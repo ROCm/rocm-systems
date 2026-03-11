@@ -382,6 +382,182 @@ _SYS_TRACE_IMPLIED: frozenset = frozenset({
 # Args that only specify output location — not considered "new data collection"
 _OUTPUT_ONLY_ARGS: frozenset = frozenset({"-d", "-o", "--output-directory", "--output-file"})
 
+# Hardware counter collection limits for rocprofv3 --pmc.
+#
+# AMD GPUs limit how many performance counters from the SAME hardware block can
+# be collected simultaneously in a single kernel dispatch pass.  The "block name"
+# is the prefix before the first "_" in a counter name:
+#
+#   SQ_WAVES        → block "SQ"    (shader / wavefront counters)
+#   GRBM_COUNT      → block "GRBM"  (GPU register bus manager)
+#   TCP_*           → block "TCP"   (L1 vector cache)
+#   TCC_*           → block "TCC"   (L2 cache)
+#
+# IMPORTANT: FETCH_SIZE and WRITE_SIZE are DERIVED metrics, not raw hardware counters.
+# Internally rocprofv3 expands them to TCC hardware block counters:
+#   FETCH_SIZE → TCC_BUBBLE + TCC_EA0_RDREQ + GRBM_GUI_ACTIVE  (TCC block)
+#   WRITE_SIZE → TCC_EA0_WRREQ + TCC_EA0_WRREQ_64B              (TCC block)
+# Combined they require ~4 TCC hardware counter slots (across 32 TCC instances on MI300X).
+# They MUST be isolated in their own pass whenever SQ counters are also requested.
+#
+# Exceeding a block's per-pass limit causes rocprofv3 to abort with error code 38:
+#   "Request exceeds the capabilities of the hardware to collect"
+#
+# Actual limits vary by GPU generation (MI100/MI200/MI300X) and block type.
+# The values below are conservative safe defaults; some blocks (e.g. SQ on
+# gfx942/MI300X) support up to 8 counters per pass in practice.
+_PMC_BLOCK_LIMIT_DEFAULT: int = 4
+_PMC_BLOCK_LIMITS: Dict[str, int] = {
+    "SQ":    4,   # shader/wave; gfx942 supports up to 8 — use 4 as safe default
+    "GRBM":  4,   # GPU register bus manager
+    "TCP":   4,   # L1 vector cache
+    "TCC":   4,   # L2 cache
+    "TA":    4,   # texture addressing
+    "TD":    4,   # texture data
+}
+
+# FETCH_SIZE and WRITE_SIZE are derived metrics that each expand to multiple TCC
+# hardware counters (FETCH_SIZE → 3 counters, WRITE_SIZE → 2 counters; combined 5
+# exceed the TCC per-pass limit). Each must be in its own dedicated pass, isolated
+# from all other counters — including each other.
+_TCC_DERIVED_COUNTERS: frozenset = frozenset({"FETCH_SIZE", "WRITE_SIZE"})
+
+
+def _pmc_block(counter: str) -> str:
+    """Return the hardware block name for a counter (prefix before first '_')."""
+    return counter.split("_")[0]
+
+
+def _pmc_block_limit(block: str) -> int:
+    """Return the per-pass counter limit for the given hardware block."""
+    return _PMC_BLOCK_LIMITS.get(block, _PMC_BLOCK_LIMIT_DEFAULT)
+
+
+def _split_pmc_into_passes(
+    counters: List[str],
+    base_flags: List[str],
+    base_args: List[Dict[str, Any]],
+    output_dir: str,
+    output_prefix: str,
+    description: str,
+    app_placeholder: str = "./app",
+) -> List[Dict[str, Any]]:
+    """
+    Split a counter list into the minimum number of rocprofv3 commands so that
+    no hardware block exceeds its per-pass collection limit.
+
+    Strategy:
+    - FETCH_SIZE and WRITE_SIZE are TCC-derived metrics that expand internally to
+      multiple TCC hardware counters (FETCH_SIZE→3 TCC counters, WRITE_SIZE→2).
+      Together they exceed the TCC block per-pass limit, so each derived counter
+      MUST be in its own dedicated pass, isolated from all other counters.
+    - For all other counters: group by hardware block (prefix before '_'),
+      passes needed = max(ceil(block_count / block_limit)), distribute evenly.
+
+    Returns a list of command dicts. Single-element when one pass suffices.
+    """
+    from collections import defaultdict
+
+    if not counters:
+        return []
+
+    # Each TCC-derived counter must be in its own dedicated pass.
+    derived = [c for c in counters if c in _TCC_DERIVED_COUNTERS]
+    regular = [c for c in counters if c not in _TCC_DERIVED_COUNTERS]
+
+    if derived and (len(derived) > 1 or regular):
+        # Multiple derived counters can't share a pass (combined TCC hw counter count
+        # exceeds the block limit). Each derived counter gets its own dedicated pass;
+        # regular counters are handled together as a separate group.
+        all_cmds = []
+        if regular:
+            all_cmds.extend(_split_pmc_into_passes(
+                regular, base_flags, base_args, output_dir, output_prefix, description, app_placeholder
+            ))
+        for dc in derived:
+            # Single derived counter: build its command directly (no recursion).
+            pmc_str = dc
+            flags_str = " ".join(base_flags)
+            non_pmc = [a for a in base_args if a.get("name") not in ("--pmc",)]
+            args = list(non_pmc) + [
+                {"name": "--pmc", "value": pmc_str},
+                {"name": "-d", "value": output_dir},
+                {"name": "-o", "value": output_prefix},
+            ]
+            all_cmds.append({
+                "tool": "rocprofv3",
+                "description": description,
+                "flags": list(base_flags),
+                "args": args,
+                "full_command": (
+                    f"rocprofv3 {flags_str} --pmc {pmc_str}"
+                    f" -d {output_dir} -o {output_prefix} -- {app_placeholder}"
+                ).strip(),
+            })
+        n = len(all_cmds)
+        if n > 1:
+            for idx, cmd in enumerate(all_cmds):
+                out_name = f"{output_prefix}_pass{idx + 1}"
+                pmc_val = next((a["value"] for a in cmd["args"] if a["name"] == "--pmc"), "")
+                flags_str = " ".join(base_flags)
+                cmd["description"] = f"{description} (pass {idx + 1}/{n})"
+                for arg in cmd["args"]:
+                    if arg["name"] == "-o":
+                        arg["value"] = out_name
+                cmd["full_command"] = (
+                    f"rocprofv3 {flags_str} --pmc {pmc_val}"
+                    f" -d {output_dir} -o {out_name} -- {app_placeholder}"
+                ).strip()
+        return all_cmds
+
+    # Standard path: group by block and distribute round-robin.
+    block_groups: Dict[str, List[str]] = defaultdict(list)
+    for c in counters:
+        block_groups[_pmc_block(c)].append(c)
+
+    if not block_groups:
+        return []
+
+    n_passes = max(
+        (len(cs) + _pmc_block_limit(blk) - 1) // max(_pmc_block_limit(blk), 1)
+        for blk, cs in block_groups.items()
+    )
+
+    pass_counters: List[List[str]] = [[] for _ in range(n_passes)]
+    for blk, cs in block_groups.items():
+        limit = _pmc_block_limit(blk)
+        for pass_idx in range(n_passes):
+            chunk = cs[pass_idx * limit: (pass_idx + 1) * limit]
+            pass_counters[pass_idx].extend(chunk)
+
+    pass_counters = [p for p in pass_counters if p]
+    n = len(pass_counters)
+
+    commands = []
+    for idx, pctrs in enumerate(pass_counters):
+        suffix = f" (pass {idx + 1}/{n})" if n > 1 else ""
+        out_name = f"{output_prefix}_pass{idx + 1}" if n > 1 else output_prefix
+        pmc_str = " ".join(pctrs)
+        flags_str = " ".join(base_flags)
+        non_pmc_args = [a for a in base_args if a.get("name") not in ("--pmc",)]
+        args = list(non_pmc_args) + [
+            {"name": "--pmc", "value": pmc_str},
+            {"name": "-d", "value": output_dir},
+            {"name": "-o", "value": out_name},
+        ]
+        full_cmd = (
+            f"rocprofv3 {flags_str} --pmc {pmc_str}"
+            f" -d {output_dir} -o {out_name} -- {app_placeholder}"
+        ).strip()
+        commands.append({
+            "tool": "rocprofv3",
+            "description": f"{description}{suffix}",
+            "flags": list(base_flags),
+            "args": args,
+            "full_command": full_cmd,
+        })
+    return commands
+
 
 def _detect_already_collected(connection: RocpdImportData) -> frozenset:
     """
@@ -2437,6 +2613,1038 @@ document.querySelectorAll('.ctr-row').forEach(function(tr) {{
 </html>"""
 
 
+# ---------------------------------------------------------------------------
+# Tier 0 format helpers
+# ---------------------------------------------------------------------------
+
+def _tier0_recommendations_text(recommendations: List[Dict[str, Any]], width: int = 80) -> List[str]:
+    """Render Tier 0 recommendations as text lines (same format as Tier 1/2)."""
+    lines = []
+    for rec in recommendations:
+        pri        = rec.get("priority", "INFO")
+        cat        = rec.get("category", "")
+        issue      = rec.get("issue", "")
+        suggestion = rec.get("suggestion", "")
+        impact     = rec.get("estimated_impact", "")
+        actions    = rec.get("actions", [])
+        commands   = rec.get("commands", [])
+
+        lines.append(f"[{pri}] {cat}")
+        lines.append("─" * width)
+        lines.append(f"  Issue: {issue}")
+        lines.append("")
+        if suggestion:
+            lines.append(f"  Suggestion: {suggestion}")
+            for action in actions:
+                lines.append(f"    {action}")
+            lines.append("")
+        if impact:
+            lines.append(f"  Estimated Impact: {impact}")
+            lines.append("")
+        if commands:
+            lines.append(f"  Recommended Commands:")
+            for cmd in commands:
+                tool         = cmd.get("tool", "")
+                desc         = cmd.get("description", "")
+                full_command = cmd.get("full_command", "")
+                flags        = cmd.get("flags", [])
+                args         = cmd.get("args", [])
+                lines.append(f"    [{tool}] {desc}")
+                if flags:
+                    lines.append(f"      Flags: {' '.join(flags)}")
+                if args:
+                    arg_strs = []
+                    for a in args:
+                        name  = a.get("name", "")
+                        value = a.get("value")
+                        arg_strs.append(f"{name} {value}" if value is not None else name)
+                    lines.append(f"      Args:  {' '.join(arg_strs)}")
+                if full_command:
+                    lines.append(f"      $ {full_command}")
+            lines.append("")
+        lines.append("")
+    return lines
+
+
+def _format_tier0_text(tier0_result: Any) -> str:
+    """Format Tier 0 source-only analysis as plain text."""
+    width = 80
+    lines = []
+    lines.append("=" * width)
+    lines.append("ROCPD AI PROFILING PLAN (TIER 0: SOURCE CODE ANALYSIS)".center(width))
+    lines.append("=" * width)
+    lines.append(f"Source Directory: {tier0_result.source_dir}")
+    lines.append(f"Analysis Date:    {tier0_result.analysis_timestamp}")
+    lines.append(f"Programming Model: {tier0_result.programming_model}")
+    lines.append(f"Files Scanned:    {tier0_result.files_scanned}  "
+                 f"(skipped: {tier0_result.files_skipped})")
+    lines.append("")
+
+    # Kernels
+    lines.append("━" * width)
+    lines.append("DETECTED GPU KERNELS".center(width))
+    lines.append("━" * width)
+    lines.append(f"  Total kernels found: {tier0_result.kernel_count}")
+    if tier0_result.detected_kernels:
+        for k in tier0_result.detected_kernels[:20]:
+            lines.append(f"  • {k['name']}  ({k.get('launch_type','')})  "
+                         f"{k.get('file','').split('/')[-1]}:{k.get('line','')}")
+        if len(tier0_result.detected_kernels) > 20:
+            lines.append(f"  ... and {len(tier0_result.detected_kernels) - 20} more")
+    else:
+        lines.append("  No GPU kernels detected in source.")
+    lines.append("")
+
+    # Patterns by severity
+    lines.append("━" * width)
+    lines.append("DETECTED PATTERNS".center(width))
+    lines.append("━" * width)
+    if tier0_result.detected_patterns:
+        for p in tier0_result.detected_patterns:
+            sev = p.get("severity", "info").upper()
+            cat = p.get("category", "")
+            desc = p.get("description", "")
+            count = p.get("count", 0)
+            lines.append(f"  [{sev}] {cat} — {desc} (×{count})")
+    else:
+        lines.append("  No significant patterns detected.")
+    lines.append("")
+
+    # Risk areas
+    if tier0_result.risk_areas:
+        lines.append("━" * width)
+        lines.append("RISK AREAS".center(width))
+        lines.append("━" * width)
+        for risk in tier0_result.risk_areas:
+            lines.append(f"  ⚠  {risk}")
+        lines.append("")
+
+    # ROCTx
+    if tier0_result.already_instrumented:
+        lines.append(f"  ✓ ROCTx markers detected ({tier0_result.roctx_marker_count} markers)")
+        lines.append("")
+
+    # Recommended counters
+    if tier0_result.suggested_counters:
+        lines.append("━" * width)
+        lines.append("SUGGESTED HARDWARE COUNTERS".center(width))
+        lines.append("━" * width)
+        lines.append("  " + "  ".join(tier0_result.suggested_counters))
+        lines.append("")
+
+    # Recommendations
+    lines.append("━" * width)
+    lines.append("PROFILING RECOMMENDATIONS".center(width))
+    lines.append("━" * width)
+    lines.append("")
+    lines.extend(_tier0_recommendations_text(tier0_result.recommendations, width))
+
+    # Suggested first command
+    if tier0_result.suggested_first_command:
+        lines.append("━" * width)
+        lines.append("START HERE — SUGGESTED FIRST COMMAND".center(width))
+        lines.append("━" * width)
+        lines.append("")
+        lines.append(f"  $ {tier0_result.suggested_first_command}")
+        lines.append("")
+
+    # LLM explanation
+    if tier0_result.llm_explanation:
+        lines.append("━" * width)
+        lines.append("AI-ENHANCED INSIGHTS".center(width))
+        lines.append("━" * width)
+        lines.append("")
+        lines.append(tier0_result.llm_explanation)
+        lines.append("")
+
+    lines.append("=" * width)
+    lines.append("Analysis complete.".center(width))
+    lines.append("=" * width)
+
+    return "\n".join(lines)
+
+
+def _tier0_to_dict(tier0_result: Any) -> Dict[str, Any]:
+    """Convert SourceAnalysisResult to a JSON-serializable dict for the tier0 field."""
+    return {
+        "source_dir": tier0_result.source_dir,
+        "analysis_timestamp": tier0_result.analysis_timestamp,
+        "programming_model": tier0_result.programming_model,
+        "files_scanned": tier0_result.files_scanned,
+        "files_skipped": tier0_result.files_skipped,
+        "kernel_count": tier0_result.kernel_count,
+        "detected_kernels": tier0_result.detected_kernels,
+        "detected_patterns": tier0_result.detected_patterns,
+        "risk_areas": tier0_result.risk_areas,
+        "already_instrumented": tier0_result.already_instrumented,
+        "roctx_marker_count": tier0_result.roctx_marker_count,
+        "recommendations": _build_recommendations_json(tier0_result.recommendations),
+        "suggested_counters": tier0_result.suggested_counters,
+        "suggested_first_command": tier0_result.suggested_first_command,
+        "llm_explanation": tier0_result.llm_explanation,
+    }
+
+
+def _format_tier0_json(tier0_result: Any) -> str:
+    """Format Tier 0 source-only analysis as schema v0.2.0 JSON."""
+    import json as _json
+    doc: Dict[str, Any] = {
+        "schema_version": "0.2.0",
+        "metadata": {
+            "rocpd_version": "6.3.0",
+            "analysis_version": "0.2.0",
+            "database_file": None,
+            "analysis_timestamp": tier0_result.analysis_timestamp,
+            "analysis_duration_ms": 0,
+            "custom_prompt": None,
+        },
+        "profiling_info": {
+            "total_duration_ns": 0,
+            "profiling_mode": "source_only",
+            "analysis_tier": 0,
+            "gpus": [],
+        },
+        "summary": {
+            "overall_assessment": (
+                f"Static analysis of {tier0_result.files_scanned} source files found "
+                f"{tier0_result.kernel_count} GPU kernels. "
+                f"Programming model: {tier0_result.programming_model}. "
+                f"See recommendations for next profiling steps."
+            ),
+            "primary_bottleneck": "unknown",
+            "confidence": 0.0,
+            "key_findings": tier0_result.risk_areas,
+        },
+        "tier0": _tier0_to_dict(tier0_result),
+        "execution_breakdown": None,
+        "hotspots": [],
+        "memory_analysis": {},
+        "hardware_counters": {"has_counters": False, "metrics": None, "counters": None},
+        "recommendations": _build_recommendations_json(tier0_result.recommendations),
+        "warnings": [],
+        "errors": [],
+        "llm_enhanced_explanation": tier0_result.llm_explanation,
+    }
+    return _json.dumps(doc, indent=2)
+
+
+def _format_tier0_markdown(tier0_result: Any) -> str:
+    """Format Tier 0 source-only analysis as Markdown."""
+    lines = []
+    lines.append("# ROCpd AI Profiling Plan — Tier 0: Source Code Analysis")
+    lines.append("")
+    lines.append(f"**Source Directory:** `{tier0_result.source_dir}`")
+    lines.append(f"**Analysis Date:** {tier0_result.analysis_timestamp}")
+    lines.append(f"**Programming Model:** {tier0_result.programming_model}")
+    lines.append(f"**Analysis Tier:** 0 (Source Code Analysis)")
+    lines.append("")
+
+    lines.append("## Detected Kernels")
+    lines.append("")
+    lines.append(f"**Total GPU kernels found:** {tier0_result.kernel_count}")
+    lines.append("")
+    if tier0_result.detected_kernels:
+        lines.append("| Kernel | Launch Type | File | Line |")
+        lines.append("|--------|-------------|------|------|")
+        for k in tier0_result.detected_kernels[:20]:
+            fname = k.get("file", "").split("/")[-1]
+            lines.append(f"| `{k['name']}` | {k.get('launch_type','')} | {fname} | {k.get('line','')} |")
+        if len(tier0_result.detected_kernels) > 20:
+            lines.append(f"\n*... and {len(tier0_result.detected_kernels) - 20} more kernels*")
+    else:
+        lines.append("*No GPU kernels detected in source.*")
+    lines.append("")
+
+    lines.append("## Detected Patterns")
+    lines.append("")
+    if tier0_result.detected_patterns:
+        lines.append("| Severity | Category | Description | Count |")
+        lines.append("|----------|----------|-------------|-------|")
+        for p in tier0_result.detected_patterns:
+            sev = p.get("severity", "info")
+            lines.append(
+                f"| **{sev.upper()}** | {p.get('category','')} | {p.get('description','')} | {p.get('count',0)} |"
+            )
+    else:
+        lines.append("*No significant patterns detected.*")
+    lines.append("")
+
+    if tier0_result.risk_areas:
+        lines.append("## Risk Areas")
+        lines.append("")
+        for risk in tier0_result.risk_areas:
+            lines.append(f"- ⚠ {risk}")
+        lines.append("")
+
+    if tier0_result.suggested_counters:
+        lines.append("## Suggested Hardware Counters")
+        lines.append("")
+        lines.append("```")
+        lines.append(" ".join(tier0_result.suggested_counters))
+        lines.append("```")
+        lines.append("")
+
+    lines.append("## Profiling Recommendations")
+    lines.append("")
+    priority_emoji = {"HIGH": "🔴", "MEDIUM": "🟡", "LOW": "🟢", "INFO": "🔵"}
+    for rec in tier0_result.recommendations:
+        pri  = rec.get("priority", "INFO")
+        cat  = rec.get("category", "")
+        emoji = priority_emoji.get(pri, "•")
+        lines.append(f"### {emoji} [{pri}] {cat}")
+        lines.append("")
+        lines.append(f"**Issue:** {rec.get('issue', '')}")
+        lines.append("")
+        lines.append(f"**Suggestion:** {rec.get('suggestion', '')}")
+        actions = rec.get("actions", [])
+        if actions:
+            lines.append("")
+            for action in actions:
+                lines.append(f"{action}")
+        impact = rec.get("estimated_impact", "")
+        if impact:
+            lines.append("")
+            lines.append(f"**Estimated Impact:** {impact}")
+        commands = rec.get("commands", [])
+        if commands:
+            lines.append("")
+            lines.append("**Recommended Commands:**")
+            lines.append("")
+            for cmd in commands:
+                tool         = cmd.get("tool", "")
+                desc         = cmd.get("description", "")
+                full_command = cmd.get("full_command", "")
+                flags        = cmd.get("flags", [])
+                args         = cmd.get("args", [])
+                lines.append(f"*{tool}* — {desc}")
+                if flags:
+                    lines.append(f"- Flags: `{' '.join(flags)}`")
+                if args:
+                    arg_strs = []
+                    for a in args:
+                        name  = a.get("name", "")
+                        value = a.get("value")
+                        arg_strs.append(f"{name} {value}" if value is not None else name)
+                    lines.append(f"- Args: `{' '.join(arg_strs)}`")
+                if full_command:
+                    lines.append(f"```bash\n{full_command}\n```")
+                lines.append("")
+        lines.append("")
+
+    if tier0_result.suggested_first_command:
+        lines.append("## Start Here — Suggested First Command")
+        lines.append("")
+        lines.append("```bash")
+        lines.append(tier0_result.suggested_first_command)
+        lines.append("```")
+        lines.append("")
+
+    if tier0_result.llm_explanation:
+        lines.append("## AI-Enhanced Insights")
+        lines.append("")
+        lines.append(tier0_result.llm_explanation)
+        lines.append("")
+
+    lines.append("---")
+    lines.append(f"*Generated by rocpd analyze (Tier 0) \u2022 {tier0_result.analysis_timestamp}*")
+    return "\n".join(lines)
+
+
+def _format_tier0_webview(tier0_result: Any) -> str:
+    """Generate a self-contained AMD-themed HTML Tier 0 report (identical design system as Tier 1/2)."""
+    import html as _html
+    import json as _json
+
+    def _h(v: Any) -> str:
+        return _html.escape(str(v), quote=True)
+
+    SEV_FG = {"high": "#e84040", "medium": "#f08432", "low": "#caa828", "info": "#4d8ef2"}
+    SEV_BG = {
+        "high":   "rgba(232,64,64,.13)",
+        "medium": "rgba(240,132,50,.13)",
+        "low":    "rgba(202,168,40,.13)",
+        "info":   "rgba(77,142,242,.13)",
+    }
+    PRIORITY = {
+        "HIGH":   ("#e84040", "#2a0808"),
+        "MEDIUM": ("#f08432", "#2a1600"),
+        "LOW":    ("#caa828", "#241e08"),
+        "INFO":   ("#4d8ef2", "#081428"),
+    }
+    PRIORITY_ICON = {"HIGH": "&#128308;", "MEDIUM": "&#128992;", "LOW": "&#128993;", "INFO": "&#8505;"}
+
+    analysis_date = tier0_result.analysis_timestamp
+    src_dir       = str(tier0_result.source_dir)
+    src_display   = src_dir[-45:] if len(src_dir) > 45 else src_dir
+
+    # ── Counts ──────────────────────────────────────────────────────────────
+    recs = tier0_result.recommendations or []
+    n_high   = sum(1 for r in recs if r.get("priority") == "HIGH")
+    n_medium = sum(1 for r in recs if r.get("priority") == "MEDIUM")
+    n_low    = sum(1 for r in recs if r.get("priority") == "LOW")
+    n_info   = sum(1 for r in recs if r.get("priority") == "INFO")
+
+    _badge_parts = []
+    if n_high:   _badge_parts.append(f'<span class="hbadge hbadge-crit">&#9679; {n_high} Critical</span>')
+    if n_medium: _badge_parts.append(f'<span class="hbadge hbadge-warn">&#9679; {n_medium} Warning</span>')
+    if n_low:    _badge_parts.append(f'<span class="hbadge hbadge-ok">&#9679; {n_low} Low</span>')
+    if n_info:   _badge_parts.append(f'<span class="hbadge hbadge-info">&#9679; {n_info} Info</span>')
+    header_badges_html = " ".join(_badge_parts)
+
+    _recs_badge_html = ""
+    if n_high:   _recs_badge_html += f'<span class="shdr-badge sbadge-crit">{n_high} Critical</span> '
+    if n_medium: _recs_badge_html += f'<span class="shdr-badge sbadge-warn">{n_medium} Warning</span>'
+
+    # ── Recommendations HTML (same .r-card format as Tier 1/2) ──────────────
+    recs_parts = []
+    for ri, rec in enumerate(recs):
+        p    = rec.get("priority", "INFO")
+        cat  = rec.get("category", "")
+        fg, _ = PRIORITY.get(p, ("#888", "#1a1a2a"))
+        picon = PRIORITY_ICON.get(p, "&#8505;")
+        actions_li   = "".join(f"<li>{_h(a)}</li>" for a in rec.get("actions", []))
+        actions_html = f'<ol class="r-actions">{actions_li}</ol>' if actions_li else ""
+        impact       = rec.get("estimated_impact", "")
+        impact_html  = (
+            f'<p class="r-impact">&#9889; Expected impact: {_h(impact)}</p>'
+            if impact else ""
+        )
+        cmds_parts = []
+        for ci, cmd in enumerate(rec.get("commands", [])):
+            fc   = cmd.get("full_command", "")
+            tool = cmd.get("tool", "")
+            desc = cmd.get("description", "")
+            if not fc:
+                continue
+            cid = f"c{ri}_{ci}"
+            cmds_parts.append(
+                f'<div class="cmd-blk">'
+                f'<span class="tool-tag">{_h(tool)}</span>'
+                f'<span class="cmd-desc">{_h(desc)}</span>'
+                f'<div class="cmd-row" id="{cid}">'
+                f'<code>{_h(fc)}</code>'
+                f'<button class="cp-btn" onclick="cpCmd(\'{cid}\')">Copy</button>'
+                f'</div></div>'
+            )
+        cmds_html  = "".join(cmds_parts)
+        issue_txt  = rec.get("issue", "")
+        suggest    = rec.get("suggestion", "")
+        recs_parts.append(
+            f'<div class="r-card" style="border-left-color:{fg}" data-p="{_h(p)}">'
+            f'<div class="r-hdr" onclick="toggleR(this)">'
+            f'<span class="r-priority-icon">{picon}</span>'
+            f'<span class="r-badge" style="background:{fg};color:#fff">{_h(p)}</span>'
+            f'<span class="r-cat">{_h(cat)}</span>'
+            f'<span class="r-chev">&#9660;</span>'
+            f'</div>'
+            f'<div class="r-body">'
+            f'<p class="r-issue"><strong>Issue:</strong> {_h(issue_txt)}</p>'
+            f'<p class="r-suggest"><strong>What to do:</strong> {_h(suggest)}</p>'
+            f'{actions_html}{impact_html}{cmds_html}'
+            f'</div></div>'
+        )
+    recs_html = (
+        "".join(recs_parts)
+        or '<p class="dim">No recommendations — workload looks well-optimized.</p>'
+    )
+
+    # ── Kernels table ────────────────────────────────────────────────────────
+    kernel_rows = []
+    for i, k in enumerate(tier0_result.detected_kernels[:50]):
+        fname = _h(k.get("file", "").split("/")[-1])
+        kernel_rows.append(
+            f'<tr>'
+            f'<td>{i + 1}</td>'
+            f'<td class="kname" title="{_h(k.get("name",""))}"><code>{_h(k.get("name",""))}</code></td>'
+            f'<td>{_h(k.get("launch_type",""))}</td>'
+            f'<td>{fname}</td>'
+            f'<td data-v="{k.get("line",0)}">{_h(str(k.get("line","")))}</td>'
+            f'</tr>'
+        )
+    if kernel_rows:
+        kernels_section = (
+            '<section class="scard">'
+            '<div class="shdr">'
+            '<span class="shdr-icon">&#128187;</span>'
+            '<h2>Detected GPU Kernels</h2>'
+            f'<span class="shdr-badge sbadge-info">{tier0_result.kernel_count} found</span>'
+            '</div>'
+            '<div class="sbody"><div class="tbl-wrap">'
+            '<table class="dtable sortable">'
+            '<thead><tr>'
+            '<th data-tip=\'Rank by order found in source.\'>#</th>'
+            '<th data-tip=\'GPU kernel function name detected in source code. For HIP/CUDA: __global__ functions.\'>Kernel Name</th>'
+            '<th data-tip=\'How the kernel is launched: __global__ for HIP/CUDA, kernel for OpenCL.\'>Launch Type</th>'
+            '<th data-tip=\'Source file where the kernel is defined (basename only).\'>File</th>'
+            '<th data-tip=\'Line number of the kernel definition in the source file.\'>Line &#8645;</th>'
+            '</tr></thead>'
+            '<tbody>' + "".join(kernel_rows) + '</tbody>'
+            '</table></div></div></section>'
+        )
+    else:
+        kernels_section = (
+            '<section class="scard">'
+            '<div class="shdr"><span class="shdr-icon">&#128187;</span>'
+            '<h2>Detected GPU Kernels</h2></div>'
+            '<div class="sbody"><p class="dim">No GPU kernels detected in the source directory.</p></div>'
+            '</section>'
+        )
+
+    # ── Patterns table ───────────────────────────────────────────────────────
+    pattern_rows = []
+    for pat in tier0_result.detected_patterns:
+        sev  = pat.get("severity", "info").lower()
+        sfg  = SEV_FG.get(sev, "#6b7280")
+        sbg  = SEV_BG.get(sev, "rgba(107,114,128,.13)")
+        pattern_rows.append(
+            f'<tr>'
+            f'<td><span style="display:inline-block;padding:.14em .55em;border-radius:4px;'
+            f'font-size:.69rem;font-weight:800;letter-spacing:.06em;'
+            f'background:{sbg};color:{sfg}">{_h(sev.upper())}</span></td>'
+            f'<td>{_h(pat.get("category",""))}</td>'
+            f'<td>{_h(pat.get("description",""))}</td>'
+            f'<td data-v="{pat.get("count",0)}">{pat.get("count",0)}</td>'
+            f'</tr>'
+        )
+    if pattern_rows:
+        patterns_section = (
+            '<section class="scard">'
+            '<div class="shdr">'
+            '<span class="shdr-icon">&#128202;</span>'
+            '<h2>Detected Performance Patterns</h2>'
+            f'<span class="shdr-badge sbadge-warn">{len(tier0_result.detected_patterns)} found</span>'
+            '</div>'
+            '<div class="sbody"><div class="tbl-wrap">'
+            '<table class="dtable sortable">'
+            '<thead><tr>'
+            '<th data-tip=\'Issue severity. HIGH = likely significant performance impact. MEDIUM = moderate. LOW = minor.\'>Severity</th>'
+            '<th data-tip=\'Category of the anti-pattern detected in source code (memory, compute, synchronization, etc.).\'>Category</th>'
+            '<th data-tip=\'Description of the specific pattern found and its likely performance impact.\'>Description</th>'
+            '<th data-tip=\'Number of occurrences of this pattern across all scanned source files.\'>Count &#8645;</th>'
+            '</tr></thead>'
+            '<tbody>' + "".join(pattern_rows) + '</tbody>'
+            '</table></div></div></section>'
+        )
+    else:
+        patterns_section = ""
+
+    # ── Risk areas ───────────────────────────────────────────────────────────
+    risk_li = "".join(f'<li>{_h(r)}</li>' for r in tier0_result.risk_areas)
+    risk_section = ""
+    if risk_li:
+        risk_section = (
+            '<section class="scard">'
+            '<div class="shdr">'
+            '<span class="shdr-icon">&#9888;</span>'
+            '<h2>Risk Areas</h2>'
+            f'<span class="shdr-badge sbadge-warn">{len(tier0_result.risk_areas)}</span>'
+            '</div>'
+            '<div class="sbody">'
+            f'<ul class="findings">{risk_li}</ul>'
+            '</div></section>'
+        )
+
+    # ── Suggested counters ───────────────────────────────────────────────────
+    ctr_badges = " ".join(
+        f'<code style="background:rgba(77,142,242,.15);color:#4d8ef2;'
+        f'padding:.14em .55em;border-radius:4px;font-size:.83rem;margin:.18rem .1rem;'
+        f'display:inline-block">{_h(c)}</code>'
+        for c in tier0_result.suggested_counters
+    )
+    counters_section = ""
+    if tier0_result.suggested_counters:
+        collect_cmd = (
+            "rocprofv3 --sys-trace --pmc "
+            + " ".join(tier0_result.suggested_counters)
+            + " -- ./your_app"
+        )
+        counters_section = (
+            '<section class="scard">'
+            '<div class="shdr">'
+            '<span class="shdr-icon">&#128300;</span>'
+            '<h2>Suggested Hardware Counters</h2>'
+            f'<span class="shdr-badge sbadge-info">{len(tier0_result.suggested_counters)} counters</span>'
+            '</div>'
+            '<div class="sbody">'
+            '<p style="margin-bottom:.85rem;color:var(--sub);font-size:.9rem">'
+            'Collect these counters to enable Tier 2 (hardware-level) analysis:</p>'
+            f'<p style="margin-bottom:1rem;line-height:1.9">{ctr_badges}</p>'
+            f'<div class="cmd-row" id="cmd-ctr">'
+            f'<code>{_h(collect_cmd)}</code>'
+            f'<button class="cp-btn" onclick="cpCmd(\'cmd-ctr\')">Copy</button>'
+            '</div>'
+            '</div></section>'
+        )
+
+    # ── Start Here ───────────────────────────────────────────────────────────
+    start_here_section = ""
+    if tier0_result.suggested_first_command:
+        fc = tier0_result.suggested_first_command
+        start_here_section = (
+            '<section class="scard">'
+            '<div class="shdr">'
+            '<span class="shdr-icon">&#9654;</span>'
+            '<h2>Start Here</h2>'
+            '<span class="shdr-badge sbadge-info">Recommended First Step</span>'
+            '</div>'
+            '<div class="sbody">'
+            '<p style="margin-bottom:.85rem;color:var(--sub);font-size:.9rem">'
+            'Run this command to collect profiling data for Tier 1/2 analysis:</p>'
+            f'<div class="cmd-row" id="cmd-start">'
+            f'<code>{_h(fc)}</code>'
+            f'<button class="cp-btn" onclick="cpCmd(\'cmd-start\')">Copy</button>'
+            '</div>'
+            '</div></section>'
+        )
+
+    # ── LLM section ──────────────────────────────────────────────────────────
+    llm_section = ""
+    if tier0_result.llm_explanation:
+        llm_section = (
+            '<section class="scard">'
+            '<div class="shdr">'
+            '<span class="shdr-icon">&#129302;</span>'
+            '<h2>AI-Enhanced Insights</h2>'
+            '<span class="shdr-badge sbadge-info">LLM</span>'
+            '</div>'
+            '<div class="sbody">'
+            f'<pre style="white-space:pre-wrap;line-height:1.6;'
+            f'color:var(--sub);font-size:.9rem">{_h(tier0_result.llm_explanation)}</pre>'
+            '</div></section>'
+        )
+
+    # ── KPI grid ─────────────────────────────────────────────────────────────
+    n_risks        = len(tier0_result.risk_areas)
+    risk_kpi_cls   = "kpi-warn" if n_risks > 0 else "kpi-ok"
+    risk_kpi_label = "Needs Attention" if n_risks > 0 else "None Found"
+    model_upper    = _h(tier0_result.programming_model.upper())
+    assessment_txt = (
+        f"Static source analysis of {tier0_result.files_scanned} file(s) found "
+        f"{tier0_result.kernel_count} GPU kernel(s). "
+        f"Programming model: {tier0_result.programming_model}. "
+        "See recommendations below for the suggested profiling workflow."
+    )
+    n_patterns = len(tier0_result.detected_patterns)
+
+    payload = _json.dumps(_tier0_to_dict(tier0_result))
+
+    return f"""<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ROCpd AI Profiling Plan &#8212; Tier 0 Source Analysis</title>
+<style>
+/* ── Reset + Variables ─────────────────────────────────────────────── */
+:root {{
+  --bg:#0d0d14; --bg2:#14141f; --bg3:#1c1c2c; --bg4:#242438;
+  --bdr:#2c2c48; --bdr2:#3a3a58;
+  --text:#e0e3f2; --sub:#a8aace; --dim:#6868a0;
+  --amd:#e01a22;
+  --blue:#4d8ef2; --green:#3acc66; --orange:#f08432;
+  --purple:#9866cc; --teal:#28bca8; --yellow:#caa828;
+  --c-ok:#3acc66;   --c-ok-bg:rgba(58,204,102,.13);
+  --c-warn:#f08432; --c-warn-bg:rgba(240,132,50,.13);
+  --c-crit:#e84040; --c-crit-bg:rgba(232,64,64,.13);
+  --c-info:#4d8ef2; --c-info-bg:rgba(77,142,242,.13);
+  --r:10px; --r-sm:6px;
+  --font:-apple-system,"Segoe UI",system-ui,Ubuntu,sans-serif;
+  --mono:"JetBrains Mono","Cascadia Code","Fira Code",ui-monospace,monospace;
+  --shadow:0 4px 18px rgba(0,0,0,.42);
+  --shadow-lg:0 8px 36px rgba(0,0,0,.55);
+  --trans:all 0.22s cubic-bezier(0.4,0,0.2,1);
+}}
+[data-theme="light"] {{
+  --bg:#f2f2f8; --bg2:#ffffff; --bg3:#eaeaf2; --bg4:#dddde8;
+  --bdr:#c8c8dc; --bdr2:#b4b4cc;
+  --text:#181828; --sub:#444468; --dim:#6868a0;
+  --c-ok-bg:rgba(58,204,102,.10); --c-warn-bg:rgba(240,132,50,.10);
+  --c-crit-bg:rgba(232,64,64,.10); --c-info-bg:rgba(77,142,242,.10);
+  --shadow:0 2px 12px rgba(0,0,0,.10);
+  --shadow-lg:0 4px 20px rgba(0,0,0,.14);
+}}
+*,*::before,*::after {{ box-sizing:border-box; margin:0; padding:0; }}
+html {{ scroll-behavior:smooth; }}
+body {{ font-family:var(--font); background:var(--bg); color:var(--text);
+       line-height:1.65; font-size:15px; min-height:100vh;
+       transition:background .25s,color .25s; }}
+a {{ color:var(--blue); }}
+code {{ font-family:var(--mono); font-size:.87em; }}
+/* ── Header ──────────────────────────────────────────────────────── */
+.hdr {{
+  background:linear-gradient(135deg,#080810 0%,#120e1c 100%);
+  border-bottom:3px solid var(--amd); padding:.9rem 0;
+  position:sticky; top:0; z-index:100;
+  box-shadow:0 2px 16px rgba(0,0,0,.55);
+}}
+[data-theme="light"] .hdr {{ background:linear-gradient(135deg,#1a0a10 0%,#280e18 100%); }}
+.hdr-inner {{ max-width:1140px; margin:0 auto; padding:0 1.25rem;
+              display:flex; align-items:center; gap:1rem; flex-wrap:wrap; }}
+.hdr-brand {{ display:flex; align-items:baseline; gap:.6rem; }}
+.logo {{ font-size:1.6rem; font-weight:900; color:var(--amd);
+         letter-spacing:-.04em; line-height:1; }}
+.logo em {{ color:#f0f0ff; font-style:normal; }}
+.hdr-subtitle {{ font-size:.88rem; color:rgba(255,255,255,.55); font-weight:500; }}
+.hdr-badges {{ display:flex; gap:.4rem; flex-wrap:wrap; margin-left:auto; }}
+.hbadge {{ font-size:.7rem; font-weight:800; padding:.2em .65em;
+           border-radius:100px; letter-spacing:.04em;
+           display:inline-flex; align-items:center; gap:.25em; }}
+.hbadge-crit {{ background:var(--c-crit-bg); color:var(--c-crit); border:1px solid rgba(232,64,64,.4); }}
+.hbadge-warn {{ background:var(--c-warn-bg); color:var(--c-warn); border:1px solid rgba(240,132,50,.4); }}
+.hbadge-ok   {{ background:var(--c-ok-bg);   color:var(--c-ok);   border:1px solid rgba(58,204,102,.4); }}
+.hbadge-info {{ background:var(--c-info-bg);  color:var(--c-info); border:1px solid rgba(77,142,242,.4); }}
+.hdr-controls {{ display:flex; gap:.5rem; align-items:center; }}
+.hdr-btn {{ background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.15);
+            color:rgba(255,255,255,.7); border-radius:var(--r-sm);
+            padding:.3em .75em; font-size:.79rem; cursor:pointer;
+            font-family:var(--font); transition:var(--trans);
+            display:flex; align-items:center; gap:.3em; }}
+.hdr-btn:hover {{ background:rgba(255,255,255,.14); color:#fff; }}
+.hdr-pills {{ max-width:1140px; margin:.55rem auto 0; padding:.5rem 1.25rem 0;
+              display:flex; gap:.45rem; flex-wrap:wrap;
+              border-top:1px solid rgba(255,255,255,.07); }}
+.hpill {{ font-size:.72rem; background:rgba(255,255,255,.06);
+          border:1px solid rgba(255,255,255,.1); border-radius:5px;
+          padding:.12em .55em; display:flex; align-items:center; gap:.3em; }}
+.hpill-label {{ color:rgba(255,255,255,.4); }}
+.hpill-value {{ font-family:var(--mono); font-weight:600; color:rgba(255,255,255,.75); }}
+/* ── Layout ──────────────────────────────────────────────────────── */
+.wrap {{ max-width:1140px; margin:0 auto; padding:1.5rem 1.25rem 5rem; }}
+/* ── Section Card ────────────────────────────────────────────────── */
+.scard {{ background:var(--bg2); border:1px solid var(--bdr); border-radius:var(--r);
+          margin-bottom:1.5rem; box-shadow:var(--shadow); overflow:hidden;
+          animation:fadeInUp .35s ease both; }}
+.scard:nth-child(1) {{ animation-delay:.04s; }}
+.scard:nth-child(2) {{ animation-delay:.08s; }}
+.scard:nth-child(3) {{ animation-delay:.12s; }}
+.scard:nth-child(4) {{ animation-delay:.16s; }}
+.scard:nth-child(5) {{ animation-delay:.20s; }}
+.scard:nth-child(6) {{ animation-delay:.24s; }}
+.scard:nth-child(7) {{ animation-delay:.28s; }}
+.scard:nth-child(8) {{ animation-delay:.32s; }}
+.shdr {{ display:flex; align-items:center; gap:.6rem;
+         padding:.85rem 1.4rem; border-bottom:1px solid var(--bdr);
+         background:var(--bg3); }}
+.shdr-icon {{ font-size:1.1rem; flex-shrink:0; }}
+.shdr h2 {{ font-size:.97rem; font-weight:700; letter-spacing:.02em; flex:1; color:var(--text); }}
+.shdr-badge {{ font-size:.69rem; font-weight:800; padding:.15em .55em;
+               border-radius:100px; letter-spacing:.04em; flex-shrink:0; }}
+.sbadge-crit {{ background:var(--c-crit-bg); color:var(--c-crit); }}
+.sbadge-warn {{ background:var(--c-warn-bg); color:var(--c-warn); }}
+.sbadge-ok   {{ background:var(--c-ok-bg);   color:var(--c-ok); }}
+.sbadge-info {{ background:var(--c-info-bg);  color:var(--c-info); }}
+.sbody {{ padding:1.25rem 1.4rem; }}
+.dim {{ color:var(--dim); }}
+.hint {{ font-size:.85rem; color:var(--dim); }}
+/* ── Assessment / Quote ──────────────────────────────────────────── */
+.assess {{ font-style:italic; color:var(--sub); font-size:.92rem; line-height:1.7;
+           padding:.7rem 1rem; border-left:3px solid var(--blue);
+           background:var(--c-info-bg); border-radius:0 var(--r-sm) var(--r-sm) 0;
+           margin-bottom:1.25rem; }}
+/* ── KPI Grid ────────────────────────────────────────────────────── */
+.kpi-grid {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(185px,1fr));
+             gap:1rem; margin-bottom:1.25rem; }}
+.kpi {{ border:1px solid var(--bdr); border-radius:var(--r); padding:1rem;
+        position:relative; overflow:hidden; transition:var(--trans); cursor:help; }}
+.kpi:hover {{ transform:translateY(-2px); box-shadow:var(--shadow); }}
+.kpi::before {{ content:''; position:absolute; top:0; left:0; right:0; height:3px; }}
+.kpi-ok   {{ background:var(--c-ok-bg); }}   .kpi-ok::before   {{ background:var(--c-ok); }}
+.kpi-warn {{ background:var(--c-warn-bg); }}  .kpi-warn::before {{ background:var(--c-warn); }}
+.kpi-crit {{ background:var(--c-crit-bg); }}  .kpi-crit::before {{ background:var(--c-crit); }}
+.kpi-info {{ background:var(--c-info-bg); }}  .kpi-info::before {{ background:var(--c-info); }}
+.kpi-head {{ display:flex; align-items:center; justify-content:space-between; margin-bottom:.4rem; }}
+.kpi-icon {{ font-size:1.25rem; }}
+.kpi-status {{ font-size:.68rem; font-weight:800; padding:.14em .5em; border-radius:100px; }}
+.kpi-ok   .kpi-status {{ background:rgba(58,204,102,.2);  color:var(--c-ok); }}
+.kpi-warn .kpi-status {{ background:rgba(240,132,50,.2);  color:var(--c-warn); }}
+.kpi-crit .kpi-status {{ background:rgba(232,64,64,.2);   color:var(--c-crit); }}
+.kpi-info .kpi-status {{ background:rgba(77,142,242,.2);  color:var(--c-info); }}
+.kpi-label {{ font-size:.69rem; text-transform:uppercase; letter-spacing:.1em; color:var(--dim); margin-bottom:.2rem; }}
+.kpi-value {{ font-size:1.55rem; font-weight:800; line-height:1.1; font-family:var(--mono); margin-bottom:.15rem; }}
+.kpi-ok   .kpi-value {{ color:var(--c-ok); }}
+.kpi-warn .kpi-value {{ color:var(--c-warn); }}
+.kpi-crit .kpi-value {{ color:var(--c-crit); }}
+.kpi-info .kpi-value {{ color:var(--c-info); }}
+.kpi-sub {{ font-size:.77rem; color:var(--dim); }}
+/* ── Key Findings / Risk list ────────────────────────────────────── */
+.findings {{ list-style:none; margin-top:.85rem; border-top:1px solid var(--bdr); padding-top:.75rem; }}
+.findings li {{ font-size:.87rem; color:var(--sub); padding:.28rem 0 .28rem 1.3rem;
+                position:relative; border-bottom:1px solid rgba(44,44,72,.3); }}
+.findings li:last-child {{ border-bottom:none; }}
+.findings li::before {{ content:'⚠'; position:absolute; left:0; color:var(--c-warn); font-weight:700; }}
+/* ── Recommendations ─────────────────────────────────────────────── */
+.r-card {{ border-left:4px solid; border-radius:0 var(--r) var(--r) 0;
+           background:var(--bg3); margin-bottom:.6rem; overflow:hidden;
+           transition:background .15s; }}
+.r-card:hover {{ background:var(--bg4); }}
+.r-hdr {{ display:flex; align-items:center; gap:.55rem; padding:.8rem 1rem;
+          cursor:pointer; user-select:none; }}
+.r-priority-icon {{ font-size:.9rem; flex-shrink:0; }}
+.r-badge {{ padding:.14em .55em; border-radius:4px; font-size:.69rem;
+            font-weight:800; letter-spacing:.06em; flex-shrink:0; }}
+.r-cat {{ font-weight:600; font-size:.9rem; flex:1; color:var(--text); }}
+.r-chev {{ color:var(--dim); font-size:.7rem; transition:transform .2s; flex-shrink:0; }}
+.r-card.open .r-chev {{ transform:rotate(180deg); }}
+.r-body {{ display:none; padding:.85rem 1rem 1rem; border-top:1px solid var(--bdr); }}
+.r-card.open .r-body {{ display:block; }}
+.r-issue {{ margin-bottom:.5rem; font-size:.9rem; }}
+.r-suggest {{ font-size:.9rem; margin-bottom:.5rem; }}
+.r-actions {{ padding-left:1.5rem; margin:.5rem 0; color:var(--sub); font-size:.87rem; }}
+.r-actions li {{ margin-bottom:.22rem; }}
+.r-impact {{ color:var(--c-ok); font-size:.84rem; margin-top:.65rem;
+             padding:.35rem .65rem; background:var(--c-ok-bg);
+             border-radius:var(--r-sm); display:inline-block; }}
+.cmd-blk {{ margin-top:.85rem; }}
+.tool-tag {{ color:var(--blue); font-weight:700; font-size:.83rem; }}
+.cmd-desc {{ color:var(--dim); font-size:.81rem; margin-left:.4rem; }}
+.cmd-row {{ display:flex; align-items:center; justify-content:space-between;
+            gap:.5rem; background:var(--bg); border:1px solid var(--bdr);
+            border-radius:var(--r-sm); padding:.55rem .85rem; margin-top:.35rem;
+            overflow-x:auto; }}
+.cmd-row code {{ color:#a0e870; white-space:nowrap; font-size:.84rem; }}
+.cp-btn {{ flex-shrink:0; background:var(--bg3); border:1px solid var(--bdr);
+           color:var(--dim); padding:.2em .6em; border-radius:4px;
+           cursor:pointer; font-size:.73rem; font-family:var(--font); transition:var(--trans); }}
+.cp-btn:hover {{ color:var(--text); border-color:var(--blue); }}
+/* ── Tables ──────────────────────────────────────────────────────── */
+.tbl-wrap {{ overflow-x:auto; }}
+.dtable {{ width:100%; border-collapse:collapse; font-size:.85rem; }}
+.dtable th {{ background:var(--bg3); color:var(--dim); font-weight:700; font-size:.76rem;
+              text-transform:uppercase; letter-spacing:.06em;
+              text-align:left; padding:.55rem .75rem; border-bottom:2px solid var(--bdr);
+              cursor:pointer; user-select:none; white-space:nowrap; transition:color .15s; }}
+.dtable th:hover {{ color:var(--text); }}
+.dtable td {{ padding:.5rem .75rem; border-bottom:1px solid rgba(44,44,72,.4); vertical-align:middle; }}
+.dtable tr:last-child td {{ border-bottom:none; }}
+.dtable tr:hover td {{ background:rgba(255,255,255,.02); }}
+.kname {{ max-width:340px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }}
+/* ── Floating Tooltip ────────────────────────────────────────────── */
+#tt {{
+  position:fixed; z-index:9999; pointer-events:none; max-width:320px;
+  padding:.7rem 1rem; background:#0e0e1c; border:1px solid #3a3a5c;
+  border-radius:10px; box-shadow:0 10px 40px rgba(0,0,0,.7);
+  font-size:.8rem; line-height:1.65; color:#dde0f2;
+  opacity:0; transition:opacity .12s; white-space:normal;
+}}
+#tt.show {{ opacity:1; }}
+#tt strong {{ color:var(--blue); display:block; margin-bottom:.2rem; font-size:.85rem; }}
+#tt code {{ font-size:.78rem; background:rgba(255,255,255,.08); padding:.05em .3em; border-radius:3px; }}
+#tt em {{ color:var(--dim); font-size:.77rem; display:block; margin-top:.3rem; }}
+[data-tip] {{ cursor:help; }}
+/* ── FAB ─────────────────────────────────────────────────────────── */
+.fab {{ position:fixed; bottom:1.5rem; right:1.5rem; width:46px; height:46px;
+        border-radius:50%; background:linear-gradient(135deg,var(--blue) 0%,var(--purple) 100%);
+        color:#fff; border:none; font-size:1.25rem; box-shadow:var(--shadow-lg);
+        cursor:pointer; display:flex; align-items:center; justify-content:center;
+        transition:var(--trans); z-index:200; opacity:0; pointer-events:none; }}
+.fab.visible {{ opacity:1; pointer-events:all; }}
+.fab:hover {{ transform:scale(1.1) translateY(-2px); }}
+/* ── Footer ──────────────────────────────────────────────────────── */
+footer {{ border-top:1px solid var(--bdr); padding:1.25rem 1.25rem; max-width:1140px; margin:0 auto; }}
+footer p {{ color:var(--dim); font-size:.77rem; text-align:center; }}
+/* ── Animations ──────────────────────────────────────────────────── */
+@keyframes fadeInUp {{
+  from {{ opacity:0; transform:translateY(14px); }}
+  to   {{ opacity:1; transform:translateY(0); }}
+}}
+/* ── Scrollbar ───────────────────────────────────────────────────── */
+::-webkit-scrollbar {{ width:7px; height:7px; }}
+::-webkit-scrollbar-track {{ background:var(--bg); }}
+::-webkit-scrollbar-thumb {{ background:var(--bdr2); border-radius:4px; }}
+::-webkit-scrollbar-thumb:hover {{ background:var(--dim); }}
+/* ── Mobile ──────────────────────────────────────────────────────── */
+@media (max-width:640px) {{
+  .kpi-value {{ font-size:1.3rem; }}
+  .hdr-subtitle {{ display:none; }}
+}}
+</style>
+</head>
+<body>
+
+<div id="tt"></div>
+
+<!-- ── Header ────────────────────────────────────────────────────── -->
+<header class="hdr">
+  <div class="hdr-inner">
+    <div class="hdr-brand">
+      <span class="logo">ROC<em>pd</em></span>
+      <span class="hdr-subtitle">AI Profiling Plan</span>
+    </div>
+    <div class="hdr-badges">{header_badges_html}</div>
+    <div class="hdr-controls">
+      <button class="hdr-btn" id="theme-btn" onclick="toggleTheme()">&#9728; Light</button>
+    </div>
+  </div>
+  <div class="hdr-pills">
+    <div class="hpill"><span class="hpill-label">Source:</span><span class="hpill-value" title="{_h(src_dir)}">{_h(src_display)}</span></div>
+    <div class="hpill"><span class="hpill-label">Kernels:</span><span class="hpill-value">{tier0_result.kernel_count}</span></div>
+    <div class="hpill"><span class="hpill-label">Tier:</span><span class="hpill-value">0 (Source)</span></div>
+    <div class="hpill"><span class="hpill-label">Generated:</span><span class="hpill-value">{_h(analysis_date)}</span></div>
+    <div class="hpill"><span class="hpill-label">Model:</span><span class="hpill-value">{_h(tier0_result.programming_model)}</span></div>
+  </div>
+</header>
+
+<div class="wrap">
+
+<!-- ── Overview ──────────────────────────────────────────────────── -->
+<section class="scard">
+  <div class="shdr">
+    <span class="shdr-icon">&#128202;</span>
+    <h2>Overview</h2>
+    <span class="shdr-badge sbadge-info">Tier 0</span>
+  </div>
+  <div class="sbody">
+    <p class="assess">{_h(assessment_txt)}</p>
+    <div class="kpi-grid">
+      <div class="kpi kpi-info" data-tip='<strong>GPU Kernels Detected</strong>Number of GPU kernel functions found in the source directory by static analysis. Each __global__ (HIP/CUDA) or kernel (OpenCL) function is counted.'>
+        <div class="kpi-head"><span class="kpi-icon">&#128187;</span><span class="kpi-status">Detected</span></div>
+        <div class="kpi-label">GPU Kernels</div>
+        <div class="kpi-value">{tier0_result.kernel_count}</div>
+        <div class="kpi-sub">{tier0_result.files_scanned} file(s) scanned</div>
+      </div>
+      <div class="kpi kpi-info" data-tip='<strong>Programming Model</strong>GPU programming model detected in source files. HIP is AMD&#39;s primary GPU programming interface, compatible with CUDA syntax.'>
+        <div class="kpi-head"><span class="kpi-icon">&#129520;</span><span class="kpi-status">Model</span></div>
+        <div class="kpi-label">Programming Model</div>
+        <div class="kpi-value" style="font-size:1.2rem">{model_upper}</div>
+        <div class="kpi-sub">{tier0_result.files_scanned} files &bull; {tier0_result.files_skipped} skipped</div>
+      </div>
+      <div class="kpi kpi-info" data-tip='<strong>Performance Patterns</strong>Anti-patterns and potential bottlenecks detected by static source analysis. Patterns are classified by severity (HIGH, MEDIUM, LOW).'>
+        <div class="kpi-head"><span class="kpi-icon">&#128202;</span><span class="kpi-status">Found</span></div>
+        <div class="kpi-label">Patterns Detected</div>
+        <div class="kpi-value">{n_patterns}</div>
+        <div class="kpi-sub">potential issues identified</div>
+      </div>
+      <div class="kpi {risk_kpi_cls}" data-tip='<strong>Risk Areas</strong>High-level risk categories identified in the source code that may cause performance issues at runtime. Run profiling to confirm and quantify each risk.'>
+        <div class="kpi-head"><span class="kpi-icon">&#9888;</span><span class="kpi-status">{risk_kpi_label}</span></div>
+        <div class="kpi-label">Risk Areas</div>
+        <div class="kpi-value">{n_risks}</div>
+        <div class="kpi-sub">{"requires profiling to confirm" if n_risks > 0 else "no obvious risk areas"}</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Recommendations ────────────────────────────────────────────── -->
+<section class="scard">
+  <div class="shdr">
+    <span class="shdr-icon">&#128161;</span>
+    <h2>Profiling Recommendations</h2>
+    {_recs_badge_html}
+  </div>
+  <div class="sbody">
+    {recs_html}
+  </div>
+</section>
+
+{kernels_section}
+{patterns_section}
+{risk_section}
+{counters_section}
+{start_here_section}
+{llm_section}
+
+</div><!-- /wrap -->
+
+<footer>
+  <p>Generated by <strong>rocpd analyze</strong> (Tier 0) &mdash; AMD ROCm GPU Performance Analysis &bull; {_h(analysis_date)}</p>
+</footer>
+
+<!-- scroll-to-top FAB -->
+<button class="fab" id="fab-top" title="Back to top" onclick="window.scrollTo({{top:0,behavior:'smooth'}})">&#8679;</button>
+
+<script>
+var TIER0 = {payload};
+
+/* ── Theme toggle ── */
+var htmlEl = document.documentElement;
+var themeBtn = document.getElementById('theme-btn');
+var _saved = localStorage.getItem('rocpd-theme') || 'dark';
+if (_saved === 'light') {{ htmlEl.setAttribute('data-theme','light'); themeBtn.innerHTML = '&#127769; Dark'; }}
+function toggleTheme() {{
+  var isLight = htmlEl.getAttribute('data-theme') === 'light';
+  htmlEl.setAttribute('data-theme', isLight ? 'dark' : 'light');
+  themeBtn.innerHTML = isLight ? '&#9728; Light' : '&#127769; Dark';
+  localStorage.setItem('rocpd-theme', isLight ? 'dark' : 'light');
+}}
+
+/* ── Scroll-to-top FAB ── */
+var fabEl = document.getElementById('fab-top');
+window.addEventListener('scroll', function() {{
+  if (window.scrollY > 250) {{ fabEl.classList.add('visible'); }}
+  else {{ fabEl.classList.remove('visible'); }}
+}});
+
+/* ── Recommendation toggle ── */
+function toggleR(hdr) {{
+  hdr.closest('.r-card').classList.toggle('open');
+}}
+document.querySelectorAll('.r-card[data-p="HIGH"]').forEach(function(c) {{
+  c.classList.add('open');
+}});
+
+/* ── Copy command ── */
+function cpCmd(id) {{
+  var el = document.getElementById(id);
+  var txt = el.querySelector('code').textContent;
+  if (navigator.clipboard) {{
+    navigator.clipboard.writeText(txt).then(function() {{
+      var btn = el.querySelector('.cp-btn');
+      var orig = btn.textContent;
+      btn.textContent = '\u2713 Copied!';
+      btn.style.color = 'var(--c-ok)';
+      setTimeout(function() {{ btn.textContent = orig; btn.style.color = ''; }}, 1600);
+    }});
+  }}
+}}
+
+/* ── Sortable tables ── */
+document.querySelectorAll('.sortable thead th').forEach(function(th) {{
+  th.addEventListener('click', function() {{
+    var tbl   = th.closest('table');
+    var tbody = tbl.querySelector('tbody');
+    var col   = Array.prototype.indexOf.call(th.parentElement.children, th);
+    var dir   = th.dataset.dir === '1' ? -1 : 1;
+    tbl.querySelectorAll('thead th').forEach(function(t) {{
+      delete t.dataset.dir;
+      t.textContent = t.textContent.replace(/ [\u25b2\u25bc]$/, '');
+    }});
+    th.dataset.dir = String(dir);
+    th.textContent += dir === 1 ? ' \u25b2' : ' \u25bc';
+    var rows = Array.prototype.slice.call(tbody.querySelectorAll('tr'));
+    rows.sort(function(a, b) {{
+      var av = a.cells[col].dataset.v || a.cells[col].textContent.trim();
+      var bv = b.cells[col].dataset.v || b.cells[col].textContent.trim();
+      var an = parseFloat(av), bn = parseFloat(bv);
+      if (!isNaN(an) && !isNaN(bn)) return (an - bn) * dir;
+      return av < bv ? -dir : av > bv ? dir : 0;
+    }});
+    rows.forEach(function(r) {{ tbody.appendChild(r); }});
+  }});
+}});
+
+/* ── Floating tooltip ── */
+var ttEl = document.getElementById('tt');
+function showTip(e, html_content) {{
+  ttEl.innerHTML = html_content; ttEl.classList.add('show'); moveTip(e);
+}}
+function moveTip(e) {{
+  var x = e.clientX + 16, y = e.clientY - 12;
+  var w = ttEl.offsetWidth || 320;
+  if (x + w + 10 > window.innerWidth) {{ x = e.clientX - w - 14; }}
+  if (y + ttEl.offsetHeight + 10 > window.innerHeight) {{ y = e.clientY - ttEl.offsetHeight - 10; }}
+  ttEl.style.left = x + 'px'; ttEl.style.top = y + 'px';
+}}
+function hideTip() {{ ttEl.classList.remove('show'); }}
+document.querySelectorAll('[data-tip]').forEach(function(el) {{
+  el.addEventListener('mouseenter', function(e) {{ showTip(e, el.dataset.tip); }});
+  el.addEventListener('mousemove',  moveTip);
+  el.addEventListener('mouseleave', hideTip);
+}});
+</script>
+</body>
+</html>"""
+
+
 def format_analysis_output(
     time_breakdown: Dict[str, Any],
     hotspots: List[Dict[str, Any]],
@@ -2445,6 +3653,8 @@ def format_analysis_output(
     hardware_counters: Optional[Dict[str, Any]] = None,
     database_path: str = "",
     output_format: str = "text",
+    tier0_result: Optional[Any] = None,
+    source_only: bool = False,
 ) -> str:
     """
     Format analysis results for display.
@@ -2455,13 +3665,25 @@ def format_analysis_output(
         memory_analysis: Memory copy analysis
         recommendations: Performance recommendations
         database_path: Path to analyzed database
-        output_format: Output format (currently only "text" supported)
+        output_format: Output format (text, json, markdown, webview)
+        tier0_result: Optional Tier 0 source analysis result
+        source_only: True when no database was provided (Tier 0 only)
 
     Returns:
         Formatted string output
     """
+    # Source-only mode: dispatch entirely to Tier 0 formatters
+    if source_only and tier0_result is not None:
+        if output_format == "json":
+            return _format_tier0_json(tier0_result)
+        if output_format == "markdown":
+            return _format_tier0_markdown(tier0_result)
+        if output_format == "webview":
+            return _format_tier0_webview(tier0_result)
+        return _format_tier0_text(tier0_result)
+
     if output_format == "json":
-        return _format_as_json(
+        output = _format_as_json(
             time_breakdown=time_breakdown,
             hotspots=hotspots,
             memory_analysis=memory_analysis,
@@ -2469,9 +3691,19 @@ def format_analysis_output(
             hardware_counters=hardware_counters,
             database_path=database_path,
         )
+        # Combined mode: embed tier0 into JSON document
+        if tier0_result is not None:
+            import json as _json
+            try:
+                doc = _json.loads(output)
+                doc["tier0"] = _tier0_to_dict(tier0_result)
+                output = _json.dumps(doc, indent=2)
+            except Exception:
+                pass
+        return output
 
     if output_format == "markdown":
-        return _format_as_markdown(
+        output = _format_as_markdown(
             time_breakdown=time_breakdown,
             hotspots=hotspots,
             memory_analysis=memory_analysis,
@@ -2479,6 +3711,10 @@ def format_analysis_output(
             hardware_counters=hardware_counters,
             database_path=database_path,
         )
+        if tier0_result is not None:
+            output += "\n\n---\n\n## Tier 0: Source Code Analysis\n\n"
+            output += _format_tier0_markdown(tier0_result)
+        return output
 
     if output_format == "webview":
         return _format_as_webview(
@@ -2708,8 +3944,97 @@ def format_analysis_output(
     return "\n".join(lines)
 
 
+def analyze_source_code(
+    source_dir: str,
+    prompt: Optional[str] = None,
+    llm: Optional[str] = None,
+    llm_api_key: Optional[str] = None,
+    llm_model: Optional[str] = None,
+    verbose: bool = False,
+) -> Any:
+    """
+    Run Tier 0 static source code analysis.
+
+    Args:
+        source_dir: Path to source directory
+        prompt: Optional user question to guide analysis
+        llm: LLM provider ("anthropic", "openai")
+        llm_api_key: API key for LLM provider
+        llm_model: Override LLM model name
+        verbose: Enable verbose logging
+
+    Returns:
+        SourceAnalysisResult from ai_analysis.api
+    """
+    from pathlib import Path as _Path
+    from .ai_analysis.source_analyzer import SourceAnalyzer
+    from .ai_analysis.api import SourceAnalysisResult
+
+    if verbose:
+        print(f"[Tier0] Scanning source directory: {source_dir}")
+
+    scanner = SourceAnalyzer(_Path(source_dir), verbose=verbose)
+    plan = scanner.analyze()
+
+    if verbose:
+        print(f"[Tier0] Scanned {plan.files_scanned} files, "
+              f"{plan.kernel_count} kernels, model: {plan.programming_model}")
+
+    # Convert ProfilingPlan → SourceAnalysisResult dataclass
+    result = SourceAnalysisResult(
+        source_dir=plan.source_dir,
+        analysis_timestamp=plan.analysis_timestamp,
+        programming_model=plan.programming_model,
+        files_scanned=plan.files_scanned,
+        files_skipped=plan.files_skipped,
+        detected_kernels=[
+            {"name": k.name, "file": k.file, "line": k.line, "launch_type": k.launch_type}
+            for k in plan.detected_kernels
+        ],
+        kernel_count=plan.kernel_count,
+        detected_patterns=[
+            {
+                "pattern_id": p.pattern_id, "severity": p.severity,
+                "category": p.category, "description": p.description,
+                "count": p.count, "locations": p.locations,
+            }
+            for p in plan.detected_patterns
+        ],
+        risk_areas=plan.risk_areas,
+        already_instrumented=plan.already_instrumented,
+        roctx_marker_count=plan.roctx_marker_count,
+        recommendations=plan.recommendations,
+        suggested_counters=plan.suggested_counters,
+        suggested_first_command=plan.suggested_first_command,
+    )
+
+    if llm:
+        try:
+            import os as _os
+            from .ai_analysis.llm_analyzer import LLMAnalyzer
+
+            _prev = _os.environ.get("ROCPD_LLM_MODEL")
+            if llm_model:
+                _os.environ["ROCPD_LLM_MODEL"] = llm_model
+            try:
+                analyzer = LLMAnalyzer(provider=llm, api_key=llm_api_key, verbose=verbose)
+                result.llm_explanation = analyzer.analyze_source_with_llm(
+                    result, custom_prompt=prompt
+                )
+            finally:
+                if llm_model:
+                    if _prev is None:
+                        _os.environ.pop("ROCPD_LLM_MODEL", None)
+                    else:
+                        _os.environ["ROCPD_LLM_MODEL"] = _prev
+        except Exception as e:
+            print(f"⚠️  Tier 0 LLM enhancement failed: {e}", file=sys.stderr)
+
+    return result
+
+
 def analyze_performance(
-    connection: RocpdImportData,
+    connection: Optional[RocpdImportData],
     prompt: Optional[str] = None,
     top_kernels: int = 10,
     min_duration: float = 0.0,
@@ -2719,6 +4044,8 @@ def analyze_performance(
     llm_api_key: Optional[str] = None,
     llm_model: Optional[str] = None,
     verbose: bool = False,
+    source_dir: Optional[str] = None,
+    _collect_result: Optional[Dict[str, Any]] = None,
     **kwargs: Any,
 ) -> str:
     """
@@ -2739,18 +4066,42 @@ def analyze_performance(
     Returns:
         Formatted analysis output string
     """
-    # Run all analyses
-    time_breakdown = compute_time_breakdown(connection)
-    hotspots = identify_hotspots(connection, top_n=top_kernels, min_duration=min_duration)
-    memory_analysis = analyze_memory_copies(connection)
-    hardware_counters = analyze_hardware_counters(connection)  # Tier 2
-    already_collected = _detect_already_collected(connection)
+    # ------------------------------------------------------------------
+    # Tier 0 — static source code analysis (optional)
+    # ------------------------------------------------------------------
+    tier0_result = None
+    if source_dir:
+        tier0_result = analyze_source_code(
+            source_dir=source_dir,
+            prompt=prompt,
+            llm=llm,
+            llm_api_key=llm_api_key,
+            llm_model=llm_model,
+            verbose=verbose,
+        )
 
-    # Generate recommendations (redundant re-collection commands are filtered out)
-    recommendations = generate_recommendations(
-        time_breakdown, hotspots, memory_analysis, hardware_counters,
-        already_collected=already_collected,
-    )
+    # ------------------------------------------------------------------
+    # Tier 1/2 — database analysis (only when a connection is provided)
+    # ------------------------------------------------------------------
+    source_only = (connection is None)
+    if not source_only:
+        time_breakdown = compute_time_breakdown(connection)
+        hotspots = identify_hotspots(connection, top_n=top_kernels, min_duration=min_duration)
+        memory_analysis = analyze_memory_copies(connection)
+        hardware_counters = analyze_hardware_counters(connection)  # Tier 2
+        already_collected = _detect_already_collected(connection)
+        # Generate recommendations (redundant re-collection commands are filtered out)
+        recommendations = generate_recommendations(
+            time_breakdown, hotspots, memory_analysis, hardware_counters,
+            already_collected=already_collected,
+        )
+    else:
+        time_breakdown = {}
+        hotspots = []
+        memory_analysis = {}
+        hardware_counters = {}
+        already_collected = frozenset()
+        recommendations = tier0_result.recommendations if tier0_result else []
 
     # Format output
     output = format_analysis_output(
@@ -2761,10 +4112,18 @@ def analyze_performance(
         hardware_counters=hardware_counters,
         database_path=database_path,
         output_format=output_format,
+        tier0_result=tier0_result,
+        source_only=source_only,
     )
 
-    # LLM enhancement (if enabled)
-    if llm:
+    # Expose structured results to caller (used by interactive mode)
+    if _collect_result is not None:
+        _collect_result["recommendations"] = recommendations
+        _collect_result["tier0_result"]    = tier0_result
+        _collect_result["database_path"]   = database_path
+
+    # LLM enhancement (if enabled) — only for Tier 1/2; Tier 0 LLM runs in analyze_source_code()
+    if llm and not source_only:
         try:
             if verbose:
                 print(f"[LLM] Enabling {llm} enhancement...")
@@ -2868,6 +4227,381 @@ def analyze_performance(
     return output
 
 
+def _is_code_change_rec(rec: Dict[str, Any]) -> bool:
+    """Return True if this recommendation suggests source-code modifications."""
+    CODE_CHANGE_KEYWORDS = (
+        "replace ", "convert ", "add ", "insert ", "remove ", "delete ",
+        "change ", "modify ", "update ", "use hip", "hipstream", "hipmemcpy",
+        "hiplaunchkernel", "block size", "blockdim", "thread block",
+        "merge kernel", "fuse kernel", "combine kernel", "async",
+        "hipstreamcreate", "batch ", "coalesce", "stride", "unroll",
+        "pragma ", "#pragma", "__launch_bounds__", "wave32", "wave64",
+    )
+    for action in rec.get("actions", []):
+        al = action.lower()
+        if any(kw in al for kw in CODE_CHANGE_KEYWORDS):
+            return True
+    return False
+
+
+def _call_llm_for_code(
+    provider: str,
+    api_key: Optional[str],
+    model: Optional[str],
+    prompt: str,
+) -> str:
+    """Call Anthropic or OpenAI to generate code-change suggestions."""
+    import os as _os
+
+    if provider == "anthropic":
+        try:
+            import anthropic
+        except ImportError:
+            raise ImportError("anthropic package not installed. Run: pip install anthropic")
+        key = api_key or _os.environ.get("ANTHROPIC_API_KEY")
+        if not key:
+            raise ValueError("No Anthropic API key. Set ANTHROPIC_API_KEY or pass --llm-api-key.")
+        use_model = model or _os.environ.get("ROCPD_LLM_MODEL", "claude-sonnet-4-20250514")
+        client = anthropic.Anthropic(api_key=key)
+        msg = client.messages.create(
+            model=use_model,
+            max_tokens=4096,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return msg.content[0].text
+
+    elif provider in ("openai", "gpt"):
+        try:
+            import openai
+        except ImportError:
+            raise ImportError("openai package not installed. Run: pip install openai")
+        key = api_key or _os.environ.get("OPENAI_API_KEY")
+        if not key:
+            raise ValueError("No OpenAI API key. Set OPENAI_API_KEY or pass --llm-api-key.")
+        use_model = model or _os.environ.get("ROCPD_LLM_MODEL", "gpt-4-turbo-preview")
+        client = openai.OpenAI(api_key=key)
+        try:
+            resp = client.chat.completions.create(
+                model=use_model,
+                messages=[{"role": "user", "content": prompt}],
+                max_completion_tokens=4096,
+            )
+        except Exception:
+            resp = client.chat.completions.create(
+                model=use_model,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=4096,
+            )
+        return resp.choices[0].message.content
+
+    else:
+        raise ValueError(f"Unknown LLM provider: {provider!r}")
+
+
+def _apply_code_change_interactive(
+    rec: Dict[str, Any],
+    source_dir: str,
+    llm_provider: Optional[str],
+    llm_api_key: Optional[str],
+    llm_model: Optional[str],
+    colors: Dict[str, str],
+) -> None:
+    """Walk the user through applying a code-change recommendation."""
+    import os as _os
+    import glob as _glob
+    import difflib
+    import shutil
+
+    C   = colors["C"]
+    G   = colors["G"]
+    Y   = colors["Y"]
+    R   = colors["R"]
+    DIM = colors["DIM"]
+    N   = colors["N"]
+
+    cat        = rec.get("category", "")
+    issue      = rec.get("issue", "")
+    suggestion = rec.get("suggestion", "")
+    actions    = rec.get("actions", [])
+    impact     = rec.get("estimated_impact", "")
+
+    # ── Show recommendation details ──────────────────────────────────────────
+    print(f"\n{C}{'─' * 80}{N}")
+    print(f"{C}  Code Change Recommendation: {cat}{N}")
+    print(f"{C}{'─' * 80}{N}")
+    print(f"\n  {Y}Issue:{N}      {issue}")
+    print(f"  {Y}Suggestion:{N} {suggestion}")
+    if actions:
+        print(f"\n  {Y}Required Changes:{N}")
+        for i, action in enumerate(actions, 1):
+            print(f"    {i}. {action}")
+    if impact:
+        print(f"\n  {Y}Estimated Impact:{N} {impact}")
+    print()
+
+    if not source_dir:
+        print(f"  {DIM}Tip: run with --source-dir <path> to enable AI code editing.{N}\n")
+        return
+
+    # ── Find GPU source files ────────────────────────────────────────────────
+    source_files: List[str] = []
+    for ext in ("*.hip", "*.cpp", "*.cu", "*.cuh", "*.h"):
+        source_files.extend(_glob.glob(_os.path.join(source_dir, "**", ext), recursive=True))
+    source_files = [f for f in source_files if _os.path.isfile(f)]
+
+    if not source_files:
+        print(f"  {DIM}No GPU source files found in {source_dir}/{N}\n")
+        return
+
+    # ── Auto-detect LLM provider from environment if not explicitly set ─────
+    import os as _os2
+    if not llm_provider:
+        if _os2.environ.get("ANTHROPIC_API_KEY"):
+            llm_provider = "anthropic"
+        elif _os2.environ.get("OPENAI_API_KEY"):
+            llm_provider = "openai"
+
+    # ── No LLM configured: show manual steps and offer $EDITOR ──────────────
+    if not llm_provider:
+        print(f"  {DIM}To enable AI code editing, set ANTHROPIC_API_KEY (or OPENAI_API_KEY) in your"
+              f" environment, or pass --llm anthropic to rocpd analyze.{N}")
+        print(f"\n  {Y}Manual steps:{N}")
+        for i, action in enumerate(actions, 1):
+            print(f"    {i}. {action}")
+        editor = _os.environ.get("EDITOR", "")
+        if editor and source_files:
+            try:
+                ans = input(f"\n  Open source files in {editor}? [y/N]: ").strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                ans = "n"
+            if ans in ("y", "yes"):
+                import subprocess
+                subprocess.run([editor] + source_files[:3])
+        print()
+        return
+
+    # ── Ask user before invoking LLM ────────────────────────────────────────
+    try:
+        ans = input(
+            f"  {Y}Would you like the AI to apply this change to your source code? [y/N]: {N}"
+        ).strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return
+    if ans not in ("y", "yes"):
+        print()
+        return
+
+    # ── Read source files ────────────────────────────────────────────────────
+    MAX_FILES     = 5
+    MAX_FILE_SIZE = 50_000  # bytes per file
+
+    print(f"\n  {DIM}Reading source files...{N}")
+    file_contents: Dict[str, str] = {}
+    for fpath in source_files[:MAX_FILES]:
+        try:
+            with open(fpath, "r", encoding="utf-8", errors="replace") as fh:
+                file_contents[fpath] = fh.read(MAX_FILE_SIZE)
+        except OSError:
+            pass
+
+    if not file_contents:
+        print(f"  {R}Could not read source files.{N}\n")
+        return
+
+    # ── Build LLM prompt ─────────────────────────────────────────────────────
+    files_text = "\n\n".join(
+        f"=== {_os.path.relpath(fp, source_dir)} ===\n{content}"
+        for fp, content in file_contents.items()
+    )
+    changes_text = "\n".join(f"- {a}" for a in actions)
+
+    llm_prompt = (
+        "You are a GPU performance optimization expert. The following GPU source files "
+        "have a performance issue that needs to be fixed.\n\n"
+        f"ISSUE: {issue}\n"
+        f"SUGGESTION: {suggestion}\n"
+        f"REQUIRED CHANGES:\n{changes_text}\n\n"
+        f"SOURCE FILES:\n{files_text}\n\n"
+        "OUTPUT INSTRUCTIONS:\n"
+        "For each file that needs modification, output EXACTLY this format:\n"
+        "MODIFY_FILE: <relative_filename>\n"
+        "<<<ORIGINAL\n"
+        "<exact original code section to replace — copy verbatim from the source>\n"
+        "ORIGINAL\n"
+        "<<<REPLACEMENT\n"
+        "<new replacement code>\n"
+        "REPLACEMENT\n\n"
+        "Only output sections that need to change. Be precise — the ORIGINAL block must "
+        "match exactly what appears in the file (used for find-and-replace). "
+        "If no changes are needed, output: NO_CHANGES_NEEDED"
+    )
+
+    print(f"  {DIM}Calling {llm_provider} for code change suggestions...{N}")
+
+    try:
+        llm_response = _call_llm_for_code(
+            provider=llm_provider,
+            api_key=llm_api_key,
+            model=llm_model,
+            prompt=llm_prompt,
+        )
+    except Exception as exc:
+        print(f"  {R}LLM error: {exc}{N}\n")
+        return
+
+    if "NO_CHANGES_NEEDED" in llm_response:
+        print(f"  {G}AI analysis: no code changes are needed for this issue.{N}\n")
+        return
+
+    # ── Parse MODIFY_FILE blocks ─────────────────────────────────────────────
+    import re as _re
+
+    patches: List[tuple] = []
+    pattern = _re.compile(
+        r"MODIFY_FILE:\s*(\S+)\s*<<<ORIGINAL\n(.*?)ORIGINAL\s*<<<REPLACEMENT\n(.*?)REPLACEMENT",
+        _re.DOTALL,
+    )
+    for m in pattern.finditer(llm_response):
+        rel_path    = m.group(1).strip()
+        original    = m.group(2).strip()
+        replacement = m.group(3).strip()
+        abs_path    = _os.path.join(source_dir, rel_path)
+        if _os.path.isfile(abs_path) and abs_path in file_contents:
+            patches.append((abs_path, rel_path, original, replacement))
+
+    if not patches:
+        print(f"  {Y}AI did not produce actionable code changes.{N}")
+        print(f"  {DIM}Raw AI response (first 20 lines):{N}")
+        for line in llm_response.splitlines()[:20]:
+            print(f"    {DIM}{line}{N}")
+        print()
+        return
+
+    # ── Show unified diff ────────────────────────────────────────────────────
+    print(f"\n{C}{'─' * 80}{N}")
+    print(f"{C}  Proposed changes:{N}")
+    print(f"{C}{'─' * 80}{N}")
+
+    valid_patches: List[tuple] = []
+    for abs_path, rel_path, original, replacement in patches:
+        orig_content = file_contents[abs_path]
+        if original not in orig_content:
+            print(f"\n  {R}✗ Could not locate original code in {rel_path} — skipping.{N}")
+            continue
+        new_content = orig_content.replace(original, replacement, 1)
+        diff = list(difflib.unified_diff(
+            orig_content.splitlines(keepends=True),
+            new_content.splitlines(keepends=True),
+            fromfile=f"a/{rel_path}",
+            tofile=f"b/{rel_path}",
+            n=3,
+        ))
+        print(f"\n  File: {rel_path}")
+        for line in diff[:80]:
+            if line.startswith("+") and not line.startswith("+++"):
+                print(f"  {G}{line.rstrip()}{N}")
+            elif line.startswith("-") and not line.startswith("---"):
+                print(f"  {R}{line.rstrip()}{N}")
+            elif line.startswith("@@"):
+                print(f"  {C}{line.rstrip()}{N}")
+            else:
+                print(f"  {DIM}{line.rstrip()}{N}")
+        if len(diff) > 80:
+            print(f"  {DIM}  ... ({len(diff) - 80} more lines){N}")
+        valid_patches.append((abs_path, rel_path, orig_content, new_content))
+
+    if not valid_patches:
+        print()
+        return
+
+    print()
+    try:
+        ans = input(f"  {Y}Apply these changes? [y/N]: {N}").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return
+
+    if ans not in ("y", "yes"):
+        print(f"  {DIM}Changes not applied.{N}\n")
+        return
+
+    # ── Apply with backup ────────────────────────────────────────────────────
+    applied = 0
+    for abs_path, rel_path, orig_content, new_content in valid_patches:
+        backup_path = abs_path + ".rocpd.bak"
+        try:
+            shutil.copy2(abs_path, backup_path)
+            with open(abs_path, "w", encoding="utf-8") as fh:
+                fh.write(new_content)
+            print(f"  {G}✓ Applied: {rel_path}  (backup: {_os.path.basename(backup_path)}){N}")
+            applied += 1
+        except OSError as exc:
+            print(f"  {R}✗ Failed to write {rel_path}: {exc}{N}")
+
+    if applied:
+        print(f"\n  {G}✓ {applied} file(s) modified. Rebuild your application to test.{N}\n")
+        return True
+    else:
+        print(f"  {Y}No files were modified.{N}\n")
+        return False
+
+
+def _get_app_path_from_db(database_path: str) -> str:
+    """
+    Extract the profiled application's executable path from a rocpd database.
+
+    rocprofv3 writes the process command into rocpd_info_process_<uuid>.command.
+    Returns the path string, or "" if the database cannot be read or has no entry.
+    """
+    if not database_path:
+        return ""
+    try:
+        import sqlite3 as _sqlite3
+        con = _sqlite3.connect(database_path)
+        # Find all rocpd_info_process_* tables
+        tables = con.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'rocpd_info_process_%'"
+        ).fetchall()
+        for (tname,) in tables:
+            row = con.execute(f'SELECT command FROM "{tname}" WHERE command IS NOT NULL LIMIT 1').fetchone()
+            if row and row[0]:
+                return row[0].strip()
+        con.close()
+    except Exception:
+        pass
+    return ""
+
+
+def _run_interactive_session(
+    recommendations: List[Dict[str, Any]],
+    tier0_result: Optional[Any] = None,
+    database_path: str = "",
+    source_dir: str = "",
+    llm_provider: Optional[str] = None,
+    llm_api_key: Optional[str] = None,
+    llm_model: Optional[str] = None,
+    llm_local: Optional[str] = None,
+    llm_local_model: Optional[str] = None,
+    resume_session: Optional[str] = None,
+) -> None:
+    """Thin shim: delegates to InteractiveSession in ai_analysis/interactive.py."""
+    from rocpd.ai_analysis.interactive import InteractiveSession, SessionStore
+    InteractiveSession(
+        source_dir=source_dir,
+        tier0_result=tier0_result,
+        recommendations=recommendations,
+        database_path=database_path,
+        llm_provider=llm_provider,
+        llm_api_key=llm_api_key,
+        llm_model=llm_model,
+        llm_local=llm_local,
+        llm_local_model=llm_local_model,
+        session_store=SessionStore(),
+        resume_session_id=resume_session,
+    ).run()
+
+
 def add_args(parser: argparse.ArgumentParser):
     """
     Add command-line arguments for AI analysis.
@@ -2879,6 +4613,18 @@ def add_args(parser: argparse.ArgumentParser):
         Function to process parsed arguments
     """
     analysis_options = parser.add_argument_group("Analysis options")
+
+    analysis_options.add_argument(
+        "--source-dir",
+        type=str,
+        default=None,
+        dest="source_dir",
+        help=(
+            "Path to GPU application source directory for Tier 0 static analysis. "
+            "Scans .hip/.cpp/.cu files and generates a profiling plan. "
+            "Can be used alone (no -i required) or alongside -i for combined analysis."
+        ),
+    )
 
     analysis_options.add_argument(
         "--prompt",
@@ -2954,9 +4700,59 @@ def add_args(parser: argparse.ArgumentParser):
         help="Enable verbose logging (shows LLM API calls, reference guide loading, etc.)",
     )
 
+    analysis_options.add_argument(
+        "--interactive",
+        "-I",
+        action="store_true",
+        default=False,
+        help=(
+            "After showing analysis results, enter interactive mode: presents the "
+            "recommended profiling commands as a numbered menu and runs whichever "
+            "one you select. Useful for iterating through the profiling workflow "
+            "without copy-pasting commands manually."
+        ),
+    )
+
+    analysis_options.add_argument(
+        "--resume-session",
+        type=str,
+        default=None,
+        dest="resume_session",
+        help=(
+            "Resume a previous interactive session by session ID or file path. "
+            "Example: --resume-session 2026-03-10_14-23-01_myapp"
+        ),
+    )
+
+    llm_options.add_argument(
+        "--llm-local",
+        type=str,
+        choices=["ollama"],
+        default=None,
+        dest="llm_local",
+        help=(
+            "Local LLM provider for Stage 1 source summarization (before online LLM). "
+            "Choices: 'ollama'. Requires Ollama running at localhost:11434. "
+            "Set ROCPD_LLM_LOCAL_URL to override endpoint."
+        ),
+    )
+
+    llm_options.add_argument(
+        "--llm-local-model",
+        type=str,
+        default=None,
+        dest="llm_local_model",
+        help=(
+            "Model name for local LLM (default: codellama:13b). "
+            "Can also be set via ROCPD_LLM_LOCAL_MODEL environment variable."
+        ),
+    )
+
     def process_args(input: RocpdImportData, args: argparse.Namespace):
         """Process and return valid arguments as dictionary."""
-        valid_args = ["prompt", "top_kernels", "format", "min_duration", "llm", "llm_api_key", "llm_model", "verbose"]
+        valid_args = ["source_dir", "prompt", "top_kernels", "format", "min_duration",
+                      "llm", "llm_api_key", "llm_model", "verbose", "interactive",
+                      "resume_session", "llm_local", "llm_local_model"]
         ret = {}
         for itr in valid_args:
             if hasattr(args, itr):
@@ -2971,17 +4767,17 @@ def add_args(parser: argparse.ArgumentParser):
     return process_args
 
 
-def execute(input: RocpdImportData, config: Optional[output_config.output_config] = None, **kwargs: Any) -> RocpdImportData:
+def execute(input: Optional[RocpdImportData], config: Optional[output_config.output_config] = None, **kwargs: Any) -> Optional[RocpdImportData]:
     """
-    Execute AI analysis on rocpd database.
+    Execute AI analysis on rocpd database and/or source directory.
 
     Args:
-        input: RocpdImportData object with database connection
+        input: RocpdImportData object with database connection, or None for source-only mode
         config: Optional output configuration
-        **kwargs: Analysis parameters
+        **kwargs: Analysis parameters (may include source_dir for Tier 0)
 
     Returns:
-        The input RocpdImportData object (for chaining)
+        The input RocpdImportData object (for chaining), or None in source-only mode
     """
     # Update config if provided
     if config is not None:
@@ -2991,17 +4787,24 @@ def execute(input: RocpdImportData, config: Optional[output_config.output_config
 
     # Get database path for display
     database_path = ""
-    if hasattr(input, "_paths") and input._paths:
+    if input is not None and hasattr(input, "_paths") and input._paths:
         database_path = input._paths[0] if isinstance(input._paths, list) else str(input._paths)
+
+    # Pop interactive before passing to analyze_performance (it doesn't accept it)
+    interactive = kwargs.pop("interactive", False)
 
     # Map 'format' CLI key → 'output_format' parameter expected by analyze_performance
     if "format" in kwargs:
         kwargs["output_format"] = kwargs.pop("format")
 
+    # Collect structured results so interactive mode can build its command menu
+    result_store: Dict[str, Any] = {}
+
     # Run analysis
     output = analyze_performance(
         connection=input,
         database_path=database_path,
+        _collect_result=result_store,
         **kwargs,
     )
 
@@ -3027,6 +4830,21 @@ def execute(input: RocpdImportData, config: Optional[output_config.output_config
                   "or --format markdown for Markdown.")
     else:
         print(output)
+
+    # ── Interactive mode ─────────────────────────────────────────────────────
+    if interactive:
+        _run_interactive_session(
+            recommendations=result_store.get("recommendations", []),
+            tier0_result=result_store.get("tier0_result"),
+            database_path=result_store.get("database_path", database_path),
+            source_dir=kwargs.get("source_dir", ""),
+            llm_provider=kwargs.get("llm"),
+            llm_api_key=kwargs.get("llm_api_key"),
+            llm_model=kwargs.get("llm_model"),
+            llm_local=kwargs.get("llm_local"),
+            llm_local_model=kwargs.get("llm_local_model"),
+            resume_session=kwargs.get("resume_session"),
+        )
 
     return input
 
