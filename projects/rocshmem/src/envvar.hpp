@@ -515,6 +515,7 @@ namespace envvar {
     extern const var<uint8_t> traffic_class;
     extern const var<bool> pcie_relaxed_ordering;
     extern const var<bool> enable_dmabuf;
+    extern const var<bool> override_nic_firmware_check;
     extern const var<std::string> alltoallv_wg_algo;
   }  // namespace gda
 }  // namespace envvar
