@@ -37,6 +37,21 @@ class HistoryEntry:
 
 
 @dataclass
+class SessionContext:
+    """Compact facts accumulated during a session; injected into LLM prompts."""
+    iteration: int = 0
+    analyses: List[Dict[str, Any]] = field(default_factory=list)
+    # Each entry: {db, kernel_pct, memcpy_pct, idle_pct, top_issue, top_priority}
+    # Capped at 5 entries; oldest dropped when exceeded.
+
+    suggestions_given: List[str] = field(default_factory=list)
+    # First 120 chars of each LLM optimization response; capped at 3, oldest dropped.
+
+    commands_run: List[Dict[str, Any]] = field(default_factory=list)
+    # Each entry: {cmd: str, exit_code: int}; capped at 5, oldest dropped.
+
+
+@dataclass
 class SessionData:
     session_id: str
     source_dir: str
@@ -44,6 +59,7 @@ class SessionData:
     last_updated: str
     history: List[HistoryEntry] = field(default_factory=list)
     persistent_menu_items: List[PersistentMenuItem] = field(default_factory=list)
+    context: Optional[Dict[str, Any]] = None          # NEW field
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -59,6 +75,7 @@ class SessionData:
             last_updated=d["last_updated"],
             history=history,
             persistent_menu_items=items,
+            context=d.get("context"),               # None if key absent (backward compat)
         )
 
 
@@ -227,6 +244,33 @@ def _render_logo_halfblock(width: int = 66, threshold: int = 70) -> Optional[str
         return None
 
 
+def _replace_output_dir(cmd: str, new_dir: str) -> str:
+    """Replace the -d <dir> argument in a rocprofv3 command with new_dir."""
+    import shlex as _shlex
+    import re as _re
+    # Replace -d <value> token pair
+    try:
+        parts = _shlex.split(cmd)
+    except ValueError:
+        parts = cmd.split()
+    out = []
+    i = 0
+    replaced = False
+    while i < len(parts):
+        if parts[i] in ("-d", "--output-path") and i + 1 < len(parts):
+            out.extend([parts[i], new_dir])
+            i += 2
+            replaced = True
+        else:
+            out.append(parts[i])
+            i += 1
+    result = " ".join(_shlex.quote(p) if " " in p else p for p in out)
+    if not replaced:
+        # Append -d before the -- separator if present
+        result = _re.sub(r"\s+--\s+", f" -d {new_dir} -- ", result, count=1)
+    return result
+
+
 def _print_startup_banner() -> None:
     """Print the AMD ROCm logo + session title once at interactive startup."""
     art = _render_logo_halfblock()
@@ -269,6 +313,7 @@ class InteractiveSession:
         self._llm_local = llm_local
         self._llm_local_model = llm_local_model
         self._store = session_store or SessionStore()
+        self._ctx = SessionContext()
         self._session = self._init_session(resume_session_id)
 
     @property
@@ -1396,7 +1441,7 @@ class WorkflowSession:
         run_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         out_dir = f"{self._trace_dir}/run_{run_id}"
         return (
-            f"rocprofv3 --hip-trace --hsa-trace --stats "
+            f"rocprofv3 --sys-trace --kernel-trace --memory-copy-trace --stats "
             f"-d {out_dir} -o results "
             f"-- {self._state.app_command}"
         )
@@ -1621,9 +1666,9 @@ class WorkflowSession:
                     "memcpy_time_pct":  eb.memcpy_time_pct,
                     "api_overhead_pct": eb.api_overhead_pct,
                     "idle_time_pct":    eb.idle_time_pct,
-                    "total_runtime_ns": eb.total_duration_ns,
+                    "total_runtime_ns": result.profiling_info.total_duration_ns,
                 }
-                total_s = eb.total_duration_ns / 1e9
+                total_s = result.profiling_info.total_duration_ns / 1e9
                 _print("  Summary:", style="white")
                 _print(f"    Total GPU active time : {total_s:.3f}s", style="dim")
                 _print(f"    Kernel  {eb.kernel_time_pct:.1f}%  "
@@ -1636,7 +1681,17 @@ class WorkflowSession:
                 + result.recommendations.medium_priority
                 + result.recommendations.low_priority
             )
-            for r in all_recs:
+
+            # Get raw recs (which carry the structured `commands` list with
+            # full_command strings) so we can surface them in the re-profiling menu.
+            # Match by index — raw_recs and all_recs are in the same order;
+            # raw recs have no stable id (the dataclass assigns "rec_001" etc. in api.py).
+            raw_recs: List[Dict[str, Any]] = getattr(result, "_raw", {}).get(
+                "recommendations_raw", []
+            )
+
+            for idx, r in enumerate(all_recs):
+                raw_rec = raw_recs[idx] if idx < len(raw_recs) else {}
                 recs.append({
                     "id":               r.id,
                     "priority":         r.priority,
@@ -1645,11 +1700,12 @@ class WorkflowSession:
                     "suggestion":       r.description,
                     "estimated_impact": r.estimated_impact,
                     "actions":          r.next_steps,
-                    "commands":         [],
+                    "commands":         raw_rec.get("commands", []),
                 })
 
         except Exception as exc:
             _print(f"  (Analysis failed: {exc})", style="red")
+            raw_recs = []
 
         # Source correlation note
         if self._state.source_paths:
@@ -1658,7 +1714,7 @@ class WorkflowSession:
                    style="dim")
             _print()
 
-        # Print each finding
+        # Print each finding; show recommended commands beneath each issue
         for i, rec in enumerate(recs, 1):
             pri   = rec.get("priority", "INFO")
             style = _PRI_STYLE.get(pri, "white")
@@ -1670,6 +1726,16 @@ class WorkflowSession:
                 _print(f"  Impact     : {rec['estimated_impact']}", style="dim")
             for act in rec.get("actions", [])[:3]:
                 _print(f"    • {act}", style="dim")
+            cmds = rec.get("commands", [])
+            if cmds:
+                _print(f"  Suggested next commands:", style="dim")
+                for cmd_obj in cmds[:3]:
+                    fc = cmd_obj.get("full_command", "")
+                    desc = cmd_obj.get("description", "")
+                    if fc:
+                        _print(f"    $ {fc}", style="cyan")
+                    if desc:
+                        _print(f"      ({desc})", style="dim")
             _print()
 
         if not recs:
@@ -1680,7 +1746,28 @@ class WorkflowSession:
         if self._state.analysis_history:
             self._print_comparison(breakdown)
 
-        return self._record_analysis(recs, breakdown, hotspots)
+        # Derive AI-recommended re-profiling command from the first rocprofv3
+        # command found in any recommendation, replacing the generic placeholder
+        # with the actual application being profiled.
+        ai_rec_cmd: Optional[str] = None
+        app_cmd = self._state.app_command
+        run_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        new_out_dir = f"{self._trace_dir}/run_{run_id}"
+        for rec in recs:
+            for cmd_obj in rec.get("commands", []):
+                if cmd_obj.get("tool") == "rocprofv3":
+                    fc = cmd_obj.get("full_command", "")
+                    if fc and "-- ./app" in fc:
+                        # Replace placeholder app and generic output dir
+                        fc = fc.replace("-- ./app", f"-- {app_cmd}")
+                        fc = _replace_output_dir(fc, new_out_dir)
+                        ai_rec_cmd = fc
+                        break
+            if ai_rec_cmd:
+                break
+
+        return self._record_analysis(recs, breakdown, hotspots,
+                                     ai_recommended_command=ai_rec_cmd)
 
     # ── Phase 5: Recommendations menu ─────────────────────────────────────────
 
@@ -1690,11 +1777,17 @@ class WorkflowSession:
         """Show recommendations as a numbered menu.
 
         Returns (mode, selected_recs) where mode='direct'|'diff', or None if skipped.
+        Returns None when recommendations are profiling-guidance only (INFO priority),
+        since those require re-profiling rather than source code changes.
         """
         recs = snap.recommendations
         if not recs:
             _print("  No recommendations to act on.", style="dim")
             return None
+
+        # Determine if all recommendations are INFO-level profiling guidance
+        # (i.e. "collect more data") with no actionable source code changes.
+        all_info = all(r.get("priority", "INFO").upper() == "INFO" for r in recs)
 
         while True:
             _print()
@@ -1705,9 +1798,16 @@ class WorkflowSession:
                 issue = rec.get("issue", "")[:70]
                 _print(f"  [{i}]  [{pri}]  {issue}", style=style)
             _print()
-            _print("  [a]  Address all with AI optimization", style="dim")
-            _print("  [n]  Skip — proceed to re-profiling", style="dim")
-            _print("  [q]  Quit session", style="dim")
+            if all_info:
+                # Only profiling-guidance recommendations — no source code to optimize.
+                # Direct the user to re-profile with the suggested commands.
+                _print("  [r]  Re-profile with suggested commands", style="cyan")
+                _print("  [n]  Skip", style="dim")
+                _print("  [q]  Quit session", style="dim")
+            else:
+                _print("  [a]  Address all with AI optimization", style="dim")
+                _print("  [n]  Skip — proceed to re-profiling", style="dim")
+                _print("  [q]  Quit session", style="dim")
             _print()
             try:
                 choice = _input("  Enter choice: ").strip().lower()
@@ -1718,11 +1818,25 @@ class WorkflowSession:
                 return None
             if choice in ("n", ""):
                 return None
-            if choice == "a":
+            if choice == "r" and all_info:
+                # Advance to re-profiling phase; AI-recommended command will be option [3].
+                _print()
+                _print("  Advancing to re-profiling. Select [3] to use the suggested command.",
+                       style="dim")
+                return None
+            if choice == "a" and not all_info:
                 selected = recs
             elif choice.isdigit() and 1 <= int(choice) <= len(recs):
                 selected = [recs[int(choice) - 1]]
                 r = selected[0]
+                # If the selected rec is INFO-level profiling guidance, direct to re-profiling.
+                if r.get("priority", "INFO").upper() == "INFO":
+                    _print()
+                    _print("  This recommendation requires re-profiling with different flags,",
+                           style="dim")
+                    _print("  not source code changes. Proceeding to re-profiling step.",
+                           style="dim")
+                    return None
                 _print()
                 _print(f"  ─── {r.get('issue', '')[:60]} [{r.get('priority', '')}] ───", style="cyan")
                 if r.get("suggestion"):
