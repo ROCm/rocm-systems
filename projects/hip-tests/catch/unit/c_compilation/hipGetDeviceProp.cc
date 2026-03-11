@@ -33,7 +33,7 @@
 
 extern "C" int hipGetDeviceProp();
 
-TEST_CASE(HIP_TEST_CASE(Unit_hipGetDeviceProp_ctest)) {
+HIP_TEST_CASE(Unit_hipGetDeviceProp_ctest) {
   int result = hipGetDeviceProp();
   REQUIRE(result == 1);
 }

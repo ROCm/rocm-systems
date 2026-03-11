@@ -44,7 +44,7 @@ entries and does update numNodes.
 /**
  * Functional Test for hipGraphGetNodes API fetching node list
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipGraphGetNodes_Functional)) {
+HIP_TEST_CASE(Unit_hipGraphGetNodes_Functional) {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   constexpr auto blocksPerCU = 6;  // to hide latency
@@ -145,7 +145,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipGraphGetNodes_Functional)) {
  * Begin stream capture and push operations to stream.
  * Verify nodes of created graph are matching the operations pushed.
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipGraphGetNodes_CapturedStream)) {
+HIP_TEST_CASE(Unit_hipGraphGetNodes_CapturedStream) {
   hipGraph_t graph{nullptr};
   hipGraphExec_t graphExec{nullptr};
   constexpr size_t N = 1000000;
@@ -250,7 +250,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipGraphGetNodes_CapturedStream)) {
  * as input and output parameters and validates the behavior.
  * Test will include both negative and positive scenarios.
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipGraphGetNodes_ParamValidation)) {
+HIP_TEST_CASE(Unit_hipGraphGetNodes_ParamValidation) {
   hipStream_t stream{nullptr};
   hipGraph_t graph{nullptr};
   constexpr unsigned blocks = 512;

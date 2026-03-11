@@ -53,7 +53,7 @@ Output: A_h will not get updated with Coherent Memory
         A_h will be INITIAL_VAL
         ret value would be 0, B_h would be 0
 */
-TEST_CASE(HIP_TEST_CASE(Unit_BuiltInAtomicAdd_CoherentGlobalMem)) {
+HIP_TEST_CASE(Unit_BuiltInAtomicAdd_CoherentGlobalMem) {
   hipDeviceProp_t prop;
   int device;
   HIP_CHECK(hipGetDevice(&device));
@@ -102,7 +102,7 @@ Output: A_h will not get updated with Coherent Memory
         A_h will be INITIAL_VAL+INC_VAL
         B_h would be initial value of A_h, B_h would be INITIAL_VAL
 */
-TEST_CASE(HIP_TEST_CASE(Unit_BuiltInAtomicAdd_NonCoherentGlobalMem)) {
+HIP_TEST_CASE(Unit_BuiltInAtomicAdd_NonCoherentGlobalMem) {
   hipDeviceProp_t prop;
   int device;
   HIP_CHECK(hipGetDevice(&device));
@@ -144,7 +144,7 @@ Output: A_h will not get updated with Coherent Memory
         A_h will be INITIAL_VAL
         ret value would be 0, B_h would be 0
 */
-TEST_CASE(HIP_TEST_CASE(Unit_BuiltInAtomicAdd_CoherentGlobalMemWithRtc)) {
+HIP_TEST_CASE(Unit_BuiltInAtomicAdd_CoherentGlobalMemWithRtc) {
   hipDeviceProp_t prop;
   int device;
   HIP_CHECK(hipGetDevice(&device));
@@ -227,7 +227,7 @@ Output: A_h will not get updated with Coherent Memory
         A_h will be INITIAL_VAL+INC_VAL
         B_h would be initial value of A_h, B_h would be INITIAL_VAL
 */
-TEST_CASE(HIP_TEST_CASE(Unit_BuiltInAtomicAdd_NonCoherentGlobalMemWithRtc)) {
+HIP_TEST_CASE(Unit_BuiltInAtomicAdd_NonCoherentGlobalMemWithRtc) {
   hipDeviceProp_t prop;
   int device;
   HIP_CHECK(hipGetDevice(&device));

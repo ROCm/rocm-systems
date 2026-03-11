@@ -61,7 +61,7 @@ __global__ void AtomicCheck(double* Ad, double *result) {
    Output: unsafeAtomicAdd API will not work and returns 0 so
    the initial value will be intact. expected O/P is 5
 */
-TEMPLATE_TEST_CASE(HIP_TEST_CASE(Unit_unsafeAtomicAdd_CoherentRTCnounsafeatomicflag), float, double) {
+HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_CoherentRTCnounsafeatomicflag, float, double) {
   int device = 0;
   hipDeviceProp_t props;
   HIP_CHECK(hipGetDeviceProperties(&props, device));
@@ -152,7 +152,7 @@ TEMPLATE_TEST_CASE(HIP_TEST_CASE(Unit_unsafeAtomicAdd_CoherentRTCnounsafeatomicf
    Output: unsafeAtomicAdd API will not work and r`eturns 0 so
    the initial value will be intact. expected O/P is 5
 */
-TEMPLATE_TEST_CASE(HIP_TEST_CASE(Unit_unsafeAtomicAdd_CoherentRTCunsafeatomicflag), float, double) {
+HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_CoherentRTCunsafeatomicflag, float, double) {
   int device = 0;
   hipDeviceProp_t props;
   HIP_CHECK(hipGetDeviceProperties(&props, device));
@@ -242,7 +242,7 @@ TEMPLATE_TEST_CASE(HIP_TEST_CASE(Unit_unsafeAtomicAdd_CoherentRTCunsafeatomicfla
    Output: unsafeAtomicAdd API will not work and returns 0 so
    the initial value will be intact. expected O/P is 5*/
 
-TEMPLATE_TEST_CASE(HIP_TEST_CASE(Unit_unsafeAtomicAdd_CoherentRTCwithoutflag), float, double) {
+HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_CoherentRTCwithoutflag, float, double) {
   int device = 0;
   hipDeviceProp_t props;
   HIP_CHECK(hipGetDeviceProperties(&props, device));
@@ -331,7 +331,7 @@ TEMPLATE_TEST_CASE(HIP_TEST_CASE(Unit_unsafeAtomicAdd_CoherentRTCwithoutflag), f
    is compiled using hipRTC and with compilation flag -mno-unsafe-fp-atomics
    Input: Ad{5}, INCREMENT_VAL{10}
    Output: Expected O/P is 15 */
-TEMPLATE_TEST_CASE(HIP_TEST_CASE(Unit_unsafeAtomicAdd_NonCoherentRTCnounsafeatomicflag), float, double) {
+HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_NonCoherentRTCnounsafeatomicflag, float, double) {
   int device = 0;
   hipDeviceProp_t props;
   HIP_CHECK(hipGetDeviceProperties(&props, device));
@@ -414,7 +414,7 @@ TEMPLATE_TEST_CASE(HIP_TEST_CASE(Unit_unsafeAtomicAdd_NonCoherentRTCnounsafeatom
    Input: Ad{5}, INCREMENT_VAL{10}
    Output: Expected O/P is 15 */
 
-TEMPLATE_TEST_CASE(HIP_TEST_CASE(Unit_unsafeAtomicAdd_NonCoherentRTCunsafeatomicflag), float, double) {
+HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_NonCoherentRTCunsafeatomicflag, float, double) {
   int device = 0;
   hipDeviceProp_t props;
   HIP_CHECK(hipGetDeviceProperties(&props, device));
@@ -498,7 +498,7 @@ TEMPLATE_TEST_CASE(HIP_TEST_CASE(Unit_unsafeAtomicAdd_NonCoherentRTCunsafeatomic
    Input: Ad{5}, INCREMENT_VAL{10}
    Output: O/P is 15 */
 
-TEMPLATE_TEST_CASE(HIP_TEST_CASE(Unit_unsafeAtomicAdd_NonCoherentRTC), float, double) {
+HIP_TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_NonCoherentRTC, float, double) {
   int device = 0;
   hipDeviceProp_t props;
   HIP_CHECK(hipGetDeviceProperties(&props, device));

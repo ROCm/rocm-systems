@@ -403,7 +403,7 @@ void HipFunctorTests::TestForFunctorContainInStructObj(void) {
  *    - HIP_VERSION >= 5.5
  */
 
-TEST_CASE(HIP_TEST_CASE(Unit_hipLaunchParmFunctor)) {
+HIP_TEST_CASE(Unit_hipLaunchParmFunctor) {
   HipFunctorTests FunctorTests;
 
   SECTION("test for simple class functor") { FunctorTests.TestForSimpleClassFunctor(); }

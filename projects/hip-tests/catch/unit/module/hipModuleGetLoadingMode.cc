@@ -54,7 +54,7 @@ constexpr auto kernel_name = "copy_ker";
  * ------------------------
  * - HIP_VERSION >= 7.2
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipModuleGetLoadingMode_DefaultModeCheck)) {
+HIP_TEST_CASE(Unit_hipModuleGetLoadingMode_DefaultModeCheck) {
   hipModuleLoadingMode_t mode;
   HIP_CHECK(hipModuleGetLoadingMode(&mode));
   REQUIRE(mode == HIP_MODULE_LAZY_LOADING);
@@ -71,7 +71,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipModuleGetLoadingMode_DefaultModeCheck)) {
  * ------------------------
  * - HIP_VERSION >= 7.2
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipModuleGetLoadingMode_EagerModeCheck)) {
+HIP_TEST_CASE(Unit_hipModuleGetLoadingMode_EagerModeCheck) {
   hipModuleLoadingMode_t mode;
   if (setenv("HIP_MODULE_LOADING", "EAGER", 1) != 0) {
     HIP_CHECK(hipModuleGetLoadingMode(&mode));
@@ -130,7 +130,7 @@ void kernelExecutionFunction(hipModule_t module) {
  * ------------------------
  * - HIP_VERSION >= 7.2
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipModuleGetLoadingMode_EagerModeKernel)) {
+HIP_TEST_CASE(Unit_hipModuleGetLoadingMode_EagerModeKernel) {
   hipModuleLoadingMode_t mode;
   hipModule_t module;
   if (setenv("HIP_MODULE_LOADING", "EAGER", 1) == 0) {
@@ -159,7 +159,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipModuleGetLoadingMode_EagerModeKernel)) {
  * ------------------------
  * - HIP_VERSION >= 7.2
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipModuleGetLoadingMode_LazyModeKernel)) {
+HIP_TEST_CASE(Unit_hipModuleGetLoadingMode_LazyModeKernel) {
   hipModuleLoadingMode_t mode;
   hipModule_t module;
   HIP_CHECK(hipModuleGetLoadingMode(&mode));
@@ -193,7 +193,7 @@ void ChkMode() {
  * ------------------------
  * - HIP_VERSION >= 7.2
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipModuleGetLoadingMode_MultiThread)) {
+HIP_TEST_CASE(Unit_hipModuleGetLoadingMode_MultiThread) {
   // Create Thraed one.
   std::thread t1(setMode);
   t1.join();

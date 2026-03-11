@@ -39,7 +39,7 @@ Functional -
 
 /* Test verifies hipGraphMemcpyNodeGetParams API Negative scenarios.
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipGraphMemcpyNodeGetParams_Negative)) {
+HIP_TEST_CASE(Unit_hipGraphMemcpyNodeGetParams_Negative) {
   CHECK_IMAGE_SUPPORT
 
   constexpr int width{SIZE}, height{SIZE}, depth{SIZE};
@@ -135,7 +135,7 @@ static bool memcpyNodeCompare(hipMemcpy3DParms* mNode1, hipMemcpy3DParms* mNode2
   return true;
 }
 
-TEST_CASE(HIP_TEST_CASE(Unit_hipGraphMemcpyNodeGetParams_Functional)) {
+HIP_TEST_CASE(Unit_hipGraphMemcpyNodeGetParams_Functional) {
   CHECK_IMAGE_SUPPORT
 
   constexpr int width{SIZE}, height{SIZE}, depth{SIZE};

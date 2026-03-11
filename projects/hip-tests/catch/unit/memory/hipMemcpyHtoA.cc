@@ -35,7 +35,7 @@ hipMemcpyHtoA api when parameters are invalid
 #include <utils.hh>
 
 
-TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpyHtoA_Positive_Default)) {
+HIP_TEST_CASE(Unit_hipMemcpyHtoA_Positive_Default) {
   CHECK_IMAGE_SUPPORT
 
   using namespace std::placeholders;
@@ -46,7 +46,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpyHtoA_Positive_Default)) {
   MemcpyHtoAShell<false, int>(std::bind(hipMemcpyHtoA, _1, 0, _2, allocation_size), width);
 }
 
-TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpyHtoA_Positive_Synchronization_Behavior)) {
+HIP_TEST_CASE(Unit_hipMemcpyHtoA_Positive_Synchronization_Behavior) {
   CHECK_IMAGE_SUPPORT
 
   using namespace std::placeholders;
@@ -64,7 +64,7 @@ This is excluded for AMD as we have a bug already raised
 SWDEV-274683
 */
 #if HT_NVIDIA
-TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpyHtoA_Positive_ZeroCount)) {
+HIP_TEST_CASE(Unit_hipMemcpyHtoA_Positive_ZeroCount) {
   CHECK_IMAGE_SUPPORT
 
   const auto width = 1024;
@@ -98,7 +98,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpyHtoA_Positive_ZeroCount)) {
 }
 #endif
 
-TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpyHtoA_Negative_Parameters)) {
+HIP_TEST_CASE(Unit_hipMemcpyHtoA_Negative_Parameters) {
   CHECK_IMAGE_SUPPORT
 
   using namespace std::placeholders;
@@ -142,7 +142,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpyHtoA_Negative_Parameters)) {
   }
 }
 
-TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpyHtoA_Capture)) {
+HIP_TEST_CASE(Unit_hipMemcpyHtoA_Capture) {
   CHECK_IMAGE_SUPPORT
 
   const auto width = 512;

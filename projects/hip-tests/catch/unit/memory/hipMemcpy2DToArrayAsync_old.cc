@@ -44,7 +44,7 @@ static constexpr auto NUM_H{10};
  *         --> A_h host variable
  *         and verifying A_h with Phi
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpy2DToArrayAsync_Basic)) {
+HIP_TEST_CASE(Unit_hipMemcpy2DToArrayAsync_Basic) {
   CHECK_IMAGE_SUPPORT
 
   HIP_CHECK(hipSetDevice(0));
@@ -82,7 +82,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpy2DToArrayAsync_Basic)) {
 /*
  * This testcase verifies the extent validation scenarios
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpy2DToArrayAsync_ExtentValidation)) {
+HIP_TEST_CASE(Unit_hipMemcpy2DToArrayAsync_ExtentValidation) {
   CHECK_IMAGE_SUPPORT
 
   HIP_CHECK(hipSetDevice(0));
@@ -150,7 +150,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpy2DToArrayAsync_ExtentValidation)) {
  *         --> A_h host variable
  *         and verifying A_h with PinnedMem[0](i.e., 10)
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpy2DToArrayAsync_PinnedHostMemSameGpu)) {
+HIP_TEST_CASE(Unit_hipMemcpy2DToArrayAsync_PinnedHostMemSameGpu) {
   CHECK_IMAGE_SUPPORT
 
   HIP_CHECK(hipSetDevice(0));
@@ -195,7 +195,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpy2DToArrayAsync_PinnedHostMemSameGpu)) {
  *         --> A_h host variable
  *         and verifying A_h with E_h[0]+i(i.e., 10+i)
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpy2DToArrayAsync_multiDevicePinnedHostMem)) {
+HIP_TEST_CASE(Unit_hipMemcpy2DToArrayAsync_multiDevicePinnedHostMem) {
   CHECK_IMAGE_SUPPORT
 
   int numDevices = 0;
@@ -255,7 +255,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpy2DToArrayAsync_multiDevicePinnedHostMem)) 
  *         --> A_h host variable
  *         and verifying A_h with Phi
  * */
-TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpy2DToArrayAsync_multiDeviceDeviceContextChange)) {
+HIP_TEST_CASE(Unit_hipMemcpy2DToArrayAsync_multiDeviceDeviceContextChange) {
   CHECK_IMAGE_SUPPORT
 
   int numDevices = 0;
@@ -299,7 +299,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpy2DToArrayAsync_multiDeviceDeviceContextCha
 }
 /* This testcase verifies the negative scenarios
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpy2DToArrayAsync_Negative)) {
+HIP_TEST_CASE(Unit_hipMemcpy2DToArrayAsync_Negative) {
   CHECK_IMAGE_SUPPORT
 
   HIP_CHECK(hipSetDevice(0));

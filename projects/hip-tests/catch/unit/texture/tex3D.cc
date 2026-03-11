@@ -48,7 +48,7 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE(HIP_TEST_CASE(Unit_tex3D_Positive_ReadModeElementType), char, unsigned char, short,
+HIP_TEMPLATE_TEST_CASE(Unit_tex3D_Positive_ReadModeElementType, char, unsigned char, short,
                    unsigned short, int, unsigned int, float) {
   CHECK_IMAGE_SUPPORT;
 #if HT_NVIDIA
@@ -127,7 +127,7 @@ TEMPLATE_TEST_CASE(HIP_TEST_CASE(Unit_tex3D_Positive_ReadModeElementType), char,
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE(HIP_TEST_CASE(Unit_tex3D_Positive_ReadModeNormalizedFloat), char, unsigned char, short,
+HIP_TEMPLATE_TEST_CASE(Unit_tex3D_Positive_ReadModeNormalizedFloat, char, unsigned char, short,
                    unsigned short) {
   CHECK_IMAGE_SUPPORT;
 

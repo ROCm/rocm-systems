@@ -236,7 +236,7 @@ void QuaternaryFloatingPointTest(kernel_sig<T, TArg, TArg, TArg, TArg> kernel,
 #define MATH_QUATERNARY_WITHIN_ULP_TEST_DEF(kern_name, ref_func, sp_ulp, dp_ulp)                   \
   MATH_QUATERNARY_KERNEL_DEF(kern_name)                                                            \
                                                                                                    \
-  TEMPLATE_TEST_CASE(HIP_TEST_CASE(Unit_Device_##kern_name##_Accuracy_Positive),                    \
+  HIP_TEMPLATE_TEST_CASE(Unit_Device_##kern_name##_Accuracy_Positive,                              \
                      float, double) {                                                              \
     using RT = RefType_t<TestType>;                                                                \
     RT (*ref)(RT, RT, RT, RT) = ref_func;                                                          \

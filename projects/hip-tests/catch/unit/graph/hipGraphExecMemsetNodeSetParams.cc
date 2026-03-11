@@ -54,7 +54,7 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE(HIP_TEST_CASE(Unit_hipGraphExecMemsetNodeSetParams_Positive_Basic), uint8_t, uint16_t,
+HIP_TEMPLATE_TEST_CASE(Unit_hipGraphExecMemsetNodeSetParams_Positive_Basic, uint8_t, uint16_t,
                    uint32_t) {
   CHECK_IMAGE_SUPPORT
 
@@ -130,7 +130,7 @@ TEMPLATE_TEST_CASE(HIP_TEST_CASE(Unit_hipGraphExecMemsetNodeSetParams_Positive_B
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipGraphExecMemsetNodeSetParams_Negative_Parameters)) {
+HIP_TEST_CASE(Unit_hipGraphExecMemsetNodeSetParams_Negative_Parameters) {
   // FIXME: this test tests 1D/2D/3D stuff in one single go, need to decouple it so that it can run
   // on devices with no image support
   CHECK_IMAGE_SUPPORT
@@ -192,7 +192,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipGraphExecMemsetNodeSetParams_Negative_Parameters
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipGraphExecMemsetNodeSetParams_Negative_Updating_Non1D_Node)) {
+HIP_TEST_CASE(Unit_hipGraphExecMemsetNodeSetParams_Negative_Updating_Non1D_Node) {
   CHECK_IMAGE_SUPPORT
 
   hipGraph_t graph = nullptr;

@@ -26,7 +26,7 @@ THE SOFTWARE.
 
 texture<float, 1, hipReadModeElementType> tex;
 
-TEST_CASE(HIP_TEST_CASE(Unit_hipTexRefGetAddress_Positive)) {
+HIP_TEST_CASE(Unit_hipTexRefGetAddress_Positive) {
   CHECK_IMAGE_SUPPORT
   hipDeviceptr_t device_ptr;
   hipModule_t module = nullptr;
@@ -47,7 +47,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipTexRefGetAddress_Positive)) {
   HIP_CHECK(hipFree(tex_buffer));
 }
 
-TEST_CASE(HIP_TEST_CASE(Unit_hipTexRefGetAddress_Negative)) {
+HIP_TEST_CASE(Unit_hipTexRefGetAddress_Negative) {
   CHECK_IMAGE_SUPPORT
   hipDeviceptr_t device_ptr;
   hipModule_t module = nullptr;
@@ -74,7 +74,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipTexRefGetAddress_Negative)) {
   HIP_CHECK(hipFree(tex_buffer));
 }
 
-TEST_CASE(HIP_TEST_CASE(Unit_hipTexRefGetAddress_AdressNotSet)) {
+HIP_TEST_CASE(Unit_hipTexRefGetAddress_AdressNotSet) {
   CHECK_IMAGE_SUPPORT
   hipDeviceptr_t device_ptr;
   hipModule_t module = nullptr;

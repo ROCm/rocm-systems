@@ -68,7 +68,7 @@ static inline void launchVectorAdd(float*& A_h, float*& B_h, float*& C_h,
  *  - Platform specific (AMD)
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipEventDestroy_Unfinished)) {
+HIP_TEST_CASE(Unit_hipEventDestroy_Unfinished) {
   hipEvent_t event;
 
   HIP_CHECK(hipEventCreate(&event));
@@ -97,7 +97,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipEventDestroy_Unfinished)) {
  *  - Platform specific (AMD)
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipEventDestroy_WithWaitingStream)) {
+HIP_TEST_CASE(Unit_hipEventDestroy_WithWaitingStream) {
   hipEvent_t event;
   HIP_CHECK(hipEventCreate(&event));
 
@@ -135,14 +135,14 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipEventDestroy_WithWaitingStream)) {
  *  - Platform specific (AMD)
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipEventDestroy_Negative)) {
+HIP_TEST_CASE(Unit_hipEventDestroy_Negative) {
   SECTION("Invalid Event") {
     hipEvent_t event{nullptr};
     HIP_CHECK_ERROR(hipEventDestroy(event), hipErrorInvalidResourceHandle);
   }
 }
 
-TEST_CASE(HIP_TEST_CASE(Unit_hipEventDestroy_Verify_Capture)) {
+HIP_TEST_CASE(Unit_hipEventDestroy_Verify_Capture) {
   hipEvent_t event;
   HIP_CHECK(hipEventCreate(&event));
   REQUIRE(event != nullptr);

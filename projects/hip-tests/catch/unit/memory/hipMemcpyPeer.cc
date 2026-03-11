@@ -46,7 +46,7 @@ THE SOFTWARE.
  *  - Multi-device
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpyPeer_Positive_Default)) {
+HIP_TEST_CASE(Unit_hipMemcpyPeer_Positive_Default) {
   const auto device_count = HipTest::getDeviceCount();
   if (device_count < 2) {
     HipTest::HIP_SKIP_TEST("Skipping because devices < 2");
@@ -111,7 +111,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpyPeer_Positive_Default)) {
  *  - Multi-device
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpyPeer_Positive_Synchronization_Behavior)) {
+HIP_TEST_CASE(Unit_hipMemcpyPeer_Positive_Synchronization_Behavior) {
   HIP_CHECK(hipDeviceSynchronize());
 
   const auto device_count = HipTest::getDeviceCount();
@@ -159,7 +159,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpyPeer_Positive_Synchronization_Behavior)) {
  *  - Multi-device
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpyPeer_Positive_ZeroSize)) {
+HIP_TEST_CASE(Unit_hipMemcpyPeer_Positive_ZeroSize) {
   const auto device_count = HipTest::getDeviceCount();
   if (device_count < 2) {
     HipTest::HIP_SKIP_TEST("Skipping because devices < 2");
@@ -242,7 +242,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpyPeer_Positive_ZeroSize)) {
  *  - Multi-device
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpyPeer_Negative_Parameters)) {
+HIP_TEST_CASE(Unit_hipMemcpyPeer_Negative_Parameters) {
   const auto device_count = HipTest::getDeviceCount();
   if (device_count < 2) {
     HipTest::HIP_SKIP_TEST("Skipping because devices < 2");

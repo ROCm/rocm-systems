@@ -79,7 +79,7 @@ __global__ void copyFromHostMem(const int* hostMem, int* devOut, int N) {
  * ------------------------
  *    - HIP_VERSION >= 6.1
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipMemSetAccess_SetGet)) {
+HIP_TEST_CASE(Unit_hipMemSetAccess_SetGet) {
   size_t granularity = 0;
   constexpr int N = DATA_SIZE;
   size_t buffer_size = N * sizeof(int);
@@ -148,7 +148,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipMemSetAccess_SetGet)) {
  * ------------------------
  *    - HIP_VERSION >= 6.1
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipMemSetAccess_MultDevSetGet)) {
+HIP_TEST_CASE(Unit_hipMemSetAccess_MultDevSetGet) {
   size_t granularity = 0;
   constexpr int N = DATA_SIZE;
   size_t buffer_size = N * sizeof(int);
@@ -218,7 +218,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipMemSetAccess_MultDevSetGet)) {
  * ------------------------
  *    - HIP_VERSION >= 6.1
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipMemSetAccess_EntireVMMRangeSetGet)) {
+HIP_TEST_CASE(Unit_hipMemSetAccess_EntireVMMRangeSetGet) {
   size_t granularity = 0;
   constexpr int N = DATA_SIZE;
   size_t buffer_size = N * sizeof(int);
@@ -276,7 +276,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipMemSetAccess_EntireVMMRangeSetGet)) {
  * ------------------------
  *    - HIP_VERSION >= 6.1
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipMemGetAccess_NegTst)) {
+HIP_TEST_CASE(Unit_hipMemGetAccess_NegTst) {
   size_t granularity = 0;
   constexpr int N = DATA_SIZE;
   size_t buffer_size = N * sizeof(int);
@@ -340,7 +340,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipMemGetAccess_NegTst)) {
  * ------------------------
  *    - HIP_VERSION >= 6.1
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipMemSetAccess_FuncTstOnMultDev)) {
+HIP_TEST_CASE(Unit_hipMemSetAccess_FuncTstOnMultDev) {
   size_t granularity = 0;
   constexpr int N = DATA_SIZE;
   size_t buffer_size = N * sizeof(int);
@@ -412,7 +412,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipMemSetAccess_FuncTstOnMultDev)) {
  * ------------------------
  *    - HIP_VERSION >= 6.1
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipMemSetAccess_ChangeAccessProp)) {
+HIP_TEST_CASE(Unit_hipMemSetAccess_ChangeAccessProp) {
   size_t granularity = 0;
   constexpr int N = DATA_SIZE;
   size_t buffer_size = N * sizeof(int);
@@ -500,7 +500,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipMemSetAccess_ChangeAccessProp)) {
  *        - the full range (1 call: segments 0-2)
  * ------------------------
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipMemSetAccess_SegmentsAccess)) {
+HIP_TEST_CASE(Unit_hipMemSetAccess_SegmentsAccess) {
   size_t granularity = 0;
   int deviceId = 0;
   hipDevice_t device;
@@ -626,7 +626,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipMemSetAccess_SegmentsAccess)) {
  * ------------------------
  *    - HIP_VERSION >= 6.1
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipMemSetAccess_Vmm2UnifiedMemCpy)) {
+HIP_TEST_CASE(Unit_hipMemSetAccess_Vmm2UnifiedMemCpy) {
   CTX_CREATE();
   auto managed = HmmAttrPrint();
   if (managed != 1) {
@@ -702,7 +702,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipMemSetAccess_Vmm2UnifiedMemCpy)) {
  * ------------------------
  *    - HIP_VERSION >= 6.1
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipMemSetAccess_Vmm2DevMemCpy)) {
+HIP_TEST_CASE(Unit_hipMemSetAccess_Vmm2DevMemCpy) {
   size_t granularity = 0;
   constexpr int N = DATA_SIZE;
   size_t buffer_size = N * sizeof(int);
@@ -762,7 +762,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipMemSetAccess_Vmm2DevMemCpy)) {
  * ------------------------
  *    - HIP_VERSION >= 6.1
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipMemSetAccess_Vmm2PeerDevMemCpy)) {
+HIP_TEST_CASE(Unit_hipMemSetAccess_Vmm2PeerDevMemCpy) {
   size_t granularity = 0;
   constexpr int N = DATA_SIZE;
   size_t buffer_size = N * sizeof(int);
@@ -853,7 +853,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipMemSetAccess_Vmm2PeerDevMemCpy)) {
  * ------------------------
  *    - HIP_VERSION >= 6.1
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipMemSetAccess_Vmm2PeerPeerMemCpy)) {
+HIP_TEST_CASE(Unit_hipMemSetAccess_Vmm2PeerPeerMemCpy) {
   size_t granularity = 0;
   constexpr int N = DATA_SIZE;
   size_t buffer_size = N * sizeof(int);
@@ -949,7 +949,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipMemSetAccess_Vmm2PeerPeerMemCpy)) {
  * ------------------------
  *    - HIP_VERSION >= 6.1
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipMemSetAccess_Vmm2VMMMemCpy)) {
+HIP_TEST_CASE(Unit_hipMemSetAccess_Vmm2VMMMemCpy) {
   size_t granularity = 0;
   constexpr int N = DATA_SIZE;
   size_t buffer_size = N * sizeof(int);
@@ -1015,7 +1015,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipMemSetAccess_Vmm2VMMMemCpy)) {
  * ------------------------
  *    - HIP_VERSION >= 6.1
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipMemSetAccess_Vmm2VMMInterDevMemCpy)) {
+HIP_TEST_CASE(Unit_hipMemSetAccess_Vmm2VMMInterDevMemCpy) {
   size_t granularity = 0;
   constexpr int N = DATA_SIZE;
   size_t buffer_size = N * sizeof(int);
@@ -1229,7 +1229,7 @@ class vmm_resize_class {
  * ------------------------
  *    - HIP_VERSION >= 6.1
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipMemSetAccess_GrowVMM)) {
+HIP_TEST_CASE(Unit_hipMemSetAccess_GrowVMM) {
   hipDeviceptr_t ptr;
   constexpr int N = DATA_SIZE;
   size_t buffer_size = N * sizeof(int);
@@ -1332,7 +1332,7 @@ void test_thread(hipDevice_t device) {
  * ------------------------
  *    - HIP_VERSION >= 6.1
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipMemSetAccess_Multithreaded)) {
+HIP_TEST_CASE(Unit_hipMemSetAccess_Multithreaded) {
   CTX_CREATE();
   int deviceId = 0;
   hipDevice_t device;
@@ -1360,7 +1360,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipMemSetAccess_Multithreaded)) {
  * ------------------------
  *    - HIP_VERSION >= 6.1
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipMemSetAccess_negative)) {
+HIP_TEST_CASE(Unit_hipMemSetAccess_negative) {
   size_t granularity = 0;
   constexpr int N = DATA_SIZE;
   size_t buffer_size = N * sizeof(int);
@@ -1453,7 +1453,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipMemSetAccess_negative)) {
   CTX_DESTROY();
 }
 
-TEST_CASE(HIP_TEST_CASE(Unit_hipMemSetGetAccess_Capture)) {
+HIP_TEST_CASE(Unit_hipMemSetGetAccess_Capture) {
   CTX_CREATE();
 
   const size_t kBufferBytes = DATA_SIZE * sizeof(int);
@@ -1512,7 +1512,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipMemSetGetAccess_Capture)) {
   CTX_DESTROY();
 }
 
-TEST_CASE(HIP_TEST_CASE(Unit_hipMemSetAccessHostDevice_hostalloc)) {
+HIP_TEST_CASE(Unit_hipMemSetAccessHostDevice_hostalloc) {
   // Ensure device 0 is selected
   REQUIRE(hipSetDevice(0) == hipSuccess);
 
@@ -1584,7 +1584,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipMemSetAccessHostDevice_hostalloc)) {
   HIP_CHECK(hipMemRelease(handle));
 }
 
-TEST_CASE(HIP_TEST_CASE(Unit_hipMemSetAccessHost_devicealloc)) {
+HIP_TEST_CASE(Unit_hipMemSetAccessHost_devicealloc) {
   // Ensure device 0 is selected
   REQUIRE(hipSetDevice(0) == hipSuccess);
 

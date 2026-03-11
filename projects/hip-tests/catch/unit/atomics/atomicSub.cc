@@ -56,7 +56,7 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE(HIP_TEST_CASE(Unit_atomicSub_Positive), int, unsigned int, unsigned long,
+HIP_TEMPLATE_TEST_CASE(Unit_atomicSub_Positive, int, unsigned int, unsigned long,
                    unsigned long long, float, double) {
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
@@ -101,7 +101,7 @@ TEMPLATE_TEST_CASE(HIP_TEST_CASE(Unit_atomicSub_Positive), int, unsigned int, un
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE(HIP_TEST_CASE(Unit_atomicSub_Positive_Multi_Kernel), int, unsigned int, unsigned long,
+HIP_TEMPLATE_TEST_CASE(Unit_atomicSub_Positive_Multi_Kernel, int, unsigned int, unsigned long,
                    unsigned long long, float, double) {
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
@@ -136,7 +136,7 @@ TEMPLATE_TEST_CASE(HIP_TEST_CASE(Unit_atomicSub_Positive_Multi_Kernel), int, uns
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(HIP_TEST_CASE(Unit_atomicSub_Negative_Parameters_RTC)) {
+HIP_TEST_CASE(Unit_atomicSub_Negative_Parameters_RTC) {
   hiprtcProgram program{};
 
   const auto program_source = GENERATE(kAtomicSub_int, kAtomicSub_uint, kAtomicSub_ulong,

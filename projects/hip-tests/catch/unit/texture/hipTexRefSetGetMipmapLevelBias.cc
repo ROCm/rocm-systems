@@ -21,7 +21,7 @@ THE SOFTWARE.
 #if defined(__HIP_PLATFORM_AMD__) || CUDA_VERSION < CUDA_12000
 texture<float, 2, hipReadModeElementType> tex;
 // Test for hipTexRefSetMipmapLevelBias and hipTexRefGetMipmapLevelBias, including error handling
-TEST_CASE(HIP_TEST_CASE(Unit_hipTexRefSetGetMipmapLevelBias)) {
+HIP_TEST_CASE(Unit_hipTexRefSetGetMipmapLevelBias) {
   CHECK_IMAGE_SUPPORT;
 
   // Retrieve the texture reference for our symbol

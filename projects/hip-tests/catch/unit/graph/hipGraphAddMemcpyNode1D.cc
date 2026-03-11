@@ -51,7 +51,7 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipGraphAddMemcpyNode1D_Positive_Basic)) {
+HIP_TEST_CASE(Unit_hipGraphAddMemcpyNode1D_Positive_Basic) {
   constexpr auto f = [](void* dst, void* src, size_t count, hipMemcpyKind direction) {
     hipGraph_t graph = nullptr;
     HIP_CHECK(hipGraphCreate(&graph, 0));
@@ -143,7 +143,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipGraphAddMemcpyNode1D_Positive_Basic)) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipGraphAddMemcpyNode1D_Negative_Parameters)) {
+HIP_TEST_CASE(Unit_hipGraphAddMemcpyNode1D_Negative_Parameters) {
   using namespace std::placeholders;
   hipGraph_t graph = nullptr;
   HIP_CHECK(hipGraphCreate(&graph, 0));

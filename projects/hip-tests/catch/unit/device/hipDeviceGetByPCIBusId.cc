@@ -42,7 +42,7 @@
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipDeviceGetByPCIBusId_Functional)) {
+HIP_TEST_CASE(Unit_hipDeviceGetByPCIBusId_Functional) {
   char pciBusId[SIZE]{};
   int deviceCount = 0;
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
@@ -80,7 +80,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipDeviceGetByPCIBusId_Functional)) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipDeviceGetByPCIBusId_NegativeNullChk)) {
+HIP_TEST_CASE(Unit_hipDeviceGetByPCIBusId_NegativeNullChk) {
   int device = -1;
   hipError_t ret;
   char pciBusIdstr[SIZE]{};
@@ -106,7 +106,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipDeviceGetByPCIBusId_NegativeNullChk)) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipDeviceGetByPCIBusId_NegativeInputString)) {
+HIP_TEST_CASE(Unit_hipDeviceGetByPCIBusId_NegativeInputString) {
   int device = -1;
   hipError_t ret;
   ret = hipDeviceGetByPCIBusId(&device, "");
@@ -129,7 +129,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipDeviceGetByPCIBusId_NegativeInputString)) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipDeviceGetByPCIBusId_WrongBusID)) {
+HIP_TEST_CASE(Unit_hipDeviceGetByPCIBusId_WrongBusID) {
   int deviceCount = 0;
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
   HIP_ASSERT(deviceCount != 0);

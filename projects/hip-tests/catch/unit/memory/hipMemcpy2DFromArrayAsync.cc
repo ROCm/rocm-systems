@@ -35,7 +35,7 @@ of hipMemcpy2DFromArrayAsync api when parameters are invalid
 #include <resource_guards.hh>
 #include <utils.hh>
 
-TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpy2DFromArrayAsync_Positive_Default)) {
+HIP_TEST_CASE(Unit_hipMemcpy2DFromArrayAsync_Positive_Default) {
   CHECK_IMAGE_SUPPORT
 
   using namespace std::placeholders;
@@ -93,7 +93,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpy2DFromArrayAsync_Positive_Default)) {
 #endif
 }
 
-TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpy2DFromArrayAsync_Positive_Synchronization_Behavior)) {
+HIP_TEST_CASE(Unit_hipMemcpy2DFromArrayAsync_Positive_Synchronization_Behavior) {
   CHECK_IMAGE_SUPPORT
 
   using namespace std::placeholders;
@@ -123,7 +123,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpy2DFromArrayAsync_Positive_Synchronization_
   }
 }
 
-TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpy2DFromArrayAsync_Positive_ZeroWidthHeight)) {
+HIP_TEST_CASE(Unit_hipMemcpy2DFromArrayAsync_Positive_ZeroWidthHeight) {
   CHECK_IMAGE_SUPPORT
 
   using namespace std::placeholders;
@@ -163,7 +163,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpy2DFromArrayAsync_Positive_ZeroWidthHeight)
   }
 }
 
-TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpy2DFromArrayAsync_Negative_Parameters)) {
+HIP_TEST_CASE(Unit_hipMemcpy2DFromArrayAsync_Negative_Parameters) {
   CHECK_IMAGE_SUPPORT
 
   using namespace std::placeholders;

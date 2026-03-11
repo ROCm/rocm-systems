@@ -54,7 +54,7 @@ __global__ void HIP_kernel(unsigned int* a, unsigned int* b, unsigned int* c,
 }
 
 
-TEST_CASE(HIP_TEST_CASE(Unit_popc)) {
+HIP_TEST_CASE(Unit_popc) {
   using namespace std;
   unsigned int* hostA;
   unsigned int* hostB;

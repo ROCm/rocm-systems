@@ -65,7 +65,7 @@ Verify that hipEventElapsedTime() returns error.
  * Scenario 1: Create s simple graph with just one event record
  * node and instantiate and launch the graph.
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipGraphAddEventRecordNode_Functional_Simple)) {
+HIP_TEST_CASE(Unit_hipGraphAddEventRecordNode_Functional_Simple) {
   hipGraph_t graph;
   hipStream_t streamForGraph;
   hipGraphExec_t graphExec;
@@ -201,7 +201,7 @@ static void validateAddEventRecordNode(bool measureTime, bool withFlags, int nst
 /**
  * Scenario 2: Validate event record nodes created without flags.
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipGraphAddEventRecordNode_Functional_WithoutFlags)) {
+HIP_TEST_CASE(Unit_hipGraphAddEventRecordNode_Functional_WithoutFlags) {
   // Create events without flags using hipEventCreate and
   // elapsed time is not validated
   validateAddEventRecordNode(false, false, 1);
@@ -210,7 +210,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipGraphAddEventRecordNode_Functional_WithoutFlags)
 /**
  * Scenario 3: Validate elapsed time between 2 recorded events.
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipGraphAddEventRecordNode_Functional_ElapsedTime)) {
+HIP_TEST_CASE(Unit_hipGraphAddEventRecordNode_Functional_ElapsedTime) {
   // Create events without flags using hipEventCreate and
   // elapsed time is validated
   validateAddEventRecordNode(true, false, 1);
@@ -220,7 +220,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipGraphAddEventRecordNode_Functional_ElapsedTime))
  * Scenario 4: Validate event record nodes created with different
  * event flags.
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipGraphAddEventRecordNode_Functional_WithFlags)) {
+HIP_TEST_CASE(Unit_hipGraphAddEventRecordNode_Functional_WithFlags) {
   // Create events with different flags using hipEventCreate and
   // elapsed time is not validated
   SECTION("Flag = hipEventDefault") { validateAddEventRecordNode(false, true, 1, hipEventDefault); }
@@ -238,14 +238,14 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipGraphAddEventRecordNode_Functional_WithFlags)) {
  * Scenario 5: Validate hipGraphAddEventRecordNode by executing graph
  * 100 times in a loop.
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipGraphAddEventRecordNode_MultipleRun)) {
+HIP_TEST_CASE(Unit_hipGraphAddEventRecordNode_MultipleRun) {
   validateAddEventRecordNode(false, false, 100);
 }
 
 /**
  * Scenario 6: Validate hipGraphAddEventRecordNode with time disabled events.
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipGraphAddEventRecordNode_Functional_TimingDisabled)) {
+HIP_TEST_CASE(Unit_hipGraphAddEventRecordNode_Functional_TimingDisabled) {
   constexpr size_t Nbytes = 1024;
   hipGraph_t graph;
   hipStream_t streamForGraph;
@@ -298,7 +298,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipGraphAddEventRecordNode_Functional_TimingDisable
 /**
  * Scenario 7: Positive parameter tests
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipGraphAddEventRecordNode_Positive_Parameters)) {
+HIP_TEST_CASE(Unit_hipGraphAddEventRecordNode_Positive_Parameters) {
   hipGraph_t graph;
   HIP_CHECK(hipGraphCreate(&graph, 0));
   hipEvent_t event;
@@ -337,7 +337,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipGraphAddEventRecordNode_Positive_Parameters)) {
 /**
  * Scenario 8: All negative tests
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipGraphAddEventRecordNode_Negative)) {
+HIP_TEST_CASE(Unit_hipGraphAddEventRecordNode_Negative) {
   using namespace std::placeholders;
   hipGraph_t graph;
   HIP_CHECK(hipGraphCreate(&graph, 0));

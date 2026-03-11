@@ -61,6 +61,6 @@ __device__ void integer_intrinsics() {
 
 __global__ void compileIntegerIntrinsics(int) { integer_intrinsics(); }
 
-TEST_CASE(HIP_TEST_CASE(Unit_IntegerIntrinsics)) {
+HIP_TEST_CASE(Unit_IntegerIntrinsics) {
   hipLaunchKernelGGL(compileIntegerIntrinsics, dim3(1, 1, 1), dim3(1, 1, 1), 0, 0, 1);
 }

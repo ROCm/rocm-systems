@@ -44,7 +44,7 @@ static constexpr auto NUM_H{10};
  *         --> A_h host variable
  *         and verifying A_h with Phi
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpy2DFromArrayAsync_Basic)) {
+HIP_TEST_CASE(Unit_hipMemcpy2DFromArrayAsync_Basic) {
   CHECK_IMAGE_SUPPORT
 
   HIP_CHECK(hipSetDevice(0));
@@ -84,7 +84,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpy2DFromArrayAsync_Basic)) {
  * This testcase verifies the extent validation scenarios
  * of hipMemcpy2DFromArrayAsync API
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpy2DFromArrayAsync_ExtentValidation)) {
+HIP_TEST_CASE(Unit_hipMemcpy2DFromArrayAsync_ExtentValidation) {
   CHECK_IMAGE_SUPPORT
 
   HIP_CHECK(hipSetDevice(0));
@@ -153,7 +153,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpy2DFromArrayAsync_ExtentValidation)) {
  *         --> A_h host variable
  *         and verifying A_h with PinnedMem[0](i.e., 10)
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpy2DFromArrayAsync_PinnedHostMemSameGpu)) {
+HIP_TEST_CASE(Unit_hipMemcpy2DFromArrayAsync_PinnedHostMemSameGpu) {
   CHECK_IMAGE_SUPPORT
 
   HIP_CHECK(hipSetDevice(0));
@@ -196,7 +196,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpy2DFromArrayAsync_PinnedHostMemSameGpu)) {
            then A_d-->E_h  in GPU1
  * OUTPUT: validating the result by comparing A_h and E_h
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpy2DFromArrayAsync_multiDevicePinnedHostMem)) {
+HIP_TEST_CASE(Unit_hipMemcpy2DFromArrayAsync_multiDevicePinnedHostMem) {
   CHECK_IMAGE_SUPPORT
 
   int numDevices = 0;
@@ -255,7 +255,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpy2DFromArrayAsync_multiDevicePinnedHostMem)
  *         --> A_h host variable
  *         and verifying A_h with Phi
  * */
-TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpy2DFromArrayAsync_multiDeviceContextChange)) {
+HIP_TEST_CASE(Unit_hipMemcpy2DFromArrayAsync_multiDeviceContextChange) {
   CHECK_IMAGE_SUPPORT
 
   int numDevices = 0;
@@ -300,7 +300,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpy2DFromArrayAsync_multiDeviceContextChange)
 /* This testcase verifies the negative scenarios
  * of hipMemcpy2DFromArrayAsync API
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpy2DFromArrayAsync_Negative)) {
+HIP_TEST_CASE(Unit_hipMemcpy2DFromArrayAsync_Negative) {
   CHECK_IMAGE_SUPPORT
 
   HIP_CHECK(hipSetDevice(0));
@@ -356,7 +356,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpy2DFromArrayAsync_Negative)) {
 * ------------------------
 *  - HIP_VERSION >= 6.0
 */
-TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpy2DFromArrayAsync_Capture)) {
+HIP_TEST_CASE(Unit_hipMemcpy2DFromArrayAsync_Capture) {
   CHECK_IMAGE_SUPPORT
 
   constexpr int kTestSizes[] = {3, 4, 100};

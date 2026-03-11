@@ -161,7 +161,7 @@ static void queryLesserNumOfDeps(const std::vector<hipGraphNode_t>& Nlist,
 /**
  * Functional Test for getting dependencies of node in graph and verifying execution
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipGraphNodeGetDependencies_Functional)) {
+HIP_TEST_CASE(Unit_hipGraphNodeGetDependencies_Functional) {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   constexpr auto blocksPerCU = 6;  // to hide latency
@@ -300,7 +300,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipGraphNodeGetDependencies_Functional)) {
  * as input and output parameters and validates the behavior.
  * Test will include both negative and positive scenarios.
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipGraphNodeGetDependencies_ParamValidation)) {
+HIP_TEST_CASE(Unit_hipGraphNodeGetDependencies_ParamValidation) {
   hipGraph_t graph{};
   const int numBytes = 100;
   size_t numDeps{1};

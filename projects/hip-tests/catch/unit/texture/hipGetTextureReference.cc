@@ -26,7 +26,7 @@ THE SOFTWARE.
 
 texture<float, 2, hipReadModeElementType> tex;
 
-TEST_CASE(HIP_TEST_CASE(Unit_hipGetTextureReference_Positive)) {
+HIP_TEST_CASE(Unit_hipGetTextureReference_Positive) {
   CHECK_IMAGE_SUPPORT
 
   const textureReference* tex_ref = nullptr;
@@ -34,7 +34,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipGetTextureReference_Positive)) {
   REQUIRE(tex_ref != nullptr);
 }
 
-TEST_CASE(HIP_TEST_CASE(Unit_hipGetTextureReference_Negative)) {
+HIP_TEST_CASE(Unit_hipGetTextureReference_Negative) {
   CHECK_IMAGE_SUPPORT
 
   const textureReference* tex_ref = nullptr;

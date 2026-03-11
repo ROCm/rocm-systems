@@ -75,7 +75,7 @@ Input: A_h with INITIAL_VAL
 Output: Return val would be 0 and the input value to API will not
         get updated. A_h would be INITIAL_VAL, B_h is 0
 */
-TEST_CASE(HIP_TEST_CASE(Unit_BuiltinAtomics_fmaxCoherentGlobalMem)) {
+HIP_TEST_CASE(Unit_BuiltinAtomics_fmaxCoherentGlobalMem) {
   hipDeviceProp_t prop;
   int device;
   HIP_CHECK(hipGetDevice(&device));
@@ -122,7 +122,7 @@ Output: Return val would be initial val of A_h and the input value of
         API would be updated with the max value
         A_h would be 10, B_h would be INITIAL_VAL
 */
-TEST_CASE(HIP_TEST_CASE(Unit_BuiltinAtomics_fmaxNonCoherentGlobalFlatMem)) {
+HIP_TEST_CASE(Unit_BuiltinAtomics_fmaxNonCoherentGlobalFlatMem) {
   int mem_type = GENERATE(0, 1);
   hipDeviceProp_t prop;
   int device;
@@ -173,7 +173,7 @@ Input: A_h with INITIAL_VAL
 Output: Return val would be 0 and the input value to API will not
         get updated. A_h would be INITIAL_VAL, B_h is 0
 */
-TEST_CASE(HIP_TEST_CASE(Unit_BuiltinAtomicsRTC_fmaxCoherentGlobalMem)) {
+HIP_TEST_CASE(Unit_BuiltinAtomicsRTC_fmaxCoherentGlobalMem) {
   hipDeviceProp_t prop;
   int device;
   HIP_CHECK(hipGetDevice(&device));
@@ -254,7 +254,7 @@ Output: Return val would be initial val of A_h and the input value of
         API would be updated with the max value
         A_h would be 10, B_h would be INITIAL_VAL
 */
-TEST_CASE(HIP_TEST_CASE(Unit_BuiltinAtomicsRTC_fmaxNonCoherentGlobalFlatMem)) {
+HIP_TEST_CASE(Unit_BuiltinAtomicsRTC_fmaxNonCoherentGlobalFlatMem) {
   int mem_type = GENERATE(0, 1);
   hipDeviceProp_t prop;
   int device;

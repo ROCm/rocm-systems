@@ -50,7 +50,7 @@ constexpr int block_size = 512;
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipEventCreateWithFlags_Positive)) {
+HIP_TEST_CASE(Unit_hipEventCreateWithFlags_Positive) {
 #if HT_AMD
   const unsigned int flagUnderTest =
       GENERATE(hipEventDefault, hipEventBlockingSync, hipEventDisableTiming,
@@ -169,7 +169,7 @@ static void testMemCoherency(eSyncToTest test, eMemoryToTest mem, uint32_t flags
  * ------------------------
  *    - HIP_VERSION >= 5.6
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipEventCreateWithFlags_DisableSystemFence_HstVisMem)) {
+HIP_TEST_CASE(Unit_hipEventCreateWithFlags_DisableSystemFence_HstVisMem) {
   SECTION("Check with hipStreamSynchronize") {
     INFO("Check with hipStreamSynchronize");
     testMemCoherency(eSyncToTest::eStreamSynchronize, eMemoryToTest::eHostVisibleMemory,
@@ -196,7 +196,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipEventCreateWithFlags_DisableSystemFence_HstVisMe
  * ------------------------
  *    - HIP_VERSION >= 5.6
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipEventCreateWithFlags_DefaultFlg_HstVisMem)) {
+HIP_TEST_CASE(Unit_hipEventCreateWithFlags_DefaultFlg_HstVisMem) {
   SECTION("Check with hipStreamSynchronize") {
     INFO("Check with hipStreamSynchronize");
     testMemCoherency(eSyncToTest::eStreamSynchronize, eMemoryToTest::eHostVisibleMemory,
@@ -228,7 +228,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipEventCreateWithFlags_DefaultFlg_HstVisMem)) {
  * ------------------------
  *    - HIP_VERSION >= 5.6
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipEventCreateWithFlags_DisableSystemFence_NonCohHstMem)) {
+HIP_TEST_CASE(Unit_hipEventCreateWithFlags_DisableSystemFence_NonCohHstMem) {
   SECTION("Check with hipStreamSynchronize") {
     INFO("Check with hipStreamSynchronize");
     testMemCoherency(eSyncToTest::eStreamSynchronize, eMemoryToTest::eNonCoherentHostMemory,
@@ -256,7 +256,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipEventCreateWithFlags_DisableSystemFence_NonCohHs
  * ------------------------
  *    - HIP_VERSION >= 5.6
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipEventCreateWithFlags_DefaultFlg_NonCohHstMem)) {
+HIP_TEST_CASE(Unit_hipEventCreateWithFlags_DefaultFlg_NonCohHstMem) {
   SECTION("Check with hipStreamSynchronize") {
     INFO("Check with hipStreamSynchronize");
     testMemCoherency(eSyncToTest::eStreamSynchronize, eMemoryToTest::eNonCoherentHostMemory,
@@ -288,7 +288,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipEventCreateWithFlags_DefaultFlg_NonCohHstMem)) {
  * ------------------------
  *    - HIP_VERSION >= 5.6
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipEventCreateWithFlags_DisableSystemFence_CohHstMem)) {
+HIP_TEST_CASE(Unit_hipEventCreateWithFlags_DisableSystemFence_CohHstMem) {
   SECTION("Check with hipStreamSynchronize") {
     INFO("Check with hipStreamSynchronize");
     testMemCoherency(eSyncToTest::eStreamSynchronize, eMemoryToTest::eCoherentHostMemory,
@@ -320,7 +320,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipEventCreateWithFlags_DisableSystemFence_CohHstMe
  * ------------------------
  *    - HIP_VERSION >= 5.6
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipEventCreateWithFlags_DefaultFlg_CohHstMem)) {
+HIP_TEST_CASE(Unit_hipEventCreateWithFlags_DefaultFlg_CohHstMem) {
   SECTION("Check with hipStreamSynchronize") {
     INFO("Check with hipStreamSynchronize");
     testMemCoherency(eSyncToTest::eStreamSynchronize, eMemoryToTest::eCoherentHostMemory,
@@ -350,7 +350,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipEventCreateWithFlags_DefaultFlg_CohHstMem)) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipEventCreateWithFlags_Verify_Capture)) {
+HIP_TEST_CASE(Unit_hipEventCreateWithFlags_Verify_Capture) {
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
 

@@ -44,7 +44,7 @@ static constexpr size_t NUM_H{10};
  * it with the initalized data "C_h".
  *
  */
-TEMPLATE_TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpyParam2DAsync_multiDevice_StreamOnDiffDevice), char, float, int,
+HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpyParam2DAsync_multiDevice_StreamOnDiffDevice, char, float, int,
                    double, long double) {
   CHECK_IMAGE_SUPPORT
 
@@ -119,7 +119,7 @@ TEMPLATE_TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpyParam2DAsync_multiDevice_StreamOn
  * it with the initalized data "C_h".
  *
  */
-TEMPLATE_TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpyParam2DAsync_multiDevice_D2D), char, int, float,
+HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpyParam2DAsync_multiDevice_D2D, char, int, float,
                    double, long double) {
   CHECK_IMAGE_SUPPORT
 
@@ -196,7 +196,7 @@ TEMPLATE_TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpyParam2DAsync_multiDevice_D2D), ch
  *
  * Validating the result by comparing "A_h" to "C_h"
  */
-TEMPLATE_TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpyParam2DAsync_multiDevice_H2D_D2H), char, int, float,
+HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpyParam2DAsync_multiDevice_H2D_D2H, char, int, float,
                    double, long double) {
   CHECK_IMAGE_SUPPORT
 
@@ -279,7 +279,7 @@ TEMPLATE_TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpyParam2DAsync_multiDevice_H2D_D2H)
 /*
  * This testcase verifies the extent validation scenarios
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpyParam2DAsync_ExtentValidation)) {
+HIP_TEST_CASE(Unit_hipMemcpyParam2DAsync_ExtentValidation) {
   CHECK_IMAGE_SUPPORT
 
   HIP_CHECK(hipSetDevice(0));
@@ -345,7 +345,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpyParam2DAsync_ExtentValidation)) {
 /*
  * This testcase verifies the negative scenarios
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpyParam2DAsync_Negative)) {
+HIP_TEST_CASE(Unit_hipMemcpyParam2DAsync_Negative) {
   CHECK_IMAGE_SUPPORT
 
   HIP_CHECK(hipSetDevice(0));

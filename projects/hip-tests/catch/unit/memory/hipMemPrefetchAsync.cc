@@ -48,7 +48,7 @@ __global__ void MemPrefetchAsyncKernel(int* C_d, const int* A_d, size_t N) {
   }
 }
 
-TEST_CASE(HIP_TEST_CASE(Unit_hipMemPrefetchAsync_Basic_AllDevices)) {
+HIP_TEST_CASE(Unit_hipMemPrefetchAsync_Basic_AllDevices) {
   const auto supported_devices = GetDevicesWithPrefetchSupport();
   if (supported_devices.empty()) {
     HipTest::HIP_SKIP_TEST("Test need at least one device with managed memory support");
@@ -78,7 +78,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipMemPrefetchAsync_Basic_AllDevices)) {
   ArrayFindIfNot(alloc1.ptr(), fill_value, count);
 }
 
-TEST_CASE(HIP_TEST_CASE(Unit_hipMemPrefetchAsync_Sync_Behavior)) {
+HIP_TEST_CASE(Unit_hipMemPrefetchAsync_Sync_Behavior) {
   const auto supported_devices = GetDevicesWithPrefetchSupport();
   if (supported_devices.empty()) {
     HipTest::HIP_SKIP_TEST("Test need at least one device with managed memory support");
@@ -95,7 +95,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipMemPrefetchAsync_Sync_Behavior)) {
   HIP_CHECK(hipStreamSynchronize(sg.stream()));
 }
 
-TEST_CASE(HIP_TEST_CASE(Unit_hipMemPrefetchAsync_Rounding_Behavior)) {
+HIP_TEST_CASE(Unit_hipMemPrefetchAsync_Rounding_Behavior) {
   auto supported_devices = GetDevicesWithPrefetchSupport();
   if (supported_devices.empty()) {
     HipTest::HIP_SKIP_TEST("Test need at least one device with managed memory support");
@@ -128,7 +128,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipMemPrefetchAsync_Rounding_Behavior)) {
           static_cast<int>(attribute));
 }
 
-TEST_CASE(HIP_TEST_CASE(Unit_hipMemPrefetchAsync_Negative_Parameters)) {
+HIP_TEST_CASE(Unit_hipMemPrefetchAsync_Negative_Parameters) {
   auto supported_devices = GetDevicesWithPrefetchSupport();
   if (supported_devices.empty()) {
     HipTest::HIP_SKIP_TEST("Test need at least one device with managed memory support");

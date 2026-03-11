@@ -44,7 +44,7 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipDeviceTotalMem_NegTst)) {
+HIP_TEST_CASE(Unit_hipDeviceTotalMem_NegTst) {
 #if HT_NVIDIA
   HIP_CHECK(hipInit(0));
 #endif
@@ -79,7 +79,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipDeviceTotalMem_NegTst)) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipDeviceTotalMem_ValidateTotalMem)) {
+HIP_TEST_CASE(Unit_hipDeviceTotalMem_ValidateTotalMem) {
   size_t totMem;
   int numDevices = 0;
 
@@ -115,7 +115,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipDeviceTotalMem_ValidateTotalMem)) {
  *  - Multi-device test
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipDeviceTotalMem_NonSelectedDevice)) {
+HIP_TEST_CASE(Unit_hipDeviceTotalMem_NonSelectedDevice) {
   auto deviceCount = HipTest::getDeviceCount();
   if (deviceCount < 2) {
     HipTest::HIP_SKIP_TEST("Multi Device Test, will not run on single gpu systems. Skipping.");

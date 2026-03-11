@@ -70,7 +70,7 @@ void StaticAssertWrapper(const char* program_source) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(HIP_TEST_CASE(Unit_StaticAssert_Positive_Basic_RTC)) { StaticAssertWrapper(kStaticAssert_Positive); }
+HIP_TEST_CASE(Unit_StaticAssert_Positive_Basic_RTC) { StaticAssertWrapper(kStaticAssert_Positive); }
 
 /**
  * Test Description
@@ -85,7 +85,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_StaticAssert_Positive_Basic_RTC)) { StaticAssertWra
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(HIP_TEST_CASE(Unit_StaticAssert_Negative_Basic_RTC)) { StaticAssertWrapper(kStaticAssert_Negative); }
+HIP_TEST_CASE(Unit_StaticAssert_Negative_Basic_RTC) { StaticAssertWrapper(kStaticAssert_Negative); }
 
 /**
  * End doxygen group DeviceLanguageTest.

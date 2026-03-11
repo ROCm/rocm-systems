@@ -23,7 +23,7 @@ THE SOFTWARE.
 
 texture<float, 2, hipReadModeElementType> tex;
 
-TEST_CASE(HIP_TEST_CASE(Unit_hipTexRefGetFormat_Basic)) {
+HIP_TEST_CASE(Unit_hipTexRefGetFormat_Basic) {
   CHECK_IMAGE_SUPPORT
   hipModule_t module = nullptr;
   hipTexRef tex_ref = nullptr;
@@ -44,7 +44,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipTexRefGetFormat_Basic)) {
   HIP_CHECK(hipModuleUnload(module));
 }
 
-TEST_CASE(HIP_TEST_CASE(Unit_hipTexRefGetFormat_Positive)) {
+HIP_TEST_CASE(Unit_hipTexRefGetFormat_Positive) {
   CHECK_IMAGE_SUPPORT
   hipModule_t module = nullptr;
   hipTexRef tex_ref = nullptr;
@@ -75,7 +75,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipTexRefGetFormat_Positive)) {
   HIP_CHECK(hipModuleUnload(module));
 }
 
-TEST_CASE(HIP_TEST_CASE(Unit_hipTexRefGetFormat_Negative)) {
+HIP_TEST_CASE(Unit_hipTexRefGetFormat_Negative) {
   CHECK_IMAGE_SUPPORT
   hipModule_t module = nullptr;
   hipTexRef tex_ref = nullptr;

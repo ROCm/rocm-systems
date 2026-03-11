@@ -38,7 +38,7 @@ Functional -
 
 /* Test verifies hipGraphMemcpyNodeSetParams API Negative scenarios.
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipGraphMemcpyNodeSetParams_Negative)) {
+HIP_TEST_CASE(Unit_hipGraphMemcpyNodeSetParams_Negative) {
   CHECK_IMAGE_SUPPORT
 
   constexpr int width{SIZE}, height{SIZE}, depth{SIZE};
@@ -94,7 +94,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipGraphMemcpyNodeSetParams_Negative)) {
 
 /* Test verifies hipGraphMemcpyNodeSetParams API Functional scenarios.
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipGraphMemcpyNodeSetParams_Functional)) {
+HIP_TEST_CASE(Unit_hipGraphMemcpyNodeSetParams_Functional) {
   CHECK_IMAGE_SUPPORT
 
   constexpr int width{SIZE}, height{SIZE}, depth{SIZE};

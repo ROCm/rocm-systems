@@ -46,7 +46,7 @@ THE SOFTWARE.
  *    - Host specific (LINUX)
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE(HIP_TEST_CASE(Unit_hipMemPoolImportFromShareableHandle_Negative)) {
+HIP_TEST_CASE(Unit_hipMemPoolImportFromShareableHandle_Negative) {
   hipShareableHdl sharedHandle;
   hipMemPoolProps pool_props{};
   hipMemPool_t mempoolPfd;

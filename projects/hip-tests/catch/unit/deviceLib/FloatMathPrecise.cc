@@ -121,6 +121,6 @@ __device__ void FloatMathPrecise() {
 
 __global__ void CompileFloatMathPrecise(int) { FloatMathPrecise(); }
 
-TEST_CASE(HIP_TEST_CASE(Unit_FloatMathPrecise)) {
+HIP_TEST_CASE(Unit_FloatMathPrecise) {
   hipLaunchKernelGGL(CompileFloatMathPrecise, dim3(1, 1, 1), dim3(1, 1, 1), 0, 0, 1);
 }

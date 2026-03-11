@@ -41,7 +41,7 @@ THE SOFTWARE.
 #include <hip_test_kernels.hh>
 
 
-TEST_CASE(HIP_TEST_CASE(Unit_hipGraphExecChildGraphNodeSetParams_Negative)) {
+HIP_TEST_CASE(Unit_hipGraphExecChildGraphNodeSetParams_Negative) {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   hipGraph_t graph, childgraph1, childgraph2;
@@ -123,7 +123,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipGraphExecChildGraphNodeSetParams_Negative)) {
    using hipGraphExecChildGraphNodeSetParams API
    and execute it
    */
-TEST_CASE(HIP_TEST_CASE(Unit_hipGraphExecChildGraphNodeSetParams_BasicFunc)) {
+HIP_TEST_CASE(Unit_hipGraphExecChildGraphNodeSetParams_BasicFunc) {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   hipGraph_t graph, childgraph1, childgraph2;
@@ -195,7 +195,7 @@ TEST_CASE(HIP_TEST_CASE(Unit_hipGraphExecChildGraphNodeSetParams_BasicFunc)) {
    using hipGraphExecChildGraphNodeSetParams API
    and execute it
    */
-TEST_CASE(HIP_TEST_CASE(Unit_hipGraphExecChildGraphNodeSetParams_ChildTopology)) {
+HIP_TEST_CASE(Unit_hipGraphExecChildGraphNodeSetParams_ChildTopology) {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   constexpr auto blocksPerCU = 6;  // to hide latency
