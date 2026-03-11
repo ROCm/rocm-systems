@@ -217,6 +217,10 @@ void GDABackend::select_nics() {
               "NICs but max is %d\n", nic_names.size(), MAX_NICS_PER_PE);
       exit(1);
     }
+    // Compute path types for weighted QP distribution
+    for (auto const& name : nic_names) {
+      nic_paths.push_back(rocshmem::ComputeGpuNicPathTypeByName(gpu_dev, name));
+    }
   } else {
     int merge_level = rocshmem::ParseNicMergeLevel(
         envvar::gda::net_merge_level.get_value());

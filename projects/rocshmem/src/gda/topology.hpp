@@ -103,6 +103,16 @@ namespace rocshmem
   int ComputeGpuNicPathType(int gpuIndex, const std::string &nicBusId, int nicNuma);
 
   /**
+   * Computes the PCIe path type between a GPU and a NIC identified by device name.
+   * Looks up the NIC's bus ID and NUMA node from the IB device list.
+   *
+   * @param[in] gpuIndex Index of the GPU
+   * @param[in] nicName  Device name of the NIC (e.g. "rocep28s0")
+   * @returns   One of NIC_PATH_PIX / PXB / PHB / SYS, or NIC_PATH_SYS if not found
+   */
+  int ComputeGpuNicPathTypeByName(int gpuIndex, const std::string &nicName);
+
+  /**
    * Enumeration of GID priority
    *
    * @note These are the GID types ordered in priority from lowest (0) to highest

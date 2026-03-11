@@ -746,6 +746,17 @@ namespace rocshmem
     return NIC_PATH_SYS;
   }
 
+  int ComputeGpuNicPathTypeByName(int gpuIndex, const std::string &nicName)
+  {
+    auto const& ibvDeviceList = GetIbvDeviceList();
+    for (auto const& dev : ibvDeviceList) {
+      if (dev.name == nicName && dev.hasActivePort) {
+        return ComputeGpuNicPathType(gpuIndex, dev.busId, dev.numaNode);
+      }
+    }
+    return NIC_PATH_SYS;
+  }
+
   static bool hasExactMatch(const std::string& namesList, const std::string& name) {
     std::stringstream ss(namesList);
     std::string token;
