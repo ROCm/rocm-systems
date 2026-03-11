@@ -37,6 +37,13 @@ from .exceptions import (
     ReferenceGuideNotFoundError,
 )
 
+from .exceptions import (
+    AnalysisError,
+    LLMAuthenticationError,
+    LLMRateLimitError,
+    ReferenceGuideNotFoundError,
+)
+
 # Regex to match Unix and Windows file paths that may appear in profiling data
 _PATH_PATTERN = re.compile(
     r'(/home/[^\s,"\';>]+|/opt/[^\s,"\';>]+|/root/[^\s,"\';>]+|'
@@ -47,12 +54,6 @@ _PATH_PATTERN = re.compile(
 def _redact_paths(value: str) -> str:
     """Replace file system paths in a string with [REDACTED]."""
     return _PATH_PATTERN.sub("[REDACTED]", value)
-from .exceptions import (
-    AnalysisError,
-    LLMAuthenticationError,
-    LLMRateLimitError,
-    ReferenceGuideNotFoundError,
-)
 
 
 # Default location for the reference guide (relative to package installation)
