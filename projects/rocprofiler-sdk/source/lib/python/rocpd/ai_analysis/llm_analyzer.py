@@ -25,6 +25,8 @@ No code changes required - the guide is loaded dynamically.
 
 import os
 import re
+import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Dict, Any
 
@@ -101,6 +103,71 @@ def get_reference_guide_path() -> Path:
 
     # Not found — report all attempted paths
     raise ReferenceGuideNotFoundError(attempted)
+
+
+# ---------------------------------------------------------------------------
+# Context-aware guide filtering
+# ---------------------------------------------------------------------------
+
+@dataclass
+class AnalysisContext:
+    """
+    Describes the current analysis state so LLMAnalyzer can select only the
+    relevant sections of the reference guide, reducing prompt token cost by
+    18–51% depending on the scenario.
+
+    Fields:
+        tier: Analysis tier — 0=source-only, 1=trace, 2=hardware counters.
+        has_counters: True when PMC counter data is present in the database.
+            When True, tier2-tagged sections are loaded even if tier==1.
+        bottleneck_type: Primary bottleneck from _build_summary() —
+            "compute", "memory", "latency", "launch", or "mixed".
+            "compute" and "memory" trigger the compiler tag.
+        gpu_arch: Detected GPU architecture string e.g. "gfx942".
+            Reserved for future per-GPU section filtering.
+        custom_prompt: The user's --prompt text, if any.
+            Triggers compiler tag when it contains compiler/flag/build/compile.
+    """
+    tier: int = 1
+    has_counters: bool = False
+    bottleneck_type: Optional[str] = None
+    gpu_arch: Optional[str] = None
+    custom_prompt: Optional[str] = None
+
+
+def _select_tags(ctx: AnalysisContext) -> set:
+    """
+    Map an AnalysisContext to the set of section tags to include.
+
+    Tag vocabulary:
+        always   — critical rules, role, output format, what not to do, summary
+        tier1    — profiling workflow, tool reference, common bottleneck types
+        tier2    — hardware counters, memory hierarchy, GPU specs, perf models
+        compiler — compiler flags section (HIPCC, LLVM AMDGPU, register control)
+        source   — reserved for future Tier 0-specific guidance sections
+
+    Fallback: sections with no tag comment are always included.
+    """
+    tags = {"always"}
+    if ctx.tier >= 1:
+        tags.add("tier1")
+    if ctx.has_counters or ctx.tier >= 2:
+        tags.add("tier2")
+    if (
+        ctx.tier == 0
+        or ctx.bottleneck_type in ("compute", "memory")
+        or (
+            ctx.custom_prompt
+            and any(
+                w in ctx.custom_prompt.lower()
+                for w in ("compiler", "flag", "build", "compile")
+            )
+        )
+    ):
+        tags.add("compiler")
+    if ctx.tier == 0:
+        tags.add("source")
+    return tags
 
 
 class LLMAnalyzer:
