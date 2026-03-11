@@ -339,6 +339,8 @@ rocprofiler_add_integration_validate_test(
     ARGS --att-other-simd-out-dir ${OTHER_SIMD_OUT_DIR}
     FAIL_REGULAR_EXPRESSION "AssertionError")
 
+set(SHADERDATA_OUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/att-rocprofv3-shaderdata")
+
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-att-shaderdata
     COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -d ${SHADERDATA_OUT_DIR} --att --
