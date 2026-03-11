@@ -186,6 +186,7 @@ function(setup_split_device_compile)
           -e "s/^\\([[:space:]]*\\.set[[:space:]]\\+.*ncclDevKernel[^.]*\\.num_agpr,\\).*/\\1 64/"
           -e "s/^\\([[:space:]]*\\.set[[:space:]]\\+.*ncclDevKernel[^.]*\\.uses_flat_scratch,\\).*/\\1 1/"
           -e "s/^\\([[:space:]]*\\.set[[:space:]]\\+.*ncclDevKernel[^.]*\\.has_dyn_sized_stack,\\).*/\\1 1/"
+          -e "s/^\\([[:space:]]*\\.set[[:space:]]\\+.*\\.num_named_barrier,\\).*/\\1 0/"
         )
       endif()
 
