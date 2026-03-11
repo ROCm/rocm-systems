@@ -30,7 +30,7 @@
 
 using namespace rocshmem;
 
-#define NUM_TIMEOUT_CYCLES 200000000000ll // 200G cycles ~= 100s
+#define NUM_TIMEOUT_CYCLES 20000000000ll // 200G cycles ~= 10s
 
 template <typename T>
 __host__ __device__ T cell_div(T a, T b) {
@@ -52,7 +52,7 @@ struct atomics_buffer {
   int64_t* atomic_buffer_ptr {nullptr};
 
   int64_t* atomic_buffers[2] {nullptr, nullptr};
-  
+
   int buffer_idx {0};
 
   atomics_buffer(int num_elems_, int64_t* atomic_buffer_ptr_)
@@ -98,7 +98,7 @@ __forceinline__ __device__ void grid_barrier(int* global_counter,
   }
   __syncthreads();
 }
- 
+
 /**
 * kernel_1:
 * - Atomics pattern of deepEP_LL dispatch kernel
@@ -106,7 +106,7 @@ __forceinline__ __device__ void grid_barrier(int* global_counter,
 */
 template <int kNumWavesPerGroup, int kNumWaveGroups>
 __global__ void kernel_1(int64_t* atomic_buffer, int num_experts,
-    int64_t* next_atomic_buffer, int num_pes, int pe, int* grid_sync_buffer) {
+    int64_t* next_atomic_buffer, int num_pes, int pe, int* grid_sync_buffer, int iter) {
   const int wg_id = static_cast<int>(blockIdx.x);
   const int thread_id = static_cast<int>(threadIdx.x);
   const int wave_id = static_cast<int>(thread_id / warpSize);
@@ -145,7 +145,7 @@ __global__ void kernel_1(int64_t* atomic_buffer, int num_experts,
   }
   // Grid barrier
   // grid_barrier(grid_sync_buffer, num_wgs);
-  
+
   if (responsible_expert_id < num_experts) {
     const int src_pe = responsible_expert_id / num_local_experts;
     const int src_expert_local_idx = responsible_expert_id % num_local_experts;
@@ -168,10 +168,10 @@ __global__ void kernel_1(int64_t* atomic_buffer, int num_experts,
           int src_responsible_expert_id = pe * num_local_experts + src_expert_local_idx;
           int src_wg_id = src_responsible_expert_id / kNumWaveGroups;
           int src_wave_group_id = src_responsible_expert_id % kNumWaveGroups;
-          printf("[%s] Timeout waiting for source ptr to be updated by: "
+          printf("%02d [%s] Timeout iteration %d waiting for source ptr to be updated by: "
                  "PE: %d, WG ID: %d, Wave Group ID: %d, Responsible Expert ID: %d, "
-                 "Expected Value: %d, Actual Value: %ld\n",
-                 __func__, src_pe, src_wg_id, src_wave_group_id,
+                 "Expected Value: %d, Actual Value: %ld\n", pe, __func__, iter,
+                 src_pe, src_wg_id, src_wave_group_id,
                  src_responsible_expert_id, expected_value, *src_ptr);
           // reset the start time
           start_time = wall_clock64();
@@ -185,7 +185,7 @@ __global__ void kernel_1(int64_t* atomic_buffer, int num_experts,
 
 template <int kNumWavesPerGroup, int kNumWaveGroups>
 __global__ void kernel_2(int64_t* atomic_buffer, int num_experts,
-    int64_t* next_atomic_buffer, int num_pes, int pe, int* grid_sync_buffer) {
+    int64_t* next_atomic_buffer, int num_pes, int pe, int* grid_sync_buffer, int iter) {
   const int wg_id = static_cast<int>(blockIdx.x);
   const int thread_id = static_cast<int>(threadIdx.x);
   const int wave_id = static_cast<int>(thread_id / warpSize);
@@ -242,10 +242,10 @@ __global__ void kernel_2(int64_t* atomic_buffer, int num_experts,
         int src_responsible_expert_id = pe * num_local_experts + src_expert_local_idx;
         int src_wg_id = src_responsible_expert_id / kNumWaveGroups;
         int src_wave_group_id = src_responsible_expert_id % kNumWaveGroups;
-        printf("[%s] Timeout waiting for destination ptr to be updated by: "
+        printf("%02d [%s] Timeout iteration %d waiting for destination ptr to be updated by: "
                "PE: %d, WG ID: %d, Wave Group ID: %d, Responsible Expert ID: %d, "
-               "Expected Value: %d, Actual Value: %ld\n",
-               __func__, src_pe, wg_id, wave_group_id, responsible_expert_id,
+               "Expected Value: %d, Actual Value: %ld\n", pe, __func__, iter,
+               src_pe, wg_id, wave_group_id, responsible_expert_id,
                expected_value, *dst_ptr);
         // reset the start time
         start_time = wall_clock64();
@@ -300,7 +300,7 @@ int main (int argc, char **argv) {
   CHECK_HIP(hipStreamCreate(&stream));
 
   std::cout << "my_pe: " << my_pe
-            << ", npes: " << n_pes 
+            << ", npes: " << n_pes
             << ", num_experts: " << num_experts
             << ", num_iterations: " << num_iterations
             << ", get_launcher_local_rank(): " << get_launcher_local_rank()
@@ -341,7 +341,7 @@ int main (int argc, char **argv) {
 
     // print debug info
     // std::cout << "iter: " << iter
-    //           << ", grid: {" << grid.x << ", " << grid.y << ", " << grid.z << "}" 
+    //           << ", grid: {" << grid.x << ", " << grid.y << ", " << grid.z << "}"
     //           << ", block: {" << block.x << ", " << block.y << ", " << block.z << "}"
     //           << ", kNumWavesPerGroup: " << kNumWavesPerGroup
     //           << ", kNumWaveGroups: " << kNumWaveGroups
@@ -355,7 +355,7 @@ int main (int argc, char **argv) {
     kernel_1<kNumWavesPerGroup, kNumWaveGroups>
       <<<grid, block, 0, stream>>>(amo_buffers.atomic_buffers[amo_buffers.buffer_idx],
         amo_buffers.num_elems, amo_buffers.atomic_buffers[amo_buffers.buffer_idx ^= 1],
-        n_pes, my_pe, grid_sync_buffer);
+        n_pes, my_pe, grid_sync_buffer, iter);
 
     // Synchronize the stream
     CHECK_HIP(hipStreamSynchronize(stream));
@@ -365,7 +365,7 @@ int main (int argc, char **argv) {
     kernel_2<kNumWavesPerGroup, kNumWaveGroups>
       <<<grid, block, 0, stream>>>(amo_buffers.atomic_buffers[amo_buffers.buffer_idx],
         amo_buffers.num_elems, amo_buffers.atomic_buffers[amo_buffers.buffer_idx ^= 1],
-        n_pes, my_pe, grid_sync_buffer);
+        n_pes, my_pe, grid_sync_buffer, iter);
 
     // Synchronize the stream
     CHECK_HIP(hipStreamSynchronize(stream));
@@ -381,4 +381,4 @@ int main (int argc, char **argv) {
   rocshmem_finalize();
   return 0;
 }
- 
+
