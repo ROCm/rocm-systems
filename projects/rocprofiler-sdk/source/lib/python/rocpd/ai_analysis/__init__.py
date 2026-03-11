@@ -34,10 +34,12 @@ Usage:
 from .api import (
     analyze_database,
     analyze_database_to_json,
+    analyze_source,
     get_kernel_analysis,
     get_recommendations,
     validate_database,
     AnalysisResult,
+    SourceAnalysisResult,
     OutputFormat,
 )
 
@@ -50,17 +52,23 @@ from .exceptions import (
     LLMAuthenticationError,
     LLMRateLimitError,
     ReferenceGuideNotFoundError,
+    SourceDirectoryNotFoundError,
+    SourceAnalysisError,
 )
+
+from .interactive import InteractiveSession, SessionStore, SessionData
 
 __all__ = [
     # Main API functions
     "analyze_database",
     "analyze_database_to_json",
+    "analyze_source",
     "get_kernel_analysis",
     "get_recommendations",
     "validate_database",
     # Data classes
     "AnalysisResult",
+    "SourceAnalysisResult",
     "OutputFormat",
     # Exceptions
     "AnalysisError",
@@ -71,6 +79,13 @@ __all__ = [
     "LLMAuthenticationError",
     "LLMRateLimitError",
     "ReferenceGuideNotFoundError",
+    "SourceDirectoryNotFoundError",
+    "SourceAnalysisError",
+
+    # Interactive session
+    "InteractiveSession",
+    "SessionStore",
+    "SessionData",
 ]
 
 __version__ = "0.1.0"
