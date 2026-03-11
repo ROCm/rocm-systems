@@ -91,7 +91,7 @@
 #define NCCL_GROUP_CUDA_STREAM 1 // CGMD: CUDA 9.0,9.1 Need to use an internal CUDA stream
 #endif
 
-#define TEMP_BUFF_SIZE (4 * 1024 * 1024) // Define Size for Temporary Buffer for Direct RS
+#define TEMP_BUFF_SIZE (16 * 1024 * 1024) // Define Size for Temporary Buffer for Direct RS
 
 using namespace rccl;
 
