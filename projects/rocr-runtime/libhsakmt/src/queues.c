@@ -534,7 +534,8 @@ static int handle_concrete_asic(struct queue *q,
 		/* Allocate unified memory for context save restore
 		 * area on dGPU.
 		 */
-		if (!q->use_ats && hsakmt_is_svm_api_supported) {
+		// WA: disable svm api for queue temporarily
+		if (!q->use_ats && 0) {
 			uint32_t size = PAGE_ALIGN_UP(q->total_mem_alloc_size);
 
 			pr_info("Allocating GTT for CWSR\n");

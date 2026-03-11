@@ -49,6 +49,9 @@
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #include "hsakmt/linux/udmabuf.h"
+#include "drm/amdgpu_drm.h"
+
+#define USE_DRM_SVM 1
 
 #ifndef MPOL_F_STATIC_NODES
 /* Bug in numaif.h, this should be defined in there. Definition copied
@@ -938,6 +941,32 @@ static int32_t gpu_mem_find_by_gpu_id(uint32_t gpu_id)
 	return -1;
 }
 
+int get_drm_render_fd_by_gpu_id(HSAuint32 gpu_id)
+{
+	uint32_t i;
+	int32_t gpu_mem_id;
+
+	if (!g_first_gpu_mem)
+		return -1;
+
+	if (gpu_id) {
+		gpu_mem_id = gpu_mem_find_by_gpu_id(gpu_id);
+		if (gpu_mem_id < 0)
+			return -1;
+
+		return gpu_mem[gpu_mem_id].drm_render_fd;
+	}
+
+	for (i = 0; i < gpu_mem_count; i++) {
+		if (gpu_mem[i].gpu_id == NON_VALID_GPU_ID)
+			continue;
+		if (gpu_mem[i].drm_render_fd >= 0)
+			return gpu_mem[i].drm_render_fd;
+	}
+
+	return -1;
+}
+
 static int32_t gpu_mem_find_by_node_id(uint32_t node_id)
 {
 	uint32_t i;
@@ -1060,6 +1089,7 @@ static HsaMemFlags fmm_translate_ioc_to_hsa_flags(uint32_t ioc_flags)
 	return mflags;
 }
 
+__attribute__((unused))
 static HSAKMT_STATUS fmm_register_mem_svm_api(void *address,
 					      uint64_t size, HsaMemFlags flags)
 {
@@ -1095,6 +1125,69 @@ static HSAKMT_STATUS fmm_register_mem_svm_api(void *address,
 	return HSAKMT_STATUS_SUCCESS;
 }
 
+static HSAKMT_STATUS fmm_register_mem_svm_api_drm(void *address,
+				      uint64_t size, HsaMemFlags flags)
+{
+	HSAuint32 page_offset = (HSAuint64)address & (PAGE_SIZE-1);
+	HSAuint64 aligned_addr = (HSAuint64)address - page_offset;
+	HSAuint64 aligned_size = PAGE_ALIGN_UP(page_offset + size);
+	uint32_t i;
+	int drm_fd;
+	int ret;
+
+	if (!g_first_gpu_mem)
+		return HSAKMT_STATUS_ERROR;
+	
+	pr_debug("Registering to SVM [%p-%p]-0x%lx for all GPU nodes using AMDGPU DRM\n", 
+		 (void*)aligned_addr, (void*)(aligned_addr + aligned_size), aligned_size);
+	
+	for (i = 0; i < gpu_mem_count; i++) {
+		if (gpu_mem[i].gpu_id == NON_VALID_GPU_ID)
+			continue;
+		
+		drm_fd = gpu_mem[i].drm_render_fd;
+		
+		if (drm_fd < 0) {
+			pr_debug("GPU Node %d: Invalid drm_render_fd=%d, skipping\n", i, drm_fd);
+			continue;
+		}
+		
+		pr_debug("GPU Node %d: gpu_id=0x%x, node_id=%d, drm_render_fd=%d, drm_render_minor=%d\n",
+			i, gpu_mem[i].gpu_id, gpu_mem[i].node_id, 
+			drm_fd, gpu_mem[i].drm_render_minor);
+		
+		struct drm_amdgpu_svm_attribute attrs[2];
+		struct drm_amdgpu_gem_svm svm_args;
+		
+		attrs[0].type = flags.ui32.CoarseGrain ?
+				AMDGPU_SVM_ATTR_CLR_FLAGS : AMDGPU_SVM_ATTR_SET_FLAGS;
+		attrs[0].value = AMDGPU_SVM_FLAG_COHERENT;
+		
+		attrs[1].type = flags.ui32.ExtendedCoherent ?
+				AMDGPU_SVM_ATTR_SET_FLAGS : AMDGPU_SVM_ATTR_CLR_FLAGS;
+		attrs[1].value = AMDGPU_SVM_FLAG_EXT_COHERENT;
+		
+		memset(&svm_args, 0, sizeof(svm_args));
+		svm_args.start_addr = aligned_addr;
+		svm_args.size = aligned_size;
+		svm_args.operation = AMDGPU_SVM_OP_SET_ATTR;
+		svm_args.nattr = 2;
+		svm_args.attrs_ptr = (__u64)(uintptr_t)attrs;
+		
+		ret = ioctl(drm_fd, DRM_IOCTL_AMDGPU_GEM_SVM, &svm_args);
+		if (ret < 0) {
+			pr_debug("GPU Node %d: DRM_IOCTL_AMDGPU_GEM_SVM failed: %s (errno=%d)\n",
+			       i, strerror(errno), errno);
+			continue;
+		} else {
+			pr_debug("GPU Node %d: Successfully set SVM attributes via DRM ioctl\n", i);
+		}
+	}
+
+	return HSAKMT_STATUS_SUCCESS;
+}
+
+__attribute__((unused))
 static HSAKMT_STATUS fmm_map_mem_svm_api(void *address,
 					      uint64_t size,
 					      uint32_t *nodes_to_map,
@@ -1125,6 +1218,91 @@ static HSAKMT_STATUS fmm_map_mem_svm_api(void *address,
 		return HSAKMT_STATUS_ERROR;
 	}
 
+	return HSAKMT_STATUS_SUCCESS;
+}
+
+static HSAKMT_STATUS fmm_map_mem_svm_api_drm(void *address,
+					      uint64_t size,
+					      uint32_t *nodes_to_map,
+					      uint32_t nodes_array_size)
+{
+	uint32_t i;
+	int drm_fd;
+	int ret;
+	int success_count = 0;
+	int32_t gpu_mem_id;
+
+	if (!g_first_gpu_mem)
+		return HSAKMT_STATUS_ERROR;
+
+	if (!nodes_to_map || nodes_array_size == 0)
+		return HSAKMT_STATUS_INVALID_PARAMETER;
+
+	pr_debug("Mapping SVM memory [%p-%p]-0x%lx to %d nodes using AMDGPU DRM\n",
+		 address, (void *)((uintptr_t)address + size), size, nodes_array_size);
+
+	for (i = 0; i < nodes_array_size; i++) {
+		uint32_t gpu_id = nodes_to_map[i];
+		uint32_t node_id;
+
+		if (gpu_id == NON_VALID_GPU_ID) {
+			pr_warn("GPU %d: Invalid GPU ID, skipping\n", gpu_id);
+			continue;
+		}
+
+		gpu_mem_id = gpu_mem_find_by_gpu_id(gpu_id);
+		if (gpu_mem_id < 0) {
+			pr_warn("GPU %d: Not found in gpu_mem array, skipping\n", gpu_id);
+			continue;
+		}
+
+		node_id = gpu_mem[gpu_mem_id].node_id;
+
+		pr_debug("Node ID for GPU %d is %d\n", gpu_id, node_id);
+
+		drm_fd = gpu_mem[gpu_mem_id].drm_render_fd;
+
+		if (drm_fd < 0) {
+			pr_warn("GPU %d (gpu_mem_id=%d): Invalid drm_render_fd=%d, skipping\n", 
+				gpu_id, gpu_mem_id, drm_fd);
+			continue;
+		}
+
+		struct drm_amdgpu_svm_attribute attr;
+		attr.type = AMDGPU_SVM_ATTR_ACCESS_IN_PLACE;
+		attr.value = gpu_mem[gpu_mem_id].gpu_id;  // WA: Use gpu_id for the attribute value
+
+		struct drm_amdgpu_gem_svm svm_args;
+		memset(&svm_args, 0, sizeof(svm_args));
+		svm_args.start_addr = (uint64_t)address;
+		svm_args.size = size;
+		svm_args.operation = AMDGPU_SVM_OP_SET_ATTR;
+		svm_args.nattr = 1;
+		svm_args.attrs_ptr = (__u64)(uintptr_t)&attr;
+
+		pr_debug("Mapping to GPU %d (gpu_id=0x%x, gpu_mem_id=%d, drm_fd=%d, drm_minor=%d)\n",
+			gpu_id, gpu_mem[gpu_mem_id].gpu_id, gpu_mem_id,
+			drm_fd, gpu_mem[gpu_mem_id].drm_render_minor);
+
+		ret = ioctl(drm_fd, DRM_IOCTL_AMDGPU_GEM_SVM, &svm_args);
+		if (ret < 0) {
+			pr_debug("GPU %d: DRM_IOCTL_AMDGPU_GEM_SVM failed: %s (errno=%d)\n",
+			       gpu_id, strerror(errno), errno);
+			continue;
+		} else {
+			pr_debug("GPU %d: Successfully mapped SVM memory via DRM ioctl on drm_fd=%d\n", 
+				gpu_id, drm_fd);
+			// success_count++;
+		}
+	}
+
+	// if (success_count == 0) {
+		pr_debug("Failed to map SVM memory on any of the %d requested nodes\n", nodes_array_size);
+	// 	return HSAKMT_STATUS_ERROR;
+	// }
+
+	pr_debug("Successfully mapped SVM memory on %d out of %d requested nodes\n", 
+		success_count, nodes_array_size);
 	return HSAKMT_STATUS_SUCCESS;
 }
 
@@ -3411,10 +3589,17 @@ static HSAKMT_STATUS _fmm_map_to_gpu_userptr(void *addr, uint64_t size,
 		}
 		pr_debug("%s Mapping Address %p size aligned: %ld offset: %x\n",
 			__func__, svm_addr, PAGE_ALIGN_UP(page_offset + size), page_offset);
+#ifdef USE_DRM_SVM
+		ret = fmm_map_mem_svm_api_drm(svm_addr,
+						  PAGE_ALIGN_UP(page_offset + size),
+						  nodes_to_map,
+						  nodes_array_size / sizeof(uint32_t));
+#else
 		ret = fmm_map_mem_svm_api(svm_addr,
 						  PAGE_ALIGN_UP(page_offset + size),
 						  nodes_to_map,
 						  nodes_array_size / sizeof(uint32_t));
+#endif
 
 	} else if (object) {
 		svm_addr = object->start;
@@ -3831,7 +4016,11 @@ HSAKMT_STATUS hsakmt_fmm_register_memory(void *address, uint64_t size_in_bytes,
 
 		/* Register a new user ptr */
 		if (hsakmt_is_svm_api_supported) {
+#ifdef USE_DRM_SVM
+			ret = fmm_register_mem_svm_api_drm(address, size_in_bytes, flags);
+#else
 			ret = fmm_register_mem_svm_api(address, size_in_bytes, flags);
+#endif
 			if (ret == HSAKMT_STATUS_SUCCESS)
 				return ret;
 			pr_debug("SVM failed, falling back to old registration\n");
