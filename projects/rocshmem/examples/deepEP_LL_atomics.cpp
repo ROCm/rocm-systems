@@ -106,7 +106,8 @@ __forceinline__ __device__ void grid_barrier(int* global_counter,
 */
 template <int kNumWavesPerGroup, int kNumWaveGroups>
 __global__ void kernel_1(int64_t* atomic_buffer, int num_experts,
-    int64_t* next_atomic_buffer, int num_pes, int pe, int* grid_sync_buffer, int iter) {
+    int64_t* next_atomic_buffer, int num_pes, int pe, int* grid_sync_buffer,
+    int iter) {
   const int wg_id = static_cast<int>(blockIdx.x);
   const int thread_id = static_cast<int>(threadIdx.x);
   const int wave_id = static_cast<int>(thread_id / warpSize);
@@ -158,7 +159,7 @@ __global__ void kernel_1(int64_t* atomic_buffer, int num_experts,
                          src_expert_local_idx;
     expected_value = -expected_value - 1;
 
-    // Wait until the source ptr is updated
+    // Wait until the destination ptr is updated
     if (sub_wave_id == 0 && lane_id == 0) {
       long long int start_time = wall_clock64();
       while (__hip_atomic_load(src_ptr, __ATOMIC_ACQUIRE,
@@ -168,10 +169,10 @@ __global__ void kernel_1(int64_t* atomic_buffer, int num_experts,
           int src_responsible_expert_id = pe * num_local_experts + src_expert_local_idx;
           int src_wg_id = src_responsible_expert_id / kNumWaveGroups;
           int src_wave_group_id = src_responsible_expert_id % kNumWaveGroups;
-          printf("%02d [%s] Timeout iteration %d waiting for source ptr to be updated by: "
-                 "PE: %d, WG ID: %d, Wave Group ID: %d, Responsible Expert ID: %d, "
-                 "Expected Value: %d, Actual Value: %ld\n", pe, __func__, iter,
-                 src_pe, src_wg_id, src_wave_group_id,
+          printf("[%s] PE: %02d, Iter: %d, Timeout waiting for destination ptr to be updated by: "
+                 "src {PE: %d, WG ID: %d, Wave Group ID: %d, Responsible Expert ID: %d}, "
+                 "Expected Value: %d, Actual Value: %ld\n",
+                 __func__, pe, iter, src_pe, src_wg_id, src_wave_group_id,
                  src_responsible_expert_id, expected_value, *src_ptr);
           // reset the start time
           start_time = wall_clock64();
@@ -185,7 +186,8 @@ __global__ void kernel_1(int64_t* atomic_buffer, int num_experts,
 
 template <int kNumWavesPerGroup, int kNumWaveGroups>
 __global__ void kernel_2(int64_t* atomic_buffer, int num_experts,
-    int64_t* next_atomic_buffer, int num_pes, int pe, int* grid_sync_buffer, int iter) {
+    int64_t* next_atomic_buffer, int num_pes, int pe, int* grid_sync_buffer,
+    int iter) {
   const int wg_id = static_cast<int>(blockIdx.x);
   const int thread_id = static_cast<int>(threadIdx.x);
   const int wave_id = static_cast<int>(thread_id / warpSize);
@@ -243,10 +245,10 @@ __global__ void kernel_2(int64_t* atomic_buffer, int num_experts,
         int src_responsible_expert_id = pe * num_local_experts + src_expert_local_idx;
         int src_wg_id = src_responsible_expert_id / kNumWaveGroups;
         int src_wave_group_id = src_responsible_expert_id % kNumWaveGroups;
-        printf("%02d [%s] Timeout iteration %d waiting for destination ptr to be updated by: "
-               "PE: %d, WG ID: %d, Wave Group ID: %d, Responsible Expert ID: %d, "
-               "Expected Value: %d, Actual Value: %ld\n", pe, __func__, iter,
-               src_pe, wg_id, wave_group_id, responsible_expert_id,
+        printf("[%s] PE: %02d, Iter: %d, Timeout waiting for destination ptr to be updated by: "
+               "src {PE: %d, WG ID: %d, Wave Group ID: %d, Responsible Expert ID: %d}, "
+               "Expected Value: %d, Actual Value: %ld\n",
+               __func__, pe, iter, src_pe, wg_id, wave_group_id, responsible_expert_id,
                expected_value, *dst_ptr);
         // reset the start time
         start_time = wall_clock64();
@@ -300,6 +302,11 @@ int main (int argc, char **argv) {
   hipStream_t stream;
   CHECK_HIP(hipStreamCreate(&stream));
 
+  // Get the device properties
+  hipDeviceProp_t device_prop;
+  CHECK_HIP(hipGetDeviceProperties(&device_prop, device_id));
+  // Wavefront size
+  const int wf_size = device_prop.warpSize;
   std::cout << "my_pe: " << my_pe
             << ", npes: " << n_pes
             << ", num_experts: " << num_experts
@@ -330,12 +337,10 @@ int main (int argc, char **argv) {
   for (int iter = 0; iter < num_iterations; iter++) {
     constexpr int kNumWavesPerGroup = 4;
     constexpr int kNumWaveGroups = 4;
-    // TODO: get from device properties
-    constexpr int kWaveSize = 64;
 
     const auto num_waves   = kNumWaveGroups * kNumWavesPerGroup;
     const auto num_wgs     = cell_div(num_experts, kNumWaveGroups);
-    const auto num_threads = num_waves * kWaveSize;
+    const auto num_threads = num_waves * wf_size;
 
     dim3 grid(num_wgs);
     dim3 block(num_threads);
