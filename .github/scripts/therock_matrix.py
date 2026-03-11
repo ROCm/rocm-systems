@@ -48,11 +48,11 @@ project_map = {
     },
     "debug_tools": {
         "cmake_options": "-DTHEROCK_ENABLE_DEBUG_TOOLS=ON -DTHEROCK_ENABLE_ALL=OFF",
-        "projects_to_test": "rocr-debug-agent",  # rocgdb testing requires custom container support in rocm-systems, to be enabled in a future PR
+        "projects_to_test": "rocr-debug-agent, rocgdb",
     },
     "all": {
         "cmake_options": "-DTHEROCK_ENABLE_ALL=ON",
-        "projects_to_test": "hip-tests, rocrtst, aqlprofile, rocprofiler-compute, rocprofiler_systems, rocr-debug-agent",
+        "projects_to_test": "hip-tests, rocrtst, aqlprofile, rocprofiler-compute, rocprofiler_systems, rocr-debug-agent, rocgdb",
     },
 }
 
@@ -62,5 +62,5 @@ trigger_windows_ci_for_subtrees_paths = [
     "projects/hip-tests/*",
     "projects/rocr-runtime/*",
     "shared/amdgpu-windows-interop/**",
-    ".github/*/therock*"
+    ".github/*/therock*",
 ]
