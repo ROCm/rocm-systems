@@ -102,7 +102,7 @@ void GetCodeObjectUsingRTC(size_t codeSize, std::vector<char>& code) {
  *    - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Stress_hipModuleLoadUnload") {
+TEST_CASE(Stress_hipModuleLoadUnload) {
   size_t code_size = 0;
   std::vector<char> code;
   GetCodeObjectUsingRTC(code_size, code);

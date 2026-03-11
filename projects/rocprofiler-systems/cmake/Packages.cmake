@@ -1087,10 +1087,18 @@ if(ROCPROFSYS_USE_PYTHON)
     include(PyBind11Tools)
 
     rocprofiler_systems_watch_for_change(ROCPROFSYS_PYTHON_ROOT_DIRS _PYTHON_DIRS_CHANGED)
+    rocprofiler_systems_watch_for_change(ROCPROFSYS_PYTHON_VERSIONS _PYTHON_VERS_CHANGED)
 
     if(_PYTHON_DIRS_CHANGED)
         unset(ROCPROFSYS_PYTHON_VERSION CACHE)
-        unset(ROCPROFSYS_PYTHON_VERSIONS CACHE)
+        # Only discard cached versions if the user did not explicitly
+        # provide/change them on this configure run. This prevents a fresh
+        # build (where watch_for_change treats all new values as "changed")
+        # from discarding user-supplied versions while still allowing
+        # re-discovery when only root dirs change between reconfigures.
+        if(NOT _PYTHON_VERS_CHANGED OR NOT ROCPROFSYS_PYTHON_VERSIONS)
+            unset(ROCPROFSYS_PYTHON_VERSIONS CACHE)
+        endif()
         unset(ROCPROFSYS_INSTALL_PYTHONDIR CACHE)
     else()
         foreach(_VAR PREFIX ENVS)
@@ -1123,7 +1131,9 @@ if(ROCPROFSYS_USE_PYTHON)
         set(ROCPROFSYS_PYTHON_VERSIONS "${ROCPROFSYS_PYTHON_VERSION}")
 
         if(NOT ROCPROFSYS_PYTHON_ROOT_DIRS)
-            rocprofiler_systems_find_python(_PY VERSION ${ROCPROFSYS_PYTHON_VERSION})
+            rocprofiler_systems_find_python(_PY VERSION ${ROCPROFSYS_PYTHON_VERSION}
+                COMPONENTS Interpreter
+            )
             set(ROCPROFSYS_PYTHON_ROOT_DIRS "${_PY_ROOT_DIR}" CACHE INTERNAL "" FORCE)
         endif()
 
@@ -1137,7 +1147,9 @@ if(ROCPROFSYS_USE_PYTHON)
         set(_PY_VERSIONS)
 
         foreach(_DIR ${ROCPROFSYS_PYTHON_ROOT_DIRS})
-            rocprofiler_systems_find_python(_PY ROOT_DIR ${_DIR})
+            rocprofiler_systems_find_python(_PY ROOT_DIR ${_DIR}
+                COMPONENTS Interpreter
+            )
 
             if(NOT _PY_FOUND)
                 continue()
@@ -1154,7 +1166,7 @@ if(ROCPROFSYS_USE_PYTHON)
         AND NOT ROCPROFSYS_PYTHON_VERSION
         AND NOT ROCPROFSYS_PYTHON_ROOT_DIRS
     )
-        rocprofiler_systems_find_python(_PY REQUIRED)
+        rocprofiler_systems_find_python(_PY REQUIRED COMPONENTS Interpreter)
         set(ROCPROFSYS_PYTHON_ROOT_DIRS "${_PY_ROOT_DIR}" CACHE INTERNAL "" FORCE)
         set(ROCPROFSYS_PYTHON_VERSIONS "${_PY_VERSION}" CACHE INTERNAL "" FORCE)
     endif()

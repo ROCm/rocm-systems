@@ -184,8 +184,8 @@ ncclResult_t ncclAlltoAll_impl(const void* sendbuff, void* recvbuff, size_t coun
   } else {
       #ifdef ENABLE_ROCSHMEM
       size_t msgSize = count * ncclTypeSize(datatype) * comm->nRanks;
-      if (rcclUseAllToAllGda(comm) && msgSize <= comm->rocshmemThreshold) {	
-        struct ncclInfo info = { ncclFuncAllToAllGda, "AllToAllGda",
+      if (rcclUseAlltoAllGda(comm) && msgSize <= comm->rocshmemThreshold) {	
+        struct ncclInfo info = { ncclFuncAlltoAllGda, "AlltoAllGda",
               sendbuff, recvbuff, count, datatype, ncclSum, 0, comm, stream,
               ALLTOALL_PIVOT_CHUNKSTEPS, ALLTOALL_PIVOT_SLICESTEPS, nullptr };
             
@@ -220,8 +220,64 @@ ncclResult_t ncclAlltoAllv_impl(const void *sendbuff, const size_t sendcounts[],
       0, datatype, 0, 0, ncclSum, mscclFuncAllToAllv, comm, stream);
   }
 
-  int nRanks;
+  int nRanks, rank;
+  ncclResult_t ret = ncclSuccess;
   NCCLCHECK(ncclCommCount(comm, &nRanks));
+  NCCLCHECK(ncclCommUserRank(comm, &rank));
+
+  std::vector<size_t> sdispls1(nRanks);
+  std::vector<size_t> rdispls1(nRanks);
+  std::vector<size_t> sendcounts1(nRanks);
+  std::vector<size_t> recvcounts1(nRanks);
+
+  std::vector<size_t> sizes(4*nRanks);	//4 for sdispl, rdispl, scount, rcount
+#ifdef ENABLE_ROCSHMEM
+    for (int i = 0; i < nRanks; i++) {
+       sdispls1[i] = sdispls[i] * ncclTypeSize(datatype);
+       rdispls1[i] = rdispls[i] * ncclTypeSize(datatype);
+       sendcounts1[i] = sendcounts[i] * ncclTypeSize(datatype);
+       recvcounts1[i] = recvcounts[i] * ncclTypeSize(datatype);
+    }
+
+    size_t count = sdispls1[nRanks - 1] + sendcounts1[nRanks - 1];
+
+    if (comm->enableRocshmem && comm->nNodes > 1 && (comm->nRanks/comm->nNodes == 8)) {
+        INFO(NCCL_INIT, "GDA alltoallv is supported for up to 128MB message size; Use ROCSHMEM_HEAP_SIZE=3GB for GDA support till 512MB");  
+
+        for (int i = 0; i < nRanks; i++) {
+            sizes[i] = sendcounts1[i];
+            sizes[nRanks + i] = sdispls1[i];
+            sizes[2*nRanks + i] = recvcounts1[i];
+            sizes[3*nRanks + i] = rdispls1[i];
+        }
+        count = count / ncclTypeSize(datatype);
+
+	//use CU for copy-in/copy-out for small <= 128KB sizes
+	//TODO: the threshold could be different for different number of nodes
+	if ((count * ncclTypeSize(datatype)) > 131072) {
+	    void *dest = (char*)comm->sourceRshmem + comm->symId * comm->bufThreshold;
+            CUDACHECK(hipMemcpyAsync(dest, sendbuff, count * ncclTypeSize(datatype),
+               hipMemcpyDeviceToDevice, stream));
+        }
+        struct ncclInfo info = { ncclFuncAlltoAllvGda, "AlltoAllvGda",
+        sendbuff, recvbuff, count, datatype, ncclSum, 0, comm, stream,
+        ALLTOALL_PIVOT_CHUNKSTEPS, ALLTOALL_PIVOT_SLICESTEPS, nullptr };
+#ifdef ENABLE_ROCSHMEM
+        info.sizes = sizes.data();
+#endif
+
+        ret = ncclEnqueueCheck(&info);
+
+        if (ret == ncclSuccess && ((count * ncclTypeSize(datatype)) > 131072)) {
+	    void *src = (char*)comm->destRshmem + comm->symId * comm->bufThreshold;
+            CUDACHECK(hipMemcpyAsync(recvbuff, src, count * ncclTypeSize(datatype),
+                    hipMemcpyDeviceToDevice, stream));
+            comm->symId = (comm->symId + 1) % comm->numSymBuf;
+        }
+        return ret;
+    }
+#endif
+
   if (!mscclIsCaller()) Recorder::instance().skip(true);
   NCCLCHECK(ncclGroupStart());
   for (int r=0; r<nRanks; r++) {

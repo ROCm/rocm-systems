@@ -68,6 +68,7 @@ WDDMDevice::WDDMDevice(D3DKMT_HANDLE adapter, LUID adapter_luid, uint32_t node_i
   memset(&device_info_, 0, sizeof(device_info_));
 
   NTSTATUS ret = ParseDeviceInfo();
+  device_info_.hwsInfo.hwsMask.aql_queue &= !dxg_runtime->use_pm4_;
 
   if (ret == STATUS_OBJECT_NAME_NOT_FOUND || ret == STATUS_REVISION_MISMATCH) {
     // Skip adapter
@@ -737,11 +738,12 @@ bool WDDMDevice::CreateHwQueue(WDDMQueue *queue) {
   assert(priv_data);
   memset(priv_data, 0, priv_size);
   bool FwManagedGfxState = SupportStateShadowingByCpFw();
+  uint32_t* doorbell_loc = nullptr;
   auto queue_memory = static_cast<ComputeQueue*>(queue)->GetAmdQueueMemory();
   auto resource = queue_memory->KmtHandle();
   Wkmi::FillinHwQueuePrivData(priv_data, FwManagedGfxState, queue->prio, IsAqlSupported(),
       queue->cmdbuf_addr, queue->cmdbuf_size, reinterpret_cast<uintptr_t>(queue->ring_wptr),
-      reinterpret_cast<uintptr_t>(queue->ring_rptr), resource);
+      reinterpret_cast<uintptr_t>(queue->ring_rptr), resource, &doorbell_loc);
 
   D3DKMT_CREATEHWQUEUE createHwQueue = {0};
   createHwQueue.hHwContext = queue->context;
@@ -754,6 +756,9 @@ bool WDDMDevice::CreateHwQueue(WDDMQueue *queue) {
     pr_err("fail %x\n", ret);
     free(priv_data);
     return false;
+  }
+  if (doorbell_loc != nullptr) {
+    queue->aql_doorbell_offset_ = *doorbell_loc;
   }
 
   free(priv_data);
@@ -808,6 +813,27 @@ bool WDDMDevice::SubmitToHwQueue(WDDMQueue *queue, uint64_t command_addr,
   free(priv_data);
 
   return true;
+}
+
+// ================================================================================================
+bool WDDMDevice::SetCuMask(uint32_t doorbell, uint32_t cu_mask_count,
+                           const uint32_t* queue_cu_mask) {
+#if defined(WIN32)
+  pr_debug("set CU mask doorbell: %d -> %d\n", doorbell, cu_mask_count);
+  // Fill private KMD data
+  int priv_size = Wkmi::GetCuMaskPrivDataSize();
+  void* priv_data = alloca(priv_size);
+  memset(priv_data, 0, priv_size);
+  Wkmi::FillinCuMaskPrivData(priv_data, doorbell, cu_mask_count, queue_cu_mask);
+  // Update CU mask for the queue
+  if (Escape(priv_data, priv_size, false)) {
+    return true;
+  } else {
+    pr_debug("CU mask escape/update failed for doorbell %u\n", doorbell);
+    return false;
+  }
+#endif
+  return false;
 }
 
 // ================================================================================================

@@ -65,7 +65,9 @@ if(NOT DEFINED PyBind11Python_PYTHON)
     endif()
 endif()
 
-if(NOT PyBind11Python_COMPONENTS)
+if(PyBind11Python_FIND_COMPONENTS)
+    set(PyBind11Python_COMPONENTS ${PyBind11Python_FIND_COMPONENTS})
+elseif(NOT PyBind11Python_COMPONENTS)
     set(PyBind11Python_COMPONENTS Interpreter Development)
 endif()
 

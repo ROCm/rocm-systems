@@ -1,0 +1,20 @@
+---
+vector_types:
+  Unit_make_vector_SanityCheck_Basic_Host: *level_2
+  Unit_make_vector_SanityCheck_Basic_Device: *level_2
+  Unit_VectorAndVectorOperations_SanityCheck_Basic_Host: *level_2
+  Unit_VectorAndValueTypeOperations_SanityCheck_Basic_Host: *level_2
+  Unit_VectorAndVectorOperations_SanityCheck_Basic_Device: *level_2
+  Unit_VectorAndValueTypeOperations_SanityCheck_Basic_Device: *level_2
+  Unit_VectorStructuredBindings_SanityCheck_Basic_host: *level_2
+  Unit_VectorConstexpr_SanityCheck_Basic_host_device: *level_2
+  Unit_Vector_alignment_check: *level_2
+  Unit_Vector_size_check: *level_2
+  Unit_dim3_Empty_Positive_Device: *level_2
+  Unit_dim3_X_Positive_Device: *level_2
+  Unit_dim3_XY_Positive_Device: *level_2
+  Unit_dim3_XYZ_Positive_Device: *level_2
+  Unit_dim3_Empty_Positive_Host: *level_2
+  Unit_dim3_X_Positive_Host: *level_2
+  Unit_dim3_XY_Positive_Host: *level_2
+  Unit_dim3_XYZ_Positive_Host: *level_2

@@ -1,0 +1,36 @@
+---
+syncthreads:
+  Unit___syncthreads_Positive_Basic:
+    <<: *level_2
+    # Below tests are failing PSDB
+    disabled: [amd_windows]
+  Unit___syncthreads_count_Positive_Basic:
+    <<: *level_2
+    # Below tests are failing PSDB
+    disabled: [amd_windows]
+  Unit___syncthreads_count_Positive_Predicate_Zero: *level_2
+  Unit___syncthreads_count_Positive_Predicate_One: *level_2
+  Unit___syncthreads_count_Positive_Predicate_OddEven: *level_2
+  Unit___syncthreads_count_Positive_Predicate_Negative: *level_2
+  Unit___syncthreads_count_Positive_Predicate_Id: *level_2
+  Unit___syncthreads_count_Negative_Parameters_RTC: *level_2
+  Unit___syncthreads_and_Positive_Basic:
+    <<: *level_2
+    # Below tests are failing PSDB
+    disabled: [amd_windows]
+  Unit___syncthreads_and_Positive_Predicate_Zero: *level_2
+  Unit___syncthreads_and_Positive_Predicate_One: *level_2
+  Unit___syncthreads_and_Positive_Predicate_OddEven: *level_2
+  Unit___syncthreads_and_Positive_Predicate_Negative: *level_2
+  Unit___syncthreads_and_Positive_Predicate_Id: *level_2
+  Unit___syncthreads_and_Negative_Parameters_RTC: *level_2
+  Unit___syncthreads_or_Positive_Basic:
+    <<: *level_2
+    # Below tests are failing PSDB
+    disabled: [amd_windows]
+  Unit___syncthreads_or_Positive_Predicate_Zero: *level_2
+  Unit___syncthreads_or_Positive_Predicate_One: *level_2
+  Unit___syncthreads_or_Positive_Predicate_OddEven: *level_2
+  Unit___syncthreads_or_Positive_Predicate_Negative: *level_2
+  Unit___syncthreads_or_Positive_Predicate_Id: *level_2
+  Unit___syncthreads_or_Negative_Parameters_RTC: *level_2

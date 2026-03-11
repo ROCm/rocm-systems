@@ -1,0 +1,5 @@
+---
+p2p:
+  Unit_hipDeviceGetP2PAttribute_Basic: *level_2
+  Unit_hipDeviceGetP2PAttribute_Negative: *level_2
+  Unit_hipP2pLinkTypeAndHopFunc: *level_2

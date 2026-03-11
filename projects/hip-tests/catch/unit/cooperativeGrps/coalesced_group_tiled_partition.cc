@@ -125,7 +125,7 @@ __global__ void coalesced_group_tiled_partition_thread_rank_getter(uint64_t* act
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Coalesced_Group_Tiled_Partition_Getters_Positive_Basic") {
+TEST_CASE(Unit_Coalesced_Group_Tiled_Partition_Getters_Positive_Basic) {
   const auto tile_size = GenerateTileSizes();
   INFO("Tile size: " << tile_size);
   auto blocks = GenerateBlockDimensions();
@@ -330,7 +330,7 @@ template <typename T> static void CoalescedGroupTiledPartitonShflUpTestImpl() {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_Coalesced_Group_Tiled_Partition_Shfl_Up_Positive_Basic", "", int,
+TEMPLATE_TEST_CASE(Unit_Coalesced_Group_Tiled_Partition_Shfl_Up_Positive_Basic, int,
                    unsigned int, long, unsigned long, long long, unsigned long long, float,
                    double) {
   CoalescedGroupTiledPartitonShflUpTestImpl<TestType>();
@@ -445,7 +445,7 @@ template <typename T> static void CoalescedGroupTiledPartitonShflDownTestImpl() 
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_Coalesced_Group_Tiled_Partition_Shfl_Down_Positive_Basic", "", int,
+TEMPLATE_TEST_CASE(Unit_Coalesced_Group_Tiled_Partition_Shfl_Down_Positive_Basic, int,
                    unsigned int, long, unsigned long, long long, unsigned long long, float,
                    double) {
   CoalescedGroupTiledPartitonShflDownTestImpl<TestType>();
@@ -552,7 +552,7 @@ template <typename T> static void CoalescedGroupTiledPartitonShflTestImpl() {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_Coalesced_Group_Tiled_Partition_Shfl_Positive_Basic", "", int,
+TEMPLATE_TEST_CASE(Unit_Coalesced_Group_Tiled_Partition_Shfl_Positive_Basic, int,
                    unsigned int, long, unsigned long, long long, unsigned long long, float,
                    double) {
   CoalescedGroupTiledPartitonShflTestImpl<TestType>();
@@ -703,7 +703,7 @@ template <bool global_memory, typename T> void CoalescedGroupTiledPartitionSyncT
  *    - HIP_VERSION >= 5.2
  */
 uint64_t counter = 0;
-TEMPLATE_TEST_CASE("Unit_Coalesced_Group_Tiled_Partition_Sync_Positive_Basic", "", uint8_t,
+TEMPLATE_TEST_CASE(Unit_Coalesced_Group_Tiled_Partition_Sync_Positive_Basic, uint8_t,
                    uint16_t, uint32_t) {
   SECTION("Global memory") { CoalescedGroupTiledPartitionSyncTest<true, TestType>(); }
   SECTION("Shared memory") { CoalescedGroupTiledPartitionSyncTest<false, TestType>(); }

@@ -34,7 +34,7 @@ extern "C" {
 #define AMDCUID_LIB_VERSION_MAJOR 0
 
 //! Minor version should be updated for each API change, but without changing headers
-#define AMDCUID_LIB_VERSION_MINOR 1
+#define AMDCUID_LIB_VERSION_MINOR 2
 
 //! Patch version should be updated for each bug fix or non-API change
 #define AMDCUID_LIB_VERSION_PATCH 1
@@ -259,7 +259,8 @@ typedef enum {
     AMDCUID_QUERY_CORE_ID = 12,               ///< Query the core ID (uint16_t). Supported by CPU device type.
     AMDCUID_QUERY_PHYSICAL_ID = 13,           ///< Query the physical package ID (uint16_t). Supported by CPU device type.
     AMDCUID_QUERY_PCI_CLASS = 14,             ///< Query the PCI class (uint16_t). Supported by GPU and NIC device types.
-    AMDCUID_QUERY_LAST = 14
+    AMDCUID_QUERY_BDF = 15,                   ///< Query the PCI BDF (string in format "bus:device.function", e.g. "0000:03:00.0"). Supported by GPU and NIC device types.
+    AMDCUID_QUERY_LAST = 15
 } amdcuid_query_t;
 
 /**
