@@ -594,6 +594,7 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                                 R.event_id,
                                 T.nid,
                                 TH.tid,
+                                TH.id AS thread_index,
                                 CN.string AS category,
                                 PMC_I.name,
                                 PMC_I.symbol,

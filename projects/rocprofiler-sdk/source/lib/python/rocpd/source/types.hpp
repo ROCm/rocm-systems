@@ -242,6 +242,7 @@ struct sample
     std::string             units             = {};
     std::string             short_description = {};
     uint64_t                agent_abs_index   = 0;
+    uint64_t                thread_index      = 0;
     uint64_t                event_id          = 0;
     uint64_t                stack_id          = 0;
     uint64_t                parent_stack_id   = 0;
@@ -721,6 +722,7 @@ load(ArchiveT& ar, rocpd::types::sample& data)
     LOAD_DATA_FIELD(units);
     LOAD_DATA_FIELD(short_description);
     LOAD_DATA_FIELD(agent_abs_index);
+    LOAD_DATA_FIELD(thread_index);
     LOAD_DATA_FIELD(event_id);
     LOAD_DATA_FIELD(stack_id);
     LOAD_DATA_FIELD(parent_stack_id);

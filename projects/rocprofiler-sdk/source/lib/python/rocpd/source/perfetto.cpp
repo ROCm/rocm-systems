@@ -602,9 +602,10 @@ write_perfetto(
                 // sample_gen
                 if(!itr.symbol.empty())
                 {
-                    // For CPU tracks, use (TID, 0) as the track index
+                    // For CPU tracks, use (thread_index, 0) as the track index
                     // For GPU tracks, use (0, agent_abs_index) as the track index
-                    std::pair<uint32_t, uint32_t> track_index = {itr.tid, itr.agent_abs_index};
+                    std::pair<uint32_t, uint32_t> track_index = {itr.thread_index,
+                                                                 itr.agent_abs_index};
                     auto& track_data = sample_counter_tracks[itr.symbol][track_index];
 
                     const auto _agent      = agent_data.at(itr.agent_abs_index).first;
@@ -615,6 +616,9 @@ write_perfetto(
                                                pmc_event_values[itr.symbol][itr.event_id]);
                     continue;
                 }
+
+                // Skip samples with no thread
+                if(thread_tracks.count(itr.tid) == 0) continue;
 
                 auto& track      = thread_tracks.at(itr.tid);
                 auto  _name      = itr.name;
@@ -996,7 +1000,7 @@ write_perfetto(
                 if(track_data.size() != 1)
                 {
                     if(data.agent_type == "CPU")
-                        track_name << " [" << track_index.first << "]";
+                        track_name << " [" << track_index.first - 1 << "]";
                     else if(data.agent_type == "GPU")
                         track_name << " [" << track_index.second - 1 << "]";
                 }
