@@ -114,3 +114,55 @@ class TestCategorizeKernelName:
         from rocpd.tracelens_port import categorize_kernel_name
         assert categorize_kernel_name("SGEMM_KERNEL") == "GEMM"
         assert categorize_kernel_name("Flash_Attention") == "SDPA"
+
+
+class TestSubtractIntervals:
+    def test_empty_a(self):
+        from rocpd.tracelens_port import _subtract_intervals
+        assert _subtract_intervals([], [(0, 100)]) == []
+
+    def test_empty_b(self):
+        from rocpd.tracelens_port import _subtract_intervals
+        result = _subtract_intervals([(0, 100)], [])
+        assert result == [(0, 100)]
+
+    def test_b_fully_covers_a(self):
+        from rocpd.tracelens_port import _subtract_intervals
+        result = _subtract_intervals([(0, 100)], [(0, 100)])
+        assert result == []
+
+    def test_b_partially_overlaps_left(self):
+        from rocpd.tracelens_port import _subtract_intervals
+        # b covers [0,50], a is [0,100] → remaining [50, 100]
+        result = _subtract_intervals([(0, 100)], [(0, 50)])
+        assert result == [(50, 100)]
+
+    def test_b_partially_overlaps_right(self):
+        from rocpd.tracelens_port import _subtract_intervals
+        # b covers [50,100], a is [0,100] → remaining [0, 50]
+        result = _subtract_intervals([(0, 100)], [(50, 100)])
+        assert result == [(0, 50)]
+
+    def test_b_cuts_middle(self):
+        from rocpd.tracelens_port import _subtract_intervals
+        # b covers [40,60], a is [0,100] → remaining [0,40] and [60,100]
+        result = _subtract_intervals([(0, 100)], [(40, 60)])
+        assert result == [(0, 40), (60, 100)]
+
+    def test_multiple_a_intervals(self):
+        from rocpd.tracelens_port import _subtract_intervals
+        # a=[0,50],[100,150], b=[25,125] → [0,25] and [125,150]
+        result = _subtract_intervals([(0, 50), (100, 150)], [(25, 125)])
+        assert result == [(0, 25), (125, 150)]
+
+    def test_adjacent_boundary(self):
+        from rocpd.tracelens_port import _subtract_intervals
+        # b ends exactly at a_start → no overlap, a is preserved
+        result = _subtract_intervals([(100, 200)], [(0, 100)])
+        assert result == [(100, 200)]
+
+    def test_no_overlap(self):
+        from rocpd.tracelens_port import _subtract_intervals
+        # b is entirely before a
+        result = _subtract_intervals([(200, 300)], [(0, 100)])
+        assert result == [(200, 300)]

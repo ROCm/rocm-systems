@@ -207,7 +207,7 @@ def analyze_kernels_by_category(
     Call compute_interval_timeline() first and pass its total_wall_ns here
     so pct_of_total_time uses the same wall-time baseline.
 
-    Returns list of dicts sorted by total_ns descending (at most 8 entries).
+    Returns list of dicts sorted by total_ns descending, one entry per category.
     Returns [] if kernels table is empty.
 
     Edge cases:
