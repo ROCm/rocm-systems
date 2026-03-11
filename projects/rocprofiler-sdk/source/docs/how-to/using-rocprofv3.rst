@@ -1063,14 +1063,14 @@ If ``input.txt`` contains:
 
 .. code-block:: text
 
-   pmc: FETCH_SIZE WRITE_SIZE
+   pmc: FETCH_SIZE SQ_WAVES
    pmc: GRBM_GUI_ACTIVE
 
 This creates four profiling passes:
 
 - Pass 1: ``GRBM_COUNT`` (from CLI)
 - Pass 2: ``SQ_WAVES`` (from CLI)
-- Pass 3: ``FETCH_SIZE WRITE_SIZE`` (from input file)
+- Pass 3: ``FETCH_SIZE SQ_WAVES`` (from input file)
 - Pass 4: ``GRBM_GUI_ACTIVE`` (from input file)
 
 **Output organization**
