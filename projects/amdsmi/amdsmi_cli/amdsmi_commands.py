@@ -53,6 +53,7 @@ class AMDSMICommands():
             self.helpers = helpers
         self.logger = AMDSMILogger(format=format, destination=destination, helpers=self.helpers)
         self.device_handles = []
+        self.device_handles_gpus = []
         self.cpu_handles = []
         self.core_handles = []
         self.node_handle = None
@@ -6662,7 +6663,7 @@ class AMDSMICommands():
                 try:
                     memory_partition = amdsmi_interface.AmdSmiMemoryPartitionType[args.memory_partition]
                     amdsmi_interface.amdsmi_set_gpu_memory_partition(args.gpu, memory_partition)
-                    out = f"Successfully set memory partition to {args.memory_partition}, reload driver when ready"
+                    out = f"Successfully set memory partition to {args.memory_partition}, use `sudo modprobe -r amdgpu && sudo modprobe amdgpu` to reload driver"
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     out = f"[{e.get_error_info(detailed=False)}] Unable to set memory partition to {args.memory_partition}"
                     if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
@@ -9515,7 +9516,6 @@ class AMDSMICommands():
             self.helpers.check_required_groups()
             self.group_check_printed = True
 
-        processors = amdsmi_interface.amdsmi_get_processor_handles()
         version_info = {"amd-smi": "N/A",
                         "amdgpu version": "N/A",
                         "kernel version": "N/A",
@@ -9524,6 +9524,12 @@ class AMDSMICommands():
                         "rocm version": (False, "N/A")}
         version_info['rocm version'] = amdsmi_interface.amdsmi_get_rocm_version()
         version_info['kernel version'] = os.uname().release
+
+        if not self.helpers.is_amdgpu_initialized():
+            # everything below requires amdgpu to be initialized, so if it's not, skip the rest of the default info and just return what we have so far
+            return
+
+        processors = amdsmi_interface.amdsmi_get_processor_handles()
         try:
             version_info["amdgpu version"] = amdsmi_interface.amdsmi_get_gpu_driver_info(processors[0])
         except amdsmi_exception.AmdSmiLibraryException as e:

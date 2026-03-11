@@ -20,6 +20,7 @@
  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  THE SOFTWARE. */
 
+#include "lib/common/logging.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 
 #include <fmt/format.h>
@@ -185,6 +186,108 @@ struct formatter<hsa_amd_ais_file_handle_t>
     auto format(hsa_amd_ais_file_handle_t const& h, FormatContext& ctx) const
     {
         return fmt::format_to(ctx.out(), "{{fd={}, handle={}}}", h.fd, h.handle);
+    }
+};
+#endif
+#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0A
+template <>
+struct formatter<hsa_amd_memory_copy_op_type_t>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+
+    template <typename FormatContext>
+    auto format(hsa_amd_memory_copy_op_type_t const& op, FormatContext& ctx) const
+    {
+        switch(op)
+        {
+            case HSA_AMD_MEMORY_COPY_OP_LINEAR:
+                return fmt::format_to(ctx.out(), "HSA_AMD_MEMORY_COPY_OP_LINEAR");
+            case HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST:
+                return fmt::format_to(ctx.out(), "HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST");
+            case HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP:
+                return fmt::format_to(ctx.out(), "HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP");
+            case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT:
+                return fmt::format_to(ctx.out(), "HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT");
+        }
+
+        auto value = static_cast<std::underlying_type_t<hsa_amd_memory_copy_op_type_t>>(op);
+        ROCP_CI_LOG(INFO) << fmt::format("Unknown hsa_amd_memory_copy_op_type_t {}", value);
+        return fmt::format_to(ctx.out(), "hsa_amd_memory_copy_op_type_t({})", value);
+    }
+};
+
+template <>
+struct formatter<hsa_amd_memory_copy_op_t>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+
+    template <typename FormatContext>
+    auto format(hsa_amd_memory_copy_op_t const& op, FormatContext& ctx) const
+    {
+        auto out = fmt::format_to(ctx.out(),
+                                  "[MEMORY_COPY_OP type={}, version={}, num_dsts={}, "
+                                  "traffic_class={}, completion_signal={}",
+                                  op.type,
+                                  op.version,
+                                  op.num_dsts,
+                                  op.traffic_class,
+                                  op.completion_signal.handle);
+
+        switch(op.type)
+        {
+            case HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST:
+                out = fmt::format_to(
+                    out,
+                    ", src={}, src_agent={}, dst_list={}, dst_agent_list={}, size={}",
+                    fmt::ptr(op.src),
+                    op.src_agent.handle,
+                    fmt::ptr(op.dst_list),
+                    fmt::ptr(op.dst_agent_list),
+                    op.size);
+                break;
+
+            case HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP:
+                out = fmt::format_to(
+                    out,
+                    ", src={}, src_agent={}, dst={}, dst_agent={}, src_size={}, dst_size={}",
+                    fmt::ptr(op.src),
+                    op.src_agent.handle,
+                    fmt::ptr(op.dst),
+                    op.dst_agent.handle,
+                    op.src_size,
+                    op.dst_size);
+                break;
+
+            case HSA_AMD_MEMORY_COPY_OP_LINEAR:
+            case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT:
+            default:
+                out = fmt::format_to(
+                    out,
+                    ", src={}, src_agent={}, dst={}, dst_agent={}, size={}, unused_size={}",
+                    fmt::ptr(op.src),
+                    op.src_agent.handle,
+                    fmt::ptr(op.dst),
+                    op.dst_agent.handle,
+                    op.size,
+                    op.unused_size);
+                break;
+        }
+
+        if(op.reserved[0] != 0 || op.reserved[1] != 0 || op.reserved[2] != 0)
+        {
+            out = fmt::format_to(
+                out, ", reserved=[{},{},{}]", op.reserved[0], op.reserved[1], op.reserved[2]);
+        }
+
+        return fmt::format_to(out, "]");
     }
 };
 #endif
