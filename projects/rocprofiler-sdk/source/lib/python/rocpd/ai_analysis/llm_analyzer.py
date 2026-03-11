@@ -171,6 +171,59 @@ def _select_tags(ctx: AnalysisContext) -> set:
     return tags
 
 
+def _filter_guide(guide_text: str, tags: set) -> str:
+    """
+    Return only the sections of the reference guide whose
+    ``<!-- rocpd-context: TAG [, TAG ...] -->`` comment matches one of the
+    requested *tags*.
+
+    Parsing rules:
+    - Split on newline + "## " to find section boundaries.
+    - Scan only the first 3 lines of each section for the tag comment.
+    - A section with *no* tag comment is always included (safe fallback for
+      user-added sections that lack a tag).
+    - Multiple tags in a single comment are comma-separated; any match
+      is sufficient to include the section.
+    - Tags in the comment are stripped of surrounding whitespace before
+      comparison.
+
+    Args:
+        guide_text: Full reference guide markdown content.
+        tags:       Set of tag strings that should be included
+                    (e.g. {"always", "tier1"}).
+
+    Returns:
+        Filtered guide text.  Empty string if *guide_text* is empty.
+    """
+    if not guide_text:
+        return ""
+
+    import re as _re
+
+    _TAG_RE = _re.compile(r"<!--\s*rocpd-context:\s*([^-]+?)\s*-->")
+
+    # Split on section boundaries. The intro block (before first ##) is
+    # kept as-is (it has no tag → always included).
+    raw_sections = _re.split(r"\n(?=## )", guide_text)
+
+    included = []
+    for section in raw_sections:
+        # Examine only the first 3 lines for a tag comment.
+        head_lines = section.splitlines()[:3]
+        head = "\n".join(head_lines)
+        match = _TAG_RE.search(head)
+
+        if match is None:
+            # No tag → always include (safe fallback).
+            included.append(section)
+        else:
+            section_tags = {t.strip() for t in match.group(1).split(",")}
+            if section_tags & tags:
+                included.append(section)
+
+    return "\n".join(included)
+
+
 class LLMAnalyzer:
     """
     Handles LLM-powered analysis enhancements.
@@ -335,19 +388,36 @@ class LLMAnalyzer:
 
         return sanitized
 
-    def _build_system_prompt(self) -> str:
+    def _build_system_prompt(self, context: Optional["AnalysisContext"] = None) -> str:
         """
-        Build system prompt that includes the reference guide.
+        Build the system prompt with the reference guide.
 
-        This is where the "fence" is applied - the LLM gets the reference
-        guide as context for every request, ensuring it follows the guidelines.
+        When *context* is provided, only the guide sections relevant to the
+        current analysis are included (see _filter_guide and _select_tags).
+        When *context* is None the full guide is used — preserving backward
+        compatibility for callers that do not yet provide context.
+
+        Args:
+            context: Optional AnalysisContext describing tier, bottleneck, etc.
 
         Returns:
-            System prompt with embedded reference guide
+            System prompt string with embedded (possibly filtered) reference guide.
         """
+        if context is not None:
+            guide = _filter_guide(self.reference_guide, _select_tags(context))
+            if self.verbose:
+                full_len = len(self.reference_guide)
+                filt_len = len(guide)
+                print(
+                    f"[LLM] Guide filtered: {filt_len} / {full_len} chars "
+                    f"({100 * filt_len // full_len}% of full guide)"
+                )
+        else:
+            guide = self.reference_guide
+
         return f"""You are an expert GPU performance analyst specializing in AMD GPUs.
 
-{self.reference_guide}
+{guide}
 
 CRITICAL: Follow these guidelines strictly:
 1. Use ONLY current generation tools (rocprofv3, rocprof-compute, rocprof-sys), NEVER rocprof or rocprof-v2
