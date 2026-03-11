@@ -41,6 +41,7 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
+from utils.utils import normalize_filter_to_str_list
 
 # TODO: use pandas chunksize or dask to read really large csv file
 # from dask import dataframe as dd
@@ -116,10 +117,14 @@ def create_df_kernel_top_stats(
     # which can be merged together if need it.
 
     if filter_nodes:
-        df = df.loc[df["Node"].astype(str).isin([filter_nodes])]
+        df = df.loc[
+            df["Node"].astype(str).isin(normalize_filter_to_str_list(filter_nodes))
+        ]
 
     if filter_gpu_ids:
-        df = df.loc[df["GPU_ID"].astype(str).isin([filter_gpu_ids])]
+        df = df.loc[
+            df["GPU_ID"].astype(str).isin(normalize_filter_to_str_list(filter_gpu_ids))
+        ]
 
     if filter_dispatch_ids:
         # NB: support ignoring the 1st n dispatched execution by '> n'
@@ -400,3 +405,15 @@ def find_1st_sub_dir(directory: str) -> Optional[str]:
         return None
     except FileNotFoundError:
         console_error(f'The directory "{directory}" does not exist.', exit=False)
+
+
+def get_valid_nodes(directory: str) -> list[str]:
+    """Return subdirectory names that contain sysinfo.csv"""
+    dir_path = Path(directory)
+    if not dir_path.is_dir():
+        return []
+    return [
+        entry.name
+        for entry in dir_path.iterdir()
+        if entry.is_dir() and (entry / "sysinfo.csv").exists()
+    ]
