@@ -366,7 +366,7 @@ def analyze_hardware_counters(connection: RocpdImportData) -> Dict[str, Any]:
 
     except Exception as e:
         print(f"Warning: Could not analyze hardware counters: {e}", file=sys.stderr)
-        return {"has_counters": False}
+        return {"has_counters": False, "reason": str(e)}
 
 
 # ---------------------------------------------------------------------------
