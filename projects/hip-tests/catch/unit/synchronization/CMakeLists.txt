@@ -34,4 +34,3 @@ hip_add_exe_to_target(NAME synchronizationTests
                       COMPILE_OPTIONS -std=c++14)
 
 add_dependencies(synchronizationTests memcpyInt.hsaco)
-

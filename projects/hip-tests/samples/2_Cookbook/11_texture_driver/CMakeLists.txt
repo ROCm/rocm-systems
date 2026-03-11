@@ -1,4 +1,4 @@
-# Copyright (c) 2020 - 2023 Advanced Micro Devices, Inc. All Rights Reserved.
+# Copyright (c) 2020 - 2026 Advanced Micro Devices, Inc. All Rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -46,7 +46,7 @@ else()
   set(EXCLUDE_OPTION)
 endif()
 
-# Mark source files as HIP code  
+# Mark source files as HIP code
 set_source_files_properties(texture2dDrv.cpp PROPERTIES LANGUAGE HIP)
 set_source_files_properties(tex2dKernel.cpp PROPERTIES LANGUAGE HIP)
 
