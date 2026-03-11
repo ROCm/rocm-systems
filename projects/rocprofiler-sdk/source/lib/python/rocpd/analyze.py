@@ -224,11 +224,14 @@ def analyze_memory_copies(connection: RocpdImportData) -> Dict[str, Dict[str, An
             ELSE category
         END as direction,
         COUNT(*) as count,
-        SUM(CAST(0 AS INTEGER)) as total_bytes,
+        COALESCE(SUM(CAST(size AS INTEGER)), 0) as total_bytes,
         SUM(end - start) as total_duration,
-        AVG(CAST(0 AS INTEGER)) as avg_bytes,
+        COALESCE(AVG(CAST(size AS INTEGER)), 0.0) as avg_bytes,
         AVG(end - start) as avg_duration,
-        CAST(0 AS REAL) as bandwidth_bytes_per_sec
+        CASE WHEN SUM(end - start) > 0
+             THEN (COALESCE(SUM(CAST(size AS INTEGER)), 0) * 1.0e9 / SUM(end - start))
+             ELSE 0.0
+        END as bandwidth_bytes_per_sec
     FROM memory_copies
     WHERE category IS NOT NULL
     GROUP BY direction
@@ -276,7 +279,10 @@ def analyze_hardware_counters(connection: RocpdImportData) -> Dict[str, Any]:
         check_query = "SELECT COUNT(*) FROM pmc_events LIMIT 1"
         result = execute_statement(connection, check_query, ()).fetchone()
         if not result or result[0] == 0:
-            return {"has_counters": False}
+            return {
+                "has_counters": False,
+                "reason": "pmc_events table exists but contains no data",
+            }
 
         # Get available counters
         counters_query = """

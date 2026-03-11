@@ -38,7 +38,7 @@ from ..analyze import (
     format_analysis_output,
     _detect_already_collected,
 )
-from .llm_analyzer import LLMAnalyzer, get_reference_guide_path
+from .llm_analyzer import AnalysisContext, LLMAnalyzer, get_reference_guide_path
 from .exceptions import (
     DatabaseNotFoundError,
     DatabaseCorruptedError,
@@ -613,21 +613,28 @@ def _build_analysis_result(
         gpus=[],
     )
 
-    # Build summary
-    primary_bottleneck = "unknown"
-    confidence = 0.5
+    # Build summary — mirrors _build_summary() logic in analyze.py
+    primary_bottleneck = "mixed"
+    confidence = 0.50
 
     memcpy_pct = time_breakdown.get("memcpy_percent", 0)
     kernel_pct = time_breakdown.get("kernel_percent", 0)
+    overhead_pct = time_breakdown.get("overhead_percent", 0)
     if memcpy_pct > 30:
         primary_bottleneck = "memory_transfer"
-        confidence = 0.8
-    elif has_counters:
+        confidence = 0.85
+    elif memcpy_pct > 20:
+        primary_bottleneck = "memory_transfer"
+        confidence = 0.70
+    elif overhead_pct > 25:
+        primary_bottleneck = "latency"
+        confidence = 0.75
+    elif kernel_pct > 70 and has_counters:
         primary_bottleneck = "compute"
-        confidence = 0.7
-    elif kernel_pct > 80:
+        confidence = 0.80
+    elif kernel_pct > 70:
         primary_bottleneck = "compute"
-        confidence = 0.6
+        confidence = 0.60
 
     summary = AnalysisSummary(
         overall_assessment=f"Analysis complete. {len(hotspots)} kernels analyzed.",
@@ -939,8 +946,9 @@ def analyze_source(
                 api_key=llm_api_key,
                 verbose=verbose,
             )
+            context = AnalysisContext(tier=0, custom_prompt=custom_prompt)
             result.llm_explanation = analyzer.analyze_source_with_llm(
-                result, custom_prompt=custom_prompt
+                result, custom_prompt=custom_prompt, context=context
             )
 
             if verbose:
