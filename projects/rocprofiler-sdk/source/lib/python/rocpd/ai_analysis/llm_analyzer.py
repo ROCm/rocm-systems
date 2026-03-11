@@ -50,6 +50,9 @@ _PATH_PATTERN = re.compile(
     r'/tmp/[^\s,"\';>]+|/var/[^\s,"\';>]+|[A-Za-z]:\\[^\s,"\';>]+)'
 )
 
+# Regex to match rocpd-context tag comments in the reference guide
+_TAG_RE = re.compile(r"<!--\s*rocpd-context:\s*([^-]+?)\s*-->")
+
 
 def _redact_paths(value: str) -> str:
     """Replace file system paths in a string with [REDACTED]."""
@@ -198,13 +201,9 @@ def _filter_guide(guide_text: str, tags: set) -> str:
     if not guide_text:
         return ""
 
-    import re as _re
-
-    _TAG_RE = _re.compile(r"<!--\s*rocpd-context:\s*([^-]+?)\s*-->")
-
     # Split on section boundaries. The intro block (before first ##) is
     # kept as-is (it has no tag → always included).
-    raw_sections = _re.split(r"\n(?=## )", guide_text)
+    raw_sections = re.split(r"\n(?=## )", guide_text)
 
     included = []
     for section in raw_sections:
@@ -410,7 +409,7 @@ class LLMAnalyzer:
                 filt_len = len(guide)
                 print(
                     f"[LLM] Guide filtered: {filt_len} / {full_len} chars "
-                    f"({100 * filt_len // full_len}% of full guide)"
+                    f"({(100 * filt_len // full_len if full_len else 0)}% of full guide)"
                 )
         else:
             guide = self.reference_guide
