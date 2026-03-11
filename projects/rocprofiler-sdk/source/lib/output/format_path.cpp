@@ -193,16 +193,15 @@ get_mpi_size()
     }
 
     // Fall back to checking multiple known MPI environment variables
-    static int _v =
-        get_variable_env<int>(0,
-                              {"MPI_SIZE",  // most generic to most runtime-specific
-                               "MPI_LOCALNRANKS",
-                               "MPI_NRANKS",
-                               "OMPI_COMM_WORLD_SIZE",
-                               "MV2_COMM_WORLD_SIZE",
-                               "PMI_SIZE",
-                               "SLURM_NTASKS",
-                               "PBS_O_TASKNUM"});
+    static int _v = get_variable_env<int>(0,
+                                          {"MPI_SIZE",  // most generic to most runtime-specific
+                                           "MPI_LOCALNRANKS",
+                                           "MPI_NRANKS",
+                                           "OMPI_COMM_WORLD_SIZE",
+                                           "MV2_COMM_WORLD_SIZE",
+                                           "PMI_SIZE",
+                                           "SLURM_NTASKS",
+                                           "PBS_O_TASKNUM"});
     return _v;
 }
 
