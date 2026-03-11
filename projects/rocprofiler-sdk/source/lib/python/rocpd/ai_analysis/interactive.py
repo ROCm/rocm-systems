@@ -1824,9 +1824,11 @@ class WorkflowSession:
         self,
         new_breakdown: Optional[Dict[str, Any]],
     ) -> None:
-        if len(self._state.analysis_history) < 2:
+        # Called before the current snapshot is appended to analysis_history,
+        # so [-1] is the most-recent *previous* run.
+        if len(self._state.analysis_history) < 1:
             return
-        prev = self._state.analysis_history[-2]
+        prev = self._state.analysis_history[-1]
         pb = prev.execution_breakdown or {}
         nb = new_breakdown or {}
         prev_s = pb.get("total_runtime_ns", 0) / 1e9
@@ -1856,8 +1858,13 @@ class WorkflowSession:
 
     def _phase4_analyze(self, db_path: str) -> _AnalysisSnapshot:
         """Run Tier 1/2 analysis; print structured report; return snapshot."""
+        iteration = len(self._state.analysis_history) + 1
         _print()
-        _print("  ══ AI Trace Analysis Report " + "═" * 44, style="bold cyan")
+        if iteration == 1:
+            header = "  ══ AI Trace Analysis Report " + "═" * 44
+        else:
+            header = f"  ══ AI Trace Analysis Report  (Run #{iteration}) " + "═" * 35
+        _print(header, style="bold cyan")
         _print()
 
         recs: List[Dict[str, Any]] = []
@@ -1888,6 +1895,22 @@ class WorkflowSession:
                 _print(f"    Kernel  {eb.kernel_time_pct:.1f}%  "
                        f"MemCopy {eb.memcpy_time_pct:.1f}%  "
                        f"Overhead {eb.api_overhead_pct:.1f}%", style="dim")
+                _print()
+
+            # Warn when GPU time is zero but profiling ran — likely multiprocessing
+            total_ns = result.profiling_info.total_duration_ns if eb else 0
+            if total_ns == 0 and self._state.trace_history:
+                _print("  ⚠  No GPU kernel activity captured in the main process.",
+                       style="yellow")
+                _print("     If your app uses Python multiprocessing (e.g. vLLM, PyTorch",
+                       style="yellow")
+                _print("     DDP), GPU kernels run in spawned worker processes and are",
+                       style="yellow")
+                _print("     not captured in the main-process DB.", style="yellow")
+                _print("     Try:  rocprof-sys --trace -- <app>  (multi-process aware)",
+                       style="yellow")
+                _print("     or profile a specific worker with  --pid <worker_pid>",
+                       style="yellow")
                 _print()
 
             all_recs = (
@@ -1980,6 +2003,18 @@ class WorkflowSession:
             if ai_rec_cmd:
                 break
 
+        # Don't re-suggest PMC counters that were already collected in the last run.
+        # This prevents an infinite [r] → run → same INFO result → [r] loop.
+        if ai_rec_cmd and self._state.trace_history:
+            def _pmc_counters(cmd: str) -> set:
+                return {c for m in re.finditer(
+                    r'--pmc\s+((?:[A-Z_][A-Z0-9_]*(?:\s+|$))+)', cmd, re.IGNORECASE
+                ) for c in m.group(1).split()}
+            suggested = _pmc_counters(ai_rec_cmd)
+            already   = _pmc_counters(self._state.trace_history[-1].command)
+            if suggested and suggested.issubset(already):
+                ai_rec_cmd = None  # all suggested counters already collected
+
         return self._record_analysis(recs, breakdown, hotspots,
                                      ai_recommended_command=ai_rec_cmd)
 
@@ -2003,6 +2038,14 @@ class WorkflowSession:
         # (i.e. "collect more data") with no actionable source code changes.
         all_info = all(r.get("priority", "INFO").upper() == "INFO" for r in recs)
 
+        # Detect "already re-profiled, still no progress" — don't loop indefinitely.
+        # This happens when: all INFO, iteration > 0, and no fresh AI command available.
+        already_reprofiled = (
+            all_info
+            and snap.iteration > 0
+            and snap.ai_recommended_command is None
+        )
+
         while True:
             _print()
             _print("  ── Recommendations ─────────────────────────────────────", style="bold cyan")
@@ -2012,7 +2055,16 @@ class WorkflowSession:
                 issue = rec.get("issue", "")[:70]
                 _print(f"  [{i}]  [{pri}]  {issue}", style=style)
             _print()
-            if all_info:
+            if all_info and already_reprofiled:
+                # Re-profiling already attempted with the suggested counters but
+                # the analysis result is unchanged.  No new suggestions available.
+                _print("  Analysis result unchanged after re-profiling.", style="yellow")
+                _print("  The profiler may not be capturing GPU kernels from this app.", style="yellow")
+                _print("  See the ⚠ note above for multi-process profiling options.", style="yellow")
+                _print()
+                _print("  [n]  Skip — stop re-profiling", style="dim")
+                _print("  [q]  Quit session", style="dim")
+            elif all_info:
                 # Only profiling-guidance recommendations — no source code to optimize.
                 # Direct the user to re-profile with the suggested commands.
                 _print("  [r]  Re-profile with suggested commands", style="cyan")
@@ -2032,7 +2084,7 @@ class WorkflowSession:
                 return None
             if choice in ("n", ""):
                 return None
-            if choice == "r" and all_info:
+            if choice == "r" and all_info and not already_reprofiled:
                 # Advance to re-profiling phase; AI-recommended command will be option [3].
                 _print()
                 _print("  Advancing to re-profiling. Select [3] to use the suggested command.",
