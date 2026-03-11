@@ -1386,7 +1386,7 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
 
     HsaExternalHandleDesc desc;
     desc.device_handle = agent_->libThunkDev();
-    desc.fd = static_cast<HSAint32>(dmabuf_fd);
+    desc.fd = static_cast<HSAint64>(dmabuf_fd);
     desc.type = HSA_EXTERNAL_HANDLE_DMA_BUF;
     desc.metadata = handle->handle[7];
     desc.mem = ptr;
@@ -1464,13 +1464,13 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle,
 
     if (dmabuf_fd_handle == IPC_SOCK_SERVER_CONN_CLOSE_HANDLE) return 0;
 
-    int dmabuf_fd = os::IPCRecvHandle(socket_fd);
+    intptr_t dmabuf_fd = os::IPCRecvHandle(socket_fd);
     if (dmabuf_fd == -1) return -1;
 
     HsaGraphicsResourceInfo info;
     HSA_REGISTER_MEM_FLAGS regFlags;
     regFlags.ui32.requiresVAddr = !isDmabufSysmem;
-    int err = HSAKMT_CALL(hsaKmtRegisterGraphicsHandleToNodesExt(dmabuf_fd, &info, numNodes, nodes, regFlags));
+    int err = HSAKMT_CALL(hsaKmtRegisterGraphicsHandleToNodesExt(static_cast<HSAuint64>(dmabuf_fd), &info, numNodes, nodes, regFlags));
     if (err == HSAKMT_STATUS_SUCCESS) {
       *importAddress = info.MemoryAddress;
       *importSize = info.SizeInBytes;
@@ -1482,7 +1482,7 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle,
 
       HsaExternalHandleDesc desc;
       desc.device_handle = agent->libThunkDev();
-      desc.fd = static_cast<HSAint32>(dmabuf_fd);
+      desc.fd = static_cast<HSAint64>(dmabuf_fd);
       desc.type = HSA_EXTERNAL_HANDLE_DMA_BUF;
       desc.metadata = static_cast<HSAuint32>(shared_handle);
       desc.mem = *importAddress;
@@ -1495,9 +1495,9 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle,
       if (status != HSAKMT_STATUS_SUCCESS) {
         fprintf(stderr, "IPC Client Import: Invalid IPC handle! expected %u, got %u\n",
                 shared_handle, res.metadata);
-        #if defined(__linux__)
-        close(dmabuf_fd);
-        #endif
+#if defined(__linux__)
+        close(static_cast<int>(dmabuf_fd));
+#endif
         return -1;
       }
 
@@ -1510,9 +1510,9 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle,
         }
         allocation_map_[*importAddress].thunk_bo = res.buf_handle;
       }
-      #if defined(__linux__)
-      close(dmabuf_fd);
-      #endif
+#if defined(__linux__)
+      close(static_cast<int>(dmabuf_fd));
+#endif
     }
 
     // Ping socket server to close exporter

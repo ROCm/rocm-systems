@@ -1032,7 +1032,8 @@ int IPCSocketWrite(IPCSocket conn, const void* buf, size_t len) {
   return static_cast<int>(write(IPCSockToFd(conn), buf, len));
 }
 
-int IPCSendHandle(IPCSocket conn, int handle) {
+int IPCSendHandle(IPCSocket conn, intptr_t handle) {
+  int fd = static_cast<int>(handle);
   char iov_buf[1] = {'y'};
   struct iovec io = {.iov_base = iov_buf, .iov_len = 1};
 
@@ -1049,14 +1050,14 @@ int IPCSendHandle(IPCSocket conn, int handle) {
   cmsg->cmsg_level = SOL_SOCKET;
   cmsg->cmsg_type = SCM_RIGHTS;
   cmsg->cmsg_len = CMSG_LEN(sizeof(int));
-  memcpy(CMSG_DATA(cmsg), &handle, sizeof(int));
+  memcpy(CMSG_DATA(cmsg), &fd, sizeof(int));
 
   msg.msg_controllen = CMSG_SPACE(sizeof(int));
 
   return (sendmsg(IPCSockToFd(conn), &msg, 0) < 0) ? -1 : 0;
 }
 
-int IPCRecvHandle(IPCSocket conn) {
+intptr_t IPCRecvHandle(IPCSocket conn) {
   char m_buffer[1];
   struct iovec io = {.iov_base = m_buffer, .iov_len = sizeof(m_buffer)};
 
