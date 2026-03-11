@@ -1459,7 +1459,7 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle,
     char buf[IPC_SOCK_SERVER_DMABUF_FD_HANDLE_LENGTH];
     memset(buf, 0, sizeof(buf));
 
-    snprintf(buf, sizeof(buf), "%li", dmabuf_fd_handle);
+    snprintf(buf, sizeof(buf), "%llu", dmabuf_fd_handle);
     if (os::IPCSocketWrite(socket_fd, buf, sizeof(buf)) == -1) return -1;
 
     if (dmabuf_fd_handle == IPC_SOCK_SERVER_CONN_CLOSE_HANDLE) return 0;
