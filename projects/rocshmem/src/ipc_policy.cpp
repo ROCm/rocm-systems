@@ -25,6 +25,7 @@
 #include "ipc_policy.hpp"
 
 #include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
+#include "memory/default_allocator.hpp"
 #include "backend_bc.hpp"
 #include "context_incl.hpp"
 #include "envvar.hpp"
@@ -56,9 +57,8 @@ __host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
   /*
    * Allocate a host-side c-array to hold the IPC handles.
    */
-  void *ipc_mem_handle_uncast = malloc(shm_size * sizeof(hipIpcMemHandle_t));
-  hipIpcMemHandle_t *vec_ipc_handle =
-      reinterpret_cast<hipIpcMemHandle_t *>(ipc_mem_handle_uncast);
+  HIPAllocator *allocator = get_default_allocator();
+  HIPIpcHandleVec *vec_ipc_handle = allocator->AllocateIpcHandleVec(shm_size);
 
   /*
    * Call into the hip runtime to get an IPC handle for my symmetric
@@ -66,14 +66,15 @@ __host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
    * just allocated.
    */
   char *base_heap = heap_bases[my_pe];
-  CHECK_HIP(hipIpcGetMemHandle(&vec_ipc_handle[shm_rank], base_heap));
+  CHECK_HIP(allocator->GetIpcHandle(base_heap, vec_ipc_handle->GetHandleVecElem(shm_rank)));
 
   /*
    * Do an all-to-all exchange with each local processing element to
    * share the symmetric heap IPC handles.
    */
-  mpilib_ftable_.Allgather(MPI_IN_PLACE, sizeof(hipIpcMemHandle_t), MPI_CHAR,
-                           vec_ipc_handle, sizeof(hipIpcMemHandle_t), MPI_CHAR, shmcomm);
+  size_t ipc_handle_size = allocator->GetIpcHandleSize();
+  mpilib_ftable_.Allgather(MPI_IN_PLACE, ipc_handle_size, MPI_CHAR,
+                           vec_ipc_handle->GetHandleVecElem(0), ipc_handle_size, MPI_CHAR, shmcomm);
 
   /*
    * Allocate device-side array to hold the IPC symmetric heap base
@@ -90,8 +91,8 @@ __host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
   for (int i = 0; i < shm_size; i++) {
     if (i != shm_rank) {
       void **ipc_base_uncast = reinterpret_cast<void **>(&ipc_base[i]);
-      CHECK_HIP(hipIpcOpenMemHandle(ipc_base_uncast, vec_ipc_handle[i],
-                                    hipIpcMemLazyEnablePeerAccess));
+      CHECK_HIP(allocator->OpenIpcHandle(ipc_base_uncast,
+                                         vec_ipc_handle->GetHandleVecElem(i)));
     } else {
       ipc_base[i] = base_heap;
     }
@@ -106,7 +107,7 @@ __host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
    * Free the host-side memory used to exchange the symmetric heap base
    * addresses.
    */
-  free(vec_ipc_handle);
+  delete vec_ipc_handle;
 
   if (envvar::ro::disable_ipc || envvar::disable_ipc) {
     if (0 == my_pe) {
@@ -141,9 +142,8 @@ __host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
   /*
    * Allocate a host-side c-array to hold the IPC handles.
    */
-  void *ipc_mem_handle_uncast = malloc(shm_size * sizeof(hipIpcMemHandle_t));
-  hipIpcMemHandle_t *vec_ipc_handle =
-      reinterpret_cast<hipIpcMemHandle_t *>(ipc_mem_handle_uncast);
+  HIPAllocator *allocator = get_default_allocator();
+  HIPIpcHandleVec *vec_ipc_handle = allocator->AllocateIpcHandleVec(shm_size);
 
   /*
    * Call into the hip runtime to get an IPC handle for my symmetric
@@ -151,13 +151,14 @@ __host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
    * just allocated.
    */
   char *base_heap = heap_bases[my_pe];
-  CHECK_HIP(hipIpcGetMemHandle(&vec_ipc_handle[shm_rank], base_heap));
+  CHECK_HIP(allocator->GetIpcHandle(base_heap, vec_ipc_handle->GetHandleVecElem(shm_rank)));
 
   /*
    * Do an all-to-all exchange with each local processing element to
    * share the symmetric heap IPC handles.
    */
-  bootstr->groupAllGather(vec_ipc_handle, sizeof(hipIpcMemHandle_t), shm_ranks);
+  size_t ipc_handle_size = allocator->GetIpcHandleSize();
+  bootstr->groupAllGather(vec_ipc_handle->GetHandleVecElem(0), ipc_handle_size, shm_ranks);
 
   /*
    * Allocate device-side array to hold the IPC symmetric heap base
@@ -174,8 +175,8 @@ __host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
   for (int i = 0; i < shm_size; i++) {
     if (i != shm_rank) {
       void **ipc_base_uncast = reinterpret_cast<void **>(&ipc_base[i]);
-      CHECK_HIP(hipIpcOpenMemHandle(ipc_base_uncast, vec_ipc_handle[i],
-                                    hipIpcMemLazyEnablePeerAccess));
+      CHECK_HIP(allocator->OpenIpcHandle(ipc_base_uncast,
+                                         vec_ipc_handle->GetHandleVecElem(i)));
     } else {
       ipc_base[i] = base_heap;
     }
@@ -190,7 +191,7 @@ __host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
    * Free the host-side memory used to exchange the symmetric heap base
    * addresses.
    */
-  free(vec_ipc_handle);
+  delete vec_ipc_handle;
 
   if (envvar::ro::disable_ipc || envvar::disable_ipc) {
     if (0 == my_pe) {
@@ -206,9 +207,11 @@ __host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
 }
 
 __host__ void IpcOnImpl::ipcHostStop() {
+  HIPAllocator *allocator = get_default_allocator();
+
   for (int i = 0; i < shm_size; i++) {
     if (i != shm_rank) {
-      CHECK_HIP(hipIpcCloseMemHandle(ipc_bases[i]));
+      CHECK_HIP(allocator->CloseIpcHandle(ipc_bases[i]));
     }
   }
   CHECK_HIP(hipFree(ipc_bases));

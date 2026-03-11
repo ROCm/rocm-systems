@@ -51,16 +51,16 @@ __global__ void _dispatchSpeed(float* outBuf) {
 
 // kernel that has an execution of count, in GPU clock ticks
 __global__ void _TimingKernel(uint64_t count) {
-  uint64_t begin_time = __builtin_amdgcn_s_memrealtime();
+  uint64_t begin_time = wall_clock64();
   uint64_t curr_time = begin_time;
   do {
-    curr_time = __builtin_amdgcn_s_memrealtime();
+    curr_time = wall_clock64();
   } while (begin_time + count > curr_time);
 }
 
 enum TimingMode { TimingMode_WallTime, TimingMode_HIPEvent, TimingMode_NumModes };
 
-TEST_CASE("Perf_hipPerfDispatchAndExecutionSpeed") {
+TEST_CASE(Perf_hipPerfDispatchAndExecutionSpeed) {
   hipError_t err = hipSuccess;
 
   unsigned int testListSize = sizeof(testList) / sizeof(testList[0]);

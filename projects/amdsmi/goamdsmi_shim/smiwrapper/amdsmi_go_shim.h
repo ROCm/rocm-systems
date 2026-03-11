@@ -22,6 +22,7 @@
  */
 
 #include "goamdsmi.h"
+#include <stdint.h>
 ////////////////////////////////////////////////------------CPU------------////////////////////////////////////////////////
 /**
  *  @brief Go language stub to initialize the AMDSMI library
@@ -557,3 +558,75 @@ uint64_t goamdsmi_gpu_dev_gpu_memory_usage_get(uint32_t dv_ind);
  *
  */
 uint64_t goamdsmi_gpu_dev_gpu_memory_total_get(uint32_t dv_ind);
+
+/**
+ *  @brief Go language stub to get UMA carveout information
+ *
+ *  @details This function will call the amdsmi_get_gpu_uma_carveout_info()
+ *  function to get the current UMA carveout configuration and available options.
+ *
+ *  @param[in] dv_ind is the device index
+ *  @param[out] current_index current carveout option index
+ *  @param[out] num_options number of available carveout options
+ *  @param[out] options array of option descriptions (up to 16 options, 256 chars each)
+ *
+ *  @retval ::int32_t 0 on success, -1 on failure
+ *
+ */
+int32_t goamdsmi_gpu_uma_carveout_info_get(uint32_t dv_ind, uint32_t* current_index,
+                                           uint32_t* num_options, char options[][256]);
+
+/**
+ *  @brief Go language stub to set UMA carveout size
+ *
+ *  @details This function will call the amdsmi_set_gpu_uma_carveout()
+ *  function to set the UMA carveout size by option index.
+ *  Requires system reboot to take effect.
+ *
+ *  @param[in] dv_ind is the device index
+ *  @param[in] option_index the carveout option index to set
+ *
+ *  @retval ::int32_t 0 on success, -1 on failure
+ *
+ */
+int32_t goamdsmi_gpu_uma_carveout_set(uint32_t dv_ind, uint32_t option_index);
+
+/**
+ *  @brief Go language stub to get TTM (shared GPU memory) information
+ *
+ *  @details This function will call the amdsmi_get_ttm_info()
+ *  function to get the current TTM pages limit. This is system-wide,
+ *  not per-GPU.
+ *
+ *  @param[out] current_pages current TTM pages limit
+ *
+ *  @retval ::int32_t 0 on success, -1 on failure
+ *
+ */
+int32_t goamdsmi_ttm_info_get(uint64_t* current_pages);
+
+/**
+ *  @brief Go language stub to set TTM (shared GPU memory) pages limit
+ *
+ *  @details This function will call the amdsmi_set_ttm_pages_limit()
+ *  function to set the TTM pages limit. This is system-wide, not per-GPU.
+ *  Requires system reboot to take effect.
+ *
+ *  @param[in] pages the pages limit to set
+ *
+ *  @retval ::int32_t 0 on success, -1 on failure
+ *
+ */
+int32_t goamdsmi_ttm_pages_limit_set(uint64_t pages);
+
+/**
+ *  @brief Go language stub to reset TTM pages limit to system default
+ *
+ *  @details This function will call the amdsmi_reset_ttm_pages_limit()
+ *  function to reset the TTM pages limit to system default. This is
+ *  system-wide, not per-GPU. Requires system reboot to take effect.
+ *
+ *  @retval ::int32_t 0 on success, -1 on failure
+ *
+ */
+int32_t goamdsmi_ttm_pages_limit_reset(void);

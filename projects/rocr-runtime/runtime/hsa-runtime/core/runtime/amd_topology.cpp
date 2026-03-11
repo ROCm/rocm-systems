@@ -304,6 +304,7 @@ void SurfaceGpuList(std::vector<int32_t>& gpu_list, bool xnack_mode, bool enable
         core::Runtime::runtime_singleton_->flag().set_ipc_mode_legacy(false);
         core::Runtime::runtime_singleton_->flag().disable_dev_mem_queue_buf();
         core::Runtime::runtime_singleton_->flag().disable_sdma_hdp_flush();
+        core::Runtime::runtime_singleton_->flag().set_disable_tool_register(true);
       }
 
       // Instantiate a Gpu device. The IO links

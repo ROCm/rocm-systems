@@ -1,15 +1,28 @@
 # Changelog for rocSHMEM
-## Unreleased - rocSHMEM 3.x.x for ROCm 7.x.x
+## Unreleased - rocSHMEM 3.3.0 for ROCm x.x.x
 ### Added
 * Added new APIs:
    * `rocshmem_TYPENAME_alltoall_wg`
-
-## Unreleased -- rocSHMEM 3.2.1 for ROCm x.x.x
-### Added
+   * `rocshmem_TYPENAME_alltoallv_wg`
+   * `rocshmem_team_my_pe`
+   * `rocshmem_team_n_pes`
+   * `rocshmem_barrier`
+   * `rocshmem_barrier_wave`
+   * `rocshmem_barrier_wg`
+* Added `ROCSHMEM_TEAM_WORLD` for the device code
+* Added new Enviroment variable:
+  * `OVERRIDE_NIC_FIRMWARE_CHECK`
 ### Changed
-### Removed
-### Resolved issues
+* Use CQ collapsing for the Mellanox MLX5 GDA conduit
+
+## rocSHMEM 3.2.1 for ROCm 7.2.1
+### Added
+* Warn if large BAR is not available
+### Resolved Issues
+* GDA Backend will disable itself when no GDA compatible NICs are available rather than crashing
+* Fix memory coherency issues on gfx1201
 ### Known issues
+* Only 64bit rocSHMEM atomic APIs are implemented for the GDA conduit
 
 ## rocSHMEM 3.2.0 for ROCm 7.2.0
 ### Added

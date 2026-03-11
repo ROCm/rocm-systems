@@ -172,6 +172,7 @@ TEST_CASE("Unit_KerArgOptimization_Saxpy") {
   HIP_CHECK(hipFree(x4_d));
   HIP_CHECK(hipFree(x5_d));
   HIP_CHECK(hipFree(x6_d));
+  HIP_CHECK(hipModuleUnload(Module));
   delete[] x1_h;
   delete[] x2_h;
   delete[] x3_h;

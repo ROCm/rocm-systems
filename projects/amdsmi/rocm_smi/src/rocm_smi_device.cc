@@ -119,6 +119,8 @@ static const char *kDevPmMetricsFName = "pm_metrics";   // PM log
 static const char *kDevRegMetricsFName = "reg_state";   // register table
 static const char *kDevBaseBoardTempMetricsFName = "board/baseboard_temp";
 static const char *kDevGpuBoardTempMetricsFName = "board/gpuboard_temp";
+static const char *kDevBaseBoardPowerFName = "board/baseboard_power";
+static const char *kDevBaseBoardPowerLimitFName = "board/baseboard_power_limit";
 static const char *kDevPtlSupportedFName = "ptl/ptl_supported_formats"; // Only used internally for verification
 static const char *kDevPtlStatusFName = "ptl/ptl_enable";
 static const char *kDevPtlFormatFName = "ptl/ptl_format";
@@ -334,6 +336,8 @@ static const std::map<DevInfoTypes, const char *> kDevAttribNameMap = {
     {kDevRegMetrics, kDevRegMetricsFName},
     {kDevBaseBoardTempMetrics, kDevBaseBoardTempMetricsFName},
     {kDevGpuBoardTempMetrics, kDevGpuBoardTempMetricsFName},
+    {kDevBaseBoardPower, kDevBaseBoardPowerFName},
+    {kDevBaseBoardPowerLimit, kDevBaseBoardPowerLimitFName},
     {kDevPtlSupported, kDevPtlSupportedFName},
     {kDevPtlStatus, kDevPtlStatusFName},
     {kDevPtlFormat, kDevPtlFormatFName},
@@ -511,6 +515,8 @@ Device::devInfoTypesStrings = {
   {kDevRegMetrics, "kDevRegMetrics"},
   {kDevBaseBoardTempMetrics, "kDevBaseBoardTempMetrics"},
   {kDevGpuBoardTempMetrics, "kDevGpuBoardTempMetrics"},
+  {kDevBaseBoardPower, "kDevBaseBoardPower"},
+  {kDevBaseBoardPowerLimit, "kDevBaseBoardPowerLimit"},
   {kDevGpuReset, "kDevGpuReset"},
   {kDevAvailableComputePartition, "kDevAvailableComputePartition"},
   {kDevComputePartition, "kDevComputePartition"},
@@ -1361,6 +1367,8 @@ int Device::readDevInfo(DevInfoTypes type, uint64_t *val) {
     case kDevDFCountersAvailable:
     case kDevMemBusyPercent:
     case kDevXGMIError:
+    case kDevBaseBoardPower:
+    case kDevBaseBoardPowerLimit:
       ret = readDevInfoStr(type, &tempStr);
       RET_IF_NONZERO(ret);
       if (tempStr.empty()) {

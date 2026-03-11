@@ -352,6 +352,29 @@ bool HostBlitManager::copyBufferRect(device::Memory& srcMemory, device::Memory& 
   return true;
 }
 
+bool HostBlitManager::copyBufferBatch(std::vector<amd::BatchCopyOp>& copyOps) const {
+  // Default implementation falls back to individual copies
+  for (auto& op : copyOps) {
+    if (op.srcMemory == nullptr || op.dstMemory == nullptr) {
+      return false;
+    }
+    device::Memory* srcDevMem = op.srcMemory->getDeviceMemory(
+        *op.srcMemory->getContext().devices()[0]);
+    device::Memory* dstDevMem = op.dstMemory->getDeviceMemory(
+        *op.dstMemory->getContext().devices()[0]);
+    if (srcDevMem == nullptr || dstDevMem == nullptr) {
+      return false;
+    }
+    amd::Coord3D srcOrigin(op.srcOffset);
+    amd::Coord3D dstOrigin(op.dstOffset);
+    amd::Coord3D size(op.size);
+    if (!copyBuffer(*srcDevMem, *dstDevMem, srcOrigin, dstOrigin, size, false, op.metadata)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 bool HostBlitManager::copyImageToBuffer(device::Memory& srcMemory, device::Memory& dstMemory,
                                         const amd::Coord3D& srcOrigin,
                                         const amd::Coord3D& dstOrigin, const amd::Coord3D& size,

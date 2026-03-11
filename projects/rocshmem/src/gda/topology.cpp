@@ -56,22 +56,22 @@ namespace rocshmem
 
     long const retCode = numa.move_pages(0, numPages, pages.data(), NULL, status.data(), 0);
     if (retCode) {
-      fprintf(stderr,"Unable to collect page table information for allocated memory. "
-              "Ensure NUMA library is installed properly");
+      fprintf(stderr, "Unable to collect page table information for allocated memory. "
+              "Ensure NUMA library is installed properly\n");
       return -1;
     }
 
     size_t mistakeCount = 0;
     for (size_t i = 0; i < numPages; i++) {
       if (status[i] < 0) {
-        fprintf(stderr, "Unexpected page status (%d) for page %zu", status[i], i);
+        fprintf(stderr, "Unexpected page status (%d) for page %zu\n", status[i], i);
         return -1;
       }
       if (status[i] != targetId) mistakeCount++;
     }
     if (mistakeCount > 0) {
-      fprintf(stderr, "%lu out of %lu pages for memory allocation were not on NUMA node %d."
-              " This could be due to hardware memory issues, or the use of numa-rebalancing daemons such as numad",
+      fprintf(stderr, "%zu out of %zu pages for memory allocation were not on NUMA node %d.\n"
+              " This could be due to hardware memory issues, or the use of numa-rebalancing daemons such as numad\n",
               mistakeCount, numPages, targetId);
       return -1;
     }
@@ -226,29 +226,6 @@ namespace rocshmem
            memDevice.memType, memDevice.memIndex);
     return -1;
   }
-
-  // Structure to track PCIe topology
-  struct PCIeNode
-  {
-    std::string        address;                   ///< PCIe address for this PCIe node
-    std::string        description;               ///< Description for this PCIe node
-    std::set<PCIeNode> children;                  ///< Children PCIe nodes
-
-    // Default constructor
-    PCIeNode() : address(""), description("") {}
-
-    // Constructor
-    PCIeNode(std::string const& addr) : address(addr) {}
-
-    // Constructor
-    PCIeNode(std::string const& addr, std::string const& desc)
-      :address(addr), description(desc) {}
-
-    // Comparison operator for std::set
-    bool operator<(PCIeNode const& other) const {
-      return address < other.address;
-    }
-  };
 
   // Structure to track information about IBV devices
   struct IbvDevice
@@ -487,10 +464,105 @@ namespace rocshmem
     }
   }
 
+  // Function to extract the bus number from a PCIe address (domain:bus:device.function)
+  int ExtractBusNumber(std::string const& pcieAddress)
+  {
+    int domain, bus, device, function;
+    char delimiter;
+
+    std::istringstream iss(pcieAddress);
+    iss >> std::hex >> domain >> delimiter >> bus >> delimiter >> device >> delimiter >> function;
+    if (iss.fail()) {
+#ifdef VERBS_DEBUG
+      printf("Invalid PCIe address format: %s\n", pcieAddress.c_str());
+#endif
+      return -1;
+    }
+    return bus;
+  }
+
+  // Function to compute the distance between two bus IDs
+  int GetBusIdDistance(std::string const& pcieAddress1,
+                       std::string const& pcieAddress2)
+  {
+    int bus1 = ExtractBusNumber(pcieAddress1);
+    int bus2 = ExtractBusNumber(pcieAddress2);
+    return (bus1 < 0 || bus2 < 0) ? -1 : std::abs(bus1 - bus2);
+  }
+
+  static std::string GetPCIeVendor(std::string const& address)
+  {
+    std::string vendor;
+    if (!address.empty() && ExtractBusNumber(address) != -1) {
+      std::filesystem::path devicePath = "/sys/bus/pci/devices/" + address + "/vendor";
+
+      std::error_code ec;
+      std::filesystem::path cPath = std::filesystem::canonical(devicePath, ec);
+      if (!ec) {
+        std::string canonicalPath = cPath.string();
+        if (std::filesystem::exists(canonicalPath)) {
+          std::ifstream file(canonicalPath);
+          if (file.is_open()) {
+            std::getline(file, vendor);
+          }
+        }
+      }
+    }
+
+    return vendor;
+  }
+
+  static std::string GetBcmLink(std::string const& address)
+  {
+    std::filesystem::path devicePath = "/sys/kernel/pci_switch_link/virtual_switch_links/" + address;
+    std::string peer;
+
+    if (std::filesystem::exists(devicePath)) {
+      for (const auto& entry : std::filesystem::directory_iterator(devicePath)) {
+        if (std::filesystem::is_directory(entry.path())) {
+          // Get the directory name (filename component of the path)
+          peer = entry.path().filename().string();
+        }
+      }
+    }
+
+    return peer;
+  }
+
+  static void ResolveVirtualP2Plinks(PCIeNode& pcieRoot)
+  {
+    std::vector<PCIeNode*> virt_links;
+
+    std::function<void(PCIeNode&)> traverse = [&](PCIeNode& node) {
+      if (node.is_virtual_p2p_link) {
+        virt_links.push_back(&node);
+      }
+      for (auto& child : node.children) {
+        traverse(const_cast<PCIeNode&>(child));
+      }
+    };
+    traverse(pcieRoot);
+
+    std::function<PCIeNode*(PCIeNode&, PCIeNode&)> findNode = [&](PCIeNode& virtNode, PCIeNode& node) -> PCIeNode* {
+      if (node.address == virtNode.address && node.children.size() > 0) {
+        return &node;
+      }
+      for (auto& child : node.children) {
+        PCIeNode* result = findNode(virtNode, const_cast<PCIeNode&>(child));
+        if (result) return result;
+      }
+      return nullptr;
+    };
+
+    for (auto virtNode : virt_links) {
+      virtNode->p2p_node = findNode(*virtNode, pcieRoot);
+    }
+  }
+
   // Inserts nodes along pcieAddress down a tree starting from root
-  static int InsertPCIePathToTree(std::string const& pcieAddress,
-                                  std::string const& description,
-                                  PCIeNode&          root)
+  int InsertPCIePathToTree(std::string const& pcieAddress,
+                           std::string const& description,
+                           PCIeNode&          root)
   {
     std::filesystem::path devicePath = "/sys/bus/pci/devices/" + pcieAddress;
     std::string canonicalPath = std::filesystem::canonical(devicePath).string();
@@ -502,10 +574,20 @@ namespace rocshmem
 
     std::istringstream iss(canonicalPath);
     std::string token;
+    std::string bcmVendorString = "0x1000";
 
     PCIeNode* currNode = &root;
     while (std::getline(iss, token, '/')) {
       auto it = (currNode->children.insert(PCIeNode(token))).first;
+      std::string vendor = GetPCIeVendor(token);
+      if (!vendor.empty() && vendor == bcmVendorString) {
+        std::string peer = GetBcmLink(token);
+        // Current configuration will lead to exactly one P2P link per PCIe switch
+        if (!peer.empty()) {
+          PCIeNode* peerIt = const_cast<PCIeNode*>(&(*currNode->children.insert(PCIeNode(peer, "Virtual P2P Link")).first));
+          peerIt->is_virtual_p2p_link = true;
+        }
+      }
       currNode = const_cast<PCIeNode*>(&(*it));
     }
     currNode->description = description;
@@ -537,6 +619,11 @@ namespace rocshmem
           InsertPCIePathToTree(hipPciBusId, "GPU " + std::to_string(i), pcieRoot);
         }
       }
+
+      // Resolve virtual P2P links. For every child PCIeNode that is marked
+      // as a p2p virtual link we store a pointer to actual PCIe node.
+      ResolveVirtualP2Plinks(pcieRoot);
+
 #ifdef VERBS_DEBUG
       PrintPCIeTree(pcieRoot);
 #endif
@@ -545,10 +632,11 @@ namespace rocshmem
     return &pcieRoot;
   }
 
-  // Finds the lowest common ancestor in PCIe tree between two nodes
-  static PCIeNode const* GetLcaBetweenNodes(PCIeNode    const* root,
-                                            std::string const& node1Address,
-                                            std::string const& node2Address)
+  // Finds the lowest common ancestor in PCIe tree between two nodes (recursive helper)
+  static PCIeNode const* GetLcaBetweenNodesRecursive(PCIeNode    const* root,
+                                                     std::string const& node1Address,
+                                                     std::string const& node2Address,
+                                                     std::vector<PCIeNode*>& lca_candidates)
   {
     if (!root || root->address == node1Address || root->address == node2Address)
       return root;
@@ -558,7 +646,13 @@ namespace rocshmem
 
     // Recursively iterate over children
     for (auto const& child : root->children) {
-      PCIeNode const* lca = GetLcaBetweenNodes(&child, node1Address, node2Address);
+      PCIeNode* targetChild = const_cast<PCIeNode*>(&child);
+      if (child.is_virtual_p2p_link && child.p2p_node && child.children.size() == 0){
+        // Switch the search from the virtual link to the actual link
+        targetChild = child.p2p_node;
+      }
+      PCIeNode const* lca = GetLcaBetweenNodesRecursive(const_cast<PCIeNode const*>(targetChild),
+                                                        node1Address, node2Address, lca_candidates);
       if (!lca) continue;
       if (!lcaFound1) {
         // First time found
@@ -570,14 +664,18 @@ namespace rocshmem
       }
     }
 
+    if (lcaFound1 && lcaFound2) {
+      lca_candidates.push_back(const_cast<PCIeNode*>(root));
+    }
+
     // If two children were found, then current node is the lowest common ancestor
     return (lcaFound1 && lcaFound2) ? root : lcaFound1;
   }
 
   // Gets the depth of an node in the PCIe tree
-  static int GetLcaDepth(std::string const&     targetBusID,
-                         PCIeNode const* const& node,
-                         int                    depth = 0)
+  int GetLcaDepth(std::string const&     targetBusID,
+                  PCIeNode const* const& node,
+                  int                    depth)
   {
     if (!node) return -1;
     if (targetBusID == node->address) return depth;
@@ -590,49 +688,64 @@ namespace rocshmem
     return -1;
   }
 
-  // Function to extract the bus number from a PCIe address (domain:bus:device.function)
-  static int ExtractBusNumber(std::string const& pcieAddress)
+  // Find a PCIe node by address in the tree
+  static PCIeNode const* GetPCIeNode(std::string const& address,
+                                     PCIeNode const* root)
   {
-    int domain, bus, device, function;
-    char delimiter;
+    if (!root) return nullptr;
+    if (root->address == address) return root;
 
-    std::istringstream iss(pcieAddress);
-    iss >> std::hex >> domain >> delimiter >> bus >> delimiter >> device >> delimiter >> function;
-    if (iss.fail()) {
-#ifdef VERBS_DEBUG
-      printf("Invalid PCIe address format: %s\n", pcieAddress.c_str());
-#endif
-      return -1;
+    // Recursively search children
+    for (auto const& child : root->children) {
+      PCIeNode const* found = GetPCIeNode(address, &child);
+      if (found) return found;
     }
-    return bus;
+
+    return nullptr;
   }
 
-  // Function to compute the distance between two bus IDs
-  static int GetBusIdDistance(std::string const& pcieAddress1,
-                              std::string const& pcieAddress2)
+  // Public wrapper for GetLcaBetweenNodesRecursive
+  PCIeNode const* GetLcaBetweenNodes(PCIeNode    const* root,
+                                     std::string const& node1Address,
+                                     std::string const& node2Address)
   {
-    int bus1 = ExtractBusNumber(pcieAddress1);
-    int bus2 = ExtractBusNumber(pcieAddress2);
-    return (bus1 < 0 || bus2 < 0) ? -1 : std::abs(bus1 - bus2);
+    std::vector<PCIeNode*> lca_candidates;
+    int maxDepth = -1;
+    if (node1Address == node2Address) {
+      return GetPCIeNode(node1Address, root);
+    }
+
+    PCIeNode const* lca{nullptr};
+    (void) GetLcaBetweenNodesRecursive(root, node1Address, node2Address, lca_candidates);
+    for (auto tmplca : lca_candidates) {
+      int depth = GetLcaDepth(tmplca->address, root);
+      if (depth > maxDepth) {
+        maxDepth = depth;
+        lca = tmplca;
+      }
+    }
+
+    return lca;
   }
 
   // Given a target busID and a set of candidate devices, returns a set of indices
-  // that is "closest" to the target
-  static std::set<int> GetNearestDevicesInTree(std::string              const& targetBusId,
-                                               std::vector<std::string> const& candidateBusIdList)
+  // that is "closest" to the target (using custom root)
+  std::set<int> GetNearestDevicesInTree(std::string              const& targetBusId,
+                                        std::vector<std::string> const& candidateBusIdList,
+                                        PCIeNode                 const* root)
   {
     int maxDepth = -1;
     int minDistance = std::numeric_limits<int>::max();
     std::set<int> matches = {};
 
     // Loop over the candidates to find the ones with the lowest common ancestor (LCA)
-    for (int i = 0; i < candidateBusIdList.size(); i++) {
+    for (size_t i = 0; i < candidateBusIdList.size(); i++) {
       std::string const& candidateBusId = candidateBusIdList[i];
       if (candidateBusId == "") continue;
-      PCIeNode const* lca = GetLcaBetweenNodes(GetPCIeTreeRoot(), targetBusId, candidateBusId);
+      PCIeNode const* lca = GetLcaBetweenNodes(root, targetBusId, candidateBusId);
       if (!lca) continue;
 
-      int depth = GetLcaDepth(lca->address, GetPCIeTreeRoot());
+      int depth = GetLcaDepth(lca->address, root);
       int currDistance = GetBusIdDistance(targetBusId, candidateBusId);
 
       // When more than one LCA match is found, choose the one with smallest busId difference
@@ -648,6 +761,14 @@ namespace rocshmem
       }
     }
     return matches;
+  }
+
+  // Given a target busID and a set of candidate devices, returns a set of indices
+  // that is "closest" to the target (using system PCIe tree)
+  std::set<int> GetNearestDevicesInTree(std::string              const& targetBusId,
+                                        std::vector<std::string> const& candidateBusIdList)
+  {
+    return GetNearestDevicesInTree(targetBusId, candidateBusIdList, GetPCIeTreeRoot());
   }
 
   int GetNumDevices(DeviceType exeType)
@@ -673,6 +794,9 @@ namespace rocshmem
 
   int GetClosestCpuNumaToGpu(int gpuIndex)
   {
+    int numGpus = GetNumDevices(rocshmem::EXE_GPU);
+    if (gpuIndex < 0 || gpuIndex >= numGpus) return -1;
+
     hsa_agent_t gpuAgent;
     ERR_CHECK(GetHsaAgent({EXE_GPU, gpuIndex}, gpuAgent));
 
@@ -696,8 +820,19 @@ namespace rocshmem
     return GetIbvDeviceList()[nicIndex].numaNode;
   }
 
+  static bool hasExactMatch(const std::string& namesList, const std::string& name) {
+    std::stringstream ss(namesList);
+    std::string token;
 
-  int GetClosestNicToGpu(int gpuIndex, const char** dev_name)
+    while (std::getline(ss, token, ',')) {
+      if (token == name) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  int GetClosestNicToGpu(int gpuIndex, const char* hca_list, const char** dev_name)
   {
     static bool isInitialized = false;
     static std::vector<int> closestNicId;
@@ -712,8 +847,13 @@ namespace rocshmem
 
       // Build up list of NIC bus addresses
       std::vector<std::string> ibvAddressList;
-      for (auto const& ibvDevice : ibvDeviceList)
-        ibvAddressList.push_back(ibvDevice.hasActivePort ? ibvDevice.busId : "");
+      std::string excludeList((nullptr != hca_list && hca_list[0] == '^')? &hca_list[1]: "");
+      std::string includeList((nullptr != hca_list && hca_list[0] != '^')? hca_list: "");
+      for (auto const& ibvDevice : ibvDeviceList) {
+        auto is_excluded = hasExactMatch(excludeList, ibvDevice.name)
+                        || (includeList.length() && !hasExactMatch(includeList, ibvDevice.name));
+        ibvAddressList.push_back((ibvDevice.hasActivePort && !is_excluded) ? ibvDevice.busId : "");
+      }
 
       // Track how many times a device has been assigned as "closest"
       // This allows distributed work across devices using multiple ports (sharing the same busID)
@@ -759,9 +899,9 @@ namespace rocshmem
 #endif
 
           int minDistance = std::numeric_limits<int>::max();
-          for (int j = 0; j < ibvDeviceList.size(); j++) {
-            if (ibvDeviceList[j].busId != "") {
-              int distance = GetBusIdDistance(hipPciBusId, ibvDeviceList[j].busId);
+          for (int j = 0; j < ibvAddressList.size(); j++) {
+            if (ibvAddressList[j] != "") {
+              int distance = GetBusIdDistance(hipPciBusId, ibvAddressList[j]);
               if (distance < minDistance && distance >= 0) {
                 minDistance = distance;
                 closestIdx = j;
@@ -775,10 +915,11 @@ namespace rocshmem
       isInitialized = true;
     }
 
-    DPRINTF("GPU Device id: %d closest NIC id : %d name: %s\n", gpuIndex, closestNicId[gpuIndex],
-           ibvDeviceList[closestNicId[gpuIndex]].name.c_str());
-    if (dev_name != nullptr) {
-      *dev_name = strdup(ibvDeviceList[closestNicId[gpuIndex]].name.c_str());
+    int closestIdx = closestNicId[gpuIndex];
+    DPRINTF("GPU Device id: %d closest NIC id : %d name: %s\n", gpuIndex, closestIdx,
+           (-1 != closestIdx)? ibvDeviceList[closestIdx].name.c_str(): "none-found");
+    if (dev_name != nullptr && closestIdx != -1) {
+      *dev_name = strdup(ibvDeviceList[closestIdx].name.c_str());
     }
 
     return closestNicId[gpuIndex];
@@ -810,7 +951,7 @@ namespace rocshmem
 
       std::string closestGpusStr = "";
       for (int j = 0; j < numGpus; j++) {
-        if (rocshmem::GetClosestNicToGpu(j, nullptr) == i) {
+        if (rocshmem::GetClosestNicToGpu(j, nullptr, nullptr) == i) {
           if (closestGpusStr != "") closestGpusStr += ",";
           closestGpusStr += std::to_string(j);
         }
@@ -848,6 +989,9 @@ namespace rocshmem
       printf("  %d Supported NIC device(s)\n", numNics);
     }
 
+    // Print out detected NIC topology
+    PrintNicToGPUTopo(outputToCsv);
+
     // Print out detected CPU topology
     printf("\n            %c", sep);
     for (int j = 0; j < numCpus; j++)
@@ -883,8 +1027,5 @@ namespace rocshmem
       printf("\n");
     }
     printf("\n");
-
-    // Print out detected NIC topology
-    PrintNicToGPUTopo(outputToCsv);
   }
 }

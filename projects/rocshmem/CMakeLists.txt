@@ -22,7 +22,7 @@
 # IN THE SOFTWARE.
 ###############################################################################
 
-cmake_minimum_required(VERSION 3.16.3 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.20 FATAL_ERROR)
 
 ###############################################################################
 # AVOID IN SOURCE BUILD
@@ -49,11 +49,6 @@ option(USE_WF_COAL "Enable wavefront message coalescing" OFF)
 option(USE_HEAP_DEVICE_FINEGRAIN "Heap uses GPU memory in finegrain mode" ON)
 option(USE_HEAP_DEVICE_UNCACHED "Heap uses GPU memory in uncached mode" OFF)
 option(USE_HEAP_DEVICE_COARSEGRAIN "Heap uses GPU memory in coarsegrain mode" OFF)
-option(USE_HEAP_MANAGED "Heap uses managed memory" OFF)
-option(USE_HEAP_HOST_HIP "Heap uses pinned host memory allocated with hip api" OFF)
-option(USE_HEAP_HOST "Heap uses host memory allocated with malloc/free" OFF)
-option(USE_ALLOC_DLMALLOC "Enable dlmalloc device memory allocator" ON)
-option(USE_ALLOC_POW2BINS "Enable legacy Pow2Bins device memory allocator" OFF)
 option(USE_FUNC_CALL "Force compiler to use function calls on library API" OFF)
 option(USE_SHARED_CTX "Request support for shared ctx between WG" OFF)
 option(USE_SINGLE_NODE "Enable single node support only." OFF)
@@ -61,7 +56,7 @@ option(USE_HDP_FLUSH "Force flush the HDP cache." OFF)
 option(USE_HDP_FLUSH_HOST_SIDE "Use a polling thread to flush the HDP cache on the host." OFF)
 
 option(BUILD_FUNCTIONAL_TESTS "Build the functional tests (Requires MPI)" OFF)
-option(BUILD_EXAMPLES "Build the examples" ON)
+option(BUILD_EXAMPLES "Build the examples" OFF)
 option(BUILD_UNIT_TESTS "Build the unit tests (Requires MPI)" OFF)
 option(BUILD_TESTS_ONLY "Build only tests. Used to link agains rocSHMEM in a ROCm Release" OFF)
 option(BUILD_TOOLS "Build binary tools (e.g., rocshmem_info)" ON)
@@ -166,6 +161,7 @@ if (NOT BUILD_TESTS_ONLY)
   else()
     set(HAVE_EXTERNAL_MPI OFF)
     set(BUILD_UNIT_TESTS OFF)
+    set(BUILD_EXAMPLES OFF)
   endif()
 
   if (USE_EXTERNAL_MPI STREQUAL "ON")
@@ -180,6 +176,14 @@ if (NOT BUILD_TESTS_ONLY)
   set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
   set(THREADS_PREFER_PTHREAD_FLAG TRUE)
   find_package(Threads REQUIRED)
+
+  if(${ROCM_MAJOR_VERSION} GREATER_EQUAL 6 )
+    set(HAVE_DEVICE_MALLOC_UNCACHED ON)
+  elseif (${ROCM_MAJOR_VERSION} EQUAL 5 AND ${ROCM_MINOR_VERSION} GREATER_EQUAL 5)
+    set(HAVE_DEVICE_MALLOC_UNCACHED ON)
+  else()
+    set(HAVE_DEVICE_MALLOC_UNCACHED OFF)
+  endif()
 
   configure_file(cmake/rocshmem_config.h.in include/rocshmem/rocshmem_config.h)
 

@@ -33,20 +33,9 @@ THE SOFTWARE.
  * calculates maximum between address and val, returns old value.
  */
 
-/**
- * Test Description
- * ------------------------
- *  - Performs atomicMax from multiple threads on the same address.
- *  - Uses only one device and launches one kernel.
- * Test source
- * ------------------------
- *  - unit/atomics/atomicMax.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 5.2
- */
-TEMPLATE_TEST_CASE("Unit_atomicMax_Positive_SameAddress", "", int, unsigned int, unsigned long,
-                   unsigned long long, float, double) {
+// Helper function to run atomicMax tests for same address (single kernel)
+template <typename TestType>
+static void runAtomicMaxSameAddressTest() {
   for (auto current = 0; current < cmd_options.iterations; ++current) {
     DYNAMIC_SECTION("Same address " << current) {
       MinMax::SingleDeviceSingleKernelTest<TestType, MinMax::AtomicOperation::kMax>(
@@ -55,20 +44,9 @@ TEMPLATE_TEST_CASE("Unit_atomicMax_Positive_SameAddress", "", int, unsigned int,
   }
 }
 
-/**
- * Test Description
- * ------------------------
- *  - Performs atomicMax from multiple threads on adjacent addresses.
- *  - Uses only one device and launches one kernel.
- * Test source
- * ------------------------
- *  - unit/atomics/atomicMax.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 5.2
- */
-TEMPLATE_TEST_CASE("Unit_atomicMax_Positive_Adjacent_Addresses", "", int, unsigned int,
-                   unsigned long, unsigned long long, float, double) {
+// Helper function to run atomicMax tests for adjacent addresses (single kernel)
+template <typename TestType>
+static void runAtomicMaxAdjacentAddressesTest() {
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
 
@@ -80,20 +58,9 @@ TEMPLATE_TEST_CASE("Unit_atomicMax_Positive_Adjacent_Addresses", "", int, unsign
   }
 }
 
-/**
- * Test Description
- * ------------------------
- *  - Performs atomicMax from multiple threads on the scaterred addresses.
- *  - Uses only one device and launches one kernel.
- * Test source
- * ------------------------
- *  - unit/atomics/atomicMax.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 5.2
- */
-TEMPLATE_TEST_CASE("Unit_atomicMax_Positive_Scattered_Addresses", "", int, unsigned int,
-                   unsigned long, unsigned long long, float, double) {
+// Helper function to run atomicMax tests for scattered addresses (single kernel)
+template <typename TestType>
+static void runAtomicMaxScatteredAddressesTest() {
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
   const auto cache_line_size = 128u;
@@ -106,20 +73,9 @@ TEMPLATE_TEST_CASE("Unit_atomicMax_Positive_Scattered_Addresses", "", int, unsig
   }
 }
 
-/**
- * Test Description
- * ------------------------
- *  - Performs atomicMax from multiple threads on the same address.
- *  - Uses only one device and launches multiple kernels.
- * Test source
- * ------------------------
- *  - unit/atomics/atomicMax.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 5.2
- */
-TEMPLATE_TEST_CASE("Unit_atomicMax_Positive_Multi_Kernel_Same_Address", "", int, unsigned int,
-                   unsigned long, unsigned long long, float, double) {
+// Helper function to run atomicMax tests for same address (multiple kernels)
+template <typename TestType>
+static void runAtomicMaxMultiKernelSameAddressTest() {
   for (auto current = 0; current < cmd_options.iterations; ++current) {
     DYNAMIC_SECTION("Same address " << current) {
       MinMax::SingleDeviceMultipleKernelTest<TestType, MinMax::AtomicOperation::kMax>(
@@ -128,20 +84,9 @@ TEMPLATE_TEST_CASE("Unit_atomicMax_Positive_Multi_Kernel_Same_Address", "", int,
   }
 }
 
-/**
- * Test Description
- * ------------------------
- *  - Performs atomicMax from multiple threads on adjacent addresses.
- *  - Uses only one device and launches multiple kernels.
- * Test source
- * ------------------------
- *  - unit/atomics/atomicMax.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 5.2
- */
-TEMPLATE_TEST_CASE("Unit_atomicMax_Positive_Multi_Kernel_Adjacent_Addresses", "", int, unsigned int,
-                   unsigned long, unsigned long long, float, double) {
+// Helper function to run atomicMax tests for adjacent addresses (multiple kernels)
+template <typename TestType>
+static void runAtomicMaxMultiKernelAdjacentAddressesTest() {
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
 
@@ -153,20 +98,9 @@ TEMPLATE_TEST_CASE("Unit_atomicMax_Positive_Multi_Kernel_Adjacent_Addresses", ""
   }
 }
 
-/**
- * Test Description
- * ------------------------
- *  - Performs atomicMax from multiple threads on the scaterred addresses.
- *  - Uses only one device and launches multiple kernels.
- * Test source
- * ------------------------
- *  - unit/atomics/atomicMax.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 5.2
- */
-TEMPLATE_TEST_CASE("Unit_atomicMax_Positive_Multi_Kernel_Scattered_Addresses", "", int,
-                   unsigned int, unsigned long, unsigned long long, float, double) {
+// Helper function to run atomicMax tests for scattered addresses (multiple kernels)
+template <typename TestType>
+static void runAtomicMaxMultiKernelScatteredAddressesTest() {
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
   const auto cache_line_size = 128u;
@@ -182,6 +116,136 @@ TEMPLATE_TEST_CASE("Unit_atomicMax_Positive_Multi_Kernel_Scattered_Addresses", "
 /**
  * Test Description
  * ------------------------
+ *  - Performs atomicMax from multiple threads on the same address.
+ *  - Uses only one device and launches one kernel.
+ * Test source
+ * ------------------------
+ *  - unit/atomics/atomicMax.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 5.2
+ */
+TEST_CASE("Unit_atomicMax_Positive_SameAddress") {
+  SECTION("int") { runAtomicMaxSameAddressTest<int>(); }
+  SECTION("unsigned int") { runAtomicMaxSameAddressTest<unsigned int>(); }
+  SECTION("unsigned long") { runAtomicMaxSameAddressTest<unsigned long>(); }
+  SECTION("unsigned long long") { runAtomicMaxSameAddressTest<unsigned long long>(); }
+  SECTION("float") { runAtomicMaxSameAddressTest<float>(); }
+  SECTION("double") { runAtomicMaxSameAddressTest<double>(); }
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Performs atomicMax from multiple threads on adjacent addresses.
+ *  - Uses only one device and launches one kernel.
+ * Test source
+ * ------------------------
+ *  - unit/atomics/atomicMax.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 5.2
+ */
+TEST_CASE("Unit_atomicMax_Positive_Adjacent_Addresses") {
+  SECTION("int") { runAtomicMaxAdjacentAddressesTest<int>(); }
+  SECTION("unsigned int") { runAtomicMaxAdjacentAddressesTest<unsigned int>(); }
+  SECTION("unsigned long") { runAtomicMaxAdjacentAddressesTest<unsigned long>(); }
+  SECTION("unsigned long long") { runAtomicMaxAdjacentAddressesTest<unsigned long long>(); }
+  SECTION("float") { runAtomicMaxAdjacentAddressesTest<float>(); }
+  SECTION("double") { runAtomicMaxAdjacentAddressesTest<double>(); }
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Performs atomicMax from multiple threads on the scaterred addresses.
+ *  - Uses only one device and launches one kernel.
+ * Test source
+ * ------------------------
+ *  - unit/atomics/atomicMax.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 5.2
+ */
+TEST_CASE("Unit_atomicMax_Positive_Scattered_Addresses") {
+  SECTION("int") { runAtomicMaxScatteredAddressesTest<int>(); }
+  SECTION("unsigned int") { runAtomicMaxScatteredAddressesTest<unsigned int>(); }
+  SECTION("unsigned long") { runAtomicMaxScatteredAddressesTest<unsigned long>(); }
+  SECTION("unsigned long long") { runAtomicMaxScatteredAddressesTest<unsigned long long>(); }
+  SECTION("float") { runAtomicMaxScatteredAddressesTest<float>(); }
+  SECTION("double") { runAtomicMaxScatteredAddressesTest<double>(); }
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Performs atomicMax from multiple threads on the same address.
+ *  - Uses only one device and launches multiple kernels.
+ * Test source
+ * ------------------------
+ *  - unit/atomics/atomicMax.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 5.2
+ */
+TEST_CASE(Unit_atomicMax_Positive_Multi_Kernel_Same_Address) {
+  SECTION("int") { runAtomicMaxMultiKernelSameAddressTest<int>(); }
+  SECTION("unsigned int") { runAtomicMaxMultiKernelSameAddressTest<unsigned int>(); }
+  SECTION("unsigned long") { runAtomicMaxMultiKernelSameAddressTest<unsigned long>(); }
+  SECTION("unsigned long long") { runAtomicMaxMultiKernelSameAddressTest<unsigned long long>(); }
+  SECTION("float") { runAtomicMaxMultiKernelSameAddressTest<float>(); }
+  SECTION("double") { runAtomicMaxMultiKernelSameAddressTest<double>(); }
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Performs atomicMax from multiple threads on adjacent addresses.
+ *  - Uses only one device and launches multiple kernels.
+ * Test source
+ * ------------------------
+ *  - unit/atomics/atomicMax.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 5.2
+ */
+TEST_CASE(Unit_atomicMax_Positive_Multi_Kernel_Adjacent_Addresses) {
+  SECTION("int") { runAtomicMaxMultiKernelAdjacentAddressesTest<int>(); }
+  SECTION("unsigned int") { runAtomicMaxMultiKernelAdjacentAddressesTest<unsigned int>(); }
+  SECTION("unsigned long") { runAtomicMaxMultiKernelAdjacentAddressesTest<unsigned long>(); }
+  SECTION("unsigned long long") {
+    runAtomicMaxMultiKernelAdjacentAddressesTest<unsigned long long>();
+  }
+  SECTION("float") { runAtomicMaxMultiKernelAdjacentAddressesTest<float>(); }
+  SECTION("double") { runAtomicMaxMultiKernelAdjacentAddressesTest<double>(); }
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Performs atomicMax from multiple threads on the scaterred addresses.
+ *  - Uses only one device and launches multiple kernels.
+ * Test source
+ * ------------------------
+ *  - unit/atomics/atomicMax.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 5.2
+ */
+TEST_CASE(Unit_atomicMax_Positive_Multi_Kernel_Scattered_Addresses) {
+  SECTION("int") { runAtomicMaxMultiKernelScatteredAddressesTest<int>(); }
+  SECTION("unsigned int") { runAtomicMaxMultiKernelScatteredAddressesTest<unsigned int>(); }
+  SECTION("unsigned long") { runAtomicMaxMultiKernelScatteredAddressesTest<unsigned long>(); }
+  SECTION("unsigned long long") {
+    runAtomicMaxMultiKernelScatteredAddressesTest<unsigned long long>();
+  }
+  SECTION("float") { runAtomicMaxMultiKernelScatteredAddressesTest<float>(); }
+  SECTION("double") { runAtomicMaxMultiKernelScatteredAddressesTest<double>(); }
+}
+
+/**
+ * Test Description
+ * ------------------------
  *  - Compiles atomicMax with invalid parameters.
  *  - Compiles the source with RTC.
  * Test source
@@ -191,7 +255,7 @@ TEMPLATE_TEST_CASE("Unit_atomicMax_Positive_Multi_Kernel_Scattered_Addresses", "
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_atomicMax_Negative_Parameters_RTC") {
+TEST_CASE(Unit_atomicMax_Negative_Parameters_RTC) {
   hiprtcProgram program{};
 
   const auto program_source = GENERATE(kAtomicMax_int, kAtomicMax_uint, kAtomicMax_ulong,

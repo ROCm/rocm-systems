@@ -186,6 +186,7 @@ TEST_CASE("Unit_hipFreeNegativeHost") {
                          hipHostRegisterIoMemory);
     HIP_CHECK(hipHostRegister((void*)hostPtr, sizeof(char), flag));
     HIP_CHECK_ERROR(hipHostFree(hostPtr), hipErrorInvalidValue);
+    HIP_CHECK(hipHostUnregister(hostPtr));
     delete hostPtr;
   }
 #endif
@@ -219,6 +220,7 @@ TEST_CASE("Unit_hipFreeDoubleDevice") {
   HIP_CHECK(hipFree(ptr));
   HIP_CHECK_ERROR(hipFree(ptr), hipErrorInvalidValue);
 }
+
 TEST_CASE("Unit_hipFreeDoubleHost") {
   size_t width = GENERATE(32, 512, 1024);
   char* ptr{};

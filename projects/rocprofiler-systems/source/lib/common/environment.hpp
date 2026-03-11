@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier:  MIT
 
 #pragma once
 
@@ -494,16 +475,46 @@ add_torch_library_path(std::vector<char*>& envp, const std::vector<char*>& argv,
     updated_envs.emplace(ld_prefix.substr(0, ld_prefix.length() - 1));
 }
 
+/// @brief Consolidates duplicate environment variable entries by merging their values.
+///
+/// When building an environment for execve(), multiple entries for the same variable
+/// may accumulate. This function merges them into single entries with unique values.
+///
+/// For most variables, values are split and joined using ':' (e.g., PATH,
+/// LD_LIBRARY_PATH). Certain variables that use ':' in their value syntax use ',' as the
+/// delimiter instead.
+///
+/// @param envp Vector of environment strings in "KEY=VALUE" format. Modified in place.
+///             Original strings are freed; new strings are allocated with strdup().
+///
+/// Example transformations:
+///   - PATH=/usr/bin + PATH=/usr/local/bin -> PATH=/usr/bin:/usr/local/bin
+///   - ROCPROFSYS_PAPI_EVENTS=perf::A + ROCPROFSYS_PAPI_EVENTS=perf::B
+///         -> ROCPROFSYS_PAPI_EVENTS=perf::A,perf::B
 inline void
 consolidate_env_entries(std::vector<char*>& envp)
 {
-    constexpr char delim = ':';
+    /// Returns the appropriate delimiter character for splitting/joining values.
+    /// Most variables use ':' (like PATH), but some use ':' in their value syntax
+    /// and need ',' instead:
+    /// - ROCPROFSYS_PAPI_EVENTS: uses perf::EVENT_NAME or net:::interface:metric syntax
+    /// - ROCPROFSYS_SAMPLING_OVERFLOW_EVENT: uses perf::EVENT_NAME syntax
+    /// - ROCPROFSYS_ROCM_EVENTS: uses EVENT_NAME:device=N syntax
+    auto get_delimiter = [](std::string_view key) -> char {
+        if(key == "ROCPROFSYS_PAPI_EVENTS" ||
+           key == "ROCPROFSYS_SAMPLING_OVERFLOW_EVENT" || key == "ROCPROFSYS_ROCM_EVENTS")
+            return ',';
+        return ':';
+    };
 
+    /// Stores the parsed and deduplicated parts for a single environment variable.
     struct key_data
     {
-        std::vector<std::string>        parts;
-        std::unordered_set<std::string> seen;
+        std::vector<std::string> parts;  ///< Unique value parts in order of appearance
+        std::unordered_set<std::string> seen;  ///< Tracks seen parts for deduplication
+        char                            delim = ':';  ///< Delimiter for this variable
 
+        /// Adds a part if non-empty and not already seen.
         void add_unique(std::string part)
         {
             if(!part.empty() && seen.insert(part).second)
@@ -511,6 +522,9 @@ consolidate_env_entries(std::vector<char*>& envp)
         }
     };
 
+    /// Parses an environment entry string into key and value components.
+    /// @param entry String in "KEY=VALUE" format
+    /// @return Optional pair of (key, value) views, or nullopt if no '=' found
     auto parse_entry = [](std::string_view entry)
         -> std::optional<std::pair<std::string_view, std::string_view>> {
         auto eq_pos = entry.find('=');
@@ -518,8 +532,13 @@ consolidate_env_entries(std::vector<char*>& envp)
         return std::make_pair(entry.substr(0, eq_pos), entry.substr(eq_pos + 1));
     };
 
-    auto join_parts = [delim](std::string_view                key,
-                              const std::vector<std::string>& parts) {
+    /// Reconstructs an environment entry string from key and value parts.
+    /// @param key   The environment variable name
+    /// @param parts The deduplicated value components
+    /// @param delim The delimiter to use when joining parts
+    /// @return String in "KEY=part1<delim>part2<delim>..." format
+    auto join_parts = [](std::string_view key, const std::vector<std::string>& parts,
+                         char delim) {
         std::string result;
 
         const auto total_parts_length = std::accumulate(
@@ -533,6 +552,7 @@ consolidate_env_entries(std::vector<char*>& envp)
         result.append(key);
         result += '=';
 
+        // Join all parts with the delimiter
         result =
             std::accumulate(parts.begin(), parts.end(), std::move(result),
                             [delim, &parts](std::string acc, const std::string& part) {
@@ -547,6 +567,7 @@ consolidate_env_entries(std::vector<char*>& envp)
     std::unordered_map<std::string_view, key_data> key_map;
     std::vector<std::string_view>                  key_order;
 
+    // Phase 1: Parse all entries and aggregate values by key
     for(auto* entry : envp)
     {
         if(!entry)
@@ -562,28 +583,34 @@ consolidate_env_entries(std::vector<char*>& envp)
 
         auto [key, value] = *parsed;
 
+        // Create new entry if key not seen before, recording its delimiter
         auto [it, inserted] = key_map.try_emplace(key);
         if(inserted)
         {
             key_order.emplace_back(key);
+            it->second.delim = get_delimiter(key);
         }
 
+        // Split value by delimiter and add unique parts
         auto&              data = it->second;
         std::istringstream stream{ std::string{ value } };
-        for(std::string part; std::getline(stream, part, delim);)
+        for(std::string part; std::getline(stream, part, data.delim);)
         {
             data.add_unique(part);
         }
     }
 
+    // Phase 2: Build consolidated result
     std::vector<char*> result;
     result.reserve(key_order.size());
 
     for(auto key : key_order)
     {
-        result.emplace_back(strdup(join_parts(key, key_map[key].parts).c_str()));
+        const auto& data = key_map[key];
+        result.emplace_back(strdup(join_parts(key, data.parts, data.delim).c_str()));
     }
 
+    // Phase 3: Free original entries and replace with consolidated result
     for(auto* entry : envp)
     {
         std::free(entry);

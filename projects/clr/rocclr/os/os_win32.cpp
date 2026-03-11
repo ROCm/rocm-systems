@@ -240,6 +240,38 @@ static void SetThreadName(DWORD threadId, const char* name) {
 
 void Os::setCurrentThreadName(const char* name) { SetThreadName(GetCurrentThreadId(), name); }
 
+// Crash exception handling for Windows
+static Os::CrashCallback crashCallback_ = nullptr;
+static PVOID crashExceptionHandler = NULL;
+
+static LONG WINAPI crashExceptionFilter(struct _EXCEPTION_POINTERS* ep) {
+  DWORD code = ep->ExceptionRecord->ExceptionCode;
+
+  if (code == EXCEPTION_ACCESS_VIOLATION || code == EXCEPTION_STACK_OVERFLOW ||
+      code == EXCEPTION_ILLEGAL_INSTRUCTION || code == EXCEPTION_INT_DIVIDE_BY_ZERO ||
+      code == EXCEPTION_INT_OVERFLOW) {
+    if (crashCallback_ != nullptr) {
+      crashCallback_();
+    }
+  }
+
+  return EXCEPTION_CONTINUE_SEARCH;
+}
+
+bool Os::installExceptionHandlers(CrashCallback callback) {
+  crashCallback_ = callback;
+  crashExceptionHandler = AddVectoredExceptionHandler(1, crashExceptionFilter);
+  return crashExceptionHandler != NULL;
+}
+
+void Os::uninstallExceptionHandlers() {
+  if (crashExceptionHandler != NULL) {
+    RemoveVectoredExceptionHandler(crashExceptionHandler);
+    crashExceptionHandler = NULL;
+  }
+  crashCallback_ = nullptr;
+}
+
 static LONG WINAPI divExceptionFilter(struct _EXCEPTION_POINTERS* ep) {
   DWORD code = ep->ExceptionRecord->ExceptionCode;
 
@@ -639,8 +671,31 @@ bool Os::MemoryMapFileTruncated(const char* fname, const void** mmap_ptr, size_t
 }
 
 bool Os::FindFileNameFromAddress(const void* image, std::string* fname_ptr, size_t* foffset_ptr) {
-  // TODO: Implementation on windows side pending.
-  return false;
+  HMODULE hm = NULL;
+  if (!GetModuleHandleExA(
+          GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+          (LPCSTR)image, &hm)) {
+    return false;
+  }
+
+  // Use a growing buffer to support long paths beyond MAX_PATH.
+  DWORD cap = 512;
+  for (;;) {
+    fname_ptr->resize(cap);
+    DWORD len = GetModuleFileNameA(hm, &(*fname_ptr)[0], cap);
+    if (len == 0) {
+      return false;
+    }
+    if (len < cap) {
+      fname_ptr->resize(len);
+      break;
+    }
+    // Buffer was too small (len == cap means possible truncation).
+    cap *= 2;
+  }
+
+  *foffset_ptr = reinterpret_cast<uintptr_t>(image) - reinterpret_cast<uintptr_t>(hm);
+  return true;
 }
 
 int Os::getProcessId() { return ::_getpid(); }

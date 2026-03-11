@@ -233,6 +233,13 @@ class Context {
                            int nelems);
 
   template <typename T>
+  __device__ void alltoallv(rocshmem_team_t team,
+                            T *dest, const size_t dest_nelems[],
+                            const size_t dest_displs[],
+                            T *source, const size_t source_nelems[],
+                            const size_t source_displs[]);
+
+  template <typename T>
   __device__ void fcollect(rocshmem_team_t team, T* dest, const T* source,
                            int nelems);
 
