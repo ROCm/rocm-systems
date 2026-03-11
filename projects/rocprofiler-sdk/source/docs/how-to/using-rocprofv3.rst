@@ -1044,7 +1044,7 @@ You can specify multiple ``--pmc`` flags to define different counter groups. Eac
 
 .. code-block:: shell
 
-   rocprofv3 --pmc SQ_WAVES  --pmc GRBM_COUNT GRBM_GUI_ACTIVE -- <application_path>
+   rocprofv3 --pmc SQ_WAVES SQ_WAVE_CYCLES --pmc GRBM_COUNT GRBM_GUI_ACTIVE -- <application_path>
 
 This command creates two profiling passes:
 
