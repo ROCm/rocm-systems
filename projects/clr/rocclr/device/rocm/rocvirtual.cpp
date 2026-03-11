@@ -2129,14 +2129,13 @@ void VirtualGPU::profilingBegin(amd::Command& command, bool sdmaProfiling) {
         }
       }
     }
-
-    for (auto it = command.getDepHwEvents().begin(); it < command.getDepHwEvents().end(); ++it) {
-      ClPrint(amd::LOG_DEBUG, amd::LOG_SIG, "Adding dep hw event signal: 0x%lx",
-          reinterpret_cast<ProfilingSignal*>(*it)->signal_.handle);
-      Barriers().AddExternalSignal(reinterpret_cast<ProfilingSignal*>(*it));
-    }
-    command.clearDepHwEvents();
   }
+  for (auto it = command.getDepHwEvents().begin(); it < command.getDepHwEvents().end(); ++it) {
+    ClPrint(amd::LOG_DEBUG, amd::LOG_SIG, "Adding dep hw event signal: 0x%lx",
+            reinterpret_cast<ProfilingSignal*>(*it)->signal_.handle);
+    Barriers().AddExternalSignal(reinterpret_cast<ProfilingSignal*>(*it));
+  }
+  command.clearDepHwEvents();
 }
 
 // ================================================================================================
