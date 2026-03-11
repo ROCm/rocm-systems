@@ -263,7 +263,7 @@ class LLMAnalyzer:
         self.provider = provider
         self.model = model
         self.verbose = verbose
-        self.api_key = api_key or self._get_api_key_from_env()
+        self.api_key = api_key or self._get_api_key_from_env(raise_if_missing=False)
 
         # Load reference guide (the "fence")
         if reference_guide_path:
@@ -277,7 +277,7 @@ class LLMAnalyzer:
             print(f"[LLM] Loaded reference guide from: {self.reference_guide_path}")
             print(f"[LLM] Reference guide size: {len(self.reference_guide)} characters")
 
-    def _get_api_key_from_env(self) -> str:
+    def _get_api_key_from_env(self, raise_if_missing: bool = True) -> str:
         """Get API key from environment"""
         if self.provider == "anthropic":
             key = os.getenv("ANTHROPIC_API_KEY", "")
@@ -288,7 +288,7 @@ class LLMAnalyzer:
         else:
             raise ValueError(f"Unknown provider: {self.provider}")
 
-        if not key:
+        if not key and raise_if_missing:
             raise LLMAuthenticationError(
                 f"No API key found for {self.provider}. "
                 f"Set {'ANTHROPIC_API_KEY' if self.provider == 'anthropic' else 'OPENAI_API_KEY'} "
@@ -609,6 +609,10 @@ Follow the reference guide strictly for analysis methodology and output format."
 
     def _call_anthropic(self, system_prompt: str, user_prompt: str) -> str:
         """Call Anthropic Claude API"""
+        if not self.api_key:
+            raise LLMAuthenticationError(
+                "No Anthropic API key. Set ANTHROPIC_API_KEY environment variable."
+            )
         try:
             import anthropic
         except ImportError:
@@ -619,12 +623,13 @@ Follow the reference guide strictly for analysis methodology and output format."
         try:
             client = anthropic.Anthropic(api_key=self.api_key)
 
-            model = os.environ.get("ROCPD_LLM_MODEL") or DEFAULT_ANTHROPIC_MODEL
+            model = self.model or os.environ.get("ROCPD_LLM_MODEL") or DEFAULT_ANTHROPIC_MODEL
             response = client.messages.create(
                 model=model,
                 max_tokens=4096,
                 system=system_prompt,
                 messages=[{"role": "user", "content": user_prompt}],
+                timeout=120,
             )
 
             return response.content[0].text
@@ -638,6 +643,10 @@ Follow the reference guide strictly for analysis methodology and output format."
 
     def _call_openai(self, system_prompt: str, user_prompt: str) -> str:
         """Call OpenAI GPT API"""
+        if not self.api_key:
+            raise LLMAuthenticationError(
+                "No OpenAI API key. Set OPENAI_API_KEY environment variable."
+            )
         try:
             import openai
         except ImportError:
@@ -646,7 +655,7 @@ Follow the reference guide strictly for analysis methodology and output format."
         try:
             client = openai.OpenAI(api_key=self.api_key)
 
-            model = os.environ.get("ROCPD_LLM_MODEL") or DEFAULT_OPENAI_MODEL
+            model = self.model or os.environ.get("ROCPD_LLM_MODEL") or DEFAULT_OPENAI_MODEL
             _messages = [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
@@ -659,6 +668,7 @@ Follow the reference guide strictly for analysis methodology and output format."
                     model=model,
                     messages=_messages,
                     max_completion_tokens=4096,
+                    timeout=120,
                 )
             except openai.BadRequestError as _br:
                 if "max_completion_tokens" in str(_br):
@@ -666,6 +676,7 @@ Follow the reference guide strictly for analysis methodology and output format."
                         model=model,
                         messages=_messages,
                         max_tokens=4096,
+                        timeout=120,
                     )
                 else:
                     raise
@@ -700,6 +711,7 @@ Follow the reference guide strictly for analysis methodology and output format."
                     {"role": "user",   "content": user_prompt},
                 ],
                 max_tokens=2048,
+                timeout=60,
             )
             return resp.choices[0].message.content
         except Exception as exc:
