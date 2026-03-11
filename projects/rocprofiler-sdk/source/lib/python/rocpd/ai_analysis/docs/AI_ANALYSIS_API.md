@@ -1016,6 +1016,38 @@ compare_traces(Path("baseline.db"), Path("optimized.db"))
 
 ---
 
+### Context-Aware LLM Guide Loading
+
+`LLMAnalyzer` accepts an optional `AnalysisContext` to reduce the reference guide
+tokens sent per call. Build the context from already-computed analysis results:
+
+```python
+from rocpd.ai_analysis import AnalysisContext
+from rocpd.ai_analysis.llm_analyzer import LLMAnalyzer
+
+ctx = AnalysisContext(
+    tier=2,                        # 0=source-only, 1=trace, 2=counters
+    has_counters=True,
+    bottleneck_type="compute",     # triggers compiler section
+    custom_prompt="why is my kernel slow?",
+)
+
+analyzer = LLMAnalyzer(provider="anthropic", api_key="...", verbose=True)
+result = analyzer.analyze_with_llm(data, context=ctx)
+```
+
+When `context=None` (default), the full guide is used — backward compatible.
+
+Token savings by scenario:
+- Tier 1 trace-only: ~47% fewer tokens
+- Tier 0 source-only: ~51% fewer tokens
+- Tier 2 with latency bottleneck: ~18% fewer tokens
+
+See `docs/LLM_GUIDE_SECTIONS.md` for the full tag vocabulary and how to add
+new sections or tags.
+
+---
+
 ## Support
 
 For issues, questions, or feature requests:
