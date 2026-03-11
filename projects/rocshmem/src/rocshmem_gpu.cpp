@@ -80,10 +80,8 @@ __constant__ Backend *device_backend_proxy;
 
 __constant__ rocshmem_ctx_t ROCSHMEM_CTX_INVALID = {nullptr, nullptr};
 
-namespace device {
-    __constant__ rocshmem_team_t
-    __attribute__((visibility("default"))) ROCSHMEM_TEAM_WORLD;
-}
+__device__ rocshmem_team_t
+__attribute__((visibility("default"))) ROCSHMEM_TEAM_WORLD = nullptr;
 
 #if defined(ENABLE_IPC_BITCODE)
   typedef IPCContext ContextTy;
@@ -190,7 +188,7 @@ __host__ int rocshmem_hipmodule_init(hipModule_t module, hipStream_t stream) {
                                    "ROCSHMEM_CTX_DEFAULT") != ROCSHMEM_SUCCESS) {
     return ROCSHMEM_ERROR;
   }
-  if (copy_device_symbol_to_module(device::ROCSHMEM_TEAM_WORLD,
+  if (copy_device_symbol_to_module(ROCSHMEM_TEAM_WORLD,
                                    "ROCSHMEM_TEAM_WORLD",
                                    sizeof(rocshmem_team_t), module, stream,
                                    "ROCSHMEM_TEAM_WORLD") != ROCSHMEM_SUCCESS) {
@@ -347,15 +345,15 @@ __device__ void rocshmem_atomic_xor(T *dest, T value, int pe) {
 }
 
 __device__ void rocshmem_barrier() {
-  rocshmem_ctx_barrier(ROCSHMEM_CTX_DEFAULT, device::ROCSHMEM_TEAM_WORLD);
+  rocshmem_ctx_barrier(ROCSHMEM_CTX_DEFAULT, ROCSHMEM_TEAM_WORLD);
 }
 
 __device__ void rocshmem_barrier_wave() {
-  rocshmem_ctx_barrier_wave(ROCSHMEM_CTX_DEFAULT, device::ROCSHMEM_TEAM_WORLD);
+  rocshmem_ctx_barrier_wave(ROCSHMEM_CTX_DEFAULT, ROCSHMEM_TEAM_WORLD);
 }
 
 __device__ void rocshmem_barrier_wg() {
-  rocshmem_ctx_barrier_wg(ROCSHMEM_CTX_DEFAULT, device::ROCSHMEM_TEAM_WORLD);
+  rocshmem_ctx_barrier_wg(ROCSHMEM_CTX_DEFAULT, ROCSHMEM_TEAM_WORLD);
 }
 
 #define ROCSHMEM_PUTMEM_SIGNAL_DEF(SUFFIX)                                                      \
@@ -403,7 +401,7 @@ __host__ void set_internal_ctx(rocshmem_ctx_t *ctx) {
 }
 
 __host__ void set_team_world_device(rocshmem_team_t team_world) {
-  CHECK_HIP(hipMemcpyToSymbol(HIP_SYMBOL(device::ROCSHMEM_TEAM_WORLD), &team_world,
+  CHECK_HIP(hipMemcpyToSymbol(HIP_SYMBOL(ROCSHMEM_TEAM_WORLD), &team_world,
                               sizeof(rocshmem_team_t), 0,
                               hipMemcpyHostToDevice));
 }

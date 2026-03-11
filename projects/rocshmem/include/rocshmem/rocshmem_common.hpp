@@ -147,23 +147,17 @@ BackendType get_backend_type();
 
 typedef uint64_t *rocshmem_team_t;
 
-namespace device {
-    extern __constant__ rocshmem_team_t __attribute__((visibility("default"))) ROCSHMEM_TEAM_WORLD;
-}
-
-namespace host {
-    extern rocshmem_team_t ROCSHMEM_TEAM_WORLD;
-}
-
-#if __HIP_DEVICE_COMPILE__
-using device::ROCSHMEM_TEAM_WORLD;
-#else
-using host::ROCSHMEM_TEAM_WORLD;
-#endif
-
 /**
- * Used internally to update the ROCSHMEM_TEAM_WORLD constant
+ * ROCSHMEM_TEAM_WORLD: the default team containing all PEs.
+ * - Device code: __device__ variable with C linkage (no name mangling),
+ *   initialized via hipMemcpyToSymbol at init time.
+ * - Host code: extern "C" declaration resolves to the same unmangled symbol,
+ *   allowing host API calls (team_n_pes, team_split_strided, etc.).
  */
+extern "C" {
+    extern __device__ rocshmem_team_t __attribute__((visibility("default"))) ROCSHMEM_TEAM_WORLD;
+}
+
 void set_team_world_device(rocshmem_team_t team_world);
 
 const rocshmem_team_t ROCSHMEM_TEAM_INVALID = nullptr;
