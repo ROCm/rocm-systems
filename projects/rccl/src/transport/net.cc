@@ -925,11 +925,13 @@ static ncclResult_t sendProxySetup(struct ncclProxyConnection* connection, struc
   resources->isP2p = req->isP2p;
   ncclNetProperties_t props;
   NCCLCHECK(proxyState->ncclNet->getProperties(req->netDev, &props));
-  /* GDR mode selection: RCCL_FORCE_ENABLE_DMABUF=1 forces DMAbuf, otherwise prefer peermem */
+  /* GDR mode selection: RCCL_FORCE_ENABLE_DMABUF=1 forces DMAbuf, otherwise prefer peermem.
+   * cuMem/VMM buffers cannot be registered with ibv_reg_mr (causes "Bad address"
+   * and corrupts VMM state), so dmabuf must always be used when cuMem is enabled. */
   bool peermemAvailable = (props.ptrSupport & NCCL_PTR_CUDA);
   bool dmabufAvailable = (props.ptrSupport & NCCL_PTR_DMABUF) && proxyState->dmaBufSupport;
   bool forceDmaBuf = rcclParamForceEnableDMABUF();
-  if (forceDmaBuf) {
+  if (forceDmaBuf || ncclCuMemEnable()) {
     resources->useDmaBuf = resources->useGdr && dmabufAvailable;
   } else {
     resources->useDmaBuf = resources->useGdr && !peermemAvailable && dmabufAvailable;
@@ -972,11 +974,13 @@ static ncclResult_t recvProxySetup(struct ncclProxyConnection* connection, struc
   resources->curr_hdp_reg = req->curr_hdp_reg;
   ncclNetProperties_t props;
   NCCLCHECK(proxyState->ncclNet->getProperties(req->netDev, &props));
-  /* GDR mode selection: RCCL_FORCE_ENABLE_DMABUF=1 forces DMAbuf, otherwise prefer peermem */
+  /* GDR mode selection: RCCL_FORCE_ENABLE_DMABUF=1 forces DMAbuf, otherwise prefer peermem.
+   * cuMem/VMM buffers cannot be registered with ibv_reg_mr (causes "Bad address"
+   * and corrupts VMM state), so dmabuf must always be used when cuMem is enabled. */
   bool peermemAvailable = (props.ptrSupport & NCCL_PTR_CUDA);
   bool dmabufAvailable = (props.ptrSupport & NCCL_PTR_DMABUF) && proxyState->dmaBufSupport;
   bool forceDmaBuf = rcclParamForceEnableDMABUF();
-  if (forceDmaBuf) {
+  if (forceDmaBuf || ncclCuMemEnable()) {
     resources->useDmaBuf = resources->useGdr && dmabufAvailable;
   } else {
     resources->useDmaBuf = resources->useGdr && !peermemAvailable && dmabufAvailable;
