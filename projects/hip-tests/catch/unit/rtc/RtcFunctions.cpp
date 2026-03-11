@@ -79,7 +79,6 @@ bool check_architecture(const char** Combination_CO, int Combination_CO_size, in
         HIPRTC_CHECK(hiprtcGetProgramLog(prog, &log[0]));
         WARN(log);
       }
-      HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
       return 0;
     }
   } else {
@@ -95,7 +94,6 @@ bool check_architecture(const char** Combination_CO, int Combination_CO_size, in
         HIPRTC_CHECK(hiprtcGetProgramLog(prog, &log[0]));
         WARN(log);
       }
-      HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
       return 0;
     }
   }
@@ -121,8 +119,12 @@ bool check_rdc(const char** Combination_CO, int Combination_CO_size, int max_thr
   }
   const char* compiler_opt = CO.c_str();
   float *A_d, *B_d, *C_d;
-  std::vector<float> A_h(1), B_h(1), C_h(1), result(1);
+  float *A_h, *B_h, *C_h, *result;
   float Nbytes = sizeof(float);
+  A_h = new float[1];
+  B_h = new float[1];
+  C_h = new float[1];
+  result = new float[1];
   for (int i = 0; i < 1; i++) {
     A_h[i] = 4;
     B_h[i] = 4;
@@ -131,8 +133,8 @@ bool check_rdc(const char** Combination_CO, int Combination_CO_size, int max_thr
   HIP_CHECK(hipMalloc(&A_d, Nbytes));
   HIP_CHECK(hipMalloc(&B_d, Nbytes));
   HIP_CHECK(hipMalloc(&C_d, Nbytes));
-  HIP_CHECK(hipMemcpy(A_d, A_h.data(), Nbytes, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(B_d, B_h.data(), Nbytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(B_d, B_h, Nbytes, hipMemcpyHostToDevice));
   hiprtcProgram prog;
   HIPRTC_CHECK(hiprtcCreateProgram(&prog, rdc_string, kername, 0, NULL, NULL));
   if (Combination_CO_size != -1) {
@@ -152,7 +154,6 @@ bool check_rdc(const char** Combination_CO, int Combination_CO_size, int max_thr
         HIPRTC_CHECK(hiprtcGetProgramLog(prog, &log[0]));
         WARN(log);
       }
-      HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
       return 0;
     }
   } else {
@@ -168,7 +169,6 @@ bool check_rdc(const char** Combination_CO, int Combination_CO_size, int max_thr
         HIPRTC_CHECK(hiprtcGetProgramLog(prog, &log[0]));
         WARN(log);
       }
-      HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
       return 0;
     }
   }
@@ -234,7 +234,7 @@ bool check_rdc(const char** Combination_CO, int Combination_CO_size, int max_thr
         break;
     }
   }
-  HIP_CHECK(hipMemcpy(result.data(), C_d, Nbytes, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(result, C_d, Nbytes, hipMemcpyDeviceToHost));
   for (int i = 0; i < 1; i++) {
     if (result[i] != ((A_h[i] * B_h[i]))) {
       WARN("Compiler Option : " << compiler_opt);
@@ -293,18 +293,21 @@ bool check_denormals_enabled(const char** Combination_CO, int Combination_CO_siz
   for (test_case = 0, res_inc = 0;
        test_case < Input_Vals_int.size() && res_inc < Expected_Results_int.size();
        test_case += 2, res_inc++) {
-    std::vector<double> base_h(1), power_h(1), result_h(1);
+    double *base_h, *power_h, *result_h;
     double *base_d, *power_d, *result_d;
     double Nbytes = sizeof(double);
-    base_h[0] = Input_Vals_int[test_case];
-    power_h[0] = Input_Vals_int[test_case + 1];
-    result_h[0] = 1;
+    base_h = new double[1];
+    power_h = new double[1];
+    result_h = new double[1];
+    *base_h = Input_Vals_int[test_case];
+    *power_h = Input_Vals_int[test_case + 1];
+    *result_h = 1;
     HIP_CHECK(hipMalloc(&base_d, Nbytes));
     HIP_CHECK(hipMalloc(&power_d, Nbytes));
     HIP_CHECK(hipMalloc(&result_d, Nbytes));
-    HIP_CHECK(hipMemcpy(base_d, base_h.data(), Nbytes, hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(power_d, power_h.data(), Nbytes, hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(result_d, result_h.data(), Nbytes, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(base_d, base_h, Nbytes, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(power_d, power_h, Nbytes, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(result_d, result_h, Nbytes, hipMemcpyHostToDevice));
     hiprtcProgram program;
     HIPRTC_CHECK(hiprtcCreateProgram(&program, denormals_string, "denormals", 0, NULL, NULL));
     if (Combination_CO_size != -1) {
@@ -325,7 +328,6 @@ bool check_denormals_enabled(const char** Combination_CO, int Combination_CO_siz
           HIPRTC_CHECK(hiprtcGetProgramLog(program, &log[0]));
           WARN(log);
         }
-        HIPRTC_CHECK(hiprtcDestroyProgram(&program));
         return 0;
       }
     } else {
@@ -341,7 +343,6 @@ bool check_denormals_enabled(const char** Combination_CO, int Combination_CO_siz
           HIPRTC_CHECK(hiprtcGetProgramLog(program, &log[0]));
           WARN(log);
         }
-        HIPRTC_CHECK(hiprtcDestroyProgram(&program));
         return 0;
       }
     }
@@ -358,11 +359,11 @@ bool check_denormals_enabled(const char** Combination_CO, int Combination_CO_siz
     HIP_CHECK(hipModuleLoadData(&module, codec.data()));
     HIP_CHECK(hipModuleGetFunction(&function, module, kername));
     HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, 0, nullptr, kernel_parameter));
-    HIP_CHECK(hipMemcpy(result_h.data(), result_d, sizeof(double), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(result_h, result_d, sizeof(double), hipMemcpyDeviceToHost));
     HIP_CHECK(hipDeviceSynchronize());
     HIP_CHECK(hipModuleUnload(module));
     HIPRTC_CHECK(hiprtcDestroyProgram(&program));
-    if (result_h[0] != Expected_Results_int[res_inc]) {
+    if (*result_h != Expected_Results_int[res_inc]) {
       WARN("Compiler Option : " << compiler_option);
       if (Combination_CO_size != -1) {
         WARN("FAILED IN COMBINATION :");
@@ -372,9 +373,9 @@ bool check_denormals_enabled(const char** Combination_CO, int Combination_CO_siz
       }
       WARN("EXPECTED RESULT DOES NOT MATCH FOR " << res_inc);
       WARN("th ITERATION (start iteration is 0 ) ");
-      WARN("INPUT : pow(2, " << power_h[0] << ") ");
+      WARN("INPUT : pow(2, " << *power_h << ") ");
       WARN("EXPECTED OP: " << Expected_Results_int[res_inc]);
-      WARN("OBTAINED OP: " << result_h[0]);
+      WARN("OBTAINED OP: " << *result_h);
       return 0;
     }
   }
@@ -422,18 +423,21 @@ bool check_denormals_disabled(const char** Combination_CO, int Combination_CO_si
   for (test_case = 0, res_inc = 0;
        test_case < Input_Vals_int.size() && res_inc < Expected_Results_for_no_int.size();
        test_case += 2, res_inc++) {
-    std::vector<double> base_h(1), power_h(1), result_h(1);
+    double *base_h, *power_h, *result_h;
     double *base_d, *power_d, *result_d;
     double Nbytes = sizeof(double);
-    base_h[0] = Input_Vals_int[test_case];
-    power_h[0] = Input_Vals_int[test_case + 1];
-    result_h[0] = 0;
+    base_h = new double[1];
+    power_h = new double[1];
+    result_h = new double[1];
+    *base_h = Input_Vals_int[test_case];
+    *power_h = Input_Vals_int[test_case + 1];
+    *result_h = 0;
     HIP_CHECK(hipMalloc(&base_d, Nbytes));
     HIP_CHECK(hipMalloc(&power_d, Nbytes));
     HIP_CHECK(hipMalloc(&result_d, Nbytes));
-    HIP_CHECK(hipMemcpy(base_d, base_h.data(), Nbytes, hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(power_d, power_h.data(), Nbytes, hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(result_d, result_h.data(), Nbytes, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(base_d, base_h, Nbytes, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(power_d, power_h, Nbytes, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(result_d, result_h, Nbytes, hipMemcpyHostToDevice));
     hiprtcProgram program;
     HIPRTC_CHECK(hiprtcCreateProgram(&program, denormals_string, "denormals", 0, NULL, NULL));
     if (Combination_CO_size != -1) {
@@ -454,7 +458,6 @@ bool check_denormals_disabled(const char** Combination_CO, int Combination_CO_si
           HIPRTC_CHECK(hiprtcGetProgramLog(program, &log[0]));
           WARN(log);
         }
-        HIPRTC_CHECK(hiprtcDestroyProgram(&program));
         return 0;
       }
     } else {
@@ -470,7 +473,6 @@ bool check_denormals_disabled(const char** Combination_CO, int Combination_CO_si
           HIPRTC_CHECK(hiprtcGetProgramLog(program, &log[0]));
           WARN(log);
         }
-        HIPRTC_CHECK(hiprtcDestroyProgram(&program));
         return 0;
       }
     }
@@ -487,11 +489,11 @@ bool check_denormals_disabled(const char** Combination_CO, int Combination_CO_si
     HIP_CHECK(hipModuleLoadData(&module, codec.data()));
     HIP_CHECK(hipModuleGetFunction(&function, module, kername));
     HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, 0, nullptr, kernel_parameter));
-    HIP_CHECK(hipMemcpy(result_h.data(), result_d, sizeof(double), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(result_h, result_d, sizeof(double), hipMemcpyDeviceToHost));
     HIP_CHECK(hipDeviceSynchronize());
     HIP_CHECK(hipModuleUnload(module));
     HIPRTC_CHECK(hiprtcDestroyProgram(&program));
-    if (result_h[0] != Expected_Results_for_no_int[res_inc]) {
+    if (*result_h != Expected_Results_for_no_int[res_inc]) {
       WARN("Compiler Option : " << compiler_option);
       if (Combination_CO_size != -1) {
         WARN("FAILED IN COMBINATION :");
@@ -501,9 +503,9 @@ bool check_denormals_disabled(const char** Combination_CO, int Combination_CO_si
       }
       WARN("EXPECTED RESULT DOES NOT MATCH FOR " << res_inc);
       WARN("th ITERATION (start iteration is 0 ) ");
-      WARN("INPUT : pow(2, " << power_h[0] << ") ");
+      WARN("INPUT : pow(2, " << *power_h << ") ");
       WARN("EXPECTED OP: " << Expected_Results_for_no_int[res_inc]);
-      WARN("OBTAINED OP: " << result_h[0]);
+      WARN("OBTAINED OP: " << *result_h);
       return 0;
     }
   }
@@ -532,13 +534,13 @@ bool check_ffp_contract_off(const char** Combination_CO, int Combination_CO_size
     CO_vec.push_back(indx.get<std::string>());
   }
   int CO_IRadded_size = 3;
-  std::vector<const char*> CO_IRadded(3);
+  const char** CO_IRadded = new const char*[3];
   std::string hold = CO_vec[0];
   CO_IRadded[0] = hold.c_str();
   CO_IRadded[1] = "-mllvm";
   CO_IRadded[2] = "-print-after=constmerge";
   std::string data =
-      checking_IR(kername, CO_IRadded.data(), CO_IRadded_size, Combination_CO, Combination_CO_size);
+      checking_IR(kername, CO_IRadded, CO_IRadded_size, Combination_CO, Combination_CO_size);
   if (data == "") {
     WARN("Compiler option : " << retrieved_CO[0]);
     if (Combination_CO_size != -1) {
@@ -589,13 +591,13 @@ bool check_ffp_contract_on(const char** Combination_CO, int Combination_CO_size,
     CO_vec.push_back(indx.get<std::string>());
   }
   int CO_IRadded_size = 3;
-  std::vector<const char*> CO_IRadded(3);
+  const char** CO_IRadded = new const char*[3];
   std::string hold = CO_vec[1];
   CO_IRadded[0] = hold.c_str();
   CO_IRadded[1] = "-mllvm";
   CO_IRadded[2] = "-print-after=constmerge";
   std::string data =
-      checking_IR(kername, CO_IRadded.data(), CO_IRadded_size, Combination_CO, Combination_CO_size);
+      checking_IR(kername, CO_IRadded, CO_IRadded_size, Combination_CO, Combination_CO_size);
   if (data == "") {
     WARN("Compiler option : " << retrieved_CO[1]);
     if (Combination_CO_size != -1) {
@@ -660,13 +662,13 @@ bool check_ffp_contract_fast(const char** Combination_CO, int Combination_CO_siz
     CO_vec.push_back(indx.get<std::string>());
   }
   int CO_IRadded_size = 3;
-  std::vector<const char*> CO_IRadded(3);
+  const char** CO_IRadded = new const char*[3];
   std::string hold = CO_vec[2];
   CO_IRadded[0] = hold.c_str();
   CO_IRadded[1] = "-mllvm";
   CO_IRadded[2] = "-print-after=constmerge";
   std::string data =
-      checking_IR(kername, CO_IRadded.data(), CO_IRadded_size, Combination_CO, Combination_CO_size);
+      checking_IR(kername, CO_IRadded, CO_IRadded_size, Combination_CO, Combination_CO_size);
   if (data == "") {
     WARN("Compiler option : " << retrieved_CO[2]);
     if (Combination_CO_size != -1) {
@@ -727,12 +729,12 @@ bool check_fast_math_enabled(const char** Combination_CO, int Combination_CO_siz
     return 0;
   }
   int CO_IRadded_size = 3;
-  std::vector<const char*> CO_IRadded(3);
+  const char** CO_IRadded = new const char*[3];
   CO_IRadded[0] = retrieved_CO.c_str();
   CO_IRadded[1] = "-mllvm";
   CO_IRadded[2] = "-print-after=constmerge";
   std::string data =
-      checking_IR(kername, CO_IRadded.data(), CO_IRadded_size, Combination_CO, Combination_CO_size);
+      checking_IR(kername, CO_IRadded, CO_IRadded_size, Combination_CO, Combination_CO_size);
   if (data == "") {
     WARN("Compiler option : " << retrieved_CO);
     if (Combination_CO_size != -1) {
@@ -777,12 +779,12 @@ bool check_fast_math_disabled(const char** Combination_CO, int Combination_CO_si
     return 0;
   }
   int CO_IRadded_size = 3;
-  std::vector<const char*> CO_IRadded(3);
+  const char** CO_IRadded = new const char*[3];
   CO_IRadded[0] = retrieved_CO.c_str();
   CO_IRadded[1] = "-mllvm";
   CO_IRadded[2] = "-print-after=constmerge";
   std::string data =
-      checking_IR(kername, CO_IRadded.data(), CO_IRadded_size, Combination_CO, Combination_CO_size);
+      checking_IR(kername, CO_IRadded, CO_IRadded_size, Combination_CO, Combination_CO_size);
   if (data == "") {
     WARN("Compiler option : " << retrieved_CO);
     if (Combination_CO_size != -1) {
@@ -830,19 +832,28 @@ bool check_slp_vectorize_enabled(const char** Combination_CO, int Combination_CO
   auto dump_dir = ir_capture.CreateDumpDir();
   std::string ir_dump_option = "-ir-dump-directory=" + dump_dir.string();
   int CO_IRadded_size = 5;
-  std::vector<const char*> CO_IRadded(5);
+  const char** CO_IRadded = new const char*[5];
   CO_IRadded[0] = retrieved_CO.c_str();
   CO_IRadded[1] = "-mllvm";
   CO_IRadded[2] = "-print-after=constmerge";
   CO_IRadded[3] = "-mllvm";
   CO_IRadded[4] = ir_dump_option.c_str();
+  __half2 *a_d, *x_d, *y_d;
+  __half2 a_h, x_h;
+  a_h.data.x = 1.5;
+  x_h.data.y = 3.0;
+  HIP_CHECK(hipMalloc(&a_d, sizeof(__half2)));
+  HIP_CHECK(hipMalloc(&x_d, sizeof(__half2)));
+  HIP_CHECK(hipMalloc(&y_d, sizeof(__half2)));
+  HIP_CHECK(hipMemcpy(a_d, &a_h, sizeof(__half2), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(x_d, &x_h, sizeof(__half2), hipMemcpyHostToDevice));
   hiprtcProgram prog;
   HIPRTC_CHECK(hiprtcCreateProgram(&prog, slp_vectorize_string, kername, 0, NULL, NULL));
   if (Combination_CO_size != -1) {
     int Combination_CO_IRadded_size = Combination_CO_size + 5;
     int b = 0;
     std::vector<std::string> add_ir_forcombi(Combination_CO_size + 5, "");
-    std::vector<const char*> Combination_CO_IRadded(Combination_CO_size + 5);
+    const char** Combination_CO_IRadded = new const char*[Combination_CO_size + 5];
     for (int i = 0; i < Combination_CO_size + 5; ++i) {
       if (i == Combination_CO_size) {
         Combination_CO_IRadded[i] = "-fno-signed-zeros";
@@ -858,7 +869,7 @@ bool check_slp_vectorize_enabled(const char** Combination_CO, int Combination_CO
       b++;
     }
     hiprtcResult compileResult{
-        hiprtcCompileProgram(prog, Combination_CO_IRadded_size, Combination_CO_IRadded.data())};
+        hiprtcCompileProgram(prog, Combination_CO_IRadded_size, Combination_CO_IRadded)};
     if (!(compileResult == HIPRTC_SUCCESS)) {
       ir_capture.Cleanup(dump_dir);
       WARN("Compiler option : " << retrieved_CO);
@@ -875,11 +886,10 @@ bool check_slp_vectorize_enabled(const char** Combination_CO, int Combination_CO
         HIPRTC_CHECK(hiprtcGetProgramLog(prog, &log[0]));
         WARN(log);
       }
-      HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
       return 0;
     }
   } else {
-    hiprtcResult compileResult{hiprtcCompileProgram(prog, CO_IRadded_size, CO_IRadded.data())};
+    hiprtcResult compileResult{hiprtcCompileProgram(prog, CO_IRadded_size, CO_IRadded)};
     if (!(compileResult == HIPRTC_SUCCESS)) {
       ir_capture.Cleanup(dump_dir);
       WARN("Compiler option : " << retrieved_CO);
@@ -892,13 +902,29 @@ bool check_slp_vectorize_enabled(const char** Combination_CO, int Combination_CO
         HIPRTC_CHECK(hiprtcGetProgramLog(prog, &log[0]));
         WARN(log);
       }
-      HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
       return 0;
     }
   }
   std::string data = ir_capture.ReadDumpFile(dump_dir);
+  std::stringstream dataStream;
+  size_t codeSize;
+  HIPRTC_CHECK(hiprtcGetCodeSize(prog, &codeSize));
+  std::vector<char> codec(codeSize);
+  HIPRTC_CHECK(hiprtcGetCode(prog, codec.data()));
+  void* kernelParam[] = {reinterpret_cast<void*>(a_d), reinterpret_cast<void*>(x_d),
+                         reinterpret_cast<void*>(y_d)};
+  auto size = sizeof(kernelParam);
+  void* kernel_parameter[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &kernelParam,
+                              HIP_LAUNCH_PARAM_BUFFER_SIZE, &size, HIP_LAUNCH_PARAM_END};
+  hipModule_t module;
+  hipFunction_t function;
+  HIP_CHECK(hipModuleLoadData(&module, codec.data()));
+  HIP_CHECK(hipModuleGetFunction(&function, module, kername));
+  HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, 0, nullptr, kernel_parameter));
+  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipModuleUnload(module));
   HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
-  if (data.empty()) {
+  if (data == "") {
     WARN("Compiler option : " << retrieved_CO);
     if (Combination_CO_size != -1) {
       WARN("FAILED IN COMBINATION :");
@@ -910,11 +936,13 @@ bool check_slp_vectorize_enabled(const char** Combination_CO, int Combination_CO
     return 0;
   }
   int times = 0;
-  const std::string search_string = "contract <2 x half>";
-  size_t start = 0;
-  while ((start = data.find(search_string, start)) != std::string::npos) {
-    ++times;
-    ++start;
+  if (data.find("contract <2 x half>", 0) != -1) {
+    times++;
+  }
+  int start = data.find("contract <2 x half>", 0) + 1;
+  while (data.find("contract <2 x half>", start) != -1) {
+    times++;
+    start = data.find("contract <2 x half>", start) + 1;
   }
   if (times == 1) {
     return 1;
@@ -961,23 +989,30 @@ bool check_slp_vectorize_disabled(const char** Combination_CO, int Combination_C
   CaptureIR ir_capture;
   auto dump_dir = ir_capture.CreateDumpDir();
   std::string ir_dump_option = "-ir-dump-directory=" + dump_dir.string();
-  int CO_IRadded_size = 7;
-  std::vector<const char*> CO_IRadded(7);
+  int CO_IRadded_size = 5;
+  const char** CO_IRadded = new const char*[5];
   CO_IRadded[0] = retrieved_CO.c_str();
   CO_IRadded[1] = "-mllvm";
   CO_IRadded[2] = "-print-after=constmerge";
   CO_IRadded[3] = "-mllvm";
   CO_IRadded[4] = ir_dump_option.c_str();
-  CO_IRadded[5] = "-mllvm";
-  CO_IRadded[6] = "-disable-vector-combine";
+  __half2 *a_d, *x_d, *y_d;
+  __half2 a_h, x_h;
+  a_h.data.x = 1.5;
+  x_h.data.y = 3.0;
+  HIP_CHECK(hipMalloc(&a_d, sizeof(__half2)));
+  HIP_CHECK(hipMalloc(&x_d, sizeof(__half2)));
+  HIP_CHECK(hipMalloc(&y_d, sizeof(__half2)));
+  HIP_CHECK(hipMemcpy(a_d, &a_h, sizeof(__half2), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(x_d, &x_h, sizeof(__half2), hipMemcpyHostToDevice));
   hiprtcProgram prog;
   HIPRTC_CHECK(hiprtcCreateProgram(&prog, slp_vectorize_string, kername, 0, NULL, NULL));
   if (Combination_CO_size != -1) {
-    int Combination_CO_IRadded_size = Combination_CO_size + 7;
+    int Combination_CO_IRadded_size = Combination_CO_size + 5;
     int b = 0;
-    std::vector<std::string> add_ir_forcombi(Combination_CO_IRadded_size, "");
-    std::vector<const char*> Combination_CO_IRadded(Combination_CO_IRadded_size);
-    for (int i = 0; i < Combination_CO_IRadded_size; ++i) {
+    std::vector<std::string> add_ir_forcombi(Combination_CO_size + 5, "");
+    const char** Combination_CO_IRadded = new const char*[Combination_CO_size + 5];
+    for (int i = 0; i < Combination_CO_size + 5; ++i) {
       if (i == Combination_CO_size) {
         Combination_CO_IRadded[i] = "-fno-signed-zeros";
         Combination_CO_IRadded[i + 1] = "-mllvm";
@@ -985,8 +1020,6 @@ bool check_slp_vectorize_disabled(const char** Combination_CO, int Combination_C
         Combination_CO_IRadded[i + 3] = "-mllvm";
         add_ir_forcombi[i + 4] = ir_dump_option;
         Combination_CO_IRadded[i + 4] = add_ir_forcombi[i + 4].c_str();
-        Combination_CO_IRadded[i + 5] = "-mllvm";
-        Combination_CO_IRadded[i + 6] = "-disable-vector-combine";
         break;
       }
       add_ir_forcombi[i] = Combination_CO[b];
@@ -994,12 +1027,12 @@ bool check_slp_vectorize_disabled(const char** Combination_CO, int Combination_C
       b++;
     }
     hiprtcResult compileResult{
-        hiprtcCompileProgram(prog, Combination_CO_IRadded_size, Combination_CO_IRadded.data())};
+        hiprtcCompileProgram(prog, Combination_CO_IRadded_size, Combination_CO_IRadded)};
     if (!(compileResult == HIPRTC_SUCCESS)) {
       ir_capture.Cleanup(dump_dir);
       WARN("Compiler option : " << retrieved_CO);
       WARN("FAILED IN COMBINATION :");
-      for (int i = 0; i < Combination_CO_size + 7; i++) {
+      for (int i = 0; i < Combination_CO_size + 5; i++) {
         WARN(Combination_CO_IRadded[i]);
       }
       WARN("hiprtcCompileProgram() api failed!! with error code: ");
@@ -1011,11 +1044,10 @@ bool check_slp_vectorize_disabled(const char** Combination_CO, int Combination_C
         HIPRTC_CHECK(hiprtcGetProgramLog(prog, &log[0]));
         WARN(log);
       }
-      HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
       return 0;
     }
   } else {
-    hiprtcResult compileResult{hiprtcCompileProgram(prog, CO_IRadded_size, CO_IRadded.data())};
+    hiprtcResult compileResult{hiprtcCompileProgram(prog, CO_IRadded_size, CO_IRadded)};
     if (!(compileResult == HIPRTC_SUCCESS)) {
       ir_capture.Cleanup(dump_dir);
       WARN("Compiler option : " << retrieved_CO);
@@ -1028,18 +1060,36 @@ bool check_slp_vectorize_disabled(const char** Combination_CO, int Combination_C
         HIPRTC_CHECK(hiprtcGetProgramLog(prog, &log[0]));
         WARN(log);
       }
-      HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
       return 0;
     }
   }
   std::string data = ir_capture.ReadDumpFile(dump_dir);
+  std::stringstream dataStream;
+  size_t codeSize;
+  HIPRTC_CHECK(hiprtcGetCodeSize(prog, &codeSize));
+  std::vector<char> codec(codeSize);
+  HIPRTC_CHECK(hiprtcGetCode(prog, codec.data()));
+  void* kernelParam[] = {reinterpret_cast<void*>(a_d), reinterpret_cast<void*>(x_d),
+                         reinterpret_cast<void*>(y_d)};
+  auto size = sizeof(kernelParam);
+  void* kernel_parameter[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &kernelParam,
+                              HIP_LAUNCH_PARAM_BUFFER_SIZE, &size, HIP_LAUNCH_PARAM_END};
+  hipModule_t module;
+  hipFunction_t function;
+  HIP_CHECK(hipModuleLoadData(&module, codec.data()));
+  HIP_CHECK(hipModuleGetFunction(&function, module, kername));
+  HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, 0, nullptr, kernel_parameter));
+  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipModuleUnload(module));
   HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
   int times = 0;
-  const std::string search_string = "contract half";
-  size_t start = 0;
-  while ((start = data.find(search_string, start)) != std::string::npos) {
-    ++times;
-    ++start;
+  if (data.find("contract <2 x half>", 0) != -1) {
+    times++;
+  }
+  int start = data.find("contract <2 x half>", 0) + 1;
+  while (data.find("contract <2 x half>", start) != -1) {
+    times++;
+    start = data.find("contract <2 x half>", start) + 1;
   }
   if (times == 2) {
     return 1;
@@ -1051,7 +1101,7 @@ bool check_slp_vectorize_disabled(const char** Combination_CO, int Combination_C
         WARN(Combination_CO[i]);
       }
     }
-    WARN("IR CONTAIN '" << search_string << "' " << times << "times");
+    WARN("IR CONTAIN 'fadd contract <2 x half>' " << times << "times");
     WARN(" WHICH IS NOT EXPECTED(IT SHOULD BE PRESENT TWICE)");
     return 0;
   } else {
@@ -1062,7 +1112,7 @@ bool check_slp_vectorize_disabled(const char** Combination_CO, int Combination_C
         WARN(Combination_CO[i]);
       }
     }
-    WARN("IR CONTAIN '" << search_string << "' " << times << "times");
+    WARN("IR CONTAIN 'fadd contract <2 x half>' " << times << "times");
     WARN(" WHICH IS NOT EXPECTED(IT SHOULD BE PRESENT TWICE)");
     return 0;
   }
@@ -1112,7 +1162,6 @@ bool check_macro(const char** Combination_CO, int Combination_CO_size, int max_t
         HIPRTC_CHECK(hiprtcGetProgramLog(prog, &log[0]));
         WARN(log);
       }
-      HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
       return 0;
     }
   } else {
@@ -1127,15 +1176,15 @@ bool check_macro(const char** Combination_CO, int Combination_CO_size, int max_t
         HIPRTC_CHECK(hiprtcGetProgramLog(prog, &log[0]));
         WARN(log);
       }
-      HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
       return 0;
     }
   }
-  std::vector<int> macro_value_h(1);
+  int* macro_value_h;
   int* macro_value_d;
+  macro_value_h = new int[1];
   HIP_CHECK(hipMalloc(&macro_value_d, sizeof(int)));
-  macro_value_h[0] = 0;
-  HIP_CHECK(hipMemcpy(macro_value_d, macro_value_h.data(), sizeof(int), hipMemcpyHostToDevice));
+  *macro_value_h = 0;
+  HIP_CHECK(hipMemcpy(macro_value_d, macro_value_h, sizeof(int), hipMemcpyHostToDevice));
   size_t codeSize;
   HIPRTC_CHECK(hiprtcGetCodeSize(prog, &codeSize));
   std::vector<char> codec(codeSize);
@@ -1149,11 +1198,11 @@ bool check_macro(const char** Combination_CO, int Combination_CO_size, int max_t
   HIP_CHECK(hipModuleLoadData(&module, codec.data()));
   HIP_CHECK(hipModuleGetFunction(&function, module, kername));
   HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, 0, nullptr, kernel_parameter));
-  HIP_CHECK(hipMemcpy(macro_value_h.data(), macro_value_d, sizeof(int), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(macro_value_h, macro_value_d, sizeof(int), hipMemcpyDeviceToHost));
   HIP_CHECK(hipDeviceSynchronize());
   HIP_CHECK(hipModuleUnload(module));
   HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
-  if (macro_value_h[0] != Expected_Results_int[0]) {
+  if (*macro_value_h != Expected_Results_int[0]) {
     WARN("Compiler Option : " << compiler_option);
     if (Combination_CO_size != -1) {
       WARN("FAILED IN COMBINATION :");
@@ -1164,7 +1213,7 @@ bool check_macro(const char** Combination_CO, int Combination_CO_size, int max_t
     WARN("EXPECTED RESULT DOES NOT MATCH");
     WARN("INPUT: " << compiler_option);
     WARN("EXPECTED OP : " << Expected_Results_int[0]);
-    WARN("OBTAINED OP: " << macro_value_h[0]);
+    WARN("OBTAINED OP: " << *macro_value_h);
     return 0;
   } else {
     return 1;
@@ -1192,7 +1241,7 @@ bool check_undef_macro(const char** Combination_CO, int Combination_CO_size, int
     compiler_option.push_back(indx.get<std::string>());
   }
   std::vector<std::string> variable(compiler_option.size(), "");
-  std::vector<const char*> appended_compiler_options(compiler_option.size());
+  const char** appended_compiler_options = new const char*[compiler_option.size()];
   for (int i = 0; i < compiler_option.size(); ++i) {
     variable[i] = compiler_option[i];
     appended_compiler_options[i] = variable[i].c_str();
@@ -1208,7 +1257,6 @@ bool check_undef_macro(const char** Combination_CO, int Combination_CO_size, int
         std::string log(logSize, '\0');
         HIPRTC_CHECK(hiprtcGetProgramLog(prog, &log[0]));
         if (log.find("undeclared identifier")) {
-          HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
           return 1;
         }
       } else {
@@ -1218,21 +1266,19 @@ bool check_undef_macro(const char** Combination_CO, int Combination_CO_size, int
           WARN(Combination_CO[i]);
         }
         WARN("Expected error : 'undeclared identifier' NOT GENERATED");
-        HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
         return 0;
       }
     }
   } else {
     hiprtcResult compileResult{
-        hiprtcCompileProgram(prog, compiler_option.size(), appended_compiler_options.data())};
+        hiprtcCompileProgram(prog, compiler_option.size(), appended_compiler_options)};
     if (!(compileResult == HIPRTC_SUCCESS)) {
       size_t logSize;
       HIPRTC_CHECK(hiprtcGetProgramLogSize(prog, &logSize));
       if (logSize) {
         std::string log(logSize, '\0');
         HIPRTC_CHECK(hiprtcGetProgramLog(prog, &log[0]));
-        if (log.find("undeclared identifier") != std::string::npos) {
-          HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
+        if (log.find("undeclared identifier")) {
           return 1;
         }
       } else {
@@ -1244,7 +1290,6 @@ bool check_undef_macro(const char** Combination_CO, int Combination_CO_size, int
           }
         }
         WARN("Expected error : 'undeclared identifier' NOT GENERATED");
-        HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
         return 0;
       }
     }
@@ -1257,7 +1302,6 @@ bool check_undef_macro(const char** Combination_CO, int Combination_CO_size, int
     }
   }
   WARN("EXPECTED ERROR WAS NOT GENERATED");
-  HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
   return 0;
 }
 
@@ -1323,13 +1367,13 @@ bool check_header_dir(const char** Combination_CO, int Combination_CO_size, int 
     Expected_Results_int.push_back(static_cast<int>(indx));
   }
   std::vector<std::string> src_var_hdr_lst(Src_headers_list.size(), "");
-  std::vector<const char*> src_hder_lst(Src_headers_list.size());
+  const char** src_hder_lst = new const char*[Src_headers_list.size()];
   for (int i = 0; i < Src_headers_list.size(); ++i) {
     src_var_hdr_lst[i] = Src_headers_list[i];
     src_hder_lst[i] = src_var_hdr_lst[i].c_str();
   }
   std::vector<std::string> var_hdr_lst(Headers_list.size(), "");
-  std::vector<const char*> hder_lst(Headers_list.size());
+  const char** hder_lst = new const char*[Headers_list.size()];
   for (int i = 0; i < Headers_list.size(); ++i) {
     var_hdr_lst[i] = Headers_list[i];
     hder_lst[i] = var_hdr_lst[i].c_str();
@@ -1337,7 +1381,7 @@ bool check_header_dir(const char** Combination_CO, int Combination_CO_size, int 
   for (int senario = 0; senario < Input_Thrd_Vals_int.size(); senario++) {
     hiprtcProgram prog;
     HIPRTC_CHECK(hiprtcCreateProgram(&prog, header_dir_string, kername, Headers_list.size(),
-                                     src_hder_lst.data(), hder_lst.data()));
+                                     src_hder_lst, hder_lst));
     if (Combination_CO_size != -1) {
       hiprtcResult compileResult{hiprtcCompileProgram(prog, Combination_CO_size, Combination_CO)};
       if (!(compileResult == HIPRTC_SUCCESS)) {
@@ -1355,7 +1399,6 @@ bool check_header_dir(const char** Combination_CO, int Combination_CO_size, int 
           HIPRTC_CHECK(hiprtcGetProgramLog(prog, &log[0]));
           WARN(log);
         }
-        HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
         return 0;
       }
     } else {
@@ -1371,7 +1414,6 @@ bool check_header_dir(const char** Combination_CO, int Combination_CO_size, int 
           HIPRTC_CHECK(hiprtcGetProgramLog(prog, &log[0]));
           WARN(log);
         }
-        HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
         return 0;
       }
     }
@@ -1457,7 +1499,6 @@ bool check_warning(const char** Combination_CO, int Combination_CO_size, int max
         HIPRTC_CHECK(hiprtcGetProgramLog(prog, &log[0]));
         WARN(log);
       }
-      HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
       return 0;
     }
   } else {
@@ -1473,7 +1514,6 @@ bool check_warning(const char** Combination_CO, int Combination_CO_size, int max
         HIPRTC_CHECK(hiprtcGetProgramLog(prog, &log[0]));
         WARN(log);
       }
-      HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
       return 0;
     }
   }
@@ -1536,7 +1576,6 @@ bool check_Rpass_inline(const char** Combination_CO, int Combination_CO_size, in
         HIPRTC_CHECK(hiprtcGetProgramLog(prog, &log[0]));
         WARN(log);
       }
-      HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
       return 0;
     }
   } else {
@@ -1552,7 +1591,6 @@ bool check_Rpass_inline(const char** Combination_CO, int Combination_CO_size, in
         HIPRTC_CHECK(hiprtcGetProgramLog(prog, &log[0]));
         WARN(log);
       }
-      HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
       return 0;
     }
   }
@@ -1624,7 +1662,6 @@ bool check_conversionerror_enabled(const char** Combination_CO, int Combination_
     HIPRTC_CHECK(hiprtcGetProgramLog(prog, &log[0]));
     std::string variable = "error";
     if (-1 != log.find(variable)) {
-      HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
       return 1;
     } else {
       WARN("Compiler Option : " << compiler_option);
@@ -1635,7 +1672,6 @@ bool check_conversionerror_enabled(const char** Combination_CO, int Combination_
         }
       }
       WARN("ERROR MSG : '" << variable << "' NOT FOUND");
-      HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
       return 0;
     }
   } else {
@@ -1648,7 +1684,6 @@ bool check_conversionerror_enabled(const char** Combination_CO, int Combination_
     }
     WARN("LOG IS NOT GENERATED");
     WARN("maybe due to presence of '-w' compiler option");
-    HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
     return 0;
   }
 }
@@ -1698,14 +1733,11 @@ bool check_conversionerror_disabled(const char** Combination_CO, int Combination
       }
       WARN("LOG IS PRESENT WITH ERROR WHICH IS NOT EXPECTED : ");
       WARN("maybe due to presence of '-w' compiler option");
-      HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
       return 0;
     } else {
-      HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
       return 1;
     }
   } else {
-    HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
     return 1;
   }
 }
@@ -1747,7 +1779,6 @@ bool check_conversionwarning_enabled(const char** Combination_CO, int Combinatio
     HIPRTC_CHECK(hiprtcGetProgramLog(prog, &log[0]));
     std::string variable = "warning";
     if (-1 != log.find(variable)) {
-      HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
       return 1;
     } else {
       WARN("Compiler Option : " << compiler_option);
@@ -1758,7 +1789,6 @@ bool check_conversionwarning_enabled(const char** Combination_CO, int Combinatio
         }
       }
       WARN("LOG DOESN'T CONTAIN WARNING AS EXP : " << compiler_option);
-      HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
       return 0;
     }
   } else {
@@ -1770,7 +1800,6 @@ bool check_conversionwarning_enabled(const char** Combination_CO, int Combinatio
       }
     }
     WARN("LOG IS NOT GENERATED");
-    HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
     return 0;
   }
 }
@@ -1820,14 +1849,11 @@ bool check_conversionwarning_disabled(const char** Combination_CO, int Combinati
       }
       WARN("WARNING IS GENERATED WHICH IS NOT EXPECTED");
       WARN(compiler_option);
-      HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
       return 0;
     } else {
-      HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
       return 1;
     }
   } else {
-    HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
     return 1;
   }
 }
@@ -1863,7 +1889,7 @@ bool check_max_thread(const char** Combination_CO, int Combination_CO_size, int 
   }
   int a = 0;
   std::vector<std::string> variable(Target_Thrd_Vals_int.size(), "");
-  std::vector<const char*> appended_compiler_options(Target_Thrd_Vals_int.size());
+  const char** appended_compiler_options = new const char*[Target_Thrd_Vals_int.size()];
   for (int i = 0; i < Target_Thrd_Vals_int.size(); i++) {
     variable[i] = compiler_option + std::to_string(Target_Thrd_Vals_int[i]);
     appended_compiler_options[i] = variable[i].c_str();
@@ -1920,7 +1946,6 @@ bool check_max_thread(const char** Combination_CO, int Combination_CO_size, int 
           HIPRTC_CHECK(hiprtcGetProgramLog(prog, &log[0]));
           WARN(log);
         }
-        HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
         return 0;
       }
     } else {
@@ -1937,7 +1962,6 @@ bool check_max_thread(const char** Combination_CO, int Combination_CO_size, int 
           HIPRTC_CHECK(hiprtcGetProgramLog(prog, &log[0]));
           WARN(log);
         }
-        HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
         return 0;
       }
     }
@@ -2042,7 +2066,6 @@ bool check_unsafe_atomic_enabled(const char** Combination_CO, int Combination_CO
           HIPRTC_CHECK(hiprtcGetProgramLog(prog, &log[0]));
           WARN(log);
         }
-        HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
         return 0;
       }
     } else {
@@ -2058,7 +2081,6 @@ bool check_unsafe_atomic_enabled(const char** Combination_CO, int Combination_CO
           HIPRTC_CHECK(hiprtcGetProgramLog(prog, &log[0]));
           WARN(log);
         }
-        HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
         return 0;
       }
     }
@@ -2150,7 +2172,6 @@ bool check_unsafe_atomic_disabled(const char** Combination_CO, int Combination_C
         HIPRTC_CHECK(hiprtcGetProgramLog(prog, &log[0]));
         WARN(log);
       }
-      HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
       return 0;
     }
   } else {
@@ -2166,7 +2187,6 @@ bool check_unsafe_atomic_disabled(const char** Combination_CO, int Combination_C
         HIPRTC_CHECK(hiprtcGetProgramLog(prog, &log[0]));
         WARN(log);
       }
-      HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
       return 0;
     }
   }
@@ -2225,12 +2245,12 @@ bool check_infinite_num_enabled(const char** Combination_CO, int Combination_CO_
     return 0;
   }
   int CO_IRadded_size = 3, a = 0;
-  std::vector<const char*> CO_IRadded(3);
+  const char** CO_IRadded = new const char*[3];
   CO_IRadded[0] = retrieved_CO.c_str();
   CO_IRadded[1] = "-mllvm";
   CO_IRadded[2] = "-print-after=constmerge";
   std::string data =
-      checking_IR(kername, CO_IRadded.data(), CO_IRadded_size, Combination_CO, Combination_CO_size);
+      checking_IR(kername, CO_IRadded, CO_IRadded_size, Combination_CO, Combination_CO_size);
   if (data == "") {
     WARN("Compiler option : " << retrieved_CO);
     if (Combination_CO_size != -1) {
@@ -2291,12 +2311,12 @@ bool check_infinite_num_disabled(const char** Combination_CO, int Combination_CO
     return 0;
   }
   int CO_IRadded_size = 3, a = 0;
-  std::vector<const char*> CO_IRadded(3);
+  const char** CO_IRadded = new const char*[3];
   CO_IRadded[0] = retrieved_CO.c_str();
   CO_IRadded[1] = "-mllvm";
   CO_IRadded[2] = "-print-after=constmerge";
   std::string data =
-      checking_IR(kername, CO_IRadded.data(), CO_IRadded_size, Combination_CO, Combination_CO_size);
+      checking_IR(kername, CO_IRadded, CO_IRadded_size, Combination_CO, Combination_CO_size);
   if (data == "") {
     WARN("Compiler option : " << retrieved_CO);
     if (Combination_CO_size != -1) {
@@ -2357,12 +2377,12 @@ bool check_NAN_num_enabled(const char** Combination_CO, int Combination_CO_size,
     return 0;
   }
   int CO_IRadded_size = 3, a = 0;
-  std::vector<const char*> CO_IRadded(3);
+  const char** CO_IRadded = new const char*[3];
   CO_IRadded[0] = retrieved_CO.c_str();
   CO_IRadded[1] = "-mllvm";
   CO_IRadded[2] = "-print-after=constmerge";
   std::string data =
-      checking_IR(kername, CO_IRadded.data(), CO_IRadded_size, Combination_CO, Combination_CO_size);
+      checking_IR(kername, CO_IRadded, CO_IRadded_size, Combination_CO, Combination_CO_size);
   if (data == "") {
     WARN("Compiler option : " << retrieved_CO);
     if (Combination_CO_size != -1) {
@@ -2422,12 +2442,12 @@ bool check_NAN_num_disabled(const char** Combination_CO, int Combination_CO_size
     return 0;
   }
   int CO_IRadded_size = 3, a = 0;
-  std::vector<const char*> CO_IRadded(3);
+  const char** CO_IRadded = new const char*[3];
   CO_IRadded[0] = retrieved_CO.c_str();
   CO_IRadded[1] = "-mllvm";
   CO_IRadded[2] = "-print-after=constmerge";
   std::string data =
-      checking_IR(kername, CO_IRadded.data(), CO_IRadded_size, Combination_CO, Combination_CO_size);
+      checking_IR(kername, CO_IRadded, CO_IRadded_size, Combination_CO, Combination_CO_size);
   if (data == "") {
     WARN("Compiler option : " << retrieved_CO);
     if (Combination_CO_size != -1) {
@@ -2487,12 +2507,12 @@ bool check_finite_math_enabled(const char** Combination_CO, int Combination_CO_s
     return 0;
   }
   int CO_IRadded_size = 3, a = 0;
-  std::vector<const char*> CO_IRadded(3);
+  const char** CO_IRadded = new const char*[3];
   CO_IRadded[0] = retrieved_CO.c_str();
   CO_IRadded[1] = "-mllvm";
   CO_IRadded[2] = "-print-after=constmerge";
   std::string data =
-      checking_IR(kername, CO_IRadded.data(), CO_IRadded_size, Combination_CO, Combination_CO_size);
+      checking_IR(kername, CO_IRadded, CO_IRadded_size, Combination_CO, Combination_CO_size);
   if (data == "") {
     WARN("Compiler option : " << retrieved_CO);
     if (Combination_CO_size != -1) {
@@ -2552,12 +2572,12 @@ bool check_finite_math_disabled(const char** Combination_CO, int Combination_CO_
     return 0;
   }
   int CO_IRadded_size = 3, a = 0;
-  std::vector<const char*> CO_IRadded(3);
+  const char** CO_IRadded = new const char*[3];
   CO_IRadded[0] = retrieved_CO.c_str();
   CO_IRadded[1] = "-mllvm";
   CO_IRadded[2] = "-print-after=constmerge";
   std::string data =
-      checking_IR(kername, CO_IRadded.data(), CO_IRadded_size, Combination_CO, Combination_CO_size);
+      checking_IR(kername, CO_IRadded, CO_IRadded_size, Combination_CO, Combination_CO_size);
   if (data == "") {
     WARN("Compiler option : " << retrieved_CO);
     if (Combination_CO_size != -1) {
@@ -2617,7 +2637,7 @@ bool check_associative_math_enabled(const char** Combination_CO, int Combination
     return 0;
   }
   int CO_IRadded_size = 4, a = 0;
-  std::vector<const char*> CO_IRadded(4);
+  const char** CO_IRadded = new const char*[4];
   CO_IRadded[0] = retrieved_CO.c_str();
   CO_IRadded[1] = "-fno-signed-zeros";
   CO_IRadded[2] = "-mllvm";
@@ -2627,7 +2647,7 @@ bool check_associative_math_enabled(const char** Combination_CO, int Combination
     int Combination_CO_IRadded_size = Combination_CO_size + 1;
     int b = 0;
     std::vector<std::string> add_ir_forcombi(Combination_CO_size + 1, "");
-    std::vector<const char*> Combination_CO_IRadded(Combination_CO_size + 1);
+    const char** Combination_CO_IRadded = new const char*[Combination_CO_size + 1];
     for (int i = 0; i < Combination_CO_size + 1; ++i) {
       if (i == Combination_CO_size) {
         Combination_CO_IRadded[i] = "-fno-signed-zeros";
@@ -2637,10 +2657,10 @@ bool check_associative_math_enabled(const char** Combination_CO, int Combination
       Combination_CO_IRadded[i] = add_ir_forcombi[i].c_str();
       b++;
     }
-    data = checking_IR(kername, CO_IRadded.data(), CO_IRadded_size, Combination_CO_IRadded.data(),
+    data = checking_IR(kername, CO_IRadded, CO_IRadded_size, Combination_CO_IRadded,
                        Combination_CO_IRadded_size);
   } else {
-    data = checking_IR(kername, CO_IRadded.data(), CO_IRadded_size, Combination_CO, Combination_CO_size);
+    data = checking_IR(kername, CO_IRadded, CO_IRadded_size, Combination_CO, Combination_CO_size);
   }
   if (data == "") {
     WARN("Compiler option : " << retrieved_CO);
@@ -2702,7 +2722,7 @@ bool check_associative_math_disabled(const char** Combination_CO, int Combinatio
     return 0;
   }
   int CO_IRadded_size = 4, a = 0;
-  std::vector<const char*> CO_IRadded(4);
+  const char** CO_IRadded = new const char*[4];
   CO_IRadded[0] = retrieved_CO.c_str();
   CO_IRadded[1] = "-fno-signed-zeros";
   CO_IRadded[2] = "-mllvm";
@@ -2712,7 +2732,7 @@ bool check_associative_math_disabled(const char** Combination_CO, int Combinatio
     int Combination_CO_IRadded_size = Combination_CO_size + 1;
     int b = 0;
     std::vector<std::string> add_ir_forcombi(Combination_CO_size + 1, "");
-    std::vector<const char*> Combination_CO_IRadded(Combination_CO_size + 1);
+    const char** Combination_CO_IRadded = new const char*[Combination_CO_size + 1];
     for (int i = 0; i < Combination_CO_size + 1; ++i) {
       if (i == Combination_CO_size) {
         Combination_CO_IRadded[i] = "-fno-signed-zeros";
@@ -2722,10 +2742,10 @@ bool check_associative_math_disabled(const char** Combination_CO, int Combinatio
       Combination_CO_IRadded[i] = add_ir_forcombi[i].c_str();
       b++;
     }
-    data = checking_IR(kername, CO_IRadded.data(), CO_IRadded_size, Combination_CO_IRadded.data(),
+    data = checking_IR(kername, CO_IRadded, CO_IRadded_size, Combination_CO_IRadded,
                        Combination_CO_IRadded_size);
   } else {
-    data = checking_IR(kername, CO_IRadded.data(), CO_IRadded_size, Combination_CO, Combination_CO_size);
+    data = checking_IR(kername, CO_IRadded, CO_IRadded_size, Combination_CO, Combination_CO_size);
   }
   if (data == "") {
     WARN("Compiler option : " << retrieved_CO);
@@ -2786,12 +2806,12 @@ bool check_signed_zeros_enabled(const char** Combination_CO, int Combination_CO_
     return 0;
   }
   int CO_IRadded_size = 3, a = 0;
-  std::vector<const char*> CO_IRadded(3);
+  const char** CO_IRadded = new const char*[3];
   CO_IRadded[0] = retrieved_CO.c_str();
   CO_IRadded[1] = "-mllvm";
   CO_IRadded[2] = "-print-after=constmerge";
   std::string data =
-      checking_IR(kername, CO_IRadded.data(), CO_IRadded_size, Combination_CO, Combination_CO_size);
+      checking_IR(kername, CO_IRadded, CO_IRadded_size, Combination_CO, Combination_CO_size);
   if (data == "") {
     WARN("Compiler option : " << retrieved_CO);
     if (Combination_CO_size != -1) {
@@ -2851,12 +2871,12 @@ bool check_signed_zeros_disabled(const char** Combination_CO, int Combination_CO
     return 0;
   }
   int CO_IRadded_size = 3, a = 0;
-  std::vector<const char*> CO_IRadded(3);
+  const char** CO_IRadded = new const char*[3];
   CO_IRadded[0] = retrieved_CO.c_str();
   CO_IRadded[1] = "-mllvm";
   CO_IRadded[2] = "-print-after=constmerge";
   std::string data =
-      checking_IR(kername, CO_IRadded.data(), CO_IRadded_size, Combination_CO, Combination_CO_size);
+      checking_IR(kername, CO_IRadded, CO_IRadded_size, Combination_CO, Combination_CO_size);
   if (data == "") {
     WARN("Compiler option : " << retrieved_CO);
     if (Combination_CO_size != -1) {
@@ -2916,12 +2936,12 @@ bool check_trapping_math_enabled(const char** Combination_CO, int Combination_CO
     return 0;
   }
   int CO_IRadded_size = 3, a = 0;
-  std::vector<const char*> CO_IRadded(3);
+  const char** CO_IRadded = new const char*[3];
   CO_IRadded[0] = retrieved_CO.c_str();
   CO_IRadded[1] = "-mllvm";
   CO_IRadded[2] = "-print-after=constmerge";
   std::string data =
-      checking_IR(kername, CO_IRadded.data(), CO_IRadded_size, Combination_CO, Combination_CO_size);
+      checking_IR(kername, CO_IRadded, CO_IRadded_size, Combination_CO, Combination_CO_size);
   if (data == "") {
     WARN("Compiler option : " << retrieved_CO);
     if (Combination_CO_size != -1) {
@@ -2965,12 +2985,12 @@ bool check_trapping_math_disabled(const char** Combination_CO, int Combination_C
     return 0;
   }
   int CO_IRadded_size = 3, a = 0;
-  std::vector<const char*> CO_IRadded(3);
+  const char** CO_IRadded = new const char*[3];
   CO_IRadded[0] = retrieved_CO.c_str();
   CO_IRadded[1] = "-mllvm";
   CO_IRadded[2] = "-print-after=constmerge";
   std::string data =
-      checking_IR(kername, CO_IRadded.data(), CO_IRadded_size, Combination_CO, Combination_CO_size);
+      checking_IR(kername, CO_IRadded, CO_IRadded_size, Combination_CO, Combination_CO_size);
   if (data == "") {
     WARN("Compiler option : " << retrieved_CO);
     if (Combination_CO_size != -1) {
@@ -3001,8 +3021,12 @@ std::string checking_IR(const char* kername, const char** extra_CO_IRadded,
                         int extra_CO_IRadded_size, const char** Combination_CO,
                         int Combination_CO_size) {
   float *A_d, *B_d, *C_d;
-  std::vector<float> A_h(1), B_h(1), C_h(1), result(1);
+  float *A_h, *B_h, *C_h, *result;
   float Nbytes = sizeof(float);
+  A_h = new float[1];
+  B_h = new float[1];
+  C_h = new float[1];
+  result = new float[1];
   for (int i = 0; i < 1; i++) {
     A_h[i] = 0.1f;
     B_h[i] = 0.1f;
@@ -3012,9 +3036,9 @@ std::string checking_IR(const char* kername, const char** extra_CO_IRadded,
   HIP_CHECK(hipMalloc(&A_d, Nbytes));
   HIP_CHECK(hipMalloc(&B_d, Nbytes));
   HIP_CHECK(hipMalloc(&C_d, Nbytes));
-  HIP_CHECK(hipMemcpy(A_d, A_h.data(), Nbytes, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(B_d, B_h.data(), Nbytes, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(C_d, C_h.data(), Nbytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(B_d, B_h, Nbytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(C_d, C_h, Nbytes, hipMemcpyHostToDevice));
   hiprtcProgram prog;
   HIPRTC_CHECK(hiprtcCreateProgram(&prog, ffp_contract_string, kername, 0, NULL, NULL));
   CaptureIR ir_capture;
@@ -3025,7 +3049,7 @@ std::string checking_IR(const char* kername, const char** extra_CO_IRadded,
     Combination_CO_IRadded_size = Combination_CO_size + 4;
     int b = 0;
     std::vector<std::string> add_ir_forcombi(Combination_CO_size + 4, "");
-    std::vector<const char*> Combination_CO_IRadded(Combination_CO_size + 4);
+    const char** Combination_CO_IRadded = new const char*[Combination_CO_size + 4];
     for (int i = 0; i < Combination_CO_size + 4; ++i) {
       if (i == Combination_CO_size) {
         Combination_CO_IRadded[i] = "-mllvm";
@@ -3040,7 +3064,7 @@ std::string checking_IR(const char* kername, const char** extra_CO_IRadded,
       b++;
     }
     hiprtcResult compileResult{
-        hiprtcCompileProgram(prog, Combination_CO_IRadded_size, Combination_CO_IRadded.data())};
+        hiprtcCompileProgram(prog, Combination_CO_IRadded_size, Combination_CO_IRadded)};
     if (!(compileResult == HIPRTC_SUCCESS)) {
       ir_capture.Cleanup(dump_dir);
       WARN("Compiler option : " << extra_CO_IRadded[0]);
@@ -3057,12 +3081,11 @@ std::string checking_IR(const char* kername, const char** extra_CO_IRadded,
         HIPRTC_CHECK(hiprtcGetProgramLog(prog, &log[0]));
         WARN(log);
       }
-      HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
       return "";
     }
   } else {
     std::vector<std::string> extra_ir_options(extra_CO_IRadded_size + 2, "");
-    std::vector<const char*> extra_CO_IRadded_with_dump(extra_CO_IRadded_size + 2);
+    const char** extra_CO_IRadded_with_dump = new const char*[extra_CO_IRadded_size + 2];
     for (int i = 0; i < extra_CO_IRadded_size; ++i) {
       extra_ir_options[i] = extra_CO_IRadded[i];
       extra_CO_IRadded_with_dump[i] = extra_ir_options[i].c_str();
@@ -3072,7 +3095,7 @@ std::string checking_IR(const char* kername, const char** extra_CO_IRadded,
     extra_CO_IRadded_with_dump[extra_CO_IRadded_size + 1] =
         extra_ir_options[extra_CO_IRadded_size + 1].c_str();
     hiprtcResult compileResult{
-        hiprtcCompileProgram(prog, extra_CO_IRadded_size + 2, extra_CO_IRadded_with_dump.data())};
+        hiprtcCompileProgram(prog, extra_CO_IRadded_size + 2, extra_CO_IRadded_with_dump)};
     if (!(compileResult == HIPRTC_SUCCESS)) {
       ir_capture.Cleanup(dump_dir);
       WARN("hiprtcCompileProgram() api failed!! with error code: ");
@@ -3084,7 +3107,6 @@ std::string checking_IR(const char* kername, const char** extra_CO_IRadded,
         HIPRTC_CHECK(hiprtcGetProgramLog(prog, &log[0]));
         WARN(log);
       }
-      HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
       return "";
     }
   }
@@ -3102,7 +3124,7 @@ std::string checking_IR(const char* kername, const char** extra_CO_IRadded,
   HIP_CHECK(hipModuleLoadData(&module, codec.data()));
   HIP_CHECK(hipModuleGetFunction(&function, module, kername));
   HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, 0, nullptr, kernel_parameter));
-  HIP_CHECK(hipMemcpy(result.data(), C_d, Nbytes, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(result, C_d, Nbytes, hipMemcpyDeviceToHost));
   for (int i = 0; i < 1; i++) {
     if (result[i] != ((A_h[i] * B_h[i]) + C_h[i])) {
       return "";
