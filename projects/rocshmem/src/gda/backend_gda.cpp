@@ -28,6 +28,7 @@
 #include <hip/hip_runtime.h>
 #include <cstdlib>
 #include <cassert>
+#include <algorithm>
 
 #include "backend_gda.hpp"
 #include "ibv_wrapper.hpp"
@@ -79,17 +80,16 @@ void GDABackend::init() {
 
   select_nics();
 
-  // Determine number of QPs to create per PE
-  num_qps_per_pe = envvar::gda::num_qps_per_pe_default_ctx.get_value() +
-                   envvar::gda::num_qps_per_pe_usr_ctx.get_value() *
-                   envvar::max_num_contexts;
+  // Per-context QP rows, raised to num_nics_ so each context can use all NICs
+  qps_per_pe_default_ctx_ = std::max(
+      envvar::gda::num_qps_per_pe_default_ctx.get_value(),
+      static_cast<size_t>(num_nics_));
+  qps_per_pe_usr_ctx_ = std::max(
+      envvar::gda::num_qps_per_pe_usr_ctx.get_value(),
+      static_cast<size_t>(num_nics_));
 
-  // NIC fusion: ensure at least num_nics_ QP rows per PE
-  if (num_nics_ > 1 && num_qps_per_pe < static_cast<size_t>(num_nics_)) {
-    DPRINTF("NIC Fusion: increasing num_qps_per_pe from %zu to %d to match num_nics\n",
-            num_qps_per_pe, num_nics_);
-    num_qps_per_pe = num_nics_;
-  }
+  num_qps_per_pe = qps_per_pe_default_ctx_ +
+                   qps_per_pe_usr_ctx_ * envvar::max_num_contexts;
 
   // Total number of QPs created
   num_qps = num_qps_per_pe * num_pes;

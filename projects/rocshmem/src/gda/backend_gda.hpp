@@ -134,10 +134,14 @@ class GDABackend : public Backend {
 
   /**
    * Determine number of QPs to create per PE =
-   * ROCSHMEM_GDA_NUM_QPS_PER_PE_DEFAULT_CTX +
-   * ROCSHMEM_GDA_NUM_QPS_PER_PE_USR_CTX * ROCSHMEM_MAX_NUM_CONTEXTS
+   * qps_per_pe_default_ctx_ + qps_per_pe_usr_ctx_ * ROCSHMEM_MAX_NUM_CONTEXTS
    */
   size_t num_qps_per_pe {1};
+
+  /** Effective QP rows per PE for the default context (>= num_nics_) */
+  size_t qps_per_pe_default_ctx_ {1};
+  /** Effective QP rows per PE for each user context (>= num_nics_) */
+  size_t qps_per_pe_usr_ctx_ {1};
 
   /**
    * Total number of QPs created =
