@@ -38,7 +38,7 @@ class TestSessionContext(unittest.TestCase):
         self.assertEqual(restored.commands_run[0]["exit_code"], 0)
 
     def test_from_dict_missing_keys_backward_compat(self):
-        # Old session file has no context key — should produce fresh SessionContext
+        # Old session file has no context key — context field is None (backward compatible)
         old_session_dict = {
             "session_id": "2026-01-01_my_app",
             "source_dir": "/src",
