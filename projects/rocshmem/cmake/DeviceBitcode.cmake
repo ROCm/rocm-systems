@@ -86,6 +86,7 @@ if(USE_GDA)
     ${CMAKE_CURRENT_SOURCE_DIR}/src/gda/queue_pair.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/gda/ionic/queue_pair_ionic.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/gda/mlx5/queue_pair_mlx5.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/gda/bnxt/queue_pair_bnxt.cpp
   )
 endif()
 
