@@ -1378,3 +1378,115 @@ plan = SourceAnalyzer(Path("./huge_repo")).analyze()
 # If > 500 files found:
 assert any("truncat" in r.lower() for r in plan.risk_areas)
 ```
+
+### WorkflowSession — Cycle Prevention and Tier 3 Escalation
+
+**Collection fingerprint expanded to all trace flags**
+
+The PMC-dedup logic that prevents infinite `[r] → re-profile → same INFO` loops now
+fingerprints **all named trace collection flags** in addition to individual `--pmc`
+counter names:
+
+```
+--sys-trace  --hip-trace  --kernel-trace  --memory-copy-trace  --hsa-trace  --stats
+```
+
+Previously only `--pmc` counters were tracked, causing the session to cycle between
+sys-trace and counter-collection runs indefinitely.
+
+**All-history comparison (not just last run)**
+
+The dedup check now compares the suggested command's fingerprint against the **union**
+of everything collected across all previous trace runs:
+
+```python
+already_fp = frozenset().union(*(
+    _collection_fingerprint(t.command) for t in self._state.trace_history
+))
+if suggested_fp and suggested_fp.issubset(already_fp):
+    ai_rec_cmd = None  # every suggested collection already performed
+```
+
+**Tier 3 escalation when Tier 1/2 exhausted**
+
+When all Tier 1/2 data has been collected and there is nothing new to suggest, Phase 5
+now shows a "go deeper" menu instead of just printing "stuck":
+
+- TraceLens interval + kernel-category analysis: already embedded in the Phase 4 report.
+- `[d]` builds a PC sampling command and sets it as the Phase 7 option `[3]`:
+  ```
+  ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1 rocprofv3 --pc-sampling \
+    -d /tmp/rocpd_trace/run_<ts> -o results -- <app>
+  ```
+
+**ENV=VALUE command prefix support in Phase 3**
+
+`_phase3_run_profiler` now strips leading `KEY=VALUE` tokens from the command string
+and injects them into the subprocess environment via `env=` rather than `shell=True`:
+
+```
+# This works directly — ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1 is extracted
+# and added to the child process env before rocprofv3 is exec'd.
+ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1 rocprofv3 --pc-sampling ...
+```
+
+### WorkflowSession — AI Edit Revert
+
+**`_revert_last_edit(failure_reason="")` helper**
+
+Restores the most recently AI-modified file from its `.bak` backup and removes the
+`_EditRecord` from `edit_history`. Accepts an optional `failure_reason` string.
+
+When `failure_reason` is non-empty and an `LLMConversation` is active, two messages
+are injected directly into the conversation history (a `user` message describing the
+failure and an `assistant` acknowledgement):
+
+```python
+feedback = (
+    f"IMPORTANT: The previous code edit to {file} was reverted "
+    f"because it caused errors.\n\nFailure details:\n{failure_reason}\n\n"
+    f"Do NOT suggest the same pattern again..."
+)
+conv._messages.append({"role": "user", "content": feedback})
+conv._messages.append({"role": "assistant", "content": "Understood. ..."})
+```
+
+This teaches the LLM what failed without requiring a separate API call.
+
+**Phase 3 (run profiler) — `[v]` revert on profiling failure**
+
+When the profiling command exits non-zero and `edit_history` is non-empty, the retry
+menu now includes `[v] Revert last AI edit and retry`. The exit code is passed as the
+failure reason so the LLM conversation records it.
+
+**Phase 6 (recompile wait) — accumulate and pass error text**
+
+The recompile-wait loop accumulates all lines the user types as potential compilation
+errors. When the user types `revert`/`undo`/`v`, the accumulated error lines are passed
+to `_revert_last_edit(failure_reason=...)` so the LLM conversation receives the exact
+compiler output. Example:
+
+```
+Changes applied. Please recompile your application.
+Type 'done' when compiled, 'revert' to undo the AI edit,
+'abort' to exit, or paste compilation errors.
+> error: use of undeclared identifier '__builtin_amdgcn_sin'
+  Error noted. Type 'done' when fixed or 'revert' to undo the edit.
+> revert
+  ✓ Reverted: inefficient_demo.cpp  (backup kept at inefficient_demo.cpp.bak)
+```
+
+### LLM Fence — Invalid HIP Intrinsics
+
+**`__builtin_amdgcn_sin` / `__builtin_amdgcn_cos` added to the prohibited list**
+
+The reference guide now explicitly bans these non-existent HIP device functions with a
+`❌` rule. The `__builtin_amdgcn_*` namespace covers hardware-specific operations
+(lane reads, DS swizzle) but **not** transcendental math. Suggesting them causes:
+
+```
+error: use of undeclared identifier '__builtin_amdgcn_sin'
+```
+
+The guide documents the correct HIP math API: use `sinf()`, `cosf()`, `sqrtf()`, etc.
+— amdclang++ maps these to OCML hardware-optimized implementations automatically.
