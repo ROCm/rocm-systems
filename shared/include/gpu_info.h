@@ -37,6 +37,15 @@ struct BdfInfo {
   uint32_t function_number;
 };
 
+// Power and voltage sensor readings from KMD PMLog escape.
+struct PowerInfo {
+  uint32_t current_socket_power;  // ASIC_POWER sensor in W (UINT32_MAX if unavailable)
+  uint32_t gfx_voltage;           // GFX_VOLTAGE sensor in mV
+  uint32_t soc_voltage;           // SOC_VOLTAGE sensor in mV
+  uint32_t mem_voltage;           // MEM_VOLTAGE sensor in mV
+  uint32_t power_limit;           // max power limit from sensor limits
+};
+
 // VBIOS version and identification information from KMD CWDDE escape.
 struct VBiosInfo {
   char name[256];          // product name from VBIOS ROM image

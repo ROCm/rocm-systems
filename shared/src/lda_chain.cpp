@@ -106,8 +106,10 @@ ErrorCode LdaChain::QueryLinkedGpusInChain(vector<Device *> &devices,
       code = Device::Create(GetPlatform(), this,
                             static_cast<u32>(devices.size()),
                             chain, info, &chained_devices_[chain]);
-      if (code == ErrorCode::Success && ChainedDevice(chain))
+      if (code == ErrorCode::Success && ChainedDevice(chain)) {
         devices.push_back(ChainedDevice(chain));
+        devices.back()->Init();  // pre-fetch sensor limits; ignore failure
+      }
       break;
     }
     default:

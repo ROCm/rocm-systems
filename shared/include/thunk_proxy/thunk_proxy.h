@@ -214,6 +214,12 @@ public:
   // Query VBIOS info via KMD CWDDE escape.
   ErrorCode QueryVBiosInfo(wsl::thunk::VBiosInfo *info) const;
 
+  // Fetch sensor limits from KMD (call once after device creation).
+  ErrorCode Init();
+
+  // Query power / voltage readings via KMD PMLog escape.
+  ErrorCode QueryPowerInfo(wsl::thunk::PowerInfo *info) const;
+
   // Send a driver-escape packet on behalf of this GPU slot.
   ErrorCode Escape(void *pData, size_t dataSize, bool hardwareAccess = false) const;
 

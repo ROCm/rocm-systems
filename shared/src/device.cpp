@@ -62,6 +62,14 @@ ErrorCode Device::QueryVBiosInfo(VBiosInfo *info) const {
   return device_ctx_->QueryVBiosInfo(info);
 }
 
+ErrorCode Device::Init() {
+  return device_ctx_->Init();
+}
+
+ErrorCode Device::QueryPowerInfo(PowerInfo *info) const {
+  return device_ctx_->QueryPowerInfo(info);
+}
+
 ErrorCode Device::Escape(void *pData, size_t dataSize, bool hardwareAccess) const {
   return device_ctx_->Escape(pData, dataSize, hardwareAccess);
 }

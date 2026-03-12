@@ -39,6 +39,11 @@ public:
 
   ErrorCode QueryVBiosInfo(VBiosInfo *info) const;
 
+  // Called once after creation to pre-fetch sensor limits.
+  ErrorCode Init();
+
+  ErrorCode QueryPowerInfo(PowerInfo *info) const;
+
   ErrorCode Escape(void *pData, size_t dataSize,
                    bool hardwareAccess = false) const;
 
