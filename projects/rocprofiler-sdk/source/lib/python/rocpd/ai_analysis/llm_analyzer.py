@@ -102,6 +102,18 @@ def get_reference_guide_path() -> Path:
     raise ReferenceGuideNotFoundError(attempted)
 
 
+def load_reference_guide() -> str:
+    """Load the LLM fence document.
+
+    Same path lookup order as get_reference_guide_path():
+    ROCPD_LLM_REFERENCE_GUIDE env var → module share/ dir → /opt/rocm/share/...
+
+    Raises:
+        ReferenceGuideNotFoundError: If guide file not found.
+    """
+    return get_reference_guide_path().read_text()
+
+
 # ---------------------------------------------------------------------------
 # Context-aware guide filtering
 # ---------------------------------------------------------------------------
