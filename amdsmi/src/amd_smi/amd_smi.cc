@@ -5330,81 +5330,33 @@ amdsmi_status_t amdsmi_get_gpu_xcd_counter(amdsmi_processor_handle processor_han
 amdsmi_status_t amdsmi_get_processor_handle_from_bdf(amdsmi_bdf_t bdf,
                 amdsmi_processor_handle* processor_handle)
 {
-    amdsmi_status_t status;
-    uint32_t socket_count = 0;
-
     AMDSMI_CHECK_INIT();
 
-    if (processor_handle == nullptr) {
+    if (processor_handle == nullptr)
         return AMDSMI_STATUS_INVAL;
-    }
 
-    status = amdsmi_get_socket_handles(&socket_count, nullptr);
-    if (status != AMDSMI_STATUS_SUCCESS) {
-        return status;
-    }
+    auto& platform = Platform::instance();
+    uint32_t device_count = static_cast<uint32_t>(platform.GetDeviceCount());
+    for (uint32_t i = 0; i < device_count; i++) {
+        Device *pdev = platform.GetDevice(i);
+        if (pdev == nullptr)
+            return AMDSMI_STATUS_API_FAILED;
 
-    std::vector<amdsmi_socket_handle> sockets(socket_count);
+        wsl::thunk::BdfInfo bi = {};
+        auto code = pdev->QueryBdfInfo(&bi);
+        if (code != ErrorCode::Success)
+            continue;
 
-    status = amdsmi_get_socket_handles(&socket_count, &sockets[0]);
-    if (status != AMDSMI_STATUS_SUCCESS) {
-        return status;
-    }
-    std::ostringstream bdf_sstream;
-    bdf_sstream << __PRETTY_FUNCTION__
-                << " | [bdf] domain_number:" << "bus_number:" << "device_number."
-                << "function_number = ";
-    bdf_sstream << std::hex << std::setfill('0') << std::setw(4) << bdf.domain_number << ":";
-    bdf_sstream << std::hex << std::setfill('0') << std::setw(2) << bdf.bus_number << ":";
-    bdf_sstream << std::hex << std::setfill('0') << std::setw(2) << bdf.device_number << ".";
-    bdf_sstream << std::hex << std::setfill('0') << +bdf.function_number;
-    // std::cout << __PRETTY_FUNCTION__ << " BDF: " << bdf_sstream.str() << std::endl;
-    LOG_DEBUG(bdf_sstream);
-
-    for (unsigned int i = 0; i < socket_count; i++) {
-        // Get the processor count available for the socket.
-        uint32_t processor_count = 0;
-        status = amdsmi_get_processor_handles(sockets[i], &processor_count, nullptr);
-
-        // Allocate the memory for the device handlers on the socket
-        std::vector<amdsmi_processor_handle> processor_handles(processor_count);
-        // Get all processors of the socket
-        status = amdsmi_get_processor_handles(sockets[i], &processor_count, &processor_handles[0]);
-        if (status != AMDSMI_STATUS_SUCCESS) {
-            return status;
-        }
-        for (uint32_t idx = 0; idx < processor_count; idx++) {
-            amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
-            status = get_gpu_device_from_handle(processor_handles[idx], &gpu_device);
-            if (status != AMDSMI_STATUS_SUCCESS) {
-                return status;
-            }
-            amdsmi_bdf_t found_bdf = gpu_device->get_bdf();
-            bdf_sstream << __PRETTY_FUNCTION__
-                        << " | [found_bdf] domain_number:" << "bus_number:" << "device_number."
-                        << "function_number = ";
-            bdf_sstream << std::hex << std::setfill('0') << std::setw(4)
-                        << found_bdf.domain_number << ":";
-            bdf_sstream << std::hex << std::setfill('0') << std::setw(2)
-                        << found_bdf.bus_number << ":";
-            bdf_sstream << std::hex << std::setfill('0') << std::setw(2)
-                        << found_bdf.device_number << ".";
-            bdf_sstream << std::hex << std::setfill('0')
-                        << +found_bdf.function_number;
-            // std::cout << __PRETTY_FUNCTION__ << " BDF: " << bdf_sstream.str() << std::endl;
-            LOG_DEBUG(bdf_sstream);
-
-            if ((bdf.bus_number == found_bdf.bus_number) &&
-                (bdf.device_number == found_bdf.device_number) &&
-                (bdf.domain_number == found_bdf.domain_number) &&
-                (bdf.function_number == found_bdf.function_number)) {
-                    *processor_handle = processor_handles[idx];
-                    return AMDSMI_STATUS_SUCCESS;
-                }
+        if (bdf.bus_number    == bi.bus_number    &&
+            bdf.device_number == bi.device_number &&
+            bdf.domain_number == bi.domain_number &&
+            bdf.function_number == bi.function_number) {
+            *processor_handle = reinterpret_cast<amdsmi_processor_handle>(pdev);
+            return AMDSMI_STATUS_SUCCESS;
         }
     }
 
-    return AMDSMI_STATUS_API_FAILED;
+    return AMDSMI_STATUS_NOT_FOUND;
 }
 
 amdsmi_status_t
