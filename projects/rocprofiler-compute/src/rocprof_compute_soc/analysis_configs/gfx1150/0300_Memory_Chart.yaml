@@ -109,6 +109,9 @@ Panel Config:
         TCP Write Requests:
           value: AVG(TCP_REQ_WRITE_sum / $denom)
           unit: Requests + $normUnit
+        TCP Atomic Requests:
+          value: AVG(TCP_REQ_ATOMIC_sum / $denom)
+          unit: Requests + $normUnit
         TCP Miss Requests:
           value: AVG(TCP_REQ_MISS_sum / $denom)
           unit: Requests + $normUnit
@@ -135,6 +138,15 @@ Panel Config:
       metric:
         LDS Instructions:
           value: AVG(SQ_INSTS_LDS_sum / $denom)
+          unit: Instructions + $normUnit
+        LDS Read Instructions:
+          value: AVG(SQ_LDS_DIRECT_RD_sum / $denom)
+          unit: Instructions + $normUnit
+        LDS Write Instructions:
+          value: AVG(SQ_LDS_DIRECT_WR_sum / $denom)
+          unit: Instructions + $normUnit
+        LDS Atomic Instructions:
+          value: AVG(SQ_LDS_ATOMIC_RETURN_sum / $denom)
           unit: Instructions + $normUnit
         LDS Instruction Cycles:
           value: AVG(SQ_INST_CYCLES_LDS_sum / $denom)
@@ -346,6 +358,26 @@ Panel Config:
     TCP Hit Rate: |-
       Definition: Percentage of TCP (L0 vector cache) requests that hit in cache.
       Formula: 100 * (TCP_REQ_sum - TCP_REQ_MISS_sum) / TCP_REQ_sum
+
+    TCP Atomic Requests: |-
+      Definition: Number of atomic operations through the TCP (Texture Cache Pipe).
+      Description: Includes buffer_atomic, global_atomic, and flat_atomic operations.
+      Formula: TCP_REQ_ATOMIC_sum / $denom
+
+    LDS Read Instructions: |-
+      Definition: Number of LDS read instructions executed.
+      Description: Direct read operations from Local Data Share memory.
+      Formula: SQ_LDS_DIRECT_RD_sum / $denom
+
+    LDS Write Instructions: |-
+      Definition: Number of LDS write instructions executed.
+      Description: Direct write operations to Local Data Share memory.
+      Formula: SQ_LDS_DIRECT_WR_sum / $denom
+
+    LDS Atomic Instructions: |-
+      Definition: Number of LDS atomic instructions executed.
+      Description: Atomic operations on Local Data Share memory with return values.
+      Formula: SQ_LDS_ATOMIC_RETURN_sum / $denom
 
     LDS Bank Conflict Rate: |-
       Definition: Percentage of LDS accesses that resulted in bank conflicts.

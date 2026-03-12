@@ -34,9 +34,9 @@ API:
     plot_mem_chart(arch, normal_unit, metric_dict) -> str
 
 RDNA3.5 MEMORY HIERARCHY:
-   Kernel -> SQC (ICache/DCache) -> GL1C (L1) -> GL2C (L2) -> GCEA -> System Memory
-         -> TCP (L0 Vector Cache)
-         -> LDS (Local Data Share)
+   Kernel -> TCP (L0 Vector Cache) -> GL1C (L1) -> GL2C (L2) -> GCEA -> System Memory
+         -> SQC (ICache/DCache)   -> GL1C (L1) -> GL2C (L2) -> GCEA -> System Memory
+         -> LDS (Local Data Share) [stays on CU, no GL1C connection]
 """
 
 import os
@@ -55,6 +55,9 @@ from rich.text import Text
 COLORS = {
     'kernel': 'green',
     'block': 'blue',
+    'tcp': 'cyan',
+    'lds': 'magenta',
+    'sqc': 'yellow',
     'read': 'bright_cyan',
     'write': 'bright_yellow',
     'atomic': 'bright_magenta',
@@ -136,21 +139,18 @@ class RegularBlock(RectBlock):
         for i, sub in enumerate(self.sub_blocks):
             if sub.show_border and sub.label:
                 box_width = self.width - 6
-                # Inner content width: box_width - 2 (for │ borders) - 2 (space after left │ and before right │)
                 inner_width = box_width - 4
                 bc = sub.border_color
                 top_line = f"[{bc}]┌" + "─" * (box_width - 2) + f"┐[/{bc}]"
                 bottom_line = f"[{bc}]└" + "─" * (box_width - 2) + f"┘[/{bc}]"
                 temp_content.append(top_line)
-                # Label line with right border
                 label_clean = sub.label
                 label_pad = " " * max(0, inner_width - len(label_clean))
                 temp_content.append(f"[{bc}]│[/{bc}] [bold]{sub.label}[/bold]{label_pad} [{bc}]│[/{bc}]")
                 for attr in sub.attributes:
-                    if not attr:  # Skip empty attributes
+                    if not attr:
                         continue
                     clean = re.sub(r'\[.*?\]', '', attr)
-                    # Calculate padding to align right border
                     pad_len = max(0, inner_width - len(clean))
                     pad = " " * pad_len
                     temp_content.append(f"[{bc}]│[/{bc}] {attr}{pad} [{bc}]│[/{bc}]")
@@ -245,7 +245,7 @@ def create_mem_chart_diagram(
     show_debug: bool = False,
     compact: bool = False
 ) -> None:
-    """Create the RDNA3.5 memory architecture diagram"""
+    """Create the RDNA3.5 memory architecture diagram with separate TCP, LDS, SQC blocks"""
 
     # Extract metrics
     icache_req = get_metric(metric_dict, 'ICache Requests')
@@ -258,15 +258,28 @@ def create_mem_chart_diagram(
 
     tcp_read_req = get_metric(metric_dict, 'TCP Read Requests')
     tcp_write_req = get_metric(metric_dict, 'TCP Write Requests')
+    tcp_atomic_req = get_metric(metric_dict, 'TCP Atomic Requests')
     tcp_hit = get_metric(metric_dict, 'TCP Hit Rate')
     tcp_bw = get_metric(metric_dict, 'TCP Request Bandwidth')
 
     lds_insts = get_metric(metric_dict, 'LDS Instructions')
+    lds_read_insts = get_metric(metric_dict, 'LDS Read Instructions')
+    lds_write_insts = get_metric(metric_dict, 'LDS Write Instructions')
+    lds_atomic_insts = get_metric(metric_dict, 'LDS Atomic Instructions')
     lds_bw = get_metric(metric_dict, 'LDS Estimated Bandwidth')
     lds_bank_conflict = get_metric(metric_dict, 'LDS Bank Conflict Rate')
 
     tcp_gl1_read_bw = get_metric(metric_dict, 'TCP-GL1 Read Bandwidth')
     tcp_gl1_write_bw = get_metric(metric_dict, 'TCP-GL1 Write Bandwidth')
+
+    # Calculate combined SQC-GL1 bandwidth
+    sqc_gl1_read_bw = None
+    if icache_gl1_bw is not None and dcache_gl1_bw is not None:
+        sqc_gl1_read_bw = icache_gl1_bw + dcache_gl1_bw
+    elif icache_gl1_bw is not None:
+        sqc_gl1_read_bw = icache_gl1_bw
+    elif dcache_gl1_bw is not None:
+        sqc_gl1_read_bw = dcache_gl1_bw
 
     gl1c_util = get_metric(metric_dict, 'GL1C Utilization')
     gl1c_hit = get_metric(metric_dict, 'GL1C Hit Rate')
@@ -290,235 +303,310 @@ def create_mem_chart_diagram(
     # Print header
     console.print()
     console.print(f"[bold]RDNA3.5 Memory Chart[/bold] [dim](Normalization: {normal_unit})[/dim]")
-    console.print("|" + "-" * 68 + " [dim]GPU[/dim] " + "-" * 68 + "|" + "-" * 4 + " [dim]System Memory[/dim] " + "-" * 4 + "|")
+    console.print("|" + "-" * 62 + " [dim]GPU[/dim] " + "-" * 62 + "|" + "-" * 4 + " [dim]System Memory[/dim] " + "-" * 4 + "|")
     console.print()
 
     # Arrow constants
-    std_arrow_len = 10
+    std_arrow_len = 8
     std_arrow_left = "<" + "-" * std_arrow_len
     std_arrow_right = "-" * std_arrow_len + ">"
+    std_arrow_both = "<" + "-" * (std_arrow_len - 1) + ">"
 
-    kernel_edge_width = 18
+    kernel_edge_width = 16
     kernel_arrow_left = "<" + "-" * (kernel_edge_width - 1)
     kernel_arrow_right = "-" * (kernel_edge_width - 1) + ">"
     kernel_arrow_both = "<" + "-" * (kernel_edge_width - 2) + ">"
 
-    def fmt_edge(label, value):
-        label_str = f"{label:<8}"
+    def fmt_edge(label, value, width=7):
+        label_str = f"{label:<{width}}"
         if value is not None:
-            value_str = f": {format_sci(value):>8}"
+            value_str = f": {format_sci(value):>7}"
         else:
             value_str = ""
         return f"{label_str}{value_str}"
 
-    # Build blocks
-    kernel = RegularBlock(
-        label="Kernel",
-        x_min=0, x_max=14, y_min=0, y_max=30,
-        color=COLORS['kernel']
-    )
+    # =========================================================================
+    # Build the layout with separate TCP, LDS, SQC blocks
+    # =========================================================================
+    
+    # Create main layout table
+    main_layout = Table.grid(padding=0)
+    main_layout.add_column()  # Kernel
+    main_layout.add_column()  # Kernel edges
+    main_layout.add_column()  # TCP/LDS/SQC stacked
+    main_layout.add_column()  # Edges to GL1
+    main_layout.add_column()  # GL1C
+    main_layout.add_column()  # GL1-GL2 edges
+    main_layout.add_column()  # GL2C
+    main_layout.add_column()  # GL2-GCEA edges
+    main_layout.add_column()  # GCEA
+    main_layout.add_column()  # GCEA-DRAM edges
+    main_layout.add_column()  # DRAM
 
-    edges_kernel = AlignedEdgesGroup(
-        label="Edges_Kernel",
-        x_min=kernel.x_max + 2,
-        x_max=kernel.x_max + 22,
-        y_min=0, y_max=30,
-        compact=compact,
-        edges=[
-            Edge(label=fmt_edge("TCP Rd", tcp_read_req), arrow=kernel_arrow_left, color=COLORS['read']),
-            Edge(label=fmt_edge("TCP Wr", tcp_write_req), arrow=kernel_arrow_right, color=COLORS['write']),
-            Edge(label=fmt_edge("LDS", lds_insts), arrow=kernel_arrow_both, color=COLORS['atomic']),
-            Edge(label=fmt_edge("ICache", icache_req), arrow=kernel_arrow_left, color=COLORS['read']),
-            Edge(label=fmt_edge("DCache", dcache_req), arrow=kernel_arrow_left, color=COLORS['read']),
-        ]
-    )
-
-    tcp_block = RegularBlock(
-        label="TCP/LDS/SQC",
-        x_min=edges_kernel.x_max + 1,
-        x_max=edges_kernel.x_max + 30,
-        y_min=0, y_max=30,
-        color=COLORS['block'],
-        vertical_position="top",
-        sub_blocks=[
-            SubBlock(label="TCP (L0)", attributes=[
-                metric_line("Hit Rate", tcp_hit, '%', COLORS['hit']),
-                metric_line("BW", tcp_bw, 'GB/s', COLORS['bw']) if tcp_bw else "",
-            ], height=7),
-            SubBlock(label="LDS", attributes=[
-                metric_line("BW", lds_bw, 'GB/s', COLORS['bw']) if lds_bw else "",
-                metric_line("BankConf", lds_bank_conflict, '%', COLORS['stall']) if lds_bank_conflict else "",
-            ], height=7),
-            SubBlock(label="SQC", attributes=[
-                metric_line("ICache", icache_hit, '%', COLORS['hit']),
-                metric_line("DCache", dcache_hit, '%', COLORS['hit']),
-            ], height=7)
-        ]
-    )
-
-    edges_to_gl1 = AlignedEdgesGroup(
-        label="Edges_GL1",
-        x_min=tcp_block.x_max + 1,
-        x_max=tcp_block.x_max + 12,
-        y_min=0, y_max=20,
-        top_padding=2,
-        compact=compact,
-        edges=[
-            Edge(label=f"Read BW\n{format_bw_gbps(tcp_gl1_read_bw)}" if tcp_gl1_read_bw else "Read BW", arrow=std_arrow_left, color=COLORS['read']),
-            Edge(label=f"Write BW\n{format_bw_gbps(tcp_gl1_write_bw)}" if tcp_gl1_write_bw else "Write BW", arrow=std_arrow_right, color=COLORS['write']),
-        ]
-    )
-
-    gl1_block = RegularBlock(
-        label="GL1C",
-        x_min=edges_to_gl1.x_max + 1,
-        x_max=edges_to_gl1.x_max + 16,
-        y_min=0, y_max=30,
-        color=COLORS['block'],
-        vertical_position="top",
-        sub_blocks=[
-            SubBlock(label="", show_border=False, attributes=[
-                metric_line("Util", gl1c_util, '%', COLORS['util']),
-                f"[dim]{bar(gl1c_util)}[/dim]",
-                "",
-                metric_line("Hit Rate", gl1c_hit, '%', COLORS['hit']),
-                f"[dim]{bar(gl1c_hit)}[/dim]",
-                "",
-                metric_line("GL2 Stall", gl1c_stall_gl2, '%', COLORS['stall']),
-            ], height=12)
-        ]
-    )
-
-    edges_gl1_gl2 = AlignedEdgesGroup(
-        label="Edges_GL1_GL2",
-        x_min=gl1_block.x_max + 1,
-        x_max=gl1_block.x_max + 12,
-        y_min=0, y_max=20,
-        top_padding=2,
-        compact=compact,
-        edges=[
-            Edge(label=f"Read BW\n{format_bw_gbps(gl1_gl2_read_bw)}" if gl1_gl2_read_bw else "Read BW", arrow=std_arrow_left, color=COLORS['read']),
-            Edge(label=f"Write BW\n{format_bw_gbps(gl1_gl2_write_bw)}" if gl1_gl2_write_bw else "Write BW", arrow=std_arrow_right, color=COLORS['write']),
-        ]
-    )
-
-    gl2_block = RegularBlock(
-        label="GL2C",
-        x_min=edges_gl1_gl2.x_max + 1,
-        x_max=edges_gl1_gl2.x_max + 16,
-        y_min=0, y_max=30,
-        color=COLORS['block'],
-        vertical_position="top",
-        sub_blocks=[
-            SubBlock(label="", show_border=False, attributes=[
-                metric_line("Util", gl2c_util, '%', COLORS['util']),
-                f"[dim]{bar(gl2c_util)}[/dim]",
-                "",
-                metric_line("Hit Rate", gl2c_hit, '%', COLORS['hit']),
-                f"[dim]{bar(gl2c_hit)}[/dim]",
-            ], height=10)
-        ]
-    )
-
-    edges_gl2_gcea = AlignedEdgesGroup(
-        label="Edges_GL2_GCEA",
-        x_min=gl2_block.x_max + 1,
-        x_max=gl2_block.x_max + 12,
-        y_min=0, y_max=20,
-        top_padding=2,
-        compact=compact,
-        edges=[
-            Edge(label=f"Read BW\n{format_bw_gbps(gl2c_read_bw)}" if gl2c_read_bw else "Read BW", arrow=std_arrow_left, color=COLORS['read']),
-            Edge(label=f"Write BW\n{format_bw_gbps(gl2c_write_bw)}" if gl2c_write_bw else "Write BW", arrow=std_arrow_right, color=COLORS['write']),
-        ]
-    )
-
-    gcea_block = RegularBlock(
-        label="GCEA",
-        x_min=edges_gl2_gcea.x_max + 1,
-        x_max=edges_gl2_gcea.x_max + 14,
-        y_min=0, y_max=30,
-        color=COLORS['block'],
-        vertical_position="top",
-        sub_blocks=[
-            SubBlock(label="", show_border=False, attributes=[
-                metric_line("SARB Util", sarb_util, '%', COLORS['util']),
-                f"[dim]{bar(sarb_util)}[/dim]",
-                "",
-                metric_line("Stall", sarb_stall, '%', COLORS['stall']),
-            ], height=8)
-        ]
-    )
-
-    edges_to_dram = AlignedEdgesGroup(
-        label="Edges_DRAM",
-        x_min=gcea_block.x_max + 1,
-        x_max=gcea_block.x_max + 12,
-        y_min=0, y_max=20,
-        top_padding=2,
-        compact=compact,
-        edges=[
-            Edge(label=f"DRAM Rd\n{format_bw_gbps(dram_read_bw)}" if dram_read_bw else "DRAM Rd", arrow=std_arrow_left, color=COLORS['read']),
-            Edge(label=f"DRAM Wr\n{format_bw_gbps(dram_write_bw)}" if dram_write_bw else "DRAM Wr", arrow=std_arrow_right, color=COLORS['write']),
-        ]
-    )
-
-    dram_block = RegularBlock(
-        label="DRAM",
-        x_min=edges_to_dram.x_max + 1,
-        x_max=edges_to_dram.x_max + 16,
-        y_min=0, y_max=30,
-        color=COLORS['block'],
-        vertical_position="top",
-        sub_blocks=[
-            SubBlock(label="System Memory", show_border=False, attributes=[
-                f"[dim]DDR5/LPDDR5[/dim]",
-                "",
-                f"Total: [bold bright_green]{format_bw_gbps(total_bw)}[/bold bright_green]",
-            ], height=6)
-        ]
-    )
-
-    # Build layout
-    layout = Table.grid(padding=0)
-    for _ in range(10):
-        layout.add_column()
-
+    # Kernel panel - height matches total of TCP+LDS+SQC stack (10+10+10=30)
     kernel_panel = Panel(
-        "\n" * 8 + "[dim]Shader Core[/dim]\n[dim]Wave Execution[/dim]",
+        "\n" * 11 + "[dim]Shader Core[/dim]\n[dim]Wave Execution[/dim]",
         title=f"[bold {COLORS['kernel']}]Kernel[/bold {COLORS['kernel']}]",
         border_style=COLORS['kernel'],
-        width=kernel.width,
-        height=kernel.height
+        width=14,
+        height=30
     )
 
-    layout.add_row(
+    # Kernel edges (showing all operations grouped by destination)
+    # Order: LDS, TCP, SQC (swapped LDS and TCP)
+    kernel_edges_lines = [
+        "",
+        "     [white]Request[/white]",  # Label between Kernel and LDS (5 spaces)
+        "",
+        f"[{COLORS['read']}]{fmt_edge('Read', lds_read_insts)}[/{COLORS['read']}]",
+        f"[{COLORS['read']}]{kernel_arrow_left}[/{COLORS['read']}]",
+        f"[{COLORS['write']}]{fmt_edge('Write', lds_write_insts)}[/{COLORS['write']}]",
+        f"[{COLORS['write']}]{kernel_arrow_right}[/{COLORS['write']}]",
+        f"[{COLORS['atomic']}]{fmt_edge('Atomic', lds_atomic_insts)}[/{COLORS['atomic']}]",
+        f"[{COLORS['atomic']}]{kernel_arrow_both}[/{COLORS['atomic']}]",
+        "",
+        "",  # 2 empty lines before TCP edges
+        "",
+        "",
+        f"[{COLORS['read']}]{fmt_edge('Read', tcp_read_req)}[/{COLORS['read']}]",
+        f"[{COLORS['read']}]{kernel_arrow_left}[/{COLORS['read']}]",
+        f"[{COLORS['write']}]{fmt_edge('Write', tcp_write_req)}[/{COLORS['write']}]",
+        f"[{COLORS['write']}]{kernel_arrow_right}[/{COLORS['write']}]",
+        f"[{COLORS['atomic']}]{fmt_edge('Atomic', tcp_atomic_req)}[/{COLORS['atomic']}]",
+        f"[{COLORS['atomic']}]{kernel_arrow_both}[/{COLORS['atomic']}]",
+        "",
+        "",
+        "",  # 2 more empty lines before SQC edges
+        "",
+        f"[{COLORS['read']}]{fmt_edge('ICache', icache_req)}[/{COLORS['read']}]",
+        f"[{COLORS['read']}]{kernel_arrow_left}[/{COLORS['read']}]",
+        f"[{COLORS['read']}]{fmt_edge('DCache', dcache_req)}[/{COLORS['read']}]",
+        f"[{COLORS['read']}]{kernel_arrow_left}[/{COLORS['read']}]",
+    ]
+    kernel_edges_text = Text.from_markup("\n".join(kernel_edges_lines))
+
+    # Create stacked TCP/LDS/SQC panels - each height=10, total=30
+    tcp_panel = Panel(
+        f"{metric_line('Hit Rate', tcp_hit, '%', COLORS['hit'])}\n"
+        f"{metric_line('BW', tcp_bw, 'GB/s', COLORS['bw']) if tcp_bw else ''}",
+        title=f"[bold {COLORS['block']}]TCP (L0)[/bold {COLORS['block']}]",
+        border_style=COLORS['block'],
+        width=20,
+        height=10
+    )
+    
+    lds_panel = Panel(
+        f"{metric_line('BW', lds_bw, 'GB/s', COLORS['bw']) if lds_bw else ''}\n"
+        f"{metric_line('Bank Conflict', lds_bank_conflict, '%', COLORS['stall']) if lds_bank_conflict else ''}",
+        title=f"[bold {COLORS['block']}]LDS[/bold {COLORS['block']}]",
+        border_style=COLORS['block'],
+        width=20,
+        height=10
+    )
+    
+    sqc_panel = Panel(
+        f"{metric_line('ICache', icache_hit, '%', COLORS['hit'])}\n"
+        f"{metric_line('DCache', dcache_hit, '%', COLORS['hit'])}",
+        title=f"[bold {COLORS['block']}]SQC[/bold {COLORS['block']}]",
+        border_style=COLORS['block'],
+        width=20,
+        height=10
+    )
+
+    # Stack LDS, TCP, SQC vertically (swapped LDS and TCP)
+    l0_stack = Table.grid(padding=0)
+    l0_stack.add_column()
+    l0_stack.add_row(lds_panel)
+    l0_stack.add_row(tcp_panel)
+    l0_stack.add_row(sqc_panel)
+
+    # Edges to GL1C (TCP and SQC connect, LDS does NOT)
+    # Order: LDS (no connection), TCP, SQC (swapped LDS and TCP)
+    gl1_edges_lines = [
+        "",
+        "",  # Empty space for LDS block (no GL1 connection)
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        f"[{COLORS['read']}]Read BW[/{COLORS['read']}]",
+        f"[{COLORS['read']}]{format_bw_gbps(tcp_gl1_read_bw)}[/{COLORS['read']}]",
+        f"[{COLORS['read']}]{std_arrow_left}[/{COLORS['read']}]",
+        "",
+        f"[{COLORS['write']}]Write BW[/{COLORS['write']}]",
+        f"[{COLORS['write']}]{format_bw_gbps(tcp_gl1_write_bw)}[/{COLORS['write']}]",
+        f"[{COLORS['write']}]{std_arrow_right}[/{COLORS['write']}]",
+        "",
+        "",
+        "",
+        f"[{COLORS['read']}]Read BW[/{COLORS['read']}]",
+        f"[{COLORS['read']}]{format_bw_gbps(sqc_gl1_read_bw)}[/{COLORS['read']}]",
+        f"[{COLORS['read']}]{std_arrow_left}[/{COLORS['read']}]",
+    ]
+    gl1_edges_text = Text.from_markup("\n".join(gl1_edges_lines))
+
+    # GL1C panel - height=30 to match stack
+    gl1_panel = Panel(
+        f"{metric_line('Util', gl1c_util, '%', COLORS['util'])}\n"
+        f"[dim]{bar(gl1c_util)}[/dim]\n"
+        "\n"
+        f"{metric_line('Hit Rate', gl1c_hit, '%', COLORS['hit'])}\n"
+        f"[dim]{bar(gl1c_hit)}[/dim]\n"
+        "\n"
+        f"{metric_line('GL2 Stall', gl1c_stall_gl2, '%', COLORS['stall'])}",
+        title=f"[bold {COLORS['block']}]GL1C[/bold {COLORS['block']}]",
+        border_style=COLORS['block'],
+        width=16,
+        height=30
+    )
+
+    # GL1-GL2 edges - more padding to center vertically
+    gl1_gl2_edges_lines = [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",  # 5 more empty lines
+        "",
+        "",
+        "",
+        "",
+        f"[{COLORS['read']}]Read BW[/{COLORS['read']}]",
+        f"[{COLORS['read']}]{format_bw_gbps(gl1_gl2_read_bw)}[/{COLORS['read']}]",
+        f"[{COLORS['read']}]{std_arrow_left}[/{COLORS['read']}]",
+        "",
+        f"[{COLORS['write']}]Write BW[/{COLORS['write']}]",
+        f"[{COLORS['write']}]{format_bw_gbps(gl1_gl2_write_bw)}[/{COLORS['write']}]",
+        f"[{COLORS['write']}]{std_arrow_right}[/{COLORS['write']}]",
+        "",
+        "",
+        "",
+        "",
+    ]
+    gl1_gl2_edges_text = Text.from_markup("\n".join(gl1_gl2_edges_lines))
+
+    # GL2C panel - height=30 to match
+    gl2_panel = Panel(
+        f"{metric_line('Util', gl2c_util, '%', COLORS['util'])}\n"
+        f"[dim]{bar(gl2c_util)}[/dim]\n"
+        "\n"
+        f"{metric_line('Hit Rate', gl2c_hit, '%', COLORS['hit'])}\n"
+        f"[dim]{bar(gl2c_hit)}[/dim]",
+        title=f"[bold {COLORS['block']}]GL2C[/bold {COLORS['block']}]",
+        border_style=COLORS['block'],
+        width=16,
+        height=30
+    )
+
+    # GL2-GCEA edges - more padding to center vertically
+    gl2_gcea_edges_lines = [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",  # 5 more empty lines
+        "",
+        "",
+        "",
+        "",
+        f"[{COLORS['read']}]Read BW[/{COLORS['read']}]",
+        f"[{COLORS['read']}]{format_bw_gbps(gl2c_read_bw)}[/{COLORS['read']}]",
+        f"[{COLORS['read']}]{std_arrow_left}[/{COLORS['read']}]",
+        "",
+        f"[{COLORS['write']}]Write BW[/{COLORS['write']}]",
+        f"[{COLORS['write']}]{format_bw_gbps(gl2c_write_bw)}[/{COLORS['write']}]",
+        f"[{COLORS['write']}]{std_arrow_right}[/{COLORS['write']}]",
+        "",
+        "",
+        "",
+        "",
+    ]
+    gl2_gcea_edges_text = Text.from_markup("\n".join(gl2_gcea_edges_lines))
+
+    # GCEA panel - height=30 to match
+    gcea_panel = Panel(
+        f"{metric_line('SARB Util', sarb_util, '%', COLORS['util'])}\n"
+        f"[dim]{bar(sarb_util)}[/dim]\n"
+        "\n"
+        f"{metric_line('Stall', sarb_stall, '%', COLORS['stall'])}",
+        title=f"[bold {COLORS['block']}]GCEA[/bold {COLORS['block']}]",
+        border_style=COLORS['block'],
+        width=16,
+        height=30
+    )
+
+    # GCEA-DRAM edges - more padding to center vertically
+    dram_edges_lines = [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",  # 5 more empty lines
+        "",
+        "",
+        "",
+        "",
+        f"[{COLORS['read']}]Read BW[/{COLORS['read']}]",
+        f"[{COLORS['read']}]{format_bw_gbps(dram_read_bw)}[/{COLORS['read']}]",
+        f"[{COLORS['read']}]{std_arrow_left}[/{COLORS['read']}]",
+        "",
+        f"[{COLORS['write']}]Write BW[/{COLORS['write']}]",
+        f"[{COLORS['write']}]{format_bw_gbps(dram_write_bw)}[/{COLORS['write']}]",
+        f"[{COLORS['write']}]{std_arrow_right}[/{COLORS['write']}]",
+        "",
+        "",
+        "",
+        "",
+    ]
+    dram_edges_text = Text.from_markup("\n".join(dram_edges_lines))
+
+    # DRAM panel - height=30 to match
+    dram_panel = Panel(
+        f"[dim]DDR5/LPDDR5[/dim]\n"
+        "\n"
+        f"Total: [bold bright_green]{format_bw_gbps(total_bw)}[/bold bright_green]",
+        title=f"[bold {COLORS['block']}]DRAM[/bold {COLORS['block']}]",
+        border_style=COLORS['block'],
+        width=16,
+        height=30
+    )
+
+    # Add the main row
+    main_layout.add_row(
         kernel_panel,
-        edges_kernel.render_text(),
-        tcp_block.render(),
-        edges_to_gl1.render_text(),
-        gl1_block.render(),
-        edges_gl1_gl2.render_text(),
-        gl2_block.render(),
-        edges_gl2_gcea.render_text(),
-        gcea_block.render(),
-        edges_to_dram.render_text(),
-        dram_block.render()
+        kernel_edges_text,
+        l0_stack,
+        gl1_edges_text,
+        gl1_panel,
+        gl1_gl2_edges_text,
+        gl2_panel,
+        gl2_gcea_edges_text,
+        gcea_panel,
+        dram_edges_text,
+        dram_panel
     )
 
-    console.print(layout)
+    console.print(main_layout)
     console.print()
     console.print(f"[dim]Legend:[/dim] [{COLORS['read']}]<----[/{COLORS['read']}] Read  [{COLORS['write']}]---->[/{COLORS['write']}] Write  [{COLORS['atomic']}]<--->[/{COLORS['atomic']}] Atomic  [{COLORS['util']}]█[/{COLORS['util']}] Util  [{COLORS['hit']}]█[/{COLORS['hit']}] Hit%  [{COLORS['stall']}]█[/{COLORS['stall']}] Stall")
     console.print()
 
     if show_debug:
-        console.print("[dim]Block Coordinates:[/dim]")
-        console.print(f"  Kernel: x({kernel.x_min}-{kernel.x_max}), y({kernel.y_min}-{kernel.y_max})")
-        console.print(f"  TCP/LDS/SQC: x({tcp_block.x_min}-{tcp_block.x_max})")
-        console.print(f"  GL1C: x({gl1_block.x_min}-{gl1_block.x_max})")
-        console.print(f"  GL2C: x({gl2_block.x_min}-{gl2_block.x_max})")
-        console.print(f"  GCEA: x({gcea_block.x_min}-{gcea_block.x_max})")
-        console.print(f"  DRAM: x({dram_block.x_min}-{dram_block.x_max})")
+        console.print("[dim]Architecture Notes:[/dim]")
+        console.print("  TCP (Texture Cache Pipe): L0 vector cache for VMEM operations")
+        console.print("  LDS (Local Data Share): On-CU scratchpad, NO GL1C connection")
+        console.print("  SQC (Sequencer Cache): ICache + DCache for scalar operations")
         console.print()
 
 
@@ -558,10 +646,14 @@ DEFAULT_SAMPLE_METRICS = {
     'TCP Total Requests': 1250000,
     'TCP Read Requests': 875000,
     'TCP Write Requests': 375000,
+    'TCP Atomic Requests': 25000,
     'TCP Miss Requests': 150000,
     'TCP Hit Rate': 88.0,
     'TCP Request Bandwidth': 80.0,
     'LDS Instructions': 125000,
+    'LDS Read Instructions': 65000,
+    'LDS Write Instructions': 50000,
+    'LDS Atomic Instructions': 10000,
     'LDS Instruction Cycles': 250000,
     'LDS Wait Cycles': 12500,
     'LDS Bank Conflict Rate': 4.0,
