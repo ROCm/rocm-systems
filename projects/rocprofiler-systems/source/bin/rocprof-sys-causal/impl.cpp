@@ -21,10 +21,10 @@
 // SOFTWARE.
 
 #include "rocprof-sys-causal.hpp"
+#include "scope_config.hpp"
 
 #include "common/defines.h"
 #include "common/environment.hpp"
-#include "common/output.hpp"
 #include "common/path.hpp"
 #include "core/mproc.hpp"
 #include "core/utility.hpp"
@@ -58,7 +58,6 @@ namespace filepath = ::tim::filepath;
 namespace console  = ::tim::utility::console;
 namespace argparse = ::tim::argparse;
 namespace path     = rocprofsys::common::path;
-namespace output   = rocprofsys::common::output;
 using namespace ::timemory::join;
 using rocprofsys::common::update_mode;
 using ::rocprofsys::utility::parse_numeric_range;
@@ -579,83 +578,29 @@ parse_args(int argc, char** argv, std::vector<char*>& _env,
             }
         });
 
-    parser
-        .add_argument({ "-B", "--binary-scope" },
-                      "Restricts causal experiments to the binaries matching the list of "
-                      "regular expressions. Each space designates a group and multiple "
-                      "scopes can be grouped together with a semi-colon")
-        .min_count(0)
-        .max_count(-1)
-        .dtype("integers")
-        .action([&](parser_t& p) {
-            _binary_scopes = p.get<std::vector<std::string>>("binary-scope");
-        });
+    std::unordered_map<std::string, std::vector<std::string>*> scope_vars = {
+        { "binary-scope", &_binary_scopes },
+        { "source-scope", &_source_scopes },
+        { "function-scope", &_function_scopes },
+        { "binary-exclude", &_binary_excludes },
+        { "source-exclude", &_source_excludes },
+        { "function-exclude", &_function_excludes }
+    };
 
-    parser
-        .add_argument({ "-S", "--source-scope" },
-                      "Restricts causal experiments to the source files or source file + "
-                      "lineno pairs (i.e. <file> or <file>:<line>) matching the list of "
-                      "regular expressions. Each space designates a group and multiple "
-                      "scopes can be grouped together with a semi-colon")
-        .min_count(0)
-        .max_count(-1)
-        .dtype("integers")
-        .action([&](parser_t& p) {
-            _source_scopes = p.get<std::vector<std::string>>("source-scope");
-        });
-
-    parser
-        .add_argument(
-            { "-F", "--function-scope" },
-            "Restricts causal experiments to the functions matching the list of "
-            "regular expressions. Each space designates a group and multiple "
-            "scopes can be grouped together with a semi-colon")
-        .min_count(0)
-        .max_count(-1)
-        .dtype("regex-list")
-        .action([&](parser_t& p) {
-            _function_scopes = p.get<std::vector<std::string>>("function-scope");
-        });
-
-    parser
-        .add_argument(
-            { "-BE", "--binary-exclude" },
-            "Excludes causal experiments from being performed on the binaries matching "
-            "the list of regular expressions. Each space designates a group and multiple "
-            "excludes can be grouped together with a semi-colon")
-        .min_count(0)
-        .max_count(-1)
-        .dtype("integers")
-        .action([&](parser_t& p) {
-            _binary_excludes = p.get<std::vector<std::string>>("binary-exclude");
-        });
-
-    parser
-        .add_argument(
-            { "-SE", "--source-exclude" },
-            "Excludes causal experiments from being performed on the code from the "
-            "source files or source file + lineno pair (i.e. <file> or <file>:<line>) "
-            "matching the list of regular expressions. Each space designates a group and "
-            "multiple excludes can be grouped together with a semi-colon")
-        .min_count(0)
-        .max_count(-1)
-        .dtype("integers")
-        .action([&](parser_t& p) {
-            _source_excludes = p.get<std::vector<std::string>>("source-exclude");
-        });
-
-    parser
-        .add_argument(
-            { "-FE", "--function-exclude" },
-            "Excludes causal experiments from being performed on the functions matching "
-            "the list of regular expressions. Each space designates a group and multiple "
-            "excludes can be grouped together with a semi-colon")
-        .min_count(0)
-        .max_count(-1)
-        .dtype("regex-list")
-        .action([&](parser_t& p) {
-            _function_excludes = p.get<std::vector<std::string>>("function-exclude");
-        });
+    for(const auto& config : rocprofsys::causal::SCOPE_CONFIGS)
+    {
+        auto arg_name = std::string(config.long_flag).substr(2);
+        parser
+            .add_argument(
+                { std::string(config.short_flag), std::string(config.long_flag) },
+                std::string(config.description))
+            .min_count(0)
+            .max_count(-1)
+            .dtype(std::string(config.dtype))
+            .action([&, arg_name, var_ptr = scope_vars[arg_name]](parser_t& p) {
+                *var_ptr = p.get<std::vector<std::string>>(arg_name);
+            });
+    }
 
     parser.end_group();
 
