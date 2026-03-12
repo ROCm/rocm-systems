@@ -204,7 +204,8 @@ function(CheckAcceptedArchs OFFLOAD_ARCH_STR_LOCAL)
 endfunction()  # CheckAcceptedArchs
 
 if(HIP_PLATFORM MATCHES "amd")
-  if (DEFINED OFFLOAD_ARCH_STR)
+  # Do not enable arch specific tests for ASAN.
+  if (DEFINED OFFLOAD_ARCH_STR AND NOT (ENABLE_ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANITIZER STREQUAL "HOST_ASAN"))
     CheckAcceptedArchs(${OFFLOAD_ARCH_STR})
   elseif(DEFINED $ENV{HCC_AMDGPU_TARGET})
     CheckAcceptedArchs($ENV{HCC_AMDGPU_TARGET})

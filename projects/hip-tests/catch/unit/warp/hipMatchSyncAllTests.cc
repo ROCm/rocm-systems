@@ -330,7 +330,7 @@ static void runTestMatchAll_4() {
  *    - HIP_VERSION >= 5.6
  */
 
-TEST_CASE("Unit_hipMatchSync_All") {
+TEST_CASE(Unit_hipMatchSync_All) {
   CHECK_WARP_MATCH_FUNCTIONS_SUPPORT
 
   SECTION("run test for int") {
