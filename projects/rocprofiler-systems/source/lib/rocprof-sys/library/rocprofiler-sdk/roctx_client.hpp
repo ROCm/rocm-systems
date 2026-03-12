@@ -8,8 +8,12 @@
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/fwd.h>
 
+#include <timemory/hash/types.hpp>
+
 #include <cstdint>
 #include <functional>
+#include <tuple>
+#include <vector>
 
 namespace rocprofsys
 {
@@ -29,7 +33,7 @@ struct marker_handlers
 class roctx_client
 {
 public:
-    explicit roctx_client(marker_handlers handlers);
+    roctx_client();
     ~roctx_client() = default;
 
     roctx_client(const roctx_client&)            = delete;
@@ -38,6 +42,7 @@ public:
     roctx_client& operator=(roctx_client&&)      = default;
 
     void configure_services(rocprofiler_context_id_t ctx);
+    void register_control_callbacks(marker_handlers handlers);
 
     rocprofiler_context_id_t get_context() const noexcept { return m_ctx; }
     bool                     is_write_enabled() const noexcept { return m_write_enabled; }
@@ -46,10 +51,16 @@ public:
     void shutdown();
 
 private:
+    using marker_range_stack_t =
+        std::vector<std::tuple<tim::hash_value_t, rocprofiler_timestamp_t, bool>>;
+
     rocprofiler_context_id_t m_ctx{ 0 };
     marker_writer            m_writer;
     marker_handlers          m_handlers;
     bool                     m_write_enabled{ false };
+
+    marker_range_stack_t& get_pushed_ranges();
+    marker_range_stack_t& get_started_ranges();
 
     void handle_marker_core_enter(rocprofiler_callback_tracing_record_t record,
                                   rocprofiler_user_data_t*              user_data,

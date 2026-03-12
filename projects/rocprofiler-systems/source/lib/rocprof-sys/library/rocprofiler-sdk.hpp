@@ -40,8 +40,8 @@ using hardware_counter_info = ::tim::hardware_counters::info;
 void
 setup();
 
-void
-set_roctx_client(roctx_client* client);
+std::shared_ptr<roctx_client>
+get_roctx_client();
 
 void
 shutdown();
@@ -54,6 +54,18 @@ post_process();
 
 void
 sample();
+
+void
+start();
+
+void
+stop();
+
+void
+pause();
+
+void
+resume();
 
 void
 start_main_contexts();

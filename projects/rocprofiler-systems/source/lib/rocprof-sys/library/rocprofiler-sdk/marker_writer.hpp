@@ -27,22 +27,10 @@ public:
     marker_writer(marker_writer&&)                 = default;
     marker_writer& operator=(marker_writer&&)      = default;
 
-    void write_push_start(std::string_view name);
+    void write_begin(std::string_view name);
 
-    void write_pop(std::string_view name, uint64_t begin_ts, uint64_t end_ts,
+    void write_end(std::string_view name, uint64_t begin_ts, uint64_t end_ts,
                    std::string& args, rocprofiler_callback_tracing_record_t record);
-
-    void write_range_start(std::string_view name);
-
-    void write_range_stop(std::string_view name, uint64_t begin_ts, uint64_t end_ts,
-                          std::string&                          args,
-                          rocprofiler_callback_tracing_record_t record);
-
-    void write_mark(std::string_view name, uint64_t begin_ts, uint64_t end_ts,
-                    std::string& args, rocprofiler_callback_tracing_record_t record);
-
-    void write_api_call(std::string_view name, uint64_t begin_ts, uint64_t end_ts,
-                        std::string& args, rocprofiler_callback_tracing_record_t record);
 
 private:
     bool m_use_perfetto{ false };

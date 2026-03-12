@@ -73,6 +73,14 @@ trace_control::handle_range_stop(uint64_t range_id)
     // Last target region exited - trigger stop callbacks
     if(now_empty)
     {
+        // Check if region ended while user had it paused
+        if(m_user_paused.load(std::memory_order_relaxed))
+        {
+            LOG_WARNING(
+                "Target region ended while paused. Subsequent resume will be ignored.");
+            m_user_paused.store(false, std::memory_order_relaxed);
+        }
+
         std::lock_guard<std::mutex> lk(m_callback_mutex);
         trigger_callbacks(m_stop_callbacks);
     }
@@ -81,10 +89,23 @@ trace_control::handle_range_stop(uint64_t range_id)
 void
 trace_control::handle_pause()
 {
-    if(region_filter_active()) m_user_paused.store(true, std::memory_order_relaxed);
+    bool should_pause = true;
+    if(region_filter_active())
+    {
+        // Only pause if we're currently inside a target region
+        std::lock_guard<std::mutex> lk(m_region_mutex);
+        should_pause = !m_active_range_ids.empty();
+        if(should_pause)
+        {
+            m_user_paused.store(true, std::memory_order_relaxed);
+        }
+    }
 
-    std::lock_guard<std::mutex> lk(m_callback_mutex);
-    trigger_callbacks(m_stop_callbacks);
+    if(should_pause)
+    {
+        std::lock_guard<std::mutex> lk(m_callback_mutex);
+        trigger_callbacks(m_stop_callbacks);
+    }
 }
 
 void

@@ -56,7 +56,7 @@ marker_writer::marker_writer()
 {}
 
 void
-marker_writer::write_push_start(std::string_view name)
+marker_writer::write_begin(std::string_view name)
 {
     if(m_use_timemory)
     {
@@ -65,118 +65,8 @@ marker_writer::write_push_start(std::string_view name)
 }
 
 void
-marker_writer::write_pop(std::string_view name, uint64_t begin_ts, uint64_t end_ts,
+marker_writer::write_end(std::string_view name, uint64_t begin_ts, uint64_t end_ts,
                          std::string& args, rocprofiler_callback_tracing_record_t record)
-{
-    if(m_use_timemory)
-    {
-        tracing::pop_timemory(category::rocm_marker_api{}, name);
-    }
-
-    if(m_use_perfetto)
-    {
-        tracing::push_perfetto_ts(
-            category::rocm_marker_api{}, name.data(), begin_ts,
-            ::perfetto::Flow::ProcessScoped(record.correlation_id.internal),
-            [&](::perfetto::EventContext ctx) {
-                if(config::get_perfetto_annotations())
-                {
-                    tracing::add_perfetto_annotation(ctx, "begin_ns", begin_ts);
-                    tracing::add_perfetto_annotation(ctx, "stack_id",
-                                                     record.correlation_id.internal);
-                }
-            });
-        tracing::pop_perfetto_ts(category::rocm_marker_api{}, name.data(), end_ts,
-                                 [&](::perfetto::EventContext ctx) {
-                                     if(config::get_perfetto_annotations())
-                                         tracing::add_perfetto_annotation(ctx, "end_ns",
-                                                                          end_ts);
-                                 });
-    }
-
-    write_to_cache(record, name, begin_ts, end_ts, args);
-}
-
-void
-marker_writer::write_range_start(std::string_view name)
-{
-    if(m_use_timemory)
-    {
-        tracing::push_timemory(category::rocm_marker_api{}, name);
-    }
-}
-
-void
-marker_writer::write_range_stop(std::string_view name, uint64_t begin_ts, uint64_t end_ts,
-                                std::string&                          args,
-                                rocprofiler_callback_tracing_record_t record)
-{
-    if(m_use_timemory)
-    {
-        tracing::pop_timemory(category::rocm_marker_api{}, name);
-    }
-
-    if(m_use_perfetto)
-    {
-        tracing::push_perfetto_ts(
-            category::rocm_marker_api{}, name.data(), begin_ts,
-            ::perfetto::Flow::ProcessScoped(record.correlation_id.internal),
-            [&](::perfetto::EventContext ctx) {
-                if(config::get_perfetto_annotations())
-                {
-                    tracing::add_perfetto_annotation(ctx, "begin_ns", begin_ts);
-                    tracing::add_perfetto_annotation(ctx, "stack_id",
-                                                     record.correlation_id.internal);
-                }
-            });
-        tracing::pop_perfetto_ts(category::rocm_marker_api{}, name.data(), end_ts,
-                                 [&](::perfetto::EventContext ctx) {
-                                     if(config::get_perfetto_annotations())
-                                         tracing::add_perfetto_annotation(ctx, "end_ns",
-                                                                          end_ts);
-                                 });
-    }
-
-    write_to_cache(record, name, begin_ts, end_ts, args);
-}
-
-void
-marker_writer::write_mark(std::string_view name, uint64_t begin_ts, uint64_t end_ts,
-                          std::string& args, rocprofiler_callback_tracing_record_t record)
-{
-    if(m_use_timemory)
-    {
-        tracing::pop_timemory(category::rocm_marker_api{}, name);
-    }
-
-    if(m_use_perfetto)
-    {
-        tracing::push_perfetto_ts(
-            category::rocm_marker_api{}, name.data(), begin_ts,
-            ::perfetto::Flow::ProcessScoped(record.correlation_id.internal),
-            [&](::perfetto::EventContext ctx) {
-                if(config::get_perfetto_annotations())
-                {
-                    tracing::add_perfetto_annotation(ctx, "begin_ns", begin_ts);
-                    tracing::add_perfetto_annotation(ctx, "stack_id",
-                                                     record.correlation_id.internal);
-                }
-            });
-        tracing::pop_perfetto_ts(category::rocm_marker_api{}, name.data(), end_ts,
-                                 [&](::perfetto::EventContext ctx) {
-                                     if(config::get_perfetto_annotations())
-                                         tracing::add_perfetto_annotation(ctx, "end_ns",
-                                                                          end_ts);
-                                 });
-    }
-
-    write_to_cache(record, name, begin_ts, end_ts, args);
-}
-
-void
-marker_writer::write_api_call(std::string_view name, uint64_t begin_ts, uint64_t end_ts,
-                              std::string&                          args,
-                              rocprofiler_callback_tracing_record_t record)
 {
     if(m_use_timemory)
     {

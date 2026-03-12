@@ -30,23 +30,6 @@ namespace rocprofiler_sdk
 {
 namespace
 {
-using marker_range_stack_t =
-    std::vector<std::tuple<tim::hash_value_t, rocprofiler_timestamp_t, bool>>;
-
-marker_range_stack_t&
-get_marker_pushed_ranges()
-{
-    static thread_local marker_range_stack_t _v{};
-    return _v;
-}
-
-marker_range_stack_t&
-get_marker_started_ranges()
-{
-    static thread_local marker_range_stack_t _v{};
-    return _v;
-}
-
 int
 iterate_args_callback(rocprofiler_callback_tracing_kind_t /*kind*/, int32_t /*operation*/,
                       uint32_t arg_number, const void* const /*arg_value_addr*/,
@@ -85,8 +68,7 @@ get_use_timemory()
 }
 }  // namespace
 
-roctx_client::roctx_client(marker_handlers handlers)
-: m_handlers(std::move(handlers))
+roctx_client::roctx_client()
 {
     auto domains =
         tim::delimit(config::get_setting_value<std::string>("ROCPROFSYS_ROCM_DOMAINS")
@@ -95,6 +77,12 @@ roctx_client::roctx_client(marker_handlers handlers)
     m_write_enabled =
         (std::find(domains.begin(), domains.end(), "marker_api") != domains.end() ||
          std::find(domains.begin(), domains.end(), "roctx") != domains.end());
+}
+
+void
+roctx_client::register_control_callbacks(marker_handlers handlers)
+{
+    m_handlers = std::move(handlers);
 }
 
 bool
@@ -107,6 +95,20 @@ void
 roctx_client::shutdown()
 {
     if(m_handlers.on_shutdown) m_handlers.on_shutdown();
+}
+
+roctx_client::marker_range_stack_t&
+roctx_client::get_pushed_ranges()
+{
+    static thread_local marker_range_stack_t ranges{};
+    return ranges;
+}
+
+roctx_client::marker_range_stack_t&
+roctx_client::get_started_ranges()
+{
+    static thread_local marker_range_stack_t ranges{};
+    return ranges;
 }
 
 void
@@ -147,11 +149,11 @@ roctx_client::handle_marker_core_enter(rocprofiler_callback_tracing_record_t rec
         {
             const char* name = data->args.roctxRangePushA.message;
             auto        hash = tim::add_hash_id(name);
-            get_marker_pushed_ranges().emplace_back(hash, ts, write_enabled);
+            get_pushed_ranges().emplace_back(hash, ts, write_enabled);
 
             if(write_enabled)
             {
-                m_writer.write_push_start(name);
+                m_writer.write_begin(name);
             }
             break;
         }
@@ -210,16 +212,16 @@ roctx_client::handle_marker_core_exit(rocprofiler_callback_tracing_record_t reco
     {
         case ROCPROFILER_MARKER_CORE_API_ID_roctxRangePop:
         {
-            if(get_marker_pushed_ranges().empty())
+            if(get_pushed_ranges().empty())
             {
                 LOG_CRITICAL("roctxRangePop does not have corresponding roctxRangePush "
                              "(skipping)");
                 return;
             }
 
-            auto& entry                          = get_marker_pushed_ranges().back();
+            auto& entry                          = get_pushed_ranges().back();
             auto [hash, begin_ts, write_enabled] = entry;
-            get_marker_pushed_ranges().pop_back();
+            get_pushed_ranges().pop_back();
 
             const char* name = nullptr;
             tim::get_hash_identifier_fast(hash, name);
@@ -227,22 +229,22 @@ roctx_client::handle_marker_core_exit(rocprofiler_callback_tracing_record_t reco
             // Only write if writing was enabled at push time
             if(write_enabled && name)
             {
-                m_writer.write_pop(name, begin_ts, ts, args_str, record);
+                m_writer.write_end(name, begin_ts, ts, args_str, record);
             }
             break;
         }
         case ROCPROFILER_MARKER_CORE_API_ID_roctxRangeStop:
         {
-            if(get_marker_started_ranges().empty())
+            if(get_started_ranges().empty())
             {
                 LOG_CRITICAL("roctxRangeStop does not have corresponding roctxRangeStart "
                              "(skipping)");
                 return;
             }
 
-            auto& entry                          = get_marker_started_ranges().back();
+            auto& entry                          = get_started_ranges().back();
             auto [hash, begin_ts, write_enabled] = entry;
-            get_marker_started_ranges().pop_back();
+            get_started_ranges().pop_back();
 
             const char* name = nullptr;
             tim::get_hash_identifier_fast(hash, name);
@@ -250,7 +252,7 @@ roctx_client::handle_marker_core_exit(rocprofiler_callback_tracing_record_t reco
 
             if(write_enabled && name)
             {
-                m_writer.write_range_stop(name, begin_ts, ts, args_str, record);
+                m_writer.write_end(name, begin_ts, ts, args_str, record);
             }
 
             if(m_handlers.on_range_stop) m_handlers.on_range_stop(range_id);
@@ -263,7 +265,7 @@ roctx_client::handle_marker_core_exit(rocprofiler_callback_tracing_record_t reco
 
             if(should_write_markers())
             {
-                m_writer.write_mark(name, begin_ts, ts, args_str, record);
+                m_writer.write_end(name, begin_ts, ts, args_str, record);
             }
             break;
         }
@@ -283,11 +285,11 @@ roctx_client::handle_marker_core_exit(rocprofiler_callback_tracing_record_t reco
 
             // Now check if we should write (region is now active)
             bool range_write_enabled = should_write_markers();
-            get_marker_started_ranges().emplace_back(hash, begin_ts, range_write_enabled);
+            get_started_ranges().emplace_back(hash, begin_ts, range_write_enabled);
 
             if(range_write_enabled)
             {
-                m_writer.write_range_start(name);
+                m_writer.write_begin(name);
             }
             return;
         }
@@ -297,7 +299,7 @@ roctx_client::handle_marker_core_exit(rocprofiler_callback_tracing_record_t reco
             if(should_write_markers())
             {
                 auto name = get_operation_name(record);
-                m_writer.write_api_call(name, begin_ts, ts, args_str, record);
+                m_writer.write_end(name, begin_ts, ts, args_str, record);
             }
             break;
         }

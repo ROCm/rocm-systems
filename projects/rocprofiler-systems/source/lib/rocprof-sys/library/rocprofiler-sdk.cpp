@@ -25,8 +25,10 @@
 #include "library/rocprofiler-sdk/roctx_client.hpp"
 #include "library/thread_info.hpp"
 #include "library/tracing.hpp"
+#include "rocprofiler-sdk/roctx_client.hpp"
 
 #include <algorithm>
+#include <memory>
 #include <set>
 #include <timemory/components/timing/wall_clock.hpp>
 #include <timemory/hash/types.hpp>
@@ -84,9 +86,9 @@ namespace rocprofiler_sdk
 {
 namespace
 {
-using tool_agent_vec_t       = std::vector<tool_agent>;
-client_data*  tool_data      = new client_data{};
-roctx_client* g_roctx_client = nullptr;
+using tool_agent_vec_t                       = std::vector<tool_agent>;
+client_data*                  tool_data      = new client_data{};
+std::shared_ptr<roctx_client> g_roctx_client = nullptr;
 
 void
 thread_precreate(rocprofiler_runtime_library_t /*lib*/, void* /*tool_data*/)
@@ -2469,21 +2471,17 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         amd_smi::set_state(State::Active);
     }
 
-    // Setup marker client (must happen within tool_init for rocprofiler-sdk context
-    // creation). Marker client configures MARKER_CORE_API and MARKER_CONTROL_API
+    // Setup roctx client (must happen within tool_init for rocprofiler-sdk context
+    // creation). Roctx client configures MARKER_CORE_API and MARKER_CONTROL_API
     // on control_ctx. trace_control's pause/resume callbacks are routed through
-    // roctx_client.
-    if(g_roctx_client)
+    // roctx_client (registered later in library.cpp).
+    auto client = get_roctx_client();
+    if(client)
     {
-        g_roctx_client->configure_services(_data->control_ctx);
+        client->configure_services(_data->control_ctx);
     }
 
-    start_code_obj_context();
-    start_control_context();
-    if(!config::get_selective_tracing())
-    {
-        start_main_contexts();
-    }
+    start();
 
     // no errors
     return 0;
@@ -2499,9 +2497,7 @@ tool_fini(void* callback_data)
     ompt_finalize_orphan_events();
 #endif
 
-    stop_control_context();
-    stop_main_contexts();
-    stop_code_obj_context();
+    stop();
 
     if(config::get_use_process_sampling() && config::get_use_amd_smi())
         amd_smi::shutdown();
@@ -2552,10 +2548,14 @@ void
 sample()
 {}
 
-void
-set_roctx_client(roctx_client* client)
+std::shared_ptr<roctx_client>
+get_roctx_client()
 {
-    g_roctx_client = client;
+    if(!g_roctx_client)
+    {
+        g_roctx_client = std::make_shared<roctx_client>();
+    }
+    return g_roctx_client;
 }
 
 void
@@ -2593,6 +2593,39 @@ flush_counter_tracks_to_zero(rocprofiler_timestamp_t timestamp)
             cs.write_zero(timestamp);
         }
     }
+}
+
+void
+start()
+{
+    start_code_obj_context();
+    start_control_context();
+    if(!config::get_selective_tracing())
+    {
+        start_main_contexts();
+    }
+}
+
+void
+stop()
+{
+    stop_control_context();
+    stop_main_contexts();
+    stop_code_obj_context();
+}
+
+void
+pause()
+{
+    stop_main_contexts();
+    flush_counter_tracks_to_zero(0);
+}
+
+void
+resume()
+{
+    flush_counter_tracks_to_zero(0);
+    start_main_contexts();
 }
 
 void
