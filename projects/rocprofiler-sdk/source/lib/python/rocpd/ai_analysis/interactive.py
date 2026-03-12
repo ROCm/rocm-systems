@@ -1883,12 +1883,12 @@ class WorkflowSession:
     def _revert_last_edit(self, failure_reason: str = "") -> bool:
         """Restore the most recently AI-modified file from its .bak backup.
 
-        Returns True on success.  The reverted _EditRecord is removed from
-        edit_history so the LLM knows the edit was rolled back.
+        After restoring, if an LLM is configured the session calls the LLM to:
+          1. Analyze what went wrong in the failed edit.
+          2. Propose a concrete alternative approach.
+          3. Offer to apply the alternative immediately.
 
-        If failure_reason is provided (e.g. compiler error text), it is injected
-        into the active LLM conversation so the model learns not to repeat the
-        same mistake in this session.
+        Returns True on success.
         """
         if not self._state.edit_history:
             _print("  No AI edits to revert.", style="yellow")
@@ -1899,41 +1899,165 @@ class WorkflowSession:
         if not bak.exists():
             _print(f"  Backup not found: {bak}", style="red")
             return False
+
+        # Capture the failed edit content BEFORE overwriting it — we'll send it
+        # to the LLM so it can see exactly what went wrong.
         try:
-            dst.write_text(bak.read_text())
+            failed_content = dst.read_text()
+        except OSError:
+            failed_content = ""
+
+        original_content = bak.read_text()
+
+        try:
+            dst.write_text(original_content)
             self._state.edit_history.pop()
+            self._save_session()
             _print(f"  ✓ Reverted: {dst.name}  (backup kept at {bak.name})", style="green")
         except OSError as exc:
             _print(f"  Revert failed: {exc}", style="red")
             return False
 
-        # Teach the LLM conversation what went wrong so it doesn't repeat it.
-        if self._conv is not None:
-            reason_detail = (
-                f"\n\nFailure details:\n{failure_reason[:800]}"
-                if failure_reason else ""
-            )
-            feedback = (
-                f"IMPORTANT: The previous code edit to {dst.name} was reverted "
-                f"because it caused errors after being applied.{reason_detail}\n\n"
-                f"Do NOT repeat the same pattern. Propose a different, valid "
-                f"approach for the next optimization attempt. Acknowledge the "
-                f"revert briefly before continuing."
-            )
-            try:
-                self._conv._messages.append({"role": "user", "content": feedback})
-                self._conv._messages.append({
-                    "role": "assistant",
-                    "content": (
-                        f"Understood. The edit to {dst.name} has been reverted. "
-                        f"I will avoid the pattern that caused the failure and "
-                        f"propose a different approach."
-                    ),
-                })
-            except Exception:
-                pass  # Conversation injection is best-effort
-
+        # Ask the LLM to actually analyze the failure and suggest an alternative.
+        self._post_revert_llm_analysis(dst, original_content, failed_content, failure_reason)
         return True
+
+    def _post_revert_llm_analysis(
+        self,
+        file_path: pathlib.Path,
+        original_content: str,
+        failed_content: str,
+        failure_reason: str,
+    ) -> None:
+        """Call LLM to analyze the failed edit and propose a concrete alternative.
+
+        Shows the LLM's root-cause analysis, then offers to apply the suggested
+        alternative immediately using the same diff/apply flow as Phase 6.
+        """
+        if not self._llm_provider:
+            _print("  (No LLM configured — cannot auto-analyze failure)", style="dim")
+            return
+
+        _print()
+        _print("  ── Analyzing failure with LLM ──────────────────────────", style="cyan")
+
+        error_block = f"\n=== COMPILATION / RUNTIME ERRORS ===\n{failure_reason[:1500]}" \
+                      if failure_reason else ""
+        failed_block = f"\n=== FAILED EDIT ===\n{failed_content}" if failed_content else ""
+
+        system = (
+            "You are an expert AMD GPU performance engineer. "
+            "A code edit you suggested was reverted because it caused errors. "
+            "Analyze what went wrong and propose a SPECIFIC corrected alternative.\n\n"
+            "Format your response with exactly two sections:\n"
+            "ANALYSIS: (root cause — what was wrong in the failed edit and why)\n"
+            "ALTERNATIVE: (the corrected optimization approach with specific code changes — "
+            "be concrete, not generic)"
+        )
+        user = (
+            f"The edit to {file_path.name} was reverted because it failed."
+            f"{error_block}"
+            f"\n=== ORIGINAL CODE (now restored) ===\n{original_content}"
+            f"{failed_block}"
+        )
+
+        try:
+            from rocpd.ai_analysis.llm_analyzer import LLMAnalyzer  # type: ignore[import]
+            analyzer = LLMAnalyzer(
+                provider=self._llm_provider,
+                api_key=self._llm_api_key,
+                model=self._llm_model,
+            )
+            with _Spinner(f"  {self._llm_provider} analyzing failure..."):
+                if self._llm_provider == "openai":
+                    analysis = analyzer._call_openai(system, user, timeout=120)
+                elif self._llm_provider == "anthropic":
+                    analysis = analyzer._call_anthropic(system, user, timeout=120)
+                elif self._llm_provider == "private":
+                    analysis = analyzer._call_private(system, user)
+                else:
+                    analysis = analyzer._call_local(system, user)
+        except Exception as exc:
+            _print(f"  (LLM analysis failed: {exc})", style="red")
+            return
+
+        if not analysis:
+            return
+
+        _print()
+        _print(analysis, style="white")
+        _print()
+
+        # Offer to apply the alternative right now.
+        if not self._llm_provider:
+            return
+        try:
+            apply = _input("  Apply this alternative approach now? [y/N]  ").strip().lower()
+        except EOFError:
+            return
+        if apply != "y":
+            return
+
+        # Extract the ALTERNATIVE section as the suggestion for _llm_rewrite_file.
+        alt_section = analysis
+        if "ALTERNATIVE:" in analysis:
+            alt_section = analysis.split("ALTERNATIVE:", 1)[1].strip()
+
+        rewritten = self._llm_rewrite_file(file_path, alt_section)
+        if not rewritten or not rewritten.strip():
+            _print("  (LLM did not produce a rewrite — try again after fixing manually)",
+                   style="yellow")
+            return
+
+        # Show diff and confirm before applying.
+        import difflib
+        original_lines  = original_content.splitlines(keepends=True)
+        rewritten_lines = rewritten.splitlines(keepends=True)
+        diff_lines = list(difflib.unified_diff(
+            original_lines, rewritten_lines,
+            fromfile=f"{file_path.name} (original)",
+            tofile=f"{file_path.name} (alternative)",
+            n=3,
+        ))
+        if not diff_lines:
+            _print("  (Alternative is identical to original — no changes to apply)",
+                   style="yellow")
+            return
+        _print()
+        _print("  ── Proposed alternative ────────────────────────────────", style="cyan")
+        for line in diff_lines[:120]:
+            line = line.rstrip("\n")
+            if line.startswith("+"):
+                _print(line, style="green")
+            elif line.startswith("-"):
+                _print(line, style="red")
+            else:
+                _print(line, style="dim")
+        if len(diff_lines) > 120:
+            _print(f"  ... ({len(diff_lines) - 120} more lines)", style="dim")
+        _print()
+        try:
+            confirm = _input("  Apply this corrected version? [y/N]  ").strip().lower()
+        except EOFError:
+            return
+        if confirm != "y":
+            _print("  Alternative discarded. File remains at original.", style="dim")
+            return
+
+        bak2 = file_path.with_suffix(file_path.suffix + ".bak")
+        try:
+            bak2.write_text(original_content)
+            file_path.write_text(rewritten)
+            self._state.edit_history.append(_EditRecord(
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                file_path=str(file_path),
+                backup_path=str(bak2),
+            ))
+            self._save_session()
+            _print(f"  ✓ Alternative applied: {file_path.name}", style="green")
+            _print("  Please recompile and re-run profiling to verify.", style="dim")
+        except OSError as exc:
+            _print(f"  (Write failed: {exc})", style="red")
 
     # ── Phase 3: Trace collection ──────────────────────────────────────────────
 
