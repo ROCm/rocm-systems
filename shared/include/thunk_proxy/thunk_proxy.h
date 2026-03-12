@@ -220,6 +220,10 @@ public:
   // Query power / voltage readings via KMD PMLog escape.
   ErrorCode QueryPowerInfo(wsl::thunk::PowerInfo *info) const;
 
+  // Query temperature metric via KMD PMLog escape.
+  ErrorCode QueryTempMetric(uint32_t sensor_type, uint32_t metric,
+                            int64_t *temperature) const;
+
   // Send a driver-escape packet on behalf of this GPU slot.
   ErrorCode Escape(void *pData, size_t dataSize, bool hardwareAccess = false) const;
 
