@@ -54,11 +54,14 @@ def _build_private_client(api_key: Optional[str], model_override: Optional[str])
         pass  # getlogin() can fail in some CI/container environments
     raw_headers = os.environ.get("ROCPD_LLM_PRIVATE_HEADERS", "")
     if raw_headers:
+        # Normalize single-quoted Python dict literals to JSON before parsing
+        normalized = raw_headers.replace("'", '"')
         try:
-            headers.update(json.loads(raw_headers))
+            headers.update(json.loads(normalized))
         except json.JSONDecodeError as e:
             raise ValueError(
                 f"ROCPD_LLM_PRIVATE_HEADERS is not valid JSON: {e}\n"
+                f"Use double-quoted JSON: '{{\"Ocp-Apim-Subscription-Key\": \"abc123\"}}'\n"
                 f"Value was: {raw_headers!r}"
             )
 
