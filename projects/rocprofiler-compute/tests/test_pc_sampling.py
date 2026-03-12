@@ -23,7 +23,6 @@
 
 ##############################################################################
 
-import inspect
 import os
 
 import pytest
@@ -71,14 +70,6 @@ PC_SAMPLING_HOST_TRAP_WITH_COUNTERS_FILES = sorted([
 ])
 
 
-def validate(test_name, workload_dir, file_dict, args=[]):
-    if config["COUNTER_LOGGING"]:
-        pass
-
-    if config["METRIC_COMPARE"]:
-        pass
-
-
 def test_pc_sampling_host_trap(binary_handler_profile_rocprof_compute):
     """
     Test that PC sampling works with --block 21 and --pc-sampling-method host_trap.
@@ -109,8 +100,6 @@ def test_pc_sampling_host_trap(binary_handler_profile_rocprof_compute):
 
     file_dict = test_utils.check_csv_files(workload_dir, num_devices, 1)
     assert sorted(list(file_dict.keys())) == sorted(PC_SAMPLING_HOST_TRAP_FILES)
-
-    validate(inspect.stack()[0][3], workload_dir, file_dict)
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -145,8 +134,6 @@ def test_pc_sampling_stochastic(binary_handler_profile_rocprof_compute):
 
     file_dict = test_utils.check_csv_files(workload_dir, num_devices, 1)
     assert sorted(list(file_dict.keys())) == sorted(PC_SAMPLING_STOCHASTIC_FILES)
-
-    validate(inspect.stack()[0][3], workload_dir, file_dict)
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -254,14 +241,12 @@ def test_pc_sampling_with_sol_block(binary_handler_profile_rocprof_compute):
         "- '2'", f"{workload_dir}/profiling_config.yaml"
     )
 
-    validate(inspect.stack()[0][3], workload_dir, file_dict)
-
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 def test_pc_sampling_with_instmix_block(binary_handler_profile_rocprof_compute):
     """
-    Test that PC sampling works with --block 21 and --block 10
+    Test that PC sampling works with --block 21 and --block 10.1
     (PC sampling with counter collection)
     """
     if soc == "MI100":
@@ -271,7 +256,7 @@ def test_pc_sampling_with_instmix_block(binary_handler_profile_rocprof_compute):
     options = [
         "--block",
         "21",
-        "10",
+        "10.1",
         "--pc-sampling-method",
         "host_trap",
         "--pc-sampling-interval",
@@ -298,17 +283,15 @@ def test_pc_sampling_with_instmix_block(binary_handler_profile_rocprof_compute):
         "- '21'", f"{workload_dir}/profiling_config.yaml"
     )
     assert test_utils.check_file_pattern(
-        "- '10'", f"{workload_dir}/profiling_config.yaml"
+        "- '10.1'", f"{workload_dir}/profiling_config.yaml"
     )
-
-    validate(inspect.stack()[0][3], workload_dir, file_dict)
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 def test_pc_sampling_with_multiple_blocks(binary_handler_profile_rocprof_compute):
     """
-    Test that PC sampling works with --block 21, --block 2, and --block 10
+    Test that PC sampling works with --block 21, --block 6, and --block 10.2
     (PC sampling with counter collection)
     """
     if soc == "MI100":
@@ -318,8 +301,8 @@ def test_pc_sampling_with_multiple_blocks(binary_handler_profile_rocprof_compute
     options = [
         "--block",
         "21",
-        "2",
-        "10",
+        "6",
+        "10.2",
         "--pc-sampling-method",
         "host_trap",
         "--pc-sampling-interval",
@@ -346,12 +329,10 @@ def test_pc_sampling_with_multiple_blocks(binary_handler_profile_rocprof_compute
         "- '21'", f"{workload_dir}/profiling_config.yaml"
     )
     assert test_utils.check_file_pattern(
-        "- '2'", f"{workload_dir}/profiling_config.yaml"
+        "- '6'", f"{workload_dir}/profiling_config.yaml"
     )
     assert test_utils.check_file_pattern(
-        "- '10'", f"{workload_dir}/profiling_config.yaml"
+        "- '10.2'", f"{workload_dir}/profiling_config.yaml"
     )
-
-    validate(inspect.stack()[0][3], workload_dir, file_dict)
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
