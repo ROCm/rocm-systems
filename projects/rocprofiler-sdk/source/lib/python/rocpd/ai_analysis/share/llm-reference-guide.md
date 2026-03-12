@@ -1986,6 +1986,73 @@ If the user provides a custom prompt (e.g., `--prompt "Why is kernel X slow?"`),
 
 ---
 
+## vLLM on ROCm — Known API Pitfalls and Correct Patterns
+<!-- rocpd-context: always -->
+
+When suggesting code optimizations for applications that use **vLLM**, you MUST follow these
+rules precisely. vLLM has a well-defined public API; incorrect parameter names will cause
+immediate `TypeError` at runtime.
+
+### CRITICAL: `pin_memory` / `use_pinned_memory` are NOT `LLM()` constructor parameters
+
+**NEVER suggest passing `pin_memory=True` or `use_pinned_memory=True` to `LLM()`.**
+These parameters do not exist in the public `LLM()` / `EngineArgs` interface. Suggesting
+them will cause a `TypeError: LLM.__init__() got an unexpected keyword argument`.
+
+**How pinned memory actually works in vLLM:**
+- Pinned (page-locked) CPU memory is an **internal implementation detail** managed automatically by `vllm/worker/cache_engine.py` and `vllm/utils/__init__.py`.
+- vLLM calls `is_pin_memory_available()` internally at startup — the user never sets it.
+- On AMD ROCm GPUs (CUDA/ROCm platform): pinned memory is **automatically enabled** — no flag needed.
+- Pinned memory is automatically **disabled** on: CPU backend (`--device cpu`), TPU, WSL (Windows Subsystem for Linux).
+
+**The correct public parameters for CPU memory management in `LLM()`:**
+
+| Parameter | Type | Default | Effect |
+|---|---|---|---|
+| `swap_space` | `float` | `4` | GiB of CPU RAM per GPU for KV cache swapping (preempted sequences paged out to pinned CPU memory automatically) |
+| `cpu_offload_gb` | `float` | `0` | GiB of CPU RAM per GPU for **model weight** offloading (not KV cache) |
+
+**Example — correct way to increase CPU KV cache swap:**
+```python
+llm = LLM(
+    model="meta-llama/Llama-3.1-8B-Instruct",
+    swap_space=8,                 # 8 GiB of pinned CPU RAM for KV cache swap per GPU
+    gpu_memory_utilization=0.90,
+    tensor_parallel_size=tp_size,
+)
+```
+vLLM will automatically use pinned memory for the swap buffer on CUDA/ROCm. You do not need any additional flag.
+
+**If you need to check availability in custom torch code (NOT for LLM() args):**
+```python
+from vllm.utils import is_pin_memory_available
+
+pin_memory = is_pin_memory_available()  # True on CUDA/ROCm, False on CPU backend/WSL/TPU
+cpu_buffer = torch.zeros(shape, dtype=dtype, pin_memory=pin_memory, device="cpu")
+```
+
+### Other vLLM LLM() Parameters Relevant to ROCm Performance
+
+| Parameter | Recommended | Notes |
+|---|---|---|
+| `enforce_eager=False` | Yes | Enables CUDA/HIP graph capture and kernel fusion. Set `True` only to debug correctness. |
+| `tensor_parallel_size` | `≥ 1` | Should match available GPU count. Use `torch.cuda.device_count()`. |
+| `gpu_memory_utilization` | `0.90–0.95` | Higher values reduce KV cache evictions but risk OOM. |
+| `enable_chunked_prefill` | `True` | Overlaps prefill and decode phases; improves GPU occupancy. |
+| `max_num_seqs` | `128–512` | Larger batches amortize launch overhead. |
+| `dtype` | `"auto"` | Selects bfloat16 on MI300X; do not force float32. |
+
+### Multiprocessing Warning for rocprofv3
+
+vLLM uses Python `multiprocessing` with `spawn` start method. When profiling with `rocprofv3`,
+GPU kernels run in **worker subprocesses**, NOT the main process. The `.db` file from the main
+process will show `total_runtime_ns == 0` (empty). To profile vLLM:
+- Use `VLLM_ENABLE_V1_MULTIPROCESSING=0` to force single-process mode for tracing
+- Or profile the worker process directly with `rocprofv3 --pid <worker_pid>`
+- Or use `rocprof-sys --trace` which can follow forks/spawns
+
+---
+
 ## Summary
 <!-- rocpd-context: always -->
 
