@@ -507,7 +507,6 @@ main(int argc, char** argv)
         return EXIT_FAILURE;
     }
 
-#if ROCPROFSYS_USE_ROCM > 0
     if(gpu_count > 0)
     {
         size_t _num_metrics = 0;
@@ -530,7 +529,6 @@ main(int argc, char** argv)
     {
         verbprintf(1, "No HIP devices found. GPU HW counters will not be available\n");
     }
-#endif
 
     auto _parser_set_if_exists = [&parser](auto& _var, const std::string& _opt) {
         using Tp = decay_t<decltype(_var)>;

@@ -137,7 +137,7 @@ __global__ void normalKernel(int* output, int totalThreads) {
  * ------------------------
  *    - HIP_VERSION >= 6.5
  */
-TEST_CASE("Unit_hipLaunchKernelExC_NegetiveTsts") {
+TEST_CASE(Unit_hipLaunchKernelExC_NegetiveTsts) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {
     HipTest::HIP_SKIP_TEST("CooperativeLaunch not supported");
     return;
@@ -207,7 +207,7 @@ TEST_CASE("Unit_hipLaunchKernelExC_NegetiveTsts") {
  *    - HIP_VERSION >= 6.5
  */
 
-TEST_CASE("Unit_hipLaunchKernelEx_NegetiveTsts") {
+TEST_CASE(Unit_hipLaunchKernelEx_NegetiveTsts) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {
     HipTest::HIP_SKIP_TEST("CooperativeLaunch not supported");
     return;
@@ -330,7 +330,7 @@ bool runTest(const char* testName, const void* kernelFunc, int totalThreads, int
  * ------------------------
  *    - HIP_VERSION >= 6.5
  */
-TEST_CASE("Unit_hipLaunchKernelEx_Functional") {
+TEST_CASE(Unit_hipLaunchKernelEx_Functional) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {
     HipTest::HIP_SKIP_TEST("CooperativeLaunch not supported");
     return;
@@ -362,7 +362,7 @@ TEST_CASE("Unit_hipLaunchKernelEx_Functional") {
  * ------------------------
  *  - HIP_VERSION >= 6.5
  */
-TEST_CASE("Unit_hipLaunchKernelEx_With_Different_Kernels") {
+TEST_CASE(Unit_hipLaunchKernelEx_With_Different_Kernels) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {
     HipTest::HIP_SKIP_TEST("CooperativeLaunch not supported");
     return;
@@ -434,7 +434,7 @@ TEST_CASE("Unit_hipLaunchKernelEx_With_Different_Kernels") {
  * ------------------------
  *  - HIP_VERSION >= 6.5
  */
-TEST_CASE("Unit_hipLaunchKernelEx_With_CooperativeKernelWithArgs") {
+TEST_CASE(Unit_hipLaunchKernelEx_With_CooperativeKernelWithArgs) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {
     HipTest::HIP_SKIP_TEST("CooperativeLaunch not supported");
     return;
@@ -497,7 +497,7 @@ TEST_CASE("Unit_hipLaunchKernelEx_With_CooperativeKernelWithArgs") {
  * ------------------------
  *  - HIP_VERSION >= 6.5
  */
-TEST_CASE("Unit_hipLaunchKernelEx_With_MaxBlockDims") {
+TEST_CASE(Unit_hipLaunchKernelEx_With_MaxBlockDims) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {
     HipTest::HIP_SKIP_TEST("CooperativeLaunch not supported");
     return;

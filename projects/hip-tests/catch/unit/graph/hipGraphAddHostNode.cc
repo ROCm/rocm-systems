@@ -77,7 +77,7 @@ static void vectorsquare_callback(void* ptr) {
 This test case verifies the negative scenarios of
 hipGraphAddHostNode API
 */
-TEST_CASE("Unit_hipGraphAddHostNode_Negative") {
+TEST_CASE(Unit_hipGraphAddHostNode_Negative) {
   constexpr size_t N = 1024;
   hipGraph_t graph;
   int *A_d{nullptr}, *C_d{nullptr};
@@ -127,7 +127,7 @@ This test case verifies hipGraphAddHostNode API in cloned graph
 Creates graph, Add graph nodes and clone the graph
 Add HostNode to the cloned graph and validate the result
 */
-TEST_CASE("Unit_hipGraphAddHostNode_ClonedGraphWithHostNode") {
+TEST_CASE(Unit_hipGraphAddHostNode_ClonedGraphWithHostNode) {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   hipGraph_t graph;
@@ -190,7 +190,7 @@ This test case verifies the square of number by
 creating graph, Add kernel node which does the square
 of number and the result is validated by hipGraphAddHostNode API
 */
-TEST_CASE("Unit_hipGraphAddHostNode_VectorSquare") {
+TEST_CASE(Unit_hipGraphAddHostNode_VectorSquare) {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   hipGraph_t graph;
@@ -248,7 +248,7 @@ Create graph, calls the host function and updates
 the parameters in the callback function and
 validates it.
 */
-TEST_CASE("Unit_hipGraphAddHostNode_BasicFunc") {
+TEST_CASE(Unit_hipGraphAddHostNode_BasicFunc) {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   hipGraph_t graph;
