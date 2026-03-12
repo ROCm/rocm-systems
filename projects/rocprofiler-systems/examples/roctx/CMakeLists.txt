@@ -51,6 +51,7 @@ if(
 endif()
 
 # Find the roctx library
+<<<<<<< HEAD
 find_library(
     ROCTX_LIBRARY
     NAMES rocprofiler-sdk-roctx
@@ -89,28 +90,68 @@ else()
 endif()
 
 # Find the library
+=======
+>>>>>>> c6289c00e6 (Add examples for selective tracing and pause resume)
 find_library(
     ROCTX_LIBRARY
     NAMES rocprofiler-sdk-roctx
     PATHS ${ROCM_PATH}/lib ${ROCM_PATH}/lib64
     REQUIRED
 )
-# Link it to targets
-target_link_libraries(roctx PRIVATE ${ROCTX_LIBRARY})
-target_link_libraries(region_filter PRIVATE ${ROCTX_LIBRARY})
 
-if("${CMAKE_BUILD_TYPE}" MATCHES "Release")
-    target_compile_options(roctx PRIVATE -g1)
-    target_compile_options(region_filter PRIVATE -g1)
-endif()
+set(ROCTX_EXAMPLE_TARGETS
+    roctx
+    pause_resume
+    selective_region
+    selective_region_pause_1
+    selective_region_pause_2
+    selective_region_pause_3
+)
 
-# Specify GPU architectures to compile for
-foreach(arch IN LISTS ROCPROFSYS_GFX_TARGETS)
-    target_compile_options(roctx PRIVATE --offload-arch=${arch})
-    target_link_options(roctx PUBLIC --offload-arch=${arch})
-    target_compile_options(region_filter PRIVATE --offload-arch=${arch})
-    target_link_options(region_filter PUBLIC --offload-arch=${arch})
+foreach(_target IN LISTS ROCTX_EXAMPLE_TARGETS)
+    add_executable(${_target} ${_target}.cpp)
+    target_link_libraries(${_target} PRIVATE Threads::Threads)
+
+    if(
+        CMAKE_CXX_COMPILER_ID MATCHES "Clang"
+        AND NOT CMAKE_CXX_COMPILER_IS_HIPCC
+        AND NOT HIPCC_EXECUTABLE
+    )
+        target_link_libraries(
+            ${_target}
+            PRIVATE
+                $<TARGET_NAME_IF_EXISTS:rocprofiler-systems::rocprofiler-systems-compile-options>
+                $<TARGET_NAME_IF_EXISTS:hip::host>
+                $<TARGET_NAME_IF_EXISTS:hip::device>
+        )
+    else()
+        target_compile_options(${_target} PRIVATE -W -Wall)
+    endif()
+
+    target_link_libraries(${_target} PRIVATE ${ROCTX_LIBRARY})
+
+    if("${CMAKE_BUILD_TYPE}" MATCHES "Release")
+        target_compile_options(${_target} PRIVATE -g1)
+    endif()
+
+    foreach(arch IN LISTS ROCPROFSYS_GFX_TARGETS)
+        target_compile_options(${_target} PRIVATE --offload-arch=${arch})
+        target_link_options(${_target} PUBLIC --offload-arch=${arch})
+    endforeach()
+
+    if(NOT CMAKE_CXX_COMPILER_IS_HIPCC AND HIPCC_EXECUTABLE)
+        rocprofiler_systems_custom_compilation(COMPILER ${HIPCC_EXECUTABLE} TARGET ${_target})
+    endif()
+
+    if(ROCPROFSYS_INSTALL_EXAMPLES AND TARGET ${_target})
+        install(
+            TARGETS ${_target}
+            DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples
+            COMPONENT rocprofiler-systems-examples
+        )
+    endif()
 endforeach()
+<<<<<<< HEAD
 
 if(NOT CMAKE_CXX_COMPILER_IS_HIPCC AND HIPCC_EXECUTABLE)
     rocprofiler_systems_custom_compilation(COMPILER ${HIPCC_EXECUTABLE} TARGET roctx)
@@ -132,3 +173,5 @@ if(ROCPROFSYS_INSTALL_EXAMPLES AND TARGET region_filter)
         COMPONENT rocprofiler-systems-examples
     )
 endif()
+=======
+>>>>>>> c6289c00e6 (Add examples for selective tracing and pause resume)
