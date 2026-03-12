@@ -856,15 +856,21 @@ amdsmi_get_gpu_device_bdf(amdsmi_processor_handle processor_handle, amdsmi_bdf_t
     if (bdf == NULL) {
         return AMDSMI_STATUS_INVAL;
     }
+    memset(bdf, 0, sizeof(*bdf));
 
-    amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
-    amdsmi_status_t r = get_gpu_device_from_handle(processor_handle, &gpu_device);
-    if (r != AMDSMI_STATUS_SUCCESS)
-        return r;
+    auto *device = reinterpret_cast<Device *>(processor_handle);
+    if (device == nullptr)
+        return AMDSMI_STATUS_NOT_FOUND;
 
-    // get bdf from sysfs file
-    *bdf = gpu_device->get_bdf();
+    wsl::thunk::BdfInfo bi = {};
+    auto code = device->QueryBdfInfo(&bi);
+    if (code != ErrorCode::Success)
+        return translateCodeToSmiStatus(code);
 
+    bdf->domain_number   = bi.domain_number;
+    bdf->bus_number      = bi.bus_number;
+    bdf->device_number   = bi.device_number;
+    bdf->function_number = bi.function_number;
     return AMDSMI_STATUS_SUCCESS;
 }
 
