@@ -309,6 +309,7 @@ class InteractiveSession:
         self._store = session_store or SessionStore()
         self._compact_every = compact_every
         self._conv: Optional[LLMConversation] = None
+        self._sent_source_files: set = set()  # filenames already sent to _conv
         self._session = self._init_session(resume_session_id)
 
     @property
@@ -1360,16 +1361,34 @@ class InteractiveSession:
         if self._conv is None:
             return {}
         try:
-            combined = "\n\n".join(f"=== {name} ===\n{content}" for name, content in summaries)
-            user_msg = (
-                f"Analyze these AMD GPU source files and provide concrete, actionable "
-                f"optimization suggestions. Focus on: memory coalescing, wave occupancy, "
-                f"unnecessary hipDeviceSynchronize, blocking hipMemcpy, MFMA usage, LDS "
-                f"utilization, loop structure, kernel launch parameters. Be specific — "
-                f"reference actual patterns visible in the code. Use plain text only — "
-                f"no markdown headers. Start each file section with exactly: FILE: <filename>\n\n"
-                f"{combined}"
-            )
+            current_files = {name for name, _ in summaries}
+            already_sent = current_files.issubset(self._sent_source_files)
+            if already_sent:
+                # Source content already in conversation history — ask for new suggestions only
+                file_list = ", ".join(sorted(current_files))
+                user_msg = (
+                    f"Based on the source files already shared ({file_list}), provide "
+                    f"additional concrete optimization suggestions we haven't covered yet. "
+                    f"Plain text only — no markdown headers. "
+                    f"Start each file section with exactly: FILE: <filename>"
+                )
+            else:
+                new_files = current_files - self._sent_source_files
+                combined = "\n\n".join(
+                    f"=== {name} ===\n{content}"
+                    for name, content in summaries
+                    if name in new_files
+                )
+                user_msg = (
+                    f"Analyze these AMD GPU source files and provide concrete, actionable "
+                    f"optimization suggestions. Focus on: memory coalescing, wave occupancy, "
+                    f"unnecessary hipDeviceSynchronize, blocking hipMemcpy, MFMA usage, LDS "
+                    f"utilization, loop structure, kernel launch parameters. Be specific — "
+                    f"reference actual patterns visible in the code. Use plain text only — "
+                    f"no markdown headers. Start each file section with exactly: FILE: <filename>\n\n"
+                    f"{combined}"
+                )
+                self._sent_source_files.update(new_files)
             _print()
             _print("  ── AI Optimization Suggestions ──────────────────────", style="cyan")
             raw = self._conv.send(user_msg, on_token=_print_token)
