@@ -49,17 +49,16 @@ __CG_QUALIFIER__ auto reduce(const TyGroup& group, TyVal&& val, TyFn&& op) -> de
   using Val = typename __hip_internal::remove_cvref<TyVal>::type;
   static_assert(impl::is_param_type_same<Val, decltype(op(val, val))>::value, "Operator input and output types differ");
   static_assert(__hip_internal::is_trivially_copyable<Val>::value, "val must be trivially copyable");
-  // this is due to a current limitation on reduce_op_sync()
   static_assert(sizeof(Val) <= 32, "Can only reduce values of size up to 32 bytes");
 
   if constexpr (!impl::isTiledGroup<TyGroup>::value && !impl::isCoalescedGroup<TyGroup>::value) {
     static_assert(__hip_internal::is_void<TyGroup>::value, "This group does not exclusively represent a tile");
   }
 
-  // we cannot simply use the __activemask() here, because more than one tile could have active
-  // threads at a time
   unsigned long long mask = ~0ull;
 
+  // we cannot simply just use the __activemask() here, because more than one tile could have active
+  // threads at a time; we need to mask away the threads that not part of this tile first
   if constexpr (!__hip_internal::is_same<TyGroup, cooperative_groups::coalesced_group>::value) {
     mask >>= (64 - group.num_threads());
     mask <<= (((threadIdx.x % warpSize) / group.num_threads()) * group.num_threads());
