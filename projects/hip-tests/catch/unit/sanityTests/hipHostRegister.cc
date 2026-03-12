@@ -26,9 +26,9 @@ THE SOFTWARE.
 #include <vector>
 
 /**
- * @addtogroup HipHostRegisterUnitTest HipHostRegisterUnitTest
+ * @addtogroup HipHostRegisterStressTest HipHostRegisterStressTest
  * @{
- * @ingroup HipHostRegisterUnitTest
+ * @ingroup HipHostRegisterStressTest
  */
 
 constexpr size_t MEM_SIZE = 1024 * 1024;   // 1 MB
@@ -47,7 +47,7 @@ constexpr int NBUF_FLAGS = 3;
  * ------------------------
  *    - unit/sanityTests/hipHostRegister.cc
  */
-TEST_CASE("Unit_hipHostRegister_RegisterUnregister") {
+TEST_CASE("Stress_hipHostRegister_RegisterUnregister") {
   HIP_CHECK(hipSetDevice(0));
 
   for (int count = 1; count <= NUM_ITERATIONS; ++count) {
@@ -79,7 +79,7 @@ TEST_CASE("Unit_hipHostRegister_RegisterUnregister") {
  *    - unit/sanityTests/hipHostRegister.cc
  */
 
-TEST_CASE("Unit_hipHostRegister_Nbuf_MultiFlag_RegisterUnregister") {
+TEST_CASE("Stress_hipHostRegister_Nbuf_MultiFlag_RegisterUnregister") {
   static const size_t sizes[NBUF_SIZES] = {1024, 1048576, 10485760};
 
   static const unsigned int flags[NBUF_FLAGS] = {
@@ -111,6 +111,6 @@ TEST_CASE("Unit_hipHostRegister_Nbuf_MultiFlag_RegisterUnregister") {
 }
 
 /**
- * End doxygen group HipHostRegisterUnitTest.
+ * End doxygen group HipHostRegisterStressTest.
  * @}
  */

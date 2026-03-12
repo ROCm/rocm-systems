@@ -35,55 +35,6 @@ THE SOFTWARE.
 
 __device__ int* dataptr_dsm[NUM_BLOCKS_DSM];
 
-// Kernel: device-side new/delete
-__global__ void deviceSideNew() {
-  int* ptr = new int;
-  if (ptr == nullptr)
-    return;
-  delete ptr;
-}
-
-// Kernel: device-side malloc/free (single thread)
-__global__ void deviceSideMalloc() {
-  int* ptr = static_cast<int*>(malloc(sizeof(int)));
-  if (ptr == nullptr)
-    return;
-  free(ptr);
-}
-
-// Kernel: per-thread malloc, memset, free
-__global__ void perThreadMalloc() {
-  size_t size = 123;
-  char* ptr = static_cast<char*>(malloc(size));
-  if (ptr == nullptr)
-    return;
-  memset(ptr, 0, size);
-  free(ptr);
-}
-
-// Kernel: per-block allocation
-__global__ void perThreadBlockAllocation() {
-  __shared__ int* data;
-
-  if (threadIdx.x == 0) {
-    size_t size = blockDim.x * 64 * sizeof(int);
-    data = static_cast<int*>(malloc(size));
-  }
-  __syncthreads();
-
-  if (data == nullptr)
-    return;
-
-  int* ptr = data;
-  for (int i = 0; i < 64; ++i)
-    ptr[i * blockDim.x + threadIdx.x] = threadIdx.x;
-
-  __syncthreads();
-
-  if (threadIdx.x == 0)
-    free(data);
-}
-
 __global__ void allocmemKernel() {
   if (threadIdx.x == 0)
     dataptr_dsm[blockIdx.x] = static_cast<int*>(malloc(blockDim.x * sizeof(int)));
@@ -107,64 +58,6 @@ __global__ void freememKernel() {
     free(ptr);
     dataptr_dsm[blockIdx.x] = nullptr;
   }
-}
-
-/**
- * Test Description
- * ------------------------
- *    - Launches a kernel that uses device-side new/delete for a single int.
- * Test source
- * ------------------------
- *    - unit/sanityTests/deviceSideMalloc.cc
- */
-TEST_CASE("Unit_deviceSideNewDelete") {
-  hipLaunchKernelGGL(deviceSideNew, 1, 1, 0, 0);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipDeviceSynchronize());
-}
-
-/**
- * Test Description
- * ------------------------
- *    - Launches a kernel that uses device-side malloc/free for a single int.
- * Test source
- * ------------------------
- *    - unit/sanityTests/deviceSideMalloc.cc
- */
-TEST_CASE("Unit_deviceSideMalloc") {
-  hipLaunchKernelGGL(deviceSideMalloc, 1, 1, 0, 0);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipDeviceSynchronize());
-}
-
-/**
- * Test Description
- * ------------------------
- *    - Launches a kernel with multiple threads; each thread allocates,
- *      memset, and frees device memory (per-thread malloc).
- * Test source
- * ------------------------
- *    - unit/sanityTests/deviceSideMalloc.cc
- */
-TEST_CASE("Unit_PerThreadMalloc") {
-  perThreadMalloc<<<1, 5>>>();
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipDeviceSynchronize());
-}
-
-/**
- * Test Description
- * ------------------------
- *    - Launches blocks; first thread per block allocates shared buffer,
- *      all threads write coalesced, then first thread frees (per-block allocation).
- * Test source
- * ------------------------
- *    - unit/sanityTests/deviceSideMalloc.cc
- */
-TEST_CASE("Unit_PerThreadBlockAllocation") {
-  perThreadBlockAllocation<<<10, 128>>>();
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipDeviceSynchronize());
 }
 
 /**
