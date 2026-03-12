@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "d3dkmt_types.h"
+#include "gpu_info.h"
 #include "status.h"
 #include "thunk_proxy/thunk_proxy.h"
 
@@ -25,6 +26,10 @@ public:
 
   LdaChain *GetLdaChain()   const { return lda_chain_; }
   u32       GetChainIndex() const { return chain_index_; }
+
+  ErrorCode QueryVramUsage(VramUsage *usage) const;
+
+  ErrorCode QueryVramInfo(VramInfo *info) const;
 
   ErrorCode Escape(void *pData, size_t dataSize,
                    bool hardwareAccess = false) const;

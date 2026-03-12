@@ -1616,117 +1616,26 @@ amdsmi_status_t amdsmi_get_npm_info(amdsmi_node_handle node_handle,
 }
 
 amdsmi_status_t amdsmi_get_gpu_vram_usage(amdsmi_processor_handle processor_handle,
-            amdsmi_vram_usage_t *vram_info) {
+            amdsmi_vram_usage_t *info) {
     AMDSMI_CHECK_INIT();
 
-    if (vram_info == nullptr) {
+    if (info == nullptr) {
         return AMDSMI_STATUS_INVAL;
     }
 
-    amd::smi::AMDSmiProcessor* device = nullptr;
-    amdsmi_status_t ret = amd::smi::AMDSmiSystem::getInstance()
-                    .handle_to_processor(processor_handle, &device);
-    if (ret != AMDSMI_STATUS_SUCCESS) {
-        return ret;
+    auto *device = reinterpret_cast<Device *>(processor_handle);
+    if (device == nullptr)
+        return AMDSMI_STATUS_NOT_FOUND;
+
+    memset(info, 0, sizeof(*info));
+
+    VramUsage usage{};
+    auto code = device->QueryVramUsage(&usage);
+    if (code == ErrorCode::Success) {
+        info->vram_used  = static_cast<uint32_t>(usage.vram_used_mb);
+        info->vram_total = static_cast<uint32_t>(usage.vram_total_mb);
     }
-
-    if (device->get_processor_type() != AMDSMI_PROCESSOR_TYPE_AMD_GPU) {
-        return AMDSMI_STATUS_NOT_SUPPORTED;
-    }
-
-    amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
-    amdsmi_status_t r = get_gpu_device_from_handle(processor_handle, &gpu_device);
-    if (r != AMDSMI_STATUS_SUCCESS) {
-        return r;
-    }
-
-    std::ostringstream ss;
-
-    SMIGPUDEVICE_MUTEX(gpu_device->get_mutex());
-    std::string render_name = gpu_device->get_gpu_path();
-    if (render_name.empty()) {
-        return AMDSMI_STATUS_NOT_SUPPORTED;
-    }
-
-    std::string path = "/dev/dri/" + render_name;
-    ScopedFD drm_fd(path.c_str(), O_RDWR | O_CLOEXEC);
-    if (!drm_fd.valid()) {
-        ss << __PRETTY_FUNCTION__
-           << " | Failed to open " << path << ": " << strerror(errno)
-           << "; Returning: " << smi_amdgpu_get_status_string(AMDSMI_STATUS_FILE_ERROR, false);
-        LOG_ERROR(ss);
-        return AMDSMI_STATUS_FILE_ERROR;
-    }
-
-    amd::smi::AMDSmiLibraryLoader libdrm;
-    amdsmi_status_t status = libdrm.load(LIBDRM_AMDGPU_SONAME);
-    if (status != AMDSMI_STATUS_SUCCESS) {
-        libdrm.unload();
-        ss << __PRETTY_FUNCTION__
-           << " | Failed to load " LIBDRM_AMDGPU_SONAME ": " << strerror(errno)
-           << "; Returning: " << smi_amdgpu_get_status_string(status, false);
-        LOG_ERROR(ss);
-        return status;
-    }
-
-    ss << __PRETTY_FUNCTION__
-       << " | about to load drmCommandWrite symbol";
-    LOG_INFO(ss);
-
-    // extern int drmCommandWrite(int fd, unsigned long drmCommandIndex,
-    //                            void *data, unsigned long size);
-    typedef int (*drmCommandWrite_t)(int fd, unsigned long drmCommandIndex,
-                                    void *data, unsigned long size);
-    drmCommandWrite_t drmCommandWrite = nullptr;
-
-    // load symbol from libdrm
-    status = libdrm.load_symbol(reinterpret_cast<drmCommandWrite_t *>(&drmCommandWrite),
-                                "drmCommandWrite");
-    if (status != AMDSMI_STATUS_SUCCESS) {
-        libdrm.unload();
-        ss << __PRETTY_FUNCTION__
-           << " | Failed to load drmCommandWrite symbol"
-           << " | Returning: " << smi_amdgpu_get_status_string(status, false);
-        LOG_ERROR(ss);
-        return status;
-    }
-    ss << __PRETTY_FUNCTION__
-       << " | drmCommandWrite symbol loaded successfully";
-    LOG_INFO(ss);
-
-    uint64_t total = 0;
-    r = rsmi_wrapper(rsmi_dev_memory_total_get, processor_handle, 0,
-                    RSMI_MEM_TYPE_VRAM, &total);
-    if (r == AMDSMI_STATUS_SUCCESS) {
-        vram_info->vram_total = static_cast<uint32_t>(total / (1024 * 1024));
-    }
-
-    uint64_t vram_used = 0;
-    struct drm_amdgpu_info request = {};
-    memset(&request, 0, sizeof(request));
-    request.return_pointer = reinterpret_cast<unsigned long long>(&vram_used);
-    request.return_size = sizeof(vram_used);
-    request.query = AMDGPU_INFO_VRAM_USAGE;
-    auto drm_write = drmCommandWrite(drm_fd, DRM_AMDGPU_INFO, &request,
-                                     sizeof(struct drm_amdgpu_info));
-    if (drm_write != 0) {
-        libdrm.unload();
-        ss << __PRETTY_FUNCTION__
-           << " | Issue - drm_write failed, drm_write (AMDGPU_INFO_VRAM_USAGE): "
-           << std::dec << drm_write << "\n"
-           << "; Returning: " << smi_amdgpu_get_status_string(AMDSMI_STATUS_DRM_ERROR, false);
-        LOG_ERROR(ss);
-        return AMDSMI_STATUS_DRM_ERROR;
-    }
-
-    vram_info->vram_used = static_cast<uint32_t>(vram_used / (1024 * 1024));
-    libdrm.unload();
-    ss << __PRETTY_FUNCTION__
-       << " | vram_info->vram_total (MB): " << std::dec << vram_info->vram_total << "\n"
-       << " | vram_info->vram_used (MB): " << std::dec << vram_info->vram_used << "\n"
-       << " | Returning: " << smi_amdgpu_get_status_string(AMDSMI_STATUS_SUCCESS, false);
-    LOG_INFO(ss);
-    return AMDSMI_STATUS_SUCCESS;
+    return translateCodeToSmiStatus(code);
 }
 
 static void system_wait(int milli_seconds) {
@@ -2727,130 +2636,33 @@ amdsmi_status_t amdsmi_get_gpu_vram_info(
         return AMDSMI_STATUS_INVAL;
     }
 
-    amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
-    amdsmi_status_t r = get_gpu_device_from_handle(processor_handle,
-                            &gpu_device);
-    if (r != AMDSMI_STATUS_SUCCESS) {
-        return r;
-    }
+    auto *device = reinterpret_cast<Device *>(processor_handle);
+    if (device == nullptr)
+        return AMDSMI_STATUS_INVAL;
 
-    std::ostringstream ss;
-    // init the info structure with default value
-    info->vram_type = AMDSMI_VRAM_TYPE_UNKNOWN;
-    info->vram_size = 0;
-    snprintf(info->vram_vendor, AMDSMI_MAX_STRING_LENGTH, "UNKNOWN");
-    info->vram_bit_width = std::numeric_limits<decltype(info->vram_bit_width)>::max();
+    memset(info, 0, sizeof(*info));
+
+    VramInfo raw{};
+    auto code = device->QueryVramInfo(&raw);
+    if (code != ErrorCode::Success)
+        return translateCodeToSmiStatus(code);
+
+    // map VIDEO_MEMORY_TYPE -> amdsmi_vram_type_t
+    switch (raw.vram_type) {
+    case 1:  info->vram_type = AMDSMI_VRAM_TYPE_DDR2;    break;  // DDR2
+    case 2:  info->vram_type = AMDSMI_VRAM_TYPE_GDDR5;   break;  // GDDR5
+    case 3:  info->vram_type = AMDSMI_VRAM_TYPE_DDR3;    break;  // DDR3
+    case 4:  info->vram_type = AMDSMI_VRAM_TYPE_DDR4;    break;  // DDR4
+    case 5:  info->vram_type = AMDSMI_VRAM_TYPE_HBM;     break;  // HBM
+    case 6:  info->vram_type = AMDSMI_VRAM_TYPE_GDDR6;   break;  // GDDR6
+    case 7:  info->vram_type = AMDSMI_VRAM_TYPE_LPDDR4;  break;  // LPDDR4
+    case 8:  info->vram_type = AMDSMI_VRAM_TYPE_DDR5;    break;  // DDR5
+    case 9:  info->vram_type = AMDSMI_VRAM_TYPE_LPDDR5;  break;  // LPDDR5
+    default: info->vram_type = AMDSMI_VRAM_TYPE_UNKNOWN; break;
+    }
+    info->vram_bit_width = raw.vram_bit_width;
+    info->vram_size      = raw.vram_size_mb;
     info->vram_max_bandwidth = std::numeric_limits<decltype(info->vram_max_bandwidth)>::max();
-
-    SMIGPUDEVICE_MUTEX(gpu_device->get_mutex());
-    std::string render_name = gpu_device->get_gpu_path();
-    std::string path = "/dev/dri/" + render_name;
-    if (render_name.empty()) {
-        return AMDSMI_STATUS_NOT_SUPPORTED;
-    }
-
-    ScopedFD drm_fd(path.c_str(), O_RDWR | O_CLOEXEC);
-    if (!drm_fd.valid()) {
-        ss << __PRETTY_FUNCTION__
-           << " | Failed to open " << path << ": " << strerror(errno)
-           << "; Returning: " << smi_amdgpu_get_status_string(AMDSMI_STATUS_FILE_ERROR, false);
-        LOG_ERROR(ss);
-        return AMDSMI_STATUS_FILE_ERROR;
-    }
-
-    amd::smi::AMDSmiLibraryLoader libdrm;
-    amdsmi_status_t status = libdrm.load(LIBDRM_AMDGPU_SONAME);
-    if (status != AMDSMI_STATUS_SUCCESS) {
-        libdrm.unload();
-        ss << __PRETTY_FUNCTION__
-           << " | Failed to load " LIBDRM_AMDGPU_SONAME ": " << strerror(errno)
-           << "; Returning: " << smi_amdgpu_get_status_string(status, false);
-        LOG_ERROR(ss);
-        return status;
-    }
-
-    ss << __PRETTY_FUNCTION__
-       << " | about to load drmCommandWrite symbol";
-    LOG_INFO(ss);
-
-    // extern int drmCommandWrite(int fd, unsigned long drmCommandIndex,
-    //                            void *data, unsigned long size);
-    typedef int (*drmCommandWrite_t)(int fd, unsigned long drmCommandIndex,
-                                    void *data, unsigned long size);
-    drmCommandWrite_t drmCommandWrite = nullptr;
-
-    // load symbol from libdrm
-    status = libdrm.load_symbol(reinterpret_cast<drmCommandWrite_t *>(&drmCommandWrite),
-                                "drmCommandWrite");
-    if (status != AMDSMI_STATUS_SUCCESS) {
-        libdrm.unload();
-        ss << __PRETTY_FUNCTION__
-           << " | Failed to load drmCommandWrite symbol"
-           << " | Returning: " << smi_amdgpu_get_status_string(status, false);
-        LOG_ERROR(ss);
-        return status;
-    }
-    ss << __PRETTY_FUNCTION__
-       << " | drmCommandWrite symbol loaded successfully";
-    LOG_INFO(ss);
-
-    struct drm_amdgpu_info_device dev_info = {};
-    memset(&dev_info, 0, sizeof(struct drm_amdgpu_info_device));
-    struct drm_amdgpu_info request = {};
-    memset(&request, 0, sizeof(request));
-    request.return_pointer = reinterpret_cast<unsigned long long>(&dev_info);
-    request.return_size = sizeof(struct drm_amdgpu_info_device);
-    request.query = AMDGPU_INFO_DEV_INFO;
-    auto drm_write = drmCommandWrite(drm_fd, DRM_AMDGPU_INFO, &request,
-                                     sizeof(struct drm_amdgpu_info));
-    if (drm_write != 0) {
-        libdrm.unload();
-        ss << __PRETTY_FUNCTION__
-           << " | Issue - drm_write failed, drm_write: " << std::dec << drm_write << "\n"
-           << "; Returning: " << smi_amdgpu_get_status_string(AMDSMI_STATUS_DRM_ERROR, false);
-        LOG_ERROR(ss);
-        return AMDSMI_STATUS_DRM_ERROR;
-    }
-
-    info->vram_type = amd::smi::vram_type_value(dev_info.vram_type);
-    info->vram_bit_width = dev_info.vram_bit_width;
-    libdrm.unload();
-    // if vram type is greater than the max enum set it to unknown
-    if (info->vram_type > AMDSMI_VRAM_TYPE__MAX) info->vram_type = AMDSMI_VRAM_TYPE_UNKNOWN;
-
-    // set info->vram_max_bandwidth to gpu_metrics vram_max_bandwidth if it is not set
-    amdsmi_gpu_metrics_t metric_info = {};
-    r = amdsmi_get_gpu_metrics_info(processor_handle, &metric_info);
-    if (r == AMDSMI_STATUS_SUCCESS) {
-        info->vram_max_bandwidth = metric_info.vram_max_bandwidth;
-    }
-
-    // map the vendor name to enum
-    char brand[256] = {'\0'};
-    r = rsmi_wrapper(rsmi_dev_vram_vendor_get, processor_handle, 0, brand, 255);
-    if (r == AMDSMI_STATUS_SUCCESS) {
-        for (auto &x : brand)
-            x = static_cast<char>(toupper(x));
-        snprintf(info->vram_vendor, AMDSMI_MAX_STRING_LENGTH, "%s", brand);
-    }
-    uint64_t total = 0;
-    r = rsmi_wrapper(rsmi_dev_memory_total_get, processor_handle, 0,
-                    RSMI_MEM_TYPE_VRAM, &total);
-    if (r == AMDSMI_STATUS_SUCCESS) {
-        info->vram_size = total / (1024 * 1024);
-    }
-
-    ss << __PRETTY_FUNCTION__
-       << " | info->vram_type: " << std::dec << info->vram_type << "\n"
-       << "; info->vram_size (MB): " << std::dec << info->vram_size << "\n"
-       << "; info->vram_vendor: " << std::dec << info->vram_vendor << "\n"
-       << "; info->vram_bit_width: " << std::dec
-       << (info->vram_bit_width == std::numeric_limits<uint64_t>::max() ?
-            "N/A" : std::to_string(info->vram_bit_width)) << "\n"
-       << "; info->vram_max_bandwidth (GB/s): " << std::dec
-       << info->vram_max_bandwidth << "\n"
-       << "; Returning: " << smi_amdgpu_get_status_string(AMDSMI_STATUS_SUCCESS, false);
-    LOG_INFO(ss);
     return AMDSMI_STATUS_SUCCESS;
 }
 

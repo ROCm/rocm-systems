@@ -38,6 +38,14 @@ ErrorCode Device::Create(Platform *platform, LdaChain *ldaChain,
   return ErrorCode::Success;
 }
 
+ErrorCode Device::QueryVramInfo(VramInfo *info) const {
+  return device_ctx_->QueryVramInfo(info);
+}
+
+ErrorCode Device::QueryVramUsage(VramUsage *usage) const {
+  return device_ctx_->QueryVramUsage(usage);
+}
+
 ErrorCode Device::Escape(void *pData, size_t dataSize, bool hardwareAccess) const {
   bool ok = device_ctx_->Escape(pData, dataSize, hardwareAccess);
   return ok ? ErrorCode::Success : ErrorCode::Unknown;
