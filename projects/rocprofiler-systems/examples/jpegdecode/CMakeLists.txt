@@ -3,6 +3,27 @@
 
 cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
 
+# Set AMD Clang as default compiler for standalone builds
+if(NOT DEFINED CMAKE_CXX_COMPILER)
+    find_program(
+        _AMDCLANG
+        NAMES amdclang++
+        HINTS ${ROCM_PATH} $ENV{ROCM_PATH} /opt/rocm
+        PATH_SUFFIXES bin
+    )
+    if(_AMDCLANG)
+        set(CMAKE_CXX_COMPILER ${_AMDCLANG})
+    endif()
+    unset(_AMDCLANG)
+endif()
+
+project(rocprofiler-systems-jpegdecode-example LANGUAGES CXX)
+
+# Support standalone builds
+if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
+    include(${CMAKE_CURRENT_LIST_DIR}/../cmake/standalone-helpers.cmake OPTIONAL)
+endif()
+
 # This example requires hip and rocjpeg.
 find_package(HIP QUIET)
 
@@ -11,13 +32,6 @@ if(NOT HIP_FOUND)
     return()
 endif()
 
-# Set AMD Clang as default compiler
-if(NOT DEFINED CMAKE_CXX_COMPILER)
-    set(CMAKE_C_COMPILER ${ROCmVersion_DIR}/bin/amdclang)
-    set(CMAKE_CXX_COMPILER ${ROCmVersion_DIR}/bin/amdclang++)
-endif()
-
-project(rocprofiler-systems-jpegdecode-example)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED On)
 

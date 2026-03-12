@@ -6,6 +6,11 @@ list(APPEND CMAKE_MESSAGE_CONTEXT "rccl-tests")
 
 project(rocprofiler-systems-rccl-example LANGUAGES CXX)
 
+# Support standalone builds
+if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
+    include(${CMAKE_CURRENT_LIST_DIR}/../cmake/standalone-helpers.cmake OPTIONAL)
+endif()
+
 if(ROCPROFSYS_DISABLE_EXAMPLES)
     get_filename_component(_DIR ${CMAKE_CURRENT_LIST_DIR} NAME)
 

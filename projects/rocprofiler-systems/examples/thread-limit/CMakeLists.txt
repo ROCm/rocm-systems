@@ -20,6 +20,15 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
+
+project(rocprofiler-systems-thread-limit-example LANGUAGES CXX)
+
+# Support standalone builds
+if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
+    include(${CMAKE_CURRENT_LIST_DIR}/../cmake/standalone-helpers.cmake OPTIONAL)
+endif()
+
 if(ROCPROFSYS_DISABLE_EXAMPLES)
     get_filename_component(_DIR ${CMAKE_CURRENT_LIST_DIR} NAME)
 
@@ -33,6 +42,11 @@ endif()
 
 set(CMAKE_BUILD_TYPE "Release")
 find_package(Threads REQUIRED)
+
+# Default MAX_THREADS for standalone builds
+if(NOT DEFINED ROCPROFSYS_MAX_THREADS)
+    set(ROCPROFSYS_MAX_THREADS 64)
+endif()
 
 add_library(tests-compile-options INTERFACE)
 target_compile_options(tests-compile-options INTERFACE -g)

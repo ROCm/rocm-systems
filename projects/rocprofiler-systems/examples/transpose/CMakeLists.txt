@@ -5,6 +5,11 @@ cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
 
 project(rocprofiler-systems-transpose-example LANGUAGES CXX)
 
+# Support standalone builds
+if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
+    include(${CMAKE_CURRENT_LIST_DIR}/../cmake/standalone-helpers.cmake OPTIONAL)
+endif()
+
 if(ROCPROFSYS_DISABLE_EXAMPLES)
     get_filename_component(_DIR ${CMAKE_CURRENT_LIST_DIR} NAME)
 
@@ -63,14 +68,25 @@ if(TRANSPOSE_USE_MPI)
     find_package(MPI REQUIRED)
 endif()
 
-add_executable(transpose transpose.cpp)
-target_link_libraries(transpose PRIVATE Threads::Threads)
+# For standalone builds with HIP language enabled, use .hip extension handling
+if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME AND CMAKE_HIP_COMPILER)
+    set_source_files_properties(transpose.cpp PROPERTIES LANGUAGE HIP)
+    add_executable(transpose transpose.cpp)
+    target_link_libraries(transpose PRIVATE Threads::Threads)
+    set_target_properties(
+        transpose
+        PROPERTIES HIP_ARCHITECTURES "${ROCPROFSYS_GFX_TARGETS}"
+    )
+else()
+    add_executable(transpose transpose.cpp)
+    target_link_libraries(transpose PRIVATE Threads::Threads)
 
-# Specify GPU architectures to compile for
-foreach(arch IN LISTS ROCPROFSYS_GFX_TARGETS)
-    target_compile_options(transpose PRIVATE --offload-arch=${arch})
-    target_link_options(transpose PUBLIC --offload-arch=${arch})
-endforeach()
+    # Specify GPU architectures to compile for
+    foreach(arch IN LISTS ROCPROFSYS_GFX_TARGETS)
+        target_compile_options(transpose PRIVATE --offload-arch=${arch})
+        target_link_options(transpose PUBLIC --offload-arch=${arch})
+    endforeach()
+endif()
 
 if(
     CMAKE_CXX_COMPILER_ID MATCHES "Clang"

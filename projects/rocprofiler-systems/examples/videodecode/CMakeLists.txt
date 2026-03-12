@@ -5,6 +5,11 @@ cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
 
 project(rocprofiler-systems-videodecode-example LANGUAGES CXX)
 
+# Support standalone builds
+if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
+    include(${CMAKE_CURRENT_LIST_DIR}/../cmake/standalone-helpers.cmake OPTIONAL)
+endif()
+
 # This example requires hip and rocdecode.
 find_package(HIP QUIET)
 
