@@ -1490,3 +1490,75 @@ error: use of undeclared identifier '__builtin_amdgcn_sin'
 
 The guide documents the correct HIP math API: use `sinf()`, `cosf()`, `sqrtf()`, etc.
 — amdclang++ maps these to OCML hardware-optimized implementations automatically.
+
+
+### WorkflowSession — Phase 1b Quick Workload Analysis
+
+**New pre-Phase-2 step selects the best starter profiling command**
+
+Before presenting the profiling command to the user in Phase 2, `WorkflowSession` now
+runs `_phase1b_quick_workload_analysis()` which combines two analysis paths:
+
+**1. App-command heuristics (`_classify_app_command`)**
+
+Inspects the binary name and arguments to detect workload type:
+
+| Detected workload | `workload_type` | Extra flags added |
+|---|---|---|
+| Python + ML framework (torch/jax/tf/paddle) | `python_ml` | `--hip-trace` |
+| Python + LLM inference (vllm/llama/gpt/…) | `llm_inference` | `--hip-trace` |
+| Python without ML framework | `python_generic` | `--hip-trace` |
+| Compiled HIP/ROCm binary | `hip_compute` | none |
+| MPI/Slurm launcher | `mpi_multi` | warning only |
+
+Multi-process patterns (torchrun, DDP, DeepSpeed, NCCL) trigger a warning about
+worker-process GPU kernel capture limitations regardless of workload type.
+
+**2. Tier 0 source analysis**
+
+If `--source-dir` paths are provided, `SourceAnalyzer.analyze()` is called on the
+first path. The flags from `plan.suggested_first_command` (the highest-priority
+recommendation) replace the heuristic flags. The `-d <dir>` and `-o <name>` components
+are updated to a fresh timestamped directory before the command is shown.
+
+**Precedence and fallback:**
+
+```
+Source analysis flags  >  Heuristic extra flags  >  default set
+(if source dir given)     (always appended)         (--sys-trace --kernel-trace
+                                                      --memory-copy-trace --stats)
+```
+
+**Return value:** The method returns the full suggested command string. `run()` falls
+back to `_build_profiling_command()` (pure default) only if the method returns `None`,
+which only happens if both paths raise exceptions.
+
+### --resume-session Scope (InteractiveSession only)
+
+`--resume-session` restores a previously saved `InteractiveSession` by ID. It applies
+**only** to the menu-driven `InteractiveSession` (triggered by
+`rocpd analyze -i db.db --interactive` **without** a `"<app_command>"` string).
+
+`WorkflowSession` (7-phase workflow, triggered by `rocpd analyze --interactive "<app>"`)
+starts fresh each invocation. It does not support session resume.
+
+**How resume works:**
+
+1. The session ID (format: `YYYY-MM-DD_HH-MM-SS_<source_dir_basename>`) is passed to
+   `InteractiveSession(resume_session_id=...)`.
+2. `_init_session(resume_id)` loads the session JSON from `~/.rocpd/sessions/`.
+3. `_restore_or_create_conv(loaded)` reconstructs the `LLMConversation` from the
+   serialized `loaded.conversation` dict via `LLMConversation.from_dict()`.
+4. `_sent_source_files` is restored from `loaded.sent_source_files`.
+
+**Auto-detect (no `--resume-session` needed):** `_init_session` also calls
+`self._store.find_by_source_dir(self._source_dir)` and, if matching sessions exist,
+prompts the user to choose one. This means repeat invocations against the same
+`--source-dir` will automatically offer resume without needing the session ID.
+
+**Session ID discovery:**
+
+```bash
+ls ~/.rocpd/sessions/*.json | xargs -I{} python3 -c \
+    "import json; d=json.load(open('{}'));print(d['session_id'],'|',d['source_dir'])"
+```

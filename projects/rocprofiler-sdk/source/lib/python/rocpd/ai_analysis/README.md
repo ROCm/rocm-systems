@@ -504,6 +504,45 @@ The interactive session (`--interactive`) launches a menu-driven loop for iterat
 - On `[s]` save, the conversation state is serialized into the session file
 - On `--resume-session`, the conversation is restored so the LLM picks up exactly where it left off
 
+### Phase 1b: Quick workload analysis (WorkflowSession)
+
+Before presenting the initial profiling command in Phase 2, `WorkflowSession` runs a
+lightweight workload analysis to pick the best starter flags:
+
+1. **App-command heuristics** — always runs; inspects binary name and arguments:
+   - `python` + ML keywords (torch, jax, paddle…) → `python_ml`; adds `--hip-trace`
+   - `python` + LLM keywords (vllm, llama, gpt…) → `llm_inference`; adds `--hip-trace`
+   - `python` without ML → `python_generic`; adds `--hip-trace`
+   - MPI/Slurm launchers (`mpirun`, `srun`…) → warns about multi-rank capture limits
+   - Compiled HIP/ROCm binary → `hip_compute`; uses default flag set
+   - Multi-process patterns (torchrun, DDP, DeepSpeed) → warns about worker capture
+
+2. **Tier 0 source analysis** — if `--source-dir` was provided, runs `SourceAnalyzer`
+   on the source directory and extracts the recommended flags from its highest-priority
+   profiling recommendation; overrides the pure-heuristic flag set.
+
+3. **Fallback** — if neither source analysis nor heuristics yield specific flags, the
+   safe default is used: `--sys-trace --kernel-trace --memory-copy-trace --stats`.
+
+The analysis output is printed before the command box so the user can see what was
+detected and why specific flags were chosen. The user always confirms or edits the
+command in Phase 2.
+
+**Example output:**
+```
+── Quick Workload Analysis ──────────────────────────────────────
+  Detected: Python + ML framework (PyTorch / JAX / TF)
+  Source scan: 14 files, 3 kernels, model=hip_python
+  Source analysis suggests: rocprofv3 --sys-trace --hip-trace --kernel-trace --stats ...
+  Starter command basis: source analysis
+
+╭──────────────────────────────────────────────────────────────────╮
+│  Profiling Command                                               │
+│  rocprofv3 --sys-trace --hip-trace --kernel-trace --stats ...   │
+╰──────────────────────────────────────────────────────────────────╯
+  Would you like the interactive tool to run this command? [Y/n]
+```
+
 ### Cycle prevention and going deeper (WorkflowSession)
 
 The 7-phase `WorkflowSession` (`--interactive "<app>"`) automatically detects and
@@ -545,8 +584,13 @@ After the LLM responds to `[o]`, the session scans the response text for `rocpro
 
 Sessions are saved as JSON under `~/.rocpd/sessions/` by default.
 
+> **Note:** `--resume-session` applies only to **`InteractiveSession`** (the menu-driven
+> `[p]/[a]/[o]/[s]/[q]` mode, triggered by `rocpd analyze -i db.db --interactive` **without**
+> a `"<app_command>"` argument). `WorkflowSession` (7-phase workflow) starts a fresh state
+> each invocation and does not support resume.
+
 ```bash
-# Start a new session
+# Start a new InteractiveSession
 rocpd analyze -i output.db --interactive --llm anthropic
 
 # With private enterprise server
@@ -555,8 +599,17 @@ rocpd analyze -i output.db --interactive --llm private
 # Control compaction interval (default 10 turns)
 rocpd analyze -i output.db --interactive --llm anthropic --llm-compact-every 5
 
-# Resume an existing session (conversation, sent files, and edit history all restored)
-rocpd analyze -i output.db --interactive --resume-session 2026-03-10_my_app
+# List available session IDs (files in ~/.rocpd/sessions/)
+ls ~/.rocpd/sessions/*.json | xargs -I{} python3 -c \
+    "import json,sys; d=json.load(open('{}'));print(d['session_id'],'|',d['source_dir'])"
+
+# Resume an existing session — restores LLM conversation, sent files, and history
+# Session ID format: YYYY-MM-DD_HH-MM-SS_<source_dir_basename>
+rocpd analyze -i output.db --interactive --resume-session 2026-03-10_14-23-01_myapp
+
+# If the source dir matches a previous session, the tool auto-prompts to resume
+# (no --resume-session needed)
+rocpd analyze -i output.db --source-dir ./my_app --interactive
 ```
 
 ---
