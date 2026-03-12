@@ -654,6 +654,11 @@ ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipMemPrefetchBatchAsync_fn, 517);
 ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipOccupancyMaxPotentialClusterSize_fn, 518);
 ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipOccupancyMaxActiveClusters_fn, 519);
 #endif
+
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 28
+ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipMemGetDefaultMemPool_fn, 520);
+#endif
+
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION == 0
 ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 442)
 #elif HIP_RUNTIME_API_TABLE_STEP_VERSION == 1
@@ -710,6 +715,8 @@ ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 517)
 ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 518)
 #elif HIP_RUNTIME_API_TABLE_STEP_VERSION == 27
 ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 520)
+#elif HIP_RUNTIME_API_TABLE_STEP_VERSION == 28
+ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 521)
 #else
 INTERNAL_CI_ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 0)
 #endif

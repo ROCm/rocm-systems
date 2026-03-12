@@ -3212,3 +3212,9 @@ hipError_t hipKernelGetFunction(hipFunction_t* pFunc, hipKernel_t kernel) {
   return hip::GetHipDispatchTable()->hipKernelGetFunction_fn(pFunc, kernel) ;
   CATCH;
 }
+hipError_t hipMemGetDefaultMemPool(hipMemPool_t* memPool, hipMemLocation* location,
+                                   hipMemAllocationType type) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipMemGetDefaultMemPool_fn(memPool, location, type);
+  CATCH;
+}

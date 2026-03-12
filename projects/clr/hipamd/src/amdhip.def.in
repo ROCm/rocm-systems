@@ -535,4 +535,5 @@ hipKernelSetAttribute
 hipKernelGetFunction
 hipOccupancyMaxPotentialClusterSize
 hipOccupancyMaxActiveClusters
+hipMemGetDefaultMemPool
 @HSA_EXPORTS@

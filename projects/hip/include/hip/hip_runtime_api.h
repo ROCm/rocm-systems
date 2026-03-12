@@ -4543,6 +4543,17 @@ hipError_t hipMemSetMemPool(hipMemLocation* location, hipMemAllocationType type,
  */
 hipError_t hipMemGetMemPool(hipMemPool_t* pool, hipMemLocation* location,
                             hipMemAllocationType type);
+
+/**
+ * @brief Returns the default memory pool for a given location and allocation type
+ * 
+ * @param [out] memPool
+ * @param [in] location
+ * @param [in] type
+ */
+hipError_t hipMemGetDefaultMemPool(hipMemPool_t* memPool, hipMemLocation* location,
+                                   hipMemAllocationType type);
+
 // Doxygen end of ordered memory allocator
 /**
  * @}
