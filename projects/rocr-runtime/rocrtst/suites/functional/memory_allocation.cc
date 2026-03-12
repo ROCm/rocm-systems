@@ -540,7 +540,10 @@ void MemoryAllocationTest::MemoryAllocateContiguousTest(hsa_agent_t agent,
                                                    &importedPtr, 0, NULL));
 
   ASSERT_NE(importedPtr, nullptr);
-  ASSERT_EQ(importedSz, alloc_size);
+  // When there's an offset in the DMA buffer export, the imported size includes
+  // the offset, so importedSz >= alloc_size. The actual memory region starts at
+  // (importedPtr + offset) with size alloc_size.
+  ASSERT_GE(importedSz, alloc_size);
 
   close(dmabuf);
 
