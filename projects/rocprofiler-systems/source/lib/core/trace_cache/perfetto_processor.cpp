@@ -126,37 +126,6 @@ using amd_smi_nic_rx_ucast_pkts_track =
 using amd_smi_nic_tx_ucast_pkts_track =
     perfetto_counter_track<category::amd_smi_nic_tx_ucast_pkts>;
 
-void
-setup_amd_smi_tracks(const uint32_t _device_id, bool is_busy_enabled,
-                     bool is_temp_enabled, bool is_power_enabled,
-                     bool is_mem_usage_enabled)
-{
-    if(amd_smi_gfx_track::exists(_device_id)) return;
-
-    auto make_track_name = [&](const char* metric) {
-        return fmt::format("GPU [{}] {} (S)", _device_id, metric);
-    };
-
-    if(is_busy_enabled)
-    {
-        amd_smi_gfx_track::emplace(_device_id, make_track_name("GFX Busy"), "%");
-        amd_smi_umc_track::emplace(_device_id, make_track_name("UMC Busy"), "%");
-        amd_smi_mm_track::emplace(_device_id, make_track_name("MM Busy"), "%");
-    }
-    if(is_temp_enabled)
-    {
-        amd_smi_temp_track::emplace(_device_id, make_track_name("Temperature"), "deg C");
-    }
-    if(is_power_enabled)
-    {
-        amd_smi_power_track::emplace(_device_id, make_track_name("Power"), "W");
-    }
-    if(is_mem_usage_enabled)
-    {
-        amd_smi_mem_track::emplace(_device_id, make_track_name("Memory Usage"), "MB");
-    }
-}
-
 template <typename Category>
 void
 write_sampling_track_data(const struct backtrace_region_sample& _sample,
@@ -1024,70 +993,88 @@ perfetto_processor_t::handle([[maybe_unused]] const pmc_event_with_sample& _pmc)
     }
 }
 
+#if ROCPROFSYS_USE_ROCM > 0
 void
-perfetto_processor_t::handle([[maybe_unused]] const amd_smi_sample& _amd_smi)
+perfetto_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& _gpu_pmc)
 {
-    // Use the shared gpu_metrics_t from core/gpu_metrics.hpp
-    using gpu_metrics_t = gpu::gpu_metrics_t;
+    auto _ts        = _gpu_pmc.timestamp;
+    auto _device_id = _gpu_pmc.device_id;
 
-    using pos = trace_cache::amd_smi_sample::settings_positions;
-    std::bitset<16> settings_bits(_amd_smi.settings);
-    bool            is_busy_enabled  = settings_bits.test(static_cast<int>(pos::busy));
-    bool            is_temp_enabled  = settings_bits.test(static_cast<int>(pos::temp));
-    bool            is_power_enabled = settings_bits.test(static_cast<int>(pos::power));
-    bool is_mem_usage_enabled = settings_bits.test(static_cast<int>(pos::mem_usage));
-    bool is_vcn_enabled       = settings_bits.test(static_cast<int>(pos::vcn_activity));
-    bool is_jpeg_enabled      = settings_bits.test(static_cast<int>(pos::jpeg_activity));
-    bool is_xgmi_enabled      = settings_bits.test(static_cast<int>(pos::xgmi));
-    bool is_pcie_enabled      = settings_bits.test(static_cast<int>(pos::pcie));
-    bool is_sdma_enabled      = settings_bits.test(static_cast<int>(pos::sdma_usage));
+    // Helper to create track names
+    auto make_track_name = [&](const char* metric) {
+        return fmt::format("GPU [{}] {} (S)", _device_id, metric);
+    };
 
-    auto _ts        = _amd_smi.timestamp;
-    auto _device_id = _amd_smi.device_id;
-
-    setup_amd_smi_tracks(_device_id, is_busy_enabled, is_temp_enabled, is_power_enabled,
-                         is_mem_usage_enabled);
-
-    if(is_busy_enabled)
+    if(_gpu_pmc.enabled_metric.bits.gfx_activity)
     {
+        if(!amd_smi_gfx_track::exists(_device_id))
+            amd_smi_gfx_track::emplace(_device_id, make_track_name("GFX Busy"), "%");
+        if(!amd_smi_umc_track::exists(_device_id))
+            amd_smi_umc_track::emplace(_device_id, make_track_name("UMC Busy"), "%");
+        if(!amd_smi_mm_track::exists(_device_id))
+            amd_smi_mm_track::emplace(_device_id, make_track_name("MM Busy"), "%");
+
         TRACE_COUNTER("device_busy_gfx", amd_smi_gfx_track::at(_device_id, 0), _ts,
-                      _amd_smi.gfx_activity);
+                      static_cast<double>(_gpu_pmc.metric_values.gfx_activity));
         TRACE_COUNTER("device_busy_umc", amd_smi_umc_track::at(_device_id, 0), _ts,
-                      _amd_smi.umc_activity);
+                      static_cast<double>(_gpu_pmc.metric_values.umc_activity));
         TRACE_COUNTER("device_busy_mm", amd_smi_mm_track::at(_device_id, 0), _ts,
-                      _amd_smi.mm_activity);
+                      static_cast<double>(_gpu_pmc.metric_values.mm_activity));
     }
-    if(is_temp_enabled)
+    if(_gpu_pmc.enabled_metric.bits.hotspot_temperature ||
+       _gpu_pmc.enabled_metric.bits.edge_temperature)
     {
-        TRACE_COUNTER("device_temp", amd_smi_temp_track::at(_device_id, 0), _ts,
-                      _amd_smi.temperature);
+        if(!amd_smi_temp_track::exists(_device_id))
+            amd_smi_temp_track::emplace(_device_id, make_track_name("Temperature"),
+                                        "deg C");
+
+        const double temp = _gpu_pmc.enabled_metric.bits.hotspot_temperature
+                                ? _gpu_pmc.metric_values.hotspot_temperature
+                                : _gpu_pmc.metric_values.edge_temperature;
+        TRACE_COUNTER("device_temp", amd_smi_temp_track::at(_device_id, 0), _ts, temp);
     }
-    if(is_power_enabled)
+    if(_gpu_pmc.enabled_metric.bits.current_socket_power ||
+       _gpu_pmc.enabled_metric.bits.average_socket_power)
     {
-        TRACE_COUNTER("device_power", amd_smi_power_track::at(_device_id, 0), _ts,
-                      _amd_smi.power);
+        if(!amd_smi_power_track::exists(_device_id))
+            amd_smi_power_track::emplace(_device_id, make_track_name("Current Power"),
+                                         "watts");
+
+        const double power = _gpu_pmc.enabled_metric.bits.average_socket_power
+                                 ? _gpu_pmc.metric_values.average_socket_power
+                                 : _gpu_pmc.metric_values.current_socket_power;
+        TRACE_COUNTER("device_power", amd_smi_power_track::at(_device_id, 0), _ts, power);
     }
-    if(is_mem_usage_enabled)
+    if(_gpu_pmc.enabled_metric.bits.memory_usage)
     {
-        double mem_mb = _amd_smi.mem_usage / static_cast<double>(units::megabyte);
+        if(!amd_smi_mem_track::exists(_device_id))
+            amd_smi_mem_track::emplace(_device_id, make_track_name("Memory Usage"),
+                                       "megabytes");
+
+        double mem_mb =
+            _gpu_pmc.metric_values.memory_usage / static_cast<double>(units::megabyte);
         TRACE_COUNTER("device_memory_usage", amd_smi_mem_track::at(_device_id, 0), _ts,
                       mem_mb);
     }
 
-    if(!is_vcn_enabled && !is_jpeg_enabled && !is_xgmi_enabled && !is_pcie_enabled &&
-       !is_sdma_enabled)
+    if(_gpu_pmc.enabled_metric.bits.sdma_usage)
+    {
+        if(!amd_smi_sdma_track::exists(_device_id))
+            amd_smi_sdma_track::emplace(_device_id, make_track_name("SDMA Usage"), "%");
+
+        TRACE_COUNTER("device_sdma_usage", amd_smi_sdma_track::at(_device_id, 0), _ts,
+                      static_cast<double>(_gpu_pmc.metric_values.sdma_usage));
+    }
+
+    if(!_gpu_pmc.enabled_metric.bits.vcn_activity &&
+       !_gpu_pmc.enabled_metric.bits.jpeg_activity &&
+       !_gpu_pmc.enabled_metric.bits.xgmi && !_gpu_pmc.enabled_metric.bits.pcie)
         return;
 
-    gpu_metrics_t                   gpu_metrics;
-    gpu::gpu_metrics_capabilities_t capabilities;
-    gpu::deserialize_gpu_metrics(_amd_smi.gpu_activity, gpu_metrics, is_vcn_enabled,
-                                 is_jpeg_enabled, is_xgmi_enabled, is_pcie_enabled,
-                                 capabilities);
-
     // Helper lambda to insert VCN/JPEG activity metrics
-    auto insert_decode_vector_metrics = [&](auto category, bool _is_enabled,
-                                            const std::vector<uint16_t>& data,
-                                            std::optional<size_t> _idx = std::nullopt) {
+    auto insert_decode_array_metrics = [&](auto category, bool _is_enabled,
+                                           const auto& data, size_t data_size,
+                                           std::optional<size_t> _idx = std::nullopt) {
         if(!_is_enabled) return;
 
         using Category = std::decay_t<decltype(category)>;
@@ -1100,7 +1087,7 @@ perfetto_processor_t::handle([[maybe_unused]] const amd_smi_sample& _amd_smi)
         else
             metric_name = trait::name<Category>::value;
 
-        for(size_t i = 0; i < data.size(); ++i)
+        for(size_t i = 0; i < data_size; ++i)
         {
             const auto value = data[i];
             if(value == std::numeric_limits<uint16_t>::max()) continue;
@@ -1150,123 +1137,90 @@ perfetto_processor_t::handle([[maybe_unused]] const amd_smi_sample& _amd_smi)
         }
     };
 
-    auto insert_xgmi_vector_metrics = [&](auto category, bool _is_enabled,
-                                          const std::vector<uint64_t>& data) {
-        if(!_is_enabled) return;
-
-        using Category = std::decay_t<decltype(category)>;
-
-        for(size_t i = 0; i < data.size(); ++i)
-        {
-            const auto value = data[i];
-            if(value == std::numeric_limits<uint64_t>::max()) continue;
-
-            std::string track_name = fmt::format("GPU [{}] {} [{:02}] (S)", _device_id,
-                                                 trait::name<Category>::value, i);
-
-            auto unique_key = (_device_id << 8) | i;
-
-            if constexpr(std::is_same_v<Category, category::amd_smi_xgmi_read_data>)
-            {
-                if(!amd_smi_xgmi_read_track::exists(unique_key))
-                {
-                    amd_smi_xgmi_read_track::emplace(unique_key, track_name, "bytes");
-                }
-                TRACE_COUNTER("device_xgmi_read_data",
-                              amd_smi_xgmi_read_track::at(unique_key, 0), _ts,
-                              static_cast<double>(value));
-            }
-            else if constexpr(std::is_same_v<Category, category::amd_smi_xgmi_write_data>)
-            {
-                if(!amd_smi_xgmi_write_track::exists(unique_key))
-                {
-                    amd_smi_xgmi_write_track::emplace(unique_key, track_name, "bytes");
-                }
-                TRACE_COUNTER("device_xgmi_write_data",
-                              amd_smi_xgmi_write_track::at(unique_key, 0), _ts,
-                              static_cast<double>(value));
-            }
-        }
-    };
-
-    // Insert VCN activity metrics
-    if(capabilities.flags.vcn_is_device_level_only)
+    if(_gpu_pmc.enabled_metric.bits.vcn_activity)
     {
-        insert_decode_vector_metrics(category::amd_smi_vcn_activity{}, is_vcn_enabled,
-                                     gpu_metrics.vcn_activity, std::nullopt);
-    }
-    else
-    {
-        for(size_t xcp = 0; xcp < gpu_metrics.vcn_busy.size(); ++xcp)
+        for(size_t xcp = 0; xcp < AMDSMI_MAX_NUM_XCP; ++xcp)
         {
-            insert_decode_vector_metrics(category::amd_smi_vcn_activity{}, is_vcn_enabled,
-                                         gpu_metrics.vcn_busy[xcp], xcp);
+            insert_decode_array_metrics(category::amd_smi_vcn_activity{}, true,
+                                        _gpu_pmc.metric_values.xcp_stats[xcp].vcn_busy,
+                                        AMDSMI_MAX_NUM_VCN, xcp);
         }
     }
 
-    // Insert JPEG activity metrics
-    if(capabilities.flags.jpeg_is_device_level_only)
+    if(_gpu_pmc.enabled_metric.bits.jpeg_activity)
     {
-        insert_decode_vector_metrics(category::amd_smi_jpeg_activity{}, is_jpeg_enabled,
-                                     gpu_metrics.jpeg_activity, std::nullopt);
-    }
-    else
-    {
-        for(size_t xcp = 0; xcp < gpu_metrics.jpeg_busy.size(); ++xcp)
+        for(size_t xcp = 0; xcp < AMDSMI_MAX_NUM_XCP; ++xcp)
         {
-            insert_decode_vector_metrics(category::amd_smi_jpeg_activity{},
-                                         is_jpeg_enabled, gpu_metrics.jpeg_busy[xcp],
-                                         xcp);
+            insert_decode_array_metrics(category::amd_smi_jpeg_activity{}, true,
+                                        _gpu_pmc.metric_values.xcp_stats[xcp].jpeg_busy,
+                                        ROCPROFSYS_MAX_NUM_JPEG_ENGINES, xcp);
         }
     }
 
-    // Insert XGMI metrics
-    if(is_xgmi_enabled)
+    if(_gpu_pmc.enabled_metric.bits.xgmi)
     {
-        auto make_track_name = [&](const char* metric) {
-            return fmt::format("GPU [{}] {} (S)", _device_id, metric);
-        };
-
         if(!amd_smi_xgmi_link_width_track::exists(_device_id))
         {
             amd_smi_xgmi_link_width_track::emplace(
-                _device_id, make_track_name("XGMI Link Width"), "");
+                _device_id, make_track_name("XGMI Link Width"), "lanes");
         }
         TRACE_COUNTER("device_xgmi_link_width",
                       amd_smi_xgmi_link_width_track::at(_device_id, 0), _ts,
-                      static_cast<double>(gpu_metrics.xgmi_link_width));
+                      static_cast<double>(_gpu_pmc.metric_values.xgmi.link.width));
 
         if(!amd_smi_xgmi_link_speed_track::exists(_device_id))
         {
             amd_smi_xgmi_link_speed_track::emplace(
-                _device_id, make_track_name("XGMI Link Speed"), "MT/s");
+                _device_id, make_track_name("XGMI Link Speed"), "Mbps");
         }
         TRACE_COUNTER("device_xgmi_link_speed",
                       amd_smi_xgmi_link_speed_track::at(_device_id, 0), _ts,
-                      static_cast<double>(gpu_metrics.xgmi_link_speed));
+                      static_cast<double>(_gpu_pmc.metric_values.xgmi.link.speed));
 
-        insert_xgmi_vector_metrics(category::amd_smi_xgmi_read_data{}, is_xgmi_enabled,
-                                   gpu_metrics.xgmi_read_data_acc);
+        for(size_t link = 0; link < AMDSMI_MAX_NUM_XGMI_LINKS; ++link)
+        {
+            const auto read_val = _gpu_pmc.metric_values.xgmi.data_acc.read[link];
+            if(read_val != std::numeric_limits<uint64_t>::max())
+            {
+                std::string track_name =
+                    fmt::format("GPU [{}] XGMI Read Data [{:02}] (S)", _device_id, link);
+                auto unique_key = (_device_id << 8) | link;
+                if(!amd_smi_xgmi_read_track::exists(unique_key))
+                {
+                    amd_smi_xgmi_read_track::emplace(unique_key, track_name, "KB");
+                }
+                TRACE_COUNTER("device_xgmi_read_data",
+                              amd_smi_xgmi_read_track::at(unique_key, 0), _ts,
+                              static_cast<double>(read_val));
+            }
 
-        insert_xgmi_vector_metrics(category::amd_smi_xgmi_write_data{}, is_xgmi_enabled,
-                                   gpu_metrics.xgmi_write_data_acc);
+            const auto write_val = _gpu_pmc.metric_values.xgmi.data_acc.write[link];
+            if(write_val != std::numeric_limits<uint64_t>::max())
+            {
+                std::string track_name =
+                    fmt::format("GPU [{}] XGMI Write Data [{:02}] (S)", _device_id, link);
+                auto unique_key = (_device_id << 8) | link;
+                if(!amd_smi_xgmi_write_track::exists(unique_key))
+                {
+                    amd_smi_xgmi_write_track::emplace(unique_key, track_name, "KB");
+                }
+                TRACE_COUNTER("device_xgmi_write_data",
+                              amd_smi_xgmi_write_track::at(unique_key, 0), _ts,
+                              static_cast<double>(write_val));
+            }
+        }
     }
 
-    // Insert PCIe metrics
-    if(is_pcie_enabled)
+    if(_gpu_pmc.enabled_metric.bits.pcie)
     {
-        auto make_track_name = [&](const char* metric) {
-            return fmt::format("GPU [{}] {} (S)", _device_id, metric);
-        };
-
         if(!amd_smi_pcie_link_width_track::exists(_device_id))
         {
             amd_smi_pcie_link_width_track::emplace(
-                _device_id, make_track_name("PCIe Link Width"), "");
+                _device_id, make_track_name("PCIe Link Width"), "lanes");
         }
         TRACE_COUNTER("device_pcie_link_width",
                       amd_smi_pcie_link_width_track::at(_device_id, 0), _ts,
-                      static_cast<double>(gpu_metrics.pcie_link_width));
+                      static_cast<double>(_gpu_pmc.metric_values.pcie.link.width));
 
         if(!amd_smi_pcie_link_speed_track::exists(_device_id))
         {
@@ -1275,7 +1229,7 @@ perfetto_processor_t::handle([[maybe_unused]] const amd_smi_sample& _amd_smi)
         }
         TRACE_COUNTER("device_pcie_link_speed",
                       amd_smi_pcie_link_speed_track::at(_device_id, 0), _ts,
-                      static_cast<double>(gpu_metrics.pcie_link_speed));
+                      static_cast<double>(_gpu_pmc.metric_values.pcie.link.speed));
 
         if(!amd_smi_pcie_bandwidth_acc_track::exists(_device_id))
         {
@@ -1284,30 +1238,103 @@ perfetto_processor_t::handle([[maybe_unused]] const amd_smi_sample& _amd_smi)
         }
         TRACE_COUNTER("device_pcie_bandwidth_acc",
                       amd_smi_pcie_bandwidth_acc_track::at(_device_id, 0), _ts,
-                      static_cast<double>(gpu_metrics.pcie_bandwidth_acc));
+                      static_cast<double>(_gpu_pmc.metric_values.pcie.bandwidth.acc));
 
         if(!amd_smi_pcie_bandwidth_inst_track::exists(_device_id))
         {
             amd_smi_pcie_bandwidth_inst_track::emplace(
-                _device_id, make_track_name("PCIe Bandwidth Inst"), "bytes");
+                _device_id, make_track_name("PCIe Bandwidth Inst"), "bytes/s");
         }
         TRACE_COUNTER("device_pcie_bandwidth_inst",
                       amd_smi_pcie_bandwidth_inst_track::at(_device_id, 0), _ts,
-                      static_cast<double>(gpu_metrics.pcie_bandwidth_inst));
-    }
-
-    // Output SDMA usage
-    if(is_sdma_enabled)
-    {
-        if(!amd_smi_sdma_track::exists(_device_id))
-        {
-            auto track_name = fmt::format("GPU [{}] SDMA Usage (S)", _device_id);
-            amd_smi_sdma_track::emplace(_device_id, track_name, "%");
-        }
-        TRACE_COUNTER("device_sdma_usage", amd_smi_sdma_track::at(_device_id, 0), _ts,
-                      static_cast<double>(_amd_smi.sdma_usage));
+                      static_cast<double>(_gpu_pmc.metric_values.pcie.bandwidth.inst));
     }
 }
+
+void
+perfetto_processor_t::handle([[maybe_unused]] const ainic_sample& _nic_sample)
+{
+    static int call_count = 0;
+    if(call_count++ < 3)
+    {
+        fprintf(stderr,
+                "[perfetto_processor] handle ainic_sample: device=%u, ts=%lu, "
+                "enabled=%u, rx_bytes=%lu, tx_bytes=%lu\n",
+                _nic_sample.device_id, (unsigned long) _nic_sample.timestamp,
+                _nic_sample.enabled_metric.value,
+                (unsigned long) _nic_sample.metric_values.rx_rdma_ucast_bytes,
+                (unsigned long) _nic_sample.metric_values.tx_rdma_ucast_bytes);
+    }
+
+    auto _ts        = _nic_sample.timestamp;
+    auto _device_id = _nic_sample.device_id;
+
+    // Helper to create track names
+    auto make_track_name = [&](const char* metric) {
+        return fmt::format("NIC [{}] {} (S)", _device_id, metric);
+    };
+
+    if(_nic_sample.enabled_metric.bits.rx_rdma_ucast_bytes)
+    {
+        if(!amd_smi_nic_rx_ucast_bytes_track::exists(_device_id))
+            amd_smi_nic_rx_ucast_bytes_track::emplace(
+                _device_id, make_track_name("RX RDMA Bytes"), "bytes");
+        TRACE_COUNTER(trait::name<category::amd_smi_nic_rx_ucast_bytes>::value,
+                      amd_smi_nic_rx_ucast_bytes_track::at(_device_id, 0), _ts,
+                      static_cast<double>(_nic_sample.metric_values.rx_rdma_ucast_bytes));
+    }
+
+    if(_nic_sample.enabled_metric.bits.tx_rdma_ucast_bytes)
+    {
+        if(!amd_smi_nic_tx_ucast_bytes_track::exists(_device_id))
+            amd_smi_nic_tx_ucast_bytes_track::emplace(
+                _device_id, make_track_name("TX RDMA Bytes"), "bytes");
+        TRACE_COUNTER(trait::name<category::amd_smi_nic_tx_ucast_bytes>::value,
+                      amd_smi_nic_tx_ucast_bytes_track::at(_device_id, 0), _ts,
+                      static_cast<double>(_nic_sample.metric_values.tx_rdma_ucast_bytes));
+    }
+
+    if(_nic_sample.enabled_metric.bits.rx_rdma_ucast_pkts)
+    {
+        if(!amd_smi_nic_rx_ucast_pkts_track::exists(_device_id))
+            amd_smi_nic_rx_ucast_pkts_track::emplace(
+                _device_id, make_track_name("RX RDMA Packets"), "packets");
+        TRACE_COUNTER(trait::name<category::amd_smi_nic_rx_ucast_pkts>::value,
+                      amd_smi_nic_rx_ucast_pkts_track::at(_device_id, 0), _ts,
+                      static_cast<double>(_nic_sample.metric_values.rx_rdma_ucast_pkts));
+    }
+
+    if(_nic_sample.enabled_metric.bits.tx_rdma_ucast_pkts)
+    {
+        if(!amd_smi_nic_tx_ucast_pkts_track::exists(_device_id))
+            amd_smi_nic_tx_ucast_pkts_track::emplace(
+                _device_id, make_track_name("TX RDMA Packets"), "packets");
+        TRACE_COUNTER(trait::name<category::amd_smi_nic_tx_ucast_pkts>::value,
+                      amd_smi_nic_tx_ucast_pkts_track::at(_device_id, 0), _ts,
+                      static_cast<double>(_nic_sample.metric_values.tx_rdma_ucast_pkts));
+    }
+
+    if(_nic_sample.enabled_metric.bits.rx_rdma_cnp_pkts)
+    {
+        if(!amd_smi_nic_rx_cnp_pkts_track::exists(_device_id))
+            amd_smi_nic_rx_cnp_pkts_track::emplace(
+                _device_id, make_track_name("RX CNP Packets"), "packets");
+        TRACE_COUNTER(trait::name<category::amd_smi_nic_rx_cnp_pkts>::value,
+                      amd_smi_nic_rx_cnp_pkts_track::at(_device_id, 0), _ts,
+                      static_cast<double>(_nic_sample.metric_values.rx_rdma_cnp_pkts));
+    }
+
+    if(_nic_sample.enabled_metric.bits.tx_rdma_cnp_pkts)
+    {
+        if(!amd_smi_nic_tx_cnp_pkts_track::exists(_device_id))
+            amd_smi_nic_tx_cnp_pkts_track::emplace(
+                _device_id, make_track_name("TX CNP Packets"), "packets");
+        TRACE_COUNTER(trait::name<category::amd_smi_nic_tx_cnp_pkts>::value,
+                      amd_smi_nic_tx_cnp_pkts_track::at(_device_id, 0), _ts,
+                      static_cast<double>(_nic_sample.metric_values.tx_rdma_cnp_pkts));
+    }
+}
+#endif
 
 void
 perfetto_processor_t::handle([[maybe_unused]] const in_time_sample& _sample)
@@ -1319,69 +1346,6 @@ perfetto_processor_t::handle([[maybe_unused]] const in_time_sample& _sample)
                   _sample.category_enum_id);
         write_in_time_sample_data(category::user{}, _sample, m_use_annotations);
     }
-}
-
-void
-perfetto_processor_t::handle(const ainic_sample& _ainic)
-{
-    auto _ts        = _ainic.timestamp;
-    auto _nic_index = _ainic.nic_index;
-
-    const auto& nic_agent = m_agent_manager.get_agent_by_id(_nic_index, agent_type::NIC);
-    const auto* nic_name  = nic_agent.name.c_str();
-
-    if(!amd_smi_nic_rx_cnp_pkts_track::exists(_nic_index))
-    {
-        amd_smi_nic_rx_cnp_pkts_track::emplace(
-            _nic_index,
-            info::annotate_with_nic<category::amd_smi_nic_rx_cnp_pkts>(nic_name,
-                                                                       _nic_index),
-            "packets");
-        amd_smi_nic_tx_cnp_pkts_track::emplace(
-            _nic_index,
-            info::annotate_with_nic<category::amd_smi_nic_tx_cnp_pkts>(nic_name,
-                                                                       _nic_index),
-            "packets");
-        amd_smi_nic_rx_ucast_bytes_track::emplace(
-            _nic_index,
-            info::annotate_with_nic<category::amd_smi_nic_rx_ucast_bytes>(nic_name,
-                                                                          _nic_index),
-            "bytes");
-        amd_smi_nic_tx_ucast_bytes_track::emplace(
-            _nic_index,
-            info::annotate_with_nic<category::amd_smi_nic_tx_ucast_bytes>(nic_name,
-                                                                          _nic_index),
-            "bytes");
-        amd_smi_nic_rx_ucast_pkts_track::emplace(
-            _nic_index,
-            info::annotate_with_nic<category::amd_smi_nic_rx_ucast_pkts>(nic_name,
-                                                                         _nic_index),
-            "packets");
-        amd_smi_nic_tx_ucast_pkts_track::emplace(
-            _nic_index,
-            info::annotate_with_nic<category::amd_smi_nic_tx_ucast_pkts>(nic_name,
-                                                                         _nic_index),
-            "packets");
-    }
-
-    TRACE_COUNTER(trait::name<category::amd_smi_nic_rx_cnp_pkts>::value,
-                  amd_smi_nic_rx_cnp_pkts_track::at(_nic_index, 0), _ts,
-                  static_cast<double>(_ainic.rx_rdma_cnp_pkts));
-    TRACE_COUNTER(trait::name<category::amd_smi_nic_tx_cnp_pkts>::value,
-                  amd_smi_nic_tx_cnp_pkts_track::at(_nic_index, 0), _ts,
-                  static_cast<double>(_ainic.tx_rdma_cnp_pkts));
-    TRACE_COUNTER(trait::name<category::amd_smi_nic_rx_ucast_bytes>::value,
-                  amd_smi_nic_rx_ucast_bytes_track::at(_nic_index, 0), _ts,
-                  static_cast<double>(_ainic.rx_ucast_bytes));
-    TRACE_COUNTER(trait::name<category::amd_smi_nic_tx_ucast_bytes>::value,
-                  amd_smi_nic_tx_ucast_bytes_track::at(_nic_index, 0), _ts,
-                  static_cast<double>(_ainic.tx_ucast_bytes));
-    TRACE_COUNTER(trait::name<category::amd_smi_nic_rx_ucast_pkts>::value,
-                  amd_smi_nic_rx_ucast_pkts_track::at(_nic_index, 0), _ts,
-                  static_cast<double>(_ainic.rx_ucast_pkts));
-    TRACE_COUNTER(trait::name<category::amd_smi_nic_tx_ucast_pkts>::value,
-                  amd_smi_nic_tx_ucast_pkts_track::at(_nic_index, 0), _ts,
-                  static_cast<double>(_ainic.tx_ucast_pkts));
 }
 
 }  // namespace trace_cache

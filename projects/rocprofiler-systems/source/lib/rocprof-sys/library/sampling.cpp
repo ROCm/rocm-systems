@@ -32,12 +32,12 @@
 #include "core/state.hpp"
 #include "core/trace_cache/cache_manager.hpp"
 #include "core/utility.hpp"
-#include "library/amd_smi.hpp"
 #include "library/components/backtrace.hpp"
 #include "library/components/backtrace_metrics.hpp"
 #include "library/components/backtrace_timestamp.hpp"
 #include "library/components/callchain.hpp"
 #include "library/perf.hpp"
+#include "library/pmc/sampler.hpp"
 #include "library/runtime.hpp"
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
@@ -1904,14 +1904,14 @@ void
 postfork_parent_reinit()
 {
     if(config::get_use_process_sampling() && config::get_use_amd_smi())
-        amd_smi::postfork_parent_reinit();
+        pmc::postfork_parent_reinit();
 }
 
 void
 postfork_child_cleanup()
 {
     if(config::get_use_process_sampling() && config::get_use_amd_smi())
-        amd_smi::postfork_child_cleanup();
+        pmc::postfork_child_cleanup();
 }
 }  // namespace sampling
 }  // namespace rocprofsys

@@ -47,8 +47,8 @@ agent_manager::insert_agent(agent& _agent)
     _agent.device_type_index = _agent_counts[_agent.type]++;
     _agents.emplace_back(std::make_shared<agent>(_agent));
 
-    LOG_TRACE("Inserting agent with device handle: {}, and agent id: {}, device type: {}",
-              _agent.device_id, _agent.device_type_index, to_string(_agent.type));
+    LOG_INFO("Inserting agent with device handle: {}, and agent id: {}, device type: {}",
+             _agent.device_id, _agent.device_type_index, to_string(_agent.type));
 }
 
 const agent&

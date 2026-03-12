@@ -22,8 +22,8 @@
 
 #include "library/process_sampler.hpp"
 #include "core/config.hpp"
-#include "library/amd_smi.hpp"
 #include "library/cpu_freq.hpp"
+#include "library/pmc/sampler.hpp"
 #include "library/runtime.hpp"
 
 #include "logger/debug.hpp"
@@ -140,12 +140,13 @@ sampler::setup()
 
     if(get_use_amd_smi())
     {
-        auto& _amd_smi         = instances.emplace_back(std::make_unique<instance>());
-        _amd_smi->setup        = []() { amd_smi::setup(); };
-        _amd_smi->shutdown     = []() { amd_smi::shutdown(); };
-        _amd_smi->post_process = []() { amd_smi::post_process(); };
-        _amd_smi->config       = []() { amd_smi::config(); };
-        _amd_smi->sample       = []() { amd_smi::sample(); };
+        LOG_DEBUG("Setting up PMC sampling.");
+        auto& _pmc         = instances.emplace_back(std::make_unique<instance>());
+        _pmc->setup        = []() { pmc::setup(); };
+        _pmc->shutdown     = []() { pmc::shutdown(); };
+        _pmc->post_process = []() { pmc::post_process(); };
+        _pmc->config       = []() { pmc::config(); };
+        _pmc->sample       = []() { pmc::sample(); };
     }
 
     if(get_cpu_freq_enabled())
