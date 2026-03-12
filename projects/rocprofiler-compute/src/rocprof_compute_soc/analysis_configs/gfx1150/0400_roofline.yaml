@@ -1,5 +1,5 @@
 # =============================================================================
-# StrixHalo (gfx1150) - RDNA3.5 Roofline Performance Metrics
+# RDNA3.5 (gfx1150) - RDNA3.5 Roofline Performance Metrics
 # =============================================================================
 # RDNA3.5 uses standard VALU FLOPs (no MFMA/XDL matrix units)
 # Cache hierarchy: TCP (L0) -> GL1C (L1) -> GL2C (L2) -> System Memory
@@ -32,10 +32,11 @@ Panel Config:
           value: AVG((($wave_size * (SQ_INSTS_VALU_DP_sum)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
           unit: GFLOP/s
           peak: $FP64Flops_empirical_peak
-        System Memory Bandwidth:
-          value: AVG(((GL2C_EA_RDREQ_128B_sum * 128 + GL2C_EA_RDREQ_32B_sum * 32 + GL2C_EA_RDREQ_64B_sum * 64 + GL2C_EA_WRREQ_64B_sum * 64 + ((GL2C_EA_WRREQ_sum - GL2C_EA_WRREQ_64B_sum) * 32)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
-          unit: GB/s
-          peak: $SysMemBw_empirical_peak
+        # Fixme: GL2C_EA_WRREQ_sum not available - commenting out metric
+        # System Memory Bandwidth:
+        #   value: AVG(((GL2C_EA_RDREQ_128B_sum * 128 + GL2C_EA_RDREQ_32B_sum * 32 + GL2C_EA_RDREQ_64B_sum * 64 + GL2C_EA_WRREQ_64B_sum * 64 + ((GL2C_EA_WRREQ_sum - GL2C_EA_WRREQ_64B_sum) * 32)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+        #   unit: GB/s
+        #   peak: $SysMemBw_empirical_peak
         GL2 Cache Bandwidth:
           value: AVG(((GL1C_GL2_REQ_READ_sum * 128 + GL1C_GL2_REQ_WRITE_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
           unit: GB/s
@@ -63,9 +64,10 @@ Panel Config:
         value: Value
         unit: Unit
       metric:
-        AI System Memory:
-          value: ( SUM($wave_size * SQ_INSTS_VALU_sum) / SUM((GL2C_EA_RDREQ_128B_sum * 128) + (GL2C_EA_RDREQ_32B_sum * 32) + (GL2C_EA_RDREQ_64B_sum * 64) + (GL2C_EA_WRREQ_64B_sum * 64) + ((GL2C_EA_WRREQ_sum - GL2C_EA_WRREQ_64B_sum) * 32)) )
-          unit: FLOPs/Byte
+        # Fixme: GL2C_EA_WRREQ_sum not available - commenting out metric
+        # AI System Memory:
+        #   value: ( SUM($wave_size * SQ_INSTS_VALU_sum) / SUM((GL2C_EA_RDREQ_128B_sum * 128) + (GL2C_EA_RDREQ_32B_sum * 32) + (GL2C_EA_RDREQ_64B_sum * 64) + (GL2C_EA_WRREQ_64B_sum * 64) + ((GL2C_EA_WRREQ_sum - GL2C_EA_WRREQ_64B_sum) * 32)) )
+        #   unit: FLOPs/Byte
         AI GL2:
           value: ( SUM($wave_size * SQ_INSTS_VALU_sum) / SUM((GL1C_GL2_REQ_READ_sum * 128) + (GL1C_GL2_REQ_WRITE_sum * 64)) )
           unit: FLOPs/Byte
@@ -95,11 +97,12 @@ Panel Config:
       FP64 throughput is typically 1/16 or 1/32 of FP32 on RDNA3.5 consumer parts.
       This is presented with the value of the peak empirical F64 FLOPs achievable
       on the specific accelerator.
-    System Memory Bandwidth: >-
-      The total number of bytes read from and written to system memory per second.
-      StrixHalo is an APU that uses system memory (DDR5/LPDDR5) instead of HBM.
-      The peak empirically measured bandwidth achievable on the specific accelerator
-      is displayed alongside for comparison.
+    # Fixme: GL2C_EA_WRREQ_sum not available - commenting out description
+    # System Memory Bandwidth: >-
+    #   The total number of bytes read from and written to system memory per second.
+    #   RDNA3.5 is an APU that uses system memory (DDR5/LPDDR5) instead of HBM.
+    #   The peak empirically measured bandwidth achievable on the specific accelerator
+    #   is displayed alongside for comparison.
     GL2 Cache Bandwidth: >-
       The number of bytes transferred between GL1C and GL2C per unit time.
       GL2C is the last-level cache in RDNA3.5 before system memory.
@@ -133,11 +136,12 @@ Panel Config:
       The Arithmetic Intensity (AI) relative to GL2C (L2 Cache). It is the ratio
       of total floating-point operations (FLOPs) to total bytes transferred between
       GL2C and GL1C. This value is used as the x-coordinate for the GL2 roofline.
-    AI System Memory: >-
-      The Arithmetic Intensity (AI) relative to System Memory. It is the ratio
-      of total floating-point operations (FLOPs) to total bytes transferred
-      between system memory and GL2C. This value is used as the x-coordinate
-      for the system memory roofline.
+    # Fixme: GL2C_EA_WRREQ_sum not available - commenting out description
+    # AI System Memory: >-
+    #   The Arithmetic Intensity (AI) relative to System Memory. It is the ratio
+    #   of total floating-point operations (FLOPs) to total bytes transferred
+    #   between system memory and GL2C. This value is used as the x-coordinate
+    #   for the system memory roofline.
     Performance (GFLOPs): >-
       The overall achieved performance, measured in GigaFLOPs per second (GFLOP/s).
       This is calculated as the sum of all VALU floating-point operations divided

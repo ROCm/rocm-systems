@@ -1,5 +1,5 @@
 # =============================================================================
-# StrixHalo (gfx1150) - RDNA3.5 Memory Hierarchy Chart Metrics
+# RDNA3.5 (gfx1150) - RDNA3.5 Memory Hierarchy Chart Metrics
 # =============================================================================
 # 
 # This panel provides detailed memory hierarchy metrics for visualization,
@@ -15,9 +15,9 @@
 
 Panel Config:
   id: 300
-  title: StrixHalo Memory Chart
+  title: RDNA3.5 Memory Chart
   description: |-
-    Detailed memory hierarchy metrics for StrixHalo (RDNA3.5), showing request counts, 
+    Detailed memory hierarchy metrics for RDNA3.5 (RDNA3.5), showing request counts, 
     bandwidth, hit rates, and utilization at each cache level.
     Memory hierarchy: LDS/TCP (L0) -> GL1C (L1) -> GL2C (L2) -> System Memory
 
@@ -408,10 +408,10 @@ Panel Config:
 
     DRAM Read Bandwidth: |-
       Definition: Bandwidth for read requests to system memory (DRAM).
-      Description: StrixHalo is an APU using DDR5/LPDDR5 system memory instead of HBM.
+      Description: RDNA3.5 is an APU using DDR5/LPDDR5 system memory instead of HBM.
       Formula: GCEA_RDRAM_SIZE_REQ_sum * 32 / time
 
     DRAM Write Bandwidth: |-
       Definition: Bandwidth for write requests to system memory (DRAM).
-      Description: StrixHalo is an APU using DDR5/LPDDR5 system memory instead of HBM.
+      Description: RDNA3.5 is an APU using DDR5/LPDDR5 system memory instead of HBM.
       Formula: GCEA_WDRAM_SIZE_REQ_sum * 32 / time

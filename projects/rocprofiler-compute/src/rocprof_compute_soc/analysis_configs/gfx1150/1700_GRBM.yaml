@@ -1,5 +1,5 @@
 # =============================================================================
-# StrixHalo (gfx1150) - RDNA3.5 GRBM (Graphics Register Bus Manager) Metrics
+# RDNA3.5 (gfx1150) - RDNA3.5 GRBM (Graphics Register Bus Manager) Metrics
 # =============================================================================
 # GRBM provides top-level GPU utilization metrics
 # =============================================================================
@@ -36,11 +36,12 @@ Panel Config:
           min: MIN((100 * GRBM_SPI_BUSY_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
           max: MAX((100 * GRBM_SPI_BUSY_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
           unit: Percent
-        GL2C Busy:
-          avg: AVG((100 * GRBM_GL2C_BUSY_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
-          min: MIN((100 * GRBM_GL2C_BUSY_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
-          max: MAX((100 * GRBM_GL2C_BUSY_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
-          unit: Percent
+        # Fixme: GRBM_GL2C_BUSY_sum not available - commenting out metric
+        # GL2C Busy:
+        #   avg: AVG((100 * GRBM_GL2C_BUSY_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
+        #   min: MIN((100 * GRBM_GL2C_BUSY_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
+        #   max: MAX((100 * GRBM_GL2C_BUSY_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
+        #   unit: Percent
 
   # =========================================================================
   # Shader Engine Utilization
@@ -65,11 +66,6 @@ Panel Config:
           min: MIN((100 * GRBM_SX_BUSY_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
           max: MAX((100 * GRBM_SX_BUSY_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
           unit: Percent
-        SH Busy:
-          avg: AVG((100 * GRBM_SH_BUSY_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
-          min: MIN((100 * GRBM_SH_BUSY_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
-          max: MAX((100 * GRBM_SH_BUSY_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
-          unit: Percent
 
   metrics_description:
     GPU Busy: |-
@@ -81,12 +77,11 @@ Panel Config:
     SPI Busy: |-
       Percentage of cycles the Shader Processor Input was busy.
       SPI handles wave scheduling and resource allocation.
-    GL2C Busy: |-
-      Percentage of cycles the GL2 Cache was busy.
-      High utilization indicates memory-intensive workload.
+    # Fixme: GRBM_GL2C_BUSY_sum not available - commenting out description
+    # GL2C Busy: |-
+    #   Percentage of cycles the GL2 Cache was busy.
+    #   High utilization indicates memory-intensive workload.
     TA Busy: |-
       Percentage of cycles the Texture Addresser was busy.
     SX Busy: |-
       Percentage of cycles the Shader Export was busy.
-    SH Busy: |-
-      Percentage of cycles the Shader Array was busy.

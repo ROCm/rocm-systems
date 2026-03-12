@@ -1,5 +1,5 @@
 # =============================================================================
-# StrixHalo (gfx1150) - RDNA3.5 GL1C (L1 Cache) Performance Metrics
+# RDNA3.5 (gfx1150) - RDNA3.5 GL1C (L1 Cache) Performance Metrics
 # =============================================================================
 # GL1C is the shared L1 cache serving multiple WGPs within a Shader Engine
 # Cache hierarchy: TCP (L0) -> GL1C (L1) -> GL2C (L2)

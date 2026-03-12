@@ -1,5 +1,5 @@
 # =============================================================================
-# StrixHalo (gfx1150) - RDNA3.5 GCEA (External Access) Performance Metrics
+# RDNA3.5 (gfx1150) - RDNA3.5 GCEA (External Access) Performance Metrics
 # =============================================================================
 # GCEA (Graphics Core External Access) handles memory controller interface
 # For APUs, this connects to system memory (DDR5/LPDDR5) instead of HBM
@@ -148,7 +148,7 @@ Panel Config:
   metrics_description:
     DRAM Read Requests: |-
       Number of read requests sent to system memory (DRAM) per client group.
-      StrixHalo uses DDR5/LPDDR5 system memory instead of HBM.
+      RDNA3.5 uses DDR5/LPDDR5 system memory instead of HBM.
     DRAM Read Chained Requests: |-
       Number of chained (sequential) read request chains sent to DRAM.
       Chained requests improve memory efficiency for sequential access patterns.

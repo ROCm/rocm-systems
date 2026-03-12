@@ -24,7 +24,7 @@
 ##############################################################################
 
 """
-RDNA3.5 (gfx1150/Strix/Halo) Memory Architecture Diagram - CLI Visualization
+RDNA3.5 (gfx1152) Memory Architecture Diagram - CLI Visualization
 =============================================================================
 
 USAGE:
@@ -704,7 +704,7 @@ def main():
     parser = argparse.ArgumentParser(description='RDNA3.5 Memory Chart - CLI Visualization')
     parser.add_argument('--data', '-d', help='JSON file with metrics data')
     parser.add_argument('--debug', action='store_true', help='Show debug info')
-    parser.add_argument('--arch', default='gfx1150', help='Architecture name')
+    parser.add_argument('--arch', default='gfx1152', help='Architecture name')
     parser.add_argument('--norm', default='per_kernel', help='Normalization unit')
     parser.add_argument('--txt', '-t', help='Output to plain text file')
     parser.add_argument('--svg', help='Output to SVG file')

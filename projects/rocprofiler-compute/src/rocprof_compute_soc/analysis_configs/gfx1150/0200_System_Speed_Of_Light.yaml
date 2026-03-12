@@ -1,5 +1,5 @@
 # =============================================================================
-# StrixHalo (gfx1150) - RDNA3.5 System Speed-of-Light Performance Metrics
+# RDNA3.5 (gfx1150) - RDNA3.5 System Speed-of-Light Performance Metrics
 # =============================================================================
 # Note: RDNA3.5 uses standard VALU FLOPs (no matrix cores)
 # Cache hierarchy: TCP (L0) -> GL1C (L1) -> GL2C (L2)
@@ -10,7 +10,7 @@ Panel Config:
   title: System Speed-of-Light
   description: |-
     Top-level performance summary showing key metrics across compute, memory,
-    and cache subsystems for StrixHalo (RDNA3.5).
+    and cache subsystems for RDNA3.5 (RDNA3.5).
 
   data source:
 
@@ -106,7 +106,7 @@ Panel Config:
   metrics_description:
     VALU FLOPs (FP16): |-
       The number of 16-bit floating point VALU operations executed per second on 
-      StrixHalo (RDNA3.5). RDNA3.5 WGPs contain 2 CUs with 2 SIMD32 units each.
+      RDNA3.5 (RDNA3.5). RDNA3.5 WGPs contain 2 CUs with 2 SIMD32 units each.
       FP16 operations execute at 2x the rate of FP32 operations.
       Peak calculation: max_sclk × CU_count × 128 ops/cycle.
     VALU FLOPs (FP32): |-

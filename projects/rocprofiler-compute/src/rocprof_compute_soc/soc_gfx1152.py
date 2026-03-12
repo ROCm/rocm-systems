@@ -24,7 +24,7 @@
 ##############################################################################
 
 """
-gfx1150 SoC Support - RDNA3.5 Architecture
+gfx1152 SoC Support - RDNA3.5 Architecture
 
 RDNA3.5 architecture APU featuring:
 - Workgroup Processors (WGPs) with 2 CUs each
@@ -42,17 +42,17 @@ from utils.mi_gpu_spec import mi_gpu_specs
 from utils.specs import MachineSpecs
 
 
-class gfx1150_soc(OmniSoC_Base):
+class gfx1152_soc(OmniSoC_Base):
     def __init__(self, args: argparse.Namespace, mspec: MachineSpecs) -> None:
         super().__init__(args, mspec)
-        self.set_arch("gfx1150")
+        self.set_arch("gfx1152")
         self.set_compatible_profilers(["rocprofv3", "rocprofiler-sdk"])
         # Per IP block max number of simultaneous counters. GFX IP Blocks
         # RDNA3.5 perfmon config - fallback to gfx11xx defaults if not defined
         try:
-            self.set_perfmon_config(mi_gpu_specs.get_perfmon_config("gfx1150"))
+            self.set_perfmon_config(mi_gpu_specs.get_perfmon_config("gfx1152"))
         except KeyError:
-            # Fallback to RDNA3 defaults if gfx1150 not defined
+            # Fallback to RDNA3 defaults if gfx1152 not defined
             self.set_perfmon_config(
                 {
                     "SQ": 16,
