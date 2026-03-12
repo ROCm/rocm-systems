@@ -639,12 +639,14 @@ TEST(rocrtstFunc, Counted_Queue_Overflow_And_Wraparound_Test) {
   RunCustomTestEpilog(&cq);
 }
 
+#ifdef HSA_ENABLE_AMDCUID_SUPPORT
 TEST(rocrtstFunc, Cuid_GPU_Validation_Test) {
   CuidTest ct;
   RunCustomTestProlog(&ct);
   ct.ValidateGpuCuidTest();
   RunCustomTestEpilog(&ct);
 }
+#endif
 
 TEST(rocrtstNeg, Memory_Negative_Tests) {
   RUN_IF_NOT_EMU_MODE(
