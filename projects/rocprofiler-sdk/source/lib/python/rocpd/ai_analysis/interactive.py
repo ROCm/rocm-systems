@@ -2202,17 +2202,25 @@ class WorkflowSession:
                 "Add a short inline comment on each changed line explaining why."
             )
             user = f"=== SUGGESTIONS ===\n{suggestions}\n\n=== SOURCE FILE ===\n{original}"
+            # File rewrites can be large — use a generous timeout (5 min).
+            _rewrite_timeout = 300
             with _Spinner(f"  {self._llm_provider} LLM rewriting {file_path.name}..."):
                 if self._llm_provider == "openai":
                     try:
-                        result = analyzer._call_openai(system, user, max_tokens=16384)
+                        result = analyzer._call_openai(
+                            system, user, max_tokens=16384, timeout=_rewrite_timeout
+                        )
                     except Exception as exc:
                         if "too large" in str(exc).lower() or "max_tokens" in str(exc).lower():
-                            result = analyzer._call_openai(system, user)
+                            result = analyzer._call_openai(
+                                system, user, timeout=_rewrite_timeout
+                            )
                         else:
                             raise
                 elif self._llm_provider == "anthropic":
-                    result = analyzer._call_anthropic(system, user)
+                    result = analyzer._call_anthropic(
+                        system, user, timeout=_rewrite_timeout
+                    )
                 else:
                     result = analyzer._call_local(system, user)
             return result if result and result.strip() else None

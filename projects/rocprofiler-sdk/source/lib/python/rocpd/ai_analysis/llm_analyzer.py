@@ -670,7 +670,7 @@ Follow the reference guide strictly for analysis methodology and output format."
         else:
             raise ValueError(f"Unknown provider: {self.provider}")
 
-    def _call_anthropic(self, system_prompt: str, user_prompt: str) -> str:
+    def _call_anthropic(self, system_prompt: str, user_prompt: str, timeout: int = 120) -> str:
         """Call Anthropic Claude API"""
         if not self.api_key:
             raise LLMAuthenticationError(
@@ -694,7 +694,7 @@ Follow the reference guide strictly for analysis methodology and output format."
                 max_tokens=4096,
                 system=system_prompt,
                 messages=[{"role": "user", "content": user_prompt}],
-                timeout=120,
+                timeout=timeout,
             )
 
             # Extended thinking support (Anthropic-only)
@@ -747,6 +747,7 @@ Follow the reference guide strictly for analysis methodology and output format."
         system_prompt: str,
         user_prompt: str,
         max_tokens: int = 4096,
+        timeout: int = 120,
     ) -> str:
         """Call OpenAI GPT API"""
         if not self.api_key:
@@ -774,7 +775,7 @@ Follow the reference guide strictly for analysis methodology and output format."
                     model=model,
                     messages=_messages,
                     max_completion_tokens=max_tokens,
-                    timeout=120,
+                    timeout=timeout,
                 )
             except openai.BadRequestError as _br:
                 if "max_completion_tokens" in str(_br):
@@ -782,7 +783,7 @@ Follow the reference guide strictly for analysis methodology and output format."
                         model=model,
                         messages=_messages,
                         max_tokens=max_tokens,
-                        timeout=120,
+                        timeout=timeout,
                     )
                 else:
                     raise
