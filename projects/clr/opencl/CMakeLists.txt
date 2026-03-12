@@ -1,3 +1,7 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
 project(opencl)
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
