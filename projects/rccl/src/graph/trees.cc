@@ -139,7 +139,12 @@ ncclResult_t ncclGetDtree(int nranks, int rank, int* s0, int* d0_0, int* d0_1, i
 static int remapRankForCompactTree(int rank, int nranks) {
   if (nranks <= 1) return rank;
 
-  int half = nranks / 2;
+  // Use ceiling division to handle odd nranks correctly.
+  // For odd nranks, there are more even positions than odd positions,
+  // so the first half (mapped to even) needs the extra rank.
+  // Example: nranks=5 -> half=3, first half has 3 ranks (0,1,2) -> positions (0,2,4)
+  //                              second half has 2 ranks (3,4) -> positions (1,3)
+  int half = (nranks + 1) / 2;
   if (rank < half) {
     // First half of sorted ranks -> even positions in remapped space
     return rank * 2;
@@ -153,7 +158,8 @@ static int remapRankForCompactTree(int rank, int nranks) {
 static int inverseRemapRankForCompactTree(int remappedRank, int nranks) {
   if (nranks <= 1) return remappedRank;
 
-  int half = nranks / 2;
+  // Use ceiling division to match remapRankForCompactTree
+  int half = (nranks + 1) / 2;
   if (remappedRank % 2 == 0) {
     // Even positions -> first half of sorted ranks
     return remappedRank / 2;
