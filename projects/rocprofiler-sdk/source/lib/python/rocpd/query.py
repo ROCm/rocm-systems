@@ -25,6 +25,9 @@
 
 import os
 import sys
+import re
+import struct
+import time
 
 from typing import Union, Tuple, List, Optional
 from datetime import datetime
@@ -41,6 +44,262 @@ __all__ = [
     "execute",
     "main",
 ]
+
+
+_PC_BLOB_TYPE_MAP = {
+    "uint8_t": "B",
+    "uint8": "B",
+    "int8_t": "b",
+    "int8": "b",
+    "uint16_t": "H",
+    "uint16": "H",
+    "int16_t": "h",
+    "int16": "h",
+    "uint32_t": "I",
+    "uint32": "I",
+    "int32_t": "i",
+    "int32": "i",
+    "uint64_t": "Q",
+    "uint64": "Q",
+    "int64_t": "q",
+    "int64": "q",
+    "float": "f",
+    "double": "d",
+}
+
+_PC_SAMPLE_TABLE = "rocpd_gpu_pc_sample"
+
+
+def _list_db_schemas(conn) -> List[str]:
+    rows = conn.execute("PRAGMA database_list").fetchall()
+    schemas = []
+    for itr in rows:
+        # PRAGMA database_list => seq, name, file
+        name = itr[1]
+        if isinstance(name, str) and re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", name):
+            schemas.append(name)
+    # Ensure temp/main are checked first when available
+    ordered = [itr for itr in ("temp", "main") if itr in schemas]
+    ordered += [itr for itr in schemas if itr not in ordered]
+    return ordered
+
+
+def _master_table_ref(schema_name: str) -> str:
+    if schema_name == "temp":
+        return "sqlite_temp_master"
+    return f"{schema_name}.sqlite_master"
+
+
+def _table_exists(conn, table_name: str) -> bool:
+    for schema in _list_db_schemas(conn):
+        row = conn.execute(
+            f"SELECT 1 FROM {_master_table_ref(schema)} "
+            "WHERE type IN ('table','view') AND name = ? LIMIT 1",
+            (table_name,),
+        ).fetchone()
+        if row is not None:
+            return True
+    return False
+
+
+def _resolve_table_name(conn, base_name: str) -> Optional[str]:
+    # Exact match first, preferring temp/main schemas
+    for schema in _list_db_schemas(conn):
+        row = conn.execute(
+            f"SELECT name FROM {_master_table_ref(schema)} "
+            "WHERE type IN ('table','view') AND name = ? LIMIT 1",
+            (base_name,),
+        ).fetchone()
+        if row is not None:
+            return row[0]
+
+    # Fallback to UUID-suffixed match, prefer views then shorter names
+    candidates = []
+    for idx, schema in enumerate(_list_db_schemas(conn)):
+        rows = conn.execute(
+            f"SELECT name, type FROM {_master_table_ref(schema)} "
+            "WHERE type IN ('table','view') AND name LIKE ?",
+            (f"{base_name}_%",),
+        ).fetchall()
+        for name, typ in rows:
+            type_rank = 0 if typ == "view" else 1
+            candidates.append((idx, type_rank, len(name), name))
+
+    if candidates:
+        candidates.sort()
+        return candidates[0][3]
+
+    return None
+
+
+def _get_column_names(conn, table_name: str) -> set:
+    rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+    return {itr[1] for itr in rows}
+
+
+def _parse_identifiers(sql: str) -> set:
+    return {
+        itr.group(0).lower()
+        for itr in re.finditer(r"[A-Za-z_][A-Za-z0-9_]*", sql or "")
+    }
+
+
+def _load_pc_blob_schema(conn, schema_table: str, field_table: str):
+    rows = conn.execute(
+        f"""
+        SELECT
+            S.id,
+            COALESCE(S.byte_order, 'little') AS byte_order,
+            F.name,
+            F.offset,
+            F.size,
+            F.data_type,
+            F.is_signed
+        FROM {schema_table} S
+        INNER JOIN {field_table} F ON F.schema_id = S.id
+        ORDER BY S.id, F.offset
+        """
+    ).fetchall()
+
+    schema_map = {}
+    all_fields = []
+    field_seen = set()
+
+    for schema_id, byte_order, name, offset, size, data_type, is_signed in rows:
+        schema_id = int(schema_id)
+        if schema_id not in schema_map:
+            schema_map[schema_id] = {}
+
+        schema_map[schema_id][name] = {
+            "byte_order": byte_order,
+            "offset": int(offset),
+            "size": int(size),
+            "data_type": data_type,
+            "is_signed": int(is_signed),
+        }
+
+        if name not in field_seen:
+            field_seen.add(name)
+            all_fields.append(name)
+
+    return schema_map, all_fields
+
+
+def _make_pc_blob_field_function(schema_map):
+    def _resolve_format(data_type):
+        if data_type is None:
+            return None
+        norm = str(data_type).strip().lower()
+        return _PC_BLOB_TYPE_MAP.get(norm)
+
+    def _pc_blob_field(blob, schema_id, field_name):
+        if blob is None or schema_id is None or field_name is None:
+            return None
+
+        try:
+            schema_id = int(schema_id)
+        except Exception:
+            return None
+
+        field_info = schema_map.get(schema_id, {}).get(str(field_name))
+        if field_info is None:
+            return None
+
+        fmt = _resolve_format(field_info["data_type"])
+        if fmt is None:
+            return None
+
+        if isinstance(blob, memoryview):
+            blob = blob.tobytes()
+
+        offset = field_info["offset"]
+        size = field_info["size"]
+
+        if not isinstance(blob, (bytes, bytearray)):
+            return None
+
+        if len(blob) < (offset + size):
+            return None
+
+        endian = "<" if field_info["byte_order"].lower() != "big" else ">"
+        try:
+            return struct.unpack_from(f"{endian}{fmt}", blob, offset)[0]
+        except Exception:
+            return None
+
+    return _pc_blob_field
+
+
+def _rewrite_pc_sample_table_name(query: str, view_name: str) -> str:
+    query = re.sub(rf"(?i)\b{_PC_SAMPLE_TABLE}\b", view_name, query)
+    query = re.sub(rf'"{_PC_SAMPLE_TABLE}"', f'"{view_name}"', query)
+    query = re.sub(rf"`{_PC_SAMPLE_TABLE}`", f"`{view_name}`", query)
+    return query
+
+
+def _setup_pc_sampling_view(
+    conn,
+    query: str,
+    view_name: str = "gpu_pc_sample",
+    profile: bool = False,
+):
+    if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", view_name):
+        raise ValueError(
+            f"Invalid --pc-sampling-view name '{view_name}'. Use letters, digits, and underscores only."
+        )
+
+    sample_table = _resolve_table_name(conn, _PC_SAMPLE_TABLE)
+    schema_table = _resolve_table_name(conn, "rocpd_info_blob_schema")
+    field_table = _resolve_table_name(conn, "rocpd_info_blob_field")
+
+    if not all([sample_table, schema_table, field_table]):
+        return query
+
+    _t0 = time.perf_counter()
+
+    schema_map, all_blob_fields = _load_pc_blob_schema(conn, schema_table, field_table)
+    if not schema_map or not all_blob_fields:
+        return query
+
+    query_identifiers = _parse_identifiers(query)
+    base_columns = _get_column_names(conn, sample_table)
+    selected_blob_fields = [itr for itr in all_blob_fields if itr not in base_columns]
+
+    if not selected_blob_fields:
+        return query
+
+    conn.create_function("rocpd_pc_blob_field", 3, _make_pc_blob_field_function(schema_map))
+
+    computed_columns = ",\n        ".join(
+        [
+            f"rocpd_pc_blob_field(extdata_blob, extdata_schema_id, '{itr}') AS \"{itr}\""
+            for itr in selected_blob_fields
+        ]
+    )
+
+    conn.execute(f"DROP VIEW IF EXISTS {view_name}")
+    conn.executescript(
+        f"""
+        CREATE TEMP VIEW {view_name} AS
+        SELECT
+            {sample_table}.*,
+            {computed_columns}
+        FROM {sample_table};
+        """
+    )
+
+    if re.search(rf"(?i)\b{_PC_SAMPLE_TABLE}\b", query) and not re.search(
+        rf"(?i)\b{re.escape(view_name)}\b", query
+    ):
+        query = _rewrite_pc_sample_table_name(query, view_name)
+
+    if profile:
+        elapsed_ms = (time.perf_counter() - _t0) * 1000.0
+        print(
+            f"PC sampling query setup: fields={len(selected_blob_fields)}, view={view_name}, elapsed={elapsed_ms:.2f} ms"
+        )
+
+    return query
 
 
 def export_sqlite_query(
@@ -401,6 +660,19 @@ def add_args(parser):
         type=str.lower,
     )
 
+    query_options.add_argument(
+        "--pc-sampling-view",
+        default="gpu_pc_sample",
+        type=str,
+        help="Temporary view name for expanded PC sampling columns (all blob fields are exposed) (default: %(default)s)",
+    )
+
+    query_options.add_argument(
+        "--pc-sampling-profile",
+        action="store_true",
+        help="Print setup timing for PC sampling column exposure",
+    )
+
     email_options = parser.add_argument_group("Query Email Options")
 
     # Email options (optional)
@@ -471,6 +743,14 @@ def execute(input, args, config=None, **kwargs):
     # Prepare parameters for export
     query = args.query
     db = input
+
+    query = _setup_pc_sampling_view(
+        db,
+        query=query,
+        view_name=getattr(args, "pc_sampling_view", "gpu_pc_sample"),
+        profile=getattr(args, "pc_sampling_profile", False),
+    )
+
     export_format = args.format
     export_path = os.path.join(config.output_path, config.output_file)
 

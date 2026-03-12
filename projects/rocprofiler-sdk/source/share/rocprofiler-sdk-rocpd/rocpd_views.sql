@@ -62,6 +62,20 @@ FROM
     `rocpd_info_pmc{{uuid}}`;
 
 CREATE VIEW IF NOT EXISTS
+    `rocpd_info_blob_schema` AS
+SELECT
+    *
+FROM
+    `rocpd_info_blob_schema{{uuid}}`;
+
+CREATE VIEW IF NOT EXISTS
+    `rocpd_info_blob_field` AS
+SELECT
+    *
+FROM
+    `rocpd_info_blob_field{{uuid}}`;
+
+CREATE VIEW IF NOT EXISTS
     `rocpd_info_code_object` AS
 SELECT
     *
@@ -137,3 +151,10 @@ SELECT
     *
 FROM
     `rocpd_memory_allocate{{uuid}}`;
+
+CREATE VIEW IF NOT EXISTS
+    `rocpd_gpu_pc_sample` AS
+SELECT
+    *
+FROM
+    `rocpd_gpu_pc_sample{{uuid}}`;
