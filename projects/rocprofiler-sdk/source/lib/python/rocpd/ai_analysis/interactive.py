@@ -1880,15 +1880,41 @@ class WorkflowSession:
 
     # ── Revert helper ──────────────────────────────────────────────────────────
 
-    def _revert_last_edit(self, failure_reason: str = "") -> bool:
+    def _post_revert_menu(self, applied_alternative: bool) -> str:
+        """Ask the user what to do after a revert.
+
+        Returns one of: "retry" | "continue" | "exit"
+        """
+        _print()
+        _print("  ── What would you like to do next? ─────────────────────", style="cyan")
+        if not applied_alternative:
+            _print("    [f]  Try a different fix  — let the AI attempt another approach",
+                   style="white")
+        _print("    [p]  Continue to re-profiling  (skip code changes this round)",
+               style="white")
+        _print("    [q]  Exit session", style="white")
+        _print()
+        prompt = "  [f/p/q]: " if not applied_alternative else "  [p/q]: "
+        try:
+            choice = _input(prompt).strip().lower()
+        except EOFError:
+            return "continue"
+        if choice in ("f", "fix", "retry", "r") and not applied_alternative:
+            return "retry"
+        if choice in ("q", "quit", "exit"):
+            return "exit"
+        return "continue"
+
+    def _revert_last_edit(self, failure_reason: str = "") -> "tuple[bool, str]":
         """Restore the most recently AI-modified file from its .bak backup.
 
-        After restoring, if an LLM is configured the session calls the LLM to:
-          1. Analyze what went wrong in the failed edit.
-          2. Propose a concrete alternative approach.
-          3. Offer to apply the alternative immediately.
+        After restoring, calls the LLM to analyze the failure and propose a
+        concrete alternative, then shows a what-next menu.
 
-        Returns True on success.
+        Returns (success, next_action) where next_action is one of:
+          "retry"    — user wants to try another AI fix
+          "continue" — user wants to skip code changes and proceed to re-profiling
+          "exit"     — user wants to end the session
         """
         if not self._state.edit_history:
             _print("  No AI edits to revert.", style="yellow")
@@ -1898,7 +1924,7 @@ class WorkflowSession:
         dst = pathlib.Path(record.file_path)
         if not bak.exists():
             _print(f"  Backup not found: {bak}", style="red")
-            return False
+            return False, "continue"
 
         # Capture the failed edit content BEFORE overwriting it — we'll send it
         # to the LLM so it can see exactly what went wrong.
@@ -1916,11 +1942,13 @@ class WorkflowSession:
             _print(f"  ✓ Reverted: {dst.name}  (backup kept at {bak.name})", style="green")
         except OSError as exc:
             _print(f"  Revert failed: {exc}", style="red")
-            return False
+            return False, "continue"
 
-        # Ask the LLM to actually analyze the failure and suggest an alternative.
-        self._post_revert_llm_analysis(dst, original_content, failed_content, failure_reason)
-        return True
+        # LLM analysis + what-next menu.
+        action = self._post_revert_llm_analysis(
+            dst, original_content, failed_content, failure_reason
+        )
+        return True, action
 
     def _post_revert_llm_analysis(
         self,
@@ -1928,15 +1956,18 @@ class WorkflowSession:
         original_content: str,
         failed_content: str,
         failure_reason: str,
-    ) -> None:
+    ) -> str:
         """Call LLM to analyze the failed edit and propose a concrete alternative.
+
+        Returns the user's next-action choice from _post_revert_menu:
+        "retry" | "continue" | "exit"
 
         Shows the LLM's root-cause analysis, then offers to apply the suggested
         alternative immediately using the same diff/apply flow as Phase 6.
         """
         if not self._llm_provider:
             _print("  (No LLM configured — cannot auto-analyze failure)", style="dim")
-            return
+            return self._post_revert_menu(applied_alternative=False)
 
         _print()
         _print("  ── Analyzing failure with LLM ──────────────────────────", style="cyan")
@@ -1979,85 +2010,81 @@ class WorkflowSession:
                     analysis = analyzer._call_local(system, user)
         except Exception as exc:
             _print(f"  (LLM analysis failed: {exc})", style="red")
-            return
+            return self._post_revert_menu(applied_alternative=False)
 
         if not analysis:
-            return
+            return self._post_revert_menu(applied_alternative=False)
 
         _print()
         _print(analysis, style="white")
         _print()
 
         # Offer to apply the alternative right now.
-        if not self._llm_provider:
-            return
+        applied = False
         try:
             apply = _input("  Apply this alternative approach now? [y/N]  ").strip().lower()
         except EOFError:
-            return
-        if apply != "y":
-            return
+            return self._post_revert_menu(applied_alternative=False)
 
-        # Extract the ALTERNATIVE section as the suggestion for _llm_rewrite_file.
-        alt_section = analysis
-        if "ALTERNATIVE:" in analysis:
-            alt_section = analysis.split("ALTERNATIVE:", 1)[1].strip()
+        if apply == "y":
+            # Extract the ALTERNATIVE section as the suggestion for _llm_rewrite_file.
+            alt_section = analysis
+            if "ALTERNATIVE:" in analysis:
+                alt_section = analysis.split("ALTERNATIVE:", 1)[1].strip()
 
-        rewritten = self._llm_rewrite_file(file_path, alt_section)
-        if not rewritten or not rewritten.strip():
-            _print("  (LLM did not produce a rewrite — try again after fixing manually)",
-                   style="yellow")
-            return
-
-        # Show diff and confirm before applying.
-        import difflib
-        original_lines  = original_content.splitlines(keepends=True)
-        rewritten_lines = rewritten.splitlines(keepends=True)
-        diff_lines = list(difflib.unified_diff(
-            original_lines, rewritten_lines,
-            fromfile=f"{file_path.name} (original)",
-            tofile=f"{file_path.name} (alternative)",
-            n=3,
-        ))
-        if not diff_lines:
-            _print("  (Alternative is identical to original — no changes to apply)",
-                   style="yellow")
-            return
-        _print()
-        _print("  ── Proposed alternative ────────────────────────────────", style="cyan")
-        for line in diff_lines[:120]:
-            line = line.rstrip("\n")
-            if line.startswith("+"):
-                _print(line, style="green")
-            elif line.startswith("-"):
-                _print(line, style="red")
+            rewritten = self._llm_rewrite_file(file_path, alt_section)
+            if not rewritten or not rewritten.strip():
+                _print("  (LLM did not produce a rewrite)", style="yellow")
             else:
-                _print(line, style="dim")
-        if len(diff_lines) > 120:
-            _print(f"  ... ({len(diff_lines) - 120} more lines)", style="dim")
-        _print()
-        try:
-            confirm = _input("  Apply this corrected version? [y/N]  ").strip().lower()
-        except EOFError:
-            return
-        if confirm != "y":
-            _print("  Alternative discarded. File remains at original.", style="dim")
-            return
+                import difflib
+                original_lines  = original_content.splitlines(keepends=True)
+                rewritten_lines = rewritten.splitlines(keepends=True)
+                diff_lines = list(difflib.unified_diff(
+                    original_lines, rewritten_lines,
+                    fromfile=f"{file_path.name} (original)",
+                    tofile=f"{file_path.name} (alternative)",
+                    n=3,
+                ))
+                if not diff_lines:
+                    _print("  (Alternative is identical to original — no changes)", style="yellow")
+                else:
+                    _print()
+                    _print("  ── Proposed alternative ──────────────────────────", style="cyan")
+                    for line in diff_lines[:120]:
+                        line = line.rstrip("\n")
+                        if line.startswith("+"):
+                            _print(line, style="green")
+                        elif line.startswith("-"):
+                            _print(line, style="red")
+                        else:
+                            _print(line, style="dim")
+                    if len(diff_lines) > 120:
+                        _print(f"  ... ({len(diff_lines) - 120} more lines)", style="dim")
+                    _print()
+                    try:
+                        confirm = _input("  Apply this corrected version? [y/N]  ").strip().lower()
+                    except EOFError:
+                        confirm = "n"
+                    if confirm == "y":
+                        bak2 = file_path.with_suffix(file_path.suffix + ".bak")
+                        try:
+                            bak2.write_text(original_content)
+                            file_path.write_text(rewritten)
+                            self._state.edit_history.append(_EditRecord(
+                                timestamp=datetime.now(timezone.utc).isoformat(),
+                                file_path=str(file_path),
+                                backup_path=str(bak2),
+                            ))
+                            self._save_session()
+                            _print(f"  ✓ Alternative applied: {file_path.name}", style="green")
+                            _print("  Please recompile to verify.", style="dim")
+                            applied = True
+                        except OSError as exc:
+                            _print(f"  (Write failed: {exc})", style="red")
+                    else:
+                        _print("  Alternative discarded. File remains at original.", style="dim")
 
-        bak2 = file_path.with_suffix(file_path.suffix + ".bak")
-        try:
-            bak2.write_text(original_content)
-            file_path.write_text(rewritten)
-            self._state.edit_history.append(_EditRecord(
-                timestamp=datetime.now(timezone.utc).isoformat(),
-                file_path=str(file_path),
-                backup_path=str(bak2),
-            ))
-            self._save_session()
-            _print(f"  ✓ Alternative applied: {file_path.name}", style="green")
-            _print("  Please recompile and re-run profiling to verify.", style="dim")
-        except OSError as exc:
-            _print(f"  (Write failed: {exc})", style="red")
+        return self._post_revert_menu(applied_alternative=applied)
 
     # ── Phase 3: Trace collection ──────────────────────────────────────────────
 
@@ -2188,9 +2215,12 @@ class WorkflowSession:
                         return False
                     continue
                 elif choice == "v" and self._state.edit_history:
-                    if self._revert_last_edit(
+                    reverted, action = self._revert_last_edit(
                         failure_reason=f"Profiling command failed with exit code {proc.returncode}."
-                    ):
+                    )
+                    if action == "exit":
+                        return False
+                    if reverted and action != "retry":
                         _print("  Please recompile, then retry.", style="cyan")
                     continue
                 else:
@@ -2677,104 +2707,119 @@ class WorkflowSession:
             _print(f"  (LLM rewrite failed: {exc})", style="red")
             return None
 
-    def _phase6_apply_direct(self, snap: _AnalysisSnapshot) -> None:
-        """Phase 6: AI edits source files in-place (.bak backup); waits for recompile."""
+    def _phase6_apply_direct(self, snap: _AnalysisSnapshot) -> Optional[str]:
+        """Phase 6: AI edits source files in-place (.bak backup); waits for recompile.
+
+        Returns None normally, "exit" if the user chose to end the session after a revert.
+        The method loops internally when the user chooses "retry" after a revert.
+        """
         suggestions = "\n\n".join(
             f"[{r.get('priority','')}] {r.get('issue','')}:\n"
             f"{r.get('suggestion','')}\n"
             + "\n".join(f"  • {a}" for a in r.get("actions", []))
             for r in snap.recommendations
         )
-        chosen = self._pick_file_from_source_paths()
-        if chosen is None:
-            return
-        rewritten = self._llm_rewrite_file(chosen, suggestions)
-        while rewritten is None:
-            try:
-                ans = _input("  Retry LLM rewrite? [y/N]  ").strip().lower()
-            except EOFError:
-                return
-            if ans != "y":
-                return
+
+        while True:  # retry loop — re-entered when user picks [f] Try a different fix
+            chosen = self._pick_file_from_source_paths()
+            if chosen is None:
+                return None
             rewritten = self._llm_rewrite_file(chosen, suggestions)
+            while rewritten is None:
+                try:
+                    ans = _input("  Retry LLM rewrite? [y/N]  ").strip().lower()
+                except EOFError:
+                    return None
+                if ans != "y":
+                    return None
+                rewritten = self._llm_rewrite_file(chosen, suggestions)
 
-        import difflib
-        original  = chosen.read_text()
-        diff_lines = list(difflib.unified_diff(
-            original.splitlines(keepends=True),
-            rewritten.splitlines(keepends=True),
-            fromfile=f"{chosen.name} (original)",
-            tofile=f"{chosen.name} (AI-edited)",
-            n=3,
-        ))
-        _print()
-        _print("  ── Proposed changes ─────────────────────────────────", style="cyan")
-        for line in diff_lines[:120]:
-            line = line.rstrip("\n")
-            if line.startswith("+"):
-                _print(line, style="green")
-            elif line.startswith("-"):
-                _print(line, style="red")
-            else:
-                _print(line, style="dim")
-        if len(diff_lines) > 120:
-            _print(f"  ... ({len(diff_lines) - 120} more lines omitted)", style="dim")
-        if not diff_lines:
-            _print("  (No changes — rewritten file is identical to original)", style="yellow")
-            return
-        _print()
-        try:
-            confirm = _input("  Apply these changes? [y/N]  ").strip().lower()
-        except EOFError:
-            return
-        if confirm != "y":
-            _print("  Changes discarded.", style="dim")
-            return
-
-        bak = chosen.with_suffix(chosen.suffix + ".bak")
-        try:
-            bak.write_text(original)
-            chosen.write_text(rewritten)
-            _print(f"  Backup : {bak}", style="dim")
-            _print(f"  Updated: {chosen}", style="green")
-            self._state.edit_history.append(_EditRecord(
-                timestamp=datetime.now(timezone.utc).isoformat(),
-                file_path=str(chosen),
-                backup_path=str(bak),
+            import difflib
+            original  = chosen.read_text()
+            diff_lines = list(difflib.unified_diff(
+                original.splitlines(keepends=True),
+                rewritten.splitlines(keepends=True),
+                fromfile=f"{chosen.name} (original)",
+                tofile=f"{chosen.name} (AI-edited)",
+                n=3,
             ))
-            self._save_session()
-        except OSError as exc:
-            _print(f"  (Write failed: {exc})", style="red")
-            return
-
-        # Wait for recompile
-        _print()
-        _print("  Changes applied. Please recompile your application.", style="cyan")
-        _print("  Type 'done' when compiled, 'revert' to undo the AI edit,", style="dim")
-        _print("  'abort' to exit, or paste compilation errors.", style="dim")
-        _compile_errors: List[str] = []
-        while True:
+            _print()
+            _print("  ── Proposed changes ─────────────────────────────────", style="cyan")
+            for line in diff_lines[:120]:
+                line = line.rstrip("\n")
+                if line.startswith("+"):
+                    _print(line, style="green")
+                elif line.startswith("-"):
+                    _print(line, style="red")
+                else:
+                    _print(line, style="dim")
+            if len(diff_lines) > 120:
+                _print(f"  ... ({len(diff_lines) - 120} more lines omitted)", style="dim")
+            if not diff_lines:
+                _print("  (No changes — rewritten file is identical to original)", style="yellow")
+                return None
+            _print()
             try:
-                resp = _input("  > ").strip()
+                confirm = _input("  Apply these changes? [y/N]  ").strip().lower()
             except EOFError:
-                break
-            resp_lower = resp.lower()
-            if resp_lower in ("done", "compiled", "ok", "yes", "y", ""):
-                _print("  Great — ready to re-profile.", style="green")
-                break
-            if resp_lower in ("revert", "undo", "rollback", "v"):
-                error_ctx = "\n".join(_compile_errors)
-                if self._revert_last_edit(failure_reason=error_ctx):
-                    _print("  Reverted. Recompile to restore original, then type 'done'.",
-                           style="cyan")
-                break
-            if resp_lower in ("abort", "cancel", "quit", "exit"):
-                _print("  Aborting. Backup preserved at: " + str(bak), style="dim")
-                break
-            # Treat as compilation error description — accumulate for context
-            _compile_errors.append(resp)
-            _print(f"  Error noted. Type 'done' when fixed or 'revert' to undo the edit.",
-                   style="yellow")
+                return None
+            if confirm != "y":
+                _print("  Changes discarded.", style="dim")
+                return None
+
+            bak = chosen.with_suffix(chosen.suffix + ".bak")
+            try:
+                bak.write_text(original)
+                chosen.write_text(rewritten)
+                _print(f"  Backup : {bak}", style="dim")
+                _print(f"  Updated: {chosen}", style="green")
+                self._state.edit_history.append(_EditRecord(
+                    timestamp=datetime.now(timezone.utc).isoformat(),
+                    file_path=str(chosen),
+                    backup_path=str(bak),
+                ))
+                self._save_session()
+            except OSError as exc:
+                _print(f"  (Write failed: {exc})", style="red")
+                return None
+
+            # Wait for recompile
+            _print()
+            _print("  Changes applied. Please recompile your application.", style="cyan")
+            _print("  Type 'done' when compiled, 'revert' to undo the AI edit,", style="dim")
+            _print("  'abort' to exit, or paste compilation errors.", style="dim")
+            _compile_errors: List[str] = []
+            _revert_action: str = "continue"
+            while True:
+                try:
+                    resp = _input("  > ").strip()
+                except EOFError:
+                    break
+                resp_lower = resp.lower()
+                if resp_lower in ("done", "compiled", "ok", "yes", "y", ""):
+                    _print("  Great — ready to re-profile.", style="green")
+                    break
+                if resp_lower in ("revert", "undo", "rollback", "v"):
+                    error_ctx = "\n".join(_compile_errors)
+                    reverted, _revert_action = self._revert_last_edit(
+                        failure_reason=error_ctx
+                    )
+                    break
+                if resp_lower in ("abort", "cancel", "quit", "exit"):
+                    _print("  Aborting. Backup preserved at: " + str(bak), style="dim")
+                    _revert_action = "exit"
+                    break
+                # Treat as compilation error description — accumulate for context
+                _compile_errors.append(resp)
+                _print("  Error noted. Type 'done' when fixed or 'revert' to undo the edit.",
+                       style="yellow")
+
+            if _revert_action == "retry":
+                _print("  ── Trying a different fix ───────────────────────────", style="cyan")
+                continue  # re-enter the while True loop above
+            if _revert_action == "exit":
+                return "exit"
+            return None  # "continue" — proceed to Phase 7
 
     def _phase6_apply_diff(self, snap: _AnalysisSnapshot) -> None:
         """Phase 6 alt: Save suggestions to a patch file."""
@@ -2911,7 +2956,8 @@ class WorkflowSession:
                     )
                     # Phase 6: apply
                     if mode == "direct":
-                        self._phase6_apply_direct(scoped)
+                        if self._phase6_apply_direct(scoped) == "exit":
+                            return
                     elif mode == "diff":
                         self._phase6_apply_diff(scoped)
 
