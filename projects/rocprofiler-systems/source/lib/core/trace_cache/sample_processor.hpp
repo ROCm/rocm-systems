@@ -98,13 +98,13 @@ struct processor_view_t
 #if(ROCPROFILER_VERSION >= 600)
     using memory_allocate_fn_t = void (*)(void*, const memory_allocate_sample&) noexcept;
 #endif
-    using region_fn_t         = void (*)(void*, const region_sample&) noexcept;
-    using in_time_sample_fn_t = void (*)(void*, const in_time_sample&) noexcept;
-    using pmc_event_fn_t      = void (*)(void*, const pmc_event_with_sample&) noexcept;
-    using gpu_pmc_sample_fn_t = void (*)(void*, const gpu_pmc_sample&) noexcept;
-    using ainic_sample_fn_t   = void (*)(void*, const ainic_sample&) noexcept;
-    using cpu_freq_sample_fn_t        = void (*)(void*, const cpu_freq_sample&) noexcept;
-    using backtrace_region_fn_t       = void (*)(void*,
+    using region_fn_t           = void (*)(void*, const region_sample&) noexcept;
+    using in_time_sample_fn_t   = void (*)(void*, const in_time_sample&) noexcept;
+    using pmc_event_fn_t        = void (*)(void*, const pmc_event_with_sample&) noexcept;
+    using gpu_pmc_sample_fn_t   = void (*)(void*, const gpu_pmc_sample&) noexcept;
+    using ainic_sample_fn_t     = void (*)(void*, const ainic_sample&) noexcept;
+    using cpu_freq_sample_fn_t  = void (*)(void*, const cpu_freq_sample&) noexcept;
+    using backtrace_region_fn_t = void (*)(void*,
                                            const backtrace_region_sample&) noexcept;
     using prepare_for_processing_fn_t = void (*)(void*) noexcept;
     using finalize_processing_fn_t    = void (*)(void*) noexcept;
@@ -117,11 +117,11 @@ struct processor_view_t
 #if(ROCPROFILER_VERSION >= 600)
         memory_allocate_fn_t handle_memory_allocate;
 #endif
-        region_fn_t         handle_region;
-        in_time_sample_fn_t handle_in_time_sample;
-        pmc_event_fn_t      handle_pmc_event;
-        gpu_pmc_sample_fn_t handle_gpu_pmc_sample;
-        ainic_sample_fn_t   handle_ainic_sample;
+        region_fn_t                 handle_region;
+        in_time_sample_fn_t         handle_in_time_sample;
+        pmc_event_fn_t              handle_pmc_event;
+        gpu_pmc_sample_fn_t         handle_gpu_pmc_sample;
+        ainic_sample_fn_t           handle_ainic_sample;
         cpu_freq_sample_fn_t        handle_cpu_freq_sample;
         backtrace_region_fn_t       handle_backtrace_region;
         prepare_for_processing_fn_t prepare_for_processing;

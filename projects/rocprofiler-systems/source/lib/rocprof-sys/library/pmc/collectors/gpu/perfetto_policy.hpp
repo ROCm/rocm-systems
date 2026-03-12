@@ -23,8 +23,6 @@ namespace collectors
 namespace gpu
 {
 
-#if ROCPROFSYS_USE_ROCM > 0
-
 // Use types from this namespace
 using enabled_metrics = ::rocprofsys::pmc::collectors::gpu::enabled_metrics;
 using metrics         = ::rocprofsys::pmc::collectors::gpu::metrics;
@@ -481,14 +479,6 @@ private:
             }
         }
 
-        static std::once_flag once_flag;
-        std::call_once(once_flag, [&]() {
-            printf("JPEG activity: %d, enabled: %d, supported: %d\n",
-                   effective_metrics.bits.jpeg_activity,
-                   enabled_metric_config.bits.jpeg_activity,
-                   supported_metric_config.bits.jpeg_activity);
-        });
-
         // Per-XCP JPEG busy metrics (MI300)
         if(effective_metrics.bits.jpeg_busy &&
            !tracks.at(JPEG_ACTIVITY_VALUE).track_indexes.empty())
@@ -636,8 +626,6 @@ private:
         }
     }
 };
-
-#endif  // ROCPROFSYS_USE_ROCM > 0
 
 }  // namespace gpu
 }  // namespace collectors

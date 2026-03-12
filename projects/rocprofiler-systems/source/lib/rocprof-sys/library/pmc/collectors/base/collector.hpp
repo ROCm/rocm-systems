@@ -132,7 +132,8 @@ struct collector
      * via the cache API and optionally Perfetto. Devices that fail to read metrics
      * are automatically disabled and removed from the device list.
      *
-     * @tparam GetTimestamp Callable returning uint64_t timestamp (avoids std::function overhead)
+     * @tparam GetTimestamp Callable returning uint64_t timestamp (avoids std::function
+     * overhead)
      * @param get_timestamp Function to retrieve the current timestamp for the sample.
      */
     template <typename GetTimestamp>
@@ -227,7 +228,6 @@ private:
     std::shared_ptr<device_provider> m_device_provider;  ///< Device provider instance
     enabled_metrics_t                m_enabled_metrics;  ///< Enabled metrics
 };
-
 
 }  // namespace base
 }  // namespace collectors

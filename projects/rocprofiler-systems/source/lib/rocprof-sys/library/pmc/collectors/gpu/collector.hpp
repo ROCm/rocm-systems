@@ -22,7 +22,6 @@ namespace collectors
 namespace gpu
 {
 
-
 using ::rocprofsys::pmc::device_filter;
 using ::rocprofsys::pmc::device_selection_mode;
 using ::rocprofsys::pmc::collectors::gpu::check_status;
@@ -154,10 +153,9 @@ struct collector
                     return false;  // Keep device
                 } catch(const std::runtime_error& e)
                 {
-                    LOG_ERROR(
-                        "Reading metrics failed for GPU device {}. Error: {}. "
-                        "Disabling device!",
-                        device->get_index(), e.what());
+                    LOG_ERROR("Reading metrics failed for GPU device {}. Error: {}. "
+                              "Disabling device!",
+                              device->get_index(), e.what());
                     return true;  // Remove device
                 }
             });
@@ -282,7 +280,7 @@ private:
                             [[maybe_unused]] metrics&               gpu_metrics,
                             [[maybe_unused]] int64_t                timestamp)
     {
-#    if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
+#if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
         if(!m_enabled_metrics.bits.sdma_usage || !supported_metrics.bits.sdma_usage)
             return;
 
@@ -312,7 +310,7 @@ private:
         state.prev_cumulative = current_cumulative;
         state.prev_timestamp  = static_cast<uint64_t>(timestamp);
         state.has_prev        = true;
-#    endif
+#endif
     }
 
     /// Per-device state for SDMA delta computation
@@ -323,12 +321,11 @@ private:
         bool     has_prev        = false;
     };
 
-    device_vector_t                  m_gpu_devices;      ///< Enabled GPU devices for sampling
+    device_vector_t                  m_gpu_devices;  ///< Enabled GPU devices for sampling
     std::shared_ptr<device_provider> m_device_provider;  ///< Device provider instance
-    enabled_metrics                  m_enabled_metrics;  ///< Metrics enabled for collection
-    std::vector<sdma_state>          m_sdma_states;      ///< Per-device SDMA delta tracking
+    enabled_metrics         m_enabled_metrics;  ///< Metrics enabled for collection
+    std::vector<sdma_state> m_sdma_states;      ///< Per-device SDMA delta tracking
 };
-
 
 }  // namespace gpu
 }  // namespace collectors
