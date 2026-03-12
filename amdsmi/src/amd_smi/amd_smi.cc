@@ -5086,24 +5086,25 @@ amdsmi_status_t amdsmi_get_gpu_ras_feature_info(
         return AMDSMI_STATUS_INVAL;
     }
 
-    amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
-    amdsmi_status_t r = get_gpu_device_from_handle(processor_handle,
-                                &gpu_device);
-    if (r != AMDSMI_STATUS_SUCCESS)
-        return r;
+    memset(ras_feature, 0, sizeof(*ras_feature));
 
-    rsmi_ras_feature_info_t rsmi_ras_feature;
-    r = rsmi_wrapper(rsmi_ras_feature_info_get, processor_handle, 0,
-                &rsmi_ras_feature);
+    auto *device = reinterpret_cast<Device *>(processor_handle);
+    if (device == nullptr)
+        return AMDSMI_STATUS_NOT_FOUND;
 
-    if (r != AMDSMI_STATUS_SUCCESS)
-        return r;
-
-    ras_feature->ecc_correction_schema_flag
-                = rsmi_ras_feature.ecc_correction_schema_flag;
-    ras_feature->ras_eeprom_version = rsmi_ras_feature.ras_eeprom_version;
-
-    return AMDSMI_STATUS_SUCCESS;
+    RasFeature info{};
+    auto code = device->QueryRasFeature(&info);
+    if (code == ErrorCode::Success) {
+        ras_feature->ecc_correction_schema_flag =
+            (info.dram_ecc  ? 0x1u : 0u) |
+            (info.sram_ecc  ? 0x2u : 0u) |
+            (info.poisoning ? 0x4u : 0u);
+        ras_feature->ras_info.dram_ecc  = info.dram_ecc;
+        ras_feature->ras_info.sram_ecc  = info.sram_ecc;
+        ras_feature->ras_info.poisoning = info.poisoning;
+        ras_feature->needs_reboot       = info.needs_reboot;
+    }
+    return translateCodeToSmiStatus(code);
 }
 
 amdsmi_status_t
