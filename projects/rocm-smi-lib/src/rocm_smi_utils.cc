@@ -1221,13 +1221,18 @@ int countDigit(uint64_t n) {
 
 std::string find_file_in_folder(const std::string& folder, const std::string& regex) {
   std::string file_name;
-  // TODO(amdsmi_dev): The closedir function has some non-standard attributes
-  // that are being ignored here which is causing a warning to be thrown
-  using dir_ptr = std::unique_ptr<DIR, decltype(&closedir)>;
+  // Stateless functor avoids -Werror=ignored-attributes from passing
+  // closedir directly as a template argument (glibc __nonnull__ attributes
+  // get stripped). Also zero overhead: empty base optimization keeps
+  // unique_ptr the same size as a raw pointer.
+  struct DirCloser {
+    void operator()(DIR* d) const { closedir(d); }
+  };
+  using dir_ptr = std::unique_ptr<DIR, DirCloser>;
 
   struct dirent* dir = nullptr;
   std::regex file_regex(regex);
-  auto drm_dir = dir_ptr(opendir(folder.c_str()), &closedir);
+  auto drm_dir = dir_ptr(opendir(folder.c_str()));
   if (drm_dir == nullptr) return file_name;
   std::cmatch m;
   while ((dir = readdir(drm_dir.get())) != NULL) {

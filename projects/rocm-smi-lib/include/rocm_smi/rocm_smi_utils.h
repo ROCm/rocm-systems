@@ -406,8 +406,8 @@ class TagTextContents_t {
   }
 
   decltype(auto) get_structured_data_subkey_by_position(const PrimaryKeyType& prim_key,
-                                                        uint32_t key_position) {
-    auto key_counter = uint32_t(0);
+                                                        size_t key_position) {
+    auto key_counter = size_t(0);
     SecondaryKeyType data_key{};
     if (key_position < (get_structured_subkeys_size(prim_key))) {
       for (const auto& [sec_key, sec_value] : m_structured[prim_key]) {

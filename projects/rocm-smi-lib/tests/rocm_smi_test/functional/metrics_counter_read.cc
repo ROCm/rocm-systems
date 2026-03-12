@@ -113,7 +113,8 @@ void TestMetricsCounterRead::Run(void) {
       CHK_ERR_ASRT(err);
       IF_VERB(STANDARD) {
         std::cout << std::dec << "power counter=" << power << '\n';
-        std::cout << "power in uJ=" << (double)(power * counter_resolution) << '\n';
+        std::cout << "power in uJ="
+                  << static_cast<double>(power) * static_cast<double>(counter_resolution) << '\n';
         std::cout << std::dec << "timestamp=" << timestamp << '\n';
       }
     }

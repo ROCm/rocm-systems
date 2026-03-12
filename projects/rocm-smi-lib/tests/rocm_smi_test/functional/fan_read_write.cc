@@ -117,7 +117,7 @@ void TestFanReadWrite::Run(void) {
     ret = rsmi_dev_fan_speed_max_get(dv_ind, 0, &max_speed);
     CHK_ERR_ASRT(ret)
 
-    new_speed = 1.1 * orig_speed;
+    new_speed = static_cast<int64_t>(1.1 * static_cast<double>(orig_speed));
 
     if (new_speed > static_cast<int64_t>(max_speed)) {
       std::cout << "***System fan speed value is close to max. Will not adjust upward."
@@ -145,8 +145,9 @@ void TestFanReadWrite::Run(void) {
     //                cur_speed < 1.1 * new_speed) ||
     //                    cur_speed > 0.95 * RSMI_MAX_FAN_SPEED);
     IF_VERB(STANDARD) {
-      if (!((cur_speed > 0.95 * new_speed && cur_speed < 1.1 * new_speed) ||
-            (cur_speed > 0.95 * RSMI_MAX_FAN_SPEED))) {
+      if (!((static_cast<double>(cur_speed) > 0.95 * static_cast<double>(new_speed) &&
+             static_cast<double>(cur_speed) < 1.1 * static_cast<double>(new_speed)) ||
+            (static_cast<double>(cur_speed) > 0.95 * RSMI_MAX_FAN_SPEED))) {
         std::cout << "WARNING: Fan speed is not within the expected range!" << std::endl;
       }
     }

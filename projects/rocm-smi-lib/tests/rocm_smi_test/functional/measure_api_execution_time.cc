@@ -151,8 +151,10 @@ void TestMeasureApiExecutionTime::Run(void) {
                 << std::to_string((static_cast<float>(kFAN_SPEED_ELAPSED_MICROSEC_BASE) * repeat))
                 << " microseconds" << std::endl;
       std::cout << "\trsmi_dev_fan_speed_get() average execution time: "
-                << std::to_string(duration.count() / repeat) << " microseconds" << std::endl;
-      EXPECT_LT(duration.count(), static_cast<float>(kFAN_SPEED_ELAPSED_MICROSEC_BASE) * repeat);
+                << std::to_string(static_cast<float>(duration.count()) / repeat) << " microseconds"
+                << std::endl;
+      EXPECT_LT(static_cast<float>(duration.count()),
+                static_cast<float>(kFAN_SPEED_ELAPSED_MICROSEC_BASE) * repeat);
     }
     skip = false;
 
@@ -176,8 +178,10 @@ void TestMeasureApiExecutionTime::Run(void) {
                 << std::to_string((static_cast<float>(kMETRICS_ELAPSED_MICROSEC_BASE) * repeat))
                 << " microseconds" << std::endl;
       std::cout << "\trsmi_dev_temp_metric_get() average execution time: "
-                << std::to_string(duration.count() / repeat) << " microseconds" << std::endl;
-      EXPECT_LT(duration.count(), (static_cast<float>(kMETRICS_ELAPSED_MICROSEC_BASE) * repeat));
+                << std::to_string(static_cast<float>(duration.count()) / repeat) << " microseconds"
+                << std::endl;
+      EXPECT_LT(static_cast<float>(duration.count()),
+                (static_cast<float>(kMETRICS_ELAPSED_MICROSEC_BASE) * repeat));
     }
     skip = false;
 
@@ -201,7 +205,8 @@ void TestMeasureApiExecutionTime::Run(void) {
                 << std::to_string((kMETRICS_ELAPSED_MICROSEC_BASE * repeat)) << " microseconds"
                 << std::endl;
       std::cout << "\trsmi_dev_gpu_metrics_info_get() average execution time: "
-                << std::to_string(duration.count() / repeat) << " microseconds" << std::endl;
+                << std::to_string(static_cast<float>(duration.count()) / repeat) << " microseconds"
+                << std::endl;
       EXPECT_LT(static_cast<float>(duration.count()),
                 static_cast<float>(kMETRICS_ELAPSED_MICROSEC_BASE) * repeat);
     }
@@ -227,8 +232,10 @@ void TestMeasureApiExecutionTime::Run(void) {
                 << std::to_string((static_cast<float>(kMETRICS_ELAPSED_MICROSEC_BASE) * repeat))
                 << " microseconds" << std::endl;
       std::cout << "\trsmi_dev_metrics_xcd_counter_get() average execution time: "
-                << std::to_string(duration.count() / repeat) << " microseconds" << std::endl;
-      EXPECT_LT(duration.count(), static_cast<float>(kMETRICS_ELAPSED_MICROSEC_BASE) * repeat);
+                << std::to_string(static_cast<float>(duration.count()) / repeat) << " microseconds"
+                << std::endl;
+      EXPECT_LT(static_cast<float>(duration.count()),
+                static_cast<float>(kMETRICS_ELAPSED_MICROSEC_BASE) * repeat);
     }
     skip = false;
   }

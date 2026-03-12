@@ -47,6 +47,7 @@
 
 #include <string>
 
+#include "rocm_smi/rocm_smi.h"
 #include "rocm_smi_test/test_base.h"
 
 class TestPerfCntrReadWrite : public TestBase {

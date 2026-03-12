@@ -276,13 +276,11 @@ void TestComputePartitionReadWrite::Run(void) {
   // end of test.
   uint32_t initial_num_devices = num_monitor_devs();
   for (uint32_t dv_ind = 0; dv_ind < initial_num_devices; ++dv_ind) {
-    if (dv_ind >= 0) {
-      IF_VERB(STANDARD) {
-        std::cout << std::endl;
-        std::cout << "\t**"
-                  << "=========  LOOP THROUGH DEVICES - DEVICE #" << std::to_string(dv_ind)
-                  << "  ==============" << std::endl;
-      }
+    IF_VERB(STANDARD) {
+      std::cout << std::endl;
+      std::cout << "\t**"
+                << "=========  LOOP THROUGH DEVICES - DEVICE #" << std::to_string(dv_ind)
+                << "  ==============" << std::endl;
     }
     PrintDeviceHeader(dv_ind);
     bool devicePartitionUpdated = false;

@@ -5818,9 +5818,9 @@ rsmi_status_t rsmi_event_notification_get(int timeout_ms, uint32_t* num_elem,
             int32_t pid;
             uint32_t addr;
             uint32_t node;
-            char* rw = "\0";
+            char rw = '\0';
 
-            sscanf(message, "%" PRId64 " -%d @%" PRIx32 "(%x) %c\n", &ns, &pid, &addr, &node, rw);
+            sscanf(message, "%" PRId64 " -%d @%" PRIx32 "(%x) %c\n", &ns, &pid, &addr, &node, &rw);
             std::stringstream final_message;
             final_message << "ns: " << std::to_string(ns).c_str()
                           << "  pid: " << std::to_string(pid).c_str() << "  addr: 0x" << std::hex
@@ -5834,10 +5834,10 @@ rsmi_status_t rsmi_event_notification_get(int timeout_ms, uint32_t* num_elem,
             int32_t pid;
             uint32_t addr;
             uint32_t node;
-            char* migrate_update = "\0";
+            char migrate_update = '\0';
 
             sscanf(message, "%" PRId64 " -%d @%" PRIx32 "(%x) %c\n", &ns, &pid, &addr, &node,
-                   migrate_update);
+                   &migrate_update);
             std::stringstream final_message;
             final_message << "ns: " << std::to_string(ns).c_str()
                           << "  pid: " << std::to_string(pid).c_str() << "  addr: 0x" << std::hex
@@ -5866,9 +5866,9 @@ rsmi_status_t rsmi_event_notification_get(int timeout_ms, uint32_t* num_elem,
             int64_t ns;
             int32_t pid;
             uint32_t node;
-            char* rescheduled = "\0";
+            char rescheduled = '\0';
 
-            sscanf(message, "%" PRId64 "-%d %x %c\n", &ns, &pid, &node, rescheduled);
+            sscanf(message, "%" PRId64 "-%d %x %c\n", &ns, &pid, &node, &rescheduled);
             std::stringstream final_message;
             final_message << "ns: " << std::to_string(ns).c_str()
                           << "  pid: " << std::to_string(pid).c_str() << "  node: 0x" << std::hex

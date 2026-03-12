@@ -139,7 +139,8 @@ void TestPerfCntrReadWrite::CountEvents(uint32_t dv_ind, rsmi_event_type_t evnt,
     std::cout << "\t\t\tTime Enabled (nS): " << val->time_enabled << std::endl;
     std::cout << "\t\t\tTime Running (nS): " << val->time_running << std::endl;
     std::cout << "\t\t\tEvents/Second Running: "
-              << val->value / static_cast<float>(val->time_running) << std::endl;
+              << static_cast<float>(val->value) / static_cast<float>(val->time_running)
+              << std::endl;
   }
   ret = rsmi_dev_counter_destroy(evt_handle);
   CHK_ERR_ASRT(ret)
@@ -171,13 +172,14 @@ void TestPerfCntrReadWrite::testEventsIndividually(uint32_t dv_ind) {
 
       CountEvents(dv_ind, evt, &val, 1);
       double coll_time_sec = static_cast<double>(val.time_running) / kGig;
-      throughput = (val.value * 32) / coll_time_sec;
+      throughput = static_cast<uint64_t>(static_cast<double>(val.value * 32) / coll_time_sec);
       std::cout << "\t\t\tCollected events for " << coll_time_sec << " seconds" << std::endl;
       std::cout << "\t\t\tEvents collected: " << val.value << std::endl;
       std::cout << "\t\t\tXGMI throughput: " << throughput << " bytes/second" << std::endl;
       std::cout << "\t\t\tXGMI Channel Utilization: "
-                << 100 * throughput / static_cast<double>(kVg20Level1Bandwidth * kGigByte) << "%"
-                << std::endl;
+                << 100.0 * static_cast<double>(throughput) /
+                       static_cast<double>(kVg20Level1Bandwidth * kGigByte)
+                << "%" << std::endl;
       std::cout << "\t\t\t****" << std::endl;
     }
     set_verbosity(tmp_verbosity);
