@@ -55,7 +55,9 @@ rocprofiler_add_integration_execute_test(
         --kokkos-trace=no --rocdecode-trace=no --rocjpeg-trace=no --hip-runtime-trace=no
         --hip-compiler-trace=no --hsa-core-trace=no --hsa-amd-trace=no
         --hsa-image-trace=no --hsa-finalizer-trace=no --advanced-thread-trace=no
-        --kernel-rename=no --summary --echo -- ${CMAKE_COMMAND}
+        --kfd-trace=no --kfd-page-migration-trace=no --kfd-page-mapping-trace=no
+        --kfd-queue-trace=no --kfd-dropped-events-trace=no --kernel-rename=no --summary
+        --echo -- ${CMAKE_COMMAND}
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 45
     LABELS "integration-tests"

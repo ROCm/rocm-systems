@@ -36,6 +36,7 @@ from textual.widgets import TextArea
 
 import config
 from utils import schema
+from utils.utils import convert_metric_id_to_panel_info
 
 
 class LogLevel(str, Enum):
@@ -126,6 +127,12 @@ class Logger:
 def get_top_kernels_and_dispatch_ids(
     runs: dict[str, Any],
 ) -> Optional[list[dict[Hashable, Any]]]:
+    """
+    Get top kernels merged with dispatch IDs.
+
+    Returns a list of records, each containing kernel info and a unique key
+    that combines kernel name and dispatch ID for looking up per-dispatch data.
+    """
     if not runs:
         return None
 
@@ -144,6 +151,14 @@ def get_top_kernels_and_dispatch_ids(
     ).sort_values("Pct", ascending=False)
 
     merged_df = merged_df.drop(columns=["Count", "GPU_ID"])
+
+    # Add unique key combining kernel name and dispatch ID for per-dispatch lookups
+    merged_df["Unique_Key"] = (
+        merged_df["Kernel_Name"].astype(str)
+        + "::"
+        + merged_df["Dispatch_ID"].astype(int).astype(str)
+    )
+
     return merged_df.to_dict("records")
 
 
@@ -151,6 +166,7 @@ def process_panels_to_dataframes(
     args: argparse.Namespace,
     kernel_df: dict[int, pd.DataFrame],
     arch_configs: schema.ArchConfig,
+    profiling_config: dict[str, Any],
     roof_plot: Optional[str] = None,
 ) -> dict[str, dict[str, dict[str, Any]]]:
     """
@@ -178,7 +194,27 @@ def process_panels_to_dataframes(
     result_structure = {}
     decimal_precision = getattr(args, "decimal", 2) if args else 2
 
+    raw_filter_panel_ids = profiling_config.get("filter_blocks", [])
+
+    if isinstance(raw_filter_panel_ids, dict):
+        # For backward compatibility
+        raw_filter_panel_ids = [
+            name
+            for name, table_type in raw_filter_panel_ids.items()
+            if table_type == "metric_id"
+        ]
+
+    filter_panel_ids = set()
+    for bid in raw_filter_panel_ids:
+        file_id, _, _ = convert_metric_id_to_panel_info(str(bid))
+        if file_id is not None:
+            filter_panel_ids.add(int(file_id))
+
     for panel_id, panel in arch_configs.panel_configs.items():
+        # HARD GATE: Block 30 (panel 3000) requires membw_analysis flag
+        if panel_id == 3000 and not args.membw_analysis:
+            continue
+
         if panel_id in config.HIDDEN_SECTIONS:
             continue
 

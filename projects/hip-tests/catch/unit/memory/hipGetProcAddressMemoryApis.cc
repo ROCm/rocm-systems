@@ -37,7 +37,7 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_MemoryApisMallocFree") {
+TEST_CASE(Unit_hipGetProcAddress_MemoryApisMallocFree) {
   void* hipMalloc_ptr = nullptr;
   void* hipFree_ptr = nullptr;
   void* hipExtMallocWithFlags_ptr = nullptr;
@@ -113,7 +113,11 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisMallocFree") {
     REQUIRE(d_ptr_size == 256);
 
     HIP_CHECK(dyn_hipFree_ptr(d_ptr));
+
+    // With ASAN Enabled, this might pass since we do not release the memory at the line above
+#if !defined(ENABLE_ADDRESS_SANITIZER)
     REQUIRE(hipMemPtrGetInfo(d_ptr, &d_ptr_size) == hipErrorInvalidValue);
+#endif
   }
 
   // Validating hipExtMallocWithFlags API
@@ -307,6 +311,8 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisMallocFree") {
     }
   }
 
+  // Skip these if we have address sanitizer enable because free might not actually free it
+#if !defined(ENABLE_ADDRESS_SANITIZER)
   // Validating hipFreeHost API
   {
     void* h_ptr = nullptr;
@@ -330,6 +336,7 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisMallocFree") {
     HIP_CHECK(dyn_hipHostFree_ptr(h_ptr));
     REQUIRE(hipMemPtrGetInfo(h_ptr, &h_ptr_size) == hipErrorInvalidValue);
   }
+#endif
 }
 
 /**
@@ -346,7 +353,7 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisMallocFree") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_MemoryApisRegisterUnReg") {
+TEST_CASE(Unit_hipGetProcAddress_MemoryApisRegisterUnReg) {
   void* hipHostRegister_ptr = nullptr;
   void* hipHostUnregister_ptr = nullptr;
 
@@ -401,7 +408,7 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisRegisterUnReg") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_MemoryApisArrayRelated") {
+TEST_CASE(Unit_hipGetProcAddress_MemoryApisArrayRelated) {
   CHECK_IMAGE_SUPPORT
 
   void* hipMallocArray_ptr = nullptr;
@@ -823,7 +830,7 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisArrayRelated") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_MemoryApisSetAndGetAttributes") {
+TEST_CASE(Unit_hipGetProcAddress_MemoryApisSetAndGetAttributes) {
   void* hipPointerGetAttribute_ptr = nullptr;
   void* hipPointerGetAttributes_ptr = nullptr;
   void* hipDrvPointerGetAttributes_ptr = nullptr;
@@ -1177,7 +1184,7 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisSetAndGetAttributes") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_MemoryApisMemCopy") {
+TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopy) {
   void* hipMemcpyHtoD_ptr = nullptr;
   void* hipMemcpyDtoH_ptr = nullptr;
   void* hipMemcpyDtoD_ptr = nullptr;
@@ -1407,7 +1414,7 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisMemCopy") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams") {
+TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
   void* hipMemcpyHtoDAsync_ptr = nullptr;
   void* hipMemcpyDtoHAsync_ptr = nullptr;
   void* hipMemcpyDtoDAsync_ptr = nullptr;
@@ -2185,7 +2192,7 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_MemoryApisMemset") {
+TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemset) {
   void* hipMemsetD8_ptr = nullptr;
   void* hipMemsetD16_ptr = nullptr;
   void* hipMemsetD32_ptr = nullptr;
@@ -2478,7 +2485,7 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisMemset") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_MemoryApisMemset2D3D") {
+TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemset2D3D) {
   CHECK_IMAGE_SUPPORT
 
   void* hipMemset2D_ptr = nullptr;
@@ -2656,7 +2663,7 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisMemset2D3D") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_MemoryApisGetMemInfoRelated") {
+TEST_CASE(Unit_hipGetProcAddress_MemoryApisGetMemInfoRelated) {
   void* hipMemGetInfo_ptr = nullptr;
   void* hipMemPtrGetInfo_ptr = nullptr;
 
@@ -2707,7 +2714,7 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisGetMemInfoRelated") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated", "[multigpu]") {
+TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated) {
   CHECK_IMAGE_SUPPORT
 
   void* hipMemcpy2D_ptr = nullptr;
@@ -4484,7 +4491,7 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated", "[multigpu]") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_MemoryApisMemcpy3DRelated") {
+TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy3DRelated) {
   CHECK_IMAGE_SUPPORT
 
   void* hipMemcpy3D_ptr = nullptr;
@@ -5340,7 +5347,7 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisMemcpy3DRelated") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_MemoryApisAddressRelated") {
+TEST_CASE(Unit_hipGetProcAddress_MemoryApisAddressRelated) {
   int currentHipVersion = 0;
   HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
 
@@ -5382,7 +5389,7 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisAddressRelated") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_MemoryApisManagedMemory") {
+TEST_CASE(Unit_hipGetProcAddress_MemoryApisManagedMemory) {
   if (HmmAttrPrint() != 1) {
     HipTest::HIP_SKIP_TEST("Skipping test since managed memory not supported");
     return;
@@ -5619,10 +5626,17 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisManagedMemory") {
       }
     }
 
-    for (int i = 0; i < num_attributes; i++) {
-      delete data[i];
-      delete dataWithFuncPtr[i];
-    }
+    delete data[0];
+    delete data[1];
+    delete[] data[2];
+    delete data[3];
+    delete data[4];
+
+    delete dataWithFuncPtr[0];
+    delete dataWithFuncPtr[1];
+    delete[] dataWithFuncPtr[2];
+    delete dataWithFuncPtr[3];
+    delete dataWithFuncPtr[4];
 
     HIP_CHECK(hipFree(memPtr));
   }
@@ -5664,7 +5678,7 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisManagedMemory") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_MemoryApisStreamOrderedMemory") {
+TEST_CASE(Unit_hipGetProcAddress_MemoryApisStreamOrderedMemory) {
   HIP_CHECK(hipSetDevice(0));
   int mem_pool_support = 0;
 
@@ -6010,7 +6024,7 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisStreamOrderedMemory") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_MemoryApisPeerToPeer", "[multigpu]") {
+TEST_CASE(Unit_hipGetProcAddress_MemoryApisPeerToPeer) {
   int deviceCount = 0;
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
 
@@ -6070,6 +6084,7 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisPeerToPeer", "[multigpu]") {
 
     REQUIRE(basePtr == devPtr);
     REQUIRE(size == (4 * sizeof(int)));
+    HIP_CHECK(hipFree(devPtr));
   }
 
   // Validating hipMemcpyPeer API

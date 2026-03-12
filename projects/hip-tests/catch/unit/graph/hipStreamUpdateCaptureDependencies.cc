@@ -56,8 +56,9 @@ static __global__ void vectorSum(const float* A_d, const float* B_d, float* C_d,
 static void UpdateStreamCaptureDependenciesSet(hipStream_t stream,
                                                hipStreamCaptureMode captureMode) {
   constexpr size_t N = 1000000;
-  constexpr unsigned blocks = 512;
   constexpr unsigned threadsPerBlock = 256;
+  constexpr int blocks =
+      (N % threadsPerBlock == 0) ? (N / threadsPerBlock) : ((N / threadsPerBlock) + 1);
   size_t Nbytes = N * sizeof(float);
 
   hipStreamCaptureStatus captureStatus{hipStreamCaptureStatusNone};
@@ -175,8 +176,9 @@ static void UpdateStreamCaptureDependenciesSet(hipStream_t stream,
 static void UpdateStreamCaptureDependenciesAdd(hipStream_t stream,
                                                hipStreamCaptureMode captureMode) {
   constexpr size_t N = 1000000;
-  constexpr unsigned blocks = 512;
   constexpr unsigned threadsPerBlock = 256;
+  constexpr int blocks =
+      (N % threadsPerBlock == 0) ? (N / threadsPerBlock) : ((N / threadsPerBlock) + 1);
   size_t Nbytes = N * sizeof(float);
 
   hipStreamCaptureStatus captureStatus{hipStreamCaptureStatusNone};
@@ -304,7 +306,7 @@ static void UpdateStreamCaptureDependenciesAdd(hipStream_t stream,
  * ------------------------
  *    - HIP_VERSION >= 5.3
  */
-TEST_CASE("Unit_hipStreamSetCaptureDependencies_Positive_Functional") {
+TEST_CASE(Unit_hipStreamSetCaptureDependencies_Positive_Functional) {
   const auto stream_type = GENERATE(Streams::perThread, Streams::created);
   StreamGuard stream_guard(stream_type);
   hipStream_t stream = stream_guard.stream();
@@ -331,7 +333,7 @@ TEST_CASE("Unit_hipStreamSetCaptureDependencies_Positive_Functional") {
  * ------------------------
  *    - HIP_VERSION >= 5.3
  */
-TEST_CASE("Unit_hipStreamAddCaptureDependencies_Positive_Functional") {
+TEST_CASE(Unit_hipStreamAddCaptureDependencies_Positive_Functional) {
   const auto stream_type = GENERATE(Streams::perThread, Streams::created);
   StreamGuard stream_guard(stream_type);
   hipStream_t stream = stream_guard.stream();
@@ -354,7 +356,7 @@ TEST_CASE("Unit_hipStreamAddCaptureDependencies_Positive_Functional") {
  * ------------------------
  *    - HIP_VERSION >= 5.3
  */
-TEST_CASE("Unit_hipStreamUpdateCaptureDependencies_Positive_Parameters") {
+TEST_CASE(Unit_hipStreamUpdateCaptureDependencies_Positive_Parameters) {
   hipGraph_t graph{nullptr};
 
   const auto stream_type = GENERATE(Streams::perThread, Streams::created);
@@ -391,7 +393,7 @@ TEST_CASE("Unit_hipStreamUpdateCaptureDependencies_Positive_Parameters") {
  * ------------------------
  *    - HIP_VERSION >= 5.3
  */
-TEST_CASE("Unit_hipStreamUpdateCaptureDependencies_Negative_Parameters") {
+TEST_CASE(Unit_hipStreamUpdateCaptureDependencies_Negative_Parameters) {
   const int Nbytes = 100;
   hipGraph_t capInfoGraph{nullptr};
   hipGraph_t graph{nullptr};

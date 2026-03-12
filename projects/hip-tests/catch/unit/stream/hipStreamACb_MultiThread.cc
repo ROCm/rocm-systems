@@ -86,7 +86,7 @@ void Thread2_func() { HIPCHECK(hipStreamAddCallback(mystream, Thread2_Callback, 
  Test multiple hipStreamAddCallback() called over
  multiple Threads.
  */
-TEST_CASE("Unit_hipStreamAddCallback_MultipleThreads") {
+TEST_CASE(Unit_hipStreamAddCallback_MultipleThreads) {
   float *A_d, *C_d;
   size_t Nbytes = (N) * sizeof(float);
   constexpr float Phi = 1.618f;
@@ -109,7 +109,8 @@ TEST_CASE("Unit_hipStreamAddCallback_MultipleThreads") {
   HIP_CHECK(hipMemcpyAsync(A_d, A1_h, Nbytes, hipMemcpyHostToDevice, mystream));
 
   constexpr unsigned threadsPerBlock = 256;
-  constexpr unsigned blocks = (N + 255) / threadsPerBlock;
+  constexpr int blocks =
+      (N % threadsPerBlock == 0) ? (N / threadsPerBlock) : ((N / threadsPerBlock) + 1);
 
   hipLaunchKernelGGL((device_function), dim3(blocks), dim3(threadsPerBlock), 0, mystream, C_d, A_d,
                      N);

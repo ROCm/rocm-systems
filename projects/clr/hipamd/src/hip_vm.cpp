@@ -113,7 +113,7 @@ hipError_t hipMemCreate(hipMemGenericAllocationHandle_t* handle, size_t size,
   amd::Context* amdContext = useHostDevice ? hip::host_context : curDevContext;
 
   if (amdContext == nullptr) {
-    return hipErrorOutOfMemory;
+    HIP_RETURN(hipErrorOutOfMemory);
   }
 
   const auto& dev_info = amdContext->devices()[0]->info();
@@ -131,7 +131,7 @@ hipError_t hipMemCreate(hipMemGenericAllocationHandle_t* handle, size_t size,
   // Handle out of memory cases,
   if (ptr == nullptr) {
     size_t free = 0, total = 0;
-    hipError_t hip_error = hipMemGetInfo(&free, &total);
+    hipError_t hip_error = ihipMemGetInfo(&free, &total);
     if (hip_error == hipSuccess) {
       LogPrintfError(
           "Allocation failed : Device memory : required :%zu | free :%zu"
@@ -340,17 +340,18 @@ hipError_t hipMemRetainAllocationHandle(hipMemGenericAllocationHandle_t* handle,
   }
 
   amd::Memory* mem = amd::MemObjMap::FindMemObj(addr);
-
   if (mem == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  *handle = reinterpret_cast<hipMemGenericAllocationHandle_t>(
+  auto ga = reinterpret_cast<hip::GenericAllocation*>(
       mem->getUserData().phys_mem_obj->getUserData().data);
-
-  if (*handle == nullptr) {
+  if (ga == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
+
+  ga->retain();
+  *handle = reinterpret_cast<hipMemGenericAllocationHandle_t>(ga);
 
   HIP_RETURN(hipSuccess);
 }
@@ -450,6 +451,9 @@ hipError_t hipMemUnmap(void* ptr, size_t size) {
       HIP_RETURN(hipErrorInvalidValue);
     }
 
+    // Save next_ptr before enqueue — submitVirtualMap releases sub_obj
+    address next_ptr = NextSubBufferPtr(vaddr_sub_obj);
+
     amd::Command* cmd = new amd::VirtualMapCommand(
         *hip::getCurrentDevice()->NullStream(), amd::Command::EventWaitList{},
         vaddr_sub_obj->getSvmPtr(), vaddr_sub_obj->getSize(), nullptr);
@@ -461,8 +465,7 @@ hipError_t hipMemUnmap(void* ptr, size_t size) {
         reinterpret_cast<hip::GenericAllocation*>(phys_mem_obj->getUserData().data);
     ga->release();
 
-    address next_ptr = NextSubBufferPtr(vaddr_sub_obj);
-    vaddr_sub_obj->release();
+    // sub_obj already released in submitVirtualMap after HW unmap
     vaddr_sub_obj = amd::MemObjMap::FindMemObj(next_ptr);
   }
 

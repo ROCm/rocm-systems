@@ -94,6 +94,7 @@ static void hipTestWithGraph() {
   HIP_CHECK(hipFree(in_d));
   HIP_CHECK(hipFree(out_d));
   HIP_CHECK(hipGraphExecDestroy(instance));
+  HIP_CHECK(hipGraphDestroy(graph));
   HIP_CHECK(hipStreamDestroy(stream));
 }
 
@@ -148,7 +149,7 @@ static void hipTestWithoutGraph() {
 /**
  * Simple test to demonstrate usage of graph.
  */
-TEST_CASE("Unit_hipGraph_SimpleGraphWithKernel") {
+TEST_CASE(Unit_hipGraph_SimpleGraphWithKernel) {
   // Sections run test with and without graph.
   SECTION("Run Test Without Graph") { hipTestWithoutGraph(); }
 

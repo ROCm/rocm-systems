@@ -96,6 +96,157 @@ TEST_F(DuplicatedEnvironmentEntriesTest, HandlesEmptyValues)
         std::free(entry);
 }
 
+TEST_F(DuplicatedEnvironmentEntriesTest, PapiEventsUsesCommaDelimiter)
+{
+    // PAPI events contain :: in their syntax, so they should use , as delimiter
+    std::vector<char*> env_vars = {
+        strdup("ROCPROFSYS_PAPI_EVENTS=perf::INSTRUCTIONS"),
+        strdup("ROCPROFSYS_PAPI_EVENTS=perf::CACHE_MISSES"),
+    };
+    consolidate_env_entries(env_vars);
+    ASSERT_EQ(env_vars.size(), 1);
+    EXPECT_STREQ(env_vars[0],
+                 "ROCPROFSYS_PAPI_EVENTS=perf::INSTRUCTIONS,perf::CACHE_MISSES");
+
+    for(auto* entry : env_vars)
+        std::free(entry);
+}
+
+TEST_F(DuplicatedEnvironmentEntriesTest, PapiEventsPreservesColonInValue)
+{
+    // Single PAPI event entry should preserve the :: in the value
+    std::vector<char*> env_vars = {
+        strdup("ROCPROFSYS_PAPI_EVENTS=perf::PERF_COUNT_SW_CPU_CLOCK"),
+    };
+    consolidate_env_entries(env_vars);
+    ASSERT_EQ(env_vars.size(), 1);
+    EXPECT_STREQ(env_vars[0], "ROCPROFSYS_PAPI_EVENTS=perf::PERF_COUNT_SW_CPU_CLOCK");
+
+    for(auto* entry : env_vars)
+        std::free(entry);
+}
+
+TEST_F(DuplicatedEnvironmentEntriesTest, PapiEventsDeduplicates)
+{
+    // Duplicate PAPI events should be deduplicated
+    std::vector<char*> env_vars = {
+        strdup("ROCPROFSYS_PAPI_EVENTS=perf::INSTRUCTIONS"),
+        strdup("ROCPROFSYS_PAPI_EVENTS=perf::CACHE_MISSES"),
+        strdup("ROCPROFSYS_PAPI_EVENTS=perf::INSTRUCTIONS"),
+    };
+    consolidate_env_entries(env_vars);
+    ASSERT_EQ(env_vars.size(), 1);
+    EXPECT_STREQ(env_vars[0],
+                 "ROCPROFSYS_PAPI_EVENTS=perf::INSTRUCTIONS,perf::CACHE_MISSES");
+
+    for(auto* entry : env_vars)
+        std::free(entry);
+}
+
+TEST_F(DuplicatedEnvironmentEntriesTest, SamplingOverflowEventUsesCommaDelimiter)
+{
+    std::vector<char*> env_vars = {
+        strdup("ROCPROFSYS_SAMPLING_OVERFLOW_EVENT=perf::INSTRUCTIONS"),
+        strdup("ROCPROFSYS_SAMPLING_OVERFLOW_EVENT=perf::CYCLES"),
+    };
+    consolidate_env_entries(env_vars);
+    ASSERT_EQ(env_vars.size(), 1);
+    EXPECT_STREQ(env_vars[0],
+                 "ROCPROFSYS_SAMPLING_OVERFLOW_EVENT=perf::INSTRUCTIONS,perf::CYCLES");
+
+    for(auto* entry : env_vars)
+        std::free(entry);
+}
+
+TEST_F(DuplicatedEnvironmentEntriesTest, MixedDelimiterVariables)
+{
+    // Test that regular variables use : and PAPI uses ,
+    std::vector<char*> env_vars = {
+        strdup("PATH=/usr/bin"),
+        strdup("ROCPROFSYS_PAPI_EVENTS=perf::INSTRUCTIONS"),
+        strdup("PATH=/usr/local/bin"),
+        strdup("ROCPROFSYS_PAPI_EVENTS=perf::CACHE_MISSES"),
+        strdup("LD_LIBRARY_PATH=/lib"),
+    };
+    consolidate_env_entries(env_vars);
+    ASSERT_EQ(env_vars.size(), 3);
+    EXPECT_STREQ(env_vars[0], "PATH=/usr/bin:/usr/local/bin");
+    EXPECT_STREQ(env_vars[1],
+                 "ROCPROFSYS_PAPI_EVENTS=perf::INSTRUCTIONS,perf::CACHE_MISSES");
+    EXPECT_STREQ(env_vars[2], "LD_LIBRARY_PATH=/lib");
+
+    for(auto* entry : env_vars)
+        std::free(entry);
+}
+
+TEST_F(DuplicatedEnvironmentEntriesTest, PreservesKeyOrder)
+{
+    std::vector<char*> env_vars = {
+        strdup("ZEBRA=1"),
+        strdup("ALPHA=2"),
+        strdup("MIDDLE=3"),
+    };
+    consolidate_env_entries(env_vars);
+    ASSERT_EQ(env_vars.size(), 3);
+    // Order should be preserved based on first occurrence
+    EXPECT_STREQ(env_vars[0], "ZEBRA=1");
+    EXPECT_STREQ(env_vars[1], "ALPHA=2");
+    EXPECT_STREQ(env_vars[2], "MIDDLE=3");
+
+    for(auto* entry : env_vars)
+        std::free(entry);
+}
+
+TEST_F(DuplicatedEnvironmentEntriesTest, PapiEventsWithCommaInValue)
+{
+    // If PAPI events are already comma-separated in a single entry, they should be split
+    std::vector<char*> env_vars = {
+        strdup("ROCPROFSYS_PAPI_EVENTS=perf::INSTRUCTIONS,perf::CYCLES"),
+        strdup("ROCPROFSYS_PAPI_EVENTS=perf::CACHE_MISSES"),
+    };
+    consolidate_env_entries(env_vars);
+    ASSERT_EQ(env_vars.size(), 1);
+    EXPECT_STREQ(
+        env_vars[0],
+        "ROCPROFSYS_PAPI_EVENTS=perf::INSTRUCTIONS,perf::CYCLES,perf::CACHE_MISSES");
+
+    for(auto* entry : env_vars)
+        std::free(entry);
+}
+
+TEST_F(DuplicatedEnvironmentEntriesTest, RocmEventsUsesCommaDelimiter)
+{
+    // ROCM events use :device=N syntax, so they should use , as delimiter
+    std::vector<char*> env_vars = {
+        strdup("ROCPROFSYS_ROCM_EVENTS=SQ_WAVES:device=0"),
+        strdup("ROCPROFSYS_ROCM_EVENTS=TA_TA_BUSY:device=1"),
+    };
+    consolidate_env_entries(env_vars);
+    ASSERT_EQ(env_vars.size(), 1);
+    EXPECT_STREQ(env_vars[0],
+                 "ROCPROFSYS_ROCM_EVENTS=SQ_WAVES:device=0,TA_TA_BUSY:device=1");
+
+    for(auto* entry : env_vars)
+        std::free(entry);
+}
+
+TEST_F(DuplicatedEnvironmentEntriesTest, RocmEventsPreservesDeviceSyntax)
+{
+    // Single ROCM event entry should preserve the :device= syntax
+    std::vector<char*> env_vars = {
+        strdup("ROCPROFSYS_ROCM_EVENTS=GRBM_COUNT,SQ_WAVES,SQ_INSTS_VALU,TA_TA_BUSY:"
+               "device=0"),
+    };
+    consolidate_env_entries(env_vars);
+    ASSERT_EQ(env_vars.size(), 1);
+    EXPECT_STREQ(
+        env_vars[0],
+        "ROCPROFSYS_ROCM_EVENTS=GRBM_COUNT,SQ_WAVES,SQ_INSTS_VALU,TA_TA_BUSY:device=0");
+
+    for(auto* entry : env_vars)
+        std::free(entry);
+}
+
 class AddTorchLibraryPathTest : public ::testing::Test
 {
 protected:

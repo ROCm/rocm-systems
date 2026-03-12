@@ -574,9 +574,6 @@ PROFILING WORKFLOW:
                 rocprofsys::common::update_env(_env, "ROCPROFSYS_PROFILE", true,
                                                update_mode::REPLACE, ":", updated_envs,
                                                original_envs);
-                rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_ROCM", true,
-                                               update_mode::REPLACE, ":", updated_envs,
-                                               original_envs);
                 rocprofsys::common::update_env(
                     _env, "ROCPROFSYS_ROCM_DOMAINS",
                     "hip_api,hsa_api,marker_api,rccl_api,memory_copy,"
@@ -601,9 +598,6 @@ PROFILING WORKFLOW:
                 rocprofsys::common::update_env(_env, "ROCPROFSYS_PROFILE", true,
                                                update_mode::REPLACE, ":", updated_envs,
                                                original_envs);
-                rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_ROCM", true,
-                                               update_mode::REPLACE, ":", updated_envs,
-                                               original_envs);
                 rocprofsys::common::update_env(
                     _env, "ROCPROFSYS_ROCM_DOMAINS",
                     "hip_runtime_api,marker_api,rccl_api,memory_copy,"
@@ -624,9 +618,6 @@ PROFILING WORKFLOW:
                                                update_mode::REPLACE, ":", updated_envs,
                                                original_envs);
                 rocprofsys::common::update_env(_env, "ROCPROFSYS_PROFILE", false,
-                                               update_mode::REPLACE, ":", updated_envs,
-                                               original_envs);
-                rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_ROCM", true,
                                                update_mode::REPLACE, ":", updated_envs,
                                                original_envs);
                 rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_AMD_SMI", true,
@@ -656,9 +647,6 @@ PROFILING WORKFLOW:
                 rocprofsys::common::update_env(_env, "ROCPROFSYS_PROFILE", false,
                                                update_mode::REPLACE, ":", updated_envs,
                                                original_envs);
-                rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_ROCM", true,
-                                               update_mode::REPLACE, ":", updated_envs,
-                                               original_envs);
                 rocprofsys::common::update_env(
                     _env, "ROCPROFSYS_ROCM_DOMAINS",
                     "hip_runtime_api,marker_api,kernel_dispatch,memory_copy,hsa_api",
@@ -686,9 +674,6 @@ PROFILING WORKFLOW:
                                                update_mode::REPLACE, ":", updated_envs,
                                                original_envs);
                 rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_AMD_SMI", false,
-                                               update_mode::REPLACE, ":", updated_envs,
-                                               original_envs);
-                rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_ROCM", false,
                                                update_mode::REPLACE, ":", updated_envs,
                                                original_envs);
             }
@@ -1042,6 +1027,17 @@ PROFILING WORKFLOW:
                 join(array_config{ "," }, p.get<std::vector<std::string>>("gpus")),
                 update_mode::REPLACE, ":", updated_envs, original_envs);
         });
+    parser
+        .add_argument({ "--ai-nics" },
+                      "AI NIC IDs for SMI queries. Comma-separated list.")
+        .dtype("string")
+        .required({ "device" })
+        .action([&](parser_t& p) {
+            rocprofsys::common::update_env(
+                _env, "ROCPROFSYS_SAMPLING_AINICS",
+                join(array_config{ "," }, p.get<std::vector<std::string>>("ai-nics")),
+                update_mode::REPLACE, ":", updated_envs, original_envs);
+        });
 
     parser.start_group("GENERAL SAMPLING OPTIONS",
                        "General options for timer-based sampling per-thread");
@@ -1168,13 +1164,6 @@ PROFILING WORKFLOW:
     _backend_choices.erase("ompt");
 #endif
 
-#if !defined(ROCPROFSYS_USE_ROCM) || ROCPROFSYS_USE_ROCM == 0
-    _backend_choices.erase("rocm");
-    _backend_choices.erase("amd-smi");
-    _backend_choices.erase("rcclp");
-    _backend_choices.erase("ompt");
-#endif
-
     parser.start_group("BACKEND OPTIONS",
                        "These options control region information captured "
                        "w/o sampling or instrumentation");
@@ -1190,7 +1179,6 @@ PROFILING WORKFLOW:
             _update("ROCPROFSYS_USE_KOKKOSP", _v.count("kokkosp") > 0);
             _update("ROCPROFSYS_USE_MPIP", _v.count("mpip") > 0);
             _update("ROCPROFSYS_USE_OMPT", _v.count("ompt") > 0);
-            _update("ROCPROFSYS_USE_ROCM", _v.count("rocm") > 0);
             _update("ROCPROFSYS_USE_RCCLP", _v.count("rcclp") > 0);
             _update("ROCPROFSYS_USE_AMD_SMI", _v.count("amd-smi") > 0);
             _update("ROCPROFSYS_TRACE_THREAD_LOCKS", _v.count("mutex-locks") > 0);
@@ -1216,7 +1204,6 @@ PROFILING WORKFLOW:
             _update("ROCPROFSYS_USE_KOKKOSP", _v.count("kokkosp") > 0);
             _update("ROCPROFSYS_USE_MPIP", _v.count("mpip") > 0);
             _update("ROCPROFSYS_USE_OMPT", _v.count("ompt") > 0);
-            _update("ROCPROFSYS_USE_ROCM", _v.count("rocm") > 0);
             _update("ROCPROFSYS_USE_RCCLP", _v.count("rcclp") > 0);
             _update("ROCPROFSYS_USE_AMD_SMI", _v.count("amd-smi") > 0);
             _update("ROCPROFSYS_TRACE_THREAD_LOCKS", _v.count("mutex-locks") > 0);

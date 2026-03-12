@@ -20,17 +20,17 @@
  * THE SOFTWARE.
  */
 
-#include <limits.h>
+#include <climits>
 #include <sys/ioctl.h>
 #include <libdrm/amdgpu.h>
 #include <libdrm/drm.h>
 #include <fcntl.h>
 #include <cstdint>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <sys/mman.h>
-#include <time.h>
+#include <ctime>
 #include <unistd.h>
 #include <dirent.h>
 #include <sys/types.h>
@@ -41,14 +41,13 @@
 #include <iostream>
 #include <iterator>
 #include <memory>
-#include <random>
 #include <regex>
 #include <sstream>
 
 #include "config/amd_smi_config.h"
 #include "amd_smi/impl/amd_smi_utils.h"
+#include "amd_smi/impl/scoped_fd.h"
 #include "amd_smi/impl/amd_smi_system.h"
-#include "shared_mutex.h"  // NOLINT
 #include "rocm_smi/rocm_smi_logger.h"
 #include "rocm_smi/rocm_smi_utils.h"
 

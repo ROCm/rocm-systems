@@ -54,7 +54,7 @@ static void RunBenchmark() {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Performance_hipStreamAddCallback") { RunBenchmark(); }
+TEST_CASE(Performance_hipStreamAddCallback) { RunBenchmark(); }
 
 /**
  * End doxygen group PerformanceTest.

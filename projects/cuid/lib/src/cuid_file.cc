@@ -60,23 +60,22 @@ bool CuidFileLock::acquire() {
         return true;  // Already locked
     }
 
-    // For shared (read) locks, we only need O_RDONLY access
-    // For exclusive (write) locks, we need O_RDWR access
-    // This allows unprivileged users to acquire shared locks on files created by root
-    int open_flags = (lock_type_ == CuidLockType::EXCLUSIVE) ? (O_RDWR | O_CREAT) : O_RDONLY;
-    
-    // For exclusive locks (creating/writing), ensure proper permissions by clearing umask
+    // For shared (read) locks, we only need O_RDONLY access.
+    // For exclusive (write) locks, first open existing file with O_RDWR.
+    // Only create if missing to avoid sticky-dir O_CREAT restrictions in /tmp.
     if (lock_type_ == CuidLockType::EXCLUSIVE) {
-        mode_t old_umask = umask(0);
-        lock_fd_ = open(lock_file_path_.c_str(), open_flags, 0666);
-        umask(old_umask);
-        // Ensure permissions are correct even if file already existed
-        if (lock_fd_ >= 0) {
-            fchmod(lock_fd_, 0666);
+        lock_fd_ = open(lock_file_path_.c_str(), O_RDWR, 0666);
+        if (lock_fd_ < 0 && errno == ENOENT) {
+            mode_t old_umask = umask(0);
+            lock_fd_ = open(lock_file_path_.c_str(), O_RDWR | O_CREAT, 0666);
+            umask(old_umask);
+            if (lock_fd_ >= 0) {
+                fchmod(lock_fd_, 0666);
+            }
         }
     } else {
         // Try to open existing file for shared (read) lock
-        lock_fd_ = open(lock_file_path_.c_str(), open_flags, 0666);
+        lock_fd_ = open(lock_file_path_.c_str(), O_RDONLY, 0666);
     }
     
     // If file doesn't exist and we need a shared lock, try to create it
@@ -136,20 +135,21 @@ bool CuidFileLock::acquire_with_timeout(int timeout_seconds) {
         return true;  // Already locked
     }
 
-    // For shared (read) locks, we only need O_RDONLY access
-    // For exclusive (write) locks, we need O_RDWR access
-    int open_flags = (lock_type_ == CuidLockType::EXCLUSIVE) ? (O_RDWR | O_CREAT) : O_RDONLY;
-    
-    // For exclusive locks (creating/writing), ensure proper permissions by clearing umask
+    // For shared (read) locks, we only need O_RDONLY access.
+    // For exclusive (write) locks, first open existing file with O_RDWR.
+    // Only create if missing to avoid sticky-dir O_CREAT restrictions in /tmp.
     if (lock_type_ == CuidLockType::EXCLUSIVE) {
-        mode_t old_umask = umask(0);
-        lock_fd_ = open(lock_file_path_.c_str(), open_flags, 0666);
-        umask(old_umask);
-        if (lock_fd_ >= 0) {
-            fchmod(lock_fd_, 0666);
+        lock_fd_ = open(lock_file_path_.c_str(), O_RDWR, 0666);
+        if (lock_fd_ < 0 && errno == ENOENT) {
+            mode_t old_umask = umask(0);
+            lock_fd_ = open(lock_file_path_.c_str(), O_RDWR | O_CREAT, 0666);
+            umask(old_umask);
+            if (lock_fd_ >= 0) {
+                fchmod(lock_fd_, 0666);
+            }
         }
     } else {
-        lock_fd_ = open(lock_file_path_.c_str(), open_flags, 0666);
+        lock_fd_ = open(lock_file_path_.c_str(), O_RDONLY, 0666);
     }
     
     // If file doesn't exist and we need a shared lock, try to create it
@@ -218,20 +218,21 @@ bool CuidFileLock::try_acquire() {
         return true;  // Already locked
     }
 
-    // For shared (read) locks, we only need O_RDONLY access
-    // For exclusive (write) locks, we need O_RDWR access
-    int open_flags = (lock_type_ == CuidLockType::EXCLUSIVE) ? (O_RDWR | O_CREAT) : O_RDONLY;
-    
-    // For exclusive locks (creating/writing), ensure proper permissions by clearing umask
+    // For shared (read) locks, we only need O_RDONLY access.
+    // For exclusive (write) locks, first open existing file with O_RDWR.
+    // Only create if missing to avoid sticky-dir O_CREAT restrictions in /tmp.
     if (lock_type_ == CuidLockType::EXCLUSIVE) {
-        mode_t old_umask = umask(0);
-        lock_fd_ = open(lock_file_path_.c_str(), open_flags, 0666);
-        umask(old_umask);
-        if (lock_fd_ >= 0) {
-            fchmod(lock_fd_, 0666);
+        lock_fd_ = open(lock_file_path_.c_str(), O_RDWR, 0666);
+        if (lock_fd_ < 0 && errno == ENOENT) {
+            mode_t old_umask = umask(0);
+            lock_fd_ = open(lock_file_path_.c_str(), O_RDWR | O_CREAT, 0666);
+            umask(old_umask);
+            if (lock_fd_ >= 0) {
+                fchmod(lock_fd_, 0666);
+            }
         }
     } else {
-        lock_fd_ = open(lock_file_path_.c_str(), open_flags, 0666);
+        lock_fd_ = open(lock_file_path_.c_str(), O_RDONLY, 0666);
     }
     
     // If file doesn't exist and we need a shared lock, try to create it
@@ -451,7 +452,7 @@ amdcuid_status_t CuidFile::load() {
                 } else if (key == "mac_address") {
                     current_entry.mac_address = value;
                 } else if (key == "hardware_fingerprint") {
-                    current_entry.hardware_fingerprint = std::stoull(value);
+                    current_entry.hardware_fingerprint = static_cast<uint64_t>(std::stoull(value, nullptr, 16));
                 } else if (key == "vendor_id") {
                     current_entry.vendor_id = static_cast<uint16_t>(std::stoul(value, nullptr, 16));
                 } else if (key == "device_id") {
@@ -467,7 +468,7 @@ amdcuid_status_t CuidFile::load() {
                 } else if (key == "unit_id") {
                     current_entry.unit_id = static_cast<uint16_t>(std::stoul(value, nullptr, 16));
                 } else if (key == "last_update") {
-                    current_entry.last_update = std::stol(value);
+                    current_entry.last_update = std::stol(value, nullptr, 10);
                 }
             }
         }
@@ -547,7 +548,7 @@ amdcuid_status_t CuidFile::save() {
             // Write hardware fingerprint (privileged file only)
             if (is_privileged_)
             {
-                file << "hardware_fingerprint=" << entry.hardware_fingerprint << "\n";
+                file << "hardware_fingerprint=" << std::hex << std::setw(16) << std::setfill('0') << entry.hardware_fingerprint << "\n";
             }
 
             // Write device-specific fields
@@ -586,7 +587,7 @@ amdcuid_status_t CuidFile::save() {
             }
             
             // Write timestamp
-            file << "last_update=" << entry.last_update << "\n";
+            file << std::dec << "last_update=" << entry.last_update << "\n";
             file << "\n";
         }
     }
@@ -767,6 +768,17 @@ amdcuid_status_t CuidFileGenerator::generate_from_devices(
             continue;
         }
         entry.derived_cuid = derived_id.UUIDv8_representation;
+
+        // get hardware fingerprint
+        uint64_t fingerprint = 0;
+        status = device->get_hardware_fingerprint(fingerprint);
+        if (status != AMDCUID_STATUS_SUCCESS) {
+            std::cerr << "Warning: Failed to get hardware fingerprint for device type " 
+                      << entry.device_type << " status: " << status << std::endl;
+            entry.hardware_fingerprint = 0;
+        } else {
+            entry.hardware_fingerprint = fingerprint;
+        }
 
         // Fill in device-specific information
         switch (entry.device_type) {

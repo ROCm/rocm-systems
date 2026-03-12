@@ -113,10 +113,6 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
                 "version of rocprof-compute. This functionality is planned for a "
                 "future release. Please adjust your profiling options accordingly."
             )
-        if args.hip_trace:
-            options["ROCPROF_HIP_COMPILER_API_TRACE"] = "1"
-            options["ROCPROF_HIP_RUNTIME_API_TRACE"] = "1"
-
         # Kernel filtering
         if args.kernel:
             options["ROCPROF_KERNEL_FILTER_INCLUDE_REGEX"] = "|".join(args.kernel)

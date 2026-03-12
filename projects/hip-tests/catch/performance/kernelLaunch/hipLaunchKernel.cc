@@ -88,7 +88,7 @@ template <KernelType kernel_type, bool timer_type> static void RunBenchmark(bool
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Performance_hipLaunchKernel") {
+TEST_CASE(Performance_hipLaunchKernel) {
   bool sync = GENERATE(true, false);
 
   SECTION("null kernel") {

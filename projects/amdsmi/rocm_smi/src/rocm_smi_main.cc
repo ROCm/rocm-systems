@@ -42,6 +42,7 @@
 #include "rocm_smi/rocm_smi_utils.h"
 #include "rocm_smi/rocm_smi_kfd.h"
 #include "rocm_smi/rocm_smi_logger.h"
+#include "rocm_smi/rocm_smi_kfd_data_manager.h"
 
 
 static const char *kPathDRMRoot = "/sys/class/drm";
@@ -617,6 +618,13 @@ static inline std::unordered_set<uint32_t> GetEnvVarUIntegerSets(
 
 // Get and store env. variables in this method
 void RocmSMI::GetEnvVariables(void) {
+  amd::smi::kfd::KFDManagerConfig kfd_cfg;
+  amd::smi::kfd::LoadConfigFromEnvironment(kfd_cfg);
+  auto ret = amd::smi::kfd::InitializeManager(kfd_cfg);
+  if (ret != 0) {  // we'll never hit this (as of today)
+    throw amd::smi::rsmi_exception(RSMI_INITIALIZATION_ERROR,
+                 "Failed to initialize KFD Manager from environment config.");
+  }
   env_vars_.logging_on = getRSMIEnvVar_LoggingEnabled("RSMI_LOGGING");
 #ifndef DEBUG
   (void)GetEnvVarUInteger(nullptr);  // This is to quiet release build warning.
@@ -660,6 +668,7 @@ void RocmSMI::debugRSMIEnvVarInfo(void) {
 }
 
 std::string RocmSMI::getRSMIEnvVarInfo(void) {
+  amd::smi::kfd::KFDManagerConfig kfd_cfg = amd::smi::kfd::GetCurrentConfig();
   std::ostringstream ss;
   ss << "\n\tRSMI_DEBUG_BITFIELD = "
      << ((env_vars_.debug_output_bitfield == 0) ? "<undefined>"
@@ -686,6 +695,18 @@ std::string RocmSMI::getRSMIEnvVarInfo(void) {
   bool isLoggingOn = RocmSMI::isLoggingOn() ? true : false;
   ss << "\tRSMI_LOGGING (are logs on) = "
             << (isLoggingOn ? "TRUE" : "FALSE") << std::endl;
+  ss << "\tAMDSMI_KFD_USE_ORIG_VRAM: "
+     << std::boolalpha << kfd_cfg.use_original_vram_fcn << std::endl;
+  ss << "\tAMDSMI_KFD_DISABLE_INOTIFY_POLLING: "
+     << std::boolalpha << kfd_cfg.disable_inotify_polling << std::endl;
+  ss << "\tAMDSMI_KFD_INOTIFY_POLL_MS: "
+     << kfd_cfg.inotify_poll_ms << " ms" << std::endl;
+  ss << "\tAMDSMI_KFD_CLEANUP_POLL_US: "
+     << kfd_cfg.cleanup_poll_us << " us" << std::endl;
+  ss << "\tAMDSMI_KFD_CACHE_TTL_MS: "
+     << kfd_cfg.cache_ttl_ms << " ms" << std::endl;
+  ss << "\tAMDSMI_KFD_MAX_CLEANUP_WAIT_MS: "
+     << kfd_cfg.max_cleanup_wait_ms << " ms" << std::endl;
   ss << "\tRSMI_DEBUG_ENUM_OVERRIDE = {";
   if (env_vars_.enum_overrides.empty()) {
     ss << "}" << std::endl;
@@ -696,7 +717,7 @@ std::string RocmSMI::getRSMIEnvVarInfo(void) {
     DevInfoTypes type = static_cast<DevInfoTypes>(*it);
     ss << (std::to_string(*it) + " (" + Device::get_type_string(type) + ")");
     auto temp_it = it;
-    if(++temp_it != env_vars_.enum_overrides.end()) {
+    if (++temp_it != env_vars_.enum_overrides.end()) {
       ss << ", ";
     }
   }
@@ -1006,7 +1027,7 @@ static bool isBRCMnic(std::string dev_path) {
   std::ostringstream ss;
   std::string vend_path = dev_path + kPathDeviceVendor;
   if (!FileExists(vend_path.c_str())) {
-    ss << __PRETTY_FUNCTION__ << " | device_path = " << dev_path << " is an BRCMnic device - "
+    ss << __PRETTY_FUNCTION__ << " | device_path = " << dev_path << " is a BRCM NIC device - "
        << (isBRCMnic ? "TRUE" : " FALSE");
     LOG_DEBUG(ss);
     return isBRCMnic;
@@ -1016,7 +1037,7 @@ static bool isBRCMnic(std::string dev_path) {
   fs.open(vend_path);
 
   if (!fs.is_open()) {
-    ss << __PRETTY_FUNCTION__ << " | device_path = " << dev_path << " is an BRCMnic device - "
+    ss << __PRETTY_FUNCTION__ << " | device_path = " << dev_path << " is a BRCM NIC device - "
        << (isBRCMnic ? "TRUE" : " FALSE");
     LOG_DEBUG(ss);
     return isBRCMnic;
@@ -1031,7 +1052,7 @@ static bool isBRCMnic(std::string dev_path) {
   if (vendor_id == kBRCMnicId) {
     isBRCMnic = true;
   }
-  ss << __PRETTY_FUNCTION__ << " | device_path = " << dev_path << " is an BRCMnic device - "
+  ss << __PRETTY_FUNCTION__ << " | device_path = " << dev_path << " is a BRCM NIC device - "
      << (isBRCMnic ? "TRUE" : " FALSE");
   LOG_DEBUG(ss);
   return isBRCMnic;
@@ -1044,7 +1065,7 @@ static bool isBRCMswitch(std::string dev_path) {
   std::string ldev_path = dev_path + kPathDevice;
 
   if (!FileExists(vend_path.c_str()) || !FileExists(ldev_path.c_str())) {
-    ss << __PRETTY_FUNCTION__ << " | device_path = " << dev_path << " is an BRCMswitch device - "
+    ss << __PRETTY_FUNCTION__ << " | device_path = " << dev_path << " is a BRCM switch device - "
        << (isBRCMswitch ? "TRUE" : " FALSE");
     LOG_DEBUG(ss);
     return isBRCMswitch;
@@ -1055,7 +1076,7 @@ static bool isBRCMswitch(std::string dev_path) {
   dfs.open(ldev_path);
 
   if (!vfs.is_open() || !dfs.is_open()) {
-    ss << __PRETTY_FUNCTION__ << " | device_path = " << dev_path << " is an BRCMswitch device - "
+    ss << __PRETTY_FUNCTION__ << " | device_path = " << dev_path << " is a BRCM switch device - "
        << (isBRCMswitch ? "TRUE" : " FALSE");
     LOG_DEBUG(ss);
     return isBRCMswitch;
@@ -1073,7 +1094,7 @@ static bool isBRCMswitch(std::string dev_path) {
   if (vendor_id == kBRCMswitchId && dev_id == kBRCMswitchDId) {
     isBRCMswitch = true;
   }
-  ss << __PRETTY_FUNCTION__ << " | device_path = " << dev_path << " is an BRCMswitch device - "
+  ss << __PRETTY_FUNCTION__ << " | device_path = " << dev_path << " is a BRCM switch device - "
      << (isBRCMswitch ? "TRUE" : " FALSE");
   LOG_DEBUG(ss);
   return isBRCMswitch;

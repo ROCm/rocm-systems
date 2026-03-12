@@ -51,7 +51,7 @@ constexpr size_t N = 1000000;
 * ------------------------
 * - HIP_VERSION >= 6.2
 */
-TEST_CASE("Unit_hipGraphInstantiateWithParams_Negative") {
+TEST_CASE(Unit_hipGraphInstantiateWithParams_Negative) {
   SECTION("Passing nullptr pGraphExec") {
     hipGraph_t graph;
     hipGraphInstantiateParams params;
@@ -204,8 +204,9 @@ void GraphInstantiateWithParams_StreamCapture() {
   HIP_CHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyHostToDevice, stream));
   HIP_CHECK(hipMemsetAsync(C_d, 0, Nbytes, stream));
 
-  constexpr unsigned blocks = 512;
   constexpr unsigned threadsPerBlock = 256;
+  constexpr unsigned blocks =
+      (N % threadsPerBlock == 0) ? (N / threadsPerBlock) : ((N / threadsPerBlock) + 1);
   hipLaunchKernelGGL(HipTest::vector_square, dim3(blocks), dim3(threadsPerBlock), 0, stream, A_d,
                      C_d, N);
   HIP_CHECK(hipMemcpyAsync(C_h, C_d, Nbytes, hipMemcpyDeviceToHost, stream));
@@ -255,7 +256,7 @@ void GraphInstantiateWithParams_StreamCapture() {
  * ------------------------
  * - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGraphInstantiateWithParams_DependencyGraph") {
+TEST_CASE(Unit_hipGraphInstantiateWithParams_DependencyGraph) {
   GraphInstantiateWithParams_DependencyGraph();
 }
 
@@ -273,7 +274,7 @@ TEST_CASE("Unit_hipGraphInstantiateWithParams_DependencyGraph") {
  * ------------------------
  * - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGraphInstantiateWithParams_StreamCapture") {
+TEST_CASE(Unit_hipGraphInstantiateWithParams_StreamCapture) {
   GraphInstantiateWithParams_StreamCapture();
 }
 

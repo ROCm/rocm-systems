@@ -1835,6 +1835,13 @@ ncclResult_t ncclIbAccept(void* listenComm, void** recvComm, ncclNetDeviceHandle
   struct ncclIbRecvComm* rComm = (struct ncclIbRecvComm*)stage->comm;
   int ready;
   int link_layer = IBV_LINK_LAYER_UNSPECIFIED;
+  // Pre-declare dmabuf variables because of goto
+  bool useDmaBuf = false;
+  bool peermemAvailable = false;
+  bool dmabufSupported = false;
+  bool dmabufEnabled = false;
+  bool dmabufAvailable = false;
+  bool forceDmaBuf = false;
   *recvComm = NULL;
 
   if (stage->state == ncclIbCommStateAccept)   goto ib_accept_check;
@@ -1908,7 +1915,6 @@ ib_recv:
   struct ncclIbRecvCommDev* rCommDev;
   struct ncclIbDevInfo* remDevInfo;
   struct ncclIbQp* qp;
-  bool useDmaBuf;
 
   mergedDev = ncclIbMergedDevs + lComm->dev;
   rComm->base.nRemDevs = remMeta.ndevs;
@@ -1990,8 +1996,36 @@ ib_recv:
     }
   }
 
-  useDmaBuf  = (ncclIbDmaBufSupport(lComm->dev) == ncclSuccess && ncclParamDmaBufEnable());
-  rComm->flushEnabled = ((ncclIbGdrSupport() == ncclSuccess || useDmaBuf)
+  // GDR mode selection logic
+  peermemAvailable = (ncclIbGdrSupport() == ncclSuccess);
+  dmabufSupported = (ncclIbDmaBufSupport(lComm->dev) == ncclSuccess);
+  dmabufEnabled = (ncclParamDmaBufEnable() != 0);
+  dmabufAvailable = dmabufSupported && dmabufEnabled;
+  forceDmaBuf = rcclParamForceEnableDMABUF();
+
+  if (forceDmaBuf) {
+    // RCCL_FORCE_ENABLE_DMABUF=1: always try DMAbuf, skip peermem
+    useDmaBuf = dmabufAvailable;
+    if (dmabufAvailable) {
+      INFO(NCCL_INIT|NCCL_NET, "NET/IB: Using GPU Direct RDMA (DMAbuf - forced) for device %d", lComm->dev);
+    } else {
+      WARN("NET/IB: RCCL_FORCE_ENABLE_DMABUF=1 but DMAbuf not available, GPU Direct RDMA disabled for device %d", lComm->dev);
+    }
+  } else {
+    // Normal path: prefer peermem over dmabuf
+    useDmaBuf = !peermemAvailable && dmabufAvailable;
+    if (peermemAvailable) {
+      INFO(NCCL_INIT|NCCL_NET, "NET/IB: Using GPU Direct RDMA (peermem) for device %d", lComm->dev);
+    } else if (useDmaBuf) {
+      WARN("NET/IB: Peermem not available, falling back to GPU Direct RDMA (DMAbuf) for device %d", lComm->dev);
+    } else if (!peermemAvailable && dmabufSupported && !dmabufEnabled) {
+      WARN("NET/IB: Peermem not available and DMAbuf is disabled (NCCL_DMABUF_ENABLE=0), GPU Direct RDMA disabled for device %d", lComm->dev);
+    } else {
+      WARN("NET/IB: GPU Direct RDMA not available for device %d", lComm->dev);
+    }
+  }
+
+  rComm->flushEnabled = ((peermemAvailable || useDmaBuf)
                             && (ncclParamIbGdrFlushDisable() == 0)) ? 1 : 0;              
   for (int i = 0; i < rComm->base.vProps.ndevs; i++) {
     rCommDev = rComm->devs + i;

@@ -61,11 +61,13 @@ public:
 
   ~code_object_t ();
 
-  void open ();
+  bool open ();
   bool is_open () const { return m_fd.has_value (); }
 
   amd_dbgapi_global_address_t load_address () const { return m_load_address; }
   amd_dbgapi_size_t mem_size () const { return m_mem_size; }
+  const std::string &uri () const { return m_uri; }
+  amd_dbgapi_code_object_id_t id () const { return m_code_object_id; }
 
   std::optional<symbol_info_t>
   find_symbol (amd_dbgapi_global_address_t address);

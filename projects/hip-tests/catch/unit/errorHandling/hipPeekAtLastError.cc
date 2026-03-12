@@ -42,7 +42,7 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipPeekAtLastError_Positive_Basic") {
+TEST_CASE(Unit_hipPeekAtLastError_Positive_Basic) {
   HIP_CHECK(hipPeekAtLastError());
   HIP_CHECK_ERROR(hipMalloc(nullptr, 1), hipErrorInvalidValue);
   HIP_CHECK_ERROR(hipPeekAtLastError(), hipErrorInvalidValue);
@@ -65,7 +65,7 @@ TEST_CASE("Unit_hipPeekAtLastError_Positive_Basic") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipPeekAtLastError_Positive_Threaded") {
+TEST_CASE(Unit_hipPeekAtLastError_Positive_Threaded) {
   class HipPeekAtLastErrorTest : public ThreadedZigZagTest<HipPeekAtLastErrorTest> {
    public:
     void TestPart2() { REQUIRE_THREAD(hipMalloc(nullptr, 1) == hipErrorInvalidValue); }
@@ -91,7 +91,7 @@ TEST_CASE("Unit_hipPeekAtLastError_Positive_Threaded") {
  * ------------------------
  *  - HIP_VERSION >= 6.4
  */
-TEST_CASE("Unit_hipPeekAtLastError_Positive") {
+TEST_CASE(Unit_hipPeekAtLastError_Positive) {
     HIP_CHECK_ERROR(hipMalloc(nullptr, 1), hipErrorInvalidValue);
     int* A_d;
     HIP_CHECK(hipMalloc(&A_d, 1024));
@@ -112,7 +112,7 @@ TEST_CASE("Unit_hipPeekAtLastError_Positive") {
  * ------------------------
  *  - HIP_VERSION >= 6.4
  */
-TEST_CASE("Unit_hipPeekAtLastError_Chk_Updated_Status") {
+TEST_CASE(Unit_hipPeekAtLastError_Chk_Updated_Status) {
     hipGraph_t graph;
     int value = 0;
     HIP_CHECK_ERROR(hipGraphCreate(&graph, 1), hipErrorInvalidValue);
@@ -135,7 +135,7 @@ TEST_CASE("Unit_hipPeekAtLastError_Chk_Updated_Status") {
  * ------------------------
  *  - HIP_VERSION >= 6.4
  */
-TEST_CASE("Unit_hipPeekAtLastError_Chk_Along_hipGetLastError") {
+TEST_CASE(Unit_hipPeekAtLastError_Chk_Along_hipGetLastError) {
     hipGraph_t graph;
     HIP_CHECK_ERROR(hipGraphCreate(&graph, 1), hipErrorInvalidValue);
     HIP_CHECK_ERROR(hipGetLastError(), hipErrorInvalidValue);
@@ -160,7 +160,7 @@ TEST_CASE("Unit_hipPeekAtLastError_Chk_Along_hipGetLastError") {
  * ------------------------
  *  - HIP_VERSION >= 6.4
  */
-TEST_CASE("Unit_hipPeekAtLastError_Error_Combinations") {
+TEST_CASE(Unit_hipPeekAtLastError_Error_Combinations) {
   int value = 0;
   hipGraph_t graph;
   SECTION("A case with Error-Error-Success-Success") {
@@ -223,7 +223,7 @@ static void thread_func() {
  * ------------------------
  *  - HIP_VERSION >= 6.4
  */
-TEST_CASE("Unit_hipPeekAtLastError_With_Thread") {
+TEST_CASE(Unit_hipPeekAtLastError_With_Thread) {
   hipGraph_t graph;
     int *A_d;
     HIP_CHECK(hipMalloc(&A_d, 1024));
@@ -244,7 +244,7 @@ TEST_CASE("Unit_hipPeekAtLastError_With_Thread") {
  * ------------------------
  *  - HIP_VERSION >= 6.4
  */
-TEST_CASE("Unit_hipPeekAtLastError_MultiProcess") {
+TEST_CASE(Unit_hipPeekAtLastError_MultiProcess) {
   hipGraph_t graph;
     int *A_d;
     HIP_CHECK(hipMalloc(&A_d, 1024));
@@ -272,7 +272,7 @@ static void __global__ emptyKernl() {}
 // Below test failed on NVIDIA due to error mismatch produced by the Invalid Kernel config.
 // For more details please check the ticket SWDEV-501896 comments.
 #if HT_AMD
-TEST_CASE("Unit_hipPeekAtLastError_Kernel_Invalid_Config") {
+TEST_CASE(Unit_hipPeekAtLastError_Kernel_Invalid_Config) {
   hipError_t ret;
     hipLaunchKernelGGL(emptyKernl, dim3(0), dim3(0), 0, 0);
     int* A_d;

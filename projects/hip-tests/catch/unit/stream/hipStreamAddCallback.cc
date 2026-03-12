@@ -39,7 +39,7 @@ Testcase Scenarios :
 #endif
 
 namespace hipStreaAddCallbackTest {
-size_t NSize = 4 * 1024 * 1024;
+constexpr size_t NSize = 4 * 1024 * 1024;
 float *A_h, *C_h;
 bool gcbDone = false;
 bool gPassed = true;
@@ -83,8 +83,9 @@ bool testStreamCallbackFunctionality(bool isDefault) {
   if (isDefault) {
     HIP_CHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyHostToDevice, 0));
 
-    const unsigned blocks = 512;
-    const unsigned threadsPerBlock = 256;
+    const unsigned threadsPerBlock = 1024;
+    const int blocks = (NSize % threadsPerBlock == 0) ? (NSize / threadsPerBlock)
+                                                      : ((NSize / threadsPerBlock) + 1);
     hipLaunchKernelGGL((HipTest::vector_square), dim3(blocks), dim3(threadsPerBlock), 0, 0, A_d,
                        C_d, NSize);
     HIP_CHECK(hipGetLastError());
@@ -98,8 +99,9 @@ bool testStreamCallbackFunctionality(bool isDefault) {
 
     HIP_CHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyHostToDevice, mystream));
 
-    const unsigned blocks = 512;
-    const unsigned threadsPerBlock = 256;
+    const unsigned threadsPerBlock = 1024;
+    const int blocks = (NSize % threadsPerBlock == 0) ? (NSize / threadsPerBlock)
+                                                      : ((NSize / threadsPerBlock) + 1);
     hipLaunchKernelGGL((HipTest::vector_square), dim3(blocks), dim3(threadsPerBlock), 0, mystream,
                        A_d, C_d, NSize);
     HIP_CHECK(hipGetLastError());
@@ -159,7 +161,7 @@ using hipStreaAddCallbackTest::testStreamCallbackFunctionality;
 /*
  * Validates parameter list of hipStreamAddCallback.
  */
-TEST_CASE("Unit_hipStreamAddCallback_ParamTst_Positive") {
+TEST_CASE(Unit_hipStreamAddCallback_ParamTst_Positive) {
   hipStream_t mystream;
   HIP_CHECK(hipStreamCreate(&mystream));
 
@@ -192,7 +194,7 @@ TEST_CASE("Unit_hipStreamAddCallback_ParamTst_Positive") {
 /*
  * Negative tests for validation of hipStreamAddCallback parameter list.
  */
-TEST_CASE("Unit_hipStreamAddCallback_ParamTst_Negative") {
+TEST_CASE(Unit_hipStreamAddCallback_ParamTst_Negative) {
   hipStream_t mystream;
   HIP_CHECK(hipStreamCreate(&mystream));
 
@@ -218,7 +220,7 @@ TEST_CASE("Unit_hipStreamAddCallback_ParamTst_Negative") {
 /*
  * Validates hipStreamAddCallback functionality with default stream.
  */
-TEST_CASE("Unit_hipStreamAddCallback_WithDefaultStream") {
+TEST_CASE(Unit_hipStreamAddCallback_WithDefaultStream) {
   bool TestPassed = true;
   TestPassed = testStreamCallbackFunctionality(true);
   REQUIRE(TestPassed);
@@ -227,7 +229,7 @@ TEST_CASE("Unit_hipStreamAddCallback_WithDefaultStream") {
 /*
  * Validates hipStreamAddCallback functionality with defined stream.
  */
-TEST_CASE("Unit_hipStreamAddCallback_WithCreatedStream") {
+TEST_CASE(Unit_hipStreamAddCallback_WithCreatedStream) {
   bool TestPassed = true;
   TestPassed = testStreamCallbackFunctionality(false);
   REQUIRE(TestPassed);

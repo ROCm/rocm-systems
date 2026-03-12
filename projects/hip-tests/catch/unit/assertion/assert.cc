@@ -73,7 +73,7 @@ bool isAbortOnErrorEnabled() {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Assert_Positive_Basic_KernelPass") {
+TEST_CASE(Unit_Assert_Positive_Basic_KernelPass) {
   
 #ifdef NDEBUG
   HipTest::HIP_SKIP_TEST("Assertions are disabled on this build.");
@@ -115,7 +115,7 @@ TEST_CASE("Unit_Assert_Positive_Basic_KernelPass") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Assert_Positive_Basic_KernelFail") {
+TEST_CASE(Unit_Assert_Positive_Basic_KernelFail) {
 
 #ifdef NDEBUG
   HipTest::HIP_SKIP_TEST("Assertions are disabled on this build.");
