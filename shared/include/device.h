@@ -53,6 +53,8 @@ public:
 
   ErrorCode QueryClockInfo(uint32_t clk_type, ClockInfo *info) const;
 
+  ErrorCode QueryPCIeInfo(PCIeInfo *info) const;
+
   ErrorCode Escape(void *pData, size_t dataSize,
                    bool hardwareAccess = false) const;
 

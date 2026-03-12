@@ -233,6 +233,8 @@ public:
   // Query clock frequency via KMD PMLog escape.
   ErrorCode QueryClockInfo(uint32_t clk_type, wsl::thunk::ClockInfo *info) const;
 
+  ErrorCode QueryPCIeInfo(wsl::thunk::PCIeInfo *info) const;
+
   // Send a driver-escape packet on behalf of this GPU slot.
   ErrorCode Escape(void *pData, size_t dataSize, bool hardwareAccess = false) const;
 

@@ -67,6 +67,35 @@ struct GpuActivity {
   uint32_t mm_activity;   // Multimedia engine utilization in %
 };
 
+// PCIe bus type classification (derived from CICHIPSETID caps).
+enum class BusType : uint32_t {
+  PCI      = 0,
+  AGP      = 1,
+  PCIE     = 2,  // Gen 1
+  PCIE_GEN2 = 3,
+  PCIE_GEN3 = 4,
+  PCIE_GEN4 = 5,
+  PCIE_GEN5 = 6,
+};
+
+// PCIe static and dynamic info from KMD chipset ID + PMLog escapes.
+struct PCIeInfo {
+  // static (from CICHIPSETID escape, populated at Init())
+  uint16_t max_pcie_width;          // max PCIe lane width
+  uint32_t max_pcie_speed;          // max speed in MT/s
+  uint32_t pcie_interface_version;  // PCIe gen (1-6), derived from max_pcie_speed
+  uint32_t slot_type;               // 0 = PCIE card form factor (always)
+  // dynamic (from PMLog escape)
+  uint16_t pcie_width;              // current lane width
+  uint32_t pcie_speed;              // current speed in MT/s
+  uint32_t pcie_bandwidth;          // current bandwidth (UINT32_MAX = unavailable)
+  uint64_t pcie_replay_count;
+  uint64_t pcie_l0_to_recovery_count;
+  uint64_t pcie_replay_roll_over_count;
+  uint64_t pcie_nak_sent_count;
+  uint64_t pcie_nak_received_count;
+};
+
 // Clock frequency readings from KMD PMLog escape.
 struct ClockInfo {
   uint32_t clk;            // current clock in MHz
