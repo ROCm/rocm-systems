@@ -176,7 +176,7 @@ counter_storage::write_zero(rocprofiler_timestamp_t timestamp) const
         static_cast<size_t>(category_enum_id<category::rocm_counter_collection>::value),
         track_name.c_str(), timestamp, "{}", 0, 0, 0, "{}", "{}",
         static_cast<uint32_t>(device_id), static_cast<uint8_t>(agent_type::GPU),
-        track_name.c_str(), 0.0 });
+        track_name.c_str(), 0.0, std::nullopt });
 }
 
 void
