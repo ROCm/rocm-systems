@@ -255,6 +255,15 @@ Added in `analyze.py`. Generates a self-contained single-file HTML report:
 - `InteractiveSession` — menu-driven loop `[p]/[a]/[o]/[s]/[q]`; triggered after standard analysis when `--interactive` flag is set without a RUN_COMMAND
 - `WorkflowSession` — 7-phase automated workflow; triggered by `--interactive "<app_command>"`
 
+**WorkflowSession re-profiling loop behaviour (key fixes):**
+- Phase 4 banner shows `(Run #N)` from iteration 2 onwards so the user can distinguish re-profile results from the initial run
+- `_print_comparison` compares the NEW breakdown against history entry `[-1]` (the most-recent prior run). History is appended AFTER the comparison call, so the check is `len < 1`, not `< 2`.
+- When `total_runtime_ns == 0` after a profiling run, a ⚠ warning is printed explaining that the app may use Python multiprocessing spawn (e.g. vLLM, PyTorch DDP) — GPU kernels run in worker processes and are not captured in the main-process DB. Suggests `rocprof-sys` or `--pid` profiling.
+- After computing `ai_rec_cmd`, the PMC counters in the suggestion are compared against the last `trace_history` command. If all suggested counters are already present, `ai_rec_cmd` is cleared to prevent an infinite `[r] → re-profile → same INFO → [r]` loop.
+- `_phase5_rec_menu` detects `already_reprofiled` (all INFO + iteration > 0 + no fresh `ai_rec_cmd`) and replaces the `[r]` option with a "result unchanged" note.
+- `--kernel-names` is stripped from AI-recommended commands before use — rocprofv3 does not accept this flag on the command line. Regex: `r"--kernel-names\s+(?:'[^']*'|\"[^\"]*\"|\S+)"`.
+- `_phase6_apply_direct` retries `_llm_rewrite_file` on failure (timeout, rate-limit, etc.) instead of silently falling through to Phase 7. Prompts `Retry LLM rewrite? [y/N]`.
+
 **Key dataclasses** (all in `interactive.py`):
 - `SessionContext` — compact per-session facts: `iteration`, `analyses` (capped 5), `suggestions_given` (capped 3, truncated 120 chars), `commands_run` (capped 5)
 - `SessionData` — persistent session JSON: `session_id`, `source_dir`, `history`, `persistent_menu_items`, `context` (serialized `SessionContext`)

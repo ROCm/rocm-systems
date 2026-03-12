@@ -1998,6 +1998,12 @@ class WorkflowSession:
                         # Replace placeholder app and generic output dir
                         fc = fc.replace("-- ./app", f"-- {app_cmd}")
                         fc = _replace_output_dir(fc, new_out_dir)
+                        # Strip --kernel-names: not a valid rocprofv3 CLI flag
+                        fc = re.sub(
+                            r"--kernel-names\s+(?:'[^']*'|\"[^\"]*\"|\S+)",
+                            "", fc,
+                        ).strip()
+                        fc = re.sub(r" {2,}", " ", fc)  # collapse extra spaces
                         ai_rec_cmd = fc
                         break
             if ai_rec_cmd:
@@ -2220,8 +2226,14 @@ class WorkflowSession:
         if chosen is None:
             return
         rewritten = self._llm_rewrite_file(chosen, suggestions)
-        if rewritten is None:
-            return
+        while rewritten is None:
+            try:
+                ans = _input("  Retry LLM rewrite? [y/N]  ").strip().lower()
+            except EOFError:
+                return
+            if ans != "y":
+                return
+            rewritten = self._llm_rewrite_file(chosen, suggestions)
 
         import difflib
         original  = chosen.read_text()
