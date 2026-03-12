@@ -348,20 +348,24 @@ TestAMO() {
   ExecTest  "amo_add"          2       8            1
   ExecTest  "amo_add"          2       32           128
 
+  if [[ $TEST != gda* ]]; then #AIROCSHMEM-316
   ExecTest  "amo_fadd"         2       1            1
   ExecTest  "amo_fadd"         2       1            1024
   ExecTest  "amo_fadd"         2       8            1
   ExecTest  "amo_fadd"         2       32           128
+  else echo "Skip:   amo_fadd* (AIROCSHMEM-316: mlx5 fetch_amo return 0)"; fi
 
   ExecTest  "amo_inc"          2       1            1
   ExecTest  "amo_inc"          2       1            1024
   ExecTest  "amo_inc"          2       8            1
   ExecTest  "amo_inc"          2       32           128
 
+  if [[ $TEST != gda* ]]; then #AIROCSHMEM-316
   ExecTest  "amo_finc"         2       1            1
   ExecTest  "amo_finc"         2       1            1024
   ExecTest  "amo_finc"         2       8            1
   ExecTest  "amo_finc"         2       32           128
+  else echo "Skip:   amo_finc* (AIROCSHMEM-316: mlx5 fetch_amo return 0)"; fi
   else echo "Skip:   amo_add* (AIROCSHMEM-211: ro amo abort)"; fi
 
   ExecTest  "amo_set"          2       1            1

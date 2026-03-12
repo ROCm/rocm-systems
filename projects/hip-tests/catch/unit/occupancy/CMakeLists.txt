@@ -11,9 +11,13 @@ set(TEST_SRC
   hipOccupancyAvailableDynamicSMemPerBlock.cc
 )
 
+string(TOUPPER "${CMAKE_BUILD_TYPE}" _HIP_BUILD_TYPE_UPPER)
+separate_arguments(HIP_DEVICE_BUILD_FLAGS_NO_ARCH NATIVE_COMMAND
+  "${CMAKE_HIP_FLAGS} ${CMAKE_HIP_FLAGS_${_HIP_BUILD_TYPE_UPPER}}")
+list(FILTER HIP_DEVICE_BUILD_FLAGS_NO_ARCH EXCLUDE REGEX "--offload-arch=")
 if (HIP_PLATFORM MATCHES "amd")
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/simple_kernel.code
-                   COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_LIST}
+                   COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} --cuda-device-only
                    -x hip ${CMAKE_CURRENT_SOURCE_DIR}/simple_kernel.cc
                    -o simple_kernel.code
                    -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}

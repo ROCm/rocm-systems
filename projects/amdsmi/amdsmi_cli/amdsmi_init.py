@@ -115,8 +115,9 @@ def amdsmi_cli_init():
     try:
         amdsmi_interface.amdsmi_init(init_flag)
     except (amdsmi_interface.AmdSmiLibraryException, amdsmi_interface.AmdSmiParameterException) as e:
+        # parameter exception thrown if init_flag is 0, but err_code will be set to 0 in that case, so must check if init_flag is 0 too
         if e.err_code in (amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_INIT,
-                            amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_DRIVER_NOT_LOADED):
+                            amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_DRIVER_NOT_LOADED) or init_flag == 0:
             logging.error("Drivers not loaded (amdgpu, amd_hsmp, ionic, rdma drivers not found in modules)")
             sys.exit(-1)
         else:
