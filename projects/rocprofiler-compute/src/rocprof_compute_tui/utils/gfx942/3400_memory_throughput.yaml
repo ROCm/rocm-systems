@@ -72,7 +72,7 @@ Panel Config:
         vL1D Cache Utilization:
           value: AVG((((TCP_GATE_EN2_sum * 100) / TCP_GATE_EN1_sum) if (TCP_GATE_EN1_sum
             != 0) else None))
-          unit: Pct of Peak
+          unit: Percent
           peak: 100
           pop: None
         Theoretical LDS Bandwidth:
@@ -84,7 +84,7 @@ Panel Config:
             / (End_Timestamp - Start_Timestamp)) / (($max_sclk * $cu_per_gpu) * 0.00128)))
         LDS Utilization:
           value: AVG(((100 * SQ_LDS_IDX_ACTIVE) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
-          unit: Pct of Peak
+          unit: Percent
           peak: 100
           pop: None
         L2 Cache Hit Rate:
