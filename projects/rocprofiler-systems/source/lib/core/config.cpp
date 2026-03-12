@@ -62,6 +62,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cctype>
 #include <csignal>
 #include <cstdint>
 #include <cstdio>
@@ -124,6 +125,42 @@ get_setting_name(std::string _v)
     auto _pos = _v.find(_prefix);
     if(_pos == 0) return _v.substr(_prefix.length());
     return _v;
+}
+
+/// Map ROCPROFSYS_LOG_LEVEL string to numeric ROCPROFSYS_VERBOSE (for timemory and
+/// get_verbose()). Aligns with logger level names: off, trace, debug, info, warn, error,
+/// critical.
+int
+log_level_to_verbose(std::string_view _level)
+{
+    if(_level.empty()) return 0;
+
+    std::string lower;
+    lower.reserve(_level.size());
+
+    for(unsigned char c : _level)
+        lower += static_cast<char>(std::tolower(c));
+
+    if(lower == "off") return -1;
+    if(lower == "critical" || lower == "error" || lower == "err") return 0;
+    if(lower == "warn" || lower == "warning" || lower == "info") return 1;
+    if(lower == "debug") return 2;
+    if(lower == "trace") return 3;
+
+    return 0;
+}
+
+void
+apply_log_level_to_verbose()
+{
+    if(auto opt = get_setting_value<std::string>("ROCPROFSYS_LOG_LEVEL");
+       opt && !opt->empty())
+    {
+        int _v        = log_level_to_verbose(*opt);
+        verbose_value = _v;
+        set_setting_value("ROCPROFSYS_VERBOSE", _v);
+        tim::set_env("ROCPROFSYS_VERBOSE", std::to_string(_v), 0);
+    }
 }
 
 template <typename Tp>
@@ -1148,6 +1185,8 @@ configure_settings(bool _init)
     if(auto opt = get_setting_value<int>("ROCPROFSYS_VERBOSE"); opt) verbose_value = *opt;
     if(auto opt = get_setting_value<bool>("ROCPROFSYS_DEBUG"); opt) debug_value = *opt;
     if(auto opt = get_setting_value<bool>("ROCPROFSYS_CI"); opt) is_ci_value = *opt;
+    // Apply ROCPROFSYS_LOG_LEVEL → ROCPROFSYS_VERBOSE once after all settings are loaded
+    apply_log_level_to_verbose();
 
     _settings_are_configured() = true;
 }
