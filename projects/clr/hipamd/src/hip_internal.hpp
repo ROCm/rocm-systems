@@ -286,41 +286,42 @@ public:
     enum Priority : int { High = -1, Normal = 0, Low = 1 };
 
   private:
-    mutable amd::Monitor lock_;
-    Device* device_;
-    Priority priority_;
-    unsigned int flags_;
-    bool null_;
-    const std::vector<uint32_t> cuMask_;
-    uint64_t stream_id_;
+   mutable std::recursive_mutex lock_;
+   Device* device_;
+   Priority priority_;
+   unsigned int flags_;
+   bool null_;
+   const std::vector<uint32_t> cuMask_;
+   uint64_t stream_id_;
 
-    /// Stream capture related parameters
+   /// Stream capture related parameters
 
-    /// Current capture status of the stream
-    hipStreamCaptureStatus captureStatus_;
-    /// Graph that is constructed with capture
-    hip::Graph* pCaptureGraph_;
-    /// Based on mode stream capture places restrictions on API calls that can be made within or
-    /// concurrently
-    hipStreamCaptureMode captureMode_{hipStreamCaptureModeGlobal};
-    bool originStream_;
-    /// Origin sream has no parent. Parent stream for the derived captured streams with event
-    /// dependencies
-    hipStream_t parentStream_ = nullptr;
-    /// Last graph node captured in the stream
-    std::vector<hip::GraphNode*> lastCapturedNodes_;
-    /// dependencies removed via API hipStreamUpdateCaptureDependencies
-    std::vector<hip::GraphNode*> removedDependencies_;
-    /// Derived streams/Paralell branches from the origin stream
-    std::vector<hipStream_t> parallelCaptureStreams_;
-    /// Capture events
-    std::unordered_set<hipEvent_t> captureEvents_;
-    unsigned long long captureID_;
+   /// Current capture status of the stream
+   hipStreamCaptureStatus captureStatus_;
+   /// Graph that is constructed with capture
+   hip::Graph* pCaptureGraph_;
+   /// Based on mode stream capture places restrictions on API calls that can be made within or
+   /// concurrently
+   hipStreamCaptureMode captureMode_{hipStreamCaptureModeGlobal};
+   bool originStream_;
+   /// Origin sream has no parent. Parent stream for the derived captured streams with event
+   /// dependencies
+   hipStream_t parentStream_ = nullptr;
+   /// Last graph node captured in the stream
+   std::vector<hip::GraphNode*> lastCapturedNodes_;
+   /// dependencies removed via API hipStreamUpdateCaptureDependencies
+   std::vector<hip::GraphNode*> removedDependencies_;
+   /// Derived streams/Paralell branches from the origin stream
+   std::vector<hipStream_t> parallelCaptureStreams_;
+   /// Capture events
+   std::unordered_set<hipEvent_t> captureEvents_;
+   unsigned long long captureID_;
 
-    static inline CommandQueue::Priority convertToQueuePriority(Priority p) {
-      return p == Priority::High ? amd::CommandQueue::Priority::High : p == Priority::Low ?
-                    amd::CommandQueue::Priority::Low : amd::CommandQueue::Priority::Normal;
-    }
+   static inline CommandQueue::Priority convertToQueuePriority(Priority p) {
+     return p == Priority::High  ? amd::CommandQueue::Priority::High
+            : p == Priority::Low ? amd::CommandQueue::Priority::Low
+                                 : amd::CommandQueue::Priority::Normal;
+   }
     /// Generates unique stream Id for the lifetime of the process
     uint64_t GenerateStreamId() {
       static std::atomic<uint64_t> uniqueId{0};
@@ -343,7 +344,7 @@ public:
     /// Returns if stream is null stream
     bool Null() const { return null_; }
     /// Returns the lock object for the current stream
-    amd::Monitor& Lock() const { return lock_; }
+    std::recursive_mutex& Lock() const { return lock_; }
     /// Returns the creation flags for the current stream
     unsigned int Flags() const { return flags_; }
     /// Returns the priority for the current stream
@@ -432,10 +433,10 @@ public:
     /// Get Capture ID
     unsigned long long GetCaptureID() { return captureID_; }
     void SetCaptureEvent(hipEvent_t e) {
-      amd::ScopedLock lock(lock_);
+      std::scoped_lock lock(lock_);
       captureEvents_.emplace(e); }
     bool IsEventCaptured(hipEvent_t e) {
-      amd::ScopedLock lock(lock_);
+      std::scoped_lock lock(lock_);
       auto it = captureEvents_.find(e);
       if (it != captureEvents_.end()) {
         return true;
@@ -443,7 +444,7 @@ public:
       return false;
     }
     void EraseCaptureEvent(hipEvent_t e) {
-      amd::ScopedLock lock(lock_);
+      std::scoped_lock lock(lock_);
       auto it = captureEvents_.find(e);
       if (it != captureEvents_.end()) {
         captureEvents_.erase(it);
@@ -504,7 +505,7 @@ public:
   /// HIP Device class
   class Device : public amd::ReferenceCountedObject {
     // Device lock
-    amd::Monitor lock_{true};
+    std::recursive_mutex lock_;
     // Guards device stream set
     std::shared_mutex streamSetLock;
     std::unordered_set<hip::Stream*> streamSet;
@@ -557,7 +558,7 @@ public:
     void release() const { context_->release(); }
     const std::vector<amd::Device*>& devices() const { return context_->devices(); }
     hipError_t EnablePeerAccess(int peerDeviceId){
-      amd::ScopedLock lock(lock_);
+      std::scoped_lock lock(lock_);
       bool found = (std::find(userEnabledPeers.begin(), userEnabledPeers.end(), peerDeviceId) != userEnabledPeers.end());
       if (found) {
         return hipErrorPeerAccessAlreadyEnabled;
@@ -566,7 +567,7 @@ public:
       return hipSuccess;
     }
     hipError_t DisablePeerAccess(int peerDeviceId) {
-      amd::ScopedLock lock(lock_);
+      std::scoped_lock lock(lock_);
       bool found = (std::find(userEnabledPeers.begin(), userEnabledPeers.end(), peerDeviceId) != userEnabledPeers.end());
       if (found) {
         userEnabledPeers.remove(peerDeviceId);
@@ -587,7 +588,7 @@ public:
     }
 
     bool GetActiveStatus() {
-      amd::ScopedLock lock(lock_);
+      std::scoped_lock lock(lock_);
       /// Either stream is active or device is active
       if (isActive_) return true;
       if (existsActiveStreamForDevice()) {

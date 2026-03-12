@@ -149,7 +149,7 @@ static void hipTestWithoutGraph() {
 /**
  * Simple test to demonstrate usage of graph.
  */
-TEST_CASE("Unit_hipGraph_SimpleGraphWithKernel") {
+TEST_CASE(Unit_hipGraph_SimpleGraphWithKernel) {
   // Sections run test with and without graph.
   SECTION("Run Test Without Graph") { hipTestWithoutGraph(); }
 

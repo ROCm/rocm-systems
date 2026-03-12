@@ -88,7 +88,7 @@ __global__ void HMinMaxHalfOpsArray(__half* x, __half* y, __half* ExptdResult, i
 
 // The following tests checks the basic functionality of __hmax(), __hmin()
 // __hmax_nan() and __hmin_nan()
-TEST_CASE("Unit_hmax_hmin_Tsts") {
+TEST_CASE(Unit_hmax_hmin_Tsts) {
   int *Hptr = nullptr, *Dptr = nullptr;
   HIP_CHECK(hipHostMalloc(&Hptr, sizeof(int)));
   *Hptr = 1;
@@ -203,7 +203,7 @@ TEST_CASE("Unit_hmax_hmin_Tsts") {
 
 
 // The following Tests does negative testing by passing nan
-TEST_CASE("Unit_hmax_hmin_Tsts_Negative") {
+TEST_CASE(Unit_hmax_hmin_Tsts_Negative) {
   int *Hptr = nullptr, *Dptr = nullptr;
   HIP_CHECK(hipHostMalloc(&Hptr, sizeof(int)));
   *Hptr = 1;
@@ -230,7 +230,7 @@ TEST_CASE("Unit_hmax_hmin_Tsts_Negative") {
 }
 
 // The following tests the __hmax/min functions over array of memory
-TEST_CASE("Unit_hmax_hmin_Tsts_With_Array") {
+TEST_CASE(Unit_hmax_hmin_Tsts_With_Array) {
   int *Hptr = nullptr, *Dptr = nullptr;
   __half *Ad = nullptr, *Bd = nullptr;
   HIP_CHECK(hipHostMalloc(&Hptr, sizeof(int)));

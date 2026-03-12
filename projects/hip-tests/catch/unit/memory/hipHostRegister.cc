@@ -110,7 +110,7 @@ void doMemCopy(size_t numElements, int offset, T* A, T* Bh, T* Bd, bool internal
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipHostRegister_ReferenceFromKernelandhipMemset") {
+TEST_CASE(Unit_hipHostRegister_ReferenceFromKernelandhipMemset) {
   size_t sizeBytes{LEN * sizeof(int)};
   int *A, **Ad;
   int num_devices = 0;
@@ -176,7 +176,7 @@ TEST_CASE("Unit_hipHostRegister_ReferenceFromKernelandhipMemset") {
  * ------------------------
  *    - HIP_VERSION >= 5.6
  */
-TEST_CASE("Unit_hipHostRegister_DirectReferenceFromKernel") {
+TEST_CASE(Unit_hipHostRegister_DirectReferenceFromKernel) {
   auto flags = GENERATE(hipHostRegisterDefault, hipHostRegisterPortable, hipHostRegisterMapped);
   size_t sizeBytes{LEN * sizeof(int)};
   int* A;
@@ -214,7 +214,7 @@ TEST_CASE("Unit_hipHostRegister_DirectReferenceFromKernel") {
  * ------------------------
  *    - HIP_VERSION >= 5.6
  */
-TEST_CASE("Unit_hipHostRegister_DirectReferenceMultGpu") {
+TEST_CASE(Unit_hipHostRegister_DirectReferenceMultGpu) {
   // 1 refers to doing hipHostRegister once for all devices
   // 0 refers to doing hipHostRegister for each device
   auto register_once = GENERATE(0, 1);
@@ -269,7 +269,7 @@ TEST_CASE("Unit_hipHostRegister_DirectReferenceMultGpu") {
  * ------------------------
  *    - HIP_VERSION >= 5.6
  */
-TEST_CASE("Unit_hipHostRegister_SameChunkRepeat") {
+TEST_CASE(Unit_hipHostRegister_SameChunkRepeat) {
   size_t sizeBytes{LEN * sizeof(uint8_t)};
   uint8_t* A;
   A = reinterpret_cast<uint8_t*>(malloc(sizeBytes));
@@ -306,7 +306,7 @@ TEST_CASE("Unit_hipHostRegister_SameChunkRepeat") {
  * ------------------------
  *    - HIP_VERSION >= 5.6
  */
-TEST_CASE("Unit_hipHostRegister_Chunks_SingleAttempt") {
+TEST_CASE(Unit_hipHostRegister_Chunks_SingleAttempt) {
   size_t sizeBytes{LARGE_CHUNK_LEN * sizeof(uint8_t)};
   size_t sizeBytesChunk{SMALL_CHUNK_LEN * sizeof(uint8_t)};
   uint8_t* A;
@@ -352,7 +352,7 @@ TEST_CASE("Unit_hipHostRegister_Chunks_SingleAttempt") {
  * ------------------------
  *    - HIP_VERSION >= 5.6
  */
-TEST_CASE("Unit_hipHostRegister_Chunks_RoundRobin") {
+TEST_CASE(Unit_hipHostRegister_Chunks_RoundRobin) {
   size_t sizeBytes{LARGE_CHUNK_LEN * sizeof(int)};
   size_t sizeBytesChunk{SMALL_CHUNK_LEN * sizeof(int)};
   int* A;
@@ -390,7 +390,7 @@ TEST_CASE("Unit_hipHostRegister_Chunks_RoundRobin") {
  * ------------------------
  *    - HIP_VERSION >= 5.6
  */
-TEST_CASE("Unit_hipHostRegister_Perform_hipMemset") {
+TEST_CASE(Unit_hipHostRegister_Perform_hipMemset) {
   size_t sizeBytes{LEN * sizeof(uint8_t)};
   uint8_t* A;
   uint8_t* dPtr = nullptr;
@@ -424,7 +424,7 @@ TEST_CASE("Unit_hipHostRegister_Perform_hipMemset") {
  * ------------------------
  *    - HIP_VERSION >= 5.6
  */
-TEST_CASE("Unit_hipHostRegister_Perform_hipMemcpy") {
+TEST_CASE(Unit_hipHostRegister_Perform_hipMemcpy) {
   size_t sizeBytes{LEN * sizeof(uint8_t)};
   uint8_t *A, *B, *dPtr;
   A = reinterpret_cast<uint8_t*>(malloc(sizeBytes));
@@ -464,7 +464,7 @@ TEST_CASE("Unit_hipHostRegister_Perform_hipMemcpy") {
  * ------------------------
  *    - HIP_VERSION >= 5.6
  */
-TEST_CASE("Unit_hipHostRegister_AsyncApis") {
+TEST_CASE(Unit_hipHostRegister_AsyncApis) {
   size_t sizeBytes{LEN * sizeof(uint32_t)};
   uint32_t *A, *B, *dPtr;
   A = reinterpret_cast<uint32_t*>(malloc(sizeBytes));
@@ -506,7 +506,7 @@ TEST_CASE("Unit_hipHostRegister_AsyncApis") {
  * ------------------------
  *    - HIP_VERSION >= 5.6
  */
-TEST_CASE("Unit_hipHostRegister_Graphs") {
+TEST_CASE(Unit_hipHostRegister_Graphs) {
   size_t sizeBytes{LEN * sizeof(uint32_t)};
   uint32_t *A, *B, *dPtr;
   A = reinterpret_cast<uint32_t*>(malloc(sizeBytes));
@@ -574,7 +574,7 @@ TEST_CASE("Unit_hipHostRegister_Graphs") {
  * ------------------------
  *    - HIP_VERSION >= 5.6
  */
-TEST_CASE("Unit_hipHostRegister_MemAdvise_SetGet") {
+TEST_CASE(Unit_hipHostRegister_MemAdvise_SetGet) {
   hipDeviceProp_t prop;
   HIP_CHECK(hipGetDeviceProperties(&prop, 0));
   if (prop.concurrentManagedAccess == 0) {
@@ -643,7 +643,7 @@ TEST_CASE("Unit_hipHostRegister_MemAdvise_SetGet") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipHostRegister_Memcpy") {
+TEST_CASE(Unit_hipHostRegister_Memcpy) {
   // 1 refers to hipHostRegister
   // 0 refers to malloc
   auto mem_type = GENERATE(0, 1);
@@ -687,7 +687,7 @@ TEST_CASE("Unit_hipHostRegister_Memcpy") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipHostRegister_Flags") {
+TEST_CASE(Unit_hipHostRegister_Flags) {
   size_t sizeBytes = 1 * sizeof(int);
   int* hostPtr = reinterpret_cast<int*>(malloc(sizeBytes));
 
@@ -737,7 +737,7 @@ TEST_CASE("Unit_hipHostRegister_Flags") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipHostRegister_Negative") {
+TEST_CASE(Unit_hipHostRegister_Negative) {
   int* hostPtr = nullptr;
 
   size_t sizeBytes = 1 * sizeof(int);
@@ -772,7 +772,7 @@ TEST_CASE("Unit_hipHostRegister_Negative") {
   }
 }
 
-TEST_CASE("Unit_hipHostRegister_Capture") {
+TEST_CASE(Unit_hipHostRegister_Capture) {
   constexpr size_t kBufferSize = 1024;
   auto buffer = std::make_unique<int[]>(kBufferSize);
   hipError_t capture_error = hipSuccess;

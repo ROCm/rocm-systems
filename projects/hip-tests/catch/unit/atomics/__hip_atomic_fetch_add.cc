@@ -58,7 +58,7 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit___hip_atomic_fetch_add_Positive_Wavefront", "", int, unsigned int,
+TEMPLATE_TEST_CASE(Unit___hip_atomic_fetch_add_Positive_Wavefront, int, unsigned int,
                    unsigned long, unsigned long long, float, double) {
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
@@ -107,7 +107,7 @@ TEMPLATE_TEST_CASE("Unit___hip_atomic_fetch_add_Positive_Wavefront", "", int, un
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit___hip_atomic_fetch_add_Positive_Workgroup", "", int, unsigned int,
+TEMPLATE_TEST_CASE(Unit___hip_atomic_fetch_add_Positive_Workgroup, int, unsigned int,
                    unsigned long, unsigned long long, float, double) {
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));

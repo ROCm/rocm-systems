@@ -306,11 +306,24 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
   - Ability to combine command-line `--pmc` flags with input file counter groups
   - Each pass generates output in a separate `pass_n` subdirectory
   - Example: `rocprofv3 --pmc SQ_WAVES --pmc GRBM_COUNT -- <app>` creates two profiling passes
+- KFD (Kernel Fusion Driver) event tracing support:
+  - Buffer service configurations for each KFD buffer tracing type
+  - New type `tool_buffer_tracing_kfd_record_t` using `std::variant` to wrap 8 different KFD buffer tracing types
+  - KFD record dumping to rocpd with support for 8 main KFD event types
+  - Each KFD event generates `rocpd_info_pmc`, `rocpd_event`, `rocpd_region`, and `rocpd_pmc_event` rows
+  - Support for rocpd to perfetto conversion for KFD events
+  - `rocprofv3` `--kfd-trace` flag to enable KFD event tracing
+  - Fixed handling for special SVM location in KFD prefetch location reporting
+  - Fixed parsing for queue restore events to handle both correct format (character '0') and broken driver format (NULL character '\0')
 
 ### Changed
 
 - Version updated to 1.2.0 to support better library compatibility detection for downstream dependencies
 - Fixed rocpd OTF2 output to add ACCELERATOR_DEVICE as system tree node domain for AMD devices.
+
+### Resolved issues
+
+- Fixed `rocprofv3` input file parsing where comment lines containing `pmc:` were incorrectly processed as valid counter collection directives, causing unintended profiling passes.
 
 ### Removed
 - Counter collection support for plain text (`.txt`) input files has been deprecated due to lack of schema validation and input sanitization. Only structured file formats (JSON and YAML) with schema validation are supported.

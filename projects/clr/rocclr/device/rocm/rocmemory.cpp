@@ -103,7 +103,7 @@ bool Memory::allocateMapMemory(size_t allocationSize) {
 void* Memory::allocMapTarget(const amd::Coord3D& origin, const amd::Coord3D& region, uint mapFlags,
                              size_t* rowPitch, size_t* slicePitch) {
   // Map/Unmap must be serialized.
-  amd::ScopedLock lock(owner()->lockMemoryOps());
+  std::scoped_lock lock(owner()->lockMemoryOps());
 
   incIndMapCount();
   // If the device backing storage is direct accessible, use it.
@@ -151,7 +151,7 @@ void* Memory::allocMapTarget(const amd::Coord3D& origin, const amd::Coord3D& reg
 
 void Memory::decIndMapCount() {
   // Map/Unmap must be serialized.
-  amd::ScopedLock lock(owner()->lockMemoryOps());
+  std::scoped_lock lock(owner()->lockMemoryOps());
 
   if (indirectMapCount_ == 0) {
     LogError("decIndMapCount() called when indirectMapCount_ already zero");
@@ -368,7 +368,7 @@ bool Memory::pinSystemMemory(void* hostPtr, size_t size) {
 }
 
 void Memory::syncCacheFromHost(VirtualGPU& gpu, device::Memory::SyncFlags syncFlags) {
-  amd::ScopedLock lock(owner()->lockMemoryOps());
+  std::scoped_lock lock(owner()->lockMemoryOps());
   // If the last writer was another GPU, then make a writeback
   if (!isHostMemDirectAccess() && (owner()->getLastWriter() != nullptr) &&
       (&dev() != owner()->getLastWriter())) {
@@ -396,7 +396,7 @@ void Memory::syncCacheFromHost(VirtualGPU& gpu, device::Memory::SyncFlags syncFl
       // Make sure the parent sync is an unique operation.
       // If the app uses multiple subbuffers from multiple queues,
       // then the parent sync can be called from multiple threads
-      amd::ScopedLock lock(owner()->parent()->lockMemoryOps());
+      std::scoped_lock lock(owner()->parent()->lockMemoryOps());
       gpuMemory->syncCacheFromHost(gpu, syncFlagsTmp);
       //! \note Don't do early exit here, since we still have to sync
       //! this view, if the parent sync operation was a NOP.
@@ -509,7 +509,7 @@ void Memory::syncHostFromCache(device::VirtualDevice* vDev, device::Memory::Sync
       // Make sure the parent sync is an unique operation.
       // If the app uses multiple subbuffers from multiple queues,
       // then the parent sync can be called from multiple threads
-      amd::ScopedLock lock(owner()->parent()->lockMemoryOps());
+      std::scoped_lock lock(owner()->parent()->lockMemoryOps());
       m->syncHostFromCache(gpu, syncFlagsTmp);
       //! \note Don't do early exit here, since we still have to sync
       //! this view, if the parent sync operation was a NOP.
@@ -537,7 +537,7 @@ void Memory::syncHostFromCache(device::VirtualDevice* vDev, device::Memory::Sync
         syncFlagsTmp.skipEntire_ = syncFlags.skipEntire_;
       }
 
-      amd::ScopedLock lock(owner()->lockMemoryOps());
+      std::scoped_lock lock(owner()->lockMemoryOps());
       for (auto& sub : owner()->subBuffers()) {
         //! \note Don't allow subbuffer's allocation in the worker thread.
         //! It may cause a system lock, because possible resource
@@ -602,7 +602,7 @@ void Memory::syncHostFromCache(device::VirtualDevice* vDev, device::Memory::Sync
 
 void Memory::mgpuCacheWriteBack(VirtualGPU& gpu) {
   // Lock memory object, so only one write back can occur
-  amd::ScopedLock lock(owner()->lockMemoryOps());
+  std::scoped_lock lock(owner()->lockMemoryOps());
 
   // Attempt to allocate a staging buffer if don't have any
   if (owner()->getHostMem() == nullptr) {
@@ -1498,7 +1498,7 @@ bool Image::createView(const Memory& parent) {
 
 void* Image::allocMapTarget(const amd::Coord3D& origin, const amd::Coord3D& region, uint mapFlags,
                             size_t* rowPitch, size_t* slicePitch) {
-  amd::ScopedLock lock(owner()->lockMemoryOps());
+  std::scoped_lock lock(owner()->lockMemoryOps());
 
   incIndMapCount();
 
@@ -1618,7 +1618,7 @@ bool Image::ValidateMemory() {
 
 // ================================================================================================
 bool Image::AddView(amd::Image* image) {
-  amd::ScopedLock l(owner()->lockMemoryOps());
+  std::scoped_lock l(owner()->lockMemoryOps());
   for (auto it : view_cache_) {
     if ((it->getImageFormat().image_channel_data_type ==
          image->getImageFormat().image_channel_data_type) &&
@@ -1635,7 +1635,7 @@ bool Image::AddView(amd::Image* image) {
 
 // ================================================================================================
 amd::Image* Image::FindView(cl_image_format format) const {
-  amd::ScopedLock l(owner()->lockMemoryOps());
+  std::scoped_lock l(owner()->lockMemoryOps());
   for (auto it : view_cache_) {
     if ((it->getImageFormat().image_channel_data_type == format.image_channel_data_type) &&
         (it->getImageFormat().image_channel_order == format.image_channel_order)) {

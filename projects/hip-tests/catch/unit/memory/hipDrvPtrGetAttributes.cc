@@ -42,7 +42,7 @@ constexpr size_t N{1000000};
 
 /* This testcase verifies Negative Scenarios of
  * hipDrvPointerGetAttributes API */
-TEST_CASE("Unit_hipDrvPtrGetAttributes_Negative") {
+TEST_CASE(Unit_hipDrvPtrGetAttributes_Negative) {
   HIP_CHECK(hipSetDevice(0));
   Nbytes = N * sizeof(int);
   int deviceId;
@@ -97,7 +97,7 @@ TEST_CASE("Unit_hipDrvPtrGetAttributes_Negative") {
 }
 
 // Testcase verifies functional scenarios of hipDrvPointerGetAttributes API
-TEST_CASE("Unit_hipDrvPtrGetAttributes_Functional") {
+TEST_CASE(Unit_hipDrvPtrGetAttributes_Functional) {
   HIP_CHECK(hipSetDevice(0));
   Nbytes = N * sizeof(int);
   int deviceId;

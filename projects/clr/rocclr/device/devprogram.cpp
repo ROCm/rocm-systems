@@ -2001,8 +2001,11 @@ bool Program::FindGlobalVarSize(void* binary, size_t binSize) {
 }
 
 amd_comgr_status_t getSymbolFromModule(amd_comgr_symbol_t symbol, void* userData) {
+  size_t nlen = 0;
+  size_t* userDataInfo = nullptr;
   amd_comgr_status_t status;
   amd_comgr_symbol_type_t type;
+  std::vector<std::string>* var_names = nullptr;
 
   /* Unpack the user data */
   SymbolInfo* sym_info = reinterpret_cast<SymbolInfo*>(userData);
@@ -2011,33 +2014,31 @@ amd_comgr_status_t getSymbolFromModule(amd_comgr_symbol_t symbol, void* userData
     return AMD_COMGR_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
+  /* Retrieve the symbol info */
+  status = amd::Comgr::symbol_get_info(symbol, AMD_COMGR_SYMBOL_INFO_NAME_LENGTH, &nlen);
+  if (status != AMD_COMGR_STATUS_SUCCESS) {
+    return status;
+  }
+
+  /* Retrieve the symbol name */
+  char* name = new char[nlen + 1];
+  status = amd::Comgr::symbol_get_info(symbol, AMD_COMGR_SYMBOL_INFO_NAME, name);
+  if (status != AMD_COMGR_STATUS_SUCCESS) {
+    return status;
+  }
+
   /* Retrieve the symbol type*/
   status = amd::Comgr::symbol_get_info(symbol, AMD_COMGR_SYMBOL_INFO_TYPE, &type);
   if (status != AMD_COMGR_STATUS_SUCCESS) {
     return status;
   }
-  if (type == sym_info->sym_type) {
-    size_t nlen = 0;
-    /* Retrieve the symbol info */
-    status = amd::Comgr::symbol_get_info(symbol, AMD_COMGR_SYMBOL_INFO_NAME_LENGTH, &nlen);
-    if (status != AMD_COMGR_STATUS_SUCCESS) {
-      return status;
-    }
 
-    /* Retrieve the symbol name */
-    char* name = new char[nlen + 1];
-    status = amd::Comgr::symbol_get_info(symbol, AMD_COMGR_SYMBOL_INFO_NAME, name);
-    if (status != AMD_COMGR_STATUS_SUCCESS) {
-      return status;
-    }
-
-    /* If symbol type is object(Variable) add it to vector */
-    if (std::strcmp(name, "") != 0) {
-      sym_info->var_names->push_back(std::string(name));
-    }
-    delete[] name;
+  /* If symbol type is object(Variable) add it to vector */
+  if ((std::strcmp(name, "") != 0) && (type == sym_info->sym_type)) {
+    sym_info->var_names->push_back(std::string(name));
   }
 
+  delete[] name;
   return status;
 }
 
@@ -2146,13 +2147,13 @@ bool Program::getGlobalVarFromCodeObj(std::vector<std::string>* var_names) const
 }
 
 // Init Fini Launch Lock
-amd::Monitor Program::initFiniLock_(true);
+std::recursive_mutex Program::initFiniLock_;
 
 bool Program::runInitFiniKernel(const std::vector<const Kernel*>& kernels) const {
   amd::HostQueue* queue = nullptr;
 
   for (const auto& kernel : kernels) {
-    amd::ScopedLock sl(initFiniLock_);
+    std::scoped_lock sl(initFiniLock_);
 
     if (queue == nullptr) {
       queue = new amd::HostQueue(device_().context(), device_(), 0);
@@ -2187,7 +2188,7 @@ bool Program::runInitFiniKernel(const std::vector<const Kernel*>& kernels) const
       queue->release();
       return false;
     }
-    if (CL_SUCCESS != kernelCommand->captureAndValidate()) {
+    if (CL_SUCCESS != kernelCommand->captureOpenCLArgsAndValidate()) {
       LogError("Kernel Capture and Validate failed");
       kernelCommand->release();
       k->release();

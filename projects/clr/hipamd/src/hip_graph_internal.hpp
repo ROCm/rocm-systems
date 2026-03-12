@@ -854,11 +854,12 @@ class Graph {
   //! returns device object
   hip::Device* Device() { return device_; }
   bool IsLeafNodeSyncRequired() const {
+    // Check if any segment is a leaf (no outgoing edges). A leaf segment on a
+    // parallel stream must be synced back to the launch stream
     size_t leafSegmentCount = 0;
-    if (max_dependency_level_ >= 0) {
-      auto it = segments_per_level_.find(max_dependency_level_);
-      if (it != segments_per_level_.end()) {
-        leafSegmentCount = it->second.size();
+    for (const auto& seg : segments_) {
+      if (seg.segment_ids_edges.empty()) {
+        leafSegmentCount++;
       }
     }
     return leafSegmentCount > 1;
@@ -947,12 +948,12 @@ class Graph {
 class GraphExec : public amd::ReferenceCountedObject, public Graph {
  public:
   static std::unordered_set<GraphExec*> graphExecSet_;
-  static amd::Monitor graphExecSetLock_;
-  static amd::Monitor graphExecStreamCreateLock_;
+  static std::recursive_mutex graphExecSetLock_;
+  static std::recursive_mutex graphExecStreamCreateLock_;
   bool graph_dumped_ = false;
   GraphExec(uint64_t flags = 0)
       : ReferenceCountedObject(), Graph(hip::getCurrentDevice()), flags_(flags) {
-    amd::ScopedLock lock(graphExecSetLock_);
+    std::scoped_lock lock(graphExecSetLock_);
     graphExecSet_.insert(this);
   }
 
@@ -1215,7 +1216,7 @@ class GraphKernelNode : public GraphNode {
     for (auto& command : commands_) {
       hipFunction_t func = getFunc(kernelParams_, dev_id_);
       hip::DeviceFunc* function = hip::DeviceFunc::asFunction(func);
-      amd::ScopedLock lock(function->dflock_);
+      std::scoped_lock lock(function->dflock_);
       command->enqueue();
       command->release();
     }
@@ -1474,7 +1475,7 @@ class GraphKernelNode : public GraphNode {
       return hipErrorInvalidDeviceFunction;
     }
     hip::DeviceFunc* function = hip::DeviceFunc::asFunction(func);
-    amd::ScopedLock lock(function->dflock_);
+    std::scoped_lock lock(function->dflock_);
     status = validateKernelParams(&kernelParams_, func, dev_id_);
     if (hipSuccess != status) {
       return status;
@@ -2660,7 +2661,6 @@ class GraphMemAllocNode final : public GraphNode {
       assert(vaddr_sub_obj != nullptr);
       queue()->device().SetMemAccess(vaddr_sub_obj->getSvmPtr(), aligned_size,
                                      amd::Device::VmmAccess::kReadWrite);
-      va_->retain();
       graph_->IncrementMemAllocNodeCount();  // Increment count of unreleased mem alloc nodes
       ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM_POOL, "Graph MemAlloc execute [%p-%p], %p",
               vaddr_sub_obj->getSvmPtr(),
@@ -2790,14 +2790,12 @@ class GraphMemFreeNode : public GraphNode {
       assert(phys_mem_obj != nullptr);
       auto vaddr_mem_obj = amd::MemObjMap::FindVirtualMemObj(ptr());
       assert(vaddr_mem_obj != nullptr);
+      // sub_obj is released inside submitVirtualMap after HW unmap completes
       VirtualMapCommand::submit(device);
       if (!AMD_DIRECT_DISPATCH) {
         // Update the current device, since hip event, used in mem pools, requires device
         hip::setCurrentDevice(device_id_);
       }
-      // Free virtual address
-      vaddr_sub_obj->release();
-      vaddr_mem_obj->release();
       // Release the allocation back to graph's pool
       auto device_id = phys_mem_obj->getUserData().deviceId;
       if (!g_devices[device_id]->FreeMemory(phys_mem_obj, static_cast<hip::Stream*>(queue()))) {

@@ -23,7 +23,7 @@ THE SOFTWARE.
 #include <hip_test_common.hh>
 
 
-TEST_CASE("Unit_hip_library_load_co") {
+TEST_CASE(Unit_hip_library_load_co) {
   constexpr size_t size = 32;
   constexpr size_t num_kernels = 3;
   std::vector<float> input1, input2;
@@ -213,7 +213,7 @@ TEST_CASE("Unit_hip_library_load_co") {
   HIP_CHECK(hipFree(d_out));
 }
 
-TEST_CASE("Unit_hipKernelGetParamInfo_Negative") {
+TEST_CASE(Unit_hipKernelGetParamInfo_Negative) {
   size_t offset, paramsize;
 
   SECTION("Kernel as nullptr") {
