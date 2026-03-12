@@ -78,6 +78,12 @@ extern const char* HipExtraSourceCodeNoGWS;
 }  // namespace amd::device
 
 namespace amd::roc {
+
+static void InterceptPassthrough(const void* pkts, uint64_t pkt_count,
+                                 uint64_t user_pkt_index, void* data,
+                                 Hsa::intercept_packet_writer_t writer) {
+  writer(pkts, pkt_count);
+}
 bool roc::Device::isHsaInitialized_ = false;
 std::vector<hsa_agent_t> roc::Device::gpu_agents_;
 std::vector<AgentInfo> roc::Device::cpu_agents_;
@@ -3025,9 +3031,18 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
     queue_type = HSA_QUEUE_TYPE_COOPERATIVE;
   }
 
-  while (Hsa::queue_create(bkendDevice_, queue_size, queue_type, callbackQueue, this,
-                           std::numeric_limits<uint>::max(), std::numeric_limits<uint>::max(),
-                           &queue) != HSA_STATUS_SUCCESS) {
+  auto createQueueFn = [&]() -> hsa_status_t {
+    if (DEBUG_USE_INTERCEPT_QUEUE) {
+      return Hsa::queue_intercept_create(
+          bkendDevice_, queue_size, queue_type, callbackQueue, this,
+          std::numeric_limits<uint>::max(), std::numeric_limits<uint>::max(), &queue);
+    }
+    return Hsa::queue_create(bkendDevice_, queue_size, queue_type, callbackQueue, this,
+                             std::numeric_limits<uint>::max(), std::numeric_limits<uint>::max(),
+                             &queue);
+  };
+
+  while (createQueueFn() != HSA_STATUS_SUCCESS) {
     queue_size >>= 1;
     if (queue_size < 64) {
       LogError("Device::acquireQueue: hsa_queue_create failed!");
@@ -3043,6 +3058,12 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
                "Device::acquireQueue: hsa_queue_create failed!");
       return nullptr;
     }
+  }
+
+  if (DEBUG_USE_INTERCEPT_QUEUE) {
+    Hsa::queue_intercept_register(queue, InterceptPassthrough, nullptr);
+    ClPrint(amd::LOG_INFO, amd::LOG_QUEUE,
+            "Wrapped queue %p in intercept queue for overhead testing", queue);
   }
 
   // default priority is normal so no need to set it again

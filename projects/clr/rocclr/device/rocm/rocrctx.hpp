@@ -125,6 +125,20 @@ struct RocrEntryPoints {
   decltype(hsa_amd_memory_get_preferred_copy_engine)* hsa_amd_memory_get_preferred_copy_engine_;
   decltype(hsa_amd_ais_file_read)* hsa_amd_ais_file_read_;
   decltype(hsa_amd_ais_file_write)* hsa_amd_ais_file_write_;
+  // Intercept queue (tools-only API, not in public HSA headers)
+  typedef void (*intercept_packet_writer_t)(const void* pkts, uint64_t pkt_count);
+  typedef void (*intercept_handler_t)(const void* pkts, uint64_t pkt_count,
+                                      uint64_t user_pkt_index, void* data,
+                                      intercept_packet_writer_t writer);
+  typedef hsa_status_t (*queue_intercept_create_t)(
+      hsa_agent_t, uint32_t, hsa_queue_type32_t,
+      void (*)(hsa_status_t, hsa_queue_t*, void*), void*,
+      uint32_t, uint32_t, hsa_queue_t**);
+  typedef hsa_status_t (*queue_intercept_register_t)(
+      hsa_queue_t*, intercept_handler_t, void*);
+  queue_intercept_create_t queue_intercept_create_;
+  queue_intercept_register_t queue_intercept_register_;
+
   // Image extensions
   decltype(hsa_ext_image_data_get_info_v2)* hsa_ext_image_data_get_info_v2_;
   decltype(hsa_ext_image_create_v2)* hsa_ext_image_create_v2_;
@@ -420,6 +434,18 @@ class Hsa : public amd::AllStatic {
   static hsa_status_t queue_set_priority(hsa_queue_t* queue, hsa_amd_queue_priority_t priority) {
     return ROCR_DYN(hsa_amd_queue_set_priority)(queue, priority);
   }
+
+  using intercept_packet_writer_t = RocrEntryPoints::intercept_packet_writer_t;
+  using intercept_handler_t = RocrEntryPoints::intercept_handler_t;
+
+  static hsa_status_t queue_intercept_create(
+      hsa_agent_t agent, uint32_t size, hsa_queue_type32_t type,
+      void (*callback)(hsa_status_t status, hsa_queue_t* source, void* data),
+      void* data, uint32_t private_segment_size,
+      uint32_t group_segment_size, hsa_queue_t** queue);
+
+  static hsa_status_t queue_intercept_register(
+      hsa_queue_t* queue, intercept_handler_t callback, void* user_data);
   static hsa_status_t memory_async_copy_rect(
     const hsa_pitched_ptr_t* dst, const hsa_dim3_t* dst_offset, const hsa_pitched_ptr_t* src,
     const hsa_dim3_t* src_offset, const hsa_dim3_t* range, hsa_agent_t copy_agent,

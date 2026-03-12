@@ -115,6 +115,11 @@ typedef void (*hsa_amd_queue_intercept_packet_writer)(const void* pkts, uint64_t
 typedef void (*hsa_amd_queue_intercept_handler)(const void* pkts, uint64_t pkt_count,
                                                 uint64_t user_pkt_index, void* data,
                                                 hsa_amd_queue_intercept_packet_writer writer);
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 hsa_status_t hsa_amd_queue_intercept_register(hsa_queue_t* queue,
                                               hsa_amd_queue_intercept_handler callback,
                                               void* user_data);
@@ -122,6 +127,10 @@ hsa_status_t hsa_amd_queue_intercept_create(
     hsa_agent_t agent_handle, uint32_t size, hsa_queue_type32_t type,
     void (*callback)(hsa_status_t status, hsa_queue_t* source, void* data), void* data,
     uint32_t private_segment_size, uint32_t group_segment_size, hsa_queue_t** queue);
+
+#ifdef __cplusplus
+}  // extern "C"
+#endif
 
 typedef void (*hsa_amd_runtime_queue_notifier)(const hsa_queue_t* queue, hsa_agent_t agent,
                                                void* data);

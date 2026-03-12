@@ -131,6 +131,18 @@ bool Hsa::LoadLib() {
   GET_ROCR_SYMBOL(hsa_amd_ais_file_read)
   GET_ROCR_SYMBOL(hsa_amd_ais_file_write)
 
+  // Intercept queue (tools-only API, exported as extern "C" from libhsa-runtime64.so)
+  cep_.queue_intercept_create_ = nullptr;
+  cep_.queue_intercept_register_ = nullptr;
+#if defined(ROCR_DYN_DLL)
+  cep_.queue_intercept_create_ =
+      reinterpret_cast<RocrEntryPoints::queue_intercept_create_t>(
+          Os::getSymbol(cep_.handle, "hsa_amd_queue_intercept_create"));
+  cep_.queue_intercept_register_ =
+      reinterpret_cast<RocrEntryPoints::queue_intercept_register_t>(
+          Os::getSymbol(cep_.handle, "hsa_amd_queue_intercept_register"));
+#endif
+
   // Image extensions
   GET_ROCR_SYMBOL(hsa_ext_image_data_get_info_v2)
   GET_ROCR_SYMBOL(hsa_ext_image_create_v2)
@@ -144,5 +156,55 @@ bool Hsa::LoadLib() {
   is_ready_ = true;
   return true;
 }
+
+}  // namespace roc
+}  // namespace amd
+
+#ifndef ROCR_DYN_DLL
+extern "C" {
+extern hsa_status_t hsa_amd_queue_intercept_create(
+    hsa_agent_t agent_handle, uint32_t size, hsa_queue_type32_t type,
+    void (*callback)(hsa_status_t status, hsa_queue_t* source, void* data), void* data,
+    uint32_t private_segment_size, uint32_t group_segment_size, hsa_queue_t** queue);
+extern hsa_status_t hsa_amd_queue_intercept_register(
+    hsa_queue_t* queue,
+    void (*callback)(const void*, uint64_t, uint64_t, void*,
+                     void (*)(const void*, uint64_t)),
+    void* user_data);
+}  // extern "C"
+#endif
+
+namespace amd {
+namespace roc {
+
+hsa_status_t Hsa::queue_intercept_create(
+    hsa_agent_t agent, uint32_t size, hsa_queue_type32_t type,
+    void (*callback)(hsa_status_t status, hsa_queue_t* source, void* data),
+    void* data, uint32_t private_segment_size,
+    uint32_t group_segment_size, hsa_queue_t** queue) {
+#ifdef ROCR_DYN_DLL
+  if (cep_.queue_intercept_create_ == nullptr) {
+    return HSA_STATUS_ERROR;
+  }
+  return cep_.queue_intercept_create_(agent, size, type, callback, data,
+                                      private_segment_size, group_segment_size, queue);
+#else
+  return ::hsa_amd_queue_intercept_create(agent, size, type, callback, data,
+                                          private_segment_size, group_segment_size, queue);
+#endif
+}
+
+hsa_status_t Hsa::queue_intercept_register(
+    hsa_queue_t* queue, intercept_handler_t callback, void* user_data) {
+#ifdef ROCR_DYN_DLL
+  if (cep_.queue_intercept_register_ == nullptr) {
+    return HSA_STATUS_ERROR;
+  }
+  return cep_.queue_intercept_register_(queue, callback, user_data);
+#else
+  return ::hsa_amd_queue_intercept_register(queue, callback, user_data);
+#endif
+}
+
 }  // namespace roc
 }  // namespace amd
