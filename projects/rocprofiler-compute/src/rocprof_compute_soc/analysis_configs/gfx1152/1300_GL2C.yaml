@@ -1,5 +1,5 @@
 # =============================================================================
-# RDNA3.5 (gfx1150) - RDNA3.5 GL2C (L2 Cache) Performance Metrics
+# RDNA3.5 (gfx1152) - RDNA3.5 GL2C (L2 Cache) Performance Metrics
 # =============================================================================
 # GL2C is the last-level cache shared across the GPU
 # Cache hierarchy: TCP (L0) -> GL1C (L1) -> GL2C (L2) -> Memory

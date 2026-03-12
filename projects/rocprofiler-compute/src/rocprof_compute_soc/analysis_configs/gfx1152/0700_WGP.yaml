@@ -1,5 +1,5 @@
 # =============================================================================
-# RDNA3.5 (gfx1150) - RDNA3.5 Workgroup Processor (WGP) Performance Metrics
+# RDNA3.5 (gfx1152) - RDNA3.5 Workgroup Processor (WGP) Performance Metrics
 # =============================================================================
 # RDNA3.5 WGP Structure: 2 CUs per WGP, 2 SIMD32 per CU, Wave32 primary wavefront size
 # =============================================================================

@@ -1,5 +1,5 @@
 # =============================================================================
-# RDNA3.5 (gfx1150) - RDNA3.5 Roofline Performance Metrics
+# RDNA3.5 (gfx1152) - RDNA3.5 Roofline Performance Metrics
 # =============================================================================
 # RDNA3.5 uses standard VALU FLOPs (no MFMA/XDL matrix units)
 # Cache hierarchy: TCP (L0) -> GL1C (L1) -> GL2C (L2) -> System Memory
@@ -50,7 +50,7 @@ Panel Config:
           unit: GB/s
           peak: $L0Bw_empirical_peak
         LDS Bandwidth:
-          value: AVG((((SQ_LDS_IDX_ACTIVE_sum - SQ_LDS_BANK_CONFLICT_sum) * 4 * $lds_banks_per_cu) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+          value: AVG((((SQC_LDS_IDX_ACTIVE_sum - SQC_LDS_BANK_CONFLICT_sum) * 4 * $lds_banks_per_cu) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
           unit: GB/s
           peak: $LDSBw_empirical_peak
 

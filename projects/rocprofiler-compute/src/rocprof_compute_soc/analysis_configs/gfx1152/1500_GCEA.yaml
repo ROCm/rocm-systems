@@ -1,5 +1,5 @@
 # =============================================================================
-# RDNA3.5 (gfx1150) - RDNA3.5 GCEA (External Access) Performance Metrics
+# RDNA3.5 (gfx1152) - RDNA3.5 GCEA (External Access) Performance Metrics
 # =============================================================================
 # GCEA (Graphics Core External Access) handles memory controller interface
 # For APUs, this connects to system memory (DDR5/LPDDR5) instead of HBM
