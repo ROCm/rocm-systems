@@ -98,7 +98,7 @@ template <typename T> class WarpShflUp : public WarpShflTest<WarpShflUp<T>, T> {
  *  - HIP_VERSION >= 5.2
  *  - Device supports warp shuffle
  */
-TEMPLATE_TEST_CASE("Unit_Warp_Shfl_Up_Positive_Basic", "", int, unsigned int, long, unsigned long,
+TEMPLATE_TEST_CASE(Unit_Warp_Shfl_Up_Positive_Basic, int, unsigned int, long, unsigned long,
                    long long, unsigned long long, float, double, __half, __half2) {
   int device;
   hipDeviceProp_t device_properties;

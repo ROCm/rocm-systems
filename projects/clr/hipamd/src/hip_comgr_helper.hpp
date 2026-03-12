@@ -177,7 +177,7 @@ struct LinkArguments {
 class RTCProgram {
  protected:
   // Lock and control variables
-  static amd::Monitor lock_;
+  static std::recursive_mutex lock_;
   static std::once_flag initialized_;
 
   RTCProgram(std::string name);
@@ -222,7 +222,7 @@ class LinkProgram : public RTCProgram {
  public:
   LinkProgram(std::string name);
   ~LinkProgram() {
-    amd::ScopedLock lock(lock_);
+    std::scoped_lock lock(lock_);
     linker_set_.erase(this);
   }
   // Public Member Functions
