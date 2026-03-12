@@ -37,21 +37,16 @@ THE SOFTWARE.
  *  - HIP_VERSION >= 7.2
  */
 TEST_CASE("Unit_hipGreenCtxRecordEvent_Sanity") {
-  CTX_CREATE();
+  HIP_CHECK(hipSetDevice(0));
   hipDevResourceDesc_t desc{};
   hipEvent_t event = nullptr;
   hipGreenCtx_t green_ctx = nullptr;
-  hipCtx_t ctx = nullptr;
   hipError_t ret = GetSmResourceDesc(&desc);
   REQUIRE(ret == hipSuccess);
 
-  HIP_CHECK(hipGreenCtxCreate(&green_ctx, desc, 0, hipGreenCtxDefaultStream));
+  HIP_CHECK(hipGreenCtxCreate(&green_ctx, desc, 0, 0));
   REQUIRE(green_ctx != nullptr);
 
-
-  HIP_CHECK(hipCtxFromGreenCtx(&ctx, green_ctx));
-  HIP_CHECK(hipCtxSetCurrent(ctx));
-  
   HIP_CHECK(hipEventCreate(&event));
   REQUIRE(event != nullptr);
 
@@ -59,7 +54,6 @@ TEST_CASE("Unit_hipGreenCtxRecordEvent_Sanity") {
 
   HIP_CHECK(hipEventDestroy(event));
   HIP_CHECK(hipGreenCtxDestroy(green_ctx));
-  CTX_DESTROY();
 }
 
 /**
@@ -71,19 +65,15 @@ TEST_CASE("Unit_hipGreenCtxRecordEvent_Sanity") {
  *  - HIP_VERSION >= 7.2
  */
 TEST_CASE("Unit_hipGreenCtxWaitEvent_Sanity") {
-  CTX_CREATE();
+  HIP_CHECK(hipSetDevice(0));
   hipDevResourceDesc_t desc{};
   hipEvent_t event = nullptr;
   hipGreenCtx_t green_ctx = nullptr;
-  hipCtx_t ctx = nullptr;
   hipError_t ret = GetSmResourceDesc(&desc);
   REQUIRE(ret == hipSuccess);
 
-  HIP_CHECK(hipGreenCtxCreate(&green_ctx, desc, 0, hipGreenCtxDefaultStream));
+  HIP_CHECK(hipGreenCtxCreate(&green_ctx, desc, 0, 0));
   REQUIRE(green_ctx != nullptr);
-
-  HIP_CHECK(hipCtxFromGreenCtx(&ctx, green_ctx));
-  HIP_CHECK(hipCtxSetCurrent(ctx));
 
   HIP_CHECK(hipEventCreate(&event));
   REQUIRE(event != nullptr);
@@ -93,7 +83,6 @@ TEST_CASE("Unit_hipGreenCtxWaitEvent_Sanity") {
 
   HIP_CHECK(hipEventDestroy(event));
   HIP_CHECK(hipGreenCtxDestroy(green_ctx));
-  CTX_DESTROY();
 }
 
 /**
@@ -105,27 +94,23 @@ TEST_CASE("Unit_hipGreenCtxWaitEvent_Sanity") {
  *  - HIP_VERSION >= 7.2
  */
 TEST_CASE("Unit_hipGreenCtxRecordEventFunctional") {
-  CTX_CREATE();
+  HIP_CHECK(hipSetDevice(0));
   hipDevResourceDesc_t desc{};
   hipEvent_t event = nullptr;
   hipGreenCtx_t green_ctx = nullptr;
-  hipCtx_t ctx = nullptr;
   hipError_t ret = GetSmResourceDesc(&desc);
   REQUIRE(ret == hipSuccess);
 
-  HIP_CHECK(hipGreenCtxCreate(&green_ctx, desc, 0, hipGreenCtxDefaultStream));
+  HIP_CHECK(hipGreenCtxCreate(&green_ctx, desc, 0, 0));
   REQUIRE(green_ctx != nullptr);
-
-  HIP_CHECK(hipCtxFromGreenCtx(&ctx, green_ctx));
-  HIP_CHECK(hipCtxSetCurrent(ctx));
 
   HIP_CHECK(hipEventCreate(&event));
   REQUIRE(event != nullptr);
 
   hipStream_t stream1 = nullptr;
   hipStream_t stream2 = nullptr;
-  HIP_CHECK(hipGreenCtxStreamCreate(&stream1, green_ctx, 0x1, 0x0));
-  HIP_CHECK(hipGreenCtxStreamCreate(&stream2, green_ctx, 0x1, 0x0));
+  HIP_CHECK(hipGreenCtxStreamCreate(&stream1, green_ctx, hipStreamNonBlocking, 0x0));
+  HIP_CHECK(hipGreenCtxStreamCreate(&stream2, green_ctx, hipStreamNonBlocking, 0x0));
   REQUIRE(stream1 != nullptr);
   REQUIRE(stream2 != nullptr);
 
@@ -178,7 +163,6 @@ TEST_CASE("Unit_hipGreenCtxRecordEventFunctional") {
   HIP_CHECK(hipStreamDestroy(stream2));
   HIP_CHECK(hipEventDestroy(event));
   HIP_CHECK(hipGreenCtxDestroy(green_ctx));
-  CTX_DESTROY();
 }
 
 /**
