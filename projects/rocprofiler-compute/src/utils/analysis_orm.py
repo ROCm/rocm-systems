@@ -29,6 +29,7 @@ from sqlalchemy import (
     Column,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -98,6 +99,8 @@ class MetricDefinition(Base):
         "WorkloadMetricValue", back_populates="metric"
     )
 
+    __table_args__ = (Index("idx_metric_def_workload", "workload_id"),)
+
 
 class KernelRooflineData(Base):
     __tablename__ = f"{PREFIX}kernel_roofline_data"
@@ -114,6 +117,8 @@ class KernelRooflineData(Base):
     # Roofline data point can have one kernel
     kernel = relationship("Kernel", back_populates="roofline_data_points")
 
+    __table_args__ = (Index("idx_kernel_roofline_kernel", "kernel_uuid"),)
+
 
 class Dispatch(Base):
     __tablename__ = f"{PREFIX}dispatch"
@@ -129,6 +134,16 @@ class Dispatch(Base):
 
     # Dispatch can have one kernel
     kernel = relationship("Kernel", back_populates="dispatches")
+
+    __table_args__ = (
+        Index("idx_dispatch_kernel", "kernel_uuid"),
+        # Composite index for duration-based queries (median calculation)
+        Index(
+            "idx_dispatch_kernel_duration",
+            "kernel_uuid",
+            text("(end_timestamp - start_timestamp)"),
+        ),
+    )
 
 
 class Kernel(Base):
@@ -151,6 +166,8 @@ class Kernel(Base):
     # Kernel can have multiple pc_sampling values
     pc_sampling_values = relationship("PCsampling", back_populates="kernel")
 
+    __table_args__ = (Index("idx_kernel_workload", "workload_id"),)
+
 
 class PCsampling(Base):
     __tablename__ = f"{PREFIX}pcsampling"
@@ -169,6 +186,8 @@ class PCsampling(Base):
 
     # PCsampling can have one kernel
     kernel = relationship("Kernel", back_populates="pc_sampling_values")
+
+    __table_args__ = (Index("idx_pcsampling_kernel", "kernel_uuid"),)
 
 
 class KernelMetricValue(Base):
@@ -189,6 +208,11 @@ class KernelMetricValue(Base):
     # Value can have one kernel
     kernel = relationship("Kernel", back_populates="metric_values")
 
+    __table_args__ = (
+        Index("idx_kernel_metric_value_metric", "metric_uuid"),
+        Index("idx_kernel_metric_value_kernel", "kernel_uuid"),
+    )
+
 
 class WorkloadMetricValue(Base):
     __tablename__ = f"{PREFIX}workload_metric_value"
@@ -207,6 +231,11 @@ class WorkloadMetricValue(Base):
     metric = relationship("MetricDefinition", back_populates="workload_metric_values")
     workload = relationship("Workload", back_populates="workload_metric_values")
 
+    __table_args__ = (
+        Index("idx_workload_metric_value_metric", "metric_uuid"),
+        Index("idx_workload_metric_value_workload", "workload_id"),
+    )
+
 
 class WorkloadRooflineData(Base):
     __tablename__ = f"{PREFIX}workload_roofline_data"
@@ -222,6 +251,8 @@ class WorkloadRooflineData(Base):
 
     # Relationships
     workload = relationship("Workload", back_populates="workload_roofline_data_points")
+
+    __table_args__ = (Index("idx_workload_roofline_workload", "workload_id"),)
 
 
 class Metadata(Base):
