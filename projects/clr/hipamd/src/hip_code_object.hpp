@@ -87,7 +87,7 @@ class CodeObject {
 // Dynamic Code Object
 class DynCO : public CodeObject {
   // Guards Dynamic Code object
-  amd::Monitor dclock_{true};
+  std::recursive_mutex dclock_;
 
  public:
   DynCO() : device_id_(ihipGetDevice()), fb_info_(nullptr), module_(nullptr) {}
@@ -165,7 +165,7 @@ class StatCO : public CodeObject {
   void ResizeForDevices(size_t device_count);
 
  private:
-  amd::Monitor sclock_{true};              //!< Guards Static Code object
+  std::recursive_mutex sclock_;            //!< Guards Static Code object
   const PlatformState& owner_;             //!< Reference to owning PlatformState
   //! Populated during __hipRegisterFatBinary
   std::unordered_map<const void*, FatBinaryInfo*> modules_;

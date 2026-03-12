@@ -806,7 +806,7 @@ extern "C"
 
 // ================================================================================================
 void PlatformState::Init() {
-  amd::ScopedLock lock(lock_);
+  std::scoped_lock lock(lock_);
   if (initialized_ || g_devices.empty()) {
     return;
   }
@@ -832,7 +832,7 @@ hipError_t PlatformState::LoadModule(hipModule_t* module, const char* fname, con
   *module = dynCo->getModule();
   assert(*module != nullptr);
 
-  amd::ScopedLock lock(lock_);
+  std::scoped_lock lock(lock_);
   const auto [it, inserted] = dynCO_map_.try_emplace(*module, dynCo.get());
   if (!inserted) {
     return hipErrorAlreadyMapped;
@@ -844,7 +844,7 @@ hipError_t PlatformState::LoadModule(hipModule_t* module, const char* fname, con
 
 // ================================================================================================
 hipError_t PlatformState::UnloadModule(hipModule_t hmod) {
-  amd::ScopedLock lock(lock_);
+  std::scoped_lock lock(lock_);
 
   if (auto it = dynCO_map_.find(hmod); it == dynCO_map_.end()) {
     return hipErrorNotFound;
@@ -872,7 +872,7 @@ hipError_t PlatformState::GetDynFunc(hipFunction_t* hfunc, hipModule_t hmod,
     return hipErrorNotFound;
   }
 
-  amd::ScopedLock lock(lock_);
+  std::scoped_lock lock(lock_);
 
   const auto it = dynCO_map_.find(hmod);
   if (it == dynCO_map_.end()) {
@@ -885,7 +885,7 @@ hipError_t PlatformState::GetDynFunc(hipFunction_t* hfunc, hipModule_t hmod,
 
 // ================================================================================================
 hipError_t PlatformState::GetFuncCount(unsigned int* count, hipModule_t hmod) {
-  amd::ScopedLock lock(lock_);
+  std::scoped_lock lock(lock_);
 
   const auto it = dynCO_map_.find(hmod);
   if (it == dynCO_map_.end()) {
@@ -897,7 +897,7 @@ hipError_t PlatformState::GetFuncCount(unsigned int* count, hipModule_t hmod) {
 
 // ================================================================================================
 bool PlatformState::IsValidDynFunc(const void* hfunc) {
-  amd::ScopedLock lock(lock_);
+  std::scoped_lock lock(lock_);
   return std::any_of(dynCO_map_.begin(), dynCO_map_.end(),
                      [hfunc](const auto& entry) { return entry.second->isValidDynFunc(hfunc); });
 }
@@ -905,7 +905,7 @@ bool PlatformState::IsValidDynFunc(const void* hfunc) {
 // ================================================================================================
 hipError_t PlatformState::GetDynGlobalVar(const char* hostVar, hipModule_t hmod,
                                           hipDeviceptr_t* dev_ptr, size_t* size_ptr) {
-  amd::ScopedLock lock(lock_);
+  std::scoped_lock lock(lock_);
 
   if (hostVar == nullptr) {
     return hipErrorInvalidValue;
@@ -937,7 +937,7 @@ hipError_t PlatformState::GetDynGlobalVar(const char* hostVar, hipModule_t hmod,
 // ================================================================================================
 hipError_t PlatformState::RegisterTexRef(textureReference* texRef, hipModule_t hmod,
                                          std::string name) {
-  amd::ScopedLock lock(lock_);
+  std::scoped_lock lock(lock_);
   texRef_map_.insert(std::make_pair(texRef, std::make_pair(hmod, name)));
   return hipSuccess;
 }
@@ -945,7 +945,7 @@ hipError_t PlatformState::RegisterTexRef(textureReference* texRef, hipModule_t h
 // ================================================================================================
 hipError_t PlatformState::GetDynTexGlobalVar(textureReference* texRef, hipDeviceptr_t* dev_ptr,
                                              size_t* size_ptr) {
-  amd::ScopedLock lock(lock_);
+  std::scoped_lock lock(lock_);
 
   const auto tex_it = texRef_map_.find(texRef);
   if (tex_it == texRef_map_.end()) {
@@ -971,7 +971,7 @@ hipError_t PlatformState::GetDynTexGlobalVar(textureReference* texRef, hipDevice
 // ================================================================================================
 hipError_t PlatformState::GetDynTexRef(const char* hostVar, hipModule_t hmod,
                                        textureReference** texRef) {
-  amd::ScopedLock lock(lock_);
+  std::scoped_lock lock(lock_);
 
   const auto it = dynCO_map_.find(hmod);
   if (it == dynCO_map_.end()) {
@@ -1013,7 +1013,7 @@ void PlatformState::PopExec(ihipExec_t& exec) {
 
 // ================================================================================================
 std::shared_ptr<UniqueFD> PlatformState::GetUniqueFileHandle(const std::string& file_path) {
-  amd::ScopedLock lock(ufd_lock_);
+  std::scoped_lock lock(ufd_lock_);
 
   auto it = ufd_map_.find(file_path);
   if (it != ufd_map_.end()) {
@@ -1034,7 +1034,7 @@ std::shared_ptr<UniqueFD> PlatformState::GetUniqueFileHandle(const std::string& 
 
 // ================================================================================================
 bool PlatformState::CloseUniqueFileHandle(const std::shared_ptr<UniqueFD>& ufd) {
-  amd::ScopedLock lock(ufd_lock_);
+  std::scoped_lock lock(ufd_lock_);
 
   // if use_count is 2, then there is 1 entry in the map and the current entry is the last close.
   if (ufd.use_count() == 2) {
@@ -1048,7 +1048,7 @@ bool PlatformState::CloseUniqueFileHandle(const std::shared_ptr<UniqueFD>& ufd) 
 
 // ================================================================================================
 void* PlatformState::GetDynamicLibraryHandle() {
-  amd::ScopedLock lock(lock_);
+  std::scoped_lock lock(lock_);
 
   if (dynamicLibraryHandle_ != nullptr) {
     return dynamicLibraryHandle_;
@@ -1066,7 +1066,7 @@ void* PlatformState::GetDynamicLibraryHandle() {
 
 // ================================================================================================
 void PlatformState::SetDynamicLibraryHandle(void* handle) {
-  amd::ScopedLock lock(lock_);
+  std::scoped_lock lock(lock_);
   dynamicLibraryHandle_ = handle;
 }
 

@@ -1140,8 +1140,13 @@ const char *JumpToTrapIsa =
         EXIT_LOOP:
         V_CMP_EQ_U32 v4, 0
         s_cbranch_vccnz EXIT_LOOP
-        flat_store_dword v[0:1], v4
-        s_waitcnt vmcnt(0)&lgkmcnt(0)
+        .if (.amdgcn.gfx_generation_number >= 12)
+            flat_store_dword v[0:1], v4 scope:SCOPE_SYS
+            s_wait_storecnt 0
+        .else
+            flat_store_dword v[0:1], v4
+            s_waitcnt vmcnt(0)&lgkmcnt(0)
+        .endif
         s_endpgm
 )";
 
@@ -1184,9 +1189,13 @@ const char *TrapHandlerIsa =
             s_and_b32 exec_lo, exec_lo, 0xfff
             s_mov_b32 ttmp3, exec_lo
             s_mov_b32 exec_lo, ttmp2
-        .else
+        .elseif (.amdgcn.gfx_generation_number < 12)
             s_sendmsg_rtn_b32 ttmp3, sendmsg(MSG_RTN_GET_DOORBELL)
             s_waitcnt lgkmcnt(0)
+            s_and_b32 ttmp3, ttmp3, 0x3ff
+        .else
+            s_sendmsg_rtn_b32 ttmp3, sendmsg(MSG_RTN_GET_DOORBELL)
+            s_wait_kmcnt 0
             s_and_b32 ttmp3, ttmp3, 0x3ff
         .endif
         s_mov_b32 ttmp2, m0
@@ -1195,7 +1204,11 @@ const char *TrapHandlerIsa =
         s_mov_b32 m0, ttmp3
         s_nop 0x0
         s_sendmsg sendmsg(MSG_INTERRUPT)
-        s_waitcnt lgkmcnt(0)
+        .if (.amdgcn.gfx_generation_number >= 12)
+            s_wait_kmcnt 0
+        .else
+            s_waitcnt lgkmcnt(0)
+        .endif
         s_mov_b32 m0, ttmp2
         v_mov_b32 v4, ttmp1
         .if (.amdgcn.gfx_generation_number >= 12)

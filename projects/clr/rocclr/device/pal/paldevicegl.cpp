@@ -846,7 +846,7 @@ bool Device::resGLAssociate(void* GLContext, uint name, uint type, Pal::OsExtern
                             Pal::DoppDesktopInfo& doppDesktopInfo
 #endif
 ) const {
-  amd::ScopedLock lk(lockPAL());
+  std::scoped_lock lk(lockPAL());
 
   GLResource hRes = {};
   GLResourceData hData = {};
@@ -910,7 +910,7 @@ bool Device::resGLAssociate(void* GLContext, uint name, uint type, Pal::OsExtern
 }
 
 bool Device::resGLAcquire(void* GLplatformContext, void* mbResHandle, uint type) const {
-  amd::ScopedLock lk(lockPAL());
+  std::scoped_lock lk(lockPAL());
 
   GLResource hRes = {};
   hRes.mbResHandle = (GLuintp)mbResHandle;
@@ -930,7 +930,7 @@ bool Device::resGLAcquire(void* GLplatformContext, void* mbResHandle, uint type)
 }
 
 bool Device::resGLRelease(void* GLplatformContext, void* mbResHandle, uint type) const {
-  amd::ScopedLock lk(lockPAL());
+  std::scoped_lock lk(lockPAL());
 
   GLResource hRes = {};
   hRes.mbResHandle = (GLuintp)mbResHandle;
@@ -952,7 +952,7 @@ bool Device::resGLRelease(void* GLplatformContext, void* mbResHandle, uint type)
 }
 
 bool Device::resGLFree(void* GLplatformContext, void* mbResHandle, uint type) const {
-  amd::ScopedLock lk(lockPAL());
+  std::scoped_lock lk(lockPAL());
 
   GLResource hRes = {};
   hRes.mbResHandle = (GLuintp)mbResHandle;

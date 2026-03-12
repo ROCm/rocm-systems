@@ -56,7 +56,7 @@ PalThreadTraceReference* PalThreadTraceReference::Create(VirtualGPU& gpu) {
 PalThreadTraceReference::~PalThreadTraceReference() {
   // The thread trace object is always associated with a particular queue,
   // so we have to lock just this queue
-  amd::ScopedLock lock(gpu_.execution());
+  std::scoped_lock lock(gpu_.execution());
 
   delete layout_;
   delete memory_;
