@@ -224,6 +224,9 @@ public:
   ErrorCode QueryTempMetric(uint32_t sensor_type, uint32_t metric,
                             int64_t *temperature) const;
 
+  // Query GPU engine activity via KMD PMLog escape.
+  ErrorCode QueryGpuActivity(wsl::thunk::GpuActivity *info) const;
+
   // Send a driver-escape packet on behalf of this GPU slot.
   ErrorCode Escape(void *pData, size_t dataSize, bool hardwareAccess = false) const;
 

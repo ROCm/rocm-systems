@@ -46,6 +46,13 @@ struct PowerInfo {
   uint32_t power_limit;           // max power limit from sensor limits
 };
 
+// GPU engine activity readings from KMD PMLog escape.
+struct GpuActivity {
+  uint32_t gfx_activity;  // GFX engine utilization in %
+  uint32_t umc_activity;  // Memory controller utilization in % (not available via PMLog, always 0)
+  uint32_t mm_activity;   // Multimedia engine utilization in %
+};
+
 // VBIOS version and identification information from KMD CWDDE escape.
 struct VBiosInfo {
   char name[256];          // product name from VBIOS ROM image

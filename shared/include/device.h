@@ -47,6 +47,8 @@ public:
   ErrorCode QueryTempMetric(uint32_t sensor_type, uint32_t metric,
                             int64_t *temperature) const;
 
+  ErrorCode QueryGpuActivity(GpuActivity *info) const;
+
   ErrorCode Escape(void *pData, size_t dataSize,
                    bool hardwareAccess = false) const;
 

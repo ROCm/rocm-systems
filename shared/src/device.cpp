@@ -75,6 +75,10 @@ ErrorCode Device::QueryTempMetric(uint32_t sensor_type, uint32_t metric,
   return device_ctx_->QueryTempMetric(sensor_type, metric, temperature);
 }
 
+ErrorCode Device::QueryGpuActivity(GpuActivity *info) const {
+  return device_ctx_->QueryGpuActivity(info);
+}
+
 ErrorCode Device::Escape(void *pData, size_t dataSize, bool hardwareAccess) const {
   return device_ctx_->Escape(pData, dataSize, hardwareAccess);
 }
