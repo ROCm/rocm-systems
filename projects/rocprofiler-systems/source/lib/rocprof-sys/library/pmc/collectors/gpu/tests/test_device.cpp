@@ -15,18 +15,9 @@ using ::testing::DoAll;
 using ::testing::Return;
 using ::testing::SetArgPointee;
 
-
 using MockDriver = rocprofsys::pmc::drivers::amd_smi::testing::mock_driver;
 
-namespace rocprofsys
-{
-namespace pmc
-{
-namespace collectors
-{
-namespace gpu
-{
-namespace testing
+namespace rocprofsys::pmc::collectors::gpu::testing
 {
 
 /**
@@ -100,15 +91,15 @@ protected:
         amdsmi_gpu_metrics_t metrics = CreateSentinelMetrics();
 
         // Set specific metrics to valid values
-        metrics.current_socket_power = 150;    // Valid power (watts)
-        metrics.temperature_hotspot  = 75000;  // Valid temp (millidegrees)
-        metrics.average_gfx_activity = 85;     // Valid activity (percent)
+        metrics.current_socket_power = 150;  // Valid power (watts)
+        metrics.temperature_hotspot  = 75;   // Valid temp (degrees Celsius)
+        metrics.average_gfx_activity = 85;   // Valid activity (percent)
 
         ON_CALL(*mock_driver, get_metrics_info(test_handle, _))
             .WillByDefault(
                 DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
 
-        uint64_t sentinel_mem = 0xFFFFFFFFFFFFFFFFULL;
+        constexpr uint64_t sentinel_mem = 0xFFFFFFFFFFFFFFFFULL;
         ON_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
             .WillByDefault(
                 DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
@@ -126,8 +117,8 @@ protected:
         metrics.average_socket_power = 140;
 
         // Temperature metrics (in millidegrees Celsius)
-        metrics.temperature_hotspot = 75000;
-        metrics.temperature_edge    = 70000;
+        metrics.temperature_hotspot = 75;
+        metrics.temperature_edge    = 70;
 
         // Activity metrics (percentage)
         metrics.average_gfx_activity = 85;
@@ -172,16 +163,16 @@ protected:
     {
         amdsmi_gpu_metrics_t metrics{};
 
-        // 32-bit sentinel
-        metrics.current_socket_power = 0xFFFFFFFF;
-        metrics.average_socket_power = 0xFFFFFFFF;
-        metrics.average_gfx_activity = 0xFFFFFFFF;
-        metrics.average_umc_activity = 0xFFFFFFFF;
-        metrics.average_mm_activity  = 0xFFFFFFFF;
+        // uint16_t sentinel values
+        metrics.current_socket_power = 0xFFFF;
+        metrics.average_socket_power = 0xFFFF;
+        metrics.average_gfx_activity = 0xFFFF;
+        metrics.average_umc_activity = 0xFFFF;
+        metrics.average_mm_activity  = 0xFFFF;
 
-        // 64-bit sentinel for temperatures (stored as int64_t)
-        metrics.temperature_hotspot = 0xFFFFFFFFFFFFFFFFLL;
-        metrics.temperature_edge    = 0xFFFFFFFFFFFFFFFFLL;
+        // Temperature sentinel values (uint16_t fields)
+        metrics.temperature_hotspot = 0xFFFF;
+        metrics.temperature_edge    = 0xFFFF;
 
         // 16-bit sentinel for XCP stats
         for(size_t xcp = 0; xcp < AMDSMI_MAX_NUM_XCP; ++xcp)
@@ -451,7 +442,7 @@ TEST_F(DeviceTest, hotspot_temperature_collection)
 {
     // Setup: Mock returns specific hotspot temperature value
     amdsmi_gpu_metrics_t metrics = CreateSentinelMetrics();
-    metrics.temperature_hotspot  = 75000;  // 75°C in millidegrees
+    metrics.temperature_hotspot  = 75;  // 75°C
 
     ON_CALL(*mock_driver, get_metrics_info(test_handle, _))
         .WillByDefault(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
@@ -471,7 +462,7 @@ TEST_F(DeviceTest, hotspot_temperature_collection)
     auto collected_metrics = dev.get_gpu_metrics();
 
     // Verify hotspot temperature value was collected
-    EXPECT_EQ(collected_metrics.hotspot_temperature, 75000);
+    EXPECT_EQ(collected_metrics.hotspot_temperature, 75);
 }
 
 /**
@@ -483,12 +474,12 @@ TEST_F(DeviceTest, edge_temperature_collection)
 {
     // Setup: Mock returns specific edge temperature value
     amdsmi_gpu_metrics_t metrics = CreateSentinelMetrics();
-    metrics.temperature_edge     = 70000;  // 70°C in millidegrees
+    metrics.temperature_edge     = 70;  // 70°C in degrees Celsius
 
     ON_CALL(*mock_driver, get_metrics_info(test_handle, _))
         .WillByDefault(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
 
-    uint64_t sentinel_mem = 0xFFFFFFFFFFFFFFFFULL;
+    constexpr uint64_t sentinel_mem = 0xFFFFFFFFFFFFFFFFULL;
     ON_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
         .WillByDefault(
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
@@ -2124,21 +2115,21 @@ TEST_F(DeviceTest, full_lifecycle_with_realistic_data)
 
     // Collection 1: Idle GPU
     amdsmi_gpu_metrics_t metrics1 = CreateSentinelMetrics();
-    metrics1.current_socket_power = 150;    // 150W
-    metrics1.temperature_hotspot  = 70000;  // 70°C
-    metrics1.average_gfx_activity = 50;     // 50% activity
+    metrics1.current_socket_power = 150;  // 150W
+    metrics1.temperature_hotspot  = 70;   // 70°C
+    metrics1.average_gfx_activity = 50;   // 50% activity
 
     // Collection 2: Heavy workload
     amdsmi_gpu_metrics_t metrics2 = CreateSentinelMetrics();
-    metrics2.current_socket_power = 180;    // 180W
-    metrics2.temperature_hotspot  = 75000;  // 75°C
-    metrics2.average_gfx_activity = 90;     // 90% activity
+    metrics2.current_socket_power = 180;  // 180W
+    metrics2.temperature_hotspot  = 75;   // 75°C
+    metrics2.average_gfx_activity = 90;   // 90% activity
 
     // Collection 3: Returning to moderate
     amdsmi_gpu_metrics_t metrics3 = CreateSentinelMetrics();
-    metrics3.current_socket_power = 160;    // 160W
-    metrics3.temperature_hotspot  = 73000;  // 73°C
-    metrics3.average_gfx_activity = 60;     // 60% activity
+    metrics3.current_socket_power = 160;  // 160W
+    metrics3.temperature_hotspot  = 73;   // 73°C
+    metrics3.average_gfx_activity = 60;   // 60% activity
 
     // Setup mock to return different values on each call
     EXPECT_CALL(*mock, get_metrics_info(test_handle, _))
@@ -2197,9 +2188,4 @@ TEST_F(DeviceTest, device_type_filtering_scenario)
     EXPECT_TRUE(is_gpu);
 }
 
-}  // namespace testing
-}  // namespace gpu
-}  // namespace collectors
-}  // namespace pmc
-}  // namespace rocprofsys
-
+}  // namespace rocprofsys::pmc::collectors::gpu::testing

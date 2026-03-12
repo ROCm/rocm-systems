@@ -19,25 +19,22 @@
 
 #include "library/pmc/sampler.hpp"
 
-// For now let's limit the PMC sampler to ROCM only.
-#if defined(ROCPROFSYS_USE_ROCM) && ROCPROFSYS_USE_ROCM > 0
+#if defined(NDEBUG)
+#    undef NDEBUG
+#endif
 
-#    if defined(NDEBUG)
-#        undef NDEBUG
-#    endif
+#include <amd_smi/amdsmi.h>
+#include <timemory/backends/threading.hpp>
+#include <timemory/components/timing/backends.hpp>
+#include <timemory/mpl/type_traits.hpp>
+#include <timemory/units.hpp>
+#include <timemory/utility/delimit.hpp>
+#include <timemory/utility/locking.hpp>
 
-#    include <amd_smi/amdsmi.h>
-#    include <timemory/backends/threading.hpp>
-#    include <timemory/components/timing/backends.hpp>
-#    include <timemory/mpl/type_traits.hpp>
-#    include <timemory/units.hpp>
-#    include <timemory/utility/delimit.hpp>
-#    include <timemory/utility/locking.hpp>
-
-#    include <cassert>
-#    include <optional>
-#    include <sys/resource.h>
-#    include <vector>
+#include <cassert>
+#include <optional>
+#include <sys/resource.h>
+#include <vector>
 
 namespace rocprofsys
 {
@@ -103,6 +100,8 @@ config()
     {
         slice.config();
     }
+    LOG_DEBUG("Setting PMC sampler state to active...");
+    pmc::set_state(State::Active);
 }
 
 void
@@ -253,5 +252,3 @@ ROCPROFSYS_INSTANTIATE_EXTERN_COMPONENT(
 ROCPROFSYS_INSTANTIATE_EXTERN_COMPONENT(
     TIMEMORY_ESC(data_tracker<double, rocprofsys::component::backtrace_gpu_jpeg>), true,
     double)
-
-#endif

@@ -301,7 +301,6 @@ struct gpu_traits
     }
 };
 
-
 }  // namespace gpu
 }  // namespace collectors
 }  // namespace pmc

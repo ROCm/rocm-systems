@@ -5,11 +5,9 @@
 
 #include <gmock/gmock.h>
 
-#if ROCPROFSYS_USE_ROCM > 0
-#    include <amd_smi/amdsmi.h>
+#include <amd_smi/amdsmi.h>
 
-#    include <utility>
-#endif
+#include <utility>
 
 namespace rocprofsys
 {
@@ -21,8 +19,6 @@ namespace amd_smi
 {
 namespace testing
 {
-
-#if ROCPROFSYS_USE_ROCM > 0
 
 /**
  * @brief Mock implementation of AMD SMI driver for unit testing.
@@ -133,7 +129,6 @@ struct mock_driver_factory
 /// Global mock driver instance shared across tests
 inline std::shared_ptr<mock_driver> mock_driver_factory::s_mock_driver = nullptr;
 
-#endif  // ROCPROFSYS_USE_ROCM > 0
 
 }  // namespace testing
 }  // namespace amd_smi

@@ -92,10 +92,8 @@ to_string(const enabled_metrics& metrics)
         static_cast<bool>(metrics.bits.vcn_activity),
         static_cast<bool>(metrics.bits.jpeg_activity),
         static_cast<bool>(metrics.bits.vcn_busy),
-        static_cast<bool>(metrics.bits.jpeg_busy),
-        static_cast<bool>(metrics.bits.xgmi),
-        static_cast<bool>(metrics.bits.pcie),
-        static_cast<bool>(metrics.bits.sdma_usage));
+        static_cast<bool>(metrics.bits.jpeg_busy), static_cast<bool>(metrics.bits.xgmi),
+        static_cast<bool>(metrics.bits.pcie), static_cast<bool>(metrics.bits.sdma_usage));
 }
 
 // Ensure we have the correct max values defined

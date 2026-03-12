@@ -2,9 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 # PMC Device Providers
-if(ROCPROFSYS_USE_ROCM)
-    add_subdirectory(amd_smi)
-endif()
+add_subdirectory(amd_smi)
 
 # Collect all device provider sources
 set(pmc_device_provider_sources ${pmc_amd_smi_provider_sources})

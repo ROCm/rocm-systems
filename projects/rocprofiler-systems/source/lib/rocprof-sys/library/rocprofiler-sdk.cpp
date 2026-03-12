@@ -2647,7 +2647,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 
     if(config::get_use_process_sampling() && config::get_use_amd_smi())
     {
-        LOG_DEBUG("Setting amd_smi state to active...");
+        LOG_DEBUG("Setting PMC sampler state to active...");
         pmc::set_state(State::Active);
     }
 

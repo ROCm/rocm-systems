@@ -330,7 +330,7 @@ private:
             process_basic_metrics(device_index, ts, sample.metrics, effective_metrics,
                                   tracks);
             process_xcp_activity(device_index, ts, sample.metrics, effective_metrics,
-                                 enabled_metrics, supported_metrics, tracks);
+                                 tracks);
             process_xgmi_metrics(device_index, ts, sample.metrics, effective_metrics);
             process_pcie_metrics(device_index, ts, sample.metrics, effective_metrics);
         }
@@ -423,8 +423,6 @@ private:
         size_t device_index, size_t ts,
         const pmc::collectors::gpu::metrics&             metric_values,
         const pmc::collectors::gpu::enabled_metrics&     effective_metrics,
-        const pmc::collectors::gpu::enabled_metrics&     enabled_metric_config,
-        const pmc::collectors::gpu::enabled_metrics&     supported_metric_config,
         std::unordered_map<uint32_t, track_description>& tracks)
     {
         // Per-XCP VCN busy metrics (MI300)

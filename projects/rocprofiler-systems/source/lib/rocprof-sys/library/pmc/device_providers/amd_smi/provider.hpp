@@ -13,9 +13,7 @@
 #include <string>
 #include <vector>
 
-#if ROCPROFSYS_USE_ROCM > 0
-#    include <amd_smi/amdsmi.h>
-#endif
+#include <amd_smi/amdsmi.h>
 
 namespace rocprofsys
 {
@@ -25,8 +23,6 @@ namespace device_providers
 {
 namespace amd_smi
 {
-
-#if ROCPROFSYS_USE_ROCM > 0
 
 /**
  * @brief AMD SMI device provider for initialization and device enumeration.
@@ -234,7 +230,6 @@ struct provider_factory
     static std::shared_ptr<provider_t> create() { return std::make_shared<provider_t>(); }
 };
 
-#endif  // ROCPROFSYS_USE_ROCM > 0
 
 }  // namespace amd_smi
 }  // namespace device_providers

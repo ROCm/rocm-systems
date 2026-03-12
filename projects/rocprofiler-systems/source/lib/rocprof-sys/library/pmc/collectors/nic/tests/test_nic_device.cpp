@@ -8,7 +8,6 @@
 #include <gtest/gtest.h>
 
 #include <cstring>
-#include <memory>
 
 using namespace rocprofsys::pmc::collectors::nic;
 using ::testing::_;
@@ -16,18 +15,9 @@ using ::testing::DoAll;
 using ::testing::Return;
 using ::testing::SetArgPointee;
 
-
 using MockDriver = rocprofsys::pmc::drivers::amd_smi::testing::mock_driver;
 
-namespace rocprofsys
-{
-namespace pmc
-{
-namespace collectors
-{
-namespace nic
-{
-namespace testing
+namespace rocprofsys::pmc::collectors::nic::testing
 {
 
 /**
@@ -257,9 +247,4 @@ TEST_F(NicDeviceTest, GetNicMetrics_ReturnsZeros_WhenNoRdmaPorts)
     EXPECT_EQ(m.tx_rdma_ucast_bytes, 0ULL);
 }
 
-}  // namespace testing
-}  // namespace nic
-}  // namespace collectors
-}  // namespace pmc
-}  // namespace rocprofsys
-
+}  // namespace rocprofsys::pmc::collectors::nic::testing

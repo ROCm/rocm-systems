@@ -993,7 +993,6 @@ perfetto_processor_t::handle([[maybe_unused]] const pmc_event_with_sample& _pmc)
     }
 }
 
-#if ROCPROFSYS_USE_ROCM > 0
 void
 perfetto_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& _gpu_pmc)
 {
@@ -1334,7 +1333,6 @@ perfetto_processor_t::handle([[maybe_unused]] const ainic_sample& _nic_sample)
                       static_cast<double>(_nic_sample.metric_values.tx_rdma_cnp_pkts));
     }
 }
-#endif
 
 void
 perfetto_processor_t::handle([[maybe_unused]] const in_time_sample& _sample)

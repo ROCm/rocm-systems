@@ -6,9 +6,7 @@
 #include <cstdint>
 #include <memory>
 
-#if ROCPROFSYS_USE_ROCM > 0
-#    include <amd_smi/amdsmi.h>
-#endif
+#include <amd_smi/amdsmi.h>
 
 namespace rocprofsys
 {
@@ -18,8 +16,6 @@ namespace drivers
 {
 namespace amd_smi
 {
-
-#if ROCPROFSYS_USE_ROCM > 0
 
 /**
  * @brief Thin wrapper around AMD SMI C API for dependency injection and testing.
@@ -242,7 +238,6 @@ struct driver_factory
     }
 };
 
-#endif  // ROCPROFSYS_USE_ROCM > 0
 
 }  // namespace amd_smi
 }  // namespace drivers

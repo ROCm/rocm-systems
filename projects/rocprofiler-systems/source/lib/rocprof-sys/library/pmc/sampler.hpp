@@ -39,48 +39,11 @@ postfork_child_cleanup();
 void
 postfork_parent_reinit();
 
-#if !defined(ROCPROFSYS_USE_ROCM) || ROCPROFSYS_USE_ROCM == 0
-
-inline void
-setup()
-{}
-
-inline void
-config()
-{}
-
-inline void
-sample()
-{}
-
-inline void
-shutdown()
-{}
-
-inline void
-post_process()
-{}
-
-inline void
-set_state(State)
-{}
-
-inline void
-postfork_child_cleanup()
-{}
-
-inline void
-postfork_parent_reinit()
-{}
-
-#endif
-
 }  // namespace pmc
 }  // namespace rocprofsys
 
-#if defined(ROCPROFSYS_USE_ROCM) && ROCPROFSYS_USE_ROCM > 0
-#    if !defined(ROCPROFSYS_EXTERN_COMPONENTS) ||                                        \
-        (defined(ROCPROFSYS_EXTERN_COMPONENTS) && ROCPROFSYS_EXTERN_COMPONENTS > 0)
+#if !defined(ROCPROFSYS_EXTERN_COMPONENTS) ||                                              \
+    (defined(ROCPROFSYS_EXTERN_COMPONENTS) && ROCPROFSYS_EXTERN_COMPONENTS > 0)
 
 #        include <timemory/components/base.hpp>
 #        include <timemory/components/data_tracker/components.hpp>
@@ -118,5 +81,4 @@ ROCPROFSYS_DECLARE_EXTERN_COMPONENT(
     TIMEMORY_ESC(data_tracker<double, rocprofsys::component::backtrace_gpu_jpeg>), true,
     double)
 
-#    endif
 #endif

@@ -9,13 +9,7 @@
 #include <memory>
 #include <vector>
 
-namespace rocprofsys
-{
-namespace pmc
-{
-namespace collectors
-{
-namespace testing
+namespace rocprofsys::pmc::collectors::testing
 {
 
 // Mock collector implementations for testing type erasure
@@ -188,7 +182,4 @@ TEST_F(collector_slice_test, collectors_can_be_different_types)
     EXPECT_EQ(nic_collector->sample_count, 3);  // int counter
 }
 
-}  // namespace testing
-}  // namespace collectors
-}  // namespace pmc
-}  // namespace rocprofsys
+}  // namespace rocprofsys::pmc::collectors::testing
