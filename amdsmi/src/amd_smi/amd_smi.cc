@@ -4547,63 +4547,26 @@ amdsmi_get_clock_info(amdsmi_processor_handle processor_handle, amdsmi_clk_type_
         return AMDSMI_STATUS_INVAL;
     }
 
+    memset(info, 0, sizeof(*info));
+
     if (clk_type > AMDSMI_CLK_TYPE__MAX) {
         return AMDSMI_STATUS_INVAL;
     }
 
-    amdsmi_gpu_metrics_t metrics = {};
-    amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
-    amdsmi_status_t r = get_gpu_device_from_handle(processor_handle, &gpu_device);
-    if (r != AMDSMI_STATUS_SUCCESS)
-        return r;
-    amdsmi_status_t status;
-
-    status =  amdsmi_get_gpu_metrics_info(processor_handle, &metrics);
-    if (status != AMDSMI_STATUS_SUCCESS) {
-        return status;
-    }
-    int max_freq;
-    int min_freq;
-    int sleep_state_freq;
-    status = smi_amdgpu_get_ranges(gpu_device, clk_type,
-        &max_freq, &min_freq, NULL, &sleep_state_freq);
-    if (status != AMDSMI_STATUS_SUCCESS) {
-        return status;
-    }
-    info->max_clk = max_freq;
-    info->min_clk = min_freq;
-    info->clk_deep_sleep = static_cast<uint8_t>(sleep_state_freq);
-
-    switch (clk_type) {
-    case AMDSMI_CLK_TYPE_GFX:
-        info->clk = metrics.current_gfxclk;
-        break;
-    case AMDSMI_CLK_TYPE_MEM:
-        info->clk = metrics.current_uclk;
-        break;
-    case AMDSMI_CLK_TYPE_VCLK0:
-        info->clk = metrics.current_vclk0;
-        break;
-    case AMDSMI_CLK_TYPE_VCLK1:
-        info->clk = metrics.current_vclk1;
-        break;
-    case AMDSMI_CLK_TYPE_DCLK0:
-        info->clk = metrics.current_dclk0;
-      break;
-    case AMDSMI_CLK_TYPE_DCLK1:
-        info->clk = metrics.current_dclk1;
-        break;
-    case AMDSMI_CLK_TYPE_SOC:
-        info->clk = metrics.current_socclk;
-        break;
-    // fclk/df not supported by gpu metrics so providing default value which cannot be contrued to be valid
-    case AMDSMI_CLK_TYPE_DF:
-        info->clk = UINT32_MAX;
-        break;
-    default:
+    auto device = reinterpret_cast<Device *>(processor_handle);
+    if (device == nullptr)
         return AMDSMI_STATUS_INVAL;
-    }
 
+    wsl::thunk::ClockInfo clock_info{};
+    auto code = device->QueryClockInfo(static_cast<uint32_t>(clk_type), &clock_info);
+    if (code != ErrorCode::Success)
+        return translateCodeToSmiStatus(code);
+
+    info->clk            = clock_info.clk;
+    info->min_clk        = clock_info.min_clk;
+    info->max_clk        = clock_info.max_clk;
+    info->clk_locked     = clock_info.clk_locked;
+    info->clk_deep_sleep = clock_info.clk_deep_sleep;
     return AMDSMI_STATUS_SUCCESS;
 }
 
