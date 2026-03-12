@@ -912,8 +912,9 @@ Follow the reference guide strictly for analysis methodology and output format."
             pass
         raw_headers = os.environ.get("ROCPD_LLM_PRIVATE_HEADERS", "")
         if raw_headers:
+            normalized = raw_headers.replace("'", '"')
             try:
-                headers.update(_json.loads(raw_headers))
+                headers.update(_json.loads(normalized))
             except _json.JSONDecodeError as e:
                 raise ValueError(
                     f"ROCPD_LLM_PRIVATE_HEADERS is not valid JSON: {e}"
