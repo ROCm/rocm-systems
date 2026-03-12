@@ -36,7 +36,7 @@ __global__ void nKernel(float* y) {
   size_t tid{threadIdx.x};
   y[tid] = y[tid] + 1.0f;
 }
-TEST_CASE("Unit_hipMultiStream_sameDevice") {
+TEST_CASE(Unit_hipMultiStream_sameDevice) {
   constexpr int num_streams{8};
   hipStream_t streams[num_streams];
   float *data[num_streams], *yd, *xd;
@@ -62,7 +62,7 @@ TEST_CASE("Unit_hipMultiStream_sameDevice") {
   REQUIRE(x == Catch::Approx(y));
 }
 
-TEST_CASE("Unit_hipMultiStream_multimeDevice") {
+TEST_CASE(Unit_hipMultiStream_multimeDevice) {
   constexpr int nLoops = 50000;
   constexpr int nStreams = 2;
   std::vector<hipStream_t> streams(nStreams);

@@ -47,7 +47,7 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 6.1
  */
-TEST_CASE("Unit_hipMemRetainAllocationHandle_SetGet") {
+TEST_CASE(Unit_hipMemRetainAllocationHandle_SetGet) {
   HIP_CHECK(hipFree(0));
   size_t granularity = 0;
   constexpr int N = DATA_SIZE;
@@ -92,7 +92,7 @@ TEST_CASE("Unit_hipMemRetainAllocationHandle_SetGet") {
  * ------------------------
  *    - HIP_VERSION >= 6.1
  */
-TEST_CASE("Unit_hipMemRetainAllocationHandle_NegTst") {
+TEST_CASE(Unit_hipMemRetainAllocationHandle_NegTst) {
   HIP_CHECK(hipFree(0));
   size_t granularity = 0;
   constexpr int N = DATA_SIZE;
@@ -141,7 +141,7 @@ TEST_CASE("Unit_hipMemRetainAllocationHandle_NegTst") {
   HIP_CHECK(hipMemAddressFree(ptrA, size_mem));
 }
 
-TEST_CASE("Unit_hipMemRetainAllocationHandle_Capture") {
+TEST_CASE(Unit_hipMemRetainAllocationHandle_Capture) {
   CTX_CREATE();
   size_t granularity = 0;
   size_t buffer_size = DATA_SIZE * sizeof(int);
