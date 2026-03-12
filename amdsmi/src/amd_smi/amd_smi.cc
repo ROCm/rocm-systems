@@ -2145,46 +2145,28 @@ amdsmi_status_t amdsmi_get_gpu_revision(amdsmi_processor_handle processor_handle
 // TODO(bliu) : add fw info from libdrm
 amdsmi_status_t amdsmi_get_fw_info(amdsmi_processor_handle processor_handle,
         amdsmi_fw_info_t *info) {
-    const std::map<amdsmi_fw_block_t, rsmi_fw_block_t> fw_in_rsmi = {
-        { AMDSMI_FW_ID_ASD, RSMI_FW_BLOCK_ASD},
-        { AMDSMI_FW_ID_CP_CE, RSMI_FW_BLOCK_CE},
-        { AMDSMI_FW_ID_DMCU, RSMI_FW_BLOCK_DMCU},
-        { AMDSMI_FW_ID_MC, RSMI_FW_BLOCK_MC},
-        { AMDSMI_FW_ID_CP_ME, RSMI_FW_BLOCK_ME},
-        { AMDSMI_FW_ID_CP_MEC1, RSMI_FW_BLOCK_MEC},
-        { AMDSMI_FW_ID_CP_MEC2, RSMI_FW_BLOCK_MEC2},
-        { AMDSMI_FW_ID_CP_PFP, RSMI_FW_BLOCK_PFP},
-        { AMDSMI_FW_ID_RLC, RSMI_FW_BLOCK_RLC},
-        { AMDSMI_FW_ID_RLC_RESTORE_LIST_CNTL, RSMI_FW_BLOCK_RLC_SRLC},
-        { AMDSMI_FW_ID_RLC_RESTORE_LIST_GPM_MEM, RSMI_FW_BLOCK_RLC_SRLG},
-        { AMDSMI_FW_ID_RLC_RESTORE_LIST_SRM_MEM, RSMI_FW_BLOCK_RLC_SRLS},
-        { AMDSMI_FW_ID_SDMA0, RSMI_FW_BLOCK_SDMA},
-        { AMDSMI_FW_ID_SDMA1, RSMI_FW_BLOCK_SDMA2},
-        { AMDSMI_FW_ID_PM, RSMI_FW_BLOCK_SMC},
-        { AMDSMI_FW_ID_PSP_SOSDRV, RSMI_FW_BLOCK_SOS},
-        { AMDSMI_FW_ID_TA_RAS, RSMI_FW_BLOCK_TA_RAS},
-        { AMDSMI_FW_ID_TA_XGMI, RSMI_FW_BLOCK_TA_XGMI},
-        { AMDSMI_FW_ID_UVD, RSMI_FW_BLOCK_UVD},
-        { AMDSMI_FW_ID_VCE, RSMI_FW_BLOCK_VCE},
-        { AMDSMI_FW_ID_VCN, RSMI_FW_BLOCK_VCN},
-        { AMDSMI_FW_ID_PLDM_BUNDLE, RSMI_FW_BLOCK_PLDM_BUNDLE},
-    };
-
     AMDSMI_CHECK_INIT();
 
     if (info == nullptr)
         return AMDSMI_STATUS_INVAL;
     memset(info, 0, sizeof(amdsmi_fw_info_t));
 
-    // collect all rsmi supported fw block
-    for (auto ite = fw_in_rsmi.begin(); ite != fw_in_rsmi.end(); ite ++) {
-        auto status = rsmi_wrapper(rsmi_dev_firmware_version_get, processor_handle, 0,
-                (*ite).second,
-                &(info->fw_info_list[info->num_fw_info].fw_version));
-        if (status == AMDSMI_STATUS_SUCCESS) {
-            info->fw_info_list[info->num_fw_info].fw_id = (*ite).first;
-            info->num_fw_info++;
-        }
+    for (int i = 0; i < AMDSMI_FW_ID__MAX; i++)
+        info->fw_info_list[i].fw_id = static_cast<amdsmi_fw_block_t>(AMDSMI_FW_ID__MAX);
+
+    auto device = reinterpret_cast<Device *>(processor_handle);
+    if (device == nullptr)
+        return AMDSMI_STATUS_INVAL;
+
+    FwInfo fw{};
+    auto code = device->QueryFwInfo(&fw);
+    if (code != ErrorCode::Success)
+        return translateCodeToSmiStatus(code);
+
+    info->num_fw_info = fw.num_fw_info;
+    for (uint32_t i = 0; i < fw.num_fw_info; i++) {
+        info->fw_info_list[i].fw_id      = static_cast<amdsmi_fw_block_t>(fw.entries[i].fw_id);
+        info->fw_info_list[i].fw_version = fw.entries[i].fw_version;
     }
     return AMDSMI_STATUS_SUCCESS;
 }
