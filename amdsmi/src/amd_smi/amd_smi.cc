@@ -4940,60 +4940,34 @@ amdsmi_status_t
 amdsmi_get_power_info(amdsmi_processor_handle processor_handle, amdsmi_power_info_t *info) {
     AMDSMI_CHECK_INIT();
 
-    if (info == nullptr) {
+    if (info == nullptr)
         return AMDSMI_STATUS_INVAL;
-    }
-    amdsmi_status_t status;
 
-    amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
-    status = get_gpu_device_from_handle(processor_handle, &gpu_device);
-    if (status != AMDSMI_STATUS_SUCCESS)
-        return status;
+    auto device = reinterpret_cast<Device *>(processor_handle);
+    if (device == nullptr)
+        return AMDSMI_STATUS_INVAL;
 
-    info->socket_power = get_std_num_limit<decltype(info->socket_power)>();
+    info->socket_power         = get_std_num_limit<decltype(info->socket_power)>();
     info->current_socket_power = get_std_num_limit<decltype(info->current_socket_power)>();
     info->average_socket_power = get_std_num_limit<decltype(info->average_socket_power)>();
-    info->gfx_voltage = get_std_num_limit<decltype(info->gfx_voltage)>();
-    info->soc_voltage = get_std_num_limit<decltype(info->soc_voltage)>();
-    info->mem_voltage = get_std_num_limit<decltype(info->mem_voltage)>();
-    info->power_limit = get_std_num_limit<decltype(info->power_limit)>();
+    info->gfx_voltage          = get_std_num_limit<decltype(info->gfx_voltage)>();
+    info->soc_voltage          = get_std_num_limit<decltype(info->soc_voltage)>();
+    info->mem_voltage          = get_std_num_limit<decltype(info->mem_voltage)>();
+    info->power_limit          = get_std_num_limit<decltype(info->power_limit)>();
 
-    amdsmi_gpu_metrics_t metrics = {};
-    status = amdsmi_get_gpu_metrics_info(processor_handle, &metrics);
-    if (status == AMDSMI_STATUS_SUCCESS) {
-        if (metrics.current_socket_power != get_std_num_limit<decltype(metrics.current_socket_power)>())
-            info->current_socket_power = metrics.current_socket_power;
-        if (metrics.average_socket_power != get_std_num_limit<decltype(metrics.average_socket_power)>())
-            info->average_socket_power = metrics.average_socket_power;
-        if (metrics.voltage_gfx != get_std_num_limit<decltype(metrics.voltage_gfx)>())
-            info->gfx_voltage = metrics.voltage_gfx;
-        if (metrics.voltage_soc != get_std_num_limit<decltype(metrics.voltage_soc)>())
-            info->soc_voltage = metrics.voltage_soc;
-        if (metrics.voltage_mem != get_std_num_limit<decltype(metrics.voltage_mem)>())
-            info->mem_voltage = metrics.voltage_mem;
+    wsl::thunk::PowerInfo pi = {};
+    auto code = device->QueryPowerInfo(&pi);
+    if (code != ErrorCode::Success)
+        return translateCodeToSmiStatus(code);
 
-        /* store something in socket power */
-        if (info->current_socket_power != get_std_num_limit<decltype(info->current_socket_power)>())
-            info->socket_power = info->current_socket_power;
-        else if (info->average_socket_power != get_std_num_limit<decltype(info->average_socket_power)>())
-            info->socket_power = info->average_socket_power;
-    }
-
-    int power_limit = 0;
-    // default the sensor_ind here to 0
-    amdsmi_status_t status2 = smi_amdgpu_get_power_cap(gpu_device, 0, &power_limit);
-    if (status2 == AMDSMI_STATUS_SUCCESS) {
-        info->power_limit = power_limit;
-    } else if (status2 == AMDSMI_STATUS_NOT_SUPPORTED) {
-        status = AMDSMI_STATUS_SUCCESS;
-    }
-
-    // Returning status from amdsmi_get_gpu_metrics_info() which should return SUCCESS
-    // Getting power cap values may not be supported on all virtualized systems and should
-    // not return a failure when the metrics values are ascertainable.
-    return status;
+    info->current_socket_power = pi.current_socket_power;
+    info->socket_power         = pi.current_socket_power;
+    info->gfx_voltage          = pi.gfx_voltage;
+    info->soc_voltage          = pi.soc_voltage;
+    info->mem_voltage          = pi.mem_voltage;
+    info->power_limit          = pi.power_limit;
+    return AMDSMI_STATUS_SUCCESS;
 }
-
 amdsmi_status_t amdsmi_get_gpu_driver_info(amdsmi_processor_handle processor_handle,
                 amdsmi_driver_info_t *info) {
     AMDSMI_CHECK_INIT();
