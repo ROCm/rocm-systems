@@ -24,7 +24,7 @@ THE SOFTWARE.
 
 static __global__ void write_integer(int* memory, int value) { *memory = value; }
 
-TEST_CASE("Unit_hipMemAllocHost_Positive") {
+TEST_CASE(Unit_hipMemAllocHost_Positive) {
   int* host_memory = nullptr;
   hipCtx_t ctx;
   hipDevice_t device;
@@ -37,7 +37,7 @@ TEST_CASE("Unit_hipMemAllocHost_Positive") {
   HIP_CHECK(hipCtxDestroy(ctx));
 }
 
-TEST_CASE("Unit_hipMemAllocHost_DataValidation") {
+TEST_CASE(Unit_hipMemAllocHost_DataValidation) {
   int validation_number = 10;
   int* host_memory = nullptr;
   hipEvent_t event = nullptr;
@@ -70,7 +70,7 @@ TEST_CASE("Unit_hipMemAllocHost_DataValidation") {
   HIP_CHECK(hipCtxDestroy(ctx));
 }
 
-TEST_CASE("Unit_hipMemAllocHost_Negative") {
+TEST_CASE(Unit_hipMemAllocHost_Negative) {
   int* host_memory = nullptr;
   hipCtx_t ctx;
   hipDevice_t device;
@@ -93,7 +93,7 @@ TEST_CASE("Unit_hipMemAllocHost_Negative") {
 /*
  * Verify that a device can read/write to the memory of another device
  */
-TEST_CASE("Unit_hipMemAllocHost_VerifyAccess", "[multigpu]") {
+TEST_CASE(Unit_hipMemAllocHost_VerifyAccess) {
   int devices_number = 0;
   HIP_CHECK(hipGetDeviceCount(&devices_number));
   std::vector<int*> devices_memories(devices_number);
@@ -137,7 +137,7 @@ TEST_CASE("Unit_hipMemAllocHost_VerifyAccess", "[multigpu]") {
   }
 }
 
-TEST_CASE("Unit_hipMemAllocHost_Capture") {
+TEST_CASE(Unit_hipMemAllocHost_Capture) {
   int* host_memory = nullptr;
 
   hipError_t capture_error = hipSuccess;

@@ -76,7 +76,7 @@ Negative:
 This testcase verifies the negative scenarios of
 hipGraphAddChildGraphNode API
 */
-TEST_CASE("Unit_hipGraphAddChildGraphNode_Negative") {
+TEST_CASE(Unit_hipGraphAddChildGraphNode_Negative) {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   hipGraph_t graph, childgraph1;
@@ -120,7 +120,7 @@ This testcase verifies the following scenario
 Creates the graph, add the graph as a child node
 and verify the number of the nodes in the original graph
 */
-TEST_CASE("Unit_hipGraphAddChildGraphNode_OrgGraphAsChildGraph") {
+TEST_CASE(Unit_hipGraphAddChildGraphNode_OrgGraphAsChildGraph) {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   hipGraph_t graph, childGraph;
@@ -163,7 +163,7 @@ This testcase verifies the following scenario
 Create graph, Add child nodes to the graph and execute only the
 child graph node and verify the behaviour
 */
-TEST_CASE("Unit_hipGraphAddChildGraphNode_ExecuteChildGraph") {
+TEST_CASE(Unit_hipGraphAddChildGraphNode_ExecuteChildGraph) {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   hipGraph_t graph, childgraph1;
@@ -214,7 +214,7 @@ This testcase verifies the following scenario
 creates graph, Add child nodes to graph, clone the graph and execute
 the cloned graph
 */
-TEST_CASE("Unit_hipGraphAddChildGraphNode_CloneChildGraph") {
+TEST_CASE(Unit_hipGraphAddChildGraphNode_CloneChildGraph) {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   hipGraph_t graph, childgraph1, clonedgraph;
@@ -266,7 +266,7 @@ This testcase verifies the following scenario
 Create graph, add multiple child nodes and validates the
 behaviour
 */
-TEST_CASE("Unit_hipGraphAddChildGraphNode_MultipleChildNodes") {
+TEST_CASE(Unit_hipGraphAddChildGraphNode_MultipleChildNodes) {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   constexpr auto blocksPerCU = 6;  // to hide latency
@@ -329,7 +329,7 @@ TEST_CASE("Unit_hipGraphAddChildGraphNode_MultipleChildNodes") {
  This testcase verifies hipGraphAddChildGraphNode functionality
  where root node is the child node.
  */
-TEST_CASE("Unit_hipGraphAddChildGraphNode_SingleChildNode") {
+TEST_CASE(Unit_hipGraphAddChildGraphNode_SingleChildNode) {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   constexpr auto blocksPerCU = 6;  // to hide latency
@@ -720,7 +720,7 @@ typedef class nestedGraph {
  Parent graph containing child graph, which in turn, contains another
  child graph.
  */
-TEST_CASE("Unit_hipGraphAddChildGraphNode_Cmplx_NestedGraphs") {
+TEST_CASE(Unit_hipGraphAddChildGraphNode_Cmplx_NestedGraphs) {
   hipGraph_t* graph;
   hipStream_t streamForGraph;
   hipGraphExec_t graphExec;
@@ -743,7 +743,7 @@ TEST_CASE("Unit_hipGraphAddChildGraphNode_Cmplx_NestedGraphs") {
  Complex Scenario: This testcase verifies cloned nested graph functionality.
  Clone the nested graph and execute the clone graph.
  */
-TEST_CASE("Unit_hipGraphAddChildGraphNode_CmplxClone_NestedGraphs") {
+TEST_CASE(Unit_hipGraphAddChildGraphNode_CmplxClone_NestedGraphs) {
   hipGraph_t *graph, clonedGraph;
   hipStream_t streamForGraph;
   hipGraphExec_t graphExec;
@@ -767,7 +767,7 @@ TEST_CASE("Unit_hipGraphAddChildGraphNode_CmplxClone_NestedGraphs") {
 /**
  Scenario: Adding an empty graph to Child Graph Node.
  */
-TEST_CASE("Unit_hipGraphAddChildGraphNode_EmptyGraphAsChildNode") {
+TEST_CASE(Unit_hipGraphAddChildGraphNode_EmptyGraphAsChildNode) {
   hipGraph_t graph, graphChild;
   hipGraphNode_t child_node;
   HIP_CHECK(hipGraphCreate(&graph, 0));
@@ -782,7 +782,7 @@ TEST_CASE("Unit_hipGraphAddChildGraphNode_EmptyGraphAsChildNode") {
  when one of the child graph node is updated. In this test the kernel node
  function is updated to a different function.
  */
-TEST_CASE("Unit_hipGraphAddChildGraphNode_CmplxNstGrph_UpdKerFun") {
+TEST_CASE(Unit_hipGraphAddChildGraphNode_CmplxNstGrph_UpdKerFun) {
   hipGraph_t* graph;
   hipStream_t streamForGraph;
   hipGraphExec_t graphExec;
@@ -806,7 +806,7 @@ TEST_CASE("Unit_hipGraphAddChildGraphNode_CmplxNstGrph_UpdKerFun") {
  function is updated to a different function and the nested graph is cloned.
  Execute the cloned graph and validate the results.
  */
-TEST_CASE("Unit_hipGraphAddChildGraphNode_CmplxNstGrph_UpdKerFun_Clone") {
+TEST_CASE(Unit_hipGraphAddChildGraphNode_CmplxNstGrph_UpdKerFun_Clone) {
   hipGraph_t *graph, clonedGraph;
   hipStream_t streamForGraph;
   hipGraphExec_t graphExec;
@@ -831,7 +831,7 @@ TEST_CASE("Unit_hipGraphAddChildGraphNode_CmplxNstGrph_UpdKerFun_Clone") {
  when one of the child graph node is updated. In this test the kernel node
  parameters - blocksize and gridsize are updated.
  */
-TEST_CASE("Unit_hipGraphAddChildGraphNode_CmplxNstGrph_UpdKerDim") {
+TEST_CASE(Unit_hipGraphAddChildGraphNode_CmplxNstGrph_UpdKerDim) {
   hipGraph_t* graph;
   hipStream_t streamForGraph;
   hipGraphExec_t graphExec;
@@ -854,7 +854,7 @@ TEST_CASE("Unit_hipGraphAddChildGraphNode_CmplxNstGrph_UpdKerDim") {
  when one of the nodes inside a child graph node is deleted and replaced with
  a new node.
  */
-TEST_CASE("Unit_hipGraphAddChildGraphNode_CmplxNstGrph_DelAddNode") {
+TEST_CASE(Unit_hipGraphAddChildGraphNode_CmplxNstGrph_DelAddNode) {
   hipGraph_t* graph;
   hipStream_t streamForGraph;
   hipGraphExec_t graphExec;
@@ -878,7 +878,7 @@ TEST_CASE("Unit_hipGraphAddChildGraphNode_CmplxNstGrph_DelAddNode") {
  replaced with a new node. After modifying the original graph it is cloned
  and the cloned graph is executed and validated.
  */
-TEST_CASE("Unit_hipGraphAddChildGraphNode_CmplxNstGrph_AddNode_Clone") {
+TEST_CASE(Unit_hipGraphAddChildGraphNode_CmplxNstGrph_AddNode_Clone) {
   hipGraph_t *graph, clonedGraph;
   hipStream_t streamForGraph;
   hipGraphExec_t graphExec;
@@ -903,7 +903,7 @@ TEST_CASE("Unit_hipGraphAddChildGraphNode_CmplxNstGrph_AddNode_Clone") {
  when one of the nodes inside a child graph node is deleted and replaced with
  a new child graph node.
  */
-TEST_CASE("Unit_hipGraphAddChildGraphNode_CmplxNstGrph_AddChdNode") {
+TEST_CASE(Unit_hipGraphAddChildGraphNode_CmplxNstGrph_AddChdNode) {
   hipGraph_t* graph;
   hipStream_t streamForGraph;
   hipGraphExec_t graphExec;
@@ -926,7 +926,7 @@ TEST_CASE("Unit_hipGraphAddChildGraphNode_CmplxNstGrph_AddChdNode") {
  when one of the nodes inside a child graph node is deleted and replaced with
  a new child graph node.
  */
-TEST_CASE("Unit_hipGraphAddChildGraphNode_CmplxNstGrph_AddChdNode_Clone") {
+TEST_CASE(Unit_hipGraphAddChildGraphNode_CmplxNstGrph_AddChdNode_Clone) {
   hipGraph_t *graph, clonedGraph;
   hipStream_t streamForGraph;
   hipGraphExec_t graphExec;
@@ -962,7 +962,7 @@ static void validateResults(int* A1_h, int* A2_h, size_t N) {
  memcpy d2h nodes. Graph1, graph2 and graph3 are added as child nodes in
  graph4. Graph4 is validated for functionality.
  */
-TEST_CASE("Unit_hipGraphAddChildGraphNode_MultGraphsAsSingleGraph") {
+TEST_CASE(Unit_hipGraphAddChildGraphNode_MultGraphsAsSingleGraph) {
   size_t size = 1024;
   constexpr auto blocksPerCU = 6;
   constexpr auto threadsPerBlock = 256;
@@ -1084,7 +1084,7 @@ TEST_CASE("Unit_hipGraphAddChildGraphNode_MultGraphsAsSingleGraph") {
  in multi GPU environment. Create one nested graph per GPU context. Execute
  all the created graphs in their respective GPUs and validate the output.
  */
-TEST_CASE("Unit_hipGraphAddChildGraphNode_CmplxNstGrph_MultGPU", "[multigpu]") {
+TEST_CASE(Unit_hipGraphAddChildGraphNode_CmplxNstGrph_MultGPU) {
   int devcount = 0;
   HIP_CHECK(hipGetDeviceCount(&devcount));
   // If only single GPU is detected then return

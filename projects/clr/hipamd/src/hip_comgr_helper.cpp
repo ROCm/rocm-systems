@@ -871,18 +871,18 @@ void RTCProgram::AppendOptions(const std::string app_env_var, std::vector<std::s
 }
 
 // HIPRTC Program lock
-amd::Monitor RTCProgram::lock_(true);
+std::recursive_mutex RTCProgram::lock_;
 
 LinkProgram::LinkProgram(std::string name) : RTCProgram(name) {
   if (link_input_.Create() != AMD_COMGR_STATUS_SUCCESS) {
     guarantee(false, "Failed to allocate internal comgr structure");
   }
-  amd::ScopedLock lock(lock_);
+  std::scoped_lock lock(lock_);
   linker_set_.insert(this);
 }
 
 bool LinkProgram::isLinkerValid(LinkProgram* link_program) {
-  amd::ScopedLock lock(lock_);
+  std::scoped_lock lock(lock_);
   if (linker_set_.find(link_program) == linker_set_.end()) {
     return false;
   }

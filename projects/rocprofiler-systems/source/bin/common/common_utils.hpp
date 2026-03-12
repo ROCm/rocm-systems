@@ -259,11 +259,7 @@ validate_preset_modes(const std::vector<std::string>& active_presets)
 inline bool
 check_rocm_available()
 {
-#if !defined(ROCPROFSYS_USE_ROCM) || ROCPROFSYS_USE_ROCM == 0
-    return false;
-#else
     return (access("/opt/rocm/bin/hipconfig", X_OK) == 0);
-#endif
 }
 
 inline void

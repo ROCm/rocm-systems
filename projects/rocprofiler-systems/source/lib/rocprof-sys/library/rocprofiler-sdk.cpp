@@ -563,7 +563,7 @@ get_scratch_mem_alloc_size(
 // The version of rocprofiler_buffer_tracing_scratch_memory_record_t from ROCm < 7.1 does
 // not have the allocation_size field. ROCPROFILER_VERSION for both ROCm 7.0 and 7.1
 // is 1.0.0, so we need to check the ROCm version.
-#if(ROCPROFSYS_USE_ROCM > 0 && ROCPROFSYS_ROCM_VERSION >= 70100)
+#if ROCPROFSYS_ROCM_VERSION >= 70100
     return record.allocation_size;
 #else
     return 0;
@@ -1986,7 +1986,7 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
 // The version of rocprofiler_buffer_tracing_scratch_memory_record_t from ROCm < 7.1 does
 // not have the allocation_size field. ROCPROFILER_VERSION for both ROCm 7.0 and 7.1
 // is 1.0.0, so we need to check the ROCm version.
-#if(ROCPROFSYS_USE_ROCM > 0 && ROCPROFSYS_ROCM_VERSION >= 70100)
+#if ROCPROFSYS_ROCM_VERSION >= 70100
                     using counter_track = perfetto_counter_track<
                         rocprofiler_buffer_tracing_scratch_memory_record_t>;
 
@@ -2781,8 +2781,6 @@ sdk_tool_configure(uint32_t version, const char* runtime_version,
     if(!rocprofsys::config::settings_are_configured() &&
        rocprofsys::get_state() < rocprofsys::State::Active)
         rocprofsys_init_tooling_hidden();
-
-    if(!rocprofsys::config::get_use_rocm()) return false;
 
     // set the client name
     id->name = "rocprofsys";

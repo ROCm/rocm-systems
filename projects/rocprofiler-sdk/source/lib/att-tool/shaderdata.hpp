@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
+// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,24 +20,26 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "core/timemory.hpp"
+#pragma once
 
-#include <amd_smi/amdsmi.h>
+#include "att_lib_wrapper.hpp"
 
-// AMD-SMI >= 26.3 supports NIC APIs and SDMA usage
-#if AMDSMI_LIB_VERSION_MAJOR > 26 ||                                                     \
-    (AMDSMI_LIB_VERSION_MAJOR == 26 && AMDSMI_LIB_VERSION_MINOR > 2)
-#    if ROCPROFSYS_USE_AINIC > 0
-#        define AINIC_SUPPORTED 1
-#    endif
-#    define AMD_SMI_SDMA_SUPPORTED 1
-#endif
+#include <cstddef>
+#include <cstdint>
 
-namespace rocprofsys
+struct rocprofiler_thread_trace_decoder_shaderdata_t;
+
+namespace rocprofiler
 {
-namespace amd_smi
+namespace att_wrapper
 {
+/// Write shaderdata records to a JSON file.
 void
-config_settings(const std::shared_ptr<settings>&);
-}  // namespace amd_smi
-}  // namespace rocprofsys
+write_shaderdata_json(const rocprofiler_thread_trace_decoder_shaderdata_t* records,
+                      size_t                                               count,
+                      const Fspath&                                        filepath,
+                      int64_t                                              begin_time,
+                      int64_t                                              end_time);
+
+}  // namespace att_wrapper
+}  // namespace rocprofiler

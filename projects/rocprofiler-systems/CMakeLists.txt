@@ -244,7 +244,6 @@ rocprofiler_systems_add_option(ROCPROFSYS_USE_BFD
                                "Enable BFD support (map call-stack samples to LOC)" ON
 )
 rocprofiler_systems_add_option(ROCPROFSYS_USE_MPI "Enable MPI support" OFF)
-rocprofiler_systems_add_option(ROCPROFSYS_USE_ROCM "Enable ROCm support" ON)
 rocprofiler_systems_add_option(ROCPROFSYS_USE_PAPI "Enable HW counter support via PAPI"
                                ON
 )

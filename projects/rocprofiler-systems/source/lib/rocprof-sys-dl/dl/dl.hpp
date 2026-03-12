@@ -53,10 +53,6 @@
 #    define ROCPROFSYS_USE_OMPT 0
 #endif
 
-#if !defined(ROCPROFSYS_USE_ROCM)
-#    define ROCPROFSYS_USE_ROCM 0
-#endif
-
 //--------------------------------------------------------------------------------------//
 //
 //      rocprof-sys symbols
@@ -173,10 +169,8 @@ extern "C"
                                               const char*) ROCPROFSYS_PUBLIC_API;
 #    endif
 
-#    if ROCPROFSYS_USE_ROCM > 0
     struct rocprofiler_tool_configure_result_t;
     struct rocprofiler_client_id_t;
-#    endif
 
 #endif  // ROCPROFSYS_DL_SOURCE
 }
