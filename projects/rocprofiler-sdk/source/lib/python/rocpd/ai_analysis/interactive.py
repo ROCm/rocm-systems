@@ -500,6 +500,14 @@ class InteractiveSession:
     def run(self) -> None:
         """Main event loop."""
         _print_startup_banner()
+        try:
+            self._run_loop()
+        except KeyboardInterrupt:
+            _print()
+            _print("  Interrupted — saving session.", style="yellow")
+            self._save_and_quit()
+
+    def _run_loop(self) -> None:
         while True:
             self._render_main_menu()
             try:
@@ -1609,6 +1617,30 @@ class WorkflowSession:
         self._llm_model = llm_model
         self._trace_dir = trace_dir or self._DEFAULT_TRACE_DIR
         self._conv: Optional["LLMConversation"] = None  # set by _phase2 if LLM configured
+        # Session persistence
+        _ts = datetime.now(timezone.utc).strftime("%Y-%m-%d_%H-%M-%S")
+        try:
+            _slug = re.sub(r"[^\w-]", "_", shlex.split(app_command)[0])[:24]
+        except (ValueError, IndexError):
+            _slug = "app"
+        self._session_id = f"workflow_{_ts}_{_slug}"
+        self._sessions_dir = pathlib.Path.home() / ".rocpd" / "sessions"
+        self._session_file = self._sessions_dir / f"{self._session_id}.json"
+
+    def _save_session(self) -> None:
+        """Serialize WorkflowState to ~/.rocpd/sessions/workflow_<id>.json."""
+        from dataclasses import asdict as _asdict
+        try:
+            self._sessions_dir.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "session_id": self._session_id,
+                "type": "workflow",
+                "app_command": self._state.app_command,
+                "state": _asdict(self._state),
+            }
+            self._session_file.write_text(json.dumps(payload, indent=2))
+        except Exception as exc:
+            _print(f"  (Session save failed: {exc})", style="dim")
 
     # ── Phase 1b: Quick workload analysis ──────────────────────────────────────
 
@@ -1992,6 +2024,7 @@ class WorkflowSession:
                         db_path=db_path,
                         trace_files=trace_files,
                     ))
+                    self._save_session()
                     return True
                 # Ran OK but no files found — ask user for path
                 _print("  Profiler completed but no trace files found.", style="yellow")
@@ -2006,6 +2039,7 @@ class WorkflowSession:
                         db_path=db_input,
                         trace_files=[db_input],
                     ))
+                    self._save_session()
                     return True
                 return False
             else:
@@ -2584,6 +2618,7 @@ class WorkflowSession:
                 file_path=str(chosen),
                 backup_path=str(bak),
             ))
+            self._save_session()
         except OSError as exc:
             _print(f"  (Write failed: {exc})", style="red")
             return
@@ -2700,6 +2735,9 @@ class WorkflowSession:
             runs = [pathlib.Path(t.db_path).parent.name for t in self._state.trace_history]
             _print(f"  Trace runs : {', '.join(runs)}", style="dim")
 
+        if self._session_file.exists():
+            _print(f"  Session    : {self._session_file}", style="dim")
+
         _print("  ══════════════════════════════════════════", style="bold cyan")
         _print()
 
@@ -2709,53 +2747,59 @@ class WorkflowSession:
         """Execute the 7-phase workflow loop."""
         _print_startup_banner()
 
-        # Phase 1: validate source paths
-        for sp in self._state.source_paths:
-            if not pathlib.Path(sp).exists():
-                _print(f"  Warning: --source path not found: {sp}", style="yellow")
+        try:
+            # Phase 1: validate source paths
+            for sp in self._state.source_paths:
+                if not pathlib.Path(sp).exists():
+                    _print(f"  Warning: --source path not found: {sp}", style="yellow")
 
-        # Phase 1b: quick workload analysis → derive best starter command
-        cmd = self._phase1b_quick_workload_analysis() or self._build_profiling_command()
+            # Phase 1b: quick workload analysis → derive best starter command
+            cmd = self._phase1b_quick_workload_analysis() or self._build_profiling_command()
 
-        # Phase 2: confirm profiling command with user
-        self._state.profiling_command = cmd
-        if not self._phase2_show_command(cmd):
-            return
+            # Phase 2: confirm profiling command with user
+            self._state.profiling_command = cmd
+            if not self._phase2_show_command(cmd):
+                return
 
-        # Phases 3-7 loop
-        while True:
-            # Phase 3: run profiler
-            if not self._phase3_run_profiler(self._state.profiling_command):
-                _print("  Trace collection failed or was aborted.", style="yellow")
-                break
+            # Phases 3-7 loop
+            while True:
+                # Phase 3: run profiler
+                if not self._phase3_run_profiler(self._state.profiling_command):
+                    _print("  Trace collection failed or was aborted.", style="yellow")
+                    break
 
-            latest_run = self._state.trace_history[-1]
+                latest_run = self._state.trace_history[-1]
 
-            # Phase 4: analysis
-            snap = self._phase4_analyze(latest_run.db_path)
+                # Phase 4: analysis
+                snap = self._phase4_analyze(latest_run.db_path)
 
-            # Phase 5: recommendations menu
-            result = self._phase5_rec_menu(snap)
-            if result is not None:
-                mode, selected_recs = result
-                scoped = _AnalysisSnapshot(
-                    timestamp=snap.timestamp,
-                    iteration=snap.iteration,
-                    recommendations=selected_recs,
-                    execution_breakdown=snap.execution_breakdown,
-                    hotspots=snap.hotspots,
-                    ai_recommended_command=snap.ai_recommended_command,
-                )
-                # Phase 6: apply
-                if mode == "direct":
-                    self._phase6_apply_direct(scoped)
-                elif mode == "diff":
-                    self._phase6_apply_diff(scoped)
+                # Phase 5: recommendations menu
+                result = self._phase5_rec_menu(snap)
+                if result is not None:
+                    mode, selected_recs = result
+                    scoped = _AnalysisSnapshot(
+                        timestamp=snap.timestamp,
+                        iteration=snap.iteration,
+                        recommendations=selected_recs,
+                        execution_breakdown=snap.execution_breakdown,
+                        hotspots=snap.hotspots,
+                        ai_recommended_command=snap.ai_recommended_command,
+                    )
+                    # Phase 6: apply
+                    if mode == "direct":
+                        self._phase6_apply_direct(scoped)
+                    elif mode == "diff":
+                        self._phase6_apply_diff(scoped)
 
-            # Phase 7: re-profiling?
-            next_cmd = self._phase7_reprofiling_prompt()
-            if next_cmd is None:
-                break
-            self._state.profiling_command = next_cmd
+                # Phase 7: re-profiling?
+                next_cmd = self._phase7_reprofiling_prompt()
+                if next_cmd is None:
+                    break
+                self._state.profiling_command = next_cmd
 
-        self.print_session_summary()
+        except KeyboardInterrupt:
+            _print()
+            _print("  Interrupted.", style="yellow")
+        finally:
+            self._save_session()
+            self.print_session_summary()
