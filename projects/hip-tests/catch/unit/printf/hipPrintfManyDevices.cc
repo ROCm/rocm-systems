@@ -47,7 +47,7 @@ __global__ void print_things() {
  * ------------------------
  * - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_Printf_ManyDevicesTest", "[multigpu]") {
+TEST_CASE(Unit_Printf_ManyDevicesTest) {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
