@@ -1657,6 +1657,32 @@ class WorkflowSession:
             return False
         return True
 
+    # ── Revert helper ──────────────────────────────────────────────────────────
+
+    def _revert_last_edit(self) -> bool:
+        """Restore the most recently AI-modified file from its .bak backup.
+
+        Returns True on success.  The reverted _EditRecord is removed from
+        edit_history so the LLM knows the edit was rolled back.
+        """
+        if not self._state.edit_history:
+            _print("  No AI edits to revert.", style="yellow")
+            return False
+        record = self._state.edit_history[-1]
+        bak = pathlib.Path(record.backup_path)
+        dst = pathlib.Path(record.file_path)
+        if not bak.exists():
+            _print(f"  Backup not found: {bak}", style="red")
+            return False
+        try:
+            dst.write_text(bak.read_text())
+            self._state.edit_history.pop()
+            _print(f"  ✓ Reverted: {dst.name}  (backup kept at {bak.name})", style="green")
+            return True
+        except OSError as exc:
+            _print(f"  Revert failed: {exc}", style="red")
+            return False
+
     # ── Phase 3: Trace collection ──────────────────────────────────────────────
 
     def _find_trace_files(self, cmd: str) -> List[str]:
@@ -1681,19 +1707,35 @@ class WorkflowSession:
         """Run profiling command with real-time stdout streaming.
 
         On success (exit 0 + trace files found): records TraceRun, returns True.
-        On failure: ask retry / edit command / abort.
+        On failure: ask retry / edit command / revert-AI-edit / abort.
+
+        Leading KEY=VALUE tokens (e.g. ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1) are
+        extracted and injected into the child process environment automatically.
         """
         import shlex as _shlex
 
         while True:
             _print(f"  Running: $ {cmd}", style="cyan")
             _print()
+
+            # Separate leading ENV=value tokens from the executable + args.
+            # This lets callers build commands like:
+            #   ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1 rocprofv3 --pc-sampling ...
+            # without needing shell=True.
+            _tokens = _shlex.split(cmd)
+            _env_overrides: Dict[str, str] = {}
+            while _tokens and "=" in _tokens[0] and not _tokens[0].startswith("-"):
+                _key, _, _val = _tokens.pop(0).partition("=")
+                _env_overrides[_key] = _val
+            _run_env = {**os.environ, **_env_overrides} if _env_overrides else None
+
             try:
                 proc = subprocess.Popen(
-                    _shlex.split(cmd),
+                    _tokens,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
                     text=True,
+                    env=_run_env,
                 )
                 assert proc.stdout is not None
                 for line in proc.stdout:
@@ -1742,6 +1784,8 @@ class WorkflowSession:
                 _print(f"  Profiling command failed (exit code {proc.returncode}).", style="red")
                 _print("    [r]  Retry same command", style="dim")
                 _print("    [e]  Edit the command and retry", style="dim")
+                if self._state.edit_history:
+                    _print("    [v]  Revert last AI edit and retry", style="yellow")
                 _print("    [a]  Abort", style="dim")
                 try:
                     choice = _input("  > ").strip().lower()
@@ -1756,6 +1800,10 @@ class WorkflowSession:
                             cmd = new_cmd
                     except EOFError:
                         return False
+                    continue
+                elif choice == "v" and self._state.edit_history:
+                    if self._revert_last_edit():
+                        _print("  Please recompile, then retry.", style="cyan")
                     continue
                 else:
                     return False
@@ -1976,17 +2024,38 @@ class WorkflowSession:
             if ai_rec_cmd:
                 break
 
-        # Don't re-suggest PMC counters that were already collected in the last run.
-        # This prevents an infinite [r] → run → same INFO result → [r] loop.
+        # Don't re-suggest a collection profile whose data has already been gathered.
+        # This prevents cycling between two INFO recommendations (e.g. "add --pmc
+        # counters" → "add --sys-trace" → "add --pmc counters" → ...).
+        # Strategy: fingerprint both PMC counters AND named trace flags, then compare
+        # the suggested command against the UNION of everything collected across ALL
+        # previous runs (not just the last one).
         if ai_rec_cmd and self._state.trace_history:
-            def _pmc_counters(cmd: str) -> set:
-                return {c for m in re.finditer(
+            _TRACE_FLAGS = frozenset({
+                "--sys-trace", "--hip-trace", "--kernel-trace",
+                "--memory-copy-trace", "--hsa-trace", "--stats",
+            })
+
+            def _collection_fingerprint(cmd: str) -> frozenset:
+                items: set = set()
+                # Individual PMC counters
+                for m in re.finditer(
                     r'--pmc\s+((?:[A-Z_][A-Z0-9_]*(?:\s+|$))+)', cmd, re.IGNORECASE
-                ) for c in m.group(1).split()}
-            suggested = _pmc_counters(ai_rec_cmd)
-            already   = _pmc_counters(self._state.trace_history[-1].command)
-            if suggested and suggested.issubset(already):
-                ai_rec_cmd = None  # all suggested counters already collected
+                ):
+                    items.update(f"pmc:{c}" for c in m.group(1).split())
+                # Named trace collection flags
+                for flag in _TRACE_FLAGS:
+                    if flag in cmd:
+                        items.add(flag)
+                return frozenset(items)
+
+            suggested_fp = _collection_fingerprint(ai_rec_cmd)
+            # Union of everything collected across all previous runs
+            already_fp = frozenset().union(*(
+                _collection_fingerprint(t.command) for t in self._state.trace_history
+            ))
+            if suggested_fp and suggested_fp.issubset(already_fp):
+                ai_rec_cmd = None  # every suggested collection already performed
 
         return self._record_analysis(recs, breakdown, hotspots,
                                      ai_recommended_command=ai_rec_cmd)
@@ -2028,12 +2097,28 @@ class WorkflowSession:
                 issue = rec.get("issue", "")[:70]
                 _print(f"  [{i}]  [{pri}]  {issue}", style=style)
             _print()
+            has_real_data = bool(self._state.trace_history)
             if all_info and already_reprofiled:
-                # Re-profiling already attempted with the suggested counters but
-                # the analysis result is unchanged.  No new suggestions available.
-                _print("  Analysis result unchanged after re-profiling.", style="yellow")
-                _print("  The profiler may not be capturing GPU kernels from this app.", style="yellow")
-                _print("  See the ⚠ note above for multi-process profiling options.", style="yellow")
+                # Re-profiling already attempted; nothing new to suggest at Tier 1/2.
+                if has_real_data:
+                    # GPU data captured — we've exhausted Tier 1/2 analysis.
+                    # Offer deeper tiers.
+                    _print("  All Tier 1/2 data collected. To investigate further:", style="yellow")
+                    _print("  • TraceLens interval + kernel-category analysis: "
+                           "already shown in the report above", style="dim")
+                    _print("  • PC Sampling (Tier 3): instruction-level hotspots "
+                           "within each kernel", style="dim")
+                    _print("  • rocprof-compute / Omniperf: roofline + detailed "
+                           "micro-architecture metrics", style="dim")
+                    _print()
+                    _print("  [d]  Go deeper: collect PC sampling data (Tier 3)", style="cyan")
+                else:
+                    # No GPU data at all — likely multiprocessing spawn issue.
+                    _print("  Analysis result unchanged after re-profiling.", style="yellow")
+                    _print("  The profiler may not be capturing GPU kernels from this app.",
+                           style="yellow")
+                    _print("  See the ⚠ note above for multi-process profiling options.",
+                           style="yellow")
                 _print()
                 _print("  [n]  Skip — stop re-profiling", style="dim")
                 _print("  [q]  Quit session", style="dim")
@@ -2056,6 +2141,19 @@ class WorkflowSession:
             if choice == "q":
                 return None
             if choice in ("n", ""):
+                return None
+            if choice == "d" and all_info and already_reprofiled and has_real_data:
+                # Build PC sampling command and route it to Phase 7 as option [3].
+                run_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+                new_dir = f"{self._trace_dir}/run_{run_id}"
+                pc_cmd = (
+                    f"ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1 rocprofv3 --pc-sampling"
+                    f" -d {new_dir} -o results -- {self._state.app_command}"
+                )
+                snap.ai_recommended_command = pc_cmd
+                _print()
+                _print("  PC sampling command ready. Proceeding to re-profiling.", style="dim")
+                _print("  Select [3] at the next prompt to run it.", style="dim")
                 return None
             if choice == "r" and all_info and not already_reprofiled:
                 # Advance to re-profiling phase; AI-recommended command will be option [3].
@@ -2263,7 +2361,8 @@ class WorkflowSession:
         # Wait for recompile
         _print()
         _print("  Changes applied. Please recompile your application.", style="cyan")
-        _print("  Type 'done' when compiled, 'abort' to exit, or describe errors.", style="dim")
+        _print("  Type 'done' when compiled, 'revert' to undo the AI edit,", style="dim")
+        _print("  'abort' to exit, or describe compilation errors.", style="dim")
         while True:
             try:
                 resp = _input("  > ").strip().lower()
@@ -2272,13 +2371,18 @@ class WorkflowSession:
             if resp in ("done", "compiled", "ok", "yes", "y", ""):
                 _print("  Great — ready to re-profile.", style="green")
                 break
+            if resp in ("revert", "undo", "rollback", "v"):
+                if self._revert_last_edit():
+                    _print("  Reverted. Recompile to restore original, then type 'done'.",
+                           style="cyan")
+                break
             if resp in ("abort", "cancel", "quit", "exit"):
                 _print("  Aborting. Backup preserved at: " + str(bak), style="dim")
                 break
             # Treat as compilation error description
             _print(f"  Compilation error noted. Common causes: missing include, "
                    f"incorrect __launch_bounds__ syntax.", style="yellow")
-            _print("  After fixing, type 'done'.", style="dim")
+            _print("  Type 'done' when fixed, or 'revert' to undo the AI edit.", style="dim")
 
     def _phase6_apply_diff(self, snap: _AnalysisSnapshot) -> None:
         """Phase 6 alt: Save suggestions to a patch file."""
