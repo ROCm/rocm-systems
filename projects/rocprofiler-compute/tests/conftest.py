@@ -42,10 +42,12 @@ try:
     rocprof_compute = SourceFileLoader(
         "rocprof-compute", "src/rocprof-compute"
     ).load_module()
+    rocprof_compute_script_path = "src/rocprof-compute"
 except Exception:
     rocprof_compute = SourceFileLoader(
         "rocprof-compute", "rocprof-compute"
     ).load_module()
+    rocprof_compute_script_path = "rocprof-compute"
 
 
 def pytest_addoption(parser):
@@ -65,6 +67,23 @@ def pytest_addoption(parser):
         ),
         help="Path to the rocprofiler-sdk tool",
     )
+
+
+@pytest.fixture(autouse=True)
+def skip_monkeypatch_with_binary(request):
+    """Auto-skip tests using monkeypatch when --call-binary is used.
+
+    Tests that use monkeypatch to patch Python functions/classes/modules
+    cannot work with --call-binary mode because the binary runs in a separate
+    process where Python patches don't apply.
+    """
+    if (
+        request.config.getoption("--call-binary")
+        and "monkeypatch" in request.fixturenames
+    ):
+        pytest.skip(
+            "Test uses monkeypatch which is incompatible with --call-binary mode"
+        )
 
 
 @pytest.fixture
@@ -117,7 +136,7 @@ def binary_handler_profile_rocprof_compute(request):
             )
         if request.config.getoption("--call-binary"):
             baseline_opts = [
-                "build/rocprof-compute.bin",
+                "./rocprof-compute.bin",
                 "profile",
                 "-VVV",
             ]
@@ -160,9 +179,14 @@ def binary_handler_profile_rocprof_compute(request):
             process = subprocess.run(
                 command_rocprof_compute,
                 text=True,
-                capture_output=capture_output,
+                capture_output=True,
             )
-            # Verify run status
+            # Print output so capsys can capture it
+            if process.stdout:
+                print(process.stdout, end="")
+            if process.stderr:
+                print(process.stderr, end="", file=sys.stderr)
+            # verify run status
             if check_success:
                 assert process.returncode == 0
 
@@ -208,8 +232,8 @@ def binary_handler_profile_rocprof_compute(request):
 
             # For multi-rank, use mpirun to run the command
             if num_ranks > 1:
-                # Use src/rocprof-compute instead of rocprof-compute
-                command_rocprof_compute[0] = "src/rocprof-compute"
+                # Use rocprof_compute_script_path instead of rocprof-compute
+                command_rocprof_compute[0] = rocprof_compute_script_path
                 command_rocprof_compute = [
                     "mpirun",
                     "-n",
@@ -218,9 +242,9 @@ def binary_handler_profile_rocprof_compute(request):
 
             # For capture_output or multi-rank, run the command with subprocess
             if capture_output or num_ranks > 1:
-                # Use src/rocprof-compute instead of rocprof-compute
+                # Use rocprof_compute_script_path instead of rocprof-compute
                 if num_ranks == 1:
-                    command_rocprof_compute[0] = "src/rocprof-compute"
+                    command_rocprof_compute[0] = rocprof_compute_script_path
 
                 process = subprocess.run(
                     command_rocprof_compute,
@@ -268,9 +292,15 @@ def binary_handler_analyze_rocprof_compute(request):
     def _handler(arguments):
         if request.config.getoption("--call-binary"):
             process = subprocess.run(
-                ["build/rocprof-compute.bin", *arguments],
+                ["./rocprof-compute.bin", *arguments],
                 text=True,
+                capture_output=True,
             )
+            # Print output so capsys can capture it
+            if process.stdout:
+                print(process.stdout, end="")
+            if process.stderr:
+                print(process.stderr, end="", file=sys.stderr)
             return process.returncode
         else:
             with pytest.raises(SystemExit) as e:

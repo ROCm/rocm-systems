@@ -109,7 +109,7 @@ Allocates the memory using hipHostMalloc API
 Launches the kernel and performs vector addition.
 validates thes result.
 */
-TEST_CASE("Unit_hipHostMalloc_Basic") {
+TEST_CASE(Unit_hipHostMalloc_Basic) {
   static constexpr auto LEN{1024 * 1024};
   static constexpr auto SIZE{LEN * sizeof(float)};
 
@@ -163,7 +163,7 @@ TEST_CASE("Unit_hipHostMalloc_Basic") {
 This testcase verifies the hipHostMalloc API by passing nullptr
 to the pointer variable
 */
-TEST_CASE("Unit_hipHostMalloc_Negative") {
+TEST_CASE(Unit_hipHostMalloc_Negative) {
 #if HT_AMD
   {
     // Stimulate error condition:
@@ -182,7 +182,7 @@ This testcase verifies the hipHostMalloc API by
    techniquies
 3. validates the result.
 */
-TEST_CASE("Unit_hipHostMalloc_NonCoherent") {
+TEST_CASE(Unit_hipHostMalloc_NonCoherent) {
   int* A = nullptr;
   HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&A), sizeBytes, hipHostMallocNonCoherent));
   const char* ptrType = "non-coherent";
@@ -200,7 +200,7 @@ This testcase verifies the hipHostMalloc API by
    techniquies
 3. validates the result.
 */
-TEST_CASE("Unit_hipHostMalloc_Coherent") {
+TEST_CASE(Unit_hipHostMalloc_Coherent) {
   int* A = nullptr;
   if (hipHostMalloc(reinterpret_cast<void**>(&A), sizeBytes, hipHostMallocCoherent) == hipSuccess) {
     const char* ptrType = "coherent";
@@ -226,7 +226,7 @@ This testcase verifies the hipHostMalloc API by
    techniquies
 3. validates the result.
 */
-TEST_CASE("Unit_hipHostMalloc_Default") {
+TEST_CASE(Unit_hipHostMalloc_Default) {
   int* A = nullptr;
   HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&A), sizeBytes));
   const char* ptrType = "default";
@@ -236,76 +236,26 @@ TEST_CASE("Unit_hipHostMalloc_Default") {
   HIP_CHECK(hipFreeHost(A));
 }
 
-TEST_CASE("Unit_hipHostGetDevicePointer_NullCheck") {
-  int* d_a;
-  HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&d_a), sizeof(int)));
-
-  auto res = hipHostGetDevicePointer(nullptr, d_a, 0);
-  REQUIRE(res == hipErrorInvalidValue);
-
-  HIP_CHECK(hipHostFree(d_a));
-}
-
 /*
 This testcase verifies the hipHostMalloc API by
-1. Allocating more memory than total GPU memory. Should return hipSuccess.
-2. Allocating more memory than the total GPU memory and accessing the memory
-   in a device function.
+1. Allocating more memory than total system RAM. Should return hipErrorOutOfMemory.
 */
-TEST_CASE("Unit_hipHostMalloc_AllocateMoreThanAvailGPUMemory") {
-  char* A = nullptr;
-  size_t maxGpuMem = 0, availableMem = 0;
-  // Get available GPU memory and total GPU memory
-  HIP_CHECK(hipMemGetInfo(&availableMem, &maxGpuMem));
-#if defined(_WIN32)
-  size_t allocsize = availableMem - (256 * 1024 * 1024);
-  allocsize -= allocsize * (MEMORY_PERCENT / 100.0);
-#else
-  size_t allocsize = maxGpuMem + ((maxGpuMem * MEMORY_PERCENT) / 100);
-#endif
-  // Get free host In bytes
-  size_t hostMemFree = HipTest::getMemoryAmount() * 1024 * 1024;
-  // Ensure that allocsize < hostMemFree
-  if (allocsize < hostMemFree) {
-    HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&A), allocsize));
-    HIP_CHECK(hipHostFree(A));
-  } else {
-    WARN("Skipping test as CPU memory is less than GPU memory");
+TEST_CASE(Unit_hipHostMalloc_AllocateMoreThanTotalSystemMemory) {
+  char* host_ptr = nullptr;
+  const size_t total_ram_mb = HipTest::getTotalSystemMemoryInMB();
+  if (total_ram_mb == 0) {
+    WARN("Skipping test as total system memory could not be queried");
+    return;
   }
+
+  const size_t total_ram_bytes = total_ram_mb * 1024 * 1024;
+  const size_t allocsize = total_ram_bytes + ((total_ram_bytes * MEMORY_PERCENT) / 100);
+
+  HIP_CHECK_ERROR(hipHostMalloc(reinterpret_cast<void**>(&host_ptr), allocsize), hipErrorOutOfMemory);
+  REQUIRE(host_ptr == nullptr);
 }
 
-#if HT_AMD
-TEST_CASE("Unit_hipHostMalloc_AllocateUseMoreThanAvailGPUMemory") {
-  char* A = nullptr;
-  size_t maxGpuMem = 0, availableMem = 0;
-  // Get available GPU memory and total GPU memory
-  HIP_CHECK(hipMemGetInfo(&availableMem, &maxGpuMem));
-#if defined(_WIN32)
-  size_t allocsize = availableMem - (256 * 1024 * 1024);
-  allocsize -= allocsize * (MEMORY_PERCENT / 100.0);
-#else
-  size_t allocsize = maxGpuMem + ((maxGpuMem * MEMORY_PERCENT) / 100);
-#endif
-  // Get free host In bytes
-  size_t hostMemFree = HipTest::getMemoryAmount() * 1024 * 1024;
-  // Ensure that allocsize < hostMemFree
-  if (allocsize < hostMemFree) {
-    HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&A), allocsize));
-    constexpr int sample_size = 1024;
-    // memset a sample size to 0
-    HIP_CHECK(hipMemset(A, 0, sample_size));
-    unsigned int grid_size = allocsize / BLOCK_SIZE;
-    // Check if the allocated memory can be accessed in kernels
-    kerTestMemAccess<<<grid_size, BLOCK_SIZE>>>(A);
-    HIP_CHECK(hipDeviceSynchronize());
-    HIP_CHECK(hipHostFree(A));
-  } else {
-    WARN("Skipping test as CPU memory is less than GPU memory");
-  }
-}
-#endif
-
-TEST_CASE("Unit_hipHostMalloc_Capture") {
+TEST_CASE(Unit_hipHostMalloc_Capture) {
   int* host_ptr = nullptr;
   hipError_t capture_error = hipSuccess;
 

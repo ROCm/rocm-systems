@@ -104,8 +104,8 @@ address KernelParameters::alloc(device::VirtualDevice& vDev) {
 }
 
 // =================================================================================================
-bool KernelParameters::captureAndSet(void** kernelParams, address kernArgs, size_t kernArgsSize,
-                                     address mem) {
+bool KernelParameters::captureHIPArgs(void** kernelParams, address kernArgs, size_t kernArgsSize,
+                                      address mem) {
   amd::Memory** memories = reinterpret_cast<amd::Memory**>(mem + memoryObjOffset());
   for (size_t idx = 0; idx < signature_.numParameters(); ++idx) {
     KernelParameterDescriptor& desc = signature_.params()[idx];
@@ -122,8 +122,10 @@ bool KernelParameters::captureAndSet(void** kernelParams, address kernArgs, size
       LP64_SWITCH(uint32_value, uint64_value) = *(LP64_SWITCH(uint32_t*, uint64_t*))value;
       memArg = amd::MemObjMap::FindMemObj(*reinterpret_cast<const void* const*>(value));
       memories[desc.info_.arrayIndex_] = memArg;
-      if (memArg != nullptr) {
-        memArg->retain();
+      if (!(amd::IS_HIP && AMD_DIRECT_DISPATCH)) {
+        if (memArg != nullptr) {
+          memArg->retain();
+        }
       }
     } else if (desc.type_ == T_SAMPLER) {
       LogError("Cannot handle Sampler now");
@@ -233,8 +235,8 @@ void KernelParameters::set(size_t index, size_t size, const void* value, bool sv
   desc.info_.defined_ = true;
 }
 
-address KernelParameters::capture(device::VirtualDevice& vDev, uint64_t lclMemSize,
-                                  int32_t* error) {
+address KernelParameters::captureOpenCLArgs(device::VirtualDevice& vDev, uint64_t lclMemSize,
+                                            int32_t* error) {
   const Device& device = vDev.device();
   *error = CL_SUCCESS;
 
@@ -258,7 +260,9 @@ address KernelParameters::capture(device::VirtualDevice& vDev, uint64_t lclMemSi
       if (desc.type_ == T_POINTER && (desc.addressQualifier_ != CL_KERNEL_ARG_ADDRESS_LOCAL)) {
         Memory* memArg = memoryObjects_[desc.info_.arrayIndex_];
         if (memArg != nullptr) {
-          memArg->retain();
+          if (!(amd::IS_HIP && AMD_DIRECT_DISPATCH)) {
+            memArg->retain();
+          }
           device::Memory* devMem = memArg->getDeviceMemory(device);
           if (nullptr == devMem) {
             LogPrintfError("Can't allocate memory size - 0x%08X bytes!", memArg->getSize());
@@ -347,8 +351,10 @@ void KernelParameters::release(address mem) const {
   amd::Memory* const* memories = reinterpret_cast<amd::Memory* const*>(mem + memoryObjOffset());
   for (uint32_t i = 0; i < signature_.numMemories(); ++i) {
     Memory* memArg = memories[i];
-    if (memArg != nullptr) {
-      memArg->release();
+    if (!(amd::IS_HIP && AMD_DIRECT_DISPATCH)) {
+      if (memArg != nullptr) {
+        memArg->release();
+      }
     }
   }
   if (signature_.numSamplers() > 0) {

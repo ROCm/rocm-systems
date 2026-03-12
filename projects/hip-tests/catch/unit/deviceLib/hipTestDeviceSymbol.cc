@@ -47,7 +47,7 @@ __global__ void checkStaticConstVarAddress(float* addr, bool* out) {
   *out = (statConstVar == addr);
 }
 
-TEST_CASE("Unit_hipMemcpyToSymbolAsync_ToNFrom") {
+TEST_CASE(Unit_hipMemcpyToSymbolAsync_ToNFrom) {
   int *A{nullptr}, *Am{nullptr}, *B{nullptr}, *Ad{nullptr}, *C{nullptr}, *Cm{nullptr};
   A = new int[NUM];
   B = new int[NUM];
@@ -165,7 +165,7 @@ TEST_CASE("Unit_hipMemcpyToSymbolAsync_ToNFrom") {
 /*
  1) Validate get symbol address/size for static const variable.
 */
-TEST_CASE("Unit_hipGetSymbolAddressAndSize_Validation") {
+TEST_CASE(Unit_hipGetSymbolAddressAndSize_Validation) {
   bool* checkOkD{nullptr};
   bool checkOk = false;
   size_t symbolSize{};
@@ -186,7 +186,7 @@ TEST_CASE("Unit_hipGetSymbolAddressAndSize_Validation") {
   }
 }
 
-TEST_CASE("Unit_hipGetSymbolAddress_Negative") {
+TEST_CASE(Unit_hipGetSymbolAddress_Negative) {
   SECTION("Invalid symbol") {
     int notADeviceSymbol{0};
     int* addr{nullptr};
@@ -202,7 +202,7 @@ TEST_CASE("Unit_hipGetSymbolAddress_Negative") {
   }
 }
 
-TEST_CASE("Unit_hipGetSymbolSize_Negative") {
+TEST_CASE(Unit_hipGetSymbolSize_Negative) {
   SECTION("Invalid symbol") {
     int notADeviceSymbol{0};
     size_t dsize{0};

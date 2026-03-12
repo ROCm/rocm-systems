@@ -36,7 +36,8 @@ hipError_t ihipBatchMemOperation(hipStream_t stream, cl_command_type cmdType, un
   // Validate operations in paramArray
   for (unsigned int i = 0; i < count; i++) {
     // These operations are currently not supported
-    if (paramArray[i].operation == hipStreamMemOpBarrier || hipStreamMemOpFlushRemoteWrites) {
+    if (paramArray[i].operation == hipStreamMemOpBarrier ||
+        paramArray[i].operation == hipStreamMemOpFlushRemoteWrites) {
       return hipErrorInvalidValue;
     }
   }
@@ -46,10 +47,6 @@ hipError_t ihipBatchMemOperation(hipStream_t stream, cl_command_type cmdType, un
 
   amd::BatchMemoryOperationCommand* command = new amd::BatchMemoryOperationCommand(
       *hip_stream, cmdType, count, flags, waitList, paramArray, sizeof(hipStreamBatchMemOpParams));
-
-  if (command == nullptr) {
-    return hipErrorOutOfMemory;
-  }
   command->enqueue();
   command->release();
   HIP_RETURN(hipSuccess);

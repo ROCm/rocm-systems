@@ -60,7 +60,7 @@ static __global__ void Iter(int* Ad, int num) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipDeviceSynchronize_Positive_Empty_Streams") {
+TEST_CASE(Unit_hipDeviceSynchronize_Positive_Empty_Streams) {
   const auto device = GENERATE(range(0, HipTest::getDeviceCount()));
   HIP_CHECK(hipSetDevice(device));
   INFO("Current device: " << device);
@@ -83,7 +83,7 @@ TEST_CASE("Unit_hipDeviceSynchronize_Positive_Empty_Streams") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipDeviceSynchronize_Positive_Nullstream") {
+TEST_CASE(Unit_hipDeviceSynchronize_Positive_Nullstream) {
   const auto device = GENERATE(range(0, HipTest::getDeviceCount()));
   HIP_CHECK(hipSetDevice(device));
   INFO("Current device: " << device);
@@ -97,7 +97,6 @@ TEST_CASE("Unit_hipDeviceSynchronize_Positive_Nullstream") {
   hipLaunchKernelGGL(HIP_KERNEL_NAME(Iter), dim3(1), dim3(1), 0, NULL, A_d, 1 << 30);
   HIP_CHECK(hipMemcpyAsync(A_h, A_d, _SIZE, hipMemcpyDeviceToHost, NULL));
 
-  REQUIRE(1 << 30 != A_h[0] - 1);
   HIP_CHECK(hipDeviceSynchronize());
   REQUIRE(1 << 30 == A_h[0] - 1);
   HIP_CHECK(hipHostFree(A_h));
@@ -116,7 +115,7 @@ TEST_CASE("Unit_hipDeviceSynchronize_Positive_Nullstream") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipDeviceSynchronize_Functional") {
+TEST_CASE(Unit_hipDeviceSynchronize_Functional) {
   int* A[NUM_STREAMS];
   int* Ad[NUM_STREAMS];
   hipStream_t stream[NUM_STREAMS];

@@ -37,8 +37,7 @@ The relevant fields are ``ID`` and the ``VERSION_ID``.
 Install via package manager
 ============================
 
-   If you have ROCm version 6.3 or higher installed, you can use the
-   package manager to install a pre-built copy of ROCm Systems Profiler.
+If you have ROCm version 6.3 or higher installed, you can use the package manager to install a pre-built copy of ROCm Systems Profiler.
 
 .. tab-set::
 
@@ -141,20 +140,13 @@ Optional third-party packages
     (By default, if ROCm Systems Profiler cannot find an OpenMPI MPI distribution, it uses a local copy
     of the OpenMPI ``mpi.h``.)
 
-* UCX
-
-  * ``ROCPROFSYS_USE_UCX`` enables UCX (Unified Communication X) support for tracing UCX communication functions
-    used as a transport layer for MPI and other communication libraries
-
 .. csv-table::
    :header: "Third-Party Library", "CMake Enable Option"
    :widths: 15, 45
 
-   "ROCm", "``ROCPROFSYS_USE_ROCM`` (default: ON)"
    "PAPI", "``ROCPROFSYS_USE_PAPI`` (default: ON)"
    "MPI", "``ROCPROFSYS_USE_MPI`` (default: OFF)"
    "MPI (header-only)", "``ROCPROFSYS_USE_MPI_HEADERS`` (default: ON)"
-   "UCX", "``ROCPROFSYS_USE_UCX`` (default: ON)"
 
 Installing Dyninst
 -----------------------------------
@@ -202,9 +194,9 @@ Building and installing ROCm Systems Profiler
 ---------------------------------------------
 
 ROCm Systems Profiler has CMake configuration options for MPI support (``ROCPROFSYS_USE_MPI`` or
-``ROCPROFSYS_USE_MPI_HEADERS``), ROCm tracing and sampling (``ROCPROFSYS_USE_ROCM``),
-OpenMP-Tools (``ROCPROFSYS_USE_OMPT``), hardware counters via PAPI (``ROCPROFSYS_USE_PAPI``),
-among other features.
+``ROCPROFSYS_USE_MPI_HEADERS``), OpenMP-Tools (``ROCPROFSYS_USE_OMPT``),
+hardware counters via PAPI (``ROCPROFSYS_USE_PAPI``), among other features.
+ROCm support is always enabled.
 Various additional features can be enabled via the
 ``TIMEMORY_USE_*`` `CMake options <https://timemory.readthedocs.io/en/develop/installation.html#cmake-options>`_.
 Any ``ROCPROFSYS_USE_<VAL>`` option which has a corresponding ``TIMEMORY_USE_<VAL>``
@@ -220,7 +212,6 @@ in `the Perfetto UI <https://ui.perfetto.dev>`_.
    cmake                                                 \
        -B rocprof-sys-build                              \
        -D CMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems  \
-       -D ROCPROFSYS_USE_ROCM=ON                         \
        -D ROCPROFSYS_USE_PYTHON=ON                       \
        -D ROCPROFSYS_USE_OMPT=ON                         \
        -D ROCPROFSYS_USE_MPI_HEADERS=ON                  \
@@ -296,20 +287,6 @@ ROCm Systems Profiler on an application built against OpenMPI causes a segmentat
 This happens because the value of the ``MPI_COMM_WORLD`` is truncated
 during the function wrapping before being passed along to the underlying MPI function.
 
-UCX support within ROCm Systems Profiler
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-ROCm Systems Profiler supports tracing UCX (Unified Communication X) communication functions
-when ``ROCPROFSYS_USE_UCX`` is enabled (default: ON). UCX is a high-performance communication
-framework that serves as a transport layer for MPI and other communication libraries, providing
-optimized point-to-point and collective communication operations.
-
-When UCX support is enabled, ROCm Systems Profiler can automatically intercept and trace UCX
-communication functions such as ``ucp_tag_send``, ``ucp_tag_recv``, and other UCP (Unified
-Communication Protocol) and UCT (Unified Communication Transport) layer operations. This allows
-for detailed analysis of communication patterns and performance in applications using UCX as
-their underlying transport mechanism.
-
 Python support within ROCm Systems Profiler
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -324,22 +301,9 @@ and ``ROCPROFSYS_PYTHON_ROOT_DIRS`` lists must
 be the same size.
 
 .. code-block:: shell
+
    cmake --preset release -D ROCPROFSYS_PYTHON_ROOT_DIRS="/usr/bin;/usr/bin" -D ROCPROFSYS_PYTHON_VERSIONS="3.10;3.12"
 
-
-ROCm Systems Profiler without ROCm
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-To build ROCm Systems Profiler for use on systems without a GPU or the ROCm runtime, disable ROCm
-support using the CMake configuration option ``ROCPROFSYS_USE_ROCM=OFF``. See :ref:`cmake-options`
-for more information.
-
-Alternatively, use the provided build script with the appropriate options. See :ref:`build-script`.
-For example, to build without ROCm support and create a STGZ installer, use the following command:
-
-.. code-block:: shell
-
-   ./scripts/build-release.sh --core +python --generators STGZ
 
 .. _post-installation-steps:
 
@@ -352,15 +316,16 @@ You should also test the executables to confirm ROCm Systems Profiler is correct
 Configure the environment
 -----------------------------------
 
-If environment modules are available and preferred, then add them using these commands,
- replacing ``1.0.0`` with the desired version number to load:
+If environment modules are available and preferred, then add them using these commands:
+
+* Replacing ``1.0.0`` with the desired version number to load:
 
 .. code-block:: shell
 
    module use /opt/rocprofiler-systems/share/modulefiles
    module load rocprofiler-systems/1.0.0
 
-Alternatively, you can directly source the ``setup-env.sh`` script:
+* Alternatively, you can directly source the ``setup-env.sh`` script:
 
 .. code-block:: shell
 

@@ -48,11 +48,13 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Optional, Union, cast
 
+import numpy as np
 import pandas as pd
 import yaml
 
 import config
 from utils import rocpd_data
+from utils.kernel_name_shortener import kernel_name_shortener
 from utils.logger import (
     console_debug,
     console_error,
@@ -62,9 +64,73 @@ from utils.logger import (
 )
 
 METRIC_ID_RE = re.compile(pattern=r"^\d{1,2}(?:\.\d{1,2}){0,2}$")
+NS_TO_MS = 1.0 / 1_000_000.0
 
 rocprof_cmd = ""
 rocprof_args = ""
+
+
+def version_to_numeric(version_parts: list[int], max_len: int) -> int:
+    """Convert version tuple to numeric value using base-1000 positional system."""
+    version_numeric = 0
+    for i, part in enumerate(version_parts):
+        version_numeric += part * (1000 ** (max_len - i - 1))
+    return version_numeric
+
+
+def resolve_rocm_library_path(library_path: Optional[str]) -> Optional[str]:
+    """
+    Resolve ROCm library path with automatic version fallback.
+    Tries exact path first, then falls back to versioned variants
+    (e.g., .so.1, .so.1.2.3).
+    """
+    if not library_path:
+        return library_path
+
+    path = Path(library_path)
+
+    # Try exact path first (handles both unversioned and explicit versioned paths)
+    if path.exists():
+        console_debug(f"Resolved library (exact match): {path}")
+        return str(path)
+
+    # Escape the input path so any glob metacharacters are treated literally.
+    matches = glob.glob(f"{glob.escape(library_path)}.*")
+
+    # First pass: filter to numeric versions and collect version tuples
+    version_tuples: list[tuple[list[int], str]] = []
+    for candidate in matches:
+        # Compute the suffix relative to the requested library path.
+        if not candidate.startswith(library_path):
+            continue
+        suffix = candidate[len(library_path) :]
+        # Expect a suffix like ".1" or ".1.2.3"
+        if not suffix.startswith("."):
+            continue
+        parts = suffix.split(".")[1:]  # drop leading empty element
+        if not parts:
+            continue
+        if not all(part.isdigit() for part in parts):
+            continue
+        version_tuples.append(([int(p) for p in parts], candidate))
+
+    # Find max version length to normalize all versions
+    if not version_tuples:
+        console_debug(f"ROCm library .so file not found: {library_path}")
+        return library_path
+
+    # Second pass: convert to numeric values with normalized length
+    max_version_len = max(len(vt[0]) for vt in version_tuples)
+    versioned_candidates: list[tuple[int, str]] = []
+    for version_parts, candidate in version_tuples:
+        version_numeric = version_to_numeric(version_parts, max_version_len)
+        versioned_candidates.append((version_numeric, candidate))
+
+    # Select the candidate with the highest numeric version.
+    versioned_candidates.sort(key=lambda item: item[0], reverse=True)
+    resolved = versioned_candidates[0][1]
+    console_debug(f"Resolved library (versioned): {library_path} -> {resolved}")
+    return resolved
 
 
 def is_tcc_channel_counter(counter: str) -> bool:
@@ -973,7 +1039,8 @@ def run_prof(
         )
         combined_df.to_csv(workload_dir + f"/results_{fbase}.csv", index=False)
         if torch_trace_enabled:
-            process_torch_trace_output(workload_dir, fbase, format_rocprof_output)
+            # move counter collection and marker trace to workload dir
+            save_torch_trace_inputs(workload_dir, fbase, format_rocprof_output)
         if retain_rocpd_output:
             for db_path in glob.glob(workload_dir + "/out/pmc_1/*/*.db"):
                 pid = Path(db_path).stem.split("_")[0]
@@ -998,8 +1065,6 @@ def run_prof(
             )
             # TODO: as rocprofv3 --kokkos-trace feature improves,
             # rocprof-compute should make updates accordingly
-            if "ROCPROF_HIP_RUNTIME_API_TRACE" in options:
-                process_hip_trace_output(workload_dir, fbase)
         else:
             # rocprofv3 requires additional processing for each process
             # rocprofv3 cannot use native tool
@@ -1010,11 +1075,10 @@ def run_prof(
                 # TODO: as rocprofv3 --kokkos-trace feature improves,
                 # rocprof-compute should make updates accordingly
                 process_kokkos_trace_output(workload_dir, fbase)
-            elif "--hip-trace" in options:
-                process_hip_trace_output(workload_dir, fbase)
         # Add torch operator trace processing
         if torch_trace_enabled:
-            process_torch_trace_output(workload_dir, fbase, format_rocprof_output)
+            # move counter collection and marker trace to workload dir
+            save_torch_trace_inputs(workload_dir, fbase, format_rocprof_output)
         # Combine results into single CSV file
         if results_files:
             combined_results = pd.concat(
@@ -1273,20 +1337,204 @@ def process_rocprofv3_output(workload_dir: str, using_native_tool: bool) -> list
 
 
 @demarcate
-def process_torch_trace_output(
+def save_torch_trace_inputs(
     workload_dir: str,
     fbase: str,
     output_format: str = "rocpd",
 ) -> None:
     """
-    Creates PyTorch operator trace from counter_collection and marker_api_trace data.
-        - Performs inner join on Correlation_Id, filtering out unmatched entries
-        - Output file is saved to workload root, not the temporary out/ directory
+    Move counter_collection and marker_api_trace data to workload_dir,
+    for creation of PyTorch operator trace in Analyze mode.
     """
-    marker_trace_csv_file_path = f"{workload_dir}/out/pmc_1/"
-    # Find all marker_api_trace CSV files
+    src_dir = Path(workload_dir) / "out" / "pmc_1"
+    if output_format == "rocpd":
+        # Only one pair expected
+        src_counter = src_dir / f"{fbase}_counter_collection.csv"
+        src_marker = src_dir / f"{fbase}_marker_api_trace.csv"
+        dst_counter = Path(workload_dir) / f"torch_trace_{fbase}_counter_collection.csv"
+        dst_marker = Path(workload_dir) / f"torch_trace_{fbase}_marker_api_trace.csv"
+        # These files are expected to exist
+        # Letting shutil.copyfile raise error if files not found
+        shutil.copyfile(src_counter, dst_counter)
+        shutil.copyfile(src_marker, dst_marker)
+        console_log(
+            "torch trace",
+            "Moved counter collection and marker trace files "
+            "to workload dir for PyTorch trace creation.",
+        )
+        console_log("Counter Collection: ", str(dst_counter))
+        console_log("Marker API Trace: ", str(dst_marker))
+    elif output_format == "csv":
+        # Multiple pairs possible (one per PID/process)
+        counter_files = glob.glob(str(src_dir / "*/*_counter_collection.csv"))
+        marker_files = glob.glob(str(src_dir / "*/*_marker_api_trace.csv"))
+        (Path(workload_dir) / f"{fbase}").mkdir(parents=True, exist_ok=True)
+        # Expecting the files to be present
+        # Letting shutil.copyfile raise error if files not found
+        # Path: workload_dir/fbase/torch_trace_<src_basename> (discovered by
+        # process_torch_trace_output via glob **/torch_trace*_marker_api_trace.csv)
+        for src_counter in counter_files:
+            dst_counter = str(
+                Path(workload_dir)
+                / f"{fbase}"
+                / ("torch_trace_" + Path(src_counter).name)
+            )
+            shutil.copyfile(src_counter, dst_counter)
+            console_log("torch trace", f"Copied Counter Collection: {dst_counter}")
+        for src_marker in marker_files:
+            dst_marker = str(
+                Path(workload_dir)
+                / f"{fbase}"
+                / ("torch_trace_" + Path(src_marker).name)
+            )
+            shutil.copyfile(src_marker, dst_marker)
+            console_log("torch trace", f"Copied Marker API Trace: {dst_marker}")
+    else:
+        console_warning(
+            "torch trace",
+            f"Unknown output_format: {output_format} in save_torch_trace_inputs",
+        )
+
+
+def simplify_kernel_name(full_kernel_name: str) -> str:
+    """Simplify a kernel name for display by stripping templates and namespaces.
+
+    Intended as a last-resort readability pass *after* the standard
+    kernel_name_shortener / process_single_kernel_name pipeline.  Strips
+    ``void`` prefix, template parameters, and namespace qualifiers so that
+    e.g. ``void at::native::vectorized_elementwise_kernel<4, ...>`` becomes
+    ``vectorized_elementwise_kernel``.
+    """
+    name = full_kernel_name.strip()
+    if name.startswith("void "):
+        name = name[5:]
+
+    if "<" in name:
+        main_part = name.split("<")[0]
+    elif "(" in name:
+        main_part = name.split("(")[0]
+    else:
+        main_part = name
+
+    if "::" in main_part:
+        function_name = main_part.split("::")[-1].strip()
+        return function_name if function_name else name.strip()
+
+    return main_part.strip()
+
+
+def sanitize_torch_operator_key(name: str) -> str:
+    """Normalize a user-supplied operator name to match torch_trace CSV filename stems.
+
+    Strips the ``torch.`` prefix and replaces dots with underscores so that
+    inputs like ``torch.nn.functional.conv2d`` become ``nn_functional_conv2d``.
+    """
+    return name.replace("torch.", "").replace(".", "_")
+
+
+def get_unique_invocations(df: pd.DataFrame) -> Optional[pd.DataFrame]:
+    """Deduplicate operator invocations from trace rows.
+
+    Each trace row represents one (operator, kernel, counter) combination, so a
+    single operator invocation appears in many rows.  Deduplication uses
+    (Operator_Name, Context_Id, Start_Timestamp_function) when Context_Id is
+    present; otherwise falls back to
+    (Operator_Name, Start_Timestamp_function, End_Timestamp_function).
+
+    Returns a DataFrame with at least Operator_Name, Start_Timestamp_function,
+    and End_Timestamp_function columns, or None when timestamps are missing.
+    """
+    has_ts = (
+        "Start_Timestamp_function" in df.columns
+        and "End_Timestamp_function" in df.columns
+    )
+    if not has_ts:
+        return None
+
+    use_context = "Context_Id" in df.columns and df["Context_Id"].notna().any()
+    if use_context:
+        return df[
+            [
+                "Operator_Name",
+                "Context_Id",
+                "Start_Timestamp_function",
+                "End_Timestamp_function",
+            ]
+        ].drop_duplicates(
+            subset=["Operator_Name", "Context_Id", "Start_Timestamp_function"]
+        )
+    return df[
+        ["Operator_Name", "Start_Timestamp_function", "End_Timestamp_function"]
+    ].drop_duplicates()
+
+
+def compute_operator_prefix_stats(
+    df: pd.DataFrame,
+) -> dict[str, tuple[float, int]]:
+    """Compute total duration (ms) and invocation count per operator path prefix.
+
+    Hierarchy semantics: the trace only has the full path per row (e.g. A/B/C).
+    We attribute each invocation's duration to every prefix along its path, so
+    stats at each node are inclusive.
+    Returns dict: prefix -> (total_duration_ms, count).
+    """
+    invocations = get_unique_invocations(df)
+    if invocations is None:
+        return {}
+
+    prefix_stats: dict[str, tuple[float, int]] = {}
+    for _, row in invocations.iterrows():
+        op = str(row["Operator_Name"])
+        duration_ns = float(row["End_Timestamp_function"]) - float(
+            row["Start_Timestamp_function"]
+        )
+        duration_ms = duration_ns * NS_TO_MS
+        parts = op.split("/")
+        for i in range(1, len(parts) + 1):
+            prefix = "/".join(parts[:i])
+            if prefix not in prefix_stats:
+                prefix_stats[prefix] = (0.0, 0)
+            prev_dur, prev_cnt = prefix_stats[prefix]
+            prefix_stats[prefix] = (prev_dur + duration_ms, prev_cnt + 1)
+    return prefix_stats
+
+
+def build_kernel_name_to_id(
+    dfs: list[pd.DataFrame], kernel_verbose: int = 1
+) -> Optional[dict[str, int]]:
+    """Build a mapping from shortened kernel name to a stable numeric ID.
+
+    Collects every unique Kernel_Name across the supplied DataFrames,
+    shortens them with kernel_name_shortener, and assigns sequential IDs
+    in alphabetical order.  Returns None when no kernel names are found.
+    """
+    all_kernel_names: set[str] = set()
+    for df in dfs:
+        if "Kernel_Name" in df.columns:
+            all_kernel_names.update(df["Kernel_Name"].dropna().unique())
+    if not all_kernel_names:
+        return None
+    kernel_df = pd.DataFrame({"Kernel_Name": sorted(all_kernel_names)})
+    kernel_df = kernel_name_shortener(kernel_df.copy(), kernel_verbose)
+    if kernel_df is None:
+        return None
+    return {str(row["Kernel_Name"]).strip(): i for i, row in kernel_df.iterrows()}
+
+
+@demarcate
+def process_torch_trace_output(
+    workload_dir: str,
+) -> None:
+    """
+    Joins counter_collection and marker_api_trace data for PyTorch operator listing.
+
+    - Performs inner join on Correlation_ID, filtering out unmatched entries
+    - Consolidates data across passes and groups by Operator_Name, saving one CSV
+      per operator under workload_dir/torch_trace/
+    """
+    console_log(f"Looking for marker and counter csv files in {workload_dir}")
     marker_api_trace_csvs = list(
-        Path(marker_trace_csv_file_path).glob("**/*_marker_api_trace.csv")
+        Path(workload_dir).glob("**/torch_trace*_marker_api_trace.csv")
     )
     counter_collection_csvs = [
         markers_file.parent
@@ -1298,20 +1546,46 @@ def process_torch_trace_output(
         for i in range(len(marker_api_trace_csvs))
         if counter_collection_csvs[i].is_file() and marker_api_trace_csvs[i].is_file()
     ]
+
     if not existing_csv_files:
-        console_warning(
-            f"No marker files with corresponding counter files found for {fbase}"
-        )
+        if Path(f"{workload_dir}/torch_trace").exists():
+            console_log(
+                "torch trace",
+                "Torch data has already been processed and saved to "
+                f"{workload_dir}/torch_trace",
+            )
+        else:
+            console_warning(
+                "torch trace",
+                "No marker files with corresponding counter files found. "
+                "Ensure profiling was done with '--torch-trace'.",
+            )
         return
+    if Path(f"{workload_dir}/torch_trace").exists():
+        shutil.rmtree(Path(f"{workload_dir}/torch_trace"))
+        console_log(
+            f"Removed previous torch_trace directory: {workload_dir}/torch_trace"
+        )
 
     # Join marker and counter data
     def _merge_pair(
         marker_path: Path,
         counter_path: Path,
-        join_keys: list = ("Correlation_Id"),
+        join_keys: tuple[str, ...] = ("Correlation_ID",),
     ) -> pd.DataFrame:
+        """Merge a pair of marker and counter csv files on specified keys,
+        return the merged dataframe.
+        """
         marker_df = pd.read_csv(marker_path)
         counter_df = pd.read_csv(counter_path)
+        # Normalize column names to handle case inconsistencies
+        marker_df.columns = marker_df.columns.str.replace(
+            "Correlation_Id", "Correlation_ID"
+        )
+        counter_df.columns = counter_df.columns.str.replace(
+            "Correlation_Id", "Correlation_ID"
+        )
+
         return pd.merge(
             marker_df,
             counter_df,
@@ -1320,37 +1594,17 @@ def process_torch_trace_output(
             suffixes=("_function", "_kernel"),
         )
 
-    if output_format == "csv":
-        merged_results = pd.concat(
-            [_merge_pair(f[0], f[1]) for f in existing_csv_files],
-            ignore_index=True,
-        )
-    elif output_format == "rocpd":
-        # There will one pair of csv files extracted from rocpd db and consolidated.
-        merged_results = _merge_pair(
-            existing_csv_files[0][0],
-            existing_csv_files[0][1],
-            ("Correlation_Id", "GUID"),
-        )
-    # Save merged results
-    merged_results.to_csv(
-        f"{workload_dir}/{fbase}_torch_trace.csv",
-        index=False,
+    # If rocpd format, pairs are present in workload_dir, one pair per fbase
+    # If csv format, pairs are present in workload/{fbase}/ one pair per process
+    # Extracting the output_format used in profiling from the path of a marker file
+    if Path(workload_dir).resolve() == existing_csv_files[0][0].parent.resolve():
+        join_keys = ("Correlation_ID", "GUID")  # output_format "rocpd"
+    else:
+        join_keys = ("Correlation_ID",)  # output_format "csv"
+    consolidated_df = pd.concat(
+        [_merge_pair(f[0], f[1], join_keys) for f in existing_csv_files],
+        ignore_index=True,
     )
-    console_log("Created ", f"{workload_dir}/{fbase}_torch_trace.csv")
-
-
-@demarcate
-def consolidate_torch_trace_output(workload_dir: str) -> None:
-    # Consolidate torch operator trace CSV files from multiple processes
-    console_log("Consolidating torch operator trace output...")
-    # Find all torch trace CSV files in workload directory
-    torch_trace_files = glob.glob(f"{workload_dir}/*_torch_trace.csv")
-    if not torch_trace_files:
-        console_warning("No torch trace files found.")
-        return
-    # Read and concatenate all torch trace files
-    all_traces = []
     required_columns = [
         "Function",
         "Kernel_Name",
@@ -1361,41 +1615,19 @@ def consolidate_torch_trace_output(workload_dir: str) -> None:
         "Start_Timestamp_kernel",
         "End_Timestamp_kernel",
     ]
-    for trace_file in torch_trace_files:
-        try:
-            df = pd.read_csv(trace_file)
-        except pd.errors.ParserError as e:
-            console_warning(f"Parser error while reading {trace_file}: {e}")
-            continue
-        except OSError as e:
-            console_warning(f"I/O error while reading {trace_file}: {e}")
-            continue
-        except Exception as e:
-            # Unexpected error; log full details for debugging
-            console_warning(
-                f"Unexpected error while reading {trace_file}: {e}\n"
-                f"{traceback.format_exc()}"
-            )
-            continue
-
-        missing_columns = [col for col in required_columns if col not in df.columns]
-        if missing_columns:
-            console_warning(
-                f"Skipping {trace_file}: missing required columns {missing_columns}"
-            )
-            continue
-
-        all_traces.append(df[required_columns])
-    if not all_traces:
-        console_warning("No valid torch trace data to consolidate.")
+    missing_columns = [
+        col for col in required_columns if col not in consolidated_df.columns
+    ]
+    if missing_columns:
+        console_error(
+            f"Consolidated torch trace is missing required columns {missing_columns}"
+        )
         return
-
-    consolidated_df = pd.concat(all_traces, ignore_index=True)
+    consolidated_df = consolidated_df[required_columns]
     if consolidated_df.isnull().values.any():
         console_warning("Consolidated torch trace contains missing values")
         return
     consolidated_df = consolidated_df.sort_values(by=["Function", "Counter_Name"])
-
     split_columns = consolidated_df["Function"].str.split(":#", expand=True)
     consolidated_df["Operator_Name"] = (
         split_columns[0] if len(split_columns.columns) > 0 else None
@@ -1417,31 +1649,27 @@ def consolidate_torch_trace_output(workload_dir: str) -> None:
             "End_Timestamp_kernel",
         ]
     ]
-
     if consolidated_df.isnull().values.any():
         console_error(
             "Missing values in consolidated torch trace after splitting ",
             "the Function name.",
         )
         return
-
     grouped = consolidated_df.groupby("Operator_Name")
     for operator_name, group in grouped:
-        sanitized_operator_name = operator_name.replace("torch.", "").replace(".", "_")
+        # Extract the operator name from hierarchy
+        last_operator = operator_name.split("/")[-1]
+        sanitized_operator_name = last_operator.replace("torch.", "").replace(".", "_")
         # Ensure output directory exists
         Path(f"{workload_dir}/torch_trace").mkdir(parents=True, exist_ok=True)
         output_file = f"{workload_dir}/torch_trace/{sanitized_operator_name}.csv"
-        group.to_csv(output_file, index=False)
-        console_log(
-            f"Saved consolidated trace for {sanitized_operator_name} to {output_file}"
-        )
-
-    for trace_file in torch_trace_files:
-        try:
-            Path(trace_file).unlink()
-            console_debug(f"Removed temporary torch trace file: {trace_file}")
-        except OSError as e:
-            console_warning(f"Error removing temporary file {trace_file}: {e}")
+        # If the file already exists, append to it, else create new file.
+        if Path(output_file).is_file():
+            group.to_csv(output_file, mode="a", header=False, index=False)
+            console_log(f"Appended trace to existing file {output_file}")
+        else:
+            group.to_csv(output_file, index=False)
+            console_log(f"Saved consolidated trace to {output_file}")
 
 
 @demarcate
@@ -1466,29 +1694,6 @@ def process_kokkos_trace_output(workload_dir: str, fbase: str) -> None:
         shutil.copyfile(
             f"{workload_dir}/out/pmc_1/results_{fbase}_marker_api_trace.csv",
             f"{workload_dir}/{fbase}_marker_api_trace.csv",
-        )
-
-
-@demarcate
-def process_hip_trace_output(workload_dir: str, fbase: str) -> None:
-    # hip api trace csv files are generated for each process
-    hip_api_trace_csvs = glob.glob(f"{workload_dir}/out/pmc_1/*/*_hip_api_trace.csv")
-    existing_hip_files_csv = [f for f in hip_api_trace_csvs if Path(f).is_file()]
-
-    # concate and output hip api trace info
-    combined_results = pd.concat(
-        [pd.read_csv(f) for f in existing_hip_files_csv], ignore_index=True
-    )
-
-    combined_results.to_csv(
-        f"{workload_dir}/out/pmc_1/results_{fbase}_hip_api_trace.csv",
-        index=False,
-    )
-
-    if Path(f"{workload_dir}/out").exists():
-        shutil.copyfile(
-            f"{workload_dir}/out/pmc_1/results_{fbase}_hip_api_trace.csv",
-            f"{workload_dir}/{fbase}_hip_api_trace.csv",
         )
 
 
@@ -1655,14 +1860,18 @@ def impute_counters_iteration_multiplex(
         # Collect imputed groups as dataframes
         group_dfs = []
 
+        # Log imputation task summary before processing
+        console_debug(
+            f"Performing data imputation on {len(df)} dispatches "
+            f"across {unique_occurences.ngroups} unique kernel configurations"
+        )
+
         for _, group in unique_occurences:
             # Identify counter buckets
             counter_groups: set[frozenset[str]] = set()
             for _, row in group.iterrows():
                 # Set of counter column names with non empty values
-                cols_frozenset = frozenset(
-                    row[counter_columns][row[counter_columns].notna()].index
-                )
+                cols_frozenset = frozenset(row[counter_columns].dropna().index)
                 # If no counters found for this dispatch, continue
                 if not cols_frozenset:
                     continue
@@ -1678,49 +1887,20 @@ def impute_counters_iteration_multiplex(
 
             # Iterate over subgroups of dispatches containing
             # all counters and impute missing values
-            subgroup_size = len(counter_groups)
-            all_counters = {
-                counter for counter_group in counter_groups for counter in counter_group
-            }
-            # Collect imputed sub-groups as dataframes
-            subgroup_dfs = []
-            previous_fill_values = {}
-            for i in range(0, len(group), subgroup_size):
-                subgroup = group.iloc[i : i + subgroup_size]
-
-                # Build imputation mapping once for all counters in this subgroup
-                fill_values = {}
-                for counter in all_counters:
-                    valid_mask = subgroup[counter].notna()
-                    if valid_mask.any():
-                        # Get the first valid value for this counter
-                        fill_values[counter] = subgroup.loc[valid_mask, counter].iloc[0]
-
-                # Apply all fills at once using vectorized fillna
-                if fill_values:
-                    subgroup = subgroup.fillna(fill_values)
-
-                # If this is the last subgroup and it still has missing values,
-                # use previous subgroup's fill values
-                # NOTE: This wont work if the first subgroup is itself incomplete
-                is_last_subgroup = (i + subgroup_size) >= len(group)
-                # First any() returns bool pd.Series for every column,
-                # second any() returns single bool
-                if (
-                    is_last_subgroup
-                    and previous_fill_values
-                    and subgroup.isna().any().any()
-                ):
-                    # Use previous subgroup's fill values for remaining missing values
-                    subgroup = subgroup.fillna(previous_fill_values)
-
-                subgroup_dfs.append(subgroup)
-                previous_fill_values = fill_values
-
-            # Concatenate all subgroups for this group
-            if subgroup_dfs:
-                # Add the imputed group dataframe
-                group_dfs.append(pd.concat(subgroup_dfs, ignore_index=True))
+            # Create subgroup_id column for groupby: 0,0,0,...,1,1,1,...,2,2,2,...
+            # Use numpy for vectorized operation
+            group_copy = group.copy()
+            group_copy["__subgroup_id"] = np.arange(len(group_copy)) // len(
+                counter_groups
+            )
+            # groupby().bfill() automatically excludes the grouping column from result
+            group_copy[counter_columns] = (
+                group_copy[[*counter_columns, "__subgroup_id"]]
+                .groupby("__subgroup_id", group_keys=False)
+                .bfill()  # Propagate first valid value backward to start of subgroup
+                .ffill()  # Propagate forward to end of subgroup
+            )
+            group_dfs.append(group_copy)
 
         # Create a new dataframe by concatenating all groups
         result_dfs.append(
@@ -2062,3 +2242,10 @@ def replace_env(name: str) -> str:
     pattern = re.compile(r"%env{([^}]+)}%")
 
     return pattern.sub(env, name)
+
+
+def normalize_filter_to_str_list(value: Any) -> list[str]:  # noqa: ANN401
+    """Normalize a filter value (scalar or list) to a list of strings."""
+    if isinstance(value, (list, tuple)):
+        return [str(v) for v in value]
+    return [str(value)]

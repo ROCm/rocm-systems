@@ -22,8 +22,10 @@ THE SOFTWARE.
 #include <hip_test_kernels.hh>
 
 #pragma clang diagnostic ignored "-Wunused-parameter"
-#define SIZE (1024 * 1024)
-static size_t Nbytes = SIZE * sizeof(int);
+constexpr unsigned int SIZE = 1024 * 1024;
+constexpr size_t Nbytes = SIZE * sizeof(int);
+constexpr int ThreadsPerBlock = 256;
+constexpr int TotalBlocks = (SIZE % 256 == 0) ? (SIZE / 256) : ((SIZE / 256) + 1);
 
 __device__ int globalOut[SIZE];
 
@@ -82,7 +84,7 @@ static void CpuCallback(void* args) {
  *  - HIP_VERSION >= 5.6
  */
 
-TEST_CASE("Unit_hipStreamBeginCapture_with_hipGraphAddHostNode") {
+TEST_CASE(Unit_hipStreamBeginCapture_with_hipGraphAddHostNode) {
   hipGraph_t graph;
   hipGraphExec_t graphExec;
   hipGraphNode_t cpuGraphNode;
@@ -139,7 +141,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_with_hipGraphAddHostNode") {
  *  - HIP_VERSION >= 5.6
  */
 
-TEST_CASE("Unit_hipStreamEndCapture_later_and_add_a_node_inbetween") {
+TEST_CASE(Unit_hipStreamEndCapture_later_and_add_a_node_inbetween) {
   hipGraphExec_t graphExec;
   hipGraphNode_t memcpyD2H_C;
   hipStream_t stream;
@@ -150,7 +152,7 @@ TEST_CASE("Unit_hipStreamEndCapture_later_and_add_a_node_inbetween") {
   HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
   HIP_CHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyHostToDevice, stream));
   HIP_CHECK(hipMemcpyAsync(B_d, B_h, Nbytes, hipMemcpyHostToDevice, stream));
-  HipTest::vectorADD<int><<<1, 1, 0, stream>>>(A_d, B_d, C_d, SIZE);
+  HipTest::vectorADD<int><<<TotalBlocks, ThreadsPerBlock, 0, stream>>>(A_d, B_d, C_d, SIZE);
 
   hipStreamCaptureStatus captureStatus{hipStreamCaptureStatusNone};
   hipGraph_t capGraph{nullptr};
@@ -485,7 +487,7 @@ TEST_CASE("Unit_hipStreamEndCapture_later_and_add_a_node_inbetween") {
  *  - HIP_VERSION >= 5.6
  */
 
-TEST_CASE("Unit_hipStreamEndCapture_first_and_add_a_node_later") {
+TEST_CASE(Unit_hipStreamEndCapture_first_and_add_a_node_later) {
   hipGraph_t graph;
   hipGraphExec_t graphExec;
   hipGraphNode_t memcpyD2H_C;
@@ -497,7 +499,7 @@ TEST_CASE("Unit_hipStreamEndCapture_first_and_add_a_node_later") {
   HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
   HIP_CHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyHostToDevice, stream));
   HIP_CHECK(hipMemcpyAsync(B_d, B_h, Nbytes, hipMemcpyHostToDevice, stream));
-  HipTest::vectorSUB<int><<<1, 1, 0, stream>>>(A_d, B_d, C_d, SIZE);
+  HipTest::vectorSUB<int><<<TotalBlocks, ThreadsPerBlock, 0, stream>>>(A_d, B_d, C_d, SIZE);
   HIP_CHECK(hipStreamEndCapture(stream, &graph));
 
   size_t numN{};
@@ -783,7 +785,7 @@ TEST_CASE("Unit_hipStreamEndCapture_first_and_add_a_node_later") {
  *  - HIP_VERSION >= 5.6
  */
 
-TEST_CASE("Unit_hipStreamEndCapture_first_and_add_other_graph_node_later") {
+TEST_CASE(Unit_hipStreamEndCapture_first_and_add_other_graph_node_later) {
   hipGraph_t graph;
   hipGraphExec_t graphExec;
   hipGraphNode_t memcpyH2D_A, memcpyH2D_B, memcpyD2H_AC, memcpyH2D_C;
@@ -798,7 +800,7 @@ TEST_CASE("Unit_hipStreamEndCapture_first_and_add_other_graph_node_later") {
   HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
   HIP_CHECK(hipMemcpyAsync(A_d1, A_h1, Nbytes, hipMemcpyHostToDevice, stream));
   HIP_CHECK(hipMemcpyAsync(B_d1, B_h1, Nbytes, hipMemcpyHostToDevice, stream));
-  HipTest::vectorADD<int><<<1, 1, 0, stream>>>(A_d1, B_d1, C_d1, SIZE);
+  HipTest::vectorADD<int><<<TotalBlocks, ThreadsPerBlock, 0, stream>>>(A_d1, B_d1, C_d1, SIZE);
   HIP_CHECK(hipMemcpyAsync(C_h1, C_d1, Nbytes, hipMemcpyDeviceToHost, stream));
   HIP_CHECK(hipStreamEndCapture(stream, &graph));
 
@@ -851,7 +853,7 @@ TEST_CASE("Unit_hipStreamEndCapture_first_and_add_other_graph_node_later") {
  *  - HIP_VERSION >= 5.6
  */
 
-TEST_CASE("Unit_hipStreamEndCapture_later_and_addEmptyNode") {
+TEST_CASE(Unit_hipStreamEndCapture_later_and_addEmptyNode) {
   hipGraphExec_t graphExec;
   hipGraphNode_t memcpyD2H_C;
   hipStream_t stream;
@@ -862,7 +864,7 @@ TEST_CASE("Unit_hipStreamEndCapture_later_and_addEmptyNode") {
   HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
   HIP_CHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyHostToDevice, stream));
   HIP_CHECK(hipMemcpyAsync(B_d, B_h, Nbytes, hipMemcpyHostToDevice, stream));
-  HipTest::vectorSUB<int><<<1, 1, 0, stream>>>(A_d, B_d, C_d, SIZE);
+  HipTest::vectorSUB<int><<<TotalBlocks, ThreadsPerBlock, 0, stream>>>(A_d, B_d, C_d, SIZE);
 
   hipStreamCaptureStatus captureStatus{hipStreamCaptureStatusNone};
   hipGraph_t capGraph{nullptr};

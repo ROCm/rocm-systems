@@ -65,7 +65,7 @@ static __global__ void doubleKernel(int* arr, int size) {
 
 /* This test covers the negative scenarios of
    hipGraphInstantiateWithFlags API */
-TEST_CASE("Unit_hipGraphInstantiateWithFlags_Negative") {
+TEST_CASE(Unit_hipGraphInstantiateWithFlags_Negative) {
   SECTION("Passing nullptr pGraphExec") {
     hipGraph_t graph;
     HIP_CHECK(hipGraphCreate(&graph, 0));
@@ -207,12 +207,11 @@ void GraphInstantiateWithFlags_StreamCapture(bool deviceContextChg = false) {
   HIP_CHECK(hipMalloc(&C_d, Nbytes));
   REQUIRE(A_d != nullptr);
   REQUIRE(C_d != nullptr);
-  HIP_CHECK(hipGraphCreate(&graph, 0));
-
 
   HIP_CHECK(hipStreamCreate(&stream));
-  constexpr unsigned blocks = 512;
   constexpr unsigned threadsPerBlock = 256;
+  constexpr unsigned blocks =
+      (N % threadsPerBlock == 0) ? (N / threadsPerBlock) : ((N / threadsPerBlock) + 1);
 
   HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
   HIP_CHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyHostToDevice, stream));
@@ -260,7 +259,7 @@ This testcase verifies hipGraphInstantiateWithFlags API
 by creating dependency graph and instantiate, launching and verifying
 the result
 */
-TEST_CASE("Unit_hipGraphInstantiateWithFlags_DependencyGraph") {
+TEST_CASE(Unit_hipGraphInstantiateWithFlags_DependencyGraph) {
   GraphInstantiateWithFlags_DependencyGraph();
 }
 
@@ -269,8 +268,7 @@ This testcase verifies hipGraphInstantiateWithFlags API
 by creating dependency graph on GPU-0 and instantiate, launching and verifying
 the result on GPU-1
 */
-TEST_CASE("Unit_hipGraphInstantiateWithFlags_DependencyGraphDeviceCtxtChg",
-          "[multigpu]") {
+TEST_CASE(Unit_hipGraphInstantiateWithFlags_DependencyGraphDeviceCtxtChg) {
   int numDevices = 0;
   int canAccessPeer = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
@@ -291,7 +289,7 @@ This testcase verifies hipGraphInstantiateWithFlags API
 by creating capture graph and instantiate, launching and verifying
 the result
 */
-TEST_CASE("Unit_hipGraphInstantiateWithFlags_StreamCapture") {
+TEST_CASE(Unit_hipGraphInstantiateWithFlags_StreamCapture) {
   int numDevices = 0;
   int canAccessPeer = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
@@ -312,8 +310,7 @@ This testcase verifies hipGraphInstantiateWithFlags API
 by creating capture graph on GPU-0 and instantiate, launching and verifying
 the result on GPU-1
 */
-TEST_CASE("Unit_hipGraphInstantiateWithFlags_StreamCaptureDeviceContextChg",
-          "[multigpu]") {
+TEST_CASE(Unit_hipGraphInstantiateWithFlags_StreamCaptureDeviceContextChg) {
   int numDevices = 0;
   int canAccessPeer = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
@@ -338,7 +335,7 @@ Note - This test case is just to check if hipGraphInstantiateFlagAutoFreeOnLaunc
        is not resulting in compilation error or api failure. Real functional test
        will be added once the feature is fully implemented.
 */
-TEST_CASE("Unit_hipGraphInstantiateWithFlags_FlagAutoFreeOnLaunch_check") {
+TEST_CASE(Unit_hipGraphInstantiateWithFlags_FlagAutoFreeOnLaunch_check) {
   constexpr size_t size = 512 * 1024 * 1024;
   constexpr size_t Nbytes = size * sizeof(int);
 
@@ -394,10 +391,10 @@ TEST_CASE("Unit_hipGraphInstantiateWithFlags_FlagAutoFreeOnLaunch_check") {
   REQUIRE(bmem == amem);
   REQUIRE(bmemres == amemres);
 
-  HIP_CHECK(hipFree(A_d));  //  free allocMemory manually
   HIP_CHECK(hipGraphDestroy(graph));
   HIP_CHECK(hipGraphExecDestroy(graphExec));
   HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipFree(A_d));
 }
 
 /**
@@ -412,7 +409,7 @@ TEST_CASE("Unit_hipGraphInstantiateWithFlags_FlagAutoFreeOnLaunch_check") {
  * ------------------------
  * - unit/graph/hipGraphInstantiateWithFlags.cc
  */
-TEST_CASE("Unit_hipGraphInstantiateWithFlags_AutoFreeOnLaunchInLoop") {
+TEST_CASE(Unit_hipGraphInstantiateWithFlags_AutoFreeOnLaunchInLoop) {
   constexpr size_t NBytes = 1024 * 1024 * 1024;
 
   void* devMem = nullptr;
@@ -474,7 +471,7 @@ TEST_CASE("Unit_hipGraphInstantiateWithFlags_AutoFreeOnLaunchInLoop") {
  * ------------------------
  * - unit/graph/hipGraphInstantiateWithFlags.cc
  */
-TEST_CASE("Unit_hipGraphInstantiateWithFlags_AutoFreeOnLaunchFillKernel") {
+TEST_CASE(Unit_hipGraphInstantiateWithFlags_AutoFreeOnLaunchFillKernel) {
   int value = 100;
 
   int* hostMemDst = new int[SIZE];
@@ -567,7 +564,7 @@ TEST_CASE("Unit_hipGraphInstantiateWithFlags_AutoFreeOnLaunchFillKernel") {
  * ------------------------
  * - unit/graph/hipGraphInstantiateWithFlags.cc
  */
-TEST_CASE("Unit_hipGraphInstantiateWithFlags_AutoFreeOnLaunchDoubleKernel") {
+TEST_CASE(Unit_hipGraphInstantiateWithFlags_AutoFreeOnLaunchDoubleKernel) {
   int* hostMemSrc = new int[SIZE];
   REQUIRE(hostMemSrc != nullptr);
 
@@ -674,7 +671,7 @@ TEST_CASE("Unit_hipGraphInstantiateWithFlags_AutoFreeOnLaunchDoubleKernel") {
  * ------------------------
  * - unit/graph/hipGraphInstantiateWithFlags.cc
  */
-TEST_CASE("Unit_hipGraphInstantiateWithFlags_WithDefaultAndAutoFreeOnLaunch") {
+TEST_CASE(Unit_hipGraphInstantiateWithFlags_WithDefaultAndAutoFreeOnLaunch) {
   int* hostMem1 = new int[SIZE];
   REQUIRE(hostMem1 != nullptr);
   int* hostMem2 = new int[SIZE];

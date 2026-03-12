@@ -108,7 +108,7 @@ static void ResetGraphMemAttribute(unsigned deviceId = 0) {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipDeviceGetGraphMemAttribute_Positive_DoubleMemory") {
+TEST_CASE(Unit_hipDeviceGetGraphMemAttribute_Positive_DoubleMemory) {
   hipGraphExec_t graph_exec1, graph_exec2;
   int *dev_p1, *dev_p2;
 
@@ -154,7 +154,7 @@ TEST_CASE("Unit_hipDeviceGetGraphMemAttribute_Positive_DoubleMemory") {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipDeviceGetGraphMemAttribute_Negative_Parameters") {
+TEST_CASE(Unit_hipDeviceGetGraphMemAttribute_Negative_Parameters) {
   int device_id = 0;
   HIP_CHECK(hipSetDevice(device_id));
 
@@ -218,7 +218,7 @@ TEST_CASE("Unit_hipDeviceGetGraphMemAttribute_Negative_Parameters") {
  *  - HIP_VERSION >= 6.1
  */
 
-static void Unit_hipDeviceGetGraphMemAttribute_Functional(unsigned deviceId = 0) {
+static void hipDeviceGetGraphMemAttribute_Functional_Test(unsigned deviceId = 0) {
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
@@ -305,18 +305,17 @@ static void Unit_hipDeviceGetGraphMemAttribute_Functional(unsigned deviceId = 0)
   ResetGraphMemAttribute(deviceId);
 }
 
-TEST_CASE("Unit_hipDeviceGetGraphMemAttribute_Functional") {
-  Unit_hipDeviceGetGraphMemAttribute_Functional();
+TEST_CASE(Unit_hipDeviceGetGraphMemAttribute_Functional) {
+  hipDeviceGetGraphMemAttribute_Functional_Test();
 }
 
-TEST_CASE("Unit_hipDeviceGetGraphMemAttribute_Functional_Multi_Device",
-          "[multigpu]") {
+TEST_CASE(Unit_hipDeviceGetGraphMemAttribute_Functional_Multi_Device) {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
 
   if (numDevices > 0) {
     for (int i = 0; i < numDevices; ++i) {
-      Unit_hipDeviceGetGraphMemAttribute_Functional(i);
+      hipDeviceGetGraphMemAttribute_Functional_Test(i);
     }
   } else {
     HipTest::HIP_SKIP_TEST("Skipped test as there is no device to test.");
@@ -339,7 +338,7 @@ TEST_CASE("Unit_hipDeviceGetGraphMemAttribute_Functional_Multi_Device",
  *  - HIP_VERSION >= 6.1
  */
 
-TEST_CASE("Unit_hipDeviceGetGraphMemAttribute_Negative") {
+TEST_CASE(Unit_hipDeviceGetGraphMemAttribute_Negative) {
   size_t value = 0;
   hipError_t ret;
   SECTION("Pass device id as negative value") {
@@ -379,7 +378,7 @@ TEST_CASE("Unit_hipDeviceGetGraphMemAttribute_Negative") {
  *  - HIP_VERSION >= 6.1
  */
 
-TEST_CASE("Unit_hipDeviceSetGraphMemAttribute_Negative") {
+TEST_CASE(Unit_hipDeviceSetGraphMemAttribute_Negative) {
   size_t value = 0;
   hipError_t ret;
   SECTION("Pass device id as negative value") {

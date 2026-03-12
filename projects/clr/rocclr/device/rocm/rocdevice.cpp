@@ -136,7 +136,6 @@ Device::Device(hsa_agent_t bkendDevice)
       alloc_granularity_(0),
       xferQueue_(nullptr),
       freeMem_(0),
-      vgpusAccess_(true), /* Virtual GPU List Ops Lock */
       hsa_exclusive_gpu_access_(false),
       coopHostcallBuffer_(nullptr),
       numOfVgpus_(0),
@@ -682,7 +681,7 @@ bool Device::create() {
   }
 
   // Map Cache Lock
-  mapCacheOps_ = new amd::Monitor(true);
+  mapCacheOps_ = new std::recursive_mutex();
   if (nullptr == mapCacheOps_) {
     return false;
   }
@@ -701,7 +700,9 @@ bool Device::create() {
 
   if (AMD_LOG_LEVEL >= LOG_EXTRA_DEBUG) {
     uint8_t logMask[8] = {0};
-    hsa_flag_set64(logMask, HSA_AMD_LOG_FLAG_BLIT_KERNEL_PKTS);
+    hsa_flag_set64(logMask, HSA_AMD_LOG_FLAG_AQL);
+    hsa_flag_set64(logMask, HSA_AMD_LOG_FLAG_SDMA);
+    hsa_flag_set64(logMask, HSA_AMD_LOG_FLAG_INFO);
     Hsa::enable_logging(logMask, outFile);
   }
 
@@ -1662,8 +1663,9 @@ bool Device::populateOCLDeviceConstants() {
     LogWarning("HSA_AMD_AGENT_INFO_HAS_EXPERT_SCHED_MODE query failed.");
   }
 
-  ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Gfx Major/Minor/Stepping: %d/%d/%d", isa().versionMajor(),
-          isa().versionMinor(), isa().versionStepping());
+  ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Gfx Major/Minor/Stepping: %d/%d/%d, Device ID: 0x%x",
+          isa().versionMajor(), isa().versionMinor(), isa().versionStepping(), pciDeviceId_);
+  ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Using dev kernel arg wa = %d", settings().kernel_arg_impl_);
   ClPrint(amd::LOG_INFO, amd::LOG_INIT, "HMM support: %d, XNACK: %d, Direct host access: %d",
           info_.hmmSupported_, info_.hmmCpuMemoryAccessible_, info_.hmmDirectHostAccess_);
   ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Max SDMA Read Mask: 0x%x, Max SDMA Write Mask: 0x%x",
@@ -1683,6 +1685,11 @@ bool Device::populateOCLDeviceConstants() {
   }
   HIP_MEM_POOL_USE_VM &= info_.virtualMemoryManagement_;
 
+  // Check Support for Buffer sharing with dma_buf
+  std::ignore = Hsa::system_get_info(
+                    static_cast<hsa_system_info_t>(HSA_AMD_SYSTEM_INFO_DMABUF_SUPPORTED),
+                    &info_.dmabufSupported_);
+
   if (isa().versionMajor() < 8) {
     info_.sgprsPerSimd_ = 512;
   } else if (isa().versionMajor() < 10) {
@@ -1697,7 +1704,7 @@ bool Device::populateOCLDeviceConstants() {
 
 // ================================================================================================
 device::VirtualDevice* Device::createVirtualDevice(amd::CommandQueue* queue) {
-  amd::ScopedLock lock(vgpusAccess());
+  std::scoped_lock lock(vgpusAccess());
 
   bool profiling = (queue != nullptr) && queue->properties().test(CL_QUEUE_PROFILING_ENABLE);
   bool cooperative = false;
@@ -1821,7 +1828,7 @@ bool Device::unbindExternalDevice(uint flags, void* const gfxDevice[], void* gfx
 
 amd::Memory* Device::findMapTarget(size_t size) const {
   // Must be serialised for access
-  amd::ScopedLock lk(*mapCacheOps_);
+  std::scoped_lock lk(*mapCacheOps_);
 
   amd::Memory* map = nullptr;
   size_t minSize = 0;
@@ -1869,7 +1876,7 @@ amd::Memory* Device::findMapTarget(size_t size) const {
 
 bool Device::addMapTarget(amd::Memory* memory) const {
   // Must be serialised for access
-  amd::ScopedLock lk(*mapCacheOps_);
+  std::scoped_lock lk(*mapCacheOps_);
 
   // the svm memory shouldn't be cached
   if (!memory->canBeCached()) {
@@ -3244,6 +3251,7 @@ void* Device::getOrCreateHostcallBuffer(hsa_queue_t* queue, bool coop_queue,
   decltype(queuePool_)::value_type::iterator qIter;
   bool found = false;
 
+  amd::ScopedLock l(active_queue_access_);
   if (!coop_queue) {
     for (auto& it : cuMask.size() == 0 ? queuePool_ : queueWithCUMaskPool_) {
       qIter = it.find(queue);
@@ -3544,6 +3552,13 @@ void Device::ReleaseGlobalSignal(void* signal) const {
 }
 
 // ================================================================================================
+void Device::RetainGlobalSignal(void* signal) const {
+  if (signal != nullptr) {
+    reinterpret_cast<ProfilingSignal*>(signal)->retain();
+  }
+}
+
+// ================================================================================================
 bool Device::CreateUserEvent(amd::UserEvent* event) const {
   std::unique_ptr<ProfilingSignal> signal(new ProfilingSignal());
   if ((signal == nullptr) ||
@@ -3627,10 +3642,10 @@ void Device::HiddenHeapInit(const VirtualGPU& gpu) {
 // ================================================================================================
 uint32_t Device::SdmaEngineAllocator::AllocateEngine(VirtualGPU* vgpu, HwQueueEngine engine_type,
                                                       hsa_agent_t dstAgent, hsa_agent_t srcAgent) {
-  amd::ScopedLock lock(lock_);
+  std::scoped_lock lock(lock_);
 
   // Get valid engine mask based on operation type (read vs write)
-  uint32_t validEngineMask = (engine_type == HwQueueEngine::SdmaRead)
+  uint32_t validEngineMask = (engine_type == HwQueueEngine::SdmaD2H)
                               ? device_.maxSdmaReadMask_
                               : device_.maxSdmaWriteMask_;
 
@@ -3695,7 +3710,7 @@ uint32_t Device::SdmaEngineAllocator::AllocateEngine(VirtualGPU* vgpu, HwQueueEn
   uint32_t allocated_mask = 0;
 
   // For inter-GPU copies, strongly prefer the recommended engines
-  bool is_inter_gpu = (engine_type == HwQueueEngine::SdmaInter);
+  bool is_inter_gpu = (engine_type == HwQueueEngine::SdmaP2P);
 
   if (is_inter_gpu && (preferredMask != 0)) {
     // Inter-GPU: prioritize preferredMask, even if engines are already allocated
@@ -3753,7 +3768,7 @@ uint32_t Device::SdmaEngineAllocator::AllocateEngine(VirtualGPU* vgpu, HwQueueEn
 
 // ================================================================================================
 void Device::SdmaEngineAllocator::ReleaseEngine(VirtualGPU* vgpu) {
-  amd::ScopedLock lock(lock_);
+  std::scoped_lock lock(lock_);
 
   auto it = vgpu_to_engine_.find(vgpu);
   if (it != vgpu_to_engine_.end()) {
@@ -3766,14 +3781,14 @@ void Device::SdmaEngineAllocator::ReleaseEngine(VirtualGPU* vgpu) {
 
 // ================================================================================================
 void Device::AddKernel(Kernel& gpuKernel) const {
-  amd::ScopedLock lock(vgpusAccess());
+  std::scoped_lock lock(vgpusAccess());
   kernel_map_.insert({gpuKernel.KernelCodeHandle(), gpuKernel});
 }
 
 // ================================================================================================
 void Device::RemoveKernel(Kernel& gpuKernel) const {
   if (gpuKernel.KernelCodeHandle() != 0) {
-    amd::ScopedLock lock(vgpusAccess());
+    std::scoped_lock lock(vgpusAccess());
     auto it = kernel_map_.find(gpuKernel.KernelCodeHandle());
     if (it != kernel_map_.end()) {
       // Remove the old mapping

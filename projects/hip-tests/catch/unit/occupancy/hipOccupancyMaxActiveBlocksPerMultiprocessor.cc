@@ -26,6 +26,7 @@ Unit_hipOccupancyMaxActiveBlocksPerMultiprocessor_Negative_Parameters - Test uns
 of hipOccupancyMaxActiveBlocksPerMultiprocessor api when parameters are invalid
 */
 #include "occupancy_common.hh"
+#include <limits>
 
 static __global__ void f1(float* a) { *a = 1.0; }
 
@@ -50,6 +51,12 @@ TEST_CASE("Unit_hipOccupancyMaxActiveBlocksPerMultiprocessor_Negative_Parameters
   SECTION("Kernel function is NULL") {
     HIP_CHECK_ERROR(hipOccupancyMaxActiveBlocksPerMultiprocessor(&numBlocks, NULL, blockSize, 0),
                     hipErrorInvalidDeviceFunction);
+  }
+
+  SECTION("Block size is 0 and dynSharedMemPerBlk is max") {
+    const hipError_t ret = hipOccupancyMaxActiveBlocksPerMultiprocessor(
+        &numBlocks, f1, 0, std::numeric_limits<std::size_t>::max());
+    REQUIRE(ret != hipSuccess);
   }
 }
 

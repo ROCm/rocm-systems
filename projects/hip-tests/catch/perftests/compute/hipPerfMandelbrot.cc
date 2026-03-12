@@ -369,6 +369,7 @@ void hipPerfMandelBrot::open(int deviceId) {
   HIP_CHECK(hipGetDeviceCount(&nGpu));
   if (nGpu < 1) {
     HipTest::HIP_SKIP_TEST("Skipping because devices < 1");
+    return;
   }
   HIP_CHECK(hipSetDevice(deviceId));
   hipDeviceProp_t props;
@@ -598,7 +599,7 @@ void hipPerfMandelBrot::checkData(uint* ptr) {
  *  - HIP_VERSION >= 5.6
  */
 
-TEST_CASE("Perf_hipPerfMandelbrot") {
+TEST_CASE(Perf_hipPerfMandelbrot) {
   hipPerfMandelBrot mandelbrotCompute;
   int deviceId = 0;
   mandelbrotCompute.open(deviceId);

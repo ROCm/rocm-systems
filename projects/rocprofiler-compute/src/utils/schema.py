@@ -68,6 +68,7 @@ class Workload:
     roofline_metrics: dict[int, dict[str, Any]] = field(default_factory=dict)
     path: str = field(default_factory=str)
     filter_top_n: str = field(default_factory=str)
+    torch_operators: dict[str, pd.DataFrame] = field(default_factory=dict)
 
 
 # Metrics will be calculated ONLY when the header(key) is in below list

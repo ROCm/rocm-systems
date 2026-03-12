@@ -101,15 +101,13 @@ DeviceVar::~DeviceVar() {
 }
 
 // Device Functions
-DeviceFunc::DeviceFunc(std::string name, hipModule_t hmod)
-    : dflock_("function lock"), name_(name), kernel_(nullptr) {
+DeviceFunc::DeviceFunc(std::string name, hipModule_t hmod) : name_(name), kernel_(nullptr) {
   amd::Program* program = as_amd(reinterpret_cast<cl_program>(hmod));
 
   const amd::Symbol* symbol = program->findSymbol(name.c_str());
   guarantee(symbol != nullptr, "Cannot find Symbol with name: %s", name.c_str());
 
   kernel_ = new amd::Kernel(*program, *symbol, name);
-  guarantee(kernel_ != nullptr, "Cannot Create kernel with name: %s", name.c_str());
 }
 
 DeviceFunc::~DeviceFunc() {
@@ -154,7 +152,7 @@ hipError_t Function::getStatFunc(hipFunction_t* hfunc, int deviceId) {
     *hfunc = dFunc_[deviceId]->asHipFunction();
     return hipSuccess;
   }
-  amd::ScopedLock lock((*modules_)->FatBinaryLock());
+  std::scoped_lock lock((*modules_)->FatBinaryLock());
   // Check for the compiled kernel again, to make sure only one thread does compilation
   if (dFunc_[deviceId] != nullptr) {
     *hfunc = dFunc_[deviceId]->asHipFunction();

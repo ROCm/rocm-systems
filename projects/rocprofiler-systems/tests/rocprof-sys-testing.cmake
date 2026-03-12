@@ -13,6 +13,13 @@ set(ROCPROFSYS_ABORT_FAIL_REGEX
     FORCE
 )
 
+# Detect Docker/container at configure time (for tests that should be disabled in CI containers)
+include(DetectDocker)
+rocprofiler_systems_detect_docker(ROCPROFSYS_INSIDE_DOCKER)
+if(ROCPROFSYS_INSIDE_DOCKER)
+    rocprofiler_systems_message(STATUS "Configure is running inside a Docker/container; some tests may be disabled")
+endif()
+
 if(EXISTS /etc/os-release AND NOT IS_DIRECTORY /etc/os-release)
     file(READ /etc/os-release _OS_RELEASE_RAW)
 
@@ -292,7 +299,7 @@ endif()
 # -------------------------------------------------------------------------------------- #
 
 set(_VALID_GPU OFF)
-if(ROCPROFSYS_USE_ROCM AND (NOT DEFINED ROCPROFSYS_CI_GPU OR ROCPROFSYS_CI_GPU))
+if(NOT DEFINED ROCPROFSYS_CI_GPU OR ROCPROFSYS_CI_GPU)
     set(_VALID_GPU ON)
     find_program(
         ROCPROFSYS_AMD_SMI_EXE
@@ -541,21 +548,8 @@ function(ROCPROFILER_SYSTEMS_ADD_TEST)
 
     if(TEST_GPU)
         list(APPEND TEST_LABELS "gpu")
-
-        if(NOT "ROCPROFSYS_USE_ROCM=OFF" IN_LIST TEST_ENVIRONMENT)
-            list(APPEND TEST_LABELS "rocm")
-        endif()
-
-        if(NOT "ROCPROFSYS_USE_ROCM=OFF" IN_LIST TEST_ENVIRONMENT)
-            list(APPEND TEST_LABELS "amd-smi")
-        endif()
-    endif()
-
-    if(
-        "ROCPROFSYS_USE_ROCM=ON" IN_LIST TEST_ENVIRONMENT
-        AND NOT "rocm" IN_LIST TEST_ENVIRONMENT
-    )
         list(APPEND TEST_LABELS "rocm")
+        list(APPEND TEST_LABELS "amd-smi")
     endif()
 
     if(

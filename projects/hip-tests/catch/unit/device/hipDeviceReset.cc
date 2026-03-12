@@ -46,7 +46,7 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipDeviceReset_Positive_Basic") {
+TEST_CASE(Unit_hipDeviceReset_Positive_Basic) {
   const auto device = GENERATE(range(0, HipTest::getDeviceCount()));
   HIP_CHECK(hipSetDevice(device));
 
@@ -77,7 +77,10 @@ TEST_CASE("Unit_hipDeviceReset_Positive_Basic") {
   CHECK(hipGetDeviceFlags(&flags_after) == hipSuccess);
   CHECK(flags_after == flags_before);
 
+  // This will faill in ASAN due to how we handle free
+#if !defined(ENABLE_ADDRESS_SANITIZER)
   CHECK(hipFree(ptr) == hipErrorInvalidValue);
+#endif
 
   if (cache_config_ret == hipSuccess) {
     hipFuncCache_t cache_config;
@@ -105,7 +108,7 @@ TEST_CASE("Unit_hipDeviceReset_Positive_Basic") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipDeviceReset_Positive_Threaded") {
+TEST_CASE(Unit_hipDeviceReset_Positive_Threaded) {
   HIP_CHECK(hipSetDevice(0));
   INFO("Current device is: " << 0);
   HIP_CHECK(hipDeviceReset());
@@ -139,7 +142,9 @@ TEST_CASE("Unit_hipDeviceReset_Positive_Threaded") {
   CHECK(hipGetDeviceFlags(&flags_after) == hipSuccess);
   CHECK(flags_after == flags_before);
 
+#if !defined(ENABLE_ADDRESS_SANITIZER)
   CHECK(hipFree(ptr) == hipErrorInvalidValue);
+#endif
 
   if (cache_config_ret == hipSuccess) {
     hipFuncCache_t cache_config;
