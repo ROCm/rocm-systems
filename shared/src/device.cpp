@@ -83,6 +83,10 @@ ErrorCode Device::QueryFwInfo(FwInfo *info) const {
   return device_ctx_->QueryFwInfo(info);
 }
 
+ErrorCode Device::QueryClockInfo(uint32_t clk_type, ClockInfo *info) const {
+  return device_ctx_->QueryClockInfo(clk_type, info);
+}
+
 ErrorCode Device::Escape(void *pData, size_t dataSize, bool hardwareAccess) const {
   return device_ctx_->Escape(pData, dataSize, hardwareAccess);
 }

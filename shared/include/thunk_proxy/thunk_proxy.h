@@ -230,6 +230,9 @@ public:
   // Query firmware versions from KMD adapter info.
   ErrorCode QueryFwInfo(wsl::thunk::FwInfo *info) const;
 
+  // Query clock frequency via KMD PMLog escape.
+  ErrorCode QueryClockInfo(uint32_t clk_type, wsl::thunk::ClockInfo *info) const;
+
   // Send a driver-escape packet on behalf of this GPU slot.
   ErrorCode Escape(void *pData, size_t dataSize, bool hardwareAccess = false) const;
 

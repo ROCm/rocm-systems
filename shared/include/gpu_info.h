@@ -67,6 +67,15 @@ struct GpuActivity {
   uint32_t mm_activity;   // Multimedia engine utilization in %
 };
 
+// Clock frequency readings from KMD PMLog escape.
+struct ClockInfo {
+  uint32_t clk;            // current clock in MHz
+  uint32_t min_clk;        // minimum clock in MHz
+  uint32_t max_clk;        // maximum clock in MHz
+  uint8_t  clk_locked;     // clock locked flag
+  uint8_t  clk_deep_sleep; // deep-sleep capable flag
+};
+
 // VBIOS version and identification information from KMD CWDDE escape.
 struct VBiosInfo {
   char name[256];          // product name from VBIOS ROM image
