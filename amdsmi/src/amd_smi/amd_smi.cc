@@ -359,7 +359,7 @@ amdsmi_shut_down() {
     if (init_ref_count > 0) {
         return AMDSMI_STATUS_SUCCESS;
     }
-    Platform::instance().TearDownDevices();
+    Platform::instance().Destroy();
     dxcore::DxcoreLoader::Instance().Shutdown();
     return AMDSMI_STATUS_SUCCESS;
 }

@@ -240,6 +240,12 @@ inline ErrorCode CreateDevice(const LdaChain &, CreateDeviceArgs *args) {
   return TranslateNtStatus(DXCORE_CALL(D3DKMTCreateDevice(args)));
 }
 
+inline ErrorCode DestroyDevice(const LdaChain &chain) {
+  D3DKMT_DESTROYDEVICE args{};
+  args.hDevice = chain.DeviceHandle();
+  return TranslateNtStatus(DXCORE_CALL(D3DKMTDestroyDevice(&args)));
+}
+
 inline ErrorCode Escape(const LdaChain &chain, EscapeArgs *args) {
   args->hAdapter = chain.AdapterHandle();
   args->hDevice  = chain.DeviceHandle();

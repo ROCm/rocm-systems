@@ -56,6 +56,8 @@ class Platform {
 public:
   static Platform& instance();
   ErrorCode Init();
+  void Destroy();
+
   void TearDownDevices();
   ErrorCode ReEnumerateDevices();
   ErrorCode EnumerateDevices(std::vector<Device *> &devices);

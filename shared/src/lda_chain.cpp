@@ -64,7 +64,12 @@ LdaChain::LdaChain(Platform *platform,
   std::fill(std::begin(chained_devices_), std::end(chained_devices_), nullptr);
 }
 
-LdaChain::~LdaChain() = default;
+LdaChain::~LdaChain() {
+  d3dthunk::DestroyDevice(*this);
+  platform_    = nullptr;
+  adapter_handle_ = 0;
+  device_handle_  = 0;
+}
 
 ErrorCode LdaChain::QueryLinkedGpusInChain(vector<Device *> &devices,
                                             bool disableGpuTimeout) {

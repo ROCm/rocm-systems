@@ -62,6 +62,15 @@ ErrorCode Platform::Init() {
   return ReEnumerateDevices();
 }
 
+void Platform::Destroy() {
+  TearDownDevices();
+
+  for (auto i = 0u; i < lda_chain_count_; i++)
+    delete lda_chain_list_[i];
+
+  lda_chain_count_ = 0;
+}
+
 void Platform::TearDownDevices() {
   for (auto dev : devices_)
     delete dev;
