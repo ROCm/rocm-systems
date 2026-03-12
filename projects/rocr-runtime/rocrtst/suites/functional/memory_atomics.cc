@@ -489,19 +489,15 @@ void MemoryAtomic::MemoryAtomicTest(hsa_agent_t cpuAgent,
   }
 
   if (refSysdata) {
-    err = hsa_amd_memory_pool_free(refSysdata);
+    err = hsa_memory_free(refSysdata);
     ASSERT_EQ(err, HSA_STATUS_SUCCESS);
   }
   if (oldrefdata) {
-    err = hsa_amd_memory_pool_free(oldrefdata);
+    err = hsa_memory_free(oldrefdata);
     ASSERT_EQ(err, HSA_STATUS_SUCCESS);
   }
   if (oldValues) {
-    err = hsa_amd_memory_pool_free(oldValues);
-    ASSERT_EQ(err, HSA_STATUS_SUCCESS);
-  }
-  if (expecteddata) {
-    err = hsa_amd_memory_pool_free(expecteddata);
+    err = hsa_memory_free(oldValues);
     ASSERT_EQ(err, HSA_STATUS_SUCCESS);
   }
   if (access == HSA_AMD_MEMORY_POOL_ACCESS_NEVER_ALLOWED) {
@@ -511,16 +507,16 @@ void MemoryAtomic::MemoryAtomicTest(hsa_agent_t cpuAgent,
     err = hsa_signal_destroy(copy_signal);
     ASSERT_EQ(err, HSA_STATUS_SUCCESS);
     if (g_gpuRefData) {
-      err = hsa_amd_memory_pool_free(g_gpuRefData);
+      err = hsa_memory_free(g_gpuRefData);
       ASSERT_EQ(err, HSA_STATUS_SUCCESS);
     }
   }
   if (gpuRefData) {
-    err = hsa_amd_memory_pool_free(gpuRefData);
+    err = hsa_memory_free(gpuRefData);
     ASSERT_EQ(err, HSA_STATUS_SUCCESS);
   }
   if (kernArguments) {
-    err = hsa_amd_memory_pool_free(kernArguments);
+    err = hsa_memory_free(kernArguments);
     ASSERT_EQ(err, HSA_STATUS_SUCCESS);
   }
   if (queue) {
