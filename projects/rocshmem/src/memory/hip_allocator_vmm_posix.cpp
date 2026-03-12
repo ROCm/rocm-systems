@@ -109,6 +109,7 @@ hipError_t HIPAllocatorVMMPosixFd::VMMAlloc(void** ptr, size_t size)
   VMMAllocationInfo info;
   info.handle = handle;
   info.size = alloc_size;
+  info.exported_fd = -1;  // Not yet exported
   allocations_[dev_ptr] = info;
 
   *ptr = dev_ptr;
@@ -129,6 +130,11 @@ hipError_t HIPAllocatorVMMPosixFd::VMMFree(void* ptr)
 
   VMMAllocationInfo& info = it->second;
   hipError_t err;
+
+  // Close exported fd if it was exported for IPC
+  if (info.exported_fd != -1) {
+    close(info.exported_fd);
+  }
 
   // Unmap memory
   err = hipMemUnmap(ptr, info.size);
@@ -221,12 +227,20 @@ hipError_t HIPAllocatorVMMPosixFd::GetIpcHandle(void *dev_ptr, void *handle)
   hipIpcMemHandlePosix_t* posix_handle = reinterpret_cast<hipIpcMemHandlePosix_t*>(handle);
   hipError_t err;
 
-  // Export the VMM handle to a shareable file descriptor
+  // Check if we already exported this allocation
   int fd;
-  err = hipMemExportToShareableHandle(&fd, it->second.handle,
-                                      hipMemHandleTypePosixFileDescriptor, 0);
-  if (err != hipSuccess) {
-    return err;
+  if (it->second.exported_fd != -1) {
+    // Reuse existing fd
+    fd = it->second.exported_fd;
+  } else {
+    // Export the VMM handle to a shareable file descriptor
+    err = hipMemExportToShareableHandle(&fd, it->second.handle,
+                                        hipMemHandleTypePosixFileDescriptor, 0);
+    if (err != hipSuccess) {
+      return err;
+    }
+    // Store the fd so we can close it later
+    it->second.exported_fd = fd;
   }
 
   // Get current process ID and fill handle

@@ -208,6 +208,7 @@ class HIPAllocatorVMMPosixFd : public HIPAllocator {
   struct VMMAllocationInfo {
     hipMemGenericAllocationHandle_t handle;
     size_t size;
+    int exported_fd;  // File descriptor exported for IPC, -1 if not exported
   };
   static std::map<void*, VMMAllocationInfo> allocations_;
   static std::map<void*, VMMAllocationInfo> imported_allocations_;
