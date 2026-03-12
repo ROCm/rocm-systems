@@ -671,7 +671,7 @@ bool MigrateMemObjectsCommand::validateMemory() {
 }
 
 // =================================================================================================
-int32_t NDRangeKernelCommand::AllocCaptureSetValidate(void** kernelParams, address kernArgs,
+int32_t NDRangeKernelCommand::captureHIPArgsAndValidate(void** kernelParams, address kernArgs,
                                                       size_t kernArgsSize) {
   const amd::Device& device = queue()->device();
   // Validate the kernel before submission
@@ -685,14 +685,14 @@ int32_t NDRangeKernelCommand::AllocCaptureSetValidate(void** kernelParams, addre
     return CL_OUT_OF_RESOURCES;
   }
 
-  if (!kernel().parameters().captureAndSet(kernelParams, kernArgs, kernArgsSize, parameters_)) {
+  if (!kernel().parameters().captureHIPArgs(kernelParams, kernArgs, kernArgsSize, parameters_)) {
     LogError("Cannot capture and set the kernel parameters");
     return CL_OUT_OF_RESOURCES;
   }
   return CL_SUCCESS;
 }
 
-int32_t NDRangeKernelCommand::captureAndValidate() {
+int32_t NDRangeKernelCommand::captureOpenCLArgsAndValidate() {
   const amd::Device& device = queue()->device();
   // Validate the kernel before submission
   if (!queue()->device().validateKernel(kernel(), queue()->vdev(), cooperativeGroups())) {
@@ -701,8 +701,8 @@ int32_t NDRangeKernelCommand::captureAndValidate() {
 
   int32_t error;
   uint64_t lclMemSize = kernel().getDeviceKernel(device)->workGroupInfo()->localMemSize_;
-  parameters_ =
-      kernel().parameters().capture(*queue()->vdev(), sharedMemBytes_ + lclMemSize, &error);
+  parameters_ = kernel().parameters().captureOpenCLArgs(*queue()->vdev(),
+                                                        sharedMemBytes_ + lclMemSize, &error);
   return error;
 }
 
