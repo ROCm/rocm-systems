@@ -843,6 +843,7 @@ int RocVideoESParser::EbspToRbsp(uint8_t *streamBuffer, int begin_bytepos, int e
     FunctionEntryLog(logger_);
     int count = 0;
     if (end_bytepos < begin_bytepos) {
+        FunctionExitLog(logger_);
         return end_bytepos;
     }
     uint8_t *streamBuffer_i = streamBuffer + begin_bytepos;
@@ -856,6 +857,7 @@ int RocVideoESParser::EbspToRbsp(uint8_t *streamBuffer, int begin_bytepos, int e
             if (tmp == 0x03) {
                 //check the 4th uint8_t after 0x000003, except when cabac_zero_word is used, in which case the last three bytes of this NAL unit must be 0x000003
                 if ((streamBuffer_i + 1 != streamBuffer_end) && (streamBuffer_i[1] > 0x03)) {
+                    FunctionExitLog(logger_);
                     return -1;
                 }
                 //if cabac_zero_word is used, the final uint8_t of this NAL unit(0x03) is discarded, and the last two bytes of RBSP must be 0x0000

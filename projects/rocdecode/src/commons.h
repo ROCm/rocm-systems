@@ -107,11 +107,12 @@ public:
         }
     };
 
-    #define FunctionEntryLog(logger) if (logger.log_level_ >= kRocDecLogInfo) { OutputMsg("[" + TOSTR(kRocDecLogInfo) + ", Info] " + MakeMsg("") + " entry ..."); }
-    #define FunctionExitLog(logger) if (logger.log_level_ >= kRocDecLogInfo) { OutputMsg("[" + TOSTR(kRocDecLogInfo) + ", Info] " + MakeMsg("") + " exit ..."); }
     
     int log_level_ = kRocDecLogCritical;
 };
+
+#define FunctionEntryLog(logger) if (logger.log_level_ >= kRocDecLogInfo) { OutputMsg("[" + TOSTR(kRocDecLogInfo) + ", Info] " + MakeMsg("") + " entry ..."); }
+#define FunctionExitLog(logger) if (logger.log_level_ >= kRocDecLogInfo) { OutputMsg("[" + TOSTR(kRocDecLogInfo) + ", Info] " + MakeMsg("") + " exit ..."); }
 
 class rocDecodeException : public std::exception {
 public:

@@ -94,6 +94,7 @@ rocDecStatus ROCDECAPI rocDecGetBitstreamBitDepth(RocdecBitstreamReader bs_reade
 rocDecStatus ROCDECAPI rocDecGetBitstreamPicData(RocdecBitstreamReader bs_reader_handle, uint8_t **pic_data, int *pic_size, int64_t *pts) {
     FunctionEntryLog(logger);
     if (bs_reader_handle == nullptr || pic_data == nullptr || pic_size == nullptr || pts == nullptr) {
+        logger.CriticalLog(MakeMsg("Null pointer"));
         FunctionExitLog(logger);
         return ROCDEC_INVALID_PARAMETER;
     }
