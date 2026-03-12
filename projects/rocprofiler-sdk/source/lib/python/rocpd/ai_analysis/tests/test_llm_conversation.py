@@ -394,5 +394,193 @@ class TestPersistence(unittest.TestCase):
         self.assertNotIn("sk-secret", str(d))
 
 
+# ── TestInteractiveIntegration ────────────────────────────────────────────────
+
+class TestInteractiveIntegration(unittest.TestCase):
+    """Integration tests: LLMConversation wired into InteractiveSession."""
+
+    def _make_session(self, mock_conv=None):
+        """Build an InteractiveSession with a mocked _conv and a temp session store."""
+        from rocpd.ai_analysis.interactive import InteractiveSession, SessionStore
+        import tempfile, os
+        store_dir = tempfile.mkdtemp()
+        session = InteractiveSession(
+            source_dir="/tmp/fake_src",
+            tier0_result=None,
+            recommendations=[],
+            database_path="",
+            llm_provider=None,   # no real LLM; we inject mock directly
+            llm_api_key=None,
+            llm_model=None,
+            session_store=SessionStore(store_dir),
+        )
+        if mock_conv is not None:
+            session._conv = mock_conv
+        return session
+
+    def test_conv_send_called_for_annotate_profiling_plan(self):
+        mock_conv = MagicMock()
+        mock_conv.send.return_value = "some annotation"
+        session = self._make_session(mock_conv)
+
+        # Provide minimal tier0 result
+        import types
+        plan = types.SimpleNamespace(
+            programming_model="HIP",
+            kernel_count=2,
+            suggested_counters=[],
+            risk_areas=[],
+            detected_patterns=[],
+        )
+        session._tier0 = plan
+
+        session._llm_annotate_profiling_plan([("counter", "rocprofv3 --pmc A -- ./app")])
+        mock_conv.send.assert_called_once()
+        call_msg = mock_conv.send.call_args[0][0]
+        self.assertIn("Annotate this profiling plan", call_msg)
+
+    def test_conv_send_called_for_optimize_via_tier0(self):
+        mock_conv = MagicMock()
+        mock_conv.send.return_value = "use MFMA"
+        session = self._make_session(mock_conv)
+
+        # _optimize_via_tier0 reads self._recs; give it empty list
+        session._recs = []
+        # patch _offer_apply_suggestions and _offer_run_ai_commands to be no-ops
+        session._offer_apply_suggestions = MagicMock()
+        session._offer_run_ai_commands = MagicMock()
+        session._extract_ai_commands = MagicMock(return_value=[])
+
+        import types
+        plan = types.SimpleNamespace(
+            source_files=[],
+            detected_patterns=[],
+            suggested_counters=[],
+        )
+        session._tier0 = plan
+        session._optimize_via_tier0(llm_provider="anthropic")
+        mock_conv.send.assert_called_once()
+        call_msg = mock_conv.send.call_args[0][0]
+        self.assertIn("optimization recommendations", call_msg)
+
+    def test_conv_send_called_for_request_optimization_suggestions(self):
+        mock_conv = MagicMock()
+        mock_conv.send.return_value = "FILE: foo.cpp\nuse LDS"
+        session = self._make_session(mock_conv)
+
+        result = session._request_optimization_suggestions(
+            [("foo.cpp", "// kernel code")]
+        )
+        mock_conv.send.assert_called_once()
+        # First call sends full source content
+        call_msg = mock_conv.send.call_args[0][0]
+        self.assertIn("foo.cpp", call_msg)
+        self.assertIn("kernel code", call_msg)
+
+    def test_repeated_call_does_not_resend_source_content(self):
+        """Second call for the same files sends a short follow-up, not the full source."""
+        mock_conv = MagicMock()
+        mock_conv.send.return_value = "FILE: foo.cpp\nuse LDS"
+        session = self._make_session(mock_conv)
+
+        summaries = [("foo.cpp", "// kernel code")]
+        session._request_optimization_suggestions(summaries)
+        session._request_optimization_suggestions(summaries)
+
+        self.assertEqual(mock_conv.send.call_count, 2)
+        first_msg = mock_conv.send.call_args_list[0][0][0]
+        second_msg = mock_conv.send.call_args_list[1][0][0]
+        # First call contains source content, second does not
+        self.assertIn("kernel code", first_msg)
+        self.assertNotIn("kernel code", second_msg)
+        self.assertIn("already shared", second_msg)
+
+    def test_new_file_sends_only_new_content(self):
+        """Adding a new file on second call sends only the new file's content."""
+        mock_conv = MagicMock()
+        mock_conv.send.return_value = "FILE: bar.cpp\nuse streams"
+        session = self._make_session(mock_conv)
+
+        session._request_optimization_suggestions([("foo.cpp", "// foo")])
+        mock_conv.reset_mock()
+        mock_conv.send.return_value = "FILE: bar.cpp\nuse streams"
+
+        session._request_optimization_suggestions(
+            [("foo.cpp", "// foo"), ("bar.cpp", "// bar")]
+        )
+        mock_conv.send.assert_called_once()
+        msg = mock_conv.send.call_args[0][0]
+        self.assertNotIn("// foo", msg)   # already in conversation
+        self.assertIn("// bar", msg)      # new file — must be sent
+
+    def test_post_rewrite_summary_appended_to_conv(self):
+        """_apply_suggestions_via_llm notifies _conv after writing a file."""
+        from rocpd.ai_analysis.interactive import InteractiveSession, SessionStore
+        import tempfile, pathlib
+
+        store_dir = tempfile.mkdtemp()
+        src_dir = tempfile.mkdtemp()
+        src_file = pathlib.Path(src_dir) / "kernel.cpp"
+        src_file.write_text("// original")
+
+        mock_conv = MagicMock()
+        mock_conv.send.return_value = "summary sent"
+
+        session = InteractiveSession(
+            source_dir=src_dir,
+            tier0_result=None,
+            recommendations=[],
+            database_path="",
+            llm_provider=None,
+            llm_api_key=None,
+            llm_model=None,
+            session_store=SessionStore(store_dir),
+        )
+        session._conv = mock_conv
+        session._llm_provider = "anthropic"
+
+        # _pick_source_file prompts interactively — return the file directly
+        session._pick_source_file = MagicMock(return_value=src_file)
+
+        # _apply_suggestions_via_llm instantiates LLMAnalyzer inline and calls
+        # _call_anthropic — patch it at the source so no real API call is made
+        mock_analyzer = MagicMock()
+        mock_analyzer._call_anthropic.return_value = "// rewritten by LLM"
+
+        import rocpd.ai_analysis.interactive as imod
+        with patch("rocpd.ai_analysis.llm_analyzer.LLMAnalyzer", return_value=mock_analyzer):
+            with patch.object(imod, "_input", return_value="y"):
+                session._apply_suggestions_via_llm(
+                    "use LDS tiling for better cache reuse", "anthropic"
+                )
+
+        # _conv.send must have been called with the post-rewrite notification
+        rewrite_calls = [
+            call for call in mock_conv.send.call_args_list
+            if "rewritten" in str(call)
+        ]
+        self.assertTrue(
+            len(rewrite_calls) >= 1,
+            "Expected _conv.send() to be called with post-rewrite summary",
+        )
+
+    def test_session_context_not_referenced(self):
+        """SessionContext must not exist in the interactive module."""
+        import rocpd.ai_analysis.interactive as imod
+        self.assertFalse(
+            hasattr(imod, "SessionContext"),
+            "SessionContext should have been removed from interactive.py",
+        )
+
+    def test_workflow_session_has_no_conv(self):
+        """WorkflowSession must not own a _conv attribute."""
+        from rocpd.ai_analysis.interactive import WorkflowSession
+        ws = WorkflowSession(app_command="./app")
+        self.assertFalse(
+            hasattr(ws, "_conv"),
+            "WorkflowSession must not own _conv",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
