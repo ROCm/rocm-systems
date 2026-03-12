@@ -1859,6 +1859,27 @@ target_compile_options(... PRIVATE $<$<COMPILE_LANGUAGE:HIP>:-O3 -ffast-math>)
 - Do not suggest CUDA-only APIs that have no HIP equivalent, or NVIDIA architecture-specific tuning (e.g., SM count, CUDA core optimization)
 - All recommendations must use AMD tools (`rocprofv3`, `rocprof-compute`, `amdclang++`, HIP APIs) and reference AMD architecture concepts
 
+❌ **Never Suggest Non-Existent HIP/AMDGCN Intrinsics — Compilation Will Fail**
+
+**`__builtin_amdgcn_sin` and `__builtin_amdgcn_cos` do not exist.** These are not valid
+HIP device functions. The `__builtin_amdgcn_*` namespace covers hardware-specific
+operations (lane reads, DS swizzle, warp shuffles) but **NOT transcendental math**.
+Suggesting them will produce a compile error:
+```
+error: use of undeclared identifier '__builtin_amdgcn_sin'
+```
+
+**Correct approach for transcendental math in HIP device code:**
+- Standard: `sinf(x)`, `cosf(x)`, `sqrtf(x)`, `rsqrtf(x)`, `expf(x)`, `logf(x)`
+  - The HIP compiler (amdclang++) automatically maps these to OCML hardware-optimized
+    implementations — no manual intrinsic substitution needed.
+- These functions already map to the fastest available hardware path on gfx9xx / gfx11xx.
+- `__builtin_amdgcn_*` intrinsics that DO exist: `__builtin_amdgcn_readlane`,
+  `__builtin_amdgcn_ds_swizzle`, `__builtin_amdgcn_s_barrier`, etc. (not math ops).
+
+**Rule:** Do not suggest replacing `sinf`/`cosf`/`sqrtf` with any `__builtin_amdgcn_*`
+variant. The standard math functions are already the correct choice.
+
 ❌ **Always Flag Implausible Metric Values — Never Silently Accept Them**
 - If profiling data shows GPU utilization > 100%, memory bandwidth exceeding the GPU's theoretical peak (see Hardware Specifications), negative durations, or wave occupancy > 32 waves/CU (CDNA3), flag this explicitly as a likely measurement artifact or data issue
 - Example: "The reported bandwidth of 12 TB/s exceeds MI300X's peak of 5.3 TB/s; this value appears to be a measurement artifact and should not be used for bottleneck classification."
