@@ -202,6 +202,9 @@ public:
   // Query current VRAM usage in MB via KMD escape.
   ErrorCode QueryVramUsage(wsl::thunk::VramUsage *usage) const;
 
+  // Query PCI BDF location from KMD adapter info.
+  ErrorCode QueryBdfInfo(wsl::thunk::BdfInfo *info) const;
+
   // Query static ASIC information from KMD adapter info.
   ErrorCode QueryAsicInfo(wsl::thunk::AsicInfo *info) const;
 

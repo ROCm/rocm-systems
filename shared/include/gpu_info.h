@@ -29,6 +29,14 @@ struct RasFeature {
   bool     needs_reboot;      // immediate reboot required after feature change
 };
 
+// PCI Bus/Device/Function location.
+struct BdfInfo {
+  uint32_t domain_number;
+  uint32_t bus_number;
+  uint32_t device_number;
+  uint32_t function_number;
+};
+
 // ASIC static information sourced from KMD adapter info.
 struct AsicInfo {
   uint64_t device_id;          // PCI device ID

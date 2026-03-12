@@ -50,6 +50,10 @@ ErrorCode Device::QueryRasFeature(RasFeature *info) const {
   return device_ctx_->QueryRasFeature(info);
 }
 
+ErrorCode Device::QueryBdfInfo(BdfInfo *info) const {
+  return device_ctx_->QueryBdfInfo(info);
+}
+
 ErrorCode Device::QueryAsicInfo(AsicInfo *info) const {
   return device_ctx_->QueryAsicInfo(info);
 }

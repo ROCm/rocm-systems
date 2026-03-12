@@ -33,6 +33,8 @@ public:
 
   ErrorCode QueryRasFeature(RasFeature *info) const;
 
+  ErrorCode QueryBdfInfo(BdfInfo *info) const;
+
   ErrorCode QueryAsicInfo(AsicInfo *info) const;
 
   ErrorCode Escape(void *pData, size_t dataSize,
