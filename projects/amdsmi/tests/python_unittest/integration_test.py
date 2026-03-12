@@ -133,7 +133,7 @@ class TestAmdSmiPython(unittest.TestCase):
         try:
             bdf = amdsmi.amdsmi_get_gpu_device_bdf(gpu)
             self.common.print(msg, bdf)
-            self.common.check_ret('', '', self.common.FAIL)
+            self.fail(f'{msg} Expected an exception for invalid gpu index {gpu}, but call succeeded with bdf {bdf}')
         except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
             if self.common.check_ret(msg, e, self.common.FAIL):
                 self.raise_exception = e
@@ -144,7 +144,7 @@ class TestAmdSmiPython(unittest.TestCase):
         try:
             ret = amdsmi.amdsmi_get_processor_handle_from_bdf(bdf)
             self.common.print(msg, ret.value)
-            self.common.check_ret('', '', self.common.FAIL)
+            self.fail(f'{msg} Expected an exception for invalid BDF "{bdf}", but call succeeded with handle {ret.value}')
         except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException, amdsmi.amdsmi_exception.AmdSmiBdfFormatException) as e:
             if self.common.check_ret(msg, e, self.common.FAIL):
                 self.raise_exception = e
@@ -971,6 +971,7 @@ class TestAmdSmiPython(unittest.TestCase):
         self.common.print_func_name('')
 
         dev_perf_level_current = self.common.dev_perf_levels[0][1]
+        dev_perf_level_current_cond = self.common.dev_perf_levels[0][2]
         for i, gpu in enumerate(self.common.processors):
             self.common.print_device_header(i)
             msg = f'\t### amdsmi_get_gpu_perf_level(gpu={i}):'
@@ -978,11 +979,13 @@ class TestAmdSmiPython(unittest.TestCase):
                 dev_perf_level_name_current = amdsmi.amdsmi_get_gpu_perf_level(gpu)
                 items = dev_perf_level_name_current.split('_')
                 level_name_current = items[-1]
-                for index, level_name, cond in enumerate(self.common.dev_perf_levels):
-                    if level_name == level_name_current:
-                        dev_perf_level_current = self.common.dev_perf_levels[index][1]
+                for name, level, cond in self.common.dev_perf_levels:
+                    if name == level_name_current:
+                        dev_perf_level_current = level
+                        dev_perf_level_current_cond = cond
+                        break
                 self.common.print(msg, level_name_current)
-                self.common.check_ret('', '', cond)
+                self.common.check_ret('', '', self.common.PASS)
             except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
                 self.common.print(msg, e)
                 continue
@@ -1003,7 +1006,7 @@ class TestAmdSmiPython(unittest.TestCase):
                 self.common.print(msg, ret)
                 self.common.check_ret('', '', self.common.PASS)
             except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
-                if self.common.check_ret(msg, e, dev_perf_level_cond):
+                if self.common.check_ret(msg, e, dev_perf_level_current_cond):
                     self.raise_exception = e
 
         if self.raise_exception:
@@ -1490,7 +1493,6 @@ if __name__ == '__main__':
     # Skip legend/title/"Running" preamble when the user just wants help text.
     if '-h' in sys.argv or '--help' in sys.argv:
         unittest.main()
-        sys.exit(0)
 
     # Only show the dot-character legend when not in verbose mode; in verbose
     # mode each test prints its own result line so the dot legend is irrelevant.
@@ -1547,4 +1549,3 @@ if __name__ == '__main__':
 
     common.expand_glob_k_arg(globals())
     unittest.main(testRunner=runner)
-

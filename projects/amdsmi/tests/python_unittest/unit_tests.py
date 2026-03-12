@@ -1566,7 +1566,6 @@ if __name__ == '__main__':
     # Skip legend/title/"Running" preamble when the user just wants help text.
     if '-h' in sys.argv or '--help' in sys.argv:
         unittest.main()
-        sys.exit(0)
 
     # Only show the dot-character legend when not in verbose mode; in verbose
     # mode each test prints its own result line so the dot legend is irrelevant.
@@ -1615,5 +1614,3 @@ if __name__ == '__main__':
     runner = unittest.TextTestRunner(stream=sys.stderr, verbosity=common.make_runner_verbosity(verbose))
     common.expand_glob_k_arg(globals())
     unittest.main(testRunner=runner)
-    sys.exit(0)
-
