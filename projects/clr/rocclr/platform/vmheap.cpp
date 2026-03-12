@@ -90,7 +90,6 @@ bool VmHeap::UncommitMemory(void* addr, size_t size) {
   cmd->enqueue();
   cmd->awaitCompletion();
   cmd->release();
-  vaddr_sub_obj->release();
   SvmBuffer::free(device_->context(), phys_mem_obj->getSvmPtr());
   return true;
 }

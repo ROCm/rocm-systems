@@ -3410,6 +3410,9 @@ void VirtualGPU::submitVirtualMap(amd::VirtualMapCommand& vcmd) {
         vaddr_sub_obj->getUserData().phys_mem_obj->getUserData().vaddr_mem_obj = nullptr;
         vaddr_sub_obj->getUserData().phys_mem_obj = nullptr;
       }
+      // Release sub_obj now that HW unmap is complete.
+      // ~Memory releases parent va_ via parent_->release().
+      vaddr_sub_obj->release();
     } else {
       LogError("HSA Command: hsa_amd_vmem_unmap failed");
     }

@@ -251,6 +251,13 @@ bool MemoryPool::FreeMemory(amd::Memory* memory, Stream* stream, Event* event) {
     if (!state_.use_vm_heap_ && memory->getUserData().phys_mem_obj != nullptr) {
       memory = memory->getUserData().phys_mem_obj;
     }
+    // Graph-allocated virtual buffer: normal FreeMemory/SvmBuffer::free miss
+    // releasing phys_mem_obj, sub_obj, and parent VA. Handle cleanup here.
+    if (HIP_MEM_POOL_USE_VM && (memory->getMemFlags() & CL_MEM_VA_RANGE_AMD) &&
+        memory->parent() != nullptr &&
+        memory->getUserData().phys_mem_obj != nullptr) {
+      amd::Memory* phys_mem_obj = memory->getUserData().phys_mem_obj;
+    }
 
     // If the free heap grows over the busy heap, then force release
     if (AMD_DIRECT_DISPATCH && (free_heap_.GetTotalSize() > busy_heap_.GetTotalSize())) {
