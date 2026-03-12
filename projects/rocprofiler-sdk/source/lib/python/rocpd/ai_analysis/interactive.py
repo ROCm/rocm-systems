@@ -1610,10 +1610,198 @@ class WorkflowSession:
         self._trace_dir = trace_dir or self._DEFAULT_TRACE_DIR
         self._conv: Optional["LLMConversation"] = None  # set by _phase2 if LLM configured
 
+    # ── Phase 1b: Quick workload analysis ──────────────────────────────────────
+
+    @staticmethod
+    def _classify_app_command(app_cmd: str) -> Dict[str, Any]:
+        """Inspect the app command for workload-type hints.
+
+        Returns a dict with:
+          workload_type  – one of: "python_ml", "python_generic", "hip_compute",
+                           "llm_inference", "mpi_multi", "unknown"
+          hints          – list of human-readable detection notes
+          extra_flags    – additional rocprofv3 flags to add beyond the default set
+          warnings       – list of capture-limitation warnings to show
+        """
+        try:
+            tokens = shlex.split(app_cmd)
+        except ValueError:
+            tokens = app_cmd.split()
+        if not tokens:
+            return {"workload_type": "unknown", "hints": [], "extra_flags": [], "warnings": []}
+
+        binary = tokens[0].lower()
+        all_lower = " ".join(tokens).lower()
+
+        hints: List[str] = []
+        extra_flags: List[str] = []
+        warnings: List[str] = []
+
+        # ── Multi-process launchers ──────────────────────────────────────────
+        is_mpi = any(kw in binary for kw in ("mpirun", "mpiexec", "srun", "jsrun", "orterun"))
+        if is_mpi:
+            warnings.append(
+                "MPI/Slurm launcher detected — rocprofv3 traces only the launcher "
+                "process. GPU kernels in worker ranks may not be captured. "
+                "Consider profiling a single rank with --pid or using rocprof-sys."
+            )
+            return {
+                "workload_type": "mpi_multi",
+                "hints": ["MPI/Slurm launcher"],
+                "extra_flags": extra_flags,
+                "warnings": warnings,
+            }
+
+        # ── Python workloads ─────────────────────────────────────────────────
+        is_python = "python" in binary or binary.endswith(".py")
+
+        ml_keywords = ("torch", "pytorch", "tensorflow", "jax", "paddle", "mxnet",
+                       "onnx", "triton", "megatron", "deepspeed")
+        is_ml = any(kw in all_lower for kw in ml_keywords)
+
+        llm_keywords = ("vllm", "llm", "llama", "mistral", "falcon", "gpt", "bert",
+                        "transformer", "inference", "generate", "decode")
+        is_llm = any(kw in all_lower for kw in llm_keywords)
+
+        multiproc_keywords = ("torchrun", "torch.distributed", "accelerate", "deepspeed",
+                              "nccl", "ddp")
+        is_multiproc = any(kw in all_lower for kw in multiproc_keywords)
+
+        if is_python:
+            extra_flags.append("--hip-trace")   # Python HIP API overhead is significant
+            if is_multiproc:
+                warnings.append(
+                    "Distributed/multi-process training detected (torchrun/DDP/DeepSpeed). "
+                    "GPU kernels run in worker processes not captured by default. "
+                    "Profile a single worker via --pid <pid> or use rocprof-sys."
+                )
+            if is_llm:
+                hints.append("Python + LLM inference framework")
+                return {
+                    "workload_type": "llm_inference",
+                    "hints": hints,
+                    "extra_flags": extra_flags,
+                    "warnings": warnings,
+                }
+            if is_ml:
+                hints.append("Python + ML framework (PyTorch / JAX / TF)")
+                return {
+                    "workload_type": "python_ml",
+                    "hints": hints,
+                    "extra_flags": extra_flags,
+                    "warnings": warnings,
+                }
+            hints.append("Python workload")
+            return {
+                "workload_type": "python_generic",
+                "hints": hints,
+                "extra_flags": extra_flags,
+                "warnings": warnings,
+            }
+
+        # ── Compiled HIP / ROCm binary ───────────────────────────────────────
+        hip_keywords = ("hip", "rocm", "roc", "hsa", "blas", "lapack", "fft",
+                        "conv", "gemm", "matmul")
+        if any(kw in binary for kw in hip_keywords):
+            hints.append(f"HIP/ROCm binary ({tokens[0]})")
+        else:
+            hints.append(f"Compiled binary ({tokens[0]})")
+
+        return {
+            "workload_type": "hip_compute",
+            "hints": hints,
+            "extra_flags": extra_flags,
+            "warnings": warnings,
+        }
+
+    def _phase1b_quick_workload_analysis(self) -> Optional[str]:
+        """Analyze the workload before Phase 2 to suggest the best starter command.
+
+        - If source paths provided: runs Tier 0 SourceAnalyzer and uses its
+          highest-priority recommendation flags.
+        - Always runs app-command heuristics for extra flags / warnings.
+        - Falls back to default --sys-trace --kernel-trace --memory-copy-trace --stats
+          when nothing more specific can be determined.
+
+        Returns the full suggested rocprofv3 command, or None to use the default.
+        """
+        _print()
+        _print("  ── Quick Workload Analysis ─────────────────────────────────", style="cyan")
+
+        # App-command heuristics
+        app_info = self._classify_app_command(self._state.app_command)
+        for warn in app_info.get("warnings", []):
+            _print(f"  ⚠  {warn}", style="yellow")
+        for hint in app_info.get("hints", []):
+            _print(f"  Detected: {hint}", style="dim")
+
+        source_plan = None
+        source_cmd_flags: Optional[str] = None
+
+        # Tier 0 source analysis
+        if self._state.source_paths:
+            try:
+                from .source_analyzer import SourceAnalyzer
+                plan = SourceAnalyzer(self._state.source_paths[0]).analyze()
+                source_plan = plan
+                _print(
+                    f"  Source scan: {plan.files_scanned} files, "
+                    f"{plan.kernel_count} kernels, "
+                    f"model={plan.programming_model}",
+                    style="dim",
+                )
+                # Extract just the flags from the suggested first command
+                # (strip the `-- <app>` part; we'll add the real app below)
+                raw = plan.suggested_first_command
+                sep_idx = raw.find(" -- ")
+                if sep_idx != -1:
+                    source_cmd_flags = raw[:sep_idx]
+                else:
+                    source_cmd_flags = raw
+                _print(f"  Source analysis suggests: {source_cmd_flags}", style="dim")
+            except Exception as exc:
+                _print(f"  Source analysis skipped: {exc}", style="dim")
+
+        # Build the final command
+        run_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        out_dir = f"{self._trace_dir}/run_{run_id}"
+
+        if source_cmd_flags:
+            # Source-derived flags — replace any `-d <dir>` and `-o <name>` with fresh values
+            flags = re.sub(r"-d\s+\S+", f"-d {out_dir}", source_cmd_flags)
+            flags = re.sub(r"-o\s+\S+", "-o results", flags)
+            if "-d " not in flags:
+                flags = f"{flags} -d {out_dir}"
+            if "-o " not in flags:
+                flags = f"{flags} -o results"
+            # Append any extra flags from app-command heuristics that aren't already present
+            for ef in app_info.get("extra_flags", []):
+                if ef not in flags:
+                    flags = flags.replace("rocprofv3 ", f"rocprofv3 {ef} ", 1)
+            cmd = f"{flags} -- {self._state.app_command}"
+            reason = "source analysis"
+        else:
+            # Pure heuristics path — build on top of the safe default flag set
+            base_flags = "--sys-trace --kernel-trace --memory-copy-trace --stats"
+            extra = " ".join(app_info.get("extra_flags", []))
+            if extra:
+                base_flags = f"{base_flags} {extra}"
+            extra_info = f" + heuristics ({', '.join(app_info['hints'])})" if app_info.get("hints") else ""
+            reason = f"default flags{extra_info}"
+            cmd = (
+                f"rocprofv3 {base_flags} "
+                f"-d {out_dir} -o results "
+                f"-- {self._state.app_command}"
+            )
+
+        _print(f"  Starter command basis: {reason}", style="dim")
+        _print()
+        return cmd
+
     # ── Phase 2: Profiling command generation ─────────────────────────────────
 
     def _build_profiling_command(self) -> str:
-        """Build a rocprofv3 profiling command wrapping the user's app."""
+        """Build a default rocprofv3 profiling command wrapping the user's app."""
         run_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         out_dir = f"{self._trace_dir}/run_{run_id}"
         return (
@@ -2526,8 +2714,10 @@ class WorkflowSession:
             if not pathlib.Path(sp).exists():
                 _print(f"  Warning: --source path not found: {sp}", style="yellow")
 
-        # Phase 2: generate + confirm profiling command
-        cmd = self._build_profiling_command()
+        # Phase 1b: quick workload analysis → derive best starter command
+        cmd = self._phase1b_quick_workload_analysis() or self._build_profiling_command()
+
+        # Phase 2: confirm profiling command with user
         self._state.profiling_command = cmd
         if not self._phase2_show_command(cmd):
             return
