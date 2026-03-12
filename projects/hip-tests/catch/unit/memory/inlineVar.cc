@@ -25,7 +25,7 @@ THE SOFTWARE.
 #include "memoryCommon.hh"
 using namespace mem_utils;
 
-TEST_CASE("Unit_hipMemcpyToFromSymbol_GlobalConstVar") {
+TEST_CASE(Unit_hipMemcpyToFromSymbol_GlobalConstVar) {
   int const initialValue = 10;
   set_value(initialValue);
   int const finalValue = get_value();

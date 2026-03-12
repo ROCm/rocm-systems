@@ -70,7 +70,7 @@ static std::vector<int> getSupportedDevices() {
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-TEST_CASE("Unit_hipMemPrefetchAsync_v2_Device_Host", "[multigpu]") {
+TEST_CASE(Unit_hipMemPrefetchAsync_v2_Device_Host) {
   auto supportedDevices = getSupportedDevices();
   if (supportedDevices.empty()) {
     HipTest::HIP_SKIP_TEST(
@@ -183,7 +183,7 @@ TEST_CASE("Unit_hipMemPrefetchAsync_v2_Device_Host", "[multigpu]") {
  *  - HIP_VERSION >= 7.1
  */
 #if __linux__
-TEST_CASE("Unit_hipMemPrefetchAsync_v2_HostNuma_HostNumaCurrent") {
+TEST_CASE(Unit_hipMemPrefetchAsync_v2_HostNuma_HostNumaCurrent) {
   auto supportedDevices = getSupportedDevices();
   if (supportedDevices.empty() || numa_available() < 0) {
     HipTest::HIP_SKIP_TEST("Skipping as System does not have managed memory "
@@ -303,7 +303,7 @@ TEST_CASE("Unit_hipMemPrefetchAsync_v2_HostNuma_HostNumaCurrent") {
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-TEST_CASE("Unit_hipMemPrefetchAsync_v2_Negative") {
+TEST_CASE(Unit_hipMemPrefetchAsync_v2_Negative) {
   auto supportedDevices = getSupportedDevices();
   if (supportedDevices.empty()) {
     HipTest::HIP_SKIP_TEST(

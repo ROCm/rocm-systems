@@ -48,7 +48,7 @@ MATH_UNARY_KERNEL_DEF(sqrt)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_sqrtf_Accuracy_Positive") {
+TEST_CASE(Unit_Device_sqrtf_Accuracy_Positive) {
   float (*ref)(float) = std::sqrt;
   UnarySinglePrecisionTest(sqrt_kernel<float>, ref, ULPValidatorBuilderFactory<float>(1));
 }
@@ -68,7 +68,7 @@ TEST_CASE("Unit_Device_sqrtf_Accuracy_Positive") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_sqrt_Accuracy_Positive") {
+TEST_CASE(Unit_Device_sqrt_Accuracy_Positive) {
   double (*ref)(double) = std::sqrt;
   UnaryDoublePrecisionTest<double>(sqrt_kernel<double>, ref, ULPValidatorBuilderFactory<double>(0));
 }
@@ -85,7 +85,7 @@ TEST_CASE("Unit_Device_sqrt_Accuracy_Positive") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_sqrt_sqrtf_Negative_RTC") { NegativeTestRTCWrapper<4>(kSqrt); }
+TEST_CASE(Unit_Device_sqrt_sqrtf_Negative_RTC) { NegativeTestRTCWrapper<4>(kSqrt); }
 
 MATH_UNARY_KERNEL_DEF(rsqrt)
 
@@ -102,7 +102,7 @@ MATH_UNARY_KERNEL_DEF(rsqrt)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_rsqrtf_Accuracy_Positive") {
+TEST_CASE(Unit_Device_rsqrtf_Accuracy_Positive) {
   auto rsqrt_ref = [](double arg) -> double { return 1. / std::sqrt(arg); };
   double (*ref)(double) = rsqrt_ref;
   UnarySinglePrecisionTest(rsqrt_kernel<float>, ref, ULPValidatorBuilderFactory<float>(2));
@@ -121,7 +121,7 @@ TEST_CASE("Unit_Device_rsqrtf_Accuracy_Positive") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_rsqrt_Accuracy_Positive") {
+TEST_CASE(Unit_Device_rsqrt_Accuracy_Positive) {
   auto rsqrt_ref = [](long double arg) -> long double { return 1.L / std::sqrt(arg); };
   long double (*ref)(long double) = rsqrt_ref;
   UnaryDoublePrecisionTest(rsqrt_kernel<double>, ref, ULPValidatorBuilderFactory<double>(1));
@@ -139,7 +139,7 @@ TEST_CASE("Unit_Device_rsqrt_Accuracy_Positive") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_rsqrt_rsqrtf_Negative_RTC") { NegativeTestRTCWrapper<4>(kRsqrt); }
+TEST_CASE(Unit_Device_rsqrt_rsqrtf_Negative_RTC) { NegativeTestRTCWrapper<4>(kRsqrt); }
 
 /**
  * Test Description
@@ -169,7 +169,7 @@ MATH_UNARY_WITHIN_ULP_TEST_DEF(cbrt, std::cbrt, 1, 1)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_cbrt_cbrtf_Negative_RTC") { NegativeTestRTCWrapper<4>(kCbrt); }
+TEST_CASE(Unit_Device_cbrt_cbrtf_Negative_RTC) { NegativeTestRTCWrapper<4>(kCbrt); }
 
 MATH_UNARY_KERNEL_DEF(rcbrt)
 
@@ -186,7 +186,7 @@ MATH_UNARY_KERNEL_DEF(rcbrt)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_rcbrtf_Accuracy_Positive") {
+TEST_CASE(Unit_Device_rcbrtf_Accuracy_Positive) {
   auto rcbrt_ref = [](double arg) -> double { return 1. / std::cbrt(arg); };
   double (*ref)(double) = rcbrt_ref;
   UnarySinglePrecisionTest(rcbrt_kernel<float>, ref, ULPValidatorBuilderFactory<float>(1));
@@ -205,7 +205,7 @@ TEST_CASE("Unit_Device_rcbrtf_Accuracy_Positive") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_rcbrt_Accuracy_Positive") {
+TEST_CASE(Unit_Device_rcbrt_Accuracy_Positive) {
   auto rcbrt_ref = [](long double arg) -> long double { return 1. / std::cbrt(arg); };
   long double (*ref)(long double) = rcbrt_ref;
   UnaryDoublePrecisionTest(rcbrt_kernel<double>, ref, ULPValidatorBuilderFactory<double>(1));
@@ -223,7 +223,7 @@ TEST_CASE("Unit_Device_rcbrt_Accuracy_Positive") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_rcbrt_rcbrtf_Negative_RTC") { NegativeTestRTCWrapper<4>(kRcbrt); }
+TEST_CASE(Unit_Device_rcbrt_rcbrtf_Negative_RTC) { NegativeTestRTCWrapper<4>(kRcbrt); }
 
 /********** Binary Functions **********/
 
@@ -256,7 +256,7 @@ MATH_BINARY_WITHIN_ULP_TEST_DEF(hypot, std::hypot, 3, 2)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_hypot_hypotf_Negative_RTC") { NegativeTestRTCWrapper<8>(kHypot); }
+TEST_CASE(Unit_Device_hypot_hypotf_Negative_RTC) { NegativeTestRTCWrapper<8>(kHypot); }
 
 MATH_BINARY_KERNEL_DEF(rhypot)
 
@@ -274,7 +274,7 @@ MATH_BINARY_KERNEL_DEF(rhypot)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_Device_rhypot_Accuracy_Positive", "", float, double) {
+TEMPLATE_TEST_CASE(Unit_Device_rhypot_Accuracy_Positive, float, double) {
   using RT = RefType_t<TestType>;
   auto rhypot_ref = [](RT arg1, RT arg2) -> RT { return 1. / std::hypot(arg1, arg2); };
   RT (*ref)(RT, RT) = rhypot_ref;
@@ -294,7 +294,7 @@ TEMPLATE_TEST_CASE("Unit_Device_rhypot_Accuracy_Positive", "", float, double) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_rhypot_rhypotf_Negative_RTC") { NegativeTestRTCWrapper<8>(kRhypot); }
+TEST_CASE(Unit_Device_rhypot_rhypotf_Negative_RTC) { NegativeTestRTCWrapper<8>(kRhypot); }
 
 /********** Ternary Functions **********/
 
@@ -314,7 +314,7 @@ MATH_TERNARY_KERNEL_DEF(norm3d)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_Device_norm3d_Accuracy_Positive", "", float, double) {
+TEMPLATE_TEST_CASE(Unit_Device_norm3d_Accuracy_Positive, float, double) {
   using RT = RefType_t<TestType>;
   auto norm3d_ref = [](RT arg1, RT arg2, RT arg3) -> RT {
     if (std::isinf(arg1) || std::isinf(arg2) || std::isinf(arg3)) {
@@ -339,7 +339,7 @@ TEMPLATE_TEST_CASE("Unit_Device_norm3d_Accuracy_Positive", "", float, double) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_norm3d_norm3df_Negative_RTC") { NegativeTestRTCWrapper<12>(kNorm3D); }
+TEST_CASE(Unit_Device_norm3d_norm3df_Negative_RTC) { NegativeTestRTCWrapper<12>(kNorm3D); }
 
 MATH_TERNARY_KERNEL_DEF(rnorm3d)
 
@@ -357,7 +357,7 @@ MATH_TERNARY_KERNEL_DEF(rnorm3d)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_Device_rnorm3d_Accuracy_Positive", "", float, double) {
+TEMPLATE_TEST_CASE(Unit_Device_rnorm3d_Accuracy_Positive, float, double) {
   using RT = RefType_t<TestType>;
   auto rnorm3d_ref = [](RT arg1, RT arg2, RT arg3) -> RT {
     if (std::isinf(arg1) || std::isinf(arg2) || std::isinf(arg3)) {
@@ -383,7 +383,7 @@ TEMPLATE_TEST_CASE("Unit_Device_rnorm3d_Accuracy_Positive", "", float, double) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_rnorm3d_rnorm3df_Negative_RTC") { NegativeTestRTCWrapper<12>(kRnorm3D); }
+TEST_CASE(Unit_Device_rnorm3d_rnorm3df_Negative_RTC) { NegativeTestRTCWrapper<12>(kRnorm3D); }
 
 /********** Quaternary Functions **********/
 
@@ -403,7 +403,7 @@ MATH_QUATERNARY_KERNEL_DEF(norm4d)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_Device_norm4d_Accuracy_Positive", "", float, double) {
+TEMPLATE_TEST_CASE(Unit_Device_norm4d_Accuracy_Positive, float, double) {
   using RT = RefType_t<TestType>;
   auto norm4d_ref = [](RT arg1, RT arg2, RT arg3, RT arg4) -> RT {
     if (std::isinf(arg1) || std::isinf(arg2) || std::isinf(arg3) || std::isinf(arg4)) {
@@ -429,7 +429,7 @@ TEMPLATE_TEST_CASE("Unit_Device_norm4d_Accuracy_Positive", "", float, double) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_norm4d_norm4df_Negative_RTC") { NegativeTestRTCWrapper<16>(kNorm4D); }
+TEST_CASE(Unit_Device_norm4d_norm4df_Negative_RTC) { NegativeTestRTCWrapper<16>(kNorm4D); }
 
 MATH_QUATERNARY_KERNEL_DEF(rnorm4d)
 
@@ -447,7 +447,7 @@ MATH_QUATERNARY_KERNEL_DEF(rnorm4d)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_Device_rnorm4d_Accuracy_Positive", "", float, double) {
+TEMPLATE_TEST_CASE(Unit_Device_rnorm4d_Accuracy_Positive, float, double) {
   using RT = RefType_t<TestType>;
   auto rnorm4d_ref = [](RT arg1, RT arg2, RT arg3, RT arg4) -> RT {
     if (std::isinf(arg1) || std::isinf(arg2) || std::isinf(arg3) || std::isinf(arg4)) {
@@ -473,7 +473,7 @@ TEMPLATE_TEST_CASE("Unit_Device_rnorm4d_Accuracy_Positive", "", float, double) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_rnorm4d_rnorm4df_Negative_RTC") { NegativeTestRTCWrapper<16>(kRnorm4D); }
+TEST_CASE(Unit_Device_rnorm4d_rnorm4df_Negative_RTC) { NegativeTestRTCWrapper<16>(kRnorm4D); }
 
 /********** norm Function **********/
 
@@ -531,7 +531,7 @@ MATH_NORM_KERNEL_DEF(norm)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_Device_norm_Sanity_Positive", "", float, double) {
+TEMPLATE_TEST_CASE(Unit_Device_norm_Sanity_Positive, float, double) {
   using RT = RefType_t<TestType>;
   auto norm_ref = [](int dim, TestType* args) -> RT {
     RT sum = 0;
@@ -558,7 +558,7 @@ TEMPLATE_TEST_CASE("Unit_Device_norm_Sanity_Positive", "", float, double) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_norm_normf_Negative_RTC") { NegativeTestRTCWrapper<18>(kNorm); }
+TEST_CASE(Unit_Device_norm_normf_Negative_RTC) { NegativeTestRTCWrapper<18>(kNorm); }
 
 MATH_NORM_KERNEL_DEF(rnorm)
 
@@ -574,7 +574,7 @@ MATH_NORM_KERNEL_DEF(rnorm)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_Device_rnorm_Sanity_Positive", "", float, double) {
+TEMPLATE_TEST_CASE(Unit_Device_rnorm_Sanity_Positive, float, double) {
   using RT = RefType_t<TestType>;
   auto rnorm_ref = [](int dim, TestType* args) -> RT {
     RT sum = 0;
@@ -601,7 +601,7 @@ TEMPLATE_TEST_CASE("Unit_Device_rnorm_Sanity_Positive", "", float, double) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_rnorm_rnormf_Negative_RTC") { NegativeTestRTCWrapper<18>(kRnorm); }
+TEST_CASE(Unit_Device_rnorm_rnormf_Negative_RTC) { NegativeTestRTCWrapper<18>(kRnorm); }
 
 /**
  * End doxygen group MathTest.

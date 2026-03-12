@@ -167,7 +167,7 @@ public:
   bool CreateSyncobj(D3DKMT_HANDLE *handle, uint64_t **addr);
   void DestroySyncobj(D3DKMT_HANDLE handle);
 
-  bool CreateQueue(WDDMQueue *queue);
+  bool CreateQueue(WDDMQueue *queue, uint64_t debugger_data = 0);
   void DestroyQueue(WDDMQueue *queue);
   bool CreateHwQueue(WDDMQueue *queue);
   bool DestroyHwQueue(WDDMQueue *queue);
@@ -229,8 +229,13 @@ public:
   device_init_result InitStatus() const { return init_status_; }
   uint32_t GbAddrConfig() const { return device_info_.gb_addr_config; }
 
+  // Debugger support
+  bool GetKmdDbgVersion(struct Wkmi::KmdDbgVersion *version) const;
+  bool RegisterRuntimeState(uint32_t runtime_state, const void* r_debug, bool ttmp_setup_hint) const;
+  bool SetTrapHandler(uint64_t tba, uint64_t tma) const;
+
 private:
-  bool Escape(void* priv_data, uint32_t priv_size, bool hw_access);
+  bool Escape(void* priv_data, uint32_t priv_size, bool hw_access) const;
   NTSTATUS ParseDeviceInfo(void);
   void DestroyDeviceInfo(void);
   bool CreateDevice(void);
@@ -239,7 +244,7 @@ private:
   bool DestroyPagingQueue(void);
   void *Lock(D3DKMT_HANDLE handle);
   bool Unlock(D3DKMT_HANDLE handle);
-  bool CreateContext(int engine, D3DKMT_HANDLE *handle);
+  bool CreateContext(int engine, D3DKMT_HANDLE *handle, uint64_t debugger_data = 0);
   bool DestroyContext(D3DKMT_HANDLE handle);
 
   void SetPowerOptimization(bool restore);

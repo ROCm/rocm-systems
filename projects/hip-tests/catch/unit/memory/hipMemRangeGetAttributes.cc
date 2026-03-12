@@ -25,7 +25,7 @@ THE SOFTWARE.
 #include <resource_guards.hh>
 #include <utils.hh>
 
-TEST_CASE("Unit_hipMemRangeGetAttributes_Positive_Basic") {
+TEST_CASE(Unit_hipMemRangeGetAttributes_Positive_Basic) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeManagedMemory)) {
     HipTest::HIP_SKIP_TEST("Managed memory not supported");
     return;
@@ -63,7 +63,7 @@ TEST_CASE("Unit_hipMemRangeGetAttributes_Positive_Basic") {
   }
 }
 
-TEST_CASE("Unit_hipMemRangeGetAttributes_Negative_Parameters") {
+TEST_CASE(Unit_hipMemRangeGetAttributes_Negative_Parameters) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeManagedMemory)) {
     HipTest::HIP_SKIP_TEST("Managed memory not supported");
     return;

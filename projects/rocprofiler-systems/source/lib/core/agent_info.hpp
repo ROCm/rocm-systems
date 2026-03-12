@@ -22,9 +22,8 @@
 
 #pragma once
 
-#if ROCPROFSYS_USE_ROCM > 0
-#    include <nlohmann/json.hpp>
-#    include <rocprofiler-sdk/agent.h>
+#include <nlohmann/json.hpp>
+#include <rocprofiler-sdk/agent.h>
 
 namespace rocprofsys
 {
@@ -144,20 +143,20 @@ to_json_string(const rocprofiler_agent_v0_t& agent_data)
     data["logical_node_id"]      = agent_data.logical_node_id;
     data["logical_node_type_id"] = agent_data.logical_node_type_id;
 
-#    if(ROCPROFILER_VERSION >= 600)
+#if(ROCPROFILER_VERSION >= 600)
     data["runtime_visibility"]["hsa"]       = agent_data.runtime_visibility.hsa;
     data["runtime_visibility"]["hip"]       = agent_data.runtime_visibility.hip;
     data["runtime_visibility"]["rccl"]      = agent_data.runtime_visibility.rccl;
     data["runtime_visibility"]["rocdecode"] = agent_data.runtime_visibility.rocdecode;
-#    endif
+#endif
 
-#    if(ROCPROFILER_VERSION >= 700)
+#if(ROCPROFILER_VERSION >= 700)
     auto& uuid_bytes = data["uuid"]["bytes"];
     for(size_t i = 0; i < 16; ++i)
     {
         uuid_bytes[std::string("value") + std::to_string(i)] = agent_data.uuid.bytes[i];
     }
-#    endif
+#endif
 
     data["mem_banks"] = nlohmann::json::array();
     for(uint32_t i = 0; i < agent_data.mem_banks_count; ++i)
@@ -238,5 +237,3 @@ to_json_string(const rocprofiler_agent_v0_t& agent_data)
 
 }  // namespace agent_info
 }  // namespace rocprofsys
-
-#endif  // ROCPROFSYS_USE_ROCM

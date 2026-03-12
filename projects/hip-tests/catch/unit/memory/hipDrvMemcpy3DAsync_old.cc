@@ -459,7 +459,7 @@ template <typename T> void DrvMemcpy3DAsync<T>::DeAllocateMemory() {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipDrvMemcpy3DAsync_H2DDeviceContextChange", "[multigpu]") {
+TEST_CASE(Unit_hipDrvMemcpy3DAsync_H2DDeviceContextChange) {
   CHECK_IMAGE_SUPPORT
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
@@ -484,8 +484,7 @@ TEST_CASE("Unit_hipDrvMemcpy3DAsync_H2DDeviceContextChange", "[multigpu]") {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipDrvMemcpy3DAsync_Host2ArrayDeviceContextChange",
-          "[multigpu]") {
+TEST_CASE(Unit_hipDrvMemcpy3DAsync_Host2ArrayDeviceContextChange) {
   CHECK_IMAGE_SUPPORT
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
@@ -513,8 +512,7 @@ TEST_CASE("Unit_hipDrvMemcpy3DAsync_Host2ArrayDeviceContextChange",
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipDrvMemcpy3DAsync_multiDevice_Basic_Size_Test",
-          "[multigpu]") {
+TEST_CASE(Unit_hipDrvMemcpy3DAsync_multiDevice_Basic_Size_Test) {
   CHECK_IMAGE_SUPPORT
   constexpr int size_128b = 128, size_256b = 256;
   int numDevices = 0;
