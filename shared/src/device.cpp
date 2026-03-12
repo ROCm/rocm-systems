@@ -25,7 +25,8 @@ ErrorCode Device::Create(Platform *platform, LdaChain *ldaChain,
   (void)deviceInfo;
 
   auto dctx = std::unique_ptr<thunk_proxy::DeviceContext>(
-      ldaChain->GetChainContext()->CreateDevice(chainIndex));
+      ldaChain->GetChainContext()->CreateDevice(
+          ldaChain->DeviceHandle(), chainIndex));
 
   if (!dctx)
     return ErrorCode::InitializationFailed;
@@ -38,11 +39,7 @@ ErrorCode Device::Create(Platform *platform, LdaChain *ldaChain,
 }
 
 ErrorCode Device::Escape(void *pData, size_t dataSize, bool hardwareAccess) const {
-  bool ok = device_ctx_->Escape(
-      static_cast<uint32_t>(lda_chain_->AdapterHandle()),
-      static_cast<uint32_t>(lda_chain_->DeviceHandle()),
-      chain_index_,
-      pData, dataSize, hardwareAccess);
+  bool ok = device_ctx_->Escape(pData, dataSize, hardwareAccess);
   return ok ? ErrorCode::Success : ErrorCode::Unknown;
 }
 

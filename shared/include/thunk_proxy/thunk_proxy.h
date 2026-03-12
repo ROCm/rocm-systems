@@ -3,6 +3,7 @@
 
 #include <vector>
 #include "d3dkmt_types.h"
+#include "gpu_info.h"
 #include "status.h"
 
 namespace thunk_proxy {
@@ -177,7 +178,8 @@ public:
 
   // Create a DeviceContext for GPU slot chain_index.
   // Must be called after QueryAdapterInfo().
-  class DeviceContext *CreateDevice(uint32_t chain_index) const;
+  class DeviceContext *CreateDevice(WinDeviceHandle device_handle,
+                                    uint32_t chain_index) const;
 
   ChainContext(const ChainContext &) = delete;
   ChainContext &operator=(const ChainContext &) = delete;
@@ -195,13 +197,13 @@ public:
   // Returns false if the GPU slot does not meet the WDDM2 baseline.
   bool IsWddm2Supported() const;
 
+  ErrorCode QueryVramInfo(wsl::thunk::VramInfo *info) const;
+
+  // Query current VRAM usage in MB via KMD escape.
+  ErrorCode QueryVramUsage(wsl::thunk::VramUsage *usage) const;
+
   // Send a driver-escape packet on behalf of this GPU slot.
-  bool Escape(WinAdapterHandle adapter_handle,
-              WinAdapterHandle device_handle,
-              uint32_t chain_index,
-              void    *pData,
-              size_t   dataSize,
-              bool     hardwareAccess) const;
+  bool Escape(void *pData, size_t dataSize, bool hardwareAccess = false) const;
 
   DeviceContext(const DeviceContext &) = delete;
   DeviceContext &operator=(const DeviceContext &) = delete;
