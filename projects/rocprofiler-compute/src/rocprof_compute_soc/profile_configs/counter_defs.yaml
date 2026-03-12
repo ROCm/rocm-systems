@@ -6326,7 +6326,7 @@ rocprofiler-sdk:
       - gfx942
       - gfx950
       expression: reduce(TA_FLAT_WRITE_WAVEFRONTS,sum)
-  - name: TA_TA_BUSY
+  - name: TA_TA_BUSY # the original on spec is "TA_PERF_SEL_ta_busy"
     description: TA block is busy. Perf_Windowing not supported for this counter.
     properties: []
     definitions:

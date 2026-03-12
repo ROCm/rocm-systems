@@ -143,10 +143,10 @@ Panel Config:
           value: AVG(SQ_WAIT_INST_LDS_sum / $denom)
           unit: Cycles + $normUnit
         LDS Bank Conflict Rate:
-          value: AVG((100 * SQ_LDS_BANK_CONFLICT_sum / SQ_LDS_IDX_ACTIVE_sum) if (SQ_LDS_IDX_ACTIVE_sum != 0) else None)
+          value: AVG((100 * SQC_LDS_BANK_CONFLICT_sum / SQC_LDS_IDX_ACTIVE_sum) if (SQC_LDS_IDX_ACTIVE_sum != 0) else None)
           unit: Percent
         LDS Estimated Bandwidth:
-          value: AVG((((SQ_LDS_IDX_ACTIVE_sum - SQ_LDS_BANK_CONFLICT_sum) * 4 * 32) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+          value: AVG((((SQC_LDS_IDX_ACTIVE_sum - SQC_LDS_BANK_CONFLICT_sum) * 4 * 32) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
           unit: GB/s
 
   # =========================================================================
@@ -350,12 +350,12 @@ Panel Config:
     LDS Bank Conflict Rate: |-
       Definition: Percentage of LDS accesses that resulted in bank conflicts.
       Description: Bank conflicts occur when multiple work-items access the same LDS bank simultaneously.
-      Formula: 100 * SQ_LDS_BANK_CONFLICT_sum / SQ_LDS_IDX_ACTIVE_sum
+      Formula: 100 * SQC_LDS_BANK_CONFLICT_sum / SQC_LDS_IDX_ACTIVE_sum
 
     LDS Estimated Bandwidth: |-
       Definition: Estimated LDS bandwidth based on active index cycles minus bank conflicts.
       Description: RDNA3.5 has 32 LDS banks per CU, each capable of 4 bytes per cycle.
-      Formula: ((SQ_LDS_IDX_ACTIVE_sum - SQ_LDS_BANK_CONFLICT_sum) * 4 * 32) / time
+      Formula: ((SQC_LDS_IDX_ACTIVE_sum - SQC_LDS_BANK_CONFLICT_sum) * 4 * 32) / time
 
     GL1C Utilization: |-
       Definition: Percentage of cycles the GL1C (L1 cache) is busy.

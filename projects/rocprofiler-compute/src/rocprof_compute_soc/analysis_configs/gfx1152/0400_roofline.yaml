@@ -49,7 +49,7 @@ Panel Config:
           unit: GB/s
           peak: $L0Bw_empirical_peak
         LDS Bandwidth:
-          value: AVG((((SQ_LDS_IDX_ACTIVE_sum - SQ_LDS_BANK_CONFLICT_sum) * 4 * $lds_banks_per_cu) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+          value: AVG((((SQC_LDS_IDX_ACTIVE_sum - SQC_LDS_BANK_CONFLICT_sum) * 4 * $lds_banks_per_cu) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
           unit: GB/s
           peak: $LDSBw_empirical_peak
 
