@@ -51,7 +51,7 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGraphExecMemcpyNodeSetParams_Positive_Basic") {
+TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParams_Positive_Basic) {
   constexpr auto f = [](void* dst, void* src, size_t count, hipMemcpyKind direction) {
     hipGraph_t graph = nullptr;
     HIP_CHECK(hipGraphCreate(&graph, 0));
@@ -158,7 +158,7 @@ TEST_CASE("Unit_hipGraphExecMemcpyNodeSetParams_Positive_Basic") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGraphExecMemcpyNodeSetParams_Negative_Parameters") {
+TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParams_Negative_Parameters) {
   using namespace std::placeholders;
   hipGraph_t graph = nullptr;
   HIP_CHECK(hipGraphCreate(&graph, 0));
@@ -230,15 +230,35 @@ TEST_CASE("Unit_hipGraphExecMemcpyNodeSetParams_Negative_Parameters") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGraphExecMemcpyNodeSetParams_Negative_Changing_Memcpy_Direction") {
-  int *host, *dev;
+TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParams_Negative_Changing_Memcpy_Direction) {
+  int *host, *dev, *src, *dst;
   HIP_CHECK(hipHostMalloc(&host, sizeof(int)));
   HIP_CHECK(hipMalloc(&dev, sizeof(int)));
 
-  const auto [dir, src, dst] = GENERATE_REF(std::make_tuple(hipMemcpyHostToHost, host, host),
-                                            std::make_tuple(hipMemcpyHostToDevice, host, dev),
-                                            std::make_tuple(hipMemcpyDeviceToHost, dev, host),
-                                            std::make_tuple(hipMemcpyDeviceToDevice, dev, dev));
+  const auto dir = GENERATE(hipMemcpyHostToHost, hipMemcpyHostToDevice,
+                            hipMemcpyDeviceToHost, hipMemcpyDeviceToDevice);
+
+  switch (dir) {
+  case hipMemcpyHostToHost:
+    src = host;
+    dst = host;
+    break;
+  case hipMemcpyHostToDevice:
+    src = host;
+    dst = dev;
+    break;
+  case hipMemcpyDeviceToHost:
+    src = dev;
+    dst = host;
+    break;
+  case hipMemcpyDeviceToDevice:
+    src = dev;
+    dst = dev;
+    break;
+  default:
+    REQUIRE(false);
+    assert(false);
+  }
 
   hipGraph_t graph = nullptr;
   HIP_CHECK(hipGraphCreate(&graph, 0));

@@ -207,16 +207,16 @@ static bool hipPerfBufferCopyRectSpeed_test(int p_tests) {
 /**
  * Test Description
  * ------------------------
- *  - Verify hipPerfBufferCopy status.
+ *  - Verify hipPerfBufferCopy status.
  * Test source
  * ------------------------
- *  - perftests/memory/hipPerfBufferCopyRectSpeed.cc
+ *  - perftests/memory/hipPerfBufferCopyRectSpeed.cc
  * Test requirements
  * ------------------------
- *  - HIP_VERSION >= 5.6
+ *  - HIP_VERSION >= 5.6
  */
 
-TEST_CASE("Perf_hipPerfBufferCopyRectSpeed_test") {
+TEST_CASE(Perf_hipPerfBufferCopyRectSpeed_test) {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
 

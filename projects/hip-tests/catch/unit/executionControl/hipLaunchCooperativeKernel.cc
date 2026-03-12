@@ -27,7 +27,7 @@ THE SOFTWARE.
 #include <resource_guards.hh>
 #include <utils.hh>
 
-TEST_CASE("Unit_hipLaunchCooperativeKernel_Positive_Basic") {
+TEST_CASE(Unit_hipLaunchCooperativeKernel_Positive_Basic) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {
     HipTest::HIP_SKIP_TEST("CooperativeLaunch not supported");
     return;
@@ -54,7 +54,7 @@ TEST_CASE("Unit_hipLaunchCooperativeKernel_Positive_Basic") {
   }
 }
 
-TEST_CASE("Unit_hipLaunchCooperativeKernel_Positive_Parameters") {
+TEST_CASE(Unit_hipLaunchCooperativeKernel_Positive_Parameters) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {
     HipTest::HIP_SKIP_TEST("CooperativeLaunch not supported");
     return;
@@ -79,7 +79,7 @@ TEST_CASE("Unit_hipLaunchCooperativeKernel_Positive_Parameters") {
   }
 }
 
-TEST_CASE("Unit_hipLaunchCooperativeKernel_Negative_Parameters") {
+TEST_CASE(Unit_hipLaunchCooperativeKernel_Negative_Parameters) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {
     HipTest::HIP_SKIP_TEST("CooperativeLaunch not supported");
     return;
@@ -178,7 +178,7 @@ TEST_CASE("Unit_hipLaunchCooperativeKernel_Negative_Parameters") {
   }
 }
 
-TEST_CASE("Unit_hipLaunchCooperativeKernel_Verify_Capture") {
+TEST_CASE(Unit_hipLaunchCooperativeKernel_Verify_Capture) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {
     HipTest::HIP_SKIP_TEST("CooperativeLaunch not supported");
     return;

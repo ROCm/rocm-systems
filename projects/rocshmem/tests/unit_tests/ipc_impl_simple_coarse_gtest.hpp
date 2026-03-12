@@ -67,7 +67,7 @@ kernel_simple_coarse_copy_warp(IpcImpl *ipc_impl, int *src, int *dest, size_t by
 }
 
 class IPCImplSimpleCoarse : public ::testing::TestWithParam<std::tuple<int, int, int>> {
-    using HEAP_T = HeapMemory<HIPAllocator>;
+    using HEAP_T = HeapMemoryType<HIPAllocator>;
     using MPI_T = RemoteHeapInfo<CommunicatorMPI>;
     using FN_T = void (*)(IpcImpl*, int*, int*, size_t);
 

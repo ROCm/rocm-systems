@@ -55,7 +55,7 @@ __global__ void test_kernel() {
  * ------------------------
  * - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_Printf_PrintfAltFormsTsts") {
+TEST_CASE(Unit_Printf_PrintfAltFormsTsts) {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {

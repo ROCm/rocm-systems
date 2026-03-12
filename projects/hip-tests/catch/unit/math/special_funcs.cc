@@ -23,8 +23,7 @@ THE SOFTWARE.
 #include "binary_common.hh"
 #include "special_common.hh"
 #include "math_special_func_kernels_rtc.hh"
-
-#include <boost/math/special_functions.hpp>
+#include "math_reference_impl.hh"
 
 
 /**
@@ -63,7 +62,7 @@ MATH_UNARY_WITHIN_ULP_STL_REF_TEST_DEF(erf, 2, 2)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_erf_erff_Negative_RTC") { NegativeTestRTCWrapper<4>(kErf); }
+TEST_CASE(Unit_Device_erf_erff_Negative_RTC) { NegativeTestRTCWrapper<4>(kErf); }
 
 /**
  * Test Description
@@ -94,7 +93,7 @@ MATH_UNARY_WITHIN_ULP_STL_REF_TEST_DEF(erfc, 4, 5)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_erfc_erfcf_Negative_RTC") { NegativeTestRTCWrapper<4>(kErfc); }
+TEST_CASE(Unit_Device_erfc_erfcf_Negative_RTC) { NegativeTestRTCWrapper<4>(kErfc); }
 
 MATH_UNARY_KERNEL_DEF(erfinv)
 
@@ -112,7 +111,7 @@ MATH_UNARY_KERNEL_DEF(erfinv)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_erfinvf_Accuracy_Positive") {
+TEST_CASE(Unit_Device_erfinvf_Accuracy_Positive) {
   auto erfinv_ref = [](double arg) -> double {
     if (arg == 0) return 0;
     if (arg == 1)
@@ -121,7 +120,7 @@ TEST_CASE("Unit_Device_erfinvf_Accuracy_Positive") {
       return -std::numeric_limits<double>::infinity();
     else if (arg < -1 || arg > 1)
       return std::numeric_limits<double>::quiet_NaN();
-    return boost::math::erf_inv(arg);
+    return math_reference::erfinv_ref(arg);
   };
   double (*ref)(double) = erfinv_ref;
   UnarySinglePrecisionTest(erfinv_kernel<float>, ref, ULPValidatorBuilderFactory<float>(4));
@@ -142,7 +141,7 @@ TEST_CASE("Unit_Device_erfinvf_Accuracy_Positive") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_erfinv_Accuracy_Positive") {
+TEST_CASE(Unit_Device_erfinv_Accuracy_Positive) {
   auto erfinv_ref = [](long double arg) -> long double {
     if (arg == 0) return 0;
     if (arg == 1)
@@ -151,7 +150,7 @@ TEST_CASE("Unit_Device_erfinv_Accuracy_Positive") {
       return -std::numeric_limits<long double>::infinity();
     else if (arg < -1 || arg > 1)
       return std::numeric_limits<long double>::quiet_NaN();
-    return boost::math::erf_inv(arg);
+    return math_reference::erfinv_ref(arg);
   };
   long double (*ref)(long double) = erfinv_ref;
   UnaryDoublePrecisionTest(erfinv_kernel<double>, ref, ULPValidatorBuilderFactory<double>(5));
@@ -169,7 +168,7 @@ TEST_CASE("Unit_Device_erfinv_Accuracy_Positive") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_erfinv_erfinvf_Negative_RTC") { NegativeTestRTCWrapper<4>(kErfinv); }
+TEST_CASE(Unit_Device_erfinv_erfinvf_Negative_RTC) { NegativeTestRTCWrapper<4>(kErfinv); }
 
 MATH_UNARY_KERNEL_DEF(erfcinv)
 
@@ -187,7 +186,7 @@ MATH_UNARY_KERNEL_DEF(erfcinv)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_erfcinvf_Accuracy_Positive") {
+TEST_CASE(Unit_Device_erfcinvf_Accuracy_Positive) {
   auto erfcinv_ref = [](double arg) -> double {
     if (arg == 0)
       return std::numeric_limits<double>::infinity();
@@ -195,7 +194,7 @@ TEST_CASE("Unit_Device_erfcinvf_Accuracy_Positive") {
       return -std::numeric_limits<double>::infinity();
     else if (arg < 0 || arg > 2)
       return std::numeric_limits<double>::quiet_NaN();
-    return boost::math::erfc_inv(arg);
+    return math_reference::erfcinv_ref(arg);
   };
   double (*ref)(double) = erfcinv_ref;
   UnarySinglePrecisionTest(erfcinv_kernel<float>, ref, ULPValidatorBuilderFactory<float>(4));
@@ -216,7 +215,7 @@ TEST_CASE("Unit_Device_erfcinvf_Accuracy_Positive") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_erfcinv_Accuracy_Positive") {
+TEST_CASE(Unit_Device_erfcinv_Accuracy_Positive) {
   auto erfcinv_ref = [](long double arg) -> long double {
     if (arg == 0)
       return std::numeric_limits<long double>::infinity();
@@ -224,7 +223,7 @@ TEST_CASE("Unit_Device_erfcinv_Accuracy_Positive") {
       return -std::numeric_limits<long double>::infinity();
     else if (arg < 0 || arg > 2)
       return std::numeric_limits<long double>::quiet_NaN();
-    return boost::math::erfc_inv(arg);
+    return math_reference::erfcinv_ref(arg);
   };
   long double (*ref)(long double) = erfcinv_ref;
   UnaryDoublePrecisionTest(erfcinv_kernel<double>, ref, ULPValidatorBuilderFactory<double>(6));
@@ -242,7 +241,7 @@ TEST_CASE("Unit_Device_erfcinv_Accuracy_Positive") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_erfcinv_erfcinvf_Negative_RTC") { NegativeTestRTCWrapper<4>(kErfcinv); }
+TEST_CASE(Unit_Device_erfcinv_erfcinvf_Negative_RTC) { NegativeTestRTCWrapper<4>(kErfcinv); }
 
 MATH_UNARY_KERNEL_DEF(erfcx)
 
@@ -258,7 +257,7 @@ MATH_UNARY_KERNEL_DEF(erfcx)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_erfcxf_Sanity_Positive") {
+TEST_CASE(Unit_Device_erfcxf_Sanity_Positive) {
   constexpr std::array<float, 11> input{-std::numeric_limits<float>::infinity(),
                                         -1000.f,
                                         -100.f,
@@ -297,7 +296,7 @@ TEST_CASE("Unit_Device_erfcxf_Sanity_Positive") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_erfcx_Sanity_Positive") {
+TEST_CASE(Unit_Device_erfcx_Sanity_Positive) {
   constexpr std::array<double, 11> input{
       -std::numeric_limits<double>::infinity(), -1000., -100., -5., -0.5, 0., 0.75, 15., 200., 500.,
       std::numeric_limits<double>::infinity()};
@@ -328,7 +327,7 @@ TEST_CASE("Unit_Device_erfcx_Sanity_Positive") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_erfcx_erfcxf_Negative_RTC") { NegativeTestRTCWrapper<4>(kErfcx); }
+TEST_CASE(Unit_Device_erfcx_erfcxf_Negative_RTC) { NegativeTestRTCWrapper<4>(kErfcx); }
 
 MATH_UNARY_KERNEL_DEF(normcdf)
 
@@ -345,7 +344,7 @@ MATH_UNARY_KERNEL_DEF(normcdf)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_normcdff_Accuracy_Positive") {
+TEST_CASE(Unit_Device_normcdff_Accuracy_Positive) {
   auto normcdf_ref = [](double arg) -> double { return std::erfc(-arg / std::sqrt(2)) / 2; };
   double (*ref)(double) = normcdf_ref;
   UnarySinglePrecisionTest(normcdf_kernel<float>, ref, ULPValidatorBuilderFactory<float>(5));
@@ -364,7 +363,7 @@ TEST_CASE("Unit_Device_normcdff_Accuracy_Positive") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_normcdf_Accuracy_Positive") {
+TEST_CASE(Unit_Device_normcdf_Accuracy_Positive) {
   auto normcdf_ref = [](long double arg) -> long double {
     return std::erfc(-arg / std::sqrt(2.L)) / 2;
   };
@@ -384,7 +383,7 @@ TEST_CASE("Unit_Device_normcdf_Accuracy_Positive") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_normcdf_normcdff_Negative_RTC") { NegativeTestRTCWrapper<4>(kNormcdf); }
+TEST_CASE(Unit_Device_normcdf_normcdff_Negative_RTC) { NegativeTestRTCWrapper<4>(kNormcdf); }
 
 MATH_UNARY_KERNEL_DEF(normcdfinv)
 
@@ -400,7 +399,7 @@ MATH_UNARY_KERNEL_DEF(normcdfinv)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_normcdfinvf_Sanity_Positive") {
+TEST_CASE(Unit_Device_normcdfinvf_Sanity_Positive) {
   constexpr std::array<float, 9> input{0.f, 0.1f, 0.25f, 0.4f, 0.5f, 0.6f, 0.75f, 0.9f, 1.f};
   constexpr std::array<float, 9> reference{-std::numeric_limits<float>::infinity(),
                                            -1.28155160f,
@@ -427,7 +426,7 @@ TEST_CASE("Unit_Device_normcdfinvf_Sanity_Positive") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_normcdfinv_Sanity_Positive") {
+TEST_CASE(Unit_Device_normcdfinv_Sanity_Positive) {
   constexpr std::array<double, 9> input{0., 0.1, 0.25, 0.4, 0.5, 0.6, 0.75, 0.9, 1.};
   constexpr std::array<double, 9> reference{-std::numeric_limits<float>::infinity(),
                                             -1.2815515655446004,
@@ -454,7 +453,7 @@ TEST_CASE("Unit_Device_normcdfinv_Sanity_Positive") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_normcdfinv_normcdfinvf_Negative_RTC") {
+TEST_CASE(Unit_Device_normcdfinv_normcdfinvf_Negative_RTC) {
   NegativeTestRTCWrapper<4>(kNormcdfinv);
 }
 
@@ -475,7 +474,7 @@ MATH_UNARY_KERNEL_DEF(tgamma)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_tgammaf_Accuracy_Limited_Positive") {
+TEST_CASE(Unit_Device_tgammaf_Accuracy_Limited_Positive) {
   double (*ref)(double) = std::tgamma;
   UnarySinglePrecisionRangeTest(tgamma_kernel<float>, ref, ULPValidatorBuilderFactory<float>(5),
                                 std::numeric_limits<float>::lowest(), -0.001f);
@@ -498,7 +497,7 @@ TEST_CASE("Unit_Device_tgammaf_Accuracy_Limited_Positive") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_tgamma_Accuracy_Limited_Positive") {
+TEST_CASE(Unit_Device_tgamma_Accuracy_Limited_Positive) {
   long double (*ref)(long double) = std::tgamma;
   UnaryDoublePrecisionTest(tgamma_kernel<double>, ref, ULPValidatorBuilderFactory<double>(10));
 }
@@ -515,7 +514,7 @@ TEST_CASE("Unit_Device_tgamma_Accuracy_Limited_Positive") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_tgamma_tgammaf_Negative_RTC") { NegativeTestRTCWrapper<4>(kTgamma); }
+TEST_CASE(Unit_Device_tgamma_tgammaf_Negative_RTC) { NegativeTestRTCWrapper<4>(kTgamma); }
 
 MATH_UNARY_KERNEL_DEF(lgamma)
 
@@ -533,7 +532,7 @@ MATH_UNARY_KERNEL_DEF(lgamma)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_lgammaf_Accuracy_Limited_Positive") {
+TEST_CASE(Unit_Device_lgammaf_Accuracy_Limited_Positive) {
   double (*ref)(double) = std::lgamma;
   UnarySinglePrecisionRangeTest(lgamma_kernel<float>, ref, ULPValidatorBuilderFactory<float>(7),
                                 std::numeric_limits<float>::lowest(), -11.0001f);
@@ -556,7 +555,7 @@ TEST_CASE("Unit_Device_lgammaf_Accuracy_Limited_Positive") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_lgamma_Accuracy_Limited_Positive") {
+TEST_CASE(Unit_Device_lgamma_Accuracy_Limited_Positive) {
   long double (*ref)(long double) = std::lgamma;
   UnaryDoublePrecisionBruteForceTest(lgamma_kernel<double>, ref,
                                      ULPValidatorBuilderFactory<double>(4),
@@ -578,7 +577,7 @@ TEST_CASE("Unit_Device_lgamma_Accuracy_Limited_Positive") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_lgamma_lgammaf_Negative_RTC") { NegativeTestRTCWrapper<4>(kLgamma); }
+TEST_CASE(Unit_Device_lgamma_lgammaf_Negative_RTC) { NegativeTestRTCWrapper<4>(kLgamma); }
 
 MATH_UNARY_KERNEL_DEF(cyl_bessel_i0)
 
@@ -596,7 +595,7 @@ MATH_UNARY_KERNEL_DEF(cyl_bessel_i0)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_cyl_bessel_i0f_Accuracy_Limited_Positive") {
+TEST_CASE(Unit_Device_cyl_bessel_i0f_Accuracy_Limited_Positive) {
   auto cyl_bessel_i0_ref = [](double arg) -> double { return std::cyl_bessel_i(0, arg); };
   double (*ref)(double) = cyl_bessel_i0_ref;
   UnarySinglePrecisionRangeTest(cyl_bessel_i0_kernel<float>, ref,
@@ -618,7 +617,7 @@ TEST_CASE("Unit_Device_cyl_bessel_i0f_Accuracy_Limited_Positive") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_cyl_bessel_i0_Accuracy_Limited_Positive") {
+TEST_CASE(Unit_Device_cyl_bessel_i0_Accuracy_Limited_Positive) {
   auto cyl_bessel_i0_ref = [](long double arg) -> long double { return std::cyl_bessel_i(0, arg); };
   long double (*ref)(long double) = cyl_bessel_i0_ref;
   UnaryDoublePrecisionBruteForceTest(cyl_bessel_i0_kernel<double>, ref,
@@ -637,7 +636,7 @@ TEST_CASE("Unit_Device_cyl_bessel_i0_Accuracy_Limited_Positive") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_cyl_bessel_i0_cyl_bessel_i0f_Negative_RTC") {
+TEST_CASE(Unit_Device_cyl_bessel_i0_cyl_bessel_i0f_Negative_RTC) {
   NegativeTestRTCWrapper<4>(kCylBesselI0);
 }
 
@@ -657,7 +656,7 @@ MATH_UNARY_KERNEL_DEF(cyl_bessel_i1)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_cyl_bessel_i1f_Accuracy_Limited_Positive") {
+TEST_CASE(Unit_Device_cyl_bessel_i1f_Accuracy_Limited_Positive) {
   auto cyl_bessel_i1_ref = [](double arg) -> double { return std::cyl_bessel_i(1, arg); };
   double (*ref)(double) = cyl_bessel_i1_ref;
   UnarySinglePrecisionRangeTest(cyl_bessel_i1_kernel<float>, ref,
@@ -679,7 +678,7 @@ TEST_CASE("Unit_Device_cyl_bessel_i1f_Accuracy_Limited_Positive") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_cyl_bessel_i1_Accuracy_Limited_Positive") {
+TEST_CASE(Unit_Device_cyl_bessel_i1_Accuracy_Limited_Positive) {
   auto cyl_bessel_i1_ref = [](long double arg) -> long double { return std::cyl_bessel_i(1, arg); };
   long double (*ref)(long double) = cyl_bessel_i1_ref;
   UnaryDoublePrecisionBruteForceTest(cyl_bessel_i1_kernel<double>, ref,
@@ -698,7 +697,7 @@ TEST_CASE("Unit_Device_cyl_bessel_i1_Accuracy_Limited_Positive") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_cyl_bessel_i1_cyl_bessel_i1f_Negative_RTC") {
+TEST_CASE(Unit_Device_cyl_bessel_i1_cyl_bessel_i1f_Negative_RTC) {
   NegativeTestRTCWrapper<4>(kCylBesselI1);
 }
 
@@ -720,7 +719,7 @@ MATH_UNARY_KERNEL_DEF(y0)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_y0f_Accuracy_Limited_Positive") {
+TEST_CASE(Unit_Device_y0f_Accuracy_Limited_Positive) {
 #ifdef __unix__
   double (*ref)(double) = y0;
 #elif _WIN64
@@ -747,7 +746,7 @@ TEST_CASE("Unit_Device_y0f_Accuracy_Limited_Positive") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_y0_Accuracy_Limited_Positive") {
+TEST_CASE(Unit_Device_y0_Accuracy_Limited_Positive) {
 #ifdef __unix__
   long double (*ref)(long double) = y0l;
 #elif _WIN64
@@ -770,7 +769,7 @@ TEST_CASE("Unit_Device_y0_Accuracy_Limited_Positive") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_y0_y0f_Negative_RTC") { NegativeTestRTCWrapper<4>(kY0); }
+TEST_CASE(Unit_Device_y0_y0f_Negative_RTC) { NegativeTestRTCWrapper<4>(kY0); }
 
 MATH_UNARY_KERNEL_DEF(y1)
 
@@ -788,7 +787,7 @@ MATH_UNARY_KERNEL_DEF(y1)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_y1f_Accuracy_Limited_Positive") {
+TEST_CASE(Unit_Device_y1f_Accuracy_Limited_Positive) {
 #ifdef __unix__
   double (*ref)(double) = y1;
 #elif _WIN64
@@ -815,7 +814,7 @@ TEST_CASE("Unit_Device_y1f_Accuracy_Limited_Positive") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_y1_Accuracy_Limited_Positive") {
+TEST_CASE(Unit_Device_y1_Accuracy_Limited_Positive) {
 #ifdef __unix__
   long double (*ref)(long double) = y1l;
 #elif _WIN64
@@ -838,7 +837,7 @@ TEST_CASE("Unit_Device_y1_Accuracy_Limited_Positive") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_y1_y1f_Negative_RTC") { NegativeTestRTCWrapper<4>(kY1); }
+TEST_CASE(Unit_Device_y1_y1f_Negative_RTC) { NegativeTestRTCWrapper<4>(kY1); }
 
 MATH_BESSEL_N_KERNEL_DEF(yn)
 
@@ -856,7 +855,7 @@ MATH_BESSEL_N_KERNEL_DEF(yn)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_ynf_Accuracy_Limited_Positive") {
+TEST_CASE(Unit_Device_ynf_Accuracy_Limited_Positive) {
 #ifdef __unix__
   double (*ref)(int, double) = yn;
 #elif _WIN64
@@ -882,7 +881,7 @@ TEST_CASE("Unit_Device_ynf_Accuracy_Limited_Positive") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_yn_Accuracy_Limited_Positive") {
+TEST_CASE(Unit_Device_yn_Accuracy_Limited_Positive) {
 #ifdef __unix__
   long double (*ref)(int, long double) = ynl;
 #elif _WIN64
@@ -906,7 +905,7 @@ TEST_CASE("Unit_Device_yn_Accuracy_Limited_Positive") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_yn_ynf_Negative_RTC") { NegativeTestRTCWrapper<8>(kYn); }
+TEST_CASE(Unit_Device_yn_ynf_Negative_RTC) { NegativeTestRTCWrapper<8>(kYn); }
 
 MATH_UNARY_KERNEL_DEF(j0)
 
@@ -924,7 +923,7 @@ MATH_UNARY_KERNEL_DEF(j0)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_j0f_Accuracy_Limited_Positive") {
+TEST_CASE(Unit_Device_j0f_Accuracy_Limited_Positive) {
 #ifdef __unix__
   double (*ref)(double) = j0;
 #elif _WIN64
@@ -953,7 +952,7 @@ TEST_CASE("Unit_Device_j0f_Accuracy_Limited_Positive") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_j0_Accuracy_Limited_Positive") {
+TEST_CASE(Unit_Device_j0_Accuracy_Limited_Positive) {
 #ifdef __unix__
   long double (*ref)(long double) = j0l;
 #elif _WIN64
@@ -976,7 +975,7 @@ TEST_CASE("Unit_Device_j0_Accuracy_Limited_Positive") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_j0_j0f_Negative_RTC") { NegativeTestRTCWrapper<4>(kJ0); }
+TEST_CASE(Unit_Device_j0_j0f_Negative_RTC) { NegativeTestRTCWrapper<4>(kJ0); }
 
 MATH_UNARY_KERNEL_DEF(j1)
 
@@ -994,7 +993,7 @@ MATH_UNARY_KERNEL_DEF(j1)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_j1f_Accuracy_Limited_Positive") {
+TEST_CASE(Unit_Device_j1f_Accuracy_Limited_Positive) {
 #ifdef __unix__
   double (*ref)(double) = j1;
 #elif _WIN64
@@ -1023,7 +1022,7 @@ TEST_CASE("Unit_Device_j1f_Accuracy_Limited_Positive") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_j1_Accuracy_Limited_Positive") {
+TEST_CASE(Unit_Device_j1_Accuracy_Limited_Positive) {
 #ifdef __unix__
   long double (*ref)(long double) = j1l;
 #elif _WIN64
@@ -1046,7 +1045,7 @@ TEST_CASE("Unit_Device_j1_Accuracy_Limited_Positive") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_j1_j1f_Negative_RTC") { NegativeTestRTCWrapper<4>(kJ1); }
+TEST_CASE(Unit_Device_j1_j1f_Negative_RTC) { NegativeTestRTCWrapper<4>(kJ1); }
 
 MATH_BESSEL_N_KERNEL_DEF(jn)
 
@@ -1064,7 +1063,7 @@ MATH_BESSEL_N_KERNEL_DEF(jn)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_jnf_Accuracy_Limited_Positive") {
+TEST_CASE(Unit_Device_jnf_Accuracy_Limited_Positive) {
 #ifdef __unix__
   double (*ref)(int, double) = jn;
 #elif _WIN64
@@ -1090,7 +1089,7 @@ TEST_CASE("Unit_Device_jnf_Accuracy_Limited_Positive") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_jn_Accuracy_Limited_Positive") {
+TEST_CASE(Unit_Device_jn_Accuracy_Limited_Positive) {
 #ifdef __unix__
   long double (*ref)(int, long double) = jnl;
 #elif _WIN64
@@ -1114,7 +1113,7 @@ TEST_CASE("Unit_Device_jn_Accuracy_Limited_Positive") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_jn_jnf_Negative_RTC") { NegativeTestRTCWrapper<8>(kJn); }
+TEST_CASE(Unit_Device_jn_jnf_Negative_RTC) { NegativeTestRTCWrapper<8>(kJn); }
 
 /**
  * End doxygen group MathTest.

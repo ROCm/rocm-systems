@@ -37,7 +37,7 @@
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-TEST_CASE("Unit_hipMemcpy3DPeer_BasicFunctional") {
+TEST_CASE(Unit_hipMemcpy3DPeer_BasicFunctional) {
   CHECK_IMAGE_SUPPORT
   constexpr int numW = 16;
   constexpr int numH = 16;
@@ -48,6 +48,7 @@ TEST_CASE("Unit_hipMemcpy3DPeer_BasicFunctional") {
   if (device_count <= 1) {
     std::string msg = "Invalid Device Count. Hence Skipping the test.. ";
     HipTest::HIP_SKIP_TEST(msg.c_str());
+    return;
   }
   const auto src_device = GENERATE_COPY(range(0, device_count));
   const auto dst_device = GENERATE_COPY(range(0, device_count));
@@ -55,6 +56,7 @@ TEST_CASE("Unit_hipMemcpy3DPeer_BasicFunctional") {
     std::string msg = "Both Source and Destination device ids are same.";
     INFO("Src device: " << src_device << ", Dst device: " << dst_device);
     HipTest::HIP_SKIP_TEST(msg.c_str());
+    return;
   }
   HIP_CHECK(hipSetDevice(src_device));
   int can_access_peer = 0;
@@ -63,6 +65,7 @@ TEST_CASE("Unit_hipMemcpy3DPeer_BasicFunctional") {
     std::string msg = "Skipped as peer access cannot be enabled between devices " +
         std::to_string(src_device) + " " + std::to_string(dst_device);
     HipTest::HIP_SKIP_TEST(msg.c_str());
+    return;
   }
   // Array-1 Memory allocation
   hipChannelFormatDesc channelDesc_1 = hipCreateChannelDesc<char>();
@@ -137,7 +140,7 @@ TEST_CASE("Unit_hipMemcpy3DPeer_BasicFunctional") {
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-TEST_CASE("Unit_hipMemcpy3DPeer_NegativeTsts") {
+TEST_CASE(Unit_hipMemcpy3DPeer_NegativeTsts) {
   CHECK_IMAGE_SUPPORT
   constexpr int numW = 16;
   constexpr int numH = 16;

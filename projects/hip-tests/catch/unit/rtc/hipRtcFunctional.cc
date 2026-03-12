@@ -43,7 +43,7 @@ __global__ void testinline()
 }
 )"};
 
-TEST_CASE("Unit_hiprtc_functional") {
+TEST_CASE(Unit_hiprtc_functional) {
   using namespace std;
   hiprtcProgram prog;
   HIPRTC_CHECK(hiprtcCreateProgram(&prog, code, nullptr, 0, nullptr, nullptr));

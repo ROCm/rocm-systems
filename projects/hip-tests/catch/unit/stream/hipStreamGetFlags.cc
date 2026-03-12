@@ -30,7 +30,7 @@ Testcase Scenarios :
  * @brief Check that hipStreamGetFlags returns the same flags that were used to create the stream.
  *
  */
-TEST_CASE("Unit_hipStreamGetFlags_Basic") {
+TEST_CASE(Unit_hipStreamGetFlags_Basic) {
   unsigned int expectedFlag = GENERATE(hipStreamDefault, hipStreamNonBlocking);
   unsigned int returnedFlags;
   hipStream_t stream;
@@ -45,7 +45,7 @@ TEST_CASE("Unit_hipStreamGetFlags_Basic") {
  * @brief Negative scenarios for hipStreamGetFlags.
  *
  */
-TEST_CASE("Unit_hipStreamGetFlags_Negative") {
+TEST_CASE(Unit_hipStreamGetFlags_Negative) {
   hipStream_t validStream;
   unsigned int flags;
 
@@ -70,7 +70,7 @@ TEST_CASE("Unit_hipStreamGetFlags_Negative") {
 /**
  * Test flag value when streams created with CUMask.
  */
-TEST_CASE("Unit_hipStreamGetFlags_StreamsCreatedWithCUMask") {
+TEST_CASE(Unit_hipStreamGetFlags_StreamsCreatedWithCUMask) {
   hipStream_t stream;
   unsigned int flags;
   const uint32_t cuMask = 0xffffffff;

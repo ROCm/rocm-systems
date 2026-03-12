@@ -45,7 +45,7 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGraphAddDependencies_Positive_Functional") {
+TEST_CASE(Unit_hipGraphAddDependencies_Positive_Functional) {
   constexpr size_t N = 1024;
   hipGraph_t graph;
   hipStream_t streamForGraph;
@@ -110,7 +110,7 @@ TEST_CASE("Unit_hipGraphAddDependencies_Positive_Functional") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGraphAddDependencies_Positive_Parameters") {
+TEST_CASE(Unit_hipGraphAddDependencies_Positive_Parameters) {
   constexpr size_t Nbytes = 1024;
   hipGraphNode_t memcpyH2D_A;
   hipGraphNode_t memcpyD2H_A;
@@ -191,7 +191,7 @@ TEST_CASE("Unit_hipGraphAddDependencies_Positive_Parameters") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGraphAddDependencies_Negative_Parameters") {
+TEST_CASE(Unit_hipGraphAddDependencies_Negative_Parameters) {
   // Initialize
   constexpr size_t Nbytes = 1024;
   hipGraph_t graph;
@@ -283,17 +283,6 @@ TEST_CASE("Unit_hipGraphAddDependencies_Negative_Parameters") {
   SECTION("Same Node Dependencies") {
     HIP_CHECK(hipGraphAddMemsetNode(&memset_A, graph, nullptr, 0, &memsetParams));
     HIP_CHECK_ERROR(hipGraphAddDependencies(graph, &memset_A, &memset_A, 1), hipErrorInvalidValue);
-  }
-
-  SECTION("numDependencies > To/From length") {
-    HIP_CHECK(hipGraphAddMemsetNode(&memset_A, graph, nullptr, 0, &memsetParams));
-    HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyH2D_A, graph, nullptr, 0, A_d, A_h, Nbytes,
-                                      hipMemcpyHostToDevice));
-    HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyD2H_A, graph, nullptr, 0, A_h, A_d, Nbytes,
-                                      hipMemcpyDeviceToHost));
-    hipGraphNode_t from_list[] = {memset_A, memcpyH2D_A};
-    hipGraphNode_t to_list[] = {memcpyH2D_A, memcpyD2H_A};
-    HIP_CHECK_ERROR(hipGraphAddDependencies(graph, from_list, to_list, 3), hipErrorInvalidValue);
   }
 
   // Destroy

@@ -202,6 +202,9 @@ template <typename T> void memcpytest2(DeviceMemory<T>* dmem, HostMemory<T>* hme
                                        size_t numElements, bool useHostToHost,
                                        bool useDeviceToDevice, bool useMemkindDefault) {
   size_t sizeElements = numElements * sizeof(T);
+  int threads = 1024;
+  int blocks =
+      (numElements % threads == 0) ? (numElements / threads) : ((numElements / threads) + 1);
 
   hmem->reset(numElements);
 
@@ -228,7 +231,7 @@ template <typename T> void memcpytest2(DeviceMemory<T>* dmem, HostMemory<T>* hme
                         useMemkindDefault ? hipMemcpyDefault : hipMemcpyHostToDevice));
   }
 
-  hipLaunchKernelGGL(HipTest::vectorADD, dim3(1), dim3(1), 0, 0, static_cast<const T*>(dmem->A_d()),
+  hipLaunchKernelGGL(HipTest::vectorADD, blocks, threads, 0, 0, static_cast<const T*>(dmem->A_d()),
                      static_cast<const T*>(dmem->B_d()), dmem->C_d(), numElements);
   HIP_CHECK(hipGetLastError());
 
@@ -369,7 +372,7 @@ Initializes device variables
 Launches kernel and performs the sum of device variables
 copies the result to host variable and validates the result.
 */
-TEMPLATE_TEST_CASE("Unit_hipMemcpy_KernelLaunch", "", int, float, double) {
+TEMPLATE_TEST_CASE(Unit_hipMemcpy_KernelLaunch, int, float, double) {
   size_t Nbytes = NUM_ELM * sizeof(TestType);
 
   TestType *A_d{nullptr}, *B_d{nullptr}, *C_d{nullptr};
@@ -380,7 +383,9 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpy_KernelLaunch", "", int, float, double) {
   HIP_CHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice));
   HIP_CHECK(hipMemcpy(B_d, B_h, Nbytes, hipMemcpyHostToDevice));
 
-  hipLaunchKernelGGL(HipTest::vectorADD, dim3(1), dim3(1), 0, 0, static_cast<const TestType*>(A_d),
+  constexpr int threads = 1024;
+  int blocks = NUM_ELM / threads;
+  hipLaunchKernelGGL(HipTest::vectorADD, blocks, 1024, 0, 0, static_cast<const TestType*>(A_d),
                      static_cast<const TestType*>(B_d), C_d, NUM_ELM);
   HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipMemcpy(C_h, C_d, Nbytes, hipMemcpyDeviceToHost));
@@ -399,8 +404,7 @@ This testcase verifies the following scenarios
 4. Device context change
 5. H2D-D2D-D2H peer GPU
 */
-TEMPLATE_TEST_CASE("Unit_hipMemcpy_H2H-H2D-D2H-H2PinMem", "[multigpu]", int,
-                   float, double) {
+TEMPLATE_TEST_CASE(Unit_hipMemcpy_H2H_H2D_D2H_H2PinMem, int, float, double) {
   TestType *A_d{nullptr}, *B_d{nullptr};
   TestType *A_h{nullptr}, *B_h{nullptr};
   TestType *A_Ph{nullptr}, *B_Ph{nullptr};
@@ -480,7 +484,7 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpy_H2H-H2D-D2H-H2PinMem", "[multigpu]", int,
 /*
 This testcase verifies the multi thread scenario
 */
-TEST_CASE("Unit_hipMemcpy_MultiThreadWithSerialization") {
+TEST_CASE(Unit_hipMemcpy_MultiThreadWithSerialization) {
   HIP_CHECK(hipDeviceReset());
 
   // Simplest cases: serialize the threads, and also used pinned memory:
@@ -496,7 +500,7 @@ This testcase verifies hipMemcpy API with pinnedMemory and hostRegister
 along with kernel launches
 */
 
-TEMPLATE_TEST_CASE("Unit_hipMemcpy_PinnedRegMemWithKernelLaunch", "[multigpu]",
+TEMPLATE_TEST_CASE(Unit_hipMemcpy_PinnedRegMemWithKernelLaunch,
                    int, float, double) {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));

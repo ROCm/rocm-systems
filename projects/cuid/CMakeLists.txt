@@ -49,3 +49,43 @@ add_subdirectory(cli)
 add_subdirectory(daemon)
 add_subdirectory(example)
 add_subdirectory(tests)
+
+# ==============================================================================
+# CPack Configuration for Portable Packages
+# ==============================================================================
+set(CPACK_PACKAGE_NAME "amdcuid")
+set(CPACK_PACKAGE_VENDOR "Advanced Micro Devices, Inc.")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "AMD Compute Unit ID Library and Tools")
+
+# Use the project's install prefix for all package types
+set(CPACK_PACKAGING_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}")
+set(CPACK_PACKAGE_VERSION_MAJOR "1")
+set(CPACK_PACKAGE_VERSION_MINOR "0")
+set(CPACK_PACKAGE_VERSION_PATCH "0")
+set(CPACK_PACKAGE_VERSION "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}")
+set(CPACK_PACKAGE_CONTACT "support@amd.com")
+set(CPACK_RESOURCE_FILE_README "${CMAKE_SOURCE_DIR}/README.md")
+
+# Component-based installation
+set(CPACK_COMPONENT_RUNTIME_DISPLAY_NAME "Runtime")
+set(CPACK_COMPONENT_LIBRARY_DISPLAY_NAME "Library")
+set(CPACK_COMPONENT_DEVELOPMENT_DISPLAY_NAME "Development")
+
+# Platform-specific generators
+if(WIN32)
+    set(CPACK_GENERATOR "ZIP;NSIS")
+else()
+    set(CPACK_GENERATOR "TGZ;DEB;RPM")
+    
+    # DEB-specific
+    set(CPACK_DEBIAN_PACKAGE_MAINTAINER "${CPACK_PACKAGE_CONTACT}")
+    set(CPACK_DEBIAN_PACKAGE_DEPENDS "libssl1.1 | libssl3")
+    set(CPACK_DEBIAN_PACKAGE_SECTION "utils")
+    
+    # RPM-specific
+    set(CPACK_RPM_PACKAGE_LICENSE "MIT")
+    set(CPACK_RPM_PACKAGE_GROUP "System Environment/Libraries")
+    set(CPACK_RPM_PACKAGE_REQUIRES "openssl-libs")
+endif()
+
+include(CPack)

@@ -67,7 +67,7 @@ static __global__ void f1(float *a) { *a = 1.0; }
  * ------------------------
  * - HIP_VERSION >= 7.1
  */
-TEST_CASE("Unit_hipOccupancyAvailableDynamicSMemPerBlock_Negative") {
+TEST_CASE(Unit_hipOccupancyAvailableDynamicSMemPerBlock_Negative) {
   size_t dynamicSmemSize;
   int numBlocks = 1;
   SECTION("Number of blocks are zero") {
@@ -108,7 +108,7 @@ TEST_CASE("Unit_hipOccupancyAvailableDynamicSMemPerBlock_Negative") {
  * ------------------------
  * - HIP_VERSION >= 7.1
  */
-TEST_CASE("Unit_hipOccupancyAvailableDynamicSMemPerBlock_Positive") {
+TEST_CASE(Unit_hipOccupancyAvailableDynamicSMemPerBlock_Positive) {
   size_t dynamicSmemSize = 0;
   int numBlocks = 1;
   int inputArray[SIZE], expectedOutput[SIZE], actualOutput[SIZE];
@@ -126,15 +126,17 @@ TEST_CASE("Unit_hipOccupancyAvailableDynamicSMemPerBlock_Positive") {
   HIP_CHECK(hipMemcpy(deviceArray, inputArray, SIZE * sizeof(int),
                       hipMemcpyHostToDevice));
 
-  HIP_CHECK(hipOccupancyAvailableDynamicSMemPerBlock(
-      &dynamicSmemSize, dynamicReverse, numBlocks, SIZE));
+  HIP_CHECK(
+      hipOccupancyAvailableDynamicSMemPerBlock(&dynamicSmemSize, dynamicReverse, numBlocks, SIZE));
   hipDeviceProp_t devProp;
   HIP_CHECK(hipGetDeviceProperties(&devProp, 0));
   INFO("Available Dynamic shared memory size : "
-       << dynamicSmemSize
-       << ", Dynamic shared memory calculated from device properties : "
+       << dynamicSmemSize << ", Dynamic shared memory calculated from device properties : "
        << devProp.sharedMemPerBlock - SIZE * sizeof(int));
+ // With ASAN this will mismatch
+#if !defined(ENABLE_ADDRESS_SANITIZER)
   REQUIRE(dynamicSmemSize == devProp.sharedMemPerBlock - SIZE * sizeof(int));
+#endif
   dynamicReverse<<<numBlocks, SIZE, SIZE * sizeof(int)>>>(deviceArray, SIZE);
 
   HIP_CHECK(hipMemcpy(actualOutput, deviceArray, SIZE * sizeof(int),
@@ -146,6 +148,7 @@ TEST_CASE("Unit_hipOccupancyAvailableDynamicSMemPerBlock_Positive") {
                                               << expectedOutput[i] << ")");
     REQUIRE(actualOutput[i] == expectedOutput[i]);
   }
+  HIP_CHECK(hipFree(deviceArray));
 }
 
 /**

@@ -50,6 +50,22 @@ def pytest_addoption(parser):
         action="store",
         help="Output Path.",
     )
+    parser.addoption(
+        "--target-cu",
+        action="store",
+        default=None,
+        help="Target CU for perfcounter validation.",
+    )
+    parser.addoption(
+        "--att-other-simd-out-dir",
+        action="store",
+        help="Path to Output directory.",
+    )
+    parser.addoption(
+        "--att-shaderdata-out-dir",
+        action="store",
+        help="Path to Output directory.",
+    )
 
 
 @pytest.fixture
@@ -67,6 +83,8 @@ def output_path(request):
 @pytest.fixture
 def code_object_file_path(request):
     file_path = request.config.getoption("--code-object-input")
+    if file_path is None:
+        pytest.skip("--code-object-input not provided")
     # hsa_file_load = re.compile(".*copy.hsaco$")
     code_object_files = {}
     code_object_memory = []
@@ -78,3 +96,19 @@ def code_object_file_path(request):
                 code_object_memory.append(filename)
     code_object_files["hsa_memory_load"] = code_object_memory
     return code_object_files
+
+
+@pytest.fixture
+def att_other_simd_out_dir_path(request):
+    output_dir_path = request.config.getoption("--att-other-simd-out-dir")
+    if not output_dir_path:
+        pytest.skip("--att-other-simd-out-dir not provided")
+    return output_dir_path
+
+
+@pytest.fixture
+def att_shaderdata_out_dir_path(request):
+    output_dir_path = request.config.getoption("--att-shaderdata-out-dir")
+    if not output_dir_path:
+        pytest.skip("--att-shaderdata-out-dir not provided")
+    return output_dir_path

@@ -153,7 +153,7 @@ __global__ void hip_complex_corner_double_kernel(int *res) {
  * ------------------------
  *  - HIP_VERSION >= 6.1
  */
-TEST_CASE("Unit_Rtc_HipComplex_header") {
+TEST_CASE(Unit_Rtc_HipComplex_header) {
   int n = 0;
   hipDeviceProp_t prop;
   HIP_CHECK(hipGetDeviceProperties(&prop, 0));

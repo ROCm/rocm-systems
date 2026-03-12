@@ -190,7 +190,7 @@ static void test_cg_thread_block_type(ThreadBlockTypeTests test_type, int block_
 }
 
 
-TEST_CASE("Unit_hipCGThreadBlockType") {
+TEST_CASE(Unit_hipCGThreadBlockType) {
   // Use default device for validating the test
   int device;
   hipDeviceProp_t device_properties;

@@ -262,14 +262,13 @@ void TestCore(const TestParams& p) {
 
   // Test Values on Device
   TestType test_value = GetTestValue<TestType, operation>();
+  std::vector<TestType> test_values(p.width * p.pitch / sizeof(TestType), test_value);
   for (auto i = 0u; i < p.num_devices; ++i) {
     HIP_CHECK(hipSetDevice(i));
     TestType* const mem_ptr =
         p.alloc_type == LinearAllocs::hipMalloc ? mem_devs[i].ptr() : mem_devs[i].host_ptr();
     HIP_CHECK(hipMemset(mem_ptr, 0, mem_alloc_size));
-    for (int j = 0; j < p.width * p.pitch / sizeof(TestType); ++j) {
-      HIP_CHECK(hipMemcpy(&mem_ptr[j], &test_value, sizeof(TestType), hipMemcpyHostToDevice));
-    }
+    HIP_CHECK(hipMemcpy(mem_ptr, test_values.data(), p.width * p.pitch, hipMemcpyHostToDevice));
   }
   // Launch Kernel and get back old vals
   for (auto i = 0u; i < p.num_devices; ++i) {

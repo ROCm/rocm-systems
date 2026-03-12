@@ -1,0 +1,4 @@
+---
+gcc:
+  Unit_LaunchKernelgccTests: *level_2
+  Unit_hipMallocgccTests: *level_2

@@ -31,7 +31,7 @@ from typing import Optional, Union
 from rocprof_compute_profile.profiler_base import RocProfCompute_Base
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils.logger import console_error, console_log, demarcate
-from utils.utils import consolidate_torch_trace_output, resolve_rocm_library_path
+from utils.utils import resolve_rocm_library_path
 
 
 class rocprofiler_sdk_profiler(RocProfCompute_Base):
@@ -113,10 +113,6 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
                 "version of rocprof-compute. This functionality is planned for a "
                 "future release. Please adjust your profiling options accordingly."
             )
-        if args.hip_trace:
-            options["ROCPROF_HIP_COMPILER_API_TRACE"] = "1"
-            options["ROCPROF_HIP_RUNTIME_API_TRACE"] = "1"
-
         # Kernel filtering
         if args.kernel:
             options["ROCPROF_KERNEL_FILTER_INCLUDE_REGEX"] = "|".join(args.kernel)

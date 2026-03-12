@@ -70,9 +70,9 @@ __global__ void reduceOp(T* output, const T* input, const MaskType* masks, int n
         result = __reduce_min_sync(masks[i], input[tid]);
       else if constexpr (std::is_same<Op, MaxOp<T>>::value)
         result = __reduce_max_sync(masks[i], input[tid]);
-      else if constexpr (std::is_same<Op, std::logical_and<T>>::value)
+      else if constexpr (std::is_same<Op, AndOp<T>>::value)
         result = __reduce_and_sync(masks[i], input[tid]);
-      else if (std::is_same<Op, std::logical_or<T>>::value)
+      else if (std::is_same<Op, OrOp<T>>::value)
         result = __reduce_or_sync(masks[i], input[tid]);
       else if (std::is_same<Op, XorOp<T>>::value)
         result = __reduce_xor_sync(masks[i], input[tid]);
@@ -93,8 +93,10 @@ template <class T> void runTestMultipleMasks(unsigned long long masks[], int num
   LinearAllocGuard<T> d_output(LinearAllocs::hipMalloc, wavefrontSize * sizeof(T));
   std::plus<T> op;
   std::mt19937_64 gen(123);
-  T a = std::is_same<T, half>::value ? std::numeric_limits<unsigned short>::lowest() : -1023;
-  T b = std::is_same<T, half>::value ? std::numeric_limits<unsigned short>::max() : 1023;
+  typename distribution::result_type a = std::is_same<T, half>::value? std::numeric_limits<unsigned short>::lowest() :
+                                         (std::is_signed<T>::value? -1023 : 0);
+  typename distribution::result_type b = std::is_same<T, half>::value? std::numeric_limits<unsigned short>::max() :
+                                         1023;
   distribution distInput(a, b);
   dim3 blkDim{wavefrontSize};
   dim3 grdDim{1u};
@@ -129,7 +131,7 @@ template <class T> void runTestMultipleMasks(unsigned long long masks[], int num
   }
 }
 
-TEMPLATE_TEST_CASE("Unit_hipReduceSingleMasks", "", int, unsigned int, long long,
+TEMPLATE_TEST_CASE(Unit_hipReduceSingleMasks, int, unsigned int, long long,
                    unsigned long long, float, half, double) {
   unsigned long long fullMask = getWarpSize() == 64 ? ~0ul : 0xFFFFFFFF;
   unsigned long long oneBitMasks[] = {0b1 & fullMask};
@@ -143,7 +145,7 @@ TEMPLATE_TEST_CASE("Unit_hipReduceSingleMasks", "", int, unsigned int, long long
   runTestMultipleMasks<TestType>(everyFifthButNinethMasks, NELEMS(everyFifthButNinethMasks));
 }
 
-TEMPLATE_TEST_CASE("Unit_hipReduceMultipleMasks", "", int, unsigned int, long long,
+TEMPLATE_TEST_CASE(Unit_hipReduceMultipleMasks, int, unsigned int, long long,
                    unsigned long long, float, half, double) {
   if (getWarpSize() == 64) {
     unsigned long long masks[] = {0b0110011, 0x0F0F0F0F00000000, 0xF0F0F0F000000000,
@@ -196,7 +198,7 @@ void runTestReduceForTypes(const std::tuple<T, Types...>) {
   runTestReduceForTypes<Op>(remainingTypes);
 }
 
-TEST_CASE("Unit_hipReduceRandom") {
+TEST_CASE(Unit_hipReduceRandom) {
   const std::tuple<int, unsigned int, long long, unsigned long long, float, half, double> allTypes;
   const std::tuple<int, unsigned int, long long, unsigned long long> integralTypes;
 
@@ -206,9 +208,9 @@ TEST_CASE("Unit_hipReduceRandom") {
 
   SECTION("max") { runTestReduceForTypes<MaxOp>(allTypes); }
 
-  SECTION("and") { runTestReduceForTypes<std::logical_and>(integralTypes); }
+  SECTION("and") { runTestReduceForTypes<AndOp>(integralTypes); }
 
-  SECTION("or") { runTestReduceForTypes<std::logical_or>(integralTypes); }
+  SECTION("or") { runTestReduceForTypes<OrOp>(integralTypes); }
 
   SECTION("xor") { runTestReduceForTypes<XorOp>(integralTypes); }
 }
