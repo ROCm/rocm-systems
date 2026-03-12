@@ -90,21 +90,11 @@ def _master_table_ref(schema_name: str) -> str:
     return f"{schema_name}.sqlite_master"
 
 
-def _table_exists(conn, table_name: str) -> bool:
-    for schema in _list_db_schemas(conn):
-        row = conn.execute(
-            f"SELECT 1 FROM {_master_table_ref(schema)} "
-            "WHERE type IN ('table','view') AND name = ? LIMIT 1",
-            (table_name,),
-        ).fetchone()
-        if row is not None:
-            return True
-    return False
-
-
 def _resolve_table_name(conn, base_name: str) -> Optional[str]:
+    schemas = _list_db_schemas(conn)
+
     # Exact match first, preferring temp/main schemas
-    for schema in _list_db_schemas(conn):
+    for schema in schemas:
         row = conn.execute(
             f"SELECT name FROM {_master_table_ref(schema)} "
             "WHERE type IN ('table','view') AND name = ? LIMIT 1",
@@ -115,7 +105,7 @@ def _resolve_table_name(conn, base_name: str) -> Optional[str]:
 
     # Fallback to UUID-suffixed match, prefer views then shorter names
     candidates = []
-    for idx, schema in enumerate(_list_db_schemas(conn)):
+    for idx, schema in enumerate(schemas):
         rows = conn.execute(
             f"SELECT name, type FROM {_master_table_ref(schema)} "
             "WHERE type IN ('table','view') AND name LIKE ?",
@@ -135,13 +125,6 @@ def _resolve_table_name(conn, base_name: str) -> Optional[str]:
 def _get_column_names(conn, table_name: str) -> set:
     rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
     return {itr[1] for itr in rows}
-
-
-def _parse_identifiers(sql: str) -> set:
-    return {
-        itr.group(0).lower()
-        for itr in re.finditer(r"[A-Za-z_][A-Za-z0-9_]*", sql or "")
-    }
 
 
 def _load_pc_blob_schema(conn, schema_table: str, field_table: str):
@@ -231,10 +214,7 @@ def _make_pc_blob_field_function(schema_map):
 
 
 def _rewrite_pc_sample_table_name(query: str, view_name: str) -> str:
-    query = re.sub(rf"(?i)\b{_PC_SAMPLE_TABLE}\b", view_name, query)
-    query = re.sub(rf'"{_PC_SAMPLE_TABLE}"', f'"{view_name}"', query)
-    query = re.sub(rf"`{_PC_SAMPLE_TABLE}`", f"`{view_name}`", query)
-    return query
+    return re.sub(rf"(?i)\b{_PC_SAMPLE_TABLE}\b", view_name, query)
 
 
 def _setup_pc_sampling_view(
@@ -261,7 +241,6 @@ def _setup_pc_sampling_view(
     if not schema_map or not all_blob_fields:
         return query
 
-    query_identifiers = _parse_identifiers(query)
     base_columns = _get_column_names(conn, sample_table)
     selected_blob_fields = [itr for itr in all_blob_fields if itr not in base_columns]
 
@@ -442,7 +421,7 @@ def _export_df_to_pdf(df, path: str):
     from reportlab.lib.units import inch
 
     c = canvas.Canvas(path, pagesize=letter)
-    width, height = letter
+    _, height = letter
     x = 0.5 * inch
     y = height - 1 * inch
     row_height = 14
@@ -738,7 +717,9 @@ def execute(input, args, config=None, **kwargs):
         # read script and execute statements
         with open(args.script, "r") as ifs:
             for itr in ifs.read().split(";"):
-                input.execute(f"{itr}")
+                stmt = itr.strip()
+                if stmt:
+                    input.execute(stmt)
 
     # Prepare parameters for export
     query = args.query
