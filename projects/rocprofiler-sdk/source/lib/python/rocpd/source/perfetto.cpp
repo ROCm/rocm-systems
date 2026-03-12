@@ -209,9 +209,12 @@ write_perfetto(
     namespace sdk    = ::rocprofiler::sdk;
     namespace common = ::rocprofiler::common;
 
-    static auto     orig_process_track = ::perfetto::ProcessTrack::Current();
-    static auto     orig_process_desc  = orig_process_track.Serialize();
-    static uint64_t global_flow_index  = 0x100000000;
+    // Samples having stack_id == 0 will start flow arrows from this high value and increment
+    // Avoids mess of flow arrows pointing to each and every sample
+    // Yes, possible to eventually have flow arrows collisions, but only for long traces
+    static auto global_flow_index  = uint64_t{0x100000000};
+    static auto orig_process_track = ::perfetto::ProcessTrack::Current();
+    static auto orig_process_desc  = orig_process_track.Serialize();
 
     auto*          conn             = perfetto_session.connection;
     const auto&    tracing_session  = perfetto_session.tracing_session;
@@ -256,6 +259,10 @@ write_perfetto(
         std::unordered_map<uint64_t,
                            std::unordered_map<rocprofiler_queue_id_t, ::perfetto::Track>>{};
     auto stream_tracks = std::unordered_map<rocprofiler_stream_id_t, ::perfetto::Track>{};
+
+    auto get_flow_index = [&this_pid_track](uint64_t stack_id) {
+        return (stack_id == 0) ? (++global_flow_index) : (stack_id ^ this_pid_track.uuid);
+    };
 
     auto read_event = [&conn, &process](uint64_t event_id) {
         return rocpd::read_sql_query<types::event>(
@@ -455,7 +462,7 @@ write_perfetto(
             counter_id_name[record.counter_id] = std::string{record.counter_name};
         }
 
-    std::map<std::string, std::map<uint64_t, double>> pmc_event_values;
+    auto pmc_event_values = std::map<std::string, std::map<uint64_t, double>>{};
     for(auto ditr : pmc_event_gen)
     {
         for(const auto& itr : pmc_event_gen.get(ditr))
@@ -509,6 +516,10 @@ write_perfetto(
                         _operation = _extdata.operation.value();
                 }
 
+                auto _pmc_events = read_pmc_events(itr.event_id);
+                auto _event      = (ocfg.annotate_kfd) ? read_event(itr.event_id) : types::event{};
+                auto _args       = read_region_args(itr.id);
+
                 const char* category_name = get_category_string(itr.category);
 
                 auto _category = std::strcmp(category_name,
@@ -516,12 +527,7 @@ write_perfetto(
                                      ? ::perfetto::DynamicCategory{itr.category}
                                      : ::perfetto::DynamicCategory{category_name};
 
-                auto _pmc_events = read_pmc_events(itr.event_id);
-                auto _event      = (ocfg.annotate_kfd) ? read_event(itr.event_id) : types::event{};
-                auto _args       = read_region_args(itr.id);
-
-                auto flow_index = (itr.stack_id == 0) ? (++global_flow_index)
-                                                      : (itr.stack_id ^ this_pid_track.uuid);
+                auto flow_index = get_flow_index(itr.stack_id);
 
                 TRACE_EVENT_BEGIN(
                     _category,
@@ -638,15 +644,14 @@ write_perfetto(
                         _operation = _extdata.operation.value();
                 }
 
-                auto flow_index = (itr.stack_id == 0) ? (++global_flow_index)
-                                                      : (itr.stack_id ^ this_pid_track.uuid);
-
                 const char* category_name = get_category_string(itr.category);
 
                 auto _category = std::strcmp(category_name,
                                              sdk::perfetto_category<sdk::category::none>::name) == 0
                                      ? ::perfetto::DynamicCategory{itr.category}
                                      : ::perfetto::DynamicCategory{category_name};
+
+                auto flow_index = get_flow_index(itr.stack_id);
 
                 TRACE_EVENT_INSTANT(_category,
                                     ::perfetto::DynamicString{_name},
@@ -690,12 +695,10 @@ write_perfetto(
                     _track         = &stream_tracks.at(stream_id);
                 }
 
-                auto flow_index = (itr.stack_id == 0) ? (++global_flow_index)
-                                                      : (itr.stack_id ^ this_pid_track.uuid);
+                auto flow_index = get_flow_index(itr.stack_id);
 
                 auto src_agent_index = agent_data.at(itr.src_agent_abs_index).second;
                 auto dst_agent_index = agent_data.at(itr.dst_agent_abs_index).second;
-
                 TRACE_EVENT_BEGIN(sdk::perfetto_category<sdk::category::memory_copy>::name,
                                   perfetto_session.get_static_event_name(itr.name),
                                   *_track,
@@ -930,9 +933,7 @@ write_perfetto(
                 auto _name =
                     (ocfg.kernel_rename && !current.region.empty()) ? current.region : current.name;
 
-                auto flow_index = (current.stack_id == 0)
-                                      ? (++global_flow_index)
-                                      : (current.stack_id ^ this_pid_track.uuid);
+                auto flow_index = get_flow_index(current.stack_id);
 
                 TRACE_EVENT_BEGIN(sdk::perfetto_category<sdk::category::kernel_dispatch>::name,
                                   perfetto_session.get_static_event_name(_name),
