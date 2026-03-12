@@ -1248,6 +1248,8 @@ class InteractiveSession:
                     rewritten = analyzer._call_openai(system, user, max_tokens=16384)
                 elif llm_provider == "anthropic":
                     rewritten = analyzer._call_anthropic(system, user)
+                elif llm_provider == "private":
+                    rewritten = analyzer._call_private(system, user)
                 else:
                     rewritten = analyzer._call_local(system, user)
         except Exception as exc:
@@ -2173,6 +2175,8 @@ class WorkflowSession:
                     result = analyzer._call_anthropic(
                         system, user, timeout=_rewrite_timeout
                     )
+                elif self._llm_provider == "private":
+                    result = analyzer._call_private(system, user)
                 else:
                     result = analyzer._call_local(system, user)
             return result if result and result.strip() else None
