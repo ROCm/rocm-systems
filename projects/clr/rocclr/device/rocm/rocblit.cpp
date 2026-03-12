@@ -41,7 +41,6 @@ DmaBlitManager::DmaBlitManager(VirtualGPU& gpu, Setup setup)
 inline void DmaBlitManager::synchronize() const {
   if (syncOperation_) {
     gpu().releaseGpuMemoryFence();
-    gpu().releasePinnedMem();
   }
 }
 
@@ -705,14 +704,8 @@ bool DmaBlitManager::hsaCopyBatch(const std::vector<amd::BatchCopyOp>& copyOps,
       hsaOp.src_size = op.size;
       hsaOp.dst_size = op.size;
       break;
-    case amd::CopyMetadata::kCopyOpIndirectSrc:
-      hsaOp.type = HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC;
-      break;
-    case amd::CopyMetadata::kCopyOpIndirectDst:
-      hsaOp.type = HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_DST;
-      break;
-    case amd::CopyMetadata::kCopyOpIndirectSrcDst:
-      hsaOp.type = HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST;
+    case amd::CopyMetadata::kCopyOpIndirect:
+      hsaOp.type = HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT;
       break;
     default:
       hsaOp.type = HSA_AMD_MEMORY_COPY_OP_LINEAR;
@@ -820,7 +813,7 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
         op.src_agent = grp.tmpl.src_agent;
         op.dst_list = grp.dsts.data();
         op.dst_agent_list = grp.dst_agents.data();
-        op.num_dsts = static_cast<uint16_t>(grp.dsts.size());
+        op.num_dsts = static_cast<uint32_t>(grp.dsts.size());
         op.size = grp.tmpl.size;
         op.completion_signal = completion_signal;
         finalOps.push_back(op);
@@ -3009,12 +3002,6 @@ amd::Memory* DmaBlitManager::pinHostMemory(const void* hostMem, size_t pinSize,
   // Recalculate pin memory size
   pinAllocSize = amd::alignUp(pinSize + partial, PinnedMemoryAlignment);
 
-  amdMemory = gpu().findPinnedMem(tmpHost, pinAllocSize);
-
-  if (nullptr != amdMemory) {
-    return amdMemory;
-  }
-
   amdMemory = new (*context_) amd::Buffer(*context_, CL_MEM_USE_HOST_PTR, pinAllocSize);
   amdMemory->setVirtualDevice(&gpu());
   if ((amdMemory != nullptr) && !amdMemory->create(tmpHost, SysMem)) {
@@ -3030,7 +3017,6 @@ amd::Memory* DmaBlitManager::pinHostMemory(const void* hostMem, size_t pinSize,
 
   if (srcMemory == nullptr) {
     // Release all pinned memory and attempt pinning again
-    gpu().releasePinnedMem();
     srcMemory = dev().getRocMemory(amdMemory);
     if (srcMemory == nullptr) {
       // Release memory

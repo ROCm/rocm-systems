@@ -37,7 +37,7 @@ hipMemPtrGetInfo API
 2. Gets the allocated size of that variable using hipMemPtrGetInfo API
 3. Validates the initial size and allocated size
 */
-TEST_CASE("Unit_hipMemPtrGetInfo_Basic") {
+TEST_CASE(Unit_hipMemPtrGetInfo_Basic) {
   int* iPtr;
   float* fPtr;
   MemInfo* sPtr;
@@ -61,7 +61,7 @@ TEST_CASE("Unit_hipMemPtrGetInfo_Basic") {
 This testcase verifies the scenario of
 hipMemPtrGetInfo API being called on a zero-sized allocation.
 */
-TEST_CASE("Unit_hipMemPtrGetInfo_SizeZeroAllocation") {
+TEST_CASE(Unit_hipMemPtrGetInfo_SizeZeroAllocation) {
   int* iPtr;
   size_t sSetSize = 0, sGetSize;
   HIP_CHECK(hipMalloc(&iPtr, sSetSize));

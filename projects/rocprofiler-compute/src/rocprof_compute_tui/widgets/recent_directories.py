@@ -23,6 +23,7 @@
 
 ##############################################################################
 
+
 from textual.app import ComposeResult
 from textual.containers import Container, Horizontal
 from textual.screen import ModalScreen
@@ -57,8 +58,6 @@ class ClickableListItem(ListItem):
 
         # Update highlight immediately
         list_view.index = index
-        list_view.refresh(layout=True)
-        self.refresh(layout=True)
 
     def on_click(self, event) -> None:  # noqa: ANN001
         event.stop()

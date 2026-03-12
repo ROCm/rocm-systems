@@ -451,6 +451,9 @@ hipError_t hipMemUnmap(void* ptr, size_t size) {
       HIP_RETURN(hipErrorInvalidValue);
     }
 
+    // Save next_ptr before enqueue — submitVirtualMap releases sub_obj
+    address next_ptr = NextSubBufferPtr(vaddr_sub_obj);
+
     amd::Command* cmd = new amd::VirtualMapCommand(
         *hip::getCurrentDevice()->NullStream(), amd::Command::EventWaitList{},
         vaddr_sub_obj->getSvmPtr(), vaddr_sub_obj->getSize(), nullptr);
@@ -462,8 +465,7 @@ hipError_t hipMemUnmap(void* ptr, size_t size) {
         reinterpret_cast<hip::GenericAllocation*>(phys_mem_obj->getUserData().data);
     ga->release();
 
-    address next_ptr = NextSubBufferPtr(vaddr_sub_obj);
-    vaddr_sub_obj->release();
+    // sub_obj already released in submitVirtualMap after HW unmap
     vaddr_sub_obj = amd::MemObjMap::FindMemObj(next_ptr);
   }
 

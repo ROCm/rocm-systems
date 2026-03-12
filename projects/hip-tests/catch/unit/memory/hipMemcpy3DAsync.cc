@@ -30,7 +30,7 @@ THE SOFTWARE.
 
 #pragma clang diagnostic ignored "-Wunused-variable"
 
-TEST_CASE("Unit_hipMemcpy3DAsync_Positive_Basic") {
+TEST_CASE(Unit_hipMemcpy3DAsync_Positive_Basic) {
   CHECK_IMAGE_SUPPORT
 
   constexpr bool async = true;
@@ -55,7 +55,7 @@ TEST_CASE("Unit_hipMemcpy3DAsync_Positive_Basic") {
   SECTION("Host to Host") { Memcpy3DHostToHostShell<async>(Memcpy3DWrapper<async>, stream); }
 }
 
-TEST_CASE("Unit_hipMemcpy3DAsync_Positive_Synchronization_Behavior") {
+TEST_CASE(Unit_hipMemcpy3DAsync_Positive_Synchronization_Behavior) {
   CHECK_IMAGE_SUPPORT
 
   constexpr bool async = true;
@@ -77,14 +77,14 @@ TEST_CASE("Unit_hipMemcpy3DAsync_Positive_Synchronization_Behavior") {
   SECTION("Host to Host") { Memcpy3DHtoHSyncBehavior(Memcpy3DWrapper<async>, true); }
 }
 
-TEST_CASE("Unit_hipMemcpy3DAsync_Positive_Parameters") {
+TEST_CASE(Unit_hipMemcpy3DAsync_Positive_Parameters) {
   CHECK_IMAGE_SUPPORT
 
   constexpr bool async = true;
   Memcpy3DZeroWidthHeightDepth<async>(Memcpy3DWrapper<async>);
 }
 
-TEST_CASE("Unit_hipMemcpy3DAsync_Positive_Array") {
+TEST_CASE(Unit_hipMemcpy3DAsync_Positive_Array) {
   CHECK_IMAGE_SUPPORT
 
   constexpr bool async = true;
@@ -94,7 +94,7 @@ TEST_CASE("Unit_hipMemcpy3DAsync_Positive_Array") {
 #endif
 }
 
-TEST_CASE("Unit_hipMemcpy3DAsync_Negative_Parameters") {
+TEST_CASE(Unit_hipMemcpy3DAsync_Negative_Parameters) {
   CHECK_IMAGE_SUPPORT
 
   constexpr bool async = true;
@@ -244,7 +244,7 @@ TEST_CASE("Unit_hipMemcpy3DAsync_Negative_Parameters") {
   }
 }
 
-TEST_CASE("Unit_hipMemcpy3DAsync_Capture") {
+TEST_CASE(Unit_hipMemcpy3DAsync_Capture) {
   CHECK_IMAGE_SUPPORT
 
   constexpr hipExtent kExtent{128 * sizeof(int), 128, 8};

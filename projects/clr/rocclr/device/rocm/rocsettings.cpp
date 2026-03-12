@@ -79,9 +79,7 @@ Settings::Settings() {
 
   rocr_backend_ = true;
 
-  cpu_wait_for_signal_ = !AMD_DIRECT_DISPATCH;
-  cpu_wait_for_signal_ =
-      (!flagIsDefault(ROC_CPU_WAIT_FOR_SIGNAL)) ? ROC_CPU_WAIT_FOR_SIGNAL : cpu_wait_for_signal_;
+  cpu_wait_for_signal_ = ROC_CPU_WAIT_FOR_SIGNAL;
   system_scope_signal_ = ROC_SYSTEM_SCOPE_SIGNAL;
 
   // Use coarse grain system memory for kernel arguments by default (to keep GPU cache)
@@ -93,7 +91,7 @@ Settings::Settings() {
 
   dynamic_queues_ = amd::IS_HIP ? DEBUG_HIP_DYNAMIC_QUEUES : 0;
   // note: OCL user events don't allow CPU blocking calls in DD mode
-  blocking_blit_ = amd::IS_HIP || !AMD_DIRECT_DISPATCH;
+  blocking_blit_ = amd::IS_HIP;
 
   max_hw_queues_ = GPU_MAX_HW_QUEUES;
 
