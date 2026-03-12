@@ -20,6 +20,10 @@ def test_multiple_pid_databases(output_dir):
     This validates the fix where using -o flag with %pid% substitution
     creates separate database files for parent and child processes.
     """
+    assert (
+        output_dir is not None
+    ), "output_dir must be provided via --output-dir when running this test."
+
     db_files = get_pid_databases(output_dir)
 
     # We expect at least 2 databases (parent + child)

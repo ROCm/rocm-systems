@@ -22,13 +22,24 @@ def pytest_addoption(parser):
 @pytest.fixture
 def output_dir(request):
     """Fixture to provide the output directory to tests."""
-    return request.config.getoption("--output-dir")
+    output_dir = request.config.getoption("--output-dir")
+    if not output_dir:
+        pytest.skip(
+            "output_dir fixture requires --output-dir to be provided "
+            "when running this test outside the CTest harness."
+        )
+    return output_dir
 
 
 @pytest.fixture
 def kernel_trace_files(request):
     """Fixture to provide list of kernel trace CSV files."""
     pattern = request.config.getoption("--kernel-trace-pattern")
+    if not pattern:
+        pytest.skip(
+            "kernel_trace_files fixture requires --kernel-trace-pattern to be provided "
+            "when running this test outside the CTest harness."
+        )
     files = glob.glob(pattern)
     return files
 
