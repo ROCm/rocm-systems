@@ -390,7 +390,7 @@ void Command::enqueue() {
 
     // The batch update must be lock protected to avoid a race condition
     // when multiple threads submit/flush/update the batch at the same time
-    ScopedLock sl(queue_->vdev()->execution());
+    std::scoped_lock sl(queue_->vdev()->execution());
     queue_->FormSubmissionBatch(this);
 
     // Enqueue flushes, except profiling markers to avoid frequent expensive callbacks
@@ -802,7 +802,7 @@ bool CopyMemoryP2PCommand::validateMemory() {
   }
 
   if (devices[0]->P2PStage() != nullptr && p2pStaging) {
-    amd::ScopedLock lock(devices[0]->P2PStageOps());
+    std::scoped_lock lock(devices[0]->P2PStageOps());
     // Make sure runtime allocates memory on every device
     for (uint d = 0; d < devices[0]->GlbCtx().devices().size(); ++d) {
       device::Memory* mem =

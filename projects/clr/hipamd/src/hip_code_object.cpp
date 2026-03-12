@@ -40,7 +40,7 @@ hipError_t ihipFree(void* ptr);
 hipError_t ihipMallocManaged(void** ptr, size_t size, size_t align = 0, bool use_host_ptr = 0);
 
 hipError_t DynCO::loadCodeObject(const char* fname, const void* image) {
-  amd::ScopedLock lock(dclock_);
+  std::scoped_lock lock(dclock_);
 
   // Number of devices = 1 in dynamic code object
   fb_info_ = new FatBinaryInfo(fname, image);
@@ -63,7 +63,7 @@ hipError_t DynCO::loadCodeObject(const char* fname, const void* image) {
 
 // Dynamic Code Object
 DynCO::~DynCO() {
-  amd::ScopedLock lock(dclock_);
+  std::scoped_lock lock(dclock_);
 
   for (auto& elem : vars_) {
     if (elem.second->getVarKind() == Var::DVK_Managed) {
@@ -96,7 +96,7 @@ DynCO::~DynCO() {
 }
 
 hipError_t DynCO::getDeviceVar(DeviceVar** dvar, const std::string& var_name) {
-  amd::ScopedLock lock(dclock_);
+  std::scoped_lock lock(dclock_);
 
   auto it = vars_.find(var_name);
   if (it == vars_.end()) {
@@ -109,7 +109,7 @@ hipError_t DynCO::getDeviceVar(DeviceVar** dvar, const std::string& var_name) {
 }
 
 hipError_t DynCO::getDynFunc(hipFunction_t* hfunc, const std::string& func_name) {
-  amd::ScopedLock lock(dclock_);
+  std::scoped_lock lock(dclock_);
 
   if (hfunc == nullptr) {
     return hipErrorInvalidValue;
@@ -126,7 +126,7 @@ hipError_t DynCO::getDynFunc(hipFunction_t* hfunc, const std::string& func_name)
 }
 
 hipError_t DynCO::getFuncCount(unsigned int* count) {
-  amd::ScopedLock lock(dclock_);
+  std::scoped_lock lock(dclock_);
   if (count == nullptr) {
     return hipErrorInvalidValue;
   }
@@ -135,13 +135,13 @@ hipError_t DynCO::getFuncCount(unsigned int* count) {
 }
 
 bool DynCO::isValidDynFunc(const void* hfunc) {
-  amd::ScopedLock lock(dclock_);
+  std::scoped_lock lock(dclock_);
   return std::any_of(functions_.begin(), functions_.end(),
                      [&](auto& it) { return it.second->isValidDynFunc(hfunc); });
 }
 
 hipError_t DynCO::initDynManagedVars(const std::string& managedVar) {
-  amd::ScopedLock lock(dclock_);
+  std::scoped_lock lock(dclock_);
   DeviceVar* dvar;
   void* pointer = nullptr;
   hipError_t status = hipSuccess;
@@ -194,7 +194,7 @@ hipError_t DynCO::initDynManagedVars(const std::string& managedVar) {
 }
 
 hipError_t DynCO::populateDynGlobalVars() {
-  amd::ScopedLock lock(dclock_);
+  std::scoped_lock lock(dclock_);
   hipError_t err = hipSuccess;
   std::vector<std::string> var_names;
   std::string managedVarExt = ".managed";
@@ -223,7 +223,7 @@ hipError_t DynCO::populateDynGlobalVars() {
 }
 
 hipError_t DynCO::populateDynGlobalFuncs() {
-  amd::ScopedLock lock(dclock_);
+  std::scoped_lock lock(dclock_);
 
   std::vector<std::string> func_names;
   device::Program* dev_program = fb_info_->GetProgram(ihipGetDevice())
@@ -246,7 +246,7 @@ hipError_t DynCO::populateDynGlobalFuncs() {
 StatCO::StatCO(const PlatformState& owner) : owner_(owner) {}
 
 StatCO::~StatCO() {
-  amd::ScopedLock lock(sclock_);
+  std::scoped_lock lock(sclock_);
 
   for (auto& elem : functions_) {
     delete elem.second;
@@ -260,7 +260,7 @@ StatCO::~StatCO() {
 }
 
 hipError_t StatCO::DigestFatBinary(const void* data, FatBinaryInfo*& programs) {
-  amd::ScopedLock lock(sclock_);
+  std::scoped_lock lock(sclock_);
 
   if (programs != nullptr) {
     return hipSuccess;
@@ -307,7 +307,7 @@ hipError_t StatCO::DigestFatBinary(const void* data, FatBinaryInfo*& programs) {
 }
 
 FatBinaryInfo** StatCO::AddFatBinary(const void* data, bool& success) {
-  amd::ScopedLock lock(sclock_);
+  std::scoped_lock lock(sclock_);
   module_to_hostModule_.insert(std::make_pair(&modules_[data], data));
 
   if (!owner_.IsInitialized()) {
@@ -323,7 +323,7 @@ FatBinaryInfo** StatCO::AddFatBinary(const void* data, bool& success) {
 
 FatBinaryInfo** StatCO::AddKpackBinary(const void* hipk_metadata, const void* wrapper_addr,
                                        bool& success) {
-  amd::ScopedLock lock(sclock_);
+  std::scoped_lock lock(sclock_);
 
   // Use wrapper_addr as the key (same as data pointer for normal path)
   // This allows DigestFatBinary to access the wrapper and detect HIPK magic
@@ -342,7 +342,7 @@ FatBinaryInfo** StatCO::AddKpackBinary(const void* hipk_metadata, const void* wr
 }
 
 hipError_t StatCO::RemoveFatBinary(FatBinaryInfo** module) {
-  amd::ScopedLock lock(sclock_);
+  std::scoped_lock lock(sclock_);
 
   auto hostVarsIter = module_to_hostVars_.find(module);
   if (hostVarsIter != module_to_hostVars_.end()) {
@@ -417,7 +417,7 @@ hipError_t StatCO::RemoveFatBinary(FatBinaryInfo** module) {
 
 // =================================================================================================
 void StatCO::RemoveAllFatBinaries() {
-  amd::ScopedLock lock(sclock_);
+  std::scoped_lock lock(sclock_);
 
   // Clear mapping tables that associate modules with host-side constructs
   module_to_hostModule_.clear();
@@ -472,7 +472,7 @@ void StatCO::RemoveAllFatBinaries() {
 }
 
 hipError_t StatCO::RegisterFunction(const void* hostFunction, Function* func) {
-  amd::ScopedLock lock(sclock_);
+  std::scoped_lock lock(sclock_);
 
   if (functions_.find(hostFunction) != functions_.end()) {
     ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_API,
@@ -487,7 +487,7 @@ hipError_t StatCO::RegisterFunction(const void* hostFunction, Function* func) {
 }
 
 const char* StatCO::GetFuncName(const void* hostFunction) {
-  amd::ScopedLock lock(sclock_);
+  std::scoped_lock lock(sclock_);
 
   const auto it = functions_.find(hostFunction);
   if (it == functions_.end()) {
@@ -505,7 +505,7 @@ hipError_t StatCO::GetFunc(hipFunction_t* hfunc, const void* hostFunction, int d
   // Lazy load
   FatBinaryInfo** module = it->second->moduleInfo();
   if (module != nullptr) {
-    amd::ScopedLock lock(sclock_);
+    std::scoped_lock lock(sclock_);
     if (*(module) == nullptr) {
       hipError_t err = DigestFatBinary(module_to_hostModule_[module], *module);
 
@@ -523,7 +523,7 @@ hipError_t StatCO::GetFunc(hipFunction_t* hfunc, const void* hostFunction, int d
 
 hipError_t StatCO::GetFuncAttr(hipFuncAttributes* func_attr, const void* hostFunction,
                                int deviceId) {
-  amd::ScopedLock lock(sclock_);
+  std::scoped_lock lock(sclock_);
 
   const auto it = functions_.find(hostFunction);
   if (it == functions_.end()) {
@@ -540,7 +540,7 @@ hipError_t StatCO::GetFuncAttr(hipFuncAttributes* func_attr, const void* hostFun
 }
 
 hipError_t StatCO::RegisterGlobalVar(const void* hostVar, Var* var) {
-  amd::ScopedLock lock(sclock_);
+  std::scoped_lock lock(sclock_);
 
   auto var_it = vars_.find(hostVar);
   if ((var_it != vars_.end()) && (var_it->second->getName() != var->getName())) {
@@ -554,7 +554,7 @@ hipError_t StatCO::RegisterGlobalVar(const void* hostVar, Var* var) {
 
 hipError_t StatCO::GetGlobalVar(const void* hostVar, int deviceId, hipDeviceptr_t* dev_ptr,
                                 size_t* size_ptr) {
-  amd::ScopedLock lock(sclock_);
+  std::scoped_lock lock(sclock_);
 
   const auto it = vars_.find(hostVar);
   if (it == vars_.end()) {
@@ -582,7 +582,7 @@ hipError_t StatCO::RegisterManagedVar(Var* var) {
 
 // ================================================================================================
 void StatCO::ResizeForDevices(size_t device_count) {
-  amd::ScopedLock lock(sclock_);
+  std::scoped_lock lock(sclock_);
   for (const auto& it : vars_) {
     it.second->resize_dVar(device_count);
   }
@@ -598,7 +598,7 @@ void StatCO::ResizeForDevices(size_t device_count) {
 
 // ================================================================================================
 hipError_t StatCO::InitManagedVarDevicePtr(int deviceId) {
-  amd::ScopedLock lock(sclock_);
+  std::scoped_lock lock(sclock_);
   hipError_t err = hipSuccess;
   if (managedVarsDevicePtrInitalized_.find(deviceId) == managedVarsDevicePtrInitalized_.end() ||
       !managedVarsDevicePtrInitalized_[deviceId]) {
