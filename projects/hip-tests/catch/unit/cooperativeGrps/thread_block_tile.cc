@@ -1005,15 +1005,27 @@ TEMPLATE_TEST_CASE("Unit_Thread_Block_Coalesced_Reduce_arithmetic", "", int, uns
 {
   std::tuple<cooperative_groups::plus<TestType>,
              cooperative_groups::less<TestType>,
-             cooperative_groups::greater<TestType>> types;
+             cooperative_groups::greater<TestType>> ops;
 
   if (getWarpSize() == 32) {
-    runReduceRandomForOps<true, TestType, 32>(types);
+    runReduceRandomForOps<true, TestType, 32>(ops);
   } else {
-    runReduceRandomForOps<true, TestType, 64>(types);
+    runReduceRandomForOps<true, TestType, 64>(ops);
   }
 }
 
+
+TEMPLATE_TEST_CASE("Unit_Thread_Block_Coalesced_Reduce_boolean", "", int, unsigned int, long long, unsigned long long)
+{
+  std::tuple<cooperative_groups::bit_and<TestType>,
+             cooperative_groups::bit_or<TestType>,
+             cooperative_groups::bit_xor<TestType>> ops;
+  if (getWarpSize() == 32) {
+    runReduceRandomForOps<true, TestType, 32>(ops);
+  } else {
+    runReduceRandomForOps<true, TestType, 64>(ops);
+  }
+} 
 
 /**
  * End doxygen group DeviceLanguageTest.
