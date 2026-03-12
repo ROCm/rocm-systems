@@ -284,7 +284,7 @@ template <typename T> static void runTestRW(const int width, const int height) {
  * ------------------------
  *    - HIP_VERSION >= 5.7
  */
-TEMPLATE_TEST_CASE("Unit_surfCubemapLayeredread_Positive_Basic", "", char, unsigned char, short,
+TEMPLATE_TEST_CASE(Unit_surfCubemapLayeredread_Positive_Basic, char, unsigned char, short,
                    unsigned short, int, unsigned int, float) {
   CHECK_IMAGE_SUPPORT;
 
@@ -307,7 +307,7 @@ TEMPLATE_TEST_CASE("Unit_surfCubemapLayeredread_Positive_Basic", "", char, unsig
  * ------------------------
  *    - HIP_VERSION >= 5.7
  */
-TEMPLATE_TEST_CASE("Unit_surfCubemapLayeredwrite_Positive_Basic", "", char, unsigned char, short,
+TEMPLATE_TEST_CASE(Unit_surfCubemapLayeredwrite_Positive_Basic, char, unsigned char, short,
                    unsigned short, int, unsigned int, float) {
   CHECK_IMAGE_SUPPORT;
 
@@ -330,7 +330,7 @@ TEMPLATE_TEST_CASE("Unit_surfCubemapLayeredwrite_Positive_Basic", "", char, unsi
  * ------------------------
  *    - HIP_VERSION >= 5.7
  */
-TEMPLATE_TEST_CASE("Unit_surfCubemapLayered_Positive_ReadWrite", "", char, unsigned char, short,
+TEMPLATE_TEST_CASE(Unit_surfCubemapLayered_Positive_ReadWrite, char, unsigned char, short,
                    unsigned short, int, unsigned int, float) {
   CHECK_IMAGE_SUPPORT;
 

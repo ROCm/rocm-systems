@@ -28,7 +28,7 @@ void saxpy(float a, float* x, float* y, float* out, size_t n)
 }
 )"};
 
-TEST_CASE("Unit_RTC_LinkerAPI_Negative") {
+TEST_CASE(Unit_RTC_LinkerAPI_Negative) {
   SECTION("get bitcode - nullptr size and code") {
     hiprtcProgram program;
     REQUIRE(hiprtcGetBitcodeSize(program, nullptr) == HIPRTC_ERROR_INVALID_INPUT);
@@ -49,14 +49,14 @@ TEST_CASE("Unit_RTC_LinkerAPI_Negative") {
   }
 }
 
-TEST_CASE("Unit_RTC_LinkDestroy_Negative") {
+TEST_CASE(Unit_RTC_LinkDestroy_Negative) {
   SECTION("link destroy - incorrect hiprtcLinkState") {
     hiprtcLinkState linkstate;
     REQUIRE(hiprtcLinkDestroy(linkstate) == HIPRTC_ERROR_INVALID_INPUT);
   }
 }
 
-TEST_CASE("Unit_RTC_LinkDestroy_Default") {
+TEST_CASE(Unit_RTC_LinkDestroy_Default) {
   SECTION("link destroy - nullptr") {
     REQUIRE(hiprtcLinkDestroy(nullptr) == HIPRTC_ERROR_INVALID_INPUT);
   }
@@ -80,7 +80,7 @@ std::vector<char> createBitcodeFromSource(const char* src, const char* name, int
   return code;
 }
 
-TEST_CASE("Unit_RTC_LinkerAPI") {
+TEST_CASE(Unit_RTC_LinkerAPI) {
   const char* options[]{"-fgpu-rdc"};
   std::vector<char> code = createBitcodeFromSource(src, "saxpy", 1, options);
 
@@ -151,7 +151,7 @@ TEST_CASE("Unit_RTC_LinkerAPI") {
   }
 }
 
-TEST_CASE("Unit_RTC_LinkAddFile_Negative") {
+TEST_CASE(Unit_RTC_LinkAddFile_Negative) {
   static constexpr hiprtcJITInputType input_type = HIPRTC_JIT_INPUT_LLVM_BITCODE;
   static constexpr const char* file_name = "bitcode_file";
 
@@ -184,7 +184,7 @@ TEST_CASE("Unit_RTC_LinkAddFile_Negative") {
   }
 }
 
-TEST_CASE("Unit_RTC_LinkAddFile_Default") {
+TEST_CASE(Unit_RTC_LinkAddFile_Default) {
   // Create bitcode and save it to file
   const char* options[]{"-fgpu-rdc"};
   std::vector<char> code = createBitcodeFromSource(src, "saxpy", 1, options);

@@ -48,7 +48,7 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 5.7
  */
-TEMPLATE_TEST_CASE("Unit_tex2DLayeredLod_Positive_ReadModeElementType", "", char, unsigned char,
+TEMPLATE_TEST_CASE(Unit_tex2DLayeredLod_Positive_ReadModeElementType, char, unsigned char,
                    short, unsigned short, int, unsigned int, float) {
   CHECK_IMAGE_SUPPORT;
 
@@ -120,7 +120,7 @@ TEMPLATE_TEST_CASE("Unit_tex2DLayeredLod_Positive_ReadModeElementType", "", char
  * ------------------------
  *    - HIP_VERSION >= 5.7
  */
-TEMPLATE_TEST_CASE("Unit_tex2DLayeredLod_Positive_ReadModeNormalizedFloat", "", char, unsigned char,
+TEMPLATE_TEST_CASE(Unit_tex2DLayeredLod_Positive_ReadModeNormalizedFloat, char, unsigned char,
                    short, unsigned short) {
   CHECK_IMAGE_SUPPORT;
 
