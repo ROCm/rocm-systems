@@ -29,6 +29,19 @@ struct RasFeature {
   bool     needs_reboot;      // immediate reboot required after feature change
 };
 
+// ASIC static information sourced from KMD adapter info.
+struct AsicInfo {
+  uint64_t device_id;          // PCI device ID
+  uint32_t vendor_id;          // PCI vendor ID
+  uint32_t subvendor_id;       // subsystem vendor ID (high 16 bits of ulSubsystemID)
+  uint32_t subsystem_id;       // subsystem device ID (low  16 bits of ulSubsystemID)
+  uint32_t rev_id;             // silicon revision
+  uint64_t asic_serial;        // ProductSerialNumber (unique ID)
+  char     market_name[256];   // adapter string from registry
+  uint32_t num_of_compute_units;      // WGP*2
+  uint64_t target_graphics_version;   // major<<16|minor<<8|stepping
+};
+
 } // namespace thunk
 } // namespace wsl
 

@@ -202,6 +202,9 @@ public:
   // Query current VRAM usage in MB via KMD escape.
   ErrorCode QueryVramUsage(wsl::thunk::VramUsage *usage) const;
 
+  // Query static ASIC information from KMD adapter info.
+  ErrorCode QueryAsicInfo(wsl::thunk::AsicInfo *info) const;
+
   // Query RAS feature flags via KMD escape.
   ErrorCode QueryRasFeature(wsl::thunk::RasFeature *info) const;
 

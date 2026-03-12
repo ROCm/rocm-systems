@@ -33,6 +33,8 @@ public:
 
   ErrorCode QueryRasFeature(RasFeature *info) const;
 
+  ErrorCode QueryAsicInfo(AsicInfo *info) const;
+
   ErrorCode Escape(void *pData, size_t dataSize,
                    bool hardwareAccess = false) const;
 
