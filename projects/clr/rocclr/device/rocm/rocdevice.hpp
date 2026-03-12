@@ -611,6 +611,9 @@ class Device : public NullDevice {
   //! enum for keeping the total and available queue priorities
   enum QueuePriority : uint { Low = 0, Normal = 1, High = 2, Total = 3 };
 
+  //! Returns the number of hardware pipes
+  uint32_t NumHwPipes() const { return numHwPipes_; }
+
   //! Returns true if PM4 emulation is enabled
   bool IsPm4Emulation() const { return pm4_emulation_; }
 
