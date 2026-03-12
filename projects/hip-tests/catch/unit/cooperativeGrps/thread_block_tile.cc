@@ -901,6 +901,105 @@ TEST_CASE("Unit_Thread_Block_Tile_Reduce_Trivially_Copyable_Parameters")
   REQUIRE((result->x == 1 && result->y == 9));
 }
 
+template <size_t NumElems>
+using ArrayContainer = std::array<unsigned char, NumElems>;
+
+template <size_t NumElems>
+struct Sum {
+  ArrayContainer<NumElems> __device__ operator()(const ArrayContainer<NumElems>& lhs,
+                                                 const ArrayContainer<NumElems>& rhs) const
+  {
+    ArrayContainer<NumElems> result;
+
+    for (int i = 0; i < NumElems; i++) {
+      result[i] = lhs[i] + rhs[i];
+    }
+
+    return result;
+  }
+};
+
+template <size_t NumElems>
+struct Max {
+  ArrayContainer<NumElems> __device__ operator()(const ArrayContainer<NumElems>& lhs,
+                                                 const ArrayContainer<NumElems>& rhs) const
+  {
+    ArrayContainer<NumElems> result;
+
+    for (int i = 0; i < NumElems; i++) {
+      for (int i = 0; i < NumElems; i++) {
+        result[i] = std::max(lhs[i], rhs[i]);
+      }
+    }
+
+    return result;
+  }
+};
+
+template <size_t NumElems, class Functor>
+__global__ void applyFunctor(ArrayContainer<NumElems>* result)
+{
+  cg::thread_block mygroup = cg::this_thread_block();
+  auto mytile = cg::tiled_partition<32>(mygroup);
+  __shared__ ArrayContainer<NumElems> input;
+  Functor op;
+
+  if (threadIdx.x < NumElems) {
+    input[threadIdx.x] = threadIdx.x;
+    __syncwarp();
+    *result = cg::reduce(mytile, input, op);
+  }
+}
+
+template <size_t NumElems, template <size_t> class Functor>
+void testReduceSizes()
+{
+  LinearAllocGuard<ArrayContainer<NumElems>> h_result(LinearAllocs::malloc, sizeof(ArrayContainer<NumElems>));
+  LinearAllocGuard<ArrayContainer<NumElems>> d_result(LinearAllocs::hipMalloc, sizeof(ArrayContainer<NumElems>));
+  dim3 gridDim = { 1 };
+  dim3 blockDim = { 32 };
+  void* devicePtr = d_result.ptr();
+  void* args[] = { &devicePtr };
+  ArrayContainer<NumElems>* result;
+
+  HIP_CHECK(hipLaunchCooperativeKernel(reinterpret_cast<void*>(applyFunctor<NumElems, Functor<NumElems>>), gridDim, blockDim, args, 0, nullptr));
+  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipMemcpy(h_result.host_ptr(), d_result.ptr(),
+                      h_result.size_bytes(), hipMemcpyDeviceToHost));
+  result = &h_result.host_ptr()[0];
+  INFO("T is of size: " << NumElems);
+
+  for (int i = 0; i < NumElems; i++) {
+    INFO("Element: " << i);
+
+    if (std::is_same<Functor<NumElems>, Sum<NumElems>>::value) {
+      // the result can be calculated with an arithmetic series formula, modulo 256
+      // (we do overflow unsigned char for some indices, but that is defined behaviour)
+      REQUIRE((*result)[i] == ((NumElems * (i + i)) / 2) % 256);
+    } else {
+      REQUIRE((*result)[i] == i);
+    }
+  }
+
+  if constexpr (NumElems > 1) {
+    testReduceSizes<NumElems - 1, Functor>();
+  }
+}
+
+// we allow any reduction size of T of up to 32 bytes; this tests that reduction works with user-defined
+// types in that range; including non-powers of two
+TEST_CASE("Unit_Thread_Block_Tile_Reduce_All_Parameter_Sizes")
+{
+  SECTION("sum") {
+    testReduceSizes<32, Sum>();
+  }
+
+  SECTION("max") {
+    testReduceSizes<32, Max>();
+  }
+}
+
 TEMPLATE_TEST_CASE("Unit_Thread_Block_Coalesced_Reduce_arithmetic", "", int, unsigned int, long long,
                    unsigned long long, float, half, double)
 {
