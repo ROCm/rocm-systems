@@ -4810,6 +4810,7 @@ def _run_interactive_session(
     llm_local: Optional[str] = None,
     llm_local_model: Optional[str] = None,
     resume_session: Optional[str] = None,
+    compact_every: int = 10,
 ) -> None:
     """Thin shim: delegates to InteractiveSession in ai_analysis/interactive.py."""
     from rocpd.ai_analysis.interactive import InteractiveSession, SessionStore
@@ -4825,6 +4826,7 @@ def _run_interactive_session(
         llm_local_model=llm_local_model,
         session_store=SessionStore(),
         resume_session_id=resume_session,
+        compact_every=compact_every,
     ).run()
 
 
@@ -4971,6 +4973,19 @@ def add_args(parser: argparse.ArgumentParser):
     )
 
     llm_options.add_argument(
+        "--llm-compact-every",
+        metavar="N",
+        type=int,
+        default=10,
+        dest="llm_compact_every",
+        help=(
+            "Compact the LLM conversation context every N assistant turns by summarizing "
+            "older messages (default: 10). Lower values use less memory; higher values "
+            "preserve more context. Only applies to --interactive sessions."
+        ),
+    )
+
+    llm_options.add_argument(
         "--llm-local",
         type=str,
         choices=["ollama"],
@@ -4997,7 +5012,7 @@ def add_args(parser: argparse.ArgumentParser):
     def process_args(input: RocpdImportData, args: argparse.Namespace):
         """Process and return valid arguments as dictionary."""
         valid_args = ["source_dir", "prompt", "top_kernels", "format", "min_duration",
-                      "llm", "llm_api_key", "llm_model", "llm_thinking", "verbose", "interactive",
+                      "llm", "llm_api_key", "llm_model", "llm_thinking", "llm_compact_every", "verbose", "interactive",
                       "resume_session", "llm_local", "llm_local_model"]
         ret = {}
         for itr in valid_args:
@@ -5119,6 +5134,7 @@ def execute(input: Optional[RocpdImportData], config: Optional[output_config.out
             llm_local=kwargs.get("llm_local"),
             llm_local_model=kwargs.get("llm_local_model"),
             resume_session=kwargs.get("resume_session"),
+            compact_every=kwargs.get("llm_compact_every", 10),
         )
 
     return input
