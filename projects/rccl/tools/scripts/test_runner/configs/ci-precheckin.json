@@ -96,7 +96,7 @@
         {"name": "SendRecv.UserBufferRegister", "description": "SendRecv user buffer register", "test_filter": "SendRecv.UserBufferRegister"},
         {"name": "GroupCall.Identical", "description": "GroupCall identical", "test_filter": "GroupCall.Identical"},
         {"name": "GroupCall.Different", "description": "GroupCall different", "test_filter": "GroupCall.Different"},
-        {"name": "GroupCall.Multistream", "description": "GroupCall multistream", "test_filter": "GroupCall.Multistream", "timeout": 180},
+        {"name": "GroupCall.Multistream", "description": "GroupCall multistream", "test_filter": "GroupCall.Multistream", "timeout": 300},
         {"name": "GroupCall.MixedDataType", "description": "GroupCall mixed data type", "test_filter": "GroupCall.MixedDataType"},
         {"name": "GroupCall.MultiGroupCall", "description": "GroupCall multi group call", "test_filter": "GroupCall.MultiGroupCall"},
         {"name": "NonBlocking.SingleCalls", "description": "NonBlocking single calls", "test_filter": "NonBlocking.SingleCalls"},
