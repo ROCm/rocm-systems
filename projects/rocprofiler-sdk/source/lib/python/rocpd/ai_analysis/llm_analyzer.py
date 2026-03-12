@@ -877,11 +877,13 @@ Follow the reference guide strictly for analysis methodology and output format."
         """Call a private/enterprise OpenAI-compatible LLM server.
 
         Configuration via environment variables:
-            ROCPD_LLM_PRIVATE_URL     Base URL (required)
-            ROCPD_LLM_PRIVATE_MODEL   Model name (required)
-            ROCPD_LLM_PRIVATE_API_KEY API key (default: "dummy")
-            ROCPD_LLM_PRIVATE_HEADERS JSON object of extra request headers
-                                       (the "user" header defaults to os.getlogin())
+            ROCPD_LLM_PRIVATE_URL        Base URL (required)
+            ROCPD_LLM_PRIVATE_MODEL      Model name (required)
+            ROCPD_LLM_PRIVATE_API_KEY    API key (default: "dummy")
+            ROCPD_LLM_PRIVATE_HEADERS    JSON object of extra request headers
+                                         (the "user" header defaults to os.getlogin())
+            ROCPD_LLM_PRIVATE_VERIFY_SSL Set to "0" or "false" to disable SSL
+                                         certificate verification (requires httpx).
         """
         try:
             import openai
@@ -917,7 +919,26 @@ Follow the reference guide strictly for analysis methodology and output format."
                     f"ROCPD_LLM_PRIVATE_HEADERS is not valid JSON: {e}"
                 )
 
-        client = openai.OpenAI(api_key=key, base_url=base_url, default_headers=headers)
+        verify_ssl_env = os.environ.get("ROCPD_LLM_PRIVATE_VERIFY_SSL", "1").lower()
+        verify_ssl = verify_ssl_env not in ("0", "false", "no")
+        http_client = None
+        if not verify_ssl:
+            try:
+                import httpx as _httpx
+                http_client = _httpx.Client(verify=False)
+            except ImportError:
+                import warnings
+                warnings.warn(
+                    "ROCPD_LLM_PRIVATE_VERIFY_SSL=0 requested but httpx is not installed. "
+                    "SSL verification will remain enabled. Run: pip install httpx",
+                    stacklevel=2,
+                )
+
+        client_kwargs: dict = dict(api_key=key, base_url=base_url, default_headers=headers)
+        if http_client is not None:
+            client_kwargs["http_client"] = http_client
+        client = openai.OpenAI(**client_kwargs)
+
         try:
             resp = client.chat.completions.create(
                 model=model,
