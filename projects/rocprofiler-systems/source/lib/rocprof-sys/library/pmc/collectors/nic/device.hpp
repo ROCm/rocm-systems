@@ -11,22 +11,14 @@
 #include <cstring>
 #include <memory>
 #include <string>
+#include <string_view>
+#include <unordered_map>
 #include <vector>
 
-#if ROCPROFSYS_USE_ROCM > 0
-#    include <amd_smi/amdsmi.h>
-#endif
+#include <amd_smi/amdsmi.h>
 
-namespace rocprofsys
+namespace rocprofsys::pmc::collectors::nic
 {
-namespace pmc
-{
-namespace collectors
-{
-namespace nic
-{
-
-#if ROCPROFSYS_USE_ROCM > 0
 
 using ::rocprofsys::pmc::collectors::nic::enabled_metrics;
 using ::rocprofsys::pmc::collectors::nic::metrics;
@@ -129,32 +121,22 @@ public:
             return nic_metrics;
         }
 
-        // Extract the 6 metrics we care about
+        // Extract the 6 metrics we care about using O(1) hash lookup
+        // instead of O(n) strcmp chain for better performance in hot path
+        static const std::unordered_map<std::string_view, uint64_t metrics::*>
+            METRIC_MAP = { { "rx_rdma_ucast_bytes", &metrics::rx_rdma_ucast_bytes },
+                           { "tx_rdma_ucast_bytes", &metrics::tx_rdma_ucast_bytes },
+                           { "rx_rdma_ucast_pkts", &metrics::rx_rdma_ucast_pkts },
+                           { "tx_rdma_ucast_pkts", &metrics::tx_rdma_ucast_pkts },
+                           { "rx_rdma_cnp_pkts", &metrics::rx_rdma_cnp_pkts },
+                           { "tx_rdma_cnp_pkts", &metrics::tx_rdma_cnp_pkts } };
+
         for(const auto& stat : stats)
         {
-            if(std::strcmp(stat.name, "rx_rdma_ucast_bytes") == 0)
+            auto it = METRIC_MAP.find(std::string_view(stat.name));
+            if(it != METRIC_MAP.end())
             {
-                nic_metrics.rx_rdma_ucast_bytes = stat.value;
-            }
-            else if(std::strcmp(stat.name, "tx_rdma_ucast_bytes") == 0)
-            {
-                nic_metrics.tx_rdma_ucast_bytes = stat.value;
-            }
-            else if(std::strcmp(stat.name, "rx_rdma_ucast_pkts") == 0)
-            {
-                nic_metrics.rx_rdma_ucast_pkts = stat.value;
-            }
-            else if(std::strcmp(stat.name, "tx_rdma_ucast_pkts") == 0)
-            {
-                nic_metrics.tx_rdma_ucast_pkts = stat.value;
-            }
-            else if(std::strcmp(stat.name, "rx_rdma_cnp_pkts") == 0)
-            {
-                nic_metrics.rx_rdma_cnp_pkts = stat.value;
-            }
-            else if(std::strcmp(stat.name, "tx_rdma_cnp_pkts") == 0)
-            {
-                nic_metrics.tx_rdma_cnp_pkts = stat.value;
+                nic_metrics.*(it->second) = stat.value;
             }
         }
 
@@ -256,9 +238,4 @@ private:
     bool                    m_is_supported    = false;
 };
 
-#endif  // ROCPROFSYS_USE_ROCM > 0
-
-}  // namespace nic
-}  // namespace collectors
-}  // namespace pmc
-}  // namespace rocprofsys
+}  // namespace rocprofsys::pmc::collectors::nic

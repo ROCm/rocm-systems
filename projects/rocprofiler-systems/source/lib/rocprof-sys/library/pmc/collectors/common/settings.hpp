@@ -15,11 +15,7 @@
 #include <string>
 #include <unordered_map>
 
-namespace rocprofsys
-{
-namespace pmc
-{
-namespace collectors
+namespace rocprofsys::pmc::collectors
 {
 
 // Import GPU types into collectors namespace
@@ -295,6 +291,4 @@ private:
     }
 };
 
-}  // namespace collectors
-}  // namespace pmc
-}  // namespace rocprofsys
+}  // namespace rocprofsys::pmc::collectors

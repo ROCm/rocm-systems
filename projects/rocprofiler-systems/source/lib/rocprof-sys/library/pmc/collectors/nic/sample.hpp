@@ -10,13 +10,7 @@
 #include <string>
 #include <string_view>
 
-namespace rocprofsys
-{
-namespace pmc
-{
-namespace collectors
-{
-namespace nic
+namespace rocprofsys::pmc::collectors::nic
 {
 
 /**
@@ -48,10 +42,10 @@ struct sample : trace_cache::cacheable_t
     metrics         metric_values;
 };
 
-}  // namespace nic
-}  // namespace collectors
-}  // namespace pmc
+}  // namespace rocprofsys::pmc::collectors::nic
 
+namespace rocprofsys
+{
 namespace trace_cache
 {
 

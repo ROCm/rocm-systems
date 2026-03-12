@@ -15,16 +15,8 @@
 #include <optional>
 #include <string>
 
-namespace rocprofsys
+namespace rocprofsys::pmc::collectors::nic
 {
-namespace pmc
-{
-namespace collectors
-{
-namespace nic
-{
-
-#if ROCPROFSYS_USE_ROCM > 0
 
 /**
  * @brief Output policy for writing NIC RDMA samples to the trace cache.
@@ -186,9 +178,4 @@ struct cache_policy
     }
 };
 
-#endif  // ROCPROFSYS_USE_ROCM > 0
-
-}  // namespace nic
-}  // namespace collectors
-}  // namespace pmc
-}  // namespace rocprofsys
+}  // namespace rocprofsys::pmc::collectors::nic

@@ -12,20 +12,11 @@
 
 #include <map>
 #include <memory>
+#include <spdlog/fmt/fmt.h>
 #include <vector>
 
-#define JOIN(...) ::timemory::join::join(__VA_ARGS__)
-
-namespace rocprofsys
+namespace rocprofsys::pmc::collectors::nic
 {
-namespace pmc
-{
-namespace collectors
-{
-namespace nic
-{
-
-#if ROCPROFSYS_USE_ROCM > 0
 
 namespace
 {
@@ -64,20 +55,6 @@ struct nic_perfetto_sample
     metrics metric_values;
 };
 
-inline std::map<size_t, std::map<uint32_t, nic_track_description>>&
-get_nic_perfetto_tracks()
-{
-    static std::map<size_t, std::map<uint32_t, nic_track_description>> tracks;
-    return tracks;
-}
-
-inline std::map<size_t, std::unique_ptr<std::vector<nic_perfetto_sample>>>&
-get_nic_perfetto_bundle()
-{
-    static std::map<size_t, std::unique_ptr<std::vector<nic_perfetto_sample>>> bundle;
-    return bundle;
-}
-
 }  // namespace
 
 /**
@@ -92,6 +69,11 @@ struct perfetto_policy
 {
     using counter_track = perfetto_counter_track<metrics>;
 
+    // Static storage for Perfetto tracks and sample buffering (C++17 inline static)
+    static inline std::map<size_t, std::map<uint32_t, nic_track_description>> tracks{};
+    static inline std::map<size_t, std::unique_ptr<std::vector<nic_perfetto_sample>>>
+        bundle{};
+
     /**
      * @brief Initialize Perfetto storage for the given NIC devices.
      *
@@ -105,7 +87,7 @@ struct perfetto_policy
     {
         for(const auto& device : devices)
         {
-            get_nic_perfetto_bundle().insert(
+            perfetto_policy::bundle.insert(
                 { device->get_index(),
                   std::make_unique<std::vector<nic_perfetto_sample>>() });
         }
@@ -124,11 +106,11 @@ struct perfetto_policy
                                      const enabled_metrics& enabled_metric_config)
     {
         auto addendum = [&](const char* metric_name) {
-            return JOIN(" ", "NIC", device_name, metric_name,
-                        JOIN("", '[', device_index, ']'), "(S)");
+            return fmt::format("NIC {} {} [{}] (S)", device_name, metric_name,
+                               device_index);
         };
 
-        auto& tracks = get_nic_perfetto_tracks()[device_index];
+        auto& tracks = perfetto_policy::tracks[device_index];
 
         if(enabled_metric_config.bits.rx_rdma_ucast_bytes)
         {
@@ -191,8 +173,8 @@ struct perfetto_policy
     static void store_sample(size_t device_index, const metrics& metric_values,
                              unsigned long timestamp)
     {
-        auto it = get_nic_perfetto_bundle().find(device_index);
-        if(it != get_nic_perfetto_bundle().end())
+        auto it = perfetto_policy::bundle.find(device_index);
+        if(it != perfetto_policy::bundle.end())
         {
             it->second->emplace_back(nic_perfetto_sample{ timestamp, metric_values });
         }
@@ -226,8 +208,8 @@ private:
         ::rocprofsys::pmc::collectors::nic::enabled_metrics enabled_metrics,
         ::rocprofsys::pmc::collectors::nic::enabled_metrics supported_metrics)
     {
-        auto bundle_it = get_nic_perfetto_bundle().find(device_index);
-        if(bundle_it == get_nic_perfetto_bundle().end() || !bundle_it->second)
+        auto bundle_it = perfetto_policy::bundle.find(device_index);
+        if(bundle_it == perfetto_policy::bundle.end() || !bundle_it->second)
         {
             return;
         }
@@ -254,8 +236,8 @@ private:
             return;
         }
 
-        auto tracks_it = get_nic_perfetto_tracks().find(device_index);
-        if(tracks_it == get_nic_perfetto_tracks().end())
+        auto tracks_it = perfetto_policy::tracks.find(device_index);
+        if(tracks_it == perfetto_policy::tracks.end())
         {
             return;
         }
@@ -353,9 +335,4 @@ private:
     }
 };
 
-#endif  // ROCPROFSYS_USE_ROCM > 0
-
-}  // namespace nic
-}  // namespace collectors
-}  // namespace pmc
-}  // namespace rocprofsys
+}  // namespace rocprofsys::pmc::collectors::nic

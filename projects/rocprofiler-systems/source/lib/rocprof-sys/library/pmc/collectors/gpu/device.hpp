@@ -15,13 +15,7 @@
 #include <string>
 #include <vector>
 
-namespace rocprofsys
-{
-namespace pmc
-{
-namespace collectors
-{
-namespace gpu
+namespace rocprofsys::pmc::collectors::gpu
 {
 
 using ::rocprofsys::pmc::collectors::gpu::enabled_metrics;
@@ -91,7 +85,7 @@ public:
      *
      * @return Cumulative SDMA usage in microseconds.
      */
-#    if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
+#if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
     [[nodiscard]] uint64_t get_raw_sdma_usage() const
     {
         uint32_t num_processes = 0;
@@ -117,7 +111,7 @@ public:
         }
         return cumulative;
     }
-#    endif
+#endif
 
 private:
     void collect_power_metrics(const amdsmi_gpu_metrics_t& gpu_metrics,
@@ -329,14 +323,14 @@ private:
             is_metric_supported(gpu_metrics.pcie_bandwidth_acc) ||
             is_metric_supported(gpu_metrics.pcie_bandwidth_inst);
 
-#    if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
+#if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
         {
             uint32_t num_processes = 0;
             m_supported_metrics.bits.sdma_usage =
                 m_driver_api->get_gpu_process_list(m_device_handle, &num_processes,
                                                    nullptr) == AMDSMI_STATUS_SUCCESS;
         }
-#    endif
+#endif
 
         LOG_DEBUG("Device [{}] supported metrics: {}", m_index,
                   format_supported_metrics(m_supported_metrics));
@@ -409,8 +403,4 @@ private:
     bool                    m_is_supported = false;
 };
 
-
-}  // namespace gpu
-}  // namespace collectors
-}  // namespace pmc
-}  // namespace rocprofsys
+}  // namespace rocprofsys::pmc::collectors::gpu

@@ -11,6 +11,6 @@ set(pmc_common_sources
 set(pmc_common_sources ${pmc_common_sources} PARENT_SCOPE)
 
 # Tests
-if(ROCPROFSYS_BUILD_TESTING AND ROCPROFSYS_USE_ROCM)
+if(ROCPROFSYS_BUILD_TESTING)
     add_subdirectory(tests)
 endif()

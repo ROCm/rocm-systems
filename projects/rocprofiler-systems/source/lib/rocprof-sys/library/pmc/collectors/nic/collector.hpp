@@ -15,16 +15,8 @@
 #include <limits>
 #include <memory>
 
-namespace rocprofsys
+namespace rocprofsys::pmc::collectors::nic
 {
-namespace pmc
-{
-namespace collectors
-{
-namespace nic
-{
-
-#if ROCPROFSYS_USE_ROCM > 0
 
 using ::rocprofsys::pmc::device_selection_mode;
 using ::rocprofsys::pmc::nic_device_filter;
@@ -268,9 +260,4 @@ private:
     enabled_metrics m_enabled_metrics;  ///< Set of metrics enabled for collection
 };
 
-#endif  // ROCPROFSYS_USE_ROCM > 0
-
-}  // namespace nic
-}  // namespace collectors
-}  // namespace pmc
-}  // namespace rocprofsys
+}  // namespace rocprofsys::pmc::collectors::nic

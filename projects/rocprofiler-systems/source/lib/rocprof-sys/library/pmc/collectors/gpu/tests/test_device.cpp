@@ -15,7 +15,6 @@ using ::testing::DoAll;
 using ::testing::Return;
 using ::testing::SetArgPointee;
 
-#if ROCPROFSYS_USE_ROCM > 0
 
 using MockDriver = rocprofsys::pmc::drivers::amd_smi::testing::mock_driver;
 
@@ -2204,4 +2203,3 @@ TEST_F(DeviceTest, device_type_filtering_scenario)
 }  // namespace pmc
 }  // namespace rocprofsys
 
-#endif  // ROCPROFSYS_USE_ROCM > 0

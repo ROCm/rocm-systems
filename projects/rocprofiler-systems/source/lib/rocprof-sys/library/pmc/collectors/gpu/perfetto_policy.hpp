@@ -8,19 +8,12 @@
 #include "library/thread_info.hpp"
 
 #include <mutex>
+#include <spdlog/fmt/fmt.h>
 #include <timemory/units.hpp>
 
 #include <vector>
 
-#define JOIN(...) ::timemory::join::join(__VA_ARGS__)
-
-namespace rocprofsys
-{
-namespace pmc
-{
-namespace collectors
-{
-namespace gpu
+namespace rocprofsys::pmc::collectors::gpu
 {
 
 // Use types from this namespace
@@ -172,19 +165,17 @@ struct perfetto_policy
                                      const enabled_metrics& enabled_metric_config)
     {
         auto addendum = [&](const char* name) {
-            return JOIN(" ", "GPU", name, JOIN("", '[', device_index, ']'), "(S)");
+            return fmt::format("GPU {} [{}] (S)", name, device_index);
         };
 
         auto addendum_blk = [&](std::size_t i, const char* metric,
                                 std::size_t xcp_idx = SIZE_MAX) {
             if(xcp_idx != SIZE_MAX)
             {
-                return JOIN(" ", "GPU", JOIN("", '[', device_index, ']'), metric,
-                            JOIN("", "XCP_", xcp_idx, ": [", (i < 10 ? "0" : ""), i, ']'),
-                            "(S)");
+                return fmt::format("GPU [{}] {} XCP_{}: [{:02d}] (S)", device_index,
+                                   metric, xcp_idx, i);
             }
-            return JOIN(" ", "GPU", JOIN("", '[', device_index, ']'), metric,
-                        JOIN("", "[", (i < 10 ? "0" : ""), i, ']'), "(S)");
+            return fmt::format("GPU [{}] {} [{:02d}] (S)", device_index, metric, i);
         };
 
         auto& tracks = get_perfetto_tracks();
@@ -627,7 +618,4 @@ private:
     }
 };
 
-}  // namespace gpu
-}  // namespace collectors
-}  // namespace pmc
-}  // namespace rocprofsys
+}  // namespace rocprofsys::pmc::collectors::gpu

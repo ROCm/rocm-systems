@@ -6,11 +6,7 @@
 #include <cstdint>
 #include <functional>
 
-namespace rocprofsys
-{
-namespace pmc
-{
-namespace collectors
+namespace rocprofsys::pmc::collectors
 {
 
 /**
@@ -111,6 +107,4 @@ private:
     std::function<void(void*)> m_shutdown_impl; /**< Type-erased shutdown function */
 };
 
-}  // namespace collectors
-}  // namespace pmc
-}  // namespace rocprofsys
+}  // namespace rocprofsys::pmc::collectors

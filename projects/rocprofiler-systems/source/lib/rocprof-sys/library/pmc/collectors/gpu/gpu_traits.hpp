@@ -11,9 +11,7 @@
 #include <memory>
 #include <vector>
 
-#if ROCPROFSYS_USE_ROCM > 0
-#    include <amd_smi/amdsmi.h>
-#endif
+#include <amd_smi/amdsmi.h>
 
 namespace rocprofsys
 {
@@ -23,8 +21,6 @@ namespace collectors
 {
 namespace gpu
 {
-
-#if ROCPROFSYS_USE_ROCM > 0
 
 using ::rocprofsys::pmc::device_filter;
 using ::rocprofsys::pmc::device_selection_mode;
@@ -305,7 +301,6 @@ struct gpu_traits
     }
 };
 
-#endif  // ROCPROFSYS_USE_ROCM > 0
 
 }  // namespace gpu
 }  // namespace collectors

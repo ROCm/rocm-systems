@@ -13,13 +13,7 @@
 #include <memory>
 #include <vector>
 
-namespace rocprofsys
-{
-namespace pmc
-{
-namespace collectors
-{
-namespace gpu
+namespace rocprofsys::pmc::collectors::gpu
 {
 
 using ::rocprofsys::pmc::device_filter;
@@ -327,7 +321,4 @@ private:
     std::vector<sdma_state> m_sdma_states;      ///< Per-device SDMA delta tracking
 };
 
-}  // namespace gpu
-}  // namespace collectors
-}  // namespace pmc
-}  // namespace rocprofsys
+}  // namespace rocprofsys::pmc::collectors::gpu

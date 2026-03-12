@@ -15,16 +15,8 @@
 #include <cstdint>
 #include <optional>
 
-namespace rocprofsys
+namespace rocprofsys::pmc::collectors::gpu
 {
-namespace pmc
-{
-namespace collectors
-{
-namespace gpu
-{
-
-#if ROCPROFSYS_USE_ROCM > 0
 
 /**
  * @brief Output policy for writing GPU PMC samples to the trace cache.
@@ -364,9 +356,4 @@ struct cache_policy
     }
 };
 
-#endif  // ROCPROFSYS_USE_ROCM > 0
-
-}  // namespace gpu
-}  // namespace collectors
-}  // namespace pmc
-}  // namespace rocprofsys
+}  // namespace rocprofsys::pmc::collectors::gpu

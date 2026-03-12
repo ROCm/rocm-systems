@@ -13,13 +13,7 @@
 #include <stdexcept>
 #include <string>
 
-namespace rocprofsys
-{
-namespace pmc
-{
-namespace collectors
-{
-namespace base
+namespace rocprofsys::pmc::collectors::base
 {
 
 /**
@@ -229,7 +223,4 @@ private:
     enabled_metrics_t                m_enabled_metrics;  ///< Enabled metrics
 };
 
-}  // namespace base
-}  // namespace collectors
-}  // namespace pmc
-}  // namespace rocprofsys
+}  // namespace rocprofsys::pmc::collectors::base

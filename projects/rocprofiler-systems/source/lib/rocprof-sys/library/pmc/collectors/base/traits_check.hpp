@@ -6,13 +6,7 @@
 #include <memory>
 #include <type_traits>
 
-namespace rocprofsys
-{
-namespace pmc
-{
-namespace collectors
-{
-namespace base
+namespace rocprofsys::pmc::collectors::base
 {
 
 /**
@@ -132,7 +126,4 @@ validate_traits()
                   "Traits must define: static constexpr bool multi_device");
 }
 
-}  // namespace base
-}  // namespace collectors
-}  // namespace pmc
-}  // namespace rocprofsys
+}  // namespace rocprofsys::pmc::collectors::base
