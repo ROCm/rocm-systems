@@ -101,14 +101,7 @@ foreach(OPENMP_EXAMPLE IN LISTS OPENMP_EXAMPLES)
     endif()
 endforeach()
 
-if(ROCPROFSYS_USE_ROCM)
-    add_subdirectory(external)
-else()
-    rocprofiler_systems_message(
-      WARNING
-      "ROCPROFSYS OMPVV CTests requires ROCm to be installed. Disabling OMPVV CTests..."
-    )
-endif()
+add_subdirectory(external)
 
 if(ROCPROFSYS_DISABLE_EXAMPLES)
     if(NOT "openmp-target" IN_LIST ROCPROFSYS_DISABLE_EXAMPLES)

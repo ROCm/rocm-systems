@@ -49,7 +49,7 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGraphMemcpyNodeGetParams_Negative_Parameters") {
+TEST_CASE(Unit_hipGraphMemcpyNodeGetParams_Negative_Parameters) {
   CHECK_IMAGE_SUPPORT
   constexpr hipExtent extent{128 * sizeof(int), 128, 8};
 

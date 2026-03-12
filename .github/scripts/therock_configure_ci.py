@@ -9,7 +9,11 @@ import fnmatch
 import json
 import logging
 import subprocess
-from therock_matrix import subtree_to_project_map, project_map, trigger_windows_ci_for_subtrees_paths
+from therock_matrix import (
+    subtree_to_project_map,
+    project_map,
+    trigger_windows_ci_for_subtrees_paths,
+)
 import time
 from typing import Mapping, Optional, Iterable
 import os
@@ -31,6 +35,7 @@ def set_github_output(d: Mapping[str, str]):
     with open(step_output_file, "a") as f:
         f.writelines(f"{k}={v}" + "\n" for k, v in d.items())
 
+
 def retry(max_attempts, delay_seconds, exceptions):
     def decorator(func):
         def newfn(*args, **kwargs):
@@ -39,14 +44,19 @@ def retry(max_attempts, delay_seconds, exceptions):
                 try:
                     return func(*args, **kwargs)
                 except exceptions as e:
-                    print(f'Exception {str(e)} thrown when attempting to run , attempt {attempt} of {max_attempts}')
+                    print(
+                        f"Exception {str(e)} thrown when attempting to run , attempt {attempt} of {max_attempts}"
+                    )
                     attempt += 1
                     if attempt < max_attempts:
                         backoff = delay_seconds * (2 ** (attempt - 1))
                         time.sleep(backoff)
             return func(*args, **kwargs)
+
         return newfn
+
     return decorator
+
 
 @retry(max_attempts=3, delay_seconds=2, exceptions=(TimeoutError))
 def get_modified_paths(base_ref: str) -> Optional[Iterable[str]]:
@@ -105,7 +115,6 @@ SKIPPABLE_PATH_PATTERNS = [
     "projects/*/docs/*",
     "projects/*/.gitignore",
     "projects/rocr-runtime/libhsakmt/src/dxg/*",
-    "projects/rocshmem/*",
     "shared/*/docs/*",
     "shared/*/.gitignore",
 ]
@@ -176,13 +185,14 @@ def retrieve_projects(args):
 
         # If files changed but no subtree matched → evaluate all
         if modified_paths and not subtrees:
-            logging.info("Modified files did not match known subtrees, evaluating all projects")
+            logging.info(
+                "Modified files did not match known subtrees, evaluating all projects"
+            )
             subtrees = list(subtree_to_project_map.keys())
 
     # Windows CI skip logic
-    if (
-        args.get("platform") == "windows"
-        and not any(check_trigger_windows_ci_for_subtree_path(path) for path in modified_paths)
+    if args.get("platform") == "windows" and not any(
+        check_trigger_windows_ci_for_subtree_path(path) for path in modified_paths
     ):
         logging.info("Modified paths do not require Windows CI, skipping")
         return []
@@ -216,10 +226,13 @@ def retrieve_projects(args):
     else:
         final_flags = " ".join(sorted(merged_flags))
 
-    return [{
-        "cmake_options": final_flags,
-        "projects_to_test": ", ".join(sorted(merged_tests))
-    }]
+    return [
+        {
+            "cmake_options": final_flags,
+            "projects_to_test": ", ".join(sorted(merged_tests)),
+        }
+    ]
+
 
 def run(args):
     project_to_run = retrieve_projects(args)
