@@ -912,13 +912,19 @@ Follow the reference guide strictly for analysis methodology and output format."
             pass
         raw_headers = os.environ.get("ROCPD_LLM_PRIVATE_HEADERS", "")
         if raw_headers:
-            normalized = raw_headers.replace("'", '"')
+            # Try strict JSON first; only normalize single-quotes as a fallback.
+            # The replace-based normalization would corrupt values with apostrophes.
+            parsed_h = None
             try:
-                headers.update(_json.loads(normalized))
-            except _json.JSONDecodeError as e:
-                raise ValueError(
-                    f"ROCPD_LLM_PRIVATE_HEADERS is not valid JSON: {e}"
-                )
+                parsed_h = _json.loads(raw_headers)
+            except _json.JSONDecodeError:
+                try:
+                    parsed_h = _json.loads(raw_headers.replace("'", '"'))
+                except _json.JSONDecodeError as e:
+                    raise ValueError(
+                        f"ROCPD_LLM_PRIVATE_HEADERS is not valid JSON: {e}"
+                    )
+            headers.update(parsed_h)
 
         verify_ssl_env = os.environ.get("ROCPD_LLM_PRIVATE_VERIFY_SSL", "1").lower()
         verify_ssl = verify_ssl_env not in ("0", "false", "no")
@@ -941,33 +947,37 @@ Follow the reference guide strictly for analysis methodology and output format."
         client = openai.OpenAI(**client_kwargs)
 
         try:
-            resp = client.chat.completions.create(
-                model=model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user",   "content": user_prompt},
-                ],
-                max_completion_tokens=4096,
-            )
-            return resp.choices[0].message.content or ""
-        except openai.BadRequestError as e:
-            if "max_completion_tokens" in str(e):
+            try:
                 resp = client.chat.completions.create(
                     model=model,
                     messages=[
                         {"role": "system", "content": system_prompt},
                         {"role": "user",   "content": user_prompt},
                     ],
-                    max_tokens=4096,
+                    max_completion_tokens=4096,
                 )
                 return resp.choices[0].message.content or ""
-            raise
-        except Exception as exc:
-            raise RuntimeError(
-                f"Private LLM request failed ({base_url}). "
-                f"Check ROCPD_LLM_PRIVATE_URL, ROCPD_LLM_PRIVATE_HEADERS. "
-                f"Error: {exc}"
-            ) from exc
+            except openai.BadRequestError as e:
+                if "max_completion_tokens" in str(e):
+                    resp = client.chat.completions.create(
+                        model=model,
+                        messages=[
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user",   "content": user_prompt},
+                        ],
+                        max_tokens=4096,
+                    )
+                    return resp.choices[0].message.content or ""
+                raise
+            except Exception as exc:
+                raise RuntimeError(
+                    f"Private LLM request failed ({base_url}). "
+                    f"Check ROCPD_LLM_PRIVATE_URL, ROCPD_LLM_PRIVATE_HEADERS. "
+                    f"Error: {exc}"
+                ) from exc
+        finally:
+            if http_client is not None:
+                http_client.close()
 
     def summarize_source_file(self, filename: str, content: str) -> str:
         """Stage 1: summarize a GPU source file to its key patterns (local LLM)."""

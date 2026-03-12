@@ -54,16 +54,23 @@ def _build_private_client(api_key: Optional[str], model_override: Optional[str])
         pass  # getlogin() can fail in some CI/container environments
     raw_headers = os.environ.get("ROCPD_LLM_PRIVATE_HEADERS", "")
     if raw_headers:
-        # Normalize single-quoted Python dict literals to JSON before parsing
-        normalized = raw_headers.replace("'", '"')
+        # Try strict JSON first; only normalize single-quotes as a fallback.
+        # The replace-based normalization is intentionally not the first path
+        # because it would corrupt values containing legitimate apostrophes
+        # (e.g. Bearer tokens with embedded apostrophes).
+        parsed_headers = None
         try:
-            headers.update(json.loads(normalized))
-        except json.JSONDecodeError as e:
-            raise ValueError(
-                f"ROCPD_LLM_PRIVATE_HEADERS is not valid JSON: {e}\n"
-                f"Use double-quoted JSON: '{{\"Ocp-Apim-Subscription-Key\": \"abc123\"}}'\n"
-                f"Value was: {raw_headers!r}"
-            )
+            parsed_headers = json.loads(raw_headers)
+        except json.JSONDecodeError:
+            try:
+                parsed_headers = json.loads(raw_headers.replace("'", '"'))
+            except json.JSONDecodeError as e:
+                raise ValueError(
+                    f"ROCPD_LLM_PRIVATE_HEADERS is not valid JSON: {e}\n"
+                    f"Use double-quoted JSON: '{{\"Ocp-Apim-Subscription-Key\": \"abc123\"}}'\n"
+                    f"Value was: {raw_headers!r}"
+                )
+        headers.update(parsed_headers)
 
     # SSL verification — disabled when ROCPD_LLM_PRIVATE_VERIFY_SSL=0/false
     verify_ssl_env = os.environ.get("ROCPD_LLM_PRIVATE_VERIFY_SSL", "1").lower()
@@ -86,7 +93,7 @@ def _build_private_client(api_key: Optional[str], model_override: Optional[str])
         kwargs["http_client"] = http_client
 
     client = _openai.OpenAI(**kwargs)
-    return client, model
+    return client, model, http_client
 
 
 class LLMConversation:
@@ -212,8 +219,10 @@ class LLMConversation:
             model = self._model or os.environ.get("ROCPD_LLM_LOCAL_MODEL", _DEFAULT_LOCAL_MODEL)
             client = _openai.OpenAI(api_key="ignored", base_url=base_url)
         elif self._provider == "private":
-            client, model = _build_private_client(self._api_key, self._model)
+            client, model, _http_client = _build_private_client(self._api_key, self._model)
             if not model:
+                if _http_client is not None:
+                    _http_client.close()
                 raise ValueError(
                     "No model specified for private provider. "
                     "Set ROCPD_LLM_PRIVATE_MODEL or pass --llm-private-model."
@@ -226,6 +235,7 @@ class LLMConversation:
                 )
             model = self._model or os.environ.get("ROCPD_LLM_MODEL") or DEFAULT_OPENAI_MODEL
             client = _openai.OpenAI(api_key=api_key)
+            _http_client = None
 
         messages_with_system = [{"role": "system", "content": self._system}] + self._messages
         result = ""
@@ -266,6 +276,9 @@ class LLMConversation:
                 )
             else:
                 raise
+        finally:
+            if _http_client is not None:
+                _http_client.close()
         return result
 
     # ── Compaction ────────────────────────────────────────────────────────────
@@ -329,6 +342,7 @@ class LLMConversation:
             import openai as _openai
         except ImportError:
             raise ImportError("openai package not installed.")
+        _http_client = None
         if self._provider == "local":
             client = _openai.OpenAI(
                 api_key="ignored",
@@ -336,23 +350,34 @@ class LLMConversation:
             )
             model = self._model or os.environ.get("ROCPD_LLM_LOCAL_MODEL", _DEFAULT_LOCAL_MODEL)
         elif self._provider == "private":
-            client, model = _build_private_client(self._api_key, self._model)
+            client, model, _http_client = _build_private_client(self._api_key, self._model)
+            if not model:
+                if _http_client is not None:
+                    _http_client.close()
+                raise ValueError(
+                    "No model specified for private provider. "
+                    "Set ROCPD_LLM_PRIVATE_MODEL or pass --llm-private-model."
+                )
         else:
             client = _openai.OpenAI(api_key=self._api_key or os.environ.get("OPENAI_API_KEY", ""))
             model = self._model or os.environ.get("ROCPD_LLM_MODEL") or DEFAULT_OPENAI_MODEL
         full_messages = [{"role": "system", "content": self._system}] + messages
         try:
-            resp = client.chat.completions.create(
-                model=model, messages=full_messages, max_completion_tokens=max_tokens,
-            )
-        except _openai.BadRequestError as e:
-            if "max_completion_tokens" in str(e):
+            try:
                 resp = client.chat.completions.create(
-                    model=model, messages=full_messages, max_tokens=max_tokens,
+                    model=model, messages=full_messages, max_completion_tokens=max_tokens,
                 )
-            else:
-                raise
-        return resp.choices[0].message.content or ""
+            except _openai.BadRequestError as e:
+                if "max_completion_tokens" in str(e):
+                    resp = client.chat.completions.create(
+                        model=model, messages=full_messages, max_tokens=max_tokens,
+                    )
+                else:
+                    raise
+            return resp.choices[0].message.content or ""
+        finally:
+            if _http_client is not None:
+                _http_client.close()
 
     # ── Disk archive ──────────────────────────────────────────────────────────
 

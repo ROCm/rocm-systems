@@ -48,6 +48,7 @@ class SessionData:
     history: List[HistoryEntry] = field(default_factory=list)
     persistent_menu_items: List[PersistentMenuItem] = field(default_factory=list)
     conversation: Optional[Dict[str, Any]] = None     # serialized LLMConversation
+    sent_source_files: List[str] = field(default_factory=list)  # files already sent to LLM
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -64,6 +65,7 @@ class SessionData:
             history=history,
             persistent_menu_items=items,
             conversation=d.get("conversation"),      # None if key absent (backward compat)
+            sent_source_files=d.get("sent_source_files", []),  # empty list for old sessions
         )
 
 
@@ -322,6 +324,7 @@ class InteractiveSession:
             loaded = self._store.load(resume_id)
             if loaded:
                 self._conv = self._restore_or_create_conv(loaded)
+                self._sent_source_files = set(loaded.sent_source_files)
                 return loaded
 
         # Auto-detect previous session for this source dir
@@ -330,6 +333,7 @@ class InteractiveSession:
             chosen = self._prompt_resume(existing)
             if chosen:
                 self._conv = self._restore_or_create_conv(chosen)
+                self._sent_source_files = set(chosen.sent_source_files)
                 return chosen
 
         # New session
@@ -510,6 +514,7 @@ class InteractiveSession:
             elif choice == "s":
                 if self._conv:
                     self._session.conversation = self._conv.to_dict()
+                self._session.sent_source_files = list(self._sent_source_files)
                 self._store.save(self._session)
                 _print("  Session saved.", style="green")
             elif choice == "p":
@@ -531,6 +536,7 @@ class InteractiveSession:
         self._session.last_updated = datetime.now(timezone.utc).isoformat()
         if self._conv:
             self._session.conversation = self._conv.to_dict()
+        self._session.sent_source_files = list(self._sent_source_files)
         self._store.save(self._session)
         _print("  Session saved. Goodbye.", style="cyan")
 
@@ -888,6 +894,7 @@ class InteractiveSession:
         self._session.last_updated = now
         if self._conv:
             self._session.conversation = self._conv.to_dict()
+        self._session.sent_source_files = list(self._sent_source_files)
         self._store.save(self._session)
         _print(f"  ✓ {added} finding(s) added to menu.", style="green")
 
