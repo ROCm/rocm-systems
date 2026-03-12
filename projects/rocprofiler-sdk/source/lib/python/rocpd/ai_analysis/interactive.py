@@ -1659,11 +1659,15 @@ class WorkflowSession:
 
     # ── Revert helper ──────────────────────────────────────────────────────────
 
-    def _revert_last_edit(self) -> bool:
+    def _revert_last_edit(self, failure_reason: str = "") -> bool:
         """Restore the most recently AI-modified file from its .bak backup.
 
         Returns True on success.  The reverted _EditRecord is removed from
         edit_history so the LLM knows the edit was rolled back.
+
+        If failure_reason is provided (e.g. compiler error text), it is injected
+        into the active LLM conversation so the model learns not to repeat the
+        same mistake in this session.
         """
         if not self._state.edit_history:
             _print("  No AI edits to revert.", style="yellow")
@@ -1678,10 +1682,39 @@ class WorkflowSession:
             dst.write_text(bak.read_text())
             self._state.edit_history.pop()
             _print(f"  ✓ Reverted: {dst.name}  (backup kept at {bak.name})", style="green")
-            return True
         except OSError as exc:
             _print(f"  Revert failed: {exc}", style="red")
             return False
+
+        # Teach the LLM conversation what went wrong so it doesn't repeat it.
+        if self._conv is not None:
+            reason_detail = (
+                f"\n\nFailure details:\n{failure_reason[:800]}"
+                if failure_reason else ""
+            )
+            feedback = (
+                f"IMPORTANT: The previous code edit to {dst.name} was reverted "
+                f"because it caused errors after being applied.{reason_detail}\n\n"
+                f"Do NOT suggest the same pattern again. When proposing the next "
+                f"optimization, use only standard HIP APIs and functions that are "
+                f"guaranteed to compile (e.g. sinf, cosf, sqrtf — not "
+                f"__builtin_amdgcn_* variants). Acknowledge the revert briefly, "
+                f"then propose a different, valid approach."
+            )
+            try:
+                self._conv._messages.append({"role": "user", "content": feedback})
+                self._conv._messages.append({
+                    "role": "assistant",
+                    "content": (
+                        f"Understood. The edit to {dst.name} has been reverted. "
+                        f"I will avoid the pattern that caused the failure and "
+                        f"propose a different approach."
+                    ),
+                })
+            except Exception:
+                pass  # Conversation injection is best-effort
+
+        return True
 
     # ── Phase 3: Trace collection ──────────────────────────────────────────────
 
@@ -1802,7 +1835,9 @@ class WorkflowSession:
                         return False
                     continue
                 elif choice == "v" and self._state.edit_history:
-                    if self._revert_last_edit():
+                    if self._revert_last_edit(
+                        failure_reason=f"Profiling command failed with exit code {proc.returncode}."
+                    ):
                         _print("  Please recompile, then retry.", style="cyan")
                     continue
                 else:
@@ -2362,27 +2397,30 @@ class WorkflowSession:
         _print()
         _print("  Changes applied. Please recompile your application.", style="cyan")
         _print("  Type 'done' when compiled, 'revert' to undo the AI edit,", style="dim")
-        _print("  'abort' to exit, or describe compilation errors.", style="dim")
+        _print("  'abort' to exit, or paste compilation errors.", style="dim")
+        _compile_errors: List[str] = []
         while True:
             try:
-                resp = _input("  > ").strip().lower()
+                resp = _input("  > ").strip()
             except EOFError:
                 break
-            if resp in ("done", "compiled", "ok", "yes", "y", ""):
+            resp_lower = resp.lower()
+            if resp_lower in ("done", "compiled", "ok", "yes", "y", ""):
                 _print("  Great — ready to re-profile.", style="green")
                 break
-            if resp in ("revert", "undo", "rollback", "v"):
-                if self._revert_last_edit():
+            if resp_lower in ("revert", "undo", "rollback", "v"):
+                error_ctx = "\n".join(_compile_errors)
+                if self._revert_last_edit(failure_reason=error_ctx):
                     _print("  Reverted. Recompile to restore original, then type 'done'.",
                            style="cyan")
                 break
-            if resp in ("abort", "cancel", "quit", "exit"):
+            if resp_lower in ("abort", "cancel", "quit", "exit"):
                 _print("  Aborting. Backup preserved at: " + str(bak), style="dim")
                 break
-            # Treat as compilation error description
-            _print(f"  Compilation error noted. Common causes: missing include, "
-                   f"incorrect __launch_bounds__ syntax.", style="yellow")
-            _print("  Type 'done' when fixed, or 'revert' to undo the AI edit.", style="dim")
+            # Treat as compilation error description — accumulate for context
+            _compile_errors.append(resp)
+            _print(f"  Error noted. Type 'done' when fixed or 'revert' to undo the edit.",
+                   style="yellow")
 
     def _phase6_apply_diff(self, snap: _AnalysisSnapshot) -> None:
         """Phase 6 alt: Save suggestions to a patch file."""
