@@ -150,7 +150,7 @@ template <typename T, typename D> void testType(int msize) {
 }
 
 
-TEST_CASE("Unit_floatTM") {
+TEST_CASE(Unit_floatTM) {
   constexpr int msize = 100;
 
   // double

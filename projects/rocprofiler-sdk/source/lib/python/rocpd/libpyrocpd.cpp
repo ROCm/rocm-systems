@@ -284,6 +284,9 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
         .def_readwrite("kernel_rename", &tool::output_config::kernel_rename)
         .def_readwrite("agent_index_value", &tool::output_config::agent_index_value)
         .def_readwrite("group_by_queue", &tool::output_config::group_by_queue)
+        .def_readwrite("annotate_args", &tool::output_config::annotate_args)
+        .def_readwrite("annotate_kfd", &tool::output_config::annotate_kfd)
+        .def_readwrite("annotate_pmc", &tool::output_config::annotate_pmc)
         .def_readwrite("perfetto_shmem_size_hint", &tool::output_config::perfetto_shmem_size_hint)
         .def_readwrite("perfetto_buffer_size", &tool::output_config::perfetto_buffer_size)
         .def_readwrite("perfetto_backend", &tool::output_config::perfetto_backend)
@@ -414,13 +417,13 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
             constexpr auto region_order_by = "start ASC, end DESC";
             constexpr auto sample_order_by = "timestamp ASC";
 
-            auto perfetto_session = rocpd::output::PerfettoSession{output_cfg};
-            auto sqlgen_perf      = common::simple_timer{
+            auto* conn             = rocpd::interop::get_connection(std::move(data.connection));
+            auto  perfetto_session = rocpd::output::PerfettoSession{output_cfg, conn};
+            auto  sqlgen_perf      = common::simple_timer{
                 fmt::format("Perfetto generation from {} SQL database(s)", data.size())};
             for(auto obj : {data.connection})
             {
-                auto* conn  = rocpd::interop::get_connection(std::move(obj));
-                auto  nodes = rocpd::read<rocpd::types::node>(conn);
+                auto nodes = rocpd::read<rocpd::types::node>(conn);
 
                 for(const auto& nitr : nodes)
                 {

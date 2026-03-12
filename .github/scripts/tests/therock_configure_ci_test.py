@@ -97,6 +97,16 @@ class ConfigureCITest(unittest.TestCase):
         project_to_run = therock_configure_ci.retrieve_projects(args)
         self.assertEqual(len(project_to_run), 0)
 
+    def test_scheduled_run(self):
+        args = {
+            "is_nightly": True,
+            "input_projects": "",
+            "base_ref": "HEAD^"
+        }
+
+        project_to_run = therock_configure_ci.retrieve_projects(args)
+        self.assertEqual(len(project_to_run), 1)
+
     @patch("subprocess.run")
     def test_is_push(self, mock_run):
         args = {
@@ -187,6 +197,7 @@ class ConfigureCITest(unittest.TestCase):
             "projects/amdsmi/hello/test.cpp",
             "projects/hip/src/hip.cpp",  # contains windows CI trigger
             "projects/clr/src/hip.cpp",  # contains windows CI trigger
+            ".github/workflows/therock-ci.yml" # contains windows CI trigger
         ]
         
         project_to_run = therock_configure_ci.retrieve_projects(args)

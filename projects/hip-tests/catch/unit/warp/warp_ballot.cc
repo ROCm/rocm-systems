@@ -39,9 +39,14 @@ __global__ void kernel_ballot(uint64_t* const out, const uint64_t* const active_
 
   const auto grid = cg::this_grid();
   const auto warp = cg::tiled_partition(cg::this_thread_block(), warpSize);
-
   int pred = MASK_SHIFT(predicate, warp.thread_rank());
+
+#if HT_AMD
   out[grid.thread_rank()] = __ballot(pred);
+#else
+  unsigned mask = 0xFFFFFFFF;
+  out[grid.thread_rank()] = __ballot_sync(mask, pred);
+#endif
 }
 
 class WarpBallot : public WarpVoteTest<WarpBallot, uint64_t> {
@@ -99,7 +104,7 @@ class WarpBallot : public WarpVoteTest<WarpBallot, uint64_t> {
  *  - HIP_VERSION >= 5.2
  *  - Device supports warp ballot
  */
-TEST_CASE("Unit_Warp_Ballot_Positive_Basic") {
+TEST_CASE(Unit_Warp_Ballot_Positive_Basic) {
   int device;
   hipDeviceProp_t device_properties;
   HIP_CHECK(hipGetDevice(&device));

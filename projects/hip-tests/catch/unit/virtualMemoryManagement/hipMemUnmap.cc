@@ -45,7 +45,7 @@ constexpr int N = (1 << 13);
  * ------------------------
  *    - HIP_VERSION >= 6.1
  */
-TEST_CASE("Unit_hipMemUnmap_negative") {
+TEST_CASE(Unit_hipMemUnmap_negative) {
   size_t granularity = 0;
   size_t buffer_size = N * sizeof(int);
   int deviceId = 0;
@@ -81,13 +81,13 @@ TEST_CASE("Unit_hipMemUnmap_negative") {
     REQUIRE(hipMemUnmap(ptrA, (size_mem - 1)) == hipErrorInvalidValue);
   }
 
-  HIP_CHECK(hipMemRelease(handle));
   HIP_CHECK(hipMemUnmap(ptrA, size_mem));
   HIP_CHECK(hipMemAddressFree(ptrA, size_mem));
+  HIP_CHECK(hipMemRelease(handle));
   CTX_DESTROY();
 }
 
-TEST_CASE("Unit_hipMemUnmap_Capture") {
+TEST_CASE(Unit_hipMemUnmap_Capture) {
   CTX_CREATE();
   size_t granularity = 0;
   constexpr size_t kBufferSize = N * sizeof(int);

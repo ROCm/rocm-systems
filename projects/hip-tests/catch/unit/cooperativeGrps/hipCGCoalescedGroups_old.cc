@@ -472,7 +472,7 @@ static void test_shfl_broadcast() {
   }
 }
 
-TEST_CASE("Unit_coalesced_groups") {
+TEST_CASE(Unit_coalesced_groups) {
   // Use default device for validating the test
   int deviceId;
   HIP_CHECK(hipGetDevice(&deviceId));

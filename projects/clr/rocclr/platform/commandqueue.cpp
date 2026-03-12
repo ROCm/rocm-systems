@@ -172,6 +172,12 @@ void HostQueue::finish(bool cpu_wait) {
       ClPrint(LOG_DEBUG, LOG_CMD, "No command awaiting completion on host");
       return;
     }
+
+    if (!AMD_DIRECT_DISPATCH && !Os::isThreadAlive(thread_)) {
+      command->release();
+      return;
+    }
+
     // Force blocking wait if requested. That allows to avoid a build up of unreleased CPU commands
     if ((DEBUG_HIP_BLOCK_SYNC > 0) &&
         (vdev()->QueuedAsyncHandlers().load() > DEBUG_HIP_BLOCK_SYNC)) {
@@ -212,7 +218,7 @@ void HostQueue::finish(bool cpu_wait) {
     command->awaitCompletion();
   }
   if (IS_HIP) {
-    ScopedLock sl(vdev()->execution());
+    std::scoped_lock sl(vdev()->execution());
     ScopedLock l(lastCmdLock_);
     // Runtime can clear the last command only if no other submissions occured
     // during finish()
@@ -356,7 +362,7 @@ Command* HostQueue::getLastQueuedCommand(bool retain) {
   if (AMD_DIRECT_DISPATCH) {
     // The batch update must be lock protected to avoid a race condition
     // when multiple threads submit/flush/update the batch at the same time
-    ScopedLock sl(vdev()->execution());
+    std::scoped_lock sl(vdev()->execution());
     // Since the lastCmdLock_ is acquired, it is safe to read and retain the lastEnqueueCommand.
     // It is guaranteed that the pointer will not change.
     if (retain && lastEnqueueCommand_ != nullptr) {

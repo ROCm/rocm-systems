@@ -249,6 +249,11 @@ enum ibv_access_flags {
 	IBV_ACCESS_RELAXED_ORDERING	= IBV_ACCESS_OPTIONAL_FIRST,
 };
 
+struct ibv_pd {
+	struct ibv_context     *context;
+	uint32_t		handle;
+};
+
 struct ibv_mr {
 	struct ibv_context     *context;
 	struct ibv_pd	       *pd;
@@ -530,6 +535,11 @@ struct ibv_context {
 enum ibv_cq_init_attr_mask {
 	IBV_CQ_INIT_ATTR_MASK_FLAGS	= 1 << 0,
 	IBV_CQ_INIT_ATTR_MASK_PD	= 1 << 1,
+};
+
+enum ibv_create_cq_attr_flags {
+	IBV_CREATE_CQ_ATTR_SINGLE_THREADED = 1 << 0,
+	IBV_CREATE_CQ_ATTR_IGNORE_OVERRUN  = 1 << 1,
 };
 
 struct ibv_cq_init_attr_ex {

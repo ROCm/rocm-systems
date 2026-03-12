@@ -38,7 +38,7 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 6.4
  */
-TEST_CASE("Unit_hipStreamBatchMemOp_Negative_Tests") {
+TEST_CASE(Unit_hipStreamBatchMemOp_Negative_Tests) {
   hipStream_t stream{nullptr};
   HIP_CHECK(hipStreamCreate(&stream));
   REQUIRE(stream != nullptr);
@@ -68,10 +68,6 @@ TEST_CASE("Unit_hipStreamBatchMemOp_Negative_Tests") {
   invalidParamArray[1].waitValue.address = opsArray[0];
   invalidParamArray[1].waitValue.value = 1000;
   invalidParamArray[1].waitValue.flags = hipStreamWaitValueEq;
-
-  SECTION("Stream as a nullptr") {
-    HIP_CHECK_ERROR(hipStreamBatchMemOp(nullptr, totalOps, paramArray, 0), hipErrorInvalidValue);
-  }
 
   SECTION("Invalid Stream") {
     HIP_CHECK_ERROR(hipStreamBatchMemOp(reinterpret_cast<hipStream_t>(-1), totalOps, paramArray, 0),

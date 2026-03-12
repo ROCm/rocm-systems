@@ -135,7 +135,7 @@ static void hipGraphUploadFunctional_with_stream(hipStream_t stream) {
   HIP_CHECK(hipGraphDestroy(graph));
 }
 
-TEST_CASE("Unit_hipGraphUpload_Functional") {
+TEST_CASE(Unit_hipGraphUpload_Functional) {
   SECTION("Pass a stream") {
     hipStream_t stream;
     HIP_CHECK(hipStreamCreate(&stream));
@@ -153,7 +153,7 @@ TEST_CASE("Unit_hipGraphUpload_Functional") {
   }
 }
 
-TEST_CASE("Unit_hipGraphUpload_Functional_multidevice_test", "[multigpu]") {
+TEST_CASE(Unit_hipGraphUpload_Functional_multidevice_test) {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
 
@@ -215,7 +215,7 @@ TEST_CASE("Unit_hipGraphUpload_Functional_multidevice_test", "[multigpu]") {
    Upload the graph into high priority stream and execute the graph and verify.
  */
 
-TEST_CASE("Unit_hipGraphUpload_Functional_With_Priority_Stream") {
+TEST_CASE(Unit_hipGraphUpload_Functional_With_Priority_Stream) {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   hipGraph_t graph;
@@ -262,7 +262,7 @@ TEST_CASE("Unit_hipGraphUpload_Functional_With_Priority_Stream") {
 4) Graphexec is destroyed before upload
 */
 
-TEST_CASE("Unit_hipGraphUpload_Negative_Parameters") {
+TEST_CASE(Unit_hipGraphUpload_Negative_Parameters) {
   hipGraphExec_t graphExec{};
   hipError_t ret;
 
@@ -281,8 +281,9 @@ TEST_CASE("Unit_hipGraphUpload_Negative_Parameters") {
     HIP_CHECK(hipGraphCreate(&graph, 0));
     HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
 
-    ret = hipGraphUpload(graphExec, stream1);
-    REQUIRE(hipSuccess == ret);
+    HIP_CHECK(hipGraphUpload(graphExec, stream1));
+    HIP_CHECK(hipGraphExecDestroy(graphExec));
+    HIP_CHECK(hipGraphDestroy(graph));
   }
   SECTION("graphExec is destroyed") {
     hipGraphExec_t graph_exec;
@@ -294,6 +295,7 @@ TEST_CASE("Unit_hipGraphUpload_Negative_Parameters") {
     HIP_CHECK(hipGraphUpload(graph_exec, hipStreamPerThread));
     HIP_CHECK(hipGraphExecDestroy(graph_exec));
     HIP_CHECK_ERROR(hipGraphUpload(graph_exec, hipStreamPerThread), hipErrorInvalidValue);
+    HIP_CHECK(hipGraphDestroy(graph));
   }
   HIP_CHECK(hipStreamDestroy(stream));
 }

@@ -87,7 +87,7 @@ void testSynchronize(hipStream_t stream) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipEventSynchronize_Default_Positive") {
+TEST_CASE(Unit_hipEventSynchronize_Default_Positive) {
   hipStream_t stream{nullptr};
 
   SECTION("Kernel launched in null stream") { testSynchronize(stream); }
@@ -110,7 +110,7 @@ TEST_CASE("Unit_hipEventSynchronize_Default_Positive") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipEventSynchronize_NoEventRecord_Positive") {
+TEST_CASE(Unit_hipEventSynchronize_NoEventRecord_Positive) {
   constexpr size_t N = 1024;
 
   constexpr int blocks = 1024;

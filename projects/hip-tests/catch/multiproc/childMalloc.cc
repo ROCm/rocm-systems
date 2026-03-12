@@ -75,7 +75,7 @@ bool testMallocFromChild() {
 }
 
 
-TEST_CASE("ChildMalloc") {
+TEST_CASE(ChildMalloc) {
   auto res = testMallocFromChild();
   REQUIRE(res == true);
 }

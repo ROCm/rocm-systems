@@ -36,7 +36,7 @@ Testcase Scenarios :
 /**
  * Functional Test to add empty node with dependencies
  */
-TEST_CASE("Unit_hipGraphAddEmptyNode_Functional") {
+TEST_CASE(Unit_hipGraphAddEmptyNode_Functional) {
   char* pOutBuff_d{};
   constexpr size_t size = 1024;
   hipGraph_t graph{};
@@ -66,7 +66,7 @@ TEST_CASE("Unit_hipGraphAddEmptyNode_Functional") {
 /**
  * Negative Scenarios hipGraphAddEmptyNode
  */
-TEST_CASE("Unit_hipGraphAddEmptyNode_NegTest") {
+TEST_CASE(Unit_hipGraphAddEmptyNode_NegTest) {
   char* pOutBuff_d{};
   constexpr size_t size = 1024;
   hipGraph_t graph;
@@ -124,7 +124,7 @@ static void validateOutData(int* A1_h, int* A2_h, size_t N) {
 /**
  * Functional Test to use empty node as barrier to wait for multiple nodes.
  */
-TEST_CASE("Unit_hipGraphAddEmptyNode_BarrierFunc") {
+TEST_CASE(Unit_hipGraphAddEmptyNode_BarrierFunc) {
   size_t size = 1024;
   constexpr auto blocksPerCU = 6;
   constexpr auto threadsPerBlock = 256;

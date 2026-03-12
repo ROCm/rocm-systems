@@ -297,7 +297,7 @@ bool testhipLinkTypeHopcountDevice(int numDevices) {
  *    - HIP_VERSION >= 5.5
  */
 
-TEST_CASE("Unit_hipP2pLinkTypeAndHopFunc") {
+TEST_CASE(Unit_hipP2pLinkTypeAndHopFunc) {
   int numDevices = 0;
   bool TestPassed = true;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
