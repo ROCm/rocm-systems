@@ -227,6 +227,9 @@ public:
   // Query GPU engine activity via KMD PMLog escape.
   ErrorCode QueryGpuActivity(wsl::thunk::GpuActivity *info) const;
 
+  // Query firmware versions from KMD adapter info.
+  ErrorCode QueryFwInfo(wsl::thunk::FwInfo *info) const;
+
   // Send a driver-escape packet on behalf of this GPU slot.
   ErrorCode Escape(void *pData, size_t dataSize, bool hardwareAccess = false) const;
 

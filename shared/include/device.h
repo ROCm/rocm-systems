@@ -49,6 +49,8 @@ public:
 
   ErrorCode QueryGpuActivity(GpuActivity *info) const;
 
+  ErrorCode QueryFwInfo(FwInfo *info) const;
+
   ErrorCode Escape(void *pData, size_t dataSize,
                    bool hardwareAccess = false) const;
 

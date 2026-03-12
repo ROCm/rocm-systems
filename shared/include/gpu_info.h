@@ -46,6 +46,20 @@ struct PowerInfo {
   uint32_t power_limit;           // max power limit from sensor limits
 };
 
+// Firmware version entry: fw_id matches amdsmi_fw_block_t integer values.
+struct FwEntry {
+  uint32_t fw_id;       // amdsmi_fw_block_t cast to uint32_t
+  uint64_t fw_version;
+};
+
+// Firmware version table read from KMD adapter info.
+// num_fw_info entries are valid; the rest are zero-initialised.
+constexpr uint32_t kMaxFwEntries = 32;
+struct FwInfo {
+  FwEntry  entries[kMaxFwEntries];
+  uint32_t num_fw_info;
+};
+
 // GPU engine activity readings from KMD PMLog escape.
 struct GpuActivity {
   uint32_t gfx_activity;  // GFX engine utilization in %

@@ -79,6 +79,10 @@ ErrorCode Device::QueryGpuActivity(GpuActivity *info) const {
   return device_ctx_->QueryGpuActivity(info);
 }
 
+ErrorCode Device::QueryFwInfo(FwInfo *info) const {
+  return device_ctx_->QueryFwInfo(info);
+}
+
 ErrorCode Device::Escape(void *pData, size_t dataSize, bool hardwareAccess) const {
   return device_ctx_->Escape(pData, dataSize, hardwareAccess);
 }
