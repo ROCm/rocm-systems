@@ -29,11 +29,9 @@ Panel Config:
         L1 Cache - TA data stalled by TCP:
           value: SUM((TA_DATA_STALLED_BY_TC_CYCLES_sum * 100)) / SUM(TA_TA_BUSY_sum)
           unit: Percent
-        # TODO: TA_ADDRESSER_STALLED_CYCLES - exists in MI350 hardware (ID 46 in MI350_perfmons_list.xlsx)
-        # but not defined in counter_defs.yaml. Uncomment when counter is added.
-        # L1 Cache - TA addresser stalled:
-        #   value: SUM((TA_ADDRESSER_STALLED_CYCLES_sum * 100)) / SUM(TA_TA_BUSY_sum)
-        #   unit: Percent
+        L1 Cache - TA addresser stalled:
+          value: SUM((TA_ADDRESSER_STALLED_CYCLES_sum * 100)) / SUM(TA_TA_BUSY_sum)
+          unit: Percent
         L1 Cache - TA stalled by TCP (aggregated):
           value: SUM((TCP_TCP_TA_ADDR_STALL_CYCLES_sum * 100)) / SUM(TCP_GATE_EN2_sum)
           unit: Percent
@@ -114,12 +112,9 @@ Panel Config:
         UTCL1 latency:
           value: SUM(TCP_CLIENT_UTCL1_INFLIGHT_sum) / SUM(TCP_UTCL1_REQUEST_sum)
           unit: Cycles per Request
-        # TODO: UTCL1 to UTCL2 latency - TCP_UTCL1_UTCL2_INFLIGHT exists in MI350 hardware
-        # (ID 56/58 in MI350_perfmons_list.xlsx) but is not defined in counter_defs.yaml.
-        # Uncomment when counter is added:
-        # UTCL1 to UTCL2 latency:
-        #   value: SUM(TCP_UTCL1_UTCL2_INFLIGHT_sum) / SUM(TCP_UTCL1_TRANSLATION_MISS_sum)
-        #   unit: Cycles per Request
+        UTCL1 to UTCL2 latency:
+          value: SUM(TCP_UTCL1_UTCL2_INFLIGHT_sum) / SUM(TCP_UTCL1_TRANSLATION_MISS_sum)
+          unit: Cycles per Request
   - metric_table:
       id: 3003
       title: TD Return Path
@@ -131,16 +126,12 @@ Panel Config:
         TD - stalled by TCP:
           value: SUM((TD_TC_STALL_sum * 100)) / SUM(TD_TD_BUSY_sum)
           unit: Percent
-        # TODO: TD_TC_TD_FIFO_FULL - exists in MI350 hardware (ID 10 in MI350_perfmons_list.xlsx)
-        # but not defined in counter_defs.yaml. Uncomment when counter is added.
-        # TD - input FIFO full:
-        #   value: SUM((TD_TC_TD_FIFO_FULL_sum * 100)) / SUM(TD_TD_BUSY_sum)
-        #   unit: Percent
-        # TODO: TD_OUTPUT_FIFO_FULL - exists in MI350 hardware (ID 11 in MI350_perfmons_list.xlsx)
-        # but not defined in counter_defs.yaml. Uncomment when counter is added.
-        # TD - output FIFO full:
-        #   value: SUM((TD_OUTPUT_FIFO_FULL_sum * 100)) / SUM(TD_TD_BUSY_sum)
-        #   unit: Percent
+        TD - input FIFO full:
+          value: SUM((TD_TC_TD_FIFO_FULL_sum * 100)) / SUM(TD_TD_BUSY_sum)
+          unit: Percent
+        TD - output FIFO full:
+          value: SUM((TD_OUTPUT_FIFO_FULL_sum * 100)) / SUM(TD_TD_BUSY_sum)
+          unit: Percent
         TD - stalled by SPI:
           value: SUM((TD_SPI_STALL_sum * 100)) / SUM(TD_TD_BUSY_sum)
           unit: Percent
@@ -181,10 +172,9 @@ Panel Config:
         Normalized L1 Cache - TA data stalled by TCP:
           value: SUM((TA_DATA_STALLED_BY_TC_CYCLES_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
           unit: Percent
-        # TODO: TA_ADDRESSER_STALLED_CYCLES - not in counter_defs.yaml (see note in Table 3001)
-        # Normalized L1 Cache - TA addresser stalled:
-        #   value: SUM((TA_ADDRESSER_STALLED_CYCLES_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
-        #   unit: Percent
+        Normalized L1 Cache - TA addresser stalled:
+          value: SUM((TA_ADDRESSER_STALLED_CYCLES_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
+          unit: Percent
         Normalized L1 Cache - TA stalled by TCP (aggregated):
           value: SUM((TCP_TCP_TA_ADDR_STALL_CYCLES_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
           unit: Percent
@@ -205,14 +195,12 @@ Panel Config:
         Normalized TD - stalled by TCP:
           value: SUM((TD_TC_STALL_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
           unit: Percent
-        # TODO: TD_TC_TD_FIFO_FULL - not in counter_defs.yaml (see note in Table 3003)
-        # Normalized TD - input FIFO full:
-        #   value: SUM((TD_TC_TD_FIFO_FULL_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
-        #   unit: Percent
-        # TODO: TD_OUTPUT_FIFO_FULL - not in counter_defs.yaml (see note in Table 3003)
-        # Normalized TD - output FIFO full:
-        #   value: SUM((TD_OUTPUT_FIFO_FULL_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
-        #   unit: Percent
+        Normalized TD - input FIFO full:
+          value: SUM((TD_TC_TD_FIFO_FULL_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
+          unit: Percent
+        Normalized TD - output FIFO full:
+          value: SUM((TD_OUTPUT_FIFO_FULL_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
+          unit: Percent
         Normalized TD - stalled by SPI:
           value: SUM((TD_SPI_STALL_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
           unit: Percent
@@ -282,10 +270,9 @@ Panel Config:
         TA_DATA_STALLED_BY_TC_CYCLES:
           value: SUM(TA_DATA_STALLED_BY_TC_CYCLES_sum) / SUM($denom)
           unit: (Cycles + $normUnit)
-        # TODO: TA_ADDRESSER_STALLED_CYCLES - not in counter_defs.yaml (see note in Table 3001)
-        # TA_ADDRESSER_STALLED_CYCLES:
-        #   value: SUM(TA_ADDRESSER_STALLED_CYCLES_sum) / SUM($denom)
-        #   unit: (Cycles + $normUnit)
+        TA_ADDRESSER_STALLED_CYCLES:
+          value: SUM(TA_ADDRESSER_STALLED_CYCLES_sum) / SUM($denom)
+          unit: (Cycles + $normUnit)
         # TCP counters
         TCP_GATE_EN1 (free running cycles):
           value: SUM(TCP_GATE_EN1_sum) / SUM($denom)
@@ -345,10 +332,9 @@ Panel Config:
         TCP_CLIENT_UTCL1_INFLIGHT:
           value: SUM(TCP_CLIENT_UTCL1_INFLIGHT_sum) / SUM($denom)
           unit: (Cycles + $normUnit)
-        # TODO: TCP_UTCL1_UTCL2_INFLIGHT - not in counter_defs.yaml (see note in Table 3002)
-        # TCP_UTCL1_UTCL2_INFLIGHT:
-        #   value: SUM(TCP_UTCL1_UTCL2_INFLIGHT_sum) / SUM($denom)
-        #   unit: (Cycles + $normUnit)
+        TCP_UTCL1_UTCL2_INFLIGHT:
+          value: SUM(TCP_UTCL1_UTCL2_INFLIGHT_sum) / SUM($denom)
+          unit: (Cycles + $normUnit)
         # TCP-TCC interface counters
         TCP_TCC_READ_REQ:
           value: SUM(TCP_TCC_READ_REQ_sum) / SUM($denom)
@@ -375,14 +361,12 @@ Panel Config:
         TD_TC_STALL:
           value: SUM(TD_TC_STALL_sum) / SUM($denom)
           unit: (Cycles + $normUnit)
-        # TODO: TD_TC_TD_FIFO_FULL - not in counter_defs.yaml (see note in Table 3003)
-        # TD_TC_TD_FIFO_FULL:
-        #   value: SUM(TD_TC_TD_FIFO_FULL_sum) / SUM($denom)
-        #   unit: (Cycles + $normUnit)
-        # TODO: TD_OUTPUT_FIFO_FULL - not in counter_defs.yaml (see note in Table 3003)
-        # TD_OUTPUT_FIFO_FULL:
-        #   value: SUM(TD_OUTPUT_FIFO_FULL_sum) / SUM($denom)
-        #   unit: (Cycles + $normUnit)
+        TD_TC_TD_FIFO_FULL:
+          value: SUM(TD_TC_TD_FIFO_FULL_sum) / SUM($denom)
+          unit: (Cycles + $normUnit)
+        TD_OUTPUT_FIFO_FULL:
+          value: SUM(TD_OUTPUT_FIFO_FULL_sum) / SUM($denom)
+          unit: (Cycles + $normUnit)
         TD_SPI_STALL:
           value: SUM(TD_SPI_STALL_sum) / SUM($denom)
           unit: (Cycles + $normUnit)
@@ -436,10 +420,9 @@ Panel Config:
     L1 Cache - TA data stalled by TCP: >-
       Measures cycles the TA data path is stalled by TCP (L1 cache). A high rate indicates TCP write data backpressure.
       Equation: SUM((TA_DATA_STALLED_BY_TC_CYCLES_sum * 100)) / SUM(TA_TA_BUSY_sum)
-    # TODO: TA_ADDRESSER_STALLED_CYCLES - not in counter_defs.yaml
-    # L1 Cache - TA addresser stalled: >-
-    #   Measures total cycles the TA addresser is stalled. High values indicate address generation bottlenecks.
-    #   Equation: SUM((TA_ADDRESSER_STALLED_CYCLES_sum * 100)) / SUM(TA_TA_BUSY_sum)
+    L1 Cache - TA addresser stalled: >-
+      Measures total cycles the TA addresser is stalled. High values indicate address generation bottlenecks.
+      Equation: SUM((TA_ADDRESSER_STALLED_CYCLES_sum * 100)) / SUM(TA_TA_BUSY_sum)
     L1 Cache - TA stalled by TCP (aggregated): >-
       Measures the aggregated impact of TCP events on TA. A high stall rate (>= 10%) indicates that TCP is the bottleneck.
       Equation: SUM((TCP_TCP_TA_ADDR_STALL_CYCLES_sum * 100)) / SUM(TCP_GATE_EN2_sum)
@@ -503,23 +486,20 @@ Panel Config:
       Includes both hits and misses. High latency indicates TLB pressure or UTCL2 miss penalty.
       MI350 restored this counter (removed in MI300 for power savings).
       Equation: SUM(TCP_CLIENT_UTCL1_INFLIGHT_sum) / SUM(TCP_UTCL1_REQUEST_sum)
-    # TODO: UTCL1 to UTCL2 latency - TCP_UTCL1_UTCL2_INFLIGHT not in counter_defs.yaml
-    # UTCL1 to UTCL2 latency: >-
-    #   Average cycles for UTCL1 misses to be resolved by UTCL2 (L2 TLB).
-    #   Only counts requests that missed UTCL1 and went to UTCL2. High latency indicates page table walk overhead.
-    #   Equation: SUM(TCP_UTCL1_UTCL2_INFLIGHT_sum) / SUM(TCP_UTCL1_TRANSLATION_MISS_sum)
+    UTCL1 to UTCL2 latency: >-
+      Average cycles for UTCL1 misses to be resolved by UTCL2 (L2 TLB).
+      Only counts requests that missed UTCL1 and went to UTCL2. High latency indicates page table walk overhead.
+      Equation: SUM(TCP_UTCL1_UTCL2_INFLIGHT_sum) / SUM(TCP_UTCL1_TRANSLATION_MISS_sum)
     # Table 3003: TD Return Path
     TD - stalled by TCP: >-
       Percentage of TD busy time spent waiting for TCP (L1 cache) data. A high rate indicates L1 data return bottleneck.
       Equation: SUM((TD_TC_STALL_sum * 100)) / SUM(TD_TD_BUSY_sum)
-    # TODO: TD_TC_TD_FIFO_FULL - not in counter_defs.yaml
-    # TD - input FIFO full: >-
-    #   Percentage of TD busy time when the TCP-TD input FIFO is full. Indicates TD pipeline stall or power throttling.
-    #   Equation: SUM((TD_TC_TD_FIFO_FULL_sum * 100)) / SUM(TD_TD_BUSY_sum)
-    # TODO: TD_OUTPUT_FIFO_FULL - not in counter_defs.yaml
-    # TD - output FIFO full: >-
-    #   Percentage of TD busy time when the output FIFO is full. Indicates TD-to-VGPR/LDS backpressure.
-    #   Equation: SUM((TD_OUTPUT_FIFO_FULL_sum * 100)) / SUM(TD_TD_BUSY_sum)
+    TD - input FIFO full: >-
+      Percentage of TD busy time when the TCP-TD input FIFO is full. Indicates TD pipeline stall or power throttling.
+      Equation: SUM((TD_TC_TD_FIFO_FULL_sum * 100)) / SUM(TD_TD_BUSY_sum)
+    TD - output FIFO full: >-
+      Percentage of TD busy time when the output FIFO is full. Indicates TD-to-VGPR/LDS backpressure.
+      Equation: SUM((TD_OUTPUT_FIFO_FULL_sum * 100)) / SUM(TD_TD_BUSY_sum)
     TD - stalled by SPI: >-
       Percentage of TD busy time stalled by SPI (shader processor input). Indicates VGPR write contention.
       Equation: SUM((TD_SPI_STALL_sum * 100)) / SUM(TD_TD_BUSY_sum)
@@ -556,11 +536,10 @@ Panel Config:
       Percentage of kernel execution time that TA data path is stalled by TCP.
       Normalized to kernel cycles for cross-component comparison.
       Equation: SUM((TA_DATA_STALLED_BY_TC_CYCLES_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
-    # TODO: TA_ADDRESSER_STALLED_CYCLES - not in counter_defs.yaml
-    # Normalized L1 Cache - TA addresser stalled: >-
-    #   Percentage of kernel execution time that TA addresser is stalled.
-    #   Normalized to kernel cycles for cross-component comparison.
-    #   Equation: SUM((TA_ADDRESSER_STALLED_CYCLES_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
+    Normalized L1 Cache - TA addresser stalled: >-
+      Percentage of kernel execution time that TA addresser is stalled.
+      Normalized to kernel cycles for cross-component comparison.
+      Equation: SUM((TA_ADDRESSER_STALLED_CYCLES_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
     Normalized L1 Cache - TA stalled by TCP (aggregated): >-
       Percentage of kernel execution time that TA is stalled by TCP (from TCP perspective).
       Normalized to kernel cycles for cross-component comparison.
@@ -585,16 +564,14 @@ Panel Config:
       Percentage of kernel execution time that TD is stalled waiting for TCP data.
       Normalized to kernel cycles for cross-component comparison.
       Equation: SUM((TD_TC_STALL_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
-    # TODO: TD_TC_TD_FIFO_FULL - not in counter_defs.yaml
-    # Normalized TD - input FIFO full: >-
-    #   Percentage of kernel execution time that TD input FIFO is full.
-    #   Normalized to kernel cycles for cross-component comparison.
-    #   Equation: SUM((TD_TC_TD_FIFO_FULL_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
-    # TODO: TD_OUTPUT_FIFO_FULL - not in counter_defs.yaml
-    # Normalized TD - output FIFO full: >-
-    #   Percentage of kernel execution time that TD output FIFO is full.
-    #   Normalized to kernel cycles for cross-component comparison.
-    #   Equation: SUM((TD_OUTPUT_FIFO_FULL_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
+    Normalized TD - input FIFO full: >-
+      Percentage of kernel execution time that TD input FIFO is full.
+      Normalized to kernel cycles for cross-component comparison.
+      Equation: SUM((TD_TC_TD_FIFO_FULL_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
+    Normalized TD - output FIFO full: >-
+      Percentage of kernel execution time that TD output FIFO is full.
+      Normalized to kernel cycles for cross-component comparison.
+      Equation: SUM((TD_OUTPUT_FIFO_FULL_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
     Normalized TD - stalled by SPI: >-
       Percentage of kernel execution time that TD is stalled by SPI.
       Normalized to kernel cycles for cross-component comparison.
