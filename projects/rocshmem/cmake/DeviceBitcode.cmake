@@ -15,30 +15,28 @@ if(NOT LLVM_CLANG OR NOT LLVM_LINK)
   return()
 endif()
 
-# Derive default bitcode arch list from GPU_TARGETS (strip feature suffixes like :xnack-, deduplicate).
-# If GPU_TARGETS is unset, fall back to auto-detecting GPUs on the local machine.
-set(_BITCODE_DEFAULT_ARCHS "")
-if(GPU_TARGETS)
-  foreach(_target ${GPU_TARGETS})
-    string(REGEX REPLACE ":.*" "" _base_arch "${_target}")
-    list(APPEND _BITCODE_DEFAULT_ARCHS "${_base_arch}")
+# Strip feature suffixes (gfx942:sramecc+:xnack- → gfx942) and deduplicate.
+function(strip_arch_features targets_list out_var)
+  set(_result "")
+  foreach(_t ${targets_list})
+    string(REGEX REPLACE ":.*" "" _base "${_t}")
+    list(APPEND _result "${_base}")
   endforeach()
-  list(REMOVE_DUPLICATES _BITCODE_DEFAULT_ARCHS)
-else()
-  if(COMMAND rocm_local_targets)
-    set(_LOCAL_GPUS "")
-    rocm_local_targets(_LOCAL_GPUS)
-    if(_LOCAL_GPUS)
-      foreach(_target ${_LOCAL_GPUS})
-        string(REGEX REPLACE ":.*" "" _base_arch "${_target}")
-        list(APPEND _BITCODE_DEFAULT_ARCHS "${_base_arch}")
-      endforeach()
-      list(REMOVE_DUPLICATES _BITCODE_DEFAULT_ARCHS)
-      message(STATUS "GPU_TARGETS not set; auto-detected local GPU(s) for device bitcode: ${_BITCODE_DEFAULT_ARCHS}")
-    else()
-      message(WARNING "GPU_TARGETS not set and no local GPU detected. "
-        "Device bitcode will not be built. Set -DGPU_TARGETS=<arch> to enable.")
-    endif()
+  list(REMOVE_DUPLICATES _result)
+  set(${out_var} "${_result}" PARENT_SCOPE)
+endfunction()
+
+# Resolve the default arch list: GPU_TARGETS if set, otherwise auto-detect local GPUs.
+if(GPU_TARGETS)
+  strip_arch_features("${GPU_TARGETS}" _BITCODE_DEFAULT_ARCHS)
+elseif(COMMAND rocm_local_targets)
+  rocm_local_targets(_LOCAL_GPUS)
+  if(_LOCAL_GPUS)
+    strip_arch_features("${_LOCAL_GPUS}" _BITCODE_DEFAULT_ARCHS)
+    message(STATUS "GPU_TARGETS not set; auto-detected local GPU(s) for device bitcode: ${_BITCODE_DEFAULT_ARCHS}")
+  else()
+    message(WARNING "GPU_TARGETS not set and no local GPU detected. "
+      "Device bitcode will not be built. Set -DGPU_TARGETS=<arch> to enable.")
   endif()
 endif()
 
@@ -80,7 +78,16 @@ set(BITCODE_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/src/device/rocshmem_wrapper.cc
 )
 
-# Backend-specific device sources
+# Backend-specific device sources. The bitcode MUST match the host library's
+# backend selection because:
+#   1. DISPATCH macros in backend_type.hpp produce different code (switch vs
+#      direct static_cast) depending on which USE_* defines are active.
+#   2. Context struct layouts differ per backend — static_cast reinterprets the
+#      same pointer as different derived types, so ABI must match.
+# A "universal" bitcode with all backends forced on would crash when paired
+# with a host library compiled for a single backend (layout/ABI mismatch).
+# TODO: refactor DISPATCH to remove this hard limitation
+
 if(USE_RO)
   list(APPEND BITCODE_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/src/reverse_offload/backend_ro.cpp
@@ -97,16 +104,31 @@ if(USE_IPC)
   )
 endif()
 
+# GDA queue_pair implementations are guarded by GDA_MLX5/GDA_IONIC/GDA_BNXT in
+# queue_pair.hpp. Only compile the backend(s) enabled for this build so that
+# declarations and definitions match.
 if(USE_GDA)
   list(APPEND BITCODE_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/src/gda/context_gda_device.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/gda/context_gda_device_coll.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/gda/backend_gda.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/gda/queue_pair.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/gda/ionic/queue_pair_ionic.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/gda/mlx5/queue_pair_mlx5.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/gda/bnxt/queue_pair_bnxt.cpp
   )
+  if(GDA_MLX5)
+    list(APPEND BITCODE_SOURCES
+      ${CMAKE_CURRENT_SOURCE_DIR}/src/gda/mlx5/queue_pair_mlx5.cpp
+    )
+  endif()
+  if(GDA_IONIC)
+    list(APPEND BITCODE_SOURCES
+      ${CMAKE_CURRENT_SOURCE_DIR}/src/gda/ionic/queue_pair_ionic.cpp
+    )
+  endif()
+  if(GDA_BNXT)
+    list(APPEND BITCODE_SOURCES
+      ${CMAKE_CURRENT_SOURCE_DIR}/src/gda/bnxt/queue_pair_bnxt.cpp
+    )
+  endif()
 endif()
 
 # Build bitcode for each GPU architecture
