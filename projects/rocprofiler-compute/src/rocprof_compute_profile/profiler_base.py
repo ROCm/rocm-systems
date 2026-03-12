@@ -652,22 +652,10 @@ class RocProfCompute_Base:
                         "or source files are present."
                     )
 
-        console_debug("profiling", f"Backend: {self.__profiler}")
-
         if self.__profiler == "rocprofiler-sdk":
             options = self.get_profiler_options(native_tool_path=native_tool_path)
         else:
             options = self.get_profiler_options()
-
-        using_native_tool = (
-            isinstance(options, dict)
-            and options.get("ROCPROF_COUNTER_COLLECTION") == "0"
-        )
-        native_tool_status = "enabled" if using_native_tool else "disabled"
-        console_debug(
-            "profiling",
-            f"Native counter collection tool: {native_tool_status}",
-        )
 
         # Run profiling on each input file
         input_files = sorted(Path(args.path).glob("perfmon/*.txt"))
@@ -747,12 +735,10 @@ class RocProfCompute_Base:
                     console_debug(output)
 
         if args.iteration_multiplexing is not None:
-            if not using_native_tool:
+            if native_tool_path is None:
                 console_error(
-                    "Iteration multiplexing is only compatible with native "
-                    "counter collection tool. "
-                    "Native counter collection tool requires rocprofiler-sdk "
-                    "with ROCm >= 7.0.0."
+                    "Native tool is not supported which is required for "
+                    "iteration multiplexing."
                 )
             console_log(
                 "profiling", f"Iteration multiplexing: {args.iteration_multiplexing}"
