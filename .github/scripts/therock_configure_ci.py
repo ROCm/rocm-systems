@@ -115,7 +115,6 @@ SKIPPABLE_PATH_PATTERNS = [
     "projects/*/docs/*",
     "projects/*/.gitignore",
     "projects/rocr-runtime/libhsakmt/src/dxg/*",
-    "projects/rocshmem/*",
     "shared/*/docs/*",
     "shared/*/.gitignore",
 ]
