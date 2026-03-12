@@ -303,13 +303,13 @@ private:
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
 #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
     if(sizeof(U) == 1)
-      u1 = __hip_atomic_load((uint8_t*)src, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+      u1 = __hip_atomic_load((__attribute__((address_space(1))) uint8_t*)src, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
     else if(sizeof(U) == 2)
-      u2 = __hip_atomic_load((uint16_t*)src, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+      u2 = __hip_atomic_load((__attribute__((address_space(1))) uint16_t*)src, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
     else if(sizeof(U) == 4)
-      u4 = __hip_atomic_load((uint32_t*)src, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+      u4 = __hip_atomic_load((__attribute__((address_space(1))) uint32_t*)src, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
     else
-      u8 = __hip_atomic_load((uint64_t*)src, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+      u8 = __hip_atomic_load((__attribute__((address_space(1))) uint64_t*)src, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
 #else
     if(sizeof(U) == 1)
 #ifdef __GFX11__
@@ -362,13 +362,13 @@ private:
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
 #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
     if(sizeof(U) == 1)
-      __hip_atomic_store((uint8_t*)dst, u1, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+      __hip_atomic_store((__attribute__((address_space(1))) uint8_t*)dst, u1, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
     else if(sizeof(U) == 2)
-      __hip_atomic_store((uint16_t*)dst, u2, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+      __hip_atomic_store((__attribute__((address_space(1))) uint16_t*)dst, u2, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
     else if(sizeof(U) == 4)
-      __hip_atomic_store((uint32_t*)dst, u4, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+      __hip_atomic_store((__attribute__((address_space(1))) uint32_t*)dst, u4, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
     else
-      __hip_atomic_store((uint64_t*)dst, u8, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+      __hip_atomic_store((__attribute__((address_space(1))) uint64_t*)dst, u8, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
 #else
     if(sizeof(U) == 1)
       __builtin_nontemporal_store(u1, (uint8_t*)dst);

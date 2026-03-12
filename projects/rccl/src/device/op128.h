@@ -258,7 +258,7 @@ template<> __device__ __forceinline__ void st_global<0>(uintptr_t addr, BytePack
   template<> \
   __device__ __forceinline__ BytePack<bytes> ld_##space<bytes>(addr_cxx_ty addr) { \
     data_cxx_ty tmp; \
-    tmp = *((data_cxx_ty *)addr); \
+    tmp = *((__attribute__((address_space(1))) data_cxx_ty *)addr); \
     BytePack<bytes> ans; \
     ans.native = tmp; \
     return ans; \
@@ -266,21 +266,21 @@ template<> __device__ __forceinline__ void st_global<0>(uintptr_t addr, BytePack
   template<> \
   __device__ __forceinline__ BytePack<bytes> ld_volatile_##space<bytes>(addr_cxx_ty addr) { \
     data_cxx_ty tmp; \
-    tmp =  __hip_atomic_load((data_cxx_ty *)addr, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM); \
+    tmp =  __hip_atomic_load((__attribute__((address_space(1))) data_cxx_ty *)addr, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM); \
     BytePack<bytes> ans; \
     ans.native = tmp; \
     return ans; \
   } \
   template<> \
   __device__ __forceinline__ void st_##space<bytes>(addr_cxx_ty addr, BytePack<bytes> value) { \
-    __hip_atomic_store((data_cxx_ty *)addr, value.native, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM); \
+    __hip_atomic_store((__attribute__((address_space(1))) data_cxx_ty *)addr, value.native, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM); \
   }
 
 #define DEFINE_ld_st__size_space_fallback(bytes, data_cxx_ty, data_ptx_ty, data_reg_ty, space, addr_cxx_ty, addr_reg_ty) \
   template<> \
   __device__ __forceinline__ BytePack<bytes> ld_##space<bytes>(addr_cxx_ty addr) { \
     data_cxx_ty tmp; \
-    tmp = *((data_cxx_ty *)addr); \
+    tmp = *((__attribute__((address_space(1))) data_cxx_ty *)addr); \
     BytePack<bytes> ans; \
     ans.native = tmp; \
     return ans; \
@@ -288,14 +288,14 @@ template<> __device__ __forceinline__ void st_global<0>(uintptr_t addr, BytePack
   template<> \
   __device__ __forceinline__ BytePack<bytes> ld_volatile_##space<bytes>(addr_cxx_ty addr) { \
     data_cxx_ty tmp; \
-    tmp = __builtin_nontemporal_load((data_cxx_ty *)addr); \
+    tmp = __builtin_nontemporal_load((__attribute__((address_space(1))) data_cxx_ty *)addr); \
     BytePack<bytes> ans; \
     ans.native = tmp; \
     return ans; \
   } \
   template<> \
   __device__ __forceinline__ void st_##space<bytes>(addr_cxx_ty addr, BytePack<bytes> value) { \
-    __builtin_nontemporal_store(value.native, (data_cxx_ty *)addr); \
+    __builtin_nontemporal_store(value.native, (__attribute__((address_space(1))) data_cxx_ty *)addr); \
   }
 
 #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
@@ -409,7 +409,7 @@ DEFINE_ld_st_16__space(global, uintptr_t, l)
 __device__ __forceinline__ uint64_t ld_volatile_global(uint64_t *ptr) {
   uint64_t ans;
   #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
-  ans = __hip_atomic_load(ptr, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+  ans = __hip_atomic_load((__attribute__((address_space(1)))uint64_t *)ptr, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
   #else
   ans = __builtin_nontemporal_load(ptr);
   #endif
@@ -418,7 +418,7 @@ __device__ __forceinline__ uint64_t ld_volatile_global(uint64_t *ptr) {
 __device__ __forceinline__ uint64_t ld_relaxed_sys_global(uint64_t *ptr) {
   uint64_t ans;
   #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
-  ans = __hip_atomic_load(ptr, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+  ans = __hip_atomic_load((__attribute__((address_space(1)))uint64_t *)ptr, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
   #else
   ans = __builtin_nontemporal_load(ptr);
   #endif
@@ -438,7 +438,7 @@ __device__ __forceinline__ uint64_t ld_relaxed_sys_global(uint64_t *ptr) {
 __device__ __forceinline__ uint64_t ld_acquire_sys_global(uint64_t *ptr) {
   uint64_t ans;
   #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
-  ans = __hip_atomic_load(ptr, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_SYSTEM);
+  ans = __hip_atomic_load((__attribute__((address_space(1)))uint64_t *)ptr, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_SYSTEM);
   #else
   ans = __atomic_load_n(ptr ,__ATOMIC_SEQ_CST);
   #endif
@@ -447,21 +447,21 @@ __device__ __forceinline__ uint64_t ld_acquire_sys_global(uint64_t *ptr) {
 
 __device__ __forceinline__ void st_volatile_global(uint64_t *ptr, uint64_t val) {
   #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
-  __hip_atomic_store(ptr, val, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+  __hip_atomic_store((__attribute__((address_space(1)))uint64_t *)ptr, val, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
   #else
   __builtin_nontemporal_store(val, ptr);
   #endif
 }
 __device__ __forceinline__ void st_relaxed_sys_global(uint64_t *ptr, uint64_t val) {
   #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
-  __hip_atomic_store(ptr, val, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+  __hip_atomic_store((__attribute__((address_space(1)))uint64_t *)ptr, val, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
   #else
   __builtin_nontemporal_store(val, ptr);
   #endif
 }
 __device__ __forceinline__ void st_release_sys_global(uint64_t *ptr, uint64_t val) {
   #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
-  __hip_atomic_store(ptr, val, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
+  __hip_atomic_store((__attribute__((address_space(1)))uint64_t *)ptr, val, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
   #else
   __atomic_store_n(ptr, val, __ATOMIC_SEQ_CST);
   #endif
