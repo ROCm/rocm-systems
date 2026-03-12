@@ -67,7 +67,7 @@ __global__ void TextureTypes(float *res) {
  *  - HIP_VERSION >= 6.1
  */
 
-TEST_CASE("Unit_Rtc_TextureTypes_header") {
+TEST_CASE(Unit_Rtc_TextureTypes_header) {
   std::string kernel_name = "TextureTypes";
   const char* kername = kernel_name.c_str();
   float* result_h;

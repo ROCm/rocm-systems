@@ -103,7 +103,7 @@ int test_triple_chevron(size_t N) {
  *    - HIP_VERSION >= 5.5
  */
 
-TEST_CASE("Unit_hipGridLaunch") {
+TEST_CASE(Unit_hipGridLaunch) {
   size_t N = 4 * 1024 * 1024;
   SECTION("Test test_gl2") { test_gl2(N); }
 
