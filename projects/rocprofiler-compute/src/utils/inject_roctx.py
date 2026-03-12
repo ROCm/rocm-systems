@@ -51,12 +51,15 @@ for candidate in candidate_paths:
 
 from utils.logger import console_error, console_log, console_warning
 
-console_log("torch trace", f"Python version: {python_version}")
+console_log("torch trace", f"Workload Python Version: {python_version}")
 
 try:
     from roctx import rangePop, rangePush
 
-    roctx_path = Path(rangePush.__code__.co_filename).parent
+    if hasattr(rangePush, "__code__") and hasattr(rangePush.__code__, "co_filename"):
+        roctx_path = Path(rangePush.__code__.co_filename).parent
+    else:
+        roctx_path = "<unknown>"
 
     console_log(
         "torch trace",
@@ -64,12 +67,10 @@ try:
     )
 except ImportError:
     console_error(
-        f"Looked for Roctx in :{candidate_paths}"
-        "ROCTX Python module not found.\n"
-        "Please ensure that the rocprofiler-sdk is installed"
-        " and that the roctx Python bindings are available for your Python version."
-        "You may need to reinstall or rebuild ROCm for your current Python environment.\n"
-        "The --torch-trace option requires a valid roctx installation.\n",
+        f"Looked for roctx in: {candidate_paths}\n"
+        "ROCTX not found. --torch-trace requires roctx from rocprofiler-sdk. "
+        "Ensure your workload uses a Python version for which "
+        "roctx bindings are available in your ROCm installation.\n",
     )
     sys.exit(1)
 
@@ -527,10 +528,14 @@ def instrument_all_torch_ops():
                         marker_stack = get_marker_stack()
                         context_stack = get_context_stack()
                         marker_stack.append(marker_name)
+                        # Filter empty strings from context_stack; always add context
+                        # suffix so downstream parsing (expecting ":" and Context_Id) works.
                         filtered_context = [c for c in context_stack if c]
-                        full_marker_name = "/".join(marker_stack) + (
-                            ":" + "/".join(filtered_context) if filtered_context else ""
-                        )
+                        if filtered_context:
+                            context_suffix = ":" + "/".join(filtered_context)
+                        else:
+                            context_suffix = ":#0@unknown:0"
+                        full_marker_name = "/".join(marker_stack) + context_suffix
 
                         rangePush(full_marker_name)
                         try:

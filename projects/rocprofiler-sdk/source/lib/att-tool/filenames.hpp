@@ -68,11 +68,18 @@ public:
 
     void addwave(const Fspath& file, Coord coord, size_t start, size_t end);
 
+    void add_other_simd_data(
+        int                                                                    se,
+        const std::vector<rocprofiler_thread_trace_decoder_inst_other_simd_t>& records);
+
     Fspath                    dir{};
     Fspath                    filename{};
     std::map<Coord, WaveName> streams{};
     std::vector<std::string>  perfcounters{};
     int                       gfxip = 9;
+
+    using OtherSIMDName = WaveName;
+    std::map<int, std::vector<OtherSIMDName>> other_simd_files{};
 };
 
 }  // namespace att_wrapper
