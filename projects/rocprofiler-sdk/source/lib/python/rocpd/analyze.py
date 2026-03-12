@@ -391,7 +391,6 @@ def analyze_hardware_counters(connection: RocpdImportData) -> Dict[str, Any]:
 _SYS_TRACE_IMPLIED: frozenset = frozenset({
     "--sys-trace",
     "--hip-trace",
-    "--hip-api-trace",
     "--hsa-trace",
     "--kernel-trace",
     "--memory-copy-trace",
@@ -964,12 +963,12 @@ def generate_recommendations(
                     {
                         "tool": "rocprofv3",
                         "description": "Trace all HIP runtime API calls to identify highest-frequency calls",
-                        "flags": ["--hip-api-trace", "--hsa-trace"],
+                        "flags": ["--hip-trace", "--hsa-trace"],
                         "args": [
                             {"name": "-d", "value": "./api_output"},
                             {"name": "-o", "value": "profile"},
                         ],
-                        "full_command": "rocprofv3 --hip-api-trace --hsa-trace -d ./api_output -o profile -- ./app",
+                        "full_command": "rocprofv3 --hip-trace --hsa-trace -d ./api_output -o profile -- ./app",
                     },
                     {
                         "tool": "rocprof-sys",
