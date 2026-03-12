@@ -1292,45 +1292,20 @@ amdsmi_get_gpu_device_uuid(amdsmi_processor_handle processor_handle,
         return AMDSMI_STATUS_INVAL;
     }
 
-    uint64_t device_uuid = 0;
-    uint16_t device_id = std::numeric_limits<uint16_t>::max();
-    amdsmi_status_t status;
-    std::ostringstream ss;
+    auto *device = reinterpret_cast<Device *>(processor_handle);
+    if (device == nullptr)
+        return AMDSMI_STATUS_INVAL;
 
-    status = rsmi_wrapper(rsmi_dev_id_get, processor_handle, 0, &device_id);
-    if (status != AMDSMI_STATUS_SUCCESS) {
-        ss << __PRETTY_FUNCTION__
-        << " | rsmi_dev_id_get(): "
-        << smi_amdgpu_get_status_string(status, false);
-        LOG_INFO(ss);
-        device_id = std::numeric_limits<uint16_t>::max();
-    }
-    ss << __PRETTY_FUNCTION__
-       << " | device_id (dec): " << device_id << "\n"
-       << "; device_id (hex): 0x" << std::hex << device_id << std::dec << "\n"
-       << "; rsmi_dev_id_get() status: "
-       << smi_amdgpu_get_status_string(status, false) << "\n";
-
-    status = rsmi_wrapper(rsmi_dev_unique_id_get, processor_handle, 0,
-                            &device_uuid);
-    if (status != AMDSMI_STATUS_SUCCESS) {
-        LOG_INFO(ss);
-        return status;
-    }
-    ss << "; device_uuid (dec): " << device_uuid << "\n"
-       << "; device_uuid (hex): 0x" << std::hex << device_uuid << std::dec << "\n"
-       << "; rsmi_dev_unique_id_get() status: "
-       << smi_amdgpu_get_status_string(status, false) << "\n";
-
+    wsl::thunk::AsicInfo asic_info = {};
     const uint8_t fcn = 0xff;
 
-    /* generate random UUID */
-    status = amdsmi_uuid_gen(uuid, device_uuid, device_id, fcn);
-    ss << "; uuid: " << uuid << "\n"
-       << "; amdsmi_uuid_gen() status: "
-       << smi_amdgpu_get_status_string(status, false) << "\n";
-    LOG_INFO(ss);
-    return status;
+    auto code = device->QueryAsicInfo(&asic_info);
+    if (code == ErrorCode::Success) {
+        return amdsmi_uuid_gen(uuid,
+                               asic_info.asic_serial,
+                               (uint16_t)asic_info.device_id, fcn);
+    }
+    return translateCodeToSmiStatus(code);
 }
 
 // Add a static cache for KFD nodes with initialization flag
@@ -2241,273 +2216,31 @@ amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handle, amdsmi_asic_i
         return AMDSMI_STATUS_INVAL;
     }
 
-    struct drm_amdgpu_info_device dev_info = {};
-    uint16_t vendor_id = 0;
-    uint16_t subvendor_id = 0;
-    uint16_t device_id = 0;
-    uint16_t subsystem_id = 0;
-    char temp_market_name[AMDSMI_MAX_STRING_LENGTH] = {0};
-    smi_clear_char_and_reinitialize(info->market_name, AMDSMI_MAX_STRING_LENGTH, temp_market_name);
-    info->market_name[0] = '\0';
-    info->vendor_id = std::numeric_limits<uint32_t>::max();
+    auto *device = reinterpret_cast<Device *>(processor_handle);
+    if (device == nullptr)
+        return AMDSMI_STATUS_INVAL;
+
+    wsl::thunk::AsicInfo ai = {};
+    auto code = device->QueryAsicInfo(&ai);
+    if (code != ErrorCode::Success)
+        return translateCodeToSmiStatus(code);
+
+    info->device_id    = ai.device_id;
+    info->vendor_id    = ai.vendor_id;
+    info->subvendor_id = ai.subvendor_id;
+    info->subsystem_id = ai.subsystem_id;
+    info->rev_id       = ai.rev_id;
+    info->num_of_compute_units    = ai.num_of_compute_units;
+    info->target_graphics_version = ai.target_graphics_version;
+    snprintf(info->asic_serial, sizeof(info->asic_serial),
+             "%016llx", (unsigned long long)ai.asic_serial);
+    strncpy(info->market_name, ai.market_name, sizeof(info->market_name) - 1);
     info->vendor_name[0] = '\0';
-    info->subvendor_id = std::numeric_limits<uint32_t>::max();
-    info->device_id = std::numeric_limits<uint64_t>::max();
-    info->rev_id = std::numeric_limits<uint16_t>::max();
-    info->asic_serial[0] = '\0';
-    info->oam_id = std::numeric_limits<uint32_t>::max();
-    info->num_of_compute_units = std::numeric_limits<uint32_t>::max();
-    info->target_graphics_version = std::numeric_limits<uint64_t>::max();
-    info->subsystem_id = std::numeric_limits<uint32_t>::max();
-    info->flags = 0;
-
-    std::ostringstream ss;
-    amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
-    amdsmi_status_t r = get_gpu_device_from_handle(processor_handle, &gpu_device);
-    if (r != AMDSMI_STATUS_SUCCESS) {
-        return r;
-    }
-    SMIGPUDEVICE_MUTEX(gpu_device->get_mutex())
-
-    // ---- ASIC info cache ----
-    const std::string key = gpu_device->get_gpu_path();
-
-    AsicInfoCache* cache_ptr = nullptr;
-    {
-        std::lock_guard<std::mutex> map_lk(g_asic_info_cache_map_mu);
-        cache_ptr = &g_asic_info_cache_map[key];
-    }
-    {
-        std::lock_guard<std::mutex> lk(cache_ptr->mtx);
-        auto now = std::chrono::steady_clock::now();
-        auto last_read_delta = std::chrono::duration_cast<std::chrono::milliseconds>(now - cache_ptr->last_read);
-
-        if (cache_ptr->valid &&
-            kAsicInfoCacheDuration > std::chrono::milliseconds::zero() &&
-            last_read_delta < kAsicInfoCacheDuration) {
-
-            *info = cache_ptr->info;
-
-            ss << "Returned cached ASIC info for key=" << key
-                << " (age=" << last_read_delta.count() << "ms)";
-            LOG_INFO(ss);
-
-            return AMDSMI_STATUS_SUCCESS;
-        }
-    }
-
-    /**
-     * For other sysfs related information, get from rocm-smi
-     */
-
-    // Ensure asic_serial defaults to an unsupported value
-    std::string max_uint64_str = "ffffffffffffffff";
-    smi_clear_char_and_reinitialize(info->asic_serial, AMDSMI_MAX_STRING_LENGTH, max_uint64_str);
-    uint64_t device_uuid = 0;
-    amdsmi_status_t status = rsmi_wrapper(rsmi_dev_unique_id_get, processor_handle, 0,
-                                          &device_uuid);
-    // Currently unique_id is not available for APUs
-    if (status == AMDSMI_STATUS_SUCCESS && device_uuid != 0) {
-        ss.clear();
-        ss << std::hex << std::setw(16) << std::setfill('0') << device_uuid;
-        std::string asic_serial_str = ss.str();
-        ss.clear();
-        smi_clear_char_and_reinitialize(info->asic_serial, AMDSMI_MAX_STRING_LENGTH,
-                                        asic_serial_str);
-        ss << __PRETTY_FUNCTION__
-           << " | Retrieved unique_id from rsmi: " << processor_handle << "\n"
-           << " ; Successfully fell back to KFD's unique_id... \n"
-           << " ; info->asic_serial (hex): " << info->asic_serial << "\n"
-           << " ; info->asic_serial (dec): " << std::dec
-           << static_cast<uint64_t>(std::stoull(asic_serial_str, nullptr, 16));
-        LOG_INFO(ss);
-    }
-
-    status = rsmi_wrapper(rsmi_dev_subsystem_vendor_id_get, processor_handle, 0,
-                          &subvendor_id);
-    if (status == AMDSMI_STATUS_SUCCESS) info->subvendor_id = subvendor_id;
-
-    status = rsmi_wrapper(rsmi_dev_subsystem_id_get, processor_handle, 0,
-                          &subsystem_id);
-    if (status == AMDSMI_STATUS_SUCCESS) info->subsystem_id = subsystem_id;
-
-    char temp_vendor_name[AMDSMI_MAX_STRING_LENGTH] = {0};
-    status =  rsmi_wrapper(rsmi_dev_pcie_vendor_name_get, processor_handle, 0,
-                           temp_vendor_name, AMDSMI_MAX_STRING_LENGTH);
-    if (status == AMDSMI_STATUS_SUCCESS) {
-        smi_clear_char_and_reinitialize(info->vendor_name, AMDSMI_MAX_STRING_LENGTH,
-                                        temp_vendor_name);
-    }
-
-    uint16_t tmp_oam_id = 0;
-    status =  rsmi_wrapper(rsmi_dev_xgmi_physical_id_get, processor_handle, 0,
-                          &(tmp_oam_id));
-    if (status == AMDSMI_STATUS_SUCCESS) {
-        info->oam_id = tmp_oam_id;
-    }
-
-    auto tmp_num_of_compute_units = uint32_t(0);
-    status = rsmi_wrapper(amd::smi::rsmi_dev_number_of_computes_get, processor_handle, 0,
-                          &(tmp_num_of_compute_units));
-    if (status == AMDSMI_STATUS_SUCCESS) {
-        info->num_of_compute_units = tmp_num_of_compute_units;
-    }
-
-    auto tmp_target_gfx_version = uint64_t(0);
-    status = rsmi_wrapper(rsmi_dev_target_graphics_version_get, processor_handle, 0,
-                          &(tmp_target_gfx_version));
-    if (status == AMDSMI_STATUS_SUCCESS) {
-        info->target_graphics_version = tmp_target_gfx_version;
-    }
-
-    status =  rsmi_wrapper(rsmi_dev_id_get, processor_handle, 0,
-                               &device_id);
-    ss << __PRETTY_FUNCTION__ << " | rsmi_dev_id_get() returned: "
-       << smi_amdgpu_get_status_string(status, true) << "\n"
-       << " ; device_id (dec): " << std::dec << device_id << "\n"
-       << " ; device_id (hex): 0x"
-       << std::hex << std::setw(4) << std::setfill('0') << device_id << std::dec;
-    LOG_INFO(ss);
-    if (status == AMDSMI_STATUS_SUCCESS) {
-        info->device_id = static_cast<uint64_t>(device_id);
-    }
-    info->rev_id = dev_info.pci_rev;
-    status = rsmi_wrapper(rsmi_dev_vendor_id_get, processor_handle, 0,
-                        &vendor_id);
-    if (status == AMDSMI_STATUS_SUCCESS) {
-        info->vendor_id = vendor_id;
-    }
-
-    // If vendor name is empty and the vendor id is 0x1002, set vendor name to AMD vendor string
-    if ((info->vendor_name[0] == '\0') && info->vendor_id == 0x1002) {
-        std::string amd_name = "Advanced Micro Devices Inc. [AMD/ATI]";
-        smi_clear_char_and_reinitialize(info->vendor_name, AMDSMI_MAX_STRING_LENGTH, amd_name);
-    }
-
-    status = smi_amdgpu_get_market_name_from_dev_id(gpu_device, info->market_name);
-    if (status != AMDSMI_STATUS_SUCCESS) {
-        status = rsmi_wrapper(rsmi_dev_brand_get, processor_handle, 0,
-                              temp_market_name, AMDSMI_MAX_STRING_LENGTH);
-        if (status == AMDSMI_STATUS_SUCCESS) {
-            ss << __PRETTY_FUNCTION__
-               << " | rsmi_dev_brand_get() returned: "
-               << smi_amdgpu_get_status_string(status, false) << "\n"
-               << " ; temp_market_name: " << temp_market_name << "\n";
-            LOG_INFO(ss);
-            smi_clear_char_and_reinitialize(info->market_name, AMDSMI_MAX_STRING_LENGTH,
-                                            temp_market_name);
-        } else {
-            ss << __PRETTY_FUNCTION__
-               << " | rsmi_dev_brand_get() failed: "
-               << smi_amdgpu_get_status_string(status, false) << "\n";
-            LOG_INFO(ss);
-        }
-    }
-
-    std::string render_name = gpu_device->get_gpu_path();
-    if (render_name.empty()) {
-        return AMDSMI_STATUS_NOT_SUPPORTED;
-    }
-    std::string path = "/dev/dri/" + render_name;
-    ScopedFD drm_fd(path.c_str(), O_RDWR | O_CLOEXEC);
-    if (!drm_fd.valid()) {
-        ss << __PRETTY_FUNCTION__
-           << " | Failed to open " << path << ": " << strerror(errno)
-           << "; Returning: " << smi_amdgpu_get_status_string(AMDSMI_STATUS_FILE_ERROR, false);
-        LOG_ERROR(ss);
-        return AMDSMI_STATUS_FILE_ERROR;
-    }
-
-    amd::smi::AMDSmiLibraryLoader libdrm;
-    status = libdrm.load(LIBDRM_AMDGPU_SONAME);
-    if (status != AMDSMI_STATUS_SUCCESS) {
-        libdrm.unload();
-        ss << __PRETTY_FUNCTION__
-           << " | Failed to load " LIBDRM_AMDGPU_SONAME ": " << strerror(errno)
-           << "; Returning: " << smi_amdgpu_get_status_string(status, false);
-        LOG_ERROR(ss);
-        return status;
-    }
-
-    // extern int drmCommandWrite(int fd, unsigned long drmCommandIndex,
-    //                            void *data, unsigned long size);
-    typedef int (*drmCommandWrite_t)(int fd, unsigned long drmCommandIndex,
-                                    void *data, unsigned long size);
-    drmCommandWrite_t drmCommandWrite = nullptr;
-
-    // load symbol from libdrm
-    status = libdrm.load_symbol(reinterpret_cast<drmCommandWrite_t *>(&drmCommandWrite),
-                                "drmCommandWrite");
-    if (status != AMDSMI_STATUS_SUCCESS) {
-        libdrm.unload();
-        ss << __PRETTY_FUNCTION__
-           << " | Failed to load drmCommandWrite symbol"
-           << " | Returning: " << smi_amdgpu_get_status_string(status, false);
-        LOG_ERROR(ss);
-        return status;
-    }
-
-    // Get the device info
-    memset(&dev_info, 0, sizeof(struct drm_amdgpu_info_device));
-    struct drm_amdgpu_info request = {};
-    memset(&request, 0, sizeof(request));
-    request.return_pointer = reinterpret_cast<unsigned long long>(&dev_info);
-    request.return_size = sizeof(struct drm_amdgpu_info_device);
-    request.query = AMDGPU_INFO_DEV_INFO;
-    auto drm_write = drmCommandWrite(drm_fd, DRM_AMDGPU_INFO, &request,
-                                     sizeof(struct drm_amdgpu_info));
-    if (drm_write != 0) {
-        libdrm.unload();
-        ss << __PRETTY_FUNCTION__
-           << " | Issue - drm_write failed, drm_write: " << std::dec << drm_write << "\n"
-           << "; Returning: " << smi_amdgpu_get_status_string(AMDSMI_STATUS_DRM_ERROR, false);
-        LOG_ERROR(ss);
-        return AMDSMI_STATUS_DRM_ERROR;
-    }
-    // TODO(cpoag): check if this is correct, might be able to go through KGD/KFD
-    info->rev_id = static_cast<uint32_t>(dev_info.pci_rev);
-    info->flags = static_cast<uint64_t>(dev_info.ids_flags);
-    libdrm.unload();
-
-    ss << __PRETTY_FUNCTION__
-       << " | info->market_name: " << info->market_name << "\n"
-       << " | info->vendor_id (dec): " << std::dec << info->vendor_id << "\n"
-       << " | info->vendor_id (hex): 0x"
-       << std::hex << std::setw(4) << std::setfill('0') << info->vendor_id << "\n"
-       << " | info->vendor_name: " << info->vendor_name << "\n"
-       << " | info->subvendor_id (dec): " << std::dec << info->subvendor_id << "\n"
-       << " | info->subvendor_id (hex): 0x"
-       << std::hex << std::setw(4) << std::setfill('0') << info->subvendor_id << "\n"
-       << " | info->device_id (dec): " << std::dec << info->device_id << "\n"
-       << " | info->device_id (hex): 0x"
-       << std::hex << std::setw(4) << std::setfill('0') << info->device_id << "\n"
-       << " | info->rev_id (dec): " << std::dec << info->rev_id << "\n"
-       << " | info->rev_id (hex): 0x"
-       << std::hex << std::setw(4) << std::setfill('0') << info->rev_id << "\n"
-       << " | info->asic_serial: 0x" << info->asic_serial << "\n"
-       << " | info->oam_id (dec): " << std::dec << info->oam_id << "\n"
-       << " | info->oam_id (hex): 0x"
-       << std::hex << std::setw(4) << std::setfill('0') << info->oam_id << "\n"
-       << " | info->num_of_compute_units (dec): " << std::dec
-       << info->num_of_compute_units << "\n"
-       << " | info->target_graphics_version: gfx"
-       << std::hex << info->target_graphics_version << "\n"
-       << " | Returning: " << smi_amdgpu_get_status_string(AMDSMI_STATUS_SUCCESS, true);
-    LOG_INFO(ss);
-
-    // ---- Store cache success ----
-    if (status == AMDSMI_STATUS_SUCCESS &&
-        kAsicInfoCacheDuration > std::chrono::milliseconds::zero()) {
-
-        auto now = std::chrono::steady_clock::now();
-        std::lock_guard<std::mutex> lk(cache_ptr->mtx);
-        cache_ptr->info  = *info;
-        cache_ptr->last_read = now;
-        cache_ptr->valid = true;
-
-        ss << "Successfully Cached ASIC info for key=" << key;
-        LOG_INFO(ss);
-    }
+    if (info->vendor_id == 0x1002)
+        strncpy(info->vendor_name, "Advanced Micro Devices Inc. [AMD/ATI]",
+                sizeof(info->vendor_name) - 1);
+    info->oam_id = 0;
+    info->flags  = 0;
     return AMDSMI_STATUS_SUCCESS;
 }
 
