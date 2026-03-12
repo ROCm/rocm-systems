@@ -1545,27 +1545,18 @@ amdsmi_status_t  amdsmi_get_temp_metric(amdsmi_processor_handle processor_handle
 
     AMDSMI_CHECK_INIT();
 
-    if (temperature == nullptr) {
+    if (temperature == nullptr)
         return AMDSMI_STATUS_INVAL;
-    }
 
-    // Get the PLX temperature from the gpu_metrics
-    if (sensor_type == AMDSMI_TEMPERATURE_TYPE_PLX) {
-        amdsmi_gpu_metrics_t metric_info;
-        auto r_status =  amdsmi_get_gpu_metrics_info(
-                processor_handle, &metric_info);
-        if (r_status != AMDSMI_STATUS_SUCCESS)
-            return r_status;
-        *temperature = metric_info.temperature_vrsoc;
-        return r_status;
-    }
-    amdsmi_status_t amdsmi_status = rsmi_wrapper(rsmi_dev_temp_metric_get, processor_handle, 0,
-            static_cast<uint32_t>(sensor_type),
-            static_cast<rsmi_temperature_metric_t>(metric), temperature);
-    *temperature /= 1000;
-    return amdsmi_status;
+    auto device = reinterpret_cast<Device *>(processor_handle);
+    if (device == nullptr)
+        return AMDSMI_STATUS_INVAL;
+
+    auto code = device->QueryTempMetric(static_cast<uint32_t>(sensor_type),
+                                        static_cast<uint32_t>(metric),
+                                        temperature);
+    return translateCodeToSmiStatus(code);
 }
-
 amdsmi_status_t amdsmi_get_npm_info(amdsmi_node_handle node_handle,
                             amdsmi_npm_info_t *npm_info) {
     AMDSMI_CHECK_INIT();
