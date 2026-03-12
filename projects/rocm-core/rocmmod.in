@@ -12,6 +12,8 @@ proc ModulesHelp { } {
     puts stderr "\tThe ROCM Module."
 }
 
+conflict rocm
+
 set ROOT [file normalize [file dirname [file normalize ${ModulesCurrentModulefile}/__]]/../..]
 
 prepend-path PATH "${ROOT}/@CMAKE_INSTALL_BINDIR@:${ROOT}/lib/llvm/bin"
