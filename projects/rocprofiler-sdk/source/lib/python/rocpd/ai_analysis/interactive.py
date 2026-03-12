@@ -1608,6 +1608,7 @@ class WorkflowSession:
         self._llm_api_key = llm_api_key
         self._llm_model = llm_model
         self._trace_dir = trace_dir or self._DEFAULT_TRACE_DIR
+        self._conv: Optional["LLMConversation"] = None  # set by _phase2 if LLM configured
 
     # ── Phase 2: Profiling command generation ─────────────────────────────────
 
@@ -1695,11 +1696,9 @@ class WorkflowSession:
             feedback = (
                 f"IMPORTANT: The previous code edit to {dst.name} was reverted "
                 f"because it caused errors after being applied.{reason_detail}\n\n"
-                f"Do NOT suggest the same pattern again. When proposing the next "
-                f"optimization, use only standard HIP APIs and functions that are "
-                f"guaranteed to compile (e.g. sinf, cosf, sqrtf — not "
-                f"__builtin_amdgcn_* variants). Acknowledge the revert briefly, "
-                f"then propose a different, valid approach."
+                f"Do NOT repeat the same pattern. Propose a different, valid "
+                f"approach for the next optimization attempt. Acknowledge the "
+                f"revert briefly before continuing."
             )
             try:
                 self._conv._messages.append({"role": "user", "content": feedback})
@@ -1762,24 +1761,32 @@ class WorkflowSession:
                 _env_overrides[_key] = _val
             _run_env = {**os.environ, **_env_overrides} if _env_overrides else None
 
-            try:
-                proc = subprocess.Popen(
-                    _tokens,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    env=_run_env,
-                )
-                assert proc.stdout is not None
-                for line in proc.stdout:
-                    print(line, end="", flush=True)
-                proc.wait()
-            except FileNotFoundError as exc:
-                _print(f"  [error] Command not found: {exc}", style="red")
+            if not _tokens:
+                _print("  [error] Command is empty after stripping env vars.", style="red")
+                _print(f"  Command was: {cmd}", style="dim")
 
                 class _FakeProc:
                     returncode = 127
                 proc = _FakeProc()  # type: ignore[assignment]
+            else:
+                try:
+                    proc = subprocess.Popen(
+                        _tokens,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                        env=_run_env,
+                    )
+                    assert proc.stdout is not None
+                    for line in proc.stdout:
+                        print(line, end="", flush=True)
+                    proc.wait()
+                except FileNotFoundError as exc:
+                    _print(f"  [error] Command not found: {exc}", style="red")
+
+                    class _FakeProc:  # type: ignore[no-redef]
+                        returncode = 127
+                    proc = _FakeProc()  # type: ignore[assignment]
 
             _print()
             if proc.returncode == 0:

@@ -188,10 +188,12 @@ Analysis results (text/JSON/markdown/webview)
 | **Tier 0** | Source code directory (`--source-dir`) | Kernel detection, pattern scanning, profiling plan, suggested first command |
 | **Tier 1** | Trace data (`-i db.db`) | Kernel hotspots, time breakdown, memory copy overhead |
 | **Tier 2** | Trace + hardware counters (`--pmc`) | Roofline model, Speed-of-Light metrics, bottleneck classification |
-| **Tier 3** | Trace + counters + PC sampling | Instruction-level hotspots (future) |
-| **Tier 4** | Trace + thread trace | Full instruction timeline, stall analysis (future) |
+| **Tier 3** | Trace + PC sampling (`--pc-sampling`) | Instruction-level hotspots within kernels |
+| **Tier 4** | Trace + thread trace | Full instruction timeline, stall analysis |
 
-Tiers 0–2 are implemented and production-ready. Tiers 3 and 4 are future enhancements.
+Tiers 0–2 are implemented and production-ready. The interactive session automatically
+suggests `ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1 rocprofv3 --pc-sampling` (Tier 3)
+once all Tier 1/2 data has been collected.
 
 ## API Reference
 
@@ -495,9 +497,42 @@ The interactive session (`--interactive`) launches a menu-driven loop for iterat
 - All `[a]`, `[o]`, and code-edit LLM calls share the same conversation object
 - The LLM sees the full message history from earlier in the session
 - History is automatically compacted to stay within context limits (`--llm-compact-every N`, default 10 turns)
-- Source files are tracked: a file sent once is not re-transmitted on repeat calls (only new files are sent)
+- Source files are tracked: a file sent once is not re-transmitted on repeat calls (only new files are sent); the file set is serialized into the session JSON and restored on `--resume-session`
 - On `[s]` save, the conversation state is serialized into the session file
 - On `--resume-session`, the conversation is restored so the LLM picks up exactly where it left off
+
+### Cycle prevention and going deeper (WorkflowSession)
+
+The 7-phase `WorkflowSession` (`--interactive "<app>"`) automatically detects and
+breaks counter-collection/API-tracing cycles:
+
+- **Fingerprint all collection flags** — when deciding whether to re-suggest a command,
+  the session checks `--sys-trace`, `--hip-trace`, `--kernel-trace`, `--memory-copy-trace`,
+  `--hsa-trace`, `--stats`, and individual `--pmc` counter names.
+- **Compares against all prior runs** — the dedup check looks at the union of everything
+  collected across all previous trace runs, not just the last one.
+- **Tier 3 escalation** — once all Tier 1/2 data has been collected, Phase 5 shows a
+  "go deeper" menu:
+  - TraceLens interval + kernel-category analysis is already shown in the report.
+  - `[d]` builds a PC sampling command and wires it into Phase 7 as option `[3]`:
+    ```
+    ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1 rocprofv3 --pc-sampling \
+      -d /tmp/rocpd_trace/run_<ts> -o results -- <app>
+    ```
+  - `ENV=VALUE` prefixes in commands are automatically extracted and injected into the
+    subprocess environment (no `shell=True` needed).
+
+### AI-edit revert
+
+When the AI modifies source files (Phase 6), the session backs up each file to `<file>.bak`:
+
+- **During recompile wait** — type `revert` (or `undo`/`v`) to instantly restore the
+  original file. Paste compilation error text first and it will be included as context.
+- **When profiling fails** (Phase 3) — `[v]` appears in the retry menu if there are AI
+  edits; selecting it reverts the last edit and prompts recompile before retrying.
+- **Session learning** — on every revert, the failure reason is injected into the active
+  `LLMConversation` as a `user`/`assistant` exchange so the LLM knows what went wrong
+  and avoids repeating the same pattern later in the session.
 
 ### AI-suggested commands
 
@@ -517,7 +552,7 @@ rocpd analyze -i output.db --interactive --llm private
 # Control compaction interval (default 10 turns)
 rocpd analyze -i output.db --interactive --llm anthropic --llm-compact-every 5
 
-# Resume an existing session
+# Resume an existing session (conversation, sent files, and edit history all restored)
 rocpd analyze -i output.db --interactive --resume-session 2026-03-10_my_app
 ```
 
