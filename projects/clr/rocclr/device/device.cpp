@@ -797,11 +797,8 @@ Device::~Device() {
 }
 
 bool Device::ValidateComgr() {
-  // Check if Lightning compiler was requested
-  bool kComgrVersioned = true;
-  if (!amd::IS_HIP) {
-    kComgrVersioned = false;
-  }
+  // use versioned comgr for HIP, unversioned for Opencl
+  const bool kComgrVersioned = amd::IS_HIP;
   std::call_once(amd::Comgr::initialized, amd::Comgr::LoadLib, kComgrVersioned);
   return amd::Comgr::IsReady();
 }
