@@ -13,6 +13,9 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Union
 
+from .llm_conversation import LLMConversation
+from .llm_analyzer import load_reference_guide
+
 
 # ── Session data ─────────────────────────────────────────────────────────────
 
@@ -37,21 +40,6 @@ class HistoryEntry:
 
 
 @dataclass
-class SessionContext:
-    """Compact facts accumulated during a session; injected into LLM prompts."""
-    iteration: int = 0
-    analyses: List[Dict[str, Any]] = field(default_factory=list)
-    # Each entry: {db, kernel_pct, memcpy_pct, idle_pct, top_issue, top_priority}
-    # Capped at 5 entries; oldest dropped when exceeded.
-
-    suggestions_given: List[str] = field(default_factory=list)
-    # First 120 chars of each LLM optimization response; capped at 3, oldest dropped.
-
-    commands_run: List[Dict[str, Any]] = field(default_factory=list)
-    # Each entry: {cmd: str, exit_code: int}; capped at 5, oldest dropped.
-
-
-@dataclass
 class SessionData:
     session_id: str
     source_dir: str
@@ -59,7 +47,7 @@ class SessionData:
     last_updated: str
     history: List[HistoryEntry] = field(default_factory=list)
     persistent_menu_items: List[PersistentMenuItem] = field(default_factory=list)
-    context: Optional[Dict[str, Any]] = None          # NEW field
+    conversation: Optional[Dict[str, Any]] = None     # serialized LLMConversation
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -75,7 +63,7 @@ class SessionData:
             last_updated=d["last_updated"],
             history=history,
             persistent_menu_items=items,
-            context=d.get("context"),               # None if key absent (backward compat)
+            conversation=d.get("conversation"),      # None if key absent (backward compat)
         )
 
 
@@ -167,6 +155,11 @@ def _print(msg: str = "", style: str = "") -> None:
 
 def _input(prompt: str) -> str:
     return input(prompt)
+
+
+def _print_token(t: str) -> None:
+    """Stream a single LLM token to stdout without newline."""
+    print(t, end="", flush=True)
 
 
 class _Spinner:
@@ -302,6 +295,7 @@ class InteractiveSession:
         llm_local_model: Optional[str] = None,
         session_store: Optional[SessionStore] = None,
         resume_session_id: Optional[str] = None,
+        compact_every: int = 10,
     ) -> None:
         self._source_dir = source_dir
         self._tier0 = tier0_result
@@ -313,7 +307,8 @@ class InteractiveSession:
         self._llm_local = llm_local
         self._llm_local_model = llm_local_model
         self._store = session_store or SessionStore()
-        self._ctx = SessionContext()
+        self._compact_every = compact_every
+        self._conv: Optional[LLMConversation] = None
         self._session = self._init_session(resume_session_id)
 
     @property
@@ -325,27 +320,61 @@ class InteractiveSession:
         if resume_id:
             loaded = self._store.load(resume_id)
             if loaded:
-                raw_ctx = loaded.context or {}
-                self._ctx = SessionContext(**raw_ctx) if raw_ctx else SessionContext()
+                self._conv = self._restore_or_create_conv(loaded)
                 return loaded
 
-        # Auto-detect
+        # Auto-detect previous session for this source dir
         existing = self._store.find_by_source_dir(self._source_dir)
         if existing:
             chosen = self._prompt_resume(existing)
             if chosen:
-                raw_ctx = chosen.context or {}
-                self._ctx = SessionContext(**raw_ctx) if raw_ctx else SessionContext()
+                self._conv = self._restore_or_create_conv(chosen)
                 return chosen
 
         # New session
         now = datetime.now(timezone.utc).isoformat()
-        return SessionData(
+        new_session = SessionData(
             session_id=SessionStore.make_session_id(self._source_dir),
             source_dir=self._source_dir,
             created_at=now,
             last_updated=now,
         )
+        self._conv = self._make_fresh_conv(new_session.session_id)
+        return new_session
+
+    def _restore_or_create_conv(self, loaded: SessionData) -> Optional["LLMConversation"]:
+        """Restore _conv from a loaded session, or create fresh if absent."""
+        if not self._llm_provider:
+            return None
+        raw_conv = loaded.conversation
+        if raw_conv:
+            return LLMConversation.from_dict(
+                raw_conv, api_key=self._llm_api_key, model=self._llm_model
+            )
+        return self._make_fresh_conv(loaded.session_id)
+
+    def _make_fresh_conv(self, session_id: str) -> Optional["LLMConversation"]:
+        """Create a new LLMConversation for a session, or None if no LLM configured."""
+        if not self._llm_provider:
+            return None
+        hp = self._store._dir / f"{session_id}_history.jsonl"
+        conv = LLMConversation(
+            provider=self._llm_provider,
+            api_key=self._llm_api_key,
+            model=self._llm_model,
+            compact_every=self._compact_every,
+            history_path=hp,
+        )
+        try:
+            fence = load_reference_guide()
+        except Exception as e:
+            warnings.warn(f"[LLMConversation] Could not load reference guide: {e}", stacklevel=3)
+            fence = ""
+        conv.initialize(
+            "You are an expert AMD GPU performance engineer "
+            "helping optimize a HIP/ROCm application.\n\n" + fence
+        )
+        return conv
 
     def _prompt_resume(self, existing: List[SessionData]) -> Optional[SessionData]:
         _print()
@@ -442,7 +471,6 @@ class InteractiveSession:
         if new_recs:
             self._show_analysis_summary(new_recs)
         added = self._ingest_recommendations(new_recs)
-        self._update_ctx_analysis(new_recs, breakdown)
         now = datetime.now(timezone.utc).isoformat()
         self._session.history.append(HistoryEntry(
             type="profiling_run", timestamp=now, db_path=str(db_path)
@@ -479,7 +507,8 @@ class InteractiveSession:
                 self._save_and_quit()
                 break
             elif choice == "s":
-                self._session.context = asdict(self._ctx)   # flush context before save
+                if self._conv:
+                    self._session.conversation = self._conv.to_dict()
                 self._store.save(self._session)
                 _print("  Session saved.", style="green")
             elif choice == "p":
@@ -499,7 +528,8 @@ class InteractiveSession:
 
     def _save_and_quit(self) -> None:
         self._session.last_updated = datetime.now(timezone.utc).isoformat()
-        self._session.context = asdict(self._ctx)     # flush context before save
+        if self._conv:
+            self._session.conversation = self._conv.to_dict()
         self._store.save(self._session)
         _print("  Session saved. Goodbye.", style="cyan")
 
@@ -584,7 +614,6 @@ class InteractiveSession:
 
         import subprocess
         proc = subprocess.run(selected_cmd, shell=True)
-        self._update_ctx_command(selected_cmd, proc.returncode)
         _print()
         if proc.returncode != 0:
             _print(f"  Command exited with code {proc.returncode}.", style="yellow")
@@ -611,7 +640,6 @@ class InteractiveSession:
         if new_recs:
             self._show_analysis_summary(new_recs)
         added = self._ingest_recommendations(new_recs, source=_source)
-        self._update_ctx_analysis(new_recs, breakdown)
         now = datetime.now(timezone.utc).isoformat()
         self._session.history.append(HistoryEntry(
             type="profiling_run",
@@ -697,14 +725,15 @@ class InteractiveSession:
         return cmds
 
     def _llm_annotate_profiling_plan(self, cmds: List[tuple]) -> List[tuple]:
-        """Send tier0 metadata (NOT source text) to online LLM for annotation."""
+        """Send tier0 metadata to LLM for annotation via persistent conversation."""
+        if self._conv is None:
+            return cmds
         try:
-            from rocpd.ai_analysis.llm_analyzer import LLMAnalyzer
-            # Use self._tier0 directly — SourceAnalysisResult has the fields we need
             plan = self._tier0
             if plan is None:
                 return cmds
             patterns = getattr(plan, "detected_patterns", [])
+            import json as _json
             metadata = {
                 "programming_model":  getattr(plan, "programming_model", "HIP"),
                 "kernel_count":       getattr(plan, "kernel_count", 0),
@@ -718,22 +747,17 @@ class InteractiveSession:
                 ],
                 "suggested_commands": [cmd for _, cmd in cmds],
             }
-            model = self._llm_local_model if self._llm_provider == "local" else self._llm_model
-            analyzer = LLMAnalyzer(
-                provider=self._llm_provider,
-                api_key=self._llm_api_key,
-                model=model,
+            user_msg = (
+                f"Annotate this profiling plan (max 200 words, plain text only — no markdown): "
+                f"{_json.dumps(metadata)}"
             )
-            with _Spinner(f"  Contacting {self._llm_provider} LLM for profiling advice..."):
-                note = analyzer.annotate_profiling_plan(metadata)
-            if note:
-                _print()
-                _print("  ── LLM Profiling Advice ────────────────────────────", style="cyan")
-                _print(note)
-                _print()
+            _print()
+            _print("  ── LLM Profiling Advice ────────────────────────────", style="cyan")
+            note = self._conv.send(user_msg, on_token=_print_token)
+            _print()
         except Exception as exc:
             _print(f"  (LLM annotation skipped: {exc})", style="dim")
-        return cmds  # commands unchanged; LLM output is advisory only
+        return cmds
 
     def _run_tier1_analysis(self, db_path: str):
         """Run Tier 1/2 analysis on db_path; return (recs, breakdown) tuple.
@@ -774,75 +798,6 @@ class InteractiveSession:
         except Exception as exc:
             _print(f"  (Tier 1 analysis failed: {exc})", style="red")
             return [], None
-
-    def _update_ctx_analysis(
-        self,
-        recs: List[Dict[str, Any]],
-        breakdown: Optional[Dict[str, Any]],
-    ) -> None:
-        """Append a compact analysis snapshot to _ctx.analyses (capped at 5)."""
-        bd = breakdown or {}
-        entry = {
-            "db":           pathlib.Path(self._db_path).name if self._db_path else "",
-            "kernel_pct":   bd.get("kernel_time_pct", 0.0),
-            "memcpy_pct":   bd.get("memcpy_time_pct", 0.0),
-            "idle_pct":     bd.get("idle_time_pct", 0.0),
-            "top_issue":    recs[0]["issue"] if recs else "",
-            "top_priority": recs[0]["priority"] if recs else "INFO",
-        }
-        self._ctx.analyses.append(entry)
-        if len(self._ctx.analyses) > 5:
-            self._ctx.analyses.pop(0)
-        self._ctx.iteration += 1
-
-    def _update_ctx_suggestion(self, llm_response: str) -> None:
-        """Append truncated LLM response to _ctx.suggestions_given (capped at 3)."""
-        self._ctx.suggestions_given.append(llm_response[:120])
-        if len(self._ctx.suggestions_given) > 3:
-            self._ctx.suggestions_given.pop(0)
-
-    def _update_ctx_command(self, cmd: str, exit_code: int) -> None:
-        """Append command record to _ctx.commands_run (capped at 5)."""
-        self._ctx.commands_run.append({"cmd": cmd, "exit_code": exit_code})
-        if len(self._ctx.commands_run) > 5:
-            self._ctx.commands_run.pop(0)
-
-    def _format_context_block(self) -> str:
-        """Serialize _ctx to a compact text block for LLM prompt injection.
-
-        Returns "" when _ctx has no accumulated data yet (first LLM call).
-        Output is ≤~1300 chars regardless of cap sizes.
-        """
-        if (not self._ctx.analyses
-                and not self._ctx.suggestions_given
-                and not self._ctx.commands_run):
-            return ""
-
-        lines = [f"### Session Context (iteration {self._ctx.iteration})"]
-
-        if self._ctx.analyses:
-            lines.append(f"Previous analyses ({len(self._ctx.analyses)} run(s)):")
-            for i, a in enumerate(self._ctx.analyses, 1):
-                lines.append(
-                    f"  Run {i}: db={a.get('db','')}  "
-                    f"kernel={a.get('kernel_pct', 0):.1f}%  "
-                    f"idle={a.get('idle_pct', 0):.1f}%  "
-                    f"top_issue={a.get('top_issue','')} [{a.get('top_priority','')}]"
-                )
-
-        if self._ctx.suggestions_given:
-            lines.append(f"Previous suggestions ({len(self._ctx.suggestions_given)}):")
-            for i, s in enumerate(self._ctx.suggestions_given, 1):
-                lines.append(f"  [{i}] {s}")
-
-        if self._ctx.commands_run:
-            lines.append(f"Commands run ({len(self._ctx.commands_run)}):")
-            for c in self._ctx.commands_run:
-                lines.append(
-                    f"  $ {c.get('cmd','')}  (exit {c.get('exit_code', '?')})"
-                )
-
-        return "\n".join(lines)
 
     def _extract_ai_commands(
         self, text: str, structured_cmds: List[str]
@@ -900,7 +855,6 @@ class InteractiveSession:
         _print(f"  Running: $ {cmd}", style="cyan")
         _print()
         proc = subprocess.run(cmd, shell=True)
-        self._update_ctx_command(cmd, proc.returncode)
         _print()
         if proc.returncode != 0:
             _print(f"  Command exited with code {proc.returncode}.", style="yellow")
@@ -923,7 +877,6 @@ class InteractiveSession:
         self._db_path = str(db_path)
         _print("  Running Tier 1/2 analysis on new trace...", style="dim")
         new_recs, breakdown = self._run_tier1_analysis(str(db_path))
-        self._update_ctx_analysis(new_recs, breakdown)
         if new_recs:
             self._show_analysis_summary(new_recs)
         added = self._ingest_recommendations(new_recs)
@@ -932,7 +885,8 @@ class InteractiveSession:
             type="profiling_run", timestamp=now, db_path=str(db_path)
         ))
         self._session.last_updated = now
-        self._session.context = asdict(self._ctx)
+        if self._conv:
+            self._session.conversation = self._conv.to_dict()
         self._store.save(self._session)
         _print(f"  ✓ {added} finding(s) added to menu.", style="green")
 
@@ -1093,93 +1047,69 @@ class InteractiveSession:
         _print()
         _print("  Requesting optimization suggestions (based on detected patterns)...",
                style="dim")
+        import json as _json
+
+        # Build compact metadata from tier0 — same approach as annotate_profiling_plan
+        plan = self._tier0
+        patterns = getattr(plan, "detected_patterns", [])
+        kernels  = getattr(plan, "detected_kernels", [])[:5]
+        metadata = {
+            "programming_model": getattr(plan, "programming_model", "HIP"),
+            "kernel_count":      getattr(plan, "kernel_count", 0),
+            "risk_areas":        getattr(plan, "risk_areas", []),
+            "detected_patterns": [
+                {
+                    "id":          (p.get("pattern_id") if isinstance(p, dict)
+                                    else getattr(p, "pattern_id", "")),
+                    "severity":    (p.get("severity")   if isinstance(p, dict)
+                                    else getattr(p, "severity",   "")),
+                    "description": (p.get("description") if isinstance(p, dict)
+                                    else getattr(p, "description", "")),
+                    "count":       (p.get("count", 1)   if isinstance(p, dict)
+                                    else getattr(p, "count", 1)),
+                }
+                for p in patterns
+            ],
+            "detected_kernels": [
+                {
+                    "name":        ("[KERNEL]" if isinstance(k, dict)
+                                    else "[KERNEL]"),
+                    "launch_type": (k.get("launch_type", "") if isinstance(k, dict)
+                                    else getattr(k, "launch_type", "")),
+                }
+                for k in kernels
+            ],
+        }
+
+        if self._conv is None:
+            _print("  (No LLM configured — skipping AI optimization)", style="dim")
+            return
+
+        user_msg = (
+            "Based on these detected GPU source patterns, provide concrete "
+            "optimization recommendations (max 300 words, plain text only — no markdown headers):\n"
+            + _json.dumps(metadata, indent=2)
+        )
+        _print()
+        _print("  ── AI Optimization Suggestions ──────────────────────", style="cyan")
         try:
-            from rocpd.ai_analysis.llm_analyzer import LLMAnalyzer
-            import json as _json
-
-            # Build compact metadata from tier0 — same approach as annotate_profiling_plan
-            plan = self._tier0
-            patterns = getattr(plan, "detected_patterns", [])
-            kernels  = getattr(plan, "detected_kernels", [])[:5]
-            metadata = {
-                "programming_model": getattr(plan, "programming_model", "HIP"),
-                "kernel_count":      getattr(plan, "kernel_count", 0),
-                "risk_areas":        getattr(plan, "risk_areas", []),
-                "detected_patterns": [
-                    {
-                        "id":          (p.get("pattern_id") if isinstance(p, dict)
-                                        else getattr(p, "pattern_id", "")),
-                        "severity":    (p.get("severity")   if isinstance(p, dict)
-                                        else getattr(p, "severity",   "")),
-                        "description": (p.get("description") if isinstance(p, dict)
-                                        else getattr(p, "description", "")),
-                        "count":       (p.get("count", 1)   if isinstance(p, dict)
-                                        else getattr(p, "count", 1)),
-                    }
-                    for p in patterns
-                ],
-                "detected_kernels": [
-                    {
-                        "name":        ("[KERNEL]" if isinstance(k, dict)
-                                        else "[KERNEL]"),
-                        "launch_type": (k.get("launch_type", "") if isinstance(k, dict)
-                                        else getattr(k, "launch_type", "")),
-                    }
-                    for k in kernels
-                ],
-            }
-
-            model = self._llm_local_model if llm_provider == "local" else self._llm_model
-            analyzer = LLMAnalyzer(
-                provider=llm_provider,
-                api_key=self._llm_api_key,
-                model=model,
-            )
-
-            system = (
-                "You are an expert AMD GPU performance engineer. "
-                "Given detected GPU source code patterns, provide specific, "
-                "actionable optimization suggestions. "
-                "Focus on the highest-impact changes. "
-                "Be concise and practical (max 300 words). "
-                "Use plain text only — no markdown headers."
-            )
-            ctx_block = self._format_context_block()
-            user = (
-                (ctx_block + "\n\n" if ctx_block else "")
-                + "Based on these detected GPU source patterns, provide concrete "
-                  "optimization recommendations:\n\n"
-                + _json.dumps(metadata, indent=2)
-            )
-
-            with _Spinner(f"  Contacting {llm_provider} LLM..."):
-                note = analyzer._call_openai(system, user, max_tokens=2000) \
-                       if llm_provider == "openai" \
-                       else (analyzer._call_anthropic(system, user)
-                             if llm_provider == "anthropic"
-                             else analyzer._call_local(system, user))
-
-            if note:
-                self._update_ctx_suggestion(note)
-                _print()
-                _print("  ── AI Optimization Suggestions ──────────────────────", style="cyan")
-                _print(note)
-                _print()
-                self._offer_apply_suggestions(note, llm_provider)
-                # Extract commands from LLM text + current recs
-                structured = [
-                    c.get("full_command", "")
-                    for rec in self._recs
-                    for c in rec.get("commands", [])
-                    if c.get("full_command")
-                ]
-                ai_cmds = self._extract_ai_commands(note, structured)
-                self._offer_run_ai_commands(ai_cmds)
-            else:
-                _print("  (LLM returned no suggestions)", style="yellow")
-
+            note = self._conv.send(user_msg, on_token=_print_token)
+            _print()
         except Exception as exc:
-            _print(f"  (LLM optimization failed: {exc})", style="red")
+            _print(f"\n  (LLM optimization failed: {exc})", style="red")
+            return
+        if note:
+            self._offer_apply_suggestions(note, self._llm_provider)
+            structured = [
+                c.get("full_command", "")
+                for rec in self._recs
+                for c in rec.get("commands", [])
+                if c.get("full_command")
+            ]
+            ai_cmds = self._extract_ai_commands(note, structured)
+            self._offer_run_ai_commands(ai_cmds)
+        else:
+            _print("  (LLM returned no suggestions)", style="yellow")
 
     def _offer_apply_suggestions(self, suggestions: str, llm_provider: Optional[str] = None) -> None:
         """Ask user whether to save the suggestions or let the LLM edit source code directly."""
@@ -1374,6 +1304,17 @@ class InteractiveSession:
         except OSError as e:
             _print(f"  (Write failed: {e})", style="red")
 
+        # Notify the persistent conversation about the rewrite
+        if self._conv:
+            try:
+                self._conv.send(
+                    f"File `{chosen.name}` was rewritten applying the above optimizations. "
+                    f"Compilation: pending.",
+                    on_token=None,
+                )
+            except Exception:
+                pass  # post-rewrite summary is advisory; never crash here
+
     def _autodetect_llm(self) -> Optional[str]:
         """Try to detect a running local LLM (ollama). Returns provider name or None."""
         try:
@@ -1415,28 +1356,26 @@ class InteractiveSession:
     def _request_optimization_suggestions(
         self, summaries: List[tuple], llm_provider: Optional[str] = None
     ) -> Dict[str, str]:
-        """Send summaries to online LLM; return {filename: suggestion_text}."""
-        provider = llm_provider or self._llm_provider
+        """Send source file summaries to LLM; return {filename: suggestion_text}."""
+        if self._conv is None:
+            return {}
         try:
-            from rocpd.ai_analysis.llm_analyzer import LLMAnalyzer
-            analyzer = LLMAnalyzer(
-                provider=provider,
-                api_key=self._llm_api_key,
-                model=self._llm_model,
+            combined = "\n\n".join(f"=== {name} ===\n{content}" for name, content in summaries)
+            user_msg = (
+                f"Analyze these AMD GPU source files and provide concrete, actionable "
+                f"optimization suggestions. Focus on: memory coalescing, wave occupancy, "
+                f"unnecessary hipDeviceSynchronize, blocking hipMemcpy, MFMA usage, LDS "
+                f"utilization, loop structure, kernel launch parameters. Be specific — "
+                f"reference actual patterns visible in the code. Use plain text only — "
+                f"no markdown headers. Start each file section with exactly: FILE: <filename>\n\n"
+                f"{combined}"
             )
-            file_list = ", ".join(name for name, _ in summaries)
-            ctx_block = self._format_context_block()
-            custom_prompt = (
-                (ctx_block + "\n\n" if ctx_block else "")
-                + f"Analyze and optimize these AMD GPU source files: {file_list}."
-            )
-            with _Spinner(f"  Contacting {provider} LLM for optimization suggestions..."):
-                raw = analyzer.suggest_optimizations(summaries, custom_prompt=custom_prompt)
-            if raw:
-                self._update_ctx_suggestion(raw)
+            _print()
+            _print("  ── AI Optimization Suggestions ──────────────────────", style="cyan")
+            raw = self._conv.send(user_msg, on_token=_print_token)
+            _print()
 
             result: Dict[str, str] = {}
-            # Normalize: if response starts with FILE:, add a leading newline
             if raw and raw.lstrip().startswith("FILE:"):
                 raw = "\n" + raw.lstrip()
             for block in re.split(r"\nFILE:\s*", raw or ""):
@@ -1446,16 +1385,12 @@ class InteractiveSession:
                 lines = block.split("\n", 1)
                 if len(lines) == 2:
                     result[lines[0].strip()] = lines[1].strip()
-
-            # If the LLM didn't use FILE: headers, display the full response
-            # under the first file's name so it's never silently discarded
             if not result and raw and raw.strip():
                 first_name = summaries[0][0] if summaries else "response"
                 result[first_name] = raw.strip()
-
             return result
         except Exception as exc:
-            _print(f"  [DEBUG] exception in LLM call: {type(exc).__name__}: {exc}", style="red")
+            _print(f"  (LLM optimization failed: {exc})", style="red")
             return {}
 
     def _present_and_apply(
@@ -1544,7 +1479,6 @@ class InteractiveSession:
             _print(f"  Running: $ {cmd}", style="cyan")
             _print()
             proc = subprocess.run(cmd, shell=True, check=False)
-            self._update_ctx_command(cmd, proc.returncode)
             _print()
             if proc.returncode != 0:
                 _print(f"  Command exited with code {proc.returncode}.", style="yellow")
@@ -1570,7 +1504,6 @@ class InteractiveSession:
                 _print("  Running Tier 1/2 analysis...", style="dim")
                 new_recs, breakdown = self._run_tier1_analysis(str(db_path))
                 added = self._ingest_recommendations(new_recs)
-                self._update_ctx_analysis(new_recs, breakdown)
                 now = datetime.now(timezone.utc).isoformat()
                 self._session.history.append(HistoryEntry(
                     type="profiling_run", timestamp=now, db_path=str(db_path)
