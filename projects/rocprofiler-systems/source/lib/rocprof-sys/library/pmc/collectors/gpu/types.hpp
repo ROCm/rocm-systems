@@ -5,17 +5,15 @@
 
 #include "library/pmc/common/types.hpp"
 
+#include <spdlog/fmt/fmt.h>
+
+#include <array>
 #include <cstdint>
-#include <sstream>
+#include <set>
+#include <stdexcept>
 #include <string>
 
-#if ROCPROFSYS_USE_ROCM > 0
-#    include <array>
-#    include <set>
-#    include <stdexcept>
-
-#    include <amd_smi/amdsmi.h>
-#endif
+#include <amd_smi/amdsmi.h>
 
 namespace rocprofsys
 {
@@ -77,46 +75,47 @@ union enabled_metrics
 inline std::string
 to_string(const enabled_metrics& metrics)
 {
-    std::stringstream ss;
-    ss << "[SMI enabled metrics] ";
-    ss << "Current socket power: " << metrics.bits.current_socket_power
-       << ", Average socket power: " << metrics.bits.average_socket_power
-       << ", Memory usage: " << static_cast<bool>(metrics.bits.memory_usage)
-       << ", Hotspot temperature: " << static_cast<bool>(metrics.bits.hotspot_temperature)
-       << ", Edge temperature: " << static_cast<bool>(metrics.bits.edge_temperature)
-       << ", GFX activity: " << static_cast<bool>(metrics.bits.gfx_activity)
-       << ", UMC activity: " << static_cast<bool>(metrics.bits.umc_activity)
-       << ", MM activity: " << static_cast<bool>(metrics.bits.mm_activity)
-       << ", VCN activity: " << static_cast<bool>(metrics.bits.vcn_activity)
-       << ", JPEG activity: " << static_cast<bool>(metrics.bits.jpeg_activity)
-       << ", VCN busy: " << static_cast<bool>(metrics.bits.vcn_busy)
-       << ", JPEG busy: " << static_cast<bool>(metrics.bits.jpeg_busy)
-       << ", XGMI: " << static_cast<bool>(metrics.bits.xgmi)
-       << ", PCIE: " << static_cast<bool>(metrics.bits.pcie)
-       << ", SDMA: " << static_cast<bool>(metrics.bits.sdma_usage) << "\n";
-    return ss.str();
+    return fmt::format(
+        "[SMI enabled metrics] Current socket power: {}, Average socket power: {}, "
+        "Memory usage: {}, Hotspot temperature: {}, Edge temperature: {}, "
+        "GFX activity: {}, UMC activity: {}, MM activity: {}, "
+        "VCN activity: {}, JPEG activity: {}, VCN busy: {}, JPEG busy: {}, "
+        "XGMI: {}, PCIE: {}, SDMA: {}\n",
+        static_cast<bool>(metrics.bits.current_socket_power),
+        static_cast<bool>(metrics.bits.average_socket_power),
+        static_cast<bool>(metrics.bits.memory_usage),
+        static_cast<bool>(metrics.bits.hotspot_temperature),
+        static_cast<bool>(metrics.bits.edge_temperature),
+        static_cast<bool>(metrics.bits.gfx_activity),
+        static_cast<bool>(metrics.bits.umc_activity),
+        static_cast<bool>(metrics.bits.mm_activity),
+        static_cast<bool>(metrics.bits.vcn_activity),
+        static_cast<bool>(metrics.bits.jpeg_activity),
+        static_cast<bool>(metrics.bits.vcn_busy),
+        static_cast<bool>(metrics.bits.jpeg_busy),
+        static_cast<bool>(metrics.bits.xgmi),
+        static_cast<bool>(metrics.bits.pcie),
+        static_cast<bool>(metrics.bits.sdma_usage));
 }
 
-#if ROCPROFSYS_USE_ROCM > 0
-
 // Ensure we have the correct max values defined
-#    ifdef AMDSMI_MAX_NUM_JPEG_ENG_V1
-#        define ROCPROFSYS_MAX_NUM_JPEG_ENGINES AMDSMI_MAX_NUM_JPEG_ENG_V1
-#    else
-#        define ROCPROFSYS_MAX_NUM_JPEG_ENGINES 40
-#    endif
+#ifdef AMDSMI_MAX_NUM_JPEG_ENG_V1
+#    define ROCPROFSYS_MAX_NUM_JPEG_ENGINES AMDSMI_MAX_NUM_JPEG_ENG_V1
+#else
+#    define ROCPROFSYS_MAX_NUM_JPEG_ENGINES 40
+#endif
 
-#    ifndef AMDSMI_MAX_NUM_VCN
-#        define AMDSMI_MAX_NUM_VCN 4
-#    endif
+#ifndef AMDSMI_MAX_NUM_VCN
+#    define AMDSMI_MAX_NUM_VCN 4
+#endif
 
-#    ifndef AMDSMI_MAX_NUM_JPEG
-#        define AMDSMI_MAX_NUM_JPEG 32
-#    endif
+#ifndef AMDSMI_MAX_NUM_JPEG
+#    define AMDSMI_MAX_NUM_JPEG 32
+#endif
 
-#    ifndef AMDSMI_MAX_NUM_XCP
-#        define AMDSMI_MAX_NUM_XCP 8
-#    endif
+#ifndef AMDSMI_MAX_NUM_XCP
+#    define AMDSMI_MAX_NUM_XCP 8
+#endif
 
 struct metrics
 {
@@ -178,13 +177,10 @@ check_status(amdsmi_status_t status, const char* error_message)
 {
     if(status != AMDSMI_STATUS_SUCCESS)
     {
-        std::stringstream ss;
-        ss << error_message << " AMD SMI Error code: " << status;
-        throw std::runtime_error(ss.str());
+        throw std::runtime_error(fmt::format("{} AMD SMI Error code: {}", error_message,
+                                             static_cast<int>(status)));
     }
 }
-
-#endif  // ROCPROFSYS_USE_ROCM > 0
 
 }  // namespace gpu
 }  // namespace collectors

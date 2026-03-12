@@ -6,20 +6,14 @@
 #include "library/pmc/collectors/gpu/types.hpp"
 #include "logger/debug.hpp"
 
+#include <amd_smi/amdsmi.h>
+
 #include <algorithm>
 #include <cstdint>
 #include <limits>
 #include <memory>
 #include <string>
 #include <vector>
-
-#if ROCPROFSYS_USE_ROCM > 0
-#    include "core/amd_smi.hpp"
-#endif
-
-#if ROCPROFSYS_USE_ROCM > 0
-#    include <amd_smi/amdsmi.h>
-#endif
 
 namespace rocprofsys
 {
@@ -29,8 +23,6 @@ namespace collectors
 {
 namespace gpu
 {
-
-#if ROCPROFSYS_USE_ROCM > 0
 
 using ::rocprofsys::pmc::collectors::gpu::enabled_metrics;
 using ::rocprofsys::pmc::collectors::gpu::metrics;
@@ -417,7 +409,6 @@ private:
     bool                    m_is_supported = false;
 };
 
-#endif  // ROCPROFSYS_USE_ROCM > 0
 
 }  // namespace gpu
 }  // namespace collectors

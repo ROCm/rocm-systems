@@ -30,4 +30,5 @@ target_link_libraries(
     PRIVATE
         rocprofiler-systems-core-library
         rocprofiler-systems::rocprofiler-systems-interface-library
+        rocprofiler-systems::rocprofiler-systems-rocm
 )

@@ -9,10 +9,9 @@
 
 #include <algorithm>
 #include <cassert>
-#include <functional>
 #include <limits>
 #include <memory>
-#include <unordered_map>
+#include <vector>
 
 namespace rocprofsys
 {
@@ -23,14 +22,11 @@ namespace collectors
 namespace gpu
 {
 
-#if ROCPROFSYS_USE_ROCM > 0
 
 using ::rocprofsys::pmc::device_filter;
 using ::rocprofsys::pmc::device_selection_mode;
 using ::rocprofsys::pmc::collectors::gpu::check_status;
 using ::rocprofsys::pmc::collectors::gpu::enabled_metrics;
-
-using gettimestamp_t = std::function<unsigned long()>;
 
 /**
  * @brief GPU metrics collector for performance monitoring.
@@ -158,9 +154,10 @@ struct collector
                     return false;  // Keep device
                 } catch(const std::runtime_error& e)
                 {
-                    LOG_ERROR("Reading metrics failed for device with ID %zu. Error: %s. "
-                              "Disabling device!",
-                              device->get_index(), e.what());
+                    LOG_ERROR(
+                        "Reading metrics failed for GPU device {}. Error: {}. "
+                        "Disabling device!",
+                        device->get_index(), e.what());
                     return true;  // Remove device
                 }
             });
@@ -292,6 +289,12 @@ private:
         auto     _device_id         = device->get_index();
         uint64_t current_cumulative = device->get_raw_sdma_usage();
 
+        // Ensure vector is sized to accommodate device index
+        if(_device_id >= m_sdma_states.size())
+        {
+            m_sdma_states.resize(_device_id + 1);
+        }
+
         auto& state = m_sdma_states[_device_id];
         if(state.has_prev && timestamp > static_cast<int64_t>(state.prev_timestamp))
         {
@@ -320,14 +323,12 @@ private:
         bool     has_prev        = false;
     };
 
-    device_vector_t m_gpu_devices;  ///< List of enabled GPU devices for sampling
+    device_vector_t                  m_gpu_devices;      ///< Enabled GPU devices for sampling
     std::shared_ptr<device_provider> m_device_provider;  ///< Device provider instance
-    enabled_metrics m_enabled_metrics;  ///< Set of metrics enabled for collection
-    std::unordered_map<size_t, sdma_state>
-        m_sdma_states;  ///< Per-device SDMA delta tracking
+    enabled_metrics                  m_enabled_metrics;  ///< Metrics enabled for collection
+    std::vector<sdma_state>          m_sdma_states;      ///< Per-device SDMA delta tracking
 };
 
-#endif  // ROCPROFSYS_USE_ROCM > 0
 
 }  // namespace gpu
 }  // namespace collectors

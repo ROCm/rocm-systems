@@ -8,7 +8,6 @@
 
 #include <algorithm>
 #include <cassert>
-#include <functional>
 #include <limits>
 #include <memory>
 #include <stdexcept>
@@ -22,10 +21,6 @@ namespace collectors
 {
 namespace base
 {
-
-#if ROCPROFSYS_USE_ROCM > 0
-
-using get_timestamp_t = std::function<unsigned long()>;
 
 /**
  * @brief Generic collector template for device performance monitoring.
@@ -137,9 +132,11 @@ struct collector
      * via the cache API and optionally Perfetto. Devices that fail to read metrics
      * are automatically disabled and removed from the device list.
      *
+     * @tparam GetTimestamp Callable returning uint64_t timestamp (avoids std::function overhead)
      * @param get_timestamp Function to retrieve the current timestamp for the sample.
      */
-    void sample(const get_timestamp_t& get_timestamp)
+    template <typename GetTimestamp>
+    void sample(GetTimestamp&& get_timestamp)
     {
         auto new_end = std::remove_if(
             m_device_entries.begin(), m_device_entries.end(),
@@ -231,7 +228,6 @@ private:
     enabled_metrics_t                m_enabled_metrics;  ///< Enabled metrics
 };
 
-#endif  // ROCPROFSYS_USE_ROCM > 0
 
 }  // namespace base
 }  // namespace collectors

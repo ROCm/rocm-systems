@@ -31,9 +31,13 @@ target_link_libraries(
         rocprofiler-systems-pmc-library
         rocprofiler-systems-googletest-library
         rocprofiler-systems-logger
+        rocprofiler-systems::rocprofiler-systems-rocm
 )
 
 target_include_directories(
     pmc-gpu-collector-tests
-    PRIVATE ${PROJECT_SOURCE_DIR}/source/lib ${PROJECT_SOURCE_DIR}/source/lib/rocprof-sys
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/source/lib
+        ${PROJECT_SOURCE_DIR}/source/lib/rocprof-sys
+        ${PROJECT_BINARY_DIR}/source/lib
 )

@@ -10,9 +10,9 @@ set(UNIT_TEST_OBJECTS
     $<$<TARGET_EXISTS:rccl-unit-tests>:$<TARGET_OBJECTS:rccl-unit-tests>>
 )
 
-if(ROCPROFSYS_USE_ROCM)
-    list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:pmc-common-tests>)
-endif()
+list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:pmc-common-tests>)
+list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:pmc-gpu-collector-tests>)
+list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:pmc-nic-collector-tests>)
 
 add_executable(rocprof-sys-unit-tests ${UNIT_TEST_OBJECTS})
 
