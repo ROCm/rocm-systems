@@ -63,13 +63,13 @@ jobs:
 
       - name: Fetch sources
         run: |
-          ./TheRock/build_tools/fetch_sources.py --jobs 12
+          ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-systems
 
       - name: Configure Projects
         env:
           amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
           package_version: ADHOCBUILD
-          extra_cmake_options: ${{ inputs.extra_cmake_options }}
+          extra_cmake_options: "-DTHEROCK_ROCM_SYSTEMS_SOURCE_DIR=../ ${{ inputs.cmake_options }}"
           BUILD_DIR: build
         run: |
           python3 ./TheRock/build_tools/github_actions/build_configure.py

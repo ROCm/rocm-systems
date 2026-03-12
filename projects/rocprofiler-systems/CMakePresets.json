@@ -17,8 +17,7 @@
                 "ROCPROFSYS_BUILD_TESTING": "ON",
                 "ROCPROFSYS_MAX_THREADS": "64",
                 "ROCPROFSYS_STRIP_LIBRARIES": "OFF",
-                "ROCPROFSYS_USE_PYTHON": "ON",
-                "ROCPROFSYS_USE_ROCM": "ON"
+                "ROCPROFSYS_USE_PYTHON": "ON"
             },
             "description": "Official CI build parameters",
             "displayName": "official CI build",
@@ -40,8 +39,7 @@
                 "ROCPROFSYS_BUILD_TBB": "ON",
                 "ROCPROFSYS_BUILD_TESTING": "ON",
                 "ROCPROFSYS_STRIP_LIBRARIES": "OFF",
-                "ROCPROFSYS_USE_PYTHON": "ON",
-                "ROCPROFSYS_USE_ROCM": "ON"
+                "ROCPROFSYS_USE_PYTHON": "ON"
             },
             "description": "Debug build parameters with tests",
             "displayName": "official debug build",
@@ -62,8 +60,7 @@
                 "ROCPROFSYS_BUILD_TBB": "ON",
                 "ROCPROFSYS_BUILD_TESTING": "ON",
                 "ROCPROFSYS_STRIP_LIBRARIES": "OFF",
-                "ROCPROFSYS_USE_PYTHON": "ON",
-                "ROCPROFSYS_USE_ROCM": "ON"
+                "ROCPROFSYS_USE_PYTHON": "ON"
             },
             "description": "Release build with debug info with tests",
             "displayName": "release build with debug info",
@@ -82,8 +79,7 @@
                 "ROCPROFSYS_BUILD_ELFUTILS": "ON",
                 "ROCPROFSYS_BUILD_LIBIBERTY": "ON",
                 "ROCPROFSYS_BUILD_TBB": "ON",
-                "ROCPROFSYS_USE_PYTHON": "ON",
-                "ROCPROFSYS_USE_ROCM": "ON"
+                "ROCPROFSYS_USE_PYTHON": "ON"
             },
             "description": "Official release build",
             "displayName": "official release build",
