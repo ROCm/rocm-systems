@@ -46,12 +46,36 @@ target_link_libraries(error_callback_test
 )
 gtest_discover_tests(error_callback_test)
 
+# memory: AIE agent memory allocation and sharing tests. Like error_callback_test
+# above, it is self-contained and needs no AIE kernel artifacts.
+add_executable(memory memory.cc)
+set_target_properties(memory
+  PROPERTIES
+    CXX_STANDARD                17
+    CXX_EXTENSIONS              OFF
+    CXX_VISIBILITY_PRESET       hidden
+    VISIBILITY_INLINES_HIDDEN   ON
+    POSITION_INDEPENDENT_CODE   ON
+)
+target_compile_options(memory
+  PRIVATE
+    -Wall
+    -Wextra
+    -Wpedantic
+)
+target_link_libraries(memory
+  PRIVATE
+    hsa-runtime64::hsa-runtime64
+    GTest::gtest_main
+)
+gtest_discover_tests(memory)
+
 # ---------------------------------------------------------------------------
 # Everything below builds AIE kernel artifacts and the dispatch tests that need
 # them. It is all conditional on the kernel toolchain being present, because
-# error_callback_test above needs none of it and is expected to configure and
-# run on any machine -- a missing NPU or IRON environment must not fail the
-# configure and take that target down with it.
+# error_callback_test and memory above need none of it and are expected to
+# configure and run on any machine -- a missing NPU or IRON environment must not
+# fail the configure and take those targets down with it.
 #
 # AIE_KERNEL_TOOLCHAIN is set to FALSE by the first missing piece; each probe
 # below is skipped once it is false, so the reason reported is the first thing
@@ -119,7 +143,7 @@ if(AIE_KERNEL_TOOLCHAIN)
 endif()
 
 if(NOT AIE_KERNEL_TOOLCHAIN)
-  message(STATUS "AIE kernel toolchain incomplete: building error_callback_test only.")
+  message(STATUS "AIE kernel toolchain incomplete: building error_callback_test and memory only.")
   return()
 endif()
 
