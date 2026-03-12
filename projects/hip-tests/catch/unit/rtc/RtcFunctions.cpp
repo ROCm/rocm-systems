@@ -99,6 +99,7 @@ bool check_architecture(const char** Combination_CO, int Combination_CO_size, in
       return 0;
     }
   }
+  HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
   return 1;
 }
 
@@ -180,6 +181,7 @@ bool check_rdc(const char** Combination_CO, int Combination_CO_size, int max_thr
   HIPRTC_CHECK(hiprtcGetBitcodeSize(prog, &codeSize));
   std::vector<char> codec(codeSize);
   HIPRTC_CHECK(hiprtcGetBitcode(prog, codec.data()));
+  HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
   float wall_time;
   int reg_count = 2;
   int max_thread = 1;
@@ -216,6 +218,9 @@ bool check_rdc(const char** Combination_CO, int Combination_CO_size, int max_thr
         HIP_CHECK(
             hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, 0, nullptr, kernel_parameter));
         pass_count++;
+        HIP_CHECK(hipDeviceSynchronize());
+        HIP_CHECK(hipModuleUnload(module));
+        HIPRTC_CHECK(hiprtcLinkDestroy(rtc_link_state));
         break;
       case 1:
         HIPRTC_CHECK(hiprtcLinkCreate(8, jit_options.data(), reinterpret_cast<void**>(&lopts),
@@ -227,6 +232,9 @@ bool check_rdc(const char** Combination_CO, int Combination_CO_size, int max_thr
         HIP_CHECK(hipModuleGetFunction(&function, module, kername));
         HIP_CHECK(
             hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, 0, nullptr, kernel_parameter));
+        HIP_CHECK(hipDeviceSynchronize());
+        HIP_CHECK(hipModuleUnload(module));
+        HIPRTC_CHECK(hiprtcLinkDestroy(rtc_link_state));
         pass_count++;
         break;
       default:
@@ -235,6 +243,9 @@ bool check_rdc(const char** Combination_CO, int Combination_CO_size, int max_thr
     }
   }
   HIP_CHECK(hipMemcpy(result.data(), C_d, Nbytes, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipFree(A_d));
+  HIP_CHECK(hipFree(B_d));
+  HIP_CHECK(hipFree(C_d));
   for (int i = 0; i < 1; i++) {
     if (result[i] != ((A_h[i] * B_h[i]))) {
       WARN("Compiler Option : " << compiler_opt);
@@ -377,6 +388,9 @@ bool check_denormals_enabled(const char** Combination_CO, int Combination_CO_siz
       WARN("OBTAINED OP: " << result_h[0]);
       return 0;
     }
+    HIP_CHECK(hipFree(base_d));
+    HIP_CHECK(hipFree(power_d));
+    HIP_CHECK(hipFree(result_d));
   }
   return 1;
 }
@@ -506,6 +520,9 @@ bool check_denormals_disabled(const char** Combination_CO, int Combination_CO_si
       WARN("OBTAINED OP: " << result_h[0]);
       return 0;
     }
+    HIP_CHECK(hipFree(base_d));
+    HIP_CHECK(hipFree(power_d));
+    HIP_CHECK(hipFree(result_d));
   }
   return 1;
 }
@@ -1152,6 +1169,7 @@ bool check_macro(const char** Combination_CO, int Combination_CO_size, int max_t
   HIP_CHECK(hipMemcpy(macro_value_h.data(), macro_value_d, sizeof(int), hipMemcpyDeviceToHost));
   HIP_CHECK(hipDeviceSynchronize());
   HIP_CHECK(hipModuleUnload(module));
+  HIP_CHECK(hipFree(macro_value_d));
   HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
   if (macro_value_h[0] != Expected_Results_int[0]) {
     WARN("Compiler Option : " << compiler_option);
@@ -1399,6 +1417,8 @@ bool check_header_dir(const char** Combination_CO, int Combination_CO_size, int 
     HIP_CHECK(hipModuleGetFunction(&function, module, kername));
     HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, 0, nullptr, kernel_parameter));
     HIP_CHECK(hipMemcpy(ptr_value_h, value_d, sizeof(int), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipFree(value_d));
+    HIP_CHECK(hipFree(input_d));
     if (*ptr_value_h != Expected_Results_int[senario]) {
       WARN("Compiler Option : " << appended_CO);
       if (Combination_CO_size != -1) {
@@ -1491,11 +1511,14 @@ bool check_warning(const char** Combination_CO, int Combination_CO_size, int max
         }
       }
       WARN(" WARNING MESSAGE IS PRINTING WHICH IS NOT SUPRESSED ");
+      HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
       return 0;
     } else {
+      HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
       return 1;
     }
   } else {
+    HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
     return 1;
   }
 }
@@ -1561,6 +1584,7 @@ bool check_Rpass_inline(const char** Combination_CO, int Combination_CO_size, in
   if (logSize) {
     std::string log(logSize, '\0');
     HIPRTC_CHECK(hiprtcGetProgramLog(prog, &log[0]));
+    HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
     if (log.find("inlined into")) {
       return 1;
     } else {
@@ -1962,6 +1986,7 @@ bool check_max_thread(const char** Combination_CO, int Combination_CO_size, int 
       hipError_t status = hipModuleLaunchKernel(function, 1, 1, 1, Input_Thrd_Vals_int[test_case],
                                                 1, 1, 0, 0, nullptr, kernel_parameter);
       HIP_CHECK(hipMemcpy(ptr_num_threads_h, Thread_count_d, sizeof(int), hipMemcpyDeviceToHost));
+      HIP_CHECK(hipFree(Thread_count_d));
       if ((status == hipSuccess) && (num_threads_h <= Target_Thrd_Vals_int[senario])) {
         check = 1;
       } else {
@@ -2087,6 +2112,7 @@ bool check_unsafe_atomic_enabled(const char** Combination_CO, int Combination_CO
     HIP_CHECK(hipModuleUnload(module));
     HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
   }
+  HIP_CHECK(hipFree(A_d));
   if (sum_w != sum_tocheck) {
     return 1;
   } else {
@@ -2184,6 +2210,7 @@ bool check_unsafe_atomic_disabled(const char** Combination_CO, int Combination_C
   HIP_CHECK(hipModuleGetFunction(&function, module, kername));
   HIP_CHECK(hipModuleLaunchKernel(function, N, 1, 1, N, 1, 1, 0, 0, nullptr, kernel_parameter));
   HIP_CHECK(hipMemcpy(A_h, A_d, Nbytes, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipFree(A_d));
   for (int i = 0; i < N; i++) {
     sum += A_h[i];
   }
@@ -3111,5 +3138,8 @@ std::string checking_IR(const char* kername, const char** extra_CO_IRadded,
   std::stringstream dataStream;
   HIP_CHECK(hipModuleUnload(module));
   HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
+  HIP_CHECK(hipFree(A_d));
+  HIP_CHECK(hipFree(B_d));
+  HIP_CHECK(hipFree(C_d));
   return data;
 }
