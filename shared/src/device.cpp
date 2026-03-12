@@ -46,9 +46,12 @@ ErrorCode Device::QueryVramUsage(VramUsage *usage) const {
   return device_ctx_->QueryVramUsage(usage);
 }
 
+ErrorCode Device::QueryRasFeature(RasFeature *info) const {
+  return device_ctx_->QueryRasFeature(info);
+}
+
 ErrorCode Device::Escape(void *pData, size_t dataSize, bool hardwareAccess) const {
-  bool ok = device_ctx_->Escape(pData, dataSize, hardwareAccess);
-  return ok ? ErrorCode::Success : ErrorCode::Unknown;
+  return device_ctx_->Escape(pData, dataSize, hardwareAccess);
 }
 
 } // namespace thunk

@@ -31,6 +31,8 @@ public:
 
   ErrorCode QueryVramInfo(VramInfo *info) const;
 
+  ErrorCode QueryRasFeature(RasFeature *info) const;
+
   ErrorCode Escape(void *pData, size_t dataSize,
                    bool hardwareAccess = false) const;
 

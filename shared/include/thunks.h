@@ -246,6 +246,13 @@ inline ErrorCode Escape(const LdaChain &chain, EscapeArgs *args) {
   return TranslateNtStatus(DXCORE_CALL(D3DKMTEscape(args)));
 }
 
+inline ErrorCode Escape(WinAdapterHandle adapter, WinDeviceHandle device,
+                        EscapeArgs *args) {
+  args->hAdapter = adapter;
+  args->hDevice  = device;
+  return TranslateNtStatus(DXCORE_CALL(D3DKMTEscape(args)));
+}
+
 } // namespace d3dthunk
 } // namespace thunk
 } // namespace wsl

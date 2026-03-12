@@ -202,8 +202,11 @@ public:
   // Query current VRAM usage in MB via KMD escape.
   ErrorCode QueryVramUsage(wsl::thunk::VramUsage *usage) const;
 
+  // Query RAS feature flags via KMD escape.
+  ErrorCode QueryRasFeature(wsl::thunk::RasFeature *info) const;
+
   // Send a driver-escape packet on behalf of this GPU slot.
-  bool Escape(void *pData, size_t dataSize, bool hardwareAccess = false) const;
+  ErrorCode Escape(void *pData, size_t dataSize, bool hardwareAccess = false) const;
 
   DeviceContext(const DeviceContext &) = delete;
   DeviceContext &operator=(const DeviceContext &) = delete;

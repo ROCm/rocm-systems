@@ -20,6 +20,15 @@ struct VramUsage {
   uint64_t vram_total_mb;  // total VRAM in MB
 };
 
+// RAS (Reliability, Availability, Serviceability) feature flags
+struct RasFeature {
+  uint32_t dram_ecc     : 1;  // DRAM ECC enabled
+  uint32_t sram_ecc     : 1;  // SRAM ECC enabled
+  uint32_t poisoning    : 1;  // data poisoning enabled
+  uint32_t rsvd         : 29;
+  bool     needs_reboot;      // immediate reboot required after feature change
+};
+
 } // namespace thunk
 } // namespace wsl
 
