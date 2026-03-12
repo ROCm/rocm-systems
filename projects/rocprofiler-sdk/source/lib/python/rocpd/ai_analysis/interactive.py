@@ -1998,11 +1998,21 @@ class WorkflowSession:
                         # Replace placeholder app and generic output dir
                         fc = fc.replace("-- ./app", f"-- {app_cmd}")
                         fc = _replace_output_dir(fc, new_out_dir)
-                        # Strip --kernel-names: not a valid rocprofv3 CLI flag
+                        # Strip flags not accepted by rocprofv3 CLI.
+                        # The LLM fence documents valid flags, but LLMs still
+                        # hallucinate legacy/HIP-RT names — strip defensively.
+                        # (a) Standalone boolean flags that rocprofv3 does not accept:
+                        fc = re.sub(
+                            r"\s*--(hip-api-trace|hsa-trace|hip-trace"
+                            r"|hip-stats|hsa-stats)\b",
+                            "", fc,
+                        )
+                        # (b) --kernel-names <value> — value-taking invalid flag:
                         fc = re.sub(
                             r"--kernel-names\s+(?:'[^']*'|\"[^\"]*\"|\S+)",
                             "", fc,
-                        ).strip()
+                        )
+                        fc = fc.strip()
                         fc = re.sub(r" {2,}", " ", fc)  # collapse extra spaces
                         ai_rec_cmd = fc
                         break

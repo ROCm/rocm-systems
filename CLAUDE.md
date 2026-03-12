@@ -261,7 +261,7 @@ Added in `analyze.py`. Generates a self-contained single-file HTML report:
 - When `total_runtime_ns == 0` after a profiling run, a ⚠ warning is printed explaining that the app may use Python multiprocessing spawn (e.g. vLLM, PyTorch DDP) — GPU kernels run in worker processes and are not captured in the main-process DB. Suggests `rocprof-sys` or `--pid` profiling.
 - After computing `ai_rec_cmd`, the PMC counters in the suggestion are compared against the last `trace_history` command. If all suggested counters are already present, `ai_rec_cmd` is cleared to prevent an infinite `[r] → re-profile → same INFO → [r]` loop.
 - `_phase5_rec_menu` detects `already_reprofiled` (all INFO + iteration > 0 + no fresh `ai_rec_cmd`) and replaces the `[r]` option with a "result unchanged" note.
-- `--kernel-names` is stripped from AI-recommended commands before use — rocprofv3 does not accept this flag on the command line. Regex: `r"--kernel-names\s+(?:'[^']*'|\"[^\"]*\"|\S+)"`.
+- Invalid rocprofv3 CLI flags are stripped from AI-recommended commands before use — the LLM fence documents valid flags but LLMs still hallucinate legacy names. Two categories stripped: (a) standalone boolean flags: `--hip-api-trace`, `--hsa-trace`, `--hip-trace`, `--hip-stats`, `--hsa-stats`; (b) value-taking flag: `--kernel-names <value>`. Pattern: `r"\s*--(hip-api-trace|hsa-trace|hip-trace|hip-stats|hsa-stats)\b"` and `r"--kernel-names\s+(?:'[^']*'|\"[^\"]*\"|\S+)"`.
 - `_phase6_apply_direct` retries `_llm_rewrite_file` on failure (timeout, rate-limit, etc.) instead of silently falling through to Phase 7. Prompts `Retry LLM rewrite? [y/N]`.
 
 **Key dataclasses** (all in `interactive.py`):
