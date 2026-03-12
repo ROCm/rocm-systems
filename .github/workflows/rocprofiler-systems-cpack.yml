@@ -51,17 +51,11 @@ jobs:
           # ubuntu 22.04
           - os-distro: "ubuntu"
             os-version: "22.04"
-            rocm-version: "0.0"
-          - os-distro: "ubuntu"
-            os-version: "22.04"
             rocm-version: "6.3"
           - os-distro: "ubuntu"
             os-version: "22.04"
             rocm-version: "6.4"
           # ubuntu 24.04
-          - os-distro: "ubuntu"
-            os-version: "24.04"
-            rocm-version: "0.0"
           - os-distro: "ubuntu"
             os-version: "24.04"
             rocm-version: "6.3"
@@ -71,14 +65,8 @@ jobs:
           # opensuse 15.5
           - os-distro: "opensuse"
             os-version: "15.5"
-            rocm-version: "0.0"
-          - os-distro: "opensuse"
-            os-version: "15.5"
             rocm-version: "6.3"
           # opensuse 15.6
-          - os-distro: "opensuse"
-            os-version: "15.6"
-            rocm-version: "0.0"
           - os-distro: "opensuse"
             os-version: "15.6"
             rocm-version: "6.3"
@@ -88,9 +76,6 @@ jobs:
           # RHEL 8.10
           - os-distro: "rhel"
             os-version: "8.10"
-            rocm-version: "0.0"
-          - os-distro: "rhel"
-            os-version: "8.10"
             rocm-version: "6.3"
           - os-distro: "rhel"
             os-version: "8.10"
@@ -98,17 +83,11 @@ jobs:
           # RHEL 9.4
           - os-distro: "rhel"
             os-version: "9.4"
-            rocm-version: "0.0"
-          - os-distro: "rhel"
-            os-version: "9.4"
             rocm-version: "6.3"
           - os-distro: "rhel"
             os-version: "9.4"
             rocm-version: "6.4"
           # RHEL 9.5
-          - os-distro: "rhel"
-            os-version: "9.5"
-            rocm-version: "0.0"
           - os-distro: "rhel"
             os-version: "9.5"
             rocm-version: "6.3"
@@ -134,15 +113,9 @@ jobs:
             .github
           submodules: recursive
 
-      - name: Configure ROCm Version
-        if: ${{ matrix.rocm-version == 0 }}
+      - name: Configure Build Arguments
         run: |
-          echo "CI_SCRIPT_ARGS=--core +python" >> $GITHUB_ENV
-
-      - name: Configure ROCm Version
-        if: ${{ matrix.rocm-version > 0 }}
-        run: |
-          echo "CI_SCRIPT_ARGS=--rocm +python" >> $GITHUB_ENV
+          echo "CI_SCRIPT_ARGS=--base +python" >> $GITHUB_ENV
 
       - name: Configure Generators
         run: |
