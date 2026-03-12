@@ -67,8 +67,11 @@ output_config::parse_env()
     annotate_kfd   = common::get_env("ROCPROF_ANNOTATE_KFD", false);
     annotate_pmc   = common::get_env("ROCPROF_ANNOTATE_PMC", false);
 
-    // Ensure %pid% is in the output pattern for multi-process support
-    if(output_file.find("%pid%") == std::string::npos)
+    // Ensure PID token is in the output pattern for multi-process support.
+    // Treat "%pid%", "{pid}", and "%p" as equivalent forms.
+    if(output_file.find("%pid%") == std::string::npos &&
+       output_file.find("{pid}") == std::string::npos &&
+       output_file.find("%p") == std::string::npos)
     {
         output_file += "_%pid%";
     }
