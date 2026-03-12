@@ -122,9 +122,13 @@ function(CheckRejectedArchs OFFLOAD_ARCH_STR_LOCAL)
   endforeach()   # OFFLOAD_ARCH_LIST
 endfunction()  # CheckAcceptedArchs
 
+string(TOUPPER "${CMAKE_BUILD_TYPE}" _HIP_BUILD_TYPE_UPPER)
+separate_arguments(HIP_DEVICE_BUILD_FLAGS_NO_ARCH NATIVE_COMMAND
+  "${CMAKE_HIP_FLAGS} ${CMAKE_HIP_FLAGS_${_HIP_BUILD_TYPE_UPPER}}")
+list(FILTER HIP_DEVICE_BUILD_FLAGS_NO_ARCH EXCLUDE REGEX "--offload-arch=")
 if (HIP_PLATFORM MATCHES "amd")
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/tex_ref_get_module.code
-                   COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_LIST} -Wno-deprecated-declarations
+                   COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} --cuda-device-only -Wno-deprecated-declarations
                    -x hip ${CMAKE_CURRENT_SOURCE_DIR}/tex_ref_get_module.cc
                    -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
                    -o tex_ref_get_module.code

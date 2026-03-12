@@ -65,7 +65,7 @@ static __global__ void copy_ker_func(int* a, int* b, size_t N) {
 /**
  * Scenario 1: Functional scenario (See description Above)
  */
-TEST_CASE("Unit_hipGraphExecEventRecordNodeSetEvent_Functional") {
+TEST_CASE(Unit_hipGraphExecEventRecordNodeSetEvent_Functional) {
   constexpr size_t gridSize = 512;
   constexpr size_t blockSize = 512;
   constexpr size_t N = gridSize * blockSize;
@@ -162,7 +162,7 @@ TEST_CASE("Unit_hipGraphExecEventRecordNodeSetEvent_Functional") {
  * Scenario 2: This test verifies that changes to executable graph does
  * not impact the original graph.
  */
-TEST_CASE("Unit_hipGraphExecEventRecordNodeSetEvent_VerifyEventNotChanged") {
+TEST_CASE(Unit_hipGraphExecEventRecordNodeSetEvent_VerifyEventNotChanged) {
   hipGraph_t graph;
   HIP_CHECK(hipGraphCreate(&graph, 0));
   hipEvent_t event1, event2, event_out;
@@ -187,8 +187,7 @@ TEST_CASE("Unit_hipGraphExecEventRecordNodeSetEvent_VerifyEventNotChanged") {
  * Scenario 3: This test verifies event in node of the executable graph can be changed to event on
  * different device
  */
-TEST_CASE("Unit_hipGraphExecEventRecordNodeSetEvent_Positive_DifferentDevices",
-          "[multigpu]") {
+TEST_CASE(Unit_hipGraphExecEventRecordNodeSetEvent_Positive_DifferentDevices) {
   const auto device_count = HipTest::getDeviceCount();
   if (device_count < 2) {
     HipTest::HIP_SKIP_TEST("Skipping because devices < 2");
@@ -228,7 +227,7 @@ TEST_CASE("Unit_hipGraphExecEventRecordNodeSetEvent_Positive_DifferentDevices",
 /**
  * Scenario 4: Negative Parameter Tests
  */
-TEST_CASE("Unit_hipGraphExecEventRecordNodeSetEvent_Negative") {
+TEST_CASE(Unit_hipGraphExecEventRecordNodeSetEvent_Negative) {
   hipGraph_t graph;
   HIP_CHECK(hipGraphCreate(&graph, 0));
   hipEvent_t event1, event2;

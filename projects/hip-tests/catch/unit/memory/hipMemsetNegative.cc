@@ -54,7 +54,7 @@ inline void testHipMemset3DApis(hipPitchedPtr& pitchedDevPtr, int value, const h
   HIP_CHECK_ERROR(hipMemset3DAsync(pitchedDevPtr, value, extent, nullStream), expectedReturn);
 }
 
-TEST_CASE("Unit_hipMemset_Negative_InvalidPtr") {
+TEST_CASE(Unit_hipMemset_Negative_InvalidPtr) {
   void* dst;
 
   SECTION("Uninitialized Dst") {}
@@ -70,7 +70,7 @@ TEST_CASE("Unit_hipMemset_Negative_InvalidPtr") {
 }
 
 
-TEST_CASE("Unit_hipMemset_Negative_OutOfBoundsSize") {
+TEST_CASE(Unit_hipMemset_Negative_OutOfBoundsSize) {
 #if !HT_AMD
   void* dst;
   constexpr size_t outOfBoundsSize{width + 1};
@@ -81,7 +81,7 @@ TEST_CASE("Unit_hipMemset_Negative_OutOfBoundsSize") {
 #endif
 }
 
-TEST_CASE("Unit_hipMemset_Negative_OutOfBoundsPtr") {
+TEST_CASE(Unit_hipMemset_Negative_OutOfBoundsPtr) {
   void* dst;
   HIP_CHECK(hipMalloc(&dst, width));
   void* outOfBoundsPtr{reinterpret_cast<char*>(dst) + width + 1};
@@ -89,7 +89,7 @@ TEST_CASE("Unit_hipMemset_Negative_OutOfBoundsPtr") {
   HIP_CHECK(hipFree(dst));
 }
 
-TEST_CASE("Unit_hipMemset2D_Negative_InvalidPtr") {
+TEST_CASE(Unit_hipMemset2D_Negative_InvalidPtr) {
   CHECK_IMAGE_SUPPORT
 
   void* dst;
@@ -109,7 +109,7 @@ TEST_CASE("Unit_hipMemset2D_Negative_InvalidPtr") {
   HIP_CHECK(hipFree(A_d));
 }
 
-TEST_CASE("Unit_hipMemset2D_Negative_InvalidSizes") {
+TEST_CASE(Unit_hipMemset2D_Negative_InvalidSizes) {
   CHECK_IMAGE_SUPPORT
 
   void* dst;
@@ -135,7 +135,7 @@ TEST_CASE("Unit_hipMemset2D_Negative_InvalidSizes") {
   HIP_CHECK(hipFree(dst));
 }
 
-TEST_CASE("Unit_hipMemset2D_Negative_OutOfBoundsPtr") {
+TEST_CASE(Unit_hipMemset2D_Negative_OutOfBoundsPtr) {
   CHECK_IMAGE_SUPPORT
 
   void* dst;
@@ -148,7 +148,7 @@ TEST_CASE("Unit_hipMemset2D_Negative_OutOfBoundsPtr") {
 }
 
 
-TEST_CASE("Unit_hipMemset3D_Negative_InvalidPtr") {
+TEST_CASE(Unit_hipMemset3D_Negative_InvalidPtr) {
   CHECK_IMAGE_SUPPORT
 
   hipPitchedPtr pitchedDevPtr;
@@ -159,7 +159,7 @@ TEST_CASE("Unit_hipMemset3D_Negative_InvalidPtr") {
   testHipMemset3DApis(pitchedDevPtr, memsetVal, validExtent);
 }
 
-TEST_CASE("Unit_hipMemset3D_Negative_ModifiedPtr") {
+TEST_CASE(Unit_hipMemset3D_Negative_ModifiedPtr) {
   CHECK_IMAGE_SUPPORT
 
   hipPitchedPtr pitchedDevPtr;
@@ -182,7 +182,7 @@ TEST_CASE("Unit_hipMemset3D_Negative_ModifiedPtr") {
   HIP_CHECK(hipFree(allocatedMemory));
 }
 
-TEST_CASE("Unit_hipMemset3D_Negative_InvalidSizes") {
+TEST_CASE(Unit_hipMemset3D_Negative_InvalidSizes) {
   CHECK_IMAGE_SUPPORT
 
   hipPitchedPtr pitchedDevPtr;
@@ -210,7 +210,7 @@ TEST_CASE("Unit_hipMemset3D_Negative_InvalidSizes") {
   HIP_CHECK(hipFree(pitchedDevPtr.ptr));
 }
 
-TEST_CASE("Unit_hipMemset3D_Negative_OutOfBounds") {
+TEST_CASE(Unit_hipMemset3D_Negative_OutOfBounds) {
   CHECK_IMAGE_SUPPORT
 
   hipPitchedPtr pitchedDevPtr;

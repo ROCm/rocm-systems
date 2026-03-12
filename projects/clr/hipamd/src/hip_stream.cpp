@@ -33,7 +33,6 @@ Stream::Stream(hip::Device* dev, Priority p, unsigned int f, bool null_stream,
                const std::vector<uint32_t>& cuMask, hipStreamCaptureStatus captureStatus)
     : amd::HostQueue(*dev->asContext(), *dev->devices()[0], 0, amd::CommandQueue::RealTimeDisabled,
                      convertToQueuePriority(p), cuMask, null_stream),
-      lock_("Stream Callback lock"),
       device_(dev),
       priority_(p),
       flags_(f),
