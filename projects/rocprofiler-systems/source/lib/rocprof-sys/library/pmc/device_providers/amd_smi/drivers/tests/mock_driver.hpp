@@ -56,11 +56,11 @@ public:
                  amdsmi_gpu_metrics_t*   metrics));
 
     // SDMA-specific methods (requires AMD SMI >= 26.3)
-#    if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
+#if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
     MOCK_METHOD(amdsmi_status_t, get_gpu_process_list,
                 (amdsmi_processor_handle processor_handle, uint32_t* max_processes,
                  amdsmi_proc_info_t* list));
-#    endif
+#endif
 
     // NIC-specific methods
     MOCK_METHOD(amdsmi_status_t, get_nic_asic_info,
@@ -128,7 +128,6 @@ struct mock_driver_factory
 
 /// Global mock driver instance shared across tests
 inline std::shared_ptr<mock_driver> mock_driver_factory::s_mock_driver = nullptr;
-
 
 }  // namespace testing
 }  // namespace amd_smi

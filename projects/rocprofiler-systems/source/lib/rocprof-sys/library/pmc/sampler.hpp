@@ -42,12 +42,12 @@ postfork_parent_reinit();
 }  // namespace pmc
 }  // namespace rocprofsys
 
-#if !defined(ROCPROFSYS_EXTERN_COMPONENTS) ||                                              \
+#if !defined(ROCPROFSYS_EXTERN_COMPONENTS) ||                                            \
     (defined(ROCPROFSYS_EXTERN_COMPONENTS) && ROCPROFSYS_EXTERN_COMPONENTS > 0)
 
-#        include <timemory/components/base.hpp>
-#        include <timemory/components/data_tracker/components.hpp>
-#        include <timemory/operations.hpp>
+#    include <timemory/components/base.hpp>
+#    include <timemory/components/data_tracker/components.hpp>
+#    include <timemory/operations.hpp>
 
 ROCPROFSYS_DECLARE_EXTERN_COMPONENT(
     TIMEMORY_ESC(data_tracker<double, rocprofsys::component::backtrace_gpu_busy_gfx>),

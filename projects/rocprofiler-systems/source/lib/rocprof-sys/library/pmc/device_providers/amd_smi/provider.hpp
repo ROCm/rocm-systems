@@ -230,7 +230,6 @@ struct provider_factory
     static std::shared_ptr<provider_t> create() { return std::make_shared<provider_t>(); }
 };
 
-
 }  // namespace amd_smi
 }  // namespace device_providers
 }  // namespace pmc

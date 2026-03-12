@@ -155,14 +155,14 @@ struct driver
      *
      * @note Requires AMD SMI >= 26.3. Guarded by AMD_SMI_SDMA_SUPPORTED.
      */
-#    if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
+#if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
     static amdsmi_status_t get_gpu_process_list(amdsmi_processor_handle processor_handle,
                                                 uint32_t*               max_processes,
                                                 amdsmi_proc_info_t*     list)
     {
         return amdsmi_get_gpu_process_list(processor_handle, max_processes, list);
     }
-#    endif
+#endif
 
     /**
      * @brief Get NIC ASIC information including vendor and product names.
@@ -237,7 +237,6 @@ struct driver_factory
         return std::make_shared<driver_t>();
     }
 };
-
 
 }  // namespace amd_smi
 }  // namespace drivers
