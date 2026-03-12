@@ -38,7 +38,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: ad524887d223cbd04d6b423691958fe86b589944 # 2026-03-06 commit
+          ref: 37007c3e526156203fa8a4fab38b59415264d4b1 # 2026-03-06 commit
 
       - name: Install python deps
         run: |
@@ -81,11 +81,8 @@ jobs:
         run: |
           python TheRock/build_tools/github_actions/build_configure.py
 
-      - name: Build therock-dist
-        run: cmake --build TheRock/build --target therock-dist
-
-      - name: Build therock-archives
-        run: cmake --build TheRock/build --target therock-archives
+      - name: Build therock-archives and therock-dist
+        run: cmake --build TheRock/build --target therock-archives therock-dist -- -k 0
 
       - name: Report
         if: ${{ !cancelled() }}

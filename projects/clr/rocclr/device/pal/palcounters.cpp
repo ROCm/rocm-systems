@@ -114,7 +114,7 @@ PalCounterReference* PalCounterReference::Create(VirtualGPU& gpu) {
 PalCounterReference::~PalCounterReference() {
   // The counter object is always associated with a particular queue,
   // so we have to lock just this queue
-  amd::ScopedLock lock(gpu_.execution());
+  std::scoped_lock lock(gpu_.execution());
 
   delete layout_;
   delete memory_;

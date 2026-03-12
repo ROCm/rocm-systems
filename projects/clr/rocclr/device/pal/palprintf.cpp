@@ -247,7 +247,7 @@ static constexpr char Separator[] = ",\0";
 size_t PrintfDbg::outputArgument(const std::string& fmt, bool printFloat, size_t size,
                                  const void* argument) const {
   // Serialize the output to the screen
-  amd::ScopedLock k(dev().lockAsyncOps());
+  std::scoped_lock k(dev().lockAsyncOps());
 
   size_t copiedBytes = size;
   // Print the string argument, using standard PrintfDbg()

@@ -45,7 +45,7 @@ __global__ void run_printf() { printf("Hello World"); }
  * ------------------------
  * - HIP_VERSION >= 5.6
  */
-TEST_CASE("Unit_kernel_ChkPrintf", "[multigpu]") {
+TEST_CASE(Unit_kernel_ChkPrintf) {
   int device_count = 0;
   HIP_CHECK(hipGetDeviceCount(&device_count));
   CaptureStream capture;

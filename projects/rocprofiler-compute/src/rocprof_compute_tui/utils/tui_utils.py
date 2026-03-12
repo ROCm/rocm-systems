@@ -126,7 +126,12 @@ class Logger:
 def get_top_kernels_and_dispatch_ids(
     runs: dict[str, Any],
 ) -> Optional[list[dict[Hashable, Any]]]:
-    """Get top kernels with aggregated metrics sorted by percentage."""
+    """
+    Get top kernels merged with dispatch IDs.
+
+    Returns a list of records, each containing kernel info and a unique key
+    that combines kernel name and dispatch ID for looking up per-dispatch data.
+    """
     if not runs:
         return None
 
@@ -135,12 +140,25 @@ def get_top_kernels_and_dispatch_ids(
         return None
 
     top_kernel_df = base_run.dfs.get(1)
+    dispatch_id_df = base_run.dfs.get(2)
 
-    if top_kernel_df is None or top_kernel_df.empty:
+    if top_kernel_df is None or dispatch_id_df is None:
         return None
 
-    sorted_df = top_kernel_df.sort_values("Pct", ascending=False)
-    return sorted_df.to_dict("records")
+    merged_df = pd.merge(
+        top_kernel_df, dispatch_id_df, on="Kernel_Name", how="outer"
+    ).sort_values("Pct", ascending=False)
+
+    merged_df = merged_df.drop(columns=["Count", "GPU_ID"])
+
+    # Add unique key combining kernel name and dispatch ID for per-dispatch lookups
+    merged_df["Unique_Key"] = (
+        merged_df["Kernel_Name"].astype(str)
+        + "::"
+        + merged_df["Dispatch_ID"].astype(int).astype(str)
+    )
+
+    return merged_df.to_dict("records")
 
 
 def process_panels_to_dataframes(

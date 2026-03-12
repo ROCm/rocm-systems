@@ -63,7 +63,7 @@ static bool verify(const int* C_d, const int* A_d) {
   return true;
 }
 
-TEST_CASE("Unit_hipMemFaultStackAllocation_Check") {
+TEST_CASE(Unit_hipMemFaultStackAllocation_Check) {
   hipError_t ret;
   int *A_d, *C_d;
   const size_t Nbytes = N * sizeof(int);

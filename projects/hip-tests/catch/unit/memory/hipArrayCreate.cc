@@ -73,7 +73,7 @@ static void ArrayCreate_DiffSizes(int gpu) {
 }
 
 /* This testcase verifies hipArrayCreate API for small and big chunks data*/
-TEST_CASE("Unit_hipArrayCreate_DiffSizes") {
+TEST_CASE(Unit_hipArrayCreate_DiffSizes) {
   CHECK_IMAGE_SUPPORT
 
   ArrayCreate_DiffSizes(0);
@@ -85,7 +85,7 @@ This testcase verifies the hipArrayCreate API in multithreaded
 scenario by launching threads in parallel on multiple GPUs
 and verifies the hipArrayCreate API with small and big chunks data
 */
-TEST_CASE("Unit_hipArrayCreate_MultiThread", "[multigpu]") {
+TEST_CASE(Unit_hipArrayCreate_MultiThread) {
   CHECK_IMAGE_SUPPORT
 
   std::vector<std::thread> threadlist;
@@ -200,7 +200,7 @@ void testArrayAsTexture(hipArray_t array, const size_t width, const size_t heigh
 
 // Selection of types chosen since trying all types would be slow to compile
 // Test the happy path of the hipArrayCreate
-TEMPLATE_TEST_CASE("Unit_hipArrayCreate_happy", "", uint, int, int4, ushort, short2, char, uchar2,
+TEMPLATE_TEST_CASE(Unit_hipArrayCreate_happy, uint, int, int4, ushort, short2, char, uchar2,
                    char4, float, float2, float4) {
   CHECK_IMAGE_SUPPORT
 
@@ -225,7 +225,7 @@ TEMPLATE_TEST_CASE("Unit_hipArrayCreate_happy", "", uint, int, int4, ushort, sho
 
 
 // Only widths and Heights up to the maxTexture size is supported
-TEMPLATE_TEST_CASE("Unit_hipArrayCreate_maxTexture", "", uint, int, int4, ushort, short2, char,
+TEMPLATE_TEST_CASE(Unit_hipArrayCreate_maxTexture, uint, int, int4, ushort, short2, char,
                    uchar2, char4, float, float2, float4) {
   CHECK_IMAGE_SUPPORT
 
@@ -286,7 +286,7 @@ TEMPLATE_TEST_CASE("Unit_hipArrayCreate_maxTexture", "", uint, int, int4, ushort
 }
 
 // zero-width array is not supported
-TEST_CASE("Unit_hipArrayCreate_ZeroWidth") {
+TEST_CASE(Unit_hipArrayCreate_ZeroWidth) {
   CHECK_IMAGE_SUPPORT
 
   DriverContext ctx;
@@ -302,7 +302,7 @@ TEST_CASE("Unit_hipArrayCreate_ZeroWidth") {
 }
 
 // HipArrayCreate will return an error when nullptr is used as the array argument
-TEST_CASE("Unit_hipArrayCreate_Nullptr") {
+TEST_CASE(Unit_hipArrayCreate_Nullptr) {
   CHECK_IMAGE_SUPPORT
 
   DriverContext ctx;
@@ -322,7 +322,7 @@ TEST_CASE("Unit_hipArrayCreate_Nullptr") {
 }
 
 // Only elements with 1,2, or 4 channels is supported
-TEST_CASE("Unit_hipArrayCreate_BadNumberChannelElement") {
+TEST_CASE(Unit_hipArrayCreate_BadNumberChannelElement) {
   CHECK_IMAGE_SUPPORT
 
   DriverContext ctx;
@@ -340,7 +340,7 @@ TEST_CASE("Unit_hipArrayCreate_BadNumberChannelElement") {
 }
 
 // Only certain channel formats are acceptable.
-TEST_CASE("Unit_hipArrayCreate_BadChannelFormat") {
+TEST_CASE(Unit_hipArrayCreate_BadChannelFormat) {
   CHECK_IMAGE_SUPPORT
 
   DriverContext ctx;

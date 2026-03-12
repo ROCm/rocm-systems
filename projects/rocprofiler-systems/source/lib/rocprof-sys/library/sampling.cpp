@@ -1805,11 +1805,8 @@ post_process_timemory(int64_t _tid, const std::vector<timer_sampling_data>& _tim
 }
 
 void
-cache_backtrace_metrics(
-    [[maybe_unused]] int64_t                                 _tid,
-    [[maybe_unused]] const std::vector<timer_sampling_data>& _timer_data)
+cache_backtrace_metrics(int64_t _tid, const std::vector<timer_sampling_data>& _timer_data)
 {
-#if ROCPROFSYS_USE_ROCM > 0
     auto _valid_metrics = backtrace_metrics::valid_array_t{};
 
     for(const auto& itr : _timer_data)
@@ -1827,19 +1824,15 @@ cache_backtrace_metrics(
         for(const auto& itr : _timer_data)
             itr.m_metrics.cache_backtrace_data(_tid, 0.5 * (itr.m_beg + itr.m_end));
     }
-#endif
 }
 
 void
-store_sampling_data_in_cache(
-    [[maybe_unused]] int64_t                                    _tid,
-    [[maybe_unused]] const std::vector<timer_sampling_data>&    _timer_data,
-    [[maybe_unused]] const std::vector<overflow_sampling_data>& _overflow_data)
+store_sampling_data_in_cache(int64_t                                    _tid,
+                             const std::vector<timer_sampling_data>&    _timer_data,
+                             const std::vector<overflow_sampling_data>& _overflow_data)
 {
-#if ROCPROFSYS_USE_ROCM > 0
     cache_sampling_data(_tid, _timer_data, _overflow_data);
     cache_backtrace_metrics(_tid, _timer_data);
-#endif
 }
 
 struct sampling_initialization

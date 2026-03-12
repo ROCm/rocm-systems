@@ -87,15 +87,30 @@ class tui_analysis(OmniAnalyze_Base):
             workload=workload, dir_path=self.path, args=self.args
         )
 
-        parser.eval_metric(
-            workload.dfs,
-            workload.dfs_type,
-            workload.sys_info.iloc[0],
-            workload.roofline_peaks,
-            workload.raw_pmc,
-            self.args.debug,
-            self._profiling_config,
-        )
+        # 2. Generate kernel-specific dataframes (per-dispatch)
+        self.raw_dfs = {}
+        for idx in workload.raw_pmc.index:
+            kernel_df = workload.raw_pmc.loc[[idx]]
+            kernel_name = str(kernel_df.pmc_perf["Kernel_Name"].loc[idx])
+            dispatch_id = int(kernel_df.pmc_perf["Dispatch_ID"].loc[idx])
+
+            # Create unique key: "kernel_name::dispatch_id"
+            unique_key = f"{kernel_name}::{dispatch_id}"
+
+            kernel_dfs = copy.deepcopy(workload.dfs)
+
+            # Evaluate metrics for this dispatch
+            parser.eval_metric(
+                kernel_dfs,
+                workload.dfs_type,
+                workload.sys_info.iloc[0],
+                workload.roofline_peaks,
+                kernel_dfs,
+                self.args.debug,
+                self._profiling_config,
+            )
+
+            self.raw_dfs[unique_key] = kernel_dfs
 
     def initalize_runs(
         self, normalization_filter: Optional[str] = None

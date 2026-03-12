@@ -10,6 +10,8 @@
    * `rocshmem_barrier_wave`
    * `rocshmem_barrier_wg`
 * Added `ROCSHMEM_TEAM_WORLD` for the device code
+* Added new Enviroment variable:
+  * `OVERRIDE_NIC_FIRMWARE_CHECK`
 ### Changed
 * Use CQ collapsing for the Mellanox MLX5 GDA conduit
 

@@ -1818,45 +1818,11 @@ hsa_status_t HSA_API
  * @brief Type of memory copy operation within a batch.
  */
 typedef enum {
-  HSA_AMD_MEMORY_COPY_OP_LINEAR               = 0,  /**< Default: linear copy via copy engine */
-  HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST     = 1,  /**< Linear broadcast: single src -> multiple dsts */
-  HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP          = 2,  /**< Linear swap: exchange contents of src and dst */
-  HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC     = 3,  /**< Source address resolved via indirection */
-  HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_DST     = 4,  /**< Destination address resolved via indirection */
-  HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST  = 5,  /**< Both src and dst resolved via indirection */
+  HSA_AMD_MEMORY_COPY_OP_LINEAR           = 0,  /**< Default: linear copy via copy engine */
+  HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST = 1,  /**< Linear broadcast: single src -> multiple dsts via copy engine */
+  HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP      = 2,  /**< Linear swap: swap contents of src and dst via copy engine */
+  HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT  = 3,  /**< src/dst are pointers to pointers; actual addresses resolved dynamically */
 } hsa_amd_memory_copy_op_type_t;
-
-/**
- * @brief Wait comparison functions for copy operations.
- *
- * Maps to the SDMA WAIT_FUNCTION field. The SDMA engine polls
- * (*wait.addr & wait.mask) against wait.value using the specified
- * comparison before starting the copy.  Orthogonal to operation type:
- * any copy can optionally wait.
- */
-typedef enum {
-  HSA_AMD_MEMORY_COPY_WAIT_ALWAYS = 0,  /**< Always pass (no wait) */
-  HSA_AMD_MEMORY_COPY_WAIT_LT     = 1,  /**< Less than */
-  HSA_AMD_MEMORY_COPY_WAIT_LE     = 2,  /**< Less than or equal */
-  HSA_AMD_MEMORY_COPY_WAIT_EQ     = 3,  /**< Equal */
-  HSA_AMD_MEMORY_COPY_WAIT_NE     = 4,  /**< Not equal */
-  HSA_AMD_MEMORY_COPY_WAIT_GE     = 5,  /**< Greater than or equal */
-  HSA_AMD_MEMORY_COPY_WAIT_GT     = 6,  /**< Greater than */
-} hsa_amd_memory_copy_wait_function_t;
-
-/**
- * @brief Signal operations for copy completion notification.
- *
- * Maps to the SDMA SIGNAL_OPERATION field. After the copy completes,
- * the SDMA engine performs the specified atomic operation on signal.addr.
- * This is a raw GPU-side signal, separate from the HSA completion_signal.
- */
-typedef enum {
-  HSA_AMD_MEMORY_COPY_SIGNAL_NONE  = 0,   /**< No signal operation */
-  HSA_AMD_MEMORY_COPY_SIGNAL_WRITE = 1,   /**< 64b write: *addr = data */
-  HSA_AMD_MEMORY_COPY_SIGNAL_ADD   = 2,   /**< 64b add: *addr += data */
-  HSA_AMD_MEMORY_COPY_SIGNAL_SUB   = 3,   /**< 64b sub: *addr -= data */
-} hsa_amd_memory_copy_signal_op_t;
 
 /**
  * @brief Version of the hsa_amd_memory_copy_op_t structure.
@@ -1878,25 +1844,6 @@ typedef enum {
  *   traffic_class   -- QoS traffic class (0 = default/unspecified)
  *   reserved[]      -- must be zero
  *
- * Wait-before-copy (orthogonal, any operation type):
- *   wait.function   -- comparison function (hsa_amd_memory_copy_wait_function_t).
- *                      SDMA polls (*wait.addr & wait.mask) against wait.value using
- *                      this comparison before starting the copy.  ALWAYS (0) = no wait.
- *   wait.scope      -- coherency scope (hsa_fence_scope_t) for pre-copy memory reads:
- *                      wait address polling and indirect address resolution.
- *                      Must be 0 when function is ALWAYS and type is not INDIRECT_*.
- *   wait.addr       -- address to poll (NULL when function is ALWAYS)
- *   wait.value      -- reference value for the comparison
- *   wait.mask       -- AND mask applied to the polled value before comparison
- *
- * Signal-after-copy (orthogonal, any operation type):
- *   signal.operation -- signal operation (hsa_amd_memory_copy_signal_op_t).
- *                       NONE (0) = no signal.  This is a raw GPU-side atomic,
- *                       separate from the HSA completion_signal.
- *   signal.scope     -- coherency scope for the signal write (hsa_fence_scope_t)
- *   signal.addr      -- target address for the atomic (NULL when operation is NONE)
- *   signal.data      -- data value for the atomic operation
- *
  * Field usage per operation type:
  *
  * LINEAR (default):
@@ -1906,7 +1853,7 @@ typedef enum {
  *   num_dsts        -- must be 0
  *
  * LINEAR_BROADCAST (single source -> multiple destinations):
- *   src, src_agent    -- source pointer and agent (must be GPU)
+ *   src, src_agent    -- source pointer and agent
  *   dst_list          -- caller-owned array of num_dsts destination pointers
  *   dst_agent_list    -- caller-owned array of num_dsts destination agents
  *   size              -- copy size in bytes (same for every destination)
@@ -1919,23 +1866,9 @@ typedef enum {
  *   dst_size        -- size of the destination region in bytes
  *   num_dsts        -- must be 0
  *
- * LINEAR_INDIRECT_SRC (source address resolved via indirection):
- *   src             -- void** pointing to the actual source address
- *   dst             -- regular destination pointer
- *   wait.scope      -- hsa_fence_scope_t for indirect address reads
- *
- * LINEAR_INDIRECT_DST (destination address resolved via indirection):
- *   src             -- regular source pointer
- *   dst             -- void** pointing to the actual destination address
- *   wait.scope      -- hsa_fence_scope_t for indirect address reads
- *
- * LINEAR_INDIRECT_SRCDST (both addresses resolved via indirection):
- *   src             -- void** pointing to the actual source address
- *   dst             -- void** pointing to the actual destination address
- *   wait.scope      -- hsa_fence_scope_t for indirect address reads
- *
- * For all INDIRECT_* types:
- *   src_agent, dst_agent -- source and destination agents
+ * LINEAR_INDIRECT (pointers resolved at execution time):
+ *   src, src_agent  -- pointer to source address (void**)
+ *   dst, dst_agent  -- pointer to destination address (void**)
  *   size            -- copy size in bytes
  *   num_dsts        -- must be 0
  *
@@ -1944,13 +1877,13 @@ typedef enum {
  *   unused_size               -- must be 0 for non-SWAP operations
  */
 typedef struct hsa_amd_memory_copy_op_s {
-  uint16_t version;                       /**< Struct version. Must be HSA_AMD_MEMORY_COPY_OP_VERSION. */
-  uint16_t type;                          /**< Operation type (hsa_amd_memory_copy_op_type_t) */
-  uint16_t num_dsts;                      /**< BROADCAST: number of destinations; others: must be 0 */
-  uint16_t traffic_class;                 /**< QoS traffic class. 0 = default/unspecified. */
+  uint32_t version;                       /**< Struct version. Must be HSA_AMD_MEMORY_COPY_OP_VERSION. */
+  hsa_amd_memory_copy_op_type_t type;     /**< Operation type */
+  uint32_t num_dsts;                      /**< BROADCAST: number of destinations; others: must be 0 */
+  uint32_t traffic_class;                 /**< QoS traffic class. 0 = default/unspecified. */
   hsa_signal_t completion_signal;         /**< Completion signal for this operation */
   union {
-    void* src;                            /**< Source pointer (or void** for INDIRECT_SRC/SRCDST) */
+    void* src;                            /**< Source pointer */
     void** src_list;                      /**< Reserved for future use */
   };
   union {
@@ -1958,41 +1891,24 @@ typedef struct hsa_amd_memory_copy_op_s {
     hsa_agent_t* src_agent_list;          /**< Reserved for future use */
   };
   union {
-    hsa_agent_t dst_agent;                /**< Destination agent (single-dst types) */
+    hsa_agent_t dst_agent;                /**< LINEAR/SWAP/INDIRECT: destination agent */
     hsa_agent_t* dst_agent_list;          /**< BROADCAST: caller-owned array of num_dsts destination agents */
   };
   union {
-    void* dst;                            /**< Destination pointer (or void** for INDIRECT_DST/SRCDST) */
+    void* dst;                            /**< LINEAR/SWAP/INDIRECT: destination pointer */
     void** dst_list;                      /**< BROADCAST: caller-owned array of num_dsts destination pointers */
   };
   union {
     struct {
-      size_t size;                        /**< Copy size in bytes (non-SWAP types) */
-      size_t unused_size;                 /**< Must be 0 for non-SWAP types */
+      size_t size;                        /**< LINEAR/BROADCAST/INDIRECT: copy size in bytes */
+      size_t unused_size;                 /**< LINEAR/BROADCAST/INDIRECT: must be 0 */
     };
     struct {
       size_t src_size;                    /**< SWAP: source region size in bytes */
       size_t dst_size;                    /**< SWAP: destination region size in bytes */
     };
   };
-  /** Wait-before-copy. Set to {0} to disable. */
-  struct {
-    uint16_t function;                    /**< Comparison (hsa_amd_memory_copy_wait_function_t) */
-    uint16_t scope;                       /**< Scope (hsa_fence_scope_t) */
-    uint32_t reserved;                    /**< Must be 0 */
-    void*    addr;                        /**< Address to poll (NULL = no wait) */
-    uint64_t value;                       /**< Reference value for wait comparison */
-    uint64_t mask;                        /**< AND mask applied before comparison */
-  } wait;                                 /**< Wait-before-copy descriptor */
-  /** Signal-after-copy (raw GPU-side atomic, separate from completion_signal). Set to {0} to disable. */
-  struct {
-    uint16_t operation;                   /**< Signal op (hsa_amd_memory_copy_signal_op_t) */
-    uint16_t scope;                       /**< Scope for signal write (hsa_fence_scope_t) */
-    uint32_t reserved;                    /**< Must be 0 */
-    void*    addr;                        /**< Target address for atomic (NULL = no signal) */
-    uint64_t data;                        /**< Data value for the atomic operation */
-  } signal;                               /**< Signal-after-copy descriptor */
-  uint64_t reserved[1];                   /**< Reserved for future use. Must be zero. */
+  uint64_t reserved[3];                   /**< Reserved for future use. Must be zero. */
 } hsa_amd_memory_copy_op_t;
 
 /**

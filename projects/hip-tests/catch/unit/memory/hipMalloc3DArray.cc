@@ -66,7 +66,7 @@ static void Malloc3DArray_DiffSizes(int gpu) {
   }
 }
 
-TEST_CASE("Unit_hipMalloc3DArray_DiffSizes") {
+TEST_CASE(Unit_hipMalloc3DArray_DiffSizes) {
   CHECK_IMAGE_SUPPORT
 
   Malloc3DArray_DiffSizes(0);
@@ -78,7 +78,7 @@ This testcase verifies the hipMalloc3DArray API in multithreaded
 scenario by launching threads in parallel on multiple GPUs
 and verifies the hipMalloc3DArray API with small and big chunks data
 */
-TEST_CASE("Unit_hipMalloc3DArray_MultiThread", "[multigpu]") {
+TEST_CASE(Unit_hipMalloc3DArray_MultiThread) {
   CHECK_IMAGE_SUPPORT
 
   std::vector<std::thread> threadlist;
@@ -124,7 +124,7 @@ void checkArrayIsExpected(hipArray_t array, const hipChannelFormatDesc& expected
 }
 }  // namespace
 
-TEMPLATE_TEST_CASE("Unit_hipMalloc3DArray_happy", "", char, uchar2, uint2, int4, short4, float,
+TEMPLATE_TEST_CASE(Unit_hipMalloc3DArray_happy, char, uchar2, uint2, int4, short4, float,
                    float2, float4) {
   CHECK_IMAGE_SUPPORT
 
@@ -155,7 +155,7 @@ TEMPLATE_TEST_CASE("Unit_hipMalloc3DArray_happy", "", char, uchar2, uint2, int4,
   }
 }
 
-TEMPLATE_TEST_CASE("Unit_hipMalloc3DArray_MaxTexture", "", int, uint4, short, ushort2,
+TEMPLATE_TEST_CASE(Unit_hipMalloc3DArray_MaxTexture, int, uint4, short, ushort2,
                    unsigned char, float, float4) {
   CHECK_IMAGE_SUPPORT
 
@@ -248,7 +248,7 @@ hipExtent makeExtent(unsigned int flag, size_t s) {
 
 
 // Providing the array pointer as nullptr should return an error
-TEST_CASE("Unit_hipMalloc3DArray_Negative_NullArrayPtr") {
+TEST_CASE(Unit_hipMalloc3DArray_Negative_NullArrayPtr) {
   CHECK_IMAGE_SUPPORT
 
   hipChannelFormatDesc desc = hipCreateChannelDesc<float4>();
@@ -260,7 +260,7 @@ TEST_CASE("Unit_hipMalloc3DArray_Negative_NullArrayPtr") {
 }
 
 // Providing the description pointer as nullptr should return an error
-TEST_CASE("Unit_hipMalloc3DArray_Negative_NullDescPtr") {
+TEST_CASE(Unit_hipMalloc3DArray_Negative_NullDescPtr) {
   CHECK_IMAGE_SUPPORT
 
   constexpr size_t s = 6;  // 6 to keep cubemap happy
@@ -273,7 +273,7 @@ TEST_CASE("Unit_hipMalloc3DArray_Negative_NullDescPtr") {
 }
 
 // Zero width arrays are not allowed
-TEST_CASE("Unit_hipMalloc3DArray_Negative_ZeroWidth") {
+TEST_CASE(Unit_hipMalloc3DArray_Negative_ZeroWidth) {
   CHECK_IMAGE_SUPPORT
 
   constexpr size_t s = 6;  // 6 to keep cubemap happy
@@ -287,7 +287,7 @@ TEST_CASE("Unit_hipMalloc3DArray_Negative_ZeroWidth") {
 }
 
 // Zero height arrays are only allowed for 1D arrays and layered arrays
-TEST_CASE("Unit_hipMalloc3DArray_Negative_ZeroHeight") {
+TEST_CASE(Unit_hipMalloc3DArray_Negative_ZeroHeight) {
   CHECK_IMAGE_SUPPORT
 
   constexpr size_t s = 6;  // 6 to keep cubemap happy
@@ -305,7 +305,7 @@ TEST_CASE("Unit_hipMalloc3DArray_Negative_ZeroHeight") {
   }
 }
 
-TEST_CASE("Unit_hipMalloc3DArray_Negative_InvalidFlags") {
+TEST_CASE(Unit_hipMalloc3DArray_Negative_InvalidFlags) {
   CHECK_IMAGE_SUPPORT
 
   constexpr size_t s = 6;  // 6 to keep cubemap happy
@@ -342,7 +342,7 @@ void testInvalidDescription(hipChannelFormatDesc desc) {
   HIP_CHECK_ERROR(hipMalloc3DArray(&array, &desc, makeExtent(flag, s), flag), expectedError);
 }
 
-TEST_CASE("Unit_hipMalloc3DArray_Negative_InvalidFormat") {
+TEST_CASE(Unit_hipMalloc3DArray_Negative_InvalidFormat) {
   CHECK_IMAGE_SUPPORT
 
   hipChannelFormatDesc desc = hipCreateChannelDesc<float4>();
@@ -350,7 +350,7 @@ TEST_CASE("Unit_hipMalloc3DArray_Negative_InvalidFormat") {
   testInvalidDescription(desc);
 }
 
-TEST_CASE("Unit_hipMalloc3DArray_Negative_BadChannelLayout") {
+TEST_CASE(Unit_hipMalloc3DArray_Negative_BadChannelLayout) {
   CHECK_IMAGE_SUPPORT
 
   const int bits = GENERATE(8, 16, 32);
@@ -373,7 +373,7 @@ TEST_CASE("Unit_hipMalloc3DArray_Negative_BadChannelLayout") {
   testInvalidDescription(desc);
 }
 
-TEST_CASE("Unit_hipMalloc3DArray_Negative_8BitFloat") {
+TEST_CASE(Unit_hipMalloc3DArray_Negative_8BitFloat) {
   CHECK_IMAGE_SUPPORT
 
   hipChannelFormatDesc desc = GENERATE(hipCreateChannelDesc(8, 0, 0, 0, hipChannelFormatKindFloat),
@@ -383,7 +383,7 @@ TEST_CASE("Unit_hipMalloc3DArray_Negative_8BitFloat") {
   testInvalidDescription(desc);
 }
 
-TEST_CASE("Unit_hipMalloc3DArray_Negative_DifferentChannelSizes") {
+TEST_CASE(Unit_hipMalloc3DArray_Negative_DifferentChannelSizes) {
   CHECK_IMAGE_SUPPORT
 
   const int bitsX = GENERATE(8, 16, 32);
@@ -408,7 +408,7 @@ TEST_CASE("Unit_hipMalloc3DArray_Negative_DifferentChannelSizes") {
   testInvalidDescription(desc);
 }
 
-TEST_CASE("Unit_hipMalloc3DArray_Negative_BadChannelSize") {
+TEST_CASE(Unit_hipMalloc3DArray_Negative_BadChannelSize) {
   CHECK_IMAGE_SUPPORT
 
   const int badBits = GENERATE(-1, 0, 10, 100);
@@ -423,7 +423,7 @@ TEST_CASE("Unit_hipMalloc3DArray_Negative_BadChannelSize") {
 
 
 // hipMalloc3DArray should handle the max numeric value gracefully.
-TEST_CASE("Unit_hipMalloc3DArray_Negative_NumericLimit") {
+TEST_CASE(Unit_hipMalloc3DArray_Negative_NumericLimit) {
   CHECK_IMAGE_SUPPORT
 
   hipArray_t arrayPtr;
@@ -436,7 +436,7 @@ TEST_CASE("Unit_hipMalloc3DArray_Negative_NumericLimit") {
 }
 
 // texture gather arrays are only allowed to be 2D
-TEMPLATE_TEST_CASE("Unit_hipMalloc3DArray_Negative_Non2DTextureGather", "", char, uchar2, short4,
+TEMPLATE_TEST_CASE(Unit_hipMalloc3DArray_Negative_Non2DTextureGather, char, uchar2, short4,
                    float2, float4) {
 #if HT_AMD
   HipTest::HIP_SKIP_TEST("Texture Gather arrays not supported using AMD backend");

@@ -45,7 +45,7 @@ static void fillDataTransfer2Dev(int* hostBuf, size_t len) {
  * ------------------------
  *    - HIP_VERSION >= 6.1
  */
-TEST_CASE("Unit_hipMemcpyDeviceToDeviceNoCU_SingleStream") {
+TEST_CASE(Unit_hipMemcpyDeviceToDeviceNoCU_SingleStream) {
   auto testAsync = GENERATE(0, 1);
   auto isDefaultStrm = GENERATE(0, 1);
   constexpr int N = 1 << 18;
@@ -109,7 +109,7 @@ TEST_CASE("Unit_hipMemcpyDeviceToDeviceNoCU_SingleStream") {
  * ------------------------
  *    - HIP_VERSION >= 6.1
  */
-TEST_CASE("Unit_hipMemcpyDeviceToDeviceNoCU_WithCU_NoCU_Comb_SingleStrm") {
+TEST_CASE(Unit_hipMemcpyDeviceToDeviceNoCU_WithCU_NoCU_Comb_SingleStrm) {
   constexpr int N = 1 << 18;
   size_t buffer_size = N * sizeof(int);
   // Allocate device resources
@@ -170,7 +170,7 @@ TEST_CASE("Unit_hipMemcpyDeviceToDeviceNoCU_WithCU_NoCU_Comb_SingleStrm") {
  * ------------------------
  *    - HIP_VERSION >= 6.1
  */
-TEST_CASE("Unit_hipMemcpyDeviceToDeviceNoCU_NoCU_MulStrm") {
+TEST_CASE(Unit_hipMemcpyDeviceToDeviceNoCU_NoCU_MulStrm) {
   constexpr int N = 1 << 18;
   size_t buffer_size = N * sizeof(int);
   // Allocate device resources
@@ -229,7 +229,7 @@ TEST_CASE("Unit_hipMemcpyDeviceToDeviceNoCU_NoCU_MulStrm") {
  * ------------------------
  *    - HIP_VERSION >= 6.1
  */
-TEST_CASE("Unit_hipMemcpyDeviceToDeviceNoCU_Memcpy_Kernel_InParallel") {
+TEST_CASE(Unit_hipMemcpyDeviceToDeviceNoCU_Memcpy_Kernel_InParallel) {
   constexpr int N = 1 << 24;
   size_t buffer_size = N * sizeof(int);
   constexpr unsigned threadsPerBlock = 1024;

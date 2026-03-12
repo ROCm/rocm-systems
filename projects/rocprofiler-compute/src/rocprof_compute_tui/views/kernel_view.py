@@ -113,12 +113,15 @@ class KernelView(Container):
             top_container.mount(Label("No kernels available", classes="placeholder"))
             return
 
+        # Build and mount components
         self.new_perf_metric()
-
-        keys = list(self.top_kernel_to_df_list[0].keys())
+        # build header section
+        # Filter out Unique_Key from visible columns (internal identifier only)
+        keys = [k for k in self.top_kernel_to_df_list[0].keys() if k != "Unique_Key"]
         header_text = " | ".join(f"{key:25}" for key in keys)
         top_container.mount(Label(header_text, classes="kernel-table-header"))
 
+        # build selector section
         radio_buttons = []
         for i, kernel in enumerate(self.top_kernel_to_df_list):
             row_text = " | ".join(
@@ -129,7 +132,11 @@ class KernelView(Container):
             radio_buttons.append(button)
         top_container.mount(RadioSet(*radio_buttons))
 
-        self.current_selection = self.top_kernel_to_df_list[0]["Kernel_Name"]
+        # build analysis section
+        # Use Unique_Key for per-dispatch selection (falls back to Kernel_Name)
+        self.current_selection = self.top_kernel_to_df_list[0].get(
+            "Unique_Key", self.top_kernel_to_df_list[0]["Kernel_Name"]
+        )
         self.update_bottom_content()
 
     def update_view(self, message: str, log_level: str) -> None:
@@ -167,7 +174,10 @@ class KernelView(Container):
 
         kernel_data = getattr(event.pressed, "kernel_data", None)
         if kernel_data:
-            self.current_selection = kernel_data.get("Kernel_Name")
+            # Use Unique_Key for per-dispatch selection (falls back to Kernel_Name)
+            self.current_selection = kernel_data.get(
+                "Unique_Key", kernel_data.get("Kernel_Name")
+            )
             self.update_bottom_content()
 
     def update_bottom_content(self) -> None:
