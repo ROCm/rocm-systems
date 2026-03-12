@@ -26,8 +26,10 @@ THE SOFTWARE.
 #include <string>
 #include <iostream>
 #include <algorithm>
+#include <chrono>
+#include <ctime>
 
-#define TOSTR(X) std::to_string(static_cast<int>(X))
+#define TOSTR(X) std::to_string(X)
 #define STR(X) std::string(X)
 
 #if DBGINFO
@@ -51,16 +53,9 @@ enum RocDecLogLevel {
     kRocDecLogLevelMax       = 4
 };
 
-// Use full function signature so member-function logs show class name (e.g. RocDecoder::InitializeDecoder)
-#if defined(__GNUC__) || defined(__clang__)
-#define ROCDEC_FUNC_DISPLAY __PRETTY_FUNCTION__
-#elif defined(_MSC_VER)
-#define ROCDEC_FUNC_DISPLAY __FUNCSIG__
-#else
-#define ROCDEC_FUNC_DISPLAY __func__
-#endif
-#define MakeMsg(msg) STR(ROCDEC_FUNC_DISPLAY) + ", Line " + TOSTR(__LINE__) + ": " + msg
-#define MakeFuncMsg(msg) STR(ROCDEC_FUNC_DISPLAY) + ": " + msg
+#define GET_TIME_NS() ([]() -> long long { struct timespec ts_; clock_gettime(CLOCK_MONOTONIC, &ts_); return static_cast<long long>(ts_.tv_sec) * 1000000000LL + ts_.tv_nsec; }())
+#define __FILENAME__ (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__)
+#define MakeMsg(msg) STR(__FILENAME__) + ":" + TOSTR(__LINE__) + ": " + TOSTR(GET_TIME_NS() / 1000ULL) + STR(" us: ") + STR(__func__) + "(): " + msg
 #define OutputMsg(msg) std::cout << msg << std::endl
 #define OutputErrMsg(msg) std::cerr << msg << std::endl
 
@@ -84,38 +79,37 @@ public:
 
     void CriticalLog(std::string msg) {
         if (log_level_ >= kRocDecLogCritical) {
-            OutputErrMsg("[Critical] " + msg);
+            OutputErrMsg("[" + TOSTR(kRocDecLogCritical) + ", Critical] "  + msg);
         }
     };
 
     void ErrorLog(std::string msg) {
         if (log_level_ >= kRocDecLogError) {
-            OutputErrMsg("[Error] " + msg);
+            OutputErrMsg("[" + TOSTR(kRocDecLogError) + ", Error] "  + msg);
         }
     };
 
     void WarningLog(std::string msg) {
         if (log_level_ >= kRocDecLogWarning) {
-            OutputErrMsg("[Warning] " + msg);
+            OutputErrMsg("[" + TOSTR(kRocDecLogWarning) + ", Warning] "  + msg);
         }
     };
 
     void InfoLog(std::string msg) {
         if (log_level_ >= kRocDecLogInfo) {
-            OutputMsg("[Info] " + msg);
+            OutputErrMsg("[" + TOSTR(kRocDecLogInfo) + ", Info] "  + msg);
         }
     };
 
     void DebugLog(std::string msg) {
         if (log_level_ >= kRocDecLogDebug) {
-            OutputMsg("[Debug] " + msg);
+            OutputErrMsg("[" + TOSTR(kRocDecLogDebug) + ", Debug] "  + msg);
         }
     };
 
-    #define FunctionEntryLog(logger) if (logger.log_level_ >= kRocDecLogInfo) { OutputMsg("[Info] " + MakeFuncMsg("") + " entry ..."); }
+    #define FunctionEntryLog(logger) if (logger.log_level_ >= kRocDecLogInfo) { OutputMsg("[" + TOSTR(kRocDecLogInfo) + ", Info] " + MakeMsg("") + " entry ..."); }
+    #define FunctionExitLog(logger) if (logger.log_level_ >= kRocDecLogInfo) { OutputMsg("[" + TOSTR(kRocDecLogInfo) + ", Info] " + MakeMsg("") + " exit ..."); }
     
-    #define FunctionExitLog(logger) if (logger.log_level_ >= kRocDecLogInfo) { OutputMsg("[Info] " + MakeFuncMsg("") + " exit ..."); }
-
     int log_level_ = kRocDecLogCritical;
 };
 
