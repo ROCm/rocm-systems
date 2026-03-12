@@ -32,6 +32,7 @@ from textual.widgets import Label, RadioButton, RadioSet
 
 from config import rocprof_compute_home
 from rocprof_compute_tui.widgets.collapsibles import build_all_sections
+from utils.utils import format_scientific_notation_if_needed
 
 
 class KernelView(Container):
@@ -98,6 +99,29 @@ class KernelView(Container):
         with VerticalScroll(id="bottom-container"):
             pass
 
+    def new_perf_metric(self) -> None:
+        """Add VGPRs, Grid Size, and Workgroup Size from per-kernel analysis."""
+        new_metrics = ["VGPRs", "Grid Size", "Workgroup Size"]
+
+        for kernel in self.top_kernel_to_df_list:
+            kernel_name = kernel.get("Kernel_Name")
+            if not kernel_name:
+                continue
+
+            # Look up per-kernel analysis data
+            kernel_analysis = self.kernel_to_df_dict.get(kernel_name, {})
+            wavefront_section = kernel_analysis.get("7. Wavefront", {})
+            launch_stats = wavefront_section.get("7.1 Wavefront Launch Stats", {})
+            df = launch_stats.get("df")
+
+            if df is None:
+                continue
+
+            for metric in new_metrics:
+                matching_rows = df[df["Metric"] == metric]
+                if not matching_rows.empty:
+                    kernel[metric] = matching_rows["Avg"].iloc[0]
+
     def update_results(
         self,
         kernel_to_df_dict: dict[str, dict[str, Any]],
@@ -113,19 +137,43 @@ class KernelView(Container):
             top_container.mount(Label("No kernels available", classes="placeholder"))
             return
 
-        # Build and mount components
+        # Add VGPRs, Grid Size, Workgroup Size from per-kernel analysis
         self.new_perf_metric()
+
         # build header section
-        # Filter out Unique_Key from visible columns (internal identifier only)
-        keys = [k for k in self.top_kernel_to_df_list[0].keys() if k != "Unique_Key"]
-        header_text = " | ".join(f"{key:25}" for key in keys)
+        keys = list(self.top_kernel_to_df_list[0].keys())
+
+        # Pre-format all values and compute column widths
+        formatted_rows = []
+        for kernel in self.top_kernel_to_df_list:
+            formatted_row = {}
+            for key in keys:
+                val = kernel.get(key, "N/A")
+                if isinstance(val, (int, float)):
+                    formatted_row[key] = format_scientific_notation_if_needed(
+                        val, align="", width_align=0, precision=2, fmt_type_align="f"
+                    )
+                else:
+                    formatted_row[key] = str(val)
+            formatted_rows.append(formatted_row)
+
+        # Compute column widths (max of header and all values)
+        col_widths = {key: len(key) for key in keys}
+        for row in formatted_rows:
+            for key in keys:
+                col_widths[key] = max(col_widths[key], len(row[key]))
+
+        # Build header text with fitted column widths
+        header_text = " | ".join(f"{key:{col_widths[key]}}" for key in keys)
         top_container.mount(Label(header_text, classes="kernel-table-header"))
 
         # build selector section
         radio_buttons = []
-        for i, kernel in enumerate(self.top_kernel_to_df_list):
+        for i, (kernel, formatted_row) in enumerate(
+            zip(self.top_kernel_to_df_list, formatted_rows)
+        ):
             row_text = " | ".join(
-                f"{str(kernel.get(key, 'N/A'))[:18]:25}" for key in keys
+                f"{formatted_row[key]:{col_widths[key]}}" for key in keys
             )
             button = RadioButton(row_text, id=f"kernel-{i}")
             button.kernel_data = kernel  # type: ignore[attr-defined]
@@ -133,10 +181,8 @@ class KernelView(Container):
         top_container.mount(RadioSet(*radio_buttons))
 
         # build analysis section
-        # Use Unique_Key for per-dispatch selection (falls back to Kernel_Name)
-        self.current_selection = self.top_kernel_to_df_list[0].get(
-            "Unique_Key", self.top_kernel_to_df_list[0]["Kernel_Name"]
-        )
+        # Use Kernel_Name for per-kernel aggregated analysis
+        self.current_selection = self.top_kernel_to_df_list[0].get("Kernel_Name")
         self.update_bottom_content()
 
     def update_view(self, message: str, log_level: str) -> None:
@@ -147,26 +193,6 @@ class KernelView(Container):
             self.status_label.update(message)
             self.status_label.set_classes(log_level)
 
-    def new_perf_metric(self) -> None:
-        new_metrics = ["VGPRs", "Grid Size", "Workgroup Size"]
-
-        if "7. Wavefront" not in self.kernel_to_df_dict:
-            return
-
-        wavefront_section = self.kernel_to_df_dict.get("7. Wavefront", {})
-        launch_stats = wavefront_section.get("7.1 Wavefront Launch Stats", {})
-        df_path = launch_stats.get("df")
-
-        if df_path is None:
-            return
-
-        for new_metric in new_metrics:
-            matching_rows = df_path[df_path["Metric"] == new_metric]
-            if not matching_rows.empty:
-                metric_avg = matching_rows["Avg"].iloc[0]
-                for kernel in self.top_kernel_to_df_list:
-                    kernel[new_metric] = metric_avg
-
     @on(RadioSet.Changed)
     def on_radio_changed(self, event: RadioSet.Changed) -> None:
         if not event.pressed:
@@ -174,10 +200,8 @@ class KernelView(Container):
 
         kernel_data = getattr(event.pressed, "kernel_data", None)
         if kernel_data:
-            # Use Unique_Key for per-dispatch selection (falls back to Kernel_Name)
-            self.current_selection = kernel_data.get(
-                "Unique_Key", kernel_data.get("Kernel_Name")
-            )
+            # Use Kernel_Name for per-kernel aggregated analysis
+            self.current_selection = kernel_data.get("Kernel_Name")
             self.update_bottom_content()
 
     def update_bottom_content(self) -> None:
@@ -196,12 +220,23 @@ class KernelView(Container):
             bottom_container.mount(Label("No analysis data available", classes="error"))
             return
 
+        # Look up per-kernel aggregated analysis data using the kernel name
+        selected_data = self.kernel_to_df_dict.get(self.current_selection)
+        if not selected_data:
+            bottom_container.mount(
+                Label(
+                    f"No analysis data for: {self.current_selection}",
+                    classes="error",
+                )
+            )
+            return
+
         bottom_container.mount(
             Label(f"Current kernel selection: {self.current_selection}")
         )
 
         try:
-            sections = build_all_sections(self.kernel_to_df_dict, self.config_path)
+            sections = build_all_sections(selected_data, self.config_path)
             for section in sections:
                 bottom_container.mount(section)
         except Exception as e:

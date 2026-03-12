@@ -123,14 +123,16 @@ class Logger:
         self.log(message, "ERROR", update_ui)
 
 
-def get_top_kernels_and_dispatch_ids(
+def get_top_kernels(
     runs: dict[str, Any],
 ) -> Optional[list[dict[Hashable, Any]]]:
     """
-    Get top kernels merged with dispatch IDs.
+    Get top kernels with aggregated stats (one row per kernel).
 
-    Returns a list of records, each containing kernel info and a unique key
-    that combines kernel name and dispatch ID for looking up per-dispatch data.
+    Returns a list of records sorted by percentage of total time,
+    each containing kernel name, call count, total time, and percentage.
+    Returns None if runs is empty or workload has no dfs.
+    Returns empty list if the top kernel dataframe is empty.
     """
     if not runs:
         return None
@@ -140,33 +142,29 @@ def get_top_kernels_and_dispatch_ids(
         return None
 
     top_kernel_df = base_run.dfs.get(1)
-    dispatch_id_df = base_run.dfs.get(2)
-
-    if top_kernel_df is None or dispatch_id_df is None:
+    if top_kernel_df is None:
         return None
 
-    merged_df = pd.merge(
-        top_kernel_df, dispatch_id_df, on="Kernel_Name", how="outer"
-    ).sort_values("Pct", ascending=False)
+    if top_kernel_df.empty:
+        return []
 
-    merged_df = merged_df.drop(columns=["Count", "GPU_ID"])
+    # top_kernel_df already contains aggregated per-kernel stats
+    # (Kernel_Name, Count, Total_Time, Pct, etc.)
+    if "Pct" not in top_kernel_df.columns:
+        # If Pct column is missing, return unsorted records
+        return top_kernel_df.to_dict("records")
 
-    # Add unique key combining kernel name and dispatch ID for per-dispatch lookups
-    merged_df["Unique_Key"] = (
-        merged_df["Kernel_Name"].astype(str)
-        + "::"
-        + merged_df["Dispatch_ID"].astype(int).astype(str)
-    )
+    result_df = top_kernel_df.sort_values("Pct", ascending=False)
 
-    return merged_df.to_dict("records")
+    return result_df.to_dict("records")
 
 
 def process_panels_to_dataframes(
     args: argparse.Namespace,
     kernel_df: dict[int, pd.DataFrame],
     arch_configs: schema.ArchConfig,
-    profiling_config: dict[str, Any],
-    roof_plot: Optional[str] = None,
+    _profiling_config: dict[str, Any],  # Reserved for future filter_blocks logic
+    _roof_plot: Optional[str] = None,  # Reserved for future roofline support
 ) -> dict[str, dict[str, dict[str, Any]]]:
     result_structure = {}
     decimal_precision = getattr(args, "decimal", 2) if args else 2

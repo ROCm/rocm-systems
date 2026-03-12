@@ -34,7 +34,7 @@ import pandas as pd
 
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from rocprof_compute_tui.utils.tui_utils import (
-    get_top_kernels_and_dispatch_ids,
+    get_top_kernels,
     process_panels_to_dataframes,
 )
 from utils import file_io, parser, schema
@@ -87,30 +87,33 @@ class tui_analysis(OmniAnalyze_Base):
             workload=workload, dir_path=self.path, args=self.args
         )
 
-        # 2. Generate kernel-specific dataframes (per-dispatch)
+        # 2. Generate per-kernel dataframes (aggregated across all dispatches)
         self.raw_dfs = {}
-        for idx in workload.raw_pmc.index:
-            kernel_df = workload.raw_pmc.loc[[idx]]
-            kernel_name = str(kernel_df.pmc_perf["Kernel_Name"].loc[idx])
-            dispatch_id = int(kernel_df.pmc_perf["Dispatch_ID"].loc[idx])
 
-            # Create unique key: "kernel_name::dispatch_id"
-            unique_key = f"{kernel_name}::{dispatch_id}"
+        # Group raw PMC data by kernel name
+        kernel_groups = workload.raw_pmc.pmc_perf.groupby("Kernel_Name")
+
+        for kernel_name, group in kernel_groups:
+            # Get all dispatch indices for this kernel
+            dispatch_indices = group.index.tolist()
+
+            # Extract raw PMC data for all dispatches of this kernel
+            kernel_raw_pmc = workload.raw_pmc.loc[dispatch_indices]
 
             kernel_dfs = copy.deepcopy(workload.dfs)
 
-            # Evaluate metrics for this dispatch
+            # Evaluate metrics aggregated across all dispatches of this kernel
             parser.eval_metric(
                 kernel_dfs,
                 workload.dfs_type,
                 workload.sys_info.iloc[0],
                 workload.roofline_peaks,
-                kernel_dfs,
+                kernel_raw_pmc,
                 self.args.debug,
                 self._profiling_config,
             )
 
-            self.raw_dfs[unique_key] = kernel_dfs
+            self.raw_dfs[str(kernel_name)] = kernel_dfs
 
     def initalize_runs(
         self, normalization_filter: Optional[str] = None
@@ -143,18 +146,21 @@ class tui_analysis(OmniAnalyze_Base):
         self._runs[self.path] = w
         return self._runs
 
-    def run_kernel_analysis(self) -> dict[str, Any]:
-        """Generate aggregated kernel analysis."""
-        workload = self._runs[self.path]
+    def run_kernel_analysis(self) -> dict[str, dict[str, Any]]:
+        """Generate per-kernel analysis keyed by kernel_name."""
         arch = list(self._arch_configs.keys())[0]
 
-        return process_panels_to_dataframes(
-            self.args,
-            workload.dfs,
-            arch_configs=self._arch_configs[arch],
-            profiling_config=self._profiling_config,
-            roof_plot=None,
-        )
+        # Convert per-kernel raw_dfs to display format
+        result: dict[str, dict[str, Any]] = {}
+        for kernel_name, kernel_dfs in self.raw_dfs.items():
+            result[kernel_name] = process_panels_to_dataframes(
+                self.args,
+                kernel_dfs,
+                self._arch_configs[arch],
+                self._profiling_config,
+            )
+
+        return result
 
     def run_top_kernel(self) -> Optional[list[dict[Hashable, Any]]]:
-        return get_top_kernels_and_dispatch_ids(self._runs)
+        return get_top_kernels(self._runs)
