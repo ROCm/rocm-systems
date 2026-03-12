@@ -63,6 +63,7 @@ config["app_vcopy_multikernel_iter"] = [
 ]
 config["app_mpi_aware_laplace_eqn"] = ["./tests/mpi_aware_laplace_eqn", "-i", "5"]
 config["rocflop"] = ["./tests/rocflop", "--device", "0", "--fp16"]
+config["torch_test_app"] = ["./tests/simple_net"]
 config["cleanup"] = True
 config["COUNTER_LOGGING"] = False
 config["METRIC_COMPARE"] = False
@@ -3341,44 +3342,6 @@ def test_torch_trace_profile(
     in default suite.
     """
     workload_dir = test_utils.get_output_dir(param_id="torch_trace")
-    Path(workload_dir).mkdir(parents=True, exist_ok=True)
-    torch_app_path = Path(workload_dir) / "test_torch_app.py"
-
-    torch_app_code = """
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-
-class SimpleNet(nn.Module):
-    def __init__(self):
-        super(SimpleNet, self).__init__()
-        self.fc1 = nn.Linear(10, 20)
-        self.fc2 = nn.Linear(20, 10)
-    def forward(self, x):
-        x = self.fc1(x)
-        x = F.relu(x)
-        x = self.fc2(x)
-        return x
-
-if __name__ == "__main__":
-    if not torch.cuda.is_available():
-        import sys
-        print("GPU is required for this test. Exiting.")
-        sys.exit(1)
-    model = SimpleNet()
-    model = model.cuda()
-    x = torch.randn(5, 10).cuda()
-    # Run a few iterations
-    for epoch in range(1):
-        output = model(x)
-        loss = output.sum()
-        loss.backward()
-        print("Training completed")
-"""
-
-    with open(torch_app_path, "w") as f:
-        f.write(torch_app_code)
-    config["torch_test_app"] = ["python3", str(torch_app_path)]
 
     # --torch-trace needs --experimental for profiling
     options = [
@@ -3635,43 +3598,6 @@ def test_torch_trace_overhead(binary_handler_profile_rocprof_compute):
     Compares execution time with and without the flag to ensure overhead is acceptable.
     NOTE: Not included in the test suite since this requires PyTorch and GPU.
     """
-    helper_dir = Path(test_utils.get_output_dir(param_id="torch_trace_helper"))
-    helper_dir.mkdir(parents=True, exist_ok=True)
-    torch_app_path = helper_dir / "test_torch_app.py"
-    torch_app_code = """
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-
-class SimpleNet(nn.Module):
-    def __init__(self):
-        super(SimpleNet, self).__init__()
-        self.fc1 = nn.Linear(10, 20)
-        self.fc2 = nn.Linear(20, 10)
-    def forward(self, x):
-        x = self.fc1(x)
-        x = F.relu(x)
-        x = self.fc2(x)
-        return x
-
-if __name__ == "__main__":
-    if not torch.cuda.is_available():
-        import sys
-        print("GPU is required for this test. Exiting.")
-        sys.exit(1)
-    model = SimpleNet()
-    model = model.cuda()
-    x = torch.randn(5, 10).cuda()
-    # Run a few iterations
-    for epoch in range(1):
-        output = model(x)
-        loss = output.sum()
-        loss.backward()
-    print("Training completed")
-"""
-    with open(torch_app_path, "w") as f:
-        f.write(torch_app_code)
-    config["torch_test_app"] = ["python3", str(torch_app_path)]
     # Run WITHOUT --torch-trace (baseline)
     workload_dir_baseline = test_utils.get_output_dir(param_id="torch_trace_baseline")
     start_baseline = time.time()
