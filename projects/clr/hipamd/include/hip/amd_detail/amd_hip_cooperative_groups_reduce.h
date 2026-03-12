@@ -9,9 +9,8 @@
 #if __cplusplus
 #if !defined(__HIPCC_RTC__)
 #include <hip/amd_detail/hip_cooperative_groups_helper.h>
-#endif
-
 #include <hip/amd_detail/amd_hip_cooperative_groups.h>
+#endif
 
 #if !defined(__HIPCC_RTC__)
 #include <type_traits>
