@@ -681,7 +681,12 @@ class RocProfCompute_Base:
             total_workload_runs += 1
 
         # Warn about multi-rank profiling when multiple workload runs are needed
-        if total_workload_runs > 1 and get_rank() is not None:
+        # Skip warning when iteration multiplexing is enabled (single application run)
+        if (
+            total_workload_runs > 1
+            and get_rank() is not None
+            and args.iteration_multiplexing is None
+        ):
             console_warning(
                 "Multi-rank application detected. Application replay mode "
                 "(running the workload multiple times) may fail to collect "
