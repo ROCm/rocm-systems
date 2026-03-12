@@ -647,6 +647,7 @@ void NullDevice::fillDeviceInfo(const Pal::DeviceProperties& palProp,
       }
     }
   }
+  info_.hasExpertSchedMode_ = palProp.gfxLevel >= Pal::GfxIpLevel::GfxIp12;
 }
 
 Device::XferBuffers::~XferBuffers() {
