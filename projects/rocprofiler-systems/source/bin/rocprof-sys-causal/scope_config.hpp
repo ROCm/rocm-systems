@@ -78,5 +78,5 @@ inline const std::vector<ScopeConfig> SCOPE_CONFIGS = {
       "regex-list" }
 };
 
-}  
-}  
+}  // namespace causal
+}  // namespace rocprofsys

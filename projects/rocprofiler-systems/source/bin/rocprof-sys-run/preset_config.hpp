@@ -207,5 +207,5 @@ INSTRUMENTATION WORKFLOW:
 
 }
 
-}  
-}  
+}  // namespace run
+}  // namespace rocprofsys

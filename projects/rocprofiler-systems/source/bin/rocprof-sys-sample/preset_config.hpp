@@ -186,5 +186,5 @@ PROFILING WORKFLOW:
 
 }
 
-}  
-}  
+}  // namespace sample
+}  // namespace rocprofsys
