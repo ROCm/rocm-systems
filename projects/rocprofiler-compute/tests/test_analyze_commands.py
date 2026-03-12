@@ -1263,6 +1263,18 @@ def test_apply_filters_direct():
     result = apply_filters(workload, "/tmp", False, False)
     assert len(result) == 2
 
+    # Test node filter with list of strings
+    workload = MockWorkload()
+    workload.filter_nodes = ["node0", "node1"]
+    result = apply_filters(workload, "/tmp", False, False)
+    assert len(result) == 4
+
+    # Test GPU filter with list of integers
+    workload = MockWorkload()
+    workload.filter_gpu_ids = [0, 1]
+    result = apply_filters(workload, "/tmp", False, False)
+    assert len(result) == 4
+
 
 @pytest.mark.misc
 def test_missing_files_scenarios(binary_handler_analyze_rocprof_compute):

@@ -22,13 +22,14 @@
 # THE SOFTWARE.
 ##############################################################################
 
+
 from textual.message import Message
 from textual.widgets import Button
 
 
 class InstantButton(Button):
     """
-    A button that fires exactly once per *click* using Textual's press semantics.
+    A button that posts a custom InstantPressed message for each button press.
     """
 
     class InstantPressed(Message):
@@ -39,10 +40,13 @@ class InstantButton(Button):
             self.button = button  # the button that was pressed
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        """Translate Textual's `Button.Pressed` into `InstantPressed`."""
+        """Translate Textual's Button.Pressed into InstantPressed."""
         if event.button is not self:
             return
 
         event.stop()
+        self.post_message(self.InstantPressed(self))
 
+    def trigger(self) -> None:
+        """Programmatically trigger button (for keyboard shortcuts)."""
         self.post_message(self.InstantPressed(self))

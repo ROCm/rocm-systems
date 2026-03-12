@@ -96,7 +96,7 @@ template <typename T> void GraphMemcpyToSymbolSetParamsShell(const void* symbol,
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGraphMemcpyNodeSetParamsToSymbol_Positive_Basic") {
+TEST_CASE(Unit_hipGraphMemcpyNodeSetParamsToSymbol_Positive_Basic) {
   SECTION("char") {
     HIP_GRAPH_MEMCPY_NODE_SET_PARAMS_TO_FROM_SYMBOL_TEST(GraphMemcpyToSymbolSetParamsShell, 10,
                                                          char);
@@ -137,7 +137,7 @@ TEST_CASE("Unit_hipGraphMemcpyNodeSetParamsToSymbol_Positive_Basic") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGraphMemcpyNodeSetParamsToSymbol_Negative_Parameters") {
+TEST_CASE(Unit_hipGraphMemcpyNodeSetParamsToSymbol_Negative_Parameters) {
   using namespace std::placeholders;
   hipGraph_t graph = nullptr;
   HIP_CHECK(hipGraphCreate(&graph, 0));

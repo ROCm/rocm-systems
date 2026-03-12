@@ -42,7 +42,7 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMemcpyAtoHAsync_Basic") {
+TEST_CASE(Unit_hipMemcpyAtoHAsync_Basic) {
 #if HT_NVIDIA
   HipTest::HIP_SKIP_TEST("API currently unsupported on nvidia, skipping...");
   return;
@@ -73,7 +73,7 @@ TEST_CASE("Unit_hipMemcpyAtoHAsync_Basic") {
 #endif
 }
 
-TEST_CASE("Unit_hipMemcpyAtoHAsync_Capture") {
+TEST_CASE(Unit_hipMemcpyAtoHAsync_Capture) {
   CHECK_IMAGE_SUPPORT
 
   constexpr int kRows = 1;

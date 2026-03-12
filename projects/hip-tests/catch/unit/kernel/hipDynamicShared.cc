@@ -124,7 +124,7 @@ template <typename T> void testExternShared(size_t N, unsigned groupElements) {
  *    - HIP_VERSION >= 5.5
  */
 
-TEST_CASE("Unit_hipDynamicShared") {
+TEST_CASE(Unit_hipDynamicShared) {
   SECTION("test case with float for least size") {
     testExternShared<float>(1024, 4);
     testExternShared<float>(1024, 8);
