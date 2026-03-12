@@ -20,13 +20,16 @@ def _build_private_client(api_key: Optional[str], model_override: Optional[str])
     """Build an OpenAI client for a private/enterprise LLM server.
 
     Reads configuration from environment variables:
-        ROCPD_LLM_PRIVATE_URL     Base URL of the private server (required)
-        ROCPD_LLM_PRIVATE_MODEL   Model name to use
-        ROCPD_LLM_PRIVATE_API_KEY API key (default: "dummy" for header-auth servers)
-        ROCPD_LLM_PRIVATE_HEADERS JSON object of extra request headers, e.g.
-                                   '{"Ocp-Apim-Subscription-Key": "abc123"}'
-                                   The "user" header is auto-set to os.getlogin()
-                                   unless already present in ROCPD_LLM_PRIVATE_HEADERS.
+        ROCPD_LLM_PRIVATE_URL        Base URL of the private server (required)
+        ROCPD_LLM_PRIVATE_MODEL      Model name to use
+        ROCPD_LLM_PRIVATE_API_KEY    API key (default: "dummy" for header-auth servers)
+        ROCPD_LLM_PRIVATE_HEADERS    JSON object of extra request headers, e.g.
+                                     '{"Ocp-Apim-Subscription-Key": "abc123"}'
+                                     The "user" header is auto-set to os.getlogin()
+                                     unless already present in ROCPD_LLM_PRIVATE_HEADERS.
+        ROCPD_LLM_PRIVATE_VERIFY_SSL Set to "0" or "false" to disable SSL certificate
+                                     verification (e.g. for corporate proxies with
+                                     self-signed certs). Requires httpx package.
     """
     try:
         import openai as _openai
@@ -59,7 +62,27 @@ def _build_private_client(api_key: Optional[str], model_override: Optional[str])
                 f"Value was: {raw_headers!r}"
             )
 
-    client = _openai.OpenAI(api_key=key, base_url=base_url, default_headers=headers)
+    # SSL verification — disabled when ROCPD_LLM_PRIVATE_VERIFY_SSL=0/false
+    verify_ssl_env = os.environ.get("ROCPD_LLM_PRIVATE_VERIFY_SSL", "1").lower()
+    verify_ssl = verify_ssl_env not in ("0", "false", "no")
+    http_client = None
+    if not verify_ssl:
+        try:
+            import httpx as _httpx
+            http_client = _httpx.Client(verify=False)
+        except ImportError:
+            warnings.warn(
+                "[LLMConversation] ROCPD_LLM_PRIVATE_VERIFY_SSL=0 requested but httpx is "
+                "not installed. SSL verification will remain enabled. "
+                "Run: pip install httpx",
+                stacklevel=3,
+            )
+
+    kwargs: Dict[str, Any] = dict(api_key=key, base_url=base_url, default_headers=headers)
+    if http_client is not None:
+        kwargs["http_client"] = http_client
+
+    client = _openai.OpenAI(**kwargs)
     return client, model
 
 
