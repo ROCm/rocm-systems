@@ -535,6 +535,29 @@ main(int argc, char** argv)
         return EXIT_FAILURE;
     }
 
+    if(gpu_count > 0)
+    {
+        size_t _num_metrics = 0;
+        try
+        {
+            // call to rocm_events() will add choices to ROCPROFSYS_ROCM_EVENTS setting
+            // so always perform this call even if list of HW counters is not requested
+            _num_metrics = rocprofsys::rocm::rocm_events().size();
+        } catch(std::runtime_error& _e)
+        {
+            verbprintf(0, "Retrieving the GPU HW counters failed: %s", _e.what());
+        } catch(std::exception& _e)
+        {
+            verbprintf(0, "Exception retrieving GPU HW counters: %s", _e.what());
+        }
+        verbprintf(1, "Found %i HIP devices and %zu GPU HW counters\n", gpu_count,
+                   _num_metrics);
+    }
+    else
+    {
+        verbprintf(1, "No HIP devices found. GPU HW counters will not be available\n");
+    }
+
     auto _parser_set_if_exists = [&parser](auto& _var, const std::string& _opt) {
         using Tp = decay_t<decltype(_var)>;
         if(parser.exists(_opt)) _var = parser.get<Tp>(_opt);

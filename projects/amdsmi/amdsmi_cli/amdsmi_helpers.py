@@ -1466,6 +1466,34 @@ class AMDSMIHelpers():
         return valid_clock_input, input_clock_type
 
 
+    # Memory Size Management Helper Functions (using library functions)
+
+    def gb_to_pages(self, gb):
+        """Convert GB to pages.
+
+        Args:
+            gb: Size in gigabytes (float)
+
+        Returns:
+            int: Number of pages
+        """
+        page_size = os.sysconf('SC_PAGESIZE')
+        bytes_value = gb * (1024 ** 3)
+        return int(bytes_value / page_size)
+
+    def pages_to_gb(self, pages):
+        """Convert pages to GB.
+
+        Args:
+            pages: Number of pages (int)
+
+        Returns:
+            float: Size in gigabytes
+        """
+        page_size = os.sysconf('SC_PAGESIZE')
+        bytes_value = pages * page_size
+        return bytes_value / (1024 ** 3)
+
     def confirm_out_of_spec_warning(self, auto_respond=False):
         """ Print the warning for running outside of specification and prompt user to accept the terms.
 
@@ -1503,16 +1531,17 @@ class AMDSMIHelpers():
         print('''
             ******WARNING******\n
             After changing memory (NPS) partition modes, users MUST restart
-            (reload) the AMD GPU driver. This command NO LONGER AUTOMATICALLY
-            reloads the driver, see `amd-smi reset -h` and
-            `sudo amd-smi reset -r` for more information.
+            (reload) the AMD GPU driver. Use modprobe to reload the driver:
+
+                sudo modprobe -r amdgpu
+                sudo modprobe amdgpu
 
             This change is intended to allow users the ability to control when is
             the best time to restart the AMD GPU driver, as it may not be desired
             to restart the AMD GPU driver immediately after changing the
             memory (NPS) partition mode.
 
-            Please use `sudo amd-smi reset -r` AFTER successfully
+            Please reload the AMD GPU driver AFTER successfully
             changing the memory (NPS) partition mode. A successful driver reload
             is REQUIRED in order to complete updating ALL GPUs in the hive to
             the requested partition mode.
@@ -1522,37 +1551,6 @@ class AMDSMIHelpers():
             workloads across all devices.
             ''')
 
-        if not auto_respond:
-            user_input = input('Do you accept these terms? [Y/N] ')
-        else:
-            user_input = auto_respond
-        if user_input in ['Yes', 'yes', 'y', 'Y', 'YES']:
-            print('')
-            return
-        else:
-            print('Confirmation not given. Exiting without setting value')
-            sys.exit(1)
-
-    def confirm_gpu_driver_reload_warning(self, auto_respond=False):
-        """ Print the warning for running outside of specification and prompt user to accept the terms.
-
-        :param autoRespond: Response to automatically provide for all prompts
-        """
-        print('''
-          ****** WARNING ******\n
-          AMD SMI is about to initiate an AMD GPU driver restart (module reload).
-
-          Reloading the AMD GPU driver REQUIRES users to quit all GPU activity across all
-          devices.
-
-          If user is initiating a driver reload AFTER changing memory (NPS) partition
-          modes (`sudo amd-smi set -M <NPS_MODE>`), a AMD GPU driver reload is REQUIRED
-          to complete updating the partition mode. This change will effect ALL GPUs in
-          the hive. Advise using `amd-smi list -e` and `amd-smi partition -c -m`
-          afterwards to ensure changes were applied as expected.
-
-          Please use this utility with caution.
-          ''')
         if not auto_respond:
             user_input = input('Do you accept these terms? [Y/N] ')
         else:
@@ -2141,7 +2139,7 @@ class AMDSMIHelpers():
                     cper_path_str = str(cper_path)
                     json_path_str = str(Path(cper_path).with_suffix('.json'))
                     try:
-                        afids = self.pvtDumpAfids(cper_path)
+                        afids = self.cper_dump_afids(cper_path)
                     except Exception as e:
                         afids = []
                         logging.debug(f"Failed to fetch AFIDs for {cper_path}: {e}")
@@ -2160,7 +2158,7 @@ class AMDSMIHelpers():
                 for cper_path, row in output_rows.items():
                     timestamp, gpu_id, severity, fname = row
                     try:
-                        afids = self.pvtDumpAfids(cper_path)
+                        afids = self.cper_dump_afids(cper_path)
                         afids_str = ' '.join(map(str, afids))
                     except Exception as e:
                         afids_str = "Error fetching AFIDs"
@@ -2843,3 +2841,66 @@ class AMDSMIHelpers():
                     "message": error_msg
                 }
             return error_msg
+
+    def prompt_reboot(self):
+        """Prompt user to reboot and execute if confirmed
+
+        Returns:
+            bool: True if reboot was successful or user declined, False on error
+        """
+        if not sys.stdin.isatty():
+            print("Reboot required for changes to take effect. Please reboot manually.")
+            return True
+        try:
+            response = input("Would you like to reboot the system now? (y/n): ").strip().lower()
+            if response in ("y", "yes"):
+                return self._reboot_system()
+            return True
+        except (KeyboardInterrupt, EOFError):
+            print()  # New line after Ctrl+C
+            return True
+
+    def _reboot_system(self):
+        """Reboot the system using logind D-Bus interface
+
+        Returns:
+            bool: True if reboot initiated successfully, False otherwise
+        """
+        # Try systemd logind first (modern systems)
+        if self._reboot_logind():
+            return True
+
+        # Fallback to systemctl/reboot command
+        print("D-Bus reboot failed, falling back to systemctl...")
+        import subprocess
+        try:
+            subprocess.run(["systemctl", "reboot"], check=True)
+            return True
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            try:
+                subprocess.run(["reboot"], check=True)
+                return True
+            except (subprocess.CalledProcessError, FileNotFoundError):
+                print("Failed to initiate reboot. Please reboot manually.")
+                return False
+
+    def _reboot_logind(self):
+        """Reboot using systemd-logind D-Bus interface
+
+        Returns:
+            bool: True if reboot initiated successfully, False otherwise
+        """
+        # Try dbus library (most common)
+        try:
+            import dbus
+            bus = dbus.SystemBus()
+            obj = bus.get_object("org.freedesktop.login1", "/org/freedesktop/login1")
+            intf = dbus.Interface(obj, "org.freedesktop.login1.Manager")
+            intf.Reboot(True)  # True = interactive authentication
+            return True
+        except ImportError:
+            pass
+        except (dbus.DBusException, OSError, RuntimeError) as e:
+            logging.debug(f"D-Bus reboot failed: {e}")
+
+        return False

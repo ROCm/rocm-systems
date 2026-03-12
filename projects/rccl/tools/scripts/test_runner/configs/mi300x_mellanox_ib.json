@@ -433,6 +433,25 @@
           "test_filter": "AltRsmiTest.*"
         }
       ]
+    },
+    "implicit_launch_order": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 8,
+      "num_nodes": 1,
+      "num_gpus": 8,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_LAUNCH_ORDER_IMPLICIT": "1"
+      },
+      "tests": [
+        {
+          "name": "ImplicitLaunchOrder_MultiCommunicatorChain",
+          "description": "Test NCCL_LAUNCH_ORDER_IMPLICIT serialization across multiple communicators",
+          "test_filter": "ImplicitLaunchOrderMPITest.MultiCommunicatorChain"
+        }
+      ]
     }
   },
   "test_suites": [
@@ -500,6 +519,12 @@
       "name": "AltRsmi Tests - Complete Suite",
       "description": "All Alternative RSMI tests using public API only",
       "config": "alt_rsmi_tests",
+      "enabled": true
+    },
+    {
+      "name": "Implicit Launch Order Tests",
+      "description": "Test NCCL_LAUNCH_ORDER_IMPLICIT for multi-communicator serialization",
+      "config": "implicit_launch_order",
       "enabled": true
     }
   ]

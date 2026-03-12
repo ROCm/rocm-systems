@@ -56,15 +56,15 @@ static char memSetVal = 'a';
  * ------------------------
  *    - HIP_VERSION >= 6.0
  */
-TEMPLATE_TEST_CASE("Unit_hipDrvGraphAddMemsetNode_Positive_Basic", "", uint8_t, uint16_t,
+TEMPLATE_TEST_CASE(Unit_hipDrvGraphAddMemsetNode_Positive_Basic, uint8_t, uint16_t,
                    uint32_t) {
+  CHECK_IMAGE_SUPPORT
+
   HIP_CHECK(hipInit(0));
   hipDevice_t device;
   hipCtx_t context;
   HIP_CHECK(hipDeviceGet(&device, 0));
   HIP_CHECK(hipCtxCreate(&context, 0, device));
-
-  CHECK_IMAGE_SUPPORT
 
   const auto f = [&context](hipMemsetParams* params) {
     hipGraph_t graph = nullptr;
@@ -116,7 +116,7 @@ TEMPLATE_TEST_CASE("Unit_hipDrvGraphAddMemsetNode_Positive_Basic", "", uint8_t, 
  * ------------------------
  *    - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipDrvGraphAddMemsetNode_Negative_Parameters") {
+TEST_CASE(Unit_hipDrvGraphAddMemsetNode_Negative_Parameters) {
   using namespace std::placeholders;
 
   HIP_CHECK(hipInit(0));
@@ -163,13 +163,13 @@ TEST_CASE("Unit_hipDrvGraphAddMemsetNode_Negative_Parameters") {
  *    - HIP_VERSION >= 6.0
  */
 TEST_CASE("Unit_hipDrvGraphAddMemsetNode_hipMallocPitch_2D") {
+  CHECK_IMAGE_SUPPORT
+
   HIP_CHECK(hipInit(0));
   hipDevice_t device;
   hipCtx_t context;
   HIP_CHECK(hipDeviceGet(&device, 0));
   HIP_CHECK(hipCtxCreate(&context, 0, device));
-
-  CHECK_IMAGE_SUPPORT
 
   size_t width = SIZE * sizeof(char), numW{SIZE}, numH{SIZE}, pitch_A;
   char* A_d;
@@ -250,13 +250,13 @@ TEST_CASE("Unit_hipDrvGraphAddMemsetNode_hipMallocPitch_2D") {
  *    - HIP_VERSION >= 6.0
  */
 TEST_CASE("Unit_hipDrvGraphAddMemsetNode_hipMallocPitch_1D") {
+  CHECK_IMAGE_SUPPORT
+
   HIP_CHECK(hipInit(0));
   hipDevice_t device;
   hipCtx_t context;
   HIP_CHECK(hipDeviceGet(&device, 0));
   HIP_CHECK(hipCtxCreate(&context, 0, device));
-
-  CHECK_IMAGE_SUPPORT
 
   size_t width = SIZE * sizeof(char), numW{SIZE}, pitch_A;
   char* A_d;
@@ -331,13 +331,13 @@ TEST_CASE("Unit_hipDrvGraphAddMemsetNode_hipMallocPitch_1D") {
  *    - HIP_VERSION >= 6.0
  */
 TEST_CASE("Unit_hipDrvGraphAddMemsetNode_hipMalloc3D_2D") {
+  CHECK_IMAGE_SUPPORT
+
   HIP_CHECK(hipInit(0));
   hipDevice_t device;
   hipCtx_t context;
   HIP_CHECK(hipDeviceGet(&device, 0));
   HIP_CHECK(hipCtxCreate(&context, 0, device));
-
-  CHECK_IMAGE_SUPPORT
 
   size_t width = SIZE * sizeof(char);
   size_t numW = SIZE, numH = SIZE;
@@ -425,13 +425,13 @@ TEST_CASE("Unit_hipDrvGraphAddMemsetNode_hipMalloc3D_2D") {
  *    - HIP_VERSION >= 6.0
  */
 TEST_CASE("Unit_hipDrvGraphAddMemsetNode_hipMalloc3D_1D") {
+  CHECK_IMAGE_SUPPORT
+
   HIP_CHECK(hipInit(0));
   hipDevice_t device;
   hipCtx_t context;
   HIP_CHECK(hipDeviceGet(&device, 0));
   HIP_CHECK(hipCtxCreate(&context, 0, device));
-
-  CHECK_IMAGE_SUPPORT
 
   size_t width = SIZE * sizeof(char);
   size_t numW = SIZE;
@@ -511,7 +511,7 @@ TEST_CASE("Unit_hipDrvGraphAddMemsetNode_hipMalloc3D_1D") {
  * ------------------------
  *    - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipDrvGraphAddMemsetNode_hipMalloc_1D") {
+TEST_CASE(Unit_hipDrvGraphAddMemsetNode_hipMalloc_1D) {
   HIP_CHECK(hipInit(0));
   hipDevice_t device;
   hipCtx_t context;
@@ -594,7 +594,7 @@ TEST_CASE("Unit_hipDrvGraphAddMemsetNode_hipMalloc_1D") {
  * ------------------------
  *    - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipDrvGraphAddMemsetNode_hipMallocManaged") {
+TEST_CASE(Unit_hipDrvGraphAddMemsetNode_hipMallocManaged) {
   HIP_CHECK(hipInit(0));
   hipDevice_t device;
   hipCtx_t context;

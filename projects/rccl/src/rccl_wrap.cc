@@ -171,6 +171,11 @@ ncclResult_t rcclOverrideChannels(struct ncclComm* comm, ncclFunc_t coll, size_t
     return ncclSuccess;
   }
 
+  if (comm->nRanks == comm->nNodes) {
+    INFO(NCCL_TUNING, "RCCL tuning model channel thresholds not applied for single GPU per node case");
+    return ncclSuccess;
+  }
+
   auto tunableIndex = rcclGetTunableIndex(coll);
   if(tunableIndex == RCCL_UNSUPPORTED_TUNABLE){
     INFO(NCCL_TUNING, "tunableIndex:%i not supported", tunableIndex);
@@ -396,11 +401,10 @@ ncclResult_t rcclGetProtocolName(int protocol, const char** protocolName) {
   return ncclSuccess;
 }
 
-bool rcclUseAllToAllGda(struct ncclComm* comm) {
+bool rcclUseAlltoAllGda(struct ncclComm* comm) {
 
-    //TODO: enable on MI350;  currently tested on MI300X
 #ifdef ENABLE_ROCSHMEM
-  if (comm->enableRocshmem && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942") && comm->nNodes > 1 && (comm->nRanks/comm->nNodes == 8) && comm->rocshmemThreshold <= 1048576) {
+  if (comm->enableRocshmem && comm->nNodes > 1 && (comm->nRanks/comm->nNodes == 8) && comm->rocshmemThreshold <= 1048576) {
       INFO(NCCL_INIT, "Enabling GDA alltoall for RCCL");
       return true;
   }

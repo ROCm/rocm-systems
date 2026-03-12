@@ -162,6 +162,9 @@ TesterArguments::TesterArguments(int argc, char *argv[]) {
     case FloodGetTestType:
     case FloodGetNBITestType:
     case FloodGTestType:
+    case FloodAddTestType:
+    case FloodFAddTestType:
+    case FloodWaitAmoTestType:
       min_msg_size = max_msg_size = 8;
       break;
     default:
@@ -233,6 +236,9 @@ void TesterArguments::get_arguments() {
     case FloodGetTestType:
     case FloodGetNBITestType:
     case FloodGTestType:
+    case FloodAddTestType:
+    case FloodFAddTestType:
+    case FloodWaitAmoTestType:
       requires_two_pes = false;
       break;
     default:

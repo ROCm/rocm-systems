@@ -1,22 +1,8 @@
-/* Copyright (c) 2026 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #pragma once
 #include <algorithm>
@@ -868,11 +854,12 @@ class Graph {
   //! returns device object
   hip::Device* Device() { return device_; }
   bool IsLeafNodeSyncRequired() const {
+    // Check if any segment is a leaf (no outgoing edges). A leaf segment on a
+    // parallel stream must be synced back to the launch stream
     size_t leafSegmentCount = 0;
-    if (max_dependency_level_ >= 0) {
-      auto it = segments_per_level_.find(max_dependency_level_);
-      if (it != segments_per_level_.end()) {
-        leafSegmentCount = it->second.size();
+    for (const auto& seg : segments_) {
+      if (seg.segment_ids_edges.empty()) {
+        leafSegmentCount++;
       }
     }
     return leafSegmentCount > 1;
@@ -2674,7 +2661,6 @@ class GraphMemAllocNode final : public GraphNode {
       assert(vaddr_sub_obj != nullptr);
       queue()->device().SetMemAccess(vaddr_sub_obj->getSvmPtr(), aligned_size,
                                      amd::Device::VmmAccess::kReadWrite);
-      va_->retain();
       graph_->IncrementMemAllocNodeCount();  // Increment count of unreleased mem alloc nodes
       ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM_POOL, "Graph MemAlloc execute [%p-%p], %p",
               vaddr_sub_obj->getSvmPtr(),
@@ -2804,14 +2790,12 @@ class GraphMemFreeNode : public GraphNode {
       assert(phys_mem_obj != nullptr);
       auto vaddr_mem_obj = amd::MemObjMap::FindVirtualMemObj(ptr());
       assert(vaddr_mem_obj != nullptr);
+      // sub_obj is released inside submitVirtualMap after HW unmap completes
       VirtualMapCommand::submit(device);
       if (!AMD_DIRECT_DISPATCH) {
         // Update the current device, since hip event, used in mem pools, requires device
         hip::setCurrentDevice(device_id_);
       }
-      // Free virtual address
-      vaddr_sub_obj->release();
-      vaddr_mem_obj->release();
       // Release the allocation back to graph's pool
       auto device_id = phys_mem_obj->getUserData().deviceId;
       if (!g_devices[device_id]->FreeMemory(phys_mem_obj, static_cast<hip::Stream*>(queue()))) {

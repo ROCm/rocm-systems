@@ -27,7 +27,7 @@ THE SOFTWARE.
 #include <resource_guards.hh>
 #include <utils.hh>
 
-TEST_CASE("Unit_hipMemcpyParam2DAsync_Positive_Basic", "[multigpu]") {
+TEST_CASE(Unit_hipMemcpyParam2DAsync_Positive_Basic) {
   using namespace std::placeholders;
 
   constexpr bool async = true;
@@ -60,7 +60,7 @@ TEST_CASE("Unit_hipMemcpyParam2DAsync_Positive_Basic", "[multigpu]") {
   }
 }
 
-TEST_CASE("Unit_hipMemcpyParam2DAsync_Positive_Synchronization_Behavior") {
+TEST_CASE(Unit_hipMemcpyParam2DAsync_Positive_Synchronization_Behavior) {
   CHECK_IMAGE_SUPPORT
   using namespace std::placeholders;
 
@@ -96,13 +96,13 @@ TEST_CASE("Unit_hipMemcpyParam2DAsync_Positive_Synchronization_Behavior") {
 #endif
 }
 
-TEST_CASE("Unit_hipMemcpyParam2DAsync_Positive_Parameters") {
+TEST_CASE(Unit_hipMemcpyParam2DAsync_Positive_Parameters) {
   CHECK_IMAGE_SUPPORT
   constexpr bool async = true;
   Memcpy2DZeroWidthHeight<async>(MemcpyParam2DAdapter<async>());
 }
 
-TEST_CASE("Unit_hipMemcpyParam2DAsync_Positive_Array") {
+TEST_CASE(Unit_hipMemcpyParam2DAsync_Positive_Array) {
   CHECK_IMAGE_SUPPORT
   constexpr bool async = true;
   SECTION("Array from/to Host") {
@@ -113,7 +113,7 @@ TEST_CASE("Unit_hipMemcpyParam2DAsync_Positive_Array") {
   }
 }
 
-TEST_CASE("Unit_hipMemcpyParam2DAsync_Negative_Parameters") {
+TEST_CASE(Unit_hipMemcpyParam2DAsync_Negative_Parameters) {
   CHECK_IMAGE_SUPPORT
   constexpr bool async = true;
 
@@ -213,7 +213,7 @@ TEST_CASE("Unit_hipMemcpyParam2DAsync_Negative_Parameters") {
 static constexpr size_t NUM_W{10};
 static constexpr size_t NUM_H{10};
 
-TEST_CASE("Unit_hipMemcpyParam2DAsync_Capture") {
+TEST_CASE(Unit_hipMemcpyParam2DAsync_Capture) {
   void* device_a = nullptr;
   void* device_b = nullptr;
   size_t pitch_a = 0;

@@ -123,6 +123,9 @@ declare -A TEST_NUMBERS=(
   ["flood_getnbi"]="87"
   ["flood_g"]="88"
   ["hipmodule_init"]="89"
+  ["flood_add"]="90"
+  ["flood_fadd"]="91"
+  ["flood_waitadd"]="92"
 )
 
 ExecTest() {
@@ -345,20 +348,24 @@ TestAMO() {
   ExecTest  "amo_add"          2       8            1
   ExecTest  "amo_add"          2       32           128
 
+  if [[ $TEST != gda* ]]; then #AIROCSHMEM-316
   ExecTest  "amo_fadd"         2       1            1
   ExecTest  "amo_fadd"         2       1            1024
   ExecTest  "amo_fadd"         2       8            1
   ExecTest  "amo_fadd"         2       32           128
+  else echo "Skip:   amo_fadd* (AIROCSHMEM-316: mlx5 fetch_amo return 0)"; fi
 
   ExecTest  "amo_inc"          2       1            1
   ExecTest  "amo_inc"          2       1            1024
   ExecTest  "amo_inc"          2       8            1
   ExecTest  "amo_inc"          2       32           128
 
+  if [[ $TEST != gda* ]]; then #AIROCSHMEM-316
   ExecTest  "amo_finc"         2       1            1
   ExecTest  "amo_finc"         2       1            1024
   ExecTest  "amo_finc"         2       8            1
   ExecTest  "amo_finc"         2       32           128
+  else echo "Skip:   amo_finc* (AIROCSHMEM-316: mlx5 fetch_amo return 0)"; fi
   else echo "Skip:   amo_add* (AIROCSHMEM-211: ro amo abort)"; fi
 
   ExecTest  "amo_set"          2       1            1
@@ -506,6 +513,11 @@ TestOther() {
   if [[ $TEST != gda* ]]; then #AIROCSHMEM-162
   ExecTest  "flood_g"          8       64           1024
   else echo "Skip:   flood_g (AIROCSHMEM-162: GDA _g not implemented)"; fi
+
+  ExecTest  "flood_add"        2       64           1024
+  ExecTest  "flood_add"        8       64           1024
+  ExecTest  "flood_fadd"       8       64           1024
+  ExecTest  "flood_waitadd"    8       64           1024
 
   # This test requires more contexts than workgroups
   export ROCSHMEM_MAX_NUM_CONTEXTS=1024

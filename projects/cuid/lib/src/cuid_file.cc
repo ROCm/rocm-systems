@@ -60,23 +60,22 @@ bool CuidFileLock::acquire() {
         return true;  // Already locked
     }
 
-    // For shared (read) locks, we only need O_RDONLY access
-    // For exclusive (write) locks, we need O_RDWR access
-    // This allows unprivileged users to acquire shared locks on files created by root
-    int open_flags = (lock_type_ == CuidLockType::EXCLUSIVE) ? (O_RDWR | O_CREAT) : O_RDONLY;
-    
-    // For exclusive locks (creating/writing), ensure proper permissions by clearing umask
+    // For shared (read) locks, we only need O_RDONLY access.
+    // For exclusive (write) locks, first open existing file with O_RDWR.
+    // Only create if missing to avoid sticky-dir O_CREAT restrictions in /tmp.
     if (lock_type_ == CuidLockType::EXCLUSIVE) {
-        mode_t old_umask = umask(0);
-        lock_fd_ = open(lock_file_path_.c_str(), open_flags, 0666);
-        umask(old_umask);
-        // Ensure permissions are correct even if file already existed
-        if (lock_fd_ >= 0) {
-            fchmod(lock_fd_, 0666);
+        lock_fd_ = open(lock_file_path_.c_str(), O_RDWR, 0666);
+        if (lock_fd_ < 0 && errno == ENOENT) {
+            mode_t old_umask = umask(0);
+            lock_fd_ = open(lock_file_path_.c_str(), O_RDWR | O_CREAT, 0666);
+            umask(old_umask);
+            if (lock_fd_ >= 0) {
+                fchmod(lock_fd_, 0666);
+            }
         }
     } else {
         // Try to open existing file for shared (read) lock
-        lock_fd_ = open(lock_file_path_.c_str(), open_flags, 0666);
+        lock_fd_ = open(lock_file_path_.c_str(), O_RDONLY, 0666);
     }
     
     // If file doesn't exist and we need a shared lock, try to create it
@@ -136,20 +135,21 @@ bool CuidFileLock::acquire_with_timeout(int timeout_seconds) {
         return true;  // Already locked
     }
 
-    // For shared (read) locks, we only need O_RDONLY access
-    // For exclusive (write) locks, we need O_RDWR access
-    int open_flags = (lock_type_ == CuidLockType::EXCLUSIVE) ? (O_RDWR | O_CREAT) : O_RDONLY;
-    
-    // For exclusive locks (creating/writing), ensure proper permissions by clearing umask
+    // For shared (read) locks, we only need O_RDONLY access.
+    // For exclusive (write) locks, first open existing file with O_RDWR.
+    // Only create if missing to avoid sticky-dir O_CREAT restrictions in /tmp.
     if (lock_type_ == CuidLockType::EXCLUSIVE) {
-        mode_t old_umask = umask(0);
-        lock_fd_ = open(lock_file_path_.c_str(), open_flags, 0666);
-        umask(old_umask);
-        if (lock_fd_ >= 0) {
-            fchmod(lock_fd_, 0666);
+        lock_fd_ = open(lock_file_path_.c_str(), O_RDWR, 0666);
+        if (lock_fd_ < 0 && errno == ENOENT) {
+            mode_t old_umask = umask(0);
+            lock_fd_ = open(lock_file_path_.c_str(), O_RDWR | O_CREAT, 0666);
+            umask(old_umask);
+            if (lock_fd_ >= 0) {
+                fchmod(lock_fd_, 0666);
+            }
         }
     } else {
-        lock_fd_ = open(lock_file_path_.c_str(), open_flags, 0666);
+        lock_fd_ = open(lock_file_path_.c_str(), O_RDONLY, 0666);
     }
     
     // If file doesn't exist and we need a shared lock, try to create it
@@ -218,20 +218,21 @@ bool CuidFileLock::try_acquire() {
         return true;  // Already locked
     }
 
-    // For shared (read) locks, we only need O_RDONLY access
-    // For exclusive (write) locks, we need O_RDWR access
-    int open_flags = (lock_type_ == CuidLockType::EXCLUSIVE) ? (O_RDWR | O_CREAT) : O_RDONLY;
-    
-    // For exclusive locks (creating/writing), ensure proper permissions by clearing umask
+    // For shared (read) locks, we only need O_RDONLY access.
+    // For exclusive (write) locks, first open existing file with O_RDWR.
+    // Only create if missing to avoid sticky-dir O_CREAT restrictions in /tmp.
     if (lock_type_ == CuidLockType::EXCLUSIVE) {
-        mode_t old_umask = umask(0);
-        lock_fd_ = open(lock_file_path_.c_str(), open_flags, 0666);
-        umask(old_umask);
-        if (lock_fd_ >= 0) {
-            fchmod(lock_fd_, 0666);
+        lock_fd_ = open(lock_file_path_.c_str(), O_RDWR, 0666);
+        if (lock_fd_ < 0 && errno == ENOENT) {
+            mode_t old_umask = umask(0);
+            lock_fd_ = open(lock_file_path_.c_str(), O_RDWR | O_CREAT, 0666);
+            umask(old_umask);
+            if (lock_fd_ >= 0) {
+                fchmod(lock_fd_, 0666);
+            }
         }
     } else {
-        lock_fd_ = open(lock_file_path_.c_str(), open_flags, 0666);
+        lock_fd_ = open(lock_file_path_.c_str(), O_RDONLY, 0666);
     }
     
     // If file doesn't exist and we need a shared lock, try to create it

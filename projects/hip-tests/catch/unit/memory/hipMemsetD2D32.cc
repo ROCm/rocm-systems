@@ -42,7 +42,7 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-TEST_CASE("Unit_hipMemsetD2D32_BasicFunctional") {
+TEST_CASE(Unit_hipMemsetD2D32_BasicFunctional) {
   constexpr int memsetval = 15;
   constexpr size_t numH = 256;
   constexpr size_t numW = 256;
@@ -77,7 +77,7 @@ TEST_CASE("Unit_hipMemsetD2D32_BasicFunctional") {
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-TEST_CASE("Unit_hipMemsetD2D32_UnEvenRowsCols") {
+TEST_CASE(Unit_hipMemsetD2D32_UnEvenRowsCols) {
   constexpr int memsetval = 5;
   hipDeviceptr_t A_d;
   int rows, cols;
@@ -114,7 +114,7 @@ TEST_CASE("Unit_hipMemsetD2D32_UnEvenRowsCols") {
  * ------------------------
  * - HIP_VERSION >= 7.1
  */
-TEST_CASE("Unit_hipMemsetD2D32_NegTsts") {
+TEST_CASE(Unit_hipMemsetD2D32_NegTsts) {
   hipDeviceptr_t A_d;
   constexpr size_t numH = 256;
   constexpr size_t numW = 256;
