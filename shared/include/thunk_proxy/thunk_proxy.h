@@ -211,6 +211,9 @@ public:
   // Query RAS feature flags via KMD escape.
   ErrorCode QueryRasFeature(wsl::thunk::RasFeature *info) const;
 
+  // Query VBIOS info via KMD CWDDE escape.
+  ErrorCode QueryVBiosInfo(wsl::thunk::VBiosInfo *info) const;
+
   // Send a driver-escape packet on behalf of this GPU slot.
   ErrorCode Escape(void *pData, size_t dataSize, bool hardwareAccess = false) const;
 

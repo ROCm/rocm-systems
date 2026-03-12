@@ -37,6 +37,8 @@ public:
 
   ErrorCode QueryAsicInfo(AsicInfo *info) const;
 
+  ErrorCode QueryVBiosInfo(VBiosInfo *info) const;
+
   ErrorCode Escape(void *pData, size_t dataSize,
                    bool hardwareAccess = false) const;
 

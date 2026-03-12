@@ -37,6 +37,15 @@ struct BdfInfo {
   uint32_t function_number;
 };
 
+// VBIOS version and identification information from KMD CWDDE escape.
+struct VBiosInfo {
+  char name[256];          // product name from VBIOS ROM image
+  char build_date[256];    // BIOS date info (yyyy/mm/dd hh:mm)
+  char part_number[256];   // BIOS part number
+  char version[256];       // BIOS version (XXX.YYY.MMM.NNN)
+  char boot_firmware[256]; // (not filled via KMD escape)
+};
+
 // ASIC static information sourced from KMD adapter info.
 struct AsicInfo {
   uint64_t device_id;          // PCI device ID

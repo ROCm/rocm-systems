@@ -58,6 +58,10 @@ ErrorCode Device::QueryAsicInfo(AsicInfo *info) const {
   return device_ctx_->QueryAsicInfo(info);
 }
 
+ErrorCode Device::QueryVBiosInfo(VBiosInfo *info) const {
+  return device_ctx_->QueryVBiosInfo(info);
+}
+
 ErrorCode Device::Escape(void *pData, size_t dataSize, bool hardwareAccess) const {
   return device_ctx_->Escape(pData, dataSize, hardwareAccess);
 }
