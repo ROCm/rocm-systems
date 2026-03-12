@@ -10,11 +10,11 @@ This module provides both CLI and Python API access to AI-powered analysis of GP
 
 - **Local-first analysis** - Works offline, no API calls required by default
 - **Tier 0 source analysis** - Scan GPU source code without a trace database (`analyze_source()`)
-- **Optional LLM enhancement** - Natural language explanations via Anthropic Claude or OpenAI GPT
+- **Optional LLM enhancement** - Natural language explanations via Anthropic Claude, OpenAI GPT, any OpenAI-compatible private server, or local Ollama
 - **User-modifiable "fence"** - Customize LLM behavior by editing reference guide
 - **Privacy-focused** - Data sanitization for LLM mode (kernel names, grid sizes redacted)
 - **Multiple output formats** - Python objects, JSON, text, markdown, webview (interactive HTML)
-- **Interactive session** - Menu-driven analysis loop with LLM context awareness and session persistence
+- **Interactive session** - Menu-driven analysis loop with persistent multi-turn LLM conversation and session persistence
 - **Type-safe API** - Dataclass-based with type hints
 
 ## Quick Start
@@ -25,9 +25,17 @@ This module provides both CLI and Python API access to AI-powered analysis of GP
 # Basic analysis (local mode)
 rocpd analyze -i output.db
 
-# With LLM enhancement
+# With LLM enhancement — Anthropic or OpenAI
 export ANTHROPIC_API_KEY="sk-ant-..."
 rocpd analyze -i output.db --llm anthropic
+
+# Private/enterprise OpenAI-compatible server
+export ROCPD_LLM_PRIVATE_URL="https://llm-api.example.com/OpenAI"
+export ROCPD_LLM_PRIVATE_HEADERS='{"Ocp-Apim-Subscription-Key": "abc123", "api-version": "preview"}'
+rocpd analyze -i output.db --llm private --llm-private-model gpt-4o
+
+# Local Ollama model
+rocpd analyze -i output.db --llm-local ollama --llm-local-model llama3
 
 # With custom prompt
 rocpd analyze -i output.db --llm anthropic --prompt "Why is my matmul kernel slow?"
@@ -48,9 +56,10 @@ rocpd analyze --source-dir ./my_app --format json -d ./output -o plan
 # Combined: Tier 0 + Tier 1/2
 rocpd analyze -i output.db --source-dir ./my_app
 
-# Interactive menu session (LLM-context-aware, session-persistent)
+# Interactive menu session (persistent LLM conversation, session-persistent)
 rocpd analyze -i output.db --interactive
 rocpd analyze -i output.db --interactive --llm anthropic
+rocpd analyze --source-dir ./my_app --interactive "./my_app arg1" --llm private
 
 # Resume a previous interactive session
 rocpd analyze -i output.db --interactive --resume-session 2026-03-10_14-23-01_myapp
@@ -79,18 +88,19 @@ for rec in result.recommendations.high_priority:
 
 ```
 ai_analysis/
-├── __init__.py              # Public API exports
+├── __init__.py              # Public API exports (incl. LLMConversation, load_reference_guide)
 ├── api.py                   # Main API functions, AnalysisResult, SourceAnalysisResult
-├── llm_analyzer.py          # LLM integration with "fence" implementation
+├── llm_analyzer.py          # Single-shot LLM integration with "fence" implementation
+├── llm_conversation.py      # Persistent multi-turn LLM session (LLMConversation)
 ├── exceptions.py            # Exception classes (incl. SourceDirectoryNotFoundError)
 ├── source_analyzer.py       # Tier 0: static source code scanner
 ├── interactive.py           # Interactive session: InteractiveSession + WorkflowSession
-│                            #   SessionContext, SessionData, SessionStore dataclasses
+│                            #   SessionData, SessionStore dataclasses
 ├── tests/
 │   ├── __init__.py
 │   ├── test_api_standalone.py         # 23 AI analysis API unit tests
 │   ├── test_interactive.py            # 22 interactive session unit tests
-│   └── test_interactive_context.py    # 27 session context + persistence tests
+│   └── test_llm_conversation.py       # 51 LLMConversation + integration tests
 ├── share/
 │   └── llm-reference-guide.md  # LLM "fence" - user-modifiable reference guide
 ├── docs/
@@ -324,6 +334,21 @@ result = analyze_database(
   - Env var: `OPENAI_API_KEY`
   - Model: `gpt-4-turbo-preview`
 
+- **Private/enterprise server** (any OpenAI-compatible endpoint)
+  - Provider: `"private"` (`--llm private`)
+  - Required: `ROCPD_LLM_PRIVATE_URL` — base URL of the server
+  - Required: `ROCPD_LLM_PRIVATE_MODEL` or `--llm-private-model`
+  - Optional: `ROCPD_LLM_PRIVATE_API_KEY` (default: `"dummy"` for header-authenticated servers)
+  - Optional: `ROCPD_LLM_PRIVATE_HEADERS` — JSON or Python-dict of extra request headers
+    (e.g. `{"Ocp-Apim-Subscription-Key": "abc", "api-version": "preview"}`)
+    The `user` header is auto-set to `os.getlogin()` unless already present in `ROCPD_LLM_PRIVATE_HEADERS`
+  - Optional: `ROCPD_LLM_PRIVATE_VERIFY_SSL=0` — disable SSL verification (requires `httpx`)
+
+- **Local Ollama**
+  - Provider: `--llm-local ollama`
+  - Env var: `ROCPD_LLM_LOCAL_URL` (default: `http://localhost:11434/v1`)
+  - Env var: `ROCPD_LLM_LOCAL_MODEL` (default: `codellama:13b`)
+
 ### Data Sanitization
 
 When LLM mode is enabled, sensitive data is automatically redacted:
@@ -455,39 +480,45 @@ def load_trace_for_optiq(trace_path: str):
 
 ## Interactive Session
 
-The interactive session (`--interactive`) launches a menu-driven loop for iterative profiling analysis. It maintains LLM context across multiple `[a] Analyze` and `[o] Optimize` calls within the same session so the LLM doesn't repeat itself and builds on prior results.
+The interactive session (`--interactive`) launches a menu-driven loop for iterative profiling analysis. It maintains a **persistent multi-turn `LLMConversation`** across all calls within the same session — the LLM accumulates full message history and doesn't repeat itself.
 
 ### Session menu
 
 ```
 [p] Profile   — run a new rocprofv3 command and analyze the output .db
 [a] Analyze   — re-analyze the current .db and update recommendations
-[o] Optimize  — ask the LLM for optimization suggestions (context-aware)
+[o] Optimize  — ask the LLM for optimization suggestions
 [s] Save      — save session to disk
 [q] Quit
 ```
 
-### Session context
+### LLM conversation persistence
 
-`InteractiveSession` maintains a `SessionContext` object with:
-
-- **`analyses`** — compact snapshot of each `[a]` run (db filename, kernel%, idle%, top issue), capped at 5
-- **`suggestions_given`** — first 120 chars of each LLM response, capped at 3 (oldest dropped)
-- **`commands_run`** — `{cmd, exit_code}` for every profiling command run, capped at 5
-
-Before each `[o]` LLM call, a `### Session Context` block (≤~325 tokens) is prepended to the prompt so the LLM sees what analyses and suggestions have already been given.
+`InteractiveSession` holds one `LLMConversation` for the entire session:
+- All `[a]`, `[o]`, and code-edit LLM calls share the same conversation object
+- The LLM sees the full message history from earlier in the session
+- History is automatically compacted to stay within context limits (`--llm-compact-every N`, default 10 turns)
+- Source files are tracked: a file sent once is not re-transmitted on repeat calls (only new files are sent)
+- On `[s]` save, the conversation state is serialized into the session file
+- On `--resume-session`, the conversation is restored so the LLM picks up exactly where it left off
 
 ### AI-suggested commands
 
-After the LLM responds to `[o]`, the session scans the response text for `rocprofv3 ...` commands and combines them with structured commands from the current recommendation list. If any are found, the user is offered a numbered menu to run one immediately. If run, the resulting `.db` is auto-analyzed and feeds back into `SessionContext`.
+After the LLM responds to `[o]`, the session scans the response text for `rocprofv3 ...` commands and combines them with structured commands from the current recommendation list. If any are found, the user is offered a numbered menu to run one immediately. If run, the resulting `.db` is auto-analyzed and the LLM is notified.
 
 ### Session persistence
 
-Sessions are saved as JSON under `~/.rocpd/sessions/` by default. `SessionContext` is serialized into the session file on every `[s]` save and `[q] save-and-quit`. On resume (`--resume-session <id>`), `SessionContext` is restored so the LLM picks up where it left off.
+Sessions are saved as JSON under `~/.rocpd/sessions/` by default.
 
 ```bash
 # Start a new session
 rocpd analyze -i output.db --interactive --llm anthropic
+
+# With private enterprise server
+rocpd analyze -i output.db --interactive --llm private
+
+# Control compaction interval (default 10 turns)
+rocpd analyze -i output.db --interactive --llm anthropic --llm-compact-every 5
 
 # Resume an existing session
 rocpd analyze -i output.db --interactive --resume-session 2026-03-10_my_app
@@ -509,7 +540,9 @@ cd /tmp && PYTHONPATH="${ROCPD_SYS}" python3 -m pytest ${TEST_DIR} --noconftest 
 
 # Interactive session tests only
 cd /tmp && PYTHONPATH="${ROCPD_SYS}" python3 -m pytest ${TEST_DIR}/test_interactive.py --noconftest -v
-cd /tmp && PYTHONPATH="${ROCPD_SYS}" python3 -m pytest ${TEST_DIR}/test_interactive_context.py --noconftest -v
+
+# LLMConversation + integration tests
+cd /tmp && PYTHONPATH="${ROCPD_SYS}" python3 -m pytest ${TEST_DIR}/test_llm_conversation.py --noconftest -v
 ```
 
 ### Integration Tests
@@ -537,9 +570,19 @@ rocpd analyze -i output.db --llm anthropic
 
 ### Environment Variables
 
-- `ANTHROPIC_API_KEY` - Anthropic Claude API key
-- `OPENAI_API_KEY` - OpenAI GPT API key
-- `ROCPD_LLM_REFERENCE_GUIDE` - Path to custom reference guide
+| Variable | Purpose |
+|---|---|
+| `ANTHROPIC_API_KEY` | Anthropic Claude API key |
+| `OPENAI_API_KEY` | OpenAI GPT API key |
+| `ROCPD_LLM_MODEL` | Override default model for anthropic or openai provider |
+| `ROCPD_LLM_REFERENCE_GUIDE` | Path to custom reference guide (overrides package default) |
+| `ROCPD_LLM_PRIVATE_URL` | Base URL for private/enterprise OpenAI-compatible server (required for `--llm private`) |
+| `ROCPD_LLM_PRIVATE_MODEL` | Model name for private server |
+| `ROCPD_LLM_PRIVATE_API_KEY` | API key for private server (default: `"dummy"`) |
+| `ROCPD_LLM_PRIVATE_HEADERS` | JSON or Python-dict of extra HTTP request headers (e.g. `{"Ocp-Apim-Subscription-Key": "..."}`) |
+| `ROCPD_LLM_PRIVATE_VERIFY_SSL` | Set to `0` or `false` to disable SSL cert verification (requires `httpx`) |
+| `ROCPD_LLM_LOCAL_URL` | Base URL for local Ollama endpoint (default: `http://localhost:11434/v1`) |
+| `ROCPD_LLM_LOCAL_MODEL` | Model name for local Ollama (default: `codellama:13b`) |
 
 ### Reference Guide Location
 

@@ -28,10 +28,11 @@ The rocpd AI Analysis API provides programmatic access to AI-powered GPU perform
 
 - ✅ **Local-first analysis** - Works offline, no API calls required
 - ✅ **Tier 0 source analysis** - Scan source code without a trace database (`analyze_source()`)
-- ✅ **Optional LLM enhancement** - Natural language explanations via Anthropic Claude or OpenAI GPT
+- ✅ **Optional LLM enhancement** - Natural language explanations via Anthropic Claude, OpenAI GPT, any OpenAI-compatible private server, or local Ollama
 - ✅ **Multiple output formats** - Python objects, JSON, text, markdown, webview (interactive HTML)
 - ✅ **Privacy-focused** - Data sanitization for LLM mode
 - ✅ **User-modifiable** - Customize LLM behavior via reference guide
+- ✅ **Persistent conversations** - `LLMConversation` class for multi-turn streaming sessions
 - ✅ **Type-safe** - Dataclass-based API with type hints
 
 ---
@@ -825,7 +826,27 @@ result = analyze_database(
     `max_completion_tokens` instead of `max_tokens`. This is handled automatically —
     `max_completion_tokens` is tried first and falls back to `max_tokens` if needed.
 
-**Override the model at runtime** (both providers):
+- **Private/enterprise server** (any OpenAI-compatible endpoint)
+  - Provider: `"private"` (`--llm private`)
+  - Required env var: `ROCPD_LLM_PRIVATE_URL` — base URL (e.g. `https://llm-api.example.com/OpenAI`)
+  - Required: `ROCPD_LLM_PRIVATE_MODEL` or `--llm-private-model`
+  - Optional: `ROCPD_LLM_PRIVATE_API_KEY` (default: `"dummy"` for header-authenticated servers)
+  - Optional: `ROCPD_LLM_PRIVATE_HEADERS` — JSON or Python-dict of extra request headers;
+    the `user` header is auto-set to `os.getlogin()` unless already provided
+  - Optional: `ROCPD_LLM_PRIVATE_VERIFY_SSL=0` — disable SSL certificate verification (requires `httpx`)
+
+  ```bash
+  export ROCPD_LLM_PRIVATE_URL="https://llm-api.example.com/OpenAI"
+  export ROCPD_LLM_PRIVATE_HEADERS='{"Ocp-Apim-Subscription-Key": "abc123", "api-version": "preview"}'
+  rocpd analyze -i output.db --llm private --llm-private-model gpt-4o
+  ```
+
+- **Local Ollama**
+  - Provider: `--llm-local ollama`
+  - Env var: `ROCPD_LLM_LOCAL_URL` (default: `http://localhost:11434/v1`)
+  - Env var: `ROCPD_LLM_LOCAL_MODEL` (default: `codellama:13b`)
+
+**Override the model at runtime** (anthropic/openai providers):
 
 ```bash
 export ROCPD_LLM_MODEL="claude-opus-4-6"   # Use a different Anthropic model
@@ -1089,6 +1110,82 @@ compare_traces(Path("baseline.db"), Path("optimized.db"))
 
 ---
 
+### `LLMConversation` — Persistent Multi-Turn Streaming Session
+
+`LLMConversation` provides a stateful multi-turn LLM session with streaming output,
+automatic compaction, and disk archiving. It is used internally by `InteractiveSession`
+and is also available as a public API for custom workflows.
+
+```python
+from rocpd.ai_analysis import LLMConversation
+
+conv = LLMConversation(
+    provider="anthropic",      # "anthropic" | "openai" | "private" | "local"
+    api_key=None,              # or pass directly; falls back to env vars
+    model=None,                # or override default model
+    compact_every=10,          # compact history every N turns (default 10)
+    keep_recent_turns=6,       # keep this many turns after compaction
+    history_path=None,         # optional Path for JSONL disk archive
+)
+
+# Set the system prompt once (include the reference guide / "fence" here)
+from rocpd.ai_analysis import load_reference_guide
+conv.initialize("You are an AMD GPU expert.\n\n" + load_reference_guide())
+
+# Stream a response token-by-token
+response = conv.send(
+    "What is the bottleneck in this trace?",
+    on_token=lambda t: print(t, end="", flush=True),
+)
+
+# Serialize / restore across sessions
+state = conv.to_dict()                              # does NOT include api_key
+conv2 = LLMConversation.from_dict(state, api_key="sk-ant-...")
+```
+
+**Constructor parameters:**
+
+| Parameter | Default | Description |
+|---|---|---|
+| `provider` | — | `"anthropic"`, `"openai"`, `"private"`, or `"local"` |
+| `api_key` | `None` | API key; falls back to `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `ROCPD_LLM_PRIVATE_API_KEY` |
+| `model` | `None` | Model override; falls back to `ROCPD_LLM_MODEL` then built-in default |
+| `compact_every` | `10` | Trigger LLM-based history compaction every N turns |
+| `keep_recent_turns` | `6` | Number of recent turns preserved verbatim after compaction |
+| `history_path` | `None` | JSONL file path for append-only message archive |
+
+**Methods:**
+
+- `initialize(system_prompt: str)` — Set system prompt (call once before `send()`)
+- `send(user_message, *, max_tokens=4096, on_token=None) -> str` — Append user turn, stream response
+- `to_dict() -> dict` — Serialize state (api_key excluded)
+- `from_dict(d, *, api_key=None, model=None) -> LLMConversation` — Restore from serialized state
+
+**Properties:** `turn_count: int`, `messages: List[dict]`
+
+---
+
+### `load_reference_guide()` — Load the LLM Fence
+
+Returns the full content of the LLM reference guide (the "fence") as a string.
+Useful when building a custom system prompt for `LLMConversation.initialize()`.
+
+```python
+from rocpd.ai_analysis import load_reference_guide
+
+guide = load_reference_guide()
+# guide is the full markdown text of share/llm-reference-guide.md
+
+conv.initialize("You are an expert AMD GPU engineer.\n\n" + guide)
+```
+
+The guide is loaded from (in order):
+1. `ROCPD_LLM_REFERENCE_GUIDE` environment variable path
+2. Module-relative `share/llm-reference-guide.md`
+3. `/opt/rocm/share/rocprofiler-sdk/llm-reference-guide.md`
+
+---
+
 ### Context-Aware LLM Guide Loading
 
 `LLMAnalyzer` accepts an optional `AnalysisContext` to reduce the reference guide
@@ -1241,6 +1338,31 @@ The `analyze_source_code()` function in `analyze.py` (CLI path) now raises
 `SourceDirectoryNotFoundError` (not a generic `Exception`) when the `source_dir`
 argument does not exist or is not a directory. This matches the behavior of the
 Python API's `analyze_source()`.
+
+### Interactive Session (LLM Providers)
+
+**`"private"` provider now correctly routed in `_apply_suggestions_via_llm` and `_llm_rewrite_file`**
+
+Previously, both `InteractiveSession._apply_suggestions_via_llm` and
+`WorkflowSession._llm_rewrite_file` dispatched any unrecognized provider to
+`_call_local()` (Ollama). This caused the `"private"` provider to attempt a connection
+to `http://localhost:11434/v1` and fail with a connection error instead of calling the
+configured enterprise server.
+
+Both methods now explicitly handle `"private"` by routing to `_call_private()`.
+
+**`InteractiveSession` uses `LLMConversation` for persistent multi-turn context**
+
+The previous `SessionContext` dataclass (compact per-session summary: analyses, suggestions, commands)
+has been replaced by a persistent `LLMConversation` object that holds the full message history.
+All LLM calls within a session (`[o]`, `[a]` annotations, code rewrites) share the same conversation
+so the LLM accumulates full context rather than receiving a condensed summary block.
+
+Key behavioral changes:
+- History is compacted via `--llm-compact-every N` (default 10 turns) using an LLM-generated summary, not a rule-based snippet
+- Source files are tracked in `_sent_source_files`; a file already sent in this session is not re-transmitted
+- Conversation state (`conv.to_dict()`) is serialized into the session JSON on `[s]` save
+- On `--resume-session`, the conversation is restored with `LLMConversation.from_dict()`
 
 ### Source Scanner
 
