@@ -265,39 +265,6 @@ void Timestamp::ExtractSignalTiming(ProfilingSignal* signal,
 bool HsaAmdSignalHandler(hsa_signal_value_t value, void* arg) {
   Timestamp* ts = reinterpret_cast<Timestamp*>(arg);
 
-  if (amd::activity_prof::IsEnabled(OP_ID_DISPATCH)) {
-    amd::Command* head = ts->getParsedCommand();
-    if (head == nullptr) {
-      head = ts->command().GetBatchHead();
-    }
-    while (head != nullptr) {
-      if (!head->data().empty()) {
-        for (auto i = 0; i < head->data().size(); i++) {
-          Timestamp* headTs = reinterpret_cast<Timestamp*>(head->data()[i]);
-          ts->setParsedCommand(head);
-          for (auto it : headTs->Signals()) {
-            hsa_signal_value_t complete_val = (headTs->GetCallbackSignal().handle != 0) ? 1 : 0;
-            if (int64_t val = Hsa::signal_load_relaxed(it->signal_) > complete_val) {
-              hsa_status_t result = Hsa::signal_async_handler(
-                  headTs->Signals()[0]->signal_, HSA_SIGNAL_CONDITION_LT, kInitSignalValueOne,
-                  &HsaAmdSignalHandler, ts);
-              if (HSA_STATUS_SUCCESS != result) {
-                LogError("hsa_amd_signal_async_handler() failed to requeue the handler!");
-              } else {
-                ClPrint(amd::LOG_INFO, amd::LOG_SIG,
-                        "Requeue handler : value(%d), timestamp(%p),"
-                        "handle(0x%lx)",
-                        static_cast<uint32_t>(val), headTs,
-                        headTs->HwProfiling() ? headTs->Signals()[0]->signal_.handle : 0);
-              }
-              return false;
-            }
-          }
-        }
-      }
-      head = head->getNext();
-    }
-  }
   ClPrint(amd::LOG_INFO, amd::LOG_SIG, "Handler: value(%d), timestamp(%p), handle(0x%lx)",
           static_cast<uint32_t>(value), arg,
           ts->HwProfiling() ? ts->Signals()[0]->signal_.handle : 0);
@@ -2601,7 +2568,7 @@ bool VirtualGPU::copyMemory(cl_command_type type, amd::Memory& srcMem, amd::Memo
         realSrcOrigin.c[0] *= elemSize;
       }
       result = blitMgr().copyBufferToImage(*srcDevMem, *dstDevMem, realSrcOrigin, dstOrigin, size,
-                                   entire, srcRect.rowPitch_, srcRect.slicePitch_, copyMetadata);       
+                                   entire, srcRect.rowPitch_, srcRect.slicePitch_, copyMetadata);
       break;
     }
     default:
