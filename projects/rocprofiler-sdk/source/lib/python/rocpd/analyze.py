@@ -4894,10 +4894,13 @@ def add_args(parser: argparse.ArgumentParser):
     llm_options.add_argument(
         "--llm",
         type=str,
-        choices=["anthropic", "openai"],
+        choices=["anthropic", "openai", "private"],
         default=None,
-        help="Enable LLM-powered analysis enhancement. Choices: 'anthropic' (Claude) or 'openai' (GPT). "
+        help="Enable LLM-powered analysis enhancement. Choices: 'anthropic' (Claude), 'openai' (GPT), "
+             "or 'private' (any OpenAI-compatible private/enterprise server). "
              "Requires API key set via environment variable or --llm-api-key option. "
+             "For 'private': set ROCPD_LLM_PRIVATE_URL, ROCPD_LLM_PRIVATE_MODEL, and optionally "
+             "ROCPD_LLM_PRIVATE_HEADERS (JSON). "
              "Local analysis always runs first; LLM provides additional natural language insights.",
     )
 
@@ -5009,11 +5012,35 @@ def add_args(parser: argparse.ArgumentParser):
         ),
     )
 
+    llm_options.add_argument(
+        "--llm-private-url",
+        type=str,
+        default=None,
+        dest="llm_private_url",
+        help=(
+            "Base URL for a private/enterprise OpenAI-compatible LLM server "
+            "(used with --llm private). E.g. https://my-apim.example.com/openai/deployments/gpt4. "
+            "Can also be set via ROCPD_LLM_PRIVATE_URL environment variable."
+        ),
+    )
+
+    llm_options.add_argument(
+        "--llm-private-model",
+        type=str,
+        default=None,
+        dest="llm_private_model",
+        help=(
+            "Model name for private LLM server (used with --llm private). "
+            "Can also be set via ROCPD_LLM_PRIVATE_MODEL environment variable."
+        ),
+    )
+
     def process_args(input: RocpdImportData, args: argparse.Namespace):
         """Process and return valid arguments as dictionary."""
         valid_args = ["source_dir", "prompt", "top_kernels", "format", "min_duration",
                       "llm", "llm_api_key", "llm_model", "llm_thinking", "llm_compact_every", "verbose", "interactive",
-                      "resume_session", "llm_local", "llm_local_model"]
+                      "resume_session", "llm_local", "llm_local_model",
+                      "llm_private_url", "llm_private_model"]
         ret = {}
         for itr in valid_args:
             if hasattr(args, itr):
@@ -5074,6 +5101,12 @@ def execute(input: Optional[RocpdImportData], config: Optional[output_config.out
     # Map 'format' CLI key → 'output_format' parameter expected by analyze_performance
     if "format" in kwargs:
         kwargs["output_format"] = kwargs.pop("format")
+
+    # Inject private-server CLI args into env so downstream code picks them up
+    if kwargs.get("llm_private_url"):
+        os.environ.setdefault("ROCPD_LLM_PRIVATE_URL",   kwargs["llm_private_url"])
+    if kwargs.get("llm_private_model"):
+        os.environ.setdefault("ROCPD_LLM_PRIVATE_MODEL", kwargs["llm_private_model"])
 
     # In interactive mode: skip the upfront LLM call entirely — the user will
     # trigger LLM requests explicitly via [p] and [o] inside the session.

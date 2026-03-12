@@ -16,6 +16,53 @@ _DEFAULT_LOCAL_URL = "http://localhost:11434/v1"
 _DEFAULT_LOCAL_MODEL = "codellama:13b"
 
 
+def _build_private_client(api_key: Optional[str], model_override: Optional[str]):
+    """Build an OpenAI client for a private/enterprise LLM server.
+
+    Reads configuration from environment variables:
+        ROCPD_LLM_PRIVATE_URL     Base URL of the private server (required)
+        ROCPD_LLM_PRIVATE_MODEL   Model name to use
+        ROCPD_LLM_PRIVATE_API_KEY API key (default: "dummy" for header-auth servers)
+        ROCPD_LLM_PRIVATE_HEADERS JSON object of extra request headers, e.g.
+                                   '{"Ocp-Apim-Subscription-Key": "abc123"}'
+                                   The "user" header is auto-set to os.getlogin()
+                                   unless already present in ROCPD_LLM_PRIVATE_HEADERS.
+    """
+    try:
+        import openai as _openai
+    except ImportError:
+        raise ImportError("openai package not installed. Run: pip install openai")
+
+    base_url = os.environ.get("ROCPD_LLM_PRIVATE_URL", "")
+    if not base_url:
+        raise ValueError(
+            "ROCPD_LLM_PRIVATE_URL is not set. "
+            "Export it to point at your private LLM server, e.g.:\n"
+            "  export ROCPD_LLM_PRIVATE_URL=https://my-apim.example.com/openai/deployments/gpt4"
+        )
+    key = api_key or os.environ.get("ROCPD_LLM_PRIVATE_API_KEY", "dummy")
+    model = model_override or os.environ.get("ROCPD_LLM_PRIVATE_MODEL", "")
+
+    # Build headers: start with user auto-header, then overlay env-var headers
+    headers: Dict[str, str] = {}
+    try:
+        headers["user"] = os.getlogin()
+    except OSError:
+        pass  # getlogin() can fail in some CI/container environments
+    raw_headers = os.environ.get("ROCPD_LLM_PRIVATE_HEADERS", "")
+    if raw_headers:
+        try:
+            headers.update(json.loads(raw_headers))
+        except json.JSONDecodeError as e:
+            raise ValueError(
+                f"ROCPD_LLM_PRIVATE_HEADERS is not valid JSON: {e}\n"
+                f"Value was: {raw_headers!r}"
+            )
+
+    client = _openai.OpenAI(api_key=key, base_url=base_url, default_headers=headers)
+    return client, model
+
+
 class LLMConversation:
     """Persistent multi-turn LLM session with streaming and LLM-based compaction.
 
@@ -34,7 +81,7 @@ class LLMConversation:
         keep_recent_turns: int = 6,
         history_path: Optional[Path] = None,
     ) -> None:
-        valid = {"anthropic", "openai", "local"}
+        valid = {"anthropic", "openai", "local", "private"}
         if provider not in valid:
             raise ValueError(
                 f"Unknown provider: {provider!r}. Must be one of: {', '.join(sorted(valid))}"
@@ -138,6 +185,13 @@ class LLMConversation:
             base_url = os.environ.get("ROCPD_LLM_LOCAL_URL", _DEFAULT_LOCAL_URL)
             model = self._model or os.environ.get("ROCPD_LLM_LOCAL_MODEL", _DEFAULT_LOCAL_MODEL)
             client = _openai.OpenAI(api_key="ignored", base_url=base_url)
+        elif self._provider == "private":
+            client, model = _build_private_client(self._api_key, self._model)
+            if not model:
+                raise ValueError(
+                    "No model specified for private provider. "
+                    "Set ROCPD_LLM_PRIVATE_MODEL or pass --llm-private-model."
+                )
         else:
             api_key = self._api_key or os.environ.get("OPENAI_API_KEY", "")
             if not api_key:
@@ -255,6 +309,8 @@ class LLMConversation:
                 base_url=os.environ.get("ROCPD_LLM_LOCAL_URL", _DEFAULT_LOCAL_URL),
             )
             model = self._model or os.environ.get("ROCPD_LLM_LOCAL_MODEL", _DEFAULT_LOCAL_MODEL)
+        elif self._provider == "private":
+            client, model = _build_private_client(self._api_key, self._model)
         else:
             client = _openai.OpenAI(api_key=self._api_key or os.environ.get("OPENAI_API_KEY", ""))
             model = self._model or os.environ.get("ROCPD_LLM_MODEL") or DEFAULT_OPENAI_MODEL

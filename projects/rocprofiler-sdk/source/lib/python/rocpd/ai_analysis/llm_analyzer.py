@@ -272,7 +272,7 @@ class LLMAnalyzer:
                 (claude-opus-4, claude-sonnet-4-5, claude-3-7-sonnet).
                 Can also be set via ROCPD_LLM_THINKING environment variable.
         """
-        valid_providers = {"anthropic", "openai", "local"}
+        valid_providers = {"anthropic", "openai", "local", "private"}
         if provider not in valid_providers:
             raise ValueError(
                 f"Unknown provider: {provider!r}. "
@@ -322,6 +322,8 @@ class LLMAnalyzer:
             key = os.getenv("OPENAI_API_KEY", "")
         elif self.provider == "local":
             return os.environ.get("ROCPD_LLM_LOCAL_API_KEY", "ignored")
+        elif self.provider == "private":
+            return os.environ.get("ROCPD_LLM_PRIVATE_API_KEY", "dummy")
         else:
             raise ValueError(f"Unknown provider: {self.provider}")
 
@@ -679,6 +681,8 @@ Follow the reference guide strictly for analysis methodology and output format."
             return self._call_openai(system_prompt, user_prompt)
         elif self.provider == "local":
             return self._call_local(system_prompt, user_prompt)
+        elif self.provider == "private":
+            return self._call_private(system_prompt, user_prompt)
         else:
             raise ValueError(f"Unknown provider: {self.provider}")
 
@@ -869,6 +873,80 @@ Follow the reference guide strictly for analysis methodology and output format."
                 f"Error: {exc}"
             ) from exc
 
+    def _call_private(self, system_prompt: str, user_prompt: str) -> str:
+        """Call a private/enterprise OpenAI-compatible LLM server.
+
+        Configuration via environment variables:
+            ROCPD_LLM_PRIVATE_URL     Base URL (required)
+            ROCPD_LLM_PRIVATE_MODEL   Model name (required)
+            ROCPD_LLM_PRIVATE_API_KEY API key (default: "dummy")
+            ROCPD_LLM_PRIVATE_HEADERS JSON object of extra request headers
+                                       (the "user" header defaults to os.getlogin())
+        """
+        try:
+            import openai
+            import json as _json
+        except ImportError:
+            raise ImportError("openai package required for private LLM: pip install openai")
+
+        base_url = os.environ.get("ROCPD_LLM_PRIVATE_URL", "")
+        if not base_url:
+            raise ValueError(
+                "ROCPD_LLM_PRIVATE_URL is not set. "
+                "Export it to point at your private LLM server."
+            )
+        model = self.model or os.environ.get("ROCPD_LLM_PRIVATE_MODEL", "")
+        if not model:
+            raise ValueError(
+                "No model specified for private provider. "
+                "Set ROCPD_LLM_PRIVATE_MODEL or pass --llm-private-model."
+            )
+        key = self.api_key or os.environ.get("ROCPD_LLM_PRIVATE_API_KEY", "dummy")
+
+        headers: dict = {}
+        try:
+            headers["user"] = os.getlogin()
+        except OSError:
+            pass
+        raw_headers = os.environ.get("ROCPD_LLM_PRIVATE_HEADERS", "")
+        if raw_headers:
+            try:
+                headers.update(_json.loads(raw_headers))
+            except _json.JSONDecodeError as e:
+                raise ValueError(
+                    f"ROCPD_LLM_PRIVATE_HEADERS is not valid JSON: {e}"
+                )
+
+        client = openai.OpenAI(api_key=key, base_url=base_url, default_headers=headers)
+        try:
+            resp = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user",   "content": user_prompt},
+                ],
+                max_completion_tokens=4096,
+            )
+            return resp.choices[0].message.content or ""
+        except openai.BadRequestError as e:
+            if "max_completion_tokens" in str(e):
+                resp = client.chat.completions.create(
+                    model=model,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user",   "content": user_prompt},
+                    ],
+                    max_tokens=4096,
+                )
+                return resp.choices[0].message.content or ""
+            raise
+        except Exception as exc:
+            raise RuntimeError(
+                f"Private LLM request failed ({base_url}). "
+                f"Check ROCPD_LLM_PRIVATE_URL, ROCPD_LLM_PRIVATE_HEADERS. "
+                f"Error: {exc}"
+            ) from exc
+
     def summarize_source_file(self, filename: str, content: str) -> str:
         """Stage 1: summarize a GPU source file to its key patterns (local LLM)."""
         system = (
@@ -884,6 +962,8 @@ Follow the reference guide strictly for analysis methodology and output format."
             return self._call_anthropic(system, user)
         elif self.provider == "openai":
             return self._call_openai(system, user)
+        elif self.provider == "private":
+            return self._call_private(system, user)
         return ""
 
     def annotate_profiling_plan(self, metadata: dict) -> str:
