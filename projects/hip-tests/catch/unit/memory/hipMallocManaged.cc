@@ -57,7 +57,7 @@ static unsigned threadsPerBlock{256};
 /*
    This testcase verifies the hipMallocManaged basic scenario - supported on all devices
  */
-TEST_CASE("Unit_hipMallocManaged_Basic") {
+TEST_CASE(Unit_hipMallocManaged_Basic) {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
     WARN(
@@ -79,7 +79,7 @@ TEST_CASE("Unit_hipMallocManaged_Basic") {
    This testcase verifies the hipMallocManaged advanced scenario - supported only on HMM enabled
    devices
  */
-TEST_CASE("Unit_hipMallocManaged_Advanced") {
+TEST_CASE(Unit_hipMallocManaged_Advanced) {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
     HipTest::HIP_SKIP_TEST("GPU doesn't support managed memory so skipping test.");
@@ -151,7 +151,7 @@ TEST_CASE("Unit_hipMallocManaged_Advanced") {
    This testcase verifies that hipMallocManaged returns an OutOfMemory error for allocations much
    larger than the available memory - supported on all devices
  */
-TEST_CASE("Unit_hipMallocManaged_Large") {
+TEST_CASE(Unit_hipMallocManaged_Large) {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
     WARN(

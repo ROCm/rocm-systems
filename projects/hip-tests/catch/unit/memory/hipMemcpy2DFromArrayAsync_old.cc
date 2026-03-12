@@ -32,8 +32,7 @@ static constexpr auto NUM_H{10};
            then A_d-->E_h  in GPU1
  * OUTPUT: validating the result by comparing A_h and E_h
  */
-TEST_CASE("Unit_hipMemcpy2DFromArrayAsync_multiDevicePinnedHostMem",
-          "[multigpu]") {
+TEST_CASE(Unit_hipMemcpy2DFromArrayAsync_multiDevicePinnedHostMem) {
   CHECK_IMAGE_SUPPORT
 
   int numDevices = 0;
@@ -92,8 +91,7 @@ TEST_CASE("Unit_hipMemcpy2DFromArrayAsync_multiDevicePinnedHostMem",
  *         --> A_h host variable
  *         and verifying A_h with Phi
  * */
-TEST_CASE("Unit_hipMemcpy2DFromArrayAsync_multiDeviceContextChange",
-          "[multigpu]") {
+TEST_CASE(Unit_hipMemcpy2DFromArrayAsync_multiDeviceContextChange) {
   CHECK_IMAGE_SUPPORT
 
   int numDevices = 0;
@@ -149,7 +147,7 @@ TEST_CASE("Unit_hipMemcpy2DFromArrayAsync_multiDeviceContextChange",
 * ------------------------
 *  - HIP_VERSION >= 6.0
 */
-TEST_CASE("Unit_hipMemcpy2DFromArrayAsync_Capture") {
+TEST_CASE(Unit_hipMemcpy2DFromArrayAsync_Capture) {
   CHECK_IMAGE_SUPPORT
 
   constexpr int kTestSizes[] = {3, 4, 100};
