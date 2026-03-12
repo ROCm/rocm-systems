@@ -271,10 +271,9 @@ mi_gpu_spec:
         perfmon_config:
           SQ: 8
           TA: 2
-          GL2C: 4
           GRBM: 2
           CPC:  2
-          GCEA: 8
+          GCEA: 2
           TCP:  4
           TA:   2
           SPI:  6
@@ -298,13 +297,12 @@ mi_gpu_spec:
         perfmon_config:
           SQ: 8
           TA: 2
-          GL2C: 4
           GRBM: 2
           CPC:  2
-          GCEA: 8
+          GCEA: 2
           TCP:  4
           TA:   2
-          SPI:  2
+          SPI:  6
           GL1A: 4
           GL1C: 4
           GL2A: 4
