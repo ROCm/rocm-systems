@@ -4521,24 +4521,21 @@ amdsmi_status_t
 amdsmi_get_gpu_activity(amdsmi_processor_handle processor_handle, amdsmi_engine_usage_t *info) {
     AMDSMI_CHECK_INIT();
 
-    if (info == nullptr) {
+    if (info == nullptr)
         return AMDSMI_STATUS_INVAL;
-    }
 
-    amdsmi_gpu_metrics_t metrics = {};
-    amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
-    amdsmi_status_t r = get_gpu_device_from_handle(processor_handle, &gpu_device);
-    if (r != AMDSMI_STATUS_SUCCESS)
-        return r;
-    amdsmi_status_t status;
-    status =  amdsmi_get_gpu_metrics_info(processor_handle, &metrics);
-    if (status != AMDSMI_STATUS_SUCCESS) {
-        return status;
-    }
-    info->gfx_activity = metrics.average_gfx_activity;
-    info->mm_activity = metrics.average_mm_activity;
-    info->umc_activity = metrics.average_umc_activity;
+    auto device = reinterpret_cast<Device *>(processor_handle);
+    if (device == nullptr)
+        return AMDSMI_STATUS_INVAL;
 
+    GpuActivity activity{};
+    auto code = device->QueryGpuActivity(&activity);
+    if (code != ErrorCode::Success)
+        return translateCodeToSmiStatus(code);
+
+    info->gfx_activity = activity.gfx_activity;
+    info->umc_activity = activity.umc_activity;
+    info->mm_activity  = activity.mm_activity;
     return AMDSMI_STATUS_SUCCESS;
 }
 
