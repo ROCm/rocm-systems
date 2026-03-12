@@ -40,7 +40,7 @@ ncclResult_t ncclTopoReconcileGrowChannels(struct ncclComm* comm, int* value) {
 #endif
 }
 
-// Compact tree optimization for sorted domain ordering (MI350X only)
+// Compact tree optimization for sorted domain ordering
 NCCL_PARAM(TreeCompact, "TREE_COMPACT", 0);
 
 /******************************************************************/
@@ -609,12 +609,12 @@ static ncclResult_t connectTrees(struct ncclComm* comm, int* treeToParent, int* 
   int t0u, t0d0, t0d1, t0ChildType = 0, t1u, t1d0, t1d1, t1ChildType = 0;
   int *ttp, *ttc0, *ttc1;
 
-  // Use compact tree for MI350X when enabled via NCCL_TREE_COMPACT=1
-  const bool isGfx950 = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950");
-  if (isGfx950 && ncclParamTreeCompact()) {
+  // Use compact tree when enabled via NCCL_TREE_COMPACT=1
+  const bool useCompactTree = ncclParamTreeCompact();
+  if (useCompactTree) {
     NCCLCHECK(ncclGetDtreeCompact(nNodes, node, &t0u, &t0d0, &t0d1, &t0ChildType,
                                    &t1u, &t1d0, &t1d1, &t1ChildType));
-    INFO(NCCL_GRAPH, "Using compact tree for MI350X: nNodes=%d, node=%d", nNodes, node);
+    INFO(NCCL_GRAPH, "Using compact tree: nNodes=%d, node=%d", nNodes, node);
   } else {
     NCCLCHECK(ncclGetDtree(nNodes, node, &t0u, &t0d0, &t0d1, &t0ChildType, &t1u, &t1d0, &t1d1, &t1ChildType));
   }
@@ -786,9 +786,9 @@ static ncclResult_t connectNvls(struct ncclComm* comm, int* nvlsHeads, int nHead
   int tree0Parent, tree0Child0, tree0Child1, tree1Parent, tree1Child0, tree1Child1;
   int pc0, pc1; // ignored
 
-  // Use compact tree for MI350X when enabled via NCCL_TREE_COMPACT=1
-  const bool isGfx950Nvls = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950");
-  if (isGfx950Nvls && ncclParamTreeCompact()) {
+  // Use compact tree when enabled via NCCL_TREE_COMPACT=1
+  const bool useCompactTree = ncclParamTreeCompact();
+  if (useCompactTree) {
     NCCLCHECK(ncclGetDtreeCompact(comm->nNodes, comm->node,
           &tree0Parent, &tree0Child0, &tree0Child1, &pc0,
           &tree1Parent, &tree1Child0, &tree1Child1, &pc1));
@@ -961,13 +961,13 @@ ncclResult_t connectRailOptimizedTrees(struct ncclComm* comm, int* treeToParent,
   // Compute parent/child nodes for this current node, for uptree and downtree
   int parentNodes[2], child0Nodes[2], child1Nodes[2], childTypes[2];
 
-  // Use compact tree for MI350X when enabled via NCCL_TREE_COMPACT=1
-  const bool isGfx950RailOpt = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950");
-  if (isGfx950RailOpt && ncclParamTreeCompact()) {
+  // Use compact tree when enabled via NCCL_TREE_COMPACT=1
+  const bool useCompactTree = ncclParamTreeCompact();
+  if (useCompactTree) {
     NCCLCHECK(ncclGetDtreeCompact(nNodes, node,
                                    &parentNodes[0], &child0Nodes[0], &child1Nodes[0], &childTypes[0],
                                    &parentNodes[1], &child0Nodes[1], &child1Nodes[1], &childTypes[1]));
-    INFO(NCCL_GRAPH, "Using compact tree (rail-optimized) for MI350X: nNodes=%d, node=%d", nNodes, node);
+    INFO(NCCL_GRAPH, "Using compact tree (rail-optimized): nNodes=%d, node=%d", nNodes, node);
   } else {
     NCCLCHECK(ncclGetDtree(nNodes, node,
                            &parentNodes[0], &child0Nodes[0], &child1Nodes[0], &childTypes[0],
@@ -984,7 +984,6 @@ ncclResult_t connectRailOptimizedTrees(struct ncclComm* comm, int* treeToParent,
     int* treeToChild = (childTypes[treeDir] == 0) ? treeToChild0 : treeToChild1;
 
     // Compute the parity for nodes for this tree direction
-    bool useCompactTree = isGfx950RailOpt && ncclParamTreeCompact();
     int nodeParity = getTreeNodeParity(treeDir, nNodes, node, useCompactTree);
     int parentParity = getTreeNodeParity(treeDir, nNodes, parentNode, useCompactTree);
     int child0Parity = getTreeNodeParity(treeDir, nNodes, child0Node, useCompactTree);
