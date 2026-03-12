@@ -314,8 +314,8 @@ void AieAgent::InitRegionList() {
   // For allocating memory for device instructions. These need to be mapped to the device so the
   // hardware can access them.
   // We use HSA_HEAPTYPE_DEVICE_SVM so that the recommended
-  // HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_GRANULE is 0. We can use that to determine if a pool is
-  // regular pool or dev heap.
+  // HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_REC_GRANULE is 0. We can use that to determine if a pool
+  // is regular pool or dev heap.
   // The system will report the max allocatable size as MemoryRegion::max_sysmem_alloc_size_, but
   // this is incorrect. The pool is exactly XdnaDriver::GetDevHeapByteSize() bytes.
   HsaMemoryProperties dev_mem_props = {};

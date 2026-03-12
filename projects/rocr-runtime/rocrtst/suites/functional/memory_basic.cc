@@ -237,7 +237,7 @@ void MemoryTest::MaxSingleAllocationTest(hsa_agent_t ag,
   auto gran_sz = pool_i.alloc_granule;
   auto pool_sz = pool_i.aggregate_alloc_max / gran_sz;
 
-  // AIE agent's dev heap is advertized as HSA_HEAPTYPE_DEVICE_SVM, but
+  // AIE agent's dev heap is advertised as HSA_HEAPTYPE_DEVICE_SVM, but
   // is limited to the actual pool size.
   if (ag_type == HSA_DEVICE_TYPE_AIE && pool_i.alloc_rec_granule == 0) {
     pool_sz = pool_i.size / gran_sz;
