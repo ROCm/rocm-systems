@@ -4506,124 +4506,24 @@ amdsmi_status_t
 amdsmi_get_gpu_vbios_info(amdsmi_processor_handle processor_handle, amdsmi_vbios_info_t *info) {
     AMDSMI_CHECK_INIT();
 
-    if (info == nullptr) {
+    if (info == nullptr)
         return AMDSMI_STATUS_INVAL;
-    }
 
-    struct drm_amdgpu_info_vbios vbios = {};
-    amdsmi_status_t status;
-    std::ostringstream ss;
-    amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
-    status = get_gpu_device_from_handle(processor_handle, &gpu_device);
-    if (status != AMDSMI_STATUS_SUCCESS) {
-        return status;
-    }
+    auto device = reinterpret_cast<Device *>(processor_handle);
+    if (device == nullptr)
+        return AMDSMI_STATUS_INVAL;
 
-    SMIGPUDEVICE_MUTEX(gpu_device->get_mutex());
-    std::string render_name = gpu_device->get_gpu_path();
-    std::string path = "/dev/dri/" + render_name;
-    if (render_name.empty()) {
-        return AMDSMI_STATUS_NOT_SUPPORTED;
-    }
+    memset(info, 0, sizeof(*info));
+    wsl::thunk::VBiosInfo vi = {};
+    auto code = device->QueryVBiosInfo(&vi);
+    if (code != ErrorCode::Success)
+        return translateCodeToSmiStatus(code);
 
-    ScopedFD drm_fd(path.c_str(), O_RDWR | O_CLOEXEC);
-    if (!drm_fd.valid()) {
-        ss << __PRETTY_FUNCTION__
-           << " | Failed to open " << path << ": " << strerror(errno)
-           << "; Returning: " << smi_amdgpu_get_status_string(AMDSMI_STATUS_FILE_ERROR, false);
-        LOG_ERROR(ss);
-        return AMDSMI_STATUS_FILE_ERROR;
-    }
-
-    amd::smi::AMDSmiLibraryLoader libdrm;
-    status = libdrm.load(LIBDRM_AMDGPU_SONAME);
-    if (status != AMDSMI_STATUS_SUCCESS) {
-        libdrm.unload();
-        ss << __PRETTY_FUNCTION__
-           << " | Failed to load " LIBDRM_AMDGPU_SONAME ": " << strerror(errno)
-           << "; Returning: " << smi_amdgpu_get_status_string(status, false);
-        LOG_ERROR(ss);
-        return status;
-    }
-
-    ss << __PRETTY_FUNCTION__
-       << " | about to load drmCommandWrite symbol";
-    LOG_INFO(ss);
-
-    // extern int drmCommandWrite(int fd, unsigned long drmCommandIndex,
-    //                            void *data, unsigned long size);
-    typedef int (*drmCommandWrite_t)(int fd, unsigned long drmCommandIndex,
-                                    void *data, unsigned long size);
-    drmCommandWrite_t drmCommandWrite = nullptr;
-
-    // load symbol from libdrm
-    status = libdrm.load_symbol(reinterpret_cast<drmCommandWrite_t *>(&drmCommandWrite),
-                                "drmCommandWrite");
-    if (status != AMDSMI_STATUS_SUCCESS) {
-        libdrm.unload();
-        ss << __PRETTY_FUNCTION__
-           << " | Failed to load drmCommandWrite symbol"
-           << " | Returning: " << smi_amdgpu_get_status_string(status, false);
-        LOG_ERROR(ss);
-        return status;
-    }
-    ss << __PRETTY_FUNCTION__
-       << " | drmCommandWrite symbol loaded successfully";
-    LOG_INFO(ss);
-
-    memset(&vbios, 0, sizeof(struct drm_amdgpu_info_vbios));
-    struct drm_amdgpu_info request = {};
-    memset(&request, 0, sizeof(request));
-    request.return_pointer = reinterpret_cast<uint64_t>(&vbios);
-    request.return_size = sizeof(drm_amdgpu_info_vbios);
-    request.query = AMDGPU_INFO_VBIOS;
-    request.vbios_info.type = AMDGPU_INFO_VBIOS_INFO;
-    auto drm_write = drmCommandWrite(drm_fd, DRM_AMDGPU_INFO, &request,
-                                     sizeof(struct drm_amdgpu_info));
-
-    if (drm_write == 0) {
-        snprintf(info->name, AMDSMI_MAX_STRING_LENGTH, "%s", reinterpret_cast<char *>(vbios.name));
-        snprintf(info->build_date, AMDSMI_MAX_STRING_LENGTH - 1, "%s", reinterpret_cast<char *>(vbios.date) );
-        info->build_date[AMDSMI_MAX_STRING_LENGTH - 1] = '\0';
-        snprintf(info->part_number, AMDSMI_MAX_STRING_LENGTH, "%s", reinterpret_cast<char *>(vbios.vbios_pn));
-        // Navi devices still interpret vbios version from drm vbios_ver_str
-        snprintf(info->version, AMDSMI_MAX_STRING_LENGTH, "%s", reinterpret_cast<char *>(vbios.vbios_ver_str));
-    } else {
-        // get sysfs vbios_version string which is known as the part number
-        char vbios_version[AMDSMI_MAX_STRING_LENGTH];
-        status = rsmi_wrapper(rsmi_dev_vbios_version_get, processor_handle, 0,
-                              vbios_version, AMDSMI_MAX_STRING_LENGTH);
-
-        // fail if cannot get vbios version from sysfs
-        if (status == AMDSMI_STATUS_SUCCESS) {
-            snprintf(info->part_number, AMDSMI_MAX_STRING_LENGTH, "%s", vbios_version);
-        }
-    }
-    libdrm.unload();
-
-    // get vbios build string from rocm_smi which translates to ifwi version
-    char vbios_build_number[AMDSMI_MAX_STRING_LENGTH];
-    amdsmi_status_t build_status;
-    build_status = rsmi_wrapper(rsmi_dev_vbios_build_number_get, processor_handle, 0,
-                                vbios_build_number, AMDSMI_MAX_STRING_LENGTH);
-
-    // Continue if sysfs doesn't exist
-    if (build_status == AMDSMI_STATUS_SUCCESS) {
-        // This device has an ifwi version so swap the version and boot_firmware
-        snprintf(info->boot_firmware, AMDSMI_MAX_STRING_LENGTH, "%s", info->version);
-        snprintf(info->version, AMDSMI_MAX_STRING_LENGTH, "%s", vbios_build_number);
-    }
-
-    ss << __PRETTY_FUNCTION__
-       << " | drmCommandWrite returned: " << strerror(errno) << "\n"
-       << " | vbios name: " << info->name << "\n"
-       << " | vbios build date: " << info->build_date << "\n"
-       << " | vbios part number: " << info->part_number << "\n"
-       << " | vbios version: " << info->version << "\n"
-       << " | vbios boot_firmware: " << info->boot_firmware<< "\n"
-       << " | Returning: " << smi_amdgpu_get_status_string(status, false);
-    LOG_INFO(ss);
-    return status;
+    strncpy(info->name,        vi.name,        sizeof(info->name) - 1);
+    strncpy(info->build_date,  vi.build_date,  sizeof(info->build_date) - 1);
+    strncpy(info->part_number, vi.part_number, sizeof(info->part_number) - 1);
+    strncpy(info->version,     vi.version,     sizeof(info->version) - 1);
+    return AMDSMI_STATUS_SUCCESS;
 }
 
 amdsmi_status_t
