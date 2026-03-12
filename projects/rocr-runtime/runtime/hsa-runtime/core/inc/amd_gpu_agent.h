@@ -358,6 +358,8 @@ class GpuAgent : public GpuAgentInt {
   // @brief Release a queue earlier used by application
   hsa_status_t ReleaseCountedQueue(hsa_queue_t* queue);
 
+  bool IsValidCountedQueueHandle(hsa_queue_t* queue);
+
   // @brief Override from AMD::GpuAgentInt.
   void TranslateTime(core::Signal* signal, hsa_amd_profiling_dispatch_time_t& time) override;
 

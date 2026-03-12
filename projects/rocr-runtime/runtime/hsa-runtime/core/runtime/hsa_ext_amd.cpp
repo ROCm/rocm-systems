@@ -1722,6 +1722,16 @@ hsa_status_t HSA_API hsa_amd_queue_get_info(hsa_queue_t* _queue,
   TRY;
   IS_OPEN();
 
+  if (_queue == nullptr) {
+    return HSA_STATUS_ERROR_INVALID_QUEUE;
+  }
+
+  // Check if this is a released counted queue handle BEFORE dereferencing
+  // (the SharedQueue is deleted on release, so we can't safely access it)
+  if (core::CountedQueuePoolManager::IsReleasedHandle(_queue)) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
   core::Queue* queue = core::Queue::Convert(_queue);
   IS_VALID(queue);
 

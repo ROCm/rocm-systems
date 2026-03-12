@@ -3867,5 +3867,9 @@ hsa_status_t GpuAgent::ReleaseCountedQueue(hsa_queue_t* queue) {
   return queue_pool_.ReleaseQueue(queue);
 }
 
+bool GpuAgent::IsValidCountedQueueHandle(hsa_queue_t* queue) {
+  return queue_pool_.IsValidQueueHandle(queue);
+}
+
 }  // namespace amd
 }  // namespace rocr

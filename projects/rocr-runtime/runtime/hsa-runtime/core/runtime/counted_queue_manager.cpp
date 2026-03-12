@@ -11,6 +11,11 @@
 namespace rocr {
 namespace core {
 
+// Static member definitions
+std::unordered_set<hsa_queue_t*> CountedQueuePoolManager::released_handles_;
+std::deque<hsa_queue_t*> CountedQueuePoolManager::released_handles_order_;
+std::mutex CountedQueuePoolManager::released_handles_mutex_;
+
 CountedQueuePoolManager::CountedQueuePoolManager(core::Agent* agent) : agent_(agent) {
   // Read in GPU_MAX_HW_QUEUES and HSA_COUNTED_QUEUE_SIZE flags
   max_hw_queues_ = core::Runtime::runtime_singleton_->flag().cp_queues_limit();
@@ -45,7 +50,7 @@ hsa_status_t CountedQueuePoolManager::AcquireQueue(
 
   // Increment use count
   core_queue->use_count++;
-  
+
   // Mark as a counted queue, if not already set
   if (!core_queue->is_counted_queue) {
     core_queue->is_counted_queue = true;
@@ -90,6 +95,37 @@ core::Queue* CountedQueuePoolManager::FindOrCreateHardwareQueue(
   return cmd_queue;
 }
 
+bool CountedQueuePoolManager::IsValidQueueHandle(hsa_queue_t* queue) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return counted_queues_.find(queue) != counted_queues_.end();
+}
+
+bool CountedQueuePoolManager::IsReleasedHandle(hsa_queue_t* handle) {
+  std::lock_guard<std::mutex> lock(released_handles_mutex_);
+  return released_handles_.find(handle) != released_handles_.end();
+}
+
+void CountedQueuePoolManager::TrackReleasedHandle(hsa_queue_t* handle) {
+  std::lock_guard<std::mutex> lock(released_handles_mutex_);
+
+  released_handles_.insert(handle);
+  released_handles_order_.push_back(handle);
+
+  // Limit to 32K handles (~256KB memory) for use-after-release detection
+  constexpr size_t kMaxReleasedHandles = 32768;
+  if (released_handles_order_.size() > kMaxReleasedHandles) {
+    hsa_queue_t* oldest = released_handles_order_.front();
+    released_handles_order_.pop_front();
+    released_handles_.erase(oldest);
+  }
+}
+
+void CountedQueuePoolManager::ClearReleasedHandles() {
+  std::lock_guard<std::mutex> lock(released_handles_mutex_);
+  released_handles_.clear();
+  released_handles_order_.clear();
+}
+
 hsa_status_t CountedQueuePoolManager::ReleaseQueue(hsa_queue_t* queue) {
   std::lock_guard<std::mutex> lock(mutex_);
   auto it = counted_queues_.find(queue);
@@ -100,17 +136,17 @@ hsa_status_t CountedQueuePoolManager::ReleaseQueue(hsa_queue_t* queue) {
   // Decrement internal ref count inside core::Queue object
   if (counted_q->hw_queue->use_count > 0) {
     counted_q->hw_queue->use_count--;
-    
-    // Remove unique handle from map when it is no longer in use by an application
-    if (counted_q->hw_queue->use_count == 0) {
-      counted_queues_.erase(queue);
-
-      // free the associated shared_queue when removing the counted_queue
-      SharedQueue* shared = reinterpret_cast<SharedQueue*>(
-        reinterpret_cast<char*>(queue) - offsetof(SharedQueue, amd_queue.hsa_queue));
-      delete shared;
-    }
   }
+
+  // Track the handle address for use-after-release detection (~8 bytes per handle)
+  TrackReleasedHandle(queue);
+
+  // Delete the SharedQueue immediately (no longer kept alive)
+  SharedQueue* shared = reinterpret_cast<SharedQueue*>(reinterpret_cast<char*>(queue) -
+                                                       offsetof(SharedQueue, amd_queue.hsa_queue));
+  delete shared;
+
+  counted_queues_.erase(it);
 
   return HSA_STATUS_SUCCESS;
 }
@@ -129,15 +165,16 @@ void CountedQueuePoolManager::Cleanup() {
   }
   hw_queue_pools_.clear();
 
-  // Clean up counted and shared queues
   for (auto& cq : counted_queues_) {
-    // Recover SharedQueue from unique handle and free memory
     hsa_queue_t* queue_handle = cq.first;
     SharedQueue* shared = reinterpret_cast<SharedQueue*>(
         reinterpret_cast<char*>(queue_handle) - offsetof(SharedQueue, amd_queue.hsa_queue));
     delete shared;
   }
   counted_queues_.clear();
+
+  // Clear released handle tracking (static, so clear once during shutdown)
+  ClearReleasedHandles();
 }
 
 }  // namespace core
