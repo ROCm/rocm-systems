@@ -104,8 +104,8 @@ address KernelParameters::alloc(device::VirtualDevice& vDev) {
 }
 
 // =================================================================================================
-bool KernelParameters::captureAndSet(void** kernelParams, address kernArgs, size_t kernArgsSize,
-                                     address mem) {
+bool KernelParameters::captureHIPArgs(void** kernelParams, address kernArgs, size_t kernArgsSize,
+                                      address mem) {
   amd::Memory** memories = reinterpret_cast<amd::Memory**>(mem + memoryObjOffset());
   for (size_t idx = 0; idx < signature_.numParameters(); ++idx) {
     KernelParameterDescriptor& desc = signature_.params()[idx];
@@ -235,8 +235,8 @@ void KernelParameters::set(size_t index, size_t size, const void* value, bool sv
   desc.info_.defined_ = true;
 }
 
-address KernelParameters::capture(device::VirtualDevice& vDev, uint64_t lclMemSize,
-                                  int32_t* error) {
+address KernelParameters::captureOpenCLArgs(device::VirtualDevice& vDev, uint64_t lclMemSize,
+                                            int32_t* error) {
   const Device& device = vDev.device();
   *error = CL_SUCCESS;
 
