@@ -29,6 +29,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <cctype>
 #include <atomic>
 #include <cassert>
 #include <cstdint>
@@ -145,6 +146,7 @@ static int ScanProcForKfdPids(rsmi_process_info_t* procs,
 }
 
 static const char* kKFDContextPrefix = "context_";  // Prefix for secondary KFD contexts
+static const char* kKFDVramPrefix = "vram_";
 
 // KFD Node Property strings
 // static const char *kKFDNodePropCPU_CORES_COUNTStr =    "cpu_cores_count";
@@ -511,7 +513,10 @@ int GetKfdGpuIdsForPid(long pid, std::unordered_set<uint64_t>* out) {
   DIR* d = opendir(pdir.c_str());
 
   if (!d) {
-    // PID namespace: container-local PID has no KFD sysfs entry.
+    /*
+   * Return success with empty set so 'GetProcessGPUs()' can use 'vram_*'
+   * fallback.
+   */
     if (IsKfdPidNamespaced()) {
       return 0;
     }
@@ -693,8 +698,12 @@ int GetProcessGPUs(uint32_t pid, std::unordered_set<uint64_t>* gpu_set) {
           while ((pe = readdir(pd)) != nullptr) {
             std::string fname = pe->d_name;
             if (fname.rfind("vram_", 0) == 0) {
-              std::string gpu_id_str = fname.substr(5);
-              try { gpu_set->insert(std::stoull(gpu_id_str)); } catch (...) {}
+              std::string gpu_id_str = fname.substr(strlen(kKFDVramPrefix));
+              if (!gpu_id_str.empty() &&
+                  std::all_of(gpu_id_str.begin(), gpu_id_str.end(),
+                              [](unsigned char ch) { return std::isdigit(ch); })) {
+                gpu_set->insert(std::stoull(gpu_id_str));
+              }
             }
           }
           closedir(pd);
@@ -751,7 +760,7 @@ int GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t* proc,
       proc->process_id = pid;
       proc->vram_usage = 0;
       proc->sdma_usage = 0;
-      proc->cu_occupancy = 0;
+      proc->cu_occupancy = std::numeric_limits<uint32_t>::max();
       proc->evicted_time = 0;
       return 0;
     }
