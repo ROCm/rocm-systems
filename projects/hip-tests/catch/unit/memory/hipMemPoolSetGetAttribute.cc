@@ -47,7 +47,7 @@ template <typename T> static void MemPoolSetGetAttribute(const hipMemPool_t memp
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMemPoolSetGetAttribute_Positive_Default") {
+TEST_CASE(Unit_hipMemPoolSetGetAttribute_Positive_Default) {
   const auto device = GENERATE(range(0, HipTest::getDeviceCount()));
 
   checkMempoolSupported(device)
@@ -80,7 +80,7 @@ TEST_CASE("Unit_hipMemPoolSetGetAttribute_Positive_Default") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMemPoolSetGetAttribute_Positive_MemBasic") {
+TEST_CASE(Unit_hipMemPoolSetGetAttribute_Positive_MemBasic) {
   const auto device = GENERATE(range(0, HipTest::getDeviceCount()));
 
   checkMempoolSupported(device)
@@ -115,7 +115,7 @@ TEST_CASE("Unit_hipMemPoolSetGetAttribute_Positive_MemBasic") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMemPoolSetAttribute_Opportunistic") {
+TEST_CASE(Unit_hipMemPoolSetAttribute_Opportunistic) {
   int device_id = 0;
   HIP_CHECK(hipSetDevice(device_id));
   checkMempoolSupported(device_id)
@@ -310,7 +310,7 @@ TEST_CASE("Unit_hipMemPoolSetAttribute_Opportunistic") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMemPoolSetAttribute_EventDependencies") {
+TEST_CASE(Unit_hipMemPoolSetAttribute_EventDependencies) {
   int device_id = 0;
   HIP_CHECK(hipSetDevice(device_id));
 
@@ -437,7 +437,7 @@ TEST_CASE("Unit_hipMemPoolSetAttribute_EventDependencies") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMemPoolSetAttribute_Negative_Parameters") {
+TEST_CASE(Unit_hipMemPoolSetAttribute_Negative_Parameters) {
   int device_id = 0;
   HIP_CHECK(hipSetDevice(device_id));
   checkMempoolSupported(device_id) MemPoolGuard mempool(MemPools::dev_default, device_id);
@@ -496,7 +496,7 @@ static void resetHighValue(hipMemPool_t& memPool) {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMemPoolSetAttribute_ResetMemHighAttr") {
+TEST_CASE(Unit_hipMemPoolSetAttribute_ResetMemHighAttr) {
   checkMempoolSupported(0)
       // Create mempool
       hipMemPool_t mem_pool;
@@ -556,7 +556,7 @@ TEST_CASE("Unit_hipMemPoolSetAttribute_ResetMemHighAttr") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMemPoolGetAttribute_Negative_Parameters") {
+TEST_CASE(Unit_hipMemPoolGetAttribute_Negative_Parameters) {
   int device_id = 0;
   HIP_CHECK(hipSetDevice(device_id));
   checkMempoolSupported(device_id) MemPoolGuard mempool(MemPools::dev_default, device_id);
@@ -666,7 +666,7 @@ static bool checkhipMemPoolSetAttribute(hipMemPoolAttr attr, int dev) {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMemPoolGetAttribute_SetGet") {
+TEST_CASE(Unit_hipMemPoolGetAttribute_SetGet) {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   for (int dev = 0; dev < numDevices; dev++) {
@@ -688,7 +688,7 @@ TEST_CASE("Unit_hipMemPoolGetAttribute_SetGet") {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMemPoolGetAttribute_UsedMem") {
+TEST_CASE(Unit_hipMemPoolGetAttribute_UsedMem) {
   checkMempoolSupported(0) constexpr int N = 1 << 14;
   hipMemPool_t mem_pool;
   hipMemPoolProps pool_props{};
@@ -776,7 +776,7 @@ TEST_CASE("Unit_hipMemPoolGetAttribute_UsedMem") {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMemPoolGetAttribute_ReservedMem") {
+TEST_CASE(Unit_hipMemPoolGetAttribute_ReservedMem) {
   checkMempoolSupported(0) constexpr int N = 1 << 14;
   hipMemPool_t mem_pool;
   hipMemPoolProps pool_props{};
@@ -819,7 +819,7 @@ TEST_CASE("Unit_hipMemPoolGetAttribute_ReservedMem") {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMemPoolGetAttribute_UsageStatistics") {
+TEST_CASE(Unit_hipMemPoolGetAttribute_UsageStatistics) {
   checkMempoolSupported(0) struct mempoolUsgStat stats;
   // Create mempool
   hipMemPool_t mem_pool;
@@ -891,7 +891,7 @@ TEST_CASE("Unit_hipMemPoolGetAttribute_UsageStatistics") {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMemPoolGetAttribute_hipMalloc_DefMempool") {
+TEST_CASE(Unit_hipMemPoolGetAttribute_hipMalloc_DefMempool) {
   checkMempoolSupported(0) struct mempoolUsgStat stats;
   // Create mempool
   hipMemPool_t mem_pool;
@@ -927,7 +927,7 @@ TEST_CASE("Unit_hipMemPoolGetAttribute_hipMalloc_DefMempool") {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMemPoolGetAttribute_CheckDefaultValues") {
+TEST_CASE(Unit_hipMemPoolGetAttribute_CheckDefaultValues) {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   for (int dev = 0; dev < numDevices; dev++) {

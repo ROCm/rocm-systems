@@ -338,3 +338,30 @@ rocprofiler_add_integration_validate_test(
     DISCOVERY_ARGS -k test_other_simd_data
     ARGS --att-other-simd-out-dir ${OTHER_SIMD_OUT_DIR}
     FAIL_REGULAR_EXPRESSION "AssertionError")
+
+set(SHADERDATA_OUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/att-rocprofv3-shaderdata")
+
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-att-shaderdata
+    COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -d ${SHADERDATA_OUT_DIR} --att --
+            $<TARGET_FILE:thread-trace-api-multi-test>
+    DEPENDS thread-trace-api-multi-test
+    TIMEOUT 45
+    LABELS "integration-tests"
+    DISABLED ${IS_DISABLED}
+    ENVIRONMENT "ROCPROF_ATT_LIBRARY_PATH=${attdecoder_LIB_DIR}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+    FIXTURES_SETUP rocprofv3-test-att-shaderdata)
+
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-att-shaderdata
+    TEST_PATHS validate.py
+    COPY conftest.py
+    CONFIG pytest.ini
+    DISCOVERY_ARGS -k test_shaderdata
+    TIMEOUT 45
+    LABELS "integration-tests"
+    DISABLED ${IS_DISABLED}
+    FIXTURES_REQUIRED rocprofv3-test-att-shaderdata
+    ARGS --att-shaderdata-out-dir ${SHADERDATA_OUT_DIR}
+    FAIL_REGULAR_EXPRESSION "AssertionError")

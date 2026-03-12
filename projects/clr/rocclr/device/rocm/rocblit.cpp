@@ -1009,10 +1009,7 @@ bool DmaBlitManager::hsaCopyStagedOrPinned(const_address hostSrc, address hostDs
 
 // ================================================================================================
 KernelBlitManager::KernelBlitManager(VirtualGPU& gpu, Setup setup)
-    : DmaBlitManager(gpu, setup),
-      program_(nullptr),
-      xferBufferSize_(0),
-      lockXferOps_(true) /* Transfer Ops Lock*/ {
+    : DmaBlitManager(gpu, setup), program_(nullptr), xferBufferSize_(0) {
   for (uint i = 0; i < BlitTotal; ++i) {
     kernels_[i] = nullptr;
   }
@@ -1122,7 +1119,7 @@ bool KernelBlitManager::copyBufferToImage(device::Memory& srcMemory, device::Mem
                                           amd::CopyMetadata copyMetadata) const {
   guarantee((dev().info().imageSupport_ != false), "Image not supported on this device");
 
-  amd::ScopedLock k(lockXferOps_);
+  std::scoped_lock k(lockXferOps_);
   bool result = false;
   amd::Image* dstImage = static_cast<amd::Image*>(dstMemory.owner());
   size_t imgRowPitch = size[0] * dstImage->getImageFormat().getElementSize();
@@ -1333,7 +1330,7 @@ bool KernelBlitManager::copyImageToBuffer(device::Memory& srcMemory, device::Mem
                                           amd::CopyMetadata copyMetadata) const {
   guarantee((dev().info().imageSupport_ != false), "Image not supported on this device");
 
-  amd::ScopedLock k(lockXferOps_);
+  std::scoped_lock k(lockXferOps_);
   bool result = false;
   amd::Image* srcImage = static_cast<amd::Image*>(srcMemory.owner());
   size_t imgRowPitch = size[0] * srcImage->getImageFormat().getElementSize();
@@ -1525,7 +1522,7 @@ bool KernelBlitManager::copyImage(device::Memory& srcMemory, device::Memory& dst
                                   amd::CopyMetadata copyMetadata) const {
   guarantee((dev().info().imageSupport_ != false), "Image not supported on this device");
 
-  amd::ScopedLock k(lockXferOps_);
+  std::scoped_lock k(lockXferOps_);
   bool result = false;
   Memory* srcView = &gpuMem(srcMemory);
   Memory* dstView = &gpuMem(dstMemory);
@@ -1711,7 +1708,7 @@ bool KernelBlitManager::readImage(device::Memory& srcMemory, void* dstHost,
                                   amd::CopyMetadata copyMetadata) const {
   guarantee((dev().info().imageSupport_ != false), "Image not supported on this device");
 
-  amd::ScopedLock k(lockXferOps_);
+  std::scoped_lock k(lockXferOps_);
   bool result = false;
 
   // Use host copy if memory has direct access
@@ -1764,7 +1761,7 @@ bool KernelBlitManager::writeImage(const void* srcHost, device::Memory& dstMemor
                                    amd::CopyMetadata copyMetadata) const {
   guarantee((dev().info().imageSupport_ != false), "Image not supported on this device");
 
-  amd::ScopedLock k(lockXferOps_);
+  std::scoped_lock k(lockXferOps_);
   bool result = false;
 
   // Use host copy if memory has direct access
@@ -1814,7 +1811,7 @@ bool KernelBlitManager::copyBufferRect(device::Memory& srcMemory, device::Memory
                                        const amd::BufferRect& srcRectIn,
                                        const amd::BufferRect& dstRectIn, const amd::Coord3D& sizeIn,
                                        bool entire, amd::CopyMetadata copyMetadata) const {
-  amd::ScopedLock k(lockXferOps_);
+  std::scoped_lock k(lockXferOps_);
   bool result = false;
   bool rejected = false;
 
@@ -1941,7 +1938,7 @@ bool KernelBlitManager::copyBufferRect(device::Memory& srcMemory, device::Memory
 bool KernelBlitManager::readBuffer(device::Memory& srcMemory, void* dstHost,
                                    const amd::Coord3D& origin, const amd::Coord3D& size,
                                    bool entire, amd::CopyMetadata copyMetadata) const {
-  amd::ScopedLock k(lockXferOps_);
+  std::scoped_lock k(lockXferOps_);
   bool result = false;
 
   // Use host copy if memory has direct access
@@ -2022,7 +2019,7 @@ bool KernelBlitManager::readBufferRect(device::Memory& srcMemory, void* dstHost,
                                        const amd::BufferRect& bufRect,
                                        const amd::BufferRect& hostRect, const amd::Coord3D& size,
                                        bool entire, amd::CopyMetadata copyMetadata) const {
-  amd::ScopedLock k(lockXferOps_);
+  std::scoped_lock k(lockXferOps_);
   bool result = false;
 
   // Use host copy if memory has direct access
@@ -2075,7 +2072,7 @@ bool KernelBlitManager::readBufferRect(device::Memory& srcMemory, void* dstHost,
 bool KernelBlitManager::writeBuffer(const void* srcHost, device::Memory& dstMemory,
                                     const amd::Coord3D& origin, const amd::Coord3D& size,
                                     bool entire, amd::CopyMetadata copyMetadata) const {
-  amd::ScopedLock k(lockXferOps_);
+  std::scoped_lock k(lockXferOps_);
   bool result = false;
 
   // Use host copy if memory has direct access
@@ -2159,7 +2156,7 @@ bool KernelBlitManager::writeBufferRect(const void* srcHost, device::Memory& dst
                                         const amd::BufferRect& hostRect,
                                         const amd::BufferRect& bufRect, const amd::Coord3D& size,
                                         bool entire, amd::CopyMetadata copyMetadata) const {
-  amd::ScopedLock k(lockXferOps_);
+  std::scoped_lock k(lockXferOps_);
   bool result = false;
 
   // Use host copy if memory has direct access
@@ -2242,7 +2239,7 @@ bool KernelBlitManager::fillBuffer1D(device::Memory& memory, const void* pattern
                                      size_t patternSize, const amd::Coord3D& surface,
                                      const amd::Coord3D& origin, const amd::Coord3D& size,
                                      bool entire, bool forceBlit) const {
-  amd::ScopedLock k(lockXferOps_);
+  std::scoped_lock k(lockXferOps_);
   bool result = false;
 
   // Use host fill if memory has direct access
@@ -2328,7 +2325,7 @@ bool KernelBlitManager::fillBuffer2D(device::Memory& memory, const void* pattern
                                      size_t patternSize, const amd::Coord3D& surface,
                                      const amd::Coord3D& origin, const amd::Coord3D& size,
                                      bool entire, bool forceBlit) const {
-  amd::ScopedLock k(lockXferOps_);
+  std::scoped_lock k(lockXferOps_);
   bool result = false;
 
   // Use host fill if memory has direct access
@@ -2603,7 +2600,7 @@ bool KernelBlitManager::copyBuffer(device::Memory& srcMemory, device::Memory& ds
                                    const amd::Coord3D& srcOrigin, const amd::Coord3D& dstOrigin,
                                    const amd::Coord3D& sizeIn, bool entire,
                                    amd::CopyMetadata copyMetadata) const {
-  amd::ScopedLock k(lockXferOps_);
+  std::scoped_lock k(lockXferOps_);
   bool result = false;
   uint32_t blitWg = dev().settings().limit_blit_wg_;
 
@@ -2684,7 +2681,7 @@ bool KernelBlitManager::fillImage(device::Memory& memory, const void* pattern,
                                   bool entire) const {
   guarantee((dev().info().imageSupport_ != false), "Image not supported on this device");
 
-  amd::ScopedLock k(lockXferOps_);
+  std::scoped_lock k(lockXferOps_);
   bool result = false;
   constexpr size_t kFillImageThreshold = 256 * 256;
 
@@ -2851,7 +2848,7 @@ bool KernelBlitManager::fillImage(device::Memory& memory, const void* pattern,
 // ================================================================================================
 bool KernelBlitManager::streamOpsWrite(device::Memory& memory, uint64_t value, size_t offset,
                                        size_t sizeBytes) const {
-  amd::ScopedLock k(lockXferOps_);
+  std::scoped_lock k(lockXferOps_);
   bool result = false;
   uint blitType = StreamOpsWrite;
   size_t dim = 1;
@@ -2884,7 +2881,7 @@ bool KernelBlitManager::streamOpsWrite(device::Memory& memory, uint64_t value, s
 // ================================================================================================
 bool KernelBlitManager::streamOpsWait(device::Memory& memory, uint64_t value, size_t offset,
                                       size_t sizeBytes, uint64_t flags, uint64_t mask) const {
-  amd::ScopedLock k(lockXferOps_);
+  std::scoped_lock k(lockXferOps_);
   bool result = false;
   uint blitType = StreamOpsWait;
   size_t dim = 1;
@@ -2926,7 +2923,7 @@ bool KernelBlitManager::streamOpsWait(device::Memory& memory, uint64_t value, si
 // ================================================================================================
 bool KernelBlitManager::batchMemOps(const void* paramArray, size_t paramSize,
                                     uint32_t count) const {
-  amd::ScopedLock k(lockXferOps_);
+  std::scoped_lock k(lockXferOps_);
   bool result = false;
   uint blitType = BatchMemOp;
   size_t dim = 1;
@@ -3127,7 +3124,7 @@ bool KernelBlitManager::runScheduler(uint64_t vqVM, hsa_queue_t* schedulerQueue,
 
 // ================================================================================================
 bool KernelBlitManager::RunGwsInit(uint32_t value) const {
-  amd::ScopedLock k(lockXferOps_);
+  std::scoped_lock k(lockXferOps_);
 
   if (dev().settings().gwsInitSupported_ == false) {
     LogError("GWS Init is not supported on this target");

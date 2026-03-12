@@ -59,7 +59,7 @@ static void callbackfunc_setparams(void* B_h) {
 This test case verifies the negative scenarios of
 hipGraphHostNodeGetParams API
 */
-TEST_CASE("Unit_hipGraphHostNodeGetParams_Negative") {
+TEST_CASE(Unit_hipGraphHostNodeGetParams_Negative) {
   constexpr size_t N = 1024;
   hipGraph_t graph;
   int *A_d{nullptr}, *C_d{nullptr};
@@ -102,7 +102,7 @@ Add HostNode to the cloned graph, update hostNode using hipGraphHostNodeSetParam
 then get the host node params using hipGraphHostNodeGetParams API  and
 compare it.
 */
-TEST_CASE("Unit_hipGraphHostNodeGetParams_ClonedGraphWithHostNode") {
+TEST_CASE(Unit_hipGraphHostNodeGetParams_ClonedGraphWithHostNode) {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   hipGraph_t graph;
@@ -246,7 +246,7 @@ This test case verifies hipGraphHostNodeGetParams API by
 adding host node to graph and gets the host params and
 validates it
 */
-TEST_CASE("Unit_hipGraphHostNodeGetParams_BasicFunc") { hipGraphHostNodeGetParams_func(false); }
+TEST_CASE(Unit_hipGraphHostNodeGetParams_BasicFunc) { hipGraphHostNodeGetParams_func(false); }
 
 /*
 This test case verifies hipGraphHostNodeGetParams API by
@@ -254,4 +254,4 @@ adding host node to graph, updates host node params
 using hipGraphHostNodeSetParams  and gets the host params
 validates it
 */
-TEST_CASE("Unit_hipGraphHostNodeGetParams_SetParams") { hipGraphHostNodeGetParams_func(true); }
+TEST_CASE(Unit_hipGraphHostNodeGetParams_SetParams) { hipGraphHostNodeGetParams_func(true); }

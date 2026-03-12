@@ -498,11 +498,9 @@ INSTRUMENTATION WORKFLOW:
             {
                 _parser_data.updated.emplace("ROCPROFSYS_TRACE");
                 _parser_data.updated.emplace("ROCPROFSYS_PROFILE");
-                _parser_data.updated.emplace("ROCPROFSYS_USE_ROCM");
                 _parser_data.updated.emplace("ROCPROFSYS_ROCM_DOMAINS");
                 tim::set_env("ROCPROFSYS_TRACE", "ON", 0);
                 tim::set_env("ROCPROFSYS_PROFILE", "ON", 0);
-                tim::set_env("ROCPROFSYS_USE_ROCM", "ON", 0);
                 tim::set_env("ROCPROFSYS_ROCM_DOMAINS",
                              "hip_api,hsa_api,marker_api,rccl_api,memory_copy,"
                              "scratch_memory,kernel_dispatch",
@@ -522,11 +520,9 @@ INSTRUMENTATION WORKFLOW:
             {
                 _parser_data.updated.emplace("ROCPROFSYS_TRACE");
                 _parser_data.updated.emplace("ROCPROFSYS_PROFILE");
-                _parser_data.updated.emplace("ROCPROFSYS_USE_ROCM");
                 _parser_data.updated.emplace("ROCPROFSYS_ROCM_DOMAINS");
                 tim::set_env("ROCPROFSYS_TRACE", "ON", 0);
                 tim::set_env("ROCPROFSYS_PROFILE", "ON", 0);
-                tim::set_env("ROCPROFSYS_USE_ROCM", "ON", 0);
                 tim::set_env("ROCPROFSYS_ROCM_DOMAINS",
                              "hip_runtime_api,marker_api,rccl_api,memory_copy,"
                              "scratch_memory,kernel_dispatch",
@@ -544,13 +540,11 @@ INSTRUMENTATION WORKFLOW:
             {
                 _parser_data.updated.emplace("ROCPROFSYS_TRACE");
                 _parser_data.updated.emplace("ROCPROFSYS_PROFILE");
-                _parser_data.updated.emplace("ROCPROFSYS_USE_ROCM");
                 _parser_data.updated.emplace("ROCPROFSYS_USE_AMD_SMI");
                 _parser_data.updated.emplace("ROCPROFSYS_SAMPLING_CPUS");
                 _parser_data.updated.emplace("ROCPROFSYS_ROCM_DOMAINS");
                 tim::set_env("ROCPROFSYS_TRACE", "ON", 0);
                 tim::set_env("ROCPROFSYS_PROFILE", "OFF", 0);
-                tim::set_env("ROCPROFSYS_USE_ROCM", "ON", 0);
                 tim::set_env("ROCPROFSYS_USE_AMD_SMI", "ON", 0);
                 tim::set_env("ROCPROFSYS_SAMPLING_CPUS", "none", 0);
                 tim::set_env("ROCPROFSYS_ROCM_DOMAINS",
@@ -569,12 +563,10 @@ INSTRUMENTATION WORKFLOW:
             {
                 _parser_data.updated.emplace("ROCPROFSYS_TRACE");
                 _parser_data.updated.emplace("ROCPROFSYS_PROFILE");
-                _parser_data.updated.emplace("ROCPROFSYS_USE_ROCM");
                 _parser_data.updated.emplace("ROCPROFSYS_ROCM_DOMAINS");
                 _parser_data.updated.emplace("ROCPROFSYS_USE_OMPT");
                 tim::set_env("ROCPROFSYS_TRACE", "ON", 0);
                 tim::set_env("ROCPROFSYS_PROFILE", "OFF", 0);
-                tim::set_env("ROCPROFSYS_USE_ROCM", "ON", 0);
                 tim::set_env("ROCPROFSYS_ROCM_DOMAINS",
                              "hip_runtime_api,marker_api,kernel_dispatch,memory_copy,"
                              "hsa_api",
@@ -594,12 +586,10 @@ INSTRUMENTATION WORKFLOW:
                 _parser_data.updated.emplace("ROCPROFSYS_PROFILE");
                 _parser_data.updated.emplace("ROCPROFSYS_FLAT_PROFILE");
                 _parser_data.updated.emplace("ROCPROFSYS_USE_AMD_SMI");
-                _parser_data.updated.emplace("ROCPROFSYS_USE_ROCM");
                 tim::set_env("ROCPROFSYS_TRACE", "OFF", 0);
                 tim::set_env("ROCPROFSYS_PROFILE", "ON", 0);
                 tim::set_env("ROCPROFSYS_FLAT_PROFILE", "ON", 0);
                 tim::set_env("ROCPROFSYS_USE_AMD_SMI", "OFF", 0);
-                tim::set_env("ROCPROFSYS_USE_ROCM", "OFF", 0);
             }
         });
     parser

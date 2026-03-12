@@ -131,7 +131,7 @@ class Program : public amd::HeapObject {
   uint32_t codeObjectVer_;                                              //!< version of code object
   std::map<std::string, amd_comgr_metadata_node_t> kernelMetadataMap_;  //!< Map of kernel metadata
   //! Sanitizer lock - lock when launching init/fini kernels
-  static amd::Monitor initFiniLock_;
+  static std::recursive_mutex initFiniLock_;
 
  public:
   //! Construct a section.
