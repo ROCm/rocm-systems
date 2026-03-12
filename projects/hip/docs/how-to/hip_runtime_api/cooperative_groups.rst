@@ -504,12 +504,12 @@ For bitwise-reduces:
 
 ``Operation`` a function object, which includes lambdas or functors which define ``operator()``. The
 following functors in the cooperative_groups namespace:
- cooperative_groups::plus
- cooperative_groups::less
- cooperative_groups::greater
- cooperative_groups::bit_and
- cooperative_groups::bit_or
- cooperative_groups::bit_xor
+* cooperative_groups::plus
+* cooperative_groups::less
+* cooperative_groups::greater
+* cooperative_groups::bit_and
+* cooperative_groups::bit_or
+* cooperative_groups::bit_xor
 potentially have hardware acceleration on the AMD platform, as they are based on the reduce sync
 operations, see section Warp reduction functions. On Nvidia they also have hardware acceleration, for
 all the supported types.
