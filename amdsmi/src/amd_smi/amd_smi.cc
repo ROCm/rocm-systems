@@ -5068,164 +5068,33 @@ amdsmi_status_t amdsmi_get_switch_device_uuid(amdsmi_processor_handle processor_
 #endif//BRCM_NIC
 amdsmi_status_t amdsmi_get_pcie_info(amdsmi_processor_handle processor_handle, amdsmi_pcie_info_t *info) {
     AMDSMI_CHECK_INIT();
-    std::ostringstream ss;
 
     if (info == nullptr) {
         return AMDSMI_STATUS_INVAL;
     }
 
-    amdsmi_status_t status = AMDSMI_STATUS_SUCCESS;
-    amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
-    amdsmi_status_t r = get_gpu_device_from_handle(processor_handle, &gpu_device);
-    if (r != AMDSMI_STATUS_SUCCESS)
-        return r;
+    memset(info, 0, sizeof(*info));
+    auto device = reinterpret_cast<Device *>(processor_handle);
+    if (device == nullptr)
+        return AMDSMI_STATUS_INVAL;
 
-    SMIGPUDEVICE_MUTEX(gpu_device->get_mutex())
+    wsl::thunk::PCIeInfo pcie{};
+    auto code = device->QueryPCIeInfo(&pcie);
+    if (code != ErrorCode::Success)
+        return translateCodeToSmiStatus(code);
 
-    char buff[AMDSMI_MAX_STRING_LENGTH];
-    FILE* fp;
-    double pcie_speed = 0;
-    unsigned pcie_width = 0;
-
-    memset((void *)info, 0, sizeof(*info));
-
-    std::string path_max_link_width = "/sys/class/drm/" +
-        gpu_device->get_gpu_path() + "/device/max_link_width";
-    fp = fopen(path_max_link_width.c_str(), "r");
-    if (fp) {
-        if (fscanf(fp, "%d", &pcie_width) != 1) {
-            fclose(fp);
-            ss << __PRETTY_FUNCTION__
-               << " | Failed to parse: " << path_max_link_width;
-            LOG_ERROR(ss);
-            return AMDSMI_STATUS_API_FAILED;
-        }
-        fclose(fp);
-    } else {
-        ss << __PRETTY_FUNCTION__
-           << " | Failed to open file: " << path_max_link_width
-           << " | returning AMDSMI_STATUS_NOT_SUPPORTED";
-        LOG_ERROR(ss);
-        return AMDSMI_STATUS_NOT_SUPPORTED;
-    }
-    info->pcie_static.max_pcie_width = (uint16_t)pcie_width;
-
-    std::string path_max_link_speed = "/sys/class/drm/" +
-        gpu_device->get_gpu_path() + "/device/max_link_speed";
-    fp = fopen(path_max_link_speed.c_str(), "r");
-    if (fp) {
-        if (fscanf(fp, "%lf %s", &pcie_speed, buff) != 2) {
-            fclose(fp);
-            std::ostringstream ss;
-            ss << __PRETTY_FUNCTION__
-                << " | Failed to parse: " << path_max_link_speed;
-            LOG_ERROR(ss);
-            return AMDSMI_STATUS_API_FAILED;
-        }
-        fclose(fp);
-    } else {
-        std::ostringstream ss;
-        ss << __PRETTY_FUNCTION__
-            << " | Failed to open file: " << path_max_link_speed;
-        LOG_ERROR(ss);
-        return AMDSMI_STATUS_API_FAILED;
-    }
-
-    // pcie speed in sysfs returns in GT/s
-    info->pcie_static.max_pcie_speed = static_cast<uint32_t>(pcie_speed * 1000);
-
-    switch (info->pcie_static.max_pcie_speed) {
-      case 2500:
-        info->pcie_static.pcie_interface_version = 1;
-        break;
-      case 5000:
-        info->pcie_static.pcie_interface_version = 2;
-        break;
-      case 8000:
-        info->pcie_static.pcie_interface_version = 3;
-        break;
-      case 16000:
-        info->pcie_static.pcie_interface_version = 4;
-        break;
-      case 32000:
-        info->pcie_static.pcie_interface_version = 5;
-        break;
-      case 64000:
-        info->pcie_static.pcie_interface_version = 6;
-        break;
-      default:
-        info->pcie_static.pcie_interface_version = 0;
-    }
-
-    // default to PCIe
-    info->pcie_static.slot_type = AMDSMI_CARD_FORM_FACTOR_PCIE;
-    rsmi_pcie_slot_type_t slot_type;
-    status = rsmi_wrapper(rsmi_dev_pcie_slot_type_get, processor_handle, 0,
-                          &slot_type);
-    if (status == AMDSMI_STATUS_SUCCESS) {
-        switch (slot_type) {
-            case RSMI_PCIE_SLOT_PCIE:
-                info->pcie_static.slot_type = AMDSMI_CARD_FORM_FACTOR_PCIE;
-                break;
-            case RSMI_PCIE_SLOT_OAM:
-                info->pcie_static.slot_type = AMDSMI_CARD_FORM_FACTOR_OAM;
-                break;
-            case RSMI_PCIE_SLOT_CEM:
-                info->pcie_static.slot_type = AMDSMI_CARD_FORM_FACTOR_CEM;
-                break;
-            default:
-                info->pcie_static.slot_type = AMDSMI_CARD_FORM_FACTOR_UNKNOWN;
-        }
-    }
-
-    // metrics
-    amdsmi_gpu_metrics_t metric_info = {};
-    status =  amdsmi_get_gpu_metrics_info(
-            processor_handle, &metric_info);
-    if (status != AMDSMI_STATUS_SUCCESS)
-        return status;
-
-    info->pcie_metric.pcie_width = metric_info.pcie_link_width;
-    // gpu metrics is inconsistent with pcie_speed values, if 0-6 then it needs to be translated
-    if (metric_info.pcie_link_speed <= 6) {
-        status = smi_amdgpu_get_pcie_speed_from_pcie_type(metric_info.pcie_link_speed, &info->pcie_metric.pcie_speed); // mapping to MT/s
-    } else {
-        // gpu metrics returns pcie link speed in .1 GT/s ex. 160 vs 16
-        info->pcie_metric.pcie_speed = translate_umax_or_assign_value<decltype(info->pcie_metric.pcie_speed)>
-                                          (metric_info.pcie_link_speed, (metric_info.pcie_link_speed * 100));
-    }
-
-    // additional pcie related metrics
-    /**
-     * pcie_metric.pcie_bandwidth:      MB/s  (uint32_t)
-     * metric_info.pcie_bandwidth_inst: GB/s  (uint64_t)
-     */
-    info->pcie_metric.pcie_bandwidth = translate_umax_or_assign_value<decltype(info->pcie_metric.pcie_bandwidth)>
-                                          (metric_info.pcie_bandwidth_inst, metric_info.pcie_bandwidth_inst);
-    info->pcie_metric.pcie_replay_count = metric_info.pcie_replay_count_acc;
-    info->pcie_metric.pcie_l0_to_recovery_count = metric_info.pcie_l0_to_recov_count_acc;
-    info->pcie_metric.pcie_replay_roll_over_count = metric_info.pcie_replay_rover_count_acc;
-    /**
-     * pcie_metric.pcie_nak_received_count: (uint64_t)
-     * metric_info.pcie_nak_rcvd_count_acc: (uint32_t)
-     */
-    info->pcie_metric.pcie_nak_received_count = translate_umax_or_assign_value<decltype(info->pcie_metric.pcie_nak_received_count)>
-                                                  (metric_info.pcie_nak_rcvd_count_acc, (metric_info.pcie_nak_rcvd_count_acc));
-    /**
-     * pcie_metric.pcie_nak_sent_count:     (uint64_t)
-     * metric_info.pcie_nak_sent_count_acc: (uint32_t)
-     */
-    info->pcie_metric.pcie_nak_sent_count = translate_umax_or_assign_value<decltype(info->pcie_metric.pcie_nak_sent_count)>
-                                              (metric_info.pcie_nak_sent_count_acc, (metric_info.pcie_nak_sent_count_acc));
-    /**
-     * pcie_metric.pcie_lc_perf_other_end_recovery: (uint32_t)
-     */
-    info->pcie_metric.pcie_lc_perf_other_end_recovery_count =
-        translate_umax_or_assign_value<decltype(
-            info->pcie_metric.pcie_lc_perf_other_end_recovery_count)> (
-                metric_info.pcie_lc_perf_other_end_recovery,
-                (metric_info.pcie_lc_perf_other_end_recovery));
-
+    info->pcie_static.max_pcie_width         = pcie.max_pcie_width;
+    info->pcie_static.max_pcie_speed         = pcie.max_pcie_speed;
+    info->pcie_static.pcie_interface_version = pcie.pcie_interface_version;
+    info->pcie_static.slot_type              = static_cast<amdsmi_card_form_factor_t>(pcie.slot_type);
+    info->pcie_metric.pcie_width             = pcie.pcie_width;
+    info->pcie_metric.pcie_speed             = pcie.pcie_speed;
+    info->pcie_metric.pcie_bandwidth              = pcie.pcie_bandwidth;
+    info->pcie_metric.pcie_replay_count           = pcie.pcie_replay_count;
+    info->pcie_metric.pcie_l0_to_recovery_count   = pcie.pcie_l0_to_recovery_count;
+    info->pcie_metric.pcie_replay_roll_over_count = pcie.pcie_replay_roll_over_count;
+    info->pcie_metric.pcie_nak_sent_count         = pcie.pcie_nak_sent_count;
+    info->pcie_metric.pcie_nak_received_count     = pcie.pcie_nak_received_count;
     return AMDSMI_STATUS_SUCCESS;
 }
 
