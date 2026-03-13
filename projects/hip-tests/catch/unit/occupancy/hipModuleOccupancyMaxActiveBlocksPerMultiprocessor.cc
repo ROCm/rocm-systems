@@ -26,7 +26,7 @@ execution of hipModuleOccupancyMaxActiveBlocksPerMultiprocessor api when paramet
 #include <hip_test_kernels.hh>
 #include "occupancy_common.hh"
 
-TEST_CASE("Unit_hipModuleOccupancyMaxActiveBlocksPerMultiprocessor_Negative_Parameters") {
+TEST_CASE(Unit_hipModuleOccupancyMaxActiveBlocksPerMultiprocessor_Negative_Parameters) {
   hipModule_t module;
   hipFunction_t function;
   int blockSize = 0;
@@ -51,7 +51,7 @@ TEST_CASE("Unit_hipModuleOccupancyMaxActiveBlocksPerMultiprocessor_Negative_Para
   HIP_CHECK(hipModuleUnload(module));
 }
 
-TEST_CASE("Unit_hipModuleOccupancyMaxActiveBlocksPerMultiprocessor_Positive_RangeValidation") {
+TEST_CASE(Unit_hipModuleOccupancyMaxActiveBlocksPerMultiprocessor_Positive_RangeValidation) {
   hipDeviceProp_t devProp;
   hipModule_t module;
   hipFunction_t function;
@@ -101,7 +101,7 @@ TEST_CASE("Unit_hipModuleOccupancyMaxActiveBlocksPerMultiprocessor_Positive_Rang
  * ------------------------
  *  - unit/occupancy/hipModuleOccupancyMaxActiveBlocksPerMultiprocessor.cc
  */
-TEST_CASE("Unit_OccupancyAPIs_StreamCapture") {
+TEST_CASE(Unit_OccupancyAPIs_StreamCapture) {
   GENERATE_CAPTURE();
 
   hipStream_t stream;

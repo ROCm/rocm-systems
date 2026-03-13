@@ -30,7 +30,7 @@ __global__ void copy_kernl(int* devPtr) {
   }
 }
 
-TEST_CASE("Unit_hipStreamPerThread_Basic") {
+TEST_CASE(Unit_hipStreamPerThread_Basic) {
   constexpr int size = sizeof(int) * MEM_SIZE;
   int* hostMem = nullptr;
   int* devMem = nullptr;
@@ -65,7 +65,7 @@ TEST_CASE("Unit_hipStreamPerThread_Basic") {
   HIP_CHECK(hipFree(devMem));
 }
 
-TEST_CASE("Unit_hipStreamPerThread_StreamQuery") {
+TEST_CASE(Unit_hipStreamPerThread_StreamQuery) {
   std::vector<std::thread> threads(MAX_THREAD_CNT);
 
   for (auto& th : threads) {
@@ -78,7 +78,7 @@ TEST_CASE("Unit_hipStreamPerThread_StreamQuery") {
   REQUIRE(true);
 }
 
-TEST_CASE("Unit_hipStreamPerThread_StreamSynchronize") {
+TEST_CASE(Unit_hipStreamPerThread_StreamSynchronize) {
   constexpr unsigned int MAX_THREAD_CNT = 10;
   std::vector<std::thread> threads(MAX_THREAD_CNT);
 
@@ -92,22 +92,22 @@ TEST_CASE("Unit_hipStreamPerThread_StreamSynchronize") {
   REQUIRE(true);
 }
 
-TEST_CASE("Unit_hipStreamPerThread_StreamGetPriority") {
+TEST_CASE(Unit_hipStreamPerThread_StreamGetPriority) {
   int priority = 0;
   HIP_CHECK(hipStreamGetPriority(hipStreamPerThread, &priority));
 }
 
-TEST_CASE("Unit_hipStreamPerThread_StreamGetFlags") {
+TEST_CASE(Unit_hipStreamPerThread_StreamGetFlags) {
   unsigned int flags = 0;
   HIP_CHECK(hipStreamGetFlags(hipStreamPerThread, &flags));
 }
 
-TEST_CASE("Unit_hipStreamPerThread_StreamDestroy") {
+TEST_CASE(Unit_hipStreamPerThread_StreamDestroy) {
   hipError_t status = hipStreamDestroy(hipStreamPerThread);
   REQUIRE(status != hipSuccess);
 }
 
-TEST_CASE("Unit_hipStreamPerThread_MemcpyAsync") {
+TEST_CASE(Unit_hipStreamPerThread_MemcpyAsync) {
   unsigned int ele_size = (16 * 1024);  // 16KB
   int* A_h = nullptr;
   int* A_d = nullptr;

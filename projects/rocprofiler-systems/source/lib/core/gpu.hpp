@@ -22,15 +22,12 @@
 
 #pragma once
 
-#if ROCPROFSYS_USE_ROCM > 0
-#    include <amd_smi/amdsmi.h>
-#endif
+#include <amd_smi/amdsmi.h>
 
 namespace rocprofsys
 {
 namespace gpu
 {
-#if ROCPROFSYS_USE_ROCM > 0
 void
 get_processor_handles();
 
@@ -82,7 +79,6 @@ private:
     friend bool rocprofsys::gpu::is_xgmi_supported(uint32_t dev_id);
     friend bool rocprofsys::gpu::is_pcie_supported(uint32_t dev_id);
 };
-#endif
 
 int
 device_count();

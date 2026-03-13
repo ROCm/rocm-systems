@@ -502,6 +502,7 @@ TestOther() {
   ExecTest  "pingall"          2       32           1
 
   ################################ Flood test ##################################
+  if [[ $TEST != ro* ]]; then #AIROCSHMEM-324
   ExecTest  "flood_put"        2       64           1024
   ExecTest  "flood_put"        8       64           1024
   ExecTest  "flood_putnbi"     8       64           1024
@@ -518,6 +519,7 @@ TestOther() {
   ExecTest  "flood_add"        8       64           1024
   ExecTest  "flood_fadd"       8       64           1024
   ExecTest  "flood_waitadd"    8       64           1024
+  else echo "Skip:   flood_* (AIROCSHMEM-324: RO flood tests fail in UCX)"; fi
 
   # This test requires more contexts than workgroups
   export ROCSHMEM_MAX_NUM_CONTEXTS=1024

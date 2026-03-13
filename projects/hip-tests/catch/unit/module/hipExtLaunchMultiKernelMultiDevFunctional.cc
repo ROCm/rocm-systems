@@ -53,7 +53,7 @@ __global__ void vector_square(float* C_d, float* A_d, size_t N) {
   }
 }
 
-TEST_CASE("Unit_hipExtLaunchMultiKernelMultiDevice_Functional", "[multigpu]") {
+TEST_CASE(Unit_hipExtLaunchMultiKernelMultiDevice_Functional) {
   constexpr int MAX_GPUS = 8;
   float *A_d[MAX_GPUS], *C_d[MAX_GPUS];
   float *A_h, *C_h;
