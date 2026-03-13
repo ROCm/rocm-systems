@@ -45,7 +45,7 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 6.1
  */
-TEST_CASE("Unit_hipMemGetAllocationPropertiesFromHandle_functional") {
+TEST_CASE(Unit_hipMemGetAllocationPropertiesFromHandle_functional) {
   hipDevice_t device;
   CTX_CREATE();
   HIP_CHECK(hipDeviceGet(&device, 0));
@@ -85,7 +85,7 @@ TEST_CASE("Unit_hipMemGetAllocationPropertiesFromHandle_functional") {
  * ------------------------
  *    - HIP_VERSION >= 6.1
  */
-TEST_CASE("Unit_hipMemGetAllocationPropertiesFromHandle_Negative") {
+TEST_CASE(Unit_hipMemGetAllocationPropertiesFromHandle_Negative) {
   CTX_CREATE();
   hipDevice_t device;
   HIP_CHECK(hipDeviceGet(&device, 0));
@@ -121,7 +121,7 @@ TEST_CASE("Unit_hipMemGetAllocationPropertiesFromHandle_Negative") {
   CTX_DESTROY();
 }
 
-TEST_CASE("Unit_hipMemGetAllocationPropertiesFromHandle_Capture") {
+TEST_CASE(Unit_hipMemGetAllocationPropertiesFromHandle_Capture) {
   CTX_CREATE();
   hipDevice_t device;
   HIP_CHECK(hipDeviceGet(&device, 0));

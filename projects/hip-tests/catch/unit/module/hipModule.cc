@@ -188,7 +188,7 @@ bool testMultiTargArchCodeObj() {
   return btestPassed;
 }
 
-TEST_CASE("Unit_hipModule_Functional") {
+TEST_CASE(Unit_hipModule_Functional) {
   bool TestPassed = true;
   SECTION("Code object file test on current GPU") {
     TestPassed &= testCodeObjFile(CODE_OBJ_SINGLEARCH);

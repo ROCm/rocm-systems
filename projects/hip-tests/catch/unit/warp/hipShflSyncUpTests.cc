@@ -211,7 +211,7 @@ static void runTestShflUp_4() {
  *    - HIP_VERSION >= 5.6
  */
 
-TEST_CASE("Unit_hipShflSync_Up") {
+TEST_CASE(Unit_hipShflSync_Up) {
   CHECK_WARP_MATCH_FUNCTIONS_SUPPORT
 
   SECTION("run test for short") {

@@ -38,7 +38,7 @@ THE SOFTWARE.
  *    - HIP_VERSION >= 7.2
  */
 
-TEST_CASE("Unit_hipStreamCopyAttributes_Basic") {
+TEST_CASE(Unit_hipStreamCopyAttributes_Basic) {
   hipStream_t stream1, stream2, stream3, stream4;
   hipStreamAttrValue val1, val2;
   HIP_CHECK(hipStreamCreate(&stream1));
@@ -116,7 +116,7 @@ TEST_CASE("Unit_hipStreamCopyAttributes_Basic") {
  * ------------------------
  *  - HIP_VERSION >= 7.2
  */
-TEST_CASE("Unit_hipStreamCopyAttributes_Negative") {
+TEST_CASE(Unit_hipStreamCopyAttributes_Negative) {
   hipStream_t srcStream = nullptr;
   HIP_CHECK(hipStreamCreate(&srcStream));
   hipStream_t dstStream = nullptr;
@@ -159,7 +159,7 @@ TEST_CASE("Unit_hipStreamCopyAttributes_Negative") {
  * ------------------------
  *  - HIP_VERSION >= 7.2
  */
-TEST_CASE("Unit_hipStreamCopyAttributes_WithAllSyncPolicyValues") {
+TEST_CASE(Unit_hipStreamCopyAttributes_WithAllSyncPolicyValues) {
   hipStream_t srcStream = nullptr;
   HIP_CHECK(hipStreamCreate(&srcStream));
   hipStream_t dstStream = nullptr;
