@@ -621,7 +621,9 @@ For attachment profiling of running processes:
         type=int,
     )
 
-    post_processing_options = parser.add_argument_group("Post-processing tracing options")
+    post_processing_options = parser.add_argument_group(
+        "Post-processing tracing options"
+    )
 
     add_parser_bool_argument(
         post_processing_options,
@@ -1124,7 +1126,8 @@ def parse_input(input_file):
 
     _, extension = os.path.splitext(input_file)
     if extension == ".txt" or extension == ".text":
-        warning("""
+        warning(
+            """
             Text file format for counter collection is deprecated and will be removed in a future release.
             Please use JSON or YAML format instead.
 
@@ -1141,7 +1144,8 @@ def parse_input(input_file):
 
             JSON file (recommended):
                 {"jobs":[{"pmc": ["SQ_WAVES"]},{ "pmc":["GRBM_COUNT"]}]}
-            """)
+            """
+        )
         text_input = parse_text(input_file)
         text_input_lst = [{"pmc": itr, "sub_directory": "pmc_"} for itr in text_input]
         return [dotdict(itr) for itr in text_input_lst]
@@ -1444,7 +1448,9 @@ def run(app_args, args, **kwargs):
     ROCPROF_LIST_AVAIL_TOOL_LIBRARY = resolve_library_path(
         ROCPROF_LIST_AVAIL_TOOL_LIBRARY, args
     )
-    ROCPROF_ATTACH_TOOL_LIBRARY = resolve_library_path(ROCPROF_ATTACH_TOOL_LIBRARY, args)
+    ROCPROF_ATTACH_TOOL_LIBRARY = resolve_library_path(
+        ROCPROF_ATTACH_TOOL_LIBRARY, args
+    )
 
     prepend_preload = [itr for itr in args.preload if itr]
     append_preload = [
@@ -1489,7 +1495,10 @@ def run(app_args, args, **kwargs):
         args.output_format = ["rocpd"]
 
     update_env(
-        "ROCPROF_OUTPUT_FORMAT", ",".join(args.output_format), append=True, join_char=","
+        "ROCPROF_OUTPUT_FORMAT",
+        ",".join(args.output_format),
+        append=True,
+        join_char=",",
     )
 
     if args.kokkos_trace:
@@ -1631,7 +1640,9 @@ def run(app_args, args, **kwargs):
                 f"rocprofv3 tracing options are required when ROCPROFILER_CI={rocprofiler_ci_env}"
             )
 
-    _summary_groups = "##@@##".join(args.summary_groups) if args.summary_groups else None
+    _summary_groups = (
+        "##@@##".join(args.summary_groups) if args.summary_groups else None
+    )
     _summary_output_fname = args.summary_output_file
     if args.summary and _summary_output_fname is None:
         _summary_output_fname = "stderr"
@@ -1842,7 +1853,9 @@ def run(app_args, args, **kwargs):
         )
 
     if args.kernel_iteration_range:
-        update_env("ROCPROF_KERNEL_FILTER_RANGE", ", ".join(args.kernel_iteration_range))
+        update_env(
+            "ROCPROF_KERNEL_FILTER_RANGE", ", ".join(args.kernel_iteration_range)
+        )
 
     if args.agent_index:
         update_env("ROCPROF_AGENT_INDEX", args.agent_index)
@@ -1850,7 +1863,9 @@ def run(app_args, args, **kwargs):
     if args.extra_counters is not None:
         with open(args.extra_counters, "r") as e_file:
             e_file_contents = e_file.read()
-            update_env("ROCPROF_EXTRA_COUNTERS_CONTENTS", e_file_contents, overwrite=True)
+            update_env(
+                "ROCPROF_EXTRA_COUNTERS_CONTENTS", e_file_contents, overwrite=True
+            )
 
     if args.pmc and args.pmc_groups:
         fatal_error("Cannot specify both --pmc and (input file) pmc_groups")
@@ -2137,7 +2152,9 @@ def main(argv=None):
     # 3. CLI has --pmc AND input file has pmc (combine them as separate passes)
     cli_has_pmc = hasattr(cmd_args, "pmc") and cmd_args.pmc is not None
     input_has_pmc = len(inp_args) > 0 and has_set_attr(inp_args[0], "pmc")
-    use_multipass = cli_multipass or len(inp_args) > 1 or (cli_has_pmc and input_has_pmc)
+    use_multipass = (
+        cli_multipass or len(inp_args) > 1 or (cli_has_pmc and input_has_pmc)
+    )
 
     if not use_multipass:
         # Single-pass mode: only one source of PMC (either CLI or input file, but not both)
