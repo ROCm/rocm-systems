@@ -33,10 +33,6 @@ struct cache_policy
      */
     static void initialize_category_metadata()
     {
-        if(!get_use_cache_output())
-        {
-            return;
-        }
         trace_cache::get_metadata_registry().add_string("ainic");
     }
 
@@ -45,11 +41,6 @@ struct cache_policy
      */
     static void initialize_tracks_metadata()
     {
-        if(!get_use_cache_output())
-        {
-            return;
-        }
-
         const auto thread_id = std::nullopt;
 
         trace_cache::get_metadata_registry().add_track(
@@ -74,11 +65,6 @@ struct cache_policy
      */
     static void initialize_pmc_metadata(size_t nic_id, const std::string& nic_name)
     {
-        if(!get_use_cache_output())
-        {
-            return;
-        }
-
         constexpr size_t      EVENT_CODE       = 0;
         constexpr size_t      INSTANCE_ID      = 0;
         constexpr const char* LONG_DESCRIPTION = "";
@@ -165,10 +151,6 @@ struct cache_policy
                              const enabled_metrics& supported_metrics,
                              const metrics& metric_values, unsigned long timestamp)
     {
-        if(!get_use_cache_output())
-        {
-            return;
-        }
         enabled_metrics _enabled_metrics = { .value = enabled_metrics_cfg.value &
                                                       supported_metrics.value };
 

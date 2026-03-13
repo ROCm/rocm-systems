@@ -85,7 +85,7 @@ struct gpu_traits
     template <typename Cache>
     static void init_tracks_metadata()
     {
-        Cache::initialize_smi_tracks_metadata();
+        Cache::initialize_tracks_metadata();
     }
 
     /**
@@ -94,7 +94,7 @@ struct gpu_traits
     template <typename Cache>
     static void init_pmc_metadata(size_t device_index)
     {
-        Cache::initialize_smi_pmc_metadata(device_index);
+        Cache::initialize_pmc_metadata(device_index);
     }
 
     /**
@@ -180,9 +180,9 @@ struct gpu_traits
      * @brief Get metrics from a device.
      */
     static metrics_t get_metrics(const device_ptr_t&      device,
-                                 const enabled_metrics_t& enabled)
+                                 const enabled_metrics_t& enabled, uint64_t timestamp)
     {
-        return device->get_gpu_metrics(enabled);
+        return device->get_gpu_metrics(enabled, timestamp);
     }
 
     /**

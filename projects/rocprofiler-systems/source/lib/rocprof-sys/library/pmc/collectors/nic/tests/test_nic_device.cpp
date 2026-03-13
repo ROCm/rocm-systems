@@ -11,11 +11,14 @@
 
 using namespace rocprofsys::pmc::collectors::nic;
 using ::testing::_;
+using ::testing::AtLeast;
 using ::testing::DoAll;
 using ::testing::Return;
 using ::testing::SetArgPointee;
+using ::testing::StrictMock;
 
-using MockDriver = rocprofsys::pmc::drivers::amd_smi::testing::mock_driver;
+using MockDriver =
+    ::testing::StrictMock<rocprofsys::pmc::drivers::amd_smi::testing::mock_driver>;
 
 namespace rocprofsys::pmc::collectors::nic::testing
 {
@@ -53,8 +56,9 @@ protected:
                      sizeof(asic_info.product_name) - 1);
         std::strncpy(asic_info.vendor_name, "AMD", sizeof(asic_info.vendor_name) - 1);
 
-        ON_CALL(*mock_driver, get_nic_asic_info(test_handle, _))
-            .WillByDefault(
+        EXPECT_CALL(*mock_driver, get_nic_asic_info(test_handle, _))
+            .Times(AtLeast(1))
+            .WillRepeatedly(
                 DoAll(SetArgPointee<1>(asic_info), Return(AMDSMI_STATUS_SUCCESS)));
 
         // Setup port info
@@ -63,8 +67,9 @@ protected:
         std::strncpy(port_info.ports[0].netdev, "enp226s0",
                      sizeof(port_info.ports[0].netdev) - 1);
 
-        ON_CALL(*mock_driver, get_nic_port_info(test_handle, _))
-            .WillByDefault(
+        EXPECT_CALL(*mock_driver, get_nic_port_info(test_handle, _))
+            .Times(AtLeast(1))
+            .WillRepeatedly(
                 DoAll(SetArgPointee<1>(port_info), Return(AMDSMI_STATUS_SUCCESS)));
 
         // Setup RDMA device info
@@ -74,14 +79,17 @@ protected:
         std::strncpy(rdma_info.rdma_dev_info[0].rdma_dev, "rdma0",
                      sizeof(rdma_info.rdma_dev_info[0].rdma_dev) - 1);
 
-        ON_CALL(*mock_driver, get_nic_rdma_dev_info(test_handle, _))
-            .WillByDefault(
+        EXPECT_CALL(*mock_driver, get_nic_rdma_dev_info(test_handle, _))
+            .Times(AtLeast(1))
+            .WillRepeatedly(
                 DoAll(SetArgPointee<1>(rdma_info), Return(AMDSMI_STATUS_SUCCESS)));
 
         // Setup statistics count query
-        ON_CALL(*mock_driver, get_nic_rdma_port_statistics(test_handle, 0, _, nullptr))
-            .WillByDefault([](amdsmi_processor_handle, uint8_t, uint32_t* count,
-                              amdsmi_nic_stat_t*) {
+        EXPECT_CALL(*mock_driver,
+                    get_nic_rdma_port_statistics(test_handle, 0, _, nullptr))
+            .Times(AtLeast(1))
+            .WillRepeatedly([](amdsmi_processor_handle, uint8_t, uint32_t* count,
+                               amdsmi_nic_stat_t*) {
                 *count = 6;
                 return AMDSMI_STATUS_SUCCESS;
             });
@@ -94,10 +102,11 @@ protected:
     {
         SetupFullRdmaSupport();
 
-        ON_CALL(*mock_driver,
-                get_nic_rdma_port_statistics(test_handle, 0, _, ::testing::NotNull()))
-            .WillByDefault([](amdsmi_processor_handle, uint8_t, uint32_t* count,
-                              amdsmi_nic_stat_t* stats) {
+        EXPECT_CALL(*mock_driver,
+                    get_nic_rdma_port_statistics(test_handle, 0, _, ::testing::NotNull()))
+            .Times(AtLeast(1))
+            .WillRepeatedly([](amdsmi_processor_handle, uint8_t, uint32_t* count,
+                               amdsmi_nic_stat_t* stats) {
                 *count = 6;
 
                 std::strncpy(stats[0].name, "rx_rdma_ucast_bytes",
@@ -139,8 +148,9 @@ protected:
                      sizeof(asic_info.product_name) - 1);
         std::strncpy(asic_info.vendor_name, "Unknown", sizeof(asic_info.vendor_name) - 1);
 
-        ON_CALL(*mock_driver, get_nic_asic_info(test_handle, _))
-            .WillByDefault(
+        EXPECT_CALL(*mock_driver, get_nic_asic_info(test_handle, _))
+            .Times(AtLeast(1))
+            .WillRepeatedly(
                 DoAll(SetArgPointee<1>(asic_info), Return(AMDSMI_STATUS_SUCCESS)));
 
         // Setup port info (NIC exists but no RDMA)
@@ -149,13 +159,15 @@ protected:
         std::strncpy(port_info.ports[0].netdev, "eth0",
                      sizeof(port_info.ports[0].netdev) - 1);
 
-        ON_CALL(*mock_driver, get_nic_port_info(test_handle, _))
-            .WillByDefault(
+        EXPECT_CALL(*mock_driver, get_nic_port_info(test_handle, _))
+            .Times(AtLeast(1))
+            .WillRepeatedly(
                 DoAll(SetArgPointee<1>(port_info), Return(AMDSMI_STATUS_SUCCESS)));
 
         // RDMA query fails
-        ON_CALL(*mock_driver, get_nic_rdma_dev_info(test_handle, _))
-            .WillByDefault(Return(AMDSMI_STATUS_NOT_SUPPORTED));
+        EXPECT_CALL(*mock_driver, get_nic_rdma_dev_info(test_handle, _))
+            .Times(AtLeast(1))
+            .WillRepeatedly(Return(AMDSMI_STATUS_NOT_SUPPORTED));
     }
 };
 
@@ -219,8 +231,10 @@ TEST_F(NicDeviceTest, GetNicMetrics_ReturnsZeros_WhenNoRdmaPorts)
     std::strncpy(asic_info.product_name, "Test NIC", sizeof(asic_info.product_name) - 1);
     std::strncpy(asic_info.vendor_name, "Test Vendor", sizeof(asic_info.vendor_name) - 1);
 
-    ON_CALL(*mock_driver, get_nic_asic_info(test_handle, _))
-        .WillByDefault(DoAll(SetArgPointee<1>(asic_info), Return(AMDSMI_STATUS_SUCCESS)));
+    EXPECT_CALL(*mock_driver, get_nic_asic_info(test_handle, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(
+            DoAll(SetArgPointee<1>(asic_info), Return(AMDSMI_STATUS_SUCCESS)));
 
     // Setup with RDMA device but no ports
     amdsmi_nic_port_info_t port_info{};
@@ -228,15 +242,19 @@ TEST_F(NicDeviceTest, GetNicMetrics_ReturnsZeros_WhenNoRdmaPorts)
     std::strncpy(port_info.ports[0].netdev, "enp226s0",
                  sizeof(port_info.ports[0].netdev) - 1);
 
-    ON_CALL(*mock_driver, get_nic_port_info(test_handle, _))
-        .WillByDefault(DoAll(SetArgPointee<1>(port_info), Return(AMDSMI_STATUS_SUCCESS)));
+    EXPECT_CALL(*mock_driver, get_nic_port_info(test_handle, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(
+            DoAll(SetArgPointee<1>(port_info), Return(AMDSMI_STATUS_SUCCESS)));
 
     amdsmi_nic_rdma_devices_info_t rdma_info{};
     rdma_info.num_rdma_dev                    = 1;
     rdma_info.rdma_dev_info[0].num_rdma_ports = 0;  // No ports
 
-    ON_CALL(*mock_driver, get_nic_rdma_dev_info(test_handle, _))
-        .WillByDefault(DoAll(SetArgPointee<1>(rdma_info), Return(AMDSMI_STATUS_SUCCESS)));
+    EXPECT_CALL(*mock_driver, get_nic_rdma_dev_info(test_handle, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(
+            DoAll(SetArgPointee<1>(rdma_info), Return(AMDSMI_STATUS_SUCCESS)));
 
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
 

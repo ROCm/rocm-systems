@@ -38,21 +38,12 @@ struct cache_policy
      */
     static void initialize_category_metadata()
     {
-        if(!get_use_cache_output())
-        {
-            return;
-        }
         trace_cache::get_metadata_registry().add_string(
             trait::name<category::amd_smi>::value);
     }
 
     static void initialize_tracks_metadata()
     {
-        if(!get_use_cache_output())
-        {
-            return;
-        }
-
         const auto thread_id = std::nullopt;
 
         trace_cache::get_metadata_registry().add_track(
@@ -163,11 +154,6 @@ struct cache_policy
      */
     static void initialize_pmc_metadata(size_t gpu_id)
     {
-        if(!get_use_cache_output())
-        {
-            return;
-        }
-
         // Metadata field constants for PMC info registration
         constexpr size_t      EVENT_CODE       = 0;
         constexpr size_t      INSTANCE_ID      = 0;
@@ -343,10 +329,6 @@ struct cache_policy
                              const enabled_metrics& enabled_metrics_cfg,
                              const metrics& metric_values, unsigned long timestamp)
     {
-        if(!get_use_cache_output())
-        {
-            return;
-        }
         enabled_metrics _enabled_metrics = { .value = enabled_metrics_cfg.value &
                                                       supported_metrics.value };
 

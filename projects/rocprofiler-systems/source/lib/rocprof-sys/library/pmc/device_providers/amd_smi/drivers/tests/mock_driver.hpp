@@ -86,7 +86,9 @@ public:
     void set_up_defaults()
     {
         using ::testing::_;
+        using ::testing::DoAll;
         using ::testing::Return;
+        using ::testing::SetArgPointee;
 
         ON_CALL(*this, init(_)).WillByDefault(Return(AMDSMI_STATUS_SUCCESS));
         ON_CALL(*this, shutdown()).WillByDefault(Return(AMDSMI_STATUS_SUCCESS));

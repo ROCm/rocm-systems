@@ -126,23 +126,21 @@ struct collector
      * via the cache API and optionally Perfetto. Devices that fail to read metrics
      * are automatically disabled and removed from the device list.
      *
-     * @tparam GetTimestamp Callable returning uint64_t timestamp (avoids std::function
-     * overhead)
-     * @param get_timestamp Function to retrieve the current timestamp for the sample.
+     * @param timestamp Current timestamp in nanoseconds for the sample.
      */
-    template <typename GetTimestamp>
-    void sample(GetTimestamp&& get_timestamp)
+    void sample(int64_t timestamp)
     {
         auto new_end = std::remove_if(
             m_device_entries.begin(), m_device_entries.end(),
-            [this, &get_timestamp](const device_entry& entry) {
-                auto _timestamp = get_timestamp();
+            [this, timestamp](const device_entry& entry) {
+                auto _timestamp = static_cast<uint64_t>(timestamp);
                 assert(_timestamp <
                        static_cast<unsigned long>(std::numeric_limits<int64_t>::max()));
 
                 try
                 {
-                    auto _metrics = Traits::get_metrics(entry.device, m_enabled_metrics);
+                    auto _metrics =
+                        Traits::get_metrics(entry.device, m_enabled_metrics, _timestamp);
                     auto _device_id = Traits::get_device_index(entry.device);
 
                     Traits::template store_sample<CacheApi>(_device_id, m_enabled_metrics,

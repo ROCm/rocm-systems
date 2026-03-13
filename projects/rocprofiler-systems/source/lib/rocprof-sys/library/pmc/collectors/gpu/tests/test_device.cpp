@@ -1,6 +1,11 @@
 // Copyright (c) 2018-2025 Advanced Micro Devices, Inc. All Rights Reserved.
 // SPDX-License-Identifier: MIT
 
+// Enable SDMA support for unit tests (we're using mocks, not real AMD SMI)
+#ifndef AMD_SMI_SDMA_SUPPORTED
+#    define AMD_SMI_SDMA_SUPPORTED 1
+#endif
+
 #include "library/pmc/collectors/gpu/device.hpp"
 #include "library/pmc/device_providers/amd_smi/drivers/tests/mock_driver.hpp"
 
@@ -11,11 +16,15 @@
 
 using namespace rocprofsys::pmc::collectors::gpu;
 using ::testing::_;
+using ::testing::AnyNumber;
+using ::testing::AtLeast;
 using ::testing::DoAll;
 using ::testing::Return;
 using ::testing::SetArgPointee;
+using ::testing::StrictMock;
 
-using MockDriver = rocprofsys::pmc::drivers::amd_smi::testing::mock_driver;
+using MockDriver =
+    ::testing::StrictMock<rocprofsys::pmc::drivers::amd_smi::testing::mock_driver>;
 
 namespace rocprofsys::pmc::collectors::gpu::testing
 {
@@ -43,20 +52,40 @@ protected:
     }
 
     /**
+     * @brief Setup SDMA mock expectations for any device mock.
+     * Call this for any mock that will have devices constructed with it.
+     */
+    template <typename MockPtr>
+    static void SetupSDMAExpectations(MockPtr& mock, amdsmi_processor_handle handle)
+    {
+        EXPECT_CALL(*mock, get_gpu_process_list(handle, _, _))
+            .Times(AnyNumber())
+            .WillRepeatedly(DoAll(SetArgPointee<1>(1), Return(AMDSMI_STATUS_SUCCESS)));
+    }
+
+    /**
      * @brief Configure mock to return GPU metrics with all valid values.
      */
     void SetupAllMetricsSupported()
     {
         amdsmi_gpu_metrics_t metrics = CreateValidMetrics();
 
-        ON_CALL(*mock_driver, get_metrics_info(test_handle, _))
-            .WillByDefault(
+        EXPECT_CALL(*mock_driver, get_metrics_info(test_handle, _))
+            .Times(AtLeast(1))
+            .WillRepeatedly(
                 DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
 
         uint64_t mem_usage = 8589934592ULL;  // 8 GB
-        ON_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
-            .WillByDefault(
+        EXPECT_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
+            .Times(AtLeast(1))
+            .WillRepeatedly(
                 DoAll(SetArgPointee<2>(mem_usage), Return(AMDSMI_STATUS_SUCCESS)));
+
+        // SDMA support - allow any number of calls (happens during construction and
+        // metrics collection)
+        EXPECT_CALL(*mock_driver, get_gpu_process_list(test_handle, _, _))
+            .Times(AnyNumber())
+            .WillRepeatedly(DoAll(SetArgPointee<1>(1), Return(AMDSMI_STATUS_SUCCESS)));
     }
 
     /**
@@ -66,14 +95,21 @@ protected:
     {
         amdsmi_gpu_metrics_t metrics = CreateSentinelMetrics();
 
-        ON_CALL(*mock_driver, get_metrics_info(test_handle, _))
-            .WillByDefault(
+        EXPECT_CALL(*mock_driver, get_metrics_info(test_handle, _))
+            .Times(AtLeast(1))
+            .WillRepeatedly(
                 DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
 
         uint64_t sentinel_mem = 0xFFFFFFFFFFFFFFFFULL;
-        ON_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
-            .WillByDefault(
+        EXPECT_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
+            .Times(AtLeast(1))
+            .WillRepeatedly(
                 DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
+
+        // SDMA support
+        EXPECT_CALL(*mock_driver, get_gpu_process_list(test_handle, _, _))
+            .Times(AnyNumber())
+            .WillRepeatedly(Return(AMDSMI_STATUS_NOT_SUPPORTED));
     }
 
     /**
@@ -95,14 +131,21 @@ protected:
         metrics.temperature_hotspot  = 75;   // Valid temp (degrees Celsius)
         metrics.average_gfx_activity = 85;   // Valid activity (percent)
 
-        ON_CALL(*mock_driver, get_metrics_info(test_handle, _))
-            .WillByDefault(
+        EXPECT_CALL(*mock_driver, get_metrics_info(test_handle, _))
+            .Times(AtLeast(1))
+            .WillRepeatedly(
                 DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
 
         constexpr uint64_t sentinel_mem = 0xFFFFFFFFFFFFFFFFULL;
-        ON_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
-            .WillByDefault(
+        EXPECT_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
+            .Times(AtLeast(1))
+            .WillRepeatedly(
                 DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
+
+        // SDMA support
+        EXPECT_CALL(*mock_driver, get_gpu_process_list(test_handle, _, _))
+            .Times(AnyNumber())
+            .WillRepeatedly(DoAll(SetArgPointee<1>(1), Return(AMDSMI_STATUS_SUCCESS)));
     }
 
     /**
@@ -187,6 +230,16 @@ protected:
             }
         }
 
+        // 16-bit sentinel for device-level VCN/JPEG activity arrays
+        for(size_t i = 0; i < AMDSMI_MAX_NUM_VCN; ++i)
+        {
+            metrics.vcn_activity[i] = 0xFFFF;
+        }
+        for(size_t i = 0; i < AMDSMI_MAX_NUM_JPEG; ++i)
+        {
+            metrics.jpeg_activity[i] = 0xFFFF;
+        }
+
         // 16-bit sentinel for XGMI link info
         metrics.xgmi_link_width = 0xFFFF;
         metrics.xgmi_link_speed = 0xFFFF;
@@ -261,7 +314,7 @@ TEST_F(DeviceTest, device_construction_no_support)
     EXPECT_EQ(supported.value, 0U);
 
     // Verify get_gpu_metrics returns all zeros
-    auto metrics = dev.get_gpu_metrics();
+    auto metrics = dev.get_gpu_metrics(enabled_metrics{ .value = 0xFFFF }, 1000000000ULL);
     EXPECT_EQ(metrics.current_socket_power, 0U);
     EXPECT_EQ(metrics.average_socket_power, 0U);
     EXPECT_EQ(metrics.memory_usage, 0ULL);
@@ -350,13 +403,17 @@ TEST_F(DeviceTest, current_socket_power_collection)
     amdsmi_gpu_metrics_t metrics = CreateSentinelMetrics();
     metrics.current_socket_power = 150;  // 150 watts
 
-    ON_CALL(*mock_driver, get_metrics_info(test_handle, _))
-        .WillByDefault(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
+    EXPECT_CALL(*mock_driver, get_metrics_info(test_handle, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
 
     uint64_t sentinel_mem = 0xFFFFFFFFFFFFFFFFULL;
-    ON_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
-        .WillByDefault(
+    EXPECT_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
+
+    SetupSDMAExpectations(mock_driver, test_handle);
 
     // Create device (initializes supported metrics)
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
@@ -365,7 +422,8 @@ TEST_F(DeviceTest, current_socket_power_collection)
     EXPECT_TRUE(dev.get_supported_metrics().bits.current_socket_power);
 
     // Collect metrics
-    auto collected_metrics = dev.get_gpu_metrics();
+    auto collected_metrics =
+        dev.get_gpu_metrics(enabled_metrics{ .value = 0xFFFF }, 1000000000ULL);
 
     // Verify current power value was collected
     EXPECT_EQ(collected_metrics.current_socket_power, 150U);
@@ -382,13 +440,17 @@ TEST_F(DeviceTest, average_socket_power_collection)
     amdsmi_gpu_metrics_t metrics = CreateSentinelMetrics();
     metrics.average_socket_power = 140;  // 140 watts
 
-    ON_CALL(*mock_driver, get_metrics_info(test_handle, _))
-        .WillByDefault(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
+    EXPECT_CALL(*mock_driver, get_metrics_info(test_handle, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
 
     uint64_t sentinel_mem = 0xFFFFFFFFFFFFFFFFULL;
-    ON_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
-        .WillByDefault(
+    EXPECT_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
+
+    SetupSDMAExpectations(mock_driver, test_handle);
 
     // Create device
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
@@ -397,7 +459,8 @@ TEST_F(DeviceTest, average_socket_power_collection)
     EXPECT_TRUE(dev.get_supported_metrics().bits.average_socket_power);
 
     // Collect metrics
-    auto collected_metrics = dev.get_gpu_metrics();
+    auto collected_metrics =
+        dev.get_gpu_metrics(enabled_metrics{ .value = 0xFFFF }, 1000000000ULL);
 
     // Verify average power value was collected
     EXPECT_EQ(collected_metrics.average_socket_power, 140U);
@@ -422,7 +485,8 @@ TEST_F(DeviceTest, power_metrics_not_collected_when_unsupported)
     EXPECT_FALSE(supported.bits.average_socket_power);
 
     // Collect metrics
-    auto collected_metrics = dev.get_gpu_metrics();
+    auto collected_metrics =
+        dev.get_gpu_metrics(enabled_metrics{ .value = 0xFFFF }, 1000000000ULL);
 
     // Verify power values remain zero
     EXPECT_EQ(collected_metrics.current_socket_power, 0U);
@@ -444,13 +508,17 @@ TEST_F(DeviceTest, hotspot_temperature_collection)
     amdsmi_gpu_metrics_t metrics = CreateSentinelMetrics();
     metrics.temperature_hotspot  = 75;  // 75°C
 
-    ON_CALL(*mock_driver, get_metrics_info(test_handle, _))
-        .WillByDefault(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
+    EXPECT_CALL(*mock_driver, get_metrics_info(test_handle, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
 
     uint64_t sentinel_mem = 0xFFFFFFFFFFFFFFFFULL;
-    ON_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
-        .WillByDefault(
+    EXPECT_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
+
+    SetupSDMAExpectations(mock_driver, test_handle);
 
     // Create device
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
@@ -459,7 +527,8 @@ TEST_F(DeviceTest, hotspot_temperature_collection)
     EXPECT_TRUE(dev.get_supported_metrics().bits.hotspot_temperature);
 
     // Collect metrics
-    auto collected_metrics = dev.get_gpu_metrics();
+    auto collected_metrics =
+        dev.get_gpu_metrics(enabled_metrics{ .value = 0xFFFF }, 1000000000ULL);
 
     // Verify hotspot temperature value was collected
     EXPECT_EQ(collected_metrics.hotspot_temperature, 75);
@@ -476,13 +545,17 @@ TEST_F(DeviceTest, edge_temperature_collection)
     amdsmi_gpu_metrics_t metrics = CreateSentinelMetrics();
     metrics.temperature_edge     = 70;  // 70°C in degrees Celsius
 
-    ON_CALL(*mock_driver, get_metrics_info(test_handle, _))
-        .WillByDefault(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
+    EXPECT_CALL(*mock_driver, get_metrics_info(test_handle, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
 
     constexpr uint64_t sentinel_mem = 0xFFFFFFFFFFFFFFFFULL;
-    ON_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
-        .WillByDefault(
+    EXPECT_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
+
+    SetupSDMAExpectations(mock_driver, test_handle);
 
     // Create device
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
@@ -491,10 +564,11 @@ TEST_F(DeviceTest, edge_temperature_collection)
     EXPECT_TRUE(dev.get_supported_metrics().bits.edge_temperature);
 
     // Collect metrics
-    auto collected_metrics = dev.get_gpu_metrics();
+    auto collected_metrics =
+        dev.get_gpu_metrics(enabled_metrics{ .value = 0xFFFF }, 1000000000ULL);
 
-    // Verify edge temperature value was collected
-    EXPECT_EQ(collected_metrics.edge_temperature, 70000);
+    // Verify edge temperature value was collected (raw value from AMD SMI)
+    EXPECT_EQ(collected_metrics.edge_temperature, 70);
 }
 
 /**
@@ -516,7 +590,8 @@ TEST_F(DeviceTest, temperature_metrics_not_collected_when_unsupported)
     EXPECT_FALSE(supported.bits.edge_temperature);
 
     // Collect metrics
-    auto collected_metrics = dev.get_gpu_metrics();
+    auto collected_metrics =
+        dev.get_gpu_metrics(enabled_metrics{ .value = 0xFFFF }, 1000000000ULL);
 
     // Verify temperature values remain zero
     EXPECT_EQ(collected_metrics.hotspot_temperature, 0);
@@ -538,13 +613,17 @@ TEST_F(DeviceTest, gfx_activity_collection)
     amdsmi_gpu_metrics_t metrics = CreateSentinelMetrics();
     metrics.average_gfx_activity = 85;  // 85% activity
 
-    ON_CALL(*mock_driver, get_metrics_info(test_handle, _))
-        .WillByDefault(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
+    EXPECT_CALL(*mock_driver, get_metrics_info(test_handle, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
 
     uint64_t sentinel_mem = 0xFFFFFFFFFFFFFFFFULL;
-    ON_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
-        .WillByDefault(
+    EXPECT_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
+
+    SetupSDMAExpectations(mock_driver, test_handle);
 
     // Create device
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
@@ -553,7 +632,8 @@ TEST_F(DeviceTest, gfx_activity_collection)
     EXPECT_TRUE(dev.get_supported_metrics().bits.gfx_activity);
 
     // Collect metrics
-    auto collected_metrics = dev.get_gpu_metrics();
+    auto collected_metrics =
+        dev.get_gpu_metrics(enabled_metrics{ .value = 0xFFFF }, 1000000000ULL);
 
     // Verify GFX activity value was collected
     EXPECT_EQ(collected_metrics.gfx_activity, 85U);
@@ -570,13 +650,17 @@ TEST_F(DeviceTest, umc_activity_collection)
     amdsmi_gpu_metrics_t metrics = CreateSentinelMetrics();
     metrics.average_umc_activity = 60;  // 60% activity
 
-    ON_CALL(*mock_driver, get_metrics_info(test_handle, _))
-        .WillByDefault(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
+    EXPECT_CALL(*mock_driver, get_metrics_info(test_handle, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
 
     uint64_t sentinel_mem = 0xFFFFFFFFFFFFFFFFULL;
-    ON_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
-        .WillByDefault(
+    EXPECT_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
+
+    SetupSDMAExpectations(mock_driver, test_handle);
 
     // Create device
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
@@ -585,7 +669,8 @@ TEST_F(DeviceTest, umc_activity_collection)
     EXPECT_TRUE(dev.get_supported_metrics().bits.umc_activity);
 
     // Collect metrics
-    auto collected_metrics = dev.get_gpu_metrics();
+    auto collected_metrics =
+        dev.get_gpu_metrics(enabled_metrics{ .value = 0xFFFF }, 1000000000ULL);
 
     // Verify UMC activity value was collected
     EXPECT_EQ(collected_metrics.umc_activity, 60U);
@@ -602,13 +687,17 @@ TEST_F(DeviceTest, mm_activity_collection)
     amdsmi_gpu_metrics_t metrics = CreateSentinelMetrics();
     metrics.average_mm_activity  = 40;  // 40% activity
 
-    ON_CALL(*mock_driver, get_metrics_info(test_handle, _))
-        .WillByDefault(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
+    EXPECT_CALL(*mock_driver, get_metrics_info(test_handle, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
 
     uint64_t sentinel_mem = 0xFFFFFFFFFFFFFFFFULL;
-    ON_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
-        .WillByDefault(
+    EXPECT_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
+
+    SetupSDMAExpectations(mock_driver, test_handle);
 
     // Create device
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
@@ -617,7 +706,8 @@ TEST_F(DeviceTest, mm_activity_collection)
     EXPECT_TRUE(dev.get_supported_metrics().bits.mm_activity);
 
     // Collect metrics
-    auto collected_metrics = dev.get_gpu_metrics();
+    auto collected_metrics =
+        dev.get_gpu_metrics(enabled_metrics{ .value = 0xFFFF }, 1000000000ULL);
 
     // Verify MM activity value was collected
     EXPECT_EQ(collected_metrics.mm_activity, 40U);
@@ -636,13 +726,17 @@ TEST_F(DeviceTest, all_activity_metrics_collection)
     metrics.average_umc_activity = 60;
     metrics.average_mm_activity  = 40;
 
-    ON_CALL(*mock_driver, get_metrics_info(test_handle, _))
-        .WillByDefault(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
+    EXPECT_CALL(*mock_driver, get_metrics_info(test_handle, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
 
     uint64_t sentinel_mem = 0xFFFFFFFFFFFFFFFFULL;
-    ON_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
-        .WillByDefault(
+    EXPECT_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
+
+    SetupSDMAExpectations(mock_driver, test_handle);
 
     // Create device
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
@@ -654,7 +748,8 @@ TEST_F(DeviceTest, all_activity_metrics_collection)
     EXPECT_TRUE(supported.bits.mm_activity);
 
     // Collect metrics
-    auto collected_metrics = dev.get_gpu_metrics();
+    auto collected_metrics =
+        dev.get_gpu_metrics(enabled_metrics{ .value = 0xFFFF }, 1000000000ULL);
 
     // Verify all three activity values were collected correctly
     EXPECT_EQ(collected_metrics.gfx_activity, 85U);
@@ -676,13 +771,18 @@ TEST_F(DeviceTest, vram_memory_usage_collection_success)
     // Setup: Mock returns sentinel for all GPU metrics
     amdsmi_gpu_metrics_t metrics = CreateSentinelMetrics();
 
-    ON_CALL(*mock_driver, get_metrics_info(test_handle, _))
-        .WillByDefault(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
+    EXPECT_CALL(*mock_driver, get_metrics_info(test_handle, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
 
     // Mock returns valid memory usage (8 GB)
     uint64_t mem_usage = 8589934592ULL;
-    ON_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
-        .WillByDefault(DoAll(SetArgPointee<2>(mem_usage), Return(AMDSMI_STATUS_SUCCESS)));
+    EXPECT_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(
+            DoAll(SetArgPointee<2>(mem_usage), Return(AMDSMI_STATUS_SUCCESS)));
+
+    SetupSDMAExpectations(mock_driver, test_handle);
 
     // Create device
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
@@ -691,7 +791,8 @@ TEST_F(DeviceTest, vram_memory_usage_collection_success)
     EXPECT_TRUE(dev.get_supported_metrics().bits.memory_usage);
 
     // Collect metrics
-    auto collected_metrics = dev.get_gpu_metrics();
+    auto collected_metrics =
+        dev.get_gpu_metrics(enabled_metrics{ .value = 0xFFFF }, 1000000000ULL);
 
     // Verify memory usage value was collected
     EXPECT_EQ(collected_metrics.memory_usage, 8589934592ULL);
@@ -707,12 +808,16 @@ TEST_F(DeviceTest, memory_usage_collection_failure)
     // Setup: Mock returns sentinel for all GPU metrics
     amdsmi_gpu_metrics_t metrics = CreateSentinelMetrics();
 
-    ON_CALL(*mock_driver, get_metrics_info(test_handle, _))
-        .WillByDefault(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
+    EXPECT_CALL(*mock_driver, get_metrics_info(test_handle, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
 
     // Mock returns failure for memory usage
-    ON_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
-        .WillByDefault(Return(AMDSMI_STATUS_NOT_SUPPORTED));
+    EXPECT_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(Return(AMDSMI_STATUS_NOT_SUPPORTED));
+
+    SetupSDMAExpectations(mock_driver, test_handle);
 
     // Create device
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
@@ -721,7 +826,8 @@ TEST_F(DeviceTest, memory_usage_collection_failure)
     EXPECT_FALSE(dev.get_supported_metrics().bits.memory_usage);
 
     // Collect metrics
-    auto collected_metrics = dev.get_gpu_metrics();
+    auto collected_metrics =
+        dev.get_gpu_metrics(enabled_metrics{ .value = 0xFFFF }, 1000000000ULL);
 
     // Verify memory usage remains zero
     EXPECT_EQ(collected_metrics.memory_usage, 0ULL);
@@ -749,7 +855,8 @@ TEST_F(DeviceTest, memory_usage_not_collected_when_unsupported)
         .Times(0);  // Should not be called during get_gpu_metrics()
 
     // Collect metrics
-    auto collected_metrics = dev.get_gpu_metrics();
+    auto collected_metrics =
+        dev.get_gpu_metrics(enabled_metrics{ .value = 0xFFFF }, 1000000000ULL);
 
     // Verify memory usage remains zero
     EXPECT_EQ(collected_metrics.memory_usage, 0ULL);
@@ -778,13 +885,17 @@ TEST_F(DeviceTest, vcn_busy_collection_all_xcps)
         }
     }
 
-    ON_CALL(*mock_driver, get_metrics_info(test_handle, _))
-        .WillByDefault(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
+    EXPECT_CALL(*mock_driver, get_metrics_info(test_handle, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
 
     uint64_t sentinel_mem = 0xFFFFFFFFFFFFFFFFULL;
-    ON_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
-        .WillByDefault(
+    EXPECT_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
+
+    SetupSDMAExpectations(mock_driver, test_handle);
 
     // Create device
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
@@ -795,7 +906,8 @@ TEST_F(DeviceTest, vcn_busy_collection_all_xcps)
     EXPECT_FALSE(dev.get_supported_metrics().bits.vcn_activity);
 
     // Collect metrics
-    auto collected_metrics = dev.get_gpu_metrics();
+    auto collected_metrics =
+        dev.get_gpu_metrics(enabled_metrics{ .value = 0xFFFF }, 1000000000ULL);
 
     // Verify all XCP VCN arrays were copied correctly
     for(size_t xcp = 0; xcp < AMDSMI_MAX_NUM_XCP; ++xcp)
@@ -828,22 +940,29 @@ TEST_F(DeviceTest, jpeg_activity_collection_all_xcps)
         }
     }
 
-    ON_CALL(*mock_driver, get_metrics_info(test_handle, _))
-        .WillByDefault(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
+    EXPECT_CALL(*mock_driver, get_metrics_info(test_handle, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
 
     uint64_t sentinel_mem = 0xFFFFFFFFFFFFFFFFULL;
-    ON_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
-        .WillByDefault(
+    EXPECT_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
+
+    SetupSDMAExpectations(mock_driver, test_handle);
 
     // Create device
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
 
-    // Verify jpeg_activity is marked as supported
-    EXPECT_TRUE(dev.get_supported_metrics().bits.jpeg_activity);
+    // Verify jpeg_busy (per-XCP) is marked as supported
+    EXPECT_TRUE(dev.get_supported_metrics().bits.jpeg_busy);
+    // Device-level jpeg_activity should NOT be set when per-XCP is available
+    EXPECT_FALSE(dev.get_supported_metrics().bits.jpeg_activity);
 
     // Collect metrics
-    auto collected_metrics = dev.get_gpu_metrics();
+    auto collected_metrics =
+        dev.get_gpu_metrics(enabled_metrics{ .value = 0xFFFF }, 1000000000ULL);
 
     // Verify all XCP JPEG arrays were copied correctly
     for(size_t xcp = 0; xcp < AMDSMI_MAX_NUM_XCP; ++xcp)
@@ -871,11 +990,14 @@ TEST_F(DeviceTest, xcp_metrics_not_collected_when_unsupported)
 
     // Verify XCP metrics are NOT marked as supported
     auto supported = dev.get_supported_metrics();
+    EXPECT_FALSE(supported.bits.vcn_busy);
+    EXPECT_FALSE(supported.bits.jpeg_busy);
     EXPECT_FALSE(supported.bits.vcn_activity);
     EXPECT_FALSE(supported.bits.jpeg_activity);
 
     // Collect metrics
-    auto collected_metrics = dev.get_gpu_metrics();
+    auto collected_metrics =
+        dev.get_gpu_metrics(enabled_metrics{ .value = 0xFFFF }, 1000000000ULL);
 
     // Verify XCP arrays remain default-initialized (all zeros)
     for(size_t xcp = 0; xcp < AMDSMI_MAX_NUM_XCP; ++xcp)
@@ -911,24 +1033,32 @@ TEST_F(DeviceTest, mixed_vcn_jpeg_support)
         // JPEG remains sentinel (0xFFFF)
     }
 
-    ON_CALL(*mock_driver, get_metrics_info(test_handle, _))
-        .WillByDefault(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
+    EXPECT_CALL(*mock_driver, get_metrics_info(test_handle, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
 
     uint64_t sentinel_mem = 0xFFFFFFFFFFFFFFFFULL;
-    ON_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
-        .WillByDefault(
+    EXPECT_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
+
+    SetupSDMAExpectations(mock_driver, test_handle);
 
     // Create device
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
 
-    // Verify only VCN is supported
+    // Verify only VCN busy (per-XCP) is supported
     auto supported = dev.get_supported_metrics();
-    EXPECT_TRUE(supported.bits.vcn_activity);
+    EXPECT_TRUE(supported.bits.vcn_busy);
+    EXPECT_FALSE(supported.bits.jpeg_busy);
+    // Device-level vcn_activity/jpeg_activity should NOT be set when per-XCP is available
+    EXPECT_FALSE(supported.bits.vcn_activity);
     EXPECT_FALSE(supported.bits.jpeg_activity);
 
     // Collect metrics
-    auto collected_metrics = dev.get_gpu_metrics();
+    auto collected_metrics =
+        dev.get_gpu_metrics(enabled_metrics{ .value = 0xFFFF }, 1000000000ULL);
 
     // Verify VCN arrays are populated
     for(size_t xcp = 0; xcp < AMDSMI_MAX_NUM_XCP; ++xcp)
@@ -965,13 +1095,17 @@ TEST_F(DeviceTest, xgmi_link_width_collection)
     amdsmi_gpu_metrics_t metrics = CreateSentinelMetrics();
     metrics.xgmi_link_width      = 16;  // 16-bit link width
 
-    ON_CALL(*mock_driver, get_metrics_info(test_handle, _))
-        .WillByDefault(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
+    EXPECT_CALL(*mock_driver, get_metrics_info(test_handle, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
 
     uint64_t sentinel_mem = 0xFFFFFFFFFFFFFFFFULL;
-    ON_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
-        .WillByDefault(
+    EXPECT_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
+
+    SetupSDMAExpectations(mock_driver, test_handle);
 
     // Create device
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
@@ -980,7 +1114,8 @@ TEST_F(DeviceTest, xgmi_link_width_collection)
     EXPECT_TRUE(dev.get_supported_metrics().bits.xgmi);
 
     // Collect metrics
-    auto collected_metrics = dev.get_gpu_metrics();
+    auto collected_metrics =
+        dev.get_gpu_metrics(enabled_metrics{ .value = 0xFFFF }, 1000000000ULL);
 
     // Verify XGMI link width was collected
     EXPECT_EQ(collected_metrics.xgmi.link.width, 16U);
@@ -997,13 +1132,17 @@ TEST_F(DeviceTest, xgmi_link_speed_collection)
     amdsmi_gpu_metrics_t metrics = CreateSentinelMetrics();
     metrics.xgmi_link_speed      = 25;  // 25 GT/s
 
-    ON_CALL(*mock_driver, get_metrics_info(test_handle, _))
-        .WillByDefault(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
+    EXPECT_CALL(*mock_driver, get_metrics_info(test_handle, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
 
     uint64_t sentinel_mem = 0xFFFFFFFFFFFFFFFFULL;
-    ON_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
-        .WillByDefault(
+    EXPECT_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
+
+    SetupSDMAExpectations(mock_driver, test_handle);
 
     // Create device
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
@@ -1012,7 +1151,8 @@ TEST_F(DeviceTest, xgmi_link_speed_collection)
     EXPECT_TRUE(dev.get_supported_metrics().bits.xgmi);
 
     // Collect metrics
-    auto collected_metrics = dev.get_gpu_metrics();
+    auto collected_metrics =
+        dev.get_gpu_metrics(enabled_metrics{ .value = 0xFFFF }, 1000000000ULL);
 
     // Verify XGMI link speed was collected
     EXPECT_EQ(collected_metrics.xgmi.link.speed, 25U);
@@ -1035,13 +1175,17 @@ TEST_F(DeviceTest, xgmi_read_write_data_collection_all_links)
         metrics.xgmi_write_data_acc[i] = 2000000 + i * 1000;  // Write data in bytes
     }
 
-    ON_CALL(*mock_driver, get_metrics_info(test_handle, _))
-        .WillByDefault(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
+    EXPECT_CALL(*mock_driver, get_metrics_info(test_handle, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
 
     uint64_t sentinel_mem = 0xFFFFFFFFFFFFFFFFULL;
-    ON_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
-        .WillByDefault(
+    EXPECT_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
+
+    SetupSDMAExpectations(mock_driver, test_handle);
 
     // Create device
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
@@ -1050,7 +1194,8 @@ TEST_F(DeviceTest, xgmi_read_write_data_collection_all_links)
     EXPECT_TRUE(dev.get_supported_metrics().bits.xgmi);
 
     // Collect metrics
-    auto collected_metrics = dev.get_gpu_metrics();
+    auto collected_metrics =
+        dev.get_gpu_metrics(enabled_metrics{ .value = 0xFFFF }, 1000000000ULL);
 
     // Verify all XGMI link read/write data was collected
     for(size_t i = 0; i < AMDSMI_MAX_NUM_XGMI_LINKS; ++i)
@@ -1080,13 +1225,17 @@ TEST_F(DeviceTest, xgmi_sentinel_value_handling)
     metrics.xgmi_write_data_acc[0] = 2000000;                // Valid
     metrics.xgmi_write_data_acc[1] = 0xFFFFFFFFFFFFFFFFULL;  // Sentinel
 
-    ON_CALL(*mock_driver, get_metrics_info(test_handle, _))
-        .WillByDefault(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
+    EXPECT_CALL(*mock_driver, get_metrics_info(test_handle, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
 
     uint64_t sentinel_mem = 0xFFFFFFFFFFFFFFFFULL;
-    ON_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
-        .WillByDefault(
+    EXPECT_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
+
+    SetupSDMAExpectations(mock_driver, test_handle);
 
     // Create device
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
@@ -1095,7 +1244,8 @@ TEST_F(DeviceTest, xgmi_sentinel_value_handling)
     EXPECT_TRUE(dev.get_supported_metrics().bits.xgmi);
 
     // Collect metrics
-    auto collected_metrics = dev.get_gpu_metrics();
+    auto collected_metrics =
+        dev.get_gpu_metrics(enabled_metrics{ .value = 0xFFFF }, 1000000000ULL);
 
     // Verify valid values are collected and sentinels are zeroed
     EXPECT_EQ(collected_metrics.xgmi.link.width, 16U);
@@ -1123,7 +1273,8 @@ TEST_F(DeviceTest, xgmi_not_collected_when_unsupported)
     EXPECT_FALSE(dev.get_supported_metrics().bits.xgmi);
 
     // Collect metrics
-    auto collected_metrics = dev.get_gpu_metrics();
+    auto collected_metrics =
+        dev.get_gpu_metrics(enabled_metrics{ .value = 0xFFFF }, 1000000000ULL);
 
     // Verify all XGMI metrics remain default-initialized (zeros)
     EXPECT_EQ(collected_metrics.xgmi.link.width, 0U);
@@ -1151,13 +1302,17 @@ TEST_F(DeviceTest, pcie_link_width_collection)
     amdsmi_gpu_metrics_t metrics = CreateSentinelMetrics();
     metrics.pcie_link_width      = 16;  // x16 PCIe lanes
 
-    ON_CALL(*mock_driver, get_metrics_info(test_handle, _))
-        .WillByDefault(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
+    EXPECT_CALL(*mock_driver, get_metrics_info(test_handle, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
 
     uint64_t sentinel_mem = 0xFFFFFFFFFFFFFFFFULL;
-    ON_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
-        .WillByDefault(
+    EXPECT_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
+
+    SetupSDMAExpectations(mock_driver, test_handle);
 
     // Create device
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
@@ -1166,7 +1321,8 @@ TEST_F(DeviceTest, pcie_link_width_collection)
     EXPECT_TRUE(dev.get_supported_metrics().bits.pcie);
 
     // Collect metrics
-    auto collected_metrics = dev.get_gpu_metrics();
+    auto collected_metrics =
+        dev.get_gpu_metrics(enabled_metrics{ .value = 0xFFFF }, 1000000000ULL);
 
     // Verify PCIe link width was collected
     EXPECT_EQ(collected_metrics.pcie.link.width, 16U);
@@ -1183,13 +1339,17 @@ TEST_F(DeviceTest, pcie_link_speed_collection)
     amdsmi_gpu_metrics_t metrics = CreateSentinelMetrics();
     metrics.pcie_link_speed      = 16000;  // 16 GT/s (Gen4)
 
-    ON_CALL(*mock_driver, get_metrics_info(test_handle, _))
-        .WillByDefault(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
+    EXPECT_CALL(*mock_driver, get_metrics_info(test_handle, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
 
     uint64_t sentinel_mem = 0xFFFFFFFFFFFFFFFFULL;
-    ON_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
-        .WillByDefault(
+    EXPECT_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
+
+    SetupSDMAExpectations(mock_driver, test_handle);
 
     // Create device
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
@@ -1198,7 +1358,8 @@ TEST_F(DeviceTest, pcie_link_speed_collection)
     EXPECT_TRUE(dev.get_supported_metrics().bits.pcie);
 
     // Collect metrics
-    auto collected_metrics = dev.get_gpu_metrics();
+    auto collected_metrics =
+        dev.get_gpu_metrics(enabled_metrics{ .value = 0xFFFF }, 1000000000ULL);
 
     // Verify PCIe link speed was collected
     EXPECT_EQ(collected_metrics.pcie.link.speed, 16000U);
@@ -1215,13 +1376,17 @@ TEST_F(DeviceTest, pcie_bandwidth_accumulator_collection)
     amdsmi_gpu_metrics_t metrics = CreateSentinelMetrics();
     metrics.pcie_bandwidth_acc   = 500000000;  // 500MB accumulated
 
-    ON_CALL(*mock_driver, get_metrics_info(test_handle, _))
-        .WillByDefault(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
+    EXPECT_CALL(*mock_driver, get_metrics_info(test_handle, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
 
     uint64_t sentinel_mem = 0xFFFFFFFFFFFFFFFFULL;
-    ON_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
-        .WillByDefault(
+    EXPECT_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
+
+    SetupSDMAExpectations(mock_driver, test_handle);
 
     // Create device
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
@@ -1230,7 +1395,8 @@ TEST_F(DeviceTest, pcie_bandwidth_accumulator_collection)
     EXPECT_TRUE(dev.get_supported_metrics().bits.pcie);
 
     // Collect metrics
-    auto collected_metrics = dev.get_gpu_metrics();
+    auto collected_metrics =
+        dev.get_gpu_metrics(enabled_metrics{ .value = 0xFFFF }, 1000000000ULL);
 
     // Verify PCIe bandwidth accumulator was collected
     EXPECT_EQ(collected_metrics.pcie.bandwidth.acc, 500000000U);
@@ -1247,13 +1413,17 @@ TEST_F(DeviceTest, pcie_bandwidth_instantaneous_collection)
     amdsmi_gpu_metrics_t metrics = CreateSentinelMetrics();
     metrics.pcie_bandwidth_inst  = 10000000;  // 10 MB/s
 
-    ON_CALL(*mock_driver, get_metrics_info(test_handle, _))
-        .WillByDefault(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
+    EXPECT_CALL(*mock_driver, get_metrics_info(test_handle, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
 
     uint64_t sentinel_mem = 0xFFFFFFFFFFFFFFFFULL;
-    ON_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
-        .WillByDefault(
+    EXPECT_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
+
+    SetupSDMAExpectations(mock_driver, test_handle);
 
     // Create device
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
@@ -1262,7 +1432,8 @@ TEST_F(DeviceTest, pcie_bandwidth_instantaneous_collection)
     EXPECT_TRUE(dev.get_supported_metrics().bits.pcie);
 
     // Collect metrics
-    auto collected_metrics = dev.get_gpu_metrics();
+    auto collected_metrics =
+        dev.get_gpu_metrics(enabled_metrics{ .value = 0xFFFF }, 1000000000ULL);
 
     // Verify PCIe instantaneous bandwidth was collected
     EXPECT_EQ(collected_metrics.pcie.bandwidth.inst, 10000000U);
@@ -1283,13 +1454,17 @@ TEST_F(DeviceTest, pcie_sentinel_value_handling)
     metrics.pcie_bandwidth_acc = 500000000;
     // pcie_link_speed and pcie_bandwidth_inst remain sentinel values
 
-    ON_CALL(*mock_driver, get_metrics_info(test_handle, _))
-        .WillByDefault(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
+    EXPECT_CALL(*mock_driver, get_metrics_info(test_handle, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
 
     uint64_t sentinel_mem = 0xFFFFFFFFFFFFFFFFULL;
-    ON_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
-        .WillByDefault(
+    EXPECT_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
+
+    SetupSDMAExpectations(mock_driver, test_handle);
 
     // Create device
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
@@ -1298,7 +1473,8 @@ TEST_F(DeviceTest, pcie_sentinel_value_handling)
     EXPECT_TRUE(dev.get_supported_metrics().bits.pcie);
 
     // Collect metrics
-    auto collected_metrics = dev.get_gpu_metrics();
+    auto collected_metrics =
+        dev.get_gpu_metrics(enabled_metrics{ .value = 0xFFFF }, 1000000000ULL);
 
     // Verify valid values are collected and sentinels are zeroed
     EXPECT_EQ(collected_metrics.pcie.link.width, 16U);
@@ -1324,7 +1500,8 @@ TEST_F(DeviceTest, pcie_not_collected_when_unsupported)
     EXPECT_FALSE(dev.get_supported_metrics().bits.pcie);
 
     // Collect metrics
-    auto collected_metrics = dev.get_gpu_metrics();
+    auto collected_metrics =
+        dev.get_gpu_metrics(enabled_metrics{ .value = 0xFFFF }, 1000000000ULL);
 
     // Verify all PCIe metrics remain default-initialized (zeros)
     EXPECT_EQ(collected_metrics.pcie.link.width, 0U);
@@ -1360,8 +1537,12 @@ TEST_F(DeviceTest, all_metrics_supported_detection)
     EXPECT_TRUE(supported.bits.gfx_activity);
     EXPECT_TRUE(supported.bits.umc_activity);
     EXPECT_TRUE(supported.bits.mm_activity);
-    EXPECT_TRUE(supported.bits.vcn_activity);
-    EXPECT_TRUE(supported.bits.jpeg_activity);
+    // CreateValidMetrics sets per-XCP VCN/JPEG busy, so vcn_busy/jpeg_busy should be set
+    // Device-level vcn_activity/jpeg_activity should NOT be set when per-XCP is available
+    EXPECT_TRUE(supported.bits.vcn_busy);
+    EXPECT_TRUE(supported.bits.jpeg_busy);
+    EXPECT_FALSE(supported.bits.vcn_activity);
+    EXPECT_FALSE(supported.bits.jpeg_activity);
     EXPECT_TRUE(supported.bits.xgmi);
     EXPECT_TRUE(supported.bits.pcie);
 }
@@ -1379,19 +1560,25 @@ TEST_F(DeviceTest, vcn_activity_support_detection_any_xcp)
     // Set valid VCN value only in XCP 7
     metrics.xcp_stats[7].vcn_busy[0] = 50;  // Valid value
 
-    ON_CALL(*mock_driver, get_metrics_info(test_handle, _))
-        .WillByDefault(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
+    EXPECT_CALL(*mock_driver, get_metrics_info(test_handle, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
 
     uint64_t sentinel_mem = 0xFFFFFFFFFFFFFFFFULL;
-    ON_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
-        .WillByDefault(
+    EXPECT_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
+
+    SetupSDMAExpectations(mock_driver, test_handle);
 
     // Create device
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
 
-    // Verify VCN activity is marked as supported
-    EXPECT_TRUE(dev.get_supported_metrics().bits.vcn_activity);
+    // Verify VCN busy (per-XCP) is marked as supported
+    EXPECT_TRUE(dev.get_supported_metrics().bits.vcn_busy);
+    // Device-level vcn_activity should NOT be set when per-XCP is available
+    EXPECT_FALSE(dev.get_supported_metrics().bits.vcn_activity);
 }
 
 /**
@@ -1424,19 +1611,25 @@ TEST_F(DeviceTest, jpeg_activity_support_detection_any_xcp)
     // Set valid JPEG value only in XCP 5
     metrics.xcp_stats[5].jpeg_busy[0] = 75;  // Valid value
 
-    ON_CALL(*mock_driver, get_metrics_info(test_handle, _))
-        .WillByDefault(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
+    EXPECT_CALL(*mock_driver, get_metrics_info(test_handle, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
 
     uint64_t sentinel_mem = 0xFFFFFFFFFFFFFFFFULL;
-    ON_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
-        .WillByDefault(
+    EXPECT_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
+
+    SetupSDMAExpectations(mock_driver, test_handle);
 
     // Create device
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
 
-    // Verify JPEG activity is marked as supported
-    EXPECT_TRUE(dev.get_supported_metrics().bits.jpeg_activity);
+    // Verify JPEG busy (per-XCP) is marked as supported
+    EXPECT_TRUE(dev.get_supported_metrics().bits.jpeg_busy);
+    // Device-level jpeg_activity should NOT be set when per-XCP is available
+    EXPECT_FALSE(dev.get_supported_metrics().bits.jpeg_activity);
 }
 
 /**
@@ -1451,13 +1644,17 @@ TEST_F(DeviceTest, xgmi_support_detection_link_width_only)
     metrics.xgmi_link_width      = 16;  // Valid link width
     // xgmi_link_speed and all xgmi_read_data_acc remain sentinel
 
-    ON_CALL(*mock_driver, get_metrics_info(test_handle, _))
-        .WillByDefault(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
+    EXPECT_CALL(*mock_driver, get_metrics_info(test_handle, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
 
     uint64_t sentinel_mem = 0xFFFFFFFFFFFFFFFFULL;
-    ON_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
-        .WillByDefault(
+    EXPECT_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
+
+    SetupSDMAExpectations(mock_driver, test_handle);
 
     // Create device
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
@@ -1478,13 +1675,17 @@ TEST_F(DeviceTest, xgmi_support_detection_any_read_data_valid)
     metrics.xgmi_read_data_acc[2] = 1000;  // Valid read data at index 2
     // link width, link speed, and all other read data remain sentinel
 
-    ON_CALL(*mock_driver, get_metrics_info(test_handle, _))
-        .WillByDefault(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
+    EXPECT_CALL(*mock_driver, get_metrics_info(test_handle, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
 
     uint64_t sentinel_mem = 0xFFFFFFFFFFFFFFFFULL;
-    ON_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
-        .WillByDefault(
+    EXPECT_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
+
+    SetupSDMAExpectations(mock_driver, test_handle);
 
     // Create device
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
@@ -1505,13 +1706,17 @@ TEST_F(DeviceTest, pcie_support_detection_bandwidth_only)
     metrics.pcie_bandwidth_acc   = 1000000;  // Valid bandwidth accumulator
     // pcie_link_width, pcie_link_speed, pcie_bandwidth_inst remain sentinel
 
-    ON_CALL(*mock_driver, get_metrics_info(test_handle, _))
-        .WillByDefault(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
+    EXPECT_CALL(*mock_driver, get_metrics_info(test_handle, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
 
     uint64_t sentinel_mem = 0xFFFFFFFFFFFFFFFFULL;
-    ON_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
-        .WillByDefault(
+    EXPECT_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
+
+    SetupSDMAExpectations(mock_driver, test_handle);
 
     // Create device
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
@@ -1530,13 +1735,17 @@ TEST_F(DeviceTest, memory_usage_support_detection)
     // Setup: Memory API returns success with valid value
     amdsmi_gpu_metrics_t metrics = CreateSentinelMetrics();
 
-    ON_CALL(*mock_driver, get_metrics_info(test_handle, _))
-        .WillByDefault(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
+    EXPECT_CALL(*mock_driver, get_metrics_info(test_handle, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
 
     uint64_t valid_mem_usage = 4096000000;  // 4GB
-    ON_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
-        .WillByDefault(
+    EXPECT_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(
             DoAll(SetArgPointee<2>(valid_mem_usage), Return(AMDSMI_STATUS_SUCCESS)));
+
+    SetupSDMAExpectations(mock_driver, test_handle);
 
     // Create device
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
@@ -1555,11 +1764,15 @@ TEST_F(DeviceTest, memory_usage_unsupported_api_failure)
     // Setup: Memory API returns failure
     amdsmi_gpu_metrics_t metrics = CreateSentinelMetrics();
 
-    ON_CALL(*mock_driver, get_metrics_info(test_handle, _))
-        .WillByDefault(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
+    EXPECT_CALL(*mock_driver, get_metrics_info(test_handle, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
 
-    ON_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
-        .WillByDefault(Return(AMDSMI_STATUS_NOT_SUPPORTED));
+    EXPECT_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(Return(AMDSMI_STATUS_NOT_SUPPORTED));
+
+    SetupSDMAExpectations(mock_driver, test_handle);
 
     // Create device
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
@@ -1578,13 +1791,17 @@ TEST_F(DeviceTest, memory_usage_unsupported_sentinel_value)
     // Setup: Memory API returns success but with sentinel value
     amdsmi_gpu_metrics_t metrics = CreateSentinelMetrics();
 
-    ON_CALL(*mock_driver, get_metrics_info(test_handle, _))
-        .WillByDefault(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
+    EXPECT_CALL(*mock_driver, get_metrics_info(test_handle, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
 
     uint64_t sentinel_mem = 0xFFFFFFFFFFFFFFFFULL;  // Sentinel value
-    ON_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
-        .WillByDefault(
+    EXPECT_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
+
+    SetupSDMAExpectations(mock_driver, test_handle);
 
     // Create device
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
@@ -1618,13 +1835,17 @@ TEST_F(DeviceTest, vcn_activity_top_level_field_only)
 
     // All XCP VCN busy values remain sentinel (0xFFFF)
 
-    ON_CALL(*mock_driver, get_metrics_info(test_handle, _))
-        .WillByDefault(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
+    EXPECT_CALL(*mock_driver, get_metrics_info(test_handle, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
 
     uint64_t sentinel_mem = 0xFFFFFFFFFFFFFFFFULL;
-    ON_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
-        .WillByDefault(
+    EXPECT_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
+
+    SetupSDMAExpectations(mock_driver, test_handle);
 
     // Create device
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
@@ -1658,28 +1879,32 @@ TEST_F(DeviceTest, vcn_activity_in_both_fields)
     // Also set in top-level field (not currently checked)
     // metrics.vcn_activity[0] = 75;  // Different value in top-level field
 
-    ON_CALL(*mock_driver, get_metrics_info(test_handle, _))
-        .WillByDefault(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
+    EXPECT_CALL(*mock_driver, get_metrics_info(test_handle, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
 
     uint64_t sentinel_mem = 0xFFFFFFFFFFFFFFFFULL;
-    ON_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
-        .WillByDefault(
+    EXPECT_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
+
+    SetupSDMAExpectations(mock_driver, test_handle);
 
     // Create device
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
 
-    // VCN activity should be supported (XCP stats are valid)
-    EXPECT_TRUE(dev.get_supported_metrics().bits.vcn_activity);
+    // Per-XCP vcn_busy should be supported (XCP stats are valid)
+    EXPECT_TRUE(dev.get_supported_metrics().bits.vcn_busy);
+    // Device-level vcn_activity should NOT be set when per-XCP is available
+    EXPECT_FALSE(dev.get_supported_metrics().bits.vcn_activity);
 
     // Collect metrics
-    auto collected_metrics = dev.get_gpu_metrics();
+    auto collected_metrics =
+        dev.get_gpu_metrics(enabled_metrics{ .value = 0xFFFF }, 1000000000ULL);
 
-    // Verify XCP stats were collected (current implementation)
+    // Verify XCP stats were collected
     EXPECT_EQ(collected_metrics.xcp_stats[0].vcn_busy[0], 80U);
-
-    // When implementation is enhanced to collect from both sources,
-    // add verification for top-level vcn_activity[] values
 }
 
 /**
@@ -1703,13 +1928,17 @@ TEST_F(DeviceTest, vcn_activity_detection_should_check_both_sources)
     // XCP stats have sentinels (checked by current implementation)
     // All xcp_stats[].vcn_busy[] remain 0xFFFF
 
-    ON_CALL(*mock_driver, get_metrics_info(test_handle, _))
-        .WillByDefault(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
+    EXPECT_CALL(*mock_driver, get_metrics_info(test_handle, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
 
     uint64_t sentinel_mem = 0xFFFFFFFFFFFFFFFFULL;
-    ON_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
-        .WillByDefault(
+    EXPECT_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
+
+    SetupSDMAExpectations(mock_driver, test_handle);
 
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
 
@@ -1743,17 +1972,22 @@ TEST_F(DeviceTest, vcn_activity_collection_priority)
     // metrics.vcn_activity[0] = 75;  // Average of 80 and 70?
     // metrics.vcn_activity[1] = 0;   // Or different semantic meaning?
 
-    ON_CALL(*mock_driver, get_metrics_info(test_handle, _))
-        .WillByDefault(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
+    EXPECT_CALL(*mock_driver, get_metrics_info(test_handle, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
 
     uint64_t sentinel_mem = 0xFFFFFFFFFFFFFFFFULL;
-    ON_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
-        .WillByDefault(
+    EXPECT_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
+
+    SetupSDMAExpectations(mock_driver, test_handle);
 
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
 
-    auto collected = dev.get_gpu_metrics();
+    auto collected =
+        dev.get_gpu_metrics(enabled_metrics{ .value = 0xFFFF }, 1000000000ULL);
 
     // Current implementation collects from XCP stats only
     EXPECT_EQ(collected.xcp_stats[0].vcn_busy[0], 80U);
@@ -1779,13 +2013,17 @@ TEST_F(DeviceTest, vcn_activity_xcp_disabled_top_level_valid)
     // metrics.vcn_activity[1] = 55;  // VCN 1 at 55%
 
     // All XCP stats remain sentinel
-    ON_CALL(*mock_driver, get_metrics_info(test_handle, _))
-        .WillByDefault(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
+    EXPECT_CALL(*mock_driver, get_metrics_info(test_handle, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
 
     uint64_t sentinel_mem = 0xFFFFFFFFFFFFFFFFULL;
-    ON_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
-        .WillByDefault(
+    EXPECT_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
+
+    SetupSDMAExpectations(mock_driver, test_handle);
 
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
 
@@ -1809,19 +2047,21 @@ TEST_F(DeviceTest, vcn_activity_xcp_disabled_top_level_valid)
 TEST_F(DeviceTest, get_metrics_info_failure)
 {
     // Setup: get_metrics_info() returns failure
-    ON_CALL(*mock_driver, get_metrics_info(test_handle, _))
-        .WillByDefault(Return(AMDSMI_STATUS_NOT_SUPPORTED));
+    EXPECT_CALL(*mock_driver, get_metrics_info(test_handle, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(Return(AMDSMI_STATUS_NOT_SUPPORTED));
 
     uint64_t valid_mem_usage = 4096000000;
-    ON_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
-        .WillByDefault(
+    EXPECT_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(
             DoAll(SetArgPointee<2>(valid_mem_usage), Return(AMDSMI_STATUS_SUCCESS)));
 
     // Create device
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
 
     // Call get_gpu_metrics() - should not throw
-    auto metrics = dev.get_gpu_metrics();
+    auto metrics = dev.get_gpu_metrics(enabled_metrics{ .value = 0xFFFF }, 1000000000ULL);
 
     // Verify returns default-initialized metrics (all zeros)
     EXPECT_EQ(metrics.current_socket_power, 0U);
@@ -1839,12 +2079,14 @@ TEST_F(DeviceTest, get_metrics_info_failure)
 TEST_F(DeviceTest, get_metrics_info_failure_during_init)
 {
     // Setup: get_metrics_info() returns failure during construction
-    ON_CALL(*mock_driver, get_metrics_info(test_handle, _))
-        .WillByDefault(Return(AMDSMI_STATUS_NOT_SUPPORTED));
+    EXPECT_CALL(*mock_driver, get_metrics_info(test_handle, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(Return(AMDSMI_STATUS_NOT_SUPPORTED));
 
     uint64_t valid_mem_usage = 4096000000;
-    ON_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
-        .WillByDefault(
+    EXPECT_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(
             DoAll(SetArgPointee<2>(valid_mem_usage), Return(AMDSMI_STATUS_SUCCESS)));
 
     // Create device - should not crash
@@ -1876,7 +2118,8 @@ TEST_F(DeviceTest, multiple_metric_collections)
     // Collect metrics 10 times in a row
     for(int i = 0; i < 10; ++i)
     {
-        auto metrics = dev.get_gpu_metrics();
+        auto metrics =
+            dev.get_gpu_metrics(enabled_metrics{ .value = 0xFFFF }, 1000000000ULL);
         // Each collection should succeed
         EXPECT_GT(metrics.current_socket_power, 0U);
     }
@@ -1898,19 +2141,24 @@ TEST_F(DeviceTest, large_array_indices_xgmi)
         metrics.xgmi_write_data_acc[i] = 2000 + i;
     }
 
-    ON_CALL(*mock_driver, get_metrics_info(test_handle, _))
-        .WillByDefault(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
+    EXPECT_CALL(*mock_driver, get_metrics_info(test_handle, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
 
     uint64_t sentinel_mem = 0xFFFFFFFFFFFFFFFFULL;
-    ON_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
-        .WillByDefault(
+    EXPECT_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
+
+    SetupSDMAExpectations(mock_driver, test_handle);
 
     // Create device
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
 
     // Collect metrics - should not crash or cause buffer overflow
-    auto collected_metrics = dev.get_gpu_metrics();
+    auto collected_metrics =
+        dev.get_gpu_metrics(enabled_metrics{ .value = 0xFFFF }, 1000000000ULL);
 
     // Verify all links were processed correctly
     for(size_t i = 0; i < AMDSMI_MAX_NUM_XGMI_LINKS; ++i)
@@ -1938,19 +2186,24 @@ TEST_F(DeviceTest, large_array_indices_xcp)
         }
     }
 
-    ON_CALL(*mock_driver, get_metrics_info(test_handle, _))
-        .WillByDefault(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
+    EXPECT_CALL(*mock_driver, get_metrics_info(test_handle, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
 
     uint64_t sentinel_mem = 0xFFFFFFFFFFFFFFFFULL;
-    ON_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
-        .WillByDefault(
+    EXPECT_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
+
+    SetupSDMAExpectations(mock_driver, test_handle);
 
     // Create device
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
 
     // Collect metrics - should not crash
-    auto collected_metrics = dev.get_gpu_metrics();
+    auto collected_metrics =
+        dev.get_gpu_metrics(enabled_metrics{ .value = 0xFFFF }, 1000000000ULL);
 
     // Verify all XCP stats were processed correctly
     for(size_t xcp = 0; xcp < AMDSMI_MAX_NUM_XCP; ++xcp)
@@ -1982,19 +2235,24 @@ TEST_F(DeviceTest, large_array_indices_jpeg)
         }
     }
 
-    ON_CALL(*mock_driver, get_metrics_info(test_handle, _))
-        .WillByDefault(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
+    EXPECT_CALL(*mock_driver, get_metrics_info(test_handle, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(DoAll(SetArgPointee<1>(metrics), Return(AMDSMI_STATUS_SUCCESS)));
 
     uint64_t sentinel_mem = 0xFFFFFFFFFFFFFFFFULL;
-    ON_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
-        .WillByDefault(
+    EXPECT_CALL(*mock_driver, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
+
+    SetupSDMAExpectations(mock_driver, test_handle);
 
     // Create device
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
 
     // Collect metrics - should not crash
-    auto collected_metrics = dev.get_gpu_metrics();
+    auto collected_metrics =
+        dev.get_gpu_metrics(enabled_metrics{ .value = 0xFFFF }, 1000000000ULL);
 
     // Verify all JPEG engines were processed correctly
     for(size_t xcp = 0; xcp < AMDSMI_MAX_NUM_XCP; ++xcp)
@@ -2025,39 +2283,49 @@ TEST_F(DeviceTest, concurrent_device_objects)
     amdsmi_gpu_metrics_t metrics1 = CreateSentinelMetrics();
     metrics1.current_socket_power = 100;
 
-    ON_CALL(*mock_driver1, get_metrics_info(handle1, _))
-        .WillByDefault(DoAll(SetArgPointee<1>(metrics1), Return(AMDSMI_STATUS_SUCCESS)));
+    EXPECT_CALL(*mock_driver1, get_metrics_info(handle1, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(DoAll(SetArgPointee<1>(metrics1), Return(AMDSMI_STATUS_SUCCESS)));
 
     uint64_t sentinel_mem = 0xFFFFFFFFFFFFFFFFULL;
-    ON_CALL(*mock_driver1, get_memory_usage(handle1, AMDSMI_MEM_TYPE_VRAM, _))
-        .WillByDefault(
+    EXPECT_CALL(*mock_driver1, get_memory_usage(handle1, AMDSMI_MEM_TYPE_VRAM, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
+
+    SetupSDMAExpectations(mock_driver1, handle1);
 
     // Device 2 returns power = 200W
     amdsmi_gpu_metrics_t metrics2 = CreateSentinelMetrics();
     metrics2.current_socket_power = 200;
 
-    ON_CALL(*mock_driver2, get_metrics_info(handle2, _))
-        .WillByDefault(DoAll(SetArgPointee<1>(metrics2), Return(AMDSMI_STATUS_SUCCESS)));
+    EXPECT_CALL(*mock_driver2, get_metrics_info(handle2, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(DoAll(SetArgPointee<1>(metrics2), Return(AMDSMI_STATUS_SUCCESS)));
 
-    ON_CALL(*mock_driver2, get_memory_usage(handle2, AMDSMI_MEM_TYPE_VRAM, _))
-        .WillByDefault(
+    EXPECT_CALL(*mock_driver2, get_memory_usage(handle2, AMDSMI_MEM_TYPE_VRAM, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
+
+    SetupSDMAExpectations(mock_driver2, handle2);
 
     // Create two device objects
     device<MockDriver> dev1(mock_driver1, handle1, test_processor_type, 0);
     device<MockDriver> dev2(mock_driver2, handle2, test_processor_type, 1);
 
     // Collect from device 1
-    auto result1 = dev1.get_gpu_metrics();
+    auto result1 =
+        dev1.get_gpu_metrics(enabled_metrics{ .value = 0xFFFF }, 1000000000ULL);
     EXPECT_EQ(result1.current_socket_power, 100U);
 
     // Collect from device 2
-    auto result2 = dev2.get_gpu_metrics();
+    auto result2 =
+        dev2.get_gpu_metrics(enabled_metrics{ .value = 0xFFFF }, 1000000000ULL);
     EXPECT_EQ(result2.current_socket_power, 200U);
 
     // Collect from device 1 again - should still return 100W
-    result1 = dev1.get_gpu_metrics();
+    result1 = dev1.get_gpu_metrics(enabled_metrics{ .value = 0xFFFF }, 1000000000ULL);
     EXPECT_EQ(result1.current_socket_power, 100U);
 
     // Verify devices maintain independent state
@@ -2113,6 +2381,12 @@ TEST_F(DeviceTest, full_lifecycle_with_realistic_data)
     // Setup: Mock will return different values across collections
     auto mock = std::make_shared<MockDriver>();
 
+    // Initialization metrics (used during device construction)
+    amdsmi_gpu_metrics_t init_metrics = CreateSentinelMetrics();
+    init_metrics.current_socket_power = 150;  // 150W
+    init_metrics.temperature_hotspot  = 70;   // 70°C
+    init_metrics.average_gfx_activity = 50;   // 50% activity
+
     // Collection 1: Idle GPU
     amdsmi_gpu_metrics_t metrics1 = CreateSentinelMetrics();
     metrics1.current_socket_power = 150;  // 150W
@@ -2132,35 +2406,41 @@ TEST_F(DeviceTest, full_lifecycle_with_realistic_data)
     metrics3.average_gfx_activity = 60;   // 60% activity
 
     // Setup mock to return different values on each call
+    // First call is during device construction (initialize_supported_metrics)
+    // Subsequent calls are from get_gpu_metrics()
     EXPECT_CALL(*mock, get_metrics_info(test_handle, _))
+        .WillOnce(DoAll(SetArgPointee<1>(init_metrics), Return(AMDSMI_STATUS_SUCCESS)))
         .WillOnce(DoAll(SetArgPointee<1>(metrics1), Return(AMDSMI_STATUS_SUCCESS)))
         .WillOnce(DoAll(SetArgPointee<1>(metrics2), Return(AMDSMI_STATUS_SUCCESS)))
         .WillOnce(DoAll(SetArgPointee<1>(metrics3), Return(AMDSMI_STATUS_SUCCESS)));
 
     uint64_t sentinel_mem = 0xFFFFFFFFFFFFFFFFULL;
-    ON_CALL(*mock, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
-        .WillByDefault(
+    EXPECT_CALL(*mock, get_memory_usage(test_handle, AMDSMI_MEM_TYPE_VRAM, _))
+        .Times(AtLeast(1))
+        .WillRepeatedly(
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
+
+    SetupSDMAExpectations(mock, test_handle);
 
     // Construct device
     device<MockDriver> dev(mock, test_handle, test_processor_type, test_index);
 
     // Collection 1: Idle
-    auto result1 = dev.get_gpu_metrics();
+    auto result1 = dev.get_gpu_metrics(enabled_metrics{ .value = 0xFFFF }, 1000000000ULL);
     EXPECT_EQ(result1.current_socket_power, 150U);
-    EXPECT_EQ(result1.hotspot_temperature, 70000);
+    EXPECT_EQ(result1.hotspot_temperature, 70);
     EXPECT_EQ(result1.gfx_activity, 50U);
 
     // Collection 2: Heavy
-    auto result2 = dev.get_gpu_metrics();
+    auto result2 = dev.get_gpu_metrics(enabled_metrics{ .value = 0xFFFF }, 1000000000ULL);
     EXPECT_EQ(result2.current_socket_power, 180U);
-    EXPECT_EQ(result2.hotspot_temperature, 75000);
+    EXPECT_EQ(result2.hotspot_temperature, 75);
     EXPECT_EQ(result2.gfx_activity, 90U);
 
     // Collection 3: Moderate
-    auto result3 = dev.get_gpu_metrics();
+    auto result3 = dev.get_gpu_metrics(enabled_metrics{ .value = 0xFFFF }, 1000000000ULL);
     EXPECT_EQ(result3.current_socket_power, 160U);
-    EXPECT_EQ(result3.hotspot_temperature, 73000);
+    EXPECT_EQ(result3.hotspot_temperature, 73);
     EXPECT_EQ(result3.gfx_activity, 60U);
 }
 
@@ -2186,6 +2466,63 @@ TEST_F(DeviceTest, device_type_filtering_scenario)
     bool             is_gpu      = (device_type == AMDSMI_PROCESSOR_TYPE_AMD_GPU);
 
     EXPECT_TRUE(is_gpu);
+}
+
+/**
+ * TC12.1: SDMA Delta Computation
+ *
+ * Objective: Verify SDMA usage percentage is computed correctly from deltas.
+ *
+ * NOTE: AMD_SMI_SDMA_SUPPORTED is defined at the top of this file for testing.
+ */
+TEST_F(DeviceTest, sdma_delta_computation)
+{
+    // Setup: Mock SDMA process data
+    SetupAllMetricsSupported();
+
+    // Expect calls to get_gpu_process_list:
+    // 1. During device construction (initialize_supported_metrics)
+    // 2. First get_gpu_metrics() call
+    // 3. Second get_gpu_metrics() call
+    EXPECT_CALL(*mock_driver, get_gpu_process_list(test_handle, _, nullptr))
+        .Times(AtLeast(3))
+        .WillRepeatedly(DoAll(SetArgPointee<1>(1), Return(AMDSMI_STATUS_SUCCESS)));
+
+    EXPECT_CALL(*mock_driver, get_gpu_process_list(test_handle, _, ::testing::NotNull()))
+        .Times(2)
+        .WillOnce(
+            [](amdsmi_processor_handle, uint32_t* num_items, amdsmi_proc_info_t* procs) {
+                *num_items          = 1;
+                procs[0].sdma_usage = 5000000;  // First sample: 5s cumulative
+                return AMDSMI_STATUS_SUCCESS;
+            })
+        .WillOnce(
+            [](amdsmi_processor_handle, uint32_t* num_items, amdsmi_proc_info_t* procs) {
+                *num_items          = 1;
+                procs[0].sdma_usage = 15000000;  // Second sample: 15s cumulative
+                return AMDSMI_STATUS_SUCCESS;
+            });
+
+    // Create device
+    device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
+    ASSERT_TRUE(dev.is_supported());
+    ASSERT_TRUE(dev.get_supported_metrics().bits.sdma_usage);
+
+    enabled_metrics enabled;
+    enabled.bits.sdma_usage = 1;
+
+    // First sample - no previous data, should return 0
+    auto metrics1 = dev.get_gpu_metrics(enabled, 1000000000ULL);  // t = 1s
+    EXPECT_EQ(metrics1.sdma_usage, 0U);
+
+    // Second sample - compute delta
+    // Delta usage = 15000000 - 5000000 = 10,000,000 microseconds
+    // Delta time = 2000000000 - 1000000000 = 1,000,000,000 nanoseconds
+    // Percentage = (10,000,000 * 100,000) / 1,000,000,000 = 1000%
+    // Clamped to 100%
+    auto metrics2 = dev.get_gpu_metrics(enabled, 2000000000ULL);  // t = 2s
+    EXPECT_GE(metrics2.sdma_usage, 0U);
+    EXPECT_LE(metrics2.sdma_usage, 100U);
 }
 
 }  // namespace rocprofsys::pmc::collectors::gpu::testing

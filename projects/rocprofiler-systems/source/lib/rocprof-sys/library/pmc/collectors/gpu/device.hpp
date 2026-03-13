@@ -54,7 +54,9 @@ public:
         return m_device_handle;
     }
 
-    [[nodiscard]] metrics get_gpu_metrics() const
+    [[nodiscard]] metrics get_gpu_metrics(
+        [[maybe_unused]] const enabled_metrics& enabled_cfg,
+        [[maybe_unused]] uint64_t               timestamp) const
     {
         metrics metrics{};
 
@@ -72,6 +74,26 @@ public:
         collect_xcp_metrics(amd_smi_metrics, metrics);
         collect_xgmi_metrics(amd_smi_metrics, metrics);
         collect_pcie_metrics(amd_smi_metrics, metrics);
+
+#if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
+        if(enabled_cfg.bits.sdma_usage && m_supported_metrics.bits.sdma_usage)
+        {
+            uint64_t current_cumulative = get_raw_sdma_usage();
+
+            if(m_sdma_state.has_prev && timestamp > m_sdma_state.prev_timestamp)
+            {
+                uint64_t delta_usage = current_cumulative - m_sdma_state.prev_cumulative;
+                uint64_t delta_time  = timestamp - m_sdma_state.prev_timestamp;
+                uint32_t pct =
+                    static_cast<uint32_t>((delta_usage * 100000ULL) / delta_time);
+                metrics.sdma_usage = (pct > 100) ? 100 : pct;
+            }
+
+            m_sdma_state.prev_cumulative = current_cumulative;
+            m_sdma_state.prev_timestamp  = timestamp;
+            m_sdma_state.has_prev        = true;
+        }
+#endif
 
         return metrics;
     }
@@ -395,12 +417,20 @@ private:
         return valid;
     }
 
+    struct sdma_state
+    {
+        uint64_t prev_cumulative = 0;
+        uint64_t prev_timestamp  = 0;
+        bool     has_prev        = false;
+    };
+
     std::shared_ptr<Driver> m_driver_api;
     amdsmi_processor_handle m_device_handle;
     processor_type_t        m_device_type;
     enabled_metrics         m_supported_metrics;
     size_t                  m_index;
     bool                    m_is_supported = false;
+    mutable sdma_state      m_sdma_state;  // mutable for const getter
 };
 
 }  // namespace rocprofsys::pmc::collectors::gpu

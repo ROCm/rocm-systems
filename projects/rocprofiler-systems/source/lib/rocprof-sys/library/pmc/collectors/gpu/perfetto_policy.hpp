@@ -111,11 +111,17 @@ struct perfetto_amd_smi_sample
     pmc::collectors::gpu::metrics metrics;
 };
 
-inline std::map<size_t, std::unique_ptr<std::vector<perfetto_amd_smi_sample>>>&
-get_perfetto_bundle()
+struct perfetto_device_data
 {
-    static std::map<size_t, std::unique_ptr<std::vector<perfetto_amd_smi_sample>>> bundle;
-    return bundle;
+    std::unique_ptr<std::vector<perfetto_amd_smi_sample>> samples;
+    enabled_metrics                                       supported_metrics;
+};
+
+inline std::map<size_t, perfetto_device_data>&
+get_perfetto_data()
+{
+    static std::map<size_t, perfetto_device_data> data;
+    return data;
 }
 
 }  // namespace
@@ -134,21 +140,25 @@ struct perfetto_policy
     using counter_track = perfetto_counter_track<metrics>;
 
     /**
-     * @brief Initialize Perfetto storage for the given processor devices.
+     * @brief Initialize Perfetto storage for the given device entries.
      *
-     * Allocates storage buffers for Perfetto samples for each GPU device.
+     * Allocates storage buffers for Perfetto samples for each GPU device
+     * and caches supported metrics for post-processing.
      *
-     * @tparam ProcessorVector Container type holding processor handles
-     * @param processors Vector of processor devices to initialize storage for
+     * @tparam DeviceEntryVector Container type holding device entries (device +
+     * supported_metrics)
+     * @param device_entries Vector of device entries to initialize storage for
      */
-    template <typename ProcessorVector>
-    static void init_storage(const ProcessorVector& processors)
+    template <typename DeviceEntryVector>
+    static void init_storage(const DeviceEntryVector& device_entries)
     {
-        for(const auto& processor : processors)
+        for(const auto& entry : device_entries)
         {
-            get_perfetto_bundle().insert(
-                { processor->get_index(),
-                  std::make_unique<std::vector<perfetto_amd_smi_sample>>() });
+            auto idx                 = entry.device->get_index();
+            get_perfetto_data()[idx] = {
+                std::make_unique<std::vector<perfetto_amd_smi_sample>>(),
+                entry.supported_metrics
+            };
         }
     }
 
@@ -179,6 +189,17 @@ struct perfetto_policy
         };
 
         auto& tracks = get_perfetto_tracks();
+
+        // Clear track indexes from previous setup calls to prevent
+        // stale track IDs when metric configuration changes between runs
+        for(auto& [_, description] : tracks)
+        {
+            description.track_indexes.clear();
+        }
+
+        LOG_DEBUG("[GPU perfetto_policy] Setting up counter tracks for device {}, "
+                  "enabled_metrics=0x{:x}",
+                  device_index, enabled_metric_config.value);
 
         for(auto& [num, description] : tracks)
         {
@@ -263,7 +284,7 @@ struct perfetto_policy
     static void store_sample(size_t device_index, const metrics& metric_values,
                              unsigned long timestamp)
     {
-        get_perfetto_bundle()[device_index]->emplace_back(
+        get_perfetto_data()[device_index].samples->emplace_back(
             perfetto_amd_smi_sample{ timestamp, metric_values });
     }
 
@@ -272,19 +293,15 @@ struct perfetto_policy
      *
      * Serializes all buffered PMC samples to Perfetto counter tracks.
      * This is called at the end of profiling to flush all samples.
+     * Supported metrics are retrieved from the cached device data.
      *
-     * @tparam ProcessorVector Container type holding processor handles
-     * @param processors Vector of processor devices
      * @param enabled_metrics Metrics that were enabled during collection
      */
-    template <typename ProcessorVector>
-    static void post_process(const ProcessorVector&                processors,
-                             pmc::collectors::gpu::enabled_metrics enabled_metrics)
+    static void post_process(pmc::collectors::gpu::enabled_metrics enabled_metrics)
     {
-        for(const auto& processor : processors)
+        for(const auto& [device_index, data] : get_perfetto_data())
         {
-            post_process_device(processor->get_index(), enabled_metrics,
-                                processor->get_supported_metrics());
+            post_process_device(device_index, enabled_metrics, data.supported_metrics);
         }
     }
 
@@ -293,10 +310,12 @@ private:
         size_t device_index, pmc::collectors::gpu::enabled_metrics enabled_metrics,
         pmc::collectors::gpu::enabled_metrics supported_metrics)
     {
-        auto& samples = *get_perfetto_bundle()[device_index];
+        auto& samples = *get_perfetto_data()[device_index].samples;
 
-        LOG_DEBUG("Post-processing {} PMC samples for device [{}]", samples.size(),
-                  device_index);
+        LOG_INFO("[GPU perfetto_policy] Post-processing {} PMC samples for device [{}], "
+                 "enabled=0x{:x}, supported=0x{:x}",
+                 samples.size(), device_index, enabled_metrics.value,
+                 supported_metrics.value);
 
         const auto& thread_info = thread_info::get(0, InternalTID);
         if(!thread_info)
@@ -342,80 +361,83 @@ private:
         const enabled_metrics&                           effective_metrics,
         std::unordered_map<uint32_t, track_description>& tracks)
     {
-        if(effective_metrics.bits.gfx_activity &&
-           !tracks.at(GFX_BUSY_VALUE).track_indexes.empty())
+        auto gfx_it = tracks.find(GFX_BUSY_VALUE);
+        if(effective_metrics.bits.gfx_activity && gfx_it != tracks.end() &&
+           !gfx_it->second.track_indexes.empty())
         {
-            TRACE_COUNTER("device_busy_gfx",
-                          counter_track::at(device_index,
-                                            tracks.at(GFX_BUSY_VALUE).track_indexes[0]),
-                          ts, static_cast<double>(metric_values.gfx_activity));
+            TRACE_COUNTER(
+                "device_busy_gfx",
+                counter_track::at(device_index, gfx_it->second.track_indexes[0]), ts,
+                static_cast<double>(metric_values.gfx_activity));
         }
 
-        if(effective_metrics.bits.umc_activity &&
-           !tracks.at(UMC_BUSY_VALUE).track_indexes.empty())
+        auto umc_it = tracks.find(UMC_BUSY_VALUE);
+        if(effective_metrics.bits.umc_activity && umc_it != tracks.end() &&
+           !umc_it->second.track_indexes.empty())
         {
-            TRACE_COUNTER("device_busy_umc",
-                          counter_track::at(device_index,
-                                            tracks.at(UMC_BUSY_VALUE).track_indexes[0]),
-                          ts, static_cast<double>(metric_values.umc_activity));
+            TRACE_COUNTER(
+                "device_busy_umc",
+                counter_track::at(device_index, umc_it->second.track_indexes[0]), ts,
+                static_cast<double>(metric_values.umc_activity));
         }
 
-        if(effective_metrics.bits.mm_activity &&
-           !tracks.at(MM_BUSY_VALUE).track_indexes.empty())
+        auto mm_it = tracks.find(MM_BUSY_VALUE);
+        if(effective_metrics.bits.mm_activity && mm_it != tracks.end() &&
+           !mm_it->second.track_indexes.empty())
         {
             TRACE_COUNTER("device_busy_mm",
-                          counter_track::at(device_index,
-                                            tracks.at(MM_BUSY_VALUE).track_indexes[0]),
+                          counter_track::at(device_index, mm_it->second.track_indexes[0]),
                           ts, static_cast<double>(metric_values.mm_activity));
         }
 
+        auto temp_it = tracks.find(TEMPERATURE_VALUE);
         if((effective_metrics.bits.edge_temperature ||
             effective_metrics.bits.hotspot_temperature) &&
-           !tracks.at(TEMPERATURE_VALUE).track_indexes.empty())
+           temp_it != tracks.end() && !temp_it->second.track_indexes.empty())
         {
             const double temp = effective_metrics.bits.hotspot_temperature
                                     ? metric_values.hotspot_temperature
                                     : metric_values.edge_temperature;
             TRACE_COUNTER(
                 "device_temp",
-                counter_track::at(device_index,
-                                  tracks.at(TEMPERATURE_VALUE).track_indexes[0]),
-                ts, temp);
+                counter_track::at(device_index, temp_it->second.track_indexes[0]), ts,
+                temp);
         }
 
+        auto power_it = tracks.find(CURRENT_POWER_VALUE);
         if((effective_metrics.bits.average_socket_power ||
             effective_metrics.bits.current_socket_power) &&
-           !tracks.at(CURRENT_POWER_VALUE).track_indexes.empty())
+           power_it != tracks.end() && !power_it->second.track_indexes.empty())
         {
             const double power = effective_metrics.bits.average_socket_power
                                      ? metric_values.average_socket_power
                                      : metric_values.current_socket_power;
             TRACE_COUNTER(
                 "device_power",
-                counter_track::at(device_index,
-                                  tracks.at(CURRENT_POWER_VALUE).track_indexes[0]),
-                ts, power);
+                counter_track::at(device_index, power_it->second.track_indexes[0]), ts,
+                power);
         }
 
-        if(effective_metrics.bits.memory_usage &&
-           !tracks.at(MEMORY_USAGE_VALUE).track_indexes.empty())
+        auto memory_it = tracks.find(MEMORY_USAGE_VALUE);
+        if(effective_metrics.bits.memory_usage && memory_it != tracks.end() &&
+           !memory_it->second.track_indexes.empty())
         {
             const double usage =
                 metric_values.memory_usage / static_cast<double>(tim::units::megabyte);
             TRACE_COUNTER(
                 "device_memory_usage",
-                counter_track::at(device_index,
-                                  tracks.at(MEMORY_USAGE_VALUE).track_indexes[0]),
-                ts, usage);
+                counter_track::at(device_index, memory_it->second.track_indexes[0]), ts,
+                usage);
         }
 
-        if(effective_metrics.bits.sdma_usage &&
-           !tracks.at(SDMA_USAGE_VALUE).track_indexes.empty())
+        auto sdma_it = tracks.find(SDMA_USAGE_VALUE);
+        if(effective_metrics.bits.sdma_usage && sdma_it != tracks.end() &&
+           !sdma_it->second.track_indexes.empty())
         {
-            TRACE_COUNTER("device_sdma_usage",
-                          counter_track::at(device_index,
-                                            tracks.at(SDMA_USAGE_VALUE).track_indexes[0]),
-                          ts, static_cast<double>(metric_values.sdma_usage));
+            TRACE_COUNTER(
+                "device_sdma_usage",
+                counter_track::at(device_index, sdma_it->second.track_indexes[0]), ts,
+                static_cast<double>(metric_values.sdma_usage));
         }
     }
 
@@ -425,9 +447,11 @@ private:
         const pmc::collectors::gpu::enabled_metrics&     effective_metrics,
         std::unordered_map<uint32_t, track_description>& tracks)
     {
+        auto vcn_it = tracks.find(VCN_ACTIVITY_VALUE);
+
         // Per-XCP VCN busy metrics (MI300)
-        if(effective_metrics.bits.vcn_busy &&
-           !tracks.at(VCN_ACTIVITY_VALUE).track_indexes.empty())
+        if(effective_metrics.bits.vcn_busy && vcn_it != tracks.end() &&
+           !vcn_it->second.track_indexes.empty())
         {
             size_t engine_id = 0;
             for(const auto& xcp_stats : metric_values.xcp_stats)
@@ -435,13 +459,12 @@ private:
                 for(const auto& vcn_val : xcp_stats.vcn_busy)
                 {
                     if(vcn_val != std::numeric_limits<uint16_t>::max() &&
-                       engine_id < tracks.at(VCN_ACTIVITY_VALUE).track_indexes.size())
+                       engine_id < vcn_it->second.track_indexes.size())
                     {
                         TRACE_COUNTER(
                             "device_vcn_activity",
-                            counter_track::at(
-                                device_index,
-                                tracks.at(VCN_ACTIVITY_VALUE).track_indexes[engine_id++]),
+                            counter_track::at(device_index,
+                                              vcn_it->second.track_indexes[engine_id++]),
                             ts, vcn_val);
                     }
                 }
@@ -449,28 +472,29 @@ private:
         }
 
         // Device-level VCN activity (Radeon)
-        if(effective_metrics.bits.vcn_activity &&
-           !tracks.at(VCN_ACTIVITY_VALUE).track_indexes.empty())
+        if(effective_metrics.bits.vcn_activity && vcn_it != tracks.end() &&
+           !vcn_it->second.track_indexes.empty())
         {
             size_t engine_id = 0;
             for(const auto& vcn_val : metric_values.vcn_activity)
             {
                 if(vcn_val != std::numeric_limits<uint16_t>::max() &&
-                   engine_id < tracks.at(VCN_ACTIVITY_VALUE).track_indexes.size())
+                   engine_id < vcn_it->second.track_indexes.size())
                 {
                     TRACE_COUNTER(
                         "device_vcn_activity",
-                        counter_track::at(
-                            device_index,
-                            tracks.at(VCN_ACTIVITY_VALUE).track_indexes[engine_id++]),
+                        counter_track::at(device_index,
+                                          vcn_it->second.track_indexes[engine_id++]),
                         ts, vcn_val);
                 }
             }
         }
 
+        auto jpeg_it = tracks.find(JPEG_ACTIVITY_VALUE);
+
         // Per-XCP JPEG busy metrics (MI300)
-        if(effective_metrics.bits.jpeg_busy &&
-           !tracks.at(JPEG_ACTIVITY_VALUE).track_indexes.empty())
+        if(effective_metrics.bits.jpeg_busy && jpeg_it != tracks.end() &&
+           !jpeg_it->second.track_indexes.empty())
         {
             size_t engine_id = 0;
             for(const auto& xcp_stats : metric_values.xcp_stats)
@@ -478,33 +502,32 @@ private:
                 for(const auto& jpeg_val : xcp_stats.jpeg_busy)
                 {
                     if(jpeg_val != std::numeric_limits<uint16_t>::max() &&
-                       engine_id < tracks.at(JPEG_ACTIVITY_VALUE).track_indexes.size())
+                       engine_id < jpeg_it->second.track_indexes.size())
                     {
-                        TRACE_COUNTER("device_jpeg_activity",
-                                      counter_track::at(device_index,
-                                                        tracks.at(JPEG_ACTIVITY_VALUE)
-                                                            .track_indexes[engine_id++]),
-                                      ts, jpeg_val);
+                        TRACE_COUNTER(
+                            "device_jpeg_activity",
+                            counter_track::at(device_index,
+                                              jpeg_it->second.track_indexes[engine_id++]),
+                            ts, jpeg_val);
                     }
                 }
             }
         }
 
         // Device-level JPEG activity (Radeon)
-        if(effective_metrics.bits.jpeg_activity &&
-           !tracks.at(JPEG_ACTIVITY_VALUE).track_indexes.empty())
+        if(effective_metrics.bits.jpeg_activity && jpeg_it != tracks.end() &&
+           !jpeg_it->second.track_indexes.empty())
         {
             size_t engine_id = 0;
             for(const auto& jpeg_val : metric_values.jpeg_activity)
             {
                 if(jpeg_val != std::numeric_limits<uint16_t>::max() &&
-                   engine_id < tracks.at(JPEG_ACTIVITY_VALUE).track_indexes.size())
+                   engine_id < jpeg_it->second.track_indexes.size())
                 {
                     TRACE_COUNTER(
                         "device_jpeg_activity",
-                        counter_track::at(
-                            device_index,
-                            tracks.at(JPEG_ACTIVITY_VALUE).track_indexes[engine_id++]),
+                        counter_track::at(device_index,
+                                          jpeg_it->second.track_indexes[engine_id++]),
                         ts, jpeg_val);
                 }
             }
