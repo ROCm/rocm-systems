@@ -56,7 +56,11 @@ ReduceOperation
 get_reduce_op_type_from_string(const std::string& op)
 {
     static const std::unordered_map<std::string, ReduceOperation> reduce_op_string_to_type = {
-        {"min", REDUCE_MIN}, {"max", REDUCE_MAX}, {"sum", REDUCE_SUM}, {"avr", REDUCE_AVG}, {"avg", REDUCE_AVG}};
+        {"min", REDUCE_MIN},
+        {"max", REDUCE_MAX},
+        {"sum", REDUCE_SUM},
+        {"avr", REDUCE_AVG},
+        {"avg", REDUCE_AVG}};
 
     ReduceOperation type = REDUCE_NONE;
     if(op.empty()) return REDUCE_NONE;

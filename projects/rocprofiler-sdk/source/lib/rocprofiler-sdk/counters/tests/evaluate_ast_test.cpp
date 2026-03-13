@@ -44,7 +44,11 @@ ReduceOperation
 get_reduce_op_type_from_string(const std::string& op)
 {
     static const std::unordered_map<std::string, ReduceOperation> reduce_op_string_to_type = {
-        {"min", REDUCE_MIN}, {"max", REDUCE_MAX}, {"sum", REDUCE_SUM}, {"avr", REDUCE_AVG}, {"avg", REDUCE_AVG}};
+        {"min", REDUCE_MIN},
+        {"max", REDUCE_MAX},
+        {"sum", REDUCE_SUM},
+        {"avr", REDUCE_AVG},
+        {"avg", REDUCE_AVG}};
 
     ReduceOperation type           = REDUCE_NONE;
     const auto*     reduce_op_type = rocprofiler::common::get_val(reduce_op_string_to_type, op);
@@ -589,7 +593,8 @@ TEST(evaluate_ast, evaluate_pointwise_ops)
         {"PMIN_VK", Metric("gfx9", "PMIN_VK", "a", "1", "a", "pmin(VOORHEES,KRUEGER)", "", 4)},
         {"PAVG_VK", Metric("gfx9", "PAVG_VK", "a", "1", "a", "pavg(VOORHEES,KRUEGER)", "", 5)},
         {"NESTED_PMAX",
-         Metric("gfx9", "NESTED_PMAX", "a", "1", "a", "pmax(VOORHEES,pmin(KRUEGER,MYERS))", "", 6)}};
+         Metric(
+             "gfx9", "NESTED_PMAX", "a", "1", "a", "pmax(VOORHEES,pmin(KRUEGER,MYERS))", "", 6)}};
 
     std::unordered_map<std::string, std::vector<rocprofiler_record_counter_t>> base_counter_data = {
         {"VOORHEES", construct_test_data_dim(get_base_rec_id(0), {ROCPROFILER_DIMENSION_NONE}, 8)},
