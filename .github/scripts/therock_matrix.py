@@ -26,6 +26,7 @@ subtree_to_project_map = {
     "projects/rocr-runtime": "runtimes",
     "projects/rocshmem": "rocshmem",
     "projects/roctracer": "profiler",
+    "shared/amdgpu-windows-interop": "runtimes",
 }
 
 project_map = {
@@ -64,6 +65,16 @@ project_map = {
     },
 }
 
+# Subtrees that should only trigger Windows CI, not Linux CI.
+# Note: Linux-only subtrees (e.g. projects/rocshmem) have no explicit list —
+# any subtree absent from trigger_windows_ci_for_subtrees_paths will
+# automatically skip Windows CI.
+windows_only_subtrees = {
+    "shared/amdgpu-windows-interop",
+}
+
+# Paths matching any of these patterns will trigger Windows CI.
+# Subtrees not represented here are treated as Linux-only.
 trigger_windows_ci_for_subtrees_paths = [
     "projects/clr/*",
     "projects/hip/*",
