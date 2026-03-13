@@ -203,9 +203,9 @@ function(rocprofiler_rocpd_python_bindings _VERSION)
     foreach(_AI_FILE ${rocpd_AI_ANALYSIS_FILES})
         file(RELATIVE_PATH _REL_PATH "${CMAKE_CURRENT_LIST_DIR}" "${_AI_FILE}")
         get_filename_component(_REL_DIR "${_REL_PATH}" DIRECTORY)
-        file(MAKE_DIRECTORY ${rocpd_PYTHON_OUTPUT_DIRECTORY}/${_REL_DIR})
-        configure_file(${_AI_FILE}
-                       ${rocpd_PYTHON_OUTPUT_DIRECTORY}/${_REL_PATH} COPYONLY)
+        # Use file(COPY) instead of configure_file so binary assets (e.g. PNG)
+        # are handled correctly without text substitution or EPERM on binary data.
+        file(COPY ${_AI_FILE} DESTINATION ${rocpd_PYTHON_OUTPUT_DIRECTORY}/${_REL_DIR})
         install(
             FILES ${rocpd_PYTHON_OUTPUT_DIRECTORY}/${_REL_PATH}
             DESTINATION ${rocpd_PYTHON_INSTALL_DIRECTORY}/${_REL_DIR}
