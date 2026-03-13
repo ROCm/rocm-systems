@@ -140,5 +140,5 @@ jobs:
     with:
       amdgpu_families: ${{ inputs.amdgpu_families }}
       artifact_group: ${{ inputs.artifact_group }}
-      test_runs_on: linux-mi325-4gpu-ossci-rocm
+      test_runs_on: linux-mi325-8gpu-ossci-rocm
       artifact_run_id: ${{ github.run_id }}
