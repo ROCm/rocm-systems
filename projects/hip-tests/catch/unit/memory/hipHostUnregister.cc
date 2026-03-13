@@ -51,7 +51,11 @@ TEST_CASE("Unit_hipHostUnregister_MemoryNotAccessibleAfterUnregister") {
   }
   // try all combinations of flags
   for (unsigned int flag = 0; flag <= allFlags; ++flag) {
-    DYNAMIC_SECTION("Using flag: " << flag) {
+#if defined(_WIN32)
+    // hipHostRegisterIoMemory not supported on Windows; skip flags 4-7
+    if (flag & hipHostRegisterIoMemory) continue;
+#endif
+      DYNAMIC_SECTION("Using flag: " << flag) {
       auto x = std::unique_ptr<int>(new int);
       HIP_CHECK(hipHostRegister(x.get(), sizeof(int), flag));
 
@@ -64,28 +68,32 @@ TEST_CASE("Unit_hipHostUnregister_MemoryNotAccessibleAfterUnregister") {
   }
 }
 
-TEST_CASE("Unit_hipHostUnregister_NullPtr") {
+TEST_CASE(Unit_hipHostUnregister_NullPtr) {
   HIP_CHECK_ERROR(hipHostUnregister(nullptr), hipErrorInvalidValue);
 }
 
-TEST_CASE("Unit_hipHostUnregister_Ptr_Different_Than_Specified_To_Register") {
+TEST_CASE(Unit_hipHostUnregister_Ptr_Different_Than_Specified_To_Register) {
   std::vector<int> alloc(2);
   HIP_CHECK(hipHostRegister(alloc.data(), alloc.size(), 0));
   HIP_CHECK_ERROR(hipHostUnregister(&alloc.data()[1]), hipErrorHostMemoryNotRegistered);
   HIP_CHECK(hipHostUnregister(alloc.data()));
 }
 
-TEST_CASE("Unit_hipHostUnregister_NotRegisteredPointer") {
+TEST_CASE(Unit_hipHostUnregister_NotRegisteredPointer) {
   auto x = std::unique_ptr<int>(new int);
   HIP_CHECK_ERROR(hipHostUnregister(x.get()), hipErrorHostMemoryNotRegistered);
 }
 
-TEST_CASE("Unit_hipHostUnregister_AlreadyUnregisteredPointer") {
+TEST_CASE(Unit_hipHostUnregister_AlreadyUnregisteredPointer) {
   if (!hipHostRegisterSupported()) {
     return;
   }
   // try all combinations of flags
   for (unsigned int flag = 0; flag <= allFlags; ++flag) {
+#if defined(_WIN32)
+    // hipHostRegisterIoMemory not supported on Windows; skip flags 4-7
+    if (flag & hipHostRegisterIoMemory) continue;
+#endif
     DYNAMIC_SECTION("Using flag: " << flag) {
       auto x = std::unique_ptr<int>(new int);
       HIP_CHECK(hipHostRegister(x.get(), sizeof(int), flag));
@@ -95,7 +103,7 @@ TEST_CASE("Unit_hipHostUnregister_AlreadyUnregisteredPointer") {
   }
 }
 
-TEST_CASE("Unit_hipHostUnregister_Capture") {
+TEST_CASE(Unit_hipHostUnregister_Capture) {
   constexpr size_t kBufferSize = 1024;
   auto buffer = std::make_unique<int[]>(kBufferSize);
   hipError_t capture_error = hipSuccess;

@@ -640,35 +640,40 @@ Display all PyTorch operators captured during profiling:
    PyTorch Operators in: ./workload
    ================================================================================
 
-     1. ResNet_layer1_conv1
-     2. ResNet_layer1_bn1  
-     3. ResNet_layer4_conv2
+     1. nn.Module.Net.forward/nn.Module.Conv2d.forward/torch.nn.functional.conv2d
+     2. nn.Module.Net.forward/nn.Module.Linear.forward/torch.nn.functional.linear
+     3. nn.Module.Net.forward/torch.nn.functional.relu
 
    ================================================================================
    Total: 3 operators
    ================================================================================
 
-The operators are shown with sanitized names (forward slashes replaced with underscores)
-matching the CSV filenames created in the ``torch_trace/`` directory.
+Listed names are the full operator names (hierarchy with ``/``). Per-operator CSVs
+in ``torch_trace/`` are named from the **last** segment of each name (sanitized);
+see :ref:`torch-operator-profiling` for naming details.
 
 Filtering by Operator
 ^^^^^^^^^^^^^^^^^^^^^^
 
-Analyze specific operators by name or pattern:
+``--torch-operator`` supports exactly two forms of selection:
+
+* **Full hierarchy** — the complete operator path as listed (e.g.
+  ``nn.Module.Net.forward/nn.Module.Conv2d.forward/torch.nn.functional.conv2d``)
+* **Last segment only** — the final component of the name (e.g. ``conv2d``)
+
+Selection at intermediate levels is not supported yet.
 
 .. code-block:: shell-session
 
-   $ rocprof-compute --experimental analyze --path ./workload --torch-operator "ResNet/layer4"
+   # Full hierarchy
+   $ rocprof-compute --experimental analyze --path ./workload --torch-operator "nn.Module.Net.forward/nn.Module.Conv2d.forward/torch.nn.functional.conv2d"
 
-This filters the analysis to show only kernels and metrics for the specified operator,
-enabling focused performance investigation of specific model components.
+   # Last segment only (matches any operator whose name ends with that segment)
+   $ rocprof-compute analyze --path ./workload --torch-operator conv2d
 
-**Filter multiple operators**:
+**Filter multiple operators** (each argument is full path or last segment):
 
 .. code-block:: shell-session
 
    $ rocprof-compute --experimental analyze --path ./workload \
-       --torch-operator "Model/encoder" "Model/decoder"
-
-Use the hierarchical names (with forward slashes) as they appear in your model structure,
-not the sanitized underscore-separated names from the CSV files.
+       --torch-operator "nn.Module.Net.forward/nn.Module.Conv2d.forward/torch.nn.functional.conv2d" "relu"

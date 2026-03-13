@@ -68,7 +68,7 @@ static int HmmAttrPrint() {
    call hipMemAdvise() on the memory and apply the flags ReadMostly,
    AccessedBy, and PreferredLocation for gpus other than gpu 0 and verify
    the flags using hipMemGetAttribute()*/
-TEST_CASE("Unit_hipMemPrefetchAsyncAdviseFlgTst") {
+TEST_CASE(Unit_hipMemPrefetchAsyncAdviseFlgTst) {
   int NGpus = 0;
   HIP_CHECK(hipGetDeviceCount(&NGpus));
   if (NGpus >= 2) {
@@ -133,7 +133,7 @@ TEST_CASE("Unit_hipMemPrefetchAsyncAdviseFlgTst") {
     AccessedBy using hipMemGetAttribute() and validate if AccessedBy is still
     set to gpu1. Similar tests are done with ReadMostly and PreferredLocation
     flags */
-TEST_CASE("Unit_hipMemPrefetchAsyncAccsdByTst") {
+TEST_CASE(Unit_hipMemPrefetchAsyncAccsdByTst) {
   int NGpus = 0;
   HIP_CHECK(hipGetDeviceCount(&NGpus));
   if (NGpus >= 2) {
@@ -224,7 +224,7 @@ TEST_CASE("Unit_hipMemPrefetchAsyncAccsdByTst") {
 }
 
 /*Test Case description: Negative testing with hipMemPrefetchAsync() api*/
-TEST_CASE("Unit_hipMemPrefetchAsyncNegativeTst") {
+TEST_CASE(Unit_hipMemPrefetchAsyncNegativeTst) {
   int MangdMem = HmmAttrPrint();
   if (MangdMem == 1) {
     int *Hmm = nullptr, MemSz = 4096 * 4, NumElms = MemSz / 4, InitVal = 123;
@@ -325,7 +325,7 @@ TEST_CASE("Unit_hipMemPrefetchAsyncNegativeTst") {
 /* Test Case description: In this test case I am trying to allocate HMM memory
    which is not multiple of page Size, but still trying to launch kernel and
    see if we are getting values as expected.*/
-TEST_CASE("Unit_hipMemPrefetchAsync_NonPageSz") {
+TEST_CASE(Unit_hipMemPrefetchAsync_NonPageSz) {
   int *Hmm = nullptr, NumElms = 4096 * 2, InitVal = 123;
   hipStream_t strm;
   bool IfTestPassed = true;

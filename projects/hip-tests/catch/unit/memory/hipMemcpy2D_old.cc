@@ -57,7 +57,7 @@ static constexpr auto ROWS{8};
  *  - HIP_VERSION >= 6.1
  */
 
-TEMPLATE_TEST_CASE("Unit_hipMemcpy2D_H2D_D2D_D2H", "", int, float, double) {
+TEMPLATE_TEST_CASE(Unit_hipMemcpy2D_H2D_D2D_D2H, int, float, double) {
   CHECK_IMAGE_SUPPORT
   // 1 refers to pinned host memory
   auto mem_type = GENERATE(0, 1);
@@ -133,7 +133,7 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpy2D_H2D_D2D_D2H", "", int, float, double) {
  *  - HIP_VERSION >= 6.1
  */
 
-TEMPLATE_TEST_CASE("Unit_hipMemcpy2D_H2D_D2D_D2H_WithOffset", "", int, float, double) {
+TEMPLATE_TEST_CASE(Unit_hipMemcpy2D_H2D_D2D_D2H_WithOffset, int, float, double) {
   CHECK_IMAGE_SUPPORT
   // 1 refers to pinned host memory
   auto mem_type = GENERATE(0, 1);
@@ -213,7 +213,7 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpy2D_H2D_D2D_D2H_WithOffset", "", int, float, do
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEMPLATE_TEST_CASE("Unit_hipMemcpy2D_H2D_D2D_D2H_Managed_WithOffset", "", int, float, double) {
+TEMPLATE_TEST_CASE(Unit_hipMemcpy2D_H2D_D2D_D2H_Managed_WithOffset, int, float, double) {
   CHECK_IMAGE_SUPPORT
   // 1 refers to pinned host memory
   auto mem_type = GENERATE(0, 1);
@@ -326,7 +326,7 @@ static void hipMemcpy2D_Basic_Size_Test(size_t inc) {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipMemcpy2D_multiDevice_Basic_Size_Test", "[multigpu]") {
+TEST_CASE(Unit_hipMemcpy2D_multiDevice_Basic_Size_Test) {
   CHECK_IMAGE_SUPPORT
   size_t input = 1 << 20;
   int numDevices = 0;

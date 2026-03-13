@@ -48,7 +48,7 @@ static void Copy_to_device() {
   HIP_CHECK(hipFree(A_d));
 }
 
-TEST_CASE("Unit_hipStreamPerThread_DeviceReset_1") {
+TEST_CASE(Unit_hipStreamPerThread_DeviceReset_1) {
   constexpr unsigned int MAX_THREAD_CNT = 10;
   std::vector<std::thread> threads(MAX_THREAD_CNT);
 
@@ -70,7 +70,7 @@ TEST_CASE("Unit_hipStreamPerThread_DeviceReset_1") {
  Watch out: Since hipStreamPerThread is an implicit stream hence even after device reset
             it should available to use.
  */
-TEST_CASE("Unit_hipStreamPerThread_DeviceReset_2") {
+TEST_CASE(Unit_hipStreamPerThread_DeviceReset_2) {
   unsigned int ele_size = (32 * 1024);  // 32KB
   int* A_h = nullptr;
   int* A_d = nullptr;

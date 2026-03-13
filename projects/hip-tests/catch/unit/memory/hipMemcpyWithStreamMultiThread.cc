@@ -580,7 +580,7 @@ void HipMemcpyWithStreamMultiThreadtests::TestkindHtoH(bool& val_res) {
   HIP_CHECK_THREAD(hipStreamDestroy(stream));
 }
 
-TEST_CASE("Unit_hipMemcpyWithStream_MultiThread", "[multigpu]") {
+TEST_CASE(Unit_hipMemcpyWithStream_MultiThread) {
   const auto Threadcount{10};
   bool ret_val[Threadcount];
   std::thread th[Threadcount];
