@@ -631,7 +631,7 @@ class BlockingContext {
 // is supported.
 #define CHECK_IMAGE_SUPPORT                                                                        \
   if (!HipTest::isImageSupported()) {                                                              \
-    HipTest::HIP_SKIP_TEST("Texture is not support on the device. Skipped.");                      \
+    HipTest::HIP_SKIP_TEST("Texture is not supported on the device. Skipped.");                    \
     return;                                                                                        \
   }
 
@@ -653,7 +653,7 @@ class BlockingContext {
 // are supported.
 #define CHECK_WARP_MATCH_FUNCTIONS_SUPPORT                                                         \
   if (!HipTest::areWarpMatchFunctionsSupported()) {                                                \
-    HipTest::HIP_SKIP_TEST("Warp Match Functions are not support on the device. Skipped.");        \
+    HipTest::HIP_SKIP_TEST("Warp Match Functions are not supported on the device. Skipped.");      \
     return;                                                                                        \
   }
 
