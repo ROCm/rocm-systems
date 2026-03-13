@@ -103,6 +103,6 @@ add_custom_target(
     simple_net ALL
     COMMAND ${CMAKE_COMMAND} -E copy
         ${CMAKE_SOURCE_DIR}/sample/simple_net.py
-        ${CMAKE_SOURCE_DIR}/tests/simple_net
-    COMMENT "Copying simple_net to tests directory"
+        ${CMAKE_SOURCE_DIR}/tests/simple_net.py
+    COMMENT "Copying simple_net.py to tests directory"
 )

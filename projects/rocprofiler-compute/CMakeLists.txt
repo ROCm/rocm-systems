@@ -826,7 +826,6 @@ if(INSTALL_TESTS)
             tests/mat_mul_max
             tests/rocflop
             tests/memcopy
-            tests/simple_net
         DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/tests
         COMPONENT tests
     )

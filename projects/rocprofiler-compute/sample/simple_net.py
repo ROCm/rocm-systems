@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 ##############################################################################
 # MIT License
 #
@@ -38,7 +37,7 @@ Prerequisites:
 
 Usage:
     rocprof-compute profile --experimental --torch-trace --no-roof \
-        -n simple_net  -- ./simple_net.py
+        -n simple_net  -- python3 ./simple_net.py
 """
 
 import sys

@@ -63,7 +63,7 @@ config["app_vcopy_multikernel_iter"] = [
 ]
 config["app_mpi_aware_laplace_eqn"] = ["./tests/mpi_aware_laplace_eqn", "-i", "5"]
 config["rocflop"] = ["./tests/rocflop", "--device", "0", "--fp16"]
-config["torch_test_app"] = ["./tests/simple_net"]
+config["torch_test_app"] = ["python3", "./tests/simple_net.py"]
 config["cleanup"] = True
 config["COUNTER_LOGGING"] = False
 config["METRIC_COMPARE"] = False
