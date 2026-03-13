@@ -18,6 +18,27 @@ set(rocprofv3-rocpd-env
 find_package(MPI)
 find_package(Python3 REQUIRED)
 
+# Helper: copy a test script to the build directory at build time (not just at configure
+# time).  Unlike configure_file(COPYONLY), this registers a proper build-time dependency
+# so that editing the source file and re-running cmake --build is sufficient to pick up
+# the change without re-running cmake.
+#
+# Each call creates an add_custom_command (triggered by the file dependency) and a
+# lightweight ALL custom target that forces it to run on every build.
+function(rocpd_stage_test_script _SRC _DST)
+    get_filename_component(_tgt "${_DST}" NAME_WE)
+    add_custom_command(
+        OUTPUT "${_DST}"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${_SRC}" "${_DST}"
+        DEPENDS "${_SRC}"
+        COMMENT "Staging ${_SRC} -> build dir")
+    add_custom_target(rocpd-stage-${_tgt} ALL DEPENDS "${_DST}")
+    set_property(
+        DIRECTORY
+        APPEND
+        PROPERTY CMAKE_CONFIGURE_DEPENDS "${_SRC}")
+endfunction()
+
 if(MPI_FOUND)
     set(MULTIPROC_IS_DISABLED OFF)
     set(MULTIPROC_LAUNCHER ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2
@@ -490,9 +511,8 @@ rocprofiler_add_integration_execute_test(
     ENVIRONMENT "${rocprofv3-rocpd-env}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
-# Copy test_analyze.py to build directory to avoid conftest.py issues
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/test_analyze.py
-               ${CMAKE_CURRENT_BINARY_DIR}/test_analyze_standalone.py COPYONLY)
+rocpd_stage_test_script(${CMAKE_CURRENT_SOURCE_DIR}/test_analyze.py
+                        ${CMAKE_CURRENT_BINARY_DIR}/test_analyze_standalone.py)
 
 # Test analyze unit tests (run from build dir to avoid conftest.py issues)
 rocprofiler_add_integration_execute_test(
@@ -510,9 +530,8 @@ rocprofiler_add_integration_execute_test(
 #
 #########################################################################################
 
-# Copy test_analyze_schema.py to build directory to avoid conftest.py issues
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/test_analyze_schema.py
-               ${CMAKE_CURRENT_BINARY_DIR}/test_analyze_schema_standalone.py COPYONLY)
+rocpd_stage_test_script(${CMAKE_CURRENT_SOURCE_DIR}/test_analyze_schema.py
+                        ${CMAKE_CURRENT_BINARY_DIR}/test_analyze_schema_standalone.py)
 
 # Unit schema tests: validate the schema file structure and synthetic JSON output. No
 # database fixture needed - uses synthetic data generated in-process.
@@ -556,9 +575,8 @@ rocprofiler_add_integration_execute_test(
 #
 #########################################################################################
 
-# Copy test_ai_analysis_standalone.py to build directory to avoid conftest.py issues
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/test_ai_analysis_standalone.py
-               ${CMAKE_CURRENT_BINARY_DIR}/test_ai_analysis_standalone.py COPYONLY)
+rocpd_stage_test_script(${CMAKE_CURRENT_SOURCE_DIR}/test_ai_analysis_standalone.py
+                        ${CMAKE_CURRENT_BINARY_DIR}/test_ai_analysis_standalone.py)
 
 # AI analysis API unit tests (run from build dir to avoid conftest.py issues) These tests
 # do not require a GPU trace fixture — they test the Python API in isolation.
@@ -578,9 +596,8 @@ rocprofiler_add_integration_execute_test(
 #
 #########################################################################################
 
-# Copy test file to build directory to avoid conftest.py discovery issues
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/test_guide_filter_standalone.py
-               ${CMAKE_CURRENT_BINARY_DIR}/test_guide_filter_standalone.py COPYONLY)
+rocpd_stage_test_script(${CMAKE_CURRENT_SOURCE_DIR}/test_guide_filter_standalone.py
+                        ${CMAKE_CURRENT_BINARY_DIR}/test_guide_filter_standalone.py)
 
 # Guide filtering unit tests — no GPU trace fixture required; no LLM API calls made.
 rocprofiler_add_integration_execute_test(
@@ -605,18 +622,18 @@ rocprofiler_add_integration_execute_test(
 set(_AI_ANALYSIS_TESTS_DIR
     "${CMAKE_CURRENT_SOURCE_DIR}/../../../source/lib/python/rocpd/ai_analysis/tests")
 
-configure_file("${_AI_ANALYSIS_TESTS_DIR}/test_api_standalone.py"
-               "${CMAKE_CURRENT_BINARY_DIR}/test_api_standalone.py" COPYONLY)
-configure_file("${_AI_ANALYSIS_TESTS_DIR}/test_llm_conversation.py"
-               "${CMAKE_CURRENT_BINARY_DIR}/test_llm_conversation_standalone.py" COPYONLY)
-configure_file("${_AI_ANALYSIS_TESTS_DIR}/test_local_llm.py"
-               "${CMAKE_CURRENT_BINARY_DIR}/test_local_llm_standalone.py" COPYONLY)
-configure_file("${_AI_ANALYSIS_TESTS_DIR}/test_interactive.py"
-               "${CMAKE_CURRENT_BINARY_DIR}/test_interactive_standalone.py" COPYONLY)
-configure_file("${_AI_ANALYSIS_TESTS_DIR}/test_workflow.py"
-               "${CMAKE_CURRENT_BINARY_DIR}/test_workflow_standalone.py" COPYONLY)
-configure_file("${_AI_ANALYSIS_TESTS_DIR}/test_tracelens_port.py"
-               "${CMAKE_CURRENT_BINARY_DIR}/test_tracelens_port_standalone.py" COPYONLY)
+rocpd_stage_test_script("${_AI_ANALYSIS_TESTS_DIR}/test_api_standalone.py"
+                        "${CMAKE_CURRENT_BINARY_DIR}/test_api_standalone.py")
+rocpd_stage_test_script("${_AI_ANALYSIS_TESTS_DIR}/test_llm_conversation.py"
+                        "${CMAKE_CURRENT_BINARY_DIR}/test_llm_conversation_standalone.py")
+rocpd_stage_test_script("${_AI_ANALYSIS_TESTS_DIR}/test_local_llm.py"
+                        "${CMAKE_CURRENT_BINARY_DIR}/test_local_llm_standalone.py")
+rocpd_stage_test_script("${_AI_ANALYSIS_TESTS_DIR}/test_interactive.py"
+                        "${CMAKE_CURRENT_BINARY_DIR}/test_interactive_standalone.py")
+rocpd_stage_test_script("${_AI_ANALYSIS_TESTS_DIR}/test_workflow.py"
+                        "${CMAKE_CURRENT_BINARY_DIR}/test_workflow_standalone.py")
+rocpd_stage_test_script("${_AI_ANALYSIS_TESTS_DIR}/test_tracelens_port.py"
+                        "${CMAKE_CURRENT_BINARY_DIR}/test_tracelens_port_standalone.py")
 
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-rocpd-api-unit-tests
