@@ -80,7 +80,7 @@ else()
         ${CMAKE_SOURCE_DIR}/hsail-compiler/lib/loaders/elf/utils/libelf
         ${CMAKE_SOURCE_DIR}/../hsail-compiler/lib/loaders/elf/utils/libelf
         ${CMAKE_SOURCE_DIR}/../../hsail-compiler/lib/loaders/elf/utils/libelf
-        ${CMAKE_SOURCE_DIR}/../../../amdgpu-windows-interop/20250820a/hsail-compiler/lib/loaders/elf/utils/libelf
+        ${CMAKE_SOURCE_DIR}/../../shared/amdgpu-windows-interop/hsail-compiler/lib/loaders/elf/utils/libelf
       NO_DEFAULT_PATH)
 
   message("=> LibElf paths:" ${CMAKE_CURRENT_BINARY_DIR} ${ROCR_LIBELF_INCLUDE_DIR})
