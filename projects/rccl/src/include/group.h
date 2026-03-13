@@ -78,11 +78,6 @@ extern __thread struct ncclComm* ncclGroupCommHead[ncclGroupTaskTypeNum];
 extern __thread struct ncclComm* ncclGroupCommPreconnectHead;
 extern __thread int ncclGroupBlocking;
 
-inline ncclResult_t ncclGroupStartInternal() {
-  ncclGroupDepth++;
-  return ncclSuccess;
-}
-
 inline bool ncclGroupEnabled() {
   return ncclGroupDepth != 0;
 }
