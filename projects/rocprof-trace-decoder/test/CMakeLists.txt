@@ -149,15 +149,7 @@ if(BUILD_INTEGRATION_TESTS)
                        FIXTURES_REQUIRED
                        unpack_data)
 
-        set(USES_VCMPX FALSE)
-        if(${DATA} STREQUAL "mi300_pcs"
-           OR ${DATA} STREQUAL "mi300_gemmv2"
-           OR ${DATA} STREQUAL "mi300_sgemm"
-           OR ${DATA} STREQUAL "mi300_perf")
-            set(USES_VCMPX TRUE)
-        endif()
-
-        if(NOT APPLE AND NOT USES_VCMPX)
+        if(NOT APPLE)
             add_test(NAME ${DATA}_execute COMMAND $<TARGET_FILE:tool> ${TEST_BIN_DIR}/${DATA}/1_results.json)
             set_tests_properties(
                 ${DATA}_execute
