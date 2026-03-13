@@ -29,10 +29,7 @@ import socket
 import sys
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
-
-if TYPE_CHECKING:
-    import pandas as pd
+from typing import Optional
 
 import config
 from argparser import omniarg_parser
@@ -419,7 +416,9 @@ class RocProfCompute:
             console_error("Unsupported arch")
 
     def _build_arch_metric_list(
-        self, arch: str, sys_info: "pd.Series"
+        self,
+        arch: str,
+        sys_info: "pd.Series",  # noqa: F821
     ) -> schema.ArchConfig:
         """Load panel configs for arch and populate metric_list.
         Returns the ArchConfig."""
