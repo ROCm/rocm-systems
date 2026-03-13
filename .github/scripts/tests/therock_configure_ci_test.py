@@ -257,6 +257,27 @@ class ConfigureCITest(unittest.TestCase):
         # Windows CI must not be skipped for an explicit workflow_dispatch selection
         self.assertEqual(len(project_to_run), 1)
 
+    @patch("therock_configure_ci.get_modified_paths")
+    def test_workflow_dispatch_shared_windows_subtree_triggers_windows_ci(
+        self, mock_get_modified
+    ):
+        """workflow_dispatch with shared/amdgpu-windows-interop must trigger Windows CI
+        even when the git diff contains no Windows-relevant file paths."""
+        args = {
+            "is_workflow_dispatch": True,
+            "input_projects": "shared/amdgpu-windows-interop",
+            "base_ref": "HEAD^",
+            "platform": "windows",
+        }
+
+        # Branch only touched CI scripts — no Windows-path files in the diff
+        mock_get_modified.return_value = [
+            ".github/scripts/therock_configure_ci.py",
+        ]
+
+        project_to_run = therock_configure_ci.retrieve_projects(args)
+        self.assertGreaterEqual(len(project_to_run), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

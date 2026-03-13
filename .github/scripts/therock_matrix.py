@@ -27,6 +27,7 @@ subtree_to_project_map = {
     "projects/rocr-runtime": "core",
     "projects/rocshmem": "rocshmem",
     "projects/roctracer": "profiler",
+    "shared/amdgpu-windows-interop": "core",
 }
 
 project_map = {
