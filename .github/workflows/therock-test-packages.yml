@@ -11,6 +11,12 @@ on:
         type: string
       platform:
         type: string
+      artifact_run_id:
+        type: string
+        default: ""
+      sanity_check_only_for_family:
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -22,6 +28,8 @@ jobs:
     if: ${{ inputs.test_runs_on != '' }}
     outputs:
       components: ${{ steps.configure.outputs.components }}
+      platform: ${{ steps.configure.outputs.platform }}
+      sanity_component: ${{ steps.configure.outputs.sanity_component }}
     steps:
       - name: "Fetch 'build_tools' from repository"
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -59,11 +67,10 @@ jobs:
   test_sanity_check:
     name: 'Test Sanity Check'
     needs: configure_test_matrix
-    uses: './.github/workflows/test_component.yml'
+    uses: './.github/workflows/therock-test-component.yml'
     with:
       artifact_run_id: ${{ inputs.artifact_run_id }}
       amdgpu_families: ${{ inputs.amdgpu_families }}
-      amdgpu_targets: ${{ inputs.amdgpu_targets }}
       test_runs_on: ${{ inputs.test_runs_on }}
       platform: ${{ needs.configure_test_matrix.outputs.platform }}
       component: ${{ needs.configure_test_matrix.outputs.sanity_component }}
@@ -81,7 +88,6 @@ jobs:
     with:
       artifact_run_id: ${{ inputs.artifact_run_id }}
       amdgpu_families: ${{ inputs.amdgpu_families }}
-      amdgpu_targets: ${{ inputs.amdgpu_targets }}
       # If the test requires a multi GPU, use the multi GPU test runner
       # Otherwise, use the standard test runner
       test_runs_on: >-
