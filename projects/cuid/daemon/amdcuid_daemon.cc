@@ -21,14 +21,6 @@
  */
 
 #include "include/amd_cuid.h"
-#include "src/cuid_file.h"
-#include "src/cuid_device_manager.h"
-#include "src/cuid_device.h"
-#include "src/cuid_gpu.h"
-#include "src/cuid_cpu.h"
-#include "src/cuid_nic.h"
-#include "src/cuid_platform.h"
-#include "src/cuid_util.h"
 #include "src/hmac.h"
 #include "src/ipc_protocol.h"
 #include <sys/socket.h>
@@ -42,6 +34,8 @@
 #include <map>
 #include <unistd.h>
 #include <memory>
+#include <vector>
+#include <fcntl.h>
 
 // static hmac instance for daemon
 static cuid_hmac daemon_hmac = cuid_hmac();
@@ -78,38 +72,6 @@ static void init_logging(bool enabled) {
             *g_log_file << "\n=== Log started at " << ctime(&now);
         }
     }
-}
-
-amdcuid_status_t update_device(std::string output_file,
-                                std::string priv_output_file,
-                                CuidFileEntry *device) {
-    // Load existing CUID files
-    CuidFile unpriv_file(output_file, false);
-    CuidFile priv_file(priv_output_file, true);
-    unpriv_file.load();
-    priv_file.load();
-
-    log_out() << "Attempting update of device with derived CUID: " << CuidUtilities::get_cuid_as_string(&device->derived_cuid) << std::endl;
-
-    amdcuid_status_t status;
-    // Remove entry from both files
-    status = unpriv_file.add_entry(*device);
-    if (status != AMDCUID_STATUS_SUCCESS) {
-        log_err() << "Error updating device in unprivileged file: " << amdcuid_status_to_string(status) << std::endl;
-        return status;
-    }
-    status = priv_file.add_entry(*device);
-    if (status != AMDCUID_STATUS_SUCCESS) {
-        log_err() << "Error updating device in privileged file: " << amdcuid_status_to_string(status) << std::endl;
-        return status;
-    }
-
-
-    // Save updated CUID files
-    unpriv_file.save();
-    priv_file.save();
-
-    return AMDCUID_STATUS_SUCCESS;
 }
 
 // Daemon Server
@@ -233,126 +195,6 @@ private:
 
 };
 
-amdcuid_status_t get_device_from_udev(std::string *action_output, CuidFileEntry *device_entry, cuid_hmac* hmac) {
-    // udev passes device information as environment variables when triggering rules
-    const char* action = std::getenv("ACTION");
-    const char* devpath = std::getenv("DEVPATH");
-    const char* subsystem = std::getenv("SUBSYSTEM");
-    const char* devname = std::getenv("DEVNAME");
-    const char* pci_slot = std::getenv("PCI_SLOT_NAME");
-
-    // Validate required environment variables
-    if (!devpath || !subsystem) {
-        log_err() << "Error: Missing required udev environment variables (DEVPATH, SUBSYSTEM)" << std::endl;
-        return AMDCUID_STATUS_DEVICE_NOT_FOUND;
-    }
-
-    // Log udev event info
-    log_out() << "udev event received:" << std::endl;
-    log_out() << "  ACTION: " << (action ? action : "(null)") << std::endl;
-    log_out() << "  DEVPATH: " << devpath << std::endl;
-    log_out() << "  SUBSYSTEM: " << subsystem << std::endl;
-    log_out() << "  DEVNAME: " << (devname ? devname : "(null)") << std::endl;
-    log_out() << "  PCI_SLOT_NAME: " << (pci_slot ? pci_slot : "(null)") << std::endl;
-
-    // Build sysfs path from DEVPATH
-    std::string syspath = "/sys" + std::string(devpath);
-
-    // Parse uevent file for additional properties
-    std::map<std::string, std::string> uevent_props;
-    std::ifstream uevent_file(syspath + "/uevent");
-    if (uevent_file.is_open()) {
-        std::string line;
-        while (std::getline(uevent_file, line)) {
-            size_t eq = line.find('=');
-            if (eq != std::string::npos) {
-                uevent_props[line.substr(0, eq)] = line.substr(eq + 1);
-            }
-        }
-        uevent_file.close();
-    }
-    else {
-        log_out() << "Failed to open uevent file. Exiting." << std::endl;
-        return AMDCUID_STATUS_FILE_NOT_FOUND;
-    }
-
-    // Determine device type from subsystem and create appropriate device entry
-    std::string subsys_str(subsystem);
-    CuidFileEntry entry = CuidFileEntry();
-
-    if (subsys_str == "drm") {
-        // GPU device
-        amdcuid_gpu_info info = {};
-        amdcuid_status_t status = CuidGpu::discover_single(&info, syspath + "/device");
-        auto gpu_device = std::make_shared<CuidGpu>(info);
-
-        entry.device_type = AMDCUID_DEVICE_TYPE_GPU;
-        amdcuid_primary_id primary_id;
-        status = gpu_device->get_primary_cuid(primary_id);
-        if (status != AMDCUID_STATUS_SUCCESS) {
-            log_err() << "Error: Failed to get primary CUID for GPU device" << std::endl;
-            return status;
-        }
-        entry.primary_cuid = primary_id.UUIDv8_representation;
-        amdcuid_derived_id derived_id;
-        status = gpu_device->get_derived_cuid(derived_id, hmac);
-        if (status != AMDCUID_STATUS_SUCCESS) {
-            log_err() << "Error: Failed to generate derived CUID for GPU device" << std::endl;
-            return status;
-        }
-        log_out() << "Generated derived CUID for GPU device: " << CuidUtilities::get_cuid_as_string(&derived_id.UUIDv8_representation) << std::endl;
-        entry.derived_cuid = derived_id.UUIDv8_representation;
-        entry.device_node = info.render_node;
-        entry.bdf = info.bdf;
-        entry.device_index = 0; // could be set based on existing entries
-        entry.last_update = time(nullptr);
-    } else if (subsys_str == "net") {
-        // NIC device
-        amdcuid_nic_info info = {};
-        amdcuid_status_t status = CuidNic::discover_single(&info, syspath + "/device");
-        auto nic_device = std::make_shared<CuidNic>(info);
-
-        entry.device_type = AMDCUID_DEVICE_TYPE_NIC;
-        amdcuid_primary_id primary_id;
-        status = nic_device->get_primary_cuid(primary_id);
-        if (status != AMDCUID_STATUS_SUCCESS) {
-            log_err() << "Error: Failed to get primary CUID for NIC device" << std::endl;
-            return status;
-        }
-        entry.primary_cuid = primary_id.UUIDv8_representation;
-        amdcuid_derived_id derived_id;
-        status = nic_device->get_derived_cuid(derived_id, hmac);
-        if (status != AMDCUID_STATUS_SUCCESS) {
-            log_err() << "Error: Failed to generate derived CUID for NIC device" << std::endl;
-            return status;
-        }
-        entry.derived_cuid = derived_id.UUIDv8_representation;
-        entry.device_node = info.network_interface;
-        entry.bdf = info.bdf;
-        entry.device_index = 0; // could be set based on existing entries
-        entry.last_update = time(nullptr);
-    } else {
-        // additional subsystems can be added later as support expands
-        log_err() << "Error: Unsupported subsystem: " << subsystem << std::endl;
-        return AMDCUID_STATUS_UNSUPPORTED;
-    }
-
-    if (!device_entry) {
-        return AMDCUID_STATUS_DEVICE_NOT_FOUND;
-    }
-
-    // Set action output
-    if (action_output) {
-        *action_output = std::string(action);
-    } else {
-        *action_output = "unknown";
-    }
-    // Store the device entry
-    *device_entry = entry;
-
-    return AMDCUID_STATUS_SUCCESS;
-}
-
 int main() {
     // Note: We can't log to file yet until we read the config
     std::cout << "AMD CUID Daemon Starting..." << std::endl;
@@ -380,7 +222,11 @@ int main() {
     close(fd);
 
     // read config file first get logging options and whether to run as a daemon or only on boot
-    std::ifstream config_file("/opt/amdcuid/etc/amdcuid_daemon.conf");
+#ifndef AMDCUID_CONFIG_DIR
+#error "AMDCUID_CONFIG_DIR must be defined via CMake"
+#endif
+    std::string config_path = std::string(AMDCUID_CONFIG_DIR) + "/amdcuid_daemon.conf";
+    std::ifstream config_file(config_path);
     std::vector<std::string> config_lines;
 
     if (config_file.is_open()) {

@@ -18,19 +18,68 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+#
+# Minimum version of cmake required
+#
 cmake_minimum_required(VERSION 3.10)
-project(amdcuid)
 
-# Set platform-appropriate default install prefix
+set(AMDCUID "amdcuid" CACHE INTERNAL "")
+set(AMDCUID_PACKAGE ${AMDCUID} CACHE STRING "")
+
+# ROCM_DIR should be passed in via command line
+set(ROCM_DIR "/opt/rocm" CACHE PATH "ROCm directory.")
+
+# Default libdir to "lib", this skips GNUInstallDirs from trying to take a guess if it's unset
+set(CMAKE_INSTALL_LIBDIR "lib" CACHE STRING "Library install directory")
+
+# Read version from amd_cuid.h so there is a single source of truth
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/lib/include/amd_cuid.h" _CUID_HEADER)
+string(REGEX MATCH "#define AMDCUID_LIB_VERSION_MAJOR ([0-9]+)" _ "${_CUID_HEADER}")
+set(VERSION_MAJOR "${CMAKE_MATCH_1}")
+string(REGEX MATCH "#define AMDCUID_LIB_VERSION_MINOR ([0-9]+)" _ "${_CUID_HEADER}")
+set(VERSION_MINOR "${CMAKE_MATCH_1}")
+string(REGEX MATCH "#define AMDCUID_LIB_VERSION_PATCH ([0-9]+)" _ "${_CUID_HEADER}")
+set(VERSION_PATCH "${CMAKE_MATCH_1}")
+set(VERSION_STRING "${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH}")
+message("Package version: ${VERSION_STRING}")
+
+# Don't print 'Up-to-date' when installing
+set(CMAKE_INSTALL_MESSAGE LAZY)
+
+# This must go after some CMAKE_* variables
+project(${AMDCUID} VERSION "${VERSION_STRING}")
+
+# Usually ROCM tools are installed into /opt/rocm
+# CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT is only available after project()
 if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
     if(WIN32)
-        set(CMAKE_INSTALL_PREFIX "C:/Program Files/AMD/AMDCUID" CACHE PATH "Installation prefix" FORCE)
+        set(CMAKE_INSTALL_PREFIX
+            "C:/Program Files/AMD/ROCM/AMDCUID"
+            CACHE PATH "Default installation directory."
+            FORCE
+        )
     else()  # Linux/Unix
-        set(CMAKE_INSTALL_PREFIX "/opt/amdcuid" CACHE PATH "Installation prefix" FORCE)
+        set(CMAKE_INSTALL_PREFIX
+            "${ROCM_DIR}/core"
+            CACHE PATH "Default installation directory."
+            FORCE
+        )
     endif()
 endif()
 
+# Include CMAKE_INSTALL_* variables
+# This must go after project()
 include(GNUInstallDirs)
+
+# C++ standard for all targets
+set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# When cmake -DBUILD_TESTS=off, it will not build CUID tests.
+option(BUILD_TESTS "Build test suite" OFF)
+
+# When cmake -DBUILD_EXAMPLES=off, it will not build CUID examples
+option(BUILD_EXAMPLES "Build examples" OFF)
 
 if(WIN32)
     set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
@@ -38,38 +87,70 @@ if(WIN32)
     set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)  # Import libs
 endif()
 
-# Platform-specific dependencies; If we decide to use the default Windows crypto API, we can remove the OpenSSL dependency on Windows
+# Platform-specific dependencies
 if(WIN32)
     # Windows may need different OpenSSL path
     set(OPENSSL_ROOT_DIR "C:/OpenSSL-Win64" CACHE PATH "OpenSSL location")
 endif()
 
+# Find project-wide dependencies
+find_package(OpenSSL REQUIRED)
+
+message("Build Configuration:")
+message("-----------ROCM_DIR : " ${ROCM_DIR})
+message("------Install Prefix: " ${CMAKE_INSTALL_PREFIX})
+message("--------Build Type  : " ${CMAKE_BUILD_TYPE})
+
+# Define all the install component labels
+set(LIB_COMPONENT "library")
+set(DAEMON_COMPONENT "daemon")
+set(CLI_COMPONENT "cli")
+set(EXAMPLE_COMPONENT "example")
+set(TESTS_COMPONENT "tests")
+
 add_subdirectory(lib)
 add_subdirectory(cli)
 add_subdirectory(daemon)
-add_subdirectory(example)
-add_subdirectory(tests)
+
+if(BUILD_EXAMPLES)
+    add_subdirectory(example)
+endif()
+
+if(BUILD_TESTS)
+    add_subdirectory(tests)
+endif()
 
 # ==============================================================================
-# CPack Configuration for Portable Packages
+# Configure packaging
 # ==============================================================================
-set(CPACK_PACKAGE_NAME "amdcuid")
-set(CPACK_PACKAGE_VENDOR "Advanced Micro Devices, Inc.")
-set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "AMD Compute Unit ID Library and Tools")
-
-# Use the project's install prefix for all package types
-set(CPACK_PACKAGING_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}")
-set(CPACK_PACKAGE_VERSION_MAJOR "1")
-set(CPACK_PACKAGE_VERSION_MINOR "0")
-set(CPACK_PACKAGE_VERSION_PATCH "0")
-set(CPACK_PACKAGE_VERSION "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}")
-set(CPACK_PACKAGE_CONTACT "support@amd.com")
+# CPack version is populated with CMAKE_PROJECT_VERSION implicitly
+set(PKG_MAINTAINER_NM "AMDCUID Support")
+set(PKG_MAINTAINER_EMAIL "support@amd.com")
+set(CPACK_PACKAGE_NAME ${AMDCUID_PACKAGE} CACHE INTERNAL "")
+set(CPACK_PACKAGE_VENDOR "Advanced Micro Devices, Inc." CACHE STRING "")
+set(CPACK_PACKAGE_CONTACT "${PKG_MAINTAINER_NM} <${PKG_MAINTAINER_EMAIL}>")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
+    "AMD Compute Unit ID Library and Tools"
+    CACHE STRING
+    ""
+)
+set(CPACK_PACKAGING_INSTALL_PREFIX
+    "${CMAKE_INSTALL_PREFIX}"
+    CACHE PATH
+    "Default packaging prefix."
+)
+set(CPACK_PACKAGE_VERSION_MAJOR "${VERSION_MAJOR}")
+set(CPACK_PACKAGE_VERSION_MINOR "${VERSION_MINOR}")
+set(CPACK_PACKAGE_VERSION_PATCH "${VERSION_PATCH}")
+set(CPACK_PACKAGE_VERSION "${VERSION_STRING}")
 set(CPACK_RESOURCE_FILE_README "${CMAKE_SOURCE_DIR}/README.md")
-
-# Component-based installation
-set(CPACK_COMPONENT_RUNTIME_DISPLAY_NAME "Runtime")
-set(CPACK_COMPONENT_LIBRARY_DISPLAY_NAME "Library")
-set(CPACK_COMPONENT_DEVELOPMENT_DISPLAY_NAME "Development")
+set(CPACK_GENERATOR "DEB;RPM" CACHE STRING "Default packaging generators.")
+mark_as_advanced(
+    CPACK_PACKAGE_VENDOR
+    CPACK_PACKAGE_CONTACT
+    CPACK_PACKAGE_DESCRIPTION_SUMMARY
+    CPACK_GENERATOR
+)
 
 # Platform-specific generators
 if(WIN32)
@@ -81,7 +162,7 @@ else()
     set(CPACK_DEBIAN_PACKAGE_MAINTAINER "${CPACK_PACKAGE_CONTACT}")
     set(CPACK_DEBIAN_PACKAGE_DEPENDS "libssl1.1 | libssl3")
     set(CPACK_DEBIAN_PACKAGE_SECTION "utils")
-    
+
     # RPM-specific
     set(CPACK_RPM_PACKAGE_LICENSE "MIT")
     set(CPACK_RPM_PACKAGE_GROUP "System Environment/Libraries")
