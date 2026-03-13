@@ -9,6 +9,7 @@ Run with system rocpd first in PYTHONPATH:
 
 import os
 import sys
+from unittest.mock import patch, MagicMock
 
 import pytest
 
@@ -84,9 +85,6 @@ def test_edit_record_has_checkpoint_id():
         backup_path="/src/kernel.hip.bak",
     )
     assert r.checkpoint_id is None
-
-
-from unittest.mock import patch, MagicMock
 
 
 def _make_gcm(repo_root="/repo", session_id="sess1"):
@@ -231,3 +229,36 @@ def test_gcm_delete_ref():
         gcm.delete_ref("refs/rocpd/sess1/cp-0")
     assert "update-ref" in str(mock_run.call_args)
     assert "-d" in str(mock_run.call_args)
+
+
+def test_gcm_files_in_commit():
+    gcm = _make_gcm()
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0, stdout="src/kernel.hip\nsrc/main.cpp\n")
+        files = gcm.files_in_commit("abc1234")
+    assert files == ["src/kernel.hip", "src/main.cpp"]
+
+
+def test_gcm_list_worktrees():
+    gcm = _make_gcm()
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="worktree /repo\nHEAD abc\n\nworktree /home/user/.rocpd/sessions/s/cp-0\nHEAD def\n"
+        )
+        paths = gcm.list_worktrees()
+    assert "/repo" in paths
+    assert "/home/user/.rocpd/sessions/s/cp-0" in paths
+
+
+def test_gcm_restore_files_from_commit():
+    gcm = _make_gcm()
+    with patch("subprocess.run") as mock_run:
+        # ls-tree returns the file; checkout succeeds
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="kernel.hip\n"),  # ls-tree
+            MagicMock(returncode=0, stdout=""),               # checkout
+        ]
+        gcm.restore_files_from_commit("abc1234", ["kernel.hip"])
+    # Both ls-tree and checkout were called
+    assert mock_run.call_count == 2
