@@ -99,6 +99,20 @@ def check_trigger_windows_ci_for_subtree_path(path):
     return False
 
 
+def check_trigger_windows_ci_for_subtree(subtree: str) -> bool:
+    """Returns true if the subtree root corresponds to a Windows CI-triggering subtree.
+
+    Used for workflow_dispatch where explicit subtrees are provided rather than
+    modified file paths. Patterns like 'projects/clr/*' are matched by stripping
+    the trailing glob to get the subtree prefix 'projects/clr'.
+    """
+    for pattern in trigger_windows_ci_for_subtrees_paths:
+        subtree_prefix = pattern.rstrip("/*").rstrip("/")
+        if subtree == subtree_prefix or subtree.startswith(subtree_prefix + "/"):
+            return True
+    return False
+
+
 # Paths matching any of these patterns are considered to have no influence over
 # build or test workflows so any related jobs can be skipped if all paths
 # modified by a commit/PR match a pattern in this list.
@@ -191,17 +205,18 @@ def retrieve_projects(args):
             )
             subtrees = list(subtree_to_project_map.keys())
 
-    # Windows CI skip logic: skip if no Windows-trigger paths were modified.
-    # For workflow_dispatch the user explicitly selected projects, so always honor the selection.
-    if (
-        args.get("platform") == "windows"
-        and not args.get("is_workflow_dispatch")
-        and not any(
+    # Windows CI skip logic: skip if neither the modified file paths nor the
+    # explicitly selected subtrees require Windows CI.
+    if args.get("platform") == "windows":
+        if args.get("is_workflow_dispatch"):
+            if not any(check_trigger_windows_ci_for_subtree(s) for s in subtrees):
+                logging.info("Selected subtrees do not require Windows CI, skipping")
+                return []
+        elif not any(
             check_trigger_windows_ci_for_subtree_path(path) for path in modified_paths
-        )
-    ):
-        logging.info("Modified paths do not require Windows CI, skipping")
-        return []
+        ):
+            logging.info("Modified paths do not require Windows CI, skipping")
+            return []
     # Determine logical projects impacted
     projects = {
         subtree_to_project_map[subtree]
