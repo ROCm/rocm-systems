@@ -654,4 +654,4 @@ def test_phase5_rollback_with_blacklist():
          patch.object(ws, "_blacklist_checkpoint") as mock_blacklist, \
          patch.object(ws, "_save_session"):
         ws._phase5_rec_menu(snap)
-    mock_blacklist.assert_called_once()
+    mock_blacklist.assert_called_once_with(1)

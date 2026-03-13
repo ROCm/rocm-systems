@@ -2334,29 +2334,34 @@ class WorkflowSession:
         _print("└" + "─" * 69 + "┘\n")
 
         valid = ["base"] + [str(cp.cp_id) for cp in self._state.checkpoints]
-        raw = input(
+        raw = _input(
             f"  Restore to [{'/'.join(valid)}] or [c] cancel: "
         ).strip().lower()
         if raw == "c":
             return None
         if raw == "base":
             target_cp_id = -1
-        elif raw.isdigit() and int(raw) < len(self._state.checkpoints):
+        elif raw.isdigit() and int(raw) in {cp.cp_id for cp in self._state.checkpoints}:
             target_cp_id = int(raw)
         else:
             _print("  Invalid choice.", style="yellow")
             return None
 
         # Identify regressions BEFORE rollback removes them
-        if target_cp_id != -1:
+        if target_cp_id == -1:
+            # Rolling back to baseline: show all checkpoints with regressions
+            regression_cps = [
+                cp for cp in self._state.checkpoints
+                if cp.performance_delta_pct is not None
+                and cp.performance_delta_pct < 0
+            ]
+        else:
             regression_cps = [
                 cp for cp in self._state.checkpoints
                 if cp.cp_id > target_cp_id
                 and cp.performance_delta_pct is not None
                 and cp.performance_delta_pct < 0
             ]
-        else:
-            regression_cps = []
 
         # Prompt for blacklist (before rollback so checkpoints are still in list)
         blacklist_ids: List[int] = []
@@ -2365,7 +2370,7 @@ class WorkflowSession:
             for idx, cp in enumerate(regression_cps, 1):
                 delta_str = f"{cp.performance_delta_pct:.1f}%"
                 _print(f"    [{idx}]  cp-{cp.cp_id}: {cp.edit_summary} ({delta_str})")
-            bl_raw = input(
+            bl_raw = _input(
                 "  Enter numbers to blacklist (space-separated), or [n] skip: "
             ).strip().lower()
             if bl_raw != "n":
