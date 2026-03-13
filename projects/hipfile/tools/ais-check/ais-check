@@ -12,9 +12,13 @@ If components are missing the program exits with a non-zero exit code.
 import argparse
 import ctypes
 import ctypes.util
+import glob
 import gzip
 import os
 import sys
+
+# Global list of found HIP runtime libraries
+hip_libraries = {}
 
 
 def kernel_supports_p2pdma():
@@ -46,67 +50,113 @@ def kernel_supports_p2pdma():
     return False
 
 
+def find_hip_runtimes():
+    """
+    Populate a global list of HIP runtime libraries by looking in the
+    usual places.
+    """
+
+    candidates = []
+
+    # 1. Respect runtime linker paths
+    for p in os.environ.get("LD_LIBRARY_PATH", "").split(":"):
+        if p:
+            candidates.append(os.path.join(p, "libamdhip64.so"))
+
+    # 2. Environment variables commonly set by ROCm or modules
+    for var in ("ROCM_HOME", "ROCM_PATH", "HIP_PATH"):
+        base = os.environ.get(var)
+        if base:
+            candidates += [
+                os.path.join(base, "lib", "libamdhip64.so"),
+                os.path.join(base, "lib64", "libamdhip64.so"),
+            ]
+
+    # 3. Standard ROCm install paths
+    candidates += [
+        "/opt/rocm/lib/libamdhip64.so",
+        "/opt/rocm/lib64/libamdhip64.so",
+    ]
+
+    # 4. Versioned installs (/opt/rocm-5.x, etc.)
+    for d in glob.glob("/opt/rocm*/lib*/libamdhip64.so"):
+        candidates.append(d)
+
+    # Drop any paths that don't exist
+    existing_paths = [path for path in candidates if os.path.exists(path)]
+
+    # Populate the global dictionary of paths
+    #
+    # Tell pylint to be quiet since returning the dictionary
+    # would result in uglier downstream code
+    global hip_libraries  # pylint: disable=W0603
+    hip_libraries = dict.fromkeys(existing_paths, False)
+
+
 def hip_runtime_supports_ais():
     """
     Check if hipAmdFileRead and hipAmdFileWrite are available in HIP
     """
-    hip_path = ctypes.util.find_library("amdhip64")
-    if hip_path is None:
-        return False
+    find_hip_runtimes()
 
-    hip = ctypes.CDLL(hip_path)
+    # Check for AIS functions in the list of found HIP libraries
+    for hip_path, _ in hip_libraries.items():
 
-    hipError_t = ctypes.c_int
-    hipDriverProcAddressQueryResult = ctypes.c_int
+        hip = ctypes.CDLL(hip_path)
 
-    hip.hipRuntimeGetVersion.argtypes = [ctypes.POINTER(ctypes.c_int)]
-    hip.hipRuntimeGetVersion.restype = hipError_t
+        hipError_t = ctypes.c_int
+        hipDriverProcAddressQueryResult = ctypes.c_int
 
-    hip.hipGetProcAddress.argtypes = [
-        ctypes.c_char_p,
-        ctypes.POINTER(ctypes.c_void_p),
-        ctypes.c_int,
-        ctypes.c_uint64,
-        ctypes.POINTER(hipDriverProcAddressQueryResult),
-    ]
-    hip.hipGetProcAddress.restype = hipError_t
+        hip.hipRuntimeGetVersion.argtypes = [ctypes.POINTER(ctypes.c_int)]
+        hip.hipRuntimeGetVersion.restype = hipError_t
 
-    hip.hipGetErrorString.argtypes = [hipError_t]
-    hip.hipGetErrorString.restype = ctypes.c_char_p
+        hip.hipGetProcAddress.argtypes = [
+            ctypes.c_char_p,
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.c_int,
+            ctypes.c_uint64,
+            ctypes.POINTER(hipDriverProcAddressQueryResult),
+        ]
+        hip.hipGetProcAddress.restype = hipError_t
 
-    version = ctypes.c_int()
-    err = hip.hipRuntimeGetVersion(ctypes.byref(version))
-    if err != 0:
-        err_str = hip.hipGetErrorString(err).decode("utf-8")
-        print(
-            f"hipRuntimeGetVersion failed with err code {err} ({err_str})",
-            file=sys.stderr,
-        )
-        return False
+        hip.hipGetErrorString.argtypes = [hipError_t]
+        hip.hipGetErrorString.restype = ctypes.c_char_p
 
-    for symbol in [b"hipAmdFileWrite", b"hipAmdFileRead"]:
-        func_ptr = ctypes.c_void_p()
-        symbol_status = hipDriverProcAddressQueryResult()
-        err = hip.hipGetProcAddress(
-            symbol,
-            ctypes.byref(func_ptr),
-            version.value,
-            0,
-            ctypes.byref(symbol_status),
-        )
+        version = ctypes.c_int()
+        err = hip.hipRuntimeGetVersion(ctypes.byref(version))
         if err != 0:
-            if symbol_status.value != 1:
-                symbol = symbol.decode("utf-8")
-                err_str = hip.hipGetErrorString(err).decode("utf-8")
-                print(
-                    f"hipGetProcAddress({symbol}) failed with err code"
-                    f" {err} ({err_str}) and symbolStatus"
-                    f" {symbol_status.value}",
-                    file=sys.stderr,
-                )
-            return False
+            err_str = hip.hipGetErrorString(err).decode("utf-8")
+            print(
+                f"hipRuntimeGetVersion failed with err code {err} ({err_str})",
+                file=sys.stderr,
+            )
+            continue
 
-    return True
+        for symbol in [b"hipAmdFileWrite", b"hipAmdFileRead"]:
+            func_ptr = ctypes.c_void_p()
+            symbol_status = hipDriverProcAddressQueryResult()
+            err = hip.hipGetProcAddress(
+                symbol,
+                ctypes.byref(func_ptr),
+                version.value,
+                0,
+                ctypes.byref(symbol_status),
+            )
+            if err != 0:
+                if symbol_status.value != 1:
+                    symbol = symbol.decode("utf-8")
+                    err_str = hip.hipGetErrorString(err).decode("utf-8")
+                    print(
+                        f"hipGetProcAddress({symbol}) failed with err code"
+                        f" {err} ({err_str}) and symbolStatus"
+                        f" {symbol_status.value}",
+                        file=sys.stderr,
+                    )
+                continue
+
+        hip_libraries[hip_path] = True
+
+    return bool(True in hip_libraries.values())
 
 
 def amdgpu_supports_ais():
@@ -154,8 +204,17 @@ def main():
         u = os.uname()
         print()
         print(u.sysname, u.nodename, u.release, u.version, u.machine)
-        print()
 
+        print()
+        print("Found these HIP libraries:")
+        for lib, support in hip_libraries.items():
+            if support:
+                pretty_supported = "supported"
+            else:
+                pretty_supported = "NOT supported"
+            print(f"\t{lib} (AIS {pretty_supported})")
+
+        print()
         print("AIS support in:")
         for name, supported in component_support:
             print(f"\t{name:<24}: {supported}")
