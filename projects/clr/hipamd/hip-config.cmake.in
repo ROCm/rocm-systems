@@ -147,3 +147,11 @@ if("@HIP_INSTALLS_HIPCC@")
   set(HIP_HIPCC_EXECUTABLE ${hip_HIPCC_EXECUTABLE})
   set(HIP_HIPCONFIG_EXECUTABLE ${hip_HIPCONFIG_EXECUTABLE})
 endif()
+# When this package does not install hipcc (HIP_INSTALLS_HIPCC=OFF), allow
+# consumers that set CMAKE_HIP_COMPILER to use it for HIP_HIPCC_EXECUTABLE
+# so architecture and flag checks (e.g. --offload-arch) use the chosen compiler.
+if(NOT HIP_HIPCC_EXECUTABLE OR HIP_HIPCC_EXECUTABLE STREQUAL "")
+  if(CMAKE_HIP_COMPILER)
+    set(HIP_HIPCC_EXECUTABLE "${CMAKE_HIP_COMPILER}" CACHE INTERNAL "HIP compiler for checks when package does not install hipcc")
+  endif()
+endif()
