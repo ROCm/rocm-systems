@@ -212,6 +212,72 @@ rocprofiler_add_integration_execute_test(
 
 #########################################################################################
 #
+# Region category filtering tests
+#
+#########################################################################################
+
+# Test --region-categories with single category (KERNEL)
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-rocpd-summary-region-category-kernel
+    COMMAND
+        ${Python3_EXECUTABLE} -m rocpd summary --region-categories KERNEL -f csv
+        -d ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary-kernel -i
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 45
+    LABELS "integration-tests;rocpd"
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+    ENVIRONMENT "${rocprofv3-rocpd-env}"
+    FIXTURES_SETUP rocprofv3-test-rocpd-region-category
+    FIXTURES_REQUIRED rocprofv3-test-rocpd)
+
+# Test --region-categories with single category (HIP)
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-rocpd-summary-region-category-hip
+    COMMAND
+        ${Python3_EXECUTABLE} -m rocpd summary --region-categories HIP -f csv
+        -d ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary-hip -i
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 45
+    LABELS "integration-tests;rocpd"
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+    ENVIRONMENT "${rocprofv3-rocpd-env}"
+    FIXTURES_SETUP rocprofv3-test-rocpd-region-category
+    FIXTURES_REQUIRED rocprofv3-test-rocpd)
+
+# Test --region-categories with multiple categories
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-rocpd-summary-region-category-multiple
+    COMMAND
+        ${Python3_EXECUTABLE} -m rocpd summary --region-categories HIP KERNEL MARKER -f csv
+        -d ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary-multiple -i
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 45
+    LABELS "integration-tests;rocpd"
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+    ENVIRONMENT "${rocprofv3-rocpd-env}"
+    FIXTURES_SETUP rocprofv3-test-rocpd-region-category
+    FIXTURES_REQUIRED rocprofv3-test-rocpd)
+
+# Test --region-categories NONE (all views, no regions)
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-rocpd-summary-region-category-none
+    COMMAND
+        ${Python3_EXECUTABLE} -m rocpd summary --region-categories NONE -f csv
+        -d ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary-none -i
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 45
+    LABELS "integration-tests;rocpd"
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+    ENVIRONMENT "${rocprofv3-rocpd-env}"
+    FIXTURES_SETUP rocprofv3-test-rocpd-region-category
+    FIXTURES_REQUIRED rocprofv3-test-rocpd)
+
+#########################################################################################
+#
 # Validation
 #
 #########################################################################################
@@ -238,6 +304,23 @@ rocprofiler_add_integration_validate_test(
     TIMEOUT 120
     LABELS "integration-tests;rocpd"
     FIXTURES_REQUIRED rocprofv3-test-rocpd-generation)
+
+# Validate region category filtering
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-rocpd-region-category-validation
+    TEST_PATHS validate_region_categories.py
+    CONFIG pytest.ini
+    ARGS --summary-kernel-dir
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary-kernel
+         --summary-hip-dir
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary-hip
+         --summary-multiple-dir
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary-multiple
+         --summary-none-dir
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary-none
+    TIMEOUT 60
+    LABELS "integration-tests;rocpd;region-category"
+    FIXTURES_REQUIRED rocprofv3-test-rocpd-region-category)
 
 #########################################################################################
 #
