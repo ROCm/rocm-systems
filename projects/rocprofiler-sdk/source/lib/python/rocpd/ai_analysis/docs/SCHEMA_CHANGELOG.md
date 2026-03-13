@@ -57,7 +57,9 @@ rocpd/ai_analysis/docs/
 ├── analysis-output.schema.json   ← single schema; schema_version enum lists all valid values
 │                                    Tier 1/2 output emits: "0.1.0"
 │                                    Tier 0 (source-only) output emits: "0.2.0"
-│                                    Future versions added to the enum without breaking consumers
+│                                    Tier 1/2 with TraceLens fields emits: "0.3.0"
+│                                    All valid values: ["0.1.0", "0.2.0", "0.3.0"]
+│                                    New versions are added to the enum without breaking consumers
 ├── SCHEMA_CHANGELOG.md           ← this file
 ├── AI_ANALYSIS_API.md            ← Python API documentation
 └── LLM_REFERENCE_GUIDE.md       ← copy of share/llm-reference-guide.md (for reference)

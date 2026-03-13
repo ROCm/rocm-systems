@@ -194,6 +194,8 @@ function(rocprofiler_rocpd_python_bindings _VERSION)
     # Copy ai_analysis directory and its contents (including subdirectories). Includes
     # *.py modules, *.md docs, *.json schema files, and *.png assets (e.g.
     # ai_analysis/share/amd_rocm_logo.png used by interactive.py banner).
+    # Excludes ai_analysis/tests/ — test-only files should not be installed into
+    # site-packages as they are not runtime assets and can cause import side-effects.
     file(
         GLOB_RECURSE
         rocpd_AI_ANALYSIS_FILES
@@ -201,6 +203,12 @@ function(rocprofiler_rocpd_python_bindings _VERSION)
         "${CMAKE_CURRENT_LIST_DIR}/ai_analysis/*.md"
         "${CMAKE_CURRENT_LIST_DIR}/ai_analysis/*.json"
         "${CMAKE_CURRENT_LIST_DIR}/ai_analysis/*.png")
+    list(
+        FILTER
+        rocpd_AI_ANALYSIS_FILES
+        EXCLUDE
+        REGEX
+        "${CMAKE_CURRENT_LIST_DIR}/ai_analysis/tests/.*")
 
     foreach(_AI_FILE ${rocpd_AI_ANALYSIS_FILES})
         file(RELATIVE_PATH _REL_PATH "${CMAKE_CURRENT_LIST_DIR}" "${_AI_FILE}")

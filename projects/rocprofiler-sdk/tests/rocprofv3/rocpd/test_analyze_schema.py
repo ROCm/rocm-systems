@@ -42,9 +42,10 @@ import pytest
 # Helpers
 # ---------------------------------------------------------------------------
 
-# Tier 1/2 output currently emits this version; derive it lazily from the schema enum
-# so tests stay valid as long as the output version is one the schema allows.
-SCHEMA_VERSION = "0.1.0"  # emitted by format_analysis_output() for Tier 1/2
+# The version emitted by Tier 1/2 analysis (no TraceLens fields).
+# This constant is only used to verify the schema enum includes the Tier 1/2 version;
+# conformance tests derive allowed versions from the loaded schema enum directly.
+TIER12_SCHEMA_VERSION = "0.1.0"
 
 REQUIRED_TOP_LEVEL = [
     "schema_version",
@@ -152,14 +153,15 @@ def test_schema_file_has_json_schema_keyword():
     ), f"$schema must point to json-schema.org, got netloc={parsed.netloc!r}"
 
 
-def test_schema_file_version_const():
-    """schema_version property enum includes SCHEMA_VERSION."""
+def test_schema_file_version_enum():
+    """schema_version property enum includes the Tier 1/2 version (0.1.0)."""
     schema = _load_schema()
     props = schema.get("properties", {})
     assert "schema_version" in props, "schema_version must be in properties"
     enum_vals = props["schema_version"].get("enum", [])
-    assert SCHEMA_VERSION in enum_vals, (
-        f"schema_version enum must include {SCHEMA_VERSION!r}, " f"got {enum_vals!r}"
+    assert TIER12_SCHEMA_VERSION in enum_vals, (
+        f"schema_version enum must include {TIER12_SCHEMA_VERSION!r}, "
+        f"got {enum_vals!r}"
     )
 
 
