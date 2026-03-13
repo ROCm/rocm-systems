@@ -1827,11 +1827,6 @@ class GitCheckpointManager:
             )
         return result.stdout.strip()
 
-    def is_dirty(self) -> bool:
-        """Return True if working tree has uncommitted changes."""
-        result = self._git("status", "--porcelain")
-        return bool(result.stdout.strip())
-
     def get_head(self) -> str:
         """Return current HEAD commit hash."""
         result = self._git("rev-parse", "HEAD")

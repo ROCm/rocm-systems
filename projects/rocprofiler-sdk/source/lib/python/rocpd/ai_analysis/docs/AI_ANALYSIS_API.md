@@ -1628,7 +1628,7 @@ exact string match.
 ```
 WorkflowSession.run()
   ├─ Phase 1: validate sources
-  ├─ _init_checkpoints()       ← detect git, abort if dirty tree, record baseline
+  ├─ _init_checkpoints()       ← detect git, record baseline (dirty tree OK)
   ├─ _prune_stale_worktrees()  ← remove orphaned worktrees with no session JSON
   ├─ Phase 1b … Phase 7 loop
   └─ finally:
@@ -1636,9 +1636,9 @@ WorkflowSession.run()
        _save_session()
 ```
 
-**Dirty-tree abort**: If the git working tree has uncommitted changes when the session
-starts, `_init_checkpoints` prints a clear message and calls `SystemExit(1)`. This
-prevents checkpoint commits from mixing user changes with AI edits.
+**Dirty working tree**: No issue. `commit_files` stages only the specific files modified
+by each AI edit (`git add -- <file>`), so other in-progress changes in the working tree
+are never touched or included in checkpoint commits.
 
 **No-git graceful fallback**: When git is not detected or any checkpoint operation
 fails, `self._gcm` is set to `None` and checkpoints are silently skipped. All other

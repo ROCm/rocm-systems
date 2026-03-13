@@ -113,20 +113,6 @@ def test_gcm_detect_repo_not_git():
             gcm.detect_repo("/not/a/repo")
 
 
-def test_gcm_is_dirty_true():
-    gcm = _make_gcm()
-    with patch("subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(returncode=0, stdout=" M kernel.hip\n")
-        assert gcm.is_dirty() is True
-
-
-def test_gcm_is_dirty_false():
-    gcm = _make_gcm()
-    with patch("subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(returncode=0, stdout="")
-        assert gcm.is_dirty() is False
-
-
 def test_gcm_get_head():
     gcm = _make_gcm()
     with patch("subprocess.run") as mock_run:
