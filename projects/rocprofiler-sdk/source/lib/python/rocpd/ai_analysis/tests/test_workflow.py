@@ -267,10 +267,8 @@ def test_gcm_restore_files_from_commit():
 def test_session_start_sets_repo_root_when_git_available():
     from rocpd.ai_analysis.interactive import WorkflowSession
     with patch("subprocess.run") as mock_run:
-        # detect_repo: success; is_dirty: clean; get_head: hash
         mock_run.side_effect = [
             MagicMock(returncode=0, stdout="/repo\n"),   # rev-parse --show-toplevel
-            MagicMock(returncode=0, stdout=""),           # status --porcelain (clean)
             MagicMock(returncode=0, stdout="abc1234\n"), # rev-parse HEAD
         ]
         ws = WorkflowSession(
@@ -290,16 +288,18 @@ def test_session_start_disables_checkpoints_when_not_git():
     assert ws._state.repo_root == ""   # disabled
 
 
-def test_session_continues_without_checkpoints_when_dirty():
+def test_checkpoints_work_with_dirty_tree():
     from rocpd.ai_analysis.interactive import WorkflowSession
     with patch("subprocess.run") as mock_run:
         mock_run.side_effect = [
-            MagicMock(returncode=0, stdout="/repo\n"),     # detect_repo
-            MagicMock(returncode=0, stdout=" M file.hip"), # is_dirty -> True
+            MagicMock(returncode=0, stdout="/repo\n"),       # detect_repo
+            MagicMock(returncode=0, stdout="abc123\n"),      # get_head
         ]
         ws = WorkflowSession(app_command="./app", source_paths=["/repo/src"])
-        ws._init_checkpoints()  # Should NOT raise — checkpoints disabled silently
-        assert ws._gcm is None   # Checkpoints disabled
+        ws._init_checkpoints()
+        # Dirty working tree does not affect checkpoints — _gcm should be set
+        assert ws._gcm is not None
+        assert ws._state.baseline_commit == "abc123"
 
 
 def test_init_checkpoints_disables_on_get_head_failure():
@@ -307,7 +307,6 @@ def test_init_checkpoints_disables_on_get_head_failure():
     with patch("subprocess.run") as mock_run:
         mock_run.side_effect = [
             MagicMock(returncode=0, stdout="/repo\n"),  # detect_repo
-            MagicMock(returncode=0, stdout=""),          # is_dirty (clean)
             MagicMock(returncode=1, stdout=""),          # get_head (fails)
         ]
         ws = WorkflowSession(app_command="./app", source_paths=["/repo/src"])

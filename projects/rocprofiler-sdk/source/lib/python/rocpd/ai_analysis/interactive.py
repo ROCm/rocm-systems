@@ -2036,12 +2036,13 @@ class WorkflowSession:
             _print(f"  (Session save failed: {exc})", style="dim")
 
     def _init_checkpoints(self) -> None:
-        """Detect git repo, check dirty state, record baseline commit.
+        """Detect git repo and record baseline commit.
 
         Sets self._state.repo_root and self._state.baseline_commit.
-        If source is not in a git repo: logs a notice and leaves repo_root=""
-        (checkpoints are silently disabled for the session).
-        If working tree is dirty: prints a warning, disables checkpoints, and returns.
+        If source is not in a git repo: leaves repo_root="" and checkpoints
+        are silently disabled. Dirty working tree is not a problem — checkpoints
+        only commit the specific files modified by each AI edit, leaving all
+        other working tree changes untouched.
         """
         if not self._state.source_paths:
             return  # No source paths — checkpoints require a source location
@@ -2067,13 +2068,6 @@ class WorkflowSession:
             session_id=self._session_id,
             sessions_dir=str(self._sessions_dir),
         )
-
-        if self._gcm.is_dirty():
-            # Uncommitted changes present — silently disable checkpoints so AI
-            # commits don't mix with the user's in-progress work. The session
-            # runs normally; rollback ([b]) will not be available this session.
-            self._gcm = None
-            return
 
         self._state.repo_root = repo_root
         try:
