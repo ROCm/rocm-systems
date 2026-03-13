@@ -443,11 +443,16 @@ class TestBugFixes:
         assert compute_recs, "Expected a compute bottleneck recommendation"
 
         quoted_name = shlex.quote(dangerous_name)
-        rocprofv3_cmds = [
-            cmd for cmd in compute_recs[0]["commands"] if cmd.get("tool") == "rocprofv3"
+        # The kernel name is scoped via rocprof-compute (rocprofv3 collects general
+        # PMC counters without kernel filtering, so the name only appears in the
+        # rocprof-compute command where shlex.quote is applied).
+        kernel_cmds = [
+            cmd
+            for cmd in compute_recs[0]["commands"]
+            if cmd.get("tool") == "rocprof-compute"
         ]
-        assert rocprofv3_cmds, "Expected at least one rocprofv3 command"
-        for cmd in rocprofv3_cmds:
+        assert kernel_cmds, "Expected at least one rocprof-compute command"
+        for cmd in kernel_cmds:
             full = cmd["full_command"]
             # The properly shell-quoted form of the kernel name must appear
             assert quoted_name in full, (

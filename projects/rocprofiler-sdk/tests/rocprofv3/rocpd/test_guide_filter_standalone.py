@@ -479,7 +479,7 @@ class TestEndToEndWithRealGuide:
 class TestGuideIntegrity:
     """Validate that the real llm-reference-guide.md is correctly tagged."""
 
-    KNOWN_TAGS = {"always", "tier1", "tier2", "compiler", "source"}
+    KNOWN_TAGS = {"always", "tier1", "tier2", "compiler", "source", "tracelens_metrics"}
     # The intro block (before the first ## section) is intentionally untagged
     UNTAGGED_ALLOWED_PREFIXES = ("LLM Reference Guide",)
 
