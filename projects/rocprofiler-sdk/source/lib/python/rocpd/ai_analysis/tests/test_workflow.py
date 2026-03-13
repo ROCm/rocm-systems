@@ -84,3 +84,150 @@ def test_edit_record_has_checkpoint_id():
         backup_path="/src/kernel.hip.bak",
     )
     assert r.checkpoint_id is None
+
+
+from unittest.mock import patch, MagicMock
+
+
+def _make_gcm(repo_root="/repo", session_id="sess1"):
+    from rocpd.ai_analysis.interactive import GitCheckpointManager
+    return GitCheckpointManager(
+        repo_root=repo_root,
+        session_id=session_id,
+        sessions_dir="/home/user/.rocpd/sessions",
+    )
+
+
+def test_gcm_detect_repo_success():
+    gcm = _make_gcm()
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0, stdout="/repo\n")
+        result = gcm.detect_repo("/repo/src")
+    assert result == "/repo"
+
+
+def test_gcm_detect_repo_not_git():
+    from rocpd.ai_analysis.interactive import CheckpointError
+    gcm = _make_gcm()
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=128, stdout="")
+        with pytest.raises(CheckpointError):
+            gcm.detect_repo("/not/a/repo")
+
+
+def test_gcm_is_dirty_true():
+    gcm = _make_gcm()
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0, stdout=" M kernel.hip\n")
+        assert gcm.is_dirty() is True
+
+
+def test_gcm_is_dirty_false():
+    gcm = _make_gcm()
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0, stdout="")
+        assert gcm.is_dirty() is False
+
+
+def test_gcm_get_head():
+    gcm = _make_gcm()
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0, stdout="abc1234\n")
+        assert gcm.get_head() == "abc1234"
+
+
+def test_gcm_create_checkpoint_commit():
+    gcm = _make_gcm()
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0, stdout="def5678\n")
+        result = gcm.create_checkpoint_commit(["kernel.hip"], "cp-0 — test edit")
+    assert result == "def5678"
+    calls = mock_run.call_args_list
+    assert any("add" in str(c) for c in calls)
+    assert any("commit" in str(c) for c in calls)
+
+
+def test_gcm_create_checkpoint_commit_passes_no_verify():
+    gcm = _make_gcm()
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0, stdout="abc\n")
+        gcm.create_checkpoint_commit(["f.hip"], "msg")
+    commit_call = [c for c in mock_run.call_args_list if "commit" in str(c)][0]
+    assert "--no-verify" in str(commit_call)
+
+
+def test_gcm_create_checkpoint_commit_passes_identity():
+    gcm = _make_gcm()
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0, stdout="abc\n")
+        gcm.create_checkpoint_commit(["f.hip"], "msg")
+    for c in mock_run.call_args_list:
+        assert "rocpd@local" in str(c)
+
+
+def test_gcm_tag_checkpoint():
+    gcm = _make_gcm()
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0, stdout="")
+        ref = gcm.tag_checkpoint(0, "abc1234")
+    assert ref == "refs/rocpd/sess1/cp-0"
+    assert "update-ref" in str(mock_run.call_args_list)
+
+
+def test_gcm_tag_checkpoint_not_a_branch():
+    gcm = _make_gcm()
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0, stdout="")
+        ref = gcm.tag_checkpoint(0, "abc")
+    assert "refs/heads" not in ref
+    assert ref.startswith("refs/rocpd/")
+
+
+def test_gcm_add_worktree():
+    gcm = _make_gcm()
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0, stdout="")
+        path = gcm.add_worktree(0, "abc1234")
+    assert path == "/home/user/.rocpd/sessions/sess1/cp-0"
+    assert "--detach" in str(mock_run.call_args)
+
+
+def test_gcm_add_worktree_cleans_stale_path():
+    gcm = _make_gcm()
+    with patch("subprocess.run") as mock_run, \
+         patch("os.path.exists", return_value=True), \
+         patch("shutil.rmtree") as mock_rmtree:
+        mock_run.return_value = MagicMock(returncode=0, stdout="")
+        gcm.add_worktree(0, "abc1234")
+    mock_rmtree.assert_called_once()
+
+
+def test_gcm_commit_reachable_true():
+    gcm = _make_gcm()
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0)
+        assert gcm.commit_reachable("abc1234") is True
+
+
+def test_gcm_commit_reachable_false():
+    gcm = _make_gcm()
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=1)
+        assert gcm.commit_reachable("abc1234") is False
+
+
+def test_gcm_remove_worktree_silently_skips_missing():
+    gcm = _make_gcm()
+    with patch("subprocess.run") as mock_run, \
+         patch("os.path.exists", return_value=False):
+        gcm.remove_worktree("/tmp/nonexistent")
+    mock_run.assert_not_called()
+
+
+def test_gcm_delete_ref():
+    gcm = _make_gcm()
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0)
+        gcm.delete_ref("refs/rocpd/sess1/cp-0")
+    assert "update-ref" in str(mock_run.call_args)
+    assert "-d" in str(mock_run.call_args)

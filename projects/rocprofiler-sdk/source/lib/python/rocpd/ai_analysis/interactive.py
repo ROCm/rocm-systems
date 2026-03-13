@@ -1783,6 +1783,175 @@ class CheckpointRecord:
     blacklist_description: str = ""         # injected into LLM prompts
 
 
+class GitCheckpointManager:
+    """Wraps all git subprocess calls for checkpoint management.
+
+    All git calls pass identity overrides (-c user.email/name) so the feature
+    works in HPC environments where git identity is not configured.
+    Raises CheckpointError on any git failure.
+    """
+
+    # Base args prepended to every git call
+    _ID = ["-c", "user.email=rocpd@local", "-c", "user.name=rocpd"]
+
+    def __init__(
+        self,
+        repo_root: str,
+        session_id: str,
+        sessions_dir: str,
+    ) -> None:
+        self._repo_root = repo_root
+        self._session_id = session_id
+        self._sessions_dir = sessions_dir
+
+    def _git(self, *args: str, capture: bool = True) -> "subprocess.CompletedProcess":
+        """Run a git command rooted at repo_root with identity overrides."""
+        cmd = ["git", "-C", self._repo_root] + list(self._ID) + list(args)
+        return subprocess.run(
+            cmd,
+            capture_output=capture,
+            text=True,
+        )
+
+    def detect_repo(self, source_path: str) -> str:
+        """Return git repo root for source_path, or raise CheckpointError."""
+        result = subprocess.run(
+            ["git", "-C", source_path, "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            raise CheckpointError(
+                f"'{source_path}' is not inside a git repository. "
+                "Checkpoints require git."
+            )
+        return result.stdout.strip()
+
+    def is_dirty(self) -> bool:
+        """Return True if working tree has uncommitted changes."""
+        result = self._git("status", "--porcelain")
+        return bool(result.stdout.strip())
+
+    def get_head(self) -> str:
+        """Return current HEAD commit hash."""
+        result = self._git("rev-parse", "HEAD")
+        if result.returncode != 0:
+            raise CheckpointError("Could not read HEAD commit hash.")
+        return result.stdout.strip()
+
+    def create_checkpoint_commit(
+        self, files: List[str], message: str
+    ) -> str:
+        """Stage files and create a commit; return commit hash.
+
+        Uses --no-verify to skip pre-commit hooks (rocpd checkpoints are
+        tooling artifacts, not user commits).
+        """
+        # Stage only the specified files
+        add_result = self._git("add", "--", *files)
+        if add_result.returncode != 0:
+            raise CheckpointError(
+                f"git add failed: {add_result.stderr.strip()}"
+            )
+        commit_result = self._git(
+            "commit", "--no-verify", "-m", message
+        )
+        if commit_result.returncode != 0:
+            raise CheckpointError(
+                f"git commit failed: {commit_result.stderr.strip()}"
+            )
+        # Get hash of the commit we just created
+        hash_result = self._git("rev-parse", "HEAD")
+        if hash_result.returncode != 0:
+            raise CheckpointError("Could not read new commit hash.")
+        return hash_result.stdout.strip()
+
+    def tag_checkpoint(self, cp_id: int, commit_hash: str) -> str:
+        """Create a named ref (not a branch) pinning commit_hash from GC.
+
+        Returns the ref name: refs/rocpd/<session_id>/cp-N
+        """
+        ref_name = f"refs/rocpd/{self._session_id}/cp-{cp_id}"
+        result = self._git("update-ref", ref_name, commit_hash)
+        if result.returncode != 0:
+            raise CheckpointError(
+                f"git update-ref failed: {result.stderr.strip()}"
+            )
+        return ref_name
+
+    def add_worktree(self, cp_id: int, commit_hash: str) -> str:
+        """Create a detached-HEAD worktree at sessions_dir/<session_id>/cp-N.
+
+        If the target path already exists (stale from a crashed session),
+        it is removed before creating the worktree.
+        Returns the worktree path.
+        """
+        import shutil as _shutil
+
+        worktree_path = str(
+            pathlib.Path(self._sessions_dir) / self._session_id / f"cp-{cp_id}"
+        )
+        if os.path.exists(worktree_path):
+            _shutil.rmtree(worktree_path, ignore_errors=True)
+
+        result = self._git(
+            "worktree", "add", "--detach", worktree_path, commit_hash
+        )
+        if result.returncode != 0:
+            raise CheckpointError(
+                f"git worktree add failed: {result.stderr.strip()}"
+            )
+        return worktree_path
+
+    def restore_files_from_commit(
+        self, commit_hash: str, files: List[str]
+    ) -> None:
+        """Restore files to their state at commit_hash in the working directory."""
+        ls_result = self._git(
+            "ls-tree", "-r", "--name-only", commit_hash
+        )
+        files_in_commit = set(ls_result.stdout.splitlines())
+
+        for file in files:
+            if file in files_in_commit:
+                result = self._git("checkout", commit_hash, "--", file)
+                if result.returncode != 0:
+                    raise CheckpointError(
+                        f"git checkout {commit_hash} -- {file} failed: "
+                        f"{result.stderr.strip()}"
+                    )
+
+    def remove_worktree(self, worktree_path: str) -> None:
+        """Remove a worktree directory. Silently skips if path does not exist."""
+        if not os.path.exists(worktree_path):
+            return
+        result = self._git("worktree", "remove", worktree_path, "--force")
+        # Non-fatal — log but don't raise (exit path must not crash)
+
+    def delete_ref(self, ref_name: str) -> None:
+        """Delete a named ref. Silently skips if ref was already gone."""
+        self._git("update-ref", "-d", ref_name)
+
+    def commit_reachable(self, commit_hash: str) -> bool:
+        """Return True if commit_hash exists as a git object."""
+        result = self._git("cat-file", "-e", commit_hash)
+        return result.returncode == 0
+
+    def files_in_commit(self, commit_hash: str) -> List[str]:
+        """Return repo-relative file paths present in commit_hash tree."""
+        result = self._git("ls-tree", "-r", "--name-only", commit_hash)
+        return result.stdout.splitlines()
+
+    def list_worktrees(self) -> List[str]:
+        """Return list of worktree paths registered in the repo."""
+        result = self._git("worktree", "list", "--porcelain")
+        paths = []
+        for line in result.stdout.splitlines():
+            if line.startswith("worktree "):
+                paths.append(line[len("worktree "):])
+        return paths
+
+
 @dataclass
 class WorkflowState:
     """Persistent state for the 7-phase interactive workflow session."""
