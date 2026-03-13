@@ -135,7 +135,7 @@ static void runTest_hipTextureFilterMode() {
   textureTest<unsigned char, fMode>(&texuc);
 }
 
-TEST_CASE("Unit_hipNormalizedFloatValueTex_CheckModes") {
+TEST_CASE(Unit_hipNormalizedFloatValueTex_CheckModes) {
   CHECK_IMAGE_SUPPORT
 
 #if HT_AMD

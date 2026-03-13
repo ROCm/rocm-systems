@@ -50,7 +50,7 @@ static __global__ void Get(int* Ad) {
  * - HIP_VERSION >= 5.6
  */
 
-TEST_CASE("Unit_kernel_chkConstantViaKernel") {
+TEST_CASE(Unit_kernel_chkConstantViaKernel) {
   int *A, *B, *Ad;
   A = new int[LEN];
   B = new int[LEN];

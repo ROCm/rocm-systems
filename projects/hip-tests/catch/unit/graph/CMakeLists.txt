@@ -26,13 +26,11 @@
 set(TEST_SRC
   hipGraphAddEmptyNode.cc
   hipGraphAddDependencies.cc
-  hipGraphAddDependencies_old.cc
   hipGraphAddEventRecordNode.cc
   hipGraphAddEventWaitNode.cc
   hipGraph.cc
   hipSimpleGraphWithKernel.cc
   hipGraphAddMemcpyNode.cc
-  hipGraphAddMemcpyNode_old.cc
   hipGraphClone.cc
   hipGraphInstantiateWithFlags.cc
   hipGraphInstantiateWithParams.cc
@@ -45,11 +43,9 @@ set(TEST_SRC
   hipGraphAddMemcpyNodeToSymbol_old.cc
   hipGraphAddMemcpyNodeToSymbol.cc
   hipGraphExecMemsetNodeSetParams.cc
-  hipGraphMemcpyNodeSetParamsToSymbol_old.cc
   hipGraphMemcpyNodeSetParamsToSymbol.cc
   hipGraphDestroyNode.cc
   hipGraphGetNodes.cc
-  hipGraphGetNodes_old.cc
   hipGraphGetRootNodes.cc
   hipGraphGetRootNodes_old.cc
   hipGraphHostNodeSetParams.cc
@@ -59,9 +55,7 @@ set(TEST_SRC
   hipGraphExecMemcpyNodeSetParams1D_old.cc
   hipGraphExecMemcpyNodeSetParams1D.cc
   hipGraphGetEdges.cc
-  hipGraphGetEdges_old.cc
   hipGraphRemoveDependencies.cc
-  hipGraphRemoveDependencies_old.cc
   hipGraphInstantiate.cc
   hipGraphExecUpdate.cc
   hipGraphExecEventRecordNodeSetEvent.cc
@@ -101,7 +95,6 @@ if(HIP_PLATFORM MATCHES "amd")
     hipStreamGetCaptureInfo_old.cc
     hipStreamGetCaptureInfo_v2.cc
     hipStreamUpdateCaptureDependencies.cc
-    hipStreamGetCaptureInfo_v2_old.cc
     hipGraphAddNodeBeginCapture.cc
   )
   set(TEST_SRC ${TEST_SRC} ${AMD_SRC})
@@ -123,7 +116,6 @@ set(TEST_SRC
   hipGraphMemcpyNodeGetParams.cc
   hipGraphMemcpyNodeGetParams_old.cc
   hipGraphMemcpyNodeSetParams.cc
-  hipGraphMemcpyNodeSetParams_old.cc
   hipGraphKernelNodeGetParams.cc
   hipGraphKernelNodeSetParams.cc
   hipGraphExecKernelNodeSetParams.cc
@@ -134,9 +126,7 @@ set(TEST_SRC
   hipGraphExecMemcpyNodeSetParamsToSymbol_old.cc
   hipGraphExecMemcpyNodeSetParamsToSymbol.cc
   hipGraphNodeGetDependentNodes.cc
-  hipGraphNodeGetDependentNodes_old.cc
   hipGraphNodeGetDependencies.cc
-  hipGraphNodeGetDependencies_old.cc
   hipGraphHostNodeGetParams.cc
   hipGraphExecChildGraphNodeSetParams.cc
   hipGraphCreate.cc
@@ -180,13 +170,17 @@ if(HIP_PLATFORM MATCHES "amd")
     hipDrvGraphAddMemcpyNode.cc
   )
   set(TEST_SRC ${TEST_SRC} ${AMD_SRC})
-  add_custom_target(add_Kernel.code COMMAND ${CMAKE_HIP_COMPILER}
-  --cuda-device-only ${OFFLOAD_ARCH_LIST} -x hip ${CMAKE_CURRENT_SOURCE_DIR}/add_Kernel.cpp
+  string(TOUPPER "${CMAKE_BUILD_TYPE}" _HIP_BUILD_TYPE_UPPER)
+  separate_arguments(HIP_DEVICE_BUILD_FLAGS_NO_ARCH NATIVE_COMMAND
+    "${CMAKE_HIP_FLAGS} ${CMAKE_HIP_FLAGS_${_HIP_BUILD_TYPE_UPPER}}")
+  list(FILTER HIP_DEVICE_BUILD_FLAGS_NO_ARCH EXCLUDE REGEX "--offload-arch=")
+  add_custom_target(add_Kernel.code COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST}
+  --cuda-device-only -x hip ${CMAKE_CURRENT_SOURCE_DIR}/add_Kernel.cpp
   -o ${CMAKE_CURRENT_BINARY_DIR}/../graph/add_Kernel.code
   -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
-  add_custom_target(hipMatMul COMMAND ${CMAKE_HIP_COMPILER}
-    --cuda-device-only ${OFFLOAD_ARCH_LIST}
+  add_custom_target(hipMatMul COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST}
+    --cuda-device-only
     -x hip ${CMAKE_CURRENT_SOURCE_DIR}/hipMatMul.cc
     -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/graph/hipMatMul.code
     -I${CMAKE_CURRENT_SOURCE_DIR}/../../../../include/

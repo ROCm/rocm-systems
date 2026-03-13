@@ -22,17 +22,15 @@
 
 #include "core/timemory.hpp"
 
-#if ROCPROFSYS_USE_ROCM > 0
-#    include <amd_smi/amdsmi.h>
+#include <amd_smi/amdsmi.h>
 
 // AMD-SMI >= 26.3 supports NIC APIs and SDMA usage
-#    if AMDSMI_LIB_VERSION_MAJOR > 26 ||                                                 \
-        (AMDSMI_LIB_VERSION_MAJOR == 26 && AMDSMI_LIB_VERSION_MINOR > 2)
-#        if ROCPROFSYS_USE_AINIC > 0
-#            define AINIC_SUPPORTED 1
-#        endif
-#        define AMD_SMI_SDMA_SUPPORTED 1
+#if AMDSMI_LIB_VERSION_MAJOR > 26 ||                                                     \
+    (AMDSMI_LIB_VERSION_MAJOR == 26 && AMDSMI_LIB_VERSION_MINOR > 2)
+#    if ROCPROFSYS_USE_AINIC > 0
+#        define AINIC_SUPPORTED 1
 #    endif
+#    define AMD_SMI_SDMA_SUPPORTED 1
 #endif
 
 namespace rocprofsys

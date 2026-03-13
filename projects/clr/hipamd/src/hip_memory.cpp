@@ -2790,8 +2790,14 @@ static amd::CopyMetadata buildCopyMetadataFromAttrs(hipMemcpyAttributes* attrs, 
   }
 
   // Map flags
-  if (attrs[attrIdx].flags & hipMemcpyFlagPreferOverlapWithCompute) {
-    metadata.preferOverlapCompute_ = 1;
+  unsigned int flags = attrs[attrIdx].flags;
+  if (flags & hipMemcpyFlagExtPreferCE) {
+    metadata.preferCE_ = 1;
+  }
+  if (flags & hipMemcpyFlagExtOpSwap) {
+    metadata.copyOpType_ = amd::CopyMetadata::kCopyOpSwap;
+  } else if (flags & hipMemcpyFlagExtOpIndirect) {
+    metadata.copyOpType_ = amd::CopyMetadata::kCopyOpIndirect;
   }
 
   return metadata;
@@ -2883,7 +2889,10 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count
     batchCmd->release();
   }
 
-  // Handle write buffer (host to device) copies
+  // Handle write buffer (host to device) copies.
+  // This path handles kSrcAccessOrderDuringApiCall and kSrcAccessOrderAny for host sources
+  // that lack a memory object (e.g. malloc'd or stack pointers). The writeBuffer path
+  // handles kSrcAccessOrderDuringApiCall
   for (size_t idx : writeBufferIndices) {
     status = ihipMemcpy(dsts[idx], srcs[idx], sizes[idx], hipMemcpyDefault, stream, isAsync, true);
     if (status != hipSuccess) {
@@ -2945,10 +2954,16 @@ hipError_t hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* sizes, size_t c
         HIP_RETURN(hipErrorInvalidValue);
       }
     }
-    // Validate srcAccessOrder values
+    // Validate srcAccessOrder values and flags
     for (size_t i = 0; i < numAttrs; ++i) {
       if (attrs[i].srcAccessOrder < hipMemcpySrcAccessOrderStream ||
           attrs[i].srcAccessOrder > hipMemcpySrcAccessOrderAny) {
+        HIP_RETURN(hipErrorInvalidValue);
+      }
+      // ExtOp flags are mutually exclusive
+      unsigned int extOpBits = attrs[i].flags &
+          (hipMemcpyFlagExtOpSwap | hipMemcpyFlagExtOpIndirect);
+      if (extOpBits & (extOpBits - 1)) {
         HIP_RETURN(hipErrorInvalidValue);
       }
     }

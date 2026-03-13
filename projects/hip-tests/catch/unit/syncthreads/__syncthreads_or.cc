@@ -44,7 +44,7 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit___syncthreads_or_Positive_Basic") {
+TEST_CASE(Unit___syncthreads_or_Positive_Basic) {
   const auto kGridSize = 2;
   const auto kBlockSize = GENERATE(13, 32, 64, 513);
 
@@ -71,7 +71,7 @@ TEST_CASE("Unit___syncthreads_or_Positive_Basic") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit___syncthreads_or_Positive_Predicate_Zero") {
+TEST_CASE(Unit___syncthreads_or_Positive_Predicate_Zero) {
   const auto kGridSize = 2;
   const auto kBlockSize = GENERATE(13, 32, 64, 513);
 
@@ -99,7 +99,7 @@ TEST_CASE("Unit___syncthreads_or_Positive_Predicate_Zero") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit___syncthreads_or_Positive_Predicate_One") {
+TEST_CASE(Unit___syncthreads_or_Positive_Predicate_One) {
   const auto kGridSize = 2;
   const auto kBlockSize = GENERATE(13, 32, 64, 513);
 
@@ -128,7 +128,7 @@ TEST_CASE("Unit___syncthreads_or_Positive_Predicate_One") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit___syncthreads_or_Positive_Predicate_OddEven") {
+TEST_CASE(Unit___syncthreads_or_Positive_Predicate_OddEven) {
   const auto kGridSize = 2;
   const auto kBlockSize = GENERATE(13, 32, 64, 513);
 
@@ -156,7 +156,7 @@ TEST_CASE("Unit___syncthreads_or_Positive_Predicate_OddEven") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit___syncthreads_or_Positive_Predicate_Negative") {
+TEST_CASE(Unit___syncthreads_or_Positive_Predicate_Negative) {
   const auto kGridSize = 2;
   const auto kBlockSize = GENERATE(13, 32, 64, 513);
 
@@ -184,7 +184,7 @@ TEST_CASE("Unit___syncthreads_or_Positive_Predicate_Negative") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit___syncthreads_or_Positive_Predicate_Id") {
+TEST_CASE(Unit___syncthreads_or_Positive_Predicate_Id) {
   const auto kGridSize = 2;
   const auto kBlockSize = GENERATE(13, 32, 64, 513);
 
@@ -212,7 +212,7 @@ TEST_CASE("Unit___syncthreads_or_Positive_Predicate_Id") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit___syncthreads_or_Negative_Parameters_RTC") {
+TEST_CASE(Unit___syncthreads_or_Negative_Parameters_RTC) {
   hiprtcProgram program{};
 
   HIPRTC_CHECK(hiprtcCreateProgram(&program, kSyncthreadsOrSource, "__syncthreads_or_negative.cc",

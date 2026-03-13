@@ -127,6 +127,12 @@ class Logger:
 def get_top_kernels_and_dispatch_ids(
     runs: dict[str, Any],
 ) -> Optional[list[dict[Hashable, Any]]]:
+    """
+    Get top kernels merged with dispatch IDs.
+
+    Returns a list of records, each containing kernel info and a unique key
+    that combines kernel name and dispatch ID for looking up per-dispatch data.
+    """
     if not runs:
         return None
 
@@ -145,6 +151,14 @@ def get_top_kernels_and_dispatch_ids(
     ).sort_values("Pct", ascending=False)
 
     merged_df = merged_df.drop(columns=["Count", "GPU_ID"])
+
+    # Add unique key combining kernel name and dispatch ID for per-dispatch lookups
+    merged_df["Unique_Key"] = (
+        merged_df["Kernel_Name"].astype(str)
+        + "::"
+        + merged_df["Dispatch_ID"].astype(int).astype(str)
+    )
+
     return merged_df.to_dict("records")
 
 
