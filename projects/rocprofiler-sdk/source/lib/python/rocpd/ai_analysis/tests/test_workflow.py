@@ -262,3 +262,41 @@ def test_gcm_restore_files_from_commit():
         gcm.restore_files_from_commit("abc1234", ["kernel.hip"])
     # Both ls-tree and checkout were called
     assert mock_run.call_count == 2
+
+
+def test_session_start_sets_repo_root_when_git_available():
+    from rocpd.ai_analysis.interactive import WorkflowSession
+    with patch("subprocess.run") as mock_run:
+        # detect_repo: success; is_dirty: clean; get_head: hash
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="/repo\n"),   # rev-parse --show-toplevel
+            MagicMock(returncode=0, stdout=""),           # status --porcelain (clean)
+            MagicMock(returncode=0, stdout="abc1234\n"), # rev-parse HEAD
+        ]
+        ws = WorkflowSession(
+            app_command="./app", source_paths=["/repo/src"]
+        )
+        ws._init_checkpoints()
+    assert ws._state.repo_root == "/repo"
+    assert ws._state.baseline_commit == "abc1234"
+
+
+def test_session_start_disables_checkpoints_when_not_git():
+    from rocpd.ai_analysis.interactive import WorkflowSession
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=128, stdout="")
+        ws = WorkflowSession(app_command="./app", source_paths=["/not/git"])
+        ws._init_checkpoints()
+    assert ws._state.repo_root == ""   # disabled
+
+
+def test_session_start_aborts_when_dirty():
+    from rocpd.ai_analysis.interactive import WorkflowSession
+    with patch("subprocess.run") as mock_run:
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="/repo\n"),     # detect_repo
+            MagicMock(returncode=0, stdout=" M file.hip"), # is_dirty -> True
+        ]
+        ws = WorkflowSession(app_command="./app", source_paths=["/repo/src"])
+        with pytest.raises(SystemExit):
+            ws._init_checkpoints()

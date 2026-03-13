@@ -2005,6 +2005,8 @@ class WorkflowSession:
         self._session_id = f"workflow_{_ts}_{_slug}"
         self._sessions_dir = pathlib.Path.home() / ".rocpd" / "sessions"
         self._session_file = self._sessions_dir / f"{self._session_id}.json"
+        # Checkpoint manager — set after _init_checkpoints() called from run()
+        self._gcm: Optional["GitCheckpointManager"] = None
 
     def _save_session(self) -> None:
         """Serialize WorkflowState to ~/.rocpd/sessions/workflow_<id>.json."""
@@ -2021,6 +2023,53 @@ class WorkflowSession:
             self._session_file.write_text(json.dumps(payload, indent=2))
         except Exception as exc:
             _print(f"  (Session save failed: {exc})", style="dim")
+
+    def _init_checkpoints(self) -> None:
+        """Detect git repo, check dirty state, record baseline commit.
+
+        Sets self._state.repo_root and self._state.baseline_commit.
+        If source is not in a git repo: logs a notice and leaves repo_root=""
+        (checkpoints are silently disabled for the session).
+        If working tree is dirty: prints instructions and raises SystemExit(1).
+        """
+        if not self._state.source_paths:
+            return  # No source paths — checkpoints require a source location
+
+        source = self._state.source_paths[0]
+        try:
+            gcm = GitCheckpointManager(
+                repo_root="",           # Will be set by detect_repo
+                session_id=self._session_id,
+                sessions_dir=str(self._sessions_dir),
+            )
+            repo_root = gcm.detect_repo(source)
+        except CheckpointError as exc:
+            _print(
+                f"  Note: checkpoints disabled — {exc}",
+                style="dim",
+            )
+            return
+
+        # Re-create with correct repo_root
+        self._gcm = GitCheckpointManager(
+            repo_root=repo_root,
+            session_id=self._session_id,
+            sessions_dir=str(self._sessions_dir),
+        )
+
+        if self._gcm.is_dirty():
+            _print(
+                "\n  ⚠  Working tree has uncommitted changes.\n"
+                "     Please commit or stash them before starting a session "
+                "with checkpoints:\n"
+                "       git stash   (stash and restore after session)\n"
+                "       git commit  (commit your work-in-progress)\n",
+                style="yellow",
+            )
+            raise SystemExit(1)
+
+        self._state.repo_root = repo_root
+        self._state.baseline_commit = self._gcm.get_head()
 
     # ── Phase 1b: Quick workload analysis ──────────────────────────────────────
 
