@@ -1759,6 +1759,29 @@ class _EditRecord:
     backup_path: str
 
 
+class CheckpointError(Exception):
+    """Raised when a git checkpoint operation fails."""
+
+
+@dataclass
+class CheckpointRecord:
+    """One git-worktree checkpoint created after an AI edit batch."""
+
+    cp_id: int                              # 0-based index
+    commit_hash: str                        # git commit hash
+    ref_name: str                           # refs/rocpd/<session_id>/cp-N
+    worktree_path: str                      # ~/.rocpd/sessions/<id>/cp-N
+    timestamp: str                          # ISO-8601
+    files_modified: List[str]               # repo-relative paths touched
+    edit_summary: str                       # human-readable description of AI changes
+    file_snapshots: Dict[str, str]          # {repo_relative_path: full_file_contents}
+    run_index: Optional[int] = None         # index into trace_history; None = no run yet
+    performance_delta_pct: Optional[float] = None  # +10 = improvement, -67 = regression
+    blacklisted: bool = False
+    blacklist_category: str = ""            # taken from edit_summary
+    blacklist_description: str = ""         # injected into LLM prompts
+
+
 @dataclass
 class WorkflowState:
     """Persistent state for the 7-phase interactive workflow session."""

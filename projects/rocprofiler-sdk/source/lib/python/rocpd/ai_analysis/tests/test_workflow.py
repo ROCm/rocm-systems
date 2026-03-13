@@ -39,3 +39,32 @@ def test_workflow_state_defaults():
     assert s.analysis_history == []
     assert s.edit_history == []
     assert s.iteration_count == 0
+
+
+import pytest
+
+
+def test_checkpoint_record_defaults():
+    from rocpd.ai_analysis.interactive import CheckpointRecord
+    cp = CheckpointRecord(
+        cp_id=0,
+        commit_hash="abc1234",
+        ref_name="refs/rocpd/session-1/cp-0",
+        worktree_path="/tmp/cp-0",
+        timestamp="2026-03-13T00:00:00Z",
+        files_modified=["kernel.hip"],
+        edit_summary="increased thread block size",
+        file_snapshots={"kernel.hip": "__global__ void k() {}"},
+    )
+    assert cp.cp_id == 0
+    assert cp.run_index is None
+    assert cp.performance_delta_pct is None
+    assert cp.blacklisted is False
+    assert cp.blacklist_category == ""
+    assert cp.blacklist_description == ""
+
+
+def test_checkpoint_error_is_exception():
+    from rocpd.ai_analysis.interactive import CheckpointError
+    with pytest.raises(CheckpointError):
+        raise CheckpointError("git failed")
