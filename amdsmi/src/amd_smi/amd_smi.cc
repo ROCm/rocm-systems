@@ -2242,8 +2242,22 @@ amdsmi_status_t amdsmi_get_gpu_kfd_info(amdsmi_processor_handle processor_handle
 
 amdsmi_status_t amdsmi_get_gpu_subsystem_id(amdsmi_processor_handle processor_handle,
                                 uint16_t *id) {
-    return rsmi_wrapper(rsmi_dev_subsystem_id_get, processor_handle, 0,
-                        id);
+    AMDSMI_CHECK_INIT();
+
+    if (id == nullptr)
+        return AMDSMI_STATUS_INVAL;
+
+    auto *device = reinterpret_cast<Device *>(processor_handle);
+    if (device == nullptr)
+        return AMDSMI_STATUS_INVAL;
+
+    wsl::thunk::AsicInfo info{};
+    auto code = device->QueryAsicInfo(&info);
+    if (code != ErrorCode::Success)
+        return translateCodeToSmiStatus(code);
+
+    *id = static_cast<uint16_t>(info.subsystem_id);
+    return AMDSMI_STATUS_SUCCESS;
 }
 
 amdsmi_status_t amdsmi_get_gpu_subsystem_name(
