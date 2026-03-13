@@ -538,7 +538,8 @@ amdsmi_status_t amdsmi_get_socket_handles(uint32_t *socket_count,
     }
 
     auto& platform = Platform::instance();
-    uint32_t socket_size = platform.GetDeviceCount();
+
+    uint32_t socket_size = platform.GetLdaChainCount();
     if (socket_handles == nullptr) {
         *socket_count = socket_size;
         return AMDSMI_STATUS_SUCCESS;
@@ -548,7 +549,7 @@ amdsmi_status_t amdsmi_get_socket_handles(uint32_t *socket_count,
     *socket_count = *socket_count >= socket_size ? socket_size : *socket_count;
     // Copy the socket handles
     for (uint32_t i = 0; i < *socket_count; i++) {
-        socket_handles[i] = platform.GetDevice(i);
+        socket_handles[i] = platform.GetLdaChain(i);
     }
 
     return AMDSMI_STATUS_SUCCESS;
@@ -600,10 +601,11 @@ amdsmi_status_t amdsmi_get_processor_handles(amdsmi_socket_handle socket_handle,
         return AMDSMI_STATUS_INVAL;
     }
 
-    // unused parameter socket_handle
-    (void)socket_handle;
-    auto& platform = Platform::instance();
-    auto device_count = static_cast<uint32_t>(platform.GetDeviceCount());
+    auto lda_chain = reinterpret_cast<wsl::thunk::LdaChain *>(socket_handle);
+    if (lda_chain == nullptr)
+        return AMDSMI_STATUS_INVAL;
+
+    auto device_count = static_cast<uint32_t>(lda_chain->ChainedDeviceCount());
 
     // Get the processor count only
     if (processor_handles == nullptr) {
@@ -616,7 +618,7 @@ amdsmi_status_t amdsmi_get_processor_handles(amdsmi_socket_handle socket_handle,
 
     // Copy the processor handles
     for (uint32_t i = 0; i < *processor_count; i++) {
-        processor_handles[i] = reinterpret_cast<amdsmi_processor_handle>(platform.GetDevice(i));
+        processor_handles[i] = reinterpret_cast<amdsmi_processor_handle>(lda_chain->ChainedDevice(i));
     }
 
     return AMDSMI_STATUS_SUCCESS;

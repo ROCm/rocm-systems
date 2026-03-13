@@ -64,6 +64,9 @@ public:
 
   size_t GetDeviceCount() const { return devices_.size(); }
   Device *GetDevice(size_t index) const { return devices_.at(index); }
+
+  size_t GetLdaChainCount() const { return lda_chain_count_; }
+  LdaChain *GetLdaChain(size_t index) const { return lda_chain_list_[index]; }
 private:
   ErrorCode initProperties();
   ErrorCode reQueryDevices();
