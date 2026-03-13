@@ -35,7 +35,7 @@ __all__ = [
 # Kernel category patterns (matching TraceLens kernel_name_parser.py)
 # Order matters: first match wins.
 # ---------------------------------------------------------------------------
-_CATEGORY_PATTERNS: List[Tuple[str, re.Pattern]] = [
+_CATEGORY_PATTERNS: List[Tuple[str, Any]] = [
     ("CONV", re.compile(r"conv|winograd|implicit_gemm_conv", re.IGNORECASE)),
     ("GEMM", re.compile(r"gemm|gemv|xdlops_gemm|Cijk_|rocblas_gemm", re.IGNORECASE)),
     (
