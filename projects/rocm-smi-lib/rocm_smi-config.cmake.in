@@ -7,12 +7,12 @@
 @PACKAGE_INIT@
 get_filename_component(ROCM_SMI_CMAKE_DIR "${CMAKE_CURRENT_LIST_FILE}" PATH)
 
-set_and_check( rocm_smi_INCLUDE_DIR "@PACKAGE_INCLUDE_INSTALL_DIR@" )
-set_and_check( ROCM_SMI_INCLUDE_DIR "@PACKAGE_INCLUDE_INSTALL_DIR@" )
-set_and_check( ROCM_SMI_INCLUDE_DIRS "@PACKAGE_INCLUDE_INSTALL_DIR@" )
-set_and_check( rocm_smi_LIB_DIR "@PACKAGE_LIB_INSTALL_DIR@" )
-set_and_check( ROCM_SMI_LIB_DIR "@PACKAGE_LIB_INSTALL_DIR@" )
-set_and_check( ROCM_SMI_LIB_DIRS "@PACKAGE_LIB_INSTALL_DIR@" )
+set_and_check(rocm_smi_INCLUDE_DIR "@PACKAGE_INCLUDE_INSTALL_DIR@")
+set_and_check(ROCM_SMI_INCLUDE_DIR "@PACKAGE_INCLUDE_INSTALL_DIR@")
+set_and_check(ROCM_SMI_INCLUDE_DIRS "@PACKAGE_INCLUDE_INSTALL_DIR@")
+set_and_check(rocm_smi_LIB_DIR "@PACKAGE_LIB_INSTALL_DIR@")
+set_and_check(ROCM_SMI_LIB_DIR "@PACKAGE_LIB_INSTALL_DIR@")
+set_and_check(ROCM_SMI_LIB_DIRS "@PACKAGE_LIB_INSTALL_DIR@")
 
 # rocm_smi public headers transitively include libdrm/drm.h (via kfd_ioctl.h),
 # so consumers need libdrm include paths. Find them via pkg-config.
@@ -26,8 +26,11 @@ if(NOT TARGET rocm_smi64 AND NOT rocm_smi_BINARY_DIR)
     # Append libdrm include directories to the imported target so that
     # consumers can compile against rocm_smi.h -> kfd_ioctl.h -> libdrm/drm.h
     if(TARGET rocm_smi64)
-        set_property(TARGET rocm_smi64 APPEND PROPERTY
-            INTERFACE_INCLUDE_DIRECTORIES "${_ROCM_SMI_DRM_INCLUDE_DIRS}")
+        set_property(
+            TARGET rocm_smi64
+            APPEND
+            PROPERTY INTERFACE_INCLUDE_DIRECTORIES "${_ROCM_SMI_DRM_INCLUDE_DIRS}"
+        )
     endif()
 endif()
 
