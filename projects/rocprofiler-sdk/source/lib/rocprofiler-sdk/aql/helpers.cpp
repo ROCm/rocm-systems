@@ -31,6 +31,7 @@
 #include <rocprofiler-sdk/fwd.h>
 
 #include <fmt/core.h>
+#include <iostream>
 
 namespace rocprofiler
 {
@@ -44,7 +45,7 @@ get_query_info(rocprofiler_agent_id_t agent, const counters::Metric& metric)
     hsa_ven_amd_aqlprofile_id_query_t query = {metric.block().c_str(), 0, 0};
     if(aqlprofile_get_pmc_info(&profile, AQLPROFILE_INFO_BLOCK_ID, &query) != HSA_STATUS_SUCCESS)
     {
-        ROCP_DFATAL << fmt::format("AQL failed to query info for counter {}", metric);
+        std::cerr << fmt::format("[rocprofiler-sdk]: AQL failed to query info for counter {}", metric);
         throw std::runtime_error(fmt::format("AQL failed to query info for counter {}", metric));
     }
     return query;
