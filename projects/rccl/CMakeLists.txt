@@ -368,7 +368,6 @@ if(ROCM_VERSION VERSION_GREATER_EQUAL "71100")
     endif()
     message(STATUS "Found amd_smi at ${SMI_INCLUDE_DIR}")
     set(SMI_LIBRARIES amd_smi)
-    set(AMDSMI_DIRECT 1 CACHE INTERNAL "Using AMD SMI headers directly")
   endif()
 endif()
 

@@ -20,16 +20,11 @@
  // Set AMDSMI_DIRECT to 1 at build time if the required amdsmi headers (even before UALoE support) are available,
  // otherwise 0 to use compatibility types defined below
 
-#ifndef AMDSMI_DIRECT
-  #if __has_include(<amd_smi/amdsmi.h>)
-    #define AMDSMI_DIRECT 1
-  #else
-    #define AMDSMI_DIRECT 0
-  #endif
-#endif
-
-#if AMDSMI_DIRECT
-#include <amd_smi/amdsmi.h>
+#if __has_include(<amd_smi/amdsmi.h>)
+  #define AMDSMI_DIRECT 1
+  #include <amd_smi/amdsmi.h>
+#else
+  #define AMDSMI_DIRECT 0
 #endif
 
 // Define when amdsmi fabric API is available in amdsmi headers, otherwise use compatibility types defined below
