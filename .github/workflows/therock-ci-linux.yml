@@ -122,5 +122,6 @@ jobs:
     with:
       projects_to_test: ${{ inputs.projects_to_test }}
       amdgpu_families: "gfx94X-dcgpu"
-      test_runs_on: "linux-mi325-1gpu-ossci-rocm"
+      # Due to migrating MI325s, we have lost capacity as of 3/13/2026 11:41am PST
+      test_runs_on: ""
       platform: "linux"
