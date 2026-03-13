@@ -2006,7 +2006,6 @@ class WorkflowSession:
         self._llm_api_key = llm_api_key
         self._llm_model = llm_model
         self._trace_dir = trace_dir or self._DEFAULT_TRACE_DIR
-        self._conv: Optional["LLMConversation"] = None  # set by _phase2 if LLM configured
         # Session persistence
         _ts = datetime.now(timezone.utc).strftime("%Y-%m-%d_%H-%M-%S")
         try:
