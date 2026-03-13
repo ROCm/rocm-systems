@@ -7,6 +7,9 @@ include(CMakeParseArguments)
 
 set(FETCHCONTENT_BASE_DIR ${PROJECT_BINARY_DIR}/external)
 
+# Label tests that are unstable when run in parallel on a multi-gpu system
+set(ROCPROFILER_CTEST_LABEL_MULTI_GPU "multi-gpu")
+
 # default FAIL_REGULAR_EXPRESSION for tests
 set(ROCPROFILER_DEFAULT_FAIL_REGEX
     "threw an exception|Permission denied|Could not create logging file|failed with error code|Subprocess aborted"
