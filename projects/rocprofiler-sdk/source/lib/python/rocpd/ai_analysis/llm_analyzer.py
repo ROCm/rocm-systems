@@ -937,6 +937,12 @@ Follow the reference guide strictly for analysis methodology and output format."
                     parsed_h = _json.loads(raw_headers.replace("'", '"'))
                 except _json.JSONDecodeError as e:
                     raise ValueError(f"ROCPD_LLM_PRIVATE_HEADERS is not valid JSON: {e}")
+            if not isinstance(parsed_h, dict):
+                raise ValueError(
+                    "ROCPD_LLM_PRIVATE_HEADERS must be a JSON object of header "
+                    'key/value pairs (e.g. {"X-My-Header": "value"}), '
+                    f"got {type(parsed_h).__name__}"
+                )
             headers.update(parsed_h)
 
         verify_ssl_env = os.environ.get("ROCPD_LLM_PRIVATE_VERIFY_SSL", "1").lower()
