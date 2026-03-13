@@ -2309,6 +2309,81 @@ class WorkflowSession:
         lines = ["### Blacklisted Approaches \u2014 Do NOT suggest these"] + entries
         return "\n".join(lines) + "\n"
 
+    def _show_checkpoint_picker(self) -> Optional[int]:
+        """Display checkpoint table; prompt for target and optional blacklist.
+
+        Returns target cp_id (-1 = baseline) or None if cancelled.
+        """
+        _print("\n┌─ Checkpoints " + "─" * 53 + "┐")
+        _print("│  [base]  baseline (before any AI edits)" + " " * 31 + "│")
+        for cp in self._state.checkpoints:
+            if cp.performance_delta_pct is not None:
+                if cp.performance_delta_pct > 0:
+                    delta_str = f"+{cp.performance_delta_pct:.1f}% ✓"
+                else:
+                    delta_str = f"{cp.performance_delta_pct:.1f}% ✗"
+            else:
+                delta_str = "no run yet"
+            summary = cp.edit_summary[:38].ljust(38)
+            run_str = (
+                f"Run {cp.run_index + 1}: {delta_str}"
+                if cp.run_index is not None
+                else "no run yet"
+            )
+            _print(f"│  [{cp.cp_id}]  {summary}  {run_str:20s}│")
+        _print("└" + "─" * 69 + "┘\n")
+
+        valid = ["base"] + [str(cp.cp_id) for cp in self._state.checkpoints]
+        raw = input(
+            f"  Restore to [{'/'.join(valid)}] or [c] cancel: "
+        ).strip().lower()
+        if raw == "c":
+            return None
+        if raw == "base":
+            target_cp_id = -1
+        elif raw.isdigit() and int(raw) < len(self._state.checkpoints):
+            target_cp_id = int(raw)
+        else:
+            _print("  Invalid choice.", style="yellow")
+            return None
+
+        # Identify regressions BEFORE rollback removes them
+        if target_cp_id != -1:
+            regression_cps = [
+                cp for cp in self._state.checkpoints
+                if cp.cp_id > target_cp_id
+                and cp.performance_delta_pct is not None
+                and cp.performance_delta_pct < 0
+            ]
+        else:
+            regression_cps = []
+
+        # Prompt for blacklist (before rollback so checkpoints are still in list)
+        blacklist_ids: List[int] = []
+        if regression_cps:
+            _print("\n  Blacklist approaches that caused regressions?")
+            for idx, cp in enumerate(regression_cps, 1):
+                delta_str = f"{cp.performance_delta_pct:.1f}%"
+                _print(f"    [{idx}]  cp-{cp.cp_id}: {cp.edit_summary} ({delta_str})")
+            bl_raw = input(
+                "  Enter numbers to blacklist (space-separated), or [n] skip: "
+            ).strip().lower()
+            if bl_raw != "n":
+                for tok in bl_raw.split():
+                    if tok.isdigit():
+                        idx = int(tok) - 1
+                        if 0 <= idx < len(regression_cps):
+                            blacklist_ids.append(regression_cps[idx].cp_id)
+
+        # Apply blacklists before rollback removes checkpoints
+        for cp_id in blacklist_ids:
+            self._blacklist_checkpoint(cp_id)
+
+        # Now perform rollback
+        self._rollback_to_checkpoint(target_cp_id=target_cp_id)
+
+        return target_cp_id
+
     # ── Phase 1b: Quick workload analysis ──────────────────────────────────────
 
     @staticmethod
@@ -3516,16 +3591,22 @@ class WorkflowSession:
                         style="yellow",
                     )
                 _print()
+                if self._state.checkpoints:
+                    _print("  [b]  Roll back to a checkpoint", style="dim")
                 _print("  [n]  Skip — stop re-profiling", style="dim")
                 _print("  [q]  Quit session", style="dim")
             elif all_info:
                 # Only profiling-guidance recommendations — no source code to optimize.
                 # Direct the user to re-profile with the suggested commands.
                 _print("  [r]  Re-profile with suggested commands", style="cyan")
+                if self._state.checkpoints:
+                    _print("  [b]  Roll back to a checkpoint", style="dim")
                 _print("  [n]  Skip", style="dim")
                 _print("  [q]  Quit session", style="dim")
             else:
                 _print("  [a]  Address all with AI optimization", style="dim")
+                if self._state.checkpoints:
+                    _print("  [b]  Roll back to a checkpoint", style="dim")
                 _print("  [n]  Skip — proceed to re-profiling", style="dim")
                 _print("  [q]  Quit session", style="dim")
             _print()
@@ -3537,6 +3618,9 @@ class WorkflowSession:
             if choice == "q":
                 return None
             if choice in ("n", ""):
+                return None
+            if choice == "b" and self._state.checkpoints:
+                self._show_checkpoint_picker()
                 return None
             if choice == "d" and all_info and already_reprofiled and has_real_data:
                 # Build PC sampling command and route it to Phase 7 as option [3].

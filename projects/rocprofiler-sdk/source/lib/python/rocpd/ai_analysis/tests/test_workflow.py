@@ -607,3 +607,51 @@ def test_rollback_baseline_no_git_still_clears_state():
     assert ws._state.trace_history == []
     assert ws._state.analysis_history == []
     assert ws._state.iteration_count == 0
+
+
+def test_phase5_shows_rollback_option_when_checkpoints_exist():
+    ws = _make_ws_with_checkpoints()
+    from rocpd.ai_analysis.interactive import _AnalysisSnapshot
+    snap = _AnalysisSnapshot(
+        timestamp="t", iteration=2,
+        recommendations=[{"priority": "HIGH", "category": "C", "issue": "i",
+                           "suggestion": "s", "actions": [], "id": "R1",
+                           "estimated_impact": "", "commands": []}],
+    )
+    # Simulate user typing "b" then "0" then "n" (no blacklist)
+    with patch("builtins.input", side_effect=["b", "0", "n"]), \
+         patch.object(ws, "_rollback_to_checkpoint") as mock_rollback, \
+         patch.object(ws, "_save_session"):
+        ws._phase5_rec_menu(snap)
+    mock_rollback.assert_called_once_with(target_cp_id=0)
+
+
+def test_phase5_does_not_crash_when_no_checkpoints():
+    from rocpd.ai_analysis.interactive import WorkflowSession, _AnalysisSnapshot
+    ws = WorkflowSession(app_command="./app")  # no checkpoints
+    snap = _AnalysisSnapshot(
+        timestamp="t", iteration=0,
+        recommendations=[{"priority": "INFO", "category": "C", "issue": "i",
+                           "suggestion": "s", "actions": [], "id": "R1",
+                           "estimated_impact": "", "commands": []}],
+    )
+    with patch("builtins.input", side_effect=["n"]):
+        result = ws._phase5_rec_menu(snap)
+    assert result is None
+
+
+def test_phase5_rollback_with_blacklist():
+    ws = _make_ws_with_checkpoints()
+    from rocpd.ai_analysis.interactive import _AnalysisSnapshot
+    snap = _AnalysisSnapshot(
+        timestamp="t", iteration=2,
+        recommendations=[{"priority": "HIGH", "category": "C", "issue": "i",
+                           "suggestion": "s", "actions": [], "id": "R1",
+                           "estimated_impact": "", "commands": []}],
+    )
+    with patch("builtins.input", side_effect=["b", "0", "1"]), \
+         patch.object(ws, "_rollback_to_checkpoint"), \
+         patch.object(ws, "_blacklist_checkpoint") as mock_blacklist, \
+         patch.object(ws, "_save_session"):
+        ws._phase5_rec_menu(snap)
+    mock_blacklist.assert_called_once()
