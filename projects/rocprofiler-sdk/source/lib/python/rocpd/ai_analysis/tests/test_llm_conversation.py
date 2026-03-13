@@ -1,5 +1,6 @@
 # ai_analysis/tests/test_llm_conversation.py
 """Tests for LLMConversation persistent streaming session."""
+
 from __future__ import annotations
 import json
 import pathlib
@@ -9,7 +10,6 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from rocpd.ai_analysis.llm_conversation import LLMConversation
-
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 

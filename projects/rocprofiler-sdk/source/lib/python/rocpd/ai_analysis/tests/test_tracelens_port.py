@@ -13,7 +13,6 @@ Integration test (requires real merged_db.db):
 from unittest.mock import MagicMock, patch
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

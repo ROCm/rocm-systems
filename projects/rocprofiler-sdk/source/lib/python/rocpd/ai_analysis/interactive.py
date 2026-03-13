@@ -17,7 +17,6 @@ from typing import Any, Dict, List, Optional, Union
 from .llm_conversation import LLMConversation
 from .llm_analyzer import load_reference_guide
 
-
 # ── Session data ─────────────────────────────────────────────────────────────
 
 

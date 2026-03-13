@@ -1,5 +1,6 @@
 # ai_analysis/llm_conversation.py
 """Persistent multi-turn LLM conversation with streaming, compaction, and disk archive."""
+
 from __future__ import annotations
 
 import json
