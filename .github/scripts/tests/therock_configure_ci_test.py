@@ -166,7 +166,7 @@ class ConfigureCITest(unittest.TestCase):
 
         mock_get_modified.return_value = [
             "projects/rocprofiler-compute/src/compute.cpp",
-            "projects/rccl/src/rccl.cpp",
+            "projects/rocshmem/src/rocshmem.cpp",
             "projects/amdsmi/src/amdsmi.cpp",
             "projects/rocprofiler-register/src/register.cpp",
             "projects/amdsmi/hello/test.cpp",
@@ -186,7 +186,7 @@ class ConfigureCITest(unittest.TestCase):
 
         mock_get_modified.return_value = [
             "projects/rocprofiler-compute/src/compute.cpp",
-            "projects/rccl/src/rccl.cpp",
+            "projects/rocshmem/src/rocshmem.cpp",
             "projects/amdsmi/src/amdsmi.cpp",
             "projects/rocprofiler-register/src/register.cpp",
             "projects/amdsmi/hello/test.cpp",
