@@ -996,8 +996,20 @@ if(ENABLE_SPLIT_DEVICE_COMPILE)
     message(FATAL_ERROR "Split device compile: failed to compile bundler probe (exit ${_probe_compile_rc})")
   endif()
 
+  # Derive LLVM tool paths from the compiler location so that this works in
+  # both /opt/rocm installs and TheRock/CI build trees.
+  get_filename_component(_compiler_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+  find_program(_bundler_exe clang-offload-bundler
+    HINTS "${_compiler_dir}" "${ROCM_PATH}/llvm/bin" NO_DEFAULT_PATH)
+  if(NOT _bundler_exe)
+    find_program(_bundler_exe clang-offload-bundler)
+  endif()
+  if(NOT _bundler_exe)
+    message(FATAL_ERROR "Split device compile: clang-offload-bundler not found")
+  endif()
+
   execute_process(
-    COMMAND ${ROCM_PATH}/llvm/bin/clang-offload-bundler --list --type=o --input=${_probe_obj}
+    COMMAND ${_bundler_exe} --list --type=o --input=${_probe_obj}
     OUTPUT_VARIABLE _probe_targets
     RESULT_VARIABLE _probe_list_rc
     OUTPUT_STRIP_TRAILING_WHITESPACE
