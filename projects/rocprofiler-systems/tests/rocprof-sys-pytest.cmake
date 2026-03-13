@@ -62,24 +62,29 @@ endif()
 
 # Set up marker exclusions
 # This prevents certain CTests from being generated
-set(ROCPROFSYS_PYTEST_MARKER_EXCLUSIONS_STRING "")
 set(ROCPROFSYS_PYTEST_MARKER_EXCLUSIONS_LIST "")
+set(ROCPROFSYS_PYTEST_MARKER_EXCLUSIONS_FORMATTED "")
 macro(ROCPROFILER_SYSTEMS_ADD_PYTEST_MARKER_EXCLUSION MARKER_NAME)
     # PyTest requires markers to use "_" and not "-"
     # This is done to prevent having these tests "skipped" as it will not find
     #   the target executable.
     string(REPLACE "-" "_" _marker "${MARKER_NAME}")
     list(APPEND ROCPROFSYS_PYTEST_MARKER_EXCLUSIONS_LIST "${_marker}")
-    if(ROCPROFSYS_PYTEST_MARKER_EXCLUSIONS)
-        string(APPEND ROCPROFSYS_PYTEST_MARKER_EXCLUSIONS " and not ${_marker}")
+    if(ROCPROFSYS_PYTEST_MARKER_EXCLUSIONS_FORMATTED)
+        string(APPEND ROCPROFSYS_PYTEST_MARKER_EXCLUSIONS_FORMATTED " and not ${_marker}")
     else()
-        set(ROCPROFSYS_PYTEST_MARKER_EXCLUSIONS "not ${_marker}")
+        set(ROCPROFSYS_PYTEST_MARKER_EXCLUSIONS_FORMATTED "not ${_marker}")
     endif()
 endmacro()
 
-set(ROCPROFSYS_PYTEST_MARKER_EXCLUSIONS "")
 if(ROCPROFSYS_DISABLE_EXAMPLES)
     foreach(_marker ${ROCPROFSYS_DISABLE_EXAMPLES})
+        rocprofiler_systems_add_pytest_marker_exclusion(${_marker})
+    endforeach()
+endif()
+
+if(ROCPROFSYS_DISABLE_TESTS)
+    foreach(_marker ${ROCPROFSYS_DISABLE_TESTS})
         rocprofiler_systems_add_pytest_marker_exclusion(${_marker})
     endforeach()
 endif()
@@ -148,8 +153,8 @@ if(ROCPROFSYS_PYTHON_ROOT_DIRS)
     list(APPEND _generate_args "--python-root-dirs=${_py_roots_escaped}")
 endif()
 
-if(ROCPROFSYS_PYTEST_MARKER_EXCLUSIONS)
-    list(APPEND _generate_args "-m" "${ROCPROFSYS_PYTEST_MARKER_EXCLUSIONS}")
+if(ROCPROFSYS_PYTEST_MARKER_EXCLUSIONS_FORMATTED)
+    list(APPEND _generate_args "-m" "${ROCPROFSYS_PYTEST_MARKER_EXCLUSIONS_FORMATTED}")
 endif()
 
 # ---------------------------------------------------------------------------

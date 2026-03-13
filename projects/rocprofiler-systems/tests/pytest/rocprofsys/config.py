@@ -216,7 +216,7 @@ class RocprofsysConfig:
 
     def get_fundamental_environment(self) -> dict[str, str]:
         """Get fundamental environment variables inherited from parent process."""
-        return {
+        env = {
             "PATH": os.environ.get("PATH", ""),
             "HOME": os.environ.get("HOME", ""),
             "USER": os.environ.get("USER", ""),
@@ -224,6 +224,11 @@ class RocprofsysConfig:
             "TERM": os.environ.get("TERM", ""),
             "LANG": os.environ.get("LANG", ""),
         }
+        # To maintain a stable environment, only inherit OMPI_ and ROCPROFSYS_ env vars
+        for key, value in os.environ.items():
+            if key.startswith(("OMPI_", "ROCPROFSYS_")):
+                env[key] = value
+        return env
 
     def get_base_environment(self) -> dict[str, str]:
         """Get base environment variables for test execution."""
