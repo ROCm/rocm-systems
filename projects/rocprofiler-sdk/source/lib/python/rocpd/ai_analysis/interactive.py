@@ -2041,7 +2041,7 @@ class WorkflowSession:
         Sets self._state.repo_root and self._state.baseline_commit.
         If source is not in a git repo: logs a notice and leaves repo_root=""
         (checkpoints are silently disabled for the session).
-        If working tree is dirty: prints instructions and raises SystemExit(1).
+        If working tree is dirty: prints a warning, disables checkpoints, and returns.
         """
         if not self._state.source_paths:
             return  # No source paths — checkpoints require a source location
@@ -2069,16 +2069,11 @@ class WorkflowSession:
         )
 
         if self._gcm.is_dirty():
-            _print(
-                "\n  ⚠  Working tree has uncommitted changes.\n"
-                "     Please commit or stash them before starting a session "
-                "with checkpoints:\n"
-                "       git stash   (stash and restore after session)\n"
-                "       git commit  (commit your work-in-progress)\n",
-                style="yellow",
-            )
-            self._gcm = None  # Reset since init is being aborted
-            raise SystemExit(1)
+            # Uncommitted changes present — silently disable checkpoints so AI
+            # commits don't mix with the user's in-progress work. The session
+            # runs normally; rollback ([b]) will not be available this session.
+            self._gcm = None
+            return
 
         self._state.repo_root = repo_root
         try:
