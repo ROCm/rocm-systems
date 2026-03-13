@@ -42,7 +42,7 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
   - Synchronization: When a segment depends on work running on another stream, a hardware wait is inserted. At completion, all parallel streams synchronize back to the launch stream.
   - Signaling: Segments emit hardware signals only when downstream segments require them—typically at fork points or when executing in parallel with other segments.
 
-This approach reduces dispatch overhead and improves GPU utilization by overlapping independent graph work across streams while preserving correct execution order.
+  This approach reduces dispatch overhead and improves GPU utilization by overlapping independent graph work across streams while preserving correct execution order.
 * Optimized graph stream synchronization by eliminating duplicate marker creation when syncing streams back to the launch stream. The runtime now tracks synchronized dependency segments to avoid redundant synchronization markers.
 * Optimized `hipMemcpyBatchAsync` with refactored code, new data structures, and an improved core implementation for better performance.
 
