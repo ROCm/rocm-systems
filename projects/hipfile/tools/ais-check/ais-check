@@ -17,7 +17,7 @@ import gzip
 import os
 import sys
 
-# Global list of found HIP runtime libraries
+# Global mapping of HIP runtime library paths to AIS support flags
 hip_libraries = {}
 
 
@@ -56,20 +56,29 @@ def find_hip_runtimes():
     usual places.
     """
 
+    # NOTE: CodeQL will be unhappy if you are not careful about paths
+    #       in this function
+
     candidates = []
 
     # 1. Respect runtime linker paths
     for p in os.environ.get("LD_LIBRARY_PATH", "").split(":"):
         if p:
-            candidates.append(os.path.join(p, "libamdhip64.so"))
+            # Clean up the path by removing `..`, etc. and getting
+            # an absolute path.
+            safe_p = os.path.abspath(os.path.normpath(p))
+
+            candidates.append(os.path.join(safe_p, "libamdhip64.so"))
 
     # 2. Environment variables commonly set by ROCm or modules
     for var in ("ROCM_HOME", "ROCM_PATH", "HIP_PATH"):
         base = os.environ.get(var)
         if base:
+            # Also clean up this path
+            safe_base = os.path.abspath(os.path.normpath(base))
             candidates += [
-                os.path.join(base, "lib", "libamdhip64.so"),
-                os.path.join(base, "lib64", "libamdhip64.so"),
+                os.path.join(safe_base, "lib", "libamdhip64.so"),
+                os.path.join(safe_base, "lib64", "libamdhip64.so"),
             ]
 
     # 3. Standard ROCm install paths
@@ -100,9 +109,12 @@ def hip_runtime_supports_ais():
     find_hip_runtimes()
 
     # Check for AIS functions in the list of found HIP libraries
-    for hip_path, _ in hip_libraries.items():
+    for hip_path in hip_libraries:
 
-        hip = ctypes.CDLL(hip_path)
+        try:
+            hip = ctypes.CDLL(hip_path)
+        except OSError:
+            continue
 
         hipError_t = ctypes.c_int
         hipDriverProcAddressQueryResult = ctypes.c_int
@@ -132,6 +144,9 @@ def hip_runtime_supports_ais():
             )
             continue
 
+        # Track whether all required AIS symbols are available in this library
+        supported = True
+
         for symbol in [b"hipAmdFileWrite", b"hipAmdFileRead"]:
             func_ptr = ctypes.c_void_p()
             symbol_status = hipDriverProcAddressQueryResult()
@@ -152,11 +167,13 @@ def hip_runtime_supports_ais():
                         f" {symbol_status.value}",
                         file=sys.stderr,
                     )
-                continue
+                supported = False
+                break
 
-        hip_libraries[hip_path] = True
+        if supported:
+            hip_libraries[hip_path] = True
 
-    return bool(True in hip_libraries.values())
+    return any(hip_libraries.values())
 
 
 def amdgpu_supports_ais():
