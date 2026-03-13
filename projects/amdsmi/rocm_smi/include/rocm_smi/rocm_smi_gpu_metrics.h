@@ -89,6 +89,21 @@ constexpr uint32_t kRSMI_MAX_NUM_XCC = 8;
 //  Note: This *must* match MAX_XCP
 constexpr uint32_t kRSMI_MAX_NUM_XCP = 8;
 
+//  Note: This *must* match MAX_NUM_HBM_STACKS
+constexpr uint32_t kRSMI_MAX_NUM_HBM_STACKS = 12;
+
+//  Note: This *must* match MAX_NUM_AID
+constexpr uint32_t kRSMI_MAX_NUM_AID = 2;
+
+//  Note: This *must* match MAX_NUM_MID
+constexpr uint32_t kRSMI_MAX_NUM_MID = 2;
+
+//  Note: This *must* match MAX_NUM_CLKS_PER_AID
+constexpr uint32_t kRSMI_MAX_NUM_CLKS_PER_AID = 2;
+
+//  Note: This *must* match MAX_NUM_CLKS_PER_MID
+constexpr uint32_t kRSMI_MAX_NUM_CLKS_PER_MID = 2;
+
 struct AMDGpuMetricsHeader_v1_t {
   uint16_t m_structure_size;
   uint8_t m_format_revision;
@@ -133,6 +148,9 @@ struct amdgpu_xcp_metrics_v1_2 {
   uint64_t gfx_below_host_limit_thm_acc[kRSMI_MAX_NUM_XCC];
   uint64_t gfx_low_utilization_acc[kRSMI_MAX_NUM_XCC];
   uint64_t gfx_below_host_limit_total_acc[kRSMI_MAX_NUM_XCC];
+
+  /* v1.9 additions */
+  uint16_t temperature_xcd[kRSMI_MAX_NUM_XCC];
 };
 
 struct AMDGpuMetricsBase_t {
@@ -767,6 +785,9 @@ struct AMDGpuMetrics_v18_Partition_v1_0_t {
   uint64_t m_gfx_below_host_limit_thm_acc[kRSMI_MAX_NUM_XCC];
   uint64_t m_gfx_low_utilization_acc[kRSMI_MAX_NUM_XCC];
   uint64_t m_gfx_below_host_limit_total_acc[kRSMI_MAX_NUM_XCC];
+
+  /* v1.9 additions */
+  uint16_t m_temperature_xcd[kRSMI_MAX_NUM_XCC];
 };
 
 struct AMDGpuMetrics_v18_t {
@@ -1093,6 +1114,10 @@ enum class AMDGpuMetricsUnitType_t : AMDGpuMetricTypeId_t {
   kMetricGfxBelowHostLimitTotalAcc,  // v1.8
   kMetricGfxLowUtilitizationAcc,     // v1.8
 
+  // New temperature unit types
+  kMetricTempMid,  // v1.9+
+  kMetricTempAid,  // v1.9+
+  kMetricTempXcd,  // v1.9+
 };
 using AMDGpuMetricsUnitTypeTranslationTbl_t = std::map<AMDGpuMetricsUnitType_t, std::string>;
 
