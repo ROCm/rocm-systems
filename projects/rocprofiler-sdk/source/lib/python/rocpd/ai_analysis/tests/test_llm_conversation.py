@@ -2,6 +2,7 @@
 """Tests for LLMConversation persistent streaming session."""
 
 from __future__ import annotations
+import importlib.util
 import json
 import pathlib
 import tempfile
@@ -10,6 +11,14 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from rocpd.ai_analysis.llm_conversation import LLMConversation
+
+_has_anthropic = importlib.util.find_spec("anthropic") is not None
+_has_openai = importlib.util.find_spec("openai") is not None
+
+_skip_no_anthropic = unittest.skipUnless(
+    _has_anthropic, "anthropic package not installed"
+)
+_skip_no_openai = unittest.skipUnless(_has_openai, "openai package not installed")
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -80,6 +89,7 @@ class _MockOpenAIClient:
 # ── TestLLMConversation ───────────────────────────────────────────────────────
 
 
+@_skip_no_anthropic
 class TestLLMConversation(unittest.TestCase):
     """Core behavior: initialize, send, message growth, turn_count."""
 
@@ -139,6 +149,8 @@ class TestLLMConversation(unittest.TestCase):
 # ── TestStreaming ─────────────────────────────────────────────────────────────
 
 
+@_skip_no_anthropic
+@_skip_no_openai
 class TestStreaming(unittest.TestCase):
     """on_token callback and silent collection."""
 
@@ -182,6 +194,7 @@ class TestStreaming(unittest.TestCase):
 # ── TestOpenAIFallback ────────────────────────────────────────────────────────
 
 
+@_skip_no_openai
 class TestOpenAIFallback(unittest.TestCase):
     """max_completion_tokens → max_tokens on BadRequestError."""
 
@@ -205,6 +218,7 @@ class TestOpenAIFallback(unittest.TestCase):
 # ── TestCompaction ────────────────────────────────────────────────────────────
 
 
+@_skip_no_anthropic
 class TestCompaction(unittest.TestCase):
     """Compaction trigger, turn_count not incremented, summary block placement."""
 
@@ -304,6 +318,7 @@ class TestCompaction(unittest.TestCase):
 # ── TestDiskArchive ───────────────────────────────────────────────────────────
 
 
+@_skip_no_anthropic
 class TestDiskArchive(unittest.TestCase):
     """JSONL archive written only when history_path is set."""
 

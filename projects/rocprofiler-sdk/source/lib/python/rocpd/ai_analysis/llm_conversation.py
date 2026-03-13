@@ -125,7 +125,7 @@ class LLMConversation:
         self._api_key = api_key
         self._model = model
         self._compact_every = max(1, compact_every)
-        self._keep_recent_turns = keep_recent_turns
+        self._keep_recent_turns = max(0, keep_recent_turns)
         self._history_path = Path(history_path) if history_path else None
         self._system: str = ""
         self._messages: List[Dict[str, str]] = []
@@ -143,6 +143,11 @@ class LLMConversation:
         on_token: Optional[Callable[[str], None]] = None,
     ) -> str:
         """Append user turn, stream response, increment turn_count, check compaction."""
+        if not self._system:
+            raise RuntimeError(
+                "LLMConversation.send() called before initialize(). "
+                "Call initialize(system_prompt) first."
+            )
         self._messages.append({"role": "user", "content": user_message})
         result = self._stream_response(max_tokens=max_tokens, on_token=on_token)
         self._messages.append({"role": "assistant", "content": result})

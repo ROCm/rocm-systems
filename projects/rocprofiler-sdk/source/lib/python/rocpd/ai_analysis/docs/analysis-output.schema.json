@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "rocpd-ai-analysis-output-v0.1.0",
+  "$id": "rocpd-ai-analysis-output",
   "title": "ROCpd AI Analysis Output",
   "description": "JSON output schema for 'rocpd analyze --format json' and the rocpd.ai_analysis Python API. Consumers MUST check schema_version before parsing.",
   "type": "object",

@@ -1376,6 +1376,7 @@ def _format_as_json(
     # Bump schema version when new fields are present
     if interval_timeline or kernel_categories or short_kernels:
         doc["schema_version"] = "0.3.0"
+        doc["metadata"]["analysis_version"] = "0.3.0"
 
     return _json.dumps(doc, indent=2)
 

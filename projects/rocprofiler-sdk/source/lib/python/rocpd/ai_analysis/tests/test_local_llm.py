@@ -1,3 +1,4 @@
+import pytest
 from unittest.mock import patch, MagicMock
 from rocpd.ai_analysis.llm_analyzer import LLMAnalyzer
 
@@ -22,6 +23,7 @@ class TestLocalLLM:
         assert result == "advice"
 
     def test_call_local_uses_openai_compat_endpoint(self):
+        pytest.importorskip("openai", reason="openai package not installed")
         a = LLMAnalyzer(provider="local", model="codellama:13b", api_key="ignored")
         mock_resp = MagicMock()
         mock_resp.choices = [MagicMock(message=MagicMock(content="ok"))]
