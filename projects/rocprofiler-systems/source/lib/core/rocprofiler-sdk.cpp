@@ -333,6 +333,9 @@ config_settings(const std::shared_ptr<settings>& _config)
     _add_domain("hsa_api");
     _add_domain("marker_api");
     _add_domain("roctx");
+#if(ROCPROFILER_VERSION >= 700)
+    _add_domain("kfd_events");
+#endif
 
     for(const auto& itr : buffered_tracing_info)
         _add_domain(itr.name);
@@ -517,7 +520,7 @@ get_buffered_domains()
         ROCPROFILER_BUFFER_TRACING_PAGE_MIGRATION,
 #endif
         ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY,
-#if ROCPROFSYS_HAS_KFD_EVENTS
+#if(ROCPROFILER_VERSION >= 700)
         ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT,
         ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE,
         ROCPROFILER_BUFFER_TRACING_KFD_QUEUE,
@@ -576,7 +579,17 @@ get_buffered_domains()
         {
             _data.emplace(ROCPROFILER_BUFFER_TRACING_MEMORY_COPY);
         }
-#if ROCPROFSYS_HAS_KFD_EVENTS
+#if(ROCPROFILER_VERSION >= 700)
+        else if(itr == "kfd_events")
+        {
+            for(auto eitr : { ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT,
+                              ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE,
+                              ROCPROFILER_BUFFER_TRACING_KFD_QUEUE,
+                              ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE,
+                              ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU,
+                              ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS })
+                _data.emplace(eitr);
+        }
         else if(itr == "kfd_page_fault")
         {
             _data.emplace(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT);

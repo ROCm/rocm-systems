@@ -5,16 +5,11 @@
 
 #include <rocprofiler-sdk/buffer_tracing.h>
 #include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/version.h>
 
 #include <cstdint>
 
-#if defined(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT)
-#    define ROCPROFSYS_HAS_KFD_EVENTS 1
-#else
-#    define ROCPROFSYS_HAS_KFD_EVENTS 0
-#endif
-
-#if ROCPROFSYS_HAS_KFD_EVENTS
+#if ROCPROFILER_VERSION >= 700
 
 namespace rocprofsys
 {
