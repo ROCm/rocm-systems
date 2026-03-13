@@ -53,7 +53,7 @@ Negative -
 /* Test verifies hipGraphInstantiate API Negative scenarios.
  */
 
-TEST_CASE("Unit_hipGraphInstantiate_Negative") {
+TEST_CASE(Unit_hipGraphInstantiate_Negative) {
   hipError_t ret;
   hipGraphExec_t gExec{};
   hipGraph_t graph;
@@ -83,7 +83,7 @@ TEST_CASE("Unit_hipGraphInstantiate_Negative") {
 /* Test verifies hipGraphInstantiate Basic scenarios.
 Create a graph and then used it for hipGraphInstantiate without adding any node to graph.
  */
-TEST_CASE("Unit_hipGraphInstantiate_Basic") {
+TEST_CASE(Unit_hipGraphInstantiate_Basic) {
   hipGraph_t graph;
   hipGraphExec_t graphExec;
 
@@ -98,7 +98,7 @@ TEST_CASE("Unit_hipGraphInstantiate_Basic") {
 /* Test Functional Scenario 2.a, 2.b, 2.c with hipGraphInstantiate and
 hipGraphInstantiateWithFlags.
 */
-TEST_CASE("Unit_hipGraphInstantiate_InvalidCyclicGraph") {
+TEST_CASE(Unit_hipGraphInstantiate_InvalidCyclicGraph) {
   hipGraph_t graph;
   hipGraphExec_t graphExec;
   HIP_CHECK(hipGraphCreate(&graph, 0));
@@ -194,7 +194,7 @@ static void init_input(int* a, size_t size) {
 
 /* Test Functional Scenario 3.a, 3.b and 3.c.
  */
-TEST_CASE("Unit_hipGraphInstantiate_functionalScenarios") {
+TEST_CASE(Unit_hipGraphInstantiate_functionalScenarios) {
   hipGraph_t graph;
   hipGraphExec_t graphExec[NUM_OF_INSTANCES];
   HIP_CHECK(hipGraphCreate(&graph, 0));

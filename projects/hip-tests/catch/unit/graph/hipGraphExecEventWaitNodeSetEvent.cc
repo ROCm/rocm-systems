@@ -62,7 +62,7 @@ static __global__ void sqr_ker_func(int* a, int* b, size_t N) {
 /**
  * Scenario 1: Test to validate setting different events in executable graph.
  */
-TEST_CASE("Unit_hipGraphExecEventWaitNodeSetEvent_SetAndVerifyMemory") {
+TEST_CASE(Unit_hipGraphExecEventWaitNodeSetEvent_SetAndVerifyMemory) {
   constexpr size_t gridSize = 64;
   constexpr size_t blockSize = 256;
   constexpr size_t N = gridSize * blockSize;
@@ -176,7 +176,7 @@ TEST_CASE("Unit_hipGraphExecEventWaitNodeSetEvent_SetAndVerifyMemory") {
  * Scenario 2: Test to validate setting a different event in an executable
  * graph does not impact the original graph and nodes.
  */
-TEST_CASE("Unit_hipGraphExecEventWaitNodeSetEvent_VerifyEventNotChanged") {
+TEST_CASE(Unit_hipGraphExecEventWaitNodeSetEvent_VerifyEventNotChanged) {
   hipGraph_t graph;
   HIP_CHECK(hipGraphCreate(&graph, 0));
   hipEvent_t event1, event2, event_out;
@@ -200,7 +200,7 @@ TEST_CASE("Unit_hipGraphExecEventWaitNodeSetEvent_VerifyEventNotChanged") {
 /**
  * Scenario 3: Negative and Parameter Tests.
  */
-TEST_CASE("Unit_hipGraphExecEventWaitNodeSetEvent_Negative") {
+TEST_CASE(Unit_hipGraphExecEventWaitNodeSetEvent_Negative) {
   hipGraph_t graph;
   HIP_CHECK(hipGraphCreate(&graph, 0));
   hipEvent_t event1, event2;

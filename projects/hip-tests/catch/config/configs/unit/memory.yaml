@@ -200,7 +200,6 @@ memory:
   Unit_hipHostRegister_Perform_hipMemcpy: *level_2
   Unit_hipHostRegister_AsyncApis: *level_2
   Unit_hipHostRegister_Graphs: *level_2
-  Unit_hipHostRegister_RegUnreg_Perf_SameChunk: *level_2
   Unit_hipHostRegister_RegUnreg_Perf_DiffChunk: *level_2
   Unit_hipHostRegister_RegUnreg_Perf_SameChunk_MGPU: *level_2
   Unit_hipHostRegister_MemAdvise_SetGet: *level_2
@@ -690,7 +689,6 @@ memory:
   Unit_hipMemsetAsync_VerifyExecutionWithKernel: *level_2
   Unit_hipMemset2DAsync_WithKernel: *level_2
   Unit_hipMemset2DAsync_MultiThread: *level_2
-  Unit_hipMalloc_ArgumentValidation: *level_2
   Unit_hipMemcpyDtoD_Basic:
     <<: *level_2
     tags: [multigpu]
@@ -1035,7 +1033,10 @@ memory:
   Unit_hipFreeHost_InvalidMemory: *level_2
   Unit_hipFreeHost_DoubleFree: *level_2
   Unit_hipFreeHost_Multithreading: *level_2
-  Unit_hipFreeHost_Capture: *level_2
+  Unit_hipFreeHost_Capture_negative:
+    <<: *level_2
+    # Huge memory usage, no point enabling them with ASAN
+    disabled: [amd_linux]
   Unit_hipMallocAsync_Basic_OneAlloc: *level_2
   Unit_hipMallocAsync_Basic_TwoAllocs: *level_2
   Unit_hipMallocAsync_Basic_Reuse: *level_2
@@ -1241,7 +1242,3 @@ memory:
   Unit_hipMemGetMemPool_Basic: *level_2
   Unit_hipMemSetMemPool_Negative: *level_2
   Unit_hipMemSetMemPool_Basic: *level_2
-  Unit_hipFreeHost_Capture_negative:
-    <<: *level_2
-    # Huge memory usage, no point enabling them with ASAN
-    disabled: [amd_linux]

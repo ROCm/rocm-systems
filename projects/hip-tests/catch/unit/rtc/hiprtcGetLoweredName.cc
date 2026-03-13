@@ -157,7 +157,7 @@ bool Test(int CaseNum, const char* GpuProgram) {
 }
 
 
-TEST_CASE("Unit_hiprtcGetLoweredName_templateKrnls") {
+TEST_CASE(Unit_hiprtcGetLoweredName_templateKrnls) {
   REQUIRE(Test(1, gpuProgram1));
   REQUIRE(Test(2, gpuProgram2));
   REQUIRE(Test(3, gpuProgram3));

@@ -66,12 +66,14 @@ TEST_CASE("Unit_hipKernelGetAttribute_Positive_Basic") {
     REQUIRE(pi > 0);
   }
 
+#if !defined(ENABLE_ADDRESS_SANITIZER)
   SECTION("sharedSizeBytes") {
     hipKernel_t kernel;
     HIP_CHECK(hipLibraryGetKernel(&kernel, library, "reverse"));
     HIP_CHECK(hipKernelGetAttribute(&pi, HIP_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES, kernel, device_id));
     REQUIRE(pi == 256);
   }
+#endif
 
   SECTION("dynamicSharedSizeBytes") {
     hipKernel_t addKernel;

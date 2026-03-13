@@ -34,13 +34,20 @@ from tabulate import tabulate
 
 import config
 from utils import mem_chart, parser, schema
-from utils.kernel_name_shortener import kernel_name_shortener
+from utils.kernel_name_shortener import (
+    MAX_SHORTENING_LEVEL,
+    kernel_name_shortener,
+    process_single_kernel_name,
+)
 from utils.logger import console_error, console_log, console_warning
 from utils.utils import (
     METRIC_ID_RE,
+    NS_TO_MS,
+    compute_operator_prefix_stats,
     convert_metric_id_to_panel_info,
     get_panel_alias,
     get_uuid,
+    simplify_kernel_name,
 )
 
 KERNEL_NAME_WRAP_WIDTH = 40
@@ -250,38 +257,6 @@ def is_roofline_shown(
     return True
 
 
-def extract_kernel_name(full_kernel_name: str) -> str:
-    """
-    Extract the short kernel function name from a mangled C++ kernel name.
-
-    Examples:
-    - "void at::native::vectorized_elementwise_kernel<...>"
-       -> "vectorized_elementwise_kernel"
-    - "Cijk_Ailk_Bljk_SB_MT128x128x16..." -> "Cijk_Ailk_Bljk_SB_MT128x128x16..."
-    """
-    # Remove return type prefix (void, etc.)
-    kernel_name = full_kernel_name.strip()
-    if kernel_name.startswith("void "):
-        kernel_name = kernel_name[5:]
-
-    # First, extract the main function name before any template parameters
-    # Split on '<' to get the part before template parameters
-    if "<" in kernel_name:
-        main_part = kernel_name.split("<")[0]
-    elif "(" in kernel_name:
-        main_part = kernel_name.split("(")[0]
-    else:
-        main_part = kernel_name
-
-    # Now extract the function name from namespaces
-    if "::" in main_part:
-        # Get the last part after the last :: in the main part (before templates)
-        function_name = main_part.split("::")[-1].strip()
-        return function_name if function_name else kernel_name.strip()
-
-    return main_part.strip()
-
-
 def show_torch_operator_table(operator_name: str, df: pd.DataFrame) -> None:
     """Display torch operator data in a properly formatted table."""
     if df is None or df.empty:
@@ -342,67 +317,141 @@ def show_torch_operator_table(operator_name: str, df: pd.DataFrame) -> None:
     console_log(table_str)
 
 
-def show_torch_operator_hierarchy(operator_name: str, df: pd.DataFrame) -> None:
+def show_torch_operator_hierarchy(
+    operator_name: str,
+    df: pd.DataFrame,
+    index: Optional[int] = None,
+    kernel_name_to_id: Optional[dict[str, int]] = None,
+    kernel_verbose: int = 1,
+    prefix_stats: Optional[dict[str, tuple[float, int]]] = None,
+) -> None:
     """
-    Display the hierarchy for each unique operator name in the DataFrame,
-    showing marker hierarchy on the left and kernel launches on the right.
+    Display the PyTorch operator listing with hierarchy, numbering, and durations.
+
+    Kernel names are shortened using the same logic as analyze-mode tables (and -k)
+    so they match; kernel_verbose controls shortening (default 1, overridable by user).
+    Shows Operator N: 'name', then for each hierarchy path: full_name
+    (total_duration, count), the hierarchy tree, and kernel launches with
+    optional kernel durations (total_duration ms) when timestamps are present.
+    If kernel_name_to_id is provided, each kernel line shows (id N) for use with -k.
+    If prefix_stats is provided, it is used directly; otherwise computed from df.
     """
     print(f"\n{'-' * 80}")
-    print(f"Torch Operator Hierarchy for: {operator_name}")
+    if index is not None:
+        print(f"Operator {index}:  '{operator_name}'")
+    else:
+        print(f"Operator:  '{operator_name}'")
     print("-" * 80)
 
+    if "Operator_Name" not in df.columns or "Kernel_Name" not in df.columns:
+        console_log("Torch operator CSV missing Operator_Name or Kernel_Name columns.")
+        return
+
+    # Indent for content under each hierarchy so it's clear it belongs to that hierarchy
+    hierarchy_indent = " " * 7
+
     # Expect the DataFrame to have columns "Operator_Name", "Kernel_Name",
-    # "Context_Id", etc.
+    # "Context_Id", etc. Optional: Start_Timestamp_function, End_Timestamp_function,
+    # Start_Timestamp_kernel, End_Timestamp_kernel for durations.
+
+    if prefix_stats is None:
+        prefix_stats = compute_operator_prefix_stats(df)
+    has_duration = bool(prefix_stats)
 
     unique_op_hierarchies = df["Operator_Name"].unique()
+    left_col_width = 50
+    inner_width = left_col_width - len(hierarchy_indent)
     for i, op in enumerate(unique_op_hierarchies, start=1):
-        print(f"  {i:3d}. {op}")
-        print("\nOperator Hierarchy".ljust(50) + "Kernels Launched")
-        print("-" * 80)
+        stats_str = ""
+        if has_duration and op in prefix_stats:
+            total_ms, count = prefix_stats[op]
+            stats_str = f" (total_duration: {total_ms:.2f} ms, count: {count})"
+        print(f"{hierarchy_indent}Hierarchy {i}:  {op}{stats_str}")
+        kernel_header = (
+            "Kernels Launched" if not has_duration else "Kernels Launched (duration)"
+        )
+        print(
+            f"{hierarchy_indent}\n{hierarchy_indent}"
+            + "Operator Hierarchy".ljust(inner_width)
+            + kernel_header
+        )
+        print(f"{hierarchy_indent}{'-' * (80 - len(hierarchy_indent))}")
         parts = str(op).split("/")
 
         hierarchy_lines = []
-        # Display the hierarchy tree
-        for i, part in enumerate(parts):
-            if i == 0:
-                # Top level - just the module name
-                hierarchy_lines.append(f"{part}")
+        for level, part in enumerate(parts):
+            if level == 0:
+                line = f"{part}"
             else:
-                indent = "  " * i
-                prefix = "└─ "
-                hierarchy_lines.append(f"{indent}{prefix}{part}")
+                indent = "  " * level
+                prefix_char = "└─ "
+                line = f"{indent}{prefix_char}{part}"
+            hierarchy_lines.append(line)
 
         # Get kernels for this operator hierarchy
         kernels_info = []
         op_data = df[df["Operator_Name"] == op]
-        # Group by extracted kernel name
-        kernel_counts = {}
-        kernel_context = {}
+        has_kernel_ts = (
+            "Start_Timestamp_kernel" in df.columns
+            and "End_Timestamp_kernel" in df.columns
+        )
+        kernel_counts: dict[str, int] = {}
+        kernel_duration_ns: dict[str, float] = {}
+        kernel_context: dict[str, dict[str, Any]] = {}
         for _, row in op_data.iterrows():
-            full_kernel_name = row["Kernel_Name"]
-            kernel_name = extract_kernel_name(full_kernel_name)
+            full_kernel_name = str(row["Kernel_Name"]).strip()
+            if not full_kernel_name:
+                continue
+            if kernel_verbose >= MAX_SHORTENING_LEVEL:
+                kernel_name = full_kernel_name
+            else:
+                kernel_name = process_single_kernel_name(
+                    full_kernel_name, kernel_verbose
+                )
 
             if kernel_name not in kernel_counts:
                 kernel_counts[kernel_name] = 0
+                kernel_duration_ns[kernel_name] = 0.0
                 kernel_context[kernel_name] = {
                     "full_name": full_kernel_name,
                     "contexts": {},
                 }
             kernel_counts[kernel_name] += 1
-            topmost_location = str(row["Context_Id"]).split("/")[0]
-            _, location = topmost_location.split("@")
-            file_name, line_num = location.split(":")
-            if file_name not in kernel_context[kernel_name]["contexts"]:
-                kernel_context[kernel_name]["contexts"][file_name] = {line_num: 1}
-            else:
-                if line_num not in kernel_context[kernel_name]["contexts"][file_name]:
-                    kernel_context[kernel_name]["contexts"][file_name][line_num] = 1
-                else:
-                    kernel_context[kernel_name]["contexts"][file_name][line_num] += 1
+            if has_kernel_ts:
+                kernel_duration_ns[kernel_name] += float(
+                    row["End_Timestamp_kernel"]
+                ) - float(row["Start_Timestamp_kernel"])
+            context_id = row.get("Context_Id")
+            if pd.isna(context_id) or not str(context_id).strip():
+                continue
+            topmost_location = str(context_id).split("/")[0]
+            if "@" not in topmost_location:
+                continue
+            _, location = topmost_location.split("@", 1)
+            if ":" not in location:
+                continue
+            file_name, line_num = location.split(":", 1)
+            ctx = kernel_context[kernel_name]["contexts"]
+            ctx.setdefault(file_name, {})
+            ctx[file_name][line_num] = ctx[file_name].get(line_num, 0) + 1
 
-        # Format output for each unique kernel
         for kernel_name, num_launches in kernel_counts.items():
-            kernel_info = f"|--> {kernel_name} ({num_launches} launches)\n"
+            id_suffix = ""
+            if kernel_name_to_id is not None and kernel_name in kernel_name_to_id:
+                id_suffix = f" (id {kernel_name_to_id[kernel_name]})"
+            display_name = simplify_kernel_name(kernel_name)
+            total_ms = None
+            if has_kernel_ts and kernel_name in kernel_duration_ns:
+                total_ms = kernel_duration_ns[kernel_name] * NS_TO_MS
+            if total_ms is not None and not pd.isna(total_ms):
+                kernel_info = (
+                    f"|--> {display_name}{id_suffix} ({num_launches} launches, "
+                    f"total_duration: {total_ms:.2f} ms)\n"
+                )
+            else:
+                kernel_info = (
+                    f"|--> {display_name}{id_suffix} ({num_launches} launches)\n"
+                )
             kernels_info.append(kernel_info)
             for file_name, line_count in kernel_context[kernel_name][
                 "contexts"
@@ -412,15 +461,15 @@ def show_torch_operator_hierarchy(operator_name: str, df: pd.DataFrame) -> None:
                         f"      {file_name}:{line_num} ({count} launches)\n"
                     )
 
-        # Print hierarchy lines (left column)
+        # Print hierarchy lines (left column), indented under this hierarchy
         for line in hierarchy_lines:
-            print(f"{line.ljust(40)}|")
+            print(f"{hierarchy_indent}{line.ljust(inner_width)}|")
 
-        # Print kernel lines aligned to the deepest level
+        # Print kernel lines aligned to the deepest level, indented under this hierarchy
         deepest_indent = "  " * len(parts)
         for kernel_line in kernels_info:
             left_padding = deepest_indent + "    "
-            print(f"{left_padding.ljust(40)}{kernel_line}")
+            print(f"{hierarchy_indent}{left_padding.ljust(inner_width)}{kernel_line}")
 
         print()
 

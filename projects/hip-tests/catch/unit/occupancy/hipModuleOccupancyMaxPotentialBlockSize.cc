@@ -25,7 +25,7 @@ hipModuleOccupancyMaxPotentialBlockSize api when parameters are invalid
 */
 #include "occupancy_common.hh"
 
-TEST_CASE("Unit_hipModuleOccupancyMaxPotentialBlockSize_Negative_Parameters") {
+TEST_CASE(Unit_hipModuleOccupancyMaxPotentialBlockSize_Negative_Parameters) {
   hipModule_t module;
   hipFunction_t function;
 
@@ -42,7 +42,7 @@ TEST_CASE("Unit_hipModuleOccupancyMaxPotentialBlockSize_Negative_Parameters") {
   HIP_CHECK(hipModuleUnload(module));
 }
 
-TEST_CASE("Unit_hipModuleOccupancyMaxPotentialBlockSize_Positive_RangeValidation") {
+TEST_CASE(Unit_hipModuleOccupancyMaxPotentialBlockSize_Positive_RangeValidation) {
   hipDeviceProp_t devProp;
   hipModule_t module;
   hipFunction_t function;

@@ -335,7 +335,6 @@ Generating a default configuration file
    ROCPROFSYS_PROFILE                                  = false
    ROCPROFSYS_USE_SAMPLING                             = false
    ROCPROFSYS_USE_PROCESS_SAMPLING                     = true
-   ROCPROFSYS_USE_ROCM                                 = true
    ROCPROFSYS_USE_AMD_SMI                              = true
    ROCPROFSYS_USE_KOKKOSP                              = false
    ROCPROFSYS_USE_CODE_COVERAGE                        = false
@@ -493,7 +492,6 @@ Viewing the setting descriptions
    | ROCPROFSYS_TRACE_LEGACY                  | Use legacy direct mode for tracing      |
    | ROCPROFSYS_USE_PID                       | Enable tagging filenames with proces... |
    | ROCPROFSYS_USE_AMD_SMI                   | Enable sampling GPU power, temp, uti... |
-   | ROCPROFSYS_USE_ROCM                      | Enable ROCM tracing                     |
    | ROCPROFSYS_USE_SAMPLING                  | Enable statistical sampling of call-... |
    | ROCPROFSYS_USE_PROCESS_SAMPLING          | Enable a background thread which sam... |
    | ROCPROFSYS_PROFILE                       | Enable timemory backend                 |

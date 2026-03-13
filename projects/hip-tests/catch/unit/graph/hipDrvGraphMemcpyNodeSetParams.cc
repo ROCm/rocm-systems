@@ -49,7 +49,7 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipDrvGraphMemcpyNodeSetParams_Positive_Basic") {
+TEST_CASE(Unit_hipDrvGraphMemcpyNodeSetParams_Positive_Basic) {
   using namespace std::placeholders;
 
   constexpr bool async = false;
@@ -94,7 +94,7 @@ TEST_CASE("Unit_hipDrvGraphMemcpyNodeSetParams_Positive_Basic") {
   HIP_CHECK(hipCtxDestroy(context));
 }
 
-TEST_CASE("Unit_hipDrvGraphMemcpyNodeSetParams_Positive_Array") {
+TEST_CASE(Unit_hipDrvGraphMemcpyNodeSetParams_Positive_Array) {
   CHECK_IMAGE_SUPPORT
 
   using namespace std::placeholders;
@@ -144,7 +144,7 @@ TEST_CASE("Unit_hipDrvGraphMemcpyNodeSetParams_Positive_Array") {
  * ------------------------
  *    - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipDrvGraphMemcpyNodeSetParams_Negative_Parameters") {
+TEST_CASE(Unit_hipDrvGraphMemcpyNodeSetParams_Negative_Parameters) {
   using namespace std::placeholders;
 
   HIP_CHECK(hipInit(0));

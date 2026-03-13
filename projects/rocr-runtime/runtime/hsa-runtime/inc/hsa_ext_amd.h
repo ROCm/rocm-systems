@@ -66,6 +66,7 @@
  * - 1.13 - hsa_amd_pointer_info: Added new registered field to hsa_amd_pointer_info_t
  * - 1.14 - hsa_amd_ais_file_write, hsa_amd_ais_file_read
  * - 1.15 - hsa_amd_register_system_event_handler: HSA_AMD_SYSTEM_SHUTDOWN
+ * - 1.16 - hsa_amd_counted_queue APIs
  * - 1.17 - hsa_amd_memory_async_batch_copy
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
