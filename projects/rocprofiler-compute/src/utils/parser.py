@@ -807,9 +807,7 @@ def build_metric_list(
                         metric_list[data_source_idx] = panel["title"]
 
                     table_idx = f"{data_config['id'] // 100}.{data_config['id'] % 100}"
-
-                    if not data_config["metric"]:
-                        metric_list[table_idx] = data_config["title"]
+                    metric_list[table_idx] = data_config["title"]
 
                     for i, (key, entries) in enumerate(data_config["metric"].items()):
                         metric_idx = f"{table_idx}.{i}"

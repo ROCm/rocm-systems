@@ -6953,7 +6953,7 @@ def test_list_metrics(binary_handler_analyze_rocprof_compute, capsys):
     # Test output
     output = capsys.readouterr().out
     assert "6 -> Workgroup Manager (SPI)" in output
-    assert "5.2 -> Command processor packet processor (CPC/CPF)" in output
+    assert "5.2 -> Command processor packet processor (CPC)" in output
 
 
 def test_list_blocks(binary_handler_analyze_rocprof_compute, capsys):
