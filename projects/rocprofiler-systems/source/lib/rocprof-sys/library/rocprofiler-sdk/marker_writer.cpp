@@ -40,7 +40,6 @@ void
 write_to_cache(const rocprofiler_callback_tracing_record_t& record, std::string_view name,
                uint64_t begin_ts, uint64_t end_ts, std::string& args)
 {
-    cache_category();
     cache_add_thread_info(record.thread_id);
 
     trace_cache::get_buffer_storage().store(trace_cache::region_sample{
@@ -53,10 +52,12 @@ write_to_cache(const rocprofiler_callback_tracing_record_t& record, std::string_
 marker_writer::marker_writer()
 : m_use_perfetto(config::get_use_perfetto())
 , m_use_timemory(config::get_use_timemory())
-{}
+{
+    cache_category();
+}
 
 void
-marker_writer::write_begin(std::string_view name)
+marker_writer::write_begin(std::string_view name) const
 {
     if(m_use_timemory)
     {
@@ -66,7 +67,8 @@ marker_writer::write_begin(std::string_view name)
 
 void
 marker_writer::write_end(std::string_view name, uint64_t begin_ts, uint64_t end_ts,
-                         std::string& args, rocprofiler_callback_tracing_record_t record)
+                         std::string&                          args,
+                         rocprofiler_callback_tracing_record_t record) const
 {
     if(m_use_timemory)
     {

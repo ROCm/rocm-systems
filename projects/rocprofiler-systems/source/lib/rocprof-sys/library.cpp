@@ -64,11 +64,11 @@
 #include "library/ptl.hpp"
 #include "library/rocprofiler-sdk.hpp"
 #include "library/rocprofiler-sdk/roctx_client.hpp"
+#include "library/rocprofiler-sdk/trace_control.hpp"
 #include "library/runtime.hpp"
 #include "library/sampling.hpp"
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
-#include "library/trace_control.hpp"
 #include "library/tracing.hpp"
 #include "rocprofiler-systems/categories.h"  // in rocprof-sys-user
 
@@ -701,47 +701,25 @@ rocprofsys_init_tooling_hidden(void)
             trace_cache::get_buffer_storage().start(getpid());
         }
 
-        auto        trace_region_str = config::get_trace_region();
-        static auto g_trace_control =
-            std::make_unique<control::trace_control>(trace_region_str);
-
-        auto roctx_client = rocprofiler_sdk::get_roctx_client();
-        if(roctx_client)
+        auto trace_controller = rocprofiler_sdk::get_trace_controller();
+        if(trace_controller)
         {
-            // Register control callbacks to route marker events through trace_control
-            auto handlers = rocprofiler_sdk::marker_handlers{
-                [&ctrl = *g_trace_control]() { return ctrl.should_write_markers(); },
-                [&ctrl = *g_trace_control](uint64_t id, const char* name) {
-                    ctrl.handle_range_start(id, name);
-                },
-                [&ctrl = *g_trace_control](uint64_t id) { ctrl.handle_range_stop(id); },
-                [&ctrl = *g_trace_control]() { ctrl.handle_pause(); },
-                [&ctrl = *g_trace_control]() { ctrl.handle_resume(); },
-                [&ctrl = *g_trace_control]() { ctrl.shutdown(); }
+            auto start_callback = []() {
+                rocprofiler_sdk::resume();
+                sampling::resume();
+                resume_gotcha_components();
+                rocprofsys::kokkosp::resume();
+                invoke_external_resume_callbacks();
             };
-
-            roctx_client->register_control_callbacks(std::move(handlers));
-
-            if(get_selective_tracing())
-            {
-                auto start_callback = []() {
-                    rocprofiler_sdk::resume();
-                    sampling::resume();
-                    resume_gotcha_components();
-                    rocprofsys::kokkosp::resume();
-                    invoke_external_resume_callbacks();
-                };
-                auto stop_callback = []() {
-                    rocprofiler_sdk::pause();
-                    sampling::pause();
-                    pause_gotcha_components();
-                    rocprofsys::kokkosp::pause();
-                    invoke_external_pause_callbacks();
-                };
-                g_trace_control->register_region_start_callback(start_callback);
-                g_trace_control->register_region_stop_callback(stop_callback);
-                stop_callback();
-            }
+            auto stop_callback = []() {
+                rocprofiler_sdk::pause();
+                sampling::pause();
+                pause_gotcha_components();
+                rocprofsys::kokkosp::pause();
+                invoke_external_pause_callbacks();
+            };
+            trace_controller->register_region_start_callback(start_callback);
+            trace_controller->register_region_stop_callback(stop_callback);
         }
 
         set_state(State::Active);  // set to active as very last operation

@@ -23,6 +23,9 @@
 #pragma once
 
 #include "core/timemory.hpp"
+#include "library/rocprofiler-sdk/roctx_client.hpp"
+#include "rocprofiler-sdk/roctx_client.hpp"
+#include "rocprofiler-sdk/trace_control.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
 
@@ -33,15 +36,11 @@ namespace rocprofsys
 {
 namespace rocprofiler_sdk
 {
-class roctx_client;
 
 using hardware_counter_info = ::tim::hardware_counters::info;
 
 void
 setup();
-
-std::shared_ptr<roctx_client>
-get_roctx_client();
 
 void
 shutdown();
@@ -56,40 +55,25 @@ void
 sample();
 
 void
-start();
-
-void
-stop();
-
-void
 pause();
 
 void
 resume();
 
 void
-start_main_contexts();
+start();
 
 void
-start_control_context();
-
-void
-start_code_obj_context();
-
-void
-stop_main_contexts();
-
-void
-stop_control_context();
-
-void
-stop_code_obj_context();
+stop();
 
 void
 flush();
 
 void
 flush_counter_tracks_to_zero(rocprofiler_timestamp_t timestamp);
+
+std::shared_ptr<control::trace_control>
+get_trace_controller();
 
 std::vector<hardware_counter_info>
 get_rocm_events_info();

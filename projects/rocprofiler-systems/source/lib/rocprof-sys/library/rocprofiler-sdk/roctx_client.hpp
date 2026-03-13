@@ -4,6 +4,7 @@
 #pragma once
 
 #include "library/rocprofiler-sdk/marker_writer.hpp"
+#include "library/rocprofiler-sdk/trace_control.hpp"
 
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/fwd.h>
@@ -12,6 +13,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <string_view>
 #include <tuple>
 #include <vector>
 
@@ -20,20 +22,17 @@ namespace rocprofsys
 namespace rocprofiler_sdk
 {
 
-struct marker_handlers
+struct roctx_client_config
 {
-    std::function<bool()>                      should_write;
-    std::function<void(uint64_t, const char*)> on_range_start;
-    std::function<void(uint64_t)>              on_range_stop;
-    std::function<void()>                      on_pause;
-    std::function<void()>                      on_resume;
-    std::function<void()>                      on_shutdown;
+    bool             is_write_enabled{ false };
+    bool             use_timemory{ false };
+    std::string_view selected_trace_regions{};
 };
 
 class roctx_client
 {
 public:
-    roctx_client();
+    roctx_client(roctx_client_config roctx_cfg);
     ~roctx_client() = default;
 
     roctx_client(const roctx_client&)            = delete;
@@ -42,25 +41,23 @@ public:
     roctx_client& operator=(roctx_client&&)      = default;
 
     void configure_services(rocprofiler_context_id_t ctx);
-    void register_control_callbacks(marker_handlers handlers);
-
-    rocprofiler_context_id_t get_context() const noexcept { return m_ctx; }
-    bool                     is_write_enabled() const noexcept { return m_write_enabled; }
 
     bool should_write_markers() const;
     void shutdown();
+
+    std::shared_ptr<control::trace_control> get_controller() { return m_controller; }
 
 private:
     using marker_range_stack_t =
         std::vector<std::tuple<tim::hash_value_t, rocprofiler_timestamp_t, bool>>;
 
-    rocprofiler_context_id_t m_ctx{ 0 };
-    marker_writer            m_writer;
-    marker_handlers          m_handlers;
-    bool                     m_write_enabled{ false };
-
-    marker_range_stack_t& get_pushed_ranges();
-    marker_range_stack_t& get_started_ranges();
+    rocprofiler_context_id_t                 m_ctx{ 0 };
+    marker_writer                            m_writer;
+    std::shared_ptr<control::trace_control>  m_controller{};
+    bool                                     m_write_enabled{ false };
+    bool                                     m_use_timemory{ false };
+    static thread_local marker_range_stack_t m_pushed_ranges;
+    static thread_local marker_range_stack_t m_started_ranges;
 
     void handle_marker_core_enter(rocprofiler_callback_tracing_record_t record,
                                   rocprofiler_user_data_t*              user_data,

@@ -1,7 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "library/trace_control.hpp"
+#include "library/rocprofiler-sdk/trace_control.hpp"
 
 #include "core/config.hpp"
 
@@ -11,29 +11,31 @@
 
 namespace rocprofsys
 {
+namespace rocprofiler_sdk
+{
 namespace control
 {
 
 trace_control::trace_control(std::string_view trace_regions)
 {
-    // Parse trace region names from parameter
-    if(!trace_regions.empty())
+    if(trace_regions.empty())
     {
-        for(auto& name : tim::delimit(std::string{ trace_regions }, ","))
-        {
-            auto start = name.find_first_not_of(" \t");
-            auto end   = name.find_last_not_of(" \t");
-            if(start != std::string::npos)
-                m_trace_regions.insert(name.substr(start, end - start + 1));
-        }
-        std::string names;
-        for(const auto& n : m_trace_regions)
-        {
-            if(!names.empty()) names += ", ";
-            names += n;
-        }
-        LOG_INFO("Trace controller: region filter active for regions: [{}]", names);
+        return;
     }
+    for(auto& name : tim::delimit(std::string{ trace_regions }, ","))
+    {
+        auto start = name.find_first_not_of(" \t");
+        auto end   = name.find_last_not_of(" \t");
+        if(start != std::string::npos)
+            m_trace_regions.insert(name.substr(start, end - start + 1));
+    }
+    std::string names;
+    for(const auto& n : m_trace_regions)
+    {
+        if(!names.empty()) names += ", ";
+        names += n;
+    }
+    LOG_INFO("Trace controller: region filter active for regions: [{}]", names);
 }
 
 void
@@ -89,42 +91,51 @@ trace_control::handle_range_stop(uint64_t range_id)
 void
 trace_control::handle_pause()
 {
-    bool should_pause = true;
     if(region_filter_active())
     {
-        // Only pause if we're currently inside a target region
         std::lock_guard<std::mutex> lk(m_region_mutex);
-        should_pause = !m_active_range_ids.empty();
-        if(should_pause)
+        if(m_active_range_ids.empty())
         {
-            m_user_paused.store(true, std::memory_order_relaxed);
+            LOG_WARNING("Pause requested outside of target region - ignoring");
+            return;
         }
     }
 
-    if(should_pause)
+    if(m_user_paused.load(std::memory_order_relaxed))
     {
-        std::lock_guard<std::mutex> lk(m_callback_mutex);
-        trigger_callbacks(m_stop_callbacks);
+        LOG_WARNING("Pause requested but tracing is already paused - ignoring");
+        return;
     }
+
+    m_user_paused.store(true, std::memory_order_relaxed);
+    LOG_INFO("Pausing tracing session...");
+    std::lock_guard<std::mutex> lk(m_callback_mutex);
+    trigger_callbacks(m_stop_callbacks);
 }
 
 void
 trace_control::handle_resume()
 {
-    bool should_resume = true;
-    if(region_filter_active())
+    if(!m_user_paused.load(std::memory_order_relaxed))
     {
-        m_user_paused.store(false, std::memory_order_relaxed);
-        // Only resume if we're currently inside a target region
-        std::lock_guard<std::mutex> lk(m_region_mutex);
-        should_resume = !m_active_range_ids.empty();
+        LOG_WARNING("Resume requested but tracing was not paused by user - ignoring");
+        return;
     }
 
-    if(should_resume)
+    if(region_filter_active())
     {
-        std::lock_guard<std::mutex> lk(m_callback_mutex);
-        trigger_callbacks(m_start_callbacks);
+        std::lock_guard<std::mutex> lk(m_region_mutex);
+        if(m_active_range_ids.empty())
+        {
+            LOG_WARNING("Resume requested outside of target region - ignoring");
+            return;
+        }
     }
+
+    m_user_paused.store(false, std::memory_order_relaxed);
+    LOG_INFO("Resuming tracing session...");
+    std::lock_guard<std::mutex> lk(m_callback_mutex);
+    trigger_callbacks(m_start_callbacks);
 }
 
 void
@@ -162,7 +173,7 @@ trace_control::register_region_stop_callback(callback_t callback)
 bool
 trace_control::region_filter_active() const
 {
-    return config::get_selective_tracing();
+    return !m_trace_regions.empty();
 }
 
 bool
@@ -189,4 +200,5 @@ trace_control::trigger_callbacks(const std::vector<callback_t>& callbacks)
 }
 
 }  // namespace control
+}  // namespace rocprofiler_sdk
 }  // namespace rocprofsys

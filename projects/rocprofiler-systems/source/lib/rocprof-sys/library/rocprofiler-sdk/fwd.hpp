@@ -124,7 +124,7 @@ using backtrace_operation_map_t =
 struct client_data
 {
     static constexpr size_t num_buffers  = 5;
-    static constexpr size_t num_contexts = 2;
+    static constexpr size_t num_contexts = 4;
 
     using buffer_name_info_t   = rocprofiler::sdk::buffer_name_info_t<std::string_view>;
     using callback_name_info_t = rocprofiler::sdk::callback_name_info_t<std::string_view>;
@@ -160,6 +160,7 @@ struct client_data
     void                        initialize();
     void                        initialize_event_info();
     void                        set_agents();
+    context_id_vec_t            get_all_contexts() const;
     context_id_vec_t            get_main_contexts() const;
     rocprofiler_context_id_t    get_control_context() const;
     rocprofiler_context_id_t    get_code_obj_context() const;
@@ -172,6 +173,12 @@ struct client_data
     const rocprofiler_callback_tracing_code_object_load_data_t* get_code_object_info(
         uint64_t code_object_id) const;
 };
+
+inline client_data::context_id_vec_t
+client_data::get_all_contexts() const
+{
+    return context_id_vec_t{ primary_ctx, counter_ctx, code_object_ctx, control_ctx };
+}
 
 inline client_data::context_id_vec_t
 client_data::get_main_contexts() const

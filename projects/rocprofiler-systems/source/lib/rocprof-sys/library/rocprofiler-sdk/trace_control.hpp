@@ -16,6 +16,8 @@
 
 namespace rocprofsys
 {
+namespace rocprofiler_sdk
+{
 namespace control
 {
 
@@ -58,7 +60,8 @@ private:
     mutable std::mutex m_region_mutex;
     std::mutex         m_callback_mutex;
 
-    static void trigger_callbacks(const std::vector<callback_t>& callbacks);
+    void trigger_callbacks(const std::vector<callback_t>& callbacks);
 };
 }  // namespace control
+}  // namespace rocprofiler_sdk
 }  // namespace rocprofsys

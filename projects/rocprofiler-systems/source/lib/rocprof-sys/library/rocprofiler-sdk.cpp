@@ -22,10 +22,11 @@
 #include "library/rocprofiler-sdk/counters.hpp"
 #include "library/rocprofiler-sdk/fwd.hpp"
 #include "library/rocprofiler-sdk/rccl.hpp"
-#include "library/rocprofiler-sdk/roctx_client.hpp"
 #include "library/thread_info.hpp"
 #include "library/tracing.hpp"
+#include "rocprofiler-sdk.hpp"
 #include "rocprofiler-sdk/roctx_client.hpp"
+#include "rocprofiler-sdk/trace_control.hpp"
 
 #include <algorithm>
 #include <memory>
@@ -88,7 +89,7 @@ namespace
 {
 using tool_agent_vec_t                       = std::vector<tool_agent>;
 client_data*                  tool_data      = new client_data{};
-std::shared_ptr<roctx_client> g_roctx_client = nullptr;
+std::shared_ptr<roctx_client> g_roctx_client = {};
 
 void
 thread_precreate(rocprofiler_runtime_library_t /*lib*/, void* /*tool_data*/)
@@ -2178,6 +2179,30 @@ is_valid(rocprofiler_context_id_t ctx)
     return (errc == ROCPROFILER_STATUS_SUCCESS && status > 0);
 }
 
+void
+start_control_context()
+{
+    if(!tool_data) return;
+
+    const auto ctx = tool_data->get_control_context();
+    if(is_initialized(ctx) && !is_active(ctx))
+    {
+        ROCPROFILER_CALL(rocprofiler_start_context(ctx));
+    }
+}
+
+void
+start_code_obj_context()
+{
+    if(!tool_data) return;
+
+    const auto ctx = tool_data->get_code_obj_context();
+    if(is_initialized(ctx) && !is_active(ctx))
+    {
+        ROCPROFILER_CALL(rocprofiler_start_context(ctx));
+    }
+}
+
 int
 set_kernel_rename_and_stream_correlation_id(
     rocprofiler_thread_id_t /* thr_id */, rocprofiler_context_id_t /* ctx_id */,
@@ -2475,14 +2500,19 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     // creation). Roctx client configures MARKER_CORE_API and MARKER_CONTROL_API
     // on control_ctx. trace_control's pause/resume callbacks are routed through
     // roctx_client (registered later in library.cpp).
-    auto client = get_roctx_client();
-    if(client)
+    g_roctx_client->configure_services(_data->control_ctx);
+
+    auto control          = get_trace_controller();
+    auto filtering_active = control->region_filter_active();
+    if(!filtering_active)
     {
-        client->configure_services(_data->control_ctx);
+        start();
     }
-
-    start();
-
+    else
+    {
+        start_code_obj_context();
+        start_control_context();
+    }
     // no errors
     return 0;
 }
@@ -2518,6 +2548,30 @@ tool_fini(void* callback_data)
 }
 }  // namespace
 
+std::shared_ptr<roctx_client>
+get_roctx_client()
+{
+    if(!g_roctx_client)
+    {
+        auto _domains =
+            tim::delimit(config::get_setting_value<std::string>("ROCPROFSYS_ROCM_DOMAINS")
+                             .value_or(std::string{}),
+                         " ,;:\t\n");
+        auto roctx_write_enabled =
+            (std::find(_domains.begin(), _domains.end(), "marker_api") !=
+                 _domains.end() ||
+             std::find(_domains.begin(), _domains.end(), "roctx") != _domains.end());
+        auto roctx_traced_regions = config::get_trace_region();
+
+        auto roctx_config =
+            roctx_client_config{ roctx_write_enabled, config::get_use_timemory(),
+                                 roctx_traced_regions };
+        g_roctx_client = std::make_shared<roctx_client>(roctx_config);
+    }
+
+    return g_roctx_client;
+}
+
 void
 setup()
 {}
@@ -2548,14 +2602,11 @@ void
 sample()
 {}
 
-std::shared_ptr<roctx_client>
-get_roctx_client()
+std::shared_ptr<control::trace_control>
+get_trace_controller()
 {
-    if(!g_roctx_client)
-    {
-        g_roctx_client = std::make_shared<roctx_client>();
-    }
-    return g_roctx_client;
+    auto client = get_roctx_client();
+    return client->get_controller();
 }
 
 void
@@ -2598,42 +2649,9 @@ flush_counter_tracks_to_zero(rocprofiler_timestamp_t timestamp)
 void
 start()
 {
-    start_code_obj_context();
-    start_control_context();
-    if(!config::get_selective_tracing())
-    {
-        start_main_contexts();
-    }
-}
-
-void
-stop()
-{
-    stop_control_context();
-    stop_main_contexts();
-    stop_code_obj_context();
-}
-
-void
-pause()
-{
-    stop_main_contexts();
-    flush_counter_tracks_to_zero(0);
-}
-
-void
-resume()
-{
-    flush_counter_tracks_to_zero(0);
-    start_main_contexts();
-}
-
-void
-start_main_contexts()
-{
     if(!tool_data) return;
 
-    for(auto itr : tool_data->get_main_contexts())
+    for(auto itr : tool_data->get_all_contexts())
     {
         if(is_initialized(itr) && !is_active(itr))
         {
@@ -2643,35 +2661,13 @@ start_main_contexts()
 }
 
 void
-start_control_context()
-{
-    if(!tool_data) return;
-    auto ctx = tool_data->get_control_context();
-    if(is_initialized(ctx) && !is_active(ctx))
-    {
-        ROCPROFILER_CALL(rocprofiler_start_context(ctx));
-    }
-}
-
-void
-start_code_obj_context()
-{
-    if(!tool_data) return;
-    auto ctx = tool_data->get_code_obj_context();
-    if(is_initialized(ctx) && !is_active(ctx))
-    {
-        ROCPROFILER_CALL(rocprofiler_start_context(ctx));
-    }
-}
-
-void
-stop_main_contexts()
+stop()
 {
     if(!tool_data) return;
 
     flush();
 
-    for(auto itr : tool_data->get_main_contexts())
+    for(auto itr : tool_data->get_all_contexts())
     {
         if(is_initialized(itr) && is_active(itr))
         {
@@ -2681,28 +2677,32 @@ stop_main_contexts()
 }
 
 void
-stop_control_context()
+pause()
 {
     if(!tool_data) return;
 
-    auto ctx = tool_data->get_control_context();
-    if(is_initialized(ctx) && is_active(ctx))
+    for(auto itr : tool_data->get_main_contexts())
     {
-        ROCPROFILER_CALL(rocprofiler_stop_context(ctx));
+        if(is_initialized(itr) && is_active(itr))
+        {
+            ROCPROFILER_CALL(rocprofiler_stop_context(itr));
+        }
     }
+    flush_counter_tracks_to_zero(0);
 }
 
 void
-stop_code_obj_context()
+resume()
 {
+    flush_counter_tracks_to_zero(0);
+
     if(!tool_data) return;
 
-    auto ctx = tool_data->get_code_obj_context();
-    if(is_initialized(ctx) && !is_active(ctx))
+    for(auto itr : tool_data->get_main_contexts())
     {
-        if(is_initialized(ctx) && is_active(ctx))
+        if(is_initialized(itr) && !is_active(itr))
         {
-            ROCPROFILER_CALL(rocprofiler_stop_context(ctx));
+            ROCPROFILER_CALL(rocprofiler_start_context(itr));
         }
     }
 }
