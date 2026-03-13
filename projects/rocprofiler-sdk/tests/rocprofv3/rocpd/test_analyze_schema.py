@@ -36,7 +36,35 @@ import json
 import os
 import sys
 import tempfile
-import importlib.resources as pkg_resources
+
+try:
+    import importlib.resources as pkg_resources
+except ImportError:  # Python 3.6
+    import pkgutil as _pkgutil
+
+    class pkg_resources:  # type: ignore[no-redef]
+        """Minimal shim so _load_schema() works on Python 3.6."""
+
+        class _Traversable:
+            def __init__(self, package, resource):
+                self._package = package
+                self._resource = resource
+
+            def read_text(self, encoding="utf-8"):
+                data = _pkgutil.get_data(self._package, self._resource)
+                return data.decode(encoding) if data is not None else ""
+
+        class _Package:
+            def __init__(self, package):
+                self._package = package
+
+            def joinpath(self, resource):
+                return pkg_resources._Traversable(self._package, resource)
+
+        @staticmethod
+        def files(package):
+            return pkg_resources._Package(package)
+
 
 import pytest
 
