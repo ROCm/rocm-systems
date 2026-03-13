@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -97,7 +97,27 @@ static const fs::path sysfs_path = "/sys/class/accel";
 /// @brief Devnode prefix for XDNA devices.
 static const std::string devnode_prefix = "accel";
 /// @brief Maximum devnode minor number for XDNA devices.
-static const uint32_t devnode_max_minor_num = 64;
+constexpr uint32_t devnode_max_minor_num = 64;
+
+/// @brief Used to transform an address into a device address
+constexpr uint32_t DEV_ADDR_BASE = 0x04000000;
+constexpr uint32_t DEV_ADDR_OFFSET_MASK = 0x02FFFFFF;
+
+/// @brief The driver places a structure before each command in a command chain.
+/// Need to increase the size of the command by the size of this structure.
+/// In the following xdna driver source can see where this is implemented:
+/// Commit hash: eddd92c0f61592c576a500f16efa24eb23667c23
+/// https://github.com/amd/xdna-driver/blob/main/src/driver/amdxdna/aie2_msg_priv.h#L387-L391
+/// https://github.com/amd/xdna-driver/blob/main/src/driver/amdxdna/aie2_message.c#L637
+constexpr uint32_t CMD_COUNT_SIZE_INCREASE = 3;
+
+/// @brief The size of an instruction in bytes
+constexpr uint32_t INSTR_SIZE_BYTES = 4;
+
+/// @brief Index of command payload where the instruction sequence
+/// address is located
+constexpr uint32_t CMD_PKT_PAYLOAD_INSTRUCTION_SEQUENCE_IDX = 2;
+constexpr uint32_t CMD_PKT_PAYLOAD_INSTRUCTION_SEQUENCE_SIZE_IDX = 4;
 
 /// @brief Index of the first operand in a command.
 ///
@@ -648,15 +668,19 @@ hsa_status_t XdnaDriver::ExecCmdAndWait(const BOHandle& cmd_chain_bo_handle,
   exec_cmd.cmd_count = 1;
   exec_cmd.arg_count = bo_handles.size();
 
-  if (ioctl(fd_, DRM_IOCTL_AMDXDNA_EXEC_CMD, &exec_cmd) < 0) return HSA_STATUS_ERROR;
+  if (ioctl(fd_, DRM_IOCTL_AMDXDNA_EXEC_CMD, &exec_cmd) < 0) {
+    return HSA_STATUS_ERROR;
+  }
 
   // Waiting for command chain to finish.
   amdxdna_drm_wait_cmd wait_cmd = {};
   wait_cmd.hwctx = hw_ctx_handle;
-  wait_cmd.timeout = DEFAULT_TIMEOUT_VAL;
+  wait_cmd.timeout = 0;  // no timeout, wait until the command finishes
   wait_cmd.seq = exec_cmd.seq;
 
-  if (ioctl(fd_, DRM_IOCTL_AMDXDNA_WAIT_CMD, &wait_cmd) < 0) return HSA_STATUS_ERROR;
+  if (ioctl(fd_, DRM_IOCTL_AMDXDNA_WAIT_CMD, &wait_cmd) < 0) {
+    return HSA_STATUS_ERROR;
+  }
 
   return HSA_STATUS_SUCCESS;
 }
@@ -669,7 +693,7 @@ hsa_status_t XdnaDriver::PrepareBOs(uint32_t count,
                        cmd_pkt_payload->data[CMD_PKT_PAYLOAD_INSTRUCTION_SEQUENCE_IDX]);
   auto instr_bo_handle = FindBOHandle(reinterpret_cast<void*>(instr_addr));
   if (!instr_bo_handle.IsValid()) {
-    return HSA_STATUS_ERROR;
+    return HSA_STATUS_ERROR_INVALID_ALLOCATION;
   }
 
   // Keep track of the instruction sequence BO.
@@ -692,7 +716,7 @@ hsa_status_t XdnaDriver::PrepareBOs(uint32_t count,
                                                    cmd_pkt_payload->data[operand_index]);
     auto operand_bo_handle = FindBOHandle(reinterpret_cast<void*>(operand_addr));
     if (!operand_bo_handle.IsValid()) {
-      return HSA_STATUS_ERROR;
+      return HSA_STATUS_ERROR_INVALID_ALLOCATION;
     }
 
     // Keep track of the operand BO.
