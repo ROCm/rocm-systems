@@ -109,9 +109,10 @@ Panel Config:
         TCP Write Requests:
           value: AVG(TCP_REQ_WRITE_sum / $denom)
           unit: Requests + $normUnit
-        TCP Atomic Requests:
-          value: AVG(TCP_REQ_ATOMIC_sum / $denom)
-          unit: Requests + $normUnit
+        # Counter not available
+        # TCP Atomic Requests:
+        #   value: AVG(TCP_REQ_ATOMIC_sum / $denom)
+        #   unit: Requests + $normUnit
         TCP Miss Requests:
           value: AVG(TCP_REQ_MISS_sum / $denom)
           unit: Requests + $normUnit
@@ -139,12 +140,13 @@ Panel Config:
         LDS Instructions:
           value: AVG(SQ_INSTS_LDS_sum / $denom)
           unit: Instructions + $normUnit
-        LDS Read Instructions:
-          value: AVG(SQ_LDS_DIRECT_RD_sum / $denom)
-          unit: Instructions + $normUnit
-        LDS Write Instructions:
-          value: AVG(SQ_LDS_DIRECT_WR_sum / $denom)
-          unit: Instructions + $normUnit
+        # Counters not available: SQ_LDS_DIRECT_RD, SQ_LDS_DIRECT_WR
+        # LDS Read Instructions:
+        #   value: AVG(SQ_LDS_DIRECT_RD_sum / $denom)
+        #   unit: Instructions + $normUnit
+        # LDS Write Instructions:
+        #   value: AVG(SQ_LDS_DIRECT_WR_sum / $denom)
+        #   unit: Instructions + $normUnit
         LDS Atomic Instructions:
           value: AVG(SQ_LDS_ATOMIC_RETURN_sum / $denom)
           unit: Instructions + $normUnit
