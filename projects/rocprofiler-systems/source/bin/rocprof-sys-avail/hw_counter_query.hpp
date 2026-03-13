@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All Rights Reserved.
+// Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,11 +22,14 @@
 
 #pragma once
 
-#include "common.hpp"
+#include <timemory/backends/hardware_counters.hpp>
+#include <vector>
 
-#include <set>
-#include <string>
-
-void
-generate_config(std::string _config_file, const std::set<std::string>& _config_fmts,
-                const std::array<bool, TOTAL>&, const format_options&  fmt_opts);
+namespace rocprofsys
+{
+namespace avail
+{
+std::vector<tim::hardware_counters::info>
+query_gpu_hw_counters();
+}  // namespace avail
+}  // namespace rocprofsys
