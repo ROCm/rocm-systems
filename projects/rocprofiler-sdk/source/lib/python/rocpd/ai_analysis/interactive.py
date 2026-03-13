@@ -2132,6 +2132,39 @@ class WorkflowSession:
         if self._state.edit_history:
             self._state.edit_history[-1].checkpoint_id = cp_id
 
+    def _update_checkpoint_with_run(self) -> None:
+        """Record run_index and performance_delta_pct in the most recent
+        CheckpointRecord that does not yet have a run attached.
+
+        Called after trace_history is appended in Phase 3.
+        """
+        if not self._state.checkpoints:
+            return
+
+        # Find the most recent checkpoint without a run
+        target = None
+        for cp in reversed(self._state.checkpoints):
+            if cp.run_index is None:
+                target = cp
+                break
+        if target is None:
+            return  # All checkpoints already have runs
+
+        target.run_index = len(self._state.trace_history) - 1
+
+        # Compute performance delta from total_runtime_ns
+        if len(self._state.analysis_history) >= 2:
+            prev_ns = (
+                self._state.analysis_history[-2].execution_breakdown or {}
+            ).get("total_runtime_ns", 0)
+            curr_ns = (
+                self._state.analysis_history[-1].execution_breakdown or {}
+            ).get("total_runtime_ns", 0)
+            if prev_ns > 0:
+                target.performance_delta_pct = round(
+                    ((prev_ns - curr_ns) / prev_ns) * 100, 1
+                )
+
     # ── Phase 1b: Quick workload analysis ──────────────────────────────────────
 
     @staticmethod
@@ -2893,6 +2926,7 @@ class WorkflowSession:
                         )
                     )
                     self._save_session()
+                    self._update_checkpoint_with_run()
                     return True
                 # Ran OK but no files found — ask user for path
                 _print("  Profiler completed but no trace files found.", style="yellow")
@@ -2912,6 +2946,7 @@ class WorkflowSession:
                         )
                     )
                     self._save_session()
+                    self._update_checkpoint_with_run()
                     return True
                 return False
             else:

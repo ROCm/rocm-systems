@@ -383,3 +383,79 @@ def test_create_checkpoint_skipped_on_git_error():
         ws._create_checkpoint(["f"], "edit", {"f": "c"})  # should not raise
 
     assert ws._state.checkpoints == []
+
+
+def test_update_checkpoint_records_run_index():
+    from rocpd.ai_analysis.interactive import (
+        CheckpointRecord, _AnalysisSnapshot, _TraceRun,
+    )
+    ws = _make_workflow_session_with_gcm()
+
+    cp = CheckpointRecord(
+        cp_id=0, commit_hash="abc", ref_name="refs/r", worktree_path="/wt",
+        timestamp="t", files_modified=[], edit_summary="e", file_snapshots={},
+    )
+    ws._state.checkpoints.append(cp)
+
+    ws._state.trace_history.append(
+        _TraceRun(timestamp="t", command="cmd", db_path="/db.db")
+    )
+    ws._state.analysis_history.append(
+        _AnalysisSnapshot(
+            timestamp="t", iteration=0,
+            execution_breakdown={"total_runtime_ns": 1_000_000},
+        )
+    )
+
+    with patch.object(ws, "_save_session"):
+        ws._update_checkpoint_with_run()
+
+    assert ws._state.checkpoints[0].run_index == 0
+    assert ws._state.checkpoints[0].performance_delta_pct is None  # only 1 analysis
+
+
+def test_update_checkpoint_computes_delta_from_total_runtime_ns():
+    from rocpd.ai_analysis.interactive import (
+        CheckpointRecord, _AnalysisSnapshot, _TraceRun,
+    )
+    ws = _make_workflow_session_with_gcm()
+
+    for i in range(2):
+        cp = CheckpointRecord(
+            cp_id=i, commit_hash="h", ref_name="r", worktree_path="w",
+            timestamp="t", files_modified=[], edit_summary="e", file_snapshots={},
+        )
+        ws._state.checkpoints.append(cp)
+
+    ws._state.checkpoints[0].run_index = 0  # first cp already has a run
+    ws._state.trace_history.append(
+        _TraceRun(timestamp="t", command="c", db_path="/db0.db")
+    )
+    ws._state.trace_history.append(
+        _TraceRun(timestamp="t", command="c", db_path="/db1.db")
+    )
+    ws._state.analysis_history.append(
+        _AnalysisSnapshot(
+            timestamp="t", iteration=0,
+            execution_breakdown={"total_runtime_ns": 1_000_000},
+        )
+    )
+    ws._state.analysis_history.append(
+        _AnalysisSnapshot(
+            timestamp="t", iteration=1,
+            execution_breakdown={"total_runtime_ns": 900_000},  # 10% faster
+        )
+    )
+
+    with patch.object(ws, "_save_session"):
+        ws._update_checkpoint_with_run()
+
+    import pytest as _pytest
+    delta = ws._state.checkpoints[1].performance_delta_pct
+    assert delta == _pytest.approx(10.0, abs=0.1)  # (1M-900K)/1M * 100
+
+
+def test_update_checkpoint_noop_when_no_checkpoints():
+    ws = _make_workflow_session_with_gcm()
+    with patch.object(ws, "_save_session"):
+        ws._update_checkpoint_with_run()  # should not raise
