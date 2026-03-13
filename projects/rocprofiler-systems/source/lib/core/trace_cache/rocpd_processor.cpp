@@ -651,9 +651,8 @@ rocpd_processor_t::handle(const ainic_sample& _ainic)
 }
 
 void
-rocpd_processor_t::handle([[maybe_unused]] const kfd_sample& _kfd)
+rocpd_processor_t::handle(const kfd_sample& _kfd)
 {
-#if ROCPROFSYS_USE_ROCM > 0
     auto& n_info  = node_info::get_instance();
     auto  process = m_metadata->get_process_info();
     auto  thread_primary_key =
@@ -694,7 +693,6 @@ rocpd_processor_t::handle([[maybe_unused]] const kfd_sample& _kfd)
     m_data_processor->insert_pmc_event(event_primary_key, agent_primary_key,
                                        _kfd.pmc_info_name.c_str(), _kfd.value,
                                        _kfd.event_metadata.c_str());
-#endif
 }
 
 rocpd_processor_t::rocpd_processor_t(const std::shared_ptr<metadata_registry>& md,

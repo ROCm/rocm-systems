@@ -1385,9 +1385,8 @@ perfetto_processor_t::handle(const ainic_sample& _ainic)
 }
 
 void
-perfetto_processor_t::handle([[maybe_unused]] const kfd_sample& _kfd)
+perfetto_processor_t::handle(const kfd_sample& _kfd)
 {
-#if ROCPROFSYS_USE_ROCM > 0
     auto _beg_ts     = _kfd.start_timestamp;
     auto _end_ts     = _kfd.end_timestamp;
     auto _track_name = _kfd.track_name;
@@ -1466,7 +1465,6 @@ perfetto_processor_t::handle([[maybe_unused]] const kfd_sample& _kfd)
         emit_kfd_event(category::kfd_event_dropped_events{});
     else
         LOG_WARNING("Unknown KFD category: {}", _category);
-#endif
 }
 
 }  // namespace trace_cache

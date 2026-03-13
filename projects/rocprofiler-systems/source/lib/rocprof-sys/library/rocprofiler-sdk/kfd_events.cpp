@@ -3,7 +3,7 @@
 
 #include "library/rocprofiler-sdk/kfd_events.hpp"
 
-#if ROCPROFSYS_HAS_KFD_EVENTS
+#if ROCPROFILER_VERSION >= 700
 
 #    include "core/categories.hpp"
 #    include "core/trace_cache/buffer_storage.hpp"
@@ -43,11 +43,15 @@ get_kfd_operation_name(const rocprofiler_buffer_tracing_kfd_page_fault_record_t*
 {
     switch(record->operation)
     {
-        case ROCPROFILER_KFD_PAGE_FAULT_READ_FAULT_MIGRATED: return "ReadFaultMigrated";
-        case ROCPROFILER_KFD_PAGE_FAULT_READ_FAULT_UPDATED: return "ReadFaultUpdated";
-        case ROCPROFILER_KFD_PAGE_FAULT_WRITE_FAULT_MIGRATED: return "WriteFaultMigrated";
-        case ROCPROFILER_KFD_PAGE_FAULT_WRITE_FAULT_UPDATED: return "WriteFaultUpdated";
-        default: return "PageFault";
+        case ROCPROFILER_KFD_PAGE_FAULT_READ_FAULT_MIGRATED:
+            return "PAGE_FAULT_READ_FAULT_MIGRATED";
+        case ROCPROFILER_KFD_PAGE_FAULT_READ_FAULT_UPDATED:
+            return "PAGE_FAULT_READ_FAULT_UPDATED";
+        case ROCPROFILER_KFD_PAGE_FAULT_WRITE_FAULT_MIGRATED:
+            return "PAGE_FAULT_WRITE_FAULT_MIGRATED";
+        case ROCPROFILER_KFD_PAGE_FAULT_WRITE_FAULT_UPDATED:
+            return "PAGE_FAULT_WRITE_FAULT_UPDATED";
+        default: return "PAGE_FAULT";
     }
 }
 
@@ -57,11 +61,14 @@ get_kfd_operation_name(const rocprofiler_buffer_tracing_kfd_page_migrate_record_
 {
     switch(record->operation)
     {
-        case ROCPROFILER_KFD_PAGE_MIGRATE_PREFETCH: return "Prefetch";
-        case ROCPROFILER_KFD_PAGE_MIGRATE_PAGEFAULT_GPU: return "PageFaultGPU";
-        case ROCPROFILER_KFD_PAGE_MIGRATE_PAGEFAULT_CPU: return "PageFaultCPU";
-        case ROCPROFILER_KFD_PAGE_MIGRATE_TTM_EVICTION: return "TTMEviction";
-        default: return "PageMigrate";
+        case ROCPROFILER_KFD_PAGE_MIGRATE_PREFETCH: return "PAGE_MIGRATE_PREFETCH";
+        case ROCPROFILER_KFD_PAGE_MIGRATE_PAGEFAULT_GPU:
+            return "PAGE_MIGRATE_PAGEFAULT_GPU";
+        case ROCPROFILER_KFD_PAGE_MIGRATE_PAGEFAULT_CPU:
+            return "PAGE_MIGRATE_PAGEFAULT_CPU";
+        case ROCPROFILER_KFD_PAGE_MIGRATE_TTM_EVICTION:
+            return "PAGE_MIGRATE_TTM_EVICTION";
+        default: return "PAGE_MIGRATE";
     }
 }
 
@@ -71,13 +78,14 @@ get_kfd_operation_name(const rocprofiler_buffer_tracing_kfd_queue_record_t* reco
 {
     switch(record->operation)
     {
-        case ROCPROFILER_KFD_QUEUE_EVICT_SVM: return "EvictSVM";
-        case ROCPROFILER_KFD_QUEUE_EVICT_USERPTR: return "EvictUserPtr";
-        case ROCPROFILER_KFD_QUEUE_EVICT_TTM: return "EvictTTM";
-        case ROCPROFILER_KFD_QUEUE_EVICT_SUSPEND: return "EvictSuspend";
-        case ROCPROFILER_KFD_QUEUE_EVICT_CRIU_CHECKPOINT: return "EvictCRIUCheckpoint";
-        case ROCPROFILER_KFD_QUEUE_EVICT_CRIU_RESTORE: return "EvictCRIURestore";
-        default: return "Queue";
+        case ROCPROFILER_KFD_QUEUE_EVICT_SVM: return "QUEUE_EVICT_SVM";
+        case ROCPROFILER_KFD_QUEUE_EVICT_USERPTR: return "QUEUE_EVICT_USERPTR";
+        case ROCPROFILER_KFD_QUEUE_EVICT_TTM: return "QUEUE_EVICT_TTM";
+        case ROCPROFILER_KFD_QUEUE_EVICT_SUSPEND: return "QUEUE_EVICT_SUSPEND";
+        case ROCPROFILER_KFD_QUEUE_EVICT_CRIU_CHECKPOINT:
+            return "QUEUE_EVICT_CRIU_CHECKPOINT";
+        case ROCPROFILER_KFD_QUEUE_EVICT_CRIU_RESTORE: return "QUEUE_EVICT_CRIU_RESTORE";
+        default: return "QUEUE_EVICT";
     }
 }
 
@@ -87,18 +95,20 @@ get_kfd_operation_name(const rocprofiler_buffer_tracing_kfd_event_queue_record_t
 {
     switch(record->operation)
     {
-        case ROCPROFILER_KFD_EVENT_QUEUE_EVICT_SVM: return "EventQueueEvictSVM";
-        case ROCPROFILER_KFD_EVENT_QUEUE_EVICT_USERPTR: return "EventQueueEvictUserPtr";
-        case ROCPROFILER_KFD_EVENT_QUEUE_EVICT_TTM: return "EventQueueEvictTTM";
-        case ROCPROFILER_KFD_EVENT_QUEUE_EVICT_SUSPEND: return "EventQueueEvictSuspend";
+        case ROCPROFILER_KFD_EVENT_QUEUE_EVICT_SVM: return "QUEUE_EVICT_SVM_EVENT";
+        case ROCPROFILER_KFD_EVENT_QUEUE_EVICT_USERPTR:
+            return "QUEUE_EVICT_USERPTR_EVENT";
+        case ROCPROFILER_KFD_EVENT_QUEUE_EVICT_TTM: return "QUEUE_EVICT_TTM_EVENT";
+        case ROCPROFILER_KFD_EVENT_QUEUE_EVICT_SUSPEND:
+            return "QUEUE_EVICT_SUSPEND_EVENT";
         case ROCPROFILER_KFD_EVENT_QUEUE_EVICT_CRIU_CHECKPOINT:
-            return "EventQueueEvictCRIUCheckpoint";
+            return "QUEUE_EVICT_CRIU_CHECKPOINT_EVENT";
         case ROCPROFILER_KFD_EVENT_QUEUE_EVICT_CRIU_RESTORE:
-            return "EventQueueEvictCRIURestore";
+            return "QUEUE_EVICT_CRIU_RESTORE_EVENT";
         case ROCPROFILER_KFD_EVENT_QUEUE_RESTORE_RESCHEDULED:
-            return "EventQueueRestoreRescheduled";
-        case ROCPROFILER_KFD_EVENT_QUEUE_RESTORE: return "EventQueueRestore";
-        default: return "EventQueue";
+            return "QUEUE_RESTORE_RESCHEDULED_EVENT";
+        case ROCPROFILER_KFD_EVENT_QUEUE_RESTORE: return "QUEUE_RESTORE_EVENT   ";
+        default: return "QUEUE_EVICT_EVENT";
     }
 }
 
@@ -109,11 +119,13 @@ get_kfd_operation_name(
 {
     switch(record->operation)
     {
-        case ROCPROFILER_KFD_EVENT_UNMAP_FROM_GPU_MMU_NOTIFY: return "UnmapMMUNotify";
+        case ROCPROFILER_KFD_EVENT_UNMAP_FROM_GPU_MMU_NOTIFY:
+            return "UNMAP_FROM_GPU_MMU_NOTIFY";
         case ROCPROFILER_KFD_EVENT_UNMAP_FROM_GPU_MMU_NOTIFY_MIGRATE:
-            return "UnmapMMUNotifyMigrate";
-        case ROCPROFILER_KFD_EVENT_UNMAP_FROM_GPU_UNMAP_FROM_CPU: return "UnmapFromCPU";
-        default: return "UnmapFromGPU";
+            return "UNMAP_FROM_GPU_MMU_NOTIFY_MIGRATE";
+        case ROCPROFILER_KFD_EVENT_UNMAP_FROM_GPU_UNMAP_FROM_CPU:
+            return "UNMAP_FROM_GPU_UNMAP_FROM_CPU";
+        default: return "UNMAP_FROM_GPU";
     }
 }
 
@@ -122,7 +134,7 @@ std::string
 get_kfd_operation_name(
     const rocprofiler_buffer_tracing_kfd_event_dropped_events_record_t* /*record*/)
 {
-    return "DroppedEvents";
+    return "DROPPED_EVENTS";
 }
 
 // Helper to cache category
@@ -247,62 +259,76 @@ kfd_event_metadata_initialize()
     cache_category<category::kfd_event_unmap_from_gpu>();
     cache_category<category::kfd_event_dropped_events>();
 
-    // Register PMC info for each KFD event type to match rocprofiler-sdk schema
-    // This ensures data is stored in rocpd_info_pmc and rocpd_pmc_event tables
     constexpr size_t EVENT_CODE  = 0;
     constexpr size_t INSTANCE_ID = 0;
     constexpr auto*  COMPONENT   = "rocm";
     constexpr auto*  BLOCK       = "KFD";
     constexpr auto*  EXPRESSION  = "";
-    constexpr auto*  TARGET_ARCH = "GPU";
 
-    // KFD events are not tied to a specific GPU device, so we use device_id = 0
-    // The actual agent info is stored in the JSON extdata
     constexpr uint32_t DEVICE_ID = 0;
 
-    // Register PMC info for each KFD buffer tracing kind
+    // Dropped events have no associated agent; pin to GPU 0 as a placeholder.
     trace_cache::get_metadata_registry().add_pmc_info(
-        { agent_type::GPU, DEVICE_ID, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-          trait::name<category::kfd_page_fault>::value, "KFD Page Fault Events",
-          trait::name<category::kfd_page_fault>::description,
-          "KFD page fault paired records", COMPONENT, "events", trace_cache::ABSOLUTE,
-          BLOCK, EXPRESSION, 0, 0, "{}" });
-
-    trace_cache::get_metadata_registry().add_pmc_info(
-        { agent_type::GPU, DEVICE_ID, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-          trait::name<category::kfd_page_migrate>::value, "KFD Page Migration Events",
-          trait::name<category::kfd_page_migrate>::description,
-          "KFD page migration paired records", COMPONENT, "events", trace_cache::ABSOLUTE,
-          BLOCK, EXPRESSION, 0, 0, "{}" });
-
-    trace_cache::get_metadata_registry().add_pmc_info(
-        { agent_type::GPU, DEVICE_ID, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-          trait::name<category::kfd_queue>::value, "KFD Queue Events",
-          trait::name<category::kfd_queue>::description,
-          "KFD queue eviction/restore paired records", COMPONENT, "events",
-          trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0, "{}" });
-
-    trace_cache::get_metadata_registry().add_pmc_info(
-        { agent_type::GPU, DEVICE_ID, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-          trait::name<category::kfd_event_queue>::value, "KFD Event Queue Operations",
-          trait::name<category::kfd_event_queue>::description,
-          "KFD queue eviction/restore events", COMPONENT, "events", trace_cache::ABSOLUTE,
-          BLOCK, EXPRESSION, 0, 0, "{}" });
-
-    trace_cache::get_metadata_registry().add_pmc_info(
-        { agent_type::GPU, DEVICE_ID, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-          trait::name<category::kfd_event_unmap_from_gpu>::value,
-          "KFD Unmap from GPU Events",
-          trait::name<category::kfd_event_unmap_from_gpu>::description,
-          "KFD unmap from GPU events", COMPONENT, "events", trace_cache::ABSOLUTE, BLOCK,
-          EXPRESSION, 0, 0, "{}" });
-
-    trace_cache::get_metadata_registry().add_pmc_info(
-        { agent_type::GPU, DEVICE_ID, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+        { agent_type::GPU, DEVICE_ID, "GPU", EVENT_CODE, INSTANCE_ID,
           trait::name<category::kfd_event_dropped_events>::value, "KFD Dropped Events",
           trait::name<category::kfd_event_dropped_events>::description,
           "KFD dropped_events events", COMPONENT, "count", trace_cache::ABSOLUTE, BLOCK,
           EXPRESSION, 0, 0, "{}" });
+
+    // All KFD event types carry an agent; register one PMC info entry per GPU
+    // (and per CPU for page migrate) so events are correctly attributed.
+    for(const auto& gpu : tool_data->gpu_agents)
+    {
+        auto dev_idx = static_cast<uint32_t>(gpu.device_id);
+
+        trace_cache::get_metadata_registry().add_pmc_info(
+            { agent_type::GPU, dev_idx, "GPU", EVENT_CODE, INSTANCE_ID,
+              trait::name<category::kfd_page_fault>::value, "KFD Page Fault Events",
+              trait::name<category::kfd_page_fault>::description,
+              "KFD page fault paired records", COMPONENT, "events", trace_cache::ABSOLUTE,
+              BLOCK, EXPRESSION, 0, 0, "{}" });
+
+        trace_cache::get_metadata_registry().add_pmc_info(
+            { agent_type::GPU, dev_idx, "GPU", EVENT_CODE, INSTANCE_ID,
+              trait::name<category::kfd_page_migrate>::value, "KFD Page Migration Events",
+              trait::name<category::kfd_page_migrate>::description,
+              "KFD page migration paired records", COMPONENT, "events",
+              trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0, "{}" });
+
+        trace_cache::get_metadata_registry().add_pmc_info(
+            { agent_type::GPU, dev_idx, "GPU", EVENT_CODE, INSTANCE_ID,
+              trait::name<category::kfd_queue>::value, "KFD Queue Events",
+              trait::name<category::kfd_queue>::description,
+              "KFD queue eviction/restore paired records", COMPONENT, "events",
+              trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0, "{}" });
+
+        trace_cache::get_metadata_registry().add_pmc_info(
+            { agent_type::GPU, dev_idx, "GPU", EVENT_CODE, INSTANCE_ID,
+              trait::name<category::kfd_event_queue>::value, "KFD Event Queue Operations",
+              trait::name<category::kfd_event_queue>::description,
+              "KFD queue eviction/restore events", COMPONENT, "events",
+              trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0, "{}" });
+
+        trace_cache::get_metadata_registry().add_pmc_info(
+            { agent_type::GPU, dev_idx, "GPU", EVENT_CODE, INSTANCE_ID,
+              trait::name<category::kfd_event_unmap_from_gpu>::value,
+              "KFD Unmap from GPU Events",
+              trait::name<category::kfd_event_unmap_from_gpu>::description,
+              "KFD unmap from GPU events", COMPONENT, "events", trace_cache::ABSOLUTE,
+              BLOCK, EXPRESSION, 0, 0, "{}" });
+    }
+
+    // Page migrate can also originate from CPU agents
+    for(const auto& cpu : tool_data->cpu_agents)
+    {
+        auto dev_idx = static_cast<uint32_t>(cpu.device_id);
+        trace_cache::get_metadata_registry().add_pmc_info(
+            { agent_type::CPU, dev_idx, "CPU", EVENT_CODE, INSTANCE_ID,
+              trait::name<category::kfd_page_migrate>::value, "KFD Page Migration Events",
+              trait::name<category::kfd_page_migrate>::description,
+              "KFD page migration paired records", COMPONENT, "events",
+              trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0, "{}" });
+    }
 }
 
 void
@@ -330,18 +356,11 @@ tool_kfd_page_fault_callback(
     auto track_name = fmt::format("KFD Page Fault [{}]", agent_label(_agent));
     cache_add_track(track_name.c_str(), tid);
 
-    // Create JSON extdata matching rocprofiler-sdk format (agent resolved to node_id)
-    auto _agent_nid   = agent_node_id_str(_agent);
-    auto extdata_json = fmt::format(
-        "{{\"kfd\":{{\"agent_id\":{},\"address\":\"{:#x}\",\"operation\":{}}}}}",
-        _agent_nid, _address, static_cast<int>(record->operation));
+    auto _agent_nid = agent_node_id_str(_agent);
+    auto args_str   = fmt::format("0;;uint64_t;;address;;{:#x};;"
+                                    "1;;string;;agent;;{};;",
+                                  _address, _agent_nid);
 
-    // Create region with additional info in args
-    auto args_str =
-        fmt::format("{{\"address\":\"{:#x}\",\"agent\":{}}}", _address, _agent_nid);
-
-    // Store as kfd_sample which combines region and PMC event data
-    // This matches rocprofiler-sdk logic where both share the same event_id
     auto pmc_value = static_cast<double>(get_kfd_pmc_value(record));
     trace_cache::get_buffer_storage().store(trace_cache::kfd_sample{
         tid,                                                    // thread_id
@@ -351,7 +370,7 @@ tool_kfd_page_fault_callback(
         args_str.c_str(),                                       // args_str
         trait::name<category::kfd_page_fault>::value,           // category
         track_name,                                             // track_name
-        extdata_json,                                           // event_metadata (JSON)
+        "{}",                                                   // event_metadata
         static_cast<uint32_t>(_agent ? _agent->device_id : 0),  // device_id
         static_cast<uint8_t>(agent_type::GPU),                  // device_type
         trait::name<category::kfd_page_fault>::value,           // pmc_info_name
@@ -394,30 +413,27 @@ tool_kfd_page_migrate_callback(
                     agent_label(_dst_tool_agent));
     cache_add_track(track_name.c_str(), tid);
 
-    // Resolve agent IDs to node IDs matching rocprofiler-sdk format
     auto _src_nid       = agent_node_id_str(_src_tool_agent);
     auto _dst_nid       = agent_node_id_str(_dst_tool_agent);
     auto _prefetch_nid  = agent_node_id_str(_prefetch_tool_agent);
     auto _preferred_nid = agent_node_id_str(_preferred_tool_agent);
 
-    // Create JSON extdata matching rocprofiler-sdk format (agents resolved to node_ids)
-    auto extdata_json =
-        fmt::format("{{\"kfd\":{{\"start_address\":\"{:#x}\",\"end_address\":\"{:#x}\","
-                    "\"src_agent_id\":{},\"dst_agent_id\":{},\"prefetch_agent_id\":{},"
-                    "\"preferred_agent_id\":{},\"error_code\":{}}}}}",
-                    _start_addr, _end_addr, _src_nid, _dst_nid, _prefetch_nid,
-                    _preferred_nid, _error_code);
-
-    // Create region with additional info in args
-    auto args_str = fmt::format("{{\"start_address\":\"{:#x}\",\"end_address\":\"{:#x}\","
-                                "\"src_agent\":{},\"dst_agent\":{},\"prefetch_agent\":{},"
-                                "\"preferred_agent\":{},\"error_code\":{}}}",
+    auto args_str = fmt::format("0;;uint64_t;;start_address;;{:#x};;"
+                                "1;;uint64_t;;end_address;;{:#x};;"
+                                "2;;string;;src_agent;;{};;"
+                                "3;;string;;dst_agent;;{};;"
+                                "4;;string;;prefetch_agent;;{};;"
+                                "5;;string;;preferred_agent;;{};;"
+                                "6;;int;;error_code;;{};;",
                                 _start_addr, _end_addr, _src_nid, _dst_nid, _prefetch_nid,
                                 _preferred_nid, _error_code);
 
-    // Store as kfd_sample which combines region and PMC event data
-    auto pmc_value = static_cast<double>(get_kfd_pmc_value(record));
-    auto device_id = _dst_tool_agent ? _dst_tool_agent->device_id : 0;
+    auto pmc_value    = static_cast<double>(get_kfd_pmc_value(record));
+    auto src_dev_id   = _src_tool_agent ? _src_tool_agent->device_id : 0;
+    auto src_dev_type = (_src_tool_agent && _src_tool_agent->agent)
+                            ? _src_tool_agent->agent->type
+                            : agent_type::GPU;
+
     trace_cache::get_buffer_storage().store(trace_cache::kfd_sample{
         tid,                                             // thread_id
         _name.c_str(),                                   // name
@@ -426,9 +442,9 @@ tool_kfd_page_migrate_callback(
         args_str.c_str(),                                // args_str
         trait::name<category::kfd_page_migrate>::value,  // category
         track_name,                                      // track_name
-        extdata_json,                                    // event_metadata (JSON)
-        static_cast<uint32_t>(device_id),                // device_id
-        static_cast<uint8_t>(agent_type::GPU),           // device_type
+        "{}",                                            // event_metadata
+        static_cast<uint32_t>(src_dev_id),               // device_id (source agent)
+        static_cast<uint8_t>(src_dev_type),              // device_type (source agent)
         trait::name<category::kfd_page_migrate>::value,  // pmc_info_name
         pmc_value,                                       // value
         std::optional<int64_t>(_pid)                     // system_tid
@@ -457,14 +473,9 @@ tool_kfd_queue_callback(const rocprofiler_buffer_tracing_kfd_queue_record_t* rec
     auto track_name = fmt::format("KFD Queue [{}]", agent_label(_agent));
     cache_add_track(track_name.c_str(), tid);
 
-    // Create JSON extdata matching rocprofiler-sdk format (agent resolved to node_id)
-    auto _agent_nid   = agent_node_id_str(_agent);
-    auto extdata_json = fmt::format("{{\"kfd\":{{\"agent_id\":{}}}}}", _agent_nid);
+    auto _agent_nid = agent_node_id_str(_agent);
+    auto args_str   = fmt::format("0;;string;;agent;;{};;", _agent_nid);
 
-    // Create region with additional info in args
-    auto args_str = fmt::format("{{\"agent\":{}}}", _agent_nid);
-
-    // Store as kfd_sample which combines region and PMC event data
     auto pmc_value = static_cast<double>(get_kfd_pmc_value(record));
     trace_cache::get_buffer_storage().store(trace_cache::kfd_sample{
         tid,                                                    // thread_id
@@ -474,7 +485,7 @@ tool_kfd_queue_callback(const rocprofiler_buffer_tracing_kfd_queue_record_t* rec
         args_str.c_str(),                                       // args_str
         trait::name<category::kfd_queue>::value,                // category
         track_name,                                             // track_name
-        extdata_json,                                           // event_metadata (JSON)
+        "{}",                                                   // event_metadata
         static_cast<uint32_t>(_agent ? _agent->device_id : 0),  // device_id
         static_cast<uint8_t>(agent_type::GPU),                  // device_type
         trait::name<category::kfd_queue>::value,                // pmc_info_name
@@ -508,15 +519,9 @@ tool_kfd_event_queue_callback(
     auto track_name = fmt::format("KFD Event Queue [{}]", agent_label(_agent));
     cache_add_track(track_name.c_str(), tid);
 
-    // Create JSON extdata matching rocprofiler-sdk format (agent resolved to node_id)
-    auto _agent_nid   = agent_node_id_str(_agent);
-    auto extdata_json = fmt::format("{{\"kfd\":{{\"agent_id\":{}}}}}", _agent_nid);
+    auto _agent_nid = agent_node_id_str(_agent);
+    auto args_str   = fmt::format("0;;string;;agent;;{};;", _agent_nid);
 
-    // Create region with additional info in args
-    auto args_str = fmt::format("{{\"agent\":{}}}", _agent_nid);
-
-    // Event queue records are instant events (begin == end)
-    // Store as kfd_sample which combines region and PMC event data
     auto pmc_value = static_cast<double>(get_kfd_pmc_value(record));
     trace_cache::get_buffer_storage().store(trace_cache::kfd_sample{
         tid,                                            // thread_id
@@ -526,7 +531,7 @@ tool_kfd_event_queue_callback(
         args_str.c_str(),                               // args_str
         trait::name<category::kfd_event_queue>::value,  // category
         track_name,                                     // track_name
-        extdata_json,                                   // event_metadata (JSON)
+        "{}",                                           // event_metadata
         static_cast<uint32_t>(_agent ? _agent->device_id : 0),  // device_id
         static_cast<uint8_t>(agent_type::GPU),                  // device_type
         trait::name<category::kfd_event_queue>::value,          // pmc_info_name
@@ -559,19 +564,12 @@ tool_kfd_event_unmap_from_gpu_callback(
     auto track_name = fmt::format("KFD Unmap from GPU [{}]", agent_label(_agent));
     cache_add_track(track_name.c_str(), tid);
 
-    // Create JSON extdata matching rocprofiler-sdk format (agent resolved to node_id)
-    auto _agent_nid   = agent_node_id_str(_agent);
-    auto extdata_json = fmt::format("{{\"kfd\":{{\"agent_id\":{},\"start_address\":\"{:#"
-                                    "x}\",\"end_address\":\"{:#x}\"}}}}",
-                                    _agent_nid, _start_addr, _end_addr);
+    auto _agent_nid = agent_node_id_str(_agent);
+    auto args_str   = fmt::format("0;;string;;agent;;{};;"
+                                    "1;;uint64_t;;start_address;;{:#x};;"
+                                    "2;;uint64_t;;end_address;;{:#x};;",
+                                  _agent_nid, _start_addr, _end_addr);
 
-    // Create region with additional info in args
-    auto args_str = fmt::format(
-        "{{\"agent\":{},\"start_address\":\"{:#x}\",\"end_address\":\"{:#x}\"}}",
-        _agent_nid, _start_addr, _end_addr);
-
-    // Unmap events are instant events (begin == end)
-    // Store as kfd_sample which combines region and PMC event data
     auto pmc_value = static_cast<double>(get_kfd_pmc_value(record));
     trace_cache::get_buffer_storage().store(trace_cache::kfd_sample{
         tid,               // thread_id
@@ -581,7 +579,7 @@ tool_kfd_event_unmap_from_gpu_callback(
         args_str.c_str(),  // args_str
         trait::name<category::kfd_event_unmap_from_gpu>::value,  // category
         track_name,                                              // track_name
-        extdata_json,                                            // event_metadata (JSON)
+        "{}",                                                    // event_metadata
         static_cast<uint32_t>(_agent ? _agent->device_id : 0),   // device_id
         static_cast<uint8_t>(agent_type::GPU),                   // device_type
         trait::name<category::kfd_event_unmap_from_gpu>::value,  // pmc_info_name
@@ -610,14 +608,8 @@ tool_kfd_event_dropped_events_callback(
     auto track_name = std::string{ "KFD Dropped Events" };
     cache_add_track(track_name.c_str(), tid);
 
-    // Create JSON extdata matching rocprofiler-sdk format
-    auto extdata_json = fmt::format("{{\"kfd\":{{\"count\":{}}}}}", _count);
+    auto args_str = fmt::format("0;;uint64_t;;count;;{};;", _count);
 
-    // Create region with additional info in args
-    auto args_str = fmt::format("{{\"count\":{}}}", _count);
-
-    // Dropped events are instant events (begin == end)
-    // Store as kfd_sample which combines region and PMC event data
     auto pmc_value = static_cast<double>(get_kfd_pmc_value(record));
     trace_cache::get_buffer_storage().store(trace_cache::kfd_sample{
         tid,               // thread_id
@@ -627,7 +619,7 @@ tool_kfd_event_dropped_events_callback(
         args_str.c_str(),  // args_str
         trait::name<category::kfd_event_dropped_events>::value,  // category
         track_name,                                              // track_name
-        extdata_json,                                            // event_metadata (JSON)
+        "{}",                                                    // event_metadata
         0,                                      // device_id = 0 (no specific device)
         static_cast<uint8_t>(agent_type::GPU),  // device_type
         trait::name<category::kfd_event_dropped_events>::value,  // pmc_info_name
