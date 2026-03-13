@@ -7,7 +7,7 @@ on:
         type: string
       artifact_group:
         type: string
-      extra_cmake_options:
+      cmake_options:
         type: string
 
 permissions:
