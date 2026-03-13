@@ -180,7 +180,10 @@ main()
                                gpuMatrix,
                                WIDTH);
             // Use max(i, 1) to ensure at least 1 thread per block (i=0 would be invalid)
-            pc_sampling_kernel<<<num_blocks, (i > 0 ? i : 1)>>>(i);
+            int threads_per_block = (i > 0 ? i : 1);
+            pc_sampling_kernel<<<num_blocks, threads_per_block>>>(threads_per_block);
+            // Check for kernel launch errors
+            checkHipErrors(hipGetLastError());
             roctxProfilerPause(tid);
         }
     }
