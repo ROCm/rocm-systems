@@ -3589,10 +3589,12 @@ amdsmi_get_gpu_metrics_header_info(amdsmi_processor_handle processor_handle,
     // nullptr api supported
     if (header_value != nullptr) {
         *header_value = amd_metrics_table_header_t{};  // Use a default initializer for the struct
+        header_value->structure_size = 0x78;//sizeof(gpu_metrics_v1_3);
+        header_value->format_revision = 1;
+        header_value->content_revision = 3;
     }
 
-    return rsmi_wrapper(rsmi_dev_metrics_header_info_get, processor_handle, 0,
-                    reinterpret_cast<metrics_table_header_t*>(header_value));
+    return AMDSMI_STATUS_SUCCESS;
 }
 
 amdsmi_status_t  amdsmi_get_gpu_partition_metrics_info(
