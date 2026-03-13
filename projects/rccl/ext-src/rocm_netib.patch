@@ -393,8 +393,8 @@
      // Local ibDevN
      ibDevN = rComm->devs[devIndex].base.ibDevN;
      ibDev = ncclIbDevs + ibDevN;
--    NCCLCHECKGOTO(ncclIbCreateQp(ibDev->portNum, &rCommDev->base, IBV_ACCESS_REMOTE_WRITE, &rComm->base.stats, qp), ret, fail);
-+    NCCLCHECKGOTO(ncclIbCreateQp(ibDev->portNum, &rCommDev->base, IBV_ACCESS_REMOTE_WRITE, &rComm->base.stats, qp, channel_id, false, q, remMeta.isP2p), ret, fail);
+-    NCCLCHECKGOTO(ncclIbCreateQp(ibDev->portNum, &rCommDev->base, IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_ATOMIC, &rComm->base.stats, qp), ret, fail);
++    NCCLCHECKGOTO(ncclIbCreateQp(ibDev->portNum, &rCommDev->base, IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_ATOMIC, &rComm->base.stats, qp, channel_id, false, q), ret, fail);
      qp->devIndex = devIndex;
      devIndex = (devIndex + 1) % rComm->base.vProps.ndevs;
  
