@@ -1473,7 +1473,8 @@ if __name__ == '__main__':
         sys.exit(0)
 
     # Detect if ran without sudo or root privileges
-    if os.geteuid() != 0:
+    # Run if only printing commands
+    if os.geteuid() != 0 and not my_args.printCmdsOnly:
         print('Some tests may require elevated privileges (sudo/root) to run completely.\n', file=sys.stderr)
         print('Please relaunch with elevated privileges.\n', file=sys.stderr)
         sys.exit(1)
