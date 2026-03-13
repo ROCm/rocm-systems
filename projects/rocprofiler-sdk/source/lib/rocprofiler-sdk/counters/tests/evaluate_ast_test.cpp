@@ -44,7 +44,7 @@ ReduceOperation
 get_reduce_op_type_from_string(const std::string& op)
 {
     static const std::unordered_map<std::string, ReduceOperation> reduce_op_string_to_type = {
-        {"min", REDUCE_MIN}, {"max", REDUCE_MAX}, {"sum", REDUCE_SUM}, {"avr", REDUCE_AVG}};
+        {"min", REDUCE_MIN}, {"max", REDUCE_MAX}, {"sum", REDUCE_SUM}, {"avr", REDUCE_AVG}, {"avg", REDUCE_AVG}};
 
     ReduceOperation type           = REDUCE_NONE;
     const auto*     reduce_op_type = rocprofiler::common::get_val(reduce_op_string_to_type, op);
@@ -417,6 +417,39 @@ divide_vec(std::vector<rocprofiler_record_counter_t>        a,
     return a;
 };
 
+std::vector<rocprofiler_record_counter_t>
+pmax_vec(std::vector<rocprofiler_record_counter_t>        a,
+         const std::vector<rocprofiler_record_counter_t>& b)
+{
+    for(size_t i = 0; i < a.size(); i++)
+    {
+        a[i].counter_value = std::max(a[i].counter_value, b[i].counter_value);
+    }
+    return a;
+};
+
+std::vector<rocprofiler_record_counter_t>
+pmin_vec(std::vector<rocprofiler_record_counter_t>        a,
+         const std::vector<rocprofiler_record_counter_t>& b)
+{
+    for(size_t i = 0; i < a.size(); i++)
+    {
+        a[i].counter_value = std::min(a[i].counter_value, b[i].counter_value);
+    }
+    return a;
+};
+
+std::vector<rocprofiler_record_counter_t>
+pavg_vec(std::vector<rocprofiler_record_counter_t>        a,
+         const std::vector<rocprofiler_record_counter_t>& b)
+{
+    for(size_t i = 0; i < a.size(); i++)
+    {
+        a[i].counter_value = (a[i].counter_value + b[i].counter_value) / 2.0;
+    }
+    return a;
+};
+
 }  // namespace
 
 TEST(evaluate_ast, evaluate_simple_counters)
@@ -500,6 +533,94 @@ TEST(evaluate_ast, evaluate_simple_counters)
             {"GHOSTFACE",
              minus_vec(base_counter_data["VOORHEES"],
                        plus_vec(base_counter_data["KRUEGER"], base_counter_data["MYERS"])),
+             3},
+        };
+
+    std::unordered_map<uint64_t, std::vector<rocprofiler_record_counter_t>> base_counter_decode;
+    for(const auto& [name, base_counter_v] : base_counter_data)
+    {
+        base_counter_decode[metrics[name].id()] = base_counter_v;
+    }
+
+    for(auto& [name, expected, eval_count] : derived_counters)
+    {
+        ROCP_INFO << name;
+        auto eval_counters =
+            rocprofiler::counters::get_required_hardware_counters(asts, "gfx9", metrics[name]);
+        ASSERT_TRUE(eval_counters);
+        ASSERT_EQ(eval_counters->size(), eval_count);
+        std::vector<std::unique_ptr<std::vector<rocprofiler_record_counter_t>>> cache;
+        asts.at("gfx9").at(name).expand_derived(asts.at("gfx9"));
+        auto ret = asts.at("gfx9").at(name).evaluate(base_counter_decode, cache);
+        EXPECT_EQ(ret->size(), expected.size());
+        int pos = 0;
+        asts.at("gfx9").at(name).set_out_id(*ret);
+        for(const auto& v : *ret)
+        {
+            set_counter_in_rec(expected[pos].id, {.handle = metrics[name].id()});
+            // Compare base metrics extracted from counter IDs
+            auto v_counter_id        = rocprofiler::counters::rec_to_counter_id(v.id);
+            auto expected_counter_id = rocprofiler::counters::rec_to_counter_id(expected[pos].id);
+            auto v_base = rocprofiler::counters::get_base_metric_from_counter_id(v_counter_id);
+            auto expected_base =
+                rocprofiler::counters::get_base_metric_from_counter_id(expected_counter_id);
+            EXPECT_EQ(v_base, expected_base);
+            EXPECT_FLOAT_EQ(v.counter_value, expected[pos].counter_value);
+            pos++;
+        }
+    }
+}
+
+TEST(evaluate_ast, evaluate_pointwise_ops)
+{
+    using namespace rocprofiler::counters;
+
+    auto get_base_rec_id = [](uint64_t counter_id) {
+        rocprofiler_counter_instance_id_t base_id = 0;
+        set_counter_in_rec(base_id, {.handle = counter_id});
+        return base_id;
+    };
+
+    std::unordered_map<std::string, Metric> metrics = {
+        {"VOORHEES", Metric("gfx9", "VOORHEES", "a", "1", "a", "", "", 0)},
+        {"KRUEGER", Metric("gfx9", "KRUEGER", "a", "1", "a", "", "", 1)},
+        {"MYERS", Metric("gfx9", "MYERS", "a", "1", "a", "", "", 2)},
+        {"PMAX_VK", Metric("gfx9", "PMAX_VK", "a", "1", "a", "pmax(VOORHEES,KRUEGER)", "", 3)},
+        {"PMIN_VK", Metric("gfx9", "PMIN_VK", "a", "1", "a", "pmin(VOORHEES,KRUEGER)", "", 4)},
+        {"PAVG_VK", Metric("gfx9", "PAVG_VK", "a", "1", "a", "pavg(VOORHEES,KRUEGER)", "", 5)},
+        {"NESTED_PMAX",
+         Metric("gfx9", "NESTED_PMAX", "a", "1", "a", "pmax(VOORHEES,pmin(KRUEGER,MYERS))", "", 6)}};
+
+    std::unordered_map<std::string, std::vector<rocprofiler_record_counter_t>> base_counter_data = {
+        {"VOORHEES", construct_test_data_dim(get_base_rec_id(0), {ROCPROFILER_DIMENSION_NONE}, 8)},
+        {"KRUEGER", construct_test_data_dim(get_base_rec_id(1), {ROCPROFILER_DIMENSION_NONE}, 8)},
+        {"MYERS", construct_test_data_dim(get_base_rec_id(2), {ROCPROFILER_DIMENSION_NONE}, 8)},
+    };
+
+    std::unordered_map<std::string, std::unordered_map<std::string, EvaluateAST>> asts;
+    for(const auto& [val, metric] : metrics)
+    {
+        RawAST* ast = nullptr;
+        auto*   buf = yy_scan_string(metric.expression().empty() ? metric.name().c_str()
+                                                                 : metric.expression().c_str());
+        yyparse(&ast);
+        ASSERT_TRUE(ast) << metric.expression() << " " << metric.name();
+        asts.emplace("gfx9", std::unordered_map<std::string, EvaluateAST>{})
+            .first->second.emplace(val,
+                                   EvaluateAST({.handle = metric.id()}, metrics, *ast, "gfx9"));
+        yy_delete_buffer(buf);
+        delete ast;
+    }
+
+    // Check derived counter evaluation
+    std::vector<std::tuple<std::string, std::vector<rocprofiler_record_counter_t>, int64_t>>
+        derived_counters = {
+            {"PMAX_VK", pmax_vec(base_counter_data["VOORHEES"], base_counter_data["KRUEGER"]), 2},
+            {"PMIN_VK", pmin_vec(base_counter_data["VOORHEES"], base_counter_data["KRUEGER"]), 2},
+            {"PAVG_VK", pavg_vec(base_counter_data["VOORHEES"], base_counter_data["KRUEGER"]), 2},
+            {"NESTED_PMAX",
+             pmax_vec(base_counter_data["VOORHEES"],
+                      pmin_vec(base_counter_data["KRUEGER"], base_counter_data["MYERS"])),
              3},
         };
 

@@ -55,7 +55,10 @@ enum NodeType
     SELECT_NODE,
     SUBTRACTION_NODE,
     CONSTANT_NODE,
-    ACCUMULATE_NODE
+    ACCUMULATE_NODE,
+    PMAX_NODE,
+    PMIN_NODE,
+    PAVG_NODE
 };
 
 enum class ACCUMULATE_OP_TYPE
@@ -264,6 +267,9 @@ struct formatter<rocprofiler::counters::RawAST>
             {rocprofiler::counters::REFERENCE_NODE, "REFERENCE_NODE"},
             {rocprofiler::counters::SELECT_NODE, "SELECT_NODE"},
             {rocprofiler::counters::SUBTRACTION_NODE, "SUBTRACTION_NODE"},
+            {rocprofiler::counters::PMAX_NODE, "PMAX_NODE"},
+            {rocprofiler::counters::PMIN_NODE, "PMIN_NODE"},
+            {rocprofiler::counters::PAVG_NODE, "PAVG_NODE"},
         };
 
         static std::unordered_map<rocprofiler::counters::ACCUMULATE_OP_TYPE, std::string_view>

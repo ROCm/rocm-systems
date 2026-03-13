@@ -61,4 +61,6 @@ static const std::vector<test_data> test_data_evaluate_simple_reduce = {
     {"Metric_4", "reduce(SQ_WAVES, max, [DIMENSION_XCC])", {}, {30}},
     {"Metric_5", "reduce(SQ_WAVES, avr, [DIMENSION_XCC])", {}, {20}},
     {"Metric_6", "reduce(SQ_WAVES, sum) + reduce(SQ_WAVES, avr)", {}, {80}},
-    {"Metric_7", "reduce(SQ_WAVES, max) - reduce(TCC_HIT, min)", {}, {29}}};
+    {"Metric_7", "reduce(SQ_WAVES, max) - reduce(TCC_HIT, min)", {}, {29}},
+    {"Metric_8", "reduce(SQ_WAVES, avg, [DIMENSION_XCC])", {}, {20}},
+    {"Metric_9", "reduce(SQ_WAVES, avg) + reduce(TCC_HIT, avg)", {}, {22}}};

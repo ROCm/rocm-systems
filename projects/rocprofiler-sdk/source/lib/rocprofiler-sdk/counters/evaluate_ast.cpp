@@ -56,7 +56,7 @@ ReduceOperation
 get_reduce_op_type_from_string(const std::string& op)
 {
     static const std::unordered_map<std::string, ReduceOperation> reduce_op_string_to_type = {
-        {"min", REDUCE_MIN}, {"max", REDUCE_MAX}, {"sum", REDUCE_SUM}, {"avr", REDUCE_AVG}};
+        {"min", REDUCE_MIN}, {"max", REDUCE_MAX}, {"sum", REDUCE_SUM}, {"avr", REDUCE_AVG}, {"avg", REDUCE_AVG}};
 
     ReduceOperation type = REDUCE_NONE;
     if(op.empty()) return REDUCE_NONE;
@@ -490,6 +490,9 @@ EvaluateAST::set_dimensions(rocprofiler_agent_id_t agent_id)
         case SUBTRACTION_NODE:
         case MULTIPLY_NODE:
         case DIVIDE_NODE:
+        case PMAX_NODE:
+        case PMIN_NODE:
+        case PAVG_NODE:
         {
             auto first  = _children.at(0).set_dimensions(agent_id);
             auto second = _children.at(1).set_dimensions(agent_id);
@@ -611,6 +614,9 @@ EvaluateAST::validate_raw_ast(const std::unordered_map<std::string, Metric>& met
             case SUBTRACTION_NODE:
             case MULTIPLY_NODE:
             case DIVIDE_NODE:
+            case PMAX_NODE:
+            case PMIN_NODE:
+            case PAVG_NODE:
             {
                 // For arithmetic operations '+' '-' '*' '/' check if
                 // dimensions of both operands are matching. (handled in set_dimensions())
@@ -907,6 +913,33 @@ EvaluateAST::evaluate(
                 return rocprofiler_counter_record_t{
                     .id            = a.id,
                     .counter_value = (b.counter_value == 0 ? 0 : a.counter_value / b.counter_value),
+                    .dispatch_id   = a.dispatch_id,
+                    .user_data     = {.value = 0},
+                    .agent_id      = {.handle = 0}};
+            });
+        case PMAX_NODE:
+            return perform_op([](auto& a, auto& b) {
+                return rocprofiler_counter_record_t{
+                    .id            = a.id,
+                    .counter_value = std::max(a.counter_value, b.counter_value),
+                    .dispatch_id   = a.dispatch_id,
+                    .user_data     = {.value = 0},
+                    .agent_id      = {.handle = 0}};
+            });
+        case PMIN_NODE:
+            return perform_op([](auto& a, auto& b) {
+                return rocprofiler_counter_record_t{
+                    .id            = a.id,
+                    .counter_value = std::min(a.counter_value, b.counter_value),
+                    .dispatch_id   = a.dispatch_id,
+                    .user_data     = {.value = 0},
+                    .agent_id      = {.handle = 0}};
+            });
+        case PAVG_NODE:
+            return perform_op([](auto& a, auto& b) {
+                return rocprofiler_counter_record_t{
+                    .id            = a.id,
+                    .counter_value = (a.counter_value + b.counter_value) / 2.0,
                     .dispatch_id   = a.dispatch_id,
                     .user_data     = {.value = 0},
                     .agent_id      = {.handle = 0}};

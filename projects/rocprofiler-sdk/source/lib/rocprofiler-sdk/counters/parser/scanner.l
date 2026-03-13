@@ -34,6 +34,9 @@ EXP	([Ee][-+]?[0-9]+)
 "reduce" { return REDUCE; }
 "select" { return SELECT; }
 "accumulate" { return ACCUMULATE; }
+"pmax" { return PMAX; }
+"pmin" { return PMIN; }
+"pavg" { return PAVG; }
 
 [a-z_A-Z][a-z_A-Z0-9]*  { 
     yylval.s = strdup(yytext); 

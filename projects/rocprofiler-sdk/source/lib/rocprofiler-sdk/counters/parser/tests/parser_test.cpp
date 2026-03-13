@@ -360,6 +360,138 @@ TEST(parser, parse_nested_accum_counter)
     }
 }
 
+TEST(parser, pointwise_ops)
+{
+    std::map<std::string, std::string> expressionToExpected = {
+        {"pmax(AB, BA)",
+         "{\"Type\":\"PMAX_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
+         "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
+         "\"ACCUMULATE_OP\":\"NONE\", "
+         "\"Value\":\"AB\", \"Counter_Set\":[], \"Reduce_Dimension_Set\":[], "
+         "\"Select_Dimension_Map\":[]},"
+         "{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
+         "\"Value\":\"BA\", "
+         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]}], "
+         "\"Reduce_Dimension_Set\":[], "
+         "\"Select_Dimension_Map\":[]}"},
+        {"pmin(CD, ZX)",
+         "{\"Type\":\"PMIN_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
+         "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
+         "\"ACCUMULATE_OP\":\"NONE\", "
+         "\"Value\":\"CD\", \"Counter_Set\":[], \"Reduce_Dimension_Set\":[], "
+         "\"Select_Dimension_Map\":[]},"
+         "{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
+         "\"Value\":\"ZX\", "
+         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]}], "
+         "\"Reduce_Dimension_Set\":[], "
+         "\"Select_Dimension_Map\":[]}"},
+        {"pavg(NM, DB)",
+         "{\"Type\":\"PAVG_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
+         "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
+         "\"ACCUMULATE_OP\":\"NONE\", "
+         "\"Value\":\"NM\", \"Counter_Set\":[], \"Reduce_Dimension_Set\":[], "
+         "\"Select_Dimension_Map\":[]},"
+         "{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
+         "\"Value\":\"DB\", "
+         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]}], "
+         "\"Reduce_Dimension_Set\":[], "
+         "\"Select_Dimension_Map\":[]}"}};
+
+    for(auto [op, expected] : expressionToExpected)
+    {
+        RawAST* ast = nullptr;
+        auto*   buf = yy_scan_string(op.c_str());
+        yyparse(&ast);
+        ASSERT_TRUE(ast);
+        EXPECT_EQ(fmt::format("{}", *ast), expected);
+        yy_delete_buffer(buf);
+        delete ast;
+    }
+}
+
+TEST(parser, pointwise_nested)
+{
+    std::vector<std::tuple<std::string, std::string>> expressionToExpected = {
+        {"pmax(AB, reduce(CD, SUM, [DIMENSION_XCC]))",
+         "{\"Type\":\"PMAX_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
+         "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
+         "\"ACCUMULATE_OP\":\"NONE\", \"Value\":\"AB\", "
+         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]},"
+         "{\"Type\":\"REDUCE_NODE\", \"REDUCE_OP\":\"SUM\", \"ACCUMULATE_OP\":\"NONE\", "
+         "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
+         "\"ACCUMULATE_OP\":\"NONE\", \"Value\":\"CD\", "
+         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]}], "
+         "\"Reduce_Dimension_Set\":[\"1\"], \"Select_Dimension_Map\":[]}], "
+         "\"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]}"},
+        {"reduce(pmax(AB, CD), SUM, [DIMENSION_XCC])",
+         "{\"Type\":\"REDUCE_NODE\", \"REDUCE_OP\":\"SUM\", \"ACCUMULATE_OP\":\"NONE\", "
+         "\"Counter_Set\":[{\"Type\":\"PMAX_NODE\", \"REDUCE_OP\":\"\", "
+         "\"ACCUMULATE_OP\":\"NONE\", "
+         "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
+         "\"ACCUMULATE_OP\":\"NONE\", \"Value\":\"AB\", "
+         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]},"
+         "{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
+         "\"Value\":\"CD\", "
+         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]}], "
+         "\"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]}], "
+         "\"Reduce_Dimension_Set\":[\"1\"], \"Select_Dimension_Map\":[]}"},
+        {"pmax(AB, pmin(CD, ZX))",
+         "{\"Type\":\"PMAX_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
+         "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
+         "\"ACCUMULATE_OP\":\"NONE\", \"Value\":\"AB\", "
+         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]},"
+         "{\"Type\":\"PMIN_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
+         "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
+         "\"ACCUMULATE_OP\":\"NONE\", \"Value\":\"CD\", "
+         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]},"
+         "{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
+         "\"Value\":\"ZX\", "
+         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]}], "
+         "\"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]}], "
+         "\"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]}"},
+        {"pavg(AB, CD) + ZX",
+         "{\"Type\":\"ADDITION_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
+         "\"Counter_Set\":[{\"Type\":\"PAVG_NODE\", \"REDUCE_OP\":\"\", "
+         "\"ACCUMULATE_OP\":\"NONE\", "
+         "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
+         "\"ACCUMULATE_OP\":\"NONE\", \"Value\":\"AB\", "
+         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]},"
+         "{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
+         "\"Value\":\"CD\", "
+         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]}], "
+         "\"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]},"
+         "{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
+         "\"Value\":\"ZX\", "
+         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]}], "
+         "\"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]}"},
+        {"pmin(AB, CD) * ZX",
+         "{\"Type\":\"MULTIPLY_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
+         "\"Counter_Set\":[{\"Type\":\"PMIN_NODE\", \"REDUCE_OP\":\"\", "
+         "\"ACCUMULATE_OP\":\"NONE\", "
+         "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
+         "\"ACCUMULATE_OP\":\"NONE\", \"Value\":\"AB\", "
+         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]},"
+         "{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
+         "\"Value\":\"CD\", "
+         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]}], "
+         "\"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]},"
+         "{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
+         "\"Value\":\"ZX\", "
+         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]}], "
+         "\"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]}"}};
+
+    for(auto [op, expected] : expressionToExpected)
+    {
+        RawAST* ast = nullptr;
+        auto*   buf = yy_scan_string(op.c_str());
+        yyparse(&ast);
+        ASSERT_TRUE(ast);
+        EXPECT_EQ(fmt::format("{}", *ast), expected);
+        yy_delete_buffer(buf);
+        delete ast;
+    }
+}
+
 // TEST(parser, parse_complex_counters)
 // {
 //     std::map<std::string, std::string> expressionToExpected = {

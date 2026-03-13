@@ -82,9 +82,12 @@ enum yytokentype
     REDUCE          = 275, /* REDUCE  */
     SELECT          = 276, /* SELECT  */
     ACCUMULATE      = 277, /* ACCUMULATE  */
-    DIM_ARGS_RANGE  = 278, /* DIM_ARGS_RANGE  */
-    LOWER_THAN_ELSE = 279, /* LOWER_THAN_ELSE  */
-    ELSE            = 280  /* ELSE  */
+    PMAX            = 278, /* PMAX  */
+    PMIN            = 279, /* PMIN  */
+    PAVG            = 280, /* PAVG  */
+    DIM_ARGS_RANGE  = 281, /* DIM_ARGS_RANGE  */
+    LOWER_THAN_ELSE = 282, /* LOWER_THAN_ELSE  */
+    ELSE            = 283  /* ELSE  */
 };
 typedef enum yytokentype yytoken_kind_t;
 #endif
@@ -93,14 +96,14 @@ typedef enum yytokentype yytoken_kind_t;
 #if !defined YYSTYPE && !defined YYSTYPE_IS_DECLARED
 union YYSTYPE
 {
-#    line 34 "parser.y"
+#    line 32 "parser.y"
 
     RawAST*     a;  /* For ast node */
     LinkedList* ll; /* For linked list node */
     int64_t     d;
     char*       s;
 
-#    line 103 "parser.h"
+#    line 107 "parser.h"
 };
 typedef union YYSTYPE YYSTYPE;
 #    define YYSTYPE_IS_TRIVIAL  1

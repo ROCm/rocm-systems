@@ -40,6 +40,7 @@ void yyerror(rocprofiler::counters::RawAST**, const char *s) { ROCP_ERROR << s; 
 %token NAME                      /* set data type for variables and user-defined functions */
 %token REDUCE SELECT             /* set data type for special functions */
 %token ACCUMULATE
+%token PMAX PMIN PAVG
 %token DIM_ARGS_RANGE
 %type <a> exp                    /* set data type for expressions */
 %type <s> NAME DIM_ARGS_RANGE
@@ -62,6 +63,9 @@ exp: NUMBER                               { $$ = new RawAST(NUMBER_NODE, $1); }
   | exp SUB exp                           { $$ = new RawAST(SUBTRACTION_NODE, {$1, $3}); }
   | exp MUL exp                           { $$ = new RawAST(MULTIPLY_NODE, {$1, $3}); }
   | exp DIV exp                           { $$ = new RawAST(DIVIDE_NODE, {$1, $3}); }
+  | PMAX OP exp CM exp CP                 { $$ = new RawAST(PMAX_NODE, {$3, $5}); }
+  | PMIN OP exp CM exp CP                 { $$ = new RawAST(PMIN_NODE, {$3, $5}); }
+  | PAVG OP exp CM exp CP                 { $$ = new RawAST(PAVG_NODE, {$3, $5}); }
   | OP exp CP                             { $$ = $2; }
   | NAME                                  { $$ = new RawAST(REFERENCE_NODE, $1);
                                             free($1);
