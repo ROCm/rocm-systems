@@ -663,9 +663,7 @@ class InteractiveSession:
         _print(f"  Running: $ {selected_cmd}", style="cyan")
         _print()
 
-        import subprocess
-
-        proc = subprocess.run(selected_cmd, shell=True)
+        proc = subprocess.run(shlex.split(selected_cmd))
         _print()
         if proc.returncode != 0:
             _print(f"  Command exited with code {proc.returncode}.", style="yellow")
@@ -944,7 +942,7 @@ class InteractiveSession:
         _print()
         _print(f"  Running: $ {cmd}", style="cyan")
         _print()
-        proc = subprocess.run(cmd, shell=True)
+        proc = subprocess.run(shlex.split(cmd))
         _print()
         if proc.returncode != 0:
             _print(f"  Command exited with code {proc.returncode}.", style="yellow")
@@ -1691,7 +1689,7 @@ class InteractiveSession:
             _print()
             _print(f"  Running: $ {cmd}", style="cyan")
             _print()
-            proc = subprocess.run(cmd, shell=True, check=False)
+            proc = subprocess.run(shlex.split(cmd), check=False)
             _print()
             if proc.returncode != 0:
                 _print(f"  Command exited with code {proc.returncode}.", style="yellow")
@@ -3155,7 +3153,7 @@ class WorkflowSession:
         try:
             choice = _input("  > ").strip()
             idx = int(choice) - 1
-            if 0 <= idx < len(files):
+            if 0 <= idx < min(len(files), 15):
                 return files[idx]
         except (ValueError, EOFError):
             pass

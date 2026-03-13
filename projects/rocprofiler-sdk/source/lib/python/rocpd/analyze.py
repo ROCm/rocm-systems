@@ -1037,17 +1037,12 @@ def generate_recommendations(
                                     "name": "--pmc",
                                     "value": "GRBM_COUNT GRBM_GUI_ACTIVE SQ_WAVES",
                                 },
-                                {
-                                    "name": "--kernel-names",
-                                    "value": kernel_name,
-                                },  # display only; full_command uses shlex.quote
                                 {"name": "-d", "value": "./kernel_output"},
                                 {"name": "-o", "value": "profile"},
                             ],
                             "full_command": (
-                                f"rocprofv3 --sys-trace --pmc GRBM_COUNT GRBM_GUI_ACTIVE SQ_WAVES"
-                                f" --kernel-names {shlex.quote(kernel_name)}"
-                                f" -d ./kernel_output -o profile -- ./app"
+                                "rocprofv3 --sys-trace --pmc GRBM_COUNT GRBM_GUI_ACTIVE"
+                                " SQ_WAVES -d ./kernel_output -o profile -- ./app"
                             ),
                         },
                         {
@@ -1265,6 +1260,7 @@ def _format_as_json(
     interval_timeline=None,
     kernel_categories=None,
     short_kernels=None,
+    custom_prompt: Optional[str] = None,
 ) -> str:
     """Serialize analysis results to JSON conforming to the current schema version (v0.3.0 when TraceLens fields are present, v0.1.0 otherwise).
 
@@ -1302,7 +1298,7 @@ def _format_as_json(
             "database_file": database_path,
             "analysis_timestamp": datetime.now().isoformat(),
             "analysis_duration_ms": 0,
-            "custom_prompt": None,
+            "custom_prompt": custom_prompt,
         },
         # --- profiling_info ---
         "profiling_info": {
@@ -3956,6 +3952,7 @@ def format_analysis_output(
     ] = None,  # NEW (TraceLens) — logic in Task 4
     kernel_categories: Optional[List[Any]] = None,  # NEW (TraceLens) — logic in Task 4
     short_kernels: Optional[Dict[str, Any]] = None,  # NEW (TraceLens) — logic in Task 4
+    custom_prompt: Optional[str] = None,
 ) -> str:
     """
     Format analysis results for display.
@@ -3994,6 +3991,7 @@ def format_analysis_output(
             interval_timeline=interval_timeline,
             kernel_categories=kernel_categories,
             short_kernels=short_kernels,
+            custom_prompt=custom_prompt,
         )
         # Combined mode: embed tier0 into JSON document
         if tier0_result is not None:
@@ -4493,6 +4491,7 @@ def analyze_performance(
         interval_timeline=interval_timeline,  # NEW (TraceLens)
         kernel_categories=kernel_categories,  # NEW (TraceLens)
         short_kernels=short_kernels_data,  # NEW (TraceLens)
+        custom_prompt=prompt,
     )
 
     # Expose structured results to caller (used by interactive mode)

@@ -592,3 +592,88 @@ rocprofiler_add_integration_execute_test(
     LABELS "integration-tests;rocpd;pytest"
     ENVIRONMENT "${rocprofv3-rocpd-env}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+#########################################################################################
+#
+# AI analysis module sub-package unit tests
+# Source: source/lib/python/rocpd/ai_analysis/tests/
+# Tests are mock-based; no GPU trace fixture or LLM API key required.
+# Optional-provider tests (anthropic/openai) are skipped when packages are absent.
+#
+#########################################################################################
+
+set(_AI_ANALYSIS_TESTS_DIR
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../../source/lib/python/rocpd/ai_analysis/tests")
+
+configure_file("${_AI_ANALYSIS_TESTS_DIR}/test_api_standalone.py"
+               "${CMAKE_CURRENT_BINARY_DIR}/test_api_standalone.py" COPYONLY)
+configure_file("${_AI_ANALYSIS_TESTS_DIR}/test_llm_conversation.py"
+               "${CMAKE_CURRENT_BINARY_DIR}/test_llm_conversation_standalone.py" COPYONLY)
+configure_file("${_AI_ANALYSIS_TESTS_DIR}/test_local_llm.py"
+               "${CMAKE_CURRENT_BINARY_DIR}/test_local_llm_standalone.py" COPYONLY)
+configure_file("${_AI_ANALYSIS_TESTS_DIR}/test_interactive.py"
+               "${CMAKE_CURRENT_BINARY_DIR}/test_interactive_standalone.py" COPYONLY)
+configure_file("${_AI_ANALYSIS_TESTS_DIR}/test_workflow.py"
+               "${CMAKE_CURRENT_BINARY_DIR}/test_workflow_standalone.py" COPYONLY)
+configure_file("${_AI_ANALYSIS_TESTS_DIR}/test_tracelens_port.py"
+               "${CMAKE_CURRENT_BINARY_DIR}/test_tracelens_port_standalone.py" COPYONLY)
+
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-rocpd-api-unit-tests
+    COMMAND ${Python3_EXECUTABLE} -m pytest --noconftest -x
+            ${CMAKE_CURRENT_BINARY_DIR}/test_api_standalone.py
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 120
+    LABELS "integration-tests;rocpd;pytest"
+    ENVIRONMENT "${rocprofv3-rocpd-env}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-rocpd-llm-conversation-unit-tests
+    COMMAND ${Python3_EXECUTABLE} -m pytest --noconftest -x
+            ${CMAKE_CURRENT_BINARY_DIR}/test_llm_conversation_standalone.py
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 120
+    LABELS "integration-tests;rocpd;pytest"
+    ENVIRONMENT "${rocprofv3-rocpd-env}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-rocpd-local-llm-unit-tests
+    COMMAND ${Python3_EXECUTABLE} -m pytest --noconftest -x
+            ${CMAKE_CURRENT_BINARY_DIR}/test_local_llm_standalone.py
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 120
+    LABELS "integration-tests;rocpd;pytest"
+    ENVIRONMENT "${rocprofv3-rocpd-env}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-rocpd-interactive-unit-tests
+    COMMAND ${Python3_EXECUTABLE} -m pytest --noconftest -x
+            ${CMAKE_CURRENT_BINARY_DIR}/test_interactive_standalone.py
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 120
+    LABELS "integration-tests;rocpd;pytest"
+    ENVIRONMENT "${rocprofv3-rocpd-env}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-rocpd-workflow-unit-tests
+    COMMAND ${Python3_EXECUTABLE} -m pytest --noconftest -x
+            ${CMAKE_CURRENT_BINARY_DIR}/test_workflow_standalone.py
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 120
+    LABELS "integration-tests;rocpd;pytest"
+    ENVIRONMENT "${rocprofv3-rocpd-env}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-rocpd-tracelens-port-unit-tests
+    COMMAND ${Python3_EXECUTABLE} -m pytest --noconftest -x
+            ${CMAKE_CURRENT_BINARY_DIR}/test_tracelens_port_standalone.py
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 120
+    LABELS "integration-tests;rocpd;pytest"
+    ENVIRONMENT "${rocprofv3-rocpd-env}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
