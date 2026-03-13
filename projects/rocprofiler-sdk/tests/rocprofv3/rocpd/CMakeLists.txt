@@ -412,9 +412,8 @@ rocprofiler_add_integration_execute_test(
 # Test analyze on existing database
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-rocpd-analyze
-    COMMAND
-        ${Python3_EXECUTABLE} -m rocpd analyze -i
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db --top-kernels 5
+    COMMAND ${Python3_EXECUTABLE} -m rocpd analyze -i
+            ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db --top-kernels 5
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 120
     LABELS "integration-tests;rocpd"
@@ -440,9 +439,8 @@ rocprofiler_add_integration_execute_test(
 # Test analyze with custom top-kernels
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-rocpd-analyze-top-kernels
-    COMMAND
-        ${Python3_EXECUTABLE} -m rocpd analyze -i
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db --top-kernels 20
+    COMMAND ${Python3_EXECUTABLE} -m rocpd analyze -i
+            ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db --top-kernels 20
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 120
     LABELS "integration-tests;rocpd"
@@ -516,11 +514,12 @@ rocprofiler_add_integration_execute_test(
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/test_analyze_schema.py
                ${CMAKE_CURRENT_BINARY_DIR}/test_analyze_schema_standalone.py COPYONLY)
 
-# Unit schema tests: validate the schema file structure and synthetic JSON output.
-# No database fixture needed - uses synthetic data generated in-process.
+# Unit schema tests: validate the schema file structure and synthetic JSON output. No
+# database fixture needed - uses synthetic data generated in-process.
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-rocpd-analyze-schema-unit-tests
-    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/test_analyze_schema_standalone.py
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_BINARY_DIR}/test_analyze_schema_standalone.py
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 120
     LABELS "integration-tests;rocpd;pytest"
@@ -559,11 +558,12 @@ rocprofiler_add_integration_execute_test(
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/test_ai_analysis_standalone.py
                ${CMAKE_CURRENT_BINARY_DIR}/test_ai_analysis_standalone.py COPYONLY)
 
-# AI analysis API unit tests (run from build dir to avoid conftest.py issues)
-# These tests do not require a GPU trace fixture — they test the Python API in isolation.
+# AI analysis API unit tests (run from build dir to avoid conftest.py issues) These tests
+# do not require a GPU trace fixture — they test the Python API in isolation.
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-rocpd-ai-analysis-unit-tests
-    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/test_ai_analysis_standalone.py
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_BINARY_DIR}/test_ai_analysis_standalone.py
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 120
     LABELS "integration-tests;rocpd;pytest"
@@ -583,7 +583,8 @@ configure_file(${CMAKE_CURRENT_SOURCE_DIR}/test_guide_filter_standalone.py
 # Guide filtering unit tests — no GPU trace fixture required; no LLM API calls made.
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-rocpd-guide-filter-unit-tests
-    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/test_guide_filter_standalone.py
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_BINARY_DIR}/test_guide_filter_standalone.py
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 120
     LABELS "integration-tests;rocpd;pytest"

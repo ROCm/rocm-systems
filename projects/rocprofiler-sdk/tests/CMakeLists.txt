@@ -55,13 +55,16 @@ find_package(rocprofiler_sdk_pytest REQUIRED)
 # get the gfx architectures that are present on the system
 rocprofiler_sdk_get_gfx_architectures(rocprofiler-sdk-tests-gfx-info ECHO)
 # Guard: if no GPUs detected (e.g. CI build machine without hardware), populate with a
-# placeholder so sub-CMakeLists that do list(GET ...) do not fail with "empty list".
-# The placeholder "gfx000" matches none of the known GPU patterns and is treated as
-# "disabled" by all callers that check architecture strings.
+# placeholder so sub-CMakeLists that do list(GET ...) do not fail with "empty list". The
+# placeholder "gfx000" matches none of the known GPU patterns and is treated as "disabled"
+# by all callers that check architecture strings.
 list(LENGTH rocprofiler-sdk-tests-gfx-info _gfx_list_len)
 if(_gfx_list_len EQUAL 0)
     set(rocprofiler-sdk-tests-gfx-info "gfx000")
-    message(STATUS "[rocprofiler-sdk] No GPUs detected; tests requiring hardware will be disabled.")
+    message(
+        STATUS
+            "[rocprofiler-sdk] No GPUs detected; tests requiring hardware will be disabled."
+        )
 endif()
 
 # configure python module <BINARY_DIR>/rocprofiler_sdk/pytest_utils

@@ -59,7 +59,9 @@ function(rocprofiler_sdk_pc_sampling_disabled _VAR)
     # Guard against empty GPU list (e.g. build machine without GPUs)
     list(LENGTH rocprofiler-sdk-tests-gfx-info _gfx_list_len)
     if(_gfx_list_len EQUAL 0)
-        set(${_VAR} TRUE PARENT_SCOPE)
+        set(${_VAR}
+            TRUE
+            PARENT_SCOPE)
         if(ARG_ECHO)
             message(STATUS "PC Sampling is disabled (no GPUs detected)")
         endif()
@@ -100,7 +102,9 @@ function(rocprofiler_sdk_pc_sampling_stochastic_disabled _VAR)
     # Guard against empty GPU list (e.g. build machine without GPUs)
     list(LENGTH rocprofiler-sdk-tests-gfx-info _gfx_list_len)
     if(_gfx_list_len EQUAL 0)
-        set(${_VAR} TRUE PARENT_SCOPE)
+        set(${_VAR}
+            TRUE
+            PARENT_SCOPE)
         if(ARG_ECHO)
             message(STATUS "Stochastic PC Sampling is disabled (no GPUs detected)")
         endif()
