@@ -584,7 +584,7 @@ def test_build_blacklist_block_contains_description():
     ws = _make_ws_with_checkpoints()
     ws._blacklist_checkpoint(1)
     block = ws._build_blacklist_block()
-    assert "Blacklisted Approaches" in block
+    assert "Blacklisted approaches" in block
     assert "edit 1" in block
 
 
@@ -712,7 +712,7 @@ def test_stale_worktrees_pruned_on_start():
         "/repo/.git",                             # not under sessions_dir → ignore
     ]), \
     patch.object(ws._gcm, "remove_worktree") as mock_remove, \
-    patch("pathlib.Path.exists", side_effect=lambda: False):  # no JSON files exist
+    patch("pathlib.Path.exists", return_value=False):  # no JSON files exist
         ws._prune_stale_worktrees()
 
     # Only the other_session worktree should be pruned

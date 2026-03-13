@@ -1970,6 +1970,7 @@ class WorkflowState:
     baseline_commit: str = ""
     checkpoints: List[CheckpointRecord] = field(default_factory=list)
     active_checkpoint: Optional[int] = None
+    blacklisted_approaches: List[str] = field(default_factory=list)
 
 
 def _edit_summary_from_suggestions(suggestions: str) -> str:
@@ -2076,6 +2077,7 @@ class WorkflowSession:
                 "       git commit  (commit your work-in-progress)\n",
                 style="yellow",
             )
+            self._gcm = None  # Reset since init is being aborted
             raise SystemExit(1)
 
         self._state.repo_root = repo_root
@@ -2212,7 +2214,11 @@ class WorkflowSession:
                 modified_after.update(cp.files_modified)
             target_snapshots: Dict[str, str] = {}
         else:
-            target = self._state.checkpoints[target_cp_id]
+            matches = [cp for cp in self._state.checkpoints if cp.cp_id == target_cp_id]
+            if not matches:
+                _print(f"  Checkpoint {target_cp_id} not found.", style="dim")
+                return
+            target = matches[0]
             target_hash = target.commit_hash
             modified_after = set()
             for cp in self._state.checkpoints:
@@ -2265,7 +2271,7 @@ class WorkflowSession:
             self._state.iteration_count = 0
             self._state.active_checkpoint = None
         else:
-            run_idx = self._state.checkpoints[target_cp_id].run_index
+            run_idx = target.run_index
             if run_idx is not None:
                 self._state.trace_history = self._state.trace_history[: run_idx + 1]
                 self._state.analysis_history = self._state.analysis_history[: run_idx + 1]
@@ -2280,7 +2286,10 @@ class WorkflowSession:
 
     def _blacklist_checkpoint(self, cp_id: int) -> None:
         """Mark a checkpoint as blacklisted using its edit_summary as category."""
-        cp = self._state.checkpoints[cp_id]
+        matches = [cp for cp in self._state.checkpoints if cp.cp_id == cp_id]
+        if not matches:
+            return
+        cp = matches[0]
         delta_str = (
             f"{cp.performance_delta_pct:.1f}%"
             if cp.performance_delta_pct is not None
@@ -2292,22 +2301,26 @@ class WorkflowSession:
             f"'{cp.edit_summary}' caused {delta_str} performance regression. "
             "Do not suggest this approach again."
         )
+        self._state.blacklisted_approaches.append(cp.blacklist_description)
         self._save_session()
 
     def _build_blacklist_block(self) -> str:
         """Return LLM prompt block for all blacklisted checkpoints.
 
-        Deduplicates by blacklist_category. Returns empty string when none blacklisted.
+        Uses the persistent blacklisted_approaches list so entries survive rollback.
+        Deduplicates. Returns empty string when none blacklisted.
         """
-        seen: set = set()
-        entries = []
-        for cp in self._state.checkpoints:
-            if cp.blacklisted and cp.blacklist_category not in seen:
-                seen.add(cp.blacklist_category)
-                entries.append(f"- {cp.blacklist_description}")
-        if not entries:
+        approaches = self._state.blacklisted_approaches
+        if not approaches:
             return ""
-        lines = ["### Blacklisted Approaches \u2014 Do NOT suggest these"] + entries
+        seen: set = set()
+        lines = ["# Blacklisted approaches (do NOT use these):", ""]
+        for desc in approaches:
+            if desc and desc not in seen:
+                seen.add(desc)
+                lines.append(f"- {desc}")
+        if len(lines) <= 2:
+            return ""
         return "\n".join(lines) + "\n"
 
     def _show_checkpoint_picker(self) -> Optional[int]:
@@ -3868,9 +3881,8 @@ class WorkflowSession:
             # are consistent even if a build system touches the file mid-call.
             original = chosen.read_text()
             blacklist_block = self._build_blacklist_block()
-            if blacklist_block:
-                suggestions = blacklist_block + "\n" + suggestions
-            rewritten = self._llm_rewrite_file(chosen, suggestions)
+            effective_suggestions = (blacklist_block + "\n" + suggestions) if blacklist_block else suggestions
+            rewritten = self._llm_rewrite_file(chosen, effective_suggestions)
             while rewritten is None:
                 try:
                     ans = _input("  Retry LLM rewrite? [y/N]  ").strip().lower()
@@ -3878,7 +3890,7 @@ class WorkflowSession:
                     return None
                 if ans != "y":
                     return None
-                rewritten = self._llm_rewrite_file(chosen, suggestions)
+                rewritten = self._llm_rewrite_file(chosen, effective_suggestions)
 
             import difflib
 
