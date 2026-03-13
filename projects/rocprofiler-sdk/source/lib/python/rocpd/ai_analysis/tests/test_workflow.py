@@ -689,3 +689,33 @@ def test_blacklist_block_injected_into_phase6_prompt():
         ws._phase6_apply_direct(snap)
 
     assert any("Blacklisted" in s for s in captured_suggestions)
+
+
+def test_worktrees_removed_on_session_exit():
+    ws = _make_ws_with_checkpoints()
+
+    with patch.object(ws._gcm, "remove_worktree") as mock_remove, \
+         patch.object(ws, "_save_session"), \
+         patch.object(ws, "_init_checkpoints"):
+        ws._teardown_checkpoints()
+
+    assert mock_remove.call_count == 3  # 3 checkpoints
+
+
+def test_stale_worktrees_pruned_on_start():
+    ws = _make_ws_with_checkpoints()
+    sessions_dir = str(ws._sessions_dir)
+
+    with patch.object(ws._gcm, "list_worktrees", return_value=[
+        f"{sessions_dir}/other_session/cp-0",   # no JSON → stale
+        f"{sessions_dir}/{ws._session_id}/cp-0", # current session → keep
+        "/repo/.git",                             # not under sessions_dir → ignore
+    ]), \
+    patch.object(ws._gcm, "remove_worktree") as mock_remove, \
+    patch("pathlib.Path.exists", side_effect=lambda: False):  # no JSON files exist
+        ws._prune_stale_worktrees()
+
+    # Only the other_session worktree should be pruned
+    pruned_paths = [str(c.args[0]) for c in mock_remove.call_args_list]
+    assert any("other_session" in p for p in pruned_paths)
+    assert not any(ws._session_id in p for p in pruned_paths)

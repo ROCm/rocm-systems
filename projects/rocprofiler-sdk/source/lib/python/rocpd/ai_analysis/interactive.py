@@ -2389,6 +2389,51 @@ class WorkflowSession:
 
         return target_cp_id
 
+    def _teardown_checkpoints(self) -> None:
+        """Remove all checkpoint worktrees on session exit.
+
+        Refs (refs/rocpd/…) are kept so commits survive GC until
+        the user runs 'rocpd sessions --cleanup'.
+        """
+        if self._gcm is None:
+            return
+        for cp in self._state.checkpoints:
+            self._gcm.remove_worktree(cp.worktree_path)
+
+    def _prune_stale_worktrees(self) -> None:
+        """Remove worktrees under ~/.rocpd/sessions/ with no matching session JSON.
+
+        Called at session start, after git repo is detected.
+        """
+        if self._gcm is None:
+            return
+        sessions_dir = str(self._sessions_dir)
+        try:
+            worktree_paths = self._gcm.list_worktrees()
+        except Exception:
+            return
+
+        for path in worktree_paths:
+            if not path.startswith(sessions_dir + os.sep):
+                continue
+            # Extract session_id: first path component after sessions_dir
+            rel = path[len(sessions_dir) + 1:]
+            parts = rel.split(os.sep)
+            if not parts:
+                continue
+            session_id = parts[0]
+            # Never prune the current session's own worktrees
+            if session_id == self._session_id:
+                continue
+            # Check for matching session JSON
+            json_candidates = [
+                self._sessions_dir / f"workflow_{session_id}.json",
+                self._sessions_dir / f"{session_id}.json",
+            ]
+            if not any(p.exists() for p in json_candidates):
+                self._gcm.remove_worktree(path)
+                _print(f"  Pruned stale checkpoint worktree: {path}", style="dim")
+
     # ── Phase 1b: Quick workload analysis ──────────────────────────────────────
 
     @staticmethod
@@ -4061,6 +4106,9 @@ class WorkflowSession:
                 if not pathlib.Path(sp).exists():
                     _print(f"  Warning: --source path not found: {sp}", style="yellow")
 
+            self._init_checkpoints()
+            self._prune_stale_worktrees()
+
             # Phase 1b: quick workload analysis → derive best starter command.
             # _phase1b always classifies the app; if it returns None we still want
             # app_info (uses_fork etc.) so _build_profiling_command can use %nid%.
@@ -4116,5 +4164,6 @@ class WorkflowSession:
             _print()
             _print("  Interrupted.", style="yellow")
         finally:
+            self._teardown_checkpoints()
             self._save_session()
             self.print_session_summary()
