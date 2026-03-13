@@ -37,7 +37,7 @@ rocprofiler-sdk:
     - architectures:
       - gfx90a
       expression: reduce(SQ_THREAD_CYCLES_VALU,sum)/reduce(SQ_ACTIVE_INST_VALU,sum)
-  - name: CPC_STAT_BUSY
+  - name: CPC_CPC_STAT_BUSY
     description: CPC Busy.
     properties: []
     definitions:
@@ -52,7 +52,22 @@ rocprofiler-sdk:
       - gfx1152
       block: CPC
       event: 25
-  - name: CPC_STAT_IDLE
+  - name: CPC_STAT_BUSY # Name correction for CPC_CPC_STAT_BUSY to avoid duplication
+    description: CPC Busy.
+    properties: []
+    definitions:
+    - architectures:
+      - gfx90a
+      - gfx908
+      - gfx940
+      - gfx941
+      - gfx942
+      - gfx950
+      - gfx1151
+      - gfx1152
+      block: CPC
+      event: 25
+  - name: CPC_CPC_STAT_IDLE
     description: CPC Idle.
     properties: []
     definitions:
@@ -67,7 +82,22 @@ rocprofiler-sdk:
       - gfx1152
       block: CPC
       event: 26
-  - name: CPC_STAT_STALL
+  - name: CPC_STAT_IDLE # Name correction for CPC_CPC_STAT_IDLE to avoid duplication
+    description: CPC Idle.
+    properties: []
+    definitions:
+    - architectures:
+      - gfx90a
+      - gfx908
+      - gfx940
+      - gfx941
+      - gfx942
+      - gfx950
+      - gfx1151
+      - gfx1152
+      block: CPC
+      event: 26
+  - name: CPC_CPC_STAT_STALL
     description: CPC Stalled.
     properties: []
     definitions:
@@ -82,7 +112,22 @@ rocprofiler-sdk:
       - gfx1152
       block: CPC
       event: 27
-  - name: CPC_TCIU_BUSY
+  - name: CPC_STAT_STALL # Name correction for CPC_CPC_STAT_STALL to avoid duplication
+    description: CPC Stalled.
+    properties: []
+    definitions:
+    - architectures:
+      - gfx90a
+      - gfx908
+      - gfx940
+      - gfx941
+      - gfx942
+      - gfx950
+      - gfx1151
+      - gfx1152
+      block: CPC
+      event: 27
+  - name: CPC_CPC_TCIU_BUSY
     description: CPC TCIU interface Busy.
     properties: []
     definitions:
@@ -97,7 +142,22 @@ rocprofiler-sdk:
       - gfx1152
       block: CPC
       event: 28
-  - name: CPC_TCIU_IDLE
+  - name: CPC_TCIU_BUSY # Name correction for CPC_CPC_TCIU_BUSY to avoid duplication
+    description: CPC TCIU interface Busy.
+    properties: []
+    definitions:
+    - architectures:
+      - gfx90a
+      - gfx908
+      - gfx940
+      - gfx941
+      - gfx942
+      - gfx950
+      - gfx1151
+      - gfx1152
+      block: CPC
+      event: 28
+  - name: CPC_CPC_TCIU_IDLE
     description: CPC TCIU interface Idle.
     properties: []
     definitions:
@@ -112,7 +172,22 @@ rocprofiler-sdk:
       - gfx1152
       block: CPC
       event: 29
-  - name: CPC_UTCL2IU_BUSY
+  - name: CPC_TCIU_IDLE # Name correction for CPC_CPC_TCIU_IDLE to avoid duplication
+    description: CPC TCIU interface Idle.
+    properties: []
+    definitions:
+    - architectures:
+      - gfx90a
+      - gfx908
+      - gfx940
+      - gfx941
+      - gfx942
+      - gfx950
+      - gfx1151
+      - gfx1152
+      block: CPC
+      event: 29
+  - name: CPC_CPC_UTCL2IU_BUSY
     description: CPC UTCL2 interface Busy.
     properties: []
     definitions:
@@ -127,7 +202,22 @@ rocprofiler-sdk:
       - gfx1152
       block: CPC
       event: 30
-  - name: CPC_UTCL2IU_IDLE
+  - name: CPC_UTCL2IU_BUSY # Name correction for CPC_CPC_UTCL2IU_BUSY to avoid duplication
+    description: CPC UTCL2 interface Busy.
+    properties: []
+    definitions:
+    - architectures:
+      - gfx90a
+      - gfx908
+      - gfx940
+      - gfx941
+      - gfx942
+      - gfx950
+      - gfx1151
+      - gfx1152
+      block: CPC
+      event: 30
+  - name: CPC_CPC_UTCL2IU_IDLE
     description: CPC UTCL2 interface Idle.
     properties: []
     definitions:
@@ -142,7 +232,37 @@ rocprofiler-sdk:
       - gfx1152
       block: CPC
       event: 31
-  - name: CPC_UTCL2IU_STALL
+  - name: CPC_UTCL2IU_IDLE # Name correction for CPC_CPC_UTCL2IU_IDLE to avoid duplication
+    description: CPC UTCL2 interface Idle.
+    properties: []
+    definitions:
+    - architectures:
+      - gfx90a
+      - gfx908
+      - gfx940
+      - gfx941
+      - gfx942
+      - gfx950
+      - gfx1151
+      - gfx1152
+      block: CPC
+      event: 31
+  - name: CPC_CPC_UTCL2IU_STALL
+    description: CPC UTCL2 interface Stalled waiting on Free, Tags or Translation.
+    properties: []
+    definitions:
+    - architectures:
+      - gfx90a
+      - gfx908
+      - gfx940
+      - gfx941
+      - gfx942
+      - gfx950
+      - gfx1151
+      - gfx1152
+      block: CPC
+      event: 32
+  - name: CPC_UTCL2IU_STALL # Name correction for CPC_CPC_UTCL2IU_STALL to avoid duplication
     description: CPC UTCL2 interface Stalled waiting on Free, Tags or Translation.
     properties: []
     definitions:
@@ -1362,6 +1482,20 @@ rocprofiler-sdk:
       event: 25
   - name: GRBM_GL2CC_BUSY
     description: The GL2CC block is busy.
+    properties: []
+    definitions:
+    - architectures:
+      - gfx10
+      - gfx1010
+      - gfx1030
+      - gfx1031
+      - gfx1032
+      - gfx1151
+      - gfx1152
+      block: GRBM
+      event: 40
+  - name: GRBM_GL2C_BUSY # Name chosen to avoid confusion with GL2CC busy which is a different block
+    description: The GL2C block is busy.
     properties: []
     definitions:
     - architectures:
@@ -4866,6 +5000,26 @@ rocprofiler-sdk:
       - gfx950
       block: SQ
       event: 146
+    # For gfx115x, SQ_LDS_ATOMIC_RETURN is the same as SQC_LDS_ATOMIC_RETURN
+    - architectures:
+      - gfx1151
+      - gfx1152
+      block: SQ
+      event: 260
+  - name: SQ_LDS_ATOMIC_RETURN_sum
+    description: ''
+    properties: []
+    definitions:
+    - architectures:
+      - gfx90a
+      - gfx908
+      - gfx940
+      - gfx941
+      - gfx942
+      - gfx950
+      - gfx1151
+      - gfx1152
+      expression: reduce(SQ_LDS_ATOMIC_RETURN,sum)
   - name: SQ_LDS_BANK_CONFLICT
     description: The number of cycles LDS (local data store) is stalled by bank conflicts. This value is returned on a per-SE
       (aggregate of values in SIMDs in the SE) basis.
@@ -4895,6 +5049,29 @@ rocprofiler-sdk:
       - gfx950
       block: SQ
       event: 142
+    # For gfx115x, SQ_LDS_BANK_CONFLICT is the same as SQC_LDS_BANK_CONFLICT
+    - architectures:
+      - gfx1151
+      - gfx1152
+      block: SQ
+      event: 256
+  - name: SQ_LDS_BANK_CONFLICT_sum
+    description: ''
+    properties: []
+    definitions:
+    - architectures:
+      - gfx9
+      - gfx900
+      - gfx906
+      - gfx90a
+      - gfx908
+      - gfx940
+      - gfx941
+      - gfx942
+      - gfx950
+      - gfx1151
+      - gfx1152
+      expression: reduce(SQ_LDS_BANK_CONFLICT,sum)
   - name: SQ_LDS_IDX_ACTIVE
     description: Number of cycles LDS (local data store) is used for indexed (non-direct,non-interpolation) operations. This
       value is returned on a per-SE (aggregate of values in SIMDs in the SE) basis.
@@ -4918,6 +5095,26 @@ rocprofiler-sdk:
       - gfx950
       block: SQ
       event: 147
+    # For gfx115x, SQ_LDS_IDX_ACTIVE is the same as SQC_LDS_IDX_ACTIVE
+    - architectures:
+      - gfx1151
+      - gfx1152
+      block: SQ
+      event: 261
+  - name: SQ_LDS_IDX_ACTIVE_sum
+    description: ''
+    properties: []
+    definitions:
+    - architectures:
+      - gfx90a
+      - gfx908
+      - gfx940
+      - gfx941
+      - gfx942
+      - gfx950
+      - gfx1151
+      - gfx1152
+      expression: reduce(SQ_LDS_IDX_ACTIVE,sum)
   - name: SQ_LDS_MEM_VIOLATIONS
     description: Number of threads that have a memory violation in the LDS (local data store). This value is returned on a
       per-SE (aggregate of values in SIMDs in the SE) basis.
@@ -4941,6 +5138,26 @@ rocprofiler-sdk:
       - gfx950
       block: SQ
       event: 145
+    # For gfx115x, SQ_LDS_MEM_VIOLATIONS is the same as SQC_LDS_MEM_VIOLATIONS
+    - architectures:
+      - gfx1151
+      - gfx1152
+      block: SQ
+      event: 259
+  - name: SQ_LDS_MEM_VIOLATIONS_sum
+    description: ''
+    properties: []
+    definitions:
+    - architectures:
+      - gfx90a
+      - gfx908
+      - gfx940
+      - gfx941
+      - gfx942
+      - gfx950
+      - gfx1151
+      - gfx1152
+      expression: reduce(SQ_LDS_MEM_VIOLATIONS,sum)
   - name: SQ_LDS_UNALIGNED_STALL
     description: Number of cycles LDS (local data store) is stalled processing flat unaligned load/store ops. This value is
       returned on a per-SE (aggregate of values in SIMDs in the SE) basis.
@@ -4964,6 +5181,26 @@ rocprofiler-sdk:
       - gfx950
       block: SQ
       event: 144
+    # For gfx115x, SQ_LDS_UNALIGNED_STALL is the same as SQC_LDS_UNALIGNED_STALL
+    - architectures:
+      - gfx1151
+      - gfx1152
+      block: SQ
+      event: 258
+  - name: SQ_LDS_UNALIGNED_STALL_sum
+    description: ''
+    properties: []
+    definitions:
+    - architectures:
+      - gfx90a
+      - gfx908
+      - gfx940
+      - gfx941
+      - gfx942
+      - gfx950
+      - gfx1151
+      - gfx1152
+      expression: reduce(SQ_LDS_UNALIGNED_STALL,sum)
   - name: SQ_LEVEL_WAVES
     description: Level count number of waves. Set ACCUM_PREV for the next counter to use this. This value is returned on a
       per-SIMD basis.
@@ -22530,6 +22767,14 @@ rocprofiler-sdk:
       - gfx1151
       - gfx1152
       expression: reduce(GRBM_GL2CC_BUSY,sum)
+  - name: GRBM_GL2C_BUSY_sum # name is historical, GL2C and GL2CC are the same block
+    description: ''
+    properties: []
+    definitions:
+    - architectures:
+      - gfx1151
+      - gfx1152
+      expression: reduce(GRBM_GL2C_BUSY,sum)
   - name: GRBM_GUI_ACTIVE_sum
     description: ''
     properties: []
