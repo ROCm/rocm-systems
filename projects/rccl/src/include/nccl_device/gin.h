@@ -6,7 +6,7 @@
 
 #ifndef _NCCL_DEVICE_GIN_SESSION_H_
 #define _NCCL_DEVICE_GIN_SESSION_H_
-#include "core.h"
+#include "core_tmp.h"
 #include "gin/gin_device_common.h"
 
 #if __CUDACC__

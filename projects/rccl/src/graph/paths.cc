@@ -382,6 +382,7 @@ ncclResult_t ncclTopoCheckP2p(struct ncclComm* comm, struct ncclTopoSystem* syst
     if (read && (gpu1->gpu.cudaCompCap == gpu2->gpu.cudaCompCap) && (gpu1->gpu.cudaCompCap == 80)) *read = 1;
   }
 
+#if !defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC__)
   if (cudaP2p) {
     if (checkNvml) {
       int n1, n2;
@@ -394,6 +395,12 @@ ncclResult_t ncclTopoCheckP2p(struct ncclComm* comm, struct ncclTopoSystem* syst
       *cudaP2p = (mnnvl || comm == NULL || info1->hostHash == info2->hostHash);
     }
   }
+#else
+  if (cudaP2p) {
+    // On AMD/HIP, assume P2P connectivity based on MNNVL or same host
+    *cudaP2p = (mnnvl || comm == NULL || info1->hostHash == info2->hostHash);
+  }
+#endif
 
   return ncclSuccess;
 }

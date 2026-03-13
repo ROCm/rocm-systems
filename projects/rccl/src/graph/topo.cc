@@ -388,12 +388,12 @@ ncclResult_t ncclTopoAddNet(struct ncclXmlNode* xmlNet, struct ncclTopoSystem* s
 
   // build the PCI id using the parent PCI link
   uint64_t hacc[2] = {1, 1};
-  const char* busId = NULL;
+  const char* pciBusId = NULL;
   struct ncclXmlNode* parent = xmlNet->parent;
   while (parent != NULL && strcmp(parent->name, "pci") != 0) parent = parent->parent;
-  if (parent) NCCLCHECK(xmlGetAttr(parent, "busid", &busId));
+  if (parent) NCCLCHECK(xmlGetAttr(parent, "busid", &pciBusId));
   // If we fail to find the PCIe path, we use the GUID instead.
-  if (busId) eatHash(hacc, busId, strlen(busId));
+  if (pciBusId) eatHash(hacc, pciBusId, strlen(pciBusId));
   else eatHash(hacc, &net->net.asic);
   net->net.pciId = digestHash(hacc);
 

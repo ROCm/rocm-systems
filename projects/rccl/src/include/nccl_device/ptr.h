@@ -6,7 +6,7 @@
 
 #ifndef _NCCL_DEVICE_PTR_H_
 #define _NCCL_DEVICE_PTR_H_
-#include "core.h"
+#include "core_tmp.h"
 #include <stdint.h>
 
 #define __CUDACC__ 0
