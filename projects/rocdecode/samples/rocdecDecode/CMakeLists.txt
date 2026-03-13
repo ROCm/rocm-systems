@@ -77,6 +77,7 @@ if(HIP_FOUND AND rocdecode_FOUND)
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} hip::host)
 
     if(FFMPEG_FOUND AND NOT USING_THE_ROCK)
+      find_package(rocdecode-host 1.0.0 QUIET)
       # FFMPEG
       include_directories(${AVUTIL_INCLUDE_DIR} ${AVCODEC_INCLUDE_DIR}
                           ${AVFORMAT_INCLUDE_DIR})
@@ -84,7 +85,6 @@ if(HIP_FOUND AND rocdecode_FOUND)
     endif()
     if(rocdecode-host_FOUND AND NOT USING_THE_ROCK)
       # rocdecode-host
-      find_package(rocdecode-host 1.0.0 QUIET)
       include_directories(${rocdecode-host_INCLUDE_DIR})
       set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} rocdecode::rocdecode-host)
     endif()
