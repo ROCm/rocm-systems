@@ -2133,37 +2133,51 @@ class WorkflowSession:
             self._state.edit_history[-1].checkpoint_id = cp_id
 
     def _update_checkpoint_with_run(self) -> None:
-        """Record run_index and performance_delta_pct in the most recent
-        CheckpointRecord that does not yet have a run attached.
+        """Set run_index on the most recent CheckpointRecord that does not yet
+        have a run attached.
 
-        Called after trace_history is appended in Phase 3.
+        Called from Phase 3 immediately after trace_history is appended.
+        Delta computation is deferred to _update_checkpoint_delta() which is
+        called from Phase 4 after analysis_history is updated.
         """
         if not self._state.checkpoints:
             return
 
         # Find the most recent checkpoint without a run
-        target = None
         for cp in reversed(self._state.checkpoints):
             if cp.run_index is None:
+                cp.run_index = len(self._state.trace_history) - 1
+                break
+
+    def _update_checkpoint_delta(self) -> None:
+        """Compute performance_delta_pct for the most recently-run checkpoint.
+
+        Called from Phase 4 after _record_analysis() appends to analysis_history,
+        so analysis_history[-1] is the current run and analysis_history[-2] is
+        the previous run.  Requires at least 2 entries in analysis_history.
+        """
+        if not self._state.checkpoints or len(self._state.analysis_history) < 2:
+            return
+
+        # Find the most recent checkpoint that has a run but no delta yet
+        target = None
+        for cp in reversed(self._state.checkpoints):
+            if cp.run_index is not None and cp.performance_delta_pct is None:
                 target = cp
                 break
         if target is None:
-            return  # All checkpoints already have runs
+            return
 
-        target.run_index = len(self._state.trace_history) - 1
-
-        # Compute performance delta from total_runtime_ns
-        if len(self._state.analysis_history) >= 2:
-            prev_ns = (
-                self._state.analysis_history[-2].execution_breakdown or {}
-            ).get("total_runtime_ns", 0)
-            curr_ns = (
-                self._state.analysis_history[-1].execution_breakdown or {}
-            ).get("total_runtime_ns", 0)
-            if prev_ns > 0:
-                target.performance_delta_pct = round(
-                    ((prev_ns - curr_ns) / prev_ns) * 100, 1
-                )
+        prev_ns = (
+            self._state.analysis_history[-2].execution_breakdown or {}
+        ).get("total_runtime_ns", 0)
+        curr_ns = (
+            self._state.analysis_history[-1].execution_breakdown or {}
+        ).get("total_runtime_ns", 0)
+        if prev_ns > 0:
+            target.performance_delta_pct = round(
+                ((prev_ns - curr_ns) / prev_ns) * 100, 1
+            )
 
     # ── Phase 1b: Quick workload analysis ──────────────────────────────────────
 
@@ -3284,9 +3298,12 @@ class WorkflowSession:
             if suggested_fp and suggested_fp.issubset(already_fp):
                 ai_rec_cmd = None  # every suggested collection already performed
 
-        return self._record_analysis(
+        snap = self._record_analysis(
             recs, breakdown, hotspots, ai_recommended_command=ai_rec_cmd
         )
+        # Compute performance delta now that analysis_history has been updated
+        self._update_checkpoint_delta()
+        return snap
 
     # ── Phase 5: Recommendations menu ─────────────────────────────────────────
 
