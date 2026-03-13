@@ -47,7 +47,8 @@ _CATEGORY_PATTERNS: List[Tuple[str, re.Pattern]] = [
     (
         "NCCL",
         re.compile(
-            r"ncclKernel|rccl|AllReduce|AllGather|ReduceScatter|Broadcast", re.IGNORECASE
+            r"ncclKernel|rccl|AllReduce|AllGather|ReduceScatter|Broadcast",
+            re.IGNORECASE,
         ),
     ),
     (
