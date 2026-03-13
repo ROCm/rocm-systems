@@ -105,6 +105,12 @@ struct ClockInfo {
   uint8_t  clk_deep_sleep; // deep-sleep capable flag
 };
 
+// GPU board identification info from KMD adapter registry.
+struct BoardInfo {
+  char product_name[256];      // adapter string from registry (AdapterString)
+  char manufacturer_name[256]; // always "Advanced Micro Devices, Inc. [AMD/ATI]"
+};
+
 // GPU driver version/name/date from Windows registry keys.
 struct DriverInfo {
   char driver_version[256]; // RadeonSoftwareVersion registry key

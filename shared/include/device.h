@@ -55,6 +55,8 @@ public:
 
   ErrorCode QueryPCIeInfo(PCIeInfo *info) const;
 
+  ErrorCode QueryBoardInfo(BoardInfo *info) const;
+
   ErrorCode QueryDriverInfo(DriverInfo *info) const;
 
   ErrorCode Escape(void *pData, size_t dataSize,

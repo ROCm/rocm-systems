@@ -91,6 +91,10 @@ ErrorCode Device::QueryPCIeInfo(PCIeInfo *info) const {
   return device_ctx_->QueryPCIeInfo(info);
 }
 
+ErrorCode Device::QueryBoardInfo(BoardInfo *info) const {
+  return device_ctx_->QueryBoardInfo(info);
+}
+
 ErrorCode Device::QueryDriverInfo(DriverInfo *info) const {
   return device_ctx_->QueryDriverInfo(info);
 }

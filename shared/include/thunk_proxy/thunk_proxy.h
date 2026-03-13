@@ -235,6 +235,9 @@ public:
 
   ErrorCode QueryPCIeInfo(wsl::thunk::PCIeInfo *info) const;
 
+  // Query board identification info from KMD adapter registry.
+  ErrorCode QueryBoardInfo(wsl::thunk::BoardInfo *info) const;
+
   // Query driver version, name, and date from Windows registry keys.
   ErrorCode QueryDriverInfo(wsl::thunk::DriverInfo *info) const;
 
