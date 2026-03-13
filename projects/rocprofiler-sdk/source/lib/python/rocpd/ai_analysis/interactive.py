@@ -1654,6 +1654,9 @@ class WorkflowSession:
           hints          – list of human-readable detection notes
           extra_flags    – additional rocprofv3 flags to add beyond the default set
           warnings       – list of capture-limitation warnings to show
+          uses_fork      – True when the app spawns child processes via fork/exec
+                           so the profiling command should use --process-sync and
+                           per-process output filenames (%nid%)
         """
         try:
             tokens = shlex.split(app_cmd)
@@ -1678,16 +1681,20 @@ class WorkflowSession:
         # ── Multi-process launchers ──────────────────────────────────────────
         is_mpi = any(kw in binary for kw in ("mpirun", "mpiexec", "srun", "jsrun", "orterun"))
         if is_mpi:
+            # MPI forks worker processes — use --process-sync so rocprofv3 follows
+            # them, and %nid% in the output name so each rank gets its own DB.
+            extra_flags.append("--process-sync")
+            hints.append("MPI/Slurm launcher (--process-sync enabled)")
             warnings.append(
-                "MPI/Slurm launcher detected — rocprofv3 traces only the launcher "
-                "process. GPU kernels in worker ranks may not be captured. "
-                "Consider profiling a single rank with --pid or using rocprof-sys."
+                "MPI/Slurm launcher detected — using --process-sync and %nid% output "
+                "naming so each rank's trace is captured separately and merged."
             )
             return {
                 "workload_type": "mpi_multi",
-                "hints": ["MPI/Slurm launcher"],
+                "hints": hints,
                 "extra_flags": extra_flags,
                 "warnings": warnings,
+                "uses_fork": True,
             }
 
         # ── Python workloads ─────────────────────────────────────────────────
@@ -1708,10 +1715,14 @@ class WorkflowSession:
         if is_python:
             extra_flags.append("--hip-trace")   # Python HIP API overhead is significant
             if is_multiproc:
+                # Fork-based distributed training — --process-sync follows child processes,
+                # %nid% in output name gives each worker its own DB file.
+                extra_flags.append("--process-sync")
+                hints.append("distributed/multi-process training (--process-sync enabled)")
                 warnings.append(
                     "Distributed/multi-process training detected (torchrun/DDP/DeepSpeed). "
-                    "GPU kernels run in worker processes not captured by default. "
-                    "Profile a single worker via --pid <pid> or use rocprof-sys."
+                    "Using --process-sync and per-process output naming (%nid%) so each "
+                    "worker's GPU activity is captured and merged automatically."
                 )
             if is_llm:
                 hints.append("Python + LLM inference framework")
@@ -1720,6 +1731,7 @@ class WorkflowSession:
                     "hints": hints,
                     "extra_flags": extra_flags,
                     "warnings": warnings,
+                    "uses_fork": is_multiproc,
                 }
             if is_ml:
                 hints.append("Python + ML framework (PyTorch / JAX / TF)")
@@ -1728,6 +1740,7 @@ class WorkflowSession:
                     "hints": hints,
                     "extra_flags": extra_flags,
                     "warnings": warnings,
+                    "uses_fork": is_multiproc,
                 }
             hints.append("Python workload")
             return {
@@ -1735,6 +1748,7 @@ class WorkflowSession:
                 "hints": hints,
                 "extra_flags": extra_flags,
                 "warnings": warnings,
+                "uses_fork": is_multiproc,
             }
 
         # ── Compiled HIP / ROCm binary ───────────────────────────────────────
@@ -1750,6 +1764,7 @@ class WorkflowSession:
             "hints": hints,
             "extra_flags": extra_flags,
             "warnings": warnings,
+            "uses_fork": False,
         }
 
     def _phase1b_quick_workload_analysis(self) -> Optional[str]:
@@ -1803,15 +1818,19 @@ class WorkflowSession:
         # Build the final command
         run_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         out_dir = f"{self._trace_dir}/run_{run_id}"
+        uses_fork = app_info.get("uses_fork", False)
+        out_name = "results_%nid%" if uses_fork else "results"
 
         if source_cmd_flags:
-            # Source-derived flags — replace any `-d <dir>` and `-o <name>` with fresh values
+            # Source-derived flags — replace any `-d <dir>` and `-o <name>` with fresh values.
+            # When the app forks, override -o with per-process naming regardless of what the
+            # source analyzer suggested.
             flags = re.sub(r"-d\s+\S+", f"-d {out_dir}", source_cmd_flags)
-            flags = re.sub(r"-o\s+\S+", "-o results", flags)
+            flags = re.sub(r"-o\s+\S+", f"-o {out_name}", flags)
             if "-d " not in flags:
                 flags = f"{flags} -d {out_dir}"
             if "-o " not in flags:
-                flags = f"{flags} -o results"
+                flags = f"{flags} -o {out_name}"
             # Append any extra flags from app-command heuristics that aren't already present
             for ef in app_info.get("extra_flags", []):
                 if ef not in flags:
@@ -1831,7 +1850,7 @@ class WorkflowSession:
             reason = f"default flags{extra_info}"
             cmd = (
                 f"rocprofv3 {base_flags} "
-                f"-d {out_dir} -o results "
+                f"-d {out_dir} -o {out_name} "
                 f"-- {self._state.app_command}"
             )
 
@@ -1841,13 +1860,20 @@ class WorkflowSession:
 
     # ── Phase 2: Profiling command generation ─────────────────────────────────
 
-    def _build_profiling_command(self) -> str:
-        """Build a default rocprofv3 profiling command wrapping the user's app."""
+    def _build_profiling_command(self, app_info: Optional[Dict[str, Any]] = None) -> str:
+        """Build a default rocprofv3 profiling command wrapping the user's app.
+
+        When app_info indicates uses_fork=True, adds --process-sync and uses
+        %nid% in the output filename so each forked process writes its own DB.
+        """
         run_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         out_dir = f"{self._trace_dir}/run_{run_id}"
+        uses_fork = (app_info or {}).get("uses_fork", False)
+        proc_sync = " --process-sync" if uses_fork else ""
+        out_name = "results_%nid%" if uses_fork else "results"
         return (
-            f"rocprofv3 --sys-trace --kernel-trace --memory-copy-trace --stats "
-            f"-d {out_dir} -o results "
+            f"rocprofv3 --sys-trace --kernel-trace --memory-copy-trace --stats{proc_sync} "
+            f"-d {out_dir} -o {out_name} "
             f"-- {self._state.app_command}"
         )
 
@@ -2129,6 +2155,30 @@ class WorkflowSession:
 
     # ── Phase 3: Trace collection ──────────────────────────────────────────────
 
+    def _merge_per_process_dbs(
+        self, db_files: List[str], out_dir: str
+    ) -> Optional[str]:
+        """Merge per-process DB files into a single database and return its path.
+
+        Uses rocpd.merge.merge_sqlite_dbs() (the same engine behind `rocpd merge`).
+        Returns None if merge fails — caller falls back to the first DB file.
+        """
+        if len(db_files) <= 1:
+            return None
+        merged_path = str(pathlib.Path(out_dir) / "merged_processes.db")
+        try:
+            from rocpd.merge import merge_sqlite_dbs  # type: ignore[import]
+            _print(
+                f"  Merging {len(db_files)} per-process databases…", style="cyan"
+            )
+            merge_sqlite_dbs(db_files, merged_path)
+            _print(f"  ✓ Merged → {merged_path}", style="green")
+            return merged_path
+        except Exception as exc:
+            _print(f"  ⚠  DB merge failed ({exc}); using first DB for analysis.",
+                   style="yellow")
+            return None
+
     def _find_trace_files(self, cmd: str) -> List[str]:
         """Parse -d <dir> from cmd; return .db/.csv/.json files found there."""
         import glob as _glob
@@ -2204,12 +2254,35 @@ class WorkflowSession:
             if proc.returncode == 0:
                 trace_files = self._find_trace_files(cmd)
                 if trace_files:
-                    _print(f"  ✓ Trace collected: {len(trace_files)} file(s)", style="green")
+                    db_files = [f for f in trace_files if f.endswith(".db")]
+                    _print(
+                        f"  ✓ Trace collected: {len(trace_files)} file(s)"
+                        + (f" ({len(db_files)} DB)" if db_files else ""),
+                        style="green",
+                    )
                     for tf in trace_files[:5]:
                         _print(f"    · {tf}", style="dim")
-                    db_path = next(
-                        (f for f in trace_files if f.endswith(".db")), trace_files[0]
-                    )
+                    if len(trace_files) > 5:
+                        _print(f"    … and {len(trace_files) - 5} more", style="dim")
+
+                    # When multiple DB files are present (one per forked process),
+                    # merge them into a single DB for analysis.
+                    out_dir = "."
+                    try:
+                        import shlex as _sl
+                        _parts = _sl.split(cmd)
+                    except ValueError:
+                        _parts = cmd.split()
+                    for _i, _p in enumerate(_parts):
+                        if _p in ("-d", "--output-path") and _i + 1 < len(_parts):
+                            out_dir = _parts[_i + 1]
+
+                    if len(db_files) > 1:
+                        merged = self._merge_per_process_dbs(db_files, out_dir)
+                        db_path = merged if merged else db_files[0]
+                    else:
+                        db_path = db_files[0] if db_files else trace_files[0]
+
                     self._state.trace_history.append(_TraceRun(
                         timestamp=datetime.now(timezone.utc).isoformat(),
                         command=cmd,
@@ -2369,17 +2442,29 @@ class WorkflowSession:
             # Warn when GPU time is zero but profiling ran — likely multiprocessing
             total_ns = result.profiling_info.total_duration_ns if eb else 0
             if total_ns == 0 and self._state.trace_history:
-                _print("  ⚠  No GPU kernel activity captured in the main process.",
-                       style="yellow")
-                _print("     If your app uses Python multiprocessing (e.g. vLLM, PyTorch",
-                       style="yellow")
-                _print("     DDP), GPU kernels run in spawned worker processes and are",
-                       style="yellow")
-                _print("     not captured in the main-process DB.", style="yellow")
-                _print("     Try:  rocprof-sys --trace -- <app>  (multi-process aware)",
-                       style="yellow")
-                _print("     or profile a specific worker with  --pid <worker_pid>",
-                       style="yellow")
+                last_cmd = self._state.trace_history[-1].command
+                already_has_sync = "--process-sync" in last_cmd
+                _print("  ⚠  No GPU kernel activity captured.", style="yellow")
+                if already_has_sync:
+                    _print("     --process-sync is active but the DB is still empty.",
+                           style="yellow")
+                    _print("     The app may use Python multiprocessing 'spawn' (not fork).",
+                           style="yellow")
+                    _print("     Try:  rocprof-sys --trace -- <app>  (spawn-aware)",
+                           style="yellow")
+                    _print("     or:   profile a specific worker with --pid <worker_pid>",
+                           style="yellow")
+                else:
+                    _print("     If your app spawns GPU work in child processes (fork/exec,",
+                           style="yellow")
+                    _print("     torchrun, DDP, MPI) add --process-sync to the profiling",
+                           style="yellow")
+                    _print("     command so rocprofv3 follows child processes, and use",
+                           style="yellow")
+                    _print("     -o results_%nid% so each process writes its own DB.",
+                           style="yellow")
+                    _print("     Alternatively: rocprof-sys --trace -- <app>",
+                           style="yellow")
                 _print()
 
             all_recs = (
@@ -2966,8 +3051,14 @@ class WorkflowSession:
                 if not pathlib.Path(sp).exists():
                     _print(f"  Warning: --source path not found: {sp}", style="yellow")
 
-            # Phase 1b: quick workload analysis → derive best starter command
-            cmd = self._phase1b_quick_workload_analysis() or self._build_profiling_command()
+            # Phase 1b: quick workload analysis → derive best starter command.
+            # _phase1b always classifies the app; if it returns None we still want
+            # app_info (uses_fork etc.) so _build_profiling_command can use %nid%.
+            _app_info = self._classify_app_command(self._state.app_command)
+            cmd = (
+                self._phase1b_quick_workload_analysis()
+                or self._build_profiling_command(_app_info)
+            )
 
             # Phase 2: confirm profiling command with user
             self._state.profiling_command = cmd
