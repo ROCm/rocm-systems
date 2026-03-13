@@ -44,5 +44,4 @@ tool_kfd_event_dropped_events_callback(
 }  // namespace rocprofiler_sdk
 
 }  // namespace rocprofsys
-
 #endif
