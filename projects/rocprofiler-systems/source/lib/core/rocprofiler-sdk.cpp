@@ -520,6 +520,12 @@ get_buffered_domains()
         ROCPROFILER_BUFFER_TRACING_PAGE_MIGRATION,
 #    endif
         ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY,
+        ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT,
+        ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE,
+        ROCPROFILER_BUFFER_TRACING_KFD_QUEUE,
+        ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE,
+        ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU,
+        ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS,
     };
 
     auto _data = std::unordered_set<rocprofiler_buffer_tracing_kind_t>{};
@@ -570,6 +576,30 @@ get_buffered_domains()
         else if(itr == "memory_copy")
         {
             _data.emplace(ROCPROFILER_BUFFER_TRACING_MEMORY_COPY);
+        }
+        else if(itr == "kfd_page_fault")
+        {
+            _data.emplace(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT);
+        }
+        else if(itr == "kfd_page_migrate")
+        {
+            _data.emplace(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE);
+        }
+        else if(itr == "kfd_queue")
+        {
+            _data.emplace(ROCPROFILER_BUFFER_TRACING_KFD_QUEUE);
+        }
+        else if(itr == "kfd_event_queue")
+        {
+            _data.emplace(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE);
+        }
+        else if(itr == "kfd_event_unmap_from_gpu")
+        {
+            _data.emplace(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU);
+        }
+        else if(itr == "kfd_event_dropped_events")
+        {
+            _data.emplace(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS);
         }
         else
         {
