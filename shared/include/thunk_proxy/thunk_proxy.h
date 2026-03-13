@@ -241,6 +241,12 @@ public:
   // Query driver version, name, and date from Windows registry keys.
   ErrorCode QueryDriverInfo(wsl::thunk::DriverInfo *info) const;
 
+  // Query memory total size in bytes by type (0=VRAM, 1=VIS_VRAM, 2=GTT).
+  ErrorCode QueryMemoryTotal(uint32_t mem_type, uint64_t *total) const;
+
+  // Query memory used in bytes by type via D3DKMTQueryStatistics.
+  ErrorCode QueryMemoryUsage(uint32_t mem_type, uint64_t *used) const;
+
   // Send a driver-escape packet on behalf of this GPU slot.
   ErrorCode Escape(void *pData, size_t dataSize, bool hardwareAccess = false) const;
 
