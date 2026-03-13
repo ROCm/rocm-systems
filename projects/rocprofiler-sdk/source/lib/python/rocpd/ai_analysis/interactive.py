@@ -1757,7 +1757,7 @@ class _EditRecord:
     timestamp: str
     file_path: str
     backup_path: str
-    checkpoint_id: Optional[int] = None     # cp_id of matching CheckpointRecord
+    checkpoint_id: Optional[int] = None  # cp_id of matching CheckpointRecord
 
 
 class CheckpointError(Exception):
@@ -1768,19 +1768,19 @@ class CheckpointError(Exception):
 class CheckpointRecord:
     """One git-worktree checkpoint created after an AI edit batch."""
 
-    cp_id: int                              # 0-based index
-    commit_hash: str                        # git commit hash
-    ref_name: str                           # refs/rocpd/<session_id>/cp-N
-    worktree_path: str                      # ~/.rocpd/sessions/<id>/cp-N
-    timestamp: str                          # ISO-8601
-    files_modified: List[str]               # repo-relative paths touched
-    edit_summary: str                       # human-readable description of AI changes
-    file_snapshots: Dict[str, str]          # {repo_relative_path: full_file_contents}
-    run_index: Optional[int] = None         # index into trace_history; None = no run yet
+    cp_id: int  # 0-based index
+    commit_hash: str  # git commit hash
+    ref_name: str  # refs/rocpd/<session_id>/cp-N
+    worktree_path: str  # ~/.rocpd/sessions/<id>/cp-N
+    timestamp: str  # ISO-8601
+    files_modified: List[str]  # repo-relative paths touched
+    edit_summary: str  # human-readable description of AI changes
+    file_snapshots: Dict[str, str]  # {repo_relative_path: full_file_contents}
+    run_index: Optional[int] = None  # index into trace_history; None = no run yet
     performance_delta_pct: Optional[float] = None  # +10 = improvement, -67 = regression
     blacklisted: bool = False
-    blacklist_category: str = ""            # taken from edit_summary
-    blacklist_description: str = ""         # injected into LLM prompts
+    blacklist_category: str = ""  # taken from edit_summary
+    blacklist_description: str = ""  # injected into LLM prompts
 
 
 class GitCheckpointManager:
@@ -1834,9 +1834,7 @@ class GitCheckpointManager:
             raise CheckpointError("Could not read HEAD commit hash.")
         return result.stdout.strip()
 
-    def create_checkpoint_commit(
-        self, files: List[str], message: str
-    ) -> str:
+    def create_checkpoint_commit(self, files: List[str], message: str) -> str:
         """Stage files and create a commit; return commit hash.
 
         Uses --no-verify to skip pre-commit hooks (rocpd checkpoints are
@@ -1845,16 +1843,10 @@ class GitCheckpointManager:
         # Stage only the specified files
         add_result = self._git("add", "--", *files)
         if add_result.returncode != 0:
-            raise CheckpointError(
-                f"git add failed: {add_result.stderr.strip()}"
-            )
-        commit_result = self._git(
-            "commit", "--no-verify", "-m", message
-        )
+            raise CheckpointError(f"git add failed: {add_result.stderr.strip()}")
+        commit_result = self._git("commit", "--no-verify", "-m", message)
         if commit_result.returncode != 0:
-            raise CheckpointError(
-                f"git commit failed: {commit_result.stderr.strip()}"
-            )
+            raise CheckpointError(f"git commit failed: {commit_result.stderr.strip()}")
         # Get hash of the commit we just created
         hash_result = self._git("rev-parse", "HEAD")
         if hash_result.returncode != 0:
@@ -1869,9 +1861,7 @@ class GitCheckpointManager:
         ref_name = f"refs/rocpd/{self._session_id}/cp-{cp_id}"
         result = self._git("update-ref", ref_name, commit_hash)
         if result.returncode != 0:
-            raise CheckpointError(
-                f"git update-ref failed: {result.stderr.strip()}"
-            )
+            raise CheckpointError(f"git update-ref failed: {result.stderr.strip()}")
         return ref_name
 
     def add_worktree(self, cp_id: int, commit_hash: str) -> str:
@@ -1889,22 +1879,14 @@ class GitCheckpointManager:
         if os.path.exists(worktree_path):
             _shutil.rmtree(worktree_path, ignore_errors=True)
 
-        result = self._git(
-            "worktree", "add", "--detach", worktree_path, commit_hash
-        )
+        result = self._git("worktree", "add", "--detach", worktree_path, commit_hash)
         if result.returncode != 0:
-            raise CheckpointError(
-                f"git worktree add failed: {result.stderr.strip()}"
-            )
+            raise CheckpointError(f"git worktree add failed: {result.stderr.strip()}")
         return worktree_path
 
-    def restore_files_from_commit(
-        self, commit_hash: str, files: List[str]
-    ) -> None:
+    def restore_files_from_commit(self, commit_hash: str, files: List[str]) -> None:
         """Restore files to their state at commit_hash in the working directory."""
-        ls_result = self._git(
-            "ls-tree", "-r", "--name-only", commit_hash
-        )
+        ls_result = self._git("ls-tree", "-r", "--name-only", commit_hash)
         files_in_commit = set(ls_result.stdout.splitlines())
 
         for file in files:
@@ -1922,7 +1904,7 @@ class GitCheckpointManager:
             return
         if not os.path.exists(worktree_path):
             return
-        result = self._git("worktree", "remove", worktree_path, "--force")
+        self._git("worktree", "remove", worktree_path, "--force")
         # Non-fatal — log but don't raise (exit path must not crash)
 
     def delete_ref(self, ref_name: str) -> None:
@@ -1945,7 +1927,7 @@ class GitCheckpointManager:
         paths = []
         for line in result.stdout.splitlines():
             if line.startswith("worktree "):
-                paths.append(line[len("worktree "):])
+                paths.append(line[len("worktree ") :])
         return paths
 
 
@@ -2045,7 +2027,7 @@ class WorkflowSession:
         source = self._state.source_paths[0]
         try:
             gcm = GitCheckpointManager(
-                repo_root="",           # Will be set by detect_repo
+                repo_root="",  # Will be set by detect_repo
                 session_id=self._session_id,
                 sessions_dir=str(self._sessions_dir),
             )
@@ -2094,9 +2076,7 @@ class WorkflowSession:
         message = f"rocpd: cp-{cp_id} — {edit_summary}"
 
         try:
-            commit_hash = self._gcm.create_checkpoint_commit(
-                files_modified, message
-            )
+            commit_hash = self._gcm.create_checkpoint_commit(files_modified, message)
             ref_name = self._gcm.tag_checkpoint(cp_id, commit_hash)
             worktree_path = self._gcm.add_worktree(cp_id, commit_hash)
         except CheckpointError as exc:
@@ -2155,20 +2135,16 @@ class WorkflowSession:
         if target is None:
             return
 
-        prev_ns = (
-            self._state.analysis_history[-2].execution_breakdown or {}
-        ).get("total_runtime_ns", 0)
-        curr_ns = (
-            self._state.analysis_history[-1].execution_breakdown or {}
-        ).get("total_runtime_ns", 0)
+        prev_ns = (self._state.analysis_history[-2].execution_breakdown or {}).get(
+            "total_runtime_ns", 0
+        )
+        curr_ns = (self._state.analysis_history[-1].execution_breakdown or {}).get(
+            "total_runtime_ns", 0
+        )
         if prev_ns > 0:
-            target.performance_delta_pct = round(
-                ((prev_ns - curr_ns) / prev_ns) * 100, 1
-            )
+            target.performance_delta_pct = round(((prev_ns - curr_ns) / prev_ns) * 100, 1)
 
-    def _restore_from_snapshots(
-        self, files: set, snapshots: Dict[str, str]
-    ) -> None:
+    def _restore_from_snapshots(self, files: set, snapshots: Dict[str, str]) -> None:
         """Write file contents from snapshots dict; delete files not in snapshots."""
         for f in files:
             _path = (
@@ -2214,11 +2190,11 @@ class WorkflowSession:
             pass  # Nothing to restore
         elif self._gcm and self._gcm.commit_reachable(target_hash):
             try:
-                self._gcm.restore_files_from_commit(
-                    target_hash, list(modified_after)
-                )
+                self._gcm.restore_files_from_commit(target_hash, list(modified_after))
             except CheckpointError as exc:
-                _print(f"  Git restore failed: {exc}. Using file snapshots.", style="yellow")
+                _print(
+                    f"  Git restore failed: {exc}. Using file snapshots.", style="yellow"
+                )
                 self._restore_from_snapshots(modified_after, target_snapshots)
         else:
             # Fallback: write file snapshots directly
@@ -2332,9 +2308,7 @@ class WorkflowSession:
         _print("└" + "─" * 69 + "┘\n")
 
         valid = ["base"] + [str(cp.cp_id) for cp in self._state.checkpoints]
-        raw = _input(
-            f"  Restore to [{'/'.join(valid)}] or [c] cancel: "
-        ).strip().lower()
+        raw = _input(f"  Restore to [{'/'.join(valid)}] or [c] cancel: ").strip().lower()
         if raw == "c":
             return None
         if raw == "base":
@@ -2349,13 +2323,14 @@ class WorkflowSession:
         if target_cp_id == -1:
             # Rolling back to baseline: show all checkpoints with regressions
             regression_cps = [
-                cp for cp in self._state.checkpoints
-                if cp.performance_delta_pct is not None
-                and cp.performance_delta_pct < 0
+                cp
+                for cp in self._state.checkpoints
+                if cp.performance_delta_pct is not None and cp.performance_delta_pct < 0
             ]
         else:
             regression_cps = [
-                cp for cp in self._state.checkpoints
+                cp
+                for cp in self._state.checkpoints
                 if cp.cp_id > target_cp_id
                 and cp.performance_delta_pct is not None
                 and cp.performance_delta_pct < 0
@@ -2368,9 +2343,11 @@ class WorkflowSession:
             for idx, cp in enumerate(regression_cps, 1):
                 delta_str = f"{cp.performance_delta_pct:.1f}%"
                 _print(f"    [{idx}]  cp-{cp.cp_id}: {cp.edit_summary} ({delta_str})")
-            bl_raw = _input(
-                "  Enter numbers to blacklist (space-separated), or [n] skip: "
-            ).strip().lower()
+            bl_raw = (
+                _input("  Enter numbers to blacklist (space-separated), or [n] skip: ")
+                .strip()
+                .lower()
+            )
             if bl_raw != "n":
                 for tok in bl_raw.split():
                     if tok.isdigit():
@@ -2418,7 +2395,7 @@ class WorkflowSession:
             if not path.startswith(sessions_dir + os.sep):
                 continue
             # Extract session_id: first path component after sessions_dir
-            rel = path[len(sessions_dir) + 1:]
+            rel = path[len(sessions_dir) + 1 :]
             parts = rel.split(os.sep)
             if not parts:
                 continue
@@ -3865,7 +3842,9 @@ class WorkflowSession:
             # are consistent even if a build system touches the file mid-call.
             original = chosen.read_text()
             blacklist_block = self._build_blacklist_block()
-            effective_suggestions = (blacklist_block + "\n" + suggestions) if blacklist_block else suggestions
+            effective_suggestions = (
+                (blacklist_block + "\n" + suggestions) if blacklist_block else suggestions
+            )
             rewritten = self._llm_rewrite_file(chosen, effective_suggestions)
             while rewritten is None:
                 try:

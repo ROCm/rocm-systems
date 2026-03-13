@@ -78,6 +78,55 @@ schema_path = pkg_resources.files("rocpd.ai_analysis") / "docs" / "analysis-outp
 
 ---
 
+## v0.3.1 — 2026-03-12
+
+**No schema changes.** Schema file validator corrections, Python 3.6 compatibility fixes,
+and LLM hardening only.
+
+**Schema file corrections (v0.2.0 spec was already correct; JSON file had bugs):**
+
+The `analysis-output.schema.json` file was corrected to match the already-documented
+v0.2.0 specification.  The emitted JSON format was never wrong; only the validator was:
+
+| Schema file bug | Fix |
+|---|---|
+| `profiling_info.profiling_mode` enum missing `"source_only"` | Added `"source_only"` as first enum value |
+| `profiling_info.analysis_tier` `minimum` was `1` | Lowered to `0` to allow Tier 0 documents |
+| `execution_breakdown` type was `"object"` only | Changed to `["object", "null"]` so source-only documents validate |
+| `tier0` property not declared in `properties` object | Added full `tier0` property definition with all 14 sub-fields |
+| `$id` embedded a version string (`"rocpd-ai-analysis-output-v0.1.0"`) | Changed to `"rocpd-ai-analysis-output"` (stable; version is in `schema_version` field) |
+
+Tier 0 JSON output (schema_version `"0.2.0"`) now passes `jsonschema.validate()` against
+the schema file.  28 JSON schema conformance tests added (was 17): 11 new tests cover
+Tier 0 source-only output and combined (Tier 0 + Tier 1/2) output validation.
+
+**Python 3.6 compatibility (`re.Pattern` annotation):**
+
+`tracelens_port.py` used `re.Pattern` in a module-level type annotation
+(`_CATEGORY_PATTERNS: List[Tuple[str, re.Pattern]]`).  Python 3.6 evaluates these
+annotations eagerly at import time; `re.Pattern` was added in Python 3.7.  This caused
+an `AttributeError` on RHEL 8.8 (Python 3.6.8) that cascaded into all tests importing
+`analyze.py` or `llm_analyzer.py`.  Fixed by changing the annotation to `Any` (already
+imported from `typing`).
+
+`test_analyze_schema.py` used `import importlib.resources` which also requires Python 3.7.
+Fixed with a `try/except ImportError` shim that falls back to `pkgutil.get_data()`.
+
+**`ROCPD_LLM_PRIVATE_HEADERS` dict validation:**
+
+After `json.loads()`, the parsed result is now validated to be a `dict` before
+`headers.update()` is called.  A non-dict JSON value (e.g. `"[1,2,3]"`) previously
+raised an opaque `TypeError`; it now raises a `ValueError` with a clear message
+showing the expected format.
+
+**Stream chunk accumulation (`LLMConversation`):**
+
+Both `_stream_anthropic` and `_stream_openai` now accumulate response chunks with
+`chunks.append(text)` + `"".join(chunks)` instead of `result += chunk` string
+concatenation, avoiding O(n²) memory allocation for long responses.
+
+---
+
 ## v0.3.0 (2026-03-11)
 
 ### New Fields (additive — old consumers should ignore unknown top-level keys)

@@ -44,6 +44,7 @@ def test_workflow_state_defaults():
 
 def test_checkpoint_record_defaults():
     from rocpd.ai_analysis.interactive import CheckpointRecord
+
     cp = CheckpointRecord(
         cp_id=0,
         commit_hash="abc1234",
@@ -64,12 +65,14 @@ def test_checkpoint_record_defaults():
 
 def test_checkpoint_error_is_exception():
     from rocpd.ai_analysis.interactive import CheckpointError
+
     with pytest.raises(CheckpointError):
         raise CheckpointError("git failed")
 
 
 def test_workflow_state_has_checkpoint_fields():
     from rocpd.ai_analysis.interactive import WorkflowState
+
     s = WorkflowState(app_command="./app")
     assert s.repo_root == ""
     assert s.baseline_commit == ""
@@ -79,6 +82,7 @@ def test_workflow_state_has_checkpoint_fields():
 
 def test_edit_record_has_checkpoint_id():
     from rocpd.ai_analysis.interactive import _EditRecord
+
     r = _EditRecord(
         timestamp="2026-03-13T00:00:00Z",
         file_path="/src/kernel.hip",
@@ -89,6 +93,7 @@ def test_edit_record_has_checkpoint_id():
 
 def _make_gcm(repo_root="/repo", session_id="sess1"):
     from rocpd.ai_analysis.interactive import GitCheckpointManager
+
     return GitCheckpointManager(
         repo_root=repo_root,
         session_id=session_id,
@@ -106,6 +111,7 @@ def test_gcm_detect_repo_success():
 
 def test_gcm_detect_repo_not_git():
     from rocpd.ai_analysis.interactive import CheckpointError
+
     gcm = _make_gcm()
     with patch("subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(returncode=128, stdout="")
@@ -178,9 +184,9 @@ def test_gcm_add_worktree():
 
 def test_gcm_add_worktree_cleans_stale_path():
     gcm = _make_gcm()
-    with patch("subprocess.run") as mock_run, \
-         patch("os.path.exists", return_value=True), \
-         patch("shutil.rmtree") as mock_rmtree:
+    with patch("subprocess.run") as mock_run, patch(
+        "os.path.exists", return_value=True
+    ), patch("shutil.rmtree") as mock_rmtree:
         mock_run.return_value = MagicMock(returncode=0, stdout="")
         gcm.add_worktree(0, "abc1234")
     mock_rmtree.assert_called_once()
@@ -202,8 +208,7 @@ def test_gcm_commit_reachable_false():
 
 def test_gcm_remove_worktree_silently_skips_missing():
     gcm = _make_gcm()
-    with patch("subprocess.run") as mock_run, \
-         patch("os.path.exists", return_value=False):
+    with patch("subprocess.run") as mock_run, patch("os.path.exists", return_value=False):
         gcm.remove_worktree("/tmp/nonexistent")
     mock_run.assert_not_called()
 
@@ -220,7 +225,9 @@ def test_gcm_delete_ref():
 def test_gcm_files_in_commit():
     gcm = _make_gcm()
     with patch("subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(returncode=0, stdout="src/kernel.hip\nsrc/main.cpp\n")
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout="src/kernel.hip\nsrc/main.cpp\n"
+        )
         files = gcm.files_in_commit("abc1234")
     assert files == ["src/kernel.hip", "src/main.cpp"]
 
@@ -230,7 +237,7 @@ def test_gcm_list_worktrees():
     with patch("subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(
             returncode=0,
-            stdout="worktree /repo\nHEAD abc\n\nworktree /home/user/.rocpd/sessions/s/cp-0\nHEAD def\n"
+            stdout="worktree /repo\nHEAD abc\n\nworktree /home/user/.rocpd/sessions/s/cp-0\nHEAD def\n",
         )
         paths = gcm.list_worktrees()
     assert "/repo" in paths
@@ -243,7 +250,7 @@ def test_gcm_restore_files_from_commit():
         # ls-tree returns the file; checkout succeeds
         mock_run.side_effect = [
             MagicMock(returncode=0, stdout="kernel.hip\n"),  # ls-tree
-            MagicMock(returncode=0, stdout=""),               # checkout
+            MagicMock(returncode=0, stdout=""),  # checkout
         ]
         gcm.restore_files_from_commit("abc1234", ["kernel.hip"])
     # Both ls-tree and checkout were called
@@ -252,14 +259,13 @@ def test_gcm_restore_files_from_commit():
 
 def test_session_start_sets_repo_root_when_git_available():
     from rocpd.ai_analysis.interactive import WorkflowSession
+
     with patch("subprocess.run") as mock_run:
         mock_run.side_effect = [
-            MagicMock(returncode=0, stdout="/repo\n"),   # rev-parse --show-toplevel
-            MagicMock(returncode=0, stdout="abc1234\n"), # rev-parse HEAD
+            MagicMock(returncode=0, stdout="/repo\n"),  # rev-parse --show-toplevel
+            MagicMock(returncode=0, stdout="abc1234\n"),  # rev-parse HEAD
         ]
-        ws = WorkflowSession(
-            app_command="./app", source_paths=["/repo/src"]
-        )
+        ws = WorkflowSession(app_command="./app", source_paths=["/repo/src"])
         ws._init_checkpoints()
     assert ws._state.repo_root == "/repo"
     assert ws._state.baseline_commit == "abc1234"
@@ -267,19 +273,21 @@ def test_session_start_sets_repo_root_when_git_available():
 
 def test_session_start_disables_checkpoints_when_not_git():
     from rocpd.ai_analysis.interactive import WorkflowSession
+
     with patch("subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(returncode=128, stdout="")
         ws = WorkflowSession(app_command="./app", source_paths=["/not/git"])
         ws._init_checkpoints()
-    assert ws._state.repo_root == ""   # disabled
+    assert ws._state.repo_root == ""  # disabled
 
 
 def test_checkpoints_work_with_dirty_tree():
     from rocpd.ai_analysis.interactive import WorkflowSession
+
     with patch("subprocess.run") as mock_run:
         mock_run.side_effect = [
-            MagicMock(returncode=0, stdout="/repo\n"),       # detect_repo
-            MagicMock(returncode=0, stdout="abc123\n"),      # get_head
+            MagicMock(returncode=0, stdout="/repo\n"),  # detect_repo
+            MagicMock(returncode=0, stdout="abc123\n"),  # get_head
         ]
         ws = WorkflowSession(app_command="./app", source_paths=["/repo/src"])
         ws._init_checkpoints()
@@ -290,10 +298,11 @@ def test_checkpoints_work_with_dirty_tree():
 
 def test_init_checkpoints_disables_on_get_head_failure():
     from rocpd.ai_analysis.interactive import WorkflowSession, CheckpointError
+
     with patch("subprocess.run") as mock_run:
         mock_run.side_effect = [
             MagicMock(returncode=0, stdout="/repo\n"),  # detect_repo
-            MagicMock(returncode=1, stdout=""),          # get_head (fails)
+            MagicMock(returncode=1, stdout=""),  # get_head (fails)
         ]
         ws = WorkflowSession(app_command="./app", source_paths=["/repo/src"])
         ws._init_checkpoints()
@@ -304,6 +313,7 @@ def test_init_checkpoints_disables_on_get_head_failure():
 def _make_workflow_session_with_gcm(mock_gcm=None):
     """Helper: WorkflowSession with mocked git and source paths."""
     from rocpd.ai_analysis.interactive import WorkflowSession, GitCheckpointManager
+
     ws = WorkflowSession(app_command="./app", source_paths=["/repo/src"])
     ws._state.repo_root = "/repo"
     ws._state.baseline_commit = "baseline123"
@@ -313,6 +323,7 @@ def _make_workflow_session_with_gcm(mock_gcm=None):
 
 def test_create_checkpoint_appends_checkpoint_record():
     from rocpd.ai_analysis.interactive import CheckpointRecord
+
     ws = _make_workflow_session_with_gcm()
     ws._gcm.create_checkpoint_commit.return_value = "abc1234"
     ws._gcm.tag_checkpoint.return_value = "refs/rocpd/sess/cp-0"
@@ -339,6 +350,7 @@ def test_create_checkpoint_links_edit_record():
     ws._gcm.tag_checkpoint.return_value = "refs/rocpd/s/cp-0"
     ws._gcm.add_worktree.return_value = "/tmp/cp-0"
     from rocpd.ai_analysis.interactive import _EditRecord
+
     ws._state.edit_history.append(
         _EditRecord(timestamp="t", file_path="/f", backup_path="/f.bak")
     )
@@ -361,6 +373,7 @@ def test_create_checkpoint_skipped_when_no_gcm():
 
 def test_create_checkpoint_skipped_on_git_error():
     from rocpd.ai_analysis.interactive import CheckpointError
+
     ws = _make_workflow_session_with_gcm()
     ws._gcm.create_checkpoint_commit.side_effect = CheckpointError("git fail")
 
@@ -372,13 +385,22 @@ def test_create_checkpoint_skipped_on_git_error():
 
 def test_update_checkpoint_records_run_index():
     from rocpd.ai_analysis.interactive import (
-        CheckpointRecord, _AnalysisSnapshot, _TraceRun,
+        CheckpointRecord,
+        _AnalysisSnapshot,
+        _TraceRun,
     )
+
     ws = _make_workflow_session_with_gcm()
 
     cp = CheckpointRecord(
-        cp_id=0, commit_hash="abc", ref_name="refs/r", worktree_path="/wt",
-        timestamp="t", files_modified=[], edit_summary="e", file_snapshots={},
+        cp_id=0,
+        commit_hash="abc",
+        ref_name="refs/r",
+        worktree_path="/wt",
+        timestamp="t",
+        files_modified=[],
+        edit_summary="e",
+        file_snapshots={},
     )
     ws._state.checkpoints.append(cp)
 
@@ -387,7 +409,8 @@ def test_update_checkpoint_records_run_index():
     )
     ws._state.analysis_history.append(
         _AnalysisSnapshot(
-            timestamp="t", iteration=0,
+            timestamp="t",
+            iteration=0,
             execution_breakdown={"total_runtime_ns": 1_000_000},
         )
     )
@@ -401,14 +424,23 @@ def test_update_checkpoint_records_run_index():
 
 def test_update_checkpoint_computes_delta_from_total_runtime_ns():
     from rocpd.ai_analysis.interactive import (
-        CheckpointRecord, _AnalysisSnapshot, _TraceRun,
+        CheckpointRecord,
+        _AnalysisSnapshot,
+        _TraceRun,
     )
+
     ws = _make_workflow_session_with_gcm()
 
     for i in range(2):
         cp = CheckpointRecord(
-            cp_id=i, commit_hash="h", ref_name="r", worktree_path="w",
-            timestamp="t", files_modified=[], edit_summary="e", file_snapshots={},
+            cp_id=i,
+            commit_hash="h",
+            ref_name="r",
+            worktree_path="w",
+            timestamp="t",
+            files_modified=[],
+            edit_summary="e",
+            file_snapshots={},
         )
         ws._state.checkpoints.append(cp)
 
@@ -422,13 +454,15 @@ def test_update_checkpoint_computes_delta_from_total_runtime_ns():
     ws._state.checkpoints[1].run_index = 1  # set by Phase 3 already
     ws._state.analysis_history.append(
         _AnalysisSnapshot(
-            timestamp="t", iteration=0,
+            timestamp="t",
+            iteration=0,
             execution_breakdown={"total_runtime_ns": 1_000_000},
         )
     )
     ws._state.analysis_history.append(
         _AnalysisSnapshot(
-            timestamp="t", iteration=1,
+            timestamp="t",
+            iteration=1,
             execution_breakdown={"total_runtime_ns": 900_000},  # 10% faster
         )
     )
@@ -437,16 +471,24 @@ def test_update_checkpoint_computes_delta_from_total_runtime_ns():
     ws._update_checkpoint_delta()
 
     import pytest as _pytest
+
     delta = ws._state.checkpoints[1].performance_delta_pct
     assert delta == _pytest.approx(10.0, abs=0.1)  # (1M-900K)/1M * 100
 
 
 def test_update_checkpoint_delta_noop_when_insufficient_history():
     from rocpd.ai_analysis.interactive import CheckpointRecord
+
     ws = _make_workflow_session_with_gcm()
     cp = CheckpointRecord(
-        cp_id=0, commit_hash="h", ref_name="r", worktree_path="w",
-        timestamp="t", files_modified=[], edit_summary="e", file_snapshots={},
+        cp_id=0,
+        commit_hash="h",
+        ref_name="r",
+        worktree_path="w",
+        timestamp="t",
+        files_modified=[],
+        edit_summary="e",
+        file_snapshots={},
         run_index=0,
     )
     ws._state.checkpoints.append(cp)
@@ -463,8 +505,12 @@ def test_update_checkpoint_noop_when_no_checkpoints():
 def _make_ws_with_checkpoints():
     """Helper: WorkflowSession with 3 checkpoints and 3 runs."""
     from rocpd.ai_analysis.interactive import (
-        WorkflowSession, CheckpointRecord, _TraceRun, _AnalysisSnapshot,
+        WorkflowSession,
+        CheckpointRecord,
+        _TraceRun,
+        _AnalysisSnapshot,
     )
+
     ws = _make_workflow_session_with_gcm()
     ws._state.baseline_commit = "base000"
 
@@ -488,7 +534,8 @@ def _make_ws_with_checkpoints():
         )
         ws._state.analysis_history.append(
             _AnalysisSnapshot(
-                timestamp="t", iteration=i,
+                timestamp="t",
+                iteration=i,
                 execution_breakdown={"total_runtime_ns": 1_000_000 - i * 100_000},
                 recommendations=[],
             )
@@ -499,31 +546,35 @@ def _make_ws_with_checkpoints():
 
 def test_rollback_restores_files_from_git():
     ws = _make_ws_with_checkpoints()
-    with patch.object(ws, "_save_session"), \
-         patch.object(ws._gcm, "commit_reachable", return_value=True), \
-         patch.object(ws._gcm, "restore_files_from_commit") as mock_restore, \
-         patch.object(ws._gcm, "remove_worktree"):
+    with patch.object(ws, "_save_session"), patch.object(
+        ws._gcm, "commit_reachable", return_value=True
+    ), patch.object(ws._gcm, "restore_files_from_commit") as mock_restore, patch.object(
+        ws._gcm, "remove_worktree"
+    ):
         ws._rollback_to_checkpoint(target_cp_id=0)
     mock_restore.assert_called_once_with("hash0", ["kernel.hip"])
 
 
 def test_rollback_uses_file_snapshots_when_commit_unreachable():
     ws = _make_ws_with_checkpoints()
-    with patch.object(ws, "_save_session"), \
-         patch.object(ws._gcm, "commit_reachable", return_value=False), \
-         patch.object(ws._gcm, "remove_worktree"), \
-         patch("pathlib.Path.write_text") as mock_write, \
-         patch("pathlib.Path.mkdir"):
+    with patch.object(ws, "_save_session"), patch.object(
+        ws._gcm, "commit_reachable", return_value=False
+    ), patch.object(ws._gcm, "remove_worktree"), patch(
+        "pathlib.Path.write_text"
+    ) as mock_write, patch(
+        "pathlib.Path.mkdir"
+    ):
         ws._rollback_to_checkpoint(target_cp_id=0)
     mock_write.assert_called()
 
 
 def test_rollback_truncates_checkpoints_after_target():
     ws = _make_ws_with_checkpoints()
-    with patch.object(ws, "_save_session"), \
-         patch.object(ws._gcm, "commit_reachable", return_value=True), \
-         patch.object(ws._gcm, "restore_files_from_commit"), \
-         patch.object(ws._gcm, "remove_worktree"):
+    with patch.object(ws, "_save_session"), patch.object(
+        ws._gcm, "commit_reachable", return_value=True
+    ), patch.object(ws._gcm, "restore_files_from_commit"), patch.object(
+        ws._gcm, "remove_worktree"
+    ):
         ws._rollback_to_checkpoint(target_cp_id=0)
     assert len(ws._state.checkpoints) == 1
     assert ws._state.checkpoints[0].cp_id == 0
@@ -531,10 +582,11 @@ def test_rollback_truncates_checkpoints_after_target():
 
 def test_rollback_truncates_trace_and_analysis_history():
     ws = _make_ws_with_checkpoints()
-    with patch.object(ws, "_save_session"), \
-         patch.object(ws._gcm, "commit_reachable", return_value=True), \
-         patch.object(ws._gcm, "restore_files_from_commit"), \
-         patch.object(ws._gcm, "remove_worktree"):
+    with patch.object(ws, "_save_session"), patch.object(
+        ws._gcm, "commit_reachable", return_value=True
+    ), patch.object(ws._gcm, "restore_files_from_commit"), patch.object(
+        ws._gcm, "remove_worktree"
+    ):
         ws._rollback_to_checkpoint(target_cp_id=0)
     assert len(ws._state.trace_history) == 1
     assert len(ws._state.analysis_history) == 1
@@ -543,10 +595,11 @@ def test_rollback_truncates_trace_and_analysis_history():
 
 def test_rollback_sets_active_checkpoint():
     ws = _make_ws_with_checkpoints()
-    with patch.object(ws, "_save_session"), \
-         patch.object(ws._gcm, "commit_reachable", return_value=True), \
-         patch.object(ws._gcm, "restore_files_from_commit"), \
-         patch.object(ws._gcm, "remove_worktree"):
+    with patch.object(ws, "_save_session"), patch.object(
+        ws._gcm, "commit_reachable", return_value=True
+    ), patch.object(ws._gcm, "restore_files_from_commit"), patch.object(
+        ws._gcm, "remove_worktree"
+    ):
         ws._rollback_to_checkpoint(target_cp_id=0)
     assert ws._state.active_checkpoint == 0
 
@@ -597,28 +650,50 @@ def test_rollback_baseline_no_git_still_clears_state():
 def test_phase5_shows_rollback_option_when_checkpoints_exist():
     ws = _make_ws_with_checkpoints()
     from rocpd.ai_analysis.interactive import _AnalysisSnapshot
+
     snap = _AnalysisSnapshot(
-        timestamp="t", iteration=2,
-        recommendations=[{"priority": "HIGH", "category": "C", "issue": "i",
-                           "suggestion": "s", "actions": [], "id": "R1",
-                           "estimated_impact": "", "commands": []}],
+        timestamp="t",
+        iteration=2,
+        recommendations=[
+            {
+                "priority": "HIGH",
+                "category": "C",
+                "issue": "i",
+                "suggestion": "s",
+                "actions": [],
+                "id": "R1",
+                "estimated_impact": "",
+                "commands": [],
+            }
+        ],
     )
     # Simulate user typing "b" then "0" then "n" (no blacklist)
-    with patch("builtins.input", side_effect=["b", "0", "n"]), \
-         patch.object(ws, "_rollback_to_checkpoint") as mock_rollback, \
-         patch.object(ws, "_save_session"):
+    with patch("builtins.input", side_effect=["b", "0", "n"]), patch.object(
+        ws, "_rollback_to_checkpoint"
+    ) as mock_rollback, patch.object(ws, "_save_session"):
         ws._phase5_rec_menu(snap)
     mock_rollback.assert_called_once_with(target_cp_id=0)
 
 
 def test_phase5_does_not_crash_when_no_checkpoints():
     from rocpd.ai_analysis.interactive import WorkflowSession, _AnalysisSnapshot
+
     ws = WorkflowSession(app_command="./app")  # no checkpoints
     snap = _AnalysisSnapshot(
-        timestamp="t", iteration=0,
-        recommendations=[{"priority": "INFO", "category": "C", "issue": "i",
-                           "suggestion": "s", "actions": [], "id": "R1",
-                           "estimated_impact": "", "commands": []}],
+        timestamp="t",
+        iteration=0,
+        recommendations=[
+            {
+                "priority": "INFO",
+                "category": "C",
+                "issue": "i",
+                "suggestion": "s",
+                "actions": [],
+                "id": "R1",
+                "estimated_impact": "",
+                "commands": [],
+            }
+        ],
     )
     with patch("builtins.input", side_effect=["n"]):
         result = ws._phase5_rec_menu(snap)
@@ -628,31 +703,55 @@ def test_phase5_does_not_crash_when_no_checkpoints():
 def test_phase5_rollback_with_blacklist():
     ws = _make_ws_with_checkpoints()
     from rocpd.ai_analysis.interactive import _AnalysisSnapshot
+
     snap = _AnalysisSnapshot(
-        timestamp="t", iteration=2,
-        recommendations=[{"priority": "HIGH", "category": "C", "issue": "i",
-                           "suggestion": "s", "actions": [], "id": "R1",
-                           "estimated_impact": "", "commands": []}],
+        timestamp="t",
+        iteration=2,
+        recommendations=[
+            {
+                "priority": "HIGH",
+                "category": "C",
+                "issue": "i",
+                "suggestion": "s",
+                "actions": [],
+                "id": "R1",
+                "estimated_impact": "",
+                "commands": [],
+            }
+        ],
     )
-    with patch("builtins.input", side_effect=["b", "0", "1"]), \
-         patch.object(ws, "_rollback_to_checkpoint"), \
-         patch.object(ws, "_blacklist_checkpoint") as mock_blacklist, \
-         patch.object(ws, "_save_session"):
+    with patch("builtins.input", side_effect=["b", "0", "1"]), patch.object(
+        ws, "_rollback_to_checkpoint"
+    ), patch.object(ws, "_blacklist_checkpoint") as mock_blacklist, patch.object(
+        ws, "_save_session"
+    ):
         ws._phase5_rec_menu(snap)
     mock_blacklist.assert_called_once_with(1)
 
 
 def test_blacklist_block_injected_into_phase6_prompt():
     import pathlib
+
     ws = _make_ws_with_checkpoints()
     ws._blacklist_checkpoint(1)  # blacklist cp-1 (edit 1, -67%)
 
     from rocpd.ai_analysis.interactive import _AnalysisSnapshot
+
     snap = _AnalysisSnapshot(
-        timestamp="t", iteration=2,
-        recommendations=[{"priority": "HIGH", "category": "C", "issue": "i",
-                           "suggestion": "s", "actions": [], "id": "R1",
-                           "estimated_impact": "", "commands": []}],
+        timestamp="t",
+        iteration=2,
+        recommendations=[
+            {
+                "priority": "HIGH",
+                "category": "C",
+                "issue": "i",
+                "suggestion": "s",
+                "actions": [],
+                "id": "R1",
+                "estimated_impact": "",
+                "commands": [],
+            }
+        ],
     )
 
     captured_suggestions = []
@@ -661,16 +760,25 @@ def test_blacklist_block_injected_into_phase6_prompt():
         captured_suggestions.append(suggestions)
         return "rewritten content"
 
-    with patch.object(ws, "_llm_rewrite_file", side_effect=fake_llm_rewrite), \
-         patch.object(ws, "_pick_file_from_source_paths",
-                      return_value=pathlib.Path("/repo/kernel.hip")), \
-         patch("pathlib.Path.read_text", return_value="original"), \
-         patch("pathlib.Path.write_text"), \
-         patch("pathlib.Path.with_suffix", return_value=pathlib.Path("/repo/kernel.hip.bak")), \
-         patch("pathlib.Path.exists", return_value=False), \
-         patch("builtins.input", side_effect=["y", "done"]), \
-         patch.object(ws, "_save_session"), \
-         patch.object(ws, "_create_checkpoint"):
+    with patch.object(
+        ws, "_llm_rewrite_file", side_effect=fake_llm_rewrite
+    ), patch.object(
+        ws, "_pick_file_from_source_paths", return_value=pathlib.Path("/repo/kernel.hip")
+    ), patch(
+        "pathlib.Path.read_text", return_value="original"
+    ), patch(
+        "pathlib.Path.write_text"
+    ), patch(
+        "pathlib.Path.with_suffix", return_value=pathlib.Path("/repo/kernel.hip.bak")
+    ), patch(
+        "pathlib.Path.exists", return_value=False
+    ), patch(
+        "builtins.input", side_effect=["y", "done"]
+    ), patch.object(
+        ws, "_save_session"
+    ), patch.object(
+        ws, "_create_checkpoint"
+    ):
         ws._phase6_apply_direct(snap)
 
     assert any("Blacklisted" in s for s in captured_suggestions)
@@ -679,9 +787,9 @@ def test_blacklist_block_injected_into_phase6_prompt():
 def test_worktrees_removed_on_session_exit():
     ws = _make_ws_with_checkpoints()
 
-    with patch.object(ws._gcm, "remove_worktree") as mock_remove, \
-         patch.object(ws, "_save_session"), \
-         patch.object(ws, "_init_checkpoints"):
+    with patch.object(ws._gcm, "remove_worktree") as mock_remove, patch.object(
+        ws, "_save_session"
+    ), patch.object(ws, "_init_checkpoints"):
         ws._teardown_checkpoints()
 
     assert mock_remove.call_count == 3  # 3 checkpoints
@@ -691,13 +799,17 @@ def test_stale_worktrees_pruned_on_start():
     ws = _make_ws_with_checkpoints()
     sessions_dir = str(ws._sessions_dir)
 
-    with patch.object(ws._gcm, "list_worktrees", return_value=[
-        f"{sessions_dir}/other_session/cp-0",   # no JSON → stale
-        f"{sessions_dir}/{ws._session_id}/cp-0", # current session → keep
-        "/repo/.git",                             # not under sessions_dir → ignore
-    ]), \
-    patch.object(ws._gcm, "remove_worktree") as mock_remove, \
-    patch("pathlib.Path.exists", return_value=False):  # no JSON files exist
+    with patch.object(
+        ws._gcm,
+        "list_worktrees",
+        return_value=[
+            f"{sessions_dir}/other_session/cp-0",  # no JSON → stale
+            f"{sessions_dir}/{ws._session_id}/cp-0",  # current session → keep
+            "/repo/.git",  # not under sessions_dir → ignore
+        ],
+    ), patch.object(ws._gcm, "remove_worktree") as mock_remove, patch(
+        "pathlib.Path.exists", return_value=False
+    ):  # no JSON files exist
         ws._prune_stale_worktrees()
 
     # Only the other_session worktree should be pruned
