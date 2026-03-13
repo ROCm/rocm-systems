@@ -533,7 +533,7 @@ inline bool DmaBlitManager::rocrCopyBuffer(address dst, hsa_agent_t& dstAgent,
 
       // If requested engine is valid and available, use it
       if (recIdMask != 0 && (freeEngineMask & recIdMask) != 0) {
-        copyMask = recIdMask;
+        copyMask = recIdMask - (recIdMask & (recIdMask - 1));
       } else {
         // Otherwise use first available engine
         copyMask = freeEngineMask - (freeEngineMask & (freeEngineMask - 1));
