@@ -39,7 +39,7 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 5.7
  */
-TEST_CASE("Unit_hipGetMipmappedArrayLevel_Negative_Parameters") {
+TEST_CASE(Unit_hipGetMipmappedArrayLevel_Negative_Parameters) {
   CHECK_IMAGE_SUPPORT;
 
   hipMipmappedArray_t array;

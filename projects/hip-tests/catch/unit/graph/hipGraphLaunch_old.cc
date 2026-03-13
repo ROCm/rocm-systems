@@ -105,7 +105,7 @@ static void hipGraphLaunch_test() {
   HIP_CHECK(hipStreamDestroy(streamForGraph));
 }
 
-TEST_CASE("Unit_hipGraphLaunch_Functional_multidevice_test", "[multigpu]") {
+TEST_CASE(Unit_hipGraphLaunch_Functional_multidevice_test) {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
 
@@ -141,7 +141,7 @@ static void validateOutData(int* A1_h, int* A2_h, size_t N) {
  * 2.Create a graph with multiple nodes. Create an executable graph.
  * Verify if an executable graph be launched on null stream.
  */
-TEST_CASE("Unit_hipGraphLaunch_Functional_MultipleLaunch") {
+TEST_CASE(Unit_hipGraphLaunch_Functional_MultipleLaunch) {
   size_t memSize = SIZE;
   constexpr auto blocksPerCU = 6;  // to hide latency
   constexpr auto threadsPerBlock = 256;

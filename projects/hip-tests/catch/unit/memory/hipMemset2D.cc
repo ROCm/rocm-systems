@@ -43,7 +43,7 @@ static constexpr std::initializer_list<tupletype> tableItems{
 /**
  * Basic Functionality of hipMemset2D
  */
-TEST_CASE("Unit_hipMemset2D_BasicFunctional") {
+TEST_CASE(Unit_hipMemset2D_BasicFunctional) {
   CHECK_IMAGE_SUPPORT
 
   constexpr int memsetval = 0x24;
@@ -82,7 +82,7 @@ TEST_CASE("Unit_hipMemset2D_BasicFunctional") {
 /**
  * Basic Functionality of hipMemset2DAsync
  */
-TEST_CASE("Unit_hipMemset2DAsync_BasicFunctional") {
+TEST_CASE(Unit_hipMemset2DAsync_BasicFunctional) {
   CHECK_IMAGE_SUPPORT
 
   constexpr int memsetval = 0x26;
@@ -125,7 +125,7 @@ TEST_CASE("Unit_hipMemset2DAsync_BasicFunctional") {
 /**
  * Memset partial buffer with unique Width and Height
  */
-TEST_CASE("Unit_hipMemset2D_UniqueWidthHeight") {
+TEST_CASE(Unit_hipMemset2D_UniqueWidthHeight) {
   CHECK_IMAGE_SUPPORT
 
   int width2D, height2D;
@@ -180,7 +180,7 @@ TEST_CASE("Unit_hipMemset2D_UniqueWidthHeight") {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipMemset2DAsync_capturehipMemset2DAsync") {
+TEST_CASE(Unit_hipMemset2DAsync_capturehipMemset2DAsync) {
   char *A_h, *B_h, *A_d;
   hipGraph_t graph{nullptr};
   hipGraphExec_t graphExec{nullptr};

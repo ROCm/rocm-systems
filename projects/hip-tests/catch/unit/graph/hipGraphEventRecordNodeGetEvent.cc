@@ -55,7 +55,7 @@ static void validateEventRecordNodeGetEvent(unsigned flag) {
 /**
  * Scenario: Validate scenario 1 for different event flags.
  */
-TEST_CASE("Unit_hipGraphEventRecordNodeGetEvent_Functional") {
+TEST_CASE(Unit_hipGraphEventRecordNodeGetEvent_Functional) {
   // Create event nodes with different flags and validate with
   // hipGraphEventRecordNodeGetEvent.
   SECTION("Flag = hipEventDefault") { validateEventRecordNodeGetEvent(hipEventDefault); }
@@ -70,7 +70,7 @@ TEST_CASE("Unit_hipGraphEventRecordNodeGetEvent_Functional") {
 /**
  * Scenario 2: Negative tests.
  */
-TEST_CASE("Unit_hipGraphEventRecordNodeGetEvent_Negative") {
+TEST_CASE(Unit_hipGraphEventRecordNodeGetEvent_Negative) {
   hipGraph_t graph;
   HIP_CHECK(hipGraphCreate(&graph, 0));
   hipEvent_t event_out;

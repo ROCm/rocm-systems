@@ -22,7 +22,6 @@ THE SOFTWARE.
 
 static constexpr auto NUM_W{10};
 static constexpr auto NUM_H{10};
-
 /*
  * This Scenario Verifies hipMemcpy2DFromArray API by copying the
  * data from pinned host memory to device from Peer GPU.
@@ -33,8 +32,7 @@ static constexpr auto NUM_H{10};
  *         --> E_h host variable
  *         and verifying A_h with E_h
  */
-TEST_CASE("Unit_hipMemcpy2DFromArray_multiDevicePinnedMemPeerGpu",
-          "[multigpu]") {
+TEST_CASE(Unit_hipMemcpy2DFromArray_multiDevicePinnedMemPeerGpu) {
   CHECK_IMAGE_SUPPORT
 
   int numDevices = 0;
@@ -87,7 +85,7 @@ TEST_CASE("Unit_hipMemcpy2DFromArray_multiDevicePinnedMemPeerGpu",
  *         --> A_h host variable
  *         and verifying A_h with Phi
  * */
-TEST_CASE("Unit_hipMemcpy2DFromArray_multiDeviceContextChange", "[multigpu]") {
+TEST_CASE(Unit_hipMemcpy2DFromArray_multiDeviceContextChange) {
   CHECK_IMAGE_SUPPORT
 
   int numDevices = 0;
