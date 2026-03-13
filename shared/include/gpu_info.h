@@ -127,6 +127,34 @@ struct VBiosInfo {
   char boot_firmware[256]; // (not filled via KMD escape)
 };
 
+// GPU dynamic metrics from KMD PMLog escape (clocks, temps, voltages, activity, fan).
+// Fields are UINT32_MAX when the corresponding PMLog sensor is not available.
+struct GpuMetricsInfo {
+  // Temperatures (°C, integer degrees matching amdsmi_gpu_metrics_t)
+  uint32_t temperature_edge;       // TEMP_EDGE sensor
+  uint32_t temperature_hotspot;    // TEMP_HOTSPOT sensor
+  uint32_t temperature_mem;        // TEMP_MEM sensor
+
+  // Activity (%)
+  uint32_t average_gfx_activity;   // GFX_ACTIVITY sensor
+  uint32_t average_umc_activity;   // MEM_ACTIVITY sensor
+
+  // Power (W)
+  uint32_t current_socket_power;   // BOARD_POWER sensor
+
+  // Clocks (MHz)
+  uint32_t current_gfxclk;         // GFX_CLK sensor
+  uint32_t current_socclk;         // SOC_CLK sensor
+
+  // Fan
+  uint32_t current_fan_speed;      // FAN_RPM sensor
+
+  // Voltages (mV)
+  uint32_t voltage_soc;            // SOC_VOLTAGE sensor
+  uint32_t voltage_gfx;            // GFX_VOLTAGE sensor
+  uint32_t voltage_mem;            // MEM_VOLTAGE sensor
+};
+
 // ASIC static information sourced from KMD adapter info.
 struct AsicInfo {
   uint64_t device_id;          // PCI device ID

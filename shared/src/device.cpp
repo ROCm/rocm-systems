@@ -107,6 +107,10 @@ ErrorCode Device::QueryMemoryUsage(uint32_t mem_type, uint64_t *used) const {
   return device_ctx_->QueryMemoryUsage(mem_type, used);
 }
 
+ErrorCode Device::QueryGpuMetricsInfo(GpuMetricsInfo *info) const {
+  return device_ctx_->QueryGpuMetricsInfo(info);
+}
+
 ErrorCode Device::Escape(void *pData, size_t dataSize, bool hardwareAccess) const {
   return device_ctx_->Escape(pData, dataSize, hardwareAccess);
 }

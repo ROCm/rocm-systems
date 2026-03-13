@@ -247,6 +247,9 @@ public:
   // Query memory used in bytes by type via D3DKMTQueryStatistics.
   ErrorCode QueryMemoryUsage(uint32_t mem_type, uint64_t *used) const;
 
+  // Query live GPU metrics (clocks, temps, voltages, activity, fan) via PMLog escape.
+  ErrorCode QueryGpuMetricsInfo(wsl::thunk::GpuMetricsInfo *info) const;
+
   // Send a driver-escape packet on behalf of this GPU slot.
   ErrorCode Escape(void *pData, size_t dataSize, bool hardwareAccess = false) const;
 
