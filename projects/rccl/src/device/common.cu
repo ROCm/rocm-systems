@@ -23,7 +23,8 @@ struct RunWorkNop {
     const void* volatile _kptr = (const void*)__builtin_amdgcn_kernarg_segment_ptr(); \
     ncclShmem.kernargPtr = _kptr; \
   } \
-  __syncthreads();
+  __syncthreads(); \
+  asm volatile("s_waitcnt vmcnt(0) lgkmcnt(0)\n\tbuffer_inv sc0 sc1" ::: "memory");
 #else
 #define STORE_KERNARG_PTR()
 #endif
