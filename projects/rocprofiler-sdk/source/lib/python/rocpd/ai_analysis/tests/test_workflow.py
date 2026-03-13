@@ -594,3 +594,16 @@ def test_build_blacklist_block_deduplicates():
     ws._blacklist_checkpoint(1)  # blacklist same cp twice
     block = ws._build_blacklist_block()
     assert block.count("edit 1") == 1
+
+
+def test_rollback_baseline_no_git_still_clears_state():
+    ws = _make_ws_with_checkpoints()
+    ws._gcm = None  # no git available
+    ws._state.repo_root = ""
+    with patch.object(ws, "_save_session"):
+        ws._rollback_to_checkpoint(target_cp_id=-1)
+    # State should be cleared even without git restore
+    assert ws._state.checkpoints == []
+    assert ws._state.trace_history == []
+    assert ws._state.analysis_history == []
+    assert ws._state.iteration_count == 0

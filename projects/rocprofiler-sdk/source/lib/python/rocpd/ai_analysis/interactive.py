@@ -2237,8 +2237,9 @@ class WorkflowSession:
                     "snapshots exist for the baseline state.",
                     style="red",
                 )
-                return
-            self._restore_from_snapshots(modified_after, target_snapshots)
+                pass  # fall through to cleanup: truncate checkpoints/history, _save_session
+            else:
+                self._restore_from_snapshots(modified_after, target_snapshots)
             _print(
                 "  Note: restored from session file snapshot (git unavailable).",
                 style="dim",
@@ -2290,6 +2291,7 @@ class WorkflowSession:
             f"'{cp.edit_summary}' caused {delta_str} performance regression. "
             "Do not suggest this approach again."
         )
+        self._save_session()
 
     def _build_blacklist_block(self) -> str:
         """Return LLM prompt block for all blacklisted checkpoints.
