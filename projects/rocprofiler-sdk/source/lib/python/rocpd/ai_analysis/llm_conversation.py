@@ -188,7 +188,7 @@ class LLMConversation:
             self._model or os.environ.get("ROCPD_LLM_MODEL") or DEFAULT_ANTHROPIC_MODEL
         )
         client = _anthropic.Anthropic(api_key=api_key)
-        result = ""
+        chunks: List[str] = []
         try:
             with client.messages.stream(
                 model=model,
@@ -200,7 +200,7 @@ class LLMConversation:
                 for text in stream.text_stream:
                     if on_token:
                         on_token(text)
-                    result += text
+                    chunks.append(text)
         except _anthropic.AuthenticationError as e:
             raise LLMAuthenticationError(f"Anthropic authentication failed: {e}")
         except _anthropic.RateLimitError as e:
@@ -208,13 +208,13 @@ class LLMConversation:
         except (LLMAuthenticationError, LLMRateLimitError):
             raise
         except Exception as e:
-            if result:
+            if chunks:
                 warnings.warn(
                     f"[LLMConversation] Streaming error mid-response: {e}", stacklevel=3
                 )
             else:
                 raise
-        return result
+        return "".join(chunks)
 
     def _stream_openai(
         self,
@@ -259,7 +259,7 @@ class LLMConversation:
         messages_with_system = [
             {"role": "system", "content": self._system}
         ] + self._messages
-        result = ""
+        chunks: List[str] = []
         try:
             try:
                 stream = client.chat.completions.create(
@@ -285,7 +285,7 @@ class LLMConversation:
                 if delta:
                     if on_token:
                         on_token(delta)
-                    result += delta
+                    chunks.append(delta)
         except _openai.AuthenticationError as e:
             raise LLMAuthenticationError(f"OpenAI authentication failed: {e}")
         except _openai.RateLimitError as e:
@@ -293,7 +293,7 @@ class LLMConversation:
         except (LLMAuthenticationError, LLMRateLimitError):
             raise
         except Exception as e:
-            if result:
+            if chunks:
                 warnings.warn(
                     f"[LLMConversation] Streaming error mid-response: {e}", stacklevel=3
                 )
@@ -302,7 +302,7 @@ class LLMConversation:
         finally:
             if _http_client is not None:
                 _http_client.close()
-        return result
+        return "".join(chunks)
 
     # ── Compaction ────────────────────────────────────────────────────────────
 
