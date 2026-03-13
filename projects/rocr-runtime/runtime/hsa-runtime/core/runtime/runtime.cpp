@@ -56,6 +56,7 @@
 
 #include "core/inc/runtime.h"
 #include "core/inc/hsa_table_interface.h"
+#include "core/util/timer.h"
 
 #if defined(HSA_ROCPROFILER_REGISTER) && HSA_ROCPROFILER_REGISTER > 0
 #include <rocprofiler-register/rocprofiler-register.h>
@@ -846,7 +847,14 @@ hsa_status_t Runtime::SetAsyncSignalHandler(hsa_signal_t signal,
 
   asyncInfo->new_events.PushBack(signal, cond, value, handler, arg);
 
-  hsa_signal_handle(asyncInfo->control.wake)->StoreRelease(1);
+  // Store wake value with seq_cst so that the AsyncEventsLoop thread can see this thread's update
+  atomic::Store(&hsa_signal_handle(asyncInfo->control.wake)->signal_.value,
+                int64_t(1), std::memory_order_seq_cst);
+
+  // If the thread is waiting in the kernel, invoke KFD ioctl to wake it up
+  if (asyncInfo->in_kernel_wait.load(std::memory_order_seq_cst)) {
+    hsa_signal_handle(asyncInfo->control.wake)->StoreRelease(1);
+  }
 
   return HSA_STATUS_SUCCESS;
 }
@@ -1891,19 +1899,39 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
     uint32_t index = 0;
     uint32_t wait_any = true;
     if (eventsInfo->monitor_exceptions) {
-      index =
-          Signal::WaitAnyExceptions(uint32_t(async_events_.Size()), &async_events_.signal_[0],
-                                    &async_events_.cond_[0], &async_events_.value_[0], &value[0]);
+      // Dekker-style sync: set flag, then re-check wake signal before entering kernel wait
+      eventsInfo->in_kernel_wait.store(true, std::memory_order_seq_cst);
+      auto wake_val = atomic::Load(&hsa_signals[0]->signal_.value, std::memory_order_seq_cst);
+      if (CheckSignalCondition(wake_val, async_events_.cond_[0], async_events_.value_[0])) {
+        eventsInfo->in_kernel_wait.store(false, std::memory_order_relaxed);
+        value[0] = wake_val;
+        index = 0;
+      } else {
+        index =
+            Signal::WaitAnyExceptions(uint32_t(async_events_.Size()), &async_events_.signal_[0],
+                                      &async_events_.cond_[0], &async_events_.value_[0], &value[0]);
+        eventsInfo->in_kernel_wait.store(false, std::memory_order_relaxed);
+      }
     } else {
-     if (core::Runtime::runtime_singleton_->flag().wait_any()) {
-       index = Signal::WaitMultiple(uint32_t(async_events_.Size()), &async_events_.signal_[0],
-                                    &async_events_.cond_[0], &async_events_.value_[0], uint64_t(-1),
-                                    HSA_WAIT_STATE_BLOCKED, value, false);
-     } else {
-      // Skip wake-up signal logic
-      index = 1;
-      wait_any = false;
-     }
+      if (core::Runtime::runtime_singleton_->flag().wait_any()) {
+        // This sequence is important for synchronization with the AsyncEventsLoop thread
+        eventsInfo->in_kernel_wait.store(true, std::memory_order_seq_cst);
+        auto wake_val = atomic::Load(&hsa_signals[0]->signal_.value, std::memory_order_seq_cst);
+        if (CheckSignalCondition(wake_val, async_events_.cond_[0], async_events_.value_[0])) {
+          eventsInfo->in_kernel_wait.store(false, std::memory_order_relaxed);
+          value[0] = wake_val;
+          index = 0;
+        } else {
+          index = Signal::WaitMultiple(uint32_t(async_events_.Size()), &async_events_.signal_[0],
+                                      &async_events_.cond_[0], &async_events_.value_[0], uint64_t(-1),
+                                      HSA_WAIT_STATE_BLOCKED, value, false);
+          eventsInfo->in_kernel_wait.store(false, std::memory_order_relaxed);
+        }
+      } else {
+        // Skip wake-up signal logic
+        index = 1;
+        wait_any = false;
+      }
     }
 
     // Reset the control signal
@@ -1969,7 +1997,45 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
         }
         // If nothing was complete and an interrupt wait was requested, then call KFD
         if (interrupt_wait) {
-          WaitForInterrupt();
+          // Active poll before the expensive kernel wait, matching WaitMultiple's
+          // 200us polling window. During this window, new async handlers can wake
+          // the thread via atomic stores on the wake signal without needing the
+          // expensive(~1.5us) hsaKmtSetEvent ioctl call.
+          timer::fast_clock::time_point start_time = timer::fast_clock::now();
+          const timer::fast_clock::duration kMaxElapsed = std::chrono::microseconds(200);
+
+          while (true) {
+            for (size_t pi = 0; pi < async_events_.Size(); pi++) {
+              auto pval = atomic::Load(&hsa_signals[pi]->signal_.value,
+                                       std::memory_order_relaxed);
+              if (CheckSignalCondition(pval, async_events_.cond_[pi],
+                                       async_events_.value_[pi])) {
+                finish = true;
+                break;
+              }
+            }
+            if (finish) break;
+
+            if (timer::fast_clock::now() - start_time < kMaxElapsed) {
+              continue;
+            }
+
+            // Polling window expired — fall through to kernel wait.
+            // Set flag before re-checking the wake signal
+            // to ensure mutual visibility with the producer in SetAsyncSignalHandler.
+            eventsInfo->in_kernel_wait.store(true, std::memory_order_seq_cst);
+            auto wake_chk = atomic::Load(&hsa_signals[0]->signal_.value,
+                                         std::memory_order_seq_cst);
+            if (CheckSignalCondition(wake_chk, async_events_.cond_[0],
+                                     async_events_.value_[0])) {
+              eventsInfo->in_kernel_wait.store(false, std::memory_order_relaxed);
+              finish = true;
+            } else {
+              WaitForInterrupt();
+              eventsInfo->in_kernel_wait.store(false, std::memory_order_relaxed);
+            }
+            break;
+          }
           init_age = false;
         }
       }
@@ -2405,7 +2471,7 @@ Runtime::AsyncEventsInfo::~AsyncEventsInfo() {
 }
 
 Runtime::AsyncEventsControl::AsyncEventsControl(AsyncEventsInfo *asyncInfo)
-  : info_(asyncInfo), exit(false) {
+  : exit(false), info_(asyncInfo) {
 
   auto err = HSA::hsa_signal_create(0, 0, NULL, &wake);
   if (err != HSA_STATUS_SUCCESS)

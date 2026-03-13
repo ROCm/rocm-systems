@@ -705,6 +705,7 @@ class Runtime {
     bool monitor_exceptions;
     AsyncEvents events;
     ConcurrentAsyncEvents new_events;
+    std::atomic<bool> in_kernel_wait{false};
     // control must be declared last so that events is initialized before the
     // thread starts accessing it in AsyncEventsControl constructor
     AsyncEventsControl control;
