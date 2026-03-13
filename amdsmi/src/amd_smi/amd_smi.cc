@@ -840,12 +840,17 @@ amdsmi_status_t amdsmi_get_processor_type(amdsmi_processor_handle processor_hand
     if (processor_type == nullptr) {
         return AMDSMI_STATUS_INVAL;
     }
-    amd::smi::AMDSmiProcessor* processor = nullptr;
-    amdsmi_status_t r = amd::smi::AMDSmiSystem::getInstance()
-                    .handle_to_processor(processor_handle, &processor);
-    if (r != AMDSMI_STATUS_SUCCESS) return r;
-    *processor_type = processor->get_processor_type();
 
+    *processor_type = AMDSMI_PROCESSOR_TYPE_UNKNOWN;
+    auto device = reinterpret_cast<Device *>(processor_handle);
+
+    const auto& platform = Platform::instance();
+    for (size_t i = 0, count = platform.GetDeviceCount(); i < count; ++i) {
+        if (platform.GetDevice(i) == device) {
+            *processor_type = AMDSMI_PROCESSOR_TYPE_AMD_GPU;
+            break;
+        }
+    }
     return AMDSMI_STATUS_SUCCESS;
 }
 
