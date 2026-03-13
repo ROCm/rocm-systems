@@ -10,13 +10,13 @@ Run with system rocpd first in PYTHONPATH:
 import os
 import sys
 
+import pytest
+
 # If ROCPD_SYS is set, ensure the system-installed rocpd wins over any path that
 # pytest may have prepended during package-discovery (e.g. the build tree).
 _ROCPD_SYS = os.environ.get("ROCPD_SYS", "")
 if _ROCPD_SYS:
     if not os.path.isdir(_ROCPD_SYS):
-        import pytest
-
         pytest.skip(
             f"ROCPD_SYS={_ROCPD_SYS!r} does not exist; skipping workflow tests",
             allow_module_level=True,
@@ -39,9 +39,6 @@ def test_workflow_state_defaults():
     assert s.analysis_history == []
     assert s.edit_history == []
     assert s.iteration_count == 0
-
-
-import pytest
 
 
 def test_checkpoint_record_defaults():
