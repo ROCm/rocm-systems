@@ -101,8 +101,8 @@ RUNTIME_ENTRY_RET(cl_command_queue, clCreateCommandQueueWithProperties,
   uint queueSize = amdDevice.info().queueOnDevicePreferredSize_;
   uint queueRTCUs = amd::CommandQueue::RealTimeDisabled;
   amd::CommandQueue::Priority priority = amd::CommandQueue::Priority::Normal;
-  signed int queueonDeviceProperty = amdDevice.info().queueOnDeviceProperties_;
-  signed int queueProperty = amdDevice.info().queueProperties_;
+  int32_t queueonDeviceProperty = amdDevice.info().queueOnDeviceProperties_;
+  int32_t queueProperty = amdDevice.info().queueProperties_;
   if (p != NULL)
     while (p->name != 0) {
       switch (p->name) {
@@ -110,7 +110,7 @@ RUNTIME_ENTRY_RET(cl_command_queue, clCreateCommandQueueWithProperties,
           // FIXME_lmoriche: See comment above.
           // properties = p->value.properties;
           properties = static_cast<cl_command_queue_properties>(p->value.raw);
-          if ((signed int) properties < 0) {
+          if ((int32_t) properties < 0) {
             *not_null(errcode_ret) = CL_INVALID_VALUE;
             return (cl_command_queue)0;
           }
