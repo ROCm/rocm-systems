@@ -24,7 +24,7 @@ THE SOFTWARE.
 #include <resource_guards.hh>
 #include <utils.hh>
 
-TEST_CASE("Unit_hipMemcpyAtoH_Positive_Default") {
+TEST_CASE(Unit_hipMemcpyAtoH_Positive_Default) {
   CHECK_IMAGE_SUPPORT
 
   using namespace std::placeholders;
@@ -35,7 +35,7 @@ TEST_CASE("Unit_hipMemcpyAtoH_Positive_Default") {
   MemcpyAtoHShell<false, int>(std::bind(hipMemcpyAtoH, _1, _2, 0, allocation_size), width);
 }
 
-TEST_CASE("Unit_hipMemcpyAtoH_Positive_Synchronization_Behavior") {
+TEST_CASE(Unit_hipMemcpyAtoH_Positive_Synchronization_Behavior) {
   CHECK_IMAGE_SUPPORT
 
   using namespace std::placeholders;
@@ -56,7 +56,7 @@ Excluded the testcase for amd,as there is already a bug raised
 SWDEV-274683
 */
 #if HT_NVIDIA
-TEST_CASE("Unit_hipMemcpyAtoH_Positive_ZeroCount") {
+TEST_CASE(Unit_hipMemcpyAtoH_Positive_ZeroCount) {
   CHECK_IMAGE_SUPPORT
 
   const auto width = 1024;
@@ -87,7 +87,7 @@ TEST_CASE("Unit_hipMemcpyAtoH_Positive_ZeroCount") {
 }
 #endif
 
-TEST_CASE("Unit_hipMemcpyAtoH_Negative_Parameters") {
+TEST_CASE(Unit_hipMemcpyAtoH_Negative_Parameters) {
   CHECK_IMAGE_SUPPORT
 
   using namespace std::placeholders;
@@ -130,7 +130,7 @@ TEST_CASE("Unit_hipMemcpyAtoH_Negative_Parameters") {
   }
 }
 
-TEST_CASE("Unit_hipMemcpyAtoH_Capture") {
+TEST_CASE(Unit_hipMemcpyAtoH_Capture) {
   CHECK_IMAGE_SUPPORT
 
   const auto width = 1024;

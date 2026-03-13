@@ -116,12 +116,6 @@ set(AMD_GFX1200_SPEC_TEST_SRC
     fp8_ocp.cc
 )
 
-# Note to pass arch use format like -DOFFLOAD_ARCH_STR="--offload-arch=gfx900  --offload-arch=gfx906"
-# having space at the start/end of OFFLOAD_ARCH_STR can cause build failures
-string(TOUPPER "${CMAKE_BUILD_TYPE}" _HIP_BUILD_TYPE_UPPER)
-separate_arguments(HIP_DEVICE_BUILD_FLAGS_NO_ARCH NATIVE_COMMAND
-  "${CMAKE_HIP_FLAGS} ${CMAKE_HIP_FLAGS_${_HIP_BUILD_TYPE_UPPER}}")
-list(FILTER HIP_DEVICE_BUILD_FLAGS_NO_ARCH EXCLUDE REGEX "--offload-arch=")
 if (HIP_PLATFORM MATCHES "amd")
   add_custom_target(kerDevAllocMultCO.code
                   COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} --cuda-device-only
@@ -204,7 +198,8 @@ function(CheckAcceptedArchs OFFLOAD_ARCH_STR_LOCAL)
 endfunction()  # CheckAcceptedArchs
 
 if(HIP_PLATFORM MATCHES "amd")
-  if (DEFINED OFFLOAD_ARCH_STR)
+  # Do not enable arch specific tests for ASAN.
+  if (DEFINED OFFLOAD_ARCH_STR AND NOT (ENABLE_ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANITIZER STREQUAL "HOST_ASAN"))
     CheckAcceptedArchs(${OFFLOAD_ARCH_STR})
   elseif(DEFINED $ENV{HCC_AMDGPU_TARGET})
     CheckAcceptedArchs($ENV{HCC_AMDGPU_TARGET})

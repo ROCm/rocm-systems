@@ -377,6 +377,16 @@ template <bool useGCR> class BlitSdma : public BlitSdmaBase {
   /// Minimum submission size in bytes.
   size_t min_submission_size_;
 
+  /// Cached at init to avoid pointer chasing in the hot path.
+  bool needs_kmt_doorbell_;
+  bool sdma_wait_idle_;
+  bool is_dxg_;
+  bool enable_sdma_hdp_flush_;
+  bool sw_poll_workaround_;
+  volatile uint64_t* queue_wptr_;
+  volatile uint64_t* queue_rptr_;
+  volatile uint64_t* queue_doorbell_;
+
   /// True if SDMA supports broadcast linear copy (one src -> two dst).
   bool broadcast_supported_;
 
