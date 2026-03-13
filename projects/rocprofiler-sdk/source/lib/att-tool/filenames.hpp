@@ -53,12 +53,16 @@ public:
             return id < other.id;
         }
     };
-    struct WaveName
+    struct TraceFile
     {
         std::string name{};
         size_t      begin{0};
         size_t      end{0};
     };
+
+    using WaveName       = TraceFile;
+    using ShaderDataName = TraceFile;
+    using OtherSIMDName  = WaveName;
 
     FilenameMgr(const Fspath& _dir)
     : dir(_dir)
@@ -72,14 +76,18 @@ public:
         int                                                                    se,
         const std::vector<rocprofiler_thread_trace_decoder_inst_other_simd_t>& records);
 
-    Fspath                    dir{};
-    Fspath                    filename{};
-    std::map<Coord, WaveName> streams{};
-    std::vector<std::string>  perfcounters{};
-    int                       gfxip = 9;
+    /// Write shaderdata records for an SE and track the output file name.
+    void add_shaderdata_data(int                                                  se,
+                             const rocprofiler_thread_trace_decoder_shaderdata_t* records,
+                             size_t                                               count);
 
-    using OtherSIMDName = WaveName;
-    std::map<int, std::vector<OtherSIMDName>> other_simd_files{};
+    Fspath                                     dir{};
+    Fspath                                     filename{};
+    std::map<Coord, WaveName>                  streams{};
+    std::vector<std::string>                   perfcounters{};
+    int                                        gfxip = 9;
+    std::map<int, std::vector<OtherSIMDName>>  other_simd_files{};
+    std::map<int, std::vector<ShaderDataName>> shaderdata_files{};
 };
 
 }  // namespace att_wrapper

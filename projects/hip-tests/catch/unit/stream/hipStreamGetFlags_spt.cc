@@ -38,7 +38,7 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipStreamGetFlags_spt_Basic") {
+TEST_CASE(Unit_hipStreamGetFlags_spt_Basic) {
   unsigned int expectedFlag = GENERATE(hipStreamDefault, hipStreamNonBlocking);
   unsigned int returnedFlags;
   hipStream_t stream;
@@ -60,7 +60,7 @@ TEST_CASE("Unit_hipStreamGetFlags_spt_Basic") {
  *  - HIP_VERSION >= 6.2
  */
 
-TEST_CASE("Unit_hipStreamGetFlags_spt_Negative") {
+TEST_CASE(Unit_hipStreamGetFlags_spt_Negative) {
   hipStream_t validStream;
   unsigned int flags;
 
@@ -93,7 +93,7 @@ TEST_CASE("Unit_hipStreamGetFlags_spt_Negative") {
  */
 
 #if HT_AMD
-TEST_CASE("Unit_hipStreamGetFlags_spt_StreamsCreatedWithCUMask") {
+TEST_CASE(Unit_hipStreamGetFlags_spt_StreamsCreatedWithCUMask) {
   hipStream_t stream;
   unsigned int flags;
   const uint32_t cuMask = 0xffffffff;

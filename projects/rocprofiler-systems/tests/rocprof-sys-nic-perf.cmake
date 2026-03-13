@@ -35,7 +35,6 @@ set(_nic_perf_environment
     "ROCPROFSYS_USE_PROCESS_SAMPLING=OFF"
     "ROCPROFSYS_SAMPLING_FREQ=50"
     "ROCPROFSYS_SAMPLING_CPUS=none"
-    "ROCPROFSYS_USE_ROCM=OFF"
     "ROCPROFSYS_TIMEMORY_COMPONENTS=wall_clock,papi_array,network_stats"
     "ROCPROFSYS_NETWORK_INTERFACE=${_network_interface}"
     "ROCPROFSYS_PAPI_EVENTS=${_event_list}"

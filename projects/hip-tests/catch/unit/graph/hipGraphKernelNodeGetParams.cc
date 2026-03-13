@@ -38,7 +38,7 @@ Functional -
 
 /* Test verifies hipGraphKernelNodeGetParams API Negative scenarios.
  */
-TEST_CASE("Unit_hipGraphKernelNodeGetParams_Negative") {
+TEST_CASE(Unit_hipGraphKernelNodeGetParams_Negative) {
   constexpr int N = 1024;
   size_t NElem{N};
   int *A_d, *B_d, *C_d;
@@ -106,7 +106,7 @@ static bool node_compare(hipKernelNodeParams* kNode1, hipKernelNodeParams* kNode
 
 /* Test verifies hipGraphKernelNodeGetParams API Functional scenarios.
  */
-TEST_CASE("Unit_hipGraphKernelNodeGetParams_Functional") {
+TEST_CASE(Unit_hipGraphKernelNodeGetParams_Functional) {
   constexpr int N = 1024;
   size_t NElem{N};
   int *A_d, *B_d, *C_d;

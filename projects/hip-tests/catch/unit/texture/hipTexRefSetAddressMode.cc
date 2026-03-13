@@ -22,7 +22,7 @@ THE SOFTWARE.
 
 #if defined(__HIP_PLATFORM_AMD__) || CUDA_VERSION < CUDA_12000
 
-TEST_CASE("Unit_hipTexRefSetAddressMode_Negative_Parameters") {
+TEST_CASE(Unit_hipTexRefSetAddressMode_Negative_Parameters) {
   CHECK_IMAGE_SUPPORT
 
   hipCtx_t ctx;
@@ -60,7 +60,7 @@ TEST_CASE("Unit_hipTexRefSetAddressMode_Negative_Parameters") {
   HIP_CHECK(hipCtxDestroy(ctx));
 }
 
-TEST_CASE("Unit_hipTexRefSetAddressMode_Positive") {
+TEST_CASE(Unit_hipTexRefSetAddressMode_Positive) {
   CHECK_IMAGE_SUPPORT
 
   hipCtx_t ctx;

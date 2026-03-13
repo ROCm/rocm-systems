@@ -186,9 +186,10 @@ class DirectoryPicker(ModalScreen[Optional[Path]]):
             self.dismiss(None)
 
     def on_key(self, event) -> None:  # noqa: ANN001
+        """Handle keyboard shortcuts."""
         if event.key == "enter":
-            button = self.query_one("#select-dir", InstantButton)
-            self.on_instant_button_instant_pressed(InstantButton.InstantPressed(button))
+            event.stop()
+            self.query_one("#select-dir", InstantButton).trigger()
         elif event.key == "escape":
-            button = self.query_one("#cancel-dir", InstantButton)
-            self.on_instant_button_instant_pressed(InstantButton.InstantPressed(button))
+            event.stop()
+            self.query_one("#cancel-dir", InstantButton).trigger()

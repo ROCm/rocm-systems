@@ -37,7 +37,7 @@ __global__ void __brev_kernel(unsigned int* y, unsigned int x) { y[0] = __brev(x
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device___brev_Sanity_Positive") {
+TEST_CASE(Unit_Device___brev_Sanity_Positive) {
   LinearAllocGuard<unsigned int> y(LinearAllocs::hipMallocManaged, sizeof(unsigned int));
 
   __brev_kernel<<<1, 1>>>(y.ptr(), 0xAAAAAAAA);
@@ -62,7 +62,7 @@ __global__ void __brevll_kernel(unsigned long long int* y, unsigned long long in
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device___brevll_Sanity_Positive") {
+TEST_CASE(Unit_Device___brevll_Sanity_Positive) {
   LinearAllocGuard<unsigned long long int> y(LinearAllocs::hipMallocManaged,
                                              sizeof(unsigned long long int));
 
@@ -86,7 +86,7 @@ template <typename T> __global__ void __clz_kernel(T* y, T x) { y[0] = __clz(x);
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_Device___clz_Sanity_Positive", "", int, unsigned int) {
+TEMPLATE_TEST_CASE(Unit_Device___clz_Sanity_Positive, int, unsigned int) {
   LinearAllocGuard<TestType> y(LinearAllocs::hipMallocManaged, sizeof(TestType));
 
   __clz_kernel<<<1, 1>>>(y.ptr(), static_cast<TestType>(0));
@@ -118,7 +118,7 @@ template <typename T> __global__ void __clzll_kernel(T* y, T x) { y[0] = __clzll
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_Device___clzll_Sanity_Positive", "", long long int,
+TEMPLATE_TEST_CASE(Unit_Device___clzll_Sanity_Positive, long long int,
                    unsigned long long int) {
   LinearAllocGuard<TestType> y(LinearAllocs::hipMallocManaged, sizeof(TestType));
 
@@ -150,7 +150,7 @@ template <typename T> __global__ void __ffs_kernel(T* y, T x) { y[0] = __ffs(x);
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_Device___ffs_Sanity_Positive", "", int, unsigned int) {
+TEMPLATE_TEST_CASE(Unit_Device___ffs_Sanity_Positive, int, unsigned int) {
   LinearAllocGuard<TestType> y(LinearAllocs::hipMallocManaged, sizeof(TestType));
 
   __ffs_kernel<<<1, 1>>>(y.ptr(), static_cast<TestType>(0));
@@ -182,7 +182,7 @@ template <typename T> __global__ void __ffsll_kernel(T* y, T x) { y[0] = __ffsll
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_Device___ffsll_Sanity_Positive", "", long long int,
+TEMPLATE_TEST_CASE(Unit_Device___ffsll_Sanity_Positive, long long int,
                    unsigned long long int) {
   LinearAllocGuard<TestType> y(LinearAllocs::hipMallocManaged, sizeof(TestType));
 
@@ -214,7 +214,7 @@ __global__ void __popc_kernel(unsigned int* y, unsigned int x) { y[0] = __popc(x
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device___popc_Sanity_Positive") {
+TEST_CASE(Unit_Device___popc_Sanity_Positive) {
   LinearAllocGuard<unsigned int> y(LinearAllocs::hipMallocManaged, sizeof(unsigned int));
 
   __popc_kernel<<<1, 1>>>(y.ptr(), 0);
@@ -247,7 +247,7 @@ __global__ void __popcll_kernel(unsigned long long int* y, unsigned long long in
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device___popcll_Sanity_Positive") {
+TEST_CASE(Unit_Device___popcll_Sanity_Positive) {
   LinearAllocGuard<unsigned long long int> y(LinearAllocs::hipMallocManaged,
                                              sizeof(unsigned long long int));
 
@@ -279,7 +279,7 @@ __global__ void __mul24_kernel(int* y, int x1, int x2) { y[0] = __mul24(x1, x2);
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device___mul24_Sanity_Positive") {
+TEST_CASE(Unit_Device___mul24_Sanity_Positive) {
   LinearAllocGuard<int> y(LinearAllocs::hipMallocManaged, sizeof(int));
 
   int x1 = GENERATE(0, -42, 42, 0xFFFFFFFF);
@@ -307,7 +307,7 @@ __global__ void __umul24_kernel(unsigned int* y, unsigned int x1, unsigned int x
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device___umul24_Sanity_Positive") {
+TEST_CASE(Unit_Device___umul24_Sanity_Positive) {
   LinearAllocGuard<unsigned int> y(LinearAllocs::hipMallocManaged, sizeof(unsigned int));
 
   unsigned int x1 = GENERATE(0, 42, 0xFFFFFF);
@@ -336,7 +336,7 @@ __global__ void __funnelshift_l_kernel(unsigned int* y, unsigned int lo, unsigne
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device___funnelshift_l_Sanity_Positive") {
+TEST_CASE(Unit_Device___funnelshift_l_Sanity_Positive) {
   LinearAllocGuard<unsigned int> y(LinearAllocs::hipMallocManaged, sizeof(unsigned int));
 
   const unsigned int lo = 0xAAAAAAAA, hi = 0xBBBBBBBB;
@@ -368,7 +368,7 @@ __global__ void __funnelshift_lc_kernel(unsigned int* y, unsigned int lo, unsign
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device___funnelshift_lc_Sanity_Positive") {
+TEST_CASE(Unit_Device___funnelshift_lc_Sanity_Positive) {
   LinearAllocGuard<unsigned int> y(LinearAllocs::hipMallocManaged, sizeof(unsigned int));
 
   const unsigned int lo = 0xAAAAAAAA, hi = 0xBBBBBBBB;
@@ -400,7 +400,7 @@ __global__ void __funnelshift_r_kernel(unsigned int* y, unsigned int lo, unsigne
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device___funnelshift_r_Sanity_Positive") {
+TEST_CASE(Unit_Device___funnelshift_r_Sanity_Positive) {
   LinearAllocGuard<unsigned int> y(LinearAllocs::hipMallocManaged, sizeof(unsigned int));
 
   const unsigned int lo = 0xAAAAAAAA, hi = 0xBBBBBBBB;
@@ -432,7 +432,7 @@ __global__ void __funnelshift_rc_kernel(unsigned int* y, unsigned int lo, unsign
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device___funnelshift_rc_Sanity_Positive") {
+TEST_CASE(Unit_Device___funnelshift_rc_Sanity_Positive) {
   LinearAllocGuard<unsigned int> y(LinearAllocs::hipMallocManaged, sizeof(unsigned int));
 
   const unsigned int lo = 0xAAAAAAAA, hi = 0xBBBBBBBB;
@@ -461,7 +461,7 @@ __global__ void __hadd_kernel(int* y, int x1, int x2) { y[0] = __hadd(x1, x2); }
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device___hadd_Sanity_Positive") {
+TEST_CASE(Unit_Device___hadd_Sanity_Positive) {
   LinearAllocGuard<int> y(LinearAllocs::hipMallocManaged, sizeof(int));
 
   int x1 = GENERATE(0, -42, 42, 0xFFFFFFFF);
@@ -491,7 +491,7 @@ __global__ void __uhadd_kernel(unsigned int* y, unsigned int x1, unsigned int x2
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device___uhadd_Sanity_Positive") {
+TEST_CASE(Unit_Device___uhadd_Sanity_Positive) {
   LinearAllocGuard<unsigned int> y(LinearAllocs::hipMallocManaged, sizeof(unsigned int));
 
   unsigned int x1 = GENERATE(0, 42, 0xFFFFFFFF);
@@ -519,7 +519,7 @@ __global__ void __rhadd_kernel(int* y, int x1, int x2) { y[0] = __rhadd(x1, x2);
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device___rhadd_Sanity_Positive") {
+TEST_CASE(Unit_Device___rhadd_Sanity_Positive) {
   LinearAllocGuard<int> y(LinearAllocs::hipMallocManaged, sizeof(int));
 
   int x1 = GENERATE(0, -42, 42, 0xFFFFFFFF);
@@ -549,7 +549,7 @@ __global__ void __urhadd_kernel(unsigned int* y, unsigned int x1, unsigned int x
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device___urhadd_Sanity_Positive") {
+TEST_CASE(Unit_Device___urhadd_Sanity_Positive) {
   LinearAllocGuard<unsigned int> y(LinearAllocs::hipMallocManaged, sizeof(unsigned int));
 
   unsigned int x1 = GENERATE(0, 42, 0xFFFFFFFF);
@@ -578,7 +578,7 @@ __global__ void __mulhi_kernel(int* y, int x1, int x2) { y[0] = __mulhi(x1, x2);
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device___mulhi_Sanity_Positive") {
+TEST_CASE(Unit_Device___mulhi_Sanity_Positive) {
   LinearAllocGuard<int> y(LinearAllocs::hipMallocManaged, sizeof(int));
 
   int x1 = GENERATE(0, -42, 42, 0xFFFFFFFF);
@@ -609,7 +609,7 @@ __global__ void __umulhi_kernel(unsigned int* y, unsigned int x1, unsigned int x
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device___umulhi_Sanity_Positive") {
+TEST_CASE(Unit_Device___umulhi_Sanity_Positive) {
   LinearAllocGuard<unsigned int> y(LinearAllocs::hipMallocManaged, sizeof(unsigned int));
 
   unsigned int x1 = GENERATE(0, 42, 0xFFFFFFFF);
@@ -640,7 +640,7 @@ __global__ void __mul64hi_kernel(long long* y, long long x1, long long x2) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device___mul64hi_Sanity_Positive") {
+TEST_CASE(Unit_Device___mul64hi_Sanity_Positive) {
   LinearAllocGuard<long long> y(LinearAllocs::hipMallocManaged, sizeof(long long));
 
   long long x1 = GENERATE(0, -42, 42, 0xFFFFFFFF);
@@ -672,7 +672,7 @@ __global__ void __umul64hi_kernel(unsigned long long* y, unsigned long long x1,
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device___umul64hi_Sanity_Positive") {
+TEST_CASE(Unit_Device___umul64hi_Sanity_Positive) {
   LinearAllocGuard<unsigned long long> y(LinearAllocs::hipMallocManaged,
                                          sizeof(unsigned long long));
 
@@ -704,7 +704,7 @@ __global__ void __sad_kernel(unsigned int* y, int x1, int x2, unsigned int x3) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device___sad_Sanity_Positive") {
+TEST_CASE(Unit_Device___sad_Sanity_Positive) {
   LinearAllocGuard<unsigned int> y(LinearAllocs::hipMallocManaged, sizeof(unsigned int));
 
   int x1 = GENERATE(0, -42, 42, 0xFFFFFFFF);
@@ -735,7 +735,7 @@ __global__ void __usad_kernel(unsigned int* y, unsigned int x1, unsigned int x2,
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device___usad_Sanity_Positive") {
+TEST_CASE(Unit_Device___usad_Sanity_Positive) {
   LinearAllocGuard<unsigned int> y(LinearAllocs::hipMallocManaged, sizeof(unsigned int));
 
   unsigned int x1 = GENERATE(0, 42, 0xFFFFFFFF);
@@ -768,7 +768,7 @@ __global__ void __byte_perm(unsigned int* y, unsigned int x1, unsigned int x2, u
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device___byte_perm_Sanity_Positive") {
+TEST_CASE(Unit_Device___byte_perm_Sanity_Positive) {
   LinearAllocGuard<unsigned int> y(LinearAllocs::hipMallocManaged, sizeof(unsigned int));
 
   unsigned int bytes[] = {0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF};
