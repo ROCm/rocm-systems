@@ -1662,6 +1662,12 @@ class WorkflowSession:
         if not tokens:
             return {"workload_type": "unknown", "hints": [], "extra_flags": [], "warnings": []}
 
+        # Strip leading KEY=VALUE env-var tokens (same logic as _phase3_run_profiler)
+        while tokens and "=" in tokens[0] and not tokens[0].startswith("-"):
+            tokens.pop(0)
+        if not tokens:
+            return {"workload_type": "unknown", "hints": [], "extra_flags": [], "warnings": []}
+
         binary = tokens[0].lower()
         all_lower = " ".join(tokens).lower()
 
@@ -1809,7 +1815,10 @@ class WorkflowSession:
             # Append any extra flags from app-command heuristics that aren't already present
             for ef in app_info.get("extra_flags", []):
                 if ef not in flags:
-                    flags = flags.replace("rocprofv3 ", f"rocprofv3 {ef} ", 1)
+                    if "rocprofv3 " in flags:
+                        flags = flags.replace("rocprofv3 ", f"rocprofv3 {ef} ", 1)
+                    else:
+                        flags = f"rocprofv3 {ef} {flags}"
             cmd = f"{flags} -- {self._state.app_command}"
             reason = "source analysis"
         else:
@@ -1880,45 +1889,57 @@ class WorkflowSession:
 
     # ── Revert helper ──────────────────────────────────────────────────────────
 
-    def _post_revert_menu(self, applied_alternative: bool) -> str:
-        """Ask the user what to do after a revert.
+    def _post_revert_menu(self, show_retry: bool) -> str:
+        """Ask the user what to do after a revert + LLM analysis.
+
+        show_retry — True when the user can immediately ask the AI for another
+                     code fix (Phase 6 context, no alternative applied yet).
+                     False when "retry" doesn't apply (Phase 3 context, or an
+                     alternative was already applied in this cycle).
 
         Returns one of: "retry" | "continue" | "exit"
         """
         _print()
         _print("  ── What would you like to do next? ─────────────────────", style="cyan")
-        if not applied_alternative:
+        if show_retry:
             _print("    [f]  Try a different fix  — let the AI attempt another approach",
                    style="white")
         _print("    [p]  Continue to re-profiling  (skip code changes this round)",
                style="white")
         _print("    [q]  Exit session", style="white")
         _print()
-        prompt = "  [f/p/q]: " if not applied_alternative else "  [p/q]: "
+        prompt = "  [f/p/q]: " if show_retry else "  [p/q]: "
         try:
             choice = _input(prompt).strip().lower()
         except EOFError:
             return "continue"
-        if choice in ("f", "fix", "retry", "r") and not applied_alternative:
+        if choice in ("f", "fix", "retry") and show_retry:
             return "retry"
         if choice in ("q", "quit", "exit"):
             return "exit"
         return "continue"
 
-    def _revert_last_edit(self, failure_reason: str = "") -> "tuple[bool, str]":
+    def _revert_last_edit(
+        self, failure_reason: str = "", allow_retry: bool = True
+    ) -> "tuple[bool, str]":
         """Restore the most recently AI-modified file from its .bak backup.
 
         After restoring, calls the LLM to analyze the failure and propose a
         concrete alternative, then shows a what-next menu.
 
+        allow_retry — when True (Phase 6 context), the what-next menu includes
+                      [f] Try a different fix.  When False (Phase 3 context,
+                      where a new edit cannot be applied immediately), [f] is
+                      hidden and "retry" is never returned.
+
         Returns (success, next_action) where next_action is one of:
-          "retry"    — user wants to try another AI fix
+          "retry"    — user wants to try another AI fix (only when allow_retry=True)
           "continue" — user wants to skip code changes and proceed to re-profiling
           "exit"     — user wants to end the session
         """
         if not self._state.edit_history:
             _print("  No AI edits to revert.", style="yellow")
-            return False
+            return False, "continue"
         record = self._state.edit_history[-1]
         bak = pathlib.Path(record.backup_path)
         dst = pathlib.Path(record.file_path)
@@ -1946,7 +1967,8 @@ class WorkflowSession:
 
         # LLM analysis + what-next menu.
         action = self._post_revert_llm_analysis(
-            dst, original_content, failed_content, failure_reason
+            dst, original_content, failed_content, failure_reason,
+            allow_retry=allow_retry,
         )
         return True, action
 
@@ -1956,18 +1978,36 @@ class WorkflowSession:
         original_content: str,
         failed_content: str,
         failure_reason: str,
+        allow_retry: bool = True,
     ) -> str:
         """Call LLM to analyze the failed edit and propose a concrete alternative.
 
         Returns the user's next-action choice from _post_revert_menu:
         "retry" | "continue" | "exit"
 
-        Shows the LLM's root-cause analysis, then offers to apply the suggested
-        alternative immediately using the same diff/apply flow as Phase 6.
+        If failure_reason is empty the user is asked to describe the error
+        before the LLM is called, so the analysis has useful context.
         """
+        # Ask for error context before burning an LLM call if none was provided.
+        if not failure_reason.strip():
+            _print()
+            _print("  What went wrong? Paste the error output or briefly describe the issue.",
+                   style="cyan")
+            _print("  (Press Enter to skip and proceed without error context)", style="dim")
+            lines: List[str] = []
+            try:
+                while True:
+                    line = _input("  > ").strip()
+                    if not line:
+                        break
+                    lines.append(line)
+            except EOFError:
+                pass
+            failure_reason = "\n".join(lines)
+
         if not self._llm_provider:
             _print("  (No LLM configured — cannot auto-analyze failure)", style="dim")
-            return self._post_revert_menu(applied_alternative=False)
+            return self._post_revert_menu(show_retry=False)
 
         _print()
         _print("  ── Analyzing failure with LLM ──────────────────────────", style="cyan")
@@ -2010,10 +2050,10 @@ class WorkflowSession:
                     analysis = analyzer._call_local(system, user)
         except Exception as exc:
             _print(f"  (LLM analysis failed: {exc})", style="red")
-            return self._post_revert_menu(applied_alternative=False)
+            return self._post_revert_menu(show_retry=allow_retry)
 
         if not analysis:
-            return self._post_revert_menu(applied_alternative=False)
+            return self._post_revert_menu(show_retry=allow_retry)
 
         _print()
         _print(analysis, style="white")
@@ -2024,7 +2064,7 @@ class WorkflowSession:
         try:
             apply = _input("  Apply this alternative approach now? [y/N]  ").strip().lower()
         except EOFError:
-            return self._post_revert_menu(applied_alternative=False)
+            return self._post_revert_menu(show_retry=allow_retry)
 
         if apply == "y":
             # Extract the ALTERNATIVE section as the suggestion for _llm_rewrite_file.
@@ -2084,7 +2124,8 @@ class WorkflowSession:
                     else:
                         _print("  Alternative discarded. File remains at original.", style="dim")
 
-        return self._post_revert_menu(applied_alternative=applied)
+        # [f] only offered when no alternative was applied and allow_retry is True
+        return self._post_revert_menu(show_retry=allow_retry and not applied)
 
     # ── Phase 3: Trace collection ──────────────────────────────────────────────
 
@@ -2216,7 +2257,8 @@ class WorkflowSession:
                     continue
                 elif choice == "v" and self._state.edit_history:
                     reverted, action = self._revert_last_edit(
-                        failure_reason=f"Profiling command failed with exit code {proc.returncode}."
+                        failure_reason=f"Profiling command failed with exit code {proc.returncode}.",
+                        allow_retry=False,
                     )
                     if action == "exit":
                         return False
@@ -2724,6 +2766,9 @@ class WorkflowSession:
             chosen = self._pick_file_from_source_paths()
             if chosen is None:
                 return None
+            # Capture original content before the LLM call so the diff and backup
+            # are consistent even if a build system touches the file mid-call.
+            original = chosen.read_text()
             rewritten = self._llm_rewrite_file(chosen, suggestions)
             while rewritten is None:
                 try:
@@ -2735,7 +2780,6 @@ class WorkflowSession:
                 rewritten = self._llm_rewrite_file(chosen, suggestions)
 
             import difflib
-            original  = chosen.read_text()
             diff_lines = list(difflib.unified_diff(
                 original.splitlines(keepends=True),
                 rewritten.splitlines(keepends=True),
@@ -2799,7 +2843,7 @@ class WorkflowSession:
                 if resp_lower in ("done", "compiled", "ok", "yes", "y", ""):
                     _print("  Great — ready to re-profile.", style="green")
                     break
-                if resp_lower in ("revert", "undo", "rollback", "v"):
+                if resp_lower in ("revert", "undo", "rollback", "v", "r"):
                     error_ctx = "\n".join(_compile_errors)
                     reverted, _revert_action = self._revert_last_edit(
                         failure_reason=error_ctx
