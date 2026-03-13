@@ -13,6 +13,7 @@ from therock_matrix import (
     subtree_to_project_map,
     project_map,
     trigger_windows_ci_for_subtrees_paths,
+    windows_only_subtrees,
 )
 import time
 from typing import Mapping, Optional, Iterable
@@ -204,6 +205,11 @@ def retrieve_projects(args):
                 "Modified files did not match known subtrees, evaluating all projects"
             )
             subtrees = list(subtree_to_project_map.keys())
+
+    # Linux CI skip logic: exclude Windows-only subtrees so they don't
+    # produce Linux projects. If nothing remains, Linux CI is skipped.
+    if args.get("platform") == "linux":
+        subtrees = [s for s in subtrees if s not in windows_only_subtrees]
 
     # Windows CI skip logic: skip if neither the modified file paths nor the
     # explicitly selected subtrees require Windows CI.

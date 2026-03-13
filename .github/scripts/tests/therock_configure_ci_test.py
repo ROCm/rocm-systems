@@ -278,6 +278,23 @@ class ConfigureCITest(unittest.TestCase):
         project_to_run = therock_configure_ci.retrieve_projects(args)
         self.assertGreaterEqual(len(project_to_run), 1)
 
+    @patch("therock_configure_ci.get_modified_paths")
+    def test_workflow_dispatch_windows_only_subtree_skips_linux_ci(
+        self, mock_get_modified
+    ):
+        """workflow_dispatch with a windows_only subtree must not trigger Linux CI."""
+        args = {
+            "is_workflow_dispatch": True,
+            "input_projects": "shared/amdgpu-windows-interop",
+            "base_ref": "HEAD^",
+            "platform": "linux",
+        }
+
+        mock_get_modified.return_value = []
+
+        project_to_run = therock_configure_ci.retrieve_projects(args)
+        self.assertEqual(len(project_to_run), 0)
+
 
 if __name__ == "__main__":
     unittest.main()
