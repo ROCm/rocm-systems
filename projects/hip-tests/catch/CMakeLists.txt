@@ -61,16 +61,12 @@ if(TEST_CLOCK_CYCLE)
     add_definitions(-DTEST_CLOCK_CYCLE)
 endif()
 
-# flag to generate standalone exe per src file.
-message(STATUS "STANDALONE_TESTS : ${STANDALONE_TESTS}")
-
-if(STANDALONE_TESTS)
-    set(ENABLE_YAML_TAGS OFF)
-endif()
-
 if(ENABLE_YAML_TAGS)
     add_definitions(-DENABLE_YAML_TAGS)
 endif()
+
+# flag to generate standalone exe per src file.
+message(STATUS "STANDALONE_TESTS : ${STANDALONE_TESTS}")
 
 if(NOT WIN32)
     set(CPACK_SET_DESTDIR ON CACHE BOOL "Installer package will install hip catch to CMAKE_INSTALL_PREFIX instead of CPACK_PACKAGING_INSTALL_PREFIX")
