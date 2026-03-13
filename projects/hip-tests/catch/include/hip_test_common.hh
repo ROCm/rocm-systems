@@ -627,8 +627,8 @@ class BlockingContext {
 };
 }  // namespace HipTest
 
-// This must be called in the beginning of image test app's main() to indicate whether image
-// is supported.
+// Call at the start of tests that require image/texture support to indicate whether it
+// is supported on the current device.
 #define CHECK_IMAGE_SUPPORT                                                                        \
   if (!HipTest::isImageSupported()) {                                                              \
     HipTest::HIP_SKIP_TEST("Texture is not supported on the device. Skipped.");                    \
