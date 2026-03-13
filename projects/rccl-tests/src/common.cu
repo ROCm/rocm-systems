@@ -1121,6 +1121,7 @@ testResult_t threadInit(struct threadArgs* args) {
     {
       if (local_register) NCCLCHECK(ncclCommRegister(args->comms[i], args->sendbuffs[i], args->maxbytes, &args->sendRegHandles[i]));
       if (local_register) NCCLCHECK(ncclCommRegister(args->comms[i], args->recvbuffs[i], args->maxbytes, &args->recvRegHandles[i]));
+      if (local_register && test_bias) NCCLCHECK(ncclCommRegister(args->comms[i], args->bias[i], args->maxbytes, &args->biasRegHandles[i]));
     }
   }
   NCCLCHECK(ncclGroupEnd());
@@ -1197,6 +1198,7 @@ testResult_t threadInit(struct threadArgs* args) {
     {
       if (local_register) NCCLCHECK(ncclCommDeregister(args->comms[i], args->sendRegHandles[i]));
       if (local_register) NCCLCHECK(ncclCommDeregister(args->comms[i], args->recvRegHandles[i]));
+      if (local_register && test_bias) NCCLCHECK(ncclCommDeregister(args->comms[i], args->biasRegHandles[i]));
     }
 #endif
     NCCLCHECK(ncclCommDestroy(args->comms[i]));
@@ -1257,7 +1259,7 @@ testResult_t AllocateBuffs(void **sendbuff, size_t sendBytes, void **recvbuff, s
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0) && HIP_VERSION >= 71260540
     NCCLCHECK(ncclMemAlloc(sendbuff, nbytes));
     NCCLCHECK(ncclMemAlloc(recvbuff, nbytes));
-    if (bias) CUDACHECK(cudaMalloc(bias, nbytes));
+    if (bias) NCCLCHECK(ncclMemAlloc(bias, nbytes));
     if (datacheck) NCCLCHECK(ncclMemAlloc(expected, recvBytes));
 #else
     CUDACHECK(cudaMalloc(sendbuff, nbytes));
@@ -1806,6 +1808,7 @@ testResult_t run() {
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
   std::vector<void*> sendRegHandles(nThreads*nGpus, nullptr);
   std::vector<void*> recvRegHandles(nThreads*nGpus, nullptr);
+  std::vector<void*> biasRegHandles(nThreads*nGpus, nullptr);
 #endif
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
   std::vector<ncclDevComm> devComms(nThreads*nGpus);
@@ -1850,6 +1853,7 @@ testResult_t run() {
        {
          if (local_register) NCCLCHECK(ncclCommRegister(comms[i], sendbuffs[i], maxBytes, &sendRegHandles[i]));
          if (local_register) NCCLCHECK(ncclCommRegister(comms[i], recvbuffs[i], maxBytes, &recvRegHandles[i]));
+         if (local_register && test_bias) NCCLCHECK(ncclCommRegister(comms[i], bias[i], maxBytes, &biasRegHandles[i]));
        }
      }
      NCCLCHECK(ncclGroupEnd());
@@ -1964,6 +1968,7 @@ testResult_t run() {
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
     threads[t].args.sendRegHandles = sendRegHandles.data()+t*nGpus;
     threads[t].args.recvRegHandles = recvRegHandles.data()+t*nGpus;
+    threads[t].args.biasRegHandles = biasRegHandles.data()+t*nGpus;
 #endif
     threads[t].args.ncclId = ncclId;
     threads[t].args.comms=comms+t*nGpus;
@@ -2022,6 +2027,7 @@ testResult_t run() {
       {
         if (local_register) NCCLCHECK(ncclCommDeregister(comms[i], sendRegHandles[i]));
         if (local_register) NCCLCHECK(ncclCommDeregister(comms[i], recvRegHandles[i]));
+        if (local_register && test_bias) NCCLCHECK(ncclCommDeregister(comms[i], biasRegHandles[i]));
       }
 #endif
       NCCLCHECK(ncclCommDestroy(comms[i]));
@@ -2034,6 +2040,7 @@ testResult_t run() {
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0) && HIP_VERSION >= 71260540
     if (sendbuffs[i]) NCCLCHECK(ncclMemFree((char*)sendbuffs[i]));
     if (recvbuffs[i]) NCCLCHECK(ncclMemFree((char*)recvbuffs[i]));
+    if (bias[i]) NCCLCHECK(ncclMemFree((char*)bias[i]));
     if (datacheck) NCCLCHECK(ncclMemFree(expected[i]));
 #else
     if (sendbuffs[i]) CUDACHECK(cudaFree((char*)sendbuffs[i]));
