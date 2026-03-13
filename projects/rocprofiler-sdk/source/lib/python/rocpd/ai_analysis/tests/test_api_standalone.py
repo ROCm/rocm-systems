@@ -13,8 +13,8 @@ They DO require the rocpd package to be importable (needs the built libpyrocpd
 C extension). Run with the system-installed rocpd path first, then the source
 path for the edited Python modules:
 
-    ROCPD_SYS=/opt/rocm-7.0.0/lib/python3.12/site-packages
-    ROCPD_SRC=/dockerx/ai-analysis-rocpd/rocm-systems-dev/projects/rocprofiler-sdk/source/lib/python
+    ROCPD_SYS=$(python3 -c "import site; print(site.getsitepackages()[-1])")
+    ROCPD_SRC=<repo>/projects/rocprofiler-sdk/source/lib/python
     PYTHONPATH="${ROCPD_SYS}:${ROCPD_SRC}" pytest --noconftest test_api_standalone.py -v
 
 IMPORTANT: ROCPD_SYS must come BEFORE ROCPD_SRC in PYTHONPATH to avoid a

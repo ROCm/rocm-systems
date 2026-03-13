@@ -736,9 +736,7 @@ class SourceAnalyzer:
                 if size > self._max_file_size_bytes:
                     self._files_skipped += 1
                     if self._verbose:
-                        print(
-                            f"[Tier0] Skipping large file ({size // 1024} KB): {path}"
-                        )
+                        print(f"[Tier0] Skipping large file ({size // 1024} KB): {path}")
                     continue
 
                 collected.append(path)
@@ -1112,8 +1110,7 @@ class SourceAnalyzer:
                 _bg[_pmc_block(c)] += 1
             n_passes = (
                 max(
-                    (_cnt + _pmc_block_limit(_blk) - 1)
-                    // max(_pmc_block_limit(_blk), 1)
+                    (_cnt + _pmc_block_limit(_blk) - 1) // max(_pmc_block_limit(_blk), 1)
                     for _blk, _cnt in _bg.items()
                 )
                 if _bg
