@@ -91,6 +91,10 @@ ErrorCode Device::QueryPCIeInfo(PCIeInfo *info) const {
   return device_ctx_->QueryPCIeInfo(info);
 }
 
+ErrorCode Device::QueryDriverInfo(DriverInfo *info) const {
+  return device_ctx_->QueryDriverInfo(info);
+}
+
 ErrorCode Device::Escape(void *pData, size_t dataSize, bool hardwareAccess) const {
   return device_ctx_->Escape(pData, dataSize, hardwareAccess);
 }

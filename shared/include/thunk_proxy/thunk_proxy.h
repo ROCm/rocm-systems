@@ -235,6 +235,9 @@ public:
 
   ErrorCode QueryPCIeInfo(wsl::thunk::PCIeInfo *info) const;
 
+  // Query driver version, name, and date from Windows registry keys.
+  ErrorCode QueryDriverInfo(wsl::thunk::DriverInfo *info) const;
+
   // Send a driver-escape packet on behalf of this GPU slot.
   ErrorCode Escape(void *pData, size_t dataSize, bool hardwareAccess = false) const;
 

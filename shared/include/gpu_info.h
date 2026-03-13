@@ -105,6 +105,13 @@ struct ClockInfo {
   uint8_t  clk_deep_sleep; // deep-sleep capable flag
 };
 
+// GPU driver version/name/date from Windows registry keys.
+struct DriverInfo {
+  char driver_version[256]; // RadeonSoftwareVersion registry key
+  char driver_date[256];    // parsed from ReleaseVersion registry key
+  char driver_name[256];    // DriverDesc registry key
+};
+
 // VBIOS version and identification information from KMD CWDDE escape.
 struct VBiosInfo {
   char name[256];          // product name from VBIOS ROM image
