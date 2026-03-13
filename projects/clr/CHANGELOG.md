@@ -32,15 +32,17 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 * A segmentation fault that occurred during HIP graph capture. The HIP runtime has updated its large‑graph handling mechanism to prevent stack overflow.
 * Incorrect return codes from `hipEventQuery` and `hipEventSynchronize` when invoked under mixed stream‑capture modes. The HIP runtime now correctly handles capture‑mode restrictions for event operations.
 * A segmentation fault that occurred when retrieving an allocation handle with `hipMemRetainAllocationHandle`. The HIP runtime now correctly retains the generic allocation object to prevent memory‑management issues.
-* An issue in graph node scheduling for multistream execution. The HIP runtime now assigns streams correctly and avoids unnecessary kernel‑execution stalls.
+* Resolved a graph node scheduling issue in multistream execution that, in some cases, led to unnecessary kernel‑execution stalls.
 
 ### Optimized
 
 * HIP log-level control capabilities HIP runtime adds dynamic logging functionalities, enabling applications to programmatically enable, disable, and configure logging at runtime without modifying environment variables or restarting the application. The result is more precise control over diagnostic output, making it easier to debug targeted code paths or minimize log noise during performance‑critical execution.
-* Improved HIP graph segment scheduling, including:
-  - AccumulateCommand management: per‑stream commands, batched kernel dispatches, hardware‑event lifetime tracking, and signaling only on the final packet.
-  - Cross‑stream synchronization: hardware‑event–based dependency handling, proper parallel‑stream synchronization, and unified AccumulateCommand enqueueing.
-  - Hardware event logic: events added at segment endpoints involving fork/join points or multiple same‑level segments.
+* HIP Graph Segmented Execution: Graph nodes are grouped into segments and dispatched across multiple GPU streams to enable parallel execution.
+  - Batching: Each stream receives a single AccumulateCommand that aggregates all kernel dispatches and submits them efficiently as one batch.
+  - Synchronization: When a segment depends on work running on another stream, a hardware wait is inserted. At completion, all parallel streams synchronize back to the launch stream.
+  - Signaling: Segments emit hardware signals only when downstream segments require them—typically at fork points or when executing in parallel with other segments.
+
+This approach reduces dispatch overhead and improves GPU utilization by overlapping independent graph work across streams while preserving correct execution order.
 * Optimized graph stream synchronization by eliminating duplicate marker creation when syncing streams back to the launch stream. The runtime now tracks synchronized dependency segments to avoid redundant synchronization markers.
 * Optimized `hipMemcpyBatchAsync` with refactored code, new data structures, and an improved core implementation for better performance.
 
