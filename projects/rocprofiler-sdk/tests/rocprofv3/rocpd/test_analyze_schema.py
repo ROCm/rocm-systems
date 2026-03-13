@@ -33,7 +33,9 @@ Validates:
 """
 
 import json
+import os
 import sys
+import tempfile
 import importlib.resources as pkg_resources
 
 import pytest
@@ -321,6 +323,205 @@ def test_json_output_validates_against_schema():
         jsonschema.validate(instance=doc, schema=schema)
     except jsonschema.ValidationError as exc:
         pytest.fail(f"JSON output failed schema validation: {exc.message}")
+
+
+# ---------------------------------------------------------------------------
+# Tier 0 (source-only) JSON output helpers
+# ---------------------------------------------------------------------------
+
+_MINIMAL_HIP_SOURCE = """\
+__global__ void my_kernel(float* x) { *x = 1.0f; }
+void run() {
+    hipLaunchKernelGGL(my_kernel, dim3(1), dim3(64), 0, 0, nullptr);
+    hipMemcpy(nullptr, nullptr, 0, hipMemcpyHostToDevice);
+}
+"""
+
+TIER0_SCHEMA_VERSION = "0.2.0"
+
+
+def _make_synthetic_tier0_json_output():
+    """Generate a Tier 0 (source-only) JSON document via format_analysis_output."""
+    from rocpd.analyze import analyze_source_code, format_analysis_output
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        hip_file = os.path.join(tmpdir, "test.cpp")
+        with open(hip_file, "w") as fh:
+            fh.write(_MINIMAL_HIP_SOURCE)
+
+        tier0_result = analyze_source_code(tmpdir)
+        output = format_analysis_output(
+            {},
+            [],
+            {},
+            [],
+            output_format="json",
+            tier0_result=tier0_result,
+            source_only=True,
+        )
+    return json.loads(output)
+
+
+def _make_synthetic_combined_json_output():
+    """Generate a combined (Tier 0 + Tier 1/2) JSON document."""
+    from rocpd.analyze import (
+        analyze_source_code,
+        format_analysis_output,
+        generate_recommendations,
+    )
+
+    time_breakdown = {
+        "kernel_percent": 50.0,
+        "memcpy_percent": 30.0,
+        "overhead_percent": 15.0,
+        "total_runtime": 100_000_000,
+        "total_kernel_time": 50_000_000,
+        "total_memcpy_time": 30_000_000,
+    }
+    hotspots = [
+        {
+            "name": "test_kernel",
+            "total_duration": 45_000_000,
+            "calls": 10,
+            "avg_duration": 4_500_000,
+            "min_duration": 4_000_000,
+            "max_duration": 5_000_000,
+        }
+    ]
+    memory_analysis = {
+        "Host-to-Device": {
+            "count": 5,
+            "total_bytes": 5120,
+            "total_duration": 30_000_000,
+            "avg_bytes": 1024.0,
+            "avg_duration": 6_000_000.0,
+            "bandwidth_bytes_per_sec": 1e9,
+        }
+    }
+    recommendations = generate_recommendations(time_breakdown, hotspots, memory_analysis)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        hip_file = os.path.join(tmpdir, "test.cpp")
+        with open(hip_file, "w") as fh:
+            fh.write(_MINIMAL_HIP_SOURCE)
+
+        tier0_result = analyze_source_code(tmpdir)
+        output = format_analysis_output(
+            time_breakdown,
+            hotspots,
+            memory_analysis,
+            recommendations,
+            output_format="json",
+            tier0_result=tier0_result,
+            source_only=False,
+        )
+    return json.loads(output)
+
+
+# ---------------------------------------------------------------------------
+# Tier 0 (source-only) schema conformance tests
+# ---------------------------------------------------------------------------
+
+
+def test_tier0_json_output_schema_version():
+    """Tier 0 JSON output has schema_version in the allowed enum."""
+    schema = _load_schema()
+    allowed = schema["properties"]["schema_version"]["enum"]
+    doc = _make_synthetic_tier0_json_output()
+    assert (
+        doc.get("schema_version") in allowed
+    ), f"tier0 schema_version {doc.get('schema_version')!r} not in allowed enum {allowed}"
+    assert (
+        doc.get("schema_version") == TIER0_SCHEMA_VERSION
+    ), f"tier0 schema_version should be {TIER0_SCHEMA_VERSION!r}"
+
+
+def test_tier0_json_output_required_fields_present():
+    """All required top-level fields are present in Tier 0 JSON output."""
+    doc = _make_synthetic_tier0_json_output()
+    for field in REQUIRED_TOP_LEVEL:
+        assert field in doc, f"Tier 0 JSON missing required field: {field!r}"
+
+
+def test_tier0_json_output_execution_breakdown_is_null():
+    """execution_breakdown is null in source-only (Tier 0) output."""
+    doc = _make_synthetic_tier0_json_output()
+    assert (
+        doc["execution_breakdown"] is None
+    ), "execution_breakdown must be null in Tier 0 source-only output"
+
+
+def test_tier0_json_output_profiling_mode_is_source_only():
+    """profiling_info.profiling_mode is 'source_only' in Tier 0 output."""
+    doc = _make_synthetic_tier0_json_output()
+    assert (
+        doc["profiling_info"]["profiling_mode"] == "source_only"
+    ), "Tier 0 profiling_mode must be 'source_only'"
+
+
+def test_tier0_json_output_analysis_tier_is_zero():
+    """profiling_info.analysis_tier is 0 in Tier 0 source-only output."""
+    doc = _make_synthetic_tier0_json_output()
+    assert doc["profiling_info"]["analysis_tier"] == 0, "Tier 0 analysis_tier must be 0"
+
+
+def test_tier0_json_output_has_tier0_field():
+    """Tier 0 JSON output includes a top-level 'tier0' object."""
+    doc = _make_synthetic_tier0_json_output()
+    assert "tier0" in doc, "Tier 0 JSON output must include a 'tier0' field"
+    tier0 = doc["tier0"]
+    assert isinstance(tier0, dict), "'tier0' must be a JSON object"
+    for field in ("source_dir", "programming_model", "files_scanned", "kernel_count"):
+        assert field in tier0, f"tier0 missing field {field!r}"
+
+
+def test_tier0_json_output_validates_against_schema():
+    """Tier 0 JSON output passes jsonschema validation."""
+    jsonschema = pytest.importorskip("jsonschema", reason="jsonschema not installed")
+    schema = _load_schema()
+    doc = _make_synthetic_tier0_json_output()
+    try:
+        jsonschema.validate(instance=doc, schema=schema)
+    except jsonschema.ValidationError as exc:
+        pytest.fail(f"Tier 0 JSON failed schema validation: {exc.message}")
+
+
+# ---------------------------------------------------------------------------
+# Combined (Tier 0 + Tier 1/2) schema conformance tests
+# ---------------------------------------------------------------------------
+
+
+def test_combined_json_output_has_tier0_field():
+    """Combined (Tier 0 + Tier 1/2) JSON output includes a top-level 'tier0' object."""
+    doc = _make_synthetic_combined_json_output()
+    assert "tier0" in doc, "Combined JSON output must include a 'tier0' field"
+    assert isinstance(doc["tier0"], dict), "'tier0' must be a JSON object"
+
+
+def test_combined_json_output_tier12_required_fields_present():
+    """Combined JSON output has all required Tier 1/2 top-level fields."""
+    doc = _make_synthetic_combined_json_output()
+    for field in REQUIRED_TOP_LEVEL:
+        assert field in doc, f"Combined JSON missing required field: {field!r}"
+
+
+def test_combined_json_output_execution_breakdown_not_null():
+    """execution_breakdown is non-null in combined (Tier 0 + Tier 1/2) output."""
+    doc = _make_synthetic_combined_json_output()
+    assert (
+        doc["execution_breakdown"] is not None
+    ), "execution_breakdown must not be null in combined output"
+
+
+def test_combined_json_output_validates_against_schema():
+    """Combined (Tier 0 + Tier 1/2) JSON output passes jsonschema validation."""
+    jsonschema = pytest.importorskip("jsonschema", reason="jsonschema not installed")
+    schema = _load_schema()
+    doc = _make_synthetic_combined_json_output()
+    try:
+        jsonschema.validate(instance=doc, schema=schema)
+    except jsonschema.ValidationError as exc:
+        pytest.fail(f"Combined JSON failed schema validation: {exc.message}")
 
 
 # ---------------------------------------------------------------------------
