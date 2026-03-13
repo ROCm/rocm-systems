@@ -2058,14 +2058,34 @@ amdsmi_status_t amdsmi_set_gpu_fan_speed(amdsmi_processor_handle processor_handl
 
 amdsmi_status_t amdsmi_get_gpu_id(amdsmi_processor_handle processor_handle,
                                 uint16_t *id) {
-    return rsmi_wrapper(rsmi_dev_id_get, processor_handle, 0,
-                        id);
+    AMDSMI_CHECK_INIT();
+
+    if (id == nullptr || processor_handle == nullptr)
+        return AMDSMI_STATUS_INVAL;
+
+    auto device = reinterpret_cast<Device *>(processor_handle);
+    wsl::thunk::AsicInfo info{};
+    auto code = device->QueryAsicInfo(&info);
+    if (code != ErrorCode::Success)
+        return translateCodeToSmiStatus(code);
+    *id = static_cast<uint16_t>(info.device_id);
+    return AMDSMI_STATUS_SUCCESS;
 }
 
 amdsmi_status_t amdsmi_get_gpu_revision(amdsmi_processor_handle processor_handle,
                                 uint16_t *revision) {
-    return rsmi_wrapper(rsmi_dev_revision_get, processor_handle, 0,
-                        revision);
+    AMDSMI_CHECK_INIT();
+
+    if (revision == nullptr || processor_handle == nullptr)
+        return AMDSMI_STATUS_INVAL;
+
+    auto device = reinterpret_cast<Device *>(processor_handle);
+    wsl::thunk::AsicInfo info{};
+    auto code = device->QueryAsicInfo(&info);
+    if (code != ErrorCode::Success)
+        return translateCodeToSmiStatus(code);
+    *revision = static_cast<uint16_t>(info.rev_id);
+    return AMDSMI_STATUS_SUCCESS;
 }
 
 // TODO(bliu) : add fw info from libdrm
@@ -2269,8 +2289,12 @@ amdsmi_status_t amdsmi_get_gpu_subsystem_name(
 
 amdsmi_status_t amdsmi_get_gpu_vendor_name(
             amdsmi_processor_handle processor_handle, char *name, size_t len) {
-    return rsmi_wrapper(rsmi_dev_vendor_name_get, processor_handle, 0,
-                        name, len);
+    AMDSMI_CHECK_INIT();
+
+    if (processor_handle == nullptr || name == nullptr)
+        return AMDSMI_STATUS_INVAL;
+    strncpy(name, "Advanced Micro Devices, Inc. [AMD/ATI]", len);
+    return AMDSMI_STATUS_SUCCESS;
 }
 
 
