@@ -30,12 +30,7 @@ static __device__ void bcastDeep(
     }
   }
 
-  if (waitNeeded)
-#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-    bar.wait(ncclCoopCta(), std::memory_order_relaxed);
-#else 
-    bar.wait(ncclCoopCta(), cuda::memory_order_relaxed);
-#endif
+  if (waitNeeded) bar.wait(ncclCoopCta(), NCCL_MEM_ORDER_RELAXED);
 
   if (0 < nIters) {
     while (true) {
@@ -159,11 +154,7 @@ static __device__ void bcast(
   }
 
   if (waitNeeded)
-#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-    bar.wait(ncclCoopCta(), std::memory_order_relaxed);
-#else
-    bar.wait(ncclCoopCta(), cuda::memory_order_relaxed);
-#endif
+    bar.wait(ncclCoopCta(), NCCL_MEM_ORDER_RELAXED);
 
   constexpr int UnrollPeers = 8;
   size_t nSufElts = (nBytes-cursor)/sizeof(T);
@@ -177,11 +168,7 @@ __device__ __forceinline__ void ncclSymkRun_AllGather_ST(ncclSymkDevWorkArgs con
   };
   int const& rank = handler.comm.rank;
 
-#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-  bar.arrive(ncclCoopCta(), std::memory_order_relaxed);
-#else
-  bar.arrive(ncclCoopCta(), cuda::memory_order_relaxed);
-#endif
+  bar.arrive(ncclCoopCta(), NCCL_MEM_ORDER_RELAXED);
 
   bool waitNeeded = true;
   handler.forEachWork<char>(
@@ -199,11 +186,7 @@ __device__ __forceinline__ void ncclSymkRun_AllGather_ST(ncclSymkDevWorkArgs con
       }
     );
 
-#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-  bar.sync(ncclCoopCta(), std::memory_order_release);
-#else
-  bar.sync(ncclCoopCta(), cuda::memory_order_release);
-#endif
+  bar.sync(ncclCoopCta(), NCCL_MEM_ORDER_RELEASE);
 }
 
 template<typename T>
@@ -262,11 +245,7 @@ __device__ __forceinline__ void ncclSymkRun_AllGather_STMC(ncclSymkDevWorkArgs c
   );
   int const& rank = handler.comm.rank;
 
-#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-  bar.sync(ncclCoopCta(), std::memory_order_relaxed);
-#else
-  bar.sync(ncclCoopCta(), cuda::memory_order_relaxed);
-#endif
+  bar.sync(ncclCoopCta(), NCCL_MEM_ORDER_RELAXED);
 
   handler.forEachWork<char>(
       [&]__device__(int block, int nBlocks, size_t nElts, size_t nAllElts,
@@ -281,11 +260,7 @@ __device__ __forceinline__ void ncclSymkRun_AllGather_STMC(ncclSymkDevWorkArgs c
       }
     );
 
-#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-  bar.sync(ncclCoopCta(), std::memory_order_release);
-#else
-  bar.sync(ncclCoopCta(), cuda::memory_order_release);
-#endif
+  bar.sync(ncclCoopCta(), NCCL_MEM_ORDER_RELEASE);
 }
 
 template<typename EltType>
