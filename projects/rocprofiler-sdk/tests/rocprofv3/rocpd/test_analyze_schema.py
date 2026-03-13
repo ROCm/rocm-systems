@@ -104,7 +104,9 @@ def _make_synthetic_json_output():
             "bandwidth_bytes_per_sec": 1e9,
         }
     }
-    recommendations = generate_recommendations(time_breakdown, hotspots, memory_analysis)
+    recommendations = generate_recommendations(
+        time_breakdown, hotspots, memory_analysis
+    )
     output = format_analysis_output(
         time_breakdown,
         hotspots,
@@ -138,9 +140,14 @@ def test_schema_file_is_valid_json():
 
 def test_schema_file_has_json_schema_keyword():
     """Schema file declares a JSON Schema dialect."""
+    from urllib.parse import urlparse
+
     schema = _load_schema()
     assert "$schema" in schema, "Schema must contain $schema keyword"
-    assert "json-schema.org" in schema["$schema"]
+    parsed = urlparse(schema["$schema"])
+    assert (
+        parsed.netloc == "json-schema.org"
+    ), f"$schema must point to json-schema.org, got netloc={parsed.netloc!r}"
 
 
 def test_schema_file_version_const():
