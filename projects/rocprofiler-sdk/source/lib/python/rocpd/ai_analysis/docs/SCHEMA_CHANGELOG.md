@@ -50,12 +50,15 @@ if major != 0 or minor < 1:
 
 ## Schema File Naming
 
-Each released version is a standalone file:
+A single schema file covers all emitted versions via its `schema_version` enum:
 
 ```
 rocpd/ai_analysis/docs/
-├── analysis-output.schema.json   ← current (v0.1.0 for Tier 1/2 documents; v0.2.0 for Tier 0)
-├── SCHEMA_CHANGELOG.md           ← this file (current: v0.2.0)
+├── analysis-output.schema.json   ← single schema; schema_version enum lists all valid values
+│                                    Tier 1/2 output emits: "0.1.0"
+│                                    Tier 0 (source-only) output emits: "0.2.0"
+│                                    Future versions added to the enum without breaking consumers
+├── SCHEMA_CHANGELOG.md           ← this file
 ├── AI_ANALYSIS_API.md            ← Python API documentation
 └── LLM_REFERENCE_GUIDE.md       ← copy of share/llm-reference-guide.md (for reference)
 ```

@@ -357,6 +357,7 @@ class LLMConversation:
                 max_tokens=max_tokens,
                 system=self._system,
                 messages=messages,
+                timeout=120,
             )
             return resp.content[0].text if resp.content else ""
 
@@ -399,6 +400,7 @@ class LLMConversation:
                     model=model,
                     messages=full_messages,
                     max_completion_tokens=max_tokens,
+                    timeout=120,
                 )
             except _openai.BadRequestError as e:
                 if "max_completion_tokens" in str(e):
@@ -406,6 +408,7 @@ class LLMConversation:
                         model=model,
                         messages=full_messages,
                         max_tokens=max_tokens,
+                        timeout=120,
                     )
                 else:
                     raise

@@ -532,10 +532,12 @@ rocprofiler_add_integration_execute_test(
     rocprofv3-test-rocpd-analyze-schema-validate
     COMMAND
         ${Python3_EXECUTABLE} -c
-        "import json, sys; \
+        "import json, sys, importlib.resources as pkg; \
          path = '${CMAKE_CURRENT_BINARY_DIR}/rocpd-analyze-output/analysis_results.json'; \
          d = json.load(open(path)); \
-         assert d.get('schema_version') == '0.1.0', f'Bad schema_version: {d.get(\"schema_version\")}'; \
+         schema = json.loads(pkg.files('rocpd.ai_analysis').joinpath('docs/analysis-output.schema.json').read_text()); \
+         allowed = schema['properties']['schema_version']['enum']; \
+         assert d.get('schema_version') in allowed, f'Bad schema_version {d.get(\"schema_version\")!r}, expected one of {allowed}'; \
          assert all(k in d for k in ('metadata','recommendations','hardware_counters','hotspots')); \
          cmds = [c for r in d['recommendations'] for c in r.get('commands', [])]; \
          assert len(cmds) > 0, 'No commands found in recommendations'; \
