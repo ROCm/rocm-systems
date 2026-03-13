@@ -34,7 +34,7 @@ function(setup_split_device_compile)
     message(FATAL_ERROR "setup_split_device_compile: GPU_ARCH is required")
   endif()
   if(NOT SDC_ROCM_PATH)
-    message(FATAL_ERROR "setup_split_device_compile: ROCM_PATH is required")
+    set(SDC_ROCM_PATH "")
   endif()
   if(NOT SDC_OUTPUT_DIR)
     message(FATAL_ERROR "setup_split_device_compile: OUTPUT_DIR is required")
@@ -195,7 +195,6 @@ function(setup_split_device_compile)
           -e "/\\.amdhsa_next_free_vgpr [0-9]/s/\\.amdhsa_next_free_vgpr [0-9]\\+/.amdhsa_next_free_vgpr 192/"
           -e "/\\.amdhsa_accum_offset [0-9]/s/\\.amdhsa_accum_offset [0-9]\\+/.amdhsa_accum_offset 128/"
           -e "/\\.amdhsa_next_free_sgpr [0-9]/s/\\.amdhsa_next_free_sgpr [0-9]\\+/.amdhsa_next_free_sgpr 100/"
-          -e "s/\\(s_swappc_b64\\)/s_waitcnt vmcnt(0) lgkmcnt(0)\\n\\tbuffer_inv sc0 sc1\\n\\t\\1/"
         )
       else()
         set(_sed_args
