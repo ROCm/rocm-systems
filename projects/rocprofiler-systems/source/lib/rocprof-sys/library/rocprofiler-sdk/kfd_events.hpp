@@ -8,6 +8,14 @@
 
 #include <cstdint>
 
+#if defined(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT)
+#    define ROCPROFSYS_HAS_KFD_EVENTS 1
+#else
+#    define ROCPROFSYS_HAS_KFD_EVENTS 0
+#endif
+
+#if ROCPROFSYS_HAS_KFD_EVENTS
+
 namespace rocprofsys
 {
 namespace rocprofiler_sdk
@@ -41,3 +49,5 @@ tool_kfd_event_dropped_events_callback(
 }  // namespace rocprofiler_sdk
 
 }  // namespace rocprofsys
+
+#endif

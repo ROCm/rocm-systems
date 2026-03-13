@@ -2172,6 +2172,7 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                 }
             }
 #endif
+#if ROCPROFSYS_HAS_KFD_EVENTS
             else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT)
             {
                 auto* record =
@@ -2214,6 +2215,7 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                     header->payload);
                 tool_kfd_event_dropped_events_callback(record);
             }
+#endif
             else if(header->kind == ROCPROFILER_BUFFER_TRACING_HSA_CORE_API ||
                     header->kind == ROCPROFILER_BUFFER_TRACING_HSA_AMD_EXT_API)
             {
@@ -2625,6 +2627,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     }
 #endif
 
+#if ROCPROFSYS_HAS_KFD_EVENTS
     // Initialize KFD event metadata
     if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT) > 0 ||
        _buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE) > 0 ||
@@ -2713,6 +2716,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
             _data->primary_ctx, ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS,
             nullptr, 0, _data->kfd_event_dropped_buffer));
     }
+#endif
 
     if(!_counter_events.empty())
     {

@@ -517,12 +517,14 @@ get_buffered_domains()
         ROCPROFILER_BUFFER_TRACING_PAGE_MIGRATION,
 #endif
         ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY,
+#if ROCPROFSYS_HAS_KFD_EVENTS
         ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT,
         ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE,
         ROCPROFILER_BUFFER_TRACING_KFD_QUEUE,
         ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE,
         ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU,
         ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS,
+#endif
     };
 
     auto _data = std::unordered_set<rocprofiler_buffer_tracing_kind_t>{};
@@ -574,6 +576,7 @@ get_buffered_domains()
         {
             _data.emplace(ROCPROFILER_BUFFER_TRACING_MEMORY_COPY);
         }
+#if ROCPROFSYS_HAS_KFD_EVENTS
         else if(itr == "kfd_page_fault")
         {
             _data.emplace(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT);
@@ -598,6 +601,7 @@ get_buffered_domains()
         {
             _data.emplace(ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS);
         }
+#endif
         else
         {
             for(size_t idx = 0; idx < buffer_tracing_info.size(); ++idx)

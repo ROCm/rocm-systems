@@ -3,20 +3,22 @@
 
 #include "library/rocprofiler-sdk/kfd_events.hpp"
 
-#include "core/categories.hpp"
-#include "core/trace_cache/buffer_storage.hpp"
-#include "core/trace_cache/cache_manager.hpp"
-#include "core/trace_cache/metadata_registry.hpp"
-#include "library/rocprofiler-sdk.hpp"
-#include "library/rocprofiler-sdk/fwd.hpp"
+#if ROCPROFSYS_HAS_KFD_EVENTS
 
-#include "logger/debug.hpp"
+#    include "core/categories.hpp"
+#    include "core/trace_cache/buffer_storage.hpp"
+#    include "core/trace_cache/cache_manager.hpp"
+#    include "core/trace_cache/metadata_registry.hpp"
+#    include "library/rocprofiler-sdk.hpp"
+#    include "library/rocprofiler-sdk/fwd.hpp"
 
-#include <rocprofiler-sdk/buffer_tracing.h>
-#include <rocprofiler-sdk/kfd/kfd_id.h>
+#    include "logger/debug.hpp"
 
-#include <fmt/format.h>
-#include <unistd.h>
+#    include <rocprofiler-sdk/buffer_tracing.h>
+#    include <rocprofiler-sdk/kfd/kfd_id.h>
+
+#    include <fmt/format.h>
+#    include <unistd.h>
 
 namespace rocprofsys
 {
@@ -637,3 +639,5 @@ tool_kfd_event_dropped_events_callback(
 }  // namespace rocprofiler_sdk
 
 }  // namespace rocprofsys
+
+#endif
