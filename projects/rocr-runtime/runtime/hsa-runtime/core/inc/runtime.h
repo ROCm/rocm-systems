@@ -513,6 +513,7 @@ class Runtime {
   bool VirtualMemApiSupported() const { return virtual_mem_api_supported_; }
   bool XnackEnabled() const { return xnack_enabled_; }
   void XnackEnabled(bool enable) { xnack_enabled_ = enable; }
+  bool AqlProfileAvailable() const { return (aqlprofile_lib_ != nullptr); }
 
   Driver &AgentDriver(DriverType drv_type) {
     auto is_drv_type = [&](const std::unique_ptr<Driver> &d) {
@@ -924,6 +925,8 @@ class Runtime {
 
   bool virtual_mem_api_supported_;
   bool xnack_enabled_;
+
+  os::LibHandle aqlprofile_lib_;
 
   typedef void* ThunkHandle;
 
