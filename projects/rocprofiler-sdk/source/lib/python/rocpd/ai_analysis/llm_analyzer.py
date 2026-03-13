@@ -118,6 +118,7 @@ def load_reference_guide() -> str:
 # Context-aware guide filtering
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class AnalysisContext:
     """
@@ -137,6 +138,7 @@ class AnalysisContext:
         custom_prompt: The user's --prompt text, if any.
             Triggers compiler tag when it contains compiler/flag/build/compile.
     """
+
     tier: int = 1
     has_counters: bool = False
     bottleneck_type: Optional[str] = None
@@ -144,9 +146,15 @@ class AnalysisContext:
     custom_prompt: Optional[str] = None
 
     # TraceLens-derived metrics (used by _select_tags() to gate reference guide section)
-    kernel_categories: Optional[list] = None    # [{category, count, pct_of_kernel_time, ...}]
-    short_kernel_summary: Optional[dict] = None  # {threshold_us, short_kernel_count, wasted_pct}
-    interval_timeline: Optional[dict] = None     # {true_compute_pct, exposed_memcpy_pct, idle_pct}
+    kernel_categories: Optional[list] = (
+        None  # [{category, count, pct_of_kernel_time, ...}]
+    )
+    short_kernel_summary: Optional[dict] = (
+        None  # {threshold_us, short_kernel_count, wasted_pct}
+    )
+    interval_timeline: Optional[dict] = (
+        None  # {true_compute_pct, exposed_memcpy_pct, idle_pct}
+    )
 
 
 def _select_tags(ctx: AnalysisContext) -> set:
@@ -293,6 +301,7 @@ class LLMAnalyzer:
                     self.thinking_budget_tokens = int(_env_thinking)
                 except ValueError:
                     import warnings
+
                     warnings.warn(
                         f"ROCPD_LLM_THINKING={_env_thinking!r} is not a valid integer; "
                         "extended thinking disabled.",
@@ -544,9 +553,7 @@ Follow the reference guide strictly for analysis methodology and output format."
             lines.append(
                 f"- Memory Copy Time: {breakdown.get('memcpy_time_pct', 0):.1f}%"
             )
-            lines.append(
-                f"- API Overhead: {breakdown.get('api_overhead_pct', 0):.1f}%"
-            )
+            lines.append(f"- API Overhead: {breakdown.get('api_overhead_pct', 0):.1f}%")
             lines.append("")
 
         # Top kernels
@@ -554,12 +561,8 @@ Follow the reference guide strictly for analysis methodology and output format."
             lines.append("## Top Kernels")
             for kernel in data["kernels"][:5]:  # Top 5
                 lines.append(f"- {kernel.get('kernel_id', 'Unknown')}")
-                lines.append(
-                    f"  - Time: {kernel.get('pct_total_time', 0):.1f}% of total"
-                )
-                lines.append(
-                    f"  - Dispatches: {kernel.get('dispatch_count', 'N/A')}"
-                )
+                lines.append(f"  - Time: {kernel.get('pct_total_time', 0):.1f}% of total")
+                lines.append(f"  - Dispatches: {kernel.get('dispatch_count', 'N/A')}")
 
                 if "vgpr_count" in kernel:
                     lines.append(f"  - VGPR Usage: {kernel.get('vgpr_count')}")
@@ -602,7 +605,9 @@ Follow the reference guide strictly for analysis methodology and output format."
                 "interval_timeline: " + json.dumps(data["interval_timeline"])
             )
         if data.get("kernel_categories"):
-            tracelens_parts.append("kernel_categories: " + json.dumps(data["kernel_categories"]))
+            tracelens_parts.append(
+                "kernel_categories: " + json.dumps(data["kernel_categories"])
+            )
         if data.get("short_kernel_summary"):
             tracelens_parts.append(
                 "short_kernels: " + json.dumps(data["short_kernel_summary"])
@@ -617,9 +622,7 @@ Follow the reference guide strictly for analysis methodology and output format."
         if data.get("has_counters"):
             lines.append("✅ Hardware counters available (Tier 2 analysis possible)")
         else:
-            lines.append(
-                "⚠️  No hardware counters (Tier 1 trace analysis only)"
-            )
+            lines.append("⚠️  No hardware counters (Tier 1 trace analysis only)")
 
         if data.get("has_pc_sampling"):
             lines.append("✅ PC sampling data available (Tier 3 analysis possible)")
@@ -686,7 +689,9 @@ Follow the reference guide strictly for analysis methodology and output format."
         else:
             raise ValueError(f"Unknown provider: {self.provider}")
 
-    def _call_anthropic(self, system_prompt: str, user_prompt: str, timeout: int = 120) -> str:
+    def _call_anthropic(
+        self, system_prompt: str, user_prompt: str, timeout: int = 120
+    ) -> str:
         """Call Anthropic Claude API"""
         if not self.api_key:
             raise LLMAuthenticationError(
@@ -702,7 +707,9 @@ Follow the reference guide strictly for analysis methodology and output format."
         try:
             client = anthropic.Anthropic(api_key=self.api_key)
 
-            model = self.model or os.environ.get("ROCPD_LLM_MODEL") or DEFAULT_ANTHROPIC_MODEL
+            model = (
+                self.model or os.environ.get("ROCPD_LLM_MODEL") or DEFAULT_ANTHROPIC_MODEL
+            )
 
             # Build base API call kwargs
             create_kwargs: Dict[str, Any] = dict(
@@ -717,10 +724,13 @@ Follow the reference guide strictly for analysis methodology and output format."
             if self.thinking_budget_tokens is not None:
                 # Warn if model may not support extended thinking
                 _thinking_models = (
-                    "claude-opus-4", "claude-sonnet-4-5", "claude-3-7-sonnet",
+                    "claude-opus-4",
+                    "claude-sonnet-4-5",
+                    "claude-3-7-sonnet",
                 )
                 if not any(m in model for m in _thinking_models):
                     import warnings
+
                     warnings.warn(
                         f"Extended thinking requested but model {model!r} may not support it. "
                         "Compatible models: claude-opus-4, claude-sonnet-4-5, claude-3-7-sonnet. "
@@ -778,7 +788,9 @@ Follow the reference guide strictly for analysis methodology and output format."
         try:
             client = openai.OpenAI(api_key=self.api_key)
 
-            model = self.model or os.environ.get("ROCPD_LLM_MODEL") or DEFAULT_OPENAI_MODEL
+            model = (
+                self.model or os.environ.get("ROCPD_LLM_MODEL") or DEFAULT_OPENAI_MODEL
+            )
             _messages = [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
@@ -843,15 +855,12 @@ Follow the reference guide strictly for analysis methodology and output format."
         except Exception as e:
             raise AnalysisError(f"OpenAI API error: {e}")
 
-
     def _call_local(self, system_prompt: str, user_prompt: str) -> str:
         """Call a local OpenAI-compatible LLM endpoint (e.g. Ollama)."""
         try:
             import openai
         except ImportError:
-            raise ImportError(
-                "openai package required for local LLM: pip install openai"
-            )
+            raise ImportError("openai package required for local LLM: pip install openai")
         base_url = os.environ.get("ROCPD_LLM_LOCAL_URL", "http://localhost:11434/v1")
         client = openai.OpenAI(base_url=base_url, api_key="ignored")
         model = self.model or os.environ.get("ROCPD_LLM_LOCAL_MODEL", "codellama:13b")
@@ -860,7 +869,7 @@ Follow the reference guide strictly for analysis methodology and output format."
                 model=model,
                 messages=[
                     {"role": "system", "content": system_prompt},
-                    {"role": "user",   "content": user_prompt},
+                    {"role": "user", "content": user_prompt},
                 ],
                 max_tokens=2048,
                 timeout=60,
@@ -889,7 +898,9 @@ Follow the reference guide strictly for analysis methodology and output format."
             import openai
             import json as _json
         except ImportError:
-            raise ImportError("openai package required for private LLM: pip install openai")
+            raise ImportError(
+                "openai package required for private LLM: pip install openai"
+            )
 
         base_url = os.environ.get("ROCPD_LLM_PRIVATE_URL", "")
         if not base_url:
@@ -921,9 +932,7 @@ Follow the reference guide strictly for analysis methodology and output format."
                 try:
                     parsed_h = _json.loads(raw_headers.replace("'", '"'))
                 except _json.JSONDecodeError as e:
-                    raise ValueError(
-                        f"ROCPD_LLM_PRIVATE_HEADERS is not valid JSON: {e}"
-                    )
+                    raise ValueError(f"ROCPD_LLM_PRIVATE_HEADERS is not valid JSON: {e}")
             headers.update(parsed_h)
 
         verify_ssl_env = os.environ.get("ROCPD_LLM_PRIVATE_VERIFY_SSL", "1").lower()
@@ -932,16 +941,20 @@ Follow the reference guide strictly for analysis methodology and output format."
         if not verify_ssl:
             try:
                 import httpx as _httpx
+
                 http_client = _httpx.Client(verify=False)
             except ImportError:
                 import warnings
+
                 warnings.warn(
                     "ROCPD_LLM_PRIVATE_VERIFY_SSL=0 requested but httpx is not installed. "
                     "SSL verification will remain enabled. Run: pip install httpx",
                     stacklevel=2,
                 )
 
-        client_kwargs: dict = dict(api_key=key, base_url=base_url, default_headers=headers)
+        client_kwargs: dict = dict(
+            api_key=key, base_url=base_url, default_headers=headers
+        )
         if http_client is not None:
             client_kwargs["http_client"] = http_client
         client = openai.OpenAI(**client_kwargs)
@@ -952,7 +965,7 @@ Follow the reference guide strictly for analysis methodology and output format."
                     model=model,
                     messages=[
                         {"role": "system", "content": system_prompt},
-                        {"role": "user",   "content": user_prompt},
+                        {"role": "user", "content": user_prompt},
                     ],
                     max_completion_tokens=4096,
                 )
@@ -963,7 +976,7 @@ Follow the reference guide strictly for analysis methodology and output format."
                         model=model,
                         messages=[
                             {"role": "system", "content": system_prompt},
-                            {"role": "user",   "content": user_prompt},
+                            {"role": "user", "content": user_prompt},
                         ],
                         max_tokens=4096,
                     )
@@ -1001,6 +1014,7 @@ Follow the reference guide strictly for analysis methodology and output format."
     def annotate_profiling_plan(self, metadata: dict) -> str:
         """Annotate profiling plan metadata with LLM advice (no source text)."""
         import json as _json
+
         system = (
             "You are an expert AMD GPU performance analyst. "
             "Given a structured profiling plan (no source code), "
@@ -1036,10 +1050,12 @@ Follow the reference guide strictly for analysis methodology and output format."
             if name and name not in kernel_name_map:
                 kernel_name_map[name] = f"[KERNEL_{i}]"
 
-        all_files = list({
-            (k.get("file") if isinstance(k, dict) else k.file)
-            for k in source_result.detected_kernels
-        })
+        all_files = list(
+            {
+                (k.get("file") if isinstance(k, dict) else k.file)
+                for k in source_result.detected_kernels
+            }
+        )
         for i, fp in enumerate(sorted(all_files), 1):
             if fp:
                 file_path_map[fp] = f"[FILE_{i}]"
@@ -1056,29 +1072,42 @@ Follow the reference guide strictly for analysis methodology and output format."
             fpath = k.get("file") if isinstance(k, dict) else k.file
             line = k.get("line") if isinstance(k, dict) else k.line
             launch = k.get("launch_type") if isinstance(k, dict) else k.launch_type
-            sanitized_kernels.append({
-                "name": _redact_kernel(name or ""),
-                "file": _redact_file(fpath or ""),
-                "line": line,
-                "launch_type": launch,
-            })
+            sanitized_kernels.append(
+                {
+                    "name": _redact_kernel(name or ""),
+                    "file": _redact_file(fpath or ""),
+                    "line": line,
+                    "launch_type": launch,
+                }
+            )
 
         sanitized_patterns = []
         for p in source_result.detected_patterns:
-            pd = p if isinstance(p, dict) else {
-                "pattern_id": p.pattern_id, "severity": p.severity,
-                "category": p.category, "description": p.description,
-                "count": p.count, "locations": p.locations,
-            }
-            sanitized_patterns.append({
-                "pattern_id": pd["pattern_id"],
-                "severity": pd["severity"],
-                "category": pd["category"],
-                "description": pd["description"],
-                "count": pd["count"],
-                # Redact locations (may contain file paths)
-                "locations": [_redact_paths(loc) for loc in pd.get("locations", [])[:3]],
-            })
+            pd = (
+                p
+                if isinstance(p, dict)
+                else {
+                    "pattern_id": p.pattern_id,
+                    "severity": p.severity,
+                    "category": p.category,
+                    "description": p.description,
+                    "count": p.count,
+                    "locations": p.locations,
+                }
+            )
+            sanitized_patterns.append(
+                {
+                    "pattern_id": pd["pattern_id"],
+                    "severity": pd["severity"],
+                    "category": pd["category"],
+                    "description": pd["description"],
+                    "count": pd["count"],
+                    # Redact locations (may contain file paths)
+                    "locations": [
+                        _redact_paths(loc) for loc in pd.get("locations", [])[:3]
+                    ],
+                }
+            )
 
         sanitized_risks = [_redact_paths(r) for r in source_result.risk_areas]
 
@@ -1107,17 +1136,21 @@ Follow the reference guide strictly for analysis methodology and output format."
         lines.append("Goal: produce a prioritized profiling plan.")
         lines.append("")
 
-        lines.append(f"## Source Code Summary")
+        lines.append("## Source Code Summary")
         lines.append(f"- Programming model: {sanitized['programming_model']}")
         lines.append(f"- Files scanned: {sanitized['files_scanned']}")
         lines.append(f"- GPU kernels found: {sanitized['kernel_count']}")
-        lines.append(f"- Already instrumented with ROCTx: {sanitized['already_instrumented']}")
+        lines.append(
+            f"- Already instrumented with ROCTx: {sanitized['already_instrumented']}"
+        )
         lines.append("")
 
         if sanitized["detected_kernels"]:
             lines.append("## Detected Kernels (names redacted)")
             for k in sanitized["detected_kernels"][:5]:
-                lines.append(f"  - {k['name']} ({k['launch_type']}) at {k['file']}:{k['line']}")
+                lines.append(
+                    f"  - {k['name']} ({k['launch_type']}) at {k['file']}:{k['line']}"
+                )
             lines.append("")
 
         if sanitized["detected_patterns"]:
@@ -1135,12 +1168,12 @@ Follow the reference guide strictly for analysis methodology and output format."
                 lines.append(f"  - {r}")
             lines.append("")
 
-        lines.append(f"## Suggested Counters")
+        lines.append("## Suggested Counters")
         lines.append(f"  {', '.join(sanitized['suggested_counters'])}")
         lines.append("")
 
         if custom_prompt:
-            lines.append(f"## User Question")
+            lines.append("## User Question")
             lines.append(custom_prompt)
             lines.append("")
             lines.append(
@@ -1201,11 +1234,17 @@ Follow the reference guide strictly for analysis methodology and output format."
         combined = "\n\n".join(
             f"=== {name} ===\n{content}" for name, content in summaries
         )
-        user = f"{custom_prompt}\n\nSource files:\n\n{combined}" if custom_prompt else combined
+        user = (
+            f"{custom_prompt}\n\nSource files:\n\n{combined}"
+            if custom_prompt
+            else combined
+        )
 
         if self.verbose:
-            print(f"[LLM] suggest_optimizations: {len(summaries)} file(s), "
-                  f"user prompt {len(user)} chars")
+            print(
+                f"[LLM] suggest_optimizations: {len(summaries)} file(s), "
+                f"user prompt {len(user)} chars"
+            )
 
         if self.provider == "anthropic":
             return self._call_anthropic(system, user)
@@ -1255,4 +1294,3 @@ Follow the reference guide strictly for analysis methodology and output format."
             return self._call_local(system_prompt, user_prompt)
         else:
             raise ValueError(f"Unknown provider: {self.provider}")
-

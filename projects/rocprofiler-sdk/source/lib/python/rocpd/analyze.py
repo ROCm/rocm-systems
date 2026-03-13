@@ -40,6 +40,7 @@ from typing import Any, Dict, List, Optional
 
 try:
     from importlib.metadata import version as _pkg_version
+
     _ROCPD_VERSION = _pkg_version("rocpd")
 except Exception:
     _ROCPD_VERSION = "0.1.0"  # fallback if metadata not available (common in dev / ROCm system installs)
@@ -388,18 +389,22 @@ def analyze_hardware_counters(connection: RocpdImportData) -> Dict[str, Any]:
 
 # Flags that --sys-trace subsumes.  Any flag in this set is redundant when
 # kernel + memory-copy trace data is already present in the database.
-_SYS_TRACE_IMPLIED: frozenset = frozenset({
-    "--sys-trace",
-    "--hip-trace",
-    "--hsa-trace",
-    "--kernel-trace",
-    "--memory-copy-trace",
-    "--marker-trace",
-    "--roctx-trace",
-})
+_SYS_TRACE_IMPLIED: frozenset = frozenset(
+    {
+        "--sys-trace",
+        "--hip-trace",
+        "--hsa-trace",
+        "--kernel-trace",
+        "--memory-copy-trace",
+        "--marker-trace",
+        "--roctx-trace",
+    }
+)
 
 # Args that only specify output location — not considered "new data collection"
-_OUTPUT_ONLY_ARGS: frozenset = frozenset({"-d", "-o", "--output-directory", "--output-file"})
+_OUTPUT_ONLY_ARGS: frozenset = frozenset(
+    {"-d", "-o", "--output-directory", "--output-file"}
+)
 
 # Hardware counter collection limits for rocprofv3 --pmc.
 #
@@ -427,12 +432,12 @@ _OUTPUT_ONLY_ARGS: frozenset = frozenset({"-d", "-o", "--output-directory", "--o
 # gfx942/MI300X) support up to 8 counters per pass in practice.
 _PMC_BLOCK_LIMIT_DEFAULT: int = 4
 _PMC_BLOCK_LIMITS: Dict[str, int] = {
-    "SQ":    4,   # shader/wave; gfx942 supports up to 8 — use 4 as safe default
-    "GRBM":  4,   # GPU register bus manager
-    "TCP":   4,   # L1 vector cache
-    "TCC":   4,   # L2 cache
-    "TA":    4,   # texture addressing
-    "TD":    4,   # texture data
+    "SQ": 4,  # shader/wave; gfx942 supports up to 8 — use 4 as safe default
+    "GRBM": 4,  # GPU register bus manager
+    "TCP": 4,  # L1 vector cache
+    "TCC": 4,  # L2 cache
+    "TA": 4,  # texture addressing
+    "TD": 4,  # texture data
 }
 
 # FETCH_SIZE and WRITE_SIZE are derived metrics that each expand to multiple TCC
@@ -490,9 +495,17 @@ def _split_pmc_into_passes(
         # regular counters are handled together as a separate group.
         all_cmds = []
         if regular:
-            all_cmds.extend(_split_pmc_into_passes(
-                regular, base_flags, base_args, output_dir, output_prefix, description, app_placeholder
-            ))
+            all_cmds.extend(
+                _split_pmc_into_passes(
+                    regular,
+                    base_flags,
+                    base_args,
+                    output_dir,
+                    output_prefix,
+                    description,
+                    app_placeholder,
+                )
+            )
         for dc in derived:
             # Single derived counter: build its command directly (no recursion).
             pmc_str = dc
@@ -503,21 +516,25 @@ def _split_pmc_into_passes(
                 {"name": "-d", "value": output_dir},
                 {"name": "-o", "value": output_prefix},
             ]
-            all_cmds.append({
-                "tool": "rocprofv3",
-                "description": description,
-                "flags": list(base_flags),
-                "args": args,
-                "full_command": (
-                    f"rocprofv3 {flags_str} --pmc {pmc_str}"
-                    f" -d {output_dir} -o {output_prefix} -- {app_placeholder}"
-                ).strip(),
-            })
+            all_cmds.append(
+                {
+                    "tool": "rocprofv3",
+                    "description": description,
+                    "flags": list(base_flags),
+                    "args": args,
+                    "full_command": (
+                        f"rocprofv3 {flags_str} --pmc {pmc_str}"
+                        f" -d {output_dir} -o {output_prefix} -- {app_placeholder}"
+                    ).strip(),
+                }
+            )
         n = len(all_cmds)
         if n > 1:
             for idx, cmd in enumerate(all_cmds):
                 out_name = f"{output_prefix}_pass{idx + 1}"
-                pmc_val = next((a["value"] for a in cmd["args"] if a["name"] == "--pmc"), "")
+                pmc_val = next(
+                    (a["value"] for a in cmd["args"] if a["name"] == "--pmc"), ""
+                )
                 flags_str = " ".join(base_flags)
                 cmd["description"] = f"{description} (pass {idx + 1}/{n})"
                 for arg in cmd["args"]:
@@ -546,7 +563,7 @@ def _split_pmc_into_passes(
     for blk, cs in block_groups.items():
         limit = _pmc_block_limit(blk)
         for pass_idx in range(n_passes):
-            chunk = cs[pass_idx * limit: (pass_idx + 1) * limit]
+            chunk = cs[pass_idx * limit : (pass_idx + 1) * limit]
             pass_counters[pass_idx].extend(chunk)
 
     pass_counters = [p for p in pass_counters if p]
@@ -568,13 +585,15 @@ def _split_pmc_into_passes(
             f"rocprofv3 {flags_str} --pmc {pmc_str}"
             f" -d {output_dir} -o {out_name} -- {app_placeholder}"
         ).strip()
-        commands.append({
-            "tool": "rocprofv3",
-            "description": f"{description}{suffix}",
-            "flags": list(base_flags),
-            "args": args,
-            "full_command": full_cmd,
-        })
+        commands.append(
+            {
+                "tool": "rocprofv3",
+                "description": f"{description}{suffix}",
+                "flags": list(base_flags),
+                "args": args,
+                "full_command": full_cmd,
+            }
+        )
     return commands
 
 
@@ -599,12 +618,12 @@ def _detect_already_collected(connection: RocpdImportData) -> frozenset:
       already-collected counters from ``--pmc`` recommendation commands
     """
     has_kernels = False
-    has_api_regions = False   # 'regions' view = HIP/HSA API spans → hip/hsa-trace
+    has_api_regions = False  # 'regions' view = HIP/HSA API spans → hip/hsa-trace
     has_memcpy = False
 
     checks = (
-        ("kernels",       "kernels"),
-        ("regions",       "api_regions"),
+        ("kernels", "kernels"),
+        ("regions", "api_regions"),
         ("memory_copies", "memcpy"),
     )
     for table, key in checks:
@@ -686,9 +705,13 @@ def _filter_rec_commands(
 
     # Args that are scope filters or output-only — they don't represent new
     # data collection on their own.
-    _NON_DATA_ARGS = _OUTPUT_ONLY_ARGS | frozenset({
-        "--kernel-names", "--include-names", "--exclude-names",
-    })
+    _NON_DATA_ARGS = _OUTPUT_ONLY_ARGS | frozenset(
+        {
+            "--kernel-names",
+            "--include-names",
+            "--exclude-names",
+        }
+    )
 
     filtered = []
     for cmd in commands:
@@ -748,9 +771,7 @@ def _filter_rec_commands(
 
         # Meaningful args: anything that isn't an output path or a scope filter.
         # --kernel-names scopes collection but doesn't collect new data itself.
-        meaningful_args = [
-            a for a in new_args if a.get("name", "") not in _NON_DATA_ARGS
-        ]
+        meaningful_args = [a for a in new_args if a.get("name", "") not in _NON_DATA_ARGS]
         if not new_flags and not meaningful_args:
             continue  # nothing new to collect — drop the command entirely
 
@@ -794,7 +815,7 @@ def generate_recommendations(
     memory_analysis: Dict[str, Dict[str, Any]],
     hardware_counters: Optional[Dict[str, Any]] = None,
     already_collected: Optional[frozenset] = None,
-    short_kernels: Optional[Dict[str, Any]] = None,      # NEW (TraceLens)
+    short_kernels: Optional[Dict[str, Any]] = None,  # NEW (TraceLens)
     interval_timeline: Optional[Dict[str, Any]] = None,  # NEW (TraceLens)
 ) -> List[Dict[str, Any]]:
     """
@@ -842,7 +863,10 @@ def generate_recommendations(
                             "description": "Collect wave occupancy and cycle counters per kernel dispatch",
                             "flags": ["--sys-trace"],
                             "args": [
-                                {"name": "--pmc", "value": "SQ_WAVES SQ_WAVE_CYCLES TA_TA_BUSY"},
+                                {
+                                    "name": "--pmc",
+                                    "value": "SQ_WAVES SQ_WAVE_CYCLES TA_TA_BUSY",
+                                },
                                 {"name": "-d", "value": "./occupancy_output"},
                                 {"name": "-o", "value": "profile"},
                             ],
@@ -1003,18 +1027,24 @@ def generate_recommendations(
                     "commands": [
                         {
                             "tool": "rocprofv3",
-                            "description": f"Collect GPU hardware counters scoped to the dominant kernel",
+                            "description": "Collect GPU hardware counters scoped to the dominant kernel",
                             "flags": ["--sys-trace"],
                             "args": [
-                                {"name": "--pmc", "value": "GRBM_COUNT GRBM_GUI_ACTIVE SQ_WAVES"},
-                                {"name": "--kernel-names", "value": kernel_name},  # display only; full_command uses shlex.quote
+                                {
+                                    "name": "--pmc",
+                                    "value": "GRBM_COUNT GRBM_GUI_ACTIVE SQ_WAVES",
+                                },
+                                {
+                                    "name": "--kernel-names",
+                                    "value": kernel_name,
+                                },  # display only; full_command uses shlex.quote
                                 {"name": "-d", "value": "./kernel_output"},
                                 {"name": "-o", "value": "profile"},
                             ],
                             "full_command": (
-                                f'rocprofv3 --sys-trace --pmc GRBM_COUNT GRBM_GUI_ACTIVE SQ_WAVES'
-                                f' --kernel-names {shlex.quote(kernel_name)}'
-                                f' -d ./kernel_output -o profile -- ./app'
+                                f"rocprofv3 --sys-trace --pmc GRBM_COUNT GRBM_GUI_ACTIVE SQ_WAVES"
+                                f" --kernel-names {shlex.quote(kernel_name)}"
+                                f" -d ./kernel_output -o profile -- ./app"
                             ),
                         },
                         {
@@ -1023,9 +1053,12 @@ def generate_recommendations(
                             "flags": [],
                             "args": [
                                 {"name": "profile", "value": None},
-                                {"name": "--kernel", "value": kernel_name},  # display only; full_command uses shlex.quote
+                                {
+                                    "name": "--kernel",
+                                    "value": kernel_name,
+                                },  # display only; full_command uses shlex.quote
                             ],
-                            "full_command": f'rocprof-compute profile --kernel {shlex.quote(kernel_name)} -- ./app',
+                            "full_command": f"rocprof-compute profile --kernel {shlex.quote(kernel_name)} -- ./app",
                         },
                     ],
                 }
@@ -1045,7 +1078,7 @@ def generate_recommendations(
                     {
                         "priority": "MEDIUM",
                         "category": "Launch Overhead",
-                        "issue": f"Many small kernels detected: {total_calls} launches, avg {avg_duration/1000:.1f} μs each",
+                        "issue": f"Many small kernels detected: {total_calls} launches, avg {avg_duration / 1000:.1f} μs each",
                         "suggestion": "Fuse kernels or batch work to amortize per-launch overhead (~5-10 μs each)",
                         "actions": [
                             "Combine sequential element-wise kernels (e.g., add + multiply) into a single fused kernel",
@@ -1084,10 +1117,10 @@ def generate_recommendations(
                 {
                     "priority": "MEDIUM",
                     "category": "Memory Bandwidth",
-                    "issue": f"{direction} copies achieving only {bandwidth_gbps:.2f} GB/s (avg transfer: {avg_bytes/1024:.1f} KB)",
+                    "issue": f"{direction} copies achieving only {bandwidth_gbps:.2f} GB/s (avg transfer: {avg_bytes / 1024:.1f} KB)",
                     "suggestion": "Increase transfer size per operation to reach PCIe or HBM saturation bandwidth",
                     "actions": [
-                        f"Consolidate many {avg_bytes/1024:.1f} KB transfers into fewer large transfers (>1 MB each)",
+                        f"Consolidate many {avg_bytes / 1024:.1f} KB transfers into fewer large transfers (>1 MB each)",
                         "Use hipHostMalloc with hipHostMallocPinned flag to enable DMA engine transfers",
                         "Consider hipMemcpyAsync with stream to overlap with compute",
                         "For multi-GPU: evaluate hipMemcpyPeer for direct device-to-device transfers",
@@ -1138,7 +1171,10 @@ def generate_recommendations(
                         "description": "Collect standard hardware performance counters for Tier 2 analysis",
                         "flags": ["--sys-trace"],
                         "args": [
-                            {"name": "--pmc", "value": "GRBM_COUNT GRBM_GUI_ACTIVE SQ_WAVES"},
+                            {
+                                "name": "--pmc",
+                                "value": "GRBM_COUNT GRBM_GUI_ACTIVE SQ_WAVES",
+                            },
                             {"name": "-d", "value": "./counters_output"},
                             {"name": "-o", "value": "profile"},
                         ],
@@ -1167,45 +1203,51 @@ def generate_recommendations(
     # Rule 9 — SHORT KERNELS (TraceLens-derived)
     if short_kernels and short_kernels.get("wasted_pct_of_kernel_time", 0) > 5.0:
         wasted_pct = short_kernels["wasted_pct_of_kernel_time"]
-        count      = short_kernels.get("short_kernel_count", 0)
-        threshold  = short_kernels.get("threshold_us", 10)
-        recommendations.append({
-            "priority": "MEDIUM",
-            "category": "Launch Efficiency",
-            "issue": f"Short kernel overhead: {count} kernels below {threshold}μs consume {wasted_pct:.1f}% of kernel time",
-            "suggestion": "Reduce kernel launch overhead by fusing small kernels or using persistent kernel patterns",
-            "actions": [
-                "- Fuse consecutive elementwise ops into a single kernel",
-                "- Use hipGraph to batch kernel launches and reduce launch latency",
-                "- Consider persistent kernels for kernels called >1000×/sec",
-                "- Profile with rocprofv3 --hip-trace to measure queue latency vs. execution time",
-            ],
-            "estimated_impact": "5–15% reduction in total kernel time if short kernels are dominant",
-            "commands": [],
-        })
+        count = short_kernels.get("short_kernel_count", 0)
+        threshold = short_kernels.get("threshold_us", 10)
+        recommendations.append(
+            {
+                "priority": "MEDIUM",
+                "category": "Launch Efficiency",
+                "issue": f"Short kernel overhead: {count} kernels below {threshold}μs consume {wasted_pct:.1f}% of kernel time",
+                "suggestion": "Reduce kernel launch overhead by fusing small kernels or using persistent kernel patterns",
+                "actions": [
+                    "- Fuse consecutive elementwise ops into a single kernel",
+                    "- Use hipGraph to batch kernel launches and reduce launch latency",
+                    "- Consider persistent kernels for kernels called >1000×/sec",
+                    "- Profile with rocprofv3 --hip-trace to measure queue latency vs. execution time",
+                ],
+                "estimated_impact": "5–15% reduction in total kernel time if short kernels are dominant",
+                "commands": [],
+            }
+        )
 
     # Rule 10 — GPU IDLE TIME (TraceLens interval arithmetic, more accurate than overhead%)
     if interval_timeline and interval_timeline.get("idle_pct", 0) > 20.0:
         idle_pct = interval_timeline["idle_pct"]
-        recommendations.append({
-            "priority": "HIGH",
-            "category": "GPU Utilization",
-            "issue": f"High GPU idle time detected: {idle_pct:.1f}% of wall time the GPU is idle",
-            "suggestion": "Overlap CPU dispatch work with GPU execution to reduce idle gaps",
-            "actions": [
-                "- Use async HIP API calls (hipMemcpyAsync, kernel launches without hipDeviceSynchronize)",
-                "- Introduce hipStream_t streams to overlap independent kernels and transfers",
-                "- Check for unnecessary hipDeviceSynchronize() calls in hot loops",
-                "- Use rocprofv3 --hip-trace to identify synchronization points causing stalls",
-            ],
-            "estimated_impact": f"Up to {idle_pct:.0f}% improvement in wall-time throughput if idle is CPU-bound dispatch",
-            "commands": [],
-        })
+        recommendations.append(
+            {
+                "priority": "HIGH",
+                "category": "GPU Utilization",
+                "issue": f"High GPU idle time detected: {idle_pct:.1f}% of wall time the GPU is idle",
+                "suggestion": "Overlap CPU dispatch work with GPU execution to reduce idle gaps",
+                "actions": [
+                    "- Use async HIP API calls (hipMemcpyAsync, kernel launches without hipDeviceSynchronize)",
+                    "- Introduce hipStream_t streams to overlap independent kernels and transfers",
+                    "- Check for unnecessary hipDeviceSynchronize() calls in hot loops",
+                    "- Use rocprofv3 --hip-trace to identify synchronization points causing stalls",
+                ],
+                "estimated_impact": f"Up to {idle_pct:.0f}% improvement in wall-time throughput if idle is CPU-bound dispatch",
+                "commands": [],
+            }
+        )
 
     # Strip or drop commands whose flags are already covered by the original run
     if already_collected:
         for rec in recommendations:
-            rec["commands"] = _filter_rec_commands(rec.get("commands", []), already_collected)
+            rec["commands"] = _filter_rec_commands(
+                rec.get("commands", []), already_collected
+            )
 
     return recommendations
 
@@ -1240,8 +1282,12 @@ def _format_as_json(
     overhead_pct = float(breakdown.get("overhead_percent", 0))
     # Derive api_overhead_ns from the percentage; clamp negative values to 0
     api_overhead_ns = max(0, int(total_runtime_ns * overhead_pct / 100.0))
-    idle_time_ns = max(0, total_runtime_ns - kernel_time_ns - memcpy_time_ns - api_overhead_ns)
-    idle_pct = float(idle_time_ns / total_runtime_ns * 100.0) if total_runtime_ns > 0 else 0.0
+    idle_time_ns = max(
+        0, total_runtime_ns - kernel_time_ns - memcpy_time_ns - api_overhead_ns
+    )
+    idle_pct = (
+        float(idle_time_ns / total_runtime_ns * 100.0) if total_runtime_ns > 0 else 0.0
+    )
 
     # --- metadata ---
     has_counters = bool(hw.get("has_counters", False))
@@ -1258,7 +1304,9 @@ def _format_as_json(
         # --- profiling_info ---
         "profiling_info": {
             "total_duration_ns": total_runtime_ns,
-            "profiling_mode": "sys_trace_with_counters" if has_counters else "sys_trace_only",
+            "profiling_mode": (
+                "sys_trace_with_counters" if has_counters else "sys_trace_only"
+            ),
             "analysis_tier": 2 if has_counters else 1,
             "gpus": [],
         },
@@ -1419,7 +1467,7 @@ _CATEGORY_IDS = {
     "API Overhead": "ROCPD-API-001",
     "Compute Bottleneck": "ROCPD-COMPUTE-001",
     "Launch Overhead": "ROCPD-LAUNCH-001",
-    "Launch Efficiency":    "ROCPD-LAUNCH-EFFICIENCY-001",
+    "Launch Efficiency": "ROCPD-LAUNCH-EFFICIENCY-001",
     "Memory Bandwidth": "ROCPD-MEMBW-001",
     "Performance": "ROCPD-INFO-001",
 }
@@ -1433,21 +1481,25 @@ def _build_recommendations_json(
     seen_ids: Dict[str, int] = {}
     for rec in recommendations:
         category = rec.get("category", "General")
-        base_id = _CATEGORY_IDS.get(category, f"ROCPD-{category.upper().replace(' ', '-')[:12]}-001")
+        base_id = _CATEGORY_IDS.get(
+            category, f"ROCPD-{category.upper().replace(' ', '-')[:12]}-001"
+        )
         count = seen_ids.get(base_id, 0) + 1
         seen_ids[base_id] = count
         rec_id = base_id if count == 1 else f"{base_id[:-3]}{count:03d}"
 
-        out.append({
-            "id": rec_id,
-            "priority": rec.get("priority", "INFO"),
-            "category": category,
-            "issue": rec.get("issue", ""),
-            "suggestion": rec.get("suggestion", ""),
-            "actions": rec.get("actions", []),
-            "estimated_impact": rec.get("estimated_impact", ""),
-            "commands": rec.get("commands", []),
-        })
+        out.append(
+            {
+                "id": rec_id,
+                "priority": rec.get("priority", "INFO"),
+                "category": category,
+                "issue": rec.get("issue", ""),
+                "suggestion": rec.get("suggestion", ""),
+                "actions": rec.get("actions", []),
+                "estimated_impact": rec.get("estimated_impact", ""),
+                "commands": rec.get("commands", []),
+            }
+        )
     return out
 
 
@@ -1500,7 +1552,9 @@ def _format_as_markdown(
         lines.append(f"**Database:** `{database_path}`")
     lines.append(f"**Analysis Date:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     tier = 2 if has_counters else 1
-    lines.append(f"**Analysis Tier:** {tier} ({'Hardware Counters' if has_counters else 'Trace Only'})")
+    lines.append(
+        f"**Analysis Tier:** {tier} ({'Hardware Counters' if has_counters else 'Trace Only'})"
+    )
     lines.append("")
 
     lines.append("## Time Breakdown")
@@ -1509,7 +1563,9 @@ def _format_as_markdown(
     lines.append("|----------|-----------|------------|")
     lines.append(f"| Kernel Execution | {kernel_ms:,.2f} | {kernel_pct:.1f}% |")
     lines.append(f"| Memory Copies | {memcpy_ms:,.2f} | {memcpy_pct:.1f}% |")
-    overhead_ms = max(0.0, total_runtime_ms - kernel_ms - memcpy_ms) if total_runtime_ms > 0 else 0
+    overhead_ms = (
+        max(0.0, total_runtime_ms - kernel_ms - memcpy_ms) if total_runtime_ms > 0 else 0
+    )
     lines.append(f"| API Overhead | {overhead_ms:,.2f} | {overhead_pct:.1f}% |")
     lines.append(f"| **Total** | **{total_runtime_ms:,.2f}** | **100%** |")
     lines.append("")
@@ -1525,8 +1581,8 @@ def _format_as_markdown(
                 name = name[:37] + "..."
             lines.append(
                 f"| {i} | `{name}` | {k.get('calls', 0)} "
-                f"| {k.get('total_duration', 0)/1e6:,.2f} "
-                f"| {k.get('avg_duration', 0)/1e3:,.1f} "
+                f"| {k.get('total_duration', 0) / 1e6:,.2f} "
+                f"| {k.get('avg_duration', 0) / 1e3:,.1f} "
                 f"| {k.get('percent_of_total', 0):.1f}% |"
             )
         lines.append("")
@@ -1534,22 +1590,26 @@ def _format_as_markdown(
     if memory_analysis:
         lines.append("## Memory Copy Analysis")
         lines.append("")
-        lines.append("| Direction | Count | Total Size | Duration (ms) | Bandwidth (GB/s) |")
-        lines.append("|-----------|-------|------------|---------------|-----------------|")
+        lines.append(
+            "| Direction | Count | Total Size | Duration (ms) | Bandwidth (GB/s) |"
+        )
+        lines.append(
+            "|-----------|-------|------------|---------------|-----------------|"
+        )
         for direction, s in memory_analysis.items():
             tb = s.get("total_bytes", 0)
             if tb >= 1e9:
-                size_str = f"{tb/1e9:.1f} GB"
+                size_str = f"{tb / 1e9:.1f} GB"
             elif tb >= 1e6:
-                size_str = f"{tb/1e6:.1f} MB"
+                size_str = f"{tb / 1e6:.1f} MB"
             elif tb >= 1e3:
-                size_str = f"{tb/1e3:.1f} KB"
+                size_str = f"{tb / 1e3:.1f} KB"
             else:
                 size_str = f"{tb:.0f} B"
             bw = s.get("bandwidth_bytes_per_sec", 0) / 1e9
             lines.append(
                 f"| {direction} | {s.get('count', 0)} | {size_str} "
-                f"| {s.get('total_duration', 0)/1e6:,.2f} | {bw:.2f} |"
+                f"| {s.get('total_duration', 0) / 1e6:,.2f} | {bw:.2f} |"
             )
         lines.append("")
 
@@ -1558,10 +1618,14 @@ def _format_as_markdown(
         lines.append("## Hardware Counters (Tier 2)")
         lines.append("")
         if "gpu_utilization_percent" in metrics:
-            lines.append(f"- **GPU Utilization:** {metrics['gpu_utilization_percent']:.1f}%")
+            lines.append(
+                f"- **GPU Utilization:** {metrics['gpu_utilization_percent']:.1f}%"
+            )
         if "avg_waves" in metrics:
             lines.append(f"- **Avg Wave Occupancy:** {metrics['avg_waves']:.1f} waves")
-            lines.append(f"- **Max Wave Occupancy:** {metrics.get('max_waves', 0):.1f} waves")
+            lines.append(
+                f"- **Max Wave Occupancy:** {metrics.get('max_waves', 0):.1f} waves"
+            )
         lines.append("")
 
     if recommendations:
@@ -1630,7 +1694,7 @@ def _format_as_markdown(
         lines.append("## Short Kernel Analysis")
         lines.append("")
         thresh = short_kernels.get("threshold_us", 10)
-        count  = short_kernels["short_kernel_count"]
+        count = short_kernels["short_kernel_count"]
         wasted = short_kernels["wasted_pct_of_kernel_time"]
         lines.append(
             f"**{count} kernels** below {thresh}μs threshold — "
@@ -1647,17 +1711,22 @@ def _format_as_markdown(
             lines.append("**Top offenders by wasted time:**")
             lines.append("")
             for off in short_kernels["top_offenders"][:5]:
-                lines.append(f"- `{off['name']}` — ×{off['count']} calls, avg {off['avg_us']:.1f}μs")
+                lines.append(
+                    f"- `{off['name']}` — ×{off['count']} calls, avg {off['avg_us']:.1f}μs"
+                )
             lines.append("")
 
     lines.append("---")
-    lines.append(f"*Generated by rocpd analyze • {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*")
+    lines.append(
+        f"*Generated by rocpd analyze • {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*"
+    )
     return "\n".join(lines)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # WebView output format
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def _format_as_webview(
     time_breakdown: Dict[str, Any],
@@ -1677,7 +1746,6 @@ def _format_as_webview(
     opens correctly from any local path or file-share without a web server.
     """
     import html as _html
-    import json as _json
 
     def _h(v: Any) -> str:
         """HTML-escape a value for safe text embedding."""
@@ -1713,7 +1781,6 @@ def _format_as_webview(
         cx = cy = 44
         full = 3.14159265 * r  # half circumference (180°)
         dash = full * max(0.0, min(1.0, pct / 100.0))
-        offset = full  # start at the left (270° → top, then we rotate 90° via transform)
         return (
             f'<div class="gauge-box">'
             f'<svg viewBox="0 0 88 50" width="130" height="74">'
@@ -1730,71 +1797,78 @@ def _format_as_webview(
             f' font-size="13" font-weight="700" fill="var(--text)">{_h(value_str)}</text>'
             f'<text x="{cx}" y="{cy + 10}" text-anchor="middle"'
             f' font-size="7.5" fill="var(--dim)">{_h(label.upper())}</text>'
-            f'</svg>'
-            f'</div>'
+            f"</svg>"
+            f"</div>"
         )
 
     # ── derived values ──────────────────────────────────────────────────────
     breakdown = time_breakdown or {}
-    hw        = hardware_counters or {}
-    has_counters   = bool(hw.get("has_counters", False))
-    total_ns       = float(breakdown.get("total_runtime", 0))
-    total_ms       = total_ns / 1e6
-    kernel_pct     = float(breakdown.get("kernel_percent", 0))
-    memcpy_pct     = float(breakdown.get("memcpy_percent", 0))
-    overhead_pct   = float(breakdown.get("overhead_percent", 0))
-    kernel_ms      = breakdown.get("total_kernel_time", 0) / 1e6
-    memcpy_ms      = breakdown.get("total_memcpy_time", 0) / 1e6
-    overhead_ms    = max(0.0, total_ms * overhead_pct / 100.0)
-    idle_pct       = max(0.0, 100.0 - kernel_pct - memcpy_pct - overhead_pct)
-    idle_ms        = max(0.0, total_ms - kernel_ms - memcpy_ms - overhead_ms)
-    tier           = 2 if has_counters else 1
-    analysis_date  = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    summary        = _build_summary(breakdown, hotspots or [], has_counters)
-    bottleneck     = summary.get("primary_bottleneck", "unknown")
-    confidence     = int(summary.get("confidence", 0) * 100)
-    assessment     = summary.get("overall_assessment", "")
-    key_findings   = summary.get("key_findings", [])
-    metrics        = hw.get("metrics", {}) or {}
-    gpu_util       = metrics.get("gpu_utilization_pct") or metrics.get("gpu_utilization_percent")
-    avg_waves      = metrics.get("avg_waves")
-    max_waves      = metrics.get("max_waves")
+    hw = hardware_counters or {}
+    has_counters = bool(hw.get("has_counters", False))
+    total_ns = float(breakdown.get("total_runtime", 0))
+    total_ms = total_ns / 1e6
+    kernel_pct = float(breakdown.get("kernel_percent", 0))
+    memcpy_pct = float(breakdown.get("memcpy_percent", 0))
+    overhead_pct = float(breakdown.get("overhead_percent", 0))
+    kernel_ms = breakdown.get("total_kernel_time", 0) / 1e6
+    memcpy_ms = breakdown.get("total_memcpy_time", 0) / 1e6
+    overhead_ms = max(0.0, total_ms * overhead_pct / 100.0)
+    idle_pct = max(0.0, 100.0 - kernel_pct - memcpy_pct - overhead_pct)
+    idle_ms = max(0.0, total_ms - kernel_ms - memcpy_ms - overhead_ms)
+    tier = 2 if has_counters else 1
+    analysis_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    summary = _build_summary(breakdown, hotspots or [], has_counters)
+    bottleneck = summary.get("primary_bottleneck", "unknown")
+    confidence = int(summary.get("confidence", 0) * 100)
+    assessment = summary.get("overall_assessment", "")
+    key_findings = summary.get("key_findings", [])
+    metrics = hw.get("metrics", {}) or {}
+    gpu_util = metrics.get("gpu_utilization_pct") or metrics.get(
+        "gpu_utilization_percent"
+    )
+    avg_waves = metrics.get("avg_waves")
+    max_waves = metrics.get("max_waves")
 
     BN_COLOR = {
-        "compute": "#5599ee", "memory_transfer": "#ff8c00",
-        "latency": "#cc44cc", "mixed": "#9999bb", "unknown": "#666677",
+        "compute": "#5599ee",
+        "memory_transfer": "#ff8c00",
+        "latency": "#cc44cc",
+        "mixed": "#9999bb",
+        "unknown": "#666677",
     }
     bn_color = BN_COLOR.get(bottleneck, "#888899")
 
     PRIORITY = {
-        "HIGH":   ("#e84040", "#2a0808"),
+        "HIGH": ("#e84040", "#2a0808"),
         "MEDIUM": ("#f08432", "#2a1600"),
-        "LOW":    ("#caa828", "#241e08"),
-        "INFO":   ("#4d8ef2", "#081428"),
+        "LOW": ("#caa828", "#241e08"),
+        "INFO": ("#4d8ef2", "#081428"),
     }
-    PRIORITY_ICON = {"HIGH": "&#128308;", "MEDIUM": "&#128992;", "LOW": "&#128993;", "INFO": "&#8505;"}
+    PRIORITY_ICON = {
+        "HIGH": "&#128308;",
+        "MEDIUM": "&#128992;",
+        "LOW": "&#128993;",
+        "INFO": "&#8505;",
+    }
 
     # ── recommendations HTML ────────────────────────────────────────────────
     recs_parts = []
     for ri, rec in enumerate(recommendations or []):
-        p    = rec.get("priority", "INFO")
-        cat  = rec.get("category", "")
+        p = rec.get("priority", "INFO")
+        cat = rec.get("category", "")
         fg, bg_rec = PRIORITY.get(p, ("#888", "#1a1a2a"))
         picon = PRIORITY_ICON.get(p, "&#8505;")
-        actions_li = "".join(
-            f"<li>{_h(a)}</li>" for a in rec.get("actions", [])
-        )
-        actions_html = (
-            f'<ol class="r-actions">{actions_li}</ol>' if actions_li else ""
-        )
+        actions_li = "".join(f"<li>{_h(a)}</li>" for a in rec.get("actions", []))
+        actions_html = f'<ol class="r-actions">{actions_li}</ol>' if actions_li else ""
         impact = rec.get("estimated_impact", "")
         impact_html = (
             f'<p class="r-impact">&#9889; Expected impact: {_h(impact)}</p>'
-            if impact else ""
+            if impact
+            else ""
         )
         cmds_parts = []
         for ci, cmd in enumerate(rec.get("commands", [])):
-            fc   = cmd.get("full_command", "")
+            fc = cmd.get("full_command", "")
             tool = cmd.get("tool", "")
             desc = cmd.get("description", "")
             if not fc:
@@ -1805,13 +1879,13 @@ def _format_as_webview(
                 f'<span class="tool-tag">{_h(tool)}</span>'
                 f'<span class="cmd-desc">{_h(desc)}</span>'
                 f'<div class="cmd-row" id="{cid}">'
-                f'<code>{_h(fc)}</code>'
+                f"<code>{_h(fc)}</code>"
                 f'<button class="cp-btn" onclick="cpCmd(\'{cid}\')">Copy</button>'
-                f'</div></div>'
+                f"</div></div>"
             )
         cmds_html = "".join(cmds_parts)
         issue_txt = rec.get("issue", "")
-        suggest   = rec.get("suggestion", "")
+        suggest = rec.get("suggestion", "")
         recs_parts.append(
             f'<div class="r-card" style="border-left-color:{fg}" data-p="{_h(p)}">'
             f'<div class="r-hdr" onclick="toggleR(this)">'
@@ -1819,12 +1893,12 @@ def _format_as_webview(
             f'<span class="r-badge" style="background:{fg};color:#fff">{_h(p)}</span>'
             f'<span class="r-cat">{_h(cat)}</span>'
             f'<span class="r-chev">&#9660;</span>'
-            f'</div>'
+            f"</div>"
             f'<div class="r-body">'
             f'<p class="r-issue"><strong>Issue:</strong> {_h(issue_txt)}</p>'
             f'<p class="r-suggest"><strong>What to do:</strong> {_h(suggest)}</p>'
-            f'{actions_html}{impact_html}{cmds_html}'
-            f'</div></div>'
+            f"{actions_html}{impact_html}{cmds_html}"
+            f"</div></div>"
         )
     recs_html = (
         "".join(recs_parts)
@@ -1834,22 +1908,22 @@ def _format_as_webview(
     # ── hotspots table ──────────────────────────────────────────────────────
     hotspot_rows = []
     for i, k in enumerate(hotspots or []):
-        pct  = float(k.get("percent_of_total", 0))
-        bar  = min(100.0, pct)
+        pct = float(k.get("percent_of_total", 0))
+        bar = min(100.0, pct)
         name = k.get("name", "unknown")
-        hot  = ' class="hot-row"' if pct >= 20 else ""
+        hot = ' class="hot-row"' if pct >= 20 else ""
         hotspot_rows.append(
-            f'<tr{hot}>'
-            f'<td>{i + 1}</td>'
+            f"<tr{hot}>"
+            f"<td>{i + 1}</td>"
             f'<td class="kname" title="{_h(name)}"><code>{_h(name)}</code></td>'
-            f'<td data-v="{k.get("calls",0)}">{int(k.get("calls",0)):,}</td>'
-            f'<td data-v="{k.get("total_duration",0)}">{_fmt_ns(k.get("total_duration",0))}</td>'
-            f'<td data-v="{k.get("avg_duration",0)}">{_fmt_ns(k.get("avg_duration",0))}</td>'
-            f'<td data-v="{k.get("min_duration",0)}">{_fmt_ns(k.get("min_duration",0))}</td>'
+            f'<td data-v="{k.get("calls", 0)}">{int(k.get("calls", 0)):,}</td>'
+            f'<td data-v="{k.get("total_duration", 0)}">{_fmt_ns(k.get("total_duration", 0))}</td>'
+            f'<td data-v="{k.get("avg_duration", 0)}">{_fmt_ns(k.get("avg_duration", 0))}</td>'
+            f'<td data-v="{k.get("min_duration", 0)}">{_fmt_ns(k.get("min_duration", 0))}</td>'
             f'<td data-v="{pct}">'
             f'<div class="pbar"><div class="pfill" style="width:{bar:.1f}%"></div>'
-            f'<span>{pct:.1f}%</span></div>'
-            f'</td></tr>'
+            f"<span>{pct:.1f}%</span></div>"
+            f"</td></tr>"
         )
     hotspots_html = ""
     if hotspot_rows:
@@ -1857,21 +1931,21 @@ def _format_as_webview(
             '<section class="scard">'
             '<div class="shdr">'
             '<span class="shdr-icon">&#128293;</span>'
-            '<h2>Top Kernel Hotspots</h2>'
-            '</div>'
+            "<h2>Top Kernel Hotspots</h2>"
+            "</div>"
             '<div class="sbody"><div class="tbl-wrap">'
             '<table class="dtable sortable" id="hs-tbl">'
-            '<thead><tr>'
-            '<th data-tip=\'Rank by total execution time — 1 is the hottest kernel.\'>#</th>'
-            '<th data-tip=\'Demangled GPU kernel function name dispatched to the GPU. Rows highlighted in red consume &gt;20% of total runtime.\'>Kernel Name</th>'
-            '<th data-tip=\'Number of times this kernel was dispatched. Very high call counts with low avg time suggest kernel launch overhead dominates useful work.\'>Calls &#8645;</th>'
-            '<th data-tip=\'Sum of all dispatch durations for this kernel — the primary metric for identifying hotspots. Longer total time = bigger optimization target.\'>Total Time &#8645;</th>'
-            '<th data-tip=\'Mean duration per single dispatch. Values below 10 &micro;s suggest kernel launch overhead may dominate the actual computation.\'>Avg Time &#8645;</th>'
-            '<th data-tip=\'Fastest observed single dispatch. Useful for spotting variance — a large gap between min and avg suggests irregular execution (cache effects, branch divergence).\'>Min Time &#8645;</th>'
-            '<th data-tip=\'Percentage of total profiling window time consumed by this kernel. Kernels above 20% are highlighted and are the highest-priority optimization targets.\'>% Total &#8645;</th>'
-            '</tr></thead>'
-            '<tbody>' + "".join(hotspot_rows) + '</tbody>'
-            '</table></div></div></section>'
+            "<thead><tr>"
+            "<th data-tip='Rank by total execution time — 1 is the hottest kernel.'>#</th>"
+            "<th data-tip='Demangled GPU kernel function name dispatched to the GPU. Rows highlighted in red consume &gt;20% of total runtime.'>Kernel Name</th>"
+            "<th data-tip='Number of times this kernel was dispatched. Very high call counts with low avg time suggest kernel launch overhead dominates useful work.'>Calls &#8645;</th>"
+            "<th data-tip='Sum of all dispatch durations for this kernel — the primary metric for identifying hotspots. Longer total time = bigger optimization target.'>Total Time &#8645;</th>"
+            "<th data-tip='Mean duration per single dispatch. Values below 10 &micro;s suggest kernel launch overhead may dominate the actual computation.'>Avg Time &#8645;</th>"
+            "<th data-tip='Fastest observed single dispatch. Useful for spotting variance — a large gap between min and avg suggests irregular execution (cache effects, branch divergence).'>Min Time &#8645;</th>"
+            "<th data-tip='Percentage of total profiling window time consumed by this kernel. Kernels above 20% are highlighted and are the highest-priority optimization targets.'>% Total &#8645;</th>"
+            "</tr></thead>"
+            "<tbody>" + "".join(hotspot_rows) + "</tbody>"
+            "</table></div></div></section>"
         )
 
     # ── memory analysis table ───────────────────────────────────────────────
@@ -1899,21 +1973,21 @@ def _format_as_webview(
     }
     mem_rows = []
     for direction, s in (memory_analysis or {}).items():
-        tb  = s.get("total_bytes", 0)
-        bw  = s.get("bandwidth_bytes_per_sec", 0) / 1e9
+        tb = s.get("total_bytes", 0)
+        bw = s.get("bandwidth_bytes_per_sec", 0) / 1e9
         dir_tip = _MEM_DIR_TIPS.get(
             direction,
-            f"<strong>{_h(direction)}</strong>Memory transfer direction between host and device."
+            f"<strong>{_h(direction)}</strong>Memory transfer direction between host and device.",
         )
         mem_rows.append(
-            f'<tr>'
-            f'<td data-tip=\'{dir_tip}\'>{_h(direction)}</td>'
+            f"<tr>"
+            f"<td data-tip='{dir_tip}'>{_h(direction)}</td>"
             f'<td>{int(s.get("count", 0)):,}</td>'
-            f'<td>{_fmt_bytes(tb)}</td>'
+            f"<td>{_fmt_bytes(tb)}</td>"
             f'<td>{_fmt_ns(s.get("total_duration", 0))}</td>'
             f'<td>{_fmt_bytes(s.get("avg_bytes", 0))}</td>'
-            f'<td>{bw:.2f} GB/s</td>'
-            f'</tr>'
+            f"<td>{bw:.2f} GB/s</td>"
+            f"</tr>"
         )
     mem_html = ""
     if mem_rows:
@@ -1921,20 +1995,20 @@ def _format_as_webview(
             '<section class="scard">'
             '<div class="shdr">'
             '<span class="shdr-icon">&#128190;</span>'
-            '<h2>Memory Transfer Analysis</h2>'
-            '</div>'
+            "<h2>Memory Transfer Analysis</h2>"
+            "</div>"
             '<div class="sbody"><div class="tbl-wrap">'
             '<table class="dtable">'
-            '<thead><tr>'
-            '<th data-tip=\'Transfer direction. Hover each row to learn what each direction means.\'>Direction</th>'
-            '<th data-tip=\'Number of individual copy operations in this direction. Many small transfers are inefficient — batch them when possible.\'>Count</th>'
-            '<th data-tip=\'Total data volume transferred in this direction across all operations.\'>Total Bytes</th>'
-            '<th data-tip=\'Total wall-clock time spent on copies in this direction.\'>Total Time</th>'
-            '<th data-tip=\'Average bytes per copy operation. Transfers below 1 MB are typically inefficient due to PCIe transaction overhead — batch small transfers.\'>Avg Size</th>'
-            '<th data-tip=\'Achieved transfer bandwidth. PCIe 4.0 x16 theoretical peak is ~32 GB/s. Low bandwidth usually means many small transfers, not PCIe saturation.\'>Bandwidth</th>'
-            '</tr></thead>'
-            '<tbody>' + "".join(mem_rows) + '</tbody>'
-            '</table></div></div></section>'
+            "<thead><tr>"
+            "<th data-tip='Transfer direction. Hover each row to learn what each direction means.'>Direction</th>"
+            "<th data-tip='Number of individual copy operations in this direction. Many small transfers are inefficient — batch them when possible.'>Count</th>"
+            "<th data-tip='Total data volume transferred in this direction across all operations.'>Total Bytes</th>"
+            "<th data-tip='Total wall-clock time spent on copies in this direction.'>Total Time</th>"
+            "<th data-tip='Average bytes per copy operation. Transfers below 1 MB are typically inefficient due to PCIe transaction overhead — batch small transfers.'>Avg Size</th>"
+            "<th data-tip='Achieved transfer bandwidth. PCIe 4.0 x16 theoretical peak is ~32 GB/s. Low bandwidth usually means many small transfers, not PCIe saturation.'>Bandwidth</th>"
+            "</tr></thead>"
+            "<tbody>" + "".join(mem_rows) + "</tbody>"
+            "</table></div></div></section>"
         )
 
     # ── hardware counters ───────────────────────────────────────────────────
@@ -1950,8 +2024,8 @@ def _format_as_webview(
         _gpu_ok = _gpu_u >= 70
         _gpu_status = (
             '<span class="tok">Good — GPU is well-utilized.</span>'
-            if _gpu_ok else
-            '<span class="twarn">Low — reduce synchronization barriers, increase batch size, or launch larger kernels.</span>'
+            if _gpu_ok
+            else '<span class="twarn">Low — reduce synchronization barriers, increase batch size, or launch larger kernels.</span>'
         )
         _gpu_tip = (
             f"<strong>GPU Utilization ({_gpu_u:.1f}%)</strong>"
@@ -1961,9 +2035,9 @@ def _format_as_webview(
             f"{_gpu_status}"
         )
         gauges_html += (
-            f'<div class="gauge-wrap" data-tip=\'{_gpu_tip}\'>'
+            f"<div class=\"gauge-wrap\" data-tip='{_gpu_tip}'>"
             f'{_svg_gauge(_gpu_u, gc, "GPU Utilization", f"{_gpu_u:.1f}%")}'
-            f'{hint}</div>'
+            f"{hint}</div>"
         )
     if avg_waves is not None:
         _aw = float(avg_waves)
@@ -1981,8 +2055,8 @@ def _format_as_webview(
         _wave_ok = _aw >= 16
         _wave_status = (
             '<span class="tok">Good — adequate wavefront occupancy for latency hiding.</span>'
-            if _wave_ok else
-            '<span class="twarn">Low — reduce register usage or LDS allocation per wavefront to increase occupancy and hide memory latency.</span>'
+            if _wave_ok
+            else '<span class="twarn">Low — reduce register usage or LDS allocation per wavefront to increase occupancy and hide memory latency.</span>'
         )
         _wave_tip = (
             f"<strong>Wave Occupancy (avg {_aw:.0f} waves)</strong>"
@@ -1994,9 +2068,9 @@ def _format_as_webview(
             f"{_wave_status}"
         )
         gauges_html += (
-            f'<div class="gauge-wrap" data-tip=\'{_wave_tip}\'>'
+            f"<div class=\"gauge-wrap\" data-tip='{_wave_tip}'>"
             f'{_svg_gauge(wpct, wc, "Avg Waves", wave_str)}'
-            f'{whint}</div>'
+            f"{whint}</div>"
         )
     raw_counters = hw.get("counters", {}) or {}
     ctr_rows = "".join(
@@ -2009,11 +2083,15 @@ def _format_as_webview(
         for n, v in raw_counters.items()
     )
     ctr_table = (
-        '<table class="dtable" style="margin-top:1rem">'
-        '<thead><tr><th>Counter</th><th>Samples</th>'
-        '<th>Avg</th><th>Min</th><th>Max</th><th>Total</th></tr></thead>'
-        '<tbody>' + ctr_rows + '</tbody></table>'
-    ) if ctr_rows else ""
+        (
+            '<table class="dtable" style="margin-top:1rem">'
+            "<thead><tr><th>Counter</th><th>Samples</th>"
+            "<th>Avg</th><th>Min</th><th>Max</th><th>Total</th></tr></thead>"
+            "<tbody>" + ctr_rows + "</tbody></table>"
+        )
+        if ctr_rows
+        else ""
+    )
 
     hw_inner = (
         f'<div class="gauges">{gauges_html}</div>{ctr_table}'
@@ -2022,9 +2100,9 @@ def _format_as_webview(
             '<p class="dim">No hardware counter data — Tier 1 (trace-only) analysis.</p>'
             '<p class="hint" style="margin-top:.5rem">Collect counters with:</p>'
             '<div class="cmd-row" id="hw-hint">'
-            '<code>rocprofv3 --pmc GRBM_COUNT GRBM_GUI_ACTIVE SQ_WAVES -- ./app</code>'
+            "<code>rocprofv3 --pmc GRBM_COUNT GRBM_GUI_ACTIVE SQ_WAVES -- ./app</code>"
             '<button class="cp-btn" onclick="cpCmd(\'hw-hint\')">Copy</button>'
-            '</div>'
+            "</div>"
         )
     )
 
@@ -2034,8 +2112,12 @@ def _format_as_webview(
 
     # ── embed full JSON (sanitized for HTML context) ────────────────────────
     json_str = _format_as_json(
-        time_breakdown, hotspots, memory_analysis,
-        recommendations, hardware_counters, database_path,
+        time_breakdown,
+        hotspots,
+        memory_analysis,
+        recommendations,
+        hardware_counters,
+        database_path,
     )
     json_embedded = json_str.replace("</script>", r"<\/script>").replace("<!--", r"<\!--")
 
@@ -2044,10 +2126,6 @@ def _format_as_webview(
     # All CSS { } must be doubled inside f-strings.
     # JS template literals (`${}`) avoided; no external resources.
     # ══════════════════════════════════════════════════════════════════════
-    db_meta = (
-        f'<div>Database: <code>{_h(database_path)}</code></div>'
-        if database_path else ""
-    )
     tier_label = "Hardware Counters (Tier 2)" if has_counters else "Trace Only (Tier 1)"
     bn_display = bottleneck.replace("_", " ").title()
 
@@ -2131,51 +2209,73 @@ def _format_as_webview(
         "Profiling data includes hardware performance counters collected via "
         "<code>rocprofv3 --pmc</code>. Enables GPU utilization, wave occupancy, "
         "and per-kernel counter breakdowns in addition to timing data."
-        if has_counters else
-        "<strong>Analysis Tier 1 — Trace Only</strong>"
+        if has_counters
+        else "<strong>Analysis Tier 1 — Trace Only</strong>"
         "Profiling data contains timing information only (no hardware counters). "
         "For deeper GPU-level insights, re-profile with: "
         "<em>rocprofv3 --pmc GRBM_COUNT GRBM_GUI_ACTIVE SQ_WAVES -- ./app</em>"
     )
 
     # ── Pre-compute badge / KPI status values ───────────────────────────────
-    n_high   = sum(1 for r in (recommendations or []) if r.get("priority") == "HIGH")
+    n_high = sum(1 for r in (recommendations or []) if r.get("priority") == "HIGH")
     n_medium = sum(1 for r in (recommendations or []) if r.get("priority") == "MEDIUM")
-    n_low    = sum(1 for r in (recommendations or []) if r.get("priority") == "LOW")
-    n_info   = sum(1 for r in (recommendations or []) if r.get("priority") == "INFO")
+    n_low = sum(1 for r in (recommendations or []) if r.get("priority") == "LOW")
+    n_info = sum(1 for r in (recommendations or []) if r.get("priority") == "INFO")
 
     # kernel utilization KPI health class
     if kernel_pct >= 60:
-        _kpi_kernel_cls = "kpi-ok";   _kpi_kernel_lbl = "Good"
+        _kpi_kernel_cls = "kpi-ok"
+        _kpi_kernel_lbl = "Good"
     elif kernel_pct >= 30:
-        _kpi_kernel_cls = "kpi-warn"; _kpi_kernel_lbl = "Moderate"
+        _kpi_kernel_cls = "kpi-warn"
+        _kpi_kernel_lbl = "Moderate"
     else:
-        _kpi_kernel_cls = "kpi-crit"; _kpi_kernel_lbl = "Low"
+        _kpi_kernel_cls = "kpi-crit"
+        _kpi_kernel_lbl = "Low"
 
     _BN_ICON = {
-        "compute": "&#128293;", "memory_transfer": "&#128230;",
-        "memory_bandwidth": "&#128190;", "latency": "&#9889;",
-        "mixed": "&#128256;", "unknown": "&#10067;",
+        "compute": "&#128293;",
+        "memory_transfer": "&#128230;",
+        "memory_bandwidth": "&#128190;",
+        "latency": "&#9889;",
+        "mixed": "&#128256;",
+        "unknown": "&#10067;",
     }
     _bn_icon = _BN_ICON.get(bottleneck, "&#10067;")
 
     _badge_parts = []
-    if n_high:   _badge_parts.append(f'<span class="hbadge hbadge-crit">&#9679; {n_high} Critical</span>')
-    if n_medium: _badge_parts.append(f'<span class="hbadge hbadge-warn">&#9679; {n_medium} Warning</span>')
-    if n_low:    _badge_parts.append(f'<span class="hbadge hbadge-ok">&#9679; {n_low} Low</span>')
-    if n_info:   _badge_parts.append(f'<span class="hbadge hbadge-info">&#9679; {n_info} Info</span>')
+    if n_high:
+        _badge_parts.append(
+            f'<span class="hbadge hbadge-crit">&#9679; {n_high} Critical</span>'
+        )
+    if n_medium:
+        _badge_parts.append(
+            f'<span class="hbadge hbadge-warn">&#9679; {n_medium} Warning</span>'
+        )
+    if n_low:
+        _badge_parts.append(f'<span class="hbadge hbadge-ok">&#9679; {n_low} Low</span>')
+    if n_info:
+        _badge_parts.append(
+            f'<span class="hbadge hbadge-info">&#9679; {n_info} Info</span>'
+        )
     header_badges_html = " ".join(_badge_parts)
 
     _recs_badge_html = ""
-    if n_high:   _recs_badge_html += f'<span class="shdr-badge sbadge-crit">{n_high} Critical</span> '
-    if n_medium: _recs_badge_html += f'<span class="shdr-badge sbadge-warn">{n_medium} Warning</span>'
+    if n_high:
+        _recs_badge_html += (
+            f'<span class="shdr-badge sbadge-crit">{n_high} Critical</span> '
+        )
+    if n_medium:
+        _recs_badge_html += (
+            f'<span class="shdr-badge sbadge-warn">{n_medium} Warning</span>'
+        )
 
     _tier_icon = "&#128300;" if has_counters else "&#128225;"
     _tier_status_lbl = "HW Counters" if has_counters else "Trace Only"
     _hw_badge_html = (
-        f'<span class="shdr-badge sbadge-info">Tier 2</span>'
-        if has_counters else
-        f'<span class="shdr-badge sbadge-info">Tier 1</span>'
+        '<span class="shdr-badge sbadge-info">Tier 2</span>'
+        if has_counters
+        else '<span class="shdr-badge sbadge-info">Tier 1</span>'
     )
 
     _db_pill_html = ""
@@ -2185,7 +2285,7 @@ def _format_as_webview(
             f'<div class="hpill">'
             f'<span class="hpill-label">DB:</span>'
             f'<span class="hpill-value" title="{_h(database_path)}">{_h(_db_label)}</span>'
-            f'</div>'
+            f"</div>"
         )
 
     html = f"""<!DOCTYPE html>
@@ -2739,22 +2839,22 @@ document.querySelectorAll('.ctr-row').forEach(function(tr) {{
                 f'<td>{cat["count"]}</td>'
                 f'<td><div style="display:inline-block;height:12px;width:{bar_w}px;'
                 f'background:#e01a22;border-radius:2px;vertical-align:middle"></div>'
-                f' {pct:.1f}%</td>'
-                f'<td>{avg_us:.1f}&#956;s</td></tr>'
+                f" {pct:.1f}%</td>"
+                f"<td>{avg_us:.1f}&#956;s</td></tr>"
             )
         category_card = (
             '\n<div class="card" id="card-categories">'
             '\n  <div class="card-hdr" onclick="toggle(\'categories\')">'
             '\n    <span>Kernel Category Breakdown <span style="font-size:11px;opacity:.6">(TraceLens)</span></span>'
             '\n    <span id="cat-chev">&#9660;</span>'
-            '\n  </div>'
+            "\n  </div>"
             '\n  <div id="categories" class="card-body">'
             '\n    <table class="tbl">'
-            '\n      <thead><tr><th>Category</th><th>Kernels</th><th>% of Kernel Time</th><th>Avg Duration</th></tr></thead>'
-            '\n      <tbody>' + cat_rows_html + '</tbody>'
-            '\n    </table>'
-            '\n  </div>'
-            '\n</div>'
+            "\n      <thead><tr><th>Category</th><th>Kernels</th><th>% of Kernel Time</th><th>Avg Duration</th></tr></thead>"
+            "\n      <tbody>" + cat_rows_html + "</tbody>"
+            "\n    </table>"
+            "\n  </div>"
+            "\n</div>"
         )
         html = html.replace("</body>", category_card + "\n</body>")
 
@@ -2765,17 +2865,20 @@ document.querySelectorAll('.ctr-row').forEach(function(tr) {{
 # Tier 0 format helpers
 # ---------------------------------------------------------------------------
 
-def _tier0_recommendations_text(recommendations: List[Dict[str, Any]], width: int = 80) -> List[str]:
+
+def _tier0_recommendations_text(
+    recommendations: List[Dict[str, Any]], width: int = 80
+) -> List[str]:
     """Render Tier 0 recommendations as text lines (same format as Tier 1/2)."""
     lines = []
     for rec in recommendations:
-        pri        = rec.get("priority", "INFO")
-        cat        = rec.get("category", "")
-        issue      = rec.get("issue", "")
+        pri = rec.get("priority", "INFO")
+        cat = rec.get("category", "")
+        issue = rec.get("issue", "")
         suggestion = rec.get("suggestion", "")
-        impact     = rec.get("estimated_impact", "")
-        actions    = rec.get("actions", [])
-        commands   = rec.get("commands", [])
+        impact = rec.get("estimated_impact", "")
+        actions = rec.get("actions", [])
+        commands = rec.get("commands", [])
 
         lines.append(f"[{pri}] {cat}")
         lines.append("─" * width)
@@ -2790,20 +2893,20 @@ def _tier0_recommendations_text(recommendations: List[Dict[str, Any]], width: in
             lines.append(f"  Estimated Impact: {impact}")
             lines.append("")
         if commands:
-            lines.append(f"  Recommended Commands:")
+            lines.append("  Recommended Commands:")
             for cmd in commands:
-                tool         = cmd.get("tool", "")
-                desc         = cmd.get("description", "")
+                tool = cmd.get("tool", "")
+                desc = cmd.get("description", "")
                 full_command = cmd.get("full_command", "")
-                flags        = cmd.get("flags", [])
-                args         = cmd.get("args", [])
+                flags = cmd.get("flags", [])
+                args = cmd.get("args", [])
                 lines.append(f"    [{tool}] {desc}")
                 if flags:
                     lines.append(f"      Flags: {' '.join(flags)}")
                 if args:
                     arg_strs = []
                     for a in args:
-                        name  = a.get("name", "")
+                        name = a.get("name", "")
                         value = a.get("value")
                         arg_strs.append(f"{name} {value}" if value is not None else name)
                     lines.append(f"      Args:  {' '.join(arg_strs)}")
@@ -2824,8 +2927,10 @@ def _format_tier0_text(tier0_result: Any) -> str:
     lines.append(f"Source Directory: {tier0_result.source_dir}")
     lines.append(f"Analysis Date:    {tier0_result.analysis_timestamp}")
     lines.append(f"Programming Model: {tier0_result.programming_model}")
-    lines.append(f"Files Scanned:    {tier0_result.files_scanned}  "
-                 f"(skipped: {tier0_result.files_skipped})")
+    lines.append(
+        f"Files Scanned:    {tier0_result.files_scanned}  "
+        f"(skipped: {tier0_result.files_skipped})"
+    )
     lines.append("")
 
     # Kernels
@@ -2835,8 +2940,10 @@ def _format_tier0_text(tier0_result: Any) -> str:
     lines.append(f"  Total kernels found: {tier0_result.kernel_count}")
     if tier0_result.detected_kernels:
         for k in tier0_result.detected_kernels[:20]:
-            lines.append(f"  • {k['name']}  ({k.get('launch_type','')})  "
-                         f"{k.get('file','').split('/')[-1]}:{k.get('line','')}")
+            lines.append(
+                f"  • {k['name']}  ({k.get('launch_type', '')})  "
+                f"{k.get('file', '').split('/')[-1]}:{k.get('line', '')}"
+            )
         if len(tier0_result.detected_kernels) > 20:
             lines.append(f"  ... and {len(tier0_result.detected_kernels) - 20} more")
     else:
@@ -2869,7 +2976,9 @@ def _format_tier0_text(tier0_result: Any) -> str:
 
     # ROCTx
     if tier0_result.already_instrumented:
-        lines.append(f"  ✓ ROCTx markers detected ({tier0_result.roctx_marker_count} markers)")
+        lines.append(
+            f"  ✓ ROCTx markers detected ({tier0_result.roctx_marker_count} markers)"
+        )
         lines.append("")
 
     # Recommended counters
@@ -2936,6 +3045,7 @@ def _tier0_to_dict(tier0_result: Any) -> Dict[str, Any]:
 def _format_tier0_json(tier0_result: Any) -> str:
     """Format Tier 0 source-only analysis as schema v0.2.0 JSON."""
     import json as _json
+
     doc: Dict[str, Any] = {
         "schema_version": "0.2.0",
         "metadata": {
@@ -2984,7 +3094,7 @@ def _format_tier0_markdown(tier0_result: Any) -> str:
     lines.append(f"**Source Directory:** `{tier0_result.source_dir}`")
     lines.append(f"**Analysis Date:** {tier0_result.analysis_timestamp}")
     lines.append(f"**Programming Model:** {tier0_result.programming_model}")
-    lines.append(f"**Analysis Tier:** 0 (Source Code Analysis)")
+    lines.append("**Analysis Tier:** 0 (Source Code Analysis)")
     lines.append("")
 
     lines.append("## Detected Kernels")
@@ -2996,9 +3106,13 @@ def _format_tier0_markdown(tier0_result: Any) -> str:
         lines.append("|--------|-------------|------|------|")
         for k in tier0_result.detected_kernels[:20]:
             fname = k.get("file", "").split("/")[-1]
-            lines.append(f"| `{k['name']}` | {k.get('launch_type','')} | {fname} | {k.get('line','')} |")
+            lines.append(
+                f"| `{k['name']}` | {k.get('launch_type', '')} | {fname} | {k.get('line', '')} |"
+            )
         if len(tier0_result.detected_kernels) > 20:
-            lines.append(f"\n*... and {len(tier0_result.detected_kernels) - 20} more kernels*")
+            lines.append(
+                f"\n*... and {len(tier0_result.detected_kernels) - 20} more kernels*"
+            )
     else:
         lines.append("*No GPU kernels detected in source.*")
     lines.append("")
@@ -3011,7 +3125,7 @@ def _format_tier0_markdown(tier0_result: Any) -> str:
         for p in tier0_result.detected_patterns:
             sev = p.get("severity", "info")
             lines.append(
-                f"| **{sev.upper()}** | {p.get('category','')} | {p.get('description','')} | {p.get('count',0)} |"
+                f"| **{sev.upper()}** | {p.get('category', '')} | {p.get('description', '')} | {p.get('count', 0)} |"
             )
     else:
         lines.append("*No significant patterns detected.*")
@@ -3036,8 +3150,8 @@ def _format_tier0_markdown(tier0_result: Any) -> str:
     lines.append("")
     priority_emoji = {"HIGH": "🔴", "MEDIUM": "🟡", "LOW": "🟢", "INFO": "🔵"}
     for rec in tier0_result.recommendations:
-        pri  = rec.get("priority", "INFO")
-        cat  = rec.get("category", "")
+        pri = rec.get("priority", "INFO")
+        cat = rec.get("category", "")
         emoji = priority_emoji.get(pri, "•")
         lines.append(f"### {emoji} [{pri}] {cat}")
         lines.append("")
@@ -3059,18 +3173,18 @@ def _format_tier0_markdown(tier0_result: Any) -> str:
             lines.append("**Recommended Commands:**")
             lines.append("")
             for cmd in commands:
-                tool         = cmd.get("tool", "")
-                desc         = cmd.get("description", "")
+                tool = cmd.get("tool", "")
+                desc = cmd.get("description", "")
                 full_command = cmd.get("full_command", "")
-                flags        = cmd.get("flags", [])
-                args         = cmd.get("args", [])
+                flags = cmd.get("flags", [])
+                args = cmd.get("args", [])
                 lines.append(f"*{tool}* — {desc}")
                 if flags:
                     lines.append(f"- Flags: `{' '.join(flags)}`")
                 if args:
                     arg_strs = []
                     for a in args:
-                        name  = a.get("name", "")
+                        name = a.get("name", "")
                         value = a.get("value")
                         arg_strs.append(f"{name} {value}" if value is not None else name)
                     lines.append(f"- Args: `{' '.join(arg_strs)}`")
@@ -3094,7 +3208,9 @@ def _format_tier0_markdown(tier0_result: Any) -> str:
         lines.append("")
 
     lines.append("---")
-    lines.append(f"*Generated by rocpd analyze (Tier 0) \u2022 {tier0_result.analysis_timestamp}*")
+    lines.append(
+        f"*Generated by rocpd analyze (Tier 0) \u2022 {tier0_result.analysis_timestamp}*"
+    )
     return "\n".join(lines)
 
 
@@ -3108,58 +3224,80 @@ def _format_tier0_webview(tier0_result: Any) -> str:
 
     SEV_FG = {"high": "#e84040", "medium": "#f08432", "low": "#caa828", "info": "#4d8ef2"}
     SEV_BG = {
-        "high":   "rgba(232,64,64,.13)",
+        "high": "rgba(232,64,64,.13)",
         "medium": "rgba(240,132,50,.13)",
-        "low":    "rgba(202,168,40,.13)",
-        "info":   "rgba(77,142,242,.13)",
+        "low": "rgba(202,168,40,.13)",
+        "info": "rgba(77,142,242,.13)",
     }
     PRIORITY = {
-        "HIGH":   ("#e84040", "#2a0808"),
+        "HIGH": ("#e84040", "#2a0808"),
         "MEDIUM": ("#f08432", "#2a1600"),
-        "LOW":    ("#caa828", "#241e08"),
-        "INFO":   ("#4d8ef2", "#081428"),
+        "LOW": ("#caa828", "#241e08"),
+        "INFO": ("#4d8ef2", "#081428"),
     }
-    PRIORITY_ICON = {"HIGH": "&#128308;", "MEDIUM": "&#128992;", "LOW": "&#128993;", "INFO": "&#8505;"}
+    PRIORITY_ICON = {
+        "HIGH": "&#128308;",
+        "MEDIUM": "&#128992;",
+        "LOW": "&#128993;",
+        "INFO": "&#8505;",
+    }
 
     analysis_date = tier0_result.analysis_timestamp
-    src_dir       = str(tier0_result.source_dir)
-    src_display   = src_dir[-45:] if len(src_dir) > 45 else src_dir
+    src_dir = str(tier0_result.source_dir)
+    src_display = src_dir[-45:] if len(src_dir) > 45 else src_dir
 
     # ── Counts ──────────────────────────────────────────────────────────────
     recs = tier0_result.recommendations or []
-    n_high   = sum(1 for r in recs if r.get("priority") == "HIGH")
+    n_high = sum(1 for r in recs if r.get("priority") == "HIGH")
     n_medium = sum(1 for r in recs if r.get("priority") == "MEDIUM")
-    n_low    = sum(1 for r in recs if r.get("priority") == "LOW")
-    n_info   = sum(1 for r in recs if r.get("priority") == "INFO")
+    n_low = sum(1 for r in recs if r.get("priority") == "LOW")
+    n_info = sum(1 for r in recs if r.get("priority") == "INFO")
 
     _badge_parts = []
-    if n_high:   _badge_parts.append(f'<span class="hbadge hbadge-crit">&#9679; {n_high} Critical</span>')
-    if n_medium: _badge_parts.append(f'<span class="hbadge hbadge-warn">&#9679; {n_medium} Warning</span>')
-    if n_low:    _badge_parts.append(f'<span class="hbadge hbadge-ok">&#9679; {n_low} Low</span>')
-    if n_info:   _badge_parts.append(f'<span class="hbadge hbadge-info">&#9679; {n_info} Info</span>')
+    if n_high:
+        _badge_parts.append(
+            f'<span class="hbadge hbadge-crit">&#9679; {n_high} Critical</span>'
+        )
+    if n_medium:
+        _badge_parts.append(
+            f'<span class="hbadge hbadge-warn">&#9679; {n_medium} Warning</span>'
+        )
+    if n_low:
+        _badge_parts.append(f'<span class="hbadge hbadge-ok">&#9679; {n_low} Low</span>')
+    if n_info:
+        _badge_parts.append(
+            f'<span class="hbadge hbadge-info">&#9679; {n_info} Info</span>'
+        )
     header_badges_html = " ".join(_badge_parts)
 
     _recs_badge_html = ""
-    if n_high:   _recs_badge_html += f'<span class="shdr-badge sbadge-crit">{n_high} Critical</span> '
-    if n_medium: _recs_badge_html += f'<span class="shdr-badge sbadge-warn">{n_medium} Warning</span>'
+    if n_high:
+        _recs_badge_html += (
+            f'<span class="shdr-badge sbadge-crit">{n_high} Critical</span> '
+        )
+    if n_medium:
+        _recs_badge_html += (
+            f'<span class="shdr-badge sbadge-warn">{n_medium} Warning</span>'
+        )
 
     # ── Recommendations HTML (same .r-card format as Tier 1/2) ──────────────
     recs_parts = []
     for ri, rec in enumerate(recs):
-        p    = rec.get("priority", "INFO")
-        cat  = rec.get("category", "")
+        p = rec.get("priority", "INFO")
+        cat = rec.get("category", "")
         fg, _ = PRIORITY.get(p, ("#888", "#1a1a2a"))
         picon = PRIORITY_ICON.get(p, "&#8505;")
-        actions_li   = "".join(f"<li>{_h(a)}</li>" for a in rec.get("actions", []))
+        actions_li = "".join(f"<li>{_h(a)}</li>" for a in rec.get("actions", []))
         actions_html = f'<ol class="r-actions">{actions_li}</ol>' if actions_li else ""
-        impact       = rec.get("estimated_impact", "")
-        impact_html  = (
+        impact = rec.get("estimated_impact", "")
+        impact_html = (
             f'<p class="r-impact">&#9889; Expected impact: {_h(impact)}</p>'
-            if impact else ""
+            if impact
+            else ""
         )
         cmds_parts = []
         for ci, cmd in enumerate(rec.get("commands", [])):
-            fc   = cmd.get("full_command", "")
+            fc = cmd.get("full_command", "")
             tool = cmd.get("tool", "")
             desc = cmd.get("description", "")
             if not fc:
@@ -3170,13 +3308,13 @@ def _format_tier0_webview(tier0_result: Any) -> str:
                 f'<span class="tool-tag">{_h(tool)}</span>'
                 f'<span class="cmd-desc">{_h(desc)}</span>'
                 f'<div class="cmd-row" id="{cid}">'
-                f'<code>{_h(fc)}</code>'
+                f"<code>{_h(fc)}</code>"
                 f'<button class="cp-btn" onclick="cpCmd(\'{cid}\')">Copy</button>'
-                f'</div></div>'
+                f"</div></div>"
             )
-        cmds_html  = "".join(cmds_parts)
-        issue_txt  = rec.get("issue", "")
-        suggest    = rec.get("suggestion", "")
+        cmds_html = "".join(cmds_parts)
+        issue_txt = rec.get("issue", "")
+        suggest = rec.get("suggestion", "")
         recs_parts.append(
             f'<div class="r-card" style="border-left-color:{fg}" data-p="{_h(p)}">'
             f'<div class="r-hdr" onclick="toggleR(this)">'
@@ -3184,12 +3322,12 @@ def _format_tier0_webview(tier0_result: Any) -> str:
             f'<span class="r-badge" style="background:{fg};color:#fff">{_h(p)}</span>'
             f'<span class="r-cat">{_h(cat)}</span>'
             f'<span class="r-chev">&#9660;</span>'
-            f'</div>'
+            f"</div>"
             f'<div class="r-body">'
             f'<p class="r-issue"><strong>Issue:</strong> {_h(issue_txt)}</p>'
             f'<p class="r-suggest"><strong>What to do:</strong> {_h(suggest)}</p>'
-            f'{actions_html}{impact_html}{cmds_html}'
-            f'</div></div>'
+            f"{actions_html}{impact_html}{cmds_html}"
+            f"</div></div>"
         )
     recs_html = (
         "".join(recs_parts)
@@ -3201,101 +3339,101 @@ def _format_tier0_webview(tier0_result: Any) -> str:
     for i, k in enumerate(tier0_result.detected_kernels[:50]):
         fname = _h(k.get("file", "").split("/")[-1])
         kernel_rows.append(
-            f'<tr>'
-            f'<td>{i + 1}</td>'
-            f'<td class="kname" title="{_h(k.get("name",""))}"><code>{_h(k.get("name",""))}</code></td>'
-            f'<td>{_h(k.get("launch_type",""))}</td>'
-            f'<td>{fname}</td>'
-            f'<td data-v="{k.get("line",0)}">{_h(str(k.get("line","")))}</td>'
-            f'</tr>'
+            f"<tr>"
+            f"<td>{i + 1}</td>"
+            f'<td class="kname" title="{_h(k.get("name", ""))}"><code>{_h(k.get("name", ""))}</code></td>'
+            f'<td>{_h(k.get("launch_type", ""))}</td>'
+            f"<td>{fname}</td>"
+            f'<td data-v="{k.get("line", 0)}">{_h(str(k.get("line", "")))}</td>'
+            f"</tr>"
         )
     if kernel_rows:
         kernels_section = (
             '<section class="scard">'
             '<div class="shdr">'
             '<span class="shdr-icon">&#128187;</span>'
-            '<h2>Detected GPU Kernels</h2>'
+            "<h2>Detected GPU Kernels</h2>"
             f'<span class="shdr-badge sbadge-info">{tier0_result.kernel_count} found</span>'
-            '</div>'
+            "</div>"
             '<div class="sbody"><div class="tbl-wrap">'
             '<table class="dtable sortable">'
-            '<thead><tr>'
-            '<th data-tip=\'Rank by order found in source.\'>#</th>'
-            '<th data-tip=\'GPU kernel function name detected in source code. For HIP/CUDA: __global__ functions.\'>Kernel Name</th>'
-            '<th data-tip=\'How the kernel is launched: __global__ for HIP/CUDA, kernel for OpenCL.\'>Launch Type</th>'
-            '<th data-tip=\'Source file where the kernel is defined (basename only).\'>File</th>'
-            '<th data-tip=\'Line number of the kernel definition in the source file.\'>Line &#8645;</th>'
-            '</tr></thead>'
-            '<tbody>' + "".join(kernel_rows) + '</tbody>'
-            '</table></div></div></section>'
+            "<thead><tr>"
+            "<th data-tip='Rank by order found in source.'>#</th>"
+            "<th data-tip='GPU kernel function name detected in source code. For HIP/CUDA: __global__ functions.'>Kernel Name</th>"
+            "<th data-tip='How the kernel is launched: __global__ for HIP/CUDA, kernel for OpenCL.'>Launch Type</th>"
+            "<th data-tip='Source file where the kernel is defined (basename only).'>File</th>"
+            "<th data-tip='Line number of the kernel definition in the source file.'>Line &#8645;</th>"
+            "</tr></thead>"
+            "<tbody>" + "".join(kernel_rows) + "</tbody>"
+            "</table></div></div></section>"
         )
     else:
         kernels_section = (
             '<section class="scard">'
             '<div class="shdr"><span class="shdr-icon">&#128187;</span>'
-            '<h2>Detected GPU Kernels</h2></div>'
+            "<h2>Detected GPU Kernels</h2></div>"
             '<div class="sbody"><p class="dim">No GPU kernels detected in the source directory.</p></div>'
-            '</section>'
+            "</section>"
         )
 
     # ── Patterns table ───────────────────────────────────────────────────────
     pattern_rows = []
     for pat in tier0_result.detected_patterns:
-        sev  = pat.get("severity", "info").lower()
-        sfg  = SEV_FG.get(sev, "#6b7280")
-        sbg  = SEV_BG.get(sev, "rgba(107,114,128,.13)")
+        sev = pat.get("severity", "info").lower()
+        sfg = SEV_FG.get(sev, "#6b7280")
+        sbg = SEV_BG.get(sev, "rgba(107,114,128,.13)")
         pattern_rows.append(
-            f'<tr>'
+            f"<tr>"
             f'<td><span style="display:inline-block;padding:.14em .55em;border-radius:4px;'
-            f'font-size:.69rem;font-weight:800;letter-spacing:.06em;'
+            f"font-size:.69rem;font-weight:800;letter-spacing:.06em;"
             f'background:{sbg};color:{sfg}">{_h(sev.upper())}</span></td>'
-            f'<td>{_h(pat.get("category",""))}</td>'
-            f'<td>{_h(pat.get("description",""))}</td>'
-            f'<td data-v="{pat.get("count",0)}">{pat.get("count",0)}</td>'
-            f'</tr>'
+            f'<td>{_h(pat.get("category", ""))}</td>'
+            f'<td>{_h(pat.get("description", ""))}</td>'
+            f'<td data-v="{pat.get("count", 0)}">{pat.get("count", 0)}</td>'
+            f"</tr>"
         )
     if pattern_rows:
         patterns_section = (
             '<section class="scard">'
             '<div class="shdr">'
             '<span class="shdr-icon">&#128202;</span>'
-            '<h2>Detected Performance Patterns</h2>'
+            "<h2>Detected Performance Patterns</h2>"
             f'<span class="shdr-badge sbadge-warn">{len(tier0_result.detected_patterns)} found</span>'
-            '</div>'
+            "</div>"
             '<div class="sbody"><div class="tbl-wrap">'
             '<table class="dtable sortable">'
-            '<thead><tr>'
-            '<th data-tip=\'Issue severity. HIGH = likely significant performance impact. MEDIUM = moderate. LOW = minor.\'>Severity</th>'
-            '<th data-tip=\'Category of the anti-pattern detected in source code (memory, compute, synchronization, etc.).\'>Category</th>'
-            '<th data-tip=\'Description of the specific pattern found and its likely performance impact.\'>Description</th>'
-            '<th data-tip=\'Number of occurrences of this pattern across all scanned source files.\'>Count &#8645;</th>'
-            '</tr></thead>'
-            '<tbody>' + "".join(pattern_rows) + '</tbody>'
-            '</table></div></div></section>'
+            "<thead><tr>"
+            "<th data-tip='Issue severity. HIGH = likely significant performance impact. MEDIUM = moderate. LOW = minor.'>Severity</th>"
+            "<th data-tip='Category of the anti-pattern detected in source code (memory, compute, synchronization, etc.).'>Category</th>"
+            "<th data-tip='Description of the specific pattern found and its likely performance impact.'>Description</th>"
+            "<th data-tip='Number of occurrences of this pattern across all scanned source files.'>Count &#8645;</th>"
+            "</tr></thead>"
+            "<tbody>" + "".join(pattern_rows) + "</tbody>"
+            "</table></div></div></section>"
         )
     else:
         patterns_section = ""
 
     # ── Risk areas ───────────────────────────────────────────────────────────
-    risk_li = "".join(f'<li>{_h(r)}</li>' for r in tier0_result.risk_areas)
+    risk_li = "".join(f"<li>{_h(r)}</li>" for r in tier0_result.risk_areas)
     risk_section = ""
     if risk_li:
         risk_section = (
             '<section class="scard">'
             '<div class="shdr">'
             '<span class="shdr-icon">&#9888;</span>'
-            '<h2>Risk Areas</h2>'
+            "<h2>Risk Areas</h2>"
             f'<span class="shdr-badge sbadge-warn">{len(tier0_result.risk_areas)}</span>'
-            '</div>'
+            "</div>"
             '<div class="sbody">'
             f'<ul class="findings">{risk_li}</ul>'
-            '</div></section>'
+            "</div></section>"
         )
 
     # ── Suggested counters ───────────────────────────────────────────────────
     ctr_badges = " ".join(
         f'<code style="background:rgba(77,142,242,.15);color:#4d8ef2;'
-        f'padding:.14em .55em;border-radius:4px;font-size:.83rem;margin:.18rem .1rem;'
+        f"padding:.14em .55em;border-radius:4px;font-size:.83rem;margin:.18rem .1rem;"
         f'display:inline-block">{_h(c)}</code>'
         for c in tier0_result.suggested_counters
     )
@@ -3310,18 +3448,18 @@ def _format_tier0_webview(tier0_result: Any) -> str:
             '<section class="scard">'
             '<div class="shdr">'
             '<span class="shdr-icon">&#128300;</span>'
-            '<h2>Suggested Hardware Counters</h2>'
+            "<h2>Suggested Hardware Counters</h2>"
             f'<span class="shdr-badge sbadge-info">{len(tier0_result.suggested_counters)} counters</span>'
-            '</div>'
+            "</div>"
             '<div class="sbody">'
             '<p style="margin-bottom:.85rem;color:var(--sub);font-size:.9rem">'
-            'Collect these counters to enable Tier 2 (hardware-level) analysis:</p>'
+            "Collect these counters to enable Tier 2 (hardware-level) analysis:</p>"
             f'<p style="margin-bottom:1rem;line-height:1.9">{ctr_badges}</p>'
             f'<div class="cmd-row" id="cmd-ctr">'
-            f'<code>{_h(collect_cmd)}</code>'
+            f"<code>{_h(collect_cmd)}</code>"
             f'<button class="cp-btn" onclick="cpCmd(\'cmd-ctr\')">Copy</button>'
-            '</div>'
-            '</div></section>'
+            "</div>"
+            "</div></section>"
         )
 
     # ── Start Here ───────────────────────────────────────────────────────────
@@ -3332,17 +3470,17 @@ def _format_tier0_webview(tier0_result: Any) -> str:
             '<section class="scard">'
             '<div class="shdr">'
             '<span class="shdr-icon">&#9654;</span>'
-            '<h2>Start Here</h2>'
+            "<h2>Start Here</h2>"
             '<span class="shdr-badge sbadge-info">Recommended First Step</span>'
-            '</div>'
+            "</div>"
             '<div class="sbody">'
             '<p style="margin-bottom:.85rem;color:var(--sub);font-size:.9rem">'
-            'Run this command to collect profiling data for Tier 1/2 analysis:</p>'
+            "Run this command to collect profiling data for Tier 1/2 analysis:</p>"
             f'<div class="cmd-row" id="cmd-start">'
-            f'<code>{_h(fc)}</code>'
+            f"<code>{_h(fc)}</code>"
             f'<button class="cp-btn" onclick="cpCmd(\'cmd-start\')">Copy</button>'
-            '</div>'
-            '</div></section>'
+            "</div>"
+            "</div></section>"
         )
 
     # ── LLM section ──────────────────────────────────────────────────────────
@@ -3352,20 +3490,20 @@ def _format_tier0_webview(tier0_result: Any) -> str:
             '<section class="scard">'
             '<div class="shdr">'
             '<span class="shdr-icon">&#129302;</span>'
-            '<h2>AI-Enhanced Insights</h2>'
+            "<h2>AI-Enhanced Insights</h2>"
             '<span class="shdr-badge sbadge-info">LLM</span>'
-            '</div>'
+            "</div>"
             '<div class="sbody">'
             f'<pre style="white-space:pre-wrap;line-height:1.6;'
             f'color:var(--sub);font-size:.9rem">{_h(tier0_result.llm_explanation)}</pre>'
-            '</div></section>'
+            "</div></section>"
         )
 
     # ── KPI grid ─────────────────────────────────────────────────────────────
-    n_risks        = len(tier0_result.risk_areas)
-    risk_kpi_cls   = "kpi-warn" if n_risks > 0 else "kpi-ok"
+    n_risks = len(tier0_result.risk_areas)
+    risk_kpi_cls = "kpi-warn" if n_risks > 0 else "kpi-ok"
     risk_kpi_label = "Needs Attention" if n_risks > 0 else "None Found"
-    model_upper    = _h(tier0_result.programming_model.upper())
+    model_upper = _h(tier0_result.programming_model.upper())
     assessment_txt = (
         f"Static source analysis of {tier0_result.files_scanned} file(s) found "
         f"{tier0_result.kernel_count} GPU kernel(s). "
@@ -3804,9 +3942,11 @@ def format_analysis_output(
     output_format: str = "text",
     tier0_result: Optional[Any] = None,
     source_only: bool = False,
-    interval_timeline: Optional[Dict[str, Any]] = None,   # NEW (TraceLens) — logic in Task 4
-    kernel_categories: Optional[List[Any]] = None,        # NEW (TraceLens) — logic in Task 4
-    short_kernels: Optional[Dict[str, Any]] = None,       # NEW (TraceLens) — logic in Task 4
+    interval_timeline: Optional[
+        Dict[str, Any]
+    ] = None,  # NEW (TraceLens) — logic in Task 4
+    kernel_categories: Optional[List[Any]] = None,  # NEW (TraceLens) — logic in Task 4
+    short_kernels: Optional[Dict[str, Any]] = None,  # NEW (TraceLens) — logic in Task 4
 ) -> str:
     """
     Format analysis results for display.
@@ -3849,6 +3989,7 @@ def format_analysis_output(
         # Combined mode: embed tier0 into JSON document
         if tier0_result is not None:
             import json as _json
+
             try:
                 doc = _json.loads(output)
                 doc["tier0"] = _tier0_to_dict(tier0_result)
@@ -3920,7 +4061,11 @@ def format_analysis_output(
 
     kernel_time_ms = time_breakdown.get("total_kernel_time", 0) / 1e6
     memcpy_time_ms = time_breakdown.get("total_memcpy_time", 0) / 1e6
-    overhead_time_ms = max(0.0, total_runtime_ms - kernel_time_ms - memcpy_time_ms) if total_runtime_ms > 0 else 0
+    overhead_time_ms = (
+        max(0.0, total_runtime_ms - kernel_time_ms - memcpy_time_ms)
+        if total_runtime_ms > 0
+        else 0
+    )
 
     lines.append(
         f"  Kernel Execution:  {kernel_time_ms:10,.2f} ms  ({kernel_pct:5.1f}%)  {make_bar(kernel_pct)}"
@@ -3987,11 +4132,11 @@ def format_analysis_output(
 
             # Format size
             if total_bytes >= 1e9:
-                size_str = f"{total_bytes/1e9:.1f} GB"
+                size_str = f"{total_bytes / 1e9:.1f} GB"
             elif total_bytes >= 1e6:
-                size_str = f"{total_bytes/1e6:.1f} MB"
+                size_str = f"{total_bytes / 1e6:.1f} MB"
             elif total_bytes >= 1e3:
-                size_str = f"{total_bytes/1e3:.1f} KB"
+                size_str = f"{total_bytes / 1e3:.1f} KB"
             else:
                 size_str = f"{total_bytes:.0f} B"
 
@@ -4018,7 +4163,9 @@ def format_analysis_output(
 
             if "gpu_utilization_percent" in metrics:
                 util_pct = metrics["gpu_utilization_percent"]
-                lines.append(f"  GPU Utilization:        {util_pct:6.1f}%  {make_bar(util_pct)}")
+                lines.append(
+                    f"  GPU Utilization:        {util_pct:6.1f}%  {make_bar(util_pct)}"
+                )
 
             if "avg_waves" in metrics:
                 avg_waves = metrics["avg_waves"]
@@ -4032,7 +4179,9 @@ def format_analysis_output(
         if counters:
             lines.append("Collected Counters:")
             lines.append("")
-            lines.append(f"{'Counter Name':<25}  {'Avg Value':>15}  {'Min Value':>15}  {'Max Value':>15}")
+            lines.append(
+                f"{'Counter Name':<25}  {'Avg Value':>15}  {'Min Value':>15}  {'Max Value':>15}"
+            )
             lines.append("─" * width)
 
             for counter_name, stats in counters.items():
@@ -4056,11 +4205,13 @@ def format_analysis_output(
         max_pct = max((c["pct_of_kernel_time"] for c in kernel_categories), default=1)
         bar_width = 30
         for cat in kernel_categories:
-            pct  = cat["pct_of_kernel_time"]
-            bar  = "█" * int(bar_width * pct / max(max_pct, 1))
-            cnt  = cat["count"]
+            pct = cat["pct_of_kernel_time"]
+            bar = "█" * int(bar_width * pct / max(max_pct, 1))
+            cnt = cat["count"]
             avg_us = cat["avg_duration_ns"] / 1_000
-            lines.append(f"  {cat['category']:<15} {bar:<30} {pct:5.1f}%  ({cnt} kernels, avg {avg_us:.1f}μs)")
+            lines.append(
+                f"  {cat['category']:<15} {bar:<30} {pct:5.1f}%  ({cnt} kernels, avg {avg_us:.1f}μs)"
+            )
         lines.append("")
 
     # TraceLens: Short Kernel Analysis
@@ -4070,19 +4221,22 @@ def format_analysis_output(
         lines.append("━" * width)
         lines.append("")
         thresh = short_kernels.get("threshold_us", 10)
-        count  = short_kernels["short_kernel_count"]
+        count = short_kernels["short_kernel_count"]
         wasted = short_kernels["wasted_pct_of_kernel_time"]
-        lines.append(f"  {count} kernels below {thresh}μs threshold — {wasted:.1f}% of kernel time wasted")
+        lines.append(
+            f"  {count} kernels below {thresh}μs threshold — {wasted:.1f}% of kernel time wasted"
+        )
         if short_kernels.get("histogram"):
             hist_str = "  Histogram: " + "  ".join(
-                f"[{b['bucket_label']}]: {b['count']}"
-                for b in short_kernels["histogram"]
+                f"[{b['bucket_label']}]: {b['count']}" for b in short_kernels["histogram"]
             )
             lines.append(hist_str)
         if short_kernels.get("top_offenders"):
             lines.append("  Top offenders:")
             for off in short_kernels["top_offenders"][:5]:
-                lines.append(f"    {off['name'][:50]:<52} ×{off['count']}  avg {off['avg_us']:.1f}μs")
+                lines.append(
+                    f"    {off['name'][:50]:<52} ×{off['count']}  avg {off['avg_us']:.1f}μs"
+                )
         lines.append("")
 
     # Recommendations
@@ -4114,7 +4268,7 @@ def format_analysis_output(
             lines.append(f"  Estimated Impact: {estimated_impact}")
             lines.append("")
         if commands:
-            lines.append(f"  Recommended Commands:")
+            lines.append("  Recommended Commands:")
             for cmd in commands:
                 tool = cmd.get("tool", "")
                 desc = cmd.get("description", "")
@@ -4173,6 +4327,7 @@ def analyze_source_code(
     _src_path = _Path(source_dir)
     if not _src_path.exists() or not _src_path.is_dir():
         from .ai_analysis.exceptions import SourceDirectoryNotFoundError
+
         raise SourceDirectoryNotFoundError(
             f"Source directory not found or not a directory: {source_dir}"
         )
@@ -4184,8 +4339,10 @@ def analyze_source_code(
     plan = scanner.analyze()
 
     if verbose:
-        print(f"[Tier0] Scanned {plan.files_scanned} files, "
-              f"{plan.kernel_count} kernels, model: {plan.programming_model}")
+        print(
+            f"[Tier0] Scanned {plan.files_scanned} files, "
+            f"{plan.kernel_count} kernels, model: {plan.programming_model}"
+        )
 
     # Convert ProfilingPlan → SourceAnalysisResult dataclass
     result = _plan_to_source_result(plan)
@@ -4200,12 +4357,14 @@ def analyze_source_code(
             try:
                 analyzer = LLMAnalyzer(provider=llm, api_key=llm_api_key, verbose=verbose)
                 from .ai_analysis.llm_analyzer import AnalysisContext as _AnalysisContext
+
                 _llm_ctx = _AnalysisContext(tier=0, custom_prompt=prompt)
                 _mdl = llm_model or os.environ.get("ROCPD_LLM_MODEL", "")
                 _mdl_str = f" ({_mdl})" if _mdl else ""
                 print(
                     f"  Contacting {llm}{_mdl_str} for source analysis — please wait...",
-                    file=sys.stderr, flush=True,
+                    file=sys.stderr,
+                    flush=True,
                 )
                 result.llm_explanation = analyzer.analyze_source_with_llm(
                     result, custom_prompt=prompt, context=_llm_ctx
@@ -4273,23 +4432,30 @@ def analyze_performance(
     # ------------------------------------------------------------------
     # Tier 1/2 — database analysis (only when a connection is provided)
     # ------------------------------------------------------------------
-    source_only = (connection is None)
+    source_only = connection is None
     if not source_only:
         time_breakdown = compute_time_breakdown(connection)
-        hotspots = identify_hotspots(connection, top_n=top_kernels, min_duration=min_duration)
+        hotspots = identify_hotspots(
+            connection, top_n=top_kernels, min_duration=min_duration
+        )
         memory_analysis = analyze_memory_copies(connection)
         hardware_counters = analyze_hardware_counters(connection)  # Tier 2
         already_collected = _detect_already_collected(connection)
         # TraceLens-derived analysis (Phase 1)
-        interval_timeline   = compute_interval_timeline(connection)
-        kernel_categories   = analyze_kernels_by_category(connection, interval_timeline["total_wall_ns"])
-        short_kernels_data  = analyze_short_kernels(connection)
+        interval_timeline = compute_interval_timeline(connection)
+        kernel_categories = analyze_kernels_by_category(
+            connection, interval_timeline["total_wall_ns"]
+        )
+        short_kernels_data = analyze_short_kernels(connection)
         # Generate recommendations (redundant re-collection commands are filtered out)
         recommendations = generate_recommendations(
-            time_breakdown, hotspots, memory_analysis, hardware_counters,
+            time_breakdown,
+            hotspots,
+            memory_analysis,
+            hardware_counters,
             already_collected=already_collected,
-            short_kernels=short_kernels_data,    # NEW
-            interval_timeline=interval_timeline, # NEW
+            short_kernels=short_kernels_data,  # NEW
+            interval_timeline=interval_timeline,  # NEW
         )
     else:
         time_breakdown = {}
@@ -4297,8 +4463,8 @@ def analyze_performance(
         memory_analysis = {}
         hardware_counters = {}
         already_collected = frozenset()
-        interval_timeline  = {}
-        kernel_categories  = []
+        interval_timeline = {}
+        kernel_categories = []
         short_kernels_data = {}
         recommendations = tier0_result.recommendations if tier0_result else []
 
@@ -4313,16 +4479,16 @@ def analyze_performance(
         output_format=output_format,
         tier0_result=tier0_result,
         source_only=source_only,
-        interval_timeline=interval_timeline,       # NEW (TraceLens)
-        kernel_categories=kernel_categories,       # NEW (TraceLens)
-        short_kernels=short_kernels_data,          # NEW (TraceLens)
+        interval_timeline=interval_timeline,  # NEW (TraceLens)
+        kernel_categories=kernel_categories,  # NEW (TraceLens)
+        short_kernels=short_kernels_data,  # NEW (TraceLens)
     )
 
     # Expose structured results to caller (used by interactive mode)
     if _collect_result is not None:
         _collect_result["recommendations"] = recommendations
-        _collect_result["tier0_result"]    = tier0_result
-        _collect_result["database_path"]   = database_path
+        _collect_result["tier0_result"] = tier0_result
+        _collect_result["database_path"] = database_path
 
     # LLM enhancement (if enabled) — only for Tier 1/2; Tier 0 LLM runs in analyze_source_code()
     if llm and not source_only:
@@ -4344,7 +4510,8 @@ def analyze_performance(
             _mdl_str = f" ({_mdl})" if _mdl else ""
             print(
                 f"  Contacting {llm}{_mdl_str} for trace analysis — please wait...",
-                file=sys.stderr, flush=True,
+                file=sys.stderr,
+                flush=True,
             )
 
             # Initialize LLM analyzer
@@ -4386,6 +4553,7 @@ def analyze_performance(
 
             # Build analysis context for guide filtering
             from .ai_analysis.llm_analyzer import AnalysisContext as _AnalysisContext
+
             _has_ctr = bool(hardware_counters and hardware_counters.get("has_counters"))
             _summary = _build_summary(time_breakdown, hotspots, _has_ctr)
             _llm_ctx = _AnalysisContext(
@@ -4406,13 +4574,19 @@ def analyze_performance(
             # Append LLM explanation to output
             if output_format == "text":
                 output += "\n\n" + "=" * 80 + "\n"
-                output += "AI-ENHANCED EXPLANATION (powered by {})".format(llm.upper()).center(80) + "\n"
+                output += (
+                    "AI-ENHANCED EXPLANATION (powered by {})".format(llm.upper()).center(
+                        80
+                    )
+                    + "\n"
+                )
                 output += "=" * 80 + "\n\n"
                 output += llm_explanation
                 output += "\n\n" + "=" * 80 + "\n"
             elif output_format == "json":
                 # Parse JSON and add LLM explanation
                 import json
+
                 try:
                     output_dict = json.loads(output)
                     output_dict["llm_enhanced_explanation"] = llm_explanation
@@ -4424,22 +4598,26 @@ def analyze_performance(
                     )
 
             if verbose:
-                print(f"[LLM] Enhancement complete")
+                print("[LLM] Enhancement complete")
 
         except Exception as e:
             # Always show LLM failures on console (even without --verbose)
             import sys
+
             error_msg = f"⚠️  LLM enhancement failed: {e}"
             print(error_msg, file=sys.stderr)
 
             # Also add to output file
-            warning_msg = f"\n\n{error_msg}\n(Analysis completed with local results only)\n"
+            warning_msg = (
+                f"\n\n{error_msg}\n(Analysis completed with local results only)\n"
+            )
             if output_format == "text":
                 output += warning_msg
 
             # Show full traceback only in verbose mode
             if verbose:
                 import traceback
+
                 traceback.print_exc()
 
         finally:
@@ -4456,12 +4634,36 @@ def analyze_performance(
 def _is_code_change_rec(rec: Dict[str, Any]) -> bool:
     """Return True if this recommendation suggests source-code modifications."""
     CODE_CHANGE_KEYWORDS = (
-        "replace ", "convert ", "add ", "insert ", "remove ", "delete ",
-        "change ", "modify ", "update ", "use hip", "hipstream", "hipmemcpy",
-        "hiplaunchkernel", "block size", "blockdim", "thread block",
-        "merge kernel", "fuse kernel", "combine kernel", "async",
-        "hipstreamcreate", "batch ", "coalesce", "stride", "unroll",
-        "pragma ", "#pragma", "__launch_bounds__", "wave32", "wave64",
+        "replace ",
+        "convert ",
+        "add ",
+        "insert ",
+        "remove ",
+        "delete ",
+        "change ",
+        "modify ",
+        "update ",
+        "use hip",
+        "hipstream",
+        "hipmemcpy",
+        "hiplaunchkernel",
+        "block size",
+        "blockdim",
+        "thread block",
+        "merge kernel",
+        "fuse kernel",
+        "combine kernel",
+        "async",
+        "hipstreamcreate",
+        "batch ",
+        "coalesce",
+        "stride",
+        "unroll",
+        "pragma ",
+        "#pragma",
+        "__launch_bounds__",
+        "wave32",
+        "wave64",
     )
     for action in rec.get("actions", []):
         al = action.lower()
@@ -4481,10 +4683,14 @@ def _call_llm_for_code(
         try:
             import anthropic
         except ImportError:
-            raise ImportError("anthropic package not installed. Run: pip install anthropic")
+            raise ImportError(
+                "anthropic package not installed. Run: pip install anthropic"
+            )
         key = api_key or os.environ.get("ANTHROPIC_API_KEY")
         if not key:
-            raise ValueError("No Anthropic API key. Set ANTHROPIC_API_KEY or pass --llm-api-key.")
+            raise ValueError(
+                "No Anthropic API key. Set ANTHROPIC_API_KEY or pass --llm-api-key."
+            )
         use_model = model or os.environ.get("ROCPD_LLM_MODEL", "claude-sonnet-4-20250514")
         client = anthropic.Anthropic(api_key=key)
         msg = client.messages.create(
@@ -4501,7 +4707,9 @@ def _call_llm_for_code(
             raise ImportError("openai package not installed. Run: pip install openai")
         key = api_key or os.environ.get("OPENAI_API_KEY")
         if not key:
-            raise ValueError("No OpenAI API key. Set OPENAI_API_KEY or pass --llm-api-key.")
+            raise ValueError(
+                "No OpenAI API key. Set OPENAI_API_KEY or pass --llm-api-key."
+            )
         use_model = model or os.environ.get("ROCPD_LLM_MODEL", "gpt-4-turbo-preview")
         client = openai.OpenAI(api_key=key)
         try:
@@ -4536,18 +4744,18 @@ def _apply_code_change_interactive(
     import difflib
     import shutil
 
-    C   = colors["C"]
-    G   = colors["G"]
-    Y   = colors["Y"]
-    R   = colors["R"]
+    C = colors["C"]
+    G = colors["G"]
+    Y = colors["Y"]
+    R = colors["R"]
     DIM = colors["DIM"]
-    N   = colors["N"]
+    N = colors["N"]
 
-    cat        = rec.get("category", "")
-    issue      = rec.get("issue", "")
+    cat = rec.get("category", "")
+    issue = rec.get("issue", "")
     suggestion = rec.get("suggestion", "")
-    actions    = rec.get("actions", [])
-    impact     = rec.get("estimated_impact", "")
+    actions = rec.get("actions", [])
+    impact = rec.get("estimated_impact", "")
 
     # ── Show recommendation details ──────────────────────────────────────────
     print(f"\n{C}{'─' * 80}{N}")
@@ -4570,7 +4778,9 @@ def _apply_code_change_interactive(
     # ── Find GPU source files ────────────────────────────────────────────────
     source_files: List[str] = []
     for ext in ("*.hip", "*.cpp", "*.cu", "*.cuh", "*.h"):
-        source_files.extend(_glob.glob(_os.path.join(source_dir, "**", ext), recursive=True))
+        source_files.extend(
+            _glob.glob(_os.path.join(source_dir, "**", ext), recursive=True)
+        )
     source_files = [f for f in source_files if _os.path.isfile(f)]
 
     if not source_files:
@@ -4586,8 +4796,10 @@ def _apply_code_change_interactive(
 
     # ── No LLM configured: show manual steps and offer $EDITOR ──────────────
     if not llm_provider:
-        print(f"  {DIM}To enable AI code editing, set ANTHROPIC_API_KEY (or OPENAI_API_KEY) in your"
-              f" environment, or pass --llm anthropic to rocpd analyze.{N}")
+        print(
+            f"  {DIM}To enable AI code editing, set ANTHROPIC_API_KEY (or OPENAI_API_KEY) in your"
+            f" environment, or pass --llm anthropic to rocpd analyze.{N}"
+        )
         print(f"\n  {Y}Manual steps:{N}")
         for i, action in enumerate(actions, 1):
             print(f"    {i}. {action}")
@@ -4599,15 +4811,20 @@ def _apply_code_change_interactive(
                 ans = "n"
             if ans in ("y", "yes"):
                 import subprocess
+
                 subprocess.run([editor] + source_files[:3])
         print()
         return
 
     # ── Ask user before invoking LLM ────────────────────────────────────────
     try:
-        ans = input(
-            f"  {Y}Would you like the AI to apply this change to your source code? [y/N]: {N}"
-        ).strip().lower()
+        ans = (
+            input(
+                f"  {Y}Would you like the AI to apply this change to your source code? [y/N]: {N}"
+            )
+            .strip()
+            .lower()
+        )
     except (EOFError, KeyboardInterrupt):
         print()
         return
@@ -4616,7 +4833,7 @@ def _apply_code_change_interactive(
         return
 
     # ── Read source files ────────────────────────────────────────────────────
-    MAX_FILES     = 5
+    MAX_FILES = 5
     MAX_FILE_SIZE = 50_000  # bytes per file
 
     print(f"\n  {DIM}Reading source files...{N}")
@@ -4684,14 +4901,17 @@ def _apply_code_change_interactive(
         re.DOTALL,
     )
     for m in pattern.finditer(llm_response):
-        rel_path    = m.group(1).strip()
-        original    = m.group(2).strip()
+        rel_path = m.group(1).strip()
+        original = m.group(2).strip()
         replacement = m.group(3).strip()
-        abs_path    = _os.path.join(source_dir, rel_path)
+        abs_path = _os.path.join(source_dir, rel_path)
         # Guard against path traversal (e.g. rel_path = "../../etc/passwd")
-        _resolved     = _os.path.realpath(abs_path)
+        _resolved = _os.path.realpath(abs_path)
         _src_resolved = _os.path.realpath(source_dir)
-        if not _resolved.startswith(_src_resolved + _os.sep) and _resolved != _src_resolved:
+        if (
+            not _resolved.startswith(_src_resolved + _os.sep)
+            and _resolved != _src_resolved
+        ):
             continue  # reject: path escapes source_dir
         if _os.path.isfile(abs_path) and abs_path in file_contents:
             patches.append((abs_path, rel_path, original, replacement))
@@ -4716,13 +4936,15 @@ def _apply_code_change_interactive(
             print(f"\n  {R}✗ Could not locate original code in {rel_path} — skipping.{N}")
             continue
         new_content = orig_content.replace(original, replacement, 1)
-        diff = list(difflib.unified_diff(
-            orig_content.splitlines(keepends=True),
-            new_content.splitlines(keepends=True),
-            fromfile=f"a/{rel_path}",
-            tofile=f"b/{rel_path}",
-            n=3,
-        ))
+        diff = list(
+            difflib.unified_diff(
+                orig_content.splitlines(keepends=True),
+                new_content.splitlines(keepends=True),
+                fromfile=f"a/{rel_path}",
+                tofile=f"b/{rel_path}",
+                n=3,
+            )
+        )
         print(f"\n  File: {rel_path}")
         for line in diff[:80]:
             if line.startswith("+") and not line.startswith("+++"):
@@ -4760,13 +4982,17 @@ def _apply_code_change_interactive(
             shutil.copy2(abs_path, backup_path)
             with open(abs_path, "w", encoding="utf-8") as fh:
                 fh.write(new_content)
-            print(f"  {G}✓ Applied: {rel_path}  (backup: {_os.path.basename(backup_path)}){N}")
+            print(
+                f"  {G}✓ Applied: {rel_path}  (backup: {_os.path.basename(backup_path)}){N}"
+            )
             applied += 1
         except OSError as exc:
             print(f"  {R}✗ Failed to write {rel_path}: {exc}{N}")
 
     if applied:
-        print(f"\n  {G}✓ {applied} file(s) modified. Rebuild your application to test.{N}\n")
+        print(
+            f"\n  {G}✓ {applied} file(s) modified. Rebuild your application to test.{N}\n"
+        )
         return True
     else:
         print(f"  {Y}No files were modified.{N}\n")
@@ -4784,13 +5010,16 @@ def _get_app_path_from_db(database_path: str) -> str:
         return ""
     try:
         import sqlite3 as _sqlite3
+
         con = _sqlite3.connect(database_path)
         # Find all rocpd_info_process_* tables
         tables = con.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'rocpd_info_process_%'"
         ).fetchall()
         for (tname,) in tables:
-            row = con.execute(f'SELECT command FROM "{tname}" WHERE command IS NOT NULL LIMIT 1').fetchone()
+            row = con.execute(
+                f'SELECT command FROM "{tname}" WHERE command IS NOT NULL LIMIT 1'
+            ).fetchone()
             if row and row[0]:
                 return row[0].strip()
         con.close()
@@ -4814,6 +5043,7 @@ def _run_interactive_session(
 ) -> None:
     """Thin shim: delegates to InteractiveSession in ai_analysis/interactive.py."""
     from rocpd.ai_analysis.interactive import InteractiveSession, SessionStore
+
     InteractiveSession(
         source_dir=source_dir,
         tier0_result=tier0_result,
@@ -4874,7 +5104,7 @@ def add_args(parser: argparse.ArgumentParser):
         choices=["text", "json", "markdown", "webview"],
         default="text",
         help="Output format: text, json, markdown, or webview (default: text). "
-             "File extension is set automatically: .txt, .json, .md, .html",
+        "File extension is set automatically: .txt, .json, .md, .html",
     )
 
     analysis_options.add_argument(
@@ -4888,7 +5118,7 @@ def add_args(parser: argparse.ArgumentParser):
     llm_options = parser.add_argument_group(
         "LLM enhancement options (optional)",
         "Enable natural language explanations via Anthropic Claude or OpenAI GPT. "
-        "Requires API key - see https://console.anthropic.com/ or https://platform.openai.com/api-keys"
+        "Requires API key - see https://console.anthropic.com/ or https://platform.openai.com/api-keys",
     )
 
     llm_options.add_argument(
@@ -4897,11 +5127,11 @@ def add_args(parser: argparse.ArgumentParser):
         choices=["anthropic", "openai", "private"],
         default=None,
         help="Enable LLM-powered analysis enhancement. Choices: 'anthropic' (Claude), 'openai' (GPT), "
-             "or 'private' (any OpenAI-compatible private/enterprise server). "
-             "Requires API key set via environment variable or --llm-api-key option. "
-             "For 'private': set ROCPD_LLM_PRIVATE_URL, ROCPD_LLM_PRIVATE_MODEL, and optionally "
-             "ROCPD_LLM_PRIVATE_HEADERS (JSON). "
-             "Local analysis always runs first; LLM provides additional natural language insights.",
+        "or 'private' (any OpenAI-compatible private/enterprise server). "
+        "Requires API key set via environment variable or --llm-api-key option. "
+        "For 'private': set ROCPD_LLM_PRIVATE_URL, ROCPD_LLM_PRIVATE_MODEL, and optionally "
+        "ROCPD_LLM_PRIVATE_HEADERS (JSON). "
+        "Local analysis always runs first; LLM provides additional natural language insights.",
     )
 
     llm_options.add_argument(
@@ -4909,9 +5139,9 @@ def add_args(parser: argparse.ArgumentParser):
         type=str,
         default=None,
         help="API key for LLM provider. Alternatively, set environment variable: "
-             "ANTHROPIC_API_KEY for Anthropic Claude, or OPENAI_API_KEY for OpenAI GPT. "
-             "Example: --llm anthropic --llm-api-key sk-ant-... "
-             "Or: export ANTHROPIC_API_KEY='sk-ant-...' && rocpd analyze --llm anthropic",
+        "ANTHROPIC_API_KEY for Anthropic Claude, or OPENAI_API_KEY for OpenAI GPT. "
+        "Example: --llm anthropic --llm-api-key sk-ant-... "
+        "Or: export ANTHROPIC_API_KEY='sk-ant-...' && rocpd analyze --llm anthropic",
     )
 
     llm_options.add_argument(
@@ -4919,9 +5149,9 @@ def add_args(parser: argparse.ArgumentParser):
         type=str,
         default=None,
         help="Override the LLM model name. Defaults to claude-sonnet-4-20250514 for Anthropic "
-             "and gpt-4-turbo-preview for OpenAI. Can also be set via ROCPD_LLM_MODEL environment "
-             "variable (--llm-model takes precedence). "
-             "Examples: --llm-model claude-opus-4-6, --llm-model gpt-4o",
+        "and gpt-4-turbo-preview for OpenAI. Can also be set via ROCPD_LLM_MODEL environment "
+        "variable (--llm-model takes precedence). "
+        "Examples: --llm-model claude-opus-4-6, --llm-model gpt-4o",
     )
 
     llm_options.add_argument(
@@ -5037,10 +5267,25 @@ def add_args(parser: argparse.ArgumentParser):
 
     def process_args(input: RocpdImportData, args: argparse.Namespace):
         """Process and return valid arguments as dictionary."""
-        valid_args = ["source_dir", "prompt", "top_kernels", "format", "min_duration",
-                      "llm", "llm_api_key", "llm_model", "llm_thinking", "llm_compact_every", "verbose", "interactive",
-                      "resume_session", "llm_local", "llm_local_model",
-                      "llm_private_url", "llm_private_model"]
+        valid_args = [
+            "source_dir",
+            "prompt",
+            "top_kernels",
+            "format",
+            "min_duration",
+            "llm",
+            "llm_api_key",
+            "llm_model",
+            "llm_thinking",
+            "llm_compact_every",
+            "verbose",
+            "interactive",
+            "resume_session",
+            "llm_local",
+            "llm_local_model",
+            "llm_private_url",
+            "llm_private_model",
+        ]
         ret = {}
         for itr in valid_args:
             if hasattr(args, itr):
@@ -5055,7 +5300,11 @@ def add_args(parser: argparse.ArgumentParser):
     return process_args
 
 
-def execute(input: Optional[RocpdImportData], config: Optional[output_config.output_config] = None, **kwargs: Any) -> Optional[RocpdImportData]:
+def execute(
+    input: Optional[RocpdImportData],
+    config: Optional[output_config.output_config] = None,
+    **kwargs: Any,
+) -> Optional[RocpdImportData]:
     """
     Execute AI analysis on rocpd database and/or source directory.
 
@@ -5076,7 +5325,9 @@ def execute(input: Optional[RocpdImportData], config: Optional[output_config.out
     # Get database path for display
     database_path = ""
     if input is not None and hasattr(input, "_paths") and input._paths:
-        database_path = input._paths[0] if isinstance(input._paths, list) else str(input._paths)
+        database_path = (
+            input._paths[0] if isinstance(input._paths, list) else str(input._paths)
+        )
 
     # Pop interactive before passing to analyze_performance (it doesn't accept it)
     interactive = kwargs.pop("interactive", None)
@@ -5084,6 +5335,7 @@ def execute(input: Optional[RocpdImportData], config: Optional[output_config.out
     # 7-phase workflow mode: triggered when --interactive is provided with a RUN_COMMAND
     if interactive and isinstance(interactive, str):
         from rocpd.ai_analysis.interactive import WorkflowSession  # type: ignore[import]
+
         source_paths: list = []
         source_dir = kwargs.get("source_dir")
         if source_dir:
@@ -5092,7 +5344,9 @@ def execute(input: Optional[RocpdImportData], config: Optional[output_config.out
             app_command=interactive,
             source_paths=source_paths,
             llm_provider=kwargs.get("llm"),
-            llm_api_key=kwargs.get("llm_api_key") or os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("OPENAI_API_KEY"),
+            llm_api_key=kwargs.get("llm_api_key")
+            or os.environ.get("ANTHROPIC_API_KEY")
+            or os.environ.get("OPENAI_API_KEY"),
             llm_model=kwargs.get("llm_model"),
         )
         ws.run()
@@ -5104,7 +5358,7 @@ def execute(input: Optional[RocpdImportData], config: Optional[output_config.out
 
     # Inject private-server CLI args into env so downstream code picks them up
     if kwargs.get("llm_private_url"):
-        os.environ.setdefault("ROCPD_LLM_PRIVATE_URL",   kwargs["llm_private_url"])
+        os.environ.setdefault("ROCPD_LLM_PRIVATE_URL", kwargs["llm_private_url"])
     if kwargs.get("llm_private_model"):
         os.environ.setdefault("ROCPD_LLM_PRIVATE_MODEL", kwargs["llm_private_model"])
 
@@ -5112,8 +5366,8 @@ def execute(input: Optional[RocpdImportData], config: Optional[output_config.out
     # trigger LLM requests explicitly via [p] and [o] inside the session.
     # Save credentials first so _run_interactive_session can still use them.
     _interactive_llm_provider = kwargs.get("llm")
-    _interactive_llm_api_key  = kwargs.get("llm_api_key")
-    _interactive_llm_model    = kwargs.get("llm_model")
+    _interactive_llm_api_key = kwargs.get("llm_api_key")
+    _interactive_llm_model = kwargs.get("llm_model")
     if interactive:
         kwargs.pop("llm", None)
         kwargs.pop("llm_model", None)
@@ -5148,9 +5402,11 @@ def execute(input: Optional[RocpdImportData], config: Optional[output_config.out
             f.write(output)
         print(f"Analysis written to: {output_file}")
         if _fmt == "text":
-            print("Tip: use --format webview for an interactive HTML report, "
-                  "--format json for machine-readable output, "
-                  "or --format markdown for Markdown.")
+            print(
+                "Tip: use --format webview for an interactive HTML report, "
+                "--format json for machine-readable output, "
+                "or --format markdown for Markdown."
+            )
     else:
         print(output)
 

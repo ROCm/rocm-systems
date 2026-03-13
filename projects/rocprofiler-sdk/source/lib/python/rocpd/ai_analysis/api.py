@@ -23,7 +23,6 @@ Example:
         print(f"- {rec.title}")
 """
 
-import json
 from dataclasses import dataclass, field, asdict
 from enum import Enum
 from pathlib import Path
@@ -31,6 +30,7 @@ from typing import List, Optional, Dict, Any
 
 try:
     from importlib.metadata import version as _pkg_version
+
     _ROCPD_VERSION = _pkg_version("rocpd")
 except Exception:
     _ROCPD_VERSION = "0.1.0"  # fallback if metadata not available (common in dev / ROCm system installs)
@@ -49,15 +49,13 @@ from ..tracelens_port import (
     analyze_kernels_by_category,
     analyze_short_kernels,
 )
-from .llm_analyzer import AnalysisContext, LLMAnalyzer, get_reference_guide_path
+from .llm_analyzer import AnalysisContext, LLMAnalyzer
 from .exceptions import (
     DatabaseNotFoundError,
     DatabaseCorruptedError,
-    MissingDataError,
     LLMAuthenticationError,
     LLMRateLimitError,
     SourceDirectoryNotFoundError,
-    SourceAnalysisError,
 )
 
 
@@ -176,13 +174,15 @@ class SourceAnalysisResult:
     detected_kernels: List[Dict[str, Any]]  # {name, file, line, launch_type}
     kernel_count: int
 
-    detected_patterns: List[Dict[str, Any]]  # {pattern_id, severity, category, description, count, locations}
+    detected_patterns: List[
+        Dict[str, Any]
+    ]  # {pattern_id, severity, category, description, count, locations}
     risk_areas: List[str]
 
     already_instrumented: bool
     roctx_marker_count: int
 
-    recommendations: List[Dict[str, Any]]   # same structure as generate_recommendations()
+    recommendations: List[Dict[str, Any]]  # same structure as generate_recommendations()
     suggested_counters: List[str]
     suggested_first_command: str
 
@@ -209,9 +209,12 @@ def _plan_to_source_result(plan) -> "SourceAnalysisResult":
         kernel_count=plan.kernel_count,
         detected_patterns=[
             {
-                "pattern_id": p.pattern_id, "severity": p.severity,
-                "category": p.category, "description": p.description,
-                "count": p.count, "locations": p.locations,
+                "pattern_id": p.pattern_id,
+                "severity": p.severity,
+                "category": p.category,
+                "description": p.description,
+                "count": p.count,
+                "locations": p.locations,
             }
             for p in plan.detected_patterns
         ],
@@ -273,9 +276,9 @@ class AnalysisResult:
                 hardware_counters=raw["hardware_counters"],
                 database_path=raw["database_path"],
                 output_format="json",
-                interval_timeline=raw.get("interval_timeline"),   # NEW
-                kernel_categories=raw.get("kernel_categories"),   # NEW
-                short_kernels=raw.get("short_kernels"),           # NEW
+                interval_timeline=raw.get("interval_timeline"),  # NEW
+                kernel_categories=raw.get("kernel_categories"),  # NEW
+                short_kernels=raw.get("short_kernels"),  # NEW
             )
         raise RuntimeError(
             "Raw analysis data not available. "
@@ -307,9 +310,9 @@ class AnalysisResult:
             hardware_counters=raw["hardware_counters"],
             database_path=raw["database_path"],
             output_format="webview",
-            interval_timeline=raw.get("interval_timeline"),   # NEW
-            kernel_categories=raw.get("kernel_categories"),   # NEW
-            short_kernels=raw.get("short_kernels"),           # NEW
+            interval_timeline=raw.get("interval_timeline"),  # NEW
+            kernel_categories=raw.get("kernel_categories"),  # NEW
+            short_kernels=raw.get("short_kernels"),  # NEW
         )
 
     def to_text(self) -> str:
@@ -562,6 +565,7 @@ def analyze_database(
     # not a dict. We need raw data to build the AnalysisResult dataclass.
     try:
         from ..importer import RocpdImportData
+
         # RocpdImportData's internal sanitize_input_list() iterates over its
         # argument. Passing a plain str would iterate over characters. Pass a
         # list with the single path string to ensure correct behavior.
@@ -574,8 +578,10 @@ def analyze_database(
         already_collected = _detect_already_collected(connection)
 
         # TraceLens-derived analysis
-        interval_timeline  = compute_interval_timeline(connection)
-        kernel_categories  = analyze_kernels_by_category(connection, interval_timeline["total_wall_ns"])
+        interval_timeline = compute_interval_timeline(connection)
+        kernel_categories = analyze_kernels_by_category(
+            connection, interval_timeline["total_wall_ns"]
+        )
         short_kernels_data = analyze_short_kernels(connection)
 
         recommendations = generate_recommendations(
@@ -606,13 +612,13 @@ def analyze_database(
     )
 
     result.kernel_categories = kernel_categories
-    result.short_kernels     = short_kernels_data
+    result.short_kernels = short_kernels_data
     result.interval_timeline = interval_timeline
 
     # Also write into _raw so to_json() / to_webview() include them
     result._raw["interval_timeline"] = interval_timeline
     result._raw["kernel_categories"] = kernel_categories
-    result._raw["short_kernels"]     = short_kernels_data
+    result._raw["short_kernels"] = short_kernels_data
 
     # Optional LLM enhancement
     if enable_llm and llm_provider:
@@ -640,14 +646,23 @@ def analyze_database(
                 custom_prompt=custom_prompt,
                 kernel_categories=result.kernel_categories or [],
                 interval_timeline={
-                    k: v for k, v in result.interval_timeline.items()
+                    k: v
+                    for k, v in result.interval_timeline.items()
                     if k.endswith("_pct")
                 },
-                short_kernel_summary={
-                    "threshold_us":              result.short_kernels.get("threshold_us", 10),
-                    "short_kernel_count":        result.short_kernels.get("short_kernel_count", 0),
-                    "wasted_pct_of_kernel_time": result.short_kernels.get("wasted_pct_of_kernel_time", 0),
-                } if result.short_kernels else None,
+                short_kernel_summary=(
+                    {
+                        "threshold_us": result.short_kernels.get("threshold_us", 10),
+                        "short_kernel_count": result.short_kernels.get(
+                            "short_kernel_count", 0
+                        ),
+                        "wasted_pct_of_kernel_time": result.short_kernels.get(
+                            "wasted_pct_of_kernel_time", 0
+                        ),
+                    }
+                    if result.short_kernels
+                    else None
+                ),
             )
 
             # Get LLM enhancement
@@ -669,11 +684,13 @@ def analyze_database(
         except Exception as e:
             # Other LLM errors are non-critical: add a warning and continue
             # with local-only results.
-            result.warnings.append(AnalysisWarning(
-                severity="warning",
-                message=f"LLM enhancement failed: {e}",
-                recommendation="Analysis continues with local-only results",
-            ))
+            result.warnings.append(
+                AnalysisWarning(
+                    severity="warning",
+                    message=f"LLM enhancement failed: {e}",
+                    recommendation="Analysis continues with local-only results",
+                )
+            )
 
             if verbose:
                 print(f"[Analysis] LLM enhancement failed: {e}")
@@ -712,9 +729,7 @@ def _build_analysis_result(
 
     # Build profiling info
     has_counters = hardware_counters.get("has_counters", False)
-    profiling_mode = (
-        "sys_trace_with_counters" if has_counters else "sys_trace_only"
-    )
+    profiling_mode = "sys_trace_with_counters" if has_counters else "sys_trace_only"
     analysis_tier = 2 if has_counters else 1
 
     profiling_info = ProfilingInfo(
@@ -868,7 +883,8 @@ def _convert_result_to_llm_format(result: AnalysisResult) -> Dict[str, Any]:
         "hardware_metrics": hardware_counters.get("metrics", {}),
         "has_pc_sampling": result.profiling_info.analysis_tier >= 3,
         "interval_timeline": {
-            k: v for k, v in result.interval_timeline.items()
+            k: v
+            for k, v in result.interval_timeline.items()
             if k.endswith("_pct")  # pct fields only — omit _ns fields to reduce tokens
         },
         "kernel_categories": [
@@ -876,9 +892,11 @@ def _convert_result_to_llm_format(result: AnalysisResult) -> Dict[str, Any]:
             for c in result.kernel_categories
         ],
         "short_kernel_summary": {
-            "threshold_us":              result.short_kernels.get("threshold_us", 10),
-            "short_kernel_count":        result.short_kernels.get("short_kernel_count", 0),
-            "wasted_pct_of_kernel_time": result.short_kernels.get("wasted_pct_of_kernel_time", 0),
+            "threshold_us": result.short_kernels.get("threshold_us", 10),
+            "short_kernel_count": result.short_kernels.get("short_kernel_count", 0),
+            "wasted_pct_of_kernel_time": result.short_kernels.get(
+                "wasted_pct_of_kernel_time", 0
+            ),
         },
     }
 
@@ -1008,7 +1026,9 @@ def analyze_source(
         ...     print(f"[{rec['priority']}] {rec['category']}: {rec['issue']}")
     """
     if not source_dir.exists() or not source_dir.is_dir():
-        raise SourceDirectoryNotFoundError(f"Source directory not found or not a directory: {source_dir}")
+        raise SourceDirectoryNotFoundError(
+            f"Source directory not found or not a directory: {source_dir}"
+        )
 
     if verbose:
         print(f"[Tier0] Scanning source directory: {source_dir}")
@@ -1019,9 +1039,11 @@ def analyze_source(
     plan = scanner.analyze()
 
     if verbose:
-        print(f"[Tier0] Scanned {plan.files_scanned} files, "
-              f"found {plan.kernel_count} kernels, "
-              f"programming model: {plan.programming_model}")
+        print(
+            f"[Tier0] Scanned {plan.files_scanned} files, "
+            f"found {plan.kernel_count} kernels, "
+            f"programming model: {plan.programming_model}"
+        )
 
     # Convert ProfilingPlan to SourceAnalysisResult dataclass
     result = _plan_to_source_result(plan)
