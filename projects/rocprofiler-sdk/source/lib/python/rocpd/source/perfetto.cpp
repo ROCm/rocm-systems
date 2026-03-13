@@ -212,9 +212,9 @@ write_perfetto(
     // Samples having stack_id == 0 will start flow arrows from this high value and increment
     // Avoids mess of flow arrows pointing to each and every sample
     // Yes, possible to eventually have flow arrows collisions, but only for long traces
-    static auto global_flow_index  = uint64_t{0x100000000};
-    static auto orig_process_track = ::perfetto::ProcessTrack::Current();
-    static auto orig_process_desc  = orig_process_track.Serialize();
+    static uint64_t global_flow_index  = 0x100000000;
+    static auto     orig_process_track = ::perfetto::ProcessTrack::Current();
+    static auto     orig_process_desc  = orig_process_track.Serialize();
 
     auto*          conn             = perfetto_session.connection;
     const auto&    tracing_session  = perfetto_session.tracing_session;
@@ -480,7 +480,7 @@ write_perfetto(
     };
 
     auto sample_counter_tracks =
-        std::map<std::string, std::map<std::pair<uint32_t, uint32_t>, counter_track_data>>{};
+        std::map<std::string, std::map<std::pair<uint64_t, uint64_t>, counter_track_data>>{};
 
     auto get_category_string = [](std::string_view _category) {
         static auto buffer_names  = sdk::get_buffer_tracing_names();
@@ -610,7 +610,7 @@ write_perfetto(
                 {
                     // For CPU tracks, use (thread_index, 0) as the track index
                     // For GPU tracks, use (0, agent_abs_index) as the track index
-                    std::pair<uint32_t, uint32_t> track_index = {itr.thread_index,
+                    std::pair<uint64_t, uint64_t> track_index = {itr.thread_index,
                                                                  itr.agent_abs_index};
                     auto& track_data = sample_counter_tracks[itr.symbol][track_index];
 
@@ -1021,10 +1021,9 @@ write_perfetto(
                                   itr.first,
                                   itr.second);
                 }
-
-                tracing_session->FlushBlocking();
             }
         }
+        tracing_session->FlushBlocking();
 
         // memory copy counter track
         auto mem_cpy_endpoints = std::map<uint64_t, std::map<rocprofiler_timestamp_t, uint64_t>>{};

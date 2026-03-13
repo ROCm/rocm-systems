@@ -505,8 +505,8 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
             auto _create_agent_index =
                 [&output_cfg](const rocpd::types::agent& _agent) -> tool::agent_index {
                 auto ret_index = tool::create_agent_index(output_cfg.agent_index_value,
-                                                          _agent.node_id,        // absolute index
-                                                          _agent.logical_index,  // relative index
+                                                          _agent.absolute_index,  // absolute index
+                                                          _agent.logical_index,   // relative index
                                                           _agent.type_index,  // type-relative index
                                                           std::string_view(_agent.type));
                 return ret_index;
@@ -578,7 +578,7 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                             FROM
                                 `rocpd_info_pmc` PMC_I
                                 INNER JOIN `rocpd_info_agent` A ON A.id = PMC_I.agent_id
-                                AND A.guid = PMC_I.guid
+                                AND A.guid = PMC_I.guid;
                         )";
 
                 execute_raw_sql_statements(conn, create_info_pmc_table);
@@ -735,9 +735,6 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
 
                         auto threads = rocpd::sql_generator<rocpd::types::thread>{
                             conn, select_guid_nid_pid("threads")};
-
-                        auto pmc_info = rocpd::sql_generator<rocpd::types::pmc_info>{
-                            conn, select_guid_nid_pid("pmc_info")};
 
                         auto pmc_events = rocpd::sql_generator<rocpd::types::pmc_event>{
                             conn, select_guid_nid_pid("pmc_events_schema_3_0")};
