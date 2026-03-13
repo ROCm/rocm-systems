@@ -655,3 +655,37 @@ def test_phase5_rollback_with_blacklist():
          patch.object(ws, "_save_session"):
         ws._phase5_rec_menu(snap)
     mock_blacklist.assert_called_once_with(1)
+
+
+def test_blacklist_block_injected_into_phase6_prompt():
+    import pathlib
+    ws = _make_ws_with_checkpoints()
+    ws._blacklist_checkpoint(1)  # blacklist cp-1 (edit 1, -67%)
+
+    from rocpd.ai_analysis.interactive import _AnalysisSnapshot
+    snap = _AnalysisSnapshot(
+        timestamp="t", iteration=2,
+        recommendations=[{"priority": "HIGH", "category": "C", "issue": "i",
+                           "suggestion": "s", "actions": [], "id": "R1",
+                           "estimated_impact": "", "commands": []}],
+    )
+
+    captured_suggestions = []
+
+    def fake_llm_rewrite(file, suggestions):
+        captured_suggestions.append(suggestions)
+        return "rewritten content"
+
+    with patch.object(ws, "_llm_rewrite_file", side_effect=fake_llm_rewrite), \
+         patch.object(ws, "_pick_file_from_source_paths",
+                      return_value=pathlib.Path("/repo/kernel.hip")), \
+         patch("pathlib.Path.read_text", return_value="original"), \
+         patch("pathlib.Path.write_text"), \
+         patch("pathlib.Path.with_suffix", return_value=pathlib.Path("/repo/kernel.hip.bak")), \
+         patch("pathlib.Path.exists", return_value=False), \
+         patch("builtins.input", side_effect=["y", "done"]), \
+         patch.object(ws, "_save_session"), \
+         patch.object(ws, "_create_checkpoint"):
+        ws._phase6_apply_direct(snap)
+
+    assert any("Blacklisted" in s for s in captured_suggestions)

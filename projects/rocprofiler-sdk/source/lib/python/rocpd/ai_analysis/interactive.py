@@ -3818,6 +3818,9 @@ class WorkflowSession:
             # Capture original content before the LLM call so the diff and backup
             # are consistent even if a build system touches the file mid-call.
             original = chosen.read_text()
+            blacklist_block = self._build_blacklist_block()
+            if blacklist_block:
+                suggestions = blacklist_block + "\n" + suggestions
             rewritten = self._llm_rewrite_file(chosen, suggestions)
             while rewritten is None:
                 try:
