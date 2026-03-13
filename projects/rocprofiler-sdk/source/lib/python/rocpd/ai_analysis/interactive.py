@@ -1923,6 +1923,8 @@ class GitCheckpointManager:
 
     def remove_worktree(self, worktree_path: str) -> None:
         """Remove a worktree directory. Silently skips if path does not exist."""
+        if not worktree_path:
+            return
         if not os.path.exists(worktree_path):
             return
         result = self._git("worktree", "remove", worktree_path, "--force")
@@ -2398,7 +2400,10 @@ class WorkflowSession:
         if self._gcm is None:
             return
         for cp in self._state.checkpoints:
-            self._gcm.remove_worktree(cp.worktree_path)
+            try:
+                self._gcm.remove_worktree(cp.worktree_path)
+            except Exception:
+                pass
 
     def _prune_stale_worktrees(self) -> None:
         """Remove worktrees under ~/.rocpd/sessions/ with no matching session JSON.
