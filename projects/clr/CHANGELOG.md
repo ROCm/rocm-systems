@@ -38,7 +38,7 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 
 * HIP log-level control capabilities HIP runtime adds dynamic logging functionalities, enabling applications to programmatically enable, disable, and configure logging at runtime without modifying environment variables or restarting the application. The result is more precise control over diagnostic output, making it easier to debug targeted code paths or minimize log noise during performance‑critical execution.
 * HIP Graph Segmented Execution: Graph nodes are grouped into segments and dispatched across multiple GPU streams to enable parallel execution.
-  - Batching: Each stream receives a single AccumulateCommand that aggregates all kernel dispatches and submits them efficiently as one batch.
+  - Batching: Each stream receives a single `AccumulateCommand` that aggregates all kernel dispatches and submits them efficiently as one batch.
   - Synchronization: When a segment depends on work running on another stream, a hardware wait is inserted. At completion, all parallel streams synchronize back to the launch stream.
   - Signaling: Segments emit hardware signals only when downstream segments require them—typically at fork points or when executing in parallel with other segments.
 
