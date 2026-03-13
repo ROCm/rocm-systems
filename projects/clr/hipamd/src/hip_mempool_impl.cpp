@@ -495,9 +495,13 @@ amd::Os::FileDesc MemoryPool::Export() {
 
   constexpr uint32_t kFileNameSize = 20;
   char file_name[kFileNameSize];
-  // Generate a unique name from the mempool pointer
-  // Note: Windows can accept an unnamed allocation
-  snprintf(file_name, kFileNameSize, "%p", this);
+  // Generate a unique name from the mempool pointer using process ID
+  // Windows cannot support unnamed handles for global IPC without security attributes
+  // For windows return the unique id to create filename on client for file mapping
+  static std::atomic<uint32_t> ipc_seq{1};
+  uint32_t ipc_id = (static_cast<uint32_t>(amd::Os::getProcessId()) << 16)
+                   | (ipc_seq.fetch_add(1) & 0xFFFF);
+  snprintf(file_name, kFileNameSize, "/hip_%08x", ipc_id);
   amd::Os::FileDesc handle{};
   shared_ = reinterpret_cast<SharedMemPool*>(
       amd::Os::CreateIpcMemory(file_name, sizeof(SharedMemPool), &handle));
@@ -512,16 +516,36 @@ amd::Os::FileDesc MemoryPool::Export() {
       shared_->access_size_++;
     }
   }
+#if defined(_WIN32)
+  return reinterpret_cast<amd::Os::FileDesc>(static_cast<uintptr_t>((ipc_id)));
+#else
   return handle;
+#endif
 }
 
 // ================================================================================================
 bool MemoryPool::Import(amd::Os::FileDesc handle) {
   std::scoped_lock lock(lock_pool_ops_);
   bool result = false;
+
+#if defined(_WIN32)
+  constexpr uint32_t kFileNameSize = 20;
+  char file_name[kFileNameSize];
+  // Generate a unique name from the mempool pointer
+  uint32_t ipc_id = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(handle));
+  snprintf(file_name, kFileNameSize, "/hip_%08x", ipc_id);
+
+  const void* addr = nullptr;
+  if (!amd::Os::MemoryMapFileTruncated(file_name,
+                                       &addr,
+                                       sizeof(SharedMemPool))) {
+    return false;
+  }
+  auto shared = reinterpret_cast<SharedMemPool*>(const_cast<void*>(addr));
+#else
   auto shared = reinterpret_cast<SharedMemPool*>(
       amd::Os::OpenIpcMemory(nullptr, handle, sizeof(SharedMemPool)));
-
+#endif
   if (shared != nullptr) {
     state_.value_ = shared->state_;
     for (uint32_t i = 0; i < shared->access_size_; ++i) {
