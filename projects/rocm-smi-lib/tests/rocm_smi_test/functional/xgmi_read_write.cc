@@ -43,24 +43,25 @@
  *
  */
 
-#include <stdint.h>
+#include "rocm_smi_test/functional/xgmi_read_write.h"
+
 #include <stddef.h>
+#include <stdint.h>
 
 #include <iostream>
 
 #include "gtest/gtest.h"
 #include "rocm_smi/rocm_smi.h"
-#include "rocm_smi_test/functional/xgmi_read_write.h"
 #include "rocm_smi_test/test_common.h"
 
 TestXGMIReadWrite::TestXGMIReadWrite() : TestBase() {
   set_title("RSMI XGMI Read/Write Test");
-  set_description("This test verifies that XGMI error counts can be read"
-                               " properly, and that the count can be reset.");
+  set_description(
+      "This test verifies that XGMI error counts can be read"
+      " properly, and that the count can be reset.");
 }
 
-TestXGMIReadWrite::~TestXGMIReadWrite(void) {
-}
+TestXGMIReadWrite::~TestXGMIReadWrite(void) {}
 
 void TestXGMIReadWrite::SetUp(void) {
   TestBase::SetUp();
@@ -68,9 +69,7 @@ void TestXGMIReadWrite::SetUp(void) {
   return;
 }
 
-void TestXGMIReadWrite::DisplayTestInfo(void) {
-  TestBase::DisplayTestInfo();
-}
+void TestXGMIReadWrite::DisplayTestInfo(void) { TestBase::DisplayTestInfo(); }
 
 void TestXGMIReadWrite::DisplayResults(void) const {
   TestBase::DisplayResults();
@@ -83,7 +82,6 @@ void TestXGMIReadWrite::Close() {
   TestBase::Close();
 }
 
-
 void TestXGMIReadWrite::Run(void) {
   GTEST_SKIP_("Temporarily disabled");
   rsmi_status_t err;
@@ -92,9 +90,7 @@ void TestXGMIReadWrite::Run(void) {
 
   TestBase::Run();
   if (setup_failed_) {
-    IF_VERB(STANDARD) {
-      std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl;
-    }
+    IF_VERB(STANDARD) { std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl; }
     return;
   }
 
@@ -103,31 +99,27 @@ void TestXGMIReadWrite::Run(void) {
 
     err = rsmi_dev_xgmi_hive_id_get(dv_ind, &hive_id);
     if (err == RSMI_STATUS_NOT_SUPPORTED) {
-        std::cout <<
-            "\t**rsmi_dev_xgmi_hive_id_get() is not supported"
-            " on this machine" << std::endl;
-        // Verify api support checking functionality is working
-        err = rsmi_dev_xgmi_hive_id_get(dv_ind, nullptr);
-        ASSERT_EQ(err, RSMI_STATUS_NOT_SUPPORTED);
+      std::cout << "\t**rsmi_dev_xgmi_hive_id_get() is not supported"
+                   " on this machine"
+                << std::endl;
+      // Verify api support checking functionality is working
+      err = rsmi_dev_xgmi_hive_id_get(dv_ind, nullptr);
+      ASSERT_EQ(err, RSMI_STATUS_NOT_SUPPORTED);
 
-        continue;
+      continue;
     } else {
-        CHK_ERR_ASRT(err)
-        IF_VERB(STANDARD) {
-            std::cout << "\t**XGMI Hive ID : " << std::hex << hive_id <<
-            std::endl;
-        }
-        // Verify api support checking functionality is working
-        err = rsmi_dev_xgmi_hive_id_get(dv_ind, nullptr);
-        ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
+      CHK_ERR_ASRT(err)
+      IF_VERB(STANDARD) { std::cout << "\t**XGMI Hive ID : " << std::hex << hive_id << std::endl; }
+      // Verify api support checking functionality is working
+      err = rsmi_dev_xgmi_hive_id_get(dv_ind, nullptr);
+      ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
     }
 
     err = rsmi_dev_xgmi_error_status(dv_ind, &err_stat);
 
     if (err == RSMI_STATUS_NOT_SUPPORTED) {
       IF_VERB(STANDARD) {
-        std::cout << "\t**XGMI Error Status: Not supported on this machine"
-                                                               << std::endl;
+        std::cout << "\t**XGMI Error Status: Not supported on this machine" << std::endl;
       }
       // Verify api support checking functionality is working
       err = rsmi_dev_xgmi_error_status(dv_ind, nullptr);
@@ -137,8 +129,7 @@ void TestXGMIReadWrite::Run(void) {
     }
     CHK_ERR_ASRT(err)
     IF_VERB(STANDARD) {
-      std::cout << "\t**XGMI Error Status: " <<
-                               static_cast<uint32_t>(err_stat) << std::endl;
+      std::cout << "\t**XGMI Error Status: " << static_cast<uint32_t>(err_stat) << std::endl;
     }
     // Verify api support checking functionality is working
     err = rsmi_dev_xgmi_error_status(dv_ind, nullptr);
@@ -148,8 +139,6 @@ void TestXGMIReadWrite::Run(void) {
     // test won't be meaningless
     err = rsmi_dev_xgmi_error_reset(dv_ind);
     CHK_ERR_ASRT(err)
-    IF_VERB(STANDARD) {
-      std::cout << "\t**Successfully reset XGMI Error Status: " << std::endl;
-    }
+    IF_VERB(STANDARD) { std::cout << "\t**Successfully reset XGMI Error Status: " << std::endl; }
   }
 }
