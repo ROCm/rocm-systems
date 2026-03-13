@@ -1253,18 +1253,6 @@ perfetto_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& _gpu_pmc)
 void
 perfetto_processor_t::handle([[maybe_unused]] const ainic_sample& _nic_sample)
 {
-    static int call_count = 0;
-    if(call_count++ < 3)
-    {
-        fprintf(stderr,
-                "[perfetto_processor] handle ainic_sample: device=%u, ts=%lu, "
-                "enabled=%u, rx_bytes=%lu, tx_bytes=%lu\n",
-                _nic_sample.device_id, (unsigned long) _nic_sample.timestamp,
-                _nic_sample.enabled_metric.value,
-                (unsigned long) _nic_sample.metric_values.rx_rdma_ucast_bytes,
-                (unsigned long) _nic_sample.metric_values.tx_rdma_ucast_bytes);
-    }
-
     auto _ts        = _nic_sample.timestamp;
     auto _device_id = _nic_sample.device_id;
 
