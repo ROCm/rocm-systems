@@ -71,7 +71,6 @@ set (HIP_PLATFORM amd CACHE STRING "HIP platform")
 find_package(HIP QUIET)
 find_package(FFmpeg QUIET)
 find_package(rocdecode QUIET)
-find_package(rocdecode-host 1.0.0 QUIET)
 
 if(HIP_FOUND AND rocdecode_FOUND)
     # HIP
@@ -85,6 +84,7 @@ if(HIP_FOUND AND rocdecode_FOUND)
     endif()
     if(rocdecode-host_FOUND AND NOT USING_THE_ROCK)
       # rocdecode-host
+      find_package(rocdecode-host 1.0.0 QUIET)
       include_directories(${rocdecode-host_INCLUDE_DIR})
       set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} rocdecode::rocdecode-host)
     endif()
