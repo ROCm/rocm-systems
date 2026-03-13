@@ -28,17 +28,17 @@
  * JIT/bitcode consumers (e.g. PyTorch/Triton) need stable, unmangled symbol names.
  * Each extern "C" function forwards to the corresponding rocshmem:: API.
  *
- * (temporary until extern "C" refactor)                                                                                                              
-   * Current coverage:                                                                                                                                                             
-   * - RMA: put/get/p/g + variants (wave, wg, nbi)                                                                                                                                 
-   * - AMO: standard, extended, bitwise                                                                                                                                            
-   * - Sync: wait_until variants, test                                                                                                                                             
-   * - Signal: put_signal variants                                                                                                                                                 
-   *                                                                                                                                                                               
-   * Intentionally excluded (internal use only):                                                                                                                                   
-   * - Context methods                                                                                                                                                             
-   * - Backend dispatchers                                                                                                                                                         
-   * - Template functions
+ * (temporary until extern "C" refactor)
+ * Current coverage:
+ * - RMA: put/get/p/g + variants (wave, wg, nbi)
+ * - AMO: standard, extended, bitwise
+ * - Sync: wait_until variants, test
+ * - Signal: put_signal variants
+ *
+ * Intentionally excluded (internal use only):
+ * - Context methods
+ * - Backend dispatchers
+ * - Template functions
  */
 
 #include <hip/hip_runtime.h>

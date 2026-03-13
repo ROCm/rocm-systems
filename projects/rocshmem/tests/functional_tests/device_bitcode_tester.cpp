@@ -24,6 +24,7 @@
 
 #include "device_bitcode_tester.hpp"
 #include <rocshmem/rocshmem.hpp>
+#include <cinttypes>
 #include <cstdio>
 #include <fstream>
 #include <string>
@@ -112,9 +113,10 @@ void DeviceBitcodeTester::run_rma_test(const char* label, const char* kernel,
                                        int count, T scale, T offset) {
   T* sym_src = static_cast<T*>(rocshmem_malloc(count * sizeof(T)));
   T* sym_dst = static_cast<T*>(rocshmem_malloc(count * sizeof(T)));
-  T* d_result;
-  CHECK_HIP(hipMalloc(&d_result, count * sizeof(T)));
-  CHECK_HIP(hipMemset(d_result, 0, count * sizeof(T)));
+  // Use symmetric heap for get result so GDA can write to it (only heap is
+  // registered for RDMA); hipMalloc'd dest would never receive the get.
+  T* sym_result = static_cast<T*>(rocshmem_malloc(count * sizeof(T)));
+  for (int i = 0; i < count; i++) sym_result[i] = static_cast<T>(-1);
 
   for (int i = 0; i < count; i++) {
     sym_src[i] = static_cast<T>(my_pe) * scale + static_cast<T>(i) + offset;
@@ -122,20 +124,18 @@ void DeviceBitcodeTester::run_rma_test(const char* label, const char* kernel,
   }
   rocshmem_barrier_all();
 
-  void* kargs[] = {&sym_src, &sym_dst, &d_result, &my_pe, &n_pes, &count};
+  void* kargs[] = {&sym_src, &sym_dst, &sym_result, &my_pe, &n_pes, &count};
   launch(kernel, kargs);
   rocshmem_barrier_all();
-
-  std::vector<T> h_result(count);
-  CHECK_HIP(hipMemcpy(h_result.data(), d_result, count * sizeof(T),
-                       hipMemcpyDeviceToHost));
 
   int sender = (my_pe - 1 + n_pes) % n_pes;
   bool pass = true;
   for (int i = 0; i < count; i++) {
     T expected = static_cast<T>(sender) * scale + static_cast<T>(i) + offset;
-    if (h_result[i] != expected) {
-      printf("[PE %d] %s: [%d] FAIL\n", my_pe, label, i);
+    if (sym_result[i] != expected) {
+      printf("[PE %d] %s: [%d] got=%d expect=%d (sender=PE %d) FAIL\n",
+             my_pe, label, i, static_cast<int>(sym_result[i]),
+             static_cast<int>(expected), sender);
       pass = false;
     }
   }
@@ -143,7 +143,7 @@ void DeviceBitcodeTester::run_rma_test(const char* label, const char* kernel,
     printf("[PE %d] %s: %d elements OK PASS\n", my_pe, label, count);
   if (!pass) all_pass = false;
 
-  CHECK_HIP(hipFree(d_result));
+  rocshmem_free(sym_result);
   rocshmem_free(sym_src);
   rocshmem_free(sym_dst);
 }
@@ -223,23 +223,23 @@ void DeviceBitcodeTester::execute() {
                       "test_typed_float_put_get", 4, 10.5f, 0.0f);
   rocshmem_barrier_all();
 
-  { // test_typed_atomic
-    int* sym_counter = static_cast<int*>(rocshmem_malloc(sizeof(int)));
+  { // test_typed_atomic (64-bit atomics for GDA compatibility)
+    int64_t* sym_counter = static_cast<int64_t*>(rocshmem_malloc(sizeof(int64_t)));
     *sym_counter = 0;
-    int* d_old;
-    CHECK_HIP(hipMalloc(&d_old, 2 * sizeof(int)));
-    CHECK_HIP(hipMemset(d_old, 0, 2 * sizeof(int)));
+    int64_t* d_old;
+    CHECK_HIP(hipMalloc(&d_old, 2 * sizeof(int64_t)));
+    CHECK_HIP(hipMemset(d_old, 0, 2 * sizeof(int64_t)));
     rocshmem_barrier_all();
 
     void* kargs[] = {&sym_counter, &d_old, &my_pe, &n_pes};
     launch("test_typed_atomic", kargs);
     rocshmem_barrier_all();
 
-    int h_old[2];
+    int64_t h_old[2];
     CHECK_HIP(hipMemcpy(h_old, d_old, sizeof(h_old), hipMemcpyDeviceToHost));
 
     bool pass = (h_old[0] == 0 && h_old[1] == 10);
-    printf("[PE %d] test_typed_atomic: fetch_add old=%d(expect 0) cas_old=%d(expect 10) %s\n",
+    printf("[PE %d] test_typed_atomic: fetch_add old=%" PRId64 "(expect 0) cas_old=%" PRId64 "(expect 10) %s\n",
            my_pe, h_old[0], h_old[1], pass ? "PASS" : "FAIL");
     if (!pass) all_pass = false;
 
@@ -314,23 +314,23 @@ void DeviceBitcodeTester::execute() {
                     "test_typed_int_put_get_wave", 4, 200, 0);
   rocshmem_barrier_all();
 
-  { // test_typed_amo_extended
-    int* sym_val = static_cast<int*>(rocshmem_malloc(sizeof(int)));
+  { // test_typed_amo_extended (64-bit atomics for GDA compatibility)
+    int64_t* sym_val = static_cast<int64_t*>(rocshmem_malloc(sizeof(int64_t)));
     *sym_val = 0;
-    int* d_results;
-    CHECK_HIP(hipMalloc(&d_results, 3 * sizeof(int)));
-    CHECK_HIP(hipMemset(d_results, 0, 3 * sizeof(int)));
+    int64_t* d_results;
+    CHECK_HIP(hipMalloc(&d_results, 3 * sizeof(int64_t)));
+    CHECK_HIP(hipMemset(d_results, 0, 3 * sizeof(int64_t)));
     rocshmem_barrier_all();
 
     void* kargs[] = {&sym_val, &d_results, &my_pe};
     launch("test_typed_amo_extended", kargs);
     rocshmem_barrier_all();
 
-    int h[3];
+    int64_t h[3];
     CHECK_HIP(hipMemcpy(h, d_results, sizeof(h), hipMemcpyDeviceToHost));
 
     bool pass = (h[0] == 42 && h[1] == 42 && h[2] == 99);
-    printf("[PE %d] test_typed_amo_extended: fetch=%d(42) swap_old=%d(42) final=%d(99) %s\n",
+    printf("[PE %d] test_typed_amo_extended: fetch=%" PRId64 "(42) swap_old=%" PRId64 "(42) final=%" PRId64 "(99) %s\n",
            my_pe, h[0], h[1], h[2], pass ? "PASS" : "FAIL");
     if (!pass) all_pass = false;
 
@@ -340,24 +340,24 @@ void DeviceBitcodeTester::execute() {
 
   rocshmem_barrier_all();
 
-  { // test_typed_amo_bitwise
-    unsigned int* sym_val = static_cast<unsigned int*>(
-        rocshmem_malloc(sizeof(unsigned int)));
+  { // test_typed_amo_bitwise (64-bit atomics for GDA compatibility)
+    uint64_t* sym_val = static_cast<uint64_t*>(
+        rocshmem_malloc(sizeof(uint64_t)));
     *sym_val = 0;
-    unsigned int* d_results;
-    CHECK_HIP(hipMalloc(&d_results, 3 * sizeof(unsigned int)));
-    CHECK_HIP(hipMemset(d_results, 0, 3 * sizeof(unsigned int)));
+    uint64_t* d_results;
+    CHECK_HIP(hipMalloc(&d_results, 3 * sizeof(uint64_t)));
+    CHECK_HIP(hipMemset(d_results, 0, 3 * sizeof(uint64_t)));
     rocshmem_barrier_all();
 
     void* kargs[] = {&sym_val, &d_results, &my_pe};
     launch("test_typed_amo_bitwise", kargs);
     rocshmem_barrier_all();
 
-    unsigned int h[3];
+    uint64_t h[3];
     CHECK_HIP(hipMemcpy(h, d_results, sizeof(h), hipMemcpyDeviceToHost));
 
     bool pass = (h[0] == 0xFF && h[1] == 0x0F && h[2] == 0x03);
-    printf("[PE %d] test_typed_amo_bitwise: fetch_and_old=0x%x(0xff) after=0x%x(0xf) final=0x%x(0x3) %s\n",
+    printf("[PE %d] test_typed_amo_bitwise: fetch_and_old=0x%" PRIx64 "(0xff) after=0x%" PRIx64 "(0xf) final=0x%" PRIx64 "(0x3) %s\n",
            my_pe, h[0], h[1], h[2], pass ? "PASS" : "FAIL");
     if (!pass) all_pass = false;
 

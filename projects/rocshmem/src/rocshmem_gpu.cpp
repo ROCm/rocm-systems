@@ -350,15 +350,15 @@ __device__ void rocshmem_atomic_xor(T *dest, T value, int pe) {
 }
 
 __device__ void rocshmem_barrier() {
-  rocshmem_ctx_barrier(ROCSHMEM_CTX_DEFAULT, ROCSHMEM_TEAM_WORLD);
+  rocshmem_ctx_barrier(ROCSHMEM_CTX_DEFAULT, device::ROCSHMEM_TEAM_WORLD);
 }
 
 __device__ void rocshmem_barrier_wave() {
-  rocshmem_ctx_barrier_wave(ROCSHMEM_CTX_DEFAULT, ROCSHMEM_TEAM_WORLD);
+  rocshmem_ctx_barrier_wave(ROCSHMEM_CTX_DEFAULT, device::ROCSHMEM_TEAM_WORLD);
 }
 
 __device__ void rocshmem_barrier_wg() {
-  rocshmem_ctx_barrier_wg(ROCSHMEM_CTX_DEFAULT, ROCSHMEM_TEAM_WORLD);
+  rocshmem_ctx_barrier_wg(ROCSHMEM_CTX_DEFAULT, device::ROCSHMEM_TEAM_WORLD);
 }
 
 #define ROCSHMEM_PUTMEM_SIGNAL_DEF(SUFFIX)                                                      \

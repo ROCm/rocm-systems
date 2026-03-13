@@ -51,13 +51,13 @@ extern "C" {
   DECL_RMA(float, float)
   DECL_RMA_WAVE(int, int)
 
-  __device__ int rocshmem_int_atomic_fetch_add(int*, int, int);
-  __device__ int rocshmem_int_atomic_compare_swap(int*, int, int, int);
-  __device__ int rocshmem_int_atomic_fetch(int*, int);
-  __device__ void rocshmem_int_atomic_set(int*, int, int);
-  __device__ int rocshmem_int_atomic_swap(int*, int, int);
-  __device__ unsigned int rocshmem_uint_atomic_fetch_and(unsigned int*, unsigned int, int);
-  __device__ void rocshmem_uint_atomic_and(unsigned int*, unsigned int, int);
+  __device__ int64_t rocshmem_int64_atomic_fetch_add(int64_t*, int64_t, int);
+  __device__ int64_t rocshmem_int64_atomic_compare_swap(int64_t*, int64_t, int64_t, int);
+  __device__ int64_t rocshmem_int64_atomic_fetch(int64_t*, int);
+  __device__ void rocshmem_int64_atomic_set(int64_t*, int64_t, int);
+  __device__ int64_t rocshmem_int64_atomic_swap(int64_t*, int64_t, int);
+  __device__ uint64_t rocshmem_uint64_atomic_fetch_and(uint64_t*, uint64_t, int);
+  __device__ void rocshmem_uint64_atomic_and(uint64_t*, uint64_t, int);
 
   __device__ void rocshmem_int_put_signal(int*, const int*, size_t,
                                           uint64_t*, uint64_t, int, int);
@@ -91,10 +91,12 @@ extern "C" __global__ void test_putmem_getmem(
 
     rocshmem_putmem(sym_dst, sym_src,
                     count * sizeof(int), next_pe);
+    rocshmem_quiet();
     rocshmem_barrier_all();
 
     rocshmem_getmem(local_result, sym_src,
                     count * sizeof(int), prev_pe);
+    rocshmem_quiet();
   }
 }
 
@@ -107,9 +109,11 @@ extern "C" __global__ void test_typed_int_put_get(
     int prev_pe = (my_pe - 1 + n_pes) % n_pes;
 
     rocshmem_int_put(sym_dst, sym_src, count, next_pe);
+    rocshmem_quiet();
     rocshmem_barrier_all();
 
     rocshmem_int_get(local_result, sym_src, count, prev_pe);
+    rocshmem_quiet();
   }
 }
 
@@ -122,22 +126,24 @@ extern "C" __global__ void test_typed_float_put_get(
     int prev_pe = (my_pe - 1 + n_pes) % n_pes;
 
     rocshmem_float_put(sym_dst, sym_src, count, next_pe);
+    rocshmem_quiet();
     rocshmem_barrier_all();
 
     rocshmem_float_get(local_result, sym_src, count, prev_pe);
+    rocshmem_quiet();
   }
 }
 
 extern "C" __global__ void test_typed_atomic(
-    int *sym_counter, int *out_old, int my_pe, int n_pes)
+    int64_t *sym_counter, int64_t *out_old, int my_pe, int n_pes)
 {
   if (threadIdx.x == 0 && blockIdx.x == 0) {
-    int old = rocshmem_int_atomic_fetch_add(sym_counter, 10, my_pe);
+    int64_t old = rocshmem_int64_atomic_fetch_add(sym_counter, 10, my_pe);
     out_old[0] = old;
 
     rocshmem_barrier_all();
 
-    int swapped = rocshmem_int_atomic_compare_swap(
+    int64_t swapped = rocshmem_int64_atomic_compare_swap(
         sym_counter, 10, 999, my_pe);
     out_old[1] = swapped;
   }
@@ -185,36 +191,36 @@ extern "C" __global__ void test_typed_int_put_get_wave(
 }
 
 extern "C" __global__ void test_typed_amo_extended(
-    int *sym_val, int *out_results, int my_pe)
+    int64_t *sym_val, int64_t *out_results, int my_pe)
 {
   if (threadIdx.x == 0 && blockIdx.x == 0) {
-    rocshmem_int_atomic_set(sym_val, 42, my_pe);
-    int fetched = rocshmem_int_atomic_fetch(sym_val, my_pe);
+    rocshmem_int64_atomic_set(sym_val, 42, my_pe);
+    int64_t fetched = rocshmem_int64_atomic_fetch(sym_val, my_pe);
     out_results[0] = fetched;
 
-    int old = rocshmem_int_atomic_swap(sym_val, 99, my_pe);
+    int64_t old = rocshmem_int64_atomic_swap(sym_val, 99, my_pe);
     out_results[1] = old;
 
-    int final_val = rocshmem_int_atomic_fetch(sym_val, my_pe);
+    int64_t final_val = rocshmem_int64_atomic_fetch(sym_val, my_pe);
     out_results[2] = final_val;
   }
 }
 
 extern "C" __global__ void test_typed_amo_bitwise(
-    unsigned int *sym_val, unsigned int *out_results, int my_pe)
+    uint64_t *sym_val, uint64_t *out_results, int my_pe)
 {
   if (threadIdx.x == 0 && blockIdx.x == 0) {
-    rocshmem_int_atomic_set(reinterpret_cast<int*>(sym_val), 0xFF, my_pe);
-    unsigned int old = rocshmem_uint_atomic_fetch_and(sym_val, 0x0F, my_pe);
+    rocshmem_int64_atomic_set(reinterpret_cast<int64_t*>(sym_val), 0xFF, my_pe);
+    uint64_t old = rocshmem_uint64_atomic_fetch_and(sym_val, 0x0F, my_pe);
     out_results[0] = old;
 
-    unsigned int after_and = rocshmem_int_atomic_fetch(
-        reinterpret_cast<int*>(sym_val), my_pe);
+    uint64_t after_and = rocshmem_int64_atomic_fetch(
+        reinterpret_cast<int64_t*>(sym_val), my_pe);
     out_results[1] = after_and;
 
-    rocshmem_uint_atomic_and(sym_val, 0x03, my_pe);
-    unsigned int final_val = rocshmem_int_atomic_fetch(
-        reinterpret_cast<int*>(sym_val), my_pe);
+    rocshmem_uint64_atomic_and(sym_val, 0x03, my_pe);
+    uint64_t final_val = rocshmem_int64_atomic_fetch(
+        reinterpret_cast<int64_t*>(sym_val), my_pe);
     out_results[2] = final_val;
   }
 }
