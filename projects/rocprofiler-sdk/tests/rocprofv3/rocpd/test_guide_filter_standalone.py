@@ -220,9 +220,7 @@ class TestFilterGuide:
         assert "future content" not in result
 
     def test_tag_comment_on_line2_still_found(self):
-        guide = (
-            "# Guide\n\n## Section\n\n<!-- rocpd-context: tier1 -->\nline2 tag content\n"
-        )
+        guide = "# Guide\n\n## Section\n\n<!-- rocpd-context: tier1 -->\nline2 tag content\n"
         result = self._filter(guide, {"tier1"})
         assert "line2 tag content" in result
 
@@ -443,7 +441,9 @@ class TestEndToEndWithRealGuide:
         assert "Compiler Optimization Flags" not in prompt
 
     def test_tier2_latency_excludes_compiler_section(self):
-        prompt = self._build_prompt(tier=2, has_counters=True, bottleneck_type="latency")
+        prompt = self._build_prompt(
+            tier=2, has_counters=True, bottleneck_type="latency"
+        )
         assert "Compiler Optimization Flags" not in prompt
 
     def test_tier0_includes_compiler_section(self):
@@ -451,7 +451,9 @@ class TestEndToEndWithRealGuide:
         assert "Compiler Optimization Flags" in prompt
 
     def test_bottleneck_compute_includes_compiler_section(self):
-        prompt = self._build_prompt(tier=2, has_counters=True, bottleneck_type="compute")
+        prompt = self._build_prompt(
+            tier=2, has_counters=True, bottleneck_type="compute"
+        )
         assert "Compiler Optimization Flags" in prompt
 
     def test_critical_requirements_always_present(self):

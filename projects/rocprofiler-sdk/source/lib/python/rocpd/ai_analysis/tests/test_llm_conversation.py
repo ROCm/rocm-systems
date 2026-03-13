@@ -50,7 +50,9 @@ class _MockAnthropicClient:
 
 
 def _openai_chunk(text):
-    return SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content=text))])
+    return SimpleNamespace(
+        choices=[SimpleNamespace(delta=SimpleNamespace(content=text))]
+    )
 
 
 class _MockOpenAICompletions:
@@ -463,7 +465,9 @@ class TestInteractiveIntegration(unittest.TestCase):
         )
         session._tier0 = plan
 
-        session._llm_annotate_profiling_plan([("counter", "rocprofv3 --pmc A -- ./app")])
+        session._llm_annotate_profiling_plan(
+            [("counter", "rocprofv3 --pmc A -- ./app")]
+        )
         mock_conv.send.assert_called_once()
         call_msg = mock_conv.send.call_args[0][0]
         self.assertIn("Annotate this profiling plan", call_msg)
