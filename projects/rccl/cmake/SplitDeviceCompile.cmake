@@ -46,8 +46,25 @@ function(setup_split_device_compile)
     message(FATAL_ERROR "setup_split_device_compile: BUNDLER_HOST_TARGET is required")
   endif()
 
-  set(BUNDLER "${SDC_ROCM_PATH}/llvm/bin/clang-offload-bundler")
-  set(LLD     "${SDC_ROCM_PATH}/llvm/bin/ld.lld")
+  # Derive LLVM tool paths from the compiler location so that this works in
+  # both /opt/rocm installs and TheRock/CI build trees.
+  get_filename_component(_compiler_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+  find_program(BUNDLER clang-offload-bundler
+    HINTS "${_compiler_dir}" "${SDC_ROCM_PATH}/llvm/bin" NO_DEFAULT_PATH)
+  if(NOT BUNDLER)
+    find_program(BUNDLER clang-offload-bundler)
+  endif()
+  find_program(LLD ld.lld
+    HINTS "${_compiler_dir}" "${SDC_ROCM_PATH}/llvm/bin" NO_DEFAULT_PATH)
+  if(NOT LLD)
+    find_program(LLD ld.lld)
+  endif()
+  if(NOT BUNDLER)
+    message(FATAL_ERROR "Split device compile: clang-offload-bundler not found")
+  endif()
+  if(NOT LLD)
+    message(FATAL_ERROR "Split device compile: ld.lld not found")
+  endif()
 
   # Output directories
   set(BC_DIR   "${SDC_OUTPUT_DIR}/split_device/bc")
