@@ -115,7 +115,7 @@ class TexObjectTestWrapper {
  *  - Textures supported on device
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGetTexObjectResourceDesc_positive") {
+TEST_CASE(Unit_hipGetTexObjectResourceDesc_positive) {
   CHECK_IMAGE_SUPPORT;
   CTX_CREATE();
 
@@ -148,7 +148,7 @@ TEST_CASE("Unit_hipGetTexObjectResourceDesc_positive") {
  *  - Textures supported on device
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGetTexObjectResourceDesc_Negative_Parameters") {
+TEST_CASE(Unit_hipGetTexObjectResourceDesc_Negative_Parameters) {
   CHECK_IMAGE_SUPPORT;
   CTX_CREATE();
 
@@ -200,7 +200,7 @@ TEST_CASE("Unit_hipGetTexObjectResourceDesc_Negative_Parameters") {
  *  - Platform specific (AMD)
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGetTexObjectResourceViewDesc_positive") {
+TEST_CASE(Unit_hipGetTexObjectResourceViewDesc_positive) {
   CHECK_IMAGE_SUPPORT;
   CTX_CREATE();
   TexObjectTestWrapper* tex_obj_wrapper = new TexObjectTestWrapper(true);
@@ -233,7 +233,7 @@ TEST_CASE("Unit_hipGetTexObjectResourceViewDesc_positive") {
  *  - Platform specific (AMD)
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGetTexObjectResourceViewDesc_Negative_Parameters") {
+TEST_CASE(Unit_hipGetTexObjectResourceViewDesc_Negative_Parameters) {
   CHECK_IMAGE_SUPPORT;
   CTX_CREATE();
   TexObjectTestWrapper* tex_obj_wrapper = new TexObjectTestWrapper(true);
@@ -285,7 +285,7 @@ TEST_CASE("Unit_hipGetTexObjectResourceViewDesc_Negative_Parameters") {
  *  - Platform specific (AMD)
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGetTexObjectTextureDesc_positive") {
+TEST_CASE(Unit_hipGetTexObjectTextureDesc_positive) {
   CHECK_IMAGE_SUPPORT;
   CTX_CREATE();
 
@@ -319,7 +319,7 @@ TEST_CASE("Unit_hipGetTexObjectTextureDesc_positive") {
  *  - Platform specific (AMD)
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGetTexObjectTextureDesc_Negative_Parameters") {
+TEST_CASE(Unit_hipGetTexObjectTextureDesc_Negative_Parameters) {
   CHECK_IMAGE_SUPPORT;
   CTX_CREATE();
 
@@ -367,7 +367,7 @@ TEST_CASE("Unit_hipGetTexObjectTextureDesc_Negative_Parameters") {
  *  - Textures supported on device
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipTexObjectDestroy_positive") {
+TEST_CASE(Unit_hipTexObjectDestroy_positive) {
   CHECK_IMAGE_SUPPORT;
   CTX_CREATE();
 

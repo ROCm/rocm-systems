@@ -35,7 +35,7 @@ namespace hip {
 hip::Stream* Device::NullStream(bool wait) {
   ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_WAIT, "NullStream %p, wait %d", null_stream_, wait);
   if (null_stream_ == nullptr) {
-    amd::ScopedLock lock(lock_);
+    std::scoped_lock lock(lock_);
     if (null_stream_ == nullptr) {
       null_stream_ = new Stream(this, Stream::Priority::Normal, 0, true);
       // Stream creation might be failed from rcor and in that case, vdev is null.
@@ -98,14 +98,14 @@ bool Device::Create() {
 
 // ================================================================================================
 bool Device::IsMemoryPoolValid(MemoryPool* pool) {
-  amd::ScopedLock lock(lock_);
+  std::scoped_lock lock(lock_);
   bool result = (mem_pools_.find(pool) != mem_pools_.end()) ? true : false;
   return result;
 }
 
 // ================================================================================================
 void Device::AddMemoryPool(MemoryPool* pool) {
-  amd::ScopedLock lock(lock_);
+  std::scoped_lock lock(lock_);
   if (auto it = mem_pools_.find(pool); it == mem_pools_.end()) {
     mem_pools_.insert(pool);
   }
@@ -113,7 +113,7 @@ void Device::AddMemoryPool(MemoryPool* pool) {
 
 // ================================================================================================
 void Device::RemoveMemoryPool(MemoryPool* pool) {
-  amd::ScopedLock lock(lock_);
+  std::scoped_lock lock(lock_);
   if (auto it = mem_pools_.find(pool); it != mem_pools_.end()) {
     mem_pools_.erase(it);
   }
@@ -121,7 +121,7 @@ void Device::RemoveMemoryPool(MemoryPool* pool) {
 
 // ================================================================================================
 bool Device::FreeMemory(amd::Memory* memory, Stream* stream, Event* event) {
-  amd::ScopedLock lock(lock_);
+  std::scoped_lock lock(lock_);
   // Search for memory in the entire list of pools
   for (auto it : mem_pools_) {
     if (it->FreeMemory(memory, stream, event)) {
@@ -133,7 +133,7 @@ bool Device::FreeMemory(amd::Memory* memory, Stream* stream, Event* event) {
 
 // ================================================================================================
 void Device::ReleaseFreedMemory() {
-  amd::ScopedLock lock(lock_);
+  std::scoped_lock lock(lock_);
   // Search for memory in the entire list of pools
   for (auto it : mem_pools_) {
     it->ReleaseFreedMemory();
@@ -142,7 +142,7 @@ void Device::ReleaseFreedMemory() {
 
 // ================================================================================================
 void Device::RemoveStreamFromPools(Stream* stream) {
-  amd::ScopedLock lock(lock_);
+  std::scoped_lock lock(lock_);
   // Update all pools with the destroyed stream
   for (auto it : mem_pools_) {
     it->RemoveStream(stream);
@@ -151,7 +151,7 @@ void Device::RemoveStreamFromPools(Stream* stream) {
 
 // ================================================================================================
 void Device::AddSafeStream(Stream* event_stream, Stream* wait_stream) {
-  amd::ScopedLock lock(lock_);
+  std::scoped_lock lock(lock_);
   // Update all pools with the safe streams
   for (auto it : mem_pools_) {
     it->AddSafeStream(event_stream, wait_stream);
@@ -161,7 +161,7 @@ void Device::AddSafeStream(Stream* event_stream, Stream* wait_stream) {
 // ================================================================================================
 void Device::Reset() {
   {
-    amd::ScopedLock lock(lock_);
+    std::scoped_lock lock(lock_);
     auto it = mem_pools_.begin();
     while (it != mem_pools_.end()) {
       auto current = it++;

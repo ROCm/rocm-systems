@@ -73,7 +73,7 @@ static bool checkMallocAsync() {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipDeviceGetMemPool_Basic") {
+TEST_CASE(Unit_hipDeviceGetMemPool_Basic) {
   checkMempoolSupported(0) hipMemPool_t mem_pool_device = nullptr, mem_pool_default = nullptr;
   SECTION("Check current mempool is default mempool") {
     // assign default mem pool to device
@@ -113,7 +113,7 @@ TEST_CASE("Unit_hipDeviceGetMemPool_Basic") {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipDeviceGetMemPool_Functional") {
+TEST_CASE(Unit_hipDeviceGetMemPool_Functional) {
   hipMemPool_t mem_pool = nullptr;
   checkMempoolSupported(0)
       // assign current mem pool to device
@@ -137,7 +137,7 @@ TEST_CASE("Unit_hipDeviceGetMemPool_Functional") {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipDeviceGetMemPool_Multidevice", "[multigpu]") {
+TEST_CASE(Unit_hipDeviceGetMemPool_Multidevice) {
   int num_devices;
   HIP_CHECK(hipGetDeviceCount(&num_devices));
 
@@ -165,7 +165,7 @@ TEST_CASE("Unit_hipDeviceGetMemPool_Multidevice", "[multigpu]") {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipDeviceGetDefaultMemPool_Functional") {
+TEST_CASE(Unit_hipDeviceGetDefaultMemPool_Functional) {
   hipMemPool_t mem_pool = nullptr;
   checkMempoolSupported(0)
       // assign current mem pool to device

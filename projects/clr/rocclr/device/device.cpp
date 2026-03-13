@@ -87,7 +87,7 @@ static_assert(static_cast<uint32_t>(device::Memory::MemAccess::kMemAccessReadWri
 
 namespace amd {
 
-amd::Monitor Device::lockP2P_("Lock P2P ON/OFF");
+std::recursive_mutex Device::lockP2P_;
 std::pair<const Isa*, const Isa*> Isa::supportedIsas() {
   constexpr amd::Isa::Feature NONE = amd::Isa::Feature::Unsupported;
   constexpr amd::Isa::Feature ANY = amd::Isa::Feature::Any;
@@ -346,7 +346,7 @@ AppProfile Device::appProfile_;
 
 Context* Device::glb_ctx_ = nullptr;
 // P2P Staging Lock
-Monitor Device::p2p_stage_ops_(true);
+std::recursive_mutex Device::p2p_stage_ops_;
 Memory* Device::p2p_stage_ = nullptr;
 
 cl_int Device::gpu_error_ = CL_SUCCESS;
@@ -422,17 +422,27 @@ void MemObjMap::UpdateAccess(amd::Device* peerDev) {
 
 void MemObjMap::Purge(amd::Device* dev) {
   assert(dev != nullptr);
-  std::unique_lock lock(AllocatedLock_);
-  for (auto it = MemObjMap_.cbegin(); it != MemObjMap_.cend();) {
-    amd::Memory* memObj = it->second;
-    unsigned int flags = memObj->getMemFlags();
-    const std::vector<Device*>& devices = memObj->getContext().devices();
-    if (devices.size() == 1 && devices[0] == dev && !(flags & ROCCLR_MEM_INTERNAL_MEMORY)) {
-      memObj->release();
-      it = MemObjMap_.erase(it);
-    } else {
-      ++it;
+  std::vector<amd::Memory*> toRelease{};
+  {
+    std::unique_lock lock(AllocatedLock_);
+    for (auto it = MemObjMap_.cbegin(); it != MemObjMap_.cend();) {
+      amd::Memory* memObj = it->second;
+      unsigned int flags = memObj->getMemFlags();
+      const std::vector<Device*>& devices = memObj->getContext().devices();
+      if (devices.size() == 1 && devices[0] == dev && !(flags & ROCCLR_MEM_INTERNAL_MEMORY)) {
+        toRelease.push_back(memObj);
+        it = MemObjMap_.erase(it);
+      } else {
+        ++it;
+      }
     }
+  }
+
+  // Release memObjs outside the locked region
+  // memObj->release() may trigger RemoveIpcHandleMemObj() call if memObj is an IpcBuffer
+  // where the lock would be acquired a second time
+  for (auto* memObj : toRelease) {
+    memObj->release();
   }
 }
 
@@ -701,10 +711,8 @@ bool Device::init() {
       }
       GPU_ENABLE_PAL = 1;
     } else {
-      // ROC initialization successful, enable direct dispatch
-      if (flagIsDefault(AMD_DIRECT_DISPATCH)) {
-        AMD_DIRECT_DISPATCH = true;
-      }
+      // ROC initialization was successful, force direct dispatch
+      AMD_DIRECT_DISPATCH = true;
       // Disable PAL path
       GPU_ENABLE_PAL = 0;
     }
@@ -820,7 +828,7 @@ bool Device::create(const Isa& isa) {
   assert(!vaCacheAccess_ && !vaCacheMap_);
   isa_ = &isa;
   // VA Cache Ops Lock
-  vaCacheAccess_ = new amd::Monitor(true);
+  vaCacheAccess_ = new std::recursive_mutex();
   if (nullptr == vaCacheAccess_) {
     return false;
   }
@@ -864,7 +872,7 @@ void Device::addVACache(device::Memory* memory) const {
   // Make sure system memory has direct access
   if (memory->isHostMemDirectAccess()) {
     // VA cache access must be serialised
-    amd::ScopedLock lk(*vaCacheAccess_);
+    std::scoped_lock lk(*vaCacheAccess_);
     void* start = memory->owner()->getHostMem();
     size_t offset;
     device::Memory* doubleMap = findMemoryFromVA(start, &offset);
@@ -883,7 +891,7 @@ void Device::removeVACache(const device::Memory* memory) const {
   // Make sure system memory has direct access
   if (memory->isHostMemDirectAccess() && memory->owner()) {
     // VA cache access must be serialised
-    amd::ScopedLock lk(*vaCacheAccess_);
+    std::scoped_lock lk(*vaCacheAccess_);
     void* start = memory->owner()->getHostMem();
     vaCacheMap_->erase(reinterpret_cast<uintptr_t>(start));
   }
@@ -891,7 +899,7 @@ void Device::removeVACache(const device::Memory* memory) const {
 
 device::Memory* Device::findMemoryFromVA(const void* ptr, size_t* offset) const {
   // VA cache access must be serialised
-  amd::ScopedLock lk(*vaCacheAccess_);
+  std::scoped_lock lk(*vaCacheAccess_);
 
   uintptr_t key = reinterpret_cast<uintptr_t>(ptr);
   auto it = vaCacheMap_->upper_bound(reinterpret_cast<uintptr_t>(ptr));
@@ -984,7 +992,7 @@ bool Device::getDeviceIDs(cl_device_type deviceType, uint32_t numEntries, cl_dev
 
 bool Device::enableP2P(amd::Device* ptrDev) {
   assert(ptrDev != nullptr);
-  amd::ScopedLock lock(lockP2P_);
+  std::scoped_lock lock(lockP2P_);
   Device* peerDev = static_cast<Device*>(ptrDev);
   if (std::find(enabled_p2p_devices_.begin(), enabled_p2p_devices_.end(), peerDev) ==
       enabled_p2p_devices_.end()) {
@@ -997,7 +1005,7 @@ bool Device::enableP2P(amd::Device* ptrDev) {
 
 bool Device::disableP2P(amd::Device* ptrDev) {
   assert(ptrDev != nullptr);
-  amd::ScopedLock lock(lockP2P_);
+  std::scoped_lock lock(lockP2P_);
   Device* peerDev = static_cast<Device*>(ptrDev);
   // if device is present then remove
   auto it = std::find(enabled_p2p_devices_.begin(), enabled_p2p_devices_.end(), peerDev);
@@ -1256,7 +1264,7 @@ void Memory::saveMapInfo(const void* mapAddress, const amd::Coord3D origin,
                          const amd::Coord3D region, uint mapFlags, bool entire,
                          amd::Image* baseMip) {
   // Map/Unmap must be serialized.
-  amd::ScopedLock lock(owner()->lockMemoryOps());
+  std::scoped_lock lock(owner()->lockMemoryOps());
 
   WriteMapInfo info = {};
   WriteMapInfo* pInfo = &info;

@@ -48,7 +48,7 @@ template <typename T> bool WriteAndValidateData(hipArray_t& array, size_t array_
   return is_valid;
 }
 
-TEST_CASE("Unit_hipExternalMemoryGetMappedMipmappedArray_Vulkan_Positive_Read_Write") {
+TEST_CASE(Unit_hipExternalMemoryGetMappedMipmappedArray_Vulkan_Positive_Read_Write) {
   VulkanTest vkt(enable_validation);
   using type = uint8_t;
   constexpr uint32_t count = 16384;
@@ -90,7 +90,7 @@ TEST_CASE("Unit_hipExternalMemoryGetMappedMipmappedArray_Vulkan_Positive_Read_Wr
   HIP_CHECK(hipDestroyExternalMemory(ext_memory));
 }
 
-TEST_CASE("Unit_hipExternalMemoryGetMappedMipmappedArray_Vulkan_Array_Layered") {
+TEST_CASE(Unit_hipExternalMemoryGetMappedMipmappedArray_Vulkan_Array_Layered) {
   VulkanTest vkt(enable_validation);
   using type = uint8_t;
   constexpr uint32_t count = 16384;
@@ -123,7 +123,7 @@ TEST_CASE("Unit_hipExternalMemoryGetMappedMipmappedArray_Vulkan_Array_Layered") 
   HIP_CHECK(hipDestroyExternalMemory(ext_memory));
 }
 
-TEST_CASE("Unit_hipExternalMemoryGetMappedMipmappedArray_Vulkan_Array_Cubemap") {
+TEST_CASE(Unit_hipExternalMemoryGetMappedMipmappedArray_Vulkan_Array_Cubemap) {
   VulkanTest vkt(enable_validation);
   using type = uint8_t;
   //  cubemap HIP array is allocated if all three extents are non-zero and the hipArrayCubemap
@@ -160,7 +160,7 @@ TEST_CASE("Unit_hipExternalMemoryGetMappedMipmappedArray_Vulkan_Array_Cubemap") 
   HIP_CHECK(hipDestroyExternalMemory(ext_memory));
 }
 
-TEST_CASE("Unit_hipExternalMemoryGetMappedMipmappedArray_Vulkan_Negative_Parameters") {
+TEST_CASE(Unit_hipExternalMemoryGetMappedMipmappedArray_Vulkan_Negative_Parameters) {
   CHECK_IMAGE_SUPPORT
 
   VulkanTest vkt(enable_validation);
@@ -224,7 +224,7 @@ TEST_CASE("Unit_hipExternalMemoryGetMappedMipmappedArray_Vulkan_Negative_Paramet
  * ------------------------
  *    - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipExternalMemoryGetMappedMipmappedArray_Vulkan_Capture") {
+TEST_CASE(Unit_hipExternalMemoryGetMappedMipmappedArray_Vulkan_Capture) {
   VulkanTest vkt(enable_validation);
   using type = uint8_t;
   //  cubemap HIP array is allocated if all three extents are non-zero and the hipArrayCubemap

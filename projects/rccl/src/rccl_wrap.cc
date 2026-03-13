@@ -171,6 +171,11 @@ ncclResult_t rcclOverrideChannels(struct ncclComm* comm, ncclFunc_t coll, size_t
     return ncclSuccess;
   }
 
+  if (comm->nRanks == comm->nNodes) {
+    INFO(NCCL_TUNING, "RCCL tuning model channel thresholds not applied for single GPU per node case");
+    return ncclSuccess;
+  }
+
   auto tunableIndex = rcclGetTunableIndex(coll);
   if(tunableIndex == RCCL_UNSUPPORTED_TUNABLE){
     INFO(NCCL_TUNING, "tunableIndex:%i not supported", tunableIndex);

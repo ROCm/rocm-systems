@@ -84,7 +84,7 @@ constexpr int LAUNCH_ITERS = 1;
  * capture info (status and id) of both s1 and s2 are identical.
  * The above scenario using hipStreamGetCaptureInfo_v2 API
  */
-TEST_CASE("Unit_hipStreamGetCaptureInfo_ParentAndForkedStrm_CaptureStatus") {
+TEST_CASE(Unit_hipStreamGetCaptureInfo_ParentAndForkedStrm_CaptureStatus) {
   hipStream_t stream1{nullptr}, stream2{nullptr};
   hipEvent_t event2{nullptr}, forkStreamEvent{nullptr};
   hipGraph_t graph{nullptr};
@@ -216,7 +216,7 @@ static void thread_func(hipStream_t stream, unsigned long long capSequenceID1,  
  * thread is same as capture id in main function. Exit the thread and end the capture
  * The above scenario using hipStreamGetCaptureInfo_v2 API
  */
-TEST_CASE("Unit_hipStreamGetCaptureInfo_CaptureStatus_InThread") {
+TEST_CASE(Unit_hipStreamGetCaptureInfo_CaptureStatus_InThread) {
   hipStream_t stream{nullptr};
   hipGraph_t graph{nullptr};
 
@@ -246,7 +246,7 @@ TEST_CASE("Unit_hipStreamGetCaptureInfo_CaptureStatus_InThread") {
  * capture info. Verify that all the capture info are identical.
  * The above scenario using hipStreamGetCaptureInfo_v2 API
  */
-TEST_CASE("Unit_hipStreamGetCaptureInfo_CaptureStatus_Througout_Capture") {
+TEST_CASE(Unit_hipStreamGetCaptureInfo_CaptureStatus_Througout_Capture) {
   hipStream_t stream{nullptr};
   hipGraph_t graph{nullptr};
   float *A_d, *B_d, *C_d, *D_d;
@@ -340,7 +340,7 @@ TEST_CASE("Unit_hipStreamGetCaptureInfo_CaptureStatus_Througout_Capture") {
  * graph and verify the output from the operations.
  * The above scenario using hipStreamGetCaptureInfo_v2 API
  */
-TEST_CASE("Unit_hipStreamGetCaptureInfo_Nullstream_CaptureInfo") {
+TEST_CASE(Unit_hipStreamGetCaptureInfo_Nullstream_CaptureInfo) {
   hipStream_t stream{nullptr}, streamForGraph{nullptr};
   hipGraph_t graph{nullptr};
   hipError_t ret;

@@ -44,7 +44,7 @@
  *  - HIP_VERSION >= 7.1
  */
 #if HT_AMD
-TEMPLATE_TEST_CASE("Unit_hipMemcpyBatchAsync_D2D_Functional", "", char, int,
+TEMPLATE_TEST_CASE(Unit_hipMemcpyBatchAsync_D2D_Functional, char, int,
                    float) {
   const size_t count = 2;
   size_t numAttrs = 0;
@@ -115,7 +115,7 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpyBatchAsync_D2D_Functional", "", char, int,
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-TEMPLATE_TEST_CASE("Unit_hipMemcpyBatchAsync_H2D_Functional", "", char, int,
+TEMPLATE_TEST_CASE(Unit_hipMemcpyBatchAsync_H2D_Functional, char, int,
                    float) {
   const size_t count = 2;
   size_t numAttrs = 0;
@@ -183,7 +183,7 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpyBatchAsync_H2D_Functional", "", char, int,
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-TEMPLATE_TEST_CASE("Unit_hipMemcpyBatchAsync_D2H_Functional", "", char, int,
+TEMPLATE_TEST_CASE(Unit_hipMemcpyBatchAsync_D2H_Functional, char, int,
                    float) {
   const size_t count = 2;
   size_t numAttrs = 0;
@@ -253,7 +253,7 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpyBatchAsync_D2H_Functional", "", char, int,
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-TEMPLATE_TEST_CASE("Unit_hipMemcpyBatchAsync_H2H_Functional", "", char, int,
+TEMPLATE_TEST_CASE(Unit_hipMemcpyBatchAsync_H2H_Functional, char, int,
                    float) {
   const size_t count = 2;
   size_t numAttrs = 0;
@@ -320,7 +320,7 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpyBatchAsync_H2H_Functional", "", char, int,
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-TEST_CASE("Unit_hipMemcpyBatchAsync_NegativeTsts") {
+TEST_CASE(Unit_hipMemcpyBatchAsync_NegativeTsts) {
   const size_t count = 2;
   size_t numAttrs = 0;
   size_t sizes[2];

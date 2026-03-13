@@ -60,7 +60,7 @@ static __global__ void square_kernel(int* Buff) {
  * ------------------------
  *    - HIP_VERSION >= 7.0
  */
-TEST_CASE("Unit_hipMemCreate_BasicAllocateDeAlloc_MultGranularity") {
+TEST_CASE(Unit_hipMemCreate_BasicAllocateDeAlloc_MultGranularity) {
   size_t granularity = 0;
   int deviceId = 0;
   CTX_CREATE();
@@ -107,7 +107,7 @@ TEST_CASE("Unit_hipMemCreate_BasicAllocateDeAlloc_MultGranularity") {
  * ------------------------
  *    - HIP_VERSION >= 7.0
  */
-TEST_CASE("Unit_hipMemCreate_ChkDev2HstMemcpy_ReleaseHdlPostUnmap") {
+TEST_CASE(Unit_hipMemCreate_ChkDev2HstMemcpy_ReleaseHdlPostUnmap) {
   size_t granularity = 0;
   constexpr int N = DATA_SIZE;
   size_t buffer_size = N * sizeof(int);
@@ -176,7 +176,7 @@ TEST_CASE("Unit_hipMemCreate_ChkDev2HstMemcpy_ReleaseHdlPostUnmap") {
  * ------------------------
  *    - HIP_VERSION >= 7.0
  */
-TEST_CASE("Unit_hipMemCreate_ChkDev2HstMemcpy_ReleaseHdlPreUse") {
+TEST_CASE(Unit_hipMemCreate_ChkDev2HstMemcpy_ReleaseHdlPreUse) {
   size_t granularity = 0;
   constexpr int N = DATA_SIZE;
   size_t buffer_size = N * sizeof(int);
@@ -245,7 +245,7 @@ TEST_CASE("Unit_hipMemCreate_ChkDev2HstMemcpy_ReleaseHdlPreUse") {
  * ------------------------
  *    - HIP_VERSION >= 7.0
  */
-TEST_CASE("Unit_hipMemCreate_ChkWithKerLaunch") {
+TEST_CASE(Unit_hipMemCreate_ChkWithKerLaunch) {
   size_t granularity = 0;
   constexpr int N = DATA_SIZE;
   size_t buffer_size = N * sizeof(int);
@@ -318,7 +318,7 @@ TEST_CASE("Unit_hipMemCreate_ChkWithKerLaunch") {
  * ------------------------
  *    - HIP_VERSION >= 7.0
  */
-TEST_CASE("Unit_hipMemCreate_MapNonContiguousChunks") {
+TEST_CASE(Unit_hipMemCreate_MapNonContiguousChunks) {
   size_t granularity = 0;
   constexpr int numOfBuffers = NUM_OF_BUFFERS;
   constexpr int N = DATA_SIZE;
@@ -404,7 +404,7 @@ TEST_CASE("Unit_hipMemCreate_MapNonContiguousChunks") {
  * ------------------------
  *    - HIP_VERSION >= 7.0
  */
-TEST_CASE("Unit_hipMemCreate_ChkWithMemset") {
+TEST_CASE(Unit_hipMemCreate_ChkWithMemset) {
   size_t granularity = 0;
   constexpr int N = DATA_SIZE;
   size_t buffer_size = N * sizeof(int);
@@ -468,7 +468,7 @@ TEST_CASE("Unit_hipMemCreate_ChkWithMemset") {
  * ------------------------
  *    - HIP_VERSION >= 6.1
  */
-TEST_CASE("Unit_hipMemCreate_Negative") {
+TEST_CASE(Unit_hipMemCreate_Negative) {
   size_t granularity = 0;
   int deviceId = 0;
   hipDevice_t device;
@@ -522,7 +522,7 @@ TEST_CASE("Unit_hipMemCreate_Negative") {
   CTX_DESTROY();
 }
 
-TEST_CASE("Unit_hipMemCreate_Capture") {
+TEST_CASE(Unit_hipMemCreate_Capture) {
   CTX_CREATE();
 
   hipMemGenericAllocationHandle_t allocation_handle;

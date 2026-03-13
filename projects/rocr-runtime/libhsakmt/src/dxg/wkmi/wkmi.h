@@ -140,6 +140,11 @@ struct DeviceInfo {
   uint32_t num_xcc;                           ///< Number of XCC (eXtended Compute Complex) units
 };
 
+struct KmdDbgVersion {
+  uint32_t major;
+  uint32_t minor;
+};
+
 // ============================================================================
 // Device Query Functions
 // ============================================================================
@@ -235,7 +240,8 @@ NTSTATUS ParseAdapterInfo(D3DKMT_HANDLE adapter,      ///< Handle to the D3DKMT 
 /// @brief Fill in context creation private data (Windows)
 void FillinContextPrivData(void* priv_data,                ///< Pointer to context private data structure
                            bool FwManagedGfxState,         ///< True to enable firmware-managed graphics state
-                           uint32_t schedId = 0);          ///< Scheduler ID for the context (default: 0)
+                           uint32_t schedId = 0,           ///< Scheduler ID for the context (default: 0)
+                           uint64_t debuggerData = 0);
 
 // ============================================================================
 // AQL Queue Submit Interfaces (Windows only)
@@ -311,5 +317,26 @@ int GetPowerOptPrivDataSize();
 /// @brief Configure power optimization settings
 void FillinPowerOptPrivData(void* priv_data,  ///< Pointer to power optimization private data structure
                             bool restore);    ///< True to restore default settings, false to apply ML workload optimization
+
+// ============================================================================
+// Debugger Support Functions
+// ============================================================================
+
+/// @brief Query the size of a debugger command private data structure
+/// @return Size in bytes
+int GetDebuggerCmdPrivDataSize();
+
+/// @brief Configure the KmdDbgVersion query
+void FillinKmdDbgVersionPrivData(void* priv_data);
+
+/// @brief Extract the KmdDbgVersion from the private data structure
+void GetKmdDbgVersion(void* priv_data, KmdDbgVersion* version);
+
+/// @brief Configure the RegisterRuntimeState debugger command
+void FillinRegisterRuntimeStatePrivData(void* priv_data, uint32_t runtime_state,
+                                        const void* r_debug, bool ttmp_setup_hint, HANDLE event);
+
+/// @brief Configure the SetTrapHandler private data
+void FillinTrapHandlerPrivData(void* priv_data, uint64_t tba, uint64_t tma);
 
 }  // namespace Wkmi
