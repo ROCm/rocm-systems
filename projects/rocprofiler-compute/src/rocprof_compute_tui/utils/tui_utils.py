@@ -148,7 +148,7 @@ def get_top_kernels_and_dispatch_ids(
 
     merged_df = pd.merge(
         top_kernel_df, dispatch_id_df, on="Kernel_Name", how="outer"
-    ).sort_values("Pct", ascending=False)
+    ).sort_values("Percent", ascending=False)
 
     merged_df = merged_df.drop(columns=["Count", "GPU_ID"])
 
