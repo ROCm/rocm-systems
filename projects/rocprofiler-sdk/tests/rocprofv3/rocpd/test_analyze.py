@@ -352,9 +352,7 @@ def test_tier2_zero_waves_does_not_fire():
     """Tier 2: avg_waves == 0 does NOT trigger (guard: avg_waves > 0)."""
     from rocpd.analyze import generate_recommendations
 
-    recs = generate_recommendations(
-        _empty_breakdown(), [], {}, _hw_counters(avg_waves=0)
-    )
+    recs = generate_recommendations(_empty_breakdown(), [], {}, _hw_counters(avg_waves=0))
     assert not any(r["category"] == "Low Occupancy" for r in recs)
 
 
@@ -1165,9 +1163,7 @@ def test_filter_pmc_kernel_names_alone_not_meaningful():
         {"--sys-trace", "pmc:GRBM_COUNT", "pmc:GRBM_GUI_ACTIVE", "pmc:SQ_WAVES"}
     )
     result = _filter_rec_commands([cmd], already)
-    assert (
-        result == []
-    ), "Command with only scope+output args remaining should be dropped"
+    assert result == [], "Command with only scope+output args remaining should be dropped"
 
 
 def test_filter_pmc_rocprof_compute_always_kept():

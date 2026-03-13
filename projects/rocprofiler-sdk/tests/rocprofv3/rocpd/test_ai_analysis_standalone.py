@@ -13,9 +13,9 @@ They DO require the rocpd package to be importable (needs the built libpyrocpd
 C extension). Run with the system-installed rocpd path first, then the source
 path for the edited Python modules:
 
-    ROCPD_SYS=/opt/rocm-7.0.0/lib/python3.12/site-packages
-    ROCPD_SRC=/dockerx/ai-analysis-rocpd/rocm-systems-dev/projects/rocprofiler-sdk/source/lib/python
-    PYTHONPATH="${ROCPD_SYS}:${ROCPD_SRC}" pytest --noconftest test_api_standalone.py -v
+    ROCPD_SYS=$(python3 -c "import site; print(site.getsitepackages()[-1])")
+    ROCPD_SRC=<repo>/projects/rocprofiler-sdk/source/lib/python
+    PYTHONPATH="${ROCPD_SYS}:${ROCPD_SRC}" pytest --noconftest test_ai_analysis_standalone.py -v
 
 IMPORTANT: ROCPD_SYS must come BEFORE ROCPD_SRC in PYTHONPATH to avoid a
 circular import of libpyrocpd.
@@ -691,18 +691,18 @@ class TestBugFixes:
         from rocpd.ai_analysis.exceptions import ReferenceGuideNotFoundError
 
         paths = [
-            "/opt/rocm/share/llm-reference-guide.md",
-            "/home/user/.config/guide.md",
+            "share/rocprofiler-sdk/llm-reference-guide.md",
+            "~/.config/rocpd/guide.md",
         ]
         err = ReferenceGuideNotFoundError(paths)
         msg = str(err)
 
         # Both paths should appear intact in the error message
         assert (
-            "/opt/rocm/share/llm-reference-guide.md" in msg
+            "share/rocprofiler-sdk/llm-reference-guide.md" in msg
         ), f"First path missing from error message: {msg}"
         assert (
-            "/home/user/.config/guide.md" in msg
+            "~/.config/rocpd/guide.md" in msg
         ), f"Second path missing from error message: {msg}"
         # Guard against the old bug where a bare string was iterated char-by-char
         assert (

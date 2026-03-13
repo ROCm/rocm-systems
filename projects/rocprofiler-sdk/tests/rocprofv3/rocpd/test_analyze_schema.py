@@ -104,9 +104,7 @@ def _make_synthetic_json_output():
             "bandwidth_bytes_per_sec": 1e9,
         }
     }
-    recommendations = generate_recommendations(
-        time_breakdown, hotspots, memory_analysis
-    )
+    recommendations = generate_recommendations(time_breakdown, hotspots, memory_analysis)
     output = format_analysis_output(
         time_breakdown,
         hotspots,

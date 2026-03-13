@@ -3,9 +3,11 @@
 Unit tests for rocpd/tracelens_port.py.
 
 Run:
-    ROCPD_SYS=/opt/rocm-7.2.0/lib/python3.12/site-packages
-    ROCPD_SRC=/home/aelwazir/work/ai-analysis-rocpd/rocm-systems-dev/projects/rocprofiler-sdk/source/lib/python
-    PYTHONPATH="${ROCPD_SYS}:${ROCPD_SRC}" pytest --noconftest test_tracelens_port.py -v
+    ROCPD_SYS=$(python3 -c "import site; print(site.getsitepackages()[-1])")
+    PYTHONPATH="${ROCPD_SYS}" pytest --noconftest test_tracelens_port.py -v
+
+Integration test (requires real merged_db.db):
+    ROCPD_TEST_DB=/path/to/merged_db.db pytest --noconftest test_tracelens_port.py -v
 """
 
 from unittest.mock import MagicMock, patch

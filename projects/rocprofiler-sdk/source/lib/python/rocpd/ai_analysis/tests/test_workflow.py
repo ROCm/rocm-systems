@@ -2,8 +2,8 @@
 
 Run with system rocpd first in PYTHONPATH:
 
-    ROCPD_SYS=/opt/rocm-7.2.0/lib/python3.12/site-packages
-    ROCPD_SRC=<repo>/source/lib/python
+    ROCPD_SYS=$(python3 -c "import site; print(site.getsitepackages()[-1])")
+    ROCPD_SRC=<repo>/projects/rocprofiler-sdk/source/lib/python
     PYTHONPATH="${ROCPD_SYS}:${ROCPD_SRC}" pytest --noconftest test_workflow.py -v
 """
 

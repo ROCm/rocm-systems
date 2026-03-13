@@ -85,9 +85,7 @@ class SessionStore:
     """Handles session file I/O under sessions_dir."""
 
     def __init__(self, sessions_dir: Optional[Union[str, pathlib.Path]] = None) -> None:
-        self._dir = (
-            pathlib.Path(sessions_dir) if sessions_dir else _DEFAULT_SESSIONS_DIR
-        )
+        self._dir = pathlib.Path(sessions_dir) if sessions_dir else _DEFAULT_SESSIONS_DIR
 
     def _path_for(self, session_id: str) -> pathlib.Path:
         return self._dir / f"{session_id}.json"
@@ -361,9 +359,7 @@ class InteractiveSession:
         self._conv = self._make_fresh_conv(new_session.session_id)
         return new_session
 
-    def _restore_or_create_conv(
-        self, loaded: SessionData
-    ) -> Optional["LLMConversation"]:
+    def _restore_or_create_conv(self, loaded: SessionData) -> Optional["LLMConversation"]:
         """Restore _conv from a loaded session, or create fresh if absent."""
         if not self._llm_provider:
             return None
@@ -442,8 +438,7 @@ class InteractiveSession:
             _console.print(
                 Panel(
                     f"[bold]Source:[/bold] {src_label}   "
-                    f"[bold]Session:[/bold] {self._session.session_id}   "
-                    + status_line,
+                    f"[bold]Session:[/bold] {self._session.session_id}   " + status_line,
                     title="[bold cyan]rocpd Interactive Analysis[/bold cyan]",
                     border_style="blue",
                 )
@@ -529,13 +524,9 @@ class InteractiveSession:
         high = [r for r in recs if r.get("priority", "").upper() == "HIGH"]
         med = [r for r in recs if r.get("priority", "").upper() == "MEDIUM"]
         _print()
-        _print(
-            "  ── Analysis Summary ────────────────────────────────────", style="cyan"
-        )
+        _print("  ── Analysis Summary ────────────────────────────────────", style="cyan")
         for r in high:
-            _print(
-                f"  [HIGH]    {r.get('issue', r.get('title', ''))}", style="bold red"
-            )
+            _print(f"  [HIGH]    {r.get('issue', r.get('title', ''))}", style="bold red")
         for r in med:
             _print(f"  [MEDIUM]  {r.get('issue', r.get('title', ''))}", style="yellow")
         _print()
@@ -577,13 +568,9 @@ class InteractiveSession:
             elif choice.isdigit():
                 idx = int(choice) - 1
                 if 0 <= idx < len(self._session.persistent_menu_items):
-                    self._pursue_recommendation(
-                        self._session.persistent_menu_items[idx]
-                    )
+                    self._pursue_recommendation(self._session.persistent_menu_items[idx])
             else:
-                _print(
-                    "  Unknown choice. Enter p, a, o, s, q, or a number.", style="dim"
-                )
+                _print("  Unknown choice. Enter p, a, o, s, q, or a number.", style="dim")
 
     def _save_and_quit(self) -> None:
         self._session.last_updated = datetime.now(timezone.utc).isoformat()
@@ -620,9 +607,7 @@ class InteractiveSession:
     def _path_profiling(self, _source: str = "profiling_analysis") -> None:
         """Show profiling commands; let user pick one to run; auto-ingest output .db."""
         _print()
-        _print(
-            "  ── Profiling Commands ──────────────────────────────────", style="cyan"
-        )
+        _print("  ── Profiling Commands ──────────────────────────────────", style="cyan")
         _print()
 
         cmds = self._collect_profiling_commands()
@@ -856,9 +841,7 @@ class InteractiveSession:
                 f"{_json.dumps(metadata)}"
             )
             _print()
-            _print(
-                "  ── LLM Profiling Advice ────────────────────────────", style="cyan"
-            )
+            _print("  ── LLM Profiling Advice ────────────────────────────", style="cyan")
             self._conv.send(user_msg, on_token=_print_token)
             _print()
         except Exception as exc:
@@ -1141,9 +1124,7 @@ class InteractiveSession:
             file_sugg = raw.get(name)
             if not file_sugg:
                 continue
-            modified_content = self._present_and_apply(
-                path, original_content, file_sugg
-            )
+            modified_content = self._present_and_apply(path, original_content, file_sugg)
             if modified_content is not None:
                 p = pathlib.Path(path)
                 with tempfile.NamedTemporaryFile(
@@ -1271,9 +1252,7 @@ class InteractiveSession:
             return
 
         if ans == "s":
-            out_path = (
-                pathlib.Path(self._source_dir) / "ai_optimization_suggestions.txt"
-            )
+            out_path = pathlib.Path(self._source_dir) / "ai_optimization_suggestions.txt"
             try:
                 out_path.write_text(suggestions + "\n")
                 _print(f"  Suggestions saved to: {out_path}", style="green")
@@ -1497,9 +1476,7 @@ class InteractiveSession:
             url = os.environ.get("ROCPD_LLM_LOCAL_URL", "http://localhost:11434")
             req = urllib.request.urlopen(f"{url}/api/tags", timeout=1)
             if req.status == 200:
-                _print(
-                    f"  Auto-detected ollama at {url} — using local LLM.", style="dim"
-                )
+                _print(f"  Auto-detected ollama at {url} — using local LLM.", style="dim")
                 self._llm_local = "ollama"
                 return "local"
         except Exception:
@@ -1535,9 +1512,7 @@ class InteractiveSession:
                     if isinstance(rec, dict)
                     else getattr(rec, "actions", [])
                 )
-                _print(
-                    f"  [{pri}] {issue}", style="yellow" if pri == "MEDIUM" else "red"
-                )
+                _print(f"  [{pri}] {issue}", style="yellow" if pri == "MEDIUM" else "red")
                 if suggest:
                     _print(f"    → {suggest}", style="dim")
                 for act in actions[:3]:
@@ -1825,9 +1800,7 @@ class WorkflowSession:
         self._llm_api_key = llm_api_key
         self._llm_model = llm_model
         self._trace_dir = trace_dir or self._DEFAULT_TRACE_DIR
-        self._conv: Optional["LLMConversation"] = (
-            None  # set by _phase2 if LLM configured
-        )
+        self._conv: Optional["LLMConversation"] = None  # set by _phase2 if LLM configured
         # Session persistence
         _ts = datetime.now(timezone.utc).strftime("%Y-%m-%d_%H-%M-%S")
         try:
@@ -2129,9 +2102,7 @@ class WorkflowSession:
 
     # ── Phase 2: Profiling command generation ─────────────────────────────────
 
-    def _build_profiling_command(
-        self, app_info: Optional[Dict[str, Any]] = None
-    ) -> str:
+    def _build_profiling_command(self, app_info: Optional[Dict[str, Any]] = None) -> str:
         """Build a default rocprofv3 profiling command wrapping the user's app.
 
         When app_info indicates uses_fork=True, adds --process-sync and uses
@@ -2203,9 +2174,7 @@ class WorkflowSession:
         Returns one of: "retry" | "continue" | "exit"
         """
         _print()
-        _print(
-            "  ── What would you like to do next? ─────────────────────", style="cyan"
-        )
+        _print("  ── What would you like to do next? ─────────────────────", style="cyan")
         if show_retry:
             _print(
                 "    [f]  Try a different fix  — let the AI attempt another approach",
@@ -2328,9 +2297,7 @@ class WorkflowSession:
             return self._post_revert_menu(show_retry=False)
 
         _print()
-        _print(
-            "  ── Analyzing failure with LLM ──────────────────────────", style="cyan"
-        )
+        _print("  ── Analyzing failure with LLM ──────────────────────────", style="cyan")
 
         error_block = (
             f"\n=== COMPILATION / RUNTIME ERRORS ===\n{failure_reason[:1500]}"
@@ -2437,9 +2404,7 @@ class WorkflowSession:
                         else:
                             _print(line, style="dim")
                     if len(diff_lines) > 120:
-                        _print(
-                            f"  ... ({len(diff_lines) - 120} more lines)", style="dim"
-                        )
+                        _print(f"  ... ({len(diff_lines) - 120} more lines)", style="dim")
                     _print()
                     try:
                         confirm = (
@@ -2481,9 +2446,7 @@ class WorkflowSession:
 
     # ── Phase 3: Trace collection ──────────────────────────────────────────────
 
-    def _merge_per_process_dbs(
-        self, db_files: List[str], out_dir: str
-    ) -> Optional[str]:
+    def _merge_per_process_dbs(self, db_files: List[str], out_dir: str) -> Optional[str]:
         """Merge per-process DB files into a single database and return its path.
 
         Uses rocpd.merge.merge_sqlite_dbs() (the same engine behind `rocpd merge`).
@@ -2722,9 +2685,7 @@ class WorkflowSession:
         pct = (new_s - prev_s) / prev_s * 100
         arrow = "▼" if pct < 0 else "▲"
         _print()
-        _print(
-            "  ── Performance Comparison ──────────────────────────────", style="cyan"
-        )
+        _print("  ── Performance Comparison ──────────────────────────────", style="cyan")
         _print(f"  {'Metric':<28}  {'Before':>8}  {'After':>8}  Change", style="bold")
         _print(
             f"  {'Total GPU time':<28}  {prev_s:>7.2f}s  {new_s:>7.2f}s  "
@@ -3182,9 +3143,7 @@ class WorkflowSession:
             except OSError:
                 pass
         if not files:
-            _print(
-                "  (No source files found in provided --source paths)", style="yellow"
-            )
+            _print("  (No source files found in provided --source paths)", style="yellow")
             return None
         _print()
         _print("  Choose a file to edit:", style="cyan")
@@ -3317,9 +3276,7 @@ class WorkflowSession:
                 else:
                     _print(line, style="dim")
             if len(diff_lines) > 120:
-                _print(
-                    f"  ... ({len(diff_lines) - 120} more lines omitted)", style="dim"
-                )
+                _print(f"  ... ({len(diff_lines) - 120} more lines omitted)", style="dim")
             if not diff_lines:
                 _print(
                     "  (No changes — rewritten file is identical to original)",
@@ -3355,9 +3312,7 @@ class WorkflowSession:
 
             # Wait for recompile
             _print()
-            _print(
-                "  Changes applied. Please recompile your application.", style="cyan"
-            )
+            _print("  Changes applied. Please recompile your application.", style="cyan")
             _print(
                 "  Type 'done' when compiled, 'revert' to undo the AI edit,",
                 style="dim",

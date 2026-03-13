@@ -565,9 +565,7 @@ Follow the reference guide strictly for analysis methodology and output format."
             lines.append("## Top Kernels")
             for kernel in data["kernels"][:5]:  # Top 5
                 lines.append(f"- {kernel.get('kernel_id', 'Unknown')}")
-                lines.append(
-                    f"  - Time: {kernel.get('pct_total_time', 0):.1f}% of total"
-                )
+                lines.append(f"  - Time: {kernel.get('pct_total_time', 0):.1f}% of total")
                 lines.append(f"  - Dispatches: {kernel.get('dispatch_count', 'N/A')}")
 
                 if "vgpr_count" in kernel:
@@ -714,9 +712,7 @@ Follow the reference guide strictly for analysis methodology and output format."
             client = anthropic.Anthropic(api_key=self.api_key)
 
             model = (
-                self.model
-                or os.environ.get("ROCPD_LLM_MODEL")
-                or DEFAULT_ANTHROPIC_MODEL
+                self.model or os.environ.get("ROCPD_LLM_MODEL") or DEFAULT_ANTHROPIC_MODEL
             )
 
             # Build base API call kwargs
@@ -868,9 +864,7 @@ Follow the reference guide strictly for analysis methodology and output format."
         try:
             import openai
         except ImportError:
-            raise ImportError(
-                "openai package required for local LLM: pip install openai"
-            )
+            raise ImportError("openai package required for local LLM: pip install openai")
         base_url = os.environ.get("ROCPD_LLM_LOCAL_URL", "http://localhost:11434/v1")
         client = openai.OpenAI(base_url=base_url, api_key="ignored")
         model = self.model or os.environ.get("ROCPD_LLM_LOCAL_MODEL", "codellama:13b")
@@ -942,9 +936,7 @@ Follow the reference guide strictly for analysis methodology and output format."
                 try:
                     parsed_h = _json.loads(raw_headers.replace("'", '"'))
                 except _json.JSONDecodeError as e:
-                    raise ValueError(
-                        f"ROCPD_LLM_PRIVATE_HEADERS is not valid JSON: {e}"
-                    )
+                    raise ValueError(f"ROCPD_LLM_PRIVATE_HEADERS is not valid JSON: {e}")
             headers.update(parsed_h)
 
         verify_ssl_env = os.environ.get("ROCPD_LLM_PRIVATE_VERIFY_SSL", "1").lower()

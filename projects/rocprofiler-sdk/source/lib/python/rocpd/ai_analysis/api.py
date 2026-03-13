@@ -182,9 +182,7 @@ class SourceAnalysisResult:
     already_instrumented: bool
     roctx_marker_count: int
 
-    recommendations: List[
-        Dict[str, Any]
-    ]  # same structure as generate_recommendations()
+    recommendations: List[Dict[str, Any]]  # same structure as generate_recommendations()
     suggested_counters: List[str]
     suggested_first_command: str
 

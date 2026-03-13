@@ -89,9 +89,7 @@ def _build_private_client(api_key: Optional[str], model_override: Optional[str])
                 stacklevel=3,
             )
 
-    kwargs: Dict[str, Any] = dict(
-        api_key=key, base_url=base_url, default_headers=headers
-    )
+    kwargs: Dict[str, Any] = dict(api_key=key, base_url=base_url, default_headers=headers)
     if http_client is not None:
         kwargs["http_client"] = http_client
 

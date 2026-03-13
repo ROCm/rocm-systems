@@ -410,7 +410,9 @@ class PerfettoReader:
         self.default_categories = kwargs.get(
             "default_categories", self.default_categories
         )
-        _acceptable_default_categories = 'default_categories can be set to: "all", ["all"], or [list of categories...]'
+        _acceptable_default_categories = (
+            'default_categories can be set to: "all", ["all"], or [list of categories...]'
+        )
 
         if not self.categories and self.default_categories:
             if not isinstance(self.default_categories, (tuple, list)):
@@ -424,9 +426,7 @@ class PerfettoReader:
                 )
 
         # filter out any categories that do not exist
-        self.categories = sorted(
-            [x for x in self.categories if x in self.df_categories]
-        )
+        self.categories = sorted([x for x in self.categories if x in self.df_categories])
 
         if not self.categories:
             raise ValueError(
@@ -444,9 +444,7 @@ class PerfettoReader:
 
         # reduce the dataframe to given specified category data
         # TODO: adjust the parent stack ids. if <user> category entry is child of <host> category entry, we lose <user> category entry
-        self.dataframe = self.dataframe[
-            self.dataframe["category"].isin(self.categories)
-        ]
+        self.dataframe = self.dataframe[self.dataframe["category"].isin(self.categories)]
 
         if self.dataframe.empty:
             raise RuntimeError(
@@ -517,9 +515,7 @@ class PerfettoReader:
                 else process.process_name
             )
             _thread_name = (
-                process.process_name
-                if process.track_name is None
-                else process.track_name
+                process.process_name if process.track_name is None else process.track_name
             )
             self.track_ids[process.tp_index][process.track_id] = {
                 "tp_index": process.tp_index,
