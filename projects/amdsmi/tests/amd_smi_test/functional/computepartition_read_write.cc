@@ -372,7 +372,7 @@ void TestComputePartitionReadWrite::Run(void) {
   // Confirm system supports compute partition, before executing wait
   DISPLAY_AMDSMI_API("amdsmi_get_gpu_compute_partition", "", VERB(STANDARD));
   ret = amdsmi_get_gpu_compute_partition(0, orig_char_computePartition, k255Len);
-  DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
+  DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS, AMDSMI_STATUS_INVAL);
   if (ret == AMDSMI_STATUS_SUCCESS) {
     system_wait(15);
   }

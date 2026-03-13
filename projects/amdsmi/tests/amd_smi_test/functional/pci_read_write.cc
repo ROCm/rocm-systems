@@ -132,7 +132,7 @@ void TestPciReadWrite::Run(void) {
       // Verify api support checking functionality is working
       DISPLAY_AMDSMI_API("amdsmi_get_gpu_pci_bandwidth", "gpu="+std::to_string(dv_ind), VERB(STANDARD));
       ret = amdsmi_get_gpu_pci_bandwidth(processor_handles_[dv_ind], nullptr);
-      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
+      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_NOT_SUPPORTED);
       ASSERT_EQ(ret, AMDSMI_STATUS_NOT_SUPPORTED);
 
       return;

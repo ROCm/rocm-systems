@@ -144,7 +144,7 @@ void TestFrequenciesReadWrite::Run(void) {
         }
         DISPLAY_AMDSMI_API("amdsmi_set_clk_freq", "gpu="+std::to_string(dv_ind), VERB(STANDARD));
         ret =  amdsmi_set_clk_freq(processor_handles_[dv_ind], amdsmi_clk, freq_bitmask);
-        DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
+        DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS, AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NO_PERM);
         // Certain ASICs does not allow to set particular clocks. If set function for a clock returns
         // permission error despite root access, manually set ret value to success and return
         //

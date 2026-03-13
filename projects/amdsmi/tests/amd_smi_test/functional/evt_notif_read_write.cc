@@ -99,7 +99,7 @@ void TestEvtNotifReadWrite::Run(void) {
   DISPLAY_AMDSMI_API("amdsmi_get_gpu_event_notification", "", VERB(STANDARD));
   ret =  amdsmi_get_gpu_event_notification(10000, &num_elem, data);
   DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS,
-                             AMDSMI_STATUS_INSUFFICIENT_SIZE);
+                             AMDSMI_STATUS_INSUFFICIENT_SIZE, AMDSMI_STATUS_NO_DATA);
   if (ret == AMDSMI_STATUS_SUCCESS || ret == AMDSMI_STATUS_INSUFFICIENT_SIZE) {
     EXPECT_LE(num_elem, 10) << "Expected the number of elements found to be <= buffer size (10)";
     IF_VERB(STANDARD) {
@@ -131,7 +131,7 @@ void TestEvtNotifReadWrite::Run(void) {
     DISPLAY_AMDSMI_API("amdsmi_get_gpu_event_notification", "", VERB(STANDARD));
     ret =  amdsmi_get_gpu_event_notification(10000, &num_elem, data);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS,
-                               AMDSMI_STATUS_INSUFFICIENT_SIZE);
+                               AMDSMI_STATUS_INSUFFICIENT_SIZE, AMDSMI_STATUS_NO_DATA);
     if (ret == AMDSMI_STATUS_SUCCESS || ret == AMDSMI_STATUS_INSUFFICIENT_SIZE) {
       EXPECT_LE(num_elem, 10) << "Expected the number of elements found to be <= buffer size (10)";
       IF_VERB(STANDARD) {

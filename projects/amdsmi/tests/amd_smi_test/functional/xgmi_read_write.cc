@@ -95,7 +95,7 @@ void TestXGMIReadWrite::Run(void) {
       // Verify api support checking functionality is working
       DISPLAY_AMDSMI_API("amdsmi_gpu_xgmi_error_status", "gpu="+std::to_string(dv_ind), VERB(STANDARD));
       err = amdsmi_gpu_xgmi_error_status(device, nullptr);
-      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
+      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_NOT_SUPPORTED);
       ASSERT_EQ(err, AMDSMI_STATUS_NOT_SUPPORTED);
       continue;
     }

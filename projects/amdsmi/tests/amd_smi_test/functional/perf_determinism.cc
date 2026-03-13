@@ -110,7 +110,7 @@ void TestPerfDeterminism::Run(void) {
       CHK_ERR_ASRT(err)
       DISPLAY_AMDSMI_API("amdsmi_get_gpu_perf_level", "gpu="+std::to_string(i), VERB(STANDARD));
       ret = amdsmi_get_gpu_perf_level(processor_handles_[i], &pfl);
-      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
+      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
       CHK_ERR_ASRT(ret)
       IF_VERB(STANDARD) { std::cout << "\t**New Perf Level:" << GetPerfLevelStr(pfl) << std::endl; }
     }  // END - SET SUPPORTED

@@ -76,7 +76,7 @@ void TestMemPageInfoRead::Run(void) {
 
     DISPLAY_AMDSMI_API("amdsmi_get_gpu_memory_reserved_pages", "gpu="+std::to_string(i), VERB(STANDARD));
     err = amdsmi_get_gpu_memory_reserved_pages(processor_handles_[i], &num_pages, nullptr);
-    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
 
     if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
       // Verify api support checking functionality is working

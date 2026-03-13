@@ -98,8 +98,9 @@ void TestFanRead::Run(void) {
       DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
       CHK_ERR_ASRT(err)
       IF_VERB(STANDARD) {
-        std::cout << static_cast<float>(val_i64) / static_cast<float>(val_ui64) * 100;
-        std::cout << "% (" << val_i64 << "/" << val_ui64 << ")" << std::endl;
+        std::cout << "\t**Current fan RPMs: ";
+        std::cout << static_cast<float>(val_i64)/static_cast<float>(val_ui64)*100;
+        std::cout << "% ("<< val_i64 << "/" << val_ui64 << ")" << std::endl;
       }
       // Verify api support checking functionality is working
       DISPLAY_AMDSMI_API("amdsmi_get_gpu_fan_speed_max", "gpu="+std::to_string(i), VERB(STANDARD));

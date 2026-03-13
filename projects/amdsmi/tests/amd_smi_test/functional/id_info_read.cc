@@ -98,7 +98,7 @@ void TestIdInfoRead::Run(void) {
       // Verify api support checking functionality is working
       DISPLAY_AMDSMI_API("amdsmi_get_gpu_id", "gpu="+std::to_string(i), VERB(STANDARD));
       ret = amdsmi_get_gpu_id(processor_handles_[i], nullptr);
-      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
+      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_NOT_SUPPORTED);
       ASSERT_EQ(ret, AMDSMI_STATUS_NOT_SUPPORTED);
     } else {
       CHK_ERR_ASRT(err)

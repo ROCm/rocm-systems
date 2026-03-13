@@ -70,7 +70,7 @@ void ReloadDriverWithMessages(bool isVerbose, const std::string& preReloadMessag
     }
 
     auto start_time = std::chrono::steady_clock::now();
-    DISPLAY_AMDSMI_API("amdsmi_reload_status ", "", isVerbose);
+    DISPLAY_AMDSMI_API("amdsmi_gpu_driver_reload", "", isVerbose);
     auto driver_reload_status = amdsmi_gpu_driver_reload();
     DISPLAY_AMDSMI_STATUS(isVerbose, __FILE__, __LINE__, driver_reload_status, AMDSMI_STATUS_SUCCESS);
     auto end_time = std::chrono::steady_clock::now();
@@ -465,7 +465,7 @@ void TestMemoryPartitionReadWrite::Run(void) {
     char smallBuffer[k2Len];
     DISPLAY_AMDSMI_API("amdsmi_get_gpu_memory_partition", "gpu="+std::to_string(dv_ind), VERB(STANDARD));
     err = amdsmi_get_gpu_memory_partition(processor_handles_[dv_ind], smallBuffer, k2Len);
-    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INSUFFICIENT_SIZE);
     uint32_t size = static_cast<uint32_t>(sizeof(smallBuffer)/sizeof(*smallBuffer));
     ASSERT_EQ(err, AMDSMI_STATUS_INSUFFICIENT_SIZE);
     ASSERT_EQ(k2Len, size);
@@ -506,7 +506,7 @@ void TestMemoryPartitionReadWrite::Run(void) {
     // Verify api support checking functionality is working
     DISPLAY_AMDSMI_API("amdsmi_get_gpu_memory_partition", "gpu="+std::to_string(dv_ind), VERB(STANDARD));
     err = amdsmi_get_gpu_memory_partition(processor_handles_[dv_ind], orig_memory_partition, k0Len);
-    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
     ASSERT_TRUE(err == AMDSMI_STATUS_INVAL);
     if (err == AMDSMI_STATUS_INVAL) {
       IF_VERB(STANDARD) {
@@ -520,7 +520,7 @@ void TestMemoryPartitionReadWrite::Run(void) {
     DISPLAY_AMDSMI_API("amdsmi_get_gpu_memory_partition_config", "gpu="+std::to_string(dv_ind), VERB(STANDARD));
     err = amdsmi_get_gpu_memory_partition_config(processor_handles_[dv_ind],
                                                   null_memory_partition_config);
-    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL, AMDSMI_STATUS_NOT_SUPPORTED);
     ASSERT_TRUE((err == AMDSMI_STATUS_INVAL) ||
                 (err == AMDSMI_STATUS_NOT_SUPPORTED));
     if (err == AMDSMI_STATUS_INVAL) {
@@ -585,7 +585,7 @@ void TestMemoryPartitionReadWrite::Run(void) {
     DISPLAY_AMDSMI_API("amdsmi_get_gpu_memory_partition", "gpu="+std::to_string(dv_ind), VERB(STANDARD));
     ret = amdsmi_get_gpu_memory_partition(processor_handles_[dv_ind],
                                           orig_memory_partition, k255Len);
-    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
     ASSERT_EQ(AMDSMI_STATUS_SUCCESS, ret);
 
     for (int partition = static_cast<int>(AMDSMI_MEMORY_PARTITION_NPS1);
