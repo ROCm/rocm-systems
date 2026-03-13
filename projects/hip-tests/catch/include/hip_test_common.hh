@@ -649,8 +649,8 @@ class BlockingContext {
     HipTest::HIP_SKIP_TEST(msg.c_str());                                                           \
     return;                                                                                        \
   }                                                                                                \
-// This must be called in the beginning of warp test app's main() to indicate warp match functions
-// are supported.
+// Use this before running tests that rely on warp match functions to check device support and
+// skip the current test if they are not available.
 #define CHECK_WARP_MATCH_FUNCTIONS_SUPPORT                                                         \
   if (!HipTest::areWarpMatchFunctionsSupported()) {                                                \
     HipTest::HIP_SKIP_TEST("Warp Match Functions are not supported on the device. Skipped.");      \
