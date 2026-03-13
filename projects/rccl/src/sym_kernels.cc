@@ -91,6 +91,7 @@ static uint32_t kernelMask_user() {
 }
 
 NCCL_PARAM(SymCTAs, "SYM_CTAS", 0)
+NCCL_PARAM(SymLL, "SYM_LL", 0)
 
 static double softmin(double x, double ceiling, double softness) {
   // looks like a smooth version of: min(x, ceiling)
@@ -289,6 +290,8 @@ static uint32_t ncclSymkMask(struct ncclComm* comm, ncclFunc_t coll, int/*ncclDe
   }
   if (!hasSTMC) kmask &= ~kernelMask_STMC;
   if (!hasLDMC) kmask &= ~kernelMask_LDMC;
+
+  if (ncclParamSymLL() == 0) kmask &= ~kernelMask_LL;
 
   size_t nBytes = nElts*ncclTypeSize(ty);
   size_t nBusBytes = (coll == ncclFuncAllReduce ? 1 : comm->nRanks)*nBytes;
