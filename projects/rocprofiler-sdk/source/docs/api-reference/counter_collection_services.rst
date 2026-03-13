@@ -365,7 +365,7 @@ Derived metrics are expressions performing computation on collected hardware met
           expression: 100*GRBM_GUI_ACTIVE/GRBM_COUNT
       description: Percentage of the time that GUI is active
 
-In the preceding example, ``GPU_UTIL`` is a derived metric that uses a mathematic expression to calculate the utilization rate of the GPU using values of two GRBM hardware counters ``GRBM_GUI_ACTIVE`` and ``GRBM_COUNT``. Expressions support the standard set of math operators (/,*,-,+) along with a set of special functions such as reduce and accumulate.
+In the preceding example, ``GPU_UTIL`` is a derived metric that uses a mathematic expression to calculate the utilization rate of the GPU using values of two GRBM hardware counters ``GRBM_GUI_ACTIVE`` and ``GRBM_COUNT``. Expressions support the standard set of math operators (/,*,-,+) along with a set of special functions such as reduce, select, accumulate, and the pointwise operations pmax, pmin, and pavg.
 
 Reduce Function
 ++++++++++++++++
@@ -377,7 +377,7 @@ Reduce Function
 The reduce function reduces counter values across all dimensions such as shader engine, SIMD, and so on, to produce a single output value. This helps to collect and compare values across the entire device. Here are the common reduction operations:
 
 - ``sum``: Sums to create a single output. For example, ``reduce(GL2C_HIT,sum)`` sums all ``GL2C_HIT`` hardware register values.
-- ``avr``: Calculates the average across all dimensions.
+- ``avr`` (or ``avg``): Calculates the average across all dimensions.
 - ``min``: Selects minimum value across all dimensions.
 - ``max``: Selects the maximum value across all dimensions.
 
@@ -485,6 +485,36 @@ similarly, for ``select(Y, [DIMENSION_XCC=[0],DIMENSION_SHADER_ENGINE=[2]])`` re
     |       |WGP[0]|WGP[1]|WGP[2]|WGP[3]|
     |-------|------|------|------|------|
     |       |  9   |  10  |  11  |  12  |
+
+Pointwise Functions
+++++++++++++++++++++
+
+Pointwise functions perform element-wise binary operations on two counter vectors. Unlike ``reduce()``, which collapses dimension instances into a single value, pointwise functions compare or combine corresponding elements across two counter expressions while preserving dimension structure.
+
+- ``pmax(A, B)``: Returns the element-wise maximum of counters A and B.
+- ``pmin(A, B)``: Returns the element-wise minimum of counters A and B.
+- ``pavg(A, B)``: Returns the element-wise average ``(A + B) / 2`` of counters A and B.
+
+.. code-block:: yaml
+
+    expression: pmax(reduce(SQ_WAVES, sum), reduce(TCC_HIT, sum))
+
+These operations can be nested with each other, with arithmetic operators, and with ``reduce()`` or ``select()``:
+
+.. code-block:: yaml
+
+    # Pointwise max of two reduced counters
+    expression: pmax(reduce(COUNTER_A, sum), reduce(COUNTER_B, sum))
+
+    # Nested pointwise operations
+    expression: pmax(COUNTER_A, pmin(COUNTER_B, COUNTER_C))
+
+    # Combined with arithmetic
+    expression: pavg(COUNTER_A, COUNTER_B) * 100 / COUNTER_C
+
+.. note::
+
+    The ``p`` prefix (from R's ``pmax``/``pmin`` convention) distinguishes pointwise operations from set-theoretic reductions. ``reduce(A, max)`` collapses all dimension instances of A to a single maximum value, while ``pmax(A, B)`` returns a vector where each element is the maximum of the corresponding elements in A and B.
 
 Accumulate Function
 -------------------

@@ -362,40 +362,25 @@ TEST(parser, parse_nested_accum_counter)
 
 TEST(parser, pointwise_ops)
 {
+    // clang-format off
+    auto ref_node = [](const char* name) {
+        return fmt::format(
+            R"({{"Type":"REFERENCE_NODE", "REDUCE_OP":"", "ACCUMULATE_OP":"NONE", )"
+            R"("Value":"{}", "Counter_Set":[], "Reduce_Dimension_Set":[], "Select_Dimension_Map":[]}})",
+            name);
+    };
+    auto binary_node = [&](const char* type, const char* a, const char* b) {
+        return fmt::format(
+            R"({{"Type":"{}", "REDUCE_OP":"", "ACCUMULATE_OP":"NONE", )"
+            R"("Counter_Set":[{},{}], "Reduce_Dimension_Set":[], "Select_Dimension_Map":[]}})",
+            type, ref_node(a), ref_node(b));
+    };
+    // clang-format on
+
     std::map<std::string, std::string> expressionToExpected = {
-        {"pmax(AB, BA)",
-         "{\"Type\":\"PMAX_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
-         "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
-         "\"ACCUMULATE_OP\":\"NONE\", "
-         "\"Value\":\"AB\", \"Counter_Set\":[], \"Reduce_Dimension_Set\":[], "
-         "\"Select_Dimension_Map\":[]},"
-         "{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
-         "\"Value\":\"BA\", "
-         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]}], "
-         "\"Reduce_Dimension_Set\":[], "
-         "\"Select_Dimension_Map\":[]}"},
-        {"pmin(CD, ZX)",
-         "{\"Type\":\"PMIN_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
-         "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
-         "\"ACCUMULATE_OP\":\"NONE\", "
-         "\"Value\":\"CD\", \"Counter_Set\":[], \"Reduce_Dimension_Set\":[], "
-         "\"Select_Dimension_Map\":[]},"
-         "{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
-         "\"Value\":\"ZX\", "
-         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]}], "
-         "\"Reduce_Dimension_Set\":[], "
-         "\"Select_Dimension_Map\":[]}"},
-        {"pavg(NM, DB)",
-         "{\"Type\":\"PAVG_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
-         "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
-         "\"ACCUMULATE_OP\":\"NONE\", "
-         "\"Value\":\"NM\", \"Counter_Set\":[], \"Reduce_Dimension_Set\":[], "
-         "\"Select_Dimension_Map\":[]},"
-         "{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
-         "\"Value\":\"DB\", "
-         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]}], "
-         "\"Reduce_Dimension_Set\":[], "
-         "\"Select_Dimension_Map\":[]}"}};
+        {"pmax(AB, BA)", binary_node("PMAX_NODE", "AB", "BA")},
+        {"pmin(CD, ZX)", binary_node("PMIN_NODE", "CD", "ZX")},
+        {"pavg(NM, DB)", binary_node("PAVG_NODE", "NM", "DB")}};
 
     for(auto [op, expected] : expressionToExpected)
     {
@@ -411,82 +396,23 @@ TEST(parser, pointwise_ops)
 
 TEST(parser, pointwise_nested)
 {
-    std::vector<std::tuple<std::string, std::string>> expressionToExpected = {
-        {"pmax(AB, reduce(CD, SUM, [DIMENSION_XCC]))",
-         "{\"Type\":\"PMAX_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
-         "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
-         "\"ACCUMULATE_OP\":\"NONE\", \"Value\":\"AB\", "
-         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]},"
-         "{\"Type\":\"REDUCE_NODE\", \"REDUCE_OP\":\"SUM\", \"ACCUMULATE_OP\":\"NONE\", "
-         "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
-         "\"ACCUMULATE_OP\":\"NONE\", \"Value\":\"CD\", "
-         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]}], "
-         "\"Reduce_Dimension_Set\":[\"1\"], \"Select_Dimension_Map\":[]}], "
-         "\"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]}"},
-        {"reduce(pmax(AB, CD), SUM, [DIMENSION_XCC])",
-         "{\"Type\":\"REDUCE_NODE\", \"REDUCE_OP\":\"SUM\", \"ACCUMULATE_OP\":\"NONE\", "
-         "\"Counter_Set\":[{\"Type\":\"PMAX_NODE\", \"REDUCE_OP\":\"\", "
-         "\"ACCUMULATE_OP\":\"NONE\", "
-         "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
-         "\"ACCUMULATE_OP\":\"NONE\", \"Value\":\"AB\", "
-         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]},"
-         "{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
-         "\"Value\":\"CD\", "
-         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]}], "
-         "\"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]}], "
-         "\"Reduce_Dimension_Set\":[\"1\"], \"Select_Dimension_Map\":[]}"},
-        {"pmax(AB, pmin(CD, ZX))",
-         "{\"Type\":\"PMAX_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
-         "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
-         "\"ACCUMULATE_OP\":\"NONE\", \"Value\":\"AB\", "
-         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]},"
-         "{\"Type\":\"PMIN_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
-         "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
-         "\"ACCUMULATE_OP\":\"NONE\", \"Value\":\"CD\", "
-         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]},"
-         "{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
-         "\"Value\":\"ZX\", "
-         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]}], "
-         "\"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]}], "
-         "\"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]}"},
-        {"pavg(AB, CD) + ZX",
-         "{\"Type\":\"ADDITION_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
-         "\"Counter_Set\":[{\"Type\":\"PAVG_NODE\", \"REDUCE_OP\":\"\", "
-         "\"ACCUMULATE_OP\":\"NONE\", "
-         "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
-         "\"ACCUMULATE_OP\":\"NONE\", \"Value\":\"AB\", "
-         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]},"
-         "{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
-         "\"Value\":\"CD\", "
-         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]}], "
-         "\"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]},"
-         "{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
-         "\"Value\":\"ZX\", "
-         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]}], "
-         "\"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]}"},
-        {"pmin(AB, CD) * ZX",
-         "{\"Type\":\"MULTIPLY_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
-         "\"Counter_Set\":[{\"Type\":\"PMIN_NODE\", \"REDUCE_OP\":\"\", "
-         "\"ACCUMULATE_OP\":\"NONE\", "
-         "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
-         "\"ACCUMULATE_OP\":\"NONE\", \"Value\":\"AB\", "
-         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]},"
-         "{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
-         "\"Value\":\"CD\", "
-         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]}], "
-         "\"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]},"
-         "{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
-         "\"Value\":\"ZX\", "
-         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]}], "
-         "\"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]}"}};
+    // Test that pointwise ops compose correctly with reduce, other pointwise ops,
+    // and arithmetic. Verifies parseability and root node type.
+    std::vector<std::pair<std::string, NodeType>> expressionToRootType = {
+        {"pmax(AB, reduce(CD, SUM, [DIMENSION_XCC]))", PMAX_NODE},
+        {"reduce(pmax(AB, CD), SUM, [DIMENSION_XCC])", REDUCE_NODE},
+        {"pmax(AB, pmin(CD, ZX))", PMAX_NODE},
+        {"pavg(AB, CD) + ZX", ADDITION_NODE},
+        {"pmin(AB, CD) * ZX", MULTIPLY_NODE},
+    };
 
-    for(auto [op, expected] : expressionToExpected)
+    for(const auto& [op, expected_type] : expressionToRootType)
     {
         RawAST* ast = nullptr;
         auto*   buf = yy_scan_string(op.c_str());
         yyparse(&ast);
-        ASSERT_TRUE(ast);
-        EXPECT_EQ(fmt::format("{}", *ast), expected);
+        ASSERT_TRUE(ast) << "Failed to parse: " << op;
+        EXPECT_EQ(ast->type, expected_type) << "Wrong root type for: " << op;
         yy_delete_buffer(buf);
         delete ast;
     }

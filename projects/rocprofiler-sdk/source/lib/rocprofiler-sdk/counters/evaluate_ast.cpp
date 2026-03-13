@@ -622,8 +622,9 @@ EvaluateAST::validate_raw_ast(const std::unordered_map<std::string, Metric>& met
             case PMIN_NODE:
             case PAVG_NODE:
             {
-                // For arithmetic operations '+' '-' '*' '/' check if
-                // dimensions of both operands are matching. (handled in set_dimensions())
+                // For arithmetic and pointwise operations '+' '-' '*' '/' 'pmax' 'pmin'
+                // 'pavg' check if dimensions of both operands are matching.
+                // (handled in set_dimensions())
                 for(auto& child : _children)
                 {
                     child.validate_raw_ast(metrics);
