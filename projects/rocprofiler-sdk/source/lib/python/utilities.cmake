@@ -179,6 +179,7 @@ function(rocprofiler_rocpd_python_bindings _VERSION)
         schema.py
         summary.py
         time_window.py
+        tracelens_port.py
         analyze.py)
 
     foreach(_SOURCE ${rocpd_PYTHON_SOURCES})
@@ -190,21 +191,24 @@ function(rocprofiler_rocpd_python_bindings _VERSION)
             COMPONENT rocpd)
     endforeach()
 
-    # Copy ai_analysis directory and its contents (including subdirectories). Includes
-    # *.py modules, *.md docs, and *.json schema files (e.g.
-    # ai_analysis/docs/analysis-output.schema.json).
+    # Copy ai_analysis directory and its contents (including subdirectories).
+    # Includes *.py modules, *.md docs, *.json schema files, and *.png assets
+    # (e.g. ai_analysis/share/amd_rocm_logo.png used by interactive.py banner).
     file(
         GLOB_RECURSE
         rocpd_AI_ANALYSIS_FILES
         CONFIGURE_DEPENDS
         "${CMAKE_CURRENT_LIST_DIR}/ai_analysis/*.py"
         "${CMAKE_CURRENT_LIST_DIR}/ai_analysis/*.md"
-        "${CMAKE_CURRENT_LIST_DIR}/ai_analysis/*.json")
+        "${CMAKE_CURRENT_LIST_DIR}/ai_analysis/*.json"
+        "${CMAKE_CURRENT_LIST_DIR}/ai_analysis/*.png")
 
     foreach(_AI_FILE ${rocpd_AI_ANALYSIS_FILES})
         file(RELATIVE_PATH _REL_PATH "${CMAKE_CURRENT_LIST_DIR}" "${_AI_FILE}")
         get_filename_component(_REL_DIR "${_REL_PATH}" DIRECTORY)
-        configure_file(${_AI_FILE} ${rocpd_PYTHON_OUTPUT_DIRECTORY}/${_REL_PATH} COPYONLY)
+        file(MAKE_DIRECTORY ${rocpd_PYTHON_OUTPUT_DIRECTORY}/${_REL_DIR})
+        configure_file(${_AI_FILE}
+                       ${rocpd_PYTHON_OUTPUT_DIRECTORY}/${_REL_PATH} COPYONLY)
         install(
             FILES ${rocpd_PYTHON_OUTPUT_DIRECTORY}/${_REL_PATH}
             DESTINATION ${rocpd_PYTHON_INSTALL_DIRECTORY}/${_REL_DIR}
