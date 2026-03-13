@@ -71,6 +71,13 @@ def _build_private_client(api_key: Optional[str], model_override: Optional[str])
                     f'Use double-quoted JSON: \'{{"Ocp-Apim-Subscription-Key": "abc123"}}\'\n'
                     f"Value was: {raw_headers!r}"
                 )
+        if not isinstance(parsed_headers, dict):
+            raise ValueError(
+                f"ROCPD_LLM_PRIVATE_HEADERS must be a JSON object, got "
+                f"{type(parsed_headers).__name__}.\n"
+                f'Expected format: \'{{"Ocp-Apim-Subscription-Key": "abc123"}}\'\n'
+                f"Value was: {raw_headers!r}"
+            )
         headers.update(parsed_headers)
 
     # SSL verification — disabled when ROCPD_LLM_PRIVATE_VERIFY_SSL=0/false
