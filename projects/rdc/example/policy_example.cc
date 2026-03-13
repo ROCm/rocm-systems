@@ -152,7 +152,7 @@ int main() {
   }
 
   policy.condition = {RDC_POLICY_COND_POWER, 150000};  // convert to milli degree
-  policy.action = RDC_POLICY_ACTION_NONE;               // Notify only
+  policy.action = RDC_POLICY_ACTION_NONE;              // Notify only
   result = rdc_policy_set(rdc_handle, group_id, policy);
   if (result != RDC_ST_OK) {
     std::cout << "Error set policy RDC_POLICY_COND_POWER, Return: " << rdc_status_string(result)
@@ -161,11 +161,11 @@ int main() {
   }
 
   policy.condition = {RDC_POLICY_COND_MAX_PAGE_RETRIED, 100};  // convert to milli degree
-  policy.action = RDC_POLICY_ACTION_NONE;               // Notify only
+  policy.action = RDC_POLICY_ACTION_NONE;                      // Notify only
   result = rdc_policy_set(rdc_handle, group_id, policy);
   if (result != RDC_ST_OK) {
-    std::cout << "Error set policy RDC_POLICY_COND_MAX_PAGE_RETRIED, Return: " << rdc_status_string(result)
-              << std::endl;
+    std::cout << "Error set policy RDC_POLICY_COND_MAX_PAGE_RETRIED, Return: "
+              << rdc_status_string(result) << std::endl;
     goto cleanup;
   }
 

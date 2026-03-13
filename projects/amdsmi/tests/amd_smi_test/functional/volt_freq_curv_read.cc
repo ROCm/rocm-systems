@@ -20,23 +20,24 @@
  * THE SOFTWARE.
  */
 
-#include <cstdint>
+#include "volt_freq_curv_read.h"
 
+#include <gtest/gtest.h>
+
+#include <cstdint>
 #include <iostream>
 #include <string>
 
-#include <gtest/gtest.h>
 #include "amd_smi/amdsmi.h"
-#include "volt_freq_curv_read.h"
 
 TestVoltCurvRead::TestVoltCurvRead() : TestBase() {
   set_title("AMDSMI Voltage-Frequency Curve Read Test");
-  set_description("The Voltage-Frequency Read tests verifies that the voltage"
-                         " frequency curve information can be read properly.");
+  set_description(
+      "The Voltage-Frequency Read tests verifies that the voltage"
+      " frequency curve information can be read properly.");
 }
 
-TestVoltCurvRead::~TestVoltCurvRead(void) {
-}
+TestVoltCurvRead::~TestVoltCurvRead(void) {}
 
 void TestVoltCurvRead::SetUp(void) {
   TestBase::SetUp();
@@ -44,9 +45,7 @@ void TestVoltCurvRead::SetUp(void) {
   return;
 }
 
-void TestVoltCurvRead::DisplayTestInfo(void) {
-  TestBase::DisplayTestInfo();
-}
+void TestVoltCurvRead::DisplayTestInfo(void) { TestBase::DisplayTestInfo(); }
 
 void TestVoltCurvRead::DisplayResults(void) const {
   TestBase::DisplayResults();
@@ -59,28 +58,26 @@ void TestVoltCurvRead::Close() {
   TestBase::Close();
 }
 
-static void pt_rng_Mhz(std::string title, amdsmi_range_t *r) {
+static void pt_rng_Mhz(std::string title, amdsmi_range_t* r) {
   assert(r != nullptr);
 
   std::cout << title << std::endl;
-  std::cout << "\t\t** " << r->lower_bound/1000000 << " to " <<
-                                r->upper_bound/1000000 << " MHz" << std::endl;
+  std::cout << "\t\t** " << r->lower_bound / 1000000 << " to " << r->upper_bound / 1000000 << " MHz"
+            << std::endl;
 }
 
-static void pt_rng_mV(std::string title, amdsmi_range_t *r) {
+static void pt_rng_mV(std::string title, amdsmi_range_t* r) {
   assert(r != nullptr);
 
   std::cout << title << std::endl;
-  std::cout << "\t\t** " << r->lower_bound << " to " << r->upper_bound <<
-                                                           " mV" << std::endl;
+  std::cout << "\t\t** " << r->lower_bound << " to " << r->upper_bound << " mV" << std::endl;
 }
 
-static void print_pnt(amdsmi_od_vddc_point_t *pt) {
-  std::cout << "\t\t** Frequency: " << pt->frequency/1000000 << "MHz" <<
-                                                                    std::endl;
+static void print_pnt(amdsmi_od_vddc_point_t* pt) {
+  std::cout << "\t\t** Frequency: " << pt->frequency / 1000000 << "MHz" << std::endl;
   std::cout << "\t\t** Voltage: " << pt->voltage << "mV" << std::endl;
 }
-static void pt_vddc_curve(amdsmi_od_volt_curve_t *c) {
+static void pt_vddc_curve(amdsmi_od_volt_curve_t* c) {
   assert(c != nullptr);
 
   for (uint32_t i = 0; i < AMDSMI_NUM_VOLTAGE_CURVE_POINTS; ++i) {
@@ -88,31 +85,28 @@ static void pt_vddc_curve(amdsmi_od_volt_curve_t *c) {
   }
 }
 
-static void print_amdsmi_od_volt_freq_data_t(amdsmi_od_volt_freq_data_t *odv) {
+static void print_amdsmi_od_volt_freq_data_t(amdsmi_od_volt_freq_data_t* odv) {
   assert(odv != nullptr);
 
   std::cout.setf(std::ios::dec, std::ios::basefield);
   pt_rng_Mhz("\t\tCurrent SCLK frequency range:", &odv->curr_sclk_range);
   pt_rng_Mhz("\t\tCurrent MCLK frequency range:", &odv->curr_mclk_range);
-  pt_rng_Mhz("\t\tMin/Max Possible SCLK frequency range:",
-                                                      &odv->sclk_freq_limits);
-  pt_rng_Mhz("\t\tMin/Max Possible MCLK frequency range:",
-                                                      &odv->mclk_freq_limits);
+  pt_rng_Mhz("\t\tMin/Max Possible SCLK frequency range:", &odv->sclk_freq_limits);
+  pt_rng_Mhz("\t\tMin/Max Possible MCLK frequency range:", &odv->mclk_freq_limits);
 
   std::cout << "\t\tCurrent Freq/Volt. curve:" << std::endl;
   pt_vddc_curve(&odv->curve);
 
-  std::cout << "\tNumber of Freq./Volt. regions: " <<
-                                                odv->num_regions << std::endl;
+  std::cout << "\tNumber of Freq./Volt. regions: " << odv->num_regions << std::endl;
 }
 
-static void print_odv_region(amdsmi_freq_volt_region_t *region) {
+static void print_odv_region(amdsmi_freq_volt_region_t* region) {
   pt_rng_Mhz("\t\tFrequency range:", &region->freq_range);
   pt_rng_mV("\t\tVoltage range:", &region->volt_range);
 }
 
 static void print_amdsmi_od_volt_freq_regions(uint32_t num_regions,
-                                             amdsmi_freq_volt_region_t *regions) {
+                                              amdsmi_freq_volt_region_t* regions) {
   for (uint32_t i = 0; i < num_regions; ++i) {
     std::cout << "\tRegion " << i << ":" << std::endl;
     print_odv_region(&regions[i]);
@@ -132,23 +126,20 @@ void TestVoltCurvRead::Run(void) {
   for (uint32_t i = 0; i < num_monitor_devs(); ++i) {
     PrintDeviceHeader(processor_handles_[i]);
 
-    err =  amdsmi_get_gpu_od_volt_info(processor_handles_[i], &odv);
-    if (err == AMDSMI_STATUS_NOT_SUPPORTED
-          || err == AMDSMI_STATUS_NOT_YET_IMPLEMENTED) {
-      //TODO add perf_level tests
+    err = amdsmi_get_gpu_od_volt_info(processor_handles_[i], &odv);
+    if (err == AMDSMI_STATUS_NOT_SUPPORTED || err == AMDSMI_STATUS_NOT_YET_IMPLEMENTED) {
+      // TODO add perf_level tests
       IF_VERB(STANDARD) {
-        std::cout <<
-            "\t** amdsmi_get_gpu_od_volt_info: Not supported on this machine"
-                                                               << std::endl;
+        std::cout << "\t** amdsmi_get_gpu_od_volt_info: Not supported on this machine" << std::endl;
       }
       // Verify api support checking functionality is working
       if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
-        err =  amdsmi_get_gpu_od_volt_info(processor_handles_[i], nullptr);
+        err = amdsmi_get_gpu_od_volt_info(processor_handles_[i], nullptr);
         ASSERT_EQ(err, AMDSMI_STATUS_NOT_SUPPORTED);
       }
     } else {
       // Verify api support checking functionality is working
-      err =  amdsmi_get_gpu_od_volt_info(processor_handles_[i], nullptr);
+      err = amdsmi_get_gpu_od_volt_info(processor_handles_[i], nullptr);
       ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
     }
 
@@ -156,31 +147,27 @@ void TestVoltCurvRead::Run(void) {
       std::cout << "\t**Frequency-voltage curve data:" << std::endl;
       print_amdsmi_od_volt_freq_data_t(&odv);
 
-      amdsmi_freq_volt_region_t *regions{};
+      amdsmi_freq_volt_region_t* regions{};
       uint32_t num_regions;
       regions = new amdsmi_freq_volt_region_t[odv.num_regions];
       ASSERT_NE(regions, nullptr);
 
       num_regions = odv.num_regions;
-      err =  amdsmi_get_gpu_od_volt_curve_regions(processor_handles_[i],
-                                                  &num_regions, regions);
+      err = amdsmi_get_gpu_od_volt_curve_regions(processor_handles_[i], &num_regions, regions);
 
       IF_VERB(STANDARD) {
         std::cout << "\t**amdsmi_get_gpu_od_volt_curve_regions("
-                  << "processor_handles_[i], &num_regions, regions): "
-                  << err << "\n"
-                  << "\t**Number of regions: " << std::dec << num_regions
-                  << "\n";
+                  << "processor_handles_[i], &num_regions, regions): " << err << "\n"
+                  << "\t**Number of regions: " << std::dec << num_regions << "\n";
       }
-      ASSERT_TRUE(err == AMDSMI_STATUS_SUCCESS
-                  || err == AMDSMI_STATUS_NOT_SUPPORTED
-                  || err == AMDSMI_STATUS_UNEXPECTED_DATA
-                  || err == AMDSMI_STATUS_UNEXPECTED_SIZE
-                  || err == AMDSMI_STATUS_INVAL);
+      ASSERT_TRUE(err == AMDSMI_STATUS_SUCCESS || err == AMDSMI_STATUS_NOT_SUPPORTED ||
+                  err == AMDSMI_STATUS_UNEXPECTED_DATA || err == AMDSMI_STATUS_UNEXPECTED_SIZE ||
+                  err == AMDSMI_STATUS_INVAL);
       if (err != AMDSMI_STATUS_SUCCESS) {
         IF_VERB(STANDARD) {
           std::cout << "\t**amdsmi_get_gpu_od_volt_curve_regions: "
-                       "Not supported on this machine" << std::endl;
+                       "Not supported on this machine"
+                    << std::endl;
         }
         continue;
       }
@@ -191,7 +178,7 @@ void TestVoltCurvRead::Run(void) {
       std::cout << "\t**Frequency-voltage curve regions:" << std::endl;
       print_amdsmi_od_volt_freq_regions(num_regions, regions);
 
-      delete []regions;
+      delete[] regions;
     }
   }
 }

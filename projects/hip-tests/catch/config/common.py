@@ -14,6 +14,42 @@ NON_UNIT_GROUPS = [
 ]
 
 
+def parse_size_string(size_str):
+    """Convert size string (1K, 1M, 1G) to bytes.
+    
+    Args:
+        size_str: Size as string ("1K", "1M", "1G") or int
+        
+    Returns:
+        Size in bytes as integer
+    """
+    # Handle integers directly (YAML may parse numbers as int)
+    if isinstance(size_str, int):
+        return size_str
+    
+    size_str = str(size_str).strip().upper()
+    multipliers = {'K': 1024, 'M': 1024*1024, 'G': 1024*1024*1024}
+    
+    for suffix, multiplier in multipliers.items():
+        if size_str.endswith(suffix):
+            return int(float(size_str[:-1]) * multiplier)
+    return int(size_str)
+
+
+def load_definitions(config_path):
+    """Load definitions.yaml and return the full config including cmd_options.
+    
+    Args:
+        config_path: Path to the config directory (containing configs/)
+        
+    Returns:
+        Dict with 'definitions' and 'cmd_options' keys
+    """
+    definitions_path = os.path.join(config_path, "definitions.yaml")
+    with open(definitions_path) as file:
+        return yaml.safe_load(file)
+
+
 def load_config(file_path, definitions_text):
     with open(file_path) as file:
         content = file.read()
