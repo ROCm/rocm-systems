@@ -84,18 +84,16 @@ __global__ void MemAdvseKernel(int n, int* x) {
 
 // Kernel
 __global__ void MemAdvise2(int* Hmm, int n) {
-  int index = blockIdx.x * blockDim.x + threadIdx.x;
-  int stride = blockDim.x * gridDim.x;
-  for (int i = index; i < n; i += stride) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < n) {
     Hmm[i] = Hmm[i] + 10;
   }
 }
 
 // Kernel
 __global__ void MemAdvise3(int* Hmm, int* Hmm1, int n) {
-  int index = blockIdx.x * blockDim.x + threadIdx.x;
-  int stride = blockDim.x * gridDim.x;
-  for (int i = index; i < n; i += stride) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < n) {
     Hmm1[i] = Hmm[i] + 10;
   }
 }
@@ -123,7 +121,7 @@ static int HmmAttrPrint() {
 // The following function tests if peers can set hipMemAdviseSetAccessedBy flag
 // on HMM memory prefetched on each of the other gpus
 #if HT_AMD
-TEST_CASE("Unit_hipMemAdvise_TstAccessedByPeer", "[multigpu]") {
+TEST_CASE(Unit_hipMemAdvise_TstAccessedByPeer) {
   int MangdMem = HmmAttrPrint();
   if (MangdMem == 1) {
     bool IfTestPassed = true;
@@ -180,7 +178,7 @@ TEST_CASE("Unit_hipMemAdvise_TstAccessedByPeer", "[multigpu]") {
 /* Set AccessedBy flag to device 0 on Hmm memory and prefetch the memory to
    device 1, then probe for AccessedBy flag using hipMemRangeGetAttribute()
    we should still see the said flag is set for device 0*/
-TEST_CASE("Unit_hipMemAdvise_TstAccessedByFlg2") {
+TEST_CASE(Unit_hipMemAdvise_TstAccessedByFlg2) {
   int managed = HmmAttrPrint();
   if (managed == 1) {
     int *Hmm = NULL, data = 999, Ngpus = 0;
@@ -216,7 +214,7 @@ TEST_CASE("Unit_hipMemAdvise_TstAccessedByFlg2") {
    PreferredLocation to device 1, check for AccessedBy flag using
    hipMemRangeGetAttribute() it should return 1*/
 
-TEST_CASE("Unit_hipMemAdvise_TstAccessedByFlg3") {
+TEST_CASE(Unit_hipMemAdvise_TstAccessedByFlg3) {
   int managed = HmmAttrPrint();
   if (managed == 1) {
     int *Hmm = NULL, data = 999, Ngpus = 0;
@@ -253,51 +251,40 @@ TEST_CASE("Unit_hipMemAdvise_TstAccessedByFlg3") {
 /* Set AccessedBy flag to HMM memory launch a kernel and then unset
    AccessedBy, launch kernel. We should not have any access issues*/
 
-TEST_CASE("Unit_hipMemAdvise_TstAccessedByFlg4") {
+TEST_CASE(Unit_hipMemAdvise_TstAccessedByFlg4) {
   int managed = HmmAttrPrint();
   if (managed == 1) {
-    int *Hmm = NULL, NumElms = (1024 * 1024), InitVal = 123, blockSize = 64;
-    int DataMismatch = 0;
+    int *Hmm = NULL, NumElms = (1024 * 1024), InitVal = 123, blockSize = 1024;
     hipStream_t strm;
     HIP_CHECK(hipStreamCreate(&strm));
     HIP_CHECK(hipMallocManaged(&Hmm, (NumElms * sizeof(int))));
-    HIP_CHECK(hipMemAdvise(Hmm, (NumElms * sizeof(int)), hipMemAdviseSetAccessedBy, 0));
     // Initializing memory
     for (int i = 0; i < NumElms; ++i) {
       Hmm[i] = InitVal;
     }
-    dim3 dimBlock(blockSize, 1, 1);
-    dim3 dimGrid((NumElms + blockSize - 1) / blockSize, 1, 1);
+    HIP_CHECK(hipMemAdvise(Hmm, (NumElms * sizeof(int)), hipMemAdviseSetAccessedBy, 0));
+    HIP_CHECK(hipMemPrefetchAsync(Hmm, (NumElms * sizeof(int)), 0, strm));
+    HIP_CHECK(hipDeviceSynchronize());
     // launching kernel from each one of the gpus
-    MemAdvise2<<<dimGrid, dimBlock, 0, strm>>>(Hmm, NumElms);
-    HIP_CHECK(hipStreamSynchronize(strm));
+    MemAdvise2<<<1024, 1024, 0, strm>>>(Hmm, NumElms);
+    HIP_CHECK(hipDeviceSynchronize());
 
     // verifying the final result
     for (int i = 0; i < NumElms; ++i) {
-      if (Hmm[i] != (InitVal + 10)) {
-        DataMismatch++;
-      }
-    }
-
-    if (DataMismatch != 0) {
-      WARN("DataMismatch is observed at line: " << __LINE__);
-      REQUIRE(false);
+      INFO("index: " << i << " Hmm[i]: " << Hmm[i] << " Expected: " << (InitVal + 10));
+      REQUIRE(Hmm[i] == (InitVal + 10));
     }
 
     HIP_CHECK(hipMemAdvise(Hmm, (NumElms * sizeof(int)), hipMemAdviseUnsetAccessedBy, 0));
-    MemAdvise2<<<dimGrid, dimBlock, 0, strm>>>(Hmm, NumElms);
-    HIP_CHECK(hipStreamSynchronize(strm));
+    HIP_CHECK(hipDeviceSynchronize());
+    MemAdvise2<<<1024, 1024, 0, strm>>>(Hmm, NumElms);
+    HIP_CHECK(hipDeviceSynchronize());
     // verifying the final result
     for (int i = 0; i < NumElms; ++i) {
-      if (Hmm[i] != (InitVal + (2 * 10))) {
-        DataMismatch++;
-      }
+      INFO("index: " << i << " Hmm[i]: " << Hmm[i] << " Expected: " << (InitVal + 20));
+      REQUIRE(Hmm[i] == (InitVal + 20));
     }
 
-    if (DataMismatch != 0) {
-      WARN("DataMismatch is observed at line: " << __LINE__);
-      REQUIRE(false);
-    }
     HIP_CHECK(hipFree(Hmm));
     HIP_CHECK(hipStreamDestroy(strm));
   } else {
@@ -311,7 +298,7 @@ TEST_CASE("Unit_hipMemAdvise_TstAccessedByFlg4") {
    the allocated memory and launch a kernel. Kernel should get executed
    successfully without hang or segfault*/
 #if __linux__ && HT_AMD
-TEST_CASE("Unit_hipMemAdvise_TstAlignedAllocMem") {
+TEST_CASE(Unit_hipMemAdvise_TstAlignedAllocMem) {
   // The following code block checks for xnack+
   // so as to skip if the device is not xnack+
   hipDeviceProp_t prop;
@@ -341,7 +328,7 @@ TEST_CASE("Unit_hipMemAdvise_TstAlignedAllocMem") {
       HIP_CHECK(hipMemAdvise(Mllc, MemSz, hipMemAdviseSetPreferredLocation, 0));
       HIP_CHECK(hipMemPrefetchAsync(Mllc, MemSz, 0, strm));
       HIP_CHECK(hipStreamSynchronize(strm));
-      MemAdvise2<<<(NumElms / 32), 32, 0, strm>>>(Mllc, NumElms);
+      MemAdvise2<<<4, 1024, 0, strm>>>(Mllc, NumElms);
       HIP_CHECK(hipStreamSynchronize(strm));
       for (int i = 0; i < NumElms; ++i) {
         if (Mllc[i] != (InitVal + 10)) {
@@ -357,7 +344,7 @@ TEST_CASE("Unit_hipMemAdvise_TstAlignedAllocMem") {
   }
 }
 
-TEST_CASE("Unit_hipMemAdvise_TstAlignedAllocMem_XNACK") {
+TEST_CASE(Unit_hipMemAdvise_TstAlignedAllocMem_XNACK) {
   if (setenv("HSA_XNACK", "1", 1) != 0) {
     HipTest::HIP_SKIP_TEST("Unable to set xnack on environment variable.");
     return;
@@ -384,7 +371,7 @@ TEST_CASE("Unit_hipMemAdvise_TstAlignedAllocMem_XNACK") {
   access denial case arising due to setting ReadMostly only to a particular
   gpu*/
 
-TEST_CASE("Unit_hipMemAdvise_ReadMosltyMgpuTst", "[multigpu]") {
+TEST_CASE(Unit_hipMemAdvise_ReadMosltyMgpuTst) {
   int managed = HmmAttrPrint();
   if (managed == 1) {
     int Ngpus = 0;
@@ -394,7 +381,7 @@ TEST_CASE("Unit_hipMemAdvise_ReadMosltyMgpuTst", "[multigpu]") {
           "This test needs atleast two gpus to run."
           "Hence skipping the test.\n");
     }
-    int *Hmm = NULL, NumElms = (1024 * 1024), InitVal = 123, blockSize = 64;
+    int *Hmm = NULL, NumElms = (1024 * 1024), InitVal = 123;
     int *Hmm1 = NULL, DataMismatch = 0;
     hipStream_t strm;
     HIP_CHECK(hipMallocManaged(&Hmm, (NumElms * sizeof(int))));
@@ -403,8 +390,6 @@ TEST_CASE("Unit_hipMemAdvise_ReadMosltyMgpuTst", "[multigpu]") {
       Hmm[i] = InitVal;
     }
     HIP_CHECK(hipMemAdvise(Hmm, (NumElms * sizeof(int)), hipMemAdviseSetReadMostly, 0));
-    dim3 dimBlock(blockSize, 1, 1);
-    dim3 dimGrid((NumElms + blockSize - 1) / blockSize, 1, 1);
 #if HT_AMD
     SECTION("Launch Kernel on all other gpus") {
       // launching kernel from each one of the gpus
@@ -413,7 +398,7 @@ TEST_CASE("Unit_hipMemAdvise_ReadMosltyMgpuTst", "[multigpu]") {
         HIP_CHECK(hipSetDevice(i));
         HIP_CHECK(hipStreamCreate(&strm));
         HIP_CHECK(hipMallocManaged(&Hmm1, (NumElms * sizeof(int))));
-        MemAdvise3<<<dimGrid, dimBlock, 0, strm>>>(Hmm, Hmm1, NumElms);
+        MemAdvise3<<<1024, 1024, 0, strm>>>(Hmm, Hmm1, NumElms);
         HIP_CHECK(hipStreamSynchronize(strm));
         // verifying the results
         for (int j = 0; j < NumElms; ++j) {
@@ -436,7 +421,7 @@ TEST_CASE("Unit_hipMemAdvise_ReadMosltyMgpuTst", "[multigpu]") {
         HIP_CHECK(hipSetDevice(i));
         HIP_CHECK(hipStreamCreate(&strm));
         HIP_CHECK(hipMemAdvise(Hmm, (NumElms * sizeof(int)), hipMemAdviseSetReadMostly, i));
-        MemAdvise2<<<dimGrid, dimBlock, 0, strm>>>(Hmm, NumElms);
+        MemAdvise2<<<1024, 1024, 0, strm>>>(Hmm, NumElms);
         HIP_CHECK(hipStreamSynchronize(strm));
         HIP_CHECK(hipStreamDestroy(strm));
       }

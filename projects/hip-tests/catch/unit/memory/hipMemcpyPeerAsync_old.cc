@@ -41,7 +41,7 @@ This testfile verifies the following scenarios of hipMemcpyPeerAsync API
  * where stream is created in GPU-1
  * Then performs the addition and validates the sum
  */
-TEST_CASE("Unit_hipMemcpyPeerAsync_StreamOnDiffDevice", "[multigpu]") {
+TEST_CASE(Unit_hipMemcpyPeerAsync_StreamOnDiffDevice) {
   constexpr auto numElements{10};
   constexpr auto copy_bytes{numElements * sizeof(int)};
   int numDevices = 0;

@@ -24,7 +24,7 @@ THE SOFTWARE.
 
 static __global__ void write_integer(int* memory, int value) { *memory = value; }
 
-TEST_CASE("Unit_hipMallocHost_Positive") {
+TEST_CASE(Unit_hipMallocHost_Positive) {
   int* host_memory = nullptr;
 
   HIP_CHECK(hipMallocHost(reinterpret_cast<void**>(&host_memory), sizeof(int)));
@@ -32,7 +32,7 @@ TEST_CASE("Unit_hipMallocHost_Positive") {
   HIP_CHECK(hipHostFree(host_memory));
 }
 
-TEST_CASE("Unit_hipMallocHost_DataValidation") {
+TEST_CASE(Unit_hipMallocHost_DataValidation) {
   int validation_number = 10;
   int* host_memory = nullptr;
   hipEvent_t event = nullptr;
@@ -60,7 +60,7 @@ TEST_CASE("Unit_hipMallocHost_DataValidation") {
   HIP_CHECK(hipHostFree(host_memory));
 }
 
-TEST_CASE("Unit_hipMallocHost_Negative") {
+TEST_CASE(Unit_hipMallocHost_Negative) {
   int* host_memory = nullptr;
 
   SECTION("host memory is nullptr") {
@@ -72,7 +72,7 @@ TEST_CASE("Unit_hipMallocHost_Negative") {
   }
 }
 
-TEST_CASE("Unit_hipMallocHost_Capture") {
+TEST_CASE(Unit_hipMallocHost_Capture) {
   int* host_memory = nullptr;
 
   hipError_t capture_error = hipSuccess;

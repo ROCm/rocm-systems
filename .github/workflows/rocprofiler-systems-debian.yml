@@ -83,7 +83,6 @@ jobs:
           apt-get autoclean
 
     - name: Install ROCm Packages
-      if: ${{ matrix.rocm-version > 0 }}
       timeout-minutes: 115
       shell: bash
       working-directory: projects/rocprofiler-systems/
@@ -111,13 +110,6 @@ jobs:
         echo "CMake version: $(cmake --version | head -n 1)"
         echo "Compiler version: $(${{ matrix.compiler }} --version | head -n 1)"
         echo "ROCm version: ${{ matrix.rocm-version }}"
-        USE_ROCM=OFF
-        if [ "${{ matrix.rocm-version }}" != "0.0" ]; then
-          CMAKE_PREFIX_PATH_ARG="-DCMAKE_PREFIX_PATH=/opt/rocm"
-          USE_ROCM=ON
-        else
-          CMAKE_PREFIX_PATH_ARG=""
-        fi
         TAG=""
         python3 ./scripts/run-ci.py -B build \
           --name ${{ github.repository_owner }}-${{ github.ref_name }}-debian-${{matrix.os-release}}-${{ matrix.compiler }}${TAG} \
@@ -129,7 +121,6 @@ jobs:
           -DCMAKE_BUILD_TYPE=${{ matrix.build-type }} \
           -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems \
           -DROCPROFSYS_BUILD_TESTING=ON \
-          -DROCPROFSYS_USE_ROCM=$USE_ROCM \
           -DROCPROFSYS_USE_PYTHON=ON \
           -DROCPROFSYS_BUILD_DYNINST=${{ matrix.build-dyninst }} \
           -DROCPROFSYS_BUILD_BOOST=${{ matrix.build-dyninst }} \
@@ -141,8 +132,8 @@ jobs:
           -DROCPROFSYS_MAX_THREADS=64 \
           -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;openmp-target;openmp-vv-offload;videodecode;jpegdecode;network" \
           -DROCPROFSYS_BUILD_NUMBER=1 \
+          -DCMAKE_PREFIX_PATH=/opt/rocm \
           -DUSE_CLANG_OMP=OFF \
-          $CMAKE_PREFIX_PATH_ARG \
           -- \
           -LE "transpose|rccl|videodecode|jpegdecode|network"
 

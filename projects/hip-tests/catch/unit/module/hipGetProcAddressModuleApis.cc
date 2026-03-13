@@ -38,7 +38,7 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_ModuleApis") {
+TEST_CASE(Unit_hipGetProcAddress_ModuleApis) {
   void* hipModuleLoad_ptr = nullptr;
   void* hipModuleUnload_ptr = nullptr;
   void* hipModuleGetFunction_ptr = nullptr;
@@ -262,7 +262,7 @@ TEST_CASE("Unit_hipGetProcAddress_ModuleApis") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_ModuleApisLoadData") {
+TEST_CASE(Unit_hipGetProcAddress_ModuleApisLoadData) {
   void* hipModuleLoadData_ptr = nullptr;
   void* hipModuleLoadDataEx_ptr = nullptr;
 
@@ -328,7 +328,7 @@ TEST_CASE("Unit_hipGetProcAddress_ModuleApisLoadData") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_ModuleApisCooperativeKernels", "[multigpu]") {
+TEST_CASE(Unit_hipGetProcAddress_ModuleApisCooperativeKernels) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {
     HipTest::HIP_SKIP_TEST("CooperativeLaunch not supported");
     return;
@@ -576,7 +576,7 @@ TEST_CASE("Unit_hipGetProcAddress_ModuleApisCooperativeKernels", "[multigpu]") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_ModuleApisOccupancy") {
+TEST_CASE(Unit_hipGetProcAddress_ModuleApisOccupancy) {
   void* hipModuleOccupancyMaxPotentialBlockSize_ptr = nullptr;
   void* hipModuleOccupancyMaxPotentialBlockSizeWithFlags_ptr = nullptr;
   void* hipModuleOccupancyMaxActiveBlocksPerMultiprocessor_ptr = nullptr;

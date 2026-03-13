@@ -27,7 +27,6 @@ def nic_perf_env(rocprof_config) -> dict[str, str]:
         "ROCPROFSYS_USE_PROCESS_SAMPLING": "OFF",
         "ROCPROFSYS_SAMPLING_FREQ": "50",
         "ROCPROFSYS_SAMPLING_CPUS": "none",
-        "ROCPROFSYS_USE_ROCM": "OFF",
         "ROCPROFSYS_TIMEMORY_COMPONENTS": "wall_clock,papi_array,network_stats",
         "ROCPROFSYS_NETWORK_INTERFACE": f"{rocprof_config.capabilities.default_nic}",
         "ROCPROFSYS_PAPI_EVENTS": f"{rocprof_config.capabilities.papi_nic_events}",

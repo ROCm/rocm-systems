@@ -7400,4 +7400,4 @@ hipError_t Test() {
 }
 
 
-TEST_CASE("Unit_hipMemPoolMaxAlloc") { HIP_CHECK(Test()); }
+TEST_CASE(Unit_hipMemPoolMaxAlloc) { HIP_CHECK(Test()); }
