@@ -29,9 +29,11 @@
 #define AMD_SMI_INCLUDE_IMPL_AMD_SMI_NO_DRM_NIC_H_
 
 #include <unistd.h>
-#include <vector>
+
 #include <memory>
 #include <mutex>  // NOLINT
+#include <vector>
+
 #include "amd_smi/amdsmi.h"
 #include "rocm_smi/rocm_smi_logger.h"
 
@@ -39,33 +41,37 @@ namespace amd::smi {
 
 class AMDSmiNoDrmNIC {
  public:
-    amdsmi_status_t init();
-    amdsmi_status_t cleanup();
-    amdsmi_status_t get_bdf_by_index(uint32_t nic_index, amdsmi_bdf_t *bdf_info) const;
-    amdsmi_status_t get_interface_name_by_index(uint32_t nic_index, std::string* interface_name) const;
-    amdsmi_status_t get_device_path_by_index(uint32_t nic_index, std::string* device_path) const;
-    amdsmi_status_t get_hwmon_path_by_index(uint32_t nic_index, std::string* hwm_path) const;
-    std::vector<amdsmi_bdf_t> get_bdfs();
-    std::vector<std::string>& get_device_paths();
-    std::vector<std::string>& get_hwmon_paths();
-    bool check_if_no_drm_is_supported();
+  amdsmi_status_t init();
+  amdsmi_status_t cleanup();
+  amdsmi_status_t get_bdf_by_index(uint32_t nic_index, amdsmi_bdf_t* bdf_info) const;
+  amdsmi_status_t get_interface_name_by_index(uint32_t nic_index,
+                                              std::string* interface_name) const;
+  amdsmi_status_t get_device_path_by_index(uint32_t nic_index, std::string* device_path) const;
+  amdsmi_status_t get_hwmon_path_by_index(uint32_t nic_index, std::string* hwm_path) const;
+  std::vector<amdsmi_bdf_t> get_bdfs();
+  std::vector<std::string>& get_device_paths();
+  std::vector<std::string>& get_hwmon_paths();
+  bool check_if_no_drm_is_supported();
 
-   uint32_t get_vendor_id();
-    amdsmi_status_t amd_query_nic_info(uint32_t nic_index, amdsmi_brcm_nic_info_t& info);
-    amdsmi_status_t amd_query_nic_uuid(std::string device_path, std::string& version);
-    amdsmi_status_t amd_query_nic_temp(std::string hwmon_path, amdsmi_brcm_nic_temperature_metric_t& info);
-    amdsmi_status_t amd_query_nic_device(std::string hwmon_path, amdsmi_brcm_nic_hwmon_device_t& info);
-    amdsmi_status_t amd_query_nic_power(std::string hwmon_path, amdsmi_brcm_nic_hwmon_power_t& info);
-    amdsmi_status_t amd_query_nic_numa_affinity(std::string device_path, int32_t *numa_node);
-    amdsmi_status_t amd_query_nic_cpu_affinity(std::string device_path, std::string& cpu_affinity);
+  uint32_t get_vendor_id();
+  amdsmi_status_t amd_query_nic_info(uint32_t nic_index, amdsmi_brcm_nic_info_t& info);
+  amdsmi_status_t amd_query_nic_uuid(std::string device_path, std::string& version);
+  amdsmi_status_t amd_query_nic_temp(std::string hwmon_path,
+                                     amdsmi_brcm_nic_temperature_metric_t& info);
+  amdsmi_status_t amd_query_nic_device(std::string hwmon_path,
+                                       amdsmi_brcm_nic_hwmon_device_t& info);
+  amdsmi_status_t amd_query_nic_power(std::string hwmon_path, amdsmi_brcm_nic_hwmon_power_t& info);
+  amdsmi_status_t amd_query_nic_numa_affinity(std::string device_path, int32_t* numa_node);
+  amdsmi_status_t amd_query_nic_cpu_affinity(std::string device_path, std::string& cpu_affinity);
 
-    amdsmi_status_t amd_query_nic_fw_info(std::string device_path, amdsmi_brcm_nic_firmware_t& info);
+  amdsmi_status_t amd_query_nic_fw_info(std::string device_path, amdsmi_brcm_nic_firmware_t& info);
+
  private:
-    // when file is not found, the empty string will be returned
-    std::vector<std::string> device_paths_;
-    std::vector<std::string> hwmon_paths_;
-    std::vector<std::string> interfaces_;
-    std::vector<amdsmi_bdf_t> no_drm_bdfs_;
+  // when file is not found, the empty string will be returned
+  std::vector<std::string> device_paths_;
+  std::vector<std::string> hwmon_paths_;
+  std::vector<std::string> interfaces_;
+  std::vector<amdsmi_bdf_t> no_drm_bdfs_;
 };
 
 }  // namespace amd::smi

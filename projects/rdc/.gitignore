@@ -18,12 +18,6 @@ docs/_doxygen/
 # VisualStudioCode
 .vscode
 
-# do NOT ignore these files
-!.clang-format
-!.editorconfig
-!.cmake-format
-!.pre-commit-config.yaml
-
 # misc
 __pycache__/
 authentication/CA/
@@ -31,3 +25,10 @@ authentication/CA/
 # act
 act.variables
 act.secrets
+
+# do NOT ignore these files
+!.clang-format
+!.cmake-format
+!.editorconfig
+!.gersemirc
+!.pre-commit-config.yaml

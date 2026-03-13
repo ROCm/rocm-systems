@@ -2,10 +2,6 @@
 set(TEST_SRC
     copy_coherency.cc
 )
-string(TOUPPER "${CMAKE_BUILD_TYPE}" _HIP_BUILD_TYPE_UPPER)
-separate_arguments(HIP_DEVICE_BUILD_FLAGS_NO_ARCH NATIVE_COMMAND
-  "${CMAKE_HIP_FLAGS} ${CMAKE_HIP_FLAGS_${_HIP_BUILD_TYPE_UPPER}}")
-list(FILTER HIP_DEVICE_BUILD_FLAGS_NO_ARCH EXCLUDE REGEX "--offload-arch=")
 if (HIP_PLATFORM MATCHES "amd")
   add_custom_target(memcpyInt.hsaco COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} --cuda-device-only
                   -x hip ${CMAKE_CURRENT_SOURCE_DIR}/memcpyIntDevice.cpp -o
@@ -38,4 +34,3 @@ hip_add_exe_to_target(NAME synchronizationTests
                       COMPILE_OPTIONS -std=c++14)
 
 add_dependencies(synchronizationTests memcpyInt.hsaco)
-
