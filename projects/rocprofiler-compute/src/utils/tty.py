@@ -689,8 +689,8 @@ def format_table_output(
             .to_dict()["Value"]
         )
         # Select appropriate mem_chart module based on GPU architecture
-        if gpu_arch == "gfx1150" and panel and comparable_columns and hidden_cols:
-            # For gfx1150, flatten all mem_chart tables in the panel into a single
+        if gpu_arch and gpu_arch.startswith("gfx115") and panel and comparable_columns and hidden_cols:
+            # For gfx115x, flatten all mem_chart tables in the panel into a single
             # mem_data dict
             chart_content, should_skip = flatten_mem_chart_tables(
                 args, runs, panel, table_config, mem_data, comparable_columns, hidden_cols
