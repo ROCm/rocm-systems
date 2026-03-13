@@ -265,6 +265,58 @@ mi_gpu_spec:
               physical: 29861
               virtual: 29881
 
+  - gpu_series: strix_halo
+    gpu_archs:
+      - gpu_arch: gfx1151
+        perfmon_config:
+            SQ: 8
+            TA: 2
+            GRBM: 2
+            CPC:  2
+            GCEA: 2
+            TCP:  4
+            TA:   2
+            SPI:  6
+            GL1A: 4
+            GL1C: 4
+            GL2A: 4
+            GL2C: 4
+            GRBM: 2
+        models:
+          - gpu_model: strix_halo
+            partition_mode:
+              compute_partition_mode:
+                num_xcds:
+                  spx: 1
+            chip_ids:
+              physical: 5510
+
+  - gpu_series: krackan
+    gpu_archs:
+      - gpu_arch: gfx1152
+        perfmon_config:
+          SQ: 8
+          TA: 2
+          GRBM: 2
+          CPC:  2
+          GCEA: 2
+          TCP:  4
+          TA:   2
+          SPI:  6
+          GL1A: 4
+          GL1C: 4
+          GL2A: 4
+          GL2C: 4
+          GRBM: 2
+        models:
+          - gpu_model: krackan
+            partition_mode:
+              compute_partition_mode:
+                num_xcds:
+                  spx: 1
+            chip_ids:
+              physical: 4372
+
   - gpu_series: mi350
     gpu_archs:
       - gpu_arch: gfx950

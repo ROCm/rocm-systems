@@ -56,6 +56,8 @@ lds_sizes = {
     "gfx941": 64 * 1024,
     "gfx942": 64 * 1024,
     "gfx950": 64 * 1024,
+    "gfx1151": 64 * 1024,
+    "gfx1152": 64 * 1024,
 }
 
 unsupported_data_types = {
@@ -75,6 +77,30 @@ unsupported_data_types = {
     "gfx941": ["MFMA-F4", "MFMA-F6", "MFMA-F6F4"],  # MI300X_A0
     "gfx942": ["MFMA-F4", "MFMA-F6", "MFMA-F6F4"],  # MI300A_A1, MI300X_A1, MI308
     "gfx950": [],  # MI350, MI355
+        "gfx1151": [
+        "MALL",
+        "MFMA-F4",
+        "MFMA-F6",
+        "MFMA-F6F4",
+        "MFMA-F8",
+        "MFMA-F16",
+        "MFMA-BF16",
+        "MFMA-F32",
+        "MFMA-F64",
+        "MFMA-I8",
+    ],  # Strix Halo (RDNA 3.5, no MFMA)
+        "gfx1152": [
+        "MALL",
+        "MFMA-F4",
+        "MFMA-F6",
+        "MFMA-F6F4",
+        "MFMA-F8",
+        "MFMA-F16",
+        "MFMA-BF16",
+        "MFMA-F32",
+        "MFMA-F64",
+        "MFMA-I8",
+    ],  # Kerackan (RDNA 3.5, no MFMA)
 }
 
 cache_kernel_selector = {
@@ -85,6 +111,8 @@ cache_kernel_selector = {
         "gfx941": "Cache_bw<float, 32 * 1024, 256>",
         "gfx942": "Cache_bw<float, 32 * 1024, 256>",
         "gfx950": "Cache_bw<float, 32 * 1024, 256>",
+        "gfx1151": "Cache_bw<float, 32 * 1024, 256>",
+        "gfx1152": "Cache_bw<float, 32 * 1024, 256>",
     },
     "L2": {
         "gfx908": "Cache_bw<float, 8 * 1024 * 1024, 256>",
@@ -93,12 +121,16 @@ cache_kernel_selector = {
         "gfx941": "Cache_bw<float, 4 * 1024 * 1024, 256>",
         "gfx942": "Cache_bw<float, 4 * 1024 * 1024, 256>",
         "gfx950": "Cache_bw<float, 4 * 1024 * 1024, 256>",
+        "gfx1151": "Cache_bw<float, 4 * 1024 * 1024, 256>",
+        "gfx1152": "Cache_bw<float, 4 * 1024 * 1024, 256>",
     },
     "MALL": {
         "gfx940": "Cache_bw<float, 64 * 1024 * 1024, 256>",
         "gfx941": "Cache_bw<float, 64 * 1024 * 1024, 256>",
         "gfx942": "Cache_bw<float, 64 * 1024 * 1024, 256>",
         "gfx950": "Cache_bw<float, 64 * 1024 * 1024, 256>",
+        "gfx1151": "Cache_bw<float, 64 * 1024 * 1024, 256>",
+        "gfx1152": "Cache_bw<float, 64 * 1024 * 1024, 256>",
     },
 }
 
@@ -162,6 +194,8 @@ cache_sizes = {
         "gfx941": 32 * 1024,
         "gfx942": 32 * 1024,
         "gfx950": 32 * 1024,
+        "gfx1151": 32 * 1024,
+        "gfx1152": 32 * 1024,
     },
     "L2": {
         "gfx908": 8 * 1024 * 1024,
@@ -170,12 +204,16 @@ cache_sizes = {
         "gfx941": 4 * 1024 * 1024,
         "gfx942": 4 * 1024 * 1024,
         "gfx950": 4 * 1024 * 1024,
+        "gfx1151": 4 * 1024 * 1024,
+        "gfx1152": 4 * 1024 * 1024,
     },
     "MALL": {
         "gfx940": 64 * 1024 * 1024,
         "gfx941": 64 * 1024 * 1024,
         "gfx942": 64 * 1024 * 1024,
         "gfx950": 64 * 1024 * 1024,
+        "gfx1151": 64 * 1024 * 1024,
+        "gfx1152": 64 * 1024 * 1024,
     },
 }
 

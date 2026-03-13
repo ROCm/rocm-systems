@@ -100,6 +100,22 @@ SUPPORTED_DATATYPES: dict[str, list[str]] = {
         "I32",
         "I64",
     ],  # Unsupported:
+    "gfx1151": [
+        "FP16",
+        "FP32",
+        "FP64",
+        "I8",
+        "I32",
+        "I64",
+    ],  # RDNA 3.5: VALU only, no MFMA
+    "gfx1152": [
+        "FP16",
+        "FP32",
+        "FP64",
+        "I8",
+        "I32",
+        "I64",
+    ],  # RDNA 3.5: VALU only, no MFMA
 }
 
 PEAK_OPS_DATATYPES = ["FP16", "FP32", "FP64", "I8", "I32", "I64"]
