@@ -17,7 +17,7 @@
 #    include <rocprofiler-sdk/buffer_tracing.h>
 #    include <rocprofiler-sdk/kfd/kfd_id.h>
 
-#    include <fmt/format.h>
+#    include <spdlog/fmt/fmt.h>
 #    include <unistd.h>
 
 namespace rocprofsys
@@ -631,5 +631,4 @@ tool_kfd_event_dropped_events_callback(
 }  // namespace rocprofiler_sdk
 
 }  // namespace rocprofsys
-
 #endif
