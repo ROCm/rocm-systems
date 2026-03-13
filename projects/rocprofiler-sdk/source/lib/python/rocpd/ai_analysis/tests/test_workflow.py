@@ -300,3 +300,17 @@ def test_session_start_aborts_when_dirty():
         ws = WorkflowSession(app_command="./app", source_paths=["/repo/src"])
         with pytest.raises(SystemExit):
             ws._init_checkpoints()
+
+
+def test_init_checkpoints_disables_on_get_head_failure():
+    from rocpd.ai_analysis.interactive import WorkflowSession, CheckpointError
+    with patch("subprocess.run") as mock_run:
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="/repo\n"),  # detect_repo
+            MagicMock(returncode=0, stdout=""),          # is_dirty (clean)
+            MagicMock(returncode=1, stdout=""),          # get_head (fails)
+        ]
+        ws = WorkflowSession(app_command="./app", source_paths=["/repo/src"])
+        ws._init_checkpoints()
+    assert ws._state.repo_root == ""
+    assert ws._gcm is None

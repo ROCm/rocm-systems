@@ -2069,7 +2069,16 @@ class WorkflowSession:
             raise SystemExit(1)
 
         self._state.repo_root = repo_root
-        self._state.baseline_commit = self._gcm.get_head()
+        try:
+            self._state.baseline_commit = self._gcm.get_head()
+        except CheckpointError as exc:
+            _print(
+                f"  Note: checkpoints disabled — {exc}",
+                style="dim",
+            )
+            self._state.repo_root = ""
+            self._gcm = None
+            return
 
     # ── Phase 1b: Quick workload analysis ──────────────────────────────────────
 
