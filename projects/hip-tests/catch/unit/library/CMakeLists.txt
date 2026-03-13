@@ -8,13 +8,13 @@ set(TEST_SRC
 
 if (HIP_PLATFORM MATCHES "amd")
   add_custom_target(library_code_load.code
-    COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only -x hip ${CMAKE_CURRENT_SOURCE_DIR}/library_code_load.cc
-            -o ${CMAKE_CURRENT_BINARY_DIR}/../library/library_code_load.code ${OFFLOAD_ARCH_LIST}
+    COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} --cuda-device-only -x hip ${CMAKE_CURRENT_SOURCE_DIR}/library_code_load.cc
+            -o ${CMAKE_CURRENT_BINARY_DIR}/../library/library_code_load.code
             -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
             -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT})
 add_custom_target(reverse_kernel.code
-    COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only -x hip ${CMAKE_CURRENT_SOURCE_DIR}/reverse_kernel.cc
-            -o ${CMAKE_CURRENT_BINARY_DIR}/../library/reverse_kernel.code ${OFFLOAD_ARCH_LIST}
+    COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} --cuda-device-only -x hip ${CMAKE_CURRENT_SOURCE_DIR}/reverse_kernel.cc
+            -o ${CMAKE_CURRENT_BINARY_DIR}/../library/reverse_kernel.code
             -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
             -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT})
 else()
@@ -49,4 +49,3 @@ endif()
 
 add_dependencies(LibraryTests library_code_load.code)
 add_dependencies(LibraryTests reverse_kernel.code)
-

@@ -41,7 +41,7 @@ THE SOFTWARE.
  * - HIP_VERSION >= 5.7
  */
 
-TEST_CASE("Unit_Buffered_Printf_Flags") {
+TEST_CASE(Unit_Buffered_Printf_Flags) {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {

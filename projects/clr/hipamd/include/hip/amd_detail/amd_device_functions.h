@@ -1,8 +1,24 @@
 /*
- * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
- *
- * SPDX-License-Identifier: MIT
- */
+Copyright (c) 2015 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
 
 #ifndef HIP_INCLUDE_HIP_AMD_DETAIL_DEVICE_FUNCTIONS_H
 #define HIP_INCLUDE_HIP_AMD_DETAIL_DEVICE_FUNCTIONS_H
@@ -690,11 +706,7 @@ __device__ inline static void __work_group_barrier(__cl_mem_fence_flags flags) {
 
 __device__ inline static void __barrier(int n) { __work_group_barrier((__cl_mem_fence_flags)n); }
 
-__device__
-inline
-__attribute__((convergent))
-void __syncthreads()
-{
+__device__ inline __attribute__((convergent)) void __syncthreads() {
   __barrier(__CLK_GLOBAL_MEM_FENCE | __CLK_LOCAL_MEM_FENCE);
 }
 
@@ -739,33 +751,35 @@ __device__ inline __attribute__((convergent)) int __syncthreads_or(int predicate
   XCC_ID      3:0     XCC the wave is assigned to.
  */
 
-#if (defined(__GFX10__) || defined(__GFX11__))
-#define HW_ID 23
+#if (defined (__GFX10__) || defined (__GFX11__) || defined(__GFX12__))
+  #define HW_ID               23
+  #define HW_ID_WGP_ID_OFFSET 10
+  #define HW_ID_WGP_ID_SIZE    4
+  #if (defined(__AMDGCN_CUMODE__))
+    #define HW_ID_CU_ID_OFFSET  8
+    #define HW_ID_CU_ID_SIZE    1
+  #endif
+  #define HW_ID_SA_ID_OFFSET  16
+  #define HW_ID_SA_ID_SIZE     1
 #else
-#define HW_ID 4
+  #define HW_ID               4
+  #define HW_ID_CU_ID_SIZE    4
+  #define HW_ID_CU_ID_OFFSET  8
 #endif
 
-#if (defined(__GFX10__) || defined(__GFX11__))
-#define HW_ID_WGP_ID_SIZE 4
-#define HW_ID_WGP_ID_OFFSET 10
-#if (defined(__AMDGCN_CUMODE__))
-#define HW_ID_CU_ID_SIZE 1
-#define HW_ID_CU_ID_OFFSET 8
-#endif
-#else
-#define HW_ID_CU_ID_SIZE 4
-#define HW_ID_CU_ID_OFFSET 8
-#endif
-
-#if (defined(__gfx908__) || defined(__gfx90a__) || defined(__GFX11__))
-#define HW_ID_SE_ID_SIZE 3
-#else  // 4 SEs/XCC for 942
-#define HW_ID_SE_ID_SIZE 2
+#if (defined(__gfx908__) || defined(__gfx90a__) || \
+     defined(__GFX11__))
+  #define HW_ID_SE_ID_SIZE    3
+#elif (defined(__GFX12__))
+  #define SE_HW_ID_SE_ID_SIZE 4
+#else //4 SEs/XCC for gfx940-942
+  #define HW_ID_SE_ID_SIZE    2
 #endif
 #if (defined(__GFX10__) || defined(__GFX11__))
-#define HW_ID_SE_ID_OFFSET 18
-#define HW_ID_SA_ID_OFFSET 16
-#define HW_ID_SA_ID_SIZE 1
+  #define HW_ID_SE_ID_OFFSET  18
+#elif defined(__GFX12__)
+  #define RTN_GET_SE_HW_ID       0x87
+  #define SE_HW_ID_SE_ID_OFFSET  0
 #else
 #define HW_ID_SE_ID_OFFSET 13
 #endif
@@ -778,7 +792,7 @@ __device__ inline __attribute__((convergent)) int __syncthreads_or(int predicate
 #endif
 
 #if !defined(__HIP_NO_IMAGE_SUPPORT) && defined(__gfx94plus_clr__)
-#define __HIP_NO_IMAGE_SUPPORT 1
+  #define __HIP_NO_IMAGE_SUPPORT   1
 #endif
 
 /*
@@ -790,49 +804,79 @@ __device__ inline __attribute__((convergent)) int __syncthreads_or(int predicate
 
 #define GETREG_IMMED(SZ, OFF, REG) (((SZ) << 11) | ((OFF) << 6) | (REG))
 
+__device__ inline unsigned assemble_smid(unsigned xcc, unsigned se, unsigned sa,
+                                         unsigned wgp, unsigned cu,
+                                         unsigned se_bits, unsigned sa_bits,
+                                         unsigned wgp_bits, unsigned cu_bits)
+{
+  unsigned temp = xcc;
+  temp = (temp << se_bits) | se;
+  temp = (temp << sa_bits) | sa;
+  temp = (temp << wgp_bits) | wgp;
+  temp = (temp << cu_bits) | cu;
+  return temp;
+}
+
 /*
   __smid returns the wave's assigned Compute Unit and Shader Engine.
   The Compute Unit, CU_ID returned in bits 3:0, and Shader Engine, SE_ID in bits 5:4.
   Note: the results vary over time.
   SZ minus 1 since SIZE is 1-based.
 */
-__device__ inline unsigned __smid(void) {
-  unsigned se_id =
-      __builtin_amdgcn_s_getreg(GETREG_IMMED(HW_ID_SE_ID_SIZE - 1, HW_ID_SE_ID_OFFSET, HW_ID));
-#if (defined(__GFX10__) || defined(__GFX11__))
-  unsigned wgp_id =
-      __builtin_amdgcn_s_getreg(GETREG_IMMED(HW_ID_WGP_ID_SIZE - 1, HW_ID_WGP_ID_OFFSET, HW_ID));
-  unsigned sa_id =
-      __builtin_amdgcn_s_getreg(GETREG_IMMED(HW_ID_SA_ID_SIZE - 1, HW_ID_SA_ID_OFFSET, HW_ID));
-#if (defined(__AMDGCN_CUMODE__))
-  unsigned cu_id =
-      __builtin_amdgcn_s_getreg(GETREG_IMMED(HW_ID_CU_ID_SIZE - 1, HW_ID_CU_ID_OFFSET, HW_ID));
-#endif
-#else
-#if defined(__gfx94plus_clr__)
-  unsigned xcc_id =
-      __builtin_amdgcn_s_getreg(GETREG_IMMED(XCC_ID_XCC_ID_SIZE - 1, XCC_ID_XCC_ID_OFFSET, XCC_ID));
-#endif
-  unsigned cu_id =
-      __builtin_amdgcn_s_getreg(GETREG_IMMED(HW_ID_CU_ID_SIZE - 1, HW_ID_CU_ID_OFFSET, HW_ID));
-#endif
-#if (defined(__GFX10__) || defined(__GFX11__))
-  unsigned temp = se_id;
-  temp = (temp << HW_ID_SA_ID_SIZE) | sa_id;
-  temp = (temp << HW_ID_WGP_ID_SIZE) | wgp_id;
-#if (defined(__AMDGCN_CUMODE__))
-  temp = (temp << HW_ID_CU_ID_SIZE) | cu_id;
-#endif
-  return temp;
-  // TODO : CU Mode impl
-#elif defined(__gfx94plus_clr__)
-  unsigned temp = xcc_id;
-  temp = (temp << HW_ID_SE_ID_SIZE) | se_id;
-  temp = (temp << HW_ID_CU_ID_SIZE) | cu_id;
-  return temp;
-#else
-  return (se_id << HW_ID_CU_ID_SIZE) + cu_id;
-#endif
+__device__
+inline
+unsigned __smid(void)
+{
+  unsigned xcc{}, se{}, sa{}, wgp{}, cu{};
+  unsigned se_bits{}, sa_bits{}, wgp_bits{}, cu_bits{};
+
+  #if defined(__GFX12__)
+    unsigned msg = __builtin_amdgcn_s_sendmsg_rtn(RTN_GET_SE_HW_ID);
+    se       = (msg >> SE_HW_ID_SE_ID_OFFSET) & ((1 << SE_HW_ID_SE_ID_SIZE) - 1);
+    se_bits  = SE_HW_ID_SE_ID_SIZE;
+
+    unsigned hw = __builtin_amdgcn_s_getreg(GETREG_IMMED(31, 0, HW_ID));
+    wgp      = (hw >> HW_ID_WGP_ID_OFFSET) & ((1 << HW_ID_WGP_ID_SIZE) - 1);
+    sa       = (hw >> HW_ID_SA_ID_OFFSET) & ((1 << HW_ID_SA_ID_SIZE) - 1);
+    wgp_bits = HW_ID_WGP_ID_SIZE;
+    sa_bits  = HW_ID_SA_ID_SIZE;
+
+  #elif defined(__GFX10__) || defined(__GFX11__)
+    se   = __builtin_amdgcn_s_getreg(
+             GETREG_IMMED(HW_ID_SE_ID_SIZE - 1, HW_ID_SE_ID_OFFSET, HW_ID));
+    sa   = __builtin_amdgcn_s_getreg(
+             GETREG_IMMED(HW_ID_SA_ID_SIZE - 1, HW_ID_SA_ID_OFFSET, HW_ID));
+    wgp  = __builtin_amdgcn_s_getreg(
+             GETREG_IMMED(HW_ID_WGP_ID_SIZE - 1, HW_ID_WGP_ID_OFFSET, HW_ID));
+    se_bits  = HW_ID_SE_ID_SIZE;
+    sa_bits  = HW_ID_SA_ID_SIZE;
+    wgp_bits = HW_ID_WGP_ID_SIZE;
+    #if defined(__AMDGCN_CUMODE__)
+      cu = __builtin_amdgcn_s_getreg(
+             GETREG_IMMED(HW_ID_CU_ID_SIZE - 1, HW_ID_CU_ID_OFFSET, HW_ID));
+      cu_bits = HW_ID_CU_ID_SIZE;
+    #endif
+
+  #elif defined(__gfx94plus_clr__)
+    se   = __builtin_amdgcn_s_getreg(
+             GETREG_IMMED(HW_ID_SE_ID_SIZE - 1, HW_ID_SE_ID_OFFSET, HW_ID));
+    xcc  = __builtin_amdgcn_s_getreg(
+             GETREG_IMMED(XCC_ID_XCC_ID_SIZE - 1, XCC_ID_XCC_ID_OFFSET, XCC_ID));
+    cu   = __builtin_amdgcn_s_getreg(
+             GETREG_IMMED(HW_ID_CU_ID_SIZE - 1, HW_ID_CU_ID_OFFSET, HW_ID));
+    se_bits  = HW_ID_SE_ID_SIZE;
+    cu_bits  = HW_ID_CU_ID_SIZE;
+
+  #else
+    se = __builtin_amdgcn_s_getreg(
+           GETREG_IMMED(HW_ID_SE_ID_SIZE - 1, HW_ID_SE_ID_OFFSET, HW_ID));
+    cu = __builtin_amdgcn_s_getreg(
+           GETREG_IMMED(HW_ID_CU_ID_SIZE - 1, HW_ID_CU_ID_OFFSET, HW_ID));
+    se_bits = HW_ID_SE_ID_SIZE;
+    cu_bits = HW_ID_CU_ID_SIZE;
+  #endif
+
+  return assemble_smid(xcc, se, sa, wgp, cu, se_bits, sa_bits, wgp_bits, cu_bits);
 }
 
 /**

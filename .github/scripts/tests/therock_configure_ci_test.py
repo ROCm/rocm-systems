@@ -97,6 +97,16 @@ class ConfigureCITest(unittest.TestCase):
         project_to_run = therock_configure_ci.retrieve_projects(args)
         self.assertEqual(len(project_to_run), 0)
 
+    def test_scheduled_run(self):
+        args = {
+            "is_nightly": True,
+            "input_projects": "",
+            "base_ref": "HEAD^"
+        }
+
+        project_to_run = therock_configure_ci.retrieve_projects(args)
+        self.assertEqual(len(project_to_run), 1)
+
     @patch("subprocess.run")
     def test_is_push(self, mock_run):
         args = {

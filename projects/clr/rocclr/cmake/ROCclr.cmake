@@ -110,6 +110,7 @@ if(WIN32)
   ${ROCCLR_SRC_DIR}/platform/interop_d3d9.cpp
   ${ROCCLR_SRC_DIR}/platform/interop_d3d10.cpp
   ${ROCCLR_SRC_DIR}/platform/interop_d3d11.cpp)
+  target_link_libraries(rocclr PRIVATE dxguid.lib)
   target_compile_definitions(rocclr PUBLIC ATI_OS_WIN)
 else()
   target_compile_definitions(rocclr PUBLIC ATI_OS_LINUX)

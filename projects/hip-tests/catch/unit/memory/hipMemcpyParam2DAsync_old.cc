@@ -43,8 +43,7 @@ static constexpr size_t NUM_H{10};
  * it with the initalized data "C_h".
  *
  */
-TEMPLATE_TEST_CASE("Unit_hipMemcpyParam2DAsync_multiDevice_StreamOnDiffDevice",
-                   "[hipMemcpyParam2DAsync][multigpu]", char, float, int,
+TEMPLATE_TEST_CASE(Unit_hipMemcpyParam2DAsync_multiDevice_StreamOnDiffDevice, char, float, int,
                    double, long double) {
   CHECK_IMAGE_SUPPORT
 

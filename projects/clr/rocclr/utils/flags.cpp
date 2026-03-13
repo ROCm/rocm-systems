@@ -157,6 +157,10 @@ bool Flag::init() {
         outFile = fopen(("clr_logs_" + pid + ".txt").c_str(), "a");
       }
     }
+    // Enable async logging if configured
+    if (!flagIsDefault(AMD_LOG_ASYNC) && AMD_LOG_ASYNC) {
+      EnableAsyncLogging(true);
+    }
   }
 
   return true;
