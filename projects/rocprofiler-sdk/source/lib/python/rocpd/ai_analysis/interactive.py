@@ -2179,6 +2179,134 @@ class WorkflowSession:
                 ((prev_ns - curr_ns) / prev_ns) * 100, 1
             )
 
+    def _restore_from_snapshots(
+        self, files: set, snapshots: Dict[str, str]
+    ) -> None:
+        """Write file contents from snapshots dict; delete files not in snapshots."""
+        for f in files:
+            _path = (
+                pathlib.Path(self._state.repo_root) / f
+                if self._state.repo_root
+                else pathlib.Path(f)
+            )
+            if f in snapshots:
+                _path.parent.mkdir(parents=True, exist_ok=True)
+                _path.write_text(snapshots[f])
+            else:
+                if _path.exists():
+                    _path.unlink()
+
+    def _rollback_to_checkpoint(self, target_cp_id: int) -> None:
+        """Restore working directory to cp target_cp_id state.
+
+        target_cp_id == -1 means baseline (before any AI edits).
+        Removes all checkpoints after target, truncates trace/analysis history,
+        and sets active_checkpoint. Uses git fast path if commit is reachable,
+        falls back to file_snapshots otherwise.
+        """
+        if target_cp_id == -1:
+            target_hash = self._state.baseline_commit
+            modified_after = set()
+            for cp in self._state.checkpoints:
+                modified_after.update(cp.files_modified)
+            target_snapshots: Dict[str, str] = {}
+        else:
+            target = self._state.checkpoints[target_cp_id]
+            target_hash = target.commit_hash
+            modified_after = set()
+            for cp in self._state.checkpoints:
+                if cp.cp_id > target_cp_id:
+                    modified_after.update(cp.files_modified)
+            target_snapshots = target.file_snapshots
+
+        if not modified_after:
+            pass  # Nothing to restore
+        elif self._gcm and self._gcm.commit_reachable(target_hash):
+            try:
+                self._gcm.restore_files_from_commit(
+                    target_hash, list(modified_after)
+                )
+            except CheckpointError as exc:
+                _print(f"  Git restore failed: {exc}. Using file snapshots.", style="yellow")
+                self._restore_from_snapshots(modified_after, target_snapshots)
+        else:
+            # Fallback: write file snapshots directly
+            if target_cp_id == -1:
+                _print(
+                    "  \u2717 Cannot restore baseline: git unavailable and no file "
+                    "snapshots exist for the baseline state.",
+                    style="red",
+                )
+                return
+            self._restore_from_snapshots(modified_after, target_snapshots)
+            _print(
+                "  Note: restored from session file snapshot (git unavailable).",
+                style="dim",
+            )
+
+        # Remove stale worktrees
+        if self._gcm:
+            for cp in self._state.checkpoints:
+                if cp.cp_id > target_cp_id:
+                    self._gcm.remove_worktree(cp.worktree_path)
+
+        # Truncate checkpoints list
+        if target_cp_id == -1:
+            self._state.checkpoints = []
+        else:
+            self._state.checkpoints = self._state.checkpoints[: target_cp_id + 1]
+
+        # Truncate trace/analysis history
+        if target_cp_id == -1:
+            self._state.trace_history = []
+            self._state.analysis_history = []
+            self._state.iteration_count = 0
+            self._state.active_checkpoint = None
+        else:
+            run_idx = self._state.checkpoints[target_cp_id].run_index
+            if run_idx is not None:
+                self._state.trace_history = self._state.trace_history[: run_idx + 1]
+                self._state.analysis_history = self._state.analysis_history[: run_idx + 1]
+                self._state.iteration_count = run_idx + 1
+            else:
+                self._state.trace_history = []
+                self._state.analysis_history = []
+                self._state.iteration_count = 0
+            self._state.active_checkpoint = target_cp_id
+
+        self._save_session()
+
+    def _blacklist_checkpoint(self, cp_id: int) -> None:
+        """Mark a checkpoint as blacklisted using its edit_summary as category."""
+        cp = self._state.checkpoints[cp_id]
+        delta_str = (
+            f"{cp.performance_delta_pct:.1f}%"
+            if cp.performance_delta_pct is not None
+            else "unknown regression"
+        )
+        cp.blacklisted = True
+        cp.blacklist_category = cp.edit_summary
+        cp.blacklist_description = (
+            f"'{cp.edit_summary}' caused {delta_str} performance regression. "
+            "Do not suggest this approach again."
+        )
+
+    def _build_blacklist_block(self) -> str:
+        """Return LLM prompt block for all blacklisted checkpoints.
+
+        Deduplicates by blacklist_category. Returns empty string when none blacklisted.
+        """
+        seen: set = set()
+        entries = []
+        for cp in self._state.checkpoints:
+            if cp.blacklisted and cp.blacklist_category not in seen:
+                seen.add(cp.blacklist_category)
+                entries.append(f"- {cp.blacklist_description}")
+        if not entries:
+            return ""
+        lines = ["### Blacklisted Approaches \u2014 Do NOT suggest these"] + entries
+        return "\n".join(lines) + "\n"
+
     # ── Phase 1b: Quick workload analysis ──────────────────────────────────────
 
     @staticmethod

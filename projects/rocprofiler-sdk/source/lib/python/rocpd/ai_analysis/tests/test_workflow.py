@@ -473,3 +473,124 @@ def test_update_checkpoint_noop_when_no_checkpoints():
     ws = _make_workflow_session_with_gcm()
     with patch.object(ws, "_save_session"):
         ws._update_checkpoint_with_run()  # should not raise
+
+
+def _make_ws_with_checkpoints():
+    """Helper: WorkflowSession with 3 checkpoints and 3 runs."""
+    from rocpd.ai_analysis.interactive import (
+        WorkflowSession, CheckpointRecord, _TraceRun, _AnalysisSnapshot,
+    )
+    ws = _make_workflow_session_with_gcm()
+    ws._state.baseline_commit = "base000"
+
+    deltas = [10.0, -67.0, -15.0]
+    for i, delta in enumerate(deltas):
+        cp = CheckpointRecord(
+            cp_id=i,
+            commit_hash=f"hash{i}",
+            ref_name=f"refs/rocpd/s/cp-{i}",
+            worktree_path=f"/wt/cp-{i}",
+            timestamp="t",
+            files_modified=["kernel.hip"],
+            edit_summary=f"edit {i}",
+            file_snapshots={"kernel.hip": f"content{i}"},
+            run_index=i,
+            performance_delta_pct=delta,
+        )
+        ws._state.checkpoints.append(cp)
+        ws._state.trace_history.append(
+            _TraceRun(timestamp="t", command="c", db_path=f"/db{i}.db")
+        )
+        ws._state.analysis_history.append(
+            _AnalysisSnapshot(
+                timestamp="t", iteration=i,
+                execution_breakdown={"total_runtime_ns": 1_000_000 - i * 100_000},
+                recommendations=[],
+            )
+        )
+    ws._state.iteration_count = 3
+    return ws
+
+
+def test_rollback_restores_files_from_git():
+    ws = _make_ws_with_checkpoints()
+    with patch.object(ws, "_save_session"), \
+         patch.object(ws._gcm, "commit_reachable", return_value=True), \
+         patch.object(ws._gcm, "restore_files_from_commit") as mock_restore, \
+         patch.object(ws._gcm, "remove_worktree"):
+        ws._rollback_to_checkpoint(target_cp_id=0)
+    mock_restore.assert_called_once_with("hash0", ["kernel.hip"])
+
+
+def test_rollback_uses_file_snapshots_when_commit_unreachable():
+    ws = _make_ws_with_checkpoints()
+    with patch.object(ws, "_save_session"), \
+         patch.object(ws._gcm, "commit_reachable", return_value=False), \
+         patch.object(ws._gcm, "remove_worktree"), \
+         patch("pathlib.Path.write_text") as mock_write, \
+         patch("pathlib.Path.mkdir"):
+        ws._rollback_to_checkpoint(target_cp_id=0)
+    mock_write.assert_called()
+
+
+def test_rollback_truncates_checkpoints_after_target():
+    ws = _make_ws_with_checkpoints()
+    with patch.object(ws, "_save_session"), \
+         patch.object(ws._gcm, "commit_reachable", return_value=True), \
+         patch.object(ws._gcm, "restore_files_from_commit"), \
+         patch.object(ws._gcm, "remove_worktree"):
+        ws._rollback_to_checkpoint(target_cp_id=0)
+    assert len(ws._state.checkpoints) == 1
+    assert ws._state.checkpoints[0].cp_id == 0
+
+
+def test_rollback_truncates_trace_and_analysis_history():
+    ws = _make_ws_with_checkpoints()
+    with patch.object(ws, "_save_session"), \
+         patch.object(ws._gcm, "commit_reachable", return_value=True), \
+         patch.object(ws._gcm, "restore_files_from_commit"), \
+         patch.object(ws._gcm, "remove_worktree"):
+        ws._rollback_to_checkpoint(target_cp_id=0)
+    assert len(ws._state.trace_history) == 1
+    assert len(ws._state.analysis_history) == 1
+    assert ws._state.iteration_count == 1
+
+
+def test_rollback_sets_active_checkpoint():
+    ws = _make_ws_with_checkpoints()
+    with patch.object(ws, "_save_session"), \
+         patch.object(ws._gcm, "commit_reachable", return_value=True), \
+         patch.object(ws._gcm, "restore_files_from_commit"), \
+         patch.object(ws._gcm, "remove_worktree"):
+        ws._rollback_to_checkpoint(target_cp_id=0)
+    assert ws._state.active_checkpoint == 0
+
+
+def test_blacklist_sets_fields():
+    ws = _make_ws_with_checkpoints()
+    ws._blacklist_checkpoint(1)
+    cp = ws._state.checkpoints[1]
+    assert cp.blacklisted is True
+    assert cp.blacklist_category == "edit 1"
+    assert "-67" in cp.blacklist_description
+
+
+def test_build_blacklist_block_empty_when_none():
+    ws = _make_ws_with_checkpoints()
+    assert ws._build_blacklist_block() == ""
+
+
+def test_build_blacklist_block_contains_description():
+    ws = _make_ws_with_checkpoints()
+    ws._blacklist_checkpoint(1)
+    block = ws._build_blacklist_block()
+    assert "Blacklisted Approaches" in block
+    assert "edit 1" in block
+
+
+def test_build_blacklist_block_deduplicates():
+    ws = _make_ws_with_checkpoints()
+    ws._blacklist_checkpoint(1)
+    ws._blacklist_checkpoint(1)  # blacklist same cp twice
+    block = ws._build_blacklist_block()
+    assert block.count("edit 1") == 1
