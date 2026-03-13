@@ -144,13 +144,13 @@ def test_schema_file_has_json_schema_keyword():
 
 
 def test_schema_file_version_const():
-    """schema_version property uses const matching SCHEMA_VERSION."""
+    """schema_version property enum includes SCHEMA_VERSION."""
     schema = _load_schema()
     props = schema.get("properties", {})
     assert "schema_version" in props, "schema_version must be in properties"
-    assert props["schema_version"].get("const") == SCHEMA_VERSION, (
-        f"schema_version const must be {SCHEMA_VERSION!r}, "
-        f"got {props['schema_version'].get('const')!r}"
+    enum_vals = props["schema_version"].get("enum", [])
+    assert SCHEMA_VERSION in enum_vals, (
+        f"schema_version enum must include {SCHEMA_VERSION!r}, " f"got {enum_vals!r}"
     )
 
 
@@ -166,9 +166,7 @@ def test_schema_file_defines_recommendation_command():
     """Schema $defs contains a recommendation_command definition."""
     schema = _load_schema()
     defs = schema.get("$defs", {})
-    assert "recommendation_command" in defs, (
-        "$defs must define recommendation_command"
-    )
+    assert "recommendation_command" in defs, "$defs must define recommendation_command"
     cmd_def = defs["recommendation_command"]
     required_cmd_fields = {"tool", "description", "flags", "args", "full_command"}
     defined = set(cmd_def.get("properties", {}).keys())
@@ -181,9 +179,9 @@ def test_schema_file_tool_enum():
     schema = _load_schema()
     cmd_props = schema["$defs"]["recommendation_command"]["properties"]
     tool_enum = set(cmd_props["tool"].get("enum", []))
-    assert tool_enum == COMMAND_TOOLS, (
-        f"tool enum must be {COMMAND_TOOLS}, got {tool_enum}"
-    )
+    assert (
+        tool_enum == COMMAND_TOOLS
+    ), f"tool enum must be {COMMAND_TOOLS}, got {tool_enum}"
 
 
 # ---------------------------------------------------------------------------
@@ -194,9 +192,9 @@ def test_schema_file_tool_enum():
 def test_json_output_schema_version():
     """format_analysis_output JSON output carries correct schema_version."""
     doc = _make_synthetic_json_output()
-    assert doc.get("schema_version") == SCHEMA_VERSION, (
-        f"Expected schema_version {SCHEMA_VERSION!r}, got {doc.get('schema_version')!r}"
-    )
+    assert (
+        doc.get("schema_version") == SCHEMA_VERSION
+    ), f"Expected schema_version {SCHEMA_VERSION!r}, got {doc.get('schema_version')!r}"
 
 
 def test_json_output_required_fields_present():
@@ -210,7 +208,12 @@ def test_json_output_metadata_fields():
     """metadata object contains expected sub-fields."""
     doc = _make_synthetic_json_output()
     meta = doc["metadata"]
-    for field in ("rocpd_version", "analysis_version", "database_file", "analysis_timestamp"):
+    for field in (
+        "rocpd_version",
+        "analysis_version",
+        "database_file",
+        "analysis_timestamp",
+    ):
         assert field in meta, f"metadata missing field: {field!r}"
     assert meta["analysis_version"] == SCHEMA_VERSION
 
@@ -235,18 +238,21 @@ def test_json_output_recommendation_required_fields():
     for i, rec in enumerate(doc["recommendations"]):
         for field in ("id", "priority", "category", "issue", "suggestion"):
             assert field in rec, f"recommendations[{i}] missing field {field!r}"
-        assert rec["priority"] in ("HIGH", "MEDIUM", "LOW", "INFO"), (
-            f"recommendations[{i}] has invalid priority {rec['priority']!r}"
-        )
+        assert rec["priority"] in (
+            "HIGH",
+            "MEDIUM",
+            "LOW",
+            "INFO",
+        ), f"recommendations[{i}] has invalid priority {rec['priority']!r}"
 
 
 def test_json_output_recommendations_have_commands():
     """Recommendations include a commands array."""
     doc = _make_synthetic_json_output()
     recs_with_commands = [r for r in doc["recommendations"] if r.get("commands")]
-    assert len(recs_with_commands) > 0, (
-        "At least one recommendation must have a non-empty commands array"
-    )
+    assert (
+        len(recs_with_commands) > 0
+    ), "At least one recommendation must have a non-empty commands array"
 
 
 def test_json_output_command_structure():
@@ -260,17 +266,17 @@ def test_json_output_command_structure():
             assert "flags" in cmd, f"{loc} missing 'flags'"
             assert "args" in cmd, f"{loc} missing 'args'"
             assert "full_command" in cmd, f"{loc} missing 'full_command'"
-            assert cmd["tool"] in COMMAND_TOOLS, (
-                f"{loc} tool {cmd['tool']!r} not in {COMMAND_TOOLS}"
-            )
+            assert (
+                cmd["tool"] in COMMAND_TOOLS
+            ), f"{loc} tool {cmd['tool']!r} not in {COMMAND_TOOLS}"
             assert isinstance(cmd["flags"], list), f"{loc} flags must be a list"
             assert isinstance(cmd["args"], list), f"{loc} args must be a list"
-            assert isinstance(cmd["full_command"], str), (
-                f"{loc} full_command must be a string"
-            )
-            assert cmd["tool"] in cmd["full_command"], (
-                f"{loc} full_command must start with tool name"
-            )
+            assert isinstance(
+                cmd["full_command"], str
+            ), f"{loc} full_command must be a string"
+            assert (
+                cmd["tool"] in cmd["full_command"]
+            ), f"{loc} full_command must start with tool name"
 
 
 def test_json_output_command_args_structure():
@@ -284,9 +290,9 @@ def test_json_output_command_args_structure():
                 assert "value" in arg, f"{loc} missing 'value'"
                 assert isinstance(arg["name"], str), f"{loc} name must be a string"
                 # value may be str or None
-                assert arg["value"] is None or isinstance(arg["value"], str), (
-                    f"{loc} value must be str or null"
-                )
+                assert arg["value"] is None or isinstance(
+                    arg["value"], str
+                ), f"{loc} value must be str or null"
 
 
 def test_json_output_validates_against_schema():

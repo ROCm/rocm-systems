@@ -771,7 +771,9 @@ def _filter_rec_commands(
 
         # Meaningful args: anything that isn't an output path or a scope filter.
         # --kernel-names scopes collection but doesn't collect new data itself.
-        meaningful_args = [a for a in new_args if a.get("name", "") not in _NON_DATA_ARGS]
+        meaningful_args = [
+            a for a in new_args if a.get("name", "") not in _NON_DATA_ARGS
+        ]
         if not new_flags and not meaningful_args:
             continue  # nothing new to collect — drop the command entirely
 
@@ -908,7 +910,10 @@ def generate_recommendations(
                             "description": "Collect GPU active vs total cycle counters to confirm utilization",
                             "flags": ["--sys-trace"],
                             "args": [
-                                {"name": "--pmc", "value": "GRBM_GUI_ACTIVE GRBM_COUNT"},
+                                {
+                                    "name": "--pmc",
+                                    "value": "GRBM_GUI_ACTIVE GRBM_COUNT",
+                                },
                                 {"name": "-d", "value": "./utilization_output"},
                                 {"name": "-o", "value": "profile"},
                             ],
@@ -1564,7 +1569,9 @@ def _format_as_markdown(
     lines.append(f"| Kernel Execution | {kernel_ms:,.2f} | {kernel_pct:.1f}% |")
     lines.append(f"| Memory Copies | {memcpy_ms:,.2f} | {memcpy_pct:.1f}% |")
     overhead_ms = (
-        max(0.0, total_runtime_ms - kernel_ms - memcpy_ms) if total_runtime_ms > 0 else 0
+        max(0.0, total_runtime_ms - kernel_ms - memcpy_ms)
+        if total_runtime_ms > 0
+        else 0
     )
     lines.append(f"| API Overhead | {overhead_ms:,.2f} | {overhead_pct:.1f}% |")
     lines.append(f"| **Total** | **{total_runtime_ms:,.2f}** | **100%** |")
@@ -2119,7 +2126,9 @@ def _format_as_webview(
         hardware_counters,
         database_path,
     )
-    json_embedded = json_str.replace("</script>", r"<\/script>").replace("<!--", r"<\!--")
+    json_embedded = json_str.replace("</script>", r"<\/script>").replace(
+        "<!--", r"<\!--"
+    )
 
     # ══════════════════════════════════════════════════════════════════════
     # HTML template
@@ -2253,7 +2262,9 @@ def _format_as_webview(
             f'<span class="hbadge hbadge-warn">&#9679; {n_medium} Warning</span>'
         )
     if n_low:
-        _badge_parts.append(f'<span class="hbadge hbadge-ok">&#9679; {n_low} Low</span>')
+        _badge_parts.append(
+            f'<span class="hbadge hbadge-ok">&#9679; {n_low} Low</span>'
+        )
     if n_info:
         _badge_parts.append(
             f'<span class="hbadge hbadge-info">&#9679; {n_info} Info</span>'
@@ -2908,7 +2919,9 @@ def _tier0_recommendations_text(
                     for a in args:
                         name = a.get("name", "")
                         value = a.get("value")
-                        arg_strs.append(f"{name} {value}" if value is not None else name)
+                        arg_strs.append(
+                            f"{name} {value}" if value is not None else name
+                        )
                     lines.append(f"      Args:  {' '.join(arg_strs)}")
                 if full_command:
                     lines.append(f"      $ {full_command}")
@@ -3186,7 +3199,9 @@ def _format_tier0_markdown(tier0_result: Any) -> str:
                     for a in args:
                         name = a.get("name", "")
                         value = a.get("value")
-                        arg_strs.append(f"{name} {value}" if value is not None else name)
+                        arg_strs.append(
+                            f"{name} {value}" if value is not None else name
+                        )
                     lines.append(f"- Args: `{' '.join(arg_strs)}`")
                 if full_command:
                     lines.append(f"```bash\n{full_command}\n```")
@@ -3222,7 +3237,12 @@ def _format_tier0_webview(tier0_result: Any) -> str:
     def _h(v: Any) -> str:
         return _html.escape(str(v), quote=True)
 
-    SEV_FG = {"high": "#e84040", "medium": "#f08432", "low": "#caa828", "info": "#4d8ef2"}
+    SEV_FG = {
+        "high": "#e84040",
+        "medium": "#f08432",
+        "low": "#caa828",
+        "info": "#4d8ef2",
+    }
     SEV_BG = {
         "high": "rgba(232,64,64,.13)",
         "medium": "rgba(240,132,50,.13)",
@@ -3263,7 +3283,9 @@ def _format_tier0_webview(tier0_result: Any) -> str:
             f'<span class="hbadge hbadge-warn">&#9679; {n_medium} Warning</span>'
         )
     if n_low:
-        _badge_parts.append(f'<span class="hbadge hbadge-ok">&#9679; {n_low} Low</span>')
+        _badge_parts.append(
+            f'<span class="hbadge hbadge-ok">&#9679; {n_low} Low</span>'
+        )
     if n_info:
         _badge_parts.append(
             f'<span class="hbadge hbadge-info">&#9679; {n_info} Info</span>'
@@ -4228,7 +4250,8 @@ def format_analysis_output(
         )
         if short_kernels.get("histogram"):
             hist_str = "  Histogram: " + "  ".join(
-                f"[{b['bucket_label']}]: {b['count']}" for b in short_kernels["histogram"]
+                f"[{b['bucket_label']}]: {b['count']}"
+                for b in short_kernels["histogram"]
             )
             lines.append(hist_str)
         if short_kernels.get("top_offenders"):
@@ -4283,7 +4306,9 @@ def format_analysis_output(
                     for a in args:
                         name = a.get("name", "")
                         value = a.get("value")
-                        arg_strs.append(f"{name} {value}" if value is not None else name)
+                        arg_strs.append(
+                            f"{name} {value}" if value is not None else name
+                        )
                     lines.append(f"      Args:  {' '.join(arg_strs)}")
                 if full_command:
                     lines.append(f"      $ {full_command}")
@@ -4355,8 +4380,12 @@ def analyze_source_code(
             if llm_model:
                 os.environ["ROCPD_LLM_MODEL"] = llm_model
             try:
-                analyzer = LLMAnalyzer(provider=llm, api_key=llm_api_key, verbose=verbose)
-                from .ai_analysis.llm_analyzer import AnalysisContext as _AnalysisContext
+                analyzer = LLMAnalyzer(
+                    provider=llm, api_key=llm_api_key, verbose=verbose
+                )
+                from .ai_analysis.llm_analyzer import (
+                    AnalysisContext as _AnalysisContext,
+                )
 
                 _llm_ctx = _AnalysisContext(tier=0, custom_prompt=prompt)
                 _mdl = llm_model or os.environ.get("ROCPD_LLM_MODEL", "")
@@ -4575,9 +4604,9 @@ def analyze_performance(
             if output_format == "text":
                 output += "\n\n" + "=" * 80 + "\n"
                 output += (
-                    "AI-ENHANCED EXPLANATION (powered by {})".format(llm.upper()).center(
-                        80
-                    )
+                    "AI-ENHANCED EXPLANATION (powered by {})".format(
+                        llm.upper()
+                    ).center(80)
                     + "\n"
                 )
                 output += "=" * 80 + "\n\n"
@@ -4691,7 +4720,9 @@ def _call_llm_for_code(
             raise ValueError(
                 "No Anthropic API key. Set ANTHROPIC_API_KEY or pass --llm-api-key."
             )
-        use_model = model or os.environ.get("ROCPD_LLM_MODEL", "claude-sonnet-4-20250514")
+        use_model = model or os.environ.get(
+            "ROCPD_LLM_MODEL", "claude-sonnet-4-20250514"
+        )
         client = anthropic.Anthropic(api_key=key)
         msg = client.messages.create(
             model=use_model,
@@ -4772,7 +4803,9 @@ def _apply_code_change_interactive(
     print()
 
     if not source_dir:
-        print(f"  {DIM}Tip: run with --source-dir <path> to enable AI code editing.{N}\n")
+        print(
+            f"  {DIM}Tip: run with --source-dir <path> to enable AI code editing.{N}\n"
+        )
         return
 
     # ── Find GPU source files ────────────────────────────────────────────────
@@ -4806,7 +4839,9 @@ def _apply_code_change_interactive(
         editor = _os.environ.get("EDITOR", "")
         if editor and source_files:
             try:
-                ans = input(f"\n  Open source files in {editor}? [y/N]: ").strip().lower()
+                ans = (
+                    input(f"\n  Open source files in {editor}? [y/N]: ").strip().lower()
+                )
             except (EOFError, KeyboardInterrupt):
                 ans = "n"
             if ans in ("y", "yes"):
@@ -4933,7 +4968,9 @@ def _apply_code_change_interactive(
     for abs_path, rel_path, original, replacement in patches:
         orig_content = file_contents[abs_path]
         if original not in orig_content:
-            print(f"\n  {R}✗ Could not locate original code in {rel_path} — skipping.{N}")
+            print(
+                f"\n  {R}✗ Could not locate original code in {rel_path} — skipping.{N}"
+            )
             continue
         new_content = orig_content.replace(original, replacement, 1)
         diff = list(

@@ -1,10 +1,12 @@
-import json
 import pathlib
-import pytest
-import subprocess
 from unittest.mock import patch, MagicMock
 
-from rocpd.ai_analysis.interactive import SessionStore, SessionData, PersistentMenuItem, InteractiveSession
+from rocpd.ai_analysis.interactive import (
+    SessionStore,
+    SessionData,
+    PersistentMenuItem,
+    InteractiveSession,
+)
 
 
 class TestSessionStore:
@@ -27,14 +29,18 @@ class TestSessionStore:
 
     def test_find_by_source_dir(self, tmp_path):
         store = SessionStore(sessions_dir=tmp_path)
-        a = SessionData(session_id="2026-03-10_10-00-00_myapp",
-                        source_dir="/tmp/myapp",
-                        created_at="2026-03-10T10:00:00Z",
-                        last_updated="2026-03-10T10:00:00Z")
-        b = SessionData(session_id="2026-03-10_11-00-00_other",
-                        source_dir="/tmp/other",
-                        created_at="2026-03-10T11:00:00Z",
-                        last_updated="2026-03-10T11:00:00Z")
+        a = SessionData(
+            session_id="2026-03-10_10-00-00_myapp",
+            source_dir="/tmp/myapp",
+            created_at="2026-03-10T10:00:00Z",
+            last_updated="2026-03-10T10:00:00Z",
+        )
+        b = SessionData(
+            session_id="2026-03-10_11-00-00_other",
+            source_dir="/tmp/other",
+            created_at="2026-03-10T11:00:00Z",
+            last_updated="2026-03-10T11:00:00Z",
+        )
         store.save(a)
         store.save(b)
         results = store.find_by_source_dir("/tmp/myapp")
@@ -44,15 +50,17 @@ class TestSessionStore:
     def test_save_creates_parent_dir(self, tmp_path):
         nested = tmp_path / "deep" / "sessions"
         store = SessionStore(sessions_dir=nested)
-        data = SessionData(session_id="s1", source_dir="/x",
-                           created_at="t", last_updated="t")
+        data = SessionData(
+            session_id="s1", source_dir="/x", created_at="t", last_updated="t"
+        )
         store.save(data)
         assert (nested / "s1.json").exists()
 
     def test_load_by_file_path(self, tmp_path):
         store = SessionStore(sessions_dir=tmp_path)
-        data = SessionData(session_id="s2", source_dir="/y",
-                           created_at="t", last_updated="t")
+        data = SessionData(
+            session_id="s2", source_dir="/y", created_at="t", last_updated="t"
+        )
         store.save(data)
         path = str(tmp_path / "s2.json")
         loaded = store.load(path)
@@ -61,9 +69,12 @@ class TestSessionStore:
     def test_find_by_source_dir_skips_malformed_json(self, tmp_path):
         store = SessionStore(sessions_dir=tmp_path)
         # Write a valid session
-        good = SessionData(session_id="good", source_dir="/tmp/myapp",
-                           created_at="2026-03-10T10:00:00Z",
-                           last_updated="2026-03-10T10:00:00Z")
+        good = SessionData(
+            session_id="good",
+            source_dir="/tmp/myapp",
+            created_at="2026-03-10T10:00:00Z",
+            last_updated="2026-03-10T10:00:00Z",
+        )
         store.save(good)
         # Write a malformed JSON file
         (tmp_path / "bad.json").write_text("not valid json")
@@ -87,12 +98,18 @@ class TestSessionStore:
 
     def test_find_by_source_dir_newest_first(self, tmp_path):
         store = SessionStore(sessions_dir=tmp_path)
-        older = SessionData(session_id="older", source_dir="/tmp/myapp",
-                            created_at="2026-03-09T10:00:00Z",
-                            last_updated="2026-03-09T10:00:00Z")
-        newer = SessionData(session_id="newer", source_dir="/tmp/myapp",
-                            created_at="2026-03-10T10:00:00Z",
-                            last_updated="2026-03-10T10:00:00Z")
+        older = SessionData(
+            session_id="older",
+            source_dir="/tmp/myapp",
+            created_at="2026-03-09T10:00:00Z",
+            last_updated="2026-03-09T10:00:00Z",
+        )
+        newer = SessionData(
+            session_id="newer",
+            source_dir="/tmp/myapp",
+            created_at="2026-03-10T10:00:00Z",
+            last_updated="2026-03-10T10:00:00Z",
+        )
         store.save(older)
         store.save(newer)
         results = store.find_by_source_dir("/tmp/myapp")
@@ -143,8 +160,10 @@ class TestInteractiveSessionMenu:
             last_updated="2026-03-09T10:00:00Z",
             persistent_menu_items=[
                 PersistentMenuItem(
-                    id="ROCPD-OCC-001", title="Increase occupancy",
-                    priority="HIGH", source="profiling_analysis",
+                    id="ROCPD-OCC-001",
+                    title="Increase occupancy",
+                    priority="HIGH",
+                    source="profiling_analysis",
                     added_at="2026-03-09T10:30:00Z",
                 )
             ],
@@ -170,10 +189,15 @@ class TestInteractiveSessionMenu:
         store = SessionStore(sessions_dir=tmp_path)
         with patch("rocpd.ai_analysis.interactive._input", side_effect=["s", "q"]):
             s = InteractiveSession(
-                source_dir="/tmp/myapp", tier0_result=None,
-                recommendations=[], database_path="",
-                llm_provider=None, llm_api_key=None, llm_model=None,
-                session_store=store, resume_session_id=None,
+                source_dir="/tmp/myapp",
+                tier0_result=None,
+                recommendations=[],
+                database_path="",
+                llm_provider=None,
+                llm_api_key=None,
+                llm_model=None,
+                session_store=store,
+                resume_session_id=None,
             )
             s.run()
         # Session should exist (saved by either [s] or [q])
@@ -184,10 +208,15 @@ class TestInteractiveSessionMenu:
         store = SessionStore(sessions_dir=tmp_path)
         with patch("rocpd.ai_analysis.interactive._input", side_effect=EOFError()):
             s = InteractiveSession(
-                source_dir="/tmp/myapp", tier0_result=None,
-                recommendations=[], database_path="",
-                llm_provider=None, llm_api_key=None, llm_model=None,
-                session_store=store, resume_session_id=None,
+                source_dir="/tmp/myapp",
+                tier0_result=None,
+                recommendations=[],
+                database_path="",
+                llm_provider=None,
+                llm_api_key=None,
+                llm_model=None,
+                session_store=store,
+                resume_session_id=None,
             )
             s.run()  # must not raise
         assert len(store.find_by_source_dir("/tmp/myapp")) == 1
@@ -196,20 +225,26 @@ class TestInteractiveSessionMenu:
         """Entering a number calls _pursue_recommendation for that item."""
         store = SessionStore(sessions_dir=tmp_path)
         item = PersistentMenuItem(
-            id="ROCPD-OCC-001", title="Increase occupancy",
-            priority="HIGH", source="profiling_analysis",
+            id="ROCPD-OCC-001",
+            title="Increase occupancy",
+            priority="HIGH",
+            source="profiling_analysis",
             added_at="2026-03-10T10:00:00Z",
         )
         with patch("rocpd.ai_analysis.interactive._input", side_effect=["1", "q"]):
             s = InteractiveSession(
-                source_dir="/tmp/myapp", tier0_result=None,
-                recommendations=[], database_path="",
-                llm_provider=None, llm_api_key=None, llm_model=None,
-                session_store=store, resume_session_id=None,
+                source_dir="/tmp/myapp",
+                tier0_result=None,
+                recommendations=[],
+                database_path="",
+                llm_provider=None,
+                llm_api_key=None,
+                llm_model=None,
+                session_store=store,
+                resume_session_id=None,
             )
             s.session.persistent_menu_items.append(item)
             pursued = []
-            original_pursue = s._pursue_recommendation
             s._pursue_recommendation = lambda i: pursued.append(i.id)
             s.run()
         assert pursued == ["ROCPD-OCC-001"]
@@ -218,17 +253,24 @@ class TestInteractiveSessionMenu:
         """Out-of-range choice in resume prompt falls through to new session."""
         store = SessionStore(sessions_dir=tmp_path)
         existing = SessionData(
-            session_id="old", source_dir="/tmp/myapp",
-            created_at="2026-03-09T10:00:00Z", last_updated="2026-03-09T10:00:00Z",
+            session_id="old",
+            source_dir="/tmp/myapp",
+            created_at="2026-03-09T10:00:00Z",
+            last_updated="2026-03-09T10:00:00Z",
         )
         store.save(existing)
         # "99" is out of range; should fall back to new session
         with patch("rocpd.ai_analysis.interactive._input", return_value="99"):
             s = InteractiveSession(
-                source_dir="/tmp/myapp", tier0_result=None,
-                recommendations=[], database_path="",
-                llm_provider=None, llm_api_key=None, llm_model=None,
-                session_store=store, resume_session_id=None,
+                source_dir="/tmp/myapp",
+                tier0_result=None,
+                recommendations=[],
+                database_path="",
+                llm_provider=None,
+                llm_api_key=None,
+                llm_model=None,
+                session_store=store,
+                resume_session_id=None,
             )
         assert s.session.session_id != "old"
 
@@ -252,9 +294,15 @@ class TestPathProfiling:
         fake_db.touch()
 
         recs_from_analysis = [
-            {"id": "ROCPD-OCC-001", "priority": "HIGH",
-             "category": "OCCUPANCY", "issue": "Low waves",
-             "suggestion": "Increase waves", "commands": [], "actions": []}
+            {
+                "id": "ROCPD-OCC-001",
+                "priority": "HIGH",
+                "category": "OCCUPANCY",
+                "issue": "Low waves",
+                "suggestion": "Increase waves",
+                "commands": [],
+                "actions": [],
+            }
         ]
 
         s = InteractiveSession(
@@ -262,8 +310,11 @@ class TestPathProfiling:
             tier0_result=self._tier0(),
             recommendations=[],
             database_path="",
-            llm_provider=None, llm_api_key=None, llm_model=None,
-            session_store=store, resume_session_id=None,
+            llm_provider=None,
+            llm_api_key=None,
+            llm_model=None,
+            session_store=store,
+            resume_session_id=None,
         )
 
         mock_proc = MagicMock()
@@ -272,10 +323,16 @@ class TestPathProfiling:
         input_seq = ["1", "", str(fake_db)]
         with patch("rocpd.ai_analysis.interactive._input", side_effect=input_seq):
             with patch("subprocess.run", return_value=mock_proc):
-                with patch.object(s, "_resolve_app_placeholder",
-                                  return_value="rocprofv3 --sys-trace -- ./app"):
-                    with patch.object(s, "_run_tier1_analysis",
-                                      return_value=(recs_from_analysis, None)):
+                with patch.object(
+                    s,
+                    "_resolve_app_placeholder",
+                    return_value="rocprofv3 --sys-trace -- ./app",
+                ):
+                    with patch.object(
+                        s,
+                        "_run_tier1_analysis",
+                        return_value=(recs_from_analysis, None),
+                    ):
                         s._path_profiling()
 
         assert any(h.type == "profiling_run" for h in s.session.history)
@@ -289,8 +346,11 @@ class TestPathProfiling:
             tier0_result=self._tier0(),
             recommendations=[],
             database_path="",
-            llm_provider=None, llm_api_key=None, llm_model=None,
-            session_store=store, resume_session_id=None,
+            llm_provider=None,
+            llm_api_key=None,
+            llm_model=None,
+            session_store=store,
+            resume_session_id=None,
         )
         with patch("rocpd.ai_analysis.interactive._input", return_value=""):
             s._path_profiling()
@@ -326,8 +386,11 @@ class TestPathOptimize:
             tier0_result=t,
             recommendations=[],
             database_path="",
-            llm_provider=None, llm_api_key=None, llm_model=None,
-            session_store=store, resume_session_id=None,
+            llm_provider=None,
+            llm_api_key=None,
+            llm_model=None,
+            session_store=store,
+            resume_session_id=None,
         )
         hot = s._select_hot_files()
         names = [pathlib.Path(f).name for f, _ in hot]
@@ -342,8 +405,11 @@ class TestPathOptimize:
             tier0_result=t,
             recommendations=[],
             database_path="",
-            llm_provider=None, llm_api_key=None, llm_model=None,
-            session_store=store, resume_session_id=None,
+            llm_provider=None,
+            llm_api_key=None,
+            llm_model=None,
+            session_store=store,
+            resume_session_id=None,
         )
         hot = s._select_hot_files(budget=60_000)
         total = sum(len(c) for _, c in hot)
@@ -354,18 +420,31 @@ class TestPursueRecommendation:
     def test_pursue_back_to_menu_keeps_item(self, tmp_path):
         store = SessionStore(sessions_dir=tmp_path)
         item = PersistentMenuItem(
-            id="ROCPD-OCC-001", title="Increase occupancy",
-            priority="HIGH", source="profiling_analysis",
+            id="ROCPD-OCC-001",
+            title="Increase occupancy",
+            priority="HIGH",
+            source="profiling_analysis",
             added_at="2026-03-10T10:00:00Z",
-            detail={"commands": [{"full_command": "rocprofv3 --pmc SQ_WAVES -- ./app",
-                                   "tool": "rocprofv3",
-                                   "description": "collect waves"}]}
+            detail={
+                "commands": [
+                    {
+                        "full_command": "rocprofv3 --pmc SQ_WAVES -- ./app",
+                        "tool": "rocprofv3",
+                        "description": "collect waves",
+                    }
+                ]
+            },
         )
         s = InteractiveSession(
-            source_dir="/tmp/myapp", tier0_result=None,
-            recommendations=[], database_path="",
-            llm_provider=None, llm_api_key=None, llm_model=None,
-            session_store=store, resume_session_id=None,
+            source_dir="/tmp/myapp",
+            tier0_result=None,
+            recommendations=[],
+            database_path="",
+            llm_provider=None,
+            llm_api_key=None,
+            llm_model=None,
+            session_store=store,
+            resume_session_id=None,
         )
         s.session.persistent_menu_items.append(item)
         with patch("rocpd.ai_analysis.interactive._input", return_value="m"):

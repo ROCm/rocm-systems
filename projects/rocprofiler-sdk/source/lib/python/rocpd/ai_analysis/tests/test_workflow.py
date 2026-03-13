@@ -6,18 +6,26 @@ Run with system rocpd first in PYTHONPATH:
     ROCPD_SRC=<repo>/source/lib/python
     PYTHONPATH="${ROCPD_SYS}:${ROCPD_SRC}" pytest --noconftest test_workflow.py -v
 """
+
+import os
 import sys
-import importlib
 
-# Always insert the system-installed rocpd at sys.path[0] so it wins over any path
-# that pytest may have prepended during package-discovery (e.g. the build tree).
-_ROCPD_SYS = "/opt/rocm-7.2.0/lib/python3.12/site-packages"
-sys.path.insert(0, _ROCPD_SYS)
+# If ROCPD_SYS is set, ensure the system-installed rocpd wins over any path that
+# pytest may have prepended during package-discovery (e.g. the build tree).
+_ROCPD_SYS = os.environ.get("ROCPD_SYS", "")
+if _ROCPD_SYS:
+    if not os.path.isdir(_ROCPD_SYS):
+        import pytest
 
-# Purge any partially-initialised rocpd that pytest loaded from the wrong tree.
-for _key in list(sys.modules):
-    if _key == "rocpd" or _key.startswith("rocpd."):
-        del sys.modules[_key]
+        pytest.skip(
+            f"ROCPD_SYS={_ROCPD_SYS!r} does not exist; skipping workflow tests",
+            allow_module_level=True,
+        )
+    sys.path.insert(0, _ROCPD_SYS)
+    # Purge any partially-initialised rocpd loaded from the wrong tree.
+    for _key in list(sys.modules):
+        if _key == "rocpd" or _key.startswith("rocpd."):
+            del sys.modules[_key]
 
 from rocpd.ai_analysis.interactive import WorkflowState  # noqa: E402
 

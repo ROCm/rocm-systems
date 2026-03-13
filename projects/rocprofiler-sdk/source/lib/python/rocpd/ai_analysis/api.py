@@ -182,7 +182,9 @@ class SourceAnalysisResult:
     already_instrumented: bool
     roctx_marker_count: int
 
-    recommendations: List[Dict[str, Any]]  # same structure as generate_recommendations()
+    recommendations: List[
+        Dict[str, Any]
+    ]  # same structure as generate_recommendations()
     suggested_counters: List[str]
     suggested_first_command: str
 
@@ -203,7 +205,12 @@ def _plan_to_source_result(plan) -> "SourceAnalysisResult":
         files_scanned=plan.files_scanned,
         files_skipped=plan.files_skipped,
         detected_kernels=[
-            {"name": k.name, "file": k.file, "line": k.line, "launch_type": k.launch_type}
+            {
+                "name": k.name,
+                "file": k.file,
+                "line": k.line,
+                "launch_type": k.launch_type,
+            }
             for k in plan.detected_kernels
         ],
         kernel_count=plan.kernel_count,

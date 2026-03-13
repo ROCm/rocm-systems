@@ -14,7 +14,6 @@ Run with:
 """
 
 import sys
-from pathlib import Path
 
 import pytest
 
@@ -23,20 +22,24 @@ import pytest
 # Group A: AnalysisContext defaults and construction (5 tests)
 # ---------------------------------------------------------------------------
 
+
 class TestAnalysisContextDefaults:
 
     def test_default_tier_is_1(self):
         from rocpd.ai_analysis.llm_analyzer import AnalysisContext
+
         ctx = AnalysisContext()
         assert ctx.tier == 1
 
     def test_default_has_counters_false(self):
         from rocpd.ai_analysis.llm_analyzer import AnalysisContext
+
         ctx = AnalysisContext()
         assert ctx.has_counters is False
 
     def test_default_nullable_fields_are_none(self):
         from rocpd.ai_analysis.llm_analyzer import AnalysisContext
+
         ctx = AnalysisContext()
         assert ctx.bottleneck_type is None
         assert ctx.gpu_arch is None
@@ -44,6 +47,7 @@ class TestAnalysisContextDefaults:
 
     def test_explicit_values_preserved(self):
         from rocpd.ai_analysis.llm_analyzer import AnalysisContext
+
         ctx = AnalysisContext(
             tier=2,
             has_counters=True,
@@ -59,6 +63,7 @@ class TestAnalysisContextDefaults:
 
     def test_dataclass_equality(self):
         from rocpd.ai_analysis.llm_analyzer import AnalysisContext
+
         a = AnalysisContext(tier=1, has_counters=False)
         b = AnalysisContext(tier=1, has_counters=False)
         assert a == b
@@ -68,10 +73,12 @@ class TestAnalysisContextDefaults:
 # Group B: _select_tags logic (14 tests)
 # ---------------------------------------------------------------------------
 
+
 class TestSelectTags:
 
     def _tags(self, **kwargs):
         from rocpd.ai_analysis.llm_analyzer import AnalysisContext, _select_tags
+
         return _select_tags(AnalysisContext(**kwargs))
 
     def test_tier1_no_counters_gives_always_and_tier1_only(self):
@@ -140,10 +147,12 @@ class TestSelectTags:
 # Group C: _filter_guide section parsing (12 tests)
 # ---------------------------------------------------------------------------
 
+
 class TestFilterGuide:
 
     def _filter(self, guide, tags):
         from rocpd.ai_analysis.llm_analyzer import _filter_guide
+
         return _filter_guide(guide, tags)
 
     def _make_guide(self, *sections):
@@ -179,7 +188,9 @@ class TestFilterGuide:
         assert "untagged content" in result
 
     def test_section_with_multiple_tags_included_on_any_match(self):
-        guide = "# Guide\n\n## Multi\n<!-- rocpd-context: tier1, tier2 -->\nmulti content\n"
+        guide = (
+            "# Guide\n\n## Multi\n<!-- rocpd-context: tier1, tier2 -->\nmulti content\n"
+        )
         result = self._filter(guide, {"always", "tier2"})
         assert "multi content" in result
 
@@ -197,7 +208,9 @@ class TestFilterGuide:
         assert "beta content" in result
 
     def test_tag_comment_with_extra_whitespace_parsed_correctly(self):
-        guide = "# Guide\n\n## Section\n<!--  rocpd-context:  tier2  -->\nspaced content\n"
+        guide = (
+            "# Guide\n\n## Section\n<!--  rocpd-context:  tier2  -->\nspaced content\n"
+        )
         result = self._filter(guide, {"tier2"})
         assert "spaced content" in result
 
@@ -207,7 +220,9 @@ class TestFilterGuide:
         assert "future content" not in result
 
     def test_tag_comment_on_line2_still_found(self):
-        guide = "# Guide\n\n## Section\n\n<!-- rocpd-context: tier1 -->\nline2 tag content\n"
+        guide = (
+            "# Guide\n\n## Section\n\n<!-- rocpd-context: tier1 -->\nline2 tag content\n"
+        )
         result = self._filter(guide, {"tier1"})
         assert "line2 tag content" in result
 
@@ -235,16 +250,22 @@ class TestFilterGuide:
 # Group D: _build_system_prompt integration (4 tests)
 # ---------------------------------------------------------------------------
 
+
 class TestBuildSystemPrompt:
 
     def _make_analyzer(self):
         from rocpd.ai_analysis.llm_analyzer import LLMAnalyzer
         from unittest.mock import patch
-        with patch.object(LLMAnalyzer, "_load_reference_guide", return_value=(
-            "# Guide\n\n## Always Section\n<!-- rocpd-context: always -->\nalways content\n\n"
-            "## Tier2 Section\n<!-- rocpd-context: tier2 -->\ntier2 content\n\n"
-            "## Compiler Section\n<!-- rocpd-context: compiler -->\ncompiler content\n"
-        )):
+
+        with patch.object(
+            LLMAnalyzer,
+            "_load_reference_guide",
+            return_value=(
+                "# Guide\n\n## Always Section\n<!-- rocpd-context: always -->\nalways content\n\n"
+                "## Tier2 Section\n<!-- rocpd-context: tier2 -->\ntier2 content\n\n"
+                "## Compiler Section\n<!-- rocpd-context: compiler -->\ncompiler content\n"
+            ),
+        ):
             return LLMAnalyzer(provider="anthropic", api_key="fake-key")
 
     def test_context_none_returns_full_guide(self):
@@ -256,6 +277,7 @@ class TestBuildSystemPrompt:
 
     def test_tier1_context_excludes_tier2_and_compiler(self):
         from rocpd.ai_analysis.llm_analyzer import AnalysisContext
+
         analyzer = self._make_analyzer()
         ctx = AnalysisContext(tier=1, has_counters=False)
         prompt = analyzer._build_system_prompt(context=ctx)
@@ -265,6 +287,7 @@ class TestBuildSystemPrompt:
 
     def test_tier2_context_includes_tier2_excludes_compiler(self):
         from rocpd.ai_analysis.llm_analyzer import AnalysisContext
+
         analyzer = self._make_analyzer()
         ctx = AnalysisContext(tier=2, has_counters=True, bottleneck_type="latency")
         prompt = analyzer._build_system_prompt(context=ctx)
@@ -273,6 +296,7 @@ class TestBuildSystemPrompt:
 
     def test_returned_prompt_is_always_non_empty(self):
         from rocpd.ai_analysis.llm_analyzer import AnalysisContext
+
         analyzer = self._make_analyzer()
         ctx = AnalysisContext(tier=1)
         prompt = analyzer._build_system_prompt(context=ctx)
@@ -283,6 +307,7 @@ class TestBuildSystemPrompt:
 # Group D continued: context propagation through public methods (3 tests)
 # ---------------------------------------------------------------------------
 
+
 class TestAnalyzeWithLLMContextParam:
 
     def _make_analyzer_capturing_prompt(self):
@@ -291,10 +316,14 @@ class TestAnalyzeWithLLMContextParam:
 
         captured = {}
 
-        with patch.object(LLMAnalyzer, "_load_reference_guide", return_value=(
-            "# Guide\n\n## Always\n<!-- rocpd-context: always -->\nalways text\n\n"
-            "## Tier2\n<!-- rocpd-context: tier2 -->\ntier2 text\n"
-        )):
+        with patch.object(
+            LLMAnalyzer,
+            "_load_reference_guide",
+            return_value=(
+                "# Guide\n\n## Always\n<!-- rocpd-context: always -->\nalways text\n\n"
+                "## Tier2\n<!-- rocpd-context: tier2 -->\ntier2 text\n"
+            ),
+        ):
             analyzer = LLMAnalyzer(provider="anthropic", api_key="fake")
 
         def fake_call(system_prompt, user_prompt):
@@ -306,6 +335,7 @@ class TestAnalyzeWithLLMContextParam:
 
     def test_analyze_with_llm_context_filters_guide(self):
         from rocpd.ai_analysis.llm_analyzer import AnalysisContext
+
         analyzer, captured = self._make_analyzer_capturing_prompt()
         ctx = AnalysisContext(tier=1, has_counters=False)
         analyzer.analyze_with_llm(analysis_data={}, context=ctx)
@@ -324,10 +354,14 @@ class TestAnalyzeWithLLMContextParam:
 
         captured = {}
 
-        with patch.object(LLMAnalyzer, "_load_reference_guide", return_value=(
-            "# Guide\n\n## Always\n<!-- rocpd-context: always -->\nalways text\n\n"
-            "## Compiler\n<!-- rocpd-context: compiler -->\ncompiler text\n"
-        )):
+        with patch.object(
+            LLMAnalyzer,
+            "_load_reference_guide",
+            return_value=(
+                "# Guide\n\n## Always\n<!-- rocpd-context: always -->\nalways text\n\n"
+                "## Compiler\n<!-- rocpd-context: compiler -->\ncompiler text\n"
+            ),
+        ):
             analyzer = LLMAnalyzer(provider="anthropic", api_key="fake")
 
         def fake_call(system_prompt, user_prompt):
@@ -361,21 +395,25 @@ class TestAnalyzeWithLLMContextParam:
 # Group F: public API export (2 tests)
 # ---------------------------------------------------------------------------
 
+
 class TestPublicExport:
 
     def test_analysis_context_importable_from_package(self):
         from rocpd.ai_analysis import AnalysisContext
+
         ctx = AnalysisContext(tier=2)
         assert ctx.tier == 2
 
     def test_analysis_context_in_all(self):
         import rocpd.ai_analysis as pkg
+
         assert "AnalysisContext" in pkg.__all__
 
 
 # ---------------------------------------------------------------------------
 # Group E: end-to-end with real guide file (6 tests)
 # ---------------------------------------------------------------------------
+
 
 class TestEndToEndWithRealGuide:
     """
@@ -386,12 +424,14 @@ class TestEndToEndWithRealGuide:
     def _build_prompt(self, **ctx_kwargs):
         from rocpd.ai_analysis.llm_analyzer import LLMAnalyzer, AnalysisContext
         from unittest.mock import patch
+
         guide = (
-            LLMAnalyzer.__module__ and
-            __import__(
-                "rocpd.ai_analysis.llm_analyzer",
-                fromlist=["get_reference_guide_path"]
-            ).get_reference_guide_path().read_text()
+            LLMAnalyzer.__module__
+            and __import__(
+                "rocpd.ai_analysis.llm_analyzer", fromlist=["get_reference_guide_path"]
+            )
+            .get_reference_guide_path()
+            .read_text()
         )
         with patch.object(LLMAnalyzer, "_load_reference_guide", return_value=guide):
             analyzer = LLMAnalyzer(provider="anthropic", api_key="fake")
@@ -436,6 +476,7 @@ class TestEndToEndWithRealGuide:
 # Group F: guide file integrity (2 tests)
 # ---------------------------------------------------------------------------
 
+
 class TestGuideIntegrity:
     """Validate that the real llm-reference-guide.md is correctly tagged."""
 
@@ -448,6 +489,7 @@ class TestGuideIntegrity:
         """Return list of (title, tag_or_None) for every ## section."""
         import re
         from rocpd.ai_analysis.llm_analyzer import get_reference_guide_path
+
         text = get_reference_guide_path().read_text()
         tag_re = re.compile(r"<!--\s*rocpd-context:\s*([^-]+?)\s*-->")
         results = []
@@ -464,7 +506,8 @@ class TestGuideIntegrity:
     def test_every_section_has_a_tag(self):
         """No ## section should be accidentally left without a rocpd-context tag."""
         untagged = [
-            title for title, tag in self._sections()
+            title
+            for title, tag in self._sections()
             if tag is None
             and not any(title.startswith(p) for p in self.UNTAGGED_ALLOWED_PREFIXES)
         ]
