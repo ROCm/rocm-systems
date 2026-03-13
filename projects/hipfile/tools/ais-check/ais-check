@@ -93,7 +93,7 @@ def find_hip_runtimes():
 
     # Drop any paths that don't exist
     existing_paths = [
-        path
+        os.path.abspath(os.path.normpath(path))
         for path in candidates
         if os.path.exists(os.path.abspath(os.path.normpath(path)))
     ]
