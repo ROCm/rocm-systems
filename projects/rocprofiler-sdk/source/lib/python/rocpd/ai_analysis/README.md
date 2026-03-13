@@ -566,15 +566,38 @@ breaks counter-collection/API-tracing cycles:
 
 ### AI-edit revert
 
-When the AI modifies source files (Phase 6), the session backs up each file to `<file>.bak`:
+When the AI modifies source files (Phase 6), the session backs up each file to `<file>.bak`.
+Typing `revert` (or `undo` / `v` / `r`) in the recompile-wait prompt triggers the full revert
+flow:
 
-- **During recompile wait** — type `revert` (or `undo`/`v`) to instantly restore the
-  original file. Paste compilation error text first and it will be included as context.
-- **When profiling fails** (Phase 3) — `[v]` appears in the retry menu if there are AI
-  edits; selecting it reverts the last edit and prompts recompile before retrying.
-- **Session learning** — on every revert, the failure reason is injected into the active
-  `LLMConversation` as a `user`/`assistant` exchange so the LLM knows what went wrong
-  and avoids repeating the same pattern later in the session.
+1. **Ask for error context** — if no errors were pasted yet, the session prompts:
+   ```
+   What went wrong? Paste the error output or briefly describe the issue.
+   (Press Enter to skip and proceed without error context)
+   >
+   ```
+2. **File restored** from `.bak` backup immediately.
+3. **LLM analysis** — calls the LLM with the original code, the failed edit, and the
+   error description. Response is formatted as:
+   - `ANALYSIS:` root-cause explanation of what went wrong
+   - `ALTERNATIVE:` a concrete corrected approach with specific code changes
+4. **Offer to apply** — `Apply this alternative approach now? [y/N]`
+   - If yes: shows a unified diff and applies on confirmation (with new `.bak`)
+5. **What-next menu**:
+   ```
+   What would you like to do next?
+     [f]  Try a different fix  — let the AI attempt another approach
+     [p]  Continue to re-profiling  (skip code changes this round)
+     [q]  Exit session
+   ```
+   - `[f]` is shown only in Phase 6 context (not after profiling failure in Phase 3)
+   - `[f]` re-enters the Phase 6 retry loop for a fresh LLM rewrite attempt
+   - `[p]` falls through to Phase 7 (re-profiling prompt)
+   - `[q]` saves the session and exits
+
+**Phase 3 failure revert** — `[v]` also appears in the Phase 3 retry menu when AI edits
+exist. In that context, `[f] Try a different fix` is not offered (a new edit can't be
+applied until re-profiling has run); instead only `[p]` (continue) and `[q]` (exit) appear.
 
 ### AI-suggested commands
 
@@ -582,7 +605,14 @@ After the LLM responds to `[o]`, the session scans the response text for `rocpro
 
 ### Session persistence
 
-Sessions are saved as JSON under `~/.rocpd/sessions/` by default.
+Both session classes save to `~/.rocpd/sessions/` automatically:
+
+| Session class | Save triggers | File pattern | Resume |
+|---|---|---|---|
+| `InteractiveSession` | `[s]` key, `[q]` quit, Ctrl+C | `<ts>_<source_slug>.json` | `--resume-session` or auto-detect |
+| `WorkflowSession` | after Phase 3 trace run, after Phase 6 edit, on exit/Ctrl+C | `workflow_<ts>_<app_slug>.json` | not supported (new state each run) |
+
+The session file path is printed in the session summary so you always know where to find it.
 
 > **Note:** `--resume-session` applies only to **`InteractiveSession`** (the menu-driven
 > `[p]/[a]/[o]/[s]/[q]` mode, triggered by `rocpd analyze -i db.db --interactive` **without**
