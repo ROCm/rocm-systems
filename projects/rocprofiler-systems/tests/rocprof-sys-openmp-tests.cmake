@@ -12,7 +12,7 @@
 # for the underlying functions that belong to the tracked host category (causing push vs pop mismatch).
 # To avoid this, add ROCPROFSYS_CI_SKIP_PUSH_POP_CHECK=ON to the environment.
 
-if(NOT EXISTS "${ROCM_LLVM_LIB_PATH}/libomptarget.so" AND ROCPROFSYS_USE_ROCM)
+if(NOT EXISTS "${ROCM_LLVM_LIB_PATH}/libomptarget.so")
     message(
         FATAL_ERROR
         "libomptarget.so not found in \"${ROCM_LLVM_LIB_PATH}\". "

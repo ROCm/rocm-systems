@@ -20,10 +20,13 @@
  * THE SOFTWARE.
  */
 
+#include "rocm_smi/rocm_smi_main.h"
+
 #include <dirent.h>
 #include <sys/types.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cassert>
 #include <cerrno>
 #include <cstdint>
@@ -31,36 +34,33 @@
 #include <cstring>
 #include <fstream>
 #include <iostream>
-#include <algorithm>
 #include <sstream>
 #include <string>
 
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_device.h"
-#include "rocm_smi/rocm_smi_main.h"
 #include "rocm_smi/rocm_smi_exception.h"
-#include "rocm_smi/rocm_smi_utils.h"
 #include "rocm_smi/rocm_smi_kfd.h"
-#include "rocm_smi/rocm_smi_logger.h"
 #include "rocm_smi/rocm_smi_kfd_data_manager.h"
+#include "rocm_smi/rocm_smi_logger.h"
+#include "rocm_smi/rocm_smi_utils.h"
 
+static const char* kPathDRMRoot = "/sys/class/drm";
+static const char* kPathHWMonRoot = "/sys/class/hwmon";
+static const char* kPathPowerRoot = "/sys/kernel/debug/dri";
+static const char* kPathNICRoot = "/sys/class/net";
+static const char* kPathSwitchRoot = "/sys/class/scsi_host";
+static const char* kPathDeviceMon = "/device/hwmon";
+static const char* kPathDeviceVendor = "/device/vendor";
+static const char* kPathVendor = "/vendor";
+static const char* kPathDevice = "/device";
+static const char* kPathPciDevices = "/sys/bus/pci/devices/";
 
-static const char *kPathDRMRoot = "/sys/class/drm";
-static const char *kPathHWMonRoot = "/sys/class/hwmon";
-static const char *kPathPowerRoot = "/sys/kernel/debug/dri";
-static const char *kPathNICRoot = "/sys/class/net";
-static const char *kPathSwitchRoot = "/sys/class/scsi_host";
-static const char *kPathDeviceMon = "/device/hwmon";
-static const char *kPathDeviceVendor = "/device/vendor";
-static const char *kPathVendor = "/vendor";
-static const char *kPathDevice = "/device";
-static const char *kPathPciDevices = "/sys/bus/pci/devices/";
+static const char* kNICPrefix =
+    "e";  // changed to 'e' since SLES syspath is 'eth' and RHEL/Ubuntu is 'en'
+static const char* kSwitchPrefix = "host";
 
-
-static const char *kNICPrefix = "e"; //changed to 'e' since SLES syspath is 'eth' and RHEL/Ubuntu is 'en'
-static const char *kSwitchPrefix = "host";
-
-static const char *kAMDMonitorTypes[] = {"radeon", "amdgpu", ""};
+static const char* kAMDMonitorTypes[] = {"radeon", "amdgpu", ""};
 
 using BDFDevicePair_t = std::pair<uint64_t, std::shared_ptr<amd::smi::Device>>;
 using BdfDeviceVector_t = std::vector<BDFDevicePair_t>;
@@ -70,7 +70,7 @@ namespace amd::smi {
 static uint32_t GetDeviceIndex(const std::string s) {
   std::string t = s;
   size_t tmp = t.find_last_not_of("0123456789");
-  t.erase(0, tmp+1);
+  t.erase(0, tmp + 1);
 
   assert(stoi(t) >= 0);
   return static_cast<uint32_t>(stoi(t));
@@ -80,7 +80,7 @@ static uint32_t GetDeviceIndex(const std::string s) {
 // From the directory renderDN in that sysfs path, the drm minor can be
 // computed for cardX.
 // On success, return drm_minor which is >= 128 otherwise return 0
-static uint32_t  GetDrmRenderMinor(const std::string s) {
+static uint32_t GetDrmRenderMinor(const std::string s) {
   std::ostringstream ss;
   std::string drm_path = s;
   int drm_minor = 0;
@@ -89,8 +89,7 @@ static uint32_t  GetDrmRenderMinor(const std::string s) {
   drm_path += "/device/drm";
 
   auto drm_dir = opendir(drm_path.c_str());
-  if (drm_dir == nullptr)
-    return 0;
+  if (drm_dir == nullptr) return 0;
 
   auto dentry = readdir(drm_dir);
 
@@ -98,8 +97,7 @@ static uint32_t  GetDrmRenderMinor(const std::string s) {
     std::string render_file = dentry->d_name;
     if (!render_file.compare(0, prefix_size, render_file_prefix)) {
       drm_minor = stoi(render_file.substr(prefix_size));
-      if (drm_minor)
-        break;
+      if (drm_minor) break;
     }
     dentry = readdir(drm_dir);
   }
@@ -108,8 +106,8 @@ static uint32_t  GetDrmRenderMinor(const std::string s) {
     return 0;
   }
 
-  ss << __PRETTY_FUNCTION__ << " | Discovered drmRenderMinor = "
-     << std::to_string(drm_minor) << " | For drm_path = " << drm_path << " | ";
+  ss << __PRETTY_FUNCTION__ << " | Discovered drmRenderMinor = " << std::to_string(drm_minor)
+     << " | For drm_path = " << drm_path << " | ";
   LOG_DEBUG(ss);
   return static_cast<uint32_t>(drm_minor);
 }
@@ -118,7 +116,7 @@ static uint32_t  GetDrmRenderMinor(const std::string s) {
 // From the directory cardN in that sysfs path, the card number can be
 // computed for renderDX.
 // On success, return drm_minor which is >= 128 otherwise return 0xFFFFFFFF
-static uint32_t  GetCard(const std::string s) {
+static uint32_t GetCard(const std::string s) {
   std::ostringstream ss;
   std::string drm_path = s;
   int card_num = -1;
@@ -127,8 +125,7 @@ static uint32_t  GetCard(const std::string s) {
   drm_path += "/device/drm";
 
   auto card_dir = opendir(drm_path.c_str());
-  if (card_dir == nullptr)
-    return static_cast<uint32_t>(-1);
+  if (card_dir == nullptr) return static_cast<uint32_t>(-1);
 
   auto dentry = readdir(card_dir);
 
@@ -136,8 +133,7 @@ static uint32_t  GetCard(const std::string s) {
     std::string card_file = dentry->d_name;
     if (!card_file.compare(0, prefix_size, card_file_prefix)) {
       card_num = stoi(card_file.substr(prefix_size));
-      if (card_num)
-        break;
+      if (card_num) break;
     }
     dentry = readdir(card_dir);
   }
@@ -146,8 +142,8 @@ static uint32_t  GetCard(const std::string s) {
     return static_cast<uint32_t>(-1);
   }
 
-  ss << __PRETTY_FUNCTION__ << " | Discovered card = "
-     << std::to_string(card_num) << " | For drm_path = " << drm_path << " | ";
+  ss << __PRETTY_FUNCTION__ << " | Discovered card = " << std::to_string(card_num)
+     << " | For drm_path = " << drm_path << " | ";
   LOG_DEBUG(ss);
   return static_cast<uint32_t>(card_num);
 }
@@ -158,9 +154,9 @@ static uint32_t  GetCard(const std::string s) {
 //
 //  where X is a hex integer (lower case is expected). If so, write the value
 //  to bdfid
-static bool bdfid_from_path(const std::string in_name, uint64_t *bdfid) {
-  char *p = nullptr;
-  char *name_start;
+static bool bdfid_from_path(const std::string in_name, uint64_t* bdfid) {
+  char* p = nullptr;
+  char* name_start;
   char name[13] = {'\0'};
   uint64_t tmp;
 
@@ -174,7 +170,7 @@ static bool bdfid_from_path(const std::string in_name, uint64_t *bdfid) {
   assert(tmp == 12);
 
   // BDFID = ((<DOMAIN> & 0xffff) << 32) | ((<BUS> & 0xff) << 8) |
-            //                        ((device& 0x1f) <<3 ) | (function & 0x7)
+  //                        ((device& 0x1f) <<3 ) | (function & 0x7)
   *bdfid = 0;
   name_start = name;
   p = name_start;
@@ -215,7 +211,7 @@ static bool bdfid_from_path(const std::string in_name, uint64_t *bdfid) {
 
 // 0 = successful bdfid found
 // 1 = not a good bdfid found
-[[maybe_unused]] static uint32_t ConstructBDFID(std::string path, uint64_t *bdfid) {
+[[maybe_unused]] static uint32_t ConstructBDFID(std::string path, uint64_t* bdfid) {
   std::ostringstream ss;
   assert(bdfid != nullptr);
   const unsigned int MAX_BDF_LENGTH = 512;
@@ -229,10 +225,8 @@ static bool bdfid_from_path(const std::string in_name, uint64_t *bdfid) {
   assert(ret < MAX_BDF_LENGTH);
 
   if (ret <= 0 || ret >= MAX_BDF_LENGTH) {
-    ss << __PRETTY_FUNCTION__ << " | readlink failed for path = "
-       << path << " | ret = " << ret
-       << " | errno = " << errno
-       << " | error = " << strerror(errno);
+    ss << __PRETTY_FUNCTION__ << " | readlink failed for path = " << path << " | ret = " << ret
+       << " | errno = " << errno << " | error = " << strerror(errno);
     // std::cout << ss.str() << std::endl;
     LOG_ERROR(ss);
     return 1;
@@ -252,35 +246,30 @@ static bool bdfid_from_path(const std::string in_name, uint64_t *bdfid) {
     tmp = tpath_str.substr(slash_i + 1, end_i - slash_i);
 
     if (bdfid_from_path(tmp, bdfid)) {
-      ss << __PRETTY_FUNCTION__ << " | Found bdfid = "
-         << print_int_as_hex(*bdfid, true, 8) << " | from path = "
-         << path << " | tmp = " << tmp << std::endl;
+      ss << __PRETTY_FUNCTION__ << " | Found bdfid = " << print_int_as_hex(*bdfid, true, 8)
+         << " | from path = " << path << " | tmp = " << tmp << std::endl;
       LOG_INFO(ss);
       return 0;
     }
     end_i = slash_i - 1;
   }
-  ss << __PRETTY_FUNCTION__ << " | No valid bdfid found in path = "
-     << path << " | tpath = " << tpath
-     << " | errno = " << errno
-     << " | error = " << strerror(errno) << std::endl;
+  ss << __PRETTY_FUNCTION__ << " | No valid bdfid found in path = " << path
+     << " | tpath = " << tpath << " | errno = " << errno << " | error = " << strerror(errno)
+     << std::endl;
   LOG_ERROR(ss);
   return 1;
 }
 
-void
-RocmSMI::Initialize(uint64_t flags) {
+void RocmSMI::Initialize(uint64_t flags) {
   auto i = 0;
   uint32_t ret;
   int i_ret;
   std::ostringstream ss;
 
-
-
   assert(ref_count_ == 1);
   if (ref_count_ != 1) {
     throw amd::smi::rsmi_exception(RSMI_INITIALIZATION_ERROR,
-            "Unexpected: RocmSMI ref_count_ != 1");
+                                   "Unexpected: RocmSMI ref_count_ != 1");
   }
 
   init_options_ = flags;
@@ -301,16 +290,15 @@ RocmSMI::Initialize(uint64_t flags) {
   // std::cout << "Current log settings:\n" << logSettings << std::endl;
 
   while (!std::string(kAMDMonitorTypes[i]).empty()) {
-      amd_monitor_types_.insert(kAMDMonitorTypes[i]);
-      ++i;
+    amd_monitor_types_.insert(kAMDMonitorTypes[i]);
+    ++i;
   }
 
   // DiscoverAmdgpuDevices() will search for devices and monitors and update
   // internal data structures.
   ret = DiscoverAmdgpuDevices();
   if (ret != 0) {
-    throw amd::smi::rsmi_exception(RSMI_INITIALIZATION_ERROR,
-            "DiscoverAmdgpuDevices() failed.");
+    throw amd::smi::rsmi_exception(RSMI_INITIALIZATION_ERROR, "DiscoverAmdgpuDevices() failed.");
   }
 
   ss << __PRETTY_FUNCTION__ << " | about to sort by BDF..." << std::endl;
@@ -321,22 +309,20 @@ RocmSMI::Initialize(uint64_t flags) {
   BdfDeviceVector_t dv_to_id;
   dv_to_id.reserve(devices_.size());
   for (uint32_t dv_ind = 0; dv_ind < devices_.size(); ++dv_ind) {
-      dev = devices_[dv_ind];
-      uint64_t bdfid = dev->bdfid();
-      bdfid = bdfid & 0xFFFFFFFF0FFFFFFF;  // clear out partition id in bdf
-      // NOTE: partition_id is not part of bdf (but is part of pci_id)
-      // which is why it is removed in sorting
-      dv_to_id.push_back({bdfid, dev});
+    dev = devices_[dv_ind];
+    uint64_t bdfid = dev->bdfid();
+    bdfid = bdfid & 0xFFFFFFFF0FFFFFFF;  // clear out partition id in bdf
+    // NOTE: partition_id is not part of bdf (but is part of pci_id)
+    // which is why it is removed in sorting
+    dv_to_id.push_back({bdfid, dev});
   }
   ss << __PRETTY_FUNCTION__ << " Sort index based on BDF.";
   LOG_DEBUG(ss);
 
   // Stable sort to keep the order if bdf is equal.
-  std::stable_sort(dv_to_id.begin(), dv_to_id.end(), []
-  (const BDFDevicePair_t& p1,
-    const BDFDevicePair_t& p2) {
-        return p1.first < p2.first;
-  });
+  std::stable_sort(
+      dv_to_id.begin(), dv_to_id.end(),
+      [](const BDFDevicePair_t& p1, const BDFDevicePair_t& p2) { return p1.first < p2.first; });
   devices_.clear();
   for (uint32_t dv_ind = 0; dv_ind < dv_to_id.size(); ++dv_ind) {
     devices_.push_back(dv_to_id[dv_ind].second);
@@ -346,20 +332,18 @@ RocmSMI::Initialize(uint64_t flags) {
   i_ret = DiscoverKFDNodes(&tmp_map);
   if (i_ret != 0) {
     throw amd::smi::rsmi_exception(RSMI_INITIALIZATION_ERROR,
-                 "Failed to initialize rocm_smi library (KFD node discovery).");
+                                   "Failed to initialize rocm_smi library (KFD node discovery).");
   }
 
-  std::map<std::pair<uint32_t, uint32_t>, std::shared_ptr<IOLink>>
-    io_link_map_tmp;
+  std::map<std::pair<uint32_t, uint32_t>, std::shared_ptr<IOLink>> io_link_map_tmp;
   i_ret = DiscoverIOLinks(&io_link_map_tmp);
   if (i_ret != 0) {
     throw amd::smi::rsmi_exception(RSMI_INITIALIZATION_ERROR,
-                 "Failed to initialize rocm_smi library (IO Links discovery).");
+                                   "Failed to initialize rocm_smi library (IO Links discovery).");
   }
   std::map<std::pair<uint32_t, uint32_t>, std::shared_ptr<IOLink>>::iterator it;
   for (it = io_link_map_tmp.begin(); it != io_link_map_tmp.end(); it++)
     io_link_map_[it->first] = it->second;
-
 
   // Remove any drm nodes that don't have  a corresponding readable kfd node.
   // kfd nodes will not be added if their properties file is not readable.
@@ -367,8 +351,8 @@ RocmSMI::Initialize(uint64_t flags) {
   while (dev_iter != devices_.end()) {
     uint64_t bdfid = (*dev_iter)->bdfid();
     if (tmp_map.find(bdfid) == tmp_map.end()) {
-      ss << __PRETTY_FUNCTION__ << " | removing device = "
-         << (*dev_iter)->path() << "; bdfid = " << std::to_string(bdfid);
+      ss << __PRETTY_FUNCTION__ << " | removing device = " << (*dev_iter)->path()
+         << "; bdfid = " << std::to_string(bdfid);
       dev_iter = devices_.erase(dev_iter);
       LOG_DEBUG(ss);
       continue;
@@ -386,7 +370,7 @@ RocmSMI::Initialize(uint64_t flags) {
     assert(tmp_map.find(bdfid) != tmp_map.end());
     if (tmp_map.find(bdfid) == tmp_map.end()) {
       throw amd::smi::rsmi_exception(RSMI_INITIALIZATION_ERROR,
-                   "amdgpu device bdfid has no KFD matching node");
+                                     "amdgpu device bdfid has no KFD matching node");
     }
 
     tmp_map[bdfid]->set_amdgpu_dev_index(dv_ind);
@@ -413,16 +397,16 @@ RocmSMI::Initialize(uint64_t flags) {
   LOG_DEBUG(ss);
   {
     /*
-      * Discover the BRCM NIC devices from the sysfs entry
-      * Construct the BDF for the discovered NIC devices 
-      * Push NIC SMI Device object to nic_devices vector
-    */
+     * Discover the BRCM NIC devices from the sysfs entry
+     * Construct the BDF for the discovered NIC devices
+     * Push NIC SMI Device object to nic_devices vector
+     */
     ret = DiscoverBRCMnicDevices();
     if (ret != 0) {
       throw amd::smi::rsmi_exception(RSMI_INITIALIZATION_ERROR, "DiscoverBRCMnicDevices() failed.");
     }
     uint64_t bdfid;
-    for (auto &device : nic_devices_) {
+    for (auto& device : nic_devices_) {
       if (ConstructBDFID(device->path(), &bdfid) != 0) {
         std::cerr << "Failed to construct BDFID." << std::endl;
       } else if (device->bdfid() != UINT64_MAX && device->bdfid() != bdfid) {
@@ -460,11 +444,9 @@ RocmSMI::Initialize(uint64_t flags) {
     LOG_DEBUG(ss);
 
     // Stable sort to keep the order if bdf is equal.
-    std::stable_sort(dv_to_id.begin(), dv_to_id.end(),
-                     [](const BDFDevicePair_t& p1,
-                        const BDFDevicePair_t& p2) {
-                       return p1.first < p2.first;
-                     });
+    std::stable_sort(
+        dv_to_id.begin(), dv_to_id.end(),
+        [](const BDFDevicePair_t& p1, const BDFDevicePair_t& p2) { return p1.first < p2.first; });
     nic_devices_.clear();
     for (uint32_t dv_ind = 0; dv_ind < dv_to_id.size(); ++dv_ind) {
       nic_devices_.push_back(dv_to_id[dv_ind].second);
@@ -474,37 +456,38 @@ RocmSMI::Initialize(uint64_t flags) {
   {
     /*
      * Discover the BRCM switches from the sysfs entry
-     * Construct the BDF for the discovered switch devices 
+     * Construct the BDF for the discovered switch devices
      * Push SWITCH SMI Device object to switch_devices vector
-    */
+     */
 
     ret = DiscoverBRCMswitchDevices();
     if (ret != 0) {
-      throw amd::smi::rsmi_exception(RSMI_INITIALIZATION_ERROR, "DiscoverBRCMswitchDevices() failed.");
+      throw amd::smi::rsmi_exception(RSMI_INITIALIZATION_ERROR,
+                                     "DiscoverBRCMswitchDevices() failed.");
     }
     uint64_t bdfid;
-    for (auto &device : switch_devices_) {
+    for (auto& device : switch_devices_) {
       if (ConstructBDFID(device->path(), &bdfid) != 0) {
         std::cerr << "Failed to construct BDFID." << std::endl;
       } else if (device->bdfid() != UINT64_MAX && device->bdfid() != bdfid) {
         // handles secondary partitions - compute partition feature nodes
         ss << __PRETTY_FUNCTION__ << " | [before] device->path() = " << device->path()
-            << "\n | bdfid = " << bdfid << "\n | device->bdfid() = " << device->bdfid()
-            << "\n | (xgmi node) setting to setting "
-            << "device->set_bdfid(device->bdfid())";
+           << "\n | bdfid = " << bdfid << "\n | device->bdfid() = " << device->bdfid()
+           << "\n | (xgmi node) setting to setting "
+           << "device->set_bdfid(device->bdfid())";
         LOG_TRACE(ss);
         device->set_bdfid(device->bdfid());
       } else {
         // legacy & pcie card updates
         ss << __PRETTY_FUNCTION__ << " | [before] device->path() = " << device->path()
-            << "\n | bdfid = " << bdfid << "\n | device->bdfid() = " << device->bdfid()
-            << "\n | (legacy/pcie card) setting device->set_bdfid(bdfid)";
+           << "\n | bdfid = " << bdfid << "\n | device->bdfid() = " << device->bdfid()
+           << "\n | (legacy/pcie card) setting device->set_bdfid(bdfid)";
         LOG_TRACE(ss);
         device->set_bdfid(bdfid);
       }
       ss << __PRETTY_FUNCTION__ << " | [after] device->path() = " << device->path()
-          << "\n | bdfid = " << bdfid << "\n | device->bdfid() = " << device->bdfid()
-          << "\n | final update: device->bdfid() holds correct device bdf";
+         << "\n | bdfid = " << bdfid << "\n | device->bdfid() = " << device->bdfid()
+         << "\n | final update: device->bdfid() holds correct device bdf";
       LOG_TRACE(ss);
     }
 
@@ -521,11 +504,9 @@ RocmSMI::Initialize(uint64_t flags) {
     LOG_DEBUG(ss);
 
     // Stable sort to keep the order if bdf is equal.
-    std::stable_sort(dv_to_id.begin(), dv_to_id.end(),
-                      [](const BDFDevicePair_t& p1,
-                         const BDFDevicePair_t& p2) {
-                        return p1.first < p2.first;
-                      });
+    std::stable_sort(
+        dv_to_id.begin(), dv_to_id.end(),
+        [](const BDFDevicePair_t& p1, const BDFDevicePair_t& p2) { return p1.first < p2.first; });
     switch_devices_.clear();
     for (uint32_t dv_ind = 0; dv_ind < dv_to_id.size(); ++dv_ind) {
       switch_devices_.push_back(dv_to_id[dv_ind].second);
@@ -533,8 +514,7 @@ RocmSMI::Initialize(uint64_t flags) {
   }
 }
 
-void
-RocmSMI::Cleanup() {
+void RocmSMI::Cleanup() {
   devices_.clear();
   monitors_.clear();
 
@@ -542,14 +522,13 @@ RocmSMI::Cleanup() {
     int ret = close(kfd_notif_evt_fh());
     if (ret < 0) {
       throw amd::smi::rsmi_exception(RSMI_STATUS_FILE_ERROR,
-                 "Failed to close kfd file handle on shutdown.");
+                                     "Failed to close kfd file handle on shutdown.");
     }
   }
 }
 
-RocmSMI::RocmSMI(uint64_t flags) : init_options_(flags),
-                          kfd_notif_evt_fh_(-1), kfd_notif_evt_fh_refcnt_(0) {
-}
+RocmSMI::RocmSMI(uint64_t flags)
+    : init_options_(flags), kfd_notif_evt_fh_(-1), kfd_notif_evt_fh_refcnt_(0) {}
 
 RocmSMI::~RocmSMI() = default;
 
@@ -560,7 +539,7 @@ RocmSMI& RocmSMI::getInstance(uint64_t flags) {
   return singleton;
 }
 
-static uint32_t GetEnvVarUInteger(const char *ev_str) {
+static uint32_t GetEnvVarUInteger(const char* ev_str) {
 #ifndef DEBUG
   (void)ev_str;
 #else
@@ -580,7 +559,7 @@ static uint32_t GetEnvVarUInteger(const char *ev_str) {
 // RSMI_LOGGING = 1, output to logs only
 // RSMI_LOGGING = 2, output to console only
 // RSMI_LOGGING = 3, output to logs and console
-static uint32_t getRSMIEnvVar_LoggingEnabled(const char *ev_str) {
+static uint32_t getRSMIEnvVar_LoggingEnabled(const char* ev_str) {
   uint32_t ret = 0;
   ev_str = getenv(ev_str);
   if (ev_str != nullptr) {
@@ -590,14 +569,15 @@ static uint32_t getRSMIEnvVar_LoggingEnabled(const char *ev_str) {
   return ret;
 }
 
-static inline std::unordered_set<uint32_t> GetEnvVarUIntegerSets(
-  const char *ev_str) {
+static inline std::unordered_set<uint32_t> GetEnvVarUIntegerSets(const char* ev_str) {
   std::unordered_set<uint32_t> returnSet;
 #ifndef DEBUG
   (void)ev_str;
 #else
   ev_str = getenv(ev_str);
-  if(ev_str == nullptr) { return returnSet; }
+  if (ev_str == nullptr) {
+    return returnSet;
+  }
   std::string stringEnv = ev_str;
 
   if (!stringEnv.empty()) {
@@ -623,7 +603,7 @@ void RocmSMI::GetEnvVariables(void) {
   auto ret = amd::smi::kfd::InitializeManager(kfd_cfg);
   if (ret != 0) {  // we'll never hit this (as of today)
     throw amd::smi::rsmi_exception(RSMI_INITIALIZATION_ERROR,
-                 "Failed to initialize KFD Manager from environment config.");
+                                   "Failed to initialize KFD Manager from environment config.");
   }
   env_vars_.logging_on = getRSMIEnvVar_LoggingEnabled("RSMI_LOGGING");
 #ifndef DEBUG
@@ -636,7 +616,7 @@ void RocmSMI::GetEnvVariables(void) {
   env_vars_.enum_overrides.clear();
 #else
   env_vars_.debug_output_bitfield = GetEnvVarUInteger("RSMI_DEBUG_BITFIELD");
-  env_vars_.path_DRM_root_override   = getenv("RSMI_DEBUG_DRM_ROOT_OVERRIDE");
+  env_vars_.path_DRM_root_override = getenv("RSMI_DEBUG_DRM_ROOT_OVERRIDE");
   env_vars_.path_HWMon_root_override = getenv("RSMI_DEBUG_HWMON_ROOT_OVERRIDE");
   env_vars_.path_power_root_override = getenv("RSMI_DEBUG_PP_ROOT_OVERRIDE");
   env_vars_.debug_inf_loop = GetEnvVarUInteger("RSMI_DEBUG_INFINITE_LOOP");
@@ -644,27 +624,21 @@ void RocmSMI::GetEnvVariables(void) {
 #endif
 }
 
-const RocmSMI_env_vars& RocmSMI::getEnv(void) {
-  return env_vars_;
-}
+const RocmSMI_env_vars& RocmSMI::getEnv(void) { return env_vars_; }
 
 bool RocmSMI::isLoggingOn(void) {
   bool isLoggingOn = false;
   GetEnvVariables();
-  if (this->env_vars_.logging_on > 0
-      && this->env_vars_.logging_on <= 3) {
+  if (this->env_vars_.logging_on > 0 && this->env_vars_.logging_on <= 3) {
     isLoggingOn = true;
   }
   return isLoggingOn;
 }
 
-uint32_t RocmSMI::getLogSetting() {
-  return this->env_vars_.logging_on;
-}
+uint32_t RocmSMI::getLogSetting() { return this->env_vars_.logging_on; }
 
 void RocmSMI::debugRSMIEnvVarInfo(void) {
-  std::cout << __PRETTY_FUNCTION__
-            << RocmSMI::getInstance().getRSMIEnvVarInfo();
+  std::cout << __PRETTY_FUNCTION__ << RocmSMI::getInstance().getRSMIEnvVarInfo();
 }
 
 std::string RocmSMI::getRSMIEnvVarInfo(void) {
@@ -672,48 +646,40 @@ std::string RocmSMI::getRSMIEnvVarInfo(void) {
   std::ostringstream ss;
   ss << "\n\tRSMI_DEBUG_BITFIELD = "
      << ((env_vars_.debug_output_bitfield == 0) ? "<undefined>"
-          : std::to_string(env_vars_.debug_output_bitfield))
+                                                : std::to_string(env_vars_.debug_output_bitfield))
      << std::endl;
   ss << "\tRSMI_DEBUG_DRM_ROOT_OVERRIDE = "
-     << ((env_vars_.path_DRM_root_override == nullptr)
-         ? "<undefined>" : env_vars_.path_DRM_root_override)
+     << ((env_vars_.path_DRM_root_override == nullptr) ? "<undefined>"
+                                                       : env_vars_.path_DRM_root_override)
      << std::endl;
   ss << "\tRSMI_DEBUG_HWMON_ROOT_OVERRIDE = "
-     << ((env_vars_.path_HWMon_root_override == nullptr)
-          ? "<undefined>" : env_vars_.path_HWMon_root_override)
+     << ((env_vars_.path_HWMon_root_override == nullptr) ? "<undefined>"
+                                                         : env_vars_.path_HWMon_root_override)
      << std::endl;
   ss << "\tRSMI_DEBUG_PP_ROOT_OVERRIDE = "
-     << ((env_vars_.path_power_root_override == nullptr)
-          ? "<undefined>" : env_vars_.path_power_root_override)
+     << ((env_vars_.path_power_root_override == nullptr) ? "<undefined>"
+                                                         : env_vars_.path_power_root_override)
      << std::endl;
   ss << "\tRSMI_DEBUG_INFINITE_LOOP = "
-     << ((env_vars_.debug_inf_loop == 0) ? "<undefined>"
-          : std::to_string(env_vars_.debug_inf_loop))
+     << ((env_vars_.debug_inf_loop == 0) ? "<undefined>" : std::to_string(env_vars_.debug_inf_loop))
      << std::endl;
-  ss << "\tRSMI_LOGGING = "
-            << getLogSetting() << std::endl;
+  ss << "\tRSMI_LOGGING = " << getLogSetting() << std::endl;
   bool isLoggingOn = RocmSMI::isLoggingOn() ? true : false;
-  ss << "\tRSMI_LOGGING (are logs on) = "
-            << (isLoggingOn ? "TRUE" : "FALSE") << std::endl;
-  ss << "\tAMDSMI_KFD_USE_ORIG_VRAM: "
-     << std::boolalpha << kfd_cfg.use_original_vram_fcn << std::endl;
-  ss << "\tAMDSMI_KFD_DISABLE_INOTIFY_POLLING: "
-     << std::boolalpha << kfd_cfg.disable_inotify_polling << std::endl;
-  ss << "\tAMDSMI_KFD_INOTIFY_POLL_MS: "
-     << kfd_cfg.inotify_poll_ms << " ms" << std::endl;
-  ss << "\tAMDSMI_KFD_CLEANUP_POLL_US: "
-     << kfd_cfg.cleanup_poll_us << " us" << std::endl;
-  ss << "\tAMDSMI_KFD_CACHE_TTL_MS: "
-     << kfd_cfg.cache_ttl_ms << " ms" << std::endl;
-  ss << "\tAMDSMI_KFD_MAX_CLEANUP_WAIT_MS: "
-     << kfd_cfg.max_cleanup_wait_ms << " ms" << std::endl;
+  ss << "\tRSMI_LOGGING (are logs on) = " << (isLoggingOn ? "TRUE" : "FALSE") << std::endl;
+  ss << "\tAMDSMI_KFD_USE_ORIG_VRAM: " << std::boolalpha << kfd_cfg.use_original_vram_fcn
+     << std::endl;
+  ss << "\tAMDSMI_KFD_DISABLE_INOTIFY_POLLING: " << std::boolalpha
+     << kfd_cfg.disable_inotify_polling << std::endl;
+  ss << "\tAMDSMI_KFD_INOTIFY_POLL_MS: " << kfd_cfg.inotify_poll_ms << " ms" << std::endl;
+  ss << "\tAMDSMI_KFD_CLEANUP_POLL_US: " << kfd_cfg.cleanup_poll_us << " us" << std::endl;
+  ss << "\tAMDSMI_KFD_CACHE_TTL_MS: " << kfd_cfg.cache_ttl_ms << " ms" << std::endl;
+  ss << "\tAMDSMI_KFD_MAX_CLEANUP_WAIT_MS: " << kfd_cfg.max_cleanup_wait_ms << " ms" << std::endl;
   ss << "\tRSMI_DEBUG_ENUM_OVERRIDE = {";
   if (env_vars_.enum_overrides.empty()) {
     ss << "}" << std::endl;
     return ss.str();
   }
-  for (auto it=env_vars_.enum_overrides.begin();
-       it != env_vars_.enum_overrides.end(); ++it) {
+  for (auto it = env_vars_.enum_overrides.begin(); it != env_vars_.enum_overrides.end(); ++it) {
     DevInfoTypes type = static_cast<DevInfoTypes>(*it);
     ss << (std::to_string(*it) + " (" + Device::get_type_string(type) + ")");
     auto temp_it = it;
@@ -725,8 +691,7 @@ std::string RocmSMI::getRSMIEnvVarInfo(void) {
   return ss.str();
 }
 
-std::shared_ptr<Monitor>
-RocmSMI::FindMonitor(std::string monitor_path) {
+std::shared_ptr<Monitor> RocmSMI::FindMonitor(std::string monitor_path) {
   std::string tmp;
   std::string err_msg;
   std::string mon_name;
@@ -790,7 +755,7 @@ RocmSMI::FindMonitor(std::string monitor_path) {
   return m;
 }
 
-void RocmSMI::AddToDeviceList(const std::string &dev_name, uint64_t bdfid) {
+void RocmSMI::AddToDeviceList(const std::string& dev_name, uint64_t bdfid) {
   static const int BYTE = 8;
   std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << " | ======= start =======";
@@ -816,12 +781,11 @@ void RocmSMI::AddToDeviceList(const std::string &dev_name, uint64_t bdfid) {
   }
 
   devices_.push_back(dev);
-  ss << __PRETTY_FUNCTION__
-     << " | Adding to device list dev_name = " << dev_name << "\n"
+  ss << __PRETTY_FUNCTION__ << " | Adding to device list dev_name = " << dev_name << "\n"
      << " | path = " << dev_path << "\n"
      << " | dName = " << d_name << "\n"
-     << " | bdfid = " << (bdfid == UINT64_MAX ?
-      "N/A" : print_int_as_hex(bdfid, true, 2*BYTE)) << "\n"
+     << " | bdfid = " << (bdfid == UINT64_MAX ? "N/A" : print_int_as_hex(bdfid, true, 2 * BYTE))
+     << "\n"
      << " | card index = " << std::to_string(card_indx) << "\n"
      << " | drmRenderMinor = " << std::to_string(drmRenderMinor) << "\n"
      << " | supported_event_groups = " << dev->supported_event_groups() << "\n";
@@ -850,17 +814,15 @@ rsmi_status_t RocmSMI::AddToDeviceList2(RocmSMI::rsmi_device_enumeration_t devic
      << " | drm_render_path = [" << device.drm_render_path << "]\n"
      << " | drm_card_path = [" << device.drm_card_path << "]\n"
      << " | drm_render_minor = [" << std::to_string(device.drm_render_minor)
-     << "]\n | bdfid (value) = [" << (device.bdfid == UINT64_MAX ?
-       "N/A" : print_int_as_hex(device.bdfid, true, 4*BYTE)) << "]\n"
-     << " | bdfid (str) = ["
-     << std::hex << std::setfill('0') << std::setw(4)
-     << ((device.bdfid >> 32) & static_cast<uint64_t>(0xFFFFFFFF)) << ":"
-     << std::hex << std::setfill('0') << std::setw(2) << ((device.bdfid >> 8)
-                                                          & static_cast<uint64_t>(0xFF)) << ":"
-     << std::hex << std::setfill('0') << std::setw(2) << ((device.bdfid >> 3)
-                                                          & static_cast<uint64_t>(0x1F)) << "."
-     << std::hex << std::setfill('0') << std::setw(1) << +(device.bdfid
-                                                          & static_cast<uint64_t>(0x7)) << "]\n";
+     << "]\n | bdfid (value) = ["
+     << (device.bdfid == UINT64_MAX ? "N/A" : print_int_as_hex(device.bdfid, true, 4 * BYTE))
+     << "]\n"
+     << " | bdfid (str) = [" << std::hex << std::setfill('0') << std::setw(4)
+     << ((device.bdfid >> 32) & static_cast<uint64_t>(0xFFFFFFFF)) << ":" << std::hex
+     << std::setfill('0') << std::setw(2) << ((device.bdfid >> 8) & static_cast<uint64_t>(0xFF))
+     << ":" << std::hex << std::setfill('0') << std::setw(2)
+     << ((device.bdfid >> 3) & static_cast<uint64_t>(0x1F)) << "." << std::hex << std::setfill('0')
+     << std::setw(1) << +(device.bdfid & static_cast<uint64_t>(0x7)) << "]\n";
   // std::cout << ss.str() << std::endl;
   LOG_TRACE(ss);
   auto dev_path = std::string(kPathDRMRoot);
@@ -875,8 +837,7 @@ rsmi_status_t RocmSMI::AddToDeviceList2(RocmSMI::rsmi_device_enumeration_t devic
     uint32_t card_num = GetCard(dev_path);
     device.dev_name = "card" + std::to_string(card_num);
     device.drm_render_path = dev_path;
-    device.drm_card_path = std::string(kPathDRMRoot) + "/card" +
-      std::to_string(card_num);
+    device.drm_card_path = std::string(kPathDRMRoot) + "/card" + std::to_string(card_num);
     device.card_index = card_num;
   }
 
@@ -896,12 +857,12 @@ rsmi_status_t RocmSMI::AddToDeviceList2(RocmSMI::rsmi_device_enumeration_t devic
   }
 
   devices_.push_back(dev);
-  ss << __PRETTY_FUNCTION__
-     << " | Adding to device list dev_name = " << device.dev_name << "\n"
+  ss << __PRETTY_FUNCTION__ << " | Adding to device list dev_name = " << device.dev_name << "\n"
      << " | path = " << dev_path << "\n"
      << " | dName = " << d_name << "\n"
-     << " | bdfid = " << (device.bdfid == UINT64_MAX ?
-      "N/A" : print_int_as_hex(device.bdfid, true, 8*BYTE)) << "\n"
+     << " | bdfid = "
+     << (device.bdfid == UINT64_MAX ? "N/A" : print_int_as_hex(device.bdfid, true, 8 * BYTE))
+     << "\n"
      << " | card index = " << std::to_string(card_indx) << "\n"
      << " | drmRenderMinor = " << std::to_string(drmRenderMinor) << "\n"
      << " | supported_event_groups = " << dev->supported_event_groups() << "\n";
@@ -911,24 +872,22 @@ rsmi_status_t RocmSMI::AddToDeviceList2(RocmSMI::rsmi_device_enumeration_t devic
      << " | drm_render_path = [" << device.drm_render_path << "]\n"
      << " | drm_card_path = [" << device.drm_card_path << "]\n"
      << " | drm_render_minor = [" << std::to_string(device.drm_render_minor)
-     << "]\n | bdfid (value) = [" << (device.bdfid == UINT64_MAX ?
-       "N/A" : print_int_as_hex(device.bdfid, true, 8*BYTE)) << "]\n"
-     << " | bdfid (str) = ["
-     << std::hex << std::setfill('0') << std::setw(4)
-     << ((device.bdfid >> 32) & static_cast<uint64_t>(0xFFFFFFFF)) << ":"
-     << std::hex << std::setfill('0') << std::setw(2) << ((device.bdfid >> 8)
-                                                          & static_cast<uint64_t>(0xFF)) << ":"
-     << std::hex << std::setfill('0') << std::setw(2) << ((device.bdfid >> 3)
-                                                          & static_cast<uint64_t>(0x1F)) << "."
-     << std::hex << std::setfill('0') << std::setw(1) << +(device.bdfid
-                                                          & static_cast<uint64_t>(0x7)) << "]\n"
+     << "]\n | bdfid (value) = ["
+     << (device.bdfid == UINT64_MAX ? "N/A" : print_int_as_hex(device.bdfid, true, 8 * BYTE))
+     << "]\n"
+     << " | bdfid (str) = [" << std::hex << std::setfill('0') << std::setw(4)
+     << ((device.bdfid >> 32) & static_cast<uint64_t>(0xFFFFFFFF)) << ":" << std::hex
+     << std::setfill('0') << std::setw(2) << ((device.bdfid >> 8) & static_cast<uint64_t>(0xFF))
+     << ":" << std::hex << std::setfill('0') << std::setw(2)
+     << ((device.bdfid >> 3) & static_cast<uint64_t>(0x1F)) << "." << std::hex << std::setfill('0')
+     << std::setw(1) << +(device.bdfid & static_cast<uint64_t>(0x7)) << "]\n"
      << " | END";
   // std::cout << ss.str() << std::endl;
   LOG_DEBUG(ss);
   return RSMI_STATUS_SUCCESS;
 }
 
-void RocmSMI::AddToNICDeviceList(const std::string &dev_name, uint64_t bdfid, uint32_t card_indx) {
+void RocmSMI::AddToNICDeviceList(const std::string& dev_name, uint64_t bdfid, uint32_t card_indx) {
   std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << " | ======= start =======";
   LOG_TRACE(ss);
@@ -954,7 +913,7 @@ void RocmSMI::AddToNICDeviceList(const std::string &dev_name, uint64_t bdfid, ui
   LOG_DEBUG(ss);
 }
 
-void RocmSMI::AddToSWITCHDeviceList(const std::string &dev_name, uint64_t bdfid) {
+void RocmSMI::AddToSWITCHDeviceList(const std::string& dev_name, uint64_t bdfid) {
   std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << " | ======= start =======";
   LOG_TRACE(ss);
@@ -967,7 +926,7 @@ void RocmSMI::AddToSWITCHDeviceList(const std::string &dev_name, uint64_t bdfid)
   std::shared_ptr<Monitor> m = FindMonitor(dev_path + kPathDeviceMon);
   dev->set_monitor(m);
 
-  const std::string &d_name = dev_name;
+  const std::string& d_name = dev_name;
   uint32_t card_indx = GetDeviceIndex(d_name);
   dev->set_card_index(card_indx);
   GetSupportedEventGroups(card_indx, dev->supported_event_groups());
@@ -991,8 +950,8 @@ static const uint32_t kBRCMswitchDId = 0x00b2;
   std::ostringstream ss;
   std::string vend_path = dev_path + kPathDeviceVendor;
   if (!FileExists(vend_path.c_str())) {
-    ss << __PRETTY_FUNCTION__ << " | device_path = " << dev_path
-       << " is an amdgpu device - " << (isAmdGpu ? "TRUE": " FALSE");
+    ss << __PRETTY_FUNCTION__ << " | device_path = " << dev_path << " is an amdgpu device - "
+       << (isAmdGpu ? "TRUE" : " FALSE");
     LOG_DEBUG(ss);
     return isAmdGpu;
   }
@@ -1001,8 +960,8 @@ static const uint32_t kBRCMswitchDId = 0x00b2;
   fs.open(vend_path);
 
   if (!fs.is_open()) {
-    ss << __PRETTY_FUNCTION__ << " | device_path = " << dev_path
-       << " is an amdgpu device - " << (isAmdGpu ? "TRUE": " FALSE");
+    ss << __PRETTY_FUNCTION__ << " | device_path = " << dev_path << " is an amdgpu device - "
+       << (isAmdGpu ? "TRUE" : " FALSE");
     LOG_DEBUG(ss);
     return isAmdGpu;
   }
@@ -1016,8 +975,8 @@ static const uint32_t kBRCMswitchDId = 0x00b2;
   if (vendor_id == kAmdGpuId) {
     isAmdGpu = true;
   }
-  ss << __PRETTY_FUNCTION__ << " | device_path = " << dev_path
-     << " is an amdgpu device - " << (isAmdGpu ? "TRUE": " FALSE");
+  ss << __PRETTY_FUNCTION__ << " | device_path = " << dev_path << " is an amdgpu device - "
+     << (isAmdGpu ? "TRUE" : " FALSE");
   LOG_DEBUG(ss);
   return isAmdGpu;
 }
@@ -1107,38 +1066,36 @@ uint32_t GetLargestNodeNumber(const std::string& path = "/sys/class/kfd/kfd/topo
   // Open the directory
   DIR* dir = opendir(path.c_str());
   if (!dir) {
-      // Return UINT32_MAX on error
-      ss << __PRETTY_FUNCTION__ << " | Failed to open directory: " << path
-         << " | errno = " << errno
-         << " | error = " << strerror(errno);
-      // std::cout << ss.str() << std::endl;
-      LOG_ERROR(ss);
-      return UINT32_MAX;
+    // Return UINT32_MAX on error
+    ss << __PRETTY_FUNCTION__ << " | Failed to open directory: " << path << " | errno = " << errno
+       << " | error = " << strerror(errno);
+    // std::cout << ss.str() << std::endl;
+    LOG_ERROR(ss);
+    return UINT32_MAX;
   }
 
   struct dirent* entry;
   while ((entry = readdir(dir)) != nullptr) {
-      // Skip "." and ".."
-      if (entry->d_name[0] == '.') {
-          continue;
-      }
+    // Skip "." and ".."
+    if (entry->d_name[0] == '.') {
+      continue;
+    }
 
-      // Check if the directory name is a number
-      std::string dir_name(entry->d_name);
-      if (std::all_of(dir_name.begin(), dir_name.end(), ::isdigit)) {
-          uint32_t node_number = static_cast<uint32_t>(std::stoul(dir_name));
-          largest_node_number = std::max(largest_node_number, node_number);
-      }
+    // Check if the directory name is a number
+    std::string dir_name(entry->d_name);
+    if (std::all_of(dir_name.begin(), dir_name.end(), ::isdigit)) {
+      uint32_t node_number = static_cast<uint32_t>(std::stoul(dir_name));
+      largest_node_number = std::max(largest_node_number, node_number);
+    }
   }
 
   if (closedir(dir)) {
-      // Return UINT32_MAX on error
-      ss << __PRETTY_FUNCTION__ << " | Failed to close directory: " << path
-         << " | errno = " << errno
-         << " | error = " << strerror(errno);
-      // std::cout << ss.str() << std::endl;
-      LOG_ERROR(ss);
-      return UINT32_MAX;
+    // Return UINT32_MAX on error
+    ss << __PRETTY_FUNCTION__ << " | Failed to close directory: " << path << " | errno = " << errno
+       << " | error = " << strerror(errno);
+    // std::cout << ss.str() << std::endl;
+    LOG_ERROR(ss);
+    return UINT32_MAX;
   }
 
   return largest_node_number;
@@ -1153,8 +1110,8 @@ uint32_t RocmSMI::DiscoverAmdgpuDevices(void) {
   monitors_.clear();
 
   uint32_t max_nodes = GetLargestNodeNumber();
-  ss << __PRETTY_FUNCTION__ << " | Discovered a potential of "
-     << std::to_string(max_nodes) << " kfd nodes";
+  ss << __PRETTY_FUNCTION__ << " | Discovered a potential of " << std::to_string(max_nodes)
+     << " kfd nodes";
   // std::cout << ss.str() << std::endl;
   LOG_DEBUG(ss);
   if (max_nodes == UINT32_MAX) {
@@ -1175,10 +1132,10 @@ uint32_t RocmSMI::DiscoverAmdgpuDevices(void) {
     uint64_t s_location_id = 0;
     uint64_t s_bdf = 0;
     uint64_t s_domain = 0;
-    uint8_t  s_bus = 0;
-    uint8_t  s_device = 0;
-    uint8_t  s_function = 0;
-    uint8_t  s_partition_id = 0;
+    uint8_t s_bus = 0;
+    uint8_t s_device = 0;
+    uint8_t s_function = 0;
+    uint8_t s_partition_id = 0;
     uint32_t s_drm_render_minor = 0;
     uint64_t padding = 0;  // padding added in case new changes in future
   };
@@ -1194,31 +1151,25 @@ uint32_t RocmSMI::DiscoverAmdgpuDevices(void) {
     uint64_t gpu_id = 0, unique_id = 0, location_id = 0, domain = 0, render_d = 0;
     int ret_gpu_id = get_gpu_id(node_id, &gpu_id);
     int ret_unique_id = read_node_properties(node_id, "unique_id", &unique_id);
-    int ret_loc_id =
-      read_node_properties(node_id, "location_id", &location_id);
+    int ret_loc_id = read_node_properties(node_id, "location_id", &location_id);
     int ret_domain = read_node_properties(node_id, "domain", &domain);
     int ret_renderd = read_node_properties(node_id, "drm_render_minor", &render_d);
-    bool isANode = (ret_gpu_id == 0 &&
-      (ret_domain == 0 && ret_loc_id == 0 && ret_renderd == 0));
-    ss << __PRETTY_FUNCTION__ << " | isAGpuNode: "
-       << (isANode ? "TRUE" : "FALSE") << "; is_vm_guest(): "
-       << (is_vm_guest() ? "TRUE" : "FALSE")
-       << "\nret_gpu_id: " << ret_gpu_id
-       << "; ret_domain: " << ret_domain
-       << "; ret_loc_id: " << ret_loc_id
-       << "; ret_unique_id: " << ret_unique_id
-       << "\nret_renderd: " << ret_renderd
-       << "\n[node_id = " << print_unsigned_hex_and_int(node_id) << "\n"
+    bool isANode = (ret_gpu_id == 0 && (ret_domain == 0 && ret_loc_id == 0 && ret_renderd == 0));
+    ss << __PRETTY_FUNCTION__ << " | isAGpuNode: " << (isANode ? "TRUE" : "FALSE")
+       << "; is_vm_guest(): " << (is_vm_guest() ? "TRUE" : "FALSE")
+       << "\nret_gpu_id: " << ret_gpu_id << "; ret_domain: " << ret_domain
+       << "; ret_loc_id: " << ret_loc_id << "; ret_unique_id: " << ret_unique_id
+       << "\nret_renderd: " << ret_renderd << "\n[node_id = " << print_unsigned_hex_and_int(node_id)
+       << "\n"
        << "; gpu_id = " << print_unsigned_hex_and_int(gpu_id) << "\n"
        << "; unique_id = " << print_unsigned_hex_and_int(unique_id) << "\n"
        << "; location_id = " << print_unsigned_hex_and_int(location_id) << "\n"
        << "; domain = " << print_unsigned_hex_and_int(domain) << "\n"
-       << "; drm_render_minor = " << print_unsigned_hex_and_int(render_d)
-       << "]\n";
+       << "; drm_render_minor = " << print_unsigned_hex_and_int(render_d) << "]\n";
     LOG_DEBUG(ss);
     if (isANode || (is_vm_guest() && ret_gpu_id == 0)) {
-        // Do not try to build a node if one of these fields
-        // do not exist in KFD (0 as values okay)
+      // Do not try to build a node if one of these fields
+      // do not exist in KFD (0 as values okay)
       systemNode myNode;
       myNode.s_node_id = node_id;
       myNode.s_gpu_id = gpu_id;
@@ -1235,13 +1186,10 @@ uint32_t RocmSMI::DiscoverAmdgpuDevices(void) {
         auto ret = gpuNodeIdsFound.insert(node_id);
         if (ret.second != false) {
           // only print out nodes which do not already exist
-          ss << __PRETTY_FUNCTION__ << " | isAGpuNode: "
-             << (isANode ? "TRUE" : "FALSE") << "; is_vm_guest(): "
-             << (is_vm_guest() ? "TRUE" : "FALSE")
-             << "\nret_gpu_id: " << ret_gpu_id
-             << "; ret_domain: " << ret_domain
-             << "; ret_loc_id: " << ret_loc_id
-             << "; ret_unique_id: " << ret_unique_id
+          ss << __PRETTY_FUNCTION__ << " | isAGpuNode: " << (isANode ? "TRUE" : "FALSE")
+             << "; is_vm_guest(): " << (is_vm_guest() ? "TRUE" : "FALSE")
+             << "\nret_gpu_id: " << ret_gpu_id << "; ret_domain: " << ret_domain
+             << "; ret_loc_id: " << ret_loc_id << "; ret_unique_id: " << ret_unique_id
              << "\n[node_id = " << print_unsigned_hex_and_int(node_id) << "\n"
              << "; gpu_id = " << print_unsigned_hex_and_int(gpu_id) << "\n"
              << "; unique_id = " << print_unsigned_hex_and_int(unique_id) << "\n"
@@ -1270,13 +1218,12 @@ uint32_t RocmSMI::DiscoverAmdgpuDevices(void) {
        << "; unique_id = " << std::to_string(i.s_unique_id) << "\n"
        << "; location_id = " << std::to_string(i.s_location_id) << "\n"
        << "; bdf = " << print_int_as_hex(i.s_bdf) << "\n"
-       << "; domain = " << print_int_as_hex(i.s_domain, true, 2*BYTE) << "\n"
+       << "; domain = " << print_int_as_hex(i.s_domain, true, 2 * BYTE) << "\n"
        << "; bus = " << print_int_as_hex(i.s_bus, true, BYTE) << "\n"
        << "; device = " << print_int_as_hex(i.s_device, true, BYTE) << "\n"
        << "; function = " << std::to_string(i.s_function) << "\n"
        << "; partition_id = " << std::to_string(i.s_partition_id) << "\n"
-       << "; drm_render_minor = " << std::to_string(i.s_drm_render_minor)
-       << "], \n";
+       << "; drm_render_minor = " << std::to_string(i.s_drm_render_minor) << "], \n";
     rsmi_device_enumeration_t rsmi_device;
     rsmi_device.dev_name = "";
     rsmi_device.bdfid = i.s_bdf;
@@ -1298,8 +1245,9 @@ uint32_t RocmSMI::DiscoverBRCMnicDevices(void) {
   nic_devices_.clear();
   nic_monitors_.clear();
 
-  if(!std::filesystem::exists(kPathNICRoot)) {
-    err_msg = "Failed to open hwmon root directory, while DiscoverBRCMnicDevices and graceful exit.";
+  if (!std::filesystem::exists(kPathNICRoot)) {
+    err_msg =
+        "Failed to open hwmon root directory, while DiscoverBRCMnicDevices and graceful exit.";
     err_msg += kPathNICRoot;
     err_msg += ".";
     perror(err_msg.c_str());
@@ -1307,12 +1255,12 @@ uint32_t RocmSMI::DiscoverBRCMnicDevices(void) {
   }
 
   for (const auto& entry : std::filesystem::directory_iterator(kPathNICRoot)) {
-    if (memcmp( entry.path().filename().string().c_str(), kNICPrefix, strlen(kNICPrefix)) == 0) {
+    if (memcmp(entry.path().filename().string().c_str(), kNICPrefix, strlen(kNICPrefix)) == 0) {
       if ((entry.path().filename().string() == ".") || (entry.path().filename().string() == "..")) {
         continue;
       }
       std::string path = kPathNICRoot;
-      path += "/" +  entry.path().filename().string();
+      path += "/" + entry.path().filename().string();
       if (isBRCMnic(path)) {
         AddToNICDeviceList(entry.path().filename().string(), UINT64_MAX, count);
         count++;
@@ -1337,7 +1285,9 @@ uint32_t RocmSMI::DiscoverBRCMswitchDevices(void) {
 
   auto scsi_host_dir = opendir(kPathSwitchRoot);
   if (scsi_host_dir == nullptr) {
-    err_msg = "Failed to open scsi_host root directory, while DiscoverBRCMswitchDevices and graceful exit.";
+    err_msg =
+        "Failed to open scsi_host root directory, while DiscoverBRCMswitchDevices and graceful "
+        "exit.";
     err_msg += kPathSwitchRoot;
     err_msg += ".";
     perror(err_msg.c_str());
@@ -1357,7 +1307,6 @@ uint32_t RocmSMI::DiscoverBRCMswitchDevices(void) {
      << " | ";
   LOG_DEBUG(ss);
 
-  
   int numofretry = 0;
   // Discover all root cards
   for (uint32_t cardId = 0; cardId < count; cardId++) {
@@ -1365,10 +1314,10 @@ uint32_t RocmSMI::DiscoverBRCMswitchDevices(void) {
     path += "/" + std::string(kSwitchPrefix);
     path += std::to_string(cardId);
 
-    //sometime cardId is not in correct increment order in sysfs
+    // sometime cardId is not in correct increment order in sysfs
     auto path_dir = opendir(path.c_str());
     if (path_dir == nullptr) {
-      //move to the next index
+      // move to the next index
       static constexpr int kMaxRetries = 3;
       if (numofretry == kMaxRetries) continue;
       count++;
@@ -1390,7 +1339,8 @@ uint32_t RocmSMI::DiscoverBRCMswitchDevices(void) {
     if (len > 0) {
       buf[len] = '\0';
       path = std::string(&(buf[0]));
-      std::string suffixDel = "host" + std::to_string(cardId) + "/scsi_host/" + "host" + std::to_string(cardId) + "/";
+      std::string suffixDel =
+          "host" + std::to_string(cardId) + "/scsi_host/" + "host" + std::to_string(cardId) + "/";
       path.erase(path.length() - suffixDel.length());
 
       auto first = path.begin();
@@ -1410,7 +1360,8 @@ uint32_t RocmSMI::DiscoverBRCMswitchDevices(void) {
   }
 
   if (closedir(scsi_host_dir)) {
-    err_msg = "Failed to close switch root directory, while DiscoverBRCMswitchDevices and graceful exit.";
+    err_msg =
+        "Failed to close switch root directory, while DiscoverBRCMswitchDevices and graceful exit.";
     err_msg += kPathSwitchRoot;
     err_msg += ".";
     perror(err_msg.c_str());
@@ -1455,8 +1406,7 @@ int RocmSMI::DiscoverAMDPowerMonitors(bool force_update) {
     tmp = mon_name + "/amdgpu_pm_info";
 
     if (FileExists(tmp.c_str())) {
-      std::shared_ptr<PowerMon> mon =
-                std::make_shared<PowerMon>(mon_name, &env_vars_);
+      std::shared_ptr<PowerMon> mon = std::make_shared<PowerMon>(mon_name, &env_vars_);
       power_mons_.push_back(mon);
       mon->set_dev_index(GetDeviceIndex(dentry->d_name));
     }
@@ -1481,8 +1431,8 @@ int RocmSMI::DiscoverAMDPowerMonitors(bool force_update) {
   return 0;
 }
 
-uint32_t RocmSMI::IterateSMIDevices(
-     std::function<uint32_t(std::shared_ptr<Device>&, void *)> func, void *p) {
+uint32_t RocmSMI::IterateSMIDevices(std::function<uint32_t(std::shared_ptr<Device>&, void*)> func,
+                                    void* p) {
   if (func == nullptr) {
     return 1;
   }
@@ -1500,7 +1450,7 @@ uint32_t RocmSMI::IterateSMIDevices(
   return 0;
 }
 
-int RocmSMI::get_node_index(uint32_t dv_ind, uint32_t *node_ind) {
+int RocmSMI::get_node_index(uint32_t dv_ind, uint32_t* node_ind) {
   if (dev_ind_to_node_ind_map_.find(dv_ind) == dev_ind_to_node_ind_map_.end()) {
     return EINVAL;
   }
@@ -1508,18 +1458,16 @@ int RocmSMI::get_node_index(uint32_t dv_ind, uint32_t *node_ind) {
   return 0;
 }
 
-int RocmSMI::get_io_link_weight(uint32_t node_from, uint32_t node_to,
-                                uint64_t *weight) {
+int RocmSMI::get_io_link_weight(uint32_t node_from, uint32_t node_to, uint64_t* weight) {
   assert(weight != nullptr);
   if (weight == nullptr) {
     return EINVAL;
   }
-  if (io_link_map_.find(std::make_pair(node_from, node_to)) ==
-      io_link_map_.end()) {
+  if (io_link_map_.find(std::make_pair(node_from, node_to)) == io_link_map_.end()) {
     return EINVAL;
   }
   *weight = io_link_map_[std::make_pair(node_from, node_to)]->weight();
   return 0;
 }
 
-} // namespace amd::smi
+}  // namespace amd::smi

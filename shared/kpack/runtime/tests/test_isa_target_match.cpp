@@ -1,12 +1,12 @@
 // Copyright (c) 2025 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "isa_target_match.h"
-
 #include <gtest/gtest.h>
 
 #include <string>
 #include <vector>
+
+#include "isa_target_match.h"
 
 namespace {
 
@@ -25,8 +25,7 @@ using Vec = std::vector<std::string>;
 // --- strip_target_prefix ---
 
 TEST(StripTargetPrefix, StripsAmdgcnPrefix) {
-  EXPECT_EQ(kpack::strip_target_prefix("amdgcn-amd-amdhsa--gfx942"),
-            "gfx942");
+  EXPECT_EQ(kpack::strip_target_prefix("amdgcn-amd-amdhsa--gfx942"), "gfx942");
 }
 
 TEST(StripTargetPrefix, StripsAmdgcnPrefixWithFeatures) {
@@ -101,27 +100,27 @@ TEST(IsaTargetMatch, ConsumerCardGfx1100) {
 
 TEST(IsaTargetMatch, TwoFeaturesMostSpecificFirst) {
   EXPECT_EQ(expand("gfx942:sramecc+:xnack-"),
-            (Vec{"gfx942:sramecc+:xnack-", "gfx942:sramecc+",
-                 "gfx942:xnack-", "gfx942"}));
+            (Vec{"gfx942:sramecc+:xnack-", "gfx942:sramecc+", "gfx942:xnack-",
+                 "gfx942"}));
 }
 
 TEST(IsaTargetMatch, TwoFeaturesWithPrefix) {
   EXPECT_EQ(expand("amdgcn-amd-amdhsa--gfx942:sramecc+:xnack-"),
-            (Vec{"gfx942:sramecc+:xnack-", "gfx942:sramecc+",
-                 "gfx942:xnack-", "gfx942"}));
+            (Vec{"gfx942:sramecc+:xnack-", "gfx942:sramecc+", "gfx942:xnack-",
+                 "gfx942"}));
 }
 
 TEST(IsaTargetMatch, AsanAgent) {
   // ASAN requires xnack+, hardware also has sramecc+
   EXPECT_EQ(expand("gfx942:sramecc+:xnack+"),
-            (Vec{"gfx942:sramecc+:xnack+", "gfx942:sramecc+",
-                 "gfx942:xnack+", "gfx942"}));
+            (Vec{"gfx942:sramecc+:xnack+", "gfx942:sramecc+", "gfx942:xnack+",
+                 "gfx942"}));
 }
 
 TEST(IsaTargetMatch, MixedFeatureValues) {
   EXPECT_EQ(expand("gfx942:sramecc-:xnack+"),
-            (Vec{"gfx942:sramecc-:xnack+", "gfx942:sramecc-",
-                 "gfx942:xnack+", "gfx942"}));
+            (Vec{"gfx942:sramecc-:xnack+", "gfx942:sramecc-", "gfx942:xnack+",
+                 "gfx942"}));
 }
 
 // --- for_each_compatible_target: single feature ---
@@ -149,19 +148,15 @@ TEST(IsaTargetMatch, GenericIsaWithPrefix) {
 
 TEST(IsaTargetMatch, Gfx950TwoFeatures) {
   EXPECT_EQ(expand("gfx950:sramecc+:xnack-"),
-            (Vec{"gfx950:sramecc+:xnack-", "gfx950:sramecc+",
-                 "gfx950:xnack-", "gfx950"}));
+            (Vec{"gfx950:sramecc+:xnack-", "gfx950:sramecc+", "gfx950:xnack-",
+                 "gfx950"}));
 }
 
 // --- for_each_compatible_target: edge cases ---
 
-TEST(IsaTargetMatch, EmptyString) {
-  EXPECT_EQ(expand(""), Vec{});
-}
+TEST(IsaTargetMatch, EmptyString) { EXPECT_EQ(expand(""), Vec{}); }
 
-TEST(IsaTargetMatch, Nullptr) {
-  EXPECT_EQ(expand(nullptr), Vec{});
-}
+TEST(IsaTargetMatch, Nullptr) { EXPECT_EQ(expand(nullptr), Vec{}); }
 
 // --- for_each_compatible_target: early termination ---
 
@@ -199,11 +194,11 @@ TEST(IsaTargetMatch, EarlyTerminationOnThirdMatch) {
 TEST(IsaTargetMatch, NoMatchReturnsAllCandidates) {
   // No match — all candidates should be visited
   std::vector<std::string> seen;
-  bool found = kpack::for_each_compatible_target(
-      "gfx942:sramecc+:xnack-", [&](const std::string& t) {
-        seen.push_back(t);
-        return false;  // no match
-      });
+  bool found = kpack::for_each_compatible_target("gfx942:sramecc+:xnack-",
+                                                 [&](const std::string& t) {
+                                                   seen.push_back(t);
+                                                   return false;  // no match
+                                                 });
 
   EXPECT_FALSE(found);
   EXPECT_EQ(seen.size(), 4u);

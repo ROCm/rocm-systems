@@ -146,7 +146,7 @@ class webui_analysis(OmniAnalyze_Base):
                     base_data[base_run].raw_pmc
                 )
 
-            if self._profiling_config["iteration_multiplexing"] is not None:
+            if self._profiling_config.get("iteration_multiplexing") is not None:
                 base_data[base_run].raw_pmc = self.iteration_multiplex_impute_counters(
                     base_data[base_run].raw_pmc,
                     policy=self._profiling_config["iteration_multiplexing"],
