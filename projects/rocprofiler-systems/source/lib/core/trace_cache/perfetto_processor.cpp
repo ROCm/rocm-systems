@@ -1384,5 +1384,90 @@ perfetto_processor_t::handle(const ainic_sample& _ainic)
                   static_cast<double>(_ainic.tx_ucast_pkts));
 }
 
+void
+perfetto_processor_t::handle([[maybe_unused]] const kfd_sample& _kfd)
+{
+#if ROCPROFSYS_USE_ROCM > 0
+    auto _beg_ts     = _kfd.start_timestamp;
+    auto _end_ts     = _kfd.end_timestamp;
+    auto _track_name = _kfd.track_name;
+    auto _name       = _kfd.name;
+    auto _category   = _kfd.category;
+    auto _track_hash = std::hash<std::string>{}(_track_name);
+
+    auto emit_kfd_event = [&](auto category_tag) {
+        using CategoryT = decltype(category_tag);
+        auto _track     = get_track(CategoryT{}, _track_name, _track_hash);
+
+        auto add_annotations = [&](::perfetto::EventContext ctx) {
+            if(!m_use_annotations) return;
+
+            std::vector<annotation_entry> annotations = {
+                { "begin_ns", _beg_ts },
+                { "end_ns", _end_ts },
+            };
+
+            if(!_kfd.event_metadata.empty())
+            {
+                try
+                {
+                    auto extdata = nlohmann::json::parse(_kfd.event_metadata);
+                    if(extdata.contains("kfd"))
+                    {
+                        for(const auto& [key, val] : extdata["kfd"].items())
+                        {
+                            if(val.is_null())
+                                continue;
+                            else if(val.is_number_integer())
+                                annotations.push_back(
+                                    { key.c_str(), static_cast<uint64_t>(val) });
+                            else if(val.is_number_float())
+                                annotations.push_back(
+                                    { key.c_str(), static_cast<double>(val) });
+                            else if(val.is_string())
+                                annotations.push_back(
+                                    { key.c_str(), val.template get<std::string>() });
+                        }
+                    }
+                } catch(const std::exception& e)
+                {
+                    LOG_WARNING("Failed to parse KFD event_metadata JSON: {}", e.what());
+                }
+            }
+
+            annotate_perfetto(ctx, annotations);
+        };
+
+        if(_beg_ts == _end_ts)
+        {
+            TRACE_EVENT_INSTANT(trait::name<CategoryT>::value,
+                                ::perfetto::DynamicString{ _name }, _track, _beg_ts,
+                                add_annotations);
+        }
+        else
+        {
+            tracing::push_perfetto_track(CategoryT{}, _name.c_str(), _track, _beg_ts,
+                                         add_annotations);
+            tracing::pop_perfetto_track(CategoryT{}, _name.c_str(), _track, _end_ts);
+        }
+    };
+
+    if(_category == trait::name<category::kfd_page_fault>::value)
+        emit_kfd_event(category::kfd_page_fault{});
+    else if(_category == trait::name<category::kfd_page_migrate>::value)
+        emit_kfd_event(category::kfd_page_migrate{});
+    else if(_category == trait::name<category::kfd_queue>::value)
+        emit_kfd_event(category::kfd_queue{});
+    else if(_category == trait::name<category::kfd_event_queue>::value)
+        emit_kfd_event(category::kfd_event_queue{});
+    else if(_category == trait::name<category::kfd_event_unmap_from_gpu>::value)
+        emit_kfd_event(category::kfd_event_unmap_from_gpu{});
+    else if(_category == trait::name<category::kfd_event_dropped_events>::value)
+        emit_kfd_event(category::kfd_event_dropped_events{});
+    else
+        LOG_WARNING("Unknown KFD category: {}", _category);
+#endif
+}
+
 }  // namespace trace_cache
 }  // namespace rocprofsys
