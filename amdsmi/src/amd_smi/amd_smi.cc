@@ -4908,107 +4908,21 @@ amdsmi_status_t amdsmi_get_gpu_driver_info(amdsmi_processor_handle processor_han
     if (info == nullptr) {
         return AMDSMI_STATUS_INVAL;
     }
-    std::ostringstream ss;
-    amdsmi_status_t status = AMDSMI_STATUS_SUCCESS;
-    amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
-    amdsmi_status_t r = get_gpu_device_from_handle(processor_handle, &gpu_device);
-    if (r != AMDSMI_STATUS_SUCCESS)
-        return r;
 
-    int length = AMDSMI_MAX_STRING_LENGTH;
+    memset(info, 0, sizeof(*info));
+    auto device = reinterpret_cast<Device *>(processor_handle);
+    if (device == nullptr)
+        return AMDSMI_STATUS_INVAL;
 
-    // Get the driver version
-    status = smi_amdgpu_get_driver_version(gpu_device,
-                &length, info->driver_version);
-    if (status != AMDSMI_STATUS_SUCCESS) {
-        return status;
-    }
+    wsl::thunk::DriverInfo dinfo{};
+    auto code = device->QueryDriverInfo(&dinfo);
+    if (code != ErrorCode::Success)
+        return translateCodeToSmiStatus(code);
 
-    SMIGPUDEVICE_MUTEX(gpu_device->get_mutex())
-    std::string render_name = gpu_device->get_gpu_path();
-    std::string path = "/dev/dri/" + render_name;
-    if (render_name.empty()) {
-        return AMDSMI_STATUS_NOT_SUPPORTED;
-    }
-
-    ScopedFD drm_fd(path.c_str(), O_RDWR | O_CLOEXEC);
-    if (!drm_fd.valid()) {
-        ss << __PRETTY_FUNCTION__
-           << " | Failed to open " << path << ": " << strerror(errno)
-           << "; Returning: " << smi_amdgpu_get_status_string(AMDSMI_STATUS_FILE_ERROR, false);
-        LOG_ERROR(ss);
-        return AMDSMI_STATUS_FILE_ERROR;
-    }
-    amd::smi::AMDSmiLibraryLoader libdrm;
-    status = libdrm.load(LIBDRM_AMDGPU_SONAME);
-    if (status != AMDSMI_STATUS_SUCCESS) {
-        libdrm.unload();
-        ss << __PRETTY_FUNCTION__
-           << " | Failed to load " LIBDRM_AMDGPU_SONAME ": " << strerror(errno)
-           << "; Returning: " << smi_amdgpu_get_status_string(status, false);
-        LOG_ERROR(ss);
-        return status;
-    }
-
-    // Define a function pointer for drmGetVersion
-    typedef struct _drmVersion* (*drmGetVersion_t)(int fd);  // drmGetVersion
-    drmGetVersion_t drm_get_version = nullptr;
-    typedef void (*drmFreeVersion_t)(drmVersionPtr version);  // drmFreeVersion
-    drmFreeVersion_t drm_free_version = nullptr;
-
-    status = libdrm.load_symbol(
-        reinterpret_cast<drmGetVersion_t *>(&drm_get_version), "drmGetVersion");
-    if (status != AMDSMI_STATUS_SUCCESS) {
-        libdrm.unload();
-        ss << __PRETTY_FUNCTION__
-           << " | Failed to load drmGetVersion symbol"
-           << "; Returning: " << smi_amdgpu_get_status_string(status, false);
-        LOG_ERROR(ss);
-        return status;
-    }
-    status = libdrm.load_symbol(
-        reinterpret_cast<drmGetVersion_t *>(&drm_free_version), "drmFreeVersion");
-    if (status != AMDSMI_STATUS_SUCCESS) {
-        libdrm.unload();
-        ss << __PRETTY_FUNCTION__
-           << " | Failed to load drmFreeVersion symbol"
-           << "; Returning: " << smi_amdgpu_get_status_string(status, false);
-        LOG_ERROR(ss);
-        return status;
-    }
-
-    // Get the driver date
-    std::string driver_date;
-    auto version = drm_get_version(drm_fd);
-    if (version == nullptr) {
-        libdrm.unload();
-        ss << __PRETTY_FUNCTION__
-           << " | Failed to get driver version"
-           << "; Returning: " << smi_amdgpu_get_status_string(AMDSMI_STATUS_DRM_ERROR, false);
-        LOG_ERROR(ss);
-        return AMDSMI_STATUS_DRM_ERROR;
-    }
-
-    driver_date = version->date;
-    // Reformat the driver date from 20150101 to 2015/01/01 00:00
-    if (driver_date.length() == 8) {
-        driver_date = driver_date.substr(0, 4) + "/" + driver_date.substr(4, 2)
-                        + "/" + driver_date.substr(6, 2) + " 00:00";
-    }
-    snprintf(info->driver_date, AMDSMI_MAX_STRING_LENGTH, "%s", driver_date.c_str());
-
-    // Get the driver name
-    std::string driver_name = version->name;
-    snprintf(info->driver_name, AMDSMI_MAX_STRING_LENGTH, "%s", driver_name.c_str());
-    drm_free_version(version);
-    libdrm.unload();
-    ss << __PRETTY_FUNCTION__
-       << " | Driver version: " << info->driver_version << "\n"
-       << " | Driver date: " << info->driver_date << "\n"
-       << " | Driver name: " << info->driver_name << "\n"
-       << " | Returning: " << smi_amdgpu_get_status_string(status, false);
-    LOG_INFO(ss);
-    return status;
+    snprintf(info->driver_version, AMDSMI_MAX_STRING_LENGTH, "%s", dinfo.driver_version);
+    snprintf(info->driver_date,    AMDSMI_MAX_STRING_LENGTH, "%s", dinfo.driver_date);
+    snprintf(info->driver_name,    AMDSMI_MAX_STRING_LENGTH, "%s", dinfo.driver_name);
+    return AMDSMI_STATUS_SUCCESS;
 }
 
 #ifdef BRCM_NIC
