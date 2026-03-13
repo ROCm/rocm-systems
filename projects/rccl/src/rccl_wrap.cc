@@ -43,6 +43,7 @@ RCCL_PARAM(PipelineAllDTypes, "PIPELINE_ALL_DATA_TYPES", 0);
 RCCL_PARAM(disableReduceCopyPipelining, "DISABLE_REDUCE_COPY_PIPELINING", 0);
 RCCL_PARAM(DirectAllGatherThreshold, "DIRECT_ALLGATHER_THRESHOLD", 75497472);
 RCCL_PARAM(DirectReduceScatterThreshold, "DIRECT_REDUCE_SCATTER_THRESHOLD", 8388608);
+RCCL_PARAM(DirectReduceScatterDisable, "DIRECT_REDUCE_SCATTER_DISABLE", 0);
 RCCL_PARAM(ThreadsPerBlock, "THREADS_PER_BLOCK", -1);
 RCCL_PARAM(UnrollFactor, "UNROLL_FACTOR", -1);
 #ifdef ENABLE_WARP_SPEED
@@ -459,13 +460,9 @@ bool rcclUseReduceScatterDirect(struct ncclComm* comm, size_t& msgSize) {
   // - 2 nodes: enable for 128KiB .. 2MiB
   // - 4 nodes: enable up to 4MiB
   // - 8 and 16 nodes: enable up to 8MiB
-  static int userDirectReduceScatterInput = -2;
-  if (userDirectReduceScatterInput == -2) {
-    const char *inputStr = getenv("RCCL_DIRECT_REDUCE_SCATTER_DISABLE");
-    userDirectReduceScatterInput = !inputStr ? 0 : 1;
-  }
-  if (userDirectReduceScatterInput == 1) {
-    INFO(NCCL_INIT, "RCCL DIRECT REDUCE-SCATTER has been disabled.");
+  static int userDirectReduceScatterInput = rcclParamDirectReduceScatterDisable();
+  if (userDirectReduceScatterInput !=0) {
+    INFO(NCCL_INIT, "RCCL DIRECT REDUCE-SCATTER has been disabled by environment variable.");
     return false;
   }
   const bool archGfx950 = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950");
