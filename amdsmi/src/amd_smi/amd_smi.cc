@@ -3612,13 +3612,43 @@ amdsmi_status_t  amdsmi_get_gpu_metrics_info(
         amdsmi_processor_handle processor_handle,
         amdsmi_gpu_metrics_t *pgpu_metrics) {
     AMDSMI_CHECK_INIT();
-    if (pgpu_metrics != nullptr) {
-        *pgpu_metrics = amdsmi_gpu_metrics_t{};  // Use a default initializer for the struct
-    } else {
-        return AMDSMI_STATUS_INVAL;  // Return error if pgpu_metrics is null
-    }
-    return rsmi_wrapper(rsmi_dev_gpu_metrics_info_get, processor_handle, 0,
-                       reinterpret_cast<rsmi_gpu_metrics_t*>(pgpu_metrics));
+    if (pgpu_metrics == nullptr)
+        return AMDSMI_STATUS_INVAL;
+
+    *pgpu_metrics = amdsmi_gpu_metrics_t{};
+
+    auto device = reinterpret_cast<Device *>(processor_handle);
+    if (device == nullptr)
+        return AMDSMI_STATUS_INVAL;
+
+    GpuMetricsInfo m{};
+    auto code = device->QueryGpuMetricsInfo(&m);
+    if (code != ErrorCode::Success)
+        return translateCodeToSmiStatus(code);
+
+    // Helper: saturate uint32 to uint16 (UINT32_MAX sentinel → 0 for "unavailable").
+    auto to16 = [](uint32_t v) -> uint16_t {
+        if (v == UINT32_MAX) return 0;
+        return static_cast<uint16_t>(v > 0xFFFFu ? 0xFFFFu : v);
+    };
+
+    pgpu_metrics->temperature_edge     = to16(m.temperature_edge);
+    pgpu_metrics->temperature_hotspot  = to16(m.temperature_hotspot);
+    pgpu_metrics->temperature_mem      = to16(m.temperature_mem);
+    pgpu_metrics->average_gfx_activity = to16(m.average_gfx_activity);
+    pgpu_metrics->average_umc_activity = to16(m.average_umc_activity);
+    pgpu_metrics->current_socket_power = to16(m.current_socket_power);
+    pgpu_metrics->current_gfxclk      = to16(m.current_gfxclk);
+    pgpu_metrics->current_socclk      = to16(m.current_socclk);
+    pgpu_metrics->current_fan_speed   = to16(m.current_fan_speed);
+    pgpu_metrics->voltage_soc         = to16(m.voltage_soc);
+    pgpu_metrics->voltage_gfx         = to16(m.voltage_gfx);
+    pgpu_metrics->voltage_mem         = to16(m.voltage_mem);
+    // Propagate to per-instance arrays (index 0 = first/only instance on WDDM).
+    pgpu_metrics->current_gfxclks[0]  = pgpu_metrics->current_gfxclk;
+    pgpu_metrics->current_socclks[0]  = pgpu_metrics->current_socclk;
+
+    return AMDSMI_STATUS_SUCCESS;
 }
 
 
