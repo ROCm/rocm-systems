@@ -119,8 +119,8 @@ By default, output file generation runs asynchronously after detachment to allow
 
 For use cases that require output files to be fully written before detachment completes (e.g., scripts that process or delete output directories immediately after detachment), you can enable synchronous output generation using either:
 
-- Command line: ``--sync-output`` flag
-- Environment variable: ``ROCPROF_OUTPUT_GENERATION_SYNC=1``
+- Command line: ``--attach-sync-output`` flag
+- Environment variable: ``ROCPROF_ATTACH_OUTPUT_GENERATION_SYNC=1``
 
 This will cause ``tool_detach`` to wait for all output files to be written before returning, ensuring output files are complete when the ``rocprofv3`` process exits.
 
