@@ -191,20 +191,22 @@ function(rocprofiler_rocpd_python_bindings _VERSION)
             COMPONENT rocpd)
     endforeach()
 
-    # Copy ai_analysis directory and its contents (including subdirectories).
-    # Includes *.py modules, *.md docs, *.json schema files, and *.png assets
-    # (e.g. ai_analysis/share/amd_rocm_logo.png used by interactive.py banner).
-    file(GLOB_RECURSE rocpd_AI_ANALYSIS_FILES
-         "${CMAKE_CURRENT_LIST_DIR}/ai_analysis/*.py"
-         "${CMAKE_CURRENT_LIST_DIR}/ai_analysis/*.md"
-         "${CMAKE_CURRENT_LIST_DIR}/ai_analysis/*.json"
-         "${CMAKE_CURRENT_LIST_DIR}/ai_analysis/*.png")
+    # Copy ai_analysis directory and its contents (including subdirectories). Includes
+    # *.py modules, *.md docs, *.json schema files, and *.png assets (e.g.
+    # ai_analysis/share/amd_rocm_logo.png used by interactive.py banner).
+    file(
+        GLOB_RECURSE
+        rocpd_AI_ANALYSIS_FILES
+        "${CMAKE_CURRENT_LIST_DIR}/ai_analysis/*.py"
+        "${CMAKE_CURRENT_LIST_DIR}/ai_analysis/*.md"
+        "${CMAKE_CURRENT_LIST_DIR}/ai_analysis/*.json"
+        "${CMAKE_CURRENT_LIST_DIR}/ai_analysis/*.png")
 
     foreach(_AI_FILE ${rocpd_AI_ANALYSIS_FILES})
         file(RELATIVE_PATH _REL_PATH "${CMAKE_CURRENT_LIST_DIR}" "${_AI_FILE}")
         get_filename_component(_REL_DIR "${_REL_PATH}" DIRECTORY)
-        # Use file(COPY) instead of configure_file so binary assets (e.g. PNG)
-        # are handled correctly without text substitution or EPERM on binary data.
+        # Use file(COPY) instead of configure_file so binary assets (e.g. PNG) are handled
+        # correctly without text substitution or EPERM on binary data.
         file(COPY ${_AI_FILE} DESTINATION ${rocpd_PYTHON_OUTPUT_DIRECTORY}/${_REL_DIR})
         install(
             FILES ${rocpd_PYTHON_OUTPUT_DIRECTORY}/${_REL_PATH}
