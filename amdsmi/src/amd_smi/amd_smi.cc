@@ -4038,13 +4038,37 @@ amdsmi_get_gpu_memory_reserved_pages(amdsmi_processor_handle processor_handle,
 }
 amdsmi_status_t amdsmi_get_gpu_memory_total(amdsmi_processor_handle processor_handle,
                 amdsmi_memory_type_t mem_type, uint64_t *total) {
-    return rsmi_wrapper(rsmi_dev_memory_total_get, processor_handle, 0,
-                    static_cast<rsmi_memory_type_t>(mem_type), total);
+    AMDSMI_CHECK_INIT();
+
+    if (total == nullptr)
+        return AMDSMI_STATUS_INVAL;
+
+    if (mem_type < AMDSMI_MEM_TYPE_FIRST || mem_type > AMDSMI_MEM_TYPE_LAST)
+        return AMDSMI_STATUS_INVAL;
+
+    auto device = reinterpret_cast<Device *>(processor_handle);
+    if (device == nullptr)
+        return AMDSMI_STATUS_INVAL;
+
+    auto code = device->QueryMemoryTotal(static_cast<uint32_t>(mem_type), total);
+    return translateCodeToSmiStatus(code);
 }
 amdsmi_status_t amdsmi_get_gpu_memory_usage(amdsmi_processor_handle processor_handle,
             amdsmi_memory_type_t mem_type, uint64_t *used) {
-    return rsmi_wrapper(rsmi_dev_memory_usage_get, processor_handle, 0,
-                    static_cast<rsmi_memory_type_t>(mem_type), used);
+    AMDSMI_CHECK_INIT();
+
+    if (used == nullptr)
+        return AMDSMI_STATUS_INVAL;
+
+    if (mem_type < AMDSMI_MEM_TYPE_FIRST || mem_type > AMDSMI_MEM_TYPE_LAST)
+        return AMDSMI_STATUS_INVAL;
+
+    auto device = reinterpret_cast<Device *>(processor_handle);
+    if (device == nullptr)
+        return AMDSMI_STATUS_INVAL;
+
+    auto code = device->QueryMemoryUsage(static_cast<uint32_t>(mem_type), used);
+    return translateCodeToSmiStatus(code);
 }
 
 amdsmi_status_t amdsmi_get_gpu_overdrive_level(

@@ -59,6 +59,9 @@ public:
 
   ErrorCode QueryDriverInfo(DriverInfo *info) const;
 
+  ErrorCode QueryMemoryTotal(uint32_t mem_type, uint64_t *total) const;
+  ErrorCode QueryMemoryUsage(uint32_t mem_type, uint64_t *used) const;
+
   ErrorCode Escape(void *pData, size_t dataSize,
                    bool hardwareAccess = false) const;
 
