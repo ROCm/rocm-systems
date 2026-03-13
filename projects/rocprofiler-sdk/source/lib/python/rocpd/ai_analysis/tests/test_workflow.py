@@ -65,3 +65,22 @@ def test_checkpoint_error_is_exception():
     from rocpd.ai_analysis.interactive import CheckpointError
     with pytest.raises(CheckpointError):
         raise CheckpointError("git failed")
+
+
+def test_workflow_state_has_checkpoint_fields():
+    from rocpd.ai_analysis.interactive import WorkflowState
+    s = WorkflowState(app_command="./app")
+    assert s.repo_root == ""
+    assert s.baseline_commit == ""
+    assert s.checkpoints == []
+    assert s.active_checkpoint is None
+
+
+def test_edit_record_has_checkpoint_id():
+    from rocpd.ai_analysis.interactive import _EditRecord
+    r = _EditRecord(
+        timestamp="2026-03-13T00:00:00Z",
+        file_path="/src/kernel.hip",
+        backup_path="/src/kernel.hip.bak",
+    )
+    assert r.checkpoint_id is None

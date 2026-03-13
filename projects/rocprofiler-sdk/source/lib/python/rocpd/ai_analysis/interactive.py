@@ -1757,6 +1757,7 @@ class _EditRecord:
     timestamp: str
     file_path: str
     backup_path: str
+    checkpoint_id: Optional[int] = None     # cp_id of matching CheckpointRecord
 
 
 class CheckpointError(Exception):
@@ -1793,6 +1794,11 @@ class WorkflowState:
     analysis_history: List[_AnalysisSnapshot] = field(default_factory=list)
     edit_history: List[_EditRecord] = field(default_factory=list)
     iteration_count: int = 0
+    # Checkpoint fields
+    repo_root: str = ""
+    baseline_commit: str = ""
+    checkpoints: List[CheckpointRecord] = field(default_factory=list)
+    active_checkpoint: Optional[int] = None
 
 
 class WorkflowSession:
