@@ -1,22 +1,8 @@
-/* Copyright (c) 2015 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #ifndef HIP_EVENT_H
 #define HIP_EVENT_H
@@ -116,8 +102,7 @@ class Event {
   // Flushes CPU command batch in direct dispatch mode
   static constexpr bool kBatchFlush = true;
 
-  explicit Event(uint32_t flags)
-      : flags_(flags), lock_(true), event_(nullptr) {
+  explicit Event(uint32_t flags) : flags_(flags), event_(nullptr) {
     device_id_ = hip::getCurrentDevice()->deviceId();
   }
 
@@ -142,7 +127,7 @@ class Event {
   uint32_t flags() const { return flags_; }
 
   void BindCommand(amd::Command& command) {
-    amd::ScopedLock lock(lock_);
+    std::scoped_lock lock(lock_);
     if (event_ != nullptr) {
       event_->release();
     }
@@ -150,8 +135,8 @@ class Event {
     command.retain();
   }
 
-  amd::Monitor& lock() { return lock_; }
-  int deviceId() const { return device_id_; }
+  std::recursive_mutex& lock() { return lock_; }
+  const int deviceId() const { return device_id_; }
   void setDeviceId(int id) { device_id_ = id; }
   amd::Event* event() { return event_; }
 
@@ -178,10 +163,10 @@ class Event {
   virtual int64_t time(bool getStartTs) const;
 
  protected:
-  uint32_t flags_;         //!< Flags associated with the event
-  amd::Monitor lock_;      //!< Mutex for thread-safe access to event state
-  amd::Event* event_;      //!< Underlying ROCclr event object for GPU synchronization
-  int device_id_;          //!< Device ID where this event was created
+  uint32_t flags_;             //!< Flags associated with the event
+  std::recursive_mutex lock_;  //!< Mutex for thread-safe access to event state
+  amd::Event* event_;          //!< Underlying ROCclr event object for GPU synchronization
+  int device_id_;              //!< Device ID where this event was created
 };
 
 class EventDD : public Event {

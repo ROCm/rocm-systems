@@ -128,6 +128,8 @@ cmake_dependent_option(BUILD_WRAPPER "Rebuild AMDSMI-wrapper" OFF "BUILD_SHARED_
 cmake_dependent_option(BUILD_CLI "Build AMDSMI-CLI and install" ON "BUILD_SHARED_LIBS" OFF)
 cmake_dependent_option(BUILD_RUST_WRAPPER "Build rust wrapper and install" OFF "BUILD_SHARED_LIBS" OFF)
 cmake_dependent_option(ENABLE_LDCONFIG "Set library links and caches using ldconfig." ON "BUILD_SHARED_LIBS" OFF)
+cmake_dependent_option(AUTO_BUILD_STATIC_LIBS "auto-build static library (tests/examples link to static)" ON "NOT BUILD_SHARED_LIBS OR BUILD_TESTS" OFF)
+cmake_dependent_option(BUILD_BOTH_LIBS "Build both shared and static library" ON "BUILD_SHARED_LIBS AND AUTO_BUILD_STATIC_LIBS" OFF)
 
 # Set share path here because project name != amd_smi
 set(SHARE_INSTALL_PREFIX "${CMAKE_INSTALL_DATAROOTDIR}/${AMD_SMI}" CACHE STRING "Tests and Example install directory")
@@ -208,7 +210,7 @@ set(ROCM_INC_DIR "${PROJECT_SOURCE_DIR}/rocm_smi/include/rocm_smi")
 set(SHR_MUTEX_DIR "${PROJECT_SOURCE_DIR}/third_party/shared_mutex")
 if(ENABLE_ESMI_LIB)
     # Supported esmi library version tag
-    set(current_esmi_tag "esmi_pkg_ver-4.2")
+    set(current_esmi_tag "esmi_pkg_ver-5.1.1")
 
     if(NOT EXISTS ${PROJECT_SOURCE_DIR}/esmi_ib_library/src)
         # TODO: use ExternalProject_Add instead or a submodule
@@ -358,7 +360,7 @@ install(
 
 # Create cmake target
 # Add all targets to the build-tree export set
-export(TARGETS ${AMD_SMI} FILE "${PROJECT_BINARY_DIR}/amd_smi_target.cmake")
+export(TARGETS ${AMD_SMI_EXPORT_TARGETS} FILE "${PROJECT_BINARY_DIR}/amd_smi_target.cmake")
 
 # Export the package for use from the build-tree
 # (this registers the build-tree with a global CMake-registry)

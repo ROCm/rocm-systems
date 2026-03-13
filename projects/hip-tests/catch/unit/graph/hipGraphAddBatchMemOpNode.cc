@@ -39,7 +39,7 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 6.4
  */
-TEST_CASE("Unit_hipGraphAddBatchMemOpNode_NegativeTsts") {
+TEST_CASE(Unit_hipGraphAddBatchMemOpNode_NegativeTsts) {
   HIP_CHECK(hipInit(0));
   hipGraph_t graph;
   hipCtx_t ctx;

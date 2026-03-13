@@ -44,7 +44,7 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGetErrorString_Positive_Basic") {
+TEST_CASE(Unit_hipGetErrorString_Positive_Basic) {
   const char* error_string = nullptr;
   const auto enumerator =
       GENERATE(from_range(std::begin(kErrorEnumerators), std::end(kErrorEnumerators)));
@@ -69,7 +69,7 @@ TEST_CASE("Unit_hipGetErrorString_Positive_Basic") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGetErrorString_Negative_Parameters") {
+TEST_CASE(Unit_hipGetErrorString_Negative_Parameters) {
   const char* error_string = hipGetErrorString(static_cast<hipError_t>(-1));
   REQUIRE(error_string != nullptr);
 }

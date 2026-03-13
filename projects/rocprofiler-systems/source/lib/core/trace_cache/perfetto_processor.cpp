@@ -42,10 +42,8 @@
 #include <mutex>
 #include <string>
 
-#if ROCPROFSYS_USE_ROCM > 0
-#    include "library/rocprofiler-sdk/fwd.hpp"
-#    include <rocprofiler-sdk/context.h>
-#endif
+#include "library/rocprofiler-sdk/fwd.hpp"
+#include <rocprofiler-sdk/context.h>
 
 namespace rocprofsys
 {
@@ -493,9 +491,8 @@ perfetto_processor_t::finalize_processing()
 }
 
 void
-perfetto_processor_t::handle([[maybe_unused]] const kernel_dispatch_sample& _kds)
+perfetto_processor_t::handle(const kernel_dispatch_sample& _kds)
 {
-#if ROCPROFSYS_USE_ROCM > 0
     static auto _track_desc = [](uint64_t _device_id_v, uint64_t _queue_id_v) {
         return fmt::format("GPU Kernel Dispatch [{}] Queue {}", _device_id_v,
                            _queue_id_v);
@@ -547,13 +544,11 @@ perfetto_processor_t::handle([[maybe_unused]] const kernel_dispatch_sample& _kds
 
     tracing::pop_perfetto(category::rocm_kernel_dispatch{}, kernel_name.c_str(), _track,
                           _end_ts);
-#endif
 }
 
 void
-perfetto_processor_t::handle([[maybe_unused]] const scratch_memory_sample& _sms)
+perfetto_processor_t::handle(const scratch_memory_sample& _sms)
 {
-#if ROCPROFSYS_USE_ROCM > 0
     auto        _corr_id           = _sms.correlation_id_internal;
     auto        _stream_id         = _sms.stream_handle;
     auto        _queue_id_handle   = _sms.queue_id_handle;
@@ -570,7 +565,7 @@ perfetto_processor_t::handle([[maybe_unused]] const scratch_memory_sample& _sms)
 
 // Scratch memory samples from SDK versions prior to 7.0.2 do not include
 // allocation_size field, so counter tracks are not needed
-#    if ROCPROFSYS_ROCM_VERSION >= 70002
+#if ROCPROFSYS_ROCM_VERSION >= 70002
     using counter_track =
         perfetto_counter_track<rocprofiler_buffer_tracing_scratch_memory_record_t>;
 
@@ -586,7 +581,7 @@ perfetto_processor_t::handle([[maybe_unused]] const scratch_memory_sample& _sms)
         TRACE_COUNTER("rocm_scratch_memory", counter_track::at(_agent_device_id, 0),
                       _beg_ts, _sms.allocation_size);
     }
-#    endif
+#endif
 
     auto _track_desc_events = [&]() {
         return fmt::format("GPU Scratch Memory Events Thread {}", _thread_id_sequent);
@@ -613,13 +608,11 @@ perfetto_processor_t::handle([[maybe_unused]] const scratch_memory_sample& _sms)
                            _beg_ts, ::perfetto::Flow::ProcessScoped(_corr_id),
                            add_perfetto_annotations);
     tracing::pop_perfetto(category::rocm_scratch_memory{}, "", _track, _end_ts);
-#endif
 }
 
 void
-perfetto_processor_t::handle([[maybe_unused]] const memory_copy_sample& _mcs)
+perfetto_processor_t::handle(const memory_copy_sample& _mcs)
 {
-#if ROCPROFSYS_USE_ROCM > 0
     auto _corr_id   = _mcs.correlation_id_internal;
     auto _thrd_id   = _mcs.thread_id;
     auto _stream_id = _mcs.stream_handle;
@@ -662,13 +655,12 @@ perfetto_processor_t::handle([[maybe_unused]] const memory_copy_sample& _mcs)
                            ::perfetto::Flow::ProcessScoped(_corr_id),
                            add_perfetto_annotations);
     tracing::pop_perfetto(category::rocm_memory_copy{}, "", _track, _end_ts);
-#endif
 }
 
 void
 perfetto_processor_t::handle([[maybe_unused]] const memory_allocate_sample& _mas)
 {
-#if ROCPROFSYS_USE_ROCM > 0 && ROCPROFILER_VERSION >= 600
+#if ROCPROFILER_VERSION >= 600
     auto memop_to_string =
         [](rocprofiler_memory_allocation_operation_t op) -> const char* {
         switch(op)
@@ -1330,9 +1322,8 @@ perfetto_processor_t::handle([[maybe_unused]] const in_time_sample& _sample)
 }
 
 void
-perfetto_processor_t::handle([[maybe_unused]] const ainic_sample& _ainic)
+perfetto_processor_t::handle(const ainic_sample& _ainic)
 {
-#if ROCPROFSYS_USE_ROCM > 0
     auto _ts        = _ainic.timestamp;
     auto _nic_index = _ainic.nic_index;
 
@@ -1391,7 +1382,6 @@ perfetto_processor_t::handle([[maybe_unused]] const ainic_sample& _ainic)
     TRACE_COUNTER(trait::name<category::amd_smi_nic_tx_ucast_pkts>::value,
                   amd_smi_nic_tx_ucast_pkts_track::at(_nic_index, 0), _ts,
                   static_cast<double>(_ainic.tx_ucast_pkts));
-#endif
 }
 
 }  // namespace trace_cache

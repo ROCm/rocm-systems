@@ -45,7 +45,7 @@ the hipMemcpyKind from H2D to D2H but allocate pointer memory for H2D, api shoul
 
 /* Test verifies hipGraphExecMemcpyNodeSetParams1D API Functional scenarios.
  */
-TEST_CASE("Unit_hipGraphExecMemcpyNodeSetParams1D_Functional") {
+TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParams1D_Functional) {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   constexpr auto blocksPerCU = 6;  // to hide latency
@@ -117,7 +117,7 @@ TEST_CASE("Unit_hipGraphExecMemcpyNodeSetParams1D_Functional") {
 
 /* Test verifies hipGraphExecMemcpyNodeSetParams1D API Negative scenarios.
  */
-TEST_CASE("Unit_hipGraphExecMemcpyNodeSetParams1D_Negative") {
+TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParams1D_Negative) {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
 
