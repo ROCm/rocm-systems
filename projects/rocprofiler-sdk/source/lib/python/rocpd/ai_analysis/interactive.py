@@ -3612,22 +3612,18 @@ class WorkflowSession:
                 )
                 self._save_session()
                 # Create checkpoint after saving (captures file contents after the edit)
+                _rel_path = (
+                    os.path.relpath(str(chosen), self._state.repo_root)
+                    if self._state.repo_root
+                    else str(chosen)
+                )
                 _file_snapshots = {}
                 try:
-                    _rel_path = (
-                        os.path.relpath(str(chosen), self._state.repo_root)
-                        if self._state.repo_root
-                        else str(chosen)
-                    )
                     _file_snapshots[_rel_path] = chosen.read_text()
                 except OSError:
                     pass
                 self._create_checkpoint(
-                    files_modified=[
-                        os.path.relpath(str(chosen), self._state.repo_root)
-                        if self._state.repo_root
-                        else str(chosen)
-                    ],
+                    files_modified=[_rel_path],
                     edit_summary=_edit_summary_from_suggestions(suggestions),
                     file_snapshots=_file_snapshots,
                 )
