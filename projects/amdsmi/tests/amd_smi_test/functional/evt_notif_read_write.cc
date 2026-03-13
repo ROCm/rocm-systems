@@ -79,14 +79,16 @@ void TestEvtNotifReadWrite::Run(void) {
   }
 
   for (dv_ind = 0; dv_ind < num_monitor_devs(); ++dv_ind) {
-    DISPLAY_AMDSMI_API("amdsmi_init_gpu_event_notification", "gpu="+std::to_string(dv_ind), VERB(STANDARD));
+    DISPLAY_AMDSMI_API("amdsmi_init_gpu_event_notification", "gpu=" + std::to_string(dv_ind),
+                       VERB(STANDARD));
     ret = amdsmi_init_gpu_event_notification(processor_handles_[dv_ind]);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
     if (ret == AMDSMI_STATUS_NOT_SUPPORTED) {
       return;
     }
     ASSERT_EQ(ret, AMDSMI_STATUS_SUCCESS);
-    DISPLAY_AMDSMI_API("amdsmi_set_gpu_event_notification_mask", "gpu="+std::to_string(dv_ind), VERB(STANDARD));
+    DISPLAY_AMDSMI_API("amdsmi_set_gpu_event_notification_mask", "gpu=" + std::to_string(dv_ind),
+                       VERB(STANDARD));
     ret =  amdsmi_set_gpu_event_notification_mask(processor_handles_[dv_ind], mask);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
     ASSERT_EQ(ret, AMDSMI_STATUS_SUCCESS);

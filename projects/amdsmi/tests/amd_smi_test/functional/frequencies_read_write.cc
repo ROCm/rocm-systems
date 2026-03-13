@@ -180,7 +180,8 @@ void TestFrequenciesReadWrite::Run(void) {
           return;
         }
 
-        DISPLAY_AMDSMI_API("amdsmi_set_gpu_perf_level", "gpu="+std::to_string(dv_ind), VERB(STANDARD));
+        DISPLAY_AMDSMI_API("amdsmi_set_gpu_perf_level", "gpu=" + std::to_string(dv_ind),
+                           VERB(STANDARD));
         ret =  amdsmi_set_gpu_perf_level(processor_handles_[dv_ind], AMDSMI_DEV_PERF_LEVEL_AUTO);
         DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
         if (ret == AMDSMI_STATUS_NOT_SUPPORTED) {

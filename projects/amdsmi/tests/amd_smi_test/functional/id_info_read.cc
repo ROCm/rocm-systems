@@ -252,12 +252,14 @@ void TestIdInfoRead::Run(void) {
     ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
 
     // Verify api support checking functionality is working
-    DISPLAY_AMDSMI_API("amdsmi_get_gpu_virtualization_mode", "gpu="+std::to_string(i), VERB(STANDARD));
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_virtualization_mode", "gpu=" + std::to_string(i),
+                       VERB(STANDARD));
     err = amdsmi_get_gpu_virtualization_mode(processor_handles_[i], nullptr);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
     ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
     amdsmi_virtualization_mode_t vmode;
-    DISPLAY_AMDSMI_API("amdsmi_get_gpu_virtualization_mode", "gpu="+std::to_string(i), VERB(STANDARD));
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_virtualization_mode", "gpu=" + std::to_string(i),
+                       VERB(STANDARD));
     err = amdsmi_get_gpu_virtualization_mode(processor_handles_[i], &vmode);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
     ASSERT_TRUE(err == AMDSMI_STATUS_SUCCESS ||

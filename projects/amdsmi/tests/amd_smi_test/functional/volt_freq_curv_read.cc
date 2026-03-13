@@ -159,9 +159,9 @@ void TestVoltCurvRead::Run(void) {
       ASSERT_NE(regions, nullptr);
 
       num_regions = odv.num_regions;
-      DISPLAY_AMDSMI_API("amdsmi_get_gpu_od_volt_curve_regions", "gpu="+std::to_string(i), VERB(STANDARD));
-      err =  amdsmi_get_gpu_od_volt_curve_regions(processor_handles_[i],
-                                                  &num_regions, regions);
+      DISPLAY_AMDSMI_API("amdsmi_get_gpu_od_volt_curve_regions", "gpu=" + std::to_string(i),
+                         VERB(STANDARD));
+      err = amdsmi_get_gpu_od_volt_curve_regions(processor_handles_[i], &num_regions, regions);
       DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
 
       IF_VERB(STANDARD) {

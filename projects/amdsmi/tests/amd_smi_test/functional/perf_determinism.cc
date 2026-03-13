@@ -87,7 +87,8 @@ void TestPerfDeterminism::Run(void) {
     }
     std::cout << "About to rsmi_perf_determinism_mode_set() -->\n";
 
-    DISPLAY_AMDSMI_API("amdsmi_set_gpu_perf_determinism_mode", "gpu="+std::to_string(i), VERB(STANDARD));
+    DISPLAY_AMDSMI_API("amdsmi_set_gpu_perf_determinism_mode", "gpu=" + std::to_string(i),
+                       VERB(STANDARD));
     err = amdsmi_set_gpu_perf_determinism_mode(processor_handles_[i], clkvalue);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
     if (err == AMDSMI_STATUS_NOT_SUPPORTED) {

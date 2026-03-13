@@ -121,7 +121,8 @@ void TestSysInfoRead::Run(void) {
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
     ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
 
-    DISPLAY_AMDSMI_API("amdsmi_get_gpu_topo_numa_affinity", "gpu="+std::to_string(i), VERB(STANDARD));
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_topo_numa_affinity", "gpu=" + std::to_string(i),
+                       VERB(STANDARD));
     err = amdsmi_get_gpu_topo_numa_affinity(processor_handles_[i], &val_i32);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
     if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
@@ -135,7 +136,8 @@ void TestSysInfoRead::Run(void) {
     }
 
     // Verify api support checking functionality is working
-    DISPLAY_AMDSMI_API("amdsmi_get_gpu_topo_numa_affinity", "gpu="+std::to_string(i), VERB(STANDARD));
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_topo_numa_affinity", "gpu=" + std::to_string(i),
+                       VERB(STANDARD));
     err = amdsmi_get_gpu_topo_numa_affinity(processor_handles_[i], nullptr);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
     ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
@@ -250,7 +252,8 @@ void TestSysInfoRead::Run(void) {
             EXPECT_EQ(err, AMDSMI_STATUS_SUCCESS);
             EXPECT_NE(asic_info.target_graphics_version, std::numeric_limits<uint64_t>::max());
             // Verify api support checking functionality is working
-            DISPLAY_AMDSMI_API("amdsmi_get_gpu_asic_info", "gpu="+std::to_string(i), VERB(STANDARD));
+            DISPLAY_AMDSMI_API("amdsmi_get_gpu_asic_info", "gpu=" + std::to_string(i),
+                               VERB(STANDARD));
             err = amdsmi_get_gpu_asic_info(processor_handles_[i], nullptr);
             DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
             ASSERT_EQ(err, AMDSMI_STATUS_INVAL);

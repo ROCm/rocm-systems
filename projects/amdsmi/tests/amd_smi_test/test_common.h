@@ -71,106 +71,110 @@ inline void DISPLAY_AMDSMI_API(std::string_view func_name, std::string_view desc
     return;
 }
 
-template<typename... Args>
-inline void DISPLAY_AMDSMI_STATUS(bool isVerbose, std::string_view fileName, long unsigned int lineNum, amdsmi_status_t returnCode, Args... args) {
-    // Input:
-    //     isVerbose  : Toggle for outputing to std_out
-    //                  True : Allow printing
-    //                  False: No printing
-    //     fileName   : Name of file calling this routine
-    //     lineNum    : Line number of function in file
-    //     returnCode : API return code
-    //     args       : API Expected return code(s)
-    //                  Must have at least 1, can be multiple
-    //
-    // Output:
-    //     isVerbose(true)  : Print results
-    //     isVerbose(false) : No output
-    //
-    // Notes:
-    //     1. The API returnCode is checked against all args, expected return codes.
-    //        If API returnCode matches any expected return codes, test passes with
-    //            TEST SUCCESS, AMDSMI API Returned 0, AMDSMI_STATUS_SUCCESS
-    //     2. If the API returnCode is one of the Not Supported return codes
-    //        the test will pass with
-	//            TEST SUCCESS, AMDSMI API Returned 2, AMDSMI_STATUS_NOT_SUPPORTED
-    //     3. If the API returnCode is not what was expected or not supported,
-    //        the test will fail with
-	//            TEST FAILURE, AMDSMI API Returned X1, AMDSMI_STATUS_XX1
-	//                                     Expected X2, AMDSMI_STATUS_XX2
-    //            where:
-    //                 X1 API error code
-    //                XX1 API error code string
-    //                 X2 API exptected error code
-    //                XX2 API exptected error code string
-    //
-    // TODO:
-    //     1. Use this function to verify expected return codes and report failures
-    //        to testing framework
-    //     2. Upon failures, alter test flow
-    //     3. For not supported API's, allow function to mark as failures where applicable
+template <typename... Args>
+inline void DISPLAY_AMDSMI_STATUS(bool isVerbose, std::string_view fileName,
+                                  long unsigned int lineNum, amdsmi_status_t returnCode,
+                                  Args... args) {
+  // Input:
+  //     isVerbose  : Toggle for outputing to std_out
+  //                  True : Allow printing
+  //                  False: No printing
+  //     fileName   : Name of file calling this routine
+  //     lineNum    : Line number of function in file
+  //     returnCode : API return code
+  //     args       : API Expected return code(s)
+  //                  Must have at least 1, can be multiple
+  //
+  // Output:
+  //     isVerbose(true)  : Print results
+  //     isVerbose(false) : No output
+  //
+  // Notes:
+  //     1. The API returnCode is checked against all args, expected return codes.
+  //        If API returnCode matches any expected return codes, test passes with
+  //            TEST SUCCESS, AMDSMI API Returned 0, AMDSMI_STATUS_SUCCESS
+  //     2. If the API returnCode is one of the Not Supported return codes
+  //        the test will pass with
+  //            TEST SUCCESS, AMDSMI API Returned 2, AMDSMI_STATUS_NOT_SUPPORTED
+  //     3. If the API returnCode is not what was expected or not supported,
+  //        the test will fail with
+  //            TEST FAILURE, AMDSMI API Returned X1, AMDSMI_STATUS_XX1
+  //                                     Expected X2, AMDSMI_STATUS_XX2
+  //            where:
+  //                 X1 API error code
+  //                XX1 API error code string
+  //                 X2 API exptected error code
+  //                XX2 API exptected error code string
+  //
+  // TODO(amdsmi_team):
+  //     1. Use this function to verify expected return codes and report failures
+  //        to testing framework
+  //     2. Upon failures, alter test flow
+  //     3. For not supported API's, allow function to mark as failures where applicable
 
-    int i;
-    amdsmi_status_t retExpected[] = {args...};
-    int numRetExpected = sizeof(retExpected) / sizeof(retExpected[0]);
-    std::string status = smi_amdgpu_get_status_string(returnCode, false);
-    amdsmi_status_t retExpectedStr = retExpected[0];
+  int i;
+  amdsmi_status_t retExpected[] = {args...};
+  int numRetExpected = sizeof(retExpected) / sizeof(retExpected[0]);
+  std::string status = smi_amdgpu_get_status_string(returnCode, false);
+  amdsmi_status_t retExpectedStr = retExpected[0];
 
-    // Check for successful (expected) return code
-    for (i=0; i<numRetExpected; ++i) {
-        if (returnCode == retExpected[i]) {
-            if (isVerbose)
-                std::cout << "\t===> TEST SUCCESS, AMDSMI API Returned " << returnCode << ", " << status << std::endl;
-            return;
-        }
+  // Check for successful (expected) return code
+  for (i = 0; i < numRetExpected; ++i) {
+    if (returnCode == retExpected[i]) {
+      if (isVerbose)
+        std::cout << "\t===> TEST SUCCESS, AMDSMI API Returned " << returnCode << ", " << status
+                  << std::endl;
+      return;
     }
+  }
 
-    //
-    // Return code is not what was expected
-    // Find and report error code
-    //
+  //
+  // Return code is not what was expected
+  // Find and report error code
+  //
 
-    // Check if return code is in the not supported list
-    int numNotSupportedErrorCodes = sizeof(NotSupportedErrorCodes) / sizeof(NotSupportedErrorCodes[0]);
-    for (i=0; i<numNotSupportedErrorCodes ; ++i) {
-        if (returnCode == NotSupportedErrorCodes[i]) {
-            if (isVerbose)
-                std::cout << "\t===> TEST SUCCESS, AMDSMI API Returned " << returnCode << ", " << status << std::endl;
-            return;
-        }
+  // Check if return code is in the not supported list
+  int numNotSupportedErrorCodes =
+      sizeof(NotSupportedErrorCodes) / sizeof(NotSupportedErrorCodes[0]);
+  for (i = 0; i < numNotSupportedErrorCodes; ++i) {
+    if (returnCode == NotSupportedErrorCodes[i]) {
+      if (isVerbose)
+        std::cout << "\t===> TEST SUCCESS, AMDSMI API Returned " << returnCode << ", " << status
+                  << std::endl;
+      return;
     }
+  }
 
-    //
-    // Return code is not successful, print failure results
-    //
-    if (isVerbose) {
-        std::string expectedStatus;
-        std::cout << "\t===> TEST FAILURE, AMDSMI API Returned " << std::setfill(' ') << std::setw(2) << returnCode << ", " << status << std::endl;
-        std::cout << "\t===>                          Expected ";
-        if (numRetExpected == 1) {
-            expectedStatus = smi_amdgpu_get_status_string(retExpectedStr, false);
-            std::cout << std::setfill(' ') << std::setw(2) << std::right << retExpectedStr << ", " << expectedStatus << std::endl;
-        }
-        else {
-            for (int i=0; i<numRetExpected; ++i) {
-                expectedStatus = smi_amdgpu_get_status_string(retExpected[i], false);
-                if (i != 0)
-                    std::cout << "\t===>                                or ";
-                std::cout << std::setfill(' ') << std::setw(2) << std::right << retExpected[i] << ", " << expectedStatus << std::endl;
-            }
-            std::cout << std::endl;
-        }
+  //
+  // Return code is not successful, print failure results
+  //
+  if (isVerbose) {
+    std::string expectedStatus;
+    std::cout << "\t===> TEST FAILURE, AMDSMI API Returned " << std::setfill(' ') << std::setw(2)
+              << returnCode << ", " << status << std::endl;
+    std::cout << "\t===>                          Expected ";
+    if (numRetExpected == 1) {
+      expectedStatus = smi_amdgpu_get_status_string(retExpectedStr, false);
+      std::cout << std::setfill(' ') << std::setw(2) << std::right << retExpectedStr << ", "
+                << expectedStatus << std::endl;
+    } else {
+      for (int i = 0; i < numRetExpected; ++i) {
+        expectedStatus = smi_amdgpu_get_status_string(retExpected[i], false);
+        if (i != 0) std::cout << "\t===>                                or ";
+        std::cout << std::setfill(' ') << std::setw(2) << std::right << retExpected[i] << ", "
+                  << expectedStatus << std::endl;
+      }
+      std::cout << std::endl;
     }
-    // Display file path starting from root directory
-    if (isVerbose) {
-        std::string start_dir = std::string(fileName);
-        size_t pos = start_dir.find("tests/amd_smi_test");
-        if (pos != std::string::npos)
-            start_dir = start_dir.substr(pos);
-        std::cout << "\t===> " << start_dir << ":" << std::dec << lineNum << std::endl;
-    }
-
-    return;
+  }
+  // Display file path starting from root directory
+  if (isVerbose) {
+    std::string start_dir = std::string(fileName);
+    size_t pos = start_dir.find("tests/amd_smi_test");
+    if (pos != std::string::npos) start_dir = start_dir.substr(pos);
+    std::cout << "\t===> " << start_dir << ":" << std::dec << lineNum << std::endl;
+  }
+  return;
 }
 
 #endif  // TESTS_AMD_SMI_TEST_TEST_COMMON_H_

@@ -89,7 +89,8 @@ void TestHWTopologyRead::Run(void) {
 
   for (uint32_t dv_ind = 0; dv_ind < num_devices; ++dv_ind) {
     amdsmi_processor_handle dev_handle = processor_handles_[dv_ind];
-    DISPLAY_AMDSMI_API("amdsmi_topo_get_numa_node_number", "gpu="+std::to_string(dv_ind), VERB(STANDARD));
+    DISPLAY_AMDSMI_API("amdsmi_topo_get_numa_node_number", "gpu=" + std::to_string(dv_ind),
+                       VERB(STANDARD));
     err = amdsmi_topo_get_numa_node_number(dev_handle, &numa_numbers[dv_ind]);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
     if (err != AMDSMI_STATUS_SUCCESS) {
@@ -112,7 +113,9 @@ void TestHWTopologyRead::Run(void) {
                                                  UINT8_MAX};
       } else {
         amdsmi_link_type_t type;
-        DISPLAY_AMDSMI_API("amdsmi_topo_get_link_type", "gpu="+std::to_string(dv_ind_src)+","+std::to_string(dv_ind_dst), VERB(STANDARD));
+        DISPLAY_AMDSMI_API("amdsmi_topo_get_link_type",
+                           "gpu=" + std::to_string(dv_ind_src) + "," + std::to_string(dv_ind_dst),
+                           VERB(STANDARD));
         err = amdsmi_topo_get_link_type(processor_handles_[dv_ind_src],
                 processor_handles_[dv_ind_dst],
                 &gpu_links[dv_ind_src][dv_ind_dst].hops, &type);
@@ -140,7 +143,9 @@ void TestHWTopologyRead::Run(void) {
               }
           }
         }
-        DISPLAY_AMDSMI_API("amdsmi_topo_get_p2p_status", "gpu="+std::to_string(dv_ind_src)+","+std::to_string(dv_ind_dst), VERB(STANDARD));
+        DISPLAY_AMDSMI_API("amdsmi_topo_get_p2p_status",
+                           "gpu=" + std::to_string(dv_ind_src) + "," + std::to_string(dv_ind_dst),
+                           VERB(STANDARD));
         err = amdsmi_topo_get_p2p_status(processor_handles_[dv_ind_src],
                 processor_handles_[dv_ind_dst],
                 &type, &gpu_links[dv_ind_src][dv_ind_dst].cap);
@@ -164,7 +169,9 @@ void TestHWTopologyRead::Run(void) {
               }
           }
         }
-        DISPLAY_AMDSMI_API("amdsmi_topo_get_link_weight", "gpu="+std::to_string(dv_ind_src)+","+std::to_string(dv_ind_dst), VERB(STANDARD));
+        DISPLAY_AMDSMI_API("amdsmi_topo_get_link_weight",
+                           "gpu=" + std::to_string(dv_ind_src) + "," + std::to_string(dv_ind_dst),
+                           VERB(STANDARD));
         err = amdsmi_topo_get_link_weight(processor_handles_[dv_ind_src],
                     processor_handles_[dv_ind_dst],
                                    &gpu_links[dv_ind_src][dv_ind_dst].weight);
@@ -176,7 +183,9 @@ void TestHWTopologyRead::Run(void) {
             CHK_ERR_ASRT(err)
           }
         }
-        DISPLAY_AMDSMI_API("amdsmi_is_P2P_accessible", "gpu="+std::to_string(dv_ind_src)+","+std::to_string(dv_ind_dst), VERB(STANDARD));
+        DISPLAY_AMDSMI_API("amdsmi_is_P2P_accessible",
+                           "gpu=" + std::to_string(dv_ind_src) + "," + std::to_string(dv_ind_dst),
+                           VERB(STANDARD));
         err = amdsmi_is_P2P_accessible(processor_handles_[dv_ind_src],
                     processor_handles_[dv_ind_dst],
                     &gpu_links[dv_ind_src][dv_ind_dst].accessible);
