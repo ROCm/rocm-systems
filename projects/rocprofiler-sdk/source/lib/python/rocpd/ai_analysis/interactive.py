@@ -1970,6 +1970,15 @@ class WorkflowState:
     active_checkpoint: Optional[int] = None
 
 
+def _edit_summary_from_suggestions(suggestions: str) -> str:
+    """Extract a short summary from the LLM suggestions string."""
+    for line in suggestions.splitlines():
+        line = line.strip(" #-*")
+        if line:
+            return line[:80]
+    return "AI code edit"
+
+
 class WorkflowSession:
     """7-phase interactive profiling + optimization workflow.
 
@@ -2079,6 +2088,49 @@ class WorkflowSession:
             self._state.repo_root = ""
             self._gcm = None
             return
+
+    def _create_checkpoint(
+        self,
+        files_modified: List[str],
+        edit_summary: str,
+        file_snapshots: Dict[str, str],
+    ) -> None:
+        """Create a git commit + worktree checkpoint after an AI edit batch.
+
+        Silently skips if checkpoints are disabled (self._gcm is None) or if
+        any git operation fails (non-fatal — session continues without this cp).
+        """
+        if self._gcm is None:
+            return
+
+        cp_id = len(self._state.checkpoints)
+        message = f"rocpd: cp-{cp_id} — {edit_summary}"
+
+        try:
+            commit_hash = self._gcm.create_checkpoint_commit(
+                files_modified, message
+            )
+            ref_name = self._gcm.tag_checkpoint(cp_id, commit_hash)
+            worktree_path = self._gcm.add_worktree(cp_id, commit_hash)
+        except CheckpointError as exc:
+            _print(f"  (Checkpoint cp-{cp_id} skipped: {exc})", style="dim")
+            return
+
+        cp = CheckpointRecord(
+            cp_id=cp_id,
+            commit_hash=commit_hash,
+            ref_name=ref_name,
+            worktree_path=worktree_path,
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            files_modified=files_modified,
+            edit_summary=edit_summary,
+            file_snapshots=file_snapshots,
+        )
+        self._state.checkpoints.append(cp)
+
+        # Link the most recent edit record to this checkpoint
+        if self._state.edit_history:
+            self._state.edit_history[-1].checkpoint_id = cp_id
 
     # ── Phase 1b: Quick workload analysis ──────────────────────────────────────
 
@@ -3559,6 +3611,26 @@ class WorkflowSession:
                     )
                 )
                 self._save_session()
+                # Create checkpoint after saving (captures file contents after the edit)
+                _file_snapshots = {}
+                try:
+                    _rel_path = (
+                        os.path.relpath(str(chosen), self._state.repo_root)
+                        if self._state.repo_root
+                        else str(chosen)
+                    )
+                    _file_snapshots[_rel_path] = chosen.read_text()
+                except OSError:
+                    pass
+                self._create_checkpoint(
+                    files_modified=[
+                        os.path.relpath(str(chosen), self._state.repo_root)
+                        if self._state.repo_root
+                        else str(chosen)
+                    ],
+                    edit_summary=_edit_summary_from_suggestions(suggestions),
+                    file_snapshots=_file_snapshots,
+                )
             except OSError as exc:
                 _print(f"  (Write failed: {exc})", style="red")
                 return None

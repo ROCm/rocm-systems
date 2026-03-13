@@ -314,3 +314,72 @@ def test_init_checkpoints_disables_on_get_head_failure():
         ws._init_checkpoints()
     assert ws._state.repo_root == ""
     assert ws._gcm is None
+
+
+def _make_workflow_session_with_gcm(mock_gcm=None):
+    """Helper: WorkflowSession with mocked git and source paths."""
+    from rocpd.ai_analysis.interactive import WorkflowSession, GitCheckpointManager
+    ws = WorkflowSession(app_command="./app", source_paths=["/repo/src"])
+    ws._state.repo_root = "/repo"
+    ws._state.baseline_commit = "baseline123"
+    ws._gcm = mock_gcm or MagicMock(spec=GitCheckpointManager)
+    return ws
+
+
+def test_create_checkpoint_appends_checkpoint_record():
+    from rocpd.ai_analysis.interactive import CheckpointRecord
+    ws = _make_workflow_session_with_gcm()
+    ws._gcm.create_checkpoint_commit.return_value = "abc1234"
+    ws._gcm.tag_checkpoint.return_value = "refs/rocpd/sess/cp-0"
+    ws._gcm.add_worktree.return_value = "/tmp/cp-0"
+
+    with patch.object(ws, "_save_session"):
+        ws._create_checkpoint(
+            files_modified=["kernel.hip"],
+            edit_summary="increased block size",
+            file_snapshots={"kernel.hip": "content"},
+        )
+
+    assert len(ws._state.checkpoints) == 1
+    cp = ws._state.checkpoints[0]
+    assert cp.cp_id == 0
+    assert cp.commit_hash == "abc1234"
+    assert cp.files_modified == ["kernel.hip"]
+    assert cp.file_snapshots == {"kernel.hip": "content"}
+
+
+def test_create_checkpoint_links_edit_record():
+    ws = _make_workflow_session_with_gcm()
+    ws._gcm.create_checkpoint_commit.return_value = "abc"
+    ws._gcm.tag_checkpoint.return_value = "refs/rocpd/s/cp-0"
+    ws._gcm.add_worktree.return_value = "/tmp/cp-0"
+    from rocpd.ai_analysis.interactive import _EditRecord
+    ws._state.edit_history.append(
+        _EditRecord(timestamp="t", file_path="/f", backup_path="/f.bak")
+    )
+
+    with patch.object(ws, "_save_session"):
+        ws._create_checkpoint(["f"], "edit", {"f": "c"})
+
+    assert ws._state.edit_history[-1].checkpoint_id == 0
+
+
+def test_create_checkpoint_skipped_when_no_gcm():
+    ws = _make_workflow_session_with_gcm()
+    ws._gcm = None  # checkpoints disabled
+
+    with patch.object(ws, "_save_session"):
+        ws._create_checkpoint(["f"], "edit", {"f": "c"})
+
+    assert ws._state.checkpoints == []
+
+
+def test_create_checkpoint_skipped_on_git_error():
+    from rocpd.ai_analysis.interactive import CheckpointError
+    ws = _make_workflow_session_with_gcm()
+    ws._gcm.create_checkpoint_commit.side_effect = CheckpointError("git fail")
+
+    with patch.object(ws, "_save_session"):
+        ws._create_checkpoint(["f"], "edit", {"f": "c"})  # should not raise
+
+    assert ws._state.checkpoints == []
