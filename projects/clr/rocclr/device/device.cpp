@@ -422,17 +422,27 @@ void MemObjMap::UpdateAccess(amd::Device* peerDev) {
 
 void MemObjMap::Purge(amd::Device* dev) {
   assert(dev != nullptr);
-  std::unique_lock lock(AllocatedLock_);
-  for (auto it = MemObjMap_.cbegin(); it != MemObjMap_.cend();) {
-    amd::Memory* memObj = it->second;
-    unsigned int flags = memObj->getMemFlags();
-    const std::vector<Device*>& devices = memObj->getContext().devices();
-    if (devices.size() == 1 && devices[0] == dev && !(flags & ROCCLR_MEM_INTERNAL_MEMORY)) {
-      memObj->release();
-      it = MemObjMap_.erase(it);
-    } else {
-      ++it;
+  std::vector<amd::Memory*> toRelease{};
+  {
+    std::unique_lock lock(AllocatedLock_);
+    for (auto it = MemObjMap_.cbegin(); it != MemObjMap_.cend();) {
+      amd::Memory* memObj = it->second;
+      unsigned int flags = memObj->getMemFlags();
+      const std::vector<Device*>& devices = memObj->getContext().devices();
+      if (devices.size() == 1 && devices[0] == dev && !(flags & ROCCLR_MEM_INTERNAL_MEMORY)) {
+        toRelease.push_back(memObj);
+        it = MemObjMap_.erase(it);
+      } else {
+        ++it;
+      }
     }
+  }
+
+  // Release memObjs outside the locked region
+  // memObj->release() may trigger RemoveIpcHandleMemObj() call if memObj is an IpcBuffer
+  // where the lock would be acquired a second time
+  for (auto* memObj : toRelease) {
+    memObj->release();
   }
 }
 
