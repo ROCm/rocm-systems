@@ -759,8 +759,10 @@ result = analyze_database(
   - Required env var: `ROCPD_LLM_PRIVATE_URL` — base URL (e.g. `https://llm-api.example.com/OpenAI`)
   - Required: `ROCPD_LLM_PRIVATE_MODEL` or `--llm-private-model`
   - Optional: `ROCPD_LLM_PRIVATE_API_KEY` (default: `"dummy"` for header-authenticated servers)
-  - Optional: `ROCPD_LLM_PRIVATE_HEADERS` — JSON or Python-dict of extra request headers;
-    the `user` header is auto-set to `os.getlogin()` unless already provided
+  - Optional: `ROCPD_LLM_PRIVATE_HEADERS` — JSON object of extra request headers;
+    must be a JSON object (`{...}`), not an array or scalar — a `ValueError` is raised
+    if the parsed value is not a dict; the `user` header is auto-set to `os.getlogin()`
+    unless already provided
   - Optional: `ROCPD_LLM_PRIVATE_VERIFY_SSL=0` — disable SSL certificate verification (requires `httpx`)
 
   ```bash
@@ -1490,3 +1492,154 @@ prompts the user to choose one. This means repeat invocations against the same
 ls ~/.rocpd/sessions/*.json | xargs -I{} python3 -c \
     "import json; d=json.load(open('{}'));print(d['session_id'],'|',d['source_dir'])"
 ```
+
+---
+
+### WorkflowSession — Session Checkpoints
+
+Each AI source-file edit creates a git-worktree checkpoint so the user can roll back to
+any prior state and blacklist approaches that caused regressions.
+
+#### Overview
+
+```
+Phase 6 AI edit
+  └─► git commit all modified files
+  └─► git update-ref refs/rocpd/<session_id>/cp-N  (GC-pinned ref, not a branch)
+  └─► git worktree add --detach ~/.rocpd/sessions/<session_id>/cp-N
+  └─► CheckpointRecord appended to WorkflowState.checkpoints
+        ├── cp_id, commit_hash, ref_name, worktree_path
+        ├── files_modified, file_snapshots (full file contents for offline restore)
+        ├── run_index       ← set in Phase 3 after profiling succeeds
+        ├── performance_delta_pct  ← set in Phase 4 after analysis history appended
+        └── blacklisted, blacklist_category, blacklist_description
+```
+
+When the session exits (normally or via Ctrl+C), `_teardown_checkpoints()` removes all
+worktrees. Refs (`refs/rocpd/…`) are kept so the commits survive GC until the user
+explicitly runs a cleanup command.
+
+#### Dataclasses
+
+**`CheckpointRecord`** (in `interactive.py`):
+
+| Field | Type | Description |
+|---|---|---|
+| `cp_id` | `int` | Sequential checkpoint index (0-based) |
+| `commit_hash` | `str` | Full git commit SHA |
+| `ref_name` | `str` | `refs/rocpd/<session_id>/cp-<N>` |
+| `worktree_path` | `str` | Absolute path to the detached worktree |
+| `timestamp` | `str` | ISO-8601 timestamp |
+| `files_modified` | `List[str]` | Repo-relative paths of files in this edit batch |
+| `edit_summary` | `str` | First non-blank line of the LLM suggestion (≤80 chars) |
+| `file_snapshots` | `Dict[str, str]` | Full file contents keyed by relative path |
+| `run_index` | `Optional[int]` | Which trace run followed this edit (set in Phase 3) |
+| `performance_delta_pct` | `Optional[float]` | Runtime change % vs prior run (set in Phase 4) |
+| `blacklisted` | `bool` | Whether this approach has been blacklisted |
+| `blacklist_category` | `str` | Equal to `edit_summary` (used for deduplication) |
+| `blacklist_description` | `str` | Human-readable description injected into LLM prompt |
+
+**`WorkflowState` additions:**
+
+| Field | Type | Description |
+|---|---|---|
+| `repo_root` | `str` | Absolute path to git repo root (empty when no git) |
+| `baseline_commit` | `str` | HEAD at session start — rollback target `cp_id=-1` |
+| `checkpoints` | `List[CheckpointRecord]` | All checkpoints in this session |
+| `active_checkpoint` | `Optional[int]` | Currently restored checkpoint (or `None`) |
+| `blacklisted_approaches` | `List[str]` | Persistent list of blacklist descriptions; **not truncated by rollback** |
+
+#### GitCheckpointManager
+
+All git operations are isolated in `GitCheckpointManager`:
+
+```python
+gcm = GitCheckpointManager(repo_root="/path/to/repo", session_id="2026-03-13_myapp")
+
+# Detect repo (static — does not require a known repo_root)
+repo_root = GitCheckpointManager.detect_repo(cwd="/path/to/project")
+
+# Core checkpoint operations
+hash_ = gcm.commit_files(files=["src/kernel.cpp"], message="rocpd: checkpoint 0")
+gcm.tag_checkpoint(commit_hash=hash_, cp_id=0)          # creates refs/rocpd/.../cp-0
+gcm.add_worktree(commit_hash=hash_, cp_id=0)             # git worktree add --detach
+gcm.remove_worktree(worktree_path="/path/to/wt")
+
+# Introspection
+gcm.get_head()                                           # current HEAD SHA
+gcm.files_in_commit(commit_hash)                        # list of relative paths
+gcm.list_worktrees()                                     # all registered worktrees
+gcm.restore_files_from_commit(commit_hash, files)        # git checkout <hash> -- <files>
+```
+
+`commit_files` uses `-c user.email=rocpd@local -c user.name=rocpd` overrides and
+`--no-verify` to work in any git environment regardless of hooks or missing config.
+
+#### Rollback
+
+Triggered by `[b]` in the Phase 5 recommendations menu (shown only when checkpoints
+exist). `_show_checkpoint_picker()` displays a table of all checkpoints with performance
+delta and edit summary:
+
+```
+  Checkpoints
+  ──────────────────────────────────────────────────────────
+  [-1]  Baseline (no AI edits)
+  [ 0]  Reduce memcpy by using zero-copy buffers             Run #1   -12.3%
+  [ 1]  Optimize wave occupancy via LDS padding              Run #2   +4.1%  ← regression
+  [ 2]  Unroll inner loop and vectorize memory accesses      Run #3   -8.7%
+```
+
+Regression checkpoints (+delta) are flagged and the user is prompted to blacklist them
+before the rollback is applied. The blacklist description is appended to
+`WorkflowState.blacklisted_approaches` (never truncated by rollback) so future LLM
+calls avoid the same approach.
+
+**Rollback strategy:**
+
+1. **git fast path**: `git checkout <hash> -- <file>` for each file in the target
+   checkpoint. Falls back to snapshot path on any `CheckpointError`.
+2. **Snapshot fallback**: Writes `file_snapshots` contents directly. Works in any
+   environment including those where git is not available post-session-start.
+3. **Baseline rollback** (`cp_id = -1`): Restores to `baseline_commit` via git, or
+   writes all accumulated snapshots in reverse order as a last resort.
+
+After rollback, `WorkflowState.checkpoints` is truncated to `checkpoints[:target+1]`
+and `_save_session()` is called unconditionally.
+
+#### Blacklist Injection
+
+When `_build_blacklist_block()` returns a non-empty string, it is prepended to the LLM
+suggestion prompt in Phase 6 before `_llm_rewrite_file()` is called:
+
+```
+# Blacklisted approaches (do NOT use these):
+
+- Reduce memcpy by using zero-copy buffers (caused +4.1% regression on run #2)
+- ...
+```
+
+The blacklist is built from `WorkflowState.blacklisted_approaches` (persistent) so it
+survives rollbacks that truncate the `checkpoints` list. Entries are deduplicated by
+exact string match.
+
+#### Session lifecycle
+
+```
+WorkflowSession.run()
+  ├─ Phase 1: validate sources
+  ├─ _init_checkpoints()       ← detect git, abort if dirty tree, record baseline
+  ├─ _prune_stale_worktrees()  ← remove orphaned worktrees with no session JSON
+  ├─ Phase 1b … Phase 7 loop
+  └─ finally:
+       _teardown_checkpoints() ← remove all worktrees (refs kept for GC protection)
+       _save_session()
+```
+
+**Dirty-tree abort**: If the git working tree has uncommitted changes when the session
+starts, `_init_checkpoints` prints a clear message and calls `SystemExit(1)`. This
+prevents checkpoint commits from mixing user changes with AI edits.
+
+**No-git graceful fallback**: When git is not detected or any checkpoint operation
+fails, `self._gcm` is set to `None` and checkpoints are silently skipped. All other
+session functionality continues normally.
