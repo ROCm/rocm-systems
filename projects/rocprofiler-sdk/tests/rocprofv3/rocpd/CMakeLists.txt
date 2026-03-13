@@ -532,17 +532,17 @@ rocprofiler_add_integration_execute_test(
     rocprofv3-test-rocpd-analyze-schema-validate
     COMMAND
         ${Python3_EXECUTABLE} -c
-        "import json, sys, importlib.resources as pkg; \
+        "import json, pkgutil; \
          path = '${CMAKE_CURRENT_BINARY_DIR}/rocpd-analyze-output/analysis_results.json'; \
          d = json.load(open(path)); \
-         schema = json.loads(pkg.files('rocpd.ai_analysis').joinpath('docs/analysis-output.schema.json').read_text()); \
+         schema = json.loads(pkgutil.get_data('rocpd.ai_analysis', 'docs/analysis-output.schema.json')); \
          allowed = schema['properties']['schema_version']['enum']; \
-         assert d.get('schema_version') in allowed, f'Bad schema_version {d.get(\"schema_version\")!r}, expected one of {allowed}'; \
+         assert d.get('schema_version') in allowed, 'Bad schema_version ' + repr(d.get('schema_version')) + ', expected one of ' + repr(allowed); \
          assert all(k in d for k in ('metadata','recommendations','hardware_counters','hotspots')); \
          cmds = [c for r in d['recommendations'] for c in r.get('commands', [])]; \
          assert len(cmds) > 0, 'No commands found in recommendations'; \
          assert all(c['tool'] in ('rocprofv3','rocprof-sys','rocprof-compute') for c in cmds); \
-         print(f'Schema OK: version={d[\"schema_version\"]}, recs={len(d[\"recommendations\"])}, commands={len(cmds)}')"
+         print('Schema OK: version=' + str(d['schema_version']) + ', recs=' + str(len(d['recommendations'])) + ', commands=' + str(len(cmds)))"
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 120
     LABELS "integration-tests;rocpd"
