@@ -1049,8 +1049,94 @@ RewriteResult RetargetCodeObject(void* elf_data, size_t elf_size,
       EncodeSNop(nop);
       std::memcpy(text + di.offset + 4, nop, 4);
     } else if (is_fp4_convert) {
-      // No gfx942 equivalent for FP4 scale-convert.
-      // Replace with v_mov_b32 vDst, 0x11 + s_nop (constant FP4 output).
+      // v_cvt_scalef32_pk_fp4_f32 vDst, vSrc0, vSrc1, vScale
+      // Emulate FP4 E2M1 quantization using trampoline with v255 temp:
+      //   1. v_mul_f32 vDst, vSrc0, vScale    (4B VOP2) — scale src0
+      //   2. v_mul_f32 vDst, vDst, 2.0        (4B VOP2) — multiply by 2 for E2M1 index
+      //   3. v_cvt_u32_f32 vDst, vDst         (4B VOP1) — truncate to uint
+      //   4. v_min_u32 vDst, 7, vDst          (4B VOP2) — clamp to [0,7]
+      //   5. v_mul_f32 v255, vSrc1, vScale    (4B VOP2) — scale src1
+      //   6. v_mul_f32 v255, v255, 2.0        (4B VOP2)
+      //   7. v_cvt_u32_f32 v255, v255         (4B VOP1)
+      //   8. v_min_u32 v255, 7, v255          (4B VOP2)
+      //   9. v_lshl_or_b32 vDst, v255, 4, vDst (8B VOP3) — pack nibbles
+      //  10. s_branch <return>                (4B)
+      // Total: 44 bytes
+      uint16_t src0_raw = dword1 & 0x1FF;
+      uint16_t src1_raw = (dword1 >> 9) & 0x1FF;
+      uint16_t scale_raw = (dword1 >> 18) & 0x1FF;
+      uint8_t src0_vgpr = static_cast<uint8_t>(src0_raw & 0xFF);
+      uint8_t src1_vgpr = static_cast<uint8_t>(src1_raw & 0xFF);
+      uint8_t scale_vgpr = static_cast<uint8_t>(scale_raw & 0xFF);
+      uint8_t vtmp = 255;
+
+      NopSled* sled = findNearestSled(di.offset);
+      if (sled && sled->write_pos + 44 <= sled->end) {
+        uint64_t tp = sled->write_pos;
+
+        // VOP2 helpers:
+        // v_mul_f32_e32 = opcode 0x04: (0x04<<25)|(vdst<<17)|(vsrc1<<9)|src0
+        // v_min_u32_e32 = opcode 0x0E: (0x0E<<25)|(vdst<<17)|(vsrc1<<9)|src0
+        // VOP1: v_cvt_u32_f32_e32 = opcode 0x07: 0x7E000000|(vdst<<17)|(0x07<<9)|src0
+        // 2.0 inline = 0xF4, 7 inline = 0x87
+        auto vop2 = [](uint8_t op, uint8_t d, uint8_t s1, uint16_t s0) -> uint32_t {
+          return (static_cast<uint32_t>(op) << 25) | (static_cast<uint32_t>(d) << 17) |
+                 (static_cast<uint32_t>(s1) << 9) | s0;
+        };
+        auto vop1_cvt = [](uint8_t d, uint16_t s0) -> uint32_t {
+          return 0x7E000000u | (static_cast<uint32_t>(d) << 17) |
+                 (0x07u << 9) | s0; // v_cvt_u32_f32 opcode = 0x07
+        };
+
+        // 1. v_mul_f32 vDst, vScale, vSrc0 (src0=vScale, vsrc1=vSrc0)
+        uint32_t i1 = vop2(0x04, vdst, src0_vgpr, 256u + scale_vgpr);
+        std::memcpy(text + tp, &i1, 4);
+        // 2. v_mul_f32 vDst, 2.0, vDst (src0=2.0(0xF4), vsrc1=vDst)
+        uint32_t i2 = vop2(0x04, vdst, vdst, 0xF4u);
+        std::memcpy(text + tp + 4, &i2, 4);
+        // 3. v_cvt_u32_f32 vDst, vDst
+        uint32_t i3 = vop1_cvt(vdst, 256u + vdst);
+        std::memcpy(text + tp + 8, &i3, 4);
+        // 4. v_min_u32 vDst, 7, vDst (src0=7(0x87), vsrc1=vDst)
+        uint32_t i4 = vop2(0x0E, vdst, vdst, 0x87u);
+        std::memcpy(text + tp + 12, &i4, 4);
+        // 5. v_mul_f32 v255, vScale, vSrc1
+        uint32_t i5 = vop2(0x04, vtmp, src1_vgpr, 256u + scale_vgpr);
+        std::memcpy(text + tp + 16, &i5, 4);
+        // 6. v_mul_f32 v255, 2.0, v255
+        uint32_t i6 = vop2(0x04, vtmp, vtmp, 0xF4u);
+        std::memcpy(text + tp + 20, &i6, 4);
+        // 7. v_cvt_u32_f32 v255, v255
+        uint32_t i7 = vop1_cvt(vtmp, 256u + vtmp);
+        std::memcpy(text + tp + 24, &i7, 4);
+        // 8. v_min_u32 v255, 7, v255
+        uint32_t i8 = vop2(0x0E, vtmp, vtmp, 0x87u);
+        std::memcpy(text + tp + 28, &i8, 4);
+        // 9. v_lshl_or_b32 vDst, v255, 4, vDst (VOP3)
+        uint32_t i9_dw0 = 0xD2000000u | static_cast<uint32_t>(vdst);
+        uint32_t i9_dw1 = (256u + vtmp) | (0x84u << 9) | // inline 4
+                          ((256u + vdst) << 18);
+        std::memcpy(text + tp + 32, &i9_dw0, 4);
+        std::memcpy(text + tp + 36, &i9_dw1, 4);
+        // 10. s_branch back
+        uint8_t br[4];
+        if (EncodeSBranch(tp + 40, di.offset + 8, br)) {
+          std::memcpy(text + tp + 40, br, 4);
+
+          uint8_t br_fwd[4];
+          if (EncodeSBranch(di.offset, tp, br_fwd)) {
+            std::memcpy(text + di.offset, br_fwd, 4);
+            uint8_t nop[4];
+            EncodeSNop(nop);
+            std::memcpy(text + di.offset + 4, nop, 4);
+            sled->write_pos += 44;
+            di.mnemonic = "<replaced>";
+            ++gfx950_only_replaced;
+            continue;
+          }
+        }
+      }
+      // Fallback: constant FP4
       uint32_t mov_word = 0x7E000291u | (static_cast<uint32_t>(vdst) << 17);
       std::memcpy(text + di.offset, &mov_word, 4);
       uint8_t nop[4];
