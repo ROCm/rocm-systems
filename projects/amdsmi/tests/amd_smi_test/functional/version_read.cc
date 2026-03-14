@@ -20,20 +20,22 @@
  * THE SOFTWARE.
  */
 
-#include <iostream>
+#include "version_read.h"
 
 #include <gtest/gtest.h>
+
+#include <iostream>
+
 #include "amd_smi/amdsmi.h"
-#include "version_read.h"
 
 TestVersionRead::TestVersionRead() : TestBase() {
   set_title("AMDSMI Version Read Test");
-  set_description("The Version Read tests verifies that the AMDSMI library "
-                                             "version can be read properly.");
+  set_description(
+      "The Version Read tests verifies that the AMDSMI library "
+      "version can be read properly.");
 }
 
-TestVersionRead::~TestVersionRead(void) {
-}
+TestVersionRead::~TestVersionRead(void) {}
 
 void TestVersionRead::SetUp(void) {
   TestBase::SetUp();
@@ -41,9 +43,7 @@ void TestVersionRead::SetUp(void) {
   return;
 }
 
-void TestVersionRead::DisplayTestInfo(void) {
-  TestBase::DisplayTestInfo();
-}
+void TestVersionRead::DisplayTestInfo(void) { TestBase::DisplayTestInfo(); }
 
 void TestVersionRead::DisplayResults(void) const {
   TestBase::DisplayResults();
@@ -69,10 +69,10 @@ void TestVersionRead::Run(void) {
   err = amdsmi_get_lib_version(&ver);
   CHK_ERR_ASRT(err)
 
-  ASSERT_TRUE(ver.major != 0xFFFFFFFF && ver.minor != 0xFFFFFFFF &&
-              ver.release != 0xFFFFFFFF && ver.build != nullptr);
+  ASSERT_TRUE(ver.major != 0xFFFFFFFF && ver.minor != 0xFFFFFFFF && ver.release != 0xFFFFFFFF &&
+              ver.build != nullptr);
   IF_VERB(STANDARD) {
-    std::cout << "\t**AMD SMI Library version: " << ver.major << "." <<
-      ver.minor << "." << ver.release << " (" << ver.build << ")" << std::endl;
+    std::cout << "\t**AMD SMI Library version: " << ver.major << "." << ver.minor << "."
+              << ver.release << " (" << ver.build << ")" << std::endl;
   }
 }

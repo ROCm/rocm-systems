@@ -96,6 +96,13 @@ endif()
 ## Create the rocr target.
 add_library( ${CORE_RUNTIME_TARGET} "" )
 
+## Enable parallel compilation on MSVC.
+if(MSVC)
+  if(DEFINED ENV{CMAKE_BUILD_PARALLEL_LEVEL})
+    target_compile_options(${CORE_RUNTIME_TARGET} PRIVATE /MP$ENV{CMAKE_BUILD_PARALLEL_LEVEL})
+  endif()
+endif()
+
 if (UNIX)
   pkg_check_modules(drm REQUIRED IMPORTED_TARGET libdrm)
 else()
