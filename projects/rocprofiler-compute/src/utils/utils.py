@@ -2114,17 +2114,17 @@ def format_scientific_notation_if_needed(
     width_align: int = 6,
     precision: int = 2,
     fmt_type_align: str = "f",
-    max_length: int = 6,
+    max_length: int = 6,  # Deprecated: kept for backward compatibility
     sci_lower_bound: float = 1e-2,
     sci_upper_bound: float = 1e6,
 ) -> str:
     """
     Format a numeric value as normal or scientific notation string.
 
-    Uses scientific notation if:
+    Uses scientific notation only if it results in a shorter string than
+    normal notation, or if the value falls outside the bounds:
     - abs(value) < sci_lower_bound (but not zero)
     - abs(value) >= sci_upper_bound
-    - formatted normal string length exceeds max_length
 
     Parameters:
     - value: numeric value to format
@@ -2132,13 +2132,14 @@ def format_scientific_notation_if_needed(
     - width_align: total width of formatted output
     - precision: number of digits after decimal point
     - fmt_type_align: format type, e.g., 'f', 'e', 'g'
-    - max_length: max allowed length for normal format string (excluding padding)
+    - max_length: deprecated, no longer used
     - sci_lower_bound: lower bound for scientific notation usage
     - sci_upper_bound: upper bound for scientific notation usage
 
     Returns:
     - formatted string according to the criteria, respecting alignment
     """
+    del max_length  # Unused, kept for backward compatibility
 
     abs_val = abs(value)
     use_sci = False
@@ -2162,10 +2163,8 @@ def format_scientific_notation_if_needed(
                 sci_str_strip = sci_str.strip()
 
                 # Decide based on length of stripped strings (ignore padding)
-                if (
-                    len(normal_str_strip) > len(sci_str_strip)
-                    or len(normal_str_strip) > max_length
-                ):
+                # Only use scientific notation if it's actually shorter
+                if len(sci_str_strip) < len(normal_str_strip):
                     use_sci = True
             except Exception:
                 # Fallback to scientific if formatting fails

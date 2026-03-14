@@ -23,63 +23,80 @@ THE SOFTWARE.
 #include "../commons.h"
 #include "roc_decoder_host.h"
 
-RocDecoderHost::RocDecoderHost(RocDecoderHostCreateInfo& decoder_create_info): avcodec_video_decoder_{decoder_create_info}, decoder_create_info_{decoder_create_info} {}
+RocDecoderHost::RocDecoderHost(RocDecoderHostCreateInfo& decoder_create_info): avcodec_video_decoder_{decoder_create_info}, decoder_create_info_{decoder_create_info} {
+}
 
-RocDecoderHost::~RocDecoderHost() {}
+RocDecoderHost::~RocDecoderHost() {
+}
 
 rocDecStatus RocDecoderHost::InitializeDecoder() {
+    FunctionEntryLog(logger_);
     rocDecStatus rocdec_status = ROCDEC_SUCCESS;
     if (!decoder_create_info_.user_data) {
         logger_.CriticalLog(MakeMsg("Invalid function callback pointer passed"));
+        FunctionExitLog(logger_);
         return ROCDEC_NOT_INITIALIZED;
     }
     rocdec_status = avcodec_video_decoder_.InitializeDecoder();
     if (rocdec_status != ROCDEC_SUCCESS) {
         logger_.CriticalLog(MakeMsg("Failed to initialize the FFMpeg Video decoder."));
+        FunctionExitLog(logger_);
         return rocdec_status;
     }
-     return rocdec_status;
- }
+    FunctionExitLog(logger_);
+    return rocdec_status;
+}
 
 rocDecStatus RocDecoderHost::DecodeFrame(RocdecPicParamsHost *pic_params) {
+    FunctionEntryLog(logger_);
     rocDecStatus rocdec_status = ROCDEC_SUCCESS;
     rocdec_status = avcodec_video_decoder_.SubmitDecode(pic_params);
     if (rocdec_status != ROCDEC_SUCCESS) {
         logger_.ErrorLog(MakeMsg("Decode submission is not successful."));
     }
-
-     return rocdec_status;
+    FunctionExitLog(logger_);
+    return rocdec_status;
 }
 
 rocDecStatus RocDecoderHost::GetDecodeStatus(int pic_idx, RocdecDecodeStatus* decode_status) {
+    FunctionEntryLog(logger_);
     rocDecStatus rocdec_status = ROCDEC_SUCCESS;
     rocdec_status = avcodec_video_decoder_.GetDecodeStatus(pic_idx, decode_status);
     if (rocdec_status != ROCDEC_SUCCESS) {
         logger_.ErrorLog(MakeMsg("Failed to query the decode status."));
     }
+    FunctionExitLog(logger_);
     return rocdec_status;
 }
 
 rocDecStatus RocDecoderHost::ReconfigureDecoder(RocdecReconfigureDecoderInfo *reconfig_params) {
+    FunctionEntryLog(logger_);
     if (reconfig_params == nullptr) {
+        FunctionExitLog(logger_);
         return ROCDEC_INVALID_PARAMETER;
     }
     rocDecStatus rocdec_status = avcodec_video_decoder_.ReconfigureDecoder(reconfig_params);
     if (rocdec_status != ROCDEC_SUCCESS) {
         logger_.CriticalLog(MakeMsg("Reconfiguration of the decoder failed."));
+        FunctionExitLog(logger_);
         return rocdec_status;
     }
+    FunctionExitLog(logger_);
     return rocdec_status;
 }
 
 rocDecStatus RocDecoderHost::GetVideoFrame(int pic_idx, void **frame_ptr, uint32_t *line_size, RocdecProcParams *vid_postproc_params) {
+    FunctionEntryLog(logger_);
     if (vid_postproc_params == nullptr || frame_ptr == nullptr) {
+        FunctionExitLog(logger_);
         return ROCDEC_INVALID_PARAMETER;
     }
     rocDecStatus rocdec_status = avcodec_video_decoder_.GetVideoFrame(pic_idx, frame_ptr, line_size, vid_postproc_params);
     if (rocdec_status != ROCDEC_SUCCESS) {
         logger_.ErrorLog(MakeMsg("GetVideoFrame failed."));
+        FunctionExitLog(logger_);
         return rocdec_status;
     }
+    FunctionExitLog(logger_);
     return rocdec_status;
 }

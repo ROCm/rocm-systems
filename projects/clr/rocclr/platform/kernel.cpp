@@ -118,7 +118,7 @@ bool KernelParameters::captureHIPArgs(void** kernelParams, address kernArgs, siz
       value = &uint64_value;
     }
     Memory* memArg = nullptr;
-    if (desc.type_ == T_POINTER && (desc.addressQualifier_ != CL_KERNEL_ARG_ADDRESS_LOCAL)) {
+    if (desc.type_ == T_POINTER) {
       LP64_SWITCH(uint32_value, uint64_value) = *(LP64_SWITCH(uint32_t*, uint64_t*))value;
       memArg = amd::MemObjMap::FindMemObj(*reinterpret_cast<const void* const*>(value));
       memories[desc.info_.arrayIndex_] = memArg;
@@ -127,27 +127,15 @@ bool KernelParameters::captureHIPArgs(void** kernelParams, address kernArgs, siz
           memArg->retain();
         }
       }
-    } else if (desc.type_ == T_SAMPLER) {
-      LogError("Cannot handle Sampler now");
-      return false;
-    } else if (desc.type_ == T_QUEUE) {
-      LogError("Cannot handle Queue now");
-      return false;
     } else {
+      assert((desc.type_ != T_SAMPLER && desc.type_ != T_QUEUE) &&
+             "Unexpected argument type for a HIP kernel");
       switch (desc.size_) {
         case 4:
-          if (desc.addressQualifier_ == CL_KERNEL_ARG_ADDRESS_LOCAL) {
-            uint32_value = desc.size_;
-          } else {
-            uint32_value = *(static_cast<const uint32_t*>(value));
-          }
+          uint32_value = *(static_cast<const uint32_t*>(value));
           break;
         case 8:
-          if (desc.addressQualifier_ == CL_KERNEL_ARG_ADDRESS_LOCAL) {
-            uint64_value = desc.size_;
-          } else {
-            uint64_value = *(static_cast<const uint64_t*>(value));
-          }
+          uint64_value = *(static_cast<const uint64_t*>(value));
           break;
       }
     }
