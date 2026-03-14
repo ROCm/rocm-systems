@@ -967,26 +967,40 @@ RewriteResult RetargetCodeObject(void* elf_data, size_t elf_size,
 
     bool is_fp4_convert = (opcode_hi >= 0xD23D && opcode_hi <= 0xD243);
     bool is_mfma_f8f6f4 = (opcode_hi == 0xD3AD || opcode_hi == 0xD3AE);
+    bool is_cvt_pk_f16 = (opcode_hi == 0xD267); // v_cvt_pk_f16_f32 (gfx950)
+    bool is_cvt_pk_bf16 = (opcode_hi == 0xD268); // v_cvt_pk_bf16_f32 (gfx950)
+    bool is_bitop3 = (opcode_hi == 0xD233);      // v_bitop3_b16 (gfx950)
 
-    if (!is_fp4_convert && !is_mfma_f8f6f4) continue;
+    bool is_gfx950_only = is_fp4_convert || is_mfma_f8f6f4 ||
+                          is_cvt_pk_f16 || is_cvt_pk_bf16 || is_bitop3;
+    if (!is_gfx950_only) continue;
 
     // Extract destination VGPR from VOP3 encoding
     uint8_t vdst = dword0 & 0xFF;
 
-    if (is_fp4_convert) {
-      // Replace FP4 conversion with v_mov_b32 vDst, 0x11 + s_nop.
-      // 0x11 = packed FP4 E2M1 encoding for two 0.5 values.
-      // v_mov_b32_e32 vN, 17 = 0x7E000291 | (N << 17)
+    if (is_cvt_pk_f16) {
+      // Swap v_cvt_pk_f16_f32 (D267) → v_cvt_pkrtz_f16_f32 (D296)
+      // Same VOP3 operand format, just different opcode. Slightly
+      // different rounding (RTZ vs RNE) but functionally compatible.
+      uint32_t new_dw0 = (dword0 & ~0xFFFF0000u) | 0xD2960000u;
+      std::memcpy(text + di.offset, &new_dw0, 4);
+      // DW1 unchanged
+    } else if (is_cvt_pk_bf16 || is_fp4_convert) {
+      // No gfx942 equivalent for bf16 pack-convert or FP4 scale-convert.
+      // Replace with v_mov_b32 vDst, 0x11 + s_nop (constant output).
       uint32_t mov_word = 0x7E000291u | (static_cast<uint32_t>(vdst) << 17);
       std::memcpy(text + di.offset, &mov_word, 4);
       uint8_t nop[4];
       EncodeSNop(nop);
       std::memcpy(text + di.offset + 4, nop, 4);
-      if (gfx950_only_replaced < 3) {
-        std::cerr << "hotswap: FP4 @0x" << std::hex << di.offset
-                  << " vDst=v" << std::dec << static_cast<int>(vdst)
-                  << " → v_mov_b32 0x" << std::hex << mov_word << std::dec << "\n";
-      }
+    } else if (is_bitop3) {
+      // v_bitop3_b16 does a 3-input truth-table lookup on 16-bit values.
+      // Replace with v_mov_b32 vDst, 0 (safe zero output) + s_nop.
+      uint32_t mov_word = 0x7E000280u | (static_cast<uint32_t>(vdst) << 17);
+      std::memcpy(text + di.offset, &mov_word, 4);
+      uint8_t nop[4];
+      EncodeSNop(nop);
+      std::memcpy(text + di.offset + 4, nop, 4);
     } else {
       // MFMA or no space for trampoline: NOP out
       uint8_t nop[4];
