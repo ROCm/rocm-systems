@@ -743,8 +743,8 @@ bool PatchElfIsa(void* elf_data, size_t elf_size,
   static const GfxMach gfx_mach_map[] = {
     {"gfx900",  0x02c}, {"gfx902",  0x02d}, {"gfx904",  0x02e},
     {"gfx906",  0x02f}, {"gfx908",  0x030}, {"gfx909",  0x031},
-    {"gfx90a",  0x03f}, {"gfx90c",  0x032}, {"gfx940",  0x040},
-    {"gfx941",  0x041}, {"gfx942",  0x042}, {"gfx950",  0x04e},
+    {"gfx90a",  0x03f}, {"gfx90c",  0x032}, {"gfx940",  0x04a},
+    {"gfx941",  0x04b}, {"gfx942",  0x04c}, {"gfx950",  0x04f},
     {"gfx1010", 0x033}, {"gfx1011", 0x034}, {"gfx1012", 0x035},
     {"gfx1030", 0x036}, {"gfx1031", 0x037}, {"gfx1032", 0x038},
     {"gfx1033", 0x039}, {"gfx1034", 0x03e}, {"gfx1035", 0x03d},
@@ -974,34 +974,11 @@ RewriteResult RetargetCodeObject(void* elf_data, size_t elf_size,
     uint8_t vdst = dword0 & 0xFF;
 
     if (is_fp4_convert) {
-      NopSled* sled = findNearestSled(di.offset);
-      if (sled) {
-        uint64_t tramp_pos = sled->write_pos;
-
-        // Build trampoline: v_mov_b32_e32 vDst, 0 + s_branch back
-        uint32_t mov_word = 0x7E000280u | (static_cast<uint32_t>(vdst) << 17);
-        std::memcpy(text + tramp_pos, &mov_word, 4);
-
-        // s_branch back to instruction after original (offset + 8)
-        uint8_t branch_back[4];
-        if (EncodeSBranch(tramp_pos + 4, di.offset + 8, branch_back)) {
-          std::memcpy(text + tramp_pos + 4, branch_back, 4);
-
-          // Replace original with s_branch to trampoline + s_nop
-          uint8_t branch_fwd[4];
-          if (EncodeSBranch(di.offset, tramp_pos, branch_fwd)) {
-            std::memcpy(text + di.offset, branch_fwd, 4);
-            uint8_t nop[4];
-            EncodeSNop(nop);
-            std::memcpy(text + di.offset + 4, nop, 4);
-            sled->write_pos += 8;
-            di.mnemonic = "<replaced>";
-            ++gfx950_only_replaced;
-            continue;
-          }
-        }
-      }
-      // Fallback: NOP if no sled or branch out of range
+      // NOP out FP4 conversion instructions. The downstream code that reads
+      // vDst will see the register's previous value (from before the NOP).
+      // This is a lossy emulation — proper FP4 E2M1 quantization requires
+      // a trampoline with ~15 VALU instructions per conversion.
+      // TODO: implement full FP4 E2M1 emulation trampolines.
       uint8_t nop[4];
       EncodeSNop(nop);
       std::memcpy(text + di.offset, nop, 4);

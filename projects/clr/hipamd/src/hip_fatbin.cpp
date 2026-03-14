@@ -711,8 +711,8 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
           if (patched_size >= 64 && patched_data[0] == 0x7f && patched_data[1] == 'E') {
             // Map device gfx name to EF_AMDGPU_MACH
             uint32_t target_mach = 0;
-            if (device_name.find("gfx942") != std::string::npos) target_mach = 0x42;
-            else if (device_name.find("gfx950") != std::string::npos) target_mach = 0x4e;
+            if (device_name.find("gfx942") != std::string::npos) target_mach = 0x4c;
+            else if (device_name.find("gfx950") != std::string::npos) target_mach = 0x4f;
             if (target_mach) {
               uint32_t e_flags = 0;
               memcpy(&e_flags, patched_data + 48, 4);
@@ -792,10 +792,12 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
               }
             }
           }
-          if (retarget_fn) {
+          if (retarget_fn && getenv("HSA_HOTSWAP_RULES")) {
             int matched = retarget_fn(patched_data, patched_size,
                                       best_co->first.c_str(), device_name.c_str());
             LogPrintfInfo("HotSwap: retargeted %d instructions", matched);
+          } else {
+            LogPrintfInfo("HotSwap: skipping retarget (no HSA_HOTSWAP_RULES)");
           }
 
           hip_status = AddDevProgram(device, patched_data, patched_size, 0);
