@@ -699,25 +699,25 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
               "HotSwap: no native code object for %s, using %s for retarget",
               device_name.c_str(), best_co->first.c_str());
 
-          // Make a mutable copy and patch ELF e_flags to match device ISA.
-          // Allocate on heap — CLR's addDeviceProgram may keep a reference
-          // to the buffer beyond this scope.
-          auto* patched_ptr = new std::vector<uint8_t>(
+          // Make a persistent copy of the code object for patching.
+          // Use a static container to keep the buffers alive — CLR's
+          // addDeviceProgram may reference the buffer after this function returns.
+          static std::vector<std::unique_ptr<std::vector<uint8_t>>> s_patched_bufs;
+          s_patched_bufs.push_back(std::make_unique<std::vector<uint8_t>>(
               reinterpret_cast<const uint8_t*>(best_co->second.first),
-              reinterpret_cast<const uint8_t*>(best_co->second.first) + best_co->second.second);
-          auto& patched = *patched_ptr;
-          // Track the allocation for cleanup
-          code_obj_allocations_.insert(patched.data());
-          if (patched.size() >= 64 && patched[0] == 0x7f && patched[1] == 'E') {
+              reinterpret_cast<const uint8_t*>(best_co->second.first) + best_co->second.second));
+          uint8_t* patched_data = s_patched_bufs.back()->data();
+          size_t patched_size = s_patched_bufs.back()->size();
+          if (patched_size >= 64 && patched_data[0] == 0x7f && patched_data[1] == 'E') {
             // Map device gfx name to EF_AMDGPU_MACH
             uint32_t target_mach = 0;
             if (device_name.find("gfx942") != std::string::npos) target_mach = 0x42;
             else if (device_name.find("gfx950") != std::string::npos) target_mach = 0x4e;
             if (target_mach) {
               uint32_t e_flags = 0;
-              memcpy(&e_flags, patched.data() + 48, 4);
+              memcpy(&e_flags, patched_data + 48, 4);
               e_flags = (e_flags & ~0xFFu) | target_mach;
-              memcpy(patched.data() + 48, &e_flags, 4);
+              memcpy(patched_data + 48, &e_flags, 4);
 
               // Also patch .note ISA string (NT_AMDGPU_ISA, type 27)
               // Extract target gfx name from device_name
@@ -730,11 +730,11 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
               if (!target_gfx.empty()) {
                 uint64_t shoff = 0;
                 uint16_t shentsz = 0, shnum = 0;
-                memcpy(&shoff, patched.data() + 40, 8);
-                memcpy(&shentsz, patched.data() + 58, 2);
-                memcpy(&shnum, patched.data() + 60, 2);
-                for (uint16_t si = 0; si < shnum && shoff + (si+1)*shentsz <= patched.size(); ++si) {
-                  uint8_t* sh = patched.data() + shoff + si * shentsz;
+                memcpy(&shoff, patched_data + 40, 8);
+                memcpy(&shentsz, patched_data + 58, 2);
+                memcpy(&shnum, patched_data + 60, 2);
+                for (uint16_t si = 0; si < shnum && shoff + (si+1)*shentsz <= patched_size; ++si) {
+                  uint8_t* sh = patched_data + shoff + si * shentsz;
                   uint32_t shtype = 0;
                   memcpy(&shtype, sh + 4, 4);
                   if (shtype != 7) continue; // SHT_NOTE
@@ -742,16 +742,16 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
                   memcpy(&nofs, sh + 24, 8);
                   memcpy(&nsize, sh + 32, 8);
                   uint64_t pos = nofs;
-                  while (pos + 12 <= nofs + nsize && pos + 12 <= patched.size()) {
+                  while (pos + 12 <= nofs + nsize && pos + 12 <= patched_size) {
                     uint32_t namesz, descsz, ntype;
-                    memcpy(&namesz, patched.data() + pos, 4);
-                    memcpy(&descsz, patched.data() + pos + 4, 4);
-                    memcpy(&ntype, patched.data() + pos + 8, 4);
+                    memcpy(&namesz, patched_data + pos, 4);
+                    memcpy(&descsz, patched_data + pos + 4, 4);
+                    memcpy(&ntype, patched_data + pos + 8, 4);
                     uint32_t na = (namesz + 3) & ~3u;
                     uint32_t da = (descsz + 3) & ~3u;
-                    if (ntype == 27 && pos + 12 + na + da <= patched.size()) {
+                    if (ntype == 27 && pos + 12 + na + da <= patched_size) {
                       // Found NT_AMDGPU_ISA — patch gfx string in-place
-                      uint8_t* desc = patched.data() + pos + 12 + na;
+                      uint8_t* desc = patched_data + pos + 12 + na;
                       std::string isa(reinterpret_cast<char*>(desc), descsz > 0 ? descsz - 1 : 0);
                       auto fp = isa.find("gfx");
                       if (fp != std::string::npos) {
@@ -776,22 +776,29 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
           typedef int (*RetargetFn)(void*, size_t, const char*, const char*);
           static RetargetFn retarget_fn = nullptr;
           static bool tried_dlsym = false;
-          if (!tried_dlsym) {
+          if (!tried_dlsym || !retarget_fn) {
             tried_dlsym = true;
-            // Try RTLD_DEFAULT first (searches all loaded libraries)
+            // Try RTLD_DEFAULT (all loaded libraries) — may fail early
+            // if ROCR isn't loaded yet, so retry on each call
             retarget_fn = reinterpret_cast<RetargetFn>(
                 dlsym(RTLD_DEFAULT, "rocr_hotswap_retarget"));
             if (!retarget_fn) {
-              LogPrintfError("HotSwap: rocr_hotswap_retarget not found in ROCR");
+              // Try explicit dlopen
+              void* rocr = dlopen("libhsa-runtime64.so.1", RTLD_NOW | RTLD_NOLOAD);
+              if (rocr) {
+                retarget_fn = reinterpret_cast<RetargetFn>(
+                    dlsym(rocr, "rocr_hotswap_retarget"));
+                dlclose(rocr);
+              }
             }
           }
           if (retarget_fn) {
-            int matched = retarget_fn(patched.data(), patched.size(),
+            int matched = retarget_fn(patched_data, patched_size,
                                       best_co->first.c_str(), device_name.c_str());
             LogPrintfInfo("HotSwap: retargeted %d instructions", matched);
           }
 
-          hip_status = AddDevProgram(device, patched.data(), patched.size(), 0);
+          hip_status = AddDevProgram(device, patched_data, patched_size, 0);
           if (hip_status != hipSuccess) {
             break;
           }
