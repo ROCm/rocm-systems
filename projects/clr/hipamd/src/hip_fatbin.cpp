@@ -727,7 +727,7 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
                 auto ge = device_name.find_first_of(":- ", gp);
                 target_gfx = device_name.substr(gp, ge - gp);
               }
-              if (!target_gfx.empty()) {
+              if (!target_gfx.empty() && false) { // DISABLED: .note patching may corrupt feature flags
                 uint64_t shoff = 0;
                 uint16_t shentsz = 0, shnum = 0;
                 memcpy(&shoff, patched_data + 40, 8);
