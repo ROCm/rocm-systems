@@ -116,7 +116,10 @@ bool Memory::create(Resource::MemoryType memType, Resource::CreateParams* params
       memType = Persistent;
     }
 
-    if (amd::IS_HIP && dev().settings().apuSystem_) {
+    if (amd::IS_HIP && dev().settings().apuSystem_ && !dev().info().largeBar_) {
+      // For large-bar APU (UMA, no invisible heap), skip the premature redirect to
+      // RemoteUSWC: the retry loop below will naturally fall through Local ->
+      // Persistent -> RemoteUSWC, avoiding the Windows GART 50%-of-RAM cap.
       Pal::gpusize totalAlloc = dev().TotalAlloc();
       if (memType == Local && totalAlloc > dev().GetMaxFrameBuffer()) {
         memType = RemoteUSWC;

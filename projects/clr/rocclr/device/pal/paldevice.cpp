@@ -615,9 +615,10 @@ void NullDevice::fillDeviceInfo(const Pal::DeviceProperties& palProp,
     info_.aqlBarrierValue_ = true;
 
 #if defined(_WIN64)
-    if (amd::IS_HIP) {
-      info_.largeBar_ = false;
-    } else if (heaps[Pal::GpuHeapInvisible].logicalSize == 0) {
+    // For APU/integrated devices (no invisible/private VRAM heap), treat as large bar.
+    // This applies to both HIP and OpenCL: on UMA systems the entire system memory is
+    // GPU-local, so resizable BAR semantics apply.
+    if (heaps[Pal::GpuHeapInvisible].logicalSize == 0) {
       info_.largeBar_ = true;
       ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Resizable bar enabled");
     }
