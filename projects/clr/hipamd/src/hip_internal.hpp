@@ -280,29 +280,16 @@ private:
     uint64_t stream_id_;                     //!< Process-unique monotonic stream identifier
 
     // ----- Stream capture state -----
-
-    /// Current capture status of the stream
-    hipStreamCaptureStatus captureStatus_;
-    /// Graph that is constructed with capture
-    hip::Graph* pCaptureGraph_ = nullptr;
-    /// Based on mode, stream capture places restrictions on API calls that can be made within or
-    /// concurrently
-    hipStreamCaptureMode captureMode_{hipStreamCaptureModeGlobal};
-    /// Whether this stream is the origin of a capture
-    bool originStream_;
-    /// Origin stream has no parent. Parent stream for the derived captured streams with event
-    /// dependencies
-    hipStream_t parentStream_ = nullptr;
-    /// Last graph node captured in the stream
-    std::vector<hip::GraphNode*> lastCapturedNodes_;
-    /// Dependencies removed via API hipStreamUpdateCaptureDependencies
-    std::vector<hip::GraphNode*> removedDependencies_;
-    /// Derived streams / parallel branches from the origin stream
-    std::vector<hipStream_t> parallelCaptureStreams_;
-    /// Events associated with the current capture
-    std::unordered_set<hipEvent_t> captureEvents_;
-    /// Unique ID for the current capture sequence
-    unsigned long long captureID_;
+    hipStreamCaptureStatus captureStatus_;                //!< Current capture status
+    hip::Graph* pCaptureGraph_ = nullptr;                 //!< Graph being constructed by capture
+    hipStreamCaptureMode captureMode_{hipStreamCaptureModeGlobal}; //!< API restriction mode
+    bool originStream_;                                   //!< True if this stream started capture
+    hipStream_t parentStream_ = nullptr;                  //!< Parent stream (null for origin)
+    std::vector<hip::GraphNode*> lastCapturedNodes_;      //!< Last graph node(s) captured
+    std::vector<hip::GraphNode*> removedDependencies_;    //!< Deps removed via UpdateCaptureDeps
+    std::vector<hipStream_t> parallelCaptureStreams_;      //!< Forked parallel capture branches
+    std::unordered_set<hipEvent_t> captureEvents_;        //!< Events tied to this capture
+    unsigned long long captureID_;                        //!< Unique ID for this capture sequence
 
     static CommandQueue::Priority convertToQueuePriority(Priority p) {
       return p == Priority::High  ? amd::CommandQueue::Priority::High
