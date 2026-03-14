@@ -53,9 +53,10 @@ enum RocDecLogLevel {
     kRocDecLogLevelMax       = 4
 };
 
-#define GET_TIME_NS() ([]() -> long long { struct timespec ts_; clock_gettime(CLOCK_MONOTONIC, &ts_); return static_cast<long long>(ts_.tv_sec) * 1000000000LL + ts_.tv_nsec; }())
+#define GET_TIME_NS() ([]() -> uint64_t { struct timespec ts_; clock_gettime(CLOCK_MONOTONIC, &ts_); return static_cast<uint64_t>(ts_.tv_sec) * 1000000000LL + ts_.tv_nsec; }())
 #define __FILENAME__ (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__)
 #define MakeMsg(msg) STR(__FILENAME__) + ":" + TOSTR(__LINE__) + ": " + TOSTR(GET_TIME_NS() / 1000ULL) + STR(" us: ") + STR("[pid:") + TOSTR(getpid()) + STR(" tid:") + TOSTR(syscall(SYS_gettid)) + STR("] ") + STR(__func__) + "(): " + msg
+#define MakeFuncMsg(time) STR(__FILENAME__) + ":" + TOSTR(__LINE__) + ": " + time + STR(" us: ") + STR("[pid:") + TOSTR(getpid()) + STR(" tid:") + TOSTR(syscall(SYS_gettid)) + STR("] ") + STR(__func__) + "(): "
 #define OutputMsg(msg) std::cout << msg << std::endl
 #define OutputErrMsg(msg) std::cerr << msg << std::endl
 
@@ -72,6 +73,11 @@ public:
 
     void SetLogLevel(int log_level) {log_level_ = std::clamp(log_level, 0, static_cast<int>(kRocDecLogLevelMax));};
     int GetLogLevel() {return log_level_;};
+
+    uint64_t GetStartTime() {return start_time_;};
+    void SetStartTime(uint64_t time) {start_time_ = time;};
+    uint64_t GetEndTime() {return end_time_;};
+    void SetEndTime(uint64_t time) {end_time_ = time;};
 
     static void AlwaysLog(std::string msg) {
         OutputMsg(msg);
@@ -107,12 +113,23 @@ public:
         }
     };
 
-    
+private:
     int log_level_ = kRocDecLogCritical;
+    uint64_t start_time_; // in us
+    uint64_t end_time_; // in us
 };
 
-#define FunctionEntryLog(logger) if (logger.log_level_ >= kRocDecLogInfo) { OutputMsg("[" + TOSTR(kRocDecLogInfo) + ", Info] " + MakeMsg("") + " entry ..."); }
-#define FunctionExitLog(logger) if (logger.log_level_ >= kRocDecLogInfo) { OutputMsg("[" + TOSTR(kRocDecLogInfo) + ", Info] " + MakeMsg("") + " exit ..."); }
+#define FunctionEntryLog(logger) \
+    if (logger.GetLogLevel() >= kRocDecLogInfo) { \
+        logger.SetStartTime(GET_TIME_NS() / 1000ULL); \
+        OutputMsg("[" + TOSTR(kRocDecLogInfo) + ", Info] " + MakeFuncMsg((TOSTR(logger.GetStartTime()))) + " entry ..."); \
+    }
+
+#define FunctionExitLog(logger) \
+    if (logger.GetLogLevel() >= kRocDecLogInfo) { \
+        logger.SetEndTime(GET_TIME_NS() / 1000ULL); \
+        OutputMsg("[" + TOSTR(kRocDecLogInfo) + ", Info] " + MakeFuncMsg((TOSTR(logger.GetEndTime()))) + " exit (" + TOSTR(logger.GetEndTime() - logger.GetStartTime()) + " us) ..."); \
+    }
 
 class rocDecodeException : public std::exception {
 public:
