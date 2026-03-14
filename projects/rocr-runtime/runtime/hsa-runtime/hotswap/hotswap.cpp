@@ -985,9 +985,29 @@ RewriteResult RetargetCodeObject(void* elf_data, size_t elf_size,
       uint32_t new_dw0 = (dword0 & ~0xFFFF0000u) | 0xD2960000u;
       std::memcpy(text + di.offset, &new_dw0, 4);
       // DW1 unchanged
-    } else if (is_cvt_pk_bf16 || is_fp4_convert) {
-      // No gfx942 equivalent for bf16 pack-convert or FP4 scale-convert.
-      // Replace with v_mov_b32 vDst, 0x11 + s_nop (constant output).
+    } else if (is_cvt_pk_bf16) {
+      // v_cvt_pk_bf16_f32 vDst, vSrc0, vSrc1: pack bf16(src0) and bf16(src1)
+      // bf16 is the upper 16 bits of f32 (truncation rounding).
+      // Emulate with v_lshrrev_b32 vDst, 16, vSrc0 (4 bytes) + s_nop (4 bytes):
+      //   vDst[15:0]  = vSrc0[31:16] = bf16(vSrc0) ← correct
+      //   vDst[31:16] = 0 = bf16(0.0) ← lossy but valid (no NaN)
+      // v_lshrrev_b32_e32 vN, 16, vM = 0x20000090 | (N << 17) | (256+M)
+      uint16_t src0_raw = dword1 & 0x1FF;
+      uint8_t src0_vgpr = static_cast<uint8_t>(src0_raw & 0xFF);
+      // VOP2 encoding: v_lshrrev_b32_e32 = opcode 0x10
+      // [31:25]=0x10 [24:17]=vdst [16:9]=vsrc1 [8:0]=src0
+      // src0 = 16 (inline constant = 0x90), vsrc1 = vSrc0_vgpr
+      uint32_t lshr_word = (0x10u << 25) |
+                           (static_cast<uint32_t>(vdst) << 17) |
+                           (static_cast<uint32_t>(src0_vgpr) << 9) |
+                           0x90u; // inline constant 16
+      std::memcpy(text + di.offset, &lshr_word, 4);
+      uint8_t nop[4];
+      EncodeSNop(nop);
+      std::memcpy(text + di.offset + 4, nop, 4);
+    } else if (is_fp4_convert) {
+      // No gfx942 equivalent for FP4 scale-convert.
+      // Replace with v_mov_b32 vDst, 0x11 + s_nop (constant FP4 output).
       uint32_t mov_word = 0x7E000291u | (static_cast<uint32_t>(vdst) << 17);
       std::memcpy(text + di.offset, &mov_word, 4);
       uint8_t nop[4];
