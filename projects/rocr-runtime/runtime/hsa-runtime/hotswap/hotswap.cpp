@@ -974,18 +974,19 @@ RewriteResult RetargetCodeObject(void* elf_data, size_t elf_size,
     uint8_t vdst = dword0 & 0xFF;
 
     if (is_fp4_convert) {
-      // Replace FP4 conversion with v_mov_b32 vDst, 0x11 (constant FP4
-      // encoding for two 0.5 values). This is a lossy emulation that
-      // produces valid FP4 output (won't cause NaN/Inf downstream).
-      // The 8-byte original is replaced with 4-byte mov + 4-byte nop.
-      //
+      // Replace FP4 conversion with v_mov_b32 vDst, 0x11 + s_nop.
+      // 0x11 = packed FP4 E2M1 encoding for two 0.5 values.
       // v_mov_b32_e32 vN, 17 = 0x7E000291 | (N << 17)
-      // (17 = 0x11 = packed FP4 E2M1: low nibble=0001=0.5, high nibble=0001=0.5)
       uint32_t mov_word = 0x7E000291u | (static_cast<uint32_t>(vdst) << 17);
       std::memcpy(text + di.offset, &mov_word, 4);
       uint8_t nop[4];
       EncodeSNop(nop);
       std::memcpy(text + di.offset + 4, nop, 4);
+      if (gfx950_only_replaced < 3) {
+        std::cerr << "hotswap: FP4 @0x" << std::hex << di.offset
+                  << " vDst=v" << std::dec << static_cast<int>(vdst)
+                  << " → v_mov_b32 0x" << std::hex << mov_word << std::dec << "\n";
+      }
     } else {
       // MFMA or no space for trampoline: NOP out
       uint8_t nop[4];
