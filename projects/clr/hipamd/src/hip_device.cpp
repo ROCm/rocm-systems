@@ -251,9 +251,9 @@ void Device::RemoveStream(Stream* stream) {
 }
 
 // ================================================================================================
-bool Device::StreamExists(Stream* stream) {
+bool Device::StreamExists(const Stream* stream) {
   std::shared_lock lock(streamSetLock);
-  if (streamSet.find(stream) != streamSet.end()) {
+  if (streamSet.find(const_cast<Stream*>(stream)) != streamSet.end()) {
     return true;
   }
   return false;
@@ -273,7 +273,7 @@ void Device::destroyAllStreams() {
   for (auto& it : toBeDeleted) {
     hip::Stream::Destroy(it);
   }
-  hip::tls.stream_per_thread_obj_.clear_spt();
+  hip::tls.stream_per_thread_obj_.Clear();
 }
 
 // ================================================================================================
