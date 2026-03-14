@@ -987,28 +987,63 @@ RewriteResult RetargetCodeObject(void* elf_data, size_t elf_size,
       // DW1 unchanged
     } else if (is_cvt_pk_bf16) {
       // v_cvt_pk_bf16_f32 vDst, vSrc0, vSrc1: pack bf16(src0) and bf16(src1)
-      // bf16 = upper 16 bits of f32 (truncation).
-      // Use NOP sled trampoline with 3 instructions (12 bytes):
-      //   v_lshrrev_b32 vDst, 16, vSrc1   (4B) → vDst = bf16(src1) in [15:0]
-      //   v_lshl_or_b32 vDst, vDst, 16, 0 (8B VOP3) → vDst = bf16(src1) in [31:16]
-      //   v_lshrrev_b32 ... wait, this clobbers the lower half
-      //
-      // Better 2-instruction approach (12 bytes in trampoline):
-      //   v_lshrrev_b32 vDst, 16, vSrc0   (4B) → vDst[15:0] = bf16(src0)
-      //   v_lshl_or_b32 vDst, vSrc1, 0, vDst (8B) → vDst |= vSrc1
-      //   This puts vSrc1's FULL 32 bits OR'd with bf16(src0). Wrong.
-      //
-      // Correct 2-instruction (12 bytes): use v_and_b32 + v_or_b32
-      // Actually can't do it in 2 instructions without a temp or literal.
-      //
-      // Simplest correct approach: just capture src0 half (4 bytes + nop).
-      // This is lossy but NaN-safe.
+      // Full emulation using NOP sled trampoline + temp VGPR (v255):
+      //   1. v_lshrrev_b32 vDst, 16, vSrc0   (4B) → bf16(src0) in [15:0]
+      //   2. v_lshrrev_b32 v255, 16, vSrc1   (4B) → bf16(src1) in [15:0]
+      //   3. v_lshl_or_b32 vDst, v255, 16, vDst (8B) → pack both halves
+      //   4. s_branch <return>                (4B)
+      // Total: 20 bytes in trampoline
       uint16_t src0_raw = dword1 & 0x1FF;
+      uint16_t src1_raw = (dword1 >> 9) & 0x1FF;
       uint8_t src0_vgpr = static_cast<uint8_t>(src0_raw & 0xFF);
+      uint8_t src1_vgpr = static_cast<uint8_t>(src1_raw & 0xFF);
+      uint8_t vtmp = 255; // temp VGPR
+
+      NopSled* sled = findNearestSled(di.offset);
+      if (sled && sled->write_pos + 20 <= sled->end) {
+        uint64_t tp = sled->write_pos;
+
+        // 1. v_lshrrev_b32 vDst, 16, vSrc0
+        uint32_t i1 = (0x10u << 25) | (static_cast<uint32_t>(vdst) << 17) |
+                      (static_cast<uint32_t>(src0_vgpr) << 9) | 0x90u;
+        std::memcpy(text + tp, &i1, 4);
+
+        // 2. v_lshrrev_b32 v255, 16, vSrc1
+        uint32_t i2 = (0x10u << 25) | (static_cast<uint32_t>(vtmp) << 17) |
+                      (static_cast<uint32_t>(src1_vgpr) << 9) | 0x90u;
+        std::memcpy(text + tp + 4, &i2, 4);
+
+        // 3. v_lshl_or_b32 vDst, v255, 16, vDst (VOP3 opcode D200)
+        uint32_t i3_dw0 = 0xD2000000u | static_cast<uint32_t>(vdst);
+        uint32_t i3_dw1 = (256u + static_cast<uint32_t>(vtmp)) |
+                          (0x90u << 9) |
+                          ((256u + static_cast<uint32_t>(vdst)) << 18);
+        std::memcpy(text + tp + 8, &i3_dw0, 4);
+        std::memcpy(text + tp + 12, &i3_dw1, 4);
+
+        // 4. s_branch back
+        uint8_t br_back[4];
+        if (EncodeSBranch(tp + 16, di.offset + 8, br_back)) {
+          std::memcpy(text + tp + 16, br_back, 4);
+
+          // Replace original with s_branch to trampoline + s_nop
+          uint8_t br_fwd[4];
+          if (EncodeSBranch(di.offset, tp, br_fwd)) {
+            std::memcpy(text + di.offset, br_fwd, 4);
+            uint8_t nop[4];
+            EncodeSNop(nop);
+            std::memcpy(text + di.offset + 4, nop, 4);
+            sled->write_pos += 20;
+            di.mnemonic = "<replaced>";
+            ++gfx950_only_replaced;
+            continue;
+          }
+        }
+      }
+      // Fallback: v_lshrrev for src0 half only
       uint32_t lshr_word = (0x10u << 25) |
                            (static_cast<uint32_t>(vdst) << 17) |
-                           (static_cast<uint32_t>(src0_vgpr) << 9) |
-                           0x90u;
+                           (static_cast<uint32_t>(src0_vgpr) << 9) | 0x90u;
       std::memcpy(text + di.offset, &lshr_word, 4);
       uint8_t nop[4];
       EncodeSNop(nop);
