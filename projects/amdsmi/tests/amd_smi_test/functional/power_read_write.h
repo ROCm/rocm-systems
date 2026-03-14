@@ -27,7 +27,7 @@
 
 class TestPowerReadWrite : public TestBase {
  public:
-    TestPowerReadWrite();
+  TestPowerReadWrite();
 
   // @Brief: Destructor for test case of TestPowerReadWrite
   virtual ~TestPowerReadWrite();

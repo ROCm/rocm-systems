@@ -27,7 +27,7 @@
 
 class TestVoltRead : public TestBase {
  public:
-    TestVoltRead();
+  TestVoltRead();
 
   // @Brief: Destructor for test case of TestVOltRead
   virtual ~TestVoltRead();
