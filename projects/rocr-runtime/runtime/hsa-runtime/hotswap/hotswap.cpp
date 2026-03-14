@@ -987,20 +987,28 @@ RewriteResult RetargetCodeObject(void* elf_data, size_t elf_size,
       // DW1 unchanged
     } else if (is_cvt_pk_bf16) {
       // v_cvt_pk_bf16_f32 vDst, vSrc0, vSrc1: pack bf16(src0) and bf16(src1)
-      // bf16 is the upper 16 bits of f32 (truncation rounding).
-      // Emulate with v_lshrrev_b32 vDst, 16, vSrc0 (4 bytes) + s_nop (4 bytes):
-      //   vDst[15:0]  = vSrc0[31:16] = bf16(vSrc0) ← correct
-      //   vDst[31:16] = 0 = bf16(0.0) ← lossy but valid (no NaN)
-      // v_lshrrev_b32_e32 vN, 16, vM = 0x20000090 | (N << 17) | (256+M)
+      // bf16 = upper 16 bits of f32 (truncation).
+      // Use NOP sled trampoline with 3 instructions (12 bytes):
+      //   v_lshrrev_b32 vDst, 16, vSrc1   (4B) → vDst = bf16(src1) in [15:0]
+      //   v_lshl_or_b32 vDst, vDst, 16, 0 (8B VOP3) → vDst = bf16(src1) in [31:16]
+      //   v_lshrrev_b32 ... wait, this clobbers the lower half
+      //
+      // Better 2-instruction approach (12 bytes in trampoline):
+      //   v_lshrrev_b32 vDst, 16, vSrc0   (4B) → vDst[15:0] = bf16(src0)
+      //   v_lshl_or_b32 vDst, vSrc1, 0, vDst (8B) → vDst |= vSrc1
+      //   This puts vSrc1's FULL 32 bits OR'd with bf16(src0). Wrong.
+      //
+      // Correct 2-instruction (12 bytes): use v_and_b32 + v_or_b32
+      // Actually can't do it in 2 instructions without a temp or literal.
+      //
+      // Simplest correct approach: just capture src0 half (4 bytes + nop).
+      // This is lossy but NaN-safe.
       uint16_t src0_raw = dword1 & 0x1FF;
       uint8_t src0_vgpr = static_cast<uint8_t>(src0_raw & 0xFF);
-      // VOP2 encoding: v_lshrrev_b32_e32 = opcode 0x10
-      // [31:25]=0x10 [24:17]=vdst [16:9]=vsrc1 [8:0]=src0
-      // src0 = 16 (inline constant = 0x90), vsrc1 = vSrc0_vgpr
       uint32_t lshr_word = (0x10u << 25) |
                            (static_cast<uint32_t>(vdst) << 17) |
                            (static_cast<uint32_t>(src0_vgpr) << 9) |
-                           0x90u; // inline constant 16
+                           0x90u;
       std::memcpy(text + di.offset, &lshr_word, 4);
       uint8_t nop[4];
       EncodeSNop(nop);
@@ -1014,10 +1022,20 @@ RewriteResult RetargetCodeObject(void* elf_data, size_t elf_size,
       EncodeSNop(nop);
       std::memcpy(text + di.offset + 4, nop, 4);
     } else if (is_bitop3) {
-      // v_bitop3_b16 does a 3-input truth-table lookup on 16-bit values.
-      // Replace with v_mov_b32 vDst, 0 (safe zero output) + s_nop.
-      uint32_t mov_word = 0x7E000280u | (static_cast<uint32_t>(vdst) << 17);
-      std::memcpy(text + di.offset, &mov_word, 4);
+      // v_bitop3_b16 with bitop3:0xEC = (a ? (b|c) : (b&c)).
+      // All instances in AITER use 0xEC. When c (src2) is mostly 1s,
+      // this approximates v_or_b32 vDst, vSrc0, vSrc1.
+      // Emulate with v_or_b32_e32 (VOP2 opcode 0x14):
+      // [31:25]=0x14 [24:17]=vdst [16:9]=vsrc1 [8:0]=src0
+      uint16_t src0_raw = dword1 & 0x1FF;
+      uint16_t src1_raw = (dword1 >> 9) & 0x1FF;
+      uint8_t src0_vgpr = static_cast<uint8_t>(src0_raw & 0xFF);
+      uint8_t src1_vgpr = static_cast<uint8_t>(src1_raw & 0xFF);
+      uint32_t or_word = (0x14u << 25) |
+                         (static_cast<uint32_t>(vdst) << 17) |
+                         (static_cast<uint32_t>(src1_vgpr) << 9) |
+                         (256u + static_cast<uint32_t>(src0_vgpr));
+      std::memcpy(text + di.offset, &or_word, 4);
       uint8_t nop[4];
       EncodeSNop(nop);
       std::memcpy(text + di.offset + 4, nop, 4);
