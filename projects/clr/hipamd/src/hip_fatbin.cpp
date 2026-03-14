@@ -23,6 +23,7 @@ THE SOFTWARE.
 #include "hip/hip_runtime_api.h"
 #include "hip_fatbin.hpp"
 #include "hip_global.hpp"
+#include <dlfcn.h>
 #include <unordered_map>
 #include <mutex>
 #include "hip_code_object.hpp"
@@ -485,10 +486,29 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
     }
   }
 
+  std::set<std::string> hotswap_extra_isas;
+  // HotSwap cross-gen: when ISA override is set, prepare to also query for
+  // code objects from other architectures. We do this in a second pass after
+  // the initial lookup finds nothing for the device's native ISA.
+  if (const char* hotswap_override = getenv("HSA_HOTSWAP_ISA_OVERRIDE")) {
+    if (hotswap_override[0] && std::string(hotswap_override) != "1") {
+      std::string target_gfx(hotswap_override);
+      if (target_gfx == "gfx942") {
+        hotswap_extra_isas.insert("amdgcn-amd-amdhsa--gfx950");
+        hotswap_extra_isas.insert("amdgcn-amd-amdhsa--gfx950:sramecc+:xnack-");
+      } else if (target_gfx == "gfx950") {
+        hotswap_extra_isas.insert("amdgcn-amd-amdhsa--gfx942");
+        hotswap_extra_isas.insert("amdgcn-amd-amdhsa--gfx942:sramecc+:xnack-");
+      }
+    }
+  }
+
   std::map<std::string, std::pair<const void*, size_t>> code_obj_map;  //!< code object map
   if (is_compressed) {
     if (!UncompressAndPopulateCodeObject(image_, unique_isa_names, code_obj_map)) {
-      return hipErrorInvalidImage;
+      if (hotswap_extra_isas.empty()) {
+        return hipErrorInvalidImage;
+      }
     }
     // For compressed code objects, we use comgr to extract and make a copy.
     // Track these to release later
@@ -496,7 +516,10 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
                   [&](const auto& info) { code_obj_allocations_.insert(info.second.first); });
   } else {  // uncompressed code object
     if (!PopulateCodeObjectMap(image_, unique_isa_names, code_obj_map)) {
-      return hipErrorInvalidImage;
+      // If hotswap override is active, don't fail yet — try cross-gen lookup
+      if (hotswap_extra_isas.empty()) {
+        return hipErrorInvalidImage;
+      }
     }
   }
 
@@ -659,6 +682,120 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
 
         hip_status = AddDevProgram(device, co, co_size, 0);
         if (hip_status != hipSuccess) {
+          break;
+        }
+      } else if (!hotswap_extra_isas.empty()) {
+        // HotSwap cross-gen fallback: no native/generic/SPIRV code object found.
+        // Do a second COMGR lookup for cross-gen ISAs.
+        std::map<std::string, std::pair<const void*, size_t>> xgen_map;
+        if (is_compressed) {
+          UncompressAndPopulateCodeObject(image_, hotswap_extra_isas, xgen_map);
+        } else {
+          PopulateCodeObjectMap(image_, hotswap_extra_isas, xgen_map);
+        }
+        if (!xgen_map.empty()) {
+          auto best_co = xgen_map.begin();
+          LogPrintfInfo(
+              "HotSwap: no native code object for %s, using %s for retarget",
+              device_name.c_str(), best_co->first.c_str());
+
+          // Make a mutable copy and patch ELF e_flags to match device ISA
+          // so CLR's program loader accepts the code object.
+          // The ROCR hotswap hook will handle actual instruction retargeting.
+          std::vector<uint8_t> patched(
+              reinterpret_cast<const uint8_t*>(best_co->second.first),
+              reinterpret_cast<const uint8_t*>(best_co->second.first) + best_co->second.second);
+          if (patched.size() >= 64 && patched[0] == 0x7f && patched[1] == 'E') {
+            // Map device gfx name to EF_AMDGPU_MACH
+            uint32_t target_mach = 0;
+            if (device_name.find("gfx942") != std::string::npos) target_mach = 0x42;
+            else if (device_name.find("gfx950") != std::string::npos) target_mach = 0x4e;
+            if (target_mach) {
+              uint32_t e_flags = 0;
+              memcpy(&e_flags, patched.data() + 48, 4);
+              e_flags = (e_flags & ~0xFFu) | target_mach;
+              memcpy(patched.data() + 48, &e_flags, 4);
+
+              // Also patch .note ISA string (NT_AMDGPU_ISA, type 27)
+              // Extract target gfx name from device_name
+              std::string target_gfx;
+              auto gp = device_name.find("gfx");
+              if (gp != std::string::npos) {
+                auto ge = device_name.find_first_of(":- ", gp);
+                target_gfx = device_name.substr(gp, ge - gp);
+              }
+              if (!target_gfx.empty()) {
+                uint64_t shoff = 0;
+                uint16_t shentsz = 0, shnum = 0;
+                memcpy(&shoff, patched.data() + 40, 8);
+                memcpy(&shentsz, patched.data() + 58, 2);
+                memcpy(&shnum, patched.data() + 60, 2);
+                for (uint16_t si = 0; si < shnum && shoff + (si+1)*shentsz <= patched.size(); ++si) {
+                  uint8_t* sh = patched.data() + shoff + si * shentsz;
+                  uint32_t shtype = 0;
+                  memcpy(&shtype, sh + 4, 4);
+                  if (shtype != 7) continue; // SHT_NOTE
+                  uint64_t nofs = 0, nsize = 0;
+                  memcpy(&nofs, sh + 24, 8);
+                  memcpy(&nsize, sh + 32, 8);
+                  uint64_t pos = nofs;
+                  while (pos + 12 <= nofs + nsize && pos + 12 <= patched.size()) {
+                    uint32_t namesz, descsz, ntype;
+                    memcpy(&namesz, patched.data() + pos, 4);
+                    memcpy(&descsz, patched.data() + pos + 4, 4);
+                    memcpy(&ntype, patched.data() + pos + 8, 4);
+                    uint32_t na = (namesz + 3) & ~3u;
+                    uint32_t da = (descsz + 3) & ~3u;
+                    if (ntype == 27 && pos + 12 + na + da <= patched.size()) {
+                      // Found NT_AMDGPU_ISA — patch gfx string in-place
+                      uint8_t* desc = patched.data() + pos + 12 + na;
+                      std::string isa(reinterpret_cast<char*>(desc), descsz > 0 ? descsz - 1 : 0);
+                      auto fp = isa.find("gfx");
+                      if (fp != std::string::npos) {
+                        auto fe = fp;
+                        while (fe < isa.size() && isa[fe] != ':' && isa[fe] != '\0') ++fe;
+                        std::string orig = isa.substr(fp, fe - fp);
+                        if (target_gfx.size() <= orig.size()) {
+                          memcpy(desc + fp, target_gfx.c_str(), target_gfx.size());
+                          for (size_t z = target_gfx.size(); z < orig.size(); ++z)
+                            desc[fp + z] = '\0';
+                        }
+                      }
+                      break;
+                    }
+                    pos += 12 + na + da;
+                  }
+                }
+              }
+            }
+          }
+          // Retarget instructions using ROCR's hotswap engine via C wrapper
+          typedef int (*RetargetFn)(void*, size_t, const char*, const char*);
+          static RetargetFn retarget_fn = nullptr;
+          static bool tried_dlsym = false;
+          if (!tried_dlsym) {
+            tried_dlsym = true;
+            // Try RTLD_DEFAULT first (searches all loaded libraries)
+            retarget_fn = reinterpret_cast<RetargetFn>(
+                dlsym(RTLD_DEFAULT, "rocr_hotswap_retarget"));
+            if (!retarget_fn) {
+              LogPrintfError("HotSwap: rocr_hotswap_retarget not found in ROCR");
+            }
+          }
+          if (retarget_fn) {
+            int matched = retarget_fn(patched.data(), patched.size(),
+                                      best_co->first.c_str(), device_name.c_str());
+            LogPrintfInfo("HotSwap: retargeted %d instructions", matched);
+          }
+
+          hip_status = AddDevProgram(device, patched.data(), patched.size(), 0);
+          if (hip_status != hipSuccess) {
+            break;
+          }
+        } else {
+          LogPrintfError(
+              "No compatible code objects found for: %s (HotSwap: no cross-gen candidates either)",
+              device->devices()[0]->isa().targetId());
           break;
         }
       } else {

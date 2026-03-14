@@ -1457,3 +1457,12 @@ RewriteResult RewriteCodeObjectGrow(const void* elf_data, size_t elf_size,
 
 } // namespace hotswap
 } // namespace rocr
+
+// C-linkage wrapper for dlsym access from HIP/CLR
+extern "C" __attribute__((visibility("default")))
+int rocr_hotswap_retarget(void* elf_data, size_t elf_size,
+                          const char* source_isa, const char* target_isa) {
+  auto result = rocr::hotswap::RetargetCodeObject(
+      elf_data, elf_size, std::string(source_isa), std::string(target_isa));
+  return result.rules_matched;
+}

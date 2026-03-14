@@ -69,7 +69,6 @@
 
 #ifdef ROCR_HOTSWAP_ENABLED
 #include "hotswap/hotswap.hpp"
-#include "core/inc/isa.h"
 #endif
 
 using namespace rocr::amd::hsa;
@@ -1296,57 +1295,90 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
 
   bool isaOverridden = false;
 #ifdef ROCR_HOTSWAP_ENABLED
-  // When HSA_HOTSWAP_ISA_OVERRIDE is set to a target ISA (e.g. "gfx942"),
-  // always retarget code objects whose ISA doesn't match the override target.
-  // This handles the case where HSA_OVERRIDE_GFX_VERSION makes the agent
-  // report a different ISA than the actual hardware.
-  std::string hotswapTargetIsa;
-  if (rocr::hotswap::IsEnabled() && rocr::hotswap::IsIsaOverrideEnabled()) {
-    const char* overrideTarget = std::getenv("HSA_HOTSWAP_ISA_OVERRIDE");
-    if (overrideTarget && std::string(overrideTarget) != "1") {
-      // Explicit target ISA specified (e.g. "gfx942")
-      hotswapTargetIsa = std::string("amdgcn-amd-amdhsa--") + overrideTarget;
+  // Cache the ISA override target (avoid repeated getenv)
+  static const char* s_hotswap_isa_override = std::getenv("HSA_HOTSWAP_ISA_OVERRIDE");
+  std::string hotswapTargetGfx;
+  if (rocr::hotswap::IsEnabled() && s_hotswap_isa_override && s_hotswap_isa_override[0]
+      && s_hotswap_isa_override[0] != '0') {
+    if (std::string(s_hotswap_isa_override) != "1") {
+      hotswapTargetGfx = s_hotswap_isa_override;
     }
-    // Check if the code object's ISA differs from the override target
-    if (!hotswapTargetIsa.empty()) {
-      // Compare just the gfx part
-      std::string codeGfx, targetGfx;
-      auto extractGfx = [](const std::string& s) -> std::string {
-        size_t p = s.find("gfx");
-        if (p == std::string::npos) return "";
-        size_t e = p;
-        while (e < s.size() && s[e] != ':' && s[e] != ' ' && s[e] != '-')
-          ++e;
-        // Also include trailing digits after the last alpha
-        return s.substr(p, e - p);
-      };
-      codeGfx = extractGfx(codeIsa);
-      targetGfx = extractGfx(hotswapTargetIsa);
-      std::cerr << "hotswap: ISA override check: code=" << codeGfx
-                << " target=" << targetGfx << "\n";
-      if (codeGfx != targetGfx && !codeGfx.empty() && !targetGfx.empty()) {
-        isaOverridden = true;
-        std::cerr << "hotswap: ISA mismatch detected, retarget "
-                  << codeGfx << " -> " << targetGfx << "\n";
+    if (!hotswapTargetGfx.empty()) {
+      // Check the ELF .note section for the true ISA (HIP may have patched
+      // e_flags but not the note). The codeIsa comes from GetIsa() which
+      // reads the note section, so it reflects the original ISA.
+      // However, if e_flags was patched, codeIsa may already reflect the
+      // patched value. Check the actual ELF note bytes directly.
+      const uint8_t* elfBytes = reinterpret_cast<const uint8_t*>(code->ElfData());
+      uint64_t elfSz = code->ElfSize();
+      // Read the original e_flags MACH value before any patching
+      if (elfSz >= 52) {
+        uint32_t e_flags = 0;
+        std::memcpy(&e_flags, elfBytes + 48, 4);
+        uint32_t mach = e_flags & 0xFF;
+        // Check if the mach matches the target. If HIP patched it, mach
+        // will equal the target. But we need to check the .note ISA string
+        // which wasn't patched.
+        // Scan for NT_AMDGPU_ISA note (type 27) with original gfx name
+        uint64_t shoff = 0;
+        uint16_t shentsz = 0, shnum = 0;
+        std::memcpy(&shoff, elfBytes + 40, 8);
+        std::memcpy(&shentsz, elfBytes + 58, 2);
+        std::memcpy(&shnum, elfBytes + 60, 2);
+        for (uint16_t i = 0; i < shnum && shoff + (i+1)*shentsz <= elfSz; ++i) {
+          const uint8_t* sh = elfBytes + shoff + i * shentsz;
+          uint32_t shtype = 0;
+          std::memcpy(&shtype, sh + 4, 4);
+          if (shtype != 7) continue; // SHT_NOTE
+          uint64_t shofs = 0, shshz = 0;
+          std::memcpy(&shofs, sh + 24, 8);
+          std::memcpy(&shshz, sh + 32, 8);
+          uint64_t pos = shofs;
+          while (pos + 12 <= shofs + shshz && pos + 12 <= elfSz) {
+            uint32_t namesz, descsz, ntype;
+            std::memcpy(&namesz, elfBytes + pos, 4);
+            std::memcpy(&descsz, elfBytes + pos + 4, 4);
+            std::memcpy(&ntype, elfBytes + pos + 8, 4);
+            uint32_t na = (namesz + 3) & ~3u;
+            uint32_t da = (descsz + 3) & ~3u;
+            if (ntype == 27 && namesz > 0 && pos + 12 + na + da <= elfSz) {
+              // Found NT_AMDGPU_ISA — check the desc for original gfx
+              const char* desc = reinterpret_cast<const char*>(elfBytes + pos + 12 + na);
+              std::string noteIsa(desc, descsz > 0 ? descsz - 1 : 0);
+              size_t gp = noteIsa.find("gfx");
+              if (gp != std::string::npos) {
+                size_t ge = gp;
+                while (ge < noteIsa.size() && noteIsa[ge] != ':' && noteIsa[ge] != ' ')
+                  ++ge;
+                std::string noteGfx = noteIsa.substr(gp, ge - gp);
+                if (noteGfx != hotswapTargetGfx) {
+                  isaOverridden = true;
+                  std::cerr << "hotswap: .note ISA mismatch: " << noteGfx
+                            << " != " << hotswapTargetGfx << " — retarget\n";
+                }
+              }
+              break;
+            }
+            pos += 12 + na + da;
+          }
+          if (isaOverridden) break;
+        }
       }
     }
   }
+#endif
 
   if (agent.handle != 0 && !context_->IsaSupportedByAgent(agent, objectsIsa, genericVersion)) {
-    if (rocr::hotswap::IsEnabled() && rocr::hotswap::IsIsaOverrideEnabled()) {
-      logger_ << "LoaderInfo: hotswap ISA override active, bypassing ISA check for " << codeIsa.c_str() << "\n";
+#ifdef ROCR_HOTSWAP_ENABLED
+    if (rocr::hotswap::IsEnabled() && s_hotswap_isa_override && s_hotswap_isa_override[0]) {
       isaOverridden = true;
-    } else {
+    } else
+#endif
+    {
       logger_ << "LoaderError: code object's ISA (" << codeIsa.c_str() << ") is not supported by the agent\n";
       return HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS;
     }
   }
-#else
-  if (agent.handle != 0 && !context_->IsaSupportedByAgent(agent, objectsIsa, genericVersion)) {
-    logger_ << "LoaderError: code object's ISA (" << codeIsa.c_str() << ") is not supported by the agent\n";
-    return HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS;
-  }
-#endif
 
   hsa_status_t status;
 
@@ -1361,21 +1393,10 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
     // If ISA was overridden, first retarget all instructions from the source
     // ISA to the target ISA, then apply any rewrite rules.
     if (isaOverridden) {
-      // Determine the target ISA name: prefer explicit override, fall back to agent ISA
+      // Determine the target ISA name from HSA_HOTSWAP_ISA_OVERRIDE
       std::string targetIsaName;
-      if (!hotswapTargetIsa.empty()) {
-        targetIsaName = hotswapTargetIsa;
-      } else {
-        hsa_isa_t agentIsa = {};
-        auto getIsa = [](hsa_isa_t isa, void* data) {
-          *reinterpret_cast<hsa_isa_t*>(data) = isa;
-          return HSA_STATUS_INFO_BREAK;
-        };
-        hsa_agent_iterate_isas(agent, getIsa, &agentIsa);
-        if (agentIsa.handle) {
-          const rocr::core::Isa* isaObj = rocr::core::Isa::Object(agentIsa);
-          if (isaObj) targetIsaName = isaObj->GetIsaName();
-        }
+      if (!hotswapTargetGfx.empty()) {
+        targetIsaName = std::string("amdgcn-amd-amdhsa--") + hotswapTargetGfx;
       }
 
       if (!targetIsaName.empty()) {
