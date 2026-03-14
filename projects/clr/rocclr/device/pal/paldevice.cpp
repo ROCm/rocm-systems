@@ -1937,7 +1937,6 @@ bool Device::unbindExternalDevice(uint flags, void* const pDevice[], void* pCont
   if ((flags & amd::Context::Flags::GLDeviceKhr) == 0) {
     return true;
   }
-
   void* glDevice = pDevice[amd::Context::DeviceFlagIdx::GLDeviceKhrIdx];
   if (glDevice != nullptr) {
     // Dissociate PAL-OGL
