@@ -127,19 +127,23 @@ bool glAssociate(Device* device, uint flags, void* GLplatformContext, void* GLde
 
   if (!initGLInteropPrivateExt(GLdeviceContext)) return false;
 
-  if (!glCanInterop(device, GLplatformContext, GLdeviceContext)) {
-    return false;
-  }
-
-  return wglBeginCLInteropAMD(static_cast<HGLRC>(GLplatformContext), 0) != FALSE;
+  return glCanInterop(device, GLplatformContext, GLdeviceContext);
 }
 
 // ================================================================================================
 bool glDissociate(Device* device, void* GLplatformContext, void* GLdeviceContext) {
-  static_cast<void>(device); // unused
+  return true;
+}
 
-  if (!initGLInteropPrivateExt(GLdeviceContext)) return false;
+// ================================================================================================
+bool glBeginInterop(void* GLplatformContext) {
+  if (!wglBeginCLInteropAMD) return false;
+  return wglBeginCLInteropAMD(static_cast<HGLRC>(GLplatformContext), 0) != FALSE;
+}
 
+// ================================================================================================
+bool glEndInterop(void* GLplatformContext) {
+  if (!wglEndCLInteropAMD) return false;
   return wglEndCLInteropAMD(static_cast<HGLRC>(GLplatformContext), 0) != FALSE;
 }
 

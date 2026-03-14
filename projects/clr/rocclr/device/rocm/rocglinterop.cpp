@@ -198,5 +198,15 @@ bool glDissociate(Device*, void*, void*) {
   return true;
 }
 
+// ================================================================================================
+bool glBeginInterop(void*) {
+  return true;
+}
+
+// ================================================================================================
+bool glEndInterop(void*) {
+  return true;
+}
+
 }  // namespace GlInterop
 }  // namespace amd::roc

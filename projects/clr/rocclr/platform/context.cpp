@@ -51,13 +51,10 @@ Context::Context(const std::vector<Device*>& devices, const Info& info)
 }
 
 Context::~Context() {
+  endGLInterop();
+
   // Loop through all devices
   for (const auto& it : devices_) {
-    // Dissociate OCL context with any external device
-    if (info_.flags_ & (GLDeviceKhr | D3D10DeviceKhr | D3D11DeviceKhr)) {
-      it->unbindExternalDevice(info_.flags_, info_.hDev_, info_.hCtx_);
-    }
-
     // Notify device about context destroy
     it->ContextDestroy();
 
@@ -215,7 +212,6 @@ int Context::create(const intptr_t* properties) {
 #ifdef _WIN32
           info_.hCtx_ = (void*)glenv_->wglGetCurrentContext_();
           info_.hDev_[GLDeviceKhrIdx] = (void*)glenv_->wglGetCurrentDC_();
-
 #else
           info_.hCtx_ = (void*)glenv_->glXGetCurrentContext_();
           info_.hDev_[GLDeviceKhrIdx] = (void*)glenv_->glXGetCurrentDisplay_();
@@ -246,10 +242,17 @@ int Context::create(const intptr_t* properties) {
   if (info_.flags_ & (D3D10DeviceKhr | D3D11DeviceKhr | GLDeviceKhr | D3D9DeviceKhr |
                       D3D9DeviceEXKhr | D3D9DeviceVAKhr)) {
     // Loop through all devices
+    int boundDeviceCount = 0;
     for (const auto& it : devices_) {
       if (!it->bindExternalDevice(info_.flags_, info_.hDev_, info_.hCtx_)) {
         result = CL_INVALID_VALUE;
+      } else {
+        boundDeviceCount++;
       }
+    }
+
+    if (boundDeviceCount > 0) {
+      beginGLInterop();
     }
   }
 
@@ -288,6 +291,35 @@ int Context::create(const intptr_t* properties) {
   }
 
   return result;
+}
+
+bool Context::beginGLInterop() {
+  if (glInteropBound_ && glInteropCtx_ == info_.hCtx_) return true;
+
+  if (glInteropBound_) {
+    endGLInterop();
+  }
+
+  if (devices_.empty() || info_.hCtx_ == nullptr) return false;
+
+  if (!devices_[0]->beginGLInterop(info_.hCtx_)) {
+    return false;
+  }
+  glInteropBound_ = true;
+  glInteropCtx_ = info_.hCtx_;
+  return true;
+}
+
+bool Context::endGLInterop() {
+  if (!glInteropBound_) return true;
+  if (devices_.empty() || glInteropCtx_ == nullptr) return false;
+
+  if (!devices_[0]->endGLInterop(glInteropCtx_)) {
+    return false;
+  }
+  glInteropBound_ = false;
+  glInteropCtx_ = nullptr;
+  return true;
 }
 
 void* Context::hostAlloc(size_t size, size_t alignment, bool atomics) const {

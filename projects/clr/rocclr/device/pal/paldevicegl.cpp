@@ -798,30 +798,30 @@ bool Device::glAssociate(void* GLplatformContext, void* GLdeviceContext) const {
       !glCanInterop(GLplatformContext, GLdeviceContext)) {
     return false;
   }
-#ifdef ATI_OS_LINUX
-  GLXContext ctx = (GLXContext)GLplatformContext;
-  return (glXBeginCLInteropAMD(ctx, 0)) ? true : false;
-#else
-  HGLRC hRC = (HGLRC)GLplatformContext;
-  return (wglBeginCLInteropAMD(hRC, 0)) ? true : false;
-#endif
+  return true;
 }
 
 bool Device::glDissociate(void* GLplatformContext, void* GLdeviceContext) const {
+  return true;
+}
+
+bool Device::beginGLInterop(void* GLplatformContext) const {
 #ifdef ATI_OS_LINUX
   GLXContext ctx = (GLXContext)GLplatformContext;
-  if (glXEndCLInteropAMD == nullptr) {
-    return false;
-  } else {
-    return (glXEndCLInteropAMD(ctx, 0)) ? true : false;
-  }
+  return (glXBeginCLInteropAMD != nullptr) && (glXBeginCLInteropAMD(ctx, 0));
 #else
   HGLRC hRC = (HGLRC)GLplatformContext;
-  if (wglEndCLInteropAMD == nullptr) {
-    return false;
-  } else {
-    return (wglEndCLInteropAMD(hRC, 0)) ? true : false;
-  }
+  return (wglBeginCLInteropAMD != nullptr) && (wglBeginCLInteropAMD(hRC, 0));
+#endif
+}
+
+bool Device::endGLInterop(void* GLplatformContext) const {
+#ifdef ATI_OS_LINUX
+  GLXContext ctx = (GLXContext)GLplatformContext;
+  return (glXEndCLInteropAMD != nullptr) && (glXEndCLInteropAMD(ctx, 0));
+#else
+  HGLRC hRC = (HGLRC)GLplatformContext;
+  return (wglEndCLInteropAMD != nullptr) && (wglEndCLInteropAMD(hRC, 0));
 #endif
 }
 

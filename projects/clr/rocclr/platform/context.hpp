@@ -171,6 +171,11 @@ class Context : public RuntimeObject {
   //! Returns a pointer to the OpenGL context
   GLFunctions* glenv() const { return glenv_; }
 
+  //! Begin/End GL interop for this context's HGLRC
+  bool beginGLInterop();
+  bool endGLInterop();
+  bool isGlInteropBound() const { return glInteropBound_; }
+
   //! RTTI internal implementation
   virtual ObjectType objectType() const { return ObjectTypeContext; }
 
@@ -207,6 +212,8 @@ class Context : public RuntimeObject {
   std::vector<Device*> svmAllocDevice_;  //!< Devices can support SVM allocations
   std::unordered_map<const Device*, DeviceQueueInfo> deviceQueues_;  //!< Device queues mapping
   mutable Monitor ctxLock_;  //!< Lock for the context access
+  bool glInteropBound_ = false;  //!< True if wglBeginCLInteropAMD/glXBeginCLInteropAMD was called
+  void* glInteropCtx_ = nullptr;  //!< The HGLRC/GLXContext that was begun
 };
 
 /*! @}

@@ -255,19 +255,20 @@ hipError_t hipGLGetDevices(unsigned int* pHipDeviceCount, int* pHipDevices,
 
   hipDeviceCount = std::min(hipDeviceCount, static_cast<unsigned int>(g_devices.size()));
 
-  amd::Context::Info info = hip::getCurrentDevice()->asContext()->info();
+  amd::Context* amdContext = hip::getCurrentDevice()->asContext();
+  amd::Context::Info info = amdContext->info();
   if (!(info.flags_ & amd::Context::GLDeviceKhr)) {
     LogError("Failed : Invalid Shared Group Reference");
     HIP_RETURN(hipErrorInvalidValue);
   }
-  amd::GLFunctions* glenv = hip::getCurrentDevice()->asContext()->glenv();
+  amd::GLFunctions* glenv = amdContext->glenv();
   if (glenv != nullptr) {
 #ifdef _WIN32
     info.hCtx_ = glenv->wglGetCurrentContext_();
 #else
     info.hCtx_ = glenv->glXGetCurrentContext_();
 #endif
-    hip::getCurrentDevice()->asContext()->setInfo(info);
+    amdContext->setInfo(info);
     glenv->update(reinterpret_cast<intptr_t>(info.hCtx_));
   }
   *pHipDeviceCount = 0;
@@ -290,6 +291,11 @@ hipError_t hipGLGetDevices(unsigned int* pHipDeviceCount, int* pHipDevices,
     }
   }
   *pHipDeviceCount = foundDeviceCount;
+
+  if (*pHipDeviceCount > 0) {
+    amdContext->beginGLInterop();
+  }
+
   HIP_RETURN(*pHipDeviceCount > 0 ? hipSuccess : hipErrorNoDevice);
 }
 
