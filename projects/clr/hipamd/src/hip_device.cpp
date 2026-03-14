@@ -253,8 +253,10 @@ void Device::RemoveStream(Stream* stream) {
 // ================================================================================================
 bool Device::StreamExists(const Stream* stream) {
   std::shared_lock lock(streamSetLock);
-  if (streamSet.find(const_cast<Stream*>(stream)) != streamSet.end()) {
-    return true;
+  for (const auto& s : streamSet) {
+    if (s == stream) {
+      return true;
+    }
   }
   return false;
 }
