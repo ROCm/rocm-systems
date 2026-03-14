@@ -67,6 +67,11 @@
 
 #include "AMDHSAKernelDescriptor.h"
 
+#ifdef ROCR_HOTSWAP_ENABLED
+#include "hotswap/hotswap.hpp"
+#include "core/inc/isa.h"
+#endif
+
 using namespace rocr::amd::hsa;
 using namespace rocr::amd::hsa::common;
 
@@ -1289,15 +1294,117 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
     return HSA_STATUS_ERROR_INVALID_ISA_NAME;
   }
 
+  bool isaOverridden = false;
+#ifdef ROCR_HOTSWAP_ENABLED
+  // When HSA_HOTSWAP_ISA_OVERRIDE is set to a target ISA (e.g. "gfx942"),
+  // always retarget code objects whose ISA doesn't match the override target.
+  // This handles the case where HSA_OVERRIDE_GFX_VERSION makes the agent
+  // report a different ISA than the actual hardware.
+  std::string hotswapTargetIsa;
+  if (rocr::hotswap::IsEnabled() && rocr::hotswap::IsIsaOverrideEnabled()) {
+    const char* overrideTarget = std::getenv("HSA_HOTSWAP_ISA_OVERRIDE");
+    if (overrideTarget && std::string(overrideTarget) != "1") {
+      // Explicit target ISA specified (e.g. "gfx942")
+      hotswapTargetIsa = std::string("amdgcn-amd-amdhsa--") + overrideTarget;
+    }
+    // Check if the code object's ISA differs from the override target
+    if (!hotswapTargetIsa.empty()) {
+      // Compare just the gfx part
+      std::string codeGfx, targetGfx;
+      auto extractGfx = [](const std::string& s) -> std::string {
+        size_t p = s.find("gfx");
+        if (p == std::string::npos) return "";
+        size_t e = p;
+        while (e < s.size() && s[e] != ':' && s[e] != ' ' && s[e] != '-')
+          ++e;
+        // Also include trailing digits after the last alpha
+        return s.substr(p, e - p);
+      };
+      codeGfx = extractGfx(codeIsa);
+      targetGfx = extractGfx(hotswapTargetIsa);
+      std::cerr << "hotswap: ISA override check: code=" << codeGfx
+                << " target=" << targetGfx << "\n";
+      if (codeGfx != targetGfx && !codeGfx.empty() && !targetGfx.empty()) {
+        isaOverridden = true;
+        std::cerr << "hotswap: ISA mismatch detected, retarget "
+                  << codeGfx << " -> " << targetGfx << "\n";
+      }
+    }
+  }
+
+  if (agent.handle != 0 && !context_->IsaSupportedByAgent(agent, objectsIsa, genericVersion)) {
+    if (rocr::hotswap::IsEnabled() && rocr::hotswap::IsIsaOverrideEnabled()) {
+      logger_ << "LoaderInfo: hotswap ISA override active, bypassing ISA check for " << codeIsa.c_str() << "\n";
+      isaOverridden = true;
+    } else {
+      logger_ << "LoaderError: code object's ISA (" << codeIsa.c_str() << ") is not supported by the agent\n";
+      return HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS;
+    }
+  }
+#else
   if (agent.handle != 0 && !context_->IsaSupportedByAgent(agent, objectsIsa, genericVersion)) {
     logger_ << "LoaderError: code object's ISA (" << codeIsa.c_str() << ") is not supported by the agent\n";
     return HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS;
   }
+#endif
 
   hsa_status_t status;
 
   objects.push_back(std::make_shared<LoadedCodeObjectImpl>(this, agent, code->ElfData(), code->ElfSize()));
   loaded_code_objects.push_back(std::static_pointer_cast<LoadedCodeObjectImpl>(objects.back()));
+
+#ifdef ROCR_HOTSWAP_ENABLED
+  if (rocr::hotswap::IsEnabled()) {
+    void* elfData = const_cast<void*>(static_cast<const void*>(code->ElfData()));
+    size_t elfSize = code->ElfSize();
+
+    // If ISA was overridden, first retarget all instructions from the source
+    // ISA to the target ISA, then apply any rewrite rules.
+    if (isaOverridden) {
+      // Determine the target ISA name: prefer explicit override, fall back to agent ISA
+      std::string targetIsaName;
+      if (!hotswapTargetIsa.empty()) {
+        targetIsaName = hotswapTargetIsa;
+      } else {
+        hsa_isa_t agentIsa = {};
+        auto getIsa = [](hsa_isa_t isa, void* data) {
+          *reinterpret_cast<hsa_isa_t*>(data) = isa;
+          return HSA_STATUS_INFO_BREAK;
+        };
+        hsa_agent_iterate_isas(agent, getIsa, &agentIsa);
+        if (agentIsa.handle) {
+          const rocr::core::Isa* isaObj = rocr::core::Isa::Object(agentIsa);
+          if (isaObj) targetIsaName = isaObj->GetIsaName();
+        }
+      }
+
+      if (!targetIsaName.empty()) {
+        std::string agentIsaName = targetIsaName;
+
+          // Step 1: Retarget instructions from source ISA to target ISA
+          auto rt = rocr::hotswap::RetargetCodeObject(
+              elfData, elfSize, codeIsa, agentIsaName);
+
+          // Step 2: Only patch ELF metadata if retarget actually changed
+          // instructions. If it was skipped (e.g. LLVM limitation on
+          // subsequent code objects), don't patch — let the loader
+          // handle the unmodified code object normally.
+          if (rt.rules_matched > 0) {
+            rocr::hotswap::PatchElfIsa(elfData, elfSize, agentIsaName);
+          } else if (rt.status != HSA_STATUS_SUCCESS) {
+            logger_ << "LoaderWarning: hotswap ISA retarget failed\n";
+          }
+      }
+    }
+
+    // Step 3: Apply rewrite rules (using original source ISA for matching,
+    // or target ISA if retargeted)
+    auto rw = rocr::hotswap::RewriteCodeObject(elfData, elfSize, codeIsa);
+    if (rw.status != HSA_STATUS_SUCCESS) {
+      logger_ << "LoaderWarning: hotswap ISA rewrite failed\n";
+    }
+  }
+#endif
 
   status = LoadSegments(agent, code.get(), majorVersion);
   if (status != HSA_STATUS_SUCCESS) return status;

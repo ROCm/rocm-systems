@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "target": "amdgcn-amd-amdhsa--gfx1201",
+  "rules": [
+    {
+      "name": "replace_v_mac_with_v_fmac",
+      "match": { "mnemonic": "v_mac_f32_e32" },
+      "replace": { "mnemonic": "v_fmac_f32_e32", "preserve_operands": true }
+    },
+    {
+      "name": "nop_out_sleep",
+      "match": { "mnemonic": "s_sleep", "operands": [{ "imm": 10 }] },
+      "replace_asm": "s_nop 0"
+    },
+    {
+      "name": "patch_at_offset",
+      "match": { "kernel": "my_kernel", "offset": "0x1a4" },
+      "replace_bytes": "BF800000"
+    }
+  ]
+}
