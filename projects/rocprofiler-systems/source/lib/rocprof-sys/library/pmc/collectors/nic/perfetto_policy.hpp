@@ -171,7 +171,7 @@ struct perfetto_policy
      * @param timestamp Sample timestamp in nanoseconds
      */
     static void store_sample(size_t device_index, const metrics& metric_values,
-                             unsigned long timestamp)
+                             uint64_t timestamp)
     {
         auto it = perfetto_policy::bundle.find(device_index);
         if(it != perfetto_policy::bundle.end())
@@ -202,7 +202,6 @@ struct perfetto_policy
         }
     }
 
-private:
     static void post_process_device(
         size_t                                              device_index,
         ::rocprofsys::pmc::collectors::nic::enabled_metrics enabled_metrics,
