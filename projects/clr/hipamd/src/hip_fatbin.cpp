@@ -699,12 +699,15 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
               "HotSwap: no native code object for %s, using %s for retarget",
               device_name.c_str(), best_co->first.c_str());
 
-          // Make a mutable copy and patch ELF e_flags to match device ISA
-          // so CLR's program loader accepts the code object.
-          // The ROCR hotswap hook will handle actual instruction retargeting.
-          std::vector<uint8_t> patched(
+          // Make a mutable copy and patch ELF e_flags to match device ISA.
+          // Allocate on heap — CLR's addDeviceProgram may keep a reference
+          // to the buffer beyond this scope.
+          auto* patched_ptr = new std::vector<uint8_t>(
               reinterpret_cast<const uint8_t*>(best_co->second.first),
               reinterpret_cast<const uint8_t*>(best_co->second.first) + best_co->second.second);
+          auto& patched = *patched_ptr;
+          // Track the allocation for cleanup
+          code_obj_allocations_.insert(patched.data());
           if (patched.size() >= 64 && patched[0] == 0x7f && patched[1] == 'E') {
             // Map device gfx name to EF_AMDGPU_MACH
             uint32_t target_mach = 0;
