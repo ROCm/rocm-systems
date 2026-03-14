@@ -69,7 +69,6 @@ class Primitives<
   uint64_t barrier_next_pat = 0;
   int repeat;
   bool skip_fence = 0;
-  bool ubr_reg = false;
 
 #if defined(ENABLE_NPKIT)
 public:
@@ -215,29 +214,17 @@ private:
 
   template<int Recv, int Send>
   inline __device__ void postPeer(bool dataStored) {
-    // DWORDX4 builtins emit system-scope cache-bypassing stores, so s_waitcnt alone
-    // ensures data visibility for both UBR and non-UBR paths.
-#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
-    if (skip_fence || ubr_reg) {
-#else
-    if (skip_fence){
-#endif
+    if (skip_fence) {
       __atomic_signal_fence(__ATOMIC_SEQ_CST);
       barrier_generic(asm volatile("s_waitcnt lgkmcnt(0) vmcnt(0)"), nworkers, barrier_next, barriers);
       __atomic_signal_fence(__ATOMIC_SEQ_CST);
     }
-#if !RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
-    // Without DWORDX4 builtins, nontemporal stores lack system scope;
-    // explicit system-scope fence needed for UBR/IPC visibility.
-    else if (ubr_reg && (flags & RolePostSend) && dataStored) {
-      __builtin_amdgcn_fence(__ATOMIC_RELEASE, "");
-    }
-#endif
-    else if((flags & RolePostSend) && dataStored) {
-#ifdef __GFX9__
-    __threadfence();
+
+    if ((flags & RolePostSend) && dataStored && !skip_fence) {
+#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS && (defined(__GFX9__))
+      __threadfence();
 #else
-    __threadfence_system();
+      __threadfence_system();
 #endif
     }
 
@@ -246,18 +233,7 @@ private:
 
     if (flags & (Recv*RolePostRecv | Send*RolePostSend)) {
       step += StepPerSlice;
-#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
-      // DWORDX4 system-scope stores + s_waitcnt already ensure data visibility; relaxed is sufficient.
       STORE(connStepPtr, step);
-#else
-      if (Direct && ubr_reg) {
-        // Without DWORDX4 builtins, nontemporal stores lack system scope; release ordering
-        // on the step pointer is needed to publish data visibility to remote IPC readers.
-        __atomic_store_n(connStepPtr, step, __ATOMIC_RELEASE);
-      } else {
-        STORE(connStepPtr, step);
-      }
-#endif
     }
   }
 
@@ -625,18 +601,10 @@ public:
         step += StepPerSlice;
       }
       if (flags & (Recv*RolePostRecv | Send*RolePostSend)) {
-#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
-        // DWORDX4 system-scope stores + s_waitcnt already ensure data visibility; relaxed is sufficient.
-        STORE(connStepPtr, step);
-#else
-        if (Direct && fn.work->regUsed) {
-          // Without DWORDX4 builtins, nontemporal stores lack system scope; release ordering
-          // on the step pointer is needed to publish data visibility to remote IPC readers.
-          __atomic_store_n(connStepPtr, step, __ATOMIC_RELEASE);
-        } else {
-          STORE(connStepPtr, step);
+        if (Send && (!Recv || (flags & RolePostSend)) && (dstSize!=0 || (flags&ConnFifoEnabled))) {
+          fence_acq_rel_sys();
         }
-#endif
+        st_relaxed_sys_global(connStepPtr, step);
       }
     }
   }
@@ -937,7 +905,6 @@ public:
     }
     if(collWork){
       skip_fence = !collWork -> gfx9CheapFenceOff;
-      ubr_reg = collWork->regUsed || collWork->netRegUsed;
     }
   }
 
