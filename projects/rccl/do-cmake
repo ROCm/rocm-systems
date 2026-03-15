@@ -1,9 +1,9 @@
 #!/bin/bash
 cmake \
-  -B build \
+  -B build/release \
   -DBUILD_TESTS=ON \
   -DENABLE_IFC=ON \
-  -DCMAKE_BUILD_TYPE=build/Release \
+  -DCMAKE_BUILD_TYPE=Release \
   -DBUILD_LOCAL_GPU_TARGET_ONLY=ON \
   -DROCM_PATH=/opt/rocm \
   -DENABLE_SPLIT_DEVICE_COMPILE=ON \
