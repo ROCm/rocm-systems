@@ -739,6 +739,24 @@ class GpuAgent : public GpuAgentInt {
       const hsa_amd_memory_copy_op_t& op,
       std::vector<core::Signal*>& dep_signals);
 
+  // Multi-linear copy: LINEAR op with num_dsts > 0, independent copies
+  // (different src/dst/size per entry) sharing a single completion signal.
+  // Uses prologue/body/epilogue fan-out across available SDMA engines.
+  hsa_status_t DmaCopyMulti(
+      const hsa_amd_memory_copy_op_t& op,
+      std::vector<core::Signal*>& dep_signals);
+
+  // Common fan-out implementation shared by DmaCopyBroadcast and DmaCopyMulti.
+  // Submits prologue, per-entry copy bodies, and epilogue with one signal.
+  hsa_status_t DmaCopyFanOut(
+      core::Signal& out_signal,
+      std::vector<core::Signal*>& dep_signals,
+      uint16_t num_entries,
+      const void* const* src_list,
+      void* const* dst_list,
+      const hsa_agent_t* dst_agent_list,
+      const size_t* size_list);
+
   // Bind index of peer device that is connected via xGMI links
   lazy_ptr<core::Blit>& GetXgmiBlit(const core::Agent& peer_agent);
 
