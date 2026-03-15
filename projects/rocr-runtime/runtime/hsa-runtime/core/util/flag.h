@@ -473,7 +473,7 @@ class Flag {
   [[nodiscard]]
   bool lightweight_core_dump_enable() const { 
     return lightweight_core_dump_enable_; 
-  } 
+  }
 
   void set_sdma(bool peer_sdma, bool sdma_gang) {
     enable_peer_sdma_ = peer_sdma ? SDMA_ENABLE : SDMA_DISABLE;
