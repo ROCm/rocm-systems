@@ -457,8 +457,108 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
   // It better be elf if its neither compressed nor uncompressed
   if (!is_compressed && !is_uncompressed) {
     if (IsCodeObjectElf(image_)) {
-      // Load the binary directly
       auto elf_size = amd::Elf::getElfSize(image_);
+
+      // HotSwap cross-gen: check if this bare ELF has a different ISA
+      const char* hotswap_override = getenv("HSA_HOTSWAP_ISA_OVERRIDE");
+      if (hotswap_override && hotswap_override[0] && hotswap_override[0] != '0'
+          && elf_size >= 64) {
+        const uint8_t* elf_bytes = reinterpret_cast<const uint8_t*>(image_);
+        uint32_t e_flags = 0;
+        memcpy(&e_flags, elf_bytes + 48, 4);
+        uint32_t mach = e_flags & 0xFF;
+
+        std::string target_gfx(hotswap_override);
+        if (target_gfx == "1") target_gfx = "";
+        uint32_t target_mach = 0;
+        if (target_gfx == "gfx942") target_mach = 0x4c;
+        else if (target_gfx == "gfx950") target_mach = 0x4f;
+
+        if (target_mach != 0 && mach != target_mach) {
+          LogPrintfInfo("HotSwap: bare ELF mach=0x%02x, target=0x%02x — patching for cross-gen",
+                        mach, target_mach);
+
+          // Make a persistent mutable copy for patching
+          static std::vector<std::unique_ptr<std::vector<uint8_t>>> s_bare_elf_bufs;
+          s_bare_elf_bufs.push_back(std::make_unique<std::vector<uint8_t>>(
+              elf_bytes, elf_bytes + elf_size));
+          uint8_t* patched = s_bare_elf_bufs.back()->data();
+
+          // Patch e_flags
+          e_flags = (e_flags & ~0xFFu) | target_mach;
+          memcpy(patched + 48, &e_flags, 4);
+
+          // Patch .note ISA string
+          uint64_t shoff = 0; uint16_t shentsz = 0, shnum = 0;
+          memcpy(&shoff, patched + 40, 8);
+          memcpy(&shentsz, patched + 58, 2);
+          memcpy(&shnum, patched + 60, 2);
+          for (uint16_t si = 0; si < shnum && shoff + (si+1)*shentsz <= elf_size; ++si) {
+            uint8_t* sh = patched + shoff + si * shentsz;
+            uint32_t shtype = 0; memcpy(&shtype, sh + 4, 4);
+            if (shtype != 7) continue;
+            uint64_t nofs = 0, nsize = 0;
+            memcpy(&nofs, sh + 24, 8); memcpy(&nsize, sh + 32, 8);
+            uint64_t pos = nofs;
+            while (pos + 12 <= nofs + nsize && pos + 12 <= elf_size) {
+              uint32_t namesz, descsz, ntype;
+              memcpy(&namesz, patched + pos, 4);
+              memcpy(&descsz, patched + pos + 4, 4);
+              memcpy(&ntype, patched + pos + 8, 4);
+              uint32_t na = (namesz + 3) & ~3u, da = (descsz + 3) & ~3u;
+              if ((ntype == 27 || ntype == 32) && pos + 12 + na + da <= elf_size) {
+                // Patch gfx string in both NT_AMDGPU_ISA (27) and
+                // NT_AMDGPU_METADATA (32, MSGPACK) notes
+                uint8_t* desc = patched + pos + 12 + na;
+                // Scan for all "gfx" occurrences and patch each one
+                for (uint32_t off = 0; off + 6 < descsz; ++off) {
+                  if (desc[off] == 'g' && desc[off+1] == 'f' && desc[off+2] == 'x') {
+                    // Found "gfx" — extract the full gfx token
+                    uint32_t end = off + 3;
+                    while (end < descsz && desc[end] >= '0' && desc[end] <= '9') ++end;
+                    // Also include 'a' for gfx90a
+                    while (end < descsz && desc[end] >= 'a' && desc[end] <= 'z') ++end;
+                    uint32_t gfx_len = end - off;
+                    std::string orig(reinterpret_cast<char*>(desc + off), gfx_len);
+                    if (orig != target_gfx && target_gfx.size() == gfx_len) {
+                      memcpy(desc + off, target_gfx.c_str(), target_gfx.size());
+                    }
+                  }
+                }
+                if (ntype == 27) break; // Only one ISA note, but MSGPACK may have multiple
+              }
+              pos += 12 + na + da;
+            }
+          }
+
+          // Call retarget
+          typedef int (*RetargetFn)(void*, size_t, const char*, const char*);
+          static RetargetFn retarget_fn = nullptr;
+          static bool tried = false;
+          if (!tried || !retarget_fn) {
+            tried = true;
+            retarget_fn = reinterpret_cast<RetargetFn>(
+                dlsym(RTLD_DEFAULT, "rocr_hotswap_retarget"));
+          }
+          if (retarget_fn && getenv("HSA_HOTSWAP_RULES")) {
+            std::string src_isa = "amdgcn-amd-amdhsa--" + std::string(
+                mach == 0x4f ? "gfx950" : mach == 0x4c ? "gfx942" : "unknown");
+            std::string dst_isa = "amdgcn-amd-amdhsa--" + target_gfx;
+            int matched = retarget_fn(patched, elf_size,
+                                      src_isa.c_str(), dst_isa.c_str());
+            LogPrintfInfo("HotSwap: bare ELF retargeted %d instructions", matched);
+          }
+
+          // Load the patched copy
+          for (size_t i = 0; i < devices.size(); i++) {
+            if (hipSuccess != AddDevProgram(devices[i], patched, elf_size, 0))
+              return hipErrorInvalidImage;
+          }
+          return hipSuccess;
+        }
+      }
+
+      // Normal path: load the bare ELF directly
       for (size_t i = 0; i < devices.size(); i++) {
         if (hipSuccess != AddDevProgram(devices[i], image_, elf_size, 0))
           return hipErrorInvalidImage;
