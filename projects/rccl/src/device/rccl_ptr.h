@@ -44,6 +44,23 @@ using u8_gptr = __attribute__((address_space(1))) uint8_t*;
 typedef __attribute__((__vector_size__(4 * sizeof(unsigned int)))) unsigned int v4u;
 typedef __attribute__((address_space(1))) v4u* v4u_gptr;
 
+// LDS (address_space(3)) pointer type. Casting to LDSPtr<T> tells the compiler
+// to emit ds_read/ds_write instructions rather than flat_load/flat_store.
+// On the host, LDSPtr<T> is just T* since address_space(3) is device-only.
+#if defined(__HIP_DEVICE_COMPILE__)
+template<typename T>
+using LDSPtr = __attribute__((address_space(3))) T*;
+#else
+template<typename T>
+using LDSPtr = T*;
+#endif
+
+using ncclShmemPerWarpPtr = LDSPtr<uint8_t>;
+
+// Cast generic pointer to LDS pointer for storeShmem128/loadShmem128. Used when the pointer
+// is known to point to LDS (e.g. from ncclScratchForWarp or ncclShmem).
+#define shmemCvtPtr(p) ((LDSPtr<uint64_t>)(p))
+
 // "" means system scope, "agent" means device.  Adding this here because I don't think it's obvious otherwise that
 // "" means system scope.
 #define RCCL_SYSTEM_SYNCSCOPE ""

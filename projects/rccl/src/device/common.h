@@ -65,7 +65,7 @@
     __trace_xccid() \
     collTrace->batchIx = ix; \
     if ((ncclShmem).workType == ncclDevWorkTypeP2p) { \
-      struct ncclDevWorkP2p *p2pWork = (struct ncclDevWorkP2p*)(ncclShmem).workStorage; \
+      LDSPtr<ncclDevWorkP2p> p2pWork = LDSPtr<ncclDevWorkP2p>((ncclShmem).workStorage); \
       collTrace->p2p.sendRank = p2pWork->sendRank; \
       collTrace->p2p.recvRank = p2pWork->recvRank; \
       collTrace->p2p.nSendChannels = p2pWork->nSendChannels; \
@@ -81,7 +81,7 @@
       collTrace->p2pOpCount[1] = p2pWork->recvOpCount; \
       __hip_atomic_store(&collTrace->type, (launch_type) | ncclCollTraceP2pElemType, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_WORKGROUP); \
     } else if ((ncclShmem).workType == ncclDevWorkTypeColl) { \
-      struct ncclDevWorkColl *collWork = (struct ncclDevWorkColl*)(ncclShmem).workStorage; \
+      LDSPtr<ncclDevWorkColl> collWork = LDSPtr<ncclDevWorkColl>((ncclShmem).workStorage); \
       collTrace->coll.nWarps = collWork->nWarps; \
       collTrace->coll.nChannels = collWork->channelHi-collWork->channelLo+1; \
       collTrace->coll.bid = (ncclShmem).channelId - collWork->channelLo; \
@@ -94,12 +94,12 @@
     INC_COLL_TRACE(ncclShmem) \
     collTrace->funcIndex = (ncclShmem).funcId;\
     if ((ncclShmem).workType == ncclDevWorkTypeP2p) { \
-      struct ncclDevWorkP2p *p2pWork = (struct ncclDevWorkP2p*)(ncclShmem).workStorage; \
+      LDSPtr<ncclDevWorkP2p> p2pWork = LDSPtr<ncclDevWorkP2p>((ncclShmem).workStorage); \
       collTrace->p2pOpCount[0] = p2pWork->sendOpCount; \
       collTrace->p2pOpCount[1] = p2pWork->recvOpCount; \
       __hip_atomic_store(&collTrace->type, (end_type) | ncclCollTraceP2pElemType, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_WORKGROUP); \
     } else if ((ncclShmem).workType == ncclDevWorkTypeColl) { \
-      struct ncclDevWorkColl *collWork = (struct ncclDevWorkColl*)(ncclShmem).workStorage; \
+      LDSPtr<ncclDevWorkColl> collWork = LDSPtr<ncclDevWorkColl>((ncclShmem).workStorage); \
       collTrace->opCount = collWork->opCount; \
       __hip_atomic_store(&collTrace->type, (end_type) | ncclCollTraceCollElemType, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_WORKGROUP); \
     } \
@@ -151,7 +151,7 @@ struct ncclShmemGroup {
 struct ncclShmemData {
   struct ncclDevKernelArgs args;
 #ifdef __gfx950__
-  const void* volatile kernargPtr;
+  const void* kernargPtr;
 #endif
   int channelId;
   int aborted;
@@ -191,12 +191,8 @@ struct ncclShmemData {
   uint64_t barrier_pat;
 };
 
-// extern __shared__ ncclShmemData ncclShmem;
-// #if __CUDA_ARCH__ >= 700
-//   extern __shared__ ulong2 ncclShmemPerWarp[/*ncclShmemDynamicSize()/sizeof(ulong2)*/];
-// #else
-//   extern __shared__ ulong2 ncclShmemPerWarp[ncclShmemScratchWarpSize()*(NCCL_MAX_NTHREADS/WARP_SIZE)/sizeof(ulong2)];
-// #endif
+__device__ __shared__ ncclShmemData ncclShmem;
+__device__ __shared__ __attribute__((aligned(16))) uint8_t ncclShmemPerWarp[ncclShmemScratchWarpSize()*(NCCL_MAX_NTHREADS/WARP_SIZE)+16];
 
 #ifdef ENABLE_FAULT_INJECTION
 __device__ inline void insert_random_delay_per_warp(ncclShmemData& ncclShmem) {
@@ -220,8 +216,15 @@ __device__ inline void insert_random_delay_per_warp(ncclShmemData& ncclShmem) {
 }
 #endif
 
-__device__ inline void* ncclScratchForWarp(void* ncclShmemPerWarp, int warp) {
-  return (char*)ncclShmemPerWarp + warp*ncclShmemScratchWarpSize();
+template<typename T>
+__device__ __forceinline__
+LDSPtr<T> ncclScratchForWarp(ncclShmemPerWarpPtr ncclShmemPerWarp, int warp) {
+  return LDSPtr<T>(ncclShmemPerWarp + warp * ncclShmemScratchWarpSize());
+}
+
+__device__ __forceinline__
+void* ncclScratchForWarp(ncclShmemPerWarpPtr ncclShmemPerWarp, int warp) {
+  return (void*)(ncclShmemPerWarp + warp * ncclShmemScratchWarpSize());
 }
 
 __device__ inline void barrier_sync(int name) {
@@ -276,15 +279,36 @@ __device__ inline bool barrier_red_or(bool vote, int name, int nThreads) {
 #define __insert_timestamp(ncclShmem, line_num)
 #endif
 
-// Copy 16-byte aligned data. You must call with at least `(bytes+15)/16` threads.
-inline __device__ void copyToShmem16(int tid, void* dst, void const* src, int bytes) {
+// Copy 16-byte aligned data from global to LDS. You must call with at least `(bytes+15)/16` threads.
+inline __device__ void copyToShmem16(int tid, LDSPtr<uint8_t> dst, u8_gptr src, int bytes) {
   int offset = 16*tid;
   if (offset < bytes) {
-    ulong2 *src2, *dst2;
-    src2 = (ulong2*)((char const*)src + offset);
-    dst2 = (ulong2*)((char*)dst + offset);
-    dst2->x = src2->x;
-    dst2->y = src2->y;
+    u64_gptr src2 = u64_gptr(src + offset);
+    LDSPtr<uint64_t> dst2 = LDSPtr<uint64_t>(dst + offset);
+    dst2[0] = src2[0];
+    dst2[1] = src2[1];
+  }
+}
+
+// Copy 16-byte aligned data within LDS.
+inline __device__ void copyToShmem16(int tid, LDSPtr<uint8_t> dst, LDSPtr<uint8_t> src, int bytes) {
+  int offset = 16*tid;
+  if (offset < bytes) {
+    LDSPtr<uint64_t> src2 = LDSPtr<uint64_t>(src + offset);
+    LDSPtr<uint64_t> dst2 = LDSPtr<uint64_t>(dst + offset);
+    dst2[0] = src2[0];
+    dst2[1] = src2[1];
+  }
+}
+
+// Copy 16-byte aligned data from LDS to global (used by profiling).
+inline __device__ void copyToShmem16(int tid, u8_gptr dst, LDSPtr<uint8_t> src, int bytes) {
+  int offset = 16*tid;
+  if (offset < bytes) {
+    LDSPtr<uint64_t> src2 = LDSPtr<uint64_t>(src + offset);
+    u64_gptr dst2 = u64_gptr(dst + offset);
+    dst2[0] = src2[0];
+    dst2[1] = src2[1];
   }
 }
 
@@ -520,11 +544,7 @@ __device__ __forceinline__ void profiler(struct ncclShmemData& ncclShmem, int ac
 #ifndef NCCL_FUNC_ONLY
 
 template<int SpecializedFnId, typename SpecializedRunWorkBatch, bool COLLTRACE, int COLL_UNROLL>
-#if defined(__gfx950__)
-__device__ __attribute__((noinline))
-#else
 __device__ __forceinline__
-#endif
 void ncclKernelMain(struct ncclDevKernelArgs const* args, ncclShmemData& ncclShmem, void* ncclShmemPerWarp) {
   const int tid = threadIdx.x;
   int tn = blockDim.x;
@@ -602,19 +622,17 @@ void ncclKernelMain(struct ncclDevKernelArgs const* args, ncclShmemData& ncclShm
   // Use first 2 warps to load comm and channel, and remaining load work batch.
   switch (tid/WARP_SIZE) {
   case 0:
-    { void* dst = &ncclShmem.comm;
-      void* src = ncclShmem.args.comm;
+    { u8_gptr src = u8_gptr(ncclShmem.args.comm);
       int bytes = sizeof(ncclKernelComm);
       static_assert(sizeof(ncclKernelComm) <= 16*WARP_SIZE, "ncclKernelComm cannot be loaded by a single warp in one insn.");
-      copyToShmem16(tid, dst, src, bytes);
+      copyToShmem16(tid, LDSPtr<uint8_t>(&ncclShmem.comm), src, bytes);
     } break;
   case 1:
     { // Get address of channel without incurring indirect load from ncclKernelComm::channels
-      void* dst = &ncclShmem.channel;
-      void* src = &((ncclKernelCommAndChannels*)ncclShmem.args.comm)->channels[ncclShmem.channelId];
+      u8_gptr src = u8_gptr(&((ncclKernelCommAndChannels*)ncclShmem.args.comm)->channels[ncclShmem.channelId]);
       int bytes = sizeof(ncclDevChannel);
       static_assert(sizeof(ncclDevChannel) <= 16*WARP_SIZE, "ncclDevChannel cannot be loaded by a single warp in one insn.");
-      copyToShmem16(tid-WARP_SIZE, dst, src, bytes);
+      copyToShmem16(tid-WARP_SIZE, LDSPtr<uint8_t>(&ncclShmem.channel), src, bytes);
     } break;
   default:
     { int subtid = tid - 2*WARP_SIZE;
@@ -657,20 +675,19 @@ void ncclKernelMain(struct ncclDevKernelArgs const* args, ncclShmemData& ncclShm
     }
     __syncthreads();
     if(ncclShmem.warpChannelId[localWarpId] >= 0) {
-      void* dst = &ncclShmem.warpChannel[localWarpId];
-      void* src = &((ncclKernelCommAndChannels*)ncclShmem.args.comm)->channels[ncclShmem.warpChannelId[localWarpId]];
+      u8_gptr src = u8_gptr(&((ncclKernelCommAndChannels*)ncclShmem.args.comm)->channels[ncclShmem.warpChannelId[localWarpId]]);
       int bytes = sizeof(ncclDevChannel);
       static_assert(sizeof(ncclDevChannel) <= 16*WARP_SIZE, "ncclDevChannel cannot be loaded by a single warp in one insn.");
       // assert((tid-localWarpId*WARP_SIZE) >= 0 && (tid-localWarpId*WARP_SIZE) < WARP_SIZE);
-      copyToShmem16(tid-localWarpId*WARP_SIZE, dst, src, bytes);
+      copyToShmem16(tid-localWarpId*WARP_SIZE, LDSPtr<uint8_t>(&ncclShmem.warpChannel[localWarpId]), src, bytes);
     }
   } else {  // If warpComm is disabled, all warps use the same channel as the block
     if(laneId == 0) {
       ncclShmem.warpChannelId[localWarpId] = ncclShmem.channelId;
     }
     // Use all threads in the warp to copy the channel data in parallel
-    void* dst = &ncclShmem.warpChannel[localWarpId];
-    void* src = &ncclShmem.channel;
+    LDSPtr<uint8_t> dst = LDSPtr<uint8_t>(&ncclShmem.warpChannel[localWarpId]);
+    LDSPtr<uint8_t> src = LDSPtr<uint8_t>(&ncclShmem.channel);
     int bytes = sizeof(ncclDevChannel);
     copyToShmem16(laneId, dst, src, bytes);
   }
@@ -732,7 +749,7 @@ void ncclKernelMain(struct ncclDevKernelArgs const* args, ncclShmemData& ncclShm
 #ifdef ENABLE_PROFILING
   if (ncclShmem.comm.devProf->seq < PROFILE_NUM_LAUNCHES) {
     __syncthreads();
-    copyToShmem16(tid, ncclShmem.comm.devProf+MAXCHANNELS*ncclShmem.prof.seq+blockIdx.x, &ncclShmem.prof, sizeof(struct ncclProf));
+    copyToShmem16(tid, u8_gptr(ncclShmem.comm.devProf+MAXCHANNELS*ncclShmem.prof.seq+blockIdx.x), LDSPtr<uint8_t>(&ncclShmem.prof), sizeof(struct ncclProf));
     if (tid == 0) ncclShmem.comm.devProf[blockIdx.x].seq++;
   }
 #endif

@@ -51,6 +51,8 @@ KD_KERNEL_CODE_PROPERTIES_OFF = 56     # uint16 LE
 
 # COMPUTE_PGM_RSRC1 bit fields
 RSRC1_VGPR_MASK = 0x3F                  # bits [5:0]
+RSRC1_SGPR_SHIFT = 6
+RSRC1_SGPR_MASK = 0xF << RSRC1_SGPR_SHIFT  # bits [9:6]
 
 # COMPUTE_PGM_RSRC3 bit fields (GFX90A+)
 RSRC3_ACCUM_OFFSET_MASK = 0x3F          # bits [5:0]
@@ -273,6 +275,7 @@ def analyze_device_objects(dev_obj_dir: str, gpu_arch: str,
 
     global_max_v = -1
     global_max_a = -1
+    global_max_s = -1
     global_max_scratch = 0
 
     for obj in objs:
@@ -290,6 +293,7 @@ def analyze_device_objects(dev_obj_dir: str, gpu_arch: str,
         cur_func = None
         func_max_v: dict[str, int] = {}
         func_max_a: dict[str, int] = {}
+        func_max_s: dict[str, int] = {}
         func_scratch: dict[str, int] = {}
 
         for line in r.stdout.splitlines():
@@ -301,6 +305,7 @@ def analyze_device_objects(dev_obj_dir: str, gpu_arch: str,
                     continue
                 func_max_v.setdefault(cur_func, -1)
                 func_max_a.setdefault(cur_func, -1)
+                func_max_s.setdefault(cur_func, -1)
                 func_scratch.setdefault(cur_func, 0)
                 continue
 
@@ -326,6 +331,8 @@ def analyze_device_objects(dev_obj_dir: str, gpu_arch: str,
                     func_max_v[cur_func] = max(func_max_v[cur_func], rn)
                 elif fc == "a":
                     func_max_a[cur_func] = max(func_max_a[cur_func], rn)
+                elif fc == "s":
+                    func_max_s[cur_func] = max(func_max_s[cur_func], rn)
 
             sm = _SCRATCH_RE.search(s)
             if sm:
@@ -340,12 +347,15 @@ def analyze_device_objects(dev_obj_dir: str, gpu_arch: str,
             global_max_v = max(global_max_v, v)
         for a in func_max_a.values():
             global_max_a = max(global_max_a, a)
+        for s in func_max_s.values():
+            global_max_s = max(global_max_s, s)
         for scr in func_scratch.values():
             global_max_scratch = max(global_max_scratch, scr)
 
     return {
         "max_vgpr": global_max_v + 1 if global_max_v >= 0 else 0,
         "max_agpr": global_max_a + 1 if global_max_a >= 0 else 0,
+        "max_sgpr": global_max_s + 1 if global_max_s >= 0 else 0,
         "max_scratch": global_max_scratch,
     }
 
@@ -364,6 +374,18 @@ def compute_granulated_vgprs(max_vgpr: int, max_agpr: int,
     if total <= 0:
         return 0
     return (_align_to(total, granularity) // granularity) - 1
+
+
+def compute_granulated_sgprs(max_sgpr: int) -> int:
+    """Compute the granulated_wavefront_sgpr_count for COMPUTE_PGM_RSRC1.
+
+    On GFX9, SGPR granularity is 16.  The count includes VCC and
+    FLAT_SCRATCH (4 extra SGPRs).
+    """
+    if max_sgpr <= 0:
+        return 0
+    total = max_sgpr + 4  # +2 VCC, +2 FLAT_SCRATCH
+    return (_align_to(total, 16) // 16) - 1
 
 
 def compute_accum_offset(max_vgpr: int) -> int:

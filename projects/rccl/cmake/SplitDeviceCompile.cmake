@@ -163,7 +163,7 @@ function(setup_split_device_compile)
         ${_rdc_flag}
         --offload-device-only
         --offload-arch=${SDC_GPU_ARCH}
-        -emit-llvm -c -O3 -g
+        -emit-llvm -c -O3 -gline-tables-only
         ${_inc_flags}
         ${_def_flags}
         ${_extra_defs}
@@ -185,29 +185,19 @@ function(setup_split_device_compile)
       # the known maximums: 128 VGPRs, 64 AGPRs, flat scratch, dynamic stack.
       set(ASM_FILE "${DEV_DIR}/${fname}.${SDC_GPU_ARCH}.s")
 
-      if(SDC_GPU_ARCH STREQUAL "gfx950")
-        set(_sed_args
-          -e "s/^\\([[:space:]]*\\.set[[:space:]]\\+.*ncclDevKernel[^.]*\\.num_vgpr,\\).*/\\1 128/"
-          -e "s/^\\([[:space:]]*\\.set[[:space:]]\\+.*ncclDevKernel[^.]*\\.num_agpr,\\).*/\\1 64/"
-          -e "s/^\\([[:space:]]*\\.set[[:space:]]\\+.*ncclDevKernel[^.]*\\.uses_flat_scratch,\\).*/\\1 1/"
-          -e "s/^\\([[:space:]]*\\.set[[:space:]]\\+.*ncclDevKernel[^.]*\\.has_dyn_sized_stack,\\).*/\\1 1/"
-          -e "s/^\\([[:space:]]*\\.set[[:space:]]\\+.*\\.num_named_barrier,\\).*/\\1 0/"
-          -e "/\\.amdhsa_next_free_vgpr [0-9]/s/\\.amdhsa_next_free_vgpr [0-9]\\+/.amdhsa_next_free_vgpr 192/"
-          -e "/\\.amdhsa_accum_offset [0-9]/s/\\.amdhsa_accum_offset [0-9]\\+/.amdhsa_accum_offset 128/"
-          -e "/\\.amdhsa_next_free_sgpr [0-9]/s/\\.amdhsa_next_free_sgpr [0-9]\\+/.amdhsa_next_free_sgpr 100/"
-        )
-      else()
-        set(_sed_args
-          -e "s/^\\([[:space:]]*\\.set[[:space:]]\\+.*ncclDevKernel[^.]*\\.num_vgpr,\\).*/\\1 128/"
-          -e "s/^\\([[:space:]]*\\.set[[:space:]]\\+.*ncclDevKernel[^.]*\\.num_agpr,\\).*/\\1 64/"
-          -e "s/^\\([[:space:]]*\\.set[[:space:]]\\+.*ncclDevKernel[^.]*\\.private_seg_size,\\).*/\\1 2048/"
-          -e "s/^\\([[:space:]]*\\.set[[:space:]]\\+.*ncclDevKernel[^.]*\\.uses_flat_scratch,\\).*/\\1 1/"
-          -e "s/^\\([[:space:]]*\\.set[[:space:]]\\+.*ncclDevKernel[^.]*\\.has_dyn_sized_stack,\\).*/\\1 1/"
-          -e "s/^\\([[:space:]]*\\.set[[:space:]]\\+.*\\.num_named_barrier,\\).*/\\1 0/"
-          -e "s/\\.amdhsa_private_segment_fixed_size [0-9]\\+/.amdhsa_private_segment_fixed_size 2048/"
-          -e "s/\\.private_segment_fixed_size: [0-9]\\+/.private_segment_fixed_size: 2048/"
-        )
-      endif()
+      set(_sed_args
+        -e "s/^\\([[:space:]]*\\.set[[:space:]]\\+.*ncclDevKernel[^.]*\\.num_vgpr,\\).*/\\1 128/"
+        -e "s/^\\([[:space:]]*\\.set[[:space:]]\\+.*ncclDevKernel[^.]*\\.num_agpr,\\).*/\\1 64/"
+        -e "s/^\\([[:space:]]*\\.set[[:space:]]\\+.*ncclDevKernel[^.]*\\.numbered_sgpr,\\).*/\\1 102/"
+        -e "s/^\\([[:space:]]*\\.set[[:space:]]\\+.*ncclDevKernel[^.]*\\.uses_flat_scratch,\\).*/\\1 1/"
+        -e "s/^\\([[:space:]]*\\.set[[:space:]]\\+.*ncclDevKernel[^.]*\\.has_dyn_sized_stack,\\).*/\\1 1/"
+        -e "s/^\\([[:space:]]*\\.set[[:space:]]\\+.*ncclDevKernel[^.]*\\.has_indirect_call,\\).*/\\1 1/"
+        -e "s/^\\([[:space:]]*\\.set[[:space:]]\\+.*ncclDevKernel[^.]*\\.has_recursion,\\).*/\\1 1/"
+        -e "s/^\\([[:space:]]*\\.set[[:space:]]\\+.*\\.num_named_barrier,\\).*/\\1 0/"
+        -e "s/\\.amdhsa_next_free_vgpr .*/\\.amdhsa_next_free_vgpr 192/"
+        -e "s/\\.amdhsa_accum_offset .*/\\.amdhsa_accum_offset 128/"
+        -e "s/\\.amdhsa_next_free_sgpr .*/\\.amdhsa_next_free_sgpr 102/"
+      )
 
       add_custom_command(
         OUTPUT  ${ASM_FILE}
@@ -215,7 +205,7 @@ function(setup_split_device_compile)
           -x ir
           -target amdgcn-amd-amdhsa
           -mcpu=${SDC_GPU_ARCH}
-          -O3 -S -g
+          -O3 -S -gline-tables-only
           -o ${ASM_FILE} ${BC_FILE}
         COMMAND sed -i ${_sed_args} ${ASM_FILE}
         DEPENDS   ${BC_FILE}
@@ -228,7 +218,7 @@ function(setup_split_device_compile)
           -x assembler
           -target amdgcn-amd-amdhsa
           -mcpu=${SDC_GPU_ARCH}
-          -c -g
+          -c -gline-tables-only
           -o ${DEV_OBJ} ${ASM_FILE}
         DEPENDS   ${ASM_FILE}
         COMMENT   "SPLIT[dev] ${fname} (from patched asm)"
@@ -244,7 +234,7 @@ function(setup_split_device_compile)
           -x ir
           -target amdgcn-amd-amdhsa
           -mcpu=${SDC_GPU_ARCH}
-          -O3 -c -g
+          -O3 -c -gline-tables-only
           -o ${DEV_OBJ} ${BC_FILE}
         DEPENDS   ${BC_FILE}
         COMMENT   "SPLIT[dev] ${fname}"

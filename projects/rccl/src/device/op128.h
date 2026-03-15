@@ -21,47 +21,43 @@ inline __device__ void store128(uint64_t* ptr, uint64_t v0, uint64_t v1) {
   *((u64_gptr) ptr + 1) = v1;
 }
 
-inline __device__ uint64_t* shmemCvtPtr(volatile uint64_t* shmemGenericPtr) {
-  return (uint64_t*)shmemGenericPtr;
+inline __device__ void loadShmem128(LDSPtr<uint64_t> ptr, uint64_t &v0, uint64_t &v1) {
+  v0 = ptr[0];
+  v1 = ptr[1];
 }
 
-inline __device__ void loadShmem128(uint64_t* shmemAsmPtr, uint64_t &v0, uint64_t &v1) {
-  v0 = *(shmemAsmPtr);
-  v1 = *(shmemAsmPtr+1);
-}
-
-inline __device__ void storeShmem128(uint64_t* shmemAsmPtr, uint64_t v0, uint64_t v1) {
-  *(shmemAsmPtr) = v0;
-  *(shmemAsmPtr+1) = v1;
+inline __device__ void storeShmem128(LDSPtr<uint64_t> ptr, uint64_t v0, uint64_t v1) {
+  ptr[0] = v0;
+  ptr[1] = v1;
 }
 
 template<typename T>
-inline __device__ void loadShmemMisaligned128(T *ptr, uint64_t &v0, uint64_t &v1) {
+inline __device__ void loadShmemMisaligned128(LDSPtr<T> ptr, uint64_t &v0, uint64_t &v1) {
   union {
     uint32_t tmp4[4];
     uint64_t tmp8[2];
   };
   if(sizeof(T) < 4) {
-    uint32_t *ptr4 = reinterpret_cast<uint32_t*>(reinterpret_cast<uintptr_t>(ptr) & -uintptr_t(4));
+    LDSPtr<uint32_t> ptr4 = LDSPtr<uint32_t>(reinterpret_cast<uintptr_t>(ptr) & -uintptr_t(4));
     #pragma unroll
     for(int e=0; e < 4; e++) {
-      // Produce 4 bytes of sub-register type by reading 2 4-byte
-      // aligned values and shifting.
       uint32_t lo, hi;
-      lo = __builtin_nontemporal_load(ptr4+e+0);
-      hi = __builtin_nontemporal_load(ptr4+e+1);
+      lo = ptr4[e];
+      hi = ptr4[e+1];
       tmp4[e] = __funnelshift_r(lo, hi, 8*(int(reinterpret_cast<uintptr_t>(ptr))%4));
     }
   }
   else if(sizeof(T) == 4) {
+    LDSPtr<uint32_t> ptr4 = LDSPtr<uint32_t>(ptr);
     #pragma unroll
     for(int e=0; e < 4; e++)
-      tmp4[e] = __builtin_nontemporal_load(reinterpret_cast<uint32_t*>(ptr)+e);
+      tmp4[e] = ptr4[e];
   }
   else /*sizeof(T)==8*/ {
+    LDSPtr<uint64_t> ptr8 = LDSPtr<uint64_t>(ptr);
     #pragma unroll
     for(int e=0; e < 2; e++)
-      tmp8[e] = __builtin_nontemporal_load(reinterpret_cast<uint64_t*>(ptr)+e);
+      tmp8[e] = ptr8[e];
   }
   v0 = tmp8[0];
   v1 = tmp8[1];
