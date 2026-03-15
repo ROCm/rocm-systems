@@ -269,14 +269,12 @@ class NullDevice : public amd::Device {
   //! Acquire external graphics API object in the host thread
   //! Needed for OpenGL objects on CPU device
 
-  bool bindExternalDevice(uint flags, void* const pDevice[], void* pContext,
-                          bool validateOnly) override {
+  bool bindExternalDevice(uint flags, void* const pDevice[], void* pContext) override {
     ShouldNotReachHere();
     return false;
   }
 
-  bool unbindExternalDevice(uint flags, void* const pDevice[], void* pContext,
-                            bool validateOnly) override {
+  bool unbindExternalDevice(uint flags, void* const pDevice[], void* pContext) override {
     ShouldNotReachHere();
     return false;
   }
@@ -407,8 +405,7 @@ class Device : public NullDevice {
 
   //! Acquire external graphics API object in the host thread
   //! Needed for OpenGL objects on CPU device
-  virtual bool bindExternalDevice(uint flags, void* const pDevice[], void* pContext,
-                                  bool validateOnly) override;
+  virtual bool bindExternalDevice(uint flags, void* const pDevice[], void* pContext) override;
 
   /**
    * @brief Removes the external device as an available device.
@@ -420,9 +417,7 @@ class Device : public NullDevice {
   bool unbindExternalDevice(
       uint flags,               //!< Enum val. for ext.API type: GL, D3D10, etc.
       void* const gfxDevice[],  //!< D3D device do D3D, HDC/Display handle of X Window for GL
-      void* gfxContext,         //!< HGLRC/GLXContext handle
-      bool validateOnly         //!< Only validate if the device can inter-operate with
-                                //!< pDevice/pContext, do not bind.
+      void* gfxContext          //!< HGLRC/GLXContext handle
   ) override;
 
   //! Gets free memory on a GPU device

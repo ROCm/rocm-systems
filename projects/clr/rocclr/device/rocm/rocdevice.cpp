@@ -1798,8 +1798,7 @@ bool Device::amdFileWrite(amd::Os::FileDesc handle, void* devicePtr, uint64_t si
 }
 
 // ================================================================================================
-bool Device::bindExternalDevice(uint flags, void* const gfxDevice[], void* gfxContext,
-                                bool validateOnly) {
+bool Device::bindExternalDevice(uint flags, void* const gfxDevice[], void* gfxContext) {
   if ((flags & amd::Context::GLDeviceKhr) == 0) return false;
 
   void* glDevice = gfxDevice[amd::Context::DeviceFlagIdx::GLDeviceKhrIdx];
@@ -1812,8 +1811,7 @@ bool Device::bindExternalDevice(uint flags, void* const gfxDevice[], void* gfxCo
 }
 
 // ================================================================================================
-bool Device::unbindExternalDevice(uint flags, void* const gfxDevice[], void* gfxContext,
-                                  bool validateOnly) {
+bool Device::unbindExternalDevice(uint flags, void* const gfxDevice[], void* gfxContext) {
   if ((flags & amd::Context::GLDeviceKhr) == 0) return false;
 
   void* glDevice = gfxDevice[amd::Context::DeviceFlagIdx::GLDeviceKhrIdx];
