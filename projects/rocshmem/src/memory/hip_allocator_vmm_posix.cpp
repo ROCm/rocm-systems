@@ -349,7 +349,7 @@ hipError_t HIPAllocatorVMMPosixFd::OpenIpcHandle(void **dev_ptr, void *handle)
   close(open_fd);
 
   // Track the imported allocation
-  imported_allocations_[base_addr] = {imported_handle, size};
+  imported_allocations_[base_addr] = {imported_handle, size, -1};
 
   // Set output pointer to the mapped address
   *dev_ptr = base_addr;
