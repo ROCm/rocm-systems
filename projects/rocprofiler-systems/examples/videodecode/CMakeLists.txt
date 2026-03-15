@@ -25,7 +25,7 @@ if(NOT DEFINED CMAKE_CXX_COMPILER)
     set(CMAKE_CXX_COMPILER ${ROCmVersion_DIR}/bin/amdclang++)
 endif()
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 
 list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/../../cmake)
 list(APPEND CMAKE_PREFIX_PATH ${ROCmVersion_DIR}/lib/cmake ${ROCmVersion_DIR})
@@ -162,7 +162,7 @@ if(FFMPEG_FOUND AND rocdecode_FOUND)
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} Threads::Threads)
 
     add_executable(videodecode videodecodebatch.cpp roc_video_dec.cpp)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=gnu++17")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=gnu++20")
     target_link_libraries(videodecode ${LINK_LIBRARY_LIST})
     target_compile_options(videodecode PRIVATE ${_FLAGS})
 
