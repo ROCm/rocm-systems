@@ -824,8 +824,6 @@ RUNTIME_ENTRY(cl_int, clGetGLContextInfoKHR,
   cl_device_id* gpu_devices;
   cl_uint num_gpu_devices = 0;
   amd::Context::Info info;
-  static const bool VALIDATE_ONLY = true;
-
   errcode = amd::Context::checkProperties(properties, &info);
   if (CL_SUCCESS != errcode) {
     return errcode;
@@ -860,7 +858,7 @@ RUNTIME_ENTRY(cl_int, clGetGLContextInfoKHR,
         for (cl_uint i = 0; i < num_gpu_devices; ++i) {
           cl_device_id device = gpu_devices[i];
           if (is_valid(device) && as_amd(device)->bindExternalDevice(info.flags_, info.hDev_,
-                                                                     info.hCtx_, VALIDATE_ONLY)) {
+                                                                     info.hCtx_)) {
             return amd::clGetInfo(device, param_value_size, param_value, param_value_size_ret);
           }
         }
@@ -886,7 +884,7 @@ RUNTIME_ENTRY(cl_int, clGetGLContextInfoKHR,
       for (cl_uint i = 0; i < total_devices; ++i) {
         cl_device_id device = devices[i];
         if (is_valid(device) && as_amd(device)->bindExternalDevice(info.flags_, info.hDev_,
-                                                                   info.hCtx_, VALIDATE_ONLY)) {
+                                                                   info.hCtx_)) {
           compatible_devices.push_back(as_amd(device));
         }
       }

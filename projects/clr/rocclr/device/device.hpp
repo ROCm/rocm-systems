@@ -1877,17 +1877,13 @@ class Device : public RuntimeObject {
   virtual bool bindExternalDevice(
       uint flags,             //!< Enum val. for ext.API type: GL, D3D10, etc.
       void* const pDevice[],  //!< D3D device do D3D, HDC/Display handle of X Window for GL
-      void* pContext,         //!< HGLRC/GLXContext handle
-      bool validateOnly  //! Only validate if the device can inter-operate with pDevice/pContext, do
-                         //! not bind.
+      void* pContext          //!< HGLRC/GLXContext handle
       ) = 0;
 
   virtual bool unbindExternalDevice(
       uint flags,             //!< Enum val. for ext.API type: GL, D3D10, etc.
       void* const pDevice[],  //!< D3D device do D3D, HDC/Display handle of X Window for GL
-      void* pContext,         //!< HGLRC/GLXContext handle
-      bool validateOnly  //! Only validate if the device can inter-operate with pDevice/pContext, do
-                         //! not bind.
+      void* pContext          //!< HGLRC/GLXContext handle
       ) = 0;
 
   //! resolves GL depth/msaa buffer

@@ -51,13 +51,11 @@ Context::Context(const std::vector<Device*>& devices, const Info& info)
 }
 
 Context::~Context() {
-  static const bool VALIDATE_ONLY = false;
-
   // Loop through all devices
   for (const auto& it : devices_) {
     // Dissociate OCL context with any external device
     if (info_.flags_ & (GLDeviceKhr | D3D10DeviceKhr | D3D11DeviceKhr)) {
-      it->unbindExternalDevice(info_.flags_, info_.hDev_, info_.hCtx_, VALIDATE_ONLY);
+      it->unbindExternalDevice(info_.flags_, info_.hDev_, info_.hCtx_);
     }
 
     // Notify device about context destroy
@@ -189,7 +187,6 @@ int Context::checkProperties(const cl_context_properties* properties, Context::I
 }
 
 int Context::create(const intptr_t* properties) {
-  static const bool VALIDATE_ONLY = false;
   int result = CL_SUCCESS;
 
   if (properties != NULL) {
@@ -250,7 +247,7 @@ int Context::create(const intptr_t* properties) {
                       D3D9DeviceEXKhr | D3D9DeviceVAKhr)) {
     // Loop through all devices
     for (const auto& it : devices_) {
-      if (!it->bindExternalDevice(info_.flags_, info_.hDev_, info_.hCtx_, VALIDATE_ONLY)) {
+      if (!it->bindExternalDevice(info_.flags_, info_.hDev_, info_.hCtx_)) {
         result = CL_INVALID_VALUE;
       }
     }

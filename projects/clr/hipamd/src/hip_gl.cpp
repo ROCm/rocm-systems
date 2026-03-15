@@ -244,7 +244,6 @@ hipError_t hipGLGetDevices(unsigned int* pHipDeviceCount, int* pHipDevices,
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  constexpr bool VALIDATE_ONLY = true;
   if (deviceList == hipGLDeviceListNextFrame) {
     LogError("hipGLDeviceListNextFrame not supported yet");
     HIP_RETURN(hipErrorNotSupported);
@@ -283,7 +282,7 @@ hipError_t hipGLGetDevices(unsigned int* pHipDeviceCount, int* pHipDevices,
   for (unsigned int i = 0; i < hipDeviceCount; ++i) {
     const std::vector<amd::Device*>& devices = g_devices[i]->devices();
     if (!devices.empty() &&
-        devices[0]->bindExternalDevice(info.flags_, info.hDev_, info.hCtx_, VALIDATE_ONLY)) {
+        devices[0]->bindExternalDevice(info.flags_, info.hDev_, info.hCtx_)) {
       pHipDevices[foundDeviceCount++] = i;
       if (findOnlyFirst) {
         break;

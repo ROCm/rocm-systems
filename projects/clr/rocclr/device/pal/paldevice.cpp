@@ -1877,8 +1877,7 @@ device::Memory* Device::createView(amd::Memory& owner, const device::Memory& par
 }
 
 //! Attempt to bind with external graphics API's device/context
-bool Device::bindExternalDevice(uint flags, void* const pDevice[], void* pContext,
-                                bool validateOnly) {
+bool Device::bindExternalDevice(uint flags, void* const pDevice[], void* pContext) {
   assert(pDevice);
 
 #ifdef _WIN32
@@ -1914,9 +1913,7 @@ bool Device::bindExternalDevice(uint flags, void* const pDevice[], void* pContex
   if (flags & amd::Context::Flags::GLDeviceKhr) {
     // Attempt to associate PAL-OGL
     if (!glAssociate(pContext, pDevice[amd::Context::DeviceFlagIdx::GLDeviceKhrIdx])) {
-      if (!validateOnly) {
-        LogError("Failed glAssociate()");
-      }
+      LogError("Failed glAssociate()");
       return false;
     }
   }
@@ -1924,8 +1921,7 @@ bool Device::bindExternalDevice(uint flags, void* const pDevice[], void* pContex
   return true;
 }
 
-bool Device::unbindExternalDevice(uint flags, void* const pDevice[], void* pContext,
-                                  bool validateOnly) {
+bool Device::unbindExternalDevice(uint flags, void* const pDevice[], void* pContext) {
   if ((flags & amd::Context::Flags::GLDeviceKhr) == 0) {
     return true;
   }
@@ -1934,9 +1930,7 @@ bool Device::unbindExternalDevice(uint flags, void* const pDevice[], void* pCont
   if (glDevice != nullptr) {
     // Dissociate PAL-OGL
     if (!glDissociate(pContext, glDevice)) {
-      if (validateOnly) {
-        LogWarning("Failed glDissociate()");
-      }
+      LogWarning("Failed glDissociate()");
       return false;
     }
   }

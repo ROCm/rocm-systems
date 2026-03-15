@@ -42,7 +42,6 @@ RUNTIME_ENTRY(cl_int, clGetDeviceIDsFromD3D10KHR,
   cl_device_id* gpu_devices;
   cl_uint num_gpu_devices = 0;
   bool create_d3d10Device = false;
-  static const bool VALIDATE_ONLY = true;
   HMODULE d3d10Module = NULL;
 
   if (platform != NULL && platform != AMD_PLATFORM) {
@@ -114,7 +113,7 @@ RUNTIME_ENTRY(cl_int, clGetDeviceIDsFromD3D10KHR,
         cl_device_id device = gpu_devices[i];
         if (is_valid(device) &&
             as_amd(device)->bindExternalDevice(amd::Context::Flags::D3D10DeviceKhr, external_device,
-                                               NULL, VALIDATE_ONLY)) {
+                                               NULL)) {
           compatible_devices.push_back(as_amd(device));
         }
       }
