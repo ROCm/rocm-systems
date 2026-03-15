@@ -449,7 +449,7 @@ hipError_t hipStreamWaitEvent_common(hipStream_t stream, hipEvent_t event, unsig
   if (flags == hipEventWaitExternal) {
     // Ensure the wait stream is actively capturing and has a capture graph.
     if (waitStream == nullptr || waitStream->GetCaptureGraph() == nullptr) {
-      return hipErrorStreamCaptureNotActive;
+      return hipErrorInvalidHandle;
     }
     auto lastCapturedNodes = waitStream->GetLastCapturedNodes();
     hip::GraphNode* pGraphNode = waitStream->GetCaptureGraph()->AddExternalEventWaitNode(
