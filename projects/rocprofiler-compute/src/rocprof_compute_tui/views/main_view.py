@@ -59,6 +59,7 @@ class MainView(Horizontal):
         super().__init__(id="main-container")
         self.logger = Logger()
         self.logger.info("MainView initialized", update_ui=False)
+        self.analyzer: Optional[Any] = None
 
     def flush(self) -> None:
         """Required for stdout compatibility."""
@@ -207,6 +208,7 @@ class MainView(Horizontal):
             # ------------------------------------
             self.app.call_from_thread(
                 self._analysis_success,
+                analyzer,
                 kernel_to_df_dict,
                 top_kernel_to_df_list,
             )
@@ -229,9 +231,13 @@ class MainView(Horizontal):
 
     def _analysis_success(
         self,
+        analyzer: Any,  # noqa: ANN401
         kernel_to_df_dict: dict[str, dict[str, Any]],
         top_kernel_to_df_list: list[dict[str, Any]],
     ) -> None:
+        # Store analyzer for filter re-runs
+        self.analyzer = analyzer
+
         self.kernel_to_df_dict = kernel_to_df_dict or {}
         self.top_kernel_to_df_list = top_kernel_to_df_list or []
 

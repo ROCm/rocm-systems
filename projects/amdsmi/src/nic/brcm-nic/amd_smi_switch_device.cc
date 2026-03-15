@@ -25,42 +25,37 @@
  * THE SOFTWARE.
  */
 
-#include <functional>
 #include "amd_smi/impl/nic/amd_smi_switch_device.h"
+
+#include <functional>
+
 #include "rocm_smi/rocm_smi_utils.h"
 
 namespace amd::smi {
 
-uint32_t AMDSmiSWITCHDevice::get_switch_id() const {
-    return switch_id_;
-}
+uint32_t AMDSmiSWITCHDevice::get_switch_id() const { return switch_id_; }
 
-std::string& AMDSmiSWITCHDevice::get_switch_path() {
-    return path_;
-}
+std::string& AMDSmiSWITCHDevice::get_switch_path() { return path_; }
 
-amdsmi_bdf_t AMDSmiSWITCHDevice::get_bdf() {
-    return bdf_;
-}
+amdsmi_bdf_t AMDSmiSWITCHDevice::get_bdf() { return bdf_; }
 
 amdsmi_status_t AMDSmiSWITCHDevice::get_no_drm_data() {
-    amdsmi_status_t ret;
-    std::string path;
-    amdsmi_bdf_t bdf;
-    ret = nodrm_.get_device_path_by_index(switch_id_, &path);
-    if (ret != AMDSMI_STATUS_SUCCESS) return AMDSMI_STATUS_NOT_SUPPORTED;
-    ret = nodrm_.get_bdf_by_index(switch_id_, &bdf);
-    if (ret != AMDSMI_STATUS_SUCCESS) return AMDSMI_STATUS_NOT_SUPPORTED;
-    path_ = path;
+  amdsmi_status_t ret;
+  std::string path;
+  amdsmi_bdf_t bdf;
+  ret = nodrm_.get_device_path_by_index(switch_id_, &path);
+  if (ret != AMDSMI_STATUS_SUCCESS) return AMDSMI_STATUS_NOT_SUPPORTED;
+  ret = nodrm_.get_bdf_by_index(switch_id_, &bdf);
+  if (ret != AMDSMI_STATUS_SUCCESS) return AMDSMI_STATUS_NOT_SUPPORTED;
+  path_ = path;
 
-    return AMDSMI_STATUS_SUCCESS;
+  return AMDSMI_STATUS_SUCCESS;
 }
 
-pthread_mutex_t* AMDSmiSWITCHDevice::get_mutex() {
-    return amd::smi::GetMutex(switch_id_);
-}
+pthread_mutex_t* AMDSmiSWITCHDevice::get_mutex() { return amd::smi::GetMutex(switch_id_); }
 
-amdsmi_status_t AMDSmiSWITCHDevice::amd_query_switch_link_info(amdsmi_brcm_switch_link_metric_t& info) const {
+amdsmi_status_t AMDSmiSWITCHDevice::amd_query_switch_link_info(
+    amdsmi_brcm_switch_link_metric_t& info) const {
   amdsmi_status_t ret;
   std::string device_path;
   ret = nodrm_.get_device_path_by_index(switch_id_, &device_path);
@@ -69,16 +64,18 @@ amdsmi_status_t AMDSmiSWITCHDevice::amd_query_switch_link_info(amdsmi_brcm_switc
   return nodrm_.amd_query_switch_link(device_path, info);
 }
 
-amdsmi_status_t AMDSmiSWITCHDevice::amd_query_switch_power_info(amdsmi_brcm_switch_power_metric_t& info) const {
+amdsmi_status_t AMDSmiSWITCHDevice::amd_query_switch_power_info(
+    amdsmi_brcm_switch_power_metric_t& info) const {
   amdsmi_status_t ret;
-  std::string device_path; //sys/bus/pci/devices/0000:9b:00.0
+  std::string device_path;  // sys/bus/pci/devices/0000:9b:00.0
   ret = nodrm_.get_device_path_by_index(switch_id_, &device_path);
   if (ret != AMDSMI_STATUS_SUCCESS) return AMDSMI_STATUS_NOT_SUPPORTED;
 
   return nodrm_.amd_query_switch_power(device_path, info);
 }
 
-amdsmi_status_t AMDSmiSWITCHDevice::amd_query_switch_device_info(amdsmi_brcm_switch_device_metric_t& info) const {
+amdsmi_status_t AMDSmiSWITCHDevice::amd_query_switch_device_info(
+    amdsmi_brcm_switch_device_metric_t& info) const {
   amdsmi_status_t ret;
   std::string device_path;
   ret = nodrm_.get_device_path_by_index(switch_id_, &device_path);
@@ -95,13 +92,13 @@ amdsmi_status_t AMDSmiSWITCHDevice::amd_query_switch_uuid(std::string& serial) c
   if (ret != AMDSMI_STATUS_SUCCESS) return AMDSMI_STATUS_NOT_SUPPORTED;
 
   char bdf_str[20];
-  snprintf(bdf_str, sizeof(bdf_str)-1, "%04lx:%02x:%02x.%d", bdf.domain_number, bdf.bus_number,
-          bdf.device_number, bdf.function_number);
+  snprintf(bdf_str, sizeof(bdf_str) - 1, "%04lx:%02x:%02x.%d", bdf.domain_number, bdf.bus_number,
+           bdf.device_number, bdf.function_number);
 
   return nodrm_.amd_query_switch_uuid(std::string(bdf_str), serial);
 }
 
-amdsmi_status_t AMDSmiSWITCHDevice::amd_query_switch_numa_affinity(int32_t *numa_node) const {
+amdsmi_status_t AMDSmiSWITCHDevice::amd_query_switch_numa_affinity(int32_t* numa_node) const {
   amdsmi_status_t ret;
   std::string device_path;
   ret = nodrm_.get_device_path_by_index(switch_id_, &device_path);
@@ -112,12 +109,11 @@ amdsmi_status_t AMDSmiSWITCHDevice::amd_query_switch_numa_affinity(int32_t *numa
 
 amdsmi_status_t AMDSmiSWITCHDevice::amd_query_switch_cpu_affinity(std::string& cpu_affinity) const {
   char bdf_str[20];
-  snprintf(bdf_str, sizeof(bdf_str)-1, "%04lx:%02x", bdf_.domain_number, bdf_.bus_number);
+  snprintf(bdf_str, sizeof(bdf_str) - 1, "%04lx:%02x", bdf_.domain_number, bdf_.bus_number);
   std::stringstream domain_bus_sstream;
   domain_bus_sstream << "/sys/class/pci_bus/" << std::string(bdf_str);
-  
+
   return nodrm_.amd_query_switch_cpu_affinity(domain_bus_sstream.str(), cpu_affinity);
 }
 
 }  // namespace amd::smi
-
