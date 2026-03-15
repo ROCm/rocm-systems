@@ -4,6 +4,7 @@
 #pragma once
 #include "common/span.hpp"
 #include <array>
+#include <concepts>
 #include <cstdint>
 #include <optional>
 #include <string_view>
@@ -166,10 +167,13 @@ struct has_get_size<T, void_t<decltype(get_size(std::declval<const T&>()))>>
 : std::true_type
 {};
 
+/// Validates that type T satisfies all Cacheable requirements at compile time
+/// @note Uses C++20 concepts for clearer error messages
 template <typename T, typename TypeIdentifierEnum>
 __attribute__((always_inline)) inline constexpr void
 check_type()
 {
+    // Legacy static_asserts preserved for backwards compatibility with detailed messages
     static_assert(has_serialize<T>::value, "Type doesn't have `serialize` function.");
     static_assert(has_deserialize<T>::value, "Type doesn't have `deserialize` function.");
     static_assert(has_get_size<T>::value, "Type doesn't have `get_size` function.");
@@ -192,5 +196,46 @@ struct has_execute_processing<
 {};
 
 }  // namespace type_traits
+
+// ======================================================================================
+// C++20 Concepts for cacheable types
+// ======================================================================================
+
+/// Concept for types that can be serialized to a byte buffer
+template <typename T>
+concept Serializable = requires(uint8_t* buffer, const T& value) {
+    { serialize(buffer, value) } -> std::same_as<void>;
+};
+
+/// Concept for types that can be deserialized from a byte buffer
+template <typename T>
+concept Deserializable = requires(uint8_t*& data_pos) {
+    { deserialize<T>(data_pos) } -> std::same_as<T>;
+};
+
+/// Concept for types that can compute their serialized size
+template <typename T>
+concept HasSize = requires(const T& value) {
+    { get_size(value) } -> std::convertible_to<size_t>;
+};
+
+/// Concept for types with a type_identifier static member of enum class type
+template <typename T, typename TypeIdentifierEnum>
+concept HasTypeIdentifier =
+    type_traits::is_enum_class_v<TypeIdentifierEnum> &&
+    std::is_convertible_v<decltype(T::type_identifier), TypeIdentifierEnum>;
+
+/// Concept combining all requirements for a cacheable type
+template <typename T, typename TypeIdentifierEnum>
+concept Cacheable = Serializable<T> && Deserializable<T> && HasSize<T> &&
+                    HasTypeIdentifier<T, TypeIdentifierEnum>;
+
+/// Concept for sample processor types that can handle samples
+template <typename T, typename TypeIdentifierEnum, typename CacheableType>
+concept SampleProcessor =
+    requires(T processor, TypeIdentifierEnum type_id, const CacheableType& sample) {
+        { processor.execute_sample_processing(type_id, sample) } -> std::same_as<void>;
+    };
+
 }  // namespace trace_cache
 }  // namespace rocprofsys

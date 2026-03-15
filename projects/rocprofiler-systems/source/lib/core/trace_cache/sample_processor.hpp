@@ -3,6 +3,7 @@
 
 #pragma once
 #include "common/defines.h"
+#include "core/trace_cache/cache_type_traits.hpp"
 #include "core/trace_cache/cacheable.hpp"
 #include "core/trace_cache/sample_type.hpp"
 
@@ -12,6 +13,7 @@
 
 #include <rocprofiler-sdk/version.h>
 
+#include <concepts>
 #include <vector>
 
 namespace rocprofsys
@@ -114,14 +116,14 @@ struct processor_view_t
         finalize_processing_fn_t    finalize_processing;
     };
 
+    /// Constructs a processor view from a concrete processor type
+    /// @note Uses C++20 concept constraint instead of static_assert
     template <typename T>
+        requires std::derived_from<T, processor_t<T>>
     explicit processor_view_t(T& t) noexcept
     : m_object{ std::addressof(t) }
     , m_vtable{ std::addressof(get_vtable_for_type<T>()) }
-    {
-        static_assert(std::is_base_of<processor_t<T>, T>::value,
-                      "Type must be derived from processor_t<T>");
-    }
+    {}
 
     processor_view_t(const processor_view_t&) noexcept            = default;
     processor_view_t(processor_view_t&&) noexcept                 = default;
