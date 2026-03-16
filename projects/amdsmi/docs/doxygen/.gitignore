@@ -1,2 +1,6 @@
-docBin/
 Doxyfile
+# doxygen-generated artifacts
+html/
+latex/
+xml/
+tagfile.xml

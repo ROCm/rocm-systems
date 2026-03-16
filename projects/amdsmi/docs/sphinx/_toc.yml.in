@@ -29,27 +29,25 @@ subtrees:
   - file: how-to/setup-docker-container.md
     title: Use AMD SMI in a Docker container
 
-- caption: Reference
-  entries:
-  - file: reference/amdsmi-cpp-api.md
-    title: C++ API
+  - caption: Reference
     entries:
-    - file: doxygen/docBin/html/topics
-      title: Modules
-    - file: doxygen/docBin/html/files
-      title: Files
-    - file: doxygen/docBin/html/globals
-      title: Globals
-    - file: doxygen/docBin/html/annotated
-      title: Data structures
-    - file: doxygen/docBin/html/functions_data_fields
-      title: Data fields
-  - file: reference/amdsmi-py-api.md
-    title: Python API
-  - file: reference/amdsmi-go-api.md
-    title: Go API
-  - file: reference/changelog.md
-    title: Changelog
+      - file: reference/amdsmi-cpp-api/index.md
+        title: C/C++ API
+        entries:
+          - file: reference/amdsmi-cpp-api/functions.md
+            title: Functions
+          - file: reference/amdsmi-cpp-api/constants.md
+            title: Constants
+          - file: reference/amdsmi-cpp-api/structs.md
+            title: Data structures
+          - file: reference/amdsmi-cpp-api/typedefs.md
+            title: Typedefs
+      - file: reference/amdsmi-py-api.md
+        title: Python API
+      - file: reference/amdsmi-go-api.md
+        title: Go API
+      - file: reference/changelog.md
+        title: Changelog
 
 - caption: Conceptual
   entries:

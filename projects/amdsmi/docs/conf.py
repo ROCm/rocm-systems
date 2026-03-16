@@ -8,7 +8,12 @@ import re
 import sys
 from pathlib import Path
 
-sys.path.append(str(Path("_extension").resolve()))
+from sphinx.errors import ConfigError
+
+DOCS_DIR = Path(__file__).parent.resolve()
+DOXYGEN_DIR = DOCS_DIR / "doxygen"
+AMDSMI_DIR = DOCS_DIR.parent
+AMDSMI_H = AMDSMI_DIR / "include" / "amd_smi" / "amdsmi.h"
 
 
 # get version number to print in docs
@@ -50,38 +55,39 @@ html_theme_options = {"flavor": "rocm"}
 html_title = f"AMD SMI {version_number} documentation"
 suppress_warnings = ["etoc.toctree"]
 external_toc_path = "./sphinx/_toc.yml"
+html_theme_options = {"flavor": "rocm", "show_toc_level": 2}
 
+# Extension-related settings
+sys.path.append(str(DOCS_DIR / "_extension"))
 external_projects_current_project = "amdsmi"
 extensions = ["rocm_docs", "rocm_docs.doxygen", "go_api_ref", "sphinxcontrib.mermaid"]
 
 myst_fence_as_directive = ["mermaid"]
-
-doxygen_root = "doxygen"
-doxysphinx_enabled = True
-doxygen_project = {
-    "name": "AMD SMI C++ API reference",
-    "path": "doxygen/docBin/xml",
 }
 
+# doxygen-related settings
+doxygen_root = DOXYGEN_DIR
+breathe_projects = {"amdsmi": doxygen_root / "xml"}
+breathe_default_project = "amdsmi"
+breathe_domain_by_extension = {"h": "c"}
+breathe_order_parameters_first = True
+amdsmi_doxygen_tagfile = DOXYGEN_DIR / "tagfile.xml"
 
-def generate_doxyfile(app, _):
-    doxyfile_in = Path(app.confdir) / doxygen_root / "Doxyfile.in"
-    doxyfile_out = Path(app.confdir) / doxygen_root / "Doxyfile"
+
+def generate_doxyfile():
+    doxyfile_in = doxygen_root / "Doxyfile.in"
+    doxyfile_out = doxygen_root / "Doxyfile"
 
     if not doxyfile_in.exists():
-        from sphinx.errors import ConfigError
-
         raise ConfigError(f"Missing Doxyfile.in at {doxyfile_in}")
 
     with open(doxyfile_in) as f:
         content = f.read()
 
-    content = content.replace("@PROJECT_NUMBER@", version_number)
+    content = content.replace("@PROJECT_NUMBER@", version)
 
     with open(doxyfile_out, "w") as f:
         f.write(content)
 
 
-def setup(app):
-    app.connect("config-inited", generate_doxyfile, priority=100)
-    return {"parallel_read_safe": True, "parallel_write_safe": True}
+generate_doxyfile()
