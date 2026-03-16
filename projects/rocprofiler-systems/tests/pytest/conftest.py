@@ -272,6 +272,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "rocprof_binary",
         "rocprof_config",
         "xgmi",
+        "sdma",
         "group_by_queue",
         "group_by_stream",
         "openmp",

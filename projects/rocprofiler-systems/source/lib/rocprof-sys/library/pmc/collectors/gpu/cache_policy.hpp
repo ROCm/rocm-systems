@@ -320,13 +320,13 @@ struct cache_policy
      * @brief Store a PMC sample to the trace cache.
      *
      * @param device_id GPU device identifier
-     * @param supported_metrics Metrics supported by this device
      * @param enabled_metrics Metrics requested by user configuration
+     * @param supported_metrics Metrics supported by this device
      * @param metrics Collected metric values
      * @param timestamp Sample timestamp in nanoseconds
      */
-    static void store_sample(size_t device_id, const enabled_metrics& supported_metrics,
-                             const enabled_metrics& enabled_metrics_cfg,
+    static void store_sample(size_t device_id, const enabled_metrics& enabled_metrics_cfg,
+                             const enabled_metrics& supported_metrics,
                              const metrics& metric_values, unsigned long timestamp)
     {
         enabled_metrics _enabled_metrics = { .value = enabled_metrics_cfg.value &

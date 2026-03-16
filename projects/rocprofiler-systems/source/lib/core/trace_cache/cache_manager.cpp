@@ -415,10 +415,13 @@ configure_processors(const std::shared_ptr<sample_processor_t>&       _type_proc
     }
     if(_enabled_formats.is_perfetto_enabled())
     {
+        LOG_INFO("[cache_manager] Creating perfetto_processor for pid={}",
+                 _processor_config->_pid);
         processor_storage.perfetto_processor = std::make_shared<perfetto_processor_t>(
             _processor_config->_metadata_registry, _processor_config->_agent_manager,
             _processor_config->_pid, _processor_config->_ppid);
         _type_processing->add_handler(*processor_storage.perfetto_processor);
+        LOG_INFO("[cache_manager] perfetto_processor registered");
     }
     return processor_storage;
 }
@@ -584,6 +587,8 @@ cache_manager::post_process_bulk()
 
     const data::enabled_formats_t enabled_formats;
     enabled_formats.print();
+    LOG_DEBUG("[cache_manager] is_perfetto_enabled={}, is_rocpd_enabled={}",
+              enabled_formats.is_perfetto_enabled(), enabled_formats.is_rocpd_enabled());
 
     auto processor_configs =
         processing_utils::create_processor_configs(cache_files, root_pid);

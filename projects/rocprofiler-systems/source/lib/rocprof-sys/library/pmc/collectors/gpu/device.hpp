@@ -3,10 +3,9 @@
 
 #pragma once
 
+#include "core/amd_smi.hpp"
 #include "library/pmc/collectors/gpu/types.hpp"
 #include "logger/debug.hpp"
-
-#include <amd_smi/amdsmi.h>
 
 #include <algorithm>
 #include <cstdint>

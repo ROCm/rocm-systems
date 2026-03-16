@@ -72,8 +72,10 @@ struct settings_policy
     static gpu::enabled_metrics get_enabled_metrics() noexcept
     {
         static auto _enabled_metrics = []() {
-            auto setting = get_setting_value<std::string>("ROCPROFSYS_AMD_SMI_METRICS");
-            return parse_enabled_metrics(setting.has_value() ? setting.value() : "all");
+            auto setting   = get_setting_value<std::string>("ROCPROFSYS_AMD_SMI_METRICS");
+            auto value_str = setting.has_value() ? setting.value() : "all";
+            auto result    = parse_enabled_metrics(value_str);
+            return result;
         }();
         return _enabled_metrics;
     }
