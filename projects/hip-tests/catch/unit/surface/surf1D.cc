@@ -242,8 +242,8 @@ template <typename T> static void runTestRW(const int width) {
  * ------------------------
  *    - HIP_VERSION >= 5.7
  */
-TEMPLATE_TEST_CASE("Unit_surf1Dread_Positive_Basic", "", char, unsigned char, short,
-                   unsigned short, int, unsigned int, float) {
+TEMPLATE_TEST_CASE(Unit_surf1Dread_Positive_Basic, char, unsigned char, short, unsigned short, int,
+                   unsigned int, float) {
   CHECK_IMAGE_SUPPORT;
 
   const int width = GENERATE(31, 67, 131, 263);
@@ -265,8 +265,8 @@ TEMPLATE_TEST_CASE("Unit_surf1Dread_Positive_Basic", "", char, unsigned char, sh
  * ------------------------
  *    - HIP_VERSION >= 5.7
  */
-TEMPLATE_TEST_CASE("Unit_surf1Dwrite_Positive_Basic", "", char, unsigned char, short,
-                   unsigned short, int, unsigned int, float) {
+TEMPLATE_TEST_CASE(Unit_surf1Dwrite_Positive_Basic, char, unsigned char, short, unsigned short, int,
+                   unsigned int, float) {
   CHECK_IMAGE_SUPPORT;
 
   const int width = GENERATE(31, 67, 131, 263);
@@ -288,8 +288,8 @@ TEMPLATE_TEST_CASE("Unit_surf1Dwrite_Positive_Basic", "", char, unsigned char, s
  * ------------------------
  *    - HIP_VERSION >= 5.7
  */
-TEMPLATE_TEST_CASE("Unit_surf1D_Positive_ReadWrite", "", char, unsigned char, short,
-                   unsigned short, int, unsigned int, float) {
+TEMPLATE_TEST_CASE(Unit_surf1D_Positive_ReadWrite, char, unsigned char, short, unsigned short, int,
+                   unsigned int, float) {
   CHECK_IMAGE_SUPPORT;
 
   const int width = GENERATE(31, 67, 131, 263);

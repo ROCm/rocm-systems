@@ -674,8 +674,11 @@ configure_settings(bool _init)
         std::string{ "perf::PERF_COUNT_HW_CACHE_REFERENCES" }, "sampling",
         "hardware_counters");
 
-    rocprofiler_sdk::config_settings(_config);
-    amd_smi::config_settings(_config);
+    if(_init)
+    {
+        rocprofiler_sdk::config_settings(_config);
+        amd_smi::config_settings(_config);
+    }
 
     ROCPROFSYS_CONFIG_SETTING(size_t, "ROCPROFSYS_PERFETTO_SHMEM_SIZE_HINT_KB",
                               "Hint for shared-memory buffer size in perfetto (in KB)",

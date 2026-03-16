@@ -94,18 +94,20 @@ else()
     endif()
   endif()
 
-  set ( HSAKMT_LINKER_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/src/libhsakmt.ver" )
+  if (UNIX)
+    set ( HSAKMT_LINKER_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/src/libhsakmt.ver" )
 
-  # Preprocess the version script to handle conditional compilation
-  set ( HSAKMT_LINKER_SCRIPT_PROCESSED "${CMAKE_CURRENT_BINARY_DIR}/libhsakmt.ver" )
-  execute_process(
-    COMMAND ${CMAKE_C_COMPILER} -E -P -x c ${HSAKMT_LINKER_SCRIPT}
-    OUTPUT_FILE ${HSAKMT_LINKER_SCRIPT_PROCESSED}
-  )
+    # Preprocess the version script to handle conditional compilation
+    set ( HSAKMT_LINKER_SCRIPT_PROCESSED "${CMAKE_CURRENT_BINARY_DIR}/libhsakmt.ver" )
+    execute_process(
+      COMMAND ${CMAKE_C_COMPILER} -E -P -x c ${HSAKMT_LINKER_SCRIPT}
+      OUTPUT_FILE ${HSAKMT_LINKER_SCRIPT_PROCESSED}
+    )
 
-  ## Linker Flags
-  ## Add --enable-new-dtags to generate DT_RUNPATH
-  set (HSAKMT_LINK_FLAGS "${HSAKMT_LINK_FLAGS} -Wl,--enable-new-dtags -Wl,--version-script=${HSAKMT_LINKER_SCRIPT_PROCESSED} -Wl,-soname=${HSAKMT_COMPONENT}.so.${LIB_VERSION_MAJOR} -Wl,-z,nodelete")
+    ## Linker Flags
+    ## Add --enable-new-dtags to generate DT_RUNPATH
+    set (HSAKMT_LINK_FLAGS "${HSAKMT_LINK_FLAGS} -Wl,--enable-new-dtags -Wl,--version-script=${HSAKMT_LINKER_SCRIPT_PROCESSED} -Wl,-soname=${HSAKMT_COMPONENT}.so.${LIB_VERSION_MAJOR} -Wl,-z,nodelete")
+  endif()
 
   ## Address Sanitize Flag
   if ( ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANITIZER STREQUAL "HOST_ASAN" )
@@ -271,17 +273,41 @@ else()
     endif()
   else()
     ## Link Windows Kernel Mode Interface
-    if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-      set(WKMI_LIB_PATH ${CMAKE_CURRENT_SOURCE_DIR}/src/dxg/wkmi/win/dbg/wkmi.lib)
-    else()
-      set(WKMI_LIB_PATH ${CMAKE_CURRENT_SOURCE_DIR}/src/dxg/wkmi/win/rel/wkmi.lib)
+    if (LIB_SRC_BUILD)
+      set(WKMI_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../../wkmi" CACHE PATH "Path to wkmi source directory for direct build")
     endif()
-    
-    # Link wkmi.lib and ensure it's propagated to downstream targets (hsa-runtime64)
-    target_link_libraries(${HSAKMT_TARGET} PUBLIC ${WKMI_LIB_PATH})
-    
-    # Export wkmi.lib path for downstream static linking
-    set_property(TARGET ${HSAKMT_TARGET} APPEND PROPERTY INTERFACE_LINK_LIBRARIES ${WKMI_LIB_PATH})
+
+    if(WKMI_SRC_DIR AND EXISTS "${WKMI_SRC_DIR}/CMakeLists.txt")
+      ## Build wkmi from source
+      set(WKMI_SRC_BUILD ON CACHE INTERNAL "wkmi is built from source")
+      message(STATUS "Building wkmi from source: ${WKMI_SRC_DIR}")
+      set(WKMI_DEBUG_WITH_OPTIMIZATIONS OFF CACHE BOOL "" FORCE)
+      add_subdirectory(${WKMI_SRC_DIR} ${CMAKE_CURRENT_BINARY_DIR}/wkmi)
+
+      # Add the hsa-runtime paths wkmi needs for transitive includes.
+      target_include_directories(wkmi PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/hsa-runtime/core
+        ${CMAKE_CURRENT_SOURCE_DIR}/../runtime
+      )
+      target_link_libraries(${HSAKMT_TARGET} PUBLIC wkmi)
+      target_include_directories(${HSAKMT_TARGET} PUBLIC ${WKMI_SRC_DIR}/lib/inc)
+    else()
+      ## Fall back to pre-built wkmi.lib
+      set(WKMI_SRC_BUILD OFF CACHE INTERNAL "wkmi is built from source")
+      message(STATUS "Using pre-built wkmi.lib (set WKMI_SRC_DIR to build from source)")
+      if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+        set(WKMI_LIB_PATH ${CMAKE_CURRENT_SOURCE_DIR}/src/dxg/wkmi/win/dbg/wkmi.lib)
+      else()
+        set(WKMI_LIB_PATH ${CMAKE_CURRENT_SOURCE_DIR}/src/dxg/wkmi/win/rel/wkmi.lib)
+      endif()
+      target_include_directories(${HSAKMT_TARGET} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src/dxg/wkmi)
+      
+      # Link wkmi.lib and ensure it's propagated to downstream targets (hsa-runtime64)
+      target_link_libraries(${HSAKMT_TARGET} PUBLIC ${WKMI_LIB_PATH})
+      
+      # Export wkmi.lib path for downstream static linking
+      set_property(TARGET ${HSAKMT_TARGET} APPEND PROPERTY INTERFACE_LINK_LIBRARIES ${WKMI_LIB_PATH})
+    endif()
   endif()
 
   ## Define default paths and packages.
@@ -388,7 +414,13 @@ else()
         INTERFACE -Wl,-Bstatic ${AMDGPU_STATIC_LIB_PATHS} ${DRM_AMDGPU_LDFLAGS} ${DRM_LDFLAGS} -Wl,-Bdynamic
       )
     else()
-      set_property(TARGET ${HSAKMT_STATIC_DRM_TARGET} APPEND PROPERTY INTERFACE_LINK_LIBRARIES ${WKMI_LIB_PATH})
+      if(WKMI_SRC_BUILD)
+        target_link_libraries(${HSAKMT_STATIC_DRM_TARGET} PUBLIC wkmi)
+        target_include_directories(${HSAKMT_STATIC_DRM_TARGET} PUBLIC ${WKMI_SRC_DIR}/lib/inc)
+      else()
+        target_include_directories(${HSAKMT_STATIC_DRM_TARGET} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src/dxg/wkmi)
+        set_property(TARGET ${HSAKMT_STATIC_DRM_TARGET} APPEND PROPERTY INTERFACE_LINK_LIBRARIES ${WKMI_LIB_PATH})
+      endif()
     endif()
     target_compile_options(${HSAKMT_STATIC_DRM_TARGET} PRIVATE ${DRM_CFLAGS} ${HSAKMT_C_FLAGS})
 

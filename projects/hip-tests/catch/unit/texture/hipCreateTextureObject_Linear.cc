@@ -51,7 +51,7 @@ THE SOFTWARE.
  *  - Textures supported on device
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipCreateTextureObject_LinearResource") {
+TEST_CASE(Unit_hipCreateTextureObject_LinearResource) {
   CHECK_IMAGE_SUPPORT
 
   float* texBuf;

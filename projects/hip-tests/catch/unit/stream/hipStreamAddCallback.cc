@@ -161,7 +161,7 @@ using hipStreaAddCallbackTest::testStreamCallbackFunctionality;
 /*
  * Validates parameter list of hipStreamAddCallback.
  */
-TEST_CASE("Unit_hipStreamAddCallback_ParamTst_Positive") {
+TEST_CASE(Unit_hipStreamAddCallback_ParamTst_Positive) {
   hipStream_t mystream;
   HIP_CHECK(hipStreamCreate(&mystream));
 
@@ -194,7 +194,7 @@ TEST_CASE("Unit_hipStreamAddCallback_ParamTst_Positive") {
 /*
  * Negative tests for validation of hipStreamAddCallback parameter list.
  */
-TEST_CASE("Unit_hipStreamAddCallback_ParamTst_Negative") {
+TEST_CASE(Unit_hipStreamAddCallback_ParamTst_Negative) {
   hipStream_t mystream;
   HIP_CHECK(hipStreamCreate(&mystream));
 
@@ -220,7 +220,7 @@ TEST_CASE("Unit_hipStreamAddCallback_ParamTst_Negative") {
 /*
  * Validates hipStreamAddCallback functionality with default stream.
  */
-TEST_CASE("Unit_hipStreamAddCallback_WithDefaultStream") {
+TEST_CASE(Unit_hipStreamAddCallback_WithDefaultStream) {
   bool TestPassed = true;
   TestPassed = testStreamCallbackFunctionality(true);
   REQUIRE(TestPassed);
@@ -229,7 +229,7 @@ TEST_CASE("Unit_hipStreamAddCallback_WithDefaultStream") {
 /*
  * Validates hipStreamAddCallback functionality with defined stream.
  */
-TEST_CASE("Unit_hipStreamAddCallback_WithCreatedStream") {
+TEST_CASE(Unit_hipStreamAddCallback_WithCreatedStream) {
   bool TestPassed = true;
   TestPassed = testStreamCallbackFunctionality(false);
   REQUIRE(TestPassed);

@@ -55,7 +55,7 @@ static __global__ void texture2dCopyKernel(hipTextureObject_t texObj, TYPE_t* ds
  *  - Textures supported on device
  *  - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_hipTexObjPitch_texture2D", "", char, unsigned char, short, unsigned short,
+TEMPLATE_TEST_CASE(Unit_hipTexObjPitch_texture2D, char, unsigned char, short, unsigned short,
                    int, unsigned int, float) {
   CHECK_IMAGE_SUPPORT
   (void)hipGetLastError();  // Prevent negative tests affecting this
