@@ -25,7 +25,7 @@ THE SOFTWARE.
 #include <fstream>
 #include <vector>
 
-TEST_CASE("Unit_hipModuleLoadData_Positive_Basic") {
+TEST_CASE(Unit_hipModuleLoadData_Positive_Basic) {
   HIP_CHECK(hipFree(nullptr));
   hipModule_t module = nullptr;
 
@@ -84,7 +84,7 @@ TEST_CASE("Unit_hipModuleLoadData_Positive_Basic") {
   }
 }
 
-TEST_CASE("Unit_hipModuleLoadData_Negative_Parameters") {
+TEST_CASE(Unit_hipModuleLoadData_Negative_Parameters) {
   HIP_CHECK(hipFree(nullptr));
   hipModule_t module;
 
@@ -123,7 +123,7 @@ TEST_CASE("Unit_hipModuleLoadData_Negative_Parameters") {
 */
 #if HT_AMD
 // Below test disabled for NVIDIA due to the defect SWDEV-472385
-TEST_CASE("Unit_hipModuleLoadData_Functional") {
+TEST_CASE(Unit_hipModuleLoadData_Functional) {
   constexpr int LEN = 64;
   constexpr int SIZE = LEN << 2;
   constexpr auto FILENAME = "vcpy_kernel.code";

@@ -8,5 +8,68 @@ definitions:
     level: 2
   level_3: &level_3
     level: 3
-  level_5: &level_5
-    level: 5
+  level_4: &level_4
+    level: 4
+
+# ==============================================================================
+# LEVEL PARAMETERS - Test parameters for each level
+# These are converted to C++ compile-time constants at build time
+# [TODO] Add description of each parameter and its purpose
+# [TODO] Add default values for each parameter
+# The values below are example defaults and should be replaced with the actual values.
+# ==============================================================================
+cmd_options:
+  # Level 0 - Quick/Smoke Tests
+  # Use case: Emulation environment, PR validation, quick sanity checks
+  # Runtime: seconds
+  level_0:
+    memory_sizes: [1K, 1M, 10M]
+    block_sizes: [64, 256]
+    iterations: 100
+    warmups: 10
+    max_memory: 1G
+    reduction_factor: 0.1
+
+  # Level 1 - Standard Tests
+  # Use case: Nightly CI, regular regression testing
+  # Runtime: minutes
+  level_1:
+    memory_sizes: [1K, 4K, 64K, 1M, 10M, 50M, 100M]
+    block_sizes: [32, 64, 128, 256, 512, 1024]
+    iterations: 1000
+    warmups: 100
+    max_memory: 4G
+    reduction_factor: 0.1
+
+  # Level 2 - Comprehensive Tests
+  # Use case: Release validation, full coverage
+  # Runtime: hours
+  level_2:
+    memory_sizes: [64, 256, 1K, 4K, 16K, 64K, 256K, 1M, 10M, 50M, 100M, 500M, 1G, 2G]
+    block_sizes: [32, 64, 96, 128, 192, 256, 384, 512, 768, 1024]
+    iterations: 5
+    warmups: 5
+    max_memory: 8G
+    reduction_factor: 0.1
+
+  # Level 3 - Performance/Stress Tests
+  # Use case: Benchmarks, stress testing
+  # Runtime: variable
+  level_3:
+    memory_sizes: [100M, 1G, 2G]
+    block_sizes: [256, 512, 1024]
+    iterations: 5
+    warmups: 5
+    max_memory: 2G
+    reduction_factor: 100
+
+  # Level 4 - Extended Stress Tests
+  # Use case: Full system stress, extended validation
+  # Runtime: hours
+  level_4:
+    memory_sizes: [256M, 512M, 1G, 2G, 4G]
+    block_sizes: [256, 512, 1024]
+    iterations: 10
+    warmups: 5
+    max_memory: 4G
+    reduction_factor: 100

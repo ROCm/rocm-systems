@@ -129,7 +129,7 @@ class RocVideoESParser {
         /*! \brief Function to check the remaining data size in the ring buffer
          * \return Number of bytes still available in the ring
          */
-        int GetDataSizeInRB();
+        uint32_t GetDataSizeInRB();
 
         /*! \brief Function to read one byte from the ring buffer without advancing the read pointer
          * \param [in] offset The byte offset to read

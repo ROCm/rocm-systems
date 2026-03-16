@@ -21,7 +21,7 @@
 # Detect unique GPU architectures for add_custom_command
 if(NOT DEFINED HIP_ARCH_DETECTION_DONE)
   set(HIP_ARCH_DETECTION_DONE TRUE CACHE INTERNAL "HIP architecture detection completed")
-  
+
   # Detect GPU architectures for code object generation
   # Note: CMake's HIP language support may not deduplicate architectures
   # Fix any duplicates in CMAKE_HIP_ARCHITECTURES if already set
@@ -41,14 +41,14 @@ if(NOT DEFINED HIP_ARCH_DETECTION_DONE)
         set(ROCM_PATH "/opt/rocm")
       endif()
     endif()
-    
+
     execute_process(
       COMMAND ${ROCM_PATH}/bin/rocm_agent_enumerator
       OUTPUT_VARIABLE DETECTED_GPUS
       OUTPUT_STRIP_TRAILING_WHITESPACE
       ERROR_QUIET
     )
-    
+
     if(DETECTED_GPUS)
       string(REPLACE "\n" ";" GPU_ARCH_LIST "${DETECTED_GPUS}")
       list(REMOVE_ITEM GPU_ARCH_LIST "gfx000" "")
@@ -69,3 +69,8 @@ foreach(arch ${CMAKE_HIP_ARCHITECTURES})
   list(APPEND OFFLOAD_ARCH_FLAGS "--offload-arch=${arch}")
 endforeach()
 
+# Build flags for device-only compilation (CMAKE_HIP_FLAGS minus --offload-arch)
+string(TOUPPER "${CMAKE_BUILD_TYPE}" _HIP_BUILD_TYPE_UPPER)
+separate_arguments(HIP_DEVICE_BUILD_FLAGS_NO_ARCH NATIVE_COMMAND
+  "${CMAKE_HIP_FLAGS} ${CMAKE_HIP_FLAGS_${_HIP_BUILD_TYPE_UPPER}}")
+list(FILTER HIP_DEVICE_BUILD_FLAGS_NO_ARCH EXCLUDE REGEX "--offload-arch=")

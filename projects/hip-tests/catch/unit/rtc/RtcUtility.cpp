@@ -179,6 +179,7 @@ int calling_combination_function(std::vector<std::string> combi_vec_list) {
     }
     Combination_CO[j] = hold_CO[j].c_str();
   }
+  delete[] Combination_CO;
   return errors;
 }
 

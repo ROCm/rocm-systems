@@ -37,7 +37,7 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_VMM") {
+TEST_CASE(Unit_hipGetProcAddress_VMM) {
   int value = 0;
   HIP_CHECK(hipDeviceGetAttribute(&value, hipDeviceAttributeVirtualMemoryManagementSupported, 0));
   if (value == 0) {

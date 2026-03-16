@@ -20,6 +20,8 @@
  * THE SOFTWARE.
  */
 
+#include "rocm_smi/rocm_smi_monitor.h"
+
 #include <dirent.h>
 
 #include <algorithm>
@@ -29,77 +31,73 @@
 #include <regex>  // NOLINT
 #include <string>
 
-#include "rocm_smi/rocm_smi_monitor.h"
-#include "rocm_smi/rocm_smi_utils.h"
 #include "rocm_smi/rocm_smi_exception.h"
 #include "rocm_smi/rocm_smi_logger.h"
+#include "rocm_smi/rocm_smi_utils.h"
 
 namespace amd::smi {
 
 struct MonitorNameEntry {
-    MonitorTypes type;
-    const char *name;
+  MonitorTypes type;
+  const char* name;
 };
 
+static const char* kMonTempFName = "temp#_input";
+static const char* kMonFanSpeedFName = "pwm#";
+static const char* kMonMaxFanSpeedFName = "pwm#_max";
+static const char* kMonFanRPMsName = "fan#_input";
+static const char* kMonFanControlEnableName = "pwm#_enable";
+static const char* kMonNameFName = "name";
+static const char* kMonPowerCapDefaultName = "power#_cap_default";
+static const char* kMonPowerCapName = "power#_cap";
+static const char* kMonPowerCapMaxName = "power#_cap_max";
+static const char* kMonPowerCapMinName = "power#_cap_min";
+static const char* kMonPowerAveName = "power#_average";
+static const char* kMonPowerInputName = "power#_input";
+static const char* kMonPowerLabelName = "power#_label";
+static const char* kMonTempMaxName = "temp#_max";
+static const char* kMonTempMinName = "temp#_min";
+static const char* kMonTempMaxHystName = "temp#_max_hyst";
+static const char* kMonTempMinHystName = "temp#_min_hyst";
+static const char* kMonTempCriticalName = "temp#_crit";
+static const char* kMonTempCriticalHystName = "temp#_crit_hyst";
+static const char* kMonTempEmergencyName = "temp#_emergency";
+static const char* kMonTempEmergencyHystName = "temp#_emergency_hyst";
+static const char* kMonTempCritMinName = "temp#_lcrit";
+static const char* kMonTempCritMinHystName = "temp#_lcrit_hyst";
+static const char* kMonTempOffsetName = "temp#_offset";
+static const char* kMonTempLowestName = "temp#_lowest";
+static const char* kMonTempHighestName = "temp#_highest";
+static const char* kMonTempLabelName = "temp#_label";
+static const char* kMonVoltFName = "in#_input";
+static const char* kMonVoltMinName = "in#_min";
+static const char* kMonVoltMinCritName = "in#_lcrit";
+static const char* kMonVoltMaxName = "in#_max";
+static const char* kMonVoltMaxCritName = "in#_crit";
+static const char* kMonVoltAverageName = "in#_average";
+static const char* kMonVoltLowestName = "in#_lowest";
+static const char* kMonVoltHighestName = "in#_highest";
+static const char* kMonVoltLabelName = "in#_label";
 
-static const char *kMonTempFName = "temp#_input";
-static const char *kMonFanSpeedFName = "pwm#";
-static const char *kMonMaxFanSpeedFName = "pwm#_max";
-static const char *kMonFanRPMsName = "fan#_input";
-static const char *kMonFanControlEnableName = "pwm#_enable";
-static const char *kMonNameFName = "name";
-static const char *kMonPowerCapDefaultName = "power#_cap_default";
-static const char *kMonPowerCapName = "power#_cap";
-static const char *kMonPowerCapMaxName = "power#_cap_max";
-static const char *kMonPowerCapMinName = "power#_cap_min";
-static const char *kMonPowerAveName = "power#_average";
-static const char *kMonPowerInputName = "power#_input";
-static const char *kMonPowerLabelName = "power#_label";
-static const char *kMonTempMaxName = "temp#_max";
-static const char *kMonTempMinName = "temp#_min";
-static const char *kMonTempMaxHystName = "temp#_max_hyst";
-static const char *kMonTempMinHystName = "temp#_min_hyst";
-static const char *kMonTempCriticalName = "temp#_crit";
-static const char *kMonTempCriticalHystName = "temp#_crit_hyst";
-static const char *kMonTempEmergencyName = "temp#_emergency";
-static const char *kMonTempEmergencyHystName = "temp#_emergency_hyst";
-static const char *kMonTempCritMinName = "temp#_lcrit";
-static const char *kMonTempCritMinHystName = "temp#_lcrit_hyst";
-static const char *kMonTempOffsetName = "temp#_offset";
-static const char *kMonTempLowestName = "temp#_lowest";
-static const char *kMonTempHighestName = "temp#_highest";
-static const char *kMonTempLabelName = "temp#_label";
-static const char *kMonVoltFName = "in#_input";
-static const char *kMonVoltMinName = "in#_min";
-static const char *kMonVoltMinCritName = "in#_lcrit";
-static const char *kMonVoltMaxName = "in#_max";
-static const char *kMonVoltMaxCritName = "in#_crit";
-static const char *kMonVoltAverageName = "in#_average";
-static const char *kMonVoltLowestName = "in#_lowest";
-static const char *kMonVoltHighestName = "in#_highest";
-static const char *kMonVoltLabelName = "in#_label";
+static const char* kTempSensorTypeMemoryName = "mem";
+static const char* kTempSensorTypeJunctionName = "junction";
+static const char* kTempSensorTypeEdgeName = "edge";
 
-static const char *kTempSensorTypeMemoryName = "mem";
-static const char *kTempSensorTypeJunctionName = "junction";
-static const char *kTempSensorTypeEdgeName = "edge";
+static const char* kTempSensorTypeVddgfxName = "vddgfx";
+static const char* kTempSensorTypeVddboardName = "vddboard";
 
-static const char *kTempSensorTypeVddgfxName = "vddgfx";
-static const char *kTempSensorTypeVddboardName = "vddboard";
-
-static const std::map<std::string, rsmi_temperature_type_t>
-                                                        kTempSensorNameMap = {
+static const std::map<std::string, rsmi_temperature_type_t> kTempSensorNameMap = {
     {kTempSensorTypeMemoryName, RSMI_TEMP_TYPE_MEMORY},
     {kTempSensorTypeJunctionName, RSMI_TEMP_TYPE_JUNCTION},
     {kTempSensorTypeEdgeName, RSMI_TEMP_TYPE_EDGE},
 };
 
-static const std::map<std::string, rsmi_voltage_type_t>
-                                                        kVoltSensorNameMap = {
+static const std::map<std::string, rsmi_voltage_type_t> kVoltSensorNameMap = {
     {kTempSensorTypeVddgfxName, RSMI_VOLT_TYPE_VDDGFX},
     {kTempSensorTypeVddboardName, RSMI_VOLT_TYPE_VDDBOARD},
 };
 
-static const std::map<MonitorTypes, const char *> kMonitorNameMap = {
+static const std::map<MonitorTypes, const char*> kMonitorNameMap = {
     {kMonName, kMonNameFName},
     {kMonTemp, kMonTempFName},
     {kMonFanSpeed, kMonFanSpeedFName},
@@ -138,7 +136,7 @@ static const std::map<MonitorTypes, const char *> kMonitorNameMap = {
     {kMonVoltLabel, kMonVoltLabelName},
 };
 
-static  std::map<MonitorTypes, uint64_t> kMonInfoVarTypeToRSMIVariant = {
+static std::map<MonitorTypes, uint64_t> kMonInfoVarTypeToRSMIVariant = {
     // rsmi_temperature_metric_t
     {kMonTemp, RSMI_TEMP_CURRENT},
     {kMonTempMax, RSMI_TEMP_MAX},
@@ -167,107 +165,108 @@ static  std::map<MonitorTypes, uint64_t> kMonInfoVarTypeToRSMIVariant = {
 };
 
 typedef struct {
-    std::vector<const char *> mandatory_depends;
-    std::vector<MonitorTypes> variants;
+  std::vector<const char*> mandatory_depends;
+  std::vector<MonitorTypes> variants;
 } monitor_depends_t;
 
-static const std::map<const char *, monitor_depends_t> kMonFuncDependsMap = {
-  {"rsmi_dev_power_ave_get",        { .mandatory_depends = {kMonPowerAveName},
-                                      .variants = {kMonInvalid},
-                                    }
-  },
-  {"rsmi_dev_power_cap_get",        { .mandatory_depends = {kMonPowerCapName},
-                                      .variants = {kMonInvalid},
-                                    }
-  },
-  {"rsmi_dev_power_cap_default_get", { .mandatory_depends =
-                                      {kMonPowerCapDefaultName},
-                                      .variants = {kMonInvalid},
-                                    }
-  },
-  {"rsmi_dev_power_cap_range_get",  { .mandatory_depends =
-                                                        {kMonPowerCapMaxName,
-                                                         kMonPowerCapMinName},
-                                      .variants = {kMonInvalid},
-                                    }
-  },
-  {"rsmi_dev_power_cap_set",        { .mandatory_depends =
-                                                         {kMonPowerCapMaxName,
-                                                          kMonPowerCapMinName,
-                                                          kMonPowerCapName},
-                                      .variants = {kMonInvalid},
-                                    }
-  },
+static const std::map<const char*, monitor_depends_t> kMonFuncDependsMap = {
+    {"rsmi_dev_power_ave_get",
+     {
+         .mandatory_depends = {kMonPowerAveName},
+         .variants = {kMonInvalid},
+     }},
+    {"rsmi_dev_power_cap_get",
+     {
+         .mandatory_depends = {kMonPowerCapName},
+         .variants = {kMonInvalid},
+     }},
+    {"rsmi_dev_power_cap_default_get",
+     {
+         .mandatory_depends = {kMonPowerCapDefaultName},
+         .variants = {kMonInvalid},
+     }},
+    {"rsmi_dev_power_cap_range_get",
+     {
+         .mandatory_depends = {kMonPowerCapMaxName, kMonPowerCapMinName},
+         .variants = {kMonInvalid},
+     }},
+    {"rsmi_dev_power_cap_set",
+     {
+         .mandatory_depends = {kMonPowerCapMaxName, kMonPowerCapMinName, kMonPowerCapName},
+         .variants = {kMonInvalid},
+     }},
 
-  {"rsmi_dev_fan_rpms_get",         { .mandatory_depends = {kMonFanRPMsName},
-                                      .variants = {kMonInvalid},
-                                    }
-  },
-  {"rsmi_dev_fan_speed_get",        { .mandatory_depends = {kMonFanSpeedFName},
-                                      .variants = {kMonInvalid},
-                                    }
-  },
-  {"rsmi_dev_fan_speed_max_get",    { .mandatory_depends =
-                                                       {kMonMaxFanSpeedFName},
-                                      .variants = {kMonInvalid},
-                                    }
-  },
-  {"rsmi_dev_temp_metric_get",      { .mandatory_depends =
-                                                          {kMonTempLabelName},
-                                      .variants = {kMonTemp,
-                                                   kMonTempMax,
-                                                   kMonTempMin,
-                                                   kMonTempMaxHyst,
-                                                   kMonTempMinHyst,
-                                                   kMonTempCritical,
-                                                   kMonTempCriticalHyst,
-                                                   kMonTempEmergency,
-                                                   kMonTempEmergencyHyst,
-                                                   kMonTempCritMin,
-                                                   kMonTempCritMinHyst,
-                                                   kMonTempOffset,
-                                                   kMonTempLowest,
-                                                   kMonTempHighest,
-                                        },
-                                    }
-  },
-  {"rsmi_dev_fan_reset",            { .mandatory_depends =
-                                                   {kMonFanControlEnableName},
-                                      .variants = {kMonInvalid},
-                                    }
-  },
-  {"rsmi_dev_fan_speed_set",        { .mandatory_depends =
-                                                    {kMonMaxFanSpeedFName,
-                                                     kMonFanControlEnableName,
-                                                     kMonFanSpeedFName},
-                                      .variants = {kMonInvalid},
-                                    }
-  },
-  {"rsmi_dev_volt_metric_get",      { .mandatory_depends =
-                                                          {kMonVoltLabelName},
-                                      .variants = {kMonVolt,
-                                                   kMonVoltMin,
-                                                   kMonVoltMinCrit,
-                                                   kMonVoltMax,
-                                                   kMonVoltMaxCrit,
-                                                   kMonVoltAverage,
-                                                   kMonVoltLowest,
-                                                   kMonVoltHighest,
-                                                  },
-                                      }
-  },
+    {"rsmi_dev_fan_rpms_get",
+     {
+         .mandatory_depends = {kMonFanRPMsName},
+         .variants = {kMonInvalid},
+     }},
+    {"rsmi_dev_fan_speed_get",
+     {
+         .mandatory_depends = {kMonFanSpeedFName},
+         .variants = {kMonInvalid},
+     }},
+    {"rsmi_dev_fan_speed_max_get",
+     {
+         .mandatory_depends = {kMonMaxFanSpeedFName},
+         .variants = {kMonInvalid},
+     }},
+    {"rsmi_dev_temp_metric_get",
+     {
+         .mandatory_depends = {kMonTempLabelName},
+         .variants =
+             {
+                 kMonTemp,
+                 kMonTempMax,
+                 kMonTempMin,
+                 kMonTempMaxHyst,
+                 kMonTempMinHyst,
+                 kMonTempCritical,
+                 kMonTempCriticalHyst,
+                 kMonTempEmergency,
+                 kMonTempEmergencyHyst,
+                 kMonTempCritMin,
+                 kMonTempCritMinHyst,
+                 kMonTempOffset,
+                 kMonTempLowest,
+                 kMonTempHighest,
+             },
+     }},
+    {"rsmi_dev_fan_reset",
+     {
+         .mandatory_depends = {kMonFanControlEnableName},
+         .variants = {kMonInvalid},
+     }},
+    {"rsmi_dev_fan_speed_set",
+     {
+         .mandatory_depends = {kMonMaxFanSpeedFName, kMonFanControlEnableName, kMonFanSpeedFName},
+         .variants = {kMonInvalid},
+     }},
+    {"rsmi_dev_volt_metric_get",
+     {
+         .mandatory_depends = {kMonVoltLabelName},
+         .variants =
+             {
+                 kMonVolt,
+                 kMonVoltMin,
+                 kMonVoltMinCrit,
+                 kMonVoltMax,
+                 kMonVoltMaxCrit,
+                 kMonVoltAverage,
+                 kMonVoltLowest,
+                 kMonVoltHighest,
+             },
+     }},
 };
 
-  Monitor::Monitor(std::string path, RocmSMI_env_vars const *e) :
-                                                        path_(path), env_(e) {
+Monitor::Monitor(std::string path, RocmSMI_env_vars const* e) : path_(path), env_(e) {
 #ifndef DEBUG
-    env_ = nullptr;
+  env_ = nullptr;
 #endif
 }
 Monitor::~Monitor(void) = default;
 
-std::string
-Monitor::MakeMonitorPath(MonitorTypes type, uint32_t sensor_id) {
+std::string Monitor::MakeMonitorPath(MonitorTypes type, uint32_t sensor_id) {
   std::string tempPath = path_;
   std::string fn = kMonitorNameMap.at(type);
 
@@ -298,8 +297,7 @@ Monitor::MakeMonitorPath(MonitorTypes type, uint32_t sensor_id) {
   return tempPath;
 }
 
-int Monitor::writeMonitor(MonitorTypes type, uint32_t sensor_id,
-                                                            std::string val) {
+int Monitor::writeMonitor(MonitorTypes type, uint32_t sensor_id, std::string val) {
   std::string sysfs_path = MakeMonitorPath(type, sensor_id);
 
   DBG_FILE_ERROR(sysfs_path, &val)
@@ -307,28 +305,24 @@ int Monitor::writeMonitor(MonitorTypes type, uint32_t sensor_id,
 }
 
 // This string version should work for all valid monitor types
-int Monitor::readMonitor(MonitorTypes type, uint32_t sensor_id,
-                                                           std::string *val) {
+int Monitor::readMonitor(MonitorTypes type, uint32_t sensor_id, std::string* val) {
   std::ostringstream ss;
   assert(val != nullptr);
 
   std::string temp_str;
   std::string sysfs_path = MakeMonitorPath(type, sensor_id);
 
-  DBG_FILE_ERROR(sysfs_path, (std::string *)nullptr)
+  DBG_FILE_ERROR(sysfs_path, (std::string*)nullptr)
   int ret = ReadSysfsStr(sysfs_path, val);
-  ss << __PRETTY_FUNCTION__
-     << " | Success | Read hwmon file: " << sysfs_path
+  ss << __PRETTY_FUNCTION__ << " | Success | Read hwmon file: " << sysfs_path
      << " | Type: " << monitorTypesToString.at(type)
-     << " | Sensor id: " << std::to_string(sensor_id)
-     << " | Data: " << *val
+     << " | Sensor id: " << std::to_string(sensor_id) << " | Data: " << *val
      << " | Returning: " << std::to_string(ret) << " |";
   LOG_INFO(ss);
   return ret;
 }
 
-int32_t
-Monitor::setTempSensorLabelMap(void) {
+int32_t Monitor::setTempSensorLabelMap(void) {
   std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << " | ======= start =======";
   LOG_TRACE(ss);
@@ -356,25 +350,23 @@ Monitor::setTempSensorLabelMap(void) {
   };
 
   for (uint32_t t = RSMI_TEMP_TYPE_FIRST; t <= RSMI_TEMP_TYPE_LAST; ++t) {
-    temp_type_index_map_.insert(
-       {static_cast<rsmi_temperature_type_t>(t), RSMI_TEMP_TYPE_INVALID});
+    temp_type_index_map_.insert({static_cast<rsmi_temperature_type_t>(t), RSMI_TEMP_TYPE_INVALID});
   }
   for (uint32_t i = 1; i <= RSMI_TEMP_TYPE_LAST + 1; ++i) {
     if ((i <= RSMI_TEMP_TYPE_GENERAL_LAST) ||
         (i >= RSMI_TEMP_TYPE_GPUBOARD_NODE_FIRST && i <= RSMI_TEMP_TYPE_GPUBOARD_NODE_LAST) ||
         (i >= RSMI_TEMP_TYPE_GPUBOARD_VR_FIRST && i <= RSMI_TEMP_TYPE_GPUBOARD_LAST) ||
         (i >= RSMI_TEMP_TYPE_BASEBOARD_FIRST && i <= RSMI_TEMP_TYPE_BASEBOARD_LAST)) {
-          ret = add_temp_sensor_entry(i);
-          if (ret) {
-            return ret;
-          }
+      ret = add_temp_sensor_entry(i);
+      if (ret) {
+        return ret;
+      }
     }
   }
   return 0;
 }
 
-int32_t
-Monitor::setVoltSensorLabelMap(void) {
+int32_t Monitor::setVoltSensorLabelMap(void) {
   std::string type_str;
   int ret;
 
@@ -414,7 +406,7 @@ Monitor::setVoltSensorLabelMap(void) {
 }
 
 static int get_supported_sensors(std::string dir_path, std::string fn_reg_ex,
-                                              std::vector<uint64_t> *sensors) {
+                                 std::vector<uint64_t>* sensors) {
   auto hwmon_dir = opendir(dir_path.c_str());
   if (!hwmon_dir) {
     return errno ? errno : 1;
@@ -437,7 +429,7 @@ static int get_supported_sensors(std::string dir_path, std::string fn_reg_ex,
   std::smatch match;
   uint64_t mon_val;
 
-  char *endptr;
+  char* endptr;
   try {
     std::regex re(fn_reg_ex);
     std::string fn;
@@ -471,30 +463,26 @@ static int get_supported_sensors(std::string dir_path, std::string fn_reg_ex,
   return 0;
 }
 
-uint32_t
-Monitor::getTempSensorIndex(rsmi_temperature_type_t type) {
+uint32_t Monitor::getTempSensorIndex(rsmi_temperature_type_t type) {
   return temp_type_index_map_.at(type);
 }
 
-rsmi_temperature_type_t
-Monitor::getTempSensorEnum(uint64_t ind) {
+rsmi_temperature_type_t Monitor::getTempSensorEnum(uint64_t ind) {
   return index_temp_type_map_.at(ind);
 }
 
-uint32_t
-Monitor::getVoltSensorIndex(rsmi_voltage_type_t type) {
+uint32_t Monitor::getVoltSensorIndex(rsmi_voltage_type_t type) {
   return volt_type_index_map_.at(type);
 }
 
-rsmi_voltage_type_t
-Monitor::getVoltSensorEnum(uint64_t ind) {
+rsmi_voltage_type_t Monitor::getVoltSensorEnum(uint64_t ind) {
   // check if ind is a key or not
   if (index_volt_type_map_.count(ind) == 0) return RSMI_VOLT_TYPE_INVALID;
   return index_volt_type_map_.at(ind);
 }
 
-static std::vector<uint64_t> get_intersection(std::vector<uint64_t> *v1,
-                                                   std::vector<uint64_t> *v2) {
+static std::vector<uint64_t> get_intersection(std::vector<uint64_t>* v1,
+                                              std::vector<uint64_t>* v2) {
   assert(v1 != nullptr);
   assert(v2 != nullptr);
   std::vector<uint64_t> intersect;
@@ -503,7 +491,7 @@ static std::vector<uint64_t> get_intersection(std::vector<uint64_t> *v1,
   std::sort(v2->begin(), v2->end());
 
   std::set_intersection(v1->begin(), v1->end(), v2->begin(), v2->end(),
-                                               std::back_inserter(intersect));
+                        std::back_inserter(intersect));
   return intersect;
 }
 
@@ -530,9 +518,8 @@ static monitor_types getFuncType(std::string f_name) {
   return ret;
 }
 
-void Monitor::fillSupportedFuncs(SupportedFuncMap *supported_funcs) {
-  std::map<const char *, monitor_depends_t>::const_iterator it =
-                                                   kMonFuncDependsMap.begin();
+void Monitor::fillSupportedFuncs(SupportedFuncMap* supported_funcs) {
+  std::map<const char*, monitor_depends_t>::const_iterator it = kMonFuncDependsMap.begin();
   std::string mon_root = path_;
   bool mand_depends_met;
   std::shared_ptr<VariantMap> supported_variants;
@@ -545,8 +532,7 @@ void Monitor::fillSupportedFuncs(SupportedFuncMap *supported_funcs) {
 
   while (it != kMonFuncDependsMap.end()) {
     // First, see if all the mandatory dependencies are there
-    std::vector<const char *>::const_iterator dep =
-                                         it->second.mandatory_depends.begin();
+    std::vector<const char*>::const_iterator dep = it->second.mandatory_depends.begin();
 
     m_type = getFuncType(it->first);
     mand_depends_met = true;
@@ -572,7 +558,7 @@ void Monitor::fillSupportedFuncs(SupportedFuncMap *supported_funcs) {
       }
     } else if (ret <= -2) {
       throw amd::smi::rsmi_exception(RSMI_STATUS_INTERNAL_EXCEPTION,
-                        "Failed to parse monitor file name: " + dep_path);
+                                     "Failed to parse monitor file name: " + dep_path);
     }
     dep++;
 
@@ -591,7 +577,7 @@ void Monitor::fillSupportedFuncs(SupportedFuncMap *supported_funcs) {
         }
       } else if (ret <= -2) {
         throw amd::smi::rsmi_exception(RSMI_STATUS_INTERNAL_EXCEPTION,
-                          "Failed to parse monitor file name: " + dep_path);
+                                       "Failed to parse monitor file name: " + dep_path);
       }
 
       dep++;
@@ -605,49 +591,44 @@ void Monitor::fillSupportedFuncs(SupportedFuncMap *supported_funcs) {
     // "intersect" holds the set of sensors for the mandatory dependencies
     // that exist.
 
-    std::vector<MonitorTypes>::const_iterator var =
-                                                  it->second.variants.begin();
+    std::vector<MonitorTypes>::const_iterator var = it->second.variants.begin();
     supported_variants = std::make_shared<VariantMap>();
 
     std::vector<uint64_t> supported_monitors;
 
     for (; var != it->second.variants.end(); var++) {
       if (*var != kMonInvalid) {
-        ret = get_supported_sensors(mon_root + "/",
-                                        kMonitorNameMap.at(*var), &sensors_i);
+        ret = get_supported_sensors(mon_root + "/", kMonitorNameMap.at(*var), &sensors_i);
 
         if (ret == 0) {
           supported_monitors = get_intersection(&sensors_i, &intersect);
         } else if (ret <= -2) {
           throw amd::smi::rsmi_exception(RSMI_STATUS_INTERNAL_EXCEPTION,
-                            "Failed to parse monitor file name: " + dep_path);
+                                         "Failed to parse monitor file name: " + dep_path);
         }
       } else {
         supported_monitors = intersect;
       }
       if (!supported_monitors.empty()) {
-        for (uint64_t &supported_monitor : supported_monitors) {
+        for (uint64_t& supported_monitor : supported_monitors) {
           if (m_type == eDefaultMonitor) {
             assert(supported_monitor > 0);
-            supported_monitor |=
-                    (supported_monitor - 1) << MONITOR_TYPE_BIT_POSITION;
+            supported_monitor |= (supported_monitor - 1) << MONITOR_TYPE_BIT_POSITION;
           } else if (m_type == eTempMonitor) {
             // Temp sensor file names are 1-based
             assert(supported_monitor > 0);
-            supported_monitor |=
-                 static_cast<uint64_t>(getTempSensorEnum(supported_monitor))
-                                                << MONITOR_TYPE_BIT_POSITION;
+            supported_monitor |= static_cast<uint64_t>(getTempSensorEnum(supported_monitor))
+                                 << MONITOR_TYPE_BIT_POSITION;
           } else if (m_type == eVoltMonitor) {
             // Voltage sensor file names are 0-based
-            supported_monitor |=
-                 static_cast<uint64_t>(getVoltSensorEnum(supported_monitor))
-                                                << MONITOR_TYPE_BIT_POSITION;
+            supported_monitor |= static_cast<uint64_t>(getVoltSensorEnum(supported_monitor))
+                                 << MONITOR_TYPE_BIT_POSITION;
           } else {
             assert(false);  // Unexpected monitor type
           }
         }
-      (*supported_variants)[kMonInfoVarTypeToRSMIVariant.at(*var)] =
-                             std::make_shared<SubVariant>(supported_monitors);
+        (*supported_variants)[kMonInfoVarTypeToRSMIVariant.at(*var)] =
+            std::make_shared<SubVariant>(supported_monitors);
       }
     }
 
@@ -662,4 +643,4 @@ void Monitor::fillSupportedFuncs(SupportedFuncMap *supported_funcs) {
   }
 }
 
-} // namespace amd::smi
+}  // namespace amd::smi
