@@ -296,7 +296,7 @@ def sample_top_kernel_df() -> pd.DataFrame:
     """Create a sample top kernel dataframe (dfs[1])
     with aggregated per-kernel stats."""
     return pd.DataFrame({
-        "Kernel_Name": ["kernel_a", "kernel_b", "kernel_a"],
+        "Kernel_Name": ["kernel_a", "kernel_b", "kernel_c"],
         "Percent": [50.0, 30.0, 20.0],
         "Count": [10, 5, 8],
         "Total_Time": [1500.0, 900.0, 600.0],
@@ -332,7 +332,9 @@ class TestGetTopKernels:
         from rocprof_compute_tui.utils.tui_utils import get_top_kernels
 
         mock_workload = MagicMock()
-        mock_workload.dfs = {1: pd.DataFrame(columns=["Kernel_Name", "Pct", "Count"])}
+        mock_workload.dfs = {
+            1: pd.DataFrame(columns=["Kernel_Name", "Percent", "Count"])
+        }
 
         assert get_top_kernels({"path": mock_workload}) == []
 
@@ -340,7 +342,7 @@ class TestGetTopKernels:
         self,
         sample_top_kernel_df: pd.DataFrame,
     ) -> None:
-        """Test that function returns kernel records sorted by Pct descending."""
+        """Test that function returns kernel records sorted by Percent descending."""
         from rocprof_compute_tui.utils.tui_utils import get_top_kernels
 
         mock_workload = MagicMock()
@@ -350,11 +352,11 @@ class TestGetTopKernels:
 
         assert result is not None
         assert len(result) == 3
-        # Verify sorted by Pct descending
-        pct_values = [record["Pct"] for record in result]
+        # Verify sorted by Percent descending
+        pct_values = [record["Percent"] for record in result]
         assert pct_values == sorted(pct_values, reverse=True)
         # Verify all expected columns preserved
-        assert all("Kernel_Name" in r and "Pct" in r for r in result)
+        assert all("Kernel_Name" in r and "Percent" in r for r in result)
 
     def test_handles_missing_pct_column(self) -> None:
         """Test that function returns unsorted records when Pct column is missing."""
@@ -370,8 +372,7 @@ class TestGetTopKernels:
         result = get_top_kernels({"path": mock_workload})
 
         assert result is not None
-        pct_values = [record["Percent"] for record in result]
-        assert pct_values == sorted(pct_values, reverse=True)
+        assert len(result) == 2
 
 
 # =============================================================================
@@ -570,8 +571,8 @@ class TestDataStructureIntegration:
             "kernel_b": {"section": {"value": 200}},
         }
         top_kernel_list = [
-            {"Kernel_Name": "kernel_a", "Pct": 50.0},
-            {"Kernel_Name": "kernel_b", "Pct": 30.0},
+            {"Kernel_Name": "kernel_a", "Percent": 50.0},
+            {"Kernel_Name": "kernel_b", "Percent": 30.0},
         ]
 
         # Verify kernel_view lookup logic works
