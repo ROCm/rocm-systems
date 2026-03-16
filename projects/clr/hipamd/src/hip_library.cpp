@@ -31,7 +31,7 @@ THE SOFTWARE.
 #include "utils/debug.hpp"
 
 namespace hip {
-void LibraryContainer::Register(std::string name, int device, hipKernel_t k) {
+void LibraryContainer::Register(const std::string &name, int device, hipKernel_t k) {
   std::scoped_lock<std::mutex> lock(lib_mutex_);
   auto key = std::make_pair(name, device);
   if (kernels_.find(key) == kernels_.end()) {
@@ -80,7 +80,7 @@ hipError_t LibraryContainer::EnumerateKernels(hipKernel_t* k, unsigned int maxKe
   return hipSuccess;
 }
 
-hipError_t LibraryContainer::Kernel(hipKernel_t* k, std::string name) {
+hipError_t LibraryContainer::Kernel(hipKernel_t* k, const std::string &name) {
   auto device_id = hip::ihipGetDevice();
   if (auto ki = kernels_.find(std::make_pair(name, device_id)); ki != kernels_.end()) {
     *k = ki->second;
@@ -104,7 +104,7 @@ LibraryContainer::LibraryContainer(const char* code_object) {
   fatbin_ = std::make_shared<hip::FatBinaryInfo>(nullptr, code_object);
 }
 
-LibraryContainer::LibraryContainer(const std::string file_name) {
+LibraryContainer::LibraryContainer(const std::string &file_name) {
   fatbin_ = std::make_shared<hip::FatBinaryInfo>(file_name.c_str(), nullptr);
 }
 

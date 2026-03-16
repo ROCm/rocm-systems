@@ -23,7 +23,7 @@ class LibraryContainer {
   // Create from pointer
   explicit LibraryContainer(const char* code_object);  // from pointer
   // Create from file
-  explicit LibraryContainer(const std::string file_name);  // deep copy from file
+  explicit LibraryContainer(const std::string &file_name);  // deep copy from file
   ~LibraryContainer();
 
   // Load and build the library
@@ -33,13 +33,13 @@ class LibraryContainer {
   size_t KernelCount() const { return functions_.size(); }
 
   // Get the Kernel from name
-  hipError_t Kernel(hipKernel_t* k, std::string name);
+  hipError_t Kernel(hipKernel_t* k, const std::string &name);
 
   // Get Fatbin pointer
   inline FatBinaryInfo* FatBin() { return fatbin_.get(); }
 
   // Register the kernel function, make an entry in global state
-  void Register(std::string name, int device, hipKernel_t k);
+  void Register(const std::string &name, int device, hipKernel_t k);
 
   // Enumerate atmost maxKernels kernel handles in this library
   hipError_t EnumerateKernels(hipKernel_t* k, unsigned int maxKernels);
