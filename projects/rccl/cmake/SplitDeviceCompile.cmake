@@ -149,12 +149,6 @@ function(setup_split_device_compile)
     set(DEV_OBJ  "${DEV_DIR}/${fname}.${SDC_GPU_ARCH}.o")
 
     # -- Step A: Compile to LLVM bitcode (device only) ------------------------
-    # The kernel TU is compiled WITHOUT -fgpu-rdc so that the LLVM
-    # InferAddressSpaces pass can convert generic (flat) pointers to LDS
-    # pointers, generating ds_* instructions instead of flat_* for shared
-    # memory.  The function pointer tables (ncclDevFuncTable_*) still produce
-    # proper relocations that lld resolves at link time.
-    # Device-function TUs keep -fgpu-rdc for normal cross-TU linkage.
     set(_rdc_flag "-fgpu-rdc")
     add_custom_command(
       OUTPUT  ${BC_FILE}
