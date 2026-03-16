@@ -21,3 +21,6 @@ rocprofiler_add_unit_test(
     ENVIRONMENT
         "LD_LIBRARY_PATH=${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:/opt/rocm/lib:/opt/rocm/llvm/lib:$ENV{LD_LIBRARY_PATH}"
     )
+
+# Only unit test 159 (save_load) is in the multi-gpu label group
+set_tests_properties(unit.buffering.save_load PROPERTIES LABELS "unittests;multi-gpu")

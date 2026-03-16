@@ -22,7 +22,7 @@ rocprofiler_add_integration_execute_test(
         ${PRELOAD_ARGS} -- $<TARGET_FILE:multiqueue_testapp>
     DEPENDS multiqueue_testapp
     TIMEOUT 45
-    LABELS "integration-tests"
+    LABELS "integration-tests;multi-gpu"
     FIXTURES_SETUP rocprofv3-test-hsa-multiqueue
     FAIL_REGULAR_EXPRESSION "HSA_API|HIP_API")
 
@@ -40,5 +40,5 @@ rocprofiler_add_integration_validate_test(
          --pftrace-input
          ${CMAKE_CURRENT_BINARY_DIR}/multiqueue_testapp-trace/out_results.pftrace
     TIMEOUT 45
-    LABELS "integration-tests"
+    LABELS "integration-tests;multi-gpu"
     FIXTURES_REQUIRED rocprofv3-test-hsa-multiqueue)

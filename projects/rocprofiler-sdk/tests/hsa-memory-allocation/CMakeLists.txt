@@ -14,7 +14,7 @@ rocprofiler_add_integration_execute_test(
     memory-allocation-tracing
     TARGET hsa-memory-allocation
     TIMEOUT 45
-    LABELS "integration-tests"
+    LABELS "integration-tests;multi-gpu"
     PRELOAD "$<TARGET_FILE:rocprofiler-sdk-json-tool>"
     ENVIRONMENT "ROCPROFILER_TOOL_OUTPUT_FILE=memory-allocation-tracing-test.json"
     FIXTURES_SETUP memory-allocation-tracing)
@@ -24,7 +24,7 @@ rocprofiler_add_integration_validate_test(
     TEST_PATHS validate.py
     COPY conftest.py
     CONFIG pytest.ini
-    LABELS "integration-tests"
+    LABELS "integration-tests;multi-gpu"
     TIMEOUT 45
     FIXTURES_REQUIRED memory-allocation-tracing
     ARGS --input ${CMAKE_CURRENT_BINARY_DIR}/memory-allocation-tracing-test.json)

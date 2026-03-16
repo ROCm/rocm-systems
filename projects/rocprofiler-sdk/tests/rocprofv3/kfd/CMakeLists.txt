@@ -24,6 +24,10 @@ set(kfd-xnack-off-env "${PRELOAD_ENV};HSA_XNACK=0")
 
 foreach(_XNACK on off)
     rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY validate.py conftest.py)
+    set(_kfd_labels "integration-tests")
+    if(_XNACK STREQUAL "off")
+        set(_kfd_labels "integration-tests;multi-gpu")
+    endif()
     add_test(
         NAME rocprofv3-test-kfd-xnack-${_XNACK}-execute
         COMMAND
@@ -33,7 +37,7 @@ foreach(_XNACK on off)
 
     set_tests_properties(
         rocprofv3-test-kfd-xnack-${_XNACK}-execute
-        PROPERTIES TIMEOUT 45 LABELS "integration-tests" ENVIRONMENT
+        PROPERTIES TIMEOUT 45 LABELS "${_kfd_labels}" ENVIRONMENT
                    "${kfd-xnack-${_XNACK}-env}" FAIL_REGULAR_EXPRESSION
                    "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
@@ -45,7 +49,7 @@ foreach(_XNACK on off)
 
     set_tests_properties(
         rocprofv3-test-kfd-xnack-${_XNACK}-validate
-        PROPERTIES TIMEOUT 45 LABELS "integration-tests" DEPENDS
+        PROPERTIES TIMEOUT 45 LABELS "${_kfd_labels}" DEPENDS
                    "rocprofv3-test-kfd-xnack-${_XNACK}-execute" FAIL_REGULAR_EXPRESSION
                    "AssertionError")
 endforeach()

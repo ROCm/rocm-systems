@@ -50,7 +50,7 @@ rocprofiler_add_integration_execute_test(
         -- $<TARGET_FILE:transpose>
     DEPENDS transpose
     TIMEOUT 45
-    LABELS "integration-tests"
+    LABELS "integration-tests;multi-gpu"
     PRELOAD "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-agent-index-json-absolute)
 
@@ -63,7 +63,7 @@ rocprofiler_add_integration_execute_test(
         ${LOG_LEVEL} -- $<TARGET_FILE:transpose>
     DEPENDS transpose
     TIMEOUT 45
-    LABELS "integration-tests"
+    LABELS "integration-tests;multi-gpu"
     PRELOAD "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-agent-index-json-type-relative)
 
@@ -76,7 +76,7 @@ rocprofiler_add_integration_execute_test(
         -- $<TARGET_FILE:transpose>
     DEPENDS transpose
     TIMEOUT 45
-    LABELS "integration-tests"
+    LABELS "integration-tests;multi-gpu"
     PRELOAD "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-agent-index-json-relative)
 
@@ -87,7 +87,7 @@ rocprofiler_add_integration_validate_test(
          input_relative_agent_index.yaml
     CONFIG pytest.ini
     TIMEOUT 45
-    LABELS "integration-tests"
+    LABELS "integration-tests;multi-gpu"
     FIXTURES_REQUIRED rocprofv3-test-agent-index-json-absolute
     ARGS --agent-index
          absolute
@@ -108,7 +108,7 @@ rocprofiler_add_integration_validate_test(
          input_relative_agent_index.yaml
     CONFIG pytest.ini
     TIMEOUT 45
-    LABELS "integration-tests"
+    LABELS "integration-tests;multi-gpu"
     FIXTURES_REQUIRED rocprofv3-test-agent-index-json-relative
                       rocprofv3-test-agent-index-json-absolute
     ARGS --agent-index
@@ -130,7 +130,7 @@ rocprofiler_add_integration_validate_test(
          input_relative_agent_index.yaml
     CONFIG pytest.ini
     TIMEOUT 45
-    LABELS "integration-tests"
+    LABELS "integration-tests;multi-gpu"
     FIXTURES_REQUIRED rocprofv3-test-agent-index-json-type-relative
                       rocprofv3-test-agent-index-json-absolute
     ARGS --agent-index

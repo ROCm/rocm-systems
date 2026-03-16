@@ -29,7 +29,7 @@ foreach(_SUBPARSER "" "-convert" "-query" "-summary")
         COMMAND ${Python3_EXECUTABLE} -m rocpd ${_CMD} --help
         DEPENDS rocprofiler-sdk::rocprofv3
         TIMEOUT 120
-        LABELS "integration-tests;rocpd"
+        LABELS "integration-tests;rocpd;multi-gpu"
         PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
         ENVIRONMENT "${rocpd-env}")
 endforeach()
@@ -40,7 +40,7 @@ foreach(_MODULE "csv" "pftrace" "otf2" "query" "summary")
         COMMAND ${Python3_EXECUTABLE} -m rocpd.${_MODULE} --help
         DEPENDS rocprofiler-sdk::rocprofv3
         TIMEOUT 120
-        LABELS "integration-tests;rocpd"
+        LABELS "integration-tests;rocpd;multi-gpu"
         PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
         ENVIRONMENT "${rocpd-env}")
 endforeach()
