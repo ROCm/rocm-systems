@@ -17,7 +17,6 @@ pytestmark = [pytest.mark.code_coverage]
 # =============================================================================
 
 
-@pytest.mark.xdist_group(name="python_code_coverage")
 class TestCodeCoverage(RocprofsysTest):
     def get_rewrite_args(self, type) -> list[str]:
         ret = ["-e", "-v", "2", "--min-instructions=4", "-E", "^std::"]

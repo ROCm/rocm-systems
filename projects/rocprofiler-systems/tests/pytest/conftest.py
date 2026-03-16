@@ -320,27 +320,6 @@ def pytest_configure(config: pytest.Config) -> None:
     for label in non_functional_markers + generic_functional_markers:
         config.addinivalue_line("markers", f"{label}: label test as {label}")
 
-    # Ignore unknown marker warnings when plugins are not installed
-    config.addinivalue_line(
-        "filterwarnings",
-        "ignore:Unknown pytest.mark.xdist_group:pytest.PytestUnknownMarkWarning",
-    )
-
-    # If test parallelism is done without CTest, --dist=loadgroup must be specified
-    # as xdist does not handle test ordering well. Using pytest-order is also not
-    # an option as it does not support xdist.
-    try:
-        numprocesses = config.getoption("numprocesses", default=None)
-        dist_mode = config.getoption("dist", default=None)
-        if numprocesses and numprocesses != 0 and dist_mode != "loadgroup":
-            pytest.exit(
-                f"Running with xdist (-n {numprocesses}) but --dist={dist_mode}. "
-                "For proper test grouping with @pytest.mark.xdist_group, use --dist=loadgroup",
-                returncode=1,
-            )
-    except (ValueError, AttributeError):
-        pass
-
     _show_test_output = config.getoption("--show-test-output", default="subtest")
     pytest._show_output_flag = _show_test_output == "all"
     pytest._show_output_on_subtest_fail_flag = _show_test_output == "subtest"
@@ -365,8 +344,7 @@ def pytest_sessionstart(session):
 
     log_file = config.getoption("--output-log", default="@output_dir@/pytest-output.txt")
 
-    # With pytest-xdist, we require that only the master writes to the log file.
-    if log_file.lower() == "none" or hasattr(config, "workerinput"):
+    if log_file.lower() == "none":
         config._output_log_path = None
         config._log_file_handle = None
     else:
@@ -729,11 +707,6 @@ def pytest_sessionfinish(session, exitstatus):
     - Test config directories
     """
 
-    # Disallow xdist workers from executing code after this call
-    # Only the master process should run this code
-    if hasattr(session.config, "workerinput"):
-        return
-
     # Skipped tests return exit code so that CTests knows to report them as skipped
     if (
         session.config.getoption("--ctest-mode", default="off") == "run"
@@ -862,7 +835,6 @@ def _ctest_generate_tests(
         "ci_enable",  # Internal marker
         "ci_disable",  # Internal marker
         "mpi_optional",  # Internal marker
-        "xdist_group",  # Dependencies are reported using run_after
         "no_docker",  # Internal marker
         "oshrun_min_version",  # Internal marker
         "rocm_min_version",  # Internal marker
@@ -904,7 +876,7 @@ def _ctest_generate_tests(
         "",
         'set(_INSTALL_PATH "${ROCPROFSYS_TEST_DIR}/rocprofsys-tests.pyz")',
         'set(_BUILD_PATH "${ROCPROFSYS_TEST_DIR}/../share/rocprofiler-systems/tests/pytest/")',
-        'set(_TEST_ARGS "--ctest-mode" "run" "-p" "no:xdist")',
+        'set(_TEST_ARGS "--ctest-mode" "run")',
         "",
         'if(EXISTS "${_INSTALL_PATH}")',
         "    if(NOT DEFINED ROCPROFSYS_TEST_EXECUTABLE)",
@@ -1452,13 +1424,6 @@ def timemory_env(base_env: dict[str, str]) -> dict[str, str]:
 
 
 @pytest.fixture(scope="session")
-def is_xdist_used(request) -> bool:
-    """Whether xdist is actively being used (parallel mode) for the test session."""
-    # workerinput only exists on xdist worker processes
-    return hasattr(request.config, "workerinput")
-
-
-@pytest.fixture(scope="session")
 def num_processes(request) -> int:
     """Get the number of processes for the test."""
     return request.config.getoption("--num-processes", default=2)
@@ -1520,9 +1485,7 @@ def test_output_base(rocprof_config, request) -> Path:
 
 
 @pytest.fixture(scope="module", autouse=True)
-def cleanup_module_temp_files(
-    rocprof_config, request: pytest.FixtureRequest, is_xdist_used
-):
+def cleanup_module_temp_files(rocprof_config, request: pytest.FixtureRequest):
     """Module-scoped cleanup that runs AFTER each test module completes.
 
     Execution Order:
@@ -1545,10 +1508,6 @@ def cleanup_module_temp_files(
     for pattern in ["*.inst", "*.inst.orig"]:
         for filepath in glob.glob(str(rocprof_config.rocprofsys_build_dir / pattern)):
             _safe_remove_file(Path(filepath))
-
-    # Defer below cleanup to end of session
-    if is_xdist_used:
-        return
 
     # Clean up trace cache temp files
     # For CTest impl, these should not be deleted

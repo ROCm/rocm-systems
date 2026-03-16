@@ -141,8 +141,6 @@ set(_generate_args
     --output-log=none
     -q
     -p
-    no:xdist
-    -p
     no:cacheprovider
 )
 
