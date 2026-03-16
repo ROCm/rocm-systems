@@ -1059,13 +1059,7 @@ def test_parser_error_handling():
         update_denominator_string,
     )
 
-    try:
-        build_eval_string("AVG(SQ_WAVES)", None, config={})
-        assert False, "Should have raised exception for None coll_level"
-    except Exception as e:
-        assert "coll_level can not be None" in str(e)
-
-    assert build_eval_string("", "pmc_perf", config={}) == ""
+    assert build_eval_string("", config={}) == ""
     assert update_denominator_string("", "per_wave") == ""
 
     class MockSysInfo:

@@ -2526,11 +2526,7 @@ def test_comprehensive_error_paths():
     result = calc_builtin_var("$total_l2_chan", sys_info)
     assert result == 16
 
-    try:
-        build_eval_string("test", None, config={})
-        assert False, "Should raise exception for None coll_level"
-    except Exception as e:
-        assert "coll_level can not be None" in str(e)
+    assert build_eval_string("", config={}) == ""
 
 
 @pytest.mark.pc_sampling

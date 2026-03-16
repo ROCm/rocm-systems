@@ -1538,7 +1538,7 @@ def test_v3_json_to_csv_no_dispatches(tmp_path, monkeypatch):
 def test_v3_json_to_csv_accumulated_counters(tmp_path, monkeypatch):
     """
     Test v3_json_to_csv handling of accumulated counters (with _ACCUM suffix).
-    Should rename them to SQ_ACCUM_PREV_HIRES.
+    _ACCUM counters keep their original names.
 
     Args:
         tmp_path (Path): Temporary directory for test files
@@ -1640,9 +1640,8 @@ def test_v3_json_to_csv_accumulated_counters(tmp_path, monkeypatch):
     assert csv_path.exists()
     df = pd.read_csv(csv_path)
 
-    assert "COUNTER_ACCUM" not in df.columns
-    assert "SQ_ACCUM_PREV_HIRES" in df.columns
-    assert df["SQ_ACCUM_PREV_HIRES"][0] == 42
+    assert "COUNTER_ACCUM" in df.columns
+    assert df["COUNTER_ACCUM"][0] == 42
 
 
 def test_v3_json_to_csv_duplicate_counters(tmp_path, monkeypatch):
@@ -6627,7 +6626,7 @@ def test_v3_to_v2_agent_id_parsing_success_and_error(
 @mock.patch("utils.utils.console_debug")  # To suppress debug output
 def test_v3_to_v2_accum_column_rename(mock_console_debug, tmp_path):
     """
-    Tests Line 3: Renaming of a column ending with '_ACCUM' to 'SQ_ACCUM_PREV_HIRES'.
+    Tests that _ACCUM columns keep their original names after conversion.
     """
     # --- Setup ---
     agent_info_content = create_csv_string({
@@ -6669,10 +6668,9 @@ def test_v3_to_v2_accum_column_rename(mock_console_debug, tmp_path):
     )
 
     result_df = pd.read_csv(converted_csv_filepath)
-    assert "SQ_ACCUM_PREV_HIRES" in result_df.columns
-    assert "FETCH_SIZE_ACCUM" not in result_df.columns
+    assert "FETCH_SIZE_ACCUM" in result_df.columns
     assert "CYCLES" in result_df.columns
-    assert result_df["SQ_ACCUM_PREV_HIRES"].iloc[0] == 12345
+    assert result_df["FETCH_SIZE_ACCUM"].iloc[0] == 12345
     assert result_df["CYCLES"].iloc[0] == 5000
 
 
