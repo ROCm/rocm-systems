@@ -1,2 +1,21 @@
-Kernel_Name,GPU_ID
-"vecCopy(double*, double*, double*, int, int)",0
+Dispatch_ID,Kernel_Name,GPU_ID
+0,"vecCopy(double*, double*, double*, int, int)",0
+1,"vecCopy(double*, double*, double*, int, int)",0
+2,"vecCopy(double*, double*, double*, int, int)",0
+3,"vecCopy(double*, double*, double*, int, int)",0
+4,"vecCopy(double*, double*, double*, int, int)",0
+5,"vecCopy(double*, double*, double*, int, int)",0
+6,"vecCopy(double*, double*, double*, int, int)",0
+7,"vecCopy(double*, double*, double*, int, int)",0
+8,"vecCopy(double*, double*, double*, int, int)",0
+9,"vecCopy(double*, double*, double*, int, int)",0
+10,"vecCopy(double*, double*, double*, int, int)",0
+11,"vecCopy(double*, double*, double*, int, int)",0
+12,"vecCopy(double*, double*, double*, int, int)",0
+13,"vecCopy(double*, double*, double*, int, int)",0
+14,"vecCopy(double*, double*, double*, int, int)",0
+15,"vecCopy(double*, double*, double*, int, int)",0
+16,"vecCopy(double*, double*, double*, int, int)",0
+17,"vecCopy(double*, double*, double*, int, int)",0
+18,"vecCopy(double*, double*, double*, int, int)",0
+19,"vecCopy(double*, double*, double*, int, int)",0

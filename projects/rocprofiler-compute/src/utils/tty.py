@@ -200,8 +200,8 @@ def is_roofline_shown(
                 if not kernel_top_df.empty and kernel_id in kernel_top_df.index:
                     kernel_name = kernel_top_df.loc[kernel_id, "Kernel_Name"]
                     kernel_pct = (
-                        kernel_top_df.loc[kernel_id, "Pct"]
-                        if "Pct" in kernel_top_df.columns
+                        kernel_top_df.loc[kernel_id, "Percent"]
+                        if "Percent" in kernel_top_df.columns
                         else 0
                     )
                 else:

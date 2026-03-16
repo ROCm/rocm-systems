@@ -297,7 +297,7 @@ def sample_top_kernel_df() -> pd.DataFrame:
     """Create a sample top kernel dataframe (dfs[1])."""
     return pd.DataFrame({
         "Kernel_Name": ["kernel_a", "kernel_b", "kernel_a"],
-        "Pct": [50.0, 30.0, 20.0],
+        "Percent": [50.0, 30.0, 20.0],
         "Count": [10, 5, 8],
         "GPU_ID": [0, 0, 1],
     })
@@ -407,7 +407,7 @@ class TestGetTopKernelsAndDispatchIds:
         result = get_top_kernels_and_dispatch_ids(runs)
 
         assert result is not None
-        pct_values = [record["Pct"] for record in result]
+        pct_values = [record["Percent"] for record in result]
         assert pct_values == sorted(pct_values, reverse=True)
 
 
@@ -475,14 +475,14 @@ class TestProcessPanelsToDataframes:
 
         df = pd.DataFrame({
             "Value": [1.23456789, 2.987654321],
-            "Pct": [50.123456, 49.876544],
+            "Percent": [50.123456, 49.876544],
         })
 
         result = apply_rounding_logic(df, decimal_precision=2)
 
         # Check that values are rounded to 2 decimal places
         assert result["Value"].iloc[0] == pytest.approx(1.23, rel=0.01)
-        assert result["Pct"].iloc[0] == pytest.approx(50.12, rel=0.01)
+        assert result["Percent"].iloc[0] == pytest.approx(50.12, rel=0.01)
 
 
 # =============================================================================

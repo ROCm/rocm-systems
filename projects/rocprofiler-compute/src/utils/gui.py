@@ -111,7 +111,7 @@ def create_sol_charts(display_df: pd.DataFrame, table_id: int) -> list[px.bar]:
 
     if table_id == 1701:
         # Special layout for L2 Cache SOL
-        pct_data = display_df[display_df["Unit"] == "Pct"]
+        pct_data = display_df[display_df["Unit"] == "Percent"]
         charts.append(
             px.bar(
                 pct_data,

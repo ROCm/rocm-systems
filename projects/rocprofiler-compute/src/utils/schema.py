@@ -86,7 +86,7 @@ SUPPORTED_FIELD = [
     "Peak (Empirical)",
     "Count",
     "Mean",
-    "Pct",
+    "Percent",
     "Std Dev",
     "Q1",
     "Q3",
