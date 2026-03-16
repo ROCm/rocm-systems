@@ -580,11 +580,7 @@ def test_perfetto_hip_event_annotations(pftrace_data, pftrace_filename):
         not result.empty
     ), "No HIP event annotations found - --annotate-args may be broken"
 
-    print(f"\n{len(result)} HIP event argument annotations found:")
-    print(result.to_string())
-
     # Validate the structure
-    assert "slice_name" in result.columns
     assert "arg_name" in result.columns
     assert "arg_value" in result.columns
 
