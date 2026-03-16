@@ -21,8 +21,9 @@
  * THE SOFTWARE.
  */
 
-#include "goamdsmi.h"
 #include <stdint.h>
+
+#include "goamdsmi.h"
 ////////////////////////////////////////////////------------CPU------------////////////////////////////////////////////////
 /**
  *  @brief Go language stub to initialize the AMDSMI library

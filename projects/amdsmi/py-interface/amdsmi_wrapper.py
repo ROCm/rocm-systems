@@ -4117,4 +4117,3 @@ __all__ = \
     'struct_valid_bits_', 'uint32_t', 'uint64_t', 'uint8_t',
     'union_amdsmi_bdf_t', 'union_amdsmi_cper_valid_bits_t',
     'union_amdsmi_nps_caps_t', 'union_policy_data_']
-

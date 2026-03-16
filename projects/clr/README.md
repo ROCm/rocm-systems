@@ -116,30 +116,6 @@ For detailed instructions, please refer to [How to build HIP](https://rocm.docs.
    cmake --build . --config Release -j 6 --target install
    ```
 
-#### Private developer setup (source-built PAL)
-
-5. Clone the following repositories into the **same parent folder** as `rocm-systems`:
-   1. **bootstrap** — <https://github.com/AMD-Radeon-Driver/bootstrap>
-      Run the bootstrap script and select **option 27: Header** (Mainline headers only for 3D UMDs → `AMD-Radeon-Driver/drivers`).
-   2. **PAL** — <https://github.com/AMD-Radeon-Driver/pal>
-      Make sure to init/sync submodules (`git submodule update --init --recursive`).
-   3. **wkmi** — <https://github.com/AMD-ROCm-Internal/wkmi/>
-
-   Expected folder layout:
-   ```
-   bootstrap/
-   drivers/
-   pal/
-   rocm-systems/
-   wkmi/
-   ```
-
-6. Configure and build (debug, ROCR + PAL backends, source-built PAL):
-   ```cmd
-   cmake ../rocm-systems/projects/clr -DCMAKE_BUILD_TYPE=Debug -DCLR_BUILD_HIP=ON -DHIP_COMMON_DIR=%HIP_COMMON_DIR% -DHIPCC_BIN_DIR=%HIPCC_BIN_DIR% -DCMAKE_INSTALL_PREFIX=..\install -D__HIP_ENABLE_PCH=OFF -DROCCLR_ENABLE_HSA=ON -DROCCLR_ENABLE_PAL=ON -D__HIP_ENABLE_RTC=ON -DUSE_PROF_API=OFF -DROCR_DLL_LOAD=OFF -DAMD_COMPUTE_WIN=../../../shared/amdgpu-windows-interop/ -DLIB_SRC_BUILD=ON
-   cmake --build . --config Debug -j 6 --target install
-   ```
-
 ## Tests
 
 ### HIP

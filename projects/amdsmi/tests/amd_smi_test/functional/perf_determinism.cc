@@ -20,25 +20,25 @@
  * THE SOFTWARE.
  */
 
-#include <cstdint>
+#include "perf_determinism.h"
 
+#include <gtest/gtest.h>
+
+#include <cstdint>
 #include <iostream>
 #include <string>
 
-#include <gtest/gtest.h>
-#include "amd_smi/amdsmi.h"
-#include "perf_determinism.h"
 #include "../test_common.h"
-
+#include "amd_smi/amdsmi.h"
 
 TestPerfDeterminism::TestPerfDeterminism() : TestBase() {
   set_title("AMDSMI Performance Determinism Test");
-  set_description("The Performance Determinism tests verifies "
-                  "Enabling/Disabling performance determinism mode.");
+  set_description(
+      "The Performance Determinism tests verifies "
+      "Enabling/Disabling performance determinism mode.");
 }
 
-TestPerfDeterminism::~TestPerfDeterminism(void) {
-}
+TestPerfDeterminism::~TestPerfDeterminism(void) {}
 
 void TestPerfDeterminism::SetUp(void) {
   TestBase::SetUp();
@@ -46,9 +46,7 @@ void TestPerfDeterminism::SetUp(void) {
   return;
 }
 
-void TestPerfDeterminism::DisplayTestInfo(void) {
-  TestBase::DisplayTestInfo();
-}
+void TestPerfDeterminism::DisplayTestInfo(void) { TestBase::DisplayTestInfo(); }
 
 void TestPerfDeterminism::DisplayResults(void) const {
   TestBase::DisplayResults();
@@ -60,7 +58,6 @@ void TestPerfDeterminism::Close() {
   // amdsmi_shut_down(), so it should be done after other hsa cleanup
   TestBase::Close();
 }
-
 
 void TestPerfDeterminism::Run(void) {
   amdsmi_status_t err;
@@ -76,46 +73,37 @@ void TestPerfDeterminism::Run(void) {
 
   for (uint32_t i = 0; i < num_monitor_devs(); ++i) {
     PrintDeviceHeader(processor_handles_[i]);
-    err =  amdsmi_get_gpu_od_volt_info(processor_handles_[i], &odv);
+    err = amdsmi_get_gpu_od_volt_info(processor_handles_[i], &odv);
     if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
-      IF_VERB(STANDARD) {
-        std::cout << "\t** Not supported on this machine\n";
-      }
+      IF_VERB(STANDARD) { std::cout << "\t** Not supported on this machine\n"; }
       return;
-    }  else if (err == AMDSMI_STATUS_SUCCESS) {
-      clkvalue = (odv.curr_sclk_range.lower_bound/1000000) + 50;
+    } else if (err == AMDSMI_STATUS_SUCCESS) {
+      clkvalue = (odv.curr_sclk_range.lower_bound / 1000000) + 50;
     } else {
-      IF_VERB(STANDARD) {
-        std::cout << "\t** Unable to retrieve lower bound sclk, continue.. \n";
-      }
+      IF_VERB(STANDARD) { std::cout << "\t** Unable to retrieve lower bound sclk, continue.. \n"; }
       continue;
     }
     std::cout << "About to rsmi_perf_determinism_mode_set() -->\n";
 
     err = amdsmi_set_gpu_perf_determinism_mode(processor_handles_[i], clkvalue);
     if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
-      IF_VERB(STANDARD) {
-        std::cout << "\t**Not supported on this machine" << std::endl;
-      }
+      IF_VERB(STANDARD) { std::cout << "\t**Not supported on this machine" << std::endl; }
       continue;
     } else {
       ret = amdsmi_get_gpu_perf_level(processor_handles_[i], &pfl);
       CHK_ERR_ASRT(ret)
       IF_VERB(STANDARD) {
-          std::cout << "\t**New Perf Level:" <<  GetPerfLevelStr(pfl) <<
-                                                                  std::endl;
-          std::cout << "\t**SCLK is now set to " << clkvalue << std::endl;
+        std::cout << "\t**New Perf Level:" << GetPerfLevelStr(pfl) << std::endl;
+        std::cout << "\t**SCLK is now set to " << clkvalue << std::endl;
       }
 
       std::cout << "\t**Resetting performance determinism" << std::endl;
-      err =  amdsmi_set_gpu_perf_level(processor_handles_[i], AMDSMI_DEV_PERF_LEVEL_AUTO);;
+      err = amdsmi_set_gpu_perf_level(processor_handles_[i], AMDSMI_DEV_PERF_LEVEL_AUTO);
+      ;
       CHK_ERR_ASRT(err)
       ret = amdsmi_get_gpu_perf_level(processor_handles_[i], &pfl);
       CHK_ERR_ASRT(ret)
-      IF_VERB(STANDARD) {
-          std::cout << "\t**New Perf Level:" <<  GetPerfLevelStr(pfl) <<
-                                                                  std::endl;
-      }
+      IF_VERB(STANDARD) { std::cout << "\t**New Perf Level:" << GetPerfLevelStr(pfl) << std::endl; }
     }  // END - SET SUPPORTED
   }  // END - DEVICE LOOP
 }
