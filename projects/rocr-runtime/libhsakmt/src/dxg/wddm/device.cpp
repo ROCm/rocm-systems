@@ -68,6 +68,7 @@ WDDMDevice::WDDMDevice(D3DKMT_HANDLE adapter, LUID adapter_luid, uint32_t node_i
   memset(&device_info_, 0, sizeof(device_info_));
 
   NTSTATUS ret = ParseDeviceInfo();
+  device_info_.hwsInfo.hwsMask.aql_queue &= !dxg_runtime->use_pm4_;
 
   if (ret == STATUS_OBJECT_NAME_NOT_FOUND || ret == STATUS_REVISION_MISMATCH) {
     // Skip adapter
@@ -366,7 +367,7 @@ bool WDDMDevice::Unlock(D3DKMT_HANDLE handle) {
   return false;
 }
 
-bool WDDMDevice::CreateContext(int engine, D3DKMT_HANDLE *handle) {
+bool WDDMDevice::CreateContext(int engine, D3DKMT_HANDLE* handle, uint64_t debugger_data) {
   void *priv_data;
   int priv_size;
 
@@ -378,10 +379,8 @@ bool WDDMDevice::CreateContext(int engine, D3DKMT_HANDLE *handle) {
   priv_data = malloc(priv_size);
   assert(priv_data);
   memset(priv_data, 0, priv_size);
-  Wkmi::FillinContextPrivData(
-    priv_data,
-    SupportStateShadowingByCpFw(),
-    device_info_.compute_schedid);
+  Wkmi::FillinContextPrivData(priv_data, SupportStateShadowingByCpFw(),
+                              device_info_.compute_schedid, debugger_data);
 
   D3DKMT_CREATECONTEXTVIRTUAL args = {0};
   args.hDevice = device_;
@@ -653,9 +652,8 @@ void WDDMDevice::GetClockCounters(uint64_t *gpu, uint64_t *cpu) {
   }
 }
 
-bool WDDMDevice::CreateQueue(WDDMQueue *queue) {
-  if (!CreateContext(queue->queue_engine, &queue->context))
-    return false;
+bool WDDMDevice::CreateQueue(WDDMQueue* queue, uint64_t debugger_data) {
+  if (!CreateContext(queue->queue_engine, &queue->context, debugger_data)) return false;
 
   GpuMemory *gpu_mem = nullptr;
   if (queue->cmdbuf_addr == 0) {
@@ -737,11 +735,12 @@ bool WDDMDevice::CreateHwQueue(WDDMQueue *queue) {
   assert(priv_data);
   memset(priv_data, 0, priv_size);
   bool FwManagedGfxState = SupportStateShadowingByCpFw();
+  uint32_t* doorbell_loc = nullptr;
   auto queue_memory = static_cast<ComputeQueue*>(queue)->GetAmdQueueMemory();
   auto resource = queue_memory->KmtHandle();
   Wkmi::FillinHwQueuePrivData(priv_data, FwManagedGfxState, queue->prio, IsAqlSupported(),
       queue->cmdbuf_addr, queue->cmdbuf_size, reinterpret_cast<uintptr_t>(queue->ring_wptr),
-      reinterpret_cast<uintptr_t>(queue->ring_rptr), resource);
+      reinterpret_cast<uintptr_t>(queue->ring_rptr), resource, &doorbell_loc);
 
   D3DKMT_CREATEHWQUEUE createHwQueue = {0};
   createHwQueue.hHwContext = queue->context;
@@ -754,6 +753,9 @@ bool WDDMDevice::CreateHwQueue(WDDMQueue *queue) {
     pr_err("fail %x\n", ret);
     free(priv_data);
     return false;
+  }
+  if (doorbell_loc != nullptr) {
+    queue->aql_doorbell_offset_ = *doorbell_loc;
   }
 
   free(priv_data);
@@ -811,6 +813,27 @@ bool WDDMDevice::SubmitToHwQueue(WDDMQueue *queue, uint64_t command_addr,
 }
 
 // ================================================================================================
+bool WDDMDevice::SetCuMask(uint32_t doorbell, uint32_t cu_mask_count,
+                           const uint32_t* queue_cu_mask) {
+#if defined(WIN32)
+  pr_debug("set CU mask doorbell: %d -> %d\n", doorbell, cu_mask_count);
+  // Fill private KMD data
+  int priv_size = Wkmi::GetCuMaskPrivDataSize();
+  void* priv_data = alloca(priv_size);
+  memset(priv_data, 0, priv_size);
+  Wkmi::FillinCuMaskPrivData(priv_data, doorbell, cu_mask_count, queue_cu_mask);
+  // Update CU mask for the queue
+  if (Escape(priv_data, priv_size, false)) {
+    return true;
+  } else {
+    pr_debug("CU mask escape/update failed for doorbell %u\n", doorbell);
+    return false;
+  }
+#endif
+  return false;
+}
+
+// ================================================================================================
 bool WDDMDevice::SubmitToAqlQueue(WDDMQueue* queue, uint64_t command_addr, uint64_t command_size,
                                   uint64_t fence_value) {
 #if defined(WIN32)
@@ -835,7 +858,7 @@ bool WDDMDevice::SubmitToAqlQueue(WDDMQueue* queue, uint64_t command_addr, uint6
 }
 
 // ================================================================================================
-bool WDDMDevice::Escape(void* priv_data, uint32_t priv_size, bool hw_access) {
+bool WDDMDevice::Escape(void* priv_data, uint32_t priv_size, bool hw_access) const {
   D3DKMT_ESCAPE d3dkmt_escape = {.hAdapter = adapter_,
                                  .hDevice = device_,
                                  .Type = D3DKMT_ESCAPE_DRIVERPRIVATE,
@@ -950,6 +973,65 @@ HSAKMT_STATUS WDDMDevice::WaitOnMultipleEvents(HsaEvent* events[], uint32_t num_
 #endif
   return HSAKMT_STATUS_WAIT_TIMEOUT;
 }
+
+bool WDDMDevice::GetKmdDbgVersion(struct Wkmi::KmdDbgVersion* version) const {
+  int priv_size = Wkmi::GetDebuggerCmdPrivDataSize();
+  void* priv_data = alloca(priv_size);
+
+  memset(priv_data, 0, priv_size);
+  Wkmi::FillinKmdDbgVersionPrivData(priv_data);
+
+  if (Escape(priv_data, priv_size, true)) {
+    Wkmi::GetKmdDbgVersion(priv_data, version);
+    return true;
+  }
+
+  return false;
+}
+
+bool WDDMDevice::RegisterRuntimeState(uint32_t runtime_state, const void* r_debug,
+                                      bool ttmp_setup_hint) const {
+  int priv_size = Wkmi::GetDebuggerCmdPrivDataSize();
+  void* priv_data = alloca(priv_size);
+
+#ifdef WIN32
+  HANDLE init_event = CreateEvent(nullptr, true, false, TEXT("RuntimeInitEvent"));
+  if (!init_event) {
+    return false;
+  }
+#else   // !WIN32
+  // It isn't clear yet how system events are going to be shared across OSes.
+  HANDLE init_event = nullptr;
+  pr_warn_once("not supported\n");
+  return false;
+#endif  // !WIN32
+
+  memset(priv_data, 0, priv_size);
+  Wkmi::FillinRegisterRuntimeStatePrivData(priv_data, runtime_state, r_debug, ttmp_setup_hint,
+                                           init_event);
+
+  bool ret = Escape(priv_data, priv_size, true);
+
+#ifdef WIN32
+  if (ret) {
+    ret = (WaitForSingleObject(init_event, INFINITE) == WAIT_OBJECT_0);
+  }
+
+  CloseHandle(init_event);
+#endif  // WIN32
+  return ret;
+}
+
+bool WDDMDevice::SetTrapHandler(uint64_t tba, uint64_t tma) const {
+  int priv_size = Wkmi::GetDebuggerCmdPrivDataSize();
+  void* priv_data = alloca(priv_size);
+
+  memset(priv_data, 0, priv_size);
+  Wkmi::FillinTrapHandlerPrivData(priv_data, tba, tma);
+
+  return Escape(priv_data, priv_size, true);
+}
+
 
 } // namespace thunk
 } // namespace wsl

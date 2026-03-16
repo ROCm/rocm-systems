@@ -20,6 +20,8 @@
  * THE SOFTWARE.
  */
 
+#include "rocm_smi/rocm_smi_kfd.h"
+
 #include <dirent.h>
 #include <fcntl.h>
 #include <sys/ioctl.h>
@@ -37,22 +39,19 @@
 #include <unordered_set>
 #include <vector>
 
-#include "rocm_smi/rocm_smi_io_link.h"
-#include "rocm_smi/rocm_smi_kfd.h"
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_exception.h"
-#include "rocm_smi/rocm_smi_utils.h"
-#include "rocm_smi/rocm_smi_main.h"
-#include "rocm_smi/rocm_smi_logger.h"
+#include "rocm_smi/rocm_smi_io_link.h"
 #include "rocm_smi/rocm_smi_kfd_data_manager.h"
+#include "rocm_smi/rocm_smi_logger.h"
+#include "rocm_smi/rocm_smi_main.h"
+#include "rocm_smi/rocm_smi_utils.h"
 
 namespace amd::smi {
 
-static const char *kKFDProcPathRoot = "/sys/class/kfd/kfd/proc";
-static const char *kKFDNodesPathRoot = "/sys/class/kfd/kfd/topology/nodes";
-static const char *kKFDContextPrefix = "context_";  // Prefix for secondary KFD contexts
-
-
+static const char* kKFDProcPathRoot = "/sys/class/kfd/kfd/proc";
+static const char* kKFDNodesPathRoot = "/sys/class/kfd/kfd/topology/nodes";
+static const char* kKFDContextPrefix = "context_";  // Prefix for secondary KFD contexts
 
 // KFD Node Property strings
 // static const char *kKFDNodePropCPU_CORES_COUNTStr =    "cpu_cores_count";
@@ -68,20 +67,19 @@ static const char *kKFDContextPrefix = "context_";  // Prefix for secondary KFD 
 // static const char *kKFDNodePropNUM_GWSStr =            "num_gws";
 // static const char *kKFDNodePropWAVE_FRONT_SIZEStr =    "wave_front_size";
 
-static const char *kKFDNodePropARRAY_COUNTStr = "array_count";
-static const char *kKFDNodePropSIMD_ARRAYS_PER_ENGINEStr =
-                                                     "simd_arrays_per_engine";
-static const char *kKFDNodePropCU_PER_SIMD_ARRAYStr = "cu_per_simd_array";
+static const char* kKFDNodePropARRAY_COUNTStr = "array_count";
+static const char* kKFDNodePropSIMD_ARRAYS_PER_ENGINEStr = "simd_arrays_per_engine";
+static const char* kKFDNodePropCU_PER_SIMD_ARRAYStr = "cu_per_simd_array";
 // static const char *kKFDNodePropSIMD_PER_CUStr = "simd_per_cu";
 // static const char *kKFDNodePropMAX_SLOTS_SCRATCH_CUStr =
 //                                                     "max_slots_scratch_cu";
 
 // static const char *kKFDNodePropVENDOR_IDStr =          "vendor_id";
 // static const char *kKFDNodePropDEVICE_IDStr =          "device_id";
-static const char *kKFDNodePropLOCATION_IDStr =          "location_id";
-static const char *kKFDNodePropDOMAINStr =               "domain";
+static const char* kKFDNodePropLOCATION_IDStr = "location_id";
+static const char* kKFDNodePropDOMAINStr = "domain";
 // static const char *kKFDNodePropDRM_RENDER_MINORStr =   "drm_render_minor";
-static const char *kKFDNodePropHIVE_IDStr =            "hive_id";
+static const char* kKFDNodePropHIVE_IDStr = "hive_id";
 // static const char *kKFDNodePropNUM_SDMA_ENGINESStr =   "num_sdma_engines";
 // static const char *kKFDNodePropNUM_SDMA_XGMI_ENGINESStr =
 //                                                   "num_sdma_xgmi_engines";
@@ -104,7 +102,7 @@ static const char* kKFDVramPrefix = "vram_";
 static const char* kKFDCountersPrefix = "counters_";
 static const char* kKFDSdmaPrefix = "sdma_";
 
-static bool is_number(const std::string &s) {
+static bool is_number(const std::string& s) {
   return !s.empty() && std::all_of(s.begin(), s.end(), ::isdigit);
 }
 
@@ -139,7 +137,6 @@ static std::vector<std::string> GetSecondaryContextPaths(const std::string& proc
   return context_paths;
 }
 
-
 static std::string KFDDevicePath(uint32_t dev_id) {
   std::string node_path = kKFDNodesPathRoot;
   node_path += '/';
@@ -151,7 +148,7 @@ static std::string KFDDevicePath(uint32_t dev_id) {
 // return empty string if file or property not found
 // Assume the property_name is at the beginning of the line.
 static std::string get_properties_from_file(const std::string& file_name,
-                    const std::string& property_name) {
+                                            const std::string& property_name) {
   std::ifstream infile(file_name);
   if (!infile) return "";
   std::string line;
@@ -165,9 +162,7 @@ static std::string get_properties_from_file(const std::string& file_name,
   return "";
 }
 
-
-static int OpenKFDNodeFile(uint32_t dev_id, std::string node_file,
-                                                          std::ifstream *fs) {
+static int OpenKFDNodeFile(uint32_t dev_id, std::string node_file, std::ifstream* fs) {
   std::string line;
   int ret;
   std::string f_path;
@@ -191,7 +186,7 @@ static int OpenKFDNodeFile(uint32_t dev_id, std::string node_file,
   fs->open(f_path);
 
   if (!fs->is_open()) {
-      return errno;
+    return errno;
   }
 
   return 0;
@@ -213,8 +208,7 @@ bool KFDNodeSupported(uint32_t node_indx) {
   return ret;
 }
 
-int ReadKFDDeviceProperties(uint32_t kfd_node_id,
-                                           std::vector<std::string> *retVec) {
+int ReadKFDDeviceProperties(uint32_t kfd_node_id, std::vector<std::string>* retVec) {
   std::string line;
   int ret;
   std::ifstream fs;
@@ -257,7 +251,7 @@ int ReadKFDDeviceProperties(uint32_t kfd_node_id,
   return 0;
 }
 
-static int ReadKFDGpuId(uint32_t kfd_node_id, uint64_t *gpu_id) {
+static int ReadKFDGpuId(uint32_t kfd_node_id, uint64_t* gpu_id) {
   std::string line;
   int ret;
   std::ifstream fs;
@@ -278,8 +272,7 @@ static int ReadKFDGpuId(uint32_t kfd_node_id, uint64_t *gpu_id) {
 
   gpu_id_str = ss.str();
 
-  gpu_id_str.erase(std::remove(gpu_id_str.begin(), gpu_id_str.end(), '\n'),
-                                                            gpu_id_str.end());
+  gpu_id_str.erase(std::remove(gpu_id_str.begin(), gpu_id_str.end(), '\n'), gpu_id_str.end());
 
   if (!is_number(gpu_id_str)) {
     return ENXIO;
@@ -289,7 +282,7 @@ static int ReadKFDGpuId(uint32_t kfd_node_id, uint64_t *gpu_id) {
   return 0;
 }
 
-static int ReadKFDGpuName(uint32_t kfd_node_id, std::string *gpu_name) {
+static int ReadKFDGpuName(uint32_t kfd_node_id, std::string* gpu_name) {
   std::string line;
   int ret;
   std::ifstream fs;
@@ -309,14 +302,12 @@ static int ReadKFDGpuName(uint32_t kfd_node_id, std::string *gpu_name) {
 
   *gpu_name = ss.str();
 
-  gpu_name->erase(std::remove(gpu_name->begin(), gpu_name->end(), '\n'),
-                                                             gpu_name->end());
+  gpu_name->erase(std::remove(gpu_name->begin(), gpu_name->end(), '\n'), gpu_name->end());
 
   return 0;
 }
 
-int GetProcessInfo(rsmi_process_info_t *procs, uint32_t num_allocated,
-                                                  uint32_t *num_procs_found) {
+int GetProcessInfo(rsmi_process_info_t* procs, uint32_t num_allocated, uint32_t* num_procs_found) {
   assert(num_procs_found != nullptr);
 
   *num_procs_found = 0;
@@ -359,7 +350,8 @@ int GetProcessInfo(rsmi_process_info_t *procs, uint32_t num_allocated,
       // Extract PID from "pid:XXXX-id:X" format
       size_t dash_pos = proc_id_str.find('-');
       if (dash_pos != std::string::npos) {
-        std::string pid_part = proc_id_str.substr(4, dash_pos - 4);  // Extract XXXX from "pid:XXXX-id:X"
+        std::string pid_part =
+            proc_id_str.substr(4, dash_pos - 4);  // Extract XXXX from "pid:XXXX-id:X"
         if (is_number(pid_part)) {
           uint32_t pid = static_cast<uint32_t>(std::stoul(pid_part));
           if (seen_pids.find(pid) == seen_pids.end()) {
@@ -371,8 +363,7 @@ int GetProcessInfo(rsmi_process_info_t *procs, uint32_t num_allocated,
           }
         }
       }
-    }
-    else {
+    } else {
       // Skip unexpected entries that don't match known formats
       // (e.g., non-numeric, non-pid: format files/directories)
       dentry = readdir(proc_dir);
@@ -389,8 +380,7 @@ int GetProcessInfo(rsmi_process_info_t *procs, uint32_t num_allocated,
   return 0;
 }
 
-int GetKfdGpuIdsForPid(long pid, std::unordered_set<uint64_t>* out){
-
+int GetKfdGpuIdsForPid(long pid, std::unordered_set<uint64_t>* out) {
   if (!out) return EINVAL;
   out->clear();
 
@@ -403,7 +393,7 @@ int GetKfdGpuIdsForPid(long pid, std::unordered_set<uint64_t>* out){
 
     struct dirent* e;
     while ((e = readdir(d))) {
-      if (e->d_name[0] == '.') continue; // skip "."/".." and hidden entries
+      if (e->d_name[0] == '.') continue;  // skip "."/".." and hidden entries
 
       // Grab KFD GPU id from one of these fields
       if (!strncmp(e->d_name, kKFDStatsPrefix, strlen(kKFDStatsPrefix))) {
@@ -462,7 +452,6 @@ int GetKfdGpuIdsForPid(long pid, std::unordered_set<uint64_t>* out){
   }
 
   return 0;
-
 }
 
 // Read the gpuid files found in all the <queue id> dirs and put them in
@@ -471,7 +460,7 @@ int GetKfdGpuIdsForPid(long pid, std::unordered_set<uint64_t>* out){
 //     /sys/class/kfd/kfd/proc/<pid>/queues/<queue id>/gpuid
 //     /sys/class/kfd/kfd/proc/<pid>/context_<id>/queues/<queue id>/gpuid (for secondary contexts)
 
-int GetProcessGPUs(uint32_t pid, std::unordered_set<uint64_t> *gpu_set) {
+int GetProcessGPUs(uint32_t pid, std::unordered_set<uint64_t>* gpu_set) {
   int err;
 
   assert(gpu_set != nullptr);
@@ -517,8 +506,7 @@ int GetProcessGPUs(uint32_t pid, std::unordered_set<uint64_t> *gpu_set) {
       try {
         val = static_cast<uint64_t>(std::stoi(tmp));
       } catch (...) {
-        std::cerr << "Error; read invalid data: " << tmp << " from " <<
-                                                      q_gpu_id_str << std::endl;
+        std::cerr << "Error; read invalid data: " << tmp << " from " << q_gpu_id_str << std::endl;
         closedir(queues_dir_hd);
         return ENXIO;  // Return "no such device" if we read an invalid gpu id
       }
@@ -587,37 +575,34 @@ int GetProcessGPUs(uint32_t pid, std::unordered_set<uint64_t> *gpu_set) {
   return 0;
 }
 
-static int CheckValidProcessInfoData(const std::string& s, int sysfs_ret){
-  if(sysfs_ret==0 && !is_number(s)){
+static int CheckValidProcessInfoData(const std::string& s, int sysfs_ret) {
+  if (sysfs_ret == 0 && !is_number(s)) {
     return EINVAL;
   }
   return sysfs_ret;
 }
 
-static int GetProcessKFDStats(std::string path, uint32_t& val){
+static int GetProcessKFDStats(std::string path, uint32_t& val) {
+  std::string tmp;
+  int err = ReadSysfsStr(path, &tmp);
+  auto sysfs_data_errcode = CheckValidProcessInfoData(tmp, err);
 
-    std::string tmp;
-    int err = ReadSysfsStr(path, &tmp);
-    auto sysfs_data_errcode = CheckValidProcessInfoData(tmp, err);
+  if (!(sysfs_data_errcode == 0 || sysfs_data_errcode == ENOENT)) {
+    return sysfs_data_errcode;
+  } else if (sysfs_data_errcode == 0) {
+    // Update KFD stat by the process
+    val = static_cast<uint32_t>(std::stoul(tmp));
+  } else {
+    // Some GFX revisions do not provide KFD stats debugfs method
+    // which may cause ENOENT
+    val = KFD_STATS_INVALID;
+  }
 
-    if (!(sysfs_data_errcode == 0 || sysfs_data_errcode == ENOENT)){
-      return sysfs_data_errcode;
-    }
-    else if(sysfs_data_errcode==0){
-      // Update KFD stat by the process
-      val = static_cast<uint32_t>(std::stoul(tmp));
-    }
-    else {
-      // Some GFX revisions do not provide KFD stats debugfs method
-      // which may cause ENOENT
-      val = KFD_STATS_INVALID;
-    }
-
-    return 0;
+  return 0;
 }
 
-int GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t *proc,
-                         std::unordered_set<uint64_t> *gpu_set) {
+int GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t* proc,
+                         std::unordered_set<uint64_t>* gpu_set) {
   assert(proc != nullptr);
   assert(gpu_set != nullptr);
   int err;
@@ -634,7 +619,8 @@ int GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t *proc,
 
   proc->vram_usage = 0;
   proc->sdma_usage = 0;
-  proc->cu_occupancy = 0;
+  // Default to invalid to display N/A if cu_occupancy file is unavailable
+  proc->cu_occupancy = KFD_STATS_INVALID;
   proc->evicted_time = 0;
 
   // Collect all paths to read metrics from: primary process + secondary contexts
@@ -673,7 +659,6 @@ int GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t *proc,
   }
 
   for (const auto& gpu_id : *gpu_set) {
-
     // Aggregate metrics from primary process and all secondary contexts
     for (const auto& metric_base_path : metric_paths) {
       std::string vram_str_path = metric_base_path + "/vram_" + std::to_string(gpu_id);
@@ -683,7 +668,7 @@ int GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t *proc,
 
       // Report all errors, except ENOENT (2), which should be ignored
       // and the proc->vram_usage should be unmodified
-      if (!(sysfs_data_errcode == 0 || sysfs_data_errcode == ENOENT)){
+      if (!(sysfs_data_errcode == 0 || sysfs_data_errcode == ENOENT)) {
         return sysfs_data_errcode;
       }
       // Do not store any invalid values
@@ -696,16 +681,16 @@ int GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t *proc,
       err = ReadSysfsStr(sdma_str_path, &tmp);
       sysfs_data_errcode = CheckValidProcessInfoData(tmp, err);
 
-      if (!(sysfs_data_errcode == 0 || sysfs_data_errcode == ENOENT)){
+      if (!(sysfs_data_errcode == 0 || sysfs_data_errcode == ENOENT)) {
         return sysfs_data_errcode;
-      }
-      else if (sysfs_data_errcode == 0) {
+      } else if (sysfs_data_errcode == 0) {
         proc->sdma_usage += std::stoull(tmp);
       }
 
       // Build the path and read from Sysfs file, info that
       // encodes Compute Unit usage by a process of interest
-      std::string cu_occupancy_path = metric_base_path + "/stats_" + std::to_string(gpu_id) + "/cu_occupancy";
+      std::string cu_occupancy_path =
+          metric_base_path + "/stats_" + std::to_string(gpu_id) + "/cu_occupancy";
 
       err = GetProcessKFDStats(cu_occupancy_path, kfd_stat);
       if (err != 0) {
@@ -718,12 +703,14 @@ int GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t *proc,
         }
       } else {
         // Aggregate cu_occupancy (use max value as it represents peak usage)
-        if (kfd_stat != KFD_STATS_INVALID && kfd_stat > proc->cu_occupancy) {
+        if (kfd_stat != KFD_STATS_INVALID &&
+            (proc->cu_occupancy == KFD_STATS_INVALID || kfd_stat > proc->cu_occupancy)) {
           proc->cu_occupancy = kfd_stat;
         }
       }
 
-      std::string evicted_time_path = metric_base_path + "/stats_" + std::to_string(gpu_id) + "/evicted_ms";
+      std::string evicted_time_path =
+          metric_base_path + "/stats_" + std::to_string(gpu_id) + "/evicted_ms";
 
       err = GetProcessKFDStats(evicted_time_path, kfd_stat);
       if (err != 0) {
@@ -751,7 +738,7 @@ int GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t *proc,
   return 0;
 }
 
-int DiscoverKFDNodes(std::map<uint64_t, std::shared_ptr<KFDNode>> *nodes) {
+int DiscoverKFDNodes(std::map<uint64_t, std::shared_ptr<KFDNode>>* nodes) {
   assert(nodes != nullptr);
 
   if (nodes == nullptr) {
@@ -801,26 +788,23 @@ int DiscoverKFDNodes(std::map<uint64_t, std::shared_ptr<KFDNode>> *nodes) {
     uint64_t kfd_gpu_node_bus_fn;
     uint64_t kfd_gpu_node_domain;
     int ret;
-    ret =
-      node->get_property_value(kKFDNodePropLOCATION_IDStr,
-                                                        &kfd_gpu_node_bus_fn);
+    ret = node->get_property_value(kKFDNodePropLOCATION_IDStr, &kfd_gpu_node_bus_fn);
     if (ret != 0) {
-      std:: cerr << "Failed to open properties file for kfd node " <<
-                                       node->node_index() << "." << std::endl;
+      std::cerr << "Failed to open properties file for kfd node " << node->node_index() << "."
+                << std::endl;
       closedir(kfd_node_dir);
       return ret;
     }
-    ret =
-        node->get_property_value(kKFDNodePropDOMAINStr, &kfd_gpu_node_domain);
+    ret = node->get_property_value(kKFDNodePropDOMAINStr, &kfd_gpu_node_domain);
     if (ret != 0) {
       std::cerr << "Failed to get \"domain\" properity from properties "
-              "files for kfd node " << node->node_index() << "." << std::endl;
+                   "files for kfd node "
+                << node->node_index() << "." << std::endl;
       closedir(kfd_node_dir);
       return ret;
     }
 
-    uint64_t kfd_bdfid =
-                       (kfd_gpu_node_domain << 32) | (kfd_gpu_node_bus_fn);
+    uint64_t kfd_bdfid = (kfd_gpu_node_domain << 32) | (kfd_gpu_node_bus_fn);
     (*nodes)[kfd_bdfid] = node;
 
     dentry = readdir(kfd_node_dir);
@@ -860,7 +844,7 @@ int KFDNode::ReadProperties(void) {
   std::istringstream fs;
   std::ostringstream ss;
 
-  for (const auto & i : propVec) {
+  for (const auto& i : propVec) {
     fs.str(i);
     fs >> key_str;
     fs >> val_str;
@@ -878,28 +862,32 @@ int KFDNode::ReadProperties(void) {
   return 0;
 }
 
-int
-KFDNode::Initialize(void) {
+int KFDNode::Initialize(void) {
   int ret = 0;
   ret = ReadProperties();
-  if (ret) {return ret;}
+  if (ret) {
+    return ret;
+  }
 
   ret = ReadKFDGpuId(node_indx_, &gpu_id_);
-  if (ret || (gpu_id_ == 0)) {return ret;}
+  if (ret || (gpu_id_ == 0)) {
+    return ret;
+  }
 
   ret = ReadKFDGpuName(node_indx_, &name_);
 
   ret = get_property_value(kKFDNodePropHIVE_IDStr, &xgmi_hive_id_);
   if (ret != 0) {
     throw amd::smi::rsmi_exception(RSMI_INITIALIZATION_ERROR,
-    "Failed to initialize rocm_smi library (get xgmi hive id).");
+                                   "Failed to initialize rocm_smi library (get xgmi hive id).");
   }
 
   std::map<uint32_t, std::shared_ptr<IOLink>> io_link_map_tmp;
   ret = DiscoverIOLinksPerNode(node_indx_, &io_link_map_tmp);
   if (ret != 0) {
-    throw amd::smi::rsmi_exception(RSMI_INITIALIZATION_ERROR,
-    "Failed to initialize rocm_smi library (IO Links discovery per node).");
+    throw amd::smi::rsmi_exception(
+        RSMI_INITIALIZATION_ERROR,
+        "Failed to initialize rocm_smi library (IO Links discovery per node).");
   }
 
   std::map<uint32_t, std::shared_ptr<IOLink>>::iterator it;
@@ -912,7 +900,9 @@ KFDNode::Initialize(void) {
     node_to = it->first;
     link = it->second;
     ret = ReadKFDGpuId(node_to, &node_to_gpu_id);
-    if (ret) {continue;}
+    if (ret) {
+      continue;
+    }
     if (node_to_gpu_id == 0) {  //  CPU node
       if (numa_node_found) {
         if (numa_node_weight_ > link->weight()) {
@@ -931,7 +921,6 @@ KFDNode::Initialize(void) {
       io_link_weight_[node_to] = link->weight();
       io_link_max_bandwidth_[node_to] = link->max_bandwidth();
       io_link_min_bandwidth_[node_to] = link->min_bandwidth();
-
     }
   }
 
@@ -940,28 +929,29 @@ KFDNode::Initialize(void) {
   ret = get_property_value(kKFDNodePropSIMD_ARRAYS_PER_ENGINEStr, &tmp_val);
   if (ret != 0) {
     throw amd::smi::rsmi_exception(RSMI_INITIALIZATION_ERROR,
-    "Failed to initialize rocm_smi library "
-                                 "(get number of shader arrays per engine).");
+                                   "Failed to initialize rocm_smi library "
+                                   "(get number of shader arrays per engine).");
   }
   cu_count_ = uint32_t(tmp_val);
   ret = get_property_value(kKFDNodePropARRAY_COUNTStr, &tmp_val);
   if (ret != 0) {
-    throw amd::smi::rsmi_exception(RSMI_INITIALIZATION_ERROR,
-    "Failed to initialize rocm_smi library (get number of shader arrays).");
+    throw amd::smi::rsmi_exception(
+        RSMI_INITIALIZATION_ERROR,
+        "Failed to initialize rocm_smi library (get number of shader arrays).");
   }
   cu_count_ = cu_count_ * uint32_t(tmp_val);
   ret = get_property_value(kKFDNodePropCU_PER_SIMD_ARRAYStr, &tmp_val);
   if (ret != 0) {
-    throw amd::smi::rsmi_exception(RSMI_INITIALIZATION_ERROR,
-    "Failed to initialize rocm_smi library (get number of CU's per array).");
+    throw amd::smi::rsmi_exception(
+        RSMI_INITIALIZATION_ERROR,
+        "Failed to initialize rocm_smi library (get number of CU's per array).");
   }
   cu_count_ = cu_count_ * uint32_t(tmp_val);
 
   return ret;
 }
 
-int
-KFDNode::get_property_value(std::string property, uint64_t *value) {
+int KFDNode::get_property_value(std::string property, uint64_t* value) {
   assert(value != nullptr);
   if (value == nullptr) {
     return EINVAL;
@@ -973,8 +963,7 @@ KFDNode::get_property_value(std::string property, uint64_t *value) {
   return 0;
 }
 
-int
-KFDNode::get_io_link_type(uint32_t node_to, IO_LINK_TYPE *type) {
+int KFDNode::get_io_link_type(uint32_t node_to, IO_LINK_TYPE* type) {
   assert(type != nullptr);
   if (type == nullptr) {
     return EINVAL;
@@ -986,8 +975,7 @@ KFDNode::get_io_link_type(uint32_t node_to, IO_LINK_TYPE *type) {
   return 0;
 }
 
-int
-KFDNode::get_io_link_weight(uint32_t node_to, uint64_t *weight) {
+int KFDNode::get_io_link_weight(uint32_t node_to, uint64_t* weight) {
   assert(weight != nullptr);
   if (weight == nullptr) {
     return EINVAL;
@@ -999,18 +987,17 @@ KFDNode::get_io_link_weight(uint32_t node_to, uint64_t *weight) {
   return 0;
 }
 
-int
-KFDNode::get_io_link_bandwidth(uint32_t node_to, uint64_t *max_bandwidth,
-                                                      uint64_t *min_bandwidth){
-  assert (max_bandwidth != nullptr && min_bandwidth != nullptr);
-  if (max_bandwidth == nullptr || min_bandwidth == nullptr ){
+int KFDNode::get_io_link_bandwidth(uint32_t node_to, uint64_t* max_bandwidth,
+                                   uint64_t* min_bandwidth) {
+  assert(max_bandwidth != nullptr && min_bandwidth != nullptr);
+  if (max_bandwidth == nullptr || min_bandwidth == nullptr) {
     return EINVAL;
   }
 
   if (io_link_max_bandwidth_.find(node_to) == io_link_max_bandwidth_.end() ||
-      io_link_min_bandwidth_.find(node_to) == io_link_min_bandwidth_.end()){
-        return EINVAL;
-      }
+      io_link_min_bandwidth_.find(node_to) == io_link_min_bandwidth_.end()) {
+    return EINVAL;
+  }
 
   *max_bandwidth = io_link_max_bandwidth_[node_to];
   *min_bandwidth = io_link_min_bandwidth_[node_to];
@@ -1026,7 +1013,7 @@ int KFDNode::get_total_memory(uint64_t* total) {
   }
   *total = 0;
 
-  std::string f_path  = kKFDNodesPathRoot;
+  std::string f_path = kKFDNodesPathRoot;
   f_path += "/";
   f_path += std::to_string(node_indx_);
   f_path += "/mem_banks";
@@ -1056,8 +1043,7 @@ int KFDNode::get_total_memory(uint64_t* total) {
 
     // read "size_in_bytes 68702699520" line
     const std::string size_in_bytes_property = "size_in_bytes ";
-    std::string memory_bank_file = f_path + "/"
-                  + dentry->d_name + "/properties";
+    std::string memory_bank_file = f_path + "/" + dentry->d_name + "/properties";
     std::ifstream fs(memory_bank_file);
     if (!fs) {
       dentry = readdir(kfd_node_dir);
@@ -1065,16 +1051,15 @@ int KFDNode::get_total_memory(uint64_t* total) {
     }
     std::string line;
     while (std::getline(fs, line)) {
-      if (line.substr(0, size_in_bytes_property.length())
-           == size_in_bytes_property) {
-          auto bytes = line.substr(size_in_bytes_property.length());
-          try {
-            *total += std::stol(bytes);
-            break;
-          } catch(...) {
-            dentry = readdir(kfd_node_dir);
-            continue;
-          }
+      if (line.substr(0, size_in_bytes_property.length()) == size_in_bytes_property) {
+        auto bytes = line.substr(size_in_bytes_property.length());
+        try {
+          *total += std::stol(bytes);
+          break;
+        } catch (...) {
+          dentry = readdir(kfd_node_dir);
+          continue;
+        }
       }
     }  // end loop for lines in property file
     subDirCount--;
@@ -1093,15 +1078,15 @@ int KFDNode::get_total_memory(uint64_t* total) {
 // ioctl on kfd node device
 int KFDNode::get_used_memory_orig(uint64_t* used) {
   if (used == nullptr) return EINVAL;
-  static const char *kPathKFDIoctl = "/dev/kfd";
+  static const char* kPathKFDIoctl = "/dev/kfd";
 
   int kfd_fd = open(kPathKFDIoctl, O_RDWR | O_CLOEXEC);
   if (kfd_fd <= 0) {
-      return 1;
+    return 1;
   }
   struct kfd_ioctl_get_available_memory_args mem = {0, 0, 0};
   mem.gpu_id = static_cast<uint32_t>(gpu_id_);
-  if (ioctl(kfd_fd, AMDKFD_IOC_AVAILABLE_MEMORY , &mem) != 0) {
+  if (ioctl(kfd_fd, AMDKFD_IOC_AVAILABLE_MEMORY, &mem) != 0) {
     close(kfd_fd);
     return 1;
   }
@@ -1141,11 +1126,11 @@ int KFDNode::get_used_memory(uint64_t* used) {
   auto start_time = std::chrono::steady_clock::now();
   if (kfd_cfg.use_original_vram_fcn) {
     int orig_ret = get_used_memory_orig(used);
-    ss << __PRETTY_FUNCTION__
-       << " | [original] gpu_id: " << gpu_id_
-       << "; val: " << *used << "; ret: " << orig_ret
-       << "; Time took: " << std::chrono::duration_cast<std::chrono::microseconds>(
-           std::chrono::steady_clock::now() - start_time).count()
+    ss << __PRETTY_FUNCTION__ << " | [original] gpu_id: " << gpu_id_ << "; val: " << *used
+       << "; ret: " << orig_ret << "; Time took: "
+       << std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() -
+                                                                start_time)
+              .count()
        << " microseconds";
     LOG_DEBUG(ss);
     return orig_ret;
@@ -1158,25 +1143,24 @@ int KFDNode::get_used_memory(uint64_t* used) {
     for (auto& dev : devices) {
       gpu_ids.push_back(static_cast<uint32_t>(dev->kfd_gpu_id()));
     }
-    ret = amd::smi::kfd::QueryAvailableVramBatch(
-                    gpu_ids, static_cast<uint32_t>(gpu_id_),
-                    &available);
+    ret =
+        amd::smi::kfd::QueryAvailableVramBatch(gpu_ids, static_cast<uint32_t>(gpu_id_), &available);
     ss << __PRETTY_FUNCTION__
        << " | [Batch & cached - 1 batched kfd fork for all devices] gpu_id: " << gpu_id_
-       << "; val: " << available << "; ret: " << ret
-       << "; Time took: " << std::chrono::duration_cast<std::chrono::microseconds>(
-           std::chrono::steady_clock::now() - start_time).count()
+       << "; val: " << available << "; ret: " << ret << "; Time took: "
+       << std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() -
+                                                                start_time)
+              .count()
        << " microseconds";
     LOG_DEBUG(ss);
   } else {
-    ret = amd::smi::kfd::QueryAvailableVram(
-        static_cast<uint32_t>(gpu_id_), &available);
+    ret = amd::smi::kfd::QueryAvailableVram(static_cast<uint32_t>(gpu_id_), &available);
 
-    ss << __PRETTY_FUNCTION__
-       << " | [1 kfd fork per device] gpu_id: " << gpu_id_
-       << "; val: " << available << "; ret: " << ret
-       << "; Time took: " << std::chrono::duration_cast<std::chrono::microseconds>(
-           std::chrono::steady_clock::now() - start_time).count()
+    ss << __PRETTY_FUNCTION__ << " | [1 kfd fork per device] gpu_id: " << gpu_id_
+       << "; val: " << available << "; ret: " << ret << "; Time took: "
+       << std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() -
+                                                                start_time)
+              .count()
        << " microseconds";
     LOG_DEBUG(ss);
   }
@@ -1199,14 +1183,14 @@ int KFDNode::get_used_memory(uint64_t* used) {
   }
 }
 
-int KFDNode::get_cache_info(rsmi_gpu_cache_info_t *info) {
+int KFDNode::get_cache_info(rsmi_gpu_cache_info_t* info) {
   if (info == nullptr) return EINVAL;
   uint64_t caches_count = 0;
   int ret = get_property_value("caches_count", &caches_count);
-  if (ret != 0)  return ret;
+  if (ret != 0) return ret;
 
   // /sys/class/kfd/kfd/topology/nodes/1/caches/0/properties
-  std::string f_path  = kKFDNodesPathRoot;
+  std::string f_path = kKFDNodesPathRoot;
   f_path += "/";
   f_path += std::to_string(node_indx_);
   f_path += "/";
@@ -1228,20 +1212,20 @@ int KFDNode::get_cache_info(rsmi_gpu_cache_info_t *info) {
       int cache_size = std::stoi(size);
       if (cache_size <= 0) continue;
 
-      std::string sibling_map =
-          get_properties_from_file(prop_file, "sibling_map ");
-      uint32_t num_cu_shared = static_cast<uint32_t>(std::count(sibling_map.begin(), sibling_map.end(), '1'));
+      std::string sibling_map = get_properties_from_file(prop_file, "sibling_map ");
+      uint32_t num_cu_shared =
+          static_cast<uint32_t>(std::count(sibling_map.begin(), sibling_map.end(), '1'));
 
       bool is_count_already = false;
       for (unsigned int i = 0; i < info->num_cache_types; i++) {
         if (info->cache[i].cache_level == static_cast<uint32_t>(cache_level) &&
-          info->cache[i].flags == static_cast<uint32_t>(cache_type) &&
-          info->cache[i].cache_size_kb == static_cast<uint32_t>(cache_size) &&
-          info->cache[i].max_num_cu_shared == num_cu_shared) {
+            info->cache[i].flags == static_cast<uint32_t>(cache_type) &&
+            info->cache[i].cache_size_kb == static_cast<uint32_t>(cache_size) &&
+            info->cache[i].max_num_cu_shared == num_cu_shared) {
           is_count_already = true;
           info->cache[i].num_cache_instance++;
           break;
-      }
+        }
       }
       if (is_count_already) continue;
 
@@ -1261,19 +1245,16 @@ int KFDNode::get_cache_info(rsmi_gpu_cache_info_t *info) {
 }
 
 // /sys/class/kfd/kfd/topology/nodes/*/properties
-int read_node_properties(uint32_t node, std::string property_name,
-                         uint64_t *val) {
+int read_node_properties(uint32_t node, std::string property_name, uint64_t* val) {
   std::ostringstream ss;
-  std::string propertiesFullPath = "/sys/class/kfd/kfd/topology/nodes/"
-    + std::to_string(node) + "/properties";
+  std::string propertiesFullPath =
+      "/sys/class/kfd/kfd/topology/nodes/" + std::to_string(node) + "/properties";
   int retVal = EINVAL;
   if (property_name.empty() || val == nullptr) {
-    ss << __PRETTY_FUNCTION__
-       << " | File: " << propertiesFullPath
+    ss << __PRETTY_FUNCTION__ << " | File: " << propertiesFullPath
        << " | Issue: Could not read node #" << std::to_string(node)
        << ", property_name is empty or *val is nullptr "
-       << " | return = " << std::to_string(retVal)
-       << " | ";
+       << " | return = " << std::to_string(retVal) << " | ";
     LOG_DEBUG(ss);
     return retVal;
   }
@@ -1281,41 +1262,32 @@ int read_node_properties(uint32_t node, std::string property_name,
   myNode->Initialize();
   if (KFDNodeSupported(node)) {
     retVal = myNode->get_property_value(property_name, val);
-    ss << __PRETTY_FUNCTION__
-       << " | File: " << propertiesFullPath
-       << " | Successfully read node #" << std::to_string(node)
-       << " for property_name = " << property_name
-       << " | Data (" << property_name << ") * val = "
-       << std::to_string(*val)
-       << " | return = " << std::to_string(retVal)
-       << " | ";
+    ss << __PRETTY_FUNCTION__ << " | File: " << propertiesFullPath << " | Successfully read node #"
+       << std::to_string(node) << " for property_name = " << property_name << " | Data ("
+       << property_name << ") * val = " << std::to_string(*val)
+       << " | return = " << std::to_string(retVal) << " | ";
     LOG_DEBUG(ss);
   } else {
     retVal = 1;
-    ss << __PRETTY_FUNCTION__
-       << " | File: " << propertiesFullPath
+    ss << __PRETTY_FUNCTION__ << " | File: " << propertiesFullPath
        << " | Issue: Could not read node #" << std::to_string(node)
        << ", KFD node was an unsupported node."
-       << " | return = " << std::to_string(retVal)
-       << " | ";
+       << " | return = " << std::to_string(retVal) << " | ";
     LOG_ERROR(ss);
   }
   return retVal;
 }
 
 // /sys/class/kfd/kfd/topology/nodes/*/gpu_id
-int get_gpu_id(uint32_t node, uint64_t *gpu_id) {
+int get_gpu_id(uint32_t node, uint64_t* gpu_id) {
   std::ostringstream ss;
-  std::string gpu_id_FullPath = "/sys/class/kfd/kfd/topology/nodes/"
-    + std::to_string(node) + "/gpu_id";
+  std::string gpu_id_FullPath =
+      "/sys/class/kfd/kfd/topology/nodes/" + std::to_string(node) + "/gpu_id";
   int retVal = EINVAL;
   if (gpu_id == nullptr) {
-    ss << __PRETTY_FUNCTION__
-       << " | File: " << gpu_id_FullPath
-       << " | Issue: Could not read node #" << std::to_string(node)
-       << ", gpu_id is a nullptr "
-       << " | return = " << std::to_string(retVal)
-       << " | ";
+    ss << __PRETTY_FUNCTION__ << " | File: " << gpu_id_FullPath << " | Issue: Could not read node #"
+       << std::to_string(node) << ", gpu_id is a nullptr "
+       << " | return = " << std::to_string(retVal) << " | ";
     LOG_DEBUG(ss);
     return retVal;
   }
@@ -1323,93 +1295,72 @@ int get_gpu_id(uint32_t node, uint64_t *gpu_id) {
   myNode->Initialize();
   if (KFDNodeSupported(node)) {
     retVal = ReadKFDGpuId(node, gpu_id);
-    ss << __PRETTY_FUNCTION__
-       << " | File: " << gpu_id_FullPath
-       << " | Successfully read node #" << std::to_string(node)
-       << " for gpu_id"
-       << " | Data (gpu_id) *gpu_id = "
-       << std::to_string(*gpu_id)
-       << " | return = " << std::to_string(retVal)
-       << " | ";
+    ss << __PRETTY_FUNCTION__ << " | File: " << gpu_id_FullPath << " | Successfully read node #"
+       << std::to_string(node) << " for gpu_id"
+       << " | Data (gpu_id) *gpu_id = " << std::to_string(*gpu_id)
+       << " | return = " << std::to_string(retVal) << " | ";
     LOG_DEBUG(ss);
   } else {
     retVal = 1;
-    ss << __PRETTY_FUNCTION__
-       << " | File: " << gpu_id_FullPath
-       << " | Issue: Could not read node #" << std::to_string(node)
-       << ", KFD node was an unsupported node."
-       << " | return = " << std::to_string(retVal)
-       << " | ";
+    ss << __PRETTY_FUNCTION__ << " | File: " << gpu_id_FullPath << " | Issue: Could not read node #"
+       << std::to_string(node) << ", KFD node was an unsupported node."
+       << " | return = " << std::to_string(retVal) << " | ";
     LOG_ERROR(ss);
   }
   return retVal;
 }
 
 // /sys/class/kfd/kfd/topology/nodes/*/properties | grep gfx_target_version
-int KFDNode::get_gfx_target_version(uint64_t *gfx_target_version) {
+int KFDNode::get_gfx_target_version(uint64_t* gfx_target_version) {
   std::ostringstream ss;
-  std::string properties_path = "/sys/class/kfd/kfd/topology/nodes/"
-    + std::to_string(this->node_indx_) + "/properties";
+  std::string properties_path =
+      "/sys/class/kfd/kfd/topology/nodes/" + std::to_string(this->node_indx_) + "/properties";
   uint64_t gfx_version = 0;
-  int ret = read_node_properties(this->node_indx_, "gfx_target_version",
-                                 &gfx_version);
+  int ret = read_node_properties(this->node_indx_, "gfx_target_version", &gfx_version);
   *gfx_target_version = gfx_version;
-  ss << __PRETTY_FUNCTION__
-     << " | File: " << properties_path
-     << " | Read node: " << std::to_string(this->node_indx_)
-     << " for gfx_target_version"
-     << " | Data (*gfx_target_version): "
-     << std::to_string(*gfx_target_version)
-     << " | Return: "
-     << getRSMIStatusString(amd::smi::ErrnoToRsmiStatus(ret), false)
-     << " | ";
+  ss << __PRETTY_FUNCTION__ << " | File: " << properties_path
+     << " | Read node: " << std::to_string(this->node_indx_) << " for gfx_target_version"
+     << " | Data (*gfx_target_version): " << std::to_string(*gfx_target_version)
+     << " | Return: " << getRSMIStatusString(amd::smi::ErrnoToRsmiStatus(ret), false) << " | ";
   LOG_DEBUG(ss);
   return ret;
 }
 
 int32_t KFDNode::get_simd_per_cu(uint64_t* simd_per_cu) const {
-    const std::string properties_path("/sys/class/kfd/kfd/topology/nodes/" +
-                                      std::to_string(this->node_indx_) +
-                                      "/properties");
+  const std::string properties_path("/sys/class/kfd/kfd/topology/nodes/" +
+                                    std::to_string(this->node_indx_) + "/properties");
 
-    auto tmp_simd_per_cu = uint64_t(0);
-    auto ret = read_node_properties(this->node_indx_, "simd_per_cu",
-                                    &tmp_simd_per_cu);
-    *simd_per_cu = tmp_simd_per_cu;
-    return ret;
+  auto tmp_simd_per_cu = uint64_t(0);
+  auto ret = read_node_properties(this->node_indx_, "simd_per_cu", &tmp_simd_per_cu);
+  *simd_per_cu = tmp_simd_per_cu;
+  return ret;
 }
 
 int32_t KFDNode::get_simd_count(uint64_t* simd_count) const {
-    const std::string properties_path("/sys/class/kfd/kfd/topology/nodes/" +
-                                      std::to_string(this->node_indx_) +
-                                      "/properties");
+  const std::string properties_path("/sys/class/kfd/kfd/topology/nodes/" +
+                                    std::to_string(this->node_indx_) + "/properties");
 
-    auto tmp_simd_count = uint64_t(0);
-    auto ret = read_node_properties(this->node_indx_, "simd_count",
-                                    &tmp_simd_count);
-    *simd_count = tmp_simd_count;
-    return ret;
+  auto tmp_simd_count = uint64_t(0);
+  auto ret = read_node_properties(this->node_indx_, "simd_count", &tmp_simd_count);
+  *simd_count = tmp_simd_count;
+  return ret;
 }
 
 // Public interface for device
 // /sys/class/kfd/kfd/topology/nodes/*/gpu_id
-int KFDNode::get_gpu_id(uint64_t *gpu_id) {
+int KFDNode::get_gpu_id(uint64_t* gpu_id) {
   std::ostringstream ss;
-  std::string gpuid_path = "/sys/class/kfd/kfd/topology/nodes/"
-    + std::to_string(this->node_indx_) + "/gpu_id";
+  std::string gpuid_path =
+      "/sys/class/kfd/kfd/topology/nodes/" + std::to_string(this->node_indx_) + "/gpu_id";
   const uint64_t undefined_gpu_id = std::numeric_limits<uint64_t>::max();
   std::string gpu_id_string = "";
   *gpu_id = undefined_gpu_id;
   int ret = ReadSysfsStr(gpuid_path, &gpu_id_string);
   if (ret != 0 || gpu_id_string.empty()) {
-    ss << __PRETTY_FUNCTION__
-       << " | File: " << gpuid_path
-       << " | Data (*gpu_id): empty or nullptr"
+    ss << __PRETTY_FUNCTION__ << " | File: " << gpuid_path << " | Data (*gpu_id): empty or nullptr"
        << " | Issue: Could not read node #" << std::to_string(this->node_indx_)
        << ". KFD node was an unsupported node or value read was empty."
-       << " | Return: "
-       << getRSMIStatusString(amd::smi::ErrnoToRsmiStatus(ret), false)
-       << " | ";
+       << " | Return: " << getRSMIStatusString(amd::smi::ErrnoToRsmiStatus(ret), false) << " | ";
     LOG_ERROR(ss);
     return ret;
   }
@@ -1418,34 +1369,27 @@ int KFDNode::get_gpu_id(uint64_t *gpu_id) {
     *gpu_id = undefined_gpu_id;
     ret = ENOENT;  // map to RSMI_STATUS_NOT_SUPPORTED
   }
-  ss << __PRETTY_FUNCTION__
-     << " | File: " << gpuid_path
+  ss << __PRETTY_FUNCTION__ << " | File: " << gpuid_path
      << " | Read node #: " << std::to_string(this->node_indx_)
      << " | Data (*gpu_id): " << std::to_string(*gpu_id)
-     << " | Return: "
-     << getRSMIStatusString(amd::smi::ErrnoToRsmiStatus(ret), false)
-     << " | ";
+     << " | Return: " << getRSMIStatusString(amd::smi::ErrnoToRsmiStatus(ret), false) << " | ";
   LOG_DEBUG(ss);
   return ret;
 }
 
 // Public interface for device
 // /sys/class/kfd/kfd/topology/nodes/<node_id>
-int KFDNode::get_node_id(uint32_t *node_id) {
+int KFDNode::get_node_id(uint32_t* node_id) {
   std::ostringstream ss;
   int ret = 0;
-  std::string nodeid_path = "/sys/class/kfd/kfd/topology/nodes/"
-    + std::to_string(this->node_indx_);
+  std::string nodeid_path = "/sys/class/kfd/kfd/topology/nodes/" + std::to_string(this->node_indx_);
   *node_id = this->node_indx_;
-  ss << __PRETTY_FUNCTION__
-     << " | File: " << nodeid_path
+  ss << __PRETTY_FUNCTION__ << " | File: " << nodeid_path
      << " | Read node #: " << std::to_string(this->node_indx_)
      << " | Data (*node_id): " << std::to_string(*node_id)
-     << " | Return: "
-     << getRSMIStatusString(amd::smi::ErrnoToRsmiStatus(ret), false)
-     << " | ";
+     << " | Return: " << getRSMIStatusString(amd::smi::ErrnoToRsmiStatus(ret), false) << " | ";
   LOG_DEBUG(ss);
   return ret;
 }
 
-} // namespace amd::smi
+}  // namespace amd::smi

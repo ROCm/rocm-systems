@@ -33,7 +33,6 @@ Stream::Stream(hip::Device* dev, Priority p, unsigned int f, bool null_stream,
                const std::vector<uint32_t>& cuMask, hipStreamCaptureStatus captureStatus)
     : amd::HostQueue(*dev->asContext(), *dev->devices()[0], 0, amd::CommandQueue::RealTimeDisabled,
                      convertToQueuePriority(p), cuMask, null_stream),
-      lock_("Stream Callback lock"),
       device_(dev),
       priority_(p),
       flags_(f),
@@ -115,17 +114,15 @@ void Stream::ReleaseCaptureGraph() {
 int Stream::DeviceId() const { return device_->deviceId(); }
 
 // ================================================================================================
-int Stream::DeviceId(const hipStream_t hStream) {
-  // Copying locally into non-const variable just to get const away
-  hipStream_t inputStream = hStream;
-  if (!hip::isValid(inputStream)) {
-    // return invalid device id
-    return -1;
+int Stream::DeviceId(hipStream_t hStream) {
+  assert(hip::isValid(hStream) && "Stream must be valid to get deviceId"); 
+
+  // Legacy or null stream case
+  if (hStream == nullptr || hStream == hipStreamLegacy) {
+    return ihipGetDevice();
   }
-  bool isNullOrLegacyStream = (hStream == nullptr || hStream == hipStreamLegacy);
-  hip::Stream* s = reinterpret_cast<hip::Stream*>(inputStream);
-  int deviceId = isNullOrLegacyStream ? ihipGetDevice() : s->DeviceId();
-  assert(deviceId >= 0 && deviceId < static_cast<int>(g_devices.size()));
+  int deviceId = reinterpret_cast<hip::Stream*>(hStream)->DeviceId();
+  assert(deviceId >= 0 && deviceId < static_cast<int>(g_devices.size()) && "Invalid deviceId has been returned");
   return deviceId;
 }
 
@@ -905,7 +902,7 @@ hipError_t hipStreamGetAttribute(hipStream_t stream, hipStreamAttrID attr,
   HIP_INIT_API(hipStreamGetAttribute, stream, attr, value_out);
 
   if (value_out == nullptr) {
-    return hipErrorInvalidValue;
+    HIP_RETURN(hipErrorInvalidValue);
   }
 
   if (!hip::isValid(stream)) {

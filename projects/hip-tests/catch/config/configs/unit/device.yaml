@@ -24,12 +24,6 @@ device:
   Unit_hipDeviceGetByPCIBusId_WrongBusID:
     <<: *level_2
     tags: [device_mgmt, query]
-  Unit_hipDeviceGetLimit_NegTst:
-    <<: *level_2
-    tags: [device_mgmt, query]
-  Unit_hipDeviceGetLimit_CheckValidityOfOutputVal:
-    <<: *level_2
-    tags: [device_mgmt, query]
   Unit_hipDeviceGetName_NegTst:
     <<: *level_2
     tags: [device_mgmt, query]
@@ -203,9 +197,6 @@ device:
   Unit_hipExtGetLinkTypeAndHopCount_Negative_Parameters:
     <<: *level_2
     tags: [device_mgmt, query]
-  Unit_hipDeviceSetLimit_SetGet:
-    <<: *level_2
-    tags: [config, device_mgmt, multigpu]
   Unit_hipDeviceSetLimit_Positive_StackSize:
     <<: *level_2
     tags: [config, device_mgmt]

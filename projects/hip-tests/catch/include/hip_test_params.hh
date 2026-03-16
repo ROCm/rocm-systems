@@ -22,10 +22,10 @@ THE SOFTWARE.
 
 #pragma once
 
-#include <cstddef>
 #include <vector>
 #include <string>
 #include <map>
+#include <memory>
 
 /**
  * @brief Global parameter store for test configuration.

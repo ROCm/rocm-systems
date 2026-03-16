@@ -166,7 +166,7 @@ cache_comm_data_events(const uint32_t device_id, int bytes)
         track_name.c_str(), timestamp_ns, event_metadata.c_str(), stack_id,
         parent_stack_id, correlation_id, call_stack.c_str(), line_info.c_str(), device_id,
         static_cast<uint8_t>(agent_type::CPU), track_name.c_str(),
-        static_cast<double>(value) });
+        static_cast<double>(value), std::nullopt });
 }
 
 }  // namespace

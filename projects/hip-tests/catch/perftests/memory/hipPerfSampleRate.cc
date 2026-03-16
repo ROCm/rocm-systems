@@ -278,16 +278,16 @@ void hipPerfSampleRate::checkData(uint* ptr) {
 /**
  * Test Description
  * ------------------------
- *  - Verify hipPerfSampleRate status.
+ *  - Verify hipPerfSampleRate status.
  * Test source
  * ------------------------
- *  - perftests/memory/hipPerfSampleRate.cc
+ *  - perftests/memory/hipPerfSampleRate.cc
  * Test requirements
  * ------------------------
- *  - HIP_VERSION >= 5.6
+ *  - HIP_VERSION >= 5.6
  */
 
-TEST_CASE("Perf_hipPerfSampleRate_test") {
+TEST_CASE(Perf_hipPerfSampleRate_test) {
   hipPerfSampleRate sampleTypes;
 
   REQUIRE(true == sampleTypes.open());

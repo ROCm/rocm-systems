@@ -57,12 +57,12 @@ struct ArgCheckTestEnvironment
     {
         if(sendDevicePtr)
         {
-            hipFree(sendDevicePtr);
+            ASSERT_EQ(hipFree(sendDevicePtr), hipSuccess);
             sendDevicePtr = nullptr;
         }
         if(recvDevicePtr)
         {
-            hipFree(recvDevicePtr);
+            ASSERT_EQ(hipFree(recvDevicePtr), hipSuccess);
             recvDevicePtr = nullptr;
         }
     }
@@ -128,9 +128,9 @@ TEST(ArgCheckTest, CudaPtrCheck_ValidPointer)
             ncclResult_t result = CudaPtrCheck(devicePtr, env.comm, "devicePtr", "TestOp");
             EXPECT_EQ(result, ncclSuccess);
 
-            hipFree(devicePtr);
+            ASSERT_EQ(hipFree(devicePtr), hipSuccess);
             env.cleanup();
-            INFO("Test 'CudaPtrCheck_ValidPointer' PASSED\n");
+            TEST_INFO("Test 'CudaPtrCheck_ValidPointer' PASSED\n");
         }
     );
 }
@@ -148,7 +148,7 @@ TEST(ArgCheckTest, CudaPtrCheck_NullPointer)
             EXPECT_EQ(result, ncclInvalidArgument);
 
             env.cleanup();
-            INFO("Test 'CudaPtrCheck_NullPointer' PASSED\n");
+            TEST_INFO("Test 'CudaPtrCheck_NullPointer' PASSED\n");
         }
     );
 }
@@ -163,18 +163,18 @@ TEST(ArgCheckTest, CudaPtrCheck_DifferentDevicePointer)
             env.setup();
 
             int* devicePtr = nullptr;
-            hipSetDevice(1);
+            ASSERT_EQ(hipSetDevice(1), hipSuccess);
             hipError_t err = hipMalloc(&devicePtr, sizeof(int));
             ASSERT_EQ(err, hipSuccess);
 
             ncclResult_t result = CudaPtrCheck(devicePtr, env.comm, "devicePtr", "TestOp");
             EXPECT_EQ(result, ncclInvalidArgument);
 
-            hipFree(devicePtr);
-            hipSetDevice(env.comm->cudaDev);
+            ASSERT_EQ(hipFree(devicePtr), hipSuccess);
+            ASSERT_EQ(hipSetDevice(env.comm->cudaDev), hipSuccess);
 
             env.cleanup();
-            INFO("Test 'CudaPtrCheck_DifferentDevicePointer' PASSED\n");
+            TEST_INFO("Test 'CudaPtrCheck_DifferentDevicePointer' PASSED\n");
         }
     );
 }
@@ -204,7 +204,7 @@ TEST(ArgCheckTest, CudaPtrCheck_HostMemoryPointer)
             free(hostPtr);
 
             env.cleanup();
-            INFO("Test 'CudaPtrCheck_HostMemoryPointer' PASSED\n");
+            TEST_INFO("Test 'CudaPtrCheck_HostMemoryPointer' PASSED\n");
         }
     );
 }
@@ -218,7 +218,7 @@ TEST(ArgCheckTest, PtrCheck_ValidPointer)
             int          value  = 42;
             ncclResult_t result = PtrCheck(&value, "TestOp", "value");
             ASSERT_EQ(result, ncclSuccess);
-            INFO("Test 'PtrCheck_ValidPointer' PASSED\n");
+            TEST_INFO("Test 'PtrCheck_ValidPointer' PASSED\n");
         }
     );
 }
@@ -231,7 +231,7 @@ TEST(ArgCheckTest, PtrCheck_NullPointer)
         {
             ncclResult_t result = PtrCheck(nullptr, "TestOp", "value");
             ASSERT_EQ(result, ncclInvalidArgument);
-            INFO("Test 'PtrCheck_NullPointer' PASSED\n");
+            TEST_INFO("Test 'PtrCheck_NullPointer' PASSED\n");
         }
     );
 }
@@ -257,7 +257,7 @@ TEST(ArgCheckTest, CommCheck_ValidComm)
             EXPECT_EQ(result, ncclSuccess) << "Failed for valid communicator";
 
             env.cleanup();
-            INFO("Test 'CommCheck_ValidComm' PASSED\n");
+            TEST_INFO("Test 'CommCheck_ValidComm' PASSED\n");
         }
     );
 }
@@ -270,7 +270,7 @@ TEST(ArgCheckTest, CommCheck_NullComm)
         {
             ncclResult_t result = CommCheck(nullptr, "TestOp", "comm");
             ASSERT_EQ(result, ncclInvalidArgument);
-            INFO("Test 'CommCheck_NullComm' PASSED\n");
+            TEST_INFO("Test 'CommCheck_NullComm' PASSED\n");
         }
     );
 }
@@ -293,7 +293,7 @@ TEST(ArgCheckTest, CommCheck_CorruptedStartMagic)
             EXPECT_EQ(result, ncclInvalidArgument) << "Failed for corrupted startMagic";
 
             env.cleanup();
-            INFO("Test 'CommCheck_CorruptedStartMagic' PASSED\n");
+            TEST_INFO("Test 'CommCheck_CorruptedStartMagic' PASSED\n");
         }
     );
 }
@@ -316,7 +316,7 @@ TEST(ArgCheckTest, CommCheck_CorruptedEndMagic)
             EXPECT_EQ(result, ncclInvalidArgument) << "Failed for corrupted endMagic";
 
             env.cleanup();
-            INFO("Test 'CommCheck_CorruptedEndMagic' PASSED\n");
+            TEST_INFO("Test 'CommCheck_CorruptedEndMagic' PASSED\n");
         }
     );
 }
@@ -339,7 +339,7 @@ TEST(ArgCheckTest, CommCheck_CorruptedBothMagics)
             EXPECT_EQ(result, ncclInvalidArgument) << "Failed for corrupted both magic values";
 
             env.cleanup();
-            INFO("Test 'CommCheck_CorruptedBothMagics' PASSED\n");
+            TEST_INFO("Test 'CommCheck_CorruptedBothMagics' PASSED\n");
         }
     );
 }
@@ -359,7 +359,7 @@ TEST(ArgCheckTest, ArgsCheck_InvalidRoot_NegativeValue)
             EXPECT_EQ(result, ncclInvalidArgument) << "Failed for invalid root < 0";
 
             env.cleanup();
-            INFO("Test 'ArgsCheck_InvalidRoot_NegativeValue' PASSED\n");
+            TEST_INFO("Test 'ArgsCheck_InvalidRoot_NegativeValue' PASSED\n");
         }
     );
 }
@@ -379,7 +379,7 @@ TEST(ArgCheckTest, ArgsCheck_InvalidRoot_ExceedsNRanks)
             EXPECT_EQ(result, ncclInvalidArgument) << "Failed for invalid root >= nRanks";
 
             env.cleanup();
-            INFO("Test 'ArgsCheck_InvalidRoot_ExceedsNRanks' PASSED\n");
+            TEST_INFO("Test 'ArgsCheck_InvalidRoot_ExceedsNRanks' PASSED\n");
         }
     );
 }
@@ -399,7 +399,7 @@ TEST(ArgCheckTest, ArgsCheck_InvalidDatatype_NegativeValue)
             EXPECT_EQ(result, ncclInvalidArgument) << "Failed for invalid datatype < 0";
 
             env.cleanup();
-            INFO("Test 'ArgsCheck_InvalidDatatype_NegativeValue' PASSED\n");
+            TEST_INFO("Test 'ArgsCheck_InvalidDatatype_NegativeValue' PASSED\n");
         }
     );
 }
@@ -419,7 +419,7 @@ TEST(ArgCheckTest, ArgsCheck_InvalidDatatype_ExceedsMaxValue)
             EXPECT_EQ(result, ncclInvalidArgument) << "Failed for invalid datatype >= ncclNumTypes";
 
             env.cleanup();
-            INFO("Test 'ArgsCheck_InvalidDatatype_ExceedsMaxValue' PASSED\n");
+            TEST_INFO("Test 'ArgsCheck_InvalidDatatype_ExceedsMaxValue' PASSED\n");
         }
     );
 }
@@ -439,7 +439,7 @@ TEST(ArgCheckTest, ArgsCheck_InvalidReductionOperation_NegativeValue)
             EXPECT_EQ(result, ncclInvalidArgument) << "Failed for invalid reduction operation < 0";
 
             env.cleanup();
-            INFO("Test 'ArgsCheck_InvalidReductionOperation_NegativeValue' PASSED\n");
+            TEST_INFO("Test 'ArgsCheck_InvalidReductionOperation_NegativeValue' PASSED\n");
         }
     );
 }
@@ -460,7 +460,7 @@ TEST(ArgCheckTest, ArgsCheck_InvalidReductionOperation_ExceedsMaxValue)
                 << "Failed for invalid reduction operation >= ncclNumOps";
 
             env.cleanup();
-            INFO("Test 'ArgsCheck_InvalidReductionOperation_ExceedsMaxValue' PASSED\n");
+            TEST_INFO("Test 'ArgsCheck_InvalidReductionOperation_ExceedsMaxValue' PASSED\n");
         }
     );
 }
@@ -477,12 +477,12 @@ TEST(ArgCheckTest, ArgsCheck_InvalidCommunicatorPointers)
             env.info->op = (ncclRedOp_t)0; // Valid reduction operation
             if(env.info->sendbuff)
             {
-                hipFree((void*)env.info->sendbuff);
+                ASSERT_EQ(hipFree((void*)env.info->sendbuff), hipSuccess);
                 env.info->sendbuff = nullptr; // Invalid send buffer
             }
             if(env.info->recvbuff)
             {
-                hipFree((void*)env.info->recvbuff);
+                ASSERT_EQ(hipFree((void*)env.info->recvbuff), hipSuccess);
                 env.info->recvbuff = nullptr; // Invalid receive buffer
             }
 
@@ -490,7 +490,7 @@ TEST(ArgCheckTest, ArgsCheck_InvalidCommunicatorPointers)
             EXPECT_EQ(result, ncclInvalidArgument) << "Failed for invalid communicator pointers";
 
             env.cleanup();
-            INFO("Test 'ArgsCheck_InvalidCommunicatorPointers' PASSED\n");
+            TEST_INFO("Test 'ArgsCheck_InvalidCommunicatorPointers' PASSED\n");
         }
     );
 }
@@ -510,7 +510,7 @@ TEST(ArgCheckTest, ArgsCheck_InvalidReductionOperationOutOfRange)
             EXPECT_EQ(result, ncclInvalidArgument) << "Failed for invalid reduction operation";
 
             env.cleanup();
-            INFO("Test 'ArgsCheck_InvalidReductionOperationOutOfRange' PASSED\n");
+            TEST_INFO("Test 'ArgsCheck_InvalidReductionOperationOutOfRange' PASSED\n");
         }
     );
 }
@@ -533,7 +533,7 @@ TEST(ArgCheckTest, ArgsCheck_UserDefinedReductionOperationInvalid)
                 << "Failed for user-defined reduction operation with freeNext != -1";
 
             env.cleanup();
-            INFO("Test 'ArgsCheck_UserDefinedReductionOperationInvalid' PASSED\n");
+            TEST_INFO("Test 'ArgsCheck_UserDefinedReductionOperationInvalid' PASSED\n");
         }
     );
 }
@@ -561,7 +561,7 @@ TEST(ArgCheckTest, ArgsCheck_SendAndRecvFunction)
             }
 
             env.cleanup();
-            INFO("Test 'ArgsCheck_SendAndRecvFunction' PASSED\n");
+            TEST_INFO("Test 'ArgsCheck_SendAndRecvFunction' PASSED\n");
         }
     );
 }
@@ -582,7 +582,7 @@ TEST(ArgCheckTest, ArgsCheck_CollNotReduce)
             EXPECT_EQ(result, ncclSuccess) << "Failed for coll != ncclFuncReduce";
 
             env.cleanup();
-            INFO("Test 'ArgsCheck_CollNotReduce' PASSED\n");
+            TEST_INFO("Test 'ArgsCheck_CollNotReduce' PASSED\n");
         }
     );
 }
@@ -603,7 +603,7 @@ TEST(ArgCheckTest, ArgsCheck_ReduceCollWithRootRank)
             EXPECT_EQ(result, ncclSuccess) << "Failed for coll == ncclFuncReduce and rank == root";
 
             env.cleanup();
-            INFO("Test 'ArgsCheck_ReduceCollWithRootRank' PASSED\n");
+            TEST_INFO("Test 'ArgsCheck_ReduceCollWithRootRank' PASSED\n");
         }
     );
 }
@@ -623,7 +623,7 @@ TEST(ArgCheckTest, ArgsCheck_ReduceCollWithNonRootRank)
             EXPECT_EQ(result, ncclSuccess) << "Failed for coll == ncclFuncReduce and rank != root";
 
             env.cleanup();
-            INFO("Test 'ArgsCheck_ReduceCollWithNonRootRank' PASSED\n");
+            TEST_INFO("Test 'ArgsCheck_ReduceCollWithNonRootRank' PASSED\n");
         }
     );
 }

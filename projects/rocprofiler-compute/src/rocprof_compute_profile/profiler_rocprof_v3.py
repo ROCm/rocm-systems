@@ -57,8 +57,6 @@ class rocprof_v3_profiler(RocProfCompute_Base):
                 "version of rocprof-compute. This functionality is planned for a "
                 "future release. Please adjust your profiling options accordingly."
             )
-        elif args.hip_trace:
-            trace_option = "--hip-trace"
         elif getattr(args, "torch_trace", False):
             trace_option = "--marker-trace"
         else:

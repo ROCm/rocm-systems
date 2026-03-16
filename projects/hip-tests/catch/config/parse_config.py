@@ -1,6 +1,40 @@
-import sys
+import argparse
 
 from common import iter_group_configs, load_definitions, parse_size_string
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Parse YAML test configs and generate a C/C++ header with "
+        "Catch2 TEST_CASE macro definitions.",
+    )
+    parser.add_argument(
+        "configs_path",
+        help="Path to the directory containing YAML config files.",
+    )
+    parser.add_argument(
+        "platform",
+        help="Target platform (e.g. amd, nvidia).",
+    )
+    parser.add_argument(
+        "os_name",
+        help="Target operating system (e.g. linux, windows).",
+    )
+    parser.add_argument(
+        "arch",
+        help="Target architecture (e.g. gfx90a, gfx942).",
+    )
+    parser.add_argument(
+        "header_path",
+        help="Output path for the generated header file.",
+    )
+    parser.add_argument(
+        "param_header_path",
+        nargs="?",
+        default=None,
+        help="Optional output path for the generated parameter header file.",
+    )
+    return parser.parse_args()
 
 
 def create_test_definition(group, case_name, case_config, platform, os_name, arch):
@@ -118,26 +152,18 @@ def generate_parameter_header(cmd_options, output_path):
 
 
 def main():
-    if len(sys.argv) == 6:
-        config_path = sys.argv[1]
-        platform = sys.argv[2]
-        os_name = sys.argv[3]
-        arch = sys.argv[4]
-        header_path = sys.argv[5]
-        param_header_path = None
-    elif len(sys.argv) == 7:
-        config_path = sys.argv[1]
-        platform = sys.argv[2]
-        os_name = sys.argv[3]
-        arch = sys.argv[4]
-        header_path = sys.argv[5]
-        param_header_path = sys.argv[6]
-    else:
-        raise ValueError("5 or 6 arguments expected")
+    args = parse_args()
+
+    configs_path = args.configs_path
+    platform = args.platform
+    os_name = args.os_name
+    arch = args.arch
+    header_path = args.header_path
+    param_header_path = args.param_header_path
 
     test_macros = []
 
-    for group, cases in iter_group_configs(config_path):
+    for group, cases in iter_group_configs(configs_path):
         for case_name, case_config in cases.items():
             test_macros.append(
                 create_test_definition(
@@ -157,7 +183,7 @@ def main():
 
     # Generate parameter header if path provided
     if param_header_path:
-        definitions = load_definitions(config_path)
+        definitions = load_definitions(configs_path)
         cmd_options = definitions.get("cmd_options", {})
         if cmd_options:
             generate_parameter_header(cmd_options, param_header_path)

@@ -65,7 +65,7 @@ HIP_TEST_CASE(Unit_hipKernelNameRefByPtr_Positive_Basic) {
  *  - HIP_VERSION >= 5.2
  *  - Platform specific (AMD)
  */
-HIP_TEST_CASE(Unit_hipKernelNameRefByPtr_Negative_StreamNullptr) {
+HIP_TEST_CASE(Unit_hipKernelNameRefByPtr_Positive_StreamNullptr) {
   const void* kernel_ptr{reinterpret_cast<const void*>(&test_kernel)};
   StreamGuard stream_guard{Streams::nullstream};
 

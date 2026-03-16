@@ -113,9 +113,6 @@ stream:
     # Note: TDR
     disabled: [amd_wsl]
     tags: [lifecycle]
-  Unit_hipStreamCreate_MultistreamBasicFunctionalities:
-    <<: *level_2
-    tags: [lifecycle]
   Unit_hipMemcpyAsync_hipStreamLegacy_H2H_H2D_D2H_H2PinMem:
     <<: *level_2
     tags: [memory]

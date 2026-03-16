@@ -18,12 +18,6 @@ graph:
   Unit_hipGraphAddDependencies_Negative_Parameters:
     <<: *level_2
     tags: [dependency]
-  Unit_hipGraphAddDependencies_Functional:
-    <<: *level_2
-    tags: [dependency]
-  Unit_hipGraphAddDependencies_NegTest:
-    <<: *level_2
-    tags: [dependency]
   Unit_hipGraphAddEventRecordNode_Functional_Simple:
     <<: *level_2
     tags: [node]
@@ -90,18 +84,6 @@ graph:
     <<: *level_2
     # NOTE: The following test is disabled due to defect - EXSWHTEC-245
     disabled: [amd_windows]
-    tags: [node]
-  Unit_hipGraphAddMemcpyNode_Negative:
-    <<: *level_2
-    tags: [node]
-  Unit_hipGraphAddMemcpyNode_BasicFunctional:
-    <<: *level_2
-    tags: [node]
-  Unit_hipGraphAddMemcpyNode_PeerAccessFunctional:
-    <<: *level_2
-    tags: [multigpu, node]
-  Unit_hipGraphAddMemcpyNode_HostToHost:
-    <<: *level_2
     tags: [node]
   Unit_hipGraphClone_Negative:
     <<: *level_2
@@ -311,15 +293,6 @@ graph:
   Unit_hipGraphGetNodes_Negative_Parameters:
     <<: *level_2
     tags: [query]
-  Unit_hipGraphGetNodes_Functional:
-    <<: *level_2
-    tags: [query]
-  Unit_hipGraphGetNodes_CapturedStream:
-    <<: *level_2
-    tags: [query]
-  Unit_hipGraphGetNodes_ParamValidation:
-    <<: *level_2
-    tags: [query]
   Unit_hipGraphGetRootNodes_Positive_Functional:
     <<: *level_2
     tags: [query]
@@ -469,12 +442,6 @@ graph:
   Unit_hipGraphGetEdges_Negative_Parameters:
     <<: *level_2
     tags: [query]
-  Unit_hipGraphGetEdges_Functionality:
-    <<: *level_2
-    tags: [query]
-  Unit_hipGraphGetEdges_Negative:
-    <<: *level_2
-    tags: [query]
   Unit_hipGraphRemoveDependencies_Positive_Functional:
     <<: *level_2
     tags: [dependency]
@@ -488,18 +455,6 @@ graph:
     <<: *level_2
     tags: [dependency]
   Unit_hipGraphRemoveDependencies_Negative_Parameters:
-    <<: *level_2
-    tags: [dependency]
-  Unit_hipGraphRemoveDependencies_Func_Manual:
-    <<: *level_2
-    tags: [dependency]
-  Unit_hipGraphRemoveDependencies_Func_StrmCapture:
-    <<: *level_2
-    tags: [dependency]
-  Unit_hipGraphRemoveDependencies_ChangeComputeFunc:
-    <<: *level_2
-    tags: [dependency]
-  Unit_hipGraphRemoveDependencies_Negative:
     <<: *level_2
     tags: [dependency]
   Unit_hipGraphInstantiate_Negative:
@@ -1119,15 +1074,6 @@ graph:
   Unit_hipGraphMemcpyNodeSetParams_Negative_Parameters:
     <<: *level_2
     tags: [node]
-  Unit_hipGraphMemcpyNodeSetParams_Negative:
-    <<: *level_2
-    tags: [node]
-  Unit_hipGraphMemcpyNodeSetParams_Functional:
-    <<: *level_2
-    # (amd_windows) SWDEV-347670 - blocking tests have TDR, causing hangs
-    # (amd_wsl) Note: Windows disabled
-    disabled: [amd_windows, amd_wsl]
-    tags: [node]
   Unit_hipGraphKernelNodeGetParams_Negative:
     <<: *level_2
     tags: [query]
@@ -1203,28 +1149,10 @@ graph:
   Unit_hipGraphNodeGetDependentNodes_Negative_Parameters:
     <<: *level_2
     tags: [dependency]
-  Unit_hipGraphNodeGetDependentNodes_Functional:
-    <<: *level_2
-    # (amd_windows) SWDEV-347670 - blocking tests have TDR, causing hangs
-    # (amd_wsl) Note: Windows disabled
-    disabled: [amd_windows, amd_wsl]
-    tags: [dependency]
-  Unit_hipGraphNodeGetDependentNodes_ParamValidation:
-    <<: *level_2
-    tags: [dependency]
   Unit_hipGraphNodeGetDependencies_Positive_Functional:
     <<: *level_2
     tags: [dependency]
   Unit_hipGraphNodeGetDependencies_Negative_Parameters:
-    <<: *level_2
-    tags: [dependency]
-  Unit_hipGraphNodeGetDependencies_Functional:
-    <<: *level_2
-    # (amd_windows) SWDEV-347670 - blocking tests have TDR, causing hangs
-    # (amd_wsl) Note: Windows disabled
-    disabled: [amd_windows, amd_wsl]
-    tags: [dependency]
-  Unit_hipGraphNodeGetDependencies_ParamValidation:
     <<: *level_2
     tags: [dependency]
   Unit_hipGraphHostNodeGetParams_Negative:
@@ -1302,18 +1230,6 @@ graph:
     <<: *level_2
     tags: [capture]
   Unit_hipLaunchHostFunc_H2D_Kernel_D2H_Capture:
-    <<: *level_2
-    tags: [capture]
-  Unit_hipStreamGetCaptureInfo_v2_BasicFunctional:
-    <<: *level_2
-    tags: [capture]
-  Unit_hipStreamGetCaptureInfo_v2_hipStreamPerThread:
-    <<: *level_2
-    tags: [capture]
-  Unit_hipStreamGetCaptureInfo_v2_UniqueID:
-    <<: *level_2
-    tags: [capture]
-  Unit_hipStreamGetCaptureInfo_v2_ParamValidation:
     <<: *level_2
     tags: [capture]
   Unit_hipUserObjectCreate_Functional_1:

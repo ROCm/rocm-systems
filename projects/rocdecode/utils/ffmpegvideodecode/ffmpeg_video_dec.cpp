@@ -104,7 +104,10 @@ FFMpegVideoDecoder::~FFMpegVideoDecoder() {
                 if (hip_status != hipSuccess) {
                     std::cerr << "ERROR: hipFree failed! (" << hip_status << ")" << std::endl;
                 }
+            } else {
+                delete[] p_frame.frame_ptr;
             }
+            p_frame.frame_ptr = nullptr;
         }
     }
 }
@@ -264,13 +267,16 @@ int FFMpegVideoDecoder::ReconfigureDecoder(RocdecVideoFormat *p_video_format) {
     std::lock_guard<std::mutex> lock(mtx_vp_frame_);
     while(!vp_frames_.empty()) {
         DecFrameBuffer *p_frame = &vp_frames_.back();
-        // pop decoded frame
-        vp_frames_.pop_back();
         if (p_frame->frame_ptr) {
             if (out_mem_type_ == OUT_SURFACE_MEM_DEV_COPIED) {
                 hipError_t hip_status = hipFree(p_frame->frame_ptr);
                 if (hip_status != hipSuccess) std::cerr << "ERROR: hipFree failed! (" << hip_status << ")" << std::endl;
+            } else {
+                delete[] p_frame->frame_ptr;
             }
+            // pop decoded frame
+            vp_frames_.pop_back();
+            p_frame->frame_ptr = nullptr;
         }
     }
     output_frame_cnt_ = 0;     // reset frame_count

@@ -56,9 +56,11 @@ $(EXE): $(files)
 
 hipify:
 	rm -rf hipify_rccl
-	mkdir -p hipify_rccl/src/device/include hipify_rccl/include/network/unpack include
+	mkdir -p hipify_rccl/src/device/include hipify_rccl/include/network/unpack include/rccl
 	# Copy nccl.h.in from rccl source to always get latest API definitions
 	cp -a ../../src/nccl.h.in include/nccl.h
+	# Also copy to rccl/rccl.h for files that use #include <rccl/rccl.h>
+	cp -a ../../src/nccl.h.in include/rccl/rccl.h
 	cp -a ../../src/include/ hipify_rccl/
 	cp -a ../../src/graph/ hipify_rccl/
 	cp -a ../../src/device/*.h hipify_rccl/src/device/include

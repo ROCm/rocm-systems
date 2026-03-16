@@ -173,6 +173,9 @@ deviceLib:
     # Note: devicelib hangs and failures
     disabled: [amd_windows, amd_wsl]
     tags: [device_lib, memory]
+  Unit_deviceAllocationFollowedByDeviceReset:
+    <<: *level_2
+    tags: [device_lib, memory]
   Unit_AtomicFunctions_Inc:
     <<: *level_2
     tags: [atomic, device_lib]
@@ -186,9 +189,6 @@ deviceLib:
     <<: *level_2
     tags: [device_lib, math]
   Unit_DoublePrecisionMathHost:
-    <<: *level_2
-    tags: [device_lib, math]
-  Unit_FloatMathPrecise:
     <<: *level_2
     tags: [device_lib, math]
   Unit_IntegerIntrinsics:
@@ -503,20 +503,6 @@ deviceLib:
     tags: [device_lib, math]
   Unit_BuiltinAtomicsRTC_fminNonCoherentGlobalFlatMem:
     <<: *level_2
-    tags: [device_lib, math]
-  Unit_BuiltInAtomicAdd_CoherentGlobalMem:
-    <<: *level_2
-    tags: [device_lib, math]
-  Unit_BuiltInAtomicAdd_NonCoherentGlobalMem:
-    <<: *level_2
-    tags: [device_lib, math]
-  Unit_BuiltInAtomicAdd_CoherentGlobalMemWithRtc:
-    <<: *level_2
-    tags: [device_lib, math]
-  Unit_BuiltInAtomicAdd_NonCoherentGlobalMemWithRtc:
-    <<: *level_2
-    # Rock_Linux_Failures_on_gfx94X
-    disabled: [amd_linux]
     tags: [device_lib, math]
   Unit_unsafeAtomicAdd_CoherentRTCnounsafeatomicflag:
     <<: *level_2

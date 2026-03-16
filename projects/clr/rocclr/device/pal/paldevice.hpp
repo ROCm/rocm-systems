@@ -1,22 +1,8 @@
-/* Copyright (c) 2015 - 2023 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #pragma once
 
@@ -248,14 +234,10 @@ class Device : public NullDevice {
     int counter_;                    //!< Lock usage counter
     Pal::EngineType engineType_;     //!< Engine type
     uint32_t index_;                 //!< HW queue index for scratch buffer access
-    amd::Monitor queue_lock_;        //!< Queue lock for access
+    std::recursive_mutex queue_lock_;  //!< Queue lock for access
     AqlPacketMgmt aql_packet_mgmt_;  //!< AQL packets management class for debugger support
     QueueRecycleInfo(const Device& dev)
-        : counter_(1),
-          engineType_(Pal::EngineTypeCompute),
-          index_(0),
-          queue_lock_(true) /* Queue lock for sharing */,
-          aql_packet_mgmt_(dev) {}
+        : counter_(1), engineType_(Pal::EngineTypeCompute), index_(0), aql_packet_mgmt_(dev) {}
 
     //! Returns the MQD's read_dispatch_id's address.
     uintptr_t DebuggerData() const {
@@ -472,16 +454,16 @@ class Device : public NullDevice {
   pal::Memory* getGpuMemory(amd::Memory* mem  //!< Pointer to AMD memory object
   ) const;
 
-  amd::Monitor& lockAsyncOps() const { return lockAsyncOps_; }
+  std::recursive_mutex& lockAsyncOps() const { return lockAsyncOps_; }
 
   //! Returns the lock object for the virtual gpus list
-  amd::Monitor& vgpusAccess() const { return vgpusAccess_; }
+  std::recursive_mutex& vgpusAccess() const { return vgpusAccess_; }
 
   //! Returns the monitor object for PAL
-  amd::Monitor& lockPAL() const { return lockPAL_; }
+  std::recursive_mutex& lockPAL() const { return lockPAL_; }
 
   //! Returns the monitor object for PAL
-  amd::Monitor& lockResources() const { return lockResourceOps_; }
+  std::recursive_mutex& lockResources() const { return lockResourceOps_; }
 
   //! Returns the number of virtual GPUs allocated on this device
   uint numOfVgpus() const { return numOfVgpus_; }
@@ -635,7 +617,7 @@ class Device : public NullDevice {
 
   //! Adds a resource to the global list
   void addResource(Resource* res) const {
-    amd::ScopedLock lock(lockResources());
+    std::scoped_lock lock(lockResources());
     auto findIt = resourceList_->find(res);
     res->resizeGpuEvents(numOfVgpus() - 1);
     if (resourceList_->end() == findIt) {
@@ -645,7 +627,7 @@ class Device : public NullDevice {
 
   //! Removes a resource from the global list
   void removeResource(Resource* res) const {
-    amd::ScopedLock lock(lockResources());
+    std::scoped_lock lock(lockResources());
     resourceList_->erase(res);
   }
 
@@ -654,7 +636,7 @@ class Device : public NullDevice {
     // Not safe to resize the list when runtime creates/destroys a queue at the same time
     // or other queues process a command, since the size of the TS array can change
     Device::ScopedLockVgpus v(*this);
-    amd::ScopedLock r(lockResources());
+    std::scoped_lock r(lockResources());
     for (const auto& it : *resourceList_) {
       it->resizeGpuEvents(index);
     }
@@ -662,7 +644,7 @@ class Device : public NullDevice {
 
   //! Erases an old queue from the list
   void eraseResoureList(uint index) const {
-    amd::ScopedLock lock(lockResources());
+    std::scoped_lock lock(lockResources());
     for (const auto& it : *resourceList_) {
       it->eraseGpuEvents(index);
     }
@@ -745,14 +727,14 @@ class Device : public NullDevice {
   static char* platformObj_;         //!< Memory allocated for PAL platform object
   static Pal::IPlatform* platform_;  //!< Pointer to the PAL platform object
 
-  mutable amd::Monitor lockAsyncOps_;  //!< Lock to serialise all async ops on this device
+  mutable std::recursive_mutex lockAsyncOps_;  //!< Lock to serialise all async ops on this device
   //! Lock to serialise all async ops on initialization heap operation
-  mutable amd::Monitor lockForInitHeap_;
-  mutable amd::Monitor lockPAL_;          //!< Lock to serialise PAL access
-  mutable amd::Monitor vgpusAccess_;      //!< Lock to serialise virtual gpu list access
-  mutable amd::Monitor scratchAlloc_;     //!< Lock to serialise scratch allocation
-  mutable amd::Monitor mapCacheOps_;      //!< Lock to serialise cache for the map resources
-  mutable amd::Monitor lockResourceOps_;  //!< Lock to serialise resource access
+  mutable std::recursive_mutex lockForInitHeap_;
+  mutable std::recursive_mutex lockPAL_;          //!< Lock to serialise PAL access
+  mutable std::recursive_mutex vgpusAccess_;      //!< Lock to serialise virtual gpu list access
+  mutable std::recursive_mutex scratchAlloc_;     //!< Lock to serialise scratch allocation
+  mutable std::recursive_mutex mapCacheOps_;      //!< Lock to serialise cache for the map resources
+  mutable std::recursive_mutex lockResourceOps_;  //!< Lock to serialise resource access
   mutable std::mutex lockAllowAccess_;    //!< To serialize allow_access calls
   XferBuffers* xferRead_;                 //!< Transfer buffers read
   std::vector<amd::Memory*>* mapCache_;   //!< Map cache info structure

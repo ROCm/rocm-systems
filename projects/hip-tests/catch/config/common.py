@@ -45,7 +45,7 @@ def load_definitions(config_path):
     Returns:
         Dict with 'definitions' and 'cmd_options' keys
     """
-    definitions_path = os.path.join(config_path, "configs", "definitions.yaml")
+    definitions_path = os.path.join(config_path, "definitions.yaml")
     with open(definitions_path) as file:
         return yaml.safe_load(file)
 
@@ -59,13 +59,12 @@ def load_config(file_path, definitions_text):
     return yaml.safe_load(combined)
 
 
-def iter_group_configs(config_path):
+def iter_group_configs(configs_path):
     """Yield (group, config) pairs for all unit and non-unit config files.
 
     Iterates unit configs first (sorted alphabetically), then non-unit groups
     in the order defined by NON_UNIT_GROUPS.
     """
-    configs_path = os.path.join(config_path, "configs")
     definitions_path = os.path.join(configs_path, "definitions.yaml")
     with open(definitions_path) as file:
         definitions_text = file.read()

@@ -102,7 +102,7 @@ rocprofiler_add_option(ROCPROFILER_BUILD_DEPRECATED_WARNINGS
                        "Enable warnings for use of deprecated features" OFF ADVANCED)
 
 # In the future, we will do this even with clang-tidy enabled
-foreach(_OPT ROCPROFILER_BUILD_DEVELOPER ROCPROFILER_BUILD_WERROR)
+foreach(_OPT ROCPROFILER_BUILD_WERROR)
     if(ROCPROFILER_BUILD_CI AND NOT ${_OPT})
         message(AUTHOR_WARNING "Forcing ${_OPT}=ON because ROCPROFILER_BUILD_CI=ON")
         set(${_OPT}

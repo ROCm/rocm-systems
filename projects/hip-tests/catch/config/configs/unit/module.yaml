@@ -180,7 +180,7 @@ module:
     # Below test fails in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/215
     disabled: [nvidia_linux, nvidia_windows]
     tags: [load]
-  Unit_hipModuleLoad_basic:
+  Unit_hipModuleUnload_basic:
     <<: *level_2
     tags: [load]
   Unit_hipModuleGetFunctionCount_Functional:
@@ -310,18 +310,3 @@ module:
   Unit_hipFuncGetAttributes_basic:
     <<: *level_2
     tags: [function]
-  Unit_hipModuleGetLoadingMode_DefaultModeCheck:
-    <<: *level_2
-    tags: [load]
-  Unit_hipModuleGetLoadingMode_EagerModeCheck:
-    <<: *level_2
-    tags: [load]
-  Unit_hipModuleGetLoadingMode_EagerModeKernel:
-    <<: *level_2
-    tags: [load]
-  Unit_hipModuleGetLoadingMode_LazyModeKernel:
-    <<: *level_2
-    tags: [load]
-  Unit_hipModuleGetLoadingMode_MultiThread:
-    <<: *level_2
-    tags: [load]
