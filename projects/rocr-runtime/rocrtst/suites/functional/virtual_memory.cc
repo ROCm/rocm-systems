@@ -602,9 +602,10 @@ void VirtMemoryTestBasic::CPUAccessToGPUMemoryTest(hsa_agent_t cpuAgent, hsa_age
   }
   std::cout << "    CPU have read & write to GPU memory successfully" << std::endl;
 
-  ASSERT_SUCCESS(hsa_amd_vmem_unmap(dev_data, max_alloc_size));
-  ASSERT_SUCCESS(hsa_amd_vmem_handle_release(mem_handle_dev));
-  ASSERT_SUCCESS(hsa_amd_vmem_address_free(reinterpret_cast<void*>(dev_data), max_alloc_size));
+  // Cleanup
+  EXPECT_SUCCESS(hsa_amd_vmem_unmap(dev_data, max_alloc_size));
+  EXPECT_SUCCESS(hsa_amd_vmem_handle_release(mem_handle_dev));
+  EXPECT_SUCCESS(hsa_amd_vmem_address_free(reinterpret_cast<void*>(dev_data), max_alloc_size));
   free(host_data);
 }
 
@@ -829,11 +830,12 @@ void VirtMemoryTestBasic::GPUAccessToCPUMemoryTest(hsa_agent_t cpuAgent, hsa_age
     std::cout << "    GPU has written to system memory successfully" << std::endl;
   }
 
-  ASSERT_SUCCESS(hsa_amd_vmem_unmap(dev_data, sizeof(*dev_data)));
-  ASSERT_SUCCESS(hsa_amd_vmem_handle_release(mem_handle));
+  // Cleanup
+  EXPECT_SUCCESS(hsa_amd_vmem_unmap(dev_data, sizeof(*dev_data)));
+  EXPECT_SUCCESS(hsa_amd_vmem_handle_release(mem_handle));
 
   if (dev_data) {
-    ASSERT_SUCCESS(hsa_amd_vmem_address_free(dev_data, sizeof(*dev_data)));
+    EXPECT_SUCCESS(hsa_amd_vmem_address_free(dev_data, sizeof(*dev_data)));
   }
 
   if (host_data) hsa_memory_free(host_data);
@@ -1083,11 +1085,12 @@ void VirtMemoryTestBasic::GPUAccessToGPUMemoryTest(hsa_agent_t cpuAgent, hsa_age
     std::cout << "    GPU has written to system memory successfully" << std::endl;
   }
 
-  ASSERT_SUCCESS(hsa_amd_vmem_unmap(dev_data, sizeof(*dev_data)));
-  ASSERT_SUCCESS(hsa_amd_vmem_handle_release(mem_handle));
+  // Cleanup
+  EXPECT_SUCCESS(hsa_amd_vmem_unmap(dev_data, sizeof(*dev_data)));
+  EXPECT_SUCCESS(hsa_amd_vmem_handle_release(mem_handle));
 
   if (dev_data) {
-    ASSERT_SUCCESS(hsa_amd_vmem_address_free(dev_data, sizeof(*dev_data)));
+    EXPECT_SUCCESS(hsa_amd_vmem_address_free(dev_data, sizeof(*dev_data)));
   }
 
   if (host_data) hsa_memory_free(host_data);
