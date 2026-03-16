@@ -58,11 +58,12 @@
 #include "library/components/shmem_gotcha.hpp"
 #include "library/components/ucx_gotcha.hpp"
 #include "library/components/vaapi_gotcha.hpp"
-#include "library/control.hpp"
 #include "library/coverage.hpp"
 #include "library/kokkosp.hpp"
 #include "library/process_sampler.hpp"
 #include "library/rocprofiler-sdk.hpp"
+#include "library/rocprofiler-sdk/roctx_client.hpp"
+#include "library/rocprofiler-sdk/trace_control.hpp"
 #include "library/runtime.hpp"
 #include "library/sampling.hpp"
 #include "library/thread_data.hpp"
@@ -691,48 +692,26 @@ rocprofsys_init_tooling_hidden(void)
             trace_cache::get_buffer_storage().start(getpid());
         }
 
-        // Setup trace controller (marker watch for region filtering and pause/resume)
-        auto trace_region_str = config::get_trace_region();
-        if(!trace_region_str.empty())
+        auto trace_controller = rocprofiler_sdk::get_trace_controller();
+        if(trace_controller)
         {
-            static auto g_trace_controller =
-                std::make_unique<control::trace_controller>(trace_region_str);
-
-            // Pass trace controller to rocprofiler_sdk (it will call setup() from
-            // tool_init)
-            rocprofiler_sdk::set_trace_controller(g_trace_controller.get());
-
-            // Register rocprofiler-sdk context control callbacks.
-            // On start: flush counter tracks to zero (marks end of pause), then start
-            // contexts. On stop: stop contexts, then flush counter tracks to zero (marks
-            // start of pause). This creates visual consistency - counter tracks show
-            // zeros during pause like other tracks show gaps.
             auto start_callback = []() {
-                rocprofiler_sdk::flush_counter_tracks_to_zero(0);
-                rocprofiler_sdk::start_main_contexts();
+                rocprofiler_sdk::resume();
                 sampling::resume();
                 resume_gotcha_components();
                 rocprofsys::kokkosp::resume();
                 invoke_external_resume_callbacks();
             };
             auto stop_callback = []() {
-                rocprofiler_sdk::stop_main_contexts();
-                rocprofiler_sdk::flush_counter_tracks_to_zero(0);
+                rocprofiler_sdk::pause();
                 sampling::pause();
                 pause_gotcha_components();
                 rocprofsys::kokkosp::pause();
                 invoke_external_pause_callbacks();
             };
-            g_trace_controller->register_region_start_callback(start_callback);
-            g_trace_controller->register_region_stop_callback(stop_callback);
-            stop_callback();
+            trace_controller->register_region_start_callback(start_callback);
+            trace_controller->register_region_stop_callback(stop_callback);
         }
-        // TODO: Uncomment this when we have config option to do selective tracing
-        // if(get_selective tracing())
-        // {
-        // LOG_INFO("Pausing gotcha components...");
-        // pause_gotcha_components();
-        // }
 
         set_state(State::Active);  // set to active as very last operation
     } };

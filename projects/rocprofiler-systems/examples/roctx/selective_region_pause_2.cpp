@@ -16,7 +16,7 @@
 //     CodeBlock_A                               (profiled)
 //     CodeBlock_B                               (profiled)
 //     roctxProfilerResume                       (no valid pause to undo — no-op)
-//     CodeBlock_C                               (profiled)
+//     as                               (profiled)
 //   roctxRangeStop("Region 1")                  (region ends — profiling stops)
 //   CodeBlock_D                                 (outside region — not profiled)
 //
@@ -90,7 +90,6 @@ main()
     roctx_thread_id_t tid{};
     roctxGetThreadId(&tid);
 
-    // Pause outside region (not valid with region filter)
     roctxProfilerPause(tid);
 
     // Outside region

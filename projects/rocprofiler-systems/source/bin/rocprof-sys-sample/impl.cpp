@@ -921,6 +921,16 @@ PROFILING WORKFLOW:
         })
         .choices(clock_id_choices.first)
         .choice_aliases(clock_id_choices.second);
+    parser
+        .add_argument({ "--selective-tracing" },
+                      "Enable selective tracing by filtering rocTx Regions provided "
+                      "with  ROCPROFSYS_TRACE_REGION")
+        .max_count(1)
+        .action([&](parser_t& p) {
+            rocprofsys::common::update_env(
+                _env, "ROCPROFSYS_SELECTIVE_TRACING", p.get<bool>("selective-tracing"),
+                update_mode::REPLACE, ":", updated_envs, original_envs);
+        });
 
     parser.start_group("PROFILE OPTIONS",
                        "Specific options controlling profiling (i.e. deterministic "
@@ -973,7 +983,8 @@ PROFILING WORKFLOW:
     parser.start_group(
         "HOST/DEVICE (PROCESS SAMPLING) OPTIONS",
         "Process sampling is background measurements for resources available to the "
-        "entire process. These samples are not tied to specific lines/regions of code");
+        "entire process. These samples are not tied to specific lines/regions of "
+        "code");
     parser
         .add_argument({ "--process-freq" },
                       "Set the default host/device sampling frequency "
@@ -1054,8 +1065,10 @@ PROFILING WORKFLOW:
         .add_argument(
             { "--sampling-wait" },
             "Set the default wait time (i.e. delay) before taking first sample "
-            "(in seconds). This delay time is based on the clock of the sampler, i.e., a "
-            "delay of 1 second for CPU-clock sampler may not equal 1 second of realtime")
+            "(in seconds). This delay time is based on the clock of the sampler, "
+            "i.e., a "
+            "delay of 1 second for CPU-clock sampler may not equal 1 second of "
+            "realtime")
         .count(1)
         .action([&](parser_t& p) {
             rocprofsys::common::update_env(
