@@ -33,14 +33,14 @@ jobs:
       - name: "Checking out repository for rocm-systems"
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
-          ref: 93bc01937c91e66f680c0ceba792eb44ebaeba90 # 1016 build
+          ref: 93bc01937c91e66f680c0ceba792eb44ebaeba90 # 1021 build 
 
       - name: Checkout TheRock repository
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: 27b0755840011f7749723ca7f151d5f996b4bbc7 # rocshmem commit
+          ref: a5ed8195057dbd8f06888236b1c78ccf41ed326e # 2026-03-11 commit
 
       - name: Install python deps
         run: |
@@ -72,6 +72,7 @@ jobs:
           amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
           package_version: ADHOCBUILD
           extra_cmake_options: ${{ inputs.extra_cmake_options }}
+          extra_cmake_options: "-DTHEROCK_ROCM_SYSTEMS_SOURCE_DIR=../ ${{ inputs.extra_cmake_options }}"
           BUILD_DIR: build
         run: |
           python3 ./TheRock/build_tools/github_actions/build_configure.py
