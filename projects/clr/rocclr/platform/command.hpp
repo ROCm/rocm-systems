@@ -246,16 +246,22 @@ union CopyMetadata {
     kSrcAccessOrderAny = 2             //!< Source access can be out of stream order
   };
 
-  //! Copy operation type for batch copies (maps to hipMemcpyFlagsExt op bits)
-  enum CopyOpType { kCopyOpLinear = 0, kCopyOpBroadcast = 1, kCopyOpSwap = 2, kCopyOpIndirect = 3 };
+  enum CopyOpType {
+    kCopyOpLinear          = 0,
+    kCopyOpBroadcast       = 1,
+    kCopyOpSwap            = 2,
+    kCopyOpIndirectSrc     = 3,
+    kCopyOpIndirectDst     = 4,
+    kCopyOpIndirectSrcDst  = 5,
+  };
 
   struct {
     uint32_t isAsync_ : 1;
     uint32_t copyEnginePreference_ : 2;
     uint32_t srcAccessOrder_ : 2;       //!< Source access ordering for batch copies
     uint32_t preferCE_ : 1;             //!< Prefer compute engine over SDMA
-    uint32_t copyOpType_ : 2;           //!< Operation type (CopyOpType)
-    uint32_t reserved_ : 24;            //!< Reserved for future use
+    uint32_t copyOpType_ : 3;           //!< Operation type (CopyOpType)
+    uint32_t reserved_ : 23;            //!< Reserved for future use
   };
   uint32_t flags_;
   CopyMetadata() : flags_(0) {}
@@ -1402,10 +1408,10 @@ class NDRangeKernelCommand : public Command {
   }
 
   // Capture kernel parameters and validate
-  int32_t captureAndValidate();
+  int32_t captureOpenCLArgsAndValidate();
 
   // Allocate, capture and set kernel parameters
-  int32_t AllocCaptureSetValidate(void** kernelParams, address kernArgs, size_t kernArgsSize);
+  int32_t captureHIPArgsAndValidate(void** kernelParams, address kernArgs, size_t kernArgsSize);
 };
 
 class NativeFnCommand : public Command {

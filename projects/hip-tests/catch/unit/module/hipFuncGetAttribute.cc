@@ -32,7 +32,7 @@ static hipModule_t GetModule() {
   return mg.module();
 }
 
-TEST_CASE("Unit_hipFuncGetAttribute_Positive_Basic") {
+TEST_CASE(Unit_hipFuncGetAttribute_Positive_Basic) {
   hipFunction_t kernel = GetKernel(GetModule(), "GlobalKernel");
 
   int value;
@@ -70,7 +70,7 @@ TEST_CASE("Unit_hipFuncGetAttribute_Positive_Basic") {
   }
 }
 
-TEST_CASE("Unit_hipFuncGetAttribute_Negative_Parameters") {
+TEST_CASE(Unit_hipFuncGetAttribute_Negative_Parameters) {
   hipFunction_t kernel = GetKernel(GetModule(), "GlobalKernel");
 
   int value;

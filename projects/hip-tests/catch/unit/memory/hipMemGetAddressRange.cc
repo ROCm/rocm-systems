@@ -45,7 +45,7 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipMemGetAddressRange_Positive") {
+TEST_CASE(Unit_hipMemGetAddressRange_Positive) {
   hipDeviceptr_t base_ptr;
   size_t mem_size = 0;
   const auto allocation_size = GENERATE(kPageSize / 2, kPageSize, kPageSize * 2);
@@ -100,7 +100,7 @@ TEST_CASE("Unit_hipMemGetAddressRange_Positive") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipMemGetAddressRange_Negative") {
+TEST_CASE(Unit_hipMemGetAddressRange_Negative) {
   hipDeviceptr_t base_ptr;
   size_t mem_size = 0;
   const auto allocation_size = kPageSize / 2;

@@ -58,94 +58,9 @@ stream:
     <<: *level_2
     # Below tests fail in stress test on 30/06/23
     disabled: [amd_wsl]
-  Unit_hipStreamValue_Wait32_Blocking_Mask_Gte:
-    <<: *level_2
-    # SWDEV-347670 - blocking tests have TDR, causing hangs
-    disabled: [amd_windows, amd_wsl]
-  Unit_hipStreamValue_Wait32_NonBlocking_Mask_Gte: *level_2
-  Unit_hipStreamValue_Wait32_Blocking_Mask_Eq_1:
-    <<: *level_2
-    # (amd_windows) SWDEV-347670 - blocking tests have TDR, causing hangs
-    # (amd_wsl) Below tests fail in stress test on 30/06/23
-    disabled: [amd_windows, amd_wsl]
-  Unit_hipStreamValue_Wait32_NonBlocking_Mask_Eq_1: *level_2
-  Unit_hipStreamValue_Wait32_Blocking_Mask_Eq_2:
-    <<: *level_2
-    # SWDEV-347670 - blocking tests have TDR, causing hangs
-    disabled: [amd_windows, amd_wsl]
-  Unit_hipStreamValue_Wait32_NonBlocking_Mask_Eq_2: *level_2
-  Unit_hipStreamValue_Wait32_Blocking_Mask_And:
-    <<: *level_2
-    # SWDEV-347670 - blocking tests have TDR, causing hangs
-    disabled: [amd_windows, amd_wsl]
-  Unit_hipStreamValue_Wait32_NonBlocking_Mask_And: *level_2
-  Unit_hipStreamValue_Wait32_Blocking_NoMask_Eq:
-    <<: *level_2
-    # SWDEV-347670 - blocking tests have TDR, causing hangs
-    disabled: [amd_windows, amd_wsl]
-  Unit_hipStreamValue_Wait32_NonBlocking_NoMask_Eq: *level_2
-  Unit_hipStreamValue_Wait32_Blocking_NoMask_Gte:
-    <<: *level_2
-    # SWDEV-347670 - blocking tests have TDR, causing hangs
-    disabled: [amd_windows, amd_wsl]
-  Unit_hipStreamValue_Wait32_NonBlocking_NoMask_Gte: *level_2
-  Unit_hipStreamValue_Wait32_Blocking_NoMask_And:
-    <<: *level_2
-    # SWDEV-347670 - blocking tests have TDR, causing hangs
-    disabled: [amd_windows, amd_wsl]
-  Unit_hipStreamValue_Wait32_NonBlocking_NoMask_And: *level_2
-  Unit_hipStreamValue_Wait32_Blocking_NoMask_Nor:
-    <<: *level_2
-    # SWDEV-347670 - blocking tests have TDR, causing hangs
-    disabled: [amd_windows, amd_wsl]
-  Unit_hipStreamValue_Wait32_NonBlocking_NoMask_Nor: *level_2
-  Unit_hipStreamValue_Wait64_Blocking_Mask_Gte_1:
-    <<: *level_2
-    # SWDEV-347670 - blocking tests have TDR, causing hangs
-    disabled: [amd_windows, amd_wsl]
-  Unit_hipStreamValue_Wait64_NonBlocking_Mask_Gte_1: *level_2
-  Unit_hipStreamValue_Wait64_Blocking_Mask_Gte_2:
-    <<: *level_2
-    # SWDEV-347670 - blocking tests have TDR, causing hangs
-    disabled: [amd_windows, amd_wsl]
-  Unit_hipStreamValue_Wait64_NonBlocking_Mask_Gte_2: *level_2
-  Unit_hipStreamValue_Wait64_Blocking_Mask_Eq_1:
-    <<: *level_2
-    # SWDEV-347670 - blocking tests have TDR, causing hangs
-    disabled: [amd_windows, amd_wsl]
-  Unit_hipStreamValue_Wait64_NonBlocking_Mask_Eq_1: *level_2
-  Unit_hipStreamValue_Wait64_Blocking_Mask_Eq_2:
-    <<: *level_2
-    # SWDEV-347670 - blocking tests have TDR, causing hangs
-    disabled: [amd_windows, amd_wsl]
-  Unit_hipStreamValue_Wait64_NonBlocking_Mask_Eq_2: *level_2
-  Unit_hipStreamValue_Wait64_Blocking_Mask_And:
-    <<: *level_2
-    # SWDEV-347670 - blocking tests have TDR, causing hangs
-    disabled: [amd_windows, amd_wsl]
-  Unit_hipStreamValue_Wait64_NonBlocking_Mask_And: *level_2
-  Unit_hipStreamValue_Wait64_Blocking_NoMask_Gte:
-    <<: *level_2
-    # SWDEV-347670 - blocking tests have TDR, causing hangs
-    disabled: [amd_windows, amd_wsl]
-  Unit_hipStreamValue_Wait64_NonBlocking_NoMask_Gte: *level_2
-  Unit_hipStreamValue_Wait64_Blocking_NoMask_Eq:
-    <<: *level_2
-    # SWDEV-347670 - blocking tests have TDR, causing hangs
-    disabled: [amd_windows, amd_wsl]
-  Unit_hipStreamValue_Wait64_NonBlocking_NoMask_Eq: *level_2
-  Unit_hipStreamValue_Wait64_Blocking_NoMask_And:
-    <<: *level_2
-    # SWDEV-347670 - blocking tests have TDR, causing hangs
-    disabled: [amd_windows, amd_wsl]
-  Unit_hipStreamValue_Wait64_NonBlocking_NoMask_And: *level_2
-  Unit_hipStreamValue_Wait64_Blocking_NoMask_Nor:
-    <<: *level_2
-    disabled: [amd_windows, amd_wsl]
-  Unit_hipStreamValue_Wait64_NonBlocking_NoMask_Nor: *level_2
+  Unit_hipStreamValue_Wait_Blocking: *level_2
   Unit_hipStreamValue_Negative_InvalidMemory: *level_2
-  Unit_hipStreamValue_Negative_UninitializedStream: *level_2
-  Unit_hipStreamValue_Negative_InvalidFlag: *level_2
+  Unit_hipStreamValue_Negative_StreamAndFlag: *level_2
   Unit_hipStreamWriteValue_Default: *level_2
   Unit_hipStreamWaitValue_Default: *level_2
   Unit_hipStreamSynchronize_EmptyStream: *level_2
@@ -302,5 +217,4 @@ stream:
   Unit_hipStreamCopyAttributes_Basic: *level_2
   Unit_hipStreamCopyAttributes_Negative: *level_2
   Unit_hipStreamCopyAttributes_WithAllSyncPolicyValues: *level_2
-  Unit_hipStreamValue_Negative_StreamAndFlag: *level_2
   Unit_hipStreamValue_Wait_Blocking: *level_2

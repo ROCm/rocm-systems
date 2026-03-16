@@ -177,7 +177,7 @@ bool GraphModuleLaunchKernel::extModuleKernelExecutionMatmulwithStreamCapture(
   return testStatus;
 }
 
-TEST_CASE("Unit_hipStreamCapture_ExtModuleLaunchKernel") {
+TEST_CASE(Unit_hipStreamCapture_ExtModuleLaunchKernel) {
   struct stat fileStat;
   if (stat(GraphModuleLaunchKernel::fileName, &fileStat) || !(fileStat.st_mode & S_IFREG)) {
     FAIL("module file " << GraphModuleLaunchKernel::fileName << " doesn't exist! aborted! \n"
