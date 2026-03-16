@@ -29,33 +29,31 @@
 
 #include <spdlog/fmt/ranges.h>
 
-#if defined(ROCPROFSYS_USE_ROCM) && ROCPROFSYS_USE_ROCM > 0
+#include <timemory/defines.h>
+#include <timemory/utility/demangle.hpp>
 
-#    include <timemory/defines.h>
-#    include <timemory/utility/demangle.hpp>
+#include <rocprofiler-sdk/agent.h>
+#include <rocprofiler-sdk/cxx/name_info.hpp>
+#include <rocprofiler-sdk/fwd.h>
 
-#    include <rocprofiler-sdk/agent.h>
-#    include <rocprofiler-sdk/cxx/name_info.hpp>
-#    include <rocprofiler-sdk/fwd.h>
+#include <algorithm>
+#include <cstdint>
+#include <set>
+#include <sstream>
+#include <string>
+#include <unordered_set>
+#include <vector>
 
-#    include <algorithm>
-#    include <cstdint>
-#    include <set>
-#    include <sstream>
-#    include <string>
-#    include <unordered_set>
-#    include <vector>
-
-#    define ROCPROFILER_CALL(result)                                                     \
+#define ROCPROFILER_CALL(result)                                                         \
+    {                                                                                    \
+        rocprofiler_status_t CHECKSTATUS = (result);                                     \
+        if(CHECKSTATUS != ROCPROFILER_STATUS_SUCCESS)                                    \
         {                                                                                \
-            rocprofiler_status_t CHECKSTATUS = (result);                                 \
-            if(CHECKSTATUS != ROCPROFILER_STATUS_SUCCESS)                                \
-            {                                                                            \
-                std::string status_msg = rocprofiler_get_status_string(CHECKSTATUS);     \
-                LOG_WARNING("rocprofiler-sdk call [{}] failed with error code {} :: {}", \
-                            #result, status_msg);                                        \
-            }                                                                            \
-        }
+            std::string status_msg = rocprofiler_get_status_string(CHECKSTATUS);         \
+            LOG_WARNING("rocprofiler-sdk call [{}] failed with error code {} :: {}",     \
+                        #result, status_msg);                                            \
+        }                                                                                \
+    }
 
 namespace rocprofsys
 {
@@ -74,20 +72,19 @@ get_setting_name(std::string _v)
     return _v;
 }
 
-#    define ROCPROFSYS_CONFIG_SETTING(TYPE, ENV_NAME, DESCRIPTION, INITIAL_VALUE, ...)   \
-        [&]() {                                                                          \
-            auto _ret = _config->insert<TYPE, TYPE>(                                     \
-                ENV_NAME, get_setting_name(ENV_NAME), DESCRIPTION,                       \
-                TYPE{ INITIAL_VALUE },                                                   \
-                std::set<std::string>{ "custom", "rocprofsys", "librocprof-sys",         \
-                                       __VA_ARGS__ });                                   \
-            if(!_ret.second)                                                             \
-            {                                                                            \
-                LOG_WARNING("Duplicate setting: {} / {}", get_setting_name(ENV_NAME),    \
-                            ENV_NAME);                                                   \
-            }                                                                            \
-            return _config->find(ENV_NAME)->second;                                      \
-        }()
+#define ROCPROFSYS_CONFIG_SETTING(TYPE, ENV_NAME, DESCRIPTION, INITIAL_VALUE, ...)       \
+    [&]() {                                                                              \
+        auto _ret = _config->insert<TYPE, TYPE>(                                         \
+            ENV_NAME, get_setting_name(ENV_NAME), DESCRIPTION, TYPE{ INITIAL_VALUE },    \
+            std::set<std::string>{ "custom", "rocprofsys", "librocprof-sys",             \
+                                   __VA_ARGS__ });                                       \
+        if(!_ret.second)                                                                 \
+        {                                                                                \
+            LOG_WARNING("Duplicate setting: {} / {}", get_setting_name(ENV_NAME),        \
+                        ENV_NAME);                                                       \
+        }                                                                                \
+        return _config->find(ENV_NAME)->second;                                          \
+    }()
 
 template <typename Tp>
 std::string
@@ -351,9 +348,9 @@ config_settings(const std::shared_ptr<settings>& _config)
     auto _domain_defaults = std::string{ "hip_runtime_api,marker_api,kernel_dispatch,"
                                          "memory_copy,scratch_memory" };
 
-#    if(ROCPROFILER_VERSION < 10000)
+#if(ROCPROFILER_VERSION < 10000)
     _domain_defaults.append(",page_migration");
-#    endif
+#endif
 
     ROCPROFSYS_CONFIG_SETTING(std::string, "ROCPROFSYS_ROCM_DOMAINS", _domain_description,
                               _domain_defaults, "rocm", "rocprofiler-sdk")
@@ -417,7 +414,7 @@ get_callback_domains()
         LOG_WARNING("rocprofiler-sdk version not initialized");
     }
 
-#    if(ROCPROFILER_VERSION >= 600)
+#if(ROCPROFILER_VERSION >= 600)
     if(_version.formatted >= 600)
     {
         // Argument tracing is supported in rocprofiler-sdk 0.6.0 and later
@@ -425,13 +422,13 @@ get_callback_domains()
         supported.emplace(ROCPROFILER_CALLBACK_TRACING_OMPT);
         supported.emplace(ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API);
     }
-#    endif
-#    if(ROCPROFILER_VERSION >= 700)
+#endif
+#if(ROCPROFILER_VERSION >= 700)
     if(_version.formatted >= 700)
     {
         supported.emplace(ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API);
     }
-#    endif
+#endif
 
     auto _data = std::unordered_set<rocprofiler_callback_tracing_kind_t>{};
     auto _domains =
@@ -445,13 +442,13 @@ get_callback_domains()
         _data.emplace(ROCPROFILER_CALLBACK_TRACING_RCCL_API);
     }
 
-#    if ROCPROFILER_VERSION >= 600
+#if ROCPROFILER_VERSION >= 600
     if(config::get_use_ompt() && _version.formatted >= 600)
     {
         // Translate some configuration settings to rocprofiler domains
         _data.emplace(ROCPROFILER_CALLBACK_TRACING_OMPT);
     }
-#    endif
+#endif
 
     // Check that the domains are valid
     const auto valid_choices =
@@ -513,12 +510,12 @@ get_buffered_domains()
     const auto supported = std::unordered_set<rocprofiler_buffer_tracing_kind_t>{
         ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
         ROCPROFILER_BUFFER_TRACING_MEMORY_COPY,
-#    if(ROCPROFILER_VERSION >= 600)
+#if(ROCPROFILER_VERSION >= 600)
         ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION,
-#    endif
-#    if(ROCPROFILER_VERSION < 10000)
+#endif
+#if(ROCPROFILER_VERSION < 10000)
         ROCPROFILER_BUFFER_TRACING_PAGE_MIGRATION,
-#    endif
+#endif
         ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY,
     };
 
@@ -561,12 +558,12 @@ get_buffered_domains()
         {
             _data.emplace(ROCPROFILER_BUFFER_TRACING_MARKER_CORE_API);
         }
-#    if(ROCPROFILER_VERSION >= 600)
+#if(ROCPROFILER_VERSION >= 600)
         else if(itr == "memory_allocation")
         {
             _data.emplace(ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION);
         }
-#    endif
+#endif
         else if(itr == "memory_copy")
         {
             _data.emplace(ROCPROFILER_BUFFER_TRACING_MEMORY_COPY);
@@ -688,24 +685,3 @@ get_backtrace_operations(rocprofiler_buffer_tracing_kind_t kindv)
 }
 }  // namespace rocprofiler_sdk
 }  // namespace rocprofsys
-
-#else
-
-namespace rocprofsys
-{
-namespace rocprofiler_sdk
-{
-void
-config_settings(const std::shared_ptr<settings>&)
-{}
-
-version_info&
-get_version()
-{
-    static auto _version = version_info{ 0 };
-    return _version;
-}
-}  // namespace rocprofiler_sdk
-}  // namespace rocprofsys
-
-#endif

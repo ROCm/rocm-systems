@@ -107,9 +107,8 @@ set(go_amd_smi_install_headers smiwrapper/goamdsmi.h smiwrapper/amdsmi_go_shim.h
 ## Add the install directives for the runtime library.
 install(
     TARGETS ${GOAMDSMI_SHIM_TARGET}
-    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT ${GOAMDSMI_SHIM_COMPONENT})
-install(
-    FILES ${go_amd_smi_install_headers}
-    DESTINATION include)
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT ${GOAMDSMI_SHIM_COMPONENT}
+)
+install(FILES ${go_amd_smi_install_headers} DESTINATION include)
 
 include_directories(${go_amd_smi_includes})

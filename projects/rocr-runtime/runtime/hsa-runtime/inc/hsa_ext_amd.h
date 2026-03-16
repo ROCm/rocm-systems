@@ -66,6 +66,7 @@
  * - 1.13 - hsa_amd_pointer_info: Added new registered field to hsa_amd_pointer_info_t
  * - 1.14 - hsa_amd_ais_file_write, hsa_amd_ais_file_read
  * - 1.15 - hsa_amd_register_system_event_handler: HSA_AMD_SYSTEM_SHUTDOWN
+ * - 1.16 - hsa_amd_counted_queue APIs
  * - 1.17 - hsa_amd_memory_async_batch_copy
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
@@ -1818,7 +1819,7 @@ hsa_status_t HSA_API
  * @brief Type of memory copy operation within a batch.
  */
 typedef enum {
-  HSA_AMD_MEMORY_COPY_OP_LINEAR               = 0,  /**< Default: linear copy via copy engine */
+  HSA_AMD_MEMORY_COPY_OP_LINEAR               = 0,  /**< Linear copy (num_dsts==0: single; num_dsts>0: multi) */
   HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST     = 1,  /**< Linear broadcast: single src -> multiple dsts */
   HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP          = 2,  /**< Linear swap: exchange contents of src and dst */
   HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC     = 3,  /**< Source address resolved via indirection */
@@ -1899,11 +1900,19 @@ typedef enum {
  *
  * Field usage per operation type:
  *
- * LINEAR (default):
+ * LINEAR (default, single copy when num_dsts == 0):
  *   src, src_agent  -- source pointer and agent
  *   dst, dst_agent  -- destination pointer and agent
  *   size            -- copy size in bytes
- *   num_dsts        -- must be 0
+ *   num_dsts        -- 0
+ *
+ * LINEAR (multi-copy when num_dsts > 0, one signal for all entries):
+ *   src_list         -- caller-owned array of num_dsts source pointers
+ *   src_agent        -- common source agent (must be GPU)
+ *   dst_list         -- caller-owned array of num_dsts destination pointers
+ *   dst_agent_list   -- caller-owned array of num_dsts destination agents
+ *   size_list        -- caller-owned array of num_dsts copy sizes in bytes
+ *   num_dsts         -- number of entries (>= 1, <= 1024)
  *
  * LINEAR_BROADCAST (single source -> multiple destinations):
  *   src, src_agent    -- source pointer and agent (must be GPU)
@@ -1940,18 +1949,18 @@ typedef enum {
  *   num_dsts        -- must be 0
  *
  * Future-proofing unions (reserved, must not be used):
- *   src_list, src_agent_list  -- reserved for future gather operations
- *   unused_size               -- must be 0 for non-SWAP operations
+ *   src_agent_list           -- reserved for future gather operations
+ *   unused_size              -- must be 0 for non-SWAP types; for LINEAR multi, use size_list instead
  */
 typedef struct hsa_amd_memory_copy_op_s {
   uint16_t version;                       /**< Struct version. Must be HSA_AMD_MEMORY_COPY_OP_VERSION. */
   uint16_t type;                          /**< Operation type (hsa_amd_memory_copy_op_type_t) */
-  uint16_t num_dsts;                      /**< BROADCAST: number of destinations; others: must be 0 */
+  uint16_t num_dsts;                      /**< LINEAR multi / BROADCAST: number of entries; others: must be 0 */
   uint16_t traffic_class;                 /**< QoS traffic class. 0 = default/unspecified. */
   hsa_signal_t completion_signal;         /**< Completion signal for this operation */
   union {
     void* src;                            /**< Source pointer (or void** for INDIRECT_SRC/SRCDST) */
-    void** src_list;                      /**< Reserved for future use */
+    void** src_list;                      /**< LINEAR multi: caller-owned array of num_dsts source pointers */
   };
   union {
     hsa_agent_t src_agent;                /**< Source agent */
@@ -1959,20 +1968,24 @@ typedef struct hsa_amd_memory_copy_op_s {
   };
   union {
     hsa_agent_t dst_agent;                /**< Destination agent (single-dst types) */
-    hsa_agent_t* dst_agent_list;          /**< BROADCAST: caller-owned array of num_dsts destination agents */
+    hsa_agent_t* dst_agent_list;          /**< LINEAR multi / BROADCAST: caller-owned array of num_dsts destination agents */
   };
   union {
     void* dst;                            /**< Destination pointer (or void** for INDIRECT_DST/SRCDST) */
-    void** dst_list;                      /**< BROADCAST: caller-owned array of num_dsts destination pointers */
+    void** dst_list;                      /**< LINEAR multi / BROADCAST: caller-owned array of num_dsts destination pointers */
   };
   union {
     struct {
-      size_t size;                        /**< Copy size in bytes (non-SWAP types) */
-      size_t unused_size;                 /**< Must be 0 for non-SWAP types */
+      size_t size;                        /**< Copy size in bytes (LINEAR single / BROADCAST / INDIRECT) */
+      size_t unused_size;                 /**< Must be 0 for non-SWAP types; unused for LINEAR multi */
     };
     struct {
       size_t src_size;                    /**< SWAP: source region size in bytes */
       size_t dst_size;                    /**< SWAP: destination region size in bytes */
+    };
+    struct {
+      size_t* size_list;                  /**< LINEAR multi: caller-owned array of num_dsts copy sizes */
+      size_t reserved0;                   /**< Must be 0 for LINEAR multi */
     };
   };
   /** Wait-before-copy. Set to {0} to disable. */
@@ -1992,7 +2005,7 @@ typedef struct hsa_amd_memory_copy_op_s {
     void*    addr;                        /**< Target address for atomic (NULL = no signal) */
     uint64_t data;                        /**< Data value for the atomic operation */
   } signal;                               /**< Signal-after-copy descriptor */
-  uint64_t reserved[1];                   /**< Reserved for future use. Must be zero. */
+  uint64_t reserved1[1];                  /**< Reserved for future use. Must be zero. */
 } hsa_amd_memory_copy_op_t;
 
 /**

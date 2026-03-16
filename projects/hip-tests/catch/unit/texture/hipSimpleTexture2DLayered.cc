@@ -58,7 +58,7 @@ __global__ void simpleKernelLayered2DArray(hipTextureObject_t tex, TestType* out
  *  - Textures supported on device
  *  - HIP_VERSION >= 6.0
  */
-TEMPLATE_TEST_CASE("Unit_Layered2DTexture_Check_HostBufferToFromLayered2DArray", "", char,
+TEMPLATE_TEST_CASE(Unit_Layered2DTexture_Check_HostBufferToFromLayered2DArray, char,
                    unsigned char, short, ushort, int, uint, float, char1, uchar1, short1, ushort1,
                    int1, uint1, float1, char2, uchar2, short2, ushort2, int2, uint2, float2, char4,
                    uchar4, short4, ushort4, int4, uint4, float4) {
@@ -204,7 +204,7 @@ TEMPLATE_TEST_CASE("Unit_Layered2DTexture_Check_HostBufferToFromLayered2DArray",
  *  - Textures supported on device
  *  - HIP_VERSION >= 6.0
  */
-TEMPLATE_TEST_CASE("Unit_Layered2DTexture_Check_DeviceBufferToFromLayered2DArray", "", char,
+TEMPLATE_TEST_CASE(Unit_Layered2DTexture_Check_DeviceBufferToFromLayered2DArray, char,
                    unsigned char, short, ushort, int, uint, float, char1, uchar1, short1, ushort1,
                    int1, uint1, float1, char2, uchar2, short2, ushort2, int2, uint2, float2, char4,
                    uchar4, short4, ushort4, int4, uint4, float4) {

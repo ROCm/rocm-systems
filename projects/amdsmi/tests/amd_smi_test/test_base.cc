@@ -20,15 +20,16 @@
  * THE SOFTWARE.
  */
 
-#include <cassert>
-
-#include <iomanip>
+#include "test_base.h"
 
 #include <gtest/gtest.h>
+
+#include <cassert>
+#include <iomanip>
+
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "rocm_smi/rocm_smi_utils.h"
-#include "test_base.h"
 
 static const int kOutputLineLength = 80;
 static const char kLabelDelimiter[] = "####";
@@ -41,20 +42,17 @@ static const char kResultsLabel[] = "TEST RESULTS";
 // This one is used outside this file
 const char kSetupLabel[] = "TEST SETUP";
 
-static bool CheckModule(const std::string &fileName, const std::string &cond) {
+static bool CheckModule(const std::string& fileName, const std::string& cond) {
   std::string state;
   int rc = amd::smi::ReadSysfsStr(fileName, &state);
-  if (!rc && !state.compare(cond))
-      return (true);
+  if (!rc && !state.compare(cond)) return (true);
   return (false);
 }
 
-TestBase::TestBase() : setup_failed_(false) {
-}
+TestBase::TestBase() : setup_failed_(false) {}
 TestBase::~TestBase() = default;
 
-void TestBase::MakeHeaderStr(const char *inStr,
-                                   std::string *outStr) const {
+void TestBase::MakeHeaderStr(const char* inStr, std::string* outStr) const {
   assert(outStr != nullptr);
   assert(inStr != nullptr);
   outStr->clear();
@@ -67,9 +65,7 @@ void TestBase::MakeHeaderStr(const char *inStr,
   }
 }
 
-void TestBase::SetUp(void) {
-  SetUp(AMDSMI_INIT_AMD_GPUS);
-}
+void TestBase::SetUp(void) { SetUp(AMDSMI_INIT_AMD_GPUS); }
 
 void TestBase::SetUp(uint64_t init_flags) {
   std::string label;
@@ -93,18 +89,27 @@ void TestBase::SetUp(uint64_t init_flags) {
     bool found_amdgpu = CheckModule("/sys/module/amdgpu/initstate", "live");
     if (!found_amdgpu) {
       IF_VERB(STANDARD) {
-        std::cerr << "ERROR: Unable to get devices, driver not initialized (amdgpu not found in modules)" << std::endl;
-        std::cerr << "ERROR: Unable to detect any GPU devices, check amdgpu version and module status (sudo modprobe amdgpu)" << std::endl;
+        std::cerr
+            << "ERROR: Unable to get devices, driver not initialized (amdgpu not found in modules)"
+            << std::endl;
+        std::cerr << "ERROR: Unable to detect any GPU devices, check amdgpu version and module "
+                     "status (sudo modprobe amdgpu)"
+                  << std::endl;
       }
     }
 
     // Returns true if amd_hsmp or hsmp_acpi is found in the list of initialized modules
     struct stat buffer;
-    bool found_amd_hsmp = (stat("/dev/hsmp", &buffer)==0);
+    bool found_amd_hsmp = (stat("/dev/hsmp", &buffer) == 0);
     if (!found_amd_hsmp) {
       IF_VERB(STANDARD) {
-        std::cerr << "ERROR: Unable to get devices, driver not initialized (amd_hsmp not found in modules)" << std::endl;
-        std::cerr << "ERROR: Unable to detect any CPU devices, check amd_hsmp (or) hsmp_acpi version and module status (sudo modprobe amd_hsmp (or) sudo modprobe hsmp_acpi)" << std::endl;
+        std::cerr << "ERROR: Unable to get devices, driver not initialized (amd_hsmp not found in "
+                     "modules)"
+                  << std::endl;
+        std::cerr
+            << "ERROR: Unable to detect any CPU devices, check amd_hsmp (or) hsmp_acpi version and "
+               "module status (sudo modprobe amd_hsmp (or) sudo modprobe hsmp_acpi)"
+            << std::endl;
       }
     }
 
@@ -114,7 +119,6 @@ void TestBase::SetUp(uint64_t init_flags) {
     }
   }
   ASSERT_EQ(err, AMDSMI_STATUS_SUCCESS);
-
 
   err = amdsmi_get_socket_handles(&socket_count_, nullptr);
   if (err != AMDSMI_STATUS_SUCCESS) {
@@ -132,25 +136,23 @@ void TestBase::SetUp(uint64_t init_flags) {
 
   // collect devices from sockets
   num_monitor_devs_ = 0;
-  for (uint32_t i=0; i < socket_count_; i++) {
+  for (uint32_t i = 0; i < socket_count_; i++) {
     // Get all devices of the socket
     uint32_t device_count = 0;
-    err = amdsmi_get_processor_handles(sockets_[i],
-            &device_count, nullptr);
+    err = amdsmi_get_processor_handles(sockets_[i], &device_count, nullptr);
     if (err != AMDSMI_STATUS_SUCCESS) {
       setup_failed_ = true;
     }
     ASSERT_EQ(err, AMDSMI_STATUS_SUCCESS);
 
     std::vector<amdsmi_processor_handle> processor_handles(device_count);
-    err = amdsmi_get_processor_handles(sockets_[i],
-            &device_count, &processor_handles[0]);
+    err = amdsmi_get_processor_handles(sockets_[i], &device_count, &processor_handles[0]);
     if (err != AMDSMI_STATUS_SUCCESS) {
       setup_failed_ = true;
     }
     ASSERT_EQ(err, AMDSMI_STATUS_SUCCESS);
     // store the device handles for following tests
-    for (uint32_t j=0; j < device_count; j++) {
+    for (uint32_t j = 0; j < device_count; j++) {
       if (num_monitor_devs_ >= MAX_MONITOR_DEVICES) {
         setup_failed_ = true;
         ASSERT_EQ(AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS, AMDSMI_STATUS_SUCCESS);
@@ -175,38 +177,26 @@ void TestBase::PrintDeviceHeader(amdsmi_processor_handle dv_ind) {
 
   err = smi_amdgpu_get_device_count(&val_ui32);
   CHK_ERR_ASRT(err)
-  IF_VERB(STANDARD) {
-    std::cout << "\t**Total Devices: " << val_ui32 << std::endl;
-  }
+  IF_VERB(STANDARD) { std::cout << "\t**Total Devices: " << val_ui32 << std::endl; }
 
   err = smi_amdgpu_get_device_index(dv_ind, &val_ui32);
   CHK_ERR_ASRT(err)
-  IF_VERB(STANDARD) {
-    std::cout << "\t**AMD SMI Device index: " << val_ui32 << std::endl;
-  }
+  IF_VERB(STANDARD) { std::cout << "\t**AMD SMI Device index: " << val_ui32 << std::endl; }
 
-  IF_VERB(STANDARD) {
-    std::cout << "\t**Device handle: " << dv_ind << std::endl;
-  }
+  IF_VERB(STANDARD) { std::cout << "\t**Device handle: " << dv_ind << std::endl; }
   err = amdsmi_get_gpu_id(dv_ind, &val_ui16);
   if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
-    IF_VERB(STANDARD) {
-      std::cout << "\t**Device ID: N/A" << std::endl;
-    }
+    IF_VERB(STANDARD) { std::cout << "\t**Device ID: N/A" << std::endl; }
     ASSERT_EQ(err, AMDSMI_STATUS_NOT_SUPPORTED);
   } else {
     CHK_ERR_ASRT(err)
-    IF_VERB(STANDARD) {
-      std::cout << "\t**Device ID: 0x" << std::hex << val_ui16 << std::endl;
-    }
+    IF_VERB(STANDARD) { std::cout << "\t**Device ID: 0x" << std::hex << val_ui16 << std::endl; }
   }
 
   amdsmi_board_info_t board_info;
   err = amdsmi_get_gpu_board_info(dv_ind, &board_info);
   CHK_ERR_ASRT(err)
-  IF_VERB(STANDARD) {
-    std::cout << "\t**Device name: " << board_info.product_name  << std::endl;
-  }
+  IF_VERB(STANDARD) { std::cout << "\t**Device name: " << board_info.product_name << std::endl; }
 
   amdsmi_asic_info_t asic_info;
   err = amdsmi_get_gpu_asic_info(dv_ind, &asic_info);
@@ -227,9 +217,9 @@ void TestBase::PrintDeviceHeader(amdsmi_processor_handle dv_ind) {
 
   // Print everything we can get from the ASIC info
   IF_VERB(STANDARD) {
-    std::cout << "\t**Market name: " << asic_info.market_name  << std::endl;
-    std::cout << "\t**ASIC serial: 0x" << std::hex << asic_info.asic_serial  << std::endl;
-    std::cout << "\t**Target GFX Version: gfx" << asic_info.target_graphics_version  << std::endl;
+    std::cout << "\t**Market name: " << asic_info.market_name << std::endl;
+    std::cout << "\t**ASIC serial: 0x" << std::hex << asic_info.asic_serial << std::endl;
+    std::cout << "\t**Target GFX Version: gfx" << asic_info.target_graphics_version << std::endl;
     std::cout << "\t**Device ID: 0x" << std::hex << std::setfill('0') << std::setw(4)
               << asic_info.device_id << std::endl;
     if (checkIfMaxValue(asic_info.num_of_compute_units)) {
@@ -253,15 +243,12 @@ void TestBase::PrintDeviceHeader(amdsmi_processor_handle dv_ind) {
     }
     std::cout << "\t**Vendor ID: 0x" << std::hex << std::setfill('0') << std::setw(4)
               << asic_info.vendor_id << std::endl;
-    std::cout << "\t**Vendor name: " << asic_info.vendor_name
-              << std::endl;
+    std::cout << "\t**Vendor name: " << asic_info.vendor_name << std::endl;
   }
 
   err = amdsmi_get_gpu_revision(dv_ind, &val_ui16);
   if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
-    IF_VERB(STANDARD) {
-      std::cout << "\t**Device Revision ID: N/A" << std::endl;
-    }
+    IF_VERB(STANDARD) { std::cout << "\t**Device Revision ID: N/A" << std::endl; }
     ASSERT_EQ(err, AMDSMI_STATUS_NOT_SUPPORTED);
   } else {
     CHK_ERR_ASRT(err)
@@ -273,9 +260,7 @@ void TestBase::PrintDeviceHeader(amdsmi_processor_handle dv_ind) {
 
   err = amdsmi_get_gpu_subsystem_id(dv_ind, &val_ui16);
   if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
-    IF_VERB(STANDARD) {
-      std::cout << "\t**Subsystem ID: N/A" << std::endl;
-    }
+    IF_VERB(STANDARD) { std::cout << "\t**Subsystem ID: N/A" << std::endl; }
   } else {
     CHK_ERR_ASRT(err)
     IF_VERB(STANDARD) {
@@ -297,8 +282,7 @@ void TestBase::PrintDeviceHeader(amdsmi_processor_handle dv_ind) {
       std::cout << "\t**KFD info: " << std::endl;
       std::cout << "\t\t**GPU ID: " << std::dec << kfd_info.kfd_id << std::endl;
       std::cout << "\t\t**Node ID: " << std::dec << kfd_info.node_id << std::endl;
-      std::cout << "\t\t**Partition ID: "
-                << std::dec << kfd_info.current_partition_id << std::endl;
+      std::cout << "\t\t**Partition ID: " << std::dec << kfd_info.current_partition_id << std::endl;
     }
   }
 }
@@ -331,8 +315,9 @@ void TestBase::DisplayResults(void) const {
 
 void TestBase::DisplayTestInfo(void) {
   IF_VERB(STANDARD) {
-    printf("#########################################"
-                                  "######################################\n");
+    printf(
+        "#########################################"
+        "######################################\n");
 
     std::string label;
     MakeHeaderStr(kTitleLabel, &label);
@@ -359,18 +344,15 @@ void TestBase::set_description(std::string d) {
 }
 
 TestBase::AcceleratorProfileConfig TestBase::getAvailableProfileConfigs(
-                                      uint32_t device_index,
-                                      amdsmi_accelerator_partition_profile_t current_profile,
-                                      amdsmi_accelerator_partition_profile_config_t config,
-                                      bool isVerbose) {
+    uint32_t device_index, amdsmi_accelerator_partition_profile_t current_profile,
+    amdsmi_accelerator_partition_profile_config_t config, bool isVerbose) {
   AcceleratorProfileConfig profile_config = {};
   profile_config.number_of_profiles = config.num_profiles;
   profile_config.original_profile_type = current_profile.profile_type;
   profile_config.original_profile_index = current_profile.profile_index;
-  profile_config.original_profile_type_str =
-    partition_types_map.at(current_profile.profile_type);
-  profile_config.available_profiles = std::vector<amdsmi_accelerator_partition_type_t>(
-    config.num_profiles);
+  profile_config.original_profile_type_str = partition_types_map.at(current_profile.profile_type);
+  profile_config.available_profiles =
+      std::vector<amdsmi_accelerator_partition_type_t>(config.num_profiles);
   profile_config.available_profile_str = std::vector<std::string>(config.num_profiles);
   profile_config.available_profile_indices = std::vector<uint32_t>(config.num_profiles);
   for (uint32_t i = 0; i < config.num_profiles; i++) {
@@ -378,7 +360,7 @@ TestBase::AcceleratorProfileConfig TestBase::getAvailableProfileConfigs(
     profile_config.available_profiles[i] = config.profiles[i].profile_type;
     profile_config.available_profile_str[i].clear();
     profile_config.available_profile_str[i] =
-      partition_types_map.at(config.profiles[i].profile_type);
+        partition_types_map.at(config.profiles[i].profile_type);
     profile_config.available_profile_indices[i] = config.profiles[i].profile_index;
   }
 
@@ -386,12 +368,12 @@ TestBase::AcceleratorProfileConfig TestBase::getAvailableProfileConfigs(
     const uint32_t kMAX_UINT32 = std::numeric_limits<uint32_t>::max();
     std::cout << "\t**[Device #" << device_index << "] Profile Configs: ";
     std::cout << "\n\t\t**Original Profile Index: "
-              << (profile_config.original_profile_index == kMAX_UINT32 ?
-                  "N/A" : std::to_string(profile_config.original_profile_index))
-              << "\n\t\t**Original Profile Type: "
-              << profile_config.original_profile_type_str
-              << "\n\t\t**Original profile: " << profile_config.original_profile_type
-              << " (" << accelerator_types_map.at(profile_config.original_profile_type) << ")"
+              << (profile_config.original_profile_index == kMAX_UINT32
+                      ? "N/A"
+                      : std::to_string(profile_config.original_profile_index))
+              << "\n\t\t**Original Profile Type: " << profile_config.original_profile_type_str
+              << "\n\t\t**Original profile: " << profile_config.original_profile_type << " ("
+              << accelerator_types_map.at(profile_config.original_profile_type) << ")"
               << "\n\t\t**Number of Profiles: " << profile_config.number_of_profiles
               << "\n\t\t**Available_profiles: ";
   }
@@ -402,13 +384,13 @@ TestBase::AcceleratorProfileConfig TestBase::getAvailableProfileConfigs(
     }
 
     if (j + 1 >= profile_config.number_of_profiles) {
-      available_profiles_str += ("\n\t\t\tProfile[profile_index: "
-        + std::to_string(profile_config.available_profile_indices[j])
-        + "]: " + profile_config.available_profile_str[j] + "\n");
+      available_profiles_str += ("\n\t\t\tProfile[profile_index: " +
+                                 std::to_string(profile_config.available_profile_indices[j]) +
+                                 "]: " + profile_config.available_profile_str[j] + "\n");
     } else {
-      available_profiles_str += ("\n\t\t\tProfile[profile_index: "
-        + std::to_string(profile_config.available_profile_indices[j])
-        + "]: " + profile_config.available_profile_str[j] + ", ");
+      available_profiles_str += ("\n\t\t\tProfile[profile_index: " +
+                                 std::to_string(profile_config.available_profile_indices[j]) +
+                                 "]: " + profile_config.available_profile_str[j] + ", ");
     }
   }
   if (isVerbose) {
@@ -434,15 +416,15 @@ uint32_t TestBase::promptNumDevicesToTest(uint32_t current_num_devices) {
     if (input_char >= '0' && input_char <= '9') {
       devices_to_test += input_char;
     } else {
-      std::cout << "Invalid input. Please enter a number between 0 and "
-                << current_num_devices << std::endl;
+      std::cout << "Invalid input. Please enter a number between 0 and " << current_num_devices
+                << std::endl;
     }
   } while (true);
 
   return_value = std::stoi(devices_to_test);
   if (return_value > current_num_devices) {
-    std::cout << "Invalid input. Please enter a number between 0 and "
-              << current_num_devices << std::endl;
+    std::cout << "Invalid input. Please enter a number between 0 and " << current_num_devices
+              << std::endl;
     return 0;
   }
   return return_value;
@@ -475,4 +457,3 @@ std::string TestBase::getResourceType(amdsmi_accelerator_partition_resource_type
   }
   return resource_type_str;
 }
-

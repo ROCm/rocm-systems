@@ -143,7 +143,7 @@ template <typename Func, typename T> void launchThreads(Func f, TestType type) {
   }
 }
 
-TEST_CASE("Unit_hipMemsetAsync_QueueJobsMultithreaded") {
+TEST_CASE(Unit_hipMemsetAsync_QueueJobsMultithreaded) {
   using hipMemsetAsync_t = hipError_t (*)(void*, int, const size_t, hipStream_t);
   using hipMemsetAsyncD8_t =
       hipError_t (*)(hipDeviceptr_t, unsigned char, const size_t, hipStream_t);

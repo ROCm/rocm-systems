@@ -809,6 +809,11 @@ amdcuid_status_t CuidFileGenerator::generate_from_devices(
                     // Format: package:core
                     entry.package_core_id = std::to_string(info.header.fields.cpu.physical_id) + 
                                           ":" + std::to_string(info.header.fields.cpu.core);
+                    // Store device path (unique per logical CPU, needed for SMT)
+                    std::string cpu_device_path;
+                    if (cpu->get_device_path(cpu_device_path) == AMDCUID_STATUS_SUCCESS) {
+                        entry.device_node = cpu_device_path;
+                    }
                 }
                 break;
             }

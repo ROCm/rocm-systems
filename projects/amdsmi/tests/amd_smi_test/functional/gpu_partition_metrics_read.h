@@ -27,7 +27,7 @@
 
 class TestGpuPartitionMetricsRead : public TestBase {
  public:
-    TestGpuPartitionMetricsRead();
+  TestGpuPartitionMetricsRead();
 
   // @Brief: Destructor for test case of TestGpuPartitionMetricsRead
   virtual ~TestGpuPartitionMetricsRead();
