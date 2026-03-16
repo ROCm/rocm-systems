@@ -91,7 +91,7 @@ jobs:
       - name: Report
         #if: ${{ !cancelled() }}
         run: |
-          echo "Test changes"
+          echo "Test change"
           echo "Full SDK du:"
           echo "------------"
           du -h -d 1 build/dist/rocm
