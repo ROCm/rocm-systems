@@ -212,9 +212,7 @@ def build_agent_id_string(agent_index_value, prefix=""):
     else:
         return ""
 
-
-def write_kernel_csv(importData, config) -> None:
-
+def get_kernel_csv_query(config) -> str:
     agent_id = build_agent_id_string(config.agent_index_value)
 
     if config.kernel_rename:
@@ -249,21 +247,19 @@ def write_kernel_csv(importData, config) -> None:
         "grid_z AS Grid_Size_Z",
     ]
 
-    aliased_headers = []
-    for column in select_columns:
-        aliased_headers.append(column)
+    select_clause = ",\n".join(select_columns)
 
-    select_clause = ",\n".join(aliased_headers)
-
-    query = f"""
+    return f"""
         SELECT
             {select_clause}
         FROM "kernels"
         ORDER BY
             guid ASC, start ASC, end DESC
     """
-    write_sql_query_to_csv(importData, config, query, "kernel")
 
+def write_kernel_csv(importData, config) -> None:
+    query = get_kernel_csv_query(config)
+    write_sql_query_to_csv(importData, config, query, "kernel")
 
 def write_memory_copy_csv(importData, config) -> None:
 
@@ -280,14 +276,12 @@ def write_memory_copy_csv(importData, config) -> None:
             {dst_agent_id} AS Destination_Agent_Id,
             stack_id AS Correlation_Id,
             start AS Start_Timestamp,
-            end AS End_Timestamp,
-            (end - start) AS Duration
+            end AS End_Timestamp
         FROM "memory_copies"
         ORDER BY
             guid ASC, start ASC, end DESC
     """
     write_sql_query_to_csv(importData, config, query, "memory_copy")
-
 
 def write_memory_allocation_csv(importData, config) -> None:
 
@@ -311,8 +305,7 @@ def write_memory_allocation_csv(importData, config) -> None:
             '0x' || printf('%016X', address) AS Address,
             stack_id AS Correlation_Id,
             start AS Start_Timestamp,
-            end AS End_Timestamp,
-            (end - start) AS Duration
+            end AS End_Timestamp
         FROM "memory_allocations"
         ORDER BY
             guid ASC, start ASC, end DESC
@@ -344,8 +337,7 @@ def write_counters_csv(importData, config) -> None:
         "counter_name",
         "value AS Counter_Value",
         "start AS Start_Timestamp",
-        "end AS End_Timestamp",
-        "(end - start) AS Duration",
+        "end AS End_Timestamp"
     ]
 
     aliased_headers = []
@@ -378,8 +370,7 @@ def write_scratch_memory_csv(importData, config) -> None:
             tid AS Thread_Id,
             alloc_flags,
             start AS Start_Timestamp,
-            end AS End_Timestamp,
-            (end - start) AS Duration
+            end AS End_Timestamp
         FROM "scratch_memory"
         ORDER BY
             guid ASC, start ASC, end DESC
@@ -398,8 +389,7 @@ def write_region_csv(importData, config) -> None:
             tid AS Thread_Id,
             stack_id AS Correlation_Id,
             start AS Start_Timestamp,
-            end AS End_Timestamp,
-            (end - start) AS Duration
+            end AS End_Timestamp
         FROM "regions"
         ORDER BY
             guid ASC, start ASC, end DESC

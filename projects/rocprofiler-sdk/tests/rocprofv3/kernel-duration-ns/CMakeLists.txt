@@ -11,10 +11,14 @@ project(
 find_package(rocprofiler-sdk REQUIRED)
 find_package(Python3 REQUIRED)
 
-set(rocprofv3-env
+set(rocprofv3-generate-env
     "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
     "PYTHONPATH=${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
     "ROCPROF_OUTPUT_FORMAT=json,rocpd")
+
+set(rocprofv3-validate-env
+    "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
+    "PYTHONPATH=${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages")
 
 rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY conftest.py validate.py)
 
@@ -28,18 +32,14 @@ add_test(
 
 set_tests_properties(
     rocprofv3-test-kernel-trace-duration-generate
-    PROPERTIES TIMEOUT
-               120
-               LABELS
-               "integration-tests;kernel-trace-duration"
-               ENVIRONMENT
-               "${rocprofv3-env}"
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               FIXTURES_SETUP
-               rocprofv3-test-kernel-trace-duration-data)
+    PROPERTIES
+        TIMEOUT 120
+        LABELS "integration-tests;kernel-trace-duration"
+        ENVIRONMENT "${rocprofv3-generate-env}"
+        FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+        FIXTURES_SETUP rocprofv3-test-kernel-trace-duration-data)
 
-# Validate: Convert rocpd DB -> CSV and compare with JSON
+# Validate: compare rocpd kernel query output with JSON
 add_test(
     NAME rocprofv3-test-kernel-trace-duration-validation
     COMMAND
@@ -50,13 +50,9 @@ add_test(
 
 set_tests_properties(
     rocprofv3-test-kernel-trace-duration-validation
-    PROPERTIES TIMEOUT
-               120
-               LABELS
-               "integration-tests;kernel-trace-duration"
-               ENVIRONMENT
-               "${rocprofv3-env}"
-               FIXTURES_REQUIRED
-               rocprofv3-test-kernel-trace-duration-data
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+    PROPERTIES
+        TIMEOUT 120
+        LABELS "integration-tests;kernel-trace-duration"
+        ENVIRONMENT "${rocprofv3-validate-env}"
+        FIXTURES_REQUIRED rocprofv3-test-kernel-trace-duration-data
+        FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")

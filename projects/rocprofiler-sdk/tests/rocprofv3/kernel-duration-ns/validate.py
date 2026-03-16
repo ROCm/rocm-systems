@@ -24,7 +24,6 @@
 import sys
 import pytest
 
-
 def extract_json_kernel_records(json_root):
     """Extract kernel dispatch records from JSON output."""
     assert "rocprofiler-sdk-tool" in json_root, "missing rocprofiler-sdk-tool in JSON"
@@ -33,119 +32,134 @@ def extract_json_kernel_records(json_root):
         tool = tool[0]
 
     assert "buffer_records" in tool, "missing buffer_records in JSON"
-    br = tool["buffer_records"]
+    buffer_records = tool["buffer_records"]
 
     for key in ("kernel_dispatch", "kernel_trace", "kernel_dispatch_trace"):
-        if key in br and isinstance(br[key], list) and len(br[key]) > 0:
-            return br[key]
+        if key in buffer_records and isinstance(buffer_records[key], list) and len(buffer_records[key]) > 0:
+            return buffer_records[key]
 
-    assert False, f"no kernel dispatch records found in JSON buffer_records keys={list(br.keys())}"
+    assert False, (
+        "no kernel dispatch records found in JSON buffer_records keys="
+        f"{list(buffer_records.keys())}"
+    )
 
-
-def _as_int(val, *, field="value"):
-    assert val is not None, f"missing {field}"
+def _as_int(value, *, field="value"):
+    assert value is not None, f"missing {field}"
     try:
-        return int(val)
-    except Exception as e:
-        raise AssertionError(f"failed to parse int for {field}: {val!r} ({e})") from e
+        return int(value)
+    except Exception as exc:
+        raise AssertionError(
+            f"failed to parse int for {field}: {value!r} ({exc})"
+        ) from exc
 
+def _get_first_present(mapping, *keys):
+    for key in keys:
+        if key in mapping and mapping[key] is not None:
+            return mapping[key]
+    return None
 
-def _extract_dispatch_id_from_json_record(r):
+def _extract_dispatch_id_from_json_record(record):
     """
     Prefer dispatch_info.dispatch_id.
     Fallback to correlation_id.internal (or correlation_id if scalar).
     Return int.
     """
-    dispatch_info = r.get("dispatch_info", {})
+    dispatch_info = record.get("dispatch_info", {})
     dispatch_id = None
+
     if isinstance(dispatch_info, dict):
         dispatch_id = dispatch_info.get("dispatch_id", None)
 
     if dispatch_id is None:
-        corr_id = r.get("correlation_id", {})
-        if isinstance(corr_id, dict):
-            dispatch_id = corr_id.get("internal", None)
+        correlation_id = record.get("correlation_id", {})
+        if isinstance(correlation_id, dict):
+            dispatch_id = correlation_id.get("internal", None)
         else:
-            dispatch_id = corr_id
+            dispatch_id = correlation_id
 
     return _as_int(dispatch_id, field="dispatch_id/correlation_id")
-
 
 def build_json_duration_map(records):
     """
     Build map:
         key(int dispatch_id) -> (start, end, duration)
     """
-    m = {}
-    for r in records:
-        did = _extract_dispatch_id_from_json_record(r)
+    result = {}
 
-        start = _as_int(r.get("start_timestamp"), field="start_timestamp")
-        end = _as_int(r.get("end_timestamp"), field="end_timestamp")
+    for record in records:
+        dispatch_id = _extract_dispatch_id_from_json_record(record)
+
+        start = _as_int(record.get("start_timestamp"), field="start_timestamp")
+        end = _as_int(record.get("end_timestamp"), field="end_timestamp")
 
         assert start > 0 and end > 0, f"invalid timestamps start={start} end={end}"
         assert end >= start, f"end before start: start={start} end={end}"
 
-        m[did] = (start, end, end - start)
+        result[dispatch_id] = (start, end, end - start)
 
-    assert len(m) > 0, "no kernel records extracted from JSON"
-    return m
-
+    assert len(result) > 0, "no kernel records extracted from JSON"
+    return result
 
 def load_kernel_rows_via_rocpd(db_path):
     """
-    Use rocpd Python API to query the same underlying data used by rocpd/csv.py::write_kernel_csv().
+    Use rocpd Python API and reuse rocpd.csv kernel query logic directly.
     Returns list[dict].
     """
     try:
         import rocpd
-    except Exception as e:
+        from rocpd import csv as rocpd_csv
+        from rocpd import output_config as rocpd_output_config
+    except Exception as exc:
         raise AssertionError(
-            f"failed to import rocpd python module. Ensure PYTHONPATH is set for rocprofiler-sdk build tree. ({e})"
-        ) from e
+            "failed to import rocpd python modules. "
+            f"Ensure PYTHONPATH is set for rocprofiler-sdk build tree. ({exc})"
+        ) from exc
 
-    # RocpdImportData can take a list of inputs
     data = rocpd.connect([db_path])
 
-    # Minimal columns required for strict consistency checks
-    # NOTE: rocpd/csv.py::write_kernel_csv selects from "kernels"
-    query = """
-        SELECT
-            dispatch_id AS Dispatch_Id,
-            stack_id   AS Correlation_Id,
-            start      AS Start_Timestamp,
-            end        AS End_Timestamp,
-            (end - start) AS Duration
-        FROM "kernels"
-        ORDER BY
-            guid ASC, start ASC, end DESC
-    """
+    config = rocpd_output_config.output_config()
+    query = rocpd_csv.get_kernel_csv_query(config)
 
-    cur = rocpd.execute(data, query)
-    cols = [d[0] for d in cur.description]
-    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+    cursor = rocpd.execute(data, query)
+    columns = [desc[0] for desc in cursor.description]
+    rows = [dict(zip(columns, row)) for row in cursor.fetchall()]
 
-    assert len(rows) > 0, f"no rows returned from kernels table in db: {db_path}"
+    assert len(rows) > 0, f"no rows returned from kernel query in db: {db_path}"
     return rows
 
+def _extract_dispatch_id_from_db_row(row):
+    value = _get_first_present(row, "Dispatch_Id", "dispatch_id", "Correlation_Id", "correlation_id")
+    return _as_int(value, field="Dispatch_Id/dispatch_id/Correlation_Id/correlation_id")
+
+def _extract_start_from_db_row(row):
+    value = _get_first_present(row, "Start_Timestamp", "start_timestamp")
+    return _as_int(value, field="Start_Timestamp/start_timestamp")
+
+def _extract_end_from_db_row(row):
+    value = _get_first_present(row, "End_Timestamp", "end_timestamp")
+    return _as_int(value, field="End_Timestamp/end_timestamp")
+
+def _extract_duration_from_db_row(row):
+    value = _get_first_present(row, "Duration", "duration")
+    return _as_int(value, field="Duration/duration")
 
 def test_rocpd_kernel_trace_duration(json_data, db_path):
     """
-    Test that rocpd DB content for kernel trace has Duration and it matches JSON derived durations.
+    Validate that kernel trace Duration exists on the rocpd CSV path and matches JSON.
 
     Strategy:
-      - JSON and rocpd DB are generated from the SAME rocprofv3 execution (ROCPROF_OUTPUT_FORMAT=json,rocpd)
+      - JSON and rocpd DB are generated from the SAME rocprofv3 execution
+        (ROCPROF_OUTPUT_FORMAT=json,rocpd)
       - Read kernel records from JSON
-      - Read kernel rows from rocpd DB using rocpd Python API (no CSV I/O)
+      - Read kernel rows from rocpd DB using rocpd Python API
+      - Reuse rocpd.csv.get_kernel_csv_query(config) so test and CSV path stay aligned
       - Enforce:
-          * DB Duration == End - Start
-          * DB Start/End/Duration EXACTLY match JSON for each dispatch_id (zero tolerance)
-          * All kernel rows in DB match to a JSON record
+          * Duration == End_Timestamp - Start_Timestamp
+          * Start/End/Duration EXACTLY match JSON for each dispatch_id
+          * All DB rows match JSON rows
     """
-    # Load DB rows via rocpd Python API
     db_rows = load_kernel_rows_via_rocpd(db_path)
 
-    # Build JSON dispatch_id -> (start,end,dur)
     json_records = extract_json_kernel_records(json_data)
     json_map = build_json_duration_map(json_records)
 
@@ -155,47 +169,52 @@ def test_rocpd_kernel_trace_duration(json_data, db_path):
     missing_in_json = []
 
     for row in db_rows:
-        did = _as_int(row.get("Dispatch_Id"), field="Dispatch_Id")
-        start = _as_int(row.get("Start_Timestamp"), field="Start_Timestamp")
-        end = _as_int(row.get("End_Timestamp"), field="End_Timestamp")
-        dur = _as_int(row.get("Duration"), field="Duration")
+        dispatch_id = _extract_dispatch_id_from_db_row(row)
+        start = _extract_start_from_db_row(row)
+        end = _extract_end_from_db_row(row)
+        duration = _extract_duration_from_db_row(row)
 
-        # DB internal consistency
-        assert start > 0 and end > 0, f"invalid DB timestamps: start={start} end={end} dispatch_id={did}"
-        assert end >= start, f"DB end before start: start={start} end={end} dispatch_id={did}"
-        assert dur >= 0, f"negative DB duration: duration={dur} dispatch_id={did}"
-        assert dur == (end - start), (
-            f"DB duration mismatch: duration={dur} != end-start={end - start} dispatch_id={did}"
+        assert start > 0 and end > 0, (
+            f"invalid DB timestamps: start={start} end={end} dispatch_id={dispatch_id}"
+        )
+        assert end >= start, (
+            f"DB end before start: start={start} end={end} dispatch_id={dispatch_id}"
+        )
+        assert duration >= 0, (
+            f"negative DB duration: duration={duration} dispatch_id={dispatch_id}"
+        )
+        assert duration == (end - start), (
+            f"DB duration mismatch: duration={duration} != end-start={end - start} "
+            f"dispatch_id={dispatch_id}"
         )
 
-        if did not in json_map:
-            missing_in_json.append(did)
+        if dispatch_id not in json_map:
+            missing_in_json.append(dispatch_id)
             continue
 
         matched_count += 1
-        j_start, j_end, j_dur = json_map[did]
+        json_start, json_end, json_duration = json_map[dispatch_id]
 
-        sd = start - j_start
-        ed = end - j_end
-        dd = dur - j_dur
+        start_diff = start - json_start
+        end_diff = end - json_end
+        duration_diff = duration - json_duration
 
-        if sd != 0 or ed != 0 or dd != 0:
+        if start_diff != 0 or end_diff != 0 or duration_diff != 0:
             mismatches.append(
                 {
-                    "dispatch_id": did,
+                    "dispatch_id": dispatch_id,
                     "db_start": start,
-                    "json_start": j_start,
-                    "start_diff": sd,
+                    "json_start": json_start,
+                    "start_diff": start_diff,
                     "db_end": end,
-                    "json_end": j_end,
-                    "end_diff": ed,
-                    "db_dur": dur,
-                    "json_dur": j_dur,
-                    "dur_diff": dd,
+                    "json_end": json_end,
+                    "end_diff": end_diff,
+                    "db_duration": duration,
+                    "json_duration": json_duration,
+                    "duration_diff": duration_diff,
                 }
             )
 
-    # Hard failures with actionable context
     if missing_in_json:
         sample = missing_in_json[:10]
         raise AssertionError(
@@ -208,31 +227,40 @@ def test_rocpd_kernel_trace_duration(json_data, db_path):
     if mismatches:
         lines = [
             "",
-            "TIMESTAMP/DURATION MISMATCHES DETECTED (zero tolerance)",
+            "TIMESTAMP/DURATION MISMATCHES DETECTED",
             f"{'Dispatch':<12} {'StartDiff':<12} {'EndDiff':<12} {'DurDiff':<12}",
             "=" * 56,
         ]
-        for m in mismatches[:10]:
+
+        for item in mismatches[:10]:
             lines.append(
-                f"{m['dispatch_id']:<12} {m['start_diff']:<12} {m['end_diff']:<12} {m['dur_diff']:<12}"
+                f"{item['dispatch_id']:<12} "
+                f"{item['start_diff']:<12} "
+                f"{item['end_diff']:<12} "
+                f"{item['duration_diff']:<12}"
             )
+
         if len(mismatches) > 10:
             lines.append(f"... and {len(mismatches) - 10} more mismatches")
 
         first = mismatches[0]
         detail = (
             f"\n\nExample mismatch for dispatch {first['dispatch_id']}:\n"
-            f"  DB:   start={first['db_start']}, end={first['db_end']}, duration={first['db_dur']}\n"
-            f"  JSON: start={first['json_start']}, end={first['json_end']}, duration={first['json_dur']}\n"
-            f"  Diff: start={first['start_diff']}, end={first['end_diff']}, duration={first['dur_diff']}\n"
+            f"  DB:   start={first['db_start']}, end={first['db_end']}, "
+            f"duration={first['db_duration']}\n"
+            f"  JSON: start={first['json_start']}, end={first['json_end']}, "
+            f"duration={first['json_duration']}\n"
+            f"  Diff: start={first['start_diff']}, end={first['end_diff']}, "
+            f"duration={first['duration_diff']}\n"
             f"Total mismatches: {len(mismatches)}/{total_count}\n"
             "NOTE: Since JSON and rocpd come from the same execution, these should be identical."
         )
         raise AssertionError("\n".join(lines) + detail)
 
     assert matched_count > 0, "No DB rows matched JSON records"
-    assert matched_count == total_count, f"Only {matched_count}/{total_count} DB rows matched JSON"
-
+    assert matched_count == total_count, (
+        f"Only {matched_count}/{total_count} DB rows matched JSON"
+    )
 
 if __name__ == "__main__":
     rc = pytest.main(["-x", __file__] + sys.argv[1:])
