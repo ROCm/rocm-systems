@@ -218,7 +218,7 @@ class Event : public RuntimeObject {
 
   //! Set dependent hardware events
   void setDepHwEvents(std::vector<void*> hw_events) {
-    dep_hw_events_ = hw_events;
+    dep_hw_events_ = std::move(hw_events);
   }
 
   //! Get dependent hardware events
