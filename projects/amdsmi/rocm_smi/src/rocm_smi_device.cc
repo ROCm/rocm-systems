@@ -928,7 +928,7 @@ int Device::readDevInfoStr(DevInfoTypes type, std::string* retStr) {
 }
 
 int Device::writeDevInfoStr(DevInfoTypes type, std::string valStr, bool returnWriteErr) {
-  // returnWriteErr = false, backwards compatability (old calls)
+  // returnWriteErr = false, backwards compatibility (old calls)
   // returnWriteErr = true, improvement - allows us to detect errors
   // when writing to file
   // (such as EBUSY)
