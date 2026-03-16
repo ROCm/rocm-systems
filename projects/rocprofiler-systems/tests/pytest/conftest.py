@@ -100,8 +100,8 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         "--show-test-output",
         action="store",
         default="subtest",
-        choices=("subtest", "all"),
-        help="Show runner output: 'subtest' (default, on failure only), or 'all' (always)",
+        choices=("none", "subtest", "all"),
+        help="Show runner output: 'none' (no output), 'subtest' (default, on failure only), or 'all' (always)",
     )
     group.addoption(
         "--show-config-only",
@@ -202,6 +202,10 @@ def pytest_configure(config: pytest.Config) -> None:
     )
     config.addinivalue_line(
         "markers",
+        "preserve(file): prevents the file from being deleted after the test, even if ROCPROFSYS_KEEP_TEST_OUTPUT is set to OFF",
+    )
+    config.addinivalue_line(
+        "markers",
         "run_if_gpu_category(expr): run test only if GPU category expression is true "
         "(e.g., 'apu and not instinct', 'instinct or radeon')",
     )
@@ -217,10 +221,12 @@ def pytest_configure(config: pytest.Config) -> None:
         "markers",
         "rocpd(env): mark test as using ROCpd and inject ROCpd env into given env",
     )
+    # TODO: Deprecate once --ci-mode is removed
     config.addinivalue_line(
         "markers",
         "ci_enable: Full test will be run when in CI mode. To disable a subtest, use ci_disable(name) (CI mode only)",
     )
+    # TODO: Deprecate once --ci-mode is removed
     config.addinivalue_line(
         "markers",
         "ci_disable(name): Use 'all' to skip entire test, or assertion name (e.g., 'assert_rocpd') to disable subtest. Overrides ci_enable (CI mode only)",
@@ -370,6 +376,7 @@ def pytest_sessionstart(session):
 
 
 def pytest_report_header(config) -> list[str]:
+    # TODO: Deprecate once --ci-mode is removed
     if not config.getoption("--ci-mode", default=False):
         return []
     return _generate_rocprofsys_config_header(config)
@@ -432,6 +439,7 @@ def pytest_collection_modifyitems(config, items) -> None:
         rocprof_config.capabilities.papi_nic_events is not None
         and rocprof_config.capabilities.perf_event_paranoid <= 2
     )
+    # TODO: Deprecate once --ci-mode is removed
     mpi_available = lambda: (
         rocprof_config.capabilities.mpiexec_exec is not None
         and not config.getoption("--ci-mode", default=False)
@@ -623,6 +631,8 @@ def pytest_runtest_makereport(item, call):
     outcome = yield
     rep = outcome.get_result()
 
+    setattr(item, f"rep_{rep.when}", rep)
+
     # Relevant flags
     show_output_flag = getattr(pytest, "_show_output_flag", False)
     show_on_subfail_flag = getattr(pytest, "_show_output_on_subtest_fail_flag", False)
@@ -695,16 +705,6 @@ def pytest_sessionfinish(session, exitstatus):
 
     In CTest mode, map "all skipped" to exit code 77 so that CTest can
     distinguish skipped from passed (via SKIP_RETURN_CODE 77).
-
-    If ROCPROFSYS_KEEP_TEST_OUTPUT is not set to OFF, this code cleans up:
-    - Temporary buffered storage files
-    - Temporary metadata files
-    - Perfetto temp files
-    - HSA/ROCm temp files
-    - Instrumented binaries
-    - Causal profiling temp files
-    - Empty pytest output directories
-    - Test config directories
     """
 
     # Skipped tests return exit code so that CTests knows to report them as skipped
@@ -718,31 +718,6 @@ def pytest_sessionfinish(session, exitstatus):
             skipped = len(reporter.stats.get("skipped", []))
             if passed == 0 and skipped > 0:
                 session.exitstatus = SKIP_RETURN_CODE
-
-    if os.environ.get("ROCPROFSYS_KEEP_TEST_OUTPUT", "1") == "1":
-        return
-
-    import glob
-
-    # Clean up temp files matching patterns
-    for pattern in _cleanup_temp_patterns():
-        for filepath in glob.glob(pattern):
-            _safe_remove_file(Path(filepath))
-
-    # Clean up empty directories in test output areas
-    try:
-        config = get_rocprof_config()
-        build_dir = config.rocprofsys_build_dir
-    except Exception:
-        return  # Can't get config, skip directory cleanup
-
-    for dir_path in _cleanup_directory_patterns(build_dir):
-        if dir_path.exists():
-            # First pass: remove empty subdirectories
-            for child in list(dir_path.iterdir()):
-                _safe_remove_directory(child, remove_if_empty=True)
-            # Second pass: remove parent if now empty
-            _safe_remove_directory(dir_path, remove_if_empty=True)
 
 
 def pytest_unconfigure(config):
@@ -1000,6 +975,28 @@ def _ctest_generate_tests(
 
         lines.append("")
 
+    # Generate a cleanup test that removes temp files created by rocprofiler-systems
+    tmp_patterns = _cleanup_temp_patterns()
+    find_args = " -o ".join(f"-name '{Path(p).name}'" for p in tmp_patterns)
+    lines.append("# Cleanup temp files created by rocprofiler-systems tests")
+    lines.append("add_test(")
+    lines.append("    NAME rocprofsys-cleanup-tmp-files")
+    lines.append("    COMMAND sh -c")
+    lines.append(
+        f'        "find /tmp -maxdepth 1 -user $(whoami)'
+        f" \\\\( {find_args} \\\\)"
+        f' -delete 2>/dev/null || true"'
+    )
+    lines.append(")")
+    lines.append("set_tests_properties(")
+    lines.append("    rocprofsys-cleanup-tmp-files")
+    lines.append("    PROPERTIES")
+    lines.append('        FIXTURES_CLEANUP "rocprofsys-global-tmp-files"')
+    lines.append('        LABELS "cleanup;global"')
+    lines.append("        TIMEOUT 30")
+    lines.append(")")
+    lines.append("")
+
     content = "\n".join(lines)
     if output_path:
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1114,7 +1111,7 @@ def _generate_rocprofsys_config_header(config: pytest.Config) -> list[str]:
         _row("Sample:", rocprof_config.rocprofsys_sample),
         _row("Avail:", rocprof_config.rocprofsys_avail),
         _row("Causal:", rocprof_config.rocprofsys_causal),
-        _row("MPI exec:", cap.mpiexec_exec),
+        _row("MPI:", cap.mpiexec_exec),
         _row("Julia:", cap.julia_exec),
         _row("Oshrun:", cap.oshrun_exec),
         _row("Oshrun version:", oshrun_version_str),
@@ -1247,53 +1244,28 @@ def get_gpu_info() -> GPUInfo:
 
 
 def _cleanup_temp_patterns() -> list[str]:
-    """Return list of temp file patterns to clean up."""
-    patterns = []
-
-    # For CTest impl, these should not be deleted
-    patterns.extend(
-        [
-            "/tmp/buffered_storage*.bin",
-            "/tmp/metadata*.json",
-        ]
-    )
-
-    # Other rocprofiler-systems temp files (always cleaned)
-    patterns.extend(
-        [
-            "/tmp/rocprof-sys-*.tmp",
-            "/tmp/rocprofsys-*.tmp",
-            # Perfetto temp files
-            "/tmp/perfetto-*.proto",
-            "/tmp/perfetto_trace*.proto",
-            # HSA/ROCm temp files
-            "/tmp/hsa-*.tmp",
-            "/tmp/rocm-*.tmp",
-            "/tmp/hip-*.tmp",
-            # Instrumented binaries that might be left over
-            "/tmp/*.inst",
-            # Causal profiling temp files
-            "/tmp/causal-*.json",
-            "/tmp/experiments-*.coz",
-            # Core dumps (if any)
-            "/tmp/core.*",
-        ]
-    )
-
-    return patterns
-
-
-def _cleanup_directory_patterns(build_dir: Path) -> list[Path]:
-    """Return list of directories to check for cleanup."""
-    patterns = []
-    # For CTest impl, these should not be deleted
-    patterns.extend(
-        [
-            build_dir / "rocprof-sys-pytest-output",
-            build_dir / "rocprof-sys-tests-output",
-        ]
-    )
-
+    """Return list of rocprofiler-systems temp file patterns to clean up."""
+    tmpdir = os.environ.get("ROCPROFSYS_TMPDIR", os.environ.get("TMPDIR", "/tmp"))
+    patterns = [
+        "/tmp/rocprof-sys-*.tmp",
+        "/tmp/rocprofsys-*.tmp",
+        f"{tmpdir}/buffered_storage*.bin",
+        f"{tmpdir}/metadata*.json",
+        # Perfetto temp files
+        "/tmp/perfetto-*.proto",
+        "/tmp/perfetto_trace*.proto",
+        # HSA/ROCm temp files
+        "/tmp/hsa-*.tmp",
+        "/tmp/rocm-*.tmp",
+        "/tmp/hip-*.tmp",
+        # Instrumented binaries that might be left over
+        "/tmp/*.inst",
+        # Causal profiling temp files
+        "/tmp/causal-*.json",
+        "/tmp/experiments-*.coz",
+        # Core dumps (if any)
+        "/tmp/core.*",
+    ]
     return patterns
 
 
@@ -1302,26 +1274,6 @@ def _safe_remove_file(filepath: Path) -> None:
     try:
         if filepath.is_file():
             filepath.unlink()
-    except OSError:
-        pass
-
-
-def _safe_remove_directory(dirpath: Path, remove_if_empty: bool = True) -> None:
-    """Safely remove a directory.
-
-    Args:
-        dirpath: Path to directory
-        remove_if_empty: If True, only remove if empty. If False, remove recursively.
-    """
-    try:
-        if not dirpath.exists():
-            return
-        if remove_if_empty:
-            if dirpath.is_dir() and not any(dirpath.iterdir()):
-                dirpath.rmdir()
-        else:
-            if dirpath.is_dir():
-                shutil.rmtree(dirpath)
     except OSError:
         pass
 
@@ -1509,11 +1461,11 @@ def cleanup_module_temp_files(rocprof_config, request: pytest.FixtureRequest):
         for filepath in glob.glob(str(rocprof_config.rocprofsys_build_dir / pattern)):
             _safe_remove_file(Path(filepath))
 
-    # Clean up trace cache temp files
-    # For CTest impl, these should not be deleted
-    for pattern in ["/tmp/buffered_storage*.bin", "/tmp/metadata*.json"]:
-        for filepath in glob.glob(pattern):
-            _safe_remove_file(Path(filepath))
+    # TODO: Once ci-mode is removed, this should be removed
+    if not request.config.getoption("--ctest-mode", default=False) == "run":
+        for pattern in ["/tmp/buffered_storage*.bin", "/tmp/metadata*.json"]:
+            for filepath in glob.glob(pattern):
+                _safe_remove_file(Path(filepath))
 
 
 # ----------------------------------------------------------------------------
@@ -1608,6 +1560,7 @@ def test_output_dir(
 
     Creates a directory named after the test and cleans up on success.
     On failure, the directory is preserved for debugging.
+    Directory is removed if it is empty.
 
     Cleanup Order:
         1. Test setup: Directory is created
@@ -1637,6 +1590,12 @@ def test_output_dir(
     test_failed = hasattr(request.node, "rep_call") and request.node.rep_call.failed
 
     if not keep_output and not test_failed and output_dir.exists():
+        preserve_marker = request.node.get_closest_marker("preserve")
+        if preserve_marker and preserve_marker.args:
+            for fname in preserve_marker.args:
+                preserved = output_dir / fname
+                if preserved.exists():
+                    return
         shutil.rmtree(output_dir)
 
 
@@ -1664,37 +1623,6 @@ def apply_rocpd_marker(request):
 
     # Add ROCpd base env
     env["ROCPROFSYS_USE_ROCPD"] = "ON"
-
-
-@pytest.fixture
-def cleanup_instrumented_binary(
-    rocprof_config,
-    test_output_dir: Path,
-) -> Generator[None, None, None]:
-    """Function-scoped cleanup for instrumented binaries.
-
-    Use this fixture in tests that create instrumented binaries to ensure
-    they are cleaned up after the test completes.
-    """
-    # Track files before test
-    pre_existing = (
-        set(test_output_dir.glob("*.inst")) if test_output_dir.exists() else set()
-    )
-
-    yield
-
-    if os.environ.get("ROCPROFSYS_KEEP_TEST_OUTPUT", "1") == "1":
-        return
-
-    # Clean up any new .inst files
-    if test_output_dir.exists():
-        for inst_file in test_output_dir.glob("*.inst"):
-            if inst_file not in pre_existing:
-                _safe_remove_file(inst_file)
-
-    # Also clean from build directory
-    for inst_file in rocprof_config.rocprofsys_build_dir.glob("*.inst"):
-        _safe_remove_file(inst_file)
 
 
 # This is needed for pytest-subtests plugin compatibility when pytest < 9.0.0

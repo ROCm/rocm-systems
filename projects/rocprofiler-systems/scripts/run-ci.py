@@ -320,11 +320,29 @@ def run(*args, **kwargs):
     return subprocess.run(*args, **kwargs)
 
 
+def set_python_hints_from_cmake_args(cmake_args):
+    """Extract ROCPROFSYS_PYTHON_PREFIX and ROCPROFSYS_PYTHON_ENVS from cmake args
+    to build ROCPROFSYS_PYTHON_HINTS for CTest's find_program calls."""
+    prefix = None
+    envs = None
+    for arg in cmake_args:
+        if arg.startswith("-DROCPROFSYS_PYTHON_PREFIX="):
+            prefix = arg.split("=", 1)[1]
+        elif arg.startswith("-DROCPROFSYS_PYTHON_ENVS="):
+            envs = arg.split("=", 1)[1].split(";")
+    if prefix and envs:
+        hints = ";".join(f"{prefix}/{env}/bin" for env in envs)
+        os.environ["ROCPROFSYS_PYTHON_HINTS"] = hints
+        log(f"ROCPROFSYS_PYTHON_HINTS={hints}")
+
+
 if __name__ == "__main__":
     args, cmake_args, ctest_args = parse_args()
 
     if not os.path.exists(args.binary_dir):
         os.makedirs(args.binary_dir)
+
+    set_python_hints_from_cmake_args(cmake_args)
 
     from textwrap import dedent
 

@@ -57,6 +57,7 @@ class TestCodeCoverage(RocprofsysTest):
             return ["code coverage :: 66.67%"]
         return ["function coverage :: 66.67%"]
 
+    @pytest.mark.preserve("coverage.json")
     @pytest.mark.parametrize("mode", ["binary_rewrite", "runtime_instrument"])
     @pytest.mark.parametrize(
         "type", ["base", "base_hybrid", "basic_blocks", "basic_blocks_hybrid"]

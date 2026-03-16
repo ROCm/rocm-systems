@@ -154,7 +154,7 @@ jobs:
           -DROCPROFSYS_MAX_THREADS=${{ env.ROCPROFSYS_MAX_THREADS }} \
           -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;openmp-target;lulesh" \
           -DROCPROFSYS_TEST_LABELS_EXCLUDE="gpu" \
-          -DROCPROFSYS_BUILD_NUMBER=1
+          -DROCPROFSYS_BUILD_NUMBER=1 \
           -DUSE_CLANG_OMP=OFF \
           $CMAKE_PREFIX_PATH_ARG
 

@@ -201,6 +201,33 @@ class TestTranspose(RocprofsysTest):
         )
         self.assert_regex(result)
 
+    @pytest.mark.rocm_min_version("7.0")
+    @pytest.mark.hip_stream
+    @pytest.mark.timeout(120)
+    @pytest.mark.parametrize("mode", ["sampling", "sys_run"])
+    @pytest.mark.parametrize(
+        "type",
+        [
+            pytest.param("group-by-queue", marks=pytest.mark.group_by_queue),
+            pytest.param("group-by-stream", marks=pytest.mark.group_by_stream),
+        ],
+    )
+    def test_hip_stream(self, mode, type, num_processes):
+        if type == "group-by-queue":
+            env = {"ROCPROFSYS_ROCM_GROUP_BY_QUEUE": "YES"}
+        else:
+            env = {"ROCPROFSYS_ROCM_GROUP_BY_QUEUE": "NO"}
+
+        result = self.run_test(
+            mode,
+            "transpose",
+            env=env,
+            check_target_arch=True,
+            launcher="mpi",
+            num_procs=num_processes,
+        )
+        self.assert_regex(result)
+
 
 # ============================================================================
 # Test Class: ROCProfiler Counter Collection
