@@ -114,5 +114,5 @@ void TestPerfDeterminism::Run(void) {
       CHK_ERR_ASRT(ret)
       IF_VERB(STANDARD) { std::cout << "\t**New Perf Level:" << GetPerfLevelStr(pfl) << std::endl; }
     }  // END - SET SUPPORTED
-  }    // END - DEVICE LOOP
+  }  // END - DEVICE LOOP
 }
