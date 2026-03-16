@@ -166,6 +166,8 @@ void VirtMemoryTestBasic::TestCreateDestroy(hsa_agent_t agent, hsa_amd_memory_po
   /* For unmapped VA, then size is equal to size of address reservation */
   ASSERT_EQ(ptrInfo.sizeInBytes, sizeof_addrRangeUnmapped);
   ASSERT_EQ(num_agents_accessible, 0);
+  free(agents_accessible);
+  agents_accessible = nullptr;
 
   /* Verify that pointer info for unmapped VA offset return expected values */
   ptrInfo.size = sizeof(ptrInfo);
@@ -177,6 +179,8 @@ void VirtMemoryTestBasic::TestCreateDestroy(hsa_agent_t agent, hsa_amd_memory_po
   /* For unmapped VA, then size is equal to size of address reservation */
   ASSERT_EQ(ptrInfo.sizeInBytes, sizeof_addrRangeUnmapped);
   ASSERT_EQ(num_agents_accessible, 0);
+  free(agents_accessible);
+  agents_accessible = nullptr;
 
   hsa_amd_vmem_alloc_handle_t mem_handle;
   const size_t sizeof_mem_handle = 10 * granule_size;
@@ -210,6 +214,8 @@ void VirtMemoryTestBasic::TestCreateDestroy(hsa_agent_t agent, hsa_amd_memory_po
   ASSERT_EQ(ptrInfo.type, HSA_EXT_POINTER_TYPE_HSA_VMEM);
   ASSERT_EQ(ptrInfo.sizeInBytes, sizeof_mem_handle);  // size matches memory handle
   ASSERT_EQ(num_agents_accessible, 0);
+  free(agents_accessible);
+  agents_accessible = nullptr;
 
   // Access to each GPU should be None
   for (auto gpuIt = gpus.begin(); gpuIt != gpus.end(); ++gpuIt) {
