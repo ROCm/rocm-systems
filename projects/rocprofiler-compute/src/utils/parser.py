@@ -564,7 +564,7 @@ class MetricEvaluator:
             return "N/A"
 
 
-def build_eval_string(equation: str, coll_level: str, config: dict) -> str:
+def build_eval_string(equation: str, config: dict) -> str:
     """
     Convert user defined equation string to eval executable string.
     For example,
@@ -618,9 +618,6 @@ def build_eval_string(equation: str, coll_level: str, config: dict) -> str:
                 )
             )
     """
-    if coll_level is None:
-        raise Exception("Error: coll_level can not be None.")
-
     if not equation:
         return ""
 
@@ -641,30 +638,11 @@ def build_eval_string(equation: str, coll_level: str, config: dict) -> str:
     # the target is df['TCC_HIT[0]']
     equation_string = re.sub(r"\'\]\[(\d+)\]", r"[\g<1>]']", equation_string)
 
-    # apply coll_level
-    if config.get("format_rocprof_output") == "rocpd":
-        # Replace SQ_ACCUM_PREV_HIRES with coll_level_ACCUM then ignore coll_level df
-        equation_string = re.sub(
-            "SQ_ACCUM_PREV_HIRES", f"{coll_level}_ACCUM", equation_string
-        )
-        equation_string = re.sub(
-            r"raw_pmc_df",
-            f"raw_pmc_df['{schema.PMC_PERF_FILE_PREFIX}']",
-            equation_string,
-        )
-    else:
-        # Use pmc_perf.csv for all counters
-        equation_string = re.sub(
-            r"raw_pmc_df",
-            f"raw_pmc_df['{schema.PMC_PERF_FILE_PREFIX}']",
-            equation_string,
-        )
-        # Use coll_level csv for SQ_ACCUM_PREV_HIRES counter only
-        equation_string = re.sub(
-            rf"raw_pmc_df['{schema.PMC_PERF_FILE_PREFIX}']['SQ_ACCUM_PREV_HIRES']",
-            f"raw_pmc_df['{coll_level}']['SQ_ACCUM_PREV_HIRES']",
-            equation_string,
-        )
+    equation_string = re.sub(
+        r"raw_pmc_df",
+        f"raw_pmc_df['{schema.PMC_PERF_FILE_PREFIX}']",
+        equation_string,
+    )
     return equation_string
 
 
@@ -867,8 +845,6 @@ def build_dfs(
                             if key != "metric":
                                 headers.append(tile)
 
-                    headers.append("coll_level")
-
                     # Only add Metrics Description column if it is defined in the panel
                     if "metrics_description" in panel:
                         headers.append("Description")
@@ -913,20 +889,16 @@ def build_dfs(
                                         for bv in simple_box.values():
                                             values.append(bv[0] + v + bv[1])
                                     else:
-                                        if k not in {"coll_level", "alias"}:
+                                        if k not in {"alias"}:
                                             values.append(v)
                             else:
                                 for k, v in entries.items():
-                                    if k not in {"coll_level", "alias"}:
+                                    if k not in {"alias"}:
                                         values.append(v)
                                         eqn_content.append(v)
 
                             if "alias" in entries.keys():
                                 values.append(entries["alias"])
-
-                            values.append(
-                                entries.get("coll_level", schema.PMC_PERF_FILE_PREFIX)
-                            )
 
                             if "metrics_description" in panel:
                                 values.append(panel["metrics_description"].get(key, ""))
@@ -1012,7 +984,6 @@ def build_metric_value_string(
                             if expr.lower() != "alias":
                                 df.at[row_idx_label, expr] = build_eval_string(
                                     df.at[row_idx_label, expr],
-                                    df.at[row_idx_label, "coll_level"],
                                     profiling_config,
                                 )
 
@@ -1112,9 +1083,7 @@ def calc_builtin_vars(
             continue
 
         # NB: assume all built-in vars from pmc_perf.csv for now
-        eval_string = build_eval_string(
-            variable_value, schema.PMC_PERF_FILE_PREFIX, config
-        )
+        eval_string = build_eval_string(variable_value, config)
         try:
             # Create temporary evaluator for this calculation
             # Pass sys_vars so that $num_xcd and other system variables are available
@@ -1132,9 +1101,7 @@ def calc_builtin_vars(
         if "PER_XCD" in variable_key:
             continue
 
-        eval_string = build_eval_string(
-            variable_value, schema.PMC_PERF_FILE_PREFIX, config
-        )
+        eval_string = build_eval_string(variable_value, config)
         try:
             # Merge sys_vars with builtin_vars_collection for second pass
             combined_vars = {**sys_vars, **builtin_vars_collection}

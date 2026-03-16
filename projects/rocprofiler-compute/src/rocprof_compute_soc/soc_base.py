@@ -231,12 +231,12 @@ class OmniSoC_Base:
 
         return gpu_model
 
-    @demarcate
-    def detect_counters(self) -> tuple[set[str], list[str]]:
+    def _collect_config_yamls(
+        self,
+    ) -> tuple[list[str], list[dict], list[str]]:
         """
-        Create a set of counters required for the selected report sections.
-        Parse analysis report configuration files based on the selected report
-        sections to be filtered.
+        Collect analysis config YAML texts and parsed configs based on user
+        filters. Returns (texts, parsed_file_configs, filter_blocks).
         """
         args = self.get_args()
 
@@ -263,6 +263,8 @@ class OmniSoC_Base:
             filter_blocks = ["4"]
 
         texts: list[str] = []
+        parsed_configs: list[dict] = []
+
         if not filter_blocks:
             # Do not profile block 30 unless explicitly requested
             exclude_file_ids: set[str] = set()
@@ -273,73 +275,130 @@ class OmniSoC_Base:
             for file_id, filename in config_filename_dict.items():
                 if file_id in exclude_file_ids:
                     continue
-
                 with open(filename) as stream:
-                    texts.append(stream.read())
+                    content = stream.read()
+                texts.append(content)
+                parsed_configs.append(yaml.safe_load(content))
+        else:
+            for block_id in filter_blocks:
+                if METRIC_ID_RE.match(block_id):
+                    block_id = block_id
+                else:
+                    alias = block_id
+                    panel_alias_dict = get_panel_alias()
+                    if alias not in panel_alias_dict:
+                        raise KeyError(f"Unknown panel alias: {alias!r}")
+                    block_id = panel_alias_dict[alias]
+                    print(f"alias: {alias}, block id: {block_id}")
 
-        for block_id in filter_blocks:
-            if METRIC_ID_RE.match(block_id):
-                block_id = block_id
-            else:
-                alias = block_id
-                panel_alias_dict = get_panel_alias()
-                if alias not in panel_alias_dict:
-                    raise KeyError(f"Unknown panel alias: {alias!r}")
-                block_id = panel_alias_dict[alias]  # int
-                print(f"alias: {alias}, block id: {block_id}")
+                file_id, panel_id, metric_id = convert_metric_id_to_panel_info(block_id)
 
-            file_id, panel_id, metric_id = convert_metric_id_to_panel_info(block_id)
+                if file_id not in config_filename_dict:
+                    console_warning(
+                        f"Skipping {block_id}: file id {file_id} not found in "
+                        f"{config_root_dir}"
+                    )
+                    continue
 
-            # File id filtering
-            if file_id not in config_filename_dict:
-                console_warning(
-                    f"Skipping {block_id}: file id {file_id} not found in "
-                    f"{config_root_dir}"
-                )
+                with open(config_filename_dict[file_id]) as stream:
+                    file_config = yaml.safe_load(stream)
+                if panel_id is None:
+                    texts.append(yaml.dump(file_config, sort_keys=False))
+                    parsed_configs.append(file_config)
+                    continue
+
+                panel_dict = {
+                    section["metric_table"]["id"]: section["metric_table"]
+                    for section in file_config["Panel Config"]["data source"]
+                    if "metric_table" in section
+                }
+                if panel_id not in panel_dict:
+                    console_warning(
+                        f"Skipping {block_id}: metric table {panel_id} not found in "
+                        f"{config_filename_dict[file_id]}"
+                    )
+                    continue
+                if metric_id is None:
+                    panel_as_config = {
+                        "Panel Config": {
+                            "data source": [{"metric_table": panel_dict[panel_id]}]
+                        }
+                    }
+                    texts.append(yaml.dump(panel_dict[panel_id], sort_keys=False))
+                    parsed_configs.append(panel_as_config)
+                    continue
+
+                metric_dict = {
+                    id: panel_dict[panel_id]["metric"][metric]
+                    for id, metric in enumerate(panel_dict[panel_id]["metric"].keys())
+                }
+                if metric_id not in metric_dict:
+                    console_warning(
+                        f"Skipping {block_id}: metric id {metric_id} not found in "
+                        f"panel id {panel_id}"
+                    )
+                    continue
+                texts.append(yaml.dump(metric_dict[metric_id], sort_keys=False))
+                metric_keys = list(panel_dict[panel_id]["metric"].keys())
+                single_metric_config = {
+                    "Panel Config": {
+                        "data source": [
+                            {
+                                "metric_table": {
+                                    "id": panel_dict[panel_id]["id"],
+                                    "metric": {
+                                        metric_keys[metric_id]: metric_dict[metric_id]
+                                    },
+                                }
+                            }
+                        ]
+                    }
+                }
+                parsed_configs.append(single_metric_config)
+
+        return texts, parsed_configs, filter_blocks
+
+    def _build_metric_counter_map(
+        self, parsed_configs: list[dict]
+    ) -> dict[str, set[str]]:
+        """
+        Build a mapping of metric name to the set of hardware counters it requires.
+        Walks the parsed analysis config structures and extracts counters per metric.
+        """
+        metric_counter_map: dict[str, set[str]] = {}
+
+        for config in parsed_configs:
+            panel_config = config.get("Panel Config")
+            if not panel_config:
                 continue
+            data_sources = panel_config.get("data source", [])
+            for ds in data_sources:
+                mt = ds.get("metric_table")
+                if not mt or "metric" not in mt:
+                    continue
+                for metric_name, metric_expr in mt["metric"].items():
+                    if not isinstance(metric_expr, dict):
+                        continue
+                    formula_text_parts = []
+                    for field_key, field_val in metric_expr.items():
+                        if field_key in {"unit", "units", "coll_level", "alias"}:
+                            continue
+                        if field_val is not None:
+                            formula_text_parts.append(str(field_val))
+                    if formula_text_parts:
+                        metric_counters = self.parse_counters(
+                            "\n".join(formula_text_parts)
+                        )
+                        if metric_counters:
+                            if metric_name in metric_counter_map:
+                                metric_counter_map[metric_name].update(metric_counters)
+                            else:
+                                metric_counter_map[metric_name] = metric_counters
 
-            with open(config_filename_dict[file_id]) as stream:
-                file_config = yaml.safe_load(stream)
-            if panel_id is None:
-                # If no panel id level filtering, then read the whole file
-                texts.append(yaml.dump(file_config, sort_keys=False))
-                continue
+        return metric_counter_map
 
-            # Panel id filtering
-            panel_dict = {
-                section["metric_table"]["id"]: section["metric_table"]
-                for section in file_config["Panel Config"]["data source"]
-                if "metric_table" in section
-            }
-            if panel_id not in panel_dict:
-                console_warning(
-                    f"Skipping {block_id}: metric table {panel_id} not found in "
-                    f"{config_filename_dict[file_id]}"
-                )
-                continue
-            if metric_id is None:
-                # If no metric id level filtering, then read the whole panel
-                texts.append(yaml.dump(panel_dict[panel_id], sort_keys=False))
-                continue
-
-            # Metric id filtering
-            metric_dict = {
-                id: panel_dict[panel_id]["metric"][metric]
-                for id, metric in enumerate(panel_dict[panel_id]["metric"].keys())
-            }
-            if metric_id not in metric_dict:
-                console_warning(
-                    f"Skipping {block_id}: metric id {metric_id} not found in "
-                    f"panel id {panel_id}"
-                )
-                continue
-            texts.append(yaml.dump(metric_dict[metric_id], sort_keys=False))
-
-        counters = self.parse_counters("\n".join(texts))
-
-        # Handle TCC channel counters: if hw_counter_matches has elems ending with '['
-        # Expand and interleve the TCC channel counters
-        # e.g.  TCC_HIT[0] TCC_ATOMIC[0] ... TCC_HIT[1] TCC_ATOMIC[1] ...
+    def _expand_tcc_channel_counters(self, counters: set[str]) -> set[str]:
+        """Expand TCC channel counter placeholders into per-channel counters."""
         num_xcd_for_pmc_file = int(self._mspec.num_xcd)
         for counter_name in counters.copy():
             if counter_name.startswith("TCC") and counter_name.endswith("["):
@@ -349,19 +408,50 @@ class OmniSoC_Base:
                     f"{counter_name}[{i}]"
                     for i in range(num_xcd_for_pmc_file * int(self._mspec.l2_banks))
                 })
+        return counters
 
-        return counters, filter_blocks
+    @demarcate
+    def detect_counters(
+        self,
+    ) -> tuple[set[str], list[str], dict[str, set[str]]]:
+        """
+        Create a set of counters required for the selected report sections.
+        Also builds a metric-to-counter mapping for metric-aware bucketing.
+        Returns (counters, filter_blocks, metric_counter_map).
+        """
+        texts, parsed_configs, filter_blocks = self._collect_config_yamls()
+
+        counters = self.parse_counters("\n".join(texts))
+        counters = self._expand_tcc_channel_counters(counters)
+
+        metric_counter_map = self._build_metric_counter_map(parsed_configs)
+        for metric_name in metric_counter_map:
+            metric_counter_map[metric_name] = self._expand_tcc_channel_counters(
+                metric_counter_map[metric_name]
+            )
+
+        return counters, filter_blocks, metric_counter_map
 
     @demarcate
     def perfmon_filter(self) -> list[str]:
         """Filter default performance counter set based on user arguments"""
-        counters, filter_blocks = self.detect_counters()
+        counters, filter_blocks, metric_counter_map = self.detect_counters()
 
-        # SQ_ACCUM_PREV_HIRES will be injected for level counters later on
         counters = counters - {"SQ_ACCUM_PREV_HIRES"}
 
-        # Coalesce and writeback workload specific perfmon
-        self.perfmon_coalesce(counters)
+        # Strip _ACCUM companion counters extracted from formulas; they are
+        # auto-injected alongside their parent LEVEL counter during packing.
+        # Also ensure the parent LEVEL counters are present so they get packed
+        # (formulas only reference the _ACCUM variant, not the base counter).
+        accum_companions = {
+            c
+            for c in counters
+            if c.endswith("_ACCUM") and self._is_level_counter(c.removesuffix("_ACCUM"))
+        }
+        level_parents = {c.removesuffix("_ACCUM") for c in accum_companions}
+        counters = (counters - accum_companions) | level_parents
+
+        self.perfmon_coalesce(counters, metric_counter_map)
 
         return filter_blocks
 
@@ -466,19 +556,40 @@ class OmniSoC_Base:
 
         return rocprof_counters
 
+    @staticmethod
+    def _is_level_counter(counter: str) -> bool:
+        """Check if counter is a LEVEL counter that needs its own profiling pass."""
+        return (
+            "LEVEL" in counter
+            and not counter.endswith("_sum")
+            and not counter.endswith("_ACCUM")
+            and not is_tcc_channel_counter(counter)
+        )
+
+    @staticmethod
+    def _counter_block(counter: str) -> str:
+        """Map a counter name to its IP block."""
+        block = counter.split("_")[0]
+        if block == "SQC":
+            block = "SQ"
+        return block
+
     @demarcate
-    def perfmon_coalesce(self, counters: set[str]) -> None:
+    def perfmon_coalesce(
+        self,
+        counters: set[str],
+        metric_counter_map: Optional[dict[str, set[str]]] = None,
+    ) -> None:
         """
-        Sort and bucket all related performance counters to minimize required
-        application passes
+        Bucket performance counters into the minimum number of pmc_perf files
+        using round-robin balanced packing.  Each counter is placed exactly
+        once, LEVEL counters are limited to one per file, and TCC channel
+        counters are kept together by base name.
         """
         workload_perfmon_dir = Path(self.get_args().path) / "perfmon"
         workload_perfmon_dir.mkdir(parents=True, exist_ok=True)
 
-        # Sanity check whether counters are supported by underlying rocprof tool
         rocprof_counters = self.get_rocprof_supported_counters()
-        # rocprof does not support TCC channel counters in the avail output,
-        # so remove channel suffix for comparison
         not_supported_counters = {
             counter.split("[")[0] if is_tcc_channel_counter(counter) else counter
             for counter in counters
@@ -501,56 +612,96 @@ class OmniSoC_Base:
 
         console_debug(f"Collecting following counters: {', '.join(counters)} ")
 
-        output_files: list[CounterFile] = []
-        accu_file_count = 0
+        # -- 1. Classify counters by block -----------------------------------
+        # Each TCC channel group (e.g. TCC_HIT[0..N]) counts as one TCC slot.
+        from collections import defaultdict
 
-        # Create separate perfmon file for LEVEL counters without _sum suffix
-        # TCC LEVEL counters are handled channel wise, so ignore them
-        # Convert set to sorted list for determinism in pmc txt files
-        counters = sorted(list(counters))
-        for counter in counters.copy():
-            if (
-                "LEVEL" in counter
-                and not counter.endswith("_sum")
-                and not is_tcc_channel_counter(counter)
-            ):
-                counters.remove(counter)
-                output_files.append(
-                    CounterFile(counter + ".txt", self.__perfmon_config)
-                )
-                output_files[-1].add(counter)
-                output_files[-1].add(f"{counter}_ACCUM")
-                accu_file_count += 1
+        block_counters: dict[str, list[str]] = defaultdict(list)
+        tcc_channel_groups: dict[str, list[str]] = defaultdict(list)
+        level_counters: list[str] = []
 
-        file_count = 0
-        # Store all channels for a TCC channel counter in the same file
-        tcc_channel_counter_file_map: dict[str, CounterFile] = {}
-
-        for ctr in counters:
-            # Store all channels for a TCC channel counter in the same file
+        for ctr in sorted(counters):
             if is_tcc_channel_counter(ctr):
-                output_file = tcc_channel_counter_file_map.get(ctr.split("[")[0])
-                if output_file:
-                    output_file.add(ctr)
-                    continue
+                tcc_channel_groups[ctr.split("[")[0]].append(ctr)
+                continue
+            if self._is_level_counter(ctr):
+                level_counters.append(ctr)
+                continue
+            block_counters[self._counter_block(ctr)].append(ctr)
 
-            # Add counter to first file that has room
-            added = False
-            for output_file in output_files:
-                if output_file.add(ctr):
-                    added = True
-                    # Store all channels for a TCC channel counter in the same file
-                    if is_tcc_channel_counter(ctr):
-                        tcc_channel_counter_file_map[ctr.split("[")[0]] = output_file
-                    break
+        # TCC channel groups: each base counter uses 1 TCC slot.
+        # Append one representative entry per group to the TCC block list;
+        # the full channel list is expanded when writing the file.
+        tcc_group_names = sorted(tcc_channel_groups.keys())
+        for base in tcc_group_names:
+            block_counters["TCC"].append(base)
 
-            # All files are full, create a new file
-            if not added:
-                output_files.append(
-                    CounterFile(f"pmc_perf_{file_count}.txt", self.__perfmon_config)
-                )
-                file_count += 1
-                output_files[-1].add(ctr)
+        # LEVEL counters consume an SQ slot (both the counter and its _ACCUM).
+        # We handle them specially so that at most one lands in each file.
+
+        # -- 2. Compute minimum number of files ------------------------------
+        perfmon_config = self.__perfmon_config
+        num_files = 1
+        for block, limit in perfmon_config.items():
+            needed = len(block_counters.get(block, []))
+            if limit > 0 and needed > 0:
+                num_files = max(num_files, math.ceil(needed / limit))
+
+        # LEVEL counters each need a different file; they also use 2 SQ slots
+        # (counter + _ACCUM) so recalculate SQ requirement with them included.
+        sq_regular = len(block_counters.get("SQ", []))
+        sq_limit = perfmon_config.get("SQ", 8)
+        num_level = len(level_counters)
+        # Each LEVEL counter occupies 2 SQ slots in its file.
+        # Distribute: total SQ slots needed = sq_regular + 2*num_level
+        sq_total_slots = sq_regular + 2 * num_level
+        num_files = max(num_files, math.ceil(sq_total_slots / sq_limit))
+        num_files = max(num_files, num_level)
+
+        # -- 3. Pre-allocate files -------------------------------------------
+        output_files: list[CounterFile] = [
+            CounterFile(f"pmc_perf_{i}.txt", perfmon_config) for i in range(num_files)
+        ]
+        file_count = num_files
+
+        # -- 4. Place LEVEL counters first (one per file) --------------------
+        for idx, lctr in enumerate(sorted(level_counters)):
+            output_files[idx].add(lctr)
+            output_files[idx].add(f"{lctr}_ACCUM")
+
+        # -- 5. Round-robin each block's counters across files ---------------
+        # Process blocks with the most passes first so they get evenly spread
+        # across all files, then blocks with fewer passes fill remaining slots.
+        block_order = sorted(
+            block_counters.keys(),
+            key=lambda b: math.ceil(len(block_counters[b]) / perfmon_config.get(b, 1)),
+            reverse=True,
+        )
+
+        for block in block_order:
+            ctrs = block_counters[block]
+            file_idx = 0
+            for ctr in ctrs:
+                if ctr in tcc_channel_groups:
+                    # TCC channel group: find next file with a free TCC slot
+                    # and add all channels there.
+                    attempts = 0
+                    while attempts < num_files:
+                        if output_files[file_idx].add(tcc_channel_groups[ctr][0]):
+                            for ch in tcc_channel_groups[ctr][1:]:
+                                output_files[file_idx].add(ch)
+                            break
+                        file_idx = (file_idx + 1) % num_files
+                        attempts += 1
+                    file_idx = (file_idx + 1) % num_files
+                else:
+                    attempts = 0
+                    while attempts < num_files:
+                        if output_files[file_idx].add(ctr):
+                            break
+                        file_idx = (file_idx + 1) % num_files
+                        attempts += 1
+                    file_idx = (file_idx + 1) % num_files
 
         console_debug("profiling", f"perfmon_coalesce file_count {file_count}")
 
@@ -567,7 +718,7 @@ class OmniSoC_Base:
                 int, self.get_args().spatial_multiplexing
             )
 
-            old_group_num = file_count + accu_file_count
+            old_group_num = len(output_files)
             new_bucket_count = node_count * gpu_count
             groups_per_bucket = math.ceil(
                 old_group_num / new_bucket_count

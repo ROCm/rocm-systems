@@ -246,43 +246,34 @@ def create_df_pmc(
     def create_single_df_pmc(
         raw_data_dir: str, node_name: Optional[str], kernel_verbose: int, verbose: int
     ) -> pd.DataFrame:
-        dfs: list[pd.DataFrame] = []
-        coll_levels: list[str] = []
-
-        for csv_file in Path(raw_data_dir).rglob("*.csv"):
-            file_name = csv_file.name
-
-            is_sq_file = file_name.startswith("SQ")
-            is_pmc_perf = file_name == f"{schema.PMC_PERF_FILE_PREFIX}.csv"
-
-            if is_sq_file or is_pmc_perf:
-                tmp_df = pd.read_csv(csv_file)
-
-                if config_dict.get("format_rocprof_output") == "rocpd":
-                    tmp_df = rocpd_data.process_rocpd_csv(tmp_df)
-
-                # Demangle original KernelNames
-                # Skip for Standalone Roofline with -1 to keep full kernel names
-                if kernel_verbose >= 0:
-                    kernel_name_shortener(tmp_df, kernel_verbose)
-
-                # NB:
-                #   Idealy, the Node column should be added out of
-                #   multiindexing level. Here, we add it into pmc_perf
-                #   as it is the main sub-df which can be handled easily
-                #   later.
-                if file_name == "pmc_perf.csv" and node_name is not None:
-                    tmp_df.insert(0, "Node", node_name)
-
-                dfs.append(tmp_df)
-                # Remove .csv extension for collection level
-                coll_levels.append(csv_file.stem)
-
-        if not dfs:
+        pmc_perf_path = Path(raw_data_dir) / f"{schema.PMC_PERF_FILE_PREFIX}.csv"
+        if not pmc_perf_path.is_file():
             return pd.DataFrame()
 
+        tmp_df = pd.read_csv(pmc_perf_path)
+
+        if config_dict.get("format_rocprof_output") == "rocpd":
+            tmp_df = rocpd_data.process_rocpd_csv(tmp_df)
+
+        # Demangle original KernelNames
+        # Skip for Standalone Roofline with -1 to keep full kernel names
+        if kernel_verbose >= 0:
+            kernel_name_shortener(tmp_df, kernel_verbose)
+
+        # NB:
+        #   Ideally, the Node column should be added out of
+        #   multiindexing level. Here, we add it into pmc_perf
+        #   as it is the main sub-df which can be handled easily
+        #   later.
+        if node_name is not None:
+            tmp_df.insert(0, "Node", node_name)
+
+        coll_levels = [schema.PMC_PERF_FILE_PREFIX]
+
         # TODO: double check the case if all tmp_df.shape[0] are not on the same page
-        final_df = pd.concat(dfs, keys=coll_levels, axis=1, join="inner", copy=False)
+        final_df = pd.concat(
+            [tmp_df], keys=coll_levels, axis=1, join="inner", copy=False
+        )
         if verbose >= 2:
             console_debug(f"pmc_raw_data final_single_df {final_df.info}")
         return final_df

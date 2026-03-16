@@ -259,7 +259,7 @@ class RocProfCompute_Base:
 
         # Set default output directory if not specified
         if isinstance(args.path, str):
-            csv_patterns = ["pmc_perf_*.csv", "SQ_*.csv", "SQC_*.csv"]
+            csv_patterns = ["pmc_perf_*.csv"]
             files = [
                 file
                 for pattern in csv_patterns
@@ -447,9 +447,7 @@ class RocProfCompute_Base:
             df.to_csv(output_file, index=False)
             if not args.verbose:
                 for file in files:
-                    # Do not remove accumulate counter files
-                    if "SQ_" not in file.name or "SQC_" not in file.name:
-                        file.unlink()
+                    file.unlink()
             return None
         else:
             return df

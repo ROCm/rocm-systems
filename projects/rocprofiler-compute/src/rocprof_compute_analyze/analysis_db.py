@@ -656,7 +656,6 @@ class db_analysis(OmniAnalyze_Base):
                 "Channel",
                 "Unit",
                 "Description",
-                "coll_level",
                 "Type",
                 "Xfer",
                 "Coherency",

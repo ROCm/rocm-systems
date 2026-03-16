@@ -662,9 +662,6 @@ def v3_json_to_csv(json_file_path: str, csv_file_path: str) -> None:
             ctr_id = r["counter_id"]["handle"]
             value = r["value"]
             name = counter_info[(agent_id, ctr_id)]["name"]
-            if name.endswith("_ACCUM"):
-                # Omniperf expects accumulated value in SQ_ACCUM_PREV_HIRES.
-                name = "SQ_ACCUM_PREV_HIRES"
             ctrs[name] = ctrs.get(name, 0) + value
 
         # Append counter values
@@ -805,13 +802,6 @@ def v3_counter_csv_to_v2_csv(
     remaining_column_names = [col for col in result.columns if col not in index]
     index = index + remaining_column_names
     result = result.reindex(columns=index)
-
-    # Rename accumulate counters to standard format
-    accum_columns = {
-        col: "SQ_ACCUM_PREV_HIRES" for col in result.columns if col.endswith("_ACCUM")
-    }
-    if accum_columns:
-        result = result.rename(columns=accum_columns)
 
     result.to_csv(converted_csv_file, index=False)
 
