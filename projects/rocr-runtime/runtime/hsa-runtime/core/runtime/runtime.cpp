@@ -2427,6 +2427,7 @@ Runtime::Runtime()
       hw_exception_signal_(nullptr),
       internal_queue_create_notifier_user_data_(nullptr),
       ref_count_(0),
+      thunkLoader_(nullptr),
       kfd_version{},
       ipc_sock_server_fd_(0),
       ipc_sock_server_thread_(nullptr) {
@@ -2595,9 +2596,11 @@ void Runtime::Unload() {
 
   DestroyDrivers();
 
-  thunkLoader_->DestroyThunkInstance();
-
-  delete thunkLoader_;
+  if (thunkLoader_ != nullptr) {
+    thunkLoader_->DestroyThunkInstance();
+    delete thunkLoader_;
+    thunkLoader_ = nullptr;
+  }
 }
 
 void Runtime::LoadExtensions() {
