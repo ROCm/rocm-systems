@@ -34,9 +34,10 @@ find_path(AMD_ASIC_REG_INCLUDE_DIR nv_id.h
     ${CMAKE_SOURCE_DIR}/drivers/drivers
     ${CMAKE_SOURCE_DIR}/../drivers/drivers
     ${CMAKE_SOURCE_DIR}/../../drivers/drivers
+    ${CMAKE_SOURCE_DIR}/../../../drivers/drivers
   PATH_SUFFIXES
     inc/asic_reg)
-
+if (NOT AMD_COMPUTE_WIN)
 find_path(AMD_HSAIL_INCLUDE_DIR hsa.h
   HINTS
     ${AMD_SC_PATH}
@@ -46,6 +47,7 @@ find_path(AMD_HSAIL_INCLUDE_DIR hsa.h
     ${CMAKE_SOURCE_DIR}/../../sc
   PATH_SUFFIXES
     HSAIL/include)
+endif()
 
 find_path(AMD_PAL_INCLUDE_DIR pal.h
   HINTS
@@ -54,6 +56,7 @@ find_path(AMD_PAL_INCLUDE_DIR pal.h
     ${CMAKE_SOURCE_DIR}/pal
     ${CMAKE_SOURCE_DIR}/../pal
     ${CMAKE_SOURCE_DIR}/../../pal
+    ${CMAKE_SOURCE_DIR}/../../../pal
   PATH_SUFFIXES
     inc/core)
 

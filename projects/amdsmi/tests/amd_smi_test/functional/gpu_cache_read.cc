@@ -102,7 +102,7 @@ void TestGPUCacheRead::Run() {
     }
     amdsmi_gpu_cache_info_t res = {};
     err = amdsmi_get_gpu_cache_info(processor_handles_[i], &res);
-    const char *status_string;
+    const char* status_string;
     amdsmi_status_code_to_string(err, &status_string);
     std::cout << "\t\t** amdsmi_get_gpu_cache_info(): " << status_string << "\n";
     CHK_ERR_ASRT(err);
