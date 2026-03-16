@@ -367,7 +367,7 @@ if __name__ == "__main__":
     cmd = (
         [CTEST_CMD]
         + dashboard_args
-        + ["-S", script_path, "--output-on-failure"]
+        + ["-S", script_path, "--output-on-failure", "-V"]
         + ctest_args
     )
 

@@ -113,6 +113,11 @@ set(PYTEST_DEPENDENCIES
     rocprofiler-systems-avail
 )
 
+# Python versioned tests look for the versioned libpyrocprofsys to be found
+if(TARGET libpyrocprofsys)
+    list(APPEND PYTEST_DEPENDENCIES libpyrocprofsys)
+endif()
+
 # Filter out targets that don't exist (e.g. when certain components are disabled)
 set(_valid_deps "")
 foreach(_dep ${PYTEST_DEPENDENCIES})
