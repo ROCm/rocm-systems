@@ -33,7 +33,7 @@ rocprofiler_add_integration_execute_test(
         --runtime-trace --kernel-rename -- $<TARGET_FILE:scratch-memory>
     DEPENDS scratch-memory
     TIMEOUT 120
-    LABELS "integration-tests;rocpd"
+    LABELS "integration-tests;rocpd;multi-gpu"
     PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
     ENVIRONMENT "${rocprofv3-rocpd-scratch-env}"
     FIXTURES_SETUP rocprofv3-test-rocpd-scratch)
@@ -52,7 +52,7 @@ rocprofiler_add_integration_execute_test(
         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 120
-    LABELS "integration-tests;rocpd"
+    LABELS "integration-tests;rocpd;multi-gpu"
     PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
     ENVIRONMENT "${rocprofv3-rocpd-scratch-env}"
     FIXTURES_SETUP rocprofv3-test-rocpd-scratch-generation
@@ -72,7 +72,7 @@ rocprofiler_add_integration_validate_test(
     ARGS --json-input ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.json
          --pftrace-input ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_results.pftrace
     TIMEOUT 120
-    LABELS "integration-tests;rocpd"
+    LABELS "integration-tests;rocpd;multi-gpu"
     PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
     ENVIRONMENT "${rocprofv3-rocpd-scratch-env}"
     FIXTURES_REQUIRED rocprofv3-test-rocpd-scratch-generation)

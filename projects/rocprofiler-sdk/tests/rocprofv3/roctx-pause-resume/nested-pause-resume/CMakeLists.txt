@@ -46,7 +46,7 @@ rocprofiler_add_integration_execute_test(
         --log-level info -- $<TARGET_FILE:roctx-pause-resume>
     DEPENDS roctx-pause-resume
     TIMEOUT 45
-    LABELS "integration-tests;pause-resume"
+    LABELS "integration-tests;pause-resume;multi-gpu"
     ENVIRONMENT "${roctx-pause-resume-nested-env}"
     FIXTURES_SETUP rocprofv3-test-roctx-pause-resume-nested-tracing)
 
@@ -58,7 +58,7 @@ rocprofiler_add_integration_validate_test(
     ARGS --json-input
          ${CMAKE_CURRENT_BINARY_DIR}/roctx-pause-resume-nested-trace/out_results.json
     TIMEOUT 45
-    LABELS "integration-tests;pause-resume"
+    LABELS "integration-tests;pause-resume;multi-gpu"
     FIXTURES_REQUIRED rocprofv3-test-roctx-pause-resume-nested-tracing
     FAIL_REGULAR_EXPRESSION "AssertionError")
 

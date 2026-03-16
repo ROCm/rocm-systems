@@ -22,7 +22,7 @@ rocprofiler_add_integration_execute_test(
     hip-host-tracing
     TARGET hip-host
     TIMEOUT 100
-    LABELS "integration-tests"
+    LABELS "integration-tests;multi-gpu"
     PRELOAD "${PRELOAD_ENV}"
     ENVIRONMENT "ROCPROFILER_TOOL_OUTPUT_FILE=hip-host-tracing-test.json"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
@@ -34,7 +34,7 @@ rocprofiler_add_integration_validate_test(
     COPY conftest.py
     CONFIG pytest.ini
     TIMEOUT 45
-    LABELS "integration-tests"
+    LABELS "integration-tests;multi-gpu"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
     FIXTURES_REQUIRED hip-host-tracing
     ARGS --input ${CMAKE_CURRENT_BINARY_DIR}/hip-host-tracing-test.json)

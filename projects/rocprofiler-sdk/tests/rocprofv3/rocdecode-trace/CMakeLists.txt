@@ -41,7 +41,7 @@ rocprofiler_add_integration_execute_test(
         -i ${ROCDECODE_VIDEO_FILE}
     DEPENDS rocdecode-demo
     TIMEOUT 45
-    LABELS "integration-tests"
+    LABELS "integration-tests;multi-gpu"
     PRELOAD "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-rocdecode-tracing
     DISABLED "${IS_DISABLED}")
@@ -60,6 +60,6 @@ rocprofiler_add_integration_validate_test(
          --csv-input
          ${CMAKE_CURRENT_BINARY_DIR}/rocdecode-demo-trace/out_rocdecode_api_trace.csv
     TIMEOUT 45
-    LABELS "integration-tests"
+    LABELS "integration-tests;multi-gpu"
     FIXTURES_REQUIRED rocprofv3-test-rocdecode-tracing
     DISABLED "${IS_DISABLED}")

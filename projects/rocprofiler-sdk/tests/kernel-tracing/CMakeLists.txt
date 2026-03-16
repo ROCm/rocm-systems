@@ -24,7 +24,7 @@ rocprofiler_add_integration_execute_test(
     kernel-tracing
     TARGET reproducible-runtime
     TIMEOUT 100
-    LABELS "integration-tests"
+    LABELS "integration-tests;multi-gpu"
     ENVIRONMENT "${kernel-tracing-env}"
     PRELOAD "$<TARGET_FILE:rocprofiler-sdk-json-tool>"
     FIXTURES_SETUP kernel-tracing)
@@ -34,7 +34,7 @@ rocprofiler_add_integration_validate_test(
     TEST_PATHS validate.py
     COPY conftest.py
     CONFIG pytest.ini
-    LABELS "integration-tests"
+    LABELS "integration-tests;multi-gpu"
     TIMEOUT 45
     FIXTURES_REQUIRED kernel-tracing
     DISCOVERY_ARGS ${PYTEST_ARGS}

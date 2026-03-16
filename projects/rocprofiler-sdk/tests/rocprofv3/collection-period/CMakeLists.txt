@@ -38,7 +38,7 @@ rocprofiler_add_integration_execute_test(
         --collection-period-unit sec -- $<TARGET_FILE:reproducible-runtime> 5000 4
     DEPENDS reproducible-runtime
     TIMEOUT 45
-    LABELS "integration-tests"
+    LABELS "integration-tests;multi-gpu"
     PRELOAD "${PRELOAD_ENV}"
     ENVIRONMENT "ROCPROF_COLLECTION_PERIOD_TESTING=true"
     FIXTURES_SETUP rocprofv3-test-collection-period
@@ -58,6 +58,6 @@ rocprofiler_add_integration_validate_test(
          --collection-period-input
          ${CMAKE_CURRENT_BINARY_DIR}/collection-period/out_collection_periods.log
     TIMEOUT 45
-    LABELS "integration-tests"
+    LABELS "integration-tests;multi-gpu"
     FIXTURES_REQUIRED rocprofv3-test-collection-period
     UNSTABLE)

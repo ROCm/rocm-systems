@@ -19,7 +19,7 @@ rocprofiler_add_integration_execute_test(
     hip-graph-tracing
     TARGET hip-graph
     TIMEOUT 100
-    LABELS "integration-tests"
+    LABELS "integration-tests;multi-gpu"
     PRELOAD "$<TARGET_FILE:rocprofiler-sdk-json-tool>"
     ENVIRONMENT
         "ROCPROFILER_TOOL_OUTPUT_FILE=hip-graph-tracing-test.json"
@@ -31,7 +31,7 @@ rocprofiler_add_integration_validate_test(
     TEST_PATHS validate.py
     COPY conftest.py
     CONFIG pytest.ini
-    LABELS "integration-tests"
+    LABELS "integration-tests;multi-gpu"
     TIMEOUT 45
     FIXTURES_REQUIRED hip-graph-tracing
     DISCOVERY_ARGS ${PYTEST_ARGS}

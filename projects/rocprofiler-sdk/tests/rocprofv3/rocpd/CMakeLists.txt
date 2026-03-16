@@ -46,7 +46,7 @@ rocprofiler_add_integration_execute_test(
         $<TARGET_FILE:reproducible-dispatch-count> 500 2
     DEPENDS reproducible-dispatch-count
     TIMEOUT 120
-    LABELS "integration-tests;rocpd"
+    LABELS "integration-tests;rocpd;multi-gpu"
     PRELOAD "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-rocpd)
 
@@ -60,7 +60,7 @@ rocprofiler_add_integration_execute_test(
         SQ_WAVES -- $<TARGET_FILE:reproducible-dispatch-count> 200 1
     DEPENDS reproducible-dispatch-count
     TIMEOUT 120
-    LABELS "integration-tests;rocpd"
+    LABELS "integration-tests;rocpd;multi-gpu"
     PRELOAD "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-rocpd-multiproc
     DISABLED "${MULTIPROC_IS_DISABLED}")
@@ -76,7 +76,7 @@ rocprofiler_add_integration_execute_test(
         $<TARGET_FILE:reproducible-dispatch-count> 500 2
     DEPENDS reproducible-dispatch-count
     TIMEOUT 120
-    LABELS "integration-tests;rocpd"
+    LABELS "integration-tests;rocpd;multi-gpu"
     ENVIRONMENT "${rocprofv3-rocpd-env}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
     FIXTURES_SETUP rocprofv3-test-rocpd)
@@ -95,7 +95,7 @@ rocprofiler_add_integration_execute_test(
         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 120
-    LABELS "integration-tests;rocpd"
+    LABELS "integration-tests;rocpd;multi-gpu"
     PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
     ENVIRONMENT "${rocprofv3-rocpd-env}"
     FIXTURES_SETUP rocprofv3-test-rocpd-generation
@@ -110,7 +110,7 @@ rocprofiler_add_integration_execute_test(
         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data-multiproc/out_mp_1_results.db
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 120
-    LABELS "integration-tests;rocpd"
+    LABELS "integration-tests;rocpd;multi-gpu"
     PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
     ENVIRONMENT "${rocprofv3-rocpd-env}"
     FIXTURES_SETUP rocprofv3-test-rocpd-generation
@@ -131,7 +131,7 @@ rocprofiler_add_integration_execute_test(
         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 120
-    LABELS "integration-tests;rocpd"
+    LABELS "integration-tests;rocpd;multi-gpu"
     PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
     ENVIRONMENT "${rocprofv3-rocpd-env}"
     FIXTURES_SETUP rocprofv3-test-rocpd-generation
@@ -147,7 +147,7 @@ rocprofiler_add_integration_execute_test(
         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data-multiproc/out_mp_1_results.db
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 120
-    LABELS "integration-tests;rocpd"
+    LABELS "integration-tests;rocpd;multi-gpu"
     PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
     ENVIRONMENT "${rocprofv3-rocpd-env}"
     FIXTURES_SETUP rocprofv3-test-rocpd-generation
@@ -168,7 +168,7 @@ rocprofiler_add_integration_execute_test(
         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 120
-    LABELS "integration-tests;rocpd"
+    LABELS "integration-tests;rocpd;multi-gpu"
     PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
     ENVIRONMENT "${rocprofv3-rocpd-env}"
     FIXTURES_SETUP rocprofv3-test-rocpd-generation
@@ -188,7 +188,7 @@ rocprofiler_add_integration_execute_test(
         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 45
-    LABELS "integration-tests;rocpd"
+    LABELS "integration-tests;rocpd;multi-gpu"
     PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
     ENVIRONMENT "${rocprofv3-rocpd-env}"
     FIXTURES_SETUP rocprofv3-test-rocpd-generation
@@ -203,7 +203,7 @@ rocprofiler_add_integration_execute_test(
         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data-multiproc/out_mp_1_results.db
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 120
-    LABELS "integration-tests;rocpd"
+    LABELS "integration-tests;rocpd;multi-gpu"
     PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
     ENVIRONMENT "${rocprofv3-rocpd-env}"
     FIXTURES_SETUP rocprofv3-test-rocpd-generation
@@ -236,7 +236,7 @@ rocprofiler_add_integration_validate_test(
          ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_memory_allocation_trace.csv
          ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_regions_trace.csv
     TIMEOUT 120
-    LABELS "integration-tests;rocpd"
+    LABELS "integration-tests;rocpd;multi-gpu"
     FIXTURES_REQUIRED rocprofv3-test-rocpd-generation)
 
 #########################################################################################
@@ -261,7 +261,7 @@ rocprofiler_add_integration_execute_test(
         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out*.db
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 120
-    LABELS "integration-tests;rocpd"
+    LABELS "integration-tests;rocpd;multi-gpu"
     ENVIRONMENT "${rocprofv3-rocpd-env}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
     FIXTURES_SETUP rocprofv3-test-rocpd-package-generation
@@ -275,7 +275,7 @@ rocprofiler_add_integration_execute_test(
         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data-multiproc/out*.db
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 120
-    LABELS "integration-tests;rocpd"
+    LABELS "integration-tests;rocpd;multi-gpu"
     ENVIRONMENT "${rocprofv3-rocpd-env}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
     DISABLED "${MULTIPROC_IS_DISABLED}"
@@ -296,7 +296,7 @@ rocprofiler_add_integration_execute_test(
         "SELECT id, type FROM rocpd_info_agent LIMIT 10;"
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 120
-    LABELS "integration-tests;rocpd"
+    LABELS "integration-tests;rocpd;multi-gpu"
     ENVIRONMENT "${rocprofv3-rocpd-env}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
     FIXTURES_REQUIRED rocprofv3-test-rocpd-package-generation)
@@ -309,7 +309,7 @@ rocprofiler_add_integration_execute_test(
         --query "SELECT id, type FROM rocpd_info_agent LIMIT 10;"
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 120
-    LABELS "integration-tests;rocpd"
+    LABELS "integration-tests;rocpd;multi-gpu"
     ENVIRONMENT "${rocprofv3-rocpd-env}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
     DISABLED "${MULTIPROC_IS_DISABLED}"
@@ -329,7 +329,7 @@ rocprofiler_add_integration_execute_test(
         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/test_package.rpdb
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 120
-    LABELS "integration-tests;rocpd"
+    LABELS "integration-tests;rocpd;multi-gpu"
     ENVIRONMENT "${rocprofv3-rocpd-env}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
     FIXTURES_SETUP rocprofv3-test-rocpd-merge-generation-using-package
@@ -343,7 +343,7 @@ rocprofiler_add_integration_execute_test(
         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data-multiproc/test_package_multi.rpdb
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 120
-    LABELS "integration-tests;rocpd"
+    LABELS "integration-tests;rocpd;multi-gpu"
     ENVIRONMENT "${rocprofv3-rocpd-env}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
     DISABLED "${MULTIPROC_IS_DISABLED}"
@@ -364,7 +364,7 @@ rocprofiler_add_integration_execute_test(
         "SELECT id, type FROM rocpd_info_agent LIMIT 10;"
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 120
-    LABELS "integration-tests;rocpd"
+    LABELS "integration-tests;rocpd;multi-gpu"
     ENVIRONMENT "${rocprofv3-rocpd-env}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
     FIXTURES_REQUIRED rocprofv3-test-rocpd-merge-generation-using-package)
@@ -377,7 +377,7 @@ rocprofiler_add_integration_execute_test(
         "SELECT id, type FROM rocpd_info_agent LIMIT 10;"
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 120
-    LABELS "integration-tests;rocpd"
+    LABELS "integration-tests;rocpd;multi-gpu"
     ENVIRONMENT "${rocprofv3-rocpd-env}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
     DISABLED "${MULTIPROC_IS_DISABLED}"

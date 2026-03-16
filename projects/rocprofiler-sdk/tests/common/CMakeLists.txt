@@ -217,11 +217,12 @@ function(rocprofiler_add_integration_execute_test NAME)
         "UNSTABLE" # disable when ROCPROFILER_DISABLE_UNSTABLE_CTESTS=ON
         "DISABLED_CODECOV" # disable when ROCPROFILER_BUILD_CODECOV=ON
         )
-    set(_SINGLE_OPTS "TARGET" "WORKING_DIRECTORY" "DEPENDS" "TIMEOUT" "LABELS" "DISABLED"
+    set(_SINGLE_OPTS "TARGET" "WORKING_DIRECTORY" "DEPENDS" "TIMEOUT" "DISABLED"
                      "DISABLED_MEMCHECKS")
     set(_MULTI_OPTS
         "ARGS"
         "COMMAND"
+        "LABELS"
         "ATTACHED_FILES"
         "ATTACHED_FILES_ON_FAIL"
         "ENVIRONMENT"
@@ -303,6 +304,9 @@ function(rocprofiler_add_integration_execute_test NAME)
         list(APPEND arg_LABELS "execution")
     endif()
 
+    # LABELS must be a semicolon-separated string for set_tests_properties
+    list(JOIN arg_LABELS ";" _labels_str)
+
     # Helper to set a property only if the arg is set
     function(_rocprofiler_set_test_property_if_arg TEST_NAME PROPERTY_NAME)
         if(arg_${PROPERTY_NAME})
@@ -329,9 +333,8 @@ function(rocprofiler_add_integration_execute_test NAME)
 
         add_test(NAME "${arg_NAME}" COMMAND ${arg_COMMAND})
 
-        set_tests_properties(${arg_NAME} PROPERTIES RUN_SERIAL ON)
+        set_tests_properties(${arg_NAME} PROPERTIES RUN_SERIAL ON LABELS "${_labels_str}")
         _rocprofiler_set_test_property_if_arg(${arg_NAME} TIMEOUT)
-        _rocprofiler_set_test_property_if_arg(${arg_NAME} LABELS)
         _rocprofiler_set_test_property_if_arg(${arg_NAME} WORKING_DIRECTORY)
         _rocprofiler_set_test_property_if_arg(${arg_NAME} ENVIRONMENT)
         _rocprofiler_set_test_property_if_arg(${arg_NAME} PASS_REGULAR_EXPRESSION)
@@ -350,9 +353,8 @@ function(rocprofiler_add_integration_execute_test NAME)
 
         add_test(NAME "${arg_NAME}" COMMAND $<TARGET_FILE:${arg_TARGET}> ${arg_ARGS})
 
-        set_tests_properties(${arg_NAME} PROPERTIES RUN_SERIAL ON)
+        set_tests_properties(${arg_NAME} PROPERTIES RUN_SERIAL ON LABELS "${_labels_str}")
         _rocprofiler_set_test_property_if_arg(${arg_NAME} TIMEOUT)
-        _rocprofiler_set_test_property_if_arg(${arg_NAME} LABELS)
         _rocprofiler_set_test_property_if_arg(${arg_NAME} WORKING_DIRECTORY)
         _rocprofiler_set_test_property_if_arg(${arg_NAME} ENVIRONMENT)
         _rocprofiler_set_test_property_if_arg(${arg_NAME} PASS_REGULAR_EXPRESSION)
@@ -392,9 +394,10 @@ function(rocprofiler_add_integration_validate_test NAME)
         "STRIP_PARAM_BRACKETS"
         "INCLUDE_FILE_PATH"
         "BUNDLE_TESTS")
-    set(_SINGLE_OPTS "TARGET_DEPENDS" "WORKING_DIRECTORY" "DEPENDS" "TIMEOUT" "LABELS"
+    set(_SINGLE_OPTS "TARGET_DEPENDS" "WORKING_DIRECTORY" "DEPENDS" "TIMEOUT"
                      "DISABLED" "DISABLED_MEMCHECKS")
     set(_MULTI_OPTS
+        "LABELS"
         "TEST_PATHS"
         "CONFIG"
         "COPY"

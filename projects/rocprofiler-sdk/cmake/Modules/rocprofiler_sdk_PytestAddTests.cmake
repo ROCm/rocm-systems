@@ -52,8 +52,14 @@ if(CMAKE_SCRIPT_MODE_FILE)
         string(APPEND args " WORKING_DIRECTORY [==[${WORKING_DIRECTORY}]==]")
 
         # Append any additional properties, escaping complex characters if necessary.
+        # LABELS values with escaped semicolons (e.g. "a\;b\;c") must be output in
+        # double quotes so CMake interprets \; and CTest sees multiple labels.
         foreach(property ${TEST_PROPERTIES})
-            if(property MATCHES "[^-./:a-zA-Z0-9_]")
+            if(property MATCHES "\\\\;")
+                string(REPLACE "\\" "\\\\" _quoted "${property}")
+                string(REPLACE "\"" "\\\"" _quoted "${_quoted}")
+                string(APPEND args " \"${_quoted}\"")
+            elseif(property MATCHES "[^-./:a-zA-Z0-9_]")
                 string(APPEND args " [==[${property}]==]")
             else()
                 string(APPEND args " ${property}")

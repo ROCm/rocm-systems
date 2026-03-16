@@ -245,7 +245,7 @@ rocprofiler_add_integration_execute_test(
             ${PCS_ARGS} -o out -- $<TARGET_FILE:vector-ops>
     DEPENDS vector-ops
     TIMEOUT 90
-    LABELS "integration-tests;thread-trace;pc-sampling"
+    LABELS "integration-tests;thread-trace;pc-sampling;multi-gpu"
     DISABLED ${ATT_PLUS_PCS_DISABLE})
 
 # Trace two GPUs
