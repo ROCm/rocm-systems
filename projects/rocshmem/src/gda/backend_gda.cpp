@@ -191,6 +191,20 @@ void GDABackend::setup_ctxs() {
 }
 
 void GDABackend::cleanup_ctxs() {
+  /* Free ctx array */
+  rocshmem_ctx_t *rocshmem_ctx_array_ptr = nullptr;
+  rocshmem_ctx_t *rocshmem_ctx_array_device = nullptr;
+
+  CHECK_HIP(hipGetSymbolAddress(reinterpret_cast<void**>(&rocshmem_ctx_array_ptr),
+                                HIP_SYMBOL(rocshmem_ctx_array)));
+
+  CHECK_HIP(hipMemcpy(&rocshmem_ctx_array_device,
+                      rocshmem_ctx_array_ptr,
+                      sizeof(rocshmem_ctx*),
+                      hipMemcpyDefault));
+
+  CHECK_HIP(hipFree(rocshmem_ctx_array_device));
+
   ctx_free_list.~FreeListProxy();
   for (size_t i = 0; i < envvar::max_num_contexts; i++) {
     ctx_array[i].~GDAContext();
