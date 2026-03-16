@@ -11,9 +11,8 @@
 
 #include <timemory/hash/types.hpp>
 
-#include <cstdint>
-#include <functional>
-#include <string_view>
+#include <memory>
+#include <string>
 #include <tuple>
 #include <vector>
 
@@ -24,9 +23,10 @@ namespace rocprofiler_sdk
 
 struct roctx_client_config
 {
-    bool             is_write_enabled{ false };
-    bool             use_timemory{ false };
-    std::string_view selected_trace_regions{};
+    bool        is_write_enabled{ false };
+    bool        use_perfetto{ false };
+    bool        use_timemory{ false };
+    std::string selected_trace_regions{};
 };
 
 class roctx_client
@@ -51,11 +51,12 @@ private:
     using marker_range_stack_t =
         std::vector<std::tuple<tim::hash_value_t, rocprofiler_timestamp_t, bool>>;
 
-    rocprofiler_context_id_t                 m_ctx{ 0 };
-    marker_writer                            m_writer;
-    std::shared_ptr<control::trace_control>  m_controller{};
-    bool                                     m_write_enabled{ false };
-    bool                                     m_use_timemory{ false };
+    rocprofiler_context_id_t m_ctx{ 0 };
+
+    roctx_client_config                     m_config;
+    marker_writer                           m_writer;
+    std::shared_ptr<control::trace_control> m_controller{};
+
     static thread_local marker_range_stack_t m_pushed_ranges;
     static thread_local marker_range_stack_t m_started_ranges;
 

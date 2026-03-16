@@ -3,11 +3,22 @@
 
 #include "library/rocprofiler-sdk/marker_writer.hpp"
 
-#include "core/config.hpp"
-#include "core/timemory.hpp"
+#include "core/perfetto.hpp"
+#include "library/tracing.hpp"
+#include "library/tracing/annotation.hpp"
+
+#include <rocprofiler-sdk/fwd.h>
+
+#include "core/categories.hpp"
 #include "core/trace_cache/cache_manager.hpp"
 #include "core/trace_cache/sample_type.hpp"
-#include "library/tracing.hpp"
+
+#include <cstddef>
+#include <cstdint>
+#include <string>
+#include <string_view>
+
+#include <unistd.h>
 
 namespace rocprofsys
 {
@@ -15,11 +26,6 @@ namespace rocprofiler_sdk
 {
 namespace
 {
-uint64_t
-get_parent_stack_id(rocprofiler_correlation_id_t corr_id)
-{
-    return corr_id.external.value;
-}
 
 void
 cache_add_thread_info(rocprofiler_thread_id_t thread_id)
@@ -38,20 +44,20 @@ cache_category()
 
 void
 write_to_cache(const rocprofiler_callback_tracing_record_t& record, std::string_view name,
-               uint64_t begin_ts, uint64_t end_ts, std::string& args)
+               uint64_t begin_ts, uint64_t end_ts, const std::string& args)
 {
     cache_add_thread_info(record.thread_id);
 
     trace_cache::get_buffer_storage().store(trace_cache::region_sample{
         record.thread_id, std::string{ name }.c_str(), record.correlation_id.internal,
-        get_parent_stack_id(record.correlation_id), begin_ts, end_ts, "{}", args,
+        record.correlation_id.external.value, begin_ts, end_ts, "{}", args,
         trait::name<category::rocm_marker_api>::value });
 }
 }  // namespace
 
-marker_writer::marker_writer()
-: m_use_perfetto(config::get_use_perfetto())
-, m_use_timemory(config::get_use_timemory())
+marker_writer::marker_writer(bool use_perfetto, bool use_timemory)
+: m_use_perfetto(use_perfetto)
+, m_use_timemory(use_timemory)
 {
     cache_category();
 }
@@ -67,7 +73,7 @@ marker_writer::write_begin(std::string_view name) const
 
 void
 marker_writer::write_end(std::string_view name, uint64_t begin_ts, uint64_t end_ts,
-                         std::string&                          args,
+                         const std::string&                    args,
                          rocprofiler_callback_tracing_record_t record) const
 {
     if(m_use_timemory)

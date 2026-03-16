@@ -3,9 +3,10 @@
 
 #pragma once
 
-#include <rocprofiler-sdk/callback_tracing.h>
+#include <rocprofiler-sdk/fwd.h>
 
 #include <cstdint>
+#include <string>
 #include <string_view>
 
 namespace rocprofsys
@@ -19,7 +20,7 @@ namespace rocprofiler_sdk
 class marker_writer
 {
 public:
-    marker_writer();
+    marker_writer(bool use_perfetto, bool use_timemory);
     ~marker_writer() = default;
 
     marker_writer(const marker_writer&)            = delete;
@@ -30,7 +31,8 @@ public:
     void write_begin(std::string_view name) const;
 
     void write_end(std::string_view name, uint64_t begin_ts, uint64_t end_ts,
-                   std::string& args, rocprofiler_callback_tracing_record_t record) const;
+                   const std::string&                    args,
+                   rocprofiler_callback_tracing_record_t record) const;
 
 private:
     bool m_use_perfetto{ false };

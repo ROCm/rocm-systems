@@ -22,15 +22,12 @@
 #include "library/rocprofiler-sdk/counters.hpp"
 #include "library/rocprofiler-sdk/fwd.hpp"
 #include "library/rocprofiler-sdk/rccl.hpp"
+#include "library/rocprofiler-sdk/trace_control.hpp"
 #include "library/thread_info.hpp"
 #include "library/tracing.hpp"
 #include "rocprofiler-sdk.hpp"
 #include "rocprofiler-sdk/roctx_client.hpp"
-#include "rocprofiler-sdk/trace_control.hpp"
 
-#include <algorithm>
-#include <memory>
-#include <set>
 #include <timemory/components/timing/wall_clock.hpp>
 #include <timemory/hash/types.hpp>
 #include <timemory/unwind/processed_entry.hpp>
@@ -57,8 +54,6 @@
 
 #include <timemory/defines.h>
 #include <timemory/process/threading.hpp>
-#include <timemory/utility/delimit.hpp>
-#include <timemory/utility/demangle.hpp>
 #include <timemory/utility/types.hpp>
 
 #include <nlohmann/json.hpp>
@@ -66,10 +61,12 @@
 
 #include "logger/debug.hpp"
 
+#include <algorithm>
 #include <atomic>
 #include <cctype>
 #include <cstdint>
 #include <iostream>
+#include <memory>
 #include <mutex>
 #include <regex>
 #include <set>
@@ -89,6 +86,30 @@ namespace
 using tool_agent_vec_t                       = std::vector<tool_agent>;
 client_data*                  tool_data      = new client_data{};
 std::shared_ptr<roctx_client> g_roctx_client = {};
+
+std::shared_ptr<roctx_client>
+get_roctx_client()
+{
+    if(!g_roctx_client)
+    {
+        const auto _domains =
+            tim::delimit(config::get_setting_value<std::string>("ROCPROFSYS_ROCM_DOMAINS")
+                             .value_or(std::string{}),
+                         " ,;:\t\n");
+        const auto roctx_write_enabled =
+            (std::find(_domains.begin(), _domains.end(), "marker_api") !=
+                 _domains.end() ||
+             std::find(_domains.begin(), _domains.end(), "roctx") != _domains.end());
+        const auto roctx_traced_regions = config::get_trace_region();
+
+        const auto roctx_config =
+            roctx_client_config{ roctx_write_enabled, config::get_use_perfetto(),
+                                 config::get_use_timemory(), roctx_traced_regions };
+        g_roctx_client = std::make_shared<roctx_client>(roctx_config);
+    }
+
+    return g_roctx_client;
+}
 
 void
 thread_precreate(rocprofiler_runtime_library_t /*lib*/, void* /*tool_data*/)
@@ -2501,8 +2522,8 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     // roctx_client (registered later in library.cpp).
     g_roctx_client->configure_services(_data->control_ctx);
 
-    auto control          = get_trace_controller();
-    auto filtering_active = control->region_filter_active();
+    const auto control          = get_roctx_client()->get_controller();
+    const auto filtering_active = control->region_filter_active();
     if(!filtering_active)
     {
         start();
@@ -2544,30 +2565,13 @@ tool_fini(void* callback_data)
     delete tool_data;
     tool_data = nullptr;
 }
+
 }  // namespace
 
-std::shared_ptr<roctx_client>
-get_roctx_client()
+std::shared_ptr<control::trace_control>
+get_trace_controller()
 {
-    if(!g_roctx_client)
-    {
-        auto _domains =
-            tim::delimit(config::get_setting_value<std::string>("ROCPROFSYS_ROCM_DOMAINS")
-                             .value_or(std::string{}),
-                         " ,;:\t\n");
-        auto roctx_write_enabled =
-            (std::find(_domains.begin(), _domains.end(), "marker_api") !=
-                 _domains.end() ||
-             std::find(_domains.begin(), _domains.end(), "roctx") != _domains.end());
-        auto roctx_traced_regions = config::get_trace_region();
-
-        auto roctx_config =
-            roctx_client_config{ roctx_write_enabled, config::get_use_timemory(),
-                                 roctx_traced_regions };
-        g_roctx_client = std::make_shared<roctx_client>(roctx_config);
-    }
-
-    return g_roctx_client;
+    return get_roctx_client()->get_controller();
 }
 
 void
@@ -2599,13 +2603,6 @@ post_process()
 void
 sample()
 {}
-
-std::shared_ptr<control::trace_control>
-get_trace_controller()
-{
-    auto client = get_roctx_client();
-    return client->get_controller();
-}
 
 void
 flush()

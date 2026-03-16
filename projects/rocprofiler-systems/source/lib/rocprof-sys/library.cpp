@@ -711,6 +711,11 @@ rocprofsys_init_tooling_hidden(void)
             };
             trace_controller->register_region_start_callback(start_callback);
             trace_controller->register_region_stop_callback(stop_callback);
+
+            if(trace_controller->region_filter_active())
+            {
+                trace_controller->handle_pause();
+            }
         }
 
         set_state(State::Active);  // set to active as very last operation

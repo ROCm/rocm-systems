@@ -3,9 +3,8 @@
 
 #pragma once
 
-#include "core/defines.hpp"
-
 #include <atomic>
+#include <cstdint>
 #include <functional>
 #include <mutex>
 #include <set>

@@ -2,25 +2,31 @@
 // SPDX-License-Identifier: MIT
 
 #include "library/rocprofiler-sdk/roctx_client.hpp"
-
-#include "core/common_types.hpp"
-#include "core/config.hpp"
-#include "core/demangler.hpp"
-#include "core/timemory.hpp"
-#include "core/trace_cache/cache_manager.hpp"
+#include "library/rocprofiler-sdk/trace_control.hpp"
 #include "library/tracing.hpp"
 
+#include "core/categories.hpp"
+#include "core/common_types.hpp"
+#include "core/demangler.hpp"
+#include "core/trace_cache/cache_manager.hpp"
+#include "core/trace_cache/metadata_registry.hpp"
+
+#include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/cxx/name_info.hpp>
+#include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/marker/api_id.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
 #include <timemory/hash/types.hpp>
-#include <timemory/utility/delimit.hpp>
 
 #include "logger/debug.hpp"
 
-#include <algorithm>
 #include <array>
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <string_view>
 #include <tuple>
 #include <vector>
 
@@ -75,16 +81,16 @@ get_operation_name(rocprofiler_callback_tracing_record_t record)
 }  // namespace
 
 roctx_client::roctx_client(roctx_client_config roctx_cfg)
-: m_controller{ std::make_shared<control::trace_control>(
+: m_config{ roctx_cfg }
+, m_writer{ roctx_cfg.use_perfetto, roctx_cfg.use_timemory }
+, m_controller{ std::make_shared<control::trace_control>(
       roctx_cfg.selected_trace_regions) }
-, m_write_enabled{ roctx_cfg.is_write_enabled }
-, m_use_timemory{ roctx_cfg.use_timemory }
 {}
 
 bool
 roctx_client::should_write_markers() const
 {
-    return (m_write_enabled && m_controller->should_write_markers());
+    return (m_config.is_write_enabled && m_controller->should_write_markers());
 }
 
 void
@@ -127,7 +133,7 @@ roctx_client::handle_marker_core_enter(rocprofiler_callback_tracing_record_t rec
         case ROCPROFILER_MARKER_CORE_API_ID_roctxRangePushA:
         {
             const char* name = data->args.roctxRangePushA.message;
-            auto        hash = tim::add_hash_id(name);
+            const auto  hash = tim::add_hash_id(name);
             m_pushed_ranges.emplace_back(hash, ts, write_enabled);
 
             if(write_enabled)
@@ -149,7 +155,7 @@ roctx_client::handle_marker_core_enter(rocprofiler_callback_tracing_record_t rec
             const char* name = data->args.roctxMarkA.message;
             tim::add_hash_id(name);
 
-            if(write_enabled && m_use_timemory)
+            if(write_enabled && m_config.use_timemory)
             {
                 tracing::push_timemory(category::rocm_marker_api{}, name);
             }
@@ -159,7 +165,7 @@ roctx_client::handle_marker_core_enter(rocprofiler_callback_tracing_record_t rec
         {
             // For other operations (like roctxGetThreadId), push to timemory
             // They will be written in EXIT phase with duration
-            if(write_enabled && m_use_timemory)
+            if(write_enabled && m_config.use_timemory)
             {
                 auto name = get_operation_name(record);
                 tracing::push_timemory(category::rocm_marker_api{}, name);
@@ -179,13 +185,13 @@ roctx_client::handle_marker_core_exit(rocprofiler_callback_tracing_record_t reco
 {
     auto* data =
         static_cast<rocprofiler_callback_tracing_marker_api_data_t*>(record.payload);
-    uint64_t begin_ts = user_data->value;
+    const uint64_t begin_ts = user_data->value;
 
     auto args = function_args_t{};
     rocprofiler_iterate_callback_tracing_kind_operation_args(
         record, iterate_args_callback, 2, &args);
 
-    std::string args_str = get_args_string(args);
+    const std::string args_str = get_args_string(args);
 
     switch(record.operation)
     {
