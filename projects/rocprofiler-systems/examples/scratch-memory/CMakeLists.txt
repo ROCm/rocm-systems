@@ -14,8 +14,8 @@ if(ROCPROFSYS_DISABLE_EXAMPLES)
     get_filename_component(_DIR ${CMAKE_CURRENT_LIST_DIR} NAME)
 
     if(
-        PROJECT_NAME IN_LIST ROCPROFSYS_DISABLE_EXAMPLES
-        OR _DIR IN_LIST ROCPROFSYS_DISABLE_EXAMPLES
+        ${PROJECT_NAME} IN_LIST ROCPROFSYS_DISABLE_EXAMPLES
+        OR ${_DIR} IN_LIST ROCPROFSYS_DISABLE_EXAMPLES
     )
         return()
     endif()
@@ -74,35 +74,20 @@ endif()
 
 find_package(Threads REQUIRED)
 
-# For standalone builds with HIP language enabled, use HIP language
-if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME AND CMAKE_HIP_COMPILER)
-    set_source_files_properties(scratch-memory.cpp PROPERTIES LANGUAGE HIP)
-    add_executable(scratch-memory scratch-memory.cpp)
-    target_compile_options(
-        scratch-memory
-        PRIVATE -W -Wall -Wextra -Wpedantic -Wshadow -Werror
-    )
-    target_link_libraries(scratch-memory PRIVATE Threads::Threads ${HSA_RUNTIME_LIBRARY})
-    set_target_properties(
-        scratch-memory
-        PROPERTIES HIP_ARCHITECTURES "${ROCPROFSYS_GFX_TARGETS}"
-    )
-else()
-    add_executable(scratch-memory scratch-memory.cpp)
-    target_compile_options(
-        scratch-memory
-        PRIVATE -W -Wall -Wextra -Wpedantic -Wshadow -Werror
-    )
-    target_link_libraries(scratch-memory PRIVATE Threads::Threads ${HSA_RUNTIME_LIBRARY})
+add_executable(scratch-memory scratch-memory.cpp)
+target_compile_options(
+    scratch-memory
+    PRIVATE -W -Wall -Wextra -Wpedantic -Wshadow -Werror
+)
+target_link_libraries(scratch-memory PRIVATE Threads::Threads ${HSA_RUNTIME_LIBRARY})
 
-    foreach(arch IN LISTS ROCPROFSYS_GFX_TARGETS)
-        target_compile_options(scratch-memory PRIVATE --offload-arch=${arch})
-        target_link_options(scratch-memory PUBLIC --offload-arch=${arch})
-    endforeach()
+foreach(arch IN LISTS ROCPROFSYS_GFX_TARGETS)
+    target_compile_options(scratch-memory PRIVATE --offload-arch=${arch})
+    target_link_options(scratch-memory PRIVATE --offload-arch=${arch})
+endforeach()
 
-    if(NOT CMAKE_CXX_COMPILER_IS_HIPCC)
-        rocprofiler_systems_custom_compilation(COMPILER ${HIPCC_EXECUTABLE} TARGET scratch-memory)
-    endif()
+if(NOT CMAKE_CXX_COMPILER_IS_HIPCC AND HIPCC_EXECUTABLE)
+    rocprofiler_systems_custom_compilation(COMPILER ${HIPCC_EXECUTABLE} TARGET scratch-memory)
 endif()
 
 if(ROCPROFSYS_INSTALL_EXAMPLES AND TARGET scratch-memory)

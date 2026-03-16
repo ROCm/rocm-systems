@@ -69,46 +69,37 @@ find_library(
     REQUIRED
 )
 
-# For standalone builds with HIP language enabled, use HIP language
-if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME AND CMAKE_HIP_COMPILER)
-    set_source_files_properties(roctx.cpp PROPERTIES LANGUAGE HIP)
-    add_executable(roctx roctx.cpp)
-    target_link_libraries(roctx PRIVATE Threads::Threads ${ROCTX_LIBRARY})
-    set_target_properties(roctx PROPERTIES HIP_ARCHITECTURES "${ROCPROFSYS_GFX_TARGETS}")
-else()
-    add_executable(roctx roctx.cpp)
-    target_link_libraries(roctx PRIVATE Threads::Threads ${ROCTX_LIBRARY})
+add_executable(roctx roctx.cpp)
+target_link_libraries(roctx PRIVATE Threads::Threads ${ROCTX_LIBRARY})
 
-    if(
-        CMAKE_CXX_COMPILER_ID MATCHES "Clang"
-        AND NOT CMAKE_CXX_COMPILER_IS_HIPCC
-        AND NOT HIPCC_EXECUTABLE
+if(
+    CMAKE_CXX_COMPILER_ID MATCHES "Clang"
+    AND NOT CMAKE_CXX_COMPILER_IS_HIPCC
+    AND NOT HIPCC_EXECUTABLE
+)
+    target_link_libraries(
+        roctx
+        PRIVATE
+            $<TARGET_NAME_IF_EXISTS:rocprofiler-systems::rocprofiler-systems-compile-options>
+            $<TARGET_NAME_IF_EXISTS:hip::host>
+            $<TARGET_NAME_IF_EXISTS:hip::device>
     )
-        target_link_libraries(
-            roctx
-            PRIVATE
-                $<TARGET_NAME_IF_EXISTS:rocprofiler-systems::rocprofiler-systems-compile-options>
-                $<TARGET_NAME_IF_EXISTS:hip::host>
-                $<TARGET_NAME_IF_EXISTS:hip::device>
-        )
-    else()
-        target_compile_options(roctx PRIVATE -W -Wall)
-    endif()
+else()
+    target_compile_options(roctx PRIVATE -W -Wall)
+endif()
 
-    if("${CMAKE_BUILD_TYPE}" MATCHES "Release")
-        target_compile_options(roctx PRIVATE -g1)
-    endif()
+if("${CMAKE_BUILD_TYPE}" MATCHES "Release")
+    target_compile_options(roctx PRIVATE -g1)
+endif()
 
-    # Specify GPU architectures to compile for
-    foreach(arch IN LISTS ROCPROFSYS_GFX_TARGETS)
-        target_compile_options(roctx PRIVATE --offload-arch=${arch})
-        target_link_options(roctx PUBLIC --offload-arch=${arch})
-    endforeach()
+# Specify GPU architectures to compile for
+foreach(arch IN LISTS ROCPROFSYS_GFX_TARGETS)
+    target_compile_options(roctx PRIVATE --offload-arch=${arch})
+    target_link_options(roctx PRIVATE --offload-arch=${arch})
+endforeach()
 
-    if(NOT CMAKE_CXX_COMPILER_IS_HIPCC AND HIPCC_EXECUTABLE)
-        # defined in MacroUtilities.cmake
-        rocprofiler_systems_custom_compilation(COMPILER ${HIPCC_EXECUTABLE} TARGET roctx)
-    endif()
+if(NOT CMAKE_CXX_COMPILER_IS_HIPCC AND HIPCC_EXECUTABLE)
+    rocprofiler_systems_custom_compilation(COMPILER ${HIPCC_EXECUTABLE} TARGET roctx)
 endif()
 
 if(ROCPROFSYS_INSTALL_EXAMPLES AND TARGET roctx)

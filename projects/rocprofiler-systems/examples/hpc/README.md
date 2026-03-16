@@ -24,11 +24,11 @@ Fortran Jacobi solver using OpenMP target data directives with profiling markers
 
 ### jacobi-fortran-usm
 
-Fortran Jacobi solver using Unified Shared Memory (USM) for automatic data migration between host and device.
+Fortran Jacobi solver using Unified Shared Memory (USM) for automatic data migration between host and device. Requires a GPU with XNACK support — see [OpenMP USM documentation](https://rocm.docs.amd.com/projects/llvm-project/en/latest/conceptual/openmp.html#unified-shared-memory) for details.
 
 **Source files:** Same structure as `jacobi-fortran-targetdata-markers` with USM modifications.
 
-**Dependencies:** Fortran compiler with OpenMP USM support
+**Dependencies:** Fortran compiler with OpenMP USM support, GPU with XNACK support (`HSA_XNACK=1`)
 
 ### matrix-exponential-streams-sync-hip
 
@@ -36,7 +36,7 @@ Computes a matrix exponential via truncated Taylor series using HIP and rocBLAS,
 
 **Source files:** `mat_exp.cpp`
 
-**Dependencies:** HIP, rocBLAS, OpenMP
+**Dependencies:** HIP, rocBLAS, OpenMP, rocprofiler-sdk-roctx (for markers)
 
 **Parameters:** N=20 truncation terms, t=0.5 evaluation point, 4 OpenMP threads (= 4 HIP streams)
 
@@ -54,7 +54,7 @@ Julia language vector addition example demonstrating GPU profiling of Julia work
 
 **Source files:** `vecadd.jl`
 
-**Dependencies:** Julia runtime
+**Dependencies:** Julia runtime, AMDGPU package (`julia -e 'import Pkg; Pkg.add("AMDGPU")'`)
 
 ## Prerequisites
 
@@ -89,7 +89,7 @@ Individual sub-examples can be built by target name as defined in their respecti
 rocprof-sys-run -- ./jacobi-hip
 
 # Profile matrix exponential
-rocprof-sys-run -- ./mat_exp
+rocprof-sys-run -- ./matrix-exponential-streams-synx-hip
 ```
 
 ### Recommended Configuration

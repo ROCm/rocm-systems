@@ -15,7 +15,9 @@ string(REPLACE " " ";" _FLAGS "${CMAKE_CXX_FLAGS_DEBUG}")
 list(APPEND _FLAGS -fno-inline)
 
 find_package(Threads REQUIRED)
-find_package(rocprofiler-systems REQUIRED COMPONENTS user)
+if(NOT TARGET rocprofiler-systems::rocprofiler-systems-user-library)
+    find_package(rocprofiler-systems REQUIRED COMPONENTS user)
+endif()
 
 # Basic fork example
 add_executable(fork-example fork.cpp)
@@ -65,64 +67,43 @@ if(HIPCC_EXECUTABLE)
         OR (CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND HIPCC_EXECUTABLE)
         OR COMMAND rocprofiler_systems_custom_compilation
     )
-        # For standalone builds with HIP language enabled, use HIP language
-        if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME AND CMAKE_HIP_COMPILER)
-            set_source_files_properties(
-                hipMallocConcurrencyMproc.cpp
-                PROPERTIES LANGUAGE HIP
-            )
-            add_executable(hipMallocConcurrencyMproc hipMallocConcurrencyMproc.cpp)
-            target_link_libraries(hipMallocConcurrencyMproc PRIVATE Threads::Threads)
-            target_compile_options(hipMallocConcurrencyMproc PRIVATE -W -Wall)
-            set_target_properties(
+        add_executable(hipMallocConcurrencyMproc hipMallocConcurrencyMproc.cpp)
+        target_link_libraries(hipMallocConcurrencyMproc PRIVATE Threads::Threads)
+        set_target_properties(
+            hipMallocConcurrencyMproc
+            PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}"
+        )
+        # Specify GPU architectures to compile for
+        foreach(arch IN LISTS ROCPROFSYS_GFX_TARGETS)
+            target_compile_options(
                 hipMallocConcurrencyMproc
-                PROPERTIES
-                    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}"
-                    HIP_ARCHITECTURES "${ROCPROFSYS_GFX_TARGETS}"
+                PRIVATE --offload-arch=${arch}
+            )
+            target_link_options(hipMallocConcurrencyMproc PRIVATE --offload-arch=${arch})
+        endforeach()
+
+        if(
+            CMAKE_CXX_COMPILER_ID MATCHES "Clang"
+            AND NOT CMAKE_CXX_COMPILER_IS_HIPCC
+            AND NOT HIPCC_EXECUTABLE
+        )
+            target_link_libraries(
+                hipMallocConcurrencyMproc
+                PRIVATE
+                    $<TARGET_NAME_IF_EXISTS:rocprofiler-systems::rocprofiler-systems-compile-options>
+                    $<TARGET_NAME_IF_EXISTS:hip::host>
+                    $<TARGET_NAME_IF_EXISTS:hip::device>
             )
         else()
-            add_executable(hipMallocConcurrencyMproc hipMallocConcurrencyMproc.cpp)
-            target_link_libraries(hipMallocConcurrencyMproc PRIVATE Threads::Threads)
-            set_target_properties(
-                hipMallocConcurrencyMproc
-                PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}"
-            )
-            # Specify GPU architectures to compile for
-            foreach(arch IN LISTS ROCPROFSYS_GFX_TARGETS)
-                target_compile_options(
-                    hipMallocConcurrencyMproc
-                    PRIVATE --offload-arch=${arch}
-                )
-                target_link_options(
-                    hipMallocConcurrencyMproc
-                    PUBLIC --offload-arch=${arch}
-                )
-            endforeach()
+            target_compile_options(hipMallocConcurrencyMproc PRIVATE -W -Wall)
+        endif()
 
-            if(
-                CMAKE_CXX_COMPILER_ID MATCHES "Clang"
-                AND NOT CMAKE_CXX_COMPILER_IS_HIPCC
-                AND NOT HIPCC_EXECUTABLE
-            )
-                target_link_libraries(
-                    hipMallocConcurrencyMproc
-                    PRIVATE
-                        $<TARGET_NAME_IF_EXISTS:rocprofiler-systems::rocprofiler-systems-compile-options>
-                        $<TARGET_NAME_IF_EXISTS:hip::host>
-                        $<TARGET_NAME_IF_EXISTS:hip::device>
-                )
-            else()
-                target_compile_options(hipMallocConcurrencyMproc PRIVATE -W -Wall)
-            endif()
+        if("${CMAKE_BUILD_TYPE}" MATCHES "Release")
+            target_compile_options(hipMallocConcurrencyMproc PRIVATE -g1)
+        endif()
 
-            if("${CMAKE_BUILD_TYPE}" MATCHES "Release")
-                target_compile_options(hipMallocConcurrencyMproc PRIVATE -g1)
-            endif()
-
-            if(NOT CMAKE_CXX_COMPILER_IS_HIPCC AND HIPCC_EXECUTABLE)
-                # defined in MacroUtilities.cmake
-                rocprofiler_systems_custom_compilation(COMPILER ${HIPCC_EXECUTABLE} TARGET hipMallocConcurrencyMproc)
-            endif()
+        if(NOT CMAKE_CXX_COMPILER_IS_HIPCC AND HIPCC_EXECUTABLE)
+            rocprofiler_systems_custom_compilation(COMPILER ${HIPCC_EXECUTABLE} TARGET hipMallocConcurrencyMproc)
         endif()
 
         if(ROCPROFSYS_INSTALL_EXAMPLES AND TARGET hipMallocConcurrencyMproc)

@@ -15,6 +15,10 @@ This directory contains NAS Parallel Benchmarks (NPB) implemented with OpenMP th
 - `target/main.cpp` - OpenMP target offloading example demonstrating GPU computation via `#pragma omp target`.
 - `target/library.cpp` - Companion library for target offloading tests.
 
+### OpenMP Validation and Verification (ompvv)
+
+- `external/ompvv/` - Git submodule containing the [OpenMP V&V](https://github.com/OpenMP-Validation-and-Verification/OpenMP_VV) test suite for verifying OpenMP offloading correctness. Initialize with `git submodule update --init`.
+
 ## Prerequisites
 
 - CMake 3.21+

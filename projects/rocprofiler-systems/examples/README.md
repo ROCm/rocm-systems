@@ -68,12 +68,22 @@ This directory contains example applications demonstrating various profiling sce
 
 ## Building All Examples
 
-The examples are built as part of the rocprofiler-systems CMake project. To build them standalone:
+The examples are built as part of the rocprofiler-systems CMake project. To build them standalone, run from the `examples/` directory:
 
 ```bash
 cmake -B build \
     -DCMAKE_PREFIX_PATH=/opt/rocm \
     -DCMAKE_INSTALL_PREFIX=./install \
+    .
+
+cmake --build build --parallel
+```
+
+Or from the repository root:
+
+```bash
+cmake -B build \
+    -DCMAKE_PREFIX_PATH=/opt/rocm \
     projects/rocprofiler-systems/examples
 
 cmake --build build --parallel
@@ -85,7 +95,7 @@ Individual examples can be built by specifying the target:
 cmake --build build --target transpose
 ```
 
-GPU examples require `hipcc` and detect available architectures automatically via `offload-arch`. To specify architectures manually:
+GPU examples require ROCm (`hipcc` or `amdclang++`) and detect available architectures automatically. To specify architectures manually:
 
 ```bash
 cmake -B build -DROCPROFSYS_GFX_TARGETS="gfx90a;gfx942" ...
@@ -98,9 +108,9 @@ rocprofiler-systems supports several instrumentation modes:
 | Mode | Command | Description |
 |------|---------|-------------|
 | System-level | `rocprof-sys-run -- ./app` | Lightweight tracing via `LD_PRELOAD`, no binary modification |
-| Binary rewrite | `rocprof-sys-instrument -o app.inst -- ./app` then `./app.inst` | Statically rewrite the binary for repeated profiling |
+| Binary rewrite | `rocprof-sys-instrument -o app.inst -- ./app` then `rocprof-sys-run -- ./app.inst` | Statically rewrite the binary for repeated profiling |
 | Runtime instrument | `rocprof-sys-instrument -- ./app` | Dynamically instrument at launch without modifying the binary |
-| Sampling | `rocprof-sys-run -e ROCPROFSYS_USE_SAMPLING=ON -- ./app` | Statistical sampling of call stacks at configurable frequency |
+| Sampling | `rocprof-sys-sample -- ./app` | Statistical sampling of call stacks at configurable frequency |
 | Causal | `rocprof-sys-causal -- ./app` | Causal profiling to identify optimization opportunities |
 
 ### Common Environment Variables
@@ -109,6 +119,7 @@ rocprofiler-systems supports several instrumentation modes:
 |----------|-------------|---------|
 | `ROCPROFSYS_TRACE` | Enable Perfetto trace output | `true` |
 | `ROCPROFSYS_PROFILE` | Enable call-stack profile output | `true` |
+| `ROCPROFSYS_USE_ROCPD` | Generate `rocpd` database output | `false` |
 | `ROCPROFSYS_USE_SAMPLING` | Enable statistical sampling | `false` |
 | `ROCPROFSYS_SAMPLING_FREQ` | Sampling frequency (interrupts/sec) | `50` |
 | `ROCPROFSYS_USE_PROCESS_SAMPLING` | Enable process-level resource sampling | `true` |

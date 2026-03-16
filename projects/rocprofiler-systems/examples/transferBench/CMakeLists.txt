@@ -96,71 +96,45 @@ if(NOT HSA_RUNTIME_LIBRARY OR NOT HSA_RUNTIME_INCLUDE_DIR)
     return()
 endif()
 
-# For standalone builds with HIP language enabled, use HIP language
-if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME AND CMAKE_HIP_COMPILER)
-    set_source_files_properties(AllToAll.cpp PROPERTIES LANGUAGE HIP)
-    add_executable(transferBench AllToAll.cpp)
-    target_link_libraries(transferBench PRIVATE Threads::Threads ${HSA_RUNTIME_LIBRARY})
-    target_include_directories(
+add_executable(transferBench AllToAll.cpp)
+target_link_libraries(transferBench PRIVATE Threads::Threads ${HSA_RUNTIME_LIBRARY})
+target_include_directories(
+    transferBench
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${HSA_RUNTIME_INCLUDE_DIR}
+)
+
+if(
+    CMAKE_CXX_COMPILER_ID MATCHES "Clang"
+    AND NOT CMAKE_CXX_COMPILER_IS_HIPCC
+    AND NOT HIPCC_EXECUTABLE
+)
+    target_link_libraries(
         transferBench
-        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${HSA_RUNTIME_INCLUDE_DIR}
-    )
-    target_compile_options(transferBench PRIVATE -W -Wall)
-    # Filter out APU-only targets for HIP_ARCHITECTURES
-    set(_TRANSFER_BENCH_ARCHES)
-    foreach(arch IN LISTS ROCPROFSYS_GFX_TARGETS)
-        rocprofiler_systems_lookup_gfx(${arch} GPU_CATEGORIES)
-        if("apu" IN_LIST GPU_CATEGORIES AND NOT "instinct" IN_LIST GPU_CATEGORIES)
-            continue()
-        endif()
-        list(APPEND _TRANSFER_BENCH_ARCHES ${arch})
-    endforeach()
-    set_target_properties(
-        transferBench
-        PROPERTIES HIP_ARCHITECTURES "${_TRANSFER_BENCH_ARCHES}"
+        PRIVATE
+            $<TARGET_NAME_IF_EXISTS:rocprofiler-systems::rocprofiler-systems-compile-options>
+            $<TARGET_NAME_IF_EXISTS:hip::host>
+            $<TARGET_NAME_IF_EXISTS:hip::device>
     )
 else()
-    add_executable(transferBench AllToAll.cpp)
-    target_link_libraries(transferBench PRIVATE Threads::Threads ${HSA_RUNTIME_LIBRARY})
-    target_include_directories(
-        transferBench
-        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${HSA_RUNTIME_INCLUDE_DIR}
-    )
+    target_compile_options(transferBench PRIVATE -W -Wall)
+endif()
 
-    if(
-        CMAKE_CXX_COMPILER_ID MATCHES "Clang"
-        AND NOT CMAKE_CXX_COMPILER_IS_HIPCC
-        AND NOT HIPCC_EXECUTABLE
-    )
-        target_link_libraries(
-            transferBench
-            PRIVATE
-                $<TARGET_NAME_IF_EXISTS:rocprofiler-systems::rocprofiler-systems-compile-options>
-                $<TARGET_NAME_IF_EXISTS:hip::host>
-                $<TARGET_NAME_IF_EXISTS:hip::device>
-        )
-    else()
-        target_compile_options(transferBench PRIVATE -W -Wall)
+if("${CMAKE_BUILD_TYPE}" MATCHES "Release")
+    target_compile_options(transferBench PRIVATE -g1)
+endif()
+
+# Specify GPU architectures to compile for (skip APU-only targets)
+foreach(arch IN LISTS ROCPROFSYS_GFX_TARGETS)
+    rocprofiler_systems_lookup_gfx(${arch} GPU_CATEGORIES)
+    if("apu" IN_LIST GPU_CATEGORIES AND NOT "instinct" IN_LIST GPU_CATEGORIES)
+        continue()
     endif()
+    target_compile_options(transferBench PRIVATE --offload-arch=${arch})
+    target_link_options(transferBench PRIVATE --offload-arch=${arch})
+endforeach()
 
-    if("${CMAKE_BUILD_TYPE}" MATCHES "Release")
-        target_compile_options(transferBench PRIVATE -g1)
-    endif()
-
-    # Specify GPU architectures to compile for
-    foreach(arch IN LISTS ROCPROFSYS_GFX_TARGETS)
-        rocprofiler_systems_lookup_gfx(${arch} GPU_CATEGORIES)
-        if("apu" IN_LIST GPU_CATEGORIES AND NOT "instinct" IN_LIST GPU_CATEGORIES)
-            continue()
-        endif()
-        target_compile_options(transferBench PRIVATE --offload-arch=${arch})
-        target_link_options(transferBench PUBLIC --offload-arch=${arch})
-    endforeach()
-
-    if(NOT CMAKE_CXX_COMPILER_IS_HIPCC AND HIPCC_EXECUTABLE)
-        # defined in MacroUtilities.cmake
-        rocprofiler_systems_custom_compilation(COMPILER ${HIPCC_EXECUTABLE} TARGET transferBench)
-    endif()
+if(NOT CMAKE_CXX_COMPILER_IS_HIPCC AND HIPCC_EXECUTABLE)
+    rocprofiler_systems_custom_compilation(COMPILER ${HIPCC_EXECUTABLE} TARGET transferBench)
 endif()
 
 if(ROCPROFSYS_INSTALL_EXAMPLES AND TARGET transferBench)

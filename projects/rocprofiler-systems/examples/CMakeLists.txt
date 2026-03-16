@@ -31,6 +31,10 @@ if(CMAKE_PROJECT_NAME STREQUAL "rocprofiler-systems")
     rocprofiler_systems_add_option(ROCPROFSYS_INSTALL_EXAMPLES
                                    "Install rocprofiler-systems examples" OFF
     )
+elseif(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
+    # Standalone build of the full examples suite
+    include(${CMAKE_CURRENT_LIST_DIR}/cmake/standalone-helpers.cmake)
+    option(ROCPROFSYS_INSTALL_EXAMPLES "Install rocprofiler-systems examples" ON)
 else()
     option(ROCPROFSYS_INSTALL_EXAMPLES "Install rocprofiler-systems examples" ON)
 endif()

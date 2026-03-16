@@ -217,14 +217,60 @@ endfunction()
 
 # ----------------------------------------------------------------------------
 # rocprofiler_systems_custom_compilation()
-# Sets up custom compiler (hipcc) for a target
+# Sets up custom compiler for a target using the launch-compiler wrapper
 #
-# In standalone mode, this is a no-op since we handle HIP compilation
-# differently (via CMAKE_HIP_COMPILER or enable_language(HIP))
+# Uses the rocprof-sys-launch-compiler script to redirect compilation
+# to the specified compiler (e.g., hipcc) while keeping CMAKE_CXX_COMPILER
+# as the nominal compiler. This avoids enable_language(HIP) which can fail
+# on build systems like TheRock that wrap compilers (e.g., resource_info.py).
+#
+# The launch-compiler script is found relative to the examples directory
+# (at ../../scripts/rocprof-sys-launch-compiler) or via PATH/ROCM_PATH.
+#
+# ARGS:
+#   COMPILER: Path to the compiler to use (e.g., hipcc)
+#   TARGET: Target to apply custom compilation to
 #
 function(ROCPROFILER_SYSTEMS_CUSTOM_COMPILATION)
-    # No-op in standalone mode - HIP is handled via enable_language(HIP)
-    # The full project version uses rocprof-sys-launch-compiler wrapper
+    cmake_parse_arguments(ARG "" "COMPILER;TARGET" "" ${ARGN})
+
+    if(NOT ARG_COMPILER OR NOT ARG_TARGET)
+        return()
+    endif()
+
+    if(NOT TARGET ${ARG_TARGET})
+        return()
+    endif()
+
+    if(NOT DEFINED ROCPROFSYS_COMPILE_LAUNCHER)
+        find_program(
+            ROCPROFSYS_COMPILE_LAUNCHER
+            NAMES rocprof-sys-launch-compiler
+            HINTS
+                ${ROCPROFSYS_EXAMPLE_ROOT_DIR}/../scripts
+                ${ROCPROFSYS_EXAMPLE_ROOT_DIR}/../../scripts
+                ${ROCM_PATH}
+                $ENV{ROCM_PATH}
+                /opt/rocm
+            PATH_SUFFIXES bin scripts
+        )
+    endif()
+
+    if(NOT ROCPROFSYS_COMPILE_LAUNCHER)
+        message(
+            AUTHOR_WARNING
+            "rocprof-sys-launch-compiler not found. "
+            "Cannot set up custom compilation for ${ARG_TARGET}."
+        )
+        return()
+    endif()
+
+    set(_LAUNCH_CMD
+        "${ROCPROFSYS_COMPILE_LAUNCHER} ${ARG_COMPILER} ${CMAKE_CXX_COMPILER}"
+    )
+
+    set_property(TARGET ${ARG_TARGET} PROPERTY RULE_LAUNCH_COMPILE "${_LAUNCH_CMD}")
+    set_property(TARGET ${ARG_TARGET} PROPERTY RULE_LAUNCH_LINK "${_LAUNCH_CMD}")
 endfunction()
 
 # ----------------------------------------------------------------------------
@@ -247,46 +293,29 @@ else()
 endif()
 
 # ----------------------------------------------------------------------------
-# Enable HIP language for standalone GPU example builds
+# Setup HIP compilation for standalone GPU example builds
 #
-# For standalone builds, we enable HIP as a first-class language instead of
-# using the launch-compiler wrapper approach used by the full project.
+# We avoid enable_language(HIP) because it can fail on build systems like
+# TheRock that wrap compilers (e.g., resource_info.py). Instead, we find
+# hipcc and use it via rocprofiler_systems_custom_compilation() which sets
+# RULE_LAUNCH_COMPILE/RULE_LAUNCH_LINK on individual targets.
 #
-# CMake's HIP language requires the ROCm clang directly (not hipcc wrapper)
+# This mirrors the approach used by the full project build (PR #3519).
 #
 if(ROCPROFSYS_GFX_TARGETS)
-    # Find ROCm's clang compiler (required for CMake HIP language)
     find_program(
-        _STANDALONE_AMDCLANG
-        NAMES amdclang++ clang++
+        HIPCC_EXECUTABLE
+        NAMES hipcc
         HINTS ${ROCM_PATH} $ENV{ROCM_PATH} /opt/rocm
-        PATH_SUFFIXES bin llvm/bin
+        PATH_SUFFIXES bin NO_CACHE
     )
+    mark_as_advanced(HIPCC_EXECUTABLE)
 
-    if(_STANDALONE_AMDCLANG)
-        # Set HIP compiler to clang (CMake doesn't accept hipcc wrapper)
-        set(CMAKE_HIP_COMPILER ${_STANDALONE_AMDCLANG} CACHE FILEPATH "HIP compiler")
-
-        # Set architectures for HIP targets
-        set(CMAKE_HIP_ARCHITECTURES
-            ${ROCPROFSYS_GFX_TARGETS}
-            CACHE STRING
-            "HIP architectures"
-        )
-
-        # Enable HIP language
-        include(CheckLanguage)
-        check_language(HIP)
-        if(CMAKE_HIP_COMPILER)
-            enable_language(HIP)
-            message(
-                STATUS
-                "[standalone] HIP language enabled with compiler: ${CMAKE_HIP_COMPILER}"
-            )
-        endif()
+    if(HIPCC_EXECUTABLE)
+        set(ROCPROFSYS_STANDALONE_HIP_AVAILABLE TRUE CACHE INTERNAL "")
+        message(STATUS "[standalone] HIP compilation via hipcc: ${HIPCC_EXECUTABLE}")
     else()
-        message(STATUS "[standalone] amdclang++ not found - HIP language not enabled")
+        set(ROCPROFSYS_STANDALONE_HIP_AVAILABLE FALSE CACHE INTERNAL "")
+        message(STATUS "[standalone] hipcc not found - GPU examples will be skipped")
     endif()
-
-    unset(_STANDALONE_AMDCLANG)
 endif()

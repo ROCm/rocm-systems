@@ -61,48 +61,36 @@ if(
     return()
 endif()
 
-# For standalone builds with HIP language enabled, use HIP language
-if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME AND CMAKE_HIP_COMPILER)
-    set_source_files_properties(sdma_test.cpp PROPERTIES LANGUAGE HIP)
-    add_executable(sdma_test sdma_test.cpp)
-    target_compile_options(sdma_test PRIVATE -W -Wall)
-    set_target_properties(
+add_executable(sdma_test sdma_test.cpp)
+
+# Specify GPU architectures to compile for
+foreach(arch IN LISTS ROCPROFSYS_GFX_TARGETS)
+    target_compile_options(sdma_test PRIVATE --offload-arch=${arch})
+    target_link_options(sdma_test PRIVATE --offload-arch=${arch})
+endforeach()
+
+if(
+    CMAKE_CXX_COMPILER_ID MATCHES "Clang"
+    AND NOT CMAKE_CXX_COMPILER_IS_HIPCC
+    AND NOT HIPCC_EXECUTABLE
+)
+    target_link_libraries(
         sdma_test
-        PROPERTIES HIP_ARCHITECTURES "${ROCPROFSYS_GFX_TARGETS}"
+        PRIVATE
+            $<TARGET_NAME_IF_EXISTS:rocprofiler-systems::rocprofiler-systems-compile-options>
+            $<TARGET_NAME_IF_EXISTS:hip::host>
+            $<TARGET_NAME_IF_EXISTS:hip::device>
     )
 else()
-    add_executable(sdma_test sdma_test.cpp)
+    target_compile_options(sdma_test PRIVATE -W -Wall)
+endif()
 
-    # Specify GPU architectures to compile for
-    foreach(arch IN LISTS ROCPROFSYS_GFX_TARGETS)
-        target_compile_options(sdma_test PRIVATE --offload-arch=${arch})
-        target_link_options(sdma_test PUBLIC --offload-arch=${arch})
-    endforeach()
+if("${CMAKE_BUILD_TYPE}" MATCHES "Release")
+    target_compile_options(sdma_test PRIVATE -g1)
+endif()
 
-    if(
-        CMAKE_CXX_COMPILER_ID MATCHES "Clang"
-        AND NOT CMAKE_CXX_COMPILER_IS_HIPCC
-        AND NOT HIPCC_EXECUTABLE
-    )
-        target_link_libraries(
-            sdma_test
-            PRIVATE
-                $<TARGET_NAME_IF_EXISTS:rocprofiler-systems::rocprofiler-systems-compile-options>
-                $<TARGET_NAME_IF_EXISTS:hip::host>
-                $<TARGET_NAME_IF_EXISTS:hip::device>
-        )
-    else()
-        target_compile_options(sdma_test PRIVATE -W -Wall)
-    endif()
-
-    if("${CMAKE_BUILD_TYPE}" MATCHES "Release")
-        target_compile_options(sdma_test PRIVATE -g1)
-    endif()
-
-    if(NOT CMAKE_CXX_COMPILER_IS_HIPCC AND HIPCC_EXECUTABLE)
-        # defined in MacroUtilities.cmake
-        rocprofiler_systems_custom_compilation(COMPILER ${HIPCC_EXECUTABLE} TARGET sdma_test)
-    endif()
+if(NOT CMAKE_CXX_COMPILER_IS_HIPCC AND HIPCC_EXECUTABLE)
+    rocprofiler_systems_custom_compilation(COMPILER ${HIPCC_EXECUTABLE} TARGET sdma_test)
 endif()
 
 if(ROCPROFSYS_INSTALL_EXAMPLES AND TARGET sdma_test)

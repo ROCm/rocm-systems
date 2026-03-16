@@ -68,25 +68,14 @@ if(TRANSPOSE_USE_MPI)
     find_package(MPI REQUIRED)
 endif()
 
-# For standalone builds with HIP language enabled, use .hip extension handling
-if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME AND CMAKE_HIP_COMPILER)
-    set_source_files_properties(transpose.cpp PROPERTIES LANGUAGE HIP)
-    add_executable(transpose transpose.cpp)
-    target_link_libraries(transpose PRIVATE Threads::Threads)
-    set_target_properties(
-        transpose
-        PROPERTIES HIP_ARCHITECTURES "${ROCPROFSYS_GFX_TARGETS}"
-    )
-else()
-    add_executable(transpose transpose.cpp)
-    target_link_libraries(transpose PRIVATE Threads::Threads)
+add_executable(transpose transpose.cpp)
+target_link_libraries(transpose PRIVATE Threads::Threads)
 
-    # Specify GPU architectures to compile for
-    foreach(arch IN LISTS ROCPROFSYS_GFX_TARGETS)
-        target_compile_options(transpose PRIVATE --offload-arch=${arch})
-        target_link_options(transpose PUBLIC --offload-arch=${arch})
-    endforeach()
-endif()
+# Specify GPU architectures to compile for
+foreach(arch IN LISTS ROCPROFSYS_GFX_TARGETS)
+    target_compile_options(transpose PRIVATE --offload-arch=${arch})
+    target_link_options(transpose PRIVATE --offload-arch=${arch})
+endforeach()
 
 if(
     CMAKE_CXX_COMPILER_ID MATCHES "Clang"
