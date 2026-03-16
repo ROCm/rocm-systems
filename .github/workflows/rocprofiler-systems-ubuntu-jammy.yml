@@ -46,7 +46,7 @@ env:
   ROCPROFSYS_TMPDIR: "%env{PWD}%/testing-tmp"
 
 jobs:
-  ubuntu-jammy
+  ubuntu-jammy:
     runs-on: ubuntu-latest
     container:
       image: dgaliffiamd/rocprofiler-systems:ci-base-ubuntu-22.04

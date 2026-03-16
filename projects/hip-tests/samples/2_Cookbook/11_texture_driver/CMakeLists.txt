@@ -46,16 +46,11 @@ else()
   set(EXCLUDE_OPTION)
 endif()
 
-# Mark source files as HIP code  
+# Mark source files as HIP code
 set_source_files_properties(texture2dDrv.cpp PROPERTIES LANGUAGE HIP)
 set_source_files_properties(tex2dKernel.cpp PROPERTIES LANGUAGE HIP)
 
 add_executable(texture2dDrv ${EXCLUDE_OPTION} texture2dDrv.cpp)
-
-string(TOUPPER "${CMAKE_BUILD_TYPE}" _HIP_BUILD_TYPE_UPPER)
-separate_arguments(HIP_DEVICE_BUILD_FLAGS_NO_ARCH NATIVE_COMMAND
-  "${CMAKE_HIP_FLAGS} ${CMAKE_HIP_FLAGS_${_HIP_BUILD_TYPE_UPPER}}")
-list(FILTER HIP_DEVICE_BUILD_FLAGS_NO_ARCH EXCLUDE REGEX "--offload-arch=")
 
 # Generate code object using CMake's HIP language support
 # Note: Build for all detected architectures to support multiple GPUs (like hipcc does)

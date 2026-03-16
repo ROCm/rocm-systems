@@ -20,23 +20,24 @@
  * THE SOFTWARE.
  */
 
-#include <cstdint>
+#include "process_info_read.h"
 
+#include <gtest/gtest.h>
+
+#include <cstdint>
 #include <iostream>
 #include <string>
 
-#include <gtest/gtest.h>
 #include "amd_smi/amdsmi.h"
-#include "process_info_read.h"
 
 TestProcInfoRead::TestProcInfoRead() : TestBase() {
   set_title("AMDSMI Process Info Read Test");
-  set_description("This test verifies that process information such as the "
-                             "process ID, etc. can be read properly.");
+  set_description(
+      "This test verifies that process information such as the "
+      "process ID, etc. can be read properly.");
 }
 
-TestProcInfoRead::~TestProcInfoRead(void) {
-}
+TestProcInfoRead::~TestProcInfoRead(void) {}
 
 void TestProcInfoRead::SetUp(void) {
   TestBase::SetUp();
@@ -44,9 +45,7 @@ void TestProcInfoRead::SetUp(void) {
   return;
 }
 
-void TestProcInfoRead::DisplayTestInfo(void) {
-  TestBase::DisplayTestInfo();
-}
+void TestProcInfoRead::DisplayTestInfo(void) { TestBase::DisplayTestInfo(); }
 
 void TestProcInfoRead::DisplayResults(void) const {
   TestBase::DisplayResults();
@@ -59,7 +58,7 @@ void TestProcInfoRead::Close() {
   TestBase::Close();
 }
 
-static void dumpProcess(amdsmi_process_info_t *p) {
+static void dumpProcess(amdsmi_process_info_t* p) {
   assert(p != nullptr);
   std::cout << "\t** ProcessID: " << p->process_id << " ";
   std::cout << std::endl;
@@ -69,7 +68,7 @@ void TestProcInfoRead::Run(void) {
   amdsmi_status_t err;
   uint32_t num_proc_found;
   uint32_t val_ui32;
-  amdsmi_process_info_t *procs = nullptr;
+  amdsmi_process_info_t* procs = nullptr;
 
   TestBase::Run();
   if (setup_failed_) {
@@ -83,8 +82,7 @@ void TestProcInfoRead::Run(void) {
   if (err != AMDSMI_STATUS_SUCCESS) {
     if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
       IF_VERB(STANDARD) {
-        std::cout << "\t**Process info. read: Not supported on this machine"
-                                                                 << std::endl;
+        std::cout << "\t**Process info. read: Not supported on this machine" << std::endl;
         return;
       }
     } else {
@@ -92,8 +90,7 @@ void TestProcInfoRead::Run(void) {
     }
   } else {
     IF_VERB(STANDARD) {
-      std::cout << "\t** "  << std::dec << num_proc_found <<
-                                          " GPU processes found" << std::endl;
+      std::cout << "\t** " << std::dec << num_proc_found << " GPU processes found" << std::endl;
     }
   }
 
@@ -108,9 +105,9 @@ void TestProcInfoRead::Run(void) {
   if (err != AMDSMI_STATUS_SUCCESS) {
     if (err == AMDSMI_STATUS_INSUFFICIENT_SIZE) {
       IF_VERB(STANDARD) {
-        std::cout << "\t** " << val_ui32 <<
-         " processes were read, but more became available that were unread."
-                                                                 << std::endl;
+        std::cout << "\t** " << val_ui32
+                  << " processes were read, but more became available that were unread."
+                  << std::endl;
         for (uint32_t i = 0; i < val_ui32; ++i) {
           dumpProcess(&procs[i]);
         }
@@ -133,22 +130,19 @@ void TestProcInfoRead::Run(void) {
   num_proc_found = val_ui32;
   if (num_proc_found) {
     // Allocate the max we expect to get
-    uint32_t *dev_inds = new uint32_t[num_devices];
+    uint32_t* dev_inds = new uint32_t[num_devices];
     uint32_t amt_allocd = num_devices;
 
     for (uint32_t j = 0; j < num_proc_found; j++) {
-      err = amdsmi_get_gpu_compute_process_gpus(procs[j].process_id, dev_inds,
-                                                                 &amt_allocd);
+      err = amdsmi_get_gpu_compute_process_gpus(procs[j].process_id, dev_inds, &amt_allocd);
       if (err == AMDSMI_STATUS_NOT_FOUND) {
-        std::cout << "\t** Process " << procs[j].process_id <<
-                                                     " is no longer present.";
+        std::cout << "\t** Process " << procs[j].process_id << " is no longer present.";
         continue;
       } else {
         CHK_ERR_ASRT(err);
         ASSERT_LE(amt_allocd, num_devices);
       }
-      std::cout << "\t** Process " << procs[j].process_id <<
-                                           " is using devices with indices: ";
+      std::cout << "\t** Process " << procs[j].process_id << " is using devices with indices: ";
       uint32_t i;
       if (amt_allocd > 0) {
         for (i = 0; i < amt_allocd - 1; ++i) {
@@ -161,32 +155,29 @@ void TestProcInfoRead::Run(void) {
       amt_allocd = num_devices;
     }
 
-    delete []dev_inds;
+    delete[] dev_inds;
 
     amdsmi_process_info_t proc_info;
     for (uint32_t j = 0; j < num_proc_found; j++) {
       memset(&proc_info, 0x0, sizeof(amdsmi_process_info_t));
-      err = amdsmi_get_gpu_compute_process_info_by_pid(procs[j].process_id,
-                                                                  &proc_info);
+      err = amdsmi_get_gpu_compute_process_info_by_pid(procs[j].process_id, &proc_info);
       if (err == AMDSMI_STATUS_NOT_FOUND) {
-        std::cout <<
-         "\t** WARNING: amdsmi_get_gpu_compute_process_info() found process " <<
-           procs[j].process_id << ", but subsequently, "
-                       "amdsmi_get_gpu_compute_process_info_by_pid() did not"
-                                      " find this same process." << std::endl;
+        std::cout << "\t** WARNING: amdsmi_get_gpu_compute_process_info() found process "
+                  << procs[j].process_id
+                  << ", but subsequently, "
+                     "amdsmi_get_gpu_compute_process_info_by_pid() did not"
+                     " find this same process."
+                  << std::endl;
       } else {
         CHK_ERR_ASRT(err)
         ASSERT_EQ(proc_info.process_id, procs[j].process_id);
-        std::cout << "\t** Process ID: " <<
-            procs[j].process_id << " VRAM Usage: " <<
-                                   proc_info.vram_usage <<
-                                   " SDMA Usage: " <<
-                                   proc_info.sdma_usage <<
-                                   " Compute Unit Usage: " <<
-                                   (proc_info.cu_occupancy == UINT32_MAX ? "N/A" : std::to_string(proc_info.cu_occupancy)) <<
-                                   " Evicted Time: " <<
-                                   proc_info.evicted_time << std::endl <<
-                                   std::endl;
+        std::cout << "\t** Process ID: " << procs[j].process_id
+                  << " VRAM Usage: " << proc_info.vram_usage
+                  << " SDMA Usage: " << proc_info.sdma_usage << " Compute Unit Usage: "
+                  << (proc_info.cu_occupancy == UINT32_MAX ? "N/A"
+                                                           : std::to_string(proc_info.cu_occupancy))
+                  << " Evicted Time: " << proc_info.evicted_time << std::endl
+                  << std::endl;
       }
     }
   }
@@ -197,10 +188,9 @@ void TestProcInfoRead::Run(void) {
 
     if (err != AMDSMI_STATUS_INSUFFICIENT_SIZE) {
       std::cout << "Expected amdsmi_get_gpu_compute_process_info() to tell us"
-        " there are more processes available, but instead go return code " <<
-                                                              err << std::endl;
+                   " there are more processes available, but instead go return code "
+                << err << std::endl;
     }
   }
-  delete []procs;
-
+  delete[] procs;
 }
