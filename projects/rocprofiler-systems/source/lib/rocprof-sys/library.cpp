@@ -84,10 +84,8 @@
 #include <timemory/utility/backtrace.hpp>
 #include <timemory/utility/procfs/maps.hpp>
 
-#if ROCPROFSYS_USE_ROCM > 0
-#    include <rocprofiler-sdk/agent.h>
-#    include <rocprofiler-sdk/registration.h>
-#endif
+#include <rocprofiler-sdk/agent.h>
+#include <rocprofiler-sdk/registration.h>
 
 #include <nlohmann/json.hpp>
 
@@ -539,12 +537,10 @@ rocprofsys_init_tooling_hidden(void)
         return false;
     }
 
-#if ROCPROFSYS_USE_ROCM > 0
     dynamic_library _amdhip64{ "ROCPROFSYS_ROCTRACER_LIBAMDHIP64",
                                find_library_path("libamdhip64.so",
                                                  { "ROCPROFSYS_ROCM_PATH", "ROCM_PATH" },
                                                  { ROCPROFSYS_DEFAULT_ROCM_PATH }) };
-#endif
 
     static pid_t _once       = 0;
     static auto  _debug_init = get_debug_init();
@@ -588,10 +584,6 @@ rocprofsys_init_tooling_hidden(void)
     auto _dtor = scope::destructor{ []() {
         // if set to finalized, don't continue
         if(get_state() > State::Active) return;
-
-#if !defined(ROCPROFSYS_USE_ROCM) || ROCPROFSYS_USE_ROCM == 0
-        rocprofsys_preinit_cpu_agents();
-#endif
 
         rocprofsys_preinit_cache();
 
@@ -860,14 +852,11 @@ rocprofsys_finalize_hidden(void)
     {
         set_state(State::Finalized);
 
-#if defined(ROCPROFSYS_USE_ROCM) && ROCPROFSYS_USE_ROCM > 0
         // Flush buffered traces in case of child process
-        if(get_use_rocm())
-        {
-            LOG_DEBUG("Shutting down ROCm...");
-            rocprofiler_sdk::shutdown();
-        }
-#endif
+
+        LOG_DEBUG("Shutting down ROCm...");
+        rocprofiler_sdk::shutdown();
+
         auto&      _manager = rocprofsys::trace_cache::cache_manager::get_instance();
         const auto _agents  = get_agent_manager_instance().get_agents();
         _manager.shutdown();
@@ -970,13 +959,8 @@ rocprofsys_finalize_hidden(void)
         component::vaapi_gotcha::shutdown();
     }
 
-#if defined(ROCPROFSYS_USE_ROCM) && ROCPROFSYS_USE_ROCM > 0
-    if(get_use_rocm())
-    {
-        LOG_DEBUG("Shutting down ROCm...");
-        rocprofiler_sdk::shutdown();
-    }
-#endif
+    LOG_DEBUG("Shutting down ROCm...");
+    rocprofiler_sdk::shutdown();
 
     LOG_DEBUG("Stopping and destroying instrumentation bundles...");
     auto* _bundles = instrumentation_bundles::get();

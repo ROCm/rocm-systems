@@ -112,7 +112,7 @@ namespace RcclUnitTesting
           std::string name = testBed.GetTestCaseName(totalRanks, isMultiProcess,
                                                      ncclCollAlltoAllv, dataTypes[dataIdx],
                                                      ncclSum, -1, inPlace, useManagedMem, useHipGraph);
-          INFO("%s\n", name.c_str());
+          TEST_INFO("%s\n", name.c_str());
         }
 
         for (int rank = 0; rank < totalRanks; ++rank)
@@ -176,7 +176,7 @@ namespace RcclUnitTesting
           std::string name = testBed.GetTestCaseName(totalRanks, isMultiProcess,
                                                      ncclCollAlltoAllv, dataTypes[dataIdx],
                                                      ncclSum, -1, inPlace, useManagedMem, useHipGraph);
-          INFO("%s\n", name.c_str());
+          TEST_INFO("%s\n", name.c_str());
         }
 
         for (int rank = 0; rank < totalRanks; ++rank)

@@ -188,6 +188,10 @@ rocprofiler_systems_add_option(ROCPROFSYS_BUILD_FOR_THEROCK "Build rocprofiler-s
 )
 
 if(ROCPROFSYS_BUILD_FOR_THEROCK)
+    # TheRock injects these variables, which takes precedence over our
+    # own python discovery, even when versions differ. Unset them to prevent this.
+    unset(Python3_EXECUTABLE CACHE)
+
     set(ROCPROFSYS_INSTALL_TESTING
         ON
         CACHE BOOL
@@ -240,7 +244,6 @@ rocprofiler_systems_add_option(ROCPROFSYS_USE_BFD
                                "Enable BFD support (map call-stack samples to LOC)" ON
 )
 rocprofiler_systems_add_option(ROCPROFSYS_USE_MPI "Enable MPI support" OFF)
-rocprofiler_systems_add_option(ROCPROFSYS_USE_ROCM "Enable ROCm support" ON)
 rocprofiler_systems_add_option(ROCPROFSYS_USE_PAPI "Enable HW counter support via PAPI"
                                ON
 )
@@ -389,6 +392,14 @@ set(CMAKE_VISIBILITY_INLINES_HIDDEN
     "Visibility preset for inline functions"
 )
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+# symlink compile_commands.json to source root for clangd and clang-tidy
+file(
+    CREATE_LINK
+        "${CMAKE_BINARY_DIR}/compile_commands.json"
+        "${CMAKE_SOURCE_DIR}/compile_commands.json"
+    SYMBOLIC
+)
 
 include(Formatting) # format target
 include(Packages) # finds third-party libraries

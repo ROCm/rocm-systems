@@ -105,7 +105,7 @@ hipMemGenericAllocationHandle_t GetPhysicalMemory(hipDevice_t device, size_t siz
  * ------------------------
  *  - HIP_VERSION >= 7.0
  */
-TEST_CASE("Unit_hipMemGetHandleForAddressRange_Negative") {
+TEST_CASE(Unit_hipMemGetHandleForAddressRange_Negative) {
   int handle = -1;
   int* dptr = nullptr;
   constexpr int size = 10;
@@ -365,6 +365,7 @@ bool validateHandle(int handle, int size, int device = 0) {
 
   HIP_CHECK(hipMemUnmap(dstDevMem, sizeMem));
   HIP_CHECK(hipMemAddressFree(dstDevMem, sizeMem));
+  HIP_CHECK(hipMemRelease(imported_handle));
   free(dstHostMem);
   return true;
 }
@@ -383,7 +384,7 @@ bool validateHandle(int handle, int size, int device = 0) {
  * ------------------------
  *  - HIP_VERSION >= 7.0
  */
-TEST_CASE("Unit_hipMemGetHandleForAddressRange_DeviceMemory") {
+TEST_CASE(Unit_hipMemGetHandleForAddressRange_DeviceMemory) {
   constexpr int size = 1024;
   constexpr int sizeBytes = size * sizeof(int);
   CTX_CREATE();
@@ -422,7 +423,7 @@ TEST_CASE("Unit_hipMemGetHandleForAddressRange_DeviceMemory") {
  * ------------------------
  *  - HIP_VERSION >= 7.0
  */
-TEST_CASE("Unit_hipMemGetHandleForAddressRange_VM") {
+TEST_CASE(Unit_hipMemGetHandleForAddressRange_VM) {
   CTX_CREATE();
   hipDevice_t device;
   constexpr int kDeviceId = 0;
@@ -465,8 +466,7 @@ TEST_CASE("Unit_hipMemGetHandleForAddressRange_VM") {
  * ------------------------
  *  - HIP_VERSION >= 7.0
  */
-TEST_CASE("Unit_hipMemGetHandleForAddressRange_DeviceMemory_InAnotherDevice",
-          "[multigpu]") {
+TEST_CASE(Unit_hipMemGetHandleForAddressRange_DeviceMemory_InAnotherDevice) {
   CTX_CREATE();
   int deviceCount = 0;
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
@@ -521,8 +521,7 @@ TEST_CASE("Unit_hipMemGetHandleForAddressRange_DeviceMemory_InAnotherDevice",
  * ------------------------
  *  - HIP_VERSION >= 7.0
  */
-TEST_CASE("Unit_hipMemGetHandleForAddressRange_VM_InAnotherDevice",
-          "[multigpu]") {
+TEST_CASE(Unit_hipMemGetHandleForAddressRange_VM_InAnotherDevice) {
   CTX_CREATE();
   int deviceCount = 0;
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
@@ -585,7 +584,7 @@ TEST_CASE("Unit_hipMemGetHandleForAddressRange_VM_InAnotherDevice",
  * ------------------------
  *  - HIP_VERSION >= 7.0
  */
-TEST_CASE("Unit_hipMemGetHandleForAddressRange_MulProc_Socket_DeviceMem") {
+TEST_CASE(Unit_hipMemGetHandleForAddressRange_MulProc_Socket_DeviceMem) {
   int fd[2], fdSig[2];
   REQUIRE(pipe(fd) == 0);
   REQUIRE(pipe(fdSig) == 0);
@@ -689,7 +688,7 @@ TEST_CASE("Unit_hipMemGetHandleForAddressRange_MulProc_Socket_DeviceMem") {
  * ------------------------
  *  - HIP_VERSION >= 7.0
  */
-TEST_CASE("Unit_hipMemGetHandleForAddressRange_MulProc_Socket_VM") {
+TEST_CASE(Unit_hipMemGetHandleForAddressRange_MulProc_Socket_VM) {
   int fd[2], fdSig[2];
   REQUIRE(pipe(fd) == 0);
   REQUIRE(pipe(fdSig) == 0);
@@ -832,7 +831,7 @@ void launchForVM() {
  * ------------------------
  *  - HIP_VERSION >= 7.0
  */
-TEST_CASE("Unit_hipMemGetHandleForAddressRange_MultipleThreads") {
+TEST_CASE(Unit_hipMemGetHandleForAddressRange_MultipleThreads) {
   hipDevice_t device;
   constexpr int kDeviceId = 0;
   HIP_CHECK(hipDeviceGet(&device, kDeviceId));
@@ -879,7 +878,7 @@ TEST_CASE("Unit_hipMemGetHandleForAddressRange_MultipleThreads") {
  * ------------------------
  *  - HIP_VERSION >= 7.0
  */
-TEST_CASE("Unit_hipMemGetHandleForAddressRange_DifferentOffsets") {
+TEST_CASE(Unit_hipMemGetHandleForAddressRange_DifferentOffsets) {
   hipDevice_t device;
   constexpr int kDeviceId = 0;
   HIP_CHECK(hipDeviceGet(&device, kDeviceId));

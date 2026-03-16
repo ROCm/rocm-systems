@@ -18,6 +18,7 @@ THE SOFTWARE.
 */
 
 #include "warp_shfl_common.hh"
+#include "warp_common.hh"
 
 #include <bitset>
 
@@ -46,10 +47,18 @@ template <typename T> __global__ void shfl_xor(T* const out, const T* const in,
 template <typename T> class WarpShflXOR : public WarpShflTest<WarpShflXOR<T>, T> {
  public:
   void launch_kernel(T* const arr_dev, T* const input_dev, const uint64_t* const active_masks) {
+    const auto inv_reduction_factor = 1 / GetTestReductionFactor();
+
+    std::vector<unsigned int> lane_masks;
+    for (double i = 0; i < this->warp_size_; i += inv_reduction_factor) {
+        lane_masks.emplace_back(static_cast<unsigned int>(std::floor(i)));
+    }
+
     width_ = generate_width(this->warp_size_);
     INFO("Width: " << width_);
-    lane_mask_ = GENERATE_COPY(range(0, this->warp_size_));
+    lane_mask_ = GENERATE_COPY(from_range(lane_masks.begin(), lane_masks.end()));
     INFO("Lane mask: " << lane_mask_);
+
     shfl_xor<<<this->grid_.grid_dim_, this->grid_.block_dim_>>>(arr_dev, input_dev, active_masks,
                                                                 lane_mask_, width_);
   }
@@ -96,7 +105,7 @@ template <typename T> class WarpShflXOR : public WarpShflTest<WarpShflXOR<T>, T>
  *  - HIP_VERSION >= 5.2
  *  - Device supports warp shuffle
  */
-TEMPLATE_TEST_CASE("Unit_Warp_Shfl_XOR_Positive_Basic", "", int, unsigned int, long, unsigned long,
+TEMPLATE_TEST_CASE(Unit_Warp_Shfl_XOR_Positive_Basic, int, unsigned int, long, unsigned long,
                    long long, unsigned long long, float, double, __half, __half2) {
   int device;
   hipDeviceProp_t device_properties;

@@ -63,10 +63,13 @@ bool testhipModuleLoadUnloadFunc(const std::vector<char>& buffer, char* globTest
   switch (check) {
     case 1:
       HIP_CHECK(hipModuleLoad(&Module, CODEOBJ_FILE));
+      break;
     case 2:
       HIP_CHECK(hipModuleLoadData(&Module, &buffer[0]));
+      break;
     case 3:
       HIP_CHECK(hipModuleLoadDataEx(&Module, &buffer[0], 0, nullptr, nullptr));
+      break;
   }
   HIP_CHECK(hipModuleGetFunction(&Function, Module, CODEOBJ_GLOB_KERNEL1));
   float deviceGlobalFloatH = 3.14;

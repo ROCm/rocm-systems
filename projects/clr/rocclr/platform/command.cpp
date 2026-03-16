@@ -390,7 +390,7 @@ void Command::enqueue() {
 
     // The batch update must be lock protected to avoid a race condition
     // when multiple threads submit/flush/update the batch at the same time
-    ScopedLock sl(queue_->vdev()->execution());
+    std::scoped_lock sl(queue_->vdev()->execution());
     queue_->FormSubmissionBatch(this);
 
     // Enqueue flushes, except profiling markers to avoid frequent expensive callbacks
@@ -671,7 +671,7 @@ bool MigrateMemObjectsCommand::validateMemory() {
 }
 
 // =================================================================================================
-int32_t NDRangeKernelCommand::AllocCaptureSetValidate(void** kernelParams, address kernArgs,
+int32_t NDRangeKernelCommand::captureHIPArgsAndValidate(void** kernelParams, address kernArgs,
                                                       size_t kernArgsSize) {
   const amd::Device& device = queue()->device();
   // Validate the kernel before submission
@@ -685,14 +685,14 @@ int32_t NDRangeKernelCommand::AllocCaptureSetValidate(void** kernelParams, addre
     return CL_OUT_OF_RESOURCES;
   }
 
-  if (!kernel().parameters().captureAndSet(kernelParams, kernArgs, kernArgsSize, parameters_)) {
+  if (!kernel().parameters().captureHIPArgs(kernelParams, kernArgs, kernArgsSize, parameters_)) {
     LogError("Cannot capture and set the kernel parameters");
     return CL_OUT_OF_RESOURCES;
   }
   return CL_SUCCESS;
 }
 
-int32_t NDRangeKernelCommand::captureAndValidate() {
+int32_t NDRangeKernelCommand::captureOpenCLArgsAndValidate() {
   const amd::Device& device = queue()->device();
   // Validate the kernel before submission
   if (!queue()->device().validateKernel(kernel(), queue()->vdev(), cooperativeGroups())) {
@@ -701,8 +701,8 @@ int32_t NDRangeKernelCommand::captureAndValidate() {
 
   int32_t error;
   uint64_t lclMemSize = kernel().getDeviceKernel(device)->workGroupInfo()->localMemSize_;
-  parameters_ =
-      kernel().parameters().capture(*queue()->vdev(), sharedMemBytes_ + lclMemSize, &error);
+  parameters_ = kernel().parameters().captureOpenCLArgs(*queue()->vdev(),
+                                                        sharedMemBytes_ + lclMemSize, &error);
   return error;
 }
 
@@ -802,7 +802,7 @@ bool CopyMemoryP2PCommand::validateMemory() {
   }
 
   if (devices[0]->P2PStage() != nullptr && p2pStaging) {
-    amd::ScopedLock lock(devices[0]->P2PStageOps());
+    std::scoped_lock lock(devices[0]->P2PStageOps());
     // Make sure runtime allocates memory on every device
     for (uint d = 0; d < devices[0]->GlbCtx().devices().size(); ++d) {
       device::Memory* mem =

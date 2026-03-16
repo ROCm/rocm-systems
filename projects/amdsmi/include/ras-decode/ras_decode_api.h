@@ -33,11 +33,11 @@
  * @brief Structure containing decoded error information
  */
 typedef struct {
-  const char *bank_ref;       /**< Reference to bank name string */
-  const char *error_type_ref; /**< Reference to error type string */
-  const char *severity_ref;   /**< Reference to error severity string */
-  const char *category_ref;   /**< Reference to error category string */
-  const char *instance_ref;   /**< Reference to instance name string */
+  const char* bank_ref;       /**< Reference to bank name string */
+  const char* error_type_ref; /**< Reference to error type string */
+  const char* severity_ref;   /**< Reference to error severity string */
+  const char* category_ref;   /**< Reference to error category string */
+  const char* instance_ref;   /**< Reference to instance name string */
   int oam;                    /**< OAM value */
   int aid;                    /**< AID value */
   uint64_t raw_status;        /**< Raw status register value */
@@ -60,7 +60,7 @@ typedef struct {
  * decode
  * @return AFID value or -1 if decoding fails
  */
-int decode_afid(const uint64_t *register_array, size_t array_len, uint32_t flag,
+int decode_afid(const uint64_t* register_array, size_t array_len, uint32_t flag,
                 uint16_t hw_revision, uint16_t register_context_type);
 
 /**
@@ -73,7 +73,7 @@ int decode_afid(const uint64_t *register_array, size_t array_len, uint32_t flag,
  * decode
  * @return JsonValue* containing complete error information, or NULL on failure
  */
-JsonValue *decode_error_info(const uint64_t *register_array, size_t array_len, uint32_t flag,
+JsonValue* decode_error_info(const uint64_t* register_array, size_t array_len, uint32_t flag,
                              uint16_t hw_revision, uint16_t register_context_type);
 
 /**
@@ -81,6 +81,6 @@ JsonValue *decode_error_info(const uint64_t *register_array, size_t array_len, u
  * @param[in] error_json Pointer to JSON object containing error information
  * @return AFID value or -1 if decoding fails or JSON is NULL
  */
-int decode_error_info_afid(JsonValue *error_json);
+int decode_error_info_afid(JsonValue* error_json);
 
 #endif  // RAS_DECODE_API_H

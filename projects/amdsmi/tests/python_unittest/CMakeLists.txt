@@ -20,7 +20,9 @@ install(
     DIRECTORY ./
     DESTINATION ${SHARE_INSTALL_PREFIX}/tests/python_unittest/
     COMPONENT ${TESTS_COMPONENT}
-    USE_SOURCE_PERMISSIONS FILES_MATCHING
-    PATTERN "*.py")
+    USE_SOURCE_PERMISSIONS
+    FILES_MATCHING
+    PATTERN "*.py"
+)
 
 # message(FATAL_ERROR "python lib stop")

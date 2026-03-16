@@ -30,7 +30,7 @@ THE SOFTWARE.
  2) Pass initialRefcount as 0
  3) Pass initialRefcount as INT_MAX
  */
-TEST_CASE("Unit_hipUserObjectRetain_Negative") {
+TEST_CASE(Unit_hipUserObjectRetain_Negative) {
   int* object = new int();
   REQUIRE(object != nullptr);
 

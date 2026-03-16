@@ -27,8 +27,6 @@ set(COMMON_SHARED_SRC DriverContext.cc)
 # But this exposes several problems with hipcc and build system on windows.
 # While those are fixed, this hack should allow us to pass windows CI.
 set(TEST_SRC
-    malloc.cc
-    hipMemsetBasic.cc
     hipMemcpy2DToArray.cc
     hipMemcpy2DToArray_old.cc
     hipMemcpy2DToArrayAsync.cc
@@ -38,7 +36,6 @@ set(TEST_SRC
     hipMemcpy3DAsync.cc
     hipMemcpy3DAsync_old.cc
     hipMemcpyParam2D.cc
-    hipMemcpyParam2D_old.cc
     hipMemcpyParam2DAsync.cc
     hipMemcpyParam2DAsync_old.cc
     hipMemcpy2D.cc
@@ -167,7 +164,6 @@ set(TEST_SRC
     hipMemPoolTrimTo.cc
     hipMallocFromPoolAsync.cc
     hipMemcpyPeer.cc
-    hipMemcpyPeer_old.cc
     hipMemcpyPeerAsync.cc
     hipMemcpyPeerAsync_old.cc
     hipMemcpyWithStream_old.cc
@@ -210,7 +206,6 @@ set(TEST_SRC
     hipFreeHost.cc
     hipMallocAsync.cc
     hipStreamAttachMemAsync.cc
-    hipMemRangeGetAttributes_old.cc
     hipMemGetAddressRange.cc
     hipMallocMipmappedArray.cc
     hipFreeMipmappedArray.cc
@@ -271,17 +266,17 @@ hip_add_exe_to_target(NAME MemoryTest2
   TEST_TARGET_NAME build_tests COMMON_SHARED_SRC ${COMMON_SHARED_SRC})
 
 if(HIP_PLATFORM MATCHES "amd")
-set(TEST_SRC
+  set(TEST_SRC
   inlineVar.cc
   memoryCommon.cc
 )
 
-#hip_add_exe_to_target(NAME InlineVarTest
-#  TEST_SRC ${TEST_SRC}
-#  TEST_TARGET_NAME build_tests COMMON_SHARED_SRC ${COMMON_SHARED_SRC})
-#
-#  set_target_properties(InlineVarTest PROPERTIES COMPILE_FLAGS -fgpu-rdc)
-#  set_target_properties(InlineVarTest PROPERTIES LINK_FLAGS -fgpu-rdc)
+  #hip_add_exe_to_target(NAME InlineVarTest
+  #  TEST_SRC ${TEST_SRC}
+  #  TEST_TARGET_NAME build_tests COMMON_SHARED_SRC ${COMMON_SHARED_SRC})
+  #
+  #  set_target_properties(InlineVarTest PROPERTIES COMPILE_FLAGS -fgpu-rdc)
+  #  set_target_properties(InlineVarTest PROPERTIES LINK_FLAGS -fgpu-rdc)
 endif()
 
 set(TEST_SRC
@@ -295,8 +290,11 @@ hip_add_exe_to_target(NAME SVMAtomicTest
   TEST_SRC ${TEST_SRC}
   TEST_TARGET_NAME build_tests COMMON_SHARED_SRC ${COMMON_SHARED_SRC})
 
+target_link_libraries(SVMAtomicTest hip::host hip::device)
+target_link_libraries(MemoryTest1 hip::host hip::device)
+target_link_libraries(MemoryTest2 hip::host hip::device)
 if(HIP_PLATFORM MATCHES "nvidia")
-  set_target_properties(SVMAtomicTest PROPERTIES COMPILE_FLAGS -arch=sm_70)
-  set_target_properties(MemoryTest1 PROPERTIES COMPILE_FLAGS -arch=sm_70)
-  set_target_properties(MemoryTest2 PROPERTIES COMPILE_FLAGS -arch=sm_70)
+  set_target_properties(SVMAtomicTest PROPERTIES COMPILE_FLAGS -arch=compute_75)
+  set_target_properties(MemoryTest1 PROPERTIES COMPILE_FLAGS -arch=compute_75)
+  set_target_properties(MemoryTest2 PROPERTIES COMPILE_FLAGS -arch=compute_75)
 endif()

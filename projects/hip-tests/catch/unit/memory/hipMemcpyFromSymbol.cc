@@ -25,7 +25,7 @@ __constant__ int constSymbol[10];
 /* Test verifies hipMemcpy[From/To]Symbol[Async] API Negative scenarios.
  */
 
-TEST_CASE("Unit_hipMemcpyFromToSymbol_Negative") {
+TEST_CASE(Unit_hipMemcpyFromToSymbol_Negative) {
   SECTION("Invalid Src Ptr") {
     int result{0};
     HIP_CHECK_ERROR(
@@ -111,7 +111,7 @@ TEST_CASE("Unit_hipMemcpyFromToSymbol_Negative") {
  * For Array Values To and From Symbol
  * For Array Values with offset To and From Symbol
  * For Sync and Async Variants*/
-TEST_CASE("Unit_hipMemcpyToFromSymbol_SyncAndAsync") {
+TEST_CASE(Unit_hipMemcpyToFromSymbol_SyncAndAsync) {
   enum StreamTestType { NullStream = 0, StreamPerThread, CreatedStream, NoStream };
 
   /* Test type NoStream - Use Sync variants, else use async variants */
@@ -228,7 +228,7 @@ TEST_CASE("Unit_hipMemcpyToFromSymbol_SyncAndAsync") {
 * ------------------------
 *  - HIP_VERSION >= 6.0
 */
-TEST_CASE("Unit_hipMemcpyToFromSymbol_Capture") {
+TEST_CASE(Unit_hipMemcpyToFromSymbol_Capture) {
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
 

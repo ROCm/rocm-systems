@@ -27,11 +27,19 @@ project(clr)
 if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC"
     OR CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
     add_compile_options("/wd4267" "/wd4244" "/wd4996")
+    # Enable parallel compilation on MSVC.
+    if(DEFINED ENV{CMAKE_BUILD_PARALLEL_LEVEL})
+        add_compile_options("/MP$ENV{CMAKE_BUILD_PARALLEL_LEVEL}")
+    endif()
     string(REPLACE "/GR" "" CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
     string(REPLACE "/W3" "" CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
     if (CMAKE_BUILD_TYPE STREQUAL "Debug")
         add_compile_options(/MTd)
         add_compile_options(-D_ALLOW_ITERATOR_DEBUG_LEVEL_MISMATCH)
+    else()
+        if (AMD_COMPUTE_WIN)
+            add_compile_options(/MT)
+        endif()
     endif()
     if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
         # Unlike when targeting MSFT's MSVC, when targeting clang-cl,
@@ -41,7 +49,6 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC"
 endif()
 
 if (AMD_COMPUTE_WIN)
-    add_compile_options("/MT")
     set(AMD_LIBELF_PATH "${AMD_COMPUTE_WIN}/hsail-compiler/lib/loaders/elf/utils/libelf")
     set(AMD_SC_PATH "${AMD_COMPUTE_WIN}/sc")
     message("Public Compute Windows build path: ${AMD_COMPUTE_WIN}, SC: ${AMD_SC_PATH}, LibElf: ${AMD_LIBELF_PATH}")

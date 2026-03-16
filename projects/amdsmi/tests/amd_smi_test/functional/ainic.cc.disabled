@@ -35,7 +35,7 @@
 namespace {
 
 struct RAII {
-    RAII(std::function<void()> init, std::function<void()> finish) 
+    RAII(std::function<void()> init, std::function<void()> finish)
     : _finish(finish) {
         init();
     }
@@ -172,10 +172,10 @@ NIC: 0
                      ACTIVE_MTU: 65535
 #endif//0
     std::ostringstream oss;
-    oss << std::hex << 
-        std::setw(4) << std::setfill('0') << ainic_info.bus.bdf.domain_number << ":" << 
-        std::setw(2) << std::setfill('0') << ainic_info.bus.bdf.bus_number << ":" << 
-        std::setw(2) << std::setfill('0') << ainic_info.bus.bdf.device_number << "." << 
+    oss << std::hex <<
+        std::setw(4) << std::setfill('0') << ainic_info.bus.bdf.domain_number << ":" <<
+        std::setw(2) << std::setfill('0') << ainic_info.bus.bdf.bus_number << ":" <<
+        std::setw(2) << std::setfill('0') << ainic_info.bus.bdf.device_number << "." <<
         std::setw(2) << std::setfill('0') << ainic_info.bus.bdf.function_number;
     std::string bdf_str = oss.str();
     oss.str("");
@@ -234,10 +234,10 @@ NIC: 0
     "            PAUSE_RX: " << ainic_info.port.ports[port_idx].pause_rx << "\n" <<
     "            PAUSE_TX: " << ainic_info.port.ports[port_idx].pause_tx << "\n";
     }//port
-    oss << 
+    oss <<
     "   RDMA_DEVICES: " << "\n";
     for(uint32_t port_idx = 0; port_idx < ainic_info.port.num_ports; ++port_idx) {
-        oss << 
+        oss <<
     "      RDMA_DEVICES: " << "\n";
         for(uint8_t rdma_dev_idx = 0; rdma_dev_idx < ainic_info.rdma_dev.num_rdma_dev; ++rdma_dev_idx) {
             oss <<
@@ -255,7 +255,7 @@ NIC: 0
     // "                     PORT_NUM: " << static_cast<int>(ainic_info.port.ports[port_idx].rdma_dev[rdma_dev_idx].rdma_port_info[rdma_port_idx].port_num) << "\n" <<
     "                     STATE: " <<ainic_info.rdma_dev.rdma_dev_info[rdma_dev_idx].rdma_port_info[rdma_port_idx].state << "\n" <<
     // "                     MAX_MTU: " << static_cast<int>(ainic_info.port.ports[port_idx].rdma_dev[rdma_dev_idx].rdma_port_info[rdma_port_idx].max_mtu) << "\n" <<
-    // "                     ACTIVE_MTU: " << static_cast<int>(ainic_info.port.ports[port_idx].rdma_dev[rdma_dev_idx].rdma_port_info[rdma_port_idx].active_mtu) << 
+    // "                     ACTIVE_MTU: " << static_cast<int>(ainic_info.port.ports[port_idx].rdma_dev[rdma_dev_idx].rdma_port_info[rdma_port_idx].active_mtu) <<
                         "\n";
             }
         }//num_infiniband
@@ -281,7 +281,7 @@ std::optional<std::vector<amd::smi::AMDSmiAINICDevice::AINICInfo>> get_nics() {
     for (uint32_t index = 0 ; index < soc_count; index++){
         uint32_t processor_count = 0;
         status = amdsmi_get_processor_handles_by_type(
-            sockets[index], 
+            sockets[index],
             AMDSMI_PROCESSOR_TYPE_AMD_NIC,
             nullptr, &processor_count);
         if (status != AMDSMI_STATUS_SUCCESS){
@@ -290,7 +290,7 @@ std::optional<std::vector<amd::smi::AMDSmiAINICDevice::AINICInfo>> get_nics() {
         std::cout << "Got " << processor_count << " processors for socket " << index << ":\n";
         std::vector<amdsmi_processor_handle> processor_handles(processor_count);
         status = amdsmi_get_processor_handles_by_type(
-            sockets[index], 
+            sockets[index],
             AMDSMI_PROCESSOR_TYPE_AMD_NIC,
             processor_handles.data(), &processor_count);
         if (status != AMDSMI_STATUS_SUCCESS){
@@ -321,9 +321,9 @@ std::map<std::string, uint64_t> port_stats() {
     uint32_t num_stats = 0;
     std::unique_ptr<amdsmi_nic_stat_t[]> stats;
     amdsmi_get_nic_rdma_port_statistics(
-        processor_handle, 
+        processor_handle,
         rdma_port_index,
-        &num_stats, 
+        &num_stats,
         nullptr);
 
     std::cout << "[" << __FILE__ << ":" << __LINE__ << "]\nnum_stats: " << num_stats << "\n";

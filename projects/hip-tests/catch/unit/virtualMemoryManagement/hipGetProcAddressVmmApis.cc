@@ -37,7 +37,7 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_VMM") {
+TEST_CASE(Unit_hipGetProcAddress_VMM) {
   int value = 0;
   HIP_CHECK(hipDeviceGetAttribute(&value, hipDeviceAttributeVirtualMemoryManagementSupported, 0));
   if (value == 0) {
@@ -212,6 +212,7 @@ TEST_CASE("Unit_hipGetProcAddress_VMM") {
   // Validating hipMemUnmap, hipMemAddressFree, hipMemRelease API's
   HIP_CHECK(dyn_hipMemUnmap_ptr(ptr, granularity));
   HIP_CHECK(dyn_hipMemAddressFree_ptr(ptr, granularity));
+  HIP_CHECK(dyn_hipMemRelease_ptr(requiredHandle));
   HIP_CHECK(dyn_hipMemRelease_ptr(handle));
 
   // Performing operation on ptr, to check it is invalidated or not

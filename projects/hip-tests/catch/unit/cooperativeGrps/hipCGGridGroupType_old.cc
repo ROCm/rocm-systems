@@ -323,7 +323,7 @@ template <typename F> static void test_cg_grid_group_type(F kernel_func, int blo
   HIP_CHECK(hipHostFree(group_dim_host));
 }
 
-TEST_CASE("Unit_hipCGGridGroupType_Basic") {
+TEST_CASE(Unit_hipCGGridGroupType_Basic) {
   // Use default device for validating the test
   int device;
   hipDeviceProp_t device_properties;
@@ -368,7 +368,7 @@ TEST_CASE("Unit_hipCGGridGroupType_Basic") {
   }
 }
 
-TEST_CASE("Unit_hipCGGridGroupType_DataSharing") {
+TEST_CASE(Unit_hipCGGridGroupType_DataSharing) {
   const auto device = GENERATE(range(0, HipTest::getDeviceCount()));
   HIP_CHECK(hipSetDevice(device));
 
@@ -448,7 +448,7 @@ TEST_CASE("Unit_hipCGGridGroupType_DataSharing") {
   free(host_mem_2);
 }
 
-TEST_CASE("Unit_hipCGGridGroupType_Barrier") {
+TEST_CASE(Unit_hipCGGridGroupType_Barrier) {
   const auto device = GENERATE(range(0, HipTest::getDeviceCount()));
   HIP_CHECK(hipSetDevice(device));
 

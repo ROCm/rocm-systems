@@ -128,7 +128,7 @@ enum EINST
     einst_final
 };
 
-static std::unordered_map<int, std::pair<WaveInstCategory, uint16_t>> table_map_to_common_type{
+static std::unordered_map<int, mapped_inst_t> table_map_to_common_type{
     {(int) EINST::salu,              {WaveInstCategory::SALU, 1} },
     {(int) EINST::smem_rd,           {WaveInstCategory::SMEM, 1} },
     {(int) EINST::smem_wr,           {WaveInstCategory::SMEM, 1} },
@@ -209,22 +209,17 @@ static std::unordered_map<int, std::pair<WaveInstCategory, uint16_t>> table_map_
     {(int) EINST::subv_loop_end,     {WaveInstCategory::SALU, 1} }
 };
 
-std::pair<WaveInstCategory, uint16_t> wave_t::map_to_common_type(int einst, int dprate, int derate)
+mapped_inst_t wave_t::map_to_common_type(int einst, int dprate, int derate)
 {
-    static thread_local auto empty = std::pair<WaveInstCategory, uint16_t>{WaveInstCategory::NONE, 0};
-    if (einst >= (int) EINST::other_simd_start && einst <= (int) EINST::other_simd_end) return empty;
-
-    try
+    auto it = table_map_to_common_type.find(einst);
+    if (it != table_map_to_common_type.end())
     {
-        auto inst = table_map_to_common_type.at(einst);
-        if (einst >= (int) EINST::valub_1 && einst <= (int) EINST::valub_dfdp_derate) inst.second *= dprate;
-
+        auto inst = it->second;
+        if (einst >= (int) EINST::valub_1 && einst <= (int) EINST::valub_dfdp_derate) inst.cycles *= dprate;
         return inst;
     }
-    catch (...)
-    {
-        return empty;
-    }
+
+    return mapped_inst_t{WaveInstCategory::NONE, 0};
 }
 
 wave_t::wave_t(int target_wgp, int tg_simd, int slot, pcinfo_t addr, Token& token, bool exbarw) :
@@ -286,14 +281,14 @@ void wave_t::new_pc(int64_t time, int64_t pc, CodeobjTableTranslator& table)
     if (back.code_object_id == 0) unattrib_pcs.push_back(pc_infos.size() - 1);
 }
 
-void wave_t::apply_valu_inst(Token token, bool wave64)
+void wave_t::apply_valu_inst(int64_t token_time)
 {
-    update_barrier_gfx11(token.time);
+    update_barrier_gfx11(token_time);
 
     if (trap_status != WaveTrapStatus::TRAP_RESTORED) return;
 
-    int64_t time = token.time;
-    int64_t duration = wave64 ? 2 : 1;
+    int64_t time = token_time;
+    int64_t duration = 1;
     int64_t stall = 0;
     if (cur_state == WaveslotState::WS_STALL && last_state_cycle < time)
     {
@@ -303,7 +298,7 @@ void wave_t::apply_valu_inst(Token token, bool wave64)
     }
 
     this->instructions.push_back({time, WaveInstCategory::VALU, duration, stall});
-    update_state(WaveslotState::WS_EXEC, token.time);
+    update_state(WaveslotState::WS_EXEC, token_time);
 }
 
 void wave_t::apply_immediate(int64_t token_time)
@@ -342,11 +337,11 @@ void wave_t::update_barrier_gfx11(int64_t token_time)
     }
 }
 
-void wave_t::apply_inst(Token token, inst_type_common inst, int tt_version, int dprate, int derate)
+void wave_t::apply_inst(int64_t token_time, int enum_inst, mapped_inst_t mapped, int tt_version)
 {
-    update_barrier_gfx11(token.time);
+    update_barrier_gfx11(token_time);
 
-    if (inst.inst == INST_RFE_TYPE)
+    if (enum_inst == INST_RFE_TYPE)
     {
         pc_infos.push_back({
             instructions.size(), pcinfo_t{0, 0}
@@ -356,38 +351,30 @@ void wave_t::apply_inst(Token token, inst_type_common inst, int tt_version, int 
         if (instructions.size() && instructions.back().category == WaveInstCategory::TRAP)
         {
             auto& back = instructions.back();
-            back.duration = std::max<int64_t>(back.duration, token.time + 1 - back.time);
+            back.duration = std::max<int64_t>(back.duration, token_time + 1 - back.time);
         }
         return;
     }
-    else if (inst.inst == INST_TRAP_TYPE)
+    else if (enum_inst == INST_TRAP_TYPE)
     {
-        instructions.push_back({token.time, WaveInstCategory::TRAP, 1, 0});
+        instructions.push_back({token_time, WaveInstCategory::TRAP, 1, 0});
         trap_status = WaveTrapStatus::TRAP_STANDBY;
     }
 
     if (trap_status != WaveTrapStatus::TRAP_RESTORED) return;
 
-    this->end_time = token.time;
+    this->end_time = token_time;
 
-    auto mapped = std::pair<WaveInstCategory, uint16_t>{WaveInstCategory::NONE, 0};
-    if (tt_version == 4)
-        mapped = gfx12::wave_t::map_to_common_type(inst.inst, dprate, derate);
-    else if (tt_version == 3)
-        mapped = gfx11::wave_t::map_to_common_type(inst.inst, dprate, derate);
-    else
-        mapped = wave_t::map_to_common_type(inst.inst, dprate, derate);
-
-    if (mapped.first == WaveInstCategory::IMMED)
+    if (mapped.category == WaveInstCategory::IMMED)
     {
-        apply_immediate(token.time);
+        apply_immediate(token_time);
         extend_barrier_gfx11 = tt_version <= 3;
         return;
     }
-    if (mapped.first == WaveInstCategory::NONE) return;
+    if (mapped.category == WaveInstCategory::NONE) return;
 
-    int64_t time = token.time;
-    int64_t duration = mapped.second * (inst.w64h ? 2 : 1);
+    int64_t time = token_time;
+    int64_t duration = mapped.cycles;
     int64_t stall = 0;
     if (cur_state == WaveslotState::WS_STALL && last_state_cycle < time)
     {
@@ -396,14 +383,14 @@ void wave_t::apply_inst(Token token, inst_type_common inst, int tt_version, int 
         time = last_state_cycle;
     }
 
-    this->instructions.push_back({time, mapped.first, duration, stall});
+    this->instructions.push_back({time, mapped.category, duration, stall});
 
-    if (inst.inst == INST_JUMP_TYPE)
+    if (enum_inst == INST_JUMP_TYPE)
         pc_infos.push_back({
             instructions.size(), pcinfo_t{0, 0}
         });
 
-    update_state(WaveslotState::WS_EXEC, token.time);
+    update_state(WaveslotState::WS_EXEC, token_time);
 }
 
 } // namespace gfx10

@@ -1,4 +1,4 @@
-/* Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc.
+/* Copyright (c) 2026 Advanced Micro Devices, Inc.
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -62,10 +62,10 @@ amd::Monitor Graph::graphSetLock_{};
 std::unordered_set<GraphExec*> GraphExec::graphExecSet_;
 // Guards global exec graph set
 // we have graphExec object as part of child graph and we need recursive lock
-amd::Monitor GraphExec::graphExecSetLock_(true);
+std::recursive_mutex GraphExec::graphExecSetLock_;
 // Serialize the creation of internal streams from multiple threads, ensuring that each stream is
 // mapped to different HSA queues.
-amd::Monitor GraphExec::graphExecStreamCreateLock_(true);
+std::recursive_mutex GraphExec::graphExecStreamCreateLock_;
 std::unordered_set<UserObject*> UserObject::ObjectSet_;
 // Guards global user object
 amd::Monitor UserObject::UserObjectLock_{};
@@ -808,7 +808,7 @@ Graph* Graph::clone() const {
 
 // ================================================================================================
 bool GraphExec::isGraphExecValid(GraphExec* pGraphExec) {
-  amd::ScopedLock lock(graphExecSetLock_);
+  std::scoped_lock lock(graphExecSetLock_);
   if (graphExecSet_.find(pGraphExec) == graphExecSet_.end()) {
     return false;
   }
@@ -817,7 +817,7 @@ bool GraphExec::isGraphExecValid(GraphExec* pGraphExec) {
 
 // ================================================================================================
 hipError_t GraphExec::CreateStreams(uint32_t num_streams, int devId) {
-  amd::ScopedLock lock(graphExecStreamCreateLock_);
+  std::scoped_lock lock(graphExecStreamCreateLock_);
 
   if (num_streams == 0) {
     ClPrint(amd::LOG_WARNING, amd::LOG_CODE,
@@ -1130,7 +1130,7 @@ hipError_t GraphExec::CaptureAndFormPacketsForGraph() {
           auto& currentNode = segment.nodes[j];
           // Capture packets for this node
           std::vector<uint8_t*> nodePackets;
-          std::vector<std::string> nodeKernelNames;
+          std::vector<const std::string*> nodeKernelNames;
           status = currentNode->CaptureAndFormPacket(GetKernelArgManager(), &nodePackets,
                                                      &nodeKernelNames);
 
@@ -1274,7 +1274,7 @@ hipError_t GraphExec::UpdateAQLPacket(hip::GraphNode* node) {
 
       // Capture new packets for this node
       std::vector<uint8_t*> newPackets;
-      std::vector<std::string> newKernelNames;
+      std::vector<const std::string*> newKernelNames;
       hipError_t status = node->CaptureAndFormPacket(kernArgManager_, &newPackets,
                                                                       &newKernelNames);
       if (status != hipSuccess) {
@@ -1301,7 +1301,7 @@ hipError_t GraphExec::UpdateAQLPacket(hip::GraphNode* node) {
                                              static_cast<size_t>(packetDelta), nullptr);
           packetBatch.dispatchKernelNames.insert(
               packetBatch.dispatchKernelNames.begin() + insertPos,
-              static_cast<size_t>(packetDelta), std::string());
+              static_cast<size_t>(packetDelta), nullptr);
         } else {
           // Negative packetDelta, remove excess packet slots from the end of this node's range
           const size_t removePos = range.startIndex + newPacketCount;
@@ -1701,7 +1701,7 @@ hipError_t GraphExec::EnqueueSegment(const Segment& segment, hip::Stream* stream
 
         // Select which vectors to dispatch based on whether nodes are disabled
         const std::vector<uint8_t*>* packetsToDispatch;
-        const std::vector<std::string>* kernelNamesToDispatch;
+        const std::vector<const std::string*>* kernelNamesToDispatch;
 
         if (packetBatch.disabledNodeCount == 0) {
           // No disabled nodes - use full batch

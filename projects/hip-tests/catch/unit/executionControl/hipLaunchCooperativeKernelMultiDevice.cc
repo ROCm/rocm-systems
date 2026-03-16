@@ -27,8 +27,7 @@ THE SOFTWARE.
 #include <resource_guards.hh>
 #include <utils.hh>
 
-TEST_CASE("Unit_hipLaunchCooperativeKernelMultiDevice_Positive_Basic",
-          "[multigpu]") {
+TEST_CASE(Unit_hipLaunchCooperativeKernelMultiDevice_Positive_Basic) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {
     HipTest::HIP_SKIP_TEST("CooperativeLaunch not supported");
     return;
@@ -64,8 +63,7 @@ TEST_CASE("Unit_hipLaunchCooperativeKernelMultiDevice_Positive_Basic",
   }
 }
 
-TEST_CASE("Unit_hipLaunchCooperativeKernelMultiDevice_Negative_Parameters",
-          "[multigpu]") {
+TEST_CASE(Unit_hipLaunchCooperativeKernelMultiDevice_Negative_Parameters) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {
     HipTest::HIP_SKIP_TEST("CooperativeLaunch not supported");
     return;
@@ -146,7 +144,7 @@ TEST_CASE("Unit_hipLaunchCooperativeKernelMultiDevice_Negative_Parameters",
   }
 }
 
-TEST_CASE("Unit_hipLaunchCooperativeKernelMultiDevice_Negative_MultiKernelSameDevice") {
+TEST_CASE(Unit_hipLaunchCooperativeKernelMultiDevice_Negative_MultiKernelSameDevice) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {
     HipTest::HIP_SKIP_TEST("CooperativeLaunch not supported");
     return;

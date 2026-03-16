@@ -13,7 +13,9 @@ stress:
   Stress_deviceAllocation_new_loop_singlekernel: *level_2
   Stress_deviceAllocation_malloc_loop_multkernel: *level_2
   Stress_deviceAllocation_new_loop_multkernel: *level_2
-  Stress_hipMalloc: *level_2
+  Stress_hipMalloc:
+    <<: *level_2
+    tags: [DifferentSizes]
   Stress_hipMemcpy_multiDevice_AllAPIs: *level_2
   Stress_hipMallocManaged_MultiSize: *level_2
   Stress_hipMallocManaged_KrnlWth2MemTypes: *level_2

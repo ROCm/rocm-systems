@@ -424,7 +424,9 @@ foreach(td ${TARGET_DEVICES})
   file(MAKE_DIRECTORY ${PROJECT_BINARY_DIR}/${td})
   add_custom_command(OUTPUT "${PROJECT_BINARY_DIR}/${td}/${ROCRTST}" COMMAND ${CMAKE_COMMAND} -E create_symlink "../${ROCRTST}" "${td}/${ROCRTST}" COMMENT "BUILDING ${td}/${ROCRTST}" VERBATIM)
   set(ROCRTST_LINKS_LIST ${ROCRTST_LINKS_LIST} "${PROJECT_BINARY_DIR}/${td}/${ROCRTST}")
-  install ( DIRECTORY ${PROJECT_BINARY_DIR}/${td} DESTINATION bin )
+  install ( DIRECTORY ${PROJECT_BINARY_DIR}/${td}
+            DESTINATION share/rocrtst
+            PATTERN "${ROCRTST}" EXCLUDE )
 endforeach(td)
 
 ######################
