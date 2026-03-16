@@ -460,9 +460,10 @@ write_perfetto(
 
                 auto _pmc_events = read_pmc_events(itr.event_id);
                 auto _event      = (ocfg.annotate_kfd) ? read_event(itr.event_id) : types::event{};
-                auto _canon      = std::string_view{itr.name};
-                auto want_event_handle_annotations =
-                    ocfg.annotate_args && is_hip_event_api(_canon) && !is_event_create_api(_canon);
+                auto _api_name   = std::string_view{itr.name};
+                auto want_event_handle_annotations = ocfg.annotate_args &&
+                                                     is_hip_event_api(_api_name) &&
+                                                     !is_event_create_api(_api_name);
                 auto _args = want_event_handle_annotations ? read_region_args(itr.id)
                                                            : std::vector<types::region_arg>{};
 
