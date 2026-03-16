@@ -172,8 +172,11 @@ def get_rank_env_variable_name(connection: RocpdImportData) -> str:
         "MPI_RANK",  # most generic to most runtime-specific
         "MPI_LOCALRANKID",
         "MPI_RANKID",
-        "MV2_COMM_WORLD_RANK",
         "OMPI_COMM_WORLD_RANK",
+        "MV2_COMM_WORLD_RANK",
+        "PMI_RANK",
+        "SLURM_PROCID",
+        "PBS_NODENUM",
     ]
 
     global _get_rank_env_variable_name
