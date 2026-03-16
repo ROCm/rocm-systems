@@ -107,15 +107,6 @@ DeviceFunc::DeviceFunc(const std::string &name, hipModule_t hmod) : kernel_(null
   const amd::Symbol* symbol = program->findSymbol(name.c_str());
   guarantee(symbol != nullptr, "Cannot find Symbol with name: %s", name.c_str());
 
-  // TODO: consider storing amd::Symbol* instead of amd::Kernel*
-  // Symbols hold device kernels for every device a program was built for and
-  // they are themselves stored within a program.
-  // Moreover, when a program is built, we automatically create kernel objects
-  // for every kernel, so this new object is just extra unnecessary allocation.
-  // The only concern I have is that symbols may be re-built if a program is
-  // re-built. However, that (presumably) shouldn't happen for implicitly
-  // created programs. Need to check modules which are explicitly managed by
-  // users.
   kernel_ = new amd::Kernel(*program, *symbol, name);
 }
 
