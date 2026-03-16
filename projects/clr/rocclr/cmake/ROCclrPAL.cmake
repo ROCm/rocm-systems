@@ -51,7 +51,7 @@ set(PAL_BUILD_PHOENIX1      ON)
 # Please do not set above flags in staging and mainline in new ASICs
 
 set(PAL_BRANCHDEFS          ON)
-if (AMD_COMPUTE_WIN)
+if (AMD_COMPUTE_WIN AND NOT LIB_SRC_BUILD)
   find_package(AMD_PAL_LIB)
 else()
   find_package(AMD_PAL)

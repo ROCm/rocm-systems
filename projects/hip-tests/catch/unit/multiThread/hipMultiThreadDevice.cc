@@ -86,13 +86,13 @@ void multiThread_nearzero(bool serialize, int iters) {
   }
 }
 
-TEST_CASE("Unit_hipMultiThreadDevice_Streams") {
+TEST_CASE(Unit_hipMultiThreadDevice_Streams) {
   // Serial version, just call once:
   createThenDestroyStreams(10, 10);
 }
 
-TEST_CASE("Unit_hipMultiThreadDevice_SerialPyramid") { multiThread_pyramid(true, 3); }
+TEST_CASE(Unit_hipMultiThreadDevice_SerialPyramid) { multiThread_pyramid(true, 3); }
 
-TEST_CASE("Unit_hipMultiThreadDevice_ParallelPyramid") { multiThread_pyramid(false, 3); }
+TEST_CASE(Unit_hipMultiThreadDevice_ParallelPyramid) { multiThread_pyramid(false, 3); }
 
-TEST_CASE("Unit_hipMultiThreadDevice_NearZero") { multiThread_nearzero(false, 1000); }
+TEST_CASE(Unit_hipMultiThreadDevice_NearZero) { multiThread_nearzero(false, 1000); }

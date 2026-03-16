@@ -71,7 +71,7 @@ static void __global__ vector_square(int* A_d) {
  * ------------------------
  *    - HIP_VERSION >= 6.0
  */
-TEMPLATE_TEST_CASE("Unit_hipGraphAddNodeTypeMemset_Positive_Basic", "", uint8_t, uint16_t,
+TEMPLATE_TEST_CASE(Unit_hipGraphAddNodeTypeMemset_Positive_Basic, uint8_t, uint16_t,
                    uint32_t) {
   const auto f = [](hipMemsetParams* params) {
     hipGraph_t graph = nullptr;
@@ -115,7 +115,7 @@ TEMPLATE_TEST_CASE("Unit_hipGraphAddNodeTypeMemset_Positive_Basic", "", uint8_t,
  * ------------------------
  *    - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipGraphAddNodeTypeKernel_Positive_Basic") {
+TEST_CASE(Unit_hipGraphAddNodeTypeKernel_Positive_Basic) {
   constexpr size_t allocation_size = N * sizeof(int);
   hipGraph_t graph;
   hipGraphExec_t graphExec;
@@ -182,7 +182,7 @@ TEST_CASE("Unit_hipGraphAddNodeTypeKernel_Positive_Basic") {
  * ------------------------
  *    - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipGraphAddNodeTypeHost_Positive_Basic") {
+TEST_CASE(Unit_hipGraphAddNodeTypeHost_Positive_Basic) {
   constexpr size_t allocation_size = N * sizeof(int);
   hipGraph_t graph;
   hipGraphExec_t graphExec;
@@ -230,7 +230,7 @@ TEST_CASE("Unit_hipGraphAddNodeTypeHost_Positive_Basic") {
  * ------------------------
  *    - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipGraphAddNodeTypeChildGraph_Positive_Basic") {
+TEST_CASE(Unit_hipGraphAddNodeTypeChildGraph_Positive_Basic) {
   constexpr size_t allocation_size = N * sizeof(int);
   hipGraph_t graph, childgraph;
   hipGraphExec_t graphExec;
@@ -325,7 +325,7 @@ static hipError_t MemcpyType3DWrapper(PtrVariant dst_ptr, hipPos dst_pos, PtrVar
  * ------------------------
  *    - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipGraphAddNodeTypeMemcpy_Positive_Basic") {
+TEST_CASE(Unit_hipGraphAddNodeTypeMemcpy_Positive_Basic) {
   CHECK_IMAGE_SUPPORT
 
   constexpr bool async = false;
@@ -384,7 +384,7 @@ TEST_CASE("Unit_hipGraphAddNodeTypeMemcpy_Positive_Basic") {
  * ------------------------
  *    - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipGraphAddNodeTypeEventRecord_Positive_Basic") {
+TEST_CASE(Unit_hipGraphAddNodeTypeEventRecord_Positive_Basic) {
   hipGraph_t graph;
   hipStream_t streamForGraph;
   hipGraphExec_t graphExec;
@@ -422,7 +422,7 @@ TEST_CASE("Unit_hipGraphAddNodeTypeEventRecord_Positive_Basic") {
  * ------------------------
  *    - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipGraphAddNodeTypeEventWait_Positive_Basic") {
+TEST_CASE(Unit_hipGraphAddNodeTypeEventWait_Positive_Basic) {
   hipGraph_t graph;
   hipStream_t streamForGraph;
   hipGraphExec_t graphExec;
@@ -468,7 +468,7 @@ TEST_CASE("Unit_hipGraphAddNodeTypeEventWait_Positive_Basic") {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipGraphAddNodeTypeMemAlloc_Positive_Basic") {
+TEST_CASE(Unit_hipGraphAddNodeTypeMemAlloc_Positive_Basic) {
   constexpr size_t allocation_size = N * sizeof(int);
   hipGraph_t graph;
   hipStream_t streamForGraph;
@@ -525,7 +525,7 @@ TEST_CASE("Unit_hipGraphAddNodeTypeMemAlloc_Positive_Basic") {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipGraphAddNode_Negative_Parameters") {
+TEST_CASE(Unit_hipGraphAddNode_Negative_Parameters) {
   using namespace std::placeholders;
   hipGraph_t graph = nullptr;
   HIP_CHECK(hipGraphCreate(&graph, 0));

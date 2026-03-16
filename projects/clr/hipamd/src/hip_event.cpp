@@ -51,7 +51,7 @@ bool EventDD::ready() {
 
 // ================================================================================================
 hipError_t Event::query() {
-  amd::ScopedLock lock(lock_);
+  std::scoped_lock lock(lock_);
 
   // If event is not recorded, event_ is null, hence return hipSuccess
   if (event_ == nullptr) {
@@ -63,7 +63,7 @@ hipError_t Event::query() {
 
 // ================================================================================================
 hipError_t Event::synchronize() {
-  amd::ScopedLock lock(lock_);
+  std::scoped_lock lock(lock_);
 
   // If event is not recorded, event_ is null, hence return hipSuccess
   if (event_ == nullptr) {
@@ -95,7 +95,7 @@ bool EventDD::awaitEventCompletion() {
 
 // ================================================================================================
 hipError_t Event::elapsedTime(Event& eStop, float& ms) {
-  amd::ScopedLock startLock(lock_);
+  std::scoped_lock startLock(lock_);
 
   // Handle same event case
   if (this == &eStop) {
@@ -106,7 +106,7 @@ hipError_t Event::elapsedTime(Event& eStop, float& ms) {
     return ready() ? hipSuccess : hipErrorNotReady;
   }
 
-  amd::ScopedLock stopLock(eStop.lock());
+  std::scoped_lock stopLock(eStop.lock());
 
   // Validate events
   if (event_ == nullptr || eStop.event() == nullptr) {
@@ -176,7 +176,7 @@ hipError_t Event::streamWaitCommand(amd::Command*& command, hip::Stream* stream)
 }
 // ================================================================================================
 hipError_t Event::streamWait(hip::Stream* stream, uint flags) {
-  amd::ScopedLock lock(lock_);
+  std::scoped_lock lock(lock_);
 
   // Early return if event is not recorded, same stream, or already ready
   if ((event_ == nullptr) || (event_->command().queue() == stream) || ready()) {
@@ -239,7 +239,7 @@ hipError_t Event::enqueueRecordCommand(hip::Stream* stream, amd::Command* comman
 // ================================================================================================
 hipError_t Event::addMarker(hip::Stream* hip_stream, amd::Command* command, bool batch_flush) {
   // Keep the lock always at the beginning of this to avoid a race. SWDEV-277847
-  amd::ScopedLock lock(lock_);
+  std::scoped_lock lock(lock_);
   if (const auto status = recordCommand(command, hip_stream, 0, batch_flush);
       status != hipSuccess) {
     return status;

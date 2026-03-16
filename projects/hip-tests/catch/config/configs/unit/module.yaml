@@ -39,10 +39,6 @@ module:
     <<: *level_2
     # Below tests tests fail in PSDB
     disabled: [nvidia_windows]
-  Unit_hipModuleLoadDataEx_Negative_Image_Is_An_Empty_String:
-    <<: *level_2
-    # Note: Following two tests disabled due to defect - EXSWHTEC-153
-    disabled: [amd_windows]
   Unit_hipGetFuncBySymbol_PositiveTest: *level_2
   Unit_hipGetFuncBySymbol_NegativeTests: *level_2
   Unit_hipGetFuncBySymbol_InChildProcess: *level_2
@@ -79,10 +75,6 @@ module:
     <<: *level_2
     # Below tests tests fail in PSDB
     disabled: [nvidia_windows]
-  Unit_hipModuleLoadData_Negative_Image_Is_An_Empty_String:
-    <<: *level_2
-    # Note: Following two tests disabled due to defect - EXSWHTEC-153
-    disabled: [amd_windows]
   Unit_hipModuleLoadData_Functional: *level_2
   Unit_hipModuleLoad_Positive_Basic:
     <<: *level_2

@@ -46,7 +46,7 @@ else()
   set(EXCLUDE_OPTION)
 endif()
 
-# Mark source files as HIP code  
+# Mark source files as HIP code
 set_source_files_properties(texture2dDrv.cpp PROPERTIES LANGUAGE HIP)
 set_source_files_properties(tex2dKernel.cpp PROPERTIES LANGUAGE HIP)
 
@@ -56,7 +56,7 @@ add_executable(texture2dDrv ${EXCLUDE_OPTION} texture2dDrv.cpp)
 # Note: Build for all detected architectures to support multiple GPUs (like hipcc does)
 add_custom_command(
   OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/tex2dKernel.code
-  COMMAND ${CMAKE_HIP_COMPILER} -x hip --cuda-device-only ${OFFLOAD_ARCH_FLAGS} ${CMAKE_CURRENT_SOURCE_DIR}/tex2dKernel.cpp -o ${CMAKE_CURRENT_BINARY_DIR}/tex2dKernel.code
+  COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} -x hip --cuda-device-only ${OFFLOAD_ARCH_FLAGS} ${CMAKE_CURRENT_SOURCE_DIR}/tex2dKernel.cpp -o ${CMAKE_CURRENT_BINARY_DIR}/tex2dKernel.code
   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/tex2dKernel.cpp
   COMMENT "Generating code object tex2dKernel.code for ${CMAKE_HIP_ARCHITECTURES}"
   VERBATIM

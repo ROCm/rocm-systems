@@ -7,7 +7,7 @@ on:
         type: string
       artifact_group:
         type: string
-      extra_cmake_options:
+      cmake_options:
         type: string
 
 permissions:
@@ -38,7 +38,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: ad524887d223cbd04d6b423691958fe86b589944 # 2026-03-06 commit
+          ref: a5ed8195057dbd8f06888236b1c78ccf41ed326e # 2026-03-11 commit
 
       - name: Install python deps
         run: |
@@ -63,13 +63,18 @@ jobs:
 
       - name: Fetch sources
         run: |
-          ./TheRock/build_tools/fetch_sources.py --jobs 12
+          ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-systems
+
+      - name: Patch rocm-systems
+        run: |
+          # Remove patches here if they cannot be applied cleanly, and they have not been deleted from TheRock repo
+          rm ./TheRock/patches/amd-mainline/rocm-systems/0003-Use-is_versioned-true-consistently-in-both-Comgr-Loa.patch
 
       - name: Configure Projects
         env:
           amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
           package_version: ADHOCBUILD
-          extra_cmake_options: ${{ inputs.extra_cmake_options }}
+          extra_cmake_options: "-DTHEROCK_ROCM_SYSTEMS_SOURCE_DIR=../ ${{ inputs.cmake_options }}"
           BUILD_DIR: build
         run: |
           python3 ./TheRock/build_tools/github_actions/build_configure.py
@@ -129,11 +134,13 @@ jobs:
 
   therock-test-linux-single-node:
     name: "Test single-node"
-    if: ${{ inputs.amdgpu_families == 'gfx94X-dcgpu' }}
+    # TODO(TheRock#3288): Re-enable gfx950-dcgpu runners once we get more capacity
+    # Due to migrating MI325s, we have lost capacity as of 3/13/2026 11:41am PST
+    if: ${{ inputs.amdgpu_families != 'gfx94X-dcgpu' && inputs.amdgpu_families != 'gfx950-dcgpu' }}
     needs: [therock-build-linux]
     uses: ./.github/workflows/therock-rccl-test-packages-single-node.yml
     with:
       amdgpu_families: ${{ inputs.amdgpu_families }}
       artifact_group: ${{ inputs.artifact_group }}
-      test_runs_on: linux-mi325-4gpu-ossci-rocm
+      test_runs_on: linux-mi325-8gpu-ossci-rocm
       artifact_run_id: ${{ github.run_id }}

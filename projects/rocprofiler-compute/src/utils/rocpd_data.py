@@ -38,7 +38,7 @@ COUNTERS_COLLECTION_QUERY = """
 SELECT
     agent_id as GPU_ID,
     guid as GUID,
-    correlation_id as Correlation_Id,
+    stack_id as Correlation_Id,
     dispatch_id as Dispatch_ID,
     pid as PID,
     grid_size as Grid_Size,
@@ -62,7 +62,7 @@ SELECT
     json_extract(extdata, '$.message') AS Function,
     pid AS Process_Id,
     tid AS Thread_Id,
-    corr_id AS Correlation_Id,
+    stack_id AS Correlation_Id,
     guid AS GUID,
     start AS Start_Timestamp,
     end AS End_Timestamp
