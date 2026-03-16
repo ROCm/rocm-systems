@@ -79,7 +79,6 @@ def generate_custom(args, cmake_args, ctest_args):
         set(CTEST_UPDATE_VERSION_ONLY TRUE)
         set(CTEST_GIT_INIT_SUBMODULES TRUE)
 
-        set(CTEST_OUTPUT_ON_FAILURE TRUE)
         set(CTEST_USE_LAUNCHERS TRUE)
         set(CMAKE_CTEST_ARGUMENTS --output-on-failure {CTEST_ARGS})
 
@@ -141,6 +140,44 @@ def generate_dashboard_script(args):
         safe_submit(PARTS Build)
 
         handle_error("Build" _build_ret)
+
+        if(IS_DIRECTORY "{BINARY_DIR}/share/rocprofiler-systems/tests/pytest")
+            find_program(_pytest_exe NAMES pytest REQUIRED)
+
+            set(_py_ver_flag "")
+            set(_py_dir_flag "")
+            file(STRINGS "{BINARY_DIR}/CMakeCache.txt" _cache_lines)
+            foreach(_line IN LISTS _cache_lines)
+                if(_line MATCHES "^ROCPROFSYS_PYTHON_VERSIONS:[A-Z]+=(.+)")
+                    string(REPLACE ";" "\\\\;" _pv "${{CMAKE_MATCH_1}}")
+                    set(_py_ver_flag "--python-versions=${{_pv}}")
+                elseif(_line MATCHES "^ROCPROFSYS_PYTHON_ROOT_DIRS:[A-Z]+=(.+)")
+                    string(REPLACE ";" "\\\\;" _pd "${{CMAKE_MATCH_1}}")
+                    set(_py_dir_flag "--python-root-dirs=${{_pd}}")
+                endif()
+            endforeach()
+
+            execute_process(
+                COMMAND ${{_pytest_exe}}
+                    "{BINARY_DIR}/share/rocprofiler-systems/tests/pytest"
+                    --show-config-only
+                    -p no:cacheprovider
+                    ${{_py_ver_flag}} ${{_py_dir_flag}}
+                WORKING_DIRECTORY "{BINARY_DIR}"
+                COMMAND_ERROR_IS_FATAL ANY
+            )
+
+            # Build ROCPROFSYS_PYTHON_HINTS from root dirs so CTestTestfile
+            # find_program calls can locate conda/venv pythons
+            set(ROCPROFSYS_PYTHON_HINTS "")
+            if(NOT "${{_py_dir_flag}}" STREQUAL "")
+                string(REGEX REPLACE "^--python-root-dirs=" "" _raw_roots "${{_py_dir_flag}}")
+                string(REPLACE "\\\\;" ";" _root_list "${{_raw_roots}}")
+                foreach(_root IN LISTS _root_list)
+                    list(APPEND ROCPROFSYS_PYTHON_HINTS "${{_root}}/bin" "${{_root}}")
+                endforeach()
+            endif()
+        endif()
 
         ctest_test(BUILD "{BINARY_DIR}" RETURN_VALUE _test_ret)
         safe_submit(PARTS Test)

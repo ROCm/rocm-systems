@@ -60,38 +60,42 @@ if(PYTEST_VERSION VERSION_LESS "${PYTEST_MIN_VERSION}")
     )
 endif()
 
-# Set up marker exclusions
-# This prevents certain CTests from being generated
-set(ROCPROFSYS_PYTEST_MARKER_EXCLUSIONS_LIST "")
-set(ROCPROFSYS_PYTEST_MARKER_EXCLUSIONS_FORMATTED "")
-macro(ROCPROFILER_SYSTEMS_ADD_PYTEST_MARKER_EXCLUSION MARKER_NAME)
-    # PyTest requires markers to use "_" and not "-"
-    # This is done to prevent having these tests "skipped" as it will not find
-    #   the target executable.
-    string(REPLACE "-" "_" _marker "${MARKER_NAME}")
-    list(APPEND ROCPROFSYS_PYTEST_MARKER_EXCLUSIONS_LIST "${_marker}")
-    if(ROCPROFSYS_PYTEST_MARKER_EXCLUSIONS_FORMATTED)
-        string(APPEND ROCPROFSYS_PYTEST_MARKER_EXCLUSIONS_FORMATTED " and not ${_marker}")
-    else()
-        set(ROCPROFSYS_PYTEST_MARKER_EXCLUSIONS_FORMATTED "not ${_marker}")
-    endif()
-endmacro()
+# Configure test marker and keyword inclusions/exclusions
 
-if(ROCPROFSYS_DISABLE_EXAMPLES)
-    foreach(_marker ${ROCPROFSYS_DISABLE_EXAMPLES})
-        rocprofiler_systems_add_pytest_marker_exclusion(${_marker})
+set(_ROCPROFSYS_PYTEST_TEST_MARKERS "")
+set(_ROCPROFSYS_PYTEST_TEST_KEYWORDS "")
+
+function(ROCPROFILER_SYSTEMS_CONFIGURE_TEST_VAR PYTEST_VAR LIST_TO_ADD TO_INCLUDE)
+    set(_current "${${PYTEST_VAR}}")
+    foreach(_to_add ${LIST_TO_ADD})
+        string(REPLACE "-" "_" _to_add "${_to_add}")
+        if(_current)
+            string(APPEND _current " and ")
+        endif()
+        if(${TO_INCLUDE})
+            string(APPEND _current "${_to_add}")
+        else()
+            string(APPEND _current "not ${_to_add}")
+        endif()
     endforeach()
-endif()
+    set(${PYTEST_VAR} "${_current}" PARENT_SCOPE)
+endfunction()
 
-if(ROCPROFSYS_DISABLE_TESTS)
-    foreach(_marker ${ROCPROFSYS_DISABLE_TESTS})
-        rocprofiler_systems_add_pytest_marker_exclusion(${_marker})
-    endforeach()
-endif()
+rocprofiler_systems_configure_test_var(_ROCPROFSYS_PYTEST_TEST_MARKERS "${ROCPROFSYS_DISABLE_EXAMPLES}" FALSE)
+rocprofiler_systems_configure_test_var(_ROCPROFSYS_PYTEST_TEST_MARKERS "${ROCPROFSYS_TEST_LABELS_INCLUDE}" TRUE)
+rocprofiler_systems_configure_test_var(_ROCPROFSYS_PYTEST_TEST_MARKERS "${ROCPROFSYS_TEST_LABELS_EXCLUDE}" FALSE)
+rocprofiler_systems_configure_test_var(_ROCPROFSYS_PYTEST_TEST_MARKERS "${ROCPROFSYS_TEST_KEYWORDS_INCLUDE}" TRUE)
+rocprofiler_systems_configure_test_var(_ROCPROFSYS_PYTEST_TEST_MARKERS "${ROCPROFSYS_TEST_KEYWORDS_EXCLUDE}" FALSE)
 
-if(NOT ROCPROFSYS_PYTEST_MARKER_EXCLUSIONS_LIST STREQUAL "")
+if(NOT "${_ROCPROFSYS_PYTEST_TEST_MARKERS}" STREQUAL "")
     rocprofiler_systems_message(STATUS
-        "PyTest tests with the following markers will be excluded from the CTest suite: ${ROCPROFSYS_PYTEST_MARKER_EXCLUSIONS_LIST}"
+        "PyTest marker command: ${_ROCPROFSYS_PYTEST_TEST_MARKERS}"
+    )
+endif()
+
+if(NOT "${_ROCPROFSYS_PYTEST_TEST_KEYWORDS}" STREQUAL "")
+    rocprofiler_systems_message(STATUS
+        "PyTest keyword command: ${_ROCPROFSYS_PYTEST_TEST_KEYWORDS}"
     )
 endif()
 
@@ -153,8 +157,12 @@ if(ROCPROFSYS_PYTHON_ROOT_DIRS)
     list(APPEND _generate_args "--python-root-dirs=${_py_roots_escaped}")
 endif()
 
-if(ROCPROFSYS_PYTEST_MARKER_EXCLUSIONS_FORMATTED)
-    list(APPEND _generate_args "-m" "${ROCPROFSYS_PYTEST_MARKER_EXCLUSIONS_FORMATTED}")
+if(NOT "${ROCPROFSYS_PYTEST_TEST_MARKERS}" STREQUAL "")
+    list(APPEND _generate_args "-m" "${ROCPROFSYS_PYTEST_TEST_MARKERS}")
+endif()
+
+if(NOT "${ROCPROFSYS_PYTEST_TEST_KEYWORDS}" STREQUAL "")
+    list(APPEND _generate_args "-k" "${ROCPROFSYS_PYTEST_TEST_KEYWORDS}")
 endif()
 
 # ---------------------------------------------------------------------------

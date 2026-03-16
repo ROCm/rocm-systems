@@ -891,6 +891,11 @@ def _ctest_generate_tests(
         "#",
         "# Run with: ctest --test-dir <directory containing this file>",
         "#",
+        "# Supported variables (-D VAR=VALUE):",
+        "#   ROCPROFSYS_TEST_DIR         - Path to test package directory or .pyz file",
+        "#   ROCPROFSYS_TEST_EXECUTABLE  - Python or pytest executable to use",
+        "#   ROCPROFSYS_PYTHON_HINTS     - Additional search paths for versioned Python interpreters",
+        "#",
         "",
         "execute_process(COMMAND pwd OUTPUT_VARIABLE _CTEST_DIR OUTPUT_STRIP_TRAILING_WHITESPACE)",
         "if(NOT DEFINED ROCPROFSYS_TEST_DIR)",
@@ -923,12 +928,17 @@ def _ctest_generate_tests(
         "",
     ]
 
-    # Used to skip python-verisoned tests that the user does not have installed
+    # Used to skip python-versioned tests that the user does not have installed.
+    # Users can pass -D ROCPROFSYS_PYTHON_HINTS=/path/to/bin;... to help
+    # find_program locate non-PATH pythons (e.g. conda envs).
     if python_versions_needed:
         lines.append("# Detect available Python versions on this system")
         for ver in sorted(python_versions_needed):
             cmake_var = f"_HAS_PYTHON_{ver.replace('.', '_')}"
-            lines.append(f'find_program({cmake_var} NAMES "python{ver}")')
+            lines.append(
+                f'find_program({cmake_var} NAMES "python{ver}"'
+                f" HINTS ${{ROCPROFSYS_PYTHON_HINTS}})"
+            )
         lines.append("")
 
     for item in items:
