@@ -71,6 +71,7 @@
 #include <initializer_list>
 #include <limits>
 #include <map>
+#include <mutex>
 #include <thread>
 #include <type_traits>
 #include <unordered_map>
@@ -179,13 +180,14 @@ struct rocpd_db
     rocpd_db(rocpd_db&& other) noexcept  = delete;
     rocpd_db& operator=(rocpd_db&&) = delete;
 
-    sqlite3*        conn             = nullptr;
-    std::string     uuid             = {};
-    std::string     guid             = {};
-    schema_map_t    schemas          = {};
-    track_map_t     tracks           = {};
-    size_t          event_id_counter = 0;
-    statement_map_t statements       = {};
+    sqlite3*           conn             = nullptr;
+    std::string        uuid             = {};
+    std::string        guid             = {};
+    schema_map_t       schemas          = {};
+    track_map_t        tracks           = {};
+    size_t             event_id_counter = 0;
+    mutable std::mutex statements_mutex = {};
+    statement_map_t    statements       = {};
 
     auto get_event_id() { return ++event_id_counter; }
 };
@@ -194,10 +196,36 @@ rocpd_db::~rocpd_db()
 {
     if(conn)
     {
+        auto _lock = std::lock_guard<std::mutex>{statements_mutex};
         for(auto& [table, stmt_map] : statements)
             for(auto& [stmt_name, stmt] : stmt_map)
-                sqlite3_finalize(stmt);
-        SQLITE3_CHECK(sqlite3_close_v2(conn));
+            {
+                if(!stmt) continue;
+
+                auto status = sqlite3_finalize(stmt);
+                if(status != SQLITE_OK)
+                {
+                    ROCP_WARNING << fmt::format(
+                        "Failed to finalize prepared statement for table '{}', key '{}': {} "
+                        "({})",
+                        table,
+                        stmt_name,
+                        sqlite3_errstr(status),
+                        status);
+                }
+
+                stmt = nullptr;
+            }
+
+        auto close_status = sqlite3_close_v2(conn);
+        if(close_status != SQLITE_OK)
+        {
+            ROCP_ERROR << fmt::format("Failed to close database connection: {} ({})",
+                                      sqlite3_errstr(close_status),
+                                      close_status);
+        }
+
+        conn = nullptr;
     }
 }
 
@@ -335,7 +363,14 @@ insert_value(std::string_view _name, const Tp& _value, TraitT = {})
         {
             auto _uval = static_cast<uint64_t>(_value);
             if(_uval > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()))
-                return sql_insert_value{_name, static_cast<double>(_uval)};
+            {
+                ROCP_WARNING << fmt::format(
+                    "Large unsigned value {} for field {} exceeds INT64_MAX; storing as TEXT "
+                    "to preserve precision",
+                    _uval,
+                    _name);
+                return sql_insert_value{_name, fmt::format("{}", _uval)};
+            }
             return sql_insert_value{_name, _uval};
         }
         else
@@ -385,6 +420,11 @@ bind_sql_value(sqlite3_stmt* stmt, int idx, const sql_insert_value& value)
             }
             else if constexpr(std::is_same_v<value_type, uint64_t>)
             {
+                if(val > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()))
+                {
+                    auto sval = fmt::format("{}", val);
+                    return sqlite3_bind_text(stmt, idx, sval.c_str(), -1, SQLITE_TRANSIENT);
+                }
                 return sqlite3_bind_int64(stmt, idx, static_cast<int64_t>(val));
             }
             else if constexpr(std::is_same_v<value_type, double>)
@@ -402,6 +442,33 @@ bind_sql_value(sqlite3_stmt* stmt, int idx, const sql_insert_value& value)
             }
         },
         value.value);
+}
+
+void
+reset_and_clear_statement(sqlite3_stmt* stmt)
+{
+    SQLITE3_CHECK(sqlite3_reset(stmt));
+    SQLITE3_CHECK(sqlite3_clear_bindings(stmt));
+}
+
+void
+check_bind_status(sqlite3_stmt* stmt, int status)
+{
+    if(status != SQLITE_OK)
+    {
+        reset_and_clear_statement(stmt);
+        SQLITE3_CHECK(status);
+    }
+}
+
+void
+check_step_status(sqlite3_stmt* stmt, int status)
+{
+    if(status != SQLITE_OK && status != SQLITE_DONE && status != SQLITE_ROW)
+    {
+        reset_and_clear_statement(stmt);
+        SQLITE3_CHECK2(status, {SQLITE_OK, SQLITE_DONE, SQLITE_ROW});
+    }
 }
 
 template <template <typename...> class ContainerT, typename... TypesT>
@@ -427,6 +494,8 @@ insert_row_impl(rocpd_db&                                 _db,
 
     ROCP_FATAL_IF(_db.conn == nullptr) << "SQLite connection not set for prepared statements";
 
+    auto _lock = std::lock_guard<std::mutex>{_db.statements_mutex};
+
     auto   key  = fmt::format("{}", fmt::join(fields, ","));
     auto*& stmt = _db.statements[_table][key];
 
@@ -447,13 +516,13 @@ insert_row_impl(rocpd_db&                                 _db,
         auto idx = static_cast<int>(i + 1);
         ROCP_TRACE << fmt::format(
             "Binding SQL value {} of {} (name={})", idx, fields.size(), fields.at(i));
-        SQLITE3_CHECK(bind_sql_value(stmt, idx, values.at(i)));
+        check_bind_status(stmt, bind_sql_value(stmt, idx, values.at(i)));
     }
 
-    SQLITE3_CHECK2(sqlite3_step(stmt), {SQLITE_OK, SQLITE_DONE, SQLITE_ROW});
+    check_step_status(stmt, sqlite3_step(stmt));
+
     auto row_id = static_cast<uint64_t>(sqlite3_last_insert_rowid(_db.conn));
-    SQLITE3_CHECK(sqlite3_reset(stmt));
-    SQLITE3_CHECK(sqlite3_clear_bindings(stmt));
+    reset_and_clear_statement(stmt);
 
     return row_id;
 }
