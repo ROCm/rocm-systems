@@ -393,6 +393,14 @@ set(CMAKE_VISIBILITY_INLINES_HIDDEN
 )
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# symlink compile_commands.json to source root for clangd and clang-tidy
+file(
+    CREATE_LINK
+        "${CMAKE_BINARY_DIR}/compile_commands.json"
+        "${CMAKE_SOURCE_DIR}/compile_commands.json"
+    SYMBOLIC
+)
+
 include(Formatting) # format target
 include(Packages) # finds third-party libraries
 
