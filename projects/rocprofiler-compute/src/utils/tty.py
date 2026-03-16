@@ -35,15 +35,12 @@ from tabulate import tabulate
 import config
 from utils import mem_chart, parser, schema
 from utils.kernel_name_shortener import (
-    MAX_SHORTENING_LEVEL,
     kernel_name_shortener,
-    process_single_kernel_name,
 )
 from utils.logger import console_error, console_log, console_warning
 from utils.utils import (
     METRIC_ID_RE,
     NS_TO_MS,
-    compute_operator_prefix_stats,
     convert_metric_id_to_panel_info,
     get_panel_alias,
     get_uuid,
@@ -317,24 +314,53 @@ def show_torch_operator_table(operator_name: str, df: pd.DataFrame) -> None:
     console_log(table_str)
 
 
+def list_torch_operators(
+    workload_path: str,
+    file_data: list[tuple[str, pd.DataFrame, dict[str, tuple[float, int]], float]],
+) -> None:
+    """Display the full PyTorch operator listing.
+
+    Pure display function: receives pre-loaded data and prints the banner,
+    per-operator hierarchies, and totals.
+    """
+    print(f"\n{'=' * 80}")
+    print(f"PyTorch Operators in: {workload_path}")
+    print("Kernel (id N) can be used with -k for filtering.")
+    print(f"{'=' * 80}\n")
+    operator_count = 0
+    for idx, (operator_name, df, prefix_stats, _) in enumerate(file_data, start=1):
+        show_torch_operator_hierarchy(
+            operator_name,
+            df,
+            index=idx,
+            prefix_stats=prefix_stats,
+        )
+        operator_count += 1
+
+    if not operator_count:
+        console_warning(
+            "No PyTorch operator data found. "
+            "Please ensure profiling was done with --torch-trace option."
+        )
+
+    print(f"\n{'=' * 80}")
+    print(f"Total: {operator_count} operators")
+    print(f"{'=' * 80}\n")
+
+
 def show_torch_operator_hierarchy(
     operator_name: str,
     df: pd.DataFrame,
+    prefix_stats: dict[str, tuple[float, int]],
     index: Optional[int] = None,
-    kernel_name_to_id: Optional[dict[str, int]] = None,
-    kernel_verbose: int = 1,
-    prefix_stats: Optional[dict[str, tuple[float, int]]] = None,
 ) -> None:
     """
     Display the PyTorch operator listing with hierarchy, numbering, and durations.
 
-    Kernel names are shortened using the same logic as analyze-mode tables (and -k)
-    so they match; kernel_verbose controls shortening (default 1, overridable by user).
     Shows Operator N: 'name', then for each hierarchy path: full_name
     (total_duration, count), the hierarchy tree, and kernel launches with
     optional kernel durations (total_duration ms) when timestamps are present.
-    If kernel_name_to_id is provided, each kernel line shows (id N) for use with -k.
-    If prefix_stats is provided, it is used directly; otherwise computed from df.
+    Each kernel line shows (id N) for use with -k.
     """
     print(f"\n{'-' * 80}")
     if index is not None:
@@ -354,8 +380,6 @@ def show_torch_operator_hierarchy(
     # "Context_Id", etc. Optional: Start_Timestamp_function, End_Timestamp_function,
     # Start_Timestamp_kernel, End_Timestamp_kernel for durations.
 
-    if prefix_stats is None:
-        prefix_stats = compute_operator_prefix_stats(df)
     has_duration = bool(prefix_stats)
 
     unique_op_hierarchies = df["Operator_Name"].unique()
@@ -398,24 +422,19 @@ def show_torch_operator_hierarchy(
         kernel_counts: dict[str, int] = {}
         kernel_duration_ns: dict[str, float] = {}
         kernel_context: dict[str, dict[str, Any]] = {}
+        kernel_ids: dict[str, int] = {}
+        has_kernel_id = "Kernel_ID" in df.columns
         for _, row in op_data.iterrows():
-            full_kernel_name = str(row["Kernel_Name"]).strip()
-            if not full_kernel_name:
+            kernel_name = str(row["Kernel_Name"]).strip()
+            if not kernel_name:
                 continue
-            if kernel_verbose >= MAX_SHORTENING_LEVEL:
-                kernel_name = full_kernel_name
-            else:
-                kernel_name = process_single_kernel_name(
-                    full_kernel_name, kernel_verbose
-                )
 
             if kernel_name not in kernel_counts:
                 kernel_counts[kernel_name] = 0
                 kernel_duration_ns[kernel_name] = 0.0
-                kernel_context[kernel_name] = {
-                    "full_name": full_kernel_name,
-                    "contexts": {},
-                }
+                kernel_context[kernel_name] = {"contexts": {}}
+                if has_kernel_id and pd.notna(row["Kernel_ID"]):
+                    kernel_ids[kernel_name] = int(row["Kernel_ID"])
             kernel_counts[kernel_name] += 1
             if has_kernel_ts:
                 kernel_duration_ns[kernel_name] += float(
@@ -431,14 +450,13 @@ def show_torch_operator_hierarchy(
             if ":" not in location:
                 continue
             file_name, line_num = location.split(":", 1)
-            ctx = kernel_context[kernel_name]["contexts"]
-            ctx.setdefault(file_name, {})
-            ctx[file_name][line_num] = ctx[file_name].get(line_num, 0) + 1
+            contexts = kernel_context[kernel_name]["contexts"]
+            contexts.setdefault(file_name, {})
+            contexts[file_name][line_num] = contexts[file_name].get(line_num, 0) + 1
 
         for kernel_name, num_launches in kernel_counts.items():
-            id_suffix = ""
-            if kernel_name_to_id is not None and kernel_name in kernel_name_to_id:
-                id_suffix = f" (id {kernel_name_to_id[kernel_name]})"
+            kernel_id = kernel_ids.get(kernel_name)
+            id_suffix = f" (id {kernel_id})" if kernel_id is not None else ""
             display_name = simplify_kernel_name(kernel_name)
             total_ms = None
             if has_kernel_ts and kernel_name in kernel_duration_ns:

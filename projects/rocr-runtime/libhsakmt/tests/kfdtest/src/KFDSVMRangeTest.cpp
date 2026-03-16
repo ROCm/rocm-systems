@@ -36,7 +36,6 @@ void KFDSVMRangeTest::SetUp() {
     ROUTINE_START
 
     KFDBaseComponentTest::SetUp();
-
     SVMSetXNACKMode(GetParam());
 
     ROUTINE_END
@@ -194,6 +193,8 @@ TEST_P(KFDSVMRangeTest, XNACKModeTest) {
     TEST_START(TESTPROFILE_RUNALL);
 
     if (!SVMAPISupported())
+        return;
+    if (!m_is_xnack_supported)
         return;
 
     HSAuint32 i, j;

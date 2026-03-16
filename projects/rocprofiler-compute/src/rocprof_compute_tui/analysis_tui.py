@@ -34,7 +34,7 @@ import pandas as pd
 
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from rocprof_compute_tui.utils.tui_utils import (
-    get_top_kernels_and_dispatch_ids,
+    get_top_kernels,
     process_panels_to_dataframes,
 )
 from utils import file_io, parser, schema
@@ -49,11 +49,7 @@ class tui_analysis(OmniAnalyze_Base):
         super().__init__(args, supported_archs)
         self.path = path
         self.args = self.get_args()
-        self.raw_dfs: dict[str, dict] = {}
 
-    # -----------------------
-    # Required child methods
-    # -----------------------
     @demarcate
     def pre_processing(self) -> None:
         self._profiling_config = file_io.load_profiling_config(self.path)
@@ -62,7 +58,6 @@ class tui_analysis(OmniAnalyze_Base):
         if self.args.random_port:
             console_error("--gui flag is required to enable --random-port")
 
-        # Process PMC data
         workload = self._runs[self.path]
 
         workload.raw_pmc = file_io.create_df_pmc(
@@ -86,42 +81,43 @@ class tui_analysis(OmniAnalyze_Base):
             time_unit=self.args.time_unit,
             kernel_verbose=self.args.kernel_verbose,
         )
-        kernel_name_shortener(self._runs[self.path].raw_pmc, self.args.kernel_verbose)
+        kernel_name_shortener(workload.raw_pmc, self.args.kernel_verbose)
 
-        # 1. load top kernel
         parser.load_non_mertrics_table(
-            workload=self._runs[self.path], dir_path=self.path, args=self.args
+            workload=workload, dir_path=self.path, args=self.args
         )
 
-        # 2. Generate kernel-specific dataframes (per-dispatch)
+        # 2. Generate per-kernel dataframes (aggregated across all dispatches)
         self.raw_dfs = {}
-        for idx in workload.raw_pmc.index:
-            kernel_df = workload.raw_pmc.loc[[idx]]
-            kernel_name = str(kernel_df.pmc_perf["Kernel_Name"].loc[idx])
-            dispatch_id = int(kernel_df.pmc_perf["Dispatch_ID"].loc[idx])
 
-            # Create unique key: "kernel_name::dispatch_id"
-            unique_key = f"{kernel_name}::{dispatch_id}"
+        # Group raw PMC data by kernel name
+        kernel_groups = workload.raw_pmc.pmc_perf.groupby("Kernel_Name")
+
+        for kernel_name, group in kernel_groups:
+            # Get all dispatch indices for this kernel
+            dispatch_indices = group.index.tolist()
+
+            # Extract raw PMC data for all dispatches of this kernel
+            kernel_raw_pmc = workload.raw_pmc.loc[dispatch_indices]
 
             kernel_dfs = copy.deepcopy(workload.dfs)
 
-            # Evaluate metrics for this dispatch
+            # Evaluate metrics aggregated across all dispatches of this kernel
             parser.eval_metric(
                 kernel_dfs,
                 workload.dfs_type,
                 workload.sys_info.iloc[0],
                 workload.roofline_peaks,
-                kernel_dfs,
+                kernel_raw_pmc,
                 self.args.debug,
                 self._profiling_config,
             )
 
-            self.raw_dfs[unique_key] = kernel_dfs
+            self.raw_dfs[str(kernel_name)] = kernel_dfs
 
     def initalize_runs(
         self, normalization_filter: Optional[str] = None
     ) -> OrderedDict[str, schema.Workload]:
-        # Load system info and configure
         sys_info = file_io.load_sys_info(str(Path(self.path) / "sysinfo.csv"))
         arch = sys_info.iloc[0]["gpu_arch"]
 
@@ -134,7 +130,6 @@ class tui_analysis(OmniAnalyze_Base):
         )
         self.load_options(normalization_filter)
 
-        # Create workload with system and roofline data
         w = schema.Workload()
         w.sys_info = (
             parser.correct_sys_info(
@@ -143,12 +138,7 @@ class tui_analysis(OmniAnalyze_Base):
             if self.args.specs_correction
             else sys_info
         )
-
-        # NOTE: Roofline is not yet supported in TUI. Keep roofline_peaks empty.
-        # When roofline support is added to TUI, this should use validate_roofline_csv()
-        # similar to analysis_base.py.
         w.roofline_peaks = pd.DataFrame()
-
         w.avail_ips = w.sys_info["ip_blocks"].item().split("|")
         w.dfs = copy.deepcopy(self._arch_configs[arch].dfs)
         w.dfs_type = self._arch_configs[arch].dfs_type
@@ -156,18 +146,21 @@ class tui_analysis(OmniAnalyze_Base):
         self._runs[self.path] = w
         return self._runs
 
-    def run_kernel_analysis(self) -> dict[str, Any]:
+    def run_kernel_analysis(self) -> dict[str, dict[str, Any]]:
+        """Generate per-kernel analysis keyed by kernel_name."""
         arch = list(self._arch_configs.keys())[0]
-        return {
-            kernel_name: process_panels_to_dataframes(
+
+        # Convert per-kernel raw_dfs to display format
+        result: dict[str, dict[str, Any]] = {}
+        for kernel_name, kernel_dfs in self.raw_dfs.items():
+            result[kernel_name] = process_panels_to_dataframes(
                 self.args,
-                df,
-                arch_configs=self._arch_configs[arch],
-                profiling_config=self._profiling_config,
-                roof_plot=None,
+                kernel_dfs,
+                self._arch_configs[arch],
+                self._profiling_config,
             )
-            for kernel_name, df in self.raw_dfs.items()
-        }
+
+        return result
 
     def run_top_kernel(self) -> Optional[list[dict[Hashable, Any]]]:
-        return get_top_kernels_and_dispatch_ids(self._runs)
+        return get_top_kernels(self._runs)
