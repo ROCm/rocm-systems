@@ -37,27 +37,27 @@ string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
 
 set(roctx-pause-resume-nested-env "${PRELOAD_ENV}")
 
-add_test(
-    NAME rocprofv3-test-roctx-pause-resume-nested-tracing-execute
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-roctx-pause-resume-nested-tracing
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --marker-trace --kernel-trace
         --selected-regions-ref-count --selected-regions -d
         ${CMAKE_CURRENT_BINARY_DIR}/%tag%-nested-trace -o out --output-format json
-        --log-level info -- $<TARGET_FILE:roctx-pause-resume>)
+        --log-level info -- $<TARGET_FILE:roctx-pause-resume>
+    DEPENDS roctx-pause-resume
+    TIMEOUT 45
+    LABELS "integration-tests;pause-resume"
+    ENVIRONMENT "${roctx-pause-resume-nested-env}"
+    FIXTURES_SETUP rocprofv3-test-roctx-pause-resume-nested-tracing)
 
-set_tests_properties(
-    rocprofv3-test-roctx-pause-resume-nested-tracing-execute
-    PROPERTIES TIMEOUT 45 LABELS "integration-tests;pause-resume" ENVIRONMENT
-               "${roctx-pause-resume-nested-env}" FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
-
-add_test(
-    NAME rocprofv3-test-roctx-pause-resume-nested-tracing-validate
-    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --json-input
-            ${CMAKE_CURRENT_BINARY_DIR}/roctx-pause-resume-nested-trace/out_results.json)
-
-set_tests_properties(
-    rocprofv3-test-roctx-pause-resume-nested-tracing-validate
-    PROPERTIES TIMEOUT 45 LABELS "integration-tests;pause-resume" DEPENDS
-               rocprofv3-test-roctx-pause-resume-nested-tracing-execute
-               FAIL_REGULAR_EXPRESSION "AssertionError")
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-roctx-pause-resume-nested-tracing
+    TEST_PATHS validate.py
+    COPY conftest.py
+    CONFIG pytest.ini
+    ARGS --json-input
+         ${CMAKE_CURRENT_BINARY_DIR}/roctx-pause-resume-nested-trace/out_results.json
+    TIMEOUT 45
+    LABELS "integration-tests;pause-resume"
+    FIXTURES_REQUIRED rocprofv3-test-roctx-pause-resume-nested-tracing
+    FAIL_REGULAR_EXPRESSION "AssertionError")

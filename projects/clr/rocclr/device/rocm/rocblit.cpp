@@ -500,21 +500,33 @@ inline bool DmaBlitManager::rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, c
       (copyMetadata.copyEnginePreference_ == amd::CopyMetadata::CopyEnginePreference::SDMA);
   HwQueueEngine engine = HwQueueEngine::Unknown;
 
+  hsa_agent_t copyAgent, peerAgent;
   // Determine engine based on source and destination agents
   if (srcAgent.handle == dstAgent.handle) {
     // Device to same device
     engine = HwQueueEngine::SdmaD2D;
+    copyAgent = srcAgent;
+    peerAgent = dstAgent;
   } else {
     // Different devices
     if (srcAgent.handle == dev().getCpuAgent().handle) {
-      // CPU to device
+      // Host to device
       engine = HwQueueEngine::SdmaH2D;
+      copyAgent = dstAgent;
+      peerAgent = srcAgent;
     } else if (dstAgent.handle == dev().getCpuAgent().handle) {
-      // Device to CPU
+      // Device to host
       engine = HwQueueEngine::SdmaD2H;
+      copyAgent = srcAgent;
+      peerAgent = dstAgent;
     } else {
-      // Device to different device
+      // For P2P, always use the backendDevice as the copy agent. ROCr selects the
+      // SDMA engine from the src_agent, so we place backendDevice there.
+      // peerAgent must be the peer
       engine = HwQueueEngine::SdmaP2P;
+      copyAgent = dev().getBackendDevice();
+      peerAgent = (srcAgent.handle == copyAgent.handle) ? dstAgent : srcAgent;
+      forceSDMA = true;
     }
   }
 
@@ -540,7 +552,7 @@ inline bool DmaBlitManager::rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, c
               &gpu(), copyMask, engine);
     } else {
       // No assigned engine yet - allocate one using device-level allocator
-      copyMask = dev().AllocateSdmaEngine(&gpu(), engine, dstAgent, srcAgent);
+      copyMask = dev().AllocateSdmaEngine(&gpu(), engine, peerAgent, copyAgent);
 
       if (copyMask != 0) {
         // Store the assigned engine in the VirtualGPU for future use
@@ -561,13 +573,6 @@ inline bool DmaBlitManager::rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, c
       // Copy on the first available free engine if ROCr returns a valid mask
       hsa_amd_sdma_engine_id_t copyEngine = static_cast<hsa_amd_sdma_engine_id_t>(copyMask);
 
-      // Check if engine type is SdmaP2P and adjust agents accordingly
-      // ROCr copy api would always choose SDMA engine of the srcAgent if its a GPU
-      if (engine == HwQueueEngine::SdmaP2P) {
-        srcAgent = dev().getBackendDevice();
-        forceSDMA = true;
-      }
-
       ClPrint(amd::LOG_DEBUG, amd::LOG_COPY2,
               "HSA Copy copy_engine=0x%x, dst=0x%zx, src=0x%zx, "
               "size=%ld, forceSDMA=%d, engineOp=%s, wait_event=0x%zx, completion_signal=0x%zx",
@@ -575,7 +580,7 @@ inline bool DmaBlitManager::rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, c
               (wait_events.size() != 0) ? wait_events[0].handle : 0, active.handle);
 
       status =
-          Hsa::memory_async_copy_on_engine(dst, dstAgent, src, srcAgent, size, wait_events.size(),
+          Hsa::memory_async_copy_on_engine(dst, peerAgent, src, copyAgent, size, wait_events.size(),
                                            wait_events.data(), active, copyEngine, forceSDMA);
     } else {
       kUseRegularCopyApi = true;
@@ -589,7 +594,7 @@ inline bool DmaBlitManager::rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, c
             dst, src, size, (wait_events.size() != 0) ? wait_events[0].handle : 0, active.handle,
             EngineOpName(engine));
 
-    status = Hsa::memory_async_copy(dst, dstAgent, src, srcAgent, size, wait_events.size(),
+    status = Hsa::memory_async_copy(dst, peerAgent, src, copyAgent, size, wait_events.size(),
                                     wait_events.data(), active);
   }
 

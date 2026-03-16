@@ -3902,6 +3902,36 @@ def test_multi_rank_warning_application_replay(
 
 
 @pytest.mark.multi_rank
+def test_multi_rank_no_warning_with_iteration_multiplexing(
+    binary_handler_profile_rocprof_compute, monkeypatch
+):
+    """
+    Test that no application replay warning is printed when running a
+    multi-rank application with iteration multiplexing enabled.
+    """
+    monkeypatch.setenv("OMPI_COMM_WORLD_RANK", "0")
+
+    workload_dir = test_utils.get_output_dir()
+
+    options = ["--iteration-multiplexing"]
+
+    _, stdout, stderr = binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir,
+        options,
+        app_name="app_1",
+        capture_output=True,
+        check_success=False,
+    )
+
+    output = stdout + stderr
+    assert "Multi-rank application detected" not in output
+    assert "Application replay mode" not in output
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.multi_rank
 def test_multi_rank_warning_pc_sampling(
     binary_handler_profile_rocprof_compute, monkeypatch
 ):
