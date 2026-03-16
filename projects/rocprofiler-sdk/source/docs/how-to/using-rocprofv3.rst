@@ -113,7 +113,7 @@ The following table lists the commonly used ``rocprofv3`` command-line options c
        | ``--hsa-image-trace`` [BOOL] |br| |br| |br| |br| |br|
        | ``--hsa-finalizer-trace`` [BOOL] |br| |br| |br| |br| |br|
        | ``--kfd-page-migration-trace`` [BOOL] |br| |br| |br|
-       | ``--kfd-page-mapping-trace`` [BOOL]  |br| |br| |br|
+       | ``--kfd-page-mapping-trace`` [BOOL] |br| |br| |br|
        | ``--kfd-queue-trace`` [BOOL] |br| |br| |br|
        | ``--kfd-dropped-events-trace`` [BOOL]
      - | Collects HIP Runtime API traces. For example, public HIP API functions starting with ``hip`` such as ``hipSetDevice``. |br| |br|
