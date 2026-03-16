@@ -47,6 +47,10 @@ if (NOT WIN32)
   set(THREADS_PREFER_PTHREAD_FLAG ON)
   find_package(Threads REQUIRED)
   target_link_libraries(ocltst PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
+  # ASAN with -shared-libsan requires explicit pthread linkage
+  if(THEROCK_SANITIZER MATCHES "ASAN")
+    target_link_options(ocltst PRIVATE -lpthread)
+  endif()
 endif()
 
 set_target_properties(ocltst PROPERTIES INSTALL_RPATH "$ORIGIN")
