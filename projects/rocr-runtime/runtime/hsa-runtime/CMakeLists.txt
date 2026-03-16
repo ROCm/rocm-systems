@@ -93,6 +93,27 @@ if(NOT LibElf_FOUND)
   find_package(LibElf REQUIRED)
 endif()
 
+## Find AMD CUID library.
+set(AMDCUID_ROOT "/opt/amdcuid" CACHE PATH "Path to AMDCUID installation")
+find_library(AMDCUID_LIB
+  NAMES amdcuid_shared
+  PATHS ${AMDCUID_ROOT}/lib
+  NO_DEFAULT_PATH
+)
+find_path(AMDCUID_INCLUDE_DIR
+  NAMES amd_cuid.h
+  PATHS ${AMDCUID_ROOT}/include
+  NO_DEFAULT_PATH
+)
+if (AMDCUID_LIB AND AMDCUID_INCLUDE_DIR) 
+  message(STATUS "Found AMDCUID lib: ${AMDCUID_LIB}")
+  message(STATUS "Found AMDCUID header: ${AMDCUID_INCLUDE_DIR}")
+  set(AMDCUID_FOUND TRUE)
+else()
+  message(WARNING "AMDCUID Library not found")
+  set(AMDCUID_FOUND FALSE)
+endif()
+
 ## Create the rocr target.
 add_library( ${CORE_RUNTIME_TARGET} "" )
 
@@ -268,6 +289,16 @@ if (${PC_SAMPLING_SUPPORT})
   set( PCS_SRCS pcs/hsa_ven_amd_pc_sampling.cpp pcs/pcs_runtime.cpp )
 
   target_sources( ${CORE_RUNTIME_TARGET} PRIVATE ${PCS_SRCS} )
+endif()
+
+if (${AMDCUID_FOUND})
+  find_package(OpenSSL REQUIRED) # Required by CUID library
+  target_include_directories(${CORE_RUNTIME_TARGET} PRIVATE ${AMDCUID_INCLUDE_DIR})
+  target_link_libraries(${CORE_RUNTIME_TARGET} PRIVATE ${AMDCUID_LIB} OpenSSL::Crypto)
+  set_target_properties(${CORE_RUNTIME_TARGET} PROPERTIES
+              BUILD_RPATH "${AMDCUID_ROOT}/lib"
+              INSTALL_RPATH "${AMDCUID_ROOT}/lib")
+  target_compile_definitions(${CORE_RUNTIME_TARGET} PRIVATE HSA_ENABLE_AMDCUID_SUPPORT)
 endif()
 
 if (NOT DEFINED IMAGE_SUPPORT AND CMAKE_SYSTEM_PROCESSOR MATCHES "i?86|x86_64|amd64|AMD64|loongarch64")
