@@ -79,6 +79,10 @@ jobs:
       - name: Build therock-dist
         run: cmake --build TheRock/build
 
+      - name: Install rocprofiler-compute python deps
+        run: |
+          pip install -r projects/rocprofiler-compute/requirements.txt
+
       - name: Build therock-archives
         run: cmake --build TheRock/build --target therock-archives
 
