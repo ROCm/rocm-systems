@@ -49,8 +49,12 @@ Stream::Stream(hip::Device* dev, Priority p, unsigned int f, bool null_stream,
 // ================================================================================================
 hipError_t Stream::EndCapture() {
   // Detach all captured events from this stream.
-  for (auto event : captureEvents_) {
-    reinterpret_cast<hip::Event*>(event)->SetCaptureStream(nullptr);
+  {
+    std::scoped_lock lock(lock_);
+    for (auto event : captureEvents_) {
+      reinterpret_cast<hip::Event*>(event)->SetCaptureStream(nullptr);
+    }
+    captureEvents_.clear();
   }
   // Recursively end capture on all parallel (forked) streams.
   for (auto stream : parallelCaptureStreams_) {
@@ -65,7 +69,6 @@ hipError_t Stream::EndCapture() {
   parentStream_ = nullptr;
   lastCapturedNodes_.clear();
   parallelCaptureStreams_.clear();
-  captureEvents_.clear();
 
   return hipSuccess;
 }
