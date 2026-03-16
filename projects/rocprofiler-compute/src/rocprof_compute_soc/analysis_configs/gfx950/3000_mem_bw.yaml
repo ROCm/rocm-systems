@@ -404,59 +404,59 @@ Panel Config:
         L2 hit rate:
           value: ((SUM(TCC_HIT_sum) / SUM(TCC_HIT_sum + TCC_MISS_sum)) * 100)
             if (SUM(TCC_HIT_sum + TCC_MISS_sum) != 0) else None
-          unit: pct
+          unit: Percent
         L2 utilization:
           value: ((SUM(TCC_BUSY_sum) / SUM(TO_INT($total_l2_chan) * $GRBM_GUI_ACTIVE_PER_XCD)) * 100)
             if (SUM(TO_INT($total_l2_chan) * $GRBM_GUI_ACTIVE_PER_XCD) != 0) else None
-          unit: pct
+          unit: Percent
         L2 tag stall rate:
           value: ((SUM(TCC_TAG_STALL_sum) / SUM(TCC_BUSY_sum)) * 100)
             if (SUM(TCC_BUSY_sum) != 0) else None
-          unit: pct
+          unit: Percent
         L2 input buffer stall rate:
           value: ((SUM(TCC_IB_STALL_sum) / SUM(TCC_BUSY_sum)) * 100)
             if (SUM(TCC_BUSY_sum) != 0) else None
-          unit: pct
+          unit: Percent
         L2 latency FIFO full rate:
           value: ((SUM(TCC_LATENCY_FIFO_FULL_sum) / SUM(TCC_BUSY_sum)) * 100)
             if (SUM(TCC_BUSY_sum) != 0) else None
-          unit: pct
+          unit: Percent
         L2 write data FIFO full rate:
           value: ((SUM(TCC_SRC_FIFO_FULL_sum) / SUM(TCC_BUSY_sum)) * 100)
             if (SUM(TCC_BUSY_sum) != 0) else None
-          unit: pct
+          unit: Percent
         L2-EA write stall rate:
           value: ((SUM(TCC_EA0_WRREQ_STALL_sum) / SUM(TCC_BUSY_sum)) * 100)
             if (SUM(TCC_BUSY_sum) != 0) else None
-          unit: pct
+          unit: Percent
         L2-EA too many writes stall:
           value: ((SUM(TCC_TOO_MANY_EA_WRREQS_STALL_sum) / SUM(TCC_BUSY_sum)) * 100)
             if (SUM(TCC_BUSY_sum) != 0) else None
-          unit: pct
+          unit: Percent
         L2-EA read credit stall (HBM):
           value: ((SUM(TCC_EA0_RDREQ_DRAM_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum)) * 100)
             if (SUM(TCC_BUSY_sum) != 0) else None
-          unit: pct
+          unit: Percent
         L2-EA write credit stall (HBM):
           value: ((SUM(TCC_EA0_WRREQ_DRAM_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum)) * 100)
             if (SUM(TCC_BUSY_sum) != 0) else None
-          unit: pct
+          unit: Percent
         L2-EA read credit stall (IF):
           value: ((SUM(TCC_EA0_RDREQ_GMI_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum)) * 100)
             if (SUM(TCC_BUSY_sum) != 0) else None
-          unit: pct
+          unit: Percent
         L2-EA write credit stall (IF):
           value: ((SUM(TCC_EA0_WRREQ_GMI_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum)) * 100)
             if (SUM(TCC_BUSY_sum) != 0) else None
-          unit: pct
+          unit: Percent
         L2-EA read credit stall (IO):
           value: ((SUM(TCC_EA0_RDREQ_IO_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum)) * 100)
             if (SUM(TCC_BUSY_sum) != 0) else None
-          unit: pct
+          unit: Percent
         L2-EA write credit stall (IO):
           value: ((SUM(TCC_EA0_WRREQ_IO_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum)) * 100)
             if (SUM(TCC_BUSY_sum) != 0) else None
-          unit: pct
+          unit: Percent
   - metric_table:
       id: 3008
       title: L2 Traffic
@@ -489,11 +489,11 @@ Panel Config:
         L2 writeback rate:
           value: ((SUM(TCC_WRITEBACK_sum) / SUM(TCC_REQ_sum)) * 100)
             if (SUM(TCC_REQ_sum) != 0) else None
-          unit: pct
+          unit: Percent
         L2 eviction rate:
           value: ((SUM(TCC_NORMAL_EVICT_sum) / SUM(TCC_REQ_sum)) * 100)
             if (SUM(TCC_REQ_sum) != 0) else None
-          unit: pct
+          unit: Percent
         L2-EA read BW:
           value: ((SUM((TCC_EA0_RDREQ_32B_sum * 32) + (TCC_EA0_RDREQ_64B_sum * 64)
             + (TCC_EA0_RDREQ_128B_sum * 128))) / (SUM(End_Timestamp - Start_Timestamp)))
@@ -507,30 +507,30 @@ Panel Config:
         HBM read fraction:
           value: ((SUM(TCC_EA0_RDREQ_DRAM_sum) / SUM(TCC_EA0_RDREQ_sum)) * 100)
             if (SUM(TCC_EA0_RDREQ_sum) != 0) else None
-          unit: pct
+          unit: Percent
         HBM write fraction:
           value: ((SUM(TCC_EA0_WRREQ_DRAM_sum) / SUM(TCC_EA0_WRREQ_sum)) * 100)
             if (SUM(TCC_EA0_WRREQ_sum) != 0) else None
-          unit: pct
+          unit: Percent
         Non-coherent request rate:
           value: ((SUM(TCC_NC_REQ_sum) / SUM(TCC_REQ_sum)) * 100)
             if (SUM(TCC_REQ_sum) != 0) else None
-          unit: pct
+          unit: Percent
         Uncached request rate:
           value: ((SUM(TCC_UC_REQ_sum) / SUM(TCC_REQ_sum)) * 100)
             if (SUM(TCC_REQ_sum) != 0) else None
-          unit: pct
+          unit: Percent
         Coherent cached request rate:
           value: ((SUM(TCC_CC_REQ_sum) / SUM(TCC_REQ_sum)) * 100)
             if (SUM(TCC_REQ_sum) != 0) else None
-          unit: pct
+          unit: Percent
         Probe request rate:
           value: SUM(TCC_PROBE_sum) / SUM(TCC_BUSY_sum)
           unit: Requests per Cycle
         Probe eviction rate:
           value: ((SUM(TCC_PROBE_EVICT_sum) / SUM(TCC_PROBE_sum)) * 100)
             if (SUM(TCC_PROBE_sum) != 0) else None
-          unit: pct
+          unit: Percent
   - metric_table:
       id: 3009
       title: L2 Raw Counter Values
@@ -744,39 +744,39 @@ Panel Config:
         L2 Back Pressure Indicator:
           value: ((SUM(TCC_IB_STALL_sum) / SUM(TCC_BUSY_sum)) * 100)
             if (SUM(TCC_BUSY_sum) != 0) else None
-          unit: pct
+          unit: Percent
         L2 Memory BW Bound - Read Credit Pressure:
           value: ((SUM(TCC_EA0_RDREQ_DRAM_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum)) * 100)
             if (SUM(TCC_BUSY_sum) != 0) else None
-          unit: pct
+          unit: Percent
         L2 Memory BW Bound - Write Credit Pressure:
           value: ((SUM(TCC_EA0_WRREQ_DRAM_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum)) * 100)
             if (SUM(TCC_BUSY_sum) != 0) else None
-          unit: pct
+          unit: Percent
         L2 Memory BW Bound - Combined Credit Pressure:
           value: ((SUM(TCC_EA0_RDREQ_DRAM_CREDIT_STALL_sum + TCC_EA0_WRREQ_DRAM_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum)) * 100)
             if (SUM(TCC_BUSY_sum) != 0) else None
-          unit: pct
+          unit: Percent
         L2 Internal Resource Pressure - Latency FIFO:
           value: ((SUM(TCC_LATENCY_FIFO_FULL_sum) / SUM(TCC_BUSY_sum)) * 100)
             if (SUM(TCC_BUSY_sum) != 0) else None
-          unit: pct
+          unit: Percent
         L2 Internal Resource Pressure - Source FIFO:
           value: ((SUM(TCC_SRC_FIFO_FULL_sum) / SUM(TCC_BUSY_sum)) * 100)
             if (SUM(TCC_BUSY_sum) != 0) else None
-          unit: pct
+          unit: Percent
         L2 Cache Efficiency:
           value: ((SUM(TCC_HIT_sum) / SUM(TCC_HIT_sum + TCC_MISS_sum)) * 100)
             if (SUM(TCC_HIT_sum + TCC_MISS_sum) != 0) else None
-          unit: pct
+          unit: Percent
         L2 to Memory Traffic Ratio:
           value: ((SUM(TCC_EA0_RDREQ_sum + TCC_EA0_WRREQ_sum) / SUM(TCC_REQ_sum)) * 100)
             if (SUM(TCC_REQ_sum) != 0) else None
-          unit: pct
+          unit: Percent
         L2 Remote Access Pressure (IF):
           value: ((SUM(TCC_EA0_RDREQ_GMI_CREDIT_STALL_sum + TCC_EA0_WRREQ_GMI_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum)) * 100)
             if (SUM(TCC_BUSY_sum) != 0) else None
-          unit: pct
+          unit: Percent
   metrics_description:
     # Table 3001: L1 Cache Stalls (upstream to downstream)
     L1 Cache - VMEM stalled by L1 Cache: >-
