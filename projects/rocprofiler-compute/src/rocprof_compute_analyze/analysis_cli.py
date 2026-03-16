@@ -23,11 +23,16 @@
 
 ##############################################################################
 
+import sys
+from pathlib import Path
+
+import pandas as pd
+
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from utils import file_io, parser, tty
 from utils.kernel_name_shortener import kernel_name_shortener
 from utils.logger import console_error, console_log, demarcate
-from utils.utils import sanitize_torch_operator_key
+from utils.utils import process_torch_trace_output
 
 
 class cli_analysis(OmniAnalyze_Base):
@@ -77,6 +82,18 @@ class cli_analysis(OmniAnalyze_Base):
                 kernel_verbose=args.kernel_verbose,
             )
 
+            if getattr(args, "list_torch_operators", False):
+                kernel_top_df = pd.read_csv(
+                    Path(path_info[0]) / "pmc_kernel_top.csv"
+                )
+                file_data = process_torch_trace_output(
+                    path_info[0],
+                    kernel_top_df=kernel_top_df,
+                    kernel_verbose=args.kernel_verbose,
+                )
+                tty.list_torch_operators(path_info[0], file_data)
+                sys.exit(0)
+
             # demangle and overwrite original 'Kernel_Name'
             kernel_name_shortener(workload.raw_pmc, args.kernel_verbose)
 
@@ -125,7 +142,7 @@ class cli_analysis(OmniAnalyze_Base):
             for op in operator_list:
                 is_hierarchy = "/" in op
                 lookup = op.split("/")[-1] if is_hierarchy else op
-                op_key = sanitize_torch_operator_key(lookup)
+                op_key = lookup.replace("torch.", "").replace(".", "_")
                 df = torch_ops.get(op_key)
                 if df is None:
                     console_log(f"No data for operator: {op}")
