@@ -105,7 +105,7 @@ static bool testMemset(allocator_fn_t allocator, deallocator_fn_t deallocator) {
  * ------------------------
  *  - HIP_VERSION >= 6.1
  */
-TEST_CASE("Unit_hipMemsetD32_ValidBuffer") {
+TEST_CASE(Unit_hipMemsetD32_ValidBuffer) {
   SECTION("Device Buffer") {
     bool result = testMemset(hipMalloc, hipFree);
 
@@ -133,7 +133,7 @@ TEST_CASE("Unit_hipMemsetD32_ValidBuffer") {
  * ------------------------
  *  - HIP_VERSION >= 6.1
  */
-TEST_CASE("Unit_hipMemsetD32_InvalidArg") {
+TEST_CASE(Unit_hipMemsetD32_InvalidArg) {
   constexpr size_t ptr_test_nelem = 4096;
   void* ptr = nullptr;
 
@@ -161,7 +161,7 @@ TEST_CASE("Unit_hipMemsetD32_InvalidArg") {
  * ------------------------
  *  - HIP_VERSION >= 6.1
  */
-TEST_CASE("Unit_hipMemsetD32_KernelBuffer") {
+TEST_CASE(Unit_hipMemsetD32_KernelBuffer) {
   constexpr size_t ptr_test_nelem = 4096;
   constexpr unsigned blocksPerCU = 6;
   constexpr unsigned threadsPerBlock = 256;
@@ -214,7 +214,7 @@ TEST_CASE("Unit_hipMemsetD32_Capture") {
 
   hipError_t memcpy_err = hipSuccess;
   BEGIN_CAPTURE_SYNC(memcpy_err, false);
-  HIP_CHECK_ERROR(hipMemsetD32(dst, 0xAB, N), memcpy_err);
+  HIP_CHECK_ERROR(hipMemsetD32(reinterpret_cast<hipDeviceptr_t>(dst), 0xAB, N), memcpy_err);
   END_CAPTURE_SYNC(memcpy_err);
 
   HIP_CHECK(hipFree(dst));

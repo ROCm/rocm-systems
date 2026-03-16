@@ -1,0 +1,3 @@
+---
+g++:
+  Unit_hipMalloc_gpptest: *level_2

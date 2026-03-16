@@ -198,7 +198,7 @@ bool Settings::create(const Pal::DeviceProperties& palProp,
         enableWave32Mode_ = 0;
       }
       lcWavefrontSize64_ = !enableWave32Mode_;
-      if (palProp.gfxLevel == Pal::GfxIpLevel::GfxIp10_1) {
+      if (palProp.gfxTriple.major == 10 && palProp.gfxTriple.minor == 1) {
         // GFX10.1 HW doesn't support custom pitch. Enable double copy workaround
         imageBufferWar_ = GPU_IMAGE_BUFFER_WAR;
       }

@@ -34,9 +34,9 @@
 extern "C" {
 #endif
 
+#include <limits.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <limits.h>
 
 /**
  * \struct  oam_mapi_version_t
@@ -47,8 +47,8 @@ extern "C" {
  *	Minor version increment indicates an interface change.
  */
 typedef struct oam_mapi_version {
-	uint32_t major;
-	uint32_t minor;
+  uint32_t major;
+  uint32_t minor;
 } oam_mapi_version_t;
 
 /**
@@ -58,19 +58,19 @@ typedef struct oam_mapi_version {
  *	This is unique across the entire network.
  */
 typedef struct oam_net_dev_id {
-	/*!< unique network identifier for the device */
-	int network_id;
+  /*!< unique network identifier for the device */
+  int network_id;
 } oam_net_dev_id_t;
 
 /*
  * various lengths for device properties
  */
-#define DEVICE_VENDOR_LEN	128
-#define DEVICE_NAME_LEN	128
-#define DEVICE_SKU_LEN	128
-#define BOARD_NAME_LEN	128
-#define BOARD_REVISION_LEN	128
-#define BOARD_SERIAL_NUM_LEN	128
+#define DEVICE_VENDOR_LEN 128
+#define DEVICE_NAME_LEN 128
+#define DEVICE_SKU_LEN 128
+#define BOARD_NAME_LEN 128
+#define BOARD_REVISION_LEN 128
+#define BOARD_SERIAL_NUM_LEN 128
 
 /**
  * \struct  oam_dev_properties_t
@@ -78,23 +78,23 @@ typedef struct oam_net_dev_id {
  * \details TBD
  */
 typedef struct oam_dev_properties {
-	/*!< Immutable local identifier for the device */
-	uint32_t device_id;
-	/*!< vendor name */
-	char device_vendor[DEVICE_VENDOR_LEN];
-	/*!< Device name */
-	char device_name[DEVICE_NAME_LEN];
-	/*!< SKU name */
-	char sku_name[DEVICE_SKU_LEN];
-	/*!< Board name */
-	char board_name[BOARD_NAME_LEN];
-	/*!< Board revision */
-	char board_revision[BOARD_REVISION_LEN];
-	/*!<
-	 * Board Serial Number or UUID any other identifier, which can be used
-	 * to identify devices uniquely and physically.
-	 */
-	char board_serial_number[BOARD_SERIAL_NUM_LEN];
+  /*!< Immutable local identifier for the device */
+  uint32_t device_id;
+  /*!< vendor name */
+  char device_vendor[DEVICE_VENDOR_LEN];
+  /*!< Device name */
+  char device_name[DEVICE_NAME_LEN];
+  /*!< SKU name */
+  char sku_name[DEVICE_SKU_LEN];
+  /*!< Board name */
+  char board_name[BOARD_NAME_LEN];
+  /*!< Board revision */
+  char board_revision[BOARD_REVISION_LEN];
+  /*!<
+   * Board Serial Number or UUID any other identifier, which can be used
+   * to identify devices uniquely and physically.
+   */
+  char board_serial_number[BOARD_SERIAL_NUM_LEN];
 } oam_dev_properties_t;
 
 /**
@@ -104,11 +104,11 @@ typedef struct oam_dev_properties {
  *          Various sensor related information
  */
 typedef struct oam_sensor_count {
-	uint32_t num_temperature_sensors;
-	uint32_t num_power_sensors;
-	uint32_t num_voltage_sensors;
-	uint32_t num_current_sensors;
-	uint32_t num_fans;
+  uint32_t num_temperature_sensors;
+  uint32_t num_power_sensors;
+  uint32_t num_voltage_sensors;
+  uint32_t num_current_sensors;
+  uint32_t num_fans;
 } oam_sensor_count_t;
 
 /**
@@ -117,12 +117,12 @@ typedef struct oam_sensor_count {
  * \details This enumerated type defines available sensors types.
  */
 typedef enum oam_sensor_type {
-	OAM_SENSOR_TYPE_POWER = 0,
-	OAM_SENSOR_TYPE_VOLTAGE,
-	OAM_SENSOR_TYPE_CURRENT,
-	OAM_SENSOR_TYPE_TEMP,
-	OAM_SENSOR_TYPE_FAN_SPEED,
-	OAM_SENSOR_TYPE_UNKNOWN
+  OAM_SENSOR_TYPE_POWER = 0,
+  OAM_SENSOR_TYPE_VOLTAGE,
+  OAM_SENSOR_TYPE_CURRENT,
+  OAM_SENSOR_TYPE_TEMP,
+  OAM_SENSOR_TYPE_FAN_SPEED,
+  OAM_SENSOR_TYPE_UNKNOWN
 } oam_sensor_type_t;
 
 /**
@@ -131,9 +131,9 @@ typedef enum oam_sensor_type {
  * \details This enumerated type defines available scales for power measurements
  */
 typedef enum oam_power_sensor_scale {
-	OAM_POWER_SCALE_uW = 0,
-	OAM_POWER_SCALE_mW,
-	OAM_POWER_SCALE_W,
+  OAM_POWER_SCALE_uW = 0,
+  OAM_POWER_SCALE_mW,
+  OAM_POWER_SCALE_W,
 } oam_power_sensor_scale_t;
 
 /**
@@ -142,9 +142,9 @@ typedef enum oam_power_sensor_scale {
  * \details This enumerated type defines available scales for voltage measurements
  */
 typedef enum oam_voltage_sensor_scale {
-	OAM_VOLTAGE_SCALE_uV = 0,
-	OAM_VOLTAGE_SCALE_mV,
-	OAM_VOLTAGE_SCALE_V,
+  OAM_VOLTAGE_SCALE_uV = 0,
+  OAM_VOLTAGE_SCALE_mV,
+  OAM_VOLTAGE_SCALE_V,
 } oam_voltage_sensor_scale_t;
 
 /**
@@ -153,9 +153,9 @@ typedef enum oam_voltage_sensor_scale {
  * \details This enumerated type defines available scales for current measurements
  */
 typedef enum oam_current_sensor_scale {
-	OAM_CURRENT_SCALE_uA = 0,
-	OAM_CURRENT_SCALE_mA,
-	OAM_CURRENT_SCALE_A,
+  OAM_CURRENT_SCALE_uA = 0,
+  OAM_CURRENT_SCALE_mA,
+  OAM_CURRENT_SCALE_A,
 } oam_current_sensor_scale_t;
 
 /**
@@ -164,8 +164,8 @@ typedef enum oam_current_sensor_scale {
  * \details This enumerated type defines available scales for temp measurements
  */
 typedef enum oam_temp_sensor_scale {
-	OAM_TEMP_SCALE_C = 0,
-	OAM_TEMP_SCALE_F
+  OAM_TEMP_SCALE_C = 0,
+  OAM_TEMP_SCALE_F
 } oam_temp_sensor_scale_t;
 
 /**
@@ -174,17 +174,17 @@ typedef enum oam_temp_sensor_scale {
  * \details This enumerated type defines available scales for power measurements
  */
 typedef enum oam_fan_sensor_scale {
-	OAM_FAN_SPEED_Hz = 0,
-	OAM_FAN_SPEED_KHz,
-	OAM_FAN_SPEED_MHz
+  OAM_FAN_SPEED_Hz = 0,
+  OAM_FAN_SPEED_KHz,
+  OAM_FAN_SPEED_MHz
 } oam_fan_sensor_scale_t;
 
 typedef union oam_sensor_scale {
-	oam_power_sensor_scale_t power_scale;
-	oam_voltage_sensor_scale_t volate_scale;
-	oam_current_sensor_scale_t current_scale;
-	oam_temp_sensor_scale_t temp_scale;
-	oam_fan_sensor_scale_t fan_scale;
+  oam_power_sensor_scale_t power_scale;
+  oam_voltage_sensor_scale_t volate_scale;
+  oam_current_sensor_scale_t current_scale;
+  oam_temp_sensor_scale_t temp_scale;
+  oam_fan_sensor_scale_t fan_scale;
 } oam_sensor_scale_t;
 
 /**
@@ -195,7 +195,7 @@ typedef union oam_sensor_scale {
  *          specific operation on that device.
  */
 typedef struct oam_dev_handle {
-	void *handle;
+  void* handle;
 } oam_dev_handle_t;
 
 /**
@@ -207,16 +207,16 @@ typedef struct oam_dev_handle {
  *          device there are no side effects.
  */
 typedef enum oam_dev_mode {
-	OAM_DEV_MODE_EXCLUSIVE = 0,
-	OAM_DEV_MODE_NONEXLUSIVE = 1,
-	OAM_DEV_MODE_UNKNOWN = 0xFF
+  OAM_DEV_MODE_EXCLUSIVE = 0,
+  OAM_DEV_MODE_NONEXLUSIVE = 1,
+  OAM_DEV_MODE_UNKNOWN = 0xFF
 } oam_dev_mode_t;
 
 /**
  * \def     OAM_SENSOR_NAME_MAX
  * \brief   length of sensor name
  */
-#define OAM_SENSOR_NAME_MAX  256
+#define OAM_SENSOR_NAME_MAX 256
 
 /**
  * \struct  oam_sensor_info_t
@@ -224,10 +224,10 @@ typedef enum oam_dev_mode {
  * \details Structure to store various info of sensors.
  */
 typedef struct oam_sensor_info {
-	char sensor_name[OAM_SENSOR_NAME_MAX];
-	oam_sensor_type_t sensor_type;
-	oam_sensor_scale_t scale;
-	int64_t value;
+  char sensor_name[OAM_SENSOR_NAME_MAX];
+  oam_sensor_type_t sensor_type;
+  oam_sensor_scale_t scale;
+  int64_t value;
 } oam_sensor_info_t;
 
 /**
@@ -236,10 +236,10 @@ typedef struct oam_sensor_info {
  * \details Various types of errors reported by device.
  */
 typedef struct oam_dev_error_count {
-	uint32_t total_error_count;
-	uint32_t fatal_error_count;
-	uint32_t unknown_error_count;
-	uint32_t ecc_error_count;
+  uint32_t total_error_count;
+  uint32_t fatal_error_count;
+  uint32_t unknown_error_count;
+  uint32_t ecc_error_count;
 } oam_dev_error_count_t;
 
 /**
@@ -248,10 +248,10 @@ typedef struct oam_dev_error_count {
  * \details Structure to store various firmware versions of OAM module
  */
 typedef struct oam_firmware_version {
-	oam_mapi_version_t device_boot_fw_version;
-	oam_mapi_version_t device_fw_version;
-	oam_mapi_version_t board_boot_fw_version;
-	oam_mapi_version_t board_fw_version;
+  oam_mapi_version_t device_boot_fw_version;
+  oam_mapi_version_t device_fw_version;
+  oam_mapi_version_t board_boot_fw_version;
+  oam_mapi_version_t board_fw_version;
 } oam_firmware_version_t;
 
 /**
@@ -260,10 +260,10 @@ typedef struct oam_firmware_version {
  * \details Structure to store PCI (Domain, BDF) information of the device
  */
 typedef struct oam_pci_info {
-	uint16_t domain;
-	uint8_t bus;
-	uint8_t device;
-	uint8_t function;
+  uint16_t domain;
+  uint8_t bus;
+  uint8_t device;
+  uint8_t function;
 } oam_pci_info_t;
 
 /**
@@ -272,8 +272,8 @@ typedef struct oam_pci_info {
  * \details This enumerated type defines various states of the network port
  */
 typedef enum oam_net_port_state {
-	OAM_NET_PORT_DISABLED = 0,
-	OAM_NET_PORT_ENABLED = 1
+  OAM_NET_PORT_DISABLED = 0,
+  OAM_NET_PORT_ENABLED = 1
 } oam_net_port_state_t;
 
 /**
@@ -282,8 +282,8 @@ typedef enum oam_net_port_state {
  * \details This enumerated type defines various status of the network port
  */
 typedef enum oam_net_port_status {
-	OAM_NET_PORT_UP = 0,
-	OAM_NET_PORT_DOWN = 1,
+  OAM_NET_PORT_UP = 0,
+  OAM_NET_PORT_DOWN = 1,
 } oam_net_port_status_t;
 
 /**
@@ -292,10 +292,10 @@ typedef enum oam_net_port_status {
  * \details This enumerated type defines various identifiers for network ports
  */
 typedef enum oam_net_port_id {
-	OAM_NET_PORT0 = 0,
-	OAM_NET_PORT1 = 1,
-	OAM_NET_PORT2 = 2,
-	OAM_NET_PORT_MAX = 0xFFFF
+  OAM_NET_PORT0 = 0,
+  OAM_NET_PORT1 = 1,
+  OAM_NET_PORT2 = 2,
+  OAM_NET_PORT_MAX = 0xFFFF
 } oam_net_port_id_t;
 
 /**
@@ -305,15 +305,15 @@ typedef enum oam_net_port_id {
  *          the device to update firmware.
  */
 typedef enum oam_firmware_modes {
-	OAM_DOWNLOAD_ONLY = 0,
-	OAM_DOWNLOAD_ACTIVATE = 1
+  OAM_DOWNLOAD_ONLY = 0,
+  OAM_DOWNLOAD_ACTIVATE = 1
 } oam_firmware_modes_t;
 
 /**
  * \def     OAM_NET_PORT_NAME
  * \brief   length of network port name
  */
-#define OAM_NET_PORT_NAME  256
+#define OAM_NET_PORT_NAME 256
 
 /**
  * \struct  oam_net_port_desc
@@ -321,14 +321,14 @@ typedef enum oam_firmware_modes {
  * \details Structure to store additional details about the network port
  */
 typedef struct oam_net_port_desc {
-	char name[OAM_NET_PORT_NAME];
+  char name[OAM_NET_PORT_NAME];
 } oam_net_port_desc_t;
 
 /**
  * \def     OAM_DEV_HOST_NAME
  * \brief   length of host name
  */
-#define OAM_DEV_HOST_NAME  256
+#define OAM_DEV_HOST_NAME 256
 
 /**
  * \struct  oam_net_dev_info_t
@@ -337,9 +337,9 @@ typedef struct oam_net_port_desc {
  *          on a particular network.
  */
 typedef struct oam_net_dev_info {
-	oam_net_dev_id_t net_dev_id;
-	char host_name[OAM_DEV_HOST_NAME];
-	oam_pci_info_t pci_info;
+  oam_net_dev_id_t net_dev_id;
+  char host_name[OAM_DEV_HOST_NAME];
+  oam_pci_info_t pci_info;
 } oam_net_dev_info_t;
 
 /**
@@ -349,8 +349,8 @@ typedef struct oam_net_dev_info {
  *          network
  */
 typedef struct oam_neighbour_info {
-	oam_net_port_id_t device_port;
-	oam_net_dev_info_t device_info;
+  oam_net_port_id_t device_port;
+  oam_net_dev_info_t device_info;
 } oam_neighbour_info_t;
 
 /**
@@ -359,17 +359,17 @@ typedef struct oam_neighbour_info {
  * \details This enumerated type defines various identifiers for TPCs
  */
 typedef enum oam_dev_tpc_id {
-	OAM_DEV_TPC0,
-	OAM_DEV_TPC1,
-	OAM_DEV_TPC2,
-	OAM_DEV_TPC_MAX
+  OAM_DEV_TPC0,
+  OAM_DEV_TPC1,
+  OAM_DEV_TPC2,
+  OAM_DEV_TPC_MAX
 } oam_dev_tpc_id_t;
 
 /**
  * \def     OAM_TPC_NAME
  * \brief   length of TPC name
  */
-#define OAM_TPC_NAME  256
+#define OAM_TPC_NAME 256
 
 /**
  * \struct  oam_tpc_desc_t
@@ -378,7 +378,7 @@ typedef enum oam_dev_tpc_id {
  *          to the id etc.
  */
 typedef struct oam_tpc_desc {
-	char name[256];
+  char name[256];
 } oam_tpc_desc_t;
 
 /**
@@ -388,7 +388,7 @@ typedef struct oam_tpc_desc {
  *          e.g. TPC utilization
  */
 typedef struct oam_dev_tpc_stats {
-	double util;
+  double util;
 } oam_dev_tpc_stats_t;
 
 /**
@@ -397,10 +397,10 @@ typedef struct oam_dev_tpc_stats {
  * \details This enumerated type defines various identifiers for device memories
  */
 typedef enum oam_dev_mem_id {
-	OAM_DEV_MEM0,
-	OAM_DEV_MEM1,
-	OAM_DEV_MEM2,
-	OAM_DEV_MEM_MAX
+  OAM_DEV_MEM0,
+  OAM_DEV_MEM1,
+  OAM_DEV_MEM2,
+  OAM_DEV_MEM_MAX
 } oam_dev_mem_id_t;
 
 /**
@@ -409,7 +409,7 @@ typedef enum oam_dev_mem_id {
  * \details Structure to store additional details about device memories port
  */
 typedef struct oam_mem_desc {
-	char name[256];
+  char name[256];
 } oam_mem_desc_t;
 
 /**
@@ -419,9 +419,9 @@ typedef struct oam_mem_desc {
  *          memory.
  */
 typedef struct oam_dev_mem_stats {
-	uint32_t total_mem;
-	uint32_t allocated_mem;
-	uint32_t free_mem;
+  uint32_t total_mem;
+  uint32_t allocated_mem;
+  uint32_t free_mem;
 } oam_dev_mem_stats_t;
 
 /**
@@ -431,10 +431,10 @@ typedef struct oam_dev_mem_stats {
  *          packets on a given port.
  */
 typedef struct oam_net_port_pkt_stats {
-	uint64_t rx_count;
-	uint64_t tx_count;
-	uint64_t rx_errors;
-	uint64_t tx_errors;
+  uint64_t rx_count;
+  uint64_t tx_count;
+  uint64_t rx_errors;
+  uint64_t tx_errors;
 } oam_net_port_pkt_stats_t;
 
 /**
@@ -444,191 +444,163 @@ typedef struct oam_net_port_pkt_stats {
  *          supported by the OAM library.
  */
 typedef struct oam_ops {
-	/*!<
-	 * to initialise library instance and perform version compatibility
-	 * check
-	 */
-	int (*init)(void);
-	int (*free)(void);
+  /*!<
+   * to initialise library instance and perform version compatibility
+   * check
+   */
+  int (*init)(void);
+  int (*free)(void);
 
-	/*!<
-	 * To get error description from the error code
-	 */
-	int (*get_error_description)(int error_code, const char **error_description);
+  /*!<
+   * To get error description from the error code
+   */
+  int (*get_error_description)(int error_code, const char** error_description);
 
-	/*!<
-	 * To retrieve the OAM Management interface version
-	 */
-	int (*get_mapi_version)(oam_mapi_version_t *version);
+  /*!<
+   * To retrieve the OAM Management interface version
+   */
+  int (*get_mapi_version)(oam_mapi_version_t* version);
 
-	/*!<
-	 * To retrieve the number of devices present/discovered by the library
-	 */
-	int (*discover_devices)(uint32_t *device_count);
+  /*!<
+   * To retrieve the number of devices present/discovered by the library
+   */
+  int (*discover_devices)(uint32_t* device_count);
 
-	/*!<
-	 * To retrieve device properties for each discovered devices
-	 */
-	int (*get_dev_properties)(uint32_t device_count,
-				oam_dev_properties_t *devices);
+  /*!<
+   * To retrieve device properties for each discovered devices
+   */
+  int (*get_dev_properties)(uint32_t device_count, oam_dev_properties_t* devices);
 
-	/*!<
-	 * To retrieve PCI properties of the device
-	 */
-	int (*get_pci_properties)(uint32_t device_id, oam_pci_info_t *pci_info);
+  /*!<
+   * To retrieve PCI properties of the device
+   */
+  int (*get_pci_properties)(uint32_t device_id, oam_pci_info_t* pci_info);
 
-	/*!<
-	 * To query the number of various sensors present
-	 */
-	int (*get_sensors_count)(uint32_t device_id,
-				 oam_sensor_count_t *sensor_count);
+  /*!<
+   * To query the number of various sensors present
+   */
+  int (*get_sensors_count)(uint32_t device_id, oam_sensor_count_t* sensor_count);
 
-	/*!<
-	 * Open the device and obtain handle
-	 */
-	int (*open_device)(uint32_t *dev_id, oam_dev_mode_t mode,
-				 oam_dev_handle_t *handle);
-	int (*close_device)(oam_dev_handle_t *handle);
+  /*!<
+   * Open the device and obtain handle
+   */
+  int (*open_device)(uint32_t* dev_id, oam_dev_mode_t mode, oam_dev_handle_t* handle);
+  int (*close_device)(oam_dev_handle_t* handle);
 
+  /*!<
+   * To read various sensor values for a given sensor type
+   */
+  int (*get_sensors_info)(uint32_t device_id, oam_sensor_type_t type, uint32_t num_sensors,
+                          oam_sensor_info_t sensor_info[]);
+  /*!<
+   * To read current error count of the device
+   */
+  int (*get_device_error_count)(oam_dev_handle_t* handle, oam_dev_error_count_t* count);
 
-	/*!<
-	 * To read various sensor values for a given sensor type
-	 */
-	int (*get_sensors_info)(uint32_t device_id,
-				oam_sensor_type_t type,
-				uint32_t num_sensors,
-				oam_sensor_info_t sensor_info[]);
-	/*!<
-	 * To read current error count of the device
-	 */
-	int (*get_device_error_count)(oam_dev_handle_t *handle,
-							oam_dev_error_count_t *count);
+  /*!<
+   * To update firmware on the device
+   * fw_image contains a null terminated string which specifies complete
+   * path where the firmware image is located
+   */
+  int (*download_firmware)(uint32_t* device_id, char* fw_image, oam_firmware_modes_t mode);
 
-	/*!<
-	 * To update firmware on the device
-	 * fw_image contains a null terminated string which specifies complete
-	 * path where the firmware image is located
-	 */
-	int (*download_firmware)(uint32_t *device_id, char *fw_image,
-				 oam_firmware_modes_t mode);
+  /*!<
+   * To query firmware versions
+   */
+  int (*get_firmware_version)(uint32_t* device_id, oam_firmware_version_t* version);
 
-	/*!<
-	 * To query firmware versions
-	 */
-	int (*get_firmware_version)(uint32_t *device_id,
-						oam_firmware_version_t *version);
+  /*!<
+   * to get network id from device id
+   */
+  int (*get_net_dev_id)(uint32_t* device_id, oam_net_dev_id_t* net_device);
 
+  /*!<
+   * Network management APIs.
+   */
 
-	/*!<
-	 * to get network id from device id
-	 */
-	int (*get_net_dev_id)(uint32_t *device_id, oam_net_dev_id_t *net_device);
+  /*!<
+   * discover network.
+   */
+  int (*discover_network)(int* net_dev_count);
+  int (*get_dev_net_properties)(oam_net_dev_info_t* net_dev_info);
 
-	/*!<
-	 * Network management APIs.
-	 */
+  int (*get_neighbour_count)(uint32_t* device, oam_net_port_id_t local_port_id,
+                             uint32_t* neighbor_count);
 
-	/*!<
-	 * discover network.
-	 */
-	int (*discover_network)(int *net_dev_count);
-	int (*get_dev_net_properties)(oam_net_dev_info_t *net_dev_info);
+  int (*get_neighbours_info)(uint32_t* device, oam_net_port_id_t local_port_id,
+                             uint32_t* neighbors_count, oam_neighbour_info_t* neighbours_info);
 
-	int (*get_neighbour_count)(uint32_t *device,
-					 oam_net_port_id_t local_port_id,
-					 uint32_t *neighbor_count);
+  int (*configure_network)(oam_net_dev_id_t* net_devices, uint32_t* net_device_count,
+                           char* network_name);
 
-	int (*get_neighbours_info)(uint32_t *device,
-					 oam_net_port_id_t local_port_id,
-					 uint32_t *neighbors_count,
-					 oam_neighbour_info_t *neighbours_info);
+  int (*destroy_network)(char* network_name);
 
-	int (*configure_network)(oam_net_dev_id_t *net_devices,
-				 uint32_t *net_device_count,
-				 char *network_name);
+  int (*query_network)(char* network_name, oam_net_dev_info_t* devices, uint32_t* device_count);
 
-	int (*destroy_network)(char *network_name);
+  int (*get_network_count)(uint32_t* network_count);
+  int (*list_networks)(char* network_names[]);
 
-	int (*query_network)(char *network_name, oam_net_dev_info_t *devices,
-					 uint32_t *device_count);
+  /*!<
+   * Various statistics related to blocks
+   */
 
-	int (*get_network_count)(uint32_t *network_count);
-	int (*list_networks)(char *network_names[]);
+  /*!<
+   * To query number of ports
+   */
+  int (*get_net_port_count)(oam_dev_handle_t* handle, uint32_t* count, oam_net_port_id_t* port_ids);
 
-	/*!<
-	 * Various statistics related to blocks
-	 */
+  int (*get_net_port_desc)(oam_dev_handle_t* handle, oam_net_port_id_t* port,
+                           oam_net_port_desc_t* desc);
 
-	/*!<
-	 * To query number of ports
-	 */
-	int (*get_net_port_count)(oam_dev_handle_t *handle, uint32_t *count,
-					oam_net_port_id_t *port_ids);
+  int (*get_net_port_state)(oam_dev_handle_t* handle, oam_net_port_id_t* port,
+                            oam_net_port_state_t* state);
 
-	int (*get_net_port_desc)(oam_dev_handle_t *handle, oam_net_port_id_t *port,
-				 oam_net_port_desc_t *desc);
+  int (*check_net_port_status)(oam_dev_handle_t* handle, oam_net_port_id_t* port,
+                               oam_net_port_status_t* status);
+  int (*get_net_port_pkt_stats)(oam_dev_handle_t* handle, oam_net_port_id_t* port,
+                                uint32_t duration_sec, oam_net_port_pkt_stats_t* stats);
 
-	int (*get_net_port_state)(oam_dev_handle_t *handle, oam_net_port_id_t *port,
-					oam_net_port_state_t *state);
+  int (*query_net_port_bandwidth)(oam_dev_handle_t* handle, oam_net_port_id_t* port,
+                                  uint32_t duration_sec, double* bandwidth);
 
-	int (*check_net_port_status)(oam_dev_handle_t *handle,
-						 oam_net_port_id_t *port,
-						 oam_net_port_status_t *status);
-	int (*get_net_port_pkt_stats)(oam_dev_handle_t *handle,
-				oam_net_port_id_t *port,
-				uint32_t duration_sec,
-				oam_net_port_pkt_stats_t *stats);
+  int (*get_tpc_count)(oam_dev_handle_t* handle, uint32_t* count, oam_dev_tpc_id_t* tpc_ids);
 
-	int (*query_net_port_bandwidth)(oam_dev_handle_t *handle,
-					oam_net_port_id_t *port,
-					uint32_t duration_sec,
-					double *bandwidth);
+  int (*get_tpc_desc)(oam_dev_handle_t* handle, oam_dev_tpc_id_t* tpc_id, oam_tpc_desc_t* desc);
 
-	int (*get_tpc_count)(oam_dev_handle_t *handle, uint32_t *count,
-					 oam_dev_tpc_id_t *tpc_ids);
+  int (*get_tpc_stats)(oam_dev_handle_t* handle, oam_dev_tpc_id_t* port, oam_dev_tpc_stats_t* stats,
+                       uint32_t duration_sec);
 
-	int (*get_tpc_desc)(oam_dev_handle_t *handle, oam_dev_tpc_id_t *tpc_id,
-					oam_tpc_desc_t *desc);
+  int (*get_mem_count)(oam_dev_handle_t* handle, uint32_t* count, oam_dev_mem_id_t* mem_ids);
 
-	int (*get_tpc_stats)(oam_dev_handle_t *handle,
-					 oam_dev_tpc_id_t *port,
-					 oam_dev_tpc_stats_t *stats,
-					 uint32_t duration_sec);
+  int (*get_mem_desc)(oam_dev_handle_t* handle, oam_dev_mem_id_t* tpc_id, oam_mem_desc_t* desc);
 
-	int (*get_mem_count)(oam_dev_handle_t *handle, uint32_t *count,
-					 oam_dev_mem_id_t *mem_ids);
+  int (*get_mem_stats)(oam_dev_handle_t* handle, oam_dev_mem_id_t* mem_id,
+                       oam_dev_mem_stats_t* stats);
 
-	int (*get_mem_desc)(oam_dev_handle_t *handle, oam_dev_mem_id_t *tpc_id,
-					oam_mem_desc_t *desc);
+  /*!<
+   * To check the health of the individual components, libraries
+   * generates test workload to check if the block is functioning properly
+   * or not. So no other workload should be running while calling these
+   * APIs
+   */
+  int (*check_tpc_health)(uint32_t* device_id, oam_dev_tpc_id_t* tpc_id);
+  int (*check_net_port_health)(uint32_t* device_id, oam_net_port_id_t* port);
+  int (*check_mem_health)(uint32_t* device_id, oam_dev_mem_id_t* port);
 
-	int (*get_mem_stats)(oam_dev_handle_t *handle, oam_dev_mem_id_t *mem_id,
-					 oam_dev_mem_stats_t *stats);
+  /*
+   * Following needs more attention, will work on in next
+          int (*get_fan_speed)(oam_dev_t *oam);
+          int (*set_fan_speed)(oam_dev_t *oam, int speed);
 
-	/*!<
-	 * To check the health of the individual components, libraries
-	 * generates test workload to check if the block is functioning properly
-	 * or not. So no other workload should be running while calling these
-	 * APIs
-	 */
-	int (*check_tpc_health)(uint32_t *device_id, oam_dev_tpc_id_t *tpc_id);
-	int (*check_net_port_health)(uint32_t *device_id, oam_net_port_id_t *port);
-	int (*check_mem_health)(uint32_t *device_id, oam_dev_mem_id_t *port);
+          int (*get_power_cap)(oam_dev_t *oam);
+          int (*set_power_cap)(oam_dev_t *oam, int power);
 
-	/*
-	 * Following needs more attention, will work on in next
-		int (*get_fan_speed)(oam_dev_t *oam);
-		int (*set_fan_speed)(oam_dev_t *oam, int speed);
-
-		int (*get_power_cap)(oam_dev_t *oam);
-		int (*set_power_cap)(oam_dev_t *oam, int power);
-
-		int (*get_telemetry)(oam_dev_t *oam);
-	 */
+          int (*get_telemetry)(oam_dev_t *oam);
+   */
 
 } oam_ops_t;
 
-
-#ifdef  __cplusplus
+#ifdef __cplusplus
 }
 #endif
 

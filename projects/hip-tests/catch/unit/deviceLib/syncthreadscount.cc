@@ -131,7 +131,7 @@ void test_syncthreads_count(int blockSize) {
   HIP_CHECK(hipHostFree(allThreadsIdH));
 }
 
-TEST_CASE("Unit_syncthreads_count") {
+TEST_CASE(Unit_syncthreads_count) {
   int blockSizes[] = {10, 40, 70, 130, 240, 723, 32, 64, 128, 256, 512, 1024};
   for (unsigned long i = 0; i < (sizeof(blockSizes) / sizeof(blockSizes[0])); ++i)
     test_syncthreads_count(blockSizes[i]);

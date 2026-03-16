@@ -47,7 +47,7 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 6.1
  */
-TEST_CASE("Unit_hipMemRetainAllocationHandle_SetGet") {
+TEST_CASE(Unit_hipMemRetainAllocationHandle_SetGet) {
   HIP_CHECK(hipFree(0));
   size_t granularity = 0;
   constexpr int N = DATA_SIZE;
@@ -76,6 +76,7 @@ TEST_CASE("Unit_hipMemRetainAllocationHandle_SetGet") {
   // Check beginning of VMM ptr
   HIP_CHECK(hipMemRetainAllocationHandle(&gethandle, reinterpret_cast<void*>(ptrA)));
   REQUIRE(gethandle == handle);
+  HIP_CHECK(hipMemRelease(gethandle));
   HIP_CHECK(hipMemRelease(handle));
   HIP_CHECK(hipMemUnmap(ptrA, size_mem));
   HIP_CHECK(hipMemAddressFree(ptrA, size_mem));
@@ -91,7 +92,7 @@ TEST_CASE("Unit_hipMemRetainAllocationHandle_SetGet") {
  * ------------------------
  *    - HIP_VERSION >= 6.1
  */
-TEST_CASE("Unit_hipMemRetainAllocationHandle_NegTst") {
+TEST_CASE(Unit_hipMemRetainAllocationHandle_NegTst) {
   HIP_CHECK(hipFree(0));
   size_t granularity = 0;
   constexpr int N = DATA_SIZE;
@@ -140,7 +141,7 @@ TEST_CASE("Unit_hipMemRetainAllocationHandle_NegTst") {
   HIP_CHECK(hipMemAddressFree(ptrA, size_mem));
 }
 
-TEST_CASE("Unit_hipMemRetainAllocationHandle_Capture") {
+TEST_CASE(Unit_hipMemRetainAllocationHandle_Capture) {
   CTX_CREATE();
   size_t granularity = 0;
   size_t buffer_size = DATA_SIZE * sizeof(int);
@@ -175,6 +176,7 @@ TEST_CASE("Unit_hipMemRetainAllocationHandle_Capture") {
   END_CAPTURE(stream);
 
   HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipMemRelease(retained_handle));
   HIP_CHECK(hipMemRelease(allocation_handle));
   HIP_CHECK(hipMemUnmap(device_ptr, allocation_size));
   HIP_CHECK(hipMemAddressFree(device_ptr, allocation_size));

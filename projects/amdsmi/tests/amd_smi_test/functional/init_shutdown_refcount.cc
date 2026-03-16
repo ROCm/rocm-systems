@@ -20,19 +20,19 @@
  * THE SOFTWARE.
  */
 
+#include "init_shutdown_refcount.h"
+
+#include <gtest/gtest.h>
 #include <pthread.h>
 
-#include <iostream>
-#include <thread>  // NOLINT
-#include <random>
 #include <chrono>  // NOLINT
+#include <iostream>
+#include <random>
+#include <thread>  // NOLINT
 
-#include "init_shutdown_refcount.h"
-#include <gtest/gtest.h>
 #include "amd_smi/amdsmi.h"
 
-extern int32_t
-rsmi_test_refcount(uint64_t refcnt_type);
+extern int32_t rsmi_test_refcount(uint64_t refcnt_type);
 
 static void rand_sleep_mod(int msec) {
   assert(msec > 10);
@@ -64,7 +64,7 @@ static void* AMDSMIShutDownFunction(void* args) {
   return nullptr;
 }
 
-static void *AMDSMIInitShutDownFunction(void* args) {
+static void* AMDSMIInitShutDownFunction(void* args) {
   amdsmi_status_t status;
 
   (void)args;
@@ -84,12 +84,12 @@ static const int NumOfThreads = 100;
 
 TestConcurrentInit::TestConcurrentInit(void) : TestBase() {
   set_title("AMDSMI Concurrent Init Test");
-  set_description("This test initializes AMDSMI concurrently to verify "
-                                         "reference counting functionality.");
+  set_description(
+      "This test initializes AMDSMI concurrently to verify "
+      "reference counting functionality.");
 }
 
-TestConcurrentInit::~TestConcurrentInit(void) {
-}
+TestConcurrentInit::~TestConcurrentInit(void) {}
 
 void TestConcurrentInit::SetUp(void) {
   // TestBase::SetUp();  // Skip usual SetUp to avoid doing the usual amdsmi_init
@@ -99,16 +99,12 @@ void TestConcurrentInit::SetUp(void) {
 // Compare required profile for this test case with what we're actually
 // running on
 void TestConcurrentInit::DisplayTestInfo(void) {
-  IF_VERB(STANDARD) {
-    TestBase::DisplayTestInfo();
-  }
+  IF_VERB(STANDARD) { TestBase::DisplayTestInfo(); }
   return;
 }
 
 void TestConcurrentInit::DisplayResults(void) const {
-  IF_VERB(STANDARD) {
-    TestBase::DisplayResults();
-  }
+  IF_VERB(STANDARD) { TestBase::DisplayResults(); }
   return;
 }
 
@@ -122,9 +118,7 @@ void TestConcurrentInit::Close() {
 // running on
 void TestConcurrentInit::Run(void) {
   if (setup_failed_) {
-    IF_VERB(STANDARD) {
-      std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl;
-    }
+    IF_VERB(STANDARD) { std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl; }
     return;
   }
 
@@ -133,12 +127,9 @@ void TestConcurrentInit::Run(void) {
   pthread_attr_init(&attr);
   pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
 
-  IF_VERB(STANDARD) {
-    std::cout << "Testing concurrent amdsmi_init()..." << std::endl;
-  }
+  IF_VERB(STANDARD) { std::cout << "Testing concurrent amdsmi_init()..." << std::endl; }
   for (int Id = 0; Id < NumOfThreads; ++Id) {
-    int ThreadStatus = pthread_create(&ThreadId[Id], &attr,
-                                                   AMDSMIInitFunction, nullptr);
+    int ThreadStatus = pthread_create(&ThreadId[Id], &attr, AMDSMIInitFunction, nullptr);
     ASSERT_EQ(0, ThreadStatus) << "pthead_create failed.";
   }
 
@@ -155,15 +146,13 @@ void TestConcurrentInit::Run(void) {
   }
 
   amdsmi_status_t err = amdsmi_shut_down();
-  ASSERT_EQ(AMDSMI_STATUS_INIT_ERROR, err) <<
-                "amdsmi_init reference count was too high.";
+  ASSERT_EQ(AMDSMI_STATUS_INIT_ERROR, err) << "amdsmi_init reference count was too high.";
 
   int32_t refcnt = rsmi_test_refcount(0);
   ASSERT_EQ(0, refcnt);
 
   IF_VERB(STANDARD) {
-    std::cout << "Concurrent amdsmi_init() test passed." <<
-                                                std::endl << std::endl;
+    std::cout << "Concurrent amdsmi_init() test passed." << std::endl << std::endl;
     std::cout << "Testing concurrent amdsmi_shut_down()..." << std::endl;
   }
   // Invoke hsa_shut_down and verify that all the hsa_init's were counted.
@@ -174,8 +163,7 @@ void TestConcurrentInit::Run(void) {
   }
 
   for (int Id = 0; Id < NumOfThreads; ++Id) {
-    int ThreadStatus =
-         pthread_create(&ThreadId[Id], &attr, AMDSMIShutDownFunction, nullptr);
+    int ThreadStatus = pthread_create(&ThreadId[Id], &attr, AMDSMIShutDownFunction, nullptr);
     ASSERT_EQ(0, ThreadStatus) << "pthead_create failed.";
   }
 
@@ -189,13 +177,10 @@ void TestConcurrentInit::Run(void) {
 
   IF_VERB(STANDARD) {
     std::cout << "Concurrent amdsmi_shut_down() passed." << std::endl;
-    std::cout <<
-      "Testing concurrent amdsmi_init() followed by amdsmi_shut_down()..." <<
-                                                                    std::endl;
+    std::cout << "Testing concurrent amdsmi_init() followed by amdsmi_shut_down()..." << std::endl;
   }
   for (int Id = 0; Id < NumOfThreads; ++Id) {
-    int ThreadStatus =
-      pthread_create(&ThreadId[Id], &attr, AMDSMIInitShutDownFunction, nullptr);
+    int ThreadStatus = pthread_create(&ThreadId[Id], &attr, AMDSMIInitShutDownFunction, nullptr);
     ASSERT_EQ(0, ThreadStatus) << "pthead_create failed.";
   }
 
@@ -208,8 +193,6 @@ void TestConcurrentInit::Run(void) {
   ASSERT_EQ(0, refcnt);
 
   IF_VERB(STANDARD) {
-    std::cout <<
-      "Concurrent amdsmi_init() followed by amdsmi_shut_down() passed." <<
-                                                                    std::endl;
+    std::cout << "Concurrent amdsmi_init() followed by amdsmi_shut_down() passed." << std::endl;
   }
 }

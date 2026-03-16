@@ -20,21 +20,21 @@
  * THE SOFTWARE.
  */
 
+#include "api_support_read.h"
+
+#include <gtest/gtest.h>
 
 #include <iostream>
 #include <string>
 
-#include <gtest/gtest.h>
-#include "api_support_read.h"
-
 TestAPISupportRead::TestAPISupportRead() : TestBase() {
   set_title("AMDSMI API Support Read Test");
-  set_description("This test verifies that the supported APIs are correctly "
-                                                               "identified.");
+  set_description(
+      "This test verifies that the supported APIs are correctly "
+      "identified.");
 }
 
-TestAPISupportRead::~TestAPISupportRead(void) {
-}
+TestAPISupportRead::~TestAPISupportRead(void) {}
 
 void TestAPISupportRead::SetUp(void) {
   TestBase::SetUp();
@@ -42,9 +42,7 @@ void TestAPISupportRead::SetUp(void) {
   return;
 }
 
-void TestAPISupportRead::DisplayTestInfo(void) {
-  TestBase::DisplayTestInfo();
-}
+void TestAPISupportRead::DisplayTestInfo(void) { TestBase::DisplayTestInfo(); }
 
 void TestAPISupportRead::DisplayResults(void) const {
   TestBase::DisplayResults();
@@ -60,10 +58,7 @@ void TestAPISupportRead::Close() {
 void TestAPISupportRead::Run(void) {
   TestBase::Run();
   if (setup_failed_) {
-    IF_VERB(STANDARD) {
-      std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl;
-    }
+    IF_VERB(STANDARD) { std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl; }
     return;
   }
-
 }

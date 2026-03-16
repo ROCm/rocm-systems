@@ -48,7 +48,7 @@ static void verifyDevResult(int* hostBuf, int* devBuf, int coef1, int coef2, siz
   delete[] buf;
 }
 
-TEST_CASE("Unit_KerArgOptimization_Saxpy") {
+TEST_CASE(Unit_KerArgOptimization_Saxpy) {
   constexpr size_t arraylen = 1 << 16;
   constexpr size_t arraylenBytes = arraylen * sizeof(int);
   constexpr auto blocksize = 256;
@@ -172,6 +172,7 @@ TEST_CASE("Unit_KerArgOptimization_Saxpy") {
   HIP_CHECK(hipFree(x4_d));
   HIP_CHECK(hipFree(x5_d));
   HIP_CHECK(hipFree(x6_d));
+  HIP_CHECK(hipModuleUnload(Module));
   delete[] x1_h;
   delete[] x2_h;
   delete[] x3_h;

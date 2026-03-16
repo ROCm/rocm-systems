@@ -154,6 +154,7 @@ union alignas(16) BytePack<16> {
   uint32_t u32[4];
   uint64_t u64[2];
   ulong2 ul2[1], native;
+  v4u v4u;
   inline __device__ BytePack<16>() = default;
   inline __device__ BytePack<16>(const BytePack<16>& other) {
     *this = other;
@@ -297,17 +298,30 @@ DEFINE_ld_st__size(8, uint64_t, b64, l)
 #undef DEFINE_ld_st__size_space
 #undef DEFINE_ld_st__size
 
-#ifdef __gfx950__
-__device__ __forceinline__ void store16global(uintptr_t addr, BytePack<16> value){
-  *(u64_gptr) addr = *(u64_gptr) value.u64; 
-  *((u64_gptr) addr+1) = *((u64_gptr) value.u64+1); 
+
+__device__ __forceinline__ void store16global(uintptr_t addr, BytePack<16> value){  
+  #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+    // System scope store that bypasses the hardware caches, should generate global_store_dwordx4 instruction with sc0 and sc1 bits set to 1 on gfx942/gfx950. 
+    __builtin_amdgcn_global_store_b128((v4u_gptr) addr, value.v4u, RCCL_SYSTEM_SYNCSCOPE); 
+  #elif defined(__gfx950__)
+    *(v4u_gptr) addr = value.v4u;
+  #else
+    __builtin_nontemporal_store(value.u64[0], (u64_gptr) addr);
+    __builtin_nontemporal_store(value.u64[1], (u64_gptr) addr + 1);
+  #endif
 }
-#else
-__device__ __forceinline__ void store16global(uintptr_t addr, BytePack<16> value){
-  __builtin_nontemporal_store(value.u64[0], (u64_gptr) addr);
-  __builtin_nontemporal_store(value.u64[1], (u64_gptr) addr + 1);
+
+__device__ __forceinline__ BytePack<16> load16global(uintptr_t addr){
+  BytePack<16> ans;
+  #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+    // System scope load that bypasses the hardware caches, should generate global_load_dwordx4 instruction with sc0 and sc1 bits set to 1 on gfx942/gfx950.
+    ans.v4u = __builtin_amdgcn_global_load_b128((v4u_gptr) addr, RCCL_SYSTEM_SYNCSCOPE);
+  #else
+    *(u64_gptr) ans.u64 = __builtin_nontemporal_load((u64_gptr)addr); 
+    *((u64_gptr) ans.u64+1) = __builtin_nontemporal_load((u64_gptr)addr+1);
+  #endif
+  return ans;
 }
-#endif
 
 #define DEFINE_ld_st_16__space(space, addr_cxx_ty, addr_reg_ty) \
   template<> \
@@ -319,10 +333,7 @@ __device__ __forceinline__ void store16global(uintptr_t addr, BytePack<16> value
   } \
   template<> \
   __device__ __forceinline__ BytePack<16> ld_volatile_##space<16>(addr_cxx_ty addr) { \
-    BytePack<16> ans; \
-    *(u64_gptr) ans.u64 = __builtin_nontemporal_load((u64_gptr)addr); \
-    *((u64_gptr) ans.u64+1) = __builtin_nontemporal_load((u64_gptr)addr+1); \
-    return ans; \
+    return load16##space(addr); \
   } \
   template<> \
   __device__ __forceinline__ void st_##space<16>(addr_cxx_ty addr, BytePack<16> value) { \

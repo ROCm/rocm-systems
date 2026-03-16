@@ -39,7 +39,7 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipStreamSynchronize_spt_EmptyStream") {
+TEST_CASE(Unit_hipStreamSynchronize_spt_EmptyStream) {
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
   HIP_CHECK(hipStreamSynchronize_spt(stream));
@@ -71,7 +71,7 @@ TEST_CASE("Unit_hipStreamSynchronize_spt_EmptyStream") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipStreamSynchronize_spt_FinishWork") {
+TEST_CASE(Unit_hipStreamSynchronize_spt_FinishWork) {
   hipStream_t explicitStream = reinterpret_cast<hipStream_t>(-1);
   hipStream_t stream = GENERATE_COPY(explicitStream, hip::nullStream, hip::streamPerThread);
   if (explicitStream) {
@@ -101,7 +101,7 @@ TEST_CASE("Unit_hipStreamSynchronize_spt_FinishWork") {
  *  - HIP_VERSION >= 6.2
  */
 
-TEST_CASE("Unit_hipStreamSynchronize_spt_SynchronizeStreamAndQueryNullStream") {
+TEST_CASE(Unit_hipStreamSynchronize_spt_SynchronizeStreamAndQueryNullStream) {
   hipStream_t stream1;
   hipStream_t stream2;
 

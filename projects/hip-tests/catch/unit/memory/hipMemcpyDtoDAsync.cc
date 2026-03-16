@@ -40,7 +40,7 @@ This testcase verifies hipMemcpyDtoDAsync API
 7.DtoH copy and validating the result
 */
 
-TEMPLATE_TEST_CASE("Unit_hipMemcpyDtoDAsync_Basic", "[multigpu]", int, float,
+TEMPLATE_TEST_CASE(Unit_hipMemcpyDtoDAsync_Basic, int, float,
                    double) {
   size_t Nbytes = NUM_ELM * sizeof(TestType);
   int numDevices = 0;
@@ -91,6 +91,7 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpyDtoDAsync_Basic", "[multigpu]", int, float,
     HipTest::checkVectorADD<TestType>(A_h, B_h, C_h, NUM_ELM);
 
     HipTest::freeArrays<TestType>(A_d, B_d, C_d, A_h, B_h, C_h, false);
+    HIP_CHECK(hipStreamDestroy(stream));
     HIP_CHECK(hipFree(X_d));
     HIP_CHECK(hipFree(Y_d));
     HIP_CHECK(hipFree(Z_d));
@@ -109,7 +110,7 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpyDtoDAsync_Basic", "[multigpu]", int, float,
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipMemcpyDtoDAsync_Capture") {
+TEST_CASE(Unit_hipMemcpyDtoDAsync_Capture) {
   int device_count = 0;
   HIP_CHECK(hipGetDeviceCount(&device_count));
   if (device_count <= 1) {

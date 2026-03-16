@@ -36,6 +36,8 @@ THE SOFTWARE.
 #include <thread>
 #include "hip_test_features.hh"
 
+#include "hip_tests_config.hh"
+
 #if HT_LINUX
 #include <sys/resource.h>
 #endif
@@ -294,6 +296,27 @@ static inline bool IsNavi4X() {
   if (arch.find("gfx1200") != std::string::npos ||
       arch.find("gfx1201") != std::string::npos) {
     // gfx1200 = Navi44, gfx1201 = Navi48
+    return true;
+  } else {
+    return false;
+  }
+#else
+  std::cout << "Have to be either Nvidia or AMD platform, asserting" << std::endl;
+  assert(false);
+#endif
+}
+
+static inline bool IsStrixHalo() {
+#if HT_NVIDIA
+  return false;
+#elif HT_AMD
+  int device = -1;
+  hipDeviceProp_t props{};
+  HIP_CHECK(hipGetDevice(&device));
+  HIP_CHECK(hipGetDeviceProperties(&props, device));
+  // Get GCN Arch Name and compare to check if it is gfx1151
+  std::string arch = std::string(props.gcnArchName);
+  if (arch.find("gfx1151") != std::string::npos) {
     return true;
   } else {
     return false;
@@ -604,11 +627,11 @@ class BlockingContext {
 };
 }  // namespace HipTest
 
-// This must be called in the beginning of image test app's main() to indicate whether image
-// is supported.
+// Call at the start of tests that require image/texture support to indicate whether it
+// is supported on the current device.
 #define CHECK_IMAGE_SUPPORT                                                                        \
   if (!HipTest::isImageSupported()) {                                                              \
-    INFO("Texture is not support on the device. Skipped.");                                        \
+    HipTest::HIP_SKIP_TEST("Texture is not supported on the device. Skipped.");                    \
     return;                                                                                        \
   }
 
@@ -626,11 +649,11 @@ class BlockingContext {
     HipTest::HIP_SKIP_TEST(msg.c_str());                                                           \
     return;                                                                                        \
   }                                                                                                \
-// This must be called in the beginning of warp test app's main() to indicate warp match functions
-// are supported.
+// Use this before running tests that rely on warp match functions to check device support and
+// skip the current test if they are not available.
 #define CHECK_WARP_MATCH_FUNCTIONS_SUPPORT                                                         \
   if (!HipTest::areWarpMatchFunctionsSupported()) {                                                \
-    INFO("Warp Match Functions are not support on the device. Skipped.");                          \
+    HipTest::HIP_SKIP_TEST("Warp Match Functions are not supported on the device. Skipped.");      \
     return;                                                                                        \
   }
 

@@ -43,7 +43,7 @@ void initMemPoolProps() {
    This testcase verifies HIP Mem Pool API basic scenario - supported on all devices
  */
 
-TEST_CASE("Unit_hipMemPoolApi_Basic") {
+TEST_CASE(Unit_hipMemPoolApi_Basic) {
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
@@ -92,12 +92,13 @@ TEST_CASE("Unit_hipMemPoolApi_Basic") {
   HIP_CHECK(hipMemPoolCreate(&mem_pool, &kPoolProps));
   HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&B), numElements * sizeof(float),
                                    mem_pool, stream));
+  HIP_CHECK(hipFreeAsync(B, stream));
   HIP_CHECK(hipMemPoolDestroy(mem_pool));
 
   HIP_CHECK(hipStreamDestroy(stream));
 }
 
-TEST_CASE("Unit_hipMemPoolApi_BasicAlloc") {
+TEST_CASE(Unit_hipMemPoolApi_BasicAlloc) {
   int mem_pool_support = 0;
   HIP_CHECK(hipSetDevice(0));
 
@@ -188,7 +189,7 @@ TEST_CASE("Unit_hipMemPoolApi_BasicAlloc") {
   HIP_CHECK(hipHostFree(notified));
 }
 
-TEST_CASE("Unit_hipMemPoolApi_BasicTrim") {
+TEST_CASE(Unit_hipMemPoolApi_BasicTrim) {
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
@@ -276,7 +277,7 @@ TEST_CASE("Unit_hipMemPoolApi_BasicTrim") {
   HIP_CHECK(hipHostFree(notified));
 }
 
-TEST_CASE("Unit_hipMemPoolApi_BasicReuse") {
+TEST_CASE(Unit_hipMemPoolApi_BasicReuse) {
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
@@ -351,7 +352,7 @@ TEST_CASE("Unit_hipMemPoolApi_BasicReuse") {
   HIP_CHECK(hipHostFree(notified));
 }
 
-TEST_CASE("Unit_hipMemPoolApi_Opportunistic") {
+TEST_CASE(Unit_hipMemPoolApi_Opportunistic) {
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
@@ -508,7 +509,7 @@ TEST_CASE("Unit_hipMemPoolApi_Opportunistic") {
   HIP_CHECK(hipHostFree(notified2));
 }
 
-TEST_CASE("Unit_hipMemPoolApi_Default") {
+TEST_CASE(Unit_hipMemPoolApi_Default) {
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {

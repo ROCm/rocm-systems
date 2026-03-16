@@ -255,7 +255,8 @@ TEST_F(sample_type_test, pmc_event_with_sample_serialize_deserialize)
 {
     pmc_event_with_sample original(42, "CPU:0", 60000, "counter_sample", 200, 199, 1600,
                                    "entry\nexit", "counter.cpp:100", 5, 1,
-                                   "PERF_COUNT_HW_CPU_CYCLES", 12345.67);
+                                   "PERF_COUNT_HW_CPU_CYCLES", 12345.67,
+                                   std::make_optional<int64_t>(135));
 
     serialize(buffer.data(), original);
 
@@ -275,17 +276,141 @@ TEST_F(sample_type_test, pmc_event_with_sample_serialize_deserialize)
     EXPECT_EQ(deserialized.device_type, original.device_type);
     EXPECT_EQ(deserialized.pmc_info_name, original.pmc_info_name);
     EXPECT_DOUBLE_EQ(deserialized.value, original.value);
+    EXPECT_EQ(deserialized.system_tid, original.system_tid);
 }
 
 TEST_F(sample_type_test, pmc_event_with_sample_get_size)
 {
     pmc_event_with_sample sample(42, "CPU:0", 60000, "counter_sample", 200, 199, 1600,
                                  "entry\nexit", "counter.cpp:100", 5, 1,
-                                 "PERF_COUNT_HW_CPU_CYCLES", 12345.67);
+                                 "PERF_COUNT_HW_CPU_CYCLES", 12345.67,
+                                 std::make_optional<int64_t>(135));
 
-    size_t expected_size = sizeof(size_t) * 6 + 5 + 14 + 10 + 15 + 24 +
-                           sizeof(uint64_t) * 4 + sizeof(uint32_t) + sizeof(uint8_t) +
-                           sizeof(double);
+    size_t expected_size =
+        sizeof(size_t) +                      // category_enum_id
+        sizeof(size_t) + 5 +                  // track_name "CPU:0"
+        sizeof(uint64_t) +                    // timestamp_ns
+        sizeof(size_t) + 14 +                 // event_metadata "counter_sample"
+        (sizeof(uint64_t) * 3) +              // stack_id, parent_stack_id, correlation_id
+        sizeof(size_t) + 10 +                 // call_stack "entry\nexit"
+        sizeof(size_t) + 15 +                 // line_info "counter.cpp:100"
+        sizeof(uint32_t) +                    // device_id
+        sizeof(uint8_t) +                     // device_type
+        sizeof(size_t) + 24 +                 // pmc_info_name "PERF_COUNT_HW_CPU_CYCLES"
+        sizeof(double) +                      // value
+        (sizeof(uint8_t) + sizeof(int64_t));  // system_tid (has-value flag + value)
+
+    EXPECT_EQ(get_size(sample), expected_size);
+}
+
+TEST_F(sample_type_test, pmc_event_with_sample_serialize_deserialize_nullopt)
+{
+    pmc_event_with_sample original(42, "CPU:0", 60000, "counter_sample", 200, 199, 1600,
+                                   "entry\nexit", "counter.cpp:100", 5, 1,
+                                   "PERF_COUNT_HW_CPU_CYCLES", 12345.67, std::nullopt);
+
+    serialize(buffer.data(), original);
+
+    uint8_t* buffer_ptr   = buffer.data();
+    auto     deserialized = deserialize<pmc_event_with_sample>(buffer_ptr);
+
+    EXPECT_EQ(deserialized.category_enum_id, original.category_enum_id);
+    EXPECT_EQ(deserialized.track_name, original.track_name);
+    EXPECT_EQ(deserialized.timestamp_ns, original.timestamp_ns);
+    EXPECT_EQ(deserialized.event_metadata, original.event_metadata);
+    EXPECT_EQ(deserialized.stack_id, original.stack_id);
+    EXPECT_EQ(deserialized.parent_stack_id, original.parent_stack_id);
+    EXPECT_EQ(deserialized.correlation_id, original.correlation_id);
+    EXPECT_EQ(deserialized.call_stack, original.call_stack);
+    EXPECT_EQ(deserialized.line_info, original.line_info);
+    EXPECT_EQ(deserialized.device_id, original.device_id);
+    EXPECT_EQ(deserialized.device_type, original.device_type);
+    EXPECT_EQ(deserialized.pmc_info_name, original.pmc_info_name);
+    EXPECT_DOUBLE_EQ(deserialized.value, original.value);
+    EXPECT_FALSE(deserialized.system_tid.has_value());
+}
+
+// Tests for size consistency of pmc_event_with_sample with system_tid.
+// The value returned by get_size() must match the actual bytes written by serialize().
+TEST_F(sample_type_test, size_consistency_with_system_tid)
+{
+    pmc_event_with_sample sample_with_tid{
+        1,          "track",
+        1000,       "metadata",
+        2,          3,
+        4,          "callstack",
+        "lineinfo", 0,
+        0,          "counter",
+        42.0,       std::optional<int64_t>{ 12345 }  // has system_tid
+    };
+    size_t               calculated_size = get_size(sample_with_tid);
+    std::vector<uint8_t> buf(calculated_size);
+    serialize(buf.data(), sample_with_tid);
+    // Deserialize and verify
+    uint8_t* buffer_ptr   = buf.data();
+    auto     deserialized = deserialize<pmc_event_with_sample>(buffer_ptr);
+    ASSERT_TRUE(deserialized.system_tid.has_value());
+    EXPECT_EQ(deserialized.system_tid.value(), 12345);
+    // Verify we consumed exactly calculated_size bytes
+    EXPECT_EQ(buffer_ptr - buf.data(), static_cast<std::ptrdiff_t>(calculated_size));
+}
+// Tests for size consistency of pmc_event_with_sample without system_tid.
+// The value returned by get_size() must match the actual bytes written by serialize().
+TEST_F(sample_type_test, size_consistency_without_system_tid)
+{
+    pmc_event_with_sample sample_no_tid{
+        1,           "track",    1000, "metadata", 2,         3,    4,
+        "callstack", "lineinfo", 0,    0,          "counter", 42.0,
+        std::nullopt  // no system_tid
+    };
+    size_t               calculated_size = get_size(sample_no_tid);
+    std::vector<uint8_t> buf(calculated_size);
+    serialize(buf.data(), sample_no_tid);
+    uint8_t* buffer_ptr   = buf.data();
+    auto     deserialized = deserialize<pmc_event_with_sample>(buffer_ptr);
+    EXPECT_FALSE(deserialized.system_tid.has_value());
+    EXPECT_EQ(buffer_ptr - buf.data(), static_cast<std::ptrdiff_t>(calculated_size));
+}
+// Tests for the difference in size between pmc_event_with_sample with and without
+// system_tid. The value returned by get_size() must be different for the two cases.
+TEST_F(sample_type_test, different_sizes_based_on_optional_state)
+{
+    pmc_event_with_sample with_tid{ 1,          "track",
+                                    1000,       "metadata",
+                                    2,          3,
+                                    4,          "callstack",
+                                    "lineinfo", 0,
+                                    0,          "counter",
+                                    42.0,       std::optional<int64_t>{ 12345 } };
+    pmc_event_with_sample without_tid{ 1, "track",   1000,        "metadata",  2,
+                                       3, 4,         "callstack", "lineinfo",  0,
+                                       0, "counter", 42.0,        std::nullopt };
+    size_t                size_with    = get_size(with_tid);
+    size_t                size_without = get_size(without_tid);
+    // Variable-size: with_tid should be larger by sizeof(int64_t)
+    EXPECT_EQ(size_with, size_without + sizeof(int64_t))
+        << "Variable-size encoding should differ by inner type size";
+}
+
+TEST_F(sample_type_test, pmc_event_with_sample_get_size_nullopt)
+{
+    pmc_event_with_sample sample(42, "CPU:0", 60000, "counter_sample", 200, 199, 1600,
+                                 "entry\nexit", "counter.cpp:100", 5, 1,
+                                 "PERF_COUNT_HW_CPU_CYCLES", 12345.67, std::nullopt);
+
+    size_t expected_size =
+        sizeof(size_t) +          // category_enum_id
+        sizeof(size_t) + 5 +      // track_name "CPU:0"
+        sizeof(uint64_t) +        // timestamp_ns
+        sizeof(size_t) + 14 +     // event_metadata "counter_sample"
+        (sizeof(uint64_t) * 3) +  // stack_id, parent_stack_id, correlation_id
+        sizeof(size_t) + 10 +     // call_stack "entry\nexit"
+        sizeof(size_t) + 15 +     // line_info "counter.cpp:100"
+        sizeof(uint32_t) +        // device_id
+        sizeof(uint8_t) +         // device_type
+        sizeof(size_t) + 24 +     // pmc_info_name "PERF_COUNT_HW_CPU_CYCLES"
+        sizeof(double) +          // value
+        sizeof(uint8_t);          // system_tid (has-value flag only, nullopt)
 
     EXPECT_EQ(get_size(sample), expected_size);
 }

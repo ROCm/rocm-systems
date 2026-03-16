@@ -38,6 +38,7 @@ import pandas as pd
 from utils import schema
 from utils.logger import console_debug, console_error, console_warning, demarcate
 from utils.specs import MachineSpecs
+from utils.utils import normalize_filter_to_str_list
 
 # ------------------------------------------------------------------------------
 # Internal global definitions
@@ -1379,7 +1380,7 @@ def apply_filters(
         filtered_df = filtered_df.loc[
             filtered_df[schema.PMC_PERF_FILE_PREFIX]["Node"]
             .astype(str)
-            .isin([workload.filter_gpu_ids])
+            .isin(normalize_filter_to_str_list(workload.filter_nodes))
         ]
         if filtered_df.empty:
             console_error("analysis", f"{workload.filter_nodes} is invalid")
@@ -1389,7 +1390,7 @@ def apply_filters(
         filtered_df = filtered_df.loc[
             filtered_df[schema.PMC_PERF_FILE_PREFIX]["GPU_ID"]
             .astype(str)
-            .isin([workload.filter_gpu_ids])
+            .isin(normalize_filter_to_str_list(workload.filter_gpu_ids))
         ]
         if filtered_df.empty:
             console_error("analysis", f"{workload.filter_gpu_ids} is an invalid gpu-id")
@@ -1436,11 +1437,11 @@ def apply_kernel_filter(
         # TODO: fix it for unaligned comparison
         selected_kernels = []
         kernel_top_dataframe = workload.dfs[PMC_KERNEL_TOP_TABLE_ID]
-        kernel_top_dataframe["S"] = ""
+        kernel_top_dataframe["Selected"] = ""
 
         for kernel_id in workload.filter_kernel_ids:
             selected_kernels.append(kernel_top_dataframe.loc[kernel_id, "Kernel_Name"])
-            kernel_top_dataframe.loc[kernel_id, "S"] = "*"
+            kernel_top_dataframe.loc[kernel_id, "Selected"] = "*"
 
         if selected_kernels:
             df = df.loc[
