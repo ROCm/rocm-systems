@@ -263,3 +263,4 @@ deviceLib:
   Unit_fp8_ocp_correctness_device: *level_2
   Unit_hipTestHalfConstexpr_HostConstexpr: *level_2
   Unit_hipTestHalfConstexpr_DeviceConstexpr: *level_2
+  Unit_MemcpyToSymbolInParallelWithStreamLaunch: *level_3
