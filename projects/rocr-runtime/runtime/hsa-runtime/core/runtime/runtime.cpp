@@ -972,13 +972,18 @@ hsa_status_t Runtime::VMemoryPtrInfo(const void* ptr, hsa_amd_pointer_info_t* in
             allowed_agents.push_back((*agentPermsIt).second.targetAgent->public_handle());
         }
 
-        AMD::callback_t<decltype(alloc)> Alloc(alloc);
-
-        *accessible = (hsa_agent_t*)Alloc(sizeof(hsa_agent_t) * allowed_agents.size());
-        if ((*accessible) == nullptr) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
-
         *num_agents_accessible = allowed_agents.size();
-        memcpy(*accessible, allowed_agents.data(), sizeof(hsa_agent_t) * allowed_agents.size());
+
+        if (allowed_agents.empty()) {
+          *accessible = nullptr;
+        } else {
+          AMD::callback_t<decltype(alloc)> Alloc(alloc);
+
+          *accessible = (hsa_agent_t*)Alloc(sizeof(hsa_agent_t) * allowed_agents.size());
+          if ((*accessible) == nullptr) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+
+          memcpy(*accessible, allowed_agents.data(), sizeof(hsa_agent_t) * allowed_agents.size());
+        }
       }
 
       return HSA_STATUS_SUCCESS;
