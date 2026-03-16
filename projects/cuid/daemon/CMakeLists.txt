@@ -82,10 +82,34 @@ install(
     COMPONENT ${DAEMON_COMPONENT}
 )
 
-# Post-installation script for udev rules / cron job setup.
-# The choice between udev (daemonize=true) and cron (daemonize=false) is made
-# at install time by reading the deployed config file, so it correctly reflects
-# any user edits made after the build.
+# Install the systemd unit file.
+# The unit file itself is a static file — deploying it is an install-step
+# concern.  Enabling/starting the service is done in the post-install script
+# because it requires running systemctl against the live system.
+if(UNIX AND NOT APPLE)
+    # Allow callers to override the systemd unit directory.  The default is
+    # the conventional system-wide path that systemd always scans, which is
+    # intentionally outside CMAKE_INSTALL_PREFIX because systemd does not
+    # discover units inside arbitrary prefixes (e.g. /opt/rocm/core) without
+    # extra configuration.
+    set(SYSTEMD_UNIT_DIR "/usr/lib/systemd/system"
+        CACHE PATH "Directory where systemd unit files are installed.")
+
+    configure_file(
+        ${CMAKE_CURRENT_SOURCE_DIR}/amdcuid_daemon.service.in
+        ${CMAKE_CURRENT_BINARY_DIR}/amdcuid_daemon.service
+        @ONLY)
+
+    install(
+        FILES ${CMAKE_CURRENT_BINARY_DIR}/amdcuid_daemon.service
+        DESTINATION ${SYSTEMD_UNIT_DIR}
+        COMPONENT ${DAEMON_COMPONENT})
+endif()
+
+# Post-installation script for udev rules / service registration.
+# The choice between udev (daemonize=true) and systemd service (daemonize=false)
+# is made at install time by reading the deployed config file, so it correctly
+# reflects any user edits made after the build.
 if(UNIX AND NOT APPLE)
     # Generate the post-install shell script from a template, substituting the
     # install prefix and config directory baked-in at cmake configure time.

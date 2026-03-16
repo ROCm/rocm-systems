@@ -32,6 +32,7 @@ TOOL_BIN="@CMAKE_INSTALL_PREFIX@/bin/amdcuid_tool"
 DAEMON_BIN="@CMAKE_INSTALL_PREFIX@/bin/amdcuid_daemon"
 UDEV_RULES_FILE="/etc/udev/rules.d/90-amdcuid.rules"
 CRON_FILE="/etc/cron.d/amdcuid"
+SERVICE_NAME="amdcuid_daemon"
 
 if [ ! -f "$CONFIG_FILE" ]; then
     echo "Warning: amdcuid config not found at $CONFIG_FILE; skipping daemon setup."
@@ -55,6 +56,9 @@ fi
 DAEMONIZE=$(grep "^daemonize=" "$CONFIG_FILE" | cut -d'=' -f2 | tr -d '[:space:]')
 
 if [ "$DAEMONIZE" = "true" ]; then
+    # The daemon runs as a persistent service that wakes on udev device events.
+    # Install the udev rules first so the daemon is triggered on device changes,
+    # then register and start the service so it is ready to receive those events.
     echo "Setting up udev rules for amdcuid daemon..."
     cat > "$UDEV_RULES_FILE" << EOF
 # AMD CUID daemon udev rules
@@ -63,7 +67,15 @@ SUBSYSTEM=="net", ACTION=="add|remove|change", RUN+="$TOOL_BIN --notify-daemon"
 EOF
     udevadm control --reload-rules
     udevadm trigger
+
+    echo "Registering amdcuid_daemon as a systemd service..."
+    systemctl daemon-reload
+    systemctl enable "$SERVICE_NAME"
+    systemctl start "$SERVICE_NAME"
 else
+    # Resource-constrained mode: skip the persistent service and udev rules.
+    # Instead, install a cron job so the daemon runs once at boot to generate
+    # CUIDs and then exits.
     echo "Daemon mode not enabled; installing boot-time cron job for amdcuid daemon..."
     echo "@reboot root $DAEMON_BIN" > "$CRON_FILE"
 fi
