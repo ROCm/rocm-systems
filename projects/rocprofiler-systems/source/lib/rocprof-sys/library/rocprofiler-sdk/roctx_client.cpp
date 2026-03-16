@@ -3,9 +3,7 @@
 
 #include "library/rocprofiler-sdk/roctx_client.hpp"
 #include "library/rocprofiler-sdk/trace_control.hpp"
-#include "library/tracing.hpp"
 
-#include "core/categories.hpp"
 #include "core/common_types.hpp"
 #include "core/demangler.hpp"
 #include "core/trace_cache/cache_manager.hpp"
@@ -35,8 +33,13 @@ namespace rocprofsys
 namespace rocprofiler_sdk
 {
 
-thread_local roctx_client::marker_range_stack_t roctx_client::m_pushed_ranges{};
-thread_local roctx_client::marker_range_stack_t roctx_client::m_started_ranges{};
+template <typename MarkerWriterPolicy>
+thread_local typename roctx_client<MarkerWriterPolicy>::marker_range_stack_t
+    roctx_client<MarkerWriterPolicy>::m_pushed_ranges{};
+
+template <typename MarkerWriterPolicy>
+thread_local typename roctx_client<MarkerWriterPolicy>::marker_range_stack_t
+    roctx_client<MarkerWriterPolicy>::m_started_ranges{};
 
 namespace
 {
@@ -80,27 +83,32 @@ get_operation_name(rocprofiler_callback_tracing_record_t record)
 }
 }  // namespace
 
-roctx_client::roctx_client(roctx_client_config roctx_cfg)
+template <typename MarkerWriterPolicy>
+roctx_client<MarkerWriterPolicy>::roctx_client(roctx_client_config roctx_cfg)
 : m_config{ roctx_cfg }
-, m_writer{ roctx_cfg.use_perfetto, roctx_cfg.use_timemory }
+, m_writer{ roctx_cfg.use_perfetto, roctx_cfg.use_timemory,
+            roctx_cfg.perfetto_annotations }
 , m_controller{ std::make_shared<control::trace_control>(
       roctx_cfg.selected_trace_regions) }
 {}
 
+template <typename MarkerWriterPolicy>
 bool
-roctx_client::should_write_markers() const
+roctx_client<MarkerWriterPolicy>::should_write_markers() const
 {
     return (m_config.is_write_enabled && m_controller->should_write_markers());
 }
 
+template <typename MarkerWriterPolicy>
 void
-roctx_client::shutdown()
+roctx_client<MarkerWriterPolicy>::shutdown()
 {
     m_controller->shutdown();
 }
 
+template <typename MarkerWriterPolicy>
 void
-roctx_client::configure_services(rocprofiler_context_id_t ctx)
+roctx_client<MarkerWriterPolicy>::configure_services(rocprofiler_context_id_t ctx)
 {
     m_ctx = ctx;
 
@@ -119,10 +127,11 @@ roctx_client::configure_services(rocprofiler_context_id_t ctx)
         control_ops.size(), marker_control_callback, this);
 }
 
+template <typename MarkerWriterPolicy>
 void
-roctx_client::handle_marker_core_enter(rocprofiler_callback_tracing_record_t record,
-                                       rocprofiler_user_data_t*              user_data,
-                                       rocprofiler_timestamp_t               ts)
+roctx_client<MarkerWriterPolicy>::handle_marker_core_enter(
+    rocprofiler_callback_tracing_record_t record, rocprofiler_user_data_t* user_data,
+    rocprofiler_timestamp_t ts)
 {
     auto* data =
         static_cast<rocprofiler_callback_tracing_marker_api_data_t*>(record.payload);
@@ -155,9 +164,9 @@ roctx_client::handle_marker_core_enter(rocprofiler_callback_tracing_record_t rec
             const char* name = data->args.roctxMarkA.message;
             tim::add_hash_id(name);
 
-            if(write_enabled && m_config.use_timemory)
+            if(write_enabled)
             {
-                tracing::push_timemory(category::rocm_marker_api{}, name);
+                m_writer.write_begin(name);
             }
             break;
         }
@@ -165,10 +174,10 @@ roctx_client::handle_marker_core_enter(rocprofiler_callback_tracing_record_t rec
         {
             // For other operations (like roctxGetThreadId), push to timemory
             // They will be written in EXIT phase with duration
-            if(write_enabled && m_config.use_timemory)
+            if(write_enabled)
             {
                 auto name = get_operation_name(record);
-                tracing::push_timemory(category::rocm_marker_api{}, name);
+                m_writer.write_begin(name);
             }
             break;
         }
@@ -178,10 +187,11 @@ roctx_client::handle_marker_core_enter(rocprofiler_callback_tracing_record_t rec
     user_data->value = ts;
 }
 
+template <typename MarkerWriterPolicy>
 void
-roctx_client::handle_marker_core_exit(rocprofiler_callback_tracing_record_t record,
-                                      rocprofiler_user_data_t*              user_data,
-                                      rocprofiler_timestamp_t               ts)
+roctx_client<MarkerWriterPolicy>::handle_marker_core_exit(
+    rocprofiler_callback_tracing_record_t record, rocprofiler_user_data_t* user_data,
+    rocprofiler_timestamp_t ts)
 {
     auto* data =
         static_cast<rocprofiler_callback_tracing_marker_api_data_t*>(record.payload);
@@ -291,8 +301,10 @@ roctx_client::handle_marker_core_exit(rocprofiler_callback_tracing_record_t reco
     }
 }
 
+template <typename MarkerWriterPolicy>
 void
-roctx_client::handle_marker_control(rocprofiler_callback_tracing_record_t record)
+roctx_client<MarkerWriterPolicy>::handle_marker_control(
+    rocprofiler_callback_tracing_record_t record)
 {
     if(record.operation == ROCPROFILER_MARKER_CONTROL_API_ID_roctxProfilerPause &&
        record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
@@ -306,10 +318,11 @@ roctx_client::handle_marker_control(rocprofiler_callback_tracing_record_t record
     }
 }
 
+template <typename MarkerWriterPolicy>
 void
-roctx_client::marker_core_callback(rocprofiler_callback_tracing_record_t record,
-                                   rocprofiler_user_data_t*              user_data,
-                                   void*                                 callback_data)
+roctx_client<MarkerWriterPolicy>::marker_core_callback(
+    rocprofiler_callback_tracing_record_t record, rocprofiler_user_data_t* user_data,
+    void* callback_data)
 {
     if(!callback_data) return;
     auto* client = static_cast<roctx_client*>(callback_data);
@@ -327,15 +340,19 @@ roctx_client::marker_core_callback(rocprofiler_callback_tracing_record_t record,
     }
 }
 
+template <typename MarkerWriterPolicy>
 void
-roctx_client::marker_control_callback(rocprofiler_callback_tracing_record_t record,
-                                      rocprofiler_user_data_t* /*user_data*/,
-                                      void* callback_data)
+roctx_client<MarkerWriterPolicy>::marker_control_callback(
+    rocprofiler_callback_tracing_record_t record, rocprofiler_user_data_t* /*user_data*/,
+    void*                                 callback_data)
 {
     if(!callback_data) return;
     auto* client = static_cast<roctx_client*>(callback_data);
     client->handle_marker_control(record);
 }
+
+// Explicit instantiation for the default policy
+template class roctx_client<default_marker_policy>;
 
 }  // namespace rocprofiler_sdk
 }  // namespace rocprofsys

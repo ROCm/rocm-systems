@@ -18,7 +18,7 @@ TEST_F(roctx_client_test, test_roctx_client_constructor)
 {
     using namespace rocprofsys::rocprofiler_sdk;
 
-    const roctx_client_config config{ true, true, true, "TestRegion" };
-    roctx_client              client(config);
+    const roctx_client_config config{ true, true, true, false, "TestRegion" };
+    roctx_client<>            client(config);
     EXPECT_NE(client.get_controller(), nullptr);
 }

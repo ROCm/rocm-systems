@@ -26,9 +26,12 @@ struct roctx_client_config
     bool        is_write_enabled{ false };
     bool        use_perfetto{ false };
     bool        use_timemory{ false };
+    bool        perfetto_annotations{ false };
     std::string selected_trace_regions{};
 };
 
+/// @tparam MarkerWriterPolicy Compile-time policy passed through to marker_writer.
+template <typename MarkerWriterPolicy = default_marker_policy>
 class roctx_client
 {
 public:
@@ -54,7 +57,7 @@ private:
     rocprofiler_context_id_t m_ctx{ 0 };
 
     roctx_client_config                     m_config;
-    marker_writer                           m_writer;
+    marker_writer<MarkerWriterPolicy>       m_writer;
     std::shared_ptr<control::trace_control> m_controller{};
 
     static thread_local marker_range_stack_t m_pushed_ranges;

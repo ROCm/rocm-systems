@@ -9,6 +9,7 @@ set(UNIT_TEST_OBJECTS
     $<TARGET_OBJECTS:lib-components-tests>
     $<$<TARGET_EXISTS:rccl-unit-tests>:$<TARGET_OBJECTS:rccl-unit-tests>>
     $<$<TARGET_EXISTS:roctx-client-tests>:$<TARGET_OBJECTS:roctx-client-tests>>
+    $<$<TARGET_EXISTS:marker-writer-tests>:$<TARGET_OBJECTS:marker-writer-tests>>
 )
 
 list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:pmc-common-tests>)

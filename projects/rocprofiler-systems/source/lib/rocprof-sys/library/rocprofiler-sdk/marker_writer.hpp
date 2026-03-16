@@ -3,24 +3,67 @@
 
 #pragma once
 
+#include "core/categories.hpp"
+#include "core/trace_cache/sample_type.hpp"
+
 #include <rocprofiler-sdk/fwd.h>
 
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <variant>
+#include <vector>
 
 namespace rocprofsys
 {
 namespace rocprofiler_sdk
 {
 
-// Thin output layer for writing marker data to Perfetto, timemory, and cache.
-// No business logic - just outputs to configured destinations.
-// All logic (range tracking, operation handling) belongs in roctx_client.
+/// Annotation key-value pair for perfetto events.
+/// Writer builds these; policy iterates and calls add_perfetto_annotation for each.
+struct annotation_entry
+{
+    const char*                                                             key;
+    std::variant<std::string, uint64_t, int64_t, double, int32_t, uint32_t> value;
+};
+
+/// Thin API wrapper policy for marker_writer.
+/// Each method wraps a single raw API call. No business logic.
+struct default_marker_policy
+{
+    static void push_timemory(std::string_view name);
+    static void pop_timemory(std::string_view name);
+
+    static void push_perfetto_ts(const char* name, uint64_t ts, uint64_t flow_id,
+                                 const std::vector<annotation_entry>& annotations);
+    static void pop_perfetto_ts(const char* name, uint64_t ts,
+                                const std::vector<annotation_entry>& annotations);
+
+    static void cache_init();
+    static void store_region(const trace_cache::region_sample& sample);
+    static void add_thread_info(uint64_t thread_id);
+};
+
+/// Output layer for writing marker data to Perfetto, timemory, and cache.
+/// Contains the logic for building region samples and perfetto annotations.
+/// Delegates raw API calls to the policy, which can be mocked for testing.
+///
+/// @tparam MarkerWriterPolicy Compile-time policy providing thin API wrappers.
+///                           Must provide: push_timemory, pop_timemory,
+///                           push_perfetto_ts, pop_perfetto_ts, cache_init,
+///                           store_region, add_thread_info.
+template <typename MarkerWriterPolicy = default_marker_policy>
 class marker_writer
 {
 public:
-    marker_writer(bool use_perfetto, bool use_timemory);
+    marker_writer(bool use_perfetto, bool use_timemory, bool perfetto_annotations)
+    : m_use_perfetto(use_perfetto)
+    , m_use_timemory(use_timemory)
+    , m_perfetto_annotations(perfetto_annotations)
+    {
+        MarkerWriterPolicy::cache_init();
+    }
+
     ~marker_writer() = default;
 
     marker_writer(const marker_writer&)            = delete;
@@ -28,15 +71,50 @@ public:
     marker_writer(marker_writer&&)                 = default;
     marker_writer& operator=(marker_writer&&)      = default;
 
-    void write_begin(std::string_view name) const;
+    void write_begin(std::string_view name) const
+    {
+        if(m_use_timemory)
+        {
+            MarkerWriterPolicy::push_timemory(name);
+        }
+    }
 
     void write_end(std::string_view name, uint64_t begin_ts, uint64_t end_ts,
                    const std::string&                    args,
-                   rocprofiler_callback_tracing_record_t record) const;
+                   rocprofiler_callback_tracing_record_t record) const
+    {
+        if(m_use_timemory)
+        {
+            MarkerWriterPolicy::pop_timemory(name);
+        }
+
+        if(m_use_perfetto)
+        {
+            auto push_annotations = std::vector<annotation_entry>{};
+            auto pop_annotations  = std::vector<annotation_entry>{};
+            if(m_perfetto_annotations)
+            {
+                push_annotations.push_back({ "begin_ns", begin_ts });
+                push_annotations.push_back(
+                    { "stack_id", record.correlation_id.internal });
+                pop_annotations.push_back({ "end_ns", end_ts });
+            }
+            MarkerWriterPolicy::push_perfetto_ts(
+                name.data(), begin_ts, record.correlation_id.internal, push_annotations);
+            MarkerWriterPolicy::pop_perfetto_ts(name.data(), end_ts, pop_annotations);
+        }
+
+        MarkerWriterPolicy::add_thread_info(record.thread_id);
+        MarkerWriterPolicy::store_region(trace_cache::region_sample{
+            record.thread_id, std::string{ name }.c_str(), record.correlation_id.internal,
+            record.correlation_id.external.value, begin_ts, end_ts, "{}", args,
+            tim::trait::name<tim::category::rocm_marker_api>::value });
+    }
 
 private:
     bool m_use_perfetto{ false };
     bool m_use_timemory{ false };
+    bool m_perfetto_annotations{ false };
 };
 
 }  // namespace rocprofiler_sdk
