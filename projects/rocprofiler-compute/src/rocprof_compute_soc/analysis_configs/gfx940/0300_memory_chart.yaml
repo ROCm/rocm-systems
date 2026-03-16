@@ -11,9 +11,8 @@ Panel Config:
         value: Value
       metric:
         Wavefront Occupancy:
-          value: ROUND(AVG((SQ_ACCUM_PREV_HIRES / $GRBM_GUI_ACTIVE_PER_XCD) / $numActiveCUs),
+          value: ROUND(AVG((SQ_LEVEL_WAVES_ACCUM / $GRBM_GUI_ACTIVE_PER_XCD) / $numActiveCUs),
             0)
-          coll_level: SQ_LEVEL_WAVES
         Wave Life:
           value: ROUND(AVG(((4 * (SQ_WAVE_CYCLES / SQ_WAVES)) if (SQ_WAVES != 0) else
             0)), 0)
@@ -55,9 +54,8 @@ Panel Config:
           value: ROUND(AVG(((100 * SQ_LDS_IDX_ACTIVE) / ($GRBM_GUI_ACTIVE_PER_XCD
             * $cu_per_gpu))), 0)
         LDS Latency:
-          value: ROUND(AVG(((SQ_ACCUM_PREV_HIRES / SQ_INSTS_LDS) if (SQ_INSTS_LDS
+          value: ROUND(AVG(((SQ_INST_LEVEL_LDS_ACCUM / SQ_INSTS_LDS) if (SQ_INSTS_LDS
             != 0) else None)),0)
-          coll_level: SQ_INST_LEVEL_LDS
         VL1 Rd:
           value: ROUND(AVG((TCP_TOTAL_READ_sum / $denom)), 0)
         VL1 Wr:
@@ -89,9 +87,8 @@ Panel Config:
           value: ROUND((AVG(((SQC_DCACHE_HITS / SQC_DCACHE_REQ) if (SQC_DCACHE_REQ
             != 0) else None)) * 100), 0)
         sL1D Lat:
-          value: ROUND((AVG(((SQ_ACCUM_PREV_HIRES / SQC_DCACHE_REQ) if (SQC_DCACHE_REQ
+          value: ROUND((AVG(((SQC_DCACHE_INFLIGHT_LEVEL_ACCUM / SQC_DCACHE_REQ) if (SQC_DCACHE_REQ
             != 0) else None)) * 100), 0)
-          coll_level: SQC_DCACHE_INFLIGHT_LEVEL
         sL1D_L2 Rd:
           value: ROUND(AVG((SQC_TC_DATA_READ_REQ / $denom)), 0)
         sL1D_L2 Wr:
@@ -103,9 +100,8 @@ Panel Config:
         IL1 Hit:
           value: ROUND((AVG((SQC_ICACHE_HITS / SQC_ICACHE_REQ)) * 100), 0)
         IL1 Lat:
-          value: ROUND((AVG(((SQ_ACCUM_PREV_HIRES / SQC_ICACHE_REQ) if (SQC_ICACHE_REQ
+          value: ROUND((AVG(((SQC_ICACHE_INFLIGHT_LEVEL_ACCUM / SQC_ICACHE_REQ) if (SQC_ICACHE_REQ
             != 0) else None)) * 100), 0)
-          coll_level: SQC_ICACHE_INFLIGHT_LEVEL
         IL1_L2 Rd:
           value: ROUND(AVG((SQC_TC_INST_REQ / $denom)), 0)
         L2 Rd:

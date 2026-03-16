@@ -52,14 +52,13 @@ Panel Config:
             / (End_Timestamp - Start_Timestamp)))
           unit: Gbps
         LDS Latency:
-          avg: AVG(((SQ_ACCUM_PREV_HIRES / SQ_INSTS_LDS) if (SQ_INSTS_LDS != 0) else
+          avg: AVG(((SQ_INST_LEVEL_LDS_ACCUM / SQ_INSTS_LDS) if (SQ_INSTS_LDS != 0) else
             None))
-          min: MIN(((SQ_ACCUM_PREV_HIRES / SQ_INSTS_LDS) if (SQ_INSTS_LDS != 0) else
+          min: MIN(((SQ_INST_LEVEL_LDS_ACCUM / SQ_INSTS_LDS) if (SQ_INSTS_LDS != 0) else
             None))
-          max: MAX(((SQ_ACCUM_PREV_HIRES / SQ_INSTS_LDS) if (SQ_INSTS_LDS != 0) else
+          max: MAX(((SQ_INST_LEVEL_LDS_ACCUM / SQ_INSTS_LDS) if (SQ_INSTS_LDS != 0) else
             None))
           unit: Cycles
-          coll_level: SQ_INST_LEVEL_LDS
         Bank Conflicts/Access:
           avg: AVG(((SQ_LDS_BANK_CONFLICT / (SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT))
             if ((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) != 0) else None))

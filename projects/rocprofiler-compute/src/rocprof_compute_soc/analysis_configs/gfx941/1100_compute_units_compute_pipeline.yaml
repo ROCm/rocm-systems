@@ -141,23 +141,21 @@ Panel Config:
             0) else None))
           unit: Cycles per Instruction
         VMEM Latency:
-          avg: AVG(((SQ_ACCUM_PREV_HIRES / SQ_INSTS_VMEM) if (SQ_INSTS_VMEM != 0)
+          avg: AVG(((SQ_INST_LEVEL_VMEM_ACCUM / SQ_INSTS_VMEM) if (SQ_INSTS_VMEM != 0)
             else None))
-          min: MIN(((SQ_ACCUM_PREV_HIRES / SQ_INSTS_VMEM) if (SQ_INSTS_VMEM != 0)
+          min: MIN(((SQ_INST_LEVEL_VMEM_ACCUM / SQ_INSTS_VMEM) if (SQ_INSTS_VMEM != 0)
             else None))
-          max: MAX(((SQ_ACCUM_PREV_HIRES / SQ_INSTS_VMEM) if (SQ_INSTS_VMEM != 0)
+          max: MAX(((SQ_INST_LEVEL_VMEM_ACCUM / SQ_INSTS_VMEM) if (SQ_INSTS_VMEM != 0)
             else None))
           unit: Cycles
-          coll_level: SQ_INST_LEVEL_VMEM
         SMEM Latency:
-          avg: AVG(((SQ_ACCUM_PREV_HIRES / SQ_INSTS_SMEM) if (SQ_INSTS_SMEM != 0)
+          avg: AVG(((SQ_INST_LEVEL_SMEM_ACCUM / SQ_INSTS_SMEM) if (SQ_INSTS_SMEM != 0)
             else None))
-          min: MIN(((SQ_ACCUM_PREV_HIRES / SQ_INSTS_SMEM) if (SQ_INSTS_SMEM != 0)
+          min: MIN(((SQ_INST_LEVEL_SMEM_ACCUM / SQ_INSTS_SMEM) if (SQ_INSTS_SMEM != 0)
             else None))
-          max: MAX(((SQ_ACCUM_PREV_HIRES / SQ_INSTS_SMEM) if (SQ_INSTS_SMEM != 0)
+          max: MAX(((SQ_INST_LEVEL_SMEM_ACCUM / SQ_INSTS_SMEM) if (SQ_INSTS_SMEM != 0)
             else None))
           unit: Cycles
-          coll_level: SQ_INST_LEVEL_SMEM
   - metric_table:
       id: 1103
       title: Arithmetic Operations

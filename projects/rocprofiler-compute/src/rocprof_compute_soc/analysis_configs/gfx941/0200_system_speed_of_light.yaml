@@ -117,12 +117,11 @@ Panel Config:
           peak: 5
           pop: ((100 * AVG((SQ_INSTS / SQ_BUSY_CU_CYCLES))) / 5)
         Wavefront Occupancy:
-          value: AVG((SQ_ACCUM_PREV_HIRES / $GRBM_GUI_ACTIVE_PER_XCD))
+          value: AVG((SQ_LEVEL_WAVES_ACCUM / $GRBM_GUI_ACTIVE_PER_XCD))
           unit: Wavefronts
           peak: ($max_waves_per_cu * $cu_per_gpu)
-          pop: (100 * AVG(((SQ_ACCUM_PREV_HIRES / $GRBM_GUI_ACTIVE_PER_XCD) / ($max_waves_per_cu
+          pop: (100 * AVG(((SQ_LEVEL_WAVES_ACCUM / $GRBM_GUI_ACTIVE_PER_XCD) / ($max_waves_per_cu
             * $cu_per_gpu))))
-          coll_level: SQ_LEVEL_WAVES
         Theoretical LDS Bandwidth:
           value: AVG(((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($lds_banks_per_cu))
             / (End_Timestamp - Start_Timestamp)))
@@ -221,11 +220,10 @@ Panel Config:
           pop: ((100 * AVG(((SQC_ICACHE_REQ / (End_Timestamp - Start_Timestamp)) *
             64))) / ((($max_sclk / 1000) * 64) * $sqc_per_gpu))
         L1I Fetch Latency:
-          value: AVG((SQ_ACCUM_PREV_HIRES / SQ_IFETCH))
+          value: AVG((SQ_IFETCH_LEVEL_ACCUM / SQ_IFETCH))
           unit: Cycles
           peak: None
           pop: None
-          coll_level: SQ_IFETCH_LEVEL
         CU Utilization:
           value: AVG(100 * SQ_BUSY_CU_CYCLES / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
           unit: Percent

@@ -351,17 +351,15 @@ Addition:
         max: MAX(((SQ_VALU_MFMA_BUSY_CYCLES / SQ_INSTS_MFMA) if (SQ_INSTS_MFMA != 0) else None))
         unit: cycles/instr
     - VMEM Latency:
-        avg: AVG(((SQ_ACCUM_PREV_HIRES / SQ_INSTS_VMEM) if (SQ_INSTS_VMEM != 0) else None))
-        min: MIN(((SQ_ACCUM_PREV_HIRES / SQ_INSTS_VMEM) if (SQ_INSTS_VMEM != 0) else None))
-        max: MAX(((SQ_ACCUM_PREV_HIRES / SQ_INSTS_VMEM) if (SQ_INSTS_VMEM != 0) else None))
+        avg: AVG(((SQ_INST_LEVEL_VMEM_ACCUM / SQ_INSTS_VMEM) if (SQ_INSTS_VMEM != 0) else None))
+        min: MIN(((SQ_INST_LEVEL_VMEM_ACCUM / SQ_INSTS_VMEM) if (SQ_INSTS_VMEM != 0) else None))
+        max: MAX(((SQ_INST_LEVEL_VMEM_ACCUM / SQ_INSTS_VMEM) if (SQ_INSTS_VMEM != 0) else None))
         unit: Cycles
-        coll_level: SQ_INST_LEVEL_VMEM
     - SMEM Latency:
-        avg: AVG(((SQ_ACCUM_PREV_HIRES / SQ_INSTS_SMEM) if (SQ_INSTS_SMEM != 0) else None))
-        min: MIN(((SQ_ACCUM_PREV_HIRES / SQ_INSTS_SMEM) if (SQ_INSTS_SMEM != 0) else None))
-        max: MAX(((SQ_ACCUM_PREV_HIRES / SQ_INSTS_SMEM) if (SQ_INSTS_SMEM != 0) else None))
+        avg: AVG(((SQ_INST_LEVEL_SMEM_ACCUM / SQ_INSTS_SMEM) if (SQ_INSTS_SMEM != 0) else None))
+        min: MIN(((SQ_INST_LEVEL_SMEM_ACCUM / SQ_INSTS_SMEM) if (SQ_INSTS_SMEM != 0) else None))
+        max: MAX(((SQ_INST_LEVEL_SMEM_ACCUM / SQ_INSTS_SMEM) if (SQ_INSTS_SMEM != 0) else None))
         unit: Cycles
-        coll_level: SQ_INST_LEVEL_SMEM
 - Panel Config:
     id: 1100
   metric_table:
