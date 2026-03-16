@@ -242,6 +242,7 @@ void TesterArguments::get_arguments() {
     case FloodAddTestType:
     case FloodFAddTestType:
     case FloodWaitAmoTestType:
+    case DeviceBitcodeTestType:
       requires_two_pes = false;
       break;
     default:
