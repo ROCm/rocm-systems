@@ -84,8 +84,8 @@ endfunction()
 rocprofiler_systems_configure_test_var(_ROCPROFSYS_PYTEST_TEST_MARKERS "${ROCPROFSYS_DISABLE_EXAMPLES}" FALSE)
 rocprofiler_systems_configure_test_var(_ROCPROFSYS_PYTEST_TEST_MARKERS "${ROCPROFSYS_TEST_LABELS_INCLUDE}" TRUE)
 rocprofiler_systems_configure_test_var(_ROCPROFSYS_PYTEST_TEST_MARKERS "${ROCPROFSYS_TEST_LABELS_EXCLUDE}" FALSE)
-rocprofiler_systems_configure_test_var(_ROCPROFSYS_PYTEST_TEST_MARKERS "${ROCPROFSYS_TEST_KEYWORDS_INCLUDE}" TRUE)
-rocprofiler_systems_configure_test_var(_ROCPROFSYS_PYTEST_TEST_MARKERS "${ROCPROFSYS_TEST_KEYWORDS_EXCLUDE}" FALSE)
+rocprofiler_systems_configure_test_var(_ROCPROFSYS_PYTEST_TEST_KEYWORDS "${ROCPROFSYS_TEST_KEYWORDS_INCLUDE}" TRUE)
+rocprofiler_systems_configure_test_var(_ROCPROFSYS_PYTEST_TEST_KEYWORDS "${ROCPROFSYS_TEST_KEYWORDS_EXCLUDE}" FALSE)
 
 if(NOT "${_ROCPROFSYS_PYTEST_TEST_MARKERS}" STREQUAL "")
     rocprofiler_systems_message(STATUS
@@ -160,12 +160,12 @@ if(ROCPROFSYS_PYTHON_ROOT_DIRS)
     list(APPEND _generate_args "--python-root-dirs=${_py_roots_escaped}")
 endif()
 
-if(NOT "${ROCPROFSYS_PYTEST_TEST_MARKERS}" STREQUAL "")
-    list(APPEND _generate_args "-m" "${ROCPROFSYS_PYTEST_TEST_MARKERS}")
+if(NOT "${_ROCPROFSYS_PYTEST_TEST_MARKERS}" STREQUAL "")
+    list(APPEND _generate_args "-m" "${_ROCPROFSYS_PYTEST_TEST_MARKERS}")
 endif()
 
-if(NOT "${ROCPROFSYS_PYTEST_TEST_KEYWORDS}" STREQUAL "")
-    list(APPEND _generate_args "-k" "${ROCPROFSYS_PYTEST_TEST_KEYWORDS}")
+if(NOT "${_ROCPROFSYS_PYTEST_TEST_KEYWORDS}" STREQUAL "")
+    list(APPEND _generate_args "-k" "${_ROCPROFSYS_PYTEST_TEST_KEYWORDS}")
 endif()
 
 # ---------------------------------------------------------------------------
