@@ -1,0 +1,17 @@
+/* secondary sidebar toc (right side) */
+nav.page-toc code {
+  border: none;
+  background-color: inherit;
+}
+
+/* add separator between apis in breathe doc output */
+dl[class]:not(.enumerator, .option-list, .field-list, .footnote, .glossary, .simple):not(:last-child) {
+  margin-bottom: 1rem;
+  padding-bottom: 2rem;
+  border-bottom: 2px solid var(--pst-color-border);
+}
+
+dl[class]:not(.enumerator, .option-list, .field-list, .footnote, .glossary, .simple):not(:last-child) > dd {
+  margin-left: 1rem;
+  padding-top: 1rem;
+}

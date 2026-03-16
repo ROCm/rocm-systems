@@ -56,11 +56,20 @@ html_title = f"AMD SMI {version_number} documentation"
 suppress_warnings = ["etoc.toctree"]
 external_toc_path = "./sphinx/_toc.yml"
 html_theme_options = {"flavor": "rocm", "show_toc_level": 2}
+html_static_path = ["sphinx/static"]
+html_css_files = ["amdsmi_docs.css"]
 
 # Extension-related settings
 sys.path.append(str(DOCS_DIR / "_extension"))
+
+extensions = [
+    "rocm_docs",
+    "rocm_docs.doxygen",
+    "amdsmi_docs.doxygen",
+    "amdsmi_docs.go_api_ref",
+    "sphinxcontrib.mermaid",
+]
 external_projects_current_project = "amdsmi"
-extensions = ["rocm_docs", "rocm_docs.doxygen", "go_api_ref", "sphinxcontrib.mermaid"]
 
 myst_fence_as_directive = ["mermaid"]
 }
