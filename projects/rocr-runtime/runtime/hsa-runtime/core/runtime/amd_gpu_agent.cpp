@@ -82,6 +82,9 @@
 #include <amdgpu.h>
 #endif
 
+#ifdef HSA_ENABLE_AMDCUID_SUPPORT
+#include "amd_cuid.h"
+#endif
 
 // Size of scratch (private) segment pre-allocated per thread, in bytes.
 #define DEFAULT_SCRATCH_BYTES_PER_THREAD 2048
@@ -209,6 +212,9 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
 
   // Initialize libdrm device handle
   InitLibDrm();
+
+  // Store CUID for this agent
+  InitDerivedCuid();
 
 #if !defined(__linux__)
   wallclock_frequency_ = 0;
@@ -605,6 +611,39 @@ void GpuAgent::InitCacheList() {
   for (size_t i = 0; i < caches_.size(); i++)
     caches_[i].reset(new core::Cache(deviceName + " L" + std::to_string(cache_props_[i].CacheLevel),
                                      cache_props_[i].CacheLevel, cache_props_[i].CacheSize));
+}
+
+void GpuAgent::InitDerivedCuid() {
+  memset(derived_cuid_, 0, sizeof(derived_cuid_));
+
+#ifdef HSA_ENABLE_AMDCUID_SUPPORT
+  // Build the render node path from system property
+  std::string device_node =
+      "/sys/class/drm/renderD" + std::to_string(properties_.DrmRenderMinor);
+
+  // Retrieve the handle for a GPU device using its system path
+  amdcuid_id_t handle{};
+  amdcuid_status_t status =
+      amdcuid_get_handle_by_dev_path(device_node.c_str(), AMDCUID_DEVICE_TYPE_GPU, &handle);
+  
+  if (status != AMDCUID_STATUS_SUCCESS) {
+    debug_print("Secondary CUID not available: failed to get device handle.\n");
+    return;
+  }
+
+  // Query the derived CUID using the device handle
+  uint32_t cuid_length;
+  status = amdcuid_query_device_property(handle, AMDCUID_QUERY_DERIVED_CUID, 
+                                         derived_cuid_, &cuid_length);
+
+  if (status != AMDCUID_STATUS_SUCCESS) {
+    debug_print("Secondary CUID not available: query failed.\n");
+    memset(derived_cuid_, 0, sizeof(derived_cuid_));
+  }
+
+#else
+  debug_print("Secondary CUID not available: AMDCUID support not enabled.\n");
+#endif
 }
 
 void GpuAgent::InitLibDrm() {
@@ -2006,6 +2045,11 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
                          (kfd_version.KernelInterfaceMajorVersion == 1 &&
                           kfd_version.KernelInterfaceMinorVersion >= 20)) &&
                         properties_.EngineId.ui32.Major >= 12;
+      break;
+    }
+    case HSA_AMD_AGENT_INFO_CUID: {
+      uint8_t* cuid = static_cast<uint8_t*>(value);
+      memcpy(cuid, derived_cuid_, sizeof(derived_cuid_));
       break;
     }
     default:
