@@ -9,25 +9,25 @@ defaults:
   numbered: false
 root: index
 subtrees:
-- caption: Install
-  entries:
-  - file: install/install.md
-    title: Library and CLI tool installation
-  - file: install/build.md
-    title: Build from source
+  - caption: Install
+    entries:
+      - file: install/install.md
+        title: Install the library and CLI
+      - file: install/build.md
+        title: Build from source
 
-- caption: How to
-  entries:
-  - file: how-to/amdsmi-cpp-lib.md
-    title: C++ library usage
-  - file: how-to/amdsmi-py-lib.md
-    title: Python library usage
-  - file: how-to/amdsmi-go-lib.md
-    title: Go library usage
-  - file: how-to/amdsmi-cli-tool.md
-    title: CLI tool usage
-  - file: how-to/setup-docker-container.md
-    title: Use AMD SMI in a Docker container
+  - caption: How to
+    entries:
+      - file: how-to/amdsmi-cpp-lib.md
+        title: Use the C/C++ library
+      - file: how-to/amdsmi-py-lib.md
+        title: Use the Python library
+      - file: how-to/amdsmi-go-lib.md
+        title: Use the Go library
+      - file: how-to/amdsmi-cli-tool.md
+        title: Use the amd-smi CLI tool
+      - file: how-to/setup-docker-container.md
+        title: Use AMD SMI in a Docker container
 
   - caption: Reference
     entries:
@@ -49,19 +49,24 @@ subtrees:
       - file: reference/changelog.md
         title: Changelog
 
-- caption: Conceptual
-  entries:
-  - file: conceptual/perf-determinism.md
-    title: Performance determinism
-  - file: conceptual/ras.md
+  - caption: Conceptual
+    entries:
+      - file: conceptual/perf-determinism.md
+        title: Performance determinism
+      - file: conceptual/ras.md
 
-- caption: Tutorials
-  entries:
-  - url: https://github.com/ROCm/amdsmi/tree/${branch}/example
-    title: AMD SMI examples (GitHub)
-  - url: https://rocm.blogs.amd.com/software-tools-optimization/amd-smi-overview/README.html
-    title: AMD SMI CLI walkthrough
+  - caption: Tutorials
+    entries:
+      - url: https://github.com/ROCm/rocm-systems/tree/develop/projects/amdsmi/example
+        title: AMD SMI examples (GitHub)
+      - url: https://rocm.blogs.amd.com/software-tools-optimization/amd-smi-overview/README.html
+        title: amd-smi CLI walkthrough
+      - url: https://instinct.docs.amd.com/projects/amdgpu-docs/en/latest/gpu-partitioning/mi300x/quick-start-guide.html
+        title: GPU partitioning (MI300X)
 
-- caption: About
-  entries:
-  - file: license.md
+  - caption: About
+    entries:
+      - file: about/license.md
+        title: License
+      - file: about/contributing.md
+        title: Contributing

@@ -38,26 +38,24 @@ def get_version_info(filepath):
         raise ValueError("Couldn't find all VERSION numbers.")
 
 
-version_major, version_minor, version_release = get_version_info(
-    "../include/amd_smi/amdsmi.h"
-)
-version_number = f"{version_major}.{version_minor}.{version_release}"
+version_major, version_minor, version_release = get_version_info(AMDSMI_H)
 
 # project info
 project = "AMD SMI"
 author = "Advanced Micro Devices, Inc."
-copyright = "Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved."
-version = version_number
-release = version_number
+copyright = "Copyright (c) %Y Advanced Micro Devices, Inc. All rights reserved."
+version = f"{version_major}.{version_minor}.{version_release}"
+release = version
 
+# theme and html output
 html_theme = "rocm_docs_theme"
-html_theme_options = {"flavor": "rocm"}
-html_title = f"AMD SMI {version_number} documentation"
-suppress_warnings = ["etoc.toctree"]
-external_toc_path = "./sphinx/_toc.yml"
 html_theme_options = {"flavor": "rocm", "show_toc_level": 2}
+html_title = f"AMD SMI {version}"
 html_static_path = ["sphinx/static"]
 html_css_files = ["amdsmi_docs.css"]
+
+# Sphinx build-related settings
+# suppress_warnings = ["etoc.toctree"]
 
 # Extension-related settings
 sys.path.append(str(DOCS_DIR / "_extension"))
@@ -70,8 +68,16 @@ extensions = [
     "sphinxcontrib.mermaid",
 ]
 external_projects_current_project = "amdsmi"
+external_toc_path = DOCS_DIR / "sphinx" / "_toc.yml"
 
 myst_fence_as_directive = ["mermaid"]
+myst_html_meta = {
+    "keywords": "amd, smi, amdsmi, system, management, interface, rocm",
+    "property=og:locale": "en_US",
+}
+# Use Jinja-style {{ key }} syntax to substitute values in .md files
+myst_substitutions = {
+    "AMDSMI_VERSION": version,
 }
 
 # doxygen-related settings

@@ -5,7 +5,7 @@ myst:
     "keywords": "amdsmi, lib, cli, system, management, interface, amdgpu, admin, sys"
 ---
 
-# AMD SMI documentation
+# AMD SMI {{ AMDSMI_VERSION }} documentation
 
 The AMD System Management Interface (AMD SMI) library offers a unified tool for
 managing and monitoring GPUs, particularly in high-performance computing
@@ -13,7 +13,7 @@ environments. It provides a user-space interface that allows applications to
 control GPU operations, monitor performance, and retrieve information about the
 system's drivers and GPUs.
 
-Find the source code at <https://github.com/ROCm/amdsmi>.
+Find the source code at <https://github.com/ROCm/rocm-systems/projects/amdsmi>.
 
 ```{important}
 This AMD SMI project supports Linux bare metal and Linux virtual machine guest
@@ -22,33 +22,24 @@ refer to the [AMD SMI for Virtualization
 documentation](https://instinct.docs.amd.com/projects/amd-smi-virt/en/latest/).
 ```
 
-```{note}
-AMD SMI is the successor to <https://github.com/ROCm/rocm_smi_lib>.
-```
-
 ::::{grid} 2
 :gutter: 3
 
 :::{grid-item-card} Install
-* [Library and CLI tool installation](./install/install.md)
+* [Install the library and CLI tool](./install/install.md)
 * [Build from source](./install/build.md)
 :::
 
 :::{grid-item-card} How to
-* [C++ library usage](./how-to/amdsmi-cpp-lib.md)
-* [Python library usage](./how-to/amdsmi-py-lib.md)
-* [Go library usage](./how-to/amdsmi-go-lib.md)
-* [CLI tool usage](./how-to/amdsmi-cli-tool.md)
+* [Use the C/C++ library](./how-to/amdsmi-cpp-lib.md)
+* [Use the Python library](./how-to/amdsmi-py-lib.md)
+* [Use the Go library](./how-to/amdsmi-go-lib.md)
+* [Use the amd-smi CLI](./how-to/amdsmi-cli-tool.md)
 * [Use AMD SMI in a Docker container](./how-to/setup-docker-container.md)
 :::
 
 :::{grid-item-card} Reference
-* [C++ API](./reference/amdsmi-cpp-api.md)
-  * [Modules](../doxygen/docBin/html/topics)
-  * [Files](../doxygen/docBin/html/files)
-  * [Globals](../doxygen/docBin/html/globals)
-  * [Data structures](../doxygen/docBin/html/annotated)
-  * [Data fields](../doxygen/docBin/html/functions_data_fields)
+* [C/C++ API](./reference/amdsmi-cpp-api/index.md)
 * [Python API](./reference/amdsmi-py-api.md)
 * [Go API](./reference/amdsmi-go-api.md)
 :::
@@ -59,15 +50,20 @@ AMD SMI is the successor to <https://github.com/ROCm/rocm_smi_lib>.
 :::
 
 :::{grid-item-card} Tutorials
-* [AMD SMI examples (GitHub)](https://github.com/ROCm/amdsmi/tree/amd-staging/example)
-* [AMD SMI CLI walkthrough](https://rocm.blogs.amd.com/software-tools-optimization/amd-smi-overview/README.html)
+* [AMD SMI examples (GitHub)](https://github.com/ROCm/rocm-systems/tree/develop/projects/amdsmi/example)
+* [amd-smi CLI walkthrough](https://rocm.blogs.amd.com/software-tools-optimization/amd-smi-overview/README.html)
+* [GPU partitioning (MI300X)](https://instinct.docs.amd.com/projects/amdgpu-docs/en/latest/gpu-partitioning/mi300x/quick-start-guide.html)
 :::
 ::::
 
-To learn about contributing to AMD SMI, see [Contibuting to AMD
-SMI](https://github.com/ROCm/amdsmi/blob/amd-mainline/.github/CONTRIBUTING.md).
-To contribute to the documentation, see
-{doc}`Contributing to ROCm documentation <rocm:contribute/contributing>`.
+```{note}
+AMD SMI is the successor to <https://github.com/ROCm/rocm_smi_lib>.
+```
 
-Find ROCm licensing information on the
-{doc}`Licensing <rocm:about/license>` page.
+To learn about contributing to AMD SMI, see [Contributing to AMD
+SMI](https://github.com/ROCm/rocm-systems/blob/develop/projects/amdsmi/.github/CONTRIBUTING.md).
+To contribute to the documentation, see {doc}`Contributing to ROCm
+documentation <rocm:contribute/contributing>`.
+
+Find ROCm licensing information on the {doc}`Licensing <rocm:about/license>`
+page.
