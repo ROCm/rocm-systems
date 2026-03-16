@@ -274,6 +274,144 @@ function(ROCPROFILER_SYSTEMS_CUSTOM_COMPILATION)
 endfunction()
 
 # ----------------------------------------------------------------------------
+# rocprofiler_systems_checkout_git_submodule()
+# Checks out a git submodule or clones a repo if not already present
+#
+# Mirrors the function from cmake/MacroUtilities.cmake for standalone builds.
+#
+# ARGS:
+#   RELATIVE_PATH: Path relative to WORKING_DIRECTORY
+#   WORKING_DIRECTORY: Base directory (default: PROJECT_SOURCE_DIR)
+#   TEST_FILE: File to check for existence (default: CMakeLists.txt)
+#   REPO_URL: URL to clone if submodule checkout fails
+#   REPO_BRANCH: Branch to checkout (default: master)
+#   RECURSIVE: Also init recursive submodules
+#
+function(ROCPROFILER_SYSTEMS_CHECKOUT_GIT_SUBMODULE)
+    cmake_parse_arguments(
+        CHECKOUT
+        "RECURSIVE"
+        "RELATIVE_PATH;WORKING_DIRECTORY;TEST_FILE;REPO_URL;REPO_BRANCH"
+        "ADDITIONAL_CMDS"
+        ${ARGN}
+    )
+
+    if(NOT CHECKOUT_WORKING_DIRECTORY)
+        set(CHECKOUT_WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    endif()
+
+    if(NOT CHECKOUT_TEST_FILE)
+        set(CHECKOUT_TEST_FILE "CMakeLists.txt")
+    endif()
+
+    if(NOT CHECKOUT_REPO_BRANCH)
+        set(CHECKOUT_REPO_BRANCH "master")
+    endif()
+
+    find_package(Git)
+    set(_DIR "${CHECKOUT_WORKING_DIRECTORY}/${CHECKOUT_RELATIVE_PATH}")
+
+    if(NOT EXISTS "${_DIR}")
+        if(NOT CHECKOUT_REPO_URL)
+            message(FATAL_ERROR "submodule directory does not exist")
+        endif()
+    endif()
+
+    set(_TEST_FILE "${_DIR}/${CHECKOUT_TEST_FILE}")
+    set(_SUBMODULE "${PROJECT_SOURCE_DIR}/.gitmodules")
+
+    set(_TEST_FILE_EXISTS OFF)
+    if(EXISTS "${_TEST_FILE}" AND NOT IS_DIRECTORY "${_TEST_FILE}")
+        set(_TEST_FILE_EXISTS ON)
+    endif()
+
+    if(_TEST_FILE_EXISTS)
+        return()
+    endif()
+
+    find_package(Git REQUIRED)
+
+    set(_SUBMODULE_EXISTS OFF)
+    if(EXISTS "${_SUBMODULE}" AND NOT IS_DIRECTORY "${_SUBMODULE}")
+        set(_SUBMODULE_EXISTS ON)
+    endif()
+
+    set(_HAS_REPO_URL OFF)
+    if(NOT "${CHECKOUT_REPO_URL}" STREQUAL "")
+        set(_HAS_REPO_URL ON)
+    endif()
+
+    set(_RECURSE "")
+    if(CHECKOUT_RECURSIVE)
+        set(_RECURSE "--recursive")
+    endif()
+
+    if(NOT _TEST_FILE_EXISTS AND _SUBMODULE_EXISTS)
+        execute_process(
+            COMMAND
+                ${GIT_EXECUTABLE} submodule update --init ${_RECURSE}
+                ${CHECKOUT_ADDITIONAL_CMDS} ${CHECKOUT_RELATIVE_PATH}
+            WORKING_DIRECTORY ${CHECKOUT_WORKING_DIRECTORY}
+            RESULT_VARIABLE RET
+        )
+
+        if(RET GREATER 0)
+            message(STATUS "function(rocprofiler_systems_checkout_git_submodule) failed.")
+            message(
+                FATAL_ERROR
+                "Command: \"${GIT_EXECUTABLE} submodule update --init ${_RECURSE} ${CHECKOUT_ADDITIONAL_CMDS} ${CHECKOUT_RELATIVE_PATH}\""
+            )
+        else()
+            set(_TEST_FILE_EXISTS ON)
+        endif()
+    endif()
+
+    if(NOT _TEST_FILE_EXISTS AND _HAS_REPO_URL)
+        message(
+            STATUS
+            "Checking out '${CHECKOUT_REPO_URL}' @ '${CHECKOUT_REPO_BRANCH}'..."
+        )
+
+        if(EXISTS "${_DIR}")
+            execute_process(COMMAND ${CMAKE_COMMAND} -E remove_directory ${_DIR})
+        endif()
+
+        execute_process(
+            COMMAND
+                ${GIT_EXECUTABLE} clone -b ${CHECKOUT_REPO_BRANCH}
+                ${CHECKOUT_ADDITIONAL_CMDS} ${CHECKOUT_REPO_URL} ${CHECKOUT_RELATIVE_PATH}
+            WORKING_DIRECTORY ${CHECKOUT_WORKING_DIRECTORY}
+            RESULT_VARIABLE RET
+        )
+
+        if(CHECKOUT_RECURSIVE AND EXISTS "${_DIR}" AND IS_DIRECTORY "${_DIR}")
+            execute_process(
+                COMMAND ${GIT_EXECUTABLE} submodule update --init ${_RECURSE}
+                WORKING_DIRECTORY ${_DIR}
+                RESULT_VARIABLE RET
+            )
+        endif()
+
+        if(RET GREATER 0)
+            message(STATUS "function(rocprofiler_systems_checkout_git_submodule) failed.")
+            message(
+                FATAL_ERROR
+                "Command: \"${GIT_EXECUTABLE} clone -b ${CHECKOUT_REPO_BRANCH} ${CHECKOUT_ADDITIONAL_CMDS} ${CHECKOUT_REPO_URL} ${CHECKOUT_RELATIVE_PATH}\""
+            )
+        else()
+            set(_TEST_FILE_EXISTS ON)
+        endif()
+    endif()
+
+    if(NOT EXISTS "${_TEST_FILE}" OR NOT _TEST_FILE_EXISTS)
+        message(
+            FATAL_ERROR
+            "Error checking out submodule: '${CHECKOUT_RELATIVE_PATH}' to '${_DIR}'"
+        )
+    endif()
+endfunction()
+
+# ----------------------------------------------------------------------------
 # TheRock build compatibility
 #
 # When building within TheRock, certain examples must be disabled.

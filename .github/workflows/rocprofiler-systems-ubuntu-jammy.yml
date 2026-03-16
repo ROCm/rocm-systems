@@ -155,6 +155,7 @@ jobs:
           -DCMAKE_BUILD_TYPE=${{ matrix.build-type }} \
           -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems-dev \
           -DROCPROFSYS_BUILD_TESTING=ON \
+          -DROCPROFSYS_BUILD_EXAMPLES=ON \
           -DROCPROFSYS_USE_PYTHON=${{ matrix.python }} \
           -DROCPROFSYS_USE_MPI_HEADERS=${{ matrix.mpi-headers }} \
           -DROCPROFSYS_BUILD_DYNINST=${{ matrix.build-dyninst }} \
@@ -329,6 +330,7 @@ jobs:
           -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems \
           -DROCPROFSYS_BUILD_CI=OFF \
           -DROCPROFSYS_BUILD_TESTING=ON \
+          -DROCPROFSYS_BUILD_EXAMPLES=ON \
           -DROCPROFSYS_BUILD_DYNINST=ON \
           -DROCPROFSYS_BUILD_BOOST=ON \
           -DROCPROFSYS_BUILD_TBB=ON \
