@@ -42,6 +42,8 @@
 
 #include "core/inc/default_signal.h"
 
+#include <sched.h>
+
 #if defined(__i386__) || defined(__x86_64__)
 #include <mwaitxintrin.h>
 #define MWAITX_ECX_TIMER_ENABLE 0x2  // BIT(1)
@@ -105,8 +107,9 @@ hsa_signal_value_t BusyWaitSignal::WaitRelaxed(hsa_signal_condition_t condition,
     timer::CheckAbortTimeout(start_time, signal_abort_timeout);
 
     if (g_use_mwaitx) {
-      // Use timer-enabled mwaitx for busy waiting
       timer::DoMwaitx(const_cast<int64_t*>(&signal_.value), 60000, true);
+    } else if (wait_hint != HSA_WAIT_STATE_ACTIVE) {
+      sched_yield();
     }
   }
 }
