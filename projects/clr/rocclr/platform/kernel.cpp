@@ -228,17 +228,10 @@ address KernelParameters::captureOpenCLArgs(device::VirtualDevice& vDev, uint64_
   const Device& device = vDev.device();
   *error = CL_SUCCESS;
 
-  //! Information about which arguments are SVM pointers is stored after
-  // the actual parameters, but only if the device has any SVM capability
-  const size_t execInfoSize = getNumberOfSvmPtr() * sizeof(void*);
-
-  address mem = vDev.allocKernelArguments(totalSize_ + execInfoSize, 128);
-  if (mem == nullptr) {
-    mem = reinterpret_cast<address>(
-        AlignedMemory::allocate(totalSize_ + execInfoSize, PARAMETERS_MIN_ALIGNMENT));
-  } else {
-    deviceKernelArgs_ = true;
-  }
+  // We need to make another allocation for kernel arguments, because the same
+  // kernel may be submitted once again, but with different arguments
+  // immediately after the current dispatch.
+  address mem = alloc(vDev);
 
   if (mem != nullptr) {
     ::memcpy(mem, values_, totalSize_);
@@ -297,6 +290,9 @@ address KernelParameters::captureOpenCLArgs(device::VirtualDevice& vDev, uint64_
       }
     }
 
+    //! Information about which arguments are SVM pointers is stored after
+    // the actual parameters, but only if the device has any SVM capability
+    const size_t execInfoSize = getNumberOfSvmPtr() * sizeof(void*);
     address last = mem + totalSize_;
     if (0 != execInfoSize) {
       ::memcpy(last, &execSvmPtr_[0], execInfoSize);
