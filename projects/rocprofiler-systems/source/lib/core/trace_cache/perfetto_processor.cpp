@@ -1406,32 +1406,10 @@ perfetto_processor_t::handle(const kfd_sample& _kfd)
                 { "end_ns", _end_ts },
             };
 
-            if(!_kfd.event_metadata.empty())
+            auto args = process_arguments_string(_kfd.args_str);
+            for(const auto& arg : args)
             {
-                try
-                {
-                    auto extdata = nlohmann::json::parse(_kfd.event_metadata);
-                    if(extdata.contains("kfd"))
-                    {
-                        for(const auto& [key, val] : extdata["kfd"].items())
-                        {
-                            if(val.is_null())
-                                continue;
-                            else if(val.is_number_integer())
-                                annotations.push_back(
-                                    { key.c_str(), static_cast<uint64_t>(val) });
-                            else if(val.is_number_float())
-                                annotations.push_back(
-                                    { key.c_str(), static_cast<double>(val) });
-                            else if(val.is_string())
-                                annotations.push_back(
-                                    { key.c_str(), val.template get<std::string>() });
-                        }
-                    }
-                } catch(const std::exception& e)
-                {
-                    LOG_WARNING("Failed to parse KFD event_metadata JSON: {}", e.what());
-                }
+                annotations.push_back({ arg.arg_name.c_str(), arg.arg_value });
             }
 
             annotate_perfetto(ctx, annotations);
