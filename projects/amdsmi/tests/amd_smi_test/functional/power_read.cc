@@ -19,6 +19,8 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+#include "power_read.h"
+
 #include <gtest/gtest.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -28,7 +30,6 @@
 
 #include "../test_common.h"
 #include "amd_smi/amdsmi.h"
-#include "power_read.h"
 
 TestPowerRead::TestPowerRead() : TestBase() {
   set_title("AMDSMI Power Read Test");

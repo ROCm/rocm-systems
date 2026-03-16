@@ -19,6 +19,8 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+#include "hw_topology_read.h"
+
 #include <gtest/gtest.h>
 
 #include <cinttypes>
@@ -31,7 +33,6 @@
 
 #include "../test_common.h"
 #include "amd_smi/amdsmi.h"
-#include "hw_topology_read.h"
 
 typedef struct {
   std::string type;

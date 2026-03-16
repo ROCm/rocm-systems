@@ -19,6 +19,8 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+#include "memorypartition_read_write.h"
+
 #include <gtest/gtest.h>
 #include <sys/stat.h>
 
@@ -33,7 +35,6 @@
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "rocm_smi/rocm_smi_utils.h"
-#include "memorypartition_read_write.h"
 
 const uint32_t MAX_UNSUPPORTED_PARTITIONS = 0;
 const uint32_t MAX_SPX_PARTITIONS = 1;  // Single GPU node

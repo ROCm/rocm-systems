@@ -19,6 +19,8 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+#include "volt_freq_curv_read.h"
+
 #include <gtest/gtest.h>
 
 #include <cstdint>
@@ -27,7 +29,6 @@
 
 #include "../test_common.h"
 #include "amd_smi/amdsmi.h"
-#include "volt_freq_curv_read.h"
 
 TestVoltCurvRead::TestVoltCurvRead() : TestBase() {
   set_title("AMDSMI Voltage-Frequency Curve Read Test");

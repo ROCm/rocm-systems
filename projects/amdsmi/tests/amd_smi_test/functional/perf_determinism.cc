@@ -19,6 +19,8 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+#include "perf_determinism.h"
+
 #include <gtest/gtest.h>
 
 #include <cstdint>
@@ -27,7 +29,6 @@
 
 #include "../test_common.h"
 #include "amd_smi/amdsmi.h"
-#include "perf_determinism.h"
 
 TestPerfDeterminism::TestPerfDeterminism() : TestBase() {
   set_title("AMDSMI Performance Determinism Test");
@@ -113,5 +114,5 @@ void TestPerfDeterminism::Run(void) {
       CHK_ERR_ASRT(ret)
       IF_VERB(STANDARD) { std::cout << "\t**New Perf Level:" << GetPerfLevelStr(pfl) << std::endl; }
     }  // END - SET SUPPORTED
-  }  // END - DEVICE LOOP
+  }    // END - DEVICE LOOP
 }

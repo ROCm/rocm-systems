@@ -20,6 +20,8 @@
  * THE SOFTWARE.
  */
 
+#include "gpu_busy_read.h"
+
 #include <gtest/gtest.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -29,7 +31,6 @@
 
 #include "../test_common.h"
 #include "amd_smi/amdsmi.h"
-#include "gpu_busy_read.h"
 
 TestGPUBusyRead::TestGPUBusyRead() : TestBase() {
   set_title("AMDSMI GPU Busy Read Test");

@@ -19,6 +19,8 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+#include "sys_info_read.h"
+
 #include <gtest/gtest.h>
 
 #include <cstdint>
@@ -29,7 +31,6 @@
 
 #include "../test_common.h"
 #include "amd_smi/amdsmi.h"
-#include "sys_info_read.h"
 
 TestSysInfoRead::TestSysInfoRead() : TestBase() {
   set_title("AMDSMI System Info Read Test");

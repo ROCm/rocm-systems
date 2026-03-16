@@ -19,13 +19,14 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+#include "version_read.h"
+
 #include <gtest/gtest.h>
 
 #include <iostream>
 
 #include "../test_common.h"
 #include "amd_smi/amdsmi.h"
-#include "version_read.h"
 
 TestVersionRead::TestVersionRead() : TestBase() {
   set_title("AMDSMI Version Read Test");

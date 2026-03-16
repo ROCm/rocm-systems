@@ -19,6 +19,8 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+#include "mutual_exclusion.h"
+
 #include <gtest/gtest.h>
 
 #include <cstdint>
@@ -27,7 +29,6 @@
 
 #include "../test_common.h"
 #include "amd_smi/amdsmi.h"
-#include "mutual_exclusion.h"
 
 #define AMD_SMI_INIT_FLAG_RESRV_TEST1 0x800000000000000  //!< Reserved for test
 

@@ -19,6 +19,8 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+#include "fan_read.h"
+
 #include <gtest/gtest.h>
 
 #include <cstdint>
@@ -26,7 +28,6 @@
 
 #include "../test_common.h"
 #include "amd_smi/amdsmi.h"
-#include "fan_read.h"
 
 TestFanRead::TestFanRead() : TestBase() {
   set_title("AMDSMI Fan Read Test");

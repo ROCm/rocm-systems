@@ -19,6 +19,8 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+#include "metrics_counter_read.h"
+
 #include <gtest/gtest.h>
 
 #include <cstdint>
@@ -27,7 +29,6 @@
 
 #include "../test_common.h"
 #include "amd_smi/amdsmi.h"
-#include "metrics_counter_read.h"
 
 TestMetricsCounterRead::TestMetricsCounterRead() : TestBase() {
   set_title("AMDSMI GPU Metrics Counter Read Test");

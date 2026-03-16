@@ -19,6 +19,8 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+#include "mem_util_read.h"
+
 #include <gtest/gtest.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -30,7 +32,6 @@
 #include "../test_common.h"
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_utils.h"
-#include "mem_util_read.h"
 
 TestMemUtilRead::TestMemUtilRead() : TestBase() {
   set_title("Memory Utilization Read Test");

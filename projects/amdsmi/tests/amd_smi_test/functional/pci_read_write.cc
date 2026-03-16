@@ -19,6 +19,8 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+#include "pci_read_write.h"
+
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -29,7 +31,6 @@
 
 #include "../test_common.h"
 #include "amd_smi/amdsmi.h"
-#include "pci_read_write.h"
 
 TestPciReadWrite::TestPciReadWrite() : TestBase() {
   set_title("AMDSMI PCIe Bandwidth Read/Write Test");

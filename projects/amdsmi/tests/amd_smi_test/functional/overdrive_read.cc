@@ -19,6 +19,8 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+#include "overdrive_read.h"
+
 #include <gtest/gtest.h>
 
 #include <cstdint>
@@ -27,7 +29,6 @@
 
 #include "../test_common.h"
 #include "amd_smi/amdsmi.h"
-#include "overdrive_read.h"
 
 TestOverdriveRead::TestOverdriveRead() : TestBase() {
   set_title("AMDSMI Overdrive Read Test");
