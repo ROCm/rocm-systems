@@ -1509,8 +1509,7 @@ def process_torch_trace_output(
     Returns list of (operator_name, DataFrame, prefix_stats, total_ms) tuples.
     """
     kernel_name_to_id = {
-        str(row["Kernel_Name"]).strip(): idx
-        for idx, row in kernel_top_df.iterrows()
+        str(row["Kernel_Name"]).strip(): idx for idx, row in kernel_top_df.iterrows()
     }
     console_log(f"Looking for marker and counter csv files in {workload_dir}")
     marker_api_trace_csvs = list(
@@ -1653,13 +1652,9 @@ def process_torch_trace_output(
             pd.DataFrame({"Kernel_Name": group["Kernel_Name"]}),
             kernel_verbose,
         )
-        group["Kernel_ID"] = (
-            shortened["Kernel_Name"].str.strip().map(kernel_name_to_id)
-        )
+        group["Kernel_ID"] = shortened["Kernel_Name"].str.strip().map(kernel_name_to_id)
         prefix_stats = compute_operator_prefix_stats(group)
-        total_ms = sum(
-            dur for key, (dur, _) in prefix_stats.items() if "/" not in key
-        )
+        total_ms = sum(dur for key, (dur, _) in prefix_stats.items() if "/" not in key)
         file_data.append((sanitized_operator_name, group, prefix_stats, total_ms))
 
     file_data.sort(key=lambda x: x[3], reverse=True)
