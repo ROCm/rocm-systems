@@ -36,7 +36,7 @@ set_source_files_properties(exec_mask_manipulation.cpp PROPERTIES LANGUAGE HIP)
 add_executable(exec-mask-manipulation)
 target_sources(exec-mask-manipulation PRIVATE exec_mask_manipulation.cpp)
 # debug symbols required for PC sampling decoding validation
-target_compile_options(exec-mask-manipulation PRIVATE -W -Wall -Wextra -Wpedantic
+target_compile_options(exec-mask-manipulation PRIVATE -O2 -W -Wall -Wextra -Wpedantic
                                                       -Wshadow -Werror -g)
 
 find_package(Threads REQUIRED)
