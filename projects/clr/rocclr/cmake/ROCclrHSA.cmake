@@ -21,6 +21,7 @@
 if (AMD_COMPUTE_WIN)
   find_path(AMD_HSA_INCLUDE_DIR hsa.h
     HINTS
+      ${ROCCLR_SRC_DIR}/../../rocr-runtime/runtime/hsa-runtime
       /opt/rocm
       ${ROCM_INSTALL_PATH}
       ${CMAKE_CURRENT_BINARY_DIR}
@@ -28,7 +29,6 @@ if (AMD_COMPUTE_WIN)
       ${CMAKE_CURRENT_BINARY_DIR}/..
       ${CMAKE_CURRENT_BINARY_DIR}/../..
       ${CMAKE_CURRENT_BINARY_DIR}/../../rocr
-      ${ROCCLR_SRC_DIR}/../../rocr-runtime/runtime/hsa-runtime
     PATH_SUFFIXES
       include
       include/hsa

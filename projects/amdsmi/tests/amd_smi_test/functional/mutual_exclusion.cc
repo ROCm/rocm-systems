@@ -20,29 +20,30 @@
  * THE SOFTWARE.
  */
 
-#include <cstdint>
+#include "mutual_exclusion.h"
 
+#include <gtest/gtest.h>
+
+#include <cstdint>
 #include <iostream>
 #include <string>
 
-#include <gtest/gtest.h>
 #include "amd_smi/amdsmi.h"
-#include "mutual_exclusion.h"
 
-#define  AMD_SMI_INIT_FLAG_RESRV_TEST1 0x800000000000000  //!< Reserved for test
+#define AMD_SMI_INIT_FLAG_RESRV_TEST1 0x800000000000000  //!< Reserved for test
 
 TestMutualExclusion::TestMutualExclusion() : TestBase() {
   set_title("Mutual Exclusion Test");
-  set_description("Verify that AMDSMI only allows 1 process at a time"
-    " to access AMDSMI resources (primarily sysfs files). This test has one "
-    "process that obtains the mutex that ensures only 1 process accesses a "
+  set_description(
+      "Verify that AMDSMI only allows 1 process at a time"
+      " to access AMDSMI resources (primarily sysfs files). This test has one "
+      "process that obtains the mutex that ensures only 1 process accesses a "
       "device's sysfs files at a time, and another process that attempts "
       "to access the device's sysfs files. The second process should fail "
       "in these attempts.");
 }
 
-TestMutualExclusion::~TestMutualExclusion(void) {
-}
+TestMutualExclusion::~TestMutualExclusion(void) {}
 
 extern amdsmi_status_t rsmi_test_sleep(uint32_t dv_ind, uint32_t seconds);
 
@@ -74,7 +75,7 @@ void TestMutualExclusion::SetUp(void) {
     sleep(2);  // Let both processes get through amdsmi_init
   } else {
     sleep(1);  // Let the sleeper process get through amdsmi_init() before
-              // this one goes, so it doesn't fail.
+               // this one goes, so it doesn't fail.
     ret = amdsmi_init(AMD_SMI_INIT_FLAG_RESRV_TEST1);
     if (ret != AMDSMI_STATUS_SUCCESS) {
       setup_failed_ = true;
@@ -96,15 +97,11 @@ void TestMutualExclusion::SetUp(void) {
 }
 
 void TestMutualExclusion::DisplayTestInfo(void) {
-  IF_VERB(STANDARD) {
-    TestBase::DisplayTestInfo();
-  }
+  IF_VERB(STANDARD) { TestBase::DisplayTestInfo(); }
 }
 
 void TestMutualExclusion::DisplayResults(void) const {
-  IF_VERB(STANDARD) {
-    TestBase::DisplayResults();
-  }
+  IF_VERB(STANDARD) { TestBase::DisplayResults(); }
   return;
 }
 
@@ -114,8 +111,7 @@ void TestMutualExclusion::Close() {
   TestBase::Close();
 }
 
-extern amdsmi_status_t
-rsmi_test_sleep(uint32_t dv_ind, uint32_t seconds);
+extern amdsmi_status_t rsmi_test_sleep(uint32_t dv_ind, uint32_t seconds);
 
 void TestMutualExclusion::Run(void) {
   amdsmi_status_t ret;
@@ -127,14 +123,11 @@ void TestMutualExclusion::Run(void) {
 
   if (sleeper_process_) {
     IF_VERB(STANDARD) {
-      std::cout << "MUTEX_HOLDER process: started sleeping for 10 seconds..." <<
-                                                                     std::endl;
+      std::cout << "MUTEX_HOLDER process: started sleeping for 10 seconds..." << std::endl;
     }
     ret = rsmi_test_sleep(0, 10);
     ASSERT_EQ(ret, AMDSMI_STATUS_SUCCESS);
-    IF_VERB(STANDARD) {
-      std::cout << "MUTEX_HOLDER process: Sleep process woke up." << std::endl;
-    }
+    IF_VERB(STANDARD) { std::cout << "MUTEX_HOLDER process: Sleep process woke up." << std::endl; }
     pid_t cpid = wait(nullptr);
     ASSERT_EQ(cpid, child_);
   } else {
@@ -144,8 +137,9 @@ void TestMutualExclusion::Run(void) {
     TestBase::Run();
     IF_VERB(STANDARD) {
       std::cout << "TESTER process: verifing that all amdsmi_dev_* functions "
-                    "return AMDSMI_STATUS_BUSY because MUTEX_HOLDER process "
-                                               "holds the mutex" << std::endl;
+                   "return AMDSMI_STATUS_BUSY because MUTEX_HOLDER process "
+                   "holds the mutex"
+                << std::endl;
     }
     // Try all the device related rsmi calls. They should all fail with
     // AMDSMI_STATUS_BUSY
@@ -163,13 +157,13 @@ void TestMutualExclusion::Run(void) {
     amdsmi_ras_err_state_t dmy_ras_err_st;
 
     // This can be replaced with ASSERT_EQ() once env. stabilizes
-#define CHECK_RET(A, B) { \
-  if ((A) != (B)) { \
-    std::cout << "Expected return value of " << B << \
-                               " but got " << A << std::endl; \
-    std::cout << "at " << __FILE__ << ":" << __LINE__ << std::endl; \
-  } \
-}
+#define CHECK_RET(A, B)                                                               \
+  {                                                                                   \
+    if ((A) != (B)) {                                                                 \
+      std::cout << "Expected return value of " << B << " but got " << A << std::endl; \
+      std::cout << "at " << __FILE__ << ":" << __LINE__ << std::endl;                 \
+    }                                                                                 \
+  }
     ret = amdsmi_get_gpu_id(processor_handles_[0], &dmy_ui16);
 
     // vendor_id, unique_id
@@ -192,9 +186,9 @@ void TestMutualExclusion::Run(void) {
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
     ret = amdsmi_get_gpu_pci_throughput(processor_handles_[0], &dmy_ui64, &dmy_ui64, &dmy_ui64);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
-    ret =  amdsmi_get_gpu_pci_replay_counter(processor_handles_[0], &dmy_ui64);
+    ret = amdsmi_get_gpu_pci_replay_counter(processor_handles_[0], &dmy_ui64);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
-    ret =  amdsmi_set_gpu_pci_bandwidth(processor_handles_[0], 0);
+    ret = amdsmi_set_gpu_pci_bandwidth(processor_handles_[0], 0);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
     ret = amdsmi_get_gpu_fan_rpms(processor_handles_[0], dmy_ui32, &dmy_i64);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
@@ -202,7 +196,8 @@ void TestMutualExclusion::Run(void) {
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
     ret = amdsmi_get_gpu_fan_speed_max(processor_handles_[0], 0, &dmy_ui64);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
-    ret =  amdsmi_get_temp_metric(processor_handles_[0], AMDSMI_TEMPERATURE_TYPE_EDGE, AMDSMI_TEMP_CURRENT, &dmy_i64);
+    ret = amdsmi_get_temp_metric(processor_handles_[0], AMDSMI_TEMPERATURE_TYPE_EDGE,
+                                 AMDSMI_TEMP_CURRENT, &dmy_i64);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
     ret = amdsmi_reset_gpu_fan(processor_handles_[0], 0);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
@@ -212,19 +207,19 @@ void TestMutualExclusion::Run(void) {
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
     ret = amdsmi_get_gpu_overdrive_level(processor_handles_[0], &dmy_ui32);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
-    ret =  amdsmi_get_clk_freq(processor_handles_[0], AMDSMI_CLK_TYPE_SYS, &dmy_freqs);
+    ret = amdsmi_get_clk_freq(processor_handles_[0], AMDSMI_CLK_TYPE_SYS, &dmy_freqs);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
-    ret =  amdsmi_get_gpu_od_volt_info(processor_handles_[0], &dmy_od_volt);
+    ret = amdsmi_get_gpu_od_volt_info(processor_handles_[0], &dmy_od_volt);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
-    ret =  amdsmi_get_gpu_od_volt_curve_regions(processor_handles_[0], &dmy_ui32, &dmy_vlt_reg);
+    ret = amdsmi_get_gpu_od_volt_curve_regions(processor_handles_[0], &dmy_ui32, &dmy_vlt_reg);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
-    ret =  amdsmi_set_clk_freq(processor_handles_[0], AMDSMI_CLK_TYPE_SYS, 0);
+    ret = amdsmi_set_clk_freq(processor_handles_[0], AMDSMI_CLK_TYPE_SYS, 0);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
-    ret =  amdsmi_get_gpu_ecc_count(processor_handles_[0], AMDSMI_GPU_BLOCK_UMC, &dmy_err_cnt);
+    ret = amdsmi_get_gpu_ecc_count(processor_handles_[0], AMDSMI_GPU_BLOCK_UMC, &dmy_err_cnt);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
-    ret =  amdsmi_get_gpu_ecc_enabled(processor_handles_[0], &dmy_ui64);
+    ret = amdsmi_get_gpu_ecc_enabled(processor_handles_[0], &dmy_ui64);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
-    ret =  amdsmi_get_gpu_ecc_status(processor_handles_[0], AMDSMI_GPU_BLOCK_UMC, &dmy_ras_err_st);
+    ret = amdsmi_get_gpu_ecc_status(processor_handles_[0], AMDSMI_GPU_BLOCK_UMC, &dmy_ras_err_st);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
 
     /* Other functions holding device mutexes. Listed for reference.
@@ -279,7 +274,8 @@ void TestMutualExclusion::Run(void) {
 
     IF_VERB(STANDARD) {
       std::cout << "TESTER process: Finished verifying that all "
-                "amdsmi_dev_* functions returned AMDSMI_STATUS_BUSY" << std::endl;
+                   "amdsmi_dev_* functions returned AMDSMI_STATUS_BUSY"
+                << std::endl;
     }
     exit(0);
   }

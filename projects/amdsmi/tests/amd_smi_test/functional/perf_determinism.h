@@ -27,7 +27,7 @@
 
 class TestPerfDeterminism : public TestBase {
  public:
-    TestPerfDeterminism();
+  TestPerfDeterminism();
 
   // @Brief: Destructor for test case of TestVOltRead
   virtual ~TestPerfDeterminism();
