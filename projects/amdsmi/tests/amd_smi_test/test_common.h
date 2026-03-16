@@ -25,18 +25,16 @@
 
 #include <gtest/gtest.h>
 
-#include <iostream>
 #include <iomanip>
+#include <iostream>
 #include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
 
-#include "test_base.h"
-
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_utils.h"
-
+#include "test_base.h"
 
 struct AMDSMITstGlobals {
   uint32_t verbosity;
@@ -60,15 +58,11 @@ void DumpMonitorInfo(const TestBase* test);
 #endif
 
 inline constexpr amdsmi_status_t NotSupportedErrorCodes[] = {
-    AMDSMI_STATUS_NOT_SUPPORTED,
-    AMDSMI_STATUS_NOT_YET_IMPLEMENTED,
-    AMDSMI_STATUS_NO_HSMP_MSG_SUP
-};
+    AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED, AMDSMI_STATUS_NO_HSMP_MSG_SUP};
 
 inline void DISPLAY_AMDSMI_API(std::string_view func_name, std::string_view desc, bool isVerbose) {
-    if (isVerbose)
-        std::cout << "\t### " << (func_name) << "(" << (desc) << ")" << std::endl;
-    return;
+  if (isVerbose) std::cout << "\t### " << (func_name) << "(" << (desc) << ")" << std::endl;
+  return;
 }
 
 template <typename... Args>
@@ -178,4 +172,3 @@ inline void DISPLAY_AMDSMI_STATUS(bool isVerbose, std::string_view fileName,
 }
 
 #endif  // TESTS_AMD_SMI_TEST_TEST_COMMON_H_
-

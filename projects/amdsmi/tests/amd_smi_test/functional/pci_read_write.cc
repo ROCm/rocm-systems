@@ -21,7 +21,6 @@
  */
 
 #include "pci_read_write.h"
-#include "../test_common.h"
 
 #include <gtest/gtest.h>
 
@@ -31,6 +30,7 @@
 #include <iostream>
 #include <string>
 
+#include "../test_common.h"
 #include "amd_smi/amdsmi.h"
 
 TestPciReadWrite::TestPciReadWrite() : TestBase() {
@@ -78,44 +78,41 @@ void TestPciReadWrite::Run(void) {
 
     DISPLAY_AMDSMI_API("amdsmi_get_gpu_pci_replay_counter", "gpu=" + std::to_string(dv_ind),
                        VERB(STANDARD));
-    ret =  amdsmi_get_gpu_pci_replay_counter(processor_handles_[dv_ind], &u64int);
+    ret = amdsmi_get_gpu_pci_replay_counter(processor_handles_[dv_ind], &u64int);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
 
-     if (ret == AMDSMI_STATUS_NOT_SUPPORTED) {
-        // Verify api support checking functionality is working
-        DISPLAY_AMDSMI_API("amdsmi_get_gpu_pci_replay_counter", "gpu=" + std::to_string(dv_ind),
-                           VERB(STANDARD));
-        ret =  amdsmi_get_gpu_pci_replay_counter(processor_handles_[dv_ind], nullptr);
-        DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_INVAL);
-        ASSERT_EQ(ret, AMDSMI_STATUS_NOT_SUPPORTED);
-      } else {
-        CHK_ERR_ASRT(ret)
-        IF_VERB(STANDARD) {
-          std::cout << "\tPCIe Replay Counter: " << u64int << std::endl;
-        }
-        // Verify api support checking functionality is working
-        DISPLAY_AMDSMI_API("amdsmi_get_gpu_pci_replay_counter", "gpu=" + std::to_string(dv_ind),
-                           VERB(STANDARD));
-        ret =  amdsmi_get_gpu_pci_replay_counter(processor_handles_[dv_ind], nullptr);
-        DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_INVAL);
-        ASSERT_EQ(ret, AMDSMI_STATUS_INVAL);
-      }
-
-      DISPLAY_AMDSMI_API("amdsmi_get_gpu_pci_throughput", "gpu=" + std::to_string(dv_ind),
+    if (ret == AMDSMI_STATUS_NOT_SUPPORTED) {
+      // Verify api support checking functionality is working
+      DISPLAY_AMDSMI_API("amdsmi_get_gpu_pci_replay_counter", "gpu=" + std::to_string(dv_ind),
                          VERB(STANDARD));
-      ret = amdsmi_get_gpu_pci_throughput(processor_handles_[dv_ind], &sent,
-                                          &received, &max_pkt_sz);
-      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
-      if (ret == AMDSMI_STATUS_NOT_SUPPORTED) {
-        std::cout << "WARNING: Current PCIe throughput is not detected. "
-                     "pcie_bw sysfs file is no longer supported on this device. "
-                     "Aborting test."
-                  << std::endl;
+      ret = amdsmi_get_gpu_pci_replay_counter(processor_handles_[dv_ind], nullptr);
+      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_INVAL);
+      ASSERT_EQ(ret, AMDSMI_STATUS_NOT_SUPPORTED);
+    } else {
+      CHK_ERR_ASRT(ret)
+      IF_VERB(STANDARD) { std::cout << "\tPCIe Replay Counter: " << u64int << std::endl; }
+      // Verify api support checking functionality is working
+      DISPLAY_AMDSMI_API("amdsmi_get_gpu_pci_replay_counter", "gpu=" + std::to_string(dv_ind),
+                         VERB(STANDARD));
+      ret = amdsmi_get_gpu_pci_replay_counter(processor_handles_[dv_ind], nullptr);
+      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_INVAL);
+      ASSERT_EQ(ret, AMDSMI_STATUS_INVAL);
+    }
 
-        // We don't need to verify api support checking functionality is working
-        // as the user may choose to have any of the input parameters as 0.
-        return;
-      }
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_pci_throughput", "gpu=" + std::to_string(dv_ind),
+                       VERB(STANDARD));
+    ret = amdsmi_get_gpu_pci_throughput(processor_handles_[dv_ind], &sent, &received, &max_pkt_sz);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
+    if (ret == AMDSMI_STATUS_NOT_SUPPORTED) {
+      std::cout << "WARNING: Current PCIe throughput is not detected. "
+                   "pcie_bw sysfs file is no longer supported on this device. "
+                   "Aborting test."
+                << std::endl;
+
+      // We don't need to verify api support checking functionality is working
+      // as the user may choose to have any of the input parameters as 0.
+      return;
+    }
     CHK_ERR_ASRT(ret)
 
     IF_VERB(STANDARD) {
@@ -159,7 +156,7 @@ void TestPciReadWrite::Run(void) {
     ret = amdsmi_get_gpu_pci_bandwidth(processor_handles_[dv_ind], nullptr);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_INVAL);
     if (ret != amdsmi_status_t::AMDSMI_STATUS_NOT_SUPPORTED) {
-        ASSERT_EQ(ret, AMDSMI_STATUS_INVAL);
+      ASSERT_EQ(ret, AMDSMI_STATUS_INVAL);
     }
 
     // First set the bitmask to all supported bandwidths
@@ -173,14 +170,15 @@ void TestPciReadWrite::Run(void) {
     freq_bm_str.erase(0, std::min(freq_bm_str.find_first_not_of('0'), freq_bm_str.size() - 1));
 
     IF_VERB(STANDARD) {
-      std::cout << "\tSetting bandwidth mask to " << "0b" << freq_bm_str << " ..." << std::endl;
+      std::cout << "\tSetting bandwidth mask to "
+                << "0b" << freq_bm_str << " ..." << std::endl;
     }
     DISPLAY_AMDSMI_API("amdsmi_set_gpu_pci_bandwidth", "gpu=" + std::to_string(dv_ind),
                        VERB(STANDARD));
     ret = amdsmi_set_gpu_pci_bandwidth(processor_handles_[dv_ind], freq_bitmask);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
     if (ret != amdsmi_status_t::AMDSMI_STATUS_NOT_SUPPORTED) {
-        CHK_ERR_ASRT(ret)
+      CHK_ERR_ASRT(ret)
     }
 
     DISPLAY_AMDSMI_API("amdsmi_get_gpu_pci_bandwidth", "gpu=" + std::to_string(dv_ind),
@@ -198,11 +196,12 @@ void TestPciReadWrite::Run(void) {
     ret = amdsmi_set_gpu_pci_bandwidth(processor_handles_[dv_ind], 0xFFFFFFFF);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
     if (ret != amdsmi_status_t::AMDSMI_STATUS_NOT_SUPPORTED) {
-        CHK_ERR_ASRT(ret)
+      CHK_ERR_ASRT(ret)
     }
 
-    DISPLAY_AMDSMI_API("amdsmi_set_gpu_perf_level", "gpu="+std::to_string(dv_ind), VERB(STANDARD));
-    ret =  amdsmi_set_gpu_perf_level(processor_handles_[dv_ind], AMDSMI_DEV_PERF_LEVEL_AUTO);
+    DISPLAY_AMDSMI_API("amdsmi_set_gpu_perf_level", "gpu=" + std::to_string(dv_ind),
+                       VERB(STANDARD));
+    ret = amdsmi_set_gpu_perf_level(processor_handles_[dv_ind], AMDSMI_DEV_PERF_LEVEL_AUTO);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
     CHK_ERR_ASRT(ret)
   }

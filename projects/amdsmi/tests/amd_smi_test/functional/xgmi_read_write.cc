@@ -27,9 +27,9 @@
 #include <cstdint>
 #include <iostream>
 
+#include "../test_common.h"
 #include "amd_smi/amdsmi.h"
 #include "xgmi_read_write.h"
-#include "../test_common.h"
 
 TestXGMIReadWrite::TestXGMIReadWrite() : TestBase() {
   set_title("AMDSMI XGMI Read/Write Test");
@@ -75,11 +75,11 @@ void TestXGMIReadWrite::Run(void) {
     PrintDeviceHeader(device);
 
     amdsmi_xgmi_info_t info;
-    DISPLAY_AMDSMI_API("amdsmi_get_xgmi_info", "gpu="+std::to_string(dv_ind), VERB(STANDARD));
+    DISPLAY_AMDSMI_API("amdsmi_get_xgmi_info", "gpu=" + std::to_string(dv_ind), VERB(STANDARD));
     err = amdsmi_get_xgmi_info(device, &info);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
     if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
-        continue;
+      continue;
     } else {
       CHK_ERR_ASRT(err)
       IF_VERB(STANDARD) {

@@ -26,9 +26,9 @@
 
 #include <iostream>
 
+#include "../test_common.h"
 #include "amd_smi/amdsmi.h"
 #include "version_read.h"
-#include "../test_common.h"
 
 TestVersionRead::TestVersionRead() : TestBase() {
   set_title("AMDSMI Version Read Test");

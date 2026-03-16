@@ -28,9 +28,9 @@
 #include <iostream>
 #include <string>
 
+#include "../test_common.h"
 #include "amd_smi/amdsmi.h"
 #include "mem_page_info_read.h"
-#include "../test_common.h"
 
 TestMemPageInfoRead::TestMemPageInfoRead() : TestBase() {
   set_title("AMDSMI Memory Page Info Test");

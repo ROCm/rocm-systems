@@ -73,7 +73,8 @@ void TestPerfLevelReadWrite::Run(void) {
   for (uint32_t dv_ind = 0; dv_ind < num_monitor_devs(); ++dv_ind) {
     PrintDeviceHeader(processor_handles_[dv_ind]);
 
-    DISPLAY_AMDSMI_API("amdsmi_get_gpu_perf_level", "gpu="+std::to_string(dv_ind), VERB(STANDARD));
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_perf_level", "gpu=" + std::to_string(dv_ind),
+                       VERB(STANDARD));
     ret = amdsmi_get_gpu_perf_level(processor_handles_[dv_ind], &orig_pfl);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
     if (ret == AMDSMI_STATUS_NOT_SUPPORTED) {
@@ -105,29 +106,30 @@ void TestPerfLevelReadWrite::Run(void) {
         std::cout << "\t**" << GetPerfLevelStr(static_cast<amdsmi_dev_perf_level_t>(pfl_i))
                   << " returned AMDSMI_STATUS_NOT_SUPPORTED" << std::endl;
       } else {
-          CHK_ERR_ASRT(ret)
-          DISPLAY_AMDSMI_API("amdsmi_get_gpu_perf_level", "gpu=" + std::to_string(dv_ind),
-                             VERB(STANDARD));
-          ret = amdsmi_get_gpu_perf_level(processor_handles_[dv_ind], &pfl);
-          DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
-          CHK_ERR_ASRT(ret)
-          IF_VERB(STANDARD) {
-              std::cout << "\t**New Perf Level:" << GetPerfLevelStr(pfl) <<
-                                                                    std::endl;
+        CHK_ERR_ASRT(ret)
+        DISPLAY_AMDSMI_API("amdsmi_get_gpu_perf_level", "gpu=" + std::to_string(dv_ind),
+                           VERB(STANDARD));
+        ret = amdsmi_get_gpu_perf_level(processor_handles_[dv_ind], &pfl);
+        DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
+        CHK_ERR_ASRT(ret)
+        IF_VERB(STANDARD) {
+          std::cout << "\t**New Perf Level:" << GetPerfLevelStr(pfl) << std::endl;
         }
       }
     }
     IF_VERB(STANDARD) {
       std::cout << "Reset Perf level to " << GetPerfLevelStr(orig_pfl) << " ..." << std::endl;
     }
-    DISPLAY_AMDSMI_API("amdsmi_set_gpu_perf_level", "gpu="+std::to_string(dv_ind), VERB(STANDARD));
-    ret =  amdsmi_set_gpu_perf_level(processor_handles_[dv_ind], orig_pfl);
+    DISPLAY_AMDSMI_API("amdsmi_set_gpu_perf_level", "gpu=" + std::to_string(dv_ind),
+                       VERB(STANDARD));
+    ret = amdsmi_set_gpu_perf_level(processor_handles_[dv_ind], orig_pfl);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
     if (ret == AMDSMI_STATUS_NOT_SUPPORTED) {
       continue;
     }
     CHK_ERR_ASRT(ret)
-    DISPLAY_AMDSMI_API("amdsmi_get_gpu_perf_level", "gpu="+std::to_string(dv_ind), VERB(STANDARD));
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_perf_level", "gpu=" + std::to_string(dv_ind),
+                       VERB(STANDARD));
     ret = amdsmi_get_gpu_perf_level(processor_handles_[dv_ind], &pfl);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
     CHK_ERR_ASRT(ret)

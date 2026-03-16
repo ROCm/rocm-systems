@@ -27,9 +27,9 @@
 #include <cstdint>
 #include <iostream>
 
+#include "../test_common.h"
 #include "amd_smi/amdsmi.h"
 #include "overdrive_read_write.h"
-#include "../test_common.h"
 
 TestOverdriveReadWrite::TestOverdriveReadWrite() : TestBase() {
   set_title("AMDSMI Overdrive Read/Write Test");
@@ -72,9 +72,7 @@ void TestOverdriveReadWrite::Run(void) {
   for (uint32_t dv_ind = 0; dv_ind < num_monitor_devs(); ++dv_ind) {
     PrintDeviceHeader(processor_handles_[dv_ind]);
 
-    IF_VERB(STANDARD) {
-      std::cout << "Set Overdrive level to 0%..." << std::endl;
-    }
+    IF_VERB(STANDARD) { std::cout << "Set Overdrive level to 0%..." << std::endl; }
     DISPLAY_AMDSMI_API("amdsmi_set_gpu_overdrive_level", "gpu=" + std::to_string(dv_ind),
                        VERB(STANDARD));
     ret = amdsmi_set_gpu_overdrive_level(processor_handles_[dv_ind], 0);
@@ -83,12 +81,10 @@ void TestOverdriveReadWrite::Run(void) {
       continue;
     }
     CHK_ERR_ASRT(ret)
-    IF_VERB(STANDARD) {
-      std::cout << "Set Overdrive level to 10%..." << std::endl;
-    }
+    IF_VERB(STANDARD) { std::cout << "Set Overdrive level to 10%..." << std::endl; }
     DISPLAY_AMDSMI_API("amdsmi_set_gpu_overdrive_level", "gpu=" + std::to_string(dv_ind),
                        VERB(STANDARD));
-    ret =  amdsmi_set_gpu_overdrive_level(processor_handles_[dv_ind], 10);
+    ret = amdsmi_set_gpu_overdrive_level(processor_handles_[dv_ind], 10);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
     CHK_ERR_ASRT(ret)
     DISPLAY_AMDSMI_API("amdsmi_get_gpu_overdrive_level", "gpu=" + std::to_string(dv_ind),

@@ -91,8 +91,8 @@ void TestPowerCapReadWrite::SetCheckPowerCap(std::string msg, uint32_t dv_ind, u
       std::cout << "\t[Before Set]  Setting new cap to " << new_cap << "..." << std::endl;
     }
     start = clock();
-    DISPLAY_AMDSMI_API("amdsmi_set_power_cap", "gpu="+std::to_string(dv_ind), VERB(STANDARD));
-    ret =  amdsmi_set_power_cap(processor_handles_[dv_ind], sensor_ind, new_cap);
+    DISPLAY_AMDSMI_API("amdsmi_set_power_cap", "gpu=" + std::to_string(dv_ind), VERB(STANDARD));
+    ret = amdsmi_set_power_cap(processor_handles_[dv_ind], sensor_ind, new_cap);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, ret_expected);
     end = clock();
     cpu_time_used = (static_cast<double>(end - start)) * 1000000UL / CLOCKS_PER_SEC;
@@ -102,19 +102,20 @@ void TestPowerCapReadWrite::SetCheckPowerCap(std::string msg, uint32_t dv_ind, u
     }
     ASSERT_EQ(ret, ret_expected);
     if (ret == AMDSMI_STATUS_INVAL) {
-        new_cap = curr_cap;
-        std::cout << "\t**amdsmi_set_power_cap(): Expected invalid result" << std::endl;
-        return;
+      new_cap = curr_cap;
+      std::cout << "\t**amdsmi_set_power_cap(): Expected invalid result" << std::endl;
+      return;
     }
 
-    DISPLAY_AMDSMI_API("amdsmi_get_power_cap_info", "gpu="+std::to_string(dv_ind), VERB(STANDARD));
+    DISPLAY_AMDSMI_API("amdsmi_get_power_cap_info", "gpu=" + std::to_string(dv_ind),
+                       VERB(STANDARD));
     ret = amdsmi_get_power_cap_info(processor_handles_[dv_ind], sensor_ind, &info);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
     CHK_ERR_ASRT(ret)
 
     curr_cap = info.power_cap;
     // Confirm in watts the values are equal
-    ASSERT_EQ(curr_cap/MICRO_CONVERSION, new_cap/MICRO_CONVERSION);
+    ASSERT_EQ(curr_cap / MICRO_CONVERSION, new_cap / MICRO_CONVERSION);
 
     if (ret_expected == AMDSMI_STATUS_INVAL) {
       new_cap = curr_cap;
@@ -189,8 +190,8 @@ void TestPowerCapReadWrite::Run(void) {
                                          sensor_types);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
     if (ret != AMDSMI_STATUS_SUCCESS) {
-        ASSERT_EQ(ret, AMDSMI_STATUS_NOT_SUPPORTED);
-        continue;
+      ASSERT_EQ(ret, AMDSMI_STATUS_NOT_SUPPORTED);
+      continue;
     }
 
     for (uint32_t i = 0; i < sensor_count; ++i) {
@@ -223,8 +224,8 @@ void TestPowerCapReadWrite::Run(void) {
       IF_VERB(STANDARD) {
         std::cout << "\t[Before Set]  Default Power Cap: " << default_cap << " uW" << std::endl;
         std::cout << "\t[Before Set]  Current Power Cap: " << curr_cap << " uW" << std::endl;
-        std::cout << "\t[Before Set]  Power Cap Range [max to min]: "
-                  << max_cap << " uW to " << min_cap << " uW" << std::endl;
+        std::cout << "\t[Before Set]  Power Cap Range [max to min]: " << max_cap << " uW to "
+                  << min_cap << " uW" << std::endl;
         std::cout << "\t[Before Set]  Setting new cap to " << new_cap << "..." << std::endl;
       }
 
@@ -328,10 +329,10 @@ void TestPowerCapReadWrite::Run(void) {
       IF_VERB(STANDARD) {
         std::cout << "\tSetting to default power Cap" << std::endl;
         std::cout << "\t[Before Set] Current Power Cap: " << curr_cap << " uW" << std::endl;
-        std::cout << "\t[Before Set] Default Power Cap (default_cap): "
-                  << default_cap << "..." << std::endl;
+        std::cout << "\t[Before Set] Default Power Cap (default_cap): " << default_cap << "..."
+                  << std::endl;
       }
-      DISPLAY_AMDSMI_API("amdsmi_set_power_cap", "gpu="+std::to_string(dv_ind), VERB(STANDARD));
+      DISPLAY_AMDSMI_API("amdsmi_set_power_cap", "gpu=" + std::to_string(dv_ind), VERB(STANDARD));
       ret = amdsmi_set_power_cap(processor_handles_[dv_ind], sensor_inds[i], default_cap);
       DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
       CHK_ERR_ASRT(ret)
@@ -357,11 +358,11 @@ void TestPowerCapReadWrite::Run(void) {
       IF_VERB(STANDARD) {
         std::cout << "\tResetting Power Cap to original power cap" << std::endl;
         std::cout << "\t[Before Reset] Current Power Cap: " << curr_cap << " uW" << std::endl;
-        std::cout << "\t[Before Reset] Original Power Cap (orig_cap): "
-                  << orig_cap << "..." << std::endl;
+        std::cout << "\t[Before Reset] Original Power Cap (orig_cap): " << orig_cap << "..."
+                  << std::endl;
       }
-      DISPLAY_AMDSMI_API("amdsmi_set_power_cap", "gpu="+std::to_string(dv_ind), VERB(STANDARD));
-      ret =  amdsmi_set_power_cap(processor_handles_[dv_ind], sensor_inds[i], orig_cap);
+      DISPLAY_AMDSMI_API("amdsmi_set_power_cap", "gpu=" + std::to_string(dv_ind), VERB(STANDARD));
+      ret = amdsmi_set_power_cap(processor_handles_[dv_ind], sensor_inds[i], orig_cap);
       DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
       CHK_ERR_ASRT(ret)
 

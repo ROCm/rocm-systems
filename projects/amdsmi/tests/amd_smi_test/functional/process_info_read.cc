@@ -28,9 +28,9 @@
 #include <iostream>
 #include <string>
 
+#include "../test_common.h"
 #include "amd_smi/amdsmi.h"
 #include "process_info_read.h"
-#include "../test_common.h"
 
 TestProcInfoRead::TestProcInfoRead() : TestBase() {
   set_title("AMDSMI Process Info Read Test");
@@ -138,8 +138,7 @@ void TestProcInfoRead::Run(void) {
 
     for (uint32_t j = 0; j < num_proc_found; j++) {
       DISPLAY_AMDSMI_API("amdsmi_get_gpu_compute_process_gpus", "", VERB(STANDARD));
-      err = amdsmi_get_gpu_compute_process_gpus(procs[j].process_id, dev_inds,
-                                                                 &amt_allocd);
+      err = amdsmi_get_gpu_compute_process_gpus(procs[j].process_id, dev_inds, &amt_allocd);
       DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
       if (err == AMDSMI_STATUS_NOT_FOUND) {
         std::cout << "\t** Process " << procs[j].process_id << " is no longer present.";
@@ -167,8 +166,7 @@ void TestProcInfoRead::Run(void) {
     for (uint32_t j = 0; j < num_proc_found; j++) {
       memset(&proc_info, 0x0, sizeof(amdsmi_process_info_t));
       DISPLAY_AMDSMI_API("amdsmi_get_gpu_compute_process_info_by_pid", "", VERB(STANDARD));
-      err = amdsmi_get_gpu_compute_process_info_by_pid(procs[j].process_id,
-                                                                  &proc_info);
+      err = amdsmi_get_gpu_compute_process_info_by_pid(procs[j].process_id, &proc_info);
       DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
       if (err == AMDSMI_STATUS_NOT_FOUND) {
         std::cout << "\t** WARNING: amdsmi_get_gpu_compute_process_info() found process "

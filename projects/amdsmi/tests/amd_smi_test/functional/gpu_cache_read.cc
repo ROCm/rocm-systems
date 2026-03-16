@@ -101,7 +101,7 @@ void TestGPUCacheRead::Run() {
       std::cout << "\t**GPU CACHE INFO: Using static struct (Backwards Compatibility):\n";
     }
     amdsmi_gpu_cache_info_t res = {};
-    DISPLAY_AMDSMI_API("amdsmi_get_gpu_cache_info", "gpu="+std::to_string(i), VERB(STANDARD));
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_cache_info", "gpu=" + std::to_string(i), VERB(STANDARD));
     err = amdsmi_get_gpu_cache_info(processor_handles_[i], &res);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
     CHK_ERR_ASRT(err);

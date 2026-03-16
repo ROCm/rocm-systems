@@ -28,9 +28,9 @@
 #include <iostream>
 #include <string>
 
+#include "../test_common.h"
 #include "amd_smi/amdsmi.h"
 #include "mutual_exclusion.h"
-#include "../test_common.h"
 
 #define AMD_SMI_INIT_FLAG_RESRV_TEST1 0x800000000000000  //!< Reserved for test
 
@@ -79,7 +79,7 @@ void TestMutualExclusion::SetUp(void) {
     sleep(2);  // Let both processes get through amdsmi_init
   } else {
     sleep(1);  // Let the sleeper process get through amdsmi_init() before
-              // this one goes, so it doesn't fail.
+               // this one goes, so it doesn't fail.
     DISPLAY_AMDSMI_API("amdsmi__INIT_FLAG_RESRV_TEST1", "", VERB(STANDARD));
     ret = amdsmi_init(AMD_SMI_INIT_FLAG_RESRV_TEST1);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
@@ -163,13 +163,13 @@ void TestMutualExclusion::Run(void) {
     amdsmi_ras_err_state_t dmy_ras_err_st;
 
     // This can be replaced with ASSERT_EQ() once env. stabilizes
-#define CHECK_RET(A, B) { \
-  if ((A) != (B)) { \
-    std::cout << "Expected return value of " << B << \
-                               " but got " << A << std::endl; \
-    std::cout << "at " << __FILE__ << ":" << __LINE__ << std::endl; \
-  } \
-}
+#define CHECK_RET(A, B)                                                               \
+  {                                                                                   \
+    if ((A) != (B)) {                                                                 \
+      std::cout << "Expected return value of " << B << " but got " << A << std::endl; \
+      std::cout << "at " << __FILE__ << ":" << __LINE__ << std::endl;                 \
+    }                                                                                 \
+  }
     DISPLAY_AMDSMI_API("amdsmi_get_gpu_id", "0", VERB(STANDARD));
     ret = amdsmi_get_gpu_id(processor_handles_[0], &dmy_ui16);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_BUSY);
@@ -209,11 +209,11 @@ void TestMutualExclusion::Run(void) {
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_BUSY);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
     DISPLAY_AMDSMI_API("amdsmi_get_gpu_pci_replay_counter", "0", VERB(STANDARD));
-    ret =  amdsmi_get_gpu_pci_replay_counter(processor_handles_[0], &dmy_ui64);
+    ret = amdsmi_get_gpu_pci_replay_counter(processor_handles_[0], &dmy_ui64);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_BUSY);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
     DISPLAY_AMDSMI_API("amdsmi_set_gpu_pci_bandwidth", "0", VERB(STANDARD));
-    ret =  amdsmi_set_gpu_pci_bandwidth(processor_handles_[0], 0);
+    ret = amdsmi_set_gpu_pci_bandwidth(processor_handles_[0], 0);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_BUSY);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
     DISPLAY_AMDSMI_API("amdsmi_get_gpu_fan_rpms", "0", VERB(STANDARD));
@@ -229,7 +229,8 @@ void TestMutualExclusion::Run(void) {
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_BUSY);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
     DISPLAY_AMDSMI_API("amdsmi_get_temp_metric", "0", VERB(STANDARD));
-    ret =  amdsmi_get_temp_metric(processor_handles_[0], AMDSMI_TEMPERATURE_TYPE_EDGE, AMDSMI_TEMP_CURRENT, &dmy_i64);
+    ret = amdsmi_get_temp_metric(processor_handles_[0], AMDSMI_TEMPERATURE_TYPE_EDGE,
+                                 AMDSMI_TEMP_CURRENT, &dmy_i64);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_BUSY);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
     DISPLAY_AMDSMI_API("amdsmi_reset_gpu_fan", "0", VERB(STANDARD));
@@ -249,31 +250,31 @@ void TestMutualExclusion::Run(void) {
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_BUSY);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
     DISPLAY_AMDSMI_API("amdsmi_get_clk_freq", "0", VERB(STANDARD));
-    ret =  amdsmi_get_clk_freq(processor_handles_[0], AMDSMI_CLK_TYPE_SYS, &dmy_freqs);
+    ret = amdsmi_get_clk_freq(processor_handles_[0], AMDSMI_CLK_TYPE_SYS, &dmy_freqs);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_BUSY);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
     DISPLAY_AMDSMI_API("amdsmi_get_gpu_od_volt_info", "0", VERB(STANDARD));
-    ret =  amdsmi_get_gpu_od_volt_info(processor_handles_[0], &dmy_od_volt);
+    ret = amdsmi_get_gpu_od_volt_info(processor_handles_[0], &dmy_od_volt);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_BUSY);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
     DISPLAY_AMDSMI_API("amdsmi_get_gpu_od_volt_curve_regions", "0", VERB(STANDARD));
-    ret =  amdsmi_get_gpu_od_volt_curve_regions(processor_handles_[0], &dmy_ui32, &dmy_vlt_reg);
+    ret = amdsmi_get_gpu_od_volt_curve_regions(processor_handles_[0], &dmy_ui32, &dmy_vlt_reg);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_BUSY);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
     DISPLAY_AMDSMI_API("amdsmi_set_clk_freq", "0", VERB(STANDARD));
-    ret =  amdsmi_set_clk_freq(processor_handles_[0], AMDSMI_CLK_TYPE_SYS, 0);
+    ret = amdsmi_set_clk_freq(processor_handles_[0], AMDSMI_CLK_TYPE_SYS, 0);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_BUSY);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
     DISPLAY_AMDSMI_API("amdsmi_get_gpu_ecc_count", "0", VERB(STANDARD));
-    ret =  amdsmi_get_gpu_ecc_count(processor_handles_[0], AMDSMI_GPU_BLOCK_UMC, &dmy_err_cnt);
+    ret = amdsmi_get_gpu_ecc_count(processor_handles_[0], AMDSMI_GPU_BLOCK_UMC, &dmy_err_cnt);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_BUSY);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
     DISPLAY_AMDSMI_API("amdsmi_get_gpu_ecc_enabled", "0", VERB(STANDARD));
-    ret =  amdsmi_get_gpu_ecc_enabled(processor_handles_[0], &dmy_ui64);
+    ret = amdsmi_get_gpu_ecc_enabled(processor_handles_[0], &dmy_ui64);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_BUSY);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
     DISPLAY_AMDSMI_API("amdsmi_get_gpu_ecc_status", "0", VERB(STANDARD));
-    ret =  amdsmi_get_gpu_ecc_status(processor_handles_[0], AMDSMI_GPU_BLOCK_UMC, &dmy_ras_err_st);
+    ret = amdsmi_get_gpu_ecc_status(processor_handles_[0], AMDSMI_GPU_BLOCK_UMC, &dmy_ras_err_st);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_BUSY);
     CHECK_RET(ret, AMDSMI_STATUS_BUSY);
 

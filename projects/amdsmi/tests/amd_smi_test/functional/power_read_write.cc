@@ -28,10 +28,9 @@
 #include <iostream>
 #include <string>
 
+#include "../test_common.h"
 #include "amd_smi/amdsmi.h"
 #include "power_read_write.h"
-#include "../test_common.h"
-
 
 TestPowerReadWrite::TestPowerReadWrite() : TestBase() {
   set_title("AMDSMI Power Profiles Read/Write Test");
@@ -160,7 +159,8 @@ void TestPowerReadWrite::Run(void) {
     CHK_ERR_ASRT(ret)
 
     amdsmi_dev_perf_level_t pfl;
-    DISPLAY_AMDSMI_API("amdsmi_get_gpu_perf_level", "gpu="+std::to_string(dv_ind), VERB(STANDARD));
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_perf_level", "gpu=" + std::to_string(dv_ind),
+                       VERB(STANDARD));
     ret = amdsmi_get_gpu_perf_level(processor_handles_[dv_ind], &pfl);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
     CHK_ERR_ASRT(ret)
@@ -175,7 +175,8 @@ void TestPowerReadWrite::Run(void) {
     ASSERT_EQ(status.current, new_prof);
 
     // Reset the state of perf level and power profile after testing
-    DISPLAY_AMDSMI_API("amdsmi_set_gpu_perf_level", "gpu="+std::to_string(dv_ind), VERB(STANDARD));
+    DISPLAY_AMDSMI_API("amdsmi_set_gpu_perf_level", "gpu=" + std::to_string(dv_ind),
+                       VERB(STANDARD));
     ret = amdsmi_set_gpu_perf_level(processor_handles_[dv_ind], AMDSMI_DEV_PERF_LEVEL_AUTO);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
     CHK_ERR_ASRT(ret);
