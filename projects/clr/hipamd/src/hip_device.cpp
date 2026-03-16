@@ -183,6 +183,7 @@ void Device::Reset() {
 void Device::WaitActiveStreams(hip::Stream* blocking_stream, bool wait_null_stream) {
   amd::Command::EventWaitList eventWaitList(0);
   bool submitMarker = 0;
+  std::vector<amd::CommandQueue*> activeQueues;
 
   auto waitForStream = [&submitMarker, &eventWaitList](hip::Stream* stream) {
     if (amd::Command* command = stream->getLastQueuedCommand(true)) {
@@ -210,7 +211,7 @@ void Device::WaitActiveStreams(hip::Stream* blocking_stream, bool wait_null_stre
       waitForStream(null_stream_);
     }
   } else {
-    auto activeQueues = blocking_stream->device().getActiveQueues();
+    activeQueues = blocking_stream->device().getActiveQueues();
     for (const auto& command : activeQueues) {
       hip::Stream* active_stream = static_cast<hip::Stream*>(command);
       if (  // Make sure it's a default stream
@@ -221,7 +222,6 @@ void Device::WaitActiveStreams(hip::Stream* blocking_stream, bool wait_null_stre
         // Get the last valid command
         waitForStream(active_stream);
       }
-      command->release();
     }
   }
 
@@ -235,6 +235,12 @@ void Device::WaitActiveStreams(hip::Stream* blocking_stream, bool wait_null_stre
   // Release all active commands. It's safe after the marker was enqueued
   for (const auto& it : eventWaitList) {
     it->release();
+  }
+
+  // Release active queue references now that the marker has been fully enqueued
+  // and no longer needs to access the queues via eventWaitList commands
+  for (const auto& q : activeQueues) {
+    q->release();
   }
 }
 
@@ -788,14 +794,14 @@ hipError_t hipGetDevicePropertiesR0000(hipDeviceProp_tR0000* prop, int device) {
 }
 
 hipError_t hipGetProcAddress_common(const char* symbol, void** pfn, int hipVersion, uint64_t flags,
-                             hipDriverProcAddressQueryResult* symbolStatus) {
+                                    hipDriverProcAddressQueryResult* symbolStatus) {
   if (symbol == nullptr || std::string_view{symbol}.empty() || pfn == nullptr) {
     return hipErrorInvalidValue;
   }
   std::string symbolString = symbol;
 
-  if (flags != HIP_GET_PROC_ADDRESS_DEFAULT && flags != HIP_GET_PROC_ADDRESS_LEGACY_STREAM
-      && flags != HIP_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM) {
+  if (flags != HIP_GET_PROC_ADDRESS_DEFAULT && flags != HIP_GET_PROC_ADDRESS_LEGACY_STREAM &&
+      flags != HIP_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM) {
     return hipErrorInvalidValue;
   }
 
@@ -830,7 +836,7 @@ hipError_t hipGetProcAddress_common(const char* symbol, void** pfn, int hipVersi
   }
 
   if (checkSpt) {
-      symbolString += "_spt";
+    symbolString += "_spt";
   }
 
   *pfn = amd::Os::getSymbol(handle, symbolString.c_str());
@@ -860,9 +866,10 @@ hipError_t hipGetProcAddress(const char* symbol, void** pfn, int hipVersion, uin
 }
 
 hipError_t hipGetProcAddress_spt(const char* symbol, void** pfn, int hipVersion, uint64_t flags,
-                             hipDriverProcAddressQueryResult* symbolStatus) {
+                                 hipDriverProcAddressQueryResult* symbolStatus) {
   HIP_INIT_API(hipGetProcAddress, symbol, pfn, hipVersion, flags, symbolStatus);
-  flags = (flags == HIP_GET_PROC_ADDRESS_DEFAULT) ? HIP_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM : flags;
+  flags = (flags == HIP_GET_PROC_ADDRESS_DEFAULT) ? HIP_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM
+                                                  : flags;
   HIP_RETURN(hipGetProcAddress_common(symbol, pfn, hipVersion, flags, symbolStatus));
 }
 
