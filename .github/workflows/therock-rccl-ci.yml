@@ -78,6 +78,7 @@ jobs:
         -DTHEROCK_ENABLE_COMM_LIBS=ON 
         -DTHEROCK_ENABLE_ROCPROFV3=ON
         -DTHEROCK_ENABLE_MPI=ON
+        -DTHEROCK_ENABLE_ROCSHMEM=OFF
 
   therock_ci_summary:
     name: TheRock CI Summary
