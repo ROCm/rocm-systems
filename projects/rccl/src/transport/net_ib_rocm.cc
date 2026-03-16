@@ -2761,7 +2761,9 @@ ncclResult_t rocmIbPostFifo(struct ncclIbRecvComm* comm, int n, void** data, siz
   // slot == devIndex - When writing to fifo slot N, and this QP lives on device index N, it should send signalled.
   // This works out that each fifo posting QP gets drained
   if (rcclAinicRoce) {
-    if (slot == ctsQp->ctsQpSlot) {
+    const int nRecvQps = ncclParamRocmIbSplitDataOnQps() ? comm->base.nqps : comm->base.nDataQps;
+    int ctsOrder = comm->base.qpIndex / nRecvQps;
+    if (slot == ctsOrder) {
       wr.send_flags |= IBV_SEND_SIGNALED;
       wr.wr_id = req - comm->base.reqs;
       ncclIbAddEvent(req, ctsQp->devIndex, &comm->devs[ctsQp->devIndex].base);
@@ -2782,8 +2784,9 @@ ncclResult_t rocmIbPostFifo(struct ncclIbRecvComm* comm, int n, void** data, siz
   comm->remFifo.fifoTail++;
 
   if (rcclAinicRoce) {
-    // Select the next qpIndex
-    comm->base.qpIndex = (comm->base.qpIndex+1) % comm->base.nqps;
+    // Advance qpIndex by the number of QPs used for data to stay in sync with the sender
+    const int nRecvQps = ncclParamRocmIbSplitDataOnQps() ? comm->base.nqps : comm->base.nDataQps;
+    comm->base.qpIndex = (comm->base.qpIndex + nRecvQps) % comm->base.nqps;
   }
   return ncclSuccess;
 }
