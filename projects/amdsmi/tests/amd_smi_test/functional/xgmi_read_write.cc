@@ -19,9 +19,6 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-
-#include "xgmi_read_write.h"
-
 #include <gtest/gtest.h>
 
 #include <cstdint>

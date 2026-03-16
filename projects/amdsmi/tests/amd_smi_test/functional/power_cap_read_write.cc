@@ -19,9 +19,6 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-
-#include "power_cap_read_write.h"
-
 #include <gtest/gtest.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -33,6 +30,7 @@
 
 #include "../test_common.h"
 #include "amd_smi/amdsmi.h"
+#include "power_cap_read_write.h"
 
 const uint64_t MICRO_CONVERSION = 1000000;
 

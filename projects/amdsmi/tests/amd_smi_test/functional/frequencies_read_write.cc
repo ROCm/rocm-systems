@@ -19,9 +19,6 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-
-#include "frequencies_read_write.h"
-
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -33,6 +30,7 @@
 #include "../test_common.h"
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_utils.h"
+#include "frequencies_read_write.h"
 
 TestFrequenciesReadWrite::TestFrequenciesReadWrite() : TestBase() {
   set_title("AMDSMI Frequencies Read/Write Test");

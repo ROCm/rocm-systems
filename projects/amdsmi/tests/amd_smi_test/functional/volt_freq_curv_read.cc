@@ -19,9 +19,6 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-
-#include "volt_freq_curv_read.h"
-
 #include <gtest/gtest.h>
 
 #include <cstdint>

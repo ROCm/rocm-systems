@@ -19,9 +19,6 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-
-#include "perf_determinism.h"
-
 #include <gtest/gtest.h>
 
 #include <cstdint>
@@ -30,6 +27,7 @@
 
 #include "../test_common.h"
 #include "amd_smi/amdsmi.h"
+#include "perf_determinism.h"
 
 TestPerfDeterminism::TestPerfDeterminism() : TestBase() {
   set_title("AMDSMI Performance Determinism Test");
@@ -107,7 +105,6 @@ void TestPerfDeterminism::Run(void) {
       std::cout << "\t**Resetting performance determinism" << std::endl;
       DISPLAY_AMDSMI_API("amdsmi_set_gpu_perf_level", "gpu=" + std::to_string(i), VERB(STANDARD));
       err = amdsmi_set_gpu_perf_level(processor_handles_[i], AMDSMI_DEV_PERF_LEVEL_AUTO);
-      ;
       DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
       CHK_ERR_ASRT(err)
       DISPLAY_AMDSMI_API("amdsmi_get_gpu_perf_level", "gpu=" + std::to_string(i), VERB(STANDARD));
@@ -116,5 +113,5 @@ void TestPerfDeterminism::Run(void) {
       CHK_ERR_ASRT(ret)
       IF_VERB(STANDARD) { std::cout << "\t**New Perf Level:" << GetPerfLevelStr(pfl) << std::endl; }
     }  // END - SET SUPPORTED
-  }    // END - DEVICE LOOP
+  }  // END - DEVICE LOOP
 }

@@ -20,8 +20,6 @@
  * THE SOFTWARE.
  */
 
-#include "evt_notif_read_write.h"
-
 #include <gtest/gtest.h>
 
 #include <cstdint>
@@ -29,6 +27,7 @@
 
 #include "../test_common.h"
 #include "../test_utils.h"
+#include "evt_notif_read_write.h"
 
 TestEvtNotifReadWrite::TestEvtNotifReadWrite() : TestBase() {
   set_title("AMDSMI Event Notification Read/Write Test");

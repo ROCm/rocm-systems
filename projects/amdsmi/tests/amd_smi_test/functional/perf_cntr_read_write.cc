@@ -19,9 +19,6 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-
-#include "perf_cntr_read_write.h"
-
 #include <gtest/gtest.h>
 
 #include <cstdint>
@@ -32,6 +29,7 @@
 
 #include "../test_common.h"
 #include "amd_smi/amdsmi.h"
+#include "perf_cntr_read_write.h"
 
 PerfCntrEvtGrp::PerfCntrEvtGrp(amdsmi_event_group_t grp, uint32_t first, uint32_t last,
                                std::string name)

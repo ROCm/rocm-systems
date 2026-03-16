@@ -19,9 +19,6 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-
-#include "gpu_cache_read.h"
-
 #include <gtest/gtest.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -38,6 +35,7 @@
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "gpu_metrics_read.h"
 #include "rocm_smi/rocm_smi_utils.h"
+#include "gpu_cache_read.h"
 
 TestGPUCacheRead::TestGPUCacheRead() : TestBase() {
   set_title("GPU Cache Read Test");

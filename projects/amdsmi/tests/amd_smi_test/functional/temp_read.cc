@@ -19,9 +19,6 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-
-#include "temp_read.h"
-
 #include <gtest/gtest.h>
 
 #include <cstdint>
@@ -31,6 +28,7 @@
 
 #include "../test_common.h"
 #include "amd_smi/amdsmi.h"
+#include "temp_read.h"
 
 static const std::map<uint32_t, std::string> kTempSensorNameMap = {
     {AMDSMI_TEMPERATURE_TYPE_VRAM, "Memory"},

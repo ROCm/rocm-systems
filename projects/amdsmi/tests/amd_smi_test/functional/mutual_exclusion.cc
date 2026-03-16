@@ -19,9 +19,6 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-
-#include "mutual_exclusion.h"
-
 #include <gtest/gtest.h>
 
 #include <cstdint>

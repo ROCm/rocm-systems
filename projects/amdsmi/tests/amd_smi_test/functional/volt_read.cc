@@ -19,9 +19,6 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-
-#include "volt_read.h"
-
 #include <gtest/gtest.h>
 
 #include <cstdint>
@@ -30,6 +27,7 @@
 
 #include "../test_common.h"
 #include "amd_smi/amdsmi.h"
+#include "volt_read.h"
 
 TestVoltRead::TestVoltRead() : TestBase() {
   set_title("AMDSMI Volt Read Test");

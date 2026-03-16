@@ -19,9 +19,6 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-
-#include "computepartition_read_write.h"
-
 #include <gtest/gtest.h>
 #include <unistd.h>
 
@@ -39,6 +36,7 @@
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "rocm_smi/rocm_smi_utils.h"
+#include "computepartition_read_write.h"
 
 TestComputePartitionReadWrite::TestComputePartitionReadWrite() : TestBase() {
   set_title("AMDSMI Compute Partition Read/Write Test");

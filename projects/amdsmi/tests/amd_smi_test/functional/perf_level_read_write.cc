@@ -19,9 +19,6 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-
-#include "perf_level_read_write.h"
-
 #include <gtest/gtest.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -31,6 +28,7 @@
 
 #include "../test_common.h"
 #include "amd_smi/amdsmi.h"
+#include "perf_level_read_write.h"
 
 TestPerfLevelReadWrite::TestPerfLevelReadWrite() : TestBase() {
   set_title("AMDSMI Performance Level Read/Write Test");

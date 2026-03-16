@@ -19,9 +19,6 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-
-#include "gpu_partition_metrics_read.h"
-
 #include <gtest/gtest.h>
 
 #include <cstdint>
@@ -34,6 +31,7 @@
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "rocm_smi/rocm_smi_utils.h"
+#include "gpu_partition_metrics_read.h"
 
 TestGpuPartitionMetricsRead::TestGpuPartitionMetricsRead() : TestBase() {
   set_title("AMDSMI GPU Partition (XCP) Metrics Read Test");

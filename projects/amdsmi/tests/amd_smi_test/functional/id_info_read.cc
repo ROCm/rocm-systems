@@ -19,9 +19,6 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-
-#include "id_info_read.h"
-
 #include <gtest/gtest.h>
 
 #include <cstddef>
@@ -32,6 +29,7 @@
 
 #include "../test_common.h"
 #include "amd_smi/amdsmi.h"
+#include "id_info_read.h"
 
 TestIdInfoRead::TestIdInfoRead() : TestBase() {
   set_title("AMDSMI ID Info Read Test");
