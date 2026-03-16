@@ -44,10 +44,10 @@ Panel Config:
           peak: 5
           pop: ((100 * AVG((SQ_INSTS_ALL_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)) / 5)
         Wavefront Occupancy:
-          value: AVG((SQ_WAVE_CYCLES_sum / ($GRBM_GUI_ACTIVE_sum * $cu_per_gpu)))
+          value: AVG((SQ_WAVE_CYCLES_sum / (GRBM_GUI_ACTIVE_sum * $cu_per_gpu)))
           unit: Wavefronts
           peak: ($max_waves_per_cu * $cu_per_gpu)
-          pop: (100 * AVG(((SQ_WAVE_CYCLES_sum / ($GRBM_GUI_ACTIVE_sum * $cu_per_gpu)) / ($max_waves_per_cu * $cu_per_gpu))))
+          pop: (100 * AVG(((SQ_WAVE_CYCLES_sum / (GRBM_GUI_ACTIVE_sum * $cu_per_gpu)) / ($max_waves_per_cu * $cu_per_gpu))))
         # === Cache Hierarchy: TCP (L0) -> GL1C (L1) -> GL2C (L2) ===
         # TCP: Texture Cache Per-pipe (Vector L0 Cache per WGP)
         TCP Cache Hit Rate:
