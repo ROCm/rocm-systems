@@ -36,7 +36,7 @@ import pandas as pd
 
 import config
 from rocprof_compute_soc.soc_base import OmniSoC_Base
-from utils import file_io, parser, schema, tty
+from utils import file_io, parser, schema
 from utils.logger import (
     console_debug,
     console_error,
@@ -46,13 +46,10 @@ from utils.logger import (
 )
 from utils.roofline_calc import validate_roofline_csv
 from utils.utils import (
-    build_kernel_name_to_id,
-    compute_operator_prefix_stats,
     get_uuid,
     impute_counters_iteration_multiplex,
     is_workload_empty,
     merge_counters_spatial_multiplex,
-    process_torch_trace_output,
 )
 
 # the build-in config to list kernel names purpose only
@@ -153,72 +150,6 @@ class OmniAnalyze_Base:
         return self._arch_configs
 
     @demarcate
-    def list_torch_operators(self) -> None:
-        """
-        List PyTorch operators with hierarchy, numbering, and durations.
-
-        Displays each operator with hierarchy, operator/kernel
-        durations, and numbering.
-        """
-        workload_path = (
-            self.__args.path[0][0]
-            if isinstance(self.__args.path[0], list)
-            else self.__args.path[0]
-        )
-        process_torch_trace_output(workload_path)
-        torch_trace_dir = Path(workload_path) / "torch_trace"
-        all_files = list(torch_trace_dir.glob("*.csv"))
-        # Load each CSV, compute prefix_stats once, and derive
-        # total duration (highest first)
-        file_data: list[
-            tuple[Path, pd.DataFrame, dict[str, tuple[float, int]], float]
-        ] = []
-        for f in all_files:
-            try:
-                df = pd.read_csv(f)
-                ps = compute_operator_prefix_stats(df)
-                total_ms = sum(dur for key, (dur, _) in ps.items() if "/" not in key)
-                file_data.append((f, df, ps, total_ms))
-            except Exception as e:
-                console_error(f"Failed to read operator from {f.name}: {e}")
-        # Sort by total duration in descending order
-        file_data.sort(key=lambda x: x[3], reverse=True)
-        # Use default kernel verbosity = 1
-        kernel_verbose = getattr(self.__args, "kernel_verbose", 1)
-        kernel_name_to_id = build_kernel_name_to_id(
-            [df for _, df, _, _ in file_data], kernel_verbose
-        )
-        # print() is intentional: banner lines are display output that wraps
-        # tty.show_torch_operator_hierarchy (also print-based); console_log
-        # would prepend an INFO prefix in colored log modes.
-        print(f"\n{'=' * 80}")
-        print(f"PyTorch Operators in: {workload_path}")
-        if kernel_name_to_id:
-            print("Kernel (id N) can be used with -k for filtering.")
-        print(f"{'=' * 80}\n")
-        operator_count = 0
-        for idx, (f, df, ps, total_ms) in enumerate(file_data, start=1):
-            tty.show_torch_operator_hierarchy(
-                str(f.name).replace(".csv", ""),
-                df,
-                index=idx,
-                kernel_name_to_id=kernel_name_to_id,
-                kernel_verbose=kernel_verbose,
-                prefix_stats=ps,
-            )
-            operator_count += 1
-
-        if not operator_count:
-            console_warning(
-                "No PyTorch operator data found. "
-                "Please ensure profiling was done with --torch-trace option."
-            )
-
-        print(f"\n{'=' * 80}")
-        print(f"Total: {operator_count} operators")
-        print(f"{'=' * 80}\n")
-
-    @demarcate
     def load_options(self, normalization_filter: Optional[str]) -> None:
         args = self.get_args()
         profiling_config = self.get_profiling_config()
@@ -246,10 +177,6 @@ class OmniAnalyze_Base:
         self, normalization_filter: Optional[str] = None
     ) -> OrderedDict[str, schema.Workload]:
         args = self.get_args()
-
-        if getattr(args, "list_torch_operators", False):
-            self.list_torch_operators()
-            sys.exit(0)
 
         def get_sysinfo_path(data_path: str) -> Optional[str]:
             return (

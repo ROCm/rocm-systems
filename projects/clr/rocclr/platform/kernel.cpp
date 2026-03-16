@@ -117,16 +117,16 @@ bool KernelParameters::captureHIPArgs(void** kernelParams, address kernArgs, siz
     if (kernelParams == nullptr && ((desc.offset_ + desc.size_) > kernArgsSize)) {
       value = &uint64_value;
     }
-    Memory* memArg = nullptr;
     if (desc.type_ == T_POINTER) {
       LP64_SWITCH(uint32_value, uint64_value) = *(LP64_SWITCH(uint32_t*, uint64_t*))value;
-      memArg = amd::MemObjMap::FindMemObj(*reinterpret_cast<const void* const*>(value));
-      memories[desc.info_.arrayIndex_] = memArg;
-      if (!(amd::IS_HIP && AMD_DIRECT_DISPATCH)) {
+      Memory* memArg = nullptr;
+      if (!AMD_DIRECT_DISPATCH) {
+        memArg = amd::MemObjMap::FindMemObj(*reinterpret_cast<const void* const*>(value));
         if (memArg != nullptr) {
           memArg->retain();
         }
       }
+      memories[desc.info_.arrayIndex_] = memArg;
     } else {
       assert((desc.type_ != T_SAMPLER && desc.type_ != T_QUEUE) &&
              "Unexpected argument type for a HIP kernel");
