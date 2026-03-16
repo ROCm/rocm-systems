@@ -141,6 +141,12 @@ void TestTempRead::Run(void) {
         err = amdsmi_get_temp_metric(processor_handles_[i],
                                      static_cast<amdsmi_temperature_type_t>(type), met, &val_i64);
         DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
+        if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
+          IF_VERB(STANDARD) {
+            std::cout << "\t**" << label << ": "
+                      << "Not supported on this machine" << std::endl;
+          }
+        }
 
         if (err != AMDSMI_STATUS_SUCCESS) {
           if (err == AMDSMI_STATUS_NOT_SUPPORTED) {

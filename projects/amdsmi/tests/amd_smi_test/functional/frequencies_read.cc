@@ -102,6 +102,7 @@ void TestFrequenciesRead::Run(void) {
         err = amdsmi_get_clk_freq(processor_handles_[i], t, &f);
         DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
         if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
+          std::cout << "\t**Get " << name << ": Not supported on this machine" << std::endl;
           // Verify api support checking functionality is working
           DISPLAY_AMDSMI_API("amdsmi_get_clk_freq", "gpu=" + std::to_string(i), VERB(STANDARD));
           err = amdsmi_get_clk_freq(processor_handles_[i], t, nullptr);

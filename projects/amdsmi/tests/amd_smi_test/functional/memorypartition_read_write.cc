@@ -51,12 +51,14 @@ void ReloadDriverWithMessages(bool isVerbose, const std::string& preReloadMessag
     std::cout << "\t**" << preReloadMessage << std::endl;
   }
 
+  DISPLAY_AMDSMI_API("amdsmi_gpu_driver_reload", "", isVerbose);
   auto start_time = std::chrono::steady_clock::now();
   auto driver_reload_status = amdsmi_gpu_driver_reload();
   auto end_time = std::chrono::steady_clock::now();
   auto elapsed_time = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
   auto elapsed_seconds = std::chrono::duration_cast<std::chrono::seconds>(end_time - start_time);
   *reload_status = driver_reload_status;
+  DISPLAY_AMDSMI_STATUS(isVerbose, __FILE__, __LINE__, driver_reload_status, AMDSMI_STATUS_SUCCESS);
 
   if (isVerbose) {
     std::cout << "\t**"
@@ -69,17 +71,6 @@ void ReloadDriverWithMessages(bool isVerbose, const std::string& preReloadMessag
       std::cout << "\t**" << successMessage << std::endl;
     }
 
-    auto start_time = std::chrono::steady_clock::now();
-    DISPLAY_AMDSMI_API("amdsmi_gpu_driver_reload", "", isVerbose);
-    auto driver_reload_status = amdsmi_gpu_driver_reload();
-    DISPLAY_AMDSMI_STATUS(isVerbose, __FILE__, __LINE__, driver_reload_status,
-                          AMDSMI_STATUS_SUCCESS);
-    auto end_time = std::chrono::steady_clock::now();
-    auto elapsed_time =
-        std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
-    auto elapsed_seconds = std::chrono::duration_cast<std::chrono::seconds>(end_time - start_time);
-    *reload_status = driver_reload_status;
-
     if (isVerbose) {
       std::cout << "\t**" << restartErrorMessage << std::endl;
     }
@@ -90,6 +81,7 @@ void ReloadDriverWithMessages(bool isVerbose, const std::string& preReloadMessag
                 << smi_amdgpu_get_status_string(driver_reload_status, false) << std::endl;
     }
   }
+
   // Tests should fail if the driver reload fails
   // TODO(amdsmi_team): This is a temporary solution until CQE can update
   //                    how their containers are ran.

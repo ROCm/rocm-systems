@@ -164,6 +164,7 @@ void TestIdInfoRead::Run(void) {
       ASSERT_EQ(err, AMDSMI_STATUS_NOT_SUPPORTED);
     } else {
       CHK_ERR_ASRT(err)
+      IF_VERB(STANDARD) { std::cout << "\t**Device Vendor name: " << buffer << std::endl; }
       // Verify api support checking functionality is working
       DISPLAY_AMDSMI_API("amdsmi_get_gpu_vendor_name", "gpu=" + std::to_string(i), VERB(STANDARD));
       err = amdsmi_get_gpu_vendor_name(processor_handles_[i], nullptr, kBufferLen);

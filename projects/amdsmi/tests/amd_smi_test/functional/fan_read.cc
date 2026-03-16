@@ -114,7 +114,10 @@ void TestFanRead::Run(void) {
       err = amdsmi_get_gpu_fan_rpms(processor_handles_[i], 0, &val_i64);
       DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
       CHK_ERR_ASRT(err)
-      IF_VERB(STANDARD) { std::cout << val_i64 << std::endl; }
+      IF_VERB(STANDARD) {
+        std::cout << "\t**Current fan RPMs: ";
+        std::cout << val_i64 << std::endl;
+      }
 
       // Verify api support checking functionality is working
       DISPLAY_AMDSMI_API("amdsmi_get_gpu_fan_rpms", "gpu=" + std::to_string(i), VERB(STANDARD));
