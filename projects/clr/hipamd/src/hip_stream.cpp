@@ -39,10 +39,7 @@ Stream::Stream(hip::Device* dev, Priority p, unsigned int f, bool null_stream,
       null_(null_stream),
       cuMask_(cuMask),
       stream_id_(GenerateStreamId()),
-      captureStatus_(captureStatus),
-      pCaptureGraph_(nullptr),
-      originStream_(false),
-      captureID_(0) {
+      captureStatus_(captureStatus) {
   device_->AddStream(this);
 }
 
@@ -166,6 +163,7 @@ bool Stream::StreamCaptureOngoing(hipStream_t hStream) {
     return true;
   }
   if (captureStatus != hipStreamCaptureStatusNone) {
+    // Defensive: unknown future enum value — treat as not ongoing.
     return false;
   }
 
@@ -491,7 +489,7 @@ hipError_t hipStreamWaitEvent_common(hipStream_t stream, hipEvent_t event, unsig
     if (!waitStream->IsOriginStream() &&
         waitStream != reinterpret_cast<hip::Stream*>(eventStream->GetParentStream())) {
       waitStream->SetCaptureGraph(eventStream->GetCaptureGraph());
-      waitStream->SetCaptureId(eventStream->GetCaptureID());
+      waitStream->SetCaptureID(eventStream->GetCaptureID());
       waitStream->SetCaptureMode(eventStream->GetCaptureMode());
       waitStream->SetParentStream(reinterpret_cast<hipStream_t>(eventStream));
       eventStream->SetParallelCaptureStream(stream);

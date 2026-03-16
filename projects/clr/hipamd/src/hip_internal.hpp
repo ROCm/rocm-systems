@@ -305,8 +305,8 @@ namespace hip {
     /// Check Stream Capture status to make sure it is done
     static bool StreamCaptureOngoing(hipStream_t hStream);
     /// Generate ID for stream capture unique over the lifetime of the process
-    static unsigned long long GenerateCaptureID() {
-      static std::atomic<unsigned long long> uid(0);
+    static uint64_t GenerateCaptureID() {
+      static std::atomic<uint64_t> uid(0);
       return ++uid;
     }
 
@@ -339,9 +339,9 @@ namespace hip {
     /// Release graph when capture is invalidated
     void ReleaseCaptureGraph();
     /// Generate and assign a new capture ID (used at BeginCapture)
-    void SetCaptureId() { captureID_ = GenerateCaptureID(); }
+    void SetCaptureID() { captureID_ = GenerateCaptureID(); }
     /// Inherit capture ID from the parent stream
-    void SetCaptureId(unsigned long long captureId) { captureID_ = captureId; }
+    void SetCaptureID(uint64_t captureId) { captureID_ = captureId; }
     /// Reset capture parameters
     hipError_t EndCapture();
     /// Set capture status
@@ -353,7 +353,7 @@ namespace hip {
     /// Get parent stream
     hipStream_t GetParentStream() const { return parentStream_; }
     /// Get capture ID
-    unsigned long long GetCaptureID() const { return captureID_; }
+    uint64_t GetCaptureID() const { return captureID_; }
     /// Associate an event with the current capture
     void SetCaptureEvent(hipEvent_t e) {
       std::scoped_lock lock(lock_);
@@ -370,19 +370,9 @@ namespace hip {
       captureEvents_.erase(e);
     }
     /// Register a parallel (forked) capture stream
-    void SetParallelCaptureStream(hipStream_t s) {
-      auto it = std::find(parallelCaptureStreams_.begin(), parallelCaptureStreams_.end(), s);
-      if (it == parallelCaptureStreams_.end()) {
-        parallelCaptureStreams_.push_back(s);
-      }
-    }
+    void SetParallelCaptureStream(hipStream_t s) { parallelCaptureStreams_.insert(s); }
     /// Remove a parallel capture stream
-    void EraseParallelCaptureStream(hipStream_t s) {
-      auto it = std::find(parallelCaptureStreams_.begin(), parallelCaptureStreams_.end(), s);
-      if (it != parallelCaptureStreams_.end()) {
-        parallelCaptureStreams_.erase(it);
-      }
-    }
+    void EraseParallelCaptureStream(hipStream_t s) { parallelCaptureStreams_.erase(s); }
 
   private:
     ~Stream() = default;
@@ -396,16 +386,16 @@ namespace hip {
     uint64_t stream_id_;                     //!< Process-unique monotonic stream identifier
 
     // ----- Stream capture state -----
-    hipStreamCaptureStatus captureStatus_;                //!< Current capture status
+    hipStreamCaptureStatus captureStatus_{hipStreamCaptureStatusNone}; //!< Current capture status
     hip::Graph* pCaptureGraph_ = nullptr;                 //!< Graph being constructed by capture
     hipStreamCaptureMode captureMode_{hipStreamCaptureModeGlobal}; //!< API restriction mode
-    bool originStream_;                                   //!< True if this stream started capture
+    bool originStream_ = false;                           //!< True if this stream started capture
     hipStream_t parentStream_ = nullptr;                  //!< Parent stream (null for origin)
     std::vector<hip::GraphNode*> lastCapturedNodes_;      //!< Last graph node(s) captured
     std::vector<hip::GraphNode*> removedDependencies_;    //!< Deps removed via UpdateCaptureDeps
-    std::vector<hipStream_t> parallelCaptureStreams_;      //!< Forked parallel capture branches
+    std::unordered_set<hipStream_t> parallelCaptureStreams_; //!< Forked parallel capture branches
     std::unordered_set<hipEvent_t> captureEvents_;        //!< Events tied to this capture
-    unsigned long long captureID_;                        //!< Unique ID for this capture sequence
+    uint64_t captureID_ = 0;                              //!< Unique ID for this capture sequence
 
     static CommandQueue::Priority convertToQueuePriority(Priority p) {
       return p == Priority::High  ? amd::CommandQueue::Priority::High
@@ -413,7 +403,7 @@ namespace hip {
                                   : amd::CommandQueue::Priority::Normal;
     }
     /// Generates unique stream Id for the lifetime of the process
-    uint64_t GenerateStreamId() {
+    static uint64_t GenerateStreamId() {
       static std::atomic<uint64_t> uniqueId{0};
       return ++uniqueId;
     }
@@ -502,7 +492,7 @@ namespace hip {
 
     // --- Device activity ---
 
-    void SetActiveStatus() { isActive_ = true; }
+    void SetActiveStatus() { isActive_.store(true, std::memory_order_release); }
     bool GetActiveStatus();
 
     // --- Memory pools ---
@@ -545,7 +535,7 @@ namespace hip {
     int deviceId_;                             //!< Cached device ID (avoids linear scan)
     Stream* null_stream_ = nullptr;            //!< Default (null/legacy) stream
     unsigned int flags_;                       //!< Device flags (e.g. hipDeviceScheduleSpin)
-    std::list<int> userEnabledPeers_;          //!< Peer device IDs enabled via hipEnablePeerAccess
+    std::vector<int> userEnabledPeers_;        //!< Peer device IDs enabled via hipEnablePeerAccess
     std::atomic<bool> isActive_{false};        //!< True once any work has been submitted
 
     // ----- Memory pool state -----
@@ -554,7 +544,7 @@ namespace hip {
     MemoryPool* graph_mem_pool_ = nullptr;            //!< Memory pool for graph allocations
     MemoryPool* current_managed_mem_pool_ = nullptr;  //!< Active managed-memory pool
     MemoryPool* default_managed_mem_pool_ = nullptr;  //!< Default managed-memory pool
-    std::set<MemoryPool*> mem_pools_;                  //!< All pools associated with this device
+    std::set<MemoryPool*> mem_pools_;                 //!< All pools associated with this device
 
     // ----- Graphics resource tracking -----
     ObjectRegistry<hipGraphicsResource_t> registeredGraphicsResources_;

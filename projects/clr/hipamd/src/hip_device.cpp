@@ -237,12 +237,7 @@ void Device::RemoveStream(Stream* stream) {
 // ================================================================================================
 bool Device::StreamExists(const Stream* stream) {
   std::shared_lock lock(streamSetLock_);
-  for (const auto& s : streamSet_) {
-    if (s == stream) {
-      return true;
-    }
-  }
-  return false;
+  return streamSet_.count(const_cast<Stream*>(stream)) != 0;
 }
 
 // ================================================================================================
@@ -334,17 +329,16 @@ hipError_t Device::DisablePeerAccess(int peerDeviceId) {
 
 // ================================================================================================
 bool Device::GetActiveStatus() {
-  std::scoped_lock lock(lock_);
-  if (!isActive_) {
-    std::shared_lock streamLock(streamSetLock_);
+  if (!isActive_.load(std::memory_order_acquire)) {
+    std::shared_lock lock(streamSetLock_);
     for (const auto* stream : streamSet_) {
       if (stream->GetQueueStatus()) {
-        isActive_ = true;
+        isActive_.store(true, std::memory_order_release);
         break;
       }
     }
   }
-  return isActive_;
+  return isActive_.load(std::memory_order_relaxed);
 }
 
 // ================================================================================================
