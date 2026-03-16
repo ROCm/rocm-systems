@@ -696,7 +696,7 @@ void DefaultPT2_hipMemcpy3D() {
 }
 
 
-TEST_CASE("Unit_hipStrmPerThrdDefault") {
+TEST_CASE(Unit_hipStrmPerThrdDefault) {
   CHECK_IMAGE_SUPPORT
 
   SECTION("Testing hipMemset/Memcpy() and their async version") {

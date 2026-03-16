@@ -2782,10 +2782,7 @@ static amd::CopyMetadata buildCopyMetadataFromAttrs(hipMemcpyAttributes* attrs, 
   }
   if (flags & hipMemcpyFlagExtOpSwap) {
     metadata.copyOpType_ = amd::CopyMetadata::kCopyOpSwap;
-  } else if (flags & hipMemcpyFlagExtOpIndirect) {
-    metadata.copyOpType_ = amd::CopyMetadata::kCopyOpIndirect;
   }
-
   return metadata;
 }
 
@@ -2944,12 +2941,6 @@ hipError_t hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* sizes, size_t c
     for (size_t i = 0; i < numAttrs; ++i) {
       if (attrs[i].srcAccessOrder < hipMemcpySrcAccessOrderStream ||
           attrs[i].srcAccessOrder > hipMemcpySrcAccessOrderAny) {
-        HIP_RETURN(hipErrorInvalidValue);
-      }
-      // ExtOp flags are mutually exclusive
-      unsigned int extOpBits = attrs[i].flags &
-          (hipMemcpyFlagExtOpSwap | hipMemcpyFlagExtOpIndirect);
-      if (extOpBits & (extOpBits - 1)) {
         HIP_RETURN(hipErrorInvalidValue);
       }
     }

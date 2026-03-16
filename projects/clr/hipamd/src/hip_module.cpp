@@ -401,7 +401,7 @@ hipError_t ihipLaunchKernelCommand(amd::Command*& command, hipFunction_t f,
 
   if (DEBUG_HIP_KERNARG_COPY_OPT) {
     if (CL_SUCCESS !=
-        kernelCommand->AllocCaptureSetValidate(kernelParams, kernargs, kernargs_size)) {
+        kernelCommand->captureHIPArgsAndValidate(kernelParams, kernargs, kernargs_size)) {
       kernelCommand->release();
       return hipErrorOutOfMemory;
     }
@@ -423,7 +423,7 @@ hipError_t ihipLaunchKernelCommand(amd::Command*& command, hipFunction_t f,
     }
 
     // Capture the kernel arguments
-    if (CL_SUCCESS != kernelCommand->captureAndValidate()) {
+    if (CL_SUCCESS != kernelCommand->captureOpenCLArgsAndValidate()) {
       kernelCommand->release();
       return hipErrorOutOfMemory;
     }

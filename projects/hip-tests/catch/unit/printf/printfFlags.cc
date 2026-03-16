@@ -28,7 +28,7 @@
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Printf_flags_Sanity_Positive") {
+TEST_CASE(Unit_Printf_flags_Sanity_Positive) {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {

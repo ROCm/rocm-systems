@@ -221,7 +221,7 @@ template <typename UIntT, PtrType ptrTypeValue> struct TestParams {
 };
 
 #if HT_AMD
-TEMPLATE_TEST_CASE("Unit_hipStreamValue_Write", "", (TestParams<uint32_t, PtrType::HostPtr>),
+TEMPLATE_TEST_CASE(Unit_hipStreamValue_Write, (TestParams<uint32_t, PtrType::HostPtr>),
                    (TestParams<uint32_t, PtrType::DevicePtr>),
                    (TestParams<uint32_t, PtrType::DevicePtrToHost>),
                    (TestParams<uint64_t, PtrType::HostPtr>),
@@ -229,7 +229,7 @@ TEMPLATE_TEST_CASE("Unit_hipStreamValue_Write", "", (TestParams<uint32_t, PtrTyp
                    (TestParams<uint64_t, PtrType::DevicePtrToHost>),
                    (TestParams<uint64_t, PtrType::Signal>)) {
 #else
-TEMPLATE_TEST_CASE("Unit_hipStreamValue_Write", "", (TestParams<uint32_t, PtrType::HostPtr>),
+TEMPLATE_TEST_CASE(Unit_hipStreamValue_Write, (TestParams<uint32_t, PtrType::HostPtr>),
                    (TestParams<uint32_t, PtrType::DevicePtr>),
                    (TestParams<uint32_t, PtrType::DevicePtrToHost>),
                    (TestParams<uint64_t, PtrType::HostPtr>),
@@ -343,7 +343,7 @@ void testWait(TEST_WAIT<typename TestType::UIntType> tc) {
 }
 
 // Combined blocking test case for both uint32_t and uint64_t
-TEMPLATE_TEST_CASE("Unit_hipStreamValue_Wait_Blocking", "", uint32_t, uint64_t) {
+TEMPLATE_TEST_CASE(Unit_hipStreamValue_Wait_Blocking, uint32_t, uint64_t) {
   if (!streamWaitValueSupported()) {
     HipTest::HIP_SKIP_TEST("hipStreamWaitValue not supported on this device.");
     return;
@@ -554,7 +554,7 @@ TEMPLATE_TEST_CASE("Unit_hipStreamValue_Wait_Blocking", "", uint32_t, uint64_t) 
 }
 
 // Negative Tests
-TEST_CASE("Unit_hipStreamValue_Negative_InvalidMemory") {
+TEST_CASE(Unit_hipStreamValue_Negative_InvalidMemory) {
   if (!streamWaitValueSupported()) {
     HipTest::HIP_SKIP_TEST("hipStreamWaitValue not supported on this device.");
     return;
@@ -586,7 +586,7 @@ TEST_CASE("Unit_hipStreamValue_Negative_InvalidMemory") {
 }
 
 // Merge the two similar negative tests
-TEMPLATE_TEST_CASE("Unit_hipStreamValue_Negative_StreamAndFlag", "", uint32_t, uint64_t) {
+TEMPLATE_TEST_CASE(Unit_hipStreamValue_Negative_StreamAndFlag, uint32_t, uint64_t) {
   if (!streamWaitValueSupported()) {
     HipTest::HIP_SKIP_TEST("hipStreamWaitValue not supported on this device.");
     return;
@@ -641,7 +641,7 @@ TEMPLATE_TEST_CASE("Unit_hipStreamValue_Negative_StreamAndFlag", "", uint32_t, u
   }
 }
 
-TEMPLATE_TEST_CASE("Unit_hipStreamWriteValue_Default", "", uint32_t, uint64_t) {
+TEMPLATE_TEST_CASE(Unit_hipStreamWriteValue_Default, uint32_t, uint64_t) {
   if (!streamWaitValueSupported()) {
     HipTest::HIP_SKIP_TEST("hipStreamWaitValue not supported on this device.");
     return;
@@ -672,7 +672,7 @@ template <typename T> __global__ void add(T* a, T* b, T* c, size_t size) {
   if (i < size) c[i] = a[i] + b[i];
 }
 
-TEMPLATE_TEST_CASE("Unit_hipStreamWaitValue_Default", "", uint32_t, uint64_t) {
+TEMPLATE_TEST_CASE(Unit_hipStreamWaitValue_Default, uint32_t, uint64_t) {
   if (!streamWaitValueSupported()) {
     HipTest::HIP_SKIP_TEST("hipStreamWaitValue not supported on this device.");
     return;
