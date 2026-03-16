@@ -10,16 +10,6 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
     include(${CMAKE_CURRENT_LIST_DIR}/../cmake/standalone-helpers.cmake OPTIONAL)
 endif()
 
-if(ROCPROFSYS_DISABLE_EXAMPLES)
-    get_filename_component(_DIR ${CMAKE_CURRENT_LIST_DIR} NAME)
-    if(
-        "rocprofiler-systems-shmem-examples" IN_LIST ROCPROFSYS_DISABLE_EXAMPLES
-        OR ${_DIR} IN_LIST ROCPROFSYS_DISABLE_EXAMPLES
-    )
-        return()
-    endif()
-endif()
-
 # oshcc is the OpenSHMEM C compiler wrapper (e.g. from Open MPI); it provides
 # the correct include paths and libraries for shmem.h and OpenSHMEM runtime.
 # Prefer /usr/bin/oshcc (system package) to avoid version mismatch with oshrun.

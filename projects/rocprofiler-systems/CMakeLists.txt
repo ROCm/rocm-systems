@@ -310,15 +310,11 @@ elseif("$ENV{ROCPROFSYS_CI}")
 endif()
 
 if(ROCPROFSYS_INSTALL_TESTING)
-    set(ROCPROFSYS_INSTALL_EXAMPLES ON CACHE BOOL "Enable installing examples" FORCE)
     set(ROCPROFSYS_BUILD_TESTING ON CACHE BOOL "Enable building the testing suite" FORCE)
+    set(ROCPROFSYS_INSTALL_EXAMPLES ON CACHE BOOL "Enable installing examples" FORCE)
 endif()
 
 if(ROCPROFSYS_INSTALL_EXAMPLES)
-    set(ROCPROFSYS_BUILD_EXAMPLES ON CACHE BOOL "Enable building the examples" FORCE)
-endif()
-
-if(ROCPROFSYS_BUILD_TESTING)
     set(ROCPROFSYS_BUILD_EXAMPLES ON CACHE BOOL "Enable building the examples" FORCE)
 endif()
 

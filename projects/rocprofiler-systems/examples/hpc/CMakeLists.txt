@@ -9,12 +9,6 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
     include(${CMAKE_CURRENT_LIST_DIR}/../cmake/standalone-helpers.cmake OPTIONAL)
 endif()
 
-if(ROCPROFSYS_DISABLE_EXAMPLES)
-    if("hpc" IN_LIST ROCPROFSYS_DISABLE_EXAMPLES)
-        return()
-    endif()
-endif()
-
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 
 include(${CMAKE_CURRENT_LIST_DIR}/hpc-helper.cmake)

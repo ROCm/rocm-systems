@@ -35,17 +35,6 @@ list(APPEND CMAKE_MODULE_PATH ${ROCmVersion_DIR}/share/rocdecode/cmake)
 set(CMAKE_BUILD_TYPE "RelWithDebInfo")
 string(REPLACE " " ";" _FLAGS "${CMAKE_CXX_FLAGS_DEBUG}")
 
-if(ROCPROFSYS_DISABLE_EXAMPLES)
-    get_filename_component(_DIR ${CMAKE_CURRENT_LIST_DIR} NAME)
-
-    if(
-        ${PROJECT_NAME} IN_LIST ROCPROFSYS_DISABLE_EXAMPLES
-        OR ${_DIR} IN_LIST ROCPROFSYS_DISABLE_EXAMPLES
-    )
-        return()
-    endif()
-endif()
-
 function(videodecode_message _MSG_TYPE)
     if(
         "${CMAKE_PROJECT_NAME}" STREQUAL "rocprofiler-systems"
