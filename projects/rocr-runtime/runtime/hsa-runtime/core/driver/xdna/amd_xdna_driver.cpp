@@ -915,9 +915,7 @@ hsa_status_t XdnaDriver::SubmitCmdChain(hsa_amd_aie_ert_packet_t* first_pkt, uin
     // Fire completion signal for this packet
     if (pkt->completion_signal.handle != 0) {
       core::Signal* sig = core::Signal::Convert(pkt->completion_signal);
-      if (sig != nullptr) {
-        sig->SubRelease(1);
-      }
+      sig->SubRelease(1);
     }
   }
 
