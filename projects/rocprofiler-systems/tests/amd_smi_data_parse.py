@@ -8,6 +8,7 @@ import os
 import re
 import shutil
 import subprocess
+from enum import Enum
 
 # Mapping from amd-smi output metric names to rocpd database metric names
 METRIC_MAPPINGS = {
@@ -33,6 +34,12 @@ METRIC_MAPPINGS = {
     "PCIE_LINK_SPEED": "device_pcie_link_speed",
     "PCIE_LINK_WIDTH": "device_pcie_link_width",
 }
+
+
+# Enum to categorize metric status
+class MetricStatus(Enum):
+    SUPPORTED = "supported"
+    UNSUPPORTED = "unsupported"
 
 
 # =============================================================================
@@ -171,13 +178,12 @@ def parse_amd_smi_metrics(amd_smi_cmd_op):
         amd_smi_cmd_op: Raw string output from 'amd-smi metric' command.
 
     Returns:
-        list: List of metric names (strings) supported by the hardware.
-              These are the rocpd database metric names (e.g., 'device_temp', 'device_power').
+        dict: Dictionary with Metric status enum keys containing sets of metric names.
     """
-    metrics_list = []
+    metrics = {MetricStatus.SUPPORTED: set(), MetricStatus.UNSUPPORTED: set()}
 
     if not amd_smi_cmd_op:
-        return metrics_list
+        return metrics
 
     lines = amd_smi_cmd_op.strip().split("\n")
 
@@ -194,13 +200,21 @@ def parse_amd_smi_metrics(amd_smi_cmd_op):
             if metric_value == "N/A" or metric_value.startswith("[N/A"):
                 continue
 
-            # Map to rocpd database name if in our mappings
             if metric_name in METRIC_MAPPINGS:
                 db_metric_name = METRIC_MAPPINGS[metric_name]
-                if db_metric_name not in metrics_list:
-                    metrics_list.append(db_metric_name)
+                metrics[MetricStatus.SUPPORTED].add((metric_name, db_metric_name))
+            else:
+                metrics[MetricStatus.UNSUPPORTED].add(metric_name)
 
-    return metrics_list
+    # Print unique supported metrics
+    if metrics[MetricStatus.SUPPORTED]:
+        print(f"Supported metrics : {metrics[MetricStatus.SUPPORTED]}")
+
+    # Print unique unsupported metrics
+    if metrics[MetricStatus.UNSUPPORTED]:
+        print(f"Unsupported metrics : {metrics[MetricStatus.UNSUPPORTED]}")
+
+    return metrics
 
 
 # =============================================================================
@@ -210,14 +224,14 @@ def parse_amd_smi_metrics(amd_smi_cmd_op):
 
 def collect_supported_metrics():
     """
-    Collect and return list of supported metrics from AMD-SMI.
+    Collect and return metrics dictionary from AMD-SMI.
 
     1. Finds and runs amd-smi executable
-    2. Parses the output to extract supported metrics
-    3. Returns the list of metric names
+    2. Parses the output to extract supported and unsupported metrics
+    3. Returns the metrics dictionary
 
     Returns:
-        list or None: List of supported metric names, or None if collection failed.
+        dict or None: Dictionary with MetricStatus keys, or None if collection failed.
     """
     # Run amd-smi metric command
     success, amd_smi_cmd_op, error_msg = get_amd_smi_metrics()
@@ -227,38 +241,37 @@ def collect_supported_metrics():
         return None
 
     # Parse the output
-    metrics_list = parse_amd_smi_metrics(amd_smi_cmd_op)
+    metrics = parse_amd_smi_metrics(amd_smi_cmd_op)
 
-    if not metrics_list:
-        print("Failed in parse_amd_smi_metrics.")
+    if not metrics[MetricStatus.SUPPORTED]:
+        print("No supported metrics found in parse_amd_smi_metrics.")
         return None
 
-    print(f"Detected {len(metrics_list)} supported metrics:")
-    for metric in metrics_list:
-        print(f"   - {metric}")
-
-    return metrics_list
+    return metrics
 
 
-def is_metric_supported(query, metrics_list):
+def is_metric_supported(query, metrics):
     """
     Check if the metric in a query is supported by the hardware.
     1. Extracts the metric name from the SQL query
-    2. Checks if that metric exists in the supported metrics list
+    2. Checks if that metric exists in the supported metrics set
 
     Args:
         query: SQL query string from validation rule.
-        metrics_list: List of supported metric names from AMD-SMI.
+        metrics: Dictionary with MetricStatus keys containing sets of supported and unsupported metric
 
     Returns:
         tuple: (is_supported: bool, metric_name: string or None)
             - is_supported: True if metric is supported
             - metric_name: The extracted metric name, or None if not found
     """
-    if metrics_list is None:
-        print(" Empty metrics list is empty, Can not process further.")
+    if metrics is None:
+        print("Metrics dictionary is empty, cannot process further.")
         return (False, None)
 
     metric_name = extract_metric_from_query(query)
-    is_supported = metric_name in metrics_list
+
+    # Check if metric name in supported metrics
+    supported_mapped_names = {mapped for _, mapped in metrics[MetricStatus.SUPPORTED]}
+    is_supported = metric_name in supported_mapped_names
     return (is_supported, metric_name)
