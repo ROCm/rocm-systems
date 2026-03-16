@@ -5,6 +5,7 @@ on:
     branches:
       - develop
       - release/therock-*
+      - users/arravikum/ompi_vendoring_rccl
   pull_request:
     types:
       - opened
