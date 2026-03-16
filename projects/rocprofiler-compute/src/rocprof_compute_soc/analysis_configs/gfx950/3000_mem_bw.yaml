@@ -509,8 +509,6 @@ Panel Config:
         value: Avg
         unit: Unit
       metric:
-        # Bottleneck detection metrics based on mi300_gpu_bandwidth.pdf guidance
-        # Thresholds: >=10% back pressure or credit stall indicates bottleneck
         # Memory BW bound: High BW utilization (>80%) + High credit stalls (>10%)
         L2 Back Pressure Indicator:
           value: SUM(((TCC_IB_STALL_sum * 100) / TCC_BUSY_sum)
@@ -817,7 +815,7 @@ Panel Config:
       Normalized to wall-clock time for absolute throughput measurement.
       Equation: SUM(TCC_MISS_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1000000000)
     # Table 3009: L2 Bottleneck Detection Indicators
-    # Reference: mi300_gpu_bandwidth.pdf - Thresholds: >=10% back pressure indicates bottleneck
+    # Thresholds: >=10% back pressure indicates bottleneck
     L2 Back Pressure Indicator: >-
       Percentage of L2 busy time the input buffer was stalled.
       A rate >= 10% indicates L2 is backpressuring L1 (GL1/GL2 potential bottleneck).
