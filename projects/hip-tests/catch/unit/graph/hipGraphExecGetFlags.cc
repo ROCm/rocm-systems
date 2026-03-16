@@ -38,7 +38,7 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 6.4
  */
-TEST_CASE("Unit_hipGraphExecGetFlags_Negative") {
+TEST_CASE(Unit_hipGraphExecGetFlags_Negative) {
   hipGraphExec_t graphExec;
   unsigned long long flags;  // NOLINT
   constexpr size_t Nbytes = 10 * sizeof(int);
@@ -77,7 +77,7 @@ TEST_CASE("Unit_hipGraphExecGetFlags_Negative") {
  * ------------------------
  *    - HIP_VERSION >= 6.4
  */
-TEST_CASE("Unit_hipGraphExecGetFlags_Positive") {
+TEST_CASE(Unit_hipGraphExecGetFlags_Positive) {
   hipGraphExec_t graphExec;
   unsigned long long flags;  // NOLINT
   hipGraph_t graph;

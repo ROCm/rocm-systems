@@ -239,7 +239,7 @@ void RTCCompileProgram::stripNamedExpression(std::string& strippedName) {
 }
 
 bool RTCCompileProgram::trackMangledName(std::string& name) {
-  amd::ScopedLock lock(lock_);
+  std::scoped_lock lock(lock_);
 
   if (name.size() == 0) return false;
 

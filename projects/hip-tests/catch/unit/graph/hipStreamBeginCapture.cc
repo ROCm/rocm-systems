@@ -137,7 +137,7 @@ void captureStreamAndLaunchGraph(F graphFunc, hipStreamCaptureMode mode, hipStre
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipStreamBeginCapture_Positive_Functional") {
+TEST_CASE(Unit_hipStreamBeginCapture_Positive_Functional) {
   const auto stream_type = GENERATE(Streams::perThread, Streams::created);
   StreamGuard stream_guard(stream_type);
   hipStream_t stream = stream_guard.stream();
@@ -182,7 +182,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_Positive_Functional") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipStreamBeginCapture_Negative_Parameters") {
+TEST_CASE(Unit_hipStreamBeginCapture_Negative_Parameters) {
   const auto stream_type = GENERATE(Streams::created);
   StreamGuard stream_guard(stream_type);
   hipStream_t stream = stream_guard.stream();
@@ -216,7 +216,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_Negative_Parameters") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipStreamBeginCapture_Positive_Basic") {
+TEST_CASE(Unit_hipStreamBeginCapture_Positive_Basic) {
   hipGraph_t graph{nullptr};
   const auto stream_type = GENERATE(Streams::perThread, Streams::created);
   StreamGuard stream_guard(stream_type);
@@ -460,7 +460,7 @@ static void multithreadedTest(hipStreamCaptureMode mode) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipStreamBeginCapture_Positive_InterStrmEventSync_Flags") {
+TEST_CASE(Unit_hipStreamBeginCapture_Positive_InterStrmEventSync_Flags) {
   const auto stream_flags1 = GENERATE(hipStreamDefault, hipStreamNonBlocking);
   const auto stream_flags2 = GENERATE(hipStreamDefault, hipStreamNonBlocking);
   StreamGuard stream_guard1(Streams::withFlags, stream_flags1);
@@ -486,7 +486,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_Positive_InterStrmEventSync_Flags") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipStreamBeginCapture_Positive_InterStrmEventSync_Priority") {
+TEST_CASE(Unit_hipStreamBeginCapture_Positive_InterStrmEventSync_Priority) {
   int minPriority = 0, maxPriority = 0;
   HIP_CHECK(hipDeviceGetStreamPriorityRange(&minPriority, &maxPriority));
   StreamGuard stream_guard1(Streams::withPriority, hipStreamDefault, minPriority);
@@ -511,7 +511,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_Positive_InterStrmEventSync_Priority") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipStreamBeginCapture_Positive_ColligatedStrmCapture_Flags") {
+TEST_CASE(Unit_hipStreamBeginCapture_Positive_ColligatedStrmCapture_Flags) {
   const auto stream_flags1 = GENERATE(hipStreamDefault, hipStreamNonBlocking);
   const auto stream_flags2 = GENERATE(hipStreamDefault, hipStreamNonBlocking);
   StreamGuard stream_guard1(Streams::withFlags, stream_flags1);
@@ -537,7 +537,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_Positive_ColligatedStrmCapture_Flags") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipStreamBeginCapture_Positive_ColligatedStrmCapture_Prio") {
+TEST_CASE(Unit_hipStreamBeginCapture_Positive_ColligatedStrmCapture_Prio) {
   int minPriority = 0, maxPriority = 0;
   HIP_CHECK(hipDeviceGetStreamPriorityRange(&minPriority, &maxPriority));
   StreamGuard stream_guard1(Streams::withPriority, hipStreamDefault, minPriority);
@@ -561,7 +561,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_Positive_ColligatedStrmCapture_Prio") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipStreamBeginCapture_Positive_ColligatedStrmCaptureFunc") {
+TEST_CASE(Unit_hipStreamBeginCapture_Positive_ColligatedStrmCaptureFunc) {
   StreamGuard stream_guard1(Streams::created);
   hipStream_t stream1 = stream_guard1.stream();
   StreamGuard stream_guard2(Streams::created);
@@ -582,7 +582,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_Positive_ColligatedStrmCaptureFunc") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipStreamBeginCapture_Positive_Multithreaded") {
+TEST_CASE(Unit_hipStreamBeginCapture_Positive_Multithreaded) {
   const hipStreamCaptureMode captureMode = GENERATE(
       hipStreamCaptureModeGlobal, hipStreamCaptureModeThreadLocal, hipStreamCaptureModeRelaxed);
   multithreadedTest(captureMode);
@@ -606,7 +606,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_Positive_Multithreaded") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipStreamBeginCapture_Positive_Multiplestrms") {
+TEST_CASE(Unit_hipStreamBeginCapture_Positive_Multiplestrms) {
   StreamsGuard streams(3);
   hipGraph_t graphs[3];
 
@@ -679,7 +679,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_Positive_Multiplestrms") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipStreamBeginCapture_Positive_CapturingFromWithinStrms") {
+TEST_CASE(Unit_hipStreamBeginCapture_Positive_CapturingFromWithinStrms) {
   constexpr int INCREMENT_KERNEL_FINALEXP_VAL = 7;
 
   hipGraph_t graph{nullptr};
@@ -745,7 +745,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_Positive_CapturingFromWithinStrms") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipStreamBeginCapture_Negative_DetectingInvalidCapture") {
+TEST_CASE(Unit_hipStreamBeginCapture_Negative_DetectingInvalidCapture) {
   StreamsGuard streams(2);
   EventsGuard events(1);
   hipEvent_t event = events[0];
@@ -774,7 +774,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_Negative_DetectingInvalidCapture") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipStreamBeginCapture_Positive_CapturingMultGraphsFrom1Strm") {
+TEST_CASE(Unit_hipStreamBeginCapture_Positive_CapturingMultGraphsFrom1Strm) {
   hipGraph_t graphs[3];
 
   StreamGuard stream_guard(Streams::created);
@@ -823,7 +823,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_Positive_CapturingMultGraphsFrom1Strm") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipStreamBeginCapture_Negative_CheckingSyncDuringCapture") {
+TEST_CASE(Unit_hipStreamBeginCapture_Negative_CheckingSyncDuringCapture) {
   const hipStreamCaptureMode captureMode = GENERATE(
       hipStreamCaptureModeGlobal, hipStreamCaptureModeThreadLocal, hipStreamCaptureModeRelaxed);
   const unsigned int stream_flag = GENERATE(hipStreamDefault, hipStreamNonBlocking);
@@ -873,7 +873,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_Negative_CheckingSyncDuringCapture") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipStreamBeginCapture_Negative_Concurrent_CheckingSyncDuringCapture") {
+TEST_CASE(Unit_hipStreamBeginCapture_Negative_Concurrent_CheckingSyncDuringCapture) {
   const hipStreamCaptureMode captureMode = GENERATE(
       hipStreamCaptureModeGlobal, hipStreamCaptureModeThreadLocal, hipStreamCaptureModeRelaxed);
   const unsigned int stream_flag = GENERATE(hipStreamDefault, hipStreamNonBlocking);
@@ -974,7 +974,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_Negative_Concurrent_CheckingSyncDuringCapt
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipStreamBeginCapture_Negative_UnsafeCallsDuringCapture") {
+TEST_CASE(Unit_hipStreamBeginCapture_Negative_UnsafeCallsDuringCapture) {
   StreamGuard stream_guard(Streams::created);
   hipStream_t stream = stream_guard.stream();
 
@@ -1018,7 +1018,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_Negative_UnsafeCallsDuringCapture") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipStreamBeginCapture_Negative_EndingCapwhenCapInProg") {
+TEST_CASE(Unit_hipStreamBeginCapture_Negative_EndingCapwhenCapInProg) {
   hipGraph_t graph{nullptr};
 
   StreamsGuard streams_guard(2);
@@ -1064,7 +1064,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_Negative_EndingCapwhenCapInProg") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipStreamBeginCapture_Positive_MultiGPU", "[multigpu]") {
+TEST_CASE(Unit_hipStreamBeginCapture_Positive_MultiGPU) {
   int devcount = 0;
   HIP_CHECK(hipGetDeviceCount(&devcount));
   // If only single GPU is detected then return
@@ -1142,7 +1142,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_Positive_MultiGPU", "[multigpu]") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipStreamBeginCapture_Positive_nestedStreamCapture") {
+TEST_CASE(Unit_hipStreamBeginCapture_Positive_nestedStreamCapture) {
   constexpr int INCREMENT_KERNEL_FINALEXP_VAL = 7;
 
   hipGraph_t graph{nullptr};
@@ -1204,7 +1204,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_Positive_nestedStreamCapture") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipStreamBeginCapture_Positive_streamReuse") {
+TEST_CASE(Unit_hipStreamBeginCapture_Positive_streamReuse) {
   constexpr int increment_kernel_vals[3] = {7, 3, 5};
 
   hipGraph_t graphs[3];
@@ -1290,7 +1290,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_Positive_streamReuse") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipStreamBeginCapture_Positive_captureComplexGraph") {
+TEST_CASE(Unit_hipStreamBeginCapture_Positive_captureComplexGraph) {
   constexpr int GRIDSIZE = 256;
   constexpr int BLOCKSIZE = 256;
   constexpr int CONST_KER1_VAL = 3;
@@ -1377,7 +1377,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_Positive_captureComplexGraph") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipStreamBeginCapture_Positive_captureEmptyStreams") {
+TEST_CASE(Unit_hipStreamBeginCapture_Positive_captureEmptyStreams) {
   hipGraph_t graph{nullptr};
 
   // Stream and event create
@@ -1414,7 +1414,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_Positive_captureEmptyStreams") {
  *    - HIP_VERSION >= 5.6
  */
 
-TEST_CASE("Unit_hipStreamBeginCapture_StreamSync_OngoingCapture") {
+TEST_CASE(Unit_hipStreamBeginCapture_StreamSync_OngoingCapture) {
   hipStreamCaptureMode flag = hipStreamCaptureModeRelaxed;
   constexpr int GRIDSIZE = 1;
   constexpr int BLOCKSIZE = 512;
@@ -1540,7 +1540,7 @@ static void captureStrmThread(hipGraph_t* graph, int* Ah, int* Ad, int* Bh, int*
   }
 }
 
-TEST_CASE("Unit_hipStreamBeginCapture_StreamSync_OngoingCapture_MThread") {
+TEST_CASE(Unit_hipStreamBeginCapture_StreamSync_OngoingCapture_MThread) {
   constexpr int GRIDSIZE = 1;
   constexpr int BLOCKSIZE = 512;
   constexpr int VALUE1 = 7, VALUE2 = 11;
@@ -1626,7 +1626,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_StreamSync_OngoingCapture_MThread") {
  * ------------------------
  *    - HIP_VERSION >= 5.6
  */
-TEST_CASE("Unit_hipStreamBeginCapture_MultipleStreams_ReuseEvent") {
+TEST_CASE(Unit_hipStreamBeginCapture_MultipleStreams_ReuseEvent) {
   // Allocate streams
   hipStream_t str0, str1, str2;
   hipEvent_t ev0, ev1, ev2;

@@ -2147,13 +2147,13 @@ bool Program::getGlobalVarFromCodeObj(std::vector<std::string>* var_names) const
 }
 
 // Init Fini Launch Lock
-amd::Monitor Program::initFiniLock_(true);
+std::recursive_mutex Program::initFiniLock_;
 
 bool Program::runInitFiniKernel(const std::vector<const Kernel*>& kernels) const {
   amd::HostQueue* queue = nullptr;
 
   for (const auto& kernel : kernels) {
-    amd::ScopedLock sl(initFiniLock_);
+    std::scoped_lock sl(initFiniLock_);
 
     if (queue == nullptr) {
       queue = new amd::HostQueue(device_().context(), device_(), 0);
@@ -2188,7 +2188,7 @@ bool Program::runInitFiniKernel(const std::vector<const Kernel*>& kernels) const
       queue->release();
       return false;
     }
-    if (CL_SUCCESS != kernelCommand->captureAndValidate()) {
+    if (CL_SUCCESS != kernelCommand->captureOpenCLArgsAndValidate()) {
       LogError("Kernel Capture and Validate failed");
       kernelCommand->release();
       k->release();

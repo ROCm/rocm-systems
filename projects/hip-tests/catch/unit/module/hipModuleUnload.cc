@@ -20,13 +20,13 @@ THE SOFTWARE.
 #include <hip_test_defgroups.hh>
 #include <hip/hip_runtime_api.h>
 
-TEST_CASE("Unit_hipModuleUnload_Negative_Module_Is_Nullptr") {
+TEST_CASE(Unit_hipModuleUnload_Negative_Module_Is_Nullptr) {
   HIP_CHECK(hipFree(nullptr));
 
   HIP_CHECK_ERROR(hipModuleUnload(nullptr), hipErrorInvalidResourceHandle);
 }
 
-TEST_CASE("Unit_hipModuleUnload_Negative_Double_Unload") {
+TEST_CASE(Unit_hipModuleUnload_Negative_Double_Unload) {
   HIP_CHECK(hipFree(nullptr));
 
   hipModule_t module = nullptr;

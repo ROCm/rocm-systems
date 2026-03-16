@@ -20,6 +20,8 @@ target_sources(
         ${CMAKE_CURRENT_LIST_DIR}/generate_config.hpp
         ${CMAKE_CURRENT_LIST_DIR}/get_availability.hpp
         ${CMAKE_CURRENT_LIST_DIR}/get_categories.hpp
+        ${CMAKE_CURRENT_LIST_DIR}/hw_counter_query.cpp
+        ${CMAKE_CURRENT_LIST_DIR}/hw_counter_query.hpp
         ${CMAKE_CURRENT_LIST_DIR}/info_type.cpp
         ${CMAKE_CURRENT_LIST_DIR}/info_type.hpp
 )
@@ -34,7 +36,7 @@ target_link_libraries(
     PRIVATE
         rocprofiler-systems::rocprofiler-systems-compile-definitions
         rocprofiler-systems::rocprofiler-systems-interface-library
-        rocprofiler-systems::librocprofiler-systems-static
+        rocprofiler-systems::rocprofiler-systems-core
 )
 set_target_properties(
     rocprofiler-systems-avail
