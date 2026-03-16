@@ -2489,7 +2489,7 @@ void VirtualGPU::submitSvmPrefetchAsync(amd::SvmPrefetchAsyncCommand& cmd) {
 
 // ================================================================================================
 void VirtualGPU::SubmitSvmPrefetchBatchAsync(amd::SvmPrefetchBatchAsyncCommand& command) {
-  amd::ScopedLock lock(execution());
+  std::scoped_lock lock(execution());
   profilingBegin(command);
 
   auto wait_events = Barriers().WaitingSignal(HwQueueEngine::Unknown);
