@@ -51,7 +51,7 @@ typedef struct hipArray {
 } hipArray;
 
 namespace hip{
-  extern std::once_flag g_ihipInitialized;
+extern std::once_flag g_ihipInitialized;
 enum MemcpyType {
   hipHostToHost,      //!< Memcpy from host to host
   hipWriteBuffer,     //!< Memcpy from host to device
@@ -242,26 +242,26 @@ struct ihipExec_t {
 };
 
 namespace hip {
-/// Manages a per-thread default stream for each device.
-/// Each thread lazily creates one stream per device on first use via get().
-/// Owned by TlsAggregator::stream_per_thread_obj_ (thread-local).
-class StreamPerThread {
-public:
-  StreamPerThread();
-  ~StreamPerThread();
+  /// Manages a per-thread default stream for each device.
+  /// Each thread lazily creates one stream per device on first use via get().
+  /// Owned by TlsAggregator::stream_per_thread_obj_ (thread-local).
+  class StreamPerThread {
+  public:
+    StreamPerThread();
+    ~StreamPerThread();
 
-  StreamPerThread(const StreamPerThread&) = delete;
-  StreamPerThread& operator=(const StreamPerThread&) = delete;
+    StreamPerThread(const StreamPerThread&) = delete;
+    StreamPerThread& operator=(const StreamPerThread&) = delete;
 
-  /// Returns (or lazily creates) the per-thread default stream for the current device.
-  hipStream_t Get();
+    /// Returns (or lazily creates) the per-thread default stream for the current device.
+    hipStream_t Get();
 
-  /// Clears the per-thread stream for the current device (used by hipDeviceReset).
-  void Clear();
+    /// Clears the per-thread stream for the current device (used by hipDeviceReset).
+    void Clear();
 
-private:
-  std::vector<hipStream_t> streams_;  //!< One stream handle per device (indexed by device ID)
-};
+  private:
+    std::vector<hipStream_t> streams_;  //!< One stream handle per device (indexed by device ID)
+  };
 
   class Device;
   class MemoryPool;
@@ -270,7 +270,123 @@ private:
   public:
     enum Priority : int { High = -1, Normal = 0, Low = 1 };
 
+    Stream(Device* dev, Priority p = Priority::Normal, unsigned int f = 0, bool null_stream = false,
+           const std::vector<uint32_t>& cuMask = {},
+           hipStreamCaptureStatus captureStatus = hipStreamCaptureStatusNone);
+
+    // --- Core stream operations ---
+
+    /// Creates the hip stream object, including AMD host queue
+    bool Create();
+    /// Get device ID associated with the current stream
+    int DeviceId() const;
+    /// Get HIP device associated with the stream
+    Device* GetDevice() const { return device_; }
+    /// Get device ID associated with a stream
+    static int DeviceId(const hipStream_t hStream);
+    /// Returns true if this is the null (default legacy) stream
+    bool Null() const { return null_; }
+    /// Returns the creation flags for the current stream
+    unsigned int Flags() const { return flags_; }
+    /// Returns the priority for the current stream
+    Priority GetPriority() const { return priority_; }
+    /// Returns the CU mask for the current stream
+    const std::vector<uint32_t>& GetCUMask() const { return cuMask_; }
+    /// Fetch the stream Id
+    uint64_t GetStreamId() const { return stream_id_; }
+
+    static void Destroy(hip::Stream* stream, bool forceDestroy = false);
+    virtual bool terminate();
+
+    // --- Stream capture ---
+
+    /// Check whether any blocking stream running
+    static bool StreamCaptureBlocking();
+    /// Check Stream Capture status to make sure it is done
+    static bool StreamCaptureOngoing(hipStream_t hStream);
+    /// Generate ID for stream capture unique over the lifetime of the process
+    static unsigned long long GenerateCaptureID() {
+      static std::atomic<unsigned long long> uid(0);
+      return ++uid;
+    }
+
+    /// Returns capture status of the current stream
+    hipStreamCaptureStatus GetCaptureStatus() const { return captureStatus_; }
+    /// Returns capture mode of the current stream
+    hipStreamCaptureMode GetCaptureMode() const { return captureMode_; }
+    /// Returns if stream is origin stream
+    bool IsOriginStream() const { return originStream_; }
+    /// Mark this stream as the origin of a capture
+    void SetOriginStream() { originStream_ = true; }
+    /// Returns captured graph
+    hip::Graph* GetCaptureGraph() const { return pCaptureGraph_; }
+    /// Returns last captured graph node
+    const std::vector<hip::GraphNode*>& GetLastCapturedNodes() const { return lastCapturedNodes_; }
+    /// Set last captured graph node
+    void SetLastCapturedNode(hip::GraphNode* graphNode) { lastCapturedNodes_ = {graphNode}; }
+    /// Returns dependencies removed during capture
+    const std::vector<hip::GraphNode*>& GetRemovedDependencies() const {
+      return removedDependencies_;
+    }
+    /// Append captured node via the wait event cross stream
+    void AddCrossCapturedNode(const std::vector<hip::GraphNode*>& graphNodes,
+                              bool replace = false);
+    /// Set graph that is being captured
+    void SetCaptureGraph(hip::Graph* pGraph) {
+      pCaptureGraph_ = pGraph;
+      captureStatus_ = hipStreamCaptureStatusActive;
+    }
+    /// Release graph when capture is invalidated
+    void ReleaseCaptureGraph();
+    /// Generate and assign a new capture ID (used at BeginCapture)
+    void SetCaptureId() { captureID_ = GenerateCaptureID(); }
+    /// Inherit capture ID from the parent stream
+    void SetCaptureId(unsigned long long captureId) { captureID_ = captureId; }
+    /// Reset capture parameters
+    hipError_t EndCapture();
+    /// Set capture status
+    void SetCaptureStatus(hipStreamCaptureStatus captureStatus) { captureStatus_ = captureStatus; }
+    /// Set capture mode
+    void SetCaptureMode(hipStreamCaptureMode captureMode) { captureMode_ = captureMode; }
+    /// Set parent stream
+    void SetParentStream(hipStream_t parentStream) { parentStream_ = parentStream; }
+    /// Get parent stream
+    hipStream_t GetParentStream() const { return parentStream_; }
+    /// Get capture ID
+    unsigned long long GetCaptureID() const { return captureID_; }
+    /// Associate an event with the current capture
+    void SetCaptureEvent(hipEvent_t e) {
+      std::scoped_lock lock(lock_);
+      captureEvents_.emplace(e);
+    }
+    /// Returns true if the event is part of this capture
+    bool IsEventCaptured(hipEvent_t e) const {
+      std::scoped_lock lock(lock_);
+      return captureEvents_.count(e) != 0;
+    }
+    /// Remove an event from the current capture
+    void EraseCaptureEvent(hipEvent_t e) {
+      std::scoped_lock lock(lock_);
+      captureEvents_.erase(e);
+    }
+    /// Register a parallel (forked) capture stream
+    void SetParallelCaptureStream(hipStream_t s) {
+      auto it = std::find(parallelCaptureStreams_.begin(), parallelCaptureStreams_.end(), s);
+      if (it == parallelCaptureStreams_.end()) {
+        parallelCaptureStreams_.push_back(s);
+      }
+    }
+    /// Remove a parallel capture stream
+    void EraseParallelCaptureStream(hipStream_t s) {
+      auto it = std::find(parallelCaptureStreams_.begin(), parallelCaptureStreams_.end(), s);
+      if (it != parallelCaptureStreams_.end()) {
+        parallelCaptureStreams_.erase(it);
+      }
+    }
+
   private:
+    ~Stream() = default;
+
     mutable std::recursive_mutex lock_;      //!< Guards captureEvents_ bookkeeping
     Device* device_;                         //!< Device that owns this stream
     Priority priority_;                      //!< Scheduling priority (High / Normal / Low)
@@ -301,142 +417,6 @@ private:
       static std::atomic<uint64_t> uniqueId{0};
       return ++uniqueId;
     }
-
-  public:
-    Stream(Device* dev, Priority p = Priority::Normal, unsigned int f = 0, bool null_stream = false,
-           const std::vector<uint32_t>& cuMask = {},
-           hipStreamCaptureStatus captureStatus = hipStreamCaptureStatusNone);
-
-    /// Creates the hip stream object, including AMD host queue
-    bool Create();
-    /// Get device ID associated with the current stream;
-    int DeviceId() const;
-    /// Get HIP device associated with the stream
-    Device* GetDevice() const { return device_; }
-    /// Get device ID associated with a stream;
-    static int DeviceId(const hipStream_t hStream);
-    /// Returns true if this is the null (default legacy) stream
-    bool Null() const { return null_; }
-    /// Returns the creation flags for the current stream
-    unsigned int Flags() const { return flags_; }
-    /// Returns the priority for the current stream
-    Priority GetPriority() const { return priority_; }
-    /// Returns the CU mask for the current stream
-    const std::vector<uint32_t> GetCUMask() const { return cuMask_; }
-
-    /// Fetch the stream Id
-    uint64_t GetStreamId() const { return stream_id_; }
-    /// Check whether any blocking stream running
-    static bool StreamCaptureBlocking();
-
-    static void Destroy(hip::Stream* stream, bool forceDestroy = false);
-
-    virtual bool terminate();
-
-    /// Check Stream Capture status to make sure it is done
-    static bool StreamCaptureOngoing(hipStream_t hStream);
-
-    /// Returns capture status of the current stream
-    hipStreamCaptureStatus GetCaptureStatus() const { return captureStatus_; }
-    /// Returns capture mode of the current stream
-    hipStreamCaptureMode GetCaptureMode() const { return captureMode_; }
-    /// Returns if stream is origin stream
-    bool IsOriginStream() const { return originStream_; }
-    void SetOriginStream() { originStream_ = true; }
-    /// Returns captured graph
-    hip::Graph* GetCaptureGraph() const { return pCaptureGraph_; }
-    /// Returns last captured graph node
-    const std::vector<hip::GraphNode*>& GetLastCapturedNodes() const { return lastCapturedNodes_; }
-    /// Set last captured graph node
-    void SetLastCapturedNode(hip::GraphNode* graphNode) {
-      lastCapturedNodes_.clear();
-      lastCapturedNodes_.push_back(graphNode);
-    }
-    /// Returns dependencies removed during capture
-    const std::vector<hip::GraphNode*>& GetRemovedDependencies() const {
-      return removedDependencies_;
-    }
-    /// Append captured node via the wait event cross stream
-    void AddCrossCapturedNode(std::vector<hip::GraphNode*> graphNodes, bool replace = false) {
-      // Replace dependencies as per flag hipStreamSetCaptureDependencies.
-      if (replace) {
-        for (auto node : lastCapturedNodes_) {
-          removedDependencies_.push_back(node);
-        }
-        lastCapturedNodes_.clear();
-      }
-      for (auto node : graphNodes) {
-        if (std::find(lastCapturedNodes_.begin(), lastCapturedNodes_.end(), node) ==
-            lastCapturedNodes_.end()) {
-          lastCapturedNodes_.push_back(node);
-        }
-      }
-    }
-    /// Set graph that is being captured
-    void SetCaptureGraph(hip::Graph* pGraph) {
-      pCaptureGraph_ = pGraph;
-      captureStatus_ = hipStreamCaptureStatusActive;
-    }
-    /// Release graph when capture is invalidated
-    void ReleaseCaptureGraph();
-    /// Generate and assign a new capture ID (used at BeginCapture)
-    void SetCaptureId() {
-      captureID_ = GenerateCaptureID();
-    }
-    /// Inherit capture ID from the parent stream
-    void SetCaptureId(unsigned long long captureId) {
-      captureID_ = captureId;
-    }
-    /// reset capture parameters
-    hipError_t EndCapture();
-    /// Set capture status
-    void SetCaptureStatus(hipStreamCaptureStatus captureStatus) { captureStatus_ = captureStatus; }
-    /// Set capture mode
-    void SetCaptureMode(hipStreamCaptureMode captureMode) { captureMode_ = captureMode; }
-    /// Set parent stream
-    void SetParentStream(hipStream_t parentStream) { parentStream_ = parentStream; }
-    /// Get parent stream
-    hipStream_t GetParentStream() const { return parentStream_; }
-    /// Generate ID for stream capture unique over the lifetime of the process
-    static unsigned long long GenerateCaptureID() {
-      static std::atomic<unsigned long long> uid(0);
-      return ++uid;
-    }
-    /// Get capture ID
-    unsigned long long GetCaptureID() const { return captureID_; }
-    /// Associate an event with the current capture
-    void SetCaptureEvent(hipEvent_t e) {
-      std::scoped_lock lock(lock_);
-      captureEvents_.emplace(e);
-    }
-    /// Returns true if the event is part of this capture
-    bool IsEventCaptured(hipEvent_t e) {
-      std::scoped_lock lock(lock_);
-      return captureEvents_.count(e) != 0;
-    }
-    /// Remove an event from the current capture
-    void EraseCaptureEvent(hipEvent_t e) {
-      std::scoped_lock lock(lock_);
-      captureEvents_.erase(e);
-    }
-    /// Register a parallel (forked) capture stream
-    void SetParallelCaptureStream(hipStream_t s) {
-      auto it = std::find(parallelCaptureStreams_.begin(), parallelCaptureStreams_.end(), s);
-      if (it == parallelCaptureStreams_.end()) {
-        parallelCaptureStreams_.push_back(s);
-      }
-    }
-    /// Remove a parallel capture stream
-    void EraseParallelCaptureStream(hipStream_t s) {
-      auto it = std::find(parallelCaptureStreams_.begin(), parallelCaptureStreams_.end(), s);
-      if (it != parallelCaptureStreams_.end()) {
-        parallelCaptureStreams_.erase(it);
-      }
-    }
-
-    /// The stream should be destroyed via release() rather than delete
-  private:
-    ~Stream() {};
   };
 
   /// Thread-safe registry for tracking objects of type T (e.g. graphics resources).
@@ -473,14 +453,99 @@ private:
 
   /// HIP Device class
   class Device : public amd::ReferenceCountedObject {
+  public:
+    Device(amd::Context* ctx, int devId)
+        : context_(ctx),
+          deviceId_(devId),
+          flags_(hipDeviceScheduleSpin) {
+      assert(ctx != nullptr);
+    }
+    ~Device();
+
+    bool Create();
+    void Reset();
+
+    // --- Accessors ---
+
+    amd::Context* asContext() const { return context_; }
+    int deviceId() const { return deviceId_; }
+    void retain() const { context_->retain(); }
+    void release() const { context_->release(); }
+    const std::vector<amd::Device*>& devices() const { return context_->devices(); }
+    unsigned int getFlags() const { return flags_; }
+    void setFlags(unsigned int flags) { flags_ = flags; }
+
+    // --- Peer access ---
+
+    /// Enable peer access from this device to peerDeviceId
+    hipError_t EnablePeerAccess(int peerDeviceId);
+    /// Disable peer access from this device to peerDeviceId
+    hipError_t DisablePeerAccess(int peerDeviceId);
+
+    // --- Stream management ---
+
+    hip::Stream* NullStream(bool wait = true);
+    Stream* GetNullStream() const { return null_stream_; }
+    /// Register a stream with this device
+    void AddStream(Stream* stream);
+    /// Unregister a stream from this device
+    void RemoveStream(Stream* stream);
+    /// Returns true if stream belongs to this device
+    bool StreamExists(const Stream* stream);
+    /// Synchronize all streams (optionally only blocking ones)
+    void SyncAllStreams(bool cpu_wait = true, bool wait_blocking_streams_only = false);
+    /// Returns true if any stream on this device is in capture mode
+    bool StreamCaptureBlocking();
+    /// Wait all active streams on the blocking queue. The method enqueues a wait command and
+    /// doesn't stall the current thread.
+    void WaitActiveStreams(hip::Stream* blocking_stream, bool wait_null_stream = false);
+
+    // --- Device activity ---
+
+    void SetActiveStatus() { isActive_ = true; }
+    bool GetActiveStatus();
+
+    // --- Memory pools ---
+
+    /// Set the current memory pool on the device
+    void SetCurrentMemoryPool(MemoryPool* pool = nullptr) {
+      current_mem_pool_ = (pool == nullptr) ? default_mem_pool_ : pool;
+    }
+    MemoryPool* GetCurrentMemoryPool() const { return current_mem_pool_; }
+    MemoryPool* GetDefaultMemoryPool() const { return default_mem_pool_; }
+    MemoryPool* GetGraphMemoryPool() const { return graph_mem_pool_; }
+    void SetCurrentManagedMemoryPool(MemoryPool* pool) { current_managed_mem_pool_ = pool; }
+    MemoryPool* GetCurrentManagedMemoryPool() const { return current_managed_mem_pool_; }
+    MemoryPool* GetDefaultManagedMemoryPool() const { return default_managed_mem_pool_; }
+    void AddMemoryPool(MemoryPool* pool);
+    void RemoveMemoryPool(MemoryPool* pool);
+    bool FreeMemory(amd::Memory* memory, Stream* stream, Event* event = nullptr);
+    void ReleaseFreedMemory();
+    void RemoveStreamFromPools(Stream* stream);
+    void AddSafeStream(Stream* event_stream, Stream* wait_stream);
+    bool IsMemoryPoolValid(MemoryPool* pool);
+
+    // --- Graphics resource tracking ---
+
+    ObjectRegistry<hipGraphicsResource_t>& registeredGraphics() {
+      return registeredGraphicsResources_;
+    }
+    ObjectRegistry<hipGraphicsResource_t>& mappedGraphics() {
+      return mappedGraphicsResources_;
+    }
+
+  private:
+    /// Destroy all streams on this device (called by Reset)
+    void destroyAllStreams();
+
     std::recursive_mutex lock_;                //!< Device-wide lock
-    std::shared_mutex streamSetLock;           //!< Guards streamSet (reader-writer)
-    std::unordered_set<hip::Stream*> streamSet;//!< Active streams on this device
+    std::shared_mutex streamSetLock_;          //!< Guards streamSet_ (reader-writer)
+    std::unordered_set<hip::Stream*> streamSet_; //!< Active streams on this device
     amd::Context* context_;                    //!< ROCclr context
     int deviceId_;                             //!< Cached device ID (avoids linear scan)
     Stream* null_stream_ = nullptr;            //!< Default (null/legacy) stream
     unsigned int flags_;                       //!< Device flags (e.g. hipDeviceScheduleSpin)
-    std::list<int> userEnabledPeers;           //!< Peer device IDs enabled via hipEnablePeerAccess
+    std::list<int> userEnabledPeers_;          //!< Peer device IDs enabled via hipEnablePeerAccess
     std::atomic<bool> isActive_{false};        //!< True once any work has been submitted
 
     // ----- Memory pool state -----
@@ -494,136 +559,6 @@ private:
     // ----- Graphics resource tracking -----
     ObjectRegistry<hipGraphicsResource_t> registeredGraphicsResources_;
     ObjectRegistry<hipGraphicsResource_t> mappedGraphicsResources_;
-
-  public:
-    Device(amd::Context* ctx, int devId)
-        : context_(ctx),
-          deviceId_(devId),
-          flags_(hipDeviceScheduleSpin) {
-      assert(ctx != nullptr);
-    }
-    ~Device();
-
-    bool Create();
-    amd::Context* asContext() const { return context_; }
-    int deviceId() const { return deviceId_; }
-    void retain() const { context_->retain(); }
-    void release() const { context_->release(); }
-    const std::vector<amd::Device*>& devices() const { return context_->devices(); }
-    /// Enable peer access from this device to peerDeviceId
-    hipError_t EnablePeerAccess(int peerDeviceId) {
-      std::scoped_lock lock(lock_);
-      if (std::find(userEnabledPeers.begin(), userEnabledPeers.end(), peerDeviceId)
-          != userEnabledPeers.end()) {
-        return hipErrorPeerAccessAlreadyEnabled;
-      }
-      userEnabledPeers.push_back(peerDeviceId);
-      return hipSuccess;
-    }
-    /// Disable peer access from this device to peerDeviceId
-    hipError_t DisablePeerAccess(int peerDeviceId) {
-      std::scoped_lock lock(lock_);
-      auto it = std::find(userEnabledPeers.begin(), userEnabledPeers.end(), peerDeviceId);
-      if (it == userEnabledPeers.end()) {
-        return hipErrorPeerAccessNotEnabled;
-      }
-      userEnabledPeers.erase(it);
-      return hipSuccess;
-    }
-    unsigned int getFlags() const { return flags_; }
-    void setFlags(unsigned int flags) { flags_ = flags; }
-    void Reset();
-
-    hip::Stream* NullStream(bool wait = true);
-    Stream* GetNullStream() const { return null_stream_; }
-
-    void SetActiveStatus() { isActive_ = true; }
-
-    bool GetActiveStatus() {
-      std::scoped_lock lock(lock_);
-      /// Either stream is active or device is active
-      if (isActive_) return true;
-      if (existsActiveStreamForDevice()) {
-        isActive_ = true;
-        return true;
-      }
-      return false;
-    }
-
-    /// Set the current memory pool on the device
-    void SetCurrentMemoryPool(MemoryPool* pool = nullptr) {
-      current_mem_pool_ = (pool == nullptr) ? default_mem_pool_ : pool;
-    }
-
-    /// Get the current memory pool on the device
-    MemoryPool* GetCurrentMemoryPool() const { return current_mem_pool_; }
-
-    /// Get the default memory pool on the device
-    MemoryPool* GetDefaultMemoryPool() const { return default_mem_pool_; }
-
-    /// Get the graph memory pool on the device
-    MemoryPool* GetGraphMemoryPool() const { return graph_mem_pool_; }
-
-    /// Set managed memory pool on the device
-    void SetCurrentManagedMemoryPool(MemoryPool* pool) { current_managed_mem_pool_ = pool; }
-
-    /// Get managed memory pool on the device
-    MemoryPool* GetCurrentManagedMemoryPool() const { return current_managed_mem_pool_; }
-
-    /// Get default managed memory pool on the device
-    MemoryPool* GetDefaultManagedMemoryPool() const { return default_managed_mem_pool_; }
-
-    /// Add memory pool to the device
-    void AddMemoryPool(MemoryPool* pool);
-
-    /// Remove memory pool from the device
-    void RemoveMemoryPool(MemoryPool* pool);
-
-    /// Free memory from the device
-    bool FreeMemory(amd::Memory* memory, Stream* stream, Event* event = nullptr);
-
-    /// Release freed memory from all pools on the current device
-    void ReleaseFreedMemory();
-
-    /// Removes a destroyed stream from the safe list of memory pools
-    void RemoveStreamFromPools(Stream* stream);
-
-    /// Add safe streams into the memory pools for reuse
-    void AddSafeStream(Stream* event_stream, Stream* wait_stream);
-
-    /// Returns true if memory pool is valid on this device
-    bool IsMemoryPoolValid(MemoryPool* pool);
-    /// Register a stream with this device
-    void AddStream(Stream* stream);
-    /// Unregister a stream from this device
-    void RemoveStream(Stream* stream);
-    /// Returns true if stream belongs to this device
-    bool StreamExists(const Stream* stream);
-    /// Destroy all streams on this device
-    void destroyAllStreams();
-    /// Synchronize all streams (optionally only blocking ones)
-    void SyncAllStreams(bool cpu_wait = true, bool wait_blocking_streams_only = false);
-    /// Returns true if any stream on this device is in capture mode
-    bool StreamCaptureBlocking();
-    /// Returns true if any stream has pending work
-    bool existsActiveStreamForDevice();
-    /// Wait all active streams on the blocking queue. The method enqueues a wait command and
-    /// doesn't stall the current thread.
-    void WaitActiveStreams(hip::Stream* blocking_stream, bool wait_null_stream = false);
-
-    /// Returns the registered graphics resource tracker
-    ObjectRegistry<hipGraphicsResource_t>& registeredGraphics() {
-      return registeredGraphicsResources_;
-    }
-    /// Returns the mapped graphics resource tracker
-    ObjectRegistry<hipGraphicsResource_t>& mappedGraphics() {
-      return mappedGraphicsResources_;
-    }
-    /// Clear all tracked graphics resources
-    void clearAllTrackedObjects() {
-      registeredGraphicsResources_.clear();
-      mappedGraphicsResources_.clear();
-    }
   };
 
   /// Per-thread state aggregator for HIP runtime (one instance per thread via thread_local).

@@ -112,6 +112,22 @@ void Stream::ReleaseCaptureGraph() {
 }
 
 // ================================================================================================
+void Stream::AddCrossCapturedNode(const std::vector<hip::GraphNode*>& graphNodes, bool replace) {
+  // Replace dependencies as per flag hipStreamSetCaptureDependencies.
+  if (replace) {
+    removedDependencies_.insert(removedDependencies_.end(),
+                                lastCapturedNodes_.begin(), lastCapturedNodes_.end());
+    lastCapturedNodes_.clear();
+  }
+  for (auto* node : graphNodes) {
+    if (std::find(lastCapturedNodes_.begin(), lastCapturedNodes_.end(), node) ==
+        lastCapturedNodes_.end()) {
+      lastCapturedNodes_.push_back(node);
+    }
+  }
+}
+
+// ================================================================================================
 int Stream::DeviceId() const { return device_->deviceId(); }
 
 // ================================================================================================
