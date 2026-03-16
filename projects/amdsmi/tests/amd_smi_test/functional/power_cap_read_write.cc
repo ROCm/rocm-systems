@@ -74,9 +74,9 @@ void TestPowerCapReadWrite::SetCheckPowerCap(std::string msg, uint32_t dv_ind, u
   ret_expected = ret;
 
   IF_VERB(STANDARD) {
-    std::cout << msg << std::endl;
-    std::cout << "[Before Set]  Current Power Cap: " << curr_cap << " uW" << std::endl;
-    std::cout << "[Before Set]  Setting new cap to " << new_cap << "..." << std::endl;
+    std::cout << "\t" << msg << std::endl;
+    std::cout << "\t[Before Set]  Current Power Cap: " << curr_cap << " uW" << std::endl;
+    std::cout << "\t[Before Set]  Setting new cap to " << new_cap << "..." << std::endl;
   }
   DISPLAY_AMDSMI_API("amdsmi_set_power_cap",
                      "gpu=" + std::to_string(dv_ind) + ", cap= " + std::to_string(new_cap),
