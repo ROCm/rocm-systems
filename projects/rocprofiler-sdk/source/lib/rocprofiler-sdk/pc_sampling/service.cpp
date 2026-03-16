@@ -228,6 +228,74 @@ configure_pc_sampling_service(context::context*                ctx,
     });
 }
 
+rocprofiler_status_t
+configure_pc_sampling_service_v2(context::context*                            ctx,
+                                 const rocprofiler_agent_t*                   agent,
+                                 rocprofiler_pc_sampling_method_t             method,
+                                 rocprofiler_pc_sampling_unit_t               unit,
+                                 uint64_t                                     interval,
+                                 rocprofiler_buffer_id_t                      buffer_id,
+                                 const rocprofiler_pc_sampling_record_kind_t* record_kinds,
+                                 size_t                                       num_record_kinds)
+{
+    // PC Sampling cannot be used simultaneously with counter collection.
+    if(ctx->dispatch_counter_collection || ctx->device_counter_collection)
+    {
+        return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
+    }
+
+    // Check if this agent is already configured by another context. If so, report an error.
+    // Otherwise, register the session.
+    return get_global_pc_sampling_sessions().wlock([&](auto& sessions) -> rocprofiler_status_t {
+        if(auto it = sessions.find(agent->id); it != sessions.end())
+        {
+            // Agent already configured by another context
+            return ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED;
+        }
+
+        // calling KFD to check if the configuration is actually supported at the moment
+        uint32_t ioctl_pcs_id;
+        auto ioctl_status = ioctl::ioctl_pcs_create(agent, method, unit, interval, &ioctl_pcs_id);
+        if(ioctl_status != ROCPROFILER_STATUS_SUCCESS) return ioctl_status;
+
+        // Create a new session for this agent
+        auto session = std::make_shared<PCSAgentSession>();
+
+        // Fully initialize the session under the lock before making it visible
+        session->context_id   = rocprofiler_context_id_t{.handle = ctx->context_idx};
+        session->client_idx   = ctx->client_idx;
+        session->agent        = agent;
+        session->method       = method;
+        session->unit         = unit;
+        session->interval     = interval;
+        session->buffer_id    = buffer_id;
+        session->ioctl_pcs_id = ioctl_pcs_id;
+        session->parser       = std::make_unique<PCSamplingParserContext>();
+        session->cid_manager  = std::make_unique<PCSCIDManager>(session->parser.get());
+
+        // v2 API: store the requested record kinds and configure the parser
+        session->requested_record_kinds.assign(record_kinds, record_kinds + num_record_kinds);
+        session->parser->set_requested_record_kind(session->get_valid_record_kind());
+
+        // Register session in global map
+        sessions[agent->id] = session;
+
+        // Initialize the PC sampler service for this context if needed
+        if(!ctx->pc_sampler)
+        {
+            ctx->pc_sampler = std::make_unique<context::pc_sampling_service>();
+        }
+
+        // Register session in context map (shared ownership)
+        ctx->pc_sampler->agent_sessions[agent->id] = session;
+
+        ROCP_INFO << "PC sampling v2 session with IOCTL id: " << session->ioctl_pcs_id
+                  << " has been created!\n";
+
+        return ROCPROFILER_STATUS_SUCCESS;
+    });
+}
+
 bool
 is_pc_sample_service_configured(rocprofiler_agent_id_t agent_id)
 {

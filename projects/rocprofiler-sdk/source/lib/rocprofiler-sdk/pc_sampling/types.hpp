@@ -37,6 +37,7 @@
 #endif
 
 #include <memory>
+#include <vector>
 
 namespace rocprofiler
 {
@@ -68,6 +69,34 @@ struct PCSAgentSession
     rocprofiler_context_id_t context_id = {.handle = 0};
     // Client index from the context (tool's id)
     uint32_t client_idx = 0;
+
+    // v2 API: which record kinds the client requested.
+    // Empty means this session was created via the old (v1) API.
+    std::vector<rocprofiler_pc_sampling_record_kind_t> requested_record_kinds = {};
+
+    // Returns true if this session was created via the v2 API
+    bool is_v2_api() const { return !requested_record_kinds.empty(); }
+
+    // Returns the valid version record kind (V0-V5) if configured via v2 API,
+    // or ROCPROFILER_PC_SAMPLING_RECORD_NONE if not applicable.
+    rocprofiler_pc_sampling_record_kind_t get_valid_record_kind() const
+    {
+        for(auto kind : requested_record_kinds)
+        {
+            if(kind != ROCPROFILER_PC_SAMPLING_RECORD_INVALID_SAMPLE) return kind;
+        }
+        return ROCPROFILER_PC_SAMPLING_RECORD_NONE;
+    }
+
+    // Returns true if the client wants to receive invalid samples
+    bool wants_invalid_samples() const
+    {
+        for(auto kind : requested_record_kinds)
+        {
+            if(kind == ROCPROFILER_PC_SAMPLING_RECORD_INVALID_SAMPLE) return true;
+        }
+        return false;
+    }
 };
 
 // TODO static assertions

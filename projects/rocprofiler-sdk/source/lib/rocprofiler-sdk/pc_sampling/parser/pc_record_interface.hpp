@@ -189,6 +189,10 @@ protected:
         host_trap_data;
     std::vector<std::unique_ptr<PCSamplingData<rocprofiler_pc_sampling_record_stochastic_v0_t>>>
         stochastic_data;
+    //! Data storage for v2 API record types
+    std::vector<std::unique_ptr<PCSamplingData<rocprofiler_pc_sampling_record_v0_t>>> v0_data;
+    std::vector<std::unique_ptr<PCSamplingData<rocprofiler_pc_sampling_record_v1_t>>> v1_data;
+    std::vector<std::unique_ptr<PCSamplingData<rocprofiler_pc_sampling_record_v2_t>>> v2_data;
     //! Dispatches not yet completed.
     // Uses only the internal correlation_id.
     std::unordered_map<uint64_t, dispatch_pkt_id_t> active_dispatches;
@@ -205,5 +209,24 @@ private:
     template <typename GFXIP>
     parse_funct_ptr_t _get_parse_func_for_method(rocprofiler_pc_sampling_method_t pcs_method);
 
+    template <typename GFXIP>
+    parse_funct_ptr_t _get_parse_func_for_record_kind(
+        rocprofiler_pc_sampling_record_kind_t record_kind);
+
     std::unordered_map<rocprofiler_agent_id_t, rocprofiler_buffer_id_t> _agent_buffers;
+
+    // v2 API: the record kind to use for parse dispatch.
+    // ROCPROFILER_PC_SAMPLING_RECORD_NONE means v1 API (use method-based dispatch).
+    rocprofiler_pc_sampling_record_kind_t _requested_record_kind =
+        ROCPROFILER_PC_SAMPLING_RECORD_NONE;
+
+public:
+    /// Set the v2 record kind for this parser context.
+    /// Must be called before any parse() calls for v2 sessions.
+    void set_requested_record_kind(rocprofiler_pc_sampling_record_kind_t kind)
+    {
+        _requested_record_kind = kind;
+    }
+
+    bool is_v2() const { return _requested_record_kind != ROCPROFILER_PC_SAMPLING_RECORD_NONE; }
 };

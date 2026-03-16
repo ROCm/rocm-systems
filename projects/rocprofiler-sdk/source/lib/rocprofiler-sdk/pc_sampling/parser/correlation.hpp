@@ -219,6 +219,85 @@ private:
 
 using address_range_t = rocprofiler::sdk::codeobj::segment::address_range_t;
 
+// =====================================================================================
+// Traits for determining sample validity across old and new record types.
+//
+// Old records (host_trap_v0, stochastic_v0) use `size == 0` as the invalid sentinel.
+// New records (V0, V1, V2) don't have a `size` member; for V2 (stochastic), the
+// zero-init'd record (all fields 0) is the invalid sentinel -- we check
+// `timestamp == 0 && exec_mask == 0` as the invalid marker.
+// V0 and V1 are host-trap only and copySample never produces invalid records for them.
+// =====================================================================================
+
+template <typename PcSamplingRecordT>
+inline bool
+is_invalid_sample(const PcSamplingRecordT& sample)
+{
+    return sample.size == 0;
+}
+
+template <>
+inline bool
+is_invalid_sample<rocprofiler_pc_sampling_record_v0_t>(
+    const rocprofiler_pc_sampling_record_v0_t& /*sample*/)
+{
+    // V0 is for host-trap: copySample never produces invalid V0 records
+    return false;
+}
+
+template <>
+inline bool
+is_invalid_sample<rocprofiler_pc_sampling_record_v1_t>(
+    const rocprofiler_pc_sampling_record_v1_t& /*sample*/)
+{
+    // V1 is for host-trap: copySample never produces invalid V1 records
+    return false;
+}
+
+template <>
+inline bool
+is_invalid_sample<rocprofiler_pc_sampling_record_v2_t>(
+    const rocprofiler_pc_sampling_record_v2_t& sample)
+{
+    // V2 invalid samples are zero-init'd by copySample
+    return sample.timestamp == 0 && sample.exec_mask == 0;
+}
+
+/**
+ * @brief Mark a sample as invalid. For old records with `size`, sets size to 0.
+ * For new records, zero-inits the entire struct.
+ */
+template <typename PcSamplingRecordT>
+inline void
+mark_sample_invalid(PcSamplingRecordT& sample)
+{
+    sample.size = 0;
+}
+
+template <>
+inline void
+mark_sample_invalid<rocprofiler_pc_sampling_record_v0_t>(
+    rocprofiler_pc_sampling_record_v0_t& sample)
+{
+    std::memset(&sample, 0, sizeof(sample));
+}
+
+template <>
+inline void
+mark_sample_invalid<rocprofiler_pc_sampling_record_v1_t>(
+    rocprofiler_pc_sampling_record_v1_t& sample)
+{
+    std::memset(&sample, 0, sizeof(sample));
+}
+
+template <>
+inline void
+mark_sample_invalid<rocprofiler_pc_sampling_record_v2_t>(
+    rocprofiler_pc_sampling_record_v2_t& sample)
+{
+    std::memset(&sample, 0, sizeof(sample));
+}
+
 template <typename GFXIP, typename PcSamplingRecordT>
 inline pcsample_status_t
 add_upcoming_samples(const device_handle     device,
@@ -242,7 +321,7 @@ add_upcoming_samples(const device_handle     device,
         auto& pc_sample = samples[p];
         pc_sample       = copySample<GFXIP, PcSamplingRecordT>(static_cast<const void*>(snap));
         // skip invalid samples
-        if(pc_sample.size == 0) continue;
+        if(is_invalid_sample(pc_sample)) continue;
 
         // Correct PC address of the original sample (if needed) prior to decoding it.
         auto pc_address = correct_pc_address<GFXIP, PcSamplingRecordT>(snap);
@@ -265,8 +344,8 @@ add_upcoming_samples(const device_handle     device,
             {
                 // We observed an error sample, that was not being
                 // tagged with the error bit on time due to high latency in the trap handler.
-                // Thus, we are declaring the sample invalid, by setting its size to zero.
-                pc_sample.size = 0;
+                // Thus, we are declaring the sample invalid.
+                mark_sample_invalid(pc_sample);
             }
         } catch(std::exception& e)
         {

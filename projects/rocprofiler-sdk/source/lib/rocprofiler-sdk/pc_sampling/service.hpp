@@ -70,6 +70,16 @@ configure_pc_sampling_service(context::context*                ctx,
                               uint64_t                         interval,
                               rocprofiler_buffer_id_t          buffer_id);
 
+rocprofiler_status_t
+configure_pc_sampling_service_v2(context::context*                            ctx,
+                                 const rocprofiler_agent_t*                   agent,
+                                 rocprofiler_pc_sampling_method_t             method,
+                                 rocprofiler_pc_sampling_unit_t               unit,
+                                 uint64_t                                     interval,
+                                 rocprofiler_buffer_id_t                      buffer_id,
+                                 const rocprofiler_pc_sampling_record_kind_t* record_kinds,
+                                 size_t                                       num_record_kinds);
+
 bool
 is_pc_sample_service_configured(rocprofiler_agent_id_t agent_id);
 

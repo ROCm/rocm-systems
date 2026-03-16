@@ -174,6 +174,42 @@ copyHwId<GFX12, rocprofiler_pc_sampling_hw_id_v0_t>(rocprofiler_pc_sampling_hw_i
     hw_id.vm_id = EXTRACT_BITS(hw_id_reg, 31, 28);
 }
 
+// --- copyHwId specializations for hw_id_v1_t (unpacked uint8_t fields) ---
+
+template <>
+inline void
+copyHwId<GFX9, rocprofiler_pc_sampling_hw_id_v1_t>(rocprofiler_pc_sampling_hw_id_v1_t& hw_id,
+                                                   const uint32_t                      hw_id_reg)
+{
+    hw_id.wave_id          = EXTRACT_BITS(hw_id_reg, 3, 0);
+    hw_id.simd_id          = EXTRACT_BITS(hw_id_reg, 5, 4);
+    hw_id.pipe_id          = EXTRACT_BITS(hw_id_reg, 7, 6);
+    hw_id.cu_or_wgp_id     = EXTRACT_BITS(hw_id_reg, 11, 8);
+    hw_id.shader_array_id  = EXTRACT_BITS(hw_id_reg, 12, 12);
+    hw_id.shader_engine_id = EXTRACT_BITS(hw_id_reg, 15, 13);
+    hw_id.workgroup_id     = EXTRACT_BITS(hw_id_reg, 19, 16);
+    hw_id.vm_id            = EXTRACT_BITS(hw_id_reg, 23, 20);
+    hw_id.queue_id         = EXTRACT_BITS(hw_id_reg, 26, 24);
+    hw_id.microengine_id   = EXTRACT_BITS(hw_id_reg, 31, 30);
+}
+
+template <>
+inline void
+copyHwId<GFX12, rocprofiler_pc_sampling_hw_id_v1_t>(rocprofiler_pc_sampling_hw_id_v1_t& hw_id,
+                                                    const uint32_t                      hw_id_reg)
+{
+    hw_id.wave_id          = EXTRACT_BITS(hw_id_reg, 4, 0);
+    hw_id.queue_id         = EXTRACT_BITS(hw_id_reg, 8, 5);
+    hw_id.cu_or_wgp_id     = EXTRACT_BITS(hw_id_reg, 13, 10);
+    hw_id.simd_id          = EXTRACT_BITS(hw_id_reg, 15, 14);
+    hw_id.shader_array_id  = EXTRACT_BITS(hw_id_reg, 16, 16);
+    hw_id.microengine_id   = EXTRACT_BITS(hw_id_reg, 17, 17);
+    hw_id.shader_engine_id = EXTRACT_BITS(hw_id_reg, 19, 18);
+    hw_id.pipe_id          = EXTRACT_BITS(hw_id_reg, 21, 20);
+    hw_id.workgroup_id     = EXTRACT_BITS(hw_id_reg, 27, 23);
+    hw_id.vm_id            = EXTRACT_BITS(hw_id_reg, 31, 28);
+}
+
 template <typename PcSamplingRecordT, typename SType>
 inline PcSamplingRecordT
 copySampleHeader(const SType& sample)
@@ -404,6 +440,373 @@ copySample<GFX12, rocprofiler_pc_sampling_record_stochastic_v0_t>(const void* sa
     return ret;
 }
 
+// =====================================================================================
+// New API (v2) record type specializations: V0, V1, V2
+// =====================================================================================
+
+/**
+ * @brief Helper to copy common fields shared by all v2 record types (V0/V1/V2).
+ * V0/V1/V2 records do NOT have a `size` member.
+ */
+template <typename PcSamplingRecordT, typename SType>
+inline PcSamplingRecordT
+copySampleCommon(const SType& sample)
+{
+    PcSamplingRecordT ret;
+    std::memset(&ret, 0, sizeof(PcSamplingRecordT));
+    ret.exec_mask = sample.exec_mask;
+    ret.timestamp = sample.timestamp;
+    return ret;
+}
+
+/**
+ * @brief Helper to pack GFX9 arbiter state bits into the canonical uint32_t layout
+ * where bit N corresponds to rocprofiler_pc_sampling_arbiter_state_field_id_t value N.
+ *
+ * GFX9 arb_state register layout (from perf_snapshot_data bits [25:10]):
+ *   bit 0 = ISSUE_MISC, bit 1 = ISSUE_EXP, bit 2 = ISSUE_FLAT, bit 3 = ISSUE_LDS,
+ *   bit 4 = ISSUE_VMEM_TEX, bit 5 = ISSUE_SCALAR, bit 6 = ISSUE_MATRIX, bit 7 = ISSUE_VALU
+ *   bit 8 = STALL_MISC, bit 9 = STALL_EXP, bit 10 = STALL_FLAT, bit 11 = STALL_LDS,
+ *   bit 12 = STALL_VMEM_TEX, bit 13 = STALL_SCALAR, bit 14 = STALL_MATRIX, bit 15 = STALL_VALU
+ */
+inline uint32_t
+pack_arbiter_state_gfx9(uint16_t arb_state, bool dual_issue_valu)
+{
+    uint32_t result = 0;
+    // Map HW bits to canonical field IDs
+    auto set_bit = [&](rocprofiler_pc_sampling_arbiter_state_field_id_t field, int hw_bit) {
+        if(arb_state & (1u << hw_bit)) result |= (1u << field);
+    };
+    set_bit(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_VALU, 7);
+    set_bit(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_MATRIX, 6);
+    set_bit(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_LDS, 3);
+    set_bit(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_SCALAR, 5);
+    set_bit(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_VMEM_TEX, 4);
+    set_bit(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_FLAT, 2);
+    set_bit(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_EXP, 1);
+    set_bit(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_BRMSG_MISC, 0);
+
+    set_bit(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_VALU, 15);
+    set_bit(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_MATRIX, 14);
+    set_bit(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_LDS, 11);
+    set_bit(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_SCALAR, 13);
+    set_bit(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_VMEM_TEX, 12);
+    set_bit(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_FLAT, 10);
+    set_bit(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_EXP, 9);
+    set_bit(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_BRMSG_MISC, 8);
+
+    if(dual_issue_valu)
+        result |= (1u << ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_DUAL_ISSUE_VALU);
+
+    return result;
+}
+
+/**
+ * @brief Pack GFX12 arbiter state bits into canonical uint32_t layout.
+ *
+ * GFX12 arb_state register layout (from perf_snapshot_data1 bits [21:6]):
+ *   bit 0 = ISSUE_BRMSG, bit 1 = ISSUE_EXP, bit 2 = ISSUE_LDS_DIRECT, bit 3 = ISSUE_LDS,
+ *   bit 4 = ISSUE_VMEM_TEX, bit 5 = ISSUE_SCALAR, bit 6 = ISSUE_VALU,
+ *   [bit 7 = reserved],
+ *   bit 8 = STALL_BRMSG, bit 9 = STALL_EXP, bit 10 = STALL_LDS_DIRECT, bit 11 = STALL_LDS,
+ *   bit 12 = STALL_VMEM_TEX, bit 13 = STALL_SCALAR, bit 14 = STALL_VALU
+ */
+inline uint32_t
+pack_arbiter_state_gfx12(uint16_t arb_state)
+{
+    uint32_t result  = 0;
+    auto     set_bit = [&](rocprofiler_pc_sampling_arbiter_state_field_id_t field, int hw_bit) {
+        if(arb_state & (1u << hw_bit)) result |= (1u << field);
+    };
+    set_bit(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_VALU, 6);
+    set_bit(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_LDS, 3);
+    set_bit(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_LDS_DIRECT, 2);
+    set_bit(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_SCALAR, 5);
+    set_bit(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_VMEM_TEX, 4);
+    set_bit(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_EXP, 1);
+    set_bit(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_ISSUE_BRMSG_MISC, 0);
+
+    set_bit(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_VALU, 14);
+    set_bit(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_LDS, 11);
+    set_bit(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_LDS_DIRECT, 10);
+    set_bit(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_SCALAR, 13);
+    set_bit(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_VMEM_TEX, 12);
+    set_bit(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_EXP, 9);
+    set_bit(ROCPROFILER_PC_SAMPLING_ARBITER_STATE_FIELD_ID_STALL_BRMSG_MISC, 8);
+
+    return result;
+}
+
+// --- copySample specializations for V0 (minimal, all architectures) ---
+
+template <>
+inline rocprofiler_pc_sampling_record_v0_t
+copySample<GFX9, rocprofiler_pc_sampling_record_v0_t>(const void* sample)
+{
+    const auto& s = *static_cast<const perf_sample_host_trap_v1*>(sample);
+    return copySampleCommon<rocprofiler_pc_sampling_record_v0_t>(s);
+}
+
+template <>
+inline rocprofiler_pc_sampling_record_v0_t
+copySample<GFX950, rocprofiler_pc_sampling_record_v0_t>(const void* sample)
+{
+    return copySample<GFX9, rocprofiler_pc_sampling_record_v0_t>(sample);
+}
+
+template <>
+inline rocprofiler_pc_sampling_record_v0_t
+copySample<GFX11, rocprofiler_pc_sampling_record_v0_t>(const void* sample)
+{
+    const auto& s = *static_cast<const perf_sample_host_trap_v1*>(sample);
+    return copySampleCommon<rocprofiler_pc_sampling_record_v0_t>(s);
+}
+
+template <>
+inline rocprofiler_pc_sampling_record_v0_t
+copySample<GFX12, rocprofiler_pc_sampling_record_v0_t>(const void* sample)
+{
+    const auto& s = *static_cast<const perf_sample_host_trap_v1*>(sample);
+    return copySampleCommon<rocprofiler_pc_sampling_record_v0_t>(s);
+}
+
+// --- copySample specializations for V1 (host-trap with hw_id, workgroup, wave_in_group) ---
+
+template <>
+inline rocprofiler_pc_sampling_record_v1_t
+copySample<GFX9, rocprofiler_pc_sampling_record_v1_t>(const void* sample)
+{
+    const auto& s     = *static_cast<const perf_sample_host_trap_v1*>(sample);
+    auto        ret   = copySampleCommon<rocprofiler_pc_sampling_record_v1_t>(s);
+    ret.hw_id.chiplet = s.chiplet_and_wave_id >> 8;
+    ret.wave_in_group = s.chiplet_and_wave_id & 0x3F;
+    copyHwId<GFX9>(ret.hw_id, s.hw_id);
+    ret.workgroup_position.x = s.workgroup_id_x;
+    ret.workgroup_position.y = s.workgroup_id_y;
+    ret.workgroup_position.z = s.workgroup_id_z;
+    return ret;
+}
+
+template <>
+inline rocprofiler_pc_sampling_record_v1_t
+copySample<GFX950, rocprofiler_pc_sampling_record_v1_t>(const void* sample)
+{
+    return copySample<GFX9, rocprofiler_pc_sampling_record_v1_t>(sample);
+}
+
+template <>
+inline rocprofiler_pc_sampling_record_v1_t
+copySample<GFX11, rocprofiler_pc_sampling_record_v1_t>(const void* sample)
+{
+    const auto& s            = *static_cast<const perf_sample_host_trap_v1*>(sample);
+    auto        ret          = copySampleCommon<rocprofiler_pc_sampling_record_v1_t>(s);
+    ret.wave_in_group        = s.chiplet_and_wave_id & 0x3F;
+    ret.workgroup_position.x = s.workgroup_id_x;
+    ret.workgroup_position.y = s.workgroup_id_y;
+    ret.workgroup_position.z = s.workgroup_id_z;
+    // TODO: decode hw_id for GFX11 when hw_id register layout is available
+    return ret;
+}
+
+template <>
+inline rocprofiler_pc_sampling_record_v1_t
+copySample<GFX12, rocprofiler_pc_sampling_record_v1_t>(const void* sample)
+{
+    const auto& s     = *static_cast<const perf_sample_host_trap_v1*>(sample);
+    auto        ret   = copySampleCommon<rocprofiler_pc_sampling_record_v1_t>(s);
+    ret.wave_in_group = s.chiplet_and_wave_id & 0x3F;
+    copyHwId<GFX12>(ret.hw_id, s.hw_id);
+    ret.workgroup_position.x = s.workgroup_id_x;
+    ret.workgroup_position.y = s.workgroup_id_y;
+    ret.workgroup_position.z = s.workgroup_id_z;
+    return ret;
+}
+
+// --- copySample specializations for V2 (stochastic with snapshot_information) ---
+
+template <>
+inline rocprofiler_pc_sampling_record_v2_t
+copySample<GFX9, rocprofiler_pc_sampling_record_v2_t>(const void* sample)
+{
+    const auto& s = *static_cast<const perf_sample_snapshot_v1*>(sample);
+
+    auto perf_snapshot_data = s.perf_snapshot_data;
+    auto valid              = static_cast<bool>(EXTRACT_BITS(perf_snapshot_data, 0, 0) &
+                                   ~EXTRACT_BITS(perf_snapshot_data, 26, 26));
+    if(!valid)
+    {
+        // Invalid sample: zero-init with dispatch_id = 0 as sentinel
+        rocprofiler_pc_sampling_record_v2_t invalid{};
+        std::memset(&invalid, 0, sizeof(invalid));
+        return invalid;
+    }
+
+    auto ret          = copySampleCommon<rocprofiler_pc_sampling_record_v2_t>(s);
+    ret.hw_id.chiplet = s.chiplet_and_wave_id >> 8;
+    ret.wave_in_group = s.chiplet_and_wave_id & 0x3F;
+    copyHwId<GFX9>(ret.hw_id, s.hw_id);
+    ret.workgroup_position.x = s.workgroup_id_x;
+    ret.workgroup_position.y = s.workgroup_id_y;
+    ret.workgroup_position.z = s.workgroup_id_z;
+
+    // Populate snapshot_information
+    ret.snapshot_information.wave_issued = EXTRACT_BITS(perf_snapshot_data, 1, 1);
+    ret.snapshot_information.instruction_type =
+        translate_inst<GFX9>(EXTRACT_BITS(perf_snapshot_data, 6, 3));
+    ret.snapshot_information.no_issue_reason =
+        translate_reason<GFX9>(EXTRACT_BITS(perf_snapshot_data, 9, 7));
+    ret.snapshot_information.wave_count = EXTRACT_BITS(s.perf_snapshot_data1, 5, 0);
+
+    // Pack arbiter state into canonical layout
+    uint16_t arb_state                     = EXTRACT_BITS(perf_snapshot_data, 25, 10);
+    bool     dual_issue                    = EXTRACT_BITS(perf_snapshot_data, 2, 2);
+    ret.snapshot_information.arbiter_state = pack_arbiter_state_gfx9(arb_state, dual_issue);
+
+    return ret;
+}
+
+template <>
+inline rocprofiler_pc_sampling_record_v2_t
+copySample<GFX950, rocprofiler_pc_sampling_record_v2_t>(const void* sample)
+{
+    return copySample<GFX9, rocprofiler_pc_sampling_record_v2_t>(sample);
+}
+
+template <>
+inline rocprofiler_pc_sampling_record_v2_t
+copySample<GFX11, rocprofiler_pc_sampling_record_v2_t>(const void* sample)
+{
+    const auto& s            = *static_cast<const perf_sample_snapshot_v1*>(sample);
+    auto        ret          = copySampleCommon<rocprofiler_pc_sampling_record_v2_t>(s);
+    ret.wave_in_group        = s.chiplet_and_wave_id & 0x3F;
+    ret.workgroup_position.x = s.workgroup_id_x;
+    ret.workgroup_position.y = s.workgroup_id_y;
+    ret.workgroup_position.z = s.workgroup_id_z;
+    // TODO: decode snapshot_information fields for GFX11
+    return ret;
+}
+
+template <>
+inline rocprofiler_pc_sampling_record_v2_t
+copySample<GFX12, rocprofiler_pc_sampling_record_v2_t>(const void* sample)
+{
+    const auto& s = *static_cast<const perf_sample_snapshot_v1*>(sample);
+
+    auto perf_snapshot_data = s.perf_snapshot_data;
+    auto valid              = static_cast<bool>(EXTRACT_BITS(perf_snapshot_data, 0, 0));
+    if(!valid)
+    {
+        rocprofiler_pc_sampling_record_v2_t invalid{};
+        std::memset(&invalid, 0, sizeof(invalid));
+        return invalid;
+    }
+
+    auto ret          = copySampleCommon<rocprofiler_pc_sampling_record_v2_t>(s);
+    ret.wave_in_group = s.chiplet_and_wave_id & 0x3F;
+    copyHwId<GFX12>(ret.hw_id, s.hw_id);
+    ret.workgroup_position.x = s.workgroup_id_x;
+    ret.workgroup_position.y = s.workgroup_id_y;
+    ret.workgroup_position.z = s.workgroup_id_z;
+
+    // Populate snapshot_information
+    ret.snapshot_information.wave_issued = EXTRACT_BITS(perf_snapshot_data, 1, 1);
+    ret.snapshot_information.instruction_type =
+        translate_inst<GFX12>(EXTRACT_BITS(perf_snapshot_data, 5, 2));
+    ret.snapshot_information.no_issue_reason =
+        translate_reason<GFX12>(EXTRACT_BITS(perf_snapshot_data, 8, 6));
+
+    auto perf_snapshot_data1            = s.perf_snapshot_data1;
+    ret.snapshot_information.wave_count = EXTRACT_BITS(perf_snapshot_data1, 5, 0);
+
+    // Pack arbiter state into canonical layout
+    uint16_t arb_state                     = EXTRACT_BITS(perf_snapshot_data1, 21, 6);
+    ret.snapshot_information.arbiter_state = pack_arbiter_state_gfx12(arb_state);
+
+    return ret;
+}
+
+// --- copySample specializations for GFX1250 V0, V1, V2 (new API) ---
+
+template <>
+inline rocprofiler_pc_sampling_record_v0_t
+copySample<GFX1250, rocprofiler_pc_sampling_record_v0_t>(const void* sample)
+{
+    return copySample<GFX12, rocprofiler_pc_sampling_record_v0_t>(sample);
+}
+
+template <>
+inline rocprofiler_pc_sampling_record_v1_t
+copySample<GFX1250, rocprofiler_pc_sampling_record_v1_t>(const void* sample)
+{
+    const auto& s     = *static_cast<const perf_sample_host_trap_v1*>(sample);
+    auto        ret   = copySampleCommon<rocprofiler_pc_sampling_record_v1_t>(s);
+    ret.wave_in_group = s.chiplet_and_wave_id & 0x3F;
+    // GFX1250 has chiplets
+    ret.hw_id.chiplet = s.chiplet_and_wave_id >> 8;
+    // ROCr uses same hw_id struct for both GFX12 and GFX1250
+    copyHwId<GFX12>(ret.hw_id, s.hw_id);
+    ret.workgroup_position.x = s.workgroup_id_x;
+    ret.workgroup_position.y = s.workgroup_id_y;
+    ret.workgroup_position.z = s.workgroup_id_z;
+    return ret;
+}
+
+template <>
+inline rocprofiler_pc_sampling_record_v2_t
+copySample<GFX1250, rocprofiler_pc_sampling_record_v2_t>(const void* sample)
+{
+    const auto& s = *static_cast<const perf_sample_snapshot_v1*>(sample);
+
+    auto perf_snapshot_data = s.perf_snapshot_data;
+    // The sample is valid if perf_snapshot_data.valid == 1
+    auto valid = static_cast<bool>(EXTRACT_BITS(perf_snapshot_data, 0, 0));
+    if(!valid)
+    {
+        rocprofiler_pc_sampling_record_v2_t invalid{};
+        std::memset(&invalid, 0, sizeof(invalid));
+        return invalid;
+    }
+
+    auto ret          = copySampleCommon<rocprofiler_pc_sampling_record_v2_t>(s);
+    // GFX1250 has chiplets
+    ret.hw_id.chiplet = s.chiplet_and_wave_id >> 8;
+    ret.wave_in_group = s.chiplet_and_wave_id & 0x3F;
+    // ROCr uses same hw_id struct for both GFX12 and GFX1250
+    copyHwId<GFX12>(ret.hw_id, s.hw_id);
+    ret.workgroup_position.x = s.workgroup_id_x;
+    ret.workgroup_position.y = s.workgroup_id_y;
+    ret.workgroup_position.z = s.workgroup_id_z;
+
+    // Populate snapshot_information
+    ret.snapshot_information.wave_issued = EXTRACT_BITS(perf_snapshot_data, 1, 1);
+    ret.snapshot_information.instruction_type =
+        translate_inst<GFX12>(EXTRACT_BITS(perf_snapshot_data, 5, 2));
+    ret.snapshot_information.no_issue_reason =
+        translate_reason<GFX12>(EXTRACT_BITS(perf_snapshot_data, 8, 6));
+
+    auto perf_snapshot_data1            = s.perf_snapshot_data1;
+    ret.snapshot_information.wave_count = EXTRACT_BITS(perf_snapshot_data1, 5, 0);
+
+    // Pack arbiter state into canonical layout
+    // GFX1250 arb_state is at bits [24:9] of perf_snapshot_data1 (GFX12 uses [21:6])
+    uint16_t arb_state                     = EXTRACT_BITS(perf_snapshot_data1, 24, 9);
+    ret.snapshot_information.arbiter_state = pack_arbiter_state_gfx12(arb_state);
+
+    // Verify that the wave_id of snapshot_data matches the hw_id.wave_id
+    auto sampled_wave_id = EXTRACT_BITS(perf_snapshot_data, 13, 9);
+    if(sampled_wave_id != ret.hw_id.wave_id)
+    {
+        ROCP_FATAL << "sampled_wave_id: " << sampled_wave_id
+                   << " mismatches the hw_id.wave_id: " << ret.hw_id.wave_id;
+    }
+
+    return ret;
+}
+
+// =====================================================================================
+// correct_pc_address
+// =====================================================================================
+
 /**
  * @brief Host trap V0 sample for GFX1250
  */
@@ -540,6 +943,25 @@ correct_pc_address<GFX950, rocprofiler_pc_sampling_record_stochastic_v0_t>(
     const perf_sample_snapshot_v1* sample)
 {
     // If mid_macro bit is 1, then reg spec says we need to subtract 2 dwords from the PC address.
+    auto mid_macro = static_cast<bool>(EXTRACT_BITS(sample->perf_snapshot_data1, 31, 31));
+    if(mid_macro)
+    {
+        return rocprofiler_address_t{.value = sample->pc - 2 * sizeof(uint32_t)};
+    }
+    else
+    {
+        return rocprofiler_address_t{.value = sample->pc};
+    }
+}
+
+/**
+ * @brief GFX950 PC address correction for V2 records (stochastic on GFX950).
+ */
+template <>
+inline rocprofiler_address_t
+correct_pc_address<GFX950, rocprofiler_pc_sampling_record_v2_t>(
+    const perf_sample_snapshot_v1* sample)
+{
     auto mid_macro = static_cast<bool>(EXTRACT_BITS(sample->perf_snapshot_data1, 31, 31));
     if(mid_macro)
     {

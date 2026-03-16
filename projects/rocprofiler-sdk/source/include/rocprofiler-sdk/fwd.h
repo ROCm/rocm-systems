@@ -493,6 +493,12 @@ typedef enum rocprofiler_pc_sampling_record_kind_t
     ROCPROFILER_PC_SAMPLING_RECORD_INVALID_SAMPLE,  ///< ::rocprofiler_pc_sampling_record_invalid_t
     ROCPROFILER_PC_SAMPLING_RECORD_HOST_TRAP_V0_SAMPLE,  ///< ::rocprofiler_pc_sampling_record_host_trap_v0_t
     ROCPROFILER_PC_SAMPLING_RECORD_STOCHASTIC_V0_SAMPLE,  ///< ::rocprofiler_pc_sampling_record_stochastic_v0_t
+    ROCPROFILER_PC_SAMPLING_RECORD_V0_SAMPLE,             ///< ::rocprofiler_pc_sampling_record_v0_t
+    ROCPROFILER_PC_SAMPLING_RECORD_V1_SAMPLE,             ///< ::rocprofiler_pc_sampling_record_v1_t
+    ROCPROFILER_PC_SAMPLING_RECORD_V2_SAMPLE,             ///< ::rocprofiler_pc_sampling_record_v2_t
+    ROCPROFILER_PC_SAMPLING_RECORD_V3_SAMPLE,             ///< ::rocprofiler_pc_sampling_record_v3_t
+    ROCPROFILER_PC_SAMPLING_RECORD_V4_SAMPLE,             ///< ::rocprofiler_pc_sampling_record_v4_t
+    ROCPROFILER_PC_SAMPLING_RECORD_V5_SAMPLE,             ///< ::rocprofiler_pc_sampling_record_v5_t
     ROCPROFILER_PC_SAMPLING_RECORD_LAST,
 } rocprofiler_pc_sampling_record_kind_t;
 
