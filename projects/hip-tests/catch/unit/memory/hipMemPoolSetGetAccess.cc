@@ -66,7 +66,7 @@ static void MemPoolSetGetAccess(const MemPools mempool_type, int src_device, int
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMemPoolSetGetAccess_Positive_Basic") {
+TEST_CASE(Unit_hipMemPoolSetGetAccess_Positive_Basic) {
   const auto device = GENERATE(range(0, HipTest::getDeviceCount()));
 
   checkMempoolSupported(device)
@@ -98,7 +98,7 @@ int CheckP2PMemPoolSupport(int src_device, int dst_device) {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMemPoolSetGetAccess_Positive_MultipleGPU", "[multigpu]") {
+TEST_CASE(Unit_hipMemPoolSetGetAccess_Positive_MultipleGPU) {
   const auto device_count = HipTest::getDeviceCount();
   if (device_count < 2) {
     HipTest::HIP_SKIP_TEST("Skipping because devices < 2");
@@ -213,7 +213,7 @@ void MemPoolSetGetAccess_P2P(const MemPools mempool_type) {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMemPoolSetGetAccess_Positive_P2P", "[multigpu]") {
+TEST_CASE(Unit_hipMemPoolSetGetAccess_Positive_P2P) {
   const auto device_count = HipTest::getDeviceCount();
   if (device_count < 2) {
     HipTest::HIP_SKIP_TEST("Skipping because devices < 2");
@@ -243,7 +243,7 @@ TEST_CASE("Unit_hipMemPoolSetGetAccess_Positive_P2P", "[multigpu]") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMemPoolSetAccess_Negative_Parameters") {
+TEST_CASE(Unit_hipMemPoolSetAccess_Negative_Parameters) {
   CHECK_IMAGE_SUPPORT
   int device_id = 0;
   HIP_CHECK(hipSetDevice(device_id));
@@ -409,7 +409,7 @@ static void getDevicePairs(std::vector<std::pair<int, int>>* p2p_pairs, int numD
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMemPoolSetAccess_SetAccess", "[multigpu]") {
+TEST_CASE(Unit_hipMemPoolSetAccess_SetAccess) {
   constexpr int N = 1 << 14;
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
@@ -438,7 +438,7 @@ TEST_CASE("Unit_hipMemPoolSetAccess_SetAccess", "[multigpu]") {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMemPoolSetAccess_NegTst") {
+TEST_CASE(Unit_hipMemPoolSetAccess_NegTst) {
   checkMempoolSupported(0) hipMemPool_t mem_pool;
   hipMemPoolProps pool_props{};
   pool_props.allocType = hipMemAllocationTypePinned;
@@ -518,7 +518,7 @@ TEST_CASE("Unit_hipMemPoolSetAccess_NegTst") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMemPoolGetAccess_Negative_Parameters") {
+TEST_CASE(Unit_hipMemPoolGetAccess_Negative_Parameters) {
   int device_id = 0;
   HIP_CHECK(hipSetDevice(device_id));
   checkMempoolSupported(device_id) MemPoolGuard mempool(MemPools::dev_default, device_id);
@@ -628,7 +628,7 @@ static bool checkMempoolSetAccessWithGetUsingArray(int dev0, int dev1) {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMemPoolGetAccess_SetGet") {
+TEST_CASE(Unit_hipMemPoolGetAccess_SetGet) {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   checkIfMultiDev(numDevices) for (int dev = 0; dev < numDevices; dev++){
@@ -658,7 +658,7 @@ TEST_CASE("Unit_hipMemPoolGetAccess_SetGet") {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMemPoolGetAccess_GetDefMempoolOfEachDevice") {
+TEST_CASE(Unit_hipMemPoolGetAccess_GetDefMempoolOfEachDevice) {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   for (int dev = 0; dev < numDevices; dev++) {

@@ -274,7 +274,7 @@ RUNTIME_ENTRY(cl_int, clEnqueueNDRangeKernel,
   // ndrange is now owned by command. Do not delete it!
 
   // Make sure we have memory for the command execution
-  cl_int result = command->captureAndValidate();
+  cl_int result = command->captureOpenCLArgsAndValidate();
   if (result != CL_SUCCESS) {
     delete command;
     return result;

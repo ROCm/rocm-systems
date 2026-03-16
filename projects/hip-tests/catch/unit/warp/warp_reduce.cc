@@ -131,7 +131,7 @@ template <class T> void runTestMultipleMasks(unsigned long long masks[], int num
   }
 }
 
-TEMPLATE_TEST_CASE("Unit_hipReduceSingleMasks", "", int, unsigned int, long long,
+TEMPLATE_TEST_CASE(Unit_hipReduceSingleMasks, int, unsigned int, long long,
                    unsigned long long, float, half, double) {
   unsigned long long fullMask = getWarpSize() == 64 ? ~0ul : 0xFFFFFFFF;
   unsigned long long oneBitMasks[] = {0b1 & fullMask};
@@ -145,7 +145,7 @@ TEMPLATE_TEST_CASE("Unit_hipReduceSingleMasks", "", int, unsigned int, long long
   runTestMultipleMasks<TestType>(everyFifthButNinethMasks, NELEMS(everyFifthButNinethMasks));
 }
 
-TEMPLATE_TEST_CASE("Unit_hipReduceMultipleMasks", "", int, unsigned int, long long,
+TEMPLATE_TEST_CASE(Unit_hipReduceMultipleMasks, int, unsigned int, long long,
                    unsigned long long, float, half, double) {
   if (getWarpSize() == 64) {
     unsigned long long masks[] = {0b0110011, 0x0F0F0F0F00000000, 0xF0F0F0F000000000,
@@ -198,7 +198,7 @@ void runTestReduceForTypes(const std::tuple<T, Types...>) {
   runTestReduceForTypes<Op>(remainingTypes);
 }
 
-TEST_CASE("Unit_hipReduceRandom") {
+TEST_CASE(Unit_hipReduceRandom) {
   const std::tuple<int, unsigned int, long long, unsigned long long, float, half, double> allTypes;
   const std::tuple<int, unsigned int, long long, unsigned long long> integralTypes;
 

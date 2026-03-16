@@ -170,7 +170,7 @@ line1:
  *  - Textures supported on device
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipTextureObj3DCheckModes") {
+TEST_CASE(Unit_hipTextureObj3DCheckModes) {
   CHECK_IMAGE_SUPPORT
 
   int device = 0;

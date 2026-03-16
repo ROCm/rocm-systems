@@ -9,7 +9,12 @@ import fnmatch
 import json
 import logging
 import subprocess
-from therock_matrix import subtree_to_project_map, project_map, trigger_windows_ci_for_subtrees_paths
+from therock_matrix import (
+    subtree_to_project_map,
+    project_map,
+    trigger_windows_ci_for_subtrees_paths,
+    windows_only_subtrees,
+)
 import time
 from typing import Mapping, Optional, Iterable
 import os
@@ -31,6 +36,7 @@ def set_github_output(d: Mapping[str, str]):
     with open(step_output_file, "a") as f:
         f.writelines(f"{k}={v}" + "\n" for k, v in d.items())
 
+
 def retry(max_attempts, delay_seconds, exceptions):
     def decorator(func):
         def newfn(*args, **kwargs):
@@ -39,14 +45,19 @@ def retry(max_attempts, delay_seconds, exceptions):
                 try:
                     return func(*args, **kwargs)
                 except exceptions as e:
-                    print(f'Exception {str(e)} thrown when attempting to run , attempt {attempt} of {max_attempts}')
+                    print(
+                        f"Exception {str(e)} thrown when attempting to run , attempt {attempt} of {max_attempts}"
+                    )
                     attempt += 1
                     if attempt < max_attempts:
                         backoff = delay_seconds * (2 ** (attempt - 1))
                         time.sleep(backoff)
             return func(*args, **kwargs)
+
         return newfn
+
     return decorator
+
 
 @retry(max_attempts=3, delay_seconds=2, exceptions=(TimeoutError))
 def get_modified_paths(base_ref: str) -> Optional[Iterable[str]]:
@@ -89,6 +100,20 @@ def check_trigger_windows_ci_for_subtree_path(path):
     return False
 
 
+def check_trigger_windows_ci_for_subtree(subtree: str) -> bool:
+    """Returns true if the subtree root corresponds to a Windows CI-triggering subtree.
+
+    Used for workflow_dispatch where explicit subtrees are provided rather than
+    modified file paths. Patterns like 'projects/clr/*' are matched by stripping
+    the trailing glob to get the subtree prefix 'projects/clr'.
+    """
+    for pattern in trigger_windows_ci_for_subtrees_paths:
+        subtree_prefix = pattern.rstrip("/*").rstrip("/")
+        if subtree == subtree_prefix or subtree.startswith(subtree_prefix + "/"):
+            return True
+    return False
+
+
 # Paths matching any of these patterns are considered to have no influence over
 # build or test workflows so any related jobs can be skipped if all paths
 # modified by a commit/PR match a pattern in this list.
@@ -105,7 +130,6 @@ SKIPPABLE_PATH_PATTERNS = [
     "projects/*/docs/*",
     "projects/*/.gitignore",
     "projects/rocr-runtime/libhsakmt/src/dxg/*",
-    "projects/rocshmem/*",
     "shared/*/docs/*",
     "shared/*/.gitignore",
 ]
@@ -136,28 +160,29 @@ def retrieve_projects(args):
             logging.info("Only skippable paths were modified, skipping CI")
             return []
 
-    # Change in CI workflow triggers full subtree evaluation
-    if check_for_workflow_file_related_to_ci(modified_paths):
-        logging.info("CI workflow files changed, evaluating all subtrees")
+    # Push event → evaluate all subtrees
+    if args.get("is_push"):
         subtrees = list(subtree_to_project_map.keys())
+
+    # Manual workflow dispatch: respect explicit project selection, bypass CI file change detection
+    elif args.get("is_workflow_dispatch"):
+        if args.get("input_projects") == "all":
+            subtrees = list(subtree_to_project_map.keys())
+        else:
+            subtrees = args.get("input_projects", "").split()
+
     else:
-        # Determine which subtrees were modified
+        # Determine which subtrees were modified (only needed for non-push/dispatch paths)
         matched_subtrees = set()
         for path in modified_paths:
             for subtree in subtree_to_project_map:
                 if path.startswith(subtree):
                     matched_subtrees.add(subtree)
 
-        # Push event → evaluate all subtrees
-        if args.get("is_push"):
+        # Change in CI workflow triggers full subtree evaluation
+        if check_for_workflow_file_related_to_ci(modified_paths):
+            logging.info("CI workflow files changed, evaluating all subtrees")
             subtrees = list(subtree_to_project_map.keys())
-
-        # Manual workflow dispatch
-        elif args.get("is_workflow_dispatch"):
-            if args.get("input_projects") == "all":
-                subtrees = list(subtree_to_project_map.keys())
-            else:
-                subtrees = args.get("input_projects", "").split()
 
         # Pull request
         elif args.get("is_pull_request"):
@@ -166,22 +191,38 @@ def retrieve_projects(args):
             else:
                 subtrees = list(matched_subtrees)
 
+        # Scheduled run (nightly runs) → evaluate all subtrees
+        elif args.get("is_nightly"):
+            subtrees = list(subtree_to_project_map.keys())
+
         # Default case
         else:
             subtrees = list(matched_subtrees)
 
         # If files changed but no subtree matched → evaluate all
         if modified_paths and not subtrees:
-            logging.info("Modified files did not match known subtrees, evaluating all projects")
+            logging.info(
+                "Modified files did not match known subtrees, evaluating all projects"
+            )
             subtrees = list(subtree_to_project_map.keys())
 
-    # Windows CI skip logic
-    if (
-        args.get("platform") == "windows"
-        and not any(check_trigger_windows_ci_for_subtree_path(path) for path in modified_paths)
-    ):
-        logging.info("Modified paths do not require Windows CI, skipping")
-        return []
+    # Linux CI skip logic: exclude Windows-only subtrees so they don't
+    # produce Linux projects. If nothing remains, Linux CI is skipped.
+    if args.get("platform") == "linux":
+        subtrees = [s for s in subtrees if s not in windows_only_subtrees]
+
+    # Windows CI skip logic: skip if neither the modified file paths nor the
+    # explicitly selected subtrees require Windows CI.
+    if args.get("platform") == "windows":
+        if args.get("is_workflow_dispatch"):
+            if not any(check_trigger_windows_ci_for_subtree(s) for s in subtrees):
+                logging.info("Selected subtrees do not require Windows CI, skipping")
+                return []
+        elif not any(
+            check_trigger_windows_ci_for_subtree_path(path) for path in modified_paths
+        ):
+            logging.info("Modified paths do not require Windows CI, skipping")
+            return []
     # Determine logical projects impacted
     projects = {
         subtree_to_project_map[subtree]
@@ -212,10 +253,13 @@ def retrieve_projects(args):
     else:
         final_flags = " ".join(sorted(merged_flags))
 
-    return [{
-        "cmake_options": final_flags,
-        "projects_to_test": ", ".join(sorted(merged_tests))
-    }]
+    return [
+        {
+            "cmake_options": final_flags,
+            "projects_to_test": ", ".join(sorted(merged_tests)),
+        }
+    ]
+
 
 def run(args):
     project_to_run = retrieve_projects(args)
@@ -228,6 +272,7 @@ if __name__ == "__main__":
     args["is_pull_request"] = github_event_name == "pull_request"
     args["is_push"] = github_event_name == "push"
     args["is_workflow_dispatch"] = github_event_name == "workflow_dispatch"
+    args["is_nightly"] = github_event_name == "schedule"
 
     input_subtrees = os.getenv("SUBTREES", "")
     args["input_subtrees"] = input_subtrees

@@ -109,6 +109,10 @@ hsa_status_t AieAgent::IterateSupportedIsas(
   return HSA_STATUS_SUCCESS;
 }
 
+void AieAgent::InitDerivedCuid() {
+  // AIE devices do not have a derived CUID.
+}
+
 hsa_status_t AieAgent::GetInfo(hsa_agent_info_t attribute, void *value) const {
   const size_t attribute_ = static_cast<size_t>(attribute);
 

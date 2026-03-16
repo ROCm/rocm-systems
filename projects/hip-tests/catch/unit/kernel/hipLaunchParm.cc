@@ -542,7 +542,7 @@ template <class T1, class T2> __global__ void myKernel(T1 a, T2 b) {}
  *    - HIP_VERSION >= 5.5
  */
 
-TEST_CASE("Unit_hipLaunchParm") {
+TEST_CASE(Unit_hipLaunchParm) {
   hipMallocError = hipMalloc(reinterpret_cast<void**>(&result_d), BLOCK_DIM_SIZE * sizeof(bool));
   hipHostMallocError =
       hipHostMalloc(reinterpret_cast<void**>(&result_h), BLOCK_DIM_SIZE * sizeof(bool));

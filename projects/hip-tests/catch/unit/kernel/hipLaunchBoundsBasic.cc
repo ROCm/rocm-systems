@@ -51,7 +51,7 @@ __global__ void __launch_bounds__(256, 2) myKern(int* C, const int* A, int N) {
  * - HIP_VERSION >= 5.6
  */
 
-TEST_CASE("Unit_kernel_LaunchBounds_Functional") {
+TEST_CASE(Unit_kernel_LaunchBounds_Functional) {
   size_t Nbytes = N * sizeof(int);
   int *A_d, *C_d, *A_h, *C_h;
   HIPCHECK(hipMalloc(&A_d, Nbytes));

@@ -59,16 +59,26 @@ auto GetExpectedMetricVersionFlag(uint16_t major, uint16_t minor, bool is_partit
   } else {  // GPU metrics
     if (major == 1) {
       switch (minor) {
-        case 0: return Flag::kGpuMetricV10;
-        case 1: return Flag::kGpuMetricV11;
-        case 2: return Flag::kGpuMetricV12;
-        case 3: return Flag::kGpuMetricV13;
-        case 4: return Flag::kGpuMetricV14;
-        case 5: return Flag::kGpuMetricV15;
-        case 6: return Flag::kGpuMetricV16;
-        case 7: return Flag::kGpuMetricV17;
-        case 8: return Flag::kGpuMetricV18;
-        default: return Flag::kGpuMetricDynV19Plus;
+        case 0:
+          return Flag::kGpuMetricV10;
+        case 1:
+          return Flag::kGpuMetricV11;
+        case 2:
+          return Flag::kGpuMetricV12;
+        case 3:
+          return Flag::kGpuMetricV13;
+        case 4:
+          return Flag::kGpuMetricV14;
+        case 5:
+          return Flag::kGpuMetricV15;
+        case 6:
+          return Flag::kGpuMetricV16;
+        case 7:
+          return Flag::kGpuMetricV17;
+        case 8:
+          return Flag::kGpuMetricV18;
+        default:
+          return Flag::kGpuMetricDynV19Plus;
       }
     }
   }
@@ -76,8 +86,7 @@ auto GetExpectedMetricVersionFlag(uint16_t major, uint16_t minor, bool is_partit
 }
 
 // pass a header we want to test against
-auto BuildFakeMetricsBlob(amd::smi::AMDGpuMetricsHeader_v1_t new_header)
-  -> std::vector<uint8_t> {
+auto BuildFakeMetricsBlob(amd::smi::AMDGpuMetricsHeader_v1_t new_header) -> std::vector<uint8_t> {
   if (new_header.m_structure_size < sizeof(new_header)) {
     throw std::runtime_error("Header size too small");
   }
@@ -131,7 +140,8 @@ TEST(AmdSmiDynamicMetricTest, GPUMetricDynamicVersionSupported) {
     const auto* header = reinterpret_cast<const amd::smi::AMDGpuMetricsHeader_v1_t*>(blob.data());
     const auto flag = amd::smi::translate_header_to_flag_version(*header, is_partition_metrics,
                                                                  fake_path.string());
-    EXPECT_EQ(flag, GetExpectedMetricVersionFlag(1, static_cast<uint16_t>(ver), is_partition_metrics))
+    EXPECT_EQ(flag,
+              GetExpectedMetricVersionFlag(1, static_cast<uint16_t>(ver), is_partition_metrics))
         << "Version 1." << ver << " should be treated as supported";
 
     auto gpu_metrics_ptr =
@@ -175,7 +185,8 @@ TEST(AmdSmiDynamicMetricTest, XCPMetricDynamicVersionSupported) {
     const auto* header = reinterpret_cast<const amd::smi::AMDGpuMetricsHeader_v1_t*>(blob.data());
     const auto flag = amd::smi::translate_header_to_flag_version(*header, is_partition_metrics,
                                                                  fake_path.string());
-    EXPECT_EQ(flag, GetExpectedMetricVersionFlag(1, static_cast<uint16_t>(ver), is_partition_metrics))
+    EXPECT_EQ(flag,
+              GetExpectedMetricVersionFlag(1, static_cast<uint16_t>(ver), is_partition_metrics))
         << "Version 1." << ver << " should be treated as supported";
 
     auto xcp_metrics_ptr =

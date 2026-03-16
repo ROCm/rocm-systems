@@ -63,18 +63,12 @@ RocVideoESParser::~RocVideoESParser() {
     }
 }
 
-int RocVideoESParser::GetDataSizeInRB() {
-    if (read_ptr_ == write_ptr_) {
-        return 0;
-    } else if (read_ptr_ < write_ptr_) {
-        return write_ptr_ - read_ptr_;
-    } else {
-        return BS_RING_SIZE - read_ptr_ + write_ptr_;
-    }
+uint32_t RocVideoESParser::GetDataSizeInRB() {
+    return (read_ptr_ <= write_ptr_) ? (write_ptr_ - read_ptr_) : (BS_RING_SIZE - read_ptr_ + write_ptr_);
 }
 
-int RocVideoESParser::FetchBitStream()
-{
+int RocVideoESParser::FetchBitStream() {
+    FunctionEntryLog(logger_);
     int free_space;
     int read_size;
     int total_read_size = 0;
@@ -82,6 +76,7 @@ int RocVideoESParser::FetchBitStream()
     // A full ring has BS_RING_SIZE - 1 bytes
     free_space = BS_RING_SIZE - 1 - GetDataSizeInRB();
     if (free_space == 0) {
+        FunctionExitLog(logger_);
         return 0;
     }
     
@@ -97,10 +92,12 @@ int RocVideoESParser::FetchBitStream()
         }
         total_read_size += read_size;
         if (end_of_file_) {
+            FunctionExitLog(logger_);
             return total_read_size;
         }
         free_space -= read_size;
         if (free_space == 0) {
+            FunctionExitLog(logger_);
             return total_read_size;
         }
     }
@@ -116,6 +113,7 @@ int RocVideoESParser::FetchBitStream()
         }
         total_read_size += read_size;
     }
+    FunctionExitLog(logger_);
     return total_read_size;
 }
 
@@ -158,6 +156,7 @@ void RocVideoESParser::SetReadPointer(int value) {
 }
 
 bool RocVideoESParser::FindStartCode() {
+    FunctionEntryLog(logger_);
     uint8_t three_bytes[3];
     int i;
 
@@ -190,6 +189,7 @@ bool RocVideoESParser::FindStartCode() {
         }
         curr_byte_offset_ = (curr_byte_offset_ + 1) % BS_RING_SIZE;
     }
+    FunctionExitLog(logger_);
     return num_start_code_ ? true : false;
 }
 
@@ -280,6 +280,7 @@ void RocVideoESParser::CheckAvcNalForSlice(int start_code_offset, int *slice_fla
 }
 
 int RocVideoESParser::GetPicDataAvcHevc(uint8_t **p_pic_data, int *pic_size) {
+    FunctionEntryLog(logger_);
     int slice_nal_flag;
     int first_slice_flag = 0;
     int num_slices = 0;
@@ -337,10 +338,12 @@ int RocVideoESParser::GetPicDataAvcHevc(uint8_t **p_pic_data, int *pic_size) {
     } else {
         *pic_size = 0;
     }
+    FunctionExitLog(logger_);
     return 0;
 }
 
 bool RocVideoESParser::ReadObuHeaderAndSize(int *obu_type) {
+    FunctionEntryLog(logger_);
     uint8_t header_byte;
     int obu_extension_flag;
 
@@ -348,6 +351,7 @@ bool RocVideoESParser::ReadObuHeaderAndSize(int *obu_type) {
     obu_byte_offset_ = curr_byte_offset_;
     // Parser header
     if (GetByte(curr_byte_offset_, &header_byte) == false) {
+        FunctionExitLog(logger_);
         return false;
     }
     *obu_type = (header_byte >> 3) & 0x0F;
@@ -364,6 +368,7 @@ bool RocVideoESParser::ReadObuHeaderAndSize(int *obu_type) {
     uint8_t data_byte;
     for (len = 0; len < 8; ++len) {
         if (GetByte(curr_byte_offset_ + len, &data_byte) == false) {
+            FunctionExitLog(logger_);
             return false;
         }
         value |= (data_byte & 0x7F) << (len * 7);
@@ -375,6 +380,7 @@ bool RocVideoESParser::ReadObuHeaderAndSize(int *obu_type) {
     obu_size_ += len + value;
     curr_byte_offset_ = (curr_byte_offset_ + len + value) % BS_RING_SIZE;
 
+    FunctionExitLog(logger_);
     return true;
 }
 
@@ -404,6 +410,7 @@ bool RocVideoESParser::CopyObuFromRing() {
 }
 
 int RocVideoESParser::GetPicDataAv1(uint8_t **p_pic_data, int *pic_size) {
+    FunctionEntryLog(logger_);
     int obu_type;
     pic_data_size_ = 0;
 
@@ -423,10 +430,12 @@ int RocVideoESParser::GetPicDataAv1(uint8_t **p_pic_data, int *pic_size) {
     *p_pic_data = pic_data_.data();
     *pic_size = pic_data_size_;
     num_temp_units_++;
+    FunctionExitLog(logger_);
     return 0;
 }
 
 int RocVideoESParser::GetPicDataIvf(uint8_t **p_pic_data, int *pic_size) {
+    FunctionEntryLog(logger_);
     uint8_t frame_header[12];
     pic_data_size_ = 0;
     if (ReadBytes(curr_byte_offset_, 12, frame_header)) {
@@ -444,17 +453,26 @@ int RocVideoESParser::GetPicDataIvf(uint8_t **p_pic_data, int *pic_size) {
     }
     *p_pic_data = pic_data_.data();
     *pic_size = pic_data_size_;
+    FunctionExitLog(logger_);
     return 0;
 }
 
 int RocVideoESParser::GetPicData(uint8_t **p_pic_data, int *pic_size, int64_t *pts) {
+    FunctionEntryLog(logger_);
     *pts = 0;
+    int ret;
     switch (stream_type_) {
         case kStreamTypeAvcElementary:
-        case kStreamTypeHevcElementary:
-            return GetPicDataAvcHevc(p_pic_data, pic_size);
-        case kStreamTypeAv1Elementary:
-            return GetPicDataAv1(p_pic_data, pic_size);
+        case kStreamTypeHevcElementary: {
+            ret = GetPicDataAvcHevc(p_pic_data, pic_size);
+            FunctionExitLog(logger_);
+            return ret;
+        }
+        case kStreamTypeAv1Elementary: {
+            ret = GetPicDataAv1(p_pic_data, pic_size);
+            FunctionExitLog(logger_);
+            return ret;
+        }
         case kStreamTypeAv1Ivf:
         case kStreamTypeVp9Ivf: {
             if (!ivf_file_header_read_) {
@@ -464,33 +482,46 @@ int RocVideoESParser::GetPicData(uint8_t **p_pic_data, int *pic_size, int64_t *p
                 SetReadPointer(curr_byte_offset_);
                 ivf_file_header_read_ = true;
             }
-            return GetPicDataIvf(p_pic_data, pic_size);
+            ret = GetPicDataIvf(p_pic_data, pic_size);
+            FunctionExitLog(logger_);
+            return ret;
         }
         default: {
             *p_pic_data = pic_data_.data();
             *pic_size = 0;
+            FunctionExitLog(logger_);
             return 0;
         }
     }
 }
 
 rocDecVideoCodec RocVideoESParser::GetCodecId() {
+    FunctionEntryLog(logger_);
+    rocDecVideoCodec codec;
     switch (stream_type_) {
         case kStreamTypeAvcElementary:
-            return rocDecVideoCodec_AVC;
+            codec = rocDecVideoCodec_AVC;
+            break;
         case kStreamTypeHevcElementary:
-            return rocDecVideoCodec_HEVC;
+            codec = rocDecVideoCodec_HEVC;
+            break;
         case kStreamTypeAv1Elementary:
         case kStreamTypeAv1Ivf:
-            return rocDecVideoCodec_AV1;
+            codec = rocDecVideoCodec_AV1;
+            break;
         case kStreamTypeVp9Ivf:
-            return rocDecVideoCodec_VP9;
+            codec = rocDecVideoCodec_VP9;
+            break;
         default:
-            return rocDecVideoCodec_NumCodecs;
+            codec = rocDecVideoCodec_NumCodecs;
+            break;
     }
+    FunctionExitLog(logger_);
+    return codec;
 }
 
 int RocVideoESParser::ProbeStreamType() {
+    FunctionEntryLog(logger_);
     int stream_type = kStreamTypeUnsupported;
     int stream_type_score = 0;
     uint8_t *stream_buf;
@@ -557,10 +588,12 @@ int RocVideoESParser::ProbeStreamType() {
         free(stream_buf);
     }
     p_stream_file_.seekg(0, std::ios::beg);
+    FunctionExitLog(logger_);
     return stream_type;
 }
 
 int RocVideoESParser::CheckAvcEStream(uint8_t *p_stream, int stream_size) {
+    FunctionEntryLog(logger_);
     int score = 0;
     int curr_offset = 0;
     int num_start_codes = 0;
@@ -656,10 +689,12 @@ int RocVideoESParser::CheckAvcEStream(uint8_t *p_stream, int stream_size) {
     } else {
         score = sps_present * 25 + pps_present * 25 + idr_slice_present * 20 + slice_present * 15 + first_slice_present * 15;
     }
+    FunctionExitLog(logger_);
     return score;
 }
 
 int RocVideoESParser::CheckHevcEStream(uint8_t *p_stream, int stream_size) {
+    FunctionEntryLog(logger_);
     int score = 0;
     int curr_offset = 0;
     int num_start_codes = 0;
@@ -800,12 +835,15 @@ int RocVideoESParser::CheckHevcEStream(uint8_t *p_stream, int stream_size) {
     } else {
         score = vps_present * 15 + sps_present * 20 + pps_present * 20 + rap_slice_present * 15 + slice_present * 15 + first_slice_present * 15;
     }
+    FunctionExitLog(logger_);
     return score;
 }
 
 int RocVideoESParser::EbspToRbsp(uint8_t *streamBuffer, int begin_bytepos, int end_bytepos) {
+    FunctionEntryLog(logger_);
     int count = 0;
     if (end_bytepos < begin_bytepos) {
+        FunctionExitLog(logger_);
         return end_bytepos;
     }
     uint8_t *streamBuffer_i = streamBuffer + begin_bytepos;
@@ -819,6 +857,7 @@ int RocVideoESParser::EbspToRbsp(uint8_t *streamBuffer, int begin_bytepos, int e
             if (tmp == 0x03) {
                 //check the 4th uint8_t after 0x000003, except when cabac_zero_word is used, in which case the last three bytes of this NAL unit must be 0x000003
                 if ((streamBuffer_i + 1 != streamBuffer_end) && (streamBuffer_i[1] > 0x03)) {
+                    FunctionExitLog(logger_);
                     return -1;
                 }
                 //if cabac_zero_word is used, the final uint8_t of this NAL unit(0x03) is discarded, and the last two bytes of RBSP must be 0x0000
@@ -840,6 +879,7 @@ int RocVideoESParser::EbspToRbsp(uint8_t *streamBuffer, int begin_bytepos, int e
         }
         streamBuffer_i++;
     }
+    FunctionExitLog(logger_);
     return end_bytepos - begin_bytepos + reduce_count;
 }
 
@@ -858,6 +898,7 @@ uint32_t RocVideoESParser::ReadUVLC(const uint8_t *p_stream, size_t &bit_offset)
 }
 
 int RocVideoESParser::CheckAv1EStream(uint8_t *p_stream, int stream_size) {
+    FunctionEntryLog(logger_);
     int score = 0;
     uint8_t *obu_stream = p_stream;
     uint32_t curr_offset = 0;
@@ -1092,10 +1133,12 @@ int RocVideoESParser::CheckAv1EStream(uint8_t *p_stream, int stream_size) {
     } else {
         score = temporal_delimiter_obu_present * 25 + seq_header_obu_present * 25 + frame_obu_present * 50 + (frame_header_obu_present & tile_group_obu_present) * 50;
     }
+    FunctionExitLog(logger_);
     return score;
 }
 
 int RocVideoESParser::CheckIvfAv1Stream(uint8_t *p_stream, int stream_size) {
+    FunctionEntryLog(logger_);
     static const char *IVF_SIGNATURE = "DKIF";
     static const char *AV1_FourCC = "AV01";
     static const int IvfFileHeaderSize = 32;
@@ -1127,10 +1170,12 @@ int RocVideoESParser::CheckIvfAv1Stream(uint8_t *p_stream, int stream_size) {
     } else {
         score = 0;
     }
+    FunctionExitLog(logger_);
     return score;
 }
 
 int RocVideoESParser::CheckVp9EStream(uint8_t *p_stream, int stream_size) {
+    FunctionEntryLog(logger_);
     int score = 0;
     size_t offset = 0; // bit offset
     Vp9UncompressedHeader uncomp_header;
@@ -1172,10 +1217,12 @@ int RocVideoESParser::CheckVp9EStream(uint8_t *p_stream, int stream_size) {
     } else {
         return 0;
     }
+    FunctionExitLog(logger_);
     return score;
 }
 
 int RocVideoESParser::CheckIvfVp9Stream(uint8_t *p_stream, int stream_size) {
+    FunctionEntryLog(logger_);
     static const char *IVF_SIGNATURE = "DKIF";
     static const char *VP9_FourCC = "VP90";
     static const int IvfFileHeaderSize = 32;
@@ -1207,5 +1254,6 @@ int RocVideoESParser::CheckIvfVp9Stream(uint8_t *p_stream, int stream_size) {
     } else {
         score = 0;
     }
+    FunctionExitLog(logger_);
     return score;
 }

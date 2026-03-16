@@ -297,7 +297,7 @@ static void AllocateHmmMemory(int flag, int device) {
   }
 }
 
-TEST_CASE("Unit_hipMallocManaged_MultiThread", "[multigpu]") {
+TEST_CASE(Unit_hipMallocManaged_MultiThread) {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
     HipTest::HIP_SKIP_TEST("GPU doesn't support managed memory so skipping test.");
@@ -351,7 +351,7 @@ TEST_CASE("Unit_hipMallocManaged_MultiThread", "[multigpu]") {
 
 // The following test checks what happens when same Hmm memory is used to
 // launch multiple threads over multiple gpus
-TEST_CASE("Unit_hipMallocManaged_MGpuMThread", "[multigpu]") {
+TEST_CASE(Unit_hipMallocManaged_MGpuMThread) {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
     HipTest::HIP_SKIP_TEST("GPU doesn't support managed memory so skipping test.");
@@ -394,7 +394,7 @@ TEST_CASE("Unit_hipMallocManaged_MGpuMThread", "[multigpu]") {
 
 // The following test checks what happens when multiple kernels are launched
 // with same Hmm memory
-TEST_CASE("Unit_hipMallocManaged_MultiKrnlComnHmm") {
+TEST_CASE(Unit_hipMallocManaged_MultiKrnlComnHmm) {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
     HipTest::HIP_SKIP_TEST("GPU doesn't support managed memory so skipping test.");
@@ -429,7 +429,7 @@ TEST_CASE("Unit_hipMallocManaged_MultiKrnlComnHmm") {
 
 // The following test checks what happens when multiple kernels are launched
 // with same hipMalloc() memory
-TEST_CASE("Unit_hipMallocManaged_MultiKrnlComnMalloc") {
+TEST_CASE(Unit_hipMallocManaged_MultiKrnlComnMalloc) {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
     HipTest::HIP_SKIP_TEST("GPU doesn't support managed memory so skipping test.");
@@ -460,7 +460,7 @@ TEST_CASE("Unit_hipMallocManaged_MultiKrnlComnMalloc") {
 
 //  The following section tests the scenario wherein multiple threads use their
 //  own stream to launch kernel on common Hmm memory
-TEST_CASE("Unit_hipMallocManaged_MultiThrdMultiStrm") {
+TEST_CASE(Unit_hipMallocManaged_MultiThrdMultiStrm) {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
     HipTest::HIP_SKIP_TEST("GPU doesn't support managed memory so skipping test.");
@@ -494,7 +494,7 @@ TEST_CASE("Unit_hipMallocManaged_MultiThrdMultiStrm") {
 
 //  The following section tests the scenario wherein two threads each use
 //  different kernel but common HMM memory
-TEST_CASE("Unit_hipMallocManaged_TwoKrnlsComnHmmMem") {
+TEST_CASE(Unit_hipMallocManaged_TwoKrnlsComnHmmMem) {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
     HipTest::HIP_SKIP_TEST("GPU doesn't support managed memory so skipping test.");

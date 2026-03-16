@@ -36,7 +36,7 @@ import pandas as pd
 
 import config
 from rocprof_compute_soc.soc_base import OmniSoC_Base
-from utils import file_io, parser, schema, tty
+from utils import file_io, parser, schema
 from utils.logger import (
     console_debug,
     console_error,
@@ -50,7 +50,6 @@ from utils.utils import (
     impute_counters_iteration_multiplex,
     is_workload_empty,
     merge_counters_spatial_multiplex,
-    process_torch_trace_output,
 )
 
 # the build-in config to list kernel names purpose only
@@ -151,43 +150,6 @@ class OmniAnalyze_Base:
         return self._arch_configs
 
     @demarcate
-    def list_torch_operators(self) -> None:
-        """
-        List PyTorch operators with hierarchy from torch_trace output.
-        """
-        workload_path = (
-            self.__args.path[0][0]
-            if isinstance(self.__args.path[0], list)
-            else self.__args.path[0]
-        )
-        process_torch_trace_output(workload_path)
-        torch_trace_dir = Path(workload_path) / "torch_trace"
-        all_files = list(torch_trace_dir.glob("*.csv"))
-        print(f"\n{'=' * 80}")
-        print(f"PyTorch Operators in: {workload_path}")
-        print(f"{'=' * 80}\n")
-        operator_count = 0
-        for f in all_files:
-            try:
-                df = pd.read_csv(f)
-                tty.show_torch_operator_hierarchy(str(f.name).replace(".csv", ""), df)
-                operator_count += 1
-            except Exception as e:
-                console_log(f"Failed to read operator from {f.name}: {e}")
-                sys.exit(1)
-
-        if not operator_count:
-            console_warning(
-                "No PyTorch operator data found. "
-                "Please ensure profiling was done with --torch-trace option."
-            )
-
-        print(f"\n{'=' * 80}")
-        print(f"Total: {operator_count} operators")
-        print(f"{'=' * 80}\n")
-        sys.exit(0)
-
-    @demarcate
     def load_options(self, normalization_filter: Optional[str]) -> None:
         args = self.get_args()
         profiling_config = self.get_profiling_config()
@@ -215,9 +177,6 @@ class OmniAnalyze_Base:
         self, normalization_filter: Optional[str] = None
     ) -> OrderedDict[str, schema.Workload]:
         args = self.get_args()
-
-        if getattr(args, "list_torch_operators", False):
-            self.list_torch_operators()
 
         def get_sysinfo_path(data_path: str) -> Optional[str]:
             return (
@@ -357,6 +316,39 @@ class OmniAnalyze_Base:
             print("Node list:", "  ".join(nodes))
             sys.exit(0)
 
+        # Validate --nodes option against workload structure
+        if args.nodes is not None:
+            for dir_info in args.path:
+                workload_path = dir_info[0]
+                valid_nodes = file_io.get_valid_nodes(workload_path)
+
+                if not valid_nodes:
+                    # Single-node workload: sysinfo.csv is in root, not in
+                    # subdirectories
+                    console_error(
+                        "analysis",
+                        f"The workload at '{workload_path}' is single-node "
+                        "(sysinfo.csv is in the root directory).\n"
+                        "The --nodes option is only supported for multi-node "
+                        "workloads where each node subdirectory contains its "
+                        "own sysinfo.csv.\n"
+                        "Remove the --nodes option to analyze this "
+                        "single-node workload.",
+                    )
+
+                # If specific nodes are provided (not empty list), validate them
+                if args.nodes:
+                    invalid_nodes = [n for n in args.nodes if n not in valid_nodes]
+                    if invalid_nodes:
+                        console_error(
+                            "analysis",
+                            f"Invalid node(s): {', '.join(invalid_nodes)}\n"
+                            f"Valid nodes for '{workload_path}': "
+                            f"{', '.join(valid_nodes)}\n"
+                            "Each valid node must be a subdirectory "
+                            "containing sysinfo.csv.",
+                        )
+
         # Ensure analysis output does not overwrite existing files
         if args.output_name:
             if not re.match(r"^[A-Za-z0-9_-]+$", args.output_name):
@@ -428,8 +420,7 @@ class OmniAnalyze_Base:
             (args.gpu_kernel, "filter_kernel_ids"),
             (args.gpu_id, "filter_gpu_ids"),
             (args.gpu_dispatch_id, "filter_dispatch_ids"),
-            (args.nodes, "nodes"),
-            (args.torch_operator, "filter_torch_operators"),
+            (args.nodes, "filter_nodes"),
         ]
 
         for filter_list, attr_name in filter_configs:
