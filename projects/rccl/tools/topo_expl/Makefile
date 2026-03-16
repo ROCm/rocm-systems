@@ -80,6 +80,10 @@ hipify:
 	# PATCH 2: Use NVTX stubs - topo_expl doesn't need full NVTX implementation
 	cp hipify_rccl/include/nvtx_stub.h hipify_rccl/include/nvtx.h
 	bash ../../cmake/scripts/add_unroll.sh "hipify_rccl/src/device/include/common.h"
+	# PATCH: Apply LDS pointer transform (ncclShmemData& → LDSPtr, void* → ncclShmemPerWarpPtr, etc.)
+	for f in hipify_rccl/src/device/include/*.h; do \
+		bash ../../cmake/scripts/lds_pointer_transform.sh "$$f"; \
+	done
 	hipify-perl -inplace -quiet-warnings hipify_rccl/graph/*
 	hipify-perl -inplace -quiet-warnings hipify_rccl/include/network/unpack/*
 	hipify-perl -inplace -quiet-warnings hipify_rccl/*.cc

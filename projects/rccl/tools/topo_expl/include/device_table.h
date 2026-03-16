@@ -3,6 +3,10 @@
 #ifndef DEVICE_TABLE_COMPATIBILITY
 #define DEVICE_TABLE_COMPATIBILITY
 
+#include "rccl_ptr.h"
+
+struct ncclShmemData;
+
 struct rcclKernelItem {
   void* funcPtr;
   int   unroll;
@@ -10,9 +14,9 @@ struct rcclKernelItem {
 static struct rcclKernelItem rcclKernelTable[] = { };
 
 template <int unroll>
-__forceinline__ __device__ void NCCL_CALL_FUNCTIONS(unsigned short funcIndex) noexcept { }
-__forceinline__ __device__ void NCCL_CALL_FUNCTIONS_1(unsigned short funcIndex) noexcept { }
-__forceinline__ __device__ void NCCL_CALL_FUNCTIONS_2(unsigned short funcIndex) noexcept { }
-__forceinline__ __device__ void NCCL_CALL_FUNCTIONS_4(unsigned short funcIndex) noexcept { }
+__forceinline__ __device__ void NCCL_CALL_FUNCTIONS(unsigned short funcIndex, LDSPtr<ncclShmemData>, ncclShmemPerWarpPtr) noexcept { }
+__forceinline__ __device__ void NCCL_CALL_FUNCTIONS_1(unsigned short funcIndex, LDSPtr<ncclShmemData>, ncclShmemPerWarpPtr) noexcept { }
+__forceinline__ __device__ void NCCL_CALL_FUNCTIONS_2(unsigned short funcIndex, LDSPtr<ncclShmemData>, ncclShmemPerWarpPtr) noexcept { }
+__forceinline__ __device__ void NCCL_CALL_FUNCTIONS_4(unsigned short funcIndex, LDSPtr<ncclShmemData>, ncclShmemPerWarpPtr) noexcept { }
 
 #endif
