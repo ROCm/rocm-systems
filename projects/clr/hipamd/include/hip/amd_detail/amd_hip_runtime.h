@@ -165,15 +165,14 @@ __host__ inline void* __get_dynamicgroupbaseptr() { return nullptr; }
 
 typedef int hipLaunchParm;
 
-template <std::size_t n, typename... Ts,
-          typename std::enable_if<n == sizeof...(Ts)>::type* = nullptr>
-void pArgs(const std::tuple<Ts...>&, void*) {}
+template <typename... Formals, typename... Actuals>
+std::tuple<Formals...> validateArgsCountType(void (*kernel)(Formals...),
+                                             Actuals... actuals) {
+  static_assert(sizeof...(Formals) == sizeof...(Actuals), "Argument Count Mismatch");
+  return {std::move(actuals)...};
+}
 
-template <std::size_t n, typename... Ts,
-          typename std::enable_if<n != sizeof...(Ts)>::type* = nullptr>
-void pArgs(const std::tuple<Ts...>& formals, void** _vargs) {
-  using T = typename std::tuple_element<n, std::tuple<Ts...>>::type;
-
+template <typename T> constexpr void validateArgType() {
   static_assert(!std::is_reference<T>{},
                 "A __global__ function cannot have a reference as one of its "
                 "arguments.");
@@ -182,30 +181,42 @@ void pArgs(const std::tuple<Ts...>& formals, void** _vargs) {
                 "Only TriviallyCopyable types can be arguments to a __global__ "
                 "function");
 #endif
-  _vargs[n] = const_cast<void*>(reinterpret_cast<const void*>(&std::get<n>(formals)));
-  return pArgs<n + 1>(formals, _vargs);
 }
 
-template <typename... Formals, typename... Actuals>
-std::tuple<Formals...> validateArgsCountType(void (*kernel)(Formals...),
-                                             std::tuple<Actuals...>(actuals)) {
-  static_assert(sizeof...(Formals) == sizeof...(Actuals), "Argument Count Mismatch");
-  std::tuple<Formals...> to_formals{std::move(actuals)};
-  return to_formals;
+template <typename... Ts> constexpr void validateArgs(void (*)(Ts...)) {
+  (validateArgType<Ts>(), ...);
+}
+
+template <typename... Ts> std::array<void*, sizeof...(Ts)> pArgs(Ts... formals) {
+  return {static_cast<void*>(&formals)...};
+}
+
+template <typename... Ts, size_t... Is>
+std::array<void*, sizeof...(Ts)> pArgs(std::tuple<Ts...>& formals, std::index_sequence<Is...>) {
+  return {(static_cast<void*>(&std::get<Is>(formals)))...};
+}
+
+template <typename... Ts> std::array<void*, sizeof...(Ts)> pArgs(std::tuple<Ts...>& formals) {
+  return pArgs(formals, std::make_index_sequence<sizeof...(Ts)>());
 }
 
 #if defined(HIP_TEMPLATE_KERNEL_LAUNCH)
 template <typename... Args, typename F = void (*)(Args...)>
 void hipLaunchKernelGGL(F kernel, const dim3& numBlocks, const dim3& dimBlocks,
                         std::uint32_t sharedMemBytes, hipStream_t stream, Args... args) {
-  constexpr size_t count = sizeof...(Args);
-  auto tup_ = std::tuple<Args...>{args...};
-  auto tup = validateArgsCountType(kernel, tup_);
-  void* _Args[count];
-  pArgs<0>(tup, _Args);
-
+  validateArgs(kernel);
   auto k = reinterpret_cast<void*>(kernel);
-  hipLaunchKernel(k, numBlocks, dimBlocks, _Args, sharedMemBytes, stream);
+
+  if constexpr (std::is_same_v<F, void (*)(Args...)>) {
+    auto ptrArgsArr = pArgs(args...);
+    hipExtLaunchKernel(k, numBlocks, dimBlocks, ptrArgsArr.data(), sharedMemBytes, stream,
+                       nullptr, nullptr, 0);
+  } else {
+    auto formals = validateArgsCountType(kernel, args...);
+    auto ptrArgsArr = pArgs(formals);
+    hipExtLaunchKernel(k, numBlocks, dimBlocks, ptrArgsArr.data(), sharedMemBytes, stream,
+                       nullptr, nullptr, 0);
+  }
 }
 #else
 #define hipLaunchKernelGGLInternal(kernelName, numBlocks, numThreads, memPerBlock, streamId, ...)  \
