@@ -729,14 +729,16 @@ HSAKMT_STATUS topology_sysfs_get_node_props(uint32_t node_id, HsaNodeProperties&
   props.CComputeIdLo = 0;
   props.FComputeIdLo = 0;
   props.Capability.ui32.ASICRevision = device->AsicRevision();
-  props.Capability.ui32.WatchPointsTotalBits = std::log2(device->WatchPointsNum());
-  props.MaxWavesPerSIMD = device->WavePerCu() / device->SimdPerCu();
+  props.Capability.ui32.WatchPointsTotalBits =
+      device->WatchPointsNum() ? std::log2(device->WatchPointsNum()) : 0;
+  props.MaxWavesPerSIMD =
+      device->SimdPerCu() ? device->WavePerCu() / device->SimdPerCu() : 0;
   props.LDSSizeInKB = device->LdsSize() / 1024;
   props.GDSSizeInKB = 0;
   props.WaveFrontSize = device->WavefrontSize();
   props.NumShaderBanks = device->NumShaderEngine();
   props.NumArrays = device->ShaderArrayPerShaderEngine();
-  props.NumCUPerArray = device->ComputeUnitCount() / props.NumArrays;
+  props.NumCUPerArray = props.NumArrays ? device->ComputeUnitCount() / props.NumArrays : 0;
   props.NumSIMDPerCU = device->SimdPerCu();
   props.MaxSlotsScratchCU = device->MaxScratchSlotsPerCu();
   props.VendorId = 0x1002;
@@ -809,8 +811,8 @@ HSAKMT_STATUS topology_sysfs_get_node_props(uint32_t node_id, HsaNodeProperties&
   props.SGPRSizePerCU = SGPR_SIZE_PER_CU;
   props.VGPRSizePerCU = get_vgpr_size_per_cu(props.EngineId);
 
-  if (props.NumFComputeCores) {
-    assert(props.EngineId.ui32.Major && "HSA_OVERRIDE_GFX_VERSION may be needed");
+  if (props.NumFComputeCores && !props.EngineId.ui32.Major) {
+    pr_err("GFX version is 0 for node %u — set HSA_OVERRIDE_GFX_VERSION\n", node_id);
   }
 
   props.WallClockKHz = device->GPUCounterFrequency() / 1000ull;

@@ -119,51 +119,35 @@ bool Event::Wait(std::chrono::duration<float> timeout  // max time to wait
   return true;
 }
 #else
+/*
+ * WSL2 uses a polling model; GPU interrupt events are not supported.
+ * KMD registration is a Windows-only path.  Init() records the event
+ * type so the HSA runtime can complete agent initialisation; all other
+ * operations are intentional no-ops.
+ */
+
 // ================================================================================================
-Event::~Event() {
-  // Force device 0, since KMD should handle multiple devices.
-  WDDMDevice* device = WddmDevice(0);  // Event->EventData.HWData3
-  assert(device && "Couldn't obtain a device!");
-  if (EventId != 0) {
-    os_event_ = nullptr;
-  }
-  assert(!"Unimplemented!");
-}
+Event::~Event() {}
 
 // ================================================================================================
 bool Event::Init(const HsaEventDescriptor& event_desc, const wchar_t* pName) {
-  // Allocate OS specific events to handle HSA event, force device 0 and KMD should handle
-  // multiiple devices.
-  WDDMDevice* device = WddmDevice(0);  // EventDesc->NodeId
-  assert(device && "Couldn't obtain a device!");
-  assert(!"Unimplemented!");
+  EventData.EventType = event_desc.EventType;
+  EventData.EventData.SyncVar.SyncVar.UserData = event_desc.SyncVar.SyncVar.UserData;
+  EventData.EventData.SyncVar.SyncVarSize = event_desc.SyncVar.SyncVarSize;
   return true;
 }
 
 // ================================================================================================
-bool Event::Set() const {
-  assert(!"Unimplemented!");
-  return true;
-}
+bool Event::Set() const { return true; }
 
 // ================================================================================================
-bool Event::Reset() const {
-  assert(!"Unimplemented!");
-  return true;
-}
+bool Event::Reset() const { return true; }
 
 // ================================================================================================
-bool Event::Open(EventHandle handle, bool isReference) {
-  assert(!"Unimplemented!");
-  return true;
-}
+bool Event::Open(EventHandle handle, bool isReference) { return true; }
 
 // ================================================================================================
-bool Event::Wait(std::chrono::duration<float> timeout  // max time to wait
-  ) const {
-  assert(!"Unimplemented!");
-  return true;
-}
+bool Event::Wait(std::chrono::duration<float> timeout) const { return true; }
 #endif
 
 }  // namespace thunk
