@@ -1202,6 +1202,8 @@ rocprofsys_finalize_hidden(void)
                                           "rocprofsys", _cfg);
     }
 
+    config::print_output_summary();
+
     categories::shutdown();
 
     _finalization.stop();

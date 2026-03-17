@@ -288,5 +288,47 @@ warn_if_gpu_preset_without_rocm(const std::vector<std::string>& active_presets)
     }
 }
 
+inline void
+warn_if_output_not_writable(std::string_view tool_name)
+{
+    auto output_dir = get_output_directory();
+    if(!check_directory_writable(output_dir))
+    {
+        std::cerr << "[rocprof-sys][WARNING] Output directory '" << output_dir
+                  << "' is not writable!\n";
+        std::cerr << "  Try: rocprof-sys-" << tool_name
+                  << " -o /tmp/profile -- <command>\n";
+    }
+}
+
+inline void
+validate_configuration(std::string_view tool_name)
+{
+    // Check for conflicting ENABLE/DISABLE categories (causes std::abort() at runtime)
+    const char* enable_cats  = std::getenv("ROCPROFSYS_ENABLE_CATEGORIES");
+    const char* disable_cats = std::getenv("ROCPROFSYS_DISABLE_CATEGORIES");
+    if(enable_cats && std::strlen(enable_cats) > 0 && disable_cats &&
+       std::strlen(disable_cats) > 0)
+    {
+        std::cerr << "[rocprof-sys][warning] Both ROCPROFSYS_ENABLE_CATEGORIES and "
+                     "ROCPROFSYS_DISABLE_CATEGORIES are set.\n"
+                  << "  This will cause an abort at runtime. Use only one.\n"
+                  << "  ROCPROFSYS_ENABLE_CATEGORIES=" << enable_cats << "\n"
+                  << "  ROCPROFSYS_DISABLE_CATEGORIES=" << disable_cats << "\n";
+    }
+
+    // Check ROCPROFSYS_TMPDIR writability
+    const char* tmpdir     = std::getenv("ROCPROFSYS_TMPDIR");
+    auto        tmpdir_str = std::string{ tmpdir ? tmpdir : "/tmp" };
+    if(!check_directory_writable(tmpdir_str))
+    {
+        std::cerr << "[rocprof-sys][WARNING] Temp directory '" << tmpdir_str
+                  << "' is not writable!\n"
+                  << "  Try: export ROCPROFSYS_TMPDIR=/tmp\n";
+    }
+
+    (void) tool_name;
+}
+
 }  // namespace common_utils
 }  // namespace rocprofsys

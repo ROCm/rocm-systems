@@ -2864,6 +2864,91 @@ get_causal_output_filename()
     return _fname;
 }
 
+void
+print_output_summary()
+{
+    if(dmp::rank() > 0) return;
+
+    const auto& _config = settings::shared_instance();
+    if(!_config) return;
+
+    struct output_entry
+    {
+        std::string label;
+        std::string path;
+        std::string viewer;
+    };
+
+    auto entries = std::vector<output_entry>{};
+
+    auto _trace_it = _config->find("ROCPROFSYS_TRACE");
+    if(_trace_it != _config->end() &&
+       static_cast<tim::tsettings<bool>&>(*_trace_it->second).get())
+    {
+        auto _path = get_perfetto_output_filename();
+        entries.push_back({ "Perfetto trace", _path, "Open in https://ui.perfetto.dev" });
+    }
+
+    if(get_use_timemory())
+    {
+        auto _output_path = settings::output_path();
+        auto _txt_path    = fmt::format("{}/wall_clock.txt", _output_path);
+        auto _json_path   = fmt::format("{}/wall_clock.json", _output_path);
+        entries.push_back(
+            { "Text profile", _txt_path, fmt::format("cat {}", _txt_path) });
+        entries.push_back(
+            { "JSON data", _json_path, fmt::format("jq . {}", _json_path) });
+    }
+
+    if(get_use_rocpd())
+    {
+        auto _suffix = std::string{};
+        if(settings::use_output_suffix())
+        {
+            auto _sv = settings::default_process_suffix();
+            if(auto* _s = std::get_if<std::string>(&_sv))
+                _suffix = *_s;
+            else if(auto* _i = std::get_if<int>(&_sv))
+                _suffix = std::to_string(*_i);
+        }
+        auto _path = get_database_absolute_path("rocpd", _suffix);
+        entries.push_back(
+            { "RocPD database", _path,
+              "sqlite3, rocpd Python module, or AMD VIsualizer tool - OPTIQ" });
+    }
+
+    if(get_use_causal())
+    {
+        auto _base = get_causal_output_filename();
+        entries.push_back({ "Causal profile",
+                            fmt::format("{}.json / {}.txt", _base, _base),
+                            fmt::format("cat {}.txt", _base) });
+    }
+
+    if(entries.empty()) return;
+
+    auto _msg = std::string{};
+    _msg += "\n";
+    _msg += "  ┌──────────────────────────────────────────────┐\n";
+    _msg += "  │            Output Summary                    │\n";
+    _msg += "  └──────────────────────────────────────────────┘\n";
+
+    for(size_t i = 0; i < entries.size(); ++i)
+    {
+        const auto& entry   = entries[i];
+        bool        is_last = (i + 1 == entries.size());
+        auto        branch  = is_last ? "└─" : "├─";
+        auto        cont    = is_last ? "  " : "│ ";
+
+        _msg += fmt::format("  {} {} \n", branch, entry.label);
+        _msg += fmt::format("  {}   File: {}\n", cont, entry.path);
+        _msg += fmt::format("  {}   View with: {}\n", cont, entry.viewer);
+        if(!is_last) _msg += "  │\n";
+    }
+
+    LOG_INFO("{}", _msg);
+}
+
 namespace
 {
 std::vector<std::string>
