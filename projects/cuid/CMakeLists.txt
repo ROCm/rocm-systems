@@ -21,7 +21,7 @@
 #
 # Minimum version of cmake required
 #
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.14)
 
 set(AMDCUID "amdcuid" CACHE INTERNAL "")
 set(AMDCUID_PACKAGE ${AMDCUID} CACHE STRING "")

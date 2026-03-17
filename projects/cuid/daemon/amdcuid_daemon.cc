@@ -219,7 +219,10 @@ int main() {
             return 1;
         }
     }
-    close(fd);
+    else {
+        // The key file exists so no need to make any changes.
+        close(fd);
+    }
 
     // read config file first get logging options and whether to run as a daemon or only on boot
 #ifndef AMDCUID_CONFIG_DIR

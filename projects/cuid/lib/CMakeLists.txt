@@ -36,8 +36,7 @@ message("--------Proj Lib Dir: " ${PROJECT_BINARY_DIR}/lib)
 message("--------Proj Exe Dir: " ${PROJECT_BINARY_DIR}/bin)
 message("")
 
-# Determine library version from git tag, fallback to 0.1.0 if not available
-
+# Configure source and include directories
 set(SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src)
 set(INC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include)
 

@@ -43,8 +43,9 @@ set(SRC_LIST amdcuid_daemon.cc)
 # Add the daemon executable
 add_executable(${AMDCUID_DAEMON_EXECUTABLE} ${SRC_LIST})
 
+find_package(Threads REQUIRED)
 # Link against the CUID library
-target_link_libraries(${AMDCUID_DAEMON_EXECUTABLE} amdcuid_static OpenSSL::Crypto)
+target_link_libraries(${AMDCUID_DAEMON_EXECUTABLE} amdcuid_static OpenSSL::Crypto Threads::Threads)
 
 # Include directories
 target_include_directories(${AMDCUID_DAEMON_EXECUTABLE} PRIVATE ${INC_DIR})
@@ -73,8 +74,6 @@ install(
     COMPONENT ${DAEMON_COMPONENT})
 
 set(DAEMON_CONFIG_FILE amdcuid_daemon.conf)
-
-configure_file(${DAEMON_CONFIG_FILE} ${CONFIG_INSTALL_DIR}/${DAEMON_CONFIG_FILE} COPYONLY)
 
 install(
     FILES ${DAEMON_CONFIG_FILE}

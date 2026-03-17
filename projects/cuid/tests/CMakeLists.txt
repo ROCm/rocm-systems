@@ -37,22 +37,25 @@ message("--------Proj Exe Dir: " ${PROJECT_BINARY_DIR}/bin)
 message("")
 
 # Find required packages
-find_package(GTest REQUIRED)
-find_package(OpenSSL REQUIRED)
+find_package(GTest CONFIG QUIET)
+if (NOT GTest_FOUND)
+    # Download and compile googletest to ensure it's available
+    message("GTest not found on system. Fetching from source...")
+    include(FetchContent)
+    FetchContent_Declare(
+        googletest
+        GIT_REPOSITORY https://github.com/google/googletest.git
+        GIT_TAG v1.14.0
+    )
+    FetchContent_MakeAvailable(googletest)
+endif()
 
 set(AMDCUID_TST_EXECUTABLE amdcuid_test)
 set(UNIT_TEST_SOURCES
     unit/cuid_test.cc
 )
 
-# Download and compile googletest to ensure it's available
-include(FetchContent)
-FetchContent_Declare(
-    googletest
-    GIT_REPOSITORY https://github.com/google/googletest.git
-    GIT_TAG v1.14.0
-)
-FetchContent_MakeAvailable(googletest)
+
 
 # Enable testing
 enable_testing()
@@ -71,8 +74,8 @@ target_include_directories(
 target_link_libraries(
     ${AMDCUID_TST_EXECUTABLE}
     PRIVATE amdcuid_static
-    PRIVATE GTest::GTest
-    PRIVATE GTest::Main
+    PRIVATE GTest::gtest
+    PRIVATE GTest::gtest_main
     PRIVATE OpenSSL::SSL
     PRIVATE OpenSSL::Crypto
 )
