@@ -55,15 +55,23 @@ def test_kernel_category_filter(request):
     assert len(kernel_files) > 0, "Expected at least one kernel summary file"
 
     # Should NOT have HIP summaries
-    hip_files = [f for f in summary_files if "hip" in f.lower() and "kernel" not in f.lower()]
+    hip_files = [
+        f for f in summary_files if "hip" in f.lower() and "kernel" not in f.lower()
+    ]
     assert len(hip_files) == 0, f"Found unexpected HIP summary files: {hip_files}"
 
     # Should NOT have memory copy summaries
-    memory_files = [f for f in summary_files if "memory" in f.lower() and "kernel" not in f.lower()]
-    assert len(memory_files) == 0, f"Found unexpected memory summary files: {memory_files}"
+    memory_files = [
+        f for f in summary_files if "memory" in f.lower() and "kernel" not in f.lower()
+    ]
+    assert (
+        len(memory_files) == 0
+    ), f"Found unexpected memory summary files: {memory_files}"
 
     # Should NOT have HSA summaries
-    hsa_files = [f for f in summary_files if "hsa" in f.lower() and "kernel" not in f.lower()]
+    hsa_files = [
+        f for f in summary_files if "hsa" in f.lower() and "kernel" not in f.lower()
+    ]
     assert len(hsa_files) == 0, f"Found unexpected HSA summary files: {hsa_files}"
 
 
@@ -79,12 +87,20 @@ def test_hip_category_filter(request):
     assert len(hip_files) > 0, "Expected at least one HIP summary file"
 
     # Should NOT have kernel summaries (unless they're hip-related)
-    kernel_files = [f for f in summary_files if "kernel" in f.lower() and "hip" not in f.lower()]
-    assert len(kernel_files) == 0, f"Found unexpected kernel summary files: {kernel_files}"
+    kernel_files = [
+        f for f in summary_files if "kernel" in f.lower() and "hip" not in f.lower()
+    ]
+    assert (
+        len(kernel_files) == 0
+    ), f"Found unexpected kernel summary files: {kernel_files}"
 
     # Should NOT have memory copy summaries (unless hip-related)
-    memory_files = [f for f in summary_files if "memory" in f.lower() and "hip" not in f.lower()]
-    assert len(memory_files) == 0, f"Found unexpected memory summary files: {memory_files}"
+    memory_files = [
+        f for f in summary_files if "memory" in f.lower() and "hip" not in f.lower()
+    ]
+    assert (
+        len(memory_files) == 0
+    ), f"Found unexpected memory summary files: {memory_files}"
 
 
 def test_multiple_categories_filter(request):
@@ -123,7 +139,8 @@ def test_none_category(request):
 
     # Should have view-based summaries (kernels, memory_copy, etc.)
     view_files = [
-        f for f in summary_files
+        f
+        for f in summary_files
         if any(view in f.lower() for view in ["kernel", "memory", "scratch", "copy"])
     ]
     assert len(view_files) > 0, "Expected view-based summary files"
@@ -131,9 +148,13 @@ def test_none_category(request):
     # Should NOT have region-based summaries (rocm_hip, rocm_hsa, etc.)
     # Region summaries typically have the pattern "rocm_*" or are category-specific
     region_files = [
-        f for f in summary_files
-        if f.lower().startswith("rocm_") or
-           any(region in f.lower() for region in ["hip_summary", "hsa_summary", "marker_summary"])
+        f
+        for f in summary_files
+        if f.lower().startswith("rocm_")
+        or any(
+            region in f.lower()
+            for region in ["hip_summary", "hsa_summary", "marker_summary"]
+        )
     ]
     # Note: this assertion depends on naming conventions. Adjust if needed.
     # The key is that region summaries should not be present.
@@ -149,14 +170,22 @@ def test_all_category_outputs_exist(request):
     # All directories should have been created
     assert os.path.exists(kernel_dir), f"Kernel output directory not found: {kernel_dir}"
     assert os.path.exists(hip_dir), f"HIP output directory not found: {hip_dir}"
-    assert os.path.exists(multiple_dir), f"Multiple categories output directory not found: {multiple_dir}"
-    assert os.path.exists(none_dir), f"NONE category output directory not found: {none_dir}"
+    assert os.path.exists(
+        multiple_dir
+    ), f"Multiple categories output directory not found: {multiple_dir}"
+    assert os.path.exists(
+        none_dir
+    ), f"NONE category output directory not found: {none_dir}"
 
     # All should have at least some files
     assert len(get_summary_files(kernel_dir)) > 0, "No files in kernel output directory"
     assert len(get_summary_files(hip_dir)) > 0, "No files in HIP output directory"
-    assert len(get_summary_files(multiple_dir)) > 0, "No files in multiple categories output directory"
-    assert len(get_summary_files(none_dir)) > 0, "No files in NONE category output directory"
+    assert (
+        len(get_summary_files(multiple_dir)) > 0
+    ), "No files in multiple categories output directory"
+    assert (
+        len(get_summary_files(none_dir)) > 0
+    ), "No files in NONE category output directory"
 
 
 def pytest_addoption(parser):

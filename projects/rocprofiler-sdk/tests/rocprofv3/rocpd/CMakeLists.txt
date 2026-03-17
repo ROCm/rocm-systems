@@ -220,8 +220,8 @@ rocprofiler_add_integration_execute_test(
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-rocpd-summary-region-category-kernel
     COMMAND
-        ${Python3_EXECUTABLE} -m rocpd summary --region-categories KERNEL -f csv
-        -d ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary-kernel -i
+        ${Python3_EXECUTABLE} -m rocpd summary --region-categories KERNEL -f csv -d
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary-kernel -i
         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 45
@@ -235,8 +235,8 @@ rocprofiler_add_integration_execute_test(
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-rocpd-summary-region-category-hip
     COMMAND
-        ${Python3_EXECUTABLE} -m rocpd summary --region-categories HIP -f csv
-        -d ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary-hip -i
+        ${Python3_EXECUTABLE} -m rocpd summary --region-categories HIP -f csv -d
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary-hip -i
         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 45
@@ -250,8 +250,8 @@ rocprofiler_add_integration_execute_test(
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-rocpd-summary-region-category-multiple
     COMMAND
-        ${Python3_EXECUTABLE} -m rocpd summary --region-categories HIP KERNEL MARKER -f csv
-        -d ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary-multiple -i
+        ${Python3_EXECUTABLE} -m rocpd summary --region-categories HIP KERNEL MARKER -f
+        csv -d ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary-multiple -i
         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 45
@@ -265,8 +265,8 @@ rocprofiler_add_integration_execute_test(
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-rocpd-summary-region-category-none
     COMMAND
-        ${Python3_EXECUTABLE} -m rocpd summary --region-categories NONE -f csv
-        -d ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary-none -i
+        ${Python3_EXECUTABLE} -m rocpd summary --region-categories NONE -f csv -d
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary-none -i
         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 45

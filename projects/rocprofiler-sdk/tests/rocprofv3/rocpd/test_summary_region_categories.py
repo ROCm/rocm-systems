@@ -39,7 +39,10 @@ from unittest.mock import Mock, patch
 
 # Import the summary module
 import sys
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "source" / "lib" / "python"))
+
+sys.path.insert(
+    0, str(Path(__file__).parent.parent.parent.parent / "source" / "lib" / "python")
+)
 
 from rocpd.summary import (
     create_summary_queries,
@@ -125,7 +128,9 @@ class TestSummaryQueryFiltering:
 
     def test_no_filter_includes_all_views(self, mock_connection):
         """When only_view_categories is None, all eligible views should be included."""
-        queries = create_summary_queries(mock_connection, by_rank=False, only_view_categories=None)
+        queries = create_summary_queries(
+            mock_connection, by_rank=False, only_view_categories=None
+        )
 
         # Should have summaries for all views (kernels, hip_api, memory_copy, scratch_memory, hsa_api)
         # Each gets one query (not by_rank)
@@ -139,9 +144,7 @@ class TestSummaryQueryFiltering:
     def test_kernel_filter_only_includes_kernel_views(self, mock_connection):
         """When only_view_categories=['kernel'], only kernel-related views should be included."""
         queries = create_summary_queries(
-            mock_connection,
-            by_rank=False,
-            only_view_categories=["kernel"]
+            mock_connection, by_rank=False, only_view_categories=["kernel"]
         )
 
         # Should only have kernel summary
@@ -153,9 +156,7 @@ class TestSummaryQueryFiltering:
     def test_multiple_categories_filter(self, mock_connection):
         """When multiple categories specified, should include views matching any category."""
         queries = create_summary_queries(
-            mock_connection,
-            by_rank=False,
-            only_view_categories=["kernel", "hip"]
+            mock_connection, by_rank=False, only_view_categories=["kernel", "hip"]
         )
 
         # Should have kernel and hip summaries
@@ -168,9 +169,7 @@ class TestSummaryQueryFiltering:
     def test_by_rank_with_filter(self, mock_connection):
         """Test that by_rank creates both regular and by-rank queries when filtering."""
         queries = create_summary_queries(
-            mock_connection,
-            by_rank=True,
-            only_view_categories=["kernel"]
+            mock_connection, by_rank=True, only_view_categories=["kernel"]
         )
 
         # Should have both regular and by-rank versions
@@ -181,15 +180,11 @@ class TestSummaryQueryFiltering:
     def test_case_insensitive_filtering(self, mock_connection):
         """Test that category filtering is case-insensitive."""
         queries_upper = create_summary_queries(
-            mock_connection,
-            by_rank=False,
-            only_view_categories=["KERNEL"]
+            mock_connection, by_rank=False, only_view_categories=["KERNEL"]
         )
 
         queries_lower = create_summary_queries(
-            mock_connection,
-            by_rank=False,
-            only_view_categories=["kernel"]
+            mock_connection, by_rank=False, only_view_categories=["kernel"]
         )
 
         # Both should produce the same results
@@ -208,14 +203,17 @@ class TestGenerateAllSummariesIntegration:
         cursor = conn.cursor()
 
         # Create test tables
-        cursor.execute("""
+        cursor.execute(
+            """
             CREATE TABLE IF NOT EXISTS processes (
                 pid INTEGER PRIMARY KEY,
                 hostname TEXT
             )
-        """)
+        """
+        )
 
-        cursor.execute("""
+        cursor.execute(
+            """
             CREATE TABLE IF NOT EXISTS regions_and_samples (
                 guid INTEGER,
                 nid INTEGER,
@@ -224,34 +222,43 @@ class TestGenerateAllSummariesIntegration:
                 category TEXT,
                 duration INTEGER
             )
-        """)
+        """
+        )
 
         # Create temporary views
-        cursor.execute("""
+        cursor.execute(
+            """
             CREATE TEMP VIEW kernels AS
             SELECT 'test_kernel' as name, 1000 as duration, 1 as pid, 1 as guid, 0 as nid
-        """)
+        """
+        )
 
-        cursor.execute("""
+        cursor.execute(
+            """
             CREATE TEMP VIEW hip_api AS
             SELECT 'hipMalloc' as name, 500 as duration, 1 as pid, 1 as guid, 0 as nid
-        """)
+        """
+        )
 
-        cursor.execute("""
+        cursor.execute(
+            """
             CREATE TEMP VIEW memory_copy AS
             SELECT 'memcpy_h2d' as name, 200 as duration, 1 as pid, 1 as guid, 0 as nid
-        """)
+        """
+        )
 
         # Insert test process
         cursor.execute("INSERT INTO processes VALUES (1, 'localhost')")
 
         # Insert test region data
-        cursor.execute("""
+        cursor.execute(
+            """
             INSERT INTO regions_and_samples VALUES
             (1, 0, 1, 'hip_region', 'rocm_hip', 100),
             (1, 0, 1, 'hsa_region', 'rocm_hsa', 150),
             (1, 0, 1, 'marker_test', 'MARKER_USER', 50)
-        """)
+        """
+        )
 
         conn.commit()
         conn.close()
@@ -270,15 +277,17 @@ class TestGenerateAllSummariesIntegration:
             # Count queries by patching export_query
             exported_queries = {}
 
-            def mock_export(conn, output_path, output_file, output_format, query_name, query):
+            def mock_export(
+                conn, output_path, output_file, output_format, query_name, query
+            ):
                 exported_queries[query_name] = query
 
-            with patch('rocpd.summary.export_query', side_effect=mock_export):
+            with patch("rocpd.summary.export_query", side_effect=mock_export):
                 generate_all_summaries(
                     connection,
                     region_categories=["NONE"],
                     output_path=tmpdir,
-                    format="csv"
+                    format="csv",
                 )
 
             # Should have view summaries but no region summaries
@@ -297,15 +306,17 @@ class TestGenerateAllSummariesIntegration:
 
             exported_queries = {}
 
-            def mock_export(conn, output_path, output_file, output_format, query_name, query):
+            def mock_export(
+                conn, output_path, output_file, output_format, query_name, query
+            ):
                 exported_queries[query_name] = query
 
-            with patch('rocpd.summary.export_query', side_effect=mock_export):
+            with patch("rocpd.summary.export_query", side_effect=mock_export):
                 generate_all_summaries(
                     connection,
                     region_categories=["kernel"],
                     output_path=tmpdir,
-                    format="csv"
+                    format="csv",
                 )
 
             # Should ONLY have kernel-related summaries
@@ -325,15 +336,17 @@ class TestGenerateAllSummariesIntegration:
 
             exported_queries = {}
 
-            def mock_export(conn, output_path, output_file, output_format, query_name, query):
+            def mock_export(
+                conn, output_path, output_file, output_format, query_name, query
+            ):
                 exported_queries[query_name] = query
 
-            with patch('rocpd.summary.export_query', side_effect=mock_export):
+            with patch("rocpd.summary.export_query", side_effect=mock_export):
                 generate_all_summaries(
                     connection,
                     region_categories=["kernel", "hip"],
                     output_path=tmpdir,
-                    format="csv"
+                    format="csv",
                 )
 
             # Should have kernel and hip summaries
