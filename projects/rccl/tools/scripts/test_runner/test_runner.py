@@ -39,25 +39,27 @@ def main():
             print("Loading configuration...")
         config_processor = TestConfigProcessor(args.config)
         config_processor.validate_config()
+        print("Configuration loaded and validated")
 
         # Create test executor
         executor = TestExecutor(config_processor, args)
 
         # Check environment
         if not executor.check_environment():
-            if args.verbose:
-                print("Exiting: Environment check failed")
+            print("Exiting: Environment check failed")
             return
 
         # Build RCCL (if not --no-build)
         if not args.no_build:
             if not executor.build_rccl():
-                print("ERROR: Build failed")
-                if args.verbose:
-                    print("Exiting: RCCL build failed")
+                print("ERROR: Build failed. Exiting.")
                 return
+        else:
+            print("SKIP: Build step skipped (--no-build)")
 
         # Parse and run test suites
+        if args.skip_tests:
+            print("SKIP: Test execution skipped (--skip-tests)")
         if not args.skip_tests:
             if args.verbose:
                 print("\nParsing test suites...")
@@ -89,6 +91,8 @@ def main():
             executor.print_summary()
 
         # Generate coverage report
+        if not args.coverage_report:
+            print("\nSKIP: Coverage report not requested (use --coverage-report to enable)")
         executor.generate_coverage_report()
 
         # Return based on results
@@ -97,12 +101,10 @@ def main():
             failed = executor.test_results.count(TestResult.RESULT_FAILED.value)
             timeout = executor.test_results.count(TestResult.RESULT_TIMEOUT.value)
             if failed > 0 or timeout > 0:
-                if args.verbose:
-                    print(f"Exiting: Tests failed (failed={failed}, timeout={timeout})")
+                print(f"Exiting: Tests failed (failed={failed}, timeout={timeout})")
                 return
 
-        if args.verbose:
-            print("Exiting: Test run completed successfully")
+        print("Test run completed successfully")
         return
 
     except KeyboardInterrupt:
