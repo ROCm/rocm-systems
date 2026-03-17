@@ -30,13 +30,6 @@ std::vector<std::string> syncMsg = {"event", "stream", "device"};
 static constexpr int numElements{1024 * 16};
 static constexpr size_t sizeBytes{numElements * sizeof(int)};
 
-#if HT_AMD
-static __global__ void kerTestMemAccess(char* buf) {
-  size_t myId = threadIdx.x + blockDim.x * blockIdx.x;
-  buf[myId] = VALUE;
-}
-#endif
-
 void CheckHostPointer(int numElements, int* ptr, unsigned eventFlags, int syncMethod,
                       std::string msg) {
   std::cerr << "test: CheckHostPointer " << msg << " eventFlags = " << std::hex << eventFlags
