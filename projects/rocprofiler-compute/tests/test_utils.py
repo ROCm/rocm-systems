@@ -7938,3 +7938,120 @@ def test_gpu_benchmark_locking(tmp_path, monkeypatch, capsys):
     assert "Waiting for GPU 0" in output
     assert "another rocprof-compute benchmark is in progress" in output
     assert "Acquired lock for GPU 0" in output
+
+
+# =============================================================================
+# BUILD METRIC LIST TESTS
+# =============================================================================
+
+
+class TestBuildMetricList:
+    """Tests for build_metric_list and _metric_has_valid_expr."""
+
+    # Maps YAML metric expression keys to their SUPPORTED_FIELD display names.
+    _EXPR_KEY_TO_HEADER_DISPLAY = {
+        "value": "Value",
+        "avg": "Avg",
+        "min": "Min",
+        "max": "Max",
+        "expr": "Expression",
+        "median": "Median",
+        "count": "Count",
+    }
+
+    @classmethod
+    def setup_class(cls):
+        import sys
+
+        sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+        from utils import schema
+        from utils.parser import build_metric_list
+
+        cls.schema = schema
+        cls.build_metric_list = staticmethod(build_metric_list)
+
+    def _build_test_arch_config_for_single_metric(
+        self, metric_name: str, expression_values: dict
+    ):
+        """
+        Build an ArchConfig containing a single metric for testing.
+        """
+        from collections import OrderedDict
+
+        header = {"metric": "Metric"}
+        for key in expression_values:
+            if key in self._EXPR_KEY_TO_HEADER_DISPLAY:
+                header[key] = self._EXPR_KEY_TO_HEADER_DISPLAY[key]
+
+        table = {
+            "id": 201,
+            "title": "Test Table",
+            "header": header,
+            "metric": {metric_name: expression_values},
+        }
+        if "expr" in expression_values:
+            table["cli_style"] = "simple_box"
+
+        panel_configs = OrderedDict()
+        panel_configs[200] = {
+            "id": 200,
+            "title": "Test Panel",
+            "data source": [{"metric_table": table}],
+        }
+
+        ac = self.schema.ArchConfig()
+        ac.panel_configs = panel_configs
+        return ac
+
+    @staticmethod
+    def _extract_leaf_metric_entries(ac):
+        """Return only leaf metric entries whose ID has format 'panel.table.index'."""
+        return {k: v for k, v in ac.metric_list.items() if k.count(".") == 2}
+
+    def test_given_metric_with_valid_value__it_presents_in_metric_list(self):
+        ac = self._build_test_arch_config_for_single_metric(
+            "Valid Metric A", {"value": "AVG(COUNTER_A)"}
+        )
+        self.build_metric_list(ac, None)
+        assert "Valid Metric A" in self._extract_leaf_metric_entries(ac).values()
+
+    def test_given_metric_with_python_none__it_doesnt_present_in_metric_list(self):
+        ac = self._build_test_arch_config_for_single_metric(
+            "Unsupported Metric B", {"value": None}
+        )
+        self.build_metric_list(ac, None)
+        assert (
+            "Unsupported Metric B" not in self._extract_leaf_metric_entries(ac).values()
+        )
+
+    def test_given_metric_with_string_none__it_doesnt_present_in_metric_list(self):
+        ac = self._build_test_arch_config_for_single_metric(
+            "Unsupported Metric C", {"value": "None"}
+        )
+        self.build_metric_list(ac, None)
+        assert (
+            "Unsupported Metric C" not in self._extract_leaf_metric_entries(ac).values()
+        )
+
+    def test_given_expr_metric__it_presents_in_metric_list(self):
+        ac = self._build_test_arch_config_for_single_metric(
+            "Expr Metric", {"expr": "(100 * COUNTER_B / COUNTER_C)"}
+        )
+        self.build_metric_list(ac, None)
+        assert "Expr Metric" in self._extract_leaf_metric_entries(ac).values()
+
+    def test_given_metric_with_partial_avg_min_max__it_presents_in_metric_list(self):
+        ac = self._build_test_arch_config_for_single_metric(
+            "Partial Metric", {"avg": "AVG(COUNTER_E)", "min": None, "max": None}
+        )
+        self.build_metric_list(ac, None)
+        assert "Partial Metric" in self._extract_leaf_metric_entries(ac).values()
+
+    def test_given_metric_with_all_none_avg_min_max__it_doesnt_present_in_metric_list(
+        self,
+    ):
+        ac = self._build_test_arch_config_for_single_metric(
+            "All None Metric", {"avg": None, "min": None, "max": None}
+        )
+        self.build_metric_list(ac, None)
+        assert "All None Metric" not in self._extract_leaf_metric_entries(ac).values()

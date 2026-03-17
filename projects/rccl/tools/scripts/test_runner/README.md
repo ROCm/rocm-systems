@@ -91,11 +91,11 @@ When determining which RCCL library to use, the test runner follows this priorit
    - Skips build automatically
    - Must contain `librccl.so` and `test/` subdirectory
 2. **`--no-build` flag with local build**
-   - Uses local `build_debug_cov_on_tests_on/` directory
+   - Uses local `build/debug/` or `build/release/` directory (based on `install_flags`)
    - Requires prior build
 3. **Default build process** (lowest priority)
-   - Builds RCCL in timestamped directory
-   - Uses CMake configuration from JSON
+   - Builds RCCL via `install.sh` into `build/debug/` or `build/release/`
+   - Uses `install_flags` and `cmake_options` from JSON config
 
 **Example Usage:**
 
@@ -414,7 +414,7 @@ Optional:
   --no-build                Skip build step and use existing build
   --skip-tests              Skip test execution (useful with --coverage-report)
   --coverage-report         Generate code coverage report (HTML + text)
-  --overwrite               Overwrite previous workspace directories
+  --build-dir PATH          Custom build directory path (default: <workdir>/build/debug or build/release)
   --report-suffix SUFFIX    Suffix for report directory (default: blank)
   -h, --help                Show help message and exit
 ```
@@ -493,10 +493,10 @@ python test_runner.py --config adhoc_test_config.json --no-build --skip-tests --
 python test_runner.py --config test_config_sample.json -o /path/to/output --verbose
 ```
 
-### Run with Overwrite (Clean Previous Results)
+### Run with Custom Build Directory
 
 ```bash
-python test_runner.py --config test_config_sample.json --overwrite --coverage-report
+python test_runner.py --config test_config_sample.json --build-dir /tmp/my_rccl_build --coverage-report
 ```
 
 ## Environment Variable Merging
@@ -603,22 +603,19 @@ node02 slots=8
 ### Build Configuration (New!)
 
 Customize the RCCL build process through the `build_configuration` section in your JSON config file.
+The test runner invokes `install.sh` directly, so build options map to `install.sh` flags.
 
 #### Basic Structure
 
 ```json
 {
   "build_configuration": {
-    "cmake_options": {
-      "CMAKE_BUILD_TYPE": "Debug",
-      "ENABLE_CODE_COVERAGE": "ON",
-      "ONLY_FUNCS": "SendRecv|AllReduce"
-    },
+    "install_flags": ["--debug", "-c", "-t", "-l", "--log-trace", "--enable-mpi-tests", "--no_clean"],
+    "cmake_options": "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
     "env_variables": {
       "HIPCC_COMPILE_FLAGS_APPEND": "-g -O1"
     },
-    "parallel_jobs": 64,
-    "generator": "Unix Makefiles"
+    "parallel_jobs": 64
   }
 }
 ```
@@ -629,10 +626,18 @@ Customize the RCCL build process through the `build_configuration` section in yo
 ```json
 {
   "build_configuration": {
-    "cmake_options": {
-      "ENABLE_CODE_COVERAGE": "OFF"
-    },
+    "install_flags": ["-t", "-l", "--no_clean"],
     "parallel_jobs": 128
+  }
+}
+```
+
+**Debug Build with Coverage:**
+```json
+{
+  "build_configuration": {
+    "install_flags": ["--debug", "-c", "-t", "-l", "--log-trace", "--no_clean"],
+    "cmake_options": "-DCMAKE_CXX_FLAGS=-Wl,--build-id=sha1"
   }
 }
 ```
@@ -641,11 +646,7 @@ Customize the RCCL build process through the `build_configuration` section in yo
 ```json
 {
   "build_configuration": {
-    "cmake_options": {
-      "CMAKE_BUILD_TYPE": "Release",
-      "TRACE": "OFF",
-      "COLLTRACE": "OFF"
-    }
+    "install_flags": ["-t", "-l", "--disable-colltrace", "--no_clean"]
   }
 }
 ```
@@ -654,20 +655,17 @@ Customize the RCCL build process through the `build_configuration` section in yo
 ```json
 {
   "build_configuration": {
-    "cmake_options": {
-      "ONLY_FUNCS": "Broadcast|Reduce"
-    }
+    "install_flags": ["--debug", "-t", "--no_clean"],
+    "cmake_options": "-DONLY_FUNCS=Broadcast|Reduce"
   }
 }
 ```
 
 **All Options:**
-- `cmake_options` - Any CMake option (user values override defaults)
+- `install_flags` - List of `install.sh` command-line flags (e.g. `--debug`, `-t`, `-c`, `-l`)
+- `cmake_options` - Additional CMake options string passed via `install.sh --cmake-options` (e.g. `-DFOO=BAR`)
 - `env_variables` - Build environment variables
-- `parallel_jobs` - Number of parallel build threads (default: 64)
-- `generator` - CMake generator: "Unix Makefiles", "Ninja", etc.
-
-See `BUILD_CONFIGURATION_GUIDE.md` for complete documentation.
+- `parallel_jobs` - Number of parallel build threads (passed via `-j`)
 
 ### Enhanced Environment Variable Expansion
 
@@ -696,7 +694,7 @@ Specify test binary locations in multiple ways for maximum flexibility:
   "binary": "all_reduce_perf"
 }
 ```
-Result: `<workdir>/build_debug_cov_on_tests_on/test/all_reduce_perf`
+Result: `<workdir>/build/debug/test/all_reduce_perf`
 
 #### 2. Absolute Path
 
@@ -785,7 +783,7 @@ python test_runner.py --config test.json --verbose
 Output includes:
 ```
 Binary:  all_reduce_perf
-Binary path: /home/user/code/rti/scripts/rccl/build_debug_cov_on_tests_on/test/all_reduce_perf
+Binary path: /home/user/code/rti/scripts/rccl/build/debug/test/all_reduce_perf
 ```
 
 ### Configuration Best Practices

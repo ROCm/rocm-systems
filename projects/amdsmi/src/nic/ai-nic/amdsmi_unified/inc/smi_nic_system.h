@@ -24,18 +24,18 @@
 #define __SMI_NIC_SYSTEM_H__
 
 #include <unistd.h>
+
 #include <climits>
 #include <cstdint>
-
-#include <iostream>
 #include <filesystem>
-#include <string>
+#include <iostream>
 #include <map>
-#include <vector>
+#include <memory>
 #include <mutex>
 #include <shared_mutex>
+#include <string>
 #include <utility>
-#include <memory>
+#include <vector>
 
 #include "smi_nic.h"
 #include "smi_nic_subsystem.h"
@@ -52,31 +52,31 @@
 uint64_t parse_bdf(const std::string& bdf);
 
 class SmiNicSystem {
-public:
-	SmiNicSystem();
-	~SmiNicSystem() = default;
+ public:
+  SmiNicSystem();
+  ~SmiNicSystem() = default;
 
-	void register_subsystem(std::unique_ptr<SmiNicSubsystem> subsystem);
-	void discover_nics();
-	bool driver_loaded(const std::string& bdf, DriverType driver_type) const;
+  void register_subsystem(std::unique_ptr<SmiNicSubsystem> subsystem);
+  void discover_nics();
+  bool driver_loaded(const std::string& bdf, DriverType driver_type) const;
 
-	std::vector<std::string> list_bdfs();
-	bool interface_exists(const std::string& iface);
-	const std::vector<const SmiNic*>& get_nics() const;
-	const SmiNic* get_nic_by_interface(const std::string& iface) const;
-	const SmiNic* get_nic_by_bdf(const std::string& bdf) const;
-	const SmiNic* get_nic_by_bdf(uint64_t bdf) const;
+  std::vector<std::string> list_bdfs();
+  bool interface_exists(const std::string& iface);
+  const std::vector<const SmiNic*>& get_nics() const;
+  const SmiNic* get_nic_by_interface(const std::string& iface) const;
+  const SmiNic* get_nic_by_bdf(const std::string& bdf) const;
+  const SmiNic* get_nic_by_bdf(uint64_t bdf) const;
 
-	SmiNicSystem(const SmiNicSystem &) = delete;
-	SmiNicSystem & operator = (const SmiNicSystem &) = delete;
-	SmiNicSystem(SmiNicSystem &&) = delete;
-	SmiNicSystem & operator = (SmiNicSystem &&) = delete;
+  SmiNicSystem(const SmiNicSystem&) = delete;
+  SmiNicSystem& operator=(const SmiNicSystem&) = delete;
+  SmiNicSystem(SmiNicSystem&&) = delete;
+  SmiNicSystem& operator=(SmiNicSystem&&) = delete;
 
-private:
-	std::string net_path_;
-	std::string pci_path_;
-	std::vector<const SmiNic*> nics_;
-	std::vector<std::unique_ptr<SmiNicSubsystem>> subsystems_;
+ private:
+  std::string net_path_;
+  std::string pci_path_;
+  std::vector<const SmiNic*> nics_;
+  std::vector<std::unique_ptr<SmiNicSubsystem>> subsystems_;
 };
 
-#endif // __SMI_NIC_SYSTEM_H__
+#endif  // __SMI_NIC_SYSTEM_H__

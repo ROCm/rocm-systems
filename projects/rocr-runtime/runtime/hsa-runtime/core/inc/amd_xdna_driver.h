@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -95,29 +95,10 @@ class Queue;
 
 namespace AMD {
 
-// @brief: Used to transform an address into a device address
-constexpr uint32_t DEV_ADDR_BASE = 0x04000000;
-constexpr uint32_t DEV_ADDR_OFFSET_MASK = 0x02FFFFFF;
-
-/// @brief: The driver places a structure before each command in a command chain.
-/// Need to increase the size of the command by the size of this structure.
-/// In the following xdna driver source can see where this is implemented:
-/// Commit hash: eddd92c0f61592c576a500f16efa24eb23667c23
-/// https://github.com/amd/xdna-driver/blob/main/src/driver/amdxdna/aie2_msg_priv.h#L387-L391
-/// https://github.com/amd/xdna-driver/blob/main/src/driver/amdxdna/aie2_message.c#L637
-constexpr uint32_t CMD_COUNT_SIZE_INCREASE = 3;
-
-/// @brief: The size of an instruction in bytes
-constexpr uint32_t INSTR_SIZE_BYTES = 4;
-
-/// @brief: Index of command payload where the instruction sequence
-/// address is located
-constexpr uint32_t CMD_PKT_PAYLOAD_INSTRUCTION_SEQUENCE_IDX = 2;
-constexpr uint32_t CMD_PKT_PAYLOAD_INSTRUCTION_SEQUENCE_SIZE_IDX = 4;
-
-/// @brief Environment variable to define job submission timeout
-constexpr uint32_t DEFAULT_TIMEOUT_VAL = 50;
-
+/// @brief AMD XDNA Driver for AMD AIE agents.
+///
+/// @details The user-mode driver for AMD AIE that provides APIs for the ROCr core to allocate
+/// memory, manage DMA buffers, allocate queues, and more.
 class XdnaDriver final : public core::Driver {
   /// @brief BO handle information.
   struct BOHandle {
@@ -136,11 +117,12 @@ class XdnaDriver final : public core::Driver {
     constexpr bool IsValid() const { return handle != AMDXDNA_INVALID_BO_HANDLE; }
   };
 
-  /// @brief CU mask size.
-  static constexpr size_t cu_mask_size = sizeof(uint32_t) * CHAR_BIT;
 
   /// @brief Per hardware context PDI cache.
   class PDICache {
+    /// @brief CU mask size.
+    constexpr static size_t cu_mask_size = sizeof(uint32_t) * CHAR_BIT;
+
     std::array<BOHandle, cu_mask_size> entries = {};
     size_t entry_count = 0;
 

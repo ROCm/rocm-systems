@@ -22,6 +22,7 @@ import os
 
 amdsmi_init()
 
+
 def amdsmi_get_afids_from_cper():
     directory_path = "/tmp/cper_dump/"
     print(f"Searching for cper file in {directory_path}")
@@ -34,6 +35,7 @@ def amdsmi_get_afids_from_cper():
                         raw = file.read()
                         afids, num_afids = amdsmi_interface.amdsmi_get_afids_from_cper(raw)
                         print(f"afids: {afids}")
+
 
 amdsmi_get_afids_from_cper()
 

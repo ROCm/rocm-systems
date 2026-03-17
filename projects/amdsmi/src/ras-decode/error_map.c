@@ -100,7 +100,7 @@ static const error_map_entry_t error_map[] = {
 
 static const size_t NUM_ERROR_ENTRIES = sizeof(error_map) / sizeof(error_map[0]);
 
-int get_error_id(const char *error_category, const char *error_type, const char *error_severity) {
+int get_error_id(const char* error_category, const char* error_type, const char* error_severity) {
   if (!error_category || !error_type || !error_severity ||
       strcmp(error_category, RAS_DECODE_SEVERITY_UNKNOWN) == 0 ||
       strcmp(error_type, RAS_DECODE_SEVERITY_UNKNOWN) == 0 ||

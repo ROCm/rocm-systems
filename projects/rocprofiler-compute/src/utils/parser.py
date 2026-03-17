@@ -783,6 +783,44 @@ def calc_builtin_var(var: Union[int, str], sys_info: pd.Series) -> int:  # type:
         console_error(f'Built-in var "{var}" is not supported')
 
 
+def build_metric_list(
+    arch_configs: schema.ArchConfig,
+    sys_info: pd.Series,
+) -> None:
+    """
+    Populate arch_configs.metric_list from the panel configs.
+
+    Builds the metric_list mapping (panel/table/metric IDs -> display names)
+    without constructing DataFrames or metric_counters.  Use this directly when
+    only the metric listing is needed (e.g. --list-metrics, --list-blocks).
+    """
+    metric_list = {}
+
+    _expand_placeholder_ranges(arch_configs, sys_info)
+
+    for panel_id, panel in arch_configs.panel_configs.items():
+        for data_source in panel["data source"]:
+            for type, data_config in data_source.items():
+                if type == "metric_table":
+                    data_source_idx = str(data_config["id"] // 100)
+                    if data_source_idx != "0":
+                        metric_list[data_source_idx] = panel["title"]
+
+                    table_idx = f"{data_config['id'] // 100}.{data_config['id'] % 100}"
+                    metric_list[table_idx] = data_config["title"]
+
+                    for i, (key, entries) in enumerate(data_config["metric"].items()):
+                        metric_idx = f"{table_idx}.{i}"
+                        if _metric_has_valid_expr(entries, data_config):
+                            metric_list[metric_idx] = key
+
+                elif type in ("raw_csv_table", "pc_sampling_table"):
+                    data_source_idx = str(data_config["id"] // 100)
+                    metric_list[data_source_idx] = panel["title"]
+
+    setattr(arch_configs, "metric_list", metric_list)
+
+
 @demarcate
 def build_dfs(
     arch_configs: schema.ArchConfig,
@@ -790,10 +828,10 @@ def build_dfs(
     sys_info: pd.Series,
 ) -> None:
     """
-    - Build dataframe for each type of data source within each panel.
-      Each dataframe will be used as a template to load data with each run later.
-      For now, support "metric_table" and "raw_csv_table". Otherwise, put an empty df.
-    - Collect/build metric_list to suport customrized metrics profiling.
+    Build dataframe for each type of data source within each panel.
+
+    Each dataframe will be used as a template to load data with each run later.
+    For now, support "metric_table" and "raw_csv_table". Otherwise, put an empty df.
     """
 
     # TODO: more error checking for filter_metrics!!
@@ -806,38 +844,10 @@ def build_dfs(
     }
 
     dfs = {}
-    metric_list = {}
     dfs_type = {}
     metric_counters = {}
 
-    for panel_id, panel in arch_configs.panel_configs.items():
-        for data_source in panel["data source"]:
-            for type, data_config in data_source.items():
-                if (
-                    type == "metric_table"
-                    and "metric" in data_config
-                    and "placeholder_range" in data_config["metric"]
-                ):
-                    new_metrics = {}
-                    if sys_info is not None:
-                        # NB: support single placeholder for now!!
-                        p_range = data_config["metric"].pop("placeholder_range")
-                        metric, metric_expr = data_config["metric"].popitem()
-
-                        for p, r in p_range.items():
-                            # NB: We have to resolve placeholder range first if it
-                            #   is a build-in var. It will be too late to do it in
-                            #   eval_metric(). This is the only reason we need
-                            #   sys_info at this stage.
-                            var = calc_builtin_var(r, sys_info)
-                            for i in range(var):
-                                new_key = metric.replace(p, str(i))
-                                new_val = {}
-                                for k, v in metric_expr.items():
-                                    new_val[k] = metric_expr[k].replace(p, str(i))
-                                    new_metrics[new_key] = new_val
-
-                    data_config["metric"] = new_metrics
+    _expand_placeholder_ranges(arch_configs, sys_info)
 
     for panel_id, panel in arch_configs.panel_configs.items():
         for data_source in panel["data source"]:
@@ -846,10 +856,6 @@ def build_dfs(
                     headers = ["Metric_ID"]
                     data_source_idx = str(data_config["id"] // 100)
 
-                    if data_source_idx != 0 or (
-                        filter_metrics and data_source_idx in filter_metrics
-                    ):
-                        metric_list[data_source_idx] = panel["title"]
                     if (
                         "cli_style" in data_config
                         and data_config["cli_style"] == "simple_box"
@@ -875,12 +881,6 @@ def build_dfs(
 
                     df = pd.DataFrame(columns=headers)
 
-                    if not data_config["metric"]:
-                        data_source_idx = (
-                            f"{data_config['id'] // 100}.{data_config['id'] % 100}"
-                        )
-                        metric_list[data_source_idx] = data_config["title"]
-
                     for i, (key, entries) in enumerate(data_config["metric"].items()):
                         data_source_idx = (
                             f"{data_config['id'] // 100}.{data_config['id'] % 100}"
@@ -901,8 +901,6 @@ def build_dfs(
                             (str(panel_id // 100) in filter_metrics)
                         ):
                             values = [metric_idx, key]
-
-                            metric_list[data_source_idx] = data_config["title"]
 
                             if (
                                 "cli_style" in data_config
@@ -933,9 +931,6 @@ def build_dfs(
 
                             df_new_row = pd.DataFrame([values], columns=headers)
                             df = pd.concat([df, df_new_row])
-
-                        # collect metric_list
-                        metric_list[metric_idx] = key
 
                         # generate mapping of counters and metrics
                         filtered_counters = {}
@@ -968,7 +963,6 @@ def build_dfs(
                             df = pd.DataFrame(
                                 [data_config["source"]], columns=["from_csv"]
                             )
-                        metric_list[data_source_idx] = panel["title"]
                     else:
                         df = pd.DataFrame()
                 elif type == "pc_sampling_table":
@@ -976,7 +970,6 @@ def build_dfs(
                     df = pd.DataFrame(
                         [data_config["source"]], columns=["from_pc_sampling"]
                     )
-                    metric_list[data_source_idx] = panel["title"]
                 else:
                     df = pd.DataFrame()
 
@@ -984,7 +977,6 @@ def build_dfs(
                 dfs_type[data_config["id"]] = type
 
     setattr(arch_configs, "dfs", dfs)
-    setattr(arch_configs, "metric_list", metric_list)
     setattr(arch_configs, "dfs_type", dfs_type)
     setattr(arch_configs, "metric_counters", metric_counters)
 
@@ -1020,6 +1012,64 @@ def build_metric_value_string(
                     df[expr] = df[expr].apply(
                         update_normal_unit_string, normal_unit=normal_unit
                     )
+
+
+def _metric_has_valid_expr(entries: dict, data_config: dict) -> bool:
+    """
+    Return True if a metric entry has at least one evaluatable expression field
+    that is not None and not the string "None".
+
+    Expression fields are identified by matching the header display name against
+    schema.SUPPORTED_FIELD, excluding Peak-prefixed fields which are empirical values.
+    """
+    for header_key, header_display in data_config["header"].items():
+        if header_display in schema.SUPPORTED_FIELD and not header_display.startswith(
+            "Peak"
+        ):
+            expr_value = entries.get(header_key)
+            if expr_value is not None and expr_value != "None":
+                return True
+    return False
+
+
+def _expand_placeholder_ranges(
+    arch_configs: schema.ArchConfig,
+    sys_info: pd.Series,
+) -> None:
+    """
+    Expand placeholder_range entries in metric_table data configs in-place.
+
+    Some metric tables define a range of metrics via a placeholder key that is
+    expanded into individual entries at load time. sys_info is required to
+    resolve built-in range variables; if it is None the table is cleared.
+    """
+    for _panel_id, panel in arch_configs.panel_configs.items():
+        for data_source in panel["data source"]:
+            for type, data_config in data_source.items():
+                if (
+                    type == "metric_table"
+                    and "metric" in data_config
+                    and "placeholder_range" in data_config["metric"]
+                ):
+                    new_metrics = {}
+                    if sys_info is not None:
+                        # NB: support single placeholder for now!!
+                        p_range = data_config["metric"].pop("placeholder_range")
+                        metric, metric_expr = data_config["metric"].popitem()
+                        for p, r in p_range.items():
+                            # NB: We have to resolve placeholder range first if it
+                            #   is a build-in var. It will be too late to do it in
+                            #   eval_metric(). This is the only reason we need
+                            #   sys_info at this stage.
+                            var = calc_builtin_var(r, sys_info)
+                            for i in range(var):
+                                new_key = metric.replace(p, str(i))
+                                new_val = {
+                                    k: v.replace(p, str(i))
+                                    for k, v in metric_expr.items()
+                                }
+                                new_metrics[new_key] = new_val
+                    data_config["metric"] = new_metrics
 
 
 def create_empirical_peaks_dict(empirical_peaks_df: pd.DataFrame) -> dict[str, float]:
