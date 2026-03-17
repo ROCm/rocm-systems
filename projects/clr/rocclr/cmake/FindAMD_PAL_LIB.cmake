@@ -8,7 +8,7 @@ endif()
 
 find_path(AMD_PAL_LIB_INCLUDE_DIR pal.h
   HINTS
-    ${AMD_COMPUTE_WIN}/pal
+    ${WIN_INTEROP_DIR}/pal
   PATHS
     ${CMAKE_SOURCE_DIR}/pal
     ${CMAKE_SOURCE_DIR}/../pal
