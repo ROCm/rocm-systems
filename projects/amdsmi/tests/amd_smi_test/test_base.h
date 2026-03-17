@@ -151,18 +151,17 @@ uint32_t GetTestVerbosity();
 
 // Prints the current verbosity level. Works in both TestBase-derived tests
 // and plain TEST() cases (uses the global verbosity, not the member).
-#define PRINT_VERBOSITY()                                                                     \
-  do {                                                                                        \
-    const uint32_t _verb = GetTestVerbosity();                                                \
-    if (_verb) {                                                                              \
-      std::cout << "\tVerbosity level: " << _verb << " ("                                     \
-                << (_verb == TestBase::VERBOSE_MIN                                            \
-                        ? "MIN"                                                               \
-                        : _verb == TestBase::VERBOSE_STANDARD                                 \
-                              ? "STANDARD"                                                    \
-                              : _verb == TestBase::VERBOSE_PROGRESS ? "PROGRESS" : "UNKNOWN") \
-                << ")" << std::endl;                                                          \
-    }                                                                                         \
+#define PRINT_VERBOSITY()                                              \
+  do {                                                                 \
+    const uint32_t _verb = GetTestVerbosity();                         \
+    if (_verb) {                                                       \
+      std::cout << "\tVerbosity level: " << _verb << " ("              \
+                << (_verb == TestBase::VERBOSE_MIN        ? "MIN"      \
+                    : _verb == TestBase::VERBOSE_STANDARD ? "STANDARD" \
+                    : _verb == TestBase::VERBOSE_PROGRESS ? "PROGRESS" \
+                                                          : "UNKNOWN") \
+                << ")" << std::endl;                                   \
+    }                                                                  \
   } while (0)
 
 #define CHK_ERR_ASRT(RET)                                                              \

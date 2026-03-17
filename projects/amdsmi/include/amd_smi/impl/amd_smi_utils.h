@@ -34,15 +34,15 @@
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_main.h"
 
-#define SMIGPUDEVICE_MUTEX(MUTEX)                                                                  \
-  amd::smi::pthread_wrap _pw(*(MUTEX));                                                            \
-  {                                                                                                \
-    amd::smi::RocmSMI& _smi = amd::smi::RocmSMI::getInstance();                                    \
-    bool _blocking = !(_smi.init_options() & static_cast<uint64_t>(RSMI_INIT_FLAG_RESRV_TEST1));   \
-    amd::smi::ScopedPthread _lock(_pw, _blocking);                                                 \
-    if (_lock.mutex_not_acquired()) {                                                              \
-      return AMDSMI_STATUS_BUSY;                                                                   \
-    }                                                                                              \
+#define SMIGPUDEVICE_MUTEX(MUTEX)                                                                \
+  amd::smi::pthread_wrap _pw(*(MUTEX));                                                          \
+  {                                                                                              \
+    amd::smi::RocmSMI& _smi = amd::smi::RocmSMI::getInstance();                                  \
+    bool _blocking = !(_smi.init_options() & static_cast<uint64_t>(RSMI_INIT_FLAG_RESRV_TEST1)); \
+    amd::smi::ScopedPthread _lock(_pw, _blocking);                                               \
+    if (_lock.mutex_not_acquired()) {                                                            \
+      return AMDSMI_STATUS_BUSY;                                                                 \
+    }                                                                                            \
   }
 
 extern "C" {
