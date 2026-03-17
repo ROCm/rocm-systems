@@ -12,6 +12,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+#include <numeric>
 
 #include "hip/hip_runtime.h"
 #include "hip_internal.hpp"
@@ -257,10 +258,8 @@ class GraphNode : public hipGraphNodeDOTAttribute {
 
     // Accumulate packets directly into the batch (only if batch vectors are provided)
     if (batchPackets != nullptr && batchKernelNames != nullptr) {
-      for (auto& packet : gpuPackets_) {
-        batchPackets->push_back(packet);
-        batchKernelNames->push_back(capturedKernelName_);
-      }
+      batchPackets->insert(batchPackets->end(), gpuPackets_.begin(), gpuPackets_.end());
+      batchKernelNames->insert(batchKernelNames->end(), gpuPackets_.size(), capturedKernelName_);
     }
 
     // Commands are captured and released. Clear them from the object.
@@ -305,11 +304,9 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   /// Returns graph node dependencies
   const std::vector<Node>& GetDependencies() const { return dependencies_; }
   /// Update graph node dependecies
-  void SetDependencies(std::vector<Node>& dependencies) {
-    dependencies_.clear();
-    for (auto entry : dependencies) {
-      dependencies_.push_back(entry);
-    }
+  void SetDependencies(std::vector<Node>&& dependencies) {
+    // TODO: Should the in-degree be updated here?
+    dependencies_ = std::move(dependencies);
   }
   /// Add graph node dependency
   void AddDependency(const Node& node) {
@@ -352,11 +349,9 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   /// Return graph node children
   const std::vector<Node>& GetEdges() const { return edges_; }
   /// Updates graph node children
-  void SetEdges(std::vector<Node>& edges) {
-    edges_.clear();
-    for (auto entry : edges) {
-      edges_.push_back(entry);
-    }
+  void SetEdges(std::vector<Node>&& edges) {
+    // TODO: Should the out-degree be updated here?
+    edges_ = std::move(edges);
   }
   /// Get topological sort of the nodes embedded as part of the graphnode(e.g. ChildGraph)
   virtual bool TopologicalOrder(std::vector<Node>& TopoOrder) { return true; }

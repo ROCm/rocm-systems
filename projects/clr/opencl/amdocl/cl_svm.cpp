@@ -1145,6 +1145,7 @@ RUNTIME_ENTRY(cl_int, clEnqueueSVMMigrateMem,
   }
 
   std::vector<amd::Memory*> memObjects;
+  memObjects.reserve(num_svm_pointers);
   for (cl_uint i = 0; i < num_svm_pointers; i++) {
     const void* svm_ptr = svm_pointers[i];
 

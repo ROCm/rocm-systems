@@ -401,6 +401,7 @@ class Command : public Event {
 
   //! Update with the list of events this command needs to wait on before dispatch
   void updateEventWaitList(const EventWaitList& waitList) {
+    eventWaitList_.reserve(eventWaitList_.size() + waitList.size());
     for (auto event : waitList) {
       event->retain();
       eventWaitList_.push_back(event);
@@ -1279,6 +1280,7 @@ class MigrateMemObjectsCommand : public Command {
                            const std::vector<amd::Memory*>& memObjects,
                            cl_mem_migration_flags flags)
       : Command(queue, type, eventWaitList), migrationFlags_(flags) {
+    memObjects_.reserve(memObjects.size());
     for (const auto& it : memObjects) {
       if (!(amd::IS_HIP && AMD_DIRECT_DISPATCH)) {
         it->retain();
@@ -1553,6 +1555,7 @@ class ExtObjectsCommand : public Command {
   ExtObjectsCommand(HostQueue& queue, const EventWaitList& eventWaitList, uint32_t num_objects,
                     const std::vector<amd::Memory*>& memoryObjects, cl_command_type type)
       : Command(queue, type, eventWaitList) {
+    memObjects_.reserve(memoryObjects.size());
     for (const auto& it : memoryObjects) {
       if (!(amd::IS_HIP && AMD_DIRECT_DISPATCH)) {
         it->retain();
@@ -1784,6 +1787,7 @@ class MakeBuffersResidentCommand : public Command {
                              const std::vector<amd::Memory*>& memObjects,
                              cl_bus_address_amd* busAddr)
       : Command(queue, type, eventWaitList), busAddresses_(busAddr) {
+    memObjects_.reserve(memObjects.size());
     for (const auto& it : memObjects) {
       if (!(amd::IS_HIP && AMD_DIRECT_DISPATCH)) {
         it->retain();

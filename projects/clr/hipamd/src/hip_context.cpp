@@ -70,8 +70,8 @@ void init(bool* status) {
     for (const auto* dev : g_devices) {
       const auto& info = dev->devices()[0]->info();
       static_assert(sizeof(info.uuid_) == sizeof(hipUUID::bytes), "UUID size mismatch");
-      uuids.emplace_back();
-      std::copy(std::begin(info.uuid_), std::end(info.uuid_), std::begin(uuids.back().bytes));
+      hipUUID& newUuid = uuids.emplace_back();
+      std::copy(std::begin(info.uuid_), std::end(info.uuid_), std::begin(newUuid.bytes));
     }
 
     tools_dispatch_table->__hipReportDevices_fn(device_count, uuids.data());
@@ -119,7 +119,7 @@ hip::Stream* getStream(hipStream_t stream, bool wait) {
 
 // ================================================================================================
 hip::Stream* getNullStream(amd::Context& ctx, bool wait) {
-  for (auto& it : g_devices) {
+  for (const auto& it : g_devices) {
     if (it->asContext() == &ctx) {
       return it->NullStream(wait);
     }

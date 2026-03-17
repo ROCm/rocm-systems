@@ -215,15 +215,19 @@ static inline hipError_t hipSetInteropObjects(int num_objects, void** mem_object
     return hipErrorUnknown;
   }
 
+  size_t originalSize = interopObjects.size();
+  interopObjects.reserve(originalSize + num_objects);
   while (num_objects-- > 0) {
     void* obj = *mem_objects++;
     if (obj == nullptr) {
+      interopObjects.resize(originalSize);  // Rollback any reserved but unused space
       return hipErrorInvalidHandle;
     }
 
     amd::Memory* mem = reinterpret_cast<amd::Memory*>(obj);
 
     if (mem->getInteropObj() == nullptr) {
+      interopObjects.resize(originalSize);  // Rollback any reserved but unused space
       return hipErrorInvalidHandle;
     }
 

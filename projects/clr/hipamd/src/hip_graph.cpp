@@ -753,8 +753,8 @@ hipError_t capturehipMemcpy(hipStream_t stream, void* dst, const void* src, size
     return hipErrorContextIsDestroyed;
   }
   hip::Stream* s = reinterpret_cast<hip::Stream*>(stream);
-  std::vector<hip::GraphNode*> pDependencies = s->GetLastCapturedNodes();
-  size_t numDependencies = s->GetLastCapturedNodes().size();
+  const std::vector<hip::GraphNode*>& pDependencies = s->GetLastCapturedNodes();
+  size_t numDependencies = pDependencies.size();
   hip::Graph* graph = s->GetCaptureGraph();
   hip::GraphNode* node;
   hipError_t status = ihipGraphAddMemcpyNode1D(&node, graph, pDependencies.data(), numDependencies,
@@ -1011,6 +1011,7 @@ hipError_t capturehipMallocAsync(hipStream_t stream, hipMemPool_t mem_pool, size
   node_params.poolProps.location.type = hipMemLocationTypeDevice;
 
   std::vector<hipMemAccessDesc> descs;
+  descs.reserve(g_devices.size());
   for (const auto device : g_devices) {
     hipMemLocation location{hipMemLocationTypeDevice, device->deviceId()};
     hipMemAccessFlags flags{};
@@ -1158,8 +1159,7 @@ hipError_t hipStreamBeginCaptureToGraph(hipStream_t stream, hipGraph_t graph,
     return hipErrorInvalidValue;
   }
   hip::Graph* g = reinterpret_cast<hip::Graph*>(graph);
-  const std::vector<Node> nodes = g->GetNodes();
-  for (auto& node : nodes) {
+  for (auto* node : g->GetNodes()) {
     g->AddManualNodeDuringCapture(node);
   }
   hipError_t status = hipStreamBeginCapture_common(stream, mode, graph);
@@ -1245,14 +1245,11 @@ hipError_t hipStreamEndCapture_common(hipStream_t stream, hip::Graph** pGraph) {
     // Nodes that are removed from the dependency set via API hipStreamUpdateCaptureDependencies do
     // not result in hipErrorStreamCaptureUnjoined
     const std::vector<hip::GraphNode*>& removedDepNodes = s->GetRemovedDependencies();
-    bool foundInRemovedDep = false;
-    for (auto leafNode : leafNodes) {
-      for (auto node : removedDepNodes) {
-        if (node == leafNode) {
-          foundInRemovedDep = true;
-        }
-      }
-    }
+    bool foundInRemovedDep = std::any_of(
+        leafNodes.begin(), leafNodes.end(), [&removedDepNodes](hip::GraphNode* leafNode) {
+          return std::find(removedDepNodes.begin(), removedDepNodes.end(), leafNode) !=
+                 removedDepNodes.end();
+        });
     // remove temporary node
     s->GetCaptureGraph()->RemoveNode(pGraphNode);
     s->GetCaptureGraph()->RemoveManualNodesDuringCapture();
@@ -2013,10 +2010,10 @@ hipError_t hipGraphExecChildGraphNodeSetParams(hipGraphExec_t hGraphExec, hipGra
   if (graphExec->IsSegmentSchedulingEnabled() || childNode->GetGraphCaptureStatus()) {
     std::vector<hip::GraphNode*> childGraphNodes;
     childNode->TopologicalOrder(childGraphNodes);
-    for (std::vector<hip::GraphNode*>::size_type i = 0; i != childGraphNodes.size(); i++) {
-      if (childGraphNodes[i]->GraphCaptureEnabled()) {
+    for (hip::GraphNode* childGraphNode : childGraphNodes) {
+      if (childGraphNode->GraphCaptureEnabled()) {
         status =
-            childNode->UpdateAQLPacket(reinterpret_cast<hip::GraphKernelNode*>(childGraphNodes[i]));
+            childNode->UpdateAQLPacket(reinterpret_cast<hip::GraphKernelNode*>(childGraphNode));
         if (status != hipSuccess) {
           return status;
         }
@@ -2140,10 +2137,11 @@ hipError_t ihipStreamUpdateCaptureDependencies(hipStream_t stream, hipGraphNode_
     HIP_RETURN(hipErrorInvalidValue);
   }
   std::vector<hip::GraphNode*> depNodes;
+  depNodes.reserve(numDependencies);
   const std::vector<hip::GraphNode*>& graphNodes = s->GetCaptureGraph()->GetNodes();
   for (int i = 0; i < numDependencies; i++) {
     if ((deps[i] == nullptr) ||
-        std::find(std::begin(graphNodes), std::end(graphNodes), deps[i]) == std::end(graphNodes)) {
+        std::find(graphNodes.begin(), graphNodes.end(), deps[i]) == graphNodes.end()) {
       HIP_RETURN(hipErrorInvalidValue);
     }
     depNodes.push_back(deps[i]);
@@ -3473,8 +3471,6 @@ hipError_t hipGraphExecGetFlags(hipGraphExec_t graphExec, unsigned long long* fl
 hipError_t ihipGraphNodeSetParams(hip::GraphNode* n, hipGraphNodeParams* nodeParams,
                                   bool exec = false) {
   hipGraphNodeType nodeType = nodeParams->type;
-  std::vector<hip::GraphNode*> childGraphNodes1;
-  std::vector<hip::GraphNode*> childGraphNodes2;
   hip::Graph* cg;
   hipError_t status = hipSuccess;
   switch (nodeType) {

@@ -346,7 +346,7 @@ bool DmaBlitManager::copyBufferRect(device::Memory& srcMemory, device::Memory& d
 }
 
 // ================================================================================================
-bool DmaBlitManager::copyBufferBatch(std::vector<amd::BatchCopyOp>& copyOps) const {
+bool DmaBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& copyOps) const {
   if (copyOps.empty()) {
     return true;
   }
@@ -1108,8 +1108,7 @@ bool KernelBlitManager::createProgram(Device& device) {
     }
   }
 
-  std::vector<amd::Device*> devices;
-  devices.push_back(&device);
+  std::vector<amd::Device*> devices{&device};
 
   // Save context and program for this device
   context_ = device.blitProgram()->context_;
@@ -2537,7 +2536,7 @@ bool KernelBlitManager::shaderCopyBuffer(address dst, address src, const amd::Co
 }
 
 // ================================================================================================
-bool KernelBlitManager::copyBufferBatch(std::vector<amd::BatchCopyOp>& copyOps) const {
+bool KernelBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& copyOps) const {
   if (copyOps.empty()) {
     return true;
   }
@@ -2555,7 +2554,7 @@ bool KernelBlitManager::copyBufferBatch(std::vector<amd::BatchCopyOp>& copyOps) 
   std::vector<amd::BatchCopyOp> d2dCopyOps;
   std::vector<amd::BatchCopyOp> p2pCopyOps;
 
-  for (auto& op : copyOps) {
+  for (const auto& op : copyOps) {
     device::Memory* srcDevMem = op.srcMemory->getDeviceMemory(
         *op.srcMemory->getContext().devices()[0]);
     device::Memory* dstDevMem = op.dstMemory->getDeviceMemory(
@@ -2609,7 +2608,7 @@ bool KernelBlitManager::copyBufferBatch(std::vector<amd::BatchCopyOp>& copyOps) 
       gpu().Barriers().AddExternalSignal(priorSignal);
     }
 
-    for (auto& op : d2dCopyOps) {
+    for (const auto& op : d2dCopyOps) {
       device::Memory* srcDevMem = op.srcMemory->getDeviceMemory(
           *op.srcMemory->getContext().devices()[0]);
       device::Memory* dstDevMem = op.dstMemory->getDeviceMemory(

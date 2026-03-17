@@ -1309,6 +1309,8 @@ int32_t Program::build(const std::string& sourceCode, const char* origOptions,
   std::vector<const char*> headerIncludeNames;
   const std::vector<std::string>& tmpHeaderNames = owner()->headerNames();
   const std::vector<std::string>& tmpHeaders = owner()->headers();
+  headers.reserve(tmpHeaders.size());
+  headerIncludeNames.reserve(tmpHeaderNames.size());
   for (size_t i = 0; i < tmpHeaders.size(); ++i) {
     headers.push_back(&tmpHeaders[i]);
     headerIncludeNames.push_back(tmpHeaderNames[i].c_str());
@@ -2072,6 +2074,7 @@ bool Program::getSymbolsFromCodeObj(std::vector<std::string>* var_names,
 
 const bool Program::getLoweredNames(std::vector<std::string>* mangledNames) const {
   /* Iterate thru kernel names first */
+  mangledNames->reserve(mangledNames->size() + kernelMetadataMap_.size());
   for (auto const& kernelMeta : kernelMetadataMap_) {
     mangledNames->emplace_back(kernelMeta.first);
   }

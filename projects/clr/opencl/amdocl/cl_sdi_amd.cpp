@@ -167,6 +167,7 @@ RUNTIME_ENTRY(cl_int, clEnqueueMakeBuffersResidentAMD,
   amd::HostQueue& hostQueue = *queue;
 
   std::vector<amd::Memory*> memObjects;
+  memObjects.reserve(num_mem_objs);
   for (unsigned int i = 0; i < num_mem_objs; ++i) {
     if (!is_valid(mem_objects[i])) {
       return CL_INVALID_MEM_OBJECT;
