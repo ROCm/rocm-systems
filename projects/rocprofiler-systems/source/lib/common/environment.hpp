@@ -382,6 +382,9 @@ to_env_string(Tp&& val)
         return std::to_string(val);
 }
 
+/// Updates or adds an environment variable in _environ.
+/// Modes: REPLACE (overwrite, remove duplicates), PREPEND/APPEND (merge values),
+/// WEAK (overwrite only if value was in _original_envs).
 template <typename Tp>
 inline void
 update_env(std::vector<char*>& _environ, std::string_view _env_var, Tp&& _env_val,
@@ -394,44 +397,60 @@ update_env(std::vector<char*>& _environ, std::string_view _env_var, Tp&& _env_va
     const bool _prepend  = (_mode == update_mode::PREPEND);
     const bool _append   = (_mode == update_mode::APPEND);
     const bool _weak_upd = (_mode == update_mode::WEAK);
+    const bool _replace  = (_mode == update_mode::REPLACE);
 
     auto _env_val_str = to_env_string(std::forward<Tp>(_env_val));
+    auto _new_entry   = join('=', _env_var, _env_val_str);
+    auto _key         = join("", _env_var, "=");
+    bool _found_match = false;
 
-    auto _key = join("", _env_var, "=");
-    for(auto& itr : _environ)
+    for(auto it = _environ.begin(); it != _environ.end();)
     {
-        if(!itr) continue;
-        if(std::string_view{ itr }.find(_key) != 0) continue;
-
-        if(_weak_upd)
+        auto* itr = *it;
+        if(!itr || std::string_view{ itr }.find(_key) != 0)
         {
-            if(_original_envs.find(std::string{ itr }) == _original_envs.end()) return;
+            ++it;
+            continue;
         }
+
+        // WEAK: only update if this entry was in the original environment
+        if(_weak_upd && _original_envs.find(std::string{ itr }) == _original_envs.end())
+            return;
 
         if(_prepend || _append)
         {
+            _found_match = true;
+            // Merge new value into existing (prepend or append) if not already present
             if(std::string_view{ itr }.find(_env_val_str) == std::string_view::npos)
             {
                 auto _val = std::string{ itr }.substr(_key.length());
                 free(itr);
-                if(_prepend)
-                    itr =
-                        strdup(join('=', _env_var, join(_join_delim, _env_val_str, _val))
-                                   .c_str());
-                else
-                    itr =
-                        strdup(join('=', _env_var, join(_join_delim, _val, _env_val_str))
-                                   .c_str());
+                *it = strdup(join('=', _env_var,
+                                  _prepend ? join(_join_delim, _env_val_str, _val)
+                                           : join(_join_delim, _val, _env_val_str))
+                                 .c_str());
             }
+            ++it;
         }
         else
         {
+            // REPLACE or WEAK: overwrite with new value
             std::free(itr);
-            itr = strdup(join('=', _env_var, _env_val_str).c_str());
+            *it = strdup(_new_entry.c_str());
+            if(_weak_upd) return;
+
+            // REPLACE: remove subsequent duplicate entries (first is already replaced)
+            if(_replace && _found_match)
+            {
+                it = _environ.erase(it);
+                continue;
+            }
+            _found_match = true;
+            ++it;
         }
-        return;
     }
-    _environ.emplace_back(strdup(join('=', _env_var, _env_val_str).c_str()));
+    // Add new entry if variable was not found
+    if(!_found_match) _environ.emplace_back(strdup(_new_entry.c_str()));
 }
 
 template <typename UpdatedEnvsT>

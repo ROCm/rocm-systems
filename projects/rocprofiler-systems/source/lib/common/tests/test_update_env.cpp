@@ -73,6 +73,23 @@ TEST_F(UpdateEnvTest, ReplaceMode_ExistingVariable)
     EXPECT_EQ(m_updated_envs.count("TEST_VAR"), 1);
 }
 
+TEST_F(UpdateEnvTest, ReplaceMode_RemovesDuplicateEntries)
+{
+    m_env_vars.push_back(strdup("ROCPROFSYS_TRACE=OFF"));
+    m_env_vars.push_back(strdup("OTHER_VAR=keep"));
+    m_env_vars.push_back(strdup("ROCPROFSYS_TRACE=OFF"));
+    m_original_envs.insert("ROCPROFSYS_TRACE=OFF");
+    m_original_envs.insert("OTHER_VAR=keep");
+
+    update_env(m_env_vars, "ROCPROFSYS_TRACE", false, update_mode::REPLACE, ":",
+               m_updated_envs, m_original_envs);
+
+    ASSERT_EQ(m_env_vars.size(), 2);
+    EXPECT_STREQ(find_env_var(m_env_vars, "ROCPROFSYS_TRACE").c_str(),
+                 "ROCPROFSYS_TRACE=false");
+    EXPECT_STREQ(find_env_var(m_env_vars, "OTHER_VAR").c_str(), "OTHER_VAR=keep");
+}
+
 TEST_F(UpdateEnvTest, AppendMode_NewVariable)
 {
     update_env(m_env_vars, "PATH", "/new/path", update_mode::APPEND, ":", m_updated_envs,
