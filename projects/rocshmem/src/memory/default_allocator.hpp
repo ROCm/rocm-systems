@@ -99,7 +99,6 @@ namespace rocshmem {
 #endif
 #if defined USE_HEAP_DEVICE_VMM_POSIX
 #if HIP_VERSION >= 70000000
-    printf("[DEBUG] Using VMM POSIX allocator (HIPAllocatorVMMPosixFd)\n");
     default_allocator_ = new HIPAllocatorVMMPosixFd();
 #endif
 #endif

@@ -345,14 +345,13 @@ hipError_t HIPAllocatorVMMPosixFd::OpenIpcHandle(void **dev_ptr, void *handle)
     return err;
   }
 
-  // Close the file descriptor as it's no longer needed
-  close(open_fd);
-
-  // Track the imported allocation
-  imported_allocations_[base_addr] = {imported_handle, size, -1};
+  // Track the imported allocation and keep the fd open
+  // The fd will be closed in CloseIpcHandle
+  imported_allocations_[base_addr] = {imported_handle, size, open_fd};
 
   // Set output pointer to the mapped address
   *dev_ptr = base_addr;
+
   return hipSuccess;
 }
 
@@ -370,6 +369,13 @@ hipError_t HIPAllocatorVMMPosixFd::CloseIpcHandle(void *dev_ptr)
 
   VMMAllocationInfo& info = it->second;
   hipError_t err;
+
+  // Close the imported fd if it exists
+  // This must be done before releasing the handle to properly decrement
+  // the reference count on the underlying memory
+  if (info.exported_fd != -1) {
+    close(info.exported_fd);
+  }
 
   // Unmap the memory
   err = hipMemUnmap(dev_ptr, info.size);
