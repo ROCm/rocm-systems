@@ -339,17 +339,9 @@ static bool IsUnsupportedOnGFX9(const std::string& mnemonic) {
   if (mnemonic.find("v_wmma_") == 0) return true;
   if (mnemonic.find("v_swmmac_") == 0) return true;
 
-  // SALU float instructions — GFX9 scalar ALU is integer-only
-  if (mnemonic == "s_add_f32" || mnemonic == "s_sub_f32" ||
-      mnemonic == "s_mul_f32" || mnemonic == "s_min_f32" ||
-      mnemonic == "s_max_f32" || mnemonic == "s_fmac_f32" ||
-      mnemonic == "s_add_f16" || mnemonic == "s_sub_f16" ||
-      mnemonic == "s_mul_f16" || mnemonic == "s_min_f16" ||
-      mnemonic == "s_max_f16" || mnemonic == "s_fmac_f16" ||
-      mnemonic == "s_cvt_f32_f16" || mnemonic == "s_cvt_f16_f32" ||
-      mnemonic == "s_cvt_pk_rtz_f16_f32") {
-    return true;
-  }
+  // SALU float instructions — now emulated via VALU, but some may still be
+  // unsupported if the emulation doesn't handle them yet
+  // (s_add_f32, s_mul_f32 etc. are handled in TranslateInstruction)
 
   // VOPD (dual-issue) — not on GFX9
   if (mnemonic.find("v_dual_") == 0) return true;
@@ -568,6 +560,92 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
   if (mnemonic == "s_wait_alu") {
     result.push_back("s_nop 0");
     return result;
+  }
+
+  // ─── SALU float → VALU emulation ───
+  // GFX1250 has scalar float instructions; GFX9 doesn't.
+  // Emulate: s_op_f32 sdst, ssrc0, ssrc1 →
+  //   v_mov_b32 v255, ssrc0
+  //   v_op_f32 v255, ssrc1, v255   (ssrc1 as inline constant or SGPR)
+  //   v_readfirstlane_b32 sdst, v255
+  {
+    static const std::unordered_map<std::string, std::string> kSaluFloatMap = {
+        {"s_add_f32", "v_add_f32_e32"},
+        {"s_sub_f32", "v_sub_f32_e32"},
+        {"s_mul_f32", "v_mul_f32_e32"},
+        {"s_min_f32", "v_min_f32_e32"},
+        {"s_max_f32", "v_max_f32_e32"},
+        {"s_fmac_f32", "v_fmac_f32_e32"},
+        {"s_add_f16", "v_add_f16_e32"},
+        {"s_sub_f16", "v_sub_f16_e32"},
+        {"s_mul_f16", "v_mul_f16_e32"},
+        {"s_min_f16", "v_min_f16_e32"},
+        {"s_max_f16", "v_max_f16_e32"},
+    };
+
+    auto salu_it = kSaluFloatMap.find(mnemonic);
+    if (salu_it != kSaluFloatMap.end()) {
+      // Parse operands: sdst, ssrc0, ssrc1
+      std::string ops = line.substr(line.find(mnemonic) + mnemonic.size());
+      // Trim leading whitespace
+      size_t op_start = ops.find_first_not_of(" \t");
+      if (op_start != std::string::npos) ops = ops.substr(op_start);
+
+      // Split by comma
+      std::vector<std::string> operands;
+      std::istringstream oss(ops);
+      std::string tok;
+      while (std::getline(oss, tok, ',')) {
+        size_t s = tok.find_first_not_of(" \t");
+        size_t e = tok.find_last_not_of(" \t");
+        if (s != std::string::npos)
+          operands.push_back(tok.substr(s, e - s + 1));
+      }
+
+      if (operands.size() >= 3) {
+        std::string sdst = operands[0];
+        std::string ssrc0 = operands[1];
+        std::string ssrc1 = operands[2];
+        std::string valu_op = salu_it->second;
+
+        // v_mov_b32 v255, ssrc0
+        result.push_back("v_mov_b32_e32 v255, " + ssrc0);
+        // v_op_f32 v255, ssrc1, v255 (ssrc1 as src0, v255 as vsrc1)
+        result.push_back(valu_op + " v255, " + ssrc1 + ", v255");
+        // v_readfirstlane_b32 sdst, v255
+        result.push_back("v_readfirstlane_b32 " + sdst + ", v255");
+        return result;
+      }
+    }
+
+    // s_cvt_f32_f16 sdst, ssrc → v_cvt_f32_f16 v255, ssrc + readfirstlane
+    if (mnemonic == "s_cvt_f32_f16" || mnemonic == "s_cvt_f16_f32" ||
+        mnemonic == "s_cvt_pk_rtz_f16_f32") {
+      std::string ops = line.substr(line.find(mnemonic) + mnemonic.size());
+      size_t op_start = ops.find_first_not_of(" \t");
+      if (op_start != std::string::npos) ops = ops.substr(op_start);
+
+      std::vector<std::string> operands;
+      std::istringstream oss(ops);
+      std::string tok;
+      while (std::getline(oss, tok, ',')) {
+        size_t s = tok.find_first_not_of(" \t");
+        size_t e = tok.find_last_not_of(" \t");
+        if (s != std::string::npos)
+          operands.push_back(tok.substr(s, e - s + 1));
+      }
+
+      if (operands.size() >= 2) {
+        std::string valu_mnem;
+        if (mnemonic == "s_cvt_f32_f16") valu_mnem = "v_cvt_f32_f16_e32";
+        else if (mnemonic == "s_cvt_f16_f32") valu_mnem = "v_cvt_f16_f32_e32";
+        else valu_mnem = "v_cvt_pkrtz_f16_f32";
+
+        result.push_back(valu_mnem + " v255, " + operands[1]);
+        result.push_back("v_readfirstlane_b32 " + operands[0] + ", v255");
+        return result;
+      }
+    }
   }
 
   // ─── Unsupported instructions → NOP with diagnostic ───
