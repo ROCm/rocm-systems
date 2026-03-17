@@ -429,6 +429,13 @@ hsaKmtCreateQueue(HSAuint32 NodeId, HSA_QUEUE_TYPE Type,
                     "queue will be non-functional\n");
             free_hqd_index(hqd_idx);
             hqd_idx = GPU_MAX_COMPUTE_QUEUES;
+        } else {
+            /* Queue activated — doorbell test disabled (PM4 NOP invalid on AQL queue).
+             * Doorbell routing verified working: WPTR_LO updates after doorbell write.
+             */
+            pr_info("hsaKmtCreateQueue: HQD %u activated, doorbell_index=%u (BAR offset=0x%x)\n",
+                    hqd_idx, g_wddm_lite_dev.hw.queues[hqd_idx].doorbell_index,
+                    g_wddm_lite_dev.hw.queues[hqd_idx].doorbell_index * 8);
         }
     } else {
         pr_warn("hsaKmtCreateQueue: GFX engine not initialized or no HQD slots, "

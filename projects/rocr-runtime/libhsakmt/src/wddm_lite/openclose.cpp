@@ -263,94 +263,210 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void)
             }
         }
 
-        /* Load PSP SOS firmware if not already alive */
-        if (g_wddm_lite_dev.hw.ip_discovery_done &&
-            !g_wddm_lite_dev.hw.psp_sos_alive) {
-            char fw_path[256] = {};
+        /*
+         * GPU Init Sequence — two paths:
+         *
+         * Path A (VBIOS state — default after fresh VFIO FLR):
+         *   VBIOS already loaded SOS, firmware, enabled SMU features.
+         *   Just need: GMC → DisallowGfxOff → GFX init
+         *   Set HSAKMT_SKIP_MODE1_RESET=1 to use this path.
+         *
+         * Path B (full reinit — after mode1 reset):
+         *   1. Mode1 reset → 2. SOS → 3. GMC → 4. IH →
+         *   5. Firmware + AUTOLOAD → 6. SMU init → 7. GFXOFF → 8. GFX
+         *
+         * After VFIO FLR, VBIOS state survives: SOS alive, SMU features
+         * enabled, GC firmware loaded. Previous sessions accidentally
+         * triggered mode1_reset via debug mailbox msg=2 (thought to be
+         * GetSmuVersion), which killed this state.
+         */
+        if (g_wddm_lite_dev.hw.ip_discovery_done) {
+            /* === EARLY DIAGNOSTIC: Read bootload status before ANY PSP ops ===
+             * This tells us if VBIOS AUTOLOAD completed before we touch anything.
+             * PSP ring creation (psp_ring_init) destroys VBIOS ring and may
+             * clear bootload_status. Reading it here captures the true VBIOS state. */
+            if (g_wddm_lite_dev.hw.ip.gc_base1 != 0 &&
+                g_wddm_lite_dev.hw.ip.nbio_base1 != 0) {
+                ULONG early_bl = gpu_smn_rreg(&g_wddm_lite_dev,
+                    g_wddm_lite_dev.hw.ip.gc_base1 + 0x4e7c);
+                ULONG early_rlc_cntl = gpu_smn_rreg(&g_wddm_lite_dev,
+                    g_wddm_lite_dev.hw.ip.gc_base1 + 0x4c00);
+                pr_info("wddm_lite: EARLY DIAG: RLC_BOOTLOAD_STATUS = 0x%08x "
+                        "(bit31=%d) RLC_CNTL = 0x%08x\n",
+                        early_bl, (early_bl >> 31) & 1, early_rlc_cntl);
+                g_wddm_lite_dev.hw.gfx.rlc_bootload_status = early_bl;
+
+                /* If VBIOS AUTOLOAD already completed, offer passthrough mode */
+                if (early_bl & 0x80000000) {
+                    pr_info("wddm_lite: VBIOS AUTOLOAD complete! "
+                            "Firmware is decrypted and mapped.\n");
+                }
+
+                /* Also read GFXHUB state before we touch it.
+                 * GFXHUB regs are at gc_base (BASE_IDX=0), not gc_base1. */
+                ULONG early_gfxhub_cntl = gpu_smn_rreg(&g_wddm_lite_dev,
+                    g_wddm_lite_dev.hw.ip.gc_base + 0x1624);
+                ULONG early_pt_lo = gpu_smn_rreg(&g_wddm_lite_dev,
+                    g_wddm_lite_dev.hw.ip.gc_base + 0x168F);
+                ULONG early_pt_hi = gpu_smn_rreg(&g_wddm_lite_dev,
+                    g_wddm_lite_dev.hw.ip.gc_base + 0x1690);
+                pr_info("wddm_lite: EARLY DIAG: GFXHUB CONTEXT0_CNTL = 0x%08x "
+                        "(enabled=%d) PT_BASE = 0x%08x_%08x\n",
+                        early_gfxhub_cntl, early_gfxhub_cntl & 1,
+                        early_pt_hi, early_pt_lo);
+            }
+
             char skip_psp[32] = {};
             GetEnvironmentVariableA("HSAKMT_SKIP_PSP_INIT", skip_psp, sizeof(skip_psp));
+
             if (skip_psp[0] == '1') {
                 pr_info("wddm_lite: PSP init skipped (HSAKMT_SKIP_PSP_INIT=1)\n");
             } else {
-                /* Look for firmware path in environment, or use default */
-                DWORD len = GetEnvironmentVariableA("HSAKMT_PSP_FW_PATH",
-                                                     fw_path, sizeof(fw_path));
-                if (len > 0 && len < sizeof(fw_path))
-                    trim_trailing(fw_path);
-                if (len == 0 || len >= sizeof(fw_path)) {
-                    /* Default: look in current directory */
-                    strncpy(fw_path, "psp_14_0_3_sos.bin", sizeof(fw_path) - 1);
+                /* Check SOS status to determine GPU state */
+                ULONG sos_status = 0;
+                BOOLEAN did_mode1_reset = FALSE;
+                if (g_wddm_lite_dev.hw.ip.mp0_base != 0 &&
+                    g_wddm_lite_dev.hw.ip.nbio_base1 != 0) {
+                    sos_status = gpu_smn_rreg(&g_wddm_lite_dev,
+                        g_wddm_lite_dev.hw.ip.mp0_base + 0x0091);
                 }
-                if (gpu_psp_load_sos(&g_wddm_lite_dev, fw_path) != 0) {
-                    pr_warn("wddm_lite: PSP SOS load failed (continuing without)\n");
-                }
-            }
-        }
 
-        /*
-         * Try GFXOFF disable with VBIOS SMU first (before firmware loading).
-         * On a VBIOS-POST'd passthrough GPU, the VBIOS loads a minimal SMU
-         * that may support DisallowGfxOff. This avoids the need for
-         * full firmware loading just to disable GFXOFF.
-         *
-         * Skip with HSAKMT_SKIP_GFXOFF=1 (saves ~30s when SMU is unresponsive).
-         */
-        {
-            char skip_gfxoff[32] = {};
-            GetEnvironmentVariableA("HSAKMT_SKIP_GFXOFF", skip_gfxoff, sizeof(skip_gfxoff));
-            if (skip_gfxoff[0] == '1') {
-                pr_info("wddm_lite: GFXOFF disable skipped (HSAKMT_SKIP_GFXOFF=1)\n");
-            } else if (g_wddm_lite_dev.hw.ip_discovery_done &&
-                       !g_wddm_lite_dev.hw.gfxoff_disabled) {
-                pr_info("wddm_lite: trying GFXOFF disable with VBIOS SMU...\n");
-                if (gpu_disable_gfxoff(&g_wddm_lite_dev) == 0) {
-                    pr_info("wddm_lite: GFXOFF disabled via VBIOS SMU\n");
-                } else {
-                    pr_warn("wddm_lite: VBIOS SMU GFXOFF disable failed\n");
-                }
-            }
-        }
-
-        /* Load GPU firmware via PSP ring if needed */
-        if (g_wddm_lite_dev.hw.psp_sos_alive) {
-            char skip_fw[32] = {};
-            GetEnvironmentVariableA("HSAKMT_SKIP_FW_LOAD", skip_fw, sizeof(skip_fw));
-            if (skip_fw[0] == '1') {
-                pr_info("wddm_lite: firmware loading skipped (HSAKMT_SKIP_FW_LOAD=1)\n");
-            } else {
-                char fw_dir[256] = ".";
-                GetEnvironmentVariableA("HSAKMT_FW_DIR", fw_dir, sizeof(fw_dir));
-                trim_trailing(fw_dir);
-                if (gpu_psp_load_all_fw(&g_wddm_lite_dev, fw_dir) != 0) {
-                    pr_warn("wddm_lite: firmware loading failed (continuing without)\n");
-                } else {
-                    /* After successful firmware loading, try SMU init + GFXOFF */
-                    if (gpu_smu_enable_features(&g_wddm_lite_dev) == 0) {
-                        pr_info("wddm_lite: SMU features enabled\n");
+                /* Step 1: Mode1 reset (optional) */
+                {
+                    char skip_reset[32] = {};
+                    GetEnvironmentVariableA("HSAKMT_SKIP_MODE1_RESET",
+                        skip_reset, sizeof(skip_reset));
+                    if (skip_reset[0] == '1') {
+                        pr_info("wddm_lite: mode1 reset skipped "
+                                "(HSAKMT_SKIP_MODE1_RESET=1)\n");
+                        /* If SOS is alive, mark it so we skip SOS loading */
+                        if (sos_status != 0) {
+                            pr_info("wddm_lite: SOS already alive (0x%08x), "
+                                    "using VBIOS state\n", sos_status);
+                            g_wddm_lite_dev.hw.psp_sos_alive = TRUE;
+                        }
+                    } else if (sos_status != 0) {
+                        pr_info("wddm_lite: SOS alive (0x%08x), "
+                                "performing mode1 reset...\n", sos_status);
+                        gpu_smu_mode1_reset(&g_wddm_lite_dev);
+                        did_mode1_reset = TRUE;
+                    } else {
+                        pr_info("wddm_lite: SOS not alive, "
+                                "skipping mode1 reset\n");
                     }
-                    if (!g_wddm_lite_dev.hw.gfxoff_disabled) {
-                        if (gpu_disable_gfxoff(&g_wddm_lite_dev) != 0) {
-                            pr_warn("wddm_lite: GFXOFF disable failed after firmware load\n");
+                }
+
+                /* Step 2: Load SOS if needed */
+                if (!g_wddm_lite_dev.hw.psp_sos_alive) {
+                    char fw_path[256] = {};
+                    DWORD len = GetEnvironmentVariableA("HSAKMT_PSP_FW_PATH",
+                        fw_path, sizeof(fw_path));
+                    if (len > 0 && len < sizeof(fw_path))
+                        trim_trailing(fw_path);
+                    if (len == 0 || len >= sizeof(fw_path)) {
+                        char fw_dir_buf[256] = {};
+                        DWORD flen = GetEnvironmentVariableA("HSAKMT_FW_DIR",
+                            fw_dir_buf, sizeof(fw_dir_buf));
+                        if (flen > 0 && flen < sizeof(fw_dir_buf)) {
+                            trim_trailing(fw_dir_buf);
+                            snprintf(fw_path, sizeof(fw_path),
+                                     "%s\\psp_14_0_3_sos.bin", fw_dir_buf);
+                        } else {
+                            strncpy(fw_path, "psp_14_0_3_sos.bin",
+                                    sizeof(fw_path) - 1);
+                        }
+                    }
+                    if (gpu_psp_load_sos(&g_wddm_lite_dev, fw_path) != 0) {
+                        pr_warn("wddm_lite: PSP SOS load failed\n");
+                    }
+                }
+
+                /* Step 3: GMC init */
+                {
+                    char skip_gmc[32] = {};
+                    GetEnvironmentVariableA("HSAKMT_SKIP_GMC_INIT",
+                        skip_gmc, sizeof(skip_gmc));
+                    if (skip_gmc[0] == '1') {
+                        pr_info("wddm_lite: GMC init skipped\n");
+                    } else {
+                        if (gpu_gmc_init(&g_wddm_lite_dev) != 0) {
+                            pr_warn("wddm_lite: GMC init failed "
+                                    "(continuing without)\n");
                         }
                     }
                 }
-            }
-        }
 
-        /* Initialize GMC (GART, system aperture, TLB, L2 cache) */
-        {
-            char skip_gmc[32] = {};
-            GetEnvironmentVariableA("HSAKMT_SKIP_GMC_INIT", skip_gmc, sizeof(skip_gmc));
-            if (skip_gmc[0] == '1') {
-                pr_info("wddm_lite: GMC init skipped (HSAKMT_SKIP_GMC_INIT=1)\n");
-            } else if (g_wddm_lite_dev.hw.ip_discovery_done) {
-                if (gpu_gmc_init(&g_wddm_lite_dev) != 0) {
-                    pr_warn("wddm_lite: GMC initialization failed (continuing without)\n");
+                /* Step 4: IH init */
+                {
+                    if (gpu_ih_init(&g_wddm_lite_dev) != 0) {
+                        pr_warn("wddm_lite: IH init failed "
+                                "(continuing without)\n");
+                    }
+                }
+
+                /* Step 5: Firmware staging only — DO NOT trigger AUTOLOAD yet.
+                 * AUTOLOAD requires GFX power (EnableAllSmuFeatures in Step 6)
+                 * to complete (bit 31). Linux order: PSP loads firmware →
+                 * SMU hw_init enables GFX features → GFX hw_init triggers
+                 * AUTOLOAD_RLC. We follow the same order here. */
+                BOOLEAN fw_staged = FALSE;
+                if (g_wddm_lite_dev.hw.psp_sos_alive) {
+                    char skip_fw[32] = {};
+                    GetEnvironmentVariableA("HSAKMT_SKIP_FW_LOAD",
+                        skip_fw, sizeof(skip_fw));
+                    if (skip_fw[0] == '1') {
+                        pr_info("wddm_lite: firmware loading skipped\n");
+                    } else {
+                        char fw_dir[256] = ".";
+                        GetEnvironmentVariableA("HSAKMT_FW_DIR",
+                            fw_dir, sizeof(fw_dir));
+                        trim_trailing(fw_dir);
+                        if (gpu_psp_load_all_fw(&g_wddm_lite_dev,
+                                                fw_dir) != 0) {
+                            pr_warn("wddm_lite: firmware staging failed\n");
+                        } else {
+                            fw_staged = TRUE;
+                        }
+                    }
+                }
+
+                /* Step 6: SMU features — MUST happen before AUTOLOAD.
+                 * EnableAllSmuFeatures powers up the GFX domain via IMU.
+                 * Without GFX power, RLC cannot run and AUTOLOAD status
+                 * stays 0x00000000. This matches Linux: smu hw_init runs
+                 * before gfx hw_init (which triggers AUTOLOAD).
+                 * NOTE: On VFIO, SMU triggers power-up but may not
+                 * respond (resp stays 0). GC SMN access is temporarily
+                 * blocked during the GFX power transition (~80-120s).
+                 * DO NOT read GC registers immediately after this call. */
+                if (g_wddm_lite_dev.hw.psp_sos_alive) {
+                    gpu_smu_enable_features(&g_wddm_lite_dev);
+                }
+
+                /* Step 6b: Trigger AUTOLOAD now that GFX power is up.
+                 * GFX domain should be powered after EnableAllSmuFeatures.
+                 * RLC can now run and distribute firmware to MEC/RLCP/RLCV,
+                 * setting BOOTLOAD_STATUS bits 0-5 and eventually bit 31. */
+                if (fw_staged && g_wddm_lite_dev.hw.psp_sos_alive) {
+                    gpu_psp_trigger_autoload(&g_wddm_lite_dev);
+                }
+
+                /* Step 7: DisallowGfxOff */
+                if (!g_wddm_lite_dev.hw.gfxoff_disabled) {
+                    char skip_gfxoff[32] = {};
+                    GetEnvironmentVariableA("HSAKMT_SKIP_GFXOFF",
+                        skip_gfxoff, sizeof(skip_gfxoff));
+                    if (skip_gfxoff[0] == '1') {
+                        pr_info("wddm_lite: GFXOFF disable skipped\n");
+                        g_wddm_lite_dev.hw.gfxoff_disabled = TRUE;
+                    } else if (gpu_disable_gfxoff(&g_wddm_lite_dev) != 0) {
+                        pr_warn("wddm_lite: GFXOFF disable failed\n");
+                    }
                 }
             }
         }
 
-        /* Initialize GFX engine (SH_MEM, MEC, compute queues) */
+        /* Step 8: Initialize GFX engine (SH_MEM, MEC, compute queues) */
         {
             char skip_gfx[32] = {};
             GetEnvironmentVariableA("HSAKMT_SKIP_GFX_INIT", skip_gfx, sizeof(skip_gfx));

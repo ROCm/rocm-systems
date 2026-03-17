@@ -98,6 +98,12 @@ struct GpuGfxState {
     ULONGLONG   pfp_ucode_start;    /* PFP program counter start */
     ULONGLONG   me_ucode_start;     /* ME program counter start */
     ULONGLONG   mec_ucode_start;    /* MEC program counter start */
+
+    /* Saved MEC firmware bytes (for GART-based loading when AUTOLOAD fails) */
+    UCHAR      *mec_fw_code;        /* Firmware code section */
+    ULONG       mec_fw_code_size;
+    UCHAR      *mec_fw_data;        /* Firmware data/stack section */
+    ULONG       mec_fw_data_size;
 };
 
 /* Compute queue state (direct MMIO programming) */
@@ -172,6 +178,17 @@ int gpu_psp_load_all_fw(struct WddmLiteDevice *dev, const char *fw_dir);
 int gpu_psp_load_smu_fw(struct WddmLiteDevice *dev, const char *fw_dir);
 
 /*
+ * Trigger RLC autoload after firmware staging and GFXOFF disable.
+ * Must be called AFTER gpu_psp_load_all_fw() and gpu_disable_gfxoff().
+ * The RLC cannot distribute firmware while GC is in GFXOFF.
+ */
+int gpu_psp_trigger_autoload(struct WddmLiteDevice *dev);
+
+/* Initialize GFXHUB with GART before AUTOLOAD.
+ * Called after firmware staging wakes GC. */
+void gpu_gfxhub_init_for_autoload(struct WddmLiteDevice *dev);
+
+/*
  * Initialize GMC (GPU Memory Controller).
  * Programs MMHUB and GFXHUB registers for GART, system aperture,
  * TLB, L2 cache, and VM context 0.
@@ -184,6 +201,15 @@ int gpu_gmc_init(struct WddmLiteDevice *dev);
  * Clean up GMC resources (free GART table and dummy page).
  */
 void gpu_gmc_cleanup(struct WddmLiteDevice *dev);
+
+/*
+ * Initialize IH (Interrupt Handler) ring.
+ * Sets up the primary interrupt ring buffer so that PSP/SMU
+ * completion interrupts have somewhere to land.
+ * Must be called BEFORE PSP firmware loading (tinygrad init order).
+ * Returns 0 on success, -1 on failure.
+ */
+int gpu_ih_init(struct WddmLiteDevice *dev);
 
 /*
  * Map system memory pages into the GART.
@@ -257,6 +283,14 @@ int gpu_smu_send_msg(struct WddmLiteDevice *dev, ULONG msg, ULONG param);
 int gpu_smu_enable_features(struct WddmLiteDevice *dev);
 
 /*
+ * Perform SMU mode1 reset via debug mailbox.
+ * This fully resets the GPU (SOS dies, bootloader restarts).
+ * After this, SOS must be reloaded via bootloader commands.
+ * Matches tinygrad's __DEBUGSMC_MSG_Mode1Reset (msg=2 on debug mailbox).
+ */
+int gpu_smu_mode1_reset(struct WddmLiteDevice *dev);
+
+/*
  * Disable GFXOFF power saving.
  * Must be called before accessing any GC registers, as GFXOFF
  * powers down the GC block making all GC registers read as 0.
@@ -310,5 +344,13 @@ int gpu_setup_compute_queue(struct WddmLiteDevice *dev,
  * stops referencing them.
  */
 void gpu_deactivate_compute_queue(struct WddmLiteDevice *dev, ULONG queue_idx);
+
+/*
+ * Read HQD register diagnostic state for a queue.
+ * Returns key register values via output params.
+ */
+void gpu_read_hqd_diag(struct WddmLiteDevice *dev, ULONG queue_idx,
+                        ULONG *out_rptr, ULONG *out_wptr_lo,
+                        ULONG *out_status, ULONG *out_active);
 
 #endif /* GPU_INIT_H_INCLUDED */
