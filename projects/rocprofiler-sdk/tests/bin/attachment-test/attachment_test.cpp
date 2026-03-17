@@ -32,16 +32,18 @@
 #include <thread>
 #include <vector>
 
-// Signal handler - handles signal without affecting execution
 namespace
 {
-int signal_received = 0;
-void
-signal_handler(int signum)
+// required type for signal handlers
+volatile std::sig_atomic_t signal_received = 0;
+}  // namespace
+
+// signal handler - must have C linkage
+extern "C" void
+attachment_test_signal_handler(int signum)
 {
     signal_received = signum;
 }
-}  // namespace
 
 /* Macro for checking GPU API return values */
 #define HIP_ASSERT(call)                                                                           \
@@ -171,7 +173,7 @@ int
 main(int argc, char** argv)
 {
     // Install signal handler for SIGINT
-    std::signal(SIGWINCH, signal_handler);
+    std::signal(SIGWINCH, attachment_test_signal_handler);
 
     size_t nthreads{8};
     int    ndevices{0};
