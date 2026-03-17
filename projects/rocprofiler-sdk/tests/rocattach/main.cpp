@@ -36,6 +36,7 @@
 
 #define ROCATTACH_CALL(func)                                                                       \
     {                                                                                              \
+        std::cout << "starting call to " #func << std::endl;                                       \
         rocattach_status_t status = func;                                                          \
         if(status != ROCATTACH_STATUS_SUCCESS)                                                     \
         {                                                                                          \
@@ -45,7 +46,7 @@
         }                                                                                          \
         else                                                                                       \
         {                                                                                          \
-            std::cout << "call to " #func " successful " << std::endl;                             \
+            std::cout << "call to " #func " successful" << std::endl;                              \
         }                                                                                          \
     }
 
@@ -105,12 +106,12 @@ main(int argc, char** argv)
             std::string signal_arg{argv[3]};
             if(signal_arg == "--send-signal")
             {
-                std::cout << "Sending SIGWINCH to PID " << pid1;
+                std::cout << "Sending SIGWINCH to PID " << pid1 << "\n";
                 if(kill(pid1, SIGWINCH) == -1)
                 {
                     std::cout << "error: Failed to send signal to pid1\n";
                 }
-                std::cout << "Sending SIGWINCH to PID " << pid2;
+                std::cout << "Sending SIGWINCH to PID " << pid2 << "\n";
                 if(kill(pid2, SIGWINCH) == -1)
                 {
                     std::cout << "error: Failed to send signal to pid2\n";
