@@ -238,6 +238,59 @@ static const MnemonicMapping kVALURenames[] = {
     {"v_minmax_num_f16", "v_minmax_f16"},
 };
 
+// Global atomic renames (GFX12 adds _u32/_i32/_b32 suffix)
+static const MnemonicMapping kGlobalAtomicRenames[] = {
+    {"global_atomic_add_u32", "global_atomic_add"},
+    {"global_atomic_sub_u32", "global_atomic_sub"},
+    {"global_atomic_and_b32", "global_atomic_and"},
+    {"global_atomic_or_b32", "global_atomic_or"},
+    {"global_atomic_xor_b32", "global_atomic_xor"},
+    {"global_atomic_min_i32", "global_atomic_smin"},
+    {"global_atomic_max_i32", "global_atomic_smax"},
+    {"global_atomic_min_u32", "global_atomic_umin"},
+    {"global_atomic_max_u32", "global_atomic_umax"},
+    {"global_atomic_swap_b32", "global_atomic_swap"},
+    {"global_atomic_cmpswap_b32", "global_atomic_cmpswap"},
+    {"global_atomic_add_u64", "global_atomic_add_x2"},
+    {"global_atomic_sub_u64", "global_atomic_sub_x2"},
+    {"global_atomic_and_b64", "global_atomic_and_x2"},
+    {"global_atomic_or_b64", "global_atomic_or_x2"},
+    {"global_atomic_xor_b64", "global_atomic_xor_x2"},
+    {"global_atomic_swap_b64", "global_atomic_swap_x2"},
+    {"global_atomic_cmpswap_b64", "global_atomic_cmpswap_x2"},
+    {"global_atomic_add_f32", "global_atomic_add_f32"},  // same name
+    {"global_atomic_pk_add_f16", "global_atomic_pk_add_f16"},  // same name
+};
+
+// Flat atomic renames
+static const MnemonicMapping kFlatAtomicRenames[] = {
+    {"flat_atomic_add_u32", "flat_atomic_add"},
+    {"flat_atomic_sub_u32", "flat_atomic_sub"},
+    {"flat_atomic_and_b32", "flat_atomic_and"},
+    {"flat_atomic_or_b32", "flat_atomic_or"},
+    {"flat_atomic_xor_b32", "flat_atomic_xor"},
+    {"flat_atomic_min_i32", "flat_atomic_smin"},
+    {"flat_atomic_max_i32", "flat_atomic_smax"},
+    {"flat_atomic_min_u32", "flat_atomic_umin"},
+    {"flat_atomic_max_u32", "flat_atomic_umax"},
+    {"flat_atomic_swap_b32", "flat_atomic_swap"},
+    {"flat_atomic_cmpswap_b32", "flat_atomic_cmpswap"},
+    {"flat_atomic_add_u64", "flat_atomic_add_x2"},
+    {"flat_atomic_sub_u64", "flat_atomic_sub_x2"},
+    {"flat_atomic_swap_b64", "flat_atomic_swap_x2"},
+    {"flat_atomic_cmpswap_b64", "flat_atomic_cmpswap_x2"},
+};
+
+// DS atomic renames
+static const MnemonicMapping kDSAtomicRenames[] = {
+    {"ds_add_u32", "ds_add_u32"},  // same — but add for completeness
+    {"ds_add_rtn_u32", "ds_add_rtn_u32"},
+    {"ds_cmpstore_b32", "ds_cmpst_b32"},
+    {"ds_cmpstore_rtn_b32", "ds_cmpst_rtn_b32"},
+    {"ds_cmpstore_b64", "ds_cmpst_b64"},
+    {"ds_cmpstore_rtn_b64", "ds_cmpst_rtn_b64"},
+};
+
 // Build a reverse lookup map (gfx12 mnemonic → gfx9 mnemonic)
 static std::unordered_map<std::string, std::string> BuildMnemonicMap() {
   std::unordered_map<std::string, std::string> map;
@@ -264,6 +317,12 @@ static std::unordered_map<std::string, std::string> BuildMnemonicMap() {
               sizeof(kScalarALURenames) / sizeof(kScalarALURenames[0]));
   addMappings(kVALURenames,
               sizeof(kVALURenames) / sizeof(kVALURenames[0]));
+  addMappings(kGlobalAtomicRenames,
+              sizeof(kGlobalAtomicRenames) / sizeof(kGlobalAtomicRenames[0]));
+  addMappings(kFlatAtomicRenames,
+              sizeof(kFlatAtomicRenames) / sizeof(kFlatAtomicRenames[0]));
+  addMappings(kDSAtomicRenames,
+              sizeof(kDSAtomicRenames) / sizeof(kDSAtomicRenames[0]));
 
   return map;
 }
@@ -464,13 +523,19 @@ static std::string TranslateOperandSyntax(const std::string& line,
     }
   }
 
-  // Remove "th:TH_*" modifiers
+  // Translate "th:TH_ATOMIC_RETURN" → "sc0" (GFX940+ atomic return flag)
+  // Other "th:TH_*" modifiers are stripped (no GFX9 equivalent)
   {
     size_t pos = result.find("th:");
     if (pos != std::string::npos) {
       size_t end = result.find_first_of(" \t,", pos);
       if (end == std::string::npos) end = result.size();
-      result.erase(pos, end - pos);
+      std::string th_value = result.substr(pos, end - pos);
+      if (th_value.find("TH_ATOMIC_RETURN") != std::string::npos) {
+        result.replace(pos, end - pos, "sc0");
+      } else {
+        result.erase(pos, end - pos);
+      }
     }
   }
 
