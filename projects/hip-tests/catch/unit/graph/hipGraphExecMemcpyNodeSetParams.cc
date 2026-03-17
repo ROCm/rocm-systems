@@ -23,7 +23,6 @@ THE SOFTWARE.
 #include <functional>
 
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 #include <hip_test_defgroups.hh>
 #include <memcpy1d_tests_common.hh>
 #include <memcpy3d_tests_common.hh>

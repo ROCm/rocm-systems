@@ -18,7 +18,6 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 
 #define MEM_SIZE (1024 * 1024 * 32)
 #define SEED 5

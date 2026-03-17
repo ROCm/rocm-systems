@@ -35,7 +35,6 @@ THE SOFTWARE.
 //    atomic operation on different values)
 
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 
 using namespace std;
 
@@ -471,6 +470,7 @@ template <typename T> static void runIntTest() {
 
   // Cleanup memory
   free(hOData);
+  free(hIActiveLanes);
   HIP_CHECK(hipFree(dOData));
   HIP_CHECK(hipFree(dIActiveLanes));
 }
@@ -679,6 +679,8 @@ template <typename T> static void runDivIntTest() {
 
   // Cleanup memory
   free(hOData);
+  free(hIDivValues);
+  free(hIActiveLanes);
   HIP_CHECK(hipFree(dOData));
   HIP_CHECK(hipFree(dIActiveLanes));
   HIP_CHECK(hipFree(dIDivValues));

@@ -18,7 +18,6 @@ THE SOFTWARE.
 */
 #include <hip/hip_fp16.h>
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 
 #pragma clang diagnostic ignored "-Wunused-variable"
 #pragma clang diagnostic ignored "-Wunused-parameter"

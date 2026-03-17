@@ -18,7 +18,6 @@
  */
 
 #include "mempool_common.hh"
-#include <hip_tests_config.hh>
 
 /**
  * @addtogroup hipMemPoolDestroy hipMemPoolDestroy

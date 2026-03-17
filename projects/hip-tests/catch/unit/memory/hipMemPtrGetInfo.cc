@@ -24,7 +24,6 @@ THE SOFTWARE.
 This testfile verifies the basic scenario of hipMemPtrGetInfo API
 */
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 struct MemInfo {
   float a;
   int b;

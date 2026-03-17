@@ -18,7 +18,6 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 #include <hip_test_helper.hh>
 #include <utils.hh>
 #include <hip_test_process.hh>
@@ -633,7 +632,7 @@ HIP_TEST_CASE(Unit_hipStreamLegacy_TwoDevicesEachOneDiffOperation) {
 
   HIP_CHECK(hipMemcpyAsync(hostArrDst, devArrDev1, NBYTES, hipMemcpyDeviceToHost, hipStreamLegacy));
   HIP_CHECK(hipStreamSynchronize(hipStreamLegacy));
-  
+
   for (int i = 0; i < N; i++) {
     INFO("At index : " << i << " Got value : " << hostArrDst[i]
                        << " Expected value : 500 or 501 \n");

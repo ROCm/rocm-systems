@@ -25,7 +25,6 @@ THE SOFTWARE.
 #include <algorithm>
 #include <cmath>
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 #include <limits>
 
 __global__ void fp16_arith_gpu(float* a, float* b, float* c) {

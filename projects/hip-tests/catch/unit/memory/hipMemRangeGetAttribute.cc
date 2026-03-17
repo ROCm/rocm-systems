@@ -22,7 +22,6 @@ THE SOFTWARE.
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 #include <resource_guards.hh>
 #include <utils.hh>
 
@@ -349,6 +348,13 @@ HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_Negative_Parameters) {
     LinearAllocGuard<void> non_managed(LinearAllocs::hipMalloc, kPageSize);
     HIP_CHECK_ERROR(hipMemRangeGetAttribute(&data, 4, hipMemRangeAttributeReadMostly,
                                             non_managed.ptr(), kPageSize),
+                    hipErrorInvalidValue);
+  }
+
+  SECTION("dev_ptr is host pinned memory") {
+    LinearAllocGuard<void> host_pinned(LinearAllocs::hipHostMalloc, kPageSize);
+    HIP_CHECK_ERROR(hipMemRangeGetAttribute(&data, 4, hipMemRangeAttributeReadMostly,
+                                            host_pinned.ptr(), kPageSize),
                     hipErrorInvalidValue);
   }
 

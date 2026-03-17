@@ -28,7 +28,6 @@ priority should be clamped to the priority range.
 */
 
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 
 /**
  * Create stream and check priority.

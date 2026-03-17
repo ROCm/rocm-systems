@@ -36,7 +36,6 @@ THE SOFTWARE.
   4. Pass nullptr to device pointer
 */
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 
 static size_t Nbytes = 0;
 constexpr size_t N{1000000};

@@ -35,7 +35,6 @@ Testcase Scenarios : hipLaunchBounds_With_maxThreadsPerBlock_blocksPerCU
 */
 
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 #include <hip_test_kernels.hh>
 
 __global__ void __launch_bounds__(128, 2) MyKernel(int N, int* x, int val) {

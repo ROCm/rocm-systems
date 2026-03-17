@@ -25,7 +25,6 @@ Unit_hipDeviceGetStreamPriorityRange_Default - Check if device stream piority ra
 */
 
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 
 HIP_TEST_CASE(Unit_hipDeviceGetStreamPriorityRange_Default) {
   int priority_low = 0;

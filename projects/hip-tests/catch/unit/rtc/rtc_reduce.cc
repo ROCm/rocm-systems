@@ -20,7 +20,6 @@ THE SOFTWARE.
 #define HIP_ENABLE_EXTRA_WARP_SYNC_TYPES
 
 #include "warp_common.hh"
-#include <hip_tests_config.hh>
 #include <hip/hip_runtime.h>
 #include <tuple>
 #include <cmd_options.hh>

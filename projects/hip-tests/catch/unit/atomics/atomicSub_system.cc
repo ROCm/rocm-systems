@@ -154,7 +154,8 @@ HIP_TEMPLATE_TEST_CASE(Unit_atomicSub_system_Positive_Host_And_GPU,
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-HIP_TEMPLATE_TEST_CASE(Unit_atomicSub_system_Positive_Host_And_Peer_GPUs, int, unsigned int, unsigned long,
+HIP_TEMPLATE_TEST_CASE(Unit_atomicSub_system_Positive_Host_And_Peer_GPUs,
+                   int, unsigned int, unsigned long,
                    unsigned long long, float, double) {
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));

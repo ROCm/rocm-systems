@@ -21,7 +21,6 @@ THE SOFTWARE.
 */
 
 #include "MemUtils.hh"
-#include <hip_tests_config.hh>
 #include <utils.hh>
 /*
  * These testcases verify that synchronization behaviour for memcpy functions with respect to

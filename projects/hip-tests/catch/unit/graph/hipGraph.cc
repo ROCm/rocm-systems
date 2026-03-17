@@ -26,7 +26,6 @@ Testcase Scenarios :
 */
 
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 
 #define THREADS_PER_BLOCK 512
 #define GRAPH_LAUNCH_ITERATIONS 1000

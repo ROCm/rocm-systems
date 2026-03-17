@@ -21,7 +21,6 @@ THE SOFTWARE.
 */
 
 #include "MemUtils.hh"
-#include <hip_tests_config.hh>
 
 /*
  * This testcase verifies that asynchronous memset functions are asynchronous with respect to the

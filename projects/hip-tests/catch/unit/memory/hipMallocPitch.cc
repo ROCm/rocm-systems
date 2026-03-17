@@ -21,7 +21,6 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 #include <initializer_list>
 #include <memory>
 #include "hip/driver_types.h"

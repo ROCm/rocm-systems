@@ -18,7 +18,6 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 
 HIP_TEST_CASE(Unit_hipStreamPerThread_EventRecord) {
   hipEvent_t event;

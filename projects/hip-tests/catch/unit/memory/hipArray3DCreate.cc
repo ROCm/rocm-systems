@@ -22,7 +22,6 @@ THE SOFTWARE.
 #include "hipArrayCommon.hh"
 #include "hip_array_common.hh"
 #include "hip_test_common.hh"
-#include <hip_tests_config.hh>
 
 namespace {
 void checkArrayIsExpected(const hipArray_t array, const HIP_ARRAY3D_DESCRIPTOR& expected_desc) {

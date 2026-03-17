@@ -31,7 +31,6 @@ This testfile verifies Built fmax  API scenarios
 
 #include <hip_test_checkers.hh>
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 #include <hip/hiprtc.h>
 
 #define INITIAL_VAL 5

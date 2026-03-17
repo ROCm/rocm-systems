@@ -19,7 +19,6 @@ THE SOFTWARE.
 
 #include <hip_test_kernels.hh>
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 
 unsigned threadsPerBlock = 256;
 unsigned blocksPerCU = 6;

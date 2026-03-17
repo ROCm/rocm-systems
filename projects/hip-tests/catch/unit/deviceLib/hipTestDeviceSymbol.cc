@@ -26,7 +26,6 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 
 constexpr size_t NUM = 1024;
 constexpr size_t SIZE = 1024 * 4;

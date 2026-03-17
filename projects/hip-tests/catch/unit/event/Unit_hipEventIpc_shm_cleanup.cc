@@ -26,7 +26,6 @@ THE SOFTWARE.
 #include <hip_test_kernels.hh>
 
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 #include <dirent.h>
 #include <string>
 #include <set>

@@ -23,7 +23,6 @@ THE SOFTWARE.
 #include "memcpy2d_tests_common.hh"
 
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 #include <hip/hip_runtime_api.h>
 #include <resource_guards.hh>
 #include <utils.hh>

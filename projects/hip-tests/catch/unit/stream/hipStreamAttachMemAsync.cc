@@ -20,7 +20,6 @@ THE SOFTWARE.
 // TODO Enable it after hipStreamAttachMemAsync is feature complete on HIP
 
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 #include <memory>
 
 __device__ __managed__ int var = 0;

@@ -55,7 +55,6 @@ behaviour
 }
 
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 #include <string>
 static constexpr auto NUM_W{16};
 static constexpr auto NUM_H{16};

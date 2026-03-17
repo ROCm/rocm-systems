@@ -25,7 +25,6 @@ Testcase Scenarios :
 */
 
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 
 /**
  * @brief Check that hipStreamGetFlags returns the same flags that were used to create the stream.

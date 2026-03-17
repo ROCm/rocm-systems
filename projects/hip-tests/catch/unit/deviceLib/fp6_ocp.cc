@@ -21,7 +21,6 @@ THE SOFTWARE.
 
 #include <hip/hip_fp6.h>
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 
 #include <bitset>
 #include <type_traits>

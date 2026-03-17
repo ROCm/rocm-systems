@@ -47,7 +47,6 @@ THE SOFTWARE.
 #endif
 
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 #include "hip/hip_cooperative_groups.h"
 using namespace std::chrono;
 using namespace cooperative_groups;

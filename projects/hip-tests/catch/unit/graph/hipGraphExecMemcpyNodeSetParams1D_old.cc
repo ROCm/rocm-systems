@@ -39,7 +39,6 @@ the hipMemcpyKind from H2D to D2H but allocate pointer memory for H2D, api shoul
 */
 
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 #include <hip_test_checkers.hh>
 #include <hip_test_kernels.hh>
 #include <memcpy1d_tests_common.hh>

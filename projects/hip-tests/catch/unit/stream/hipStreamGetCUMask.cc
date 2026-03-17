@@ -25,7 +25,6 @@ Testcase Scenarios :
 */
 
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 
 #include <cmath>
 #include <vector>

@@ -1,5 +1,4 @@
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 #include <hip_test_filesystem.hh>
 
 #include <hip/hiprtc.h>

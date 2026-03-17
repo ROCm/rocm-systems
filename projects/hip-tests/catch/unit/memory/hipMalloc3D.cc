@@ -26,7 +26,6 @@ hipMalloc3D API test scenarios
 */
 
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 static constexpr auto SMALL_SIZE{4};
 static constexpr auto CHUNK_LOOP{100};
 static constexpr auto BIG_SIZE{100};

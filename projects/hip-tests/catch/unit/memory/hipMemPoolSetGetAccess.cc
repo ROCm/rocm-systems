@@ -18,7 +18,6 @@
  */
 
 #include <utility>
-#include <hip_tests_config.hh>
 #include <vector>
 #include <resource_guards.hh>
 #include "mempool_common.hh"

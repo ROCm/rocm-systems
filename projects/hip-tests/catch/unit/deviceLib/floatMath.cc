@@ -21,7 +21,6 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 
 #define LEN 512
 #define SIZE LEN << 2

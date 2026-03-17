@@ -21,7 +21,6 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 #include <utils.hh>
 
 HIP_TEST_CASE(Unit_hipHostGetDevicePointer_Negative) {

@@ -32,7 +32,6 @@
 
 
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 #include <chrono>
 
 __global__ void CoherentTst(int* ptr) {  // ptr was set to 1

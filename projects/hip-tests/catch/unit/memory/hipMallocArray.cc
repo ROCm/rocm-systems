@@ -26,7 +26,6 @@ hipMallocArray API test scenarios
 */
 
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 #include <hip_array_common.hh>
 #include <limits>
 #include <numeric>

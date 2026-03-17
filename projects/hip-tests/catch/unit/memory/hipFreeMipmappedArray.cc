@@ -22,7 +22,6 @@ THE SOFTWARE.
 
 
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 #include "hipArrayCommon.hh"
 #include "utils.hh"
 #include <array>

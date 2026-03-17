@@ -147,7 +147,7 @@ void UnarySinglePrecisionRangeTest(kernel_sig<T, float> kernel, ref_sig<RT, RTAr
   const auto reduction_factor = GetTestReductionFactor();
   const auto max_batch_size = GetMaxAllowedDeviceMemoryUsage() / (sizeof(float) + sizeof(T));
   LinearAllocGuard<float> values{LinearAllocs::hipHostMalloc, max_batch_size * sizeof(float)};
-  
+
   MathTest math_test(kernel, max_batch_size);
 
   const auto run = [&, gs = grid_size, bs = block_size](size_t inserted) {

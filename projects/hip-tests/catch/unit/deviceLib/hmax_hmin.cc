@@ -23,7 +23,6 @@ THE SOFTWARE.
 #include <cmath>
 #include <cstring>
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 #include <hip/hip_fp16.h>
 
 #define NElms 5

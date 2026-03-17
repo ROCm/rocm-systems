@@ -18,7 +18,6 @@
  */
 
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 #include <limits>
 #include "hip/driver_types.h"
 

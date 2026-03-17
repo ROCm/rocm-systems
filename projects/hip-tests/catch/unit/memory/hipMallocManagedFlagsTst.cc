@@ -21,7 +21,6 @@ THE SOFTWARE.
 */
 
 #include "hipMallocManagedCommon.hh"
-#include <hip_tests_config.hh>
 #include <atomic>
 
 // Kernel function

@@ -24,7 +24,6 @@ THE SOFTWARE.
  Run through few sanity tests to verify different attributes of hipPointerGetAttribute
 */
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 #include <vector>
 #include <iostream>
 #include <string>

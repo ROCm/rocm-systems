@@ -26,7 +26,6 @@ THE SOFTWARE.
  */
 
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 #include <iostream>
 #ifdef __linux__
 #include <unistd.h>

@@ -24,7 +24,7 @@
  #include <ctime>
  #include <execution>
  #include <memory>
- 
+
 // Stress allocation tests
 // Try to allocate as much memory as possible, backing off gradually on failure.
 HIP_TEST_CASE(Stress_hipMalloc_HighSizeAlloc) {
@@ -52,7 +52,7 @@ HIP_TEST_CASE(Stress_hipMalloc_HighSizeAlloc) {
   std::srand(static_cast<unsigned>(std::time(nullptr)));
   unsigned char fill_val = static_cast<unsigned char>(std::rand() % 255 + 1);
   INFO("Fill value for this run: " << static_cast<int>(fill_val));
- 
+
    HIP_CHECK(hipMemset(d_ptr, fill_val, devMemFree));
    auto ptr = std::unique_ptr<unsigned char[]>{new unsigned char[devMemFree]};
    HIP_CHECK(hipMemcpy(ptr.get(), d_ptr, devMemFree, hipMemcpyDeviceToHost));

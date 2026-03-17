@@ -23,7 +23,6 @@
 */
 
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 #include <hip_test_kernels.hh>
 #include <hip_test_checkers.hh>
 #include <cstdio>

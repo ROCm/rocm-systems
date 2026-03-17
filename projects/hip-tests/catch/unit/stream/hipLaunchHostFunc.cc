@@ -20,7 +20,6 @@ THE SOFTWARE.
 #include <hip_test_kernels.hh>
 #include <hip_test_checkers.hh>
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 #define GRIDSIZE 512
 #define BLOCKSIZE 256
 #define NUM_OF_STREAM 3

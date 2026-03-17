@@ -21,7 +21,6 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 #include <hip/device_functions.h>
 
 
@@ -35,8 +34,9 @@ __global__ void gpu_ballot(unsigned int* device_ballot, unsigned Num_Warps_per_B
   atomicAdd(&device_ballot[warp_num + blockIdx.x * Num_Warps_per_Block],
             __popcll(__ballot(tid - 245)));
 #else
+  unsigned mask = 0xFFFFFFFF;
   atomicAdd(&device_ballot[warp_num + blockIdx.x * Num_Warps_per_Block],
-            __popc(__ballot(tid - 245)));
+            __popc(__ballot_sync(mask, tid - 245)));
 #endif
 }
 

@@ -28,7 +28,6 @@ platform hence skipping the testcases
 */
 
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 #include <hip_test_checkers.hh>
 #include <hip_test_kernels.hh>
 #ifdef __linux__
@@ -395,6 +394,7 @@ HIP_TEST_CASE(Unit_hipGraphInstantiateWithFlags_FlagAutoFreeOnLaunch_check) {
   HIP_CHECK(hipGraphDestroy(graph));
   HIP_CHECK(hipGraphExecDestroy(graphExec));
   HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipFree(A_d));
 }
 
 /**

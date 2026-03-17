@@ -19,7 +19,6 @@ THE SOFTWARE.
 #include <hip/hip_runtime.h>
 #include <hip/math_functions.h>
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 
 __global__ static void DotFunctions(bool* result) {
 // Dot Functions

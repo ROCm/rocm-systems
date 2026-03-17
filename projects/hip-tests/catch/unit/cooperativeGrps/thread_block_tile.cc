@@ -297,7 +297,7 @@ __global__ void block_tile_shfl_xor(T* const out, const unsigned mask) {
 }
 
 template <typename T, size_t tile_size> void BlockTileShflXORTestImpl() {
-  DYNAMIC_SECTION("Tile size: " << tile_size) {    
+  DYNAMIC_SECTION("Tile size: " << tile_size) {
     const auto inv_reduction_factor = 1.0 / GetTestReductionFactor();
 
     auto blocks = GenerateBlockDimensionsForShuffle();

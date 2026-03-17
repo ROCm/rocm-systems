@@ -19,7 +19,6 @@ THE SOFTWARE.
 
 #include <chrono>
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 #include <utils.hh>
 
 namespace hipStreamCreateWithFlagsTests {

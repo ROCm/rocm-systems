@@ -18,7 +18,6 @@ THE SOFTWARE.
 */
 
 #include "deviceAllocCommon.h"
-#include <hip_tests_config.hh>
 
 __device__ static void* dev_mem_glob;
 __device__ struct deviceAllocFunc allocfunc{&deviceAlloc, &deviceWrite, &deviceFree};

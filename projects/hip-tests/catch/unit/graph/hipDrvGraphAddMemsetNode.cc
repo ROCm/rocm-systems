@@ -24,7 +24,6 @@ THE SOFTWARE.
 
 #include <hip_test_defgroups.hh>
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 #include <memcpy3d_tests_common.hh>
 #include <resource_guards.hh>
 #include <utils.hh>
@@ -59,13 +58,13 @@ static char memSetVal = 'a';
  */
 HIP_TEMPLATE_TEST_CASE(Unit_hipDrvGraphAddMemsetNode_Positive_Basic, uint8_t, uint16_t,
                    uint32_t) {
+  CHECK_IMAGE_SUPPORT
+
   HIP_CHECK(hipInit(0));
   hipDevice_t device;
   hipCtx_t context;
   HIP_CHECK(hipDeviceGet(&device, 0));
   HIP_CHECK(hipCtxCreate(&context, 0, device));
-
-  CHECK_IMAGE_SUPPORT
 
   const auto f = [&context](hipMemsetParams* params) {
     hipGraph_t graph = nullptr;
@@ -164,13 +163,13 @@ HIP_TEST_CASE(Unit_hipDrvGraphAddMemsetNode_Negative_Parameters) {
  *    - HIP_VERSION >= 6.0
  */
 HIP_TEST_CASE(Unit_hipDrvGraphAddMemsetNode_hipMallocPitch_2D) {
+  CHECK_IMAGE_SUPPORT
+
   HIP_CHECK(hipInit(0));
   hipDevice_t device;
   hipCtx_t context;
   HIP_CHECK(hipDeviceGet(&device, 0));
   HIP_CHECK(hipCtxCreate(&context, 0, device));
-
-  CHECK_IMAGE_SUPPORT
 
   size_t width = SIZE * sizeof(char), numW{SIZE}, numH{SIZE}, pitch_A;
   char* A_d;
@@ -251,13 +250,13 @@ HIP_TEST_CASE(Unit_hipDrvGraphAddMemsetNode_hipMallocPitch_2D) {
  *    - HIP_VERSION >= 6.0
  */
 HIP_TEST_CASE(Unit_hipDrvGraphAddMemsetNode_hipMallocPitch_1D) {
+  CHECK_IMAGE_SUPPORT
+
   HIP_CHECK(hipInit(0));
   hipDevice_t device;
   hipCtx_t context;
   HIP_CHECK(hipDeviceGet(&device, 0));
   HIP_CHECK(hipCtxCreate(&context, 0, device));
-
-  CHECK_IMAGE_SUPPORT
 
   size_t width = SIZE * sizeof(char), numW{SIZE}, pitch_A;
   char* A_d;
@@ -332,13 +331,13 @@ HIP_TEST_CASE(Unit_hipDrvGraphAddMemsetNode_hipMallocPitch_1D) {
  *    - HIP_VERSION >= 6.0
  */
 HIP_TEST_CASE(Unit_hipDrvGraphAddMemsetNode_hipMalloc3D_2D) {
+  CHECK_IMAGE_SUPPORT
+
   HIP_CHECK(hipInit(0));
   hipDevice_t device;
   hipCtx_t context;
   HIP_CHECK(hipDeviceGet(&device, 0));
   HIP_CHECK(hipCtxCreate(&context, 0, device));
-
-  CHECK_IMAGE_SUPPORT
 
   size_t width = SIZE * sizeof(char);
   size_t numW = SIZE, numH = SIZE;
@@ -426,13 +425,13 @@ HIP_TEST_CASE(Unit_hipDrvGraphAddMemsetNode_hipMalloc3D_2D) {
  *    - HIP_VERSION >= 6.0
  */
 HIP_TEST_CASE(Unit_hipDrvGraphAddMemsetNode_hipMalloc3D_1D) {
+  CHECK_IMAGE_SUPPORT
+
   HIP_CHECK(hipInit(0));
   hipDevice_t device;
   hipCtx_t context;
   HIP_CHECK(hipDeviceGet(&device, 0));
   HIP_CHECK(hipCtxCreate(&context, 0, device));
-
-  CHECK_IMAGE_SUPPORT
 
   size_t width = SIZE * sizeof(char);
   size_t numW = SIZE;

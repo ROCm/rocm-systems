@@ -34,7 +34,6 @@ THE SOFTWARE.
  */
 
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 // Kernel function
 
 __global__ void MemPrftchAsyncKernel1(int* Hmm, size_t N) {

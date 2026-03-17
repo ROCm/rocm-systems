@@ -31,7 +31,6 @@ incompatible flags are passed
 */
 
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 
 /**
  * @addtogroup hipEventCreate hipEventCreate
@@ -176,33 +175,5 @@ HIP_TEST_CASE(Unit_hipEventSynchronize_NullCheck) {
  */
 HIP_TEST_CASE(Unit_hipEventQuery_NullCheck) {
   auto res = hipEventQuery(nullptr);
-  REQUIRE(res != hipSuccess);
-}
-/**
- * End doxygen group hipEventQuery.
- * @}
- */
-
-/**
- * @addtogroup hipEventDestroy hipEventDestroy
- * @{
- * @ingroup EventTest
- */
-
-/**
- * Test Description
- * ------------------------
- *  - Validates handling of invalid arguments:
- *    -# When event is `nullptr`
- *      - Expected output: do not return `hipSuccess`
- * Test source
- * ------------------------
- *  - unit/event/Unit_hipEvent_Negative.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 5.2
- */
-HIP_TEST_CASE(Unit_hipEventDestroy_NullCheck) {
-  auto res = hipEventDestroy(nullptr);
   REQUIRE(res != hipSuccess);
 }

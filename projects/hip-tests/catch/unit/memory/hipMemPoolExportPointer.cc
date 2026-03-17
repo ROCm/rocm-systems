@@ -29,7 +29,6 @@ THE SOFTWARE.
  */
 
 #include "mempool_common.hh"
-#include <hip_tests_config.hh>
 
 constexpr int DATA_SIZE = 1024 * 1024;
 constexpr size_t byte_size = DATA_SIZE * sizeof(int);

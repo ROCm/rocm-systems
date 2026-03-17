@@ -18,7 +18,6 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 #include <hip_test_checkers.hh>
 #include <hip_test_kernels.hh>
 #include <array>
@@ -215,7 +214,7 @@ HIP_TEST_CASE(Unit_hipMemsetD32_Capture) {
 
   hipError_t memcpy_err = hipSuccess;
   BEGIN_CAPTURE_SYNC(memcpy_err, false);
-  HIP_CHECK_ERROR(hipMemsetD32(dst, 0xAB, N), memcpy_err);
+  HIP_CHECK_ERROR(hipMemsetD32(reinterpret_cast<hipDeviceptr_t>(dst), 0xAB, N), memcpy_err);
   END_CAPTURE_SYNC(memcpy_err);
 
   HIP_CHECK(hipFree(dst));

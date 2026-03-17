@@ -24,7 +24,6 @@
 */
 
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 #include <performance_common.hh>
 #include <cstdio>
 #include <algorithm>

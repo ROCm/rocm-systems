@@ -18,7 +18,6 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 #include <hip_array_common.hh>
 
 __global__ void add_vectors(int* a, int* b, int* result, int size) {

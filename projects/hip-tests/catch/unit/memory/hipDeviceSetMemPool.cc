@@ -30,7 +30,6 @@ THE SOFTWARE.
  */
 
 #include "mempool_common.hh"  // NOLINT
-#include <hip_tests_config.hh>
 
 #define THREADS_PER_BLOCK 512
 static constexpr auto NUM_ELM{1024 * 1024};

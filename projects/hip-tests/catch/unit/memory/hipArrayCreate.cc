@@ -27,7 +27,6 @@ hipArrayCreate API test scenarios
 #include <array>
 #include <numeric>
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 #include <hip_array_common.hh>
 #include "hipArrayCommon.hh"
 #include "DriverContext.hh"

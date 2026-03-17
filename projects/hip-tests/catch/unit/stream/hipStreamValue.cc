@@ -17,7 +17,6 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 #include <memory>
 #include <type_traits>
 
@@ -367,20 +366,20 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipStreamValue_Wait_Blocking, uint32_t, uint64_t) {
 
   SECTION("Mask_Gte") {
     TestWaitType testCase(hipStreamWaitValueGte, 0xF, 0x4, 0x3, 0x6);
-    
-    SECTION("HostPtr") { 
-      testWait<TestParams<UIntT, PtrType::HostPtr>, true>(testCase); 
+
+    SECTION("HostPtr") {
+      testWait<TestParams<UIntT, PtrType::HostPtr>, true>(testCase);
     }
-    SECTION("DevicePtr") { 
-      testWait<TestParams<UIntT, PtrType::DevicePtr>, true>(testCase); 
+    SECTION("DevicePtr") {
+      testWait<TestParams<UIntT, PtrType::DevicePtr>, true>(testCase);
     }
-    SECTION("DevicePtrToHost") { 
-      testWait<TestParams<UIntT, PtrType::DevicePtrToHost>, true>(testCase); 
+    SECTION("DevicePtrToHost") {
+      testWait<TestParams<UIntT, PtrType::DevicePtrToHost>, true>(testCase);
     }
 #if HT_AMD
     if constexpr (std::is_same_v<UIntT, uint64_t>) {
-      SECTION("Signal") { 
-        testWait<TestParams<UIntT, PtrType::Signal>, true>(testCase); 
+      SECTION("Signal") {
+        testWait<TestParams<UIntT, PtrType::Signal>, true>(testCase);
       }
     }
 #endif
@@ -388,20 +387,20 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipStreamValue_Wait_Blocking, uint32_t, uint64_t) {
 
   if constexpr (std::is_same_v<UIntT, uint64_t>) {
     SECTION("Mask_Gte_1") {
-      TestWaitType testCase(hipStreamWaitValueGte, 0x0000FFFFFFFFFFFF, 0x000000007FFF0001, 
+      TestWaitType testCase(hipStreamWaitValueGte, 0x0000FFFFFFFFFFFF, 0x000000007FFF0001,
                             0x7FFF00007FFF0000, 0x000000007FFF0001);
-      SECTION("HostPtr") { 
-        testWait<TestParams<UIntT, PtrType::HostPtr>, true>(testCase); 
+      SECTION("HostPtr") {
+        testWait<TestParams<UIntT, PtrType::HostPtr>, true>(testCase);
       }
-      SECTION("DevicePtr") { 
-        testWait<TestParams<UIntT, PtrType::DevicePtr>, true>(testCase); 
+      SECTION("DevicePtr") {
+        testWait<TestParams<UIntT, PtrType::DevicePtr>, true>(testCase);
       }
-      SECTION("DevicePtrToHost") { 
-        testWait<TestParams<UIntT, PtrType::DevicePtrToHost>, true>(testCase); 
+      SECTION("DevicePtrToHost") {
+        testWait<TestParams<UIntT, PtrType::DevicePtrToHost>, true>(testCase);
       }
 #if HT_AMD
-      SECTION("Signal") { 
-        testWait<TestParams<UIntT, PtrType::Signal>, true>(testCase); 
+      SECTION("Signal") {
+        testWait<TestParams<UIntT, PtrType::Signal>, true>(testCase);
       }
 #endif
     }
@@ -410,22 +409,22 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipStreamValue_Wait_Blocking, uint32_t, uint64_t) {
   SECTION("Mask_Eq_1") {
     TestWaitType testCase = std::is_same_v<UIntT, uint32_t>
       ? TestWaitType(hipStreamWaitValueEq, 0x0000FFFF, 0x00000001, 0x0FFF0000, 0x0FFF0001)
-      : TestWaitType(hipStreamWaitValueEq, 0x0000FFFFFFFFFFFF, 0x000000000FFF0001, 
+      : TestWaitType(hipStreamWaitValueEq, 0x0000FFFFFFFFFFFF, 0x000000000FFF0001,
                      0x7FFF00000FFF0000, 0x7F0000000FFF0001);
-    
-    SECTION("HostPtr") { 
-      testWait<TestParams<UIntT, PtrType::HostPtr>, true>(testCase); 
+
+    SECTION("HostPtr") {
+      testWait<TestParams<UIntT, PtrType::HostPtr>, true>(testCase);
     }
-    SECTION("DevicePtr") { 
-      testWait<TestParams<UIntT, PtrType::DevicePtr>, true>(testCase); 
+    SECTION("DevicePtr") {
+      testWait<TestParams<UIntT, PtrType::DevicePtr>, true>(testCase);
     }
-    SECTION("DevicePtrToHost") { 
-      testWait<TestParams<UIntT, PtrType::DevicePtrToHost>, true>(testCase); 
+    SECTION("DevicePtrToHost") {
+      testWait<TestParams<UIntT, PtrType::DevicePtrToHost>, true>(testCase);
     }
 #if HT_AMD
     if constexpr (std::is_same_v<UIntT, uint64_t>) {
-      SECTION("Signal") { 
-        testWait<TestParams<UIntT, PtrType::Signal>, true>(testCase); 
+      SECTION("Signal") {
+        testWait<TestParams<UIntT, PtrType::Signal>, true>(testCase);
       }
     }
 #endif
@@ -433,20 +432,20 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipStreamValue_Wait_Blocking, uint32_t, uint64_t) {
 
   SECTION("Mask_Eq_2") {
     TestWaitType testCase(hipStreamWaitValueEq, 0xFF, 0x11, 0x25, 0x11);
-    
-    SECTION("HostPtr") { 
-      testWait<TestParams<UIntT, PtrType::HostPtr>, true>(testCase); 
+
+    SECTION("HostPtr") {
+      testWait<TestParams<UIntT, PtrType::HostPtr>, true>(testCase);
     }
-    SECTION("DevicePtr") { 
-      testWait<TestParams<UIntT, PtrType::DevicePtr>, true>(testCase); 
+    SECTION("DevicePtr") {
+      testWait<TestParams<UIntT, PtrType::DevicePtr>, true>(testCase);
     }
-    SECTION("DevicePtrToHost") { 
-      testWait<TestParams<UIntT, PtrType::DevicePtrToHost>, true>(testCase); 
+    SECTION("DevicePtrToHost") {
+      testWait<TestParams<UIntT, PtrType::DevicePtrToHost>, true>(testCase);
     }
 #if HT_AMD
     if constexpr (std::is_same_v<UIntT, uint64_t>) {
-      SECTION("Signal") { 
-        testWait<TestParams<UIntT, PtrType::Signal>, true>(testCase); 
+      SECTION("Signal") {
+        testWait<TestParams<UIntT, PtrType::Signal>, true>(testCase);
       }
     }
 #endif
@@ -454,20 +453,20 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipStreamValue_Wait_Blocking, uint32_t, uint64_t) {
 
   SECTION("Mask_And") {
     TestWaitType testCase(hipStreamWaitValueAnd, 0xFF, 0xF4A, 0xF35, 0X02);
-    
-    SECTION("HostPtr") { 
-      testWait<TestParams<UIntT, PtrType::HostPtr>, true>(testCase); 
+
+    SECTION("HostPtr") {
+      testWait<TestParams<UIntT, PtrType::HostPtr>, true>(testCase);
     }
-    SECTION("DevicePtr") { 
-      testWait<TestParams<UIntT, PtrType::DevicePtr>, true>(testCase); 
+    SECTION("DevicePtr") {
+      testWait<TestParams<UIntT, PtrType::DevicePtr>, true>(testCase);
     }
-    SECTION("DevicePtrToHost") { 
-      testWait<TestParams<UIntT, PtrType::DevicePtrToHost>, true>(testCase); 
+    SECTION("DevicePtrToHost") {
+      testWait<TestParams<UIntT, PtrType::DevicePtrToHost>, true>(testCase);
     }
 #if HT_AMD
     if constexpr (std::is_same_v<UIntT, uint64_t>) {
-      SECTION("Signal") { 
-        testWait<TestParams<UIntT, PtrType::Signal>, true>(testCase); 
+      SECTION("Signal") {
+        testWait<TestParams<UIntT, PtrType::Signal>, true>(testCase);
       }
     }
 #endif
@@ -477,20 +476,20 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipStreamValue_Wait_Blocking, uint32_t, uint64_t) {
     TestWaitType testCase = std::is_same_v<UIntT, uint32_t>
       ? TestWaitType(hipStreamWaitValueEq, 0x7FFFFFFF, 0x7FFF0000, 0x7FFFFFFF)
       : TestWaitType(hipStreamWaitValueEq, 0x7FFFFFFFFFFFFFFF, 0x7FFFFFFF0FFF0000, 0x7FFFFFFFFFFFFFFF);
-    
-    SECTION("HostPtr") { 
-      testWait<TestParams<UIntT, PtrType::HostPtr>, true>(testCase); 
+
+    SECTION("HostPtr") {
+      testWait<TestParams<UIntT, PtrType::HostPtr>, true>(testCase);
     }
-    SECTION("DevicePtr") { 
-      testWait<TestParams<UIntT, PtrType::DevicePtr>, true>(testCase); 
+    SECTION("DevicePtr") {
+      testWait<TestParams<UIntT, PtrType::DevicePtr>, true>(testCase);
     }
-    SECTION("DevicePtrToHost") { 
-      testWait<TestParams<UIntT, PtrType::DevicePtrToHost>, true>(testCase); 
+    SECTION("DevicePtrToHost") {
+      testWait<TestParams<UIntT, PtrType::DevicePtrToHost>, true>(testCase);
     }
 #if HT_AMD
     if constexpr (std::is_same_v<UIntT, uint64_t>) {
-      SECTION("Signal") { 
-        testWait<TestParams<UIntT, PtrType::Signal>, true>(testCase); 
+      SECTION("Signal") {
+        testWait<TestParams<UIntT, PtrType::Signal>, true>(testCase);
       }
     }
 #endif
@@ -500,20 +499,20 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipStreamValue_Wait_Blocking, uint32_t, uint64_t) {
     TestWaitType testCase = std::is_same_v<UIntT, uint32_t>
       ? TestWaitType(hipStreamWaitValueGte, 0x7FFF0001, 0x7FFF0000, 0x7FFF0010)
       : TestWaitType(hipStreamWaitValueGte, 0x7FFFFFFFFFFF0001, 0x7FFFFFFFFFFF0000, 0x7FFFFFFFFFFF0001);
-    
-    SECTION("HostPtr") { 
-      testWait<TestParams<UIntT, PtrType::HostPtr>, true>(testCase); 
+
+    SECTION("HostPtr") {
+      testWait<TestParams<UIntT, PtrType::HostPtr>, true>(testCase);
     }
-    SECTION("DevicePtr") { 
-      testWait<TestParams<UIntT, PtrType::DevicePtr>, true>(testCase); 
+    SECTION("DevicePtr") {
+      testWait<TestParams<UIntT, PtrType::DevicePtr>, true>(testCase);
     }
-    SECTION("DevicePtrToHost") { 
-      testWait<TestParams<UIntT, PtrType::DevicePtrToHost>, true>(testCase); 
+    SECTION("DevicePtrToHost") {
+      testWait<TestParams<UIntT, PtrType::DevicePtrToHost>, true>(testCase);
     }
 #if HT_AMD
     if constexpr (std::is_same_v<UIntT, uint64_t>) {
-      SECTION("Signal") { 
-        testWait<TestParams<UIntT, PtrType::Signal>, true>(testCase); 
+      SECTION("Signal") {
+        testWait<TestParams<UIntT, PtrType::Signal>, true>(testCase);
       }
     }
 #endif
@@ -523,20 +522,20 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipStreamValue_Wait_Blocking, uint32_t, uint64_t) {
     TestWaitType testCase = std::is_same_v<UIntT, uint32_t>
       ? TestWaitType(hipStreamWaitValueAnd, 0x70F0F0F0, 0x0F0F0F0F, 0X1F0F0F0F)
       : TestWaitType(hipStreamWaitValueAnd, 0x70F0F0F0F0F0F0F0, 0x0F0F0F0F0F0F0F0F, 0X1F0F0F0F0F0F0F0F);
-    
-    SECTION("HostPtr") { 
-      testWait<TestParams<UIntT, PtrType::HostPtr>, true>(testCase); 
+
+    SECTION("HostPtr") {
+      testWait<TestParams<UIntT, PtrType::HostPtr>, true>(testCase);
     }
-    SECTION("DevicePtr") { 
-      testWait<TestParams<UIntT, PtrType::DevicePtr>, true>(testCase); 
+    SECTION("DevicePtr") {
+      testWait<TestParams<UIntT, PtrType::DevicePtr>, true>(testCase);
     }
-    SECTION("DevicePtrToHost") { 
-      testWait<TestParams<UIntT, PtrType::DevicePtrToHost>, true>(testCase); 
+    SECTION("DevicePtrToHost") {
+      testWait<TestParams<UIntT, PtrType::DevicePtrToHost>, true>(testCase);
     }
 #if HT_AMD
     if constexpr (std::is_same_v<UIntT, uint64_t>) {
-      SECTION("Signal") { 
-        testWait<TestParams<UIntT, PtrType::Signal>, true>(testCase); 
+      SECTION("Signal") {
+        testWait<TestParams<UIntT, PtrType::Signal>, true>(testCase);
       }
     }
 #endif
@@ -546,20 +545,20 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipStreamValue_Wait_Blocking, uint32_t, uint64_t) {
     TestWaitType testCase = std::is_same_v<UIntT, uint32_t>
       ? TestWaitType(hipStreamWaitValueNor, 0x7AAAAAAA, 0x85555555, 0x9AAAAAAA)
       : TestWaitType(hipStreamWaitValueNor, 0x4724724747247247, 0xbddbddbdbddbddbd, 0xbddbddbdbddbddb3);
-    
-    SECTION("HostPtr") { 
-      testWait<TestParams<UIntT, PtrType::HostPtr>, true>(testCase); 
+
+    SECTION("HostPtr") {
+      testWait<TestParams<UIntT, PtrType::HostPtr>, true>(testCase);
     }
-    SECTION("DevicePtr") { 
-      testWait<TestParams<UIntT, PtrType::DevicePtr>, true>(testCase); 
+    SECTION("DevicePtr") {
+      testWait<TestParams<UIntT, PtrType::DevicePtr>, true>(testCase);
     }
-    SECTION("DevicePtrToHost") { 
-      testWait<TestParams<UIntT, PtrType::DevicePtrToHost>, true>(testCase); 
+    SECTION("DevicePtrToHost") {
+      testWait<TestParams<UIntT, PtrType::DevicePtrToHost>, true>(testCase);
     }
 #if HT_AMD
     if constexpr (std::is_same_v<UIntT, uint64_t>) {
-      SECTION("Signal") { 
-        testWait<TestParams<UIntT, PtrType::Signal>, true>(testCase); 
+      SECTION("Signal") {
+        testWait<TestParams<UIntT, PtrType::Signal>, true>(testCase);
       }
     }
 #endif

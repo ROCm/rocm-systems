@@ -21,7 +21,6 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 
 static __global__ void write_integer(int* memory, int value) { *memory = value; }
 

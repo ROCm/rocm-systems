@@ -18,7 +18,6 @@
  */
 #define HIP_TEMPLATE_KERNEL_LAUNCH
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 #include <stdio.h>
 #include <ratio>
 #include <chrono>

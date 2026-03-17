@@ -21,7 +21,6 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 #include <utils.hh>
 /*
  * These testcases verify that synchronous memset functions are asynchronous with respect to the

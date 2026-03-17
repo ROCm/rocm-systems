@@ -26,7 +26,6 @@
 
 
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 
 
 // Table with unique width/height and memset values.

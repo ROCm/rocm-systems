@@ -22,7 +22,6 @@ THE SOFTWARE.
 // set_value and get_value are defined.
 
 #include "MemUtils.hh"
-#include <hip_tests_config.hh>
 #include "memoryCommon.hh"
 using namespace mem_utils;
 

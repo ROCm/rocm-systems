@@ -41,4 +41,3 @@ HIP_TEST_CASE(Unit_hipSetDevice_CheckPrimaryCtxState) {
 
   REQUIRE(is_active == 1);
 }
-

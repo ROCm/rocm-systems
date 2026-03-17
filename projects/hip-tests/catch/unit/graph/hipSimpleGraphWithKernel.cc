@@ -23,7 +23,6 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 
 #define N 1024 * 1024
 #define NSTEP 1000

@@ -26,7 +26,6 @@ THE SOFTWARE.
  */
 
 #include <hip_test_kernels.hh>
-#include <hip_tests_config.hh>
 #include <atomic>
 #include <vector>
 #include "streamCommon.hh"  // NOLINT
@@ -724,6 +723,8 @@ template <typename T> void TestForMultipleStreamWithPriority(void) {
     if (enable_priority_low) {
       HIP_CHECK(hipMemcpy(dst_h_low[i], dst_d_low[i], size, hipMemcpyDeviceToHost));
       REQUIRE(memcmp(dst_h_low[i], src_h_low[i], size) == 0);
+      free(dst_h_low[i]);
+      free(src_h_low[i]);
     }
   }
   // sanity check for normal priority streams
@@ -731,6 +732,8 @@ template <typename T> void TestForMultipleStreamWithPriority(void) {
     if (enable_priority_normal) {
       HIP_CHECK(hipMemcpy(dst_h_normal[i], dst_d_normal[i], size, hipMemcpyDeviceToHost));
       REQUIRE(memcmp(dst_h_normal[i], src_h_normal[i], size) == 0);
+      free(dst_h_normal[i]);
+      free(src_h_normal[i]);
     }
   }
   // sanity check for high priority streams
@@ -738,6 +741,8 @@ template <typename T> void TestForMultipleStreamWithPriority(void) {
     if (enable_priority_high) {
       HIP_CHECK(hipMemcpy(dst_h_high[i], dst_d_high[i], size, hipMemcpyDeviceToHost));
       REQUIRE(memcmp(dst_h_high[i], src_h_high[i], size) == 0);
+      free(dst_h_high[i]);
+      free(src_h_high[i]);
     }
   }
 

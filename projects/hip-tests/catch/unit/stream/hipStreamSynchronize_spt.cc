@@ -17,7 +17,6 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 #include <hip_test_defgroups.hh>
 #include <utils.hh>
 #include "streamCommon.hh"

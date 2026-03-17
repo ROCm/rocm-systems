@@ -302,9 +302,9 @@ template <typename F> static void test_cg_grid_group_type(F kernel_func, int blo
     ASSERT_EQUAL(is_valid_host[i], 1);
     ASSERT_EQUAL(sync_host[i], 200);
     if(kernel_type != GridTypeTests::baseType){
-      ASSERT_EQUAL(group_dim_host[i].x, 2);           
-      ASSERT_EQUAL(group_dim_host[i].y, 1);          
-      ASSERT_EQUAL(group_dim_host[i].z, 1); 
+      ASSERT_EQUAL(group_dim_host[i].x, 2);
+      ASSERT_EQUAL(group_dim_host[i].y, 1);
+      ASSERT_EQUAL(group_dim_host[i].z, 1);
     }
   }
 

@@ -18,7 +18,6 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 #include <hip/hip_runtime_api.h>
 
 bool compare_arrays(int* arr1, int* arr2, int width, int height) {

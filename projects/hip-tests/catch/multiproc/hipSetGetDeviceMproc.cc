@@ -25,7 +25,6 @@
  */
 
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 
 #ifdef __linux__
 #include <sys/wait.h>

@@ -28,7 +28,6 @@
  */
 
 #include "hipMallocManagedCommon.hh"
-#include <hip_tests_config.hh>
 #include <hip_test_kernels.hh>
 #include <hip_test_checkers.hh>
 #include <atomic>
@@ -347,7 +346,8 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMallocManaged_TwoPointers, int,
 // to all other devices. This include verification and Device two Device
 // transfers and kernel launch o discover if there any access issues.
 
-HIP_TEMPLATE_TEST_CASE(Unit_hipMallocManaged_DeviceContextChange, unsigned char, int, float, double) {
+HIP_TEMPLATE_TEST_CASE(Unit_hipMallocManaged_DeviceContextChange,
+                   unsigned char, int, float, double) {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
     HipTest::HIP_SKIP_TEST("GPU doesn't support managed memory so skipping test.");

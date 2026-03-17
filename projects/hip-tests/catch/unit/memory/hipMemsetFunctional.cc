@@ -29,7 +29,6 @@
  *                   ensure the full range isn't affected.
  */
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 
 constexpr size_t FULL_DIM = 10;
 

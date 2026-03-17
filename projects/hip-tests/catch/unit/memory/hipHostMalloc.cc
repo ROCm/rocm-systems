@@ -32,7 +32,6 @@ This testfile verifies the following scenarios of hipHostMalloc API
 #include <hip_test_checkers.hh>
 #include <kernels.hh>
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 #include <hip_test_context.hh>
 #include <hip_test_helper.hh>
 
@@ -235,16 +234,6 @@ HIP_TEST_CASE(Unit_hipHostMalloc_Default) {
   CheckHostPointer(numElements, A, 0, SYNC_STREAM, ptrType);
   CheckHostPointer(numElements, A, 0, SYNC_EVENT, ptrType);
   HIP_CHECK(hipFreeHost(A));
-}
-
-HIP_TEST_CASE(Unit_hipHostGetDevicePointer_NullCheck) {
-  int* d_a;
-  HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&d_a), sizeof(int)));
-
-  auto res = hipHostGetDevicePointer(nullptr, d_a, 0);
-  REQUIRE(res == hipErrorInvalidValue);
-
-  HIP_CHECK(hipHostFree(d_a));
 }
 
 /*

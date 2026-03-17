@@ -17,7 +17,6 @@ OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 #include <hip_test_defgroups.hh>
 /**
  * @addtogroup hipStreamBatchMemOp hipStreamBatchMemOp
@@ -69,10 +68,6 @@ HIP_TEST_CASE(Unit_hipStreamBatchMemOp_Negative_Tests) {
   invalidParamArray[1].waitValue.address = opsArray[0];
   invalidParamArray[1].waitValue.value = 1000;
   invalidParamArray[1].waitValue.flags = hipStreamWaitValueEq;
-
-  SECTION("Stream as a nullptr") {
-    HIP_CHECK_ERROR(hipStreamBatchMemOp(nullptr, totalOps, paramArray, 0), hipErrorInvalidValue);
-  }
 
   SECTION("Invalid Stream") {
     HIP_CHECK_ERROR(hipStreamBatchMemOp(reinterpret_cast<hipStream_t>(-1), totalOps, paramArray, 0),

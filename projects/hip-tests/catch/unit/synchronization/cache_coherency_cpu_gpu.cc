@@ -20,7 +20,6 @@ THE SOFTWARE.
 
 #include <hip_test_kernels.hh>
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 
 // Helper function to spin on address until address equals value.
 // If the address holds the value of -1, abort because the other thread failed.

@@ -22,7 +22,6 @@ THE SOFTWARE.
 
 
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 #include <hip_array_common.hh>
 #include "hipArrayCommon.hh"
 #include "DriverContext.hh"
@@ -183,7 +182,7 @@ HIP_TEST_CASE(Unit_hipFreeNegativeHost) {
 #if (HT_AMD == 1) && (HT_LINUX == 1)
   SECTION("hipHostRegister AMD LINUX") {
     char* hostPtr = new char;
-    auto flag = GENERATE(hipHostRegisterDefault, hipHostRegisterPortable, hipHostRegisterMapped, 
+    auto flag = GENERATE(hipHostRegisterDefault, hipHostRegisterPortable, hipHostRegisterMapped,
                          hipHostRegisterIoMemory);
     HIP_CHECK(hipHostRegister((void*)hostPtr, sizeof(char), flag));
     HIP_CHECK_ERROR(hipHostFree(hostPtr), hipErrorInvalidValue);

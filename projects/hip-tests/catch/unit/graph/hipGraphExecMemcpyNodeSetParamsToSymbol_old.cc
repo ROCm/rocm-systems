@@ -40,7 +40,6 @@ code. 10) Check with other graph node but pass same graphExec, api expected to r
 */
 
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 #include <hip_test_checkers.hh>
 #include <limits>
 #define SIZE 256

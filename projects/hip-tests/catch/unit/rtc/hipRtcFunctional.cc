@@ -26,7 +26,6 @@ THE SOFTWARE.
  * hipRTC should be able to compile kernels using  __forceinline__ keyword
  */
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 
 #include <hip/hiprtc.h>
 #include <hip/hip_runtime.h>

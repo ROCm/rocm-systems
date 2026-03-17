@@ -25,7 +25,6 @@ different stream with hipStreamWaitEvent api
 */
 
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 #include <utils.hh>
 HIP_TEST_CASE(Unit_hipStreamWaitEvent_Negative) {
   enum class StreamTestType { NullStream = 0, StreamPerThread, CreatedStream };

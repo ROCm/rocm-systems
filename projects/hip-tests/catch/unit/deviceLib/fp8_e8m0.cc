@@ -21,7 +21,6 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 #include <hip/hip_fp8.h>
 #include <cmath>
 #include <limits>
@@ -362,4 +361,3 @@ HIP_TEST_CASE(Unit__hip_cvt_e8m0_to_bf16raw) {
     }
   }
 }
-

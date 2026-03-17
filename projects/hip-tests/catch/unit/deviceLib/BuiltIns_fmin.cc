@@ -30,7 +30,6 @@ This testfile verifies Built fmin API scenarios
 
 #include <hip_test_checkers.hh>
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 #include <hip/hiprtc.h>
 
 #define INITIAL_VAL 5
@@ -52,7 +51,7 @@ static constexpr auto fminGlobalMem{
 extern "C"
 __global__ void unsafeAtomicMin_GlobalMem(double* addr, double* result) {
   double comp = 10;
-  *result = unsafeAtomicMin(addr, comp);   
+  *result = unsafeAtomicMin(addr, comp);
 }
 )"};
 

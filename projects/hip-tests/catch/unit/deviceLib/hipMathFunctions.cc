@@ -25,7 +25,6 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
-#include <hip_tests_config.hh>
 
 __global__ void kernel_abs_int64(long long* input, long long* output) {  // NOLINT
   int tx = threadIdx.x;
