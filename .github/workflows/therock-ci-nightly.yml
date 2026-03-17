@@ -99,6 +99,7 @@ jobs:
     with:
       cmake_options: ${{ matrix.projects.cmake_options }}
       projects_to_test: ${{ matrix.projects.projects_to_test }}
+      run_functional_tests: true
 
   therock-rccl-ci-linux:
     name: TheRock RCCL CI Linux
@@ -140,3 +141,4 @@ jobs:
     with:
       cmake_options: ${{ matrix.projects.cmake_options }}
       projects_to_test: ${{ matrix.projects.projects_to_test }}
+      run_functional_tests: true

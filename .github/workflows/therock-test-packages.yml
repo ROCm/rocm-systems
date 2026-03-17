@@ -17,6 +17,12 @@ on:
       sanity_check_only_for_family:
         type: boolean
         default: false
+      run_functional_tests:
+        type: boolean
+        default: false
+      benchmark_mode:
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -61,6 +67,8 @@ jobs:
         env:
           PROJECTS_TO_TEST: ${{ inputs.projects_to_test }}
           AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
+          RUN_FUNCTIONAL_TESTS: ${{ inputs.run_functional_tests }}
+          IS_BENCHMARK_WORKFLOW: ${{ inputs.benchmark_mode == true && 'true' || '' }}
         id: configure
         run: python ./build_tools/github_actions/fetch_test_configurations.py
 

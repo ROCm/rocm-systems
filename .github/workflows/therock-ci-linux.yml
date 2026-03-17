@@ -7,6 +7,15 @@ on:
         type: string
       projects_to_test:
         type: string
+      test_runs_on:
+        type: string
+        default: ""
+      run_functional_tests:
+        type: boolean
+        default: false
+      benchmark_runs_on:
+        type: string
+        default: ""
 
 
 permissions:
@@ -123,5 +132,23 @@ jobs:
       projects_to_test: ${{ inputs.projects_to_test }}
       amdgpu_families: "gfx94X-dcgpu"
       # Due to migrating MI325s, we have lost capacity as of 3/13/2026 11:41am PST
-      test_runs_on: ""
+      test_runs_on: ${{ inputs.test_runs_on }}
       platform: "linux"
+      run_functional_tests: ${{ inputs.run_functional_tests }}
+
+  therock-benchmark-linux:
+    name: "Benchmark"
+    needs: [therock-build-linux]
+    if: >-
+      ${{
+        !failure() &&
+        !cancelled() &&
+        inputs.benchmark_runs_on != ''
+      }}
+    uses: ./.github/workflows/therock-test-packages.yml
+    with:
+      projects_to_test: ${{ inputs.projects_to_test }}
+      amdgpu_families: "gfx94X-dcgpu"
+      test_runs_on: ${{ inputs.benchmark_runs_on }}
+      platform: "linux"
+      benchmark_mode: true

@@ -7,6 +7,15 @@ on:
         type: string
       projects_to_test:
         type: string
+      test_runs_on:
+        type: string
+        default: "windows-gfx1151-gpu-rocm"
+      run_functional_tests:
+        type: boolean
+        default: false
+      benchmark_runs_on:
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -150,5 +159,23 @@ jobs:
     with:
       projects_to_test: ${{ inputs.projects_to_test }}
       amdgpu_families: ${{ needs.therock-build-windows.outputs.AMDGPU_FAMILIES }}
-      test_runs_on: "windows-gfx1151-gpu-rocm"
+      test_runs_on: ${{ inputs.test_runs_on }}
       platform: "windows"
+      run_functional_tests: ${{ inputs.run_functional_tests }}
+
+  therock-benchmark-windows:
+    name: "Benchmark"
+    needs: [therock-build-windows]
+    if: >-
+      ${{
+        !failure() &&
+        !cancelled() &&
+        inputs.benchmark_runs_on != ''
+      }}
+    uses: ./.github/workflows/therock-test-packages.yml
+    with:
+      projects_to_test: ${{ inputs.projects_to_test }}
+      amdgpu_families: ${{ needs.therock-build-windows.outputs.AMDGPU_FAMILIES }}
+      test_runs_on: ${{ inputs.benchmark_runs_on }}
+      platform: "windows"
+      benchmark_mode: true
