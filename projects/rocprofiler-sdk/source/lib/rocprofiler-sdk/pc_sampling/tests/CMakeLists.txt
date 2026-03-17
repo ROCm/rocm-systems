@@ -23,7 +23,7 @@ rocprofiler_add_unit_test(
     TARGET pcs-test
     SOURCES ${ROCPROFILER_LIB_PC_SAMPLING_TEST_SOURCES}
     TIMEOUT 45
-    LABELS "unittests;pc-sampling"
+    LABELS "unittests;pc-sampling;multi-gpu"
     SKIP_REGULAR_EXPRESSION "PC sampling unavailable"
     ENVIRONMENT
         "LD_LIBRARY_PATH=${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:/opt/rocm/lib:/opt/rocm/llvm/lib:$ENV{LD_LIBRARY_PATH}"
