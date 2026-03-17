@@ -529,7 +529,7 @@ class TestExecutor:
                 map_by_arg = ""
 
             # MCA params priority: --system profile lookup > test-level "mpi_args" string > default
-            default_mca = "--mca btl ^openib --mca pml ucx --bind-to none"
+            default_mca = "--mca btl ^vader,openib --mca pml ucx --bind-to none"
             system = getattr(self.args, 'system', '') or ''
             mpi_args_config = self.config_processor.config.get("mpi_args", {})
 
@@ -537,8 +537,6 @@ class TestExecutor:
                 if isinstance(mpi_args_config, dict) and system in mpi_args_config:
                     mca_params = mpi_args_config[system]
                 else:
-                    available = list(mpi_args_config.keys()) if isinstance(mpi_args_config, dict) else []
-                    print(f"ERROR: Unknown system profile '{system}'. Available: {available}")
                     mca_params = default_mca
             elif isinstance(mpi_args_config, str) and mpi_args_config:
                 mca_params = mpi_args_config
