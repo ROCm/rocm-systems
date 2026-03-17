@@ -501,13 +501,16 @@ class TestExecutor:
                 # Single node: use default mapping (no need for ppr)
                 map_by_arg = ""
 
+            # MCA params: use config-level "mpi_args" if provided, otherwise defaults
+            default_mca = "--mca btl ^vader,openib --mca pml ucx --bind-to none"
+            extra_mpi_args = test_config.get("mpi_args", "") or self.config_processor.config.get("mpi_args", "")
+            mca_params = extra_mpi_args if extra_mpi_args else default_mca
+
             mpi_args = (
                 f"-np {num_ranks} "
                 f"{hostfile_arg}"
                 f"{map_by_arg}"
-                f"--mca btl ^vader,openib "
-                f"--mca pml ucx "
-                f"--bind-to none"
+                f"{mca_params}"
             )
 
             # Add environment variables for MPI
