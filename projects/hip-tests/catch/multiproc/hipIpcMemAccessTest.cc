@@ -77,7 +77,7 @@ typedef struct mem_handle {
  *  - Host specific (LINUX)
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipIpcMemAccess_Semaphores) {
+HIP_TEST_CASE(Unit_hipIpcMemAccess_Semaphores) {
   hip_ipc_t* shrd_mem = NULL;
   pid_t pid;
   size_t N = 1024;
@@ -211,7 +211,7 @@ TEST_CASE(Unit_hipIpcMemAccess_Semaphores) {
  *  - Host specific (LINUX)
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipIpcMemAccess_ParameterValidation) {
+HIP_TEST_CASE(Unit_hipIpcMemAccess_ParameterValidation) {
   hipIpcMemHandle_t MemHandle;
   hipIpcMemHandle_t MemHandleUninit;
   void *Ad{}, *Ad2{};

@@ -147,7 +147,7 @@ void checkMemset(T value, size_t count, MemsetType memsetType, bool async = fals
   }
 }
 
-// Macro which defines a TEST_CASE which calls and then checks the result of the 1D memset macros
+// Macro which defines a HIP_TEST_CASE which calls and then checks the result of the 1D memset macros
 // for all combinations of sync/async and hipMalloc/hipHostMalloc, given the value and memory range.
 #define DEFINE_1D_BASIC_TEST(suffix, memsetType, T, value, count)                                  \
   HIP_TEST_CASE(Unit_hipMemsetFunctional_##suffix) {                                               \

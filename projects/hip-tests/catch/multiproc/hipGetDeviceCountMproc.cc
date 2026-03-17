@@ -34,7 +34,7 @@ THE SOFTWARE.
 /**
  * Validate behavior of hipGetDeviceCount for masked devices.
  */
-TEST_CASE(Unit_hipGetDeviceCount_MaskedDevices) {
+HIP_TEST_CASE(Unit_hipGetDeviceCount_MaskedDevices) {
   int numDevices = 0;
   char visibleDeviceString[MAX_SIZE] = {};
   snprintf(visibleDeviceString, MAX_SIZE, "%d", VISIBLE_DEVICE);
