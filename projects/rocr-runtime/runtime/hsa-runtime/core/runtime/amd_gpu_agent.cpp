@@ -1282,7 +1282,7 @@ hsa_status_t GpuAgent::DmaPreferredEngine(core::Agent& dst_agent, core::Agent& s
         dst_agent.device_type() == core::Agent::kAmdCpuDevice))) {
 
     if (src_agent.device_type() == core::Agent::kAmdCpuDevice) {
-      // Host to Device: Use SDMA engine 0 if available
+      // Host to Device: Use SDMA engine 1 if available
       *recommended_ids_mask = HSA_AMD_SDMA_ENGINE_1;
     } else {
       // Device to Host: Use SDMA engines 1 and 2 if available
