@@ -241,6 +241,8 @@ class GraphNode : public hipGraphNodeDOTAttribute {
     dev_id_ = node.dev_id_;
   }
 
+  int32_t Zid = -1;
+
   virtual ~GraphNode() {
     for (auto node : edges_) {
       node->RemoveDependency(this);
@@ -464,6 +466,24 @@ class GraphNode : public hipGraphNodeDOTAttribute {
 
     auto label = GetLabel(flag),
          color = GetColorAndShortenLabel(&label);
+
+         if (Zid == 0) {
+          color = "red";
+        } else if (Zid == 1) {
+          color = "green";
+        } else if (Zid == 2) {
+          color = "blue";
+        } else if (Zid == 3) {
+          color = "yellow";
+        } else if (Zid == 4) {
+          color = "purple";
+        } else if (Zid == 5) {
+          color = "orange";
+        } else if (Zid == 6) {
+          color = "brown";
+        } else if (Zid == 7) {
+          color = "gray";
+        } 
 
     out << "[";
     out << "style=\"" << style_ << "\"";
@@ -710,12 +730,15 @@ class Graph {
     const std::vector<hip::Stream*>& parallel_stream  //!< The list of parallel streams
   );
 
+  int32_t waits_count_ = 0;
   //! Runs one node on the assigned stream
   bool RunOneNode(Node node);
 
   bool RunOneNodeRec(Node top_node, bool top_wait);
 
   bool PathDecomposition();
+
+  std::vector<std::vector<Node>> MinPathCoverBiased();
 
   //! Runs all nodes from the execution graph on the assigned streams
   bool RunNodes(
@@ -1046,6 +1069,24 @@ class GraphKernelNode : public GraphNode {
 
     auto label = GetLabel(flag),
          color = GetColorAndShortenLabel(&label);
+
+    if (Zid == 0) {
+      color = "red";
+    } else if (Zid == 1) {
+      color = "green";
+    } else if (Zid == 2) {
+      color = "blue";
+    } else if (Zid == 3) {
+      color = "yellow";
+    } else if (Zid == 4) {
+      color = "purple";
+    } else if (Zid == 5) {
+      color = "orange";
+    } else if (Zid == 6) {
+      color = "brown";
+    } else if (Zid == 7) {
+      color = "gray";
+    } 
 
     out << "[";
     out << "style";

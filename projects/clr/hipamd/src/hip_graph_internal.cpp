@@ -532,6 +532,7 @@ bool Graph::RunOneNodeRec(Node node, bool wait) {
           // since the same stream has in-order run
               (wait_order_[depNode->stream_id_]->launch_id_ < depNode->launch_id_)) {
             wait_order_[depNode->stream_id_] = depNode;
+            waits_count_++;
           }
         }
       } else {
@@ -621,6 +622,7 @@ bool Graph::RunOneNode(Node node) {
             // since the same stream has in-order run
             (wait_order_[depNode->stream_id_]->launch_id_ < depNode->launch_id_)) {
           wait_order_[depNode->stream_id_] = depNode;
+          waits_count_++;
         }
       } else {
         // Release nodes that were enqueued on the same stream, since they are not included in the
@@ -717,99 +719,256 @@ bool Graph::RunOneNode(Node node) {
 }
 #endif // USE_RECURSIVE_LAUNCH
 
+std::vector<int> ComputeCP(Graph& g) {
+  const auto& topo = g.GetTopoOrder();
+  std::unordered_map<Node, int> cp;
+
+  for (auto it = topo.rbegin(); it != topo.rend(); ++it) {
+      Node u = *it;
+      int best = 0;
+      for (Node v : u->GetEdges()) {
+          best = std::max(best, cp[v]);
+      }
+      cp[u] = 1 + best;
+  }
+
+  std::vector<int> result;
+  const auto& nodes = g.GetNodes();
+  for (Node n : nodes) {
+    // XPUT("CP[%s]: %d", n->Xstring().c_str(), cp[n]);
+    result.push_back(cp[n]);
+  }
+  return result;
+}
+
+struct BipartiteMatcher {
+  int n;
+  std::vector<std::vector<int>> adj;
+  std::vector<int> dist, matchL, matchR;
+
+  BipartiteMatcher(int n) : n(n), adj(n), dist(n), matchL(n, -1), matchR(n, -1) {}
+
+  void addEdge(int u, int v) {
+      adj[u].push_back(v);
+  }
+
+  bool bfs() {
+      std::queue<int> q;
+      for (int i = 0; i < n; i++) {
+          if (matchL[i] == -1) {
+              dist[i] = 0;
+              q.push(i);
+          } else {
+              dist[i] = -1;
+          }
+      }
+
+      bool found = false;
+      while (!q.empty()) {
+          int u = q.front(); q.pop();
+          for (int v : adj[u]) {
+              int nxt = matchR[v];
+              if (nxt >= 0 && dist[nxt] < 0) {
+                  dist[nxt] = dist[u] + 1;
+                  q.push(nxt);
+              }
+              if (nxt == -1) found = true;
+          }
+      }
+      return found;
+  }
+
+  bool dfs(int u) {
+      for (int v : adj[u]) {
+          int nxt = matchR[v];
+          if (nxt < 0 || (dist[nxt] == dist[u] + 1 && dfs(nxt))) {
+              matchL[u] = v;
+              matchR[v] = u;
+              return true;
+          }
+      }
+      dist[u] = -1;
+      return false;
+  }
+
+  int maxMatching() {
+      int result = 0;
+      while (bfs()) {
+          for (int i = 0; i < n; i++) {
+              if (matchL[i] == -1 && dfs(i)) {
+                  result++;
+              }
+          }
+      }
+      return result;
+  }
+};
+
+std::vector<std::vector<Node>> Graph::MinPathCoverBiased() {
+  const auto& nodes = GetNodes();
+  int n = nodes.size();
+
+  std::unordered_map<Node, int> id;
+  for (int i = 0; i < n; i++) id[nodes[i]] = i;
+
+  auto cp = ComputeCP(*this);
+
+  BipartiteMatcher matcher(n);
+
+  // Build edges with sorting
+  for (int u = 0; u < n; u++) {
+      auto edges = nodes[u]->GetEdges();
+
+      
+      std::sort(edges.begin(), edges.end(), [&](Node a, Node b) {
+        int ia = id[a];
+        int ib = id[b];
+        float alpha = 0.8f, beta = 0.4f, gamma = 0.2f;
+        float scoreA = alpha * cp[ia] + 
+              beta * a->GetOutDegree() - gamma * a->GetInDegree();
+        float scoreB = alpha * cp[ib] + 
+              beta * b->GetOutDegree() - gamma * b->GetInDegree();
+    
+        return scoreA > scoreB;
+      });
+
+      for (Node vNode : edges) {
+          matcher.addEdge(u, id[vNode]);
+      }
+  }
+
+  matcher.maxMatching();
+
+  // Same reconstruction as before
+  std::vector<bool> hasIncoming(n, false);
+  for (int v = 0; v < n; v++) {
+      if (matcher.matchR[v] != -1) {
+          hasIncoming[v] = true;
+      }
+  }
+
+  std::vector<std::vector<Node>> paths;
+
+  for (int i = 0; i < n; i++) {
+      if (!hasIncoming[i]) {
+          std::vector<Node> path;
+          int u = i;
+
+          while (u != -1) {
+              path.push_back(nodes[u]);
+              int next = matcher.matchL[u];
+              u = next;
+          }
+
+          paths.push_back(path);
+      }
+  }
+
+  int total_nodes = 0, I = 0;
+  for (auto path : paths) {
+    total_nodes += path.size();
+    XPUT("%d: Path: sz %zu", I, path.size());
+    for (auto node : path) {
+      node->Zid = I % 8;
+    }
+    I++;
+  }
+  XPUT("Total nodes: %d vs %zu", total_nodes, nodes.size());
+
+  return paths;
+}
+
 // Path Decomposition: assign each node to a unique path starting from roots, printing all such paths, sorted by length
 bool Graph::PathDecomposition() {
-  // Get topological order of nodes in the graph
-  auto topo_order = GetTopoOrder();
-
-  // Mapping from Node to index in topo_order for fast lookup
-  std::unordered_map<Node, int> node_to_idx;
-  for (size_t i = 0; i < topo_order.size(); ++i) {
-    node_to_idx[topo_order[i]] = static_cast<int>(i);
-  }
-
-  // Track assigned nodes
-  std::unordered_set<Node> assigned;
-
-  // Identify root nodes (those with no dependencies)
-  std::vector<Node> roots;
+  const auto& topo_order = GetTopoOrder();
+  std::unordered_map<Node, std::pair<int, int>> depth_map;
+  int idx = 0;
   for (auto node : topo_order) {
-    if (node->GetDependencies().empty()) {
-      roots.push_back(node);
-    }
+    depth_map[node] = {0, idx++};
   }
+  for (auto it = topo_order.crbegin(); it != topo_order.crend(); ++it) {
+    auto deps = (*it)->GetEdges();
+    int max_depth = -1;
+    for (auto dep : deps) {
+      max_depth = std::max(max_depth, depth_map[dep].first);
+      // XPUT("%d -> %d, max_depth: %d", (*it)->GetID(), dep->GetID(), max_depth);
+    }
+    // this will stay 0 if the node has no dependencies
+    depth_map[*it].first = max_depth + 1;
+    // XPUT("%d: final depth: %d", (*it)->GetID(), depth_map[*it]);
+  }
+  auto xnodes = topo_order;
+  std::sort(xnodes.begin(), xnodes.end(), [&](const Node& a, const Node& b) {
+    auto da = depth_map[a], db = depth_map[b];
+    return da.first > db.first || (da.first == db.first && da.second < db.second);
+  });
+  // for (auto node : xnodes) {
+  //   XPUT("%s: final sorted depth: %d", node->Xstring().c_str(), depth_map[node].first);
+  // }
 
-  // Vector for all paths
-  std::vector<std::vector<Node>> all_paths;
-
-  // Path decomposition starting from each root
-  for (auto root : roots) {
-    Node current = root;
+  std::unordered_set<Node> unused;
+  for (auto node : xnodes) {
+    unused.insert(node);
+  }
+  std::vector<std::vector<Node>> paths;
+  for (auto node : xnodes) {
+    if (unused.find(node) == unused.end()) {
+      continue;
+    }
     std::vector<Node> path;
-    while (current && assigned.find(current) == assigned.end()) {
-      path.push_back(current);
-      assigned.insert(current);
-      // Find next child (edge) that is unassigned, and is earliest in topo order
-      Node next = nullptr;
-      for (auto child : current->GetEdges()) {
-        if (assigned.find(child) == assigned.end()) {
-          if (!next || node_to_idx[child] < node_to_idx[next]) {
-            next = child;
-          }
+    auto cur = node;
+    while (unused.find(cur) != unused.end()) {
+      path.push_back(cur);
+      unused.erase(cur);
+      for (auto e : cur->GetEdges()) {
+        if (unused.find(e) != unused.end() && depth_map[e].first == depth_map[cur].first - 1) {
+          cur = e;
+          break;
         }
       }
-      current = next;
     }
-    if (!path.empty()) {
-      all_paths.push_back(path);
-    }
+    paths.push_back(path);
   }
-
-  // Cover any orphaned/uncovered nodes
-  for (auto node : topo_order) {
-    if (assigned.find(node) == assigned.end()) {
-      std::vector<Node> path;
-      Node current = node;
-      while (current && assigned.find(current) == assigned.end()) {
-        path.push_back(current);
-        assigned.insert(current);
-        Node next = nullptr;
-        for (auto child : current->GetEdges()) {
-          if (assigned.find(child) == assigned.end()) {
-            if (!next || node_to_idx[child] < node_to_idx[next]) {
-              next = child;
-            }
-          }
-        }
-        current = next;
-      }
-      if (!path.empty()) {
-        all_paths.push_back(path);
-      }
-    }
-  }
-
-  // Sort paths by descending length (longest first)
-  std::sort(all_paths.begin(), all_paths.end(),
-            [](const std::vector<Node>& a, const std::vector<Node>& b) {
-              return a.size() > b.size();
-            });
-
-  // Print out the paths using XPUT
-  XPUT("Graph Path Decomposition:\n");
-  int pathid = 0;
-  for (const auto& path : all_paths) {
-    std::stringstream ss;
-    ss << "Path " << pathid++ << " (length = " << path.size() << "):";
+  int total_nodes = 0, I = 0;
+  for (auto path : paths) {
+    total_nodes += path.size();
+    // XPUT("Path: sz %zu", path.size());
     for (auto node : path) {
-      ss << " " << node->Xstring();
+      node->Zid = I;
     }
-    ss << "\n";
-    XPUT("%s", ss.str().c_str());
+    I++;
   }
+  XPUT("Total nodes: %d vs %zu", total_nodes, xnodes.size());
+  return true;
 
-  // Return true if all nodes assigned
-  return assigned.size() == topo_order.size();
+#if 0
+for u in nodes:
+        if u not in unused:
+            continue
+
+        path = []
+        current = u
+
+        while current in unused:
+            path.append(current)
+            unused.remove(current)
+
+            # Find next node in longest path chain
+            next_nodes = [
+                v for v in graph[current]
+                if v in unused and dp[v] == dp[current] - 1
+            ]
+
+            if not next_nodes:
+                break
+
+            # choose any (they are equal-length options)
+            current = next_nodes[0]
+
+        paths.append(path)
+
+    return paths
+#endif
 }
 
 // ================================================================================================
@@ -855,23 +1014,27 @@ bool Graph::RunNodes(
     last_command->release();
   }
 
-  //PathDecomposition();
+  // PathDecomposition();
+  MinPathCoverBiased();
 
   // Run all commands in the graph
-#if USE_RECURSIVE_LAUNCH
-for (auto node : GetNodes()) node->launch_id_ = -1;
+  waits_count_ = 0;
+  #if USE_RECURSIVE_LAUNCH
+  for (auto node : GetNodes()) node->launch_id_ = -1;
   for (auto node : GetNodes()) {
     if (node->launch_id_ == -1) {
       // XPUT("RunOneNodeDFS node %s", node->Xstring().c_str());
       if (!RunOneNodeRec(node, true)) return false;
     }
   }
-#else 
+#else
   for (auto node : GetTopoOrder()) {
     node->launch_id_ = -1;
     if (!RunOneNode(node)) return false;
   }
 #endif
+  XPUT("%p: waits_count_: %d", this, waits_count_);
+  
   wait_list.clear();
   // Check if the graph has multiple leaf nodes
   for (uint32_t i = 0; i < DEBUG_HIP_FORCE_GRAPH_QUEUES; ++i) {
