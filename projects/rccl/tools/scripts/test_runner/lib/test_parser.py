@@ -32,6 +32,9 @@ Examples:
   # Skip build and use existing build
   %(prog)s -c test_config.json --no-build
 
+  # Use a custom build directory
+  %(prog)s -c test_config.json --build-dir /tmp/my_rccl_build
+
   # Generate coverage report from existing data
   %(prog)s -c test_config.json --no-build --skip-tests --coverage-report
             """
@@ -76,9 +79,9 @@ Examples:
             help="Generate code coverage report from profraw files"
         )
         self.parser.add_argument(
-            '--overwrite',
-            action='store_true',
-            help="Overwrite previous build/log directories (default: append timestamp)"
+            '--build-dir',
+            type=str,
+            help="Custom build directory path (default: <workdir>/build/debug or build/release)"
         )
         self.parser.add_argument(
             '--report-suffix',
@@ -111,7 +114,7 @@ Examples:
             print(f"No build:          {args.no_build}")
             print(f"Skip tests:        {args.skip_tests}")
             print(f"Coverage report:   {args.coverage_report}")
-            print(f"Overwrite:         {args.overwrite}")
+            print(f"Build dir:         {args.build_dir if args.build_dir else 'default'}")
             print(f"Report suffix:     {args.report_suffix}")
             print("="*80)
             print()

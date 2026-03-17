@@ -1,22 +1,8 @@
-/* Copyright (c) 2008 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "top.hpp"
 #include "device/appprofile.hpp"
@@ -350,7 +336,7 @@ int32_t Program::link(const std::vector<Device*>& devices, size_t numInputs,
 
     const device::Program::kernels_t& kernels = program.kernels();
     for (const auto& it : kernels) {
-      const std::string& name = it.first;
+      const std::string_view name = it.first;
       const device::Kernel* devKernel = it.second;
 
       Symbol& symbol = (*symbolTable_)[name];
@@ -494,7 +480,7 @@ int32_t Program::build(const std::vector<Device*>& devices, const char* options,
 
       const device::Program::kernels_t& kernels = program.kernels();
       for (const auto& kit : kernels) {
-        const std::string& name = kit.first;
+        const std::string_view name = kit.first;
         const device::Kernel* devKernel = kit.second;
 
         Symbol& symbol = (*symbolTable_)[name];
@@ -555,7 +541,7 @@ const std::string& Program::kernelNames() {
       if (it != symbols().cbegin()) {
         kernelNames_.append(1, ';');
       }
-      kernelNames_.append(it->first.c_str());
+      kernelNames_.append(it->first);
     }
   }
   return kernelNames_;

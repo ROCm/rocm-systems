@@ -46,6 +46,7 @@
 #include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
 #include "rocshmem/rocshmem.hpp"
 #include "backend_bc.hpp"
+#include "constmem.hpp"
 #include "context_incl.hpp"
 #include "team.hpp"
 #include "templates.hpp"
@@ -78,11 +79,13 @@ __attribute__((visibility("default"))) ROCSHMEM_CTX_DEFAULT{};
 
 __constant__ Backend *device_backend_proxy;
 
+__constant__ constmem_t constmem;
+
 __constant__ rocshmem_ctx_t ROCSHMEM_CTX_INVALID = {nullptr, nullptr};
 
 namespace device {
-    __constant__ rocshmem_team_t
-    __attribute__((visibility("default"))) ROCSHMEM_TEAM_WORLD;
+    extern "C" __constant__ rocshmem_team_t
+    __attribute__((visibility("default"))) ROCSHMEM_TEAM_WORLD = nullptr;
 }
 
 #if defined(ENABLE_IPC_BITCODE)
