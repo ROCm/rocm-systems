@@ -1,21 +1,9 @@
 /*
-Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 #include <hip_test_common.hh>
 #include <hip_test_checkers.hh>
 #include <hip_test_defgroups.hh>
@@ -114,7 +102,7 @@ void hipUserObjectCreate_int_float_Objects(T* hostArr, T* devArr, void destroyOb
  * ------------------------
  * - HIP_VERSION >= 6.3
  */
-TEST_CASE("Unit_hipGraphUserObj_Int_float_Objects") {
+TEST_CASE(Unit_hipGraphUserObj_Int_float_Objects) {
   SECTION("Called with Int Obj") {
     std::thread t1(threadFunc_dltMemory);
     int* hostArr = nullptr;
@@ -162,7 +150,7 @@ void destroyHostRegObj(void* ptr) {
  * ------------------------
  * - HIP_VERSION >= 6.3
  */
-TEST_CASE("Unit_hipGraphUserObj_HostRegister") {
+TEST_CASE(Unit_hipGraphUserObj_HostRegister) {
   int clockrate = 0;
   HIP_CHECK(hipDeviceGetAttribute(&clockrate, hipDeviceAttributeMemoryClockRate, 0));
   int* A_h = new int();
@@ -249,7 +237,7 @@ template <typename T> void hipUserObjectCreate_Struct_Class_Objects(T* Obj_h, T*
  * ------------------------
  * - HIP_VERSION >= 6.3
  */
-TEST_CASE("Unit_hipGraphUserObj_Struct_Class_Ojects") {
+TEST_CASE(Unit_hipGraphUserObj_Struct_Class_Ojects) {
   SECTION("Called with Struct Object") {
     std::thread t1(threadFunc_dltMemory);
     BoxStruct* structObj_h;
@@ -291,7 +279,7 @@ TEST_CASE("Unit_hipGraphUserObj_Struct_Class_Ojects") {
  * ------------------------
  * - HIP_VERSION >= 6.3
  */
-TEST_CASE("Unit_hipGraphUserObj_ClonedGraph") {
+TEST_CASE(Unit_hipGraphUserObj_ClonedGraph) {
   int clockrate = 0;
   HIP_CHECK(hipDeviceGetAttribute(&clockrate, hipDeviceAttributeMemoryClockRate, 0));
   std::thread t1(threadFunc_dltMemory);
@@ -362,7 +350,7 @@ __global__ void ManualGraphKernelFn(int* Ad, int clockrate, int WaitSecs) {
  * ------------------------
  * - HIP_VERSION >= 6.3
  */
-TEST_CASE("Unit_hipGraphUserObj_ManualGraph") {
+TEST_CASE(Unit_hipGraphUserObj_ManualGraph) {
   int clockrate = 0;
   HIP_CHECK(hipDeviceGetAttribute(&clockrate, hipDeviceAttributeMemoryClockRate, 0));
   std::thread t1(threadFunc_dltMemory);

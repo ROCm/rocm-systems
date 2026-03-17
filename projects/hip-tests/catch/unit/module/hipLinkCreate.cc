@@ -1,23 +1,8 @@
 /*
-Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip_test_common.hh>
 #include <hip/hip_runtime_api.h>
@@ -101,7 +86,7 @@ static inline void JitLink(hipModule_t *Module, hipFunction_t *Kernel, hipLinkSt
  * ------------------------
  *  - HIP_VERSION >= 6.4
  */
-TEST_CASE("Unit_hip_linker_spirv_input") {
+TEST_CASE(Unit_hip_linker_spirv_input) {
     size_t N = ARRAY_SIZE;
     size_t sizeBytes = N * sizeof(int);
     int *A_h = new int[sizeBytes];
@@ -165,7 +150,7 @@ TEST_CASE("Unit_hip_linker_spirv_input") {
  * ------------------------
  *  - HIP_VERSION >= 6.4
  */
-TEST_CASE("Unit_hipLinkCreate_Negative") {
+TEST_CASE(Unit_hipLinkCreate_Negative) {
 
     hipLinkState_t linkstate;
     hipJitOption options[4];
@@ -199,7 +184,7 @@ TEST_CASE("Unit_hipLinkCreate_Negative") {
  * ------------------------
  *  - HIP_VERSION >= 6.4
  */
-TEST_CASE("Unit_hipLinkCreate_AddLinker_CUDA_only_options") {
+TEST_CASE(Unit_hipLinkCreate_AddLinker_CUDA_only_options) {
   hipLinkState_t linkstate;
   // Random options so that it is not null
   const char* isaopts[] = {"-mllvm", "-inline-threshold=1", "-mllvm", "-inlinehint-threshold=1"};
@@ -254,7 +239,7 @@ TEST_CASE("Unit_hipLinkCreate_AddLinker_CUDA_only_options") {
  * ------------------------
  *  - HIP_VERSION >= 6.4
  */
-TEST_CASE("Unit_hipLinkAddFile_Negative") {
+TEST_CASE(Unit_hipLinkAddFile_Negative) {
     hipLinkState_t linkstate;
     HIP_CHECK(hipLinkCreate(0, nullptr, nullptr, &linkstate));
 

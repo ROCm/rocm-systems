@@ -42,10 +42,10 @@ class DeviceVar {
 
 class DeviceFunc {
  public:
-  DeviceFunc(std::string name, hipModule_t hmod);
+  DeviceFunc(const std::string &name, hipModule_t hmod);
   ~DeviceFunc();
 
-  amd::Monitor dflock_;
+  std::recursive_mutex dflock_;
 
   // Converts DeviceFunc to hipFunction_t(used by app) and vice versa.
   hipFunction_t asHipFunction() { return reinterpret_cast<hipFunction_t>(this); }
@@ -53,11 +53,10 @@ class DeviceFunc {
   static DeviceFunc* asFunction(hipKernel_t k) { return reinterpret_cast<DeviceFunc*>(k); }
 
   // Accessor for kernel_ and name_ populated during constructor.
-  std::string name() const { return name_; }
+  const std::string &name() const { return kernel_->name(); }
   amd::Kernel* kernel() const { return kernel_; }
 
  private:
-  std::string name_;     // name of the func(not unique identifier)
   amd::Kernel* kernel_;  // Kernel ptr referencing to ROCclr Symbol
 };
 

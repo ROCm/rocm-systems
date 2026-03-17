@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2021-22-present Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /*
  * Different test for checking functionality of
@@ -489,24 +476,23 @@ void TestkindHtoH(void) {
 
 TEST_CASE("Unit_hipMemcpyWithStream_TestwithTwoStream") { TestwithTwoStream(); }
 
-TEST_CASE("Unit_hipMemcpyWithStream_TestkindDtoH") { TestkindDtoH(); }
+TEST_CASE(Unit_hipMemcpyWithStream_TestkindDtoH) { TestkindDtoH(); }
 
-TEST_CASE("Unit_hipMemcpyWithStream_TestkindHtoH") { TestkindHtoH(); }
+TEST_CASE(Unit_hipMemcpyWithStream_TestkindHtoH) { TestkindHtoH(); }
 
-TEST_CASE("Unit_hipMemcpyWithStream_TestkindDtoD", "[multigpu]") {
+TEST_CASE(Unit_hipMemcpyWithStream_TestkindDtoD) {
   TestkindDtoD();
 }
 
-TEST_CASE("Unit_hipMemcpyWithStream_TestOnMultiGPUwithOneStream",
-          "[multigpu]") {
+TEST_CASE(Unit_hipMemcpyWithStream_TestOnMultiGPUwithOneStream) {
   TestOnMultiGPUwithOneStream();
 }
 
-TEST_CASE("Unit_hipMemcpyWithStream_TestkindDefault") { TestkindDefault(); }
+TEST_CASE(Unit_hipMemcpyWithStream_TestkindDefault) { TestkindDefault(); }
 #ifndef __HIP_PLATFORM_NVIDIA__
-TEST_CASE("Unit_hipMemcpyWithStream_TestkindDefaultForDtoD", "[multigpu]") {
+TEST_CASE(Unit_hipMemcpyWithStream_TestkindDefaultForDtoD) {
   TestkindDefaultForDtoD();
 }
 #endif
 
-TEST_CASE("Unit_hipMemcpyWithStream_TestDtoDonSameDevice") { TestDtoDonSameDevice(); }
+TEST_CASE(Unit_hipMemcpyWithStream_TestDtoDonSameDevice) { TestDtoDonSameDevice(); }

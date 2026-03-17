@@ -1,24 +1,9 @@
 /*
-Copyright (c) 2022 - Present Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
 #include "hip_comgr_helper.hpp"
 #if defined(_WIN32)
 #include <io.h>
@@ -871,18 +856,18 @@ void RTCProgram::AppendOptions(const std::string app_env_var, std::vector<std::s
 }
 
 // HIPRTC Program lock
-amd::Monitor RTCProgram::lock_(true);
+std::recursive_mutex RTCProgram::lock_;
 
 LinkProgram::LinkProgram(std::string name) : RTCProgram(name) {
   if (link_input_.Create() != AMD_COMGR_STATUS_SUCCESS) {
     guarantee(false, "Failed to allocate internal comgr structure");
   }
-  amd::ScopedLock lock(lock_);
+  std::scoped_lock lock(lock_);
   linker_set_.insert(this);
 }
 
 bool LinkProgram::isLinkerValid(LinkProgram* link_program) {
-  amd::ScopedLock lock(lock_);
+  std::scoped_lock lock(lock_);
   if (linker_set_.find(link_program) == linker_set_.end()) {
     return false;
   }

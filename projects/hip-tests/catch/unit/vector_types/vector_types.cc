@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "vector_operations_common.hh"
 #if HT_AMD
@@ -55,7 +42,7 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_make_vector_SanityCheck_Basic_Host", "", char, unsigned char, short,
+TEMPLATE_TEST_CASE(Unit_make_vector_SanityCheck_Basic_Host, char, unsigned char, short,
                    unsigned short, int, unsigned int, long, unsigned long, long long,
                    unsigned long long, float, double) {
   {
@@ -109,7 +96,7 @@ TEMPLATE_TEST_CASE("Unit_make_vector_SanityCheck_Basic_Host", "", char, unsigned
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_make_vector_SanityCheck_Basic_Device", "", char, unsigned char, short,
+TEMPLATE_TEST_CASE(Unit_make_vector_SanityCheck_Basic_Device, char, unsigned char, short,
                    unsigned short, int, unsigned int, long, unsigned long, long long,
                    unsigned long long, float, double) {
   {
@@ -153,9 +140,9 @@ TEMPLATE_TEST_CASE("Unit_make_vector_SanityCheck_Basic_Device", "", char, unsign
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_VectorAndVectorOperations_SanityCheck_Basic_Host", "", char,
-                   unsigned char, short, unsigned short, int, unsigned int, long, unsigned long,
-                   long long, unsigned long long, float, double) {
+TEMPLATE_TEST_CASE(Unit_VectorAndVectorOperations_SanityCheck_Basic_Host, char, unsigned char,
+                   short, unsigned short, int, unsigned int, long, unsigned long, long long,
+                   unsigned long long, float, double) {
   const VectorOperation operations[] = {
       VectorOperation::kIncrementPrefix,  VectorOperation::kIncrementPostfix,
       VectorOperation::kDecrementPrefix, VectorOperation::kDecrementPostfix,
@@ -232,9 +219,9 @@ TEMPLATE_TEST_CASE("Unit_VectorAndVectorOperations_SanityCheck_Basic_Host", "", 
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_VectorAndValueTypeOperations_SanityCheck_Basic_Host", "", char,
-                   unsigned char, short, unsigned short, int, unsigned int, long, unsigned long,
-                   long long, unsigned long long, float, double) {
+TEMPLATE_TEST_CASE(Unit_VectorAndValueTypeOperations_SanityCheck_Basic_Host, char, unsigned char,
+                   short, unsigned short, int, unsigned int, long, unsigned long, long long,
+                   unsigned long long, float, double) {
   const VectorOperation operations[] = {
       VectorOperation::kAddAssign,      VectorOperation::kSubtractAssign,
       VectorOperation::kMultiplyAssign, VectorOperation::kDivideAssign,
@@ -305,9 +292,9 @@ TEMPLATE_TEST_CASE("Unit_VectorAndValueTypeOperations_SanityCheck_Basic_Host", "
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_VectorAndVectorOperations_SanityCheck_Basic_Device", "", char,
-                   unsigned char, short, unsigned short, int, unsigned int, long, unsigned long,
-                   long long, unsigned long long, float, double) {
+TEMPLATE_TEST_CASE(Unit_VectorAndVectorOperations_SanityCheck_Basic_Device, char, unsigned char,
+                   short, unsigned short, int, unsigned int, long, unsigned long, long long,
+                   unsigned long long, float, double) {
   const VectorOperation operations[] = {
       VectorOperation::kIncrementPrefix,  VectorOperation::kIncrementPostfix,
       VectorOperation::kDecrementPrefix, VectorOperation::kDecrementPostfix,
@@ -384,9 +371,9 @@ TEMPLATE_TEST_CASE("Unit_VectorAndVectorOperations_SanityCheck_Basic_Device", ""
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_VectorAndValueTypeOperations_SanityCheck_Basic_Device", "", char,
-                   unsigned char, short, unsigned short, int, unsigned int, long, unsigned long,
-                   long long, unsigned long long, float, double) {
+TEMPLATE_TEST_CASE(Unit_VectorAndValueTypeOperations_SanityCheck_Basic_Device, char, unsigned char,
+                   short, unsigned short, int, unsigned int, long, unsigned long, long long,
+                   unsigned long long, float, double) {
   const VectorOperation operations[] = {
       VectorOperation::kAddAssign,      VectorOperation::kSubtractAssign,
       VectorOperation::kMultiplyAssign,  VectorOperation::kDivideAssign,
@@ -455,7 +442,7 @@ TEMPLATE_TEST_CASE("Unit_VectorAndValueTypeOperations_SanityCheck_Basic_Device",
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_VectorStructuredBindings_SanityCheck_Basic_host", "", float3, double3) {
+TEMPLATE_TEST_CASE(Unit_VectorStructuredBindings_SanityCheck_Basic_host, float3, double3) {
   auto value = GetTestValue<decltype(TestType().x)>(0);
 
   TestType vec3 = {value, value, value};
@@ -485,7 +472,7 @@ __global__ void generate_my_kernel() { static_assert(func()); }
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_VectorConstexpr_SanityCheck_Basic_host_device", "") {
+TEST_CASE(Unit_VectorConstexpr_SanityCheck_Basic_host_device) {
   generate_my_kernel<<<1, 1>>>();
   static_assert(func());
 }
@@ -577,7 +564,7 @@ __global__ void check_alignment_device() { check_alignment(); }
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Vector_alignment_check", "") {
+TEST_CASE(Unit_Vector_alignment_check) {
   check_alignment_device<<<1, 1>>>();
   check_alignment();
 }
@@ -670,7 +657,7 @@ __global__ void check_size_device() { check_size(); }
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Vector_size_check", "") {
+TEST_CASE(Unit_Vector_size_check) {
   check_size_device<<<1, 1>>>();
   check_size();
 }

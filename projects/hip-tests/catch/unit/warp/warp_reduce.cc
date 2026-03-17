@@ -1,21 +1,9 @@
 /*
-Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 #define HIP_ENABLE_WARP_SYNC_BUILTINS
 #define HIP_ENABLE_EXTRA_WARP_SYNC_TYPES
 
@@ -131,7 +119,7 @@ template <class T> void runTestMultipleMasks(unsigned long long masks[], int num
   }
 }
 
-TEMPLATE_TEST_CASE("Unit_hipReduceSingleMasks", "", int, unsigned int, long long,
+TEMPLATE_TEST_CASE(Unit_hipReduceSingleMasks, int, unsigned int, long long,
                    unsigned long long, float, half, double) {
   unsigned long long fullMask = getWarpSize() == 64 ? ~0ul : 0xFFFFFFFF;
   unsigned long long oneBitMasks[] = {0b1 & fullMask};
@@ -145,7 +133,7 @@ TEMPLATE_TEST_CASE("Unit_hipReduceSingleMasks", "", int, unsigned int, long long
   runTestMultipleMasks<TestType>(everyFifthButNinethMasks, NELEMS(everyFifthButNinethMasks));
 }
 
-TEMPLATE_TEST_CASE("Unit_hipReduceMultipleMasks", "", int, unsigned int, long long,
+TEMPLATE_TEST_CASE(Unit_hipReduceMultipleMasks, int, unsigned int, long long,
                    unsigned long long, float, half, double) {
   if (getWarpSize() == 64) {
     unsigned long long masks[] = {0b0110011, 0x0F0F0F0F00000000, 0xF0F0F0F000000000,
@@ -198,7 +186,7 @@ void runTestReduceForTypes(const std::tuple<T, Types...>) {
   runTestReduceForTypes<Op>(remainingTypes);
 }
 
-TEST_CASE("Unit_hipReduceRandom") {
+TEST_CASE(Unit_hipReduceRandom) {
   const std::tuple<int, unsigned int, long long, unsigned long long, float, half, double> allTypes;
   const std::tuple<int, unsigned int, long long, unsigned long long> integralTypes;
 

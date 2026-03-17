@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2021 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /* Test Case Description:
    1) Allocate managed memory --> prefetch to gpu 0
@@ -68,7 +55,7 @@ static int HmmAttrPrint() {
    call hipMemAdvise() on the memory and apply the flags ReadMostly,
    AccessedBy, and PreferredLocation for gpus other than gpu 0 and verify
    the flags using hipMemGetAttribute()*/
-TEST_CASE("Unit_hipMemPrefetchAsyncAdviseFlgTst") {
+TEST_CASE(Unit_hipMemPrefetchAsyncAdviseFlgTst) {
   int NGpus = 0;
   HIP_CHECK(hipGetDeviceCount(&NGpus));
   if (NGpus >= 2) {
@@ -133,7 +120,7 @@ TEST_CASE("Unit_hipMemPrefetchAsyncAdviseFlgTst") {
     AccessedBy using hipMemGetAttribute() and validate if AccessedBy is still
     set to gpu1. Similar tests are done with ReadMostly and PreferredLocation
     flags */
-TEST_CASE("Unit_hipMemPrefetchAsyncAccsdByTst") {
+TEST_CASE(Unit_hipMemPrefetchAsyncAccsdByTst) {
   int NGpus = 0;
   HIP_CHECK(hipGetDeviceCount(&NGpus));
   if (NGpus >= 2) {
@@ -224,7 +211,7 @@ TEST_CASE("Unit_hipMemPrefetchAsyncAccsdByTst") {
 }
 
 /*Test Case description: Negative testing with hipMemPrefetchAsync() api*/
-TEST_CASE("Unit_hipMemPrefetchAsyncNegativeTst") {
+TEST_CASE(Unit_hipMemPrefetchAsyncNegativeTst) {
   int MangdMem = HmmAttrPrint();
   if (MangdMem == 1) {
     int *Hmm = nullptr, MemSz = 4096 * 4, NumElms = MemSz / 4, InitVal = 123;
@@ -325,7 +312,7 @@ TEST_CASE("Unit_hipMemPrefetchAsyncNegativeTst") {
 /* Test Case description: In this test case I am trying to allocate HMM memory
    which is not multiple of page Size, but still trying to launch kernel and
    see if we are getting values as expected.*/
-TEST_CASE("Unit_hipMemPrefetchAsync_NonPageSz") {
+TEST_CASE(Unit_hipMemPrefetchAsync_NonPageSz) {
   int *Hmm = nullptr, NumElms = 4096 * 2, InitVal = 123;
   hipStream_t strm;
   bool IfTestPassed = true;

@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /*
 hipFreeArray API test scenarios
@@ -29,7 +16,7 @@ hipFreeArray API test scenarios
 #include <hip_array_common.hh>
 
 
-TEMPLATE_TEST_CASE("Unit_hipFreeArray_DifferentSizes", "", uchar2, char, ushort, short, short4,
+TEMPLATE_TEST_CASE(Unit_hipFreeArray_DifferentSizes, uchar2, char, ushort, short, short4,
                    uint, int, int4, float, float4) {
   CHECK_IMAGE_SUPPORT
 
@@ -46,7 +33,7 @@ TEMPLATE_TEST_CASE("Unit_hipFreeArray_DifferentSizes", "", uchar2, char, ushort,
   HIP_CHECK(hipFreeArray(arrayPtr));
 }
 
-TEST_CASE("Unit_hipFreeArray_NegativeArray") {
+TEST_CASE(Unit_hipFreeArray_NegativeArray) {
 #if HT_NVIDIA
   HIP_CHECK(hipFreeArray(nullptr));
 #else
@@ -54,7 +41,7 @@ TEST_CASE("Unit_hipFreeArray_NegativeArray") {
 #endif
 }
 
-TEST_CASE("Unit_hipFreeArray_DoubleFree") {
+TEST_CASE(Unit_hipFreeArray_DoubleFree) {
 #if HT_NVIDIA
   HipTest::HIP_SKIP_TEST("EXSWCPHIPT-120");
   return;
@@ -83,7 +70,7 @@ TEST_CASE("Unit_hipFreeArray_DoubleFree") {
  *    arrays of different types and size and then call hipFreeArray for each array
  */
 
-TEMPLATE_TEST_CASE("Unit_hipFreeArray_MultiThreaded", "", char, int, float2, float4) {
+TEMPLATE_TEST_CASE(Unit_hipFreeArray_MultiThreaded, char, int, float2, float4) {
   CHECK_IMAGE_SUPPORT
 
   constexpr size_t arr_size = 1024;

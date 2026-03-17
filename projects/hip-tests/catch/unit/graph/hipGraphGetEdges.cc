@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip_test_common.hh>
 #include <hip_test_checkers.hh>
@@ -104,7 +91,7 @@ static void validate_hipGraphGetEdges_fromto(size_t testNumEdges, GraphGetNodesT
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGraphGetEdges_Positive_Functional") {
+TEST_CASE(Unit_hipGraphGetEdges_Positive_Functional) {
   constexpr size_t N = 1024;
   hipGraph_t graph;
   int *A_d, *B_d, *C_d;
@@ -173,7 +160,7 @@ TEST_CASE("Unit_hipGraphGetEdges_Positive_Functional") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGraphGetEdges_Positive_CapturedStream") {
+TEST_CASE(Unit_hipGraphGetEdges_Positive_CapturedStream) {
   hipGraph_t graph{nullptr};
   constexpr size_t N = 1024;
   constexpr int numMemcpy[2]{2, 3}, numKernel[2]{2, 3}, numMemset[2]{2, 0};
@@ -253,7 +240,7 @@ TEST_CASE("Unit_hipGraphGetEdges_Positive_CapturedStream") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGraphGetEdges_Negative_Parameters") {
+TEST_CASE(Unit_hipGraphGetEdges_Negative_Parameters) {
   hipGraph_t graph{}, graph_uninit{};
   HIP_CHECK(hipGraphCreate(&graph, 0));
   hipGraphNode_t nodes_from[kNumOfEdges]{}, nodes_to[kNumOfEdges]{};

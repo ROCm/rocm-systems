@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sindxl
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /*
 This file has definition of functions for the following functinality:
@@ -108,9 +95,8 @@ int calling_combination_function(std::vector<std::string> combi_vec_list) {
     } else if (combi_vec_list[i] == "header_dir") {
       std::string retrived_CO = get_string_parameters("compiler_option", "header_dir");
       std::string wor_dir = std::filesystem::current_path().string();
-      std::string break_dir = wor_dir.substr(0, wor_dir.find("build"));
-      std::string append_str = "catch/unit/rtc/headers";
-      std::string CO = retrived_CO + " " + break_dir + append_str;
+      std::string append_str = "/headers";
+      std::string CO = retrived_CO + " " + wor_dir + append_str;
       hold_CO[i] = CO;
     } else if (combi_vec_list[i] == "architecture") {
       std::string retrived_CO = get_string_parameters("compiler_option", "architecture");
@@ -180,6 +166,7 @@ int calling_combination_function(std::vector<std::string> combi_vec_list) {
     }
     Combination_CO[j] = hold_CO[j].c_str();
   }
+  delete[] Combination_CO;
   return errors;
 }
 
@@ -324,9 +311,7 @@ picojson::array getblock_fromconfig() {
   static bool initialized = false;
   if (!initialized) {
     std::string wor_dir = std::filesystem::current_path().string();
-    std::string break_dir = wor_dir.substr(0, wor_dir.find("build"));
-    std::string append_str = "catch/unit/rtc/RtcConfig.json";
-    std::string config_path = break_dir + append_str;
+    std::string config_path = wor_dir + "/RtcConfig.json";
     std::ifstream json_file(config_path.c_str());
     if (!json_file.is_open()) {
       FAIL("Error loading config.json");

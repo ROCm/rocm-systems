@@ -1,22 +1,8 @@
-/* Copyright (c) 2015 - 2024 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip/hip_runtime.h>
 #include "hip_internal.hpp"
@@ -44,16 +30,6 @@ void init(bool* status) {
   // Configure HIP runtime mode
   amd::IS_HIP = true;
   GPU_NUM_MEM_DEPENDENCY = 0;
-  // Determine direct dispatch capability based on build configuration
-#if DISABLE_DIRECT_DISPATCH
-  constexpr bool kDirectDispatch = false;
-#elif defined(WITH_HSA_DEVICE)
-  constexpr bool kDirectDispatch = true;
-#else
-  constexpr bool kDirectDispatch = false;
-#endif
-
-  AMD_DIRECT_DISPATCH = flagIsDefault(AMD_DIRECT_DISPATCH) ? kDirectDispatch : AMD_DIRECT_DISPATCH;
   // Initialize AMD runtime - critical for all subsequent operations
   if (!amd::Runtime::init()) {
     *status = false;
@@ -155,16 +131,6 @@ hip::Stream* getNullStream(amd::Context& ctx, bool wait) {
     return getNullStream(wait);
   }
   return nullptr;
-}
-
-// ================================================================================================
-int getDeviceID(amd::Context& ctx) {
-  for (auto& it : g_devices) {
-    if (it->asContext() == &ctx) {
-      return it->deviceId();
-    }
-  }
-  return -1;
 }
 
 // ================================================================================================

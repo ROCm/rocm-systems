@@ -43,30 +43,30 @@
  *
  */
 
-#include <stdint.h>
-#include <stddef.h>
+#include "rocm_smi_test/functional/perf_determinism.h"
 
-#include <iostream>
-#include <string>
-#include <map>
-#include <bitset>
+#include <stddef.h>
+#include <stdint.h>
+
 #include <algorithm>
+#include <bitset>
+#include <iostream>
+#include <map>
+#include <string>
 
 #include "gtest/gtest.h"
 #include "rocm_smi/rocm_smi.h"
-#include "rocm_smi_test/functional/perf_determinism.h"
-#include "rocm_smi_test/test_common.h"
 #include "rocm_smi/rocm_smi_utils.h"
-
+#include "rocm_smi_test/test_common.h"
 
 TestPerfDeterminism::TestPerfDeterminism() : TestBase() {
   set_title("RSMI Performance Determinism Test");
-  set_description("The Performance Determinism tests verifies "
-                  "Enabling/Disabling performance determinism mode.");
+  set_description(
+      "The Performance Determinism tests verifies "
+      "Enabling/Disabling performance determinism mode.");
 }
 
-TestPerfDeterminism::~TestPerfDeterminism(void) {
-}
+TestPerfDeterminism::~TestPerfDeterminism(void) {}
 
 void TestPerfDeterminism::SetUp(void) {
   TestBase::SetUp();
@@ -74,9 +74,7 @@ void TestPerfDeterminism::SetUp(void) {
   return;
 }
 
-void TestPerfDeterminism::DisplayTestInfo(void) {
-  TestBase::DisplayTestInfo();
-}
+void TestPerfDeterminism::DisplayTestInfo(void) { TestBase::DisplayTestInfo(); }
 
 void TestPerfDeterminism::DisplayResults(void) const {
   TestBase::DisplayResults();
@@ -88,7 +86,6 @@ void TestPerfDeterminism::Close() {
   // rsmi_shut_down(), so it should be done after other hsa cleanup
   TestBase::Close();
 }
-
 
 void TestPerfDeterminism::Run(void) {
   rsmi_status_t err;
@@ -108,8 +105,7 @@ void TestPerfDeterminism::Run(void) {
     err = rsmi_dev_perf_level_set(i, RSMI_DEV_PERF_LEVEL_AUTO);
     IF_VERB(STANDARD) {
       std::cout << "\t**rsmi_dev_perf_level_set(i, RSMI_DEV_PERF_LEVEL_AUTO): "
-                << amd::smi::getRSMIStatusString(err, false)
-                << "\n";
+                << amd::smi::getRSMIStatusString(err, false) << "\n";
     }
     if (err == RSMI_STATUS_NOT_SUPPORTED) {
       IF_VERB(STANDARD) {
@@ -128,40 +124,31 @@ void TestPerfDeterminism::Run(void) {
     CHK_ERR_ASRT(ret)
     err = rsmi_dev_od_volt_info_get(i, &odv);
     IF_VERB(STANDARD) {
-        std::cout << "\t**rsmi_dev_od_volt_info_get(i, &odv): "
-                  << amd::smi::getRSMIStatusString(err, false)
-                  << "\n"
-                  << amd::smi::print_rsmi_od_volt_freq_data_t(&odv)
-                  << "\n";
+      std::cout << "\t**rsmi_dev_od_volt_info_get(i, &odv): "
+                << amd::smi::getRSMIStatusString(err, false) << "\n"
+                << amd::smi::print_rsmi_od_volt_freq_data_t(&odv) << "\n";
     }
     if (err == RSMI_STATUS_NOT_SUPPORTED) {
-      IF_VERB(STANDARD) {
-        std::cout << "\t** Not supported on this machine\n";
-      }
+      IF_VERB(STANDARD) { std::cout << "\t** Not supported on this machine\n"; }
       return;
-    }  else if (err == RSMI_STATUS_SUCCESS) {
-      clkvalue = (odv.curr_sclk_range.lower_bound/1000000) + 50;
+    } else if (err == RSMI_STATUS_SUCCESS) {
+      clkvalue = (odv.curr_sclk_range.lower_bound / 1000000) + 50;
     } else {
-      IF_VERB(STANDARD) {
-        std::cout << "\t** Unable to retrieve lower bound sclk, continue.. \n";
-      }
+      IF_VERB(STANDARD) { std::cout << "\t** Unable to retrieve lower bound sclk, continue.. \n"; }
       continue;
     }
     std::cout << "About to rsmi_perf_determinism_mode_set() -->\n";
 
     err = rsmi_perf_determinism_mode_set(i, clkvalue);
     if (err == RSMI_STATUS_NOT_SUPPORTED) {
-      IF_VERB(STANDARD) {
-        std::cout << "\t**Not supported on this machine" << std::endl;
-      }
+      IF_VERB(STANDARD) { std::cout << "\t**Not supported on this machine" << std::endl; }
       continue;
     } else {
       ret = rsmi_dev_perf_level_get(i, &pfl);
       CHK_ERR_ASRT(ret)
       IF_VERB(STANDARD) {
-          std::cout << "\t**New Perf Level:" <<  GetPerfLevelStr(pfl) <<
-                                                                  std::endl;
-          std::cout << "\t**SCLK is now set to " << clkvalue << std::endl;
+        std::cout << "\t**New Perf Level:" << GetPerfLevelStr(pfl) << std::endl;
+        std::cout << "\t**SCLK is now set to " << clkvalue << std::endl;
       }
 
       std::cout << "\t**Resetting performance determinism" << std::endl;
@@ -169,10 +156,7 @@ void TestPerfDeterminism::Run(void) {
       CHK_ERR_ASRT(err)
       ret = rsmi_dev_perf_level_get(i, &pfl);
       CHK_ERR_ASRT(ret)
-      IF_VERB(STANDARD) {
-          std::cout << "\t**New Perf Level:" <<  GetPerfLevelStr(pfl) <<
-                                                                  std::endl;
-      }
+      IF_VERB(STANDARD) { std::cout << "\t**New Perf Level:" << GetPerfLevelStr(pfl) << std::endl; }
     }  // END - SET SUPPORTED
   }  // END - DEVICE LOOP
 }

@@ -1,22 +1,7 @@
-# Copyright (c) 2023 Advanced Micro Devices, Inc. All Rights Reserved.
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 #
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# SPDX-License-Identifier: MIT
+
 if(UNIX AND BUILD_SHARED_LIBS)
   set(TEST_SRC ${TEST_SRC}
       complex_loading_behavior.cc)
@@ -32,14 +17,14 @@ if(UNIX AND BUILD_SHARED_LIBS)
                       TEST_TARGET_NAME build_tests)
 
   if(HIP_PLATFORM MATCHES "amd")
-    add_custom_target(libLazyLoad.so COMMAND ${CMAKE_HIP_COMPILER} -fPIC -lpthread -shared
-    ${OFFLOAD_ARCH_LIST} -x hip ${CMAKE_CURRENT_SOURCE_DIR}/liblazyLoad.cc
+    add_custom_target(libLazyLoad.so COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} -fPIC -lpthread -shared
+    -x hip ${CMAKE_CURRENT_SOURCE_DIR}/liblazyLoad.cc
     -I${CMAKE_CURRENT_SOURCE_DIR}/../../include ${HIP_PATH_OPT}
     -I${Catch2_SOURCE_DIR}/src -I${Catch2_BINARY_DIR}/generated-includes
     -o libLazyLoad.so)
-    add_custom_target(bit_extract_kernel.code COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only
+    add_custom_target(bit_extract_kernel.code COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} --cuda-device-only
     -x hip ${CMAKE_CURRENT_SOURCE_DIR}/bit_extract_kernel.cpp ${HIP_PATH_OPT}
-    ${OFFLOAD_ARCH_LIST} -o ${CMAKE_CURRENT_BINARY_DIR}/../dynamicLoading/bit_extract_kernel.code
+    -o ${CMAKE_CURRENT_BINARY_DIR}/../dynamicLoading/bit_extract_kernel.code
     -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
   elseif(HIP_PLATFORM MATCHES "nvidia")
     add_custom_target(libLazyLoad.so COMMAND ${CMAKE_CUDA_COMPILER} -Xcompiler -fPIC -lpthread -shared

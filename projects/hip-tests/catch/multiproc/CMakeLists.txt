@@ -1,3 +1,7 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
 # Common Tests
 set(TEST_SRC
   childMalloc.cc
@@ -20,7 +24,7 @@ set(TEST_SRC
 if(UNIX)
   if (HIP_PLATFORM MATCHES "amd")
     add_custom_target(dummy_kernel.code
-                      COMMAND ${CMAKE_HIP_COMPILER}
+                      COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH}
                       --cuda-device-only -x hip ${CMAKE_CURRENT_SOURCE_DIR}/dummy_kernel.cpp
                       -o ${CMAKE_CURRENT_BINARY_DIR}/../multiproc/dummy_kernel.code
                       -I${HIP_INCLUDE_DIR}

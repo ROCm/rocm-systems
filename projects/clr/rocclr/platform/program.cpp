@@ -1,22 +1,8 @@
-/* Copyright (c) 2008 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "top.hpp"
 #include "device/appprofile.hpp"
@@ -190,7 +176,7 @@ int32_t Program::compile(const std::vector<Device*>& devices, size_t numHeaders,
                          const char** headerIncludeNames, const char* options,
                          void(CL_CALLBACK* notifyFptr)(cl_program, void*), void* data,
                          bool optionChangable) {
-  ScopedLock sl(&programLock_);
+  std::scoped_lock sl(programLock_);
 
   int32_t retval = CL_SUCCESS;
 
@@ -261,7 +247,7 @@ int32_t Program::link(const std::vector<Device*>& devices, size_t numInputs,
                       const std::vector<Program*>& inputPrograms, const char* options,
                       void(CL_CALLBACK* notifyFptr)(cl_program, void*), void* data,
                       bool optionChangable) {
-  ScopedLock sl(&programLock_);
+  std::scoped_lock sl(programLock_);
 
   int32_t retval = CL_SUCCESS;
 
@@ -407,7 +393,7 @@ void Program::StubProgramSource(const std::string& app_name) {
 int32_t Program::build(const std::vector<Device*>& devices, const char* options,
                        void(CL_CALLBACK* notifyFptr)(cl_program, void*), void* data,
                        bool optionChangable, bool newDevProg) {
-  ScopedLock sl(&programLock_);
+  std::scoped_lock sl(programLock_);
 
   int32_t retval = CL_SUCCESS;
 
@@ -513,7 +499,7 @@ int32_t Program::build(const std::vector<Device*>& devices, const char* options,
 }
 
 bool Program::load(const std::vector<Device*>& devices) {
-  ScopedLock sl(&programLock_);
+  std::scoped_lock sl(programLock_);
 
   for (const auto& it : devicePrograms_) {
     const Device& device = *(it.first);

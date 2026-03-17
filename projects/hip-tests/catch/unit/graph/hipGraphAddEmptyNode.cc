@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /**
 Testcase Scenarios :
@@ -36,7 +23,7 @@ Testcase Scenarios :
 /**
  * Functional Test to add empty node with dependencies
  */
-TEST_CASE("Unit_hipGraphAddEmptyNode_Functional") {
+TEST_CASE(Unit_hipGraphAddEmptyNode_Functional) {
   char* pOutBuff_d{};
   constexpr size_t size = 1024;
   hipGraph_t graph{};
@@ -66,7 +53,7 @@ TEST_CASE("Unit_hipGraphAddEmptyNode_Functional") {
 /**
  * Negative Scenarios hipGraphAddEmptyNode
  */
-TEST_CASE("Unit_hipGraphAddEmptyNode_NegTest") {
+TEST_CASE(Unit_hipGraphAddEmptyNode_NegTest) {
   char* pOutBuff_d{};
   constexpr size_t size = 1024;
   hipGraph_t graph;
@@ -124,7 +111,7 @@ static void validateOutData(int* A1_h, int* A2_h, size_t N) {
 /**
  * Functional Test to use empty node as barrier to wait for multiple nodes.
  */
-TEST_CASE("Unit_hipGraphAddEmptyNode_BarrierFunc") {
+TEST_CASE(Unit_hipGraphAddEmptyNode_BarrierFunc) {
   size_t size = 1024;
   constexpr auto blocksPerCU = 6;
   constexpr auto threadsPerBlock = 256;

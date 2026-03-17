@@ -138,13 +138,6 @@ class RocProfCompute_Base:
 
             # Appending a wrapper for injecting roctx-markers
             if getattr(args, "torch_trace", False):
-                # Override the output-format to CSV when torch-trace is enabled
-                if getattr(args, "format_rocprof_output", "rocpd") != "csv":
-                    args.format_rocprof_output = "csv"
-                    console_warning(
-                        "torch trace",
-                        "This option supports only CSV output format at the moment.",
-                    )
                 # Find the inject_roctx.py script in src/utils
                 inject_script = (
                     Path(__file__).parent.parent / "utils" / "inject_roctx.py"
@@ -272,10 +265,6 @@ class RocProfCompute_Base:
                 for pattern in csv_patterns
                 for file in Path(args.path).glob(pattern)
             ]
-
-            if args.hip_trace:
-                # remove hip api trace outputs from this list
-                files = [f for f in files if not f.name.endswith("_hip_api_trace.csv")]
 
             if args.kokkos_trace:
                 # remove marker api trace outputs from this list
@@ -680,7 +669,12 @@ class RocProfCompute_Base:
             total_workload_runs += 1
 
         # Warn about multi-rank profiling when multiple workload runs are needed
-        if total_workload_runs > 1 and get_rank() is not None:
+        # Skip warning when iteration multiplexing is enabled (single application run)
+        if (
+            total_workload_runs > 1
+            and get_rank() is not None
+            and args.iteration_multiplexing is None
+        ):
             console_warning(
                 "Multi-rank application detected. Application replay mode "
                 "(running the workload multiple times) may fail to collect "
@@ -741,6 +735,11 @@ class RocProfCompute_Base:
                     console_debug(output)
 
         if args.iteration_multiplexing is not None:
+            if native_tool_path is None:
+                console_error(
+                    "Native tool is not supported which is required for "
+                    "iteration multiplexing."
+                )
             console_log(
                 "profiling", f"Iteration multiplexing: {args.iteration_multiplexing}"
             )

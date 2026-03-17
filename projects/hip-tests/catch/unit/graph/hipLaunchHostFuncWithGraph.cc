@@ -1,21 +1,9 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 #include <hip_test_common.hh>
 #include <hip_test_kernels.hh>
 
@@ -55,7 +43,7 @@ static void hostNodeCallback(void* data) {
  * ------------------------
  *    - HIP_VERSION >= 5.3
  */
-TEST_CASE("Unit_hipLaunchHostFunc_Negative_Parameters") {
+TEST_CASE(Unit_hipLaunchHostFunc_Negative_Parameters) {
   StreamGuard stream_guard(Streams::created);
   hipStream_t stream = stream_guard.stream();
   hipGraph_t graph{nullptr};
@@ -85,7 +73,7 @@ TEST_CASE("Unit_hipLaunchHostFunc_Negative_Parameters") {
  * ------------------------
  *    - HIP_VERSION >= 5.3
  */
-TEST_CASE("Unit_hipLaunchHostFunc_Positive_Functional") {
+TEST_CASE(Unit_hipLaunchHostFunc_Positive_Functional) {
   LinearAllocGuard<float> A_h(LinearAllocs::malloc, sizeof(float));
   LinearAllocGuard<float> B_h(LinearAllocs::malloc, sizeof(float));
   LinearAllocGuard<float> A_d(LinearAllocs::hipMalloc, sizeof(float));
@@ -138,7 +126,7 @@ static void thread_func_pos(hipStream_t* stream, hipHostFn_t fn, float** data){
  * ------------------------
  *    - HIP_VERSION >= 5.3
  */
-TEST_CASE("Unit_hipLaunchHostFunc_Positive_Thread") {
+TEST_CASE(Unit_hipLaunchHostFunc_Positive_Thread) {
   LinearAllocGuard<float> A_h(LinearAllocs::malloc, sizeof(float));
   LinearAllocGuard<float> B_h(LinearAllocs::malloc, sizeof(float));
   LinearAllocGuard<float> A_d(LinearAllocs::hipMalloc, sizeof(float));
@@ -195,7 +183,7 @@ static void set_vector(void* args) {
 }
 }  // namespace
 
-TEST_CASE("Unit_hipLaunchHostFunc_H2D_Kernel_D2H_Capture") {
+TEST_CASE(Unit_hipLaunchHostFunc_H2D_Kernel_D2H_Capture) {
   constexpr int numOfBlocks = 1024;
   constexpr int threadsPerBlock = 1024;
   constexpr size_t arraySize = 1U << 20;  // 1,048,576
