@@ -111,7 +111,7 @@ set_tests_properties(unit.device_counting_service_test.sync_grbm_verify PROPERTI
 set_tests_properties(unit.device_counting_service_test.sync_gpu_util_verify PROPERTIES LABELS "unittests;multi-gpu")
 set_tests_properties(unit.device_counting_service_test.sync_sq_waves_verify PROPERTIES LABELS "unittests;multi-gpu")
 set_tests_properties(unit.device_counting_service_test.sync_sq_waves_verify_non_intercept PROPERTIES LABELS "unittests;multi-gpu")
-set_tests_properties(unit.device_counting_service_test.raw_sq_waves_verify) PROPERTIES LABELS "unittests;multi-gpu")
+set_tests_properties(unit.device_counting_service_test.raw_sq_waves_verify PROPERTIES LABELS "unittests;multi-gpu")
 
 set(ROCPROFILER_LIB_CONSUMER_TEST_SOURCES consumer_test.cpp)
 
