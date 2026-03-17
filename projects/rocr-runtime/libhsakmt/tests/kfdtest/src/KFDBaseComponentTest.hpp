@@ -92,6 +92,7 @@ class KFDBaseComponentTest : public testing::Test {
     HsaNodeInfo* Get_NodeInfo();
     HsaMemFlags& GetHsaMemFlags();
     bool SVMAPISupported_GPU(unsigned int nodeId);
+    bool XNACKSupported();
 
     inline unsigned int Get_NumCpQueues(int gpuIndex){
         return m_numCpQueues_GPU[gpuIndex];
@@ -109,8 +110,8 @@ class KFDBaseComponentTest : public testing::Test {
         return m_numSdmaXgmiEngines_GPU[gpuIndex];
     }
 
-    HSAKMT_STATUS KFDTestMultiGPU(std::function<void(int)> test_func, 
-                                            const std::vector<int>& gpuNodes, 
+    HSAKMT_STATUS KFDTestMultiGPU(std::function<void(int)> test_func,
+                                            const std::vector<int>& gpuNodes,
                                             unsigned int gpu_num);
 
     HSAKMT_STATUS KFDTestLaunch(std::function<void(int)> test_func);
@@ -126,6 +127,7 @@ class KFDBaseComponentTest : public testing::Test {
     HsaMemFlags m_MemoryFlags;
     HsaNodeInfo m_NodeInfo;
     HSAint32 m_xnack;
+    bool m_is_xnack_supported;
     Assembler* m_pAsm;
 
     Assembler* m_pAsmGPU[MAX_GPU];
@@ -153,7 +155,10 @@ class KFDBaseComponentTest : public testing::Test {
     void SVMSetXNACKMode(int xnack_override = -1) {
         if (!SVMAPISupported())
             return;
-
+        if (!m_is_xnack_supported) {
+            LOG() << "Skipping test: XNACK not supported on this ASIC" << std::endl;
+            return;
+        }
         m_xnack = -1;
         HSAKMT_STATUS ret = hsaKmtGetXNACKMode(&m_xnack);
         if (ret != HSAKMT_STATUS_SUCCESS) {
@@ -172,9 +177,9 @@ class KFDBaseComponentTest : public testing::Test {
         else
                 return;
 
-	// No need to set XNACK if it's already the current value
-	if (xnack_on == m_xnack)
-		return;
+        // No need to set XNACK if it's already the current value
+        if (xnack_on == m_xnack)
+            return;
 
         ret = hsaKmtSetXNACKMode(xnack_on);
         if (ret != HSAKMT_STATUS_SUCCESS)

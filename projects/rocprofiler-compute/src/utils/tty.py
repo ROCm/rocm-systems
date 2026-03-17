@@ -197,8 +197,8 @@ def is_roofline_shown(
                 if not kernel_top_df.empty and kernel_id in kernel_top_df.index:
                     kernel_name = kernel_top_df.loc[kernel_id, "Kernel_Name"]
                     kernel_pct = (
-                        kernel_top_df.loc[kernel_id, "Pct"]
-                        if "Pct" in kernel_top_df.columns
+                        kernel_top_df.loc[kernel_id, "Percent"]
+                        if "Percent" in kernel_top_df.columns
                         else 0
                     )
                 else:
@@ -548,7 +548,7 @@ def process_table_data(
                     table_type == "metric_table" and header not in hidden_cols
                 ):
                     if run_name != base_run:
-                        # Calculate percentage difference between current and
+                        # Calculate percent difference between current and
                         # base dataframe.
                         base_series = pd.to_numeric(
                             base_df[header], errors="coerce"
@@ -557,20 +557,20 @@ def process_table_data(
                             cur_df[header], errors="coerce"
                         ).fillna(0.0)
 
-                        # Calculate absolute and percentage differences
+                        # Calculate absolute and percent differences
                         absolute_diff = (cur_series - base_series).round(args.decimal)
-                        percentage_diff = (
+                        percent_diff = (
                             absolute_diff / base_series.replace(0, 1) * 100
                         ).round(args.decimal)
 
                         if args.verbose >= 2:
-                            console_log("---------", header, percentage_diff)
+                            console_log("---------", header, percent_diff)
 
-                        # Format as "value (percentage%)"
+                        # Format as "value (percent%)"
                         formatted_diff = (
                             cur_series.round(args.decimal).astype(str)
                             + " ("
-                            + percentage_diff.astype(str)
+                            + percent_diff.astype(str)
                             + "%)"
                         )
 
@@ -581,13 +581,13 @@ def process_table_data(
                         #       requirement
                         if (
                             header in ["Value", "Count", "Avg"]
-                            and percentage_diff.abs().gt(args.report_diff).any()
+                            and percent_diff.abs().gt(args.report_diff).any()
                         ):
                             result_df["Abs Diff"] = absolute_diff
 
                             if args.report_diff:
-                                violation_idx = percentage_diff.index[
-                                    percentage_diff.abs() > args.report_diff
+                                violation_idx = percent_diff.index[
+                                    percent_diff.abs() > args.report_diff
                                 ]
                                 console_warning(
                                     f"Dataframe diff exceeds {args.report_diff}% "

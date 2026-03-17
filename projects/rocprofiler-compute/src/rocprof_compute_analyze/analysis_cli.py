@@ -83,9 +83,7 @@ class cli_analysis(OmniAnalyze_Base):
             )
 
             if getattr(args, "list_torch_operators", False):
-                kernel_top_df = pd.read_csv(
-                    Path(path_info[0]) / "pmc_kernel_top.csv"
-                )
+                kernel_top_df = pd.read_csv(Path(path_info[0]) / "pmc_kernel_top.csv")
                 file_data = process_torch_trace_output(
                     path_info[0],
                     kernel_top_df=kernel_top_df,
