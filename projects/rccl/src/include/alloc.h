@@ -425,6 +425,26 @@ static inline ncclResult_t ncclCuMemAlloc(void **ptr, CUmemGenericAllocationHand
   accessDesc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
   CUCHECKGOTO(cuMemSetAccess((CUdeviceptr)*ptr, size, &accessDesc, 1), result, fail);
   if (handlep) *handlep = handle;
+  // ROCM-20370 Workaround: hsa_amd_vmem_map writes internal bookkeeping metadata
+  // into the user-visible buffer after the kernel driver's SDMA clear,
+  // leaving non-zero residue at specific offsets. Zero it now so that
+  // structures like ncclSendMem/ncclRecvMem (head, tail, ptrExchange,
+  // redOpArgExchange) start at zero. Use a non-blocking stream with
+  // relaxed capture mode so this is safe when called from the proxy
+  // thread during graph capture on the main thread.
+  {
+    cudaStreamCaptureMode capMode = cudaStreamCaptureModeRelaxed;
+    CUDACHECKGOTO(cudaThreadExchangeStreamCaptureMode(&capMode), result, fail);
+    cudaStream_t zeroStream;
+    CUDACHECKGOTO(cudaStreamCreateWithFlags(&zeroStream, cudaStreamNonBlocking), result, restoreCapMode);
+    CUDACHECKGOTO(cudaMemsetAsync(*ptr, 0, size, zeroStream), result, destroyStream);
+    CUDACHECKGOTO(cudaStreamSynchronize(zeroStream), result, destroyStream);
+destroyStream:
+    CUDACHECK(cudaStreamDestroy(zeroStream));
+restoreCapMode:
+    CUDACHECK(cudaThreadExchangeStreamCaptureMode(&capMode));
+    if (result != ncclSuccess) goto fail;
+  }
   TRACE(NCCL_ALLOC, "CuMem Alloc Size %zu pointer %p handle %llx", size, *ptr, handle);
   
   if (cudaDev < MAX_ALLOC_TRACK_NGPU) {
