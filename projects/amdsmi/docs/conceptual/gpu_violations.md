@@ -111,45 +111,75 @@ AMD SMI provides tools to programmatically monitor GPU violations and throttling
 The AMD SMI library provides APIs to query violation status.
 
 ```c
-#include "amdsmi/amdsmi.h"
+#include "amd_smi/amdsmi.h"
 #include <stdio.h>
+#include <stdlib.h>
 
 int main() {
     amdsmi_status_t ret;
-    uint32_t num_devices = 0;
-    
-    // Initialize AMD SMI
-    ret = amdsmi_init(AMDSMI_INIT_ALL_PROCESSORS);
+    uint32_t socket_count = 0;
+    uint32_t gpu_number = 0;
+
+    // Initialize AMD SMI for GPUs
+    ret = amdsmi_init(AMDSMI_INIT_AMD_GPUS);
     if (ret != AMDSMI_STATUS_SUCCESS) {
         fprintf(stderr, "Failed to initialize AMD SMI\n");
         return 1;
     }
-    
-    // Get device count and processor handles
-    ret = amdsmi_get_processor_handles(&num_devices, NULL);
-    amdsmi_processor_handle* processors = malloc(num_devices * sizeof(amdsmi_processor_handle));
-    ret = amdsmi_get_processor_handles(&num_devices, processors);
-    
-    // Monitor violations
-    for (uint32_t i = 0; i < num_devices; i++) {
-        amdsmi_violation_status_t violation;
-        ret = amdsmi_get_violation_status(processors[i], &violation);
-        if (ret == AMDSMI_STATUS_SUCCESS) {
-            printf("GPU %d - PVIOL: %.2f%%, TVIOL: %.2f%%\n", 
-                   i, violation.power_violation_pct, violation.thermal_violation_pct);
-            
-            // Check detailed throttle status
-            amdsmi_gpu_metrics_t metrics;
-            ret = amdsmi_get_gpu_metrics_info(processors[i], &metrics);
-            if (ret == AMDSMI_STATUS_SUCCESS && metrics.throttle_status > 0) {
-                printf("GPU %d - Active throttling detected (status: 0x%x)\n", 
-                       i, metrics.throttle_status);
-            }
-        }
+
+    // Get socket count
+    ret = amdsmi_get_socket_handles(&socket_count, NULL);
+    if (ret != AMDSMI_STATUS_SUCCESS || socket_count == 0) {
+        fprintf(stderr, "Failed to get socket count\n");
+        amdsmi_shut_down();
+        return 1;
     }
-    
-    free(processors);
-    amdsmi_shutdown();
+
+    amdsmi_socket_handle *sockets = malloc(socket_count * sizeof(amdsmi_socket_handle));
+    if (!sockets) {
+        amdsmi_shut_down();
+        return 1;
+    }
+    ret = amdsmi_get_socket_handles(&socket_count, sockets);
+    if (ret != AMDSMI_STATUS_SUCCESS) {
+        free(sockets);
+        amdsmi_shut_down();
+        return 1;
+    }
+
+    // For each socket, get processor handles and query violation status
+    for (uint32_t i = 0; i < socket_count; i++) {
+        uint32_t device_count = 0;
+        ret = amdsmi_get_processor_handles(sockets[i], &device_count, NULL);
+        if (ret != AMDSMI_STATUS_SUCCESS || device_count == 0)
+            continue;
+
+        amdsmi_processor_handle *processor_handles =
+            malloc(device_count * sizeof(amdsmi_processor_handle));
+        if (!processor_handles)
+            continue;
+        ret = amdsmi_get_processor_handles(sockets[i], &device_count, processor_handles);
+        if (ret != AMDSMI_STATUS_SUCCESS) {
+            free(processor_handles);
+            continue;
+        }
+
+        for (uint32_t j = 0; j < device_count; j++) {
+            amdsmi_violation_status_t violation = {0};
+            ret = amdsmi_get_violation_status(processor_handles[j], &violation);
+            if (ret == AMDSMI_STATUS_SUCCESS) {
+                // PVIOL: per_ppt_pwr; TVIOL: per_socket_thrm (and other thermal % fields)
+                printf("GPU %u - PVIOL (PPT): %lu%%, TVIOL (socket): %lu%%\n",
+                       gpu_number, (unsigned long)violation.per_ppt_pwr,
+                       (unsigned long)violation.per_socket_thrm);
+            }
+            gpu_number++;
+        }
+        free(processor_handles);
+    }
+
+    free(sockets);
+    amdsmi_shut_down();
     return 0;
 }
 ```
