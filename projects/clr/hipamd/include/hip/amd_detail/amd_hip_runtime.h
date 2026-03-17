@@ -187,10 +187,6 @@ template <typename... Ts> constexpr void validateArgs(void (*)(Ts...)) {
   (validateArgType<Ts>(), ...);
 }
 
-template <typename... Ts> std::array<void*, sizeof...(Ts)> pArgs(Ts... formals) {
-  return {static_cast<void*>(&formals)...};
-}
-
 template <typename... Ts, size_t... Is>
 std::array<void*, sizeof...(Ts)> pArgs(std::tuple<Ts...>& formals, std::index_sequence<Is...>) {
   return {(static_cast<void*>(&std::get<Is>(formals)))...};
@@ -208,7 +204,7 @@ void hipLaunchKernelGGL(F kernel, const dim3& numBlocks, const dim3& dimBlocks,
   auto k = reinterpret_cast<void*>(kernel);
 
   if constexpr (std::is_same_v<F, void (*)(Args...)>) {
-    auto ptrArgsArr = pArgs(args...);
+    auto ptrArgsArr = std::array<void*, sizeof...(Args)>{static_cast<void*>(&args)...};
     hipExtLaunchKernel(k, numBlocks, dimBlocks, ptrArgsArr.data(), sharedMemBytes, stream,
                        nullptr, nullptr, 0);
   } else {
