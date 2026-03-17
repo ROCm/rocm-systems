@@ -205,13 +205,11 @@ void hipLaunchKernelGGL(F kernel, const dim3& numBlocks, const dim3& dimBlocks,
 
   if constexpr (std::is_same_v<F, void (*)(Args...)>) {
     std::array<void*, sizeof...(Args)> ptrArgsArr{static_cast<void*>(&args)...};
-    hipExtLaunchKernel(k, numBlocks, dimBlocks, ptrArgsArr.data(), sharedMemBytes, stream,
-                       nullptr, nullptr, 0);
+    hipLaunchKernel(k, numBlocks, dimBlocks, ptrArgsArr.data(), sharedMemBytes, stream);
   } else {
     auto formals = validateArgsCountType(kernel, args...);
     auto ptrArgsArr = pArgs(formals);
-    hipExtLaunchKernel(k, numBlocks, dimBlocks, ptrArgsArr.data(), sharedMemBytes, stream,
-                       nullptr, nullptr, 0);
+    hipLaunchKernel(k, numBlocks, dimBlocks, ptrArgsArr.data(), sharedMemBytes, stream);
   }
 }
 #else
