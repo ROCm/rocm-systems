@@ -467,23 +467,15 @@ class GraphNode : public hipGraphNodeDOTAttribute {
     auto label = GetLabel(flag),
          color = GetColorAndShortenLabel(&label);
 
-         if (Zid == 0) {
-          color = "red";
-        } else if (Zid == 1) {
-          color = "green";
-        } else if (Zid == 2) {
-          color = "blue";
-        } else if (Zid == 3) {
-          color = "yellow";
-        } else if (Zid == 4) {
-          color = "purple";
-        } else if (Zid == 5) {
-          color = "orange";
-        } else if (Zid == 6) {
-          color = "brown";
-        } else if (Zid == 7) {
-          color = "gray";
-        } 
+    if (stream_id_ != 0) {
+      color = "red";
+    } else if (stream_id_ == 1) {
+      color = "blue";
+    } else if (stream_id_ == 2) {
+      color = "green";
+    } else if (stream_id_ == 3) {
+      color = "yellow";
+    }
 
     out << "[";
     out << "style=\"" << style_ << "\"";
@@ -492,12 +484,12 @@ class GraphNode : public hipGraphNodeDOTAttribute {
     }
     out << "shape=\"" << GetShape(flag) << "\"";
     out << "label=\"" << label;
-    if (DEBUG_HIP_GRAPH_DOT_PRINT || DEBUG_HIP_GRAPH_EXEC_DOT_PRINT) {
+    if (DEBUG_HIP_GRAPH_DOT_PRINT > 0) {
       out << "\nStreamId:" << stream_id_;
       // out << "\nSignalIsRequired: " << ((signal_is_required_) ? "true" : "false");
       // out << "\nDeviceId:" << dev_id_;
     }
-    if (DEBUG_HIP_GRAPH_EXEC_DOT_PRINT) {
+    if (DEBUG_HIP_GRAPH_DOT_PRINT >= 2) {
       out << "\nLaunchId:" << launch_id_;
     }
     out << "\"";
@@ -1070,23 +1062,15 @@ class GraphKernelNode : public GraphNode {
     auto label = GetLabel(flag),
          color = GetColorAndShortenLabel(&label);
 
-    if (Zid == 0) {
+    if (stream_id_ == 0) {
       color = "red";
-    } else if (Zid == 1) {
-      color = "green";
-    } else if (Zid == 2) {
+    } else if (stream_id_ == 1) {
       color = "blue";
-    } else if (Zid == 3) {
+    } else if (stream_id_ == 2) {
+      color = "green";
+    } else if (stream_id_ == 3) {
       color = "yellow";
-    } else if (Zid == 4) {
-      color = "purple";
-    } else if (Zid == 5) {
-      color = "orange";
-    } else if (Zid == 6) {
-      color = "brown";
-    } else if (Zid == 7) {
-      color = "gray";
-    } 
+    }
 
     out << "[";
     out << "style";
@@ -1106,12 +1090,12 @@ class GraphKernelNode : public GraphNode {
     out << "label";
     out << "=\"";
     out << label;
-    if (DEBUG_HIP_GRAPH_DOT_PRINT || DEBUG_HIP_GRAPH_EXEC_DOT_PRINT) {
+    if (DEBUG_HIP_GRAPH_DOT_PRINT > 0) {
       out << "\nStreamId:" << stream_id_;
       // out << "\nSignalIsRequired: " << ((signal_is_required_) ? "true" : "false");
       // out << "\nDeviceId:" << dev_id_;
     }
-    if (DEBUG_HIP_GRAPH_EXEC_DOT_PRINT) {
+    if (DEBUG_HIP_GRAPH_DOT_PRINT >= 2) {
       out << "\nLaunchId:" << launch_id_;
     }
     out << "\"";

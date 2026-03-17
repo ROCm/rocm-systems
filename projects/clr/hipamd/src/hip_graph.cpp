@@ -1612,7 +1612,7 @@ hipError_t ihipGraphLaunch(hip::GraphExec* graphExec, hipStream_t stream) {
   getStreamPerThread(stream);
   hip::Stream* launch_stream = hip::getStream(stream);
   auto res = graphExec->Run(launch_stream);
-  if (unlikely(DEBUG_HIP_GRAPH_EXEC_DOT_PRINT)) {
+  if (unlikely(DEBUG_HIP_GRAPH_DOT_PRINT >= 2)) {
     static int i = 1;
     if (i < 10) {
       std::string filename =

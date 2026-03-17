@@ -1015,7 +1015,7 @@ bool Graph::RunNodes(
   }
 
   // PathDecomposition();
-  MinPathCoverBiased();
+  // MinPathCoverBiased();
 
   // Run all commands in the graph
   waits_count_ = 0;
