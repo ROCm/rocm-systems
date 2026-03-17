@@ -8,11 +8,22 @@
     "rocm_path": "${ROCM_PATH:-/opt/rocm}",
     "mpi_path": "${MPI_PATH}"
   },
-  "mpi_args": "--mca oob_tcp_if_include eno0 --mca btl_tcp_if_include eno0 --bind-to none",
+  "mpi_args": {
+    "ainic": "--oversubscribe --mca oob_tcp_if_include eno0 --mca btl_tcp_if_include eno0 --mca btl ^openib --bind-to none",
+    "thor2": "--oversubscribe --mca plm_rsh_agent srun --mca oob_tcp_if_include eno8303 --mca btl_tcp_if_include eno8303 --mca btl ^openib --bind-to none"
+  },
   "env_variables": {
     "HSA_NO_SCRATCH_RECLAIM": "1",
-    "NCCL_SOCKET_IFNAME": "eno0",
+    "NCCL_SOCKET_IFNAME": "eth0,eth1",
     "NCCL_DEBUG": "INFO"
+  },
+  "system_env_variables": {
+    "ainic": {
+      "NCCL_SOCKET_IFNAME": "eno0"
+    },
+    "thor2": {
+      "NCCL_SOCKET_IFNAME": "eno8303"
+    }
   },
   "build_configuration": {
     "cmake_options": {

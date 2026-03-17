@@ -52,12 +52,24 @@ class TestExecutor:
         self.args = args
         self.system_config = config_processor.get_system_config()
         self.paths = config_processor.get_paths()
-        self.global_env = config_processor.get_env_variables()
+        self.global_env = dict(config_processor.get_env_variables())
+
+        # Merge system-specific env overrides if --system is specified
+        system = getattr(args, 'system', '') or ''
+        if system:
+            system_env = config_processor.config.get("system_env_variables", {})
+            if isinstance(system_env, dict) and system in system_env:
+                self.global_env.update(system_env[system])
+            elif system_env and system not in system_env:
+                available = list(system_env.keys()) if isinstance(system_env, dict) else []
+                print(f"WARNING: No system_env_variables for '{system}'. Available: {available}")
         self.build_config = config_processor.get_build_config()
 
         # Setup directories
         self.setup_directories()
 
+        # Detect MPI hosts: prefer SLURM, fall back to hostfile
+        self.mpi_hosts = self._detect_mpi_hosts()
         # MPI hostfile is detected lazily on first MPI test
         self._mpi_hostfile = None
         self._mpi_hostfile_detected = False
@@ -138,24 +150,40 @@ class TestExecutor:
             self._mpi_hostfile_detected = True
         return self._mpi_hostfile
 
-    def _detect_mpi_hostfile(self):
+    def _detect_mpi_hosts(self):
         """
+        Detect MPI host list once during initialization.
+        Priority: SLURM allocation (scontrol) > RCCL_TEST_MPI_HOSTFILE env > ~/.mpi_hostfile
         Detect MPI hostfile.
         Checks RCCL_TEST_MPI_HOSTFILE env var, then ~/.mpi_hostfile default.
 
         Returns:
-            str: Path to hostfile, or None if not found
+            dict with either 'host_list' (comma-separated hosts) or 'hostfile' (path), or empty dict
         """
+        # Check for SLURM allocation first
+        if os.environ.get('SLURM_JOB_ID'):
+            try:
+                result = subprocess.run(
+                    ['scontrol', 'show', 'hostnames'],
+                    capture_output=True, text=True, timeout=5
+                )
+                if result.returncode == 0 and result.stdout.strip():
+                    hosts = ','.join(result.stdout.strip().split('\n'))
+                    print(f"Using SLURM hosts: {hosts}")
+                    return {'host_list': hosts}
+            except (subprocess.TimeoutExpired, FileNotFoundError):
+                pass
+
+        # Fall back to hostfile
         hostfile = os.environ.get('RCCL_TEST_MPI_HOSTFILE')
         if hostfile and os.path.isfile(hostfile):
             print(f"Using MPI hostfile from RCCL_TEST_MPI_HOSTFILE: {hostfile}")
-            return hostfile
+            return {'hostfile': hostfile}
 
-        # Check default hostfile
         default_hostfile = os.path.expanduser('~/.mpi_hostfile')
         if os.path.isfile(default_hostfile):
             print(f"Using default MPI hostfile: {default_hostfile}")
-            return default_hostfile
+            return {'hostfile': default_hostfile}
 
         if self.args.verbose:
             print("No MPI hostfile found (checked RCCL_TEST_MPI_HOSTFILE env var and ~/.mpi_hostfile)")
@@ -482,33 +510,45 @@ class TestExecutor:
             if os.getuid() == 0:
                 mpi_cmd += " --allow-run-as-root"
 
-            # Use cached hostfile detected during initialization
-            hostfile = self.mpi_hostfile
-
-            # Warn if multi-node test without hostfile
-            if hostfile is None and num_nodes > 1:
-                print("WARNING: Multi-node test without hostfile")
-
-            hostfile_arg = f"--hostfile {hostfile} " if hostfile else ""
-
-            # Determine mapping strategy based on num_gpus and num_nodes
-            # Use PPR (processes per resource) to place num_gpus ranks per node
-            # This ignores the slots specification in the hostfile
-            if num_nodes > 1:
-                # Multi-node test: use ppr to control ranks per node
-                map_by_arg = f"--map-by ppr:{num_gpus}:node "
+            # Use cached host detection from initialization
+            if 'host_list' in self.mpi_hosts:
+                # SLURM mode: use --host with slot counts instead of --map-by ppr
+                # Repeat each host num_gpus times to place that many ranks per node
+                hosts = self.mpi_hosts['host_list'].split(',')
+                expanded = ','.join(f"{h}:{num_gpus}" for h in hosts)
+                host_arg = f"--host {expanded} "
+                map_by_arg = ""
+            elif 'hostfile' in self.mpi_hosts:
+                host_arg = f"--hostfile {self.mpi_hosts['hostfile']} "
+                # Use PPR to control ranks per node with hostfile
+                map_by_arg = f"--map-by ppr:{num_gpus}:node " if num_nodes > 1 else ""
             else:
-                # Single node: use default mapping (no need for ppr)
+                if num_nodes > 1:
+                    print("WARNING: Multi-node test without hostfile or SLURM allocation")
+                host_arg = ""
                 map_by_arg = ""
 
-            # MCA params: use config-level "mpi_args" if provided, otherwise defaults
-            default_mca = "--mca btl ^vader,openib --mca pml ucx --bind-to none"
-            extra_mpi_args = test_config.get("mpi_args", "") or self.config_processor.config.get("mpi_args", "")
-            mca_params = extra_mpi_args if extra_mpi_args else default_mca
+            # MCA params priority: --system profile lookup > test-level "mpi_args" string > default
+            default_mca = "--mca btl ^openib --mca pml ucx --bind-to none"
+            system = getattr(self.args, 'system', '') or ''
+            mpi_args_config = self.config_processor.config.get("mpi_args", {})
+
+            if system:
+                if isinstance(mpi_args_config, dict) and system in mpi_args_config:
+                    mca_params = mpi_args_config[system]
+                else:
+                    available = list(mpi_args_config.keys()) if isinstance(mpi_args_config, dict) else []
+                    print(f"ERROR: Unknown system profile '{system}'. Available: {available}")
+                    mca_params = default_mca
+            elif isinstance(mpi_args_config, str) and mpi_args_config:
+                mca_params = mpi_args_config
+            else:
+                config_mpi_args = test_config.get("mpi_args", "")
+                mca_params = config_mpi_args if config_mpi_args else default_mca
 
             mpi_args = (
                 f"-np {num_ranks} "
-                f"{hostfile_arg}"
+                f"{host_arg}"
                 f"{map_by_arg}"
                 f"{mca_params}"
             )
