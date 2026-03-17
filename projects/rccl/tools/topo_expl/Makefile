@@ -114,6 +114,8 @@ hipify:
 	echo 'inline void initNvtxRegisteredEnums() {}' >> hipify_rccl/include/nvtx.h
 	# PATCH 5: Add nccl_tuner.h include to get NCCL_NUM_ALGORITHMS and NCCL_NUM_PROTOCOLS macros
 	sed -i '/#include "core.h"/a #include "plugin/nccl_tuner.h"' hipify_rccl/include/rccl_common.h
+	# PATCH 6: Guard RCCL_EXPOSE_STATIC so -DRCCL_EXPOSE_STATIC from CXXFLAGS does not trigger redefinition warning
+	sed -i 's|^#define RCCL_EXPOSE_STATIC \(.*\)|#ifndef RCCL_EXPOSE_STATIC\n#define RCCL_EXPOSE_STATIC \1\n#endif|' hipify_rccl/include/rccl_vars.h
 	@echo ">>> Hipify complete."
 
 clean:
