@@ -229,6 +229,8 @@ TEST_CASE(Unit_MemcpyToSymbolInParallelWithStreamLaunch) {
 
   // Simple thread function where we run MemcpyToSymbol in parallel
   // While we create stream, enqueue work and destroy it
+  // This pattern is seen in rocDecode, where we found this issue.
+  // Creating this test so that we do not break this again.
   auto thread_func = [&](int thread_id) {
     int val = thread_id;
     // We run it until we notify it or the previous threads have errored
