@@ -17,7 +17,8 @@ rocprofiler_systems_add_bin_test(
     ARGS --balanced -v 2 -- ls
     LABELS preset sample
     TIMEOUT 60
-    PASS_REGEX "Preset:        --balanced"
+    PASS_REGEX "Preset:        --balanced|Output Summary|Perfetto trace|Text profile"
+    FAIL_REGEX "RocPD database|ROCPROFSYS_ABORT_FAIL_REGEX"
 )
 
 rocprofiler_systems_add_bin_test(
@@ -25,8 +26,10 @@ rocprofiler_systems_add_bin_test(
     TARGET rocprofiler-systems-sample
     ARGS --profile-only -v 2 -- ls
     LABELS preset sample
+    ENVIRONMENT "ROCPROFSYS_TRACE=OFF" # ensure variable is not set by test function
     TIMEOUT 60
-    PASS_REGEX "Preset:        --profile-only"
+    PASS_REGEX "Preset:        --profile-only|Output Summary|Text profile|JSON data"
+    FAIL_REGEX "Perfetto trace|RocPD database|ROCPROFSYS_ABORT_FAIL_REGEX"
 )
 
 rocprofiler_systems_add_bin_test(
@@ -35,7 +38,8 @@ rocprofiler_systems_add_bin_test(
     ARGS --detailed -v 2 -- ls
     LABELS preset sample
     TIMEOUT 60
-    PASS_REGEX "Preset:        --detailed"
+    PASS_REGEX "Preset:        --detailed|Output Summary|Perfetto trace|Text profile"
+    FAIL_REGEX "RocPD database|ROCPROFSYS_ABORT_FAIL_REGEX"
 )
 
 rocprofiler_systems_add_bin_test(
@@ -44,7 +48,8 @@ rocprofiler_systems_add_bin_test(
     ARGS --trace-hpc -v 2 -- ls
     LABELS preset sample
     TIMEOUT 60
-    PASS_REGEX "Preset:        --trace-hpc"
+    PASS_REGEX "Preset:        --trace-hpc|Output Summary|Perfetto trace|Text profile"
+    FAIL_REGEX "RocPD database|ROCPROFSYS_ABORT_FAIL_REGEX"
 )
 
 if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU})
@@ -54,7 +59,7 @@ if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU})
         ARGS --workload-trace -v 2 -- ls
         LABELS preset sample
         TIMEOUT 60
-        PASS_REGEX "Preset:        --workload-trace"
+        PASS_REGEX "Preset:        --workload-trace|Output Summary|RocPD database"
     )
 endif()
 
@@ -64,7 +69,8 @@ rocprofiler_systems_add_bin_test(
     ARGS --sys-trace -v 2 -- ls
     LABELS preset sample
     TIMEOUT 60
-    PASS_REGEX "Preset:        --sys-trace"
+    PASS_REGEX "Preset:        --sys-trace|Output Summary|Perfetto trace"
+    FAIL_REGEX "RocPD database|ROCPROFSYS_ABORT_FAIL_REGEX"
 )
 
 rocprofiler_systems_add_bin_test(
@@ -73,7 +79,8 @@ rocprofiler_systems_add_bin_test(
     ARGS --runtime-trace -v 2 -- ls
     LABELS preset sample
     TIMEOUT 60
-    PASS_REGEX "Preset:        --runtime-trace"
+    PASS_REGEX "Preset:        --runtime-trace|Output Summary|Perfetto trace"
+    FAIL_REGEX "RocPD database|ROCPROFSYS_ABORT_FAIL_REGEX"
 )
 
 rocprofiler_systems_add_bin_test(
@@ -82,7 +89,8 @@ rocprofiler_systems_add_bin_test(
     ARGS --trace-gpu -v 2 -- ls
     LABELS preset sample
     TIMEOUT 60
-    PASS_REGEX "Preset:        --trace-gpu"
+    PASS_REGEX "Preset:        --trace-gpu|Output Summary|Perfetto trace|Text profile"
+    FAIL_REGEX "RocPD database|ROCPROFSYS_ABORT_FAIL_REGEX"
 )
 
 rocprofiler_systems_add_bin_test(
@@ -91,7 +99,8 @@ rocprofiler_systems_add_bin_test(
     ARGS --trace-openmp -v 2 -- ls
     LABELS preset sample
     TIMEOUT 60
-    PASS_REGEX "Preset:        --trace-openmp"
+    PASS_REGEX "Preset:        --trace-openmp|Output Summary|Perfetto trace|Text profile"
+    FAIL_REGEX "RocPD database|ROCPROFSYS_ABORT_FAIL_REGEX"
 )
 
 rocprofiler_systems_add_bin_test(
@@ -100,7 +109,8 @@ rocprofiler_systems_add_bin_test(
     ARGS --profile-mpi -v 2 -- ls
     LABELS preset sample
     TIMEOUT 60
-    PASS_REGEX "Preset:        --profile-mpi"
+    PASS_REGEX "Preset:        --profile-mpi|Output Summary|Text profile|JSON data"
+    FAIL_REGEX "Perfetto trace|RocPD database|ROCPROFSYS_ABORT_FAIL_REGEX"
 )
 
 rocprofiler_systems_add_bin_test(
@@ -109,7 +119,8 @@ rocprofiler_systems_add_bin_test(
     ARGS --trace-hw-counters -v 2 -- ls
     LABELS preset sample
     TIMEOUT 60
-    PASS_REGEX "Preset:        --trace-hw-counters"
+    PASS_REGEX "Preset:        --trace-hw-counters|Output Summary|Text profile|JSON data"
+    FAIL_REGEX "RocPD database|ROCPROFSYS_ABORT_FAIL_REGEX"
 )
 
 rocprofiler_systems_add_bin_test(
@@ -132,7 +143,8 @@ rocprofiler_systems_add_bin_test(
     ARGS --balanced -v 2 -- ls
     LABELS preset run
     TIMEOUT 60
-    PASS_REGEX "Preset:        --balanced"
+    PASS_REGEX "Preset:        --balanced|Output Summary|Perfetto trace|Text profile"
+    FAIL_REGEX "RocPD database|ROCPROFSYS_ABORT_FAIL_REGEX"
 )
 
 rocprofiler_systems_add_bin_test(
@@ -140,8 +152,10 @@ rocprofiler_systems_add_bin_test(
     TARGET rocprofiler-systems-run
     ARGS --profile-only -v 2 -- ls
     LABELS preset run
+    ENVIRONMENT "ROCPROFSYS_TRACE=OFF" # ensure variable is not set by test function
     TIMEOUT 60
-    PASS_REGEX "Preset:        --profile-only"
+    PASS_REGEX "Preset:        --profile-only|Output Summary|Text profile|JSON data"
+    FAIL_REGEX "Perfetto trace|RocPD database|ROCPROFSYS_ABORT_FAIL_REGEX"
 )
 
 rocprofiler_systems_add_bin_test(
@@ -150,7 +164,8 @@ rocprofiler_systems_add_bin_test(
     ARGS --detailed -v 2 -- ls
     LABELS preset run
     TIMEOUT 60
-    PASS_REGEX "Preset:        --detailed"
+    PASS_REGEX "Preset:        --detailed|Output Summary|Perfetto trace|Text profile"
+    FAIL_REGEX "RocPD database|ROCPROFSYS_ABORT_FAIL_REGEX"
 )
 
 rocprofiler_systems_add_bin_test(
@@ -159,7 +174,8 @@ rocprofiler_systems_add_bin_test(
     ARGS --trace-hpc -v 2 -- ls
     LABELS preset run
     TIMEOUT 60
-    PASS_REGEX "Preset:        --trace-hpc"
+    PASS_REGEX "Preset:        --trace-hpc|Output Summary|Perfetto trace|Text profile"
+    FAIL_REGEX "RocPD database|ROCPROFSYS_ABORT_FAIL_REGEX"
 )
 
 if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU})
@@ -169,7 +185,7 @@ if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU})
         ARGS --workload-trace -v 2 -- ls
         LABELS preset run
         TIMEOUT 60
-        PASS_REGEX "Preset:        --workload-trace"
+        PASS_REGEX "Preset:        --workload-trace|Output Summary|RocPD database"
     )
 endif()
 
@@ -179,7 +195,8 @@ rocprofiler_systems_add_bin_test(
     ARGS --sys-trace -v 2 -- ls
     LABELS preset run
     TIMEOUT 60
-    PASS_REGEX "Preset:        --sys-trace"
+    PASS_REGEX "Preset:        --sys-trace|Output Summary|Perfetto trace"
+    FAIL_REGEX "RocPD database|ROCPROFSYS_ABORT_FAIL_REGEX"
 )
 
 rocprofiler_systems_add_bin_test(
@@ -188,7 +205,8 @@ rocprofiler_systems_add_bin_test(
     ARGS --runtime-trace -v 2 -- ls
     LABELS preset run
     TIMEOUT 60
-    PASS_REGEX "Preset:        --runtime-trace"
+    PASS_REGEX "Preset:        --runtime-trace|Output Summary|Perfetto trace"
+    FAIL_REGEX "RocPD database|ROCPROFSYS_ABORT_FAIL_REGEX"
 )
 
 rocprofiler_systems_add_bin_test(
@@ -197,7 +215,8 @@ rocprofiler_systems_add_bin_test(
     ARGS --trace-gpu -v 2 -- ls
     LABELS preset run
     TIMEOUT 60
-    PASS_REGEX "Preset:        --trace-gpu"
+    PASS_REGEX "Preset:        --trace-gpu|Output Summary|Perfetto trace|Text profile"
+    FAIL_REGEX "RocPD database|ROCPROFSYS_ABORT_FAIL_REGEX"
 )
 
 rocprofiler_systems_add_bin_test(
@@ -206,7 +225,8 @@ rocprofiler_systems_add_bin_test(
     ARGS --trace-openmp -v 2 -- ls
     LABELS preset run
     TIMEOUT 60
-    PASS_REGEX "Preset:        --trace-openmp"
+    PASS_REGEX "Preset:        --trace-openmp|Output Summary|Perfetto trace|Text profile"
+    FAIL_REGEX "RocPD database|ROCPROFSYS_ABORT_FAIL_REGEX"
 )
 
 rocprofiler_systems_add_bin_test(
@@ -215,7 +235,8 @@ rocprofiler_systems_add_bin_test(
     ARGS --profile-mpi -v 2 -- ls
     LABELS preset run
     TIMEOUT 60
-    PASS_REGEX "Preset:        --profile-mpi"
+    PASS_REGEX "Preset:        --profile-mpi|Output Summary|Text profile|JSON data"
+    FAIL_REGEX "RocPD database|ROCPROFSYS_ABORT_FAIL_REGEX"
 )
 
 rocprofiler_systems_add_bin_test(
@@ -224,7 +245,8 @@ rocprofiler_systems_add_bin_test(
     ARGS --trace-hw-counters -v 2 -- ls
     LABELS preset run
     TIMEOUT 60
-    PASS_REGEX "Preset:        --trace-hw-counters"
+    PASS_REGEX "Preset:        --trace-hw-counters|Output Summary|Text profile|JSON data"
+    FAIL_REGEX "RocPD database|ROCPROFSYS_ABORT_FAIL_REGEX"
 )
 
 rocprofiler_systems_add_bin_test(
