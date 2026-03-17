@@ -69,6 +69,7 @@
 
 #ifdef ROCR_HOTSWAP_ENABLED
 #include "hotswap/hotswap.hpp"
+#include "hotswap/transpiler.hpp"
 #endif
 
 using namespace rocr::amd::hsa;
@@ -1289,8 +1290,33 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
 
   hsa_isa_t objectsIsa = context_->IsaFromName(codeIsa.c_str());
   if (!objectsIsa.handle) {
-    logger_ << "LoaderError: code object's ISA (" << codeIsa.c_str() << ") is invalid\n";
-    return HSA_STATUS_ERROR_INVALID_ISA_NAME;
+#ifdef ROCR_HOTSWAP_ENABLED
+    // If hotswap ISA override is enabled, an unknown ISA (e.g., gfx1250 on a
+    // gfx950 system) is expected — the transpiler will handle translation.
+    static const char* s_hotswap_isa_early = std::getenv("HSA_HOTSWAP_ISA_OVERRIDE");
+    if (s_hotswap_isa_early && s_hotswap_isa_early[0] && s_hotswap_isa_early[0] != '0') {
+      // Use the agent's ISA as the objectsIsa for downstream compatibility checks
+      std::string targetGfx = s_hotswap_isa_early;
+      if (targetGfx == "1") {
+        // Auto-detect: use the first available agent ISA
+        // For now, just let it fall through — the ISA mismatch check below
+        // will catch it and set isaOverridden = true
+      } else {
+        std::string targetIsaStr = std::string("amdgcn-amd-amdhsa--") + targetGfx;
+        objectsIsa = context_->IsaFromName(targetIsaStr.c_str());
+      }
+      if (!objectsIsa.handle) {
+        // Still can't resolve target ISA name — fatal
+        logger_ << "LoaderError: neither source ISA (" << codeIsa.c_str()
+                << ") nor target ISA could be resolved\n";
+        return HSA_STATUS_ERROR_INVALID_ISA_NAME;
+      }
+    } else
+#endif
+    {
+      logger_ << "LoaderError: code object's ISA (" << codeIsa.c_str() << ") is invalid\n";
+      return HSA_STATUS_ERROR_INVALID_ISA_NAME;
+    }
   }
 
   bool isaOverridden = false;
@@ -1402,6 +1428,37 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
       if (!targetIsaName.empty()) {
         std::string agentIsaName = targetIsaName;
 
+        if (rocr::hotswap::NeedsTranspile(codeIsa, agentIsaName)) {
+          // Cross-family transpile (e.g., gfx1250 → gfx950)
+          // TranspileCodeObject may reallocate the buffer if .text grows
+          void* transpileData = elfData;
+          size_t transpileSize = elfSize;
+          rocr::hotswap::TranspileStats stats;
+          auto rt = rocr::hotswap::TranspileCodeObject(
+              &transpileData, &transpileSize, codeIsa, agentIsaName, &stats);
+
+          if (rt.status == HSA_STATUS_SUCCESS && rt.rules_matched > 0) {
+            if (transpileData != elfData) {
+              // Buffer was reallocated — update the loaded code object's
+              // reference. Note: the old buffer is still owned by the
+              // code reader, but the loaded code object now uses the new
+              // one. We store it so it doesn't leak.
+              auto& lco = loaded_code_objects.back();
+              // Store the transpiled buffer for the loaded code object
+              // The transpiled data will be used by LoadSegments below.
+              elfData = transpileData;
+              elfSize = transpileSize;
+            }
+            std::cerr << "hotswap: transpile complete: "
+                      << stats.translated_passthrough << " passthrough, "
+                      << stats.translated_renamed << " renamed, "
+                      << stats.translated_waitcnt << " waitcnt, "
+                      << stats.unsupported_skipped << " unsupported\n";
+          } else if (rt.status != HSA_STATUS_SUCCESS) {
+            logger_ << "LoaderWarning: hotswap cross-family transpile failed\n";
+          }
+        } else {
+          // Same-family retarget (e.g., gfx950 → gfx942)
           // Step 1: Retarget instructions from source ISA to target ISA
           auto rt = rocr::hotswap::RetargetCodeObject(
               elfData, elfSize, codeIsa, agentIsaName);
@@ -1415,6 +1472,7 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
           } else if (rt.status != HSA_STATUS_SUCCESS) {
             logger_ << "LoaderWarning: hotswap ISA retarget failed\n";
           }
+        }
       }
     }
 

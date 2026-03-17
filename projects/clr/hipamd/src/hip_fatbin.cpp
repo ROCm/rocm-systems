@@ -473,6 +473,14 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
         uint32_t target_mach = 0;
         if (target_gfx == "gfx942") target_mach = 0x4c;
         else if (target_gfx == "gfx950") target_mach = 0x4f;
+        else if (target_gfx == "gfx90a") target_mach = 0x42;
+
+        // Detect cross-family source ISAs
+        bool is_cross_family = false;
+        if (mach == 0x49 || mach == 0x5a) {
+          // gfx1250 (0x49) or gfx1251 (0x5a) — RDNA4 source
+          is_cross_family = true;
+        }
 
         if (target_mach != 0 && mach != target_mach) {
           LogPrintfInfo("HotSwap: bare ELF mach=0x%02x, target=0x%02x — patching for cross-gen",
@@ -594,11 +602,22 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
     if (hotswap_override[0] && std::string(hotswap_override) != "1") {
       std::string target_gfx(hotswap_override);
       if (target_gfx == "gfx942") {
+        // Same-family: CDNA4 → CDNA3
         hotswap_extra_isas.insert("amdgcn-amd-amdhsa--gfx950");
         hotswap_extra_isas.insert("amdgcn-amd-amdhsa--gfx950:sramecc+:xnack-");
       } else if (target_gfx == "gfx950") {
+        // Same-family: CDNA3 → CDNA4
         hotswap_extra_isas.insert("amdgcn-amd-amdhsa--gfx942");
         hotswap_extra_isas.insert("amdgcn-amd-amdhsa--gfx942:sramecc+:xnack-");
+        // Cross-family: RDNA4 → CDNA4 (via transpiler)
+        hotswap_extra_isas.insert("amdgcn-amd-amdhsa--gfx1250");
+        hotswap_extra_isas.insert("amdgcn-amd-amdhsa--gfx1250:xnack-");
+        hotswap_extra_isas.insert("amdgcn-amd-amdhsa--gfx1251");
+        hotswap_extra_isas.insert("amdgcn-amd-amdhsa--gfx1251:xnack-");
+      } else if (target_gfx == "gfx942" || target_gfx == "gfx90a") {
+        // Cross-family: RDNA4 → CDNA3/CDNA2 (via transpiler)
+        hotswap_extra_isas.insert("amdgcn-amd-amdhsa--gfx1250");
+        hotswap_extra_isas.insert("amdgcn-amd-amdhsa--gfx1250:xnack-");
       }
     }
   }
