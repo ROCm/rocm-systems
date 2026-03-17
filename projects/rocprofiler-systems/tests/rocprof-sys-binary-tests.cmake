@@ -312,6 +312,53 @@ rocprofiler_systems_add_bin_test(
         "ROCPROFSYS_CONFIG_FILE(.*)ROCPROFSYS_ENABLED(.*)ROCPROFSYS_SUPPRESS_CONFIG(.*)ROCPROFSYS_SUPPRESS_PARSING(.*)ROCPROFSYS_VERBOSE"
 )
 
+# -------------------------------------------------------------------------------------- #
+# Conditional GPU init tests - verify settings/components work without GPU queries
+# -------------------------------------------------------------------------------------- #
+
+rocprofiler_systems_add_bin_test(
+    NAME rocprofiler-systems-avail-settings-no-gpu
+    TARGET rocprofiler-systems-avail
+    ARGS --settings --brief
+    LABELS "rocprofiler-systems-avail"
+    TIMEOUT 45
+    PASS_REGEX "ROCPROFSYS_TRACE"
+)
+
+rocprofiler_systems_add_bin_test(
+    NAME rocprofiler-systems-avail-components-no-gpu
+    TARGET rocprofiler-systems-avail
+    ARGS --components --brief
+    LABELS "rocprofiler-systems-avail"
+    TIMEOUT 45
+    PASS_REGEX "COMPONENT"
+)
+
+rocprofiler_systems_add_bin_test(
+    NAME rocprofiler-systems-avail-settings-description
+    TARGET rocprofiler-systems-avail
+    ARGS --settings --description --brief
+    LABELS "rocprofiler-systems-avail"
+    TIMEOUT 45
+    PASS_REGEX "ROCPROFSYS_OUTPUT_PATH"
+)
+
+if(NOT _VALID_GPU)
+    set(_DISABLE_GPU_TESTS ON)
+else()
+    set(_DISABLE_GPU_TESTS OFF)
+endif()
+
+rocprofiler_systems_add_bin_test(
+    NAME rocprofiler-systems-avail-settings-rocm-available
+    TARGET rocprofiler-systems-avail
+    ARGS --settings --description --brief
+    LABELS "rocprofiler-systems-avail" "rocm"
+    TIMEOUT 45
+    PASS_REGEX "ROCPROFSYS_AMD_SMI_METRICS(.*)ROCPROFSYS_ROCM_DOMAINS(.*)"
+    DISABLED ${_DISABLE_GPU_TESTS}
+)
+
 rocprofiler_systems_add_bin_test(
     NAME rocprofiler-systems-run-help
     TARGET rocprofiler-systems-run

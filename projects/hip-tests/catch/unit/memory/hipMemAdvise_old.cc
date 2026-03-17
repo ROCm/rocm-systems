@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2021-2024 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-IMPLIED, INNCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANNY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /* Test Case Description:
    Scenario-1: The following Function Tests the working of flags which can be
@@ -84,18 +71,16 @@ __global__ void MemAdvseKernel(int n, int* x) {
 
 // Kernel
 __global__ void MemAdvise2(int* Hmm, int n) {
-  int index = blockIdx.x * blockDim.x + threadIdx.x;
-  int stride = blockDim.x * gridDim.x;
-  for (int i = index; i < n; i += stride) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < n) {
     Hmm[i] = Hmm[i] + 10;
   }
 }
 
 // Kernel
 __global__ void MemAdvise3(int* Hmm, int* Hmm1, int n) {
-  int index = blockIdx.x * blockDim.x + threadIdx.x;
-  int stride = blockDim.x * gridDim.x;
-  for (int i = index; i < n; i += stride) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < n) {
     Hmm1[i] = Hmm[i] + 10;
   }
 }
@@ -256,48 +241,37 @@ TEST_CASE(Unit_hipMemAdvise_TstAccessedByFlg3) {
 TEST_CASE(Unit_hipMemAdvise_TstAccessedByFlg4) {
   int managed = HmmAttrPrint();
   if (managed == 1) {
-    int *Hmm = NULL, NumElms = (1024 * 1024), InitVal = 123, blockSize = 64;
-    int DataMismatch = 0;
+    int *Hmm = NULL, NumElms = (1024 * 1024), InitVal = 123, blockSize = 1024;
     hipStream_t strm;
     HIP_CHECK(hipStreamCreate(&strm));
     HIP_CHECK(hipMallocManaged(&Hmm, (NumElms * sizeof(int))));
-    HIP_CHECK(hipMemAdvise(Hmm, (NumElms * sizeof(int)), hipMemAdviseSetAccessedBy, 0));
     // Initializing memory
     for (int i = 0; i < NumElms; ++i) {
       Hmm[i] = InitVal;
     }
-    dim3 dimBlock(blockSize, 1, 1);
-    dim3 dimGrid((NumElms + blockSize - 1) / blockSize, 1, 1);
+    HIP_CHECK(hipMemAdvise(Hmm, (NumElms * sizeof(int)), hipMemAdviseSetAccessedBy, 0));
+    HIP_CHECK(hipMemPrefetchAsync(Hmm, (NumElms * sizeof(int)), 0, strm));
+    HIP_CHECK(hipDeviceSynchronize());
     // launching kernel from each one of the gpus
-    MemAdvise2<<<dimGrid, dimBlock, 0, strm>>>(Hmm, NumElms);
-    HIP_CHECK(hipStreamSynchronize(strm));
+    MemAdvise2<<<1024, 1024, 0, strm>>>(Hmm, NumElms);
+    HIP_CHECK(hipDeviceSynchronize());
 
     // verifying the final result
     for (int i = 0; i < NumElms; ++i) {
-      if (Hmm[i] != (InitVal + 10)) {
-        DataMismatch++;
-      }
-    }
-
-    if (DataMismatch != 0) {
-      WARN("DataMismatch is observed at line: " << __LINE__);
-      REQUIRE(false);
+      INFO("index: " << i << " Hmm[i]: " << Hmm[i] << " Expected: " << (InitVal + 10));
+      REQUIRE(Hmm[i] == (InitVal + 10));
     }
 
     HIP_CHECK(hipMemAdvise(Hmm, (NumElms * sizeof(int)), hipMemAdviseUnsetAccessedBy, 0));
-    MemAdvise2<<<dimGrid, dimBlock, 0, strm>>>(Hmm, NumElms);
-    HIP_CHECK(hipStreamSynchronize(strm));
+    HIP_CHECK(hipDeviceSynchronize());
+    MemAdvise2<<<1024, 1024, 0, strm>>>(Hmm, NumElms);
+    HIP_CHECK(hipDeviceSynchronize());
     // verifying the final result
     for (int i = 0; i < NumElms; ++i) {
-      if (Hmm[i] != (InitVal + (2 * 10))) {
-        DataMismatch++;
-      }
+      INFO("index: " << i << " Hmm[i]: " << Hmm[i] << " Expected: " << (InitVal + 20));
+      REQUIRE(Hmm[i] == (InitVal + 20));
     }
 
-    if (DataMismatch != 0) {
-      WARN("DataMismatch is observed at line: " << __LINE__);
-      REQUIRE(false);
-    }
     HIP_CHECK(hipFree(Hmm));
     HIP_CHECK(hipStreamDestroy(strm));
   } else {
@@ -341,7 +315,7 @@ TEST_CASE(Unit_hipMemAdvise_TstAlignedAllocMem) {
       HIP_CHECK(hipMemAdvise(Mllc, MemSz, hipMemAdviseSetPreferredLocation, 0));
       HIP_CHECK(hipMemPrefetchAsync(Mllc, MemSz, 0, strm));
       HIP_CHECK(hipStreamSynchronize(strm));
-      MemAdvise2<<<(NumElms / 32), 32, 0, strm>>>(Mllc, NumElms);
+      MemAdvise2<<<4, 1024, 0, strm>>>(Mllc, NumElms);
       HIP_CHECK(hipStreamSynchronize(strm));
       for (int i = 0; i < NumElms; ++i) {
         if (Mllc[i] != (InitVal + 10)) {
@@ -394,7 +368,7 @@ TEST_CASE(Unit_hipMemAdvise_ReadMosltyMgpuTst) {
           "This test needs atleast two gpus to run."
           "Hence skipping the test.\n");
     }
-    int *Hmm = NULL, NumElms = (1024 * 1024), InitVal = 123, blockSize = 64;
+    int *Hmm = NULL, NumElms = (1024 * 1024), InitVal = 123;
     int *Hmm1 = NULL, DataMismatch = 0;
     hipStream_t strm;
     HIP_CHECK(hipMallocManaged(&Hmm, (NumElms * sizeof(int))));
@@ -403,8 +377,6 @@ TEST_CASE(Unit_hipMemAdvise_ReadMosltyMgpuTst) {
       Hmm[i] = InitVal;
     }
     HIP_CHECK(hipMemAdvise(Hmm, (NumElms * sizeof(int)), hipMemAdviseSetReadMostly, 0));
-    dim3 dimBlock(blockSize, 1, 1);
-    dim3 dimGrid((NumElms + blockSize - 1) / blockSize, 1, 1);
 #if HT_AMD
     SECTION("Launch Kernel on all other gpus") {
       // launching kernel from each one of the gpus
@@ -413,7 +385,7 @@ TEST_CASE(Unit_hipMemAdvise_ReadMosltyMgpuTst) {
         HIP_CHECK(hipSetDevice(i));
         HIP_CHECK(hipStreamCreate(&strm));
         HIP_CHECK(hipMallocManaged(&Hmm1, (NumElms * sizeof(int))));
-        MemAdvise3<<<dimGrid, dimBlock, 0, strm>>>(Hmm, Hmm1, NumElms);
+        MemAdvise3<<<1024, 1024, 0, strm>>>(Hmm, Hmm1, NumElms);
         HIP_CHECK(hipStreamSynchronize(strm));
         // verifying the results
         for (int j = 0; j < NumElms; ++j) {
@@ -436,7 +408,7 @@ TEST_CASE(Unit_hipMemAdvise_ReadMosltyMgpuTst) {
         HIP_CHECK(hipSetDevice(i));
         HIP_CHECK(hipStreamCreate(&strm));
         HIP_CHECK(hipMemAdvise(Hmm, (NumElms * sizeof(int)), hipMemAdviseSetReadMostly, i));
-        MemAdvise2<<<dimGrid, dimBlock, 0, strm>>>(Hmm, NumElms);
+        MemAdvise2<<<1024, 1024, 0, strm>>>(Hmm, NumElms);
         HIP_CHECK(hipStreamSynchronize(strm));
         HIP_CHECK(hipStreamDestroy(strm));
       }

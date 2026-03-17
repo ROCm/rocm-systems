@@ -49,7 +49,7 @@
 
 class TestMetricsCounterRead : public TestBase {
  public:
-    TestMetricsCounterRead();
+  TestMetricsCounterRead();
 
   // @Brief: Destructor for test case of TestVOltRead
   virtual ~TestMetricsCounterRead();

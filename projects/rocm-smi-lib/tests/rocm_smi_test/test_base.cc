@@ -43,12 +43,13 @@
  *
  */
 
+#include "rocm_smi_test/test_base.h"
+
 #include <cassert>
 
-#include "rocm_smi/rocm_smi.h"
-#include "rocm_smi_test/test_base.h"
-#include "rocm_smi_test/test_common.h"
 #include "gtest/gtest.h"
+#include "rocm_smi/rocm_smi.h"
+#include "rocm_smi_test/test_common.h"
 
 static const int kOutputLineLength = 80;
 static const char kLabelDelimiter[] = "####";
@@ -61,12 +62,10 @@ static const char kResultsLabel[] = "TEST RESULTS";
 // This one is used outside this file
 const char kSetupLabel[] = "TEST SETUP";
 
-TestBase::TestBase() : setup_failed_(false) {
-}
+TestBase::TestBase() : setup_failed_(false) {}
 TestBase::~TestBase() = default;
 
-void TestBase::MakeHeaderStr(const char *inStr,
-                                   std::string *outStr) const {
+void TestBase::MakeHeaderStr(const char* inStr, std::string* outStr) const {
   assert(outStr != nullptr);
   assert(inStr != nullptr);
   outStr->clear();
@@ -79,9 +78,7 @@ void TestBase::MakeHeaderStr(const char *inStr,
   }
 }
 
-void TestBase::SetUp(void) {
-  SetUp(0);
-}
+void TestBase::SetUp(void) { SetUp(0); }
 
 void TestBase::SetUp(uint64_t init_flags) {
   std::string label;
@@ -129,20 +126,18 @@ void TestBase::PrintDeviceHeader(uint32_t dv_ind) {
   err = rsmi_dev_id_get(dv_ind, &val_ui16);
   if (err == RSMI_STATUS_NOT_SUPPORTED) {
     IF_VERB(STANDARD) {
-      std::cout << "	**Device ID:" "N/A" << std::endl;
+      std::cout << "	**Device ID:"
+                   "N/A"
+                << std::endl;
     }
     return;
   } else {
     CHK_ERR_ASRT(err)
-    IF_VERB(STANDARD) {
-      std::cout << "\t**Device ID: 0x" << std::hex << val_ui16 << std::endl;
-    }
+    IF_VERB(STANDARD) { std::cout << "\t**Device ID: 0x" << std::hex << val_ui16 << std::endl; }
   }
   err = rsmi_dev_revision_get(dv_ind, &val_ui16);
   if (err == RSMI_STATUS_NOT_SUPPORTED) {
-    IF_VERB(STANDARD) {
-      std::cout << "\t**Device Revision ID: N/A" << std::endl;
-    }
+    IF_VERB(STANDARD) { std::cout << "\t**Device Revision ID: N/A" << std::endl; }
     ASSERT_EQ(err, RSMI_STATUS_NOT_SUPPORTED);
   } else {
     CHK_ERR_ASRT(err)
@@ -155,20 +150,15 @@ void TestBase::PrintDeviceHeader(uint32_t dv_ind) {
   char name[128];
   err = rsmi_dev_name_get(dv_ind, name, 128);
   CHK_ERR_ASRT(err)
-  IF_VERB(STANDARD) {
-    std::cout << "\t**Device name: " << name << std::endl;
-  }
+  IF_VERB(STANDARD) { std::cout << "\t**Device name: " << name << std::endl; }
   err = rsmi_dev_vendor_id_get(dv_ind, &val_ui16);
   CHK_ERR_ASRT(err)
   IF_VERB(STANDARD) {
-    std::cout << "\t**Device Vendor ID: 0x" << std::hex << val_ui16 <<
-                                                                     std::endl;
+    std::cout << "\t**Device Vendor ID: 0x" << std::hex << val_ui16 << std::endl;
   }
   err = rsmi_dev_subsystem_id_get(dv_ind, &val_ui16);
   if (err == RSMI_STATUS_NOT_SUPPORTED) {
-    IF_VERB(STANDARD) {
-      std::cout << "\t**Subsystem ID: N/A" << std::endl;
-    }
+    IF_VERB(STANDARD) { std::cout << "\t**Subsystem ID: N/A" << std::endl; }
   } else {
     CHK_ERR_ASRT(err)
     IF_VERB(STANDARD) {
@@ -207,8 +197,9 @@ void TestBase::DisplayResults(void) const {
 
 void TestBase::DisplayTestInfo(void) {
   IF_VERB(STANDARD) {
-    printf("#########################################"
-                                  "######################################\n");
+    printf(
+        "#########################################"
+        "######################################\n");
 
     std::string label;
     MakeHeaderStr(kTitleLabel, &label);
@@ -233,4 +224,3 @@ void TestBase::set_description(std::string d) {
     i = endlptr;
   }
 }
-

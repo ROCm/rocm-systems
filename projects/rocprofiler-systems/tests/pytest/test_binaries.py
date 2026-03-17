@@ -500,6 +500,81 @@ class TestRocprofilerSystemsAvail(RocprofsysTest):
         )
         self.assert_regex(result, pass_regex=pass_regex)
 
+    def test_settings_no_gpu(self):
+        """Test that settings query works without GPU initialization.
+
+        This test validates the lightweight initialization mode that allows
+        rocprof-sys-avail to query settings without initializing the ROCm runtime,
+        reducing startup time and allowing operation in environments without GPU/ROCm.
+        """
+        pass_regex = [r"ROCPROFSYS_TRACE"]
+
+        result = self.run_test(
+            "baseline",
+            target=self.target,
+            run_args=["--settings", "--brief"],
+            timeout=45,
+            fail_on_not_found=True,
+        )
+        self.assert_regex(result, pass_regex=pass_regex)
+
+    def test_components_no_gpu(self):
+        """Test that component query works without GPU initialization.
+
+        This test validates that timemory component introspection works without
+        requiring GPU/ROCm access, using the lightweight initialization path.
+        """
+        pass_regex = [r"COMPONENT"]
+
+        result = self.run_test(
+            "baseline",
+            target=self.target,
+            run_args=["--components", "--brief"],
+            timeout=45,
+            fail_on_not_found=True,
+        )
+        self.assert_regex(result, pass_regex=pass_regex)
+
+    def test_settings_description_no_gpu(self):
+        """Test that settings with descriptions works without GPU initialization.
+
+        This test validates that detailed settings queries (with descriptions)
+        work without GPU/ROCm initialization.
+        """
+        pass_regex = [r"ROCPROFSYS_OUTPUT_PATH"]
+
+        result = self.run_test(
+            "baseline",
+            target=self.target,
+            run_args=["--settings", "--description", "--brief"],
+            timeout=45,
+            fail_on_not_found=True,
+        )
+        self.assert_regex(result, pass_regex=pass_regex)
+
+    @pytest.mark.gpu
+    def test_settings_rocm_available(self, rocprof_config):
+        """Test that ROCm-specific settings are present.
+
+        This test validates that settings like ROCPROFSYS_ROCM_DOMAINS and
+        ROCPROFSYS_AMD_SMI_METRICS are registered and visible.
+        """
+
+        # These settings should always be present when ROCm is enabled
+        pass_regex = [
+            r"ROCPROFSYS_AMD_SMI_METRICS",
+            r"ROCPROFSYS_ROCM_DOMAINS",
+        ]
+
+        result = self.run_test(
+            "baseline",
+            target=self.target,
+            run_args=["--settings", "--brief"],
+            timeout=45,
+            fail_on_not_found=True,
+        )
+        self.assert_regex(result, pass_regex=pass_regex)
+
 
 # ============================================================================
 # rocprof-sys-run tests
