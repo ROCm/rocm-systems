@@ -376,7 +376,7 @@ bool Device::init() {
           if (HSA_STATUS_SUCCESS ==
               Hsa::agent_get_info(agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_UUID),
                                   unique_id)) {
-            if (std::string(unique_id).find(str_id) != std::string::npos) {
+            if (std::string_view(unique_id).find(str_id) != std::string_view::npos) {
               str_id = std::to_string(i);
               break;
             }
@@ -435,7 +435,7 @@ bool Device::init() {
     }
     // Note: for now disable HSA path by default except for gfx942
     if (IS_WINDOWS && (GPU_ENABLE_PAL == 2) &&
-        (std::string(roc_device->info().name_).find("gfx942") == std::string::npos)) {
+        (std::string_view(roc_device->info().name_).find("gfx942") == std::string_view::npos)) {
       return false;
     }
     roc_device.release()->registerDevice();
@@ -3401,9 +3401,9 @@ bool Device::findLinkInfo(const hsa_amd_memory_pool_t& pool,
 }
 
 // ================================================================================================
-void Device::getGlobalCUMask(std::string cuMaskStr) {
+void Device::getGlobalCUMask(std::string_view cuMaskStr) {
   if (cuMaskStr.length() != 0) {
-    std::string pre = cuMaskStr.substr(0, 2);
+    std::string_view pre = cuMaskStr.substr(0, 2);
     if (pre.compare("0x") == 0 || pre.compare("0X") == 0) {
       cuMaskStr = cuMaskStr.substr(2, cuMaskStr.length());
     }
@@ -3422,13 +3422,12 @@ void Device::getGlobalCUMask(std::string cuMaskStr) {
     // is more than the compressed physical available CUs, ignore the rest
     for (unsigned i = 0; i < std::min(cuMaskStr.length(), compPhysicalCUs); i += 8) {
       int numCharToRead = (i + 8 <= compPhysicalCUs) ? 8 : compPhysicalCUs - 8;
-      std::string temp =
+      std::string_view temp =
           cuMaskStr.substr(std::max(0, end - numCharToRead), std::min(numCharToRead, end));
       end -= numCharToRead;
-      unsigned long ul = 0;
-      try {
-        ul = std::stoul(temp, 0, 16);
-      } catch (const std::invalid_argument&) {
+      char *endOfConverted = nullptr;
+      unsigned long ul = std::strtoul(temp.data(), &endOfConverted, 16);
+      if (endOfConverted == temp.data()) { // no conversion could be performed
         info_.globalCUMask_ = {};
         availCUs = 0;
         break;
