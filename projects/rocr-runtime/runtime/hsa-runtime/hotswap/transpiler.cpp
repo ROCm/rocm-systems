@@ -576,6 +576,32 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
     return result;
   }
 
+  // ─── Flat+saddr → Global conversion ───
+  // GFX12 flat instructions can use saddr (flat_load_b32 vdst, vaddr, s[pair])
+  // GFX9 flat instructions DON'T support saddr — only v[pair] addressing.
+  // When saddr is present, convert flat→global (safe for non-LDS addresses,
+  // and compilers use DS instructions for LDS, not flat+saddr).
+  {
+    bool is_flat_with_saddr = false;
+    if (mnemonic.find("flat_load_") == 0 || mnemonic.find("flat_store_") == 0) {
+      // Check if operands contain s[N:M] (saddr)
+      size_t s_bracket = line.find("s[", line.find(mnemonic) + mnemonic.size());
+      if (s_bracket != std::string::npos) {
+        is_flat_with_saddr = true;
+      }
+    }
+    if (is_flat_with_saddr) {
+      // Replace "flat_" with "global_" in the mnemonic
+      size_t flat_pos = mnemonic.find("flat_");
+      if (flat_pos != std::string::npos) {
+        std::string global_mnemonic = "global_" + mnemonic.substr(flat_pos + 5);
+        line = ReplaceMnemonic(line, mnemonic, global_mnemonic);
+        mnemonic = global_mnemonic;
+        // Now fall through to normal mnemonic renaming (global_load_b32 → global_load_dword)
+      }
+    }
+  }
+
   // ─── Mnemonic renaming (memory + SMEM instructions) ───
   // Try exact match first, then strip encoding suffix (_e32, _e64)
   const auto& mnem_map = GetMnemonicMap();

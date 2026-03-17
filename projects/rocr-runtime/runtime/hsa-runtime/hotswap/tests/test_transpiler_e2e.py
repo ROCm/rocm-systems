@@ -103,6 +103,16 @@ def translate_line(line: str) -> list[str]:
         new_mnem = MNEMONIC_MAP[mnemonic]
         return [f"{new_mnem} {operands}".strip()]
 
+    # Flat+saddr → Global conversion
+    # GFX12: flat_load_b32 vdst, vaddr, s[pair] → global_load_dword vdst, vaddr, s[pair]
+    # GFX9 flat doesn't support saddr, but global does
+    is_flat = mnemonic.startswith("flat_load_") or mnemonic.startswith("flat_store_")
+    if is_flat and "s[" in operands:
+        global_mnem = mnemonic.replace("flat_", "global_")
+        if global_mnem in MNEMONIC_MAP:
+            global_mnem = MNEMONIC_MAP[global_mnem]
+        return [f"{global_mnem} {operands}".strip()]
+
     # Pass-through (same mnemonic)
     return [stripped]
 
@@ -225,6 +235,73 @@ def main():
     print("\n" + "=" * 80)
     print("PASS: End-to-end transpile gfx1250 → gfx950 succeeded")
     print(f"  {len(instructions)} source → {len(translated)} translated → {len(gfx950_instructions)} verified")
+    print("=" * 80)
+
+    # ── Test 2: Flat+saddr kernel ──
+    print("\n" + "=" * 80)
+    print("Test 2: Flat+saddr → Global Conversion")
+    print("=" * 80)
+
+    flat_gfx1250_asm = """\
+.text
+    s_load_b64 s[0:1], s[0:1], 0x0
+    s_wait_kmcnt 0
+    flat_load_b32 v1, v0, s[0:1]
+    s_wait_loadcnt 0
+    v_add_f32_e32 v1, 1.0, v1
+    flat_store_b32 v0, v1, s[0:1]
+    s_endpgm
+"""
+
+    print("\n--- Assemble for gfx1250 ---")
+    rc, out, err = run_cmd(
+        [LLVM_MC, "-triple=amdgcn-amd-amdhsa", "-mcpu=gfx1250",
+         "-filetype=obj", "-o", "/tmp/flat_gfx1250.o"],
+        flat_gfx1250_asm
+    )
+    if rc != 0:
+        print(f"FAIL: gfx1250 assembly failed:\n{err}")
+        return 1
+
+    print("\n--- Disassemble ---")
+    rc, disasm_out, err = run_cmd(
+        [LLVM_OBJDUMP, "-d", "--mcpu=gfx1250", "--no-show-raw-insn",
+         "/tmp/flat_gfx1250.o"]
+    )
+    flat_instructions = []
+    for line in disasm_out.splitlines():
+        if not line.startswith("\t"):
+            continue
+        instr = line.strip()
+        if "//" in instr:
+            instr = instr[:instr.index("//")].strip()
+        if instr:
+            flat_instructions.append(instr)
+
+    for i, inst in enumerate(flat_instructions):
+        print(f"  [{i:2d}] {inst}")
+
+    print("\n--- Translate ---")
+    flat_translated = []
+    for inst in flat_instructions:
+        trans = translate_line(inst)
+        flat_translated.extend(trans)
+    for i, inst in enumerate(flat_translated):
+        print(f"  [{i:2d}] {inst}")
+
+    print("\n--- Assemble for gfx950 ---")
+    flat_gfx950_asm = ".text\n" + "\n".join(flat_translated) + "\n"
+    rc, out, err = run_cmd(
+        [LLVM_MC, "-triple=amdgcn-amd-amdhsa", "-mcpu=gfx950",
+         "-filetype=obj", "-o", "/tmp/flat_gfx950.o"],
+        flat_gfx950_asm
+    )
+    if rc != 0:
+        print(f"FAIL: gfx950 assembly failed:\n{err}")
+        print(f"\nAssembly input:\n{flat_gfx950_asm}")
+        return 1
+
+    print("  OK — flat+saddr converted to global successfully")
     print("=" * 80)
     return 0
 
