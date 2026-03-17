@@ -57,6 +57,7 @@ to_string(bool _v)
 
 namespace
 {
+using rocprofsys::common::update_env;
 using rocprofsys::common::update_mode;
 
 auto original_envs = std::unordered_set<std::string>{};
@@ -339,15 +340,21 @@ INSTRUMENTATION WORKFLOW:
         .action([&](parser_t& p) {
             if(p.get<bool>("balanced"))
             {
-                _parser_data.updated.emplace("ROCPROFSYS_TRACE");
-                _parser_data.updated.emplace("ROCPROFSYS_PROFILE");
-                _parser_data.updated.emplace("ROCPROFSYS_USE_SAMPLING");
-                _parser_data.updated.emplace("ROCPROFSYS_USE_PROCESS_SAMPLING");
-                tim::set_env("ROCPROFSYS_TRACE", "ON", 0);
-                tim::set_env("ROCPROFSYS_PROFILE", "ON", 0);
-                tim::set_env("ROCPROFSYS_USE_SAMPLING", "ON", 0);
-                tim::set_env("ROCPROFSYS_USE_PROCESS_SAMPLING", "ON", 0);
-                tim::set_env("ROCPROFSYS_SAMPLING_FREQ", "50", 0);
+                update_env(_parser_data.current, "ROCPROFSYS_TRACE", true,
+                           update_mode::REPLACE, ":", _parser_data.updated,
+                           original_envs);
+                update_env(_parser_data.current, "ROCPROFSYS_PROFILE", true,
+                           update_mode::REPLACE, ":", _parser_data.updated,
+                           original_envs);
+                update_env(_parser_data.current, "ROCPROFSYS_USE_SAMPLING", true,
+                           update_mode::REPLACE, ":", _parser_data.updated,
+                           original_envs);
+                update_env(_parser_data.current, "ROCPROFSYS_USE_PROCESS_SAMPLING", true,
+                           update_mode::REPLACE, ":", _parser_data.updated,
+                           original_envs);
+                update_env(_parser_data.current, "ROCPROFSYS_SAMPLING_FREQ", 50,
+                           update_mode::REPLACE, ":", _parser_data.updated,
+                           original_envs);
             }
         });
     parser
@@ -359,12 +366,15 @@ INSTRUMENTATION WORKFLOW:
         .action([&](parser_t& p) {
             if(p.get<bool>("profile-only"))
             {
-                _parser_data.updated.emplace("ROCPROFSYS_TRACE");
-                _parser_data.updated.emplace("ROCPROFSYS_PROFILE");
-                _parser_data.updated.emplace("ROCPROFSYS_FLAT_PROFILE");
-                tim::set_env("ROCPROFSYS_TRACE", "OFF", 0);
-                tim::set_env("ROCPROFSYS_PROFILE", "ON", 0);
-                tim::set_env("ROCPROFSYS_FLAT_PROFILE", "ON", 0);
+                update_env(_parser_data.current, "ROCPROFSYS_TRACE", false,
+                           update_mode::REPLACE, ":", _parser_data.updated,
+                           original_envs);
+                update_env(_parser_data.current, "ROCPROFSYS_PROFILE", true,
+                           update_mode::REPLACE, ":", _parser_data.updated,
+                           original_envs);
+                update_env(_parser_data.current, "ROCPROFSYS_FLAT_PROFILE", true,
+                           update_mode::REPLACE, ":", _parser_data.updated,
+                           original_envs);
             }
         });
     parser
@@ -375,21 +385,27 @@ INSTRUMENTATION WORKFLOW:
         .action([&](parser_t& p) {
             if(p.get<bool>("detailed"))
             {
-                _parser_data.updated.emplace("ROCPROFSYS_TRACE");
-                _parser_data.updated.emplace("ROCPROFSYS_PROFILE");
-                _parser_data.updated.emplace("ROCPROFSYS_USE_SAMPLING");
-                _parser_data.updated.emplace("ROCPROFSYS_USE_PROCESS_SAMPLING");
-                _parser_data.updated.emplace("ROCPROFSYS_SAMPLING_GPUS");
-                tim::set_env("ROCPROFSYS_TRACE", "ON", 0);
-                tim::set_env("ROCPROFSYS_PROFILE", "ON", 0);
-                tim::set_env("ROCPROFSYS_USE_SAMPLING", "ON", 0);
-                tim::set_env("ROCPROFSYS_USE_PROCESS_SAMPLING", "ON", 0);
-                tim::set_env("ROCPROFSYS_SAMPLING_CPUS", "all", 0);
+                update_env(_parser_data.current, "ROCPROFSYS_TRACE", true,
+                           update_mode::REPLACE, ":", _parser_data.updated,
+                           original_envs);
+                update_env(_parser_data.current, "ROCPROFSYS_PROFILE", true,
+                           update_mode::REPLACE, ":", _parser_data.updated,
+                           original_envs);
+                update_env(_parser_data.current, "ROCPROFSYS_USE_SAMPLING", true,
+                           update_mode::REPLACE, ":", _parser_data.updated,
+                           original_envs);
+                update_env(_parser_data.current, "ROCPROFSYS_USE_PROCESS_SAMPLING", true,
+                           update_mode::REPLACE, ":", _parser_data.updated,
+                           original_envs);
+                update_env(_parser_data.current, "ROCPROFSYS_SAMPLING_CPUS", "all",
+                           update_mode::REPLACE, ":", _parser_data.updated,
+                           original_envs);
                 auto* hip_visible_devices = getenv("HIP_VISIBLE_DEVICES");
                 if(hip_visible_devices && strlen(hip_visible_devices) > 0)
                 {
-                    tim::set_env("ROCPROFSYS_SAMPLING_GPUS",
-                                 std::string(hip_visible_devices).c_str(), 0);
+                    update_env(_parser_data.current, "ROCPROFSYS_SAMPLING_GPUS",
+                               std::string(hip_visible_devices), update_mode::REPLACE,
+                               ":", _parser_data.updated, original_envs);
                 }
             }
         });
@@ -403,36 +419,47 @@ INSTRUMENTATION WORKFLOW:
         .action([&](parser_t& p) {
             if(p.get<bool>("trace-hpc"))
             {
-                _parser_data.updated.emplace("ROCPROFSYS_TRACE");
-                _parser_data.updated.emplace("ROCPROFSYS_PROFILE");
-                _parser_data.updated.emplace("ROCPROFSYS_USE_SAMPLING");
-                _parser_data.updated.emplace("ROCPROFSYS_USE_PROCESS_SAMPLING");
-                _parser_data.updated.emplace("ROCPROFSYS_USE_OMPT");
-                _parser_data.updated.emplace("ROCPROFSYS_USE_KOKKOSP");
-                _parser_data.updated.emplace("ROCPROFSYS_USE_RCCL");
-                _parser_data.updated.emplace("ROCPROFSYS_USE_MPIP");
-                _parser_data.updated.emplace("ROCPROFSYS_SAMPLING_CPUS");
-                _parser_data.updated.emplace("ROCPROFSYS_ROCM_DOMAINS");
-                _parser_data.updated.emplace("ROCPROFSYS_AMD_SMI_METRICS");
-                _parser_data.updated.emplace("ROCPROFSYS_PAPI_EVENTS");
-                tim::set_env("ROCPROFSYS_TRACE", "ON", 0);
-                tim::set_env("ROCPROFSYS_PROFILE", "ON", 0);
-                tim::set_env("ROCPROFSYS_USE_SAMPLING", "OFF", 0);
-                tim::set_env("ROCPROFSYS_SAMPLING_FREQ", "100", 0);
-                tim::set_env("ROCPROFSYS_USE_PROCESS_SAMPLING", "ON", 0);
-                tim::set_env("ROCPROFSYS_USE_OMPT", "ON", 0);
-                tim::set_env("ROCPROFSYS_USE_RCCL", "ON", 0);
-                tim::set_env("ROCPROFSYS_USE_KOKKOSP", "ON", 0);
-                tim::set_env("ROCPROFSYS_USE_MPIP", "true", 0);
-                tim::set_env("ROCPROFSYS_SAMPLING_CPUS", "none", 0);
-                tim::set_env("ROCPROFSYS_ROCM_DOMAINS",
-                             "hip_runtime_api,marker_api,kernel_dispatch,memory_copy,"
-                             "scratch_memory",
-                             0);
-                tim::set_env("ROCPROFSYS_AMD_SMI_METRICS", "busy,temp,power,mem_usage",
-                             0);
-                tim::set_env("ROCPROFSYS_PAPI_EVENTS",
-                             "PAPI_TOT_INS,PAPI_TOT_CYC,PAPI_L3_TCM", 0);
+                update_env(_parser_data.current, "ROCPROFSYS_TRACE", true,
+                           update_mode::REPLACE, ":", _parser_data.updated,
+                           original_envs);
+                update_env(_parser_data.current, "ROCPROFSYS_PROFILE", true,
+                           update_mode::REPLACE, ":", _parser_data.updated,
+                           original_envs);
+                update_env(_parser_data.current, "ROCPROFSYS_USE_SAMPLING", false,
+                           update_mode::REPLACE, ":", _parser_data.updated,
+                           original_envs);
+                update_env(_parser_data.current, "ROCPROFSYS_SAMPLING_FREQ", 100,
+                           update_mode::REPLACE, ":", _parser_data.updated,
+                           original_envs);
+                update_env(_parser_data.current, "ROCPROFSYS_USE_PROCESS_SAMPLING", true,
+                           update_mode::REPLACE, ":", _parser_data.updated,
+                           original_envs);
+                update_env(_parser_data.current, "ROCPROFSYS_USE_OMPT", true,
+                           update_mode::REPLACE, ":", _parser_data.updated,
+                           original_envs);
+                update_env(_parser_data.current, "ROCPROFSYS_USE_RCCL", true,
+                           update_mode::REPLACE, ":", _parser_data.updated,
+                           original_envs);
+                update_env(_parser_data.current, "ROCPROFSYS_USE_KOKKOSP", true,
+                           update_mode::REPLACE, ":", _parser_data.updated,
+                           original_envs);
+                update_env(_parser_data.current, "ROCPROFSYS_USE_MPIP", "true",
+                           update_mode::REPLACE, ":", _parser_data.updated,
+                           original_envs);
+                update_env(_parser_data.current, "ROCPROFSYS_SAMPLING_CPUS", "none",
+                           update_mode::REPLACE, ":", _parser_data.updated,
+                           original_envs);
+                update_env(_parser_data.current, "ROCPROFSYS_ROCM_DOMAINS",
+                           "hip_runtime_api,marker_api,kernel_dispatch,memory_copy,"
+                           "scratch_memory",
+                           update_mode::REPLACE, ":", _parser_data.updated,
+                           original_envs);
+                update_env(_parser_data.current, "ROCPROFSYS_AMD_SMI_METRICS",
+                           "busy,temp,power,mem_usage", update_mode::REPLACE, ":",
+                           _parser_data.updated, original_envs);
+                update_env(_parser_data.current, "ROCPROFSYS_PAPI_EVENTS",
+                           "PAPI_TOT_INS,PAPI_TOT_CYC,PAPI_L3_TCM", update_mode::REPLACE,
+                           ":", _parser_data.updated, original_envs);
             }
         });
     parser
@@ -445,46 +472,60 @@ INSTRUMENTATION WORKFLOW:
         .action([&](parser_t& p) {
             if(p.get<bool>("workload-trace"))
             {
-                _parser_data.updated.emplace("ROCPROFSYS_TRACE");
-                _parser_data.updated.emplace("ROCPROFSYS_PROFILE");
-                _parser_data.updated.emplace("ROCPROFSYS_USE_SAMPLING");
-                _parser_data.updated.emplace("ROCPROFSYS_USE_PROCESS_SAMPLING");
-                _parser_data.updated.emplace("ROCPROFSYS_USE_MPIP");
-                _parser_data.updated.emplace("ROCPROFSYS_SAMPLING_CPUS");
-                _parser_data.updated.emplace("ROCPROFSYS_ROCM_DOMAINS");
-                _parser_data.updated.emplace("ROCPROFSYS_AMD_SMI_METRICS");
-                _parser_data.updated.emplace("ROCPROFSYS_SAMPLING_GPUS");
-                _parser_data.updated.emplace("ROCPROFSYS_USE_ROCTRACER");
-                _parser_data.updated.emplace("ROCPROFSYS_TRACE_HIP_API");
-                _parser_data.updated.emplace("ROCPROFSYS_TRACE_HIP_ACTIVITY");
-                _parser_data.updated.emplace("ROCPROFSYS_USE_RCCL");
-                _parser_data.updated.emplace("ROCPROFSYS_USE_ROCPD");
-                _parser_data.updated.emplace("ROCPROFSYS_PERFETTO_BUFFER_SIZE_KB");
-                tim::set_env("ROCPROFSYS_TRACE", "ON", 0);
-                tim::set_env("ROCPROFSYS_PROFILE", "ON", 0);
-                tim::set_env("ROCPROFSYS_USE_SAMPLING", "OFF", 0);
-                tim::set_env("ROCPROFSYS_SAMPLING_FREQ", "50", 0);
-                tim::set_env("ROCPROFSYS_USE_PROCESS_SAMPLING", "ON", 0);
-                tim::set_env("ROCPROFSYS_USE_MPIP", "true", 0);
-                tim::set_env("ROCPROFSYS_SAMPLING_CPUS", "none", 0);
-                tim::set_env("ROCPROFSYS_ROCM_DOMAINS",
-                             "hip_runtime_api,marker_api,kernel_dispatch,memory_copy,"
-                             "scratch_memory",
-                             0);
-                tim::set_env("ROCPROFSYS_AMD_SMI_METRICS", "busy,temp,power,mem_usage",
-                             0);
+                update_env(_parser_data.current, "ROCPROFSYS_TRACE", true,
+                           update_mode::REPLACE, ":", _parser_data.updated,
+                           original_envs);
+                update_env(_parser_data.current, "ROCPROFSYS_PROFILE", true,
+                           update_mode::REPLACE, ":", _parser_data.updated,
+                           original_envs);
+                update_env(_parser_data.current, "ROCPROFSYS_USE_SAMPLING", false,
+                           update_mode::REPLACE, ":", _parser_data.updated,
+                           original_envs);
+                update_env(_parser_data.current, "ROCPROFSYS_SAMPLING_FREQ", 50,
+                           update_mode::REPLACE, ":", _parser_data.updated,
+                           original_envs);
+                update_env(_parser_data.current, "ROCPROFSYS_USE_PROCESS_SAMPLING", true,
+                           update_mode::REPLACE, ":", _parser_data.updated,
+                           original_envs);
+                update_env(_parser_data.current, "ROCPROFSYS_USE_MPIP", "true",
+                           update_mode::REPLACE, ":", _parser_data.updated,
+                           original_envs);
+                update_env(_parser_data.current, "ROCPROFSYS_SAMPLING_CPUS", "none",
+                           update_mode::REPLACE, ":", _parser_data.updated,
+                           original_envs);
+                update_env(_parser_data.current, "ROCPROFSYS_ROCM_DOMAINS",
+                           "hip_runtime_api,marker_api,kernel_dispatch,memory_copy,"
+                           "scratch_memory",
+                           update_mode::REPLACE, ":", _parser_data.updated,
+                           original_envs);
+                update_env(_parser_data.current, "ROCPROFSYS_AMD_SMI_METRICS",
+                           "busy,temp,power,mem_usage", update_mode::REPLACE, ":",
+                           _parser_data.updated, original_envs);
                 auto* hip_visible_devices = getenv("HIP_VISIBLE_DEVICES");
                 if(hip_visible_devices && strlen(hip_visible_devices) > 0)
                 {
-                    tim::set_env("ROCPROFSYS_SAMPLING_GPUS",
-                                 std::string(hip_visible_devices).c_str(), 0);
+                    update_env(_parser_data.current, "ROCPROFSYS_SAMPLING_GPUS",
+                               std::string(hip_visible_devices), update_mode::REPLACE,
+                               ":", _parser_data.updated, original_envs);
                 }
-                tim::set_env("ROCPROFSYS_USE_ROCTRACER", "ON", 0);
-                tim::set_env("ROCPROFSYS_TRACE_HIP_API", "ON", 0);
-                tim::set_env("ROCPROFSYS_TRACE_HIP_ACTIVITY", "ON", 0);
-                tim::set_env("ROCPROFSYS_USE_RCCL", "ON", 0);
-                tim::set_env("ROCPROFSYS_USE_ROCPD", "ON", 0);
-                tim::set_env("ROCPROFSYS_PERFETTO_BUFFER_SIZE_KB", "2048000", 0);
+                update_env(_parser_data.current, "ROCPROFSYS_USE_ROCTRACER", true,
+                           update_mode::REPLACE, ":", _parser_data.updated,
+                           original_envs);
+                update_env(_parser_data.current, "ROCPROFSYS_TRACE_HIP_API", true,
+                           update_mode::REPLACE, ":", _parser_data.updated,
+                           original_envs);
+                update_env(_parser_data.current, "ROCPROFSYS_TRACE_HIP_ACTIVITY", true,
+                           update_mode::REPLACE, ":", _parser_data.updated,
+                           original_envs);
+                update_env(_parser_data.current, "ROCPROFSYS_USE_RCCL", true,
+                           update_mode::REPLACE, ":", _parser_data.updated,
+                           original_envs);
+                update_env(_parser_data.current, "ROCPROFSYS_USE_ROCPD", true,
+                           update_mode::REPLACE, ":", _parser_data.updated,
+                           original_envs);
+                update_env(_parser_data.current, "ROCPROFSYS_PERFETTO_BUFFER_SIZE_KB",
+                           2048000, update_mode::REPLACE, ":", _parser_data.updated,
+                           original_envs);
             }
         });
     parser
@@ -496,15 +537,17 @@ INSTRUMENTATION WORKFLOW:
         .action([&](parser_t& p) {
             if(p.get<bool>("sys-trace"))
             {
-                _parser_data.updated.emplace("ROCPROFSYS_TRACE");
-                _parser_data.updated.emplace("ROCPROFSYS_PROFILE");
-                _parser_data.updated.emplace("ROCPROFSYS_ROCM_DOMAINS");
-                tim::set_env("ROCPROFSYS_TRACE", "ON", 0);
-                tim::set_env("ROCPROFSYS_PROFILE", "ON", 0);
-                tim::set_env("ROCPROFSYS_ROCM_DOMAINS",
-                             "hip_api,hsa_api,marker_api,rccl_api,memory_copy,"
-                             "scratch_memory,kernel_dispatch",
-                             0);
+                update_env(_parser_data.current, "ROCPROFSYS_TRACE", true,
+                           update_mode::REPLACE, ":", _parser_data.updated,
+                           original_envs);
+                update_env(_parser_data.current, "ROCPROFSYS_PROFILE", true,
+                           update_mode::REPLACE, ":", _parser_data.updated,
+                           original_envs);
+                update_env(_parser_data.current, "ROCPROFSYS_ROCM_DOMAINS",
+                           "hip_api,hsa_api,marker_api,rccl_api,memory_copy,"
+                           "scratch_memory,kernel_dispatch",
+                           update_mode::REPLACE, ":", _parser_data.updated,
+                           original_envs);
             }
         });
     parser
@@ -518,15 +561,17 @@ INSTRUMENTATION WORKFLOW:
         .action([&](parser_t& p) {
             if(p.get<bool>("runtime-trace"))
             {
-                _parser_data.updated.emplace("ROCPROFSYS_TRACE");
-                _parser_data.updated.emplace("ROCPROFSYS_PROFILE");
-                _parser_data.updated.emplace("ROCPROFSYS_ROCM_DOMAINS");
-                tim::set_env("ROCPROFSYS_TRACE", "ON", 0);
-                tim::set_env("ROCPROFSYS_PROFILE", "ON", 0);
-                tim::set_env("ROCPROFSYS_ROCM_DOMAINS",
-                             "hip_runtime_api,marker_api,rccl_api,memory_copy,"
-                             "scratch_memory,kernel_dispatch",
-                             0);
+                update_env(_parser_data.current, "ROCPROFSYS_TRACE", true,
+                           update_mode::REPLACE, ":", _parser_data.updated,
+                           original_envs);
+                update_env(_parser_data.current, "ROCPROFSYS_PROFILE", true,
+                           update_mode::REPLACE, ":", _parser_data.updated,
+                           original_envs);
+                update_env(_parser_data.current, "ROCPROFSYS_ROCM_DOMAINS",
+                           "hip_runtime_api,marker_api,rccl_api,memory_copy,"
+                           "scratch_memory,kernel_dispatch",
+                           update_mode::REPLACE, ":", _parser_data.updated,
+                           original_envs);
             }
         });
     parser
@@ -538,19 +583,23 @@ INSTRUMENTATION WORKFLOW:
         .action([&](parser_t& p) {
             if(p.get<bool>("trace-gpu"))
             {
-                _parser_data.updated.emplace("ROCPROFSYS_TRACE");
-                _parser_data.updated.emplace("ROCPROFSYS_PROFILE");
-                _parser_data.updated.emplace("ROCPROFSYS_USE_AMD_SMI");
-                _parser_data.updated.emplace("ROCPROFSYS_SAMPLING_CPUS");
-                _parser_data.updated.emplace("ROCPROFSYS_ROCM_DOMAINS");
-                tim::set_env("ROCPROFSYS_TRACE", "ON", 0);
-                tim::set_env("ROCPROFSYS_PROFILE", "OFF", 0);
-                tim::set_env("ROCPROFSYS_USE_AMD_SMI", "ON", 0);
-                tim::set_env("ROCPROFSYS_SAMPLING_CPUS", "none", 0);
-                tim::set_env("ROCPROFSYS_ROCM_DOMAINS",
-                             "hip_runtime_api,marker_api,kernel_dispatch,memory_copy,"
-                             "scratch_memory",
-                             0);
+                update_env(_parser_data.current, "ROCPROFSYS_TRACE", true,
+                           update_mode::REPLACE, ":", _parser_data.updated,
+                           original_envs);
+                update_env(_parser_data.current, "ROCPROFSYS_PROFILE", false,
+                           update_mode::REPLACE, ":", _parser_data.updated,
+                           original_envs);
+                update_env(_parser_data.current, "ROCPROFSYS_USE_AMD_SMI", true,
+                           update_mode::REPLACE, ":", _parser_data.updated,
+                           original_envs);
+                update_env(_parser_data.current, "ROCPROFSYS_SAMPLING_CPUS", "none",
+                           update_mode::REPLACE, ":", _parser_data.updated,
+                           original_envs);
+                update_env(_parser_data.current, "ROCPROFSYS_ROCM_DOMAINS",
+                           "hip_runtime_api,marker_api,kernel_dispatch,memory_copy,"
+                           "scratch_memory",
+                           update_mode::REPLACE, ":", _parser_data.updated,
+                           original_envs);
             }
         });
     parser
@@ -561,17 +610,19 @@ INSTRUMENTATION WORKFLOW:
         .action([&](parser_t& p) {
             if(p.get<bool>("trace-openmp"))
             {
-                _parser_data.updated.emplace("ROCPROFSYS_TRACE");
-                _parser_data.updated.emplace("ROCPROFSYS_PROFILE");
-                _parser_data.updated.emplace("ROCPROFSYS_ROCM_DOMAINS");
-                _parser_data.updated.emplace("ROCPROFSYS_USE_OMPT");
-                tim::set_env("ROCPROFSYS_TRACE", "ON", 0);
-                tim::set_env("ROCPROFSYS_PROFILE", "OFF", 0);
-                tim::set_env("ROCPROFSYS_ROCM_DOMAINS",
-                             "hip_runtime_api,marker_api,kernel_dispatch,memory_copy,"
-                             "hsa_api",
-                             0);
-                tim::set_env("ROCPROFSYS_USE_OMPT", "YES", 0);
+                update_env(_parser_data.current, "ROCPROFSYS_TRACE", true,
+                           update_mode::REPLACE, ":", _parser_data.updated,
+                           original_envs);
+                update_env(_parser_data.current, "ROCPROFSYS_PROFILE", false,
+                           update_mode::REPLACE, ":", _parser_data.updated,
+                           original_envs);
+                update_env(
+                    _parser_data.current, "ROCPROFSYS_ROCM_DOMAINS",
+                    "hip_runtime_api,marker_api,kernel_dispatch,memory_copy,hsa_api",
+                    update_mode::REPLACE, ":", _parser_data.updated, original_envs);
+                update_env(_parser_data.current, "ROCPROFSYS_USE_OMPT", "YES",
+                           update_mode::REPLACE, ":", _parser_data.updated,
+                           original_envs);
             }
         });
     parser
@@ -582,14 +633,18 @@ INSTRUMENTATION WORKFLOW:
         .action([&](parser_t& p) {
             if(p.get<bool>("profile-mpi"))
             {
-                _parser_data.updated.emplace("ROCPROFSYS_TRACE");
-                _parser_data.updated.emplace("ROCPROFSYS_PROFILE");
-                _parser_data.updated.emplace("ROCPROFSYS_FLAT_PROFILE");
-                _parser_data.updated.emplace("ROCPROFSYS_USE_AMD_SMI");
-                tim::set_env("ROCPROFSYS_TRACE", "OFF", 0);
-                tim::set_env("ROCPROFSYS_PROFILE", "ON", 0);
-                tim::set_env("ROCPROFSYS_FLAT_PROFILE", "ON", 0);
-                tim::set_env("ROCPROFSYS_USE_AMD_SMI", "OFF", 0);
+                update_env(_parser_data.current, "ROCPROFSYS_TRACE", false,
+                           update_mode::REPLACE, ":", _parser_data.updated,
+                           original_envs);
+                update_env(_parser_data.current, "ROCPROFSYS_PROFILE", true,
+                           update_mode::REPLACE, ":", _parser_data.updated,
+                           original_envs);
+                update_env(_parser_data.current, "ROCPROFSYS_FLAT_PROFILE", true,
+                           update_mode::REPLACE, ":", _parser_data.updated,
+                           original_envs);
+                update_env(_parser_data.current, "ROCPROFSYS_USE_AMD_SMI", false,
+                           update_mode::REPLACE, ":", _parser_data.updated,
+                           original_envs);
             }
         });
     parser
@@ -601,12 +656,15 @@ INSTRUMENTATION WORKFLOW:
         .action([&](parser_t& p) {
             if(p.get<bool>("trace-hw-counters"))
             {
-                _parser_data.updated.emplace("ROCPROFSYS_PROFILE");
-                _parser_data.updated.emplace("ROCPROFSYS_SAMPLING_CPUS");
-                _parser_data.updated.emplace("ROCPROFSYS_ROCM_EVENTS");
-                tim::set_env("ROCPROFSYS_PROFILE", "ON", 0);
-                tim::set_env("ROCPROFSYS_SAMPLING_CPUS", "none", 0);
-                tim::set_env("ROCPROFSYS_ROCM_EVENTS", "VALUUtilization,Occupancy", 0);
+                update_env(_parser_data.current, "ROCPROFSYS_PROFILE", true,
+                           update_mode::REPLACE, ":", _parser_data.updated,
+                           original_envs);
+                update_env(_parser_data.current, "ROCPROFSYS_SAMPLING_CPUS", "none",
+                           update_mode::REPLACE, ":", _parser_data.updated,
+                           original_envs);
+                update_env(_parser_data.current, "ROCPROFSYS_ROCM_EVENTS",
+                           "VALUUtilization,Occupancy", update_mode::REPLACE, ":",
+                           _parser_data.updated, original_envs);
             }
         });
 
