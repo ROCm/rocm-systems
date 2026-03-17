@@ -1419,23 +1419,29 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                 break;
             }
             // MARKER_CORE_API is handled by roctx_client on control_ctx
-            case ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API:
-            case ROCPROFILER_CALLBACK_TRACING_NONE:
-            case ROCPROFILER_CALLBACK_TRACING_LAST:
-            case ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API:
-            case ROCPROFILER_CALLBACK_TRACING_MARKER_NAME_API:
-            case ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT:
-            case ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY:
-            case ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH:
-            case ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY:
+            case ROCPROFILER_CALLBACK_TRACING_NONE: [[fallthrough]];
+            case ROCPROFILER_CALLBACK_TRACING_LAST: [[fallthrough]];
+            case ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API: [[fallthrough]];
+            case ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API: [[fallthrough]];
+            case ROCPROFILER_CALLBACK_TRACING_MARKER_NAME_API: [[fallthrough]];
+            case ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT: [[fallthrough]];
+            case ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY: [[fallthrough]];
+            case ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH: [[fallthrough]];
+            case ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY: [[fallthrough]];
 #if (ROCPROFILER_VERSION >= 600)
-            case ROCPROFILER_CALLBACK_TRACING_MEMORY_ALLOCATION:
-            case ROCPROFILER_CALLBACK_TRACING_RUNTIME_INITIALIZATION:
+            case ROCPROFILER_CALLBACK_TRACING_MEMORY_ALLOCATION: [[fallthrough]];
+            case ROCPROFILER_CALLBACK_TRACING_RUNTIME_INITIALIZATION: [[fallthrough]];
 #endif
 #if (ROCPROFILER_VERSION >= 700)
             case ROCPROFILER_CALLBACK_TRACING_HIP_STREAM:
 #endif
             {
+                if(get_is_continuous_integration())
+                {
+                    LOG_CRITICAL("Unhandled callback record: {}", info.str());
+                    ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+                    std::abort();
+                }
                 break;
             }
             default:
@@ -1505,24 +1511,29 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                                            ts, _bt_data);
                 break;
             }
-            // MARKER_CORE_API is handled by roctx_client on control_ctx
-            case ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API:
-            case ROCPROFILER_CALLBACK_TRACING_NONE:
-            case ROCPROFILER_CALLBACK_TRACING_LAST:
-            case ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API:
-            case ROCPROFILER_CALLBACK_TRACING_MARKER_NAME_API:
-            case ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT:
-            case ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY:
-            case ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH:
+            case ROCPROFILER_CALLBACK_TRACING_NONE: [[fallthrough]];
+            case ROCPROFILER_CALLBACK_TRACING_LAST: [[fallthrough]];
+            case ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API: [[fallthrough]];
+            case ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API: [[fallthrough]];
+            case ROCPROFILER_CALLBACK_TRACING_MARKER_NAME_API: [[fallthrough]];
+            case ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT: [[fallthrough]];
+            case ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY: [[fallthrough]];
+            case ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH: [[fallthrough]];
             case ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY:
 #if (ROCPROFILER_VERSION >= 600)
-            case ROCPROFILER_CALLBACK_TRACING_MEMORY_ALLOCATION:
-            case ROCPROFILER_CALLBACK_TRACING_RUNTIME_INITIALIZATION:
+            case ROCPROFILER_CALLBACK_TRACING_MEMORY_ALLOCATION: [[fallthrough]];
+            case ROCPROFILER_CALLBACK_TRACING_RUNTIME_INITIALIZATION: [[fallthrough]];
 #endif
 #if (ROCPROFILER_VERSION >= 700)
             case ROCPROFILER_CALLBACK_TRACING_HIP_STREAM:
 #endif
             {
+                if(get_is_continuous_integration())
+                {
+                    LOG_CRITICAL("Unhandled callback record: {}", info.str());
+                    ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+                    std::abort();
+                }
                 break;
             }
             default:
