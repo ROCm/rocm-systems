@@ -1,6 +1,13 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
+# -----------------------------------------------------------------------------
+# benchmark_base.py
+#
+# Benchmarking base class for all architectures, on all accelerators.
+#
+# -----------------------------------------------------------------------------
+
 import csv
 import fcntl
 import math
@@ -47,11 +54,7 @@ VALU_NFMA = 1024
 
 
 # =============================================================================
-# Bench_base Class
-#
-# (ABSTRACT CLASS)
-# Base class for all benchmarking.
-# Underlying class for all architectures, on all accelerators.
+# Bench_base Class (ABSTRACT)
 # =============================================================================
 class Bench_base(ABC):
     def __init__(self, device_ids: list) -> None:
@@ -66,6 +69,27 @@ class Bench_base(ABC):
 
         self.WAVEFRONT_SIZE: int
         self.MATRIX_OPS_TYPE: str
+
+        self.hbm_bw_src: str
+        self.mall_bw_src: str
+        self.l2_bw_src: str
+        self.l1_bw_src: str
+        self.lds_bw_src: str
+        self.fp16_src: str
+        self.fp32_src: str
+        self.fp64_src: str
+        self.int8_src: str
+        self.int32_src: str
+        self.int64_src: str
+        self.matrix_f4_src: str
+        self.matrix_f6_src: str
+        self.matrix_f6f4_src: str
+        self.matrix_f8_src: str
+        self.matrix_f16_src: str
+        self.matrix_bf16_src: str
+        self.matrix_f32_src: str
+        self.matrix_f64_src: str
+        self.matrix_i8_src: str
 
         # Some data types have different rates. Set the number of iterations
         # to keep running time under control.
@@ -86,6 +110,18 @@ class Bench_base(ABC):
             "INT32": [f"flops_benchmark<int, {VALU_NFMA}>", sizeof(c_int32)],
             "INT64": [f"flops_benchmark<long, {VALU_NFMA}>", sizeof(c_int64)],
         }
+
+        self.vector_types_src = """
+            template<typename T, int Rank>
+            using vecT = T __attribute__((ext_vector_type(Rank)));
+
+            template<typename T> using vec2 = vecT<T, 2>;
+            template<typename T> using vec4 = vecT<T, 4>;
+            template<typename T> using vec8 = vecT<T, 8>;
+            template<typename T> using vec16 = vecT<T, 16>;
+            """
+
+        self.set_kernel_source()
 
     # -----------------------------------------------------------------------------
     # Helper Methods and Classes
@@ -249,62 +285,135 @@ class Bench_base(ABC):
         return samples
 
     # -----------------------------------------------------------------------------
-    # Benchmarking kernels and source
+    # Benchmarking kernel source
     # -----------------------------------------------------------------------------
-    cache_bw_src = """
-    template <typename T, int cacheSize, int workgroup_size>
-    __global__ void Cache_bw(const T *memBlock, T *dummy, int numIter)
-    {
-    const int thread_id = threadIdx.x;
-    constexpr int cache_count = cacheSize / sizeof(T);
 
-    T sink;
-
-    sink = 0;
-    for (int iter = 0; iter < numIter; ++iter)
-    {
-    #pragma unroll 32
-        for (int i = 0; i < cache_count; i += workgroup_size)
+    def set_kernel_source(self) -> None:
+        # HBM Bandwidth benchmark
+        self.hbm_bw_src = """
+        template<typename T>
+        __global__ void HBM_bw(T *dst, const T *src)
         {
-        // if the size of the memory block is small (e.g., the size
-        // of L1), then we need a slightly more complicated index
-        // calculation. Otherwise, the compiler holds all the loads
-        // in the inner loop in registers upon the first pass of the
-        // outer loop, and it doesn't do the loads upon subsequent
-        // passes of the outer loop.
-        // OTOH, if the size of the memory block is larger (such as L2
-        // size), experimentation showed that the overhead of the more
-        // complicated index calculation has a noticeable effect on BW,
-        // so we use a simpler index expression instead. This works since
-        // for larger memory blocks, the compiler cannot hold the loads
-        // of the inner loop in registers anymore, as it can with L1-sized
-        // buffers.
-        if constexpr (cache_count / workgroup_size <= 32)
+            const unsigned int gid = blockDim.x * blockIdx.x + threadIdx.x;
+            const unsigned int tid = threadIdx.x;
+
+            dst[gid] = src[gid];
+        }
+        """
+
+        # Cache Bandwidth benchmark
+        self.cache_bw_src = """
+        template <typename T, int cacheSize, int workgroup_size>
+        __global__ void Cache_bw(const T *memBlock, T *dummy, int numIter)
         {
-            sink += memBlock[(thread_id + i + iter) % cache_count];
-        }
-        else
+        const int thread_id = threadIdx.x;
+        constexpr int cache_count = cacheSize / sizeof(T);
+
+        T sink;
+
+        sink = 0;
+        for (int iter = 0; iter < numIter; ++iter)
         {
-            sink += memBlock[thread_id + i];
+        #pragma unroll 32
+            for (int i = 0; i < cache_count; i += workgroup_size)
+            {
+            // if the size of the memory block is small (e.g., the size
+            // of L1), then we need a slightly more complicated index
+            // calculation. Otherwise, the compiler holds all the loads
+            // in the inner loop in registers upon the first pass of the
+            // outer loop, and it doesn't do the loads upon subsequent
+            // passes of the outer loop.
+            // OTOH, if the size of the memory block is larger (such as L2
+            // size), experimentation showed that the overhead of the more
+            // complicated index calculation has a noticeable effect on BW,
+            // so we use a simpler index expression instead. This works since
+            // for larger memory blocks, the compiler cannot hold the loads
+            // of the inner loop in registers anymore, as it can with L1-sized
+            // buffers.
+            if constexpr (cache_count / workgroup_size <= 32)
+            {
+                sink += memBlock[(thread_id + i + iter) % cache_count];
+            }
+            else
+            {
+                sink += memBlock[thread_id + i];
+            }
+            }
         }
+
+        dummy[thread_id] = sink;
         }
-    }
+        """
 
-    dummy[thread_id] = sink;
-    }
-    """
+        # LDS Bandwidth benchmark
+        self.lds_benchmark_src = """
+        extern "C" __global__ void LDS_bw(int numIter, float *dummy)
+        {
+            const int tid = threadIdx.x;
+            __shared__ unsigned char shmem[64];
 
-    hbm_bw_src = """
-    template<typename T>
-    __global__ void HBM_bw(T *dst, const T *src)
-    {
-        const unsigned int gid = blockDim.x * blockIdx.x + threadIdx.x;
-        const unsigned int tid = threadIdx.x;
 
-        dst[gid] = src[gid];
-    }
-    """
+            if (tid == 0)
+            {
+                #pragma unroll
+                for (int i=0;i<63;i++)
+                    shmem[i] = i+1;
 
+                shmem[63] = 0;
+            }
+
+            __syncthreads();
+
+            int index = tid;
+            #pragma unroll 64
+            for(int iter = 0; iter < numIter; iter++)
+                index = shmem[index];
+
+            dummy[tid] = (float )index;
+        }
+
+        """
+
+        # FLOPs benchmark
+        self.flops_benchmark_src = (
+            self.vector_types_src
+            + """
+
+        template<typename T, int nFMA>
+        __global__ void flops_benchmark(T *buf, int count)
+        {
+            static_assert(nFMA % 4 == 0,\
+                  "nFMA must be divisible by 4 for vec4 operations");
+
+            const T k = (T)1.1;
+
+            const int grid_size = gridDim.x * blockDim.x;
+            const int tid = blockDim.x * blockIdx.x + threadIdx.x;
+
+            vec4<T>* ptr = (vec4<T>*)buf;
+
+            vec4<T> value0 = ptr[0 * grid_size + tid];
+
+            vec4<T> x0 = {(T)1,(T)2,(T)3,(T)4};
+
+            for(int i = 0; i < count; i++) {
+                for(int j = 0; j < nFMA / 4; j++) {
+
+                    // 4 FMA ops
+                    x0 = x0 * value0 + k;
+                }
+            }
+
+            ptr[tid] = x0;
+        }
+        """
+        )
+
+    # -----------------------------------------------------------------------------
+    # Benchmarking kernel methods
+    # -----------------------------------------------------------------------------
+
+    # HBM bandwidth benchmark
     def hbm_bw_benchmark(self, device: int) -> PerfMetrics:
         num_experiments = DEFAULT_NUM_EXPERIMENTS
         hip.hipSetDevice(device)
@@ -360,6 +469,7 @@ class Bench_base(ABC):
 
         return perf_metrics
 
+    # Generic cache bandwidth benchmark
     def cache_bw_bench(self, device: int, type: str, iters: int) -> PerfMetrics:
         hip.hipSetDevice(device)
 
@@ -421,43 +531,19 @@ class Bench_base(ABC):
 
         return perf_metrics
 
+    # MALL cache bandwidth benchmark
     def mall_bw_bench(self, device: int) -> PerfMetrics:
         return self.cache_bw_bench(device, "MALL", 1)
 
+    # L1 cache bandwidth benchmark
     def l1_bw_bench(self, device: int) -> PerfMetrics:
         return self.cache_bw_bench(device, "L1", 100)
 
+    # L2 cache bandwidth benchmark
     def l2_bw_bench(self, device: int) -> PerfMetrics:
         return self.cache_bw_bench(device, "L2", 10)
 
-    lds_benchmark_src = """
-    extern "C" __global__ void LDS_bw(int numIter, float *dummy)
-    {
-        const int tid = threadIdx.x;
-        __shared__ unsigned char shmem[64];
-
-
-        if (tid == 0)
-        {
-            #pragma unroll
-            for (int i=0;i<63;i++)
-                shmem[i] = i+1;
-
-            shmem[63] = 0;
-        }
-
-        __syncthreads();
-
-        int index = tid;
-        #pragma unroll 64
-        for(int iter = 0; iter < numIter; iter++)
-            index = shmem[index];
-
-        dummy[tid] = (float )index;
-    }
-
-    """
-
+    # LDS cache bandwidth benchmark
     def lds_bw_benchmark(self, device: int) -> PerfMetrics:
         num_experiments = DEFAULT_NUM_EXPERIMENTS
         workgroup_size = DEFAULT_WORKGROUP_SIZE
@@ -510,49 +596,7 @@ class Bench_base(ABC):
 
         return perf_metrics
 
-    vector_types_src = """
-    template<typename T, int Rank>
-    using vecT = T __attribute__((ext_vector_type(Rank)));
-
-    template<typename T> using vec2 = vecT<T, 2>;
-    template<typename T> using vec4 = vecT<T, 4>;
-    template<typename T> using vec8 = vecT<T, 8>;
-    template<typename T> using vec16 = vecT<T, 16>;
-    """
-
-    flops_benchmark_src = (
-        vector_types_src
-        + """
-
-    template<typename T, int nFMA>
-    __global__ void flops_benchmark(T *buf, int count)
-    {
-        static_assert(nFMA % 4 == 0, "nFMA must be divisible by 4 for vec4 operations");
-
-        const T k = (T)1.1;
-
-        const int grid_size = gridDim.x * blockDim.x;
-        const int tid = blockDim.x * blockIdx.x + threadIdx.x;
-
-        vec4<T>* ptr = (vec4<T>*)buf;
-
-        vec4<T> value0 = ptr[0 * grid_size + tid];
-
-        vec4<T> x0 = {(T)1,(T)2,(T)3,(T)4};
-
-        for(int i = 0; i < count; i++) {
-            for(int j = 0; j < nFMA / 4; j++) {
-
-                // 4 FMA ops
-                x0 = x0 * value0 + k;
-            }
-        }
-
-        ptr[tid] = x0;
-    }
-    """
-    )
-
+    # Generic FLOPs benchmark
     def flops_bench(self, device: int, type: str, unit: str, rate: int) -> PerfMetrics:
         num_experiments = DEFAULT_NUM_EXPERIMENTS
         workgroup_size = DEFAULT_WORKGROUP_SIZE
@@ -617,330 +661,7 @@ class Bench_base(ABC):
 
         return perf_metrics
 
-    matrix_f32_src = (
-        vector_types_src
-        + """
-
-    extern "C" __global__ void mfma_f32(int iter, float *dummy)
-    {
-        float a = threadIdx.x;
-        vec16<float> result = {0};
-
-        for(int i = 0; i < iter; ++i)
-        {
-            result = __builtin_amdgcn_mfma_f32_32x32x2f32(a, a, result, 0, 0, 0);
-        }
-
-        if (result[0] != 2*result[0])
-        {
-            dummy[0] = result[0];
-        }
-    }
-    """
-    )
-
-    matrix_f16_src = (
-        vector_types_src
-        + """
-
-
-    extern "C" __global__ void mfma_f16(int iter, float *dummy)
-    {
-        vec16<float> result = {0};
-    #if defined(__gfx908__) || defined(__gfx90a__) || defined(__gfx940__) || \
-        defined(__gfx941__) || defined(__gfx942__)
-        vec4<__fp16> a;
-        a[3] = a[2] = a[1] = a[0] = threadIdx.x;
-        for(int i = 0; i < iter; ++i)
-        {
-            result = __builtin_amdgcn_mfma_f32_32x32x8f16(a, a, result, 0, 0, 0);
-        }
-    #elif defined(__gfx950__)
-        vec8<__fp16> a;
-        a[7] = a[6] = a[5] = a[4] = a[3] = a[2] = a[1] = a[0] = threadIdx.x;
-        for(int i = 0; i < iter; ++i)
-        {
-            result = __builtin_amdgcn_mfma_f32_32x32x16_f16(a, a, result, 0, 0, 0);
-        }
-    #else
-    #error "Unsupported gfx arch"
-    #endif
-
-        if (result[0] != 2*result[0])
-        {
-            dummy[0] = result[0];
-        }
-    }
-    """
-    )
-
-    matrix_bf16_src = (
-        vector_types_src
-        + """
-
-    extern "C" __global__ void mfma_bf16(int iter, float *dummy)
-    {
-        vec16<float> result = {0};
-
-    // MI100/MI200
-    #if defined(__gfx908__) || defined(__gfx90a__)
-        vec2<short> a;
-        a[1] = a[0]= threadIdx.x;
-
-        for(int i = 0; i < iter; ++i)
-        {
-            result = __builtin_amdgcn_mfma_f32_32x32x4bf16(a, a, result, 0, 0, 0);
-        }
-    // MI300 series
-    #elif defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__)
-        vec4<short> a;
-        a[3] = a[2] = a[1] = a[0] = threadIdx.x;
-
-        for(int i = 0; i < iter; ++i)
-        {
-            result = __builtin_amdgcn_mfma_f32_32x32x8bf16_1k(a, a, result, 0, 0, 0);
-        }
-    // MI350
-    #elif defined(__gfx950__)
-        vec8<short> a;
-        a[7] = a[6] = a[5] = a[4] = a[3] = a[2] = a[1] = a[0] = threadIdx.x;
-
-        for(int i = 0; i < iter; ++i)
-        {
-            result = __builtin_amdgcn_mfma_f32_32x32x16_bf16(a, a, result, 0, 0, 0);
-        }
-    #else
-    #error "Unsupported gfx arch"
-    #endif
-
-        if (result[0] != 2*result[0])
-        {
-            dummy[0] = result[0];
-        }
-    }
-    """
-    )
-
-    matrix_f64_src = (
-        vector_types_src
-        + """
-
-    extern "C" __global__ void mfma_f64(int iter, float *dummy)
-    {
-        double a =  threadIdx.x;
-
-        vec4<double> result = {0};
-
-        for(int i = 0; i < iter; ++i)
-        {
-            result = __builtin_amdgcn_mfma_f64_16x16x4f64(a, a, result, 0, 0, 0);
-        }
-
-        if (result[0] != 2*result[0])
-        {
-            dummy[0] = result[0];
-        }
-    }
-    """
-    )
-
-    matrix_i8_src = (
-        vector_types_src
-        + """
-
-    extern "C" __global__ void mfma_i8(int iter, float *dummy)
-    {
-        vec16<int> result = {0};
-
-    // MI100/MI200
-    #if defined(__gfx908__) || defined(__gfx90a__)
-        int a = threadIdx.x;
-
-        for(int i = 0; i < iter; ++i)
-        {
-            result = __builtin_amdgcn_mfma_i32_32x32x8i8(a, a, result, 0, 0, 0);
-        }
-    // MI300 series
-    #elif defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__)
-        long a =  threadIdx.x;
-
-        for(int i = 0; i < iter; ++i)
-        {
-            result = __builtin_amdgcn_mfma_i32_32x32x16_i8(a, a, result, 0, 0, 0);
-        }
-    // MI350 series
-    #elif defined(__gfx950__)
-        vec2<long> a;
-        a[1] = a[0] = threadIdx.x;
-
-        for(int i = 0; i < iter; ++i)
-        {
-            result = __builtin_amdgcn_mfma_i32_32x32x32_i8(a, a, result, 0, 0, 0);
-        }
-    #else
-    #error "Unsupported gfx arch"
-    #endif
-
-        if (result[0] != 2*result[0])
-        {
-            dummy[0] = result[0];
-        }
-    }
-    """
-    )
-
-    matrix_f8_src = (
-        vector_types_src
-        + """
-
-    extern "C" __global__ void mfma_f8(int iter, float *dummy)
-    {
-        // MI300 series only - note gfx940/gfx941/gfx942 only uses fnuz f8
-        long a =  threadIdx.x;
-
-        vec16<float> result = {0};
-
-        for(int i = 0; i < iter; ++i)
-        {
-            result = __builtin_amdgcn_mfma_f32_32x32x16_fp8_fp8(a, a, result, 0, 0, 0);
-        }
-
-        if (result[0] != 2*result[0])
-        {
-            dummy[0] = result[0];
-        }
-    }
-    """
-    )
-
-    matrix_f8f6f4_src = (
-        vector_types_src
-        + """
-
-    #define FP8_E4M3 0
-    #define BF8_E5M2 1
-    #define FP6_E2M3 2
-    #define BF6_E3M2 3
-    #define FP4_E2M1 4
-    #define FP6_FP4_MIXED 5
-
-    template<int datatype> __global__ void mfma_f8f6f4(int iter, float *dummy)
-    {
-        // MI350 series only
-        vec8<int> a;
-        a[0] = a[1] = a[2] = a[3] = a[4] = a[5] = a[6] = a[7] = threadIdx.x;
-
-        // Output: 16 F32 registers
-        vec16<float> result = {0};
-
-        switch (datatype)
-        {
-            case FP8_E4M3: // fp8 x fp8
-                for(int i = 0; i < iter; ++i)
-                {
-                    result = __builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4(
-                        a,
-                        a,
-                        result,
-                        0,
-                        0,
-                        0,
-                        0,
-                        0,
-                        0
-                    );
-                }
-            case BF8_E5M2: // bf8 x bf8
-                for(int i = 0; i < iter; ++i)
-                {
-                    result = __builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4(
-                        a,
-                        a,
-                        result,
-                        1,
-                        1,
-                        0,
-                        0,
-                        0,
-                        0
-                    );
-                }
-                break;
-            case FP6_E2M3: // fp6 x fp6
-                for(int i = 0; i < iter; ++i)
-                {
-                    result = __builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4(
-                        a,
-                        a,
-                        result,
-                        2,
-                        2,
-                        0,
-                        0,
-                        0,
-                        0
-                    );
-                }
-                break;
-            case BF6_E3M2: // bf6 x bf6
-                for(int i = 0; i < iter; ++i)
-                {
-                    result = __builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4(
-                        a,
-                        a,
-                        result,
-                        3,
-                        3,
-                        0,
-                        0,
-                        0,
-                        0
-                    );
-                }
-                break;
-            case FP4_E2M1: // fp4 x fp4
-                for(int i = 0; i < iter; ++i)
-                {
-                    result = __builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4(
-                        a,
-                        a,
-                        result,
-                        4,
-                        4,
-                        0,
-                        0,
-                        0,
-                        0
-                    );
-                }
-                break;
-            case FP6_FP4_MIXED: // fp6 x fp4 (mixed precision)
-                for(int i = 0; i < iter; ++i)
-                {
-                    result = __builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4(
-                        a,
-                        a,
-                        result,
-                        2,  // FP6_E2M3 for input A
-                        4,  // FP4_E2M1 for input B
-                        0,
-                        0,
-                        0,
-                        0
-                    );
-                }
-                break;
-        }
-
-        if (result[0] != 2*result[0])
-        {
-            dummy[0] = result[0];
-        }
-    }
-
-    """
-    )
-
+    # Generic matrix operations benchmark
     def matrix_bench(self, device: int, type: str, unit: str, rate: int) -> PerfMetrics:
         experiments = DEFAULT_NUM_EXPERIMENTS
         iters = 2000
@@ -1057,8 +778,8 @@ class Bench_base(ABC):
     def int64_benchmark(self, device: int) -> PerfMetrics:
         return self.flops_bench(device, "INT64", "IOP", "GOPS")
 
-    # Run the roofline tests on the specified device
     def run_benchmark(self, device: int) -> dict[PerfMetrics]:
+        """Run the roofline tests on the specified device."""
         with self.gpu_benchmark_lock(device):
             metrics_dict = {}
 
@@ -1081,10 +802,11 @@ class Bench_base(ABC):
 
             return metrics_dict
 
-    # Run the benchmark test on the specified devices
-    # Returns a dictionary mapping device ID to dictionary of
-    # metrics
     def run_on_devices(self, devices: list[str]) -> dict[dict[PerfMetrics]]:
+        """
+        Run the benchmark test on the all requested devices in a given list.
+        Returns a dictionary mapping device ID to dictionary of metrics.
+        """
         metrics = {}
         for d in devices:
             metrics[d] = self.run_benchmark(int(d))
@@ -1092,6 +814,7 @@ class Bench_base(ABC):
         return metrics
 
     def dump_csv(self, metrics: dict[dict[PerfMetrics]], file_path: str) -> None:
+        """Generate a csv file containing the collected benchmark metrics."""
         # TODO: Better way to map CSV column names?
         with open(file_path, "w") as f:
             writer = csv.writer(f)

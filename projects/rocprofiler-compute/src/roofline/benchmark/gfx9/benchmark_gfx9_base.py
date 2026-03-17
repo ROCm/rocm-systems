@@ -11,6 +11,9 @@
 from .. import benchmark_base
 
 
+# =============================================================================
+# Bench_gfx9 Class (ABSTRACT)
+# =============================================================================
 class Bench_gfx9(benchmark_base.Bench_base):
     def __init__(self, device_ids: list) -> None:
         super().__init__(device_ids)
@@ -75,3 +78,67 @@ class Bench_gfx9(benchmark_base.Bench_base):
             "MFMA-F64": "MFMAF64Flops",
             "MFMA-I8": "MFMAI8Ops",
         }
+
+    # -----------------------------------------------------------------------------
+    # Benchmarking kernel source
+    # -----------------------------------------------------------------------------
+    def set_kernel_source(self) -> None:
+        # Fill in the generic source kernels contained in the super
+        super().set_kernel_source()
+
+        # Cache bandwidth and FLOPs benchmarking
+        # ----------------------------------------
+        # Completed in the Bench_base class set_kernel_source()
+
+        # Matrix operations
+        # ----------------------------------------
+        # Kernels need arch-specific definitions or are unsupported by the hardware
+        self.matrix_f16_src = """"""
+        self.matrix_bf16_src = """"""
+        self.matrix_i8_src = """"""
+        self.matrix_f8f6f4_src = """"""
+        self.matrix_f8_src = """"""
+
+        self.matrix_f32_src = (
+            self.vector_types_src
+            + """
+            extern "C" __global__ void mfma_f32(int iter, float *dummy)
+            {
+                float a = threadIdx.x;
+                vec16<float> result = {0};
+
+                for(int i = 0; i < iter; ++i)
+                {
+                    result = __builtin_amdgcn_mfma_f32_32x32x2f32(\
+                        a, a, result, 0, 0, 0);
+                }
+
+                if (result[0] != 2*result[0])
+                {
+                    dummy[0] = result[0];
+                }
+            }
+            """
+        )
+
+        self.matrix_f64_src = (
+            self.vector_types_src
+            + """
+        extern "C" __global__ void mfma_f64(int iter, float *dummy)
+        {
+            double a =  threadIdx.x;
+
+            vec4<double> result = {0};
+
+            for(int i = 0; i < iter; ++i)
+            {
+                result = __builtin_amdgcn_mfma_f64_16x16x4f64(a, a, result, 0, 0, 0);
+            }
+
+            if (result[0] != 2*result[0])
+            {
+                dummy[0] = result[0];
+            }
+        }
+        """
+        )

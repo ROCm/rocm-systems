@@ -2,10 +2,10 @@
 # SPDX-License-Identifier:  MIT
 
 # -----------------------------------------------------------------------------
-# benchmark_gfx942.py
+# benchmark_gfx90a.py
 #
-# Benchmarking class for all gfx942 product (also supports gfx940 and gfx941)
-# MI300A, MI300X, MI308, MI325X
+# Benchmarking class for all gfx90a products
+# MI210, MI250, MI250X
 #
 # -----------------------------------------------------------------------------
 
@@ -13,9 +13,9 @@ from . import benchmark_gfx9_base
 
 
 # =============================================================================
-# Bench_gfx942 Class
+# Bench_gfx90a Class
 # =============================================================================
-class Bench_gfx942(benchmark_gfx9_base.Bench_gfx9):
+class Bench_gfx90a(benchmark_gfx9_base.Bench_gfx9):
     def __init__(self, device_ids: list) -> None:
         super().__init__(device_ids)
 
@@ -140,30 +140,6 @@ class Bench_gfx942(benchmark_gfx9_base.Bench_gfx9):
 
         # Matrix operations
         # ----------------------------------------
-        self.matrix_f8_src = (
-            self.vector_types_src
-            + """
-        extern "C" __global__ void mfma_f8(int iter, float *dummy)
-        {
-            // MI300 series only - note gfx940/gfx941/gfx942 only uses fnuz f8
-            long a =  threadIdx.x;
-
-            vec16<float> result = {0};
-
-            for(int i = 0; i < iter; ++i)
-            {
-                result = __builtin_amdgcn_mfma_f32_32x32x16_fp8_fp8(\
-                    a, a, result, 0, 0, 0);
-            }
-
-            if (result[0] != 2*result[0])
-            {
-                dummy[0] = result[0];
-            }
-        }
-        """
-        )
-
         self.matrix_f16_src = (
             self.vector_types_src
             + """
@@ -192,13 +168,12 @@ class Bench_gfx942(benchmark_gfx9_base.Bench_gfx9):
         extern "C" __global__ void mfma_bf16(int iter, float *dummy)
         {
             vec16<float> result = {0};
-            vec4<short> a;
-            a[3] = a[2] = a[1] = a[0] = threadIdx.x;
+            vec2<short> a;
+            a[1] = a[0]= threadIdx.x;
 
             for(int i = 0; i < iter; ++i)
             {
-                result = __builtin_amdgcn_mfma_f32_32x32x8bf16_1k(\
-                    a, a, result, 0, 0, 0);
+                result = __builtin_amdgcn_mfma_f32_32x32x4bf16(a, a, result, 0, 0, 0);
             }
 
             if (result[0] != 2*result[0])
@@ -212,14 +187,15 @@ class Bench_gfx942(benchmark_gfx9_base.Bench_gfx9):
         self.matrix_i8_src = (
             self.vector_types_src
             + """
+
         extern "C" __global__ void mfma_i8(int iter, float *dummy)
         {
             vec16<int> result = {0};
-            long a =  threadIdx.x;
+            int a = threadIdx.x;
 
             for(int i = 0; i < iter; ++i)
             {
-                result = __builtin_amdgcn_mfma_i32_32x32x16_i8(a, a, result, 0, 0, 0);
+                result = __builtin_amdgcn_mfma_i32_32x32x8i8(a, a, result, 0, 0, 0);
             }
 
             if (result[0] != 2*result[0])
