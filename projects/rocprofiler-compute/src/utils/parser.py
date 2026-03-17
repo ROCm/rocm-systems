@@ -1186,6 +1186,7 @@ def eval_metric(
     metric_evaluator = MetricEvaluator(raw_pmc_df, sys_vars, empirical_peaks)
 
     exprs_to_eval = []
+    debugged_rows: set[tuple[int, Any]] = set()  # (df_id, row_id) already printed
 
     # Hmmm... apply + lambda should just work
     # df['Value'] = df['Value'].apply(
@@ -1201,7 +1202,8 @@ def eval_metric(
                         if row[expr]:
                             exprs_to_eval.append((df_id, row_id, expr, row[expr]))
 
-                            if debug:
+                            if debug and (df_id, row_id) not in debugged_rows:
+                                debugged_rows.add((df_id, row_id))
                                 debug_evaluate_metrics(
                                     expr, row[expr], metric_evaluator, raw_pmc_df
                                 )
@@ -1338,23 +1340,65 @@ def debug_evaluate_metrics(
             else:
                 print(f"Var {vars}: [not found]")
 
-    # Show matched columns
-    matched_cols = re.findall(r"raw_pmc_df\['\w+'\]\['\w+'\]", row_expr)
-    if matched_cols:
-        for cols in matched_cols:
-            col_match = re.match(r"raw_pmc_df\['(\w+)'\]\['(\w+)'\]", cols)
-            try:
-                if isinstance(raw_pmc_df, dict) and col_match.group(1) in raw_pmc_df:
-                    column_data = raw_pmc_df[col_match.group(1)][
-                        col_match.group(2)
-                    ].to_list()
-                    print(f"{cols}: {column_data}")
-            except KeyError as key_error:
-                console_warning(
-                    f"Skipping entry. Encountered a missing key: {key_error}"
+    # Show matched columns (support both single and double quotes in expression)
+    matched_cols = re.findall(
+        r"raw_pmc_df\[[\"'](\w+)[\"']\]\[[\"'](\w+)[\"']\]", row_expr
+    )
+    # Deduplicate while preserving order (same counter may appear multiple times)
+    _max_debug_rows = 5
+    seen: set[tuple[str, str]] = set()
+    # Collect (label, column_data) and compute global width for right-align
+    rows_to_print: list[tuple[str, list[Any] | None]] = []
+    global_width = 0
+    for table_key, col_name in matched_cols:
+        if (table_key, col_name) in seen:
+            continue
+        seen.add((table_key, col_name))
+        try:
+            if isinstance(raw_pmc_df, dict) and table_key in raw_pmc_df:
+                series = raw_pmc_df[table_key][col_name]
+                column_data = (
+                    series.tolist() if hasattr(series, "tolist") else list(series)
                 )
+            elif isinstance(raw_pmc_df, pd.DataFrame):
+                if table_key in raw_pmc_df.columns.get_level_values(0):
+                    series = raw_pmc_df[table_key][col_name]
+                    column_data = (
+                        series.tolist() if hasattr(series, "tolist") else list(series)
+                    )
+                elif col_name in raw_pmc_df.columns:
+                    series = raw_pmc_df[col_name]
+                    column_data = (
+                        series.tolist() if hasattr(series, "tolist") else list(series)
+                    )
+                else:
+                    column_data = None
+            else:
+                column_data = None
+            label = f"raw_pmc_df['{table_key}']['{col_name}']"
+            rows_to_print.append((label, column_data))
+            if column_data is not None:
+                display = column_data[:_max_debug_rows]
+                global_width = max(
+                    global_width,
+                    max((len(str(v)) for v in display), default=0),
+                )
+        except (KeyError, TypeError) as e:
+            console_warning(
+                f"Skipping entry for '{table_key}'['{col_name}']. Encountered: {e}"
+            )
+    for label, column_data in rows_to_print:
+        if column_data is not None:
+            n = len(column_data)
+            display_data = column_data[:_max_debug_rows]
+            formatted = ", ".join(str(v).rjust(global_width) for v in display_data)
+            if n > _max_debug_rows:
+                formatted += ", ..."
+            print(f"  {label}: [{formatted}]")
+        else:
+            print(f"  {label}: [unknown type]")
 
-    print("\nOutput:")
+    print("\nOutput:", end=" ")
     try:
         eval_result = metric_evaluator.eval_expression(row_expr)
         print(eval_result)
