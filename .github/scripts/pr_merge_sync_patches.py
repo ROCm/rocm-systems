@@ -214,7 +214,9 @@ def _extract_commit_message_from_patch(patch_path: Path) -> str:
     """Extract and clean the original commit message from the patch file,
     removing '[PATCH]' and trailing PR references like (#NN) from the title.
     Decodes RFC 2047 (MIME) encoded subjects so subrepo commits show plain text."""
-    with open(patch_path, "r", encoding="utf-8") as f:
+    # Read with errors=replace so we don't crash on non-UTF-8 (e.g. Latin-1). Do not rewrite
+    # the patch file: git apply must see the exact bytes from format-patch or the diff may fail.
+    with open(patch_path, "r", encoding="utf-8", errors="replace") as f:
         lines = f.readlines()
     commit_msg_lines = []
     in_msg = False
@@ -281,17 +283,9 @@ def _commits_touching_prefix(base_sha: str, merge_sha: str, prefix: str) -> List
     return [s.strip() for s in out.splitlines() if s.strip()]
 
 
-def _normalize_patch_to_utf8(patch_path: Path) -> None:
-    """Rewrite patch file as UTF-8 so downstream readers can assume UTF-8.
-    Invalid bytes (e.g. from Latin-1 in the original commit) are replaced."""
-    raw = patch_path.read_bytes()
-    text = raw.decode("utf-8", errors="replace")
-    patch_path.write_text(text, encoding="utf-8")
-
-
 def _patch_has_hunks(patch_path: Path) -> bool:
     """Return True if the patch file contains at least one diff hunk (---/+++ and lines)."""
-    with open(patch_path, "r", encoding="utf-8") as f:
+    with open(patch_path, "r", encoding="utf-8", errors="replace") as f:
         content = f.read()
     # Git patch has "--- a/path" and "+++ b/path" then "@@ ... @@" hunks
     return "--- " in content and "+++ " in content and "@@ " in content
@@ -300,7 +294,7 @@ def _patch_has_hunks(patch_path: Path) -> bool:
 def _patch_touched_paths(patch_path: Path) -> List[str]:
     """Return list of file paths touched in the patch (from --- / +++ lines)."""
     paths = []
-    with open(patch_path, "r", encoding="utf-8") as f:
+    with open(patch_path, "r", encoding="utf-8", errors="replace") as f:
         for line in f:
             if line.startswith("--- ") or line.startswith("+++ "):
                 # "--- a/clr/foo.c" or "+++ b/clr/foo.c" -> clr/foo.c
@@ -355,7 +349,7 @@ def generate_patch(
         return None
 
     patch_dir = patch_path.parent
-    # Generate one patch per commit that touches the subtree (preserves order)
+    # Generate one patch per commit that touches the subtree (preserves order).
     for i, sha in enumerate(commits, 1):
         _run_git(
             [
@@ -376,9 +370,6 @@ def generate_patch(
             f"No patch files generated for range {base_sha}..{range_end} with prefix '{prefix}' "
             f"(expected patches for {len(commits)} commit(s) touching subtree)."
         )
-
-    for p in patch_files:
-        _normalize_patch_to_utf8(p)
 
     if debug:
         for p in patch_files:
@@ -508,6 +499,11 @@ def main(argv: Optional[List[str]] = None) -> None:
     """Main function to apply patches to sub-repositories."""
     args = parse_arguments(argv)
     logging.basicConfig(level=logging.DEBUG if args.debug else logging.INFO)
+
+    # Ensure format-patch output is UTF-8 so we can read patches without decode errors
+    # (repo-local only; commit messages may be stored in Latin-1 or other encodings).
+    _run_git(["config", "i18n.logOutputEncoding", "UTF-8"])
+
     client = GitHubCLIClient()
     config = load_repo_config(args.config)
     subtrees = [line.strip() for line in args.subtrees.splitlines() if line.strip()]
