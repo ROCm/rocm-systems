@@ -247,7 +247,8 @@ def main():
 
     # Print to stdout for CMake OUTPUT_VARIABLE capture
     print(cmake_code, end="")
-
+    # The following is a dummy code for install_test_file parameter.
+    # It will be used to append the generated CMake code to a file for install-time use if needed.
     if install_test_file:
         with open(install_test_file, "a") as f:
             f.write(cmake_code)
