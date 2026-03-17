@@ -343,8 +343,7 @@ static bool IsUnsupportedOnGFX9(const std::string& mnemonic) {
   // unsupported if the emulation doesn't handle them yet
   // (s_add_f32, s_mul_f32 etc. are handled in TranslateInstruction)
 
-  // VOPD (dual-issue) — not on GFX9
-  if (mnemonic.find("v_dual_") == 0) return true;
+  // VOPD (dual-issue) — now split into two instructions in TranslateInstruction
 
   // GFX1250 tensor/cluster/prefetch — no equivalent
   if (mnemonic.find("tensor_") == 0) return true;
@@ -560,6 +559,54 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
   if (mnemonic == "s_wait_alu") {
     result.push_back("s_nop 0");
     return result;
+  }
+
+  // ─── Barrier translation ───
+  // GFX12: s_barrier_signal -1 + s_barrier_wait -1 (split)
+  // GFX9:  s_barrier (single instruction)
+  if (mnemonic == "s_barrier_signal") {
+    result.push_back("s_barrier");
+    return result;
+  }
+  if (mnemonic == "s_barrier_wait") {
+    // The s_barrier on GFX9 is already a full barrier (signal+wait).
+    // Since we emitted s_barrier for s_barrier_signal, we NOP the wait.
+    result.push_back("s_nop 0");
+    return result;
+  }
+
+  // ─── VOPD (dual-issue) → two separate instructions ───
+  // GFX11+: v_dual_add_f32 v0, v1, v2 :: v_dual_mul_f32 v3, v4, v5
+  // Split into: v_add_f32 v0, v1, v2 + v_mul_f32 v3, v4, v5
+  if (mnemonic.find("v_dual_") == 0) {
+    // Find "::" separator
+    size_t sep = line.find("::");
+    if (sep != std::string::npos) {
+      // First half: everything before "::"
+      std::string first_half = line.substr(0, sep);
+      // Strip leading whitespace and get mnemonic + operands
+      size_t fs = first_half.find_first_not_of(" \t");
+      if (fs != std::string::npos) first_half = first_half.substr(fs);
+      // Trim trailing whitespace
+      size_t fe = first_half.find_last_not_of(" \t");
+      if (fe != std::string::npos) first_half = first_half.substr(0, fe + 1);
+      // Replace "v_dual_" with "v_"
+      if (first_half.find("v_dual_") == 0)
+        first_half = "v_" + first_half.substr(7);
+
+      // Second half: everything after "::"
+      std::string second_half = line.substr(sep + 2);
+      size_t ss = second_half.find_first_not_of(" \t");
+      if (ss != std::string::npos) second_half = second_half.substr(ss);
+      size_t se = second_half.find_last_not_of(" \t");
+      if (se != std::string::npos) second_half = second_half.substr(0, se + 1);
+      if (second_half.find("v_dual_") == 0)
+        second_half = "v_" + second_half.substr(7);
+
+      result.push_back(first_half);
+      result.push_back(second_half);
+      return result;
+    }
   }
 
   // ─── SALU float → VALU emulation ───
