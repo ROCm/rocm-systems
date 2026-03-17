@@ -717,6 +717,7 @@ class Graph {
   //! Calculate dependency levels for segments using topological sort
   void CalculateSegmentTopoDependencyLevels();
 
+  int wait_count_ = 0;
   //! Runs one node on the assigned stream
   bool RunOneNode(Node node);  //!< Node for the execution on GPU
 

@@ -43,7 +43,7 @@
 cmake_minimum_required ( VERSION 3.7 )
 
 # Import target 'clang'
-find_package(Clang REQUIRED HINTS ${CMAKE_PREFIX_PATH}/llvm PATHS /opt/rocm/llvm )
+# find_package(Clang REQUIRED HINTS ${CMAKE_PREFIX_PATH}/llvm PATHS /opt/rocm/llvm )
 
 # Determine the target devices if not specified
 if (NOT DEFINED TARGET_DEVICES)
@@ -52,10 +52,11 @@ if (NOT DEFINED TARGET_DEVICES)
                       "gfx1010;gfx1011;gfx1012;gfx1013;gfx1030;gfx1031;gfx1032;gfx1033;gfx1034;gfx1035;gfx1036"
                       "gfx1100;gfx1101;gfx1102;gfx1103;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201")
 endif()
-set( TARGET_DEVICES ${TARGET_DEVICES} CACHE STRING "Build targets" FORCE )
+# set( TARGET_DEVICES "gfx950")
 
 if(${CMAKE_VERBOSE_MAKEFILE})
-  get_property(clang_path TARGET clang PROPERTY LOCATION)
+  #get_property(clang_path TARGET clang PROPERTY LOCATION)
+  set(clang_path "/opt/rocm/llvm/bin/clang")
   message("Using clang from: ${clang_path}")
   message("Build Setting:")
   message("  Target Devices*: ${TARGET_DEVICES}")
@@ -78,7 +79,7 @@ function(gen_kernel_bc TARGET_ID INPUT_FILE OUTPUT_FILE)
   ## Add custom command to produce a code object file.
   ## This depends on the kernel source file & compiler.
   add_custom_command(OUTPUT ${OUTPUT_FILE} COMMAND clang ${CLANG_ARG_LIST}
-    DEPENDS ${INPUT_FILE} clang
+    DEPENDS ${INPUT_FILE} /opt/rocm/llvm/bin/clang
     COMMENT "BUILDING bitcode for ${OUTPUT_FILE}..."
     VERBATIM)
 

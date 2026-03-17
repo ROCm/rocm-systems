@@ -309,7 +309,7 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
            {kCodeTrapHandlerV2_1010, sizeof(kCodeTrapHandlerV2_1010), 2, 4},// gfx1010
            {kCodeTrapHandlerV2_10, sizeof(kCodeTrapHandlerV2_10), 2, 4},    // gfx10
            {kCodeTrapHandlerV2_11, sizeof(kCodeTrapHandlerV2_11), 2, 4},    // gfx11
-           {kCodeTrapHandlerV2_12, sizeof(kCodeTrapHandlerV2_12), 2, 4},    // gfx12
+           {kCodeTrapHandlerV2_11, sizeof(kCodeTrapHandlerV2_11), 2, 4},    // gfx12
        }},
       {"CopyAligned",
        {
@@ -321,7 +321,7 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
            {kCodeCopyAligned10, sizeof(kCodeCopyAligned10), 32, 12},        // gfx1010
            {kCodeCopyAligned10, sizeof(kCodeCopyAligned10), 32, 12},        // gfx10
            {kCodeCopyAligned11, sizeof(kCodeCopyAligned11), 32, 12},        // gfx11
-           {kCodeCopyAligned12, sizeof(kCodeCopyAligned12), 32, 12},        // gfx12
+           {kCodeCopyAligned11, sizeof(kCodeCopyAligned11), 32, 12},        // gfx12
        }},
       {"CopyMisaligned",
        {
@@ -333,7 +333,7 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
            {kCodeCopyMisaligned10, sizeof(kCodeCopyMisaligned10), 23, 10},  // gfx1010
            {kCodeCopyMisaligned10, sizeof(kCodeCopyMisaligned10), 23, 10},  // gfx10
            {kCodeCopyMisaligned11, sizeof(kCodeCopyMisaligned11), 23, 10},  // gfx11
-           {kCodeCopyMisaligned12, sizeof(kCodeCopyMisaligned12), 23, 10},  // gfx12
+           {kCodeCopyMisaligned11, sizeof(kCodeCopyMisaligned11), 23, 10},  // gfx12
        }},
       {"Fill",
        {
@@ -345,7 +345,7 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
            {kCodeFill10, sizeof(kCodeFill10), 19, 8},                       // gfx1010
            {kCodeFill10, sizeof(kCodeFill10), 19, 8},                       // gfx10
            {kCodeFill11, sizeof(kCodeFill11), 19, 8},                       // gfx11
-           {kCodeFill12, sizeof(kCodeFill12), 19, 8},                       // gfx12
+           {kCodeFill11, sizeof(kCodeFill11), 19, 8},                       // gfx12
        }}};
 
   auto compiled_shader_it = compiled_shaders.find(func_name);

@@ -43,16 +43,19 @@
 cmake_minimum_required ( VERSION 3.7 )
 
 # Import target 'clang' and 'llvm-objcopy'
-find_package(Clang REQUIRED HINTS ${CMAKE_PREFIX_PATH}/llvm PATHS /opt/rocm/llvm )
-find_package(LLVM REQUIRED HINTS ${CMAKE_PREFIX_PATH}/llvm PATHS /opt/rocm/llvm )
+# find_package(Clang REQUIRED HINTS ${CMAKE_PREFIX_PATH}/llvm PATHS /opt/rocm/llvm )
+# find_package(LLVM REQUIRED HINTS ${CMAKE_PREFIX_PATH}/llvm PATHS /opt/rocm/llvm )
 
-set (TARGET_DEVS "gfx900;gfx942;gfx950;gfx1010;gfx1030;gfx1100;gfx1200")
-set (POSTFIX "9;942;950;1010;10;11;12")
+set (TARGET_DEVS "gfx900;gfx942;gfx950;gfx1010;gfx1030;gfx1100")
+set (POSTFIX "9;942;950;1010;10;11")
 set (SOURCE_SUFFIX ";;;;;;_gfx12")
 
 if(${CMAKE_VERBOSE_MAKEFILE})
-  get_property(clang_path TARGET clang PROPERTY LOCATION)
-  get_property(objcopy_path TARGET llvm-objcopy PROPERTY LOCATION)
+
+  #get_property(clang_path TARGET clang PROPERTY LOCATION)
+  set(clang_path "/opt/rocm/llvm/bin/clang")
+  #get_property(objcopy_path TARGET llvm-objcopy PROPERTY LOCATION)
+  set(objcopy_path "/opt/rocm/llvm/bin/llvm-objcopy")
   message("Using clang from: ${clang_path}")
   message("Using llvm-objcopy from: ${objcopy_path}")
   message("Trap handlers assembled for: ${TARGET_DEVS}")
@@ -70,7 +73,7 @@ function(gen_kernel_bc TARGET_ID INPUT_FILE OUTPUT_FILE)
 
   ## Add custom command to produce a code object file.
   add_custom_command(OUTPUT ${CODE_OBJECT} COMMAND clang ${CLANG_ARG_LIST}
-    DEPENDS ${INPUT_FILE} clang
+    DEPENDS ${INPUT_FILE} /opt/rocm/llvm/bin/clang
     COMMENT "BUILDING bitcode for ${OUTPUT_FILE}..."
     VERBATIM)
 
@@ -79,7 +82,7 @@ function(gen_kernel_bc TARGET_ID INPUT_FILE OUTPUT_FILE)
   ## Extract .text segment
   add_custom_command(OUTPUT ${OUTPUT_FILE}
                      COMMAND llvm-objcopy ${OBJCOPY_ARG_LIST}
-                     DEPENDS ${CODE_OBJECT} llvm-objcopy
+                     DEPENDS ${CODE_OBJECT} /opt/rocm/llvm/bin/llvm-objcopy
                      COMMENT "Extracting binary for ${OUTPUT_FILE}..."
                      VERBATIM)
 

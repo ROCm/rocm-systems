@@ -1780,6 +1780,7 @@ bool Graph::RunOneNode(Node node) {
             // since the same stream has in-order run
             (wait_order_[depNode->stream_id_]->launch_id_ < depNode->launch_id_)) {
           wait_order_[depNode->stream_id_] = depNode;
+          wait_count_++;
         }
       } else {
         // Release nodes that were enqueued on the same stream, since they are not included in the
@@ -1913,6 +1914,7 @@ bool Graph::RunNodes(int32_t base_stream, const std::vector<hip::Stream*>* paral
     last_command->release();
   }
 
+  wait_count_ = 0;
   // Run all commands in the graph
   for (auto node : GetTopoOrder()) {
     node->launch_id_ = -1;
@@ -1920,6 +1922,7 @@ bool Graph::RunNodes(int32_t base_stream, const std::vector<hip::Stream*>* paral
       return false;
     }
   }
+  fprintf(stderr, "wait_count_: %d\n", wait_count_);
   wait_list.clear();
   // Check if the graph has multiple leaf nodes
   for (uint32_t i = 0; i < DEBUG_HIP_FORCE_GRAPH_QUEUES; ++i) {

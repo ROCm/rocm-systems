@@ -46,6 +46,10 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE "Release")
 endif()
 
+# Add a directory to the global include directories for all projects
+include_directories(/tf/rocr-runtime-install/include)
+
+
 #############
 # Build steps
 #############
