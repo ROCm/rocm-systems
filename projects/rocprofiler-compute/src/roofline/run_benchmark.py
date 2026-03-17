@@ -26,18 +26,24 @@ from hip import hip
 
 def load_bench(device_ids: list[str]) -> object:
     try:
+        # Get exact LLVM target name of the device
         gfx_device = (hip.hipGetDeviceProperties(int(device_ids[0])).gcnArchName).split(
             ":", 1
         )[0]
-        gfx_arch = gfx_device[:4]
+
+        # Force gfx940 MI300A_A0 and gfx941 MI300X_A0 products
+        # to use same class as gfx942 MI300_A1
+        if gfx_device == "gfx940" or gfx_device == "gfx941":
+            gfx_device = "gfx942"
+
+        # Get the gfx architecture of the device
+        gfx_arch = gfx_device[:-2]
 
         # Dynamically import the bench class module
-        # bench_module = importlib.import_module(f"benchmark_{gfx_arch}")
         bench_module = importlib.import_module(
             f"benchmark.{gfx_arch}.benchmark_{gfx_device}"
         )
         # Get the bench class from the module
-        # bench_class = getattr(bench_module, f"Bench_{gfx_arch}")
         bench_class = getattr(bench_module, f"Bench_{gfx_device}")
         # Instantiate and return the bench class
         bench_instance = bench_class(device_ids)

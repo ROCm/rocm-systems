@@ -58,38 +58,17 @@ VALU_NFMA = 1024
 # =============================================================================
 class Bench_base(ABC):
     def __init__(self, device_ids: list) -> None:
-        self.lds_sizes: dict[str, int]
+        # Arch or hardware-specific variables must be set in child classes
+        # self.lds_sizes: dict[str, int]
+        self.unsupported_data_types: list[str]
+        self.cache_kernel_selector: dict[str, str]
         self.matrix_kernel_selector: dict[str, str]
-        self.unsupported_data_types: dict[str, list[str]]
-        self.cache_kernel_selector: dict[str, dict[str, str]]
-        self.matrix_ops: dict[str, dict[str, int]]
-        self.cache_sizes: dict[str, dict[str, int]]
+        self.matrix_ops: dict[str, int]
+        self.cache_sizes: dict[str, int]
         self.tests: dict[str, str]
         self.csv_cols_map: dict[str, str]
-
         self.WAVEFRONT_SIZE: int
         self.MATRIX_OPS_TYPE: str
-
-        self.hbm_bw_src: str
-        self.mall_bw_src: str
-        self.l2_bw_src: str
-        self.l1_bw_src: str
-        self.lds_bw_src: str
-        self.fp16_src: str
-        self.fp32_src: str
-        self.fp64_src: str
-        self.int8_src: str
-        self.int32_src: str
-        self.int64_src: str
-        self.matrix_f4_src: str
-        self.matrix_f6_src: str
-        self.matrix_f6f4_src: str
-        self.matrix_f8_src: str
-        self.matrix_f16_src: str
-        self.matrix_bf16_src: str
-        self.matrix_f32_src: str
-        self.matrix_f64_src: str
-        self.matrix_i8_src: str
 
         # Some data types have different rates. Set the number of iterations
         # to keep running time under control.
@@ -121,6 +100,27 @@ class Bench_base(ABC):
             template<typename T> using vec16 = vecT<T, 16>;
             """
 
+        # Kernel source must be set in child classes
+        self.hbm_bw_src: str
+        self.mall_bw_src: str
+        self.l2_bw_src: str
+        self.l1_bw_src: str
+        self.lds_bw_src: str
+        self.fp16_src: str
+        self.fp32_src: str
+        self.fp64_src: str
+        self.int8_src: str
+        self.int32_src: str
+        self.int64_src: str
+        self.matrix_f4_src: str
+        self.matrix_f6_src: str
+        self.matrix_f6f4_src: str
+        self.matrix_f8_src: str
+        self.matrix_f16_src: str
+        self.matrix_bf16_src: str
+        self.matrix_f32_src: str
+        self.matrix_f64_src: str
+        self.matrix_i8_src: str
         self.set_kernel_source()
 
     # -----------------------------------------------------------------------------
@@ -478,13 +478,12 @@ class Bench_base(ABC):
 
         cus = hip.hipGetDeviceProperties(device).multiProcessorCount
 
-        arch = self.get_gfx_arch(device)
-        cache_size = self.cache_sizes[type][arch]
+        cache_size = self.cache_sizes[type]
 
         mem_block = hip.hipMalloc(cache_size)
         dummy = hip.hipMalloc(workgroup_size * sizeof(c_float))
 
-        kernel_name = self.cache_kernel_selector[type][arch]
+        kernel_name = self.cache_kernel_selector[type]
         prog = self.Program(self.cache_bw_src, [kernel_name])
         func = prog.get_kernel(kernel_name)
 
@@ -671,13 +670,12 @@ class Bench_base(ABC):
         workgroups = 128 * cus
         workgroup_size = DEFAULT_WORKGROUP_SIZE
 
-        arch = self.get_gfx_arch(device)
         total_flops = (
             workgroups
             * workgroup_size
             // self.WAVEFRONT_SIZE
             * iters
-            * self.matrix_ops[type][arch]
+            * self.matrix_ops[type]
         )
 
         dummy = hip.hipMalloc(64 * sizeof(c_float))
@@ -789,10 +787,7 @@ class Bench_base(ABC):
             print(f"GPU Device {device} ({arch}) with {cus} CUs: Profiling...")
 
             for name, func in self.tests.items():
-                if (
-                    arch in self.unsupported_data_types
-                    and name in self.unsupported_data_types[arch]
-                ):
+                if name in self.unsupported_data_types:
                     print(f"Skipping {name}")
                     metrics = PerfMetrics(0, 0, 0)
                 else:
