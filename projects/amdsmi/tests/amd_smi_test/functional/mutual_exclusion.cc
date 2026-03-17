@@ -22,9 +22,12 @@
 #include "mutual_exclusion.h"
 
 #include <gtest/gtest.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 #include <csignal>
 #include <cstdint>
+#include <cstdlib>
 #include <iostream>
 #include <string>
 #include <vector>

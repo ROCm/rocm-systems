@@ -3419,6 +3419,10 @@ rsmi_status_t rsmi_dev_volt_metric_get(uint32_t dv_ind, rsmi_voltage_type_t sens
   rsmi_status_t ret;
   amd::smi::MonitorTypes mon_type;
 
+  if (voltage == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
   switch (metric) {
     case RSMI_VOLT_CURRENT:
       mon_type = amd::smi::kMonVolt;
@@ -4712,6 +4716,9 @@ rsmi_status_t rsmi_dev_pci_replay_counter_get(uint32_t dv_ind, uint64_t* counter
   TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
+  if (counter == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
   CHK_SUPPORT_NAME_ONLY(counter)
 
   rsmi_status_t ret;
