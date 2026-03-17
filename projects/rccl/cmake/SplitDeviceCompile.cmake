@@ -100,8 +100,11 @@ function(setup_split_device_compile)
         OR _opt MATCHES "^-x$"
         OR _opt MATCHES "^-std="
         OR _opt MATCHES "^-O[0-3s]$"
-        OR _opt MATCHES "^-fPIC")
-      # Skip: already set explicitly or irrelevant
+        OR _opt MATCHES "^-fPIC"
+        OR _opt MATCHES "^-fsanitize="
+        OR _opt MATCHES "^-shared-libasan")
+      # Skip: already set explicitly, irrelevant, or incompatible with
+      # the split device pipeline (ASAN device runtime is not linked by lld)
     elseif(_opt STREQUAL "-mllvm")
       list(APPEND _fwd_compile_opts "${_opt}")
       set(_skip_next ON)
@@ -192,6 +195,16 @@ function(setup_split_device_compile)
         -e "s/\\.amdhsa_accum_offset .*/\\.amdhsa_accum_offset 128/"
         -e "s/\\.amdhsa_next_free_sgpr .*/\\.amdhsa_next_free_sgpr 102/"
       )
+
+      # ASAN workaround: LLVM emits asan_globals group sections with the COMDAT
+      # signature symbol instead of the literal "comdat" keyword, and appends a
+      # ",unique,N" suffix that the AMDGCN MC assembler doesn't support for
+      # grouped sections.  Rewrite to the accepted form: ...,GROUP,comdat
+      if(BUILD_ADDRESS_SANITIZER)
+        list(APPEND _sed_args
+          -e "s/\\(\\.section[[:space:]]\\+asan_globals,[^,]*,@progbits,[^,]*\\),.*/\\1,comdat/"
+        )
+      endif()
 
       add_custom_command(
         OUTPUT  ${ASM_FILE}

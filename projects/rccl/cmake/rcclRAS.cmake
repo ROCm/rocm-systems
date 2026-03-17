@@ -26,5 +26,9 @@ else()
   target_link_libraries(rcclras PRIVATE dl rt -lrccl -L${CMAKE_BINARY_DIR} -lamdhip64 -L${ROCM_PATH}/lib)
 endif()
 
+if(BUILD_ADDRESS_SANITIZER)
+  target_compile_options(rcclras PRIVATE -fsanitize=address -shared-libasan)
+  target_link_options(rcclras PRIVATE -fsanitize=address -shared-libasan)
+endif()
 
 rocm_install(TARGETS rcclras)
