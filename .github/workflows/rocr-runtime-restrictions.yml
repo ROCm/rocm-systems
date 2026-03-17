@@ -36,9 +36,13 @@ jobs:
 
     - name: Apply restriction
       run: |
-        set +e
-        FILES="$(find projects/rocr-runtime/runtime -type f \( -name '*.cpp' -o -name '*.hpp' -o -name '*.h' -o -name '*.cc' \))"
-        GREP="$(grep -E -n 'std::filesystem|<filesystem>' ${FILES})"
+        GREP="$(grep -R -n \
+          --include='*.cpp' \
+          --include='*.hpp' \
+          --include='*.h' \
+          --include='*.cc' \
+          -E 'std::filesystem|<filesystem>' \
+          projects/rocr-runtime/runtime || true)"
         if [ "${GREP}" != "" ]; then
           echo -e "\nError! std::filesystem detected in rocr-runtime library sources."
           echo -e "This is not permitted due to C++ ABI compatibility issues (https://github.com/ROCm/rocm-systems/pull/2586).\n"
