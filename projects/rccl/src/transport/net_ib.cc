@@ -947,14 +947,14 @@ ncclResult_t ncclIbInit(void** ctx, uint64_t commId, ncclNetCommConfig_t* config
     // Determine whether RELAXED_ORDERING is enabled and possible
     ncclIbRelaxedOrderingEnabled = ncclIbRelaxedOrderingCapable();
     for (int d = 0; d < ncclNIbDevs; d++) {
-        snprintf(line+strlen(line), sizeof(line)-strlen(line), " [%d]%s:%d/%s", d, ncclIbDevs[d].devName,
-          ncclIbDevs[d].portNum, NCCL_IB_LLSTR(ncclIbDevs[d].link));
-        // Add this plain physical device to the list of virtual devices
-        int vDev;
-        ncclNetVDeviceProps_t vProps = {0};
-        vProps.ndevs = 1;
-        vProps.devs[0] = d;
-        NCCLCHECK(ncclIbMakeVDeviceInternal(&vDev, &vProps)); 
+      snprintf(line+strlen(line), sizeof(line)-strlen(line), " [%d]%s:%d/%s", d, ncclIbDevs[d].devName,
+        ncclIbDevs[d].portNum, NCCL_IB_LLSTR(ncclIbDevs[d].link));
+      // Add this plain physical device to the list of virtual devices
+      int vDev;
+      ncclNetVDeviceProps_t vProps = {0};
+      vProps.ndevs = 1;
+      vProps.devs[0] = d;
+      NCCLCHECK(ncclIbMakeVDeviceInternal(&vDev, &vProps)); 
     }
     char addrline[SOCKET_NAME_MAXLEN+1];
     INFO(NCCL_INIT|NCCL_NET, "NET/IB : Using%s %s; OOB %s:%s", line, ncclIbRelaxedOrderingEnabled ? "[RO]" : "",
