@@ -518,29 +518,18 @@ def test_csv_data(
             _perform_csv_json_match(a, b, keys_mapping[category], json_data)
 
 
-def test_perfetto_hip_event_annotations(pftrace_data, pftrace_filename):
+def test_perfetto_arg_annotations(pftrace_data, pftrace_filename):
     """
-    Test that HIP event API calls have event handle annotations in perfetto.
-    This validates the feature that adds event ID annotations for HIP event API arguments.
-
-    The feature adds annotations for:
-    - hipEventRecord: 'event' argument
-    - hipEventSynchronize: 'event' argument
-    - hipEventElapsedTime: 'start' and 'stop' arguments
-    - hipStreamWaitEvent: 'event' argument
-
-    Args:
-        pftrace_data: DataFrame with perfetto trace data
-        pftrace_filename: Path to the perfetto trace file for direct queries
+    Test that function argument annotations are available in perfetto with --annotate-args.
+    This validates that all API call arguments are annotated as debug annotations
+    across all categories (hip_api, marker_api, etc.).
     """
     import pytest
     from rocprofiler_sdk.pytest_utils.perfetto_reader import PerfettoReader
 
-    # Filter for HIP API traces
-    hip_api_data = pftrace_data.loc[pftrace_data["category"] == "hip_api"]
-
-    if hip_api_data.empty:
-        pytest.skip("No HIP API traces found")
+    # Check if trace has any data
+    if pftrace_data.empty:
+        pytest.skip("No trace data found")
 
     # Get the PerfettoReader to query the args table
     reader = PerfettoReader(pftrace_filename)
@@ -549,53 +538,49 @@ def test_perfetto_hip_event_annotations(pftrace_data, pftrace_filename):
     if not reader.trace_processor:
         pytest.skip("Trace processor not available")
 
-    # Query for HIP event API slices and their arguments
-    # The args table joins with slice table on arg_set_id
+    # Query for API function argument annotations from --annotate-args
+    # Filter for hip_api/hsa_api/marker_api (KFD/kernel have args from other sources)
+    # Exclude metadata fields (always present, even without --annotate-args)
     query = """
     SELECT
         slice.name as slice_name,
+        slice.category as slice_category,
         slice.id as slice_id,
         args.key as arg_name,
         args.string_value as arg_value
     FROM slice
     JOIN args ON slice.arg_set_id = args.arg_set_id
-    WHERE slice.category = 'hip_api'
-      AND (
-        slice.name LIKE '%hipEventRecord%' OR
-        slice.name LIKE '%hipEventSynchronize%' OR
-        slice.name LIKE '%hipEventElapsedTime%' OR
-        slice.name LIKE '%hipStreamWaitEvent%'
-      )
-      AND (
-        args.key = 'debug.event' OR
-        args.key = 'debug.start' OR
-        args.key = 'debug.stop'
+    WHERE args.key LIKE 'debug.%'
+      AND slice.category IN ('hip_api', 'hsa_api', 'marker_api')
+      AND args.key NOT IN (
+        'debug.begin_ns', 'debug.end_ns', 'debug.delta_ns',
+        'debug.tid', 'debug.kind', 'debug.operation',
+        'debug.corr_id', 'debug.ancestor_id'
       )
     """
 
     result = reader.query_tp(query)
 
-    # Annotations must exist - perfetto was generated with --annotate-args
-    assert (
-        not result.empty
-    ), "No HIP event annotations found - --annotate-args may be broken"
+    # Function argument annotations must exist - perfetto was generated with --annotate-args
+    assert not result.empty, (
+        "No function argument annotations found - --annotate-args may be broken. "
+        "Only metadata fields were found, which are always present."
+    )
 
     # Validate the structure
+    assert "slice_name" in result.columns
+    assert "slice_category" in result.columns
     assert "arg_name" in result.columns
     assert "arg_value" in result.columns
 
-    # Validate that we have expected argument names
-    found_arg_names = set(result["arg_name"].unique())
-    expected_arg_names = {"debug.event", "debug.start", "debug.stop"}
-    assert found_arg_names.issubset(
-        expected_arg_names
-    ), f"Found unexpected arg names: {found_arg_names - expected_arg_names}"
+    # Get statistics for debugging
+    unique_slices = result["slice_name"].nunique()
+    unique_args = result["arg_name"].nunique()
+    unique_categories = result["slice_category"].nunique()
+    categories = result["slice_category"].unique()
 
-    # Validate that event values are present (non-null)
-    null_values = result[result["arg_value"].isna()]
-    assert null_values.empty, f"Found {len(null_values)} event arguments with null values"
-
-    print(
-        f"\nValidation passed: Found {len(result)} event handle annotations "
-        f"with arg names: {found_arg_names}"
-    )
+    print(f"\nValidation passed: Found {len(result)} argument annotations")
+    print(f"  - {unique_slices} unique API calls annotated")
+    print(f"  - {unique_categories} categories: {list(categories)}")
+    print(f"  - {unique_args} unique argument types")
+    print(f"  - Sample argument names: {list(result['arg_name'].unique()[:10])}")

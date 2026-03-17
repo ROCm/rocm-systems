@@ -280,20 +280,6 @@ write_perfetto(
                 "SELECT * FROM region_args WHERE guid='{}' AND id={}", process.guid, region_id));
     };
 
-    auto is_hip_event_api = [](std::string_view opname) {
-        return (opname.rfind("hipEvent", 0) == 0) || (opname == "hipStreamWaitEvent");
-    };
-
-    auto is_event_create_api = [](std::string_view opname) {
-        return opname.rfind("hipEventCreate", 0) == 0;
-    };
-
-    auto is_hip_event_handle_arg = [](std::string_view argname) {
-        // - "event" for hipEventRecord/hipEventSynchronize/hipStreamWaitEvent
-        // - "start"/"stop" for hipEventElapsedTime
-        return (argname == "event") || (argname == "start") || (argname == "stop");
-    };
-
     {
         for(auto ditr : memory_copy_gen)
             for(const auto& itr : memory_copy_gen.get(ditr))
@@ -460,12 +446,7 @@ write_perfetto(
 
                 auto _pmc_events = read_pmc_events(itr.event_id);
                 auto _event      = (ocfg.annotate_kfd) ? read_event(itr.event_id) : types::event{};
-                auto _api_name   = std::string_view{itr.name};
-                auto want_event_handle_annotations = ocfg.annotate_args &&
-                                                     is_hip_event_api(_api_name) &&
-                                                     !is_event_create_api(_api_name);
-                auto _args = want_event_handle_annotations ? read_region_args(itr.id)
-                                                           : std::vector<types::region_arg>{};
+                auto _args       = read_region_args(itr.id);
 
                 auto _category = ::perfetto::DynamicCategory{get_category_string(itr.category)};
                 TRACE_EVENT_BEGIN(
@@ -527,15 +508,9 @@ write_perfetto(
                             }
                         }
 
-                        if(want_event_handle_annotations)
+                        for(const auto& a : _args)
                         {
-                            for(const auto& a : _args)
-                            {
-                                if(is_hip_event_handle_arg(a.name))
-                                {
-                                    rocprofiler::sdk::add_perfetto_annotation(ctx, a.name, a.value);
-                                }
-                            }
+                            rocprofiler::sdk::add_perfetto_annotation(ctx, a.name, a.value);
                         }
                     });
 
