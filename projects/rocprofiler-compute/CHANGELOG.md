@@ -6,6 +6,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Added
 
+* ``--table-view`` debug option in analyze mode to force all TTY output to table view and ignore ``cli_style`` from YAML config (e.g. mem_chart, Roofline charts render as tables).
+
 ### Changed
 
 * Standardized unit naming in analysis configs and Python utilities: `pct`/`Pct` → `Percent`, `instr` → `Instructions`.
