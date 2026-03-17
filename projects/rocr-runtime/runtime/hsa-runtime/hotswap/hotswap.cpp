@@ -714,8 +714,10 @@ static void DumpInstructions(const char* label,
 // ── Public API ───────────────────────────────────────────────────────────────
 
 bool IsEnabled() {
-  const char* env = std::getenv("HSA_HOTSWAP_RULES");
-  return env && *env;
+  const char* rules = std::getenv("HSA_HOTSWAP_RULES");
+  const char* override_isa = std::getenv("HSA_HOTSWAP_ISA_OVERRIDE");
+  // Enabled if either rules file is set OR ISA override is set
+  return (rules && *rules) || (override_isa && *override_isa && override_isa[0] != '0');
 }
 
 bool IsIsaOverrideEnabled() {
