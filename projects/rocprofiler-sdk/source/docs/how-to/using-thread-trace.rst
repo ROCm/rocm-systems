@@ -49,11 +49,7 @@ Prerequisites
 
   * Default install location is ``/opt/rocm/lib``
 
-  * For custom location, use:
-
-      * Parameter ``--att-library-path``, or
-
-      * Environment variable ``ROCPROF_ATT_LIBRARY_PATH``
+  * For custom location, use parameter ``--att-library-path``
 
 
 .. _thread-trace-parameters:

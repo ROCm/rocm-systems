@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #pragma clang diagnostic ignored "-Wunused-parameter"
 #include <hip_test_common.hh>
@@ -338,32 +325,32 @@ static void testMipmapTextureObj(size_t width, size_t height, float offsetX = 0.
  *  - Textures supported on device
  *  - HIP_VERSION >= 5.7
  */
-TEMPLATE_TEST_CASE("Unit_hipTextureMipmapObj2D_Check_hipReadModeElementType", "", char, uchar,
-                   short, ushort, int, uint, float, char1, uchar1, short1, ushort1, int1, uint1,
-                   float1, char2, uchar2, short2, ushort2, int2, uint2, float2, char4, uchar4,
-                   short4, ushort4, int4, uint4, float4) {
+TEMPLATE_TEST_CASE(Unit_hipTextureMipmapObj2D_Check_hipReadModeElementType, char, uchar, short,
+                   ushort, int, uint, float, char1, uchar1, short1, ushort1, int1, uint1, float1,
+                   char2, uchar2, short2, ushort2, int2, uint2, float2, char4, uchar4, short4,
+                   ushort4, int4, uint4, float4) {
   CHECK_IMAGE_SUPPORT
 
   SECTION(
-      "Unit_hipTextureMipmapObj2D_Check - hipReadModeElementType, hipFilterModePoint, "
+      "hipTextureMipmapObj2D_Check - hipReadModeElementType, hipFilterModePoint, "
       "hipAddressModeClamp 23, 21") {
     testMipmapTextureObj<TestType, hipReadModeElementType, hipFilterModePoint, hipAddressModeClamp>(
         23, 21, 0.4, -0.9);
   }
   SECTION(
-      "Unit_hipTextureMipmapObj2D_Check - hipReadModeElementType, hipFilterModePoint, "
+      "hipTextureMipmapObj2D_Check - hipReadModeElementType, hipFilterModePoint, "
       "hipAddressModeClamp 67, 131") {
     testMipmapTextureObj<TestType, hipReadModeElementType, hipFilterModePoint, hipAddressModeClamp>(
         67, 131, -0.3, -0.67);
   }
   SECTION(
-      "Unit_hipTextureMipmapObj2D_Check - hipReadModeElementType, hipFilterModePoint, "
+      "hipTextureMipmapObj2D_Check - hipReadModeElementType, hipFilterModePoint, "
       "hipAddressModeBorder 131, 263") {
     testMipmapTextureObj<TestType, hipReadModeElementType, hipFilterModePoint,
                          hipAddressModeBorder>(131, 263, 0.15, -0.34);
   }
   SECTION(
-      "Unit_hipTextureMipmapObj2D_Check - hipReadModeElementType, hipFilterModePoint, "
+      "hipTextureMipmapObj2D_Check - hipReadModeElementType, hipFilterModePoint, "
       "hipAddressModeBorder 263, 67") {
     testMipmapTextureObj<TestType, hipReadModeElementType, hipFilterModePoint,
                          hipAddressModeBorder>(263, 67, 0.13, 0.96);
@@ -388,55 +375,55 @@ TEMPLATE_TEST_CASE("Unit_hipTextureMipmapObj2D_Check_hipReadModeElementType", ""
  *  - Textures supported on device
  *  - HIP_VERSION >= 5.7
  */
-TEMPLATE_TEST_CASE("Unit_hipTextureMipmapObj2D_Check_hipReadModeNormalizedFloat", "", char, uchar,
-                   short, ushort, char1, uchar1, short1, ushort1, char2, uchar2, short2, ushort2,
-                   char4, uchar4, short4, ushort4) {
+TEMPLATE_TEST_CASE(Unit_hipTextureMipmapObj2D_Check_hipReadModeNormalizedFloat, char, uchar, short,
+                   ushort, char1, uchar1, short1, ushort1, char2, uchar2, short2, ushort2, char4,
+                   uchar4, short4, ushort4) {
   CHECK_IMAGE_SUPPORT
 
   SECTION(
-      "Unit_hipTextureMipmapObj2D_Check - hipReadModeNormalizedFloat, hipFilterModePoint, "
+      "hipTextureMipmapObj2D_Check - hipReadModeNormalizedFloat, hipFilterModePoint, "
       "hipAddressModeClamp 23, 21") {
     testMipmapTextureObj<TestType, hipReadModeNormalizedFloat, hipFilterModePoint,
                          hipAddressModeClamp>(23, 21, 0.4, -0.9);
   }
   SECTION(
-      "Unit_hipTextureMipmapObj2D_Check - hipReadModeNormalizedFloat, hipFilterModePoint, "
+      "hipTextureMipmapObj2D_Check - hipReadModeNormalizedFloat, hipFilterModePoint, "
       "hipAddressModeClamp 131, 263") {
     testMipmapTextureObj<TestType, hipReadModeNormalizedFloat, hipFilterModePoint,
                          hipAddressModeClamp>(131, 263, 0.15, -0.34);
   }
   SECTION(
-      "Unit_hipTextureMipmapObj2D_Check - hipReadModeNormalizedFloat, hipFilterModeLinear, "
+      "hipTextureMipmapObj2D_Check - hipReadModeNormalizedFloat, hipFilterModeLinear, "
       "hipAddressModeClamp 67, 131") {
     testMipmapTextureObj<TestType, hipReadModeNormalizedFloat, hipFilterModeLinear,
                          hipAddressModeClamp>(23, 17, -0.3, -0.67);
   }
   SECTION(
-      "Unit_hipTextureMipmapObj2D_Check - hipReadModeNormalizedFloat, hipFilterModeLinear, "
+      "hipTextureMipmapObj2D_Check - hipReadModeNormalizedFloat, hipFilterModeLinear, "
       "hipAddressModeClamp 263, 67") {
     testMipmapTextureObj<TestType, hipReadModeNormalizedFloat, hipFilterModeLinear,
                          hipAddressModeClamp>(263, 67, 0.13, 0.96);
   }
   SECTION(
-      "Unit_hipTextureMipmapObj2D_Check - hipReadModeNormalizedFloat, hipFilterModePoint, "
+      "hipTextureMipmapObj2D_Check - hipReadModeNormalizedFloat, hipFilterModePoint, "
       "hipAddressModeBorder 131, 263") {
     testMipmapTextureObj<TestType, hipReadModeNormalizedFloat, hipFilterModePoint,
                          hipAddressModeBorder>(131, 263, 0.15, -0.34);
   }
   SECTION(
-      "Unit_hipTextureMipmapObj2D_Check - hipReadModeNormalizedFloat, hipFilterModePoint, "
+      "hipTextureMipmapObj2D_Check - hipReadModeNormalizedFloat, hipFilterModePoint, "
       "hipAddressModeBorder 23, 21") {
     testMipmapTextureObj<TestType, hipReadModeNormalizedFloat, hipFilterModePoint,
                          hipAddressModeBorder>(23, 21, 0.4, -0.9);
   }
   SECTION(
-      "Unit_hipTextureMipmapObj2D_Check - hipReadModeNormalizedFloat, hipFilterModeLinear, "
+      "hipTextureMipmapObj2D_Check - hipReadModeNormalizedFloat, hipFilterModeLinear, "
       "hipAddressModeBorder 263, 67") {
     testMipmapTextureObj<TestType, hipReadModeNormalizedFloat, hipFilterModeLinear,
                          hipAddressModeBorder>(263, 67, 0.13, 0.96);
   }
   SECTION(
-      "Unit_hipTextureMipmapObj2D_Check - hipReadModeNormalizedFloat, hipFilterModeLinear, "
+      "hipTextureMipmapObj2D_Check - hipReadModeNormalizedFloat, hipFilterModeLinear, "
       "hipAddressModeBorder 67, 131") {
     testMipmapTextureObj<TestType, hipReadModeNormalizedFloat, hipFilterModeLinear,
                          hipAddressModeBorder>(67, 131, -0.3, -0.67);
@@ -462,36 +449,36 @@ TEMPLATE_TEST_CASE("Unit_hipTextureMipmapObj2D_Check_hipReadModeNormalizedFloat"
  *  - Textures supported on device
  *  - HIP_VERSION >= 5.7
  */
-TEMPLATE_TEST_CASE("Unit_hipTextureMipmapObj2D_Check_hipReadModeElementType_float_only", "",
-                   float, float1, float2, float4) {
+TEMPLATE_TEST_CASE(Unit_hipTextureMipmapObj2D_Check_hipReadModeElementType_float_only, float,
+                   float1, float2, float4) {
   CHECK_IMAGE_SUPPORT
 
   SECTION(
-      "Unit_hipTextureMipmapObj2D_Check - hipReadModeElementType, hipFilterModeLinear, "
+      "hipTextureMipmapObj2D_Check - hipReadModeElementType, hipFilterModeLinear, "
       "hipAddressModeClamp 23, 17, 0., 0.") {
     testMipmapTextureObj<TestType, hipReadModeElementType, hipFilterModeLinear,
                          hipAddressModeClamp>(23, 17, 0.79, 0.37);
   }
   SECTION(
-      "Unit_hipTextureMipmapObj2D_Check - hipReadModeElementType, hipFilterModeLinear, "
+      "hipTextureMipmapObj2D_Check - hipReadModeElementType, hipFilterModeLinear, "
       "hipAddressModeClamp 23, 17") {
     testMipmapTextureObj<TestType, hipReadModeElementType, hipFilterModeLinear,
                          hipAddressModeClamp>(23, 17, -0.3, -0.67);
   }
   SECTION(
-      "Unit_hipTextureMipmapObj2D_Check - hipReadModeElementType, hipFilterModeLinear, "
+      "hipTextureMipmapObj2D_Check - hipReadModeElementType, hipFilterModeLinear, "
       "hipAddressModeClamp 263, 67") {
     testMipmapTextureObj<TestType, hipReadModeElementType, hipFilterModeLinear,
                          hipAddressModeClamp>(263, 67, 0.13, 0.96);
   }
   SECTION(
-      "Unit_hipTextureMipmapObj2D_Check - hipReadModeElementType, hipFilterModeLinear, "
+      "hipTextureMipmapObj2D_Check - hipReadModeElementType, hipFilterModeLinear, "
       "hipAddressModeBorder 263, 67") {
     testMipmapTextureObj<TestType, hipReadModeElementType, hipFilterModeLinear,
                          hipAddressModeBorder>(263, 67, 0.13, 0.96);
   }
   SECTION(
-      "Unit_hipTextureMipmapObj2D_Check - hipReadModeElementType, hipFilterModeLinear, "
+      "hipTextureMipmapObj2D_Check - hipReadModeElementType, hipFilterModeLinear, "
       "hipAddressModeBorder 67, 131") {
     testMipmapTextureObj<TestType, hipReadModeElementType, hipFilterModeLinear,
                          hipAddressModeBorder>(67, 131, -0.3, -0.67);

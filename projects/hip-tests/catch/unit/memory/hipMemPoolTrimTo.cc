@@ -1,20 +1,7 @@
 /*
-   Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
-   Permission is hereby granted, free of charge, to any person obtaining a copy
-   of this software and associated documentation files (the "Software"), to deal
-   in the Software without restriction, including without limitation the rights
-   to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-   copies of the Software, and to permit persons to whom the Software is
-   furnished to do so, subject to the following conditions:
-   The above copyright notice and this permission notice shall be included in
-   all copies or substantial portions of the Software.
-   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-   IMPLIED, INNCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-   FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-   AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANNY CLAIM, DAMAGES OR OTHER
-   LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-   OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-   THE SOFTWARE.
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
  */
 
 
@@ -44,7 +31,7 @@
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMemPoolTrimTo_Negative_Parameter") {
+TEST_CASE(Unit_hipMemPoolTrimTo_Negative_Parameter) {
   int device_id = 0;
   HIP_CHECK(hipSetDevice(device_id));
   checkMempoolSupported(device_id) size_t trim_size = 1024;
@@ -66,7 +53,7 @@ TEST_CASE("Unit_hipMemPoolTrimTo_Negative_Parameter") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMemPoolTrimTo_Positive_Basic") {
+TEST_CASE(Unit_hipMemPoolTrimTo_Positive_Basic) {
   int device_id = 0;
   HIP_CHECK(hipSetDevice(device_id));
   checkMempoolSupported(device_id) unsigned int* notified = nullptr;
@@ -198,7 +185,7 @@ static bool checkhipMemPoolTrimTo(hipStream_t stream, int N, int dev = 0) {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMemPoolTrimTo_VaryingMinBytesToHold") {
+TEST_CASE(Unit_hipMemPoolTrimTo_VaryingMinBytesToHold) {
   checkMempoolSupported(0)
       // create a stream
       hipStream_t stream;
@@ -218,7 +205,7 @@ TEST_CASE("Unit_hipMemPoolTrimTo_VaryingMinBytesToHold") {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMemPoolTrimTo_MGpuVaryingMinBytesToHold") {
+TEST_CASE(Unit_hipMemPoolTrimTo_MGpuVaryingMinBytesToHold) {
   constexpr int N = 1 << 20;
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));

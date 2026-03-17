@@ -40,9 +40,11 @@ if(BUILD_TESTS)
 
   # MPI configuration
   if(ENABLE_MPI_TESTS)
-    # Set default MPI path, allow user to override
-    if(NOT DEFINED MPI_PATH)
-        set(MPI_PATH "/opt/ompi" CACHE PATH "Path to MPI installation")
+    # Set MPI path: 1) environment variable (always wins), 2) CMake variable, 3) default
+    if(DEFINED ENV{MPI_PATH})
+      set(MPI_PATH "$ENV{MPI_PATH}" CACHE PATH "Path to MPI installation" FORCE)
+    elseif(NOT DEFINED MPI_PATH)
+      set(MPI_PATH "/opt/ompi" CACHE PATH "Path to MPI installation")
     endif()
 
     # Verify MPI path exists
@@ -229,6 +231,7 @@ if(BUILD_TESTS)
         transport/NetMPITests.cpp
         transport/ShmMPITests.cpp
         transport/NetIbMPITests.cpp
+        ImplicitLaunchOrderMPITests.cpp
       )
 
       # Create the MPI test executable

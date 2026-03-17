@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <memcpy1d_tests_common.hh>
 #include <memcpy3d_tests_common.hh>
@@ -28,7 +12,7 @@ THE SOFTWARE.
 #include <resource_guards.hh>
 #include <utils.hh>
 
-TEST_CASE("Unit_hipDrvMemcpy3DAsync_Positive_Basic") {
+TEST_CASE(Unit_hipDrvMemcpy3DAsync_Positive_Basic) {
   CHECK_IMAGE_SUPPORT
 
   constexpr bool async = true;
@@ -57,7 +41,7 @@ TEST_CASE("Unit_hipDrvMemcpy3DAsync_Positive_Basic") {
 #endif
 }
 
-TEST_CASE("Unit_hipDrvMemcpy3DAsync_Positive_Synchronization_Behavior") {
+TEST_CASE(Unit_hipDrvMemcpy3DAsync_Positive_Synchronization_Behavior) {
   CHECK_IMAGE_SUPPORT
 
   constexpr bool async = true;
@@ -85,7 +69,7 @@ TEST_CASE("Unit_hipDrvMemcpy3DAsync_Positive_Synchronization_Behavior") {
 #endif
 }
 
-TEST_CASE("Unit_hipDrvMemcpy3DAsync_Positive_Parameters") {
+TEST_CASE(Unit_hipDrvMemcpy3DAsync_Positive_Parameters) {
   CHECK_IMAGE_SUPPORT
 
   constexpr bool async = true;
@@ -93,7 +77,7 @@ TEST_CASE("Unit_hipDrvMemcpy3DAsync_Positive_Parameters") {
 }
 
 // Disabled on AMD due to defect - EXSWHTEC-238
-TEST_CASE("Unit_hipDrvMemcpy3DAsync_Positive_Array") {
+TEST_CASE(Unit_hipDrvMemcpy3DAsync_Positive_Array) {
   CHECK_IMAGE_SUPPORT
 
   constexpr bool async = true;
@@ -101,7 +85,7 @@ TEST_CASE("Unit_hipDrvMemcpy3DAsync_Positive_Array") {
   SECTION("Array from/to Device") { DrvMemcpy3DArrayDeviceShell<async>(DrvMemcpy3DWrapper<async>); }
 }
 
-TEST_CASE("Unit_hipDrvMemcpy3DAsync_Negative_Parameters") {
+TEST_CASE(Unit_hipDrvMemcpy3DAsync_Negative_Parameters) {
   CHECK_IMAGE_SUPPORT
 
   constexpr bool async = true;
@@ -253,7 +237,7 @@ TEST_CASE("Unit_hipDrvMemcpy3DAsync_Negative_Parameters") {
   }
 }
 
-TEST_CASE("Unit_hipDrvMemcpy3DAsync_Capture") {
+TEST_CASE(Unit_hipDrvMemcpy3DAsync_Capture) {
   CHECK_IMAGE_SUPPORT
 
   constexpr hipExtent kExtent{128 * sizeof(int), 128, 8};

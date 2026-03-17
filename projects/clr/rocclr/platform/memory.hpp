@@ -212,7 +212,7 @@ class Memory : public amd::RuntimeObject {
   //! Disable default copy operator
   Memory(const Memory&);
 
-  Monitor lockMemoryOps_;         //!< Lock to serialize memory operations
+  std::recursive_mutex lockMemoryOps_;  //!< Lock to serialize memory operations
   std::set<Memory*> subBuffers_;  //!< List of all subbuffers for this memory object
   device::Memory* svmBase_;       //!< svmBase allocation for MGPU case
   size_t alignment_ = 0;          //!< alignment for allocation address
@@ -264,7 +264,7 @@ class Memory : public amd::RuntimeObject {
   );
 
   //! Returns the memory lock object
-  amd::Monitor& lockMemoryOps() { return lockMemoryOps_; }
+  std::recursive_mutex& lockMemoryOps() { return lockMemoryOps_; }
 
   //! Adds a view into the list
   void addSubBuffer(Memory* item);
@@ -682,7 +682,7 @@ class SvmBuffer : AllStatic {
   static bool Contains(uintptr_t ptr);
 
   static std::map<uintptr_t, uintptr_t> Allocated_;  // !< Allocated buffers
-  static Monitor AllocatedLock_;
+  static std::recursive_mutex AllocatedLock_;
 };
 
 class ArenaMemory : public Buffer {

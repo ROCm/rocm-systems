@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip_test_checkers.hh>
 #include <hip_test_common.hh>
@@ -306,7 +293,7 @@ static void UpdateStreamCaptureDependenciesAdd(hipStream_t stream,
  * ------------------------
  *    - HIP_VERSION >= 5.3
  */
-TEST_CASE("Unit_hipStreamSetCaptureDependencies_Positive_Functional") {
+TEST_CASE(Unit_hipStreamSetCaptureDependencies_Positive_Functional) {
   const auto stream_type = GENERATE(Streams::perThread, Streams::created);
   StreamGuard stream_guard(stream_type);
   hipStream_t stream = stream_guard.stream();
@@ -333,7 +320,7 @@ TEST_CASE("Unit_hipStreamSetCaptureDependencies_Positive_Functional") {
  * ------------------------
  *    - HIP_VERSION >= 5.3
  */
-TEST_CASE("Unit_hipStreamAddCaptureDependencies_Positive_Functional") {
+TEST_CASE(Unit_hipStreamAddCaptureDependencies_Positive_Functional) {
   const auto stream_type = GENERATE(Streams::perThread, Streams::created);
   StreamGuard stream_guard(stream_type);
   hipStream_t stream = stream_guard.stream();
@@ -356,7 +343,7 @@ TEST_CASE("Unit_hipStreamAddCaptureDependencies_Positive_Functional") {
  * ------------------------
  *    - HIP_VERSION >= 5.3
  */
-TEST_CASE("Unit_hipStreamUpdateCaptureDependencies_Positive_Parameters") {
+TEST_CASE(Unit_hipStreamUpdateCaptureDependencies_Positive_Parameters) {
   hipGraph_t graph{nullptr};
 
   const auto stream_type = GENERATE(Streams::perThread, Streams::created);
@@ -393,7 +380,7 @@ TEST_CASE("Unit_hipStreamUpdateCaptureDependencies_Positive_Parameters") {
  * ------------------------
  *    - HIP_VERSION >= 5.3
  */
-TEST_CASE("Unit_hipStreamUpdateCaptureDependencies_Negative_Parameters") {
+TEST_CASE(Unit_hipStreamUpdateCaptureDependencies_Negative_Parameters) {
   const int Nbytes = 100;
   hipGraph_t capInfoGraph{nullptr};
   hipGraph_t graph{nullptr};

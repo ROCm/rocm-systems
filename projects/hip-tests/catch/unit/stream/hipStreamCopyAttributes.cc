@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /**
  * @addtogroup hipStreamCopyAttributes hipStreamCopyAttributes
@@ -38,7 +25,7 @@ THE SOFTWARE.
  *    - HIP_VERSION >= 7.2
  */
 
-TEST_CASE("Unit_hipStreamCopyAttributes_Basic") {
+TEST_CASE(Unit_hipStreamCopyAttributes_Basic) {
   hipStream_t stream1, stream2, stream3, stream4;
   hipStreamAttrValue val1, val2;
   HIP_CHECK(hipStreamCreate(&stream1));
@@ -116,7 +103,7 @@ TEST_CASE("Unit_hipStreamCopyAttributes_Basic") {
  * ------------------------
  *  - HIP_VERSION >= 7.2
  */
-TEST_CASE("Unit_hipStreamCopyAttributes_Negative") {
+TEST_CASE(Unit_hipStreamCopyAttributes_Negative) {
   hipStream_t srcStream = nullptr;
   HIP_CHECK(hipStreamCreate(&srcStream));
   hipStream_t dstStream = nullptr;
@@ -159,7 +146,7 @@ TEST_CASE("Unit_hipStreamCopyAttributes_Negative") {
  * ------------------------
  *  - HIP_VERSION >= 7.2
  */
-TEST_CASE("Unit_hipStreamCopyAttributes_WithAllSyncPolicyValues") {
+TEST_CASE(Unit_hipStreamCopyAttributes_WithAllSyncPolicyValues) {
   hipStream_t srcStream = nullptr;
   HIP_CHECK(hipStreamCreate(&srcStream));
   hipStream_t dstStream = nullptr;

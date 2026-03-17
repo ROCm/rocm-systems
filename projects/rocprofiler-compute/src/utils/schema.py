@@ -69,7 +69,6 @@ class Workload:
     path: str = field(default_factory=str)
     filter_top_n: str = field(default_factory=str)
     torch_operators: dict[str, pd.DataFrame] = field(default_factory=dict)
-    filter_torch_operators: list[str] = field(default_factory=list)
 
 
 # Metrics will be calculated ONLY when the header(key) is in below list
@@ -87,7 +86,7 @@ SUPPORTED_FIELD = [
     "Peak (Empirical)",
     "Count",
     "Mean",
-    "Pct",
+    "Percent",
     "Std Dev",
     "Q1",
     "Q3",

@@ -3015,7 +3015,6 @@ def test_run_prof_sdk_creates_new_env_copy(tmp_path, monkeypatch):
             iteration_multiplexing=None,
             attach_pid=None,
             kokkos_trace=None,
-            hip_trace=None,
             kernel=None,
             dispatch=None,
         ),
@@ -3066,15 +3065,11 @@ def test_run_prof_sdk_creates_new_env_copy(tmp_path, monkeypatch):
     assert "APP_CMD" not in capture_subprocess_called_with_env
 
 
-def test_run_prof_v3_sdk_and_cli_calls_trace_processing(tmp_path, monkeypatch):
+def test_run_prof_v3_cli_calls_kokkos_trace_processing(tmp_path, monkeypatch):
     """
     Covers:
-    Line 3 (SDK): if "ROCPROF_HIP_RUNTIME_API_TRACE" in options:
-        process_hip_trace_output(...)
-    Line 4 (CLI): if "--kokkos-trace" in options:
+    CLI: if "--kokkos-trace" in options:
         process_kokkos_trace_output(...)
-    Line 5 (CLI): elif "--hip-trace" in options:
-        process_hip_trace_output(...)
     """
     fname_str = str(tmp_path) + "/counters.txt"
     Path(fname_str).touch()
@@ -3089,14 +3084,6 @@ def test_run_prof_v3_sdk_and_cli_calls_trace_processing(tmp_path, monkeypatch):
         "utils.utils.process_rocprofv3_output",
         lambda *a, **k: [str(tmp_path) + "/results1.csv"],
     )
-
-    hip_trace_called_with = None
-
-    def mock_hip_trace(wd, fb):
-        nonlocal hip_trace_called_with
-        hip_trace_called_with = (wd, fb)
-
-    monkeypatch.setattr("utils.utils.process_hip_trace_output", mock_hip_trace)
 
     kokkos_trace_called_with = None
 
@@ -3155,33 +3142,9 @@ def test_run_prof_v3_sdk_and_cli_calls_trace_processing(tmp_path, monkeypatch):
     loglevel = logging.INFO
     format_rocprof_output = "csv"
 
-    monkeypatch.setattr("utils.utils.rocprof_cmd", "rocprofiler-sdk")
-
-    profiler_options_sdk_hip = {
-        "APP_CMD": "my_app",
-        "ROCPROF_HIP_RUNTIME_API_TRACE": "1",
-        "ROCPROF_COUNTER_COLLECTION": "1",
-        "ROCP_TOOL_LIBRARIES": "/opt/rocm/lib/rocprofiler-sdk/"
-        "librocprofiler-sdk-tool.so",
-    }
-    hip_trace_called_with = None
-    kokkos_trace_called_with = None
-
-    utils.run_prof(
-        fname_str,
-        profiler_options_sdk_hip.copy(),
-        workload_dir_str,
-        mspec,
-        loglevel,
-        format_rocprof_output,
-    )
-    assert hip_trace_called_with == (workload_dir_str, fbase_str)
-    assert kokkos_trace_called_with is None
-
     monkeypatch.setattr("utils.utils.rocprof_cmd", "rocprof_cli_v3")
 
     profiler_options_cli_kokkos = ["--kokkos-trace", "--other-opt"]
-    hip_trace_called_with = None
     kokkos_trace_called_with = None
 
     utils.run_prof(
@@ -3193,22 +3156,6 @@ def test_run_prof_v3_sdk_and_cli_calls_trace_processing(tmp_path, monkeypatch):
         format_rocprof_output,
     )
     assert kokkos_trace_called_with == (workload_dir_str, fbase_str)
-    assert hip_trace_called_with is None
-
-    profiler_options_cli_hip = ["--hip-trace", "--other-opt"]
-    hip_trace_called_with = None
-    kokkos_trace_called_with = None
-
-    utils.run_prof(
-        fname_str,
-        profiler_options_cli_hip,
-        workload_dir_str,
-        mspec,
-        loglevel,
-        format_rocprof_output,
-    )
-    assert hip_trace_called_with == (workload_dir_str, fbase_str)
-    assert kokkos_trace_called_with is None
 
 
 # =============================================================================
@@ -3912,553 +3859,6 @@ def test_process_kokkos_trace_output_permission_error(tmp_path, monkeypatch):
 
     with pytest.raises(PermissionError):
         utils.process_kokkos_trace_output(workload_dir, fbase)
-
-
-# =============================================================================
-# HIP TRACE PROCESSING TESTS
-#
-# These test cases comprehensively cover:
-#
-# Multiple valid CSV files concatenation
-# Single file processing
-# Different CSV schemas handling
-# Edge Cases:
-#
-# No files found
-# Files listed by glob but don't exist
-# Empty CSV files
-# CSV files with only headers
-# Corrupted/malformed CSV data
-# Error Conditions:
-#
-# Permission errors during file operations
-# Invalid filename characters
-# Output directory doesn't exist
-# Performance & Special Content:
-#
-# Large files (memory handling)
-# Unicode content handling
-# Mixed file states (valid, empty, corrupted)
-# File System Edge Cases:
-#
-# Missing output directory for copy operation
-# File I/O errors
-# =============================================================================
-
-
-def test_process_hip_trace_output_multiple_files(tmp_path, monkeypatch):
-    """
-    Test process_hip_trace_output with multiple valid CSV files.
-    Should concatenate all files and save the result.
-    """
-    monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
-    monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
-    monkeypatch.setattr("utils.utils.console_warning", lambda *a, **k: None)
-
-    workload_dir = str(tmp_path)
-    out_dir = tmp_path / "out" / "pmc_1"
-    out_dir.mkdir(parents=True)
-
-    sub1 = out_dir / "process1"
-    sub2 = out_dir / "process2"
-    sub1.mkdir()
-    sub2.mkdir()
-
-    csv1 = sub1 / "test_hip_api_trace.csv"
-    csv2 = sub2 / "test_hip_api_trace.csv"
-    csv1.write_text(
-        "timestamp,api_name,duration\n1000,hipMalloc,500\n2000,hipMemcpy,300\n"
-    )
-    csv2.write_text(
-        "timestamp,api_name,duration\n3000,hipFree,200\n4000,hipLaunchKernel,800\n"
-    )
-
-    fbase = "test_workload"
-
-    utils.process_hip_trace_output(workload_dir, fbase)
-
-    output_file = out_dir / f"results_{fbase}_hip_api_trace.csv"
-    assert output_file.exists(), "The primary output file was not created."
-
-    df = pd.read_csv(output_file)
-    assert len(df) == 4, (
-        "The final DataFrame does not contain the correct number of rows."
-    )
-    assert set(df["timestamp"]) == {1000, 2000, 3000, 4000}
-    assert "hipMalloc" in df["api_name"].values
-    assert "hipLaunchKernel" in df["api_name"].values
-
-    copied_file = tmp_path / f"{fbase}_hip_api_trace.csv"
-    assert copied_file.exists(), "The copied output file was not created."
-    df_copy = pd.read_csv(copied_file)
-    assert df.equals(df_copy), (
-        "The copied file content does not match the primary output."
-    )
-
-
-def test_process_hip_trace_output_single_file(tmp_path, monkeypatch):
-    """
-    Test process_hip_trace_output with a single CSV file.
-    """
-    monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
-    monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
-
-    workload_dir = str(tmp_path)
-    out_dir = tmp_path / "out" / "pmc_1"
-    out_dir.mkdir(parents=True)
-
-    sub1 = out_dir / "process1"
-    sub1.mkdir()
-
-    csv1 = sub1 / "single_hip_api_trace.csv"
-    csv1.write_text(
-        "api_id,function_name,start_time,end_time\n1,hipDeviceSynchronize,1000,1050\n2,hipStreamCreate,2000,2010\n"
-    )
-
-    fbase = "single_test"
-
-    utils.process_hip_trace_output(workload_dir, fbase)
-
-    output_file = out_dir / f"results_{fbase}_hip_api_trace.csv"
-    assert output_file.exists()
-
-    df = pd.read_csv(output_file)
-    assert len(df) == 2
-    assert df["function_name"].tolist() == ["hipDeviceSynchronize", "hipStreamCreate"]
-
-
-def test_process_hip_trace_output_no_files_found(tmp_path, monkeypatch):
-    """
-    Test process_hip_trace_output when no HIP API trace files are found.
-    Should handle empty file list gracefully.
-    """
-    monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
-    monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
-
-    workload_dir = str(tmp_path)
-    out_dir = tmp_path / "out" / "pmc_1"
-    out_dir.mkdir(parents=True)
-
-    fbase = "no_files"
-
-    def mock_concat(dataframes, **kwargs):
-        if not dataframes:
-            return pd.DataFrame()
-        return pd.concat(dataframes, **kwargs)
-
-    monkeypatch.setattr("pandas.concat", mock_concat)
-
-    def mock_to_csv(self, path, **kwargs):
-        with open(path, "w") as f:
-            f.write("")
-
-    monkeypatch.setattr("pandas.DataFrame.to_csv", mock_to_csv)
-
-    try:
-        utils.process_hip_trace_output(workload_dir, fbase)
-
-        output_file = out_dir / f"results_{fbase}_hip_api_trace.csv"
-        assert output_file.exists()
-
-    except (ValueError, pd.errors.EmptyDataError):
-        pytest.skip(
-            "process_hip_trace_output doesn't handle empty file list gracefully"
-        )
-
-
-def test_process_hip_trace_output_files_not_exist(tmp_path, monkeypatch):
-    """
-    Test process_hip_trace_output when glob finds files but they don't actually exist.
-    """
-    monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
-
-    workload_dir = str(tmp_path)
-    out_dir = tmp_path / "out" / "pmc_1"
-    out_dir.mkdir(parents=True)
-
-    fake_files = [
-        str(out_dir / "fake1" / "test_hip_api_trace.csv"),
-        str(out_dir / "fake2" / "test_hip_api_trace.csv"),
-    ]
-
-    monkeypatch.setattr("glob.glob", lambda pattern: fake_files)
-
-    fbase = "nonexistent"
-
-    def mock_is_file(self):
-        return False
-
-    monkeypatch.setattr("pathlib.Path.is_file", mock_is_file)
-
-    def mock_concat(dataframes, **kwargs):
-        if not dataframes:
-            return pd.DataFrame()
-        return pd.concat(dataframes, **kwargs)
-
-    monkeypatch.setattr("pandas.concat", mock_concat)
-
-    def mock_to_csv(self, path, **kwargs):
-        with open(path, "w") as f:
-            f.write("")
-
-    monkeypatch.setattr("pandas.DataFrame.to_csv", mock_to_csv)
-
-    try:
-        utils.process_hip_trace_output(workload_dir, fbase)
-
-        output_file = out_dir / f"results_{fbase}_hip_api_trace.csv"
-        assert output_file.exists()
-
-    except ValueError:
-        pytest.skip(
-            "process_hip_trace_output doesn't handle empty file filtering gracefully"
-        )
-
-
-def test_process_hip_trace_output_empty_csv_files(tmp_path, monkeypatch):
-    """
-    Test process_hip_trace_output with empty CSV files.
-    """
-    monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
-
-    workload_dir = str(tmp_path)
-    out_dir = tmp_path / "out" / "pmc_1"
-    out_dir.mkdir(parents=True)
-
-    sub1 = out_dir / "process1"
-    sub1.mkdir()
-
-    csv1 = sub1 / "empty_hip_api_trace.csv"
-    csv1.write_text("")
-
-    fbase = "empty_test"
-
-    original_read_csv = pd.read_csv
-
-    def mock_read_csv(filepath, **kwargs):
-        try:
-            return original_read_csv(filepath, **kwargs)
-        except pd.errors.EmptyDataError:
-            return pd.DataFrame()
-
-    monkeypatch.setattr("pandas.read_csv", mock_read_csv)
-
-    utils.process_hip_trace_output(workload_dir, fbase)
-
-    output_file = out_dir / f"results_{fbase}_hip_api_trace.csv"
-    assert output_file.exists()
-
-
-def test_process_hip_trace_output_different_schemas(tmp_path, monkeypatch):
-    """
-    Test process_hip_trace_output with CSV files having different column schemas.
-    """
-    monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
-
-    workload_dir = str(tmp_path)
-    out_dir = tmp_path / "out" / "pmc_1"
-    out_dir.mkdir(parents=True)
-
-    sub1 = out_dir / "process1"
-    sub2 = out_dir / "process2"
-    sub1.mkdir()
-    sub2.mkdir()
-
-    csv1 = sub1 / "schema1_hip_api_trace.csv"
-    csv2 = sub2 / "schema2_hip_api_trace.csv"
-
-    csv1.write_text("timestamp,api_name\n1000,hipMalloc\n")
-    csv2.write_text("time,function,thread_id\n2000,hipFree,123\n")
-
-    fbase = "mixed_schema"
-
-    utils.process_hip_trace_output(workload_dir, fbase)
-
-    output_file = out_dir / f"results_{fbase}_hip_api_trace.csv"
-    assert output_file.exists()
-
-    df = pd.read_csv(output_file)
-    assert len(df) == 2
-
-
-def test_process_hip_trace_output_no_out_directory(tmp_path, monkeypatch):
-    """
-    Test process_hip_trace_output when output directory doesn't exist.
-    Should not copy file to workload directory.
-    """
-    monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
-
-    workload_dir = str(tmp_path)
-
-    fbase = "no_out_dir"
-
-    monkeypatch.setattr("glob.glob", lambda pattern: [])
-
-    def mock_concat(dataframes, **kwargs):
-        if not dataframes:
-            return pd.DataFrame()
-        return pd.concat(dataframes, **kwargs)
-
-    monkeypatch.setattr("pandas.concat", mock_concat)
-
-    def mock_to_csv(self, path, **kwargs):
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w") as f:
-            f.write("")
-
-    monkeypatch.setattr("pandas.DataFrame.to_csv", mock_to_csv)
-
-    original_path = utils.Path
-
-    def mock_path_exists(path_str):
-        if path_str == workload_dir + "/out":
-            mock_path_obj = mock.MagicMock()
-            mock_path_obj.exists.return_value = False
-            return mock_path_obj
-        else:
-            return original_path(path_str)
-
-    monkeypatch.setattr("utils.utils.Path", mock_path_exists)
-
-    try:
-        utils.process_hip_trace_output(workload_dir, fbase)
-
-        copied_file = tmp_path / f"{fbase}_hip_api_trace.csv"
-        assert not copied_file.exists()
-
-    except ValueError:
-        pytest.skip(
-            "process_hip_trace_output doesn't handle missing output directory "
-            "gracefully"
-        )
-
-
-def test_process_hip_trace_output_file_permission_error(tmp_path, monkeypatch):
-    """
-    Test process_hip_trace_output when file operations fail due to permissions.
-    """
-    monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
-
-    workload_dir = str(tmp_path)
-    out_dir = tmp_path / "out" / "pmc_1"
-    out_dir.mkdir(parents=True)
-
-    sub1 = out_dir / "process1"
-    sub1.mkdir()
-
-    csv1 = sub1 / "perm_test_hip_api_trace.csv"
-    csv1.write_text("api_name,duration\nhipMalloc,100\n")
-
-    fbase = "permission_test"
-
-    def mock_copyfile(src, dst):
-        raise PermissionError("Permission denied")
-
-    monkeypatch.setattr("shutil.copyfile", mock_copyfile)
-
-    with pytest.raises(PermissionError):
-        utils.process_hip_trace_output(workload_dir, fbase)
-
-
-def test_process_hip_trace_output_corrupted_csv_files(tmp_path, monkeypatch):
-    """
-    Test process_hip_trace_output with corrupted CSV files.
-    """
-    monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
-
-    workload_dir = str(tmp_path)
-    out_dir = tmp_path / "out" / "pmc_1"
-    out_dir.mkdir(parents=True)
-
-    sub1 = out_dir / "process1"
-    sub1.mkdir()
-
-    csv1 = sub1 / "corrupted_hip_api_trace.csv"
-    csv1.write_text(
-        "timestamp,api_name,duration\n1000,hipMalloc\n2000,hipFree,invalid_number,extra_column\n"
-    )
-
-    fbase = "corrupted_test"
-
-    try:
-        utils.process_hip_trace_output(workload_dir, fbase)
-
-        output_file = out_dir / f"results_{fbase}_hip_api_trace.csv"
-        assert output_file.exists()
-
-    except (pd.errors.ParserError, ValueError):
-        pytest.skip("process_hip_trace_output doesn't handle corrupted CSV gracefully")
-
-
-def test_process_hip_trace_output_large_files(tmp_path, monkeypatch):
-    """
-    Test process_hip_trace_output with larger CSV files to ensure memory handling.
-    """
-    monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
-
-    workload_dir = str(tmp_path)
-    out_dir = tmp_path / "out" / "pmc_1"
-    out_dir.mkdir(parents=True)
-
-    sub1 = out_dir / "process1"
-    sub1.mkdir()
-
-    csv1 = sub1 / "large_hip_api_trace.csv"
-
-    content = "timestamp,api_name,duration,thread_id\n"
-    hip_apis = [
-        "hipMalloc",
-        "hipFree",
-        "hipMemcpy",
-        "hipLaunchKernel",
-        "hipDeviceSynchronize",
-    ]
-    for i in range(1000):
-        api_name = hip_apis[i % len(hip_apis)]
-        content += f"{i},{api_name},{i % 100},{i % 10}\n"
-
-    csv1.write_text(content)
-
-    fbase = "large_test"
-
-    utils.process_hip_trace_output(workload_dir, fbase)
-
-    output_file = out_dir / f"results_{fbase}_hip_api_trace.csv"
-    assert output_file.exists()
-
-    df = pd.read_csv(output_file)
-    assert len(df) == 1000
-    assert "hipMalloc" in df["api_name"].values
-    assert "hipLaunchKernel" in df["api_name"].values
-
-
-def test_process_hip_trace_output_unicode_content(tmp_path, monkeypatch):
-    """
-    Test process_hip_trace_output with CSV files containing unicode characters.
-    """
-    monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
-
-    workload_dir = str(tmp_path)
-    out_dir = tmp_path / "out" / "pmc_1"
-    out_dir.mkdir(parents=True)
-
-    sub1 = out_dir / "process1"
-    sub1.mkdir()
-
-    csv1 = sub1 / "unicode_hip_api_trace.csv"
-    csv1.write_text(
-        "api_name,description\nhipMalloc,内存分配\nhipKernel,核函数执行\n",
-        encoding="utf-8",
-    )
-
-    fbase = "unicode_test"
-
-    utils.process_hip_trace_output(workload_dir, fbase)
-
-    output_file = out_dir / f"results_{fbase}_hip_api_trace.csv"
-    assert output_file.exists()
-
-    df = pd.read_csv(output_file)
-    assert len(df) == 2
-    assert "内存分配" in df["description"].values
-    assert "核函数执行" in df["description"].values
-
-
-def test_process_hip_trace_output_csv_with_only_headers(tmp_path, monkeypatch):
-    """
-    Test process_hip_trace_output with CSV files that contain only headers but no data.
-    """
-    monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
-
-    workload_dir = str(tmp_path)
-    out_dir = tmp_path / "out" / "pmc_1"
-    out_dir.mkdir(parents=True)
-
-    sub1 = out_dir / "process1"
-    sub1.mkdir()
-
-    csv1 = sub1 / "headers_only_hip_api_trace.csv"
-    csv1.write_text("timestamp,api_name,duration,thread_id\n")
-
-    fbase = "headers_only"
-
-    utils.process_hip_trace_output(workload_dir, fbase)
-
-    output_file = out_dir / f"results_{fbase}_hip_api_trace.csv"
-    assert output_file.exists()
-
-    df = pd.read_csv(output_file)
-    assert len(df) == 0
-    assert list(df.columns) == ["timestamp", "api_name", "duration", "thread_id"]
-
-
-def test_process_hip_trace_output_mixed_file_states(tmp_path, monkeypatch):
-    """
-    Test process_hip_trace_output with a mix of valid, empty, and corrupted files.
-    """
-    monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
-
-    workload_dir = str(tmp_path)
-    out_dir = tmp_path / "out" / "pmc_1"
-    out_dir.mkdir(parents=True)
-
-    sub1 = out_dir / "process1"
-    sub2 = out_dir / "process2"
-    sub3 = out_dir / "process3"
-    sub1.mkdir()
-    sub2.mkdir()
-    sub3.mkdir()
-
-    csv1 = sub1 / "valid_hip_api_trace.csv"
-    csv1.write_text("timestamp,api_name\n1000,hipMalloc\n2000,hipFree\n")
-
-    csv2 = sub2 / "empty_hip_api_trace.csv"
-    csv2.write_text("")
-
-    csv3 = sub3 / "headers_hip_api_trace.csv"
-    csv3.write_text("timestamp,api_name\n")
-
-    fbase = "mixed_test"
-
-    original_read_csv = pd.read_csv
-
-    def mock_read_csv(filepath, **kwargs):
-        try:
-            return original_read_csv(filepath, **kwargs)
-        except pd.errors.EmptyDataError:
-            return pd.DataFrame()
-
-    monkeypatch.setattr("pandas.read_csv", mock_read_csv)
-
-    utils.process_hip_trace_output(workload_dir, fbase)
-
-    output_file = out_dir / f"results_{fbase}_hip_api_trace.csv"
-    assert output_file.exists()
-
-    df = pd.read_csv(output_file)
-    assert len(df) >= 0
-
-
-def test_process_hip_trace_output_invalid_fbase_characters(tmp_path, monkeypatch):
-    """
-    Test process_hip_trace_output with invalid fbase containing special characters.
-    """
-    monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
-
-    workload_dir = str(tmp_path)
-    out_dir = tmp_path / "out" / "pmc_1"
-    out_dir.mkdir(parents=True)
-
-    sub1 = out_dir / "process1"
-    sub1.mkdir()
-
-    csv1 = sub1 / "special_hip_api_trace.csv"
-    csv1.write_text("api_name\nhipMalloc\n")
-
-    fbase = "test\x00invalid"
-
-    with pytest.raises((OSError, ValueError)):
-        utils.process_hip_trace_output(workload_dir, fbase)
 
 
 # =============================================================================
@@ -7846,6 +7246,27 @@ def test_impute_counters_iteration_multiplex():
     assert len(result) == 3  # Ensure same number of rows
 
     # For "kernel_launch_params" policy
+    data = {
+        ("file1", "Dispatch_ID"): [1, 2, 3],
+        ("file1", "GPU_ID"): [0, 0, 0],
+        ("file1", "Grid_Size"): [1024, 1024, 1024],
+        ("file1", "Workgroup_Size"): [64, 64, 32],
+        ("file1", "LDS_Per_Workgroup"): [32, 24, 32],
+        ("file1", "Scratch_Per_Workitem"): [0, 0, 0],
+        ("file1", "Arch_VGPR"): [16, 16, 16],
+        ("file1", "Accum_VGPR"): [0, 0, 0],
+        ("file1", "SGPR"): [32, 32, 32],
+        ("file1", "Kernel_Name"): ["kernel_a", "kernel_a", "kernel_a"],
+        ("file1", "Start_Timestamp"): [1000, 1200, 1400],
+        ("file1", "End_Timestamp"): [1500, 1700, 1900],
+        ("file1", "Kernel_ID"): [1, 1, 1],
+        ("file1", "Counter1"): [100, None, 300],
+        ("file1", "Counter2"): [None, 500, None],
+    }
+
+    df = pd.DataFrame(data)
+    df.columns = pd.MultiIndex.from_tuples(df.columns)
+
     result = utils.impute_counters_iteration_multiplex(df, "kernel_launch_params")
     # Sort by Dispatch_ID to ensure consistent order
     result = result.sort_values(by=("file1", "Dispatch_ID"))
@@ -7855,7 +7276,61 @@ def test_impute_counters_iteration_multiplex():
     # No imputation possible
     assert pd.isna(result[("file1", "Counter2")].iloc[0])
     assert pd.isna(result[("file1", "Counter1")].iloc[1])
-    assert pd.isna(result[("file1", "Counter1")].iloc[2])
+    assert pd.isna(result[("file1", "Counter2")].iloc[2])
+
+    # Test incomplete last subgroup handling and no cross-subgroup contamination
+    # Scenario: 3 counter buckets, 8 dispatches (2 complete subgroups + incomplete last)
+    # Subgroup 0: rows 0-2, Subgroup 1: rows 3-5, Subgroup 2 (incomplete): rows 6-7
+    data = {
+        ("file1", "Dispatch_ID"): [1, 2, 3, 4, 5, 6, 7, 8],
+        ("file1", "GPU_ID"): [0, 0, 0, 0, 0, 0, 0, 0],
+        ("file1", "Grid_Size"): [1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024],
+        ("file1", "Workgroup_Size"): [64, 64, 64, 64, 64, 64, 64, 64],
+        ("file1", "LDS_Per_Workgroup"): [32, 32, 32, 32, 32, 32, 32, 32],
+        ("file1", "Scratch_Per_Workitem"): [0, 0, 0, 0, 0, 0, 0, 0],
+        ("file1", "Arch_VGPR"): [16, 16, 16, 16, 16, 16, 16, 16],
+        ("file1", "Accum_VGPR"): [0, 0, 0, 0, 0, 0, 0, 0],
+        ("file1", "SGPR"): [32, 32, 32, 32, 32, 32, 32, 32],
+        ("file1", "Kernel_Name"): ["kernel_a"] * 8,
+        ("file1", "Start_Timestamp"): [1000, 1200, 1400, 1600, 1800, 2000, 2200, 2400],
+        ("file1", "End_Timestamp"): [1100, 1300, 1500, 1700, 1900, 2100, 2300, 2500],
+        ("file1", "Kernel_ID"): [1, 1, 1, 1, 1, 1, 1, 1],
+        # Counter bucket pattern: A, B, C (repeats)
+        ("file1", "Counter_A"): [100, None, None, 200, None, None, 300, None],
+        ("file1", "Counter_B"): [None, 110, None, None, 210, None, None, 310],
+        ("file1", "Counter_C"): [None, None, 120, None, None, 220, None, None],
+    }
+
+    df = pd.DataFrame(data)
+    df.columns = pd.MultiIndex.from_tuples(df.columns)
+    result = utils.impute_counters_iteration_multiplex(df, "kernel_launch_params")
+    result = result.sort_values(by=("file1", "Dispatch_ID"))
+
+    # Verify complete subgroups: all rows should have all counters
+    assert result[("file1", "Counter_A")].iloc[0] == 100
+    assert result[("file1", "Counter_A")].iloc[1] == 100
+    assert result[("file1", "Counter_A")].iloc[2] == 100
+    assert result[("file1", "Counter_B")].iloc[0] == 110
+    assert result[("file1", "Counter_C")].iloc[0] == 120
+
+    # Verify no cross-subgroup contamination: subgroup 1 has its own values
+    assert result[("file1", "Counter_A")].iloc[3] == 200
+    assert result[("file1", "Counter_A")].iloc[4] == 200
+    assert result[("file1", "Counter_B")].iloc[3] == 210
+    assert result[("file1", "Counter_C")].iloc[3] == 220
+
+    # Verify incomplete last subgroup gets filled from previous subgroup
+    # Row 6-7 only have Counter_A and Counter_B, missing Counter_C
+    assert result[("file1", "Counter_A")].iloc[6] == 300
+    assert result[("file1", "Counter_A")].iloc[7] == 300
+    assert result[("file1", "Counter_B")].iloc[6] == 310
+    assert result[("file1", "Counter_B")].iloc[7] == 310
+    # Counter_C should be filled from previous subgroup via global ffill
+    assert result[("file1", "Counter_C")].iloc[6] == 220
+    assert result[("file1", "Counter_C")].iloc[7] == 220
+
+    assert isinstance(result, pd.DataFrame)
+    assert len(result) == 8  # Ensure same number of rows
 
 
 # =============================================================================
@@ -8390,7 +7865,12 @@ def test_calc_roofline_data_early_exit_on_empty_roofline_df(monkeypatch):
     result = db_analysis.calc_roofline_data(analyzer)
 
     # Verify early exit behavior
-    assert len(result) == 0, "Should return empty dict when roofline data is empty"
+    assert len(result[0]) == 0, (
+        "Should return empty kernel level dict when roofline data is empty"
+    )
+    assert len(result[1]) == 0, (
+        "Should return empty workload level dict when roofline data is empty"
+    )
     assert len(warning_messages) == 1, "Should log one warning message"
     assert "Roofline data is filtered out or not found" in warning_messages[0]
     assert workload_path in warning_messages[0]
@@ -8458,3 +7938,120 @@ def test_gpu_benchmark_locking(tmp_path, monkeypatch, capsys):
     assert "Waiting for GPU 0" in output
     assert "another rocprof-compute benchmark is in progress" in output
     assert "Acquired lock for GPU 0" in output
+
+
+# =============================================================================
+# BUILD METRIC LIST TESTS
+# =============================================================================
+
+
+class TestBuildMetricList:
+    """Tests for build_metric_list and _metric_has_valid_expr."""
+
+    # Maps YAML metric expression keys to their SUPPORTED_FIELD display names.
+    _EXPR_KEY_TO_HEADER_DISPLAY = {
+        "value": "Value",
+        "avg": "Avg",
+        "min": "Min",
+        "max": "Max",
+        "expr": "Expression",
+        "median": "Median",
+        "count": "Count",
+    }
+
+    @classmethod
+    def setup_class(cls):
+        import sys
+
+        sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+        from utils import schema
+        from utils.parser import build_metric_list
+
+        cls.schema = schema
+        cls.build_metric_list = staticmethod(build_metric_list)
+
+    def _build_test_arch_config_for_single_metric(
+        self, metric_name: str, expression_values: dict
+    ):
+        """
+        Build an ArchConfig containing a single metric for testing.
+        """
+        from collections import OrderedDict
+
+        header = {"metric": "Metric"}
+        for key in expression_values:
+            if key in self._EXPR_KEY_TO_HEADER_DISPLAY:
+                header[key] = self._EXPR_KEY_TO_HEADER_DISPLAY[key]
+
+        table = {
+            "id": 201,
+            "title": "Test Table",
+            "header": header,
+            "metric": {metric_name: expression_values},
+        }
+        if "expr" in expression_values:
+            table["cli_style"] = "simple_box"
+
+        panel_configs = OrderedDict()
+        panel_configs[200] = {
+            "id": 200,
+            "title": "Test Panel",
+            "data source": [{"metric_table": table}],
+        }
+
+        ac = self.schema.ArchConfig()
+        ac.panel_configs = panel_configs
+        return ac
+
+    @staticmethod
+    def _extract_leaf_metric_entries(ac):
+        """Return only leaf metric entries whose ID has format 'panel.table.index'."""
+        return {k: v for k, v in ac.metric_list.items() if k.count(".") == 2}
+
+    def test_given_metric_with_valid_value__it_presents_in_metric_list(self):
+        ac = self._build_test_arch_config_for_single_metric(
+            "Valid Metric A", {"value": "AVG(COUNTER_A)"}
+        )
+        self.build_metric_list(ac, None)
+        assert "Valid Metric A" in self._extract_leaf_metric_entries(ac).values()
+
+    def test_given_metric_with_python_none__it_doesnt_present_in_metric_list(self):
+        ac = self._build_test_arch_config_for_single_metric(
+            "Unsupported Metric B", {"value": None}
+        )
+        self.build_metric_list(ac, None)
+        assert (
+            "Unsupported Metric B" not in self._extract_leaf_metric_entries(ac).values()
+        )
+
+    def test_given_metric_with_string_none__it_doesnt_present_in_metric_list(self):
+        ac = self._build_test_arch_config_for_single_metric(
+            "Unsupported Metric C", {"value": "None"}
+        )
+        self.build_metric_list(ac, None)
+        assert (
+            "Unsupported Metric C" not in self._extract_leaf_metric_entries(ac).values()
+        )
+
+    def test_given_expr_metric__it_presents_in_metric_list(self):
+        ac = self._build_test_arch_config_for_single_metric(
+            "Expr Metric", {"expr": "(100 * COUNTER_B / COUNTER_C)"}
+        )
+        self.build_metric_list(ac, None)
+        assert "Expr Metric" in self._extract_leaf_metric_entries(ac).values()
+
+    def test_given_metric_with_partial_avg_min_max__it_presents_in_metric_list(self):
+        ac = self._build_test_arch_config_for_single_metric(
+            "Partial Metric", {"avg": "AVG(COUNTER_E)", "min": None, "max": None}
+        )
+        self.build_metric_list(ac, None)
+        assert "Partial Metric" in self._extract_leaf_metric_entries(ac).values()
+
+    def test_given_metric_with_all_none_avg_min_max__it_doesnt_present_in_metric_list(
+        self,
+    ):
+        ac = self._build_test_arch_config_for_single_metric(
+            "All None Metric", {"avg": None, "min": None, "max": None}
+        )
+        self.build_metric_list(ac, None)
+        assert "All None Metric" not in self._extract_leaf_metric_entries(ac).values()

@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "half_precision_common.hh"
 #include "casting_common.hh"
@@ -49,7 +33,7 @@ static __half2 __half2half2_ref(Float16 x) { return __half2{x, x}; }
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device___half2half2_Accuracy_Positive") {
+TEST_CASE(Unit_Device___half2half2_Accuracy_Positive) {
   UnaryHalfPrecisionTest(__half2half2_kernel, __half2half2_ref,
                          Half2ValidatorBuilderFactory(EqValidatorBuilderFactory<Float16>()));
 }
@@ -72,7 +56,7 @@ static __half2 make_half2_ref(Float16 x, Float16 y) { return __half2{x, y}; }
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device_make_half2_Accuracy_Positive") {
+TEST_CASE(Unit_Device_make_half2_Accuracy_Positive) {
   BinaryFloatingPointTest(make_half2_kernel, make_half2_ref,
                           Half2ValidatorBuilderFactory(EqValidatorBuilderFactory<Float16>()));
 }
@@ -95,7 +79,7 @@ static __half2 __halves2half2_ref(Float16 x, Float16 y) { return __half2{x, y}; 
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device___halves2half2_Accuracy_Positive") {
+TEST_CASE(Unit_Device___halves2half2_Accuracy_Positive) {
   BinaryFloatingPointTest(__halves2half2_kernel, __halves2half2_ref,
                           Half2ValidatorBuilderFactory(EqValidatorBuilderFactory<Float16>()));
 }
@@ -120,7 +104,7 @@ static Float16 __low2half_ref(Float16 x) { return x; }
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device___low2half_Accuracy_Positive") {
+TEST_CASE(Unit_Device___low2half_Accuracy_Positive) {
   UnaryHalfPrecisionTest(__low2half_kernel, __low2half_ref, EqValidatorBuilderFactory<Float16>());
 }
 
@@ -141,7 +125,7 @@ static Float16 __high2half_ref(Float16 x) { return -x; }
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device___high2half_Accuracy_Positive") {
+TEST_CASE(Unit_Device___high2half_Accuracy_Positive) {
   UnaryHalfPrecisionTest(__high2half_kernel, __high2half_ref, EqValidatorBuilderFactory<Float16>());
 }
 
@@ -164,7 +148,7 @@ static __half2 __low2half2_ref(Float16 x) { return __half2{x, x}; }
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device___low2half2_Accuracy_Positive") {
+TEST_CASE(Unit_Device___low2half2_Accuracy_Positive) {
   UnaryHalfPrecisionTest(__low2half2_kernel, __low2half2_ref,
                          Half2ValidatorBuilderFactory(EqValidatorBuilderFactory<Float16>()));
 }
@@ -186,7 +170,7 @@ static __half2 __high2half2_ref(Float16 x) { return __half2{-x, -x}; }
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device___high2half2_Accuracy_Positive") {
+TEST_CASE(Unit_Device___high2half2_Accuracy_Positive) {
   UnaryHalfPrecisionTest(__high2half2_kernel, __high2half2_ref,
                          Half2ValidatorBuilderFactory(EqValidatorBuilderFactory<Float16>()));
 }
@@ -209,7 +193,7 @@ static __half2 __lowhigh2highlow_ref(Float16 x) { return __half2{-x, x}; }
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device___lowhigh2highlow_Accuracy_Positive") {
+TEST_CASE(Unit_Device___lowhigh2highlow_Accuracy_Positive) {
   UnaryHalfPrecisionTest(__lowhigh2highlow_kernel, __lowhigh2highlow_ref,
                          Half2ValidatorBuilderFactory(EqValidatorBuilderFactory<Float16>()));
 }
@@ -232,7 +216,7 @@ static __half2 __lows2half2_ref(Float16 x, Float16 y) { return __half2{x, y}; }
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device___lows2half2_Accuracy_Positive") {
+TEST_CASE(Unit_Device___lows2half2_Accuracy_Positive) {
   BinaryFloatingPointTest(__lows2half2_kernel, __lows2half2_ref,
                           Half2ValidatorBuilderFactory(EqValidatorBuilderFactory<Float16>()));
 }
@@ -255,7 +239,7 @@ static __half2 __highs2half2_ref(Float16 x, Float16 y) { return __half2{-x, -y};
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device___highs2half2_Accuracy_Positive") {
+TEST_CASE(Unit_Device___highs2half2_Accuracy_Positive) {
   BinaryFloatingPointTest(__highs2half2_kernel, __highs2half2_ref,
                           Half2ValidatorBuilderFactory(EqValidatorBuilderFactory<Float16>()));
 }
@@ -282,7 +266,7 @@ static __half2 __float2half2_rn_ref(float x) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device___float2half2_rn_Accuracy_Positive") {
+TEST_CASE(Unit_Device___float2half2_rn_Accuracy_Positive) {
   UnarySinglePrecisionTest(__float2half2_rn_kernel, __float2half2_rn_ref,
                            Half2ValidatorBuilderFactory(EqValidatorBuilderFactory<Float16>()));
 }
@@ -307,7 +291,7 @@ static __half2 __floats2half2_rn_ref(float x, float y) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device___floats2half2_rn_Accuracy_Positive") {
+TEST_CASE(Unit_Device___floats2half2_rn_Accuracy_Positive) {
   BinaryFloatingPointTest(__floats2half2_rn_kernel, __floats2half2_rn_ref,
                           Half2ValidatorBuilderFactory(EqValidatorBuilderFactory<Float16>()));
 }
@@ -341,7 +325,7 @@ static __half2 __float22half2_rn_ref(float x) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device___float22half2_rn_Accuracy_Positive") {
+TEST_CASE(Unit_Device___float22half2_rn_Accuracy_Positive) {
   UnarySinglePrecisionTest(__float22half2_rn_kernel, __float22half2_rn_ref,
                            Half2ValidatorBuilderFactory(EqValidatorBuilderFactory<Float16>()));
 }
@@ -366,7 +350,7 @@ static float __low2float_ref(Float16 x) { return static_cast<float>(x); }
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device___low2float_Accuracy_Positive") {
+TEST_CASE(Unit_Device___low2float_Accuracy_Positive) {
   UnaryHalfPrecisionTest(__low2float_kernel, __low2float_ref, EqValidatorBuilderFactory<float>());
 }
 
@@ -388,7 +372,7 @@ static float __high2float_ref(Float16 x) { return static_cast<float>(-x); }
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device___high2float_Accuracy_Positive") {
+TEST_CASE(Unit_Device___high2float_Accuracy_Positive) {
   UnaryHalfPrecisionTest(__high2float_kernel, __high2float_ref, EqValidatorBuilderFactory<float>());
 }
 
@@ -413,7 +397,7 @@ static float2 __half22float2_ref(Float16 x) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device___half22float2_Accuracy_Positive") {
+TEST_CASE(Unit_Device___half22float2_Accuracy_Positive) {
   UnaryHalfPrecisionTest(__half22float2_kernel, __half22float2_ref,
                          Float2ValidatorBuilderFactory(EqValidatorBuilderFactory<float>()));
 }

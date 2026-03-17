@@ -24,69 +24,66 @@
 #define INCLUDE_ROCM_SMI_ROCM_SMI_COMMON_H_
 
 #include <cstdint>
-#include <memory>
 #include <map>
-#include <vector>
+#include <memory>
 #include <string>
 #include <unordered_set>
+#include <vector>
 
-#define CHECK_DV_IND_RANGE \
-    amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance(); \
-    if (dv_ind >= smi.devices().size()) { \
-      return RSMI_STATUS_INVALID_ARGS; \
-    } \
+#define CHECK_DV_IND_RANGE                                   \
+  amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance(); \
+  if (dv_ind >= smi.devices().size()) {                      \
+    return RSMI_STATUS_INVALID_ARGS;                         \
+  }
 
-#define GET_DEV_FROM_INDX  \
-  CHECK_DV_IND_RANGE \
+#define GET_DEV_FROM_INDX                                        \
+  CHECK_DV_IND_RANGE                                             \
   std::shared_ptr<amd::smi::Device> dev = smi.devices()[dv_ind]; \
   assert(dev != nullptr);
 
-#define CHECK_NIC_DV_IND_RANGE \
+#define CHECK_NIC_DV_IND_RANGE                               \
   amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance(); \
-  if (dv_ind >= smi.nic_devices().size()) { \
-    return RSMI_STATUS_INVALID_ARGS; \
+  if (dv_ind >= smi.nic_devices().size()) {                  \
+    return RSMI_STATUS_INVALID_ARGS;                         \
   }
 
-#define GET_NIC_DEV_FROM_INDX \
-  CHECK_NIC_DV_IND_RANGE \
+#define GET_NIC_DEV_FROM_INDX                                        \
+  CHECK_NIC_DV_IND_RANGE                                             \
   std::shared_ptr<amd::smi::Device> dev = smi.nic_devices()[dv_ind]; \
   assert(dev != nullptr);
 
-#define CHECK_SWITCH_DV_IND_RANGE \
+#define CHECK_SWITCH_DV_IND_RANGE                            \
   amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance(); \
-  if (dv_ind >= smi.switch_devices().size()) { \
-    return RSMI_STATUS_INVALID_ARGS; \
+  if (dv_ind >= smi.switch_devices().size()) {               \
+    return RSMI_STATUS_INVALID_ARGS;                         \
   }
 
-#define GET_SWITCH_DEV_FROM_INDX \
-  CHECK_SWITCH_DV_IND_RANGE \
+#define GET_SWITCH_DEV_FROM_INDX                                        \
+  CHECK_SWITCH_DV_IND_RANGE                                             \
   std::shared_ptr<amd::smi::Device> dev = smi.switch_devices()[dv_ind]; \
   assert(dev != nullptr);
 
-
-#define GET_DEV_AND_KFDNODE_FROM_INDX \
-  GET_DEV_FROM_INDX \
-  std::shared_ptr<amd::smi::KFDNode> kfd_node; \
-  if (smi.kfd_node_map().find(dev->kfd_gpu_id()) == \
-                                                 smi.kfd_node_map().end()) { \
-    return RSMI_INITIALIZATION_ERROR; \
-  } \
+#define GET_DEV_AND_KFDNODE_FROM_INDX                                           \
+  GET_DEV_FROM_INDX                                                             \
+  std::shared_ptr<amd::smi::KFDNode> kfd_node;                                  \
+  if (smi.kfd_node_map().find(dev->kfd_gpu_id()) == smi.kfd_node_map().end()) { \
+    return RSMI_INITIALIZATION_ERROR;                                           \
+  }                                                                             \
   kfd_node = smi.kfd_node_map()[dev->kfd_gpu_id()];
 
-#define REQUIRE_ROOT_ACCESS \
-    if (amd::smi::RocmSMI::getInstance().euid()) { \
-      return RSMI_STATUS_PERMISSION; \
-    }
+#define REQUIRE_ROOT_ACCESS                      \
+  if (amd::smi::RocmSMI::getInstance().euid()) { \
+    return RSMI_STATUS_PERMISSION;               \
+  }
 
-#define DEVICE_MUTEX \
-    amd::smi::pthread_wrap _pw(*amd::smi::GetMutex(dv_ind)); \
-    amd::smi::RocmSMI& smi_ = amd::smi::RocmSMI::getInstance(); \
-    bool blocking_ = !(smi_.init_options() & \
-                          static_cast<uint64_t>(RSMI_INIT_FLAG_RESRV_TEST1)); \
-    amd::smi::ScopedPthread _lock(_pw, blocking_); \
-    if (!blocking_ && _lock.mutex_not_acquired()) { \
-      return RSMI_STATUS_BUSY; \
-    }
+#define DEVICE_MUTEX                                                                           \
+  amd::smi::pthread_wrap _pw(*amd::smi::GetMutex(dv_ind));                                     \
+  amd::smi::RocmSMI& smi_ = amd::smi::RocmSMI::getInstance();                                  \
+  bool blocking_ = !(smi_.init_options() & static_cast<uint64_t>(RSMI_INIT_FLAG_RESRV_TEST1)); \
+  amd::smi::ScopedPthread _lock(_pw, blocking_);                                               \
+  if (!blocking_ && _lock.mutex_not_acquired()) {                                              \
+    return RSMI_STATUS_BUSY;                                                                   \
+  }
 
 /* This group of macros is used to facilitate checking of support for rsmi_dev*
  * "getter" functions. When the return buffer is set to nullptr, the macro will
@@ -95,96 +92,93 @@
  * subvariants (e.g. monitors/sensors) are supported.
  */
 // This macro assumes dev already available
-#define CHK_API_SUPPORT_ONLY(RT_PTR, VR, SUB_VR) \
-    if ((RT_PTR) == nullptr) { \
-      try { \
-        if (!dev->DeviceAPISupported(__FUNCTION__, (VR), (SUB_VR))) { \
-          return RSMI_STATUS_NOT_SUPPORTED; \
-        }  \
-        return RSMI_STATUS_INVALID_ARGS; \
-      } catch (const amd::smi::rsmi_exception& e) { \
-        debug_print( \
-             "Exception caught when checking if API is supported %s.\n", \
-                                                                  e.what()); \
-        return RSMI_STATUS_INVALID_ARGS; \
-      } \
-    }
-
-#define CHK_SUPPORT(RT_PTR, VR, SUB_VR)  \
-    GET_DEV_FROM_INDX \
-    CHK_API_SUPPORT_ONLY((RT_PTR), (VR), (SUB_VR))
-
-#define CHK_SUPPORT_NAME_ONLY(RT_PTR) \
-    CHK_SUPPORT((RT_PTR), RSMI_DEFAULT_VARIANT, RSMI_DEFAULT_VARIANT) \
-
-#define CHK_SUPPORT_VAR(RT_PTR, VR) \
-    CHK_SUPPORT((RT_PTR), (VR), RSMI_DEFAULT_VARIANT) \
-
-#define CHK_SUPPORT_SUBVAR_ONLY(RT_PTR, SUB_VR) \
-    CHK_SUPPORT((RT_PTR), RSMI_DEFAULT_VARIANT, (SUB_VR)) \
-
-#define DBG_FILE_ERROR(FN, WR_STR) \
-  if (env_ && env_->debug_output_bitfield & RSMI_DEBUG_SYSFS_FILE_PATHS) { \
-    std::cout << "*****" << __FUNCTION__ << std::endl; \
-    std::cout << "*****Opening file: " << (FN) << std::endl; \
-    if ((WR_STR) != nullptr) { \
-       std::cout << "***** for writing. Writing: \"" << (WR_STR) << "\""; \
-    } else { std::cout << "***** for reading.";} \
-    std::cout << std::endl; \
-    std::cout << " at " << __FILE__ << ":" << std::dec << __LINE__ << \
-                                                                   std::endl;\
+#define CHK_API_SUPPORT_ONLY(RT_PTR, VR, SUB_VR)                                         \
+  if ((RT_PTR) == nullptr) {                                                             \
+    try {                                                                                \
+      if (!dev->DeviceAPISupported(__FUNCTION__, (VR), (SUB_VR))) {                      \
+        return RSMI_STATUS_NOT_SUPPORTED;                                                \
+      }                                                                                  \
+      return RSMI_STATUS_INVALID_ARGS;                                                   \
+    } catch (const amd::smi::rsmi_exception& e) {                                        \
+      debug_print("Exception caught when checking if API is supported %s.\n", e.what()); \
+      return RSMI_STATUS_INVALID_ARGS;                                                   \
+    }                                                                                    \
   }
 
-#define DEBUG_LOG(WR_STR, VR) \
-  amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance(); \
-  if (smi.getEnv().debug_output_bitfield & RSMI_DEBUG_VAL) { \
-      if ((WR_STR) != nullptr)  \
-          std::cout << (WR_STR) << " " << (VR) << std::endl;\
+#define CHK_SUPPORT(RT_PTR, VR, SUB_VR) \
+  GET_DEV_FROM_INDX                     \
+  CHK_API_SUPPORT_ONLY((RT_PTR), (VR), (SUB_VR))
+
+#define CHK_SUPPORT_NAME_ONLY(RT_PTR) \
+  CHK_SUPPORT((RT_PTR), RSMI_DEFAULT_VARIANT, RSMI_DEFAULT_VARIANT)
+
+#define CHK_SUPPORT_VAR(RT_PTR, VR) CHK_SUPPORT((RT_PTR), (VR), RSMI_DEFAULT_VARIANT)
+
+#define CHK_SUPPORT_SUBVAR_ONLY(RT_PTR, SUB_VR) \
+  CHK_SUPPORT((RT_PTR), RSMI_DEFAULT_VARIANT, (SUB_VR))
+
+#define DBG_FILE_ERROR(FN, WR_STR)                                               \
+  if (env_ && env_->debug_output_bitfield & RSMI_DEBUG_SYSFS_FILE_PATHS) {       \
+    std::cout << "*****" << __FUNCTION__ << std::endl;                           \
+    std::cout << "*****Opening file: " << (FN) << std::endl;                     \
+    if ((WR_STR) != nullptr) {                                                   \
+      std::cout << "***** for writing. Writing: \"" << (WR_STR) << "\"";         \
+    } else {                                                                     \
+      std::cout << "***** for reading.";                                         \
+    }                                                                            \
+    std::cout << std::endl;                                                      \
+    std::cout << " at " << __FILE__ << ":" << std::dec << __LINE__ << std::endl; \
+  }
+
+#define DEBUG_LOG(WR_STR, VR)                                                   \
+  amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();                    \
+  if (smi.getEnv().debug_output_bitfield & RSMI_DEBUG_VAL) {                    \
+    if ((WR_STR) != nullptr) std::cout << (WR_STR) << " " << (VR) << std::endl; \
   }
 
 // Add different debug filters here, as powers of 2; e.g, 1, 2, 4, 8, ...
-#define RSMI_DEBUG_SYSFS_FILE_PATHS 1<<0
-#define RSMI_DEBUG_VAL 1<<1
+#define RSMI_DEBUG_SYSFS_FILE_PATHS 1 << 0
+#define RSMI_DEBUG_VAL 1 << 1
 
 struct rsmi_func_id_iter_handle {
-    uintptr_t func_id_iter;
-    uintptr_t container_ptr;
-    uint32_t id_type;
+  uintptr_t func_id_iter;
+  uintptr_t container_ptr;
+  uint32_t id_type;
 };
 
 struct RocmSMI_env_vars {
-    // If RSMI_DEBUG_INFINITE_LOOP is non-zero, rsmi_init() will go into
-    // an infinite loop in debug builds. For release builds, this is
-    // ignored. This is useful for debugging RSMI applications with
-    // gdb. After attaching with gdb, the inf. loop can be exited and
-    // RSMI can be debugged.
-    uint32_t debug_inf_loop;
+  // If RSMI_DEBUG_INFINITE_LOOP is non-zero, rsmi_init() will go into
+  // an infinite loop in debug builds. For release builds, this is
+  // ignored. This is useful for debugging RSMI applications with
+  // gdb. After attaching with gdb, the inf. loop can be exited and
+  // RSMI can be debugged.
+  uint32_t debug_inf_loop;
 
-    // Bitfield that is AND'd with various RSMI_DEBUG_* bits to determine
-    // which debugging information should be turned on. Env. variable
-    // RSMI_DEBUG_BITFIELD is used to set all the debug info bits.
-    uint32_t debug_output_bitfield;
+  // Bitfield that is AND'd with various RSMI_DEBUG_* bits to determine
+  // which debugging information should be turned on. Env. variable
+  // RSMI_DEBUG_BITFIELD is used to set all the debug info bits.
+  uint32_t debug_output_bitfield;
 
-    // The integer value of sysfs field enum that is to be over-ridden.
-    // Env. variable RSMI_DEBUG_ENUM_OVERRIDE is used to specify this.
-    // A set of enum overrides, RSMI_DEBUG_ENUM_OVERRIDE now supports
-    // comma delimited values.
-    std::unordered_set<uint32_t> enum_overrides;
+  // The integer value of sysfs field enum that is to be over-ridden.
+  // Env. variable RSMI_DEBUG_ENUM_OVERRIDE is used to specify this.
+  // A set of enum overrides, RSMI_DEBUG_ENUM_OVERRIDE now supports
+  // comma delimited values.
+  std::unordered_set<uint32_t> enum_overrides;
 
-    // If RSMI_LOGGING is set, enables logging.
-    // Otherwise unset values, signify logging is turned off.
-    uint32_t logging_on;
+  // If RSMI_LOGGING is set, enables logging.
+  // Otherwise unset values, signify logging is turned off.
+  uint32_t logging_on;
 
-    // Sysfs path overrides
+  // Sysfs path overrides
 
-    // Env. var. RSMI_DEBUG_DRM_ROOT_OVERRIDE
-    const char *path_DRM_root_override;
+  // Env. var. RSMI_DEBUG_DRM_ROOT_OVERRIDE
+  const char* path_DRM_root_override;
 
-    // Env. var. RSMI_DEBUG_HWMON_ROOT_OVERRIDE
-    const char *path_HWMon_root_override;
+  // Env. var. RSMI_DEBUG_HWMON_ROOT_OVERRIDE
+  const char* path_HWMon_root_override;
 
-    // Env. var. RSMI_DEBUG_PP_ROOT_OVERRIDE
-    const char *path_power_root_override;
+  // Env. var. RSMI_DEBUG_PP_ROOT_OVERRIDE
+  const char* path_power_root_override;
 };
 
 // Use this bit offset to store the label-mapped file index

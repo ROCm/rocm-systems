@@ -1,23 +1,7 @@
 /*
-   Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-
-   Permission is hereby granted, free of charge, to any person obtaining a copy
-   of this software and associated documentation files (the "Software"), to deal
-   in the Software without restriction, including without limitation the rights
-   to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-   copies of the Software, and to permit persons to whom the Software is
-   furnished to do so, subject to the following conditions:
-
-   The above copyright notice and this permission notice shall be included in
-   all copies or substantial portions of the Software.
-
-   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-   AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-   THE SOFTWARE.
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
  */
 
 /*
@@ -109,7 +93,7 @@ Allocates the memory using hipHostMalloc API
 Launches the kernel and performs vector addition.
 validates thes result.
 */
-TEST_CASE("Unit_hipHostMalloc_Basic") {
+TEST_CASE(Unit_hipHostMalloc_Basic) {
   static constexpr auto LEN{1024 * 1024};
   static constexpr auto SIZE{LEN * sizeof(float)};
 
@@ -163,7 +147,7 @@ TEST_CASE("Unit_hipHostMalloc_Basic") {
 This testcase verifies the hipHostMalloc API by passing nullptr
 to the pointer variable
 */
-TEST_CASE("Unit_hipHostMalloc_Negative") {
+TEST_CASE(Unit_hipHostMalloc_Negative) {
 #if HT_AMD
   {
     // Stimulate error condition:
@@ -182,7 +166,7 @@ This testcase verifies the hipHostMalloc API by
    techniquies
 3. validates the result.
 */
-TEST_CASE("Unit_hipHostMalloc_NonCoherent") {
+TEST_CASE(Unit_hipHostMalloc_NonCoherent) {
   int* A = nullptr;
   HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&A), sizeBytes, hipHostMallocNonCoherent));
   const char* ptrType = "non-coherent";
@@ -200,7 +184,7 @@ This testcase verifies the hipHostMalloc API by
    techniquies
 3. validates the result.
 */
-TEST_CASE("Unit_hipHostMalloc_Coherent") {
+TEST_CASE(Unit_hipHostMalloc_Coherent) {
   int* A = nullptr;
   if (hipHostMalloc(reinterpret_cast<void**>(&A), sizeBytes, hipHostMallocCoherent) == hipSuccess) {
     const char* ptrType = "coherent";
@@ -226,7 +210,7 @@ This testcase verifies the hipHostMalloc API by
    techniquies
 3. validates the result.
 */
-TEST_CASE("Unit_hipHostMalloc_Default") {
+TEST_CASE(Unit_hipHostMalloc_Default) {
   int* A = nullptr;
   HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&A), sizeBytes));
   const char* ptrType = "default";
@@ -240,7 +224,7 @@ TEST_CASE("Unit_hipHostMalloc_Default") {
 This testcase verifies the hipHostMalloc API by
 1. Allocating more memory than total system RAM. Should return hipErrorOutOfMemory.
 */
-TEST_CASE("Unit_hipHostMalloc_AllocateMoreThanTotalSystemMemory") {
+TEST_CASE(Unit_hipHostMalloc_AllocateMoreThanTotalSystemMemory) {
   char* host_ptr = nullptr;
   const size_t total_ram_mb = HipTest::getTotalSystemMemoryInMB();
   if (total_ram_mb == 0) {
@@ -255,7 +239,7 @@ TEST_CASE("Unit_hipHostMalloc_AllocateMoreThanTotalSystemMemory") {
   REQUIRE(host_ptr == nullptr);
 }
 
-TEST_CASE("Unit_hipHostMalloc_Capture") {
+TEST_CASE(Unit_hipHostMalloc_Capture) {
   int* host_ptr = nullptr;
   hipError_t capture_error = hipSuccess;
 

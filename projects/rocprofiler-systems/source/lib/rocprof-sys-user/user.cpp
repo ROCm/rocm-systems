@@ -109,6 +109,10 @@ extern "C"
                                   rocprofsys_user_callbacks_t      inp,
                                   rocprofsys_user_callbacks_t*     out)
     {
+        fprintf(stderr,
+                "[rocprof-sys][warning] The rocprof-sys-user library is deprecated and "
+                "will be removed in a future release. Use rocprofiler-sdk-roctx "
+                "instead.\n");
         auto _former = _callbacks;
 
         switch(mode)

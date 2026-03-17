@@ -1,21 +1,9 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 /*
 Added Negative and Functional tests for hipPointerGetAttribute API
 
@@ -69,7 +57,7 @@ static __global__ void var_update(int* data) {
 
 /* Allocate memory using different Allocation APIs and check whether
    correct memory type and device oridinal are returned */
-TEST_CASE("Unit_hipPointerGetAttribute_MemoryTypes") {
+TEST_CASE(Unit_hipPointerGetAttribute_MemoryTypes) {
   CHECK_IMAGE_SUPPORT
 
   HIP_CHECK(hipSetDevice(0));
@@ -121,7 +109,7 @@ TEST_CASE("Unit_hipPointerGetAttribute_MemoryTypes") {
  * Validates the device variable to check whether the
  * data is updated or not.
  */
-TEST_CASE("Unit_hipPointerGetAttribute_KernelUpdation") {
+TEST_CASE(Unit_hipPointerGetAttribute_KernelUpdation) {
   HIP_CHECK(hipSetDevice(0));
   size_t Nbytes = 0;
   Nbytes = N * sizeof(int);
@@ -150,7 +138,7 @@ TEST_CASE("Unit_hipPointerGetAttribute_KernelUpdation") {
  * from peer GPU device.It validates the memory type and
  * device ordinal in peer GPU
  */
-TEST_CASE("Unit_hipPointerGetAttribute_PeerGPU", "[multigpu]") {
+TEST_CASE(Unit_hipPointerGetAttribute_PeerGPU) {
   HIP_CHECK(hipSetDevice(0));
   size_t Nbytes = 0;
   Nbytes = N * sizeof(int);
@@ -185,7 +173,7 @@ TEST_CASE("Unit_hipPointerGetAttribute_PeerGPU", "[multigpu]") {
    hipPointerGetAttribute API with HIP_POINTER_ATTRIBUTE_BUFFER_ID,
    DeAllocate and Allocate the memory again and
    ensure that the buffer ID is unique */
-TEST_CASE("Unit_hipPointerGetAttribute_BufferID") {
+TEST_CASE(Unit_hipPointerGetAttribute_BufferID) {
   HIP_CHECK(hipSetDevice(0));
   size_t Nbytes = 0;
   Nbytes = N * sizeof(int);
@@ -207,7 +195,7 @@ TEST_CASE("Unit_hipPointerGetAttribute_BufferID") {
    and ensure that it matches with CUDA result
 */
 #if HT_AMD
-TEST_CASE("Unit_hipPointerGetAttribute_HostDeviceOrdinal") {
+TEST_CASE(Unit_hipPointerGetAttribute_HostDeviceOrdinal) {
   size_t Nbytes = 0;
   Nbytes = N * sizeof(int);
   int* A_h;
@@ -227,7 +215,7 @@ TEST_CASE("Unit_hipPointerGetAttribute_HostDeviceOrdinal") {
 /* Allocate managed memory with different flags and trigger
    hipPointerGetAttribute with the following flags HIP_POINTER_ATTRIBUTE_MAPPED
    and verify the behaviour */
-TEST_CASE("Unit_hipPointerGetAttribute_MappedMem") {
+TEST_CASE(Unit_hipPointerGetAttribute_MappedMem) {
   HIP_CHECK(hipSetDevice(0));
   size_t Nbytes = 0;
   Nbytes = N * sizeof(int);
@@ -256,7 +244,7 @@ TEST_CASE("Unit_hipPointerGetAttribute_MappedMem") {
 }
 
 /* This testcase verifies negative scenarios of hipPointerGetAttribute API */
-TEST_CASE("Unit_hipPointerGetAttribute_Negative") {
+TEST_CASE(Unit_hipPointerGetAttribute_Negative) {
   HIP_CHECK(hipSetDevice(0));
   size_t Nbytes = 0;
   constexpr size_t N{100};
@@ -334,7 +322,7 @@ TEST_CASE("Unit_hipPointerGetAttribute_Negative") {
 
 /* Allocate memory using different Allocation APIs and check whether
    IPC CAPABLE attribute returns correctly */
-TEST_CASE("Unit_hipPointerGetAttribute_ipc_capable") {
+TEST_CASE(Unit_hipPointerGetAttribute_ipc_capable) {
 
   HIP_CHECK(hipSetDevice(0));
   size_t Nbytes = N * sizeof(int);

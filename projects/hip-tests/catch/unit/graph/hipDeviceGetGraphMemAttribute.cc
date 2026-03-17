@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip_test_common.hh>
 #include <resource_guards.hh>
@@ -108,7 +92,7 @@ static void ResetGraphMemAttribute(unsigned deviceId = 0) {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipDeviceGetGraphMemAttribute_Positive_DoubleMemory") {
+TEST_CASE(Unit_hipDeviceGetGraphMemAttribute_Positive_DoubleMemory) {
   hipGraphExec_t graph_exec1, graph_exec2;
   int *dev_p1, *dev_p2;
 
@@ -154,7 +138,7 @@ TEST_CASE("Unit_hipDeviceGetGraphMemAttribute_Positive_DoubleMemory") {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipDeviceGetGraphMemAttribute_Negative_Parameters") {
+TEST_CASE(Unit_hipDeviceGetGraphMemAttribute_Negative_Parameters) {
   int device_id = 0;
   HIP_CHECK(hipSetDevice(device_id));
 
@@ -305,12 +289,11 @@ static void hipDeviceGetGraphMemAttribute_Functional_Test(unsigned deviceId = 0)
   ResetGraphMemAttribute(deviceId);
 }
 
-TEST_CASE("Unit_hipDeviceGetGraphMemAttribute_Functional") {
+TEST_CASE(Unit_hipDeviceGetGraphMemAttribute_Functional) {
   hipDeviceGetGraphMemAttribute_Functional_Test();
 }
 
-TEST_CASE("Unit_hipDeviceGetGraphMemAttribute_Functional_Multi_Device",
-          "[multigpu]") {
+TEST_CASE(Unit_hipDeviceGetGraphMemAttribute_Functional_Multi_Device) {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
 
@@ -339,7 +322,7 @@ TEST_CASE("Unit_hipDeviceGetGraphMemAttribute_Functional_Multi_Device",
  *  - HIP_VERSION >= 6.1
  */
 
-TEST_CASE("Unit_hipDeviceGetGraphMemAttribute_Negative") {
+TEST_CASE(Unit_hipDeviceGetGraphMemAttribute_Negative) {
   size_t value = 0;
   hipError_t ret;
   SECTION("Pass device id as negative value") {
@@ -379,7 +362,7 @@ TEST_CASE("Unit_hipDeviceGetGraphMemAttribute_Negative") {
  *  - HIP_VERSION >= 6.1
  */
 
-TEST_CASE("Unit_hipDeviceSetGraphMemAttribute_Negative") {
+TEST_CASE(Unit_hipDeviceSetGraphMemAttribute_Negative) {
   size_t value = 0;
   hipError_t ret;
   SECTION("Pass device id as negative value") {

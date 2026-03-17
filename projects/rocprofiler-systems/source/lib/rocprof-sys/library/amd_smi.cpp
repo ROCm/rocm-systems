@@ -795,13 +795,11 @@ data::print(std::ostream& _os) const
 {
     std::stringstream _ss{};
 
-#if ROCPROFSYS_USE_ROCM > 0
     _ss << "device: " << m_dev_id << ", gpu busy: = " << m_busy_perc.gfx_activity
         << "%, mm busy: = " << m_busy_perc.mm_activity
         << "%, umc busy: = " << m_busy_perc.umc_activity << "%, temp = " << m_temp
         << ", current power = " << m_power.current_socket_power
         << ", memory usage = " << m_mem_usage;
-#endif
     _os << _ss.str();
 }
 

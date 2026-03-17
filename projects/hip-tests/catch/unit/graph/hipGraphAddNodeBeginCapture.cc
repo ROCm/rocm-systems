@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip_test_common.hh>
 #include <hip_test_checkers.hh>
@@ -84,7 +71,7 @@ static void CpuCallback(void* args) {
  *  - HIP_VERSION >= 5.6
  */
 
-TEST_CASE("Unit_hipStreamBeginCapture_with_hipGraphAddHostNode") {
+TEST_CASE(Unit_hipStreamBeginCapture_with_hipGraphAddHostNode) {
   hipGraph_t graph;
   hipGraphExec_t graphExec;
   hipGraphNode_t cpuGraphNode;
@@ -141,7 +128,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_with_hipGraphAddHostNode") {
  *  - HIP_VERSION >= 5.6
  */
 
-TEST_CASE("Unit_hipStreamEndCapture_later_and_add_a_node_inbetween") {
+TEST_CASE(Unit_hipStreamEndCapture_later_and_add_a_node_inbetween) {
   hipGraphExec_t graphExec;
   hipGraphNode_t memcpyD2H_C;
   hipStream_t stream;
@@ -487,7 +474,7 @@ TEST_CASE("Unit_hipStreamEndCapture_later_and_add_a_node_inbetween") {
  *  - HIP_VERSION >= 5.6
  */
 
-TEST_CASE("Unit_hipStreamEndCapture_first_and_add_a_node_later") {
+TEST_CASE(Unit_hipStreamEndCapture_first_and_add_a_node_later) {
   hipGraph_t graph;
   hipGraphExec_t graphExec;
   hipGraphNode_t memcpyD2H_C;
@@ -785,7 +772,7 @@ TEST_CASE("Unit_hipStreamEndCapture_first_and_add_a_node_later") {
  *  - HIP_VERSION >= 5.6
  */
 
-TEST_CASE("Unit_hipStreamEndCapture_first_and_add_other_graph_node_later") {
+TEST_CASE(Unit_hipStreamEndCapture_first_and_add_other_graph_node_later) {
   hipGraph_t graph;
   hipGraphExec_t graphExec;
   hipGraphNode_t memcpyH2D_A, memcpyH2D_B, memcpyD2H_AC, memcpyH2D_C;
@@ -853,7 +840,7 @@ TEST_CASE("Unit_hipStreamEndCapture_first_and_add_other_graph_node_later") {
  *  - HIP_VERSION >= 5.6
  */
 
-TEST_CASE("Unit_hipStreamEndCapture_later_and_addEmptyNode") {
+TEST_CASE(Unit_hipStreamEndCapture_later_and_addEmptyNode) {
   hipGraphExec_t graphExec;
   hipGraphNode_t memcpyD2H_C;
   hipStream_t stream;

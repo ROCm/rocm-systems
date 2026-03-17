@@ -47,7 +47,12 @@ def build_panel_dict(
     tables: tuple of (table_id, table_title, metrics_dict)
     metrics_dict example:
       {
-        "Metric A": {"avg": "AVG(A)", "min": "MIN(A)", "max": "MAX(A)", "unit": "pct"},
+        "Metric A": {
+          "avg": "AVG(A)",
+          "min": "MIN(A)",
+          "max": "MAX(A)",
+          "unit": "Percent",
+        },
         ...
       }
     """
@@ -249,7 +254,7 @@ class TestDeltaAndEditsSemantics(unittest.TestCase):
                             "avg": "AVG(A)",
                             "min": "MIN(A)",
                             "max": "MAX(A)",
-                            "unit": "pct",
+                            "unit": "Percent",
                         },
                     },
                 ),
@@ -270,7 +275,7 @@ class TestDeltaAndEditsSemantics(unittest.TestCase):
                             "avg": "AVG(A_new)",
                             "min": "MIN(A)",
                             "max": "MAX(A)",
-                            "unit": "pct",
+                            "unit": "Percent",
                         },  # MOD
                         "Metric B": {
                             "avg": "AVG(B)",

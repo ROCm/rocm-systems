@@ -167,52 +167,45 @@ endforeach()
 #
 # ----------------------------------------------------------------------------------------#
 
-if(ROCPROFSYS_USE_ROCM)
-    find_package(ROCmVersion)
+find_package(ROCmVersion)
 
-    if(NOT ROCmVersion_FOUND)
-        find_package(
-            hip
-            ${rocprofiler_systems_FIND_QUIETLY}
-            REQUIRED
-            HINTS ${ROCPROFSYS_DEFAULT_ROCM_PATH}
-            PATHS ${ROCPROFSYS_DEFAULT_ROCM_PATH}
-        )
-        find_package(ROCmVersion HINTS ${ROCM_PATH} PATHS ${ROCM_PATH})
-    endif()
-
-    if(NOT ROCmVersion_FOUND)
-        rocm_version_compute("${hip_VERSION}" _local)
-
-        foreach(_V ${ROCmVersion_VARIABLES})
-            set(_CACHE_VAR ROCmVersion_${_V}_VERSION)
-            set(_LOCAL_VAR _local_${_V}_VERSION)
-            set(ROCmVersion_${_V}_VERSION
-                "${${_LOCAL_VAR}}"
-                CACHE STRING
-                "ROCm ${_V} version"
-            )
-            rocm_version_watch_for_change(${_CACHE_VAR})
-        endforeach()
-    else()
-        list(APPEND CMAKE_PREFIX_PATH ${ROCmVersion_DIR})
-    endif()
-
-    set(ROCPROFSYS_ROCM_VERSION_FULL ${ROCmVersion_FULL_VERSION})
-    set(ROCPROFSYS_ROCM_VERSION_MAJOR ${ROCmVersion_MAJOR_VERSION})
-    set(ROCPROFSYS_ROCM_VERSION_MINOR ${ROCmVersion_MINOR_VERSION})
-    set(ROCPROFSYS_ROCM_VERSION_PATCH ${ROCmVersion_PATCH_VERSION})
-    set(ROCPROFSYS_ROCM_VERSION ${ROCmVersion_TRIPLE_VERSION})
-
-    rocprofiler_systems_add_feature(ROCPROFSYS_ROCM_VERSION
-        "ROCm version used by rocprofiler-systems"
+if(NOT ROCmVersion_FOUND)
+    find_package(
+        hip
+        ${rocprofiler_systems_FIND_QUIETLY}
+        REQUIRED
+        HINTS ${ROCPROFSYS_DEFAULT_ROCM_PATH}
+        PATHS ${ROCPROFSYS_DEFAULT_ROCM_PATH}
     )
-else()
-    set(ROCPROFSYS_ROCM_VERSION "0.0.0")
-    set(ROCPROFSYS_ROCM_VERSION_MAJOR 0)
-    set(ROCPROFSYS_ROCM_VERSION_MINOR 0)
-    set(ROCPROFSYS_ROCM_VERSION_PATCH 0)
+    find_package(ROCmVersion HINTS ${ROCM_PATH} PATHS ${ROCM_PATH})
 endif()
+
+if(NOT ROCmVersion_FOUND)
+    rocm_version_compute("${hip_VERSION}" _local)
+
+    foreach(_V ${ROCmVersion_VARIABLES})
+        set(_CACHE_VAR ROCmVersion_${_V}_VERSION)
+        set(_LOCAL_VAR _local_${_V}_VERSION)
+        set(ROCmVersion_${_V}_VERSION
+            "${${_LOCAL_VAR}}"
+            CACHE STRING
+            "ROCm ${_V} version"
+        )
+        rocm_version_watch_for_change(${_CACHE_VAR})
+    endforeach()
+else()
+    list(APPEND CMAKE_PREFIX_PATH ${ROCmVersion_DIR})
+endif()
+
+set(ROCPROFSYS_ROCM_VERSION_FULL ${ROCmVersion_FULL_VERSION})
+set(ROCPROFSYS_ROCM_VERSION_MAJOR ${ROCmVersion_MAJOR_VERSION})
+set(ROCPROFSYS_ROCM_VERSION_MINOR ${ROCmVersion_MINOR_VERSION})
+set(ROCPROFSYS_ROCM_VERSION_PATCH ${ROCmVersion_PATCH_VERSION})
+set(ROCPROFSYS_ROCM_VERSION ${ROCmVersion_TRIPLE_VERSION})
+
+rocprofiler_systems_add_feature(ROCPROFSYS_ROCM_VERSION
+    "ROCm version used by rocprofiler-systems"
+)
 
 # ----------------------------------------------------------------------------------------#
 #
@@ -220,70 +213,62 @@ endif()
 #
 # ----------------------------------------------------------------------------------------#
 
-if(ROCPROFSYS_USE_ROCM)
-    # ROCProfiler SDK
-    find_package(rocprofiler-sdk ${rocprofiler_systems_FIND_QUIETLY} REQUIRED)
-    rocprofiler_systems_target_compile_definitions(rocprofiler-systems-rocm
-        INTERFACE ROCPROFSYS_USE_ROCM
-    )
-    target_link_libraries(
-        rocprofiler-systems-rocm
-        INTERFACE rocprofiler-sdk::rocprofiler-sdk
-    )
+# ROCProfiler SDK
+find_package(rocprofiler-sdk ${rocprofiler_systems_FIND_QUIETLY} REQUIRED)
+target_link_libraries(rocprofiler-systems-rocm INTERFACE rocprofiler-sdk::rocprofiler-sdk)
 
-    # AMD SMI
-    find_package(
-        amd_smi
-        ${rocprofiler_systems_FIND_QUIETLY}
+# AMD SMI
+find_package(
+    amd_smi
+    ${rocprofiler_systems_FIND_QUIETLY}
+    HINTS ${ROCMVersion_DIR} ${ROCM_PATH} /opt/amdgpu
+    PATHS ${ROCMVersion_DIR} ${ROCM_PATH} /opt/amdgpu
+    REQUIRED
+)
+
+# amd_smi in ROCm 6.4 requires both drm and drm_amdgpu libraries to be explicitly linked.
+# This is no longer the case in ROCm 7.0.
+if(ROCPROFSYS_ROCM_VERSION_MAJOR EQUAL 6 AND ROCPROFSYS_ROCM_VERSION_MINOR EQUAL 4)
+    # Find drm library
+    find_library(
+        drm_LIBRARY
+        NAMES drm
         HINTS ${ROCMVersion_DIR} ${ROCM_PATH} /opt/amdgpu
         PATHS ${ROCMVersion_DIR} ${ROCM_PATH} /opt/amdgpu
+        PATH_SUFFIXES lib lib64
+        REQUIRED
+    )
+    # Find drm_amdgpu library
+    find_library(
+        drm_amdgpu_LIBRARY
+        NAMES drm_amdgpu
+        HINTS ${ROCMVersion_DIR} ${ROCM_PATH} /opt/amdgpu
+        PATHS ${ROCMVersion_DIR} ${ROCM_PATH} /opt/amdgpu
+        PATH_SUFFIXES lib lib64
         REQUIRED
     )
 
-    # amd_smi in ROCm 6.4 requires both drm and drm_amdgpu libraries to be explicitly linked.
-    # This is no longer the case in ROCm 7.0.
-    if(ROCPROFSYS_ROCM_VERSION_MAJOR EQUAL 6 AND ROCPROFSYS_ROCM_VERSION_MINOR EQUAL 4)
-        # Find drm library
-        find_library(
-            drm_LIBRARY
-            NAMES drm
-            HINTS ${ROCMVersion_DIR} ${ROCM_PATH} /opt/amdgpu
-            PATHS ${ROCMVersion_DIR} ${ROCM_PATH} /opt/amdgpu
-            PATH_SUFFIXES lib lib64
-            REQUIRED
-        )
-        # Find drm_amdgpu library
-        find_library(
-            drm_amdgpu_LIBRARY
-            NAMES drm_amdgpu
-            HINTS ${ROCMVersion_DIR} ${ROCM_PATH} /opt/amdgpu
-            PATHS ${ROCMVersion_DIR} ${ROCM_PATH} /opt/amdgpu
-            PATH_SUFFIXES lib lib64
-            REQUIRED
-        )
+    get_filename_component(_drm_LIBRARY_DIR "${drm_LIBRARY}" DIRECTORY)
+    get_filename_component(_drm_amdgpu_LIBRARY_DIR "${drm_amdgpu_LIBRARY}" DIRECTORY)
 
-        get_filename_component(_drm_LIBRARY_DIR "${drm_LIBRARY}" DIRECTORY)
-        get_filename_component(_drm_amdgpu_LIBRARY_DIR "${drm_amdgpu_LIBRARY}" DIRECTORY)
+    set(_drm_LIBRARY_DIRS "${_drm_LIBRARY_DIR};${_drm_amdgpu_LIBRARY_DIR}")
+    list(REMOVE_DUPLICATES _drm_LIBRARY_DIRS)
 
-        set(_drm_LIBRARY_DIRS "${_drm_LIBRARY_DIR};${_drm_amdgpu_LIBRARY_DIR}")
-        list(REMOVE_DUPLICATES _drm_LIBRARY_DIRS)
-
-        target_link_directories(amd_smi INTERFACE ${_drm_LIBRARY_DIRS})
-    endif()
-
-    # When AI NIC profiling is enabled and ROCm version is 7.0+, define ENABLE_ESMI_LIB so AMD SMI headers
-    # expose NIC APIs (e.g. amdsmi_get_nic_rdma_port_statistics, AMDSMI_INIT_AMD_NICS).
-    if(ROCPROFSYS_USE_AINIC)
-        if(ROCPROFSYS_ROCM_VERSION_MAJOR GREATER 6)
-            target_compile_definitions(
-                rocprofiler-systems-compile-definitions
-                INTERFACE ROCPROFSYS_USE_AINIC ENABLE_ESMI_LIB
-            )
-        endif()
-    endif()
-
-    target_link_libraries(rocprofiler-systems-rocm INTERFACE amd_smi)
+    target_link_directories(amd_smi INTERFACE ${_drm_LIBRARY_DIRS})
 endif()
+
+# When AI NIC profiling is enabled and ROCm version is 7.0+, define ENABLE_ESMI_LIB so AMD SMI headers
+# expose NIC APIs (e.g. amdsmi_get_nic_rdma_port_statistics, AMDSMI_INIT_AMD_NICS).
+if(ROCPROFSYS_USE_AINIC)
+    if(ROCPROFSYS_ROCM_VERSION_MAJOR GREATER 6)
+        target_compile_definitions(
+            rocprofiler-systems-compile-definitions
+            INTERFACE ROCPROFSYS_USE_AINIC ENABLE_ESMI_LIB
+        )
+    endif()
+endif()
+
+target_link_libraries(rocprofiler-systems-rocm INTERFACE amd_smi)
 
 # ----------------------------------------------------------------------------------------#
 #

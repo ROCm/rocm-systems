@@ -1,23 +1,8 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "trig_negative_kernels_rtc.hh"
 
@@ -27,49 +12,49 @@ THE SOFTWARE.
 
 
 MATH_UNARY_WITHIN_ULP_TEST_DEF(sin, std::sin, 2, 2);
-TEST_CASE("Unit_Device_sin_sinf_Negative_RTC") { NegativeTestRTCWrapper<4>(kSin); }
+TEST_CASE(Unit_Device_sin_sinf_Negative_RTC) { NegativeTestRTCWrapper<4>(kSin); }
 
 MATH_UNARY_WITHIN_ULP_TEST_DEF(cos, std::cos, 2, 2)
-TEST_CASE("Unit_Device_cos_cosf_Negative_RTC") { NegativeTestRTCWrapper<4>(kCos); }
+TEST_CASE(Unit_Device_cos_cosf_Negative_RTC) { NegativeTestRTCWrapper<4>(kCos); }
 
 MATH_UNARY_WITHIN_ULP_TEST_DEF(tan, std::tan, 4, 2)
-TEST_CASE("Unit_Device_tan_tanf_Negative_RTC") { NegativeTestRTCWrapper<4>(kTan); }
+TEST_CASE(Unit_Device_tan_tanf_Negative_RTC) { NegativeTestRTCWrapper<4>(kTan); }
 
 MATH_UNARY_WITHIN_ULP_TEST_DEF(asin, std::asin, 3, 2)
-TEST_CASE("Unit_Device_asin_asinf_Negative_RTC") { NegativeTestRTCWrapper<4>(kAsin); }
+TEST_CASE(Unit_Device_asin_asinf_Negative_RTC) { NegativeTestRTCWrapper<4>(kAsin); }
 
 MATH_UNARY_WITHIN_ULP_TEST_DEF(acos, std::acos, 2, 2)
-TEST_CASE("Unit_Device_acos_acosf_Negative_RTC") { NegativeTestRTCWrapper<4>(kAcos); }
+TEST_CASE(Unit_Device_acos_acosf_Negative_RTC) { NegativeTestRTCWrapper<4>(kAcos); }
 
 MATH_UNARY_WITHIN_ULP_TEST_DEF(atan, std::atan, 2, 2)
-TEST_CASE("Unit_Device_atan_atanf_Negative_RTC") { NegativeTestRTCWrapper<4>(kAtan); }
+TEST_CASE(Unit_Device_atan_atanf_Negative_RTC) { NegativeTestRTCWrapper<4>(kAtan); }
 
 MATH_UNARY_WITHIN_ULP_TEST_DEF(sinh, std::sinh, 3, 2)
-TEST_CASE("Unit_Device_sinh_sinhf_Negative_RTC") { NegativeTestRTCWrapper<4>(kSinh); }
+TEST_CASE(Unit_Device_sinh_sinhf_Negative_RTC) { NegativeTestRTCWrapper<4>(kSinh); }
 
 MATH_UNARY_WITHIN_ULP_TEST_DEF(cosh, std::cosh, 2, 1)
-TEST_CASE("Unit_Device_cosh_coshf_Negative_RTC") { NegativeTestRTCWrapper<4>(kCosh); }
+TEST_CASE(Unit_Device_cosh_coshf_Negative_RTC) { NegativeTestRTCWrapper<4>(kCosh); }
 
 MATH_UNARY_WITHIN_ULP_TEST_DEF(tanh, std::tanh, 2, 1)
-TEST_CASE("Unit_Device_tanh_tanhf_Negative_RTC") { NegativeTestRTCWrapper<4>(kTanh); }
+TEST_CASE(Unit_Device_tanh_tanhf_Negative_RTC) { NegativeTestRTCWrapper<4>(kTanh); }
 
 MATH_UNARY_WITHIN_ULP_TEST_DEF(asinh, std::asinh, 3, 2)
-TEST_CASE("Unit_Device_asinh_asinhf_Negative_RTC") { NegativeTestRTCWrapper<4>(kAsinh); }
+TEST_CASE(Unit_Device_asinh_asinhf_Negative_RTC) { NegativeTestRTCWrapper<4>(kAsinh); }
 
 MATH_UNARY_WITHIN_ULP_TEST_DEF(acosh, std::acosh, 4, 2)
-TEST_CASE("Unit_Device_acosh_acoshf_Negative_RTC") { NegativeTestRTCWrapper<4>(kAcosh); }
+TEST_CASE(Unit_Device_acosh_acoshf_Negative_RTC) { NegativeTestRTCWrapper<4>(kAcosh); }
 
 MATH_UNARY_WITHIN_ULP_TEST_DEF(atanh, std::atanh, 3, 2)
-TEST_CASE("Unit_Device_atanh_atanhf_Negative_RTC") { NegativeTestRTCWrapper<4>(kAtanh); }
+TEST_CASE(Unit_Device_atanh_atanhf_Negative_RTC) { NegativeTestRTCWrapper<4>(kAtanh); }
 
 MATH_UNARY_WITHIN_ULP_TEST_DEF(sinpi, math_reference::sin_pi, 2, 2);
-TEST_CASE("Unit_Device_sinpi_sinpif_Negative_RTC") { NegativeTestRTCWrapper<4>(kSinpi); }
+TEST_CASE(Unit_Device_sinpi_sinpif_Negative_RTC) { NegativeTestRTCWrapper<4>(kSinpi); }
 
 MATH_UNARY_WITHIN_ULP_TEST_DEF(cospi, math_reference::cos_pi, 2, 2);
-TEST_CASE("Unit_Device_cospi_cospif_Negative_RTC") { NegativeTestRTCWrapper<4>(kCospi); }
+TEST_CASE(Unit_Device_cospi_cospif_Negative_RTC) { NegativeTestRTCWrapper<4>(kCospi); }
 
 MATH_BINARY_WITHIN_ULP_TEST_DEF(atan2, std::atan2, 3, 2);
-TEST_CASE("Unit_Device_atan2_atan2f_Negative_RTC") { NegativeTestRTCWrapper<8>(kAtan2); }
+TEST_CASE(Unit_Device_atan2_atan2f_Negative_RTC) { NegativeTestRTCWrapper<8>(kAtan2); }
 
 
 template <typename T>
@@ -88,19 +73,19 @@ __global__ void sincos_kernel(std::pair<T, T>* const ys, const size_t num_xs, T*
 
 template <typename T> std::pair<T, T> sincos(T x) { return {std::sin(x), std::cos(x)}; }
 
-TEST_CASE("Unit_Device_sincos_Accuracy_Positive_float") {
+TEST_CASE(Unit_Device_sincos_Accuracy_Positive_float) {
   UnarySinglePrecisionTest(
       sincos_kernel<float>, sincos<double>,
       PairValidatorBuilderFactory<float>(ULPValidatorBuilderFactory<float>(2)));
 }
 
-TEST_CASE("Unit_Device_sincos_Accuracy_Positive_double") {
+TEST_CASE(Unit_Device_sincos_Accuracy_Positive_double) {
   const auto validator_builder =
       PairValidatorBuilderFactory<double>(ULPValidatorBuilderFactory<double>(2));
   UnaryDoublePrecisionTest(sincos_kernel<double>, sincos<long double>, validator_builder);
 }
 
-TEST_CASE("Unit_Device_sincos_sincosf_Negative_RTC") { NegativeTestRTCWrapper<36>(kSincos); }
+TEST_CASE(Unit_Device_sincos_sincosf_Negative_RTC) { NegativeTestRTCWrapper<36>(kSincos); }
 
 
 template <typename T>
@@ -121,16 +106,16 @@ template <typename T> std::pair<T, T> sincospi(T x) {
   return {math_reference::sin_pi(x), math_reference::cos_pi(x)};
 }
 
-TEST_CASE("Unit_Device_sincospi_Accuracy_Positive_float") {
+TEST_CASE(Unit_Device_sincospi_Accuracy_Positive_float) {
   UnarySinglePrecisionTest(
       sincospi_kernel<float>, sincospi<double>,
       PairValidatorBuilderFactory<float>(ULPValidatorBuilderFactory<float>(2)));
 }
 
-TEST_CASE("Unit_Device_sincospi_Accuracy_Positive_double") {
+TEST_CASE(Unit_Device_sincospi_Accuracy_Positive_double) {
   const auto validator_builder =
       PairValidatorBuilderFactory<double>(ULPValidatorBuilderFactory<double>(2));
   UnaryDoublePrecisionTest(sincospi_kernel<double>, sincospi<long double>, validator_builder);
 }
 
-TEST_CASE("Unit_Device_sincospi_sincospif_Negative_RTC") { NegativeTestRTCWrapper<36>(kSincospi); }
+TEST_CASE(Unit_Device_sincospi_sincospif_Negative_RTC) { NegativeTestRTCWrapper<36>(kSincospi); }

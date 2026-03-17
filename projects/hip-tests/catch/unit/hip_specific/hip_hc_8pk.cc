@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "hip_hc_8pk_negative_kernels_rtc.hh"
 
@@ -45,7 +32,7 @@ __global__ void __hip_hc_add8pk_kernel(char4* out, char4 in1, char4 in2) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device__hip_hc_add8pk_Sanity_Positive") {
+TEST_CASE(Unit_Device__hip_hc_add8pk_Sanity_Positive) {
   const char input1[] = {-0x70, -0x50, -0x30, -0x0f, 0x0, 0x01, 0x10, 0x20, 0x70, 0x7f};
   const char input2[] = {-0x05, -0x11, -0x20, -0x03, 0x0, 0x30, 0x05, 0x33, 0x0f, 0x7a};
   const char reference[] = {-0x75, -0x61, -0x50, -0x12, 0x0, 0x31, 0x15, 0x53, 0x7f, -0x07};
@@ -78,7 +65,7 @@ __global__ void __hip_hc_sub8pk_kernel(char4* out, char4 in1, char4 in2) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device__hip_hc_sub8pk_Sanity_Positive") {
+TEST_CASE(Unit_Device__hip_hc_sub8pk_Sanity_Positive) {
   const char input1[] = {-0x70, -0x50, -0x30, -0x0f, 0x0, 0x30, 0x10, 0x33, 0x70, 0x7a};
   const char input2[] = {-0x05, -0x11, -0x20, -0x03, 0x0, 0x01, 0x05, 0x20, 0x0f, 0x7f};
   const char reference[] = {-0x6b, -0x3f, -0x10, -0x0c, 0x0, 0x2f, 0x0b, 0x13, 0x61, -0x05};
@@ -111,7 +98,7 @@ __global__ void __hip_hc_mul8pk_kernel(char4* out, char4 in1, char4 in2) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device__hip_hc_mul8pk_Sanity_Positive") {
+TEST_CASE(Unit_Device__hip_hc_mul8pk_Sanity_Positive) {
   const char input1[] = {-0x70, -0x50, -0x30, -0x0f, 0x0, 0x01, 0x10, 0x20, 0x70, 0x7f};
   const char input2[] = {0x05, -0x11, 0x22, -0x03, 0x0, 0x30, 0x05, 0x33, 0x0f, 0x7a};
   const char reference[] = {-0x30, 0x50, -0x60, 0x2d, 0x0, 0x30, 0x50, 0x60, -0x70, -0x7a};
@@ -140,7 +127,7 @@ TEST_CASE("Unit_Device__hip_hc_mul8pk_Sanity_Positive") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device__hip_hc_8pk_Negative_Parameters_RTC") {
+TEST_CASE(Unit_Device__hip_hc_8pk_Negative_Parameters_RTC) {
   hiprtcProgram program{};
 
   const auto program_source = GENERATE(kHipHcAdd8pkBasic, kHipHcAdd8pkVector, kHipHcSub8pkBasic,

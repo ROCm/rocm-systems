@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2023-25 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /**
  * @addtogroup hipMemCreate hipMemCreate
@@ -60,7 +44,7 @@ static __global__ void square_kernel(int* Buff) {
  * ------------------------
  *    - HIP_VERSION >= 7.0
  */
-TEST_CASE("Unit_hipMemCreate_BasicAllocateDeAlloc_MultGranularity") {
+TEST_CASE(Unit_hipMemCreate_BasicAllocateDeAlloc_MultGranularity) {
   size_t granularity = 0;
   int deviceId = 0;
   CTX_CREATE();
@@ -107,7 +91,7 @@ TEST_CASE("Unit_hipMemCreate_BasicAllocateDeAlloc_MultGranularity") {
  * ------------------------
  *    - HIP_VERSION >= 7.0
  */
-TEST_CASE("Unit_hipMemCreate_ChkDev2HstMemcpy_ReleaseHdlPostUnmap") {
+TEST_CASE(Unit_hipMemCreate_ChkDev2HstMemcpy_ReleaseHdlPostUnmap) {
   size_t granularity = 0;
   constexpr int N = DATA_SIZE;
   size_t buffer_size = N * sizeof(int);
@@ -176,7 +160,7 @@ TEST_CASE("Unit_hipMemCreate_ChkDev2HstMemcpy_ReleaseHdlPostUnmap") {
  * ------------------------
  *    - HIP_VERSION >= 7.0
  */
-TEST_CASE("Unit_hipMemCreate_ChkDev2HstMemcpy_ReleaseHdlPreUse") {
+TEST_CASE(Unit_hipMemCreate_ChkDev2HstMemcpy_ReleaseHdlPreUse) {
   size_t granularity = 0;
   constexpr int N = DATA_SIZE;
   size_t buffer_size = N * sizeof(int);
@@ -245,7 +229,7 @@ TEST_CASE("Unit_hipMemCreate_ChkDev2HstMemcpy_ReleaseHdlPreUse") {
  * ------------------------
  *    - HIP_VERSION >= 7.0
  */
-TEST_CASE("Unit_hipMemCreate_ChkWithKerLaunch") {
+TEST_CASE(Unit_hipMemCreate_ChkWithKerLaunch) {
   size_t granularity = 0;
   constexpr int N = DATA_SIZE;
   size_t buffer_size = N * sizeof(int);
@@ -318,7 +302,7 @@ TEST_CASE("Unit_hipMemCreate_ChkWithKerLaunch") {
  * ------------------------
  *    - HIP_VERSION >= 7.0
  */
-TEST_CASE("Unit_hipMemCreate_MapNonContiguousChunks") {
+TEST_CASE(Unit_hipMemCreate_MapNonContiguousChunks) {
   size_t granularity = 0;
   constexpr int numOfBuffers = NUM_OF_BUFFERS;
   constexpr int N = DATA_SIZE;
@@ -404,7 +388,7 @@ TEST_CASE("Unit_hipMemCreate_MapNonContiguousChunks") {
  * ------------------------
  *    - HIP_VERSION >= 7.0
  */
-TEST_CASE("Unit_hipMemCreate_ChkWithMemset") {
+TEST_CASE(Unit_hipMemCreate_ChkWithMemset) {
   size_t granularity = 0;
   constexpr int N = DATA_SIZE;
   size_t buffer_size = N * sizeof(int);
@@ -468,7 +452,7 @@ TEST_CASE("Unit_hipMemCreate_ChkWithMemset") {
  * ------------------------
  *    - HIP_VERSION >= 6.1
  */
-TEST_CASE("Unit_hipMemCreate_Negative") {
+TEST_CASE(Unit_hipMemCreate_Negative) {
   size_t granularity = 0;
   int deviceId = 0;
   hipDevice_t device;
@@ -522,7 +506,7 @@ TEST_CASE("Unit_hipMemCreate_Negative") {
   CTX_DESTROY();
 }
 
-TEST_CASE("Unit_hipMemCreate_Capture") {
+TEST_CASE(Unit_hipMemCreate_Capture) {
   CTX_CREATE();
 
   hipMemGenericAllocationHandle_t allocation_handle;

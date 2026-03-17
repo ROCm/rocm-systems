@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "half_precision_common.hh"
 #include "casting_common.hh"
@@ -33,7 +17,7 @@ THE SOFTWARE.
   CAST_KERNEL_DEF(kern_name, Float16, T)                                                           \
   CAST_REF_DEF(kern_name, Float16, T)                                                              \
                                                                                                    \
-  TEST_CASE("Unit_Device_" #kern_name "_Accuracy_Positive") {                                      \
+  TEST_CASE(Unit_Device_##kern_name##_Accuracy_Positive) {                                      \
     Float16 (*ref)(T) = kern_name##_ref;                                                           \
     CastIntRangeTest(kern_name##_kernel, ref, EqValidatorBuilderFactory<Float16>());               \
   }
@@ -282,7 +266,7 @@ CAST_INT2HALF_RN_TEST_DEF(__ushort2half_ru, unsigned short)
   CAST_KERNEL_DEF(kern_name, Float16, T)                                                           \
   CAST_REF_DEF(kern_name, Float16, T)                                                              \
                                                                                                    \
-  TEST_CASE("Unit_Device_" #kern_name "_Accuracy_Positive") {                                      \
+  TEST_CASE(Unit_Device_##kern_name##_Accuracy_Positive) {                                      \
     Float16 (*ref)(T) = kern_name##_ref;                                                           \
     CastIntBruteForceTest(kern_name##_kernel, ref, EqValidatorBuilderFactory<Float16>());          \
   }
@@ -422,7 +406,7 @@ CAST_KERNEL_DEF(__short_as_half, Float16, short)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device___short_as_half_Accuracy_Positive") {
+TEST_CASE(Unit_Device___short_as_half_Accuracy_Positive) {
   Float16 (*ref)(short) = type2_as_type1_ref<Float16, short>;
   CastIntBruteForceTest(__short_as_half_kernel, ref, EqValidatorBuilderFactory<Float16>());
 }
@@ -442,7 +426,7 @@ CAST_KERNEL_DEF(__ushort_as_half, Float16, unsigned short)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Device___ushort_as_half_Accuracy_Positive") {
+TEST_CASE(Unit_Device___ushort_as_half_Accuracy_Positive) {
   Float16 (*ref)(unsigned short) = type2_as_type1_ref<Float16, unsigned short>;
   CastIntBruteForceTest(__ushort_as_half_kernel, ref, EqValidatorBuilderFactory<Float16>());
 }

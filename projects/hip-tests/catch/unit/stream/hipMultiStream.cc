@@ -1,21 +1,9 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 #include <hip_test_common.hh>
 #include <iostream>
 #include <vector>
@@ -36,7 +24,7 @@ __global__ void nKernel(float* y) {
   size_t tid{threadIdx.x};
   y[tid] = y[tid] + 1.0f;
 }
-TEST_CASE("Unit_hipMultiStream_sameDevice") {
+TEST_CASE(Unit_hipMultiStream_sameDevice) {
   constexpr int num_streams{8};
   hipStream_t streams[num_streams];
   float *data[num_streams], *yd, *xd;
@@ -62,7 +50,7 @@ TEST_CASE("Unit_hipMultiStream_sameDevice") {
   REQUIRE(x == Catch::Approx(y));
 }
 
-TEST_CASE("Unit_hipMultiStream_multimeDevice") {
+TEST_CASE(Unit_hipMultiStream_multimeDevice) {
   constexpr int nLoops = 50000;
   constexpr int nStreams = 2;
   std::vector<hipStream_t> streams(nStreams);
