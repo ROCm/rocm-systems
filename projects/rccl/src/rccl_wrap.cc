@@ -26,13 +26,9 @@ THE SOFTWARE.
 #include "enqueue.h"
 #include <algorithm>
 #include "debug.h"
+#include "amdsmi_wrap.h"
 #include "include/graph.h"
 
-#ifdef USE_AMDSMI
-#include "amd_smi/amdsmi.h"
-#else
-#include "rocm_smi/rocm_smi.h"
-#endif
 
 // Use this param to experiment pipelining new data types besides bfloat16
 // Make sure you generate the device code with the new data type (i.e. in generate.py)
@@ -477,7 +473,7 @@ bool rcclUseReduceScatterDirect(struct ncclComm* comm, size_t& msgSize) {
   }
 
   size_t threshold = rcclParamDirectReduceScatterThreshold();
-  if (threshold > -1) { 
+  if (threshold > -1) {
     // Set threshold to 2MiB hard limit
     // NOTE: If the DirectReduceScatterThreshold / hard-limit is increased, ensure TEMP_BUFF_SIZE (init.cc)
     // is increased accordingly -> TEMP_BUFF_SIZE >= 2 * (max enabled msgSize) for headroom.
@@ -749,50 +745,11 @@ ncclResult_t rcclCommSetP2pShiftSize(struct ncclComm* comm) {
 }
 
 int getFirmwareVersion() {
-  uint64_t fw_version = -1;
-
-#ifdef USE_AMDSMI
-  amdsmi_status_t ret;
-  ret = amdsmi_init(AMDSMI_INIT_AMD_GPUS);
-  if (ret != AMDSMI_STATUS_SUCCESS) {
-    ERROR("Could not initialize amd-smi");
+  uint64_t fw_version = 0;
+  ncclResult_t res = amd_smi_getFirmwareVersion(0, &fw_version);
+  if (res != ncclSuccess) {
     return -1;
   }
-
-  uint32_t socket_count = 0;
-  amdsmi_get_socket_handles(&socket_count, nullptr);
-  std::vector<amdsmi_socket_handle> sockets(socket_count);
-  amdsmi_get_socket_handles(&socket_count, sockets.data());
-
-  uint32_t num_gpus_per_socket = 0;
-  amdsmi_get_processor_handles(sockets[0], &num_gpus_per_socket, nullptr);
-  std::vector<amdsmi_processor_handle> processor_handles(num_gpus_per_socket);
-  amdsmi_get_processor_handles(sockets[0], &num_gpus_per_socket, processor_handles.data());
-
-  amdsmi_fw_info_t info;
-  ret = amdsmi_get_fw_info(processor_handles[0], &info);
-  if (ret != AMDSMI_STATUS_SUCCESS) {
-    ERROR("Could not query firmware info using amd-smi");
-    return -1;
-  }
-
-  fw_version = info.fw_info_list[0].fw_version;
-
-#else
-  rsmi_status_t ret;
-  ret = rsmi_init(0);
-  if (ret != RSMI_STATUS_SUCCESS) {
-    ERROR("Could not initialize rocm-smi");
-    return -1;
-  }
-
-  ret = rsmi_dev_firmware_version_get(0, RSMI_FW_BLOCK_MEC, &fw_version);
-  if (ret != RSMI_STATUS_SUCCESS) {
-    ERROR("Could not query firmware info using rocm-smi");
-    return -1;
-  }
-#endif
-
   return fw_version;
 }
 

@@ -1871,14 +1871,6 @@ While typically used from command line, it can be scripted:
     # Combine with custom ROCm root
     rocprofv3 --rocm-root /opt/rocm-6.0 --sdk-version 2.2.0 --sys-trace -- ./app
 
-**Environment integration:**
-
-.. code-block:: bash
-
-    # Use environment variable for version
-    export ROCPROF_SDK_VERSION="2.1.3"
-    rocprofv3 --sdk-version "$ROCPROF_SDK_VERSION" --kernel-trace -- ./app
-
 Agent index
 ++++++++++++++
 
@@ -2125,7 +2117,7 @@ Output prefix keys are useful in multiple use cases but are most helpful when de
    * - ``%nid%``
      - ``%rank%`` if possible, otherwise ``%pid%``
    * - ``%launch_time%``
-     - Launch date and/or time according to ``ROCPROF_TIME_FORMAT``
+     - Launch date and/or time
    * - ``%env{NAME}%``
      - Value of ``NAME`` environment variable (``getenv(NAME)``)
    * - ``$env{NAME}``
