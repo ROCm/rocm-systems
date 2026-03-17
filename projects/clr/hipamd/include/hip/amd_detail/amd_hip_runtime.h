@@ -204,7 +204,7 @@ void hipLaunchKernelGGL(F kernel, const dim3& numBlocks, const dim3& dimBlocks,
   auto k = reinterpret_cast<void*>(kernel);
 
   if constexpr (std::is_same_v<F, void (*)(Args...)>) {
-    auto ptrArgsArr = std::array<void*, sizeof...(Args)>{static_cast<void*>(&args)...};
+    std::array<void*, sizeof...(Args)> ptrArgsArr{static_cast<void*>(&args)...};
     hipExtLaunchKernel(k, numBlocks, dimBlocks, ptrArgsArr.data(), sharedMemBytes, stream,
                        nullptr, nullptr, 0);
   } else {
