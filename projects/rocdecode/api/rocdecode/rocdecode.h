@@ -230,7 +230,8 @@ typedef struct _RocdecReconfigureDecoderInfo {
     uint32_t target_height;       /**< IN: Post Processed output height */
     uint32_t num_decode_surfaces; /**< IN: Maximum number of internal decode surfaces */
     uint32_t bit_depth_minus_8;   /**< IN: The Value "BitDepth minus 8" */
-    uint32_t reserved_1[11];      /**< Reserved for future use. Set to Zero */
+    rocDecVideoSurfaceFormat output_format; /**< IN: rocDecVideoSurfaceFormat_XXX */
+    uint32_t reserved_1[10];      /**< Reserved for future use. Set to Zero */
     struct {
         int16_t left;
         int16_t top;

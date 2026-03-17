@@ -375,6 +375,7 @@ rocDecStatus VaapiVideoDecoder::ReconfigureDecoder(RocdecReconfigureDecoderInfo 
     decoder_create_info_.target_height = reconfig_params->target_height;
     decoder_create_info_.target_width = reconfig_params->target_width;
     decoder_create_info_.bit_depth_minus_8 = reconfig_params->bit_depth_minus_8;
+    decoder_create_info_.output_format = reconfig_params->output_format;
 
     rocDecStatus rocdec_status;
     if (create_va_config) {
@@ -480,21 +481,29 @@ rocDecStatus VaapiVideoDecoder::CreateSurfaces() {
     surf_attrib.value.type = VAGenericValueTypeInteger;
     uint32_t surface_format;
     switch (decoder_create_info_.chroma_format) {
-        case rocDecVideoChromaFormat_Monochrome:
+        case rocDecVideoChromaFormat_Monochrome: {
             surface_format = VA_RT_FORMAT_YUV400;
             surf_attrib.value.value.i = VA_FOURCC_Y800;
+        }
             break;
-        case rocDecVideoChromaFormat_420:
-            if (decoder_create_info_.bit_depth_minus_8 == 2) {
-                surface_format = VA_RT_FORMAT_YUV420_10;
-                surf_attrib.value.value.i = VA_FOURCC_P010;
-            } else if (decoder_create_info_.bit_depth_minus_8 == 4) {
-                surface_format = VA_RT_FORMAT_YUV420_12;
-                surf_attrib.value.value.i = VA_FOURCC_P012;
-            } else {
+        case rocDecVideoChromaFormat_420: {
+            // Special case for 8-bit output requirement even when the stream is 10-bit and above
+            if (decoder_create_info_.output_format == rocDecVideoSurfaceFormat_NV12) {
                 surface_format = VA_RT_FORMAT_YUV420;
                 surf_attrib.value.value.i = VA_FOURCC_NV12;
+            } else {
+                if (decoder_create_info_.bit_depth_minus_8 == 2) {
+                    surface_format = VA_RT_FORMAT_YUV420_10;
+                    surf_attrib.value.value.i = VA_FOURCC_P010;
+                } else if (decoder_create_info_.bit_depth_minus_8 == 4) {
+                    surface_format = VA_RT_FORMAT_YUV420_12;
+                    surf_attrib.value.value.i = VA_FOURCC_P012;
+                } else {
+                    surface_format = VA_RT_FORMAT_YUV420;
+                    surf_attrib.value.value.i = VA_FOURCC_NV12;
+                }
             }
+        }
             break;
         case rocDecVideoChromaFormat_422:
             surface_format = VA_RT_FORMAT_YUV422;

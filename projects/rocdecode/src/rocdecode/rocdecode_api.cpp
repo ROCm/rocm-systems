@@ -28,6 +28,47 @@ namespace rocdecode {
 RocDecLogger logger;
 
 /*****************************************************************************************************/
+//! \fn static void AdjustOutputFormatToBitDepth(rocDecVideoSurfaceFormat &output_format, uint32_t bit_depth_minus_8)
+//! Validates that the bit depth of output_format does not exceed bit_depth_minus_8 + 8. A 16-bit
+//! output format requires bit_depth_minus_8 > 0 since its bit depth (16) would exceed that of 8-bit
+//! content. An 8-bit output format is always valid regardless of bit_depth_minus_8. If an incompatible
+//! 16-bit format is detected for 8-bit content, a warning is logged and output_format is set to the
+//! corresponding 8-bit format.
+/*****************************************************************************************************/
+static void ValidateOutputFormat(rocDecVideoSurfaceFormat &output_format, uint32_t bit_depth_minus_8) {
+    if (bit_depth_minus_8 > 0) {
+        return; // 16-bit output formats are valid for content with bit depth > 8
+    }
+
+    // Content is 8-bit; a 16-bit output format would exceed the content bit depth.
+    rocDecVideoSurfaceFormat adjusted = output_format;
+    switch (output_format) {
+        case rocDecVideoSurfaceFormat_P016:
+            adjusted = rocDecVideoSurfaceFormat_NV12;
+            break;
+        case rocDecVideoSurfaceFormat_YUV444_16Bit:
+            adjusted = rocDecVideoSurfaceFormat_YUV444;
+            break;
+        case rocDecVideoSurfaceFormat_YUV420_16Bit:
+            adjusted = rocDecVideoSurfaceFormat_YUV420;
+            break;
+        case rocDecVideoSurfaceFormat_YUV422_16Bit:
+            adjusted = rocDecVideoSurfaceFormat_YUV422;
+            break;
+        default:
+            break; // already an 8-bit format, no adjustment needed
+    }
+
+    if (adjusted != output_format) {
+        logger.WarningLog(MakeMsg("output_format (" + TOSTR(static_cast<uint32_t>(output_format)) +
+                                  ") bit depth exceeds content bit depth (bit_depth_minus_8=" +
+                                  TOSTR(bit_depth_minus_8) + "). Adjusting output_format to " +
+                                  TOSTR(static_cast<uint32_t>(adjusted)) + "."));
+        output_format = adjusted;
+    }
+}
+
+/*****************************************************************************************************/
 //! \fn rocDecStatus ROCDECAPI rocDecCreateDecoder(rocDecDecoderHandle *decoder_handle, RocDecoderCreateInfo *decoder_create_info)
 //! Create the decoder object based on decoder_create_info. A handle to the created decoder is returned
 /*****************************************************************************************************/
@@ -39,6 +80,9 @@ rocDecCreateDecoder(rocDecDecoderHandle *decoder_handle, RocDecoderCreateInfo *d
         FunctionExitLog(logger);
         return ROCDEC_INVALID_PARAMETER;
     }
+
+    ValidateOutputFormat(decoder_create_info->output_format, decoder_create_info->bit_depth_minus_8);
+
     rocDecDecoderHandle handle = nullptr;
     try {
         handle = new DecHandle(*decoder_create_info);
@@ -165,6 +209,9 @@ rocDecReconfigureDecoder(rocDecDecoderHandle decoder_handle, RocdecReconfigureDe
         return ROCDEC_INVALID_PARAMETER;
     }
     auto handle = static_cast<DecHandle *>(decoder_handle);
+
+    ValidateOutputFormat(reconfig_params->output_format, reconfig_params->bit_depth_minus_8);
+
     rocDecStatus ret;
     try {
         ret = handle->roc_decoder_->ReconfigureDecoder(reconfig_params);
