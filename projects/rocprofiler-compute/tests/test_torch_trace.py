@@ -35,7 +35,11 @@ from utils.rocpd_data import (
     MARKER_API_TRACE_QUERY,
     convert_dbs_to_csv,
 )
-from utils.utils import process_torch_trace_output
+from utils.utils import (
+    build_call_trees_with_kernel_ids,
+    process_torch_trace_output,
+    write_torch_trace_operator_csvs,
+)
 
 GUID = "abc-1234-def"
 
@@ -390,8 +394,35 @@ def test_torch_trace_output_same_for_rocpd_and_csv():
     write_csv_layout(csv_dir)
 
     kernel_top_df = build_kernel_top_df()
-    process_torch_trace_output(rocpd_dir, kernel_top_df)
-    process_torch_trace_output(csv_dir, kernel_top_df)
+    rocpd_output = process_torch_trace_output(rocpd_dir)
+    csv_output = process_torch_trace_output(csv_dir)
+    assert rocpd_output is not None
+    assert csv_output is not None
+    rocpd_df, rocpd_trace_path = rocpd_output
+    csv_df, csv_trace_path = csv_output
+
+    write_torch_trace_operator_csvs(rocpd_df, rocpd_trace_path)
+    write_torch_trace_operator_csvs(csv_df, csv_trace_path)
+    rocpd_trees = build_call_trees_with_kernel_ids(rocpd_df, kernel_top_df)
+    csv_trees = build_call_trees_with_kernel_ids(csv_df, kernel_top_df)
+
+    for trees in (rocpd_trees, csv_trees):
+        assert "test.py:10" in trees
+        assert "test.py:15" in trees
+
+        linear_root = trees["test.py:10"]
+        assert linear_root.kernel_launches == 2
+        assert "nn.Module.Linear.forward" in linear_root.children
+        linear_node = linear_root.children["nn.Module.Linear.forward"]
+        assert "kernel_gemm" in linear_node.kernels
+        assert linear_node.kernels["kernel_gemm"].launches == 2
+
+        mm_root = trees["test.py:15"]
+        assert mm_root.kernel_launches == 1
+        assert "torch.mm" in mm_root.children
+        mm_node = mm_root.children["torch.mm"]
+        assert "kernel_mm" in mm_node.kernels
+        assert mm_node.kernels["kernel_mm"].launches == 1
 
     rocpd_results = read_operator_csvs(Path(rocpd_dir) / "torch_trace")
     csv_results = read_operator_csvs(Path(csv_dir) / "torch_trace")

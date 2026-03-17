@@ -32,7 +32,11 @@ from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from utils import file_io, parser, tty
 from utils.kernel_name_shortener import kernel_name_shortener
 from utils.logger import console_error, console_log, demarcate
-from utils.utils import process_torch_trace_output
+from utils.utils import (
+    build_call_trees_with_kernel_ids,
+    process_torch_trace_output,
+    write_torch_trace_operator_csvs,
+)
 
 
 class cli_analysis(OmniAnalyze_Base):
@@ -84,12 +88,16 @@ class cli_analysis(OmniAnalyze_Base):
 
             if getattr(args, "list_torch_operators", False):
                 kernel_top_df = pd.read_csv(Path(path_info[0]) / "pmc_kernel_top.csv")
-                file_data = process_torch_trace_output(
-                    path_info[0],
+                consolidated_df, torch_trace_path = process_torch_trace_output(
+                    path_info[0]
+                )
+                write_torch_trace_operator_csvs(consolidated_df, torch_trace_path)
+                call_trees = build_call_trees_with_kernel_ids(
+                    consolidated_df,
                     kernel_top_df=kernel_top_df,
                     kernel_verbose=args.kernel_verbose,
                 )
-                tty.list_torch_operators(path_info[0], file_data)
+                tty.list_torch_operators(path_info[0], call_trees)
                 sys.exit(0)
 
             # demangle and overwrite original 'Kernel_Name'
