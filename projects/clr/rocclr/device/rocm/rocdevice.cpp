@@ -3641,7 +3641,7 @@ void Device::HiddenHeapInit(const VirtualGPU& gpu) {
 
 // ================================================================================================
 uint32_t Device::SdmaEngineAllocator::AllocateEngine(VirtualGPU* vgpu, HwQueueEngine engine_type,
-                                                      hsa_agent_t dstAgent, hsa_agent_t srcAgent) {
+                                                      hsa_agent_t peerAgent, hsa_agent_t copyAgent) {
   std::scoped_lock lock(lock_);
 
   // Get valid engine mask based on operation type (read vs write)
@@ -3691,10 +3691,10 @@ uint32_t Device::SdmaEngineAllocator::AllocateEngine(VirtualGPU* vgpu, HwQueueEn
   hsa_status_t status = HSA_STATUS_SUCCESS;
 
   // Query current engine status
-  status = Hsa::memory_copy_engine_status(dstAgent, srcAgent, &freeEngineMask);
+  status = Hsa::memory_copy_engine_status(peerAgent, copyAgent, &freeEngineMask);
   if (status == HSA_STATUS_SUCCESS) {
     // Query preferred (high-bandwidth) engines
-    status = Hsa::memory_get_preferred_copy_engine(dstAgent, srcAgent, &preferredMask);
+    status = Hsa::memory_get_preferred_copy_engine(peerAgent, copyAgent, &preferredMask);
   }
 
   // Constrain to valid engines
