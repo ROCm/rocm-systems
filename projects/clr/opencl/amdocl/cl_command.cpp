@@ -87,6 +87,8 @@ RUNTIME_ENTRY_RET(cl_command_queue, clCreateCommandQueueWithProperties,
   uint queueSize = amdDevice.info().queueOnDevicePreferredSize_;
   uint queueRTCUs = amd::CommandQueue::RealTimeDisabled;
   amd::CommandQueue::Priority priority = amd::CommandQueue::Priority::Normal;
+  int32_t queueonDeviceProperty = amdDevice.info().queueOnDeviceProperties_;
+  int32_t queueProperty = amdDevice.info().queueProperties_;
   if (p != NULL)
     while (p->name != 0) {
       switch (p->name) {
@@ -94,7 +96,12 @@ RUNTIME_ENTRY_RET(cl_command_queue, clCreateCommandQueueWithProperties,
           // FIXME_lmoriche: See comment above.
           // properties = p->value.properties;
           properties = static_cast<cl_command_queue_properties>(p->value.raw);
-          if (properties == CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE) {
+          if ((int32_t) properties < 0) {
+            *not_null(errcode_ret) = CL_INVALID_VALUE;
+            return (cl_command_queue)0;
+          }
+          else if ((properties == CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE) &&
+            !(properties & queueProperty)) { 
             *not_null(errcode_ret) = CL_INVALID_QUEUE_PROPERTIES;
             return (cl_command_queue)0;
           }
@@ -113,8 +120,15 @@ RUNTIME_ENTRY_RET(cl_command_queue, clCreateCommandQueueWithProperties,
             queueRTCUs = p->value.size;
           }
           break;
+        case CL_QUEUE_ON_DEVICE:
+          if((properties == CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE) &&
+            !(properties & queueonDeviceProperty)) {
+            *not_null(errcode_ret) = CL_INVALID_QUEUE_PROPERTIES;
+            return (cl_command_queue)0;
+          }
+          break;
         default:
-          *not_null(errcode_ret) = CL_INVALID_QUEUE_PROPERTIES;
+          *not_null(errcode_ret) = CL_INVALID_VALUE;
           LogWarning("invalid property name");
           return (cl_command_queue)0;
       }

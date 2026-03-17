@@ -1556,17 +1556,30 @@ RUNTIME_ENTRY(cl_int, clSetKernelArg,
   if (((arg_value == NULL) && !is_local && (desc.type_ != T_POINTER)) ||
       ((arg_value != NULL) && is_local)) {
     as_amd(kernel)->parameters().reset(static_cast<size_t>(arg_index));
+    if (desc.type_ == T_SAMPLER) {
+      return CL_INVALID_SAMPLER;
+    }
     return CL_INVALID_ARG_VALUE;
   }
   if (!is_local && (desc.type_ == T_POINTER) && (arg_value != NULL)) {
     cl_mem memObj = *static_cast<const cl_mem*>(arg_value);
     amd::RuntimeObject* pObject = as_amd(memObj);
-    if (NULL != memObj && amd::RuntimeObject::ObjectTypeMemory != pObject->objectType()) {
-      as_amd(kernel)->parameters().reset(static_cast<size_t>(arg_index));
-      return CL_INVALID_MEM_OBJECT;
+    amd::Memory* pMem = as_amd(memObj);
+    if (NULL != memObj) {
+      if (amd::RuntimeObject::ObjectTypeMemory != pObject->objectType()) {
+        as_amd(kernel)->parameters().reset(static_cast<size_t>(arg_index));
+        return CL_INVALID_MEM_OBJECT;
+      }
+      else {
+        if (((desc.accessQualifier_ == CL_KERNEL_ARG_ACCESS_WRITE_ONLY) && 
+          (pMem->getMemFlags() == CL_MEM_READ_ONLY)) ||
+          ((desc.accessQualifier_ == CL_KERNEL_ARG_ACCESS_READ_ONLY) && 
+          (pMem->getMemFlags() == CL_MEM_WRITE_ONLY))){
+            as_amd(kernel)->parameters().reset(static_cast<size_t>(arg_index));
+            return CL_INVALID_ARG_VALUE;
+        }
+      }
     }
-  } else if ((desc.type_ == T_SAMPLER) && !is_valid(*static_cast<const cl_sampler*>(arg_value))) {
-    return CL_INVALID_SAMPLER;
   } else if (desc.type_ == T_QUEUE) {
     cl_command_queue queue = *static_cast<const cl_command_queue*>(arg_value);
     if (!is_valid(queue)) {

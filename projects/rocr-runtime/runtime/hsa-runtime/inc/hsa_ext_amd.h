@@ -68,9 +68,10 @@
  * - 1.15 - hsa_amd_register_system_event_handler: HSA_AMD_SYSTEM_SHUTDOWN
  * - 1.16 - hsa_amd_counted_queue APIs
  * - 1.17 - hsa_amd_memory_async_batch_copy
+ * - 1.18 - hsa_amd_pointer_info: Added alloc_flags field to hsa_amd_pointer_info_t
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 17
+#define HSA_AMD_INTERFACE_VERSION_MINOR 18
 
 #ifdef __cplusplus
 extern "C" {
@@ -2618,13 +2619,50 @@ typedef enum {
 } hsa_amd_pointer_type_t;
 
 /**
+ * @brief Allocation flags reported by hsa_amd_pointer_info.
+ *
+ * These flags describe properties of the memory allocation as reported by
+ * the kernel driver.  The value of this attribute is a bitmask.
+ */
+typedef enum hsa_amd_pointer_info_alloc_flag_s {
+  /**
+   * Memory was allocated with executable permission.
+   */
+  HSA_AMD_POINTER_INFO_ALLOC_FLAG_EXECUTABLE = (1 << 0),
+  /**
+   * Memory was allocated as physically contiguous.
+   */
+  HSA_AMD_POINTER_INFO_ALLOC_FLAG_CONTIGUOUS = (1 << 1),
+  /**
+   * Memory is non-paged (pinned/page-locked).
+   */
+  HSA_AMD_POINTER_INFO_ALLOC_FLAG_NONPAGED = (1 << 2),
+  /**
+   * Memory has read-only access.
+   */
+  HSA_AMD_POINTER_INFO_ALLOC_FLAG_READONLY = (1 << 3),
+  /**
+   * Memory is accessible by the host CPU.
+   */
+  HSA_AMD_POINTER_INFO_ALLOC_FLAG_HOST_ACCESS = (1 << 4),
+  /**
+   * Memory supports full system-scope atomic operations.
+   */
+  HSA_AMD_POINTER_INFO_ALLOC_FLAG_ATOMIC_FULL = (1 << 5),
+  /**
+   * Memory supports partial (PCIe) atomic operations.
+   */
+  HSA_AMD_POINTER_INFO_ALLOC_FLAG_ATOMIC_PARTIAL = (1 << 6),
+} hsa_amd_pointer_info_alloc_flag_t;
+
+/**
  * @brief Describes a memory allocation known to ROCr.
  * Within a ROCr major version this structure can only grow.
  */
 typedef struct hsa_amd_pointer_info_s {
   /*
   Size in bytes of this structure.  Used for version control within a major ROCr
-  revision.  Set to sizeof(hsa_amd_pointer_t) prior to calling
+  revision.  Set to sizeof(hsa_amd_pointer_info_t) prior to calling
   hsa_amd_pointer_info.  If the runtime supports an older version of pointer
   info then size will be smaller on return.  Members starting after the return
   value of size will not be updated by hsa_amd_pointer_info.
@@ -2676,6 +2714,15 @@ typedef struct hsa_amd_pointer_info_s {
   HSA_EXT_POINTER_TYPE_UNKNOWN.
   */
   bool registered;
+
+  /*
+  Contains a bitmask of hsa_amd_pointer_info_alloc_flag_t values.
+  Reports the allocation property flags for the memory as reported by the
+  kernel driver.  This field is not meaningful if the type of the allocation
+  is HSA_EXT_POINTER_TYPE_UNKNOWN.
+  Added in version 1.18.
+  */
+  uint32_t alloc_flags;
 } hsa_amd_pointer_info_t;
 
 /**
