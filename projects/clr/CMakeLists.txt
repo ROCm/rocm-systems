@@ -38,6 +38,8 @@ if (AMD_COMPUTE_WIN)
     message("Public Compute Windows build path: ${AMD_COMPUTE_WIN}, SC: ${AMD_SC_PATH}, LibElf: ${AMD_LIBELF_PATH}")
 endif()
 
+# add_compile_options(-g -fno-omit-frame-pointer -fno-inline-functions-called-once)
+
 option(CLR_BUILD_HIP "Build HIP" OFF)
 option(CLR_BUILD_OCL "Build OCL" OFF)
 option(USE_NEW_HOSTCALL_IMPL
@@ -47,6 +49,14 @@ option(USE_NEW_HOSTCALL_IMPL
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE "Release")
 endif()
+
+# Optional custom HSA runtime (rocr-runtime) install prefix. When set, its
+# include directory is added globally for all projects.
+set(CUSTOM_HSA_RUNTIME_PATH "" CACHE PATH "Path to a custom rocr-runtime install prefix")
+if(CUSTOM_HSA_RUNTIME_PATH)
+    include_directories(${CUSTOM_HSA_RUNTIME_PATH}/include)
+endif()
+
 
 #############
 # Build steps

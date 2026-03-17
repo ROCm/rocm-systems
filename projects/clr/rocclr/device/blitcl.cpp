@@ -263,12 +263,12 @@ const char* HipExtraSourceCode = BLIT_KERNELS(
 
     __kernel void __amd_rocclr_streamOpsIncrement(__global uint* ptrInt, __global ulong* ptrUlong,
                                                   ulong value) {
-      __amd_streamOpsIncrement(ptrInt, ptrUlong, value);
+      //__amd_streamOpsIncrement(ptrInt, ptrUlong, value);
     }
 
     __kernel void __amd_rocclr_streamOpsDecrement(__global uint* ptrInt, __global ulong* ptrUlong,
                                                   ulong value) {
-      __amd_streamOpsDecrement(ptrInt, ptrUlong, value);
+      // __amd_streamOpsDecrement(ptrInt, ptrUlong, value);
     }
 
     __kernel void __amd_rocclr_streamOpsWait(__global uint* ptrInt, __global ulong* ptrUlong,
@@ -291,12 +291,12 @@ const char* HipExtraSourceCodeNoGWS = BLIT_KERNELS(
 
     __kernel void __amd_rocclr_streamOpsIncrement(__global uint* ptrInt, __global ulong* ptrUlong,
                                                   ulong value) {
-      __amd_streamOpsIncrement(ptrInt, ptrUlong, value);
+      //__amd_streamOpsIncrement(ptrInt, ptrUlong, value);
     }
 
     __kernel void __amd_rocclr_streamOpsDecrement(__global uint* ptrInt, __global ulong* ptrUlong,
                                                   ulong value) {
-      __amd_streamOpsDecrement(ptrInt, ptrUlong, value);
+      // __amd_streamOpsDecrement(ptrInt, ptrUlong, value);
     }
 
     __kernel void __amd_rocclr_streamOpsWait(__global uint* ptrInt, __global ulong* ptrUlong,

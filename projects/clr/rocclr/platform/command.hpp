@@ -333,6 +333,7 @@ class Command : public Event {
   const std::string** capturedKernelName_ = nullptr;  //!< Kernel under capture
  protected:
   bool cpu_wait_ = false;  //!< If true, then the command was issued for CPU/GPU sync
+  bool cloned_ = false;  //!< If true, then the command was cloned
 
   //! The Events that need to complete before this command is submitted.
   EventWaitList eventWaitList_;
@@ -366,6 +367,12 @@ class Command : public Event {
   }
 
  public:
+  virtual Command *Clone() {
+    return nullptr;
+  }
+
+  bool isCloned() const { return cloned_; }
+
   //! Returns AQL buffer state
   static void ReleaseSysmemPool() {
     if (command_pool_ != nullptr) {
@@ -441,6 +448,10 @@ class Command : public Event {
   //! Return the list of events this command needs to wait on before dispatch
   const EventWaitList& eventWaitList() const { return eventWaitList_; }
 
+  void clearEventWaitList() {
+    eventWaitList_.clear();
+  }
+
   //! Update with the list of events this command needs to wait on before dispatch
   void updateEventWaitList(const EventWaitList& waitList) {
     eventWaitList_.reserve(eventWaitList_.size() + waitList.size());
@@ -448,6 +459,15 @@ class Command : public Event {
       event->retain();
       eventWaitList_.push_back(event);
     }
+  }
+
+  std::string Xstring() const {
+    std::string s("Cmd: ");
+    s += amd::activity_prof::getOclCommandKindString(type());
+    if (capturedKernelName_) {
+      s += " kernel: " + **capturedKernelName_;
+    }
+    return s;
   }
 
   //! Return this command's OpenCL type.
@@ -790,6 +810,15 @@ class WriteMemoryCommand : public OneMemoryArgCommand {
   amd::CopyMetadata copyMetadata_;
 
  public:
+  Command *Clone() override {
+    auto cmd = new WriteMemoryCommand(*queue(), type(), eventWaitList_, 
+        *memory_, origin_, size_, hostPtr_, rowPitch_, slicePitch_,
+        copyMetadata_);
+    cmd->bufRect_ = bufRect_;
+    cmd->hostRect_ = hostRect_;
+    return cmd;
+  }
+
   WriteMemoryCommand(HostQueue& queue, cl_command_type cmdType, const EventWaitList& eventWaitList,
                      Memory& memory, Coord3D origin, Coord3D size, const void* hostPtr,
                      size_t rowPitch = 0, size_t slicePitch = 0,
@@ -910,6 +939,14 @@ class FillMemoryCommand : public OneMemoryArgCommand {
   size_t patternSize_;               //!< Pattern size
 
  public:
+
+  Command *Clone() override {
+    auto cmd = new FillMemoryCommand(*queue(), type(), eventWaitList_, 
+        *memory_, (const void *)pattern_, patternSize_, origin_,
+        size_, surface_);
+    return cmd;
+  }
+
   FillMemoryCommand(HostQueue& queue, cl_command_type cmdType, const EventWaitList& eventWaitList,
                     Memory& memory, const void* pattern, size_t patternSize, const Coord3D& origin,
                     const Coord3D& size, const Coord3D& surface)
@@ -1087,6 +1124,13 @@ class CopyMemoryCommand : public TwoMemoryArgsCommand {
   amd::CopyMetadata copyMetadata_;
 
  public:
+
+  Command *Clone() override {
+    auto cmd = new CopyMemoryCommand(*queue(), type(), eventWaitList_, 
+        *memory1_, *memory2_, srcOrigin_, dstOrigin_, size_, copyMetadata_);
+    return cmd;
+  }
+
   CopyMemoryCommand(HostQueue& queue, cl_command_type cmdType, const EventWaitList& eventWaitList,
                     Memory& srcMemory, Memory& dstMemory, Coord3D srcOrigin, Coord3D dstOrigin,
                     Coord3D size, amd::CopyMetadata copyMetadata = amd::CopyMetadata())
@@ -1490,12 +1534,33 @@ class NDRangeKernelCommand : public Command {
   uint32_t numWorkgroups_;   //!< Total number of workgroups in the current launch
   DynDataPrefetchConfig dynDataPrefetchConfig_;  //!< Dynamic data prefetch configuration
 
+  uint32_t numUsages_ = 0;
+
  public:
   enum {
     CooperativeGroups = 0x01,
     CooperativeMultiDeviceGroups = 0x02,
     AnyOrderLaunch = 0x04,
   };
+
+  uint32_t getNumUsages() const {
+    return numUsages_;
+  }
+
+  Command *Clone() override {
+    auto cmd = new NDRangeKernelCommand(*queue(), eventWaitList_, kernel_,
+        sizes_, sharedMemBytes_, extraParam_, gridId_, numGrids_,
+        prevGridSum_, allGridSum_, firstDevice_, /*forceProfiling*/false);
+    cmd->parameters_ = parameters_;
+    cmd->numWorkgroups_ = numWorkgroups_;
+    cmd->profilingInfo_ = profilingInfo_;
+    cmd->profilingInfo_.clear();
+    cmd->cloned_ = true;
+    cmd->numUsages_ = ++numUsages_;
+
+    // XPUT("Cloning %p command eventWaitList_ %d", this, (int)eventWaitList_.size());
+    return cmd;
+  }
 
   //! Construct an ExecuteKernel command
   NDRangeKernelCommand(HostQueue& queue, const EventWaitList& eventWaitList, Kernel& kernel,

@@ -79,7 +79,7 @@ set(ENV{NCCL_USE_CMAKE} "1")
 include(cmake/NcclCompat.cmake)
 rccl_define_nccl_compat_options()
 
-option(BUILD_ADDRESS_SANITIZER                 "Enable address sanitizer"                      ${RCCL_DEFAULT_BUILD_ADDRESS_SANITIZER})
+option(BUILD_ADDRESS_SANITIZER                 "Enable address sanitizer"                      OFF)
 option(BUILD_BFD                               "Enable custom backtrace (if bfd.h exists)"     OFF)
 option(BUILD_LOCAL_GPU_TARGET_ONLY             "Build only for GPUs detected on this machine"  OFF)
 option(BUILD_SHARED_LIBS                       "Build as shared library"                       ON)
@@ -103,7 +103,7 @@ option(ROCTX                                   "Enable ROCTX"                   
 option(TIMETRACE                               "Enable time-trace during compilation"          OFF)
 option(TRACE                                   "Enable additional tracing"                     OFF)
 option(QP_TRACKING                             "Enable per-device QP tracking"                 OFF)
-option(FAULT_INJECTION                         "Enable fault injection"                        ON)
+option(FAULT_INJECTION                         "Enable fault injection"                        OFF)
 option(QUIET_WARNINGS                          "Supress compiler warnings"                     OFF)
 option(DWORDX4_INTRINSICS                      "Turn off compilation with dwordx4 intrinsics"  ON)
 option(ENABLE_ROCSHMEM                         "Link librocshmem.a into librccl.so (full rocSHMEM device+host integration)" OFF)
@@ -114,20 +114,9 @@ option(ENABLE_WARP_SPEED                       "Enable WARP_SPEED optimizations"
 # Default GPU architectures to build
 #==================================================================================================
 set(DEFAULT_GPUS
-      gfx906
-      gfx908
-      gfx90a
-      gfx942
+#      gfx942
       gfx950
-      gfx1030
-      gfx1100
-      gfx1101
-      gfx1102
-      gfx1151
-      gfx1200
-      gfx1201
-      gfx1250)
-
+)
 # Load CMake modules
 #==================================================================================================
 include(CheckIncludeFiles)

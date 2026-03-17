@@ -54,6 +54,7 @@ if (NOT DEFINED TARGET_DEVICES)
                       "gfx1200;gfx1201")
 endif()
 set( TARGET_DEVICES ${TARGET_DEVICES} CACHE STRING "Build targets" FORCE )
+# set( TARGET_DEVICES "gfx950")
 
 if(${CMAKE_VERBOSE_MAKEFILE})
   get_property(clang_path TARGET clang PROPERTY LOCATION)

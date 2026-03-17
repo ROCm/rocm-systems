@@ -19,6 +19,14 @@
 #include <unistd.h>
 #endif
 
+#define OKOK //fprintf(stderr, "%s:%d\n", __FILE__, __LINE__);
+#define XPUT(fmt, ...) fprintf(stderr, fmt"\n", ##__VA_ARGS__)
+
+// #define NEW_MARKER(...) [&](){ \
+//         auto X = new amd::Marker(__VA_ARGS__); \
+//         X->ss_debug = std::string(__FILE__) + ":" + std::to_string(__LINE__); \
+//         return X; }() 
+
 namespace amd { /*@{*/
 
 enum LogLevel {
@@ -240,6 +248,9 @@ inline void warning(const char* msg) { amd::report_warning(msg); }
   } while (false)
 
 #else /*CL_LOG*/
+
+#define IsLogEnabled(level, mask) false
+
 #define ClPrint(level, mask, format, ...) (void)(0)
 #define ClCondPrint(level, mask, condition, format, ...) (void)(0)
 #define HIPPrintDuration(level, mask, startTimeUs, format, ...) (void)(0)

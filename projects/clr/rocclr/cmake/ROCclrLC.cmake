@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: MIT
 
-find_package(amd_comgr 2.9 CONFIG
+find_package(amd_comgr 3.0.0 CONFIG
   PATHS
     ${ROCM_PATH}
     ${ROCM_INSTALL_PATH}
@@ -11,7 +11,7 @@ find_package(amd_comgr 2.9 CONFIG
     lib/cmake/amd_comgr)
 
 if (NOT amd_comgr_FOUND)
-  find_package(amd_comgr 3.0 REQUIRED CONFIG
+  find_package(amd_comgr 3.0.0 REQUIRED CONFIG
     PATHS
       ${ROCM_PATH}
       ${ROCM_INSTALL_PATH}
