@@ -23,6 +23,7 @@ jobs:
               - 'projects/rocprofiler-systems/**'
 
   format-rocprofiler-compute:
+    needs: check-changes
     if: ${{ needs.check-changes.outputs.rocprofiler-compute == 'true' }}
     runs-on: ubuntu-24.04
     env:
