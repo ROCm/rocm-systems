@@ -824,12 +824,44 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
 
 #if HIP_VERSION >= 50221310
   if (cudaGraphLaunches >= 1) {
+    // HIP (and CUDA) graph limitation: in single-process multi-GPU mode (-g N),
+    // graph nodes are associated with the calling thread's current device at
+    // capture time, not the stream's device. RCCL internally calls cudaSetDevice()
+    // per communicator during ncclGroupEnd, so graph nodes are captured correctly.
+    //
+    // Two internal IDs control graph execution:
+    //   - instantiateDeviceId: recorded from the calling thread's current device
+    //     at cudaGraphInstantiate() time.
+    //   - launchStreamDeviceId: the device that owns the stream passed to
+    //     cudaGraphLaunch().
+    //
+    // When instantiateDeviceId != launchStreamDeviceId, the runtime takes a
+    // fallback (TOPOORDER) path that crashes on HIP (SIGSEGV at 0x1b8) and
+    // produces silent data corruption on CUDA.
+    //
+    // Example with -g 8 (8 GPUs, single process):
+    //   ncclGroupEnd -> doLaunches calls cudaSetDevice(7) last during capture.
+    //   Without fix:
+    //     cudaGraphInstantiate(graph[0]) -> instantiateDeviceId = 7 (wrong)
+    //     cudaGraphLaunch(graph[0], stream[0]) -> launchStreamDeviceId = 0
+    //     7 != 0 -> fallback path -> SIGSEGV on HIP
+    //   With fix:
+    //     cudaSetDevice(0); cudaGraphInstantiate(graph[0]) -> instantiateDeviceId = 0
+    //     cudaSetDevice(0); cudaGraphLaunch(graph[0], stream[0]) -> launchStreamDeviceId = 0
+    //     0 == 0 -> normal path -> OK
+
     // End cuda graph capture
     for (int i=0; i<args->nGpus; i++) {
+#ifdef __HIP_PLATFORM_AMD__
+      CUDACHECK(cudaSetDevice(args->gpus[i]));
+#endif
       CUDACHECK(cudaStreamEndCapture(args->streams[i], graphs.data()+i));
     }
     // Instantiate cuda graph
     for (int i=0; i<args->nGpus; i++) {
+#ifdef __HIP_PLATFORM_AMD__
+      CUDACHECK(cudaSetDevice(args->gpus[i]));
+#endif
       CUDACHECK(cudaGraphInstantiate(graphExec.data()+i, graphs[i], NULL, NULL, 0));
     }
     // Resync CPU, restart timing, launch cuda graph
@@ -837,6 +869,9 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
     tim.reset();
     for (int l=0; l<cudaGraphLaunches; l++) {
       for (int i=0; i<args->nGpus; i++) {
+#ifdef __HIP_PLATFORM_AMD__
+        CUDACHECK(cudaSetDevice(args->gpus[i]));
+#endif
         CUDACHECK(cudaGraphLaunch(graphExec[i], args->streams[i]));
       }
     }
@@ -855,6 +890,9 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
   if (cudaGraphLaunches >= 1) {
     //destroy cuda graph
     for (int i=0; i<args->nGpus; i++) {
+#ifdef __HIP_PLATFORM_AMD__
+      CUDACHECK(cudaSetDevice(args->gpus[i]));
+#endif
       CUDACHECK(cudaGraphExecDestroy(graphExec[i]));
       CUDACHECK(cudaGraphDestroy(graphs[i]));
     }
@@ -889,14 +927,23 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
       if (cudaGraphLaunches >= 1) {
         // End cuda graph capture
         for (int i=0; i<args->nGpus; i++) {
+#ifdef __HIP_PLATFORM_AMD__
+          CUDACHECK(cudaSetDevice(args->gpus[i]));
+#endif
           CUDACHECK(cudaStreamEndCapture(args->streams[i], graphs.data()+i));
         }
         // Instantiate cuda graph
         for (int i=0; i<args->nGpus; i++) {
+#ifdef __HIP_PLATFORM_AMD__
+          CUDACHECK(cudaSetDevice(args->gpus[i]));
+#endif
           CUDACHECK(cudaGraphInstantiate(graphExec.data()+i, graphs[i], NULL, NULL, 0));
         }
         // Launch cuda graph
         for (int i=0; i<args->nGpus; i++) {
+#ifdef __HIP_PLATFORM_AMD__
+          CUDACHECK(cudaSetDevice(args->gpus[i]));
+#endif
           CUDACHECK(cudaGraphLaunch(graphExec[i], args->streams[i]));
         }
       }
@@ -908,6 +955,9 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
       if (cudaGraphLaunches >= 1) {
         //destroy cuda graph
         for (int i=0; i<args->nGpus; i++) {
+#ifdef __HIP_PLATFORM_AMD__
+          CUDACHECK(cudaSetDevice(args->gpus[i]));
+#endif
           CUDACHECK(cudaGraphExecDestroy(graphExec[i]));
           CUDACHECK(cudaGraphDestroy(graphs[i]));
         }
@@ -984,16 +1034,25 @@ testResult_t TimeTest(struct threadArgs* args, ncclDataType_t type, const char* 
     if (cudaGraphLaunches >= 1) {
       // End cuda graph capture
       for (int i=0; i<args->nGpus; i++) {
+#ifdef __HIP_PLATFORM_AMD__
+        CUDACHECK(cudaSetDevice(args->gpus[i]));
+#endif
         CUDACHECK(cudaStreamEndCapture(args->streams[i], graphs.data()+i));
       }
       // Instantiate cuda graph
       for (int i=0; i<args->nGpus; i++) {
+#ifdef __HIP_PLATFORM_AMD__
+        CUDACHECK(cudaSetDevice(args->gpus[i]));
+#endif
         CUDACHECK(cudaGraphInstantiate(graphExec.data()+i, graphs[i], NULL, NULL, 0));
       }
       // Resync CPU, restart timing, launch cuda graph
       Barrier(args);
       for (int l=0; l<cudaGraphLaunches; l++) {
         for (int i=0; i<args->nGpus; i++) {
+#ifdef __HIP_PLATFORM_AMD__
+          CUDACHECK(cudaSetDevice(args->gpus[i]));
+#endif
           CUDACHECK(cudaGraphLaunch(graphExec[i], args->streams[i]));
         }
       }
@@ -1006,6 +1065,9 @@ testResult_t TimeTest(struct threadArgs* args, ncclDataType_t type, const char* 
     if (cudaGraphLaunches >= 1) {
       //destroy cuda graph
       for (int i=0; i<args->nGpus; i++) {
+#ifdef __HIP_PLATFORM_AMD__
+        CUDACHECK(cudaSetDevice(args->gpus[i]));
+#endif
         CUDACHECK(cudaGraphExecDestroy(graphExec[i]));
         CUDACHECK(cudaGraphDestroy(graphs[i]));
       }
