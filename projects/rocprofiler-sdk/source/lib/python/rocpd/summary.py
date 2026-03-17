@@ -312,15 +312,10 @@ def generate_domain_query(
 
 
 def _view_matches_category(view_name: str, category: str) -> bool:
-    """Return True if view name matches the category (e.g. 'kernels' matches 'kernel')."""
+    """Return True if view name matches the category."""
     v = view_name.lower()
     c = category.lower()
-    return (
-        v == c
-        or v.startswith(c + "_")
-        or v == c + "s"
-        or v.startswith(c + "s_")
-    )
+    return v == c or v.startswith(c + "_") or v == c + "s" or v.startswith(c + "s_")
 
 
 def create_summary_queries(
@@ -352,8 +347,7 @@ def create_summary_queries(
 
         if only_view_categories is not None:
             if not any(
-                _view_matches_category(view_name, cat)
-                for cat in only_view_categories
+                _view_matches_category(view_name, cat) for cat in only_view_categories
             ):
                 continue
 
@@ -506,9 +500,9 @@ def generate_all_summaries(connection: RocpdImportData, **kwargs: Any) -> None:
 
     # Create the summary queries.
     # When region_categories is specified (and not NONE), only include view-based
-    # summaries that match those categories (e.g. "kernels" view for KERNEL) and
-    # only region summaries for those categories. With --region-categories NONE we
-    # only skip region summaries and still include all view-based summaries.
+    # summaries that match those categories and only region summaries for those categories.
+    # With --region-categories NONE we only skip region summaries and still include
+    # all view-based summaries.
     is_none_categories = (
         region_categories is not None
         and len(region_categories) == 1
