@@ -24,15 +24,15 @@ This example benchmarks video decoding performance using the AMD ROCDecode libra
 **Standalone build:**
 
 ```bash
-cmake -B build -DCMAKE_PREFIX_PATH=/opt/rocm
-cmake --build build
+cmake -B <build_dir> -S <project_root>/examples/videodecode -DCMAKE_PREFIX_PATH=/opt/rocm
+cmake --build <build_dir>
 ```
 
 **As part of the examples suite:**
 
 ```bash
-cmake -B build -DCMAKE_PREFIX_PATH=/opt/rocm examples/
-cmake --build build --target videodecode
+cmake -B <build_dir> -S <project_root>/examplse/ -DCMAKE_PREFIX_PATH=/opt/rocm
+cmake --build <build_dir> --target videodecode
 ```
 
 ## Running

@@ -18,15 +18,15 @@ This example measures the overhead of parallel synchronization by comparing two 
 **Standalone build:**
 
 ```bash
-cmake -B build
-cmake --build build
+cmake -B <build_dir> -S <project_root>/examples/parallel-overhead
+cmake --build <build_dir>
 ```
 
 **As part of the examples suite:**
 
 ```bash
-cmake -B build examples/
-cmake --build build --target parallel-overhead parallel-overhead-locks
+cmake -B <build_dir> -S <project_root>/examples/
+cmake --build <build_dir> --target parallel-overhead parallel-overhead-locks
 ```
 
 | Target | Description |

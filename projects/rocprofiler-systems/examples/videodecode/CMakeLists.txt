@@ -98,17 +98,17 @@ else()
 endif()
 
 # Copy video files to build directory
-if(EXISTS "${ROCmVersion_DIR}/share/rocdecode/video")
+if(EXISTS "${rocdecode_ROOT_DIR}/share/rocdecode/video")
     if(NOT EXISTS "${CMAKE_BINARY_DIR}/videos")
         file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/videos")
     endif()
 
-    file(GLOB_RECURSE video_files "${ROCmVersion_DIR}/share/rocdecode/video/*H26*.mp4")
+    file(GLOB_RECURSE video_files "${rocdecode_ROOT_DIR}/share/rocdecode/video/*H26*.mp4")
     file(COPY ${video_files} DESTINATION ${CMAKE_BINARY_DIR}/videos)
 else()
     videodecode_message(
         AUTHOR_WARNING
-        "Source directory ${ROCmVersion_DIR}/share/rocdecode/video does not exist"
+        "Source directory ${rocdecode_ROOT_DIR}/share/rocdecode/video does not exist"
     )
 endif()
 

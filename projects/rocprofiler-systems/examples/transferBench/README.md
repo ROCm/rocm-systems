@@ -21,15 +21,15 @@ TransferBench is a comprehensive all-to-all transfer benchmark that measures dat
 **Standalone build:**
 
 ```bash
-cmake -B build -DCMAKE_PREFIX_PATH=/opt/rocm
-cmake --build build
+cmake -B <build_dir> -S <project_root>/examples/transferBench -DCMAKE_PREFIX_PATH=/opt/rocm
+cmake --build <build_dir>
 ```
 
 **As part of the examples suite:**
 
 ```bash
-cmake -B build -DCMAKE_PREFIX_PATH=/opt/rocm examples/
-cmake --build build --target transferBench
+cmake -B <build_dir> -S <project_root>/examples/ -DCMAKE_PREFIX_PATH=/opt/rocm
+cmake --build <build_dir> --target transferBench
 ```
 
 ## Running

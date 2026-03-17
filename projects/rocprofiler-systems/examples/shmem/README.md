@@ -19,15 +19,15 @@ This directory contains two OpenSHMEM examples. `shmem_hello` demonstrates basic
 **Standalone build:**
 
 ```bash
-cmake -B build
-cmake --build build
+cmake -B <build_dir> -S <project_root>/examples/shmem
+cmake --build <build_dir>
 ```
 
 **As part of the examples suite:**
 
 ```bash
-cmake -B build examples/
-cmake --build build --target shmem_hello shmem_pingpong
+cmake -B <build_dir> -S <project_root>/examples/
+cmake --build <build_dir> --target shmem_hello shmem_pingpong
 ```
 
 **Targets:**

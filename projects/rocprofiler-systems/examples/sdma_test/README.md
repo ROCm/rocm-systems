@@ -18,15 +18,15 @@ This example benchmarks SDMA (System DMA) engine performance by measuring bandwi
 **Standalone build:**
 
 ```bash
-cmake -B build -DCMAKE_PREFIX_PATH=/opt/rocm
-cmake --build build
+cmake -B <build_dir> -S <project_root>/examples/sdma_test -DCMAKE_PREFIX_PATH=/opt/rocm
+cmake --build <build_dir>
 ```
 
 **As part of the examples suite:**
 
 ```bash
-cmake -B build -DCMAKE_PREFIX_PATH=/opt/rocm examples/
-cmake --build build --target sdma_test
+cmake -B <build_dir> -S <project_root>/examples/ -DCMAKE_PREFIX_PATH=/opt/rocm
+cmake --build <build_dir> --target sdma_test
 ```
 
 ## Running

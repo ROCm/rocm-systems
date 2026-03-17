@@ -29,15 +29,15 @@ This directory contains NAS Parallel Benchmarks (NPB) implemented with OpenMP th
 **Standalone build:**
 
 ```bash
-cmake -B build
-cmake --build build
+cmake -B <build_dir> -S <project_root>/examples/openmp
+cmake --build <build_dir>
 ```
 
 **As part of the examples suite:**
 
 ```bash
-cmake -B build examples/
-cmake --build build --target openmp-cg openmp-lu
+cmake -B <build_dir> -S <project_root>/examples/
+cmake --build <build_dir> --target openmp-cg openmp-lu
 ```
 
 **Targets:**

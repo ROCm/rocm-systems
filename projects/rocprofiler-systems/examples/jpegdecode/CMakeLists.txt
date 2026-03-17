@@ -88,12 +88,12 @@ find_package(rocprofiler-register QUIET)
 
 # Copy image files to build directory
 function(copy_image_files_and_make_copies)
-    if(EXISTS "${ROCmVersion_DIR}/share/rocjpeg/images")
+    if(EXISTS "${rocjpeg_ROOT_DIR}/share/rocjpeg/images")
         if(NOT EXISTS "${CMAKE_BINARY_DIR}/images")
             file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/images")
         endif()
 
-        file(GLOB_RECURSE image_files "${ROCmVersion_DIR}/share/rocjpeg/images/*")
+        file(GLOB_RECURSE image_files "${rocjpeg_ROOT_DIR}/share/rocjpeg/images/*")
         file(COPY ${image_files} DESTINATION ${CMAKE_BINARY_DIR}/images)
         set(NUM_COPIES 20)
 
@@ -110,7 +110,7 @@ function(copy_image_files_and_make_copies)
     else()
         message(
             AUTHOR_WARNING
-            "Source directory ${ROCmVersion_DIR}/share/rocjpeg/images does not exist"
+            "Source directory ${rocjpeg_ROOT_DIR}/share/rocjpeg/images does not exist"
         )
     endif()
 endfunction()

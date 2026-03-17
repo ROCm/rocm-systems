@@ -26,15 +26,15 @@ This example benchmarks various MPI communication patterns including point-to-po
 **Standalone build:**
 
 ```bash
-cmake -B build
-cmake --build build
+cmake -B <build_dir> -S <project_root>/examples/mpi
+cmake --build <build_dir>
 ```
 
 **As part of the examples suite:**
 
 ```bash
-cmake -B build examples/
-cmake --build build --target mpi-example
+cmake -B <build_dir> -S <project_root>/examples/
+cmake --build <build_dir> --target mpi-example
 ```
 
 **Targets:**

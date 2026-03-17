@@ -18,15 +18,15 @@ This example stress-tests the threading subsystem by creating a large number of 
 **Standalone build:**
 
 ```bash
-cmake -B build
-cmake --build build
+cmake -B <build_dir> -S <project_root>/examples/thread-limit
+cmake --build <build_dir>
 ```
 
 **As part of the examples suite:**
 
 ```bash
-cmake -B build examples/
-cmake --build build --target thread-limit
+cmake -B <build_dir> -S <project_root>/examples/
+cmake --build <build_dir> --target thread-limit
 ```
 
 ## Running

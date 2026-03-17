@@ -18,18 +18,18 @@ This example provides a minimal function call chain - `main()` → `outer()` →
 **Standalone build:**
 
 ```bash
-cmake -B build
-cmake --build build
+cmake -B <build_dir> -S <project_root>/examples/rewrite-caller
+cmake --build <build_dir>
 ```
 
 **As part of the examples suite:**
 
 ```bash
-cmake -B build examples/
-cmake --build build --target rewrite-caller
+cmake -B <build_dir> -S <project_root>/examples/
+cmake --build <build_dir> --target rewrite-caller
 ```
 
-The target is built in Debug mode to preserve the full call chain.
+**NOTE**: The target is built in Debug mode to preserve the full call chain.
 
 ## Running
 

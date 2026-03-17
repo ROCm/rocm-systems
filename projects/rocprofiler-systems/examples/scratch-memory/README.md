@@ -19,15 +19,15 @@ This example stress-tests GPU scratch memory allocation by launching kernels wit
 **Standalone build:**
 
 ```bash
-cmake -B build -DCMAKE_PREFIX_PATH=/opt/rocm
-cmake --build build
+cmake -B <build_dir> -S <project_root>/examples/scratch_memory -DCMAKE_PREFIX_PATH=/opt/rocm
+cmake --build <build_dir>
 ```
 
 **As part of the examples suite:**
 
 ```bash
-cmake -B build -DCMAKE_PREFIX_PATH=/opt/rocm examples/
-cmake --build build --target scratch-memory
+cmake -B <build_dir> -S <project_root>/examples/ -DCMAKE_PREFIX_PATH=/opt/rocm
+cmake --build <build_dir> --target scratch-memory
 ```
 
 ## Running

@@ -19,15 +19,15 @@ This example demonstrates the rocprofiler-systems user API for instrumenting app
 **Standalone build:**
 
 ```bash
-cmake -B build -DCMAKE_PREFIX_PATH=/opt/rocm
-cmake --build build
+cmake -B <build_dir> -S <project_root>/examples/user-api -DCMAKE_PREFIX_PATH=/opt/rocm
+cmake --build <build_dir>
 ```
 
 **As part of the examples suite:**
 
 ```bash
-cmake -B build -DCMAKE_PREFIX_PATH=/opt/rocm examples/
-cmake --build build --target user-api
+cmake -B <build_dir> -S <project_root>/examples/ -DCMAKE_PREFIX_PATH=/opt/rocm
+cmake --build <build_dir> --target user-api
 ```
 
 ## Running
@@ -65,7 +65,11 @@ rocprof-sys-run -- ./user-api 10 4 1000
 For binary rewrite instrumentation:
 
 ```bash
-rocprof-sys-instrument -e -v 2 -l --min-instructions=8 -E custom_push_region \
+rocprof-sys-instrument -v 2 -l --min-instructions=8 -E custom_push_region \
     -o user-api.inst -- ./user-api
 ./user-api.inst 10 4 1000
 ```
+
+### IMPORTANT NOTE
+
+ The `rocprof-sys-user` library will be removed in a future release. Please use `rocprofiler-sdk-roctx` instead!

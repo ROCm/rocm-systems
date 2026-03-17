@@ -69,18 +69,18 @@ Julia language vector addition example demonstrating GPU profiling of Julia work
 **Standalone build:**
 
 ```bash
-cmake -B build -DCMAKE_PREFIX_PATH=/opt/rocm
-cmake --build build
+cmake -B <build_dir> -S <project_root>/examples/hpc -DCMAKE_PREFIX_PATH=/opt/rocm
+cmake --build <build_dir>
 ```
 
 **As part of the examples suite:**
 
 ```bash
-cmake -B build -DCMAKE_PREFIX_PATH=/opt/rocm examples/
-cmake --build build
+cmake -B <build_dir> -S <project_root>/examples/ -DCMAKE_PREFIX_PATH=/opt/rocm
+cmake --build <build_dir> <target_name>
 ```
 
-Individual sub-examples can be built by target name as defined in their respective `CMakeLists.txt` files.
+**NOTE**: Individual sub-examples can be built by target name as defined in their respective `CMakeLists.txt` files.
 
 ## Profiling with rocprofiler-systems
 
@@ -89,7 +89,7 @@ Individual sub-examples can be built by target name as defined in their respecti
 rocprof-sys-run -- ./jacobi-hip
 
 # Profile matrix exponential
-rocprof-sys-run -- ./matrix-exponential-streams-synx-hip
+rocprof-sys-run -- ./matrix-exponential-streams-sync-hip
 ```
 
 ### Recommended Configuration

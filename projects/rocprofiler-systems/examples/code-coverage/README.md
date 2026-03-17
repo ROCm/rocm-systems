@@ -19,15 +19,15 @@ This example demonstrates code coverage analysis by providing two functionally i
 **Standalone build:**
 
 ```bash
-cmake -B build
-cmake --build build
+cmake -B <build_dir> -S <project_root>/examples/code-coverage
+cmake --build <build_dir>
 ```
 
 **As part of the examples suite:**
 
 ```bash
-cmake -B build examples/
-cmake --build build --target code-coverage
+cmake -B <build_dir> -S <project_root>/examples/
+cmake --build <build_dir> --target code-coverage
 ```
 
 ## Running

@@ -9,7 +9,9 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
     include(${CMAKE_CURRENT_LIST_DIR}/../cmake/standalone-helpers.cmake OPTIONAL)
 endif()
 
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
+if(CMAKE_PROJECT_NAME STREQUAL "rocprofiler-systems")
+    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
+endif()
 
 include(${CMAKE_CURRENT_LIST_DIR}/hpc-helper.cmake)
 

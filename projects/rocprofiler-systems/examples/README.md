@@ -68,37 +68,41 @@ This directory contains example applications demonstrating various profiling sce
 
 ## Building All Examples
 
-The examples are built as part of the rocprofiler-systems CMake project. To build them standalone, run from the `examples/` directory:
+- The examples are built as part of the `rocprofiler-systems` CMake project.
+- There is an option to build them also as a **standalone** applications or as a part of **examples suite**
+- The following commands will focus on a building a whole **examples suite**:
+
+- From `examples` directory run:
 
 ```bash
-cmake -B build \
+cmake -B <build_dir> \
     -DCMAKE_PREFIX_PATH=/opt/rocm \
     -DCMAKE_INSTALL_PREFIX=./install \
     .
 
-cmake --build build --parallel
+cmake --build <build_dir> --parallel
 ```
 
-Or from the repository root:
+- Or from the repository root:
 
 ```bash
-cmake -B build \
+cmake -B <build_dir> \
     -DCMAKE_PREFIX_PATH=/opt/rocm \
     projects/rocprofiler-systems/examples
 
-cmake --build build --parallel
+cmake --build <build_dir> --parallel
 ```
 
-Individual examples can be built by specifying the target:
+- Individual examples can be built by specifying the target:
 
 ```bash
-cmake --build build --target transpose
+cmake --build <build_dir> --target <example_name>
 ```
 
 GPU examples require ROCm (`hipcc` or `amdclang++`) and detect available architectures automatically. To specify architectures manually:
 
 ```bash
-cmake -B build -DROCPROFSYS_GFX_TARGETS="gfx90a;gfx942" ...
+cmake -B <build_dir> -DROCPROFSYS_GFX_TARGETS="gfx90a;gfx942" ...
 ```
 
 ## Profiling Modes

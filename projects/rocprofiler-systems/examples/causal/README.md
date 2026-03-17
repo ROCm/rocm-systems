@@ -22,15 +22,15 @@ This example implements a causal profiling workload that runs slow and fast func
 **Standalone build:**
 
 ```bash
-cmake -B build -DCMAKE_PREFIX_PATH=/opt/rocm
-cmake --build build
+cmake -B <build_dir> -S <project_root>/examples/casual -DCMAKE_PREFIX_PATH=/opt/rocm
+cmake --build <build_dir>
 ```
 
 **As part of the examples suite:**
 
 ```bash
-cmake -B build -DCMAKE_PREFIX_PATH=/opt/rocm examples/
-cmake --build build --target causal-both causal-rng causal-cpu
+cmake -B <build_dir> -DCMAKE_PREFIX_PATH=/opt/rocm <project_root>/examples/
+cmake --build <build_dir> --target causal-both causal-rng causal-cpu
 ```
 
 The build generates multiple variants of each executable:
