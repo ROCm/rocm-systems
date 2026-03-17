@@ -549,7 +549,7 @@ jobs:
         if: matrix.os == 'RHEL10' || matrix.os == 'AlmaLinux8'
         run: |
           cd ${{ env.PROJECT_DIR }}/build
-          dnf install python3-setuptools python3-wheel -y
+          dnf install --setopt=skip_if_unavailable=True python3-setuptools python3-wheel -y
 
           RETRIES=3
           for i in $(seq 1 $RETRIES); do
@@ -584,7 +584,7 @@ jobs:
               timeout 10m zypper --no-refresh --no-gpg-checks install -y ./amd-smi-lib-*99999-local*.rpm
               ;;
             dnf)
-              dnf install python3-setuptools python3-wheel -y
+              dnf install --setopt=skip_if_unavailable=True python3-setuptools python3-wheel -y
               RETRIES=3
               for i in $(seq 1 $RETRIES); do
                 echo "Attempt $i: Installing AMDSMI package..."
@@ -716,7 +716,7 @@ jobs:
           done
 
           echo 'Installing for test on RHEL10/AlmaLinux8'
-          dnf install python3-setuptools python3-wheel -y
+          dnf install --setopt=skip_if_unavailable=True python3-setuptools python3-wheel -y
 
           for i in $(seq 1 $RETRIES); do
             echo "RHEL10/AlmaLinux8: Installation attempt $i for test..."
@@ -754,7 +754,7 @@ jobs:
               timeout 10m zypper --no-refresh --no-gpg-checks install -y $BUILD_FOLDER/amd-smi-lib-*99999-local*.rpm
               ;;
             dnf)
-              dnf install python3-setuptools python3-wheel -y
+              dnf install --setopt=skip_if_unavailable=True python3-setuptools python3-wheel -y
               RETRIES=3
               for i in $(seq 1 $RETRIES); do
                 echo "Attempt $i: Installing..."

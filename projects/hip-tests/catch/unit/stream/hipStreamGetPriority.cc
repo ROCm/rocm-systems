@@ -32,7 +32,7 @@ priority should be clamped to the priority range.
 /**
  * Create stream and check priority.
  */
-TEST_CASE("Unit_hipStreamGetPriority_happy") {
+TEST_CASE(Unit_hipStreamGetPriority_happy) {
   int priority_low = 0;
   int priority_high = 0;
   int devID = GENERATE(range(0, HipTest::getDeviceCount()));
@@ -82,7 +82,7 @@ TEST_CASE("Unit_hipStreamGetPriority_happy") {
 /**
  * both stream and priority passed as nullptr.
  */
-TEST_CASE("Unit_hipStreamGetPriority_nullptr_nullptr") {
+TEST_CASE(Unit_hipStreamGetPriority_nullptr_nullptr) {
   auto res = hipStreamGetPriority(nullptr, nullptr);
   REQUIRE(res == hipErrorInvalidValue);
 }
@@ -91,7 +91,7 @@ TEST_CASE("Unit_hipStreamGetPriority_nullptr_nullptr") {
 /**
  * valid stream and priority passed as nullptr.
  */
-TEST_CASE("Unit_hipStreamGetPriority_stream_nullptr") {
+TEST_CASE(Unit_hipStreamGetPriority_stream_nullptr) {
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
 
@@ -105,7 +105,7 @@ TEST_CASE("Unit_hipStreamGetPriority_stream_nullptr") {
 /**
  * nullptr stream and valid priority
  */
-TEST_CASE("Unit_hipStreamGetPriority_nullptr_priority") {
+TEST_CASE(Unit_hipStreamGetPriority_nullptr_priority) {
   int priority = -1;
   HIP_CHECK(hipStreamGetPriority(nullptr, &priority));
 }
@@ -113,7 +113,7 @@ TEST_CASE("Unit_hipStreamGetPriority_nullptr_priority") {
 /**
  * both stream and priority passed as valid.
  */
-TEST_CASE("Unit_hipStreamGetPriority_stream_priority") {
+TEST_CASE(Unit_hipStreamGetPriority_stream_priority) {
   int priority = -1;
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
@@ -127,7 +127,7 @@ TEST_CASE("Unit_hipStreamGetPriority_stream_priority") {
 /**
  * Create stream with CUMask and check priority is returned as expected.
  */
-TEST_CASE("Unit_hipStreamGetPriority_StreamsWithCUMask") {
+TEST_CASE(Unit_hipStreamGetPriority_StreamsWithCUMask) {
   hipStream_t stream{};
   int priority = 0;
   int priority_normal = 0;

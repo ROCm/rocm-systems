@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -49,11 +49,11 @@
 
 #include <array>
 #include <cassert>
-#include <filesystem>
 #include <fstream>
 #include <map>
 #include <memory>
 #include <string>
+#include <string_view>
 
 #include "core/inc/amd_memory_region.h"
 #include "core/inc/runtime.h"
@@ -88,16 +88,34 @@ static const std::map<XDNADeviceId, XDNADeviceType> supported_xdna_devices = {
     {{0x17f0}, XDNADeviceType::Stx},  // Strix Halo / Krackan
 };
 
-namespace fs = std::filesystem;
-
 /// @brief Devnode path for XDNA devices.
-static const fs::path devnodes_path = "/dev/accel";
+static constexpr std::string_view devnodes_path = "/dev/accel";
 /// @brief Sysfs path for XDNA devices.
-static const fs::path sysfs_path = "/sys/class/accel";
+static constexpr std::string_view sysfs_path = "/sys/class/accel";
 /// @brief Devnode prefix for XDNA devices.
-static const std::string devnode_prefix = "accel";
+static constexpr std::string_view devnode_prefix = "accel";
 /// @brief Maximum devnode minor number for XDNA devices.
-static const uint32_t devnode_max_minor_num = 64;
+constexpr uint32_t devnode_max_minor_num = 64;
+
+/// @brief Used to transform an address into a device address
+constexpr uint32_t DEV_ADDR_BASE = 0x04000000;
+constexpr uint32_t DEV_ADDR_OFFSET_MASK = 0x02FFFFFF;
+
+/// @brief The driver places a structure before each command in a command chain.
+/// Need to increase the size of the command by the size of this structure.
+/// In the following xdna driver source can see where this is implemented:
+/// Commit hash: eddd92c0f61592c576a500f16efa24eb23667c23
+/// https://github.com/amd/xdna-driver/blob/main/src/driver/amdxdna/aie2_msg_priv.h#L387-L391
+/// https://github.com/amd/xdna-driver/blob/main/src/driver/amdxdna/aie2_message.c#L637
+constexpr uint32_t CMD_COUNT_SIZE_INCREASE = 3;
+
+/// @brief The size of an instruction in bytes
+constexpr uint32_t INSTR_SIZE_BYTES = 4;
+
+/// @brief Index of command payload where the instruction sequence
+/// address is located
+constexpr uint32_t CMD_PKT_PAYLOAD_INSTRUCTION_SEQUENCE_IDX = 2;
+constexpr uint32_t CMD_PKT_PAYLOAD_INSTRUCTION_SEQUENCE_SIZE_IDX = 4;
 
 /// @brief Index of the first operand in a command.
 ///
@@ -140,7 +158,7 @@ XdnaDriver::XdnaDriver(std::string devnode_name)
 
 hsa_status_t XdnaDriver::DiscoverDriver(std::unique_ptr<core::Driver>& driver) {
   for (uint32_t i = 0; i < devnode_max_minor_num; ++i) {
-    auto tmp_driver = std::make_unique<XdnaDriver>(devnode_prefix + std::to_string(i));
+    auto tmp_driver = std::make_unique<XdnaDriver>(std::string(devnode_prefix) + std::to_string(i));
     if (tmp_driver->Open() == HSA_STATUS_SUCCESS) {
       if (tmp_driver->QueryKernelModeDriver(core::DriverQuery::GET_DRIVER_VERSION) ==
           HSA_STATUS_SUCCESS) {
@@ -175,7 +193,7 @@ hsa_status_t XdnaDriver::QueryKernelModeDriver(core::DriverQuery query) {
 }
 
 hsa_status_t XdnaDriver::Open() {
-  const auto devnode_path = devnodes_path / devnode_name_;
+  const std::string devnode_path = std::string(devnodes_path) + "/" + devnode_name_;
   fd_ = open(devnode_path.c_str(), O_RDWR | O_CLOEXEC);
   if (fd_ < 0) {
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
@@ -211,19 +229,19 @@ hsa_status_t XdnaDriver::GetNodeProperties(HsaNodeProperties& node_props, uint32
     return HSA_STATUS_ERROR;
   }
 
-  const auto sysfs_device_path = sysfs_path / devnode_name_ / "device";
+  const std::string sysfs_device_path = std::string(sysfs_path) + "/" + devnode_name_ + "/device";
 
   // Find device type.
   XDNADeviceType device_type = XDNADeviceType::Unknown;
   {
-    const auto device_id_file = sysfs_device_path / "device";
-    if (!fs::exists(device_id_file)) {
+    const std::string device_id_file = sysfs_device_path + "/device";
+    std::ifstream is(device_id_file);
+    if (!is.good()) {
       assert(false && "Device file not found in sysfs.");
       return HSA_STATUS_ERROR;
     }
 
     XDNADeviceId device_id = {};
-    std::ifstream is(device_id_file);
     // Device ID is in hex.
     if (!(is >> std::hex >> device_id.device)) {
       assert(false && "Failed to read device ID from sysfs.");
@@ -263,13 +281,13 @@ hsa_status_t XdnaDriver::GetNodeProperties(HsaNodeProperties& node_props, uint32
 
   // Read device name from sysfs.
   {
-    const auto device_name_file = sysfs_device_path / "vbnv";
-    if (!fs::exists(device_name_file)) {
+    const std::string device_name_file = sysfs_device_path + "/vbnv";
+    std::ifstream is(device_name_file);
+    if (!is.good()) {
       assert(false && "Device file name not found in sysfs.");
       return HSA_STATUS_ERROR;
     }
     std::array<char, HSA_PUBLIC_NAME_SIZE> device_name = {};
-    std::ifstream is(device_name_file);
     if (!is.getline(device_name.data(), device_name.size() - 1)) {
       assert(false && "Failed to read device name from sysfs.");
       return HSA_STATUS_ERROR;
@@ -648,15 +666,19 @@ hsa_status_t XdnaDriver::ExecCmdAndWait(const BOHandle& cmd_chain_bo_handle,
   exec_cmd.cmd_count = 1;
   exec_cmd.arg_count = bo_handles.size();
 
-  if (ioctl(fd_, DRM_IOCTL_AMDXDNA_EXEC_CMD, &exec_cmd) < 0) return HSA_STATUS_ERROR;
+  if (ioctl(fd_, DRM_IOCTL_AMDXDNA_EXEC_CMD, &exec_cmd) < 0) {
+    return HSA_STATUS_ERROR;
+  }
 
   // Waiting for command chain to finish.
   amdxdna_drm_wait_cmd wait_cmd = {};
   wait_cmd.hwctx = hw_ctx_handle;
-  wait_cmd.timeout = DEFAULT_TIMEOUT_VAL;
+  wait_cmd.timeout = 0;  // no timeout, wait until the command finishes
   wait_cmd.seq = exec_cmd.seq;
 
-  if (ioctl(fd_, DRM_IOCTL_AMDXDNA_WAIT_CMD, &wait_cmd) < 0) return HSA_STATUS_ERROR;
+  if (ioctl(fd_, DRM_IOCTL_AMDXDNA_WAIT_CMD, &wait_cmd) < 0) {
+    return HSA_STATUS_ERROR;
+  }
 
   return HSA_STATUS_SUCCESS;
 }
@@ -669,7 +691,7 @@ hsa_status_t XdnaDriver::PrepareBOs(uint32_t count,
                        cmd_pkt_payload->data[CMD_PKT_PAYLOAD_INSTRUCTION_SEQUENCE_IDX]);
   auto instr_bo_handle = FindBOHandle(reinterpret_cast<void*>(instr_addr));
   if (!instr_bo_handle.IsValid()) {
-    return HSA_STATUS_ERROR;
+    return HSA_STATUS_ERROR_INVALID_ALLOCATION;
   }
 
   // Keep track of the instruction sequence BO.
@@ -692,7 +714,7 @@ hsa_status_t XdnaDriver::PrepareBOs(uint32_t count,
                                                    cmd_pkt_payload->data[operand_index]);
     auto operand_bo_handle = FindBOHandle(reinterpret_cast<void*>(operand_addr));
     if (!operand_bo_handle.IsValid()) {
-      return HSA_STATUS_ERROR;
+      return HSA_STATUS_ERROR_INVALID_ALLOCATION;
     }
 
     // Keep track of the operand BO.

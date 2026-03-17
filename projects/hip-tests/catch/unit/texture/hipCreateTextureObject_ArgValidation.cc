@@ -50,7 +50,7 @@ THE SOFTWARE.
  *  - Textures supported on device
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipCreateTextureObject_ArgValidation") {
+TEST_CASE(Unit_hipCreateTextureObject_ArgValidation) {
   CHECK_IMAGE_SUPPORT
 
   float* texBuf;

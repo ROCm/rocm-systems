@@ -126,6 +126,7 @@ declare -A TEST_NUMBERS=(
   ["flood_add"]="90"
   ["flood_fadd"]="91"
   ["flood_waitadd"]="92"
+  ["device_bitcode"]="93"
 )
 
 ExecTest() {
@@ -492,6 +493,10 @@ TestOther() {
   ##############################################################################
   ExecTest  "init"             2       1            1
   ExecTest  "hipmodule_init"   2       1            1
+  ExecTest  "device_bitcode"   2       1            1
+  ExecTest  "device_bitcode"   2       32           1024
+  ExecTest  "device_bitcode"   4       16           256
+  ExecTest  "device_bitcode"   8       16           128
 
   ExecTest  "pingpong"         2       1            1
   ExecTest  "pingpong"         2       8            1
@@ -502,6 +507,7 @@ TestOther() {
   ExecTest  "pingall"          2       32           1
 
   ################################ Flood test ##################################
+  if [[ $TEST != ro* ]]; then #AIROCSHMEM-324
   ExecTest  "flood_put"        2       64           1024
   ExecTest  "flood_put"        8       64           1024
   ExecTest  "flood_putnbi"     8       64           1024
@@ -518,6 +524,7 @@ TestOther() {
   ExecTest  "flood_add"        8       64           1024
   ExecTest  "flood_fadd"       8       64           1024
   ExecTest  "flood_waitadd"    8       64           1024
+  else echo "Skip:   flood_* (AIROCSHMEM-324: RO flood tests fail in UCX)"; fi
 
   # This test requires more contexts than workgroups
   export ROCSHMEM_MAX_NUM_CONTEXTS=1024

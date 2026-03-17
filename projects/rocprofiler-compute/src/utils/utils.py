@@ -1399,11 +1399,9 @@ def save_torch_trace_inputs(
 def simplify_kernel_name(full_kernel_name: str) -> str:
     """Simplify a kernel name for display by stripping templates and namespaces.
 
-    Intended as a last-resort readability pass *after* the standard
-    kernel_name_shortener / process_single_kernel_name pipeline.  Strips
-    ``void`` prefix, template parameters, and namespace qualifiers so that
-    e.g. ``void at::native::vectorized_elementwise_kernel<4, ...>`` becomes
-    ``vectorized_elementwise_kernel``.
+    Strips ``void`` prefix, template parameters, and namespace qualifiers so
+    that e.g. ``void at::native::vectorized_elementwise_kernel<4, ...>``
+    becomes ``vectorized_elementwise_kernel``.
     """
     name = full_kernel_name.strip()
     if name.startswith("void "):
@@ -1421,15 +1419,6 @@ def simplify_kernel_name(full_kernel_name: str) -> str:
         return function_name if function_name else name.strip()
 
     return main_part.strip()
-
-
-def sanitize_torch_operator_key(name: str) -> str:
-    """Normalize a user-supplied operator name to match torch_trace CSV filename stems.
-
-    Strips the ``torch.`` prefix and replaces dots with underscores so that
-    inputs like ``torch.nn.functional.conv2d`` become ``nn_functional_conv2d``.
-    """
-    return name.replace("torch.", "").replace(".", "_")
 
 
 def get_unique_invocations(df: pd.DataFrame) -> Optional[pd.DataFrame]:
@@ -1499,39 +1488,29 @@ def compute_operator_prefix_stats(
     return prefix_stats
 
 
-def build_kernel_name_to_id(
-    dfs: list[pd.DataFrame], kernel_verbose: int = 1
-) -> Optional[dict[str, int]]:
-    """Build a mapping from shortened kernel name to a stable numeric ID.
-
-    Collects every unique Kernel_Name across the supplied DataFrames,
-    shortens them with kernel_name_shortener, and assigns sequential IDs
-    in alphabetical order.  Returns None when no kernel names are found.
-    """
-    all_kernel_names: set[str] = set()
-    for df in dfs:
-        if "Kernel_Name" in df.columns:
-            all_kernel_names.update(df["Kernel_Name"].dropna().unique())
-    if not all_kernel_names:
-        return None
-    kernel_df = pd.DataFrame({"Kernel_Name": sorted(all_kernel_names)})
-    kernel_df = kernel_name_shortener(kernel_df.copy(), kernel_verbose)
-    if kernel_df is None:
-        return None
-    return {str(row["Kernel_Name"]).strip(): i for i, row in kernel_df.iterrows()}
-
-
 @demarcate
 def process_torch_trace_output(
     workload_dir: str,
-) -> None:
+    kernel_top_df: pd.DataFrame,
+    kernel_verbose: int = 0,
+) -> list[tuple[str, pd.DataFrame, dict[str, tuple[float, int]], float]]:
     """
     Joins counter_collection and marker_api_trace data for PyTorch operator listing.
 
     - Performs inner join on Correlation_ID, filtering out unmatched entries
     - Consolidates data across passes and groups by Operator_Name, saving one CSV
       per operator under workload_dir/torch_trace/
+    - Maps kernel names to IDs (adding a Kernel_ID column) by shortening torch
+      trace names with kernel_name_shortener to match the shortened names in
+      pmc_kernel_top.csv
+    - Computes prefix_stats per operator in-memory and returns the assembled
+      file_data list sorted by total duration (descending)
+
+    Returns list of (operator_name, DataFrame, prefix_stats, total_ms) tuples.
     """
+    kernel_name_to_id = {
+        str(row["Kernel_Name"]).strip(): idx for idx, row in kernel_top_df.iterrows()
+    }
     console_log(f"Looking for marker and counter csv files in {workload_dir}")
     marker_api_trace_csvs = list(
         Path(workload_dir).glob("**/torch_trace*_marker_api_trace.csv")
@@ -1560,12 +1539,12 @@ def process_torch_trace_output(
                 "No marker files with corresponding counter files found. "
                 "Ensure profiling was done with '--torch-trace'.",
             )
-        return
-    if Path(f"{workload_dir}/torch_trace").exists():
-        shutil.rmtree(Path(f"{workload_dir}/torch_trace"))
-        console_log(
-            f"Removed previous torch_trace directory: {workload_dir}/torch_trace"
-        )
+        return []
+    torch_trace_path = Path(f"{workload_dir}/torch_trace")
+    if torch_trace_path.exists():
+        shutil.rmtree(torch_trace_path)
+        console_log(f"Removed previous torch_trace directory: {torch_trace_path}")
+    torch_trace_path.mkdir(parents=True, exist_ok=True)
 
     # Join marker and counter data
     def _merge_pair(
@@ -1622,11 +1601,11 @@ def process_torch_trace_output(
         console_error(
             f"Consolidated torch trace is missing required columns {missing_columns}"
         )
-        return
+        return []
     consolidated_df = consolidated_df[required_columns]
     if consolidated_df.isnull().values.any():
         console_warning("Consolidated torch trace contains missing values")
-        return
+        return []
     consolidated_df = consolidated_df.sort_values(by=["Function", "Counter_Name"])
     split_columns = consolidated_df["Function"].str.split(":#", expand=True)
     consolidated_df["Operator_Name"] = (
@@ -1654,22 +1633,32 @@ def process_torch_trace_output(
             "Missing values in consolidated torch trace after splitting ",
             "the Function name.",
         )
-        return
+        return []
     grouped = consolidated_df.groupby("Operator_Name")
+    file_data: list[tuple[str, pd.DataFrame, dict[str, tuple[float, int]], float]] = []
     for operator_name, group in grouped:
-        # Extract the operator name from hierarchy
         last_operator = operator_name.split("/")[-1]
         sanitized_operator_name = last_operator.replace("torch.", "").replace(".", "_")
-        # Ensure output directory exists
-        Path(f"{workload_dir}/torch_trace").mkdir(parents=True, exist_ok=True)
-        output_file = f"{workload_dir}/torch_trace/{sanitized_operator_name}.csv"
-        # If the file already exists, append to it, else create new file.
+        output_file = f"{torch_trace_path}/{sanitized_operator_name}.csv"
         if Path(output_file).is_file():
             group.to_csv(output_file, mode="a", header=False, index=False)
             console_log(f"Appended trace to existing file {output_file}")
         else:
             group.to_csv(output_file, index=False)
             console_log(f"Saved consolidated trace to {output_file}")
+
+        group = group.copy()
+        shortened = kernel_name_shortener(
+            pd.DataFrame({"Kernel_Name": group["Kernel_Name"]}),
+            kernel_verbose,
+        )
+        group["Kernel_ID"] = shortened["Kernel_Name"].str.strip().map(kernel_name_to_id)
+        prefix_stats = compute_operator_prefix_stats(group)
+        total_ms = sum(dur for key, (dur, _) in prefix_stats.items() if "/" not in key)
+        file_data.append((sanitized_operator_name, group, prefix_stats, total_ms))
+
+    file_data.sort(key=lambda x: x[3], reverse=True)
+    return file_data
 
 
 @demarcate
@@ -2114,17 +2103,17 @@ def format_scientific_notation_if_needed(
     width_align: int = 6,
     precision: int = 2,
     fmt_type_align: str = "f",
-    max_length: int = 6,
+    max_length: int = 6,  # Deprecated: kept for backward compatibility
     sci_lower_bound: float = 1e-2,
     sci_upper_bound: float = 1e6,
 ) -> str:
     """
     Format a numeric value as normal or scientific notation string.
 
-    Uses scientific notation if:
+    Uses scientific notation only if it results in a shorter string than
+    normal notation, or if the value falls outside the bounds:
     - abs(value) < sci_lower_bound (but not zero)
     - abs(value) >= sci_upper_bound
-    - formatted normal string length exceeds max_length
 
     Parameters:
     - value: numeric value to format
@@ -2132,13 +2121,14 @@ def format_scientific_notation_if_needed(
     - width_align: total width of formatted output
     - precision: number of digits after decimal point
     - fmt_type_align: format type, e.g., 'f', 'e', 'g'
-    - max_length: max allowed length for normal format string (excluding padding)
+    - max_length: deprecated, no longer used
     - sci_lower_bound: lower bound for scientific notation usage
     - sci_upper_bound: upper bound for scientific notation usage
 
     Returns:
     - formatted string according to the criteria, respecting alignment
     """
+    del max_length  # Unused, kept for backward compatibility
 
     abs_val = abs(value)
     use_sci = False
@@ -2162,10 +2152,8 @@ def format_scientific_notation_if_needed(
                 sci_str_strip = sci_str.strip()
 
                 # Decide based on length of stripped strings (ignore padding)
-                if (
-                    len(normal_str_strip) > len(sci_str_strip)
-                    or len(normal_str_strip) > max_length
-                ):
+                # Only use scientific notation if it's actually shorter
+                if len(sci_str_strip) < len(normal_str_strip):
                     use_sci = True
             except Exception:
                 # Fallback to scientific if formatting fails

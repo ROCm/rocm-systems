@@ -25,7 +25,7 @@ execution of hipModuleOccupancyMaxPotentialBlockSizeWithFlags api when parameter
 */
 #include "occupancy_common.hh"
 
-TEST_CASE("Unit_hipModuleOccupancyMaxPotentialBlockSizeWithFlags_Negative_Parameters") {
+TEST_CASE(Unit_hipModuleOccupancyMaxPotentialBlockSizeWithFlags_Negative_Parameters) {
   hipModule_t module;
   hipFunction_t function;
   int blockSize = 0;
@@ -52,7 +52,7 @@ TEST_CASE("Unit_hipModuleOccupancyMaxPotentialBlockSizeWithFlags_Negative_Parame
   HIP_CHECK(hipModuleUnload(module));
 }
 
-TEST_CASE("Unit_hipModuleOccupancyMaxPotentialBlockSizeWithFlags_Positive_RangeValidation") {
+TEST_CASE(Unit_hipModuleOccupancyMaxPotentialBlockSizeWithFlags_Positive_RangeValidation) {
   hipDeviceProp_t devProp;
   hipModule_t module;
   hipFunction_t function;
