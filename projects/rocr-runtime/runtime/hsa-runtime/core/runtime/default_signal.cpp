@@ -42,7 +42,9 @@
 
 #include "core/inc/default_signal.h"
 
+#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
 #include <sched.h>
+#endif
 
 #if defined(__i386__) || defined(__x86_64__)
 #include <mwaitxintrin.h>
@@ -108,9 +110,12 @@ hsa_signal_value_t BusyWaitSignal::WaitRelaxed(hsa_signal_condition_t condition,
 
     if (g_use_mwaitx) {
       timer::DoMwaitx(const_cast<int64_t*>(&signal_.value), 60000, true);
-    } else if (wait_hint != HSA_WAIT_STATE_ACTIVE) {
+    }
+#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
+    else if (wait_hint != HSA_WAIT_STATE_ACTIVE) {
       sched_yield();
     }
+#endif
   }
 }
 
