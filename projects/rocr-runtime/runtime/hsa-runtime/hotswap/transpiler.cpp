@@ -829,15 +829,41 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
   }
 
   // ─── WMMA → MFMA translation with lane redistribution ───
-  // Wave32 WMMA packs 8 elements/lane; wave64 MFMA uses 4 elements/lane.
+  // Wave32 WMMA packs N elements/lane; wave64 MFMA uses N/2 elements/lane.
   // We redistribute data across 64 lanes using ds_bpermute, execute MFMA,
   // then collect results back to lower 32 lanes.
   //
-  // Supported translations:
-  //   v_wmma_f32_16x16x32_f16  → v_mfma_f32_16x16x32_f16
-  //   v_wmma_f32_16x16x32_bf16 → v_mfma_f32_16x16x32bf16
-  if (mnemonic == "v_wmma_f32_16x16x32_f16" ||
-      mnemonic == "v_wmma_f32_16x16x32_bf16") {
+  // Supported shape mappings (WMMA → MFMA):
+  //   f32_16x16x32_f16   → f32_16x16x32_f16    (dst:8→4, src:8→4)
+  //   f32_16x16x32_bf16  → f32_16x16x32bf16    (dst:8→4, src:8→4)
+  //   f32_16x16x16_f16   → f32_16x16x16_f16    (dst:8→4, src:4→2)
+  //   f32_16x16x4_f32    → f32_16x16x4_f32     (dst:8→4, src:2→1)
+  //   i32_16x16x64_iu8   → i32_16x16x64_i8     (dst:8→4, src:8→4)
+  //   f32_16x16x64_fp8_* → f32_16x16x128f8f6f4 (shape mismatch — NOP)
+  {
+    struct WmmaMfmaMapping {
+      const char* wmma_mnem;
+      const char* mfma_mnem;
+      int dst_vgprs_w32;   // WMMA dst VGPRs (wave32)
+      int src_vgprs_w32;   // WMMA src VGPRs per operand (wave32)
+      int dst_vgprs_w64;   // MFMA dst VGPRs (wave64)
+      int src_vgprs_w64;   // MFMA src VGPRs per operand (wave64)
+    };
+
+    static const WmmaMfmaMapping kWmmaMap[] = {
+      {"v_wmma_f32_16x16x32_f16",  "v_mfma_f32_16x16x32_f16",  8, 8, 4, 4},
+      {"v_wmma_f32_16x16x32_bf16", "v_mfma_f32_16x16x32bf16",  8, 8, 4, 4},
+      {"v_wmma_f32_16x16x16_f16",  "v_mfma_f32_16x16x16_f16",  8, 4, 4, 2},
+      {"v_wmma_f32_16x16x4_f32",   "v_mfma_f32_16x16x4_f32",   8, 2, 4, 1},
+      {"v_wmma_i32_16x16x64_iu8",  "v_mfma_i32_16x16x64_i8",   8, 8, 4, 4},
+    };
+
+    const WmmaMfmaMapping* mapping = nullptr;
+    for (const auto& m : kWmmaMap) {
+      if (mnemonic == m.wmma_mnem) { mapping = &m; break; }
+    }
+
+    if (mapping) {
     // Parse operands: vdst[0:7], srcA[8:15], srcB[16:23], acc[0:7]
     // WMMA: 8 VGPRs each (wave32)
     // MFMA: 4 VGPRs each (wave64)
@@ -873,192 +899,117 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
       return result;
     }
 
+    // Use mapping's register counts
+    int src_w32 = mapping->src_vgprs_w32;
+    int src_w64 = mapping->src_vgprs_w64;
+    int dst_w32 = mapping->dst_vgprs_w32;
+    int dst_w64 = mapping->dst_vgprs_w64;
+    std::string mfma_mnem = mapping->mfma_mnem;
+
     // Choose temp registers: use v248-v255 as scratch space
-    // v248: lane_id, v249: src_lane, v250: byte_addr, v251: is_upper
-    // v252-v255: temp for ds_bpermute results
     int t_lane = 248, t_src = 249, t_addr = 250, t_upper = 251;
     int t0 = 252, t1 = 253;
 
-    // MFMA register ranges (4 VGPRs each, using temp area)
-    // We'll use the first 4 of each WMMA range for MFMA
-    int mfma_srcA = srcA.first;     // reuse lower 4 of srcA
-    int mfma_srcB = srcB.first;     // reuse lower 4 of srcB
-    int mfma_acc = acc.first;       // lower 4 of acc
-    int mfma_dst = dst.first;       // lower 4 of dst
+    // MFMA register ranges — use lower half of each WMMA range
+    int mfma_srcA = srcA.first;
+    int mfma_srcB = srcB.first;
+    int mfma_acc = acc.first;
+    int mfma_dst = dst.first;
 
-    // Determine MFMA mnemonic
-    std::string mfma_mnem;
-    if (mnemonic == "v_wmma_f32_16x16x32_f16")
-      mfma_mnem = "v_mfma_f32_16x16x32_f16";
-    else
-      mfma_mnem = "v_mfma_f32_16x16x32bf16";
+    // Helper: format register range string
+    auto regRange = [](int base, int count) -> std::string {
+      if (count == 1) return "v" + std::to_string(base);
+      return "v[" + std::to_string(base) + ":" +
+             std::to_string(base + count - 1) + "]";
+    };
 
-    // Emit the redistribution + MFMA sequence
-    result.push_back("; BEGIN WMMA→MFMA translation: " + mnemonic);
+    // Helper: emit redistribution for one operand (w32 VGPRs → w64 VGPRs)
+    auto emitRedistribute = [&](int base_w32, int out_base, int n_w64) {
+      for (int i = 0; i < n_w64; ++i) {
+        int lo_reg = base_w32 + i;           // lower half VGPR
+        int hi_reg = base_w32 + n_w64 + i;  // upper half VGPR
+        result.push_back("ds_bpermute_b32 v" + std::to_string(t0) +
+                          ", v" + std::to_string(t_addr) +
+                          ", v" + std::to_string(lo_reg));
+        result.push_back("ds_bpermute_b32 v" + std::to_string(t1) +
+                          ", v" + std::to_string(t_addr) +
+                          ", v" + std::to_string(hi_reg));
+        result.push_back("s_waitcnt lgkmcnt(0)");
+        result.push_back("v_cndmask_b32_e32 v" + std::to_string(out_base + i) +
+                          ", v" + std::to_string(t0) +
+                          ", v" + std::to_string(t1) + ", vcc");
+      }
+    };
+
+    result.push_back("; BEGIN WMMA→MFMA: " + mnemonic + " → " + mfma_mnem);
 
     // Step 1: Save exec and enable full wave
     result.push_back("s_mov_b32 s12, exec_lo");
     result.push_back("s_mov_b32 s13, exec_hi");
     result.push_back("s_mov_b64 exec, -1");
 
-    // Step 2: Compute lane ID and source mapping
-    // v_lane = mbcnt(exec_lo=-1, 0) + mbcnt(exec_hi=-1, lo_result)
+    // Step 2: Compute lane ID and mapping
     result.push_back("v_mbcnt_lo_u32_b32 v" + std::to_string(t_lane) + ", -1, 0");
     result.push_back("v_mbcnt_hi_u32_b32 v" + std::to_string(t_lane) +
                       ", -1, v" + std::to_string(t_lane));
-    // src_lane = lane_id >> 1 (wave32 lane that has our data)
     result.push_back("v_lshrrev_b32_e32 v" + std::to_string(t_src) +
                       ", 1, v" + std::to_string(t_lane));
-    // is_upper = lane_id & 1 (selects upper half of WMMA VGPR pair)
     result.push_back("v_and_b32_e32 v" + std::to_string(t_upper) +
                       ", 1, v" + std::to_string(t_lane));
-    // byte_addr = src_lane * 4 (ds_bpermute uses byte offset)
     result.push_back("v_lshlrev_b32_e32 v" + std::to_string(t_addr) +
                       ", 2, v" + std::to_string(t_src));
-    // Comparison mask for selecting upper half
     result.push_back("v_cmp_ne_u32 vcc, 0, v" + std::to_string(t_upper));
 
-    // Step 3: Redistribute source A (8 VGPRs → 4 VGPRs across 64 lanes)
-    // WMMA v[srcA+0..3] → even lanes, v[srcA+4..7] → odd lanes
-    for (int i = 0; i < 4; ++i) {
-      int lo_reg = srcA.first + i;       // lower half VGPR
-      int hi_reg = srcA.first + 4 + i;   // upper half VGPR
-      int out_reg = mfma_srcA + i;
-      result.push_back("ds_bpermute_b32 v" + std::to_string(t0) +
-                        ", v" + std::to_string(t_addr) +
-                        ", v" + std::to_string(lo_reg));
-      result.push_back("ds_bpermute_b32 v" + std::to_string(t1) +
-                        ", v" + std::to_string(t_addr) +
-                        ", v" + std::to_string(hi_reg));
-      result.push_back("s_waitcnt lgkmcnt(0)");
-      result.push_back("v_cndmask_b32_e32 v" + std::to_string(out_reg) +
-                        ", v" + std::to_string(t0) +
-                        ", v" + std::to_string(t1) + ", vcc");
-    }
-
-    // Step 4: Redistribute source B (same pattern)
-    for (int i = 0; i < 4; ++i) {
-      int lo_reg = srcB.first + i;
-      int hi_reg = srcB.first + 4 + i;
-      int out_reg = mfma_srcB + i;
-      result.push_back("ds_bpermute_b32 v" + std::to_string(t0) +
-                        ", v" + std::to_string(t_addr) +
-                        ", v" + std::to_string(lo_reg));
-      result.push_back("ds_bpermute_b32 v" + std::to_string(t1) +
-                        ", v" + std::to_string(t_addr) +
-                        ", v" + std::to_string(hi_reg));
-      result.push_back("s_waitcnt lgkmcnt(0)");
-      result.push_back("v_cndmask_b32_e32 v" + std::to_string(out_reg) +
-                        ", v" + std::to_string(t0) +
-                        ", v" + std::to_string(t1) + ", vcc");
-    }
-
-    // Step 5: Redistribute accumulator (same pattern)
-    // Use mfma_acc as both input and output
-    for (int i = 0; i < 4; ++i) {
-      int lo_reg = acc.first + i;
-      int hi_reg = acc.first + 4 + i;
-      // Store in temp first to avoid overwriting input
-      result.push_back("ds_bpermute_b32 v" + std::to_string(t0) +
-                        ", v" + std::to_string(t_addr) +
-                        ", v" + std::to_string(lo_reg));
-      result.push_back("ds_bpermute_b32 v" + std::to_string(t1) +
-                        ", v" + std::to_string(t_addr) +
-                        ", v" + std::to_string(hi_reg));
-      result.push_back("s_waitcnt lgkmcnt(0)");
-      result.push_back("v_cndmask_b32_e32 v" + std::to_string(mfma_acc + i) +
-                        ", v" + std::to_string(t0) +
-                        ", v" + std::to_string(t1) + ", vcc");
-    }
+    // Step 3-5: Redistribute srcA, srcB, accumulator
+    emitRedistribute(srcA.first, mfma_srcA, src_w64);
+    emitRedistribute(srcB.first, mfma_srcB, src_w64);
+    emitRedistribute(acc.first, mfma_acc, dst_w64);
 
     // Step 6: Execute MFMA
-    result.push_back(mfma_mnem +
-                      " v[" + std::to_string(mfma_dst) + ":" +
-                      std::to_string(mfma_dst + 3) + "]" +
-                      ", v[" + std::to_string(mfma_srcA) + ":" +
-                      std::to_string(mfma_srcA + 3) + "]" +
-                      ", v[" + std::to_string(mfma_srcB) + ":" +
-                      std::to_string(mfma_srcB + 3) + "]" +
-                      ", v[" + std::to_string(mfma_acc) + ":" +
-                      std::to_string(mfma_acc + 3) + "]");
+    result.push_back(mfma_mnem + " " +
+                      regRange(mfma_dst, dst_w64) + ", " +
+                      regRange(mfma_srcA, src_w64) + ", " +
+                      regRange(mfma_srcB, src_w64) + ", " +
+                      regRange(mfma_acc, dst_w64));
 
-    // Step 7: Collect MFMA results back to 8 VGPRs in lower 32 lanes
-    // MFMA lane 2L → dst v[0:3], MFMA lane 2L+1 → dst v[4:7]
-    // For wave32 lane L: read from wave64 lane 2L and 2L+1
-    // Compute forward address: fwd_addr = lane_id * 2 * 4
-    result.push_back("v_lshlrev_b32_e32 v" + std::to_string(t_addr) +
-                      ", 3, v" + std::to_string(t_src));  // src_lane = lane>>1, ×8 for even
-    // Actually: we need lane 2L and 2L+1
-    // src_lane already = lane_id >> 1. For collecting:
-    // lane_id is 0-63. We want to write results back only in lanes 0-31.
-    // In lane L (0-31), collect from MFMA lanes 2L and 2L+1.
+    // Step 7: Collect MFMA results back to dst_w32 VGPRs in lower 32 lanes
+    // MFMA lane 2L has lower half, lane 2L+1 has upper half.
+    // Wave32 lane L: dst[0:dst_w64-1] from lane 2L, dst[dst_w64:dst_w32-1] from lane 2L+1
 
-    // Simpler: just use ds_bpermute to read from lanes 2L and 2L+1
-    for (int i = 0; i < 4; ++i) {
-      int src_reg = mfma_dst + i;
-      // Read from lane 2L (for lower half dst v[0:3])
-      result.push_back("v_lshlrev_b32_e32 v" + std::to_string(t_addr) +
-                        ", 3, v" + std::to_string(t_lane));  // wait, lane * 2 * 4 = lane << 3
-      // Actually: byte addr for lane 2L = (lane * 2) * 4 = lane * 8
-      // But ds_bpermute uses lane_id * 4 as byte offset
-      // So addr for lane 2L = 2L * 4 = L * 8
-      result.pop_back();  // remove wrong one
-      result.push_back("v_lshlrev_b32_e32 v" + std::to_string(t_addr) +
-                        ", 3, v" + std::to_string(t_src)); // t_src = lane>>1... no
-
-    }
-    // This is getting complicated — let me simplify
-
-    // Actually, for collecting: we restore exec to lower 32 lanes FIRST,
-    // then each lane L reads from MFMA result lanes 2L and 2L+1 via
-    // ds_bpermute. This gives us the lower and upper halves.
-
-    // Restore exec to lower 32 lanes
-    result.pop_back(); result.pop_back(); result.pop_back(); result.pop_back();
-    result.pop_back();  // remove the partially emitted collect code
-
-    // Simpler collect: just set exec back to lower 32 and use the existing
-    // MFMA result. Since our lane mapping puts wave32 lane L's data into
-    // wave64 lanes 2L and 2L+1, we need to gather those back.
-
+    // Recompute lane ID in lower 32 lanes
     result.push_back("s_mov_b32 exec_lo, s12");
     result.push_back("s_mov_b32 exec_hi, 0");
-
-    // Now in lower 32 lanes. Each lane L needs:
-    // dst[0:3] = MFMA result from lane 2*L
-    // dst[4:7] = MFMA result from lane 2*L+1
-
-    // Recompute addresses for lower 32 lanes
     result.push_back("v_mbcnt_lo_u32_b32 v" + std::to_string(t_lane) + ", -1, 0");
-    // addr_even = (lane * 2) * 4
+    // addr_even = lane * 2 * 4 = lane << 3 (byte addr for lane 2L)
     result.push_back("v_lshlrev_b32_e32 v" + std::to_string(t_addr) +
                       ", 3, v" + std::to_string(t_lane));
-    // addr_odd = addr_even + 4
+    // addr_odd = addr_even + 4 (byte addr for lane 2L+1)
     result.push_back("v_add_u32_e32 v" + std::to_string(t0) +
                       ", 4, v" + std::to_string(t_addr));
 
-    // Enable full wave temporarily for ds_bpermute (reads from any lane)
+    // Enable full wave for ds_bpermute cross-lane reads
     result.push_back("s_mov_b64 exec, -1");
 
-    for (int i = 0; i < 4; ++i) {
-      // Read from even lane (lower half)
+    for (int i = 0; i < dst_w64; ++i) {
+      // Lower half: read from lane 2L
       result.push_back("ds_bpermute_b32 v" + std::to_string(dst.first + i) +
                         ", v" + std::to_string(t_addr) +
                         ", v" + std::to_string(mfma_dst + i));
-      // Read from odd lane (upper half)
-      result.push_back("ds_bpermute_b32 v" + std::to_string(dst.first + 4 + i) +
+      // Upper half: read from lane 2L+1
+      result.push_back("ds_bpermute_b32 v" + std::to_string(dst.first + dst_w64 + i) +
                         ", v" + std::to_string(t0) +
                         ", v" + std::to_string(mfma_dst + i));
     }
     result.push_back("s_waitcnt lgkmcnt(0)");
 
-    // Restore exec to lower 32 lanes
+    // Restore exec
     result.push_back("s_mov_b32 exec_lo, s12");
     result.push_back("s_mov_b32 exec_hi, s13");
 
-    result.push_back("; END WMMA→MFMA translation");
+    result.push_back("; END WMMA→MFMA: " + mfma_mnem);
     return result;
-  }
+    }  // if (mapping)
+  }  // WMMA scope
 
   // ─── Other WMMA/SWMMAC → NOP with diagnostic ───
   if (mnemonic.find("v_wmma_") == 0 || mnemonic.find("v_swmmac_") == 0) {
