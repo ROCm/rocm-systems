@@ -904,6 +904,12 @@ Examples:
         "-g", dest="debug", action="store_true", help="\t\tDebug single metric."
     )
     analyze_advanced_group.add_argument(
+        "--table-view",
+        dest="table_view",
+        action="store_true",
+        help="\t\tForce all tables to table view; ignore cli_style from YAML config (debug).",
+    )
+    analyze_advanced_group.add_argument(
         "--dependency",
         action="store_true",
         help="\t\tList the installation dependency.",

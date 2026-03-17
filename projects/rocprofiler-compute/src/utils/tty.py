@@ -582,8 +582,13 @@ def format_table_output(
     # fash for now.
     transpose = table_type != "raw_csv_table" and table_config.get("columnwise", False)
 
+    # When --table-view is set, force table output and ignore cli_style from config
+    if getattr(args, "table_view", False):
+        content += (
+            get_table_string(df, transpose=transpose, decimal=args.decimal) + "\n"
+        )
     # enable mem_chart only with single run
-    if (
+    elif (
         table_config.get("cli_style") == "mem_chart"
         and len(runs) == 1
         and "Metric" in df.columns

@@ -10,6 +10,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Introduced support for MI350P GPU
 
+* ``--table-view`` debug option in analyze mode to force all TTY output to table view and ignore ``cli_style`` from YAML config (e.g. mem_chart, Roofline charts render as tables).
+
 ### Changed
 
 * Standalone roofline (`--roof-only` option) in profile mode now creates `roofline.csv` only. HTML roofline charts are generated via `rocprof-compute analyze`. The `calc_ai_profile()` function has been removed; `calc_ai_analyze()` is the single source of truth for arithmetic intensity calculation.
