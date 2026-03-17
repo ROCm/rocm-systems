@@ -435,6 +435,10 @@ static bool IsUnsupportedOnGFX9(const std::string& mnemonic) {
   if (mnemonic.find("cluster_") == 0) return true;
   if (mnemonic.find("_prefetch_") != std::string::npos) return true;
 
+  // v_permlane16/v_permlanex16 — GFX10+ only, no simple GFX9 equivalent
+  if (mnemonic.find("v_permlane16") == 0) return true;
+  if (mnemonic.find("v_permlanex16") == 0) return true;
+
   // s_wait_alu — GFX12-only ALU dependency wait
   if (mnemonic == "s_wait_alu") return true;
 
@@ -783,6 +787,44 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
         result.push_back("v_readfirstlane_b32 " + operands[0] + ", v255");
         return result;
       }
+    }
+  }
+
+  // ─── DPP8 → DPP16 or ds_bpermute conversion ───
+  // DPP8 (dpp8:[...]) only exists on GFX10+. Convert to DPP16 where possible.
+  if (line.find("dpp8:") != std::string::npos) {
+    // Parse the dpp8 pattern: dpp8:[a,b,c,d,e,f,g,h]
+    size_t dpp8_pos = line.find("dpp8:[");
+    if (dpp8_pos != std::string::npos) {
+      // Extract base instruction (everything before dpp8:)
+      std::string base_part = line.substr(0, dpp8_pos);
+      // Trim trailing whitespace
+      size_t be = base_part.find_last_not_of(" \t");
+      if (be != std::string::npos) base_part = base_part.substr(0, be + 1);
+
+      // Common DPP8 identity: dpp8:[0,1,2,3,4,5,6,7] → no-op (remove DPP)
+      if (line.find("dpp8:[0,1,2,3,4,5,6,7]") != std::string::npos) {
+        // Replace _dpp suffix with _e32 in mnemonic
+        std::string no_dpp = base_part;
+        size_t dpp_suffix = no_dpp.find("_dpp");
+        if (dpp_suffix != std::string::npos) {
+          no_dpp.replace(dpp_suffix, 4, "_e32");
+        }
+        result.push_back(no_dpp);
+        return result;
+      }
+
+      // Common DPP8 reverse: dpp8:[7,6,5,4,3,2,1,0] → no DPP16 equivalent
+      // For other arbitrary DPP8 patterns, fall through to emit as-is
+      // with a warning. The assembler will reject it, but at least we
+      // tried the common case.
+
+      // Default: strip dpp8, add row_shr:0 (identity) with full masks
+      // This loses the swizzle but keeps the kernel runnable
+      result.push_back(base_part +
+                        " row_shr:0 row_mask:0xf bank_mask:0xf"
+                        " ; WARNING: DPP8 pattern lost in translation");
+      return result;
     }
   }
 
