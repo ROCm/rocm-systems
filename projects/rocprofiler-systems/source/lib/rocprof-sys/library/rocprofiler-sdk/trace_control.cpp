@@ -29,10 +29,9 @@ trace_control::trace_control(std::string_view trace_regions)
     {
         return;
     }
-    for(auto&& name : rocprofsys::common::delimit(std::string{ trace_regions }, ","))
-    {
-        m_trace_regions.emplace(std::move(name));
-    }
+
+    const auto delimited = rocprofsys::common::delimit(std::string{ trace_regions }, ",");
+    m_trace_regions.insert(delimited.begin(), delimited.end());
 
     LOG_INFO("Trace controller: region filter active for regions: [{}]",
              fmt::join(m_trace_regions, ", "));
@@ -41,7 +40,10 @@ trace_control::trace_control(std::string_view trace_regions)
 void
 trace_control::handle_range_start(uint64_t range_id, const char* message)
 {
-    if(message == nullptr || m_trace_regions.count(message) == 0) return;
+    if(message == nullptr || m_trace_regions.count(message) == 0)
+    {
+        return;
+    }
 
     bool was_empty = false;
     {
@@ -153,17 +155,12 @@ trace_control::shutdown()
 }
 
 void
-trace_control::register_region_start_callback(callback_t callback)
+trace_control::register_region_start_stop_callbacks(callback_t start_callback,
+                                                    callback_t stop_callback)
 {
     std::lock_guard<std::mutex> const lk{ m_callback_mutex };
-    m_start_callbacks.push_back(std::move(callback));
-}
-
-void
-trace_control::register_region_stop_callback(callback_t callback)
-{
-    std::lock_guard<std::mutex> const lk{ m_callback_mutex };
-    m_stop_callbacks.push_back(std::move(callback));
+    m_start_callbacks.push_back(std::move(start_callback));
+    m_stop_callbacks.push_back(std::move(stop_callback));
 }
 
 bool
@@ -176,10 +173,16 @@ bool
 trace_control::should_write_markers() const
 {
     // If no region filter, always write
-    if(!region_filter_active()) return true;
+    if(!region_filter_active())
+    {
+        return true;
+    }
 
     // If paused by user, don't write
-    if(m_user_paused.load(std::memory_order_relaxed)) return false;
+    if(m_user_paused.load(std::memory_order_relaxed))
+    {
+        return false;
+    }
 
     // Only write if inside an active filtered region
     std::lock_guard<std::mutex> const lk{ m_region_mutex };

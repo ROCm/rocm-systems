@@ -35,27 +35,24 @@ template <typename MarkerWriterPolicy = default_marker_policy>
 class roctx_client
 {
 public:
-    roctx_client(roctx_client_config roctx_cfg);
-    ~roctx_client() = default;
+    roctx_client(const roctx_client_config& roctx_cfg);
 
+    ~roctx_client()                              = default;
     roctx_client(const roctx_client&)            = delete;
     roctx_client& operator=(const roctx_client&) = delete;
     roctx_client(roctx_client&&)                 = default;
     roctx_client& operator=(roctx_client&&)      = default;
 
     void configure_services(rocprofiler_context_id_t ctx);
-
     bool should_write_markers() const;
     void shutdown();
-
-    std::shared_ptr<control::trace_control> get_controller() { return m_controller; }
+    std::shared_ptr<control::trace_control> get_controller() const;
 
 private:
     using marker_range_stack_t =
         std::vector<std::tuple<tim::hash_value_t, rocprofiler_timestamp_t, bool>>;
 
-    rocprofiler_context_id_t m_ctx{ 0 };
-
+    rocprofiler_context_id_t                m_ctx{ 0 };
     roctx_client_config                     m_config;
     marker_writer<MarkerWriterPolicy>       m_writer;
     std::shared_ptr<control::trace_control> m_controller{};
@@ -66,17 +63,14 @@ private:
     void handle_marker_core_enter(rocprofiler_callback_tracing_record_t record,
                                   rocprofiler_user_data_t*              user_data,
                                   rocprofiler_timestamp_t               ts);
-
     void handle_marker_core_exit(rocprofiler_callback_tracing_record_t record,
                                  rocprofiler_user_data_t*              user_data,
                                  rocprofiler_timestamp_t               ts);
-
     void handle_marker_control(rocprofiler_callback_tracing_record_t record);
 
     static void marker_core_callback(rocprofiler_callback_tracing_record_t record,
                                      rocprofiler_user_data_t*              user_data,
                                      void*                                 callback_data);
-
     static void marker_control_callback(rocprofiler_callback_tracing_record_t record,
                                         rocprofiler_user_data_t*              user_data,
                                         void* callback_data);

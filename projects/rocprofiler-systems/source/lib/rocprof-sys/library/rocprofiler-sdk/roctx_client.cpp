@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "library/rocprofiler-sdk/roctx_client.hpp"
+#include "library/rocprofiler-sdk/marker_writer.hpp"
 #include "library/rocprofiler-sdk/trace_control.hpp"
 
 #include "core/common_types.hpp"
@@ -75,16 +76,10 @@ configure_rocprofiler_callback_tracing(rocprofiler_context_id_t               co
     }
 }
 
-std::string_view
-get_operation_name(rocprofiler_callback_tracing_record_t record)
-{
-    return trace_cache::get_metadata_registry().get_callback_tracing_info().at(
-        record.kind, record.operation);
-}
 }  // namespace
 
 template <typename MarkerWriterPolicy>
-roctx_client<MarkerWriterPolicy>::roctx_client(roctx_client_config roctx_cfg)
+roctx_client<MarkerWriterPolicy>::roctx_client(const roctx_client_config& roctx_cfg)
 : m_config{ roctx_cfg }
 , m_writer{ roctx_cfg.use_perfetto, roctx_cfg.use_timemory,
             roctx_cfg.perfetto_annotations }
@@ -97,6 +92,13 @@ bool
 roctx_client<MarkerWriterPolicy>::should_write_markers() const
 {
     return (m_config.is_write_enabled && m_controller->should_write_markers());
+}
+
+template <typename MarkerWriterPolicy>
+std::shared_ptr<control::trace_control>
+roctx_client<MarkerWriterPolicy>::get_controller() const
+{
+    return m_controller;
 }
 
 template <typename MarkerWriterPolicy>
@@ -176,7 +178,9 @@ roctx_client<MarkerWriterPolicy>::handle_marker_core_enter(
             // They will be written in EXIT phase with duration
             if(write_enabled)
             {
-                auto name = get_operation_name(record);
+                const auto& name =
+                    trace_cache::get_metadata_registry().get_callback_tracing_info().at(
+                        record.kind, record.operation);
                 m_writer.write_begin(name);
             }
             break;
@@ -293,7 +297,9 @@ roctx_client<MarkerWriterPolicy>::handle_marker_core_exit(
             // For other operations (like roctxGetThreadId), write with duration
             if(should_write_markers())
             {
-                auto name = get_operation_name(record);
+                const auto& name =
+                    trace_cache::get_metadata_registry().get_callback_tracing_info().at(
+                        record.kind, record.operation);
                 m_writer.write_end(name, begin_ts, ts, args_str, record);
             }
             break;

@@ -33,8 +33,8 @@ public:
 
     void shutdown();
 
-    void register_region_start_callback(callback_t callback);
-    void register_region_stop_callback(callback_t callback);
+    void register_region_start_stop_callbacks(callback_t start_callback,
+                                              callback_t stop_callback);
 
     bool region_filter_active() const;
 

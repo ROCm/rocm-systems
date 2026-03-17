@@ -3,6 +3,7 @@
 
 #include "rocprof-sys/library/rocprofiler-sdk/marker_writer.hpp"
 
+#include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/sample_type.hpp"
 
 #include <rocprofiler-sdk/callback_tracing.h>
@@ -15,6 +16,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <unistd.h>
 #include <vector>
 
 namespace
@@ -48,9 +50,10 @@ public:
     MOCK_METHOD(void, pop_perfetto_ts,
                 (const char* name, uint64_t ts,
                  const std::vector<annotation_entry>& annotations));
-    MOCK_METHOD(void, cache_init, ());
+    MOCK_METHOD(void, add_string, (const std::string_view string_value));
     MOCK_METHOD(void, store_region, (const region_sample& sample));
-    MOCK_METHOD(void, add_thread_info, (uint64_t thread_id));
+    MOCK_METHOD(void, add_thread_info,
+                (const rocprofsys::trace_cache::info::thread& thread_info));
 };
 
 struct mock_marker_policy
@@ -74,9 +77,15 @@ struct mock_marker_policy
         api->pop_perfetto_ts(name, ts, annotations);
     }
 
-    static void cache_init() { api->cache_init(); }
+    static void add_string(const std::string_view string_value)
+    {
+        api->add_string(string_value);
+    }
     static void store_region(const region_sample& sample) { api->store_region(sample); }
-    static void add_thread_info(uint64_t thread_id) { api->add_thread_info(thread_id); }
+    static void add_thread_info(const rocprofsys::trace_cache::info::thread& thread_info)
+    {
+        api->add_thread_info(thread_info);
+    }
 };
 
 using mock_marker_writer = rocprofsys::rocprofiler_sdk::marker_writer<mock_marker_policy>;
@@ -105,7 +114,8 @@ TEST_F(marker_writer_test, all_backends_with_annotations)
     auto& mock   = *mock_marker_policy::api;
     auto  record = make_dummy_record();
 
-    EXPECT_CALL(mock, cache_init());
+    constexpr auto str = "rocm_marker_api";
+    EXPECT_CALL(mock, add_string(std::string_view(str)));
     EXPECT_CALL(mock, push_timemory(std::string_view("my_region")));
     EXPECT_CALL(mock, pop_timemory(std::string_view("my_region")));
     EXPECT_CALL(mock, push_perfetto_ts(StrEq("my_region"), 1000, 100,
@@ -113,7 +123,9 @@ TEST_F(marker_writer_test, all_backends_with_annotations)
                                                    IsAnnotation("stack_id", 100u))));
     EXPECT_CALL(mock, pop_perfetto_ts(StrEq("my_region"), 2000,
                                       ElementsAre(IsAnnotation("end_ns", 2000u))));
-    EXPECT_CALL(mock, add_thread_info(42u));
+    const auto thread_info =
+        rocprofsys::trace_cache::info::thread{ getppid(), getpid(), 42u, 0, 0, "{}" };
+    EXPECT_CALL(mock, add_thread_info(thread_info));
     EXPECT_CALL(mock,
                 store_region(AllOf(Field(&region_sample::thread_id, 42u),
                                    Field(&region_sample::start_timestamp, 1000u),

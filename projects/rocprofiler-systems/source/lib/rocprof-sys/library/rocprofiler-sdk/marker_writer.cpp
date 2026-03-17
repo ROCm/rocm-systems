@@ -67,10 +67,9 @@ default_marker_policy::pop_perfetto_ts(const char* name, uint64_t ts,
 }
 
 void
-default_marker_policy::cache_init()
+default_marker_policy::add_string(const std::string_view string_value)
 {
-    trace_cache::get_metadata_registry().add_string(
-        trait::name<category::rocm_marker_api>::value);
+    trace_cache::get_metadata_registry().add_string(string_value);
 }
 
 void
@@ -80,11 +79,9 @@ default_marker_policy::store_region(const trace_cache::region_sample& sample)
 }
 
 void
-default_marker_policy::add_thread_info(uint64_t thread_id)
+default_marker_policy::add_thread_info(const trace_cache::info::thread& thread_info)
 {
-    constexpr size_t UNKNOWN_TIME = 0;
-    trace_cache::get_metadata_registry().add_thread_info(
-        { getppid(), getpid(), thread_id, UNKNOWN_TIME, UNKNOWN_TIME, "{}" });
+    trace_cache::get_metadata_registry().add_thread_info(thread_info);
 }
 
 }  // namespace rocprofiler_sdk

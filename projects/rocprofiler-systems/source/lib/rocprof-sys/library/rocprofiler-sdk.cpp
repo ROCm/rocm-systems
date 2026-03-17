@@ -1438,7 +1438,8 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
             {
                 if(get_is_continuous_integration())
                 {
-                    LOG_CRITICAL("Unhandled callback record: {}", info.str());
+                    LOG_CRITICAL("Unhandled callback record: {}",
+                                 static_cast<int>(record.kind));
                     ::rocprofsys::set_state(::rocprofsys::State::Finalized);
                     std::abort();
                 }
@@ -1530,7 +1531,8 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
             {
                 if(get_is_continuous_integration())
                 {
-                    LOG_CRITICAL("Unhandled callback record: {}", info.str());
+                    LOG_CRITICAL("Unhandled callback record: {}",
+                                 static_cast<int>(record.kind));
                     ::rocprofsys::set_state(::rocprofsys::State::Finalized);
                     std::abort();
                 }
@@ -2212,11 +2214,8 @@ is_valid(rocprofiler_context_id_t ctx)
 }
 
 void
-start_control_context()
+start_context(rocprofiler_context_id_t ctx)
 {
-    if(!tool_data) return;
-
-    const auto ctx = tool_data->get_control_context();
     if(is_initialized(ctx) && !is_active(ctx))
     {
         ROCPROFILER_CALL(rocprofiler_start_context(ctx));
@@ -2224,15 +2223,26 @@ start_control_context()
 }
 
 void
-start_code_obj_context()
+stop_context(rocprofiler_context_id_t ctx)
 {
-    if(!tool_data) return;
-
-    const auto ctx = tool_data->get_code_obj_context();
-    if(is_initialized(ctx) && !is_active(ctx))
+    if(is_initialized(ctx) && is_active(ctx))
     {
-        ROCPROFILER_CALL(rocprofiler_start_context(ctx));
+        ROCPROFILER_CALL(rocprofiler_stop_context(ctx));
     }
+}
+
+void
+start_context(const client_data::context_id_vec_t& ctxs)
+{
+    std::for_each(std::begin(ctxs), std::end(ctxs),
+                  [](const auto& ctx) { start_context(ctx); });
+}
+
+void
+stop_context(const client_data::context_id_vec_t& ctxs)
+{
+    std::for_each(std::begin(ctxs), std::end(ctxs),
+                  [](const auto& ctx) { stop_context(ctx); });
 }
 
 int
@@ -2489,18 +2499,6 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         ROCPROFILER_CALL(rocprofiler_configure_callback_dispatch_counting_service(
             _data->counter_ctx, dispatch_counting_service_callback, _data,
             counter_record_callback, _data));
-
-        // ROCPROFILER_CALL(rocprofiler_create_buffer(
-        //     counter_ctx, buffer_size, watermark,
-        //     ROCPROFILER_BUFFER_POLICY_LOSSLESS, tool_tracing_buffered, tool_data,
-        //     &counter_collection_buffer));
-
-        // for(const auto& itr : *agent_counter_profiles)
-        // {
-        //     ROCPROFILER_CALL(rocprofiler_configure_agent_profile_counting_service(
-        //         counter_ctx, counter_collection_buffer, itr.first,
-        //         agent_counter_profile_callback, nullptr));
-        // }
     }
 
     for(const auto& itr : _data->get_buffers())
@@ -2532,7 +2530,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     // creation). Roctx client configures MARKER_CORE_API and MARKER_CONTROL_API
     // on control_ctx. trace_control's pause/resume callbacks are routed through
     // roctx_client (registered later in library.cpp).
-    g_roctx_client->configure_services(_data->control_ctx);
+    g_roctx_client->configure_services(_data->get_control_context());
 
     const auto control          = get_roctx_client()->get_controller();
     const auto filtering_active = control->region_filter_active();
@@ -2542,8 +2540,11 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     }
     else
     {
-        start_code_obj_context();
-        start_control_context();
+        if(!_data)
+        {
+            start_context(_data->get_code_obj_context());
+            start_context(_data->get_control_context());
+        }
     }
     // no errors
     return 0;
@@ -2576,6 +2577,30 @@ tool_fini(void* callback_data)
 
     delete tool_data;
     tool_data = nullptr;
+}
+
+void
+flush_counter_tracks_to_zero(rocprofiler_timestamp_t timestamp)
+{
+    // Get current timestamp if not provided
+    if(timestamp == 0)
+    {
+        ROCPROFILER_CALL(rocprofiler_get_timestamp(&timestamp));
+    }
+
+    auto* storage = get_counter_storage();
+    if(!storage)
+    {
+        return;
+    }
+
+    for(auto& [agent_id, counter_map] : *storage)
+    {
+        for(auto& [counter_id, cs] : counter_map)
+        {
+            cs.write_zero(timestamp);
+        }
+    }
 }
 
 }  // namespace
@@ -2617,54 +2642,11 @@ sample()
 {}
 
 void
-flush()
-{
-    for(auto itr : tool_data->get_buffers())
-    {
-        if(itr.handle > 0)
-        {
-            auto status = rocprofiler_flush_buffer(itr);
-            if(status != ROCPROFILER_STATUS_ERROR_BUFFER_BUSY)
-            {
-                ROCPROFILER_CALL(status);
-            }
-        }
-    }
-}
-
-void
-flush_counter_tracks_to_zero(rocprofiler_timestamp_t timestamp)
-{
-    // Get current timestamp if not provided
-    if(timestamp == 0)
-    {
-        ROCPROFILER_CALL(rocprofiler_get_timestamp(&timestamp));
-    }
-
-    auto* storage = get_counter_storage();
-    if(!storage) return;
-
-    for(auto& [agent_id, counter_map] : *storage)
-    {
-        for(auto& [counter_id, cs] : counter_map)
-        {
-            cs.write_zero(timestamp);
-        }
-    }
-}
-
-void
 start()
 {
     if(!tool_data) return;
 
-    for(auto itr : tool_data->get_all_contexts())
-    {
-        if(is_initialized(itr) && !is_active(itr))
-        {
-            ROCPROFILER_CALL(rocprofiler_start_context(itr));
-        }
-    }
+    start_context(tool_data->get_all_contexts());
 }
 
 void
@@ -2672,30 +2654,7 @@ stop()
 {
     if(!tool_data) return;
 
-    flush();
-
-    for(auto itr : tool_data->get_all_contexts())
-    {
-        if(is_initialized(itr) && is_active(itr))
-        {
-            ROCPROFILER_CALL(rocprofiler_stop_context(itr));
-        }
-    }
-}
-
-void
-pause()
-{
-    if(!tool_data) return;
-
-    for(auto itr : tool_data->get_main_contexts())
-    {
-        if(is_initialized(itr) && is_active(itr))
-        {
-            ROCPROFILER_CALL(rocprofiler_stop_context(itr));
-        }
-    }
-    flush_counter_tracks_to_zero(0);
+    stop_context(tool_data->get_all_contexts());
 }
 
 void
@@ -2704,14 +2663,16 @@ resume()
     flush_counter_tracks_to_zero(0);
 
     if(!tool_data) return;
+    start_context(tool_data->get_main_contexts());
+}
 
-    for(auto itr : tool_data->get_main_contexts())
-    {
-        if(is_initialized(itr) && !is_active(itr))
-        {
-            ROCPROFILER_CALL(rocprofiler_start_context(itr));
-        }
-    }
+void
+pause()
+{
+    if(!tool_data) return;
+    stop_context(tool_data->get_main_contexts());
+
+    flush_counter_tracks_to_zero(0);
 }
 
 std::vector<hardware_counter_info>

@@ -107,8 +107,8 @@ protected:
         auto                 client = std::make_unique<roctx_client_t>(config);
 
         auto ctrl = client->get_controller();
-        ctrl->register_region_start_callback([this]() { start_count++; });
-        ctrl->register_region_stop_callback([this]() { stop_count++; });
+        ctrl->register_region_start_stop_callbacks([this]() { start_count++; },
+                                                   [this]() { stop_count++; });
 
         return client;
     }

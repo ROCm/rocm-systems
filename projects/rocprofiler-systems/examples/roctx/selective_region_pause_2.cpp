@@ -16,7 +16,7 @@
 //     CodeBlock_A                               (profiled)
 //     CodeBlock_B                               (profiled)
 //     roctxProfilerResume                       (no valid pause to undo — no-op)
-//     as                               (profiled)
+//     CodeBlock_C                               (profiled)
 //   roctxRangeStop("Region 1")                  (region ends — profiling stops)
 //   CodeBlock_D                                 (outside region — not profiled)
 //
