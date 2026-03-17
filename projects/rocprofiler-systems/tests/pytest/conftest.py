@@ -170,7 +170,7 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         "--python-root-dirs",
         action="store",
         default=None,
-        help="Semicolon-separated list of Python root directories (must match --python-versions)",
+        help="Semicolon-separated list of directories to search for Python interpreters in order of preference",
     )
 
 
@@ -838,11 +838,22 @@ def _ctest_generate_tests(
         "#",
         "# Run with: ctest --test-dir <directory containing this file>",
         "#",
-        "# Supported variables (-D VAR=VALUE):",
+        "# Supported environment variables:",
         "#   ROCPROFSYS_TEST_DIR         - Path to test package directory or .pyz file",
         "#   ROCPROFSYS_TEST_EXECUTABLE  - Python or pytest executable to use",
         "#   ROCPROFSYS_PYTHON_HINTS     - Additional search paths for versioned Python interpreters",
         "#",
+        "",
+        "# Import configuration from environment variables",
+        "if(DEFINED ENV{ROCPROFSYS_TEST_DIR} AND NOT DEFINED ROCPROFSYS_TEST_DIR)",
+        '    set(ROCPROFSYS_TEST_DIR "$ENV{ROCPROFSYS_TEST_DIR}")',
+        "endif()",
+        "if(DEFINED ENV{ROCPROFSYS_TEST_EXECUTABLE} AND NOT DEFINED ROCPROFSYS_TEST_EXECUTABLE)",
+        '    set(ROCPROFSYS_TEST_EXECUTABLE "$ENV{ROCPROFSYS_TEST_EXECUTABLE}")',
+        "endif()",
+        "if(DEFINED ENV{ROCPROFSYS_PYTHON_HINTS} AND NOT DEFINED ROCPROFSYS_PYTHON_HINTS)",
+        '    set(ROCPROFSYS_PYTHON_HINTS "$ENV{ROCPROFSYS_PYTHON_HINTS}")',
+        "endif()",
         "",
         "execute_process(COMMAND pwd OUTPUT_VARIABLE _CTEST_DIR OUTPUT_STRIP_TRAILING_WHITESPACE)",
         "if(NOT DEFINED ROCPROFSYS_TEST_DIR)",
@@ -870,13 +881,13 @@ def _ctest_generate_tests(
         '    set(_ROCPROFSYS_NODEID_PFX "${_BUILD_PATH}")',
         '    set(_ROCPROFSYS_EXTRA_ARGS "${_TEST_ARGS}")',
         "else()",
-        '    message(FATAL_ERROR "Cannot find test package. Set -D ROCPROFSYS_TEST_DIR=/path/to/rocprofsys-tests.pyz")',
+        '    message(FATAL_ERROR "Cannot find test package. Set ROCPROFSYS_TEST_DIR=/path/to/rocprofsys-tests.pyz")',
         "endif()",
         "",
     ]
 
     # Used to skip python-versioned tests that the user does not have installed.
-    # Users can pass -D ROCPROFSYS_PYTHON_HINTS=/path/to/bin;... to help
+    # Users set ROCPROFSYS_PYTHON_HINTS=/path/to/bin;... env var to help
     # find_program locate non-PATH pythons (e.g. conda envs).
     if python_versions_needed:
         lines.append("# Detect available Python versions on this system")
@@ -960,6 +971,7 @@ def _ctest_generate_tests(
             props.append(f'    LABELS "{";".join(sorted(labels))}"')
         props.append(f"    TIMEOUT {timeout}")
         props.append(f"    SKIP_RETURN_CODE {SKIP_RETURN_CODE}")
+        props.append(f'    FIXTURES_REQUIRED "rocprofsys-global-tmp-files"')
         if run_serial:
             props.append(f"    RUN_SERIAL TRUE")
         if depends_on:
@@ -978,22 +990,17 @@ def _ctest_generate_tests(
     # Generate a cleanup test that removes temp files created by rocprofiler-systems
     tmp_patterns = _cleanup_temp_patterns()
     find_args = " -o ".join(f"-name '{Path(p).name}'" for p in tmp_patterns)
-    lines.append("# Cleanup temp files created by rocprofiler-systems tests")
-    lines.append("add_test(")
-    lines.append("    NAME rocprofsys-cleanup-tmp-files")
-    lines.append("    COMMAND sh -c")
-    lines.append(
-        f'        "find /tmp -maxdepth 1 -user $(whoami)'
+    find_cmd = (
+        f"find /tmp -maxdepth 1 -user $(whoami)"
         f" \\\\( {find_args} \\\\)"
-        f' -delete 2>/dev/null || true"'
+        f" -delete 2>/dev/null || true"
     )
-    lines.append(")")
-    lines.append("set_tests_properties(")
-    lines.append("    rocprofsys-cleanup-tmp-files")
-    lines.append("    PROPERTIES")
-    lines.append('        FIXTURES_CLEANUP "rocprofsys-global-tmp-files"')
-    lines.append('        LABELS "cleanup;global"')
-    lines.append("        TIMEOUT 30")
+    lines.append("# Cleanup temp files created by rocprofiler-systems tests")
+    lines.append(f'add_test("rocprofsys-cleanup-tmp-files" "sh" "-c" "{find_cmd}")')
+    lines.append('set_tests_properties("rocprofsys-cleanup-tmp-files" PROPERTIES')
+    lines.append('    FIXTURES_CLEANUP "rocprofsys-global-tmp-files"')
+    lines.append('    LABELS "cleanup;global"')
+    lines.append("    TIMEOUT 30")
     lines.append(")")
     lines.append("")
 
@@ -1832,7 +1839,9 @@ def run_test(
         )
 
         if not result.success and not fail_on_pass:
-            # Makereport is only for subtest failures, so we also build output here
+            short_msg = fail_message or f"{runner_type} test failed"
+            ctest_mode = request.config.getoption("--ctest-mode", default="off")
+
             cmd_str = " ".join(str(c) for c in getattr(result, "command", []))
             env_dict = getattr(result, "environment", {})
             env_str = (
@@ -1847,12 +1856,16 @@ def run_test(
             if env_str:
                 details.append(f"Environment:\n{env_str}")
             details.append(f"Runner Output:\n{output}")
-
             detail_text = "\n\n".join(details)
-            if fail_message:
-                msg = f"{fail_message}\n\n{detail_text}"
+
+            if ctest_mode == "run":
+                # Print details to stdout (captured by CTest) and fail with
+                # a short message to avoid the same output appearing twice.
+                print(f"\n{detail_text}", flush=True)
+                msg = short_msg
             else:
-                msg = f"{runner_type} test failed\n\n{detail_text}"
+                msg = f"{short_msg}\n\n{detail_text}"
+
             if skip_on_error:
                 pytest.skip(msg)
             else:

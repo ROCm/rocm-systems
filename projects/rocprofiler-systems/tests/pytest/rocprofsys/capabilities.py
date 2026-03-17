@@ -414,6 +414,20 @@ def _get_python_version(executable: Path) -> Optional[str]:
     return None
 
 
+def _find_python_in_dirs(version: str, root_dirs: list[Path]) -> Optional[Path]:
+    """Search for a specific Python version across multiple root directories."""
+    for root_dir in root_dirs:
+        for name in [f"python{version}", "python3", "python"]:
+            candidate = root_dir / "bin" / name
+            if not candidate.exists():
+                candidate = root_dir / name
+            if candidate.exists() and candidate.is_file():
+                detected = _get_python_version(candidate)
+                if detected and detected.startswith(version):
+                    return candidate
+    return None
+
+
 def _get_supported_python_versions_and_executables(
     rocprofsys_site_packages: Optional[Path],
     python_versions_hint: Optional[list[str]],
@@ -423,55 +437,33 @@ def _get_supported_python_versions_and_executables(
 
     A supported python version is one that has a corresponding libpyrocprofsys.<IMPL>-<VERSION>-<ARCH>-<OS>-<ABI>.so.
 
-    Raises:
-        ValueError: If python_versions and python_root_dirs have different lengths
-        FileNotFoundError: If a Python version is specified but not found
+    When both python_versions_hint and python_root_dirs_hint are provided,
+    each version is searched for across ALL root directories (not 1:1 paired).
+    Falls back to PATH lookup if not found in any root directory.
     """
     if not rocprofsys_site_packages:
         return None, None
 
-    # First get a list of all found versions and executables on the system
     found_versions: list[str] = []
     found_executables: list[Path] = []
 
-    if python_versions_hint and python_root_dirs_hint:
-        if len(python_versions_hint) != len(python_root_dirs_hint):
-            raise ValueError(
-                f"python_versions ({len(python_versions_hint)}) and python_root_dirs "
-                f"({len(python_root_dirs_hint)}) must have the same length"
-            )
-        for version, root_dir in zip(python_versions_hint, python_root_dirs_hint):
-            matched = False
-            for name in [f"python{version}", "python3", "python"]:
-                candidate = root_dir / "bin" / name
-                if not candidate.exists():
-                    candidate = root_dir / name
-                if candidate.exists() and candidate.is_file():
-                    detected = _get_python_version(candidate)
-                    if detected and detected.startswith(version):
-                        found_versions.append(detected)
-                        found_executables.append(candidate)
-                        matched = True
-                        break
-            if not matched:
-                raise FileNotFoundError(
-                    f"Could not find Python {version} in {root_dir}. "
-                    f"Searched: {root_dir / 'bin' / f'python{version}'}, "
-                    f"{root_dir / 'bin' / 'python3'}, {root_dir / 'bin' / 'python'}"
-                )
-    elif python_versions_hint:
+    if python_versions_hint:
         for version in python_versions_hint:
-            exe = shutil.which(f"python{version}")
-            if exe:
-                exe_path = Path(exe)
-                detected = _get_python_version(exe_path)
-                if detected and detected.startswith(version):
+            found: Optional[Path] = None
+            if python_root_dirs_hint:
+                found = _find_python_in_dirs(version, python_root_dirs_hint)
+            if found is None:
+                exe = shutil.which(f"python{version}")
+                if exe:
+                    exe_path = Path(exe)
+                    detected = _get_python_version(exe_path)
+                    if detected and detected.startswith(version):
+                        found = exe_path
+            if found is not None:
+                detected = _get_python_version(found)
+                if detected:
                     found_versions.append(detected)
-                    found_executables.append(exe_path)
-    elif python_root_dirs_hint:
-        raise ValueError(
-            "python_root_dirs requires --python-versions to be provided as well"
-        )
+                    found_executables.append(found)
     else:
         import sys
 

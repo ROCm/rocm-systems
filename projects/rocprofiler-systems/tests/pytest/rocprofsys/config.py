@@ -412,6 +412,27 @@ def _find_rocprofsys_python(
     return None, None
 
 
+def _merge_python_root_dirs(
+    explicit_dirs: Optional[list[Path]],
+) -> Optional[list[Path]]:
+    """Merge explicit --python-root-dirs with ROCPROFSYS_PYTHON_HINTS env var.
+
+    ROCPROFSYS_PYTHON_HINTS entries may point to bin/ directories or their parents;
+    both are normalized to the parent directory for pythonX.Y lookup.
+    """
+    result: list[Path] = list(explicit_dirs or [])
+    env_hints = os.environ.get("ROCPROFSYS_PYTHON_HINTS", "")
+    if env_hints:
+        for hint in env_hints.split(";"):
+            hint = hint.strip()
+            if hint:
+                hint_path = Path(hint)
+                parent = hint_path.parent if hint_path.name == "bin" else hint_path
+                if parent not in result:
+                    result.append(parent)
+    return result or None
+
+
 def discover_install_config(
     install_dir: Optional[Path] = None,
     output_dir: Optional[Path] = None,
@@ -517,7 +538,7 @@ def discover_install_config(
         rocprofsys_python=rocprofsys_python,
         rocprofsys_site_packages=rocprofsys_site_packages,
         _python_versions_hint=python_versions,
-        _python_root_dirs_hint=python_root_dirs,
+        _python_root_dirs_hint=_merge_python_root_dirs(python_root_dirs),
     )
 
 
@@ -616,5 +637,5 @@ def discover_build_config(
         rocprofsys_python=rocprofsys_python,
         rocprofsys_site_packages=rocprofsys_site_packages,
         _python_versions_hint=python_versions,
-        _python_root_dirs_hint=python_root_dirs,
+        _python_root_dirs_hint=_merge_python_root_dirs(python_root_dirs),
     )
