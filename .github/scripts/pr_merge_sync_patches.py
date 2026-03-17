@@ -281,6 +281,14 @@ def _commits_touching_prefix(base_sha: str, merge_sha: str, prefix: str) -> List
     return [s.strip() for s in out.splitlines() if s.strip()]
 
 
+def _normalize_patch_to_utf8(patch_path: Path) -> None:
+    """Rewrite patch file as UTF-8 so downstream readers can assume UTF-8.
+    Invalid bytes (e.g. from Latin-1 in the original commit) are replaced."""
+    raw = patch_path.read_bytes()
+    text = raw.decode("utf-8", errors="replace")
+    patch_path.write_text(text, encoding="utf-8")
+
+
 def _patch_has_hunks(patch_path: Path) -> bool:
     """Return True if the patch file contains at least one diff hunk (---/+++ and lines)."""
     with open(patch_path, "r", encoding="utf-8") as f:
@@ -368,6 +376,9 @@ def generate_patch(
             f"No patch files generated for range {base_sha}..{range_end} with prefix '{prefix}' "
             f"(expected patches for {len(commits)} commit(s) touching subtree)."
         )
+
+    for p in patch_files:
+        _normalize_patch_to_utf8(p)
 
     if debug:
         for p in patch_files:
