@@ -62,7 +62,7 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
             args.rocprofiler_sdk_tool_path,  # Our rocprofiler-sdk tool
             native_tool_path,  # Native tool (if provided)
         ]
-        # Filter out None values and join with ':'
+        # Filter out None and empty string values and join with ':'
         ld_preload_value = ":".join(part for part in ld_preload_parts if part)
 
         if native_tool_path:

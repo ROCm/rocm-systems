@@ -3022,6 +3022,7 @@ def test_run_prof_sdk_creates_new_env_copy(tmp_path, monkeypatch):
         soc=MockSoc(),
     )
 
+    # Test 1: LD_PRELOAD is already set - should be preserved
     # Since we check all env. vars. in test,
     # empty them out while calling profiling function
     with mock.patch.dict(os.environ, {}, clear=True):
@@ -3066,6 +3067,35 @@ def test_run_prof_sdk_creates_new_env_copy(tmp_path, monkeypatch):
     assert capture_subprocess_called_with_env["LD_PRELOAD"] == expected_ld_preload, (
         f"LD_PRELOAD should be '{expected_ld_preload}' but got "
         f"'{capture_subprocess_called_with_env['LD_PRELOAD']}'"
+    )
+
+    # Test 2: LD_PRELOAD is unset - should only contain profiler tools
+    capture_subprocess_called_with_env = None
+    with mock.patch.dict(os.environ, {}, clear=True):
+        assert len(os.environ) == 0
+        monkeypatch.setenv("EXISTING_VAR", original_env_var)
+        monkeypatch.setenv("LD_LIBRARY_PATH", original_env_var)
+        # Intentionally not setting LD_PRELOAD to test the unset case
+        profiler_options = profiler.get_profiler_options(native_tool_path="native_tool")
+
+        utils.run_prof(
+            fname_str,
+            profiler_options,
+            workload_dir_str,
+            mspec,
+            loglevel,
+            format_rocprof_output,
+        )
+
+    assert capture_subprocess_called_with_env is not None, (
+        "new_env should have been created"
+    )
+    # When LD_PRELOAD is unset, should only contain our profiler tools
+    expected_ld_preload_unset = "sdk_tool:native_tool"
+    actual_ld_preload = capture_subprocess_called_with_env["LD_PRELOAD"]
+    assert actual_ld_preload == expected_ld_preload_unset, (
+        f"LD_PRELOAD should be '{expected_ld_preload_unset}' when unset, "
+        f"but got '{actual_ld_preload}'"
     )
     assert (
         capture_subprocess_called_with_env["ROCPROFILER_METRICS_PATH"] == "dummy_path"
