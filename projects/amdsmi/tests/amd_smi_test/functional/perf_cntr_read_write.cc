@@ -303,6 +303,7 @@ void TestPerfCntrReadWrite::testEventsSimultaneously(amdsmi_processor_handle dv_
 
 void TestPerfCntrReadWrite::Run(void) {
   TestBase::Run();
+  PRINT_VERBOSITY();
   if (setup_failed_) {
     std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl;
     return;

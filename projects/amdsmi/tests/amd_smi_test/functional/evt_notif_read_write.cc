@@ -62,6 +62,7 @@ void TestEvtNotifReadWrite::Run(void) {
   uint32_t dv_ind;
 
   TestBase::Run();
+  PRINT_VERBOSITY();
   if (num_monitor_devs() == 0) {
     return;
   }

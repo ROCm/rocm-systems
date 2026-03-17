@@ -84,6 +84,7 @@ void TestPowerReadWrite::Run(void) {
   amdsmi_power_profile_status_t status;
 
   TestBase::Run();
+  PRINT_VERBOSITY();
   if (setup_failed_) {
     std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl;
     return;

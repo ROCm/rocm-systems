@@ -361,6 +361,7 @@ void TestComputePartitionReadWrite::Run(void) {
   current_char_computePartition[0] = '\0';
   const uint32_t kMAX_UINT32 = std::numeric_limits<uint32_t>::max();
   TestBase::Run();
+  PRINT_VERBOSITY();
   if (setup_failed_) {
     std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl;
     return;

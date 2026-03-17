@@ -64,6 +64,7 @@ void TestPerfLevelReadWrite::Run(void) {
   amdsmi_dev_perf_level_t pfl, orig_pfl;
 
   TestBase::Run();
+  PRINT_VERBOSITY();
   if (setup_failed_) {
     IF_VERB(STANDARD) { std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl; }
     return;

@@ -41,6 +41,7 @@
 #include "functional/memory_read_write.h"
 #include "functional/memorypartition_read_write.h"
 #include "functional/metrics_counter_read.h"
+#include "functional/mutual_exclusion.h"
 #include "functional/overdrive_read.h"
 #include "functional/overdrive_read_write.h"
 #include "functional/pci_read_write.h"
@@ -250,7 +251,7 @@ TEST(amdsmitstReadOnly, TestAPISupportRead) {
   TestAPISupportRead tst;
   RunGenericTest(&tst);
 }
-/*
+
 TEST(amdsmitstReadOnly, TestMutualExclusion) {
   TestMutualExclusion tst;
   SetFlags(&tst);
@@ -259,7 +260,6 @@ TEST(amdsmitstReadOnly, TestMutualExclusion) {
   tst.Run();
   RunCustomTestEpilog(&tst);
 }
-*/
 
 TEST(amdsmitstReadWrite, TestComputePartitionReadWrite) {
   if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
@@ -317,5 +317,6 @@ int main(int argc, char** argv) {
   }
 
   sRSMIGlvalues = &settings;
+  SetTestVerbosity(settings.verbosity);
   return RUN_ALL_TESTS();
 }

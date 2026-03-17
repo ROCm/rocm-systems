@@ -46,6 +46,11 @@ struct AMDSMITstGlobals {
 
 uint32_t ProcessCmdline(AMDSMITstGlobals* test, int arg_cnt, char** arg_list);
 
+// Returns the global verbosity level set from the command line.
+// Can be used in plain TEST() cases that don't inherit from TestBase.
+uint32_t GetTestVerbosity();
+void SetTestVerbosity(uint32_t verbosity);
+
 void PrintTestHeader(uint32_t dv_ind);
 const char* GetPerfLevelStr(amdsmi_dev_perf_level_t lvl);
 const char* GetBlockNameStr(amdsmi_gpu_block_t id);

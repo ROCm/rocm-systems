@@ -62,6 +62,7 @@ void TestMetricsCounterRead::Run(void) {
   amdsmi_status_t err;
 
   TestBase::Run();
+  PRINT_VERBOSITY();
   if (setup_failed_) {
     std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl;
     return;

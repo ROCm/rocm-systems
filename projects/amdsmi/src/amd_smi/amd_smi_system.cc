@@ -271,7 +271,8 @@ amdsmi_status_t AMDSmiSystem::init(uint64_t flags) {
   amdsmi_status_t amd_smi_status;
 
   // populate GPU sockets and processors
-  if (flags & AMDSMI_INIT_AMD_GPUS) {
+  // Also initialize GPU devices when the test flag is set (for mutual exclusion testing)
+  if ((flags & AMDSMI_INIT_AMD_GPUS) || (flags & AMD_SMI_INIT_FLAG_RESRV_TEST1)) {
     amd_smi_status = populate_amd_gpu_devices();
     if (amd_smi_status != AMDSMI_STATUS_SUCCESS) return amd_smi_status;
   }
@@ -340,9 +341,11 @@ amdsmi_status_t AMDSmiSystem::populate_amd_cpus() {
 
 amdsmi_status_t AMDSmiSystem::populate_amd_gpu_devices() {
   AMDSmiSystem::cleanup();
-  // init rsmi
+  // init rsmi — forward the test flag so the mutex becomes non-blocking
   rsmi_driver_state_t state;
-  rsmi_status_t ret = rsmi_init(0);
+  uint64_t rsmi_flags =
+      (init_flag_ & AMD_SMI_INIT_FLAG_RESRV_TEST1) ? RSMI_INIT_FLAG_RESRV_TEST1 : 0;
+  rsmi_status_t ret = rsmi_init(rsmi_flags);
   if (ret != RSMI_STATUS_SUCCESS) {
     if (rsmi_driver_status(&state) == RSMI_STATUS_SUCCESS &&
         state != RSMI_DRIVER_MODULE_STATE_LIVE) {

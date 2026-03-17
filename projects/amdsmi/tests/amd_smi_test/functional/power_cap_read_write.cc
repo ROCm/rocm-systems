@@ -125,6 +125,7 @@ void TestPowerCapReadWrite::Run(void) {
   uint64_t orig_cap, default_cap, min_cap, max_cap, new_cap, curr_cap;
 
   TestBase::Run();
+  PRINT_VERBOSITY();
   if (setup_failed_) {
     std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl;
     return;

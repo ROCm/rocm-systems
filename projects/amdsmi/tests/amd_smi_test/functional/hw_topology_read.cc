@@ -73,6 +73,7 @@ void TestHWTopologyRead::Run(void) {
   uint32_t i, j;
 
   TestBase::Run();
+  PRINT_VERBOSITY();
   if (setup_failed_) {
     IF_VERB(STANDARD) { std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl; }
     return;

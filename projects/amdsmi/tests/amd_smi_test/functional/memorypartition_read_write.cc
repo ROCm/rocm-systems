@@ -69,7 +69,8 @@ void ReloadDriverWithMessages(bool isVerbose, const std::string& preReloadMessag
     if (isVerbose) {
       std::cout << "\t**" << successMessage << std::endl;
     }
-
+    ASSERT_EQ(driver_reload_status, AMDSMI_STATUS_SUCCESS);
+  } else if (driver_reload_status == AMDSMI_STATUS_AMDGPU_RESTART_ERR) {
     if (isVerbose) {
       std::cout << "\t**" << restartErrorMessage << std::endl;
     }
@@ -176,6 +177,7 @@ void TestMemoryPartitionReadWrite::Run(void) {
   std::map<uint32_t, AcceleratorProfileConfig> orig_dev_config;  // index, ProfileConfig
 
   TestBase::Run();
+  PRINT_VERBOSITY();
   if (setup_failed_) {
     std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl;
     return;
@@ -668,7 +670,8 @@ void TestMemoryPartitionReadWrite::Run(void) {
                          VERB(STANDARD));
       ret_set =
           amdsmi_set_gpu_memory_partition_mode(processor_handles_[dv_ind], new_memory_partition);
-      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret_set, AMDSMI_STATUS_SUCCESS);
+      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret_set, AMDSMI_STATUS_SUCCESS,
+                            AMDSMI_STATUS_INVAL, AMDSMI_STATUS_NOT_SUPPORTED);
       IF_VERB(STANDARD) {
         std::cout << "\t**"
                   << "amdsmi_set_gpu_memory_partition_mode(processor_handles_[" << dv_ind << "], "

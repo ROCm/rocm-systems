@@ -118,6 +118,7 @@ void TestConcurrentInit::Close() {
 // Compare required profile for this test case with what we're actually
 // running on
 void TestConcurrentInit::Run(void) {
+  PRINT_VERBOSITY();
   if (setup_failed_) {
     IF_VERB(STANDARD) { std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl; }
     return;

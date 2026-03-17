@@ -65,6 +65,7 @@ void TestFanReadWrite::Run(void) {
   uint64_t max_speed;
 
   TestBase::Run();
+  PRINT_VERBOSITY();
   if (setup_failed_) {
     std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl;
     return;

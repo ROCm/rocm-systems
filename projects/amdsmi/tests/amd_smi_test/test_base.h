@@ -145,7 +145,26 @@ class TestBase {
 #define IF_VERB(VB) if (verbosity() && verbosity() >= (TestBase::VERBOSE_##VB))
 #define IF_NVERB(VB) if (verbosity() < (TestBase::VERBOSE_##VB))
 
-// Macros to be used within TestBase classes
+// Returns the global verbosity level; defined in test_common.cc.
+// Forward-declared here so PRINT_VERBOSITY() works outside TestBase fixtures.
+uint32_t GetTestVerbosity();
+
+// Prints the current verbosity level. Works in both TestBase-derived tests
+// and plain TEST() cases (uses the global verbosity, not the member).
+#define PRINT_VERBOSITY()                                                                     \
+  do {                                                                                        \
+    const uint32_t _verb = GetTestVerbosity();                                                \
+    if (_verb) {                                                                              \
+      std::cout << "\tVerbosity level: " << _verb << " ("                                     \
+                << (_verb == TestBase::VERBOSE_MIN                                            \
+                        ? "MIN"                                                               \
+                        : _verb == TestBase::VERBOSE_STANDARD                                 \
+                              ? "STANDARD"                                                    \
+                              : _verb == TestBase::VERBOSE_PROGRESS ? "PROGRESS" : "UNKNOWN") \
+                << ")" << std::endl;                                                          \
+    }                                                                                         \
+  } while (0)
+
 #define CHK_ERR_ASRT(RET)                                                              \
   {                                                                                    \
     if (dont_fail() && ((RET) != AMDSMI_STATUS_SUCCESS)) {                             \

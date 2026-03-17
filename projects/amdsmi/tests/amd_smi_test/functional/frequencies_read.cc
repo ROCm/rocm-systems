@@ -89,6 +89,7 @@ void TestFrequenciesRead::Run(void) {
   amdsmi_pcie_bandwidth_t b;
 
   TestBase::Run();
+  PRINT_VERBOSITY();
   if (setup_failed_) {
     std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl;
     return;
@@ -167,9 +168,7 @@ void TestFrequenciesRead::Run(void) {
                              VERB(STANDARD));
           err = amdsmi_get_gpu_pci_bandwidth(processor_handles_[i], nullptr);
           DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
-          if (err != amdsmi_status_t::AMDSMI_STATUS_NOT_SUPPORTED) {
-            ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
-          }
+          ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
         }
       }
     }
