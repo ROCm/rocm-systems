@@ -11,9 +11,12 @@
 #endif
 
 #include "device/rccl_ptr.h"
-template<typename T, typename RedOp, typename Fan, int Direct, int P2p, bool isNetOffload, int Metadata, int Pipeline, int useAcc>
-class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pipeline, useAcc>:
-    public PrimitivesWithoutDirect<Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pipeline, useAcc>> {
+// UserRegMode is accepted only to match the Primitives primary template (which
+// carries it for LL128, see primitives.h/prims_ll128.h). The LL protocol path is
+// unchanged from the baseline and ignores it.
+template<typename T, typename RedOp, typename Fan, int Direct, int P2p, bool isNetOffload, int Metadata, int Pipeline, int useAcc, int UserRegMode>
+class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pipeline, useAcc, UserRegMode>:
+    public PrimitivesWithoutDirect<Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pipeline, useAcc, UserRegMode>> {
 
   // In the case of Fan::MaxRecv == 0, we need to force MaxRecv to 1 for this to compile
   // This is because of a recv buffer which is allocated to MaxRecv length in send-only cases
@@ -167,6 +170,8 @@ private:
 #ifdef __GFX11__
       asm volatile ("global_load_b128 %0, %1, off glc slc dlc\n"
         "s_waitcnt vmcnt(0)\n" : "=v"(i4.i4) : "v"(&src->i4));
+#elif RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+      i4.v4u = __builtin_amdgcn_global_load_b128((v4u_gptr)src->v, RCCL_SYSTEM_SYNCSCOPE);
 #else
       *((u64_gptr)i4.v) = __builtin_nontemporal_load((u64_gptr)src->v);
       *((u64_gptr)i4.v + 1) = __builtin_nontemporal_load((u64_gptr)src->v+1);
@@ -210,6 +215,8 @@ private:
 #ifdef __GFX11__
         asm volatile ("global_load_b128 %0, %1, off glc slc dlc\n"
           "s_waitcnt vmcnt(0)\n" : "=v"(line[i].i4) : "v"(&src->i4));
+#elif RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+        line[i].v4u = __builtin_amdgcn_global_load_b128((v4u_gptr)src->v, RCCL_SYSTEM_SYNCSCOPE);
 #else
         line[i].v[0] = __builtin_nontemporal_load(src->v);
         line[i].v[1] = __builtin_nontemporal_load(src->v+1);
@@ -237,6 +244,8 @@ private:
 #ifdef __GFX11__
       asm volatile ("global_load_b128 %0, %1, off glc slc dlc\n"
         "s_waitcnt vmcnt(0)\n" : "=v"(line[i].i4) : "v"(&src->i4));
+#elif RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+      line[i].v4u = __builtin_amdgcn_global_load_b128((v4u_gptr)src->v, RCCL_SYSTEM_SYNCSCOPE);
 #else
       line[i].v[0] = __builtin_nontemporal_load((u64_gptr)src->v);
       line[i].v[1] = __builtin_nontemporal_load((u64_gptr)src->v+1);
@@ -268,8 +277,13 @@ private:
     i4.flag1 = flag;
     i4.data2 = (val >> 32);
     i4.flag2 = flag;
+    #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+    // System scope store that bypasses the hardware caches, should generate global_store_dwordx4 instruction with sc0 and sc1 bits set to 1 on gfx942/gfx950.
+    __builtin_amdgcn_global_store_b128((v4u_gptr) dst->v, i4.v4u, RCCL_SYSTEM_SYNCSCOPE);
+    #else
     *((u64_gptr) dst->v) = *((u64_gptr) i4.v);
-    *((u64_gptr) dst->v+1) = *((u64_gptr) i4.v+1); 
+    *((u64_gptr) dst->v+1) = *((u64_gptr) i4.v+1);
+    #endif
 #if defined(__gfx950__) && ROCM_VERSION < 70002
     __builtin_amdgcn_fence(__ATOMIC_RELEASE, ""); // flush cache on gfx950 if ROCr fix for hipHostMallocUncached is not available (ROCm version < 7.0.2)
 #endif
@@ -290,6 +304,16 @@ private:
       uint64_t u8;
     };
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+    if(sizeof(U) == 1)
+      u1 = __hip_atomic_load((__attribute__((address_space(1))) uint8_t*)src, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+    else if(sizeof(U) == 2)
+      u2 = __hip_atomic_load((__attribute__((address_space(1))) uint16_t*)src, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+    else if(sizeof(U) == 4)
+      u4 = __hip_atomic_load((__attribute__((address_space(1))) uint32_t*)src, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+    else
+      u8 = __hip_atomic_load((__attribute__((address_space(1))) uint64_t*)src, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+#else
     if(sizeof(U) == 1)
 #ifdef __GFX11__
       u1 = __atomic_load_n((uint8_t*)src, __ATOMIC_RELAXED);
@@ -313,6 +337,7 @@ private:
       u8 = __atomic_load_n((uint64_t*)src, __ATOMIC_RELAXED);
 #else
       u8 = __builtin_nontemporal_load((u64_gptr)src);
+#endif
 #endif
 #else
     if(sizeof(U) == 1)
@@ -338,6 +363,16 @@ private:
     };
     elt = val;
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+    if(sizeof(U) == 1)
+      __hip_atomic_store((__attribute__((address_space(1))) uint8_t*)dst, u1, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+    else if(sizeof(U) == 2)
+      __hip_atomic_store((__attribute__((address_space(1))) uint16_t*)dst, u2, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+    else if(sizeof(U) == 4)
+      __hip_atomic_store((__attribute__((address_space(1))) uint32_t*)dst, u4, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+    else
+      __hip_atomic_store((__attribute__((address_space(1))) uint64_t*)dst, u8, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+#else
     if(sizeof(U) == 1)
       __builtin_nontemporal_store(u1, (uint8_t*)dst);
     else if(sizeof(U) == 2)
@@ -348,6 +383,7 @@ private:
       __builtin_nontemporal_store(u8, (uint64_t*)dst);
 #if defined(__gfx950__) && ROCM_VERSION < 70002
     __builtin_amdgcn_fence(__ATOMIC_RELEASE, ""); // flush cache on gfx950 if ROCr fix for hipHostMallocUncached is not available (ROCm version < 7.0.2)
+#endif
 #endif
 #else
     if(sizeof(U) == 1)
