@@ -216,6 +216,28 @@ static const MnemonicMapping kSMEMMappings[] = {
     {"s_buffer_load_b512", "s_buffer_load_dwordx16"},
 };
 
+// Scalar ALU renames (GFX12 uses explicit carry-out names)
+static const MnemonicMapping kScalarALURenames[] = {
+    {"s_add_co_u32", "s_add_u32"},
+    {"s_sub_co_u32", "s_sub_u32"},
+    {"s_add_co_ci_u32", "s_addc_u32"},
+    {"s_sub_co_ci_u32", "s_subb_u32"},
+};
+
+// VALU renames (GFX12 uses IEEE-explicit names)
+static const MnemonicMapping kVALURenames[] = {
+    {"v_max_num_f32", "v_max_f32"},
+    {"v_min_num_f32", "v_min_f32"},
+    {"v_max_num_f16", "v_max_f16"},
+    {"v_min_num_f16", "v_min_f16"},
+    {"v_max_num_f64", "v_max_f64"},
+    {"v_min_num_f64", "v_min_f64"},
+    {"v_maxmin_num_f32", "v_maxmin_f32"},
+    {"v_minmax_num_f32", "v_minmax_f32"},
+    {"v_maxmin_num_f16", "v_maxmin_f16"},
+    {"v_minmax_num_f16", "v_minmax_f16"},
+};
+
 // Build a reverse lookup map (gfx12 mnemonic → gfx9 mnemonic)
 static std::unordered_map<std::string, std::string> BuildMnemonicMap() {
   std::unordered_map<std::string, std::string> map;
@@ -238,6 +260,10 @@ static std::unordered_map<std::string, std::string> BuildMnemonicMap() {
               sizeof(kDSMappings) / sizeof(kDSMappings[0]));
   addMappings(kSMEMMappings,
               sizeof(kSMEMMappings) / sizeof(kSMEMMappings[0]));
+  addMappings(kScalarALURenames,
+              sizeof(kScalarALURenames) / sizeof(kScalarALURenames[0]));
+  addMappings(kVALURenames,
+              sizeof(kVALURenames) / sizeof(kVALURenames[0]));
 
   return map;
 }
