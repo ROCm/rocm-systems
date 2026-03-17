@@ -35,6 +35,7 @@ set(SRC_FILES
   device/all_reduce.h
   device/alltoall_pivot.h
   device/alltoall_gda.h
+  device/alltoallv_gda.h
   device/broadcast.h
   device/common.h
   device/common_kernel.h
