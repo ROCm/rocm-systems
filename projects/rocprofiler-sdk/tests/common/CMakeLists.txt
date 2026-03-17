@@ -1,6 +1,13 @@
 #
 # common utilities for tests
 #
+# CTest LABELS used by this infrastructure (pass via LABELS to add more):
+#   integration-tests  - added to all integration tests
+#   execution          - added to rocprofiler_add_integration_execute_test
+#   validation         - added to rocprofiler_add_integration_validate_test
+#   multi-gpu          - optional; use for tests that need multiple GPUs or exclusive
+#                        device access (e.g. counter collection, PC sampling, attachment).
+#                        Filter with: ctest -L multi-gpu / ctest -LE multi-gpu
 
 include(FetchContent)
 include(CMakeParseArguments)
@@ -394,8 +401,8 @@ function(rocprofiler_add_integration_validate_test NAME)
         "STRIP_PARAM_BRACKETS"
         "INCLUDE_FILE_PATH"
         "BUNDLE_TESTS")
-    set(_SINGLE_OPTS "TARGET_DEPENDS" "WORKING_DIRECTORY" "DEPENDS" "TIMEOUT"
-                     "DISABLED" "DISABLED_MEMCHECKS")
+    set(_SINGLE_OPTS "TARGET_DEPENDS" "WORKING_DIRECTORY" "DEPENDS" "TIMEOUT" "DISABLED"
+                     "DISABLED_MEMCHECKS")
     set(_MULTI_OPTS
         "LABELS"
         "TEST_PATHS"
