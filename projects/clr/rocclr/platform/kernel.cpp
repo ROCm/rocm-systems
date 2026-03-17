@@ -117,16 +117,16 @@ bool KernelParameters::captureHIPArgs(void** kernelParams, address kernArgs, siz
     if (kernelParams == nullptr && ((desc.offset_ + desc.size_) > kernArgsSize)) {
       value = &uint64_value;
     }
-    Memory* memArg = nullptr;
     if (desc.type_ == T_POINTER) {
       LP64_SWITCH(uint32_value, uint64_value) = *(LP64_SWITCH(uint32_t*, uint64_t*))value;
-      memArg = amd::MemObjMap::FindMemObj(*reinterpret_cast<const void* const*>(value));
-      memories[desc.info_.arrayIndex_] = memArg;
-      if (!(amd::IS_HIP && AMD_DIRECT_DISPATCH)) {
+      Memory* memArg = nullptr;
+      if (!AMD_DIRECT_DISPATCH) {
+        memArg = amd::MemObjMap::FindMemObj(*reinterpret_cast<const void* const*>(value));
         if (memArg != nullptr) {
           memArg->retain();
         }
       }
+      memories[desc.info_.arrayIndex_] = memArg;
     } else {
       assert((desc.type_ != T_SAMPLER && desc.type_ != T_QUEUE) &&
              "Unexpected argument type for a HIP kernel");
@@ -228,17 +228,10 @@ address KernelParameters::captureOpenCLArgs(device::VirtualDevice& vDev, uint64_
   const Device& device = vDev.device();
   *error = CL_SUCCESS;
 
-  //! Information about which arguments are SVM pointers is stored after
-  // the actual parameters, but only if the device has any SVM capability
-  const size_t execInfoSize = getNumberOfSvmPtr() * sizeof(void*);
-
-  address mem = vDev.allocKernelArguments(totalSize_ + execInfoSize, 128);
-  if (mem == nullptr) {
-    mem = reinterpret_cast<address>(
-        AlignedMemory::allocate(totalSize_ + execInfoSize, PARAMETERS_MIN_ALIGNMENT));
-  } else {
-    deviceKernelArgs_ = true;
-  }
+  // We need to make another allocation for kernel arguments, because the same
+  // kernel may be submitted once again, but with different arguments
+  // immediately after the current dispatch.
+  address mem = alloc(vDev);
 
   if (mem != nullptr) {
     ::memcpy(mem, values_, totalSize_);
@@ -297,6 +290,9 @@ address KernelParameters::captureOpenCLArgs(device::VirtualDevice& vDev, uint64_
       }
     }
 
+    //! Information about which arguments are SVM pointers is stored after
+    // the actual parameters, but only if the device has any SVM capability
+    const size_t execInfoSize = getNumberOfSvmPtr() * sizeof(void*);
     address last = mem + totalSize_;
     if (0 != execInfoSize) {
       ::memcpy(last, &execSvmPtr_[0], execInfoSize);
