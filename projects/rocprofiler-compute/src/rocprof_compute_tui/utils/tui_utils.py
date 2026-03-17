@@ -129,8 +129,8 @@ def get_top_kernels(
     """
     Get top kernels with aggregated stats (one row per kernel).
 
-    Returns a list of records sorted by percentage of total time,
-    each containing kernel name, call count, total time, and percentage.
+    Returns a list of records sorted by percent of total time,
+    each containing kernel name, call count, total time, and percent.
     Returns None if runs is empty or workload has no dfs.
     Returns empty list if the top kernel dataframe is empty.
     """
@@ -149,12 +149,12 @@ def get_top_kernels(
         return []
 
     # top_kernel_df already contains aggregated per-kernel stats
-    # (Kernel_Name, Count, Total_Time, Pct, etc.)
-    if "Pct" not in top_kernel_df.columns:
-        # If Pct column is missing, return unsorted records
+    # (Kernel_Name, Count, Total_Time, Percent, etc.)
+    if "Percent" not in top_kernel_df.columns:
+        # If Percent column is missing, return unsorted records
         return top_kernel_df.to_dict("records")
 
-    result_df = top_kernel_df.sort_values("Pct", ascending=False)
+    result_df = top_kernel_df.sort_values("Percent", ascending=False)
 
     return result_df.to_dict("records")
 

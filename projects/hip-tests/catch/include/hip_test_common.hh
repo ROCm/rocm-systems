@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2021 - 2022 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #pragma once
 #pragma clang diagnostic ignored "-Wsign-compare"
@@ -627,11 +611,11 @@ class BlockingContext {
 };
 }  // namespace HipTest
 
-// This must be called in the beginning of image test app's main() to indicate whether image
-// is supported.
+// Call at the start of tests that require image/texture support to indicate whether it
+// is supported on the current device.
 #define CHECK_IMAGE_SUPPORT                                                                        \
   if (!HipTest::isImageSupported()) {                                                              \
-    INFO("Texture is not support on the device. Skipped.");                                        \
+    HipTest::HIP_SKIP_TEST("Texture is not supported on the device. Skipped.");                    \
     return;                                                                                        \
   }
 
@@ -649,11 +633,11 @@ class BlockingContext {
     HipTest::HIP_SKIP_TEST(msg.c_str());                                                           \
     return;                                                                                        \
   }                                                                                                \
-// This must be called in the beginning of warp test app's main() to indicate warp match functions
-// are supported.
+// Use this before running tests that rely on warp match functions to check device support and
+// skip the current test if they are not available.
 #define CHECK_WARP_MATCH_FUNCTIONS_SUPPORT                                                         \
   if (!HipTest::areWarpMatchFunctionsSupported()) {                                                \
-    INFO("Warp Match Functions are not support on the device. Skipped.");                          \
+    HipTest::HIP_SKIP_TEST("Warp Match Functions are not supported on the device. Skipped.");      \
     return;                                                                                        \
   }
 

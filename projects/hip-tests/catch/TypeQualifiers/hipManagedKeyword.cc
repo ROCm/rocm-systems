@@ -1,20 +1,7 @@
 /*
-   Copyright (c) 2021 Advanced Micro Devices, Inc. All rights reserved.
-   Permission is hereby granted, free of charge, to any person obtaining a copy
-   of this software and associated documentation files (the "Software"), to deal
-   in the Software without restriction, including without limitation the rights
-   to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-   copies of the Software, and to permit persons to whom the Software is
-   furnished to do so, subject to the following conditions:
-   The above copyright notice and this permission notice shall be included in
-   all copies or substantial portions of the Software.
-   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-   IMPLIED, INNCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-   FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-   AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANNY CLAIM, DAMAGES OR OTHER
-   LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-   OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-   THE SOFTWARE.
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
  */
 
 /*
@@ -38,7 +25,18 @@ static __global__ void managed_add(size_t size) {
 
 static __global__ void managed_inc() { atomicAdd(&m_X, 1.0f); }
 
-TEST_CASE(Unit_hipManagedKeyword_SingleGpu) {
+TEST_CASE("Unit_hipManagedKeyword_SingleGpu") {
+  int numDevices = 0;
+  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  for (int i = 0; i < numDevices; i++) {
+    int managed_memory = 0;
+    HIP_CHECK(hipDeviceGetAttribute(&managed_memory, hipDeviceAttributeManagedMemory, i));
+    if (!managed_memory) {
+      HipTest::HIP_SKIP_TEST("managed memory access not supported on device");
+      return;
+    }
+  }
+
   for (size_t i = 0; i < N; i++) {
     m_A[i] = 1.0f;
     m_B[i] = 2.0f;
@@ -64,7 +62,7 @@ TEST_CASE(Unit_hipManagedKeyword_MultiGpu) {
 
   for (int i = 0; i < numDevices; i++) {
     int managed_memory = 0;
-    HIPCHECK(hipDeviceGetAttribute(&managed_memory, hipDeviceAttributeManagedMemory, i));
+    HIP_CHECK(hipDeviceGetAttribute(&managed_memory, hipDeviceAttributeManagedMemory, i));
     if (!managed_memory) {
       HipTest::HIP_SKIP_TEST("managed memory access not supported on device");
       return;

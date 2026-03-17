@@ -72,6 +72,9 @@ void KFDBaseComponentTest::SetUp() {
     /* m_FamilyId is default gpu family id, keep it to support old test method */
     m_FamilyId = FamilyIdFromNode(nodeProperties);
 
+    /* Check if XNACK is supported on the ASIC */
+    m_is_xnack_supported = m_FamilyId < FAMILY_AL ? false : true;
+
     /* these values are for default gpu, keep them to support old test method */
     GetHwQueueInfo(nodeProperties, &m_numCpQueues, &m_numSdmaEngines,
                     &m_numSdmaXgmiEngines, &m_numSdmaQueuesPerEngine);
@@ -98,7 +101,7 @@ void KFDBaseComponentTest::SetUp() {
         while ((end = g_ConcurrentNodes.find(',', start)) != std::string::npos) {
             std::string token = g_ConcurrentNodes.substr(start, end - start);
             if (!token.empty()) {
-                int node = std::stoi(token); 
+                int node = std::stoi(token);
             
                 if (std::find(gpuNodes.begin(), gpuNodes.end(), node) != gpuNodes.end()) 
                     uniqueIndices.insert(node);
@@ -279,7 +282,6 @@ bool KFDBaseComponentTest::SVMAPISupported_GPU(unsigned int gpuNode) {
     return supported;
 }
 
-
 /*
  * Some asics need CWSR workround for DEGFX11_12113
  */
@@ -359,6 +361,8 @@ HsaNodeInfo* KFDBaseComponentTest::Get_NodeInfo() {
 HsaMemFlags& KFDBaseComponentTest::GetHsaMemFlags() {
     return m_MemoryFlags;
 }
+
+bool KFDBaseComponentTest::XNACKSupported() { return m_is_xnack_supported; }
 
 static void* KFDTest_GPU(void* ptr) {
 

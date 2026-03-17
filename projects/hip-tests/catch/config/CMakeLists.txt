@@ -1,3 +1,7 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
 # Check for PyYAML
