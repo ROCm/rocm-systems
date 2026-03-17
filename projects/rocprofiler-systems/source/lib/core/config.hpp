@@ -295,9 +295,6 @@ get_trace_duration();
 std::string
 get_trace_region();
 
-bool
-get_selective_tracing();
-
 double
 get_sampling_freq();
 

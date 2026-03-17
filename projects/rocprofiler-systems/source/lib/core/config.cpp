@@ -436,14 +436,7 @@ configure_settings(bool _init)
         "activity inside roctx regions matching one of these names "
         "(matched against roctxRangeStartA message). Uses process-wide "
         "roctxRangeStart/roctxRangeStop markers.",
-        std::string{}, "trace", "profile", "perfetto", "timemory", "rocm");
-
-    ROCPROFSYS_CONFIG_SETTING(
-        bool, "ROCPROFSYS_SELECTIVE_TRACING",
-        "When enabled, tracing starts paused and only traces activity inside "
-        "roctx regions specified by ROCPROFSYS_TRACE_REGION. Tracing is "
-        "controlled by roctxRangeStart/roctxRangeStop markers.",
-        false, "trace", "profile", "perfetto", "timemory", "rocm");
+        std::string{}, "trace", "profile", "perfetto", "rocpd", "timemory", "rocm");
 
     auto _clock_choices = std::vector<std::string>{};
     for(const auto& itr : constraint::get_valid_clock_ids())
@@ -2427,13 +2420,6 @@ get_trace_region()
 {
     static auto _v = get_config()->find("ROCPROFSYS_TRACE_REGION");
     return static_cast<tim::tsettings<std::string>&>(*_v->second).get();
-}
-
-bool
-get_selective_tracing()
-{
-    static auto _v = get_config()->find("ROCPROFSYS_SELECTIVE_TRACING");
-    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
 }
 
 bool
