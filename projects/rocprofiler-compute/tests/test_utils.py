@@ -7886,7 +7886,7 @@ def test_gpu_benchmark_locking(tmp_path, monkeypatch, capsys):
     """Test GPU benchmark locking functions."""
     import fcntl
 
-    import utils.benchmark as benchmark
+    import roofline.benchmark.benchmark as benchmark
 
     # --- Setup: redirect lock directory to temp path ---
     lock_dir = tmp_path / "locks"

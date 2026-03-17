@@ -682,7 +682,7 @@ class OmniSoC_Base:
             console_log("roofline", "Skipping roofline")
         else:
             # Dynamic import to isolate hip dependency during profile time only
-            from utils import benchmark
+            from roofline.benchmark import benchmark
 
             pmc_path = Path(self.get_args().path) / "pmc_perf.csv"
             if not pmc_path.is_file():
