@@ -148,9 +148,11 @@ BackendType get_backend_type();
 typedef uint64_t *rocshmem_team_t;
 
 namespace device {
-    extern __constant__ rocshmem_team_t __attribute__((visibility("default"))) ROCSHMEM_TEAM_WORLD;
+    extern "C" {
+        extern __constant__ rocshmem_team_t
+            __attribute__((visibility("default"))) ROCSHMEM_TEAM_WORLD;
+    }
 }
-
 namespace host {
     extern rocshmem_team_t ROCSHMEM_TEAM_WORLD;
 }

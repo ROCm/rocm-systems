@@ -47,7 +47,7 @@
 
 class TestMemPageInfoRead : public TestBase {
  public:
-    TestMemPageInfoRead();
+  TestMemPageInfoRead();
 
   // @Brief: Destructor for test case of TestMemPageInfoRead
   virtual ~TestMemPageInfoRead();

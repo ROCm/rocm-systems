@@ -24,8 +24,8 @@
 #define TESTS_AMD_SMI_TEST_TEST_COMMON_H_
 
 #include <memory>
-#include <vector>
 #include <string>
+#include <vector>
 
 #include "amd_smi/amdsmi.h"
 
@@ -40,39 +40,41 @@ struct AMDSMITstGlobals {
 uint32_t ProcessCmdline(AMDSMITstGlobals* test, int arg_cnt, char** arg_list);
 
 void PrintTestHeader(uint32_t dv_ind);
-const char *GetPerfLevelStr(amdsmi_dev_perf_level_t lvl);
-const char *GetBlockNameStr(amdsmi_gpu_block_t id);
-const char *GetErrStateNameStr(amdsmi_ras_err_state_t st);
-const char *FreqEnumToStr(amdsmi_clk_type_t amdsmi_clk);
+const char* GetPerfLevelStr(amdsmi_dev_perf_level_t lvl);
+const char* GetBlockNameStr(amdsmi_gpu_block_t id);
+const char* GetErrStateNameStr(amdsmi_ras_err_state_t st);
+const char* FreqEnumToStr(amdsmi_clk_type_t amdsmi_clk);
 const std::string GetVoltSensorNameStr(amdsmi_voltage_type_t st);
 
 #if ENABLE_SMI
-void DumpMonitorInfo(const TestBase *test);
+void DumpMonitorInfo(const TestBase* test);
 #endif
 
-#define DISPLAY_AMDSMI_ERR(RET) { \
-  if ((RET) != AMDSMI_STATUS_SUCCESS) { \
-    const char *err_str; \
-    std::cout << "\t===> ERROR: AMDSMI call returned " << (RET) << std::endl; \
-    amdsmi_status_code_to_string((RET), &err_str); \
-    std::cout << "\t===> (" << err_str << ")" << std::endl; \
-    std::cout << "\t===> at " << __FILE__ << ":" << std::dec << __LINE__ << \
-                                                                  std::endl; \
-  } \
-}
+#define DISPLAY_AMDSMI_ERR(RET)                                                          \
+  {                                                                                      \
+    if ((RET) != AMDSMI_STATUS_SUCCESS) {                                                \
+      const char* err_str;                                                               \
+      std::cout << "\t===> ERROR: AMDSMI call returned " << (RET) << std::endl;          \
+      amdsmi_status_code_to_string((RET), &err_str);                                     \
+      std::cout << "\t===> (" << err_str << ")" << std::endl;                            \
+      std::cout << "\t===> at " << __FILE__ << ":" << std::dec << __LINE__ << std::endl; \
+    }                                                                                    \
+  }
 
-#define CHK_ERR_RET(RET) { \
-  DISPLAY_AMDSMI_ERR(RET) \
-  if ((RET) != AMDSMI_STATUS_SUCCESS) { \
-    return (RET); \
-  } \
-}
-#define CHK_AMDSMI_PERM_ERR(RET) { \
-    if ((RET) == AMDSMI_STATUS_NO_PERM) { \
+#define CHK_ERR_RET(RET)                  \
+  {                                       \
+    DISPLAY_AMDSMI_ERR(RET)               \
+    if ((RET) != AMDSMI_STATUS_SUCCESS) { \
+      return (RET);                       \
+    }                                     \
+  }
+#define CHK_AMDSMI_PERM_ERR(RET)                                      \
+  {                                                                   \
+    if ((RET) == AMDSMI_STATUS_NO_PERM) {                             \
       std::cout << "This command requires root access." << std::endl; \
-    } else { \
-      DISPLAY_AMDSMI_ERR(RET) \
-    } \
-}
+    } else {                                                          \
+      DISPLAY_AMDSMI_ERR(RET)                                         \
+    }                                                                 \
+  }
 
 #endif  // TESTS_AMD_SMI_TEST_TEST_COMMON_H_

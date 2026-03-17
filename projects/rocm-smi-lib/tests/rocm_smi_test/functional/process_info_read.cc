@@ -43,25 +43,26 @@
  *
  */
 
-#include <stdint.h>
+#include "rocm_smi_test/functional/process_info_read.h"
+
 #include <stddef.h>
+#include <stdint.h>
 
 #include <iostream>
 #include <string>
 
 #include "gtest/gtest.h"
 #include "rocm_smi/rocm_smi.h"
-#include "rocm_smi_test/functional/process_info_read.h"
 #include "rocm_smi_test/test_common.h"
 
 TestProcInfoRead::TestProcInfoRead() : TestBase() {
   set_title("RSMI Process Info Read Test");
-  set_description("This test verifies that process information such as the "
-                             "process ID, PASID, etc. can be read properly.");
+  set_description(
+      "This test verifies that process information such as the "
+      "process ID, PASID, etc. can be read properly.");
 }
 
-TestProcInfoRead::~TestProcInfoRead(void) {
-}
+TestProcInfoRead::~TestProcInfoRead(void) {}
 
 void TestProcInfoRead::SetUp(void) {
   TestBase::SetUp();
@@ -69,9 +70,7 @@ void TestProcInfoRead::SetUp(void) {
   return;
 }
 
-void TestProcInfoRead::DisplayTestInfo(void) {
-  TestBase::DisplayTestInfo();
-}
+void TestProcInfoRead::DisplayTestInfo(void) { TestBase::DisplayTestInfo(); }
 
 void TestProcInfoRead::DisplayResults(void) const {
   TestBase::DisplayResults();
@@ -84,7 +83,7 @@ void TestProcInfoRead::Close() {
   TestBase::Close();
 }
 
-static void dumpProcess(rsmi_process_info_t *p) {
+static void dumpProcess(rsmi_process_info_t* p) {
   assert(p != nullptr);
   std::cout << "\t** ProcessID: " << p->process_id << " ";
   std::cout << "PASID: " << p->pasid << " ";
@@ -94,7 +93,7 @@ void TestProcInfoRead::Run(void) {
   rsmi_status_t err;
   uint32_t num_proc_found;
   uint32_t val_ui32;
-  rsmi_process_info_t *procs = nullptr;
+  rsmi_process_info_t* procs = nullptr;
 
   TestBase::Run();
   if (setup_failed_) {
@@ -110,8 +109,7 @@ void TestProcInfoRead::Run(void) {
   if (err != RSMI_STATUS_SUCCESS) {
     if (err == RSMI_STATUS_NOT_SUPPORTED) {
       IF_VERB(STANDARD) {
-        std::cout << "\t**Process info. read: Not supported on this machine"
-                                                                 << std::endl;
+        std::cout << "\t**Process info. read: Not supported on this machine" << std::endl;
         return;
       }
     } else {
@@ -119,8 +117,7 @@ void TestProcInfoRead::Run(void) {
     }
   } else {
     IF_VERB(STANDARD) {
-      std::cout << "\t** "  << std::dec << num_proc_found <<
-                                          " GPU processes found" << std::endl;
+      std::cout << "\t** " << std::dec << num_proc_found << " GPU processes found" << std::endl;
     }
   }
 
@@ -135,9 +132,9 @@ void TestProcInfoRead::Run(void) {
   if (err != RSMI_STATUS_SUCCESS) {
     if (err == RSMI_STATUS_INSUFFICIENT_SIZE) {
       IF_VERB(STANDARD) {
-        std::cout << "\t** " << val_ui32 <<
-         " processes were read, but more became available that were unread."
-                                                                 << std::endl;
+        std::cout << "\t** " << val_ui32
+                  << " processes were read, but more became available that were unread."
+                  << std::endl;
         for (uint32_t i = 0; i < val_ui32; ++i) {
           dumpProcess(&procs[i]);
         }
@@ -160,22 +157,19 @@ void TestProcInfoRead::Run(void) {
   num_proc_found = val_ui32;
   if (num_proc_found) {
     // Allocate the max we expect to get
-    uint32_t *dev_inds = new uint32_t[num_devices];
+    uint32_t* dev_inds = new uint32_t[num_devices];
     uint32_t amt_allocd = num_devices;
 
     for (uint32_t j = 0; j < num_proc_found; j++) {
-      err = rsmi_compute_process_gpus_get(procs[j].process_id, dev_inds,
-                                                                 &amt_allocd);
+      err = rsmi_compute_process_gpus_get(procs[j].process_id, dev_inds, &amt_allocd);
       if (err == RSMI_STATUS_NOT_FOUND) {
-        std::cout << "\t** Process " << procs[j].process_id <<
-                                                     " is no longer present.";
+        std::cout << "\t** Process " << procs[j].process_id << " is no longer present.";
         continue;
       } else {
         CHK_ERR_ASRT(err);
         ASSERT_LE(amt_allocd, num_devices);
       }
-      std::cout << "\t** Process " << procs[j].process_id <<
-                                           " is using devices with indices: ";
+      std::cout << "\t** Process " << procs[j].process_id << " is using devices with indices: ";
       uint32_t i;
       if (amt_allocd > 0) {
         for (i = 0; i < amt_allocd - 1; ++i) {
@@ -189,45 +183,40 @@ void TestProcInfoRead::Run(void) {
       // if any process running on devices
       for (i = 0; i < amt_allocd; ++i) {
         rsmi_process_info_t proc_info;
-        err = rsmi_compute_process_info_by_device_get(
-            procs[j].process_id, dev_inds[i], &proc_info);
+        err = rsmi_compute_process_info_by_device_get(procs[j].process_id, dev_inds[i], &proc_info);
         CHK_ERR_ASRT(err)
         ASSERT_EQ(proc_info.process_id, procs[j].process_id);
         ASSERT_EQ(proc_info.pasid, procs[j].pasid);
-        std::cout << "\t** Process ID: " << procs[j].process_id
-              << " on device " << dev_inds[i] << " VRAM Usage: "
-              << proc_info.vram_usage << " SDMA Usage: " << proc_info.sdma_usage
-              << " Compute Unit Usage: " << proc_info.cu_occupancy << std::endl;
+        std::cout << "\t** Process ID: " << procs[j].process_id << " on device " << dev_inds[i]
+                  << " VRAM Usage: " << proc_info.vram_usage
+                  << " SDMA Usage: " << proc_info.sdma_usage
+                  << " Compute Unit Usage: " << proc_info.cu_occupancy << std::endl;
       }
       // Reset amt_allocd back to the amount acutally allocated
       amt_allocd = num_devices;
     }
 
-    delete []dev_inds;
+    delete[] dev_inds;
 
     rsmi_process_info_t proc_info;
     for (uint32_t j = 0; j < num_proc_found; j++) {
       memset(&proc_info, 0x0, sizeof(rsmi_process_info_t));
-      err = rsmi_compute_process_info_by_pid_get(procs[j].process_id,
-                                                                  &proc_info);
+      err = rsmi_compute_process_info_by_pid_get(procs[j].process_id, &proc_info);
       if (err == RSMI_STATUS_NOT_FOUND) {
-        std::cout <<
-         "\t** WARNING: rsmi_compute_process_info_get() found process " <<
-           procs[j].process_id << ", but subsequently, "
-                       "rsmi_compute_process_info_by_pid_get() did not"
-                                      " find this same process." << std::endl;
+        std::cout << "\t** WARNING: rsmi_compute_process_info_get() found process "
+                  << procs[j].process_id
+                  << ", but subsequently, "
+                     "rsmi_compute_process_info_by_pid_get() did not"
+                     " find this same process."
+                  << std::endl;
       } else {
         CHK_ERR_ASRT(err)
         ASSERT_EQ(proc_info.process_id, procs[j].process_id);
         ASSERT_EQ(proc_info.pasid, procs[j].pasid);
-        std::cout << "\t** Process ID: " <<
-            procs[j].process_id << " VRAM Usage: " <<
-                                   proc_info.vram_usage <<
-                                   " SDMA Usage: " <<
-                                   proc_info.sdma_usage <<
-                                   " Compute Unit Usage: " <<
-                                   proc_info.cu_occupancy <<
-                                   std::endl;
+        std::cout << "\t** Process ID: " << procs[j].process_id
+                  << " VRAM Usage: " << proc_info.vram_usage
+                  << " SDMA Usage: " << proc_info.sdma_usage
+                  << " Compute Unit Usage: " << proc_info.cu_occupancy << std::endl;
       }
     }
   }
@@ -238,9 +227,9 @@ void TestProcInfoRead::Run(void) {
 
     if (err != RSMI_STATUS_INSUFFICIENT_SIZE) {
       std::cout << "Expected rsmi_compute_process_info_get() to tell us"
-        " there are more processes available, but instead go return code " <<
-                                                              err << std::endl;
+                   " there are more processes available, but instead go return code "
+                << err << std::endl;
     }
   }
-  delete []procs;
+  delete[] procs;
 }

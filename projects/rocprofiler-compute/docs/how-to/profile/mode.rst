@@ -1064,6 +1064,8 @@ By default, if no policy is specified, ROCm Compute Profiler uses the ``kernel_l
 
 .. note::
 
+   * Iteration multiplexing requires rocprofiler-sdk from ROCm 7.0.0 or later.
+
    * Do not use ``--no-native-tool`` with ``--iteration-multiplexing``.
      Iteration multiplexing is only supported when using ROCm Compute Profiler with
      the native counter collection tool. Ensure that ``--no-native-tool`` is not used in your profiling command.
