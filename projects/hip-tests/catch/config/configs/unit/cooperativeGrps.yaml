@@ -69,8 +69,7 @@ cooperativeGrps:
     tags: [cooperative, ops]
   Unit_Coalesced_Group_Tiled_Partition_Sync_Positive_Basic:
     <<: *level_2
-    # (amd_linux) Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/210
-    disabled: [amd_linux, amd_windows]
+    disabled: [amd_windows]
     tags: [cooperative, ops]
   Unit_hipCGThreadBlockType:
     <<: *level_2
