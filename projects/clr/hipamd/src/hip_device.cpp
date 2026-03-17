@@ -24,7 +24,7 @@ hip::Stream* Device::NullStream(bool wait) {
     std::scoped_lock lock(lock_);
     if (null_stream_ == nullptr) {
       null_stream_ = new Stream(this, Stream::Priority::Normal, 0, true);
-      // Stream creation might be failed from rcor and in that case, vdev is null.
+      // Stream creation may fail in ROCclr, in which case vdev is null.
       if (null_stream_->vdev() == nullptr) {
         Stream::Destroy(null_stream_);
         null_stream_ = nullptr;
@@ -35,8 +35,8 @@ hip::Stream* Device::NullStream(bool wait) {
     LogError("Cannot create new Stream object");
     return nullptr;
   }
-  if (wait == true) {
-    // Wait for all active streams before executing commands on the default
+  if (wait) {
+    // Wait for all active streams before executing commands on the default stream
     WaitActiveStreams(null_stream_);
   }
   return null_stream_;
@@ -57,22 +57,20 @@ bool Device::Create() {
   }
 
   if (!HIP_MEM_POOL_USE_VM) {
+    // Without VM support, set max threshold so the pool never releases memory automatically.
     uint64_t max_size = std::numeric_limits<uint64_t>::max();
-    // Use maximum value to hold memory, because current implementation doesn't support VM
-    // Note: the call for the threshold is always successful
-    auto error = graph_mem_pool_->SetAttribute(hipMemPoolAttrReleaseThreshold, &max_size);
+    [[maybe_unused]] const auto err =
+        graph_mem_pool_->SetAttribute(hipMemPoolAttrReleaseThreshold, &max_size);
+    assert(err == hipSuccess);
   }
 
-  // Current is default pool after device creation
   current_mem_pool_ = default_mem_pool_;
 
   // Create managed memory pool
-  hipMemPoolProps props = {.allocType = hipMemAllocationTypeManaged,
-                           .handleTypes = hipMemHandleTypeNone,
-                           .location = {.type = hipMemLocationTypeDevice, .id = deviceId_},
-                           .win32SecurityAttributes = nullptr,
-                           .maxSize = 0,
-                           .reserved = {}};
+  const hipMemPoolProps props = {.allocType = hipMemAllocationTypeManaged,
+                                 .handleTypes = hipMemHandleTypeNone,
+                                 .location = {.type = hipMemLocationTypeDevice,
+                                              .id = deviceId_}};
   default_managed_mem_pool_ = new MemoryPool(this, &props);
   if (default_managed_mem_pool_ == nullptr) {
     return false;
@@ -85,32 +83,26 @@ bool Device::Create() {
 // ================================================================================================
 bool Device::IsMemoryPoolValid(MemoryPool* pool) {
   std::scoped_lock lock(lock_);
-  bool result = (mem_pools_.find(pool) != mem_pools_.end()) ? true : false;
-  return result;
+  return mem_pools_.count(pool) != 0;
 }
 
 // ================================================================================================
 void Device::AddMemoryPool(MemoryPool* pool) {
   std::scoped_lock lock(lock_);
-  if (auto it = mem_pools_.find(pool); it == mem_pools_.end()) {
-    mem_pools_.insert(pool);
-  }
+  mem_pools_.insert(pool);
 }
 
 // ================================================================================================
 void Device::RemoveMemoryPool(MemoryPool* pool) {
   std::scoped_lock lock(lock_);
-  if (auto it = mem_pools_.find(pool); it != mem_pools_.end()) {
-    mem_pools_.erase(it);
-  }
+  mem_pools_.erase(pool);
 }
 
 // ================================================================================================
 bool Device::FreeMemory(amd::Memory* memory, Stream* stream, Event* event) {
   std::scoped_lock lock(lock_);
-  // Search for memory in the entire list of pools
-  for (auto it : mem_pools_) {
-    if (it->FreeMemory(memory, stream, event)) {
+  for (auto* pool : mem_pools_) {
+    if (pool->FreeMemory(memory, stream, event)) {
       return true;
     }
   }
@@ -120,27 +112,24 @@ bool Device::FreeMemory(amd::Memory* memory, Stream* stream, Event* event) {
 // ================================================================================================
 void Device::ReleaseFreedMemory() {
   std::scoped_lock lock(lock_);
-  // Search for memory in the entire list of pools
-  for (auto it : mem_pools_) {
-    it->ReleaseFreedMemory();
+  for (auto* pool : mem_pools_) {
+    pool->ReleaseFreedMemory();
   }
 }
 
 // ================================================================================================
 void Device::RemoveStreamFromPools(Stream* stream) {
   std::scoped_lock lock(lock_);
-  // Update all pools with the destroyed stream
-  for (auto it : mem_pools_) {
-    it->RemoveStream(stream);
+  for (auto* pool : mem_pools_) {
+    pool->RemoveStream(stream);
   }
 }
 
 // ================================================================================================
 void Device::AddSafeStream(Stream* event_stream, Stream* wait_stream) {
   std::scoped_lock lock(lock_);
-  // Update all pools with the safe streams
-  for (auto it : mem_pools_) {
-    it->AddSafeStream(event_stream, wait_stream);
+  for (auto* pool : mem_pools_) {
+    pool->AddSafeStream(event_stream, wait_stream);
   }
 }
 
@@ -148,39 +137,37 @@ void Device::AddSafeStream(Stream* event_stream, Stream* wait_stream) {
 void Device::Reset() {
   {
     std::scoped_lock lock(lock_);
-    auto it = mem_pools_.begin();
-    while (it != mem_pools_.end()) {
-      auto current = it++;
-      (*current)->ReleaseAllMemory();
-      delete *current;
+    for (auto* pool : mem_pools_) {
+      pool->ReleaseAllMemory();
+      delete pool;
     }
     mem_pools_.clear();
   }
   flags_ = hipDeviceScheduleSpin;
   destroyAllStreams();
 
-  // Clear hostcall allocations to avoid Device::~Device() accessing freed Memory objects later.
-  devices()[0]->ClearHostcallMemories();
-  amd::MemObjMap::Purge(devices()[0]);
+  // Clear hostcall allocations to avoid ~Device() accessing freed Memory objects later.
+  auto* dev = devices()[0];
+  dev->ClearHostcallMemories();
+  amd::MemObjMap::Purge(dev);
   Create();
 }
 
 // ================================================================================================
 void Device::WaitActiveStreams(hip::Stream* blocking_stream, bool wait_null_stream) {
   amd::Command::EventWaitList eventWaitList(0);
-  bool submitMarker = 0;
+  bool submitMarker = false;
 
   auto waitForStream = [&submitMarker, &eventWaitList](hip::Stream* stream) {
     if (amd::Command* command = stream->getLastQueuedCommand(true)) {
       amd::Event& event = command->event();
-      // Check HW status of the ROCcrl event.
+      // Check HW status of the ROCclr event.
       // Note: not all ROCclr modes support HW status
       bool ready = stream->device().IsHwEventReady(event);
       if (!ready) {
         ready = (command->status() == CL_COMPLETE);
       }
       submitMarker |= stream->vdev()->isFenceDirty();
-      // Check the current active status
       if (!ready) {
         command->notifyCmdQueue();
         eventWaitList.push_back(command);
@@ -196,70 +183,65 @@ void Device::WaitActiveStreams(hip::Stream* blocking_stream, bool wait_null_stre
       waitForStream(null_stream_);
     }
   } else {
-    auto activeQueues = blocking_stream->device().getActiveQueues();
-    for (const auto& command : activeQueues) {
-      hip::Stream* active_stream = static_cast<hip::Stream*>(command);
-      if (  // Make sure it's a default stream
-          ((active_stream->Flags() & hipStreamNonBlocking) == 0) &&
-          // and it's not the current stream
-          (active_stream != blocking_stream)) {
+    const auto activeQueues = blocking_stream->device().getActiveQueues();
+    for (const auto& queue : activeQueues) {
+      auto* active_stream = static_cast<hip::Stream*>(queue);
+      // Only wait on blocking (non-nonblocking) streams other than the current one
+      if ((active_stream->Flags() & hipStreamNonBlocking) == 0 &&
+          active_stream != blocking_stream) {
         ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_WAIT, "Waiting on active stream %p", active_stream);
-        // Get the last valid command
         waitForStream(active_stream);
       }
-      command->release();
+      queue->release();
     }
   }
 
-  // Check if we have to wait anything
-  if (eventWaitList.size() > 0 || submitMarker) {
-    amd::Command* command = new amd::Marker(*blocking_stream, kMarkerDisableFlush, eventWaitList);
-    command->enqueue();
-    command->release();
+  if (!eventWaitList.empty() || submitMarker) {
+    auto* marker = new amd::Marker(*blocking_stream, kMarkerDisableFlush, eventWaitList);
+    marker->enqueue();
+    marker->release();
   }
 
-  // Release all active commands. It's safe after the marker was enqueued
-  for (const auto& it : eventWaitList) {
-    it->release();
+  // Release all active commands; safe after the marker was enqueued
+  for (const auto& cmd : eventWaitList) {
+    cmd->release();
   }
 }
 
 // ================================================================================================
 void Device::AddStream(Stream* stream) {
-  std::unique_lock lock(streamSetLock);
-  streamSet.insert(stream);
+  std::unique_lock lock(streamSetLock_);
+  streamSet_.insert(stream);
 }
 
 // ================================================================================================
 void Device::RemoveStream(Stream* stream) {
-  std::unique_lock lock(streamSetLock);
-  streamSet.erase(stream);
+  std::unique_lock lock(streamSetLock_);
+  streamSet_.erase(stream);
 }
 
 // ================================================================================================
-bool Device::StreamExists(Stream* stream) {
-  std::shared_lock lock(streamSetLock);
-  if (streamSet.find(stream) != streamSet.end()) {
-    return true;
-  }
-  return false;
+bool Device::StreamExists(const Stream* stream) {
+  std::shared_lock lock(streamSetLock_);
+  return streamSet_.count(const_cast<Stream*>(stream)) != 0;
 }
 
 // ================================================================================================
 void Device::destroyAllStreams() {
   std::vector<Stream*> toBeDeleted;
   {
-    std::shared_lock lock(streamSetLock);
-    for (auto& it : streamSet) {
-      if (it->Null() == false) {
-        toBeDeleted.push_back(it);
+    std::shared_lock lock(streamSetLock_);
+    toBeDeleted.reserve(streamSet_.size());
+    for (auto* stream : streamSet_) {
+      if (!stream->Null()) {
+        toBeDeleted.push_back(stream);
       }
     }
   }
-  for (auto& it : toBeDeleted) {
-    hip::Stream::Destroy(it);
+  for (auto* stream : toBeDeleted) {
+    hip::Stream::Destroy(stream);
   }
-  hip::tls.stream_per_thread_obj_.clear_spt();
+  hip::tls.stream_per_thread_obj_.Clear();
 }
 
 // ================================================================================================
@@ -267,31 +249,31 @@ void Device::SyncAllStreams(bool cpu_wait, bool wait_blocking_streams_only) {
   // Make a local copy to avoid stalls for GPU finish with multiple threads
   std::vector<hip::Stream*> streams;
   {
-    std::shared_lock lock(streamSetLock);
-    streams.reserve(streamSet.size());
+    std::shared_lock lock(streamSetLock_);
+    streams.reserve(streamSet_.size());
     if (wait_blocking_streams_only) {
-      auto null_stream = GetNullStream();
-      for (auto it : streamSet) {
-        if (it != null_stream && (it->Flags() & hipStreamNonBlocking) == 0) {
-          streams.push_back(it);
-          it->retain();
+      auto* null_stream = GetNullStream();
+      for (auto* stream : streamSet_) {
+        if (stream != null_stream && (stream->Flags() & hipStreamNonBlocking) == 0) {
+          streams.push_back(stream);
+          stream->retain();
         }
       }
-      // Add null stream to the end of the list so that wait happens after all blocking streams.
+      // Add null stream to the end so that wait happens after all blocking streams.
       if (null_stream != nullptr) {
         streams.push_back(null_stream);
         null_stream->retain();
       }
     } else {
-      for (auto it : streamSet) {
-        streams.push_back(it);
-        it->retain();
+      for (auto* stream : streamSet_) {
+        streams.push_back(stream);
+        stream->retain();
       }
     }
   }
-  for (auto it : streams) {
-    it->finish(cpu_wait);
-    it->release();
+  for (auto* stream : streams) {
+    stream->finish(cpu_wait);
+    stream->release();
   }
   // Release freed memory for all memory pools on the device
   ReleaseFreedMemory();
@@ -299,10 +281,10 @@ void Device::SyncAllStreams(bool cpu_wait, bool wait_blocking_streams_only) {
 
 // ================================================================================================
 bool Device::StreamCaptureBlocking() {
-  std::shared_lock lock(streamSetLock);
-  for (auto& it : streamSet) {
-    if (it->GetCaptureStatus() == hipStreamCaptureStatusActive &&
-        it->Flags() != hipStreamNonBlocking) {
+  std::shared_lock lock(streamSetLock_);
+  for (auto* stream : streamSet_) {
+    if (stream->GetCaptureStatus() == hipStreamCaptureStatusActive &&
+        (stream->Flags() & hipStreamNonBlocking) == 0) {
       return true;
     }
   }
@@ -310,14 +292,39 @@ bool Device::StreamCaptureBlocking() {
 }
 
 // ================================================================================================
-bool Device::existsActiveStreamForDevice() {
-  std::shared_lock lock(streamSetLock);
-  for (const auto& active_stream : streamSet) {
-    if (active_stream->GetQueueStatus()) {
-      return true;
+hipError_t Device::EnablePeerAccess(int peerDeviceId) {
+  std::scoped_lock lock(lock_);
+  if (std::find(userEnabledPeers_.begin(), userEnabledPeers_.end(), peerDeviceId)
+      != userEnabledPeers_.end()) {
+    return hipErrorPeerAccessAlreadyEnabled;
+  }
+  userEnabledPeers_.push_back(peerDeviceId);
+  return hipSuccess;
+}
+
+// ================================================================================================
+hipError_t Device::DisablePeerAccess(int peerDeviceId) {
+  std::scoped_lock lock(lock_);
+  auto it = std::find(userEnabledPeers_.begin(), userEnabledPeers_.end(), peerDeviceId);
+  if (it == userEnabledPeers_.end()) {
+    return hipErrorPeerAccessNotEnabled;
+  }
+  userEnabledPeers_.erase(it);
+  return hipSuccess;
+}
+
+// ================================================================================================
+bool Device::GetActiveStatus() {
+  if (!isActive_.load(std::memory_order_acquire)) {
+    std::shared_lock lock(streamSetLock_);
+    for (const auto* stream : streamSet_) {
+      if (stream->GetQueueStatus()) {
+        isActive_.store(true, std::memory_order_release);
+        break;
+      }
     }
   }
-  return false;
+  return isActive_.load(std::memory_order_relaxed);
 }
 
 // ================================================================================================
@@ -326,7 +333,8 @@ Device::~Device() {
     default_mem_pool_->release();
   }
 
-  clearAllTrackedObjects();
+  registeredGraphicsResources_.clear();
+  mappedGraphicsResources_.clear();
 
   if (graph_mem_pool_ != nullptr) {
     graph_mem_pool_->release();
@@ -341,12 +349,14 @@ Device::~Device() {
   }
 }
 
+// ================================================================================================
 void ihipDestroyDevice() {
   for (auto deviceHandle : g_devices) {
     delete deviceHandle;
   }
 }
 
+// ================================================================================================
 hipError_t ihipDeviceGet(hipDevice_t* device, int deviceId) {
   if (device == nullptr) {
     return hipErrorInvalidValue;
@@ -360,12 +370,14 @@ hipError_t ihipDeviceGet(hipDevice_t* device, int deviceId) {
   return hipSuccess;
 }
 
+// ================================================================================================
 hipError_t hipDeviceGet(hipDevice_t* device, int deviceId) {
   HIP_INIT_API(hipDeviceGet, device, deviceId);
 
   HIP_RETURN(ihipDeviceGet(device, deviceId));
 }
 
+// ================================================================================================
 hipError_t hipDeviceTotalMem(size_t* bytes, hipDevice_t device) {
   HIP_INIT_API(hipDeviceTotalMem, bytes, device);
 
@@ -379,12 +391,12 @@ hipError_t hipDeviceTotalMem(size_t* bytes, hipDevice_t device) {
 
   auto* deviceHandle = g_devices[device]->devices()[0];
   const auto& info = deviceHandle->info();
-
   *bytes = info.globalMemSize_;
 
   HIP_RETURN(hipSuccess);
 }
 
+// ================================================================================================
 hipError_t hipDeviceComputeCapability(int* major, int* minor, hipDevice_t device) {
   HIP_INIT_API(hipDeviceComputeCapability, major, minor, device);
 
@@ -404,12 +416,14 @@ hipError_t hipDeviceComputeCapability(int* major, int* minor, hipDevice_t device
   HIP_RETURN(hipSuccess);
 }
 
+// ================================================================================================
 hipError_t hipDeviceGetCount(int* count) {
   HIP_INIT_API(hipDeviceGetCount, count);
 
   HIP_RETURN(ihipDeviceGetCount(count));
 }
 
+// ================================================================================================
 hipError_t ihipDeviceGetCount(int* count) {
   if (count == nullptr) {
     return hipErrorInvalidValue;
@@ -425,8 +439,9 @@ hipError_t ihipDeviceGetCount(int* count) {
   return hipSuccess;
 }
 
+// ================================================================================================
 hipError_t hipDeviceGetName(char* name, int len, hipDevice_t device) {
-  HIP_INIT_API(hipDeviceGetName, (void*)name, len, device);
+  HIP_INIT_API(hipDeviceGetName, static_cast<void*>(name), len, device);
 
   if (device < 0 || static_cast<size_t>(device) >= g_devices.size()) {
     HIP_RETURN(hipErrorInvalidDevice);
@@ -442,13 +457,14 @@ hipError_t hipDeviceGetName(char* name, int len, hipDevice_t device) {
 
   // Only copy partial name if size of `dest` is smaller than size of `src` including
   // trailing zero byte
-  auto memcpySize = (len <= (nameLen + 1) ? (len - 1) : nameLen);
+  const auto memcpySize = (len <= (nameLen + 1) ? (len - 1) : nameLen);
   ::memcpy(name, info.boardName_, memcpySize);
   name[memcpySize] = '\0';
 
   HIP_RETURN(hipSuccess);
 }
 
+// ================================================================================================
 hipError_t hipDeviceGetUuid(hipUUID* uuid, hipDevice_t device) {
   HIP_INIT_API(hipDeviceGetUuid, reinterpret_cast<void*>(uuid), device);
 
@@ -467,20 +483,21 @@ hipError_t hipDeviceGetUuid(hipUUID* uuid, hipDevice_t device) {
   HIP_RETURN(hipSuccess);
 }
 
+// ================================================================================================
 hipError_t ihipGetDeviceProperties(hipDeviceProp_tR0600* props, int device) {
   if (props == nullptr) {
     return hipErrorInvalidValue;
   }
 
-  if (unsigned(device) >= g_devices.size()) {
+  if (static_cast<unsigned>(device) >= g_devices.size()) {
     return hipErrorInvalidDevice;
   }
   auto* deviceHandle = g_devices[device]->devices()[0];
 
-  constexpr auto pixel_size_max = 16;
-  constexpr auto int32_max = static_cast<uint64_t>(std::numeric_limits<int32_t>::max());
-  constexpr auto uint16_max = static_cast<uint64_t>(std::numeric_limits<uint16_t>::max()) + 1;
-  hipDeviceProp_tR0600 deviceProps = {0};
+  constexpr auto kPixelSizeMax = 16;
+  constexpr auto kInt32Max = static_cast<uint64_t>(std::numeric_limits<int32_t>::max());
+  constexpr auto kUint16Max = static_cast<uint64_t>(std::numeric_limits<uint16_t>::max()) + 1;
+  hipDeviceProp_tR0600 deviceProps = {};
 
   const auto& info = deviceHandle->info();
   const auto& isa = deviceHandle->isa();
@@ -495,19 +512,19 @@ hipError_t ihipGetDeviceProperties(hipDeviceProp_tR0600* props, int device) {
   deviceProps.maxThreadsDim[0] = info.maxWorkItemSizes_[0];
   deviceProps.maxThreadsDim[1] = info.maxWorkItemSizes_[1];
   deviceProps.maxThreadsDim[2] = info.maxWorkItemSizes_[2];
-  deviceProps.maxGridSize[0] = int32_max;
-  deviceProps.maxGridSize[1] = uint16_max;
-  deviceProps.maxGridSize[2] = uint16_max;
+  deviceProps.maxGridSize[0] = kInt32Max;
+  deviceProps.maxGridSize[1] = kUint16Max;
+  deviceProps.maxGridSize[2] = kUint16Max;
   deviceProps.clockRate = info.maxEngineClockFrequency_ * 1000;
   deviceProps.memoryClockRate = info.maxMemoryClockFrequency_ * 1000;
   deviceProps.memoryBusWidth = info.vramBusBitWidth_;
-  deviceProps.totalConstMem = std::min(info.maxConstantBufferSize_, int32_max);
+  deviceProps.totalConstMem = std::min(info.maxConstantBufferSize_, kInt32Max);
   deviceProps.major = isa.versionMajor();
   deviceProps.minor = isa.versionMinor();
   deviceProps.multiProcessorCount = info.maxComputeUnits_;
   deviceProps.l2CacheSize = info.l2CacheSize_;
   deviceProps.maxThreadsPerMultiProcessor = info.maxThreadsPerCU_;
-  deviceProps.maxBlocksPerMultiProcessor = int(info.maxThreadsPerCU_ / info.wavefrontWidth_);
+  deviceProps.maxBlocksPerMultiProcessor = static_cast<int>(info.maxThreadsPerCU_ / info.wavefrontWidth_);
   deviceProps.computeMode = 0;
   deviceProps.clockInstructionRate = info.timeStampFrequency_;
   deviceProps.arch.hasGlobalInt32Atomics = 1;
@@ -535,7 +552,7 @@ hipError_t ihipGetDeviceProperties(hipDeviceProp_tR0600* props, int device) {
   deviceProps.maxSharedMemoryPerMultiProcessor = info.localMemSizePerCU_;
   deviceProps.canMapHostMemory = 1;
   deviceProps.regsPerMultiprocessor = info.availableRegistersPerCU_;
-  sprintf(deviceProps.gcnArchName, "%s", isa.targetId());
+  snprintf(deviceProps.gcnArchName, sizeof(deviceProps.gcnArchName), "%s", isa.targetId());
   deviceProps.cooperativeLaunch = info.cooperativeGroups_;
   deviceProps.cooperativeMultiDeviceLaunch = info.cooperativeMultiDeviceGroups_;
 
@@ -544,33 +561,33 @@ hipError_t ihipGetDeviceProperties(hipDeviceProp_tR0600* props, int device) {
   deviceProps.cooperativeMultiDeviceUnmatchedBlockDim = info.cooperativeMultiDeviceGroups_;
   deviceProps.cooperativeMultiDeviceUnmatchedSharedMem = info.cooperativeMultiDeviceGroups_;
 
-  deviceProps.maxTexture1DLinear = std::min(pixel_size_max * info.imageMaxBufferSize_, int32_max);
-  deviceProps.maxTexture1DMipmap = std::min(16 * info.imageMaxBufferSize_, int32_max);
-  deviceProps.maxTexture1D = deviceProps.maxSurface1D = std::min(info.image1DMaxWidth_, int32_max);
+  deviceProps.maxTexture1DLinear = std::min(kPixelSizeMax * info.imageMaxBufferSize_, kInt32Max);
+  deviceProps.maxTexture1DMipmap = std::min(kPixelSizeMax * info.imageMaxBufferSize_, kInt32Max);
+  deviceProps.maxTexture1D = deviceProps.maxSurface1D = std::min(info.image1DMaxWidth_, kInt32Max);
   deviceProps.maxTexture2D[0] = deviceProps.maxSurface2D[0] =
-      std::min(info.image2DMaxWidth_, int32_max);
+      std::min(info.image2DMaxWidth_, kInt32Max);
   deviceProps.maxTexture2D[1] = deviceProps.maxSurface2D[1] =
-      std::min(info.image2DMaxHeight_, int32_max);
+      std::min(info.image2DMaxHeight_, kInt32Max);
   deviceProps.maxTexture3D[0] = deviceProps.maxSurface3D[0] =
-      std::min(info.image3DMaxWidth_, int32_max);
+      std::min(info.image3DMaxWidth_, kInt32Max);
   deviceProps.maxTexture3D[1] = deviceProps.maxSurface3D[1] =
-      std::min(info.image3DMaxHeight_, int32_max);
+      std::min(info.image3DMaxHeight_, kInt32Max);
   deviceProps.maxTexture3D[2] = deviceProps.maxSurface3D[2] =
-      std::min(info.image3DMaxDepth_, int32_max);
+      std::min(info.image3DMaxDepth_, kInt32Max);
   deviceProps.maxTexture1DLayered[0] = deviceProps.maxSurface1DLayered[0] =
-      std::min(info.image1DAMaxWidth_, int32_max);
+      std::min(info.image1DAMaxWidth_, kInt32Max);
   deviceProps.maxTexture1DLayered[1] = deviceProps.maxSurface1DLayered[1] =
-      std::min(info.imageMaxArraySize_, int32_max);
+      std::min(info.imageMaxArraySize_, kInt32Max);
   deviceProps.maxTexture2DLayered[0] = deviceProps.maxSurface2DLayered[0] =
-      std::min(info.image2DAMaxWidth_[0], int32_max);
+      std::min(info.image2DAMaxWidth_[0], kInt32Max);
   deviceProps.maxTexture2DLayered[1] = deviceProps.maxSurface2DLayered[1] =
-      std::min(info.image2DAMaxWidth_[1], int32_max);
+      std::min(info.image2DAMaxWidth_[1], kInt32Max);
   deviceProps.maxTexture2DLayered[2] = deviceProps.maxSurface2DLayered[2] =
-      std::min(info.imageMaxArraySize_, int32_max);
+      std::min(info.imageMaxArraySize_, kInt32Max);
   deviceProps.hdpMemFlushCntl = info.hdpMemFlushCntl;
   deviceProps.hdpRegFlushCntl = info.hdpRegFlushCntl;
 
-  deviceProps.memPitch = std::min(info.maxMemAllocSize_, int32_max);
+  deviceProps.memPitch = std::min(info.maxMemAllocSize_, kInt32Max);
   deviceProps.textureAlignment = deviceProps.surfaceAlignment = info.imageBaseAddressAlignment_;
   deviceProps.texturePitchAlignment = info.imagePitchAlignment_;
   deviceProps.kernelExecTimeoutEnabled = 0;
@@ -631,9 +648,9 @@ hipError_t ihipGetDeviceProperties(hipDeviceProp_tR0600* props, int device) {
   deviceProps.maxTexture2DGather[0] = 0;
   deviceProps.maxTexture2DGather[1] = 0;
   // Textures bound to pitch memory
-  deviceProps.maxTexture2DLinear[0] = std::min(info.image2DMaxWidth_, int32_max);
-  deviceProps.maxTexture2DLinear[1] = std::min(info.image2DMaxHeight_, int32_max);
-  deviceProps.maxTexture2DLinear[2] = std::min(pixel_size_max * info.image2DMaxWidth_, int32_max);
+  deviceProps.maxTexture2DLinear[0] = std::min(info.image2DMaxWidth_, kInt32Max);
+  deviceProps.maxTexture2DLinear[1] = std::min(info.image2DMaxHeight_, kInt32Max);
+  deviceProps.maxTexture2DLinear[2] = std::min(kPixelSizeMax * info.image2DMaxWidth_, kInt32Max);
   // Alternate 3D texture
   deviceProps.maxTexture3DAlt[0] = 0;
   deviceProps.maxTexture3DAlt[1] = 0;
@@ -662,12 +679,14 @@ hipError_t ihipGetDeviceProperties(hipDeviceProp_tR0600* props, int device) {
   return hipSuccess;
 }
 
+// ================================================================================================
 hipError_t hipGetDevicePropertiesR0600(hipDeviceProp_tR0600* prop, int device) {
   HIP_INIT_API(hipGetDevicePropertiesR0600, prop, device);
 
   HIP_RETURN(ihipGetDeviceProperties(prop, device));
 }
 
+// ================================================================================================
 hipError_t hipGetDevicePropertiesR0000(hipDeviceProp_tR0000* prop, int device) {
   HIP_INIT_API(hipGetDevicePropertiesR0000, prop, device);
 
@@ -675,18 +694,19 @@ hipError_t hipGetDevicePropertiesR0000(hipDeviceProp_tR0000* prop, int device) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  if (unsigned(device) >= g_devices.size()) {
+  if (static_cast<unsigned>(device) >= g_devices.size()) {
     HIP_RETURN(hipErrorInvalidDevice);
   }
   auto* deviceHandle = g_devices[device]->devices()[0];
 
-  constexpr auto int32_max = static_cast<uint64_t>(std::numeric_limits<int32_t>::max());
-  constexpr auto uint16_max = static_cast<uint64_t>(std::numeric_limits<uint16_t>::max()) + 1;
-  hipDeviceProp_tR0000 deviceProps = {0};
+  constexpr auto kPixelSizeMax = 16;
+  constexpr auto kInt32Max = static_cast<uint64_t>(std::numeric_limits<int32_t>::max());
+  constexpr auto kUint16Max = static_cast<uint64_t>(std::numeric_limits<uint16_t>::max()) + 1;
+  hipDeviceProp_tR0000 deviceProps = {};
 
   const auto& info = deviceHandle->info();
   const auto& isa = deviceHandle->isa();
-  ::strncpy(deviceProps.name, info.boardName_, 128);
+  ::strncpy(deviceProps.name, info.boardName_, sizeof(deviceProps.name));
   deviceProps.totalGlobalMem = info.globalMemSize_;
   deviceProps.sharedMemPerBlock = info.localMemSizePerCU_;
   deviceProps.regsPerBlock = info.availableRegistersPerCU_;
@@ -695,13 +715,13 @@ hipError_t hipGetDevicePropertiesR0000(hipDeviceProp_tR0000* prop, int device) {
   deviceProps.maxThreadsDim[0] = info.maxWorkItemSizes_[0];
   deviceProps.maxThreadsDim[1] = info.maxWorkItemSizes_[1];
   deviceProps.maxThreadsDim[2] = info.maxWorkItemSizes_[2];
-  deviceProps.maxGridSize[0] = int32_max;
-  deviceProps.maxGridSize[1] = uint16_max;
-  deviceProps.maxGridSize[2] = uint16_max;
+  deviceProps.maxGridSize[0] = kInt32Max;
+  deviceProps.maxGridSize[1] = kUint16Max;
+  deviceProps.maxGridSize[2] = kUint16Max;
   deviceProps.clockRate = info.maxEngineClockFrequency_ * 1000;
   deviceProps.memoryClockRate = info.maxMemoryClockFrequency_ * 1000;
   deviceProps.memoryBusWidth = info.vramBusBitWidth_;
-  deviceProps.totalConstMem = std::min(info.maxConstantBufferSize_, int32_max);
+  deviceProps.totalConstMem = std::min(info.maxConstantBufferSize_, kInt32Max);
   deviceProps.major = isa.versionMajor();
   deviceProps.minor = isa.versionMinor();
   deviceProps.multiProcessorCount = info.maxComputeUnits_;
@@ -734,7 +754,7 @@ hipError_t hipGetDevicePropertiesR0000(hipDeviceProp_tR0000* prop, int device) {
   deviceProps.canMapHostMemory = 1;
   // FIXME: This should be removed, targets can have character names as well.
   deviceProps.gcnArch = isa.versionMajor() * 100 + isa.versionMinor() * 10 + isa.versionStepping();
-  sprintf(deviceProps.gcnArchName, "%s", isa.targetId());
+  snprintf(deviceProps.gcnArchName, sizeof(deviceProps.gcnArchName), "%s", isa.targetId());
   deviceProps.cooperativeLaunch = info.cooperativeGroups_;
   deviceProps.cooperativeMultiDeviceLaunch = info.cooperativeMultiDeviceGroups_;
 
@@ -744,17 +764,17 @@ hipError_t hipGetDevicePropertiesR0000(hipDeviceProp_tR0000* prop, int device) {
   deviceProps.cooperativeMultiDeviceUnmatchedSharedMem = info.cooperativeMultiDeviceGroups_;
 
   deviceProps.maxTexture1DLinear =
-      std::min(16 * info.imageMaxBufferSize_, int32_max);  // Max pixel size is 16 bytes
-  deviceProps.maxTexture1D = std::min(info.image1DMaxWidth_, int32_max);
-  deviceProps.maxTexture2D[0] = std::min(info.image2DMaxWidth_, int32_max);
-  deviceProps.maxTexture2D[1] = std::min(info.image2DMaxHeight_, int32_max);
-  deviceProps.maxTexture3D[0] = std::min(info.image3DMaxWidth_, int32_max);
-  deviceProps.maxTexture3D[1] = std::min(info.image3DMaxHeight_, int32_max);
-  deviceProps.maxTexture3D[2] = std::min(info.image3DMaxDepth_, int32_max);
+      std::min(kPixelSizeMax * info.imageMaxBufferSize_, kInt32Max);
+  deviceProps.maxTexture1D = std::min(info.image1DMaxWidth_, kInt32Max);
+  deviceProps.maxTexture2D[0] = std::min(info.image2DMaxWidth_, kInt32Max);
+  deviceProps.maxTexture2D[1] = std::min(info.image2DMaxHeight_, kInt32Max);
+  deviceProps.maxTexture3D[0] = std::min(info.image3DMaxWidth_, kInt32Max);
+  deviceProps.maxTexture3D[1] = std::min(info.image3DMaxHeight_, kInt32Max);
+  deviceProps.maxTexture3D[2] = std::min(info.image3DMaxDepth_, kInt32Max);
   deviceProps.hdpMemFlushCntl = info.hdpMemFlushCntl;
   deviceProps.hdpRegFlushCntl = info.hdpRegFlushCntl;
 
-  deviceProps.memPitch = std::min(info.maxMemAllocSize_, int32_max);
+  deviceProps.memPitch = std::min(info.maxMemAllocSize_, kInt32Max);
   deviceProps.textureAlignment = info.imageBaseAddressAlignment_;
   deviceProps.texturePitchAlignment = info.imagePitchAlignment_;
   deviceProps.kernelExecTimeoutEnabled = 0;
@@ -773,9 +793,10 @@ hipError_t hipGetDevicePropertiesR0000(hipDeviceProp_tR0000* prop, int device) {
   HIP_RETURN(hipSuccess);
 }
 
+// ================================================================================================
 hipError_t hipGetProcAddress_common(const char* symbol, void** pfn, int hipVersion, uint64_t flags,
                              hipDriverProcAddressQueryResult* symbolStatus) {
-  if (symbol == nullptr || std::string_view{symbol}.empty() || pfn == nullptr) {
+  if (symbol == nullptr || *symbol == '\0' || pfn == nullptr) {
     return hipErrorInvalidValue;
   }
   std::string symbolString = symbol;
@@ -816,7 +837,7 @@ hipError_t hipGetProcAddress_common(const char* symbol, void** pfn, int hipVersi
   }
 
   if (checkSpt) {
-      symbolString += "_spt";
+    symbolString += "_spt";
   }
 
   *pfn = amd::Os::getSymbol(handle, symbolString.c_str());
@@ -839,12 +860,14 @@ hipError_t hipGetProcAddress_common(const char* symbol, void** pfn, int hipVersi
   return hipSuccess;
 }
 
+// ================================================================================================
 hipError_t hipGetProcAddress(const char* symbol, void** pfn, int hipVersion, uint64_t flags,
                              hipDriverProcAddressQueryResult* symbolStatus) {
   HIP_INIT_API(hipGetProcAddress, symbol, pfn, hipVersion, flags, symbolStatus);
   HIP_RETURN(hipGetProcAddress_common(symbol, pfn, hipVersion, flags, symbolStatus));
 }
 
+// ================================================================================================
 hipError_t hipGetProcAddress_spt(const char* symbol, void** pfn, int hipVersion, uint64_t flags,
                              hipDriverProcAddressQueryResult* symbolStatus) {
   HIP_INIT_API(hipGetProcAddress, symbol, pfn, hipVersion, flags, symbolStatus);
@@ -854,6 +877,7 @@ hipError_t hipGetProcAddress_spt(const char* symbol, void** pfn, int hipVersion,
 
 }  // namespace hip
 
+// ================================================================================================
 extern "C" hipError_t hipGetDeviceProperties(hipDeviceProp_tR0000* props, hipDevice_t device) {
   return hip::hipGetDevicePropertiesR0000(props, device);
 }

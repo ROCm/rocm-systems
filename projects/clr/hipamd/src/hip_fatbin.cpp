@@ -759,6 +759,8 @@ hipError_t FatBinaryInfo::BuildProgram(const int device_id) {
 
   // If Program was already built skip this step and return success
   if (dev_programs_[device_id]->IsProgramBuilt(*g_devices[device_id]->devices()[0]) == false) {
+    constexpr bool kOptionChangeable = true;
+    constexpr bool kNewDevProg = false;
     if (CL_SUCCESS != dev_programs_[device_id]->build(g_devices[device_id]->devices(), nullptr,
                                                       nullptr, nullptr, kOptionChangeable,
                                                       kNewDevProg)) {
