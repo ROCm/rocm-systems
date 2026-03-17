@@ -649,32 +649,37 @@ Display all PyTorch operators captured during profiling:
          └─ torch.nn.functional.linear (kernel_launches: 20, total_duration: 15.41 ms)
 
 Output is grouped by source location (``file:line``) and shows full operator
-hierarchy (``/``-separated) and kernel stats. Per-operator CSVs in ``torch_trace/``
-are named from the **last** segment of each name (sanitized);
-see :ref:`torch-operator-profiling` for naming details.
+hierarchy (``/``-separated) and kernel stats. A consolidated CSV
+(``torch_trace/consolidated.csv``) is written with all operator/kernel data;
+see :ref:`torch-operator-profiling` for details.
 
 Filtering by Operator
 ^^^^^^^^^^^^^^^^^^^^^^
 
-``--torch-operator`` supports exactly two forms of selection:
+``--torch-operator`` uses PurePosixPath glob patterns to select operators.
+Operator hierarchies are ``/``-separated (e.g.
+``nn.Module.Net.forward/torch.nn.functional.relu``), and patterns are matched
+using ``PurePosixPath.match()``:
 
-* **Full hierarchy** — the complete operator path as listed (e.g.
-  ``nn.Module.Net.forward/nn.Module.Conv2d.forward/torch.nn.functional.conv2d``)
-* **Last segment only** — the final component of the name (e.g. ``conv2d``)
-
-Selection at intermediate levels is not supported yet.
+* **Wildcard** — ``*relu`` (ends with relu), ``*conv*`` (contains conv)
+* **Exact** — ``torch.nn.functional.relu``
+* **Multi-level** — ``*/torch.nn.functional.relu``, ``*/*functional*/*``
+* **Match all** — no arguments, ``all``, ``*``, or ``**``
 
 .. code-block:: shell-session
 
-   # Full hierarchy
-   $ rocprof-compute --experimental analyze --path ./workload --torch-operator "nn.Module.Net.forward/nn.Module.Conv2d.forward/torch.nn.functional.conv2d"
+   # Wildcard match
+   $ rocprof-compute --experimental analyze --path ./workload --torch-operator "*relu"
 
-   # Last segment only (matches any operator whose name ends with that segment)
-   $ rocprof-compute analyze --path ./workload --torch-operator conv2d
+   # Exact match
+   $ rocprof-compute --experimental analyze --path ./workload --torch-operator torch.nn.functional.relu
 
-**Filter multiple operators** (each argument is full path or last segment):
+   # Match all operators (no arguments)
+   $ rocprof-compute --experimental analyze --path ./workload --torch-operator
+
+**Filter multiple operators** (space or comma separated):
 
 .. code-block:: shell-session
 
    $ rocprof-compute --experimental analyze --path ./workload \
-       --torch-operator "nn.Module.Net.forward/nn.Module.Conv2d.forward/torch.nn.functional.conv2d" "relu"
+       --torch-operator "*relu,*conv*,*linear"

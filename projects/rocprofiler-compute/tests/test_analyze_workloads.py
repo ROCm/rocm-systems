@@ -1256,18 +1256,13 @@ def test_analyze_torch_trace_list_operators_MI350(
 
     output = capsys.readouterr().out
 
-    assert "PyTorch Operators in:" in output
-    assert "Total: 3 operators" in output
-
-    for i in range(1, 4):
-        assert f"Operator {i}:" in output
-
-    for name in ("relu", "nn_functional_linear", "ones_like"):
-        assert f"'{name}'" in output
-
+    assert "PyTorch Operator Call Tree:" in output
+    assert "Grouped by source location" in output
     assert "torch.nn.functional.relu" in output
+    assert "torch.nn.functional.linear" in output
+    assert "torch.ones_like" in output
+    assert "kernel_launches:" in output
     assert "total_duration:" in output
-    assert "Kernel (id N) can be used with -k" in output
 
 
 def test_analyze_torch_trace_filter_operator_MI350(
@@ -1279,18 +1274,16 @@ def test_analyze_torch_trace_filter_operator_MI350(
         "--path",
         "tests/workloads/torch_trace/MI350",
         "--torch-operator",
-        "relu",
+        "*relu",
     ])
     assert code == 0
 
     output = capsys.readouterr().out
 
+    assert "Matched PyTorch Operators:" in output
     assert "relu" in output
-    assert "=" in output
-    assert "Operator_Name" in output
-    assert "Kernel_Name" in output
-    assert "torch.relu" in output
-    assert "|" in output
+    assert "kernel_launches:" in output
+    assert "total_duration:" in output
 
 
 def test_analyze_torch_trace_multi_operator_MI350(
@@ -1302,17 +1295,16 @@ def test_analyze_torch_trace_multi_operator_MI350(
         "--path",
         "tests/workloads/torch_trace/MI350",
         "--torch-operator",
-        "relu",
-        "ones_like",
+        "*relu",
+        "*ones_like",
     ])
     assert code == 0
 
     output = capsys.readouterr().out
 
+    assert "Matched PyTorch Operators:" in output
     assert "relu" in output
     assert "ones_like" in output
-    assert output.count("Operator_Name") == 2
-    assert output.count("Kernel_Name") == 4
 
 
 def test_analyze_torch_trace_invalid_operator_MI350(
@@ -1329,7 +1321,7 @@ def test_analyze_torch_trace_invalid_operator_MI350(
     assert code == 0
 
     output = capsys.readouterr().out
-    assert "No data for operator: nonexistent_op" in output
+    assert "No operators matched" in output
 
 
 def test_analyze_torch_trace_hierarchy_path_MI350(
@@ -1348,9 +1340,9 @@ def test_analyze_torch_trace_hierarchy_path_MI350(
 
     output = capsys.readouterr().out
 
-    assert "Operator_Name" in output
-    assert "Kernel_Name" in output
-    assert "|" in output
+    assert "Matched PyTorch Operators:" in output
+    assert "torch.relu" in output
+    assert "kernel_launches:" in output
 
 
 def test_analyze_torch_trace_torch_prefix_MI350(
@@ -1368,6 +1360,6 @@ def test_analyze_torch_trace_torch_prefix_MI350(
 
     output = capsys.readouterr().out
 
-    assert "Operator_Name" in output
-    assert "Kernel_Name" in output
+    assert "Matched PyTorch Operators:" in output
     assert "torch.relu" in output
+    assert "kernel_launches:" in output

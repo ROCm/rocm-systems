@@ -256,76 +256,14 @@ def is_roofline_shown(
     return True
 
 
-def show_torch_operator_table(operator_name: str, df: pd.DataFrame) -> None:
-    """Display torch operator data in a properly formatted table."""
-    if df is None or df.empty:
-        console_log(f"No data available for operator: {operator_name}")
-        return
-
-    console_log(f"\n{operator_name}")
-    console_log("=" * len(operator_name))
-
-    # Create a copy for display formatting
-    display_df = df.copy()
-
-    # Max display width per column type; Kernel_Name is skipped (show wrapped).
-    column_widths = {
-        "Operator_Name": 40,
-        "Context": 35,
-        "default": 20,  # fallback for all other string columns
-    }
-
-    # Truncate string columns; wrap Kernel_Name (full, no truncation)
-    for col in display_df.columns:
-        if display_df[col].dtype != "object":
-            continue  # skip numeric columns
-        if col == "Kernel_Name":
-            display_df[col] = (
-                display_df[col].astype(str).apply(wrap_kernel_name)
-            )  # wrap full name instead of truncating
-            continue
-        max_width = column_widths.get(
-            col, column_widths["default"]
-        )  # use column-specific width or fallback
-        display_df[col] = (
-            display_df[col]
-            .astype(str)  # ensure type is string before continuing text operations
-            .apply(
-                lambda x: (
-                    string_multiple_lines(
-                        x, max_width, 2
-                    )  # split into at most 2 lines, add "..." if still too long
-                    if len(x) > max_width
-                    else x  # leave short values as-is
-                )
-            )
-        )
-
-    # Reset index for row numbering
-    display_df = display_df.reset_index(drop=True)
-
-    # Use tabulate for consistent formatting (no maxcolwidths: natural column width)
-    table_str = tabulate(
-        display_df,
-        headers=display_df.columns,
-        tablefmt="fancy_grid",
-        showindex=True,
-        floatfmt=".2f",
-    )
-
-    console_log(table_str)
-
-
 def list_torch_operators(
     workload_path: str,
     call_trees: dict[str, CallTreeNode],
 ) -> None:
     """Display PyTorch operators as a unified call tree grouped by source location."""
     if not call_trees:
-        console_warning(
-            "No PyTorch operator data found. "
-            "Please ensure profiling was done with --torch-trace option."
-        )
+        print(f"\nPyTorch Operators in: {workload_path}")
+        print("Total: 0 operators")
         return
 
     print(f"\n{'=' * 80}")
