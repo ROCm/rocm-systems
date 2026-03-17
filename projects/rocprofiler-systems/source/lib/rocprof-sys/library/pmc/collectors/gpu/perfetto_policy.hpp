@@ -313,10 +313,10 @@ private:
     {
         auto& samples = *get_perfetto_data()[device_index].samples;
 
-        LOG_INFO("[GPU perfetto_policy] Post-processing {} PMC samples for device [{}], "
-                 "enabled=0x{:x}, supported=0x{:x}",
-                 samples.size(), device_index, enabled_metrics.value,
-                 supported_metrics.value);
+        LOG_DEBUG("[GPU perfetto_policy] Post-processing {} PMC samples for device [{}], "
+                  "enabled=0x{:x}, supported=0x{:x}",
+                  samples.size(), device_index, enabled_metrics.value,
+                  supported_metrics.value);
 
         const auto& thread_info = thread_info::get(0, InternalTID);
         if(!thread_info)

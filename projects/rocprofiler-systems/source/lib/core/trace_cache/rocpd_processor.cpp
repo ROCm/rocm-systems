@@ -404,8 +404,8 @@ rocpd_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& _gpu_pmc)
             auto pmc_name   = std::string(base_name) + suffix;
             auto track_name = pmc_name;
 
-            LOG_INFO("Inserting metric: pmc_name: {}, track_name: {}, value: {}",
-                     pmc_name, track_name, arr[i]);
+            LOG_TRACE("Inserting metric: pmc_name: {}, track_name: {}, value: {}",
+                      pmc_name, track_name, arr[i]);
             insert_metric(true, pmc_name.c_str(), track_name.c_str(), arr[i]);
         }
     };

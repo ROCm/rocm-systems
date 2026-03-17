@@ -73,8 +73,6 @@ struct cache_policy
         constexpr const char* EXPRESSION       = "";
         constexpr const char* TARGET_ARCH      = "";
 
-        auto device_desc = "NIC " + nic_name;
-
         trace_cache::get_metadata_registry().add_pmc_info(
             { agent_type::NIC, nic_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
               trait::name<category::amd_smi_nic_rx_cnp_pkts>::value, "NIC RX CNP PKTS",

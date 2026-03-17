@@ -10,7 +10,6 @@
 #include <functional>
 #include <memory>
 #include <string>
-#include <typeinfo>
 
 namespace rocprofsys::pmc
 {
@@ -75,9 +74,6 @@ public:
     , m_is_supported_impl{ [](void* ptr) -> bool {
         return static_cast<T*>(ptr)->is_supported();
     } }
-    // , m_sample_metrics_impl{ [](void* ptr, uint64_t timestamp) {
-    //     static_cast<T*>(ptr)->sample_metrics(timestamp);
-    // } }
     {}
 
     /**
@@ -122,11 +118,6 @@ public:
         return m_is_supported_impl(m_device.get());
     }
 
-    void sample_metrics(uint64_t timestamp)
-    {
-        m_sample_metrics_impl(m_device.get(), timestamp);
-    }
-
     /**
      * @brief Get the device type.
      * @return The device type (GPU, NIC).
@@ -142,7 +133,6 @@ private:
     std::function<const std::string&(void*)> m_get_product_name_impl;
     std::function<const std::string&(void*)> m_get_vendor_name_impl;
     std::function<bool(void*)>               m_is_supported_impl;
-    std::function<void(void*, uint64_t)>     m_sample_metrics_impl;
 };
 
 }  // namespace rocprofsys::pmc

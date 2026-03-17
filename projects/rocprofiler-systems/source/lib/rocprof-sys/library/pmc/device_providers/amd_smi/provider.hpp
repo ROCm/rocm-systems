@@ -167,7 +167,7 @@ public:
         m_version.string_representation          = ver.build;
     }
 
-    ~provider()
+    ~provider() noexcept
     {
         if(m_driver_api)
         {
@@ -178,8 +178,28 @@ public:
     // Non-copyable, but movable
     provider(const provider&)            = delete;
     provider& operator=(const provider&) = delete;
-    provider(provider&&)                 = default;
-    provider& operator=(provider&&)      = default;
+
+    provider(provider&& other) noexcept
+    : m_driver_api(std::move(other.m_driver_api))
+    , m_version(std::move(other.m_version))
+    {
+        other.m_driver_api.reset();  // Prevent double-shutdown
+    }
+
+    provider& operator=(provider&& other) noexcept
+    {
+        if(this != &other)
+        {
+            if(m_driver_api)
+            {
+                m_driver_api->shutdown();
+            }
+            m_driver_api = std::move(other.m_driver_api);
+            m_version    = std::move(other.m_version);
+            other.m_driver_api.reset();
+        }
+        return *this;
+    }
 
     /**
      * @brief Get AMD SMI library version.
