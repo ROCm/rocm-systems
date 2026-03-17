@@ -26,6 +26,7 @@ subtree_to_project_map = {
     "projects/rocr-runtime": "runtimes",
     "projects/rocshmem": "rocshmem",
     "projects/roctracer": "profiler",
+    "shared/amdgpu-windows-interop": "runtimes",
 }
 
 project_map = {
@@ -48,7 +49,7 @@ project_map = {
     # },
     "profiler": {
         "cmake_options": "-DTHEROCK_ENABLE_ALL=ON",
-        "projects_to_test": "aqlprofile, rocprofiler-compute, rocprofiler_systems",
+        "projects_to_test": "aqlprofile, rocprofiler-compute, rocprofiler-systems",
     },
     "rocshmem": {
         "cmake_options": "-DTHEROCK_ENABLE_ROCSHMEM=ON -DTHEROCK_ENABLE_ALL=OFF",
@@ -60,10 +61,20 @@ project_map = {
     },
     "all": {
         "cmake_options": "-DTHEROCK_ENABLE_ALL=ON",
-        "projects_to_test": "hip-tests, rocrtst, aqlprofile, rocprofiler-compute, rocprofiler_systems, rocr-debug-agent, rocgdb",
+        "projects_to_test": "hip-tests, rocrtst, aqlprofile, rocprofiler-compute, rocprofiler-systems, rocr-debug-agent, rocgdb",
     },
 }
 
+# Subtrees that should only trigger Windows CI, not Linux CI.
+# Note: Linux-only subtrees (e.g. projects/rocshmem) have no explicit list —
+# any subtree absent from trigger_windows_ci_for_subtrees_paths will
+# automatically skip Windows CI.
+windows_only_subtrees = {
+    "shared/amdgpu-windows-interop",
+}
+
+# Paths matching any of these patterns will trigger Windows CI.
+# Subtrees not represented here are treated as Linux-only.
 trigger_windows_ci_for_subtrees_paths = [
     "projects/clr/*",
     "projects/hip/*",

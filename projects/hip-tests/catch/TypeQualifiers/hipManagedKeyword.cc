@@ -38,7 +38,18 @@ static __global__ void managed_add(size_t size) {
 
 static __global__ void managed_inc() { atomicAdd(&m_X, 1.0f); }
 
-TEST_CASE(Unit_hipManagedKeyword_SingleGpu) {
+TEST_CASE("Unit_hipManagedKeyword_SingleGpu") {
+  int numDevices = 0;
+  HIP_CHECK(hipGetDeviceCount(&numDevices));
+  for (int i = 0; i < numDevices; i++) {
+    int managed_memory = 0;
+    HIP_CHECK(hipDeviceGetAttribute(&managed_memory, hipDeviceAttributeManagedMemory, i));
+    if (!managed_memory) {
+      HipTest::HIP_SKIP_TEST("managed memory access not supported on device");
+      return;
+    }
+  }
+
   for (size_t i = 0; i < N; i++) {
     m_A[i] = 1.0f;
     m_B[i] = 2.0f;
@@ -64,7 +75,7 @@ TEST_CASE(Unit_hipManagedKeyword_MultiGpu) {
 
   for (int i = 0; i < numDevices; i++) {
     int managed_memory = 0;
-    HIPCHECK(hipDeviceGetAttribute(&managed_memory, hipDeviceAttributeManagedMemory, i));
+    HIP_CHECK(hipDeviceGetAttribute(&managed_memory, hipDeviceAttributeManagedMemory, i));
     if (!managed_memory) {
       HipTest::HIP_SKIP_TEST("managed memory access not supported on device");
       return;

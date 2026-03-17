@@ -7,17 +7,39 @@
 #     git commit --no-verify
 # or
 #     SKIP=clang-format git commit
+#     SKIP=ruff-format git commit
 #     SKIP=gersemi git commit
 
+exclude: |
+  (?x)
+    docs/
+    | .*\.(md|rst|rtf)$
+    | \.readthedocs\.yaml$
+    | build/
+    | build-.*/
+    | _build/
 fail_fast: false
 repos:
-  - repo: https://github.com/pre-commit/mirrors-clang-format
-    rev: v20.1.7
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
     hooks:
-    - id: clang-format
-      types_or: [c++, c]
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+
+  - repo: https://github.com/pre-commit/mirrors-clang-format
+    rev: v22.1.0
+    hooks:
+      - id: clang-format
+        files: '\.(c|cpp|cc|h|hpp|m|mm)$'
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.4
+    hooks:
+      - id: ruff-format
 
   - repo: https://github.com/BlankSpruce/gersemi
-    rev: 0.20.1
+    rev: 0.26.0
     hooks:
-    - id: gersemi
+      - id: gersemi

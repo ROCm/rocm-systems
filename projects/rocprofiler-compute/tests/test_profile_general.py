@@ -3593,7 +3593,24 @@ if __name__ == "__main__":
         f"  Got:      {displayed_names}"
     )
 
-    # ---- Verify analysis output from --torch-operator (check 15) ----
+    # 15. --list-torch-operators succeeds at every --kernel-verbose level 0-4
+    #     (level 5 is the baseline run above)
+    for verbose_level in range(5):
+        capsys.readouterr()
+        rc = binary_handler_analyze_rocprof_compute([
+            "--experimental",
+            "analyze",
+            "--path",
+            workload_dir,
+            "--list-torch-operators",
+            "--kernel-verbose",
+            str(verbose_level),
+        ])
+        assert rc == 0, (
+            f"--list-torch-operators failed with --kernel-verbose {verbose_level}"
+        )
+
+    # ---- Verify analysis output from --torch-operator (check 16) ----
 
     # Analyze with --torch-operator needs --experimental flag
     returncode_analyze_relu = binary_handler_analyze_rocprof_compute([
@@ -3604,7 +3621,7 @@ if __name__ == "__main__":
         "--torch-operator",
         "relu",
     ])
-    # 15. Analyze with --torch-operator relu succeeds
+    # 16. Analyze with --torch-operator relu succeeds
     assert returncode_analyze_relu == 0, "Analyze with --torch-operator relu failed"
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -3880,6 +3897,36 @@ def test_multi_rank_warning_application_replay(
     assert "--iteration-multiplexing" in output
     assert "--block" not in output
     assert "--set" in output
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.multi_rank
+def test_multi_rank_no_warning_with_iteration_multiplexing(
+    binary_handler_profile_rocprof_compute, monkeypatch
+):
+    """
+    Test that no application replay warning is printed when running a
+    multi-rank application with iteration multiplexing enabled.
+    """
+    monkeypatch.setenv("OMPI_COMM_WORLD_RANK", "0")
+
+    workload_dir = test_utils.get_output_dir()
+
+    options = ["--iteration-multiplexing"]
+
+    _, stdout, stderr = binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir,
+        options,
+        app_name="app_1",
+        capture_output=True,
+        check_success=False,
+    )
+
+    output = stdout + stderr
+    assert "Multi-rank application detected" not in output
+    assert "Application replay mode" not in output
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
