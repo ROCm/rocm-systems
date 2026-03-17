@@ -60,6 +60,3 @@ if __name__ == "__main__":
     bench = load_bench(device_ids)
     metrics = bench.run_on_devices(device_ids)
     bench.dump_csv(metrics, "roofline.csv")
-
-    # metrics = run_on_devices([device_id])
-    # dump_csv(metrics, "roofline.csv")

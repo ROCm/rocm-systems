@@ -1,27 +1,5 @@
-##############################################################################
-# MIT License
-#
-# Copyright (c) 2025 - 2026 Advanced Micro Devices, Inc. All Rights Reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-
-##############################################################################
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
 import csv
 import fcntl
@@ -50,6 +28,10 @@ from typing import Any
 import hip.hip as hip
 import hip.hiprtc as hiprtc
 
+# =============================================================================
+# GLOBAL VARIABLES
+# =============================================================================
+
 Stats = namedtuple("Stats", ["mean", "stdev", "confidence"])
 PerfMetrics = namedtuple("PerfMetrics", ["mean", "low", "high"])
 
@@ -64,14 +46,26 @@ DEFAULT_NUM_ITERS = 10
 VALU_NFMA = 1024
 
 
+# =============================================================================
+# Bench_base Class
+#
+# (ABSTRACT CLASS)
+# Base class for all benchmarking.
+# Underlying class for all architectures, on all accelerators.
+# =============================================================================
 class Bench_base(ABC):
     def __init__(self, device_ids: list) -> None:
         self.lds_sizes: dict[str, int]
-        self.mfma_kernel_selector: dict[str, str]
+        self.matrix_kernel_selector: dict[str, str]
         self.unsupported_data_types: dict[str, list[str]]
         self.cache_kernel_selector: dict[str, dict[str, str]]
-        self.mfma_ops: dict[str, dict[str, int]]
+        self.matrix_ops: dict[str, dict[str, int]]
         self.cache_sizes: dict[str, dict[str, int]]
+        self.tests: dict[str, str]
+        self.csv_cols_map: dict[str, str]
+
+        self.WAVEFRONT_SIZE: int
+        self.MATRIX_OPS_TYPE: str
 
         # Some data types have different rates. Set the number of iterations
         # to keep running time under control.
@@ -93,6 +87,9 @@ class Bench_base(ABC):
             "INT64": [f"flops_benchmark<long, {VALU_NFMA}>", sizeof(c_int64)],
         }
 
+    # -----------------------------------------------------------------------------
+    # Helper Methods and Classes
+    # -----------------------------------------------------------------------------
     @contextmanager
     def gpu_benchmark_lock(self, device: int) -> Generator[None, None, None]:
         """Acquire exclusive lock for benchmarking a specific GPU."""
@@ -123,6 +120,7 @@ class Bench_base(ABC):
             yield
 
     def show_progress(self, pct: float) -> None:
+        """Displays progress bar in log for the current benchmark."""
         bar_char = "|"
         bar_size = 60
 
@@ -131,8 +129,8 @@ class Bench_base(ABC):
 
         print(f"\r{int(pct * 100):3d}% {bar}", end="", flush=True)
 
-    # Returns a named tuple with the mean, std deviation and confidence
     def calc_stats(self, samples: list) -> Stats:
+        """Returns a named tuple with the mean, std deviation and confidence."""
         mean = sum(samples) / len(samples)
 
         stdev = 0.0
@@ -144,8 +142,9 @@ class Bench_base(ABC):
 
         return Stats(mean, stdev, 1.96 * stdev / math.sqrt(len(samples)))
 
-    # Helper class for loading and compiling kerels
     class Program:
+        """Helper class for loading and compiling kernels."""
+
         def __init__(self, src: str, templates: list[str] = []) -> None:
             self.prog = hiprtc.hiprtcCreateProgram(src, "prog")
 
@@ -168,7 +167,6 @@ class Bench_base(ABC):
 
             return hip.hipModuleGetFunction(self.module, kernel_name)
 
-    # Helper method for launching kernel
     def launch_kernel(
         self,
         func: POINTER,
@@ -178,6 +176,7 @@ class Bench_base(ABC):
         stream: POINTER,
         args: list[Any] = [],
     ) -> None:
+        """Helper method for launching kernel."""
         # Convert to native types
         args_converted = []
         for arg in args:
@@ -206,14 +205,13 @@ class Bench_base(ABC):
             args_ptr,
         )
 
-    # Retrieve the gfx architecture
     def get_gfx_arch(self, device: int) -> str:
+        """Retrieve the gfx architecture."""
         arch_str = hip.hipGetDeviceProperties(device).gcnArchName
 
         # Parse out only gfx
         return arch_str.split(":", 1)[0]
 
-    # Helper method to run a kernel and collect samples
     def run_get_samples(
         self,
         count: int,
@@ -225,6 +223,7 @@ class Bench_base(ABC):
         stream: POINTER,
         args: list[Any] = [],
     ) -> list[float]:
+        """Helper method to run a kernel and collect samples."""
         event_start = hip.hipEventCreate()
         event_stop = hip.hipEventCreate()
 
@@ -247,9 +246,11 @@ class Bench_base(ABC):
             samples.append(float(work_per_kernel) / event_ms / 1e6)
 
         print()
-
         return samples
 
+    # -----------------------------------------------------------------------------
+    # Benchmarking kernels and source
+    # -----------------------------------------------------------------------------
     cache_bw_src = """
     template <typename T, int cacheSize, int workgroup_size>
     __global__ void Cache_bw(const T *memBlock, T *dummy, int numIter)
@@ -616,7 +617,7 @@ class Bench_base(ABC):
 
         return perf_metrics
 
-    mfma_f32_src = (
+    matrix_f32_src = (
         vector_types_src
         + """
 
@@ -638,7 +639,7 @@ class Bench_base(ABC):
     """
     )
 
-    mfma_f16_src = (
+    matrix_f16_src = (
         vector_types_src
         + """
 
@@ -673,7 +674,7 @@ class Bench_base(ABC):
     """
     )
 
-    mfma_bf16_src = (
+    matrix_bf16_src = (
         vector_types_src
         + """
 
@@ -720,7 +721,7 @@ class Bench_base(ABC):
     """
     )
 
-    mfma_f64_src = (
+    matrix_f64_src = (
         vector_types_src
         + """
 
@@ -743,7 +744,7 @@ class Bench_base(ABC):
     """
     )
 
-    mfma_i8_src = (
+    matrix_i8_src = (
         vector_types_src
         + """
 
@@ -788,7 +789,7 @@ class Bench_base(ABC):
     """
     )
 
-    mfma_f8_src = (
+    matrix_f8_src = (
         vector_types_src
         + """
 
@@ -812,7 +813,7 @@ class Bench_base(ABC):
     """
     )
 
-    mfma_f8f6f4_src = (
+    matrix_f8f6f4_src = (
         vector_types_src
         + """
 
@@ -940,9 +941,7 @@ class Bench_base(ABC):
     """
     )
 
-    def mfma_bench(self, device: int, type: str, unit: str, rate: int) -> PerfMetrics:
-        WAVEFRONT_SIZE = 64
-
+    def matrix_bench(self, device: int, type: str, unit: str, rate: int) -> PerfMetrics:
         experiments = DEFAULT_NUM_EXPERIMENTS
         iters = 2000
 
@@ -955,29 +954,29 @@ class Bench_base(ABC):
         total_flops = (
             workgroups
             * workgroup_size
-            // WAVEFRONT_SIZE
+            // self.WAVEFRONT_SIZE
             * iters
-            * self.mfma_ops[type][arch]
+            * self.matrix_ops[type][arch]
         )
 
         dummy = hip.hipMalloc(64 * sizeof(c_float))
 
-        kernel_name = self.mfma_kernel_selector[type]
+        kernel_name = self.matrix_kernel_selector[type]
 
         if type == "F32":
-            src = self.mfma_f32_src
+            src = self.matrix_f32_src
         elif type == "F8":
-            src = self.mfma_f8_src
+            src = self.matrix_f8_src
         elif type == "F16":
-            src = self.mfma_f16_src
+            src = self.matrix_f16_src
         elif type == "BF16":
-            src = self.mfma_bf16_src
+            src = self.matrix_bf16_src
         elif type == "F64":
-            src = self.mfma_f64_src
+            src = self.matrix_f64_src
         elif type == "I8":
-            src = self.mfma_i8_src
+            src = self.matrix_i8_src
         else:
-            src = self.mfma_f8f6f4_src
+            src = self.matrix_f8f6f4_src
 
         prog = self.Program(src, [kernel_name])
         func = prog.get_kernel(kernel_name)
@@ -1004,7 +1003,7 @@ class Bench_base(ABC):
         event_ms = total_flops / mean / 1e6
 
         print(
-            f"Peak MFMA {unit}s ({type}), GPU ID: {device}, "
+            f"Peak {self.MATRIX_OPS_TYPE} {unit}s ({type}), GPU ID: {device}, "
             f"workgroupSize:{workgroup_size}, workgroups:{workgroups}, "
             f"experiments:{experiments}, {unit}:{total_flops}, "
             f"duration:{event_ms:.2f} ms, mean:{mean:.1f} {rate}, "
@@ -1013,32 +1012,32 @@ class Bench_base(ABC):
 
         return perf_metrics
 
-    def mfma_f32_bench(self, device: int) -> PerfMetrics:
-        return self.mfma_bench(device, "F32", "FLOP", "GFLOPS")
+    def matrix_f32_bench(self, device: int) -> PerfMetrics:
+        return self.matrix_bench(device, "F32", "FLOP", "GFLOPS")
 
-    def mfma_f16_bench(self, device: int) -> PerfMetrics:
-        return self.mfma_bench(device, "F16", "FLOP", "GFLOPS")
+    def matrix_f16_bench(self, device: int) -> PerfMetrics:
+        return self.matrix_bench(device, "F16", "FLOP", "GFLOPS")
 
-    def mfma_bf16_bench(self, device: int) -> PerfMetrics:
-        return self.mfma_bench(device, "BF16", "FLOP", "GFLOPS")
+    def matrix_bf16_bench(self, device: int) -> PerfMetrics:
+        return self.matrix_bench(device, "BF16", "FLOP", "GFLOPS")
 
-    def mfma_f64_bench(self, device: int) -> PerfMetrics:
-        return self.mfma_bench(device, "F64", "FLOP", "GFLOPS")
+    def matrix_f64_bench(self, device: int) -> PerfMetrics:
+        return self.matrix_bench(device, "F64", "FLOP", "GFLOPS")
 
-    def mfma_f8_bench(self, device: int) -> PerfMetrics:
-        return self.mfma_bench(device, "F8", "FLOP", "GFLOPS")
+    def matrix_f8_bench(self, device: int) -> PerfMetrics:
+        return self.matrix_bench(device, "F8", "FLOP", "GFLOPS")
 
-    def mfma_i8_bench(self, device: int) -> PerfMetrics:
-        return self.mfma_bench(device, "I8", "IOP", "GOPS")
+    def matrix_i8_bench(self, device: int) -> PerfMetrics:
+        return self.matrix_bench(device, "I8", "IOP", "GOPS")
 
-    def mfma_f4_bench(self, device: int) -> PerfMetrics:
-        return self.mfma_bench(device, "F4", "FLOP", "GFLOPS")
+    def matrix_f4_bench(self, device: int) -> PerfMetrics:
+        return self.matrix_bench(device, "F4", "FLOP", "GFLOPS")
 
-    def mfma_f6_bench(self, device: int) -> PerfMetrics:
-        return self.mfma_bench(device, "F6", "FLOP", "GFLOPS")
+    def matrix_f6_bench(self, device: int) -> PerfMetrics:
+        return self.matrix_bench(device, "F6", "FLOP", "GFLOPS")
 
-    def mfma_f6f4_bench(self, device: int) -> PerfMetrics:
-        return self.mfma_bench(device, "F6F4", "FLOP", "GFLOPS")
+    def matrix_f6f4_bench(self, device: int) -> PerfMetrics:
+        return self.matrix_bench(device, "F6F4", "FLOP", "GFLOPS")
 
     def fp16_benchmark(self, device: int) -> PerfMetrics:
         return self.flops_bench(device, "FP16", "FLOP", "GFLOPS")
@@ -1058,29 +1057,6 @@ class Bench_base(ABC):
     def int64_benchmark(self, device: int) -> PerfMetrics:
         return self.flops_bench(device, "INT64", "IOP", "GOPS")
 
-    tests = {
-        "HBM": hbm_bw_benchmark,
-        "MALL": mall_bw_bench,
-        "L2": l2_bw_bench,
-        "L1": l1_bw_bench,
-        "LDS": lds_bw_benchmark,
-        "F16": fp16_benchmark,
-        "F32": fp32_benchmark,
-        "F64": fp64_benchmark,
-        "I8": int8_benchmark,
-        "I32": int32_benchmark,
-        "I64": int64_benchmark,
-        "MFMA-F4": mfma_f4_bench,
-        "MFMA-F6": mfma_f6_bench,
-        "MFMA-F6F4": mfma_f6f4_bench,
-        "MFMA-F8": mfma_f8_bench,
-        "MFMA-F16": mfma_f16_bench,
-        "MFMA-BF16": mfma_bf16_bench,
-        "MFMA-F32": mfma_f32_bench,
-        "MFMA-F64": mfma_f64_bench,
-        "MFMA-I8": mfma_i8_bench,
-    }
-
     # Run the roofline tests on the specified device
     def run_benchmark(self, device: int) -> dict[PerfMetrics]:
         with self.gpu_benchmark_lock(device):
@@ -1099,7 +1075,7 @@ class Bench_base(ABC):
                     print(f"Skipping {name}")
                     metrics = PerfMetrics(0, 0, 0)
                 else:
-                    metrics = func(self, device)
+                    metrics = func(device)
 
                 metrics_dict[name] = metrics
 
@@ -1117,40 +1093,17 @@ class Bench_base(ABC):
 
     def dump_csv(self, metrics: dict[dict[PerfMetrics]], file_path: str) -> None:
         # TODO: Better way to map CSV column names?
-        csv_cols_map = {
-            "HBM": "HBMBw",
-            "MALL": "MALLBw",
-            "L2": "L2Bw",
-            "L1": "L1Bw",
-            "LDS": "LDSBw",
-            "F16": "FP16Flops",
-            "F32": "FP32Flops",
-            "F64": "FP64Flops",
-            "I8": "I8Ops",
-            "I32": "I32Ops",
-            "I64": "I64Ops",
-            "MFMA-F4": "MFMAF4Flops",
-            "MFMA-F6": "MFMAF6Flops",
-            "MFMA-F6F4": "MFMAF6F4Flops",
-            "MFMA-F8": "MFMAF8Flops",
-            "MFMA-F16": "MFMAF16Flops",
-            "MFMA-BF16": "MFMABF16Flops",
-            "MFMA-F32": "MFMAF32Flops",
-            "MFMA-F64": "MFMAF64Flops",
-            "MFMA-I8": "MFMAI8Ops",
-        }
-
         with open(file_path, "w") as f:
             writer = csv.writer(f)
 
-            types = csv_cols_map.keys()
+            types = self.csv_cols_map.keys()
 
             # Write the first row (col names)
             row = ["device"]
             for t in types:
-                row.append(csv_cols_map[t])
-                row.append(csv_cols_map[t] + "Low")
-                row.append(csv_cols_map[t] + "High")
+                row.append(self.csv_cols_map[t])
+                row.append(self.csv_cols_map[t] + "Low")
+                row.append(self.csv_cols_map[t] + "High")
 
             writer.writerow(row)
 
