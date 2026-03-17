@@ -1318,7 +1318,7 @@ static ncclResult_t ncclP2pSchedule(struct ncclComm* comm) {
     int localRanks = nodeRanks[node].localRanks;
     if (localRanks % groupSize != 0 || localRanks < groupSize) groupSize = gcd(groupSize, nodeRanks[node].localRanks);
   }
-  comm->p2pSchedGroupSize = groupSize;
+  comm->p2pChannelShiftSize = groupSize;
 
   int local = comm->localRank % groupSize;
   int group = comm->localRank / groupSize;
@@ -3397,7 +3397,7 @@ ncclResult_t ncclCommRevoke(ncclComm_t comm, int revokeFlags) {
     return ncclSuccess;
   }
   // For now only NCCL_REVOKE_DEFAULT (0) is supported
-  if (revokeFlags != NCCL_REVOKE_DEFAULT) {
+  if (revokeFlags != 0) { // NCCL_REVOKE_DEFAULT = 0
     return ncclInvalidArgument;
   }
   // Disallow revoke if destroy/finalize in progress

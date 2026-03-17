@@ -891,7 +891,6 @@ ncclResult_t ncclTopoTrimSystem(struct ncclTopoSystem* system, struct ncclComm* 
     NCCLCHECKGOTO(ncclTopoRemoveNode(system, GPU, g), ret, fail);
   }
 
-<<<<<<< HEAD:projects/rccl/src/graph/paths.cc
   // trim low speed port on same NIC
   for (int i = 0; i < system->nodes[NET].count; i ++) {
     for (int j = 0; j < system->nodes[NET].count; j ++) {
@@ -948,9 +947,7 @@ ncclResult_t ncclTopoTrimSystem(struct ncclTopoSystem* system, struct ncclComm* 
     for (int n=system->nodes[NET].count-1; n>=0; n--)
       NCCLCHECKGOTO(ncclTopoRemoveNode(system, NET, n), ret, fail);
   }
-=======
   system->inter = system->nodes[GPU].count == comm->nRanks ? 0 : 1;
->>>>>>> ae7aed194d (NCCL 2.28.7-1):src/graph/paths.cc
 exit:
   free(domains);
   if (ids) free(ids);
