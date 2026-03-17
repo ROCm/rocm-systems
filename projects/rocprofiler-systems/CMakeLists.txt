@@ -530,6 +530,13 @@ install(
     COMPONENT setup
 )
 
+file(GLOB _preset_files "${PROJECT_SOURCE_DIR}/share/rocprofiler-systems/presets/*.json")
+install(
+    FILES ${_preset_files}
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/presets
+    COMPONENT setup
+)
+
 # ------------------------------------------------------------------------------#
 #
 # install

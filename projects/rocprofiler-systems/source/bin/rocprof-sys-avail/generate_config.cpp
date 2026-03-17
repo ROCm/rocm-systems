@@ -25,6 +25,7 @@
 #include "defines.hpp"
 #include "info_type.hpp"
 
+#include <nlohmann/json.hpp>
 #include <timemory/mpl/concepts.hpp>
 #include <timemory/mpl/policy.hpp>
 #include <timemory/settings.hpp>
@@ -39,6 +40,7 @@
 
 #include <cstddef>
 #include <cstdlib>
+#include <fstream>
 #include <sstream>
 #include <string>
 

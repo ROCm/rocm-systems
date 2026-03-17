@@ -37,6 +37,7 @@ target_link_libraries(
         rocprofiler-systems::rocprofiler-systems-compile-definitions
         rocprofiler-systems::rocprofiler-systems-interface-library
         rocprofiler-systems::rocprofiler-systems-core
+        rocprofiler-systems::rocprofiler-systems-json
 )
 set_target_properties(
     rocprofiler-systems-avail
