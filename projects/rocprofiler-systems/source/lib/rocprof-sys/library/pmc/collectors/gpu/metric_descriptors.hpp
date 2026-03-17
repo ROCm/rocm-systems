@@ -42,20 +42,14 @@
  * @since 1.5.0
  */
 
-#include <spdlog/fmt/fmt.h>
-
 #include <array>
 #include <cstdint>
 #include <string>
 #include <string_view>
 
-namespace rocprofsys
-{
-namespace pmc
-{
-namespace collectors
-{
-namespace gpu
+#include <spdlog/fmt/fmt.h>
+
+namespace rocprofsys::pmc::collectors::gpu
 {
 
 /**
@@ -475,7 +469,4 @@ constexpr std::array<perfetto_track_info, 13> perfetto_tracks = { {
     { metric_masks::sdma_usage, "SDMA Usage", "%" },
 } };
 
-}  // namespace gpu
-}  // namespace collectors
-}  // namespace pmc
-}  // namespace rocprofsys
+}  // namespace rocprofsys::pmc::collectors::gpu

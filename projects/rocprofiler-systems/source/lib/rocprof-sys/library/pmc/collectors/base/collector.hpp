@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cstdint>
 #include <limits>
 #include <memory>
 #include <stdexcept>
@@ -33,7 +34,6 @@ struct collector
     static_assert(has_required_types_v<Traits>,
                   "Invalid traits: missing required type aliases");
     static_assert(has_device_name_v<Traits>, "Traits must define: device_name");
-    static_assert(has_multi_device_v<Traits>, "Traits must define: multi_device");
     static_assert(has_enumerate_devices_v<Traits>,
                   "Traits must define: enumerate_devices() and device_entry type");
 
@@ -104,18 +104,17 @@ struct collector
      */
     void config()
     {
-        Traits::template init_category_metadata<CacheApi>();
+        CacheApi::initialize_category_metadata();
 
         for(const auto& entry : m_device_entries)
         {
-            auto device_index = Traits::get_device_index(entry.device);
             if(SettingsApi::get_use_perfetto_legacy_metrics())
             {
-                Traits::template setup_counter_tracks<PerfettoApi>(device_index,
+                Traits::template setup_counter_tracks<PerfettoApi>(entry.device,
                                                                    m_enabled_metrics);
             }
-            Traits::template init_tracks_metadata<CacheApi>();
-            Traits::template init_pmc_metadata<CacheApi>(device_index);
+            CacheApi::initialize_tracks_metadata();
+            Traits::template init_pmc_metadata<CacheApi>(entry.device);
         }
     }
 
@@ -141,23 +140,22 @@ struct collector
                 {
                     auto _metrics =
                         Traits::get_metrics(entry.device, m_enabled_metrics, _timestamp);
-                    auto _device_id = Traits::get_device_index(entry.device);
+                    auto _device_id   = entry.device->get_index();
+                    auto _device_name = entry.device->get_name();
 
-                    Traits::template store_sample<CacheApi>(_device_id, m_enabled_metrics,
-                                                            entry.supported_metrics,
-                                                            _metrics, _timestamp);
+                    CacheApi::store_sample(_device_id, _device_name, m_enabled_metrics,
+                                           entry.supported_metrics, _metrics, _timestamp);
+
                     if(SettingsApi::get_use_perfetto_legacy_metrics())
                     {
-                        Traits::template store_perfetto_sample<PerfettoApi>(
-                            _device_id, _metrics, _timestamp);
+                        PerfettoApi::store_sample(_device_id, _metrics, _timestamp);
                     }
                     return false;  // Keep device
                 } catch(const std::runtime_error& e)
                 {
                     LOG_ERROR("Reading metrics failed for {} device {}. Error: {}. "
                               "Disabling device!",
-                              Traits::device_name, Traits::get_device_index(entry.device),
-                              e.what());
+                              Traits::device_name, entry.device->get_index(), e.what());
                     return true;  // Remove device
                 }
             });
@@ -173,7 +171,8 @@ struct collector
     {
         if(SettingsApi::get_use_perfetto_legacy_metrics())
         {
-            Traits::template post_process_perfetto<PerfettoApi>(m_enabled_metrics);
+            Traits::template post_process_perfetto<PerfettoApi>(m_device_entries,
+                                                                m_enabled_metrics);
         }
     }
 
@@ -204,10 +203,14 @@ struct collector
 
     /**
      * @brief Shutdown the device provider and release resources.
+     *
+     * @note This method does NOT clear m_device_entries because post_process()
+     * may be called after shutdown() and needs access to device information.
+     * The device entries are cleared in pmc::post_process() after post_process
+     * is called on all collectors.
      */
     void shutdown()
     {
-        m_device_entries.clear();
         if(m_device_provider)
         {
             m_device_provider->shutdown();

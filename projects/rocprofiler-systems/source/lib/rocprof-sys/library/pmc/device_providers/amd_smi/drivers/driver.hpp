@@ -8,13 +8,7 @@
 
 #include <amd_smi/amdsmi.h>
 
-namespace rocprofsys
-{
-namespace pmc
-{
-namespace drivers
-{
-namespace amd_smi
+namespace rocprofsys::pmc::drivers::amd_smi
 {
 
 /**
@@ -63,25 +57,6 @@ struct driver
                                               amdsmi_socket_handle* socket_handles)
     {
         return amdsmi_get_socket_handles(socket_count, socket_handles);
-    }
-
-    /**
-     * @brief Get processor handles for a specific socket.
-     * @param socket_handle Socket to query.
-     * @param processor_count Pointer to receive the number of processors (input/output).
-     * @param processor_handles Pointer to array to receive processor handles (can be
-     * nullptr for count query).
-     * @return AMD SMI status code indicating success or failure.
-     *
-     * @note This function only returns GPU processors. For NICs, use
-     * get_processor_handles_by_type() with AMDSMI_PROCESSOR_TYPE_AMD_NIC.
-     */
-    static amdsmi_status_t get_processor_handles(
-        amdsmi_socket_handle socket_handle, uint32_t* processor_count,
-        amdsmi_processor_handle* processor_handles)
-    {
-        return amdsmi_get_processor_handles(socket_handle, processor_count,
-                                            processor_handles);
     }
 
     /**
@@ -139,6 +114,18 @@ struct driver
                                             amdsmi_gpu_metrics_t*   metrics)
     {
         return amdsmi_get_gpu_metrics_info(processor_handle, metrics);
+    }
+
+    /**
+     * @brief Get GPU ASIC information including vendor and product names.
+     * @param processor_handle GPU processor to query.
+     * @param asic_info Pointer to structure to receive ASIC information.
+     * @return AMD SMI status code indicating success or failure.
+     */
+    static amdsmi_status_t get_gpu_asic_info(amdsmi_processor_handle processor_handle,
+                                             amdsmi_asic_info_t*     asic_info)
+    {
+        return amdsmi_get_gpu_asic_info(processor_handle, asic_info);
     }
 
     /**
@@ -238,7 +225,4 @@ struct driver_factory
     }
 };
 
-}  // namespace amd_smi
-}  // namespace drivers
-}  // namespace pmc
-}  // namespace rocprofsys
+}  // namespace rocprofsys::pmc::drivers::amd_smi

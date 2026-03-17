@@ -9,15 +9,7 @@
 
 #include <utility>
 
-namespace rocprofsys
-{
-namespace pmc
-{
-namespace drivers
-{
-namespace amd_smi
-{
-namespace testing
+namespace rocprofsys::pmc::drivers::amd_smi::testing
 {
 
 /**
@@ -54,6 +46,9 @@ public:
     MOCK_METHOD(amdsmi_status_t, get_metrics_info,
                 (amdsmi_processor_handle processor_handle,
                  amdsmi_gpu_metrics_t*   metrics));
+    MOCK_METHOD(amdsmi_status_t, get_gpu_asic_info,
+                (amdsmi_processor_handle processor_handle,
+                 amdsmi_asic_info_t*     asic_info));
 
     // SDMA-specific methods (requires AMD SMI >= 26.3)
 #if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
@@ -96,6 +91,8 @@ public:
             .WillByDefault(Return(AMDSMI_STATUS_SUCCESS));
         ON_CALL(*this, get_metrics_info(_, _))
             .WillByDefault(Return(AMDSMI_STATUS_SUCCESS));
+        ON_CALL(*this, get_gpu_asic_info(_, _))
+            .WillByDefault(Return(AMDSMI_STATUS_SUCCESS));
     }
 };
 
@@ -131,8 +128,4 @@ struct mock_driver_factory
 /// Global mock driver instance shared across tests
 inline std::shared_ptr<mock_driver> mock_driver_factory::s_mock_driver = nullptr;
 
-}  // namespace testing
-}  // namespace amd_smi
-}  // namespace drivers
-}  // namespace pmc
-}  // namespace rocprofsys
+}  // namespace rocprofsys::pmc::drivers::amd_smi::testing

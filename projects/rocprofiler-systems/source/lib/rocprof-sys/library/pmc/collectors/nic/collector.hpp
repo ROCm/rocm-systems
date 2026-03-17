@@ -19,7 +19,6 @@ namespace rocprofsys::pmc::collectors::nic
  * @tparam Config Configuration policy providing settings and output policies
  */
 template <typename DeviceProvider, typename Config>
-using collector = base::collector<nic_traits<typename DeviceProvider::driver_t>,
-                                  DeviceProvider, Config>;
+using collector = base::collector<nic_traits<DeviceProvider>, DeviceProvider, Config>;
 
 }  // namespace rocprofsys::pmc::collectors::nic

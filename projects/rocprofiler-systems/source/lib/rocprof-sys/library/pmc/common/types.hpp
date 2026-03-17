@@ -27,6 +27,15 @@ struct version
 };
 
 /**
+ * @brief Device type for provider enumeration.
+ */
+enum class device_type : uint8_t
+{
+    GPU,  ///< GPU device
+    NIC   ///< Network interface device
+};
+
+/**
  * @brief Device selection mode for filtering devices.
  */
 enum class device_selection_mode : uint8_t

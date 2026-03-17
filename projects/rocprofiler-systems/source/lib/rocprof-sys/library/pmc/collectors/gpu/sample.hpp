@@ -8,13 +8,7 @@
 
 #include <cstdint>
 
-namespace rocprofsys
-{
-namespace pmc
-{
-namespace collectors
-{
-namespace gpu
+namespace rocprofsys::pmc::collectors::gpu
 {
 
 /**
@@ -43,11 +37,9 @@ struct sample : trace_cache::cacheable_t
     metrics         metric_values;
 };
 
-}  // namespace gpu
-}  // namespace collectors
-}  // namespace pmc
+}  // namespace rocprofsys::pmc::collectors::gpu
 
-namespace trace_cache
+namespace rocprofsys::trace_cache
 {
 
 template <>
@@ -107,5 +99,4 @@ get_size(const pmc::collectors::gpu::sample& item)
 /// @brief GPU PMC sample type alias
 using gpu_pmc_sample = pmc::collectors::gpu::sample;
 
-}  // namespace trace_cache
-}  // namespace rocprofsys
+}  // namespace rocprofsys::trace_cache

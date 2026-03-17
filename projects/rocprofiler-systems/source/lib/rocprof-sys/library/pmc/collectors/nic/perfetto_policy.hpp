@@ -8,6 +8,7 @@
 #include "library/thread_info.hpp"
 #include "logger/debug.hpp"
 
+#include <cstdint>
 #include <timemory/units.hpp>
 
 #include <map>
@@ -215,9 +216,6 @@ struct perfetto_policy
 
         auto& samples = *bundle_it->second;
 
-        LOG_DEBUG("Post-processing {} NIC samples for device [{}]", samples.size(),
-                  device_index);
-
         const auto& thread_info = thread_info::get(0, InternalTID);
         if(!thread_info)
         {
@@ -231,7 +229,6 @@ struct perfetto_policy
 
         if(effective_metrics.value == 0)
         {
-            LOG_DEBUG("No enabled NIC metrics for device [{}]", device_index);
             return;
         }
 

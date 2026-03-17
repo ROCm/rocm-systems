@@ -178,7 +178,6 @@ TEST_F(NicDeviceTest, DeviceIsSupported_WhenRdmaAvailable)
     device<MockDriver> dev(mock_driver, test_handle, test_processor_type, test_index);
 
     EXPECT_TRUE(dev.is_supported());
-    EXPECT_EQ(dev.get_device_type(), AMDSMI_PROCESSOR_TYPE_AMD_NIC);
     EXPECT_EQ(dev.get_index(), test_index);
     EXPECT_EQ(dev.get_name(), "enp226s0");
     EXPECT_EQ(dev.get_product_name(), "AMD AINIC Test");

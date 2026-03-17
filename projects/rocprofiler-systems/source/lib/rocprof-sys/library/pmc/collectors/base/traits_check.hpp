@@ -5,6 +5,7 @@
 
 #include <memory>
 #include <type_traits>
+#include <utility>
 
 namespace rocprofsys::pmc::collectors::base
 {
@@ -47,21 +48,6 @@ struct has_device_name<Traits, std::void_t<decltype(Traits::device_name)>>
 
 template <typename Traits>
 inline constexpr bool has_device_name_v = has_device_name<Traits>::value;
-
-/**
- * @brief Type trait to check if Traits defines the multi_device constant.
- */
-template <typename Traits, typename = void>
-struct has_multi_device : std::false_type
-{};
-
-template <typename Traits>
-struct has_multi_device<Traits, std::void_t<decltype(Traits::multi_device)>>
-: std::true_type
-{};
-
-template <typename Traits>
-inline constexpr bool has_multi_device_v = has_multi_device<Traits>::value;
 
 /**
  * @brief Type trait to check if Traits defines enumerate_devices().
@@ -107,7 +93,7 @@ inline constexpr bool has_enumerate_devices_v = has_enumerate_devices<Traits>::v
  *
  * Required Traits interface:
  * - Types: metrics_t, enabled_metrics_t, device_t, device_ptr_t, container_t
- * - Constants: device_name (const char*), multi_device (bool)
+ * - Constants: device_name (const char*)
  *
  * @tparam Traits The traits type to validate
  */
@@ -121,9 +107,6 @@ validate_traits()
 
     static_assert(has_device_name_v<Traits>,
                   "Traits must define: static constexpr const char* device_name");
-
-    static_assert(has_multi_device_v<Traits>,
-                  "Traits must define: static constexpr bool multi_device");
 }
 
 }  // namespace rocprofsys::pmc::collectors::base

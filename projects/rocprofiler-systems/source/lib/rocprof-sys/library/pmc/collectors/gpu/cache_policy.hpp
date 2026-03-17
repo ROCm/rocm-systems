@@ -14,6 +14,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <string>
 
 namespace rocprofsys::pmc::collectors::gpu
 {
@@ -320,12 +321,14 @@ struct cache_policy
      * @brief Store a PMC sample to the trace cache.
      *
      * @param device_id GPU device identifier
+     * @param device_name Device name (unused for GPU, kept for API consistency)
      * @param enabled_metrics Metrics requested by user configuration
      * @param supported_metrics Metrics supported by this device
      * @param metrics Collected metric values
      * @param timestamp Sample timestamp in nanoseconds
      */
-    static void store_sample(size_t device_id, const enabled_metrics& enabled_metrics_cfg,
+    static void store_sample(size_t device_id, const std::string& /*device_name*/,
+                             const enabled_metrics& enabled_metrics_cfg,
                              const enabled_metrics& supported_metrics,
                              const metrics& metric_values, unsigned long timestamp)
     {

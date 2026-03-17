@@ -15,13 +15,7 @@
 
 #include <amd_smi/amdsmi.h>
 
-namespace rocprofsys
-{
-namespace pmc
-{
-namespace device_providers
-{
-namespace amd_smi
+namespace rocprofsys::pmc::device_providers::amd_smi
 {
 
 /**
@@ -37,6 +31,112 @@ namespace amd_smi
 template <typename DriverFactory>
 class provider
 {
+private:
+    /**
+     * @brief Check AMD SMI status and throw on error.
+     * @param status AMD SMI status code.
+     * @param error_message Error message to include in exception.
+     */
+    static void check_amd_smi_status(amdsmi_status_t status, const char* error_message)
+    {
+        if(status != AMDSMI_STATUS_SUCCESS)
+        {
+            std::stringstream ss;
+            ss << error_message << " AMD SMI Error code: " << status;
+            throw std::runtime_error(ss.str());
+        }
+    }
+
+    /**
+     * @brief Get all socket handles.
+     *
+     * Queries the AMD SMI driver for all available socket handles in the system.
+     *
+     * @return Vector of socket handles.
+     * @throws std::runtime_error If querying socket handles fails.
+     */
+    [[nodiscard]] std::vector<amdsmi_socket_handle> get_socket_handles()
+    {
+        uint32_t count = 0;
+        check_amd_smi_status(m_driver_api->get_socket_handles(&count, nullptr),
+                             "Failed to get socket count!");
+
+        std::vector<amdsmi_socket_handle> handles(count);
+        if(count > 0)
+        {
+            check_amd_smi_status(m_driver_api->get_socket_handles(&count, handles.data()),
+                                 "Failed to get socket handles!");
+        }
+
+        return handles;
+    }
+
+    /**
+     * @brief Get processor handles of a specific type for a socket.
+     *
+     * @param socket_handle Socket to query.
+     * @param processor_type Type of processor to enumerate.
+     * @return Vector of processor handles of the specified type (empty if none found).
+     */
+    [[nodiscard]] std::vector<amdsmi_processor_handle> get_processor_handles_for_socket(
+        amdsmi_socket_handle socket_handle, processor_type_t processor_type)
+    {
+        uint32_t count  = 0;
+        auto     status = m_driver_api->get_processor_handles_by_type(
+            socket_handle, processor_type, nullptr, &count);
+
+        if(status != AMDSMI_STATUS_SUCCESS || count == 0)
+        {
+            return {};
+        }
+
+        std::vector<amdsmi_processor_handle> handles(count);
+        status = m_driver_api->get_processor_handles_by_type(
+            socket_handle, processor_type, handles.data(), &count);
+
+        if(status != AMDSMI_STATUS_SUCCESS)
+        {
+            return {};
+        }
+
+        return handles;
+    }
+
+    /**
+     * @brief Enumerate devices of a specific processor type.
+     *
+     * @tparam Device The device type to create.
+     * @param processor_type AMD SMI processor type.
+     * @return Vector of shared pointers to device objects.
+     */
+    template <typename Device>
+    [[nodiscard]] std::vector<std::shared_ptr<Device>> enumerate_devices(
+        processor_type_t processor_type)
+    {
+        std::vector<std::shared_ptr<Device>> devices;
+
+        auto   socket_handles = get_socket_handles();
+        size_t index          = 0;
+
+        for(auto& socket_handle : socket_handles)
+        {
+            auto handles =
+                get_processor_handles_for_socket(socket_handle, processor_type);
+            for(auto& handle : handles)
+            {
+                devices.push_back(std::make_shared<Device>(m_driver_api, handle,
+                                                           processor_type, index));
+                index++;
+            }
+        }
+
+        return devices;
+    }
+
+    std::shared_ptr<typename DriverFactory::driver_t>
+            m_driver_api;  ///< Driver API instance
+    version m_version{};   ///< AMD SMI library version
+
 public:
     using driver_t = typename DriverFactory::driver_t;
 
@@ -67,7 +167,13 @@ public:
         m_version.string_representation          = ver.build;
     }
 
-    ~provider() = default;
+    ~provider()
+    {
+        if(m_driver_api)
+        {
+            m_driver_api->shutdown();
+        }
+    }
 
     // Non-copyable, but movable
     provider(const provider&)            = delete;
@@ -82,135 +188,36 @@ public:
     [[nodiscard]] const version& get_version() const noexcept { return m_version; }
 
     /**
-     * @brief Get driver instance.
-     * @return Shared pointer to driver (used by collectors for low-level API calls).
+     * @brief Shutdown the AMD SMI driver.
+     *
+     * Releases the driver API and cleans up resources. Safe to call multiple times.
      */
-    [[nodiscard]] std::shared_ptr<driver_t> get_driver() const noexcept
+    void shutdown()
     {
-        return m_driver_api;
-    }
-
-    /**
-     * @brief Get all socket handles.
-     *
-     * Queries the AMD SMI driver for all available socket handles in the system.
-     *
-     * @return Vector of socket handles.
-     * @throws std::runtime_error If querying socket handles fails.
-     */
-    [[nodiscard]] std::vector<amdsmi_socket_handle> get_socket_handles()
-    {
-        uint32_t count = 0;
-        check_amd_smi_status(m_driver_api->get_socket_handles(&count, nullptr),
-                             "Failed to get socket count!");
-
-        std::vector<amdsmi_socket_handle> handles(count);
-        if(count > 0)
+        if(m_driver_api)
         {
-            check_amd_smi_status(m_driver_api->get_socket_handles(&count, handles.data()),
-                                 "Failed to get socket handles!");
-        }
-
-        return handles;
-    }
-
-    /**
-     * @brief Get processor handles for a specific socket (GPUs only).
-     *
-     * Queries the AMD SMI driver for GPU processor handles associated with
-     * the specified socket.
-     *
-     * @param socket_handle Socket to query.
-     * @return Vector of GPU processor handles for the specified socket.
-     * @throws std::runtime_error If querying processor handles fails.
-     *
-     * @note This function only returns GPUs. For NICs, use
-     * get_processor_handles_by_type() with AMDSMI_PROCESSOR_TYPE_AMD_NIC.
-     */
-    [[nodiscard]] std::vector<amdsmi_processor_handle> get_processor_handles(
-        amdsmi_socket_handle socket_handle)
-    {
-        uint32_t count = 0;
-        check_amd_smi_status(
-            m_driver_api->get_processor_handles(socket_handle, &count, nullptr),
-            "Failed to get processor count!");
-
-        std::vector<amdsmi_processor_handle> handles(count);
-        if(count > 0)
-        {
-            check_amd_smi_status(m_driver_api->get_processor_handles(
-                                     socket_handle, &count, handles.data()),
-                                 "Failed to get processor handles!");
-        }
-
-        return handles;
-    }
-
-    /**
-     * @brief Get processor handles of a specific type for a socket.
-     *
-     * Queries the AMD SMI driver for processor handles of a specific type
-     * (GPU, NIC, CPU) associated with the specified socket.
-     *
-     * @param socket_handle Socket to query.
-     * @param processor_type Type of processor to enumerate.
-     * @return Vector of processor handles of the specified type (empty if none found
-     *         or if the socket doesn't support the requested processor type).
-     *
-     * @note This is required for enumerating NICs. get_processor_handles()
-     * only returns GPUs.
-     */
-    [[nodiscard]] std::vector<amdsmi_processor_handle> get_processor_handles_by_type(
-        amdsmi_socket_handle socket_handle, processor_type_t processor_type)
-    {
-        uint32_t count  = 0;
-        auto     status = m_driver_api->get_processor_handles_by_type(
-            socket_handle, processor_type, nullptr, &count);
-
-        // Return empty vector if no processors of this type exist on this socket
-        // or if the query is not supported for this socket type
-        if(status != AMDSMI_STATUS_SUCCESS || count == 0)
-        {
-            return {};
-        }
-
-        std::vector<amdsmi_processor_handle> handles(count);
-        status = m_driver_api->get_processor_handles_by_type(
-            socket_handle, processor_type, handles.data(), &count);
-
-        if(status != AMDSMI_STATUS_SUCCESS)
-        {
-            return {};
-        }
-
-        return handles;
-    }
-
-    /**
-     * @brief Shutdown AMD SMI driver.
-     *
-     * @note Should be called once during application shutdown.
-     */
-    void shutdown() { m_driver_api->shutdown(); }
-
-private:
-    /**
-     * @brief Check AMD SMI status and throw on error.
-     * @param status AMD SMI status code.
-     * @param error_message Error message to include in exception.
-     */
-    static void check_amd_smi_status(amdsmi_status_t status, const char* error_message)
-    {
-        if(status != AMDSMI_STATUS_SUCCESS)
-        {
-            std::stringstream ss;
-            ss << error_message << " AMD SMI Error code: " << status;
-            throw std::runtime_error(ss.str());
+            m_driver_api->shutdown();
+            m_driver_api.reset();
         }
     }
 
-    std::shared_ptr<driver_t> m_driver_api;  ///< Driver API instance
-    version                   m_version{};   ///< AMD SMI library version
+    /**
+     * @brief Get all devices of a specific type.
+     *
+     * Enumerates all devices of the specified type across all sockets.
+     *
+     * @tparam Device The device type to create.
+     * @param type The device type to enumerate (GPU or NIC).
+     * @return Vector of shared pointers to device objects.
+     */
+    template <typename Device>
+    [[nodiscard]] std::vector<std::shared_ptr<Device>> get_devices(device_type type)
+    {
+        processor_type_t proc_type = (type == device_type::GPU)
+                                         ? AMDSMI_PROCESSOR_TYPE_AMD_GPU
+                                         : AMDSMI_PROCESSOR_TYPE_AMD_NIC;
+        return enumerate_devices<Device>(proc_type);
+    }
 };
 
 /**
@@ -230,7 +237,4 @@ struct provider_factory
     static std::shared_ptr<provider_t> create() { return std::make_shared<provider_t>(); }
 };
 
-}  // namespace amd_smi
-}  // namespace device_providers
-}  // namespace pmc
-}  // namespace rocprofsys
+}  // namespace rocprofsys::pmc::device_providers::amd_smi

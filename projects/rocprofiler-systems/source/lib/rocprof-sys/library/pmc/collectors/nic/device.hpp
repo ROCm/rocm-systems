@@ -44,10 +44,9 @@ public:
      * @param logical_index Device index for identification
      */
     device(std::shared_ptr<Driver> driver, amdsmi_processor_handle handle,
-           processor_type_t processor_type, size_t logical_index)
+           processor_type_t /*processor_type*/, size_t             logical_index)
     : m_driver_api{ std::move(driver) }
     , m_device_handle{ handle }
-    , m_device_type{ processor_type }
     , m_index{ logical_index }
     {
         m_is_supported = initialize_device_info();
@@ -58,11 +57,6 @@ public:
     [[nodiscard]] enabled_metrics get_supported_metrics() const noexcept
     {
         return m_supported_metrics;
-    }
-
-    [[nodiscard]] processor_type_t get_device_type() const noexcept
-    {
-        return m_device_type;
     }
 
     [[nodiscard]] size_t get_index() const noexcept { return m_index; }
@@ -77,11 +71,6 @@ public:
     [[nodiscard]] const std::string& get_vendor_name() const noexcept
     {
         return m_vendor_name;
-    }
-
-    [[nodiscard]] amdsmi_processor_handle get_handle() const noexcept
-    {
-        return m_device_handle;
     }
 
     /**
@@ -228,7 +217,6 @@ private:
 
     std::shared_ptr<Driver> m_driver_api;
     amdsmi_processor_handle m_device_handle;
-    processor_type_t        m_device_type;
     enabled_metrics         m_supported_metrics;
     size_t                  m_index;
     std::string             m_device_name;

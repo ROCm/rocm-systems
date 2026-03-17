@@ -22,7 +22,6 @@ namespace rocprofsys::pmc::collectors::gpu
  * @tparam Config Configuration policy providing settings and output policies
  */
 template <typename DeviceProvider, typename Config>
-using collector = base::collector<gpu_traits<typename DeviceProvider::driver_t>,
-                                  DeviceProvider, Config>;
+using collector = base::collector<gpu_traits<DeviceProvider>, DeviceProvider, Config>;
 
 }  // namespace rocprofsys::pmc::collectors::gpu

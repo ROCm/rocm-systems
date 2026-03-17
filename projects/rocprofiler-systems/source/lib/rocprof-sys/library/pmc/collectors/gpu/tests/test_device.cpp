@@ -49,6 +49,11 @@ protected:
         test_handle         = reinterpret_cast<amdsmi_processor_handle>(0x1234);
         test_processor_type = AMDSMI_PROCESSOR_TYPE_AMD_GPU;
         test_index          = 0;
+
+        // Device info is always called during device initialization
+        EXPECT_CALL(*mock_driver, get_gpu_asic_info(test_handle, _))
+            .Times(AnyNumber())
+            .WillRepeatedly(Return(AMDSMI_STATUS_SUCCESS));
     }
 
     /**
@@ -289,8 +294,6 @@ TEST_F(DeviceTest, valid_device_construction_full_support)
 
     // Verify basic properties
     EXPECT_EQ(dev.get_index(), test_index);
-    EXPECT_EQ(dev.get_device_type(), test_processor_type);
-    EXPECT_EQ(dev.get_handle(), test_handle);
 }
 
 /**
@@ -358,33 +361,31 @@ TEST_F(DeviceTest, device_construction_partial_support)
 }
 
 /**
- * TC1.4: Device Construction with Different Processor Types
+ * TC1.4: Device Construction with Different Indices
  *
- * Objective: Verify device type is correctly stored.
+ * Objective: Verify device index is correctly stored for different device instances.
  */
-TEST_F(DeviceTest, device_construction_different_types)
+TEST_F(DeviceTest, device_construction_different_indices)
 {
     SetupAllMetricsSupported();
 
-    // Test with GPU type
+    // Test with different indices
     {
         device<MockDriver> dev(mock_driver, test_handle, AMDSMI_PROCESSOR_TYPE_AMD_GPU,
                                0);
-        EXPECT_EQ(dev.get_device_type(), AMDSMI_PROCESSOR_TYPE_AMD_GPU);
+        EXPECT_EQ(dev.get_index(), 0U);
     }
 
-    // Test with CPU type
     {
-        device<MockDriver> dev(mock_driver, test_handle,
-                               AMDSMI_PROCESSOR_TYPE_AMD_CPU_CORE, 1);
-        EXPECT_EQ(dev.get_device_type(), AMDSMI_PROCESSOR_TYPE_AMD_CPU_CORE);
+        device<MockDriver> dev(mock_driver, test_handle, AMDSMI_PROCESSOR_TYPE_AMD_GPU,
+                               1);
+        EXPECT_EQ(dev.get_index(), 1U);
     }
 
-    // Test with APU type
     {
-        device<MockDriver> dev(mock_driver, test_handle, AMDSMI_PROCESSOR_TYPE_AMD_APU,
+        device<MockDriver> dev(mock_driver, test_handle, AMDSMI_PROCESSOR_TYPE_AMD_GPU,
                                2);
-        EXPECT_EQ(dev.get_device_type(), AMDSMI_PROCESSOR_TYPE_AMD_APU);
+        EXPECT_EQ(dev.get_index(), 2U);
     }
 }
 
@@ -2295,6 +2296,10 @@ TEST_F(DeviceTest, concurrent_device_objects)
 
     SetupSDMAExpectations(mock_driver1, handle1);
 
+    EXPECT_CALL(*mock_driver1, get_gpu_asic_info(handle1, _))
+        .Times(AnyNumber())
+        .WillRepeatedly(Return(AMDSMI_STATUS_SUCCESS));
+
     // Device 2 returns power = 200W
     amdsmi_gpu_metrics_t metrics2 = CreateSentinelMetrics();
     metrics2.current_socket_power = 200;
@@ -2309,6 +2314,10 @@ TEST_F(DeviceTest, concurrent_device_objects)
             DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
 
     SetupSDMAExpectations(mock_driver2, handle2);
+
+    EXPECT_CALL(*mock_driver2, get_gpu_asic_info(handle2, _))
+        .Times(AnyNumber())
+        .WillRepeatedly(Return(AMDSMI_STATUS_SUCCESS));
 
     // Create two device objects
     device<MockDriver> dev1(mock_driver1, handle1, test_processor_type, 0);
@@ -2329,7 +2338,6 @@ TEST_F(DeviceTest, concurrent_device_objects)
     EXPECT_EQ(result1.current_socket_power, 100U);
 
     // Verify devices maintain independent state
-    EXPECT_NE(dev1.get_handle(), dev2.get_handle());
     EXPECT_NE(dev1.get_index(), dev2.get_index());
 }
 
@@ -2422,6 +2430,10 @@ TEST_F(DeviceTest, full_lifecycle_with_realistic_data)
 
     SetupSDMAExpectations(mock, test_handle);
 
+    EXPECT_CALL(*mock, get_gpu_asic_info(test_handle, _))
+        .Times(AnyNumber())
+        .WillRepeatedly(Return(AMDSMI_STATUS_SUCCESS));
+
     // Construct device
     device<MockDriver> dev(mock, test_handle, test_processor_type, test_index);
 
@@ -2442,30 +2454,6 @@ TEST_F(DeviceTest, full_lifecycle_with_realistic_data)
     EXPECT_EQ(result3.current_socket_power, 160U);
     EXPECT_EQ(result3.hotspot_temperature, 73);
     EXPECT_EQ(result3.gfx_activity, 60U);
-}
-
-/**
- * Device Type Filtering Scenario
- *
- * Objective: Verify device type can be used for filtering.
- */
-TEST_F(DeviceTest, device_type_filtering_scenario)
-{
-    // Setup
-    SetupAllMetricsSupported();
-
-    // Create GPU device
-    device<MockDriver> gpu_device(mock_driver, test_handle, AMDSMI_PROCESSOR_TYPE_AMD_GPU,
-                                  test_index);
-
-    // Verify device type is correctly stored
-    EXPECT_EQ(gpu_device.get_device_type(), AMDSMI_PROCESSOR_TYPE_AMD_GPU);
-
-    // Demonstrate filtering by type
-    processor_type_t device_type = gpu_device.get_device_type();
-    bool             is_gpu      = (device_type == AMDSMI_PROCESSOR_TYPE_AMD_GPU);
-
-    EXPECT_TRUE(is_gpu);
 }
 
 /**

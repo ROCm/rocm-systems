@@ -8,22 +8,17 @@
 #include "library/pmc/common/types.hpp"
 #include "logger/debug.hpp"
 
+#include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <vector>
 
-#include <amd_smi/amdsmi.h>
-
-namespace rocprofsys
-{
-namespace pmc
-{
-namespace collectors
-{
-namespace gpu
+namespace rocprofsys::pmc::collectors::gpu
 {
 
 using ::rocprofsys::pmc::device_filter;
 using ::rocprofsys::pmc::device_selection_mode;
+using ::rocprofsys::pmc::device_type;
 
 /**
  * @brief Traits type for GPU collector configuration.
@@ -33,28 +28,26 @@ using ::rocprofsys::pmc::device_selection_mode;
  *
  * @tparam Driver The AMD SMI driver type (real or mock for testing)
  */
-template <typename Driver>
+template <typename DriverProvider>
 struct gpu_traits
 {
     // Required type aliases for base::collector
     using metrics_t         = pmc::collectors::gpu::metrics;
     using enabled_metrics_t = pmc::collectors::gpu::enabled_metrics;
-    using device_t          = device<Driver>;
+    using device_t          = device<typename DriverProvider::driver_t>;
     using device_ptr_t      = std::shared_ptr<device_t>;
     using container_t       = std::vector<device_ptr_t>;
-    using driver_t          = Driver;
+    using driver_t          = typename DriverProvider::driver_t;
 
     // Required constants
-    static constexpr const char* device_name  = "GPU";
-    static constexpr bool        multi_device = true;
-
+    static constexpr const char* device_name = "GPU";
     // Settings customization points
 
     /**
      * @brief Get the device filter from settings.
      */
     template <typename Settings>
-    static device_filter get_device_filter()
+    [[nodiscard]] static device_filter get_device_filter()
     {
         return Settings::get_device_filter();
     }
@@ -63,52 +56,21 @@ struct gpu_traits
      * @brief Get enabled metrics from settings.
      */
     template <typename Settings>
-    static enabled_metrics_t get_enabled_metrics()
+    [[nodiscard]] static enabled_metrics_t get_enabled_metrics()
     {
         return Settings::get_enabled_metrics();
     }
 
-    // Cache API delegation
-
-    /**
-     * @brief Initialize category metadata in the cache.
-     */
-    template <typename Cache>
-    static void init_category_metadata()
-    {
-        Cache::initialize_category_metadata();
-    }
-
-    /**
-     * @brief Initialize SMI tracks metadata in the cache.
-     */
-    template <typename Cache>
-    static void init_tracks_metadata()
-    {
-        Cache::initialize_tracks_metadata();
-    }
+    // Cache API customization points
 
     /**
      * @brief Initialize PMC metadata for a specific device.
      */
     template <typename Cache>
-    static void init_pmc_metadata(size_t device_index)
+    static void init_pmc_metadata(const device_ptr_t& device)
     {
-        Cache::initialize_pmc_metadata(device_index);
+        Cache::initialize_pmc_metadata(device->get_index());
     }
-
-    /**
-     * @brief Store a sample to the cache.
-     */
-    template <typename Cache>
-    static void store_sample(size_t device_id, const enabled_metrics_t& enabled,
-                             const enabled_metrics_t& supported, const metrics_t& metrics,
-                             uint64_t timestamp)
-    {
-        Cache::store_sample(device_id, enabled, supported, metrics, timestamp);
-    }
-
-    // Perfetto API delegation
 
     /**
      * @brief Initialize Perfetto storage for devices.
@@ -123,74 +85,30 @@ struct gpu_traits
      * @brief Setup Perfetto counter tracks for a device.
      */
     template <typename Perfetto>
-    static void setup_counter_tracks(size_t                   device_index,
+    static void setup_counter_tracks(const device_ptr_t&      device,
                                      const enabled_metrics_t& enabled)
     {
-        Perfetto::setup_counter_tracks(device_index, enabled);
-    }
-
-    /**
-     * @brief Store a sample to Perfetto.
-     */
-    template <typename Perfetto>
-    static void store_perfetto_sample(size_t device_id, const metrics_t& metrics,
-                                      uint64_t timestamp)
-    {
-        Perfetto::store_sample(device_id, metrics, timestamp);
+        Perfetto::setup_counter_tracks(device->get_index(), enabled);
     }
 
     /**
      * @brief Post-process Perfetto data.
      */
-    template <typename Perfetto>
-    static void post_process_perfetto(const enabled_metrics_t& enabled)
+    template <typename Perfetto, typename DeviceEntries>
+    static void post_process_perfetto(const DeviceEntries& /*device_entries*/,
+                                      const enabled_metrics_t& enabled)
     {
         Perfetto::post_process(enabled);
-    }
-
-    // Device creation
-
-    /**
-     * @brief Create a new GPU device instance.
-     */
-    static device_ptr_t create_device(std::shared_ptr<driver_t> driver,
-                                      amdsmi_processor_handle   handle,
-                                      processor_type_t type, size_t index)
-    {
-        return std::make_shared<device_t>(std::move(driver), handle, type, index);
-    }
-
-    /**
-     * @brief Get the device index from a device pointer.
-     */
-    static size_t get_device_index(const device_ptr_t& device)
-    {
-        return device->get_index();
-    }
-
-    /**
-     * @brief Get supported metrics from a device.
-     */
-    static enabled_metrics_t get_supported_metrics(const device_ptr_t& device)
-    {
-        return device->get_supported_metrics();
     }
 
     /**
      * @brief Get metrics from a device.
      */
-    static metrics_t get_metrics(const device_ptr_t&      device,
-                                 const enabled_metrics_t& enabled, uint64_t timestamp)
+    [[nodiscard]] static metrics_t get_metrics(const device_ptr_t&      device,
+                                               const enabled_metrics_t& enabled,
+                                               uint64_t                 timestamp)
     {
         return device->get_gpu_metrics(enabled, timestamp);
-    }
-
-    /**
-     * @brief Check if a device is supported.
-     */
-    static bool is_device_supported(const device_ptr_t& device)
-    {
-        return device->is_supported();
     }
 
     // Device enumeration
@@ -222,7 +140,8 @@ struct gpu_traits
      * @return Vector of device entries with cached supported metrics
      */
     template <typename Settings, typename Provider>
-    static std::vector<device_entry> enumerate_devices(std::shared_ptr<Provider> provider)
+    [[nodiscard]] static std::vector<device_entry> enumerate_devices(
+        std::shared_ptr<Provider> provider)
     {
         std::vector<device_entry> entries;
         auto                      filter = get_device_filter<Settings>();
@@ -233,48 +152,24 @@ struct gpu_traits
             return entries;
         }
 
-        auto   driver         = provider->get_driver();
-        auto   socket_handles = provider->get_socket_handles();
-        size_t index          = 0;
+        auto devices = provider->template get_devices<device_t>(device_type::GPU);
 
-        auto process_handle = [&](amdsmi_processor_handle processor_handle) {
-            processor_type_t processor_type;
-            auto status = driver->get_processor_type(processor_handle, &processor_type);
-
-            if(status != AMDSMI_STATUS_SUCCESS)
-            {
-                LOG_DEBUG("Failed to get processor type for handle at index {}", index);
-                return;
-            }
-
-            if(processor_type != AMDSMI_PROCESSOR_TYPE_AMD_GPU) return;
+        for(auto& device : devices)
+        {
+            auto index = device->get_index();
 
             bool should_include = (filter.mode == device_selection_mode::ALL) ||
                                   (filter.mode == device_selection_mode::SPECIFIC &&
                                    filter.indices.count(index) > 0);
 
-            if(!should_include) return;
-
-            auto device = create_device(driver, processor_handle,
-                                        AMDSMI_PROCESSOR_TYPE_AMD_GPU, index);
-
-            if(is_device_supported(device))
+            if(should_include && device->is_supported())
             {
-                auto supported = get_supported_metrics(device);
+                auto supported = device->get_supported_metrics();
                 entries.push_back(device_entry{ std::move(device), supported });
-            }
-        };
-
-        for(auto& socket_handle : socket_handles)
-        {
-            for(auto& processor_handle : provider->get_processor_handles(socket_handle))
-            {
-                process_handle(processor_handle);
-                index++;
             }
         }
 
-        warn_invalid_indices(filter, index);
+        warn_invalid_indices(filter, devices.size());
         return entries;
     }
 
@@ -286,22 +181,20 @@ struct gpu_traits
      */
     static void warn_invalid_indices(const device_filter& filter, size_t max_index)
     {
-        if(filter.mode == device_selection_mode::SPECIFIC)
+        if(filter.mode != device_selection_mode::SPECIFIC)
         {
-            for(auto requested_index : filter.indices)
+            return;
+        }
+        for(auto requested_index : filter.indices)
+        {
+            if(requested_index >= max_index)
             {
-                if(requested_index >= max_index)
-                {
-                    LOG_WARNING("Requested GPU device index {} does not exist. "
-                                "Available devices: 0-{}",
-                                requested_index, max_index > 0 ? max_index - 1 : 0);
-                }
+                LOG_WARNING("Requested GPU device index {} does not exist. "
+                            "Available devices: 0-{}",
+                            requested_index, max_index > 0 ? max_index - 1 : 0);
             }
         }
     }
 };
 
-}  // namespace gpu
-}  // namespace collectors
-}  // namespace pmc
-}  // namespace rocprofsys
+}  // namespace rocprofsys::pmc::collectors::gpu

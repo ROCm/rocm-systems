@@ -32,7 +32,7 @@
 #include <timemory/utility/locking.hpp>
 
 #include <cassert>
-#include <optional>
+#include <memory>
 #include <sys/resource.h>
 #include <vector>
 
@@ -80,8 +80,8 @@ using nic_collector_t = collectors::nic::collector<provider_t, nic_production_co
 
 std::shared_ptr<provider_t> g_device_provider;
 
-std::optional<gpu_collector_t> g_gpu_collector;
-std::optional<nic_collector_t> g_nic_collector;
+std::unique_ptr<gpu_collector_t> g_gpu_collector;
+std::unique_ptr<nic_collector_t> g_nic_collector;
 
 std::vector<collectors::collector_slice> g_collector_slices;
 
@@ -139,8 +139,8 @@ setup()
         // Create and inject device provider (shared between GPU and NIC collectors)
         g_device_provider = provider_factory_t::create();
 
-        g_gpu_collector.emplace(g_device_provider);
-        g_nic_collector.emplace(g_device_provider);
+        g_gpu_collector = std::make_unique<gpu_collector_t>(g_device_provider);
+        g_nic_collector = std::make_unique<nic_collector_t>(g_device_provider);
 
         g_collector_slices.clear();
         g_collector_slices.emplace_back(*g_gpu_collector);
@@ -152,7 +152,7 @@ setup()
         }
 
         is_initialized() = true;
-    } catch(std::runtime_error& _e)
+    } catch(const std::runtime_error& _e)
     {
         LOG_ERROR("Exception thrown when initializing PMC sampler: {}", _e.what());
     }
@@ -176,7 +176,7 @@ shutdown()
         {
             slice.shutdown();
         }
-    } catch(std::runtime_error& _e)
+    } catch(const std::runtime_error& _e)
     {
         LOG_ERROR("Exception thrown when shutting down PMC sampler: {}", _e.what());
     }
