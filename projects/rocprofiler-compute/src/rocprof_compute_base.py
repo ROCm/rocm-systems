@@ -373,10 +373,8 @@ class RocProfCompute:
             sys.exit(0)
         elif self.__args.list_metrics is not None:
             self.list_metrics()
-            sys.exit(0)
         elif self.__args.list_blocks is not None:
             self.list_blocks()
-            sys.exit(0)
 
         if self.__mode == "profile":
             if self.__args.list_sets:
@@ -387,18 +385,13 @@ class RocProfCompute:
     @demarcate
     def list_metrics(self) -> None:
         for_current_arch = getattr(self.__args, "list_available_metrics", False)
-
         arch = self.__mspec.gpu_arch if for_current_arch else self.__args.list_metrics
 
         if arch in self.__supported_archs.keys():
-            ac = schema.ArchConfig()
-            ac.panel_configs = file_io.load_panel_configs([
-                str(Path(self.__args.config_dir) / arch)
-            ])
             sys_info = (
                 self.__mspec.get_class_members().iloc[0] if for_current_arch else None
             )
-            parser.build_dfs(arch_configs=ac, filter_metrics=[], sys_info=sys_info)
+            ac = self._build_arch_metric_list(arch, sys_info)
             for key, value in ac.metric_list.items():
                 prefix = "\t" * min(key.count("."), 2)
                 print(f"{prefix}{key} -> {value}")
@@ -411,12 +404,7 @@ class RocProfCompute:
         arch = self.__args.list_blocks
 
         if arch in self.__supported_archs.keys():
-            ac = schema.ArchConfig()
-            ac.panel_configs = file_io.load_panel_configs([
-                str(Path(self.__args.config_dir) / arch)
-            ])
-            parser.build_dfs(arch_configs=ac, filter_metrics=[], sys_info=None)
-
+            ac = self._build_arch_metric_list(arch, sys_info=None)
             print(f"{'INDEX':<8} {'BLOCK ALIAS':<16} {'BLOCK NAME'}")
             panel_alias_dict = {value: key for key, value in get_panel_alias().items()}
             for key, value in ac.metric_list.items():
@@ -426,6 +414,20 @@ class RocProfCompute:
             sys.exit(0)
         else:
             console_error("Unsupported arch")
+
+    def _build_arch_metric_list(
+        self,
+        arch: str,
+        sys_info: "pd.Series",  # noqa: F821
+    ) -> schema.ArchConfig:
+        """Load panel configs for arch and populate metric_list.
+        Returns the ArchConfig."""
+        ac = schema.ArchConfig()
+        ac.panel_configs = file_io.load_panel_configs([
+            str(Path(self.__args.config_dir) / arch)
+        ])
+        parser.build_metric_list(ac, sys_info)
+        return ac
 
     @demarcate
     def list_sets(self) -> None:
