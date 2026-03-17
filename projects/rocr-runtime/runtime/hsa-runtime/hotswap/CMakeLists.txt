@@ -31,6 +31,7 @@ add_library(rocr-hotswap STATIC
   hotswap.cpp
   hotswap_rules.cpp
   trampoline.cpp
+  transpiler.cpp
 )
 
 target_include_directories(rocr-hotswap PUBLIC
