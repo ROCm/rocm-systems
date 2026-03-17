@@ -1388,7 +1388,7 @@ RUNTIME_ENTRY(cl_int, clCreateKernelsInProgram,
   cl_kernel* result = kernels;
 
   for (const auto& it : symbols) {
-    amd::Kernel* kernel = new amd::Kernel(*amd_program, it.second, it.first);
+    amd::Kernel* kernel = new amd::Kernel(*amd_program, it.second, std::string(it.first));
     if (kernel == NULL) {
       while (--result >= kernels) {
         as_amd(*result)->release();
