@@ -244,7 +244,8 @@ if(ROCR_ENABLE_HOTSWAP)
   list(APPEND SRCS
     hotswap/hotswap.cpp
     hotswap/hotswap_rules.cpp
-    hotswap/trampoline.cpp)
+    hotswap/trampoline.cpp
+    hotswap/transpiler.cpp)
   target_include_directories(${CORE_RUNTIME_TARGET} PRIVATE
     ${LLVM_INCLUDE_DIRS}
     ${CMAKE_CURRENT_SOURCE_DIR}/hotswap)

@@ -1324,6 +1324,11 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
   // Cache the ISA override target (avoid repeated getenv)
   static const char* s_hotswap_isa_override = std::getenv("HSA_HOTSWAP_ISA_OVERRIDE");
   std::string hotswapTargetGfx;
+  std::string hotswapOriginalIsa;  // original ISA from .note (may differ from patched e_flags)
+  std::cerr << "hotswap: LoadCodeObject ISA=" << codeIsa
+            << " enabled=" << rocr::hotswap::IsEnabled()
+            << " override=" << (s_hotswap_isa_override ? s_hotswap_isa_override : "null")
+            << "\n";
   if (rocr::hotswap::IsEnabled() && s_hotswap_isa_override && s_hotswap_isa_override[0]
       && s_hotswap_isa_override[0] != '0') {
     if (std::string(s_hotswap_isa_override) != "1") {
@@ -1367,20 +1372,24 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
             std::memcpy(&ntype, elfBytes + pos + 8, 4);
             uint32_t na = (namesz + 3) & ~3u;
             uint32_t da = (descsz + 3) & ~3u;
-            if (ntype == 27 && namesz > 0 && pos + 12 + na + da <= elfSz) {
-              // Found NT_AMDGPU_ISA — check the desc for original gfx
+            if ((ntype == 27 || ntype == 32) && namesz > 0 && pos + 12 + na + da <= elfSz) {
+              // Found NT_AMDGPU_ISA (27) or NT_AMDGPU_METADATA (32) — check for gfx
+              // For type 32 (MSGPACK), search raw binary for "gfx" substring
               const char* desc = reinterpret_cast<const char*>(elfBytes + pos + 12 + na);
-              std::string noteIsa(desc, descsz > 0 ? descsz - 1 : 0);
-              size_t gp = noteIsa.find("gfx");
-              if (gp != std::string::npos) {
-                size_t ge = gp;
-                while (ge < noteIsa.size() && noteIsa[ge] != ':' && noteIsa[ge] != ' ')
-                  ++ge;
-                std::string noteGfx = noteIsa.substr(gp, ge - gp);
-                if (noteGfx != hotswapTargetGfx) {
-                  isaOverridden = true;
-                  std::cerr << "hotswap: .note ISA mismatch: " << noteGfx
-                            << " != " << hotswapTargetGfx << " — retarget\n";
+              uint32_t searchLen = descsz;
+              for (uint32_t off = 0; off + 3 < searchLen; ++off) {
+                if (desc[off] == 'g' && desc[off+1] == 'f' && desc[off+2] == 'x') {
+                  size_t ge = off + 3;
+                  while (ge < searchLen && ((desc[ge] >= '0' && desc[ge] <= '9') ||
+                         (desc[ge] >= 'a' && desc[ge] <= 'z'))) ++ge;
+                  std::string noteGfx(desc + off, ge - off);
+                  if (noteGfx != hotswapTargetGfx) {
+                    isaOverridden = true;
+                    hotswapOriginalIsa = "amdgcn-amd-amdhsa--" + noteGfx;
+                    std::cerr << "hotswap: .note ISA mismatch: " << noteGfx
+                              << " != " << hotswapTargetGfx << " — transpile\n";
+                  }
+                  break;
                 }
               }
               break;
@@ -1428,26 +1437,31 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
       if (!targetIsaName.empty()) {
         std::string agentIsaName = targetIsaName;
 
-        if (rocr::hotswap::NeedsTranspile(codeIsa, agentIsaName)) {
+        // Use original ISA from .note for cross-family detection
+        // (e_flags may have been patched by HIP to match the target)
+        std::string sourceIsa = hotswapOriginalIsa.empty() ? codeIsa : hotswapOriginalIsa;
+        if (rocr::hotswap::NeedsTranspile(sourceIsa, agentIsaName)) {
           // Cross-family transpile (e.g., gfx1250 → gfx950)
           // TranspileCodeObject may reallocate the buffer if .text grows
           void* transpileData = elfData;
           size_t transpileSize = elfSize;
           rocr::hotswap::TranspileStats stats;
           auto rt = rocr::hotswap::TranspileCodeObject(
-              &transpileData, &transpileSize, codeIsa, agentIsaName, &stats);
+              &transpileData, &transpileSize, sourceIsa, agentIsaName, &stats);
 
           if (rt.status == HSA_STATUS_SUCCESS && rt.rules_matched > 0) {
             if (transpileData != elfData) {
-              // Buffer was reallocated — update the loaded code object's
-              // reference. Note: the old buffer is still owned by the
-              // code reader, but the loaded code object now uses the new
-              // one. We store it so it doesn't leak.
-              auto& lco = loaded_code_objects.back();
-              // Store the transpiled buffer for the loaded code object
-              // The transpiled data will be used by LoadSegments below.
+              // Buffer was reallocated — re-initialize the code object
+              // with the new transpiled buffer so LoadSegments uses it.
               elfData = transpileData;
               elfSize = transpileSize;
+              code = std::make_unique<code::AmdHsaCode>();
+              if (!code->InitAsBuffer(elfData, elfSize)) {
+                std::cerr << "hotswap: transpile: failed to re-init code object with "
+                          << elfSize << " byte buffer\n";
+              } else {
+                std::cerr << "hotswap: transpile: code object re-initialized successfully\n";
+              }
             }
             std::cerr << "hotswap: transpile complete: "
                       << stats.translated_passthrough << " passthrough, "
