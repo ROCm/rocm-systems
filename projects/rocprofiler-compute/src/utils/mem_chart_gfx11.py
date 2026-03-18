@@ -40,31 +40,32 @@ RDNA3.5 MEMORY HIERARCHY:
 """
 
 import os
-os.environ['COLUMNS'] = '200'
+
+os.environ["COLUMNS"] = "200"
 
 import argparse
 import json
 from dataclasses import dataclass, field
-from typing import List, Dict, Any, Union
+from typing import Any, Dict, List, Union
+
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-
 COLORS = {
-    'kernel': 'green',
-    'block': 'blue',
-    'tcp': 'cyan',
-    'lds': 'magenta',
-    'sqc': 'yellow',
-    'read': 'bright_cyan',
-    'write': 'bright_yellow',
-    'atomic': 'bright_magenta',
-    'util': 'bright_green',
-    'hit': 'yellow',
-    'stall': 'indian_red',
-    'bw': 'bright_cyan',
+    "kernel": "green",
+    "block": "blue",
+    "tcp": "cyan",
+    "lds": "magenta",
+    "sqc": "yellow",
+    "read": "bright_cyan",
+    "write": "bright_yellow",
+    "atomic": "bright_magenta",
+    "util": "bright_green",
+    "hit": "yellow",
+    "stall": "indian_red",
+    "bw": "bright_cyan",
 }
 
 
@@ -130,6 +131,7 @@ class RegularBlock(RectBlock):
 
     def render(self) -> Panel:
         import re
+
         temp_content = []
 
         if self.content_text:
@@ -146,11 +148,13 @@ class RegularBlock(RectBlock):
                 temp_content.append(top_line)
                 label_clean = sub.label
                 label_pad = " " * max(0, inner_width - len(label_clean))
-                temp_content.append(f"[{bc}]│[/{bc}] [bold]{sub.label}[/bold]{label_pad} [{bc}]│[/{bc}]")
+                temp_content.append(
+                    f"[{bc}]│[/{bc}] [bold]{sub.label}[/bold]{label_pad} [{bc}]│[/{bc}]"
+                )
                 for attr in sub.attributes:
                     if not attr:
                         continue
-                    clean = re.sub(r'\[.*?\]', '', attr)
+                    clean = re.sub(r"\[.*?\]", "", attr)
                     pad_len = max(0, inner_width - len(clean))
                     pad = " " * pad_len
                     temp_content.append(f"[{bc}]│[/{bc}] {attr}{pad} [{bc}]│[/{bc}]")
@@ -169,11 +173,13 @@ class RegularBlock(RectBlock):
             title=f"[bold {self.color}]{self.label}[/bold {self.color}]",
             border_style=self.color,
             width=self.width,
-            height=self.height
+            height=self.height,
         )
 
 
-def format_value(value: Union[int, float, str, None], unit: str = '', precision: int = 1) -> str:
+def format_value(
+    value: Union[int, float, str, None], unit: str = "", precision: int = 1
+) -> str:
     if value is None:
         return "N/A"
     if isinstance(value, str):
@@ -181,12 +187,53 @@ def format_value(value: Union[int, float, str, None], unit: str = '', precision:
             value = float(value)
         except (ValueError, TypeError):
             return value
-    if unit == '%':
+    if unit == "%":
         return f"{value:.{precision}f}%"
-    elif unit == 'GB/s':
-        return f"{value:.1f} GB/s"
+    elif unit in ("GB/s", "Bytes/s"):
+        # Handle both legacy GB/s and new Bytes/s units
+        return format_bw_human_readable(value, unit)
     else:
         return f"{value:.{precision}f}{unit}"
+
+
+def format_bw_human_readable(
+    value: Union[int, float, str, None], unit: str = "Bytes/s", precision: int = 1
+) -> str:
+    """
+    Format bandwidth value to human-readable format (TB/s, GB/s, MB/s, KB/s).
+
+    Args:
+        value: Bandwidth value (in Bytes/s if unit='Bytes/s', or in GB/s if unit='GB/s')
+        unit: Input unit - 'Bytes/s' or 'GB/s' (legacy)
+        precision: Number of decimal places
+
+    Returns:
+        Human-readable bandwidth string with appropriate unit
+    """
+    if value is None:
+        return "N/A"
+    try:
+        value = float(value)
+    except (ValueError, TypeError):
+        return "N/A"
+
+    # Convert to Bytes/s first if needed
+    if unit == "GB/s":
+        bytes_per_sec = value * 1e9
+    else:
+        bytes_per_sec = value
+
+    # Convert to appropriate unit
+    if bytes_per_sec >= 1e12:
+        return f"{bytes_per_sec / 1e12:.{precision}f} TB/s"
+    elif bytes_per_sec >= 1e9:
+        return f"{bytes_per_sec / 1e9:.{precision}f} GB/s"
+    elif bytes_per_sec >= 1e6:
+        return f"{bytes_per_sec / 1e6:.{precision}f} MB/s"
+    elif bytes_per_sec >= 1e3:
+        return f"{bytes_per_sec / 1e3:.{precision}f} KB/s"
+    else:
+        return f"{bytes_per_sec:.{precision}f} B/s"
 
 
 def format_sci(value: Union[int, float, str, None], precision: int = 2) -> str:
@@ -202,39 +249,58 @@ def format_sci(value: Union[int, float, str, None], precision: int = 2) -> str:
 
 
 def format_bw_gbps(value: Union[int, float, str, None], precision: int = 1) -> str:
+    """
+    Format bandwidth value from Bytes/s to human-readable format (TB/s, GB/s, MB/s, KB/s).
+
+    This function expects value in Bytes/s (raw bytes per second).
+
+    Args:
+        value: Bandwidth value in Bytes/s
+        precision: Number of decimal places
+
+    Returns:
+        Human-readable bandwidth string with appropriate unit
+    """
     if value is None:
         return "N/A"
     try:
         value = float(value)
     except (ValueError, TypeError):
         return "N/A"
-    gbps = value / 1e9
-    if gbps >= 1000:
-        return f"{gbps/1000:.{precision}f} TB/s"
-    elif gbps >= 1:
-        return f"{gbps:.{precision}f} GB/s"
+
+    # value is in Bytes/s, convert to appropriate unit
+    if value >= 1e12:
+        return f"{value / 1e12:.{precision}f} TB/s"
+    elif value >= 1e9:
+        return f"{value / 1e9:.{precision}f} GB/s"
+    elif value >= 1e6:
+        return f"{value / 1e6:.{precision}f} MB/s"
+    elif value >= 1e3:
+        return f"{value / 1e3:.{precision}f} KB/s"
     else:
-        return f"{gbps*1000:.{precision}f} MB/s"
+        return f"{value:.{precision}f} B/s"
 
 
 def get_metric(d: Dict[str, Any], key: str, default: Any = None) -> Any:
     return d.get(key, default)
 
 
-def metric_line(label: str, value: Any, unit: str = '%', color: str = 'bright_green') -> str:
+def metric_line(
+    label: str, value: Any, unit: str = "%", color: str = "bright_green"
+) -> str:
     formatted = format_value(value, unit)
     return f"{label} [{color}]{formatted}[/{color}]"
 
 
 def bar(pct: float, w: int = 10) -> str:
     if pct is None:
-        return '░' * w
+        return "░" * w
     try:
         pct = float(pct)
     except (ValueError, TypeError):
-        return '░' * w
+        return "░" * w
     filled = int(w * min(100, max(0, pct)) / 100)
-    return '█' * filled + '░' * (w - filled)
+    return "█" * filled + "░" * (w - filled)
 
 
 def create_mem_chart_diagram(
@@ -243,34 +309,34 @@ def create_mem_chart_diagram(
     metric_dict: Dict[str, Any],
     console: Console,
     show_debug: bool = False,
-    compact: bool = False
+    compact: bool = False,
 ) -> None:
     """Create the RDNA3.5 memory architecture diagram with separate TCP, LDS, SQC blocks"""
 
     # Extract metrics
-    icache_req = get_metric(metric_dict, 'ICache Requests')
-    icache_hit = get_metric(metric_dict, 'ICache Hit Rate')
-    icache_gl1_bw = get_metric(metric_dict, 'ICache-GL1 Read Bandwidth')
+    icache_req = get_metric(metric_dict, "ICache Requests")
+    icache_hit = get_metric(metric_dict, "ICache Hit Rate")
+    icache_gl1_bw = get_metric(metric_dict, "ICache-GL1 Read Bandwidth")
 
-    dcache_req = get_metric(metric_dict, 'Dcache Requests')
-    dcache_hit = get_metric(metric_dict, 'Dcache Hit Rate')
-    dcache_gl1_bw = get_metric(metric_dict, 'Dcache-GL1 Read Bandwidth')
+    dcache_req = get_metric(metric_dict, "Dcache Requests")
+    dcache_hit = get_metric(metric_dict, "Dcache Hit Rate")
+    dcache_gl1_bw = get_metric(metric_dict, "Dcache-GL1 Read Bandwidth")
 
-    tcp_read_req = get_metric(metric_dict, 'TCP Read Requests')
-    tcp_write_req = get_metric(metric_dict, 'TCP Write Requests')
-    tcp_atomic_req = get_metric(metric_dict, 'TCP Atomic Requests')
-    tcp_hit = get_metric(metric_dict, 'TCP Hit Rate')
-    tcp_bw = get_metric(metric_dict, 'TCP Request Bandwidth')
+    tcp_read_req = get_metric(metric_dict, "TCP Read Requests")
+    tcp_write_req = get_metric(metric_dict, "TCP Write Requests")
+    tcp_atomic_req = get_metric(metric_dict, "TCP Atomic Requests")
+    tcp_hit = get_metric(metric_dict, "TCP Hit Rate")
+    tcp_bw = get_metric(metric_dict, "TCP Request Bandwidth")
 
-    lds_insts = get_metric(metric_dict, 'LDS Instructions')
-    lds_read_insts = get_metric(metric_dict, 'LDS Read Instructions')
-    lds_write_insts = get_metric(metric_dict, 'LDS Write Instructions')
-    lds_atomic_insts = get_metric(metric_dict, 'LDS Atomic Instructions')
-    lds_bw = get_metric(metric_dict, 'LDS Estimated Bandwidth')
-    lds_bank_conflict = get_metric(metric_dict, 'LDS Bank Conflict Rate')
+    lds_insts = get_metric(metric_dict, "LDS Instructions")
+    lds_read_insts = get_metric(metric_dict, "LDS Read Instructions")
+    lds_write_insts = get_metric(metric_dict, "LDS Write Instructions")
+    lds_atomic_insts = get_metric(metric_dict, "LDS Atomic Instructions")
+    lds_bw = get_metric(metric_dict, "LDS Estimated Bandwidth")
+    lds_bank_conflict = get_metric(metric_dict, "LDS Bank Conflict Rate")
 
-    tcp_gl1_read_bw = get_metric(metric_dict, 'TCP-GL1 Read Bandwidth')
-    tcp_gl1_write_bw = get_metric(metric_dict, 'TCP-GL1 Write Bandwidth')
+    tcp_gl1_read_bw = get_metric(metric_dict, "TCP-GL1 Read Bandwidth")
+    tcp_gl1_write_bw = get_metric(metric_dict, "TCP-GL1 Write Bandwidth")
 
     # Calculate combined SQC-GL1 bandwidth
     sqc_gl1_read_bw = None
@@ -281,29 +347,41 @@ def create_mem_chart_diagram(
     elif dcache_gl1_bw is not None:
         sqc_gl1_read_bw = dcache_gl1_bw
 
-    gl1c_util = get_metric(metric_dict, 'GL1C Utilization')
-    gl1c_hit = get_metric(metric_dict, 'GL1C Hit Rate')
-    gl1c_stall_gl2 = get_metric(metric_dict, 'GL1C Stall GL2 Backpressure')
+    gl1c_util = get_metric(metric_dict, "GL1C Utilization")
+    gl1c_hit = get_metric(metric_dict, "GL1C Hit Rate")
+    gl1c_stall_gl2 = get_metric(metric_dict, "GL1C Stall GL2 Backpressure")
 
-    gl1_gl2_read_bw = get_metric(metric_dict, 'GL1-GL2 Read Bandwidth')
-    gl1_gl2_write_bw = get_metric(metric_dict, 'GL1-GL2 Write Bandwidth')
+    gl1_gl2_read_bw = get_metric(metric_dict, "GL1-GL2 Read Bandwidth")
+    gl1_gl2_write_bw = get_metric(metric_dict, "GL1-GL2 Write Bandwidth")
 
-    gl2c_util = get_metric(metric_dict, 'GL2C Utilization')
-    gl2c_hit = get_metric(metric_dict, 'GL2C Hit Rate')
-    gl2c_read_bw = get_metric(metric_dict, 'GL2C Read Bandwidth')
-    gl2c_write_bw = get_metric(metric_dict, 'GL2C Write Bandwidth')
+    gl2c_util = get_metric(metric_dict, "GL2C Utilization")
+    gl2c_hit = get_metric(metric_dict, "GL2C Hit Rate")
+    gl2c_read_bw = get_metric(metric_dict, "GL2C Read Bandwidth")
+    gl2c_write_bw = get_metric(metric_dict, "GL2C Write Bandwidth")
 
-    sarb_util = get_metric(metric_dict, 'SARB Utilization')
-    sarb_stall = get_metric(metric_dict, 'SARB Stall Rate')
-    dram_read_bw = get_metric(metric_dict, 'DRAM Read Bandwidth', 0)
-    dram_write_bw = get_metric(metric_dict, 'DRAM Write Bandwidth', 0)
+    sarb_util = get_metric(metric_dict, "SARB Utilization")
+    sarb_stall = get_metric(metric_dict, "SARB Stall Rate")
+    dram_read_bw = get_metric(metric_dict, "DRAM Read Bandwidth", 0)
+    dram_write_bw = get_metric(metric_dict, "DRAM Write Bandwidth", 0)
 
     total_bw = (dram_read_bw or 0) + (dram_write_bw or 0)
 
     # Print header
     console.print()
-    console.print(f"[bold]RDNA3.5 Memory Chart[/bold] [dim](Normalization: {normal_unit})[/dim]")
-    console.print("|" + "-" * 62 + " [dim]GPU[/dim] " + "-" * 62 + "|" + "-" * 4 + " [dim]System Memory[/dim] " + "-" * 4 + "|")
+    console.print(
+        f"[bold]RDNA3.5 Memory Chart[/bold] [dim](Normalization: {normal_unit})[/dim]"
+    )
+    console.print(
+        "|"
+        + "-" * 62
+        + " [dim]GPU[/dim] "
+        + "-" * 62
+        + "|"
+        + "-" * 4
+        + " [dim]System Memory[/dim] "
+        + "-" * 4
+        + "|"
+    )
     console.print()
 
     # Arrow constants
@@ -328,7 +406,7 @@ def create_mem_chart_diagram(
     # =========================================================================
     # Build the layout with separate TCP, LDS, SQC blocks
     # =========================================================================
-    
+
     # Create main layout table
     main_layout = Table.grid(padding=0)
     main_layout.add_column()  # Kernel
@@ -347,9 +425,9 @@ def create_mem_chart_diagram(
     kernel_panel = Panel(
         "\n" * 11 + "[dim]Shader Core[/dim]\n[dim]Wave Execution[/dim]",
         title=f"[bold {COLORS['kernel']}]Kernel[/bold {COLORS['kernel']}]",
-        border_style=COLORS['kernel'],
+        border_style=COLORS["kernel"],
         width=14,
-        height=30
+        height=30,
     )
 
     # Kernel edges (showing all operations grouped by destination)
@@ -390,27 +468,27 @@ def create_mem_chart_diagram(
         f"{metric_line('Hit Rate', tcp_hit, '%', COLORS['hit'])}\n"
         f"{metric_line('BW', tcp_bw, 'GB/s', COLORS['bw']) if tcp_bw else ''}",
         title=f"[bold {COLORS['block']}]TCP (L0)[/bold {COLORS['block']}]",
-        border_style=COLORS['block'],
+        border_style=COLORS["block"],
         width=20,
-        height=10
+        height=10,
     )
-    
+
     lds_panel = Panel(
         f"{metric_line('BW', lds_bw, 'GB/s', COLORS['bw']) if lds_bw else ''}\n"
         f"{metric_line('Bank Conflict', lds_bank_conflict, '%', COLORS['stall']) if lds_bank_conflict else ''}",
         title=f"[bold {COLORS['block']}]LDS[/bold {COLORS['block']}]",
-        border_style=COLORS['block'],
+        border_style=COLORS["block"],
         width=20,
-        height=10
+        height=10,
     )
-    
+
     sqc_panel = Panel(
         f"{metric_line('ICache', icache_hit, '%', COLORS['hit'])}\n"
         f"{metric_line('DCache', dcache_hit, '%', COLORS['hit'])}",
         title=f"[bold {COLORS['block']}]SQC[/bold {COLORS['block']}]",
-        border_style=COLORS['block'],
+        border_style=COLORS["block"],
         width=20,
-        height=10
+        height=10,
     )
 
     # Stack LDS, TCP, SQC vertically (swapped LDS and TCP)
@@ -460,9 +538,9 @@ def create_mem_chart_diagram(
         "\n"
         f"{metric_line('GL2 Stall', gl1c_stall_gl2, '%', COLORS['stall'])}",
         title=f"[bold {COLORS['block']}]GL1C[/bold {COLORS['block']}]",
-        border_style=COLORS['block'],
+        border_style=COLORS["block"],
         width=16,
-        height=30
+        height=30,
     )
 
     # GL1-GL2 edges - more padding to center vertically
@@ -500,9 +578,9 @@ def create_mem_chart_diagram(
         f"{metric_line('Hit Rate', gl2c_hit, '%', COLORS['hit'])}\n"
         f"[dim]{bar(gl2c_hit)}[/dim]",
         title=f"[bold {COLORS['block']}]GL2C[/bold {COLORS['block']}]",
-        border_style=COLORS['block'],
+        border_style=COLORS["block"],
         width=16,
-        height=30
+        height=30,
     )
 
     # GL2-GCEA edges - more padding to center vertically
@@ -539,9 +617,9 @@ def create_mem_chart_diagram(
         "\n"
         f"{metric_line('Stall', sarb_stall, '%', COLORS['stall'])}",
         title=f"[bold {COLORS['block']}]GCEA[/bold {COLORS['block']}]",
-        border_style=COLORS['block'],
+        border_style=COLORS["block"],
         width=16,
-        height=30
+        height=30,
     )
 
     # GCEA-DRAM edges - more padding to center vertically
@@ -577,9 +655,9 @@ def create_mem_chart_diagram(
         "\n"
         f"Total: [bold bright_green]{format_bw_gbps(total_bw)}[/bold bright_green]",
         title=f"[bold {COLORS['block']}]DRAM[/bold {COLORS['block']}]",
-        border_style=COLORS['block'],
+        border_style=COLORS["block"],
         width=16,
-        height=30
+        height=30,
     )
 
     # Add the main row
@@ -594,12 +672,14 @@ def create_mem_chart_diagram(
         gl2_gcea_edges_text,
         gcea_panel,
         dram_edges_text,
-        dram_panel
+        dram_panel,
     )
 
     console.print(main_layout)
     console.print()
-    console.print(f"[dim]Legend:[/dim] [{COLORS['read']}]<----[/{COLORS['read']}] Read  [{COLORS['write']}]---->[/{COLORS['write']}] Write  [{COLORS['atomic']}]<--->[/{COLORS['atomic']}] Atomic  [{COLORS['util']}]█[/{COLORS['util']}] Util  [{COLORS['hit']}]█[/{COLORS['hit']}] Hit%  [{COLORS['stall']}]█[/{COLORS['stall']}] Stall")
+    console.print(
+        f"[dim]Legend:[/dim] [{COLORS['read']}]<----[/{COLORS['read']}] Read  [{COLORS['write']}]---->[/{COLORS['write']}] Write  [{COLORS['atomic']}]<--->[/{COLORS['atomic']}] Atomic  [{COLORS['util']}]█[/{COLORS['util']}] Util  [{COLORS['hit']}]█[/{COLORS['hit']}] Hit%  [{COLORS['stall']}]█[/{COLORS['stall']}] Stall"
+    )
     console.print()
 
     if show_debug:
@@ -612,86 +692,93 @@ def create_mem_chart_diagram(
 
 def plot_mem_chart(arch: str, normal_unit: str, metric_dict: Dict[str, Any]) -> str:
     """Plot the memory chart and return as string."""
+
     class FakeFile:
         def __init__(self):
             self.data = []
+
         def write(self, s):
             self.data.append(s)
+
         def flush(self):
             pass
+
         def isatty(self):
             return True
+
         def getvalue(self):
-            return ''.join(self.data)
+            return "".join(self.data)
 
     fake_file = FakeFile()
     console = Console(file=fake_file, force_terminal=True, width=200, height=80)
-    create_mem_chart_diagram(arch, normal_unit, metric_dict, console, show_debug=False, compact=False)
+    create_mem_chart_diagram(
+        arch, normal_unit, metric_dict, console, show_debug=False, compact=False
+    )
     return fake_file.getvalue()
 
 
-# Default sample metrics
+# Default sample metrics (all bandwidth values are now in Bytes/s)
 DEFAULT_SAMPLE_METRICS = {
-    'ICache Requests': 450,
-    'ICache Utilization': 45.2,
-    'ICache Hit Rate': 98.5,
-    'ICache Miss Rate': 1.5,
-    'ICache Request Stall Rate': 2.1,
-    'ICache-GL1 Read Bandwidth': 57600000,
-    'Dcache Requests': 225,
-    'Dcache Utilization': 38.7,
-    'Dcache Hit Rate': 95.3,
-    'Dcache Request Stall Rate': 1.8,
-    'Dcache-GL1 Read Bandwidth': 28800000,
-    'TCP Total Requests': 1250000,
-    'TCP Read Requests': 875000,
-    'TCP Write Requests': 375000,
-    'TCP Atomic Requests': 25000,
-    'TCP Miss Requests': 150000,
-    'TCP Hit Rate': 88.0,
-    'TCP Request Bandwidth': 80.0,
-    'LDS Instructions': 125000,
-    'LDS Read Instructions': 65000,
-    'LDS Write Instructions': 50000,
-    'LDS Atomic Instructions': 10000,
-    'LDS Instruction Cycles': 250000,
-    'LDS Wait Cycles': 12500,
-    'LDS Bank Conflict Rate': 4.0,
-    'LDS Estimated Bandwidth': 256.0,
-    'TCP-GL1 Read Requests': 150000,
-    'TCP-GL1 Write Requests': 50000,
-    'TCP-GL1 Read Bandwidth': 96e9,
-    'TCP-GL1 Write Bandwidth': 32e9,
-    'GL1C Utilization': 65.2,
-    'GL1C Total Requests': 200000,
-    'GL1C Read Requests': 150000,
-    'GL1C Write Requests': 50000,
-    'GL1C Miss Requests': 30000,
-    'GL1C Hit Rate': 85.0,
-    'GL1C Starve Rate': 5.2,
-    'GL1C Stall GL2 Backpressure': 8.5,
-    'GL1-GL2 Read Requests': 30000,
-    'GL1-GL2 Write Requests': 10000,
-    'GL1-GL2 Read Bandwidth': 48e9,
-    'GL1-GL2 Write Bandwidth': 16e9,
-    'GL1-GL2 Read Latency': 85.2,
-    'GL1-GL2 Write Latency': 62.4,
-    'GL2C Utilization': 74.2,
-    'GL2C Total Requests': 40000,
-    'GL2C Read Requests': 30000,
-    'GL2C Write Requests': 10000,
-    'GL2C Atomic Requests': 1000,
-    'GL2C Hit Rate': 82.5,
-    'GL2C Read Bandwidth': 64e9,
-    'GL2C Write Bandwidth': 24e9,
-    'SARB Utilization': 52.3,
-    'SARB Stall Rate': 12.4,
-    'DRAM Read Requests': 25000,
-    'DRAM Write Requests': 8000,
-    'DRAM Read Bandwidth': 100e9,
-    'DRAM Write Bandwidth': 60e9,
-    'Read Returns': 25000,
-    'Write Returns': 8000,
+    "ICache Requests": 450,
+    "ICache Utilization": 45.2,
+    "ICache Hit Rate": 98.5,
+    "ICache Miss Rate": 1.5,
+    "ICache Request Stall Rate": 2.1,
+    "ICache-GL1 Read Bandwidth": 57.6e9,  # 57.6 GB/s in Bytes/s
+    "Dcache Requests": 225,
+    "Dcache Utilization": 38.7,
+    "Dcache Hit Rate": 95.3,
+    "Dcache Request Stall Rate": 1.8,
+    "Dcache-GL1 Read Bandwidth": 28.8e9,  # 28.8 GB/s in Bytes/s
+    "TCP Total Requests": 1250000,
+    "TCP Read Requests": 875000,
+    "TCP Write Requests": 375000,
+    "TCP Atomic Requests": 25000,
+    "TCP Miss Requests": 150000,
+    "TCP Hit Rate": 88.0,
+    "TCP Request Bandwidth": 80e9,  # 80 GB/s in Bytes/s
+    "LDS Instructions": 125000,
+    "LDS Read Instructions": 65000,
+    "LDS Write Instructions": 50000,
+    "LDS Atomic Instructions": 10000,
+    "LDS Instruction Cycles": 250000,
+    "LDS Wait Cycles": 12500,
+    "LDS Bank Conflict Rate": 4.0,
+    "LDS Estimated Bandwidth": 256e9,  # 256 GB/s in Bytes/s
+    "TCP-GL1 Read Requests": 150000,
+    "TCP-GL1 Write Requests": 50000,
+    "TCP-GL1 Read Bandwidth": 96e9,  # 96 GB/s in Bytes/s
+    "TCP-GL1 Write Bandwidth": 32e9,  # 32 GB/s in Bytes/s
+    "GL1C Utilization": 65.2,
+    "GL1C Total Requests": 200000,
+    "GL1C Read Requests": 150000,
+    "GL1C Write Requests": 50000,
+    "GL1C Miss Requests": 30000,
+    "GL1C Hit Rate": 85.0,
+    "GL1C Starve Rate": 5.2,
+    "GL1C Stall GL2 Backpressure": 8.5,
+    "GL1-GL2 Read Requests": 30000,
+    "GL1-GL2 Write Requests": 10000,
+    "GL1-GL2 Read Bandwidth": 48e9,  # 48 GB/s in Bytes/s
+    "GL1-GL2 Write Bandwidth": 16e9,  # 16 GB/s in Bytes/s
+    "GL1-GL2 Read Latency": 85.2,
+    "GL1-GL2 Write Latency": 62.4,
+    "GL2C Utilization": 74.2,
+    "GL2C Total Requests": 40000,
+    "GL2C Read Requests": 30000,
+    "GL2C Write Requests": 10000,
+    "GL2C Atomic Requests": 1000,
+    "GL2C Hit Rate": 82.5,
+    "GL2C Read Bandwidth": 64e9,  # 64 GB/s in Bytes/s
+    "GL2C Write Bandwidth": 24e9,  # 24 GB/s in Bytes/s
+    "SARB Utilization": 52.3,
+    "SARB Stall Rate": 12.4,
+    "DRAM Read Requests": 25000,
+    "DRAM Write Requests": 8000,
+    "DRAM Read Bandwidth": 100e9,  # 100 GB/s in Bytes/s
+    "DRAM Write Bandwidth": 60e9,  # 60 GB/s in Bytes/s
+    "Read Returns": 25000,
+    "Write Returns": 8000,
 }
 
 
@@ -701,19 +788,21 @@ def get_sample_metrics() -> Dict[str, Any]:
 
 
 def main():
-    parser = argparse.ArgumentParser(description='RDNA3.5 Memory Chart - CLI Visualization')
-    parser.add_argument('--data', '-d', help='JSON file with metrics data')
-    parser.add_argument('--debug', action='store_true', help='Show debug info')
-    parser.add_argument('--arch', default='gfx1152', help='Architecture name')
-    parser.add_argument('--norm', default='per_kernel', help='Normalization unit')
-    parser.add_argument('--txt', '-t', help='Output to plain text file')
-    parser.add_argument('--svg', help='Output to SVG file')
-    parser.add_argument('--compact', '-c', action='store_true', help='Compact mode')
+    parser = argparse.ArgumentParser(
+        description="RDNA3.5 Memory Chart - CLI Visualization"
+    )
+    parser.add_argument("--data", "-d", help="JSON file with metrics data")
+    parser.add_argument("--debug", action="store_true", help="Show debug info")
+    parser.add_argument("--arch", default="gfx1152", help="Architecture name")
+    parser.add_argument("--norm", default="per_kernel", help="Normalization unit")
+    parser.add_argument("--txt", "-t", help="Output to plain text file")
+    parser.add_argument("--svg", help="Output to SVG file")
+    parser.add_argument("--compact", "-c", action="store_true", help="Compact mode")
     args = parser.parse_args()
 
     # Load or use default data
     if args.data:
-        with open(args.data, 'r') as f:
+        with open(args.data) as f:
             metric_dict = json.load(f)
     else:
         metric_dict = DEFAULT_SAMPLE_METRICS.copy()
@@ -722,37 +811,53 @@ def main():
     class FakeFile:
         def __init__(self):
             self.data = []
+
         def write(self, s):
             self.data.append(s)
+
         def flush(self):
             pass
+
         def isatty(self):
             return True
+
         def getvalue(self):
-            return ''.join(self.data)
+            return "".join(self.data)
 
     if args.txt:
         fake_file = FakeFile()
-        console = Console(file=fake_file, force_terminal=True, width=200, height=80, no_color=True)
-        create_mem_chart_diagram(args.arch, args.norm, metric_dict, console, args.debug, args.compact)
+        console = Console(
+            file=fake_file, force_terminal=True, width=200, height=80, no_color=True
+        )
+        create_mem_chart_diagram(
+            args.arch, args.norm, metric_dict, console, args.debug, args.compact
+        )
         import re
+
         output = fake_file.getvalue()
-        plain = re.sub(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])', '', output)
-        with open(args.txt, 'w') as f:
+        plain = re.sub(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])", "", output)
+        with open(args.txt, "w") as f:
             f.write(plain)
         print(f"Output written to {args.txt}")
     elif args.svg:
         from io import StringIO
-        svg_console = Console(file=StringIO(), force_terminal=True, width=200, height=80, record=True)
-        create_mem_chart_diagram(args.arch, args.norm, metric_dict, svg_console, args.debug, args.compact)
+
+        svg_console = Console(
+            file=StringIO(), force_terminal=True, width=200, height=80, record=True
+        )
+        create_mem_chart_diagram(
+            args.arch, args.norm, metric_dict, svg_console, args.debug, args.compact
+        )
         svg_output = svg_console.export_svg(title="RDNA3.5 Memory Chart")
-        with open(args.svg, 'w') as f:
+        with open(args.svg, "w") as f:
             f.write(svg_output)
         print(f"SVG saved to {args.svg}")
     else:
         fake_file = FakeFile()
         console = Console(file=fake_file, force_terminal=True, width=200, height=80)
-        create_mem_chart_diagram(args.arch, args.norm, metric_dict, console, args.debug, args.compact)
+        create_mem_chart_diagram(
+            args.arch, args.norm, metric_dict, console, args.debug, args.compact
+        )
         print(fake_file.getvalue())
 
 
