@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2014-2020, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2026, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -303,6 +303,51 @@ private:
 };
 
 //===----------------------------------------------------------------------===//
+// AieKernelSymbol.                                                           //
+//===----------------------------------------------------------------------===//
+
+/// @brief Kernel symbol for AIE/NPU code objects.
+///
+/// Provides instruction buffer address and size needed for NPU kernel dispatch.
+class AieKernelSymbol final : public SymbolImpl {
+ public:
+  AieKernelSymbol(const std::string& _symbol_name, uint64_t _instr_address, uint32_t _instr_size,
+                  uint32_t _kernarg_size,
+                  uint32_t _num_cols = 1)
+      : SymbolImpl(true,  // is_loaded
+                   HSA_SYMBOL_KIND_KERNEL,
+                   "",  // module_name
+                   _symbol_name, HSA_SYMBOL_LINKAGE_PROGRAM,
+                   true,  // is_definition
+                   _instr_address),
+        full_name(_symbol_name),
+        instr_address(_instr_address),
+        instr_size(_instr_size),
+        kernarg_size(_kernarg_size),
+        num_cols(_num_cols) {}
+
+  bool GetInfo(hsa_symbol_info32_t symbol_info, void* value);
+
+  /// @brief Gets the device address of the instruction buffer.
+  uint64_t GetInstructionAddress() const { return instr_address; }
+
+  /// @brief Gets the size of the instruction buffer in bytes.
+  uint32_t GetInstructionSize() const { return instr_size; }
+
+  /// @brief Gets the size of the kernel argument buffer.
+  uint32_t GetKernargSize() const { return kernarg_size; }
+
+  /// @brief Gets the number of NPU columns used by this kernel.
+  uint32_t GetNumCols() const { return num_cols; }
+
+  std::string full_name;
+  uint64_t instr_address;
+  uint32_t instr_size;
+  uint32_t kernarg_size;
+  uint32_t num_cols;
+};
+
+//===----------------------------------------------------------------------===//
 // Logger.                                                                    //
 //===----------------------------------------------------------------------===//
 
@@ -402,6 +447,67 @@ public:
   std::string getUri() const override;
 
   link_map r_debug_info;
+};
+
+//===----------------------------------------------------------------------===//
+// AieLoadedCodeObjectImpl.                                                   //
+//===----------------------------------------------------------------------===//
+
+class AieLoadedCodeObjectImpl : public LoadedCodeObject, public ExecutableObject {
+  friend class AmdHsaCodeLoader;
+
+ private:
+  AieLoadedCodeObjectImpl(const AieLoadedCodeObjectImpl&);
+  AieLoadedCodeObjectImpl& operator=(const AieLoadedCodeObjectImpl&);
+
+  const void* elf_data;
+  const size_t elf_size;
+  void* instr_buffer;       // Host address of instruction buffer
+  uint64_t instr_dev_addr;  // Device address of instruction buffer
+  size_t instr_size;        // Size of instruction buffer
+
+ public:
+  AieLoadedCodeObjectImpl(ExecutableImpl* owner_, hsa_agent_t agent_, const void* elf_data_,
+                          size_t elf_size_, void* instr_buffer_, uint64_t instr_dev_addr_,
+                          size_t instr_size_)
+      : ExecutableObject(owner_, agent_),
+        elf_data(elf_data_),
+        elf_size(elf_size_),
+        instr_buffer(instr_buffer_),
+        instr_dev_addr(instr_dev_addr_),
+        instr_size(instr_size_) {}
+
+  const void* ElfData() const { return elf_data; }
+  size_t ElfSize() const { return elf_size; }
+
+  /// @brief Gets the device address of the instruction buffer.
+  uint64_t GetInstructionDeviceAddress() const { return instr_dev_addr; }
+
+  /// @brief Gets the host address of the instruction buffer.
+  void* GetInstructionHostAddress() const { return instr_buffer; }
+
+  /// @brief Gets the size of the instruction buffer.
+  size_t GetInstructionSize() const { return instr_size; }
+
+  bool GetInfo(amd_loaded_code_object_info_t attribute, void* value) override;
+
+  hsa_status_t IterateLoadedSegments(hsa_status_t (*callback)(amd_loaded_segment_t loaded_segment,
+                                                              void* data),
+                                     void* data) override;
+
+  void Print(std::ostream& out) override;
+
+  void Destroy() override {}
+
+  hsa_agent_t getAgent() const override;
+  hsa_executable_t getExecutable() const override;
+  uint64_t getElfData() const override;
+  uint64_t getElfSize() const override;
+  uint64_t getStorageOffset() const override;
+  uint64_t getLoadBase() const override;
+  uint64_t getLoadSize() const override;
+  int64_t getDelta() const override;
+  std::string getUri() const override;
 };
 
 class Segment : public LoadedSegment, public ExecutableObject {
@@ -596,7 +702,19 @@ public:
   Context* context() { return context_; }
   size_t id() { return id_; }
 
-private:
+ private:
+  /// @brief Loads an AIE/NPU code object.
+  ///
+  /// @param agent The AIE agent to load the code object for.
+  /// @param data Pointer to the code object data.
+  /// @param size Size of the code object data.
+  /// @param uri URI of the code object for debugging.
+  /// @param loaded_code_object Output loaded code object handle.
+  /// @return HSA_STATUS_SUCCESS on success, error code otherwise.
+  hsa_status_t LoadAieCodeObject(hsa_agent_t agent, const void* data, size_t size,
+                                 const std::string& uri,
+                                 hsa_loaded_code_object_t* loaded_code_object);
+
   ExecutableImpl(const ExecutableImpl &e);
   ExecutableImpl& operator=(const ExecutableImpl &e);
 

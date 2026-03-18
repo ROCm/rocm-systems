@@ -58,6 +58,7 @@
 #include <fstream>
 #include "inc/amd_hsa_elf.h"
 #include "inc/amd_hsa_kernel_code.h"
+#include "core/inc/amd_aie_code.hpp"
 #include "core/inc/amd_hsa_code.hpp"
 #include "amd_hsa_code_util.hpp"
 #include "amd_options.hpp"
@@ -714,6 +715,51 @@ bool VariableSymbol::GetInfo(hsa_symbol_info32_t symbol_info, void *value) {
   return true;
 }
 
+//===----------------------------------------------------------------------===//
+// AieKernelSymbol.                                                            //
+//===----------------------------------------------------------------------===//
+
+bool AieKernelSymbol::GetInfo(hsa_symbol_info32_t symbol_info, void* value) {
+  switch (symbol_info) {
+    case HSA_EXECUTABLE_SYMBOL_INFO_TYPE:
+      *static_cast<hsa_symbol_kind_t*>(value) = HSA_SYMBOL_KIND_KERNEL;
+      return true;
+    case HSA_EXECUTABLE_SYMBOL_INFO_NAME_LENGTH:
+      *static_cast<uint32_t*>(value) = static_cast<uint32_t>(full_name.size());
+      return true;
+    case HSA_EXECUTABLE_SYMBOL_INFO_NAME:
+      memcpy(value, full_name.c_str(), full_name.size() + 1);
+      return true;
+    case HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT:
+      *static_cast<uint64_t*>(value) = instr_address;
+      return true;
+    case HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_SIZE:
+      *static_cast<uint32_t*>(value) = kernarg_size;
+      return true;
+    case HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_ALIGNMENT:
+      *static_cast<uint32_t*>(value) = 64;  // Default alignment
+      return true;
+    case HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_GROUP_SEGMENT_SIZE:
+      *static_cast<uint32_t*>(value) = 0;  // NPU doesn't use group segment
+      return true;
+    case HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_PRIVATE_SEGMENT_SIZE:
+      *static_cast<uint32_t*>(value) = 0;  // NPU doesn't use private segment
+      return true;
+    case HSA_EXECUTABLE_SYMBOL_INFO_LINKAGE:
+      *static_cast<hsa_symbol_linkage_t*>(value) = HSA_SYMBOL_LINKAGE_PROGRAM;
+      return true;
+    case HSA_EXECUTABLE_SYMBOL_INFO_IS_DEFINITION:
+      *static_cast<bool*>(value) = true;
+      return true;
+    default:
+      return SymbolImpl::GetInfo(symbol_info, value);
+  }
+}
+
+//===----------------------------------------------------------------------===//
+// LoadedCodeObjectImpl.                                                            //
+//===----------------------------------------------------------------------===//
+
 bool LoadedCodeObjectImpl::GetInfo(amd_loaded_code_object_info_t attribute, void *value)
 {
   assert(value);
@@ -755,6 +801,62 @@ void LoadedCodeObjectImpl::Print(std::ostream& out)
 {
   out << "Code Object" << std::endl;
 }
+
+//===----------------------------------------------------------------------===//
+// AieLoadedCodeObjectImpl.                                                   //
+//===----------------------------------------------------------------------===//
+
+bool AieLoadedCodeObjectImpl::GetInfo(amd_loaded_code_object_info_t attribute, void* value) {
+  switch (attribute) {
+    case AMD_LOADED_CODE_OBJECT_INFO_ELF_IMAGE:
+      *static_cast<uint64_t*>(value) = reinterpret_cast<uint64_t>(elf_data);
+      return true;
+    case AMD_LOADED_CODE_OBJECT_INFO_ELF_IMAGE_SIZE:
+      *static_cast<uint64_t*>(value) = elf_size;
+      return true;
+    default:
+      return false;
+  }
+}
+
+hsa_status_t AieLoadedCodeObjectImpl::IterateLoadedSegments(
+    hsa_status_t (*callback)(amd_loaded_segment_t loaded_segment, void* data), void* data) {
+  // AIE code objects don't have traditional segments.
+  return HSA_STATUS_SUCCESS;
+}
+
+void AieLoadedCodeObjectImpl::Print(std::ostream& out) {
+  out << "AIE Loaded Code Object:" << std::endl;
+  out << "  ELF Size: " << elf_size << std::endl;
+  out << "  Instruction Buffer Size: " << instr_size << std::endl;
+  out << "  Instruction Device Address: 0x" << std::hex << instr_dev_addr << std::dec << std::endl;
+}
+
+hsa_agent_t AieLoadedCodeObjectImpl::getAgent() const { return agent; }
+
+hsa_executable_t AieLoadedCodeObjectImpl::getExecutable() const {
+  return Executable::Handle(owner);
+}
+
+uint64_t AieLoadedCodeObjectImpl::getElfData() const {
+  return reinterpret_cast<uint64_t>(elf_data);
+}
+
+uint64_t AieLoadedCodeObjectImpl::getElfSize() const { return elf_size; }
+
+uint64_t AieLoadedCodeObjectImpl::getStorageOffset() const { return 0; }
+
+uint64_t AieLoadedCodeObjectImpl::getLoadBase() const { return instr_dev_addr; }
+
+uint64_t AieLoadedCodeObjectImpl::getLoadSize() const { return instr_size; }
+
+int64_t AieLoadedCodeObjectImpl::getDelta() const { return 0; }
+
+std::string AieLoadedCodeObjectImpl::getUri() const { return ""; }
+
+//===----------------------------------------------------------------------===//
+// Segment.                                                                   //
+//===----------------------------------------------------------------------===//
 
 bool Segment::GetInfo(amd_loaded_segment_info_t attribute, void *value)
 {
@@ -1297,6 +1399,15 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
     }
   }
 
+  // Get the raw code object data.
+  const void* code_data = reinterpret_cast<const void*>(code_object.handle);
+
+  // Check if this is an AIE code object.
+  // For AIE code objects, use a different loading path.
+  if (AMD::AieCode::IsAieCodeObject(code_data, code_object_size)) {
+    return LoadAieCodeObject(agent, code_data, code_object_size, uri, loaded_code_object);
+  }
+
   LoaderOptions loaderOptions;
   if (options && !loaderOptions.ParseOptions(options)) {
     return HSA_STATUS_ERROR;
@@ -1465,6 +1576,75 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
   loaded_code_objects.back()->r_debug_info.l_next = nullptr;
 
   if (nullptr != loaded_code_object) { *loaded_code_object = LoadedCodeObject::Handle(loaded_code_objects.back().get()); }
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* data, size_t size,
+                                               const std::string& uri,
+                                               hsa_loaded_code_object_t* loaded_code_object) {
+  // Parse the AIE code object.
+  auto aie_code = AMD::AieCode::Create(data, size);
+  if (!aie_code) {
+    logger_ << "LoaderError: failed to parse AIE code object\n";
+    return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+  }
+
+  // Allocate and copy instruction buffer to device memory.
+  void* instr_buffer = context_->SegmentAlloc(AMDGPU_HSA_SEGMENT_CODE_AGENT, agent,
+                                              aie_code->GetInstructionSize(), 64, false);
+  if (!instr_buffer) {
+    logger_ << "LoaderError: failed to allocate instruction buffer\n";
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
+
+  // Copy instruction data.
+  if (!context_->SegmentCopy(AMDGPU_HSA_SEGMENT_CODE_AGENT, agent, instr_buffer, 0,
+                             aie_code->GetInstructionData(), aie_code->GetInstructionSize())) {
+    context_->SegmentFree(AMDGPU_HSA_SEGMENT_CODE_AGENT, agent, instr_buffer,
+                          aie_code->GetInstructionSize());
+    logger_ << "LoaderError: failed to copy instruction data\n";
+    return HSA_STATUS_ERROR;
+  }
+
+  // Freeze the segment to ensure data is visible to device.
+  context_->SegmentFreeze(AMDGPU_HSA_SEGMENT_CODE_AGENT, agent, instr_buffer,
+                          aie_code->GetInstructionSize());
+
+  // Get the device address using SegmentAddress.
+  // SegmentAddress returns the device-visible address for the segment.
+  void* dev_addr_ptr =
+      context_->SegmentAddress(AMDGPU_HSA_SEGMENT_CODE_AGENT, agent, instr_buffer, 0);
+  uint64_t instr_dev_addr = reinterpret_cast<uint64_t>(dev_addr_ptr);
+
+  // Create the loaded code object.
+  auto loaded_obj = std::make_shared<AieLoadedCodeObjectImpl>(
+      this, agent, data, size, instr_buffer, instr_dev_addr, aie_code->GetInstructionSize());
+
+  objects.push_back(loaded_obj);
+
+  // Create kernel symbols for each kernel in the code object.
+  for (const auto& kernel_name : aie_code->GetKernelNames()) {
+    const auto* kernel_info = aie_code->GetKernel(kernel_name);
+    if (!kernel_info) continue;
+
+    // Calculate the device address for this kernel's instructions.
+    uint64_t kernel_instr_addr = instr_dev_addr + kernel_info->instr_offset;
+
+    auto kernel_sym = std::make_shared<AieKernelSymbol>(
+        kernel_name, kernel_instr_addr, static_cast<uint32_t>(kernel_info->instr_size),
+        kernel_info->kernarg_size, kernel_info->num_cols);
+
+    kernel_sym->agent = agent;
+
+    // Add to agent symbols map.
+    AgentSymbol agent_sym = std::make_pair(kernel_name, agent);
+    agent_symbols_[agent_sym] = kernel_sym;
+  }
+
+  if (loaded_code_object) {
+    *loaded_code_object = LoadedCodeObject::Handle(loaded_obj.get());
+  }
+
   return HSA_STATUS_SUCCESS;
 }
 
