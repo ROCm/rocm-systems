@@ -27,6 +27,7 @@
 #include "utils/options.hpp"
 #include "comgrctx.hpp"
 
+#include <array>
 #include <map>
 #include <string>
 #include <sstream>
