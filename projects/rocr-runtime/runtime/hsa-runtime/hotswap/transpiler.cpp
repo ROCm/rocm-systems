@@ -997,11 +997,24 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
     auto [ap, a0, a1] = parseRange(ops, pos);
     auto [bp, b0, b1] = parseRange(ops, pos);
     if (d0 >= 0 && a0 >= 0 && b0 >= 0) {
-      // Use _e64 form to avoid constant bus restrictions (multiple SGPRs)
-      result.push_back("v_add_co_u32_e64 " + fmt(dp,d0) +
-                        ", vcc, " + fmt(ap,a0) + ", " + fmt(bp,b0));
-      result.push_back("v_addc_co_u32_e64 " + fmt(dp,d1) +
-                        ", vcc, " + fmt(ap,a1) + ", " + fmt(bp,b1) + ", vcc");
+      // If either source is SGPR, move to VGPR to avoid constant bus violations.
+      // v_addc needs vcc as carry-in which is also a constant bus source.
+      std::string a0s = fmt(ap,a0), a1s = fmt(ap,a1);
+      std::string b0s = fmt(bp,b0), b1s = fmt(bp,b1);
+      if (ap == 's') {
+        result.push_back("v_mov_b32_e32 v252, " + a0s);
+        result.push_back("v_mov_b32_e32 v253, " + a1s);
+        a0s = "v252"; a1s = "v253";
+      }
+      if (bp == 's') {
+        result.push_back("v_mov_b32_e32 v254, " + b0s);
+        result.push_back("v_mov_b32_e32 v255, " + b1s);
+        b0s = "v254"; b1s = "v255";
+      }
+      result.push_back("v_add_co_u32_e32 " + fmt(dp,d0) +
+                        ", vcc, " + a0s + ", " + b0s);
+      result.push_back("v_addc_co_u32_e32 " + fmt(dp,d1) +
+                        ", vcc, " + a1s + ", " + b1s + ", vcc");
       return result;
     }
     result.push_back("s_nop 0 ; UNSUPPORTED: " + line);
