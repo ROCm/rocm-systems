@@ -1018,9 +1018,9 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
       // src0 = workgroup_id (from TTMP on gfx1250, from v5 on gfx950)
       std::string src1 = operands[2];  // blockDim
       std::string src2 = operands[3];  // threadIdx (v0)
-      // Use v5 (saved workgroup_id) instead of src0 (TTMP-derived)
-      result.push_back("v_readfirstlane_b32 s4, v5");  // move workgroup_id to SGPR
-      result.push_back("v_mov_b32_e32 v6, s4");
+      // Use v5 (saved workgroup_id) directly — no intermediate SGPR to avoid
+      // clobbering registers like s4 which may hold blockDim or other values.
+      result.push_back("v_mov_b32_e32 v6, v5");
       result.push_back("v_mul_lo_u32 v6, v6, " + src1);
       result.push_back("v_add_u32_e32 " + vdst + ", v6, " + src2);
       // scale_offset: shift by 1 (×2) to convert element index to byte-ish offset.
