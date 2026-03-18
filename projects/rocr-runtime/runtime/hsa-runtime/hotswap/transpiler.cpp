@@ -912,17 +912,10 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
   if (mnemonic == "s_wait_xcnt") {
     return result;
   }
-  // s_add_co_i32/s_add_i32 modifying TTMP computation intermediates.
-  // Skip s0/s2/s3/s4/s5/s6 destinations that are part of TTMP workgroup ID chain.
-  // Exclude loads from kernarg (s[0:1]) which are real kernel operations.
-  if ((mnemonic == "s_add_co_i32" || mnemonic == "s_add_i32") &&
-      (line.find(" s0,") != std::string::npos || line.find(" s2,") != std::string::npos ||
-       line.find(" s3,") != std::string::npos || line.find(" s4,") != std::string::npos ||
-       line.find(" s5,") != std::string::npos || line.find(" s6,") != std::string::npos) &&
-      line.find("s[0:1]") == std::string::npos && line.find("s[2:3]") == std::string::npos &&
-      line.find("s[4:5]") == std::string::npos && line.find("s[8:") == std::string::npos) {
-    return result;
-  }
+  // NOTE: TTMP intermediate skip rules for s_add_i32 were too aggressive —
+  // they incorrectly skipped real kernel instructions that modify the same
+  // registers. Now we ONLY skip instructions that directly reference TTMP.
+  // The s_cselect_b32 handler above handles the workgroup ID assignment.
   // Fix s_cbranch_execz: replace hardcoded offset with .L_exit label
   if (mnemonic == "s_cbranch_execz") {
     result.push_back("s_cbranch_execz .L_exit");
@@ -945,23 +938,12 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
   // Other branch instructions (s_branch, s_cbranch_scc0/1, etc.):
   // Keep numeric offsets as-is. The label resolution pre-pass handles them.
 
-  // Also skip instructions that are part of the TTMP workgroup ID computation.
-  // The TTMP computation uses s0, s1, s3, s4, s5 as intermediates.
-  // These patterns occur BETWEEN the TTMP instructions and the v_mad_u32.
-  // Skip s_add_i32/s_add_co_i32 that modify s0/s3/s4/s5 (not from loads)
-  if ((mnemonic == "s_add_i32" || mnemonic == "s_add_co_i32") &&
-      (line.find(" s0,") != std::string::npos || line.find(" s3,") != std::string::npos ||
-       line.find(" s4,") != std::string::npos || line.find(" s5,") != std::string::npos) &&
-      line.find("s[0:1]") == std::string::npos) {
-    return result;
-  }
-  // Skip s_cmp_eq_u32 that checks the getreg result (s3, s5, s6, s7)
-  // These are part of the TTMP workgroup ID computation chain.
-  if (mnemonic == "s_cmp_eq_u32" &&
-      (line.find("s3") != std::string::npos || line.find("s5") != std::string::npos ||
-       line.find("s6") != std::string::npos || line.find("s7") != std::string::npos)) {
-    return result;
-  }
+  // NOTE: Second set of TTMP intermediate skip rules also removed (same reason).
+  // NOTE: s_cmp_eq_u32 skip rules removed — too aggressive. The TTMP
+  // computation sets SCC before s_cselect, but non-TTMP code also uses
+  // s_cmp_eq_u32 legitimately. Without the skip, s_cselect_b32 ttmp
+  // replacement still works (SCC value doesn't matter since we replace
+  // the entire s_cselect with v_readfirstlane).
 
   // ─── Barrier translation ───
   // GFX12: s_barrier_signal -1 + s_barrier_wait -1 (split)
