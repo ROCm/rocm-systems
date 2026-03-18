@@ -93,7 +93,7 @@ ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL,
                           "A service depends on a newer version of KFD (amdgpu kernel driver)")
 ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_ERROR_OUT_OF_RESOURCES,
                           "The given resources are insufficient to complete operation")
-ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_ERROR_PROFILE_NOT_FOUND,
+ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_ERROR_CONFIG_NOT_FOUND,
                           "Could not find counter profile")
 ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_ERROR_AGENT_DISPATCH_CONFLICT,
                           "Cannot have both an agent counter collection and a dispatch counter "
