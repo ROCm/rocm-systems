@@ -18,7 +18,6 @@ struct TestResult {
     int model_id;
     int num_nodes;
     bool success;
-    TopoExplResult error_code;
     std::string error_msg;
     int nranks;
     int nnodes;
@@ -66,8 +65,7 @@ static bool run_single_test(int model_id, int num_nodes) {
     test_result.model_id = model_id;
     test_result.num_nodes = num_nodes;
     test_result.success = (result == TOPO_EXPL_SUCCESS && context != nullptr);
-    test_result.error_code = result;
-    
+
     if (!test_result.success) {
         test_result.error_msg = "Context creation failed";
         test_result.nranks = 0;
@@ -77,34 +75,43 @@ static bool run_single_test(int model_id, int num_nodes) {
         return false;
     }
     
-    // Verify rank/node counts
-    // Get rank info for first few ranks to verify context is valid
+    // Verify rank info for first and last rank
     bool rank_info_ok = true;
-    for (int i = 0; i < std::min(4, expected_nranks); i++) {
+    for (int r : {0, expected_nranks - 1}) {
         int nodeId, cudaDev;
         uint64_t busId;
-        TopoExplResult rankResult = topoExplGetRankInfo(context, i, &nodeId, &cudaDev, &busId);
-        if (rankResult != TOPO_EXPL_SUCCESS) {
+        if (topoExplGetRankInfo(context, r, &nodeId, &cudaDev, &busId) != TOPO_EXPL_SUCCESS) {
             rank_info_ok = false;
             break;
         }
     }
     
-    // Try to get algorithm info for a simple case
-    TopoExplAlgoInfo algoInfo;
-    TopoExplResult algoResult = topoExplGetAlgoInfo(context, TOPO_FUNC_ALLREDUCE, 
-                                                     1024, TOPO_DTYPE_FLOAT32, &algoInfo);
-    
-    test_result.success = rank_info_ok && (algoResult == TOPO_EXPL_SUCCESS);
+    // Try to get algorithm info and algo time for simple cases
+    TopoExplAlgoInfo algoInfo, agAlgoInfo;
+    TopoExplResult arAlgoResult = topoExplGetAlgoInfo(context, TOPO_FUNC_ALLREDUCE, 
+                                                     16384, TOPO_DTYPE_FLOAT32, &algoInfo);
+    TopoExplResult agAlgoResult = topoExplGetAlgoInfo(context, TOPO_FUNC_ALLGATHER, 
+                                                     33554432, TOPO_DTYPE_FLOAT32, &agAlgoInfo);
+    bool algo_info_ok = (arAlgoResult == TOPO_EXPL_SUCCESS && agAlgoResult == TOPO_EXPL_SUCCESS);
+
+    float agTime = -1.0f;
+    float arTime = -1.0f;
+    TopoExplResult agTimeResult = topoExplGetAlgoTime(context, TOPO_FUNC_ALLGATHER, TOPO_ALGO_RING, TOPO_PROTO_SIMPLE, 8388608, &agTime);
+    TopoExplResult arTimeResult = topoExplGetAlgoTime(context, TOPO_FUNC_ALLREDUCE, TOPO_ALGO_RING, TOPO_PROTO_LL, 262144, &arTime);
+    bool algo_time_ok = (agTimeResult == TOPO_EXPL_SUCCESS && agTime >= 0.0f &&
+                         arTimeResult == TOPO_EXPL_SUCCESS && arTime >= 0.0f);
+
+    test_result.success = rank_info_ok && algo_info_ok && algo_time_ok;
     test_result.nranks = expected_nranks;
     test_result.nnodes = expected_nnodes;
-    
+
     if (!test_result.success) {
         if (!rank_info_ok) {
             test_result.error_msg = "Failed to get rank info";
-        } else {
+        } else if (!algo_info_ok) {
             test_result.error_msg = "Failed to get algorithm info";
-            test_result.error_code = algoResult;
+        } else {
+            test_result.error_msg = "No valid algo/proto time (tuning may be broken)";
         }
     }
     
@@ -152,9 +159,8 @@ static void print_test_summary() {
         printf("--------------------\n");
         for (const auto& result : test_results) {
             if (!result.success) {
-                printf("Model %2d, %2d nodes : %s (error_code=%d)\n",
-                       result.model_id, result.num_nodes, 
-                       result.error_msg.c_str(), result.error_code);
+                printf("Model %2d, %2d nodes : %s\n",
+                       result.model_id, result.num_nodes, result.error_msg.c_str());
             }
         }
     }
