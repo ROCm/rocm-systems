@@ -3,10 +3,6 @@ name: rocprofiler-compute Formatting
 on:
   workflow_call:
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
 env:
   RUFF_VERSION: 0.14.11
   GERSEMI_VERSION: 0.22.1

@@ -4,10 +4,6 @@ name: rocprofiler-sdk Formatting
 on:
   workflow_call:
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   cmake:
     runs-on: ubuntu-22.04
