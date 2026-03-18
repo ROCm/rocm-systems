@@ -11,8 +11,8 @@ rocprofiler-compute:
   - '!docs/**'
   - '!projects/*/docs/**'
 rocprofiler-sdk:
-  #- 'projects/rocprofiler-sdk/**'
-  - '.github/workflows/rocprofiler-sdk-formatting.yml'
+  - 'projects/rocprofiler-sdk/**'
+  # - '.github/workflows/rocprofiler-sdk-formatting.yml'
   - '!**/*.md'
   - '!**/*.rtf'
   - '!**/*.rst'
