@@ -1518,6 +1518,17 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
     }
   }
 
+  // ─── GFX12 _nc_ (no-carry) variants → strip _nc_ ───
+  // v_add_nc_u32 → v_add_u32, v_sub_nc_u32 → v_sub_u32, etc.
+  // Also handle the _e32/_e64 suffixed versions.
+  if (mnemonic.find("_nc_") != std::string::npos && mnemonic[0] == 'v') {
+    std::string fixed_mnem = mnemonic;
+    size_t nc_pos = fixed_mnem.find("_nc_");
+    fixed_mnem.erase(nc_pos, 3);  // remove "_nc" (keep the trailing _)
+    line = ReplaceMnemonic(line, mnemonic, fixed_mnem);
+    mnemonic = fixed_mnem;
+  }
+
   // ─── Unsupported instructions → NOP with diagnostic ───
   if (IsUnsupportedOnGFX9(mnemonic)) {
     result.push_back("s_nop 0 ; UNSUPPORTED: " + mnemonic);
