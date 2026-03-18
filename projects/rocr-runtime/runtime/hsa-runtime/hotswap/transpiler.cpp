@@ -26,6 +26,7 @@
 #include <map>
 #include <mutex>
 #include <regex>
+#include <set>
 #include <sstream>
 #include <string>
 #include <unordered_map>
@@ -38,6 +39,7 @@
 #include <llvm/MC/MCContext.h>
 #include <llvm/MC/MCDisassembler/MCDisassembler.h>
 #include <llvm/MC/MCInstPrinter.h>
+#include <llvm/MC/MCInstrDesc.h>
 #include <llvm/MC/MCInstrInfo.h>
 #include <llvm/MC/MCObjectWriter.h>
 #include <llvm/MC/MCParser/MCAsmParser.h>
@@ -707,6 +709,288 @@ static std::string ReplaceMnemonic(const std::string& line,
   return result;
 }
 
+// ── TTMP Taint Analysis ──────────────────────────────────────────────────────
+//
+// Forward data-flow analysis to identify the TTMP workgroup-ID computation
+// chain in gfx1250 kernels. Any SGPR defined by a TTMP-referencing instruction
+// is "tainted", and any subsequent instruction whose SGPR sources are ALL
+// tainted is also skipped. This replaces fragile pattern-matching rules.
+
+enum class RegKind { SGPR, VGPR, TTMP, SCC, VCC, EXEC, Other };
+
+static RegKind ClassifyReg(unsigned reg, const llvm::MCRegisterInfo& MRI) {
+  const char* name = MRI.getName(reg);
+  if (!name) return RegKind::Other;
+  if (strncmp(name, "TTMP", 4) == 0) return RegKind::TTMP;
+  if (strncmp(name, "SGPR", 4) == 0) return RegKind::SGPR;
+  if (strncmp(name, "VGPR", 4) == 0) return RegKind::VGPR;
+  if (strcmp(name, "SCC") == 0) return RegKind::SCC;
+  if (strncmp(name, "VCC", 3) == 0) return RegKind::VCC;
+  if (strncmp(name, "EXEC", 4) == 0) return RegKind::EXEC;
+  return RegKind::Other;
+}
+
+static bool IsRegTainted(unsigned reg, const std::set<unsigned>& tainted,
+                         const llvm::MCRegisterInfo& MRI) {
+  if (tainted.count(reg)) return true;
+  for (auto sub : MRI.subregs(reg))
+    if (tainted.count(sub)) return true;
+  for (auto sup : MRI.superregs(reg))
+    if (tainted.count(sup)) return true;
+  return false;
+}
+
+static void TaintReg(unsigned reg, std::set<unsigned>& tainted,
+                     const llvm::MCRegisterInfo& MRI) {
+  tainted.insert(reg);
+  for (auto sub : MRI.subregs(reg))
+    tainted.insert(sub);
+}
+
+static void UntaintReg(unsigned reg, std::set<unsigned>& tainted,
+                       const llvm::MCRegisterInfo& MRI) {
+  tainted.erase(reg);
+  for (auto sub : MRI.subregs(reg))
+    tainted.erase(sub);
+  for (auto sup : MRI.superregs(reg))
+    tainted.erase(sup);
+}
+
+enum class TaintAction { Keep, Skip, Replace };
+
+struct TaintResult {
+  TaintAction action;
+  std::string replace_dst;  // for Replace: "s2"
+  std::string replace_src;  // for Replace: "v5" or "v4"
+};
+
+// Extract def and use register sets from an MCInst via MCInstrDesc.
+static void GetInstRegs(const llvm::MCInst& inst,
+                        const llvm::MCInstrInfo& MCII,
+                        const llvm::MCRegisterInfo& MRI,
+                        std::vector<unsigned>& defs,
+                        std::vector<unsigned>& uses) {
+  const llvm::MCInstrDesc& desc = MCII.get(inst.getOpcode());
+  unsigned num_defs = desc.getNumDefs();
+
+  // Explicit operands
+  for (unsigned i = 0; i < inst.getNumOperands(); ++i) {
+    const auto& op = inst.getOperand(i);
+    if (!op.isReg() || op.getReg() == 0) continue;
+    if (i < num_defs)
+      defs.push_back(op.getReg());
+    else
+      uses.push_back(op.getReg());
+  }
+
+  // Implicit defs
+  for (auto imp : desc.implicit_defs())
+    defs.push_back(imp);
+
+  // Implicit uses
+  for (auto imp : desc.implicit_uses())
+    uses.push_back(imp);
+}
+
+struct SourceInstrForTaint {
+  std::string text;
+  llvm::MCInst inst;
+  bool valid_inst;
+};
+
+static std::vector<TaintResult> AnalyzeTTMPTaint(
+    const std::vector<SourceInstrForTaint>& instrs,
+    const llvm::MCInstrInfo& MCII,
+    const llvm::MCRegisterInfo& MRI) {
+
+  std::vector<TaintResult> results;
+  results.reserve(instrs.size());
+  std::set<unsigned> tainted;
+  bool dump = std::getenv("HSA_HOTSWAP_DUMP") != nullptr;
+
+  for (size_t i = 0; i < instrs.size(); ++i) {
+    const auto& si = instrs[i];
+    const auto& text = si.text;
+    std::string mnemonic = ExtractMnemonic(text);
+
+    // Default: keep
+    TaintResult tr;
+    tr.action = TaintAction::Keep;
+
+    // Non-decodable instructions (.long) — always keep, no taint
+    if (!si.valid_inst) {
+      results.push_back(tr);
+      continue;
+    }
+
+    // VALU / memory / branch — never part of TTMP computation, always keep.
+    // TTMP computation is all SALU (s_* instructions).
+    if (mnemonic.empty() || mnemonic[0] != 's' ||
+        mnemonic.find("s_cbranch_") == 0 || mnemonic == "s_branch" ||
+        mnemonic == "s_endpgm" || mnemonic == "s_barrier" ||
+        mnemonic.find("s_barrier_") == 0 || mnemonic == "s_nop" ||
+        mnemonic == "s_waitcnt" || mnemonic.find("s_wait_") == 0 ||
+        mnemonic == "s_clause" || mnemonic == "s_delay_alu" ||
+        mnemonic == "s_wait_alu" || mnemonic == "s_code_end" ||
+        mnemonic == "s_set_inst_prefetch_distance") {
+      results.push_back(tr);
+      continue;
+    }
+
+    // Extract register defs and uses
+    std::vector<unsigned> defs, uses;
+    GetInstRegs(si.inst, MCII, MRI, defs, uses);
+
+    // Check for direct TTMP reference in uses
+    bool uses_ttmp = false;
+    for (auto r : uses) {
+      if (ClassifyReg(r, MRI) == RegKind::TTMP) {
+        uses_ttmp = true;
+        break;
+      }
+    }
+    // Also check defs for TTMP (rare but possible)
+    bool defs_ttmp = false;
+    for (auto r : defs) {
+      if (ClassifyReg(r, MRI) == RegKind::TTMP) {
+        defs_ttmp = true;
+        break;
+      }
+    }
+
+    // Rule 1: s_getreg HW_REG_IB_STS2 → Skip, taint dest
+    if (mnemonic == "s_getreg_b32" &&
+        text.find("HW_REG_IB_STS2") != std::string::npos) {
+      tr.action = TaintAction::Skip;
+      for (auto r : defs) TaintReg(r, tainted, MRI);
+      if (dump) std::cerr << "hotswap: taint: SKIP (HW_REG_IB_STS2): " << text << "\n";
+      results.push_back(tr);
+      continue;
+    }
+
+    // Rule 2: s_setreg HW_REG_WAVE_MODE → Skip
+    if ((mnemonic == "s_setreg_imm32_b32" || mnemonic == "s_setreg_b32") &&
+        text.find("HW_REG_WAVE_MODE") != std::string::npos) {
+      tr.action = TaintAction::Skip;
+      if (dump) std::cerr << "hotswap: taint: SKIP (HW_REG_WAVE_MODE): " << text << "\n";
+      results.push_back(tr);
+      continue;
+    }
+
+    // Rule 3: Direct TTMP use → Skip (or Replace for s_cselect_b32)
+    if (uses_ttmp || defs_ttmp) {
+      if (mnemonic == "s_cselect_b32") {
+        // Replace: extract dest from assembly text (not MCInst, which uses
+        // internal names like SGPR4 instead of asm syntax s4)
+        tr.action = TaintAction::Replace;
+        size_t op_start = text.find(mnemonic) + mnemonic.size();
+        std::string ops = text.substr(op_start);
+        size_t s = ops.find_first_not_of(" \t");
+        size_t e = ops.find_first_of(" \t,", s);
+        if (s != std::string::npos)
+          tr.replace_dst = ops.substr(s, e != std::string::npos ? e - s : std::string::npos);
+        // ttmp9 = workgroup_id_x (saved in v5), ttmp7 = workgroup_id_y (saved in v4)
+        tr.replace_src = (text.find("ttmp9") != std::string::npos) ? "v5" : "v4";
+        // Untaint the destination (now holds valid workgroup_id) and
+        // clear SCC taint (s_cselect consumes the tainted SCC, ending
+        // that branch of the TTMP chain).
+        for (auto r : defs) UntaintReg(r, tainted, MRI);
+        for (auto r : uses) {
+          if (ClassifyReg(r, MRI) == RegKind::SCC)
+            UntaintReg(r, tainted, MRI);
+        }
+        if (dump) std::cerr << "hotswap: taint: REPLACE (s_cselect ttmp → "
+                            << tr.replace_dst << " = " << tr.replace_src << "): " << text << "\n";
+      } else {
+        tr.action = TaintAction::Skip;
+        // Taint all SGPR defs
+        for (auto r : defs) {
+          RegKind kind = ClassifyReg(r, MRI);
+          if (kind == RegKind::SGPR || kind == RegKind::SCC)
+            TaintReg(r, tainted, MRI);
+        }
+        if (dump) std::cerr << "hotswap: taint: SKIP (direct TTMP): " << text << "\n";
+      }
+      results.push_back(tr);
+      continue;
+    }
+
+    // Rule 4: s_load → always Keep, untaint dest (fresh data from memory)
+    if (mnemonic.find("s_load_") == 0 || mnemonic.find("s_buffer_load_") == 0) {
+      for (auto r : defs) UntaintReg(r, tainted, MRI);
+      if (dump && !tainted.empty())
+        std::cerr << "hotswap: taint: KEEP (s_load clears taint on defs): " << text << "\n";
+      results.push_back(tr);
+      continue;
+    }
+
+    // Rule 5: s_cmp with tainted source → Skip, taint SCC
+    if (mnemonic.find("s_cmp_") == 0) {
+      bool any_tainted = false;
+      for (auto r : uses) {
+        if (IsRegTainted(r, tainted, MRI)) { any_tainted = true; break; }
+      }
+      if (any_tainted) {
+        tr.action = TaintAction::Skip;
+        // Taint SCC (implicit def of s_cmp)
+        for (auto r : defs) TaintReg(r, tainted, MRI);
+        if (dump) std::cerr << "hotswap: taint: SKIP (s_cmp tainted): " << text << "\n";
+        results.push_back(tr);
+        continue;
+      }
+      // Not tainted — keep
+      results.push_back(tr);
+      continue;
+    }
+
+    // For remaining SALU instructions: check source taint
+    bool has_tainted_src = false;
+    bool has_untainted_sgpr_src = false;
+    for (auto r : uses) {
+      RegKind kind = ClassifyReg(r, MRI);
+      if (kind == RegKind::SGPR || kind == RegKind::SCC) {
+        if (IsRegTainted(r, tainted, MRI))
+          has_tainted_src = true;
+        else
+          has_untainted_sgpr_src = true;
+      }
+      // Immediates are not registers, so they don't appear here.
+      // VGPRs, EXEC, VCC etc. don't count for taint propagation.
+    }
+
+    // Rule 6: All SGPR sources tainted (and at least one) → Skip, taint defs
+    if (has_tainted_src && !has_untainted_sgpr_src) {
+      tr.action = TaintAction::Skip;
+      for (auto r : defs) {
+        RegKind kind = ClassifyReg(r, MRI);
+        if (kind == RegKind::SGPR || kind == RegKind::SCC)
+          TaintReg(r, tainted, MRI);
+      }
+      if (dump) std::cerr << "hotswap: taint: SKIP (all srcs tainted): " << text << "\n";
+      results.push_back(tr);
+      continue;
+    }
+
+    // Rule 7: Mixed tainted + untainted → Keep, clear taint on defs
+    if (has_tainted_src && has_untainted_sgpr_src) {
+      for (auto r : defs) UntaintReg(r, tainted, MRI);
+      if (dump) std::cerr << "hotswap: taint: KEEP (mixed taint, clear defs): " << text << "\n";
+      results.push_back(tr);
+      continue;
+    }
+
+    // Rule 8: No taint involvement → Keep, but clear taint on defs
+    // (instruction executes and produces fresh values, clearing any
+    // lingering taint from prior definitions of the same registers)
+    if (!tainted.empty()) {
+      for (auto r : defs) UntaintReg(r, tainted, MRI);
+    }
+    results.push_back(tr);
+  }
+
+  return results;
+}
+
 }  // anonymous namespace
 
 // ── Public API ───────────────────────────────────────────────────────────────
@@ -842,80 +1126,78 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
     return result;
   }
 
-  // ─── s_load_b96 → s_load_dwordx4 with register range expansion ───
-  // GFX9 has no s_load_dwordx3. Widen s[N:N+2] → s[N:N+3].
+  // ─── s_load_b96 → split into s_load_dwordx2 + s_load_dword ───
+  // GFX9 has no s_load_dwordx3. Instead of widening to dwordx4 (which reads
+  // 4 bytes past the intended range and can fault if near end of kernarg buffer),
+  // split into two loads: dwordx2 for the first 2 dwords + dword for the 3rd.
   if (mnemonic == "s_load_b96") {
-    std::string new_line = line;
-    // Replace mnemonic
-    size_t mpos = new_line.find("s_load_b96");
-    new_line.replace(mpos, 10, "s_load_dwordx4");
-    // Widen register range: s[N:N+2] → s[N:N+3]
     std::regex reg_range(R"(s\[(\d+):(\d+)\])");
     std::smatch m;
-    if (std::regex_search(new_line, m, reg_range)) {
+    std::string ops_part = line.substr(line.find(mnemonic) + mnemonic.size());
+    if (std::regex_search(ops_part, m, reg_range)) {
       int lo = std::stoi(m[1]);
-      int hi = std::stoi(m[2]);
-      if (hi == lo + 2) {  // 3-reg range
-        std::string wider = "s[" + std::to_string(lo) + ":" + std::to_string(lo + 3) + "]";
-        new_line = new_line.substr(0, m.position()) + wider +
-                   new_line.substr(m.position() + m.length());
+      // Find the base address and offset after the register range
+      std::string after_reg = ops_part.substr(m.position() + m.length());
+      // after_reg should be like ", s[0:1], 0x18"
+      // Parse: skip comma, get base pair, skip comma, get offset
+      std::string base_and_offset = after_reg;
+      // Emit two loads:
+      // s_load_dwordx2 s[lo:lo+1], base, offset
+      // s_load_dword s[lo+2], base, offset+8
+      // Parse the offset value to compute offset+8
+      size_t offset_pos = after_reg.rfind("0x");
+      if (offset_pos == std::string::npos) offset_pos = after_reg.rfind(' ');
+      if (offset_pos != std::string::npos) {
+        // Find the actual numeric offset
+        size_t num_start = after_reg.find_last_of(" \t,", after_reg.size()-1);
+        if (num_start == std::string::npos) num_start = 0; else num_start++;
+        std::string offset_str = after_reg.substr(num_start);
+        int64_t offset_val = 0;
+        try { offset_val = std::stoll(offset_str, nullptr, 0); } catch (...) {}
+        std::string base_part = after_reg.substr(0, num_start);
+        // Trim trailing comma/space from base_part
+        size_t be = base_part.find_last_not_of(" \t,");
+        if (be != std::string::npos) base_part = base_part.substr(0, be+1);
+
+        result.push_back("s_load_dwordx2 s[" + std::to_string(lo) + ":" +
+                          std::to_string(lo+1) + "]" + base_part +
+                          ", 0x" + ([](int64_t v) { std::ostringstream o; o << std::hex << v; return o.str(); })(offset_val));
+        result.push_back("s_load_dword s" + std::to_string(lo+2) + base_part +
+                          ", 0x" + ([](int64_t v) { std::ostringstream o; o << std::hex << v; return o.str(); })(offset_val + 8));
       }
     }
-    result.push_back(new_line);
+    if (result.empty()) {
+      // Fallback: just widen to dwordx4 (old behavior)
+      std::string new_line = line;
+      size_t mpos = new_line.find("s_load_b96");
+      new_line.replace(mpos, 10, "s_load_dwordx4");
+      std::smatch m2;
+      if (std::regex_search(new_line, m2, reg_range)) {
+        int lo2 = std::stoi(m2[1]);
+        std::string wider = "s[" + std::to_string(lo2) + ":" + std::to_string(lo2 + 3) + "]";
+        new_line = new_line.substr(0, m2.position()) + wider +
+                   new_line.substr(m2.position() + m2.length());
+      }
+      result.push_back(new_line);
+    }
     return result;
   }
 
-  // ─── s_setreg/s_getreg with GFX12 HW registers → SKIP ───
+  // ─── TTMP/HW_REG handling is now in AnalyzeTTMPTaint (pre-pass) ───
+  // s_setreg/s_getreg HW_REG, TTMP refs, and tainted intermediates are
+  // skipped before TranslateInstruction is called. Only fallback handling
+  // for instructions that slip through (e.g., in non-transpile paths):
   if ((mnemonic == "s_setreg_imm32_b32" || mnemonic == "s_setreg_b32" ||
        mnemonic == "s_getreg_b32") &&
       (line.find("HW_REG_WAVE_MODE") != std::string::npos ||
        line.find("HW_REG_IB_STS2") != std::string::npos)) {
     return result;  // skip entirely
   }
-
-  // ─── GFX12 TTMP-based workgroup ID → GFX9 SGPR workgroup ID ───
-  // On GFX12, workgroup_id is in TTMP registers. On GFX9, it's in s2
-  // (saved to s14 at kernel start by the transpiler).
-  // Replace: s_cselect_b32 sN, ttmp9, sM → v_readfirstlane_b32 sN, v5
-  // The preamble saved workgroup_id_x (s2) into v5. The kernel later uses sN
-  // (typically s0) as the output block index. We must set it here because the
-  // kernel expects s0 = workgroup_id after the TTMP computation completes.
-  if (mnemonic == "s_cselect_b32" &&
-      (line.find("ttmp9") != std::string::npos || line.find("ttmp7") != std::string::npos)) {
-    // Extract destination register
-    size_t op_start = line.find(mnemonic) + mnemonic.size();
-    std::string ops = line.substr(op_start);
-    size_t s = ops.find_first_not_of(" \t");
-    size_t e = ops.find_first_of(" \t,", s);
-    if (s != std::string::npos) {
-      std::string dst = ops.substr(s, e != std::string::npos ? e - s : std::string::npos);
-      // ttmp9 = workgroup_id_x (saved in v5), ttmp7 = workgroup_id_y (saved in v4)
-      std::string src_vgpr = (line.find("ttmp9") != std::string::npos) ? "v5" : "v4";
-      result.push_back("v_readfirstlane_b32 " + dst + ", " + src_vgpr);
-      return result;
-    }
-  }
-
-  // No preamble skip rules for s_load/s_and/s_mov — let them flow through.
-  // The preamble only saves s2 to v5; original kernel instructions handle the rest.
-
-  // Skip ALL TTMP-based workgroup ID computation instructions.
-  // The TTMP computation modifies s0, s1, s3 as intermediate values.
-  // Skip: any instruction referencing ttmp, AND the non-TTMP instructions
-  // that are part of the computation chain (identified by modifying s0/s1/s3
-  // between the ttmp refs and the v_mad_u32).
   if (line.find("ttmp6") != std::string::npos || line.find("ttmp7") != std::string::npos ||
       line.find("ttmp9") != std::string::npos) {
-    return result;  // skip any instruction referencing TTMP registers
+    return result;  // skip any remaining TTMP references
   }
-  // s_wait_xcnt — GFX12-specific wait counter (skip like other scheduling hints)
-  if (mnemonic == "s_wait_xcnt") {
-    return result;
-  }
-  // NOTE: TTMP intermediate skip rules for s_add_i32 were too aggressive —
-  // they incorrectly skipped real kernel instructions that modify the same
-  // registers. Now we ONLY skip instructions that directly reference TTMP.
-  // The s_cselect_b32 handler above handles the workgroup ID assignment.
+
   // Fix s_cbranch_execz: replace hardcoded offset with .L_exit label
   if (mnemonic == "s_cbranch_execz") {
     result.push_back("s_cbranch_execz .L_exit");
@@ -937,13 +1219,6 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
 
   // Other branch instructions (s_branch, s_cbranch_scc0/1, etc.):
   // Keep numeric offsets as-is. The label resolution pre-pass handles them.
-
-  // NOTE: Second set of TTMP intermediate skip rules also removed (same reason).
-  // NOTE: s_cmp_eq_u32 skip rules removed — too aggressive. The TTMP
-  // computation sets SCC before s_cselect, but non-TTMP code also uses
-  // s_cmp_eq_u32 legitimately. Without the skip, s_cselect_b32 ttmp
-  // replacement still works (SCC value doesn't matter since we replace
-  // the entire s_cselect with v_readfirstlane).
 
   // ─── Barrier translation ───
   // GFX12: s_barrier_signal -1 + s_barrier_wait -1 (split)
@@ -1044,33 +1319,35 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
     auto b = parseOperand(ops, pos);
 
     if (d.lo >= 0 && (a.lo >= 0 || a.prefix == '#') && (b.lo >= 0 || b.prefix == '#')) {
-      // Build source operand strings (lo and hi halves)
-      std::string a0s, a1s, b0s, b1s;
-      if (a.prefix == '#') {
-        a0s = a.imm; a1s = "0";  // immediate: lo = literal, hi = 0
+      // Use v_lshl_add_u64 with shift=0 for 64-bit add (available on gfx942).
+      // v_lshl_add_u64 vdst, vsrc0, shift, src1  →  vdst = (vsrc0 << shift) + src1
+      // With shift=0: vdst = vsrc0 + src1
+      auto fmtPair = [&](char p, int lo, int hi) -> std::string {
+        return std::string(1, p) + "[" + std::to_string(lo) + ":" + std::to_string(hi) + "]";
+      };
+
+      // v_lshl_add_u64 on GFX9 accepts SGPR or VGPR as src0 (VOP3 encoding).
+      // Use SGPR/VGPR directly; only fall back to temp for immediates.
+      std::string src0_pair;
+      if (a.prefix == 'v' || a.prefix == 's') {
+        src0_pair = fmtPair(a.prefix, a.lo, a.hi);
       } else {
-        a0s = fmt(a.prefix, a.lo); a1s = fmt(a.prefix, a.hi);
+        // Immediate: move to temp VGPRs (rare case)
+        result.push_back("v_mov_b32_e32 v252, " + a.imm);
+        result.push_back("v_mov_b32_e32 v253, 0");
+        src0_pair = "v[252:253]";
       }
+
+      // src1 can be SGPR pair, VGPR pair, or immediate
+      std::string src1;
       if (b.prefix == '#') {
-        b0s = b.imm; b1s = "0";
+        src1 = b.imm;
       } else {
-        b0s = fmt(b.prefix, b.lo); b1s = fmt(b.prefix, b.hi);
+        src1 = fmtPair(b.prefix, b.lo, b.hi);
       }
-      // Move SGPR or immediate to VGPR to avoid constant bus violations
-      if (a.prefix == 's' || a.prefix == '#') {
-        result.push_back("v_mov_b32_e32 v252, " + a0s);
-        result.push_back("v_mov_b32_e32 v253, " + a1s);
-        a0s = "v252"; a1s = "v253";
-      }
-      if (b.prefix == 's') {
-        result.push_back("v_mov_b32_e32 v254, " + b0s);
-        result.push_back("v_mov_b32_e32 v255, " + b1s);
-        b0s = "v254"; b1s = "v255";
-      }
-      result.push_back("v_add_co_u32_e32 " + fmt(d.prefix, d.lo) +
-                        ", vcc, " + a0s + ", " + b0s);
-      result.push_back("v_addc_co_u32_e32 " + fmt(d.prefix, d.hi) +
-                        ", vcc, " + a1s + ", " + b1s + ", vcc");
+
+      std::string dst_pair = fmtPair(d.prefix, d.lo, d.hi);
+      result.push_back("v_lshl_add_u64 " + dst_pair + ", " + src0_pair + ", 0, " + src1);
       return result;
     }
     result.push_back("s_nop 0 ; UNSUPPORTED: " + line);
@@ -1278,10 +1555,10 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
     }
   }
 
-  // ─── v_mad_u32 → emulate using saved workgroup_id from v5 ───
-  // The preamble saved s2 (workgroup_id) to v5. The kernel's v_mad_u32
-  // computes: vdst = src0 * src1 + src2 (workgroup_id * blockDim + threadIdx)
-  // We replace src0 (which references TTMP-derived s4) with v5 (workgroup_id).
+  // ─── v_mad_u32 → emulate with v_mul_lo_u32 + v_add_u32 ───
+  // GFX9 doesn't have v_mad_u32. Emulate: vdst = src0 * src1 + src2
+  // With the taint analysis, TTMP-derived operands are already replaced
+  // (e.g., s7 holds workgroup_id_x). Pass through actual operands.
   if (mnemonic == "v_mad_u32") {
     std::string ops = line.substr(line.find(mnemonic) + mnemonic.size());
     size_t op_start = ops.find_first_not_of(" \t");
@@ -1299,32 +1576,67 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
 
     if (operands.size() >= 4) {
       std::string vdst = operands[0];
-      // src0 = workgroup_id (from TTMP on gfx1250, from v5 on gfx950)
-      std::string src1 = operands[2];  // blockDim
-      std::string src2 = operands[3];  // threadIdx (v0)
-      // Use v5 (saved workgroup_id) directly — no intermediate SGPR to avoid
-      // clobbering registers like s4 which may hold blockDim or other values.
-      result.push_back("v_mov_b32_e32 v6, v5");
-      result.push_back("v_mul_lo_u32 v6, v6, " + src1);
-      result.push_back("v_add_u32_e32 " + vdst + ", v6, " + src2);
-      // scale_offset: shift by 1 (×2) to convert element index to byte-ish offset.
-      // NOTE: shift=1 (not 2) produces correct results for block 0.
-      // The comparison v_cmpx uses v0 after shift, so N must be > max_byte_offset.
-      // For 256 elements, v0 max = 255*2 = 510 < N=256... that should fail.
-      // BUT: N=256 from kernarg is the element count. v_cmpx compares N > v0.
-      // With shift=1: block 0 lane 63 has v0=63*2=126 < 256. Pass.
-      // Block 1 lane 0 has v0=(1*64+0)*2=128 < 256. Pass.
-      // Block 1 lane 63 has v0=(1*64+63)*2=254 < 256. Pass.
-      // Block 2 lane 0 has v0=(2*64+0)*2=256. 256 > 256 = FALSE. MASKED!
-      // So blocks 0-1 work (128 elements), blocks 2-3 masked.
-      // With shift=2: block 0 lane 63 v0=63*4=252 < 256. Pass.
-      // Block 1 lane 0 v0=64*4=256. MASKED!
-      // So only block 0 works with shift=2.
-      //
-      // v0 now has the element index (global thread ID).
-      // scale_offset (element→byte conversion) is handled per memory op
-      // via v3 = v0 * 4 (see scale_offset emulation below).
+      std::string src0 = operands[1];
+      std::string src1 = operands[2];
+      std::string src2 = operands[3];
+      // v_mad_u32 vdst, src0, src1, src2 → vdst = src0 * src1 + src2
+      // GFX9 constant bus restriction: at most one SGPR source per instruction.
+      // If both src0 and src1 are SGPRs we must move one to v6 first.
+      // When vdst == src2: also use v6 as temp to avoid read-before-write.
+      bool src0_sgpr = !src0.empty() && src0[0] == 's';
+      bool src1_sgpr = !src1.empty() && src1[0] == 's';
+      if (vdst != src2) {
+        if (src0_sgpr && src1_sgpr) {
+          result.push_back("v_mov_b32_e32 v6, " + src0);
+          result.push_back("v_mul_lo_u32 " + vdst + ", v6, " + src1);
+        } else {
+          result.push_back("v_mul_lo_u32 " + vdst + ", " + src0 + ", " + src1);
+        }
+        result.push_back("v_add_u32_e32 " + vdst + ", " + vdst + ", " + src2);
+      } else {
+        result.push_back("v_mov_b32_e32 v6, " + src0);
+        result.push_back("v_mul_lo_u32 v6, v6, " + src1);
+        result.push_back("v_add_u32_e32 " + vdst + ", v6, " + src2);
+      }
       return result;
+    }
+  }
+
+  // ─── v_cndmask_b32_e64 SGPR src1 → move to v6 (constant bus fix) ───
+  // GFX9 constant bus restriction: at most one SGPR source per instruction.
+  // v_cndmask_b32_e64 has (src0, src1, mask).  When src1 is SGPR and mask is
+  // also SGPR (e.g., vcc), two SGPRs violate the restriction.  Move src1 to v6.
+  if (mnemonic == "v_cndmask_b32_e64") {
+    size_t ops_start = line.find(mnemonic) + mnemonic.size();
+    std::string ops = line.substr(ops_start);
+    std::vector<std::string> operands;
+    std::istringstream oss(ops);
+    std::string tok;
+    while (std::getline(oss, tok, ',')) {
+      size_t s = tok.find_first_not_of(" \t");
+      size_t e = tok.find_last_not_of(" \t");
+      if (s != std::string::npos) operands.push_back(tok.substr(s, e - s + 1));
+    }
+    if (operands.size() >= 4) {
+      std::string& src1 = operands[2];
+      bool src1_sgpr = !src1.empty() && src1[0] == 's';
+      // vcc / vcc_lo / vcc_hi are physically SGPRs and consume the constant bus
+      bool src2_sgpr = operands.size() >= 4 && !operands[3].empty() &&
+                       (operands[3][0] == 's' ||
+                        operands[3].substr(0, 3) == "vcc" ||
+                        operands[3].substr(0, 4) == "exec");
+      if (src1_sgpr && src2_sgpr) {
+        result.push_back("v_mov_b32_e32 v6, " + src1);
+        src1 = "v6";
+        // Widen vcc_lo → vcc: GFX9 is wave64 and uses 64-bit VCC
+        for (auto& op : operands) {
+          if (op == "vcc_lo") op = "vcc";
+        }
+        std::string fixed = mnemonic + " " + operands[0];
+        for (size_t i = 1; i < operands.size(); ++i) fixed += ", " + operands[i];
+        result.push_back(fixed);
+        return result;
+      }
     }
   }
 
@@ -1624,25 +1936,27 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
       }
 
       if (!vaddr.empty()) {
-        // Compute scaled address in v3
-        result.push_back("v_lshlrev_b32_e32 v3, " +
+        // Use v7 as a temp for the byte offset.  vaddr must stay as element
+        // index because subsequent scale_offset instructions reuse it.  v7 is
+        // within the arch-VGPR range (ACCUM_OFFSET=1 ⇒ v0-v7) and is dead at
+        // this point (not used by the kernel body or the prologue after v6).
+        const std::string kScaleTemp = "v7";
+        result.push_back("v_lshlrev_b32_e32 " + kScaleTemp + ", " +
                           std::to_string(shift) + ", " + vaddr);
-        // Replace vaddr with v3 in the instruction
-        size_t vaddr_pos = line.find(vaddr, mnem_end);
-        if (vaddr_pos != std::string::npos) {
-          std::string modified = line;
-          modified.replace(vaddr_pos, vaddr.size(), "v3");
-          // Strip scale_offset from the modified line
-          size_t so_pos = modified.find("scale_offset");
-          if (so_pos != std::string::npos) {
-            if (so_pos > 0 && modified[so_pos-1] == ' ') --so_pos;
-            modified.erase(so_pos);
-          }
-          // The modified line will go through remaining translations
-          line = modified;
-          mnemonic = ExtractMnemonic(line);
-          // Don't return yet — let it fall through to mnemonic renaming etc.
+        // Replace vaddr in the instruction with the byte-offset temp register
+        std::string modified = line;
+        size_t vaddr_pos = modified.find(vaddr, mnem_end);
+        if (vaddr_pos != std::string::npos)
+          modified.replace(vaddr_pos, vaddr.size(), kScaleTemp);
+        // Strip scale_offset modifier
+        size_t so_pos = modified.find("scale_offset");
+        if (so_pos != std::string::npos) {
+          if (so_pos > 0 && modified[so_pos-1] == ' ') --so_pos;
+          modified.erase(so_pos);
         }
+        line = modified;
+        mnemonic = ExtractMnemonic(line);
+        // Don't return yet — let it fall through to mnemonic renaming etc.
       }
     }
   }
@@ -1984,21 +2298,28 @@ static void PatchKernelDescriptorsForWave64(uint8_t* elf, size_t elf_size,
     uint32_t rsrc1;
     std::memcpy(&rsrc1, text + offset + 48, 4);
 
-    // Clear ENABLE_WG_RR_EN (bit 21, GFX12) → set ENABLE_DX10_CLAMP (bit 21, GFX9)
-    rsrc1 |= (1u << 21);  // Enable DX10 clamp (standard for GFX9)
+    // Clear GFX12-specific high bits that are reserved on GFX9.
+    // Bits [31:24] include FORWARD_PROGRESS, WG_RR_EN on GFX12 but are
+    // reserved on GFX9 and must be 0.
+    rsrc1 &= 0x00FFFFFFu;
+    // Set DX10_CLAMP (bit 21) and IEEE_MODE (bit 23) for GFX9
+    rsrc1 |= (1u << 21) | (1u << 23);
 
-    // Clear DISABLE_PERF (bit 23, GFX12) → set ENABLE_IEEE_MODE (bit 23, GFX9)
-    rsrc1 |= (1u << 23);  // Enable IEEE mode (standard for GFX9)
-
-    // VGPR count is in bits [5:0] with granularity of 8 for GFX12, 4 for GFX9
-    // GFX12: num_vgprs = (rsrc1[5:0] + 1) * 8
-    // GFX9:  num_vgprs = (rsrc1[5:0] + 1) * 4
-    // So we need to double the VGPR allocation field to maintain the same count
-    uint32_t vgpr_field = rsrc1 & 0x3F;
-    uint32_t num_vgprs = (vgpr_field + 1) * 8;  // GFX12 granularity
-    uint32_t gfx9_field = (num_vgprs / 4) - 1;  // GFX9 granularity
-    if (gfx9_field > 63) gfx9_field = 63;  // Clamp to max
-    rsrc1 = (rsrc1 & ~0x3Fu) | (gfx9_field & 0x3F);
+    // GFX9 RSRC1 layout:  bits [5:0] = SGPR field, bits [11:6] = VGPR field
+    // GFX12 RSRC1 layout: bits [5:0] = VGPR field, bits [11:6] = SGPR field
+    // Convert VGPR count: GFX12 uses granularity 8 (wave32), GFX9 uses 4 (wave64)
+    // Transpiler uses at most v6 as temp (8 arch VGPRs = ACCUM_OFFSET 1).
+    // GFX942 requires RSRC1 VGPR field > ACCUM_OFFSET (1), so minimum field = 2.
+    uint32_t vgpr_field12 = rsrc1 & 0x3F;
+    uint32_t num_vgprs = (vgpr_field12 + 1) * 8;  // GFX12 granularity
+    if (num_vgprs < 8) num_vgprs = 8;             // at least 8 for transpiler temps
+    uint32_t gfx9_vgpr = (num_vgprs / 4) - 1;    // GFX9 granularity
+    if (gfx9_vgpr > 62) gfx9_vgpr = 62;           // Cap at 62 (ACCUM_OFFSET=1, field>1)
+    if (gfx9_vgpr < 2)  gfx9_vgpr = 2;            // At least 2 (> ACCUM_OFFSET=1)
+    // Clear bits [11:0] and set GFX9 SGPR[5:0] and VGPR[11:6]
+    rsrc1 &= ~0xFFFu;
+    rsrc1 |= (gfx9_vgpr << 6);  // VGPR in bits [11:6]
+    rsrc1 |= 1u;                 // SGPR in bits [5:0]: 1 → (1+1)*8 = 16 SGPRs
 
     std::memcpy(elf + info.text_offset + offset + 48, &rsrc1, 4);
 
@@ -2019,9 +2340,10 @@ static void PatchKernelDescriptorsForWave64(uint8_t* elf, size_t elf_size,
     std::memcpy(elf + info.text_offset + offset + 56, &props, 2);
 
     // Patch COMPUTE_PGM_RSRC3 (offset 44)
-    // GFX12 has INST_PREF_SIZE etc. which don't apply to GFX9.
-    // Zero it out for safety (GFX9 uses SHARED_VGPR_COUNT which we set to 0).
-    uint32_t rsrc3 = 0;
+    // GFX9 (gfx942) ACCUM_OFFSET [5:0]: num_arch_vgprs = (field+1)*4.
+    // Transpiler uses at most v6, so 8 arch VGPRs (ACCUM_OFFSET=1) suffices.
+    // Must satisfy: ACCUM_OFFSET < RSRC1 VGPR field (enforced above as field>=2).
+    uint32_t rsrc3 = 1;  // ACCUM_OFFSET = 1 → 8 arch VGPRs (v0-v7)
     std::memcpy(elf + info.text_offset + offset + 44, &rsrc3, 4);
   }
 }
@@ -2055,25 +2377,16 @@ static void PatchElfMetadata(uint8_t* elf, size_t elf_size,
   for (size_t i = 0; i + old_isa_full.size() <= elf_size; ++i) {
     if (std::memcmp(elf + i, old_isa_full.data(), old_isa_full.size()) == 0) {
       if (new_isa_full.size() <= old_isa_full.size()) {
-        // Replace and pad with spaces (preserves MSGPACK string length)
+        // Replace in-place. Pad with spaces to keep the same total length.
+        // The MSGPACK string length prefix stays the same (including padding).
+        // The runtime compares against "amdgcn-amd-amdhsa--gfx942" which is a
+        // prefix of "amdgcn-amd-amdhsa--gfx942 " — the ROCR hotswap code
+        // handles this by patching before the runtime re-validates.
+        // DO NOT update the MSGPACK length prefix — keep the original length
+        // so the space-padded string is valid MSGPACK.
         std::memcpy(elf + i, new_isa_full.data(), new_isa_full.size());
         for (size_t j = new_isa_full.size(); j < old_isa_full.size(); ++j) {
-          elf[i + j] = ' ';  // space-pad, not null (preserves MSGPACK format)
-        }
-        // Also fix the MSGPACK length prefix byte (1 byte before the string)
-        // MSGPACK fixstr: 0xa0 | len (for len < 32)
-        // MSGPACK str8: 0xd9, len (1 byte)
-        // MSGPACK str16: 0xda, len_hi, len_lo
-        if (i > 0) {
-          uint8_t prefix = elf[i - 1];
-          if ((prefix & 0xe0) == 0xa0) {
-            // fixstr: update length in lower 5 bits
-            elf[i - 1] = 0xa0 | (new_isa_full.size() & 0x1f);
-          } else if (prefix == 0xd9 && i > 1) {
-            // str8: length is at i-1... actually prefix is i-2, len is i-1
-            // Check: is i-2 == 0xd9?
-          }
-          // For simplicity, keep the original length (space-padded is valid)
+          elf[i + j] = ' ';
         }
       }
     }
@@ -2214,6 +2527,8 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
       std::string text;
       uint64_t pc_offset;  // actual byte offset in .text
       uint32_t size;       // actual instruction size
+      llvm::MCInst inst;     // decoded MCInst (valid only if valid_inst==true)
+      bool valid_inst;       // false for .long fallback
     };
     std::vector<SourceInstr> source_instrs;
     std::vector<std::string> source_lines;  // kept for compatibility
@@ -2232,7 +2547,7 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
           std::memcpy(&word, text + pos, 4);
           std::ostringstream oss;
           oss << ".long 0x" << std::hex << word;
-          source_instrs.push_back({oss.str(), pos, 4});
+          source_instrs.push_back({oss.str(), pos, 4, llvm::MCInst(), false});
           source_lines.push_back(oss.str());
         }
         pos += 4;
@@ -2250,7 +2565,7 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
       if (start != std::string::npos && start > 0)
         asm_text = asm_text.substr(start);
       if (!asm_text.empty()) {
-        source_instrs.push_back({asm_text, pos, static_cast<uint32_t>(inst_size)});
+        source_instrs.push_back({asm_text, pos, static_cast<uint32_t>(inst_size), inst, true});
         source_lines.push_back(asm_text);
       }
 
@@ -2311,6 +2626,15 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
       } catch (...) {}
     }
 
+    // ── TTMP taint analysis ──
+    // Build the taint input from source_instrs
+    std::vector<SourceInstrForTaint> taint_input;
+    taint_input.reserve(source_instrs.size());
+    for (const auto& si : source_instrs) {
+      taint_input.push_back({si.text, si.inst, si.valid_inst});
+    }
+    auto taint_results = AnalyzeTTMPTaint(taint_input, *src_state.MCII, *src_state.MRI);
+
     // GFX12→GFX9 workgroup ID fix:
     // On gfx1250, the workgroup_id is computed from TTMP registers and
     // s_getreg_b32 hwreg(HW_REG_IB_STS2). These don't exist on gfx950.
@@ -2324,13 +2648,19 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
     // overwrites it. The v_mad_u32 emulation will use v5 later.
     translated_asm += "v_mov_b32_e32 v5, s2 ; save workgroup_id_x\n";
     translated_asm += "v_mov_b32_e32 v4, s3 ; save workgroup_id_y\n";
-    // Convert element index to byte offset for scale_offset emulation.
-    // The gfx1250 kernel used scale_offset to auto-scale by element size (4 bytes).
-    // On gfx950, we must do it manually. v0 = v0 * 4 (for dword access).
-    // NOTE: v_cmpx below compares v0 (byte offset) against N (element count).
-    // We need N*4 for the comparison, OR do the shift AFTER v_cmpx.
-    // Since we can't modify N, we do NOT shift here — the comparison must use
-    // element indices. The shift will be done per memory op using v3 temp.
+
+    // Collect all REPLACE registrations so we can refresh them after saveexec.
+    // On gfx1250, workgroup_id lives in TTMP (always valid).  After transpiling
+    // to gfx942 we store it in an SGPR via v_readfirstlane_b32, but saveexec
+    // widens b32→b64 (s_and_saveexec_b32 sN → s_and_saveexec_b64 s[N:N+1]),
+    // which clobbers s[N+1] with exec_hi.  Re-emitting the v_readfirstlane
+    // after any saveexec restores the SGPR from the VGPR copy (v4/v5) which
+    // is never modified by the kernel.
+    std::vector<std::pair<std::string, std::string>> replace_regs;
+    for (auto& tr : taint_results) {
+      if (tr.action == TaintAction::Replace && !tr.replace_dst.empty())
+        replace_regs.emplace_back(tr.replace_dst, tr.replace_src);
+    }
 
     // Translate instructions for this kernel
     for (size_t ii = 0; ii < source_lines.size(); ++ii) {
@@ -2341,6 +2671,22 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
         auto lbl = branch_labels.find(source_instrs[ii].pc_offset);
         if (lbl != branch_labels.end()) {
           translated_asm += lbl->second + ":\n";
+        }
+      }
+
+      // Check taint analysis result before translating
+      if (ii < taint_results.size()) {
+        if (taint_results[ii].action == TaintAction::Skip)
+          continue;
+        if (taint_results[ii].action == TaintAction::Replace) {
+          auto& tr = taint_results[ii];
+          // Ensure any pending s_load that writes the dest register has completed.
+          // The original TTMP computation naturally delayed the assignment;
+          // our replacement is immediate and could race with in-flight loads.
+          translated_asm += "s_waitcnt lgkmcnt(0)\n";
+          translated_asm += "v_readfirstlane_b32 " + tr.replace_dst
+                         + ", " + tr.replace_src + "\n";
+          continue;
         }
       }
 
@@ -2377,8 +2723,11 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
           }
         }
       }
+      bool translated_had_saveexec = false;
       for (const auto& t : translated_lines) {
         if (t.empty()) continue;
+        if (t.find("saveexec") != std::string::npos)
+          translated_had_saveexec = true;
 
         std::string mnemonic = ExtractMnemonic(line);
         if (t.find("UNSUPPORTED") != std::string::npos) {
@@ -2399,6 +2748,13 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
         }
 
         translated_asm += t + "\n";
+      }
+      // After a saveexec the b32→b64 widening writes exec_hi into the upper
+      // SGPR of the pair, potentially overwriting a workgroup_id register.
+      // Restore all REPLACE destinations from their VGPR copies.
+      if (translated_had_saveexec) {
+        for (auto& r : replace_regs)
+          translated_asm += "v_readfirstlane_b32 " + r.first + ", " + r.second + "\n";
       }
     }
   }  // end kernel loop
@@ -2425,14 +2781,14 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
     // v_add_nc_u32 → v_add_u32_e32 (may appear without _e32 from VOP3 encoding)
     replaceAll(translated_asm, "v_add_nc_u32 ", "v_add_u32_e32 ");
     replaceAll(translated_asm, "v_sub_nc_u32 ", "v_sub_u32_e32 ");
-    // v_cndmask_b32 ... vcc_lo → strip explicit vcc_lo (GFX9 VOP2 uses implicit VCC)
-    // Only strip from v_cndmask lines, not other instructions that legitimately use vcc_lo
+    // v_cndmask_b32_e32 ... vcc_lo → strip explicit vcc_lo (GFX9 VOP2 uses implicit VCC)
+    // Only strip from _e32 form; _e64 always requires an explicit mask operand on GFX9.
     {
       std::string tmp;
       std::istringstream vcc_iss(translated_asm);
       std::string vcc_line;
       while (std::getline(vcc_iss, vcc_line)) {
-        if (vcc_line.find("v_cndmask_b32") != std::string::npos) {
+        if (vcc_line.find("v_cndmask_b32_e32") != std::string::npos) {
           // Strip trailing ", vcc_lo"
           size_t vcc_pos = vcc_line.rfind(", vcc_lo");
           if (vcc_pos != std::string::npos)
@@ -2696,22 +3052,34 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
             // Patch COMPUTE_PGM_RSRC1 (offset 48)
             uint32_t rsrc1;
             std::memcpy(&rsrc1, desc + 48, 4);
-            // Set DX10_CLAMP (bit 21) and IEEE_MODE (bit 23) for GFX9
-            rsrc1 |= (1u << 21) | (1u << 23);
-            // Fix VGPR granularity: GFX12 uses 8, GFX9 uses 4
-            uint32_t vgpr_field = rsrc1 & 0x3F;
-            uint32_t num_vgprs = (vgpr_field + 1) * 8;
-            uint32_t gfx9_field = (num_vgprs / 4) - 1;
-            if (gfx9_field > 63) gfx9_field = 63;  // Clamp to max
-            rsrc1 = (rsrc1 & ~0x3Fu) | (gfx9_field & 0x3F);
-            // Ensure SGPR allocation includes s14 (need >= 16 SGPRs)
-            // SGPR field [9:6]: num_sgprs = (field+1)*8
-            uint32_t sgpr_field = (rsrc1 >> 6) & 0xF;
-            if (sgpr_field < 1) {
-              sgpr_field = 1;  // 16 SGPRs = (1+1)*8
-              rsrc1 = (rsrc1 & ~(0xFu << 6)) | (sgpr_field << 6);
-            }
+            // Clear GFX12-specific high bits (reserved on GFX9), then set GFX9 fields
+            rsrc1 &= 0x00FFFFFFu;  // Clear bits [31:24] (reserved on GFX9)
+            rsrc1 |= (1u << 21) | (1u << 23);  // DX10_CLAMP + IEEE_MODE
+            // GFX9 RSRC1: bits [5:0] = SGPR field, bits [11:6] = VGPR field
+            // GFX12 RSRC1: bits [5:0] = VGPR field, bits [11:6] = SGPR field
+            // Convert VGPR: GFX12 granularity 8 → GFX9 granularity 4.
+            // Transpiler uses at most v6 as temp (8 arch VGPRs, ACCUM_OFFSET=1).
+            // GFX942 requires RSRC1 VGPR field > ACCUM_OFFSET (1), so min field=2.
+            uint32_t vgpr_field12 = rsrc1 & 0x3F;
+            uint32_t num_vgprs = (vgpr_field12 + 1) * 8;
+            if (num_vgprs < 8) num_vgprs = 8;
+            uint32_t gfx9_vgpr = (num_vgprs / 4) - 1;
+            if (gfx9_vgpr > 62) gfx9_vgpr = 62;  // Cap: ACCUM_OFFSET=1, field>1
+            if (gfx9_vgpr < 2)  gfx9_vgpr = 2;   // At least 2 (> ACCUM_OFFSET=1)
+            // Clear bits [11:0] and set GFX9 SGPR[5:0] and VGPR[11:6]
+            rsrc1 &= ~0xFFFu;
+            rsrc1 |= (gfx9_vgpr << 6);  // VGPR in bits [11:6]
+            rsrc1 |= 1u;                 // SGPR in bits [5:0]: 1 → 16 SGPRs
             std::memcpy(desc + 48, &rsrc1, 4);
+
+            // Patch COMPUTE_PGM_RSRC2 (offset 52)
+            // Enable workgroup ID system SGPRs (gfx1250 uses TTMP, GFX9 uses SGPRs)
+            uint32_t rsrc2;
+            std::memcpy(&rsrc2, desc + 52, 4);
+            rsrc2 |= (1u << 7);  // ENABLE_SGPR_WORKGROUP_ID_X → s2
+            rsrc2 |= (1u << 8);  // ENABLE_SGPR_WORKGROUP_ID_Y → s3
+            rsrc2 |= (1u << 9);  // ENABLE_SGPR_WORKGROUP_ID_Z → s4
+            std::memcpy(desc + 52, &rsrc2, 4);
 
             // Clear ENABLE_WAVEFRONT_SIZE32 (bit 10 in kernel_code_properties)
             uint16_t props;
@@ -2719,9 +3087,30 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
             props &= ~(1u << 10);
             std::memcpy(desc + 56, &props, 2);
 
-            // Clear COMPUTE_PGM_RSRC3 (GFX12 fields don't apply to GFX9)
-            uint32_t rsrc3 = 0;
+            // Patch COMPUTE_PGM_RSRC3 (offset 44)
+            // GFX9 (gfx942) ACCUM_OFFSET [5:0]: num_arch_vgprs = (field+1)*4.
+            // Transpiler uses at most v6, so 8 arch VGPRs (ACCUM_OFFSET=1) suffices.
+            // Must satisfy: ACCUM_OFFSET < RSRC1 VGPR field (enforced above as field>=2).
+            uint32_t rsrc3 = 1;  // ACCUM_OFFSET = 1 → 8 arch VGPRs (v0-v7)
             std::memcpy(desc + 44, &rsrc3, 4);
+
+            // Debug: dump patched descriptor when HSA_HOTSWAP_DUMP is set
+            if (std::getenv("HSA_HOTSWAP_DUMP")) {
+              uint32_t r1, r2; uint16_t p;
+              std::memcpy(&r1, desc + 48, 4);
+              std::memcpy(&r2, desc + 52, 4);
+              std::memcpy(&p, desc + 56, 2);
+              std::cerr << "hotswap: transpile: patched KD: RSRC1=0x"
+                        << std::hex << r1 << " RSRC2=0x" << r2
+                        << " props=0x" << p << std::dec
+                        << " vgpr=" << (((r1 >> 6) & 0x3f) + 1) * 4
+                        << " sgpr=" << ((r1 & 0x3f) + 1) * 8
+                        << " user_sgpr=" << ((r2 >> 1) & 0x1f)
+                        << " tgidx=" << ((r2 >> 7) & 1)
+                        << " tgidy=" << ((r2 >> 8) & 1)
+                        << " tgidz=" << ((r2 >> 9) & 1)
+                        << "\n";
+            }
           }
         }
       }
@@ -2755,6 +3144,17 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
 
   std::cerr << "hotswap: transpile: complete (" << src_cpu << " → " << tgt_cpu
             << ")\n";
+
+  // Debug: dump patched ELF if HSA_HOTSWAP_DUMP_ELF is set
+  if (auto* dump_path = std::getenv("HSA_HOTSWAP_DUMP_ELF")) {
+    FILE* fp = fopen(dump_path, "wb");
+    if (fp) {
+      fwrite(elf, 1, size, fp);
+      fclose(fp);
+      std::cerr << "hotswap: transpile: dumped patched ELF to " << dump_path
+                << " (" << size << " bytes)\n";
+    }
+  }
 
   return result;
 }
