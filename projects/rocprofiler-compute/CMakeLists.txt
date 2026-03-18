@@ -577,6 +577,11 @@ add_test(
         ${WORKING_DIR_OPTION}
 )
 
+set_tests_properties(
+    test_pc_sampling
+    PROPERTIES TIMEOUT 300 LABELS "profile" RESOURCE_GROUPS gpus:1
+)
+
 # -----------------------------------
 # TUI component tests
 # -----------------------------------
