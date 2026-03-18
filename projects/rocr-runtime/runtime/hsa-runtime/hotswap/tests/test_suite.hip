@@ -130,6 +130,24 @@ extern "C" __global__ void mag2d(float* out, const float* a, const float* b, int
   if (i < n) out[i] = sqrtf(__fmaf_rn(a[i], a[i], b[i] * b[i]));
 }
 
+// ── matmul kernel (round 3): one block per row, stride-32 column loop ────────
+// Supports arbitrary M, N, K; launch with grid=(M,1,1) block=(32,1,1).
+// Exercises: inner-loop FMA, stride access patterns, larger K depths.
+
+extern "C" __global__ void matmul(
+    float* __restrict__ C, const float* __restrict__ A,
+    const float* __restrict__ B, int M, int N, int K) {
+  int row = blockIdx.x;
+  int tid = threadIdx.x;
+  if (row >= M) return;
+  for (int col = tid; col < N; col += blockDim.x) {
+    float sum = 0.0f;
+    for (int k = 0; k < K; k++)
+      sum += A[row * K + k] * B[k * N + col];
+    C[row * N + col] = sum;
+  }
+}
+
 // ── test functions ──────────────────────────────────────────────────────────
 
 int run_test_vector_add(const char* co) {
@@ -478,6 +496,94 @@ int run_test_mag2d(const char* co) {
   return ok==N?0:1;
 }
 
+// ── matmul multi-shape harness ───────────────────────────────────────────────
+
+static void ref_matmul(float* C, const float* A, const float* B, int M, int N, int K) {
+  for (int i = 0; i < M; i++)
+    for (int j = 0; j < N; j++) {
+      float s = 0.0f;
+      for (int k = 0; k < K; k++) s += A[i*K+k] * B[k*N+j];
+      C[i*N+j] = s;
+    }
+}
+
+// Returns number of elements within tolerance, or -1 on GPU error.
+static int check_matmul_shape(hipFunction_t fn, int M, int N, int K) {
+  size_t szA=(size_t)M*K*4, szB=(size_t)K*N*4, szC=(size_t)M*N*4;
+  float *hA=(float*)malloc(szA), *hB=(float*)malloc(szB);
+  float *hC=(float*)calloc(M*N,4), *hRef=(float*)malloc(szC);
+  // Small integer inputs — exact in FP32, reference sum is precise.
+  srand((unsigned)(M*7919u + N*6271u + K*4999u));
+  for (int i=0;i<M*K;i++) hA[i]=(float)(rand()%5-2);   // {-2,-1,0,1,2}
+  for (int i=0;i<K*N;i++) hB[i]=(float)(rand()%5-2);
+  ref_matmul(hRef,hA,hB,M,N,K);
+  float *dA,*dB,*dC;
+  hipMalloc(&dA,szA); hipMalloc(&dB,szB); hipMalloc(&dC,szC);
+  hipMemcpy(dA,hA,szA,hipMemcpyHostToDevice);
+  hipMemcpy(dB,hB,szB,hipMemcpyHostToDevice);
+  hipMemset(dC,0,szC);
+  int m=M,n=N,k=K;
+  void* args[]={&dC,&dA,&dB,&m,&n,&k};
+  hipError_t e = hipModuleLaunchKernel(fn, M,1,1, 32,1,1, 0,0, args, NULL);
+  int result = -1;
+  if (e == hipSuccess && hipDeviceSynchronize() == hipSuccess) {
+    hipMemcpy(hC,dC,szC,hipMemcpyDeviceToHost);
+    // Tolerance: K accumulations of integers → allow K*eps relative + small absolute.
+    float atol = K * 1.5e-5f + 1e-4f;
+    int ok=0;
+    for (int i=0;i<M*N;i++) {
+      float tol = atol * (fabsf(hRef[i]) + 1.0f);
+      if (fabsf(hC[i]-hRef[i]) <= tol) ok++;
+    }
+    result = ok;
+  }
+  hipFree(dA); hipFree(dB); hipFree(dC);
+  free(hA); free(hB); free(hC); free(hRef);
+  return result;
+}
+
+int run_test_matmul(const char* co) {
+  hipModule_t mod; hipFunction_t fn;
+  if (hipModuleLoad(&mod, co) != hipSuccess ||
+      hipModuleGetFunction(&fn, mod, "matmul") != hipSuccess) {
+    printf("  matmul:           LOAD FAILED\n");
+    return 1;
+  }
+
+  // Shapes inspired by hipBLAS-LT matmul_common.yaml (small/medium/deepbench/resnet50)
+  struct { int M, N, K; const char* label; } shapes[] = {
+    {   8,   8,   8, "    8x   8x   8"},  // hipBLASLT small
+    {  16,  16,  16, "   16x  16x  16"},  // hipBLASLT small
+    {  32,  32,  32, "   32x  32x  32"},  // hipBLASLT small
+    {  64,  64,  64, "   64x  64x  64"},  // hipBLASLT small
+    { 128, 128,  64, "  128x 128x  64"},  // hipBLASLT medium
+    { 128, 128, 128, "  128x 128x 128"},  // hipBLASLT medium
+    { 256, 256, 256, "  256x 256x 256"},  // hipBLASLT medium
+    { 192,  64, 128, "  192x  64x 128"},  // DeepBench-inspired
+    {1024,  32, 256, " 1024x  32x 256"},  // DNN FC: tall-skinny N
+    {2048,  16, 128, " 2048x  16x 128"},  // DNN FC: very tall-skinny
+    {  64, 256, 128, "   64x 256x 128"},  // wide N — exercises stride loop
+    { 512,  32, 512, "  512x  32x 512"},  // DeepBench-inspired
+  };
+  int nshapes = (int)(sizeof(shapes)/sizeof(shapes[0]));
+  int pass = 0;
+  for (int i = 0; i < nshapes; i++) {
+    int M=shapes[i].M, N=shapes[i].N, K=shapes[i].K;
+    int ok = check_matmul_shape(fn, M, N, K);
+    int total = M*N;
+    if (ok < 0) {
+      printf("  matmul %s: LAUNCH ERROR\n", shapes[i].label);
+    } else if (ok < total) {
+      printf("  matmul %s: %d/%d FAIL\n", shapes[i].label, ok, total);
+    } else {
+      pass++;
+    }
+  }
+  printf("  matmul:           %d/%d shapes PASS\n", pass, nshapes);
+  hipModuleUnload(mod);
+  return pass == nshapes ? 0 : 1;
+}
+
 int main() {
   printf("=== gfx1250 → gfx942 Transpiler Test Suite ===\n\n");
   int fails = 0;
@@ -496,7 +602,8 @@ int main() {
   fails += run_test_exp_kernel("/tmp/exp_kernel_gfx1250.elf");
   fails += run_test_recip_vals("/tmp/recip_vals_gfx1250.elf");
   fails += run_test_mag2d("/tmp/mag2d_gfx1250.elf");
-  int total = 15;
+  fails += run_test_matmul("/tmp/matmul_gfx1250.elf");
+  int total = 16;
   printf("\n%s: %d/%d tests passed\n", fails?"SOME FAILED":"ALL PASSED", total-fails, total);
   return fails;
 }
