@@ -1299,10 +1299,9 @@ void Runtime::AsyncIPCSockServerConnLoop(void*) {
      if (err != HSAKMT_STATUS_SUCCESS) continue;
      os::IPCSendHandle(conn, dmabuf_fd);
      err = os::IPCSocketRead(conn, buf, sizeof(buf));
-     #if defined(__linux__)
-     close(dmabuf_fd);
-     #endif
      if (err == -1) break;
+     hsa_status_t status = runtime_singleton_->DmaBufClose(dmabuf_fd);
+     if (status != HSA_STATUS_SUCCESS) break;
    }
 
    ipc_sock_server_conns_.clear();
@@ -1402,17 +1401,13 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
     HsaHandleImportResult res;
     HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtHandleImport(&desc, &res, &hflags));
     if (status == HSAKMT_STATUS_ERROR) {
-      #if defined(__linux__)
-      close(dmabuf_fd);
-      #endif
+      runtime_singleton_->DmaBufClose(dmabuf_fd);
       return HSA_STATUS_ERROR;
     }
     allocation_map_[ptr].thunk_bo = res.buf_handle;
   }
 
-#if defined(__linux__)
-  close(dmabuf_fd);
-#endif
+  runtime_singleton_->DmaBufClose(dmabuf_fd);
 
   std::lock_guard<std::mutex> lock(ipc_sock_server_lock_);
   if (!ipc_sock_server_conns_.size()) {
@@ -1464,7 +1459,7 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle,
     char buf[IPC_SOCK_SERVER_DMABUF_FD_HANDLE_LENGTH];
     memset(buf, 0, sizeof(buf));
 
-    snprintf(buf, sizeof(buf), "%llu", dmabuf_fd_handle);
+    snprintf(buf, sizeof(buf), "%" PRIu64, dmabuf_fd_handle);
     if (os::IPCSocketWrite(socket_fd, buf, sizeof(buf)) == -1) return -1;
 
     if (dmabuf_fd_handle == IPC_SOCK_SERVER_CONN_CLOSE_HANDLE) return 0;
@@ -1500,9 +1495,7 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle,
       if (status != HSAKMT_STATUS_SUCCESS) {
         fprintf(stderr, "IPC Client Import: Invalid IPC handle! expected %u, got %u\n",
                 shared_handle, res.metadata);
-#if defined(__linux__)
-        close(static_cast<int>(dmabuf_fd));
-#endif
+        runtime_singleton_->DmaBufClose(static_cast<int>(dmabuf_fd));
         return -1;
       }
 
@@ -1515,9 +1508,7 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle,
         }
         allocation_map_[*importAddress].thunk_bo = res.buf_handle;
       }
-#if defined(__linux__)
-      close(static_cast<int>(dmabuf_fd));
-#endif
+      runtime_singleton_->DmaBufClose(static_cast<int>(dmabuf_fd));
     }
 
     // Ping socket server to close exporter
@@ -3449,11 +3440,14 @@ hsa_status_t Runtime::DmaBufExport(const void* ptr, size_t size, int* dmabuf, ui
 
 hsa_status_t Runtime::DmaBufClose(int dmabuf) {
 #ifdef __linux__
-  int err = close(dmabuf);
+  int err;
+  if (fd >= 0) {
+    err = close(dmabuf);
+  }
   if (err == 0) return HSA_STATUS_SUCCESS;
   return HSA_STATUS_ERROR_RESOURCE_FREE;
 #else
-  return HSA_STATUS_ERROR_NOT_INITIALIZED;
+  return HSA_STATUS_SUCCESS;
 #endif
 }
 
@@ -3728,7 +3722,7 @@ Runtime::MappedHandleAllowedAgent::MappedHandleAllowedAgent(
   status =
       targetAgent->driver().ImportDMABuf(dmabuf_fd, *targetAgent, &shareable_handle, reuse_handle);
   assert(status == HSA_STATUS_SUCCESS);
-  core::Runtime::runtime_singleton_->DmaBufClose(dmabuf_fd);
+  status = core::Runtime::runtime_singleton_->DmaBufClose(dmabuf_fd);
   if (status != HSA_STATUS_SUCCESS)
     return;
 }

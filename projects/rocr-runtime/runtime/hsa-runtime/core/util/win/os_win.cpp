@@ -575,8 +575,12 @@ IPCSocket ConnectToIPCServer(const char* name, int timeoutMs, int timeoutInterva
       auto* info = new IPCPipeInfo{pipe, "", false, 0};
       return reinterpret_cast<IPCSocket>(info);
     }
-    elapsed += timeoutIntervalMs;
+    DWORD err = GetLastError();
+    if (err != ERROR_PIPE_BUSY && err != ERROR_FILE_NOT_FOUND) {
+      return nullptr;
+    }
     ::Sleep(timeoutIntervalMs);
+    elapsed += timeoutIntervalMs;
   }
   return nullptr;
 }
