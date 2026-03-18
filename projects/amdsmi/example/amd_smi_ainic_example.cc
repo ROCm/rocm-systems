@@ -51,7 +51,7 @@ void show_stats() {
                                                   processor_handles.data(), &processor_count);
 
     if (status != AMDSMI_STATUS_SUCCESS) {
-      std::cerr << "amdsmi_get_processor_handles_by_type failed with status " << (int) status
+      std::cerr << "amdsmi_get_processor_handles_by_type failed with status " << (int)status
                 << std::endl;
       continue;
     }
