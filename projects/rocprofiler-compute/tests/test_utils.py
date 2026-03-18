@@ -23,6 +23,7 @@
 
 ##############################################################################
 
+import argparse
 import builtins
 import inspect
 import io
@@ -8927,3 +8928,120 @@ def test_parse_patterns_star():
 
     args = Namespace(torch_operator=["*,torch.relu"])
     assert parse_torch_operator_patterns(args) == ["*", "torch.relu"]
+
+
+def _make_rocclr_csv_data(counter_columns):
+    """Build a DataFrame with user kernels and __amd_rocclr_ kernels."""
+    rows = [
+        {
+            "Dispatch_ID": 0,
+            "GPU_ID": 0,
+            "Kernel_Name": "vecCopy",
+            "Grid_Size": 4096,
+            "Workgroup_Size": 256,
+            "LDS_Per_Workgroup": 0,
+            "Scratch_Per_Workitem": 0,
+            "Arch_VGPR": 4,
+            "Accum_VGPR": 0,
+            "SGPR": 16,
+            "Start_Timestamp": 100,
+            "End_Timestamp": 150,
+        },
+        {
+            "Dispatch_ID": 1,
+            "GPU_ID": 0,
+            "Kernel_Name": "__amd_rocclr_copyBuffer",
+            "Grid_Size": 512,
+            "Workgroup_Size": 512,
+            "LDS_Per_Workgroup": 0,
+            "Scratch_Per_Workitem": 0,
+            "Arch_VGPR": 8,
+            "Accum_VGPR": 0,
+            "SGPR": 32,
+            "Start_Timestamp": 200,
+            "End_Timestamp": 250,
+        },
+        {
+            "Dispatch_ID": 2,
+            "GPU_ID": 0,
+            "Kernel_Name": "vecCopy",
+            "Grid_Size": 4096,
+            "Workgroup_Size": 256,
+            "LDS_Per_Workgroup": 0,
+            "Scratch_Per_Workitem": 0,
+            "Arch_VGPR": 4,
+            "Accum_VGPR": 0,
+            "SGPR": 16,
+            "Start_Timestamp": 300,
+            "End_Timestamp": 350,
+        },
+        {
+            "Dispatch_ID": 3,
+            "GPU_ID": 0,
+            "Kernel_Name": "__amd_rocclr_fillBufferAligned",
+            "Grid_Size": 65536,
+            "Workgroup_Size": 256,
+            "LDS_Per_Workgroup": 0,
+            "Scratch_Per_Workitem": 0,
+            "Arch_VGPR": 8,
+            "Accum_VGPR": 0,
+            "SGPR": 48,
+            "Start_Timestamp": 400,
+            "End_Timestamp": 450,
+        },
+    ]
+    for row in rows:
+        row.update(counter_columns(row["Kernel_Name"]))
+    return pd.DataFrame(rows)
+
+
+def test_join_prof_filters_rocclr_kernels(tmp_path):
+    """Test that join_prof() filters out __amd_rocclr_ HIP runtime kernels."""
+    from rocprof_compute_profile.profiler_base import RocProfCompute_Base
+
+    workload_dir = str(tmp_path / "workload")
+    os.makedirs(workload_dir, exist_ok=True)
+
+    def counters_set_0(name):
+        return {"SQ_WAVES": 1 if "rocclr" in name else 16}
+
+    def counters_set_1(name):
+        return {"SQ_BUSY_CYCLES": 100 if "rocclr" in name else 500}
+
+    _make_rocclr_csv_data(counters_set_0).to_csv(
+        os.path.join(workload_dir, "pmc_perf_0.csv"), index=False
+    )
+    _make_rocclr_csv_data(counters_set_1).to_csv(
+        os.path.join(workload_dir, "pmc_perf_1.csv"), index=False
+    )
+
+    args = argparse.Namespace(
+        path=workload_dir,
+        join_type="kernel",
+        format_rocprof_output="csv",
+        iteration_multiplexing=None,
+        kokkos_trace=False,
+        verbose=True,
+    )
+
+    class MockProfiler(RocProfCompute_Base):
+        def pre_processing(self):
+            pass
+
+        def run_profiling(self, version, prog):
+            pass
+
+        def post_processing(self):
+            pass
+
+    profiler = MockProfiler(args, "test", soc=None)
+    profiler.join_prof()
+
+    result_df = pd.read_csv(os.path.join(workload_dir, "pmc_perf.csv"))
+    rocclr_mask = result_df["Kernel_Name"].str.startswith("__amd_rocclr_")
+    assert not rocclr_mask.any(), (
+        f"join_prof() did not filter __amd_rocclr_ kernels: "
+        f"{result_df.loc[rocclr_mask, 'Kernel_Name'].tolist()}"
+    )
+    assert len(result_df) == 2
+    assert set(result_df["Kernel_Name"].unique()) == {"vecCopy"}
