@@ -164,6 +164,7 @@ class TestExecutor:
             print(f"Using MPI hostfile from RCCL_TEST_MPI_HOSTFILE: {hostfile}")
             return hostfile
 
+        # Check default hostfile
         default_hostfile = os.path.expanduser('~/.mpi_hostfile')
         if os.path.isfile(default_hostfile):
             print(f"Using default MPI hostfile: {default_hostfile}")
