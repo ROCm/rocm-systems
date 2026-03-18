@@ -10,30 +10,31 @@
 #
 # Accepts the following CMake variables
 #
+# ROCPROFSYS_BUILD_BOOST    - Build Boost from source instead of finding system package
 # Boost_ROOT_DIR            - Hint directory that contains the Boost installation
-# PATH_BOOST                - Alias for Boost_ROOT_DIR Boost_MIN_VERSION         - Minimum
-# acceptable version of Boost Boost_USE_MULTITHREADED   - Use the multithreaded version of
-# Boost Boost_USE_STATIC_RUNTIME  - Use libraries linked statically to the C++ runtime
+# PATH_BOOST                - Alias for Boost_ROOT_DIR
+# Boost_MIN_VERSION         - Minimum acceptable version of Boost
+# Boost_USE_MULTITHREADED   - Use the multithreaded version of Boost
+# Boost_USE_STATIC_RUNTIME  - Use libraries linked statically to the C++ runtime
+# Boost_DEBUG               - Enable debug output from FindBoost
+# Boost_NO_SYSTEM_PATHS     - Disable searching in locations not specified by hint variables
 #
-# Options inherited from Modules/FindBoost.cmake that may be useful
+# Build-from-source options:
 #
-# BOOST_INCLUDEDIR          - Hint directory that contains the Boost headers files
-# BOOST_LIBRARYDIR          - Hint directory that contains the Boost library files
-#
-# Advanced options:
-#
-# Boost_DEBUG               - Enable debug output from FindBoost Boost_NO_SYSTEM_PATHS -
-# Disable searching in locations not specified by hint variables
+# BOOST_LINK_STATIC         - Link to boost libraries statically (default: ON)
+# ROCPROFSYS_BOOST_DOWNLOAD_VERSION - Version of boost to download (default: 1.79.0)
 #
 # Exports the following CMake cache variables
 #
-# Boost_ROOT_DIR            - Computed base directory the of Boost installation
-# Boost_INCLUDE_DIRS        - Boost include directories Boost_INCLUDE_DIR - Alias for
-# Boost_INCLUDE_DIRS Boost_LIBRARY_DIRS        - Link directories for Boost libraries
-# Boost_DEFINES             - Boost compiler definitions Boost_LIBRARIES           - Boost
-# library files Boost_<C>_LIBRARY_RELEASE - Release libraries to link for component <C>
-# (<C> is upper-case) Boost_<C>_LIBRARY_DEBUG   - Debug libraries to link for component
-# <C> Boost_THREAD_LIBRARY      - The filename of the Boost thread library
+# Boost_ROOT_DIR            - Computed base directory of the Boost installation
+# Boost_INCLUDE_DIRS        - Boost include directories
+# Boost_INCLUDE_DIR         - Alias for Boost_INCLUDE_DIRS
+# Boost_LIBRARY_DIRS        - Link directories for Boost libraries
+# Boost_DEFINES             - Boost compiler definitions
+# Boost_LIBRARIES           - Boost library files
+# Boost_<C>_LIBRARY_RELEASE - Release libraries to link for component <C> (<C> is upper-case)
+# Boost_<C>_LIBRARY_DEBUG   - Debug libraries to link for component <C>
+# Boost_THREAD_LIBRARY      - The filename of the Boost thread library
 # Boost_USE_MULTITHREADED   - Use the multithreaded version of Boost
 # Boost_USE_STATIC_RUNTIME  - Use libraries linked statically to the C++ runtime
 #

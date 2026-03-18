@@ -10,19 +10,22 @@
 #
 # Accepts the following CMake variables
 #
-# TBB_ROOT_DIR        - Hint directory that contains the TBB installation TBB_INCLUDEDIR -
-# Hint directory that contains the TBB headers files TBB_LIBRARYDIR      - Hint directory
-# that contains the TBB library files TBB_LIBRARY         - Alias for TBB_LIBRARYDIR
-# TBB_USE_DEBUG_BUILD - Use debug version of tbb libraries, if present TBB_MIN_VERSION -
-# Minimum acceptable version of TBB
+# ROCPROFSYS_BUILD_TBB - Build TBB from source instead of finding system package
+# TBB_ROOT_DIR         - Hint directory that contains the TBB installation
+# TBB_INCLUDEDIR       - Hint directory that contains the TBB headers files
+# TBB_LIBRARYDIR       - Hint directory that contains the TBB library files
+# TBB_LIBRARY          - Alias for TBB_LIBRARYDIR
+# TBB_USE_DEBUG_BUILD  - Use debug version of tbb libraries, if present
+# TBB_MIN_VERSION      - Minimum acceptable version of TBB (default: 2018.6)
 #
 # Directly exports the following CMake variables
 #
-# TBB_ROOT_DIR        - Computed base directory of TBB installation TBB_INCLUDE_DIRS    -
-# TBB include directory TBB_INCLUDE_DIR     - Alias for TBB_INCLUDE_DIRS TBB_LIBRARY_DIRS
-# - TBB library directory TBB_LIBRARY_DIR - Alias for TBB_LIBRARY_DIRS TBB_DEFINITIONS -
-# TBB compiler definitions TBB_LIBRARIES       - TBB library files
-#
+# TBB_ROOT_DIR         - Computed base directory of TBB installation
+# TBB_INCLUDE_DIRS     - TBB include directory
+# TBB_INCLUDE_DIR      - Alias for TBB_INCLUDE_DIRS
+# TBB_LIBRARY_DIRS     - TBB library directory
+# TBB_DEFINITIONS      - TBB compiler definitions
+# TBB_LIBRARIES        - TBB library files
 # TBB_<c>_LIBRARY_RELEASE - Path to the release version of component <c>
 # TBB_<c>_LIBRARY_DEBUG   - Path to the debug version of component <c>
 #
@@ -55,7 +58,7 @@ set(TBB_MIN_VERSION
 )
 
 if(${TBB_MIN_VERSION} VERSION_LESS ${_tbb_min_version})
-    dyninst_message(
+    rocprofiler_systems_message(
         FATAL_ERROR
         "Requested TBB version ${TBB_MIN_VERSION} is less than minimum supported version ${_tbb_min_version}"
     )
@@ -187,7 +190,7 @@ else()
     find_program(MAKE_EXECUTABLE NAMES make gmake PATH_SUFFIXES bin)
 
     if(NOT MAKE_EXECUTABLE AND CMAKE_GENERATOR MATCHES "Ninja")
-        dyninst_message(
+        rocprofiler_systems_message(
             FATAL_ERROR
             "make/gmake executable not found. Please re-run with -DMAKE_EXECUTABLE=/path/to/make"
         )
