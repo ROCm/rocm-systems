@@ -518,7 +518,20 @@
 #endif /* !defined (AMD_DBGAPI_EXPORTS) */
 #endif /* !defined (AMD_DBGAPI) */
 
-#if __cplusplus >= 201103L
+/* By default, MSVC reports 199711L (C++98) for the __cplusplus macro,
+   regardless of the actual language version you are using (like C++17
+   or C++20).  Instead, we need to look at _MSVC_LANG, which correctly
+   reports the C++ standard version being targeted by the
+   compiler.  */
+#if defined(__cplusplus)
+# if defined(_MSVC_LANG)
+#  define AMD_DBGAPI_CPLUSPLUS _MSVC_LANG
+# else
+#  define AMD_DBGAPI_CPLUSPLUS __cplusplus
+# endif
+#endif
+
+#if defined(__cplusplus) && AMD_DBGAPI_CPLUSPLUS >= 201103L
 /* c++11 allows extended initializer lists.  */
 #define AMD_DBGAPI_HANDLE_LITERAL(type, value) (type{ value })
 #elif __STDC_VERSION__ >= 199901L
@@ -528,7 +541,7 @@
 #define AMD_DBGAPI_HANDLE_LITERAL(type, value) {value}
 #endif /* !__STDC_VERSION__ >= 199901L */
 
-#if defined(__cplusplus) && __cplusplus >= 201402L
+#if defined(__cplusplus) && AMD_DBGAPI_CPLUSPLUS >= 201402L
 #define DEPRECATED [[deprecated]]
 #else
 #define DEPRECATED
