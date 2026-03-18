@@ -136,6 +136,10 @@ IPCBackend::~IPCBackend() {
    */
   teams_destroy();
   cleanup_wrk_sync_buffer();
+
+  // Close IPC handles for remote heap bases
+  ipcImpl.ipcHostStop();
+
   auto *team_world{team_tracker.get_team_world()};
   team_world->~Team();
   CHECK_HIP(hipFree(team_world));
@@ -426,9 +430,8 @@ void IPCBackend::setup_wrk_sync_buffers() {
    * Allocate device-side fine grained memory to hold IPC addresses of
    * work/sync buffers
    */
-  psync_allocator_->allocate(
-    reinterpret_cast<void**>(&wrk_sync_pool_bases_),
-    num_pes * sizeof(char*));
+  psync_allocator_->allocate(reinterpret_cast<void**>(&wrk_sync_pool_bases_),
+			     num_pes * sizeof(char*));
   assert(wrk_sync_pool_bases_);
 
   /*

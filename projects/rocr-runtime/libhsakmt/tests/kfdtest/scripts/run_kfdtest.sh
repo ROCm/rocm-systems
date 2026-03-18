@@ -141,11 +141,21 @@ getFilter() {
     # Check if the loaded driver is upstream (in-box) or DKMS
     rdma_get_pages_func=$(cat /proc/kallsyms | grep rdma_get_pages || true)
     if [ -z "$rdma_get_pages_func" ]; then
-	    gtestFilter="$gtestFilter:${FILTER[upstream]}"
+        # If the first character of the filter is -, it's a blacklist
+	# So add the upstream tests to the blacklist. If it's not a -, it's a
+	# whitelist, so don't add anything
+	if [[ "$gtestFilter{0:1}" == "-" ]]; then
+            gtestFilter="$gtestFilter:${FILTER[upstream]}"
+        fi
     fi
 
     if [ -n "$ADDITIONAL_EXCLUDE" ]; then
-	    gtestFilter="$gtestFilter:$ADDITIONAL_EXCLUDE"
+        # If the first character of the filter is -, it's a blacklist
+	# So add the additional exclusions to the blacklist. If it's not a -, it's a
+	# whitelist, so don't add anything
+        if [[ "$gtestFilter{0:1}" == "-" ]]; then
+            gtestFilter="$gtestFilter:$ADDITIONAL_EXCLUDE"
+        fi
     fi
 }
 
