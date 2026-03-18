@@ -341,11 +341,20 @@ def create_mem_chart_diagram(
     # Calculate combined SQC-GL1 bandwidth
     sqc_gl1_read_bw = None
     if icache_gl1_bw is not None and dcache_gl1_bw is not None:
-        sqc_gl1_read_bw = icache_gl1_bw + dcache_gl1_bw
+        try:
+            sqc_gl1_read_bw = float(icache_gl1_bw) + float(dcache_gl1_bw)
+        except (ValueError, TypeError):
+            sqc_gl1_read_bw = None
     elif icache_gl1_bw is not None:
-        sqc_gl1_read_bw = icache_gl1_bw
+        try:
+            sqc_gl1_read_bw = float(icache_gl1_bw)
+        except (ValueError, TypeError):
+            sqc_gl1_read_bw = None
     elif dcache_gl1_bw is not None:
-        sqc_gl1_read_bw = dcache_gl1_bw
+        try:
+            sqc_gl1_read_bw = float(dcache_gl1_bw)
+        except (ValueError, TypeError):
+            sqc_gl1_read_bw = None
 
     gl1c_util = get_metric(metric_dict, "GL1C Utilization")
     gl1c_hit = get_metric(metric_dict, "GL1C Hit Rate")
