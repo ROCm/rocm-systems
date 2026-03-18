@@ -37,10 +37,10 @@ void show_stats() {
   // handles and update the statistics for each of them.
   for (uint32_t index = 0; index < soc_count; index++) {
     uint32_t processor_count = 0;
-    status                   = amdsmi_get_processor_handles_by_type(sockets[index], AMDSMI_PROCESSOR_TYPE_AMD_NIC,
-                                                                    nullptr, &processor_count);
+    status = amdsmi_get_processor_handles_by_type(sockets[index], AMDSMI_PROCESSOR_TYPE_AMD_NIC,
+                                                  nullptr, &processor_count);
     if (status != AMDSMI_STATUS_SUCCESS) {
-      std::cerr << "amdsmi_get_processor_handles_by_type failed with status " << (int) status
+      std::cerr << "amdsmi_get_processor_handles_by_type failed with status " << (int)status
                 << std::endl;
       continue;
     }
@@ -48,15 +48,16 @@ void show_stats() {
     // Reserve a vector for processor_count processor handles.
     std::vector<amdsmi_processor_handle> processor_handles(processor_count);
     status = amdsmi_get_processor_handles_by_type(sockets[index], AMDSMI_PROCESSOR_TYPE_AMD_NIC,
-      processor_handles.data(), &processor_count);
+                                                  processor_handles.data(), &processor_count);
 
     if (status != AMDSMI_STATUS_SUCCESS) {
-      std::cerr << "amdsmi_get_processor_handles_by_type failed with status " << (int) status << std::endl;
+      std::cerr << "amdsmi_get_processor_handles_by_type failed with status " << (int) status
+                << std::endl;
       continue;
     }
 
     for (uint32_t idx = 0; idx < processor_count; ++idx) {
-      amdsmi_status_t                status;
+      amdsmi_status_t status;
       amdsmi_nic_rdma_devices_info_t info;
       status = amdsmi_get_nic_rdma_dev_info(processor_handles[idx], &info);
       if (status != AMDSMI_STATUS_SUCCESS) continue;
@@ -75,32 +76,33 @@ void show_data_for_one_handle(amdsmi_processor_handle processor_handle,
       amdsmi_nic_rdma_port_info_t port_info = dev_info.rdma_port_info[rdma_port_idx];
 
       // Call *_statistics the first time to get the number of statistics.
-      uint32_t        num_stats = 0;
+      uint32_t num_stats = 0;
       amdsmi_status_t status;
 
-      status = amdsmi_get_nic_rdma_port_statistics(processor_handle, rdma_port_idx,
-                                                   &num_stats, nullptr);
+      status =
+          amdsmi_get_nic_rdma_port_statistics(processor_handle, rdma_port_idx, &num_stats, nullptr);
       if (status != AMDSMI_STATUS_SUCCESS) continue;
 
       // Reserve a vector for stats.
       std::vector<amdsmi_nic_stat_t> stats(num_stats);
 
       // Call *_statistics the second time to get the statistics.
-      status = amdsmi_get_nic_rdma_port_statistics(processor_handle, rdma_port_idx,
-                                                   &num_stats, stats.data());
+      status = amdsmi_get_nic_rdma_port_statistics(processor_handle, rdma_port_idx, &num_stats,
+                                                   stats.data());
       if (status != AMDSMI_STATUS_SUCCESS) continue;
 
       std::cout << "name: " << dev_info.rdma_dev << ", netdev: " << port_info.netdev << std::endl;
 
       // Get all stats and show them.
       for (uint32_t stat_idx{}; stat_idx < num_stats; ++stat_idx) {
-        std::cout << "[" << stats[stat_idx].name << ": " << stats[stat_idx].value << "]" << std::endl;
+        std::cout << "[" << stats[stat_idx].name << ": " << stats[stat_idx].value << "]"
+                  << std::endl;
       }
     }
   }
 }
 
-int main(int argc, char *argv[]) {
+int main() {
   amdsmi_status_t status;
 
   status = amdsmi_init(AMDSMI_INIT_AMD_NICS);
