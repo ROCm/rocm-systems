@@ -547,22 +547,22 @@ static std::vector<std::string> WidenExecOperation(const std::string& line) {
             result.push_back("s_mov_b32 exec_hi, 0");
           } else {
             // Odd: manual save + op + clear exec_hi
-            // Determine the ALU op from the mnemonic (s_and_saveexec → s_and)
+            // For b32 ops, narrow vcc → vcc_lo (b32 requires 32-bit operands)
+            std::string src32 = src;
+            if (src32 == "vcc") src32 = "vcc_lo";
             result.push_back("s_mov_b32 " + dst + ", exec_lo");
             // Extract the operation: s_and_saveexec → and, s_or_saveexec → or
             if (b64_mnem.find("s_and_saveexec") == 0 ||
                 b64_mnem.find("s_andn2_saveexec") == 0) {
-              // For andn2: exec = exec & ~src
               if (b64_mnem.find("andn2") != std::string::npos) {
-                result.push_back("s_andn2_b32 exec_lo, exec_lo, " + src);
+                result.push_back("s_andn2_b32 exec_lo, exec_lo, " + src32);
               } else {
-                result.push_back("s_and_b32 exec_lo, exec_lo, " + src);
+                result.push_back("s_and_b32 exec_lo, exec_lo, " + src32);
               }
             } else if (b64_mnem.find("s_or_saveexec") == 0) {
-              result.push_back("s_or_b32 exec_lo, exec_lo, " + src);
+              result.push_back("s_or_b32 exec_lo, exec_lo, " + src32);
             } else {
-              // Generic: just AND (most common case)
-              result.push_back("s_and_b32 exec_lo, exec_lo, " + src);
+              result.push_back("s_and_b32 exec_lo, exec_lo, " + src32);
             }
             result.push_back("s_mov_b32 exec_hi, 0");
           }
