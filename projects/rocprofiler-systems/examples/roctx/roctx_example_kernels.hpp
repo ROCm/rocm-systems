@@ -52,7 +52,7 @@ struct gpu_buffer
         HIP_CHECK(hipMemset(d_data, 0, KERNEL_ELEMENTS * sizeof(float)));
     }
 
-    ~gpu_buffer() { hipFree(d_data); }
+    ~gpu_buffer() { (void) hipFree(d_data); }
 
     gpu_buffer(const gpu_buffer&)            = delete;
     gpu_buffer& operator=(const gpu_buffer&) = delete;
