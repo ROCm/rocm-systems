@@ -12,7 +12,7 @@ GPU-accelerated 2D Jacobi iterative solver using HIP. Performs halo exchange bet
 
 **Source files:** `JacobiMain.hip`, `JacobiIteration.hip`, `JacobiSetup.hip`, `JacobiRun.hip`, `HaloExchange.hip`, `Laplacian.hip`, `Norm.hip`, `Input.hip`, `defines.hpp`, `Jacobi.hpp`, `markers.h`
 
-**Dependencies:** HIP, rocprofiler-sdk-roctx (for markers)
+**Dependencies:** HIP, roctracer (for markers)
 
 ### jacobi-fortran-targetdata-markers
 
