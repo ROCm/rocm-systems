@@ -224,6 +224,7 @@ static const MnemonicMapping kScalarALURenames[] = {
     {"s_add_co_ci_u32", "s_addc_u32"},
     {"s_sub_co_ci_u32", "s_subb_u32"},
     {"s_add_co_i32", "s_add_i32"},
+    {"s_sub_co_i32", "s_sub_i32"},
     {"s_and_not1_b32", "s_andn2_b32"},
     {"s_and_not1_b64", "s_andn2_b64"},
     {"s_or_not1_b32", "s_orn2_b32"},
@@ -1197,9 +1198,11 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
       }
     }
 
-    // s_cvt_f32_f16 sdst, ssrc → v_cvt_f32_f16 v255, ssrc + readfirstlane
+    // s_cvt_* sdst, ssrc → VALU conversion + readfirstlane
     if (mnemonic == "s_cvt_f32_f16" || mnemonic == "s_cvt_f16_f32" ||
-        mnemonic == "s_cvt_pk_rtz_f16_f32") {
+        mnemonic == "s_cvt_pk_rtz_f16_f32" ||
+        mnemonic == "s_cvt_f32_u32" || mnemonic == "s_cvt_f32_i32" ||
+        mnemonic == "s_cvt_u32_f32" || mnemonic == "s_cvt_i32_f32") {
       std::string ops = line.substr(line.find(mnemonic) + mnemonic.size());
       size_t op_start = ops.find_first_not_of(" \t");
       if (op_start != std::string::npos) ops = ops.substr(op_start);
@@ -1218,6 +1221,10 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
         std::string valu_mnem;
         if (mnemonic == "s_cvt_f32_f16") valu_mnem = "v_cvt_f32_f16_e32";
         else if (mnemonic == "s_cvt_f16_f32") valu_mnem = "v_cvt_f16_f32_e32";
+        else if (mnemonic == "s_cvt_f32_u32") valu_mnem = "v_cvt_f32_u32_e32";
+        else if (mnemonic == "s_cvt_f32_i32") valu_mnem = "v_cvt_f32_i32_e32";
+        else if (mnemonic == "s_cvt_u32_f32") valu_mnem = "v_cvt_u32_f32_e32";
+        else if (mnemonic == "s_cvt_i32_f32") valu_mnem = "v_cvt_i32_f32_e32";
         else valu_mnem = "v_cvt_pkrtz_f16_f32";
 
         result.push_back(valu_mnem + " v255, " + operands[1]);
@@ -2374,6 +2381,8 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
     // v_add_nc_u32 → v_add_u32_e32 (may appear without _e32 from VOP3 encoding)
     replaceAll(translated_asm, "v_add_nc_u32 ", "v_add_u32_e32 ");
     replaceAll(translated_asm, "v_sub_nc_u32 ", "v_sub_u32_e32 ");
+    // v_cndmask_b32 ... vcc_lo → strip vcc_lo (GFX9 VOP2 uses implicit VCC)
+    replaceAll(translated_asm, ", vcc_lo\n", "\n");
     // v_bitop2_b32/v_bitop3_b32 → s_nop 0 (GFX12-only, no simple GFX9 equivalent)
     // Replace entire lines containing v_bitop[23]_b32
     std::istringstream iss(translated_asm);
