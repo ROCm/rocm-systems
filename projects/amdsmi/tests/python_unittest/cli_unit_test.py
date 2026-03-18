@@ -306,7 +306,6 @@ class TestAmdSmiCli(unittest.TestCase):
                 if data[i][key][2] > max_diff:
                     status = 'Failure'
                     compare = '>'
-                    _msg = f'Failure: {_msg}'
                 else:
                     status = 'Success'
                     compare = '<'
@@ -1501,24 +1500,25 @@ class TestAmdSmiCli(unittest.TestCase):
         msg = f"{self.tab}### amd-smi monitor"
         self.common.print(msg)
 
-        def _Process(q):
+        def _Process(q, cmd):
+            if my_args.diagnostic == 'DEBUG':
+                print(f"_Process pid={os.getpid()} received: cmd={cmd}")
+
             # Receive timestamp
             time_stamp = q.get()
 
-            cmd = 'amd-smi monitor --json'
             (rc, data, std_err) = self.util.RunCmdSync(cmd)
             time_stamp2 = time.monotonic()
             q.put(data)
             q.put(time_stamp2)
-
-            print(f"_Process pid={os.getpid()} received: {time_stamp}")
-            #print(f"Difference: {time_stamp2 - time_stamp} seconds")
             return
         
+        # Setup queue between processes
         q = multiprocessing.Queue()
 
         # Monitor to Monitor
-        p1 = multiprocessing.Process(target=_Process, args=(q,))
+        cmd = 'amd-smi monitor --json'
+        p1 = multiprocessing.Process(target=_Process, args=(q, cmd))
         p1.start()
         # Send time_stamp
         time_stamp = time.monotonic() 
@@ -1534,10 +1534,10 @@ class TestAmdSmiCli(unittest.TestCase):
         data2 = q.get()
         time_stamp_process = q.get()
         p1.join()
-        self.common.print(f"Collection TimeStamp: Monitor2={time_stamp_process}  Monitor1={time_stamp}")
-        self.common.print(f"          Difference: {abs(time_stamp_process - time_stamp)} seconds")
 
-        data2 = _Run_cmd_in_process(cmd)
+        if my_args.diagnostic == 'DEBUG':
+            print(f"Collection TimeStamp: Monitor2={time_stamp_process}  Monitor1={time_stamp}")
+            print(f"          Difference: {abs(time_stamp_process - time_stamp)} seconds")
 
         monitor1 = json.loads(data1)
         monitor2 = json.loads(data2)
@@ -1545,7 +1545,8 @@ class TestAmdSmiCli(unittest.TestCase):
         monitor_fails = self._compare_monitor_metric_data("Monitor", data)
 
         # Monitor to Metric
-        p1 = multiprocessing.Process(target=_Process, args=(q,))
+        cmd = 'amd-smi monitor --json'
+        p1 = multiprocessing.Process(target=_Process, args=(q, cmd))
         p1.start()
         # Send time_stamp
         time_stamp = time.monotonic() 
@@ -1561,8 +1562,10 @@ class TestAmdSmiCli(unittest.TestCase):
         data2 = q.get()
         time_stamp_process = q.get()
         p1.join()
-        self.common.print(f"Collection TimeStamp: Monitor={time_stamp_process}  Metric={time_stamp}")
-        self.common.print(f"          Difference: {abs(time_stamp_process - time_stamp)} seconds")
+
+        if my_args.diagnostic == 'DEBUG':
+            print(f"Collection TimeStamp: Monitor={time_stamp_process}  Metric={time_stamp}")
+            print(f"          Difference: {abs(time_stamp_process - time_stamp)} seconds")
 
         monitor = json.loads(data2)
         metric3 = json.loads(data1)
@@ -1571,6 +1574,67 @@ class TestAmdSmiCli(unittest.TestCase):
 
         # Report failures
         failures = monitor_fails + metric_fails
+        if len(failures) > 0:
+            self._PrintResults(failures, fail_on_results=True)
+        return
+
+    def test_monitor_with_workload(self):
+        self.common.print_func_name("")
+        msg = f"{self.tab}### amd-smi monitor"
+        self.common.print(msg)
+
+        def _Process(q, cmd):
+            if my_args.diagnostic == 'DEBUG':
+                print(f"_Process pid={os.getpid()} received: cmd={cmd}")
+
+            # Receive timestamp
+            time_stamp = q.get()
+
+            (rc, data, std_err) = self.util.RunCmdSync(cmd)
+            time_stamp2 = time.monotonic()
+            q.put(data)
+            q.put(time_stamp2)
+            return
+        
+        # Setup queue between processes
+        q = multiprocessing.Queue()
+
+        # Get baseline monitor data
+        cmd = 'amd-smi monitor --json'
+        (rc, data1, std_err) = self.util.RunCmdSync(cmd)
+
+        # Monitor to Monitor
+        cmd = 'rvs --json'
+        p1 = multiprocessing.Process(target=_Process, args=(q, cmd))
+        p1.start()
+        # Send time_stamp
+        time_stamp = time.monotonic() 
+        #print(f"Producer pid={os.getpid()}  sending: {time_stamp}")
+        q.put(time_stamp)
+
+        # Get monitor data under workload
+        time.sleep(4)
+        cmd = 'amd-smi monitor --json'
+        (rc, data2, std_err) = self.util.RunCmdSync(cmd)
+        time_stamp = time.monotonic() 
+
+        # Receive process data and time_stamp
+        process_data = q.get()
+        print(process_data)
+        process_time_stamp = q.get()
+        p1.join()
+
+        if my_args.diagnostic == 'DEBUG':
+            print(f"Collection TimeStamp: Monitor2={time_stamp_process}  Monitor1={time_stamp}")
+            print(f"          Difference: {abs(time_stamp_process - time_stamp)} seconds")
+
+        monitor1 = json.loads(data1)
+        monitor2 = json.loads(data2)
+        data = self._get_monitor_metric_data(monitor1, monitor2, None)
+        monitor_fails = self._compare_monitor_metric_data("Workload", data)
+
+        # Report failures
+        failures = monitor_fails #jcnii add to
         if len(failures) > 0:
             self._PrintResults(failures, fail_on_results=True)
         return
