@@ -911,10 +911,15 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
   if (mnemonic == "s_wait_xcnt") {
     return result;
   }
-  // s_add_co_i32 s0/s3 — part of TTMP computation (s0 = ttmp6 & 15, s3 = bfe result)
+  // s_add_co_i32/s_add_i32 modifying TTMP computation intermediates.
+  // Skip s0/s2/s3/s4/s5/s6 destinations that are part of TTMP workgroup ID chain.
+  // Exclude loads from kernarg (s[0:1]) which are real kernel operations.
   if ((mnemonic == "s_add_co_i32" || mnemonic == "s_add_i32") &&
-      (line.find(" s0,") != std::string::npos || line.find(" s3,") != std::string::npos) &&
-      line.find("s[0:1]") == std::string::npos) {
+      (line.find(" s0,") != std::string::npos || line.find(" s2,") != std::string::npos ||
+       line.find(" s3,") != std::string::npos || line.find(" s4,") != std::string::npos ||
+       line.find(" s5,") != std::string::npos || line.find(" s6,") != std::string::npos) &&
+      line.find("s[0:1]") == std::string::npos && line.find("s[2:3]") == std::string::npos &&
+      line.find("s[4:5]") == std::string::npos && line.find("s[8:") == std::string::npos) {
     return result;
   }
   // Fix s_cbranch_execz: replace hardcoded offset with .L_exit label
@@ -949,9 +954,11 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
       line.find("s[0:1]") == std::string::npos) {
     return result;
   }
-  // Skip s_cmp_eq_u32 that checks the getreg result (s3 or s6)
+  // Skip s_cmp_eq_u32 that checks the getreg result (s3, s5, s6, s7)
+  // These are part of the TTMP workgroup ID computation chain.
   if (mnemonic == "s_cmp_eq_u32" &&
-      (line.find("s6") != std::string::npos || line.find("s3") != std::string::npos)) {
+      (line.find("s3") != std::string::npos || line.find("s5") != std::string::npos ||
+       line.find("s6") != std::string::npos || line.find("s7") != std::string::npos)) {
     return result;
   }
 
