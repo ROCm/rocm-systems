@@ -183,7 +183,7 @@
 #endif
 
 // /X (, )
-#if defined()
+#if 0  // defined() placeholder for future architecture
 #define ARCH_ 1
 #define ARCH_NAME " (/)"
 #define HAS_HW_FP64_ATOMICS 1
@@ -242,7 +242,7 @@
 //    ASM_WAITCNT_LDS
 //
 
-#if defined()
+#if 0  // defined() placeholder for future architecture
     //  ONLY: s_waitcnt is REMOVED, use split wait instructions
     #define WAITCNT_VMEM_ALL() \
         do { \
@@ -495,8 +495,7 @@ __device__ void test_warp_reduce(TestResults* results, int lane_id) {
 __device__ void test_fp8_conversions(TestResults* results, int lane_id) {
     bool passed = true;
     
-#if defined(__gfx950__) || defined()
-    // MI350 (gfx950) / : Test FP8 E4M3 conversions using scaled intrinsics
+#if defined(__gfx950__)     // MI350 (gfx950) / : Test FP8 E4M3 conversions using scaled intrinsics
     float test_val = 1.5f;
     
     // Convert float to FP8 and back
@@ -564,8 +563,7 @@ __device__ void test_fp8_conversions(TestResults* results, int lane_id) {
 __device__ void test_bf8_conversions(TestResults* results, int lane_id) {
     bool passed = true;
     
-#if defined(__gfx950__) || defined()
-    // MI350 (gfx950) / : Test BF8 E5M2 conversions
+#if defined(__gfx950__)     // MI350 (gfx950) / : Test BF8 E5M2 conversions
     float test_val = 2.0f;
     uint32_t bf8_packed = 0;
     
@@ -812,8 +810,7 @@ __device__ void test_atomic_add_f32(float* global_mem, TestResults* results, int
 }
 
 __device__ void test_atomic_add_f64([[maybe_unused]] double* global_mem, TestResults* results, int lane_id) {
-#if defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx950__) || defined()
-    // CDNA architectures: Each lane atomically adds 1.0 using hardware FP64 atomics
+#if defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx950__)     // CDNA architectures: Each lane atomically adds 1.0 using hardware FP64 atomics
     (void)atomicAdd(global_mem, 1.0);  // Ignore old value
     
     __syncthreads();
@@ -983,8 +980,7 @@ __device__ void test_atomic_operations_asm([[maybe_unused]] int* global_int_ptr,
         atomicMax(&global_int_ptr[(tid % 64) + 64], tid);
     }
     
-#elif defined(__gfx1200__) || defined(__gfx1201__) || defined()
-    // RDNA4: global_atomic_add_u32 vdst:opt, vaddr, vdata, off [th:TH_ATOMIC_RETURN]
+#elif defined(__gfx1200__) || defined(__gfx1201__)     // RDNA4: global_atomic_add_u32 vdst:opt, vaddr, vdata, off [th:TH_ATOMIC_RETURN]
     {
         int old_val = 0;
         int add_val = 1;
@@ -1026,8 +1022,7 @@ __device__ void test_atomic_operations_asm([[maybe_unused]] int* global_int_ptr,
         global_f32_passed = !isnan(old_val);
     }
     
-#elif defined(__gfx1200__) || defined(__gfx1201__) || defined()
-    // RDNA4: global_atomic_add_f32 vdst:opt, vaddr, vdata, off
+#elif defined(__gfx1200__) || defined(__gfx1201__)     // RDNA4: global_atomic_add_f32 vdst:opt, vaddr, vdata, off
     {
         float old_val = 0.0f;
         float add_val = 1.0f;
@@ -1063,7 +1058,7 @@ __device__ void test_atomic_operations_asm([[maybe_unused]] int* global_int_ptr,
         unsafeAtomicMin(&global_f64_ptr[(tid % 32) + 32], 1.0);
     }
     
-#elif defined()
+#elif 0  // defined() placeholder for future architecture
     //  (): Has FP64 atomics
     {
         double old_val = 0.0;
@@ -1102,8 +1097,7 @@ __device__ void test_atomic_operations_asm([[maybe_unused]] int* global_int_ptr,
         flat_int_passed = (old_val >= 0);
     }
     
-#elif defined(__gfx1200__) || defined(__gfx1201__) || defined()
-    // RDNA4: flat_atomic_add_u32 vdst:opt, vaddr, vdata
+#elif defined(__gfx1200__) || defined(__gfx1201__)     // RDNA4: flat_atomic_add_u32 vdst:opt, vaddr, vdata
     {
         int old_val = 0;
         int add_val = 1;
@@ -1172,8 +1166,7 @@ __device__ void test_atomic_operations_asm([[maybe_unused]] int* global_int_ptr,
     // ========================================================================
     // ds_add_f64, ds_min_f64, ds_max_f64
     //
-#if defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx950__) || defined()
-    {
+#if defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx950__)     {
         if (tid < 32) {
             ds_atomic_f64_test[tid] = 0.0;
         }
@@ -1207,8 +1200,7 @@ __device__ void test_atomic_operations_asm([[maybe_unused]] int* global_int_ptr,
         pk_f16_passed = true;
         (void)old_packed;
     }
-#elif defined(__gfx1200__) || defined(__gfx1201__) || defined()
-    // RDNA4: global_atomic_pk_add_f16
+#elif defined(__gfx1200__) || defined(__gfx1201__)     // RDNA4: global_atomic_pk_add_f16
     {
         unsigned int packed_f16 = 0x3C003C00;
         unsigned int old_packed = 0;
@@ -1242,8 +1234,7 @@ __device__ void test_atomic_operations_asm([[maybe_unused]] int* global_int_ptr,
         pk_bf16_passed = true;
         (void)old_packed;
     }
-#elif defined(__gfx1200__) || defined(__gfx1201__) || defined()
-    // RDNA4: global_atomic_pk_add_bf16
+#elif defined(__gfx1200__) || defined(__gfx1201__)     // RDNA4: global_atomic_pk_add_bf16
     {
         unsigned int packed_bf16 = 0x3F803F80;
         unsigned int old_packed = 0;
@@ -1282,8 +1273,7 @@ __device__ void test_atomic_operations_asm([[maybe_unused]] int* global_int_ptr,
         cas_passed = true;
         (void)old_val;
     }
-#elif defined(__gfx1200__) || defined(__gfx1201__) || defined()
-    {
+#elif defined(__gfx1200__) || defined(__gfx1201__)     {
         int compare_val = 0;
         int swap_val = tid + 1;
         int old_val = 0;
@@ -1576,8 +1566,7 @@ __device__ void test_vmem_operations([[maybe_unused]] float* global_ptr,
         flat_passed = flat_passed && (fabsf(global_ptr[tid] - store_val) < 0.001f);
     }
     
-#elif defined(__gfx1200__) || defined(__gfx1201__) || defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1152__) || defined()
-    // RDNA4 architectures: flat_load_b32 / flat_store_b32
+#elif defined(__gfx1200__) || defined(__gfx1201__) || defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1152__)     // RDNA4 architectures: flat_load_b32 / flat_store_b32
     {
         float test_val = (float)tid + 1.0f;
         float loaded_val = 0.0f;
@@ -1655,8 +1644,7 @@ __device__ void test_vmem_operations([[maybe_unused]] float* global_ptr,
         global_passed = global_passed && (fabsf(global_ptr[tid] - store_val) < 0.001f);
     }
     
-#elif defined(__gfx1200__) || defined(__gfx1201__) || defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1152__) || defined()
-    // RDNA4: global_load_b32 / global_store_b32
+#elif defined(__gfx1200__) || defined(__gfx1201__) || defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1152__)     // RDNA4: global_load_b32 / global_store_b32
     {
         float test_val = (float)(tid * 3) + 0.5f;
         float loaded_val = 0.0f;
@@ -1841,7 +1829,7 @@ __device__ void test_dot_products(TestResults* results, int lane_id) {
     // - V_DOT8_U32_U4 -> V_DOT8_U32_IU4
     // - V_DOT8_I32_I4 -> V_DOT8_I32_IU4
     
-#if defined()
+#if 0  // defined() placeholder for future architecture
     //  (): Use new IU suffix opcodes
     unsigned int a = 0x01020304;  // [1, 2, 3, 4] packed as 4 unsigned bytes
     unsigned int b = 0x01010101;  // [1, 1, 1, 1] packed as 4 unsigned bytes
@@ -2506,8 +2494,7 @@ __device__ void test_dual_issue_patterns([[maybe_unused]] TestResults* results,
     // Actual dual-issue depends on wave scheduling and register availability.
     
     if (lane_id == 0) {
-#if defined(__gfx950__) || defined(__gfx942__) || defined()
-        // gfx950/: Cross-wave dual-issue VALU
+#if defined(__gfx950__) || defined(__gfx942__)         // gfx950/: Cross-wave dual-issue VALU
         // gfx942: Same-wave dual-issue via VOPD/VOPD3
         // Both support some form of dual-issue - mark as passed
         atomicAdd(&results->dual_issue_passed, 1);
@@ -2662,7 +2649,7 @@ __device__ void test_cooperative_atomics([[maybe_unused]] int* global_mem,
                                          [[maybe_unused]] TestResults* results,
                                          [[maybe_unused]] int lane_id,
                                          [[maybe_unused]] int tid) {
-#if defined()
+#if 0  // defined() placeholder for future architecture
     bool load_passed = true;
     bool store_passed = true;
     
@@ -2740,7 +2727,7 @@ __device__ void test_cooperative_atomics([[maybe_unused]] int* global_mem,
 
 // Shared memory for async LDS test
 __shared__ int async_lds_buffer[64];
-#if defined()
+#if 0  // defined() placeholder for future architecture
 __shared__ long async_barrier_counter;  // Use 'long' for  DS atomic barrier
 #else
 __shared__ long long async_barrier_counter;
@@ -2781,7 +2768,7 @@ __device__ void test_async_lds_operations([[maybe_unused]] float* global_src, fl
             0 /* offset */, 0 /* cache policy */);
     }
     
-#if defined()
+#if 0  // defined() placeholder for future architecture
     // : Use DS atomic async barrier for synchronization
     // This signals that this thread has reached the barrier point
     // The barrier counter is atomically incremented
@@ -2828,7 +2815,7 @@ __device__ void test_async_lds_operations([[maybe_unused]] float* global_src, fl
             0 /* offset */, 0 /* cache policy */);
     }
     
-#if defined()
+#if 0  // defined() placeholder for future architecture
     // : Use DS atomic async barrier for store synchronization
     if (__has_builtin(__builtin_amdgcn_ds_atomic_async_barrier_arrive_b64)) {
         __builtin_amdgcn_ds_atomic_async_barrier_arrive_b64(
@@ -2876,7 +2863,7 @@ __device__ void test_async_lds_operations([[maybe_unused]] float* global_src, fl
 // - Automatic address generation and bounds checking
 //
 
-#if defined()
+#if 0  // defined() placeholder for future architecture
 // These structures define tensor descriptors for multi-dimensional data movement
 #endif
 
@@ -2884,7 +2871,7 @@ __device__ void test_async_lds_operations([[maybe_unused]] float* global_src, fl
                                     TestResults* results, int lane_id, int tid) {
     bool passed = true;
     
-#if defined()
+#if 0  // defined() placeholder for future architecture
     
     const int SIZE_X = 10;
     const int SIZE_Y = 10;
@@ -2989,7 +2976,7 @@ __device__ void test_async_lds_operations([[maybe_unused]] float* global_src, fl
 
     bool passed = true;
     
-#if defined()
+#if 0  // defined() placeholder for future architecture
     //  (/): Test cluster-related builtins if available
     // Note: Full cluster functionality requires cluster-enabled kernel launch
     
@@ -3106,7 +3093,7 @@ __device__ void test_async_lds_operations([[maybe_unused]] float* global_src, fl
 
 // Vector types for WMMA operations (RDNA4)
 // Fragment types: 8 elements per lane for 16x16 matrix
-#if defined() || defined(__gfx1200__) || defined(__gfx1201__) || defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1152__)
+#if defined(__gfx1200__) || defined(__gfx1201__) || defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1152__)
 using wmma_f16_frag = __attribute__((__vector_size__(8 * sizeof(_Float16)))) _Float16;
 using wmma_bf16_frag = __attribute__((__vector_size__(8 * sizeof(short)))) short;
 using wmma_f32_frag = __attribute__((__vector_size__(8 * sizeof(float)))) float;
@@ -3117,7 +3104,7 @@ using wmma_i8_frag = __attribute__((__vector_size__(2 * sizeof(int)))) int;  // 
 __device__ void test_wmma_operations([[maybe_unused]] TestResults* results, 
                                      [[maybe_unused]] int lane_id,
                                      [[maybe_unused]] int tid) {
-#if defined()
+#if 0  // defined() placeholder for future architecture
     // ========================================================================
     //  () WMMA Tests - use  builtins (no _gfx12 suffix)
     // BuiltinsAMDGPU.td: __builtin_amdgcn_wmma_f32_16x16x32_f16, _bf16, i32_16x16x64_iu8
