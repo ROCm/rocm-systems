@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2014-2020, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2026, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -45,13 +45,13 @@
 #include <algorithm>
 #include <cassert>
 #include <cstring>
+#include <cstdlib>
+#include <utility>
 
+#include "core/inc/amd_aie_agent.h"
 #include "core/inc/amd_gpu_agent.h"
 #include "core/inc/amd_memory_region.h"
 #include "core/util/os.h"
-
-#include <cstdlib>
-#include <utility>
 #include "core/inc/hsa_internal.h"
 #include "core/util/utils.h"
 #include "inc/hsa_ext_amd.h"
@@ -279,15 +279,43 @@ private:
 };
 
 const core::MemoryRegion* RegionMemory::AgentLocal(hsa_agent_t agent, bool is_code) {
-  AMD::GpuAgent *amd_agent = (AMD::GpuAgent*)core::Agent::Convert(agent);
-  assert(amd_agent->device_type() == core::Agent::kAmdGpuDevice && "Invalid agent type.");
-  auto agent_local_region =
-      std::find_if(amd_agent->regions().begin(), amd_agent->regions().end(),
-                   [&](const std::shared_ptr<const core::MemoryRegion>& region) {
-                     const AMD::MemoryRegion* amd_region = (const AMD::MemoryRegion*)region.get();
-                     return amd_region->IsLocalMemory() && (!amd_region->fine_grain());
-                   });
-  return agent_local_region == amd_agent->regions().end() ? nullptr : agent_local_region->get();
+  core::Agent* base_agent = core::Agent::Convert(agent);
+
+  switch (base_agent->device_type()) {
+    case core::Agent::kAmdGpuDevice: {
+      // GPU agent: find local memory region
+      AMD::GpuAgent* amd_agent = static_cast<AMD::GpuAgent*>(base_agent);
+      auto agent_local_region =
+          std::find_if(amd_agent->regions().begin(), amd_agent->regions().end(),
+                       [&](const std::shared_ptr<const core::MemoryRegion>& region) {
+                         const AMD::MemoryRegion* amd_region =
+                             static_cast<const AMD::MemoryRegion*>(region.get());
+                         return amd_region->IsLocalMemory() && (!amd_region->fine_grain());
+                       });
+      return agent_local_region == amd_agent->regions().end() ? nullptr : agent_local_region->get();
+    }
+    case core::Agent::kAmdAieDevice: {
+      // AIE agent: find SHMEM region (first system region for non-code, device SVM for code)
+      AMD::AieAgent* aie_agent = static_cast<AMD::AieAgent*>(base_agent);
+      auto agent_region =
+          std::find_if(aie_agent->regions().begin(), aie_agent->regions().end(),
+                       [&](const std::shared_ptr<const core::MemoryRegion>& region) {
+                         const AMD::MemoryRegion* amd_region =
+                             static_cast<const AMD::MemoryRegion*>(region.get());
+                         if (is_code) {
+                           // For code segments, use the device SVM region (dev heap)
+                           return amd_region->IsDeviceSVM();
+                         } else {
+                           // For data segments, use regular system memory
+                           return amd_region->IsSystem() && !amd_region->IsDeviceSVM();
+                         }
+                       });
+      return agent_region == aie_agent->regions().end() ? nullptr : agent_region->get();
+    }
+    default:
+      assert(false && "Unsupported agent type");
+      return nullptr;
+  }
 }
 
 const core::MemoryRegion* RegionMemory::System(bool is_code) {
