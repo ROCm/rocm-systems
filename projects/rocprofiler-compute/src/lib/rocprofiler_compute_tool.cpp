@@ -152,6 +152,7 @@ struct tool_data_t {
   std::unordered_map<uint64_t, std::string> counter_id_name_map{};
   std::string requested_counters{};
   std::string kernel_filter_include_regex{};
+  std::string kernel_filter_exclude_regex{};
   std::vector<std::pair<uint64_t, uint64_t>> kernel_filter_ranges{};
   std::vector<counter_info_record_t> counter_records;
   std::set<uint64_t> target_kernel_ids{};
@@ -254,9 +255,25 @@ void tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
             << std::endl;
       }
     }
-    // If no regex specified, collect for all kernels
+    // If no include regex specified, collect for all kernels
     else {
       tool->target_kernel_ids.insert(data->kernel_id);
+    }
+
+    // If exclude regex specified, exclude kernels with names matching the regex
+    if (!tool->kernel_filter_exclude_regex.empty()) {
+      try {
+        std::regex re(tool->kernel_filter_exclude_regex);
+        if (!kernel_name.empty() && std::regex_search(kernel_name, re)) {
+          tool->target_kernel_ids.erase(data->kernel_id);
+        }
+      } catch (const std::regex_error &e) {
+        std::cerr
+            << "[rocprofiler-compute] [" << __FUNCTION__
+            << "] ERROR: Invalid regex in ROCPROF_KERNEL_FILTER_EXCLUDE_REGEX: "
+            << tool->kernel_filter_exclude_regex << " : " << e.what()
+            << std::endl;
+      }
     }
   }
 }
@@ -689,6 +706,11 @@ create_tool_data(rocprofiler_client_id_t * /*id*/) {
   // with names matching the regex
   if (const char *v = getenv("ROCPROF_KERNEL_FILTER_INCLUDE_REGEX"))
     tool_data->kernel_filter_include_regex = v;
+
+  // ROCPROF_KERNEL_FILTER_EXCLUDE_REGEX env. var. is a regex string used to
+  // exclude kernels with names matching the regex from counter collection
+  if (const char *v = getenv("ROCPROF_KERNEL_FILTER_EXCLUDE_REGEX"))
+    tool_data->kernel_filter_exclude_regex = v;
 
   // ROCPROF_KERNEL_FILTER_RANGE env. var. is a string like "[4,7-9,...]"
   if (const char *v = getenv("ROCPROF_KERNEL_FILTER_RANGE")) {
