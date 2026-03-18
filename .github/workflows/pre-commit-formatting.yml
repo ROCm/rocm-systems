@@ -14,40 +14,7 @@ jobs:
       - id: filter
         uses: dorny/paths-filter@v4
         with:
-          filters: |
-            rocprofiler-compute:
-              - 'projects/rocprofiler-compute/**'
-              - '.github/workflows/rocprofiler-compute-formatting.yml'
-              - '!**/*.md'
-              - '!**/*.rtf'
-              - '!**/*.rst'
-              - '!**/.markdownlint-ci2.yaml'
-              - '!**/.readthedocs.yaml'
-              - '!**/.spellcheck.local.yaml'
-              - '!**/.wordlist.txt'
-              - '!docs/**'
-              - '!projects/*/docs/**'
-            rocprofiler-sdk:
-              - 'projects/rocprofiler-sdk/**'
-              - '.github/workflows/rocprofiler-systems-formatting.yml'
-              - '!**/*.md'
-              - '!**/*.rtf'
-              - '!**/*.rst'
-              - '!**/.markdownlint-ci2.yaml'
-              - '!**/.readthedocs.yaml'
-              - '!**/.spellcheck.local.yaml'
-              - '!**/.wordlist.txt'
-            rocprofiler-systems:
-              - 'projects/rocprofiler-systems/**'
-              - '.github/workflows/rocprofiler-systems-formatting.yml'
-              - '!**/*.md'
-              - '!**/*.rtf'
-              - '!**/*.rst'
-              - '!**/.markdownlint-ci2.yaml'
-              - '!**/.readthedocs.yaml'
-              - '!**/.spellcheck.local.yaml'
-              - '!**/.wordlist.txt'
-
+          filters: '.github/filters.yaml'
 
   rocprofiler-compute:
     needs: check-changes
