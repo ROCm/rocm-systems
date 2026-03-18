@@ -90,54 +90,69 @@ address KernelParameters::alloc(device::VirtualDevice& vDev) {
 }
 
 // =================================================================================================
-bool KernelParameters::captureHIPArgs(void** kernelParams, address kernArgs, size_t kernArgsSize,
-                                      address mem) {
-  amd::Memory** memories = reinterpret_cast<amd::Memory**>(mem + memoryObjOffset());
-  for (size_t idx = 0; idx < signature_.numParameters(); ++idx) {
-    KernelParameterDescriptor& desc = signature_.params()[idx];
-    void* value = kernelParams ? kernelParams[idx] : kernArgs + desc.offset_;
-    void* param = mem + desc.offset_;
-    uint32_t uint32_value = 0;
-    uint64_t uint64_value = 0;
-    // if using the 'extra' path and this parameter lies beyond supplied size, write zero
-    if (kernelParams == nullptr && ((desc.offset_ + desc.size_) > kernArgsSize)) {
-      value = &uint64_value;
-    }
-    if (desc.type_ == T_POINTER) {
-      LP64_SWITCH(uint32_value, uint64_value) = *(LP64_SWITCH(uint32_t*, uint64_t*))value;
-      Memory* memArg = nullptr;
-      if (!AMD_DIRECT_DISPATCH) {
-        memArg = amd::MemObjMap::FindMemObj(*reinterpret_cast<const void* const*>(value));
-        if (memArg != nullptr) {
-          memArg->retain();
-        }
-      }
-      memories[desc.info_.arrayIndex_] = memArg;
-    } else {
-      assert((desc.type_ != T_SAMPLER && desc.type_ != T_QUEUE) &&
-             "Unexpected argument type for a HIP kernel");
-      switch (desc.size_) {
-        case 4:
-          uint32_value = *(static_cast<const uint32_t*>(value));
-          break;
-        case 8:
-          uint64_value = *(static_cast<const uint64_t*>(value));
-          break;
-      }
-    }
+// Helper function for capturing and retaining memory objects for a kernel launch after the kernel
+// parameters have been set.
+static void captureMemObjs(address mem, const KernelSignature& signature, size_t memoryObjOffset) {
+  amd::Memory** memories = reinterpret_cast<amd::Memory**>(mem + memoryObjOffset);
+  for (const KernelParameterDescriptor& desc : signature.params()) {
+    if (desc.type_ != T_POINTER) continue;
 
+    Memory* memArg = nullptr;
+    if (!AMD_DIRECT_DISPATCH) {
+      memArg =
+          amd::MemObjMap::FindMemObj(*reinterpret_cast<const void* const*>(mem + desc.offset_));
+      if (memArg != nullptr) {
+        memArg->retain();
+      }
+    }
+    memories[desc.info_.arrayIndex_] = memArg;
+  }
+}
+
+bool KernelParameters::captureHIPArgs(address kernArgs, size_t kernArgsSize, address mem) {
+  assert(kernArgs && kernArgsSize && "kernArgs cannot be null when the size is non-zero");
+  assert(std::none_of(signature_.params().begin(), signature_.params().end(),
+                      [](const KernelParameterDescriptor& desc) {
+                        return desc.type_ != T_SAMPLER && desc.type_ != T_QUEUE;
+                      }) &&
+         "Unexpected argument type for a HIP kernel");
+
+  // Copy the arguments into the buffer allocated for the kernel parameters. Only copy as much as
+  // the signature defines, even if the user passed more, to avoid out-of-bounds access in the case
+  // where the user passed a size larger than what the kernel expects.
+  ::memcpy(mem, kernArgs, std::min(kernArgsSize, size_t{signature_.paramsSize()}));
+
+  // After the parameters have been registered, go through and capture the memory objects.
+  captureMemObjs(mem, signature_, memoryObjOffset());
+
+  return true;
+}
+
+bool KernelParameters::captureHIPArgs(void** kernelParams, address mem) {
+  assert(kernelParams && "kernelParams cannot be null");
+  for (size_t idx = 0; idx < signature_.numParameters(); ++idx) {
+    const KernelParameterDescriptor& desc = signature_.params()[idx];
+    void* value = kernelParams[idx];
+    void* param = mem + desc.offset_;
+
+    assert((desc.type_ != T_SAMPLER && desc.type_ != T_QUEUE) &&
+            "Unexpected argument type for a HIP kernel");
     switch (desc.size_) {
       case sizeof(uint32_t):
-        *static_cast<uint32_t*>(param) = uint32_value;
+        *static_cast<uint32_t*>(param) = *static_cast<const uint32_t*>(value);
         break;
       case sizeof(uint64_t):
-        *static_cast<uint64_t*>(param) = uint64_value;
+        *static_cast<uint64_t*>(param) = *static_cast<const uint64_t*>(value);
         break;
       default:
         ::memcpy(param, value, desc.size_);
         break;
     }
   }
+
+  // After the parameters have been registered, go through again and capture the memory objects.
+  captureMemObjs(mem, signature_, memoryObjOffset());
+
   return true;
 }
 

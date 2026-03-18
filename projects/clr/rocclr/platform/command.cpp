@@ -671,7 +671,11 @@ int32_t NDRangeKernelCommand::captureHIPArgsAndValidate(void** kernelParams, add
     return CL_OUT_OF_RESOURCES;
   }
 
-  if (!kernel().parameters().captureHIPArgs(kernelParams, kernArgs, kernArgsSize, parameters_)) {
+  // Pick the right capture method based on the kernel parameters layout.
+  bool captureSuccess =
+      kernelParams ? kernel().parameters().captureHIPArgs(kernelParams, parameters_)
+                   : kernel().parameters().captureHIPArgs(kernArgs, kernArgsSize, parameters_);
+  if (!captureSuccess) {
     LogError("Cannot capture and set the kernel parameters");
     return CL_OUT_OF_RESOURCES;
   }
