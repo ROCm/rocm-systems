@@ -984,48 +984,65 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
       mnemonic == "v_add_u64" || mnemonic == "v_add_u64_e32") {
     std::string ops = line.substr(line.find(mnemonic) + mnemonic.size());
     // Parse: reg[D:D+1], reg[A:A+1], reg[B:B+1] where reg can be v or s
-    auto parseRange = [](const std::string& s, size_t& pos) ->
-        std::tuple<char, int, int> {
+    // Parse operands: can be v[lo:hi], s[lo:hi], or immediate
+    struct RegOrImm { char prefix; int lo; int hi; std::string imm; };
+    auto parseOperand = [](const std::string& s, size_t& pos) -> RegOrImm {
       while (pos < s.size() && (s[pos]==' '||s[pos]==','||s[pos]=='\t')) ++pos;
-      if (pos >= s.size()) return {'?', -1, -1};
+      if (pos >= s.size()) return {'?', -1, -1, ""};
       char prefix = s[pos];
-      if (prefix != 'v' && prefix != 's') return {'?', -1, -1};
-      ++pos;
-      if (pos < s.size() && s[pos] == '[') {
-        ++pos; int lo=0, hi=0;
-        while (pos<s.size()&&s[pos]>='0'&&s[pos]<='9') lo=lo*10+(s[pos++]-'0');
-        if (pos<s.size()&&s[pos]==':') ++pos;
-        while (pos<s.size()&&s[pos]>='0'&&s[pos]<='9') hi=hi*10+(s[pos++]-'0');
-        if (pos<s.size()&&s[pos]==']') ++pos;
-        return {prefix, lo, hi};
+      if (prefix == 'v' || prefix == 's') {
+        ++pos;
+        if (pos < s.size() && s[pos] == '[') {
+          ++pos; int lo=0, hi=0;
+          while (pos<s.size()&&s[pos]>='0'&&s[pos]<='9') lo=lo*10+(s[pos++]-'0');
+          if (pos<s.size()&&s[pos]==':') ++pos;
+          while (pos<s.size()&&s[pos]>='0'&&s[pos]<='9') hi=hi*10+(s[pos++]-'0');
+          if (pos<s.size()&&s[pos]==']') ++pos;
+          return {prefix, lo, hi, ""};
+        }
+        return {'?', -1, -1, ""};
       }
-      return {'?', -1, -1};
+      // Immediate (number or hex)
+      size_t start = pos;
+      if (s[pos]=='-') ++pos;
+      while (pos<s.size()&&(std::isalnum(s[pos])||s[pos]=='x')) ++pos;
+      return {'#', 0, 0, s.substr(start, pos-start)};
     };
     auto fmt = [](char p, int n) -> std::string {
       return std::string(1, p) + std::to_string(n);
     };
     size_t pos = 0;
-    auto [dp, d0, d1] = parseRange(ops, pos);
-    auto [ap, a0, a1] = parseRange(ops, pos);
-    auto [bp, b0, b1] = parseRange(ops, pos);
-    if (d0 >= 0 && a0 >= 0 && b0 >= 0) {
-      // If either source is SGPR, move to VGPR to avoid constant bus violations.
-      // v_addc needs vcc as carry-in which is also a constant bus source.
-      std::string a0s = fmt(ap,a0), a1s = fmt(ap,a1);
-      std::string b0s = fmt(bp,b0), b1s = fmt(bp,b1);
-      if (ap == 's') {
+    auto d = parseOperand(ops, pos);
+    auto a = parseOperand(ops, pos);
+    auto b = parseOperand(ops, pos);
+
+    if (d.lo >= 0 && (a.lo >= 0 || a.prefix == '#') && (b.lo >= 0 || b.prefix == '#')) {
+      // Build source operand strings (lo and hi halves)
+      std::string a0s, a1s, b0s, b1s;
+      if (a.prefix == '#') {
+        a0s = a.imm; a1s = "0";  // immediate: lo = literal, hi = 0
+      } else {
+        a0s = fmt(a.prefix, a.lo); a1s = fmt(a.prefix, a.hi);
+      }
+      if (b.prefix == '#') {
+        b0s = b.imm; b1s = "0";
+      } else {
+        b0s = fmt(b.prefix, b.lo); b1s = fmt(b.prefix, b.hi);
+      }
+      // Move SGPR or immediate to VGPR to avoid constant bus violations
+      if (a.prefix == 's' || a.prefix == '#') {
         result.push_back("v_mov_b32_e32 v252, " + a0s);
         result.push_back("v_mov_b32_e32 v253, " + a1s);
         a0s = "v252"; a1s = "v253";
       }
-      if (bp == 's') {
+      if (b.prefix == 's') {
         result.push_back("v_mov_b32_e32 v254, " + b0s);
         result.push_back("v_mov_b32_e32 v255, " + b1s);
         b0s = "v254"; b1s = "v255";
       }
-      result.push_back("v_add_co_u32_e32 " + fmt(dp,d0) +
+      result.push_back("v_add_co_u32_e32 " + fmt(d.prefix, d.lo) +
                         ", vcc, " + a0s + ", " + b0s);
-      result.push_back("v_addc_co_u32_e32 " + fmt(dp,d1) +
+      result.push_back("v_addc_co_u32_e32 " + fmt(d.prefix, d.hi) +
                         ", vcc, " + a1s + ", " + b1s + ", vcc");
       return result;
     }
