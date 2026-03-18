@@ -295,6 +295,21 @@ protected:
         );
     }
 
+    // Helper: Retry until the receiver's FIFO slot is ready.
+    void PostSendWithRetry(void* sendComm, void* data, size_t size, int tag,
+                           void* mhandle, void** request) {
+        int attempts = 0;
+        do {
+            ncclResult_t result = PostSend(sendComm, data, size, tag, mhandle, request);
+            ASSERT_EQ(result, ncclSuccess);
+            if (*request != nullptr) break;
+            if (++attempts >= kMaxRetryAttempts) {
+                FAIL() << "PostSend returned NULL request after " << kMaxRetryAttempts << " attempts";
+            }
+            usleep(kPollIntervalUs);
+        } while (*request == nullptr);
+    }
+
     // Helper: Wait for request completion with timeout
     ncclResult_t WaitForCompletion(void* request, int* sizes, int timeoutMs = kDefaultTimeoutMs) {
         if (!request) return ncclInternalError;
@@ -664,18 +679,7 @@ TEST_F(NetIbMPITest, SimpleSendRecv) {
             hostBuffer[i] = static_cast<uint8_t>((rank + i) % kBytePatternModulo);
         }
 
-        // NET IB isend can return success with NULL request if FIFO isn't ready
-        // (receiver's irecv RDMA write hasn't reached sender yet) — retry until ready
-        int attempts = 0;
-        do {
-            ncclResult_t result = PostSend(pair.sendComm, buffer, bufferSize, tag, mhandle, &request);
-            ASSERT_EQ(result, ncclSuccess);
-            if (request != nullptr) break;
-            if (++attempts >= kMaxRetryAttempts) {
-                FAIL() << "PostSend returned NULL request after " << kMaxRetryAttempts << " attempts";
-            }
-            usleep(kPollIntervalUs);
-        } while (request == nullptr);
+        PostSendWithRetry(pair.sendComm, buffer, bufferSize, tag, mhandle, &request);
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
@@ -770,23 +774,7 @@ TEST_F(NetIbMPITest, SendRecvMultipleSizes) {
                 hostBuffer[i] = static_cast<uint8_t>((seed + i) % kBytePatternModulo);
             }
 
-            // NET IB isend can return success with NULL request if FIFO isn't ready
-            // This means the receiver hasn't posted recv yet - retry until ready
-            int attempts = 0;
-            do {
-                ncclResult_t result = PostSend(pair.sendComm, buffer, size, tag, mhandle, &request);
-                ASSERT_EQ(result, ncclSuccess);
-
-                if (request != nullptr) {
-                    break;
-                }
-
-                // NULL request means "not ready yet", wait and retry
-                if (++attempts >= kMaxRetryAttempts) {
-                    FAIL() << "PostSend returned NULL request after " << kMaxRetryAttempts << " attempts";
-                }
-                usleep(kPollIntervalUs);
-            } while (request == nullptr);
+            PostSendWithRetry(pair.sendComm, buffer, size, tag, mhandle, &request);
         }
 
         // Barrier 1: Ensure both ranks have posted their operations before waiting
@@ -870,17 +858,8 @@ TEST_F(NetIbMPITest, SendRecvZeroSize) {
         ASSERT_EQ(PostRecv(pair.recvComm, 1, recvBuffers, recvSizes, recvTags,
                           recvHandles, &request), ncclSuccess);
     } else {
-        // Sender - send zero bytes (retry on NULL request — FIFO may not be ready)
-        int attempts = 0;
-        do {
-            ncclResult_t result = PostSend(pair.sendComm, buffer, 0, tag, mhandle, &request);
-            ASSERT_EQ(result, ncclSuccess);
-            if (request != nullptr) break;
-            if (++attempts >= kMaxRetryAttempts) {
-                FAIL() << "PostSend returned NULL request after " << kMaxRetryAttempts << " attempts";
-            }
-            usleep(kPollIntervalUs);
-        } while (request == nullptr);
+        // Sender - send zero bytes
+        PostSendWithRetry(pair.sendComm, buffer, 0, tag, mhandle, &request);
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
@@ -967,16 +946,7 @@ TEST_F(NetIbMPITest, FlushAfterRecv) {
         }
         HIP_TEST_CHECK_GTEST_FAIL(hipMemcpy(buffer, hostBuffer, bufferSize, hipMemcpyHostToDevice));
 
-        int attempts = 0;
-        do {
-            ncclResult_t result = PostSend(pair.sendComm, buffer, bufferSize, tag, mhandle, &request);
-            ASSERT_EQ(result, ncclSuccess);
-            if (request != nullptr) break;
-            if (++attempts >= kMaxRetryAttempts) {
-                FAIL() << "PostSend returned NULL request after " << kMaxRetryAttempts << " attempts";
-            }
-            usleep(kPollIntervalUs);
-        } while (request == nullptr);
+        PostSendWithRetry(pair.sendComm, buffer, bufferSize, tag, mhandle, &request);
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
@@ -1155,23 +1125,7 @@ TEST_F(NetIbMPITest, MultipleSequentialTransfers) {
                 hostBuffer[j] = static_cast<uint8_t>((seed + j) % kBytePatternModulo);
             }
 
-            // NET IB isend can return success with NULL request if FIFO isn't ready
-            // This means the receiver hasn't posted recv yet - retry until ready
-            int attempts = 0;
-            do {
-                ncclResult_t result = PostSend(pair.sendComm, sendBuffer, bufferSize, tag, mhandle, &request);
-                ASSERT_EQ(result, ncclSuccess);
-
-                if (request != nullptr) {
-                    break;
-                }
-
-                // NULL request means "not ready yet", wait and retry
-                if (++attempts >= kMaxRetryAttempts) {
-                    FAIL() << "PostSend returned NULL request after " << kMaxRetryAttempts << " attempts";
-                }
-                usleep(kPollIntervalUs);
-            } while (request == nullptr);
+            PostSendWithRetry(pair.sendComm, sendBuffer, bufferSize, tag, mhandle, &request);
         }
 
         // Barrier 1: Ensure both ranks have posted their operations before waiting
@@ -1278,16 +1232,7 @@ TEST_F(NetIbMPITest, LargeTransfer) {
             hostBuffer[i] = static_cast<uint8_t>((rank + i) % kBytePatternModulo);
         }
 
-        int attempts = 0;
-        do {
-            ncclResult_t result = PostSend(pair.sendComm, buffer, bufferSize, tag, mhandle, &request);
-            ASSERT_EQ(result, ncclSuccess);
-            if (request != nullptr) break;
-            if (++attempts >= kMaxRetryAttempts) {
-                FAIL() << "PostSend returned NULL request after " << kMaxRetryAttempts << " attempts";
-            }
-            usleep(kPollIntervalUs);
-        } while (request == nullptr);
+        PostSendWithRetry(pair.sendComm, buffer, bufferSize, tag, mhandle, &request);
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
@@ -1428,17 +1373,7 @@ TEST_F(NetIbMPITest, ConnectAndTransfer_VNic) {
             hostBuffer[i] = static_cast<uint8_t>((seed + i) % kBytePatternModulo);
         }
 
-        // Retry until the receiver's FIFO is ready.
-        int attempts = 0;
-        do {
-            ncclResult_t result = PostSend(pair.sendComm, buffer, bufferSize, tag, mhandle, &request);
-            ASSERT_EQ(result, ncclSuccess);
-            if (request != nullptr) break;
-            if (++attempts >= kMaxRetryAttempts) {
-                FAIL() << "PostSend returned NULL request after " << kMaxRetryAttempts << " attempts";
-            }
-            usleep(kPollIntervalUs);
-        } while (request == nullptr);
+        PostSendWithRetry(pair.sendComm, buffer, bufferSize, tag, mhandle, &request);
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
@@ -1565,17 +1500,7 @@ TEST_F(NetIbMPITest, AsymmetricMerge_VNic) {
             hostBuffer[i] = static_cast<uint8_t>((seed + i) % kBytePatternModulo);
         }
 
-        // Retry until the receiver's FIFO is ready.
-        int attempts = 0;
-        do {
-            ncclResult_t result = PostSend(pair.sendComm, buffer, bufferSize, tag, mhandle, &request);
-            ASSERT_EQ(result, ncclSuccess);
-            if (request != nullptr) break;
-            if (++attempts >= kMaxRetryAttempts) {
-                FAIL() << "PostSend returned NULL request after " << kMaxRetryAttempts << " attempts";
-            }
-            usleep(kPollIntervalUs);
-        } while (request == nullptr);
+        PostSendWithRetry(pair.sendComm, buffer, bufferSize, tag, mhandle, &request);
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
@@ -1691,16 +1616,7 @@ TEST_F(NetIbMPITest, CloseWithoutTransfer_VNic) {
             hostBuffer[i] = static_cast<uint8_t>((seed + i) % kBytePatternModulo);
         }
 
-        int attempts = 0;
-        do {
-            ncclResult_t result = PostSend(pair2.sendComm, buffer, bufferSize, tag, mhandle, &request);
-            ASSERT_EQ(result, ncclSuccess);
-            if (request != nullptr) break;
-            if (++attempts >= kMaxRetryAttempts) {
-                FAIL() << "PostSend returned NULL request after " << kMaxRetryAttempts << " attempts";
-            }
-            usleep(kPollIntervalUs);
-        } while (request == nullptr);
+        PostSendWithRetry(pair2.sendComm, buffer, bufferSize, tag, mhandle, &request);
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
@@ -1811,17 +1727,7 @@ TEST_F(NetIbMPITest, RegDeregCycling_VNic) {
             hostBuffer[i] = static_cast<uint8_t>((seed + i) % kBytePatternModulo);
         }
 
-        // Retry until the receiver's FIFO is ready.
-        int attempts = 0;
-        do {
-            ncclResult_t result = PostSend(pair.sendComm, buffer, bufferSize, tag, mhandle, &request);
-            ASSERT_EQ(result, ncclSuccess);
-            if (request != nullptr) break;
-            if (++attempts >= kMaxRetryAttempts) {
-                FAIL() << "PostSend returned NULL request after " << kMaxRetryAttempts << " attempts";
-            }
-            usleep(kPollIntervalUs);
-        } while (request == nullptr);
+        PostSendWithRetry(pair.sendComm, buffer, bufferSize, tag, mhandle, &request);
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
@@ -1918,17 +1824,7 @@ TEST_F(NetIbMPITest, LargeTransfer_VNic) {
             hostBuffer[i] = static_cast<uint8_t>((seed + i) % kBytePatternModulo);
         }
 
-        // Retry until the receiver's FIFO is ready.
-        int attempts = 0;
-        do {
-            ncclResult_t result = PostSend(pair.sendComm, buffer, bufferSize, tag, mhandle, &request);
-            ASSERT_EQ(result, ncclSuccess);
-            if (request != nullptr) break;
-            if (++attempts >= kMaxRetryAttempts) {
-                FAIL() << "PostSend returned NULL request after " << kMaxRetryAttempts << " attempts";
-            }
-            usleep(kPollIntervalUs);
-        } while (request == nullptr);
+        PostSendWithRetry(pair.sendComm, buffer, bufferSize, tag, mhandle, &request);
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
@@ -2047,17 +1943,7 @@ TEST_F(NetIbMPITest, MixedSizes_VNic) {
                 hostBuffer[i] = static_cast<uint8_t>((seed + i) % kBytePatternModulo);
             }
 
-            int attempts = 0;
-            do {
-                ncclResult_t result = PostSend(pair.sendComm, buffer, size, tag, mhandle, &request);
-                ASSERT_EQ(result, ncclSuccess);
-                if (request != nullptr) break;
-                if (++attempts >= kMaxRetryAttempts) {
-                    FAIL() << "PostSend returned NULL request after " << kMaxRetryAttempts
-                           << " attempts for size " << size;
-                }
-                usleep(kPollIntervalUs);
-            } while (request == nullptr);
+            PostSendWithRetry(pair.sendComm, buffer, size, tag, mhandle, &request);
         }
 
         MPI_Barrier(MPI_COMM_WORLD);
@@ -2166,18 +2052,7 @@ TEST_F(NetIbMPITest, UnalignedSizeTransfer_VNic) {
                 hostBuffer[i] = static_cast<uint8_t>((seed + i) % kBytePatternModulo);
             }
 
-            // Retry until the receiver's FIFO is ready.
-            int attempts = 0;
-            do {
-                ncclResult_t result = PostSend(pair.sendComm, buffer, size, tag, mhandle, &request);
-                ASSERT_EQ(result, ncclSuccess);
-                if (request != nullptr) break;
-                if (++attempts >= kMaxRetryAttempts) {
-                    FAIL() << "PostSend returned NULL request after " << kMaxRetryAttempts
-                           << " attempts for size " << size;
-                }
-                usleep(kPollIntervalUs);
-            } while (request == nullptr);
+            PostSendWithRetry(pair.sendComm, buffer, size, tag, mhandle, &request);
         }
 
         MPI_Barrier(MPI_COMM_WORLD);
@@ -2335,16 +2210,7 @@ TEST_F(NetIbMPITest, Bidirectional_VNic) {
     ASSERT_EQ(PostRecv(recvComm, 1, recvBuffers, recvSizes, recvTags,
                       recvHandles, &recvRequest), ncclSuccess);
 
-    int attempts = 0;
-    do {
-        ncclResult_t result = PostSend(sendComm, sendBuf, bufferSize, sendTag, sendMhandle, &sendRequest);
-        ASSERT_EQ(result, ncclSuccess);
-        if (sendRequest != nullptr) break;
-        if (++attempts >= kMaxRetryAttempts) {
-            FAIL() << "PostSend returned NULL request after " << kMaxRetryAttempts << " attempts";
-        }
-        usleep(kPollIntervalUs);
-    } while (sendRequest == nullptr);
+    PostSendWithRetry(sendComm, sendBuf, bufferSize, sendTag, sendMhandle, &sendRequest);
 
     MPI_Barrier(MPI_COMM_WORLD);
 
@@ -2450,16 +2316,7 @@ TEST_F(NetIbMPITest, FlushRepeated_VNic) {
             }
             HIP_TEST_CHECK_GTEST_FAIL(hipMemcpy(gpuBuffer, hostBuf, bufferSize, hipMemcpyHostToDevice));
 
-            int attempts = 0;
-            do {
-                ncclResult_t result = PostSend(pair.sendComm, gpuBuffer, bufferSize, tag, mhandle, &request);
-                ASSERT_EQ(result, ncclSuccess);
-                if (request != nullptr) break;
-                if (++attempts >= kMaxRetryAttempts) {
-                    FAIL() << "Iter " << iter << ": PostSend returned NULL after " << kMaxRetryAttempts << " attempts";
-                }
-                usleep(kPollIntervalUs);
-            } while (request == nullptr);
+            PostSendWithRetry(pair.sendComm, gpuBuffer, bufferSize, tag, mhandle, &request);
         } else {
             // Rank 0: post recv on GPU buffer.
             void* recvBuffers[1] = {gpuBuffer};
@@ -2577,17 +2434,7 @@ TEST_F(NetIbMPITest, SequentialTransfers_VNic) {
                 h[i] = static_cast<uint8_t>((seed + i) % kBytePatternModulo);
             }
 
-            // Retry until the receiver's FIFO slot is ready.
-            int attempts = 0;
-            do {
-                ncclResult_t result = PostSend(pair.sendComm, buffer, bufferSize, tag, mhandle, &request);
-                ASSERT_EQ(result, ncclSuccess);
-                if (request != nullptr) break;
-                if (++attempts >= kMaxRetryAttempts) {
-                    FAIL() << "Iter " << iter << ": PostSend returned NULL after " << kMaxRetryAttempts << " attempts";
-                }
-                usleep(kPollIntervalUs);
-            } while (request == nullptr);
+            PostSendWithRetry(pair.sendComm, buffer, bufferSize, tag, mhandle, &request);
         } else {
             // Zero buffer before recv to ensure verification catches stale data.
             memset(buffer, 0, bufferSize);
@@ -2686,16 +2533,7 @@ TEST_F(NetIbMPITest, Reconnect_VNic) {
                 h[i] = static_cast<uint8_t>((seed + i) % kBytePatternModulo);
             }
 
-            int attempts = 0;
-            do {
-                ncclResult_t result = PostSend(pair.sendComm, buffer, bufferSize, tag, mhandle, &request);
-                ASSERT_EQ(result, ncclSuccess);
-                if (request != nullptr) break;
-                if (++attempts >= kMaxRetryAttempts) {
-                    FAIL() << "Cycle " << cycle << ": PostSend returned NULL after " << kMaxRetryAttempts << " attempts";
-                }
-                usleep(kPollIntervalUs);
-            } while (request == nullptr);
+            PostSendWithRetry(pair.sendComm, buffer, bufferSize, tag, mhandle, &request);
         } else {
             memset(buffer, 0, bufferSize);
 

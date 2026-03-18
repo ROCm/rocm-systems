@@ -70,9 +70,6 @@ class TestExecutor:
 
         # Detect MPI hosts: prefer SLURM, fall back to hostfile
         self.mpi_hosts = self._detect_mpi_hosts()
-        # MPI hostfile is detected lazily on first MPI test
-        self._mpi_hostfile = None
-        self._mpi_hostfile_detected = False
 
         # Test tracking
         self.test_results = []
@@ -142,20 +139,10 @@ class TestExecutor:
             print(f"Log directory:    {self.log_dir}")
             print(f"Report directory: {self.report_dir}")
 
-    @property
-    def mpi_hostfile(self):
-        """Lazy MPI hostfile detection -- only runs on first access."""
-        if not self._mpi_hostfile_detected:
-            self._mpi_hostfile = self._detect_mpi_hostfile()
-            self._mpi_hostfile_detected = True
-        return self._mpi_hostfile
-
     def _detect_mpi_hosts(self):
         """
         Detect MPI host list once during initialization.
         Priority: SLURM allocation (scontrol) > RCCL_TEST_MPI_HOSTFILE env > ~/.mpi_hostfile
-        Detect MPI hostfile.
-        Checks RCCL_TEST_MPI_HOSTFILE env var, then ~/.mpi_hostfile default.
 
         Returns:
             dict with either 'host_list' (comma-separated hosts) or 'hostfile' (path), or empty dict
