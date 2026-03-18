@@ -141,46 +141,44 @@ def generate_dashboard_script(args):
 
         handle_error("Build" _build_ret)
 
-        if(IS_DIRECTORY "{BINARY_DIR}/share/rocprofiler-systems/tests/pytest")
-            set(_py_ver_flag "")
-            set(_py_dir_flag "")
-            set(_pytest_hints "")
-            file(STRINGS "{BINARY_DIR}/CMakeCache.txt" _cache_lines)
-            foreach(_line IN LISTS _cache_lines)
-                if(_line MATCHES "^ROCPROFSYS_PYTHON_VERSIONS:[A-Z]+=(.+)")
-                    string(REPLACE ";" "\\\\;" _pv "${{CMAKE_MATCH_1}}")
-                    set(_py_ver_flag "--python-versions=${{_pv}}")
-                elseif(_line MATCHES "^ROCPROFSYS_PYTHON_ROOT_DIRS:[A-Z]+=(.+)")
-                    string(REPLACE ";" "\\\\;" _pd "${{CMAKE_MATCH_1}}")
-                    set(_py_dir_flag "--python-root-dirs=${{_pd}}")
-                    foreach(_root IN LISTS CMAKE_MATCH_1)
-                        list(APPEND _pytest_hints "${{_root}}/bin")
-                    endforeach()
-                endif()
-            endforeach()
-
-            find_program(_pytest_exe NAMES pytest HINTS ${{_pytest_hints}} REQUIRED)
-
-            execute_process(
-                COMMAND ${{_pytest_exe}}
-                    "{BINARY_DIR}/share/rocprofiler-systems/tests/pytest"
-                    --show-config-only
-                    -p no:cacheprovider
-                    ${{_py_ver_flag}} ${{_py_dir_flag}}
-                WORKING_DIRECTORY "{BINARY_DIR}"
-                COMMAND_ERROR_IS_FATAL ANY
-            )
-
-            # Build ROCPROFSYS_PYTHON_HINTS from root dirs so CTestTestfile
-            # find_program calls can locate conda/venv pythons
-            set(ROCPROFSYS_PYTHON_HINTS "")
-            if(NOT "${{_py_dir_flag}}" STREQUAL "")
-                string(REGEX REPLACE "^--python-root-dirs=" "" _raw_roots "${{_py_dir_flag}}")
-                string(REPLACE "\\\\;" ";" _root_list "${{_raw_roots}}")
-                foreach(_root IN LISTS _root_list)
-                    list(APPEND ROCPROFSYS_PYTHON_HINTS "${{_root}}/bin" "${{_root}}")
+        set(_py_ver_flag "")
+        set(_py_dir_flag "")
+        set(_pytest_hints "")
+        file(STRINGS "{BINARY_DIR}/CMakeCache.txt" _cache_lines)
+        foreach(_line IN LISTS _cache_lines)
+            if(_line MATCHES "^ROCPROFSYS_PYTHON_VERSIONS:[A-Z]+=(.+)")
+                string(REPLACE ";" "\\\\;" _pv "${{CMAKE_MATCH_1}}")
+                set(_py_ver_flag "--python-versions=${{_pv}}")
+            elseif(_line MATCHES "^ROCPROFSYS_PYTHON_ROOT_DIRS:[A-Z]+=(.+)")
+                string(REPLACE ";" "\\\\;" _pd "${{CMAKE_MATCH_1}}")
+                set(_py_dir_flag "--python-root-dirs=${{_pd}}")
+                foreach(_root IN LISTS CMAKE_MATCH_1)
+                    list(APPEND _pytest_hints "${{_root}}/bin")
                 endforeach()
             endif()
+        endforeach()
+
+        # Generate the config header before executing any tests
+        find_program(_pytest_exe NAMES pytest HINTS ${{_pytest_hints}} REQUIRED)
+        execute_process(
+            COMMAND ${{_pytest_exe}}
+                "{BINARY_DIR}/share/rocprofiler-systems/tests/pytest"
+                --show-config-only
+                -p no:cacheprovider
+                ${{_py_ver_flag}} ${{_py_dir_flag}}
+            WORKING_DIRECTORY "{BINARY_DIR}"
+            COMMAND_ERROR_IS_FATAL ANY
+        )
+
+        # Build ROCPROFSYS_PYTHON_HINTS from root dirs so CTestTestfile
+        # find_program calls can locate conda/venv pythons
+        set(ROCPROFSYS_PYTHON_HINTS "")
+        if(NOT "${{_py_dir_flag}}" STREQUAL "")
+            string(REGEX REPLACE "^--python-root-dirs=" "" _raw_roots "${{_py_dir_flag}}")
+            string(REPLACE "\\\\;" ";" _root_list "${{_raw_roots}}")
+            foreach(_root IN LISTS _root_list)
+                list(APPEND ROCPROFSYS_PYTHON_HINTS "${{_root}}/bin" "${{_root}}")
+            endforeach()
         endif()
 
         ctest_test(BUILD "{BINARY_DIR}" RETURN_VALUE _test_ret)

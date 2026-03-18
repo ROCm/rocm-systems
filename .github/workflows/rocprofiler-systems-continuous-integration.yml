@@ -171,7 +171,7 @@ jobs:
 
       - name: Configure, Build, and Test
         id: run_ci
-        timeout-minutes: 30
+        timeout-minutes: 60
         working-directory: projects/rocprofiler-systems
         run: |
           set -e

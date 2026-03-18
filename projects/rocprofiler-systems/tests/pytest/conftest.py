@@ -565,14 +565,15 @@ def pytest_collection_modifyitems(config, items) -> None:
             system_version = rocprof_config.capabilities.oshrun_version
             if system_version is None:
                 item.add_marker(pytest.mark.skip(reason="OpenSHMEM version not found"))
-            min_parts = req_version.split(".")
-            min_tuple = tuple(int(p) for p in (min_parts + ["0", "0"])[:2])
-            if system_version < min_tuple:
-                item.add_marker(
-                    pytest.mark.skip(
-                        reason=f"oshrun version {'.'.join(map(str, system_version))} < required {req_version}"
+            else:
+                min_parts = req_version.split(".")
+                min_tuple = tuple(int(p) for p in (min_parts + ["0", "0"])[:2])
+                if system_version < min_tuple:
+                    item.add_marker(
+                        pytest.mark.skip(
+                            reason=f"oshrun version {'.'.join(map(str, system_version))} < required {req_version}"
+                        )
                     )
-                )
         if "run_if_gpu_category" in item.keywords:
             if not gpu_available():
                 item.add_marker(pytest.mark.skip(reason="No valid GPU available"))
