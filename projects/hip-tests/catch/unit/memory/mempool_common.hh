@@ -429,6 +429,12 @@ class streamMemAllocTest {
   }
 };
 
+#ifdef HT_AMD
+typedef int64_t hipShareableHdl;
+#else
+typedef int hipShareableHdl;
+#endif
+
 #ifdef __linux__
 
 #define checkSysCallErrors(result)                                                                 \
@@ -436,11 +442,6 @@ class streamMemAllocTest {
     fprintf(stderr, "Failure at %u %s\n", __LINE__, __FILE__); exit(EXIT_FAILURE);                 \
   }
 
-#ifdef HT_AMD
-typedef int64_t hipShareableHdl;
-#else
-typedef int hipShareableHdl;
-#endif
 
 typedef pid_t Process;
 

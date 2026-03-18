@@ -78,14 +78,10 @@ set(TEST_SRC
     hipMemsetD2D32Async.cc
     hipMemcpy3DPeer.cc
     hipMemcpy3DPeerAsync.cc
-    )
-
-if(UNIX)
-  set(TEST_SRC ${TEST_SRC} hipMemPoolExportPointer.cc
-  hipMemPoolExportToShareableHandle.cc
-  hipMemPoolImportFromShareableHandle.cc
-  hipMemPoolImportPointer.cc)
-endif()
+    hipMemPoolExportPointer.cc
+    hipMemPoolExportToShareableHandle.cc
+    hipMemPoolImportFromShareableHandle.cc
+    hipMemPoolImportPointer.cc)
 
 if(HIP_PLATFORM MATCHES "amd")
   set(TEST_SRC

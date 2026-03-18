@@ -16,6 +16,7 @@
  */
 
 #include "mempool_common.hh"
+#include <hip_test_process.hh>
 
 constexpr int DATA_SIZE = 1024 * 1024;
 constexpr size_t byte_size = DATA_SIZE * sizeof(int);
@@ -64,11 +65,16 @@ HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_SameProc) {
   checkMempoolSupported(0) HIP_CHECK(hipSetDevice(0));
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
+  #if HT_WIN
+  hipMemAllocationHandleType handleType = hipMemHandleTypeWin32;
+  #else
+  hipMemAllocationHandleType handleType = hipMemHandleTypePosixFileDescriptor;
+  #endif
   // Create mempool
   pool_props.allocType = hipMemAllocationTypePinned;
   pool_props.location.id = 0;
   pool_props.location.type = hipMemLocationTypeDevice;
-  pool_props.handleTypes = hipMemHandleTypePosixFileDescriptor;
+  pool_props.handleTypes = handleType;
   HIP_CHECK(hipMemPoolCreate(&mempool, &pool_props));
   // Allocate device memory from mempool
   int* A_d;
@@ -77,12 +83,12 @@ HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_SameProc) {
   HIP_CHECK(hipStreamSynchronize(stream));
   // Export mempool
   HIP_CHECK(hipMemPoolExportToShareableHandle(&sharedHandle, mempool,
-                                              hipMemHandleTypePosixFileDescriptor, 0));
+                                              handleType, 0));
   // Export A_d
   HIP_CHECK(hipMemPoolExportPointer(&ptrExp, A_d));
   // Import mempool
   HIP_CHECK(hipMemPoolImportFromShareableHandle(&mempoolImp, (void*)sharedHandle,
-                                                hipMemHandleTypePosixFileDescriptor, 0));
+                                                handleType, 0));
   // Import and use pointer
   void* ptrImp;
   HIP_CHECK(hipMemPoolImportPointer(&ptrImp, mempoolImp, &ptrExp));
@@ -99,6 +105,7 @@ HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_SameProc) {
   HIP_CHECK(hipMemPoolDestroy(mempoolImp));
 }
 
+#if HT_LINUX
 /**
  * Test Description
  * ------------------------
@@ -430,6 +437,7 @@ HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_GrndChldUseHdl) {
     checkSysCallErrors(sockObj.closeThisSock());
   }
 }
+#endif
 /**
  * Test Description
  * ------------------------
@@ -446,12 +454,16 @@ HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_Negative) {
   hipMemPoolProps pool_props{};
   hipMemPool_t mempoolPfd, mempoolwoPfd;
   checkMempoolSupported(0)
-
-      // Create mempool with Posix File Descriptor
-      pool_props.allocType = hipMemAllocationTypePinned;
+  #if HT_WIN
+  hipMemAllocationHandleType handleType = hipMemHandleTypeWin32;
+  #else
+  hipMemAllocationHandleType handleType = hipMemHandleTypePosixFileDescriptor;
+  #endif
+  // Create mempool with Posix File Descriptor
+  pool_props.allocType = hipMemAllocationTypePinned;
   pool_props.location.id = 0;
   pool_props.location.type = hipMemLocationTypeDevice;
-  pool_props.handleTypes = hipMemHandleTypePosixFileDescriptor;
+  pool_props.handleTypes = handleType;
   HIP_CHECK(hipMemPoolCreate(&mempoolPfd, &pool_props));
 
   // Create mempool without File Descriptor
@@ -462,12 +474,12 @@ HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_Negative) {
   HIP_CHECK(hipMemPoolCreate(&mempoolwoPfd, &pool_props));
   SECTION("Passing nullptr as handle") {
     HIP_CHECK_ERROR(hipMemPoolExportToShareableHandle(nullptr, mempoolPfd,
-                                                      hipMemHandleTypePosixFileDescriptor, 0),
+                                                      handleType, 0),
                     hipErrorInvalidValue);
   }
   SECTION("Passing nullptr as mempool") {
     HIP_CHECK_ERROR(hipMemPoolExportToShareableHandle(&sharedHandle, nullptr,
-                                                      hipMemHandleTypePosixFileDescriptor, 0),
+                                                      handleType, 0),
                     hipErrorInvalidValue);
   }
   SECTION("Passing invalid handle type") {
@@ -477,13 +489,12 @@ HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_Negative) {
   }
   SECTION("Passing mempool without file descriptor") {
     HIP_CHECK_ERROR(hipMemPoolExportToShareableHandle(&sharedHandle, mempoolwoPfd,
-                                                      hipMemHandleTypePosixFileDescriptor, 0),
+                                                      handleType, 0),
                     hipErrorInvalidValue);
   }
   HIP_CHECK(hipMemPoolDestroy(mempoolPfd));
   HIP_CHECK(hipMemPoolDestroy(mempoolwoPfd));
 }
-
 /**
  * End doxygen group MemoryTest.
  * @}
