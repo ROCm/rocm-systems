@@ -879,7 +879,8 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
   // The preamble saved workgroup_id_x (s2) into v5. The kernel later uses sN
   // (typically s0) as the output block index. We must set it here because the
   // kernel expects s0 = workgroup_id after the TTMP computation completes.
-  if (mnemonic == "s_cselect_b32" && line.find("ttmp9") != std::string::npos) {
+  if (mnemonic == "s_cselect_b32" &&
+      (line.find("ttmp9") != std::string::npos || line.find("ttmp7") != std::string::npos)) {
     // Extract destination register
     size_t op_start = line.find(mnemonic) + mnemonic.size();
     std::string ops = line.substr(op_start);
@@ -887,7 +888,9 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
     size_t e = ops.find_first_of(" \t,", s);
     if (s != std::string::npos) {
       std::string dst = ops.substr(s, e != std::string::npos ? e - s : std::string::npos);
-      result.push_back("v_readfirstlane_b32 " + dst + ", v5");
+      // ttmp9 = workgroup_id_x (saved in v5), ttmp7 = workgroup_id_y (saved in v4)
+      std::string src_vgpr = (line.find("ttmp9") != std::string::npos) ? "v5" : "v4";
+      result.push_back("v_readfirstlane_b32 " + dst + ", " + src_vgpr);
       return result;
     }
   }
@@ -900,7 +903,8 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
   // Skip: any instruction referencing ttmp, AND the non-TTMP instructions
   // that are part of the computation chain (identified by modifying s0/s1/s3
   // between the ttmp refs and the v_mad_u32).
-  if (line.find("ttmp6") != std::string::npos || line.find("ttmp9") != std::string::npos) {
+  if (line.find("ttmp6") != std::string::npos || line.find("ttmp7") != std::string::npos ||
+      line.find("ttmp9") != std::string::npos) {
     return result;  // skip any instruction referencing TTMP registers
   }
   // s_wait_xcnt — GFX12-specific wait counter (skip like other scheduling hints)
@@ -1940,6 +1944,15 @@ static void PatchKernelDescriptorsForWave64(uint8_t* elf, size_t elf_size,
 
     std::memcpy(elf + info.text_offset + offset + 48, &rsrc1, 4);
 
+    // Patch COMPUTE_PGM_RSRC2 (offset 52)
+    // Enable workgroup ID system SGPRs (gfx1250 uses TTMP, GFX9 uses SGPRs)
+    uint32_t rsrc2;
+    std::memcpy(&rsrc2, text + offset + 52, 4);
+    rsrc2 |= (1u << 7);  // ENABLE_SGPR_WORKGROUP_ID_X
+    rsrc2 |= (1u << 8);  // ENABLE_SGPR_WORKGROUP_ID_Y
+    rsrc2 |= (1u << 9);  // ENABLE_SGPR_WORKGROUP_ID_Z (for 3D grids)
+    std::memcpy(elf + info.text_offset + offset + 52, &rsrc2, 4);
+
     // Patch kernel_code_properties (offset 56)
     uint16_t props;
     std::memcpy(&props, text + offset + 56, 2);
@@ -2252,6 +2265,7 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
     // Instead, just save s2 (workgroup_id) to v5 before any s_load
     // overwrites it. The v_mad_u32 emulation will use v5 later.
     translated_asm += "v_mov_b32_e32 v5, s2 ; save workgroup_id_x\n";
+    translated_asm += "v_mov_b32_e32 v4, s3 ; save workgroup_id_y\n";
     // Convert element index to byte offset for scale_offset emulation.
     // The gfx1250 kernel used scale_offset to auto-scale by element size (4 bytes).
     // On gfx950, we must do it manually. v0 = v0 * 4 (for dword access).
