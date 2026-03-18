@@ -10,7 +10,12 @@ import pytest
 from pathlib import Path
 from conftest import RocprofsysTest
 
-pytestmark = [pytest.mark.gpu, pytest.mark.xgmi, pytest.mark.ci_enable]
+pytestmark = [
+    pytest.mark.gpu,
+    pytest.mark.xgmi,
+    pytest.mark.ci_enable,  # TODO: Deprecate once TheRock switches to CTest
+    pytest.mark.rocm,
+]
 
 # =============================================================================
 # GPU connectivity fixtures

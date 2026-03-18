@@ -24,7 +24,12 @@ import pytest
 from pathlib import Path
 from conftest import RocprofsysTest
 
-pytestmark = [pytest.mark.transpose, pytest.mark.gpu, pytest.mark.ci_enable]
+pytestmark = [
+    pytest.mark.transpose,
+    pytest.mark.gpu,
+    pytest.mark.ci_enable,  # TODO: Deprecate once TheRock switches to CTest
+    pytest.mark.rocm,
+]
 
 from rocprofsys import (
     GPUInfo,

@@ -14,6 +14,7 @@ pytestmark = [
     pytest.mark.scratch_memory,
     pytest.mark.gpu,
     pytest.mark.no_docker,
+    pytest.mark.rocm,
 ]
 
 # =============================================================================

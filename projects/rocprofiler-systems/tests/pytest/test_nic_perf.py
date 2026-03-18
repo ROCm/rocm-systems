@@ -31,7 +31,7 @@ def nic_perf_env(rocprof_config) -> dict[str, str]:
         "ROCPROFSYS_NETWORK_INTERFACE": f"{rocprof_config.capabilities.default_nic}",
         "ROCPROFSYS_PAPI_EVENTS": f"{rocprof_config.capabilities.papi_nic_events}",
         "ROCPROFSYS_SAMPLING_DELAY": "0.05",
-        "PAPI_NET_REFRESH_LATENCY" : "100000",
+        "PAPI_NET_REFRESH_LATENCY": "100000",
     }
 
 
@@ -52,7 +52,6 @@ def nic_perf_download_url_2() -> str:
 # =============================================================================
 
 
-# @pytest.mark.ci_disable("assert_perfetto")
 class TestNIC(RocprofsysTest):
     """Tests for NIC performance."""
 

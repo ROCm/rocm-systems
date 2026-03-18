@@ -254,7 +254,6 @@ def pytest_configure(config: pytest.Config) -> None:
         "overflow",
         "attach",
         "mpi",
-        "rocm",
         "python",
         "annotate",
         "julia",
@@ -318,6 +317,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "hpc",
         "hip",
         "scratch_memory",
+        "rocm",
     ]
     for label in non_functional_markers + generic_functional_markers:
         config.addinivalue_line("markers", f"{label}: label test as {label}")
@@ -429,9 +429,7 @@ def pytest_collection_modifyitems(config, items) -> None:
         rocprof_config.capabilities.supported_python_versions is not None
         and os.environ.get("ROCPROFSYS_USE_PYTHON", "ON").upper() == "ON"
     )
-    xnack_available = lambda: (
-        get_xnack_support(rocprof_config.rocm_path) if rocprof_config.rocm_path else False
-    )
+    xnack_available = lambda: (get_xnack_support(rocprof_config.rocm_path))
 
     # ----------------------------------------------------------------------------
     def base_modifications(item: pytest.Item) -> None:
@@ -522,8 +520,6 @@ def pytest_collection_modifyitems(config, items) -> None:
                     reason="Requires ptrace_scope to be 0. Run 'echo 0 | sudo tee /proc/sys/kernel/yama/ptrace_scope' to enable attaching to process"
                 )
             )
-        if "rocm" in item.keywords and not rocprof_config.rocm_path:
-            item.add_marker(pytest.mark.skip(reason="ROCm not available"))
         if "python" in item.keywords:
             if not python_base_available():
                 item.add_marker(pytest.mark.skip(reason="rocprof-sys-python not found"))
@@ -981,43 +977,36 @@ def _generate_rocprofsys_config_header(config: pytest.Config) -> list[str]:
 
     gpu_info = get_gpu_info()
 
-    if rocprof_config.rocm_path:
-        # Rocm version
-        rocm_version = (
-            ".".join(map(str, rocprof_config.rocm_version))
-            if rocprof_config.rocm_version
-            else "Not found"
-        )
+    # Rocm version
+    rocm_version = (
+        ".".join(map(str, rocprof_config.rocm_version))
+        if rocprof_config.rocm_version
+        else "Not found"
+    )
 
-        # Rocminfo
-        rocminfo_path = get_rocminfo(rocprof_config.rocm_path)
-        if not rocminfo_path:
-            rocminfo_err_msg = "Not found - Ensure rocminfo is in ROCM_PATH or PATH - Assuming no GPU configuration"
+    # Rocminfo
+    rocminfo_path = get_rocminfo(rocprof_config.rocm_path)
+    if not rocminfo_path:
+        rocminfo_err_msg = "Not found - Ensure rocminfo is in ROCM_PATH or PATH - Assuming no GPU configuration"
 
-        # Offload extractor
-        offload_msg = None
-        tool_path, is_llvm_too_old = get_offload_extractor(rocprof_config.rocm_path)
-        if tool_path:
-            if tool_path.name == "llvm-objdump":
+    # Offload extractor
+    offload_msg = None
+    tool_path, is_llvm_too_old = get_offload_extractor(rocprof_config.rocm_path)
+    if tool_path:
+        if tool_path.name == "llvm-objdump":
+            offload_msg = f"{tool_path}"
+        elif tool_path.name == "roc-obj-ls":
+            if not is_llvm_too_old:
+                offload_msg = f"Using deprecated {tool_path} - Set ROCM_LLVM_OBJDUMP to use llvm-objdump instead"
+            else:
                 offload_msg = f"{tool_path}"
-            elif tool_path.name == "roc-obj-ls":
-                if not is_llvm_too_old:
-                    offload_msg = f"Using deprecated {tool_path} - Set ROCM_LLVM_OBJDUMP to use llvm-objdump instead"
-                else:
-                    offload_msg = f"{tool_path}"
 
-        if not offload_msg:
-            offload_msg = (
-                "Not found - Set ROCM_LLVM_OBJDUMP to path of llvm-objdump (v20+), "
-                "or to path of roc-obj-ls if llvm-objdump < v20"
-            )
-        xnack_support = get_xnack_support(rocprof_config.rocm_path)
-    else:
-        rocm_version = "Not found"
-        rocminfo_err_msg = "ROCm not found"
-        offload_msg = "ROCm not found"
-        rocminfo_path = None
-        xnack_support = False
+    if not offload_msg:
+        offload_msg = (
+            "Not found - Set ROCM_LLVM_OBJDUMP to path of llvm-objdump (v20+), "
+            "or to path of roc-obj-ls if llvm-objdump < v20"
+        )
+    xnack_support = get_xnack_support(rocprof_config.rocm_path)
 
     if cap.oshrun_version is not None:
         oshrun_version_str = f"{cap.oshrun_version[0]}.{cap.oshrun_version[1]}"

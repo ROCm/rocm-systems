@@ -9,7 +9,10 @@ from __future__ import annotations
 import pytest
 from conftest import RocprofsysTest
 
-pytestmark = [pytest.mark.time_window, pytest.mark.ci_enable]
+pytestmark = [
+    pytest.mark.time_window,
+    pytest.mark.ci_enable,  # TODO: Deprecate once TheRock switches to CTest
+]
 
 # ============================================================================
 # Time Window Fixtures
