@@ -779,14 +779,21 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
   std::string mnemonic = ExtractMnemonic(line);
 
   // ─── Early mnemonic fixups (before any handlers) ───
-  // GFX12 _nc_ (no-carry) VALU variants → remove _nc_
+
+  // GFX12 _nc_ (no-carry) VALU variants → remove _nc_ and ensure _e32 suffix
   if (mnemonic.find("_nc_") != std::string::npos && mnemonic[0] == 'v') {
     std::string fixed = mnemonic;
     size_t nc_pos = fixed.find("_nc_");
     fixed.replace(nc_pos, 4, "_");
+    // If no _e32/_e64 suffix, add _e32 (GFX9 requires explicit encoding)
+    if (fixed.find("_e32") == std::string::npos &&
+        fixed.find("_e64") == std::string::npos) {
+      fixed += "_e32";
+    }
     line = ReplaceMnemonic(line, mnemonic, fixed);
     mnemonic = fixed;
   }
+
   // GFX12 s_and_not1/s_or_not1 → s_andn2/s_orn2 (scalar bitwise rename)
   if (mnemonic.find("_not1_") != std::string::npos && mnemonic[0] == 's') {
     std::string fixed = mnemonic;
@@ -794,6 +801,30 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
     fixed.replace(not1_pos, 6, "n2_");
     line = ReplaceMnemonic(line, mnemonic, fixed);
     mnemonic = fixed;
+  }
+
+  // GFX12 v_bitop2_b32/v_bitop3_b32 → emulate as v_and_b32 (early, before handlers)
+  if (mnemonic.find("v_bitop") == 0) {
+    // Parse: v_bitop[23]_b32 vdst, src0, src1 bitop3:0xNN
+    std::string ops = line.substr(line.find(mnemonic) + mnemonic.size());
+    size_t bitop_pos = ops.find("bitop3:");
+    std::string op_part = (bitop_pos != std::string::npos) ? ops.substr(0, bitop_pos) : ops;
+    std::vector<std::string> operands;
+    std::istringstream oss(op_part);
+    std::string tok;
+    while (std::getline(oss, tok, ',')) {
+      size_t s = tok.find_first_not_of(" \t");
+      size_t e = tok.find_last_not_of(" \t");
+      if (s != std::string::npos)
+        operands.push_back(tok.substr(s, e - s + 1));
+    }
+    if (operands.size() >= 3) {
+      result.push_back("v_and_b32_e32 " + operands[0] + ", " +
+                        operands[1] + ", " + operands[2]);
+    } else {
+      result.push_back("s_nop 0 ; UNSUPPORTED: " + line);
+    }
+    return result;
   }
 
   // ─── Wait counter translation ───
