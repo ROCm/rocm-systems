@@ -700,7 +700,10 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
   // ─── GFX12 TTMP-based workgroup ID → GFX9 SGPR workgroup ID ───
   // On GFX12, workgroup_id is in TTMP registers. On GFX9, it's in s2
   // (saved to s14 at kernel start by the transpiler).
-  // Replace: s_cselect_b32 sN, ttmp9, sM → s_mov_b32 sN, s14
+  // Replace: s_cselect_b32 sN, ttmp9, sM → v_readfirstlane_b32 sN, v5
+  // The preamble saved workgroup_id_x (s2) into v5. The kernel later uses sN
+  // (typically s0) as the output block index. We must set it here because the
+  // kernel expects s0 = workgroup_id after the TTMP computation completes.
   if (mnemonic == "s_cselect_b32" && line.find("ttmp9") != std::string::npos) {
     // Extract destination register
     size_t op_start = line.find(mnemonic) + mnemonic.size();
@@ -709,7 +712,7 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
     size_t e = ops.find_first_of(" \t,", s);
     if (s != std::string::npos) {
       std::string dst = ops.substr(s, e != std::string::npos ? e - s : std::string::npos);
-      return result;  // skip — preamble handles workgroup_id
+      result.push_back("v_readfirstlane_b32 " + dst + ", v5");
       return result;
     }
   }
