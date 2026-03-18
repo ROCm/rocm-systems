@@ -20,23 +20,9 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-set(rocpd_sources
-    ${CMAKE_CURRENT_LIST_DIR}/data_processor.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/unified_memory_aggregator.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/unified_memory_formatter.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/unified_memory_json.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/unified_memory_perfetto.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/unified_memory_integration.cpp
-)
+set(rocpd_sources ${CMAKE_CURRENT_LIST_DIR}/data_processor.cpp)
 
-set(rocpd_headers
-    ${CMAKE_CURRENT_LIST_DIR}/data_processor.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/unified_memory_aggregator.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/unified_memory_formatter.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/unified_memory_json.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/unified_memory_perfetto.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/unified_memory_integration.hpp
-)
+set(rocpd_headers ${CMAKE_CURRENT_LIST_DIR}/data_processor.hpp)
 
 target_sources(rocprofiler-systems-core-library PRIVATE ${rocpd_sources} ${rocpd_headers})
 

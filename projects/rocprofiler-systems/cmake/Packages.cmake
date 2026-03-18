@@ -287,7 +287,6 @@ function(ROCPROFSYS_CONFIGURE_ROCPD_SCHEMA_FILES)
         "data_views.sql"
         "marker_views.sql"
         "summary_views.sql"
-        "unified_memory_views.sql"
     )
 
     set(SCHEMA_SOURCE_DIR
@@ -362,34 +361,6 @@ endif()
 
 if(NOT ROCPROFSYS_USE_ROCPD_LIBRARY)
     rocprofsys_configure_rocpd_schema_files()
-else()
-    # When using external library, we still need to generate our custom unified memory schema
-    set(SCHEMA_SOURCE_DIR
-        "${PROJECT_SOURCE_DIR}/source/lib/core/rocpd/data_storage/schema"
-    )
-    set(SCHEMA_BINARY_DIR
-        "${PROJECT_BINARY_DIR}/source/lib/core/rocpd/data_storage/schema"
-    )
-    set(TEMPLATE_FILE "${PROJECT_SOURCE_DIR}/cmake/Templates/rocpd_schema.in")
-
-    file(MAKE_DIRECTORY ${SCHEMA_BINARY_DIR})
-
-    file(READ "${SCHEMA_SOURCE_DIR}/unified_memory_views.sql" SQL_CONTENT)
-
-    string(REPLACE "\\" "\\\\" SQL_CONTENT "${SQL_CONTENT}")
-    string(REPLACE "\"" "\\\"" SQL_CONTENT "${SQL_CONTENT}")
-    string(REPLACE "\n" "\\n\"\n\"" SQL_CONTENT "${SQL_CONTENT}")
-
-    set(SCHEMA_NAME "unified_memory_views")
-    set(SCHEMA_NAME_UPPER "UNIFIED_MEMORY_VIEWS")
-
-    configure_file("${TEMPLATE_FILE}" "${SCHEMA_BINARY_DIR}/${SCHEMA_NAME}.hpp" @ONLY)
-
-    target_include_directories(
-        rocprofiler-systems-headers
-        INTERFACE
-            $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/source/lib/core/rocpd/data_storage>
-    )
 endif()
 
 # ----------------------------------------------------------------------------------------#

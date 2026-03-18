@@ -36,22 +36,12 @@
 #if defined(ROCPROFSYS_USE_ROCPD_LIBRARY) && ROCPROFSYS_USE_ROCPD_LIBRARY > 0
 #    include <rocprofiler-sdk-rocpd/rocpd.h>
 #    include <rocprofiler-sdk-rocpd/types.h>
-
-namespace
-{
-constexpr rocpd_sql_schema_kind_t ROCPD_SQL_SCHEMA_ROCPD_UNIFIED_MEMORY_VIEWS =
-    static_cast<rocpd_sql_schema_kind_t>(1000);
-}  // namespace
-
-#    include "core/rocpd/data_storage/schema/unified_memory_views.hpp"
-
 #else
 #    include "core/rocpd/data_storage/schema/data_views.hpp"
 #    include "core/rocpd/data_storage/schema/marker_views.hpp"
 #    include "core/rocpd/data_storage/schema/rocpd_tables.hpp"
 #    include "core/rocpd/data_storage/schema/rocpd_views.hpp"
 #    include "core/rocpd/data_storage/schema/summary_views.hpp"
-#    include "core/rocpd/data_storage/schema/unified_memory_views.hpp"
 
 namespace
 {
@@ -64,7 +54,6 @@ enum rocpd_sql_schema_kind_t
     ROCPD_SQL_SCHEMA_ROCPD_DATA_VIEWS,
     ROCPD_SQL_SCHEMA_ROCPD_SUMMARY_VIEWS,
     ROCPD_SQL_SCHEMA_ROCPD_MARKER_VIEWS,
-    ROCPD_SQL_SCHEMA_ROCPD_UNIFIED_MEMORY_VIEWS,
     ROCPD_SQL_SCHEMA_LAST,
 };
 }  // namespace
@@ -124,12 +113,6 @@ std::string
 get_schema_query(rocpd_sql_schema_kind_t schema_kind, const std::string& upid)
 {
 #if defined(ROCPROFSYS_USE_ROCPD_LIBRARY) && ROCPROFSYS_USE_ROCPD_LIBRARY > 0
-    if(schema_kind == ROCPD_SQL_SCHEMA_ROCPD_UNIFIED_MEMORY_VIEWS)
-    {
-        return process_schema_template(
-            rocprofsys::rocpd::data_storage::schema::UNIFIED_MEMORY_VIEWS_SQL, upid);
-    }
-
     const auto                         jinja_size = 2 * upid.size();
     rocpd_sql_schema_jinja_variables_t info{ jinja_size, upid.c_str(), upid.c_str() };
 
@@ -162,9 +145,6 @@ get_schema_query(rocpd_sql_schema_kind_t schema_kind, const std::string& upid)
             break;
         case ROCPD_SQL_SCHEMA_ROCPD_SUMMARY_VIEWS:
             schema_content = rocprofsys::rocpd::data_storage::schema::SUMMARY_VIEWS_SQL;
-            break;
-        case ROCPD_SQL_SCHEMA_ROCPD_UNIFIED_MEMORY_VIEWS:
-            schema_content = rocprofsys::rocpd::data_storage::schema::UNIFIED_MEMORY_VIEWS_SQL;
             break;
         default:
             LOG_WARNING("Unknown schema kind: {}", static_cast<int>(schema_kind));
@@ -212,7 +192,7 @@ database::initialize_schema()
     const std::vector<rocpd_sql_schema_kind_t> schema_kinds = {
         ROCPD_SQL_SCHEMA_ROCPD_TABLES, ROCPD_SQL_SCHEMA_ROCPD_VIEWS,
         ROCPD_SQL_SCHEMA_ROCPD_DATA_VIEWS, ROCPD_SQL_SCHEMA_ROCPD_MARKER_VIEWS,
-        ROCPD_SQL_SCHEMA_ROCPD_SUMMARY_VIEWS, ROCPD_SQL_SCHEMA_ROCPD_UNIFIED_MEMORY_VIEWS
+        ROCPD_SQL_SCHEMA_ROCPD_SUMMARY_VIEWS
     };
 
     for(const auto& schema_kind : schema_kinds)

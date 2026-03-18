@@ -126,6 +126,12 @@ using amd_smi_nic_rx_ucast_pkts_track =
 using amd_smi_nic_tx_ucast_pkts_track =
     perfetto_counter_track<category::amd_smi_nic_tx_ucast_pkts>;
 
+// Unified Memory counter tracks
+using unified_memory_bandwidth_track =
+    perfetto_counter_track<category::unified_memory_bandwidth>;
+using unified_memory_fault_rate_track =
+    perfetto_counter_track<category::unified_memory_fault_rate>;
+
 void
 setup_amd_smi_tracks(const uint32_t _device_id, bool is_busy_enabled,
                      bool is_temp_enabled, bool is_power_enabled,
@@ -1430,9 +1436,47 @@ perfetto_processor_t::handle(const kfd_sample& _kfd)
     };
 
     if(_category == trait::name<category::kfd_page_fault>::value)
+    {
         emit_kfd_event(category::kfd_page_fault{});
+
+        // Emit page fault counter
+        if(!unified_memory_fault_rate_track::exists(_kfd.device_id))
+        {
+            auto track_name =
+                fmt::format("Unified Memory Page Faults [Device {}]", _kfd.device_id);
+            unified_memory_fault_rate_track::emplace(
+                _kfd.device_id, track_name, "faults",
+                trait::name<category::unified_memory_fault_rate>::value);
+        }
+        TRACE_COUNTER(trait::name<category::unified_memory_fault_rate>::value,
+                      unified_memory_fault_rate_track::at(_kfd.device_id, 0), _end_ts,
+                      1.0);  // Increment counter by 1
+    }
     else if(_category == trait::name<category::kfd_page_migrate>::value)
+    {
         emit_kfd_event(category::kfd_page_migrate{});
+
+        // Emit bandwidth counter
+        auto duration_ns = _end_ts - _beg_ts;
+        if(duration_ns > 0)
+        {
+            if(!unified_memory_bandwidth_track::exists(_kfd.device_id))
+            {
+                auto track_name =
+                    fmt::format("Unified Memory Bandwidth [Device {}]", _kfd.device_id);
+                unified_memory_bandwidth_track::emplace(
+                    _kfd.device_id, track_name, "GB/s",
+                    trait::name<category::unified_memory_bandwidth>::value);
+            }
+
+            // Calculate bandwidth: _kfd.value is size in bytes
+            double bandwidth_gbps =
+                (_kfd.value / static_cast<double>(duration_ns));  // bytes/ns = GB/s
+            TRACE_COUNTER(trait::name<category::unified_memory_bandwidth>::value,
+                          unified_memory_bandwidth_track::at(_kfd.device_id, 0), _end_ts,
+                          bandwidth_gbps);
+        }
+    }
     else if(_category == trait::name<category::kfd_queue>::value)
         emit_kfd_event(category::kfd_queue{});
     else if(_category == trait::name<category::kfd_event_queue>::value)

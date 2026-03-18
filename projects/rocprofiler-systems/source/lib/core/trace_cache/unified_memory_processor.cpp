@@ -1,0 +1,382 @@
+// MIT License
+//
+// Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
+#include <stdexcept>  // Must be before unified_memory_processor.hpp
+
+#include "core/config.hpp"
+#include "core/defines.hpp"
+#include "core/trace_cache/unified_memory_processor.hpp"
+#include "logger/debug.hpp"
+
+#include <cstdlib>
+#include <fstream>
+#include <iomanip>
+#include <nlohmann/json.hpp>
+#include <spdlog/fmt/fmt.h>
+#include <sstream>
+
+namespace rocprofsys
+{
+namespace trace_cache
+{
+
+namespace
+{
+// Empty namespace for now - Perfetto counters handled by perfetto_processor
+}  // namespace
+
+unified_memory_processor_t::unified_memory_processor_t(
+    const std::shared_ptr<metadata_registry>& metadata,
+    const std::shared_ptr<agent_manager>& agent_mgr, int pid,
+    const std::string& output_dir)
+: processor_t<unified_memory_processor_t>()
+, m_metadata(metadata)
+, m_agent_manager(agent_mgr)
+, m_pid(pid)
+, m_output_dir(output_dir)
+{
+    const char* xnack    = std::getenv("HSA_XNACK");
+    m_data.xnack_enabled = (xnack && std::string(xnack) == "1");
+}
+
+void
+unified_memory_processor_t::prepare_for_processing()
+{
+    LOG_DEBUG("Preparing unified memory processor for processing");
+
+    if(!m_data.xnack_enabled)
+    {
+        LOG_WARNING("HSA_XNACK is not set to 1. Unified memory profiling may show "
+                    "limited data. Set HSA_XNACK=1 for page fault-driven migration.");
+    }
+}
+
+void
+unified_memory_processor_t::finalize_processing()
+{
+    LOG_DEBUG("Finalizing unified memory processor");
+
+    bool has_data = false;
+    for(const auto& [device_id, summary] : m_data.devices)
+    {
+        if(summary.host_to_device.count > 0 || summary.device_to_host.count > 0 ||
+           summary.device_to_device.count > 0)
+        {
+            has_data = true;
+            break;
+        }
+    }
+
+    if(!has_data)
+    {
+        LOG_INFO(
+            "No unified memory migration events captured. Skipping output generation.");
+        return;
+    }
+
+    std::string   txt_path = m_output_dir + "/unified_memory.txt";
+    std::ofstream txt_file(txt_path);
+    if(!txt_file.is_open())
+    {
+        LOG_ERROR("Failed to open unified memory text output: {}", txt_path);
+    }
+    else
+    {
+        write_text_output(txt_file);
+        txt_file.close();
+        LOG_INFO("Unified memory text report written to: {}", txt_path);
+    }
+
+    std::string   json_path = m_output_dir + "/unified_memory.json";
+    std::ofstream json_file(json_path);
+    if(!json_file.is_open())
+    {
+        LOG_ERROR("Failed to open unified memory JSON output: {}", json_path);
+    }
+    else
+    {
+        write_json_output(json_file);
+        json_file.close();
+        LOG_INFO("Unified memory JSON report written to: {}", json_path);
+    }
+
+    LOG_INFO("Unified memory processor finalized successfully");
+}
+
+void
+unified_memory_processor_t::handle(const kfd_sample& sample)
+{
+    if(sample.category == "kfd_page_migrate")
+    {
+        // Format: "...2;;string;;src_agent;;NODE_ID;;3;;string;;dst_agent;;NODE_ID;;"
+        auto agent_ids = parse_agent_ids_from_args(sample.args_str);
+        if(!agent_ids.has_value())
+        {
+            LOG_TRACE("Failed to parse agent IDs from KFD page migration event");
+            return;
+        }
+
+        auto [src_label, dst_label] = agent_ids.value();
+        auto direction              = classify_direction(src_label, dst_label);
+
+        uint32_t device_id = sample.device_id;
+        if(m_data.devices.find(device_id) == m_data.devices.end())
+        {
+            device_migration_summary summary;
+            summary.device_id = device_id;
+
+            auto agent = m_agent_manager->get_agent_by_type_index(
+                device_id, static_cast<agent_type>(sample.device_type));
+            summary.device_name =
+                agent.name.empty() ? fmt::format("Device {}", device_id) : agent.name;
+
+            m_data.devices[device_id] = summary;
+        }
+
+        auto& device_summary = m_data.devices[device_id];
+
+        uint64_t size_bytes  = static_cast<uint64_t>(sample.value);
+        uint64_t duration_ns = sample.end_timestamp - sample.start_timestamp;
+
+        switch(direction)
+        {
+            case migration_direction::HOST_TO_DEVICE:
+                device_summary.host_to_device.add_migration(size_bytes, duration_ns);
+                break;
+            case migration_direction::DEVICE_TO_HOST:
+                device_summary.device_to_host.add_migration(size_bytes, duration_ns);
+                break;
+            case migration_direction::DEVICE_TO_DEVICE:
+                device_summary.device_to_device.add_migration(size_bytes, duration_ns);
+                break;
+            case migration_direction::UNKNOWN:
+                LOG_TRACE("Unknown migration direction for device {}", device_id);
+                break;
+        }
+    }
+    else if(sample.category == "kfd_page_fault")
+    {
+        uint32_t agent_id = sample.device_id;
+        bool     is_read  = is_read_fault(sample.name);
+
+        m_data.faults_by_agent[agent_id].add_fault(is_read);
+
+        if(sample.device_type == static_cast<uint8_t>(agent_type::CPU))
+        {
+            m_data.total_cpu_page_faults++;
+        }
+        else if(sample.device_type == static_cast<uint8_t>(agent_type::GPU))
+        {
+            m_data.total_gpu_page_faults++;
+        }
+    }
+}
+
+unified_memory_processor_t::migration_direction
+unified_memory_processor_t::classify_direction(const std::string& src_label,
+                                               const std::string& dst_label) const
+{
+    bool src_is_cpu = src_label.find("CPU") != std::string::npos;
+    bool dst_is_cpu = dst_label.find("CPU") != std::string::npos;
+
+    if(src_is_cpu && !dst_is_cpu)
+        return migration_direction::HOST_TO_DEVICE;
+    else if(!src_is_cpu && dst_is_cpu)
+        return migration_direction::DEVICE_TO_HOST;
+    else if(!src_is_cpu && !dst_is_cpu)
+        return migration_direction::DEVICE_TO_DEVICE;
+    else
+        return migration_direction::UNKNOWN;
+}
+
+bool
+unified_memory_processor_t::is_read_fault(const std::string& name) const
+{
+    return name.find("Read") != std::string::npos ||
+           name.find("READ") != std::string::npos;
+}
+
+std::optional<std::pair<std::string, std::string>>
+unified_memory_processor_t::parse_agent_ids_from_args(const std::string& args_str) const
+{
+    std::string src_agent, dst_agent;
+
+    // Find "src_agent;;" pattern
+    size_t src_pos = args_str.find("src_agent;;");
+    if(src_pos != std::string::npos)
+    {
+        src_pos += 11;  // Move past "src_agent;;"
+        size_t end_pos = args_str.find(";;", src_pos);
+        if(end_pos != std::string::npos)
+        {
+            src_agent = args_str.substr(src_pos, end_pos - src_pos);
+        }
+    }
+
+    // Find "dst_agent;;" pattern
+    size_t dst_pos = args_str.find("dst_agent;;");
+    if(dst_pos != std::string::npos)
+    {
+        dst_pos += 11;  // Move past "dst_agent;;"
+        size_t end_pos = args_str.find(";;", dst_pos);
+        if(end_pos != std::string::npos)
+        {
+            dst_agent = args_str.substr(dst_pos, end_pos - dst_pos);
+        }
+    }
+
+    if(src_agent.empty() || dst_agent.empty())
+    {
+        return std::nullopt;
+    }
+
+    return std::make_pair(src_agent, dst_agent);
+}
+
+static std::string
+format_size(uint64_t bytes) noexcept
+{
+    std::ostringstream oss;
+    oss << std::fixed << std::setprecision(4);
+
+    if(bytes >= 1024ULL * 1024 * 1024)
+        oss << (bytes / (1024.0 * 1024 * 1024)) << "GB";
+    else if(bytes >= 1024ULL * 1024)
+        oss << (bytes / (1024.0 * 1024)) << "MB";
+    else if(bytes >= 1024ULL)
+        oss << (bytes / 1024.0) << "KB";
+    else
+        oss << bytes << "B";
+
+    return oss.str();
+}
+
+static std::string
+format_time(uint64_t nanoseconds) noexcept
+{
+    std::ostringstream oss;
+    oss << std::fixed << std::setprecision(4);
+
+    if(nanoseconds >= 1000000000ULL)
+        oss << (nanoseconds / 1000000000.0) << "s";
+    else if(nanoseconds >= 1000000ULL)
+        oss << (nanoseconds / 1000000.0) << "ms";
+    else if(nanoseconds >= 1000ULL)
+        oss << (nanoseconds / 1000.0) << "us";
+    else
+        oss << nanoseconds << "ns";
+
+    return oss.str();
+}
+
+void
+unified_memory_processor_t::write_text_output(std::ostream& out)
+{
+    out << "==" << m_pid << "== Unified Memory profiling result:\n";
+
+    for(const auto& [device_id, summary] : m_data.devices)
+    {
+        out << " Device \"" << summary.device_name << " (" << device_id << ")\"\n";
+        out << "    Count  Avg Size  Min Size  Max Size  Total Size  Total Time    "
+               "Bandwidth  Name\n";
+
+        auto print_stats = [&](const migration_stats& stats, const char* name) {
+            if(stats.count > 0)
+            {
+                out << std::setw(9) << stats.count << "  " << std::setw(8)
+                    << format_size(static_cast<uint64_t>(stats.avg_size_bytes())) << "  "
+                    << std::setw(8) << format_size(stats.min_size_bytes) << "  "
+                    << std::setw(8) << format_size(stats.max_size_bytes) << "  "
+                    << std::setw(10) << format_size(stats.total_size_bytes) << "  "
+                    << std::setw(11) << format_time(stats.total_time_ns) << "  "
+                    << std::setw(9) << std::fixed << std::setprecision(2)
+                    << stats.bandwidth_gbps() << " GB/s  " << name << "\n";
+            }
+        };
+
+        print_stats(summary.host_to_device, "Host To Device");
+        print_stats(summary.device_to_host, "Device To Host");
+        print_stats(summary.device_to_device, "Device To Device");
+
+        out << "\n";
+    }
+
+    if(m_data.total_cpu_page_faults > 0 || m_data.total_gpu_page_faults > 0)
+    {
+        out << " Total CPU Page faults: " << m_data.total_cpu_page_faults << "\n";
+        out << " Total GPU Page faults: " << m_data.total_gpu_page_faults << "\n";
+    }
+}
+
+void
+unified_memory_processor_t::write_json_output(std::ostream& out)
+{
+    nlohmann::json root;
+    nlohmann::json devices_array = nlohmann::json::array();
+
+    for(const auto& [device_id, summary] : m_data.devices)
+    {
+        nlohmann::json device;
+        device["device_id"]   = device_id;
+        device["device_name"] = summary.device_name;
+
+        auto create_migration_json = [](const migration_stats& stats) -> nlohmann::json {
+            if(stats.count == 0) return nullptr;
+
+            nlohmann::json obj;
+            obj["count"]            = stats.count;
+            obj["avg_size_bytes"]   = stats.avg_size_bytes();
+            obj["min_size_bytes"]   = stats.min_size_bytes;
+            obj["max_size_bytes"]   = stats.max_size_bytes;
+            obj["total_size_bytes"] = stats.total_size_bytes;
+            obj["total_time_ns"]    = stats.total_time_ns;
+            obj["bandwidth_gbps"]   = stats.bandwidth_gbps();
+            return obj;
+        };
+
+        nlohmann::json migrations;
+        if(auto htd = create_migration_json(summary.host_to_device); !htd.is_null())
+            migrations["host_to_device"] = htd;
+        if(auto dth = create_migration_json(summary.device_to_host); !dth.is_null())
+            migrations["device_to_host"] = dth;
+        if(auto dtd = create_migration_json(summary.device_to_device); !dtd.is_null())
+            migrations["device_to_device"] = dtd;
+
+        device["migrations"] = migrations;
+
+        devices_array.push_back(device);
+    }
+
+    root["devices"] = devices_array;
+
+    nlohmann::json summary;
+    summary["total_cpu_page_faults"] = m_data.total_cpu_page_faults;
+    summary["total_gpu_page_faults"] = m_data.total_gpu_page_faults;
+    summary["xnack_enabled"]         = m_data.xnack_enabled;
+
+    root["summary"] = summary;
+
+    out << root.dump(2);  // Pretty print with 2-space indent
+}
+
+}  // namespace trace_cache
+}  // namespace rocprofsys

@@ -365,13 +365,6 @@ configure_settings(bool _init)
         true, "backend", "sampling", "process_sampling");
 
     ROCPROFSYS_CONFIG_SETTING(
-        bool, "ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING",
-        "Enable unified memory profiling to track page migrations, page faults, and "
-        "XNACK overhead. Provides bandwidth statistics and migration patterns for HIP "
-        "unified memory (hipMallocManaged). Requires KFD event tracing support.",
-        false, "backend", "rocpd", "unified_memory", "kfd");
-
-    ROCPROFSYS_CONFIG_SETTING(
         bool, "ROCPROFSYS_USE_PID",
         "Enable tagging filenames with process identifier (either MPI rank or pid)", true,
         "io", "filename");
