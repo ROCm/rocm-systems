@@ -468,7 +468,7 @@ list(APPEND HIP_SOURCES ${PROJECT_BINARY_DIR}/git_version.cpp)
 ## Set RCCL source files
 add_library(rccl ${HIP_SOURCES})
 
-# Keep librccl outputs in the top-level build dir 
+# Keep librccl outputs in the top-level build dir
 # existing packaging/tests scripts that link via ${PROJECT_BINARY_DIR}.
 set_target_properties(rccl PROPERTIES
   ARCHIVE_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"
@@ -486,6 +486,19 @@ endif()
 
 if(HIP_HOST_UNCACHED_MEMORY)
   target_compile_definitions(rccl PRIVATE HIP_HOST_UNCACHED_MEMORY)
+endif()
+
+if(HIP_FABRIC_API_FUNC AND HIP_FABRIC_HANDLE_TYPE)
+  set(HIP_FABRIC_API ON)
+  message(STATUS "HIP Fabric API enabled (hipMemImportFromShareableHandle and hipMemFabricHandle_t found)")
+else()
+  set(HIP_FABRIC_API OFF)
+  if(NOT HIP_FABRIC_API_FUNC)
+    message(STATUS "hipMemImportFromShareableHandle not found - disabling HIP_FABRIC_API")
+  endif()
+  if(NOT HIP_FABRIC_HANDLE_TYPE)
+    message(STATUS "hipMemFabricHandle_t type not found - disabling HIP_FABRIC_API")
+  endif()
 endif()
 
 if(GENERATE_SYM_KERNELS)
