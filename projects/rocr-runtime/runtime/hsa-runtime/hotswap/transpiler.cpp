@@ -2381,8 +2381,23 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
     // v_add_nc_u32 → v_add_u32_e32 (may appear without _e32 from VOP3 encoding)
     replaceAll(translated_asm, "v_add_nc_u32 ", "v_add_u32_e32 ");
     replaceAll(translated_asm, "v_sub_nc_u32 ", "v_sub_u32_e32 ");
-    // v_cndmask_b32 ... vcc_lo → strip vcc_lo (GFX9 VOP2 uses implicit VCC)
-    replaceAll(translated_asm, ", vcc_lo\n", "\n");
+    // v_cndmask_b32 ... vcc_lo → strip explicit vcc_lo (GFX9 VOP2 uses implicit VCC)
+    // Only strip from v_cndmask lines, not other instructions that legitimately use vcc_lo
+    {
+      std::string tmp;
+      std::istringstream vcc_iss(translated_asm);
+      std::string vcc_line;
+      while (std::getline(vcc_iss, vcc_line)) {
+        if (vcc_line.find("v_cndmask_b32") != std::string::npos) {
+          // Strip trailing ", vcc_lo"
+          size_t vcc_pos = vcc_line.rfind(", vcc_lo");
+          if (vcc_pos != std::string::npos)
+            vcc_line = vcc_line.substr(0, vcc_pos);
+        }
+        tmp += vcc_line + "\n";
+      }
+      translated_asm = tmp;
+    }
     // v_bitop2_b32/v_bitop3_b32 → s_nop 0 (GFX12-only, no simple GFX9 equivalent)
     // Replace entire lines containing v_bitop[23]_b32
     std::istringstream iss(translated_asm);
