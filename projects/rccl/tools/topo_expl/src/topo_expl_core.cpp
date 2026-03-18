@@ -1194,6 +1194,7 @@ ncclResult_t initTransportsRank_3(struct ncclComm* comm, struct allGatherInfo *a
   TRACE(NCCL_INIT, "rank %d nranks %d - CONNECTED %d RINGS AND TREES", rank, nranks, comm->nChannels);
 
   // Compute time models for algorithm and protocol combinations
+  NCCLCHECKGOTO(ncclTopoInitTunerConstants(comm), ret, fail);
   NCCLCHECKGOTO(ncclTopoTuneModel(comm, comm->minCompCap, comm->maxCompCap, graphs), ret, fail);
 
   INFO(NCCL_INIT, "%d coll channels, %d nvls channels, %d p2p channels, %d p2p channels per peer", comm->nChannels, comm->nvlsChannels, comm->p2pnChannels, comm->p2pnChannelsPerPeer);

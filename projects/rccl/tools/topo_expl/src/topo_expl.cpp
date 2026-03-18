@@ -139,7 +139,7 @@ int main(int argc, char* argv[])
     int bestAlgo = -1;
     int bestProto = -1;
     
-    // Try all algorithm/protocol combinations
+    // Try all algorithm/protocol combinations for AllReduce
     for (int a = 0; a < numAlgos; a++) {
       for (int p = 0; p < numProtos; p++) {
         float time;
@@ -171,8 +171,8 @@ int main(int argc, char* argv[])
   // Arrays to store function types
   std::vector<TopoExplFunc> funcTypes = {
     TOPO_FUNC_ALLREDUCE,
-    TOPO_FUNC_REDUCESCATTER,
     TOPO_FUNC_ALLGATHER,
+    TOPO_FUNC_REDUCESCATTER,
     TOPO_FUNC_REDUCE,
     TOPO_FUNC_BROADCAST
   };
