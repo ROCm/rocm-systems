@@ -88,7 +88,9 @@ class TestROCTx(RocprofsysTest):
     REWRITE_ARGS = ["-e", "-v", "2", "--instrument-loops"]
 
     @pytest.mark.timeout(120)
-    @pytest.mark.parametrize("mode", ["baseline", "binary_rewrite", "sys_run"])
+    @pytest.mark.parametrize(
+        "mode", ["baseline", "binary_rewrite", "sys_run", "runtime_instrument"]
+    )
     def test(self, mode, roctx_env):
         result = self.run_test(
             mode,

@@ -144,7 +144,6 @@ jobs:
           -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
           -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems
           -DROCPROFSYS_BUILD_TESTING=ON
-          -DROCPROFSYS_BUILD_FOR_THEROCK=ON
           -DROCPROFSYS_USE_MPI=OFF
           -DROCPROFSYS_USE_OMPT=OFF
           -DROCPROFSYS_USE_PYTHON=ON
@@ -183,9 +182,9 @@ jobs:
       working-directory: projects/rocprofiler-systems/
       run: |
         du /tmp -d 1 -h
-        du build/rocprof-sys-tests-output -d 1 -h
+        du build/rocprof-sys-pytest-output -d 1 -h || true
         df -h
-        rm -fr /tmp/* build/rocprof-sys-tests-output/*
+        rm -fr /tmp/* build/rocprof-sys-pytest-output/*
 
     - name: Install
       timeout-minutes: 10

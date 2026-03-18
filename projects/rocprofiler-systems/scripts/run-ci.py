@@ -142,10 +142,9 @@ def generate_dashboard_script(args):
         handle_error("Build" _build_ret)
 
         if(IS_DIRECTORY "{BINARY_DIR}/share/rocprofiler-systems/tests/pytest")
-            find_program(_pytest_exe NAMES pytest REQUIRED)
-
             set(_py_ver_flag "")
             set(_py_dir_flag "")
+            set(_pytest_hints "")
             file(STRINGS "{BINARY_DIR}/CMakeCache.txt" _cache_lines)
             foreach(_line IN LISTS _cache_lines)
                 if(_line MATCHES "^ROCPROFSYS_PYTHON_VERSIONS:[A-Z]+=(.+)")
@@ -154,8 +153,13 @@ def generate_dashboard_script(args):
                 elseif(_line MATCHES "^ROCPROFSYS_PYTHON_ROOT_DIRS:[A-Z]+=(.+)")
                     string(REPLACE ";" "\\\\;" _pd "${{CMAKE_MATCH_1}}")
                     set(_py_dir_flag "--python-root-dirs=${{_pd}}")
+                    foreach(_root IN LISTS CMAKE_MATCH_1)
+                        list(APPEND _pytest_hints "${{_root}}/bin")
+                    endforeach()
                 endif()
             endforeach()
+
+            find_program(_pytest_exe NAMES pytest HINTS ${{_pytest_hints}} REQUIRED)
 
             execute_process(
                 COMMAND ${{_pytest_exe}}

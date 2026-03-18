@@ -8,7 +8,6 @@ This module provides shared fixtures and configuration for all test modules.
 """
 
 from __future__ import annotations
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from functools import lru_cache
 from typing import Callable, Generator, Literal, Optional
@@ -60,6 +59,8 @@ _output_printed_key: StashKey[bool] = StashKey()
 _original_nodeid_key: StashKey[str] = StashKey()
 # GNU convention. Used for CTests
 SKIP_RETURN_CODE = 77
+# Default timeout for tests in seconds
+DEFAULT_TIMEOUT = 300
 
 # Accepted runner types when using parametrized "mode" marker
 ROCPROFSYS_RUNNER_NAMES = [
@@ -135,6 +136,7 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=False,
         help="Runners use ROCPROFSYS_MONOCHROME=ON and pytest color output is disabled",
     )
+    # TODO: Deprecate once TheRock switches to CTest and CTest based filtering
     group.addoption(
         "--ci-mode",
         action="store_true",
@@ -221,12 +223,12 @@ def pytest_configure(config: pytest.Config) -> None:
         "markers",
         "rocpd(env): mark test as using ROCpd and inject ROCpd env into given env",
     )
-    # TODO: Deprecate once --ci-mode is removed
+    # TODO: Deprecate once TheRock switches to CTest and CTest based filtering
     config.addinivalue_line(
         "markers",
         "ci_enable: Full test will be run when in CI mode. To disable a subtest, use ci_disable(name) (CI mode only)",
     )
-    # TODO: Deprecate once --ci-mode is removed
+    # TODO: Deprecate once TheRock switches to CTest and CTest based filtering
     config.addinivalue_line(
         "markers",
         "ci_disable(name): Use 'all' to skip entire test, or assertion name (e.g., 'assert_rocpd') to disable subtest. Overrides ci_enable (CI mode only)",
@@ -376,7 +378,7 @@ def pytest_sessionstart(session):
 
 
 def pytest_report_header(config) -> list[str]:
-    # TODO: Deprecate once --ci-mode is removed
+    # TODO: Deprecate once TheRock switches to CTest and CTest based filtering
     if not config.getoption("--ci-mode", default=False):
         return []
     return _generate_rocprofsys_config_header(config)
@@ -439,7 +441,7 @@ def pytest_collection_modifyitems(config, items) -> None:
         rocprof_config.capabilities.papi_nic_events is not None
         and rocprof_config.capabilities.perf_event_paranoid <= 2
     )
-    # TODO: Deprecate once --ci-mode is removed
+    # TODO: Deprecate once TheRock switches to CTest and CTest based filtering
     mpi_available = lambda: (
         rocprof_config.capabilities.mpiexec_exec is not None
         and not config.getoption("--ci-mode", default=False)
@@ -495,6 +497,7 @@ def pytest_collection_modifyitems(config, items) -> None:
             base_modifications(item)
         return
 
+    # TODO: Deprecate once TheRock switches to CTest and CTest based filtering
     # TheRock specific
     if config.getoption("--ci-mode", default=False):
         selected_tests = []
@@ -743,7 +746,8 @@ def configure_mode(config: pytest.Config) -> None:
      - --dev: Developer mode
     """
 
-    # MPI is disabled in CI mode, this is done in collection_modifyitems
+    # MPI is disabled in CI mode, this is done in collection_modifyit
+    # # TODO: Deprecate once TheRock switches to CTest and CTest based filteringems
     ci_mode = config.getoption("--ci-mode", default=False)
     ctest_mode = config.getoption("--ctest-mode", default="off") == "run"
     dev_mode = config.getoption("--dev", default=False)
@@ -759,6 +763,7 @@ def configure_mode(config: pytest.Config) -> None:
         config.option.no_header = True
         config.option.show_test_output = "all"
 
+    # TODO: Deprecate once TheRock switches to CTest and CTest based filtering
     if ci_mode:
         config.option.show_config = True
         config.option.show_test_output = "subtest"
@@ -773,22 +778,35 @@ def configure_mode(config: pytest.Config) -> None:
 
 
 def _standardize_test_name(item: pytest.Item, verbose: bool = False) -> None:
-    # Clean up default pytest parametrized naming conventions
-    if "-]" in item.name or "--" in item.name:
-        item.name = re.sub(r"-+\]", "]", item.name)
-        item.name = re.sub(r"--+", "-", item.name)
-
     class_name = item.cls.__name__ if item.cls else None
-    short_name = _format_output_dir_name(class_name, item.name)
+    test_name = item.name
+
+    # Strip 'Test' prefix from class name and 'test_'/'test-' prefix from test name
+    if class_name and class_name.startswith("Test"):
+        class_name = class_name[4:]
+    if test_name.startswith("test"):
+        test_name = test_name[4:]
+        if test_name.startswith(("_", "-")):
+            test_name = test_name[1:]
+    full_name = f"{class_name}-{test_name}" if class_name else test_name
+    formatted_name = "".join(c if c.isalnum() or c == "." else "-" for c in full_name)
+    formatted_name = formatted_name.replace("-", "_")
+    while "__" in formatted_name:
+        formatted_name = formatted_name.replace("__", "_")
+    formatted_name = formatted_name.strip("_")
+
     item.stash[_original_nodeid_key] = item.nodeid
     # nodeid is what is used to display the test name in the terminal
     # By default, it groups it by module. In verbose, it shows the full path + class + method
     # To get a cleaner output in verbose mode, we modify the nodeid but only if verbose is True
     # This avoids breaking the default grouping by module in non-verbose mode
     if verbose:
-        item._nodeid = short_name
-    item.name = short_name
-    item.extra_keyword_matches.add(short_name)
+        item._nodeid = formatted_name
+    item.name = formatted_name
+
+    # Allow -k filtering by the formatted name
+    item.extra_keyword_matches.add(formatted_name)
+    item.extra_keyword_matches.add(formatted_name.lower())
 
 
 def _ctest_generate_tests(
@@ -796,28 +814,28 @@ def _ctest_generate_tests(
 ) -> None:
     """Generate a CTestTestfile.cmake file and print it to stdout."""
 
-    DEFAULT_TIMEOUT = 300
-
     no_report_markers = {
         "parametrize",  # Ignored, except for "mode" parameter (instrumentation mode)
-        "usefixtures",  # Built-in pytest marker
-        "filterwarnings",  # Built-in pytest marker
-        "skipif",  # Built-in pytest marker
-        "skip",  # Built-in pytest marker
-        "xfail",  # Built-in pytest marker
         "run_if_gpu_category",  # Contains an expression that must be evaluated at runtime
-        "python_versions",  # Internal marker
-        "ci_enable",  # Internal marker
-        "ci_disable",  # Internal marker
-        "mpi_optional",  # Internal marker
-        "no_docker",  # Internal marker
-        "oshrun_min_version",  # Internal marker
-        "rocm_min_version",  # Internal marker
-        "timeout",  # Used for CTest timeout
-        "depends_on",  # Used for CTest dependencies
-        "serialize",  # Used for CTest serialize
+        # Pytest built-in
+        "usefixtures",
+        "filterwarnings",
+        "skipif",
+        "skip",
+        "xfail",
+        # Internal markers
+        "python_versions",
+        "ci_enable",
+        "ci_disable",
+        "mpi_optional",
+        "no_docker",
+        "oshrun_min_version",
+        "rocm_min_version",
+        # For CTests
+        "timeout",
+        "depends_on",
+        "serialize",
     }
-
     no_report_args_markers = {"rocpd"}
     only_report_args_markers = {"mpi_implementation"}
 
@@ -1538,26 +1556,6 @@ def collect_result(request) -> Callable:
     return _collect
 
 
-def _format_output_dir_name(class_name: str | None, test_name: str) -> str:
-    """Format a filesystem-safe output directory name for a test.
-
-    Strips 'Test' prefix from class names and 'test_'/'test-' prefix from test names,
-    joins them with '__', then sanitizes non-alphanumeric characters to dashes.
-    """
-    if class_name and class_name.startswith("Test"):
-        class_name = class_name[4:]
-    if test_name.startswith("test"):
-        test_name = test_name[4:]
-        if test_name.startswith(("_", "-")):
-            test_name = test_name[1:]
-    full_name = f"{class_name}-{test_name}" if class_name else test_name
-    safe_name = "".join(c if c.isalnum() or c == "." else "-" for c in full_name)
-    safe_name = safe_name.replace("-", "_")
-    while "__" in safe_name:
-        safe_name = safe_name.replace("__", "_")
-    return safe_name.strip("_")
-
-
 @pytest.fixture
 def test_output_dir(
     test_output_base: Path,
@@ -1646,6 +1644,7 @@ def record_subtest_failure(request):
     return _record
 
 
+# TODO: Deprecate once TheRock switches to CTest and CTest based filtering
 def _is_assert_disabled(request: pytest.FixtureRequest, subtest_name: str) -> bool:
     """Check if a subtest is disabled via ci_disable marker in CI mode."""
     if not request.config.getoption("--ci-mode", default=False):
