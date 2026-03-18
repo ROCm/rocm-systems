@@ -246,7 +246,8 @@ struct TestResults {
     int vmem_buffer_passed;   // Buffer load/store (buffer_load_dword, etc.)
     int vmem_scratch_passed;  // Scratch load/store (scratch_load_dword, etc.)
     int vmem_lds_passed;      // LDS operations (ds_read_b32, ds_write_b32, etc.)
-    int vmem_tex_load_passed; // Texture load (image_load / SQ_INSTS_TEX_LOAD) on Strix
+    int vmem_tex_load_passed;   // Texture load (image_load / SQ_INSTS_TEX_LOAD) on Strix
+    int vmem_tex_store_passed;  // Texture store (image_store / SQ_INSTS_TEX_STORE) on Strix
 
     // Atomic Operations - comprehensive inline ASM tests
     int atomic_global_int_passed;     // global_atomic_add/sub/min/max (integer)
@@ -287,7 +288,8 @@ extern "C" __global__ void _mega_kernel(
     float* async_lds_dst,      // Destination buffer for async LDS store test
     int buffer_size,
     int mfma_mode,             // 0=both, 1=asm only, 2=builtin only
-    hipTextureObject_t tex_obj // Texture for TEX load test (Strix); 0 if not used
+    hipTextureObject_t tex_obj,   // Texture for TEX load test (Strix); 0 if not used
+    hipSurfaceObject_t surf_obj   // Surface for TEX store test (Strix); 0 if not used
 );
 
 void print_separator() {
@@ -454,21 +456,31 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipMemset(d_async_lds_src, 0, ASYNC_LDS_SIZE * sizeof(float)));
     HIP_CHECK(hipMemset(d_async_lds_dst, 0, ASYNC_LDS_SIZE * sizeof(float)));
 
-    // Create texture object for Strix (gfx1150/1151/1152) to exercise INSTS_TEX_LOAD
+    // Create texture and surface objects for Strix (gfx1150/1151/1152) to exercise
+    // INSTS_TEX_LOAD (tex1Dfetch) and INSTS_TEX_STORE (surf1Dwrite).
     hipTextureObject_t tex_obj = 0;
+    hipSurfaceObject_t surf_obj = 0;
+    float* d_surf_buffer = nullptr;
     if (g_arch_type == 7) {
         hipResourceDesc resDesc;
         memset(&resDesc, 0, sizeof(resDesc));
         resDesc.resType = hipResourceTypeLinear;
-        resDesc.res.linear.devPtr = d_input;
         resDesc.res.linear.sizeInBytes = BUFFER_SIZE * sizeof(float);
-        resDesc.res.linear.desc = hipCreateChannelDesc(32, 0, 0, 0, hipChannelFormatKindFloat);
+        resDesc.res.linear.desc =
+            hipCreateChannelDesc(32, 0, 0, 0, hipChannelFormatKindFloat);
+
+        resDesc.res.linear.devPtr = d_input;
         hipTextureDesc texDesc;
         memset(&texDesc, 0, sizeof(texDesc));
         texDesc.normalizedCoords = 0;
         texDesc.filterMode = hipFilterModePoint;
         texDesc.addressMode[0] = hipAddressModeClamp;
         HIP_CHECK(hipCreateTextureObject(&tex_obj, &resDesc, &texDesc, nullptr));
+
+        HIP_CHECK(hipMalloc(&d_surf_buffer, BUFFER_SIZE * sizeof(float)));
+        HIP_CHECK(hipMemset(d_surf_buffer, 0, BUFFER_SIZE * sizeof(float)));
+        resDesc.res.linear.devPtr = d_surf_buffer;
+        HIP_CHECK(hipCreateSurfaceObject(&surf_obj, &resDesc));
     }
 
     printf("Running GPU Mega Kernel for %s...\n", get_arch_description());
@@ -510,7 +522,8 @@ int main(int argc, char** argv) {
         d_async_lds_dst,
         BUFFER_SIZE,
         (int)config.mfma_mode,  // 0=both, 1=asm, 2=builtin
-        tex_obj                 // Texture for TEX load (Strix); 0 otherwise
+        tex_obj,                // Texture for TEX load (Strix); 0 otherwise
+        surf_obj                // Surface for TEX store (Strix); 0 otherwise
     );
 
     // Check for launch errors
@@ -528,6 +541,12 @@ int main(int argc, char** argv) {
     
     if (tex_obj != 0) {
         HIP_CHECK(hipDestroyTextureObject(tex_obj));
+    }
+    if (surf_obj != 0) {
+        HIP_CHECK(hipDestroySurfaceObject(surf_obj));
+    }
+    if (d_surf_buffer != nullptr) {
+        HIP_CHECK(hipFree(d_surf_buffer));
     }
 
     // Copy results back
@@ -643,6 +662,8 @@ int main(int argc, char** argv) {
     print_test_result("LDS Operations (ds_read_b32/ds_write_b32)", h_results.vmem_lds_passed);
     print_test_result("Texture Load (tex1Dfetch / INSTS_TEX_LOAD)",
                       g_arch_type == 7 ? h_results.vmem_tex_load_passed : -1);
+    print_test_result("Texture Store (surf1Dwrite / INSTS_TEX_STORE)",
+                      g_arch_type == 7 ? h_results.vmem_tex_store_passed : -1);
     
     printf("\n[Category: Atomic Operations - Inline ASM]\n");
     print_test_result("Global INT Atomics (global_atomic_add/sub/min/max)", h_results.atomic_global_int_passed);
@@ -727,6 +748,7 @@ int main(int argc, char** argv) {
     COUNT_TEST(h_results.vmem_lds_passed);
     if (g_arch_type == 7) {
         COUNT_TEST(h_results.vmem_tex_load_passed);
+        COUNT_TEST(h_results.vmem_tex_store_passed);
     }
     COUNT_TEST(h_results.atomic_global_int_passed);
     COUNT_TEST(h_results.atomic_global_f32_passed);

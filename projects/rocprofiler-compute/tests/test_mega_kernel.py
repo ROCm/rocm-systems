@@ -135,6 +135,7 @@ class TestResults(Structure):
         ("vmem_scratch_passed", c_int),
         ("vmem_lds_passed", c_int),
         ("vmem_tex_load_passed", c_int),
+        ("vmem_tex_store_passed", c_int),
         # Atomic operations (inline ASM)
         ("atomic_global_int_passed", c_int),
         ("atomic_global_f32_passed", c_int),
@@ -360,9 +361,10 @@ def run_mega_kernel_test(device_id: int = 0, batch_size: int = 1024,
     hip.hipMemcpyHtoD(d_tdm_src, byref(zeros_tdm), batch_size * sizeof(c_int))
     hip.hipMemcpyHtoD(d_tdm_dst, byref(zeros_tdm), batch_size * sizeof(c_int))
     
-    # Texture object for Strix (gfx1150/1151/1152) TEX load test; 0 when not used.
-    # Python/hipRTC path does not create a texture object, so pass 0 (bypass).
+    # Texture/surface objects for Strix (gfx1150/1151/1152) TEX load/store tests;
+    # 0 when not used. Python/hipRTC path does not create them, so pass 0 (bypass).
     tex_obj = c_ulonglong(0)
+    surf_obj = c_ulonglong(0)
 
     # Prepare kernel arguments (must match _mega_kernel signature in mega_kernel.hip)
     args = [
@@ -377,6 +379,7 @@ def run_mega_kernel_test(device_id: int = 0, batch_size: int = 1024,
         c_int(batch_size),
         c_int(mfma_mode),
         tex_obj,
+        surf_obj,
     ]
     
     # Convert arguments to void pointers
@@ -499,6 +502,7 @@ def print_test_results(results: TestResults, arch: str):
             ("Scratch Memory (local variables)", results.vmem_scratch_passed),
             ("LDS Memory (ds_read/write)", results.vmem_lds_passed),
             ("Texture Load (tex1Dfetch / INSTS_TEX_LOAD)", results.vmem_tex_load_passed),
+            ("Texture Store (surf1Dwrite / INSTS_TEX_STORE)", results.vmem_tex_store_passed),
         ]),
         ("DOT Product Operations", [
             ("DOT4 (4-element INT8 dot product)", results.dot4_passed),
@@ -648,10 +652,11 @@ def test_mega_kernel_gfx1150():
     assert results.warp_shuffle_passed > 0, "Warp shuffle test failed"
     assert results.fp32_arith_passed > 0, "FP32 arithmetic test failed"
     assert results.wmma_f16_passed > 0, "WMMA FP16 test failed"
-    # vmem_tex_load_passed: >0 when run from standalone binary (with texture);
-    # 0 when run from Python (no texture object). For INSTS_TEX_LOAD verification
-    # run the standalone mega_kernel binary on Strix.
+    # vmem_tex_load_passed / vmem_tex_store_passed: >0 when run from standalone
+    # binary (with texture/surface); 0 when run from Python. For INSTS_TEX_LOAD
+    # and INSTS_TEX_STORE verification run the standalone mega_kernel binary on Strix.
     assert results.vmem_tex_load_passed >= 0, "Texture load test error"
+    assert results.vmem_tex_store_passed >= 0, "Texture store test error"
 
 
 def test_mega_kernel_current_device():

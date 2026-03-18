@@ -373,7 +373,8 @@ struct TestResults {
     int vmem_buffer_passed;   // Buffer load/store (buffer_load_dword, etc.)
     int vmem_scratch_passed;  // Scratch load/store (scratch_load_dword, etc.)
     int vmem_lds_passed;      // LDS operations (ds_read_b32, ds_write_b32, etc.)
-    int vmem_tex_load_passed; // Texture load (image_load / SQ_INSTS_TEX_LOAD) on Strix
+    int vmem_tex_load_passed;   // Texture load (image_load / SQ_INSTS_TEX_LOAD) on Strix
+    int vmem_tex_store_passed;  // Texture store (image_store / SQ_INSTS_TEX_STORE) on Strix
     
     // Atomic Operations - comprehensive inline ASM tests
     int atomic_global_int_passed;     // global_atomic_add/sub/min/max (integer)
@@ -1518,13 +1519,15 @@ __device__ void test_vmem_operations([[maybe_unused]] float* global_ptr,
                                      [[maybe_unused]] int lane_id,
                                      [[maybe_unused]] int tid,
                                      [[maybe_unused]] int buffer_size,
-                                     [[maybe_unused]] hipTextureObject_t tex_obj) {
+                                     [[maybe_unused]] hipTextureObject_t tex_obj,
+                                     [[maybe_unused]] hipSurfaceObject_t surf_obj) {
     bool flat_passed = true;
     bool global_passed = true;
     bool buffer_passed = true;
     bool scratch_passed = true;
     bool lds_passed = true;
     bool tex_load_passed = true;
+    bool tex_store_passed = true;
     
     // ========================================================================
     // TEST 1: FLAT MEMORY OPERATIONS
@@ -1776,8 +1779,7 @@ __device__ void test_vmem_operations([[maybe_unused]] float* global_ptr,
     // ========================================================================
     // TEST 6: TEXTURE LOAD (Strix / RDNA 3.5) - exercises INSTS_TEX_LOAD
     // ========================================================================
-    // On Strix/Strix Halo we detect INSTS_FLAT_LOAD/STORE and INSTS_TEX_STORE
-    // but not INSTS_TEX_LOAD. Use tex1Dfetch to emit image_load (TEX load).
+    // Use tex1Dfetch to emit image_load (TEX load).
     //
     if (tex_obj != 0 && buffer_size > 0) {
         int idx = tid % buffer_size;
@@ -1786,8 +1788,23 @@ __device__ void test_vmem_operations([[maybe_unused]] float* global_ptr,
     } else {
         tex_load_passed = true;  // Bypassed when no texture object
     }
+
+    // ========================================================================
+    // TEST 7: TEXTURE STORE (Strix / RDNA 3.5) - exercises INSTS_TEX_STORE
+    // ========================================================================
+    // Use surf1Dwrite to emit image_store (TEX store).
+    //
+    if (surf_obj != 0 && buffer_size > 0) {
+        int idx = tid % buffer_size;
+        float store_val = (float)tid + 1000.0f;
+        surf1Dwrite(store_val, surf_obj, idx);
+        tex_store_passed = true;  // Write issued successfully
+    } else {
+        tex_store_passed = true;  // Bypassed when no surface object
+    }
 #else
-    tex_load_passed = true;  // Not applicable on other architectures
+    tex_load_passed = true;   // Not applicable on other architectures
+    tex_store_passed = true;
 #endif
 
     // Record results
@@ -1799,6 +1816,7 @@ __device__ void test_vmem_operations([[maybe_unused]] float* global_ptr,
         atomicAdd(&results->vmem_lds_passed, lds_passed ? 1 : 0);
 #if defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1152__)
         atomicAdd(&results->vmem_tex_load_passed, tex_load_passed ? 1 : 0);
+        atomicAdd(&results->vmem_tex_store_passed, tex_store_passed ? 1 : 0);
 #endif
     }
 }
@@ -3482,7 +3500,8 @@ extern "C" __global__ void _mega_kernel(
     float* async_lds_dst,      // Destination buffer for async LDS store test
     int buffer_size,
     int mfma_mode,             // 0=both, 1=asm only, 2=builtin only
-    hipTextureObject_t tex_obj // Texture for TEX load test (Strix); 0 if not used
+    hipTextureObject_t tex_obj,   // Texture for TEX load test (Strix); 0 if not used
+    hipSurfaceObject_t surf_obj   // Surface for TEX store test (Strix); 0 if not used
 ) {
     int tid = threadIdx.x + blockIdx.x * blockDim.x;
     int lane_id = threadIdx.x % warpSize;
@@ -3548,7 +3567,7 @@ extern "C" __global__ void _mega_kernel(
     // 9.5. VMEM (Vector Memory) Comprehensive Tests
     if (active) {
         test_vmem_operations(input_buffer, results, lane_id, tid, buffer_size,
-                             tex_obj);
+                             tex_obj, surf_obj);
     }
     __syncthreads();
     
@@ -3653,6 +3672,7 @@ extern "C" __global__ void _mega_kernel(
         ACCUM_RESULT(results->vmem_scratch_passed);
         ACCUM_RESULT(results->vmem_lds_passed);
         ACCUM_RESULT(results->vmem_tex_load_passed);
+        ACCUM_RESULT(results->vmem_tex_store_passed);
         ACCUM_RESULT(results->atomic_global_int_passed);
         ACCUM_RESULT(results->atomic_global_f32_passed);
         ACCUM_RESULT(results->atomic_global_f64_passed);
