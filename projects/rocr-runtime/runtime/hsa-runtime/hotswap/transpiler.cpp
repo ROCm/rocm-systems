@@ -977,6 +977,51 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
     return result;
   }
 
+  // ─── s_add_nc_u64 → emulate with s_add_u32 + s_addc_u32 ───
+  // GFX12: s_add_nc_u64 s[D:D+1], s[A:A+1], src (single instruction)
+  // GFX9: s_add_u32 sD, sA, src_lo + s_addc_u32 sD+1, sA+1, src_hi
+  if (mnemonic == "s_add_nc_u64" || mnemonic == "s_sub_nc_u64") {
+    std::string ops = line.substr(line.find(mnemonic) + mnemonic.size());
+    // Parse operands: s[D:D+1], s[A:A+1], src (register pair or immediate)
+    std::vector<std::string> operands;
+    std::istringstream oss(ops);
+    std::string tok;
+    while (std::getline(oss, tok, ',')) {
+      size_t s = tok.find_first_not_of(" \t");
+      size_t e = tok.find_last_not_of(" \t");
+      if (s != std::string::npos) operands.push_back(tok.substr(s, e - s + 1));
+    }
+    if (operands.size() >= 3) {
+      // Extract register numbers from s[lo:hi] format
+      auto parseSpair = [](const std::string& s) -> std::pair<int,int> {
+        auto bracket = s.find('[');
+        if (bracket == std::string::npos) return {-1,-1};
+        int lo=0, hi=0; size_t p = bracket+1;
+        while (p<s.size()&&s[p]>='0'&&s[p]<='9') lo=lo*10+(s[p++]-'0');
+        if (p<s.size()&&s[p]==':') p++;
+        while (p<s.size()&&s[p]>='0'&&s[p]<='9') hi=hi*10+(s[p++]-'0');
+        return {lo, hi};
+      };
+      auto [d0,d1] = parseSpair(operands[0]);
+      auto [a0,a1] = parseSpair(operands[1]);
+      std::string src = operands[2];
+      // Check if src is a pair or immediate
+      auto [s0,s1] = parseSpair(src);
+      std::string src_lo = (s0>=0) ? "s"+std::to_string(s0) : src;
+      std::string src_hi = (s0>=0) ? "s"+std::to_string(s1) : "0";
+      bool is_sub = mnemonic.find("sub") != std::string::npos;
+      std::string op = is_sub ? "s_sub_u32" : "s_add_u32";
+      std::string opc = is_sub ? "s_subb_u32" : "s_addc_u32";
+      result.push_back(op + " s" + std::to_string(d0) +
+                        ", s" + std::to_string(a0) + ", " + src_lo);
+      result.push_back(opc + " s" + std::to_string(d1) +
+                        ", s" + std::to_string(a1) + ", " + src_hi);
+      return result;
+    }
+    result.push_back("s_nop 0 ; UNSUPPORTED: " + line);
+    return result;
+  }
+
   // ─── v_add_nc_u64 → emulate with v_add_co_u32 + v_addc_co_u32 ───
   // GFX12: v_add_nc_u64 v[D:D+1], v[A:A+1], v[B:B+1] (single instruction)
   // GFX9: v_add_co_u32 vD, vcc, vA, vB + v_addc_co_u32 vD+1, vcc, vA+1, vB+1, vcc
