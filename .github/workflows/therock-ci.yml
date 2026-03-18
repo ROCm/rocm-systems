@@ -10,7 +10,6 @@ on:
       - opened
       - synchronize
       - reopened
-      - ready_for_review
   workflow_dispatch:
     inputs:
       projects:
@@ -91,15 +90,26 @@ jobs:
         id: rccl_check
         shell: bash
         run: |
-          echo "Changed files:"
-          git diff --name-only HEAD^
-
-          if git diff --name-only HEAD^ | grep -q '^projects/rccl/'; then
-            echo "run_linux_rccl_ci=true" >> "$GITHUB_OUTPUT"
-            echo "RCCL changes detected"
+          # For workflow_dispatch, check if projects/rccl was explicitly selected
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            if echo "${{ inputs.projects }}" | grep -qw 'projects/rccl'; then
+              echo "run_linux_rccl_ci=true" >> "$GITHUB_OUTPUT"
+              echo "RCCL selected via workflow_dispatch"
+            else
+              echo "run_linux_rccl_ci=false" >> "$GITHUB_OUTPUT"
+              echo "RCCL not selected via workflow_dispatch"
+            fi
           else
-            echo "run_linux_rccl_ci=false" >> "$GITHUB_OUTPUT"
-            echo "No RCCL changes detected"
+            echo "Changed files:"
+            git diff --name-only HEAD^
+
+            if git diff --name-only HEAD^ | grep -q '^projects/rccl/'; then
+              echo "run_linux_rccl_ci=true" >> "$GITHUB_OUTPUT"
+              echo "RCCL changes detected"
+            else
+              echo "run_linux_rccl_ci=false" >> "$GITHUB_OUTPUT"
+              echo "No RCCL changes detected"
+            fi
           fi
 
   therock-ci-linux:
@@ -135,7 +145,7 @@ jobs:
     with:
       amdgpu_families: ${{ matrix.amdgpu_family }}
       artifact_group: ${{ matrix.amdgpu_family }}
-      extra_cmake_options: >
+      cmake_options: >
         -DTHEROCK_ENABLE_ALL=OFF 
         -DTHEROCK_BUILD_TESTING=ON 
         -DTHEROCK_BUNDLE_SYSDEPS=ON 

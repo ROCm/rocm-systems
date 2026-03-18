@@ -869,29 +869,29 @@ option when profiling a PyTorch workload:
 Output
 ------
 
-When Torch operator mapping is enabled, profiling writes additional CSV files in the
-workload directory: **marker_api_trace** and **counter_collection** files with the
-``torch_trace`` prefix (e.g. ``torch_trace_<fbase>_marker_api_trace.csv`` and
-``torch_trace_<fbase>_counter_collection.csv``). These map the PyTorch operators
-with GPU kernels and performance counters. Analyze mode uses them to build
-per-operator CSVs under ``torch_trace/``. After consolidation, the source marker and counter files
-are removed.
+When Torch operator mapping is enabled, profiling writes additional CSV files in
+the workload directory: **marker_api_trace** and **counter_collection** files with
+the ``torch_trace`` prefix. These correlate PyTorch operators
+with GPU kernels and performance counters. When you run analyze (e.g. with
+``--list-torch-operators`` or ``--torch-operator``), a consolidated CSV is written
+to ``torch_trace/consolidated.csv``; the source marker and counter files are
+**retained** in the workload directory and are not deleted.
 
-Torch trace directory
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+``torch_trace/`` directory
+The ``torch_trace/`` directory contains ``consolidated.csv`` with all
+operator/kernel data. The columns include:
 
-The ``torch_trace/`` directory contains per-operator CSV files. The columns include:
+   * ``Operator_Name``: Full operator hierarchy (e.g. ``nn.Module.Net.forward/nn.Module.Conv2d.forward/torch.nn.functional.relu``, ``nn.Module.ResNet.forward/torch.nn.functional.relu``).
+   * ``Context_Id``: Call context (e.g., ``1@__init__.py:231``)
+   * ``Counter_Name`` / ``Counter_Value``: Performance counter values
+   * ``Start_Timestamp_function`` / ``End_Timestamp_function``: Operator timing
+   * ``Start_Timestamp_kernel`` / ``End_Timestamp_kernel``: Kernel timing
 
-* ``Operator_Name``: Full operator hierarchy (e.g. ``nn.Module.Net.forward/nn.Module.Conv2d.forward/torch.nn.functional.relu``, ``nn.Module.ResNet.forward/torch.nn.functional.relu``).
-* ``Context_Id``: Call context (e.g., ``1@__init__.py:231``)
-* ``Counter_Name`` / ``Counter_Value``: Performance counter values
-* ``Start_Timestamp_function`` / ``End_Timestamp_function``: Operator timing
-* ``Start_Timestamp_kernel`` / ``End_Timestamp_kernel``: Kernel timing
+The consolidated CSV is generated automatically on the first analysis run that
+requires it (``--list-torch-operators`` or ``--torch-operator``) and is reused on
+subsequent runs.
 
-This per-operator organization allows focused analysis of specific operators without
-processing the entire trace.
-
-Sample rows from ``torch_trace/ones_like.csv`` (from profiling an mnist model).
+Sample rows from ``torch_trace/consolidated.csv`` (from profiling an mnist model).
 
 .. list-table::
    :header-rows: 1
@@ -962,16 +962,15 @@ The Torch trace feature currently has the following limitations:
 
 * This feature adds instrumentation overhead to track operator boundaries. For performance-critical measurements, consider profiling without this option first.
 
-* This option forces ROCprofiler-SDK output to use CSV format, as this feature currently doesn't support ``rocpd`` format.
-
 
 .. _torch-operator-profiling:
 
 Hierarchical operator names
 ----------------------------
 
-Starting with version 3.4, PyTorch operators are captured with their full module
-hierarchy, providing complete context about where each operation occurs in your model.
+PyTorch operators are captured with full module hierarchy when available (e.g.,
+``nn.Module`` and ``torch.nn.functional`` wrappers), so you see where each
+operator occurs in your PyTorch application:
 
 .. code-block:: text
 
@@ -979,9 +978,8 @@ hierarchy, providing complete context about where each operation occurs in your 
    nn.Module.MyModel.forward/nn.Module.Linear.forward
    torch.nn.functional.relu
 
-The per-operator CSV under ``torch_trace/`` is named after the operator 
-such as, ``ones_like.csv`` and ``relu.csv``. The ``Operator_Name`` column in the CSV
-contains the full operator hierarchy.
+The ``Operator_Name`` column in ``torch_trace/consolidated.csv`` contains
+the full operator hierarchy.
 
 This hierarchical information enables:
 
@@ -1000,16 +998,15 @@ Example with hierarchical naming:
            self.decoder = nn.Linear(1024, 512)
 
        def forward(self, x):
-            x = self.encoder(x)  # Captured as: nn.Module.MyModel.forward/nn.Module.Linear.forward
-            x = self.decoder(x)  # Captured as: nn.Module.MyModel.forward/nn.Module.Linear.forward
-            return x
+           x = self.encoder(x)  # Captured as nn.Module.MyModel.forward/nn.Module.Linear.forward
+           x = self.decoder(x)  # Same hierarchy; both appear in consolidated.csv under Operator_Name
+           return x
 
-.. note::
-
-   **Analyze captured operators**: After profiling, use ``--experimental`` with
-   analyze and see :doc:`../analyze/cli` for how to list and filter PyTorch operators
-   (``--list-torch-operators``, ``--torch-operator``). Filtering accepts either the
-   full hierarchical name or the last segment only (e.g. ``conv2d``).
+**Analyzing captured operators**: After profiling, use the analyze CLI (see
+:doc:`../analyze/cli`) to list and filter by operator name. Filtering
+(``--torch-operator``) accepts PurePosixPath glob patterns (e.g. ``*conv2d``,
+``torch.nn.functional.conv2d``, ``*/*conv2d``). To select all operators, pass
+no arguments, ``all``, ``*``, or ``**`` — all four forms are equivalent.
 
 Combining Torch operator with other options
 -------------------------------------------
@@ -1066,6 +1063,8 @@ the policy for multiplexing. The available policies are:
 By default, if no policy is specified, ROCm Compute Profiler uses the ``kernel_launch_params`` policy.
 
 .. note::
+
+   * Iteration multiplexing requires rocprofiler-sdk from ROCm 7.0.0 or later.
 
    * Do not use ``--no-native-tool`` with ``--iteration-multiplexing``.
      Iteration multiplexing is only supported when using ROCm Compute Profiler with

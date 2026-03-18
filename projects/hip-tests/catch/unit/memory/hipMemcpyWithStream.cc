@@ -1,23 +1,8 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip_test_common.hh>
 #include <hip/hip_runtime_api.h>
@@ -25,9 +10,9 @@ THE SOFTWARE.
 #include <resource_guards.hh>
 #include <utils.hh>
 
-TEST_CASE("Unit_hipMemcpy_Positive_Basic") { MemcpyWithDirectionCommonTests<false>(hipMemcpy); }
+TEST_CASE(Unit_hipMemcpy_Positive_Basic) { MemcpyWithDirectionCommonTests<false>(hipMemcpy); }
 
-TEST_CASE("Unit_hipMemcpy_Positive_Synchronization_Behavior") {
+TEST_CASE(Unit_hipMemcpy_Positive_Synchronization_Behavior) {
   using namespace std::placeholders;
   HIP_CHECK(hipDeviceSynchronize());
 
@@ -68,7 +53,7 @@ TEST_CASE("Unit_hipMemcpy_Positive_Synchronization_Behavior") {
   }
 }
 
-TEST_CASE("Unit_hipMemcpy_Negative_Parameters") {
+TEST_CASE(Unit_hipMemcpy_Negative_Parameters) {
   using namespace std::placeholders;
 
   SECTION("Host to device") {
@@ -100,7 +85,7 @@ TEST_CASE("Unit_hipMemcpy_Negative_Parameters") {
   }
 }
 
-TEST_CASE("Unit_hipMemcpyWithStream_Capture") {
+TEST_CASE(Unit_hipMemcpyWithStream_Capture) {
   constexpr size_t kNumElements = 1024;
 
   LinearAllocGuard<int> host_data(LinearAllocs::malloc, kNumElements * sizeof(int));

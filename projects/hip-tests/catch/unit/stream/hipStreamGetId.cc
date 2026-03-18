@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /*
 Testcase Scenarios :
@@ -51,7 +38,7 @@ bool hasUniqueStreamIds(const std::vector<unsigned long long>& streamIds) {
 /**
  *  @brief Pass uninitialized stream and id as nullptr to check if the API behaves as expected.
  */
-TEST_CASE("Unit_hipStreamGetId_Negative") {
+TEST_CASE(Unit_hipStreamGetId_Negative) {
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
   SECTION("Null Pointer") {
@@ -64,7 +51,7 @@ TEST_CASE("Unit_hipStreamGetId_Negative") {
  *  @brief Pass null stream, legacy stream and streamperthread, check the API behaves as expected.
  *  Also, check the stream id generated is not same for any two streams.
  */
-TEST_CASE("Unit_hipStreamGetId_Basic") {
+TEST_CASE(Unit_hipStreamGetId_Basic) {
   hipStream_t stream1, stream2;
   unsigned long long id1, id2, id3, id4, id5;
   SECTION("Unique Stream Id") {
@@ -99,7 +86,7 @@ TEST_CASE("Unit_hipStreamGetId_Basic") {
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-TEST_CASE("Unit_hipStreamGetId_WithDifferentStreamCreateAPIs") {
+TEST_CASE(Unit_hipStreamGetId_WithDifferentStreamCreateAPIs) {
   hipStream_t stream_1 = nullptr, stream_2 = nullptr;
   unsigned long long streamId_1 = 0, streamId_2 = 0;
 
@@ -161,7 +148,7 @@ void launchFunction() {
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-TEST_CASE("Unit_hipStreamGetId_MultipleThreads") {
+TEST_CASE(Unit_hipStreamGetId_MultipleThreads) {
   const unsigned int threadsSupported = std::thread::hardware_concurrency();
   INFO("Number of threads supported : " << threadsSupported);
 
@@ -192,7 +179,7 @@ TEST_CASE("Unit_hipStreamGetId_MultipleThreads") {
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-TEST_CASE("Unit_hipStreamGetId_MultiDevice", "[multigpu]") {
+TEST_CASE(Unit_hipStreamGetId_MultiDevice) {
   int deviceCount = 0;
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
   if (deviceCount < 2) {
@@ -231,7 +218,7 @@ TEST_CASE("Unit_hipStreamGetId_MultiDevice", "[multigpu]") {
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-TEST_CASE("Unit_hipStreamGetId_MultiProcess") {
+TEST_CASE(Unit_hipStreamGetId_MultiProcess) {
   auto pid = fork();
   REQUIRE(pid >= 0);
 

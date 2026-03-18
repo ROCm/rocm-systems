@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip_test_common.hh>
 #include <hip/hip_fp8.h>
@@ -109,7 +93,7 @@ std::vector<T> cpu_cvt_float_fp8_float_fnuz(const std::vector<T>& nums) {
 }
 
 // floats to fp8
-TEMPLATE_TEST_CASE("Unit_fp8_fnuz_compare_host_device", "", float, double) {
+TEMPLATE_TEST_CASE(Unit_fp8_fnuz_compare_host_device, float, double) {
   FP8_FNUZ_SKIP_TEST
   std::vector<TestType> numbers = {0.0f, 1.0f, 1.1f, 2.0f,  2.1f,  3.0f,  3.2f,
                                    3.3f, 4.0f, 4.5f, 10.0f, 11.0f, 12.2f, 14.1f};
@@ -195,7 +179,7 @@ std::vector<float2> cpu_cvt_float2_fp8x2_float2_fnuz(const std::vector<float2>& 
   return ret;
 }
 
-TEST_CASE("Unit_fp8x2_fnuz_compare_host_device") {
+TEST_CASE(Unit_fp8x2_fnuz_compare_host_device) {
   FP8_FNUZ_SKIP_TEST
   std::vector<float> numbers_input = {0.0f, 1.0f, 1.1f, 2.0f,  2.1f,  3.0f,  3.2f,
                                       3.3f, 4.0f, 4.5f, 10.0f, 11.0f, 12.2f, 14.1f};
@@ -237,7 +221,7 @@ TEST_CASE("Unit_fp8x2_fnuz_compare_host_device") {
   }
 }
 
-TEST_CASE("Unit_fp8x2_fnuz_split_compare") {
+TEST_CASE(Unit_fp8x2_fnuz_split_compare) {
   FP8_FNUZ_SKIP_TEST
   std::vector<float> numbers_input = {0.0f, 1.0f, 1.1f, 2.0f,  2.1f,  3.0f,  3.2f,
                                       3.3f, 4.0f, 4.5f, 10.0f, 11.0f, 12.2f, 14.1f};
@@ -325,7 +309,7 @@ template <bool is_e4m3_fnuz> __global__ void cvt_float4_fp8x4_float4_fnuz(float4
   }
 }
 
-TEST_CASE("Unit_fp8x4_fnuz_split_compare") {
+TEST_CASE(Unit_fp8x4_fnuz_split_compare) {
   FP8_FNUZ_SKIP_TEST
   std::vector<float> numbers_input = {0.0f, 1.0f, 1.1f, 2.0f,  2.1f,  3.0f,  3.2f,
                                       3.3f, 4.0f, 4.5f, 10.0f, 11.0f, 12.2f, 14.1f};
@@ -427,7 +411,7 @@ template <bool is_e4m3_fnuz> __global__ void fp8_2_bool_fnuz(float* f, bool* ret
   }
 }
 
-TEST_CASE("Unit_fp8_fnuz_bool_device") {
+TEST_CASE(Unit_fp8_fnuz_bool_device) {
   FP8_FNUZ_SKIP_TEST
   // clang-format off
   std::vector<float> fvals{-10.0f, -1.0f, -0.0f,  0.0f, 1.0f, 10.0f};
@@ -524,7 +508,7 @@ __global__ void Type_to_fp8_fnuz(float* f, __hip_fp8_storage_t* res, size_t size
   }
 }
 
-TEST_CASE("Unit_all_fp8_fnuz_cvt") {
+TEST_CASE(Unit_all_fp8_fnuz_cvt) {
   FP8_FNUZ_SKIP_TEST
   bool is_e4m3_fnuz = GENERATE(true, false);
   std::vector<float> f_vals;
@@ -664,7 +648,7 @@ __global__ void Type_to_fp8_fnuz_cvt(T* f, float* cvt1, float* cvt2, size_t size
   }
 }
 
-TEMPLATE_TEST_CASE("Unit_fp8_fnuz_correctness_device", "", float, double) {
+TEMPLATE_TEST_CASE(Unit_fp8_fnuz_correctness_device, float, double) {
   FP8_FNUZ_SKIP_TEST
 
   SECTION("e4m3_fnuz") {

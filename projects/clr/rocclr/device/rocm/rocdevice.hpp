@@ -1,22 +1,8 @@
-/* Copyright (c) 2009 - 2025 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #pragma once
 
@@ -75,7 +61,7 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
   hsa_signal_t signal_;   //!< HSA signal to track profiling information
   Timestamp* ts_;         //!< Timestamp object associated with the signal
   HwQueueEngine engine_;  //!< Engine used with this signal
-  amd::Monitor lock_;     //!< Signal lock for update
+  std::recursive_mutex lock_;  //!< Signal lock for update
 
   typedef union {
     struct {
@@ -97,25 +83,21 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
   };
   CachedTiming cached_timing_;
 
-  ProfilingSignal()
-      : ts_(nullptr),
-        engine_(HwQueueEngine::Compute),
-        lock_(true) /* Signal Ops Lock */
-  {
+  ProfilingSignal() : ts_(nullptr), engine_(HwQueueEngine::Compute) {
     signal_.handle = 0;
     flags_.data_ = 0;
     flags_.done_ = true;
   }
 
   virtual ~ProfilingSignal();
-  amd::Monitor& LockSignalOps() { return lock_; }
+  std::recursive_mutex& LockSignalOps() { return lock_; }
 
   //! Cache timing data from HSA for this signal (called once when signal completes)
   void CacheTimingData(hsa_agent_t gpu_device);
 
   //! Reset cached timing for signal reuse
   void ResetCachedTiming() {
-    amd::ScopedLock lock(lock_);
+    std::scoped_lock lock(lock_);
     cached_timing_.start_ = 0;
     cached_timing_.end_ = 0;
     cached_timing_.valid_ = false;
@@ -126,7 +108,7 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
 
   //! Get cached timing values
   void GetCachedTiming(uint64_t& start, uint64_t& end) {
-    amd::ScopedLock lock(lock_);
+    std::scoped_lock lock(lock_);
     start = cached_timing_.start_;
     end = cached_timing_.end_;
   }
@@ -543,7 +525,7 @@ class Device : public NullDevice {
   void updateFreeMemory(size_t size, bool free);
 
   //! Returns the lock object for the virtual gpus list
-  amd::Monitor& vgpusAccess() const { return vgpusAccess_; }
+  std::recursive_mutex& vgpusAccess() const { return vgpusAccess_; }
 
   typedef std::vector<VirtualGPU*> VirtualGPUs;
   //! Returns the list of all virtual GPUs running on this device
@@ -583,7 +565,7 @@ class Device : public NullDevice {
   //! Initialize memory in AMD HMM on the current device or keeps it in the host memory
   bool SvmAllocInit(void* memory, size_t size) const;
 
-  void getGlobalCUMask(std::string cuMaskStr);
+  void getGlobalCUMask(std::string_view cuMaskStr);
 
   static hsa_status_t BackendErrorCallBackHandler(const hsa_amd_event_t* event, void* data);
 
@@ -606,8 +588,8 @@ class Device : public NullDevice {
 
   //! SDMA engine allocation for per-stream affinity
   uint32_t AllocateSdmaEngine(VirtualGPU* vgpu, HwQueueEngine engine_type,
-                              hsa_agent_t dstAgent, hsa_agent_t srcAgent) const {
-    return sdma_engine_allocator_.AllocateEngine(vgpu, engine_type, dstAgent, srcAgent);
+                              hsa_agent_t peerAgent, hsa_agent_t copyAgent) const {
+    return sdma_engine_allocator_.AllocateEngine(vgpu, engine_type, peerAgent, copyAgent);
   }
   void ReleaseSdmaEngine(VirtualGPU* vgpu) const {
     sdma_engine_allocator_.ReleaseEngine(vgpu);
@@ -624,6 +606,9 @@ class Device : public NullDevice {
 
   //! enum for keeping the total and available queue priorities
   enum QueuePriority : uint { Low = 0, Normal = 1, High = 2, Total = 3 };
+
+  //! Returns the number of hardware pipes
+  uint32_t NumHwPipes() const { return numHwPipes_; }
 
   //! Returns true if PM4 emulation is enabled
   bool IsPm4Emulation() const { return pm4_emulation_; }
@@ -643,7 +628,7 @@ class Device : public NullDevice {
 
   static hsa_ven_amd_loader_1_00_pfn_t amd_loader_ext_table;
 
-  amd::Monitor* mapCacheOps_;            //!< Lock to serialise cache for the map resources
+  std::recursive_mutex* mapCacheOps_;    //!< Lock to serialise cache for the map resources
   std::vector<amd::Memory*>* mapCache_;  //!< Map cache info structure
 
   bool populateOCLDeviceConstants();
@@ -673,7 +658,7 @@ class Device : public NullDevice {
   VirtualGPU* xferQueue_;  //!< Transfer queue, created on demand
 
   std::atomic<size_t> freeMem_;       //!< Total of free memory available
-  mutable amd::Monitor vgpusAccess_;  //!< Lock to serialise virtual gpu list access
+  mutable std::recursive_mutex vgpusAccess_;  //!< Lock to serialise virtual gpu list access
   bool hsa_exclusive_gpu_access_;  //!< TRUE if current device was moved into exclusive GPU access
                                    //!< mode
   static address mg_sync_;         //!< MGPU grid launch sync memory (SVM location)
@@ -752,14 +737,13 @@ class Device : public NullDevice {
     std::atomic<uint32_t> next_rr_engine_{0};  //!< Simple RR counter for future use
     const Device& device_;  //!< Reference to parent device for accessing masks
 
-    SdmaEngineAllocator(const Device& device)
-        : lock_(true), device_(device) {}
+    SdmaEngineAllocator(const Device& device) : device_(device) {}
 
     //! Allocate an SDMA engine for a VirtualGPU
     //! Queries HSA for engine status and preferred engines, then allocates
     //! For inter-GPU copies, strongly prefers recommended engines even if already allocated
     uint32_t AllocateEngine(VirtualGPU* vgpu, HwQueueEngine engine_type,
-                           hsa_agent_t dstAgent, hsa_agent_t srcAgent);
+                           hsa_agent_t peerAgent, hsa_agent_t copyAgent);
 
     //! Release engine allocation for a VirtualGPU
     void ReleaseEngine(VirtualGPU* vgpu);
@@ -777,7 +761,7 @@ class Device : public NullDevice {
 
   //! Returns the valid SDMA engine bitmask for the given operation type.
   uint32_t GetSdmaValidMask(HwQueueEngine engine_type) const {
-    return (engine_type == HwQueueEngine::SdmaRead) ? maxSdmaReadMask_ : maxSdmaWriteMask_;
+    return (engine_type == HwQueueEngine::SdmaD2H) ? maxSdmaReadMask_ : maxSdmaWriteMask_;
   }
 
 #if defined(__clang__)

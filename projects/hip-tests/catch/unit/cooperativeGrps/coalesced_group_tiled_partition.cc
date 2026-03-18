@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "cooperative_groups_common.hh"
 #include "cg_common_kernels.hh"
@@ -125,7 +112,7 @@ __global__ void coalesced_group_tiled_partition_thread_rank_getter(uint64_t* act
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Coalesced_Group_Tiled_Partition_Getters_Positive_Basic") {
+TEST_CASE(Unit_Coalesced_Group_Tiled_Partition_Getters_Positive_Basic) {
   const auto tile_size = GenerateTileSizes();
   INFO("Tile size: " << tile_size);
   auto blocks = GenerateBlockDimensions();
@@ -330,7 +317,7 @@ template <typename T> static void CoalescedGroupTiledPartitonShflUpTestImpl() {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_Coalesced_Group_Tiled_Partition_Shfl_Up_Positive_Basic", "", int,
+TEMPLATE_TEST_CASE(Unit_Coalesced_Group_Tiled_Partition_Shfl_Up_Positive_Basic, int,
                    unsigned int, long, unsigned long, long long, unsigned long long, float,
                    double) {
   CoalescedGroupTiledPartitonShflUpTestImpl<TestType>();
@@ -445,7 +432,7 @@ template <typename T> static void CoalescedGroupTiledPartitonShflDownTestImpl() 
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_Coalesced_Group_Tiled_Partition_Shfl_Down_Positive_Basic", "", int,
+TEMPLATE_TEST_CASE(Unit_Coalesced_Group_Tiled_Partition_Shfl_Down_Positive_Basic, int,
                    unsigned int, long, unsigned long, long long, unsigned long long, float,
                    double) {
   CoalescedGroupTiledPartitonShflDownTestImpl<TestType>();
@@ -552,7 +539,7 @@ template <typename T> static void CoalescedGroupTiledPartitonShflTestImpl() {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_Coalesced_Group_Tiled_Partition_Shfl_Positive_Basic", "", int,
+TEMPLATE_TEST_CASE(Unit_Coalesced_Group_Tiled_Partition_Shfl_Positive_Basic, int,
                    unsigned int, long, unsigned long, long long, unsigned long long, float,
                    double) {
   CoalescedGroupTiledPartitonShflTestImpl<TestType>();
@@ -668,9 +655,18 @@ template <bool global_memory, typename T> void CoalescedGroupTiledPartitionSyncT
     for (int j = 0u; j < warps_in_block; ++j) {
       const auto warp_idx = i * warps_in_block + j;
       auto mask = active_masks.ptr()[warp_idx];
-      const auto shift_amount =
-          (tail + 32 * TestContext::get().isNvidia()) * !((warp_idx + 1) % warps_in_block);
-      mask = (mask << shift_amount) >> shift_amount;
+      if (warp_size < 64) {
+        const uint64_t lane_mask = (1ull << warp_size) - 1ull;
+        mask &= lane_mask;
+      }
+
+      const bool is_last_warp = ((j + 1) == warps_in_block);
+      if (is_last_warp && tail > 0) {
+        const uint32_t valid_lanes = warp_size - tail;
+        const uint64_t valid_mask = (1ull << valid_lanes) - 1ull;
+        mask &= valid_mask;
+      }
+
       const auto active_count = std::bitset<sizeof(mask) * 8>(mask).count();
       const auto start_offset = i * grid.threads_in_block_count_ + j * warp_size;
       const auto end_offset = start_offset + active_count;
@@ -703,7 +699,7 @@ template <bool global_memory, typename T> void CoalescedGroupTiledPartitionSyncT
  *    - HIP_VERSION >= 5.2
  */
 uint64_t counter = 0;
-TEMPLATE_TEST_CASE("Unit_Coalesced_Group_Tiled_Partition_Sync_Positive_Basic", "", uint8_t,
+TEMPLATE_TEST_CASE(Unit_Coalesced_Group_Tiled_Partition_Sync_Positive_Basic, uint8_t,
                    uint16_t, uint32_t) {
   SECTION("Global memory") { CoalescedGroupTiledPartitionSyncTest<true, TestType>(); }
   SECTION("Shared memory") { CoalescedGroupTiledPartitionSyncTest<false, TestType>(); }

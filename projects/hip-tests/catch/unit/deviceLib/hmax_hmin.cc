@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <cmath>
 #include <cstring>
@@ -88,7 +72,7 @@ __global__ void HMinMaxHalfOpsArray(__half* x, __half* y, __half* ExptdResult, i
 
 // The following tests checks the basic functionality of __hmax(), __hmin()
 // __hmax_nan() and __hmin_nan()
-TEST_CASE("Unit_hmax_hmin_Tsts") {
+TEST_CASE(Unit_hmax_hmin_Tsts) {
   int *Hptr = nullptr, *Dptr = nullptr;
   HIP_CHECK(hipHostMalloc(&Hptr, sizeof(int)));
   *Hptr = 1;
@@ -203,7 +187,7 @@ TEST_CASE("Unit_hmax_hmin_Tsts") {
 
 
 // The following Tests does negative testing by passing nan
-TEST_CASE("Unit_hmax_hmin_Tsts_Negative") {
+TEST_CASE(Unit_hmax_hmin_Tsts_Negative) {
   int *Hptr = nullptr, *Dptr = nullptr;
   HIP_CHECK(hipHostMalloc(&Hptr, sizeof(int)));
   *Hptr = 1;
@@ -230,7 +214,7 @@ TEST_CASE("Unit_hmax_hmin_Tsts_Negative") {
 }
 
 // The following tests the __hmax/min functions over array of memory
-TEST_CASE("Unit_hmax_hmin_Tsts_With_Array") {
+TEST_CASE(Unit_hmax_hmin_Tsts_With_Array) {
   int *Hptr = nullptr, *Dptr = nullptr;
   __half *Ad = nullptr, *Bd = nullptr;
   HIP_CHECK(hipHostMalloc(&Hptr, sizeof(int)));

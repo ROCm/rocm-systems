@@ -1,22 +1,7 @@
 /*
- * Copyright (C) Advanced Micro Devices, Inc.
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
- * THE COPYRIGHT HOLDER(S) BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
- * AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  */
 
 #include <hip_test_common.hh>
@@ -133,7 +118,7 @@ static auto get_uadd_inputs() -> std::pair<std::vector<unsigned>, std::vector<un
   return std::make_pair(a, b);
 }
 
-TEST_CASE("Unit_hadd_int_varaint") {
+TEST_CASE(Unit_hadd_int_varaint) {
   auto [a, b] = get_hadd_inputs();
 
   REQUIRE(a.size() == b.size());
@@ -244,7 +229,7 @@ TEST_CASE("Unit_hadd_int_varaint") {
   HIP_CHECK(hipFree(d_res));
 }
 
-TEST_CASE("Unit_rhadd_int_varaint") {
+TEST_CASE(Unit_rhadd_int_varaint) {
   auto [a, b] = get_hadd_inputs();
 
   REQUIRE(a.size() == b.size());
@@ -355,7 +340,7 @@ TEST_CASE("Unit_rhadd_int_varaint") {
   HIP_CHECK(hipFree(d_res));
 }
 
-TEST_CASE("Unit_uhadd_int_varaint") {
+TEST_CASE(Unit_uhadd_int_varaint) {
   auto [a, b] = get_uadd_inputs();
 
   REQUIRE(a.size() == b.size());
@@ -515,7 +500,7 @@ TEST_CASE("Unit_uhadd_int_varaint") {
   HIP_CHECK(hipFree(d_res));
 }
 
-TEST_CASE("Unit_urhadd_int_varaint") {
+TEST_CASE(Unit_urhadd_int_varaint) {
   auto [a, b] = get_uadd_inputs();
 
   REQUIRE(a.size() == b.size());

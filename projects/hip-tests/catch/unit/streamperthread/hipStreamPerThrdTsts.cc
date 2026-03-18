@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2021 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 
 /* Test Description:
@@ -253,7 +240,7 @@ static void EventSync() {
 
 /* Launch a kernel in hipStreamPerThread, while it is in flight check for
    hipStreamQuery(hipStreamPerThread) it should return hipErrorNotReady.*/
-TEST_CASE("Unit_hipStreamPerThreadTst_StrmQuery") {
+TEST_CASE(Unit_hipStreamPerThreadTst_StrmQuery) {
   int *Ad = nullptr, *Ah = nullptr, NumElms = 4096, CONST_NUM = 123;
   int blockSize = 32, peak_clk;
   hipError_t err;
@@ -302,7 +289,7 @@ TEST_CASE("Unit_hipStreamPerThreadTst_StrmQuery") {
 }
 
 /* Testing hipStreamPerThread stream object with hipMallocManaged() memory*/
-TEST_CASE("Unit_hipStreamPerThread_MangdMem") {
+TEST_CASE(Unit_hipStreamPerThread_MangdMem) {
   int managed = 0;
   HIP_CHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeManagedMemory, 0));
   if (managed == 1) {
@@ -353,7 +340,7 @@ TEST_CASE("Unit_hipStreamPerThread_MangdMem") {
 
 /*  To check the working of hipStreamPerThread in forked process*/
 #ifdef __linux__
-TEST_CASE("Unit_hipStreamPerThread_ChildProc") {
+TEST_CASE(Unit_hipStreamPerThread_ChildProc) {
   if (fork() == 0) {  //  child process
     int *Ad = nullptr, *Ah = nullptr, NumElms = 4096, CONST_NUM = 123;
     int blockSize = 32, peak_clk;
@@ -402,7 +389,7 @@ TEST_CASE("Unit_hipStreamPerThread_ChildProc") {
 
 /* The following test case tests the working of hipEventSynchronize in
    multiple threads which are launched in quick succession*/
-TEST_CASE("Unit_hipStreamPerThread_EvtRcrdMThrd") {
+TEST_CASE(Unit_hipStreamPerThread_EvtRcrdMThrd) {
   IfTestPassed = true;
   int MAX_THREAD_CNT = 20;
   std::vector<std::thread> threads(MAX_THREAD_CNT);
@@ -417,7 +404,7 @@ TEST_CASE("Unit_hipStreamPerThread_EvtRcrdMThrd") {
 
 /* The following test case checks the working of hipStreamWaitEvent() with
    hipStreamWaitEvent()*/
-TEST_CASE("Unit_hipStreamPerThread_StrmWaitEvt") {
+TEST_CASE(Unit_hipStreamPerThread_StrmWaitEvt) {
   IfTestPassed = true;
   int *Ad = nullptr, NumElms = 4096, CONST_NUM = 123, blockSize = 32, *Ah = nullptr;
   int *Ad1 = nullptr, *Ah1 = nullptr;
@@ -482,7 +469,7 @@ TEST_CASE("Unit_hipStreamPerThread_StrmWaitEvt") {
 
 
 /* Testing hipLaunchCooperativeKernel() api with hipStreamPerThread*/
-TEST_CASE("Unit_hipStreamPerThread_CoopLaunch") {
+TEST_CASE(Unit_hipStreamPerThread_CoopLaunch) {
   hipDeviceProp_t device_properties;
   HIPCHECK(hipGetDeviceProperties(&device_properties, 0));
   /* Test whether target device supports cooperative groups ****************/

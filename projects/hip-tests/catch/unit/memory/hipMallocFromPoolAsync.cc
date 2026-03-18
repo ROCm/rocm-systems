@@ -1,20 +1,7 @@
 /*
-   Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
-   Permission is hereby granted, free of charge, to any person obtaining a copy
-   of this software and associated documentation files (the "Software"), to deal
-   in the Software without restriction, including without limitation the rights
-   to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-   copies of the Software, and to permit persons to whom the Software is
-   furnished to do so, subject to the following conditions:
-   The above copyright notice and this permission notice shall be included in
-   all copies or substantial portions of the Software.
-   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-   IMPLIED, INNCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-   FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-   AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANNY CLAIM, DAMAGES OR OTHER
-   LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-   OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-   THE SOFTWARE.
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
  */
 
 #include "mempool_common.hh"
@@ -46,7 +33,7 @@ static hipMemPool_t mem_pool_common;
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMallocFromPoolAsync_Basic_OneAlloc") {
+TEST_CASE(Unit_hipMallocFromPoolAsync_Basic_OneAlloc) {
   MallocMemPoolAsync_OneAlloc(
       [](void** dev_ptr, size_t size, hipMemPool_t mem_pool, hipStream_t stream) {
         return hipMallocFromPoolAsync(dev_ptr, size, mem_pool, stream);
@@ -67,7 +54,7 @@ TEST_CASE("Unit_hipMallocFromPoolAsync_Basic_OneAlloc") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMallocFromPoolAsync_Basic_TwoAllocs") {
+TEST_CASE(Unit_hipMallocFromPoolAsync_Basic_TwoAllocs) {
   MallocMemPoolAsync_TwoAllocs(
       [](void** dev_ptr, size_t size, hipMemPool_t mem_pool, hipStream_t stream) {
         return hipMallocFromPoolAsync(dev_ptr, size, mem_pool, stream);
@@ -86,7 +73,7 @@ TEST_CASE("Unit_hipMallocFromPoolAsync_Basic_TwoAllocs") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMallocFromPoolAsync_Basic_Reuse") {
+TEST_CASE(Unit_hipMallocFromPoolAsync_Basic_Reuse) {
   MallocMemPoolAsync_Reuse(
       [](void** dev_ptr, size_t size, hipMemPool_t mem_pool, hipStream_t stream) {
         return hipMallocFromPoolAsync(dev_ptr, size, mem_pool, stream);
@@ -110,7 +97,7 @@ TEST_CASE("Unit_hipMallocFromPoolAsync_Basic_Reuse") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMallocFromPoolAsync_Negative_Parameters") {
+TEST_CASE(Unit_hipMallocFromPoolAsync_Negative_Parameters) {
   int device_id = 0;
   HIP_CHECK(hipSetDevice(device_id));
 
@@ -287,7 +274,7 @@ static bool checkMaximumAndDefaultThreshold(hipStream_t stream, int N, enum eTes
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMallocFromPoolAsync_ReleaseThreshold") {
+TEST_CASE(Unit_hipMallocFromPoolAsync_ReleaseThreshold) {
   checkMempoolSupported(0)
       // create a stream
       hipStream_t stream;
@@ -308,7 +295,7 @@ TEST_CASE("Unit_hipMallocFromPoolAsync_ReleaseThreshold") {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMallocFromPoolAsync_NullStream") {
+TEST_CASE(Unit_hipMallocFromPoolAsync_NullStream) {
   checkMempoolSupported(0) constexpr int N = 1 << 20;
   REQUIRE(true == checkMaximumAndDefaultThreshold(0, N, testdefault));
   REQUIRE(true == checkMaximumAndDefaultThreshold(0, N, testMaximum));
@@ -324,7 +311,7 @@ TEST_CASE("Unit_hipMallocFromPoolAsync_NullStream") {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMallocFromPoolAsync_hipStreamPerThread") {
+TEST_CASE(Unit_hipMallocFromPoolAsync_hipStreamPerThread) {
   checkMempoolSupported(0) constexpr int N = 1 << 20;
   REQUIRE(true == checkMaximumAndDefaultThreshold(hipStreamPerThread, N, testdefault));
   REQUIRE(true == checkMaximumAndDefaultThreshold(hipStreamPerThread, N, testMaximum));
@@ -340,7 +327,7 @@ TEST_CASE("Unit_hipMallocFromPoolAsync_hipStreamPerThread") {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMallocFromPoolAsync_ReleaseThreshold_Mgpu", "[multigpu]") {
+TEST_CASE(Unit_hipMallocFromPoolAsync_ReleaseThreshold_Mgpu) {
   constexpr int N = 1 << 20;
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
@@ -575,7 +562,7 @@ static bool checkReuseAllowOtherFlags(int N, hipMemPoolAttr attr, enum eTestValu
  *    - HIP_VERSION >= 6.2
  */
 #if HT_AMD
-TEST_CASE("Unit_hipMallocFromPoolAsync_Multidevice_Concurrent", "[multigpu]") {
+TEST_CASE(Unit_hipMallocFromPoolAsync_Multidevice_Concurrent) {
   auto testType = GENERATE(testdefault, testMaximum);
   constexpr int N = 1 << 20;
   int num_devices;
@@ -627,7 +614,7 @@ TEST_CASE("Unit_hipMallocFromPoolAsync_Multidevice_Concurrent", "[multigpu]") {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMallocFromPoolAsync_Multidevice_MultiStream", "[multigpu]") {
+TEST_CASE(Unit_hipMallocFromPoolAsync_Multidevice_MultiStream) {
   int num_devices;
   auto testType = GENERATE(testdefault, testMaximum);
   constexpr int N = 1 << 20;
@@ -694,11 +681,11 @@ TEST_CASE("Unit_hipMallocFromPoolAsync_Multidevice_MultiStream", "[multigpu]") {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMallocFromPoolAsync_MThread_DefaultThresh") {
+TEST_CASE(Unit_hipMallocFromPoolAsync_MThread_DefaultThresh) {
   checkMempoolSupported(0) REQUIRE(true == test_hipMallocFromPoolAsync_MThread(testdefault));
 }
 
-TEST_CASE("Unit_hipMallocFromPoolAsync_MThread_MaxThresh") {
+TEST_CASE(Unit_hipMallocFromPoolAsync_MThread_MaxThresh) {
   checkMempoolSupported(0) REQUIRE(true == test_hipMallocFromPoolAsync_MThread(testMaximum));
 }
 
@@ -714,12 +701,12 @@ TEST_CASE("Unit_hipMallocFromPoolAsync_MThread_MaxThresh") {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMallocFromPoolAsync_MThread_CommonMpool_DefaultMempool") {
+TEST_CASE(Unit_hipMallocFromPoolAsync_MThread_CommonMpool_DefaultMempool) {
   checkMempoolSupported(0)
       REQUIRE(true == test_hipMallocFromPoolAsync_MThread_CommonMpool(testdefault, true));
 }
 
-TEST_CASE("Unit_hipMallocFromPoolAsync_MThread_CommonMpool_MaxThresh") {
+TEST_CASE(Unit_hipMallocFromPoolAsync_MThread_CommonMpool_MaxThresh) {
   checkMempoolSupported(0)
       REQUIRE(true == test_hipMallocFromPoolAsync_MThread_CommonMpool(testMaximum, false));
 }
@@ -737,7 +724,7 @@ TEST_CASE("Unit_hipMallocFromPoolAsync_MThread_CommonMpool_MaxThresh") {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMallocFromPoolAsync_MultStream_Sync") {
+TEST_CASE(Unit_hipMallocFromPoolAsync_MultStream_Sync) {
   checkMempoolSupported(0) constexpr int N = 1 << 20;
   REQUIRE(true == checkMempoolMultStreamSync(N));
 }
@@ -755,7 +742,7 @@ TEST_CASE("Unit_hipMallocFromPoolAsync_MultStream_Sync") {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMallocFromPoolAsync_MultStream_DefaultStreams") {
+TEST_CASE(Unit_hipMallocFromPoolAsync_MultStream_DefaultStreams) {
   checkMempoolSupported(0) constexpr int N = 1 << 20;
   REQUIRE(true == checkMempoolMultStreamConcurrentExec(N, true));
 }
@@ -772,7 +759,7 @@ TEST_CASE("Unit_hipMallocFromPoolAsync_MultStream_DefaultStreams") {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMallocFromPoolAsync_MultStream_UserStreams") {
+TEST_CASE(Unit_hipMallocFromPoolAsync_MultStream_UserStreams) {
   checkMempoolSupported(0) constexpr int N = 1 << 20;
   REQUIRE(true == checkMempoolMultStreamConcurrentExec(N, false));
 }
@@ -788,7 +775,7 @@ TEST_CASE("Unit_hipMallocFromPoolAsync_MultStream_UserStreams") {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMallocFromPoolAsync_ReuseFollowEventDependencies") {
+TEST_CASE(Unit_hipMallocFromPoolAsync_ReuseFollowEventDependencies) {
   checkMempoolSupported(0) constexpr int N = 1 << 20;
   REQUIRE(true == checkReuseFollowEventDepFlag(N, testDisabled));
   REQUIRE(true == checkReuseFollowEventDepFlag(N, testEnabled));
@@ -805,7 +792,7 @@ TEST_CASE("Unit_hipMallocFromPoolAsync_ReuseFollowEventDependencies") {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMallocFromPoolAsync_ReuseAllowOpportunistic") {
+TEST_CASE(Unit_hipMallocFromPoolAsync_ReuseAllowOpportunistic) {
   checkMempoolSupported(0) constexpr int N = 1 << 20;
   REQUIRE(true == checkReuseAllowOtherFlags(N, hipMemPoolReuseAllowOpportunistic, testDisabled));
   REQUIRE(true == checkReuseAllowOtherFlags(N, hipMemPoolReuseAllowOpportunistic, testEnabled));
@@ -822,7 +809,7 @@ TEST_CASE("Unit_hipMallocFromPoolAsync_ReuseAllowOpportunistic") {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMallocFromPoolAsync_ReuseAllowInternalDependencies") {
+TEST_CASE(Unit_hipMallocFromPoolAsync_ReuseAllowInternalDependencies) {
   checkMempoolSupported(0) constexpr int N = 1 << 20;
   REQUIRE(true ==
           checkReuseAllowOtherFlags(N, hipMemPoolReuseAllowInternalDependencies, testDisabled));

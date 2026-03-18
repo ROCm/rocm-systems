@@ -1,23 +1,8 @@
-/* Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip/hip_fp6.h>
 #include <hip_test_common.hh>
@@ -63,7 +48,7 @@ __global__ void Type_to_fp6(T* f, __hip_fp6_storage_t* res, size_t size) {
  * ------------------------
  *  - HIP_VERSION >= 6.5
  */
-TEMPLATE_TEST_CASE("Unit_all_fp6_ocp_vector_cvt_interger_data", "", int, long int, long long int,
+TEMPLATE_TEST_CASE(Unit_all_fp6_ocp_vector_cvt_interger_data, int, long int, long long int,
                    short int) {
   SECTION("Fp6 with e2m3") {
     std::vector<TestType> input = {0, 1, 2, 3, 4, 5, 6, 7, -0, -1, -2, -3, -4, -5, -6, -7};
@@ -101,7 +86,7 @@ TEMPLATE_TEST_CASE("Unit_all_fp6_ocp_vector_cvt_interger_data", "", int, long in
  * ------------------------
  *  - HIP_VERSION >= 6.5
  */
-TEMPLATE_TEST_CASE("Unit_all_fp6_ocp_vector_cvt_unsigned_interger_data", "", int, long int,
+TEMPLATE_TEST_CASE(Unit_all_fp6_ocp_vector_cvt_unsigned_interger_data, int, long int,
                    long long int, short int) {
   SECTION("Fp6 with e2m3") {
     std::vector<TestType> input = {0, 1, 2, 3, 4, 5, 6, 7};
@@ -137,7 +122,7 @@ TEMPLATE_TEST_CASE("Unit_all_fp6_ocp_vector_cvt_unsigned_interger_data", "", int
  * ------------------------
  *  - HIP_VERSION >= 6.5
  */
-TEMPLATE_TEST_CASE("Unit_all_fp6_ocp_vector_cvt_unsigned_integer_device", "", unsigned int,
+TEMPLATE_TEST_CASE(Unit_all_fp6_ocp_vector_cvt_unsigned_integer_device, unsigned int,
                    unsigned long int, unsigned long long int, unsigned short int) {
   bool is_e2m3 = GENERATE(true, false);
   std::vector<TestType> f_vals;
@@ -223,7 +208,7 @@ TEMPLATE_TEST_CASE("Unit_all_fp6_ocp_vector_cvt_unsigned_integer_device", "", un
  *  - HIP_VERSION >= 6.5
  */
 
-TEMPLATE_TEST_CASE("Unit_all_fp6_ocp_vector_cvt_interger_data_device", "", int, long int,
+TEMPLATE_TEST_CASE(Unit_all_fp6_ocp_vector_cvt_interger_data_device, int, long int,
                    long long int, short int) {
   bool is_e2m3 = GENERATE(true, false);
   std::vector<TestType> f_vals;

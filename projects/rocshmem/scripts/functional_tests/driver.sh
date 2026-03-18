@@ -123,6 +123,10 @@ declare -A TEST_NUMBERS=(
   ["flood_getnbi"]="87"
   ["flood_g"]="88"
   ["hipmodule_init"]="89"
+  ["flood_add"]="90"
+  ["flood_fadd"]="91"
+  ["flood_waitadd"]="92"
+  ["device_bitcode"]="93"
 )
 
 ExecTest() {
@@ -345,20 +349,24 @@ TestAMO() {
   ExecTest  "amo_add"          2       8            1
   ExecTest  "amo_add"          2       32           128
 
+  if [[ $TEST != gda* ]]; then #AIROCSHMEM-316
   ExecTest  "amo_fadd"         2       1            1
   ExecTest  "amo_fadd"         2       1            1024
   ExecTest  "amo_fadd"         2       8            1
   ExecTest  "amo_fadd"         2       32           128
+  else echo "Skip:   amo_fadd* (AIROCSHMEM-316: mlx5 fetch_amo return 0)"; fi
 
   ExecTest  "amo_inc"          2       1            1
   ExecTest  "amo_inc"          2       1            1024
   ExecTest  "amo_inc"          2       8            1
   ExecTest  "amo_inc"          2       32           128
 
+  if [[ $TEST != gda* ]]; then #AIROCSHMEM-316
   ExecTest  "amo_finc"         2       1            1
   ExecTest  "amo_finc"         2       1            1024
   ExecTest  "amo_finc"         2       8            1
   ExecTest  "amo_finc"         2       32           128
+  else echo "Skip:   amo_finc* (AIROCSHMEM-316: mlx5 fetch_amo return 0)"; fi
   else echo "Skip:   amo_add* (AIROCSHMEM-211: ro amo abort)"; fi
 
   ExecTest  "amo_set"          2       1            1
@@ -472,7 +480,7 @@ TestOnStream() {
   ExecTest  "signal_wait_until_on_stream" 2  1      1
   if [[ $TEST != ro* ]]; then #AIROCSHMEM-217
   ExecTest  "putmem_signal_on_stream" 2  1          1         1048576
-  else echo "Skip:   putmem_signal_on_stream (AIROCSHMEM-217: RO some% abort)"; fi
+  else echo "Skip:   putmem_signal_on_stream (AIROCSHMEM-217: RO sometimes abort)"; fi
 
   ExecTest  "barrier_all_on_stream"  2  1           1
   ExecTest  "alltoallmem_on_stream"  2  1           64        1048576
@@ -485,6 +493,10 @@ TestOther() {
   ##############################################################################
   ExecTest  "init"             2       1            1
   ExecTest  "hipmodule_init"   2       1            1
+  ExecTest  "device_bitcode"   2       1            1
+  ExecTest  "device_bitcode"   2       32           1024
+  ExecTest  "device_bitcode"   4       16           256
+  ExecTest  "device_bitcode"   8       16           128
 
   ExecTest  "pingpong"         2       1            1
   ExecTest  "pingpong"         2       8            1
@@ -495,7 +507,7 @@ TestOther() {
   ExecTest  "pingall"          2       32           1
 
   ################################ Flood test ##################################
-  if [[ $TEST != gda-mlx5* ]]; then #AIROCSHMEM-234
+  if [[ $TEST != ro* ]]; then #AIROCSHMEM-324
   ExecTest  "flood_put"        2       64           1024
   ExecTest  "flood_put"        8       64           1024
   ExecTest  "flood_putnbi"     8       64           1024
@@ -507,7 +519,12 @@ TestOther() {
   if [[ $TEST != gda* ]]; then #AIROCSHMEM-162
   ExecTest  "flood_g"          8       64           1024
   else echo "Skip:   flood_g (AIROCSHMEM-162: GDA _g not implemented)"; fi
-  else echo "Skip:   flood_* (AIROCSHMEM-234: GDA_mlx5 flood test deadlock)"; fi
+
+  ExecTest  "flood_add"        2       64           1024
+  ExecTest  "flood_add"        8       64           1024
+  ExecTest  "flood_fadd"       8       64           1024
+  ExecTest  "flood_waitadd"    8       64           1024
+  else echo "Skip:   flood_* (AIROCSHMEM-324: RO flood tests fail in UCX)"; fi
 
   # This test requires more contexts than workgroups
   export ROCSHMEM_MAX_NUM_CONTEXTS=1024

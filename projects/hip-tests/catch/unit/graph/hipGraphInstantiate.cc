@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /**
 Testcase Scenarios :
@@ -53,7 +40,7 @@ Negative -
 /* Test verifies hipGraphInstantiate API Negative scenarios.
  */
 
-TEST_CASE("Unit_hipGraphInstantiate_Negative") {
+TEST_CASE(Unit_hipGraphInstantiate_Negative) {
   hipError_t ret;
   hipGraphExec_t gExec{};
   hipGraph_t graph;
@@ -83,7 +70,7 @@ TEST_CASE("Unit_hipGraphInstantiate_Negative") {
 /* Test verifies hipGraphInstantiate Basic scenarios.
 Create a graph and then used it for hipGraphInstantiate without adding any node to graph.
  */
-TEST_CASE("Unit_hipGraphInstantiate_Basic") {
+TEST_CASE(Unit_hipGraphInstantiate_Basic) {
   hipGraph_t graph;
   hipGraphExec_t graphExec;
 
@@ -98,7 +85,7 @@ TEST_CASE("Unit_hipGraphInstantiate_Basic") {
 /* Test Functional Scenario 2.a, 2.b, 2.c with hipGraphInstantiate and
 hipGraphInstantiateWithFlags.
 */
-TEST_CASE("Unit_hipGraphInstantiate_InvalidCyclicGraph") {
+TEST_CASE(Unit_hipGraphInstantiate_InvalidCyclicGraph) {
   hipGraph_t graph;
   hipGraphExec_t graphExec;
   HIP_CHECK(hipGraphCreate(&graph, 0));
@@ -194,7 +181,7 @@ static void init_input(int* a, size_t size) {
 
 /* Test Functional Scenario 3.a, 3.b and 3.c.
  */
-TEST_CASE("Unit_hipGraphInstantiate_functionalScenarios") {
+TEST_CASE(Unit_hipGraphInstantiate_functionalScenarios) {
   hipGraph_t graph;
   hipGraphExec_t graphExec[NUM_OF_INSTANCES];
   HIP_CHECK(hipGraphCreate(&graph, 0));

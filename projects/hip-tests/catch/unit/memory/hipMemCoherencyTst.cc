@@ -1,20 +1,7 @@
 /*
-   Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-   Permission is hereby granted, free of charge, to any person obtaining a copy
-   of this software and associated documentation files (the "Software"), to deal
-   in the Software without restriction, including without limitation the rights
-   to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-   copies of the Software, and to permit persons to whom the Software is
-   furnished to do so, subject to the following conditions:
-   The above copyright notice and this permission notice shall be included in
-   all copies or substantial portions of the Software.
-   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-   AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-   THE SOFTWARE.
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
  */
 
 /* Test Case Description:
@@ -104,7 +91,7 @@ static void TstCoherency(int* ptr, MemoryType type) {
 
 /* Test case description: The following test validates if fine grain
    behavior is observed or not with memory allocated using hipHostMalloc()*/
-TEST_CASE("Unit_hipHostMalloc_CoherentTst") {
+TEST_CASE(Unit_hipHostMalloc_CoherentTst) {
   HIP_CHECK(hipSetDevice(0));
   CHECK_PCIE_ATOMIC_SUPPORT;
 
@@ -130,7 +117,7 @@ TEST_CASE("Unit_hipHostMalloc_CoherentTst") {
 // The following tests are disabled for Nvidia as they are not consistently
 // passing
 #if HT_AMD
-TEST_CASE("Unit_hipMallocManaged_CoherentTst") {
+TEST_CASE(Unit_hipMallocManaged_CoherentTst) {
   HIP_CHECK(hipSetDevice(0));
   CHECK_PCIE_ATOMIC_SUPPORT;
 
@@ -160,7 +147,7 @@ TEST_CASE("Unit_hipMallocManaged_CoherentTst") {
 
 /* Test case description: The following test validates if memory access is fine
    with memory allocated using hipMallocManaged() and CoarseGrain Advise*/
-TEST_CASE("Unit_hipMallocManaged_CoherentTstWthAdvise") {
+TEST_CASE(Unit_hipMallocManaged_CoherentTstWthAdvise) {
   HIP_CHECK(hipSetDevice(0));
   int *Ptr = nullptr, SIZE = sizeof(int), managed = 0;
   YES_COHERENT = false;
@@ -203,7 +190,7 @@ TEST_CASE("Unit_hipMallocManaged_CoherentTstWthAdvise") {
    using hipMalloc() are of type Coarse Grain*/
 // The following tests are disabled for Nvidia as they are not applicable
 #if HT_AMD
-TEST_CASE("Unit_hipMalloc_CoherentTst") {
+TEST_CASE(Unit_hipMalloc_CoherentTst) {
   HIP_CHECK(hipSetDevice(0));
   int *Ptr = nullptr, SIZE = sizeof(int);
   uint32_t svm_attrib = 0;
@@ -223,7 +210,7 @@ TEST_CASE("Unit_hipMalloc_CoherentTst") {
    behavior is observed or not with memory allocated using
    hipExtMallocWithFlags()*/
 #if HT_AMD
-TEST_CASE("Unit_hipExtMallocWithFlags_CoherentTst") {
+TEST_CASE(Unit_hipExtMallocWithFlags_CoherentTst) {
   HIP_CHECK(hipSetDevice(0));
   int *Ptr = nullptr, SIZE = sizeof(int), InitVal = 9, Pageable = 0, managed = 0, finegrain = 0;
   bool FineGrain = true;

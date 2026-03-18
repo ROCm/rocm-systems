@@ -1,22 +1,8 @@
-/* Copyright (c) 2008 - 2025 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #ifndef DEVICE_HPP_
 #define DEVICE_HPP_
@@ -893,7 +879,7 @@ class Memory : public amd::HeapObject {
 
   const WriteMapInfo* writeMapInfo(const void* mapAddress) const {
     // Unmap must be serialized.
-    amd::ScopedLock lock(owner()->lockMemoryOps());
+    std::scoped_lock lock(owner()->lockMemoryOps());
 
     auto it = writeMapInfo_.find(mapAddress);
     if (it == writeMapInfo_.end()) {
@@ -911,7 +897,7 @@ class Memory : public amd::HeapObject {
   //! Clear memory object as mapped read only
   void clearUnmapInfo(const void* mapAddress) {
     // Unmap must be serialized.
-    amd::ScopedLock lock(owner()->lockMemoryOps());
+    std::scoped_lock lock(owner()->lockMemoryOps());
     auto it = writeMapInfo_.find(mapAddress);
     if (it == writeMapInfo_.end()) {
       // Get the first map info
@@ -1260,12 +1246,7 @@ class ThreadTrace : public amd::HeapObject {
 class VirtualDevice : public amd::ReferenceCountedObject {
  public:
   //! Construct a new virtual device for the given physical device.
-  VirtualDevice(amd::Device& device)
-      : device_(device),
-        blitMgr_(NULL),
-        execution_(true) /* Virtual device execution lock */
-        ,
-        index_(0) {}
+  VirtualDevice(amd::Device& device) : device_(device), blitMgr_(NULL), index_(0) {}
 
   //! Destroy this virtual device.
   virtual ~VirtualDevice() {}
@@ -1318,7 +1299,7 @@ class VirtualDevice : public amd::ReferenceCountedObject {
   device::BlitManager& blitMgr() const { return *blitMgr_; }
 
   //! Returns the monitor object for execution access by VirtualGPU
-  amd::Monitor& execution() { return execution_; }
+  std::recursive_mutex& execution() { return execution_; }
 
   //! Returns the virtual device unique index
   uint index() const { return index_; }
@@ -1333,7 +1314,7 @@ class VirtualDevice : public amd::ReferenceCountedObject {
 
   //! Dispatches multiple AQL packets in a single batch operation
   virtual bool dispatchAqlPacketBatch(const std::vector<uint8_t*>& packets,
-                                      const std::vector<std::string>& kernelNames,
+                                      const std::vector<const std::string*>& kernelNames,
                                       amd::AccumulateCommand* vcmd = nullptr,
                                       bool attach_signal = false) = 0;
   //! Returns the number of outstanding HSA async handlers
@@ -1352,7 +1333,7 @@ class VirtualDevice : public amd::ReferenceCountedObject {
  protected:
   device::BlitManager* blitMgr_;  //!< Blit manager
 
-  amd::Monitor execution_;  //!< Lock to serialise access to all device objects
+  std::recursive_mutex execution_;  //!< Lock to serialise access to all device objects
   uint index_;              //!< The virtual device unique index
   mutable std::atomic<uint64_t> queued_async_handlers_ = 0;  //!< Outstanding HSA async handlers
 
@@ -2133,7 +2114,7 @@ class Device : public RuntimeObject {
   amd::Context& GlbCtx() const { return *glb_ctx_; }
 
   //! Lock protect P2P staging operations
-  Monitor& P2PStageOps() const { return p2p_stage_ops_; }
+  std::recursive_mutex& P2PStageOps() const { return p2p_stage_ops_; }
 
   //! Staging buffer for P2P transfer
   Memory* P2PStage() const { return p2p_stage_; }
@@ -2214,6 +2195,9 @@ class Device : public RuntimeObject {
   // Removes a memory object from hostcall tracking.
   void RemoveHostcallMemory(amd::Memory* memory);
 
+  //! Clears hostcall memory tracking list without releasing.
+  void ClearHostcallMemories();
+
   //! Enable the specified extension
   char* getExtensionString();
 
@@ -2241,7 +2225,7 @@ class Device : public RuntimeObject {
   amd::Context* context_;         //!< Context
 
   static amd::Context* glb_ctx_;              //!< Global context with all devices
-  static amd::Monitor p2p_stage_ops_;         //!< Lock to serialise cache for the P2P resources
+  static std::recursive_mutex p2p_stage_ops_;  //!< Lock to serialise cache for the P2P resources
   static Memory* p2p_stage_;                  //!< Staging resources
   std::vector<Device*> enabled_p2p_devices_;  //!< List of user enabled P2P devices for this device
 
@@ -2266,8 +2250,8 @@ class Device : public RuntimeObject {
 #endif
 
   static std::vector<Device*>* devices_;  //!< All known devices
-  static amd::Monitor lockP2P_;
-  Monitor* vaCacheAccess_;                            //!< Lock to serialize VA caching access
+  static std::recursive_mutex lockP2P_;
+  std::recursive_mutex* vaCacheAccess_;               //!< Lock to serialize VA caching access
   std::map<uintptr_t, device::Memory*>* vaCacheMap_;  //!< VA cache map
   uint32_t index_;                                    //!< Unique device index
 

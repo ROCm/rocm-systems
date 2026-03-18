@@ -8,14 +8,18 @@ from typing import Any
 
 import msgpack
 
-from rocm_kpack.ccob_parser import extract_code_objects_from_fatbin
+from rocm_kpack.ccob_parser import ExtractedCodeObject, extract_code_objects_from_fatbin
+from rocm_kpack.coff.surgery import CoffSurgery
+from rocm_kpack.format_detect import detect_binary_format, UnsupportedBinaryFormat
 
 
 class BinaryType(Enum):
     """Type of bundled binary file."""
 
     STANDALONE = "standalone"  # .co files - directly in bundler format
-    BUNDLED = "bundled"  # Executables/libraries with .hip_fatbin ELF section
+    BUNDLED = (
+        "bundled"  # Executables/libraries with device code section (ELF or PE/COFF)
+    )
 
 
 class Toolchain:
@@ -222,28 +226,31 @@ class BundledBinary:
         to hold the unbundled files open for as long as needed.
         """
         if dest_dir is None:
-            dest_dir = Path(tempfile.TemporaryDirectory(delete=False).name)
-        target_list = self._list_bundled_targets(self.file_path)
+            dest_dir = Path(tempfile.mkdtemp())
+
+        # Extract code objects once, then derive both the target list and
+        # write the files from the same extraction result.
+        code_objects = self._extract_code_objects()
+        target_list = self._build_target_list(code_objects)
+
         contents = UnbundledContents(
             self, dest_dir, delete_on_close=delete_on_close, target_list=target_list
         )
         try:
             dest_dir.mkdir(parents=True, exist_ok=True)
-            self._unbundle(
-                targets=[kv[0] for kv in target_list],
-                outputs=[dest_dir / kv[1] for kv in target_list],
-            )
+            outputs = [dest_dir / kv[1] for kv in target_list]
+            self._write_code_objects(code_objects, outputs)
         except:
             contents.close()
             raise
         return contents
 
     def _detect_binary_type(self) -> BinaryType:
-        """Detect if this is a standalone bundler file or bundled ELF binary.
+        """Detect if this is a standalone bundler file or a bundled binary.
 
-        Uses readelf to check for .hip_fatbin section to determine type.
-        Files with .hip_fatbin section are BUNDLED (executables, libraries).
-        Files without (or non-ELF files) are STANDALONE (.co files in bundler format).
+        For ELF, checks for .hip_fatbin section via readelf.
+        For PE/COFF, checks for .hip_fat section via CoffSurgery.
+        Files without device code sections are STANDALONE (.co files in bundler format).
 
         Returns:
             BinaryType indicating the file type
@@ -252,35 +259,47 @@ class BundledBinary:
             RuntimeError: For unexpected errors during detection
         """
         try:
-            result = subprocess.run(
-                [str(self.toolchain.readelf), "-S", str(self.file_path.resolve())],
-                capture_output=True,
-                text=True,
-                check=True,  # Raise CalledProcessError on non-zero exit
-            )
-            # readelf succeeded - this is an ELF file
-            # Check for .hip_fatbin section
-            if ".hip_fatbin" in result.stdout:
-                return BinaryType.BUNDLED
-            else:
-                # ELF file without .hip_fatbin section
-                return BinaryType.STANDALONE
-
-        except subprocess.CalledProcessError:
-            # readelf failed - likely not an ELF file
-            # Assume STANDALONE (bundler format file like .co)
+            fmt = detect_binary_format(self.file_path)
+        except UnsupportedBinaryFormat:
             return BinaryType.STANDALONE
-        except Exception as e:
-            # Unexpected error - fail fast
-            raise RuntimeError(
-                f"Unexpected error detecting binary type for {self.file_path}: {e}"
-            )
+
+        if fmt == "elf":
+            try:
+                result = subprocess.run(
+                    [str(self.toolchain.readelf), "-S", str(self.file_path.resolve())],
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                )
+                if ".hip_fatbin" in result.stdout:
+                    return BinaryType.BUNDLED
+                else:
+                    return BinaryType.STANDALONE
+            except subprocess.CalledProcessError:
+                return BinaryType.STANDALONE
+            except Exception as e:
+                raise RuntimeError(
+                    f"Unexpected error detecting binary type for {self.file_path}: {e}"
+                ) from e
+        else:
+            # PE/COFF
+            try:
+                surgery = CoffSurgery.load(self.file_path)
+                if surgery.find_section(".hip_fat") is not None:
+                    return BinaryType.BUNDLED
+                else:
+                    return BinaryType.STANDALONE
+            except Exception as e:
+                raise RuntimeError(
+                    f"Unexpected error detecting binary type for {self.file_path}: {e}"
+                ) from e
 
     def _get_bundler_input(self) -> Path:
         """Get the file path to use as input to clang-offload-bundler.
 
         For STANDALONE files, returns the file path directly.
-        For BUNDLED binaries, extracts the .hip_fatbin section to a temp file.
+        For BUNDLED ELF binaries, extracts .hip_fatbin section via objcopy.
+        For BUNDLED PE/COFF binaries, extracts .hip_fat section via CoffSurgery.
 
         Returns:
             Path to file in bundler format
@@ -288,48 +307,61 @@ class BundledBinary:
         if self.binary_type == BinaryType.STANDALONE:
             return self.file_path
 
-        # Extract .hip_fatbin section from bundled binary
         if self._temp_dir is None:
             self._temp_dir = Path(tempfile.mkdtemp())
 
         fatbin_path = self._temp_dir / "fatbin.o"
-        # Resolve to absolute paths for objcopy
-        abs_file_path = self.file_path.resolve()
-        abs_fatbin_path = fatbin_path.resolve()
 
-        try:
-            self.toolchain.exec(
-                [
-                    self.toolchain.objcopy,
-                    "--dump-section",
-                    f".hip_fatbin={abs_fatbin_path}",
-                    abs_file_path,
-                ]
-            )
-        except subprocess.CalledProcessError as e:
-            # Include the actual stderr/stdout from objcopy
-            error_output = e.output.decode() if e.output else "(no output)"
-            raise RuntimeError(
-                f"Failed to extract .hip_fatbin section from {self.file_path}. "
-                f"objcopy exit code: {e.returncode}. Output: {error_output}"
-            ) from e
+        fmt = detect_binary_format(self.file_path)
+        if fmt == "coff":
+            surgery = CoffSurgery.load(self.file_path)
+            section = surgery.find_section(".hip_fat")
+            if section is None:
+                raise RuntimeError(
+                    f"PE binary {self.file_path} has no .hip_fat section"
+                )
+            content = surgery.get_section_content(section)
+            content = content[: section.virtual_size]
+            fatbin_path.write_bytes(content)
+        else:
+            # ELF: extract .hip_fatbin section via objcopy
+            abs_file_path = self.file_path.resolve()
+            abs_fatbin_path = fatbin_path.resolve()
+            try:
+                self.toolchain.exec(
+                    [
+                        self.toolchain.objcopy,
+                        "--dump-section",
+                        f".hip_fatbin={abs_fatbin_path}",
+                        abs_file_path,
+                    ]
+                )
+            except subprocess.CalledProcessError as e:
+                error_output = e.output.decode() if e.output else "(no output)"
+                raise RuntimeError(
+                    f"Failed to extract .hip_fatbin section from {self.file_path}. "
+                    f"objcopy exit code: {e.returncode}. Output: {error_output}"
+                ) from e
 
         return fatbin_path
 
-    def _list_bundled_targets(self, file_path: Path) -> list[tuple[str, str]]:
-        """Returns a list of (target_name, file_name) for all bundles.
+    def _extract_code_objects(self) -> list[ExtractedCodeObject]:
+        """Extract code objects from the fatbin data.
 
-        Uses our own bundle parser for all formats: CCOB-compressed, single
-        uncompressed, and concatenated uncompressed (RDC case).
+        Reads the bundler input once and parses all code objects.
+        """
+        bundler_input = self._get_bundler_input()
+        data = bundler_input.read_bytes()
+        return extract_code_objects_from_fatbin(data)
+
+    def _build_target_list(
+        self, code_objects: list[ExtractedCodeObject]
+    ) -> list[tuple[str, str]]:
+        """Build a list of (target_name, file_name) from extracted code objects.
 
         For concatenated bundles (RDC), filenames are indexed to distinguish
         multiple code objects with the same target triple.
         """
-        bundler_input = self._get_bundler_input()
-        data = bundler_input.read_bytes()
-        code_objects = extract_code_objects_from_fatbin(data)
-
-        # Check if we need indexed filenames (duplicate targets from RDC)
         targets = [obj.target for obj in code_objects]
         needs_indexing = len(targets) != len(set(targets))
 
@@ -344,28 +376,26 @@ class BundledBinary:
 
         return result
 
-    def _unbundle(self, *, targets: list[str], outputs: list[Path]):
-        """Unbundle targets from the binary.
-
-        Args:
-            targets: List of target names to unbundle
-            outputs: List of output paths (must match length of targets)
-        """
-        if not targets:
-            return
-
-        bundler_input = self._get_bundler_input()
-        data = bundler_input.read_bytes()
-        code_objects = extract_code_objects_from_fatbin(data)
-
+    def _write_code_objects(
+        self, code_objects: list[ExtractedCodeObject], outputs: list[Path]
+    ) -> None:
+        """Write extracted code objects to output files."""
         if len(code_objects) != len(outputs):
             raise ValueError(
                 f"Output count mismatch: {len(code_objects)} code objects "
                 f"but {len(outputs)} output paths"
             )
-
         for obj, output_path in zip(code_objects, outputs):
             output_path.write_bytes(obj.data)
+
+    def _list_bundled_targets(self, file_path: Path) -> list[tuple[str, str]]:
+        """Returns a list of (target_name, file_name) for all bundles.
+
+        Uses our own bundle parser for all formats: CCOB-compressed, single
+        uncompressed, and concatenated uncompressed (RDC case).
+        """
+        code_objects = self._extract_code_objects()
+        return self._build_target_list(code_objects)
 
     def list_bundles(self) -> list[str]:
         """List all architecture bundles in the binary.

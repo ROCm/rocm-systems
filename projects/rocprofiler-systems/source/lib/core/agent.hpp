@@ -27,11 +27,6 @@
 #include <stdexcept>
 #include <string>
 
-#if ROCPROFSYS_USE_ROCM > 0
-#    include <amd_smi/amdsmi.h>
-#    include <rocprofiler-sdk/agent.h>
-#endif
-
 namespace rocprofsys
 {
 

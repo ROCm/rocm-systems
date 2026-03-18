@@ -1,22 +1,7 @@
 /*
-         Copyright (c) 2021 Advanced Micro Devices, Inc. All rights reserved.
-         Permission is hereby granted, free of charge, to any person obtaining a copy
-         of this software and associated documentation files (the "Software"), to deal
-         in the Software without restriction, including without limitation the rights
-         to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-         copies of the Software, and to permit persons to whom the Software is
-         furnished to do so, subject to the following conditions:
-
-         The above copyright notice and this permission notice shall be included in
-         all copies or substantial portions of the Software.
-
-         THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-         IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-         FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-         AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-         LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-         OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-         THE SOFTWARE.
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
  */
 
 /*
@@ -60,7 +45,7 @@ __global__ void AtomicCheck(double* Ad, double *result) {
    Output: unsafeAtomicAdd API will not work and returns 0 so
    the initial value will be intact. expected O/P is 5
 */
-TEMPLATE_TEST_CASE("Unit_unsafeAtomicAdd_CoherentRTCnounsafeatomicflag", "", float, double) {
+TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_CoherentRTCnounsafeatomicflag, float, double) {
   int device = 0;
   hipDeviceProp_t props;
   HIP_CHECK(hipGetDeviceProperties(&props, device));
@@ -151,7 +136,7 @@ TEMPLATE_TEST_CASE("Unit_unsafeAtomicAdd_CoherentRTCnounsafeatomicflag", "", flo
    Output: unsafeAtomicAdd API will not work and r`eturns 0 so
    the initial value will be intact. expected O/P is 5
 */
-TEMPLATE_TEST_CASE("Unit_unsafeAtomicAdd_CoherentRTCunsafeatomicflag", "", float, double) {
+TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_CoherentRTCunsafeatomicflag, float, double) {
   int device = 0;
   hipDeviceProp_t props;
   HIP_CHECK(hipGetDeviceProperties(&props, device));
@@ -241,7 +226,7 @@ TEMPLATE_TEST_CASE("Unit_unsafeAtomicAdd_CoherentRTCunsafeatomicflag", "", float
    Output: unsafeAtomicAdd API will not work and returns 0 so
    the initial value will be intact. expected O/P is 5*/
 
-TEMPLATE_TEST_CASE("Unit_unsafeAtomicAdd_CoherentRTCwithoutflag", "", float, double) {
+TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_CoherentRTCwithoutflag, float, double) {
   int device = 0;
   hipDeviceProp_t props;
   HIP_CHECK(hipGetDeviceProperties(&props, device));
@@ -330,7 +315,7 @@ TEMPLATE_TEST_CASE("Unit_unsafeAtomicAdd_CoherentRTCwithoutflag", "", float, dou
    is compiled using hipRTC and with compilation flag -mno-unsafe-fp-atomics
    Input: Ad{5}, INCREMENT_VAL{10}
    Output: Expected O/P is 15 */
-TEMPLATE_TEST_CASE("Unit_unsafeAtomicAdd_NonCoherentRTCnounsafeatomicflag", "", float, double) {
+TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_NonCoherentRTCnounsafeatomicflag, float, double) {
   int device = 0;
   hipDeviceProp_t props;
   HIP_CHECK(hipGetDeviceProperties(&props, device));
@@ -413,7 +398,7 @@ TEMPLATE_TEST_CASE("Unit_unsafeAtomicAdd_NonCoherentRTCnounsafeatomicflag", "", 
    Input: Ad{5}, INCREMENT_VAL{10}
    Output: Expected O/P is 15 */
 
-TEMPLATE_TEST_CASE("Unit_unsafeAtomicAdd_NonCoherentRTCunsafeatomicflag", "", float, double) {
+TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_NonCoherentRTCunsafeatomicflag, float, double) {
   int device = 0;
   hipDeviceProp_t props;
   HIP_CHECK(hipGetDeviceProperties(&props, device));
@@ -497,7 +482,7 @@ TEMPLATE_TEST_CASE("Unit_unsafeAtomicAdd_NonCoherentRTCunsafeatomicflag", "", fl
    Input: Ad{5}, INCREMENT_VAL{10}
    Output: O/P is 15 */
 
-TEMPLATE_TEST_CASE("Unit_unsafeAtomicAdd_NonCoherentRTC", "", float, double) {
+TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_NonCoherentRTC, float, double) {
   int device = 0;
   hipDeviceProp_t props;
   HIP_CHECK(hipGetDeviceProperties(&props, device));

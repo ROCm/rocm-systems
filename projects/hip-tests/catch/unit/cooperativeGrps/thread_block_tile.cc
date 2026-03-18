@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "cooperative_groups_common.hh"
 #include "cg_common_kernels.hh"
@@ -120,7 +107,7 @@ template <bool dynamic, size_t... tile_sizes> void BlockPartitionGettersBasicTes
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Thread_Block_Tile_Getters_Positive_Basic") {
+TEST_CASE(Unit_Thread_Block_Tile_Getters_Positive_Basic) {
   BlockPartitionGettersBasicTest<false, 2, 4, 8, 16, 32>();
 }
 
@@ -137,7 +124,7 @@ TEST_CASE("Unit_Thread_Block_Tile_Getters_Positive_Basic") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Thread_Block_Tile_Dynamic_Getters_Positive_Basic") {
+TEST_CASE(Unit_Thread_Block_Tile_Dynamic_Getters_Positive_Basic) {
   BlockPartitionGettersBasicTest<true, 2, 4, 8, 16, 32>();
 }
 
@@ -203,7 +190,7 @@ template <typename T, size_t... tile_sizes> void BlockTileShflUpTest() {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_Thread_Block_Tile_Shfl_Up_Positive_Basic", "", int, unsigned int, long,
+TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Shfl_Up_Positive_Basic, int, unsigned int, long,
                    unsigned long, long long, unsigned long long, float, double) {
   BlockTileShflUpTest<TestType, 2, 16, 32>();
 }
@@ -282,7 +269,7 @@ template <typename T, size_t... tile_sizes> void BlockTileShflDownTest() {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_Thread_Block_Tile_Shfl_Down_Positive_Basic", "", int, unsigned int, long,
+TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Shfl_Down_Positive_Basic, int, unsigned int, long,
                    unsigned long, long long, unsigned long long, float, double) {
   BlockTileShflDownTest<TestType, 2, 16, 32>();
 }
@@ -356,7 +343,7 @@ template <typename T, size_t... tile_sizes> void BlockTileShflXORTest() {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_Thread_Block_Tile_Shfl_XOR_Positive_Basic", "", int, unsigned int, long,
+TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Shfl_XOR_Positive_Basic, int, unsigned int, long,
                    unsigned long, long long, unsigned long long, float, double) {
   BlockTileShflXORTest<TestType, 2, 16, 32>();
 }
@@ -436,7 +423,7 @@ template <typename T, size_t... tile_sizes> void BlockTileShflTest() {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_Thread_Block_Tile_Shfl_Positive_Basic", "", int, unsigned int, long,
+TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Shfl_Positive_Basic, int, unsigned int, long,
                    unsigned long, long long, unsigned long long, float, double) {
   BlockTileShflTest<TestType, 2, 16, 32>();
 }
@@ -550,7 +537,7 @@ template <bool global_memory, typename T, size_t... tile_sizes> void BlockTileSy
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_Thread_Block_Tile_Sync_Positive_Basic", "", uint8_t, uint16_t, uint32_t) {
+TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Sync_Positive_Basic, uint8_t, uint16_t, uint32_t) {
   SECTION("Global memory") { BlockTileSyncTest<true, TestType, 2, 16, 32>(); }
   SECTION("Shared memory") { BlockTileSyncTest<false, TestType, 2, 16, 32>(); }
 }

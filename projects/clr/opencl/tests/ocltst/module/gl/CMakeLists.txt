@@ -1,3 +1,7 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
 set(TESTS
     OCLGLBuffer
     OCLGLBufferMultipleQueues
@@ -50,10 +54,14 @@ target_link_libraries(oclgl
         GLEW::GLEW
         ${OPENGL_LIBRARIES})
 
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../../../cmake")
-find_package(AMD_ICD)
-find_library(AMD_ICD_LIBRARY OpenCL HINTS "${AMD_ICD_LIBRARY_DIR}")
-target_link_libraries(oclgl PRIVATE ${AMD_ICD_LIBRARY})
+if(TARGET OpenCL)
+  target_link_libraries(oclgl PRIVATE OpenCL)
+else()
+  list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../../../cmake")
+  find_package(AMD_ICD)
+  find_library(AMD_ICD_LIBRARY OpenCL HINTS "${AMD_ICD_LIBRARY_DIR}")
+  target_link_libraries(oclgl PRIVATE ${AMD_ICD_LIBRARY})
+endif()
 
 if (NOT WIN32)
   set(THREADS_PREFER_PTHREAD_FLAG ON)

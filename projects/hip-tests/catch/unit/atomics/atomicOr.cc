@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "atomicOr_negative_kernels_rtc.hh"
 #include "bitwise_common.hh"
@@ -182,7 +166,7 @@ TEST_CASE("Unit_atomicOr_Positive_Scattered_Addresses") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_atomicOr_Positive_Multi_Kernel_Same_Address") {
+TEST_CASE(Unit_atomicOr_Positive_Multi_Kernel_Same_Address) {
   SECTION("int") { runAtomicOrMultiKernelSameAddressTest<int>(); }
   SECTION("unsigned int") { runAtomicOrMultiKernelSameAddressTest<unsigned int>(); }
   SECTION("unsigned long") { runAtomicOrMultiKernelSameAddressTest<unsigned long>(); }
@@ -201,7 +185,7 @@ TEST_CASE("Unit_atomicOr_Positive_Multi_Kernel_Same_Address") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_atomicOr_Positive_Multi_Kernel_Adjacent_Addresses") {
+TEST_CASE(Unit_atomicOr_Positive_Multi_Kernel_Adjacent_Addresses) {
   SECTION("int") { runAtomicOrMultiKernelAdjacentAddressesTest<int>(); }
   SECTION("unsigned int") { runAtomicOrMultiKernelAdjacentAddressesTest<unsigned int>(); }
   SECTION("unsigned long") { runAtomicOrMultiKernelAdjacentAddressesTest<unsigned long>(); }
@@ -222,7 +206,7 @@ TEST_CASE("Unit_atomicOr_Positive_Multi_Kernel_Adjacent_Addresses") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_atomicOr_Positive_Multi_Kernel_Scattered_Addresses") {
+TEST_CASE(Unit_atomicOr_Positive_Multi_Kernel_Scattered_Addresses) {
   SECTION("int") { runAtomicOrMultiKernelScatteredAddressesTest<int>(); }
   SECTION("unsigned int") { runAtomicOrMultiKernelScatteredAddressesTest<unsigned int>(); }
   SECTION("unsigned long") { runAtomicOrMultiKernelScatteredAddressesTest<unsigned long>(); }
@@ -243,7 +227,7 @@ TEST_CASE("Unit_atomicOr_Positive_Multi_Kernel_Scattered_Addresses") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_atomicOr_Negative_Parameters_RTC") {
+TEST_CASE(Unit_atomicOr_Negative_Parameters_RTC) {
   hiprtcProgram program{};
 
   const auto program_source =

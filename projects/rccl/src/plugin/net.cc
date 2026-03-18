@@ -276,7 +276,7 @@ static void initPluginLibsOnceFunc() {
 
   // Add 2 internal ib and socket plugins
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-  if ((rcclParamAinicRoce() == 1) && !(envNetPlugin)) {
+  if (rcclUseAinic() && !(envNetPlugin)) {
     // For AINIC add rocm internal ib instead of default internal ib
     netPluginLibs[pluginCounter].ncclNet = &rocmNetIb;
     netPluginLibs[pluginCounter++].ncclNetPluginState = ncclNetPluginStateInitReady;

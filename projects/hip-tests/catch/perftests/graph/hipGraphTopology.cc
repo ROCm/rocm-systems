@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip_test_checkers.hh>
 #include <hip_test_common.hh>
@@ -193,7 +180,7 @@ static void run_graph_topology_test(const TestOptions& opt) {
     
     int kernel_count = 0;
     int current_batch_size = 0;
-    int batch_number = 0;
+    [[maybe_unused]] int batch_number = 0;
     
     for (int i = 0; i < opt.length; ++i) {
       std::string node_type;
@@ -431,7 +418,7 @@ static void run_graph_topology_test(const TestOptions& opt) {
 /**
  * Test straight topology graph performance
  */
-TEST_CASE("Perf_GraphTopology_Straight") {
+TEST_CASE(Perf_GraphTopology_Straight) {
   TestOptions opt;
   opt.topology = "straight";
   opt.length = 50;
@@ -443,7 +430,7 @@ TEST_CASE("Perf_GraphTopology_Straight") {
 /**
  * Test parallel topology graph performance
  */
-TEST_CASE("Perf_GraphTopology_Parallel") {
+TEST_CASE(Perf_GraphTopology_Parallel) {
   TestOptions opt;
   opt.topology = "parallel";
   opt.length = 25;
@@ -456,7 +443,7 @@ TEST_CASE("Perf_GraphTopology_Parallel") {
 /**
  * Test hexagon topology graph performance
  */
-TEST_CASE("Perf_GraphTopology_Hexagon") {
+TEST_CASE(Perf_GraphTopology_Hexagon) {
   TestOptions opt;
   opt.topology = "hexagon";
   opt.straight_nodes = 20;
@@ -469,7 +456,7 @@ TEST_CASE("Perf_GraphTopology_Hexagon") {
 /**
  * Test mixed topology graph performance
  */
-TEST_CASE("Perf_GraphTopology_Mixed") {
+TEST_CASE(Perf_GraphTopology_Mixed) {
   TestOptions opt;
   opt.topology = "mixed";
   opt.length = 27; // 3 cycles of 9-step pattern  

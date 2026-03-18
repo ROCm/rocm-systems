@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /**
 Negative Testcase Scenarios :
@@ -52,7 +39,7 @@ Negative Testcase Scenarios :
 #include <hip_test_common.hh>
 #include <hip_test_kernels.hh>
 
-TEST_CASE("Unit_hipStreamEndCapture_Negative") {
+TEST_CASE(Unit_hipStreamEndCapture_Negative) {
   hipError_t ret;
   SECTION("Pass stream as nullptr") {
     hipGraph_t graph;
@@ -160,7 +147,7 @@ static void StreamEndCaptureThreadNegative(float* A_d, float* A_h, float* C_d, f
   HIP_CHECK(hipStreamDestroy(stream));
   HIP_CHECK(hipGraphDestroy(graph));
 }
-TEST_CASE("Unit_hipStreamEndCapture_Thread_Negative") {
+TEST_CASE(Unit_hipStreamEndCapture_Thread_Negative) {
   constexpr size_t N = 100000;
   size_t Nbytes = N * sizeof(float);
   float *A_d, *C_d;
@@ -205,7 +192,7 @@ static void thread_func1(hipStream_t stream, hipGraph_t* graph, size_t Nbytes, f
  * stream1 and return the captured graph. Wait for the thread in main function.
  * Create an executable graph and launch the graph on input data and validate the output.
  * */
-TEST_CASE("Unit_hipStreamEndCapture_mode_hipStreamCaptureModeRelaxed") {
+TEST_CASE(Unit_hipStreamEndCapture_mode_hipStreamCaptureModeRelaxed) {
   hipStream_t stream{nullptr}, streamForGraph{nullptr};
   hipGraph_t graph{nullptr};
   constexpr unsigned threadsPerBlock = 256;
@@ -276,7 +263,7 @@ static __global__ void increment(int* A_d) { atomicAdd(A_d, 1); }
  * (like increment kernel) on both s1 and s2. End the stream capture
  * on s2 and verify the error returned by the End capture.
  */
-TEST_CASE("Unit_hipStreamEndCapture_chkError_on_wrongStream") {
+TEST_CASE(Unit_hipStreamEndCapture_chkError_on_wrongStream) {
   int *A_d{nullptr}, *A_h{nullptr};
   hipStream_t stream1{nullptr}, stream2{nullptr};
   hipEvent_t forkStreamEvent{nullptr};
@@ -336,7 +323,7 @@ static void thread_func4(hipStream_t stream1, hipStream_t stream2, hipEvent_t ev
  * stream capture in s1. Create an executable graph and launch the graph on input
  * data and validate the output.
  * */
-TEST_CASE("Unit_hipStreamEndCapture_streamMerge_in_thread") {
+TEST_CASE(Unit_hipStreamEndCapture_streamMerge_in_thread) {
   // Device Pointers
   int *A_d, *B_d, *C_d;
   // Host Pointers

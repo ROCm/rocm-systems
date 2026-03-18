@@ -387,9 +387,8 @@ ncclResult_t ncclTopoCheckP2p(struct ncclComm* comm, struct ncclTopoSystem* syst
 // MNNVL: Check whether peers are in the same fabric cluster and clique
 ncclResult_t ncclTopoCheckMNNVL(struct ncclTopoSystem* system, struct ncclPeerInfo* info1, struct ncclPeerInfo* info2, int* ret) {
   *ret = 0;
-
-  nvmlGpuFabricInfoV_t *fabricInfo1 = &info1->fabricInfo;
-  nvmlGpuFabricInfoV_t *fabricInfo2 = &info2->fabricInfo;
+  auto fabricInfo1 = &info1->fabricInfo;
+  auto fabricInfo2 = &info2->fabricInfo;
   // A zero UUID means we don't have MNNVL fabric info
   unsigned long uuid0 = 0;
   unsigned long uuid1 = 0;
@@ -1022,6 +1021,8 @@ ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
     // p2pnChannelsPerPeer cannot be greater than MAXCHANNELS
     // Capping the comm->p2pnChannels to 32 for send/recv based collectives on multi-node MI350 (2 and 4 nodes)
     if (((comm->nNodes == 2 && comm->topo->nRanks == 16) || (comm->nNodes == 4 && comm->topo->nRanks == 32)) && (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950"))) comm->p2pnChannels = std::min(comm->p2pnChannels, 32);
+    // Capping the comm->p2pnChannels to 16 for send/recv based collectives with half-subscription (4 GPUs per node) multi-node MI350 (2 and 4 nodes)
+    if (((comm->nNodes == 2 && comm->topo->nRanks == 8) || (comm->nNodes == 4 && comm->topo->nRanks == 16)) && (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950"))) comm->p2pnChannels = std::min(comm->p2pnChannels, 16);
     comm->p2pnChannelsPerPeer = std::min(comm->p2pnChannelsPerPeer, MAXCHANNELS);
   }
 

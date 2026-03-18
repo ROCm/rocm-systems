@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2022 - 2023 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <string.h>
 #ifdef __linux__
@@ -79,7 +66,7 @@ static hipError_t test_hipDeviceGetHdpAddress(int deviceId, hipDeviceAttribute_t
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGetDeviceAttribute_CheckAttrValues") {
+TEST_CASE(Unit_hipGetDeviceAttribute_CheckAttrValues) {
   int deviceId;
   HIP_CHECK(hipGetDevice(&deviceId));
   hipDeviceProp_t props;
@@ -213,7 +200,7 @@ TEST_CASE("Unit_hipGetDeviceAttribute_CheckAttrValues") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipDeviceGetAttribute_NegTst") {
+TEST_CASE(Unit_hipDeviceGetAttribute_NegTst) {
   int deviceCount = 0;
   int pi = -1;
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
@@ -411,47 +398,6 @@ void printAttributes(const AttributeToStringMap<n>& attributes, const int device
 /**
  * Test Description
  * ------------------------
- *  - Print out all device attributes in agreed upon format.
- * Test source
- * ------------------------
- *  - unit/device/hipGetDeviceAttribute.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 5.2
- */
-TEST_CASE("Print_Out_Attributes") {
-  const auto device = GENERATE(range(0, HipTest::getDeviceCount()));
-  hipDeviceProp_t properties;
-  HIP_CHECK(hipGetDeviceProperties(&properties, device));
-
-  std::cout << std::left;
-  std::cout << std::setw(kW) << "device#: " << device << "\n";
-  std::cout << std::setw(kW) << "name: " << properties.name << "\n";
-
-  printAttributes(kCommonAttributes, device);
-
-#if HT_NVIDIA
-  std::cout << "\nCUDA only\n";
-  std::cout << std::setw(kW)
-            << "--------------------------------------------------------------------------------"
-            << "\n";
-  printAttributes(kCudaOnlyAttributes, device);
-#endif
-
-#if HT_AMD
-  std::cout << "\nAMD only\n";
-  std::cout << std::setw(kW)
-            << "--------------------------------------------------------------------------------"
-            << "\n";
-  printAttributes(kAmdOnlyAttributes, device);
-#endif
-
-  std::flush(std::cout);
-}
-
-/**
- * Test Description
- * ------------------------
  *  - verify hipDeviceAttributeHostRegisterSupported attribute.
  * Test source
  * ------------------------
@@ -460,7 +406,7 @@ TEST_CASE("Print_Out_Attributes") {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipGetDeviceAttribute_hipDevAttrHostRegisterSupported") {
+TEST_CASE(Unit_hipGetDeviceAttribute_hipDevAttrHostRegisterSupported) {
   hipError_t ret_val;
   int hipDevAttr = 0;
   ret_val = hipDeviceGetAttribute(&hipDevAttr, hipDeviceAttributeHostRegisterSupported, 0);

@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip_test_common.hh>
 
@@ -34,7 +21,7 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 6.4
  */
-TEST_CASE("Unit_hipDevicePrimaryCtxSetFlags_Negative") {
+TEST_CASE(Unit_hipDevicePrimaryCtxSetFlags_Negative) {
   hipDevice_t dev;
   unsigned int flags = 0;
   SECTION("Negative device index") {
@@ -64,7 +51,7 @@ TEST_CASE("Unit_hipDevicePrimaryCtxSetFlags_Negative") {
  * ------------------------
  *  - HIP_VERSION >= 6.4
  */
-TEST_CASE("Unit_hipDeviceAPIs_not_supported") {
+TEST_CASE(Unit_hipDeviceAPIs_not_supported) {
   hipDevice_t device;
   int numDevices = -1;
   HIP_CHECK(hipDeviceGet(&device, 0));
@@ -104,7 +91,7 @@ TEST_CASE("Unit_hipDeviceAPIs_not_supported") {
  * ------------------------
  *  - HIP_VERSION >= 6.4
  */
-TEST_CASE("Unit_hipCtxGetSetCacheConfig_not_supported") {
+TEST_CASE(Unit_hipCtxGetSetCacheConfig_not_supported) {
   hipFuncCache_t cacheConfig;
   SECTION("hipCtxSetCacheConfig_not_supported") {
     SECTION("Invalid enum value") {
@@ -143,7 +130,7 @@ TEST_CASE("Unit_hipCtxGetSetCacheConfig_not_supported") {
  *  - Textures supported on device
  *  - HIP_VERSION >= 6.4
  */
-TEST_CASE("Unit_hipCtxGetSetSharedMemConfig_not_supported") {
+TEST_CASE(Unit_hipCtxGetSetSharedMemConfig_not_supported) {
   hipSharedMemConfig config;
   config = hipSharedMemBankSizeEightByte;
   SECTION("hipCtxSetSharedMemConfig_not_supported") {
@@ -169,7 +156,7 @@ TEST_CASE("Unit_hipCtxGetSetSharedMemConfig_not_supported") {
  *  - Textures supported on device
  *  - HIP_VERSION >= 6.4
  */
-TEST_CASE("Unit_hipCtxPeerAccess_not_supported") {
+TEST_CASE(Unit_hipCtxPeerAccess_not_supported) {
   hipCtx_t peerCtx = nullptr;
   unsigned int flags = 0;
   SECTION("hipCtxEnablePeerAccess_not_supported") {
@@ -193,7 +180,7 @@ TEST_CASE("Unit_hipCtxPeerAccess_not_supported") {
  * ------------------------
  *  - HIP_VERSION >= 6.4
  */
-TEST_CASE("Unit_hipCtxAPIs_not_supported") {
+TEST_CASE(Unit_hipCtxAPIs_not_supported) {
   SECTION("hipCtxGetFlags_not_supported") {
     unsigned int flags = 0x100;
     auto res = hipCtxGetFlags(&flags);
@@ -230,7 +217,7 @@ TEST_CASE("Unit_hipCtxAPIs_not_supported") {
  * ------------------------
  *  - HIP_VERSION >= 6.4
  */
-TEST_CASE("hipDevicePrimaryCtxGetState_Negative") {
+TEST_CASE(hipDevicePrimaryCtxGetState_Negative) {
   hipDevice_t device;
   HIP_CHECK(hipDeviceGet(&device, 0));
   hipCtx_t primaryCtx = nullptr;

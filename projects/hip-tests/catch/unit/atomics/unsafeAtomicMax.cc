@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "min_max_common.hh"
 
@@ -124,7 +108,7 @@ static void runUnsafeAtomicMaxMultiKernelScatteredAddressesTest() {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_unsafeAtomicMax_Positive_SameAddress") {
+TEST_CASE(Unit_unsafeAtomicMax_Positive_SameAddress) {
   SECTION("float") { runUnsafeAtomicMaxSameAddressTest<float>(); }
   SECTION("double") { runUnsafeAtomicMaxSameAddressTest<double>(); }
 }
@@ -141,7 +125,7 @@ TEST_CASE("Unit_unsafeAtomicMax_Positive_SameAddress") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_unsafeAtomicMax_Positive_Adjacent_Addresses") {
+TEST_CASE(Unit_unsafeAtomicMax_Positive_Adjacent_Addresses) {
   SECTION("float") { runUnsafeAtomicMaxAdjacentAddressesTest<float>(); }
   SECTION("double") { runUnsafeAtomicMaxAdjacentAddressesTest<double>(); }
 }
@@ -158,7 +142,7 @@ TEST_CASE("Unit_unsafeAtomicMax_Positive_Adjacent_Addresses") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_unsafeAtomicMax_Positive_Scattered_Addresses") {
+TEST_CASE(Unit_unsafeAtomicMax_Positive_Scattered_Addresses) {
   SECTION("float") { runUnsafeAtomicMaxScatteredAddressesTest<float>(); }
   SECTION("double") { runUnsafeAtomicMaxScatteredAddressesTest<double>(); }
 }
@@ -175,7 +159,7 @@ TEST_CASE("Unit_unsafeAtomicMax_Positive_Scattered_Addresses") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_unsafeAtomicMax_Positive_Multi_Kernel_Same_Address") {
+TEST_CASE(Unit_unsafeAtomicMax_Positive_Multi_Kernel_Same_Address) {
   SECTION("float") { runUnsafeAtomicMaxMultiKernelSameAddressTest<float>(); }
   SECTION("double") { runUnsafeAtomicMaxMultiKernelSameAddressTest<double>(); }
 }
@@ -192,7 +176,7 @@ TEST_CASE("Unit_unsafeAtomicMax_Positive_Multi_Kernel_Same_Address") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_unsafeAtomicMax_Positive_Multi_Kernel_Adjacent_Addresses") {
+TEST_CASE(Unit_unsafeAtomicMax_Positive_Multi_Kernel_Adjacent_Addresses) {
   SECTION("float") { runUnsafeAtomicMaxMultiKernelAdjacentAddressesTest<float>(); }
   SECTION("double") { runUnsafeAtomicMaxMultiKernelAdjacentAddressesTest<double>(); }
 }
@@ -209,7 +193,7 @@ TEST_CASE("Unit_unsafeAtomicMax_Positive_Multi_Kernel_Adjacent_Addresses") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_unsafeAtomicMax_Positive_Multi_Kernel_Scattered_Addresses") {
+TEST_CASE(Unit_unsafeAtomicMax_Positive_Multi_Kernel_Scattered_Addresses) {
   SECTION("float") { runUnsafeAtomicMaxMultiKernelScatteredAddressesTest<float>(); }
   SECTION("double") { runUnsafeAtomicMaxMultiKernelScatteredAddressesTest<double>(); }
 }

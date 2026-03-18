@@ -1,21 +1,9 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 /**
 Testcase Scenarios :
 1) Test flag value of stream created with hipStreamCreateWithFlags/
@@ -30,7 +18,7 @@ Testcase Scenarios :
  * @brief Check that hipStreamGetFlags returns the same flags that were used to create the stream.
  *
  */
-TEST_CASE("Unit_hipStreamGetFlags_Basic") {
+TEST_CASE(Unit_hipStreamGetFlags_Basic) {
   unsigned int expectedFlag = GENERATE(hipStreamDefault, hipStreamNonBlocking);
   unsigned int returnedFlags;
   hipStream_t stream;
@@ -45,7 +33,7 @@ TEST_CASE("Unit_hipStreamGetFlags_Basic") {
  * @brief Negative scenarios for hipStreamGetFlags.
  *
  */
-TEST_CASE("Unit_hipStreamGetFlags_Negative") {
+TEST_CASE(Unit_hipStreamGetFlags_Negative) {
   hipStream_t validStream;
   unsigned int flags;
 
@@ -70,7 +58,7 @@ TEST_CASE("Unit_hipStreamGetFlags_Negative") {
 /**
  * Test flag value when streams created with CUMask.
  */
-TEST_CASE("Unit_hipStreamGetFlags_StreamsCreatedWithCUMask") {
+TEST_CASE(Unit_hipStreamGetFlags_StreamsCreatedWithCUMask) {
   hipStream_t stream;
   unsigned int flags;
   const uint32_t cuMask = 0xffffffff;

@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of intge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "MemUtils.hh"
 #include <utils.hh>
@@ -177,7 +161,7 @@ static void runMemcpyTests(hipStream_t stream, bool async, allocType type, memTy
 
 #if HT_AMD /* Disabled because frequency based wait is timing out on nvidia platforms */
 
-TEST_CASE("Unit_hipMemcpySync") {
+TEST_CASE(Unit_hipMemcpySync) {
 #if HT_AMD  // To be removed when EXSWCPHIPT-127 is fixed
   HipTest::HIP_SKIP_TEST("EXSWCPHIPT-127 - Sync behaviour differs on AMD and Nvidia");
   return;
@@ -191,7 +175,7 @@ TEST_CASE("Unit_hipMemcpySync") {
   doMemTest<char>(runMemcpyTests, type, memcpy_type, data);  // Uses long running kernel
 }
 
-TEST_CASE("Unit_hipMemcpy2DSync") {
+TEST_CASE(Unit_hipMemcpy2DSync) {
 #if HT_AMD
   HipTest::HIP_SKIP_TEST("EXSWCPHIPT-127 - Sync behaviour differs on AMD and Nvidia");
   return;
@@ -207,7 +191,7 @@ TEST_CASE("Unit_hipMemcpy2DSync") {
   doMemTest<char>(runMemcpyTests, mallocType, memcpy_type, data);
 }
 
-TEST_CASE("Unit_hipMemcpy3DSync") {
+TEST_CASE(Unit_hipMemcpy3DSync) {
 #if HT_AMD
   HipTest::HIP_SKIP_TEST("EXSWCPHIPT-127 - Sync behaviour differs on AMD and Nvidia");
   return;
