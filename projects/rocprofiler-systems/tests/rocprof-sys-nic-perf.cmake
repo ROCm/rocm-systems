@@ -39,6 +39,7 @@ set(_nic_perf_environment
     "ROCPROFSYS_NETWORK_INTERFACE=${_network_interface}"
     "ROCPROFSYS_PAPI_EVENTS=${_event_list}"
     "ROCPROFSYS_SAMPLING_DELAY=0.05"
+    "PAPI_NET_REFRESH_LATENCY=100000"
 )
 
 # Set _download_url to a large file that will give rocprof-sys-sample time to collect NIC

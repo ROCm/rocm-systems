@@ -429,21 +429,21 @@ static inline ncclResult_t ncclCuMemFree(void *ptr) {
 extern int ncclCuMemEnable();
 
 static inline ncclResult_t ncclCuMemAlloc(void **ptr, void *handlep, int type, size_t size) {
-  WARN("CUMEM not supported prior to ROCm 7.0");
+  WARN("CUMEM requires ROCM_VERSION >= 7.12.0");
   return ncclInternalError;
 }
 static inline ncclResult_t ncclCuMemFree(void *ptr) {
-  WARN("CUMEM not supported prior to ROCm 7.0");
+  WARN("CUMEM requires ROCM_VERSION >= 7.12.0");
   return ncclInternalError;
 }
 
 static inline ncclResult_t ncclCuMemAllocAddr(void **ptr, CUmemGenericAllocationHandle *handleIn, size_t size) {
-  WARN("CUMEM not supported prior to ROCm 7.0");
+  WARN("CUMEM requires ROCM_VERSION >= 7.12.0");
   return ncclInternalError;
 }
 
 static inline ncclResult_t ncclCuMemFreeAddr(void *ptr) {
-  WARN("CUMEM not supported prior to ROCm 7.0");
+  WARN("CUMEM requires ROCM_VERSION >= 7.12.0");
   return ncclInternalError;
 }
 #endif
