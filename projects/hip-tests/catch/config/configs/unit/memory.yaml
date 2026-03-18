@@ -1027,7 +1027,7 @@ memory:
     <<: *level_2
     # SWDEV-396616 hipMemMap returns invalid error
     disabled: [amd_windows, amd_wsl]
-    tags: [vmm]
+    tags: [virtualMemoryManagement]
   Unit_hipMemVmm_Uncached:
     <<: *level_2
     # Rock_Window_Failures_on_gfx1151

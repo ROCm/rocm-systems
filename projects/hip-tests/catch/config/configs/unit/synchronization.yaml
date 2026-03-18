@@ -2,10 +2,10 @@
 synchronization:
   Unit_Copy_Coherency:
     <<: *level_2
-    tags: [coherency, sync]
+    tags: [coherency]
   Unit_cache_coherency_cpu_gpu:
     <<: *level_2
-    tags: [coherency, sync]
+    tags: [coherency]
   Unit_cache_coherency_gpu_gpu:
     <<: *level_2
-    tags: [coherency, multigpu, sync]
+    tags: [coherency, multigpu]
