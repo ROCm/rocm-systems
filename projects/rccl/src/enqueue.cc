@@ -435,8 +435,14 @@ ncclResult_t ncclTasksRegAndEnqueue(struct ncclComm* comm) {
       devWork.enableDirectReduceScatter = comm->enableDirectReduceScatter;
       int64_t directReduceScatterLimit = rcclParamDirectReduceScatterThreshold();
       if (directReduceScatterLimit >= 0) {
-        // set threshold to 2MiB hard limit
-        directReduceScatterLimit = std::min(directReduceScatterLimit, (int64_t)2097152);
+        // set threshold to 8MiB hard limit
+        if (comm->nNodes == 8 || comm->nNodes == 16) {
+          directReduceScatterLimit = std::min(directReduceScatterLimit, (int64_t)8388608);
+        } else if (comm->nNodes == 4) {
+          directReduceScatterLimit = std::min(directReduceScatterLimit, (int64_t)4194304);
+        } else if (comm->nNodes == 2) {
+          directReduceScatterLimit = std::min(directReduceScatterLimit, (int64_t)2097152);
+        }
         devWork.directReduceScatterLimitBytes = (uint32_t) directReduceScatterLimit;
       } else {
         devWork.directReduceScatterLimitBytes = (uint32_t)0;

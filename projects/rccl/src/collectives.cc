@@ -498,17 +498,9 @@ ncclResult_t ncclReduceScatter_impl(const void* sendbuff, void* recvbuff, size_t
     // Calculate offset into buffers
     size_t offset = recvcount * ncclTypeSize(datatype);
     
-    // Copy Current ranks data to tempbuff
-    // Enqueue the copy on the user stream so it is correctly ordered w.r.t. the subsequent
-    // ncclSend/ncclRecv and the rest of the ReduceScatter work on the same stream.
-    NCCLCHECK(ncclCudaMemcpyAsync((char*)tempbuff + comm->rank * offset, (char*)sendbuff + comm->rank * offset, offset, stream));
-
     NCCLCHECK(ncclGroupStart());
     for (int i = 0; i < nRanks; i++) {
       int peer = (comm->rank + i) % nRanks;
-      if (peer == comm->rank) {
-        continue;
-      }
       NCCLCHECK(ncclSend((void*)((char*)sendbuff + peer * offset), recvcount, datatype, peer, comm, stream));
       NCCLCHECK(ncclRecv((void*)((char*)tempbuff + peer * offset), recvcount, datatype, peer, comm, stream));
     }
