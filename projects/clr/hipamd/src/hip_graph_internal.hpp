@@ -491,6 +491,7 @@ class GraphNode : public hipGraphNodeDOTAttribute {
     }
     if (DEBUG_HIP_GRAPH_DOT_PRINT >= 2) {
       out << "\nLaunchId:" << launch_id_;
+      out << "\nHwQueueId:" << hw_queue_id_;
     }
     out << "\"";
     out << "];";
@@ -515,6 +516,7 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   size_t outDegree_;        //!< count of outgoing edges (@todo: remove, it's edges_.size())
   int32_t stream_id_ = -1;  //! Stream ID on which this node will be executed
   int32_t launch_id_ = -1;  //! Launch ID of this node in the entire graph execution sequence
+  int32_t hw_queue_id_ = -1;  //! Hardware queue ID of this node in the entire graph execution sequence
   static int nextID;
   Graph* parentGraph_;
   static std::unordered_set<GraphNode*> nodeSet_;
@@ -1097,6 +1099,7 @@ class GraphKernelNode : public GraphNode {
     }
     if (DEBUG_HIP_GRAPH_DOT_PRINT >= 2) {
       out << "\nLaunchId:" << launch_id_;
+      out << "\nHwQueueId:" << hw_queue_id_;
     }
     out << "\"";
     out << "];";

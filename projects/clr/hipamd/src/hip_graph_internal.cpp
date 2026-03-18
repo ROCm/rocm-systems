@@ -659,6 +659,7 @@ bool Graph::RunOneNode(Node node) {
   } else {
     // Assing a stream to the current node
     node->SetStream(streams_);
+    node->hw_queue_id_ = node->GetQueue()->getQueueID();
     // Create the execution commands on the assigned stream
     auto status = node->CreateCommand(node->GetQueue());
     if (status != hipSuccess) {
