@@ -1235,3 +1235,131 @@ def test_analyze_ipblocks_SPI_MI200(binary_handler_analyze_rocprof_compute):
         "tests/workloads/ipblocks_SPI/MI200",
     ])
     assert code == 0
+
+
+##################################################
+##          Torch trace analysis tests          ##
+##################################################
+
+
+def test_analyze_torch_trace_list_operators_MI350(
+    binary_handler_analyze_rocprof_compute, capsys
+):
+    code = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--path",
+        "tests/workloads/torch_trace/MI350",
+        "--list-torch-operators",
+    ])
+    assert code == 0
+
+    output = capsys.readouterr().out
+
+    assert "PyTorch Operator Call Tree:" in output
+    assert "Grouped by source location" in output
+    assert "torch.nn.functional.relu" in output
+    assert "torch.nn.functional.linear" in output
+    assert "torch.ones_like" in output
+    assert "kernel_launches:" in output
+    assert "total_duration:" in output
+
+
+def test_analyze_torch_trace_filter_operator_MI350(
+    binary_handler_analyze_rocprof_compute, capsys
+):
+    code = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--path",
+        "tests/workloads/torch_trace/MI350",
+        "--torch-operator",
+        "*relu",
+    ])
+    assert code == 0
+
+    output = capsys.readouterr().out
+
+    assert "Matched PyTorch Operators:" in output
+    assert "relu" in output
+    assert "kernel_launches:" in output
+    assert "total_duration:" in output
+
+
+def test_analyze_torch_trace_multi_operator_MI350(
+    binary_handler_analyze_rocprof_compute, capsys
+):
+    code = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--path",
+        "tests/workloads/torch_trace/MI350",
+        "--torch-operator",
+        "*relu",
+        "*ones_like",
+    ])
+    assert code == 0
+
+    output = capsys.readouterr().out
+
+    assert "Matched PyTorch Operators:" in output
+    assert "relu" in output
+    assert "ones_like" in output
+
+
+def test_analyze_torch_trace_invalid_operator_MI350(
+    binary_handler_analyze_rocprof_compute, capsys
+):
+    code = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--path",
+        "tests/workloads/torch_trace/MI350",
+        "--torch-operator",
+        "nonexistent_op",
+    ])
+    assert code == 0
+
+    output = capsys.readouterr().out
+    assert "No operators matched" in output
+
+
+def test_analyze_torch_trace_hierarchy_path_MI350(
+    binary_handler_analyze_rocprof_compute, capsys
+):
+    hierarchy = "nn.Module.SimpleNet.forward/torch.nn.functional.relu/torch.relu"
+    code = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--path",
+        "tests/workloads/torch_trace/MI350",
+        "--torch-operator",
+        hierarchy,
+    ])
+    assert code == 0
+
+    output = capsys.readouterr().out
+
+    assert "Matched PyTorch Operators:" in output
+    assert "torch.relu" in output
+    assert "kernel_launches:" in output
+
+
+def test_analyze_torch_trace_torch_prefix_MI350(
+    binary_handler_analyze_rocprof_compute, capsys
+):
+    code = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--path",
+        "tests/workloads/torch_trace/MI350",
+        "--torch-operator",
+        "torch.relu",
+    ])
+    assert code == 0
+
+    output = capsys.readouterr().out
+
+    assert "Matched PyTorch Operators:" in output
+    assert "torch.relu" in output
+    assert "kernel_launches:" in output
