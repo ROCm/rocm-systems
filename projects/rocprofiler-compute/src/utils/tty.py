@@ -33,12 +33,10 @@ import pandas as pd
 from tabulate import tabulate
 
 import config
-
 from utils import mem_chart, mem_chart_gfx11, parser, schema
 from utils.kernel_name_shortener import (
     kernel_name_shortener,
 )
-
 from utils.logger import console_error, console_log, console_warning
 from utils.utils import (
     METRIC_ID_RE,
@@ -49,12 +47,97 @@ from utils.utils import (
     simplify_kernel_name,
 )
 
+# Bandwidth units that need human-readable formatting
+BW_UNITS = ["Bytes/s", "bytes/s"]
+
 KERNEL_NAME_WRAP_WIDTH = 40
 
 
 def wrap_kernel_name(name: str) -> str:
     """Wrap a kernel name at KERNEL_NAME_WRAP_WIDTH for table display."""
     return textwrap.fill(str(name), width=KERNEL_NAME_WRAP_WIDTH)
+
+
+def format_bw_human_readable(value: float, precision: int = 2) -> str:
+    """
+    Format bandwidth value from Bytes/s to human-readable format.
+
+    Supports TB/s, GB/s, MB/s, KB/s, and B/s units.
+
+    Args:
+        value: Bandwidth value in Bytes/s
+        precision: Number of decimal places
+
+    Returns:
+        Human-readable bandwidth string with appropriate unit
+    """
+    if value is None or pd.isna(value):
+        return "N/A"
+    try:
+        value = float(value)
+    except (ValueError, TypeError):
+        return str(value)
+
+    # Convert to appropriate unit
+    if value >= 1e12:
+        return f"{value / 1e12:.{precision}f} TB/s"
+    elif value >= 1e9:
+        return f"{value / 1e9:.{precision}f} GB/s"
+    elif value >= 1e6:
+        return f"{value / 1e6:.{precision}f} MB/s"
+    elif value >= 1e3:
+        return f"{value / 1e3:.{precision}f} KB/s"
+    else:
+        return f"{value:.{precision}f} B/s"
+
+
+def format_bw_columns_human_readable(
+    df: pd.DataFrame, value_columns: list[str], decimal: int = 2
+) -> pd.DataFrame:
+    """
+    Format bandwidth columns in a DataFrame to human-readable format.
+
+    Detects rows with 'Bytes/s' in Unit column and formats corresponding value columns.
+
+    Args:
+        df: DataFrame with Unit column and value columns
+        value_columns: List of column names containing numeric values to format
+        decimal: Number of decimal places
+
+    Returns:
+        DataFrame with formatted bandwidth values
+    """
+    if "Unit" not in df.columns:
+        return df
+
+    df_copy = df.copy()
+
+    # Find rows with Bytes/s unit (case-insensitive)
+    bw_rows = df_copy["Unit"].str.lower().str.contains("bytes/s", na=False)
+
+    if not bw_rows.any():
+        return df_copy
+
+    for col in value_columns:
+        if col not in df_copy.columns:
+            continue
+        # Format the bandwidth values in these rows
+        for idx in df_copy.index[bw_rows]:
+            try:
+                val = df_copy.loc[idx, col]
+                if pd.notna(val) and val != "N/A":
+                    df_copy.loc[idx, col] = format_bw_human_readable(
+                        float(val), decimal
+                    )
+            except (ValueError, TypeError):
+                pass  # Keep original value if conversion fails
+
+    # Update Unit column for formatted rows
+    df_copy.loc[bw_rows, "Unit"] = df_copy.loc[bw_rows, "Unit"].str.replace(
+        "Bytes/s", "(auto)", case=False
+    )
+
+    return df_copy
 
 
 def string_multiple_lines(source: str, width: int, max_rows: int) -> str:
@@ -663,7 +746,8 @@ def flatten_mem_chart_tables(
                         ):
                             # Convert to dict and merge
                             table_mem_data = (
-                                pd.DataFrame([table_df["Metric"], table_df["Value"]])
+                                pd
+                                .DataFrame([table_df["Metric"], table_df["Value"]])
                                 .transpose()
                                 .set_index("Metric")
                                 .to_dict()["Value"]
@@ -743,6 +827,16 @@ def format_table_output(
     # fash for now.
     transpose = table_type != "raw_csv_table" and table_config.get("columnwise", False)
 
+    # For single run and gfx115x, format BW metrics (Bytes/s) to human-readable
+    # For multiple runs (baseline comparison), keep Bytes for accurate comparison
+    is_single_run = len(runs) == 1
+    is_gfx115x = gpu_arch and gpu_arch.startswith("gfx115")
+
+    if is_single_run and is_gfx115x and "Unit" in df.columns:
+        # Identify value columns to format
+        value_cols = ["Value", "Avg", "Min", "Max"]
+        df = format_bw_columns_human_readable(df, value_cols, args.decimal)
+
     # When --table-view is set, force table output and ignore cli_style from config
     if getattr(args, "table_view", False):
         content += (
@@ -763,19 +857,32 @@ def format_table_output(
             .to_dict()["Value"]
         )
         # Select appropriate mem_chart module based on GPU architecture
-        if gpu_arch and gpu_arch.startswith("gfx115") and panel and comparable_columns and hidden_cols:
+        if (
+            gpu_arch
+            and gpu_arch.startswith("gfx115")
+            and panel
+            and comparable_columns
+            and hidden_cols
+        ):
             # For gfx115x, flatten all mem_chart tables in the panel into a single
             # mem_data dict
             chart_content, should_skip = flatten_mem_chart_tables(
-                args, runs, panel, table_config, mem_data, comparable_columns, hidden_cols
+                args,
+                runs,
+                panel,
+                table_config,
+                mem_data,
+                comparable_columns,
+                hidden_cols,
             )
             if should_skip:
-                pass  # Skip this table as it's already included in the first table's plot
+                pass  # Already included in first table
             elif chart_content:
                 content += chart_content
             else:
                 content += (
-                    mem_chart_gfx11.plot_mem_chart("", args.normal_unit, mem_data) + "\n"
+                    mem_chart_gfx11.plot_mem_chart("", args.normal_unit, mem_data)
+                    + "\n"
                 )
         else:
             content += mem_chart.plot_mem_chart("", args.normal_unit, mem_data) + "\n"

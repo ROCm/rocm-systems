@@ -56,10 +56,10 @@ Panel Config:
           peak: 100
           pop: ROUND((AVG((((TCP_REQ_sum - TCP_REQ_MISS_sum) / TCP_REQ_sum) if (TCP_REQ_sum != 0) else None)) * 100), 0)
         TCP Cache BW:
-          value: AVG(((TCP_TA_REQ_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
-          unit: GB/s
-          peak: ((($max_sclk / 1000) * 256) * $cu_per_gpu)
-          pop: ((100 * AVG(((TCP_TA_REQ_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)) / ((($max_sclk / 1000) * 256) * $cu_per_gpu))
+          value: AVG((TCP_TA_REQ_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9))
+          unit: Bytes/s
+          peak: ((($max_sclk / 1000) * 256) * $cu_per_gpu * 1e9)
+          pop: ((100 * AVG((TCP_TA_REQ_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9))) / ((($max_sclk / 1000) * 256) * $cu_per_gpu * 1e9))
         # GL1C: Level-1 Graphics Cache
         GL1C Hit Rate:
           value: ROUND((AVG((((GL1C_REQ_sum - GL1C_REQ_MISS_sum) / GL1C_REQ_sum) if (GL1C_REQ_sum != 0) else None)) * 100), 0)
@@ -67,10 +67,10 @@ Panel Config:
           peak: 100
           pop: ROUND((AVG((((GL1C_REQ_sum - GL1C_REQ_MISS_sum) / GL1C_REQ_sum) if (GL1C_REQ_sum != 0) else None)) * 100), 0)
         GL1C Read BW:
-          value: AVG(((GL1C_REQ_READ_sum * 128) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
-          unit: GB/s
-          peak: ((($max_sclk / 1000) * 128) * $se_per_gpu)
-          pop: ((100 * AVG(((GL1C_REQ_READ_sum * 128) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)) / ((($max_sclk / 1000) * 128) * $se_per_gpu))
+          value: AVG((GL1C_REQ_READ_sum * 128) / ((End_Timestamp - Start_Timestamp) / 1e9))
+          unit: Bytes/s
+          peak: ((($max_sclk / 1000) * 128) * $se_per_gpu * 1e9)
+          pop: ((100 * AVG((GL1C_REQ_READ_sum * 128) / ((End_Timestamp - Start_Timestamp) / 1e9))) / ((($max_sclk / 1000) * 128) * $se_per_gpu * 1e9))
         # GL2C: Level-2 Graphics Cache (Last-level cache)
         GL2C Hit Rate:
           value: AVG((((100 * GL2C_HIT_sum) / (GL2C_HIT_sum + GL2C_MISS_sum)) if ((GL2C_HIT_sum + GL2C_MISS_sum) != 0) else None))
@@ -78,30 +78,30 @@ Panel Config:
           peak: 100
           pop: AVG((((100 * GL2C_HIT_sum) / (GL2C_HIT_sum + GL2C_MISS_sum)) if ((GL2C_HIT_sum + GL2C_MISS_sum) != 0) else None))
         GL2C Cache BW:
-          value: AVG(((GL2C_REQ_sum * 128) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
-          unit: GB/s
-          peak: ((($max_sclk / 1000) * 128) * TO_INT_sum($total_l2_chan))
-          pop: ((100 * AVG(((GL2C_REQ_sum * 128) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)) / ((($max_sclk / 1000) * 128) * TO_INT_sum($total_l2_chan)))
+          value: AVG((GL2C_REQ_sum * 128) / ((End_Timestamp - Start_Timestamp) / 1e9))
+          unit: Bytes/s
+          peak: ((($max_sclk / 1000) * 128) * TO_INT_sum($total_l2_chan) * 1e9)
+          pop: ((100 * AVG((GL2C_REQ_sum * 128) / ((End_Timestamp - Start_Timestamp) / 1e9))) / ((($max_sclk / 1000) * 128) * TO_INT_sum($total_l2_chan) * 1e9))
         Scalar Data Cache Hit Rate:
           value: AVG((((100 * SQC_DCACHE_HITS_sum) / (SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum)) if ((SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum) != 0) else None))
           unit: pct
           peak: 100
           pop: AVG((((100 * SQC_DCACHE_HITS_sum) / (SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum)) if ((SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum) != 0) else None))
         Scalar Data Cache BW:
-          value: AVG(((SQC_DCACHE_REQ_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
-          unit: GB/s
-          peak: ((($max_sclk / 1000) * 64) * $sqc_per_gpu)
-          pop: ((100 * AVG(((SQC_DCACHE_REQ_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)) / ((($max_sclk / 1000) * 64) * $sqc_per_gpu))
+          value: AVG((SQC_DCACHE_REQ_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9))
+          unit: Bytes/s
+          peak: ((($max_sclk / 1000) * 64) * $sqc_per_gpu * 1e9)
+          pop: ((100 * AVG((SQC_DCACHE_REQ_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9))) / ((($max_sclk / 1000) * 64) * $sqc_per_gpu * 1e9))
         Instruction Cache Hit Rate:
           value: AVG(((100 * SQC_ICACHE_HITS_sum) / (SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum)))
           unit: pct
           peak: 100
           pop: AVG(((100 * SQC_ICACHE_HITS_sum) / (SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum)))
         Instruction Cache BW:
-          value: AVG(((SQC_ICACHE_REQ_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
-          unit: GB/s
-          peak: ((($max_sclk / 1000) * 64) * $sqc_per_gpu)
-          pop: ((100 * AVG(((SQC_ICACHE_REQ_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)) / ((($max_sclk / 1000) * 64) * $sqc_per_gpu))
+          value: AVG((SQC_ICACHE_REQ_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9))
+          unit: Bytes/s
+          peak: ((($max_sclk / 1000) * 64) * $sqc_per_gpu * 1e9)
+          pop: ((100 * AVG((SQC_ICACHE_REQ_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9))) / ((($max_sclk / 1000) * 64) * $sqc_per_gpu * 1e9))
 
   metrics_description:
     VALU FLOPs (FP16): |-

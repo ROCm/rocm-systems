@@ -53,8 +53,8 @@ Panel Config:
           value: AVG((100 * SQC_ICACHE_INPUT_VALID_READYB_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
           unit: Percent
         ICache-GL1 Read Bandwidth:
-          value: AVG(((SQC_TC_INST_REQ_sum * 128) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
-          unit: GB/s
+          value: AVG((SQC_TC_INST_REQ_sum * 128) / ((End_Timestamp - Start_Timestamp) / 1e9))
+          unit: Bytes/s
 
   # =========================================================================
   # Table 302: Scalar Data Cache (SQC)
@@ -83,8 +83,8 @@ Panel Config:
           value: AVG((100 * SQC_DCACHE_INPUT_VALID_READYB_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
           unit: Percent
         Dcache-GL1 Read Bandwidth:
-          value: AVG(((SQC_TC_DATA_READ_REQ_sum * 128) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
-          unit: GB/s
+          value: AVG((SQC_TC_DATA_READ_REQ_sum * 128) / ((End_Timestamp - Start_Timestamp) / 1e9))
+          unit: Bytes/s
 
   # =========================================================================
   # Table 303: TCP Cache (L0 Vector Cache)
@@ -120,8 +120,8 @@ Panel Config:
           value: AVG((100 * (TCP_REQ_sum - TCP_REQ_MISS_sum) / TCP_REQ_sum) if (TCP_REQ_sum != 0) else None)
           unit: Percent
         TCP Request Bandwidth:
-          value: AVG(((TCP_REQ_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
-          unit: GB/s
+          value: AVG((TCP_REQ_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9))
+          unit: Bytes/s
 
   # =========================================================================
   # Table 304: LDS (Local Data Share)
@@ -160,8 +160,8 @@ Panel Config:
           value: AVG((100 * SQC_LDS_BANK_CONFLICT_sum / SQC_LDS_IDX_ACTIVE_sum) if (SQC_LDS_IDX_ACTIVE_sum != 0) else None)
           unit: Percent
         LDS Estimated Bandwidth:
-          value: AVG((((SQC_LDS_IDX_ACTIVE_sum - SQC_LDS_BANK_CONFLICT_sum) * 4 * 32) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
-          unit: GB/s
+          value: AVG(((SQC_LDS_IDX_ACTIVE_sum - SQC_LDS_BANK_CONFLICT_sum) * 4 * 32) / ((End_Timestamp - Start_Timestamp) / 1e9))
+          unit: Bytes/s
 
   # =========================================================================
   # Table 305: TCP-GL1 Interface
@@ -184,11 +184,11 @@ Panel Config:
           value: AVG(TCP_GL1_REQ_WRITE_sum / $denom)
           unit: Requests + $normUnit
         TCP-GL1 Read Bandwidth:
-          value: AVG(((TCP_GL1_REQ_READ_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
-          unit: GB/s
+          value: AVG((TCP_GL1_REQ_READ_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9))
+          unit: Bytes/s
         TCP-GL1 Write Bandwidth:
-          value: AVG(((TCP_GL1_REQ_WRITE_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
-          unit: GB/s
+          value: AVG((TCP_GL1_REQ_WRITE_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9))
+          unit: Bytes/s
 
   # =========================================================================
   # Table 306: GL1C Cache (L1)
@@ -250,11 +250,11 @@ Panel Config:
           value: AVG(GL1C_GL2_REQ_WRITE_sum / $denom)
           unit: Requests + $normUnit
         GL1-GL2 Read Bandwidth:
-          value: AVG(((GL1C_GL2_REQ_READ_32B_sum*32 + GL1C_GL2_REQ_READ_64B_sum*64 + GL1C_GL2_REQ_READ_128B_sum*128) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
-          unit: GB/s
+          value: AVG((GL1C_GL2_REQ_READ_32B_sum*32 + GL1C_GL2_REQ_READ_64B_sum*64 + GL1C_GL2_REQ_READ_128B_sum*128) / ((End_Timestamp - Start_Timestamp) / 1e9))
+          unit: Bytes/s
         GL1-GL2 Write Bandwidth:
-          value: AVG(((GL1C_GL2_REQ_WRITE_32B_sum*32 + GL1C_GL2_REQ_WRITE_64B_sum*64) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
-          unit: GB/s
+          value: AVG((GL1C_GL2_REQ_WRITE_32B_sum*32 + GL1C_GL2_REQ_WRITE_64B_sum*64) / ((End_Timestamp - Start_Timestamp) / 1e9))
+          unit: Bytes/s
         GL1-GL2 Read Latency:
           value: AVG((GL1C_GL2_REQ_READ_LATENCY_sum / GL1C_GL2_REQ_READ_sum) if (GL1C_GL2_REQ_READ_sum != 0) else None)
           unit: Cycles
@@ -295,11 +295,11 @@ Panel Config:
           value: AVG((100 * GL2C_HIT_sum / (GL2C_HIT_sum + GL2C_MISS_sum)) if ((GL2C_HIT_sum + GL2C_MISS_sum) != 0) else None)
           unit: Percent
         GL2C Read Bandwidth:
-          value: AVG(((GL2C_READ_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
-          unit: GB/s
+          value: AVG((GL2C_READ_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9))
+          unit: Bytes/s
         GL2C Write Bandwidth:
-          value: AVG(((GL2C_WRITE_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
-          unit: GB/s
+          value: AVG((GL2C_WRITE_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9))
+          unit: Bytes/s
 
   # =========================================================================
   # Table 309: GCEA to System Memory (APU)
@@ -328,11 +328,11 @@ Panel Config:
           value: AVG(GCEA_WDRAM_REQ_PER_CLIGRP_sum / $denom)
           unit: Requests + $normUnit
         DRAM Read Bandwidth:
-          value: AVG(((GCEA_RDRAM_SIZE_REQ_sum * 32) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
-          unit: GB/s
+          value: AVG((GCEA_RDRAM_SIZE_REQ_sum * 32) / ((End_Timestamp - Start_Timestamp) / 1e9))
+          unit: Bytes/s
         DRAM Write Bandwidth:
-          value: AVG(((GCEA_WDRAM_SIZE_REQ_sum * 32) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
-          unit: GB/s
+          value: AVG((GCEA_WDRAM_SIZE_REQ_sum * 32) / ((End_Timestamp - Start_Timestamp) / 1e9))
+          unit: Bytes/s
         Read Returns:
           value: AVG(GCEA_RRET_VLD_sum / $denom)
           unit: Count + $normUnit
