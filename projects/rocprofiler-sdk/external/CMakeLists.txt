@@ -144,12 +144,9 @@ option(ROCPROF_USE_SYS_YAML_CPP
         "Use system-provided yaml-cpp instead of vendored external/yaml-cpp" ON)
 
     if (ROCPROF_USE_SYS_YAML_CPP)
-        set(CMAKE_FIND_PACKAGE_PREFER_CONFIG ON)
         find_package(yaml-cpp CONFIG REQUIRED)
     else()
-        if (NOT TARGET yaml-cpp)
-            add_subdirectory(yaml-cpp EXCLUDE_FROM_ALL)
-        endif()
+        add_subdirectory(yaml-cpp EXCLUDE_FROM_ALL)
     endif()
 
 
@@ -157,9 +154,9 @@ target_link_libraries(rocprofiler-sdk-yaml-cpp
                       INTERFACE yaml-cpp::yaml-cpp)
 
 if (NOT ROCPROF_USE_SYS_YAML_CPP)
-target_include_directories(
-    rocprofiler-sdk-yaml-cpp
-    INTERFACE $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/external/yaml-cpp/include>)
+    target_include_directories(
+        rocprofiler-sdk-yaml-cpp
+        INTERFACE $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/external/yaml-cpp/include>)
 endif()
 
 # checkout submodule if not already checked out or clone repo if no .gitmodules file
