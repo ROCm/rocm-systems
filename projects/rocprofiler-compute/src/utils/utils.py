@@ -45,6 +45,7 @@ import traceback
 import uuid
 from collections.abc import Generator
 from contextlib import contextmanager
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional, Union, cast
 
@@ -68,6 +69,31 @@ NS_TO_MS = 1.0 / 1_000_000.0
 
 rocprof_cmd = ""
 rocprof_args = ""
+
+
+@dataclass
+class KernelStats:
+    """Aggregated kernel launch stats for one kernel name."""
+
+    launches: int = 0
+    total_duration_ns: float = 0.0
+    kernel_id: Optional[int] = None
+
+
+@dataclass
+class CallTreeNode:
+    """A node in the operator call tree.
+
+    Children are ordered operator sub-calls; kernels maps each kernel name to
+    a ``KernelStats`` record. ``kernel_launches``
+    and ``total_duration_ms`` are inclusive (rolled up from all descendants).
+    """
+
+    name: str
+    children: dict[str, "CallTreeNode"] = field(default_factory=dict)
+    kernels: dict[str, KernelStats] = field(default_factory=dict)
+    kernel_launches: int = 0
+    total_duration_ms: float = 0.0
 
 
 def version_to_numeric(version_parts: list[int], max_len: int) -> int:
@@ -1421,96 +1447,160 @@ def simplify_kernel_name(full_kernel_name: str) -> str:
     return main_part.strip()
 
 
-def get_unique_invocations(df: pd.DataFrame) -> Optional[pd.DataFrame]:
-    """Deduplicate operator invocations from trace rows.
+def parse_top_level_location(context_id: object) -> str:
+    """Extract 'file:line' from the first entry of a Context_Id string.
 
-    Each trace row represents one (operator, kernel, counter) combination, so a
-    single operator invocation appears in many rows.  Deduplication uses
-    (Operator_Name, Context_Id, Start_Timestamp_function) when Context_Id is
-    present; otherwise falls back to
-    (Operator_Name, Start_Timestamp_function, End_Timestamp_function).
-
-    Returns a DataFrame with at least Operator_Name, Start_Timestamp_function,
-    and End_Timestamp_function columns, or None when timestamps are missing.
+    Context_Id format: ``10@main.py:60/#10@main.py:21/...``
+    Returns ``main.py:60`` or ``unknown:0`` on failure.
     """
-    has_ts = (
-        "Start_Timestamp_function" in df.columns
-        and "End_Timestamp_function" in df.columns
-    )
-    if not has_ts:
-        return None
-
-    use_context = "Context_Id" in df.columns and df["Context_Id"].notna().any()
-    if use_context:
-        return df[
-            [
-                "Operator_Name",
-                "Context_Id",
-                "Start_Timestamp_function",
-                "End_Timestamp_function",
-            ]
-        ].drop_duplicates(
-            subset=["Operator_Name", "Context_Id", "Start_Timestamp_function"]
-        )
-    return df[
-        ["Operator_Name", "Start_Timestamp_function", "End_Timestamp_function"]
-    ].drop_duplicates()
+    if pd.isna(context_id) or not str(context_id).strip():
+        return "unknown:0"
+    first_entry = str(context_id).split("/")[0]
+    if "@" not in first_entry:
+        return "unknown:0"
+    _, location = first_entry.split("@", 1)
+    return location if ":" in location else "unknown:0"
 
 
-def compute_operator_prefix_stats(
+def rollup_node_stats(node: CallTreeNode) -> tuple[int, float]:
+    """Bottom-up rollup: set kernel_launches and total_duration_ms inclusive."""
+    launches = sum(stats.launches for stats in node.kernels.values())
+    duration_ns = sum(stats.total_duration_ns for stats in node.kernels.values())
+
+    for child in node.children.values():
+        child_launches, child_duration_ns = rollup_node_stats(child)
+        launches += child_launches
+        duration_ns += child_duration_ns
+
+    node.kernel_launches = launches
+    node.total_duration_ms = duration_ns * NS_TO_MS
+    return launches, duration_ns
+
+
+def build_call_trees(
     df: pd.DataFrame,
-) -> dict[str, tuple[float, int]]:
-    """Compute total duration (ms) and invocation count per operator path prefix.
+) -> dict[str, CallTreeNode]:
+    """Build per-source-location call trees from a consolidated torch trace DataFrame.
 
-    Hierarchy semantics: the trace only has the full path per row (e.g. A/B/C).
-    We attribute each invocation's duration to every prefix along its path, so
-    stats at each node are inclusive.
-    Returns dict: prefix -> (total_duration_ms, count).
+    Returns a dict mapping ``file:line`` to a CallTreeNode root whose
+    children form the full operator/kernel hierarchy.
+
+    Each kernel entry is stored as a ``KernelStats`` record.
+    Full kernel names are used; shortening is left to the display layer.
     """
-    invocations = get_unique_invocations(df)
-    if invocations is None:
+    required = {"Operator_Name", "Kernel_Name"}
+    if df.empty or not required.issubset(df.columns):
         return {}
 
-    prefix_stats: dict[str, tuple[float, int]] = {}
-    for _, row in invocations.iterrows():
-        op = str(row["Operator_Name"])
-        duration_ns = float(row["End_Timestamp_function"]) - float(
-            row["Start_Timestamp_function"]
-        )
-        duration_ms = duration_ns * NS_TO_MS
-        parts = op.split("/")
-        for i in range(1, len(parts) + 1):
-            prefix = "/".join(parts[:i])
-            if prefix not in prefix_stats:
-                prefix_stats[prefix] = (0.0, 0)
-            prev_dur, prev_cnt = prefix_stats[prefix]
-            prefix_stats[prefix] = (prev_dur + duration_ms, prev_cnt + 1)
-    return prefix_stats
+    has_kernel_timestamps = (
+        "Start_Timestamp_kernel" in df.columns and "End_Timestamp_kernel" in df.columns
+    )
+    has_context_id = "Context_Id" in df.columns
+    has_kernel_id = "Kernel_ID" in df.columns
+
+    deduplication_columns = ["Operator_Name", "Kernel_Name"]
+    if has_kernel_timestamps:
+        deduplication_columns.append("Start_Timestamp_kernel")
+    if has_context_id:
+        deduplication_columns.append("Context_Id")
+    dispatches = df.drop_duplicates(subset=deduplication_columns)
+
+    call_trees: dict[str, CallTreeNode] = {}
+
+    for row in dispatches.itertuples(index=False):
+        op_path = str(row.Operator_Name).strip()
+        kernel_name = str(row.Kernel_Name).strip()
+        if not op_path or not kernel_name:
+            continue
+
+        context_id = getattr(row, "Context_Id", None) if has_context_id else None
+        location = parse_top_level_location(context_id)
+
+        duration_ns = 0.0
+        if has_kernel_timestamps:
+            try:
+                duration_ns = float(row.End_Timestamp_kernel) - float(
+                    row.Start_Timestamp_kernel
+                )
+            except (ValueError, TypeError):
+                pass
+
+        if location not in call_trees:
+            call_trees[location] = CallTreeNode(name=location)
+        location_root = call_trees[location]
+
+        current_node = location_root
+        for path_segment in op_path.split("/"):
+            if path_segment not in current_node.children:
+                current_node.children[path_segment] = CallTreeNode(name=path_segment)
+            current_node = current_node.children[path_segment]
+
+        if kernel_name not in current_node.kernels:
+            kernel_id = None
+            kernel_id_value = getattr(row, "Kernel_ID", None) if has_kernel_id else None
+            if pd.notna(kernel_id_value):
+                kernel_id = int(kernel_id_value)
+            current_node.kernels[kernel_name] = KernelStats(kernel_id=kernel_id)
+        current_node.kernels[kernel_name].launches += 1
+        current_node.kernels[kernel_name].total_duration_ns += duration_ns
+
+    for location_root in call_trees.values():
+        rollup_node_stats(location_root)
+
+    return call_trees
+
+
+def write_torch_trace_operator_csvs(
+    consolidated_df: pd.DataFrame,
+    torch_trace_path: Path,
+) -> None:
+    """Write one consolidated torch trace CSV per operator."""
+    grouped = consolidated_df.groupby("Operator_Name")
+    for operator_name, group in grouped:
+        last_operator = operator_name.split("/")[-1]
+        sanitized_operator_name = last_operator.replace("torch.", "").replace(".", "_")
+        output_file = f"{torch_trace_path}/{sanitized_operator_name}.csv"
+        if Path(output_file).is_file():
+            group.to_csv(output_file, mode="a", header=False, index=False)
+            console_log(f"Appended trace to existing file {output_file}")
+        else:
+            group.to_csv(output_file, index=False)
+            console_log(f"Saved consolidated trace to {output_file}")
+
+
+def build_call_trees_with_kernel_ids(
+    consolidated_df: pd.DataFrame,
+    kernel_top_df: pd.DataFrame,
+    kernel_verbose: int = 0,
+) -> dict[str, CallTreeNode]:
+    """Attach Kernel_ID values and build call trees from consolidated trace rows."""
+    kernel_name_to_id = {
+        str(row["Kernel_Name"]).strip(): idx for idx, row in kernel_top_df.iterrows()
+    }
+    shortened = kernel_name_shortener(
+        pd.DataFrame({"Kernel_Name": consolidated_df["Kernel_Name"]}),
+        kernel_verbose,
+    )
+    consolidated_with_ids = consolidated_df.copy()
+    consolidated_with_ids["Kernel_ID"] = (
+        shortened["Kernel_Name"].str.strip().map(kernel_name_to_id)
+    )
+    return build_call_trees(consolidated_with_ids)
 
 
 @demarcate
 def process_torch_trace_output(
     workload_dir: str,
-    kernel_top_df: pd.DataFrame,
-    kernel_verbose: int = 0,
-) -> list[tuple[str, pd.DataFrame, dict[str, tuple[float, int]], float]]:
+) -> tuple[pd.DataFrame, Path]:
     """
-    Joins counter_collection and marker_api_trace data for PyTorch operator listing.
+    Build consolidated torch trace rows and prepare output directory.
 
     - Performs inner join on Correlation_ID, filtering out unmatched entries
-    - Consolidates data across passes and groups by Operator_Name, saving one CSV
-      per operator under workload_dir/torch_trace/
-    - Maps kernel names to IDs (adding a Kernel_ID column) by shortening torch
-      trace names with kernel_name_shortener to match the shortened names in
-      pmc_kernel_top.csv
-    - Computes prefix_stats per operator in-memory and returns the assembled
-      file_data list sorted by total duration (descending)
+    - Consolidates data across passes and normalizes required columns
+    - Prepares a clean workload_dir/torch_trace/ directory for output files
 
-    Returns list of (operator_name, DataFrame, prefix_stats, total_ms) tuples.
+    Returns (consolidated_df, torch_trace_path) on success.
     """
-    kernel_name_to_id = {
-        str(row["Kernel_Name"]).strip(): idx for idx, row in kernel_top_df.iterrows()
-    }
     console_log(f"Looking for marker and counter csv files in {workload_dir}")
     marker_api_trace_csvs = list(
         Path(workload_dir).glob("**/torch_trace*_marker_api_trace.csv")
@@ -1527,19 +1617,15 @@ def process_torch_trace_output(
     ]
 
     if not existing_csv_files:
-        if Path(f"{workload_dir}/torch_trace").exists():
-            console_log(
-                "torch trace",
-                "Torch data has already been processed and saved to "
-                f"{workload_dir}/torch_trace",
-            )
-        else:
-            console_warning(
-                "torch trace",
-                "No marker files with corresponding counter files found. "
-                "Ensure profiling was done with '--torch-trace'.",
-            )
-        return []
+        console_warning(
+            "No marker files with corresponding counter files found. "
+            "Ensure profiling was done with '--torch-trace'."
+        )
+        raise ValueError(
+            "No marker files with corresponding counter files found. "
+            "Ensure profiling was done with '--torch-trace'."
+        )
+
     torch_trace_path = Path(f"{workload_dir}/torch_trace")
     if torch_trace_path.exists():
         shutil.rmtree(torch_trace_path)
@@ -1601,11 +1687,13 @@ def process_torch_trace_output(
         console_error(
             f"Consolidated torch trace is missing required columns {missing_columns}"
         )
-        return []
+        raise ValueError(
+            f"Consolidated torch trace is missing required columns {missing_columns}"
+        )
     consolidated_df = consolidated_df[required_columns]
     if consolidated_df.isnull().values.any():
         console_warning("Consolidated torch trace contains missing values")
-        return []
+        raise ValueError("Consolidated torch trace contains missing values")
     consolidated_df = consolidated_df.sort_values(by=["Function", "Counter_Name"])
     split_columns = consolidated_df["Function"].str.split(":#", expand=True)
     consolidated_df["Operator_Name"] = (
@@ -1633,32 +1721,9 @@ def process_torch_trace_output(
             "Missing values in consolidated torch trace after splitting ",
             "the Function name.",
         )
-        return []
-    grouped = consolidated_df.groupby("Operator_Name")
-    file_data: list[tuple[str, pd.DataFrame, dict[str, tuple[float, int]], float]] = []
-    for operator_name, group in grouped:
-        last_operator = operator_name.split("/")[-1]
-        sanitized_operator_name = last_operator.replace("torch.", "").replace(".", "_")
-        output_file = f"{torch_trace_path}/{sanitized_operator_name}.csv"
-        if Path(output_file).is_file():
-            group.to_csv(output_file, mode="a", header=False, index=False)
-            console_log(f"Appended trace to existing file {output_file}")
-        else:
-            group.to_csv(output_file, index=False)
-            console_log(f"Saved consolidated trace to {output_file}")
+        raise ValueError("Missing values in consolidated torch trace after splitting")
 
-        group = group.copy()
-        shortened = kernel_name_shortener(
-            pd.DataFrame({"Kernel_Name": group["Kernel_Name"]}),
-            kernel_verbose,
-        )
-        group["Kernel_ID"] = shortened["Kernel_Name"].str.strip().map(kernel_name_to_id)
-        prefix_stats = compute_operator_prefix_stats(group)
-        total_ms = sum(dur for key, (dur, _) in prefix_stats.items() if "/" not in key)
-        file_data.append((sanitized_operator_name, group, prefix_stats, total_ms))
-
-    file_data.sort(key=lambda x: x[3], reverse=True)
-    return file_data
+    return consolidated_df, torch_trace_path
 
 
 @demarcate

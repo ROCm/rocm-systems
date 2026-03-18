@@ -38,7 +38,8 @@ RCCL_PARAM(PipelineAllDTypes, "PIPELINE_ALL_DATA_TYPES", 0);
 // Otherwise, it is automatically set for certain archs, datatypes and reduction collectives
 RCCL_PARAM(disableReduceCopyPipelining, "DISABLE_REDUCE_COPY_PIPELINING", 0);
 RCCL_PARAM(DirectAllGatherThreshold, "DIRECT_ALLGATHER_THRESHOLD", 75497472);
-RCCL_PARAM(DirectReduceScatterThreshold, "DIRECT_REDUCE_SCATTER_THRESHOLD", 2097152);
+RCCL_PARAM(DirectReduceScatterThreshold, "DIRECT_REDUCE_SCATTER_THRESHOLD", 8388608);
+RCCL_PARAM(DirectReduceScatterDisable, "DIRECT_REDUCE_SCATTER_DISABLE", 0);
 RCCL_PARAM(ThreadsPerBlock, "THREADS_PER_BLOCK", -1);
 RCCL_PARAM(UnrollFactor, "UNROLL_FACTOR", -1);
 #ifdef ENABLE_WARP_SPEED
@@ -453,14 +454,11 @@ bool rcclUseReduceScatterDirect(struct ncclComm* comm, size_t& msgSize) {
   // Direct ReduceScatter is supported for MI350 (gfx950):
   // Only if PXN is enabled
   // - 2 nodes: enable for 128KiB .. 2MiB
-  // - 4 and 8 nodes: enable up to 2MiB
-  static int userDirectReduceScatterInput = -2;
-  if (userDirectReduceScatterInput == -2) {
-    const char *inputStr = getenv("RCCL_DIRECT_REDUCE_SCATTER_DISABLE");
-    userDirectReduceScatterInput = !inputStr ? 0 : 1;
-  }
-  if (userDirectReduceScatterInput == 1) {
-    INFO(NCCL_INIT, "RCCL DIRECT REDUCE-SCATTER has been disabled.");
+  // - 4 nodes: enable up to 4MiB
+  // - 8 and 16 nodes: enable up to 8MiB
+  static int userDirectReduceScatterInput = rcclParamDirectReduceScatterDisable();
+  if (userDirectReduceScatterInput !=0) {
+    INFO(NCCL_INIT, "RCCL DIRECT REDUCE-SCATTER has been disabled by environment variable.");
     return false;
   }
   const bool archGfx950 = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950");
@@ -473,20 +471,22 @@ bool rcclUseReduceScatterDirect(struct ncclComm* comm, size_t& msgSize) {
   }
 
   size_t threshold = rcclParamDirectReduceScatterThreshold();
-  if (threshold > -1) {
-    // Set threshold to 2MiB hard limit
+  if (threshold > -1) { 
+    // Set threshold to 8MiB hard limit
     // NOTE: If the DirectReduceScatterThreshold / hard-limit is increased, ensure TEMP_BUFF_SIZE (init.cc)
     // is increased accordingly -> TEMP_BUFF_SIZE >= 2 * (max enabled msgSize) for headroom.
-    threshold = std::min(threshold, (size_t)2097152);
+    threshold = std::min(threshold, (size_t)8388608);
   } else {
-    threshold = 2097152;
+    threshold = 8388608;
   }
   INFO(NCCL_INIT, "RCCL DIRECT REDUCE-SCATTER threshold set to: %zu", threshold);
 
   if (msgSize > threshold) return false;
   // for 2 nodes, enable if msgSize is in 128KiB .. 2MiB range
-  if (comm->nNodes == 2) return msgSize >= (size_t)131072;
-  if (comm->nNodes == 8 || comm->nNodes == 4) return true;
+  if (comm->nNodes == 2) return (msgSize >= (size_t)131072) && (msgSize <= (size_t)2097152);
+  // for 4 nodes, enable if msgSize is up to 4MiB
+  if (comm->nNodes == 4) return (msgSize <= (size_t)4194304);
+  if (comm->nNodes == 8 || comm->nNodes == 16) return true;
   return false;
 }
 

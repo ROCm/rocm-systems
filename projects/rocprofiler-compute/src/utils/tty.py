@@ -25,6 +25,7 @@
 
 import argparse
 import copy
+import shutil
 import textwrap
 from pathlib import Path
 from typing import Any, Optional, TextIO
@@ -41,6 +42,7 @@ from utils.logger import console_error, console_log, console_warning
 from utils.utils import (
     METRIC_ID_RE,
     NS_TO_MS,
+    CallTreeNode,
     convert_metric_id_to_panel_info,
     get_panel_alias,
     get_uuid,
@@ -316,180 +318,187 @@ def show_torch_operator_table(operator_name: str, df: pd.DataFrame) -> None:
 
 def list_torch_operators(
     workload_path: str,
-    file_data: list[tuple[str, pd.DataFrame, dict[str, tuple[float, int]], float]],
+    call_trees: dict[str, CallTreeNode],
 ) -> None:
-    """Display the full PyTorch operator listing.
-
-    Pure display function: receives pre-loaded data and prints the banner,
-    per-operator hierarchies, and totals.
-    """
-    print(f"\n{'=' * 80}")
-    print(f"PyTorch Operators in: {workload_path}")
-    print("Kernel (id N) can be used with -k for filtering.")
-    print(f"{'=' * 80}\n")
-    operator_count = 0
-    for idx, (operator_name, df, prefix_stats, _) in enumerate(file_data, start=1):
-        show_torch_operator_hierarchy(
-            operator_name,
-            df,
-            index=idx,
-            prefix_stats=prefix_stats,
-        )
-        operator_count += 1
-
-    if not operator_count:
+    """Display PyTorch operators as a unified call tree grouped by source location."""
+    if not call_trees:
         console_warning(
             "No PyTorch operator data found. "
             "Please ensure profiling was done with --torch-trace option."
         )
-
-    print(f"\n{'=' * 80}")
-    print(f"Total: {operator_count} operators")
-    print(f"{'=' * 80}\n")
-
-
-def show_torch_operator_hierarchy(
-    operator_name: str,
-    df: pd.DataFrame,
-    prefix_stats: dict[str, tuple[float, int]],
-    index: Optional[int] = None,
-) -> None:
-    """
-    Display the PyTorch operator listing with hierarchy, numbering, and durations.
-
-    Shows Operator N: 'name', then for each hierarchy path: full_name
-    (total_duration, count), the hierarchy tree, and kernel launches with
-    optional kernel durations (total_duration ms) when timestamps are present.
-    Each kernel line shows (id N) for use with -k.
-    """
-    print(f"\n{'-' * 80}")
-    if index is not None:
-        print(f"Operator {index}:  '{operator_name}'")
-    else:
-        print(f"Operator:  '{operator_name}'")
-    print("-" * 80)
-
-    if "Operator_Name" not in df.columns or "Kernel_Name" not in df.columns:
-        console_log("Torch operator CSV missing Operator_Name or Kernel_Name columns.")
         return
 
-    # Indent for content under each hierarchy so it's clear it belongs to that hierarchy
-    hierarchy_indent = " " * 7
+    print(f"\n{'=' * 80}")
+    print(f"PyTorch Operator Call Tree: {workload_path}")
+    print("Grouped by source location, sorted by total GPU kernel duration.")
+    print(f"{'=' * 80}")
+    show_call_tree(call_trees)
+    print(f"\n{'=' * 80}")
 
-    # Expect the DataFrame to have columns "Operator_Name", "Kernel_Name",
-    # "Context_Id", etc. Optional: Start_Timestamp_function, End_Timestamp_function,
-    # Start_Timestamp_kernel, End_Timestamp_kernel for durations.
 
-    has_duration = bool(prefix_stats)
+def format_stats(launches: int, duration_ms: float) -> str:
+    """Format launch count and duration as an inline parenthesized string."""
+    if duration_ms < 0.01:
+        formatted_duration = f"{duration_ms * 1000:.2f} us"
+    else:
+        formatted_duration = f"{duration_ms:.2f} ms"
+    return f"(kernel_launches: {launches}, total_duration: {formatted_duration})"
 
-    unique_op_hierarchies = df["Operator_Name"].unique()
-    left_col_width = 50
-    inner_width = left_col_width - len(hierarchy_indent)
-    for i, op in enumerate(unique_op_hierarchies, start=1):
-        stats_str = ""
-        if has_duration and op in prefix_stats:
-            total_ms, count = prefix_stats[op]
-            stats_str = f" (total_duration: {total_ms:.2f} ms, count: {count})"
-        print(f"{hierarchy_indent}Hierarchy {i}:  {op}{stats_str}")
-        kernel_header = (
-            "Kernels Launched" if not has_duration else "Kernels Launched (duration)"
+
+def get_tree_wrap_width(min_width: int = 72, max_width: int = 120) -> int:
+    """Pick wrap width based on terminal size to avoid terminal hard-wrap artifacts."""
+    terminal_cols = shutil.get_terminal_size((max_width, 20)).columns
+    safe_width = max(terminal_cols - 2, min_width)
+    return min(safe_width, max_width)
+
+
+def print_wrapped_tree_line(
+    prefix: str,
+    body: str,
+    width: Optional[int] = None,
+    break_long_words: bool = False,
+) -> None:
+    """Print a tree line and wrap continuation lines to preserve indentation."""
+    effective_width = get_tree_wrap_width() if width is None else width
+    print(
+        textwrap.fill(
+            body,
+            width=effective_width,
+            initial_indent=prefix,
+            subsequent_indent=" " * len(prefix),
+            break_long_words=break_long_words,
+            break_on_hyphens=False,
         )
-        print(
-            f"{hierarchy_indent}\n{hierarchy_indent}"
-            + "Operator Hierarchy".ljust(inner_width)
-            + kernel_header
-        )
-        print(f"{hierarchy_indent}{'-' * (80 - len(hierarchy_indent))}")
-        parts = str(op).split("/")
+    )
 
-        hierarchy_lines = []
-        for level, part in enumerate(parts):
-            if level == 0:
-                line = f"{part}"
+
+def print_wrapped_kernel_line(
+    prefix: str,
+    kernel_name: str,
+    suffix: str,
+    width: Optional[int] = None,
+    continuation_prefix: str = "",
+) -> None:
+    """Wrap long kernel names while keeping suffix attached to final name chunk."""
+    effective_width = get_tree_wrap_width() if width is None else width
+    content_width = max(effective_width - len(prefix), 20)
+
+    inline = f"{kernel_name} {suffix}"
+    if len(inline) <= content_width:
+        print(f"{prefix}{inline}")
+        return
+
+    # Reserve room so suffix is never detached on its own line.
+    name_width = max(content_width - len(suffix) - 1, 8)
+    wrapped_name = textwrap.wrap(
+        kernel_name,
+        width=name_width,
+        break_long_words=True,
+        break_on_hyphens=False,
+    )
+    if not wrapped_name:
+        print(f"{prefix}{suffix}")
+        return
+
+    # Build continuation with vertical pipes from parent levels
+    # Preserve parent pipes but replace branch character with spaces
+    if len(continuation_prefix) > 0:
+        # continuation_prefix has pipes, add spaces for branch chars
+        spaces_needed = len(prefix) - len(continuation_prefix)
+        continuation = continuation_prefix + " " * spaces_needed
+    else:
+        # No parent pipes, just use spaces matching the prefix
+        continuation = " " * len(prefix)
+
+    for i, chunk in enumerate(wrapped_name):
+        if i == 0:
+            if len(wrapped_name) == 1:
+                print(f"{prefix}{chunk} {suffix}")
             else:
-                indent = "  " * level
-                prefix_char = "└─ "
-                line = f"{indent}{prefix_char}{part}"
-            hierarchy_lines.append(line)
+                print(f"{prefix}{chunk}")
+        elif i == len(wrapped_name) - 1:
+            print(f"{continuation}{chunk} {suffix}")
+        else:
+            print(f"{continuation}{chunk}")
 
-        # Get kernels for this operator hierarchy
-        kernels_info = []
-        op_data = df[df["Operator_Name"] == op]
-        has_kernel_ts = (
-            "Start_Timestamp_kernel" in df.columns
-            and "End_Timestamp_kernel" in df.columns
+
+def show_call_tree(call_trees: dict[str, CallTreeNode]) -> None:
+    """Print the unified call tree grouped by source location."""
+    sorted_locations = sorted(
+        call_trees.items(), key=lambda kv: kv[1].total_duration_ms, reverse=True
+    )
+    for i, (location, root) in enumerate(sorted_locations):
+        if i > 0:
+            print(f"\n{'- ' * 40}")
+        stats = format_stats(root.kernel_launches, root.total_duration_ms)
+        print(f"\n{location} {stats}")
+        for child in sorted(
+            root.children.values(),
+            key=lambda c: c.total_duration_ms,
+            reverse=True,
+        ):
+            print_operator_node(child)
+
+
+def print_operator_node(
+    node: CallTreeNode, is_last: bool = True, parent_pipes: str = ""
+) -> None:
+    # Build indent with vertical pipes for parent levels
+    indent = parent_pipes
+    is_branching = len(node.children) + len(node.kernels) > 1
+
+    # Use ├─ for non-last items, └─ for last items
+    branch_char = "└─ " if is_last else "├─ "
+    node_prefix = f"{indent}{branch_char}"
+
+    if is_branching:
+        stats = format_stats(node.kernel_launches, node.total_duration_ms)
+        print_wrapped_tree_line(node_prefix, f"{node.name} {stats}")
+    else:
+        print_wrapped_tree_line(node_prefix, node.name)
+
+    # Build new parent_pipes for children
+    if is_last:
+        new_parent_pipes = parent_pipes + "   "  # 3 spaces
+    else:
+        new_parent_pipes = parent_pipes + "|  "  # pipe + 2 spaces
+
+    # Process child nodes
+    children = sorted(
+        node.children.values(), key=lambda c: c.total_duration_ms, reverse=True
+    )
+    for i, child in enumerate(children):
+        # A child is last if it's the final child AND there are no kernels after it
+        child_is_last = (i == len(children) - 1) and (len(node.kernels) == 0)
+        print_operator_node(child, is_last=child_is_last, parent_pipes=new_parent_pipes)
+
+    # Process kernels
+    for i, (kernel_name, kernel_stats) in enumerate(
+        sorted(
+            node.kernels.items(),
+            key=lambda kv: kv[1].total_duration_ns,
+            reverse=True,
         )
-        kernel_counts: dict[str, int] = {}
-        kernel_duration_ns: dict[str, float] = {}
-        kernel_context: dict[str, dict[str, Any]] = {}
-        kernel_ids: dict[str, int] = {}
-        has_kernel_id = "Kernel_ID" in df.columns
-        for _, row in op_data.iterrows():
-            kernel_name = str(row["Kernel_Name"]).strip()
-            if not kernel_name:
-                continue
+    ):
+        launches = kernel_stats.launches
+        duration_ns = kernel_stats.total_duration_ns
+        kernel_id = kernel_stats.kernel_id
+        id_suffix = f" (id {kernel_id})" if kernel_id is not None else ""
+        display_name = simplify_kernel_name(kernel_name)
+        total_ms = duration_ns * NS_TO_MS
+        stats = format_stats(launches, total_ms)
 
-            if kernel_name not in kernel_counts:
-                kernel_counts[kernel_name] = 0
-                kernel_duration_ns[kernel_name] = 0.0
-                kernel_context[kernel_name] = {"contexts": {}}
-                if has_kernel_id and pd.notna(row["Kernel_ID"]):
-                    kernel_ids[kernel_name] = int(row["Kernel_ID"])
-            kernel_counts[kernel_name] += 1
-            if has_kernel_ts:
-                kernel_duration_ns[kernel_name] += float(
-                    row["End_Timestamp_kernel"]
-                ) - float(row["Start_Timestamp_kernel"])
-            context_id = row.get("Context_Id")
-            if pd.isna(context_id) or not str(context_id).strip():
-                continue
-            topmost_location = str(context_id).split("/")[0]
-            if "@" not in topmost_location:
-                continue
-            _, location = topmost_location.split("@", 1)
-            if ":" not in location:
-                continue
-            file_name, line_num = location.split(":", 1)
-            contexts = kernel_context[kernel_name]["contexts"]
-            contexts.setdefault(file_name, {})
-            contexts[file_name][line_num] = contexts[file_name].get(line_num, 0) + 1
+        # Last kernel gets └─, others get ├─
+        kernel_is_last = i == len(node.kernels) - 1
+        kernel_branch_char = "└─ " if kernel_is_last else "├─ "
+        kernel_prefix = f"{new_parent_pipes}{kernel_branch_char}"
 
-        for kernel_name, num_launches in kernel_counts.items():
-            kernel_id = kernel_ids.get(kernel_name)
-            id_suffix = f" (id {kernel_id})" if kernel_id is not None else ""
-            display_name = simplify_kernel_name(kernel_name)
-            total_ms = None
-            if has_kernel_ts and kernel_name in kernel_duration_ns:
-                total_ms = kernel_duration_ns[kernel_name] * NS_TO_MS
-            if total_ms is not None and not pd.isna(total_ms):
-                kernel_info = (
-                    f"|--> {display_name}{id_suffix} ({num_launches} launches, "
-                    f"total_duration: {total_ms:.2f} ms)\n"
-                )
-            else:
-                kernel_info = (
-                    f"|--> {display_name}{id_suffix} ({num_launches} launches)\n"
-                )
-            kernels_info.append(kernel_info)
-            for file_name, line_count in kernel_context[kernel_name][
-                "contexts"
-            ].items():
-                for line_num, count in line_count.items():
-                    kernels_info.append(
-                        f"      {file_name}:{line_num} ({count} launches)\n"
-                    )
-
-        # Print hierarchy lines (left column), indented under this hierarchy
-        for line in hierarchy_lines:
-            print(f"{hierarchy_indent}{line.ljust(inner_width)}|")
-
-        # Print kernel lines aligned to the deepest level, indented under this hierarchy
-        deepest_indent = "  " * len(parts)
-        for kernel_line in kernels_info:
-            left_padding = deepest_indent + "    "
-            print(f"{hierarchy_indent}{left_padding.ljust(inner_width)}{kernel_line}")
-
-        print()
+        print_wrapped_kernel_line(
+            kernel_prefix,
+            display_name,
+            f"{id_suffix} {stats}".strip(),
+            continuation_prefix=new_parent_pipes,
+        )
 
 
 def process_table_data(
