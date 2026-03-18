@@ -251,6 +251,28 @@ dispatch_in_time_sample(size_t category_enum_id, const in_time_sample& _sample,
         category_enum_id, _sample, use_annotations,
         rocprofsys::utility::make_index_sequence_range<1, ROCPROFSYS_CATEGORY_LAST>{});
 }
+
+// Dispatch to emit_fn with the correct category type based on runtime category name string,
+// using category_type_id mapping from categories.hpp
+template <typename EmitFn, size_t... Idx>
+bool
+dispatch_region_by_name(const std::string& category_name, EmitFn&& emit_fn,
+                        std::index_sequence<Idx...>)
+{
+    return ((category_name == trait::name<category_type_id_t<Idx>>::value
+                 ? (emit_fn(category_type_id_t<Idx>{}), true)
+                 : false) ||
+            ...);
+}
+
+template <typename EmitFn>
+bool
+dispatch_region_by_name(const std::string& category_name, EmitFn&& emit_fn)
+{
+    return dispatch_region_by_name(
+        category_name, std::forward<EmitFn>(emit_fn),
+        rocprofsys::utility::make_index_sequence_range<1, ROCPROFSYS_CATEGORY_LAST>{});
+}
 }  // namespace
 
 perfetto_processor_t::perfetto_processor_t(
@@ -778,29 +800,7 @@ perfetto_processor_t::handle(const region_sample& _rs)
         tracing::pop_perfetto_ts(CategoryT{}, _name.c_str(), _end_ts);
     };
 
-    auto try_category = [&](auto category_tag) {
-        using CategoryT = decltype(category_tag);
-        if(_category == trait::name<CategoryT>::value)
-        {
-            emit_trace(category_tag);
-            return true;
-        }
-        return false;
-    };
-
-    bool dispatched =
-        (try_category(category::host{}) || try_category(category::user{}) ||
-         try_category(category::python{}) || try_category(category::mpi{}) ||
-         try_category(category::pthread{}) || try_category(category::kokkos{}) ||
-         try_category(category::rocm_hip_api{}) ||
-         try_category(category::rocm_hsa_api{}) ||
-         try_category(category::rocm_marker_api{}) ||
-         try_category(category::rocm_rccl{}) ||
-         try_category(category::rocm_rocdecode_api{}) ||
-         try_category(category::rocm_rocjpeg_api{}) || try_category(category::ucx{}) ||
-         try_category(category::shmem{}) || try_category(category::vaapi{}));
-
-    if(!dispatched)
+    if(!dispatch_region_by_name(_category, emit_trace))
     {
         // Default to rocm category for backward compatibility
         emit_trace(category::rocm{});
