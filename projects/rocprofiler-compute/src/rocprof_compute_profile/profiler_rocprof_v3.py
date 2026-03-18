@@ -76,6 +76,8 @@ class rocprof_v3_profiler(RocProfCompute_Base):
         if args.kernel:
             profiling_options.extend(["--kernel-include-regex", "|".join(args.kernel)])
 
+        profiling_options.extend(["--kernel-exclude-regex", "__amd_rocclr_"])
+
         # Dispatch filtering
         dispatch = []
         # rocprofv3 dispatch indexing is inclusive and starts from 1

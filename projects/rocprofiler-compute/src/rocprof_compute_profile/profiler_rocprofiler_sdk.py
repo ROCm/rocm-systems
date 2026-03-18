@@ -74,6 +74,7 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
             "ROCPROF_KERNEL_TRACE": "1",
             "ROCPROF_OUTPUT_FORMAT": args.format_rocprof_output,
             "ROCPROF_OUTPUT_PATH": f"{args.path}/out/pmc_1",
+            "ROCPROF_KERNEL_FILTER_EXCLUDE_REGEX": "__amd_rocclr_",
         })
 
         if getattr(args, "torch_trace", False):
