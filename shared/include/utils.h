@@ -62,4 +62,22 @@ inline T *ptr_inc(T* ptr, size_t sz) {
   return reinterpret_cast<T *>(reinterpret_cast<std::byte *>(ptr) + sz);
 }
 
+
+namespace wsl {
+namespace thunk {
+
+struct GfxipTable {
+  uint16_t device_id;
+  uint8_t  major;
+  uint8_t  minor;
+  uint8_t  stepping;
+};
+
+extern const struct GfxipTable kGfxipTable[];
+extern const int kGfxipTableSize;
+
+bool QueryAdapterSupported(unsigned int device_id);
+
+} // namespace thunk
+} // namespace wsl
 #endif

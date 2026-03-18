@@ -33,6 +33,7 @@ add_library(dxg_shared STATIC
     src/platform.cpp
     src/lda_chain.cpp
     src/device.cpp
+    src/utils.cpp
 )
 
 set_target_properties(dxg_shared PROPERTIES

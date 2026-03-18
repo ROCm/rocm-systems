@@ -53,6 +53,7 @@
 #include "d3dkmt_types.h"
 #include "impl/wddm/device.h"
 #include "impl/wddm/queue.h"
+#include "utils.h"
 
 namespace wsl {
 namespace thunk {
@@ -535,7 +536,7 @@ NTSTATUS WDDMCreateDevices(std::vector<WDDMDevice *> &devices)
     if (query.DeviceIds.VendorID != 0x1002)
       continue;
 
-    supported = thunk_proxy::QueryAdapterSupported(query.DeviceIds.DeviceID);
+    supported = wsl::thunk::QueryAdapterSupported(query.DeviceIds.DeviceID);
 
     if (supported) {
       auto device = new WDDMDevice(

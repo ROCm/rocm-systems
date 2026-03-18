@@ -126,7 +126,6 @@ typedef struct {
 } DeviceInfo;
 
 bool ParseAdapterInfo(D3DKMT_HANDLE adapter, DeviceInfo *device_info);
-bool QueryAdapterSupported(unsigned int device_id);
 
 uint32_t QueueEngine2EngineFlag(uint32_t queue_engine);
 void SetAllocationInfo(void *data, uint64_t size, AllocDomain domain,
