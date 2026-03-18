@@ -108,8 +108,20 @@ set(ROCTX_EXAMPLE_TARGETS
     selective_region_pause_3
 )
 
+set(ROCTX_KERNEL_HEADER_TARGETS
+    pause_resume
+    selective_region
+    selective_region_pause_1
+    selective_region_pause_2
+    selective_region_pause_3
+)
+
 foreach(_target IN LISTS ROCTX_EXAMPLE_TARGETS)
-    add_executable(${_target} ${_target}.cpp)
+    set(_sources ${_target}.cpp)
+    if(${_target} IN_LIST ROCTX_KERNEL_HEADER_TARGETS)
+        list(APPEND _sources roctx_example_kernels.hpp)
+    endif()
+    add_executable(${_target} ${_sources})
     target_link_libraries(${_target} PRIVATE Threads::Threads)
 
     if(

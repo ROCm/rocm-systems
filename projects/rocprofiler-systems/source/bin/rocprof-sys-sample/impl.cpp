@@ -921,16 +921,6 @@ PROFILING WORKFLOW:
         })
         .choices(clock_id_choices.first)
         .choice_aliases(clock_id_choices.second);
-    parser
-        .add_argument({ "--selective-tracing" },
-                      "Enable selective tracing by filtering rocTx Regions provided "
-                      "with  ROCPROFSYS_TRACE_REGION")
-        .max_count(1)
-        .action([&](parser_t& p) {
-            rocprofsys::common::update_env(
-                _env, "ROCPROFSYS_SELECTIVE_TRACING", p.get<bool>("selective-tracing"),
-                update_mode::REPLACE, ":", updated_envs, original_envs);
-        });
 
     parser.start_group("PROFILE OPTIONS",
                        "Specific options controlling profiling (i.e. deterministic "
