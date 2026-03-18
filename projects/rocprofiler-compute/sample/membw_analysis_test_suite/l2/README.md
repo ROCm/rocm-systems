@@ -19,7 +19,7 @@ HIP workloads targeting MI350 (gfx950) L1 and L2 cache/memory metrics for valida
 - **gl2_backpressure**: `TCP_TCR_TCP_STALL_CYCLES / tcp_busy`
 - **utcl1_stall**: `TCP_UTCL1_STALL_INFLIGHT_MAX / tcp_busy`
 
-## L2 Workloads (tables 3004-3009)
+## L2 Workloads (tables 3007-3012)
 
 Each workload targets specific TCC perfmon counters exposed in the new L2 metric tables added in PR 4091. All use runtime L2 cache size detection (`hipDeviceAttributeL2CacheSize`).
 
