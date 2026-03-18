@@ -528,16 +528,45 @@ static std::vector<std::string> WidenExecOperation(const std::string& line) {
         size_t ss = src.find_first_not_of(" \t");
         src = src.substr(ss);
 
-        // Expand sN → s[N:N+1]
-        if (dst[0] == 's' && std::isdigit(dst[1])) {
-          int reg_num = std::stoi(dst.substr(1));
-          dst = "s[" + std::to_string(reg_num) + ":" +
-                std::to_string(reg_num + 1) + "]";
-        }
         // Widen vcc_lo → vcc in source
         size_t vcc_pos = src.find("vcc_lo");
         if (vcc_pos != std::string::npos) {
           src.replace(vcc_pos, 6, "vcc");
+        }
+
+        // Expand sN → s[N:N+1] for even-aligned pairs.
+        // If N is odd, can't use s[N:N+1] (alignment error).
+        // Use manual save+and instead.
+        if (dst[0] == 's' && std::isdigit(dst[1])) {
+          int reg_num = std::stoi(dst.substr(1));
+          if (reg_num % 2 == 0) {
+            // Even: use saveexec_b64 with aligned pair
+            std::string pair = "s[" + std::to_string(reg_num) + ":" +
+                               std::to_string(reg_num + 1) + "]";
+            result.push_back(b64_mnem + " " + pair + ", " + src);
+            result.push_back("s_mov_b32 exec_hi, 0");
+          } else {
+            // Odd: manual save + op + clear exec_hi
+            // Determine the ALU op from the mnemonic (s_and_saveexec → s_and)
+            result.push_back("s_mov_b32 " + dst + ", exec_lo");
+            // Extract the operation: s_and_saveexec → and, s_or_saveexec → or
+            if (b64_mnem.find("s_and_saveexec") == 0 ||
+                b64_mnem.find("s_andn2_saveexec") == 0) {
+              // For andn2: exec = exec & ~src
+              if (b64_mnem.find("andn2") != std::string::npos) {
+                result.push_back("s_andn2_b32 exec_lo, exec_lo, " + src);
+              } else {
+                result.push_back("s_and_b32 exec_lo, exec_lo, " + src);
+              }
+            } else if (b64_mnem.find("s_or_saveexec") == 0) {
+              result.push_back("s_or_b32 exec_lo, exec_lo, " + src);
+            } else {
+              // Generic: just AND (most common case)
+              result.push_back("s_and_b32 exec_lo, exec_lo, " + src);
+            }
+            result.push_back("s_mov_b32 exec_hi, 0");
+          }
+          return result;
         }
 
         result.push_back(b64_mnem + " " + dst + ", " + src);
