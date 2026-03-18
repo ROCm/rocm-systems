@@ -189,7 +189,7 @@ void Device::checkAtomicSupport() {
 Device::~Device() {
   if (coopHostcallBuffer_) {
     amd::disableHostcalls(coopHostcallBuffer_);
-    context().svmFree(coopHostcallBuffer_);
+    hostFree(coopHostcallBuffer_);
     coopHostcallBuffer_ = nullptr;
   }
   // Release cached map targets
@@ -228,7 +228,7 @@ Device::~Device() {
                 "Deleting hostcall buffer %p for hardware queue %p", qInfo.hostcallBuffer_,
                 qIter->first->base_address);
         amd::disableHostcalls(qInfo.hostcallBuffer_);
-        context().svmFree(qInfo.hostcallBuffer_);
+        hostFree(qInfo.hostcallBuffer_);
       }
       ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_QUEUE, "Deleting hardware queue %p with refCount 0",
               queue->base_address);
@@ -3232,7 +3232,7 @@ void Device::releaseQueue(hsa_queue_t* queue, const std::vector<uint32_t>& cuMas
               "Deleting hostcall buffer %p for hardware queue %p", hostcallBufferToFree,
               queue->base_address);
       amd::disableHostcalls(hostcallBufferToFree);
-      context().svmFree(hostcallBufferToFree);
+      hostFree(hostcallBufferToFree);
     }
     Hsa::queue_destroy(queue);
   }
