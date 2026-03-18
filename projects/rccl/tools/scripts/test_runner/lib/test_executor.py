@@ -68,7 +68,11 @@ class TestExecutor:
         # Setup directories
         self.setup_directories()
 
-        # Detect MPI hosts: prefer SLURM, fall back to hostfile
+        # MPI hostfile is detected lazily on first MPI test
+        self._mpi_hostfile = None
+        self._mpi_hostfile_detected = False
+
+        # Detect MPI hosts: auto-detect from SLURM if "auto_detect_hosts" is true in config, otherwise use hostfile
         self.mpi_hosts = self._detect_mpi_hosts()
 
         # Test tracking
@@ -139,16 +143,51 @@ class TestExecutor:
             print(f"Log directory:    {self.log_dir}")
             print(f"Report directory: {self.report_dir}")
 
+    @property
+    def mpi_hostfile(self):
+        """Lazy MPI hostfile detection -- only runs on first access."""
+        if not self._mpi_hostfile_detected:
+            self._mpi_hostfile = self._detect_mpi_hostfile()
+            self._mpi_hostfile_detected = True
+        return self._mpi_hostfile
+
+    def _detect_mpi_hostfile(self):
+        """
+        Detect MPI hostfile.
+        Checks RCCL_TEST_MPI_HOSTFILE env var, then ~/.mpi_hostfile default.
+
+        Returns:
+            str: Path to hostfile, or None if not found
+        """
+        hostfile = os.environ.get('RCCL_TEST_MPI_HOSTFILE')
+        if hostfile and os.path.isfile(hostfile):
+            print(f"Using MPI hostfile from RCCL_TEST_MPI_HOSTFILE: {hostfile}")
+            return hostfile
+
+        default_hostfile = os.path.expanduser('~/.mpi_hostfile')
+        if os.path.isfile(default_hostfile):
+            print(f"Using default MPI hostfile: {default_hostfile}")
+            return default_hostfile
+
+        if self.args.verbose:
+            print("No MPI hostfile found (checked RCCL_TEST_MPI_HOSTFILE env var and ~/.mpi_hostfile)")
+        return None
+
     def _detect_mpi_hosts(self):
         """
         Detect MPI host list once during initialization.
-        Priority: SLURM allocation (scontrol) > RCCL_TEST_MPI_HOSTFILE env > ~/.mpi_hostfile
+
+        If "auto_detect_hosts" is true in the system profile (or top-level config)
+        and a SLURM allocation is active, uses scontrol to get the host list.
+        Otherwise falls back to the hostfile detected by mpi_hostfile property.
 
         Returns:
-            dict with either 'host_list' (comma-separated hosts) or 'hostfile' (path), or empty dict
+            dict with 'host_list', 'hostfile', or empty dict
         """
-        # Check for SLURM allocation first
-        if os.environ.get('SLURM_JOB_ID'):
+        system = getattr(self.args, 'system', '') or ''
+        auto_detect = self.config_processor.config.get("auto_detect_hosts", False)
+
+        if auto_detect and os.environ.get('SLURM_JOB_ID'):
             try:
                 result = subprocess.run(
                     ['scontrol', 'show', 'hostnames'],
@@ -161,20 +200,11 @@ class TestExecutor:
             except (subprocess.TimeoutExpired, FileNotFoundError):
                 pass
 
-        # Fall back to hostfile
-        hostfile = os.environ.get('RCCL_TEST_MPI_HOSTFILE')
-        if hostfile and os.path.isfile(hostfile):
-            print(f"Using MPI hostfile from RCCL_TEST_MPI_HOSTFILE: {hostfile}")
+        hostfile = self.mpi_hostfile
+        if hostfile:
             return {'hostfile': hostfile}
 
-        default_hostfile = os.path.expanduser('~/.mpi_hostfile')
-        if os.path.isfile(default_hostfile):
-            print(f"Using default MPI hostfile: {default_hostfile}")
-            return {'hostfile': default_hostfile}
-
-        if self.args.verbose:
-            print("No MPI hostfile found (checked RCCL_TEST_MPI_HOSTFILE env var and ~/.mpi_hostfile)")
-        return None
+        return {}
 
     def check_environment(self):
         """

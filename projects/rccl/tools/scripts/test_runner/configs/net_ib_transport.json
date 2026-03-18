@@ -8,6 +8,7 @@
     "rocm_path": "${ROCM_PATH:-/opt/rocm}",
     "mpi_path": "${MPI_PATH}"
   },
+  "auto_detect_hosts": true,
   "mpi_args": {
     "alola": "--mca oob_tcp_if_include eth1 --mca btl_tcp_if_include eth1 --mca btl ^vader,openib --bind-to none",
     "ainic": "--mca oob_tcp_if_include eno0 --mca btl_tcp_if_include eno0 --mca btl ^vader,openib --bind-to none",
