@@ -751,7 +751,8 @@ Examples:
         experimental_enabled=experimental_enabled,
         feature_label="List torch operators",
         help=(
-            "\t\tList PyTorch operators with hierarchy, numbering, and durations. "
+            "\t\tList PyTorch operators as a unified call tree grouped by "
+            "source location with kernel launch stats. "
             "Recreates torch_trace output directory."
         ),
     )

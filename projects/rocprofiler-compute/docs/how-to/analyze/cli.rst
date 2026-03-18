@@ -637,19 +637,20 @@ Display all PyTorch operators captured during profiling:
    $ rocprof-compute --experimental analyze --path ./workload --list-torch-operators
 
    ================================================================================
-   PyTorch Operators in: ./workload
+   PyTorch Operator Call Tree: ./workload
+   Grouped by source location, sorted by total GPU kernel duration.
    ================================================================================
 
-     1. nn.Module.Net.forward/nn.Module.Conv2d.forward/torch.nn.functional.conv2d
-     2. nn.Module.Net.forward/nn.Module.Linear.forward/torch.nn.functional.linear
-     3. nn.Module.Net.forward/torch.nn.functional.relu
+   main.py:60 (kernel_launches: 110, total_duration: 59.31 ms)
+   └─ nn.Module.Net.forward (kernel_launches: 110, total_duration: 59.31 ms)
+      ├─ nn.Module.Conv2d.forward
+      |  └─ torch.nn.functional.conv2d (kernel_launches: 40, total_duration: 27.08 ms)
+      └─ nn.Module.Linear.forward
+         └─ torch.nn.functional.linear (kernel_launches: 20, total_duration: 15.41 ms)
 
-   ================================================================================
-   Total: 3 operators
-   ================================================================================
-
-Listed names are the full operator names (hierarchy with ``/``). Per-operator CSVs
-in ``torch_trace/`` are named from the **last** segment of each name (sanitized);
+Output is grouped by source location (``file:line``) and shows full operator
+hierarchy (``/``-separated) and kernel stats. Per-operator CSVs in ``torch_trace/``
+are named from the **last** segment of each name (sanitized);
 see :ref:`torch-operator-profiling` for naming details.
 
 Filtering by Operator
