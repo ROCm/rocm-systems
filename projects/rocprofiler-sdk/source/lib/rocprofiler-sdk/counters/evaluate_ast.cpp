@@ -147,13 +147,8 @@ perform_reduction(
     {
         for(auto dim : _reduce_dimension_set)
         {
-            // Use variable bit allocation for each dimension
-            uint64_t dim_bit_length = get_dim_bit_length(dim);
-            uint64_t dim_bit_offset = get_dim_bit_offset(dim);
-            int64_t  mask_dim       = ((1ULL << dim_bit_length) - 1) << dim_bit_offset;
-
-            rec.id = rec.id | mask_dim;
-            rec.id = rec.id ^ mask_dim;
+            uint64_t mask = get_dim_mask(dim);
+            rec.id        = (rec.id | mask) ^ mask;
         }
         rec_groups[rec.id].push_back(rec);
     }
@@ -238,28 +233,21 @@ perform_selection(std::map<rocprofiler_profile_counter_instance_types, std::stri
 
     for(auto& dim_pair : dimension_map)
     {
-        size_t selected_index = parse_dimension_selection(dim_pair.second, dim_pair.first);
-
-        // Get bit layout for this dimension
-        uint64_t dim_bit_length = get_dim_bit_length(dim_pair.first);
-        uint64_t dim_bit_offset = get_dim_bit_offset(dim_pair.first);
-        int64_t  mask           = ((1ULL << dim_bit_length) - 1) << dim_bit_offset;
+        size_t   selected_index = parse_dimension_selection(dim_pair.second, dim_pair.first);
+        uint64_t mask           = get_dim_mask(dim_pair.first);
 
         input_array->erase(std::remove_if(input_array->begin(),
                                           input_array->end(),
                                           [&](rocprofiler_counter_record_t& rec) {
                                               size_t dim_val =
-                                                  rocprofiler::counters::rec_to_dim_pos(
-                                                      rec.id, dim_pair.first);
+                                                  rec_to_dim_pos(rec.id, dim_pair.first);
 
-                                              // Check if this value matches the selected index
                                               bool should_remove = (dim_val != selected_index);
 
                                               if(!should_remove)
                                               {
                                                   // Clear the dimension bits in the record
-                                                  rec.id = rec.id | mask;
-                                                  rec.id = rec.id ^ mask;
+                                                  rec.id = (rec.id | mask) ^ mask;
                                               }
                                               return should_remove;
                                           }),

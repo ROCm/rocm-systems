@@ -105,6 +105,15 @@ get_dim_bit_offset(rocprofiler_profile_counter_instance_types dim)
     return (dim < ROCPROFILER_DIMENSION_LAST) ? DIM_BIT_OFFSETS[dim] : 0;
 }
 
+// Helper function to get the bitmask for a dimension (shifted to correct position)
+constexpr uint64_t
+get_dim_mask(rocprofiler_profile_counter_instance_types dim)
+{
+    uint64_t bit_length = get_dim_bit_length(dim);
+    uint64_t bit_offset = get_dim_bit_offset(dim);
+    return ((1ULL << bit_length) - 1) << bit_offset;
+}
+
 using DimensionMap =
     std::unordered_map<rocprofiler_profile_counter_instance_types, std::string_view>;
 
@@ -165,17 +174,14 @@ rocprofiler::counters::set_dim_in_rec(rocprofiler_counter_instance_id_t&        
         return;
     }
 
-    // Use variable bit allocation
     uint64_t bit_length = get_dim_bit_length(dim);
     uint64_t bit_offset = get_dim_bit_offset(dim);
+    uint64_t mask       = get_dim_mask(dim);
 
     CHECK(bit_length > 0) << "Invalid dimension type";
     CHECK(value <= ((1ULL << bit_length) - 1))
         << "Dimension value " << value << " exceeds max allowed for dimension "
         << static_cast<int>(dim) << " (max: " << ((1ULL << bit_length) - 1) << ")";
-
-    // Create mask for this dimension's bits
-    uint64_t mask = ((1ULL << bit_length) - 1) << bit_offset;
 
     // Reset bits to 0 for dimension, then set the value
     id = (id & ~mask) | (value << bit_offset);
@@ -207,12 +213,9 @@ rocprofiler::counters::rec_to_dim_pos(rocprofiler_counter_instance_id_t         
         return id & (MAX_64 >> COUNTER_BIT_LENGTH);
     }
 
-    // Use variable bit allocation
-    uint64_t bit_length = get_dim_bit_length(dim);
     uint64_t bit_offset = get_dim_bit_offset(dim);
+    uint64_t mask       = get_dim_mask(dim);
 
-    // Create mask and extract value
-    uint64_t mask = ((1ULL << bit_length) - 1) << bit_offset;
     return (id & mask) >> bit_offset;
 }
 
