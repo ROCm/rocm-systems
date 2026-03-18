@@ -1468,7 +1468,7 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle,
     if (dmabuf_fd == -1) return -1;
 
     HsaGraphicsResourceInfo info;
-    HSA_REGISTER_MEM_FLAGS regFlags;
+    HSA_REGISTER_MEM_FLAGS regFlags{0};
     regFlags.ui32.requiresVAddr = !isDmabufSysmem;
     int err = HSAKMT_CALL(hsaKmtRegisterGraphicsHandleToNodesExt(static_cast<HSAuint64>(dmabuf_fd), &info, numNodes, nodes, regFlags));
     if (err == HSAKMT_STATUS_SUCCESS) {

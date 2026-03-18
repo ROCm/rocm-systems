@@ -450,7 +450,6 @@ ErrorCode GpuMemory::Evict() {
 ErrorCode GpuMemory::OpenResourceFromKMTHandle(D3DKMT_HANDLE buffer_handle,
                                                D3DKMT_HANDLE device_handle,
                                                D3DKMT_OPENRESOURCE** out_open_resource) {
-#if defined(WIN32)
   D3DKMT_QUERYRESOURCEINFO query_args{};
   query_args.hDevice = device_handle;
   query_args.hGlobalShare = buffer_handle;
@@ -513,7 +512,6 @@ ErrorCode GpuMemory::OpenResourceFromKMTHandle(D3DKMT_HANDLE buffer_handle,
   }
 
   return ret;
-#endif
 }
 
 ErrorCode GpuMemory::OpenResourceFromNTHandle(HANDLE buffer_handle, D3DKMT_HANDLE device_handle,
