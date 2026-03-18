@@ -107,6 +107,29 @@ extern "C" __global__ void int_elementwise(int* out, const int* a, const int* b,
   if (i < n) out[i] = a[i] * 2 + b[i];
 }
 
+// ── new 4 kernels (round 2) ─────────────────────────────────────────────────
+
+extern "C" __global__ void fma_vals(float* out, const float* a, const float* b,
+                                    const float* c, int n) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < n) out[i] = __fmaf_rn(a[i], b[i], c[i]);
+}
+
+extern "C" __global__ void exp_kernel(float* out, const float* in, int n) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < n) out[i] = expf(in[i]);
+}
+
+extern "C" __global__ void recip_vals(float* out, const float* in, int n) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < n) out[i] = 1.0f / in[i];
+}
+
+extern "C" __global__ void mag2d(float* out, const float* a, const float* b, int n) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < n) out[i] = sqrtf(__fmaf_rn(a[i], a[i], b[i] * b[i]));
+}
+
 // ── test functions ──────────────────────────────────────────────────────────
 
 int run_test_vector_add(const char* co) {
@@ -360,6 +383,101 @@ int run_test_int_elementwise(const char* co) {
   return ok==N?0:1;
 }
 
+int run_test_fma_vals(const char* co) {
+  int N = 256, bs = 32, nb = N / bs;
+  float *h_a=(float*)malloc(N*4), *h_b=(float*)malloc(N*4);
+  float *h_c=(float*)malloc(N*4), *h_o=(float*)calloc(N,4);
+  for (int i=0;i<N;i++) { h_a[i]=(float)(i+1); h_b[i]=(float)(N-i); h_c[i]=(float)(i*2); }
+  float *d_a,*d_b,*d_c,*d_o;
+  CHECK(hipMalloc(&d_a,N*4)); CHECK(hipMalloc(&d_b,N*4));
+  CHECK(hipMalloc(&d_c,N*4)); CHECK(hipMalloc(&d_o,N*4));
+  CHECK(hipMemcpy(d_a,h_a,N*4,hipMemcpyHostToDevice));
+  CHECK(hipMemcpy(d_b,h_b,N*4,hipMemcpyHostToDevice));
+  CHECK(hipMemcpy(d_c,h_c,N*4,hipMemcpyHostToDevice));
+  hipModule_t m; hipFunction_t f;
+  CHECK(hipModuleLoad(&m,co)); CHECK(hipModuleGetFunction(&f,m,"fma_vals"));
+  int n=N; void* args[]={&d_o,&d_a,&d_b,&d_c,&n};
+  CHECK(hipModuleLaunchKernel(f,nb,1,1,bs,1,1,0,0,args,NULL));
+  CHECK(hipDeviceSynchronize());
+  CHECK(hipMemcpy(h_o,d_o,N*4,hipMemcpyDeviceToHost));
+  int ok=0; for(int i=0;i<N;i++) {
+    float exp=__builtin_fmaf(h_a[i],h_b[i],h_c[i]);
+    if(fabsf(h_o[i]-exp)<0.01f) ok++;
+  }
+  printf("  fma_vals:         %d/%d %s\n",ok,N,ok==N?"PASS":"FAIL");
+  hipFree(d_a);hipFree(d_b);hipFree(d_c);hipFree(d_o);hipModuleUnload(m);
+  free(h_a);free(h_b);free(h_c);free(h_o);
+  return ok==N?0:1;
+}
+
+int run_test_exp_kernel(const char* co) {
+  int N = 256, bs = 32, nb = N / bs;
+  float *h_in=(float*)malloc(N*4), *h_o=(float*)calloc(N,4);
+  for (int i=0;i<N;i++) h_in[i]=(float)(i-128)*0.05f;  // range ~[-6.4, 6.35]
+  float *d_in,*d_o;
+  CHECK(hipMalloc(&d_in,N*4)); CHECK(hipMalloc(&d_o,N*4));
+  CHECK(hipMemcpy(d_in,h_in,N*4,hipMemcpyHostToDevice));
+  hipModule_t m; hipFunction_t f;
+  CHECK(hipModuleLoad(&m,co)); CHECK(hipModuleGetFunction(&f,m,"exp_kernel"));
+  int n=N; void* args[]={&d_o,&d_in,&n};
+  CHECK(hipModuleLaunchKernel(f,nb,1,1,bs,1,1,0,0,args,NULL));
+  CHECK(hipDeviceSynchronize());
+  CHECK(hipMemcpy(h_o,d_o,N*4,hipMemcpyDeviceToHost));
+  int ok=0; for(int i=0;i<N;i++) {
+    float exp_val=expf(h_in[i]);
+    if(fabsf(h_o[i]-exp_val)<=1e-4f*fabsf(exp_val)+1e-7f) ok++;
+  }
+  printf("  exp_kernel:       %d/%d %s\n",ok,N,ok==N?"PASS":"FAIL");
+  hipFree(d_in);hipFree(d_o);hipModuleUnload(m);free(h_in);free(h_o);
+  return ok==N?0:1;
+}
+
+int run_test_recip_vals(const char* co) {
+  int N = 256, bs = 32, nb = N / bs;
+  float *h_in=(float*)malloc(N*4), *h_o=(float*)calloc(N,4);
+  for (int i=0;i<N;i++) h_in[i]=(float)(i+1)*0.1f;  // range [0.1, 25.6]
+  float *d_in,*d_o;
+  CHECK(hipMalloc(&d_in,N*4)); CHECK(hipMalloc(&d_o,N*4));
+  CHECK(hipMemcpy(d_in,h_in,N*4,hipMemcpyHostToDevice));
+  hipModule_t m; hipFunction_t f;
+  CHECK(hipModuleLoad(&m,co)); CHECK(hipModuleGetFunction(&f,m,"recip_vals"));
+  int n=N; void* args[]={&d_o,&d_in,&n};
+  CHECK(hipModuleLaunchKernel(f,nb,1,1,bs,1,1,0,0,args,NULL));
+  CHECK(hipDeviceSynchronize());
+  CHECK(hipMemcpy(h_o,d_o,N*4,hipMemcpyDeviceToHost));
+  int ok=0; for(int i=0;i<N;i++) {
+    float exp_val=1.0f/h_in[i];
+    if(fabsf(h_o[i]-exp_val)<=1e-5f*fabsf(exp_val)+1e-10f) ok++;
+  }
+  printf("  recip_vals:       %d/%d %s\n",ok,N,ok==N?"PASS":"FAIL");
+  hipFree(d_in);hipFree(d_o);hipModuleUnload(m);free(h_in);free(h_o);
+  return ok==N?0:1;
+}
+
+int run_test_mag2d(const char* co) {
+  int N = 256, bs = 32, nb = N / bs;
+  float *h_a=(float*)malloc(N*4), *h_b=(float*)malloc(N*4), *h_o=(float*)calloc(N,4);
+  for (int i=0;i<N;i++) { h_a[i]=(float)(i%16)+0.5f; h_b[i]=(float)(i/16)+0.5f; }
+  float *d_a,*d_b,*d_o;
+  CHECK(hipMalloc(&d_a,N*4)); CHECK(hipMalloc(&d_b,N*4)); CHECK(hipMalloc(&d_o,N*4));
+  CHECK(hipMemcpy(d_a,h_a,N*4,hipMemcpyHostToDevice));
+  CHECK(hipMemcpy(d_b,h_b,N*4,hipMemcpyHostToDevice));
+  hipModule_t m; hipFunction_t f;
+  CHECK(hipModuleLoad(&m,co)); CHECK(hipModuleGetFunction(&f,m,"mag2d"));
+  int n=N; void* args[]={&d_o,&d_a,&d_b,&n};
+  CHECK(hipModuleLaunchKernel(f,nb,1,1,bs,1,1,0,0,args,NULL));
+  CHECK(hipDeviceSynchronize());
+  CHECK(hipMemcpy(h_o,d_o,N*4,hipMemcpyDeviceToHost));
+  int ok=0; for(int i=0;i<N;i++) {
+    float exp_val=sqrtf(h_a[i]*h_a[i]+h_b[i]*h_b[i]);
+    if(fabsf(h_o[i]-exp_val)<=1e-4f*fabsf(exp_val)+1e-7f) ok++;
+  }
+  printf("  mag2d:            %d/%d %s\n",ok,N,ok==N?"PASS":"FAIL");
+  hipFree(d_a);hipFree(d_b);hipFree(d_o);hipModuleUnload(m);
+  free(h_a);free(h_b);free(h_o);
+  return ok==N?0:1;
+}
+
 int main() {
   printf("=== gfx1250 → gfx942 Transpiler Test Suite ===\n\n");
   int fails = 0;
@@ -374,7 +492,11 @@ int main() {
   fails += run_test_max_reduce("/tmp/max_reduce_gfx1250.elf");
   fails += run_test_sqrt_vals("/tmp/sqrt_vals_gfx1250.elf");
   fails += run_test_int_elementwise("/tmp/int_elementwise_gfx1250.elf");
-  int total = 11;
+  fails += run_test_fma_vals("/tmp/fma_vals_gfx1250.elf");
+  fails += run_test_exp_kernel("/tmp/exp_kernel_gfx1250.elf");
+  fails += run_test_recip_vals("/tmp/recip_vals_gfx1250.elf");
+  fails += run_test_mag2d("/tmp/mag2d_gfx1250.elf");
+  int total = 15;
   printf("\n%s: %d/%d tests passed\n", fails?"SOME FAILED":"ALL PASSED", total-fails, total);
   return fails;
 }

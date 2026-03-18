@@ -249,6 +249,7 @@ static const MnemonicMapping kVALURenames[] = {
     {"v_sub_nc_u32", "v_sub_u32"},
     {"v_add_nc_i32", "v_add_i32"},
     {"v_sub_nc_i32", "v_sub_i32"},
+    // v_fmac_f32/f16/f64: available on gfx942 (CDNA3) natively — no rename needed
 };
 
 // Global atomic renames (GFX12 adds _u32/_i32/_b32 suffix)
@@ -1430,6 +1431,37 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
     // No literal — pass through
   }
 
+  // ─── v_fmamk_f32 / v_fmaak_f32 → v_mov_b32 + v_fma_f32 ───
+  // GFX10+ "fma with embedded literal" instructions.
+  // v_fmamk_f32 vdst, src0, imm, vsrc2 → vdst = src0 * imm + vsrc2
+  // v_fmaak_f32 vdst, src0, vsrc1, imm → vdst = src0 * vsrc1 + imm
+  // GFX9 has no equivalents; use v_mov_b32 to load the literal then v_fma_f32.
+  if (mnemonic == "v_fmamk_f32" || mnemonic == "v_fmaak_f32") {
+    size_t ops_start = line.find(mnemonic) + mnemonic.size();
+    std::string ops = line.substr(ops_start);
+    std::vector<std::string> operands;
+    std::istringstream oss(ops);
+    std::string tok;
+    while (std::getline(oss, tok, ',')) {
+      size_t s = tok.find_first_not_of(" \t");
+      size_t e = tok.find_last_not_of(" \t");
+      if (s != std::string::npos) operands.push_back(tok.substr(s, e - s + 1));
+    }
+    if (operands.size() >= 4) {
+      // Load the embedded literal into v6, then emit v_fma_f32
+      const std::string& literal = (mnemonic == "v_fmamk_f32") ? operands[2] : operands[3];
+      result.push_back("v_mov_b32_e32 v6, " + literal);
+      if (mnemonic == "v_fmamk_f32") {
+        // vdst = src0 * imm + vsrc2 → v_fma_f32 vdst, src0, v6, vsrc2
+        result.push_back("v_fma_f32 " + operands[0] + ", " + operands[1] + ", v6, " + operands[3]);
+      } else {
+        // vdst = src0 * vsrc1 + imm → v_fma_f32 vdst, src0, vsrc1, v6
+        result.push_back("v_fma_f32 " + operands[0] + ", " + operands[1] + ", " + operands[2] + ", v6");
+      }
+      return result;
+    }
+  }
+
   // ─── VOPD (dual-issue) → two separate instructions ───
   // GFX11+: v_dual_add_f32 v0, v1, v2 :: v_dual_mul_f32 v3, v4, v5
   // Split into: v_add_f32 v0, v1, v2 + v_mul_f32 v3, v4, v5
@@ -1673,7 +1705,10 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
     if (operands.size() >= 3) {
       std::string& src0 = operands[1];
       bool src0_sgpr = !src0.empty() && src0[0] == 's';
-      if (src0_sgpr) {
+      // Large literal in src0 also violates constant bus (VCC is already on it)
+      bool src0_lit = src0.size() > 2 && src0[0] == '0' &&
+                      (src0[1] == 'x' || src0[1] == 'X');
+      if (src0_sgpr || src0_lit) {
         result.push_back("v_mov_b32_e32 v6, " + src0);
         src0 = "v6";
         std::string fixed = mnemonic + " " + operands[0];
@@ -1757,6 +1792,63 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
                         " row_shr:0 row_mask:0xf bank_mask:0xf"
                         " ; WARNING: DPP8 pattern lost in translation");
       return result;
+    }
+  }
+
+  // ─── VOP3 with 32-bit literal in source → v_mov_b32 + replace with v6 ───
+  // GFX9 VOP3 does not support literal constants in source operand positions.
+  // GFX12 compilers freely emit e.g. v_fma_f32 vdst, 0x3fb8aa3b, vsrc1, vsrc2.
+  // Fix: emit v_mov_b32_e32 v6, <literal>, then use v6 in the instruction.
+  // Applies to v_fma_f32/f16/f64 and any VOP3 instruction not already handled.
+  {
+    // VOP3 instructions are recognizable as having 3+ source operands (4+ total)
+    // We check a set of known VOP3 mnemonics that may have literals.
+    bool is_vop3_candidate =
+        mnemonic == "v_fma_f32" || mnemonic == "v_fma_f16" ||
+        mnemonic == "v_fma_f64" || mnemonic == "v_ldexp_f32" ||
+        mnemonic == "v_div_fmas_f32" || mnemonic == "v_div_fixup_f32" ||
+        mnemonic == "v_med3_f32" || mnemonic == "v_med3_i32" ||
+        mnemonic == "v_bfi_b32" || mnemonic == "v_alignbit_b32";
+    if (is_vop3_candidate) {
+      size_t ops_start = line.find(mnemonic) + mnemonic.size();
+      std::string ops = line.substr(ops_start);
+      std::vector<std::string> operands;
+      std::istringstream oss(ops);
+      std::string tok;
+      while (std::getline(oss, tok, ',')) {
+        size_t s = tok.find_first_not_of(" \t");
+        size_t e = tok.find_last_not_of(" \t");
+        if (s != std::string::npos) operands.push_back(tok.substr(s, e - s + 1));
+      }
+      // Check sources (operands[1..n]) for large hex literals
+      if (operands.size() >= 3) {
+        for (size_t i = 1; i < operands.size(); ++i) {
+          std::string op = operands[i];
+          // Strip negation modifier to check the base value
+          bool neg = !op.empty() && op[0] == '-';
+          if (neg) op = op.substr(1);
+          // Detect large literal (hex form 0x..., won't be inline-encodable)
+          if (op.size() > 2 && op[0] == '0' && (op[1] == 'x' || op[1] == 'X')) {
+            result.push_back("v_mov_b32_e32 v6, " + op);
+            operands[i] = (neg ? "-" : "") + std::string("v6");
+            std::string fixed = mnemonic + " " + operands[0];
+            for (size_t j = 1; j < operands.size(); ++j) fixed += ", " + operands[j];
+            result.push_back(fixed);
+            return result;
+          }
+        }
+      }
+    }
+  }
+
+  // ─── v_div_scale_f32 null sdst → vcc ───
+  // GFX12 allows "null" as a write-discard SGPR destination in VOP3B.
+  // GFX9 has no null register — use vcc (the natural sdst for div_scale).
+  if (mnemonic == "v_div_scale_f32") {
+    // Find ", null," and replace with ", vcc,"
+    size_t null_pos = line.find(", null,");
+    if (null_pos != std::string::npos) {
+      line.replace(null_pos, 7, ", vcc,");
     }
   }
 
