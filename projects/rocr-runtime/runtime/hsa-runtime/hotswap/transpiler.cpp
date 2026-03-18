@@ -916,12 +916,50 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
     return result;
   }
 
+  // ─── v_add_nc_u64 → emulate with v_add_co_u32 + v_addc_co_u32 ───
+  // GFX12: v_add_nc_u64 v[D:D+1], v[A:A+1], v[B:B+1] (single instruction)
+  // GFX9: v_add_co_u32 vD, vcc, vA, vB + v_addc_co_u32 vD+1, vcc, vA+1, vB+1, vcc
+  if (mnemonic == "v_add_nc_u64" || mnemonic == "v_add_nc_u64_e32") {
+    std::string ops = line.substr(line.find(mnemonic) + mnemonic.size());
+    // Parse: v[D:D+1], v[A:A+1], v[B:B+1]
+    auto parseRange = [](const std::string& s, size_t& pos) -> std::pair<int,int> {
+      while (pos < s.size() && (s[pos]==' '||s[pos]==','||s[pos]=='\t')) ++pos;
+      if (pos >= s.size() || s[pos] != 'v') return {-1,-1};
+      ++pos;
+      if (pos < s.size() && s[pos] == '[') {
+        ++pos; int lo=0,hi=0;
+        while (pos<s.size()&&s[pos]>='0'&&s[pos]<='9') lo=lo*10+(s[pos++]-'0');
+        if (pos<s.size()&&s[pos]==':') ++pos;
+        while (pos<s.size()&&s[pos]>='0'&&s[pos]<='9') hi=hi*10+(s[pos++]-'0');
+        if (pos<s.size()&&s[pos]==']') ++pos;
+        return {lo,hi};
+      }
+      return {-1,-1};
+    };
+    size_t pos = 0;
+    auto d = parseRange(ops, pos);
+    auto a = parseRange(ops, pos);
+    auto b = parseRange(ops, pos);
+    if (d.first >= 0 && a.first >= 0 && b.first >= 0) {
+      result.push_back("v_add_co_u32_e32 v" + std::to_string(d.first) +
+                        ", vcc, v" + std::to_string(a.first) +
+                        ", v" + std::to_string(b.first));
+      result.push_back("v_addc_co_u32_e32 v" + std::to_string(d.second) +
+                        ", vcc, v" + std::to_string(a.second) +
+                        ", v" + std::to_string(b.second) + ", vcc");
+      return result;
+    }
+    // Fallback: NOP
+    result.push_back("s_nop 0 ; UNSUPPORTED: " + line);
+    return result;
+  }
+
   // ─── v_bitop2_b32 → emulate (GFX12 programmable 3-input bitop) ───
   // v_bitop2_b32 vdst, src0, src1 bitop3:0xNN
   // The bitop3 byte is a truth table for (src0, src1, vdst_old).
   // Common patterns: 0x40 = src0 & src1 & ~vdst_old
   // For now, skip with NOP (non-critical address computation helper)
-  if (mnemonic == "v_bitop2_b32" || mnemonic == "v_bitop3_b32") {
+  if (mnemonic.find("v_bitop2_b32") == 0 || mnemonic.find("v_bitop3_b32") == 0) {
     // Parse: v_bitop2_b32 vdst, src0, src1 bitop3:0xNN
     // Emulate common patterns or NOP for rare ones
     std::string ops = line.substr(line.find(mnemonic) + mnemonic.size());
