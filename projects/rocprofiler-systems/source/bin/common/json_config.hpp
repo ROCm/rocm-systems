@@ -509,5 +509,333 @@ load_config_metadata(const std::string& filepath)
     }
 }
 
+// ============================================================================
+// Domain Flag Shorthand Expansion
+// ============================================================================
+
+/**
+ * Expands ROCm domain shorthand names to full domain names.
+ * E.g., "hip" -> "hip_runtime_api", "kernel" -> "kernel_dispatch"
+ */
+[[nodiscard]] inline std::string
+expand_rocm_domain_shorthand(const std::string& shorthand)
+{
+    static const std::map<std::string, std::string> shortcuts = {
+        { "hip", "hip_runtime_api" },
+        { "hip_runtime", "hip_runtime_api" },
+        { "hip_compiler", "hip_compiler_api" },
+        { "hsa", "hsa_api" },
+        { "kernel", "kernel_dispatch" },
+        { "kernels", "kernel_dispatch" },
+        { "memory", "memory_copy" },
+        { "mem", "memory_copy" },
+        { "scratch", "scratch_memory" },
+        { "marker", "marker_api" },
+        { "roctx", "marker_api" },
+        { "rccl", "rccl_api" },
+    };
+
+    auto it = shortcuts.find(shorthand);
+    if(it != shortcuts.end()) return it->second;
+    return shorthand;  // Return as-is if no mapping
+}
+
+/**
+ * Expands a comma-separated list of ROCm domain shorthand names.
+ */
+[[nodiscard]] inline std::string
+expand_rocm_domains(const std::string& domains_str)
+{
+    std::string              result;
+    std::string              token;
+    std::istringstream       ss(domains_str);
+    std::vector<std::string> expanded;
+
+    while(std::getline(ss, token, ','))
+    {
+        // Trim whitespace
+        auto start = token.find_first_not_of(" \t");
+        auto end   = token.find_last_not_of(" \t");
+        if(start != std::string::npos)
+        {
+            token = token.substr(start, end - start + 1);
+            expanded.push_back(expand_rocm_domain_shorthand(token));
+        }
+    }
+
+    for(const auto& d : expanded)
+    {
+        if(!result.empty()) result += ',';
+        result += d;
+    }
+    return result;
+}
+
+/**
+ * Expands parallel runtime shorthand names to env var suffixes.
+ * Returns a map of ROCPROFSYS_USE_* env vars to enable.
+ */
+[[nodiscard]] inline std::map<std::string, std::string>
+expand_parallel_runtimes(const std::string& runtimes_str)
+{
+    std::map<std::string, std::string> result;
+
+    // If empty or "all", enable all runtimes
+    if(runtimes_str.empty() || runtimes_str == "all")
+    {
+        result["ROCPROFSYS_USE_MPIP"]    = "true";
+        result["ROCPROFSYS_USE_OMPT"]    = "true";
+        result["ROCPROFSYS_USE_KOKKOSP"] = "true";
+        result["ROCPROFSYS_USE_RCCLP"]   = "true";
+        return result;
+    }
+
+    static const std::map<std::string, std::string> shortcuts = {
+        { "mpi", "ROCPROFSYS_USE_MPIP" },        { "mpip", "ROCPROFSYS_USE_MPIP" },
+        { "openmp", "ROCPROFSYS_USE_OMPT" },     { "ompt", "ROCPROFSYS_USE_OMPT" },
+        { "omp", "ROCPROFSYS_USE_OMPT" },        { "kokkos", "ROCPROFSYS_USE_KOKKOSP" },
+        { "kokkosp", "ROCPROFSYS_USE_KOKKOSP" }, { "rccl", "ROCPROFSYS_USE_RCCLP" },
+        { "rcclp", "ROCPROFSYS_USE_RCCLP" },
+    };
+
+    std::string        token;
+    std::istringstream ss(runtimes_str);
+    while(std::getline(ss, token, ','))
+    {
+        // Trim and lowercase
+        auto start = token.find_first_not_of(" \t");
+        auto end   = token.find_last_not_of(" \t");
+        if(start != std::string::npos)
+        {
+            token = token.substr(start, end - start + 1);
+            for(auto& c : token)
+                c = std::tolower(c);
+
+            auto it = shortcuts.find(token);
+            if(it != shortcuts.end()) result[it->second] = "true";
+        }
+    }
+    return result;
+}
+
+/**
+ * Expands GPU metrics shorthand. Empty or "all" means default metrics.
+ */
+[[nodiscard]] inline std::string
+expand_gpu_metrics(const std::string& metrics_str)
+{
+    if(metrics_str.empty()) return "";  // Use default
+
+    static const std::map<std::string, std::string> shortcuts = {
+        { "temperature", "temp" },
+        { "usage", "busy" },
+        { "utilization", "busy" },
+        { "memory", "mem_usage" },
+    };
+
+    std::string              result;
+    std::string              token;
+    std::istringstream       ss(metrics_str);
+    std::vector<std::string> expanded;
+
+    while(std::getline(ss, token, ','))
+    {
+        auto start = token.find_first_not_of(" \t");
+        auto end   = token.find_last_not_of(" \t");
+        if(start != std::string::npos)
+        {
+            token = token.substr(start, end - start + 1);
+            for(auto& c : token)
+                c = std::tolower(c);
+
+            auto it = shortcuts.find(token);
+            expanded.push_back(it != shortcuts.end() ? it->second : token);
+        }
+    }
+
+    for(const auto& m : expanded)
+    {
+        if(!result.empty()) result += ',';
+        result += m;
+    }
+    return result;
+}
+
+// ============================================================================
+// Config Export (env vars -> JSON schema)
+// ============================================================================
+
+/**
+ * Converts a map of ROCPROFSYS_* env vars back to JSON schema format.
+ * This allows exporting the resolved configuration for reuse.
+ */
+[[nodiscard]] inline nlohmann::json
+env_vars_to_json_schema(const std::map<std::string, std::string>& env_vars)
+{
+    nlohmann::json j;
+
+    // Helper to check if env var exists and get value
+    auto get_val = [&](const std::string& key) -> std::optional<std::string> {
+        auto it = env_vars.find(key);
+        if(it != env_vars.end()) return it->second;
+        return std::nullopt;
+    };
+
+    auto is_true = [](const std::string& v) {
+        return v == "true" || v == "TRUE" || v == "1" || v == "ON" || v == "on" ||
+               v == "yes" || v == "YES";
+    };
+
+    // --- Tracing ---
+    if(auto v = get_val("ROCPROFSYS_TRACE")) j["tracing"]["enabled"] = is_true(*v);
+    if(auto v = get_val("ROCPROFSYS_PERFETTO_BUFFER_SIZE_KB"))
+        j["tracing"]["buffer_size_kb"]["value"] = std::stoi(*v);
+    if(auto v = get_val("ROCPROFSYS_PERFETTO_FILL_POLICY"))
+        j["tracing"]["fill_policy"]["value"] = *v;
+
+    // --- Profiling ---
+    if(auto v = get_val("ROCPROFSYS_PROFILE")) j["profiling"]["enabled"] = is_true(*v);
+    if(auto v = get_val("ROCPROFSYS_FLAT_PROFILE"))
+        j["profiling"]["flat_profile"]["enabled"] = is_true(*v);
+
+    // --- Sampling ---
+    if(auto v = get_val("ROCPROFSYS_USE_SAMPLING"))
+        j["sampling"]["enabled"] = is_true(*v);
+    if(auto v = get_val("ROCPROFSYS_SAMPLING_FREQ"))
+        j["sampling"]["frequency_hz"]["value"] = std::stoi(*v);
+    if(auto v = get_val("ROCPROFSYS_SAMPLING_TIMER"))
+        j["sampling"]["timer"]["value"] = *v;
+    if(auto v = get_val("ROCPROFSYS_SAMPLING_DELAY"))
+        j["sampling"]["delay_sec"]["value"] = std::stod(*v);
+    if(auto v = get_val("ROCPROFSYS_SAMPLING_DURATION"))
+        j["sampling"]["duration_sec"]["value"] = std::stod(*v);
+    if(auto v = get_val("ROCPROFSYS_SAMPLING_CPUS")) j["sampling"]["cpus"]["value"] = *v;
+    if(auto v = get_val("ROCPROFSYS_SAMPLING_GPUS")) j["sampling"]["gpus"]["value"] = *v;
+
+    // --- Domains: GPU ---
+    if(auto v = get_val("ROCPROFSYS_USE_AMD_SMI"))
+    {
+        j["domains"]["gpu"]["enabled"] = is_true(*v);
+        if(auto metrics = get_val("ROCPROFSYS_AMD_SMI_METRICS"))
+        {
+            std::istringstream ss(*metrics);
+            std::string        token;
+            while(std::getline(ss, token, ','))
+            {
+                auto start = token.find_first_not_of(" \t");
+                auto end   = token.find_last_not_of(" \t");
+                if(start != std::string::npos)
+                {
+                    token = token.substr(start, end - start + 1);
+                    j["domains"]["gpu"]["metrics"][token]["enabled"] = true;
+                }
+            }
+        }
+        if(auto freq = get_val("ROCPROFSYS_AMD_SMI_FREQ"))
+            j["domains"]["gpu"]["sampling_rate_hz"]["value"] = std::stoi(*freq);
+    }
+
+    // --- Domains: ROCm ---
+    if(auto v = get_val("ROCPROFSYS_ROCM_DOMAINS"))
+    {
+        std::istringstream ss(*v);
+        std::string        token;
+        while(std::getline(ss, token, ','))
+        {
+            auto start = token.find_first_not_of(" \t");
+            auto end   = token.find_last_not_of(" \t");
+            if(start != std::string::npos)
+            {
+                token = token.substr(start, end - start + 1);
+                j["domains"]["rocm"]["api_domains"][token]["enabled"] = true;
+            }
+        }
+    }
+
+    // --- Domains: CPU ---
+    if(auto v = get_val("ROCPROFSYS_USE_PROCESS_SAMPLING"))
+    {
+        if(is_true(*v))
+        {
+            if(auto freq = get_val("ROCPROFSYS_CPU_FREQ"))
+            {
+                if(is_true(*freq))
+                {
+                    j["domains"]["cpu"]["enabled"]                    = true;
+                    j["domains"]["cpu"]["metrics"]["freq"]["enabled"] = true;
+                }
+            }
+        }
+    }
+
+    // --- Domains: Parallel ---
+    if(auto v = get_val("ROCPROFSYS_USE_MPIP"))
+        j["domains"]["parallel"]["runtimes"]["mpi"]["enabled"] = is_true(*v);
+    if(auto v = get_val("ROCPROFSYS_USE_OMPT"))
+        j["domains"]["parallel"]["runtimes"]["openmp"]["enabled"] = is_true(*v);
+    if(auto v = get_val("ROCPROFSYS_USE_KOKKOSP"))
+        j["domains"]["parallel"]["runtimes"]["kokkos"]["enabled"] = is_true(*v);
+    if(auto v = get_val("ROCPROFSYS_USE_RCCLP"))
+        j["domains"]["parallel"]["runtimes"]["rccl"]["enabled"] = is_true(*v);
+
+    // --- Output ---
+    if(auto v = get_val("ROCPROFSYS_OUTPUT_PATH")) j["output"]["path"]["value"] = *v;
+    if(auto v = get_val("ROCPROFSYS_TIME_OUTPUT"))
+        j["output"]["time_output"]["enabled"] = is_true(*v);
+    if(auto v = get_val("ROCPROFSYS_FILE_OUTPUT"))
+        j["output"]["file_output"]["enabled"] = is_true(*v);
+
+    // --- Hardware counters ---
+    if(auto v = get_val("ROCPROFSYS_ROCM_EVENTS"))
+    {
+        j["hardware_counters"]["enabled"]              = true;
+        j["hardware_counters"]["rocm_events"]["value"] = *v;
+    }
+    if(auto v = get_val("ROCPROFSYS_PAPI_EVENTS"))
+    {
+        j["hardware_counters"]["enabled"]              = true;
+        j["hardware_counters"]["papi_events"]["value"] = *v;
+    }
+
+    // --- Advanced ---
+    if(auto v = get_val("ROCPROFSYS_VERBOSE"))
+        j["advanced"]["verbose"]["value"] = std::stoi(*v);
+    if(auto v = get_val("ROCPROFSYS_DEBUG"))
+        j["advanced"]["debug"]["enabled"] = is_true(*v);
+    if(auto v = get_val("ROCPROFSYS_MAX_DEPTH"))
+        j["advanced"]["max_depth"]["value"] = std::stoi(*v);
+    if(auto v = get_val("ROCPROFSYS_TRACE_DELAY"))
+        j["advanced"]["trace_delay_sec"]["value"] = std::stod(*v);
+    if(auto v = get_val("ROCPROFSYS_TRACE_DURATION"))
+        j["advanced"]["trace_duration_sec"]["value"] = std::stod(*v);
+    if(auto v = get_val("ROCPROFSYS_CPU_AFFINITY"))
+        j["advanced"]["cpu_affinity"]["enabled"] = is_true(*v);
+    if(auto v = get_val("ROCPROFSYS_COLLAPSE_THREADS"))
+        j["advanced"]["collapse_threads"]["enabled"] = is_true(*v);
+    if(auto v = get_val("ROCPROFSYS_TIMEMORY_COMPONENTS"))
+        j["advanced"]["timemory_components"]["value"] = *v;
+
+    return j;
+}
+
+/**
+ * Exports the configuration as a formatted JSON string.
+ */
+[[nodiscard]] inline std::string
+export_config_as_json(const std::map<std::string, std::string>& env_vars,
+                      const std::string& preset_name = "", int indent = 4)
+{
+    auto j = env_vars_to_json_schema(env_vars);
+
+    // Add metadata if preset name provided
+    if(!preset_name.empty())
+    {
+        j["metadata"]["name"]        = preset_name;
+        j["metadata"]["description"] = "Exported configuration from rocprof-sys-run";
+    }
+
+    return j.dump(indent);
+}
+
 }  // namespace json_config
 }  // namespace rocprofsys
