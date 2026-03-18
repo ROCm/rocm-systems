@@ -57,6 +57,7 @@ A sample configuration parameter settings looks like:
   ROCPROFSYS_TIMEMORY_COMPONENTS=wall_clock papi_array network_stats
   ROCPROFSYS_NETWORK_INTERFACE=enp7s0
   ROCPROFSYS_PAPI_EVENTS=net:::enp7s0:tx:byte net:::enp7s0:rx:byte net:::enp7s0:rx:packet net:::enp7s0:tx:packet
+  PAPI_NET_REFRESH_LATENCY=100000
 
 Details of the configuration parameter settings configured in the example are:
 
@@ -64,6 +65,7 @@ Details of the configuration parameter settings configured in the example are:
 * **TIMEMORY**:  Outputs the summaries for the ``wall_clock``, ``papi_array``, and ``network_stats`` components.
 * **Network Interface**: ``enp7s0`` is the predictable network interface device name.
 * **Events for the network device to be sampled**: Bytes transmitted, bytes received, packets transmitted, and packets received.
+* **PAPI_NET_REFRESH_LATENCY**: The shortest latency (in microseconds) with which PAPI updates network statistics. The default value is 1000000 (1s).
 
 The configuration parameter settings can be saved in a configuration file. Here is an example of a complete configuration file, ``rocprofsys.cfg``:
 
@@ -85,7 +87,8 @@ The configuration parameter settings can be saved in a configuration file. Here 
   ROCPROFSYS_USE_PID=OFF
   ROCPROFSYS_OUTPUT_PREFIX=foo/
   ROCPROFSYS_NETWORK_INTERFACE=enp7s0
-  ROCPROFSYS_PAPI_EVENTS = net:::enp7s0:tx:byte net:::enp7s0:rx:byte net:::enp7s0:rx:packet net:::enp7s0:tx:packet
+  ROCPROFSYS_PAPI_EVENTS=net:::enp7s0:tx:byte net:::enp7s0:rx:byte net:::enp7s0:rx:packet net:::enp7s0:tx:packet
+  PAPI_NET_REFRESH_LATENCY=100000
 
 To specify the configuration file, use the ``ROCPROFSYS_CONFIG_FILE`` setting:
 

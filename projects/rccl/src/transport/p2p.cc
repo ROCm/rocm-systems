@@ -1086,7 +1086,7 @@ static ncclResult_t p2pProxyRegister(struct ncclProxyConnection* connection, str
   struct p2pIpcExpInfo* ipcExpInfo = (struct p2pIpcExpInfo*)reqBuff;
   void* regAddr = NULL;
   ncclResult_t ret = ncclSuccess;
-#if ROCM_VERSION >= 70000
+#if ROCM_VERSION >= 71200
   bool mapped = false;
   bool imported = false;
   CUmemGenericAllocationHandle handle;

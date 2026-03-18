@@ -1602,7 +1602,8 @@ bool Device::populateOCLDeviceConstants() {
       : 0;
   std::string imageSupport;
   if (amd::device::getValueFromIsaMeta(isaName, "ImageSupport", imageSupport)) {
-    info_.imageSupport_ = atoi(imageSupport.c_str());
+    info_.imageSupport_ =
+        (DEBUG_CLR_DISABLE_IMAGE || !image_is_supported) ? 0 : std::atoi(imageSupport.c_str());
     ClPrint(amd::LOG_INFO, amd::LOG_INIT, "imageSupport=%u", info_.imageSupport_);
   } else {
     LogInfo("Can not get image support info from ISA meta");
