@@ -519,15 +519,14 @@ def test_csv_data(
 
 
 def test_summary_region_category_filtering(
-    summary_dir, expected_categories=None, excluded_categories=None, allow_none=False
+    summary_dir, expected_categories=None, allow_none=False
 ):
     """
-    Test that summary output only contains expected categories.
+    Test that summary output contains ONLY the expected categories.
 
     Args:
         summary_dir: Path to directory containing summary CSV files
-        expected_categories: List of category names that MUST be present (e.g., ['kernel', 'hip'])
-        excluded_categories: List of category names that MUST NOT be present (e.g., ['hsa', 'memory'])
+        expected_categories: List of category names that should be present (e.g., ['kernel', 'hip'])
         allow_none: If True, allows no region summaries (for --region-categories NONE test)
     """
     import os
@@ -546,32 +545,6 @@ def test_summary_region_category_filtering(
     for name in sorted(basenames):
         print(f"  - {name}")
 
-    # Check expected categories are present
-    if expected_categories:
-        for category in expected_categories:
-            category_lower = category.lower()
-            matching_files = [f for f in basenames if category_lower in f.lower()]
-            assert len(matching_files) > 0, (
-                f"Expected category '{category}' not found. "
-                f"No files matching '{category_lower}' in {basenames}"
-            )
-
-    # Check excluded categories are NOT present
-    if excluded_categories:
-        for category in excluded_categories:
-            category_lower = category.lower()
-            matching_files = [
-                f
-                for f in basenames
-                if category_lower in f.lower()
-                and not any(
-                    exp.lower() in f.lower() for exp in (expected_categories or [])
-                )
-            ]
-            assert (
-                len(matching_files) == 0
-            ), f"Excluded category '{category}' found in files: {matching_files}"
-
     # For NONE test: ensure no region-based summaries are generated
     if allow_none:
         # Region summaries have filenames like "rocm_hip_*.csv", "rocm_hsa_*.csv"
@@ -581,4 +554,24 @@ def test_summary_region_category_filtering(
             f"but found: {region_files}"
         )
 
-    print(f"\n✓ Category filtering validated successfully")
+    # Check that expected categories are present and ONLY those categories exist
+    if expected_categories:
+        # 1. Check all expected categories are present
+        for category in expected_categories:
+            category_lower = category.lower()
+            matching_files = [f for f in basenames if category_lower in f.lower()]
+            assert len(matching_files) > 0, (
+                f"Expected category '{category}' not found. "
+                f"No files matching '{category_lower}' in {basenames}"
+            )
+
+        # 2. Check no unexpected categories exist
+        for filename in basenames:
+            filename_lower = filename.lower()
+            matches_expected = any(
+                cat.lower() in filename_lower for cat in expected_categories
+            )
+            assert matches_expected, (
+                f"Unexpected file '{filename}' found. "
+                f"Does not match any expected category: {expected_categories}"
+            )
