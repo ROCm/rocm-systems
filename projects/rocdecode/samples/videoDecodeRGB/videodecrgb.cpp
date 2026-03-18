@@ -54,7 +54,8 @@ void ShowHelpAndExit(const char *option = NULL) {
     << "-of Output Format name - (native, bgr, bgr48, rgb, rgb48, bgra, bgra64, rgba, rgba64; converts native YUV frame to RGB image format; optional; default: 0" << std::endl
     << "-resize WxH - (where W is resize width and H is resize height) optional; default: no resize " << std::endl
     << "-crop crop rectangle for output (not used when using interopped decoded frame); optional; default: 0" << std::endl
-    << "-disp_delay -specify the number of frames to be delayed for display; optional; default: 1" << std::endl;
+    << "-disp_delay -specify the number of frames to be delayed for display; optional; default: 1" << std::endl
+    << "-f number of frames to decode - optional; default: 0, meaning decode the entire stream" << std::endl;
 
     exit(0);
 }
@@ -271,7 +272,7 @@ int main(int argc, char **argv) {
         }
         if (!strcmp(argv[i], "-f")) {
             if (++i == argc) {
-                ShowHelpAndExit("-d");
+                ShowHelpAndExit("-f");
             }
             num_decoded_frames = atoi(argv[i]);
             continue;
