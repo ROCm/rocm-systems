@@ -584,11 +584,16 @@ if __name__ == "__main__":
 MAIN_EOF
 
     # Create the zipapp (don't use --main since we have __main__.py)
+    # --compress requires Python 3.11+
     cd "$BUILD_DIR"
+    COMPRESS_FLAG=""
+    if python3 -c "import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)" 2>/dev/null; then
+        COMPRESS_FLAG="--compress"
+    fi
     python3 -m zipapp \
         --python "/usr/bin/env python3" \
         --output "${OUTPUT_DIR}/rocprofsys-tests.pyz" \
-        --compress \
+        $COMPRESS_FLAG \
         .
 
     # Make it executable
