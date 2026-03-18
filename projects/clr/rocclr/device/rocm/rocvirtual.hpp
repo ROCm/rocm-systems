@@ -400,6 +400,7 @@ class VirtualGPU : public device::VirtualDevice {
 
   hsa_agent_t gpu_device() const { return gpu_device_; }
   hsa_queue_t* gpu_queue() { return gpu_queue_; }
+  bool hasAssignedQueue() const final { return gpu_queue_ != nullptr; }
   void set_gpu_queue(hsa_queue_t* gpu_queue) { gpu_queue_ = gpu_queue; }
 
   // Return pointer to PrintfDbg
@@ -444,8 +445,8 @@ class VirtualGPU : public device::VirtualDevice {
   void WaitCompleteSignal(hsa_signal_t signal);
 
   void HiddenHeapInit();
-  uint64_t getQueueID();
-
+  uint64_t getQueueID(const std::vector<uint32_t>* exclusionHint = nullptr,
+                      bool forceAcquire = false) final;
   //! Add completion signal to the scheduler queue thread's event list.
   //! Wakes the scheduler queue thread if it's sleeping.
   void addSchedulerEvent(hsa_signal_t signal) {

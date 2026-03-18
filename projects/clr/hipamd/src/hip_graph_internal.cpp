@@ -831,8 +831,8 @@ hipError_t GraphExec::CreateStreams(uint32_t num_streams, int devId) {
     max_streams, devId);
   parallel_streams_[devId].reserve(max_streams);
   for (uint32_t i = 0; i < max_streams; ++i) {
-    auto stream = new hip::Stream(g_devices[devId], hip::Stream::Priority::Normal,
-                                  hipStreamNonBlocking);
+    auto stream =
+        new hip::Stream(g_devices[devId], hip::Stream::Priority::Normal, hipStreamNonBlocking);
 
     if (!stream->Create()) {
       ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "[hipGraph] Failed to create stream %u for device %d",
@@ -1734,31 +1734,27 @@ hipError_t GraphExec::EnqueueSegment(const Segment& segment, hip::Stream* stream
 // ================================================================================================
 void GraphExec::UpdateStreams(hip::Stream* launch_stream) {
   int devId = launch_stream->vdev()->device().index();
-  // Clear any previous stream assignments
   streams_.clear();
-  // Current stream is the default in the assignment
   streams_.push_back(launch_stream);
   if (parallel_streams_.find(devId) == parallel_streams_.end()) {
     LogPrintfError("UpdateStreams failed for device id:%d", devId);
     return;
   }
   auto parallel_streams = parallel_streams_[devId];
-  std::unordered_map<int, int> unique_stream_ids;
-  unique_stream_ids[launch_stream->getQueueID()] = 1;
-  std::vector<hip::Stream*> collided_streams;
-  // Assign streams that are unique in parallel_streams and doesnt collide with launch stream
-  for (uint32_t i = 0; i < parallel_streams.size(); i++) {
-    auto qid = parallel_streams[i]->getQueueID();
-    if (unique_stream_ids[qid] == 0) {
-      streams_.push_back(parallel_streams[i]);
-    } else {
-      collided_streams.push_back(parallel_streams[i]);
-    }
-    unique_stream_ids[qid]++;
+  std::vector<uint32_t> exclude_list;
+  uint64_t launch_qid = launch_stream->getQueueID();
+  if (launch_qid != static_cast<uint64_t>(-1)) {
+    exclude_list.push_back(static_cast<uint32_t>(launch_qid));
   }
-  // Assign the remaining streams for execution.
-  for (int i = streams_.size(), j = 0; i < max_streams_ && j < collided_streams.size(); i++, j++) {
-    streams_.push_back(collided_streams[j]);
+  const std::vector<uint32_t>* hint = exclude_list.empty() ? nullptr : &exclude_list;
+  for (uint32_t i = 0; i < parallel_streams.size() && streams_.size() < static_cast<size_t>(max_streams_);
+       i++) {
+    hip::Stream* s = parallel_streams[i];
+    uint64_t qid = s->getQueueID(hint, true);
+    if (qid != static_cast<uint64_t>(-1)) {
+      exclude_list.push_back(static_cast<uint32_t>(qid));
+    }
+    streams_.push_back(s);
   }
 }
 
@@ -1996,8 +1992,8 @@ hipError_t GraphExec::Run(hip::Stream* launch_stream) {
       launch_stream->vdev()->HiddenHeapInit();
       initialized = true;
     }
-    // Update streams for the graph execution only if launch stream changed
-    if (lastLaunchStream_ != launch_stream) {
+    // Update streams only when launch stream changed and its HW queue is not assigned yet
+    if (lastLaunchStream_ != launch_stream || !launch_stream->hasAssignedQueue()) {
       UpdateStreams(launch_stream);
       lastLaunchStream_ = launch_stream;
     }
@@ -2021,8 +2017,8 @@ hipError_t GraphExec::Run(hip::Stream* launch_stream) {
       topoOrder_[i]->EnqueueCommands(launch_stream);
     }
   } else {
-    // Update streams for the graph execution only if launch stream changed
-    if (lastLaunchStream_ != launch_stream) {
+    // Update streams only when launch stream changed and its HW queue is not assigned yet
+    if (lastLaunchStream_ != launch_stream || !launch_stream->hasAssignedQueue()) {
       UpdateStreams(launch_stream);
       lastLaunchStream_ = launch_stream;
     }

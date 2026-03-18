@@ -1253,7 +1253,10 @@ class VirtualDevice : public amd::ReferenceCountedObject {
 
   //! Return the physical device for this virtual device.
   const amd::Device& device() const { return device_(); }
-  virtual uint64_t getQueueID() = 0;
+  virtual uint64_t getQueueID(const std::vector<uint32_t>* exclusionHint = nullptr,
+                              bool forceAcquire = false) = 0;
+  //! True if this virtual device already has an HW queue assigned (no lazy assign on read).
+  virtual bool hasAssignedQueue() const { return true; }
   virtual void submitReadMemory(amd::ReadMemoryCommand& cmd) = 0;
   virtual void submitWriteMemory(amd::WriteMemoryCommand& cmd) = 0;
   virtual void submitCopyMemory(amd::CopyMemoryCommand& cmd) = 0;
