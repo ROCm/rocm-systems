@@ -27,6 +27,11 @@ struct nic_stats
     uint64_t _rx_rdma_cnp_pkts{};  // received CNP packets
     uint64_t _tx_rdma_cnp_pkts{};  // transmitted CNP packets
 
+    uint64_t _req_tx_loc_acc_err{};       // local ACK timeout errors
+    uint64_t _resp_tx_pkt_seq_err{};      // responder detected a packet sequence error
+    uint64_t _req_rx_pkt_seq_err{};       // requester detected a sequence error via a NAK
+    uint64_t _req_rx_impl_nak_seq_err{};  // requester received an ACK with PSN larger than expected
+
     std::string to_string() const;
 
     static constexpr const char* RX_RDMA_UCAST_BYTES = "rx_rdma_ucast_bytes";
@@ -35,6 +40,11 @@ struct nic_stats
     static constexpr const char* TX_RDMA_UCAST_PKTS  = "tx_rdma_ucast_pkts";
     static constexpr const char* RX_RDMA_CNP_PKTS    = "rx_rdma_cnp_pkts";
     static constexpr const char* TX_RDMA_CNP_PKTS    = "tx_rdma_cnp_pkts";
+
+    static constexpr const char* REQ_TX_LOC_ACC_ERR  = "req_tx_loc_acc_err";
+    static constexpr const char* RESP_TX_PKT_SEQ_ERR = "resp_tx_pkt_seq_err";
+    static constexpr const char* REQ_TX_PKT_SEQ_ERR  = "req_rx_pkt_seq_err";
+    static constexpr const char* REQ_RX_IMPL_NAK_SEQ_ERR = "req_rx_impl_nak_seq_err";
 };
 
 class ai_nic_stats_collector

@@ -15,10 +15,14 @@ nic_stats::to_string() const
     return fmt::format("[_name={}, _netdev={}, _rx_rdma_ucast_bytes={}, "
                        "_rx_rdma_ucast_pkts={}, _tx_rdma_ucast_bytes={}, "
                        "_tx_rdma_ucast_pkts={}, _rx_rdma_cnp_pkts={}, "
-                       "_tx_rdma_cnp_pkts={}]",
+                       "_tx_rdma_cnp_pkts={}, _req_tx_loc_acc_err={}, "
+                       "_resp_tx_pkt_seq_err={}, _req_rx_pkt_seq_err={},"
+                       "_req_rx_impl_nak_seq_err={}]",
                        _name, _netdev, _rx_rdma_ucast_bytes, _rx_rdma_ucast_pkts,
                        _tx_rdma_ucast_bytes, _tx_rdma_ucast_pkts, _rx_rdma_cnp_pkts,
-                       _tx_rdma_cnp_pkts);
+                       _tx_rdma_cnp_pkts, _req_tx_loc_acc_err, _resp_tx_pkt_seq_err,
+                       _req_rx_pkt_seq_err, _req_rx_impl_nak_seq_err
+                    );
 }
 
 ai_nic_stats_collector::ai_nic_stats_collector() = default;
@@ -203,6 +207,14 @@ ai_nic_stats_collector::update_data_for_one_handle(
                       [](nic_stats& d, uint64_t v) { d._rx_rdma_cnp_pkts = v; } },
                     { nic_stats::TX_RDMA_CNP_PKTS,
                       [](nic_stats& d, uint64_t v) { d._tx_rdma_cnp_pkts = v; } },
+                    { nic_stats::REQ_TX_LOC_ACC_ERR,
+                      [](nic_stats& d, uint64_t v) { d._req_tx_loc_acc_err = v; } },
+                    { nic_stats::RESP_TX_PKT_SEQ_ERR,
+                      [](nic_stats& d, uint64_t v) { d._resp_tx_pkt_seq_err = v; } },
+                    { nic_stats::REQ_TX_PKT_SEQ_ERR,
+                      [](nic_stats& d, uint64_t v) { d._req_rx_pkt_seq_err = v; } },
+                    { nic_stats::REQ_RX_IMPL_NAK_SEQ_ERR,
+                      [](nic_stats& d, uint64_t v) { d._req_rx_impl_nak_seq_err = v; } },
                 };
 
             // Retrieve relevant stats.
@@ -231,6 +243,12 @@ ai_nic_stats_collector::update_data_for_one_handle(
 
                 new_delta._rx_rdma_cnp_pkts     = 0;
                 new_delta._tx_rdma_cnp_pkts     = 0;
+
+                new_delta._req_tx_loc_acc_err          = 0;
+                new_delta._resp_tx_pkt_seq_err         = 0;
+                new_delta._req_rx_pkt_seq_err          = 0;
+                new_delta._req_rx_impl_nak_seq_err     = 0;
+
                 _nic_params[data._netdev]       = data;
                 _nic_delta_params[data._netdev] = new_delta;
             }
@@ -256,6 +274,15 @@ ai_nic_stats_collector::update_data_for_one_handle(
                 new_delta._tx_rdma_cnp_pkts =
                     data._tx_rdma_cnp_pkts - old_data._tx_rdma_cnp_pkts;
 
+                new_delta._req_tx_loc_acc_err =
+                    data._req_tx_loc_acc_err - old_data._req_tx_loc_acc_err;
+                new_delta._resp_tx_pkt_seq_err =
+                    data._resp_tx_pkt_seq_err - old_data._resp_tx_pkt_seq_err;
+                new_delta._req_rx_pkt_seq_err =
+                    data._req_rx_pkt_seq_err - old_data._req_rx_pkt_seq_err;
+                new_delta._req_rx_impl_nak_seq_err =
+                    data._req_rx_impl_nak_seq_err - old_data._req_rx_impl_nak_seq_err;
+
                 _nic_params[data._netdev]       = data;
                 _nic_delta_params[data._netdev] = new_delta;
             }
@@ -279,6 +306,11 @@ ai_nic_stats_collector::get_data(const std::string& nic, nic_stats& data) const
 
         data._rx_rdma_cnp_pkts = 0;
         data._tx_rdma_cnp_pkts = 0;
+
+        data._req_tx_loc_acc_err      = 0;
+        data._resp_tx_pkt_seq_err     = 0;
+        data._req_rx_pkt_seq_err      = 0;
+        data._req_rx_impl_nak_seq_err = 0;
     }
     else
     {

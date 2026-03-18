@@ -125,6 +125,14 @@ using amd_smi_nic_rx_ucast_pkts_track =
     perfetto_counter_track<category::amd_smi_nic_rx_ucast_pkts>;
 using amd_smi_nic_tx_ucast_pkts_track =
     perfetto_counter_track<category::amd_smi_nic_tx_ucast_pkts>;
+using amd_smi_nic_req_tx_loc_acc_err_track =
+    perfetto_counter_track<category::amd_smi_nic_req_tx_loc_acc_err>;
+using amd_smi_nic_resp_tx_pkt_seq_err_track =
+    perfetto_counter_track<category::amd_smi_nic_resp_tx_pkt_seq_err>;
+using amd_smi_nic_req_rx_pkt_seq_err_track =
+    perfetto_counter_track<category::amd_smi_nic_req_rx_pkt_seq_err>;
+using amd_smi_nic_req_rx_impl_nak_seq_err_track =
+    perfetto_counter_track<category::amd_smi_nic_req_rx_impl_nak_seq_err>;
 
 void
 setup_amd_smi_tracks(const uint32_t _device_id, bool is_busy_enabled,

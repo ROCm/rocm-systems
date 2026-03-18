@@ -707,7 +707,9 @@ struct ainic_sample : cacheable_t
     ainic_sample(size_t _timestamp, uint32_t _nic_index, uint64_t _rx_rdma_cnp_pkts,
                  uint64_t _tx_rdma_cnp_pkts, uint64_t _rx_ucast_bytes,
                  uint64_t _tx_ucast_bytes, uint64_t _rx_ucast_pkts,
-                 uint64_t _tx_ucast_pkts)
+                 uint64_t _tx_ucast_pkts,
+                 uint64_t _req_tx_loc_acc_err, uint64_t _resp_tx_pkt_seq_err,
+                 uint64_t _req_rx_pkt_seq_err, uint64_t _req_rx_impl_nak_seq_err)
     : timestamp(_timestamp)
     , nic_index(_nic_index)
     , rx_rdma_cnp_pkts(_rx_rdma_cnp_pkts)
@@ -716,6 +718,10 @@ struct ainic_sample : cacheable_t
     , tx_ucast_bytes(_tx_ucast_bytes)
     , rx_ucast_pkts(_rx_ucast_pkts)
     , tx_ucast_pkts(_tx_ucast_pkts)
+    , req_tx_loc_acc_err(_req_tx_loc_acc_err)
+    , resp_tx_pkt_seq_err(_resp_tx_pkt_seq_err)
+    , req_rx_pkt_seq_err(_req_rx_pkt_seq_err)
+    , req_rx_impl_nak_seq_err(_req_rx_impl_nak_seq_err)
     {}
 
     size_t   timestamp;
@@ -726,6 +732,10 @@ struct ainic_sample : cacheable_t
     uint64_t tx_ucast_bytes;
     uint64_t rx_ucast_pkts;
     uint64_t tx_ucast_pkts;
+    uint64_t req_tx_loc_acc_err;
+    uint64_t resp_tx_pkt_seq_err;
+    uint64_t req_rx_pkt_seq_err;
+    uint64_t req_rx_impl_nak_seq_err;
 };
 
 template <>

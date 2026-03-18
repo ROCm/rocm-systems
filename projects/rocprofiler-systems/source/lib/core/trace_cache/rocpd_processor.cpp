@@ -648,6 +648,32 @@ rocpd_processor_t::handle(const ainic_sample& _ainic)
                                 nic_name, _ainic.nic_index)
                                 .c_str(),
                             _ainic.tx_ucast_pkts);
+
+    insert_event_and_sample(trait::name<category::amd_smi_nic_req_tx_loc_acc_err>::value,
+                            info::annotate_with_nic<category::amd_smi_nic_req_tx_loc_acc_err>(
+                                nic_name, _ainic.nic_index)
+                                .c_str(),
+                            _ainic.req_tx_loc_acc_err);
+
+    insert_event_and_sample(trait::name<category::amd_smi_nic_resp_tx_pkt_seq_err>::value,
+                            info::annotate_with_nic<category::amd_smi_nic_resp_tx_pkt_seq_err>(
+                                nic_name, _ainic.nic_index)
+                                .c_str(),
+                            _ainic.resp_tx_pkt_seq_err);
+
+    insert_event_and_sample(trait::name<category::amd_smi_nic_req_rx_pkt_seq_err>::value,
+                            info::annotate_with_nic<category::amd_smi_nic_req_rx_pkt_seq_err>(
+                                nic_name, _ainic.nic_index)
+                                .c_str(),
+                            _ainic.req_rx_pkt_seq_err);
+
+    insert_event_and_sample(trait::name<category::amd_smi_nic_req_rx_impl_nak_seq_err>::value,
+                            info::annotate_with_nic<category::amd_smi_nic_req_rx_impl_nak_seq_err>(
+                                nic_name, _ainic.nic_index)
+                                .c_str(),
+                            _ainic.req_rx_impl_nak_seq_err);
+
+
 }
 
 rocpd_processor_t::rocpd_processor_t(const std::shared_ptr<metadata_registry>& md,
