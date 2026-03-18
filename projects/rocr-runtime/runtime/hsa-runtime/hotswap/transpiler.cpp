@@ -2532,21 +2532,26 @@ static void PatchKernelDescriptorsForWave64(uint8_t* elf, size_t elf_size,
     // Set DX10_CLAMP (bit 21) and IEEE_MODE (bit 23) for GFX9
     rsrc1 |= (1u << 21) | (1u << 23);
 
-    // GFX9 RSRC1 layout:  bits [5:0] = SGPR field, bits [11:6] = VGPR field
     // GFX12 RSRC1 layout: bits [5:0] = VGPR field, bits [11:6] = SGPR field
-    // Convert VGPR count: GFX12 uses granularity 8 (wave32), GFX9 uses 4 (wave64)
-    // Transpiler uses at most v6 as temp (8 arch VGPRs = ACCUM_OFFSET 1).
-    // GFX942 requires RSRC1 VGPR field > ACCUM_OFFSET (1), so minimum field = 2.
-    uint32_t vgpr_field12 = rsrc1 & 0x3F;
-    uint32_t num_vgprs = (vgpr_field12 + 1) * 8;  // GFX12 granularity
-    if (num_vgprs < 8) num_vgprs = 8;             // at least 8 for transpiler temps
-    uint32_t gfx9_vgpr = (num_vgprs / 4) - 1;    // GFX9 granularity
-    if (gfx9_vgpr > 62) gfx9_vgpr = 62;           // Cap at 62 (ACCUM_OFFSET=1, field>1)
-    if (gfx9_vgpr < 2)  gfx9_vgpr = 2;            // At least 2 (> ACCUM_OFFSET=1)
+    // GFX9  RSRC1 layout: bits [5:0] = SGPR field, bits [11:6] = VGPR field
+    // Convert VGPR count: GFX12 granularity 8 (wave32) → GFX9 granularity 4 (wave64).
+    // Add 4 extra VGPRs to accommodate the two save registers (sv_x, sv_y) that
+    // the translation inserts above the kernel's native VGPR allocation.
+    uint32_t vgpr_field12 = rsrc1 & 0x3Fu;
+    uint32_t num_vgprs = (vgpr_field12 + 1u) * 8u;  // GFX12 granularity
+    if (num_vgprs < 8u) num_vgprs = 8u;
+    num_vgprs += 4u;  // room for sv_x, sv_y (2 regs, rounded to GFX9 granularity of 4)
+    // ACCUM_OFFSET: on GFX942, arch VGPRs = (ACCUM_OFFSET+1)*4.  Set ACCUM_OFFSET
+    // so ALL allocated VGPRs (kernel's + save regs) are arch VGPRs (accessible by VALU).
+    // Hardware requires ACCUM_OFFSET < RSRC1 VGPR field, so add one extra accum group.
+    uint32_t gfx9_vgpr = (num_vgprs / 4u) - 1u;  // ACCUM_OFFSET = all-arch
+    if (gfx9_vgpr > 62u) gfx9_vgpr = 62u;
+    uint32_t rsrc1_vgpr_field = gfx9_vgpr + 1u;   // one extra accum group (required)
+    if (rsrc1_vgpr_field > 63u) rsrc1_vgpr_field = 63u;
     // Clear bits [11:0] and set GFX9 SGPR[5:0] and VGPR[11:6]
     rsrc1 &= ~0xFFFu;
-    rsrc1 |= (gfx9_vgpr << 6);  // VGPR in bits [11:6]
-    rsrc1 |= 1u;                 // SGPR in bits [5:0]: 1 → (1+1)*8 = 16 SGPRs
+    rsrc1 |= (rsrc1_vgpr_field << 6u);  // VGPR in bits [11:6]
+    rsrc1 |= 1u;                        // SGPR in bits [5:0]: 1 → (1+1)*8 = 16 SGPRs
 
     std::memcpy(elf + info.text_offset + offset + 48, &rsrc1, 4);
 
@@ -2567,10 +2572,9 @@ static void PatchKernelDescriptorsForWave64(uint8_t* elf, size_t elf_size,
     std::memcpy(elf + info.text_offset + offset + 56, &props, 2);
 
     // Patch COMPUTE_PGM_RSRC3 (offset 44)
-    // GFX9 (gfx942) ACCUM_OFFSET [5:0]: num_arch_vgprs = (field+1)*4.
-    // Transpiler uses at most v6, so 8 arch VGPRs (ACCUM_OFFSET=1) suffices.
-    // Must satisfy: ACCUM_OFFSET < RSRC1 VGPR field (enforced above as field>=2).
-    uint32_t rsrc3 = 1;  // ACCUM_OFFSET = 1 → 8 arch VGPRs (v0-v7)
+    // ACCUM_OFFSET [5:0]: arch VGPRs = (ACCUM_OFFSET+1)*4.
+    // Set to gfx9_vgpr so all num_vgprs (kernel + save regs) are arch VGPRs.
+    uint32_t rsrc3 = gfx9_vgpr;
     std::memcpy(elf + info.text_offset + offset + 44, &rsrc3, 4);
   }
 }
@@ -2743,6 +2747,27 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
       }
     }
 
+    // Determine save-register indices for workgroup IDs.
+    // Use VGPRs above the kernel's native GFX12 allocation so they don't collide
+    // with the kernel's own register usage.  PatchKernelDescriptorsForWave64 will
+    // add 4 to num_vgprs when computing gfx9_vgpr/ACCUM_OFFSET, ensuring these
+    // extra registers are allocated as arch (non-accum) VGPRs.
+    uint32_t save_vgpr_x = 8;  // default: just above minimum allocation
+    uint32_t save_vgpr_y = 9;
+    if (kern.desc_offset != kern.code_offset &&
+        kern.desc_offset + 52 <= elf_info.text_size) {
+      uint32_t rsrc1_src;
+      std::memcpy(&rsrc1_src, text + kern.desc_offset + 48, 4);
+      // GFX12 RSRC1: bits [5:0] = VGPR field, granularity 8
+      uint32_t vgpr_field12 = rsrc1_src & 0x3Fu;
+      uint32_t num_vgprs12  = (vgpr_field12 + 1u) * 8u;
+      if (num_vgprs12 < 8u) num_vgprs12 = 8u;
+      save_vgpr_x = num_vgprs12;       // first free VGPR index
+      save_vgpr_y = num_vgprs12 + 1u;  // second free VGPR index
+    }
+    const std::string sv_x = "v" + std::to_string(save_vgpr_x);
+    const std::string sv_y = "v" + std::to_string(save_vgpr_y);
+
     // Determine code region end (next descriptor or end of .text)
     uint64_t code_end = elf_info.text_size;
     if (ki + 1 < kernels.size()) {
@@ -2862,27 +2887,37 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
     }
     auto taint_results = AnalyzeTTMPTaint(taint_input, *src_state.MCII, *src_state.MRI);
 
+    // Update taint Replace actions to use kernel-specific save register indices
+    // instead of the hardcoded "v5"/"v4" emitted by AnalyzeTTMPTaint.
+    // AnalyzeTTMPTaint uses "v5" for wg_id_x and "v4" for wg_id_y; remap to
+    // sv_x/sv_y which live above the kernel's own VGPR allocation.
+    for (auto& tr : taint_results) {
+      if (tr.action == TaintAction::Replace) {
+        if (tr.replace_src == "v5") tr.replace_src = sv_x;
+        else if (tr.replace_src == "v4") tr.replace_src = sv_y;
+      }
+    }
+
     // GFX12→GFX9 workgroup ID fix:
     // On gfx1250, the workgroup_id is computed from TTMP registers and
     // s_getreg_b32 hwreg(HW_REG_IB_STS2). These don't exist on gfx950.
     // On gfx950, the workgroup_id_x is in s2 (system SGPR).
     //
-    // IMPORTANT: Do NOT compute global_thread_id here — that would
-    // overwrite v0 (local thread ID) which shared memory kernels use
-    // for LDS addressing BEFORE the kernel's v_mad_u32 converts it.
-    //
-    // Instead, just save s2 (workgroup_id) to v5 before any s_load
-    // overwrites it. The v_mad_u32 emulation will use v5 later.
-    translated_asm += "v_mov_b32_e32 v5, s2 ; save workgroup_id_x\n";
-    translated_asm += "v_mov_b32_e32 v4, s3 ; save workgroup_id_y\n";
+    // Save wg IDs to sv_x/sv_y — VGPRs above the kernel's own allocation
+    // (computed from GFX12 RSRC1 VGPR field) — so they never conflict with
+    // the kernel's own register usage (e.g. B-array loads using v4, K_chunk
+    // integer division using v8+).  PatchKernelDescriptorsForWave64 adds 4 to
+    // num_vgprs when computing ACCUM_OFFSET so these registers are arch VGPRs.
+    translated_asm += "v_mov_b32_e32 " + sv_x + ", s2 ; save workgroup_id_x\n";
+    translated_asm += "v_mov_b32_e32 " + sv_y + ", s3 ; save workgroup_id_y\n";
 
     // Collect all REPLACE registrations so we can refresh them after saveexec.
     // On gfx1250, workgroup_id lives in TTMP (always valid).  After transpiling
     // to gfx942 we store it in an SGPR via v_readfirstlane_b32, but saveexec
     // widens b32→b64 (s_and_saveexec_b32 sN → s_and_saveexec_b64 s[N:N+1]),
     // which clobbers s[N+1] with exec_hi.  Re-emitting the v_readfirstlane
-    // after any saveexec restores the SGPR from the VGPR copy (v4/v5) which
-    // is never modified by the kernel.
+    // after any saveexec restores the SGPR from the VGPR copy (sv_x/sv_y)
+    // which live above the kernel's own VGPR allocation and are never touched.
     std::vector<std::pair<std::string, std::string>> replace_regs;
     for (auto& tr : taint_results) {
       if (tr.action == TaintAction::Replace && !tr.replace_dst.empty())
@@ -3288,18 +3323,20 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
             // GFX9 RSRC1: bits [5:0] = SGPR field, bits [11:6] = VGPR field
             // GFX12 RSRC1: bits [5:0] = VGPR field, bits [11:6] = SGPR field
             // Convert VGPR: GFX12 granularity 8 → GFX9 granularity 4.
-            // Transpiler uses at most v6 as temp (8 arch VGPRs, ACCUM_OFFSET=1).
-            // GFX942 requires RSRC1 VGPR field > ACCUM_OFFSET (1), so min field=2.
-            uint32_t vgpr_field12 = rsrc1 & 0x3F;
-            uint32_t num_vgprs = (vgpr_field12 + 1) * 8;
-            if (num_vgprs < 8) num_vgprs = 8;
-            uint32_t gfx9_vgpr = (num_vgprs / 4) - 1;
-            if (gfx9_vgpr > 62) gfx9_vgpr = 62;  // Cap: ACCUM_OFFSET=1, field>1
-            if (gfx9_vgpr < 2)  gfx9_vgpr = 2;   // At least 2 (> ACCUM_OFFSET=1)
+            // Add 4 extra VGPRs for the two save registers (sv_x, sv_y) the
+            // translation inserts above the kernel's native VGPR allocation.
+            uint32_t vgpr_field12 = rsrc1 & 0x3Fu;
+            uint32_t num_vgprs = (vgpr_field12 + 1u) * 8u;
+            if (num_vgprs < 8u) num_vgprs = 8u;
+            num_vgprs += 4u;  // room for sv_x, sv_y
+            uint32_t gfx9_vgpr = (num_vgprs / 4u) - 1u;  // ACCUM_OFFSET = all-arch
+            if (gfx9_vgpr > 62u) gfx9_vgpr = 62u;
+            uint32_t rsrc1_vgpr_field = gfx9_vgpr + 1u;   // one extra accum group
+            if (rsrc1_vgpr_field > 63u) rsrc1_vgpr_field = 63u;
             // Clear bits [11:0] and set GFX9 SGPR[5:0] and VGPR[11:6]
             rsrc1 &= ~0xFFFu;
-            rsrc1 |= (gfx9_vgpr << 6);  // VGPR in bits [11:6]
-            rsrc1 |= 1u;                 // SGPR in bits [5:0]: 1 → 16 SGPRs
+            rsrc1 |= (rsrc1_vgpr_field << 6u);  // VGPR in bits [11:6]
+            rsrc1 |= 1u;                         // SGPR in bits [5:0]: 1 → 16 SGPRs
             std::memcpy(desc + 48, &rsrc1, 4);
 
             // Patch COMPUTE_PGM_RSRC2 (offset 52)
@@ -3318,10 +3355,9 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
             std::memcpy(desc + 56, &props, 2);
 
             // Patch COMPUTE_PGM_RSRC3 (offset 44)
-            // GFX9 (gfx942) ACCUM_OFFSET [5:0]: num_arch_vgprs = (field+1)*4.
-            // Transpiler uses at most v6, so 8 arch VGPRs (ACCUM_OFFSET=1) suffices.
-            // Must satisfy: ACCUM_OFFSET < RSRC1 VGPR field (enforced above as field>=2).
-            uint32_t rsrc3 = 1;  // ACCUM_OFFSET = 1 → 8 arch VGPRs (v0-v7)
+            // ACCUM_OFFSET [5:0]: arch VGPRs = (ACCUM_OFFSET+1)*4.
+            // Set to gfx9_vgpr so all num_vgprs VGPRs (kernel + save regs) are arch.
+            uint32_t rsrc3 = gfx9_vgpr;
             std::memcpy(desc + 44, &rsrc3, 4);
 
             // Debug: dump patched descriptor when HSA_HOTSWAP_DUMP is set
