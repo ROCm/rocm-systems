@@ -41,13 +41,12 @@
 #include <regex>
 
 #include "amd_smi/impl/amd_smi_common.h"
+#include "amd_smi/impl/amd_smi_test_flags.h"
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_logger.h"
 
 namespace amd::smi {
-
-#define AMD_SMI_INIT_FLAG_RESRV_TEST1 0x800000000000000  //!< Reserved for test
 
 AMDSmiSystem& AMDSmiSystem::getInstance() {
   static AMDSmiSystem instance;

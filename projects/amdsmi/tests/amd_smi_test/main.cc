@@ -24,6 +24,7 @@
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "functional/api_support_read.h"
 #include "functional/computepartition_read_write.h"
+#include "functional/cross_process_serialization.h"
 #include "functional/err_cnt_read.h"
 #include "functional/evt_notif_read_write.h"
 #include "functional/fan_read.h"
@@ -257,6 +258,17 @@ TEST(amdsmitstReadOnly, TestMutualExclusion) {
   SetFlags(&tst);
   tst.DisplayTestInfo();
   tst.SetUp();
+  PRINT_VERBOSITY();
+  tst.Run();
+  RunCustomTestEpilog(&tst);
+}
+
+TEST(amdsmitstReadOnly, TestCrossProcessSerialization) {
+  TestCrossProcessSerialization tst;
+  SetFlags(&tst);
+  tst.DisplayTestInfo();
+  tst.SetUp();
+  PRINT_VERBOSITY();
   tst.Run();
   RunCustomTestEpilog(&tst);
 }

@@ -25,17 +25,18 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include <cerrno>
 #include <csignal>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <iostream>
 #include <string>
 #include <vector>
 
 #include "../test_common.h"
 #include "amd_smi/amdsmi.h"
-
-#define AMD_SMI_INIT_FLAG_RESRV_TEST1 0x800000000000000  //!< Reserved for test
+#include "amd_smi/impl/amd_smi_test_flags.h"
 
 TestMutualExclusion::TestMutualExclusion() : TestBase() {
   set_title("Mutual Exclusion Test");
@@ -75,6 +76,11 @@ void TestMutualExclusion::SetUp(void) {
   setenv("AMDSMI_MUTEX_CROSS_PROCESS", "1", 1);
 
   child_ = fork();
+  if (child_ < 0) {
+    std::cout << "fork() failed: " << strerror(errno) << std::endl;
+    setup_failed_ = true;
+    return;
+  }
 
   if (child_ != 0) {
     sleeper_process_ = true;  // sleeper_process is parent
@@ -121,9 +127,15 @@ void TestMutualExclusion::SetUp(void) {
   num_monitor_devs_ = 0;
   for (uint32_t i = 0; i < socket_count_; i++) {
     uint32_t device_count = 0;
-    amdsmi_get_processor_handles(sockets_[i], &device_count, nullptr);
+    amdsmi_status_t status = amdsmi_get_processor_handles(sockets_[i], &device_count, nullptr);
+    if (status != AMDSMI_STATUS_SUCCESS || device_count == 0) {
+      continue;
+    }
     std::vector<amdsmi_processor_handle> handles(device_count);
-    amdsmi_get_processor_handles(sockets_[i], &device_count, &handles[0]);
+    status = amdsmi_get_processor_handles(sockets_[i], &device_count, &handles[0]);
+    if (status != AMDSMI_STATUS_SUCCESS) {
+      continue;
+    }
     for (uint32_t j = 0; j < device_count && num_monitor_devs_ < MAX_MONITOR_DEVICES; j++) {
       processor_handles_[num_monitor_devs_++] = handles[j];
     }

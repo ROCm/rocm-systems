@@ -998,8 +998,8 @@ rsmi_status_t rsmi_dev_id_get(uint32_t dv_ind, uint16_t* id) {
   if (id == nullptr) {
     return RSMI_STATUS_INVALID_ARGS;
   }
-  CHK_SUPPORT_NAME_ONLY(id)
   DEVICE_MUTEX
+  CHK_SUPPORT_NAME_ONLY(id)
   // Set the device ID to max value
   *id = std::numeric_limits<uint16_t>::max();
 

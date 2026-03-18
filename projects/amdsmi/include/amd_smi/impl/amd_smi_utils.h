@@ -33,32 +33,6 @@
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_gpu_device.h"
 
-namespace amd::smi {
-// Simple always-blocking POSIX mutex guard with no rocm_smi dependency.
-// Used by SMIDEVICE_MUTEX for non-GPU (NIC/CPU) code paths.
-// For GPU code paths use SMIGPUDEVICE_MUTEX from amd_smi_gpu_mutex.h, which
-// additionally consults RocmSMI::init_options() to decide blocking vs non-blocking.
-struct SmiMutexLock {
-  explicit SmiMutexLock(pthread_mutex_t& m) : mutex_(m) { pthread_mutex_lock(&mutex_); }
-  ~SmiMutexLock() { pthread_mutex_unlock(&mutex_); }
-  // Always returns false: blocking lock is always acquired. Provided so call
-  // sites mirror the SMIGPUDEVICE_MUTEX pattern for consistency.
-  bool mutex_not_acquired() const { return false; }
-
- private:
-  SmiMutexLock(const SmiMutexLock&) = delete;
-  pthread_mutex_t& mutex_;
-};
-}  // namespace amd::smi
-
-// Non-GPU (NIC/CPU) mutex: always blocks until the lock is acquired.
-// Mirrors the SMIGPUDEVICE_MUTEX call pattern for consistency.
-#define SMIDEVICE_MUTEX(MUTEX)                    \
-  amd::smi::SmiMutexLock _smi_dev_lock(*(MUTEX)); \
-  if (_smi_dev_lock.mutex_not_acquired()) {       \
-    return AMDSMI_STATUS_BUSY;                    \
-  }
-
 extern "C" {
 void amdsmi_free_name_value_pairs(void* p);
 }
