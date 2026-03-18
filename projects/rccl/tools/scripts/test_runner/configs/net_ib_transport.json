@@ -30,19 +30,12 @@
     }
   },
   "build_configuration": {
-    "cmake_options": {
-      "CMAKE_BUILD_TYPE": "Debug",
-      "ENABLE_CODE_COVERAGE": "ON",
-      "BUILD_TESTS": "ON",
-      "BUILD_LOCAL_GPU_TARGET_ONLY": "ON",
-      "TRACE": "ON",
-      "COLLTRACE": "ON"
-    },
+    "install_flags": ["--debug", "-c", "-t", "-l", "--log-trace", "--enable-mpi-tests", "--no_clean"],
+    "cmake_options": "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
     "env_variables": {
       "HIPCC_COMPILE_FLAGS_APPEND": "-g -Wno-format-nonliteral -Xarch_host -fprofile-instr-generate -Xarch_host -fcoverage-mapping -parallel-jobs=16"
     },
-    "parallel_jobs": 64,
-    "generator": "Unix Makefiles"
+    "parallel_jobs": 64
   },
   "test_configurations": {
     "default": {
@@ -224,7 +217,18 @@
           "name": "NetIB_VNic_ConnectAndTransfer",
           "description": "End-to-end data transfer through fused vNIC (ndevs=2)",
           "test_filter": "NetIbMPITest.ConnectAndTransfer_VNic"
-        },
+        }
+      ]
+    },
+
+    "net_ib_vnic_edge": {
+      "extends": "net_ib_base",
+      "timeout": 120,
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "NCCL_DEBUG_SUBSYS": "NET,INIT"
+      },
+      "tests": [
         {
           "name": "NetIB_VNic_AsymmetricMerge",
           "description": "Connection with mismatched ndevs (vNIC ndevs=2 vs physical ndevs=1)",
@@ -287,22 +291,6 @@
           "test_filter": "NetIbMPITest.RegDeregCycling_VNic"
         }
       ]
-    },
-
-    "net_ib_vnic_all": {
-      "extends": "net_ib_base",
-      "timeout": 300,
-      "env_variables": {
-        "NCCL_DEBUG": "INFO",
-        "NCCL_DEBUG_SUBSYS": "NET,INIT"
-      },
-      "tests": [
-        {
-          "name": "NetIB_VNic_AllTests",
-          "description": "All vNIC tests in a single run",
-          "test_filter": "NetIbMPITest.*_VNic"
-        }
-      ]
     }
   },
   "test_suites": [
@@ -350,20 +338,20 @@
     },
     {
       "name": "NET IB - vNIC Functional",
-      "description": "Virtual NIC functional and edge case tests",
+      "description": "Virtual NIC functional validation",
       "config": "net_ib_vnic_functional",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - vNIC Edge",
+      "description": "Virtual NIC edge case and boundary condition tests",
+      "config": "net_ib_vnic_edge",
       "enabled": true
     },
     {
       "name": "NET IB - vNIC Stress",
       "description": "Virtual NIC stress, reconnect, and repeated-operation tests",
       "config": "net_ib_vnic_stress",
-      "enabled": true
-    },
-    {
-      "name": "NET IB - All vNIC Tests (Single Run)",
-      "description": "All vNIC tests via wildcard filter",
-      "config": "net_ib_vnic_all",
       "enabled": true
     }
   ]
