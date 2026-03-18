@@ -1454,7 +1454,7 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle,
 
     int timeoutLimitMs = 10000, timeoutIntervalMs = 1;
     os::IPCSocket socket_fd = os::ConnectToIPCServer(socketName, timeoutLimitMs, timeoutIntervalMs);
-    assert(socket_fd && "DMA buffer could not be imported for IPC!");
+    assert(socket_fd && "Connection to export DMA buffer not made!");
     if (!socket_fd) return -1;
 
     os::SetIPCSocketRecvTimeout(socket_fd, 10);

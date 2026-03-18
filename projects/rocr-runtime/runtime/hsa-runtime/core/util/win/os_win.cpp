@@ -512,13 +512,15 @@ struct IPCPipeInfo {
 static bool WaitForPipeData(HANDLE pipe, int timeoutMs) {
   if (timeoutMs <= 0) return true;
   int elapsed = 0;
+  DWORD sleepMs = 1; // init with 1ms
+  const DWORD maxSleep = 500; // max at 500ms
   while (elapsed < timeoutMs) {
     DWORD available = 0;
     if (!PeekNamedPipe(pipe, NULL, 0, NULL, &available, NULL))
       return false;
     if (available > 0) return true;
-    ::Sleep(1);
-    elapsed++;
+    ::Sleep(sleepMs);
+    elapsed += std::min(sleepMs * 2, maxSleep);
   }
   return false;
 }

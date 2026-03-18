@@ -1047,6 +1047,7 @@ int IPCSendHandle(IPCSocket conn, intptr_t handle) {
   msg.msg_controllen = sizeof(cmsg_buf);
 
   struct cmsghdr* cmsg = CMSG_FIRSTHDR(&msg);
+  if (!cmsg) return -1;
   cmsg->cmsg_level = SOL_SOCKET;
   cmsg->cmsg_type = SCM_RIGHTS;
   cmsg->cmsg_len = CMSG_LEN(sizeof(int));
@@ -1075,6 +1076,7 @@ intptr_t IPCRecvHandle(IPCSocket conn) {
     rcv = recvmsg(IPCSockToFd(conn), &msg, MSG_WAITALL);
 
   struct cmsghdr* cmsg = CMSG_FIRSTHDR(&msg);
+  if (!cmsg) return -1;
   int fd;
   memcpy(&fd, CMSG_DATA(cmsg), sizeof(fd));
   return fd;
