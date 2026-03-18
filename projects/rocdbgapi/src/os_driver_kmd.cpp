@@ -1368,7 +1368,7 @@ kmd_driver_t::agent_snapshot (os_agent_info_t *snapshots,
       agent.address_watch_supported
         = kmd_snap.capability & KMD_DBGR_CAP_WATCH_POINTS_SUPPORTED;
       agent.address_watch_register_count
-        = 1 << ((kmd_snap.capability
+        = static_cast<size_t>(1) << ((kmd_snap.capability
                  & KMD_DBGR_CAP_WATCH_POINTS_TOTALBITS_MASK)
                 >> KMD_DBGR_CAP_WATCH_POINTS_TOTALBITS_SHIFT);
       agent.precise_memory_supported
