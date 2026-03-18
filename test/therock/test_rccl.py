@@ -11,7 +11,9 @@ import pytest
 
 THEROCK_BIN_DIR = os.getenv("THEROCK_BIN_DIR")
 SCRIPT_DIR = Path(__file__).resolve().parent
-THEROCK_DIR = Path(os.getenv("THEROCK_DIR", SCRIPT_DIR.parent.parent.parent)).resolve()
+THEROCK_DIR = Path(
+    os.environ.get("THEROCK_DIR") or SCRIPT_DIR.parent.parent.parent
+).resolve()
 sys.path.insert(0, str(THEROCK_DIR / "build_tools" / "github_actions"))
 from github_actions_api import get_visible_gpu_count
 
