@@ -5,8 +5,8 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-#ifndef TOPO_EXPL_CORE_H_
-#define TOPO_EXPL_CORE_H_
+#ifndef TOPO_EXPL_IMPL_H_
+#define TOPO_EXPL_IMPL_H_
 
 struct graphInfo {
   int pattern;
@@ -49,4 +49,4 @@ ncclResult_t initTransportsRank_3(struct ncclComm* comm, struct allGatherInfo *a
 
 #define TIME_PRINT(name)
 
-#endif // TOPO_EXPL_CORE_H_
+#endif // TOPO_EXPL_IMPL_H_

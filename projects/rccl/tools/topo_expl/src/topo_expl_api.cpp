@@ -24,7 +24,7 @@ THE SOFTWARE.
 #include "rccl_common.h"
 #include "nccl.h"
 #include "model.h"
-#include "topo_expl_core.h"
+#include "topo_expl_impl.h"
 #include "topo.h"
 #include "graph.h"
 #include "channel.h"

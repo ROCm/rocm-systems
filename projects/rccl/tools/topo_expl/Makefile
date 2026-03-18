@@ -23,7 +23,7 @@ CXXFLAGS = -g -ffunction-sections -fdata-sections -DROCM_VERSION=$(ROCM_VERSION)
            -DTOPO_EXPL -DENABLE_TRACE -DENABLE_LL128 -DNVTX_NO_IMPL -DRCCL_EXPOSE_STATIC \
            -lpthread
 
-TOPO_EXPL_FILES = src/$(EXE).cpp src/topo_expl_api.cpp src/model.cpp src/topo_expl_core.cpp src/utils.cpp src/stubs.cc test/topo_expl_tests.cpp
+TOPO_EXPL_FILES = src/$(EXE).cpp src/topo_expl_api.cpp src/model.cpp src/topo_expl_impl.cpp src/utils.cpp src/stubs.cc test/topo_expl_tests.cpp
 
 RCCL_FILES = hipify_rccl/graph/topo.cc \
 			hipify_rccl/graph/rings.cc \

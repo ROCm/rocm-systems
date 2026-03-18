@@ -26,7 +26,7 @@ THE SOFTWARE.
 #include <vector>
 #include "topo.h"
 #include "xml.h"
-#include "topo_expl_core.h"
+#include "topo_expl_impl.h"
 
 class NodeModel {
 private:

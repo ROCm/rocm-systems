@@ -29,7 +29,7 @@
 #include "xml.h"
 #include "coll_net.h"
 #include "model.h"
-#include "topo_expl_core.h"
+#include "topo_expl_impl.h"
 #include "rocm_smi/rocm_smi.h"
 
 const char* ncclFuncStr[NCCL_NUM_FUNCTIONS+4] = { "AllGather", "AllReduce", "AlltoAllPivot", "AlltoAllGda", "AlltoAllvGda", "Broadcast", "Reduce", "ReduceScatter", "SendRecv" };
