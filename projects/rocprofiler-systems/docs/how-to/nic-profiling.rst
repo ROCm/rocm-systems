@@ -6,22 +6,28 @@
 Network performance profiling
 ********************************************
 
-`ROCm Systems Profiler <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems>`_ supports network profiling.
+`ROCm Systems Profiler <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems>`_ supports network performance profiling. It can be performed using two methods:
 
-Network performance profiling can be performed using two methods:
+* :ref:`event-based-profiling`
+* :ref:`AINIC-metric-collection`
 
-* Event-based profiling via PAPI counters
-* AI NIC metric collection using amd-smi
+.. _event-based-profiling:
 
-We first describe profiling via PAPI.
+Event-based profiling via PAPI counters
+=========================================
 
-All network events that can be traced on the system can be listed by running the command:
+This method profiles standard network events. You can sample the events based on standard network interface counters. Follow the steps to list all the network events, sample them using configuration parameters, instrument and run the generated binary, and visualize the Perfetto trace.
+
+List available network events
+-------------------------------
+
+List all the network events that can be traced on the system by running the command:
 
 .. code-block:: shell
 
     rocprof-sys-avail -H -r net
 
-For example, if the system's NIC is enp7s0, then the output of this command looks like:
+For example, if the name of system's NIC is ``enp7s0``, the output is:
 
 .. code-block:: shell
 
@@ -46,16 +52,17 @@ For example, if the system's NIC is enp7s0, then the output of this command look
   | net:::enp7s0:tx:compresse     |   CPU   |   true    | enp7s0 transmit compresse     |
   |-------------------------------|---------|-----------|-------------------------------|
 
-To track bytes and packets sent and received by the NIC ``enp7s0``, the configuration parameters should be configured as the following example:
+
+Configure the parameters
+---------------------------
+
+To track bytes and packets sent and received by NIC ``enp7s0``, configure the parameters as follows:
 
 .. code-block:: shell
 
   ROCPROFSYS_PAPI_EVENTS = net:::enp7s0:tx:byte net:::enp7s0:rx:byte net:::enp7s0:tx:packet net:::enp7s0:rx:packet
 
-Configuration
-=============
-
-A sample configuration parameter settings looks like:
+Sample configuration parameter settings look like:
 
 .. code-block:: shell
 
@@ -67,12 +74,12 @@ A sample configuration parameter settings looks like:
 
 Details of the configuration parameter settings configured in the example are:
 
-* **Sampling Frequency**: 10 samples per second
-* **TIMEMORY**:  Outputs the summaries for the ``wall_clock``, ``papi_array``, and ``network_stats`` components.
-* **Network Interface**: ``enp7s0`` is the predictable network interface device name.
-* **Events for the network device to be sampled**: Bytes transmitted, bytes received, packets transmitted, and packets received.
+* **Sampling frequency**: 10 samples per second
+* **TIMEMORY**:  Outputs summaries for the ``wall_clock``, ``papi_array``, and ``network_stats`` components.
+* **Network interface**: ``enp7s0`` is the predictable network-interface device name.
+* **Events to sample**: Bytes transmitted, bytes received, packets transmitted, and packets received.
 
-The configuration parameter settings can be saved in a configuration file. Here is an example of a complete configuration file, ``rocprofsys.cfg``:
+You can save the configuration parameter settings in a configuration file. For example, ``rocprofsys.cfg``:
 
 .. code-block:: shell
 
@@ -105,14 +112,13 @@ This setting defines the location of the ROCm Systems Profiler configuration fil
 .. note::
 
    To collect network counters using Process Application Program Interface (PAPI), ensure that
-   `/proc/sys/kernel/perf_event_paranoid` has a value <= 2. See
-   :ref:`rocprof-sys_papi_events`
-   for details.
+   ``/proc/sys/kernel/perf_event_paranoid`` has a value <= 2. See
+   :ref:`rocprof-sys_papi_events` for details.
 
-Instrumenting and running a program
-===================================
+Instrument and run the binary
+-------------------------------------
 
-An example rocprof-sys-instrument command is:
+1. Instrument the binary file using the ``rocprof-sys-instrument`` command:
 
 .. code-block:: shell
 
@@ -121,48 +127,54 @@ An example rocprof-sys-instrument command is:
     "--print-instrumented" "functions" "-e" "-v" "2" "--caller-include" \
     "inner" "-i" "4096" "--" ./foo
 
-This command generates an instrumented binary ``foo.inst``. Then, run
-it with the following command:
+This command generates an instrumented binary ``foo.inst``. 
+
+2. Run the instrumented binary using the following command:
 
 .. code-block:: shell
 
   rocprof-sys-run -- ./foo.inst
 
-To view the generated ``.proto`` file in the browser, open the
-`Perfetto UI page <https://ui.perfetto.dev/>`_. Then, click on
-``Open trace file`` and select the ``.proto`` file. In the browser, it looks
-like this:
+
+Visualize the event-based profiling results
+---------------------------------------------
+
+To view the generated ``.proto`` file in the browser, follow the steps:
+
+1. Open the `Perfetto UI page <https://ui.perfetto.dev/>`_. 
+
+2. Click ``Open trace file`` and select the ``.proto`` file. In the browser, it looks like:
 
 .. image:: ../data/rocprof-sys-perfetto-nic-trace.png
    :alt: Visualization of a performance graph in Perfetto with network tracks
    :width: 800
 
-AI NIC profiling
-================
+.. _AINIC-metric-collection:
 
-On a host that has AI network interface cards, ROCm Systems Profiler can track
-the following values:
+AI NIC metrics collection using amd-smi
+=========================================
 
-* RX Congestion Notification Packets
-* TX Congestion Notification Packets
+On a host system that has AI network interface cards, ROCm Systems Profiler can track the following metrics:
+
+* RX congestion notification packets
+* TX congestion notification packets
 * RX unicast bytes
 * TX unicast bytes
 * RX unicast packets
 * TX unicast packets
 
-Building ROCm Systems Profiler with AI NIC support enabled or disabled
-----------------------------------------------------------------------
-
-By default, AI NIC support is enabled. You can disable it by setting
+AI NIC support in ROCm Systems Profiler
+---------------------------------------
+By default, AI NIC support is enabled in ROCm Systems Profiler. However, you can disable it by setting:
 
 .. code-block:: shell
 
    -D ROCPROFSYS_USE_AINIC=OFF
 
-Getting the list of available AI NICs
--------------------------------------
+List available AI NICs
+------------------------
 
-Get the list of available AI NICs by executing ``amd-smi list``:
+Get the list of available AI NICs with their unique identifiers by running ``amd-smi list``:
 
 .. code-block:: shell
 
@@ -175,7 +187,7 @@ Get the list of available AI NICs by executing ``amd-smi list``:
        SERIAL_NUMBER: FPL250300A1EC0V2
        VENDOR_NAME: AMD Pensando Systems, Inc.
 
-Get the name of each available AI NIC by executing ``amd-smi static``:
+Get the NETDEV name and more details of each available AI NIC by running ``amd-smi static``:
 
 .. code-block:: shell
 
@@ -198,66 +210,86 @@ Get the name of each available AI NIC by executing ``amd-smi static``:
                        ACTIVE_MTU: N/A
 
 From this output, use the ``NETDEV`` value (here, ``enp229s0``) as the name of
-the NIC.
+the AI NIC.
 
-Sampling AI NIC
----------------
+Sampling the AI NICs
+-----------------------
 
-With AI NIC support enabled, you have to list the cards for which you want
-to track the values. There are two ways this can be done:
+After the AI NIC support is enabled, specify the names of the AI NICs for which you want
+to track the values. For example, if the host has an AI NIC named ``enp229s0`` there are multiple options to track its performance:
 
-* by setting the configuration variable ROCPROFSYS_SAMPLING_AINICS
-* by passing in the command-line parameter --ai-nics
+* **Option 1:** Set ``ROCPROFSYS_SAMPLING_AINICS`` in the configuration file.
 
-For example, if the host has one AI NIC named enp229s0, then you can track
-its performance in the following ways, listed from the lowest to the highest
-priority:
+  Example:
 
-* set ROCPROFSYS_SAMPLING_AINICS=enp229s0 in the configuration file
-* set ROCPROFSYS_SAMPLING_AINICS=enp229s0 in the environment
-* pass --ai-nics=enp229s0 to rocprof-sys-sample
+  .. code-block:: shell
 
-Suppose that we are using rocprof-sys-sample to profile AI NIC interface enp229s0
-while running command `wget -O /dev/null --no-check-certificate https://example.com`.
-Then the command can look like this:
+     ROCPROFSYS_SAMPLING_AINICS=enp229s0
 
-.. code-block:: shell
+* **Option 2:** Set ``ROCPROFSYS_SAMPLING_AINICS`` as an environment variable.
 
-   rocprof-sys-sample --ai-nics=enp229s0 --device -- wget -O /dev/null --no-check-certificate https://example.com
+  Example:
 
-If you want to track multiple NICs on the host, you can provide them in a
-comma-separated list, like this:
+  .. code-block:: shell
 
-.. code-block:: shell
+     export ROCPROFSYS_SAMPLING_AINICS=enp229s0
 
-   rocprof-sys-sample --ai-nics=enp229s0,enp229s1 --device -- wget -O /dev/null --no-check-certificate https://example.com
+.. _ai_nics_option_3:
 
-The value of this parameter can also be:
+* **Option 3:** Pass ``--ai-nics`` to ``rocprof-sys-sample`` on the command line. (Preferred)
 
-* all - tracking all NICs available on the host
-* none - not tracking any NICs
+  Example:
 
-``rocprof-sys-sample`` generates a ``.proto`` file that can be opened with
-Perfetto. The tracks for AI NIC in the generated ``.proto`` file look like this:
+  .. code-block:: shell
+
+     rocprof-sys-sample --ai-nics=enp229s0 -- <your command>
+
+  * If you use ``rocprof-sys-sample`` to profile the AI NIC interface ``enp229s0`` while running the command  
+    ``wget -O /dev/null --no-check-certificate https://example.com``, the full command is:
+
+    .. code-block:: shell
+
+       rocprof-sys-sample --ai-nics=enp229s0 --device -- \ wget -O /dev/null --no-check-certificate https://example.com
+
+  * If you want to track multiple NICs on the host, provide them as a comma-separated list:
+
+    .. code-block:: shell
+
+       rocprof-sys-sample --ai-nics=enp229s0,enp229s1 --device -- \ wget -O /dev/null --no-check-certificate https://example.com
+
+
+  The value of the ``--ai-nics`` parameter can also be:
+
+  * all: tracking all NICs available on the host.
+  * none: not tracking any NICs.
+
+Visualize the AI NIC profiling results
+------------------------------------------
+
+To view the ``.proto`` file generated by ``rocprof-sys-sample`` in the browser, follow the steps :
+
+1. Open the `Perfetto UI page <https://ui.perfetto.dev/>`_. 
+
+2. Click ``Open trace file`` and select the ``.proto`` file. The tracks for AI NIC in the generated ``.proto`` file look like:
 
 .. image:: ../data/rocprof-sys-ai-nic-perfetto.png
    :alt: Visualization of a performance graph in Perfetto with AI NIC network tracks
    :width: 800
 
-Writing the profiling output to rocpd
+Save the profiling output to rocpd
 -------------------------------------
 
-In order to write the output to rocpd, make sure that ``ROCPROFSYS_USE_ROCPD`` is set to
-``ON``:
+To save the output to ``rocpd``, follow the steps:
 
-.. code-block:: shell
+1. Set the environment variable ``ROCPROFSYS_USE_ROCPD`` to ``ON``.
 
-   export ROCPROFSYS_USE_ROCPD=ON
+   .. code-block:: shell
 
-Then run ``rocprof-sys-sample`` the same way as described above. It will generate a ``.db`` file
-with the file name like ``rocpd-2594634.db``.
+      export ROCPROFSYS_USE_ROCPD=ON
 
-View the generated file in `ROCm Optiq <https://rocm.docs.amd.com/projects/roc-optiq/en/latest/what-is-optiq.html>`_.
+2. Run ``rocprof-sys-sample`` as described above in :ref:`Option 3 <ai_nics_option_3>`. This generates a ``.db`` file, for example ``rocpd-2594634.db``.
+
+You can view the generated file in `ROCm Optiq <https://rocm.docs.amd.com/projects/roc-optiq/en/latest/what-is-optiq.html>`_.
 The AI NIC tracks look like this:
 
 .. image:: ../data/rocprof-sys-ai-nic-optiq.png
