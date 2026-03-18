@@ -1503,9 +1503,9 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
   // ─── SALU float → VALU emulation ───
   // GFX1250 has scalar float instructions; GFX9 doesn't.
   // Emulate: s_op_f32 sdst, ssrc0, ssrc1 →
-  //   v_mov_b32 v255, ssrc0
-  //   v_op_f32 v255, ssrc1, v255   (ssrc1 as inline constant or SGPR)
-  //   v_readfirstlane_b32 sdst, v255
+  //   v_mov_b32 v6, ssrc0
+  //   v_op_f32 v6, ssrc1, v6   (ssrc1 as inline constant or SGPR)
+  //   v_readfirstlane_b32 sdst, v6
   {
     static const std::unordered_map<std::string, std::string> kSaluFloatMap = {
         {"s_add_f32", "v_add_f32_e32"},
@@ -1546,12 +1546,12 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
         std::string ssrc1 = operands[2];
         std::string valu_op = salu_it->second;
 
-        // v_mov_b32 v255, ssrc0
-        result.push_back("v_mov_b32_e32 v255, " + ssrc0);
-        // v_op_f32 v255, ssrc1, v255 (ssrc1 as src0, v255 as vsrc1)
-        result.push_back(valu_op + " v255, " + ssrc1 + ", v255");
-        // v_readfirstlane_b32 sdst, v255
-        result.push_back("v_readfirstlane_b32 " + sdst + ", v255");
+        // Emulate SALU float op via VALU using v6 as temp (same temp register
+        // as v_mad_u32 and v_cmp literal emulations — brief clobber, no cross-
+        // instruction state).  v6 is within arch VGPRs for all kernels (min 12).
+        result.push_back("v_mov_b32_e32 v6, " + ssrc0);
+        result.push_back(valu_op + " v6, " + ssrc1 + ", v6");
+        result.push_back("v_readfirstlane_b32 " + sdst + ", v6");
         return result;
       }
     }
@@ -1585,8 +1585,8 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
         else if (mnemonic == "s_cvt_i32_f32") valu_mnem = "v_cvt_i32_f32_e32";
         else valu_mnem = "v_cvt_pkrtz_f16_f32";
 
-        result.push_back(valu_mnem + " v255, " + operands[1]);
-        result.push_back("v_readfirstlane_b32 " + operands[0] + ", v255");
+        result.push_back(valu_mnem + " v6, " + operands[1]);
+        result.push_back("v_readfirstlane_b32 " + operands[0] + ", v6");
         return result;
       }
     }
