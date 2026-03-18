@@ -1,5 +1,5 @@
 diff --git a/src/transport/net_ib.cc b/src/transport/net_ib.cc
-index 17ab50e8f2..661e9eaf68 100644
+index 17ab50e8f2..c6051c4729 100644
 --- a/src/transport/net_ib.cc
 +++ b/src/transport/net_ib.cc
 @@ -29,6 +29,7 @@
@@ -46,20 +46,21 @@ index 17ab50e8f2..661e9eaf68 100644
  #define NCCL_IB_SL_DEFAULT 0
  #define NCCL_IB_TC_DEFAULT 0
  
-@@ -142,6 +165,12 @@ NCCL_PARAM(IbDataDirect,"IB_DATA_DIRECT",1);
+@@ -141,6 +164,13 @@ NCCL_PARAM(IbEceEnable,"IB_ECE_ENABLE",1);
+ NCCL_PARAM(IbDataDirect,"IB_DATA_DIRECT",1);
  NCCL_PARAM(IbQpsPerConn, "IB_QPS_PER_CONNECTION", 1);
  RCCL_PARAM(IbQpsPerP2p, "IB_QPS_PER_P2P", 0);
- 
++NCCL_PARAM(IbGdrFlushDisable, "GDR_FLUSH_DISABLE", 0);
++
 +// AMD AINIC
 +RCCL_PARAM(CtsInlineData, "CTS_INLINE_DATA", -1);
 +RCCL_PARAM(CtsOffloadEnabled, "CTS_OFFLOAD_ENABLED", -1);
 +
 +extern int64_t rcclParamAinicRoce();
-+
+ 
  static ncclResult_t ncclIbStatsInit(struct ncclIbStats* stat) {
    __atomic_store_n(&stat->fatalErrorCount, 0, __ATOMIC_RELAXED);
-   return ncclSuccess;
-@@ -779,6 +808,10 @@ ncclResult_t ncclIbInit(void** ctx, uint64_t commId, ncclNetCommConfig_t* config
+@@ -779,6 +809,10 @@ ncclResult_t ncclIbInit(void** ctx, uint64_t commId, ncclNetCommConfig_t* config
    static int shownIbHcaEnv = 0;
    if(wrap_ibv_symbols() != ncclSuccess) { return ncclInternalError; }
    if(wrap_mlx5dv_symbols() != ncclSuccess) { INFO(NCCL_NET, "NET/IB : Failed to open mlx5dv symbols. Advance features like CX-8 Direct-NIC will be disabled."); }
@@ -70,14 +71,14 @@ index 17ab50e8f2..661e9eaf68 100644
  
    // Detect IB cards
    int nIbDevs = 0;
-@@ -944,6 +977,37 @@ ncclResult_t ncclIbInit(void** ctx, uint64_t commId, ncclNetCommConfig_t* config
+@@ -944,6 +978,37 @@ ncclResult_t ncclIbInit(void** ctx, uint64_t commId, ncclNetCommConfig_t* config
      INFO(NCCL_INIT|NCCL_NET, "NET/IB : Using%s %s; OOB %s:%s", line, ncclIbRelaxedOrderingEnabled ? "[RO]" : "",
            ncclIbIfName, ncclSocketToString(&ncclIbIfAddr, addrline));
  
 +    ncclIbUseInline = ncclParamIbUseInline();
 +    ncclIbGdrFlushDisable = ncclParamIbGdrFlushDisable();
 +
-+    rcclAinicRoce = (rcclUseAinic() ? true : false);
++    rcclAinicRoce = (rcclParamAinicRoce() ? true : false);
 +    if (rcclAinicRoce) {
 +      // for AINIC, these params are defaulted to enabled unless user forces it to disable(0).
 +      rcclCtsInlineData = ((rcclParamCtsInlineData() == 0) ? false : true);
@@ -108,7 +109,7 @@ index 17ab50e8f2..661e9eaf68 100644
    }
  exit:
    ibContext.trafficClass = config->trafficClass;
-@@ -1280,6 +1344,8 @@ struct ncclIbListenComm {
+@@ -1280,6 +1345,8 @@ struct ncclIbListenComm {
    struct ncclIbCommStage stage;
  };
  
@@ -117,7 +118,7 @@ index 17ab50e8f2..661e9eaf68 100644
  struct alignas(64) ncclIbSendFifo {
    uint64_t addr;
    uint64_t size;
-@@ -1290,10 +1356,21 @@ struct alignas(64) ncclIbSendFifo {
+@@ -1290,10 +1357,21 @@ struct alignas(64) ncclIbSendFifo {
    char padding[16];
  };
  
@@ -139,7 +140,7 @@ index 17ab50e8f2..661e9eaf68 100644
  };
  
  struct ncclIbRemSizesFifo {
-@@ -1340,6 +1417,7 @@ struct ncclIbSendComm {
+@@ -1340,6 +1418,7 @@ struct ncclIbSendComm {
    struct ncclIbNetCommBase base;
    // Start with fifo and ibv structs as they have alignment restrictions
    struct ncclIbSendFifo fifo[MAX_REQUESTS][NCCL_NET_IB_MAX_RECVS];
@@ -147,7 +148,7 @@ index 17ab50e8f2..661e9eaf68 100644
    struct ibv_sge sges[NCCL_NET_IB_MAX_RECVS];
    struct ibv_send_wr wrs[NCCL_NET_IB_MAX_RECVS + 1];
    // Each dev correlates to a mergedIbDev
-@@ -1355,6 +1433,7 @@ struct ncclIbSendComm {
+@@ -1355,6 +1434,7 @@ struct ncclIbSendComm {
  static_assert((sizeof(struct ncclIbNetCommBase) % 32) == 0, "ncclIbNetCommBase size must be 32-byte multiple to ensure fifo is at proper offset");
  static_assert((offsetof(struct ncclIbSendComm, fifo) % 32) == 0, "ncclIbSendComm fifo must be 32-byte aligned");
  static_assert((sizeof(struct ncclIbSendFifo) % 32) == 0, "ncclIbSendFifo element size must be 32-byte multiples");
@@ -155,7 +156,7 @@ index 17ab50e8f2..661e9eaf68 100644
  static_assert((offsetof(struct ncclIbSendComm, sges) % 32) == 0, "sges must be 32-byte aligned");
  static_assert((offsetof(struct ncclIbSendComm, wrs) % 32) == 0, "wrs must be 32-byte aligned");
  
-@@ -1369,6 +1448,7 @@ struct ncclIbGpuFlush {
+@@ -1369,6 +1449,7 @@ struct ncclIbGpuFlush {
  
  struct ncclIbRemFifo {
    struct ncclIbSendFifo elems[MAX_REQUESTS][NCCL_NET_IB_MAX_RECVS];
@@ -163,7 +164,7 @@ index 17ab50e8f2..661e9eaf68 100644
    uint64_t fifoTail;
    uint64_t addr;
    uint32_t flags;
-@@ -1424,20 +1504,59 @@ ncclResult_t ncclIbDestroyBase(struct ncclIbNetCommDevBase* base) {
+@@ -1424,20 +1505,59 @@ ncclResult_t ncclIbDestroyBase(struct ncclIbNetCommDevBase* base) {
    return ncclSuccess;
  }
  
@@ -225,7 +226,7 @@ index 17ab50e8f2..661e9eaf68 100644
    struct ibv_qp_attr qpAttr;
    memset(&qpAttr, 0, sizeof(struct ibv_qp_attr));
    qpAttr.qp_state = IBV_QPS_INIT;
-@@ -1447,6 +1566,9 @@ ncclResult_t ncclIbCreateQp(uint8_t ib_port, struct ncclIbNetCommDevBase* base,
+@@ -1447,6 +1567,9 @@ ncclResult_t ncclIbCreateQp(uint8_t ib_port, struct ncclIbNetCommDevBase* base,
    NCCLCHECK(wrap_ibv_modify_qp(qp->qp, &qpAttr, IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT | IBV_QP_ACCESS_FLAGS));
    TRACE(NCCL_NET, "NET/IB : ncclIbCreateQp port=%d dev=%d devName=%s ndevs=%d nmdevs=%d qpn=%u pkey=%u pd=%p",
      ib_port, base->ibDevN, ncclIbDevs[base->ibDevN].devName, ncclNIbDevs, ncclNMergedIbDevs, qp->qp->qp_num, qpAttr.pkey_index, base->pd);
@@ -235,7 +236,7 @@ index 17ab50e8f2..661e9eaf68 100644
    return ncclSuccess;
  }
  
-@@ -1530,16 +1652,21 @@ fail:
+@@ -1530,16 +1653,21 @@ fail:
    goto exit;
  }
  
@@ -259,7 +260,7 @@ index 17ab50e8f2..661e9eaf68 100644
    if (stage->state == ncclIbCommStateConnect)      goto ib_connect_check;
    if (stage->state == ncclIbCommStateSendDevList)  goto ib_send_dev_list;
    if (stage->state == ncclIbCommStateRecvDevList)  goto ib_recv_dev_list;
-@@ -1621,7 +1748,7 @@ ib_recv_dev_list:
+@@ -1621,7 +1749,7 @@ ib_recv_dev_list:
    for (int q = 0; q < comm->base.nqps; q++) {
      ncclIbSendCommDev* commDev = comm->devs + devIndex;
      ncclIbDev* ibDev = ncclIbDevs + commDev->base.ibDevN;
@@ -268,7 +269,7 @@ index 17ab50e8f2..661e9eaf68 100644
      comm->base.qps[q].devIndex = devIndex;
      meta.qpInfo[q].qpn      = comm->base.qps[q].qp->qp_num;
      meta.qpInfo[q].devIndex = comm->base.qps[q].devIndex;
-@@ -1646,7 +1773,11 @@ ib_recv_dev_list:
+@@ -1646,7 +1774,11 @@ ib_recv_dev_list:
      devInfo->lid           = ibDev->portAttr.lid;
      devInfo->ibv_dev_index = commDev->base.ibDevN;
      // Prepare my fifo
@@ -281,7 +282,7 @@ index 17ab50e8f2..661e9eaf68 100644
      devInfo->fifoRkey = commDev->fifoMr->rkey;
  
      // Pack local GID info
-@@ -1689,7 +1820,11 @@ ib_recv_dev_list:
+@@ -1689,7 +1821,11 @@ ib_recv_dev_list:
      }
    }
    config = (ncclNetCommConfig_t*)ctx;
@@ -294,8 +295,11 @@ index 17ab50e8f2..661e9eaf68 100644
    meta.sl = (ncclParamIbSl() != -1) ? ncclParamIbSl() : (config && config->trafficClass != NCCL_NET_TRAFFIC_CLASS_UNDEF) ? config->trafficClass : NCCL_IB_SL_DEFAULT;
    meta.tc = (ncclParamIbTc() != -1) ? ncclParamIbTc() : (config && config->trafficClass != NCCL_NET_TRAFFIC_CLASS_UNDEF) ? config->trafficClass : NCCL_IB_TC_DEFAULT;
    strncpy(meta.devName, mergedDev->devName, MAX_MERGED_DEV_NAME);
-@@ -1837,15 +1972,27 @@ ncclResult_t ncclIbCheckVProps(ncclNetVDeviceProps_t* vProps1, ncclNetVDevicePro
- NCCL_PARAM(IbGdrFlushDisable, "GDR_FLUSH_DISABLE", 0);
+@@ -1834,18 +1970,29 @@ ncclResult_t ncclIbCheckVProps(ncclNetVDeviceProps_t* vProps1, ncclNetVDevicePro
+   return ncclSuccess;
+ }
+ 
+-NCCL_PARAM(IbGdrFlushDisable, "GDR_FLUSH_DISABLE", 0);
  RCCL_PARAM(IbGdrFlushGpuMemNoRelaxedOrdering, "GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING", 1);
  
 -ncclResult_t ncclIbAccept(void* listenComm, void** recvComm, ncclNetDeviceHandle_t** /*recvDevComm*/) {
@@ -615,27 +619,27 @@ index 17ab50e8f2..661e9eaf68 100644
 +      // Send all applicable rkeys
 +      for (int j = 0; j < comm->base.vProps.ndevs; j++)
 +        localElemCtsInline[i].rkeys[j] = mhandleWrapper->mrs[j]->rkey;
-+
+ 
+-    // Send all applicable rkeys
+-    for (int j = 0; j < comm->base.vProps.ndevs; j++)
+-      localElem[i].rkeys[j] = mhandleWrapper->mrs[j]->rkey;
 +      localElemCtsInline[i].nreqs = n;
 +      localElemCtsInline[i].size = sizes[i]; // Sanity/Debugging
 +      localElemCtsInline[i].tag = tags[i];
 +      localElemCtsInline[i].idx = comm->remFifo.fifoTail+1;
 +      localElemRef = (uint64_t)localElemCtsInline;
  
--    // Send all applicable rkeys
--    for (int j = 0; j < comm->base.vProps.ndevs; j++)
--      localElem[i].rkeys[j] = mhandleWrapper->mrs[j]->rkey;
+-    localElem[i].nreqs = n;
+-    localElem[i].size = sizes[i]; // Sanity/Debugging
+-    localElem[i].tag = tags[i];
+-    localElem[i].idx = comm->remFifo.fifoTail+1;
 +    } else {
 +      localElem[i].addr = (uint64_t)data[i];
 +
 +      // Send all applicable rkeys
 +      for (int j = 0; j < comm->base.vProps.ndevs; j++)
 +        localElem[i].rkeys[j] = mhandleWrapper->mrs[j]->rkey;
- 
--    localElem[i].nreqs = n;
--    localElem[i].size = sizes[i]; // Sanity/Debugging
--    localElem[i].tag = tags[i];
--    localElem[i].idx = comm->remFifo.fifoTail+1;
++
 +      localElem[i].nreqs = n;
 +      localElem[i].size = sizes[i]; // Sanity/Debugging
 +      localElem[i].tag = tags[i];
