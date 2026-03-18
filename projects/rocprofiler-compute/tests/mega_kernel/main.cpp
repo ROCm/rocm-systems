@@ -242,11 +242,12 @@ struct TestResults {
     
     // VMEM (Vector Memory) Operations - comprehensive memory instruction tests
     int vmem_flat_passed;      // Flat load/store (flat_load_dword, flat_store_dword, etc.)
-    int vmem_global_passed;    // Global load/store (global_load_b32, etc.)
-    int vmem_buffer_passed;    // Buffer load/store (buffer_load_dword, etc.)
-    int vmem_scratch_passed;   // Scratch load/store (scratch_load_dword, etc.)
-    int vmem_lds_passed;       // LDS operations (ds_read_b32, ds_write_b32, etc.)
-    
+    int vmem_global_passed;   // Global load/store (global_load_b32, etc.)
+    int vmem_buffer_passed;   // Buffer load/store (buffer_load_dword, etc.)
+    int vmem_scratch_passed;  // Scratch load/store (scratch_load_dword, etc.)
+    int vmem_lds_passed;      // LDS operations (ds_read_b32, ds_write_b32, etc.)
+    int vmem_tex_load_passed; // Texture load (image_load / SQ_INSTS_TEX_LOAD) on Strix
+
     // Atomic Operations - comprehensive inline ASM tests
     int atomic_global_int_passed;     // global_atomic_add/sub/min/max (integer)
     int atomic_global_f32_passed;     // global_atomic_add_f32
@@ -285,7 +286,8 @@ extern "C" __global__ void _mega_kernel(
     float* async_lds_src,      // Source buffer for async LDS load test
     float* async_lds_dst,      // Destination buffer for async LDS store test
     int buffer_size,
-    int mfma_mode              // 0=both, 1=asm only, 2=builtin only
+    int mfma_mode,             // 0=both, 1=asm only, 2=builtin only
+    hipTextureObject_t tex_obj // Texture for TEX load test (Strix); 0 if not used
 );
 
 void print_separator() {
@@ -317,7 +319,8 @@ void detect_architecture(const char* arch) {
         g_arch_type = 5;  // RX 9070 XT/RDNA4
     } else if (strstr(arch, "gfx1200")) {
         g_arch_type = 4;  // RX 9060/RDNA4
-    } else if (strstr(arch, "gfx1151") || strstr(arch, "gfx1150")) {
+    } else if (strstr(arch, "gfx1152") || strstr(arch, "gfx1151") ||
+               strstr(arch, "gfx1150")) {
         g_arch_type = 7;  // Strix/Strix Halo (RDNA 3.5)
     } else if (strstr(arch, "gfx950")) {
         g_arch_type = 3;  // MI350/CDNA4
@@ -338,7 +341,7 @@ const char* get_arch_description() {
         case 4: return "RX 9060 series (RDNA4/gfx1200)";
         case 5: return "RX 9070 XT/9070 (RDNA4/gfx1201)";
         case 6: return " (/)";
-        case 7: return "Strix/Strix Halo (RDNA3.5/gfx1150,gfx1151)";
+        case 7: return "Strix/Strix Halo (RDNA3.5/gfx1150,gfx1151,gfx1152)";
         default: return "Unknown Architecture";
     }
 }
@@ -450,7 +453,24 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipMemset(d_output, 0, BUFFER_SIZE * sizeof(float)));
     HIP_CHECK(hipMemset(d_async_lds_src, 0, ASYNC_LDS_SIZE * sizeof(float)));
     HIP_CHECK(hipMemset(d_async_lds_dst, 0, ASYNC_LDS_SIZE * sizeof(float)));
-    
+
+    // Create texture object for Strix (gfx1150/1151/1152) to exercise INSTS_TEX_LOAD
+    hipTextureObject_t tex_obj = 0;
+    if (g_arch_type == 7) {
+        hipResourceDesc resDesc;
+        memset(&resDesc, 0, sizeof(resDesc));
+        resDesc.resType = hipResourceTypeLinear;
+        resDesc.res.linear.devPtr = d_input;
+        resDesc.res.linear.sizeInBytes = BUFFER_SIZE * sizeof(float);
+        resDesc.res.linear.desc = hipCreateChannelDesc(32, 0, 0, 0, hipChannelFormatKindFloat);
+        hipTextureDesc texDesc;
+        memset(&texDesc, 0, sizeof(texDesc));
+        texDesc.normalizedCoords = 0;
+        texDesc.filterMode = hipFilterModePoint;
+        texDesc.addressMode[0] = hipAddressModeClamp;
+        HIP_CHECK(hipCreateTextureObject(&tex_obj, &resDesc, &texDesc, nullptr));
+    }
+
     printf("Running GPU Mega Kernel for %s...\n", get_arch_description());
     print_separator();
     
@@ -489,9 +509,10 @@ int main(int argc, char** argv) {
         d_async_lds_src,
         d_async_lds_dst,
         BUFFER_SIZE,
-        (int)config.mfma_mode  // 0=both, 1=asm, 2=builtin
+        (int)config.mfma_mode,  // 0=both, 1=asm, 2=builtin
+        tex_obj                 // Texture for TEX load (Strix); 0 otherwise
     );
-    
+
     // Check for launch errors
     HIP_CHECK(hipGetLastError());
     
@@ -505,6 +526,10 @@ int main(int argc, char** argv) {
     float elapsed_ms;
     HIP_CHECK(hipEventElapsedTime(&elapsed_ms, start, stop));
     
+    if (tex_obj != 0) {
+        HIP_CHECK(hipDestroyTextureObject(tex_obj));
+    }
+
     // Copy results back
     HIP_CHECK(hipMemcpy(&h_results, d_results, sizeof(TestResults), hipMemcpyDeviceToHost));
     HIP_CHECK(hipMemcpy(h_output, d_output, BUFFER_SIZE * sizeof(float), hipMemcpyDeviceToHost));
@@ -616,6 +641,8 @@ int main(int argc, char** argv) {
     print_test_result("Buffer Load/Store (buffer_load_dword)", h_results.vmem_buffer_passed);
     print_test_result("Scratch Memory (scratch_load/scratch_store)", h_results.vmem_scratch_passed);
     print_test_result("LDS Operations (ds_read_b32/ds_write_b32)", h_results.vmem_lds_passed);
+    print_test_result("Texture Load (tex1Dfetch / INSTS_TEX_LOAD)",
+                      g_arch_type == 7 ? h_results.vmem_tex_load_passed : -1);
     
     printf("\n[Category: Atomic Operations - Inline ASM]\n");
     print_test_result("Global INT Atomics (global_atomic_add/sub/min/max)", h_results.atomic_global_int_passed);
@@ -698,6 +725,9 @@ int main(int argc, char** argv) {
     COUNT_TEST(h_results.vmem_buffer_passed);
     COUNT_TEST(h_results.vmem_scratch_passed);
     COUNT_TEST(h_results.vmem_lds_passed);
+    if (g_arch_type == 7) {
+        COUNT_TEST(h_results.vmem_tex_load_passed);
+    }
     COUNT_TEST(h_results.atomic_global_int_passed);
     COUNT_TEST(h_results.atomic_global_f32_passed);
     COUNT_TEST(h_results.atomic_global_f64_passed);

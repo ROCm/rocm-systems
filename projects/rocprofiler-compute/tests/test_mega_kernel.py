@@ -41,6 +41,7 @@ from ctypes import (
     c_double,
     c_float,
     c_int,
+    c_ulonglong,
     c_void_p,
     cast,
     sizeof,
@@ -133,6 +134,7 @@ class TestResults(Structure):
         ("vmem_buffer_passed", c_int),
         ("vmem_scratch_passed", c_int),
         ("vmem_lds_passed", c_int),
+        ("vmem_tex_load_passed", c_int),
         # Atomic operations (inline ASM)
         ("atomic_global_int_passed", c_int),
         ("atomic_global_f32_passed", c_int),
@@ -358,7 +360,11 @@ def run_mega_kernel_test(device_id: int = 0, batch_size: int = 1024,
     hip.hipMemcpyHtoD(d_tdm_src, byref(zeros_tdm), batch_size * sizeof(c_int))
     hip.hipMemcpyHtoD(d_tdm_dst, byref(zeros_tdm), batch_size * sizeof(c_int))
     
-    # Prepare kernel arguments
+    # Texture object for Strix (gfx1150/1151/1152) TEX load test; 0 when not used.
+    # Python/hipRTC path does not create a texture object, so pass 0 (bypass).
+    tex_obj = c_ulonglong(0)
+
+    # Prepare kernel arguments (must match _mega_kernel signature in mega_kernel.hip)
     args = [
         d_results,
         d_global_float,
@@ -368,10 +374,9 @@ def run_mega_kernel_test(device_id: int = 0, batch_size: int = 1024,
         d_output_buffer,
         d_async_lds_src,
         d_async_lds_dst,
-        d_tdm_src,
-        d_tdm_dst,
         c_int(batch_size),
         c_int(mfma_mode),
+        tex_obj,
     ]
     
     # Convert arguments to void pointers
@@ -493,6 +498,7 @@ def print_test_results(results: TestResults, arch: str):
             ("Buffer Memory (buffer_load/store)", results.vmem_buffer_passed),
             ("Scratch Memory (local variables)", results.vmem_scratch_passed),
             ("LDS Memory (ds_read/write)", results.vmem_lds_passed),
+            ("Texture Load (tex1Dfetch / INSTS_TEX_LOAD)", results.vmem_tex_load_passed),
         ]),
         ("DOT Product Operations", [
             ("DOT4 (4-element INT8 dot product)", results.dot4_passed),
@@ -626,22 +632,26 @@ def test_mega_kernel_gfx950():
 
 
 def test_mega_kernel_gfx1150():
-    """Test mega kernel on Strix/Strix Halo (RDNA 3.5, gfx1150/gfx1151)"""
+    """Test mega kernel on Strix/Strix Halo (RDNA 3.5, gfx1150/gfx1151/gfx1152)"""
     import pytest
 
     device_id = 0
     arch = hip.hipGetDeviceProperties(device_id).gcnArchName.split(":", 1)[0]
 
-    if arch not in ("gfx1150", "gfx1151"):
+    if arch not in ("gfx1150", "gfx1151", "gfx1152"):
         pytest.skip(f"Skipping Strix/RDNA3.5 test - device is {arch}")
 
     results = run_mega_kernel_test(device_id)
     print_test_results(results, arch)
 
-    # Assertions for RDNA 3.5: WMMA, warp ops, FP32, async LDS (no TDM, no FP64 atomics)
+    # Assertions for RDNA 3.5: WMMA, warp ops, FP32, async LDS
     assert results.warp_shuffle_passed > 0, "Warp shuffle test failed"
     assert results.fp32_arith_passed > 0, "FP32 arithmetic test failed"
     assert results.wmma_f16_passed > 0, "WMMA FP16 test failed"
+    # vmem_tex_load_passed: >0 when run from standalone binary (with texture);
+    # 0 when run from Python (no texture object). For INSTS_TEX_LOAD verification
+    # run the standalone mega_kernel binary on Strix.
+    assert results.vmem_tex_load_passed >= 0, "Texture load test error"
 
 
 def test_mega_kernel_current_device():
