@@ -12,7 +12,7 @@ rocprofiler-compute:
   - '!projects/*/docs/**'
 rocprofiler-sdk:
   - 'projects/rocprofiler-sdk/**'
-  - '.github/workflows/rocprofiler-systems-formatting.yml'
+  - '.github/workflows/rocprofiler-sdk-formatting.yml'
   - '!**/*.md'
   - '!**/*.rtf'
   - '!**/*.rst'
@@ -23,7 +23,6 @@ rocprofiler-sdk:
 rocprofiler-systems:
   - 'projects/rocprofiler-systems/**'
   - '.github/workflows/rocprofiler-systems-formatting.yml'
-  - '!**/*.md'
   - '!**/*.rtf'
   - '!**/*.rst'
   - '!**/.markdownlint-ci2.yaml'
