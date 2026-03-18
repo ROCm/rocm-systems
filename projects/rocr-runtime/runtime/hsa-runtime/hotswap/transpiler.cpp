@@ -496,6 +496,61 @@ static std::string WidenVccReferences(const std::string& line) {
 
 static std::vector<std::string> WidenExecOperation(const std::string& line) {
   std::vector<std::string> result;
+
+  // Handle saveexec_b32 → saveexec_b64 (b32 form doesn't exist on GFX9)
+  std::string mnemonic = line.substr(0, line.find_first_of(" \t"));
+  if (mnemonic.find("saveexec_b32") != std::string::npos) {
+    // Parse: s_and_saveexec_b32 sN, src → s_and_saveexec_b64 s[N:N+1], src
+    // Replace _b32 with _b64 in the mnemonic
+    std::string b64_mnem = mnemonic;
+    size_t b32_pos = b64_mnem.find("_b32");
+    b64_mnem.replace(b32_pos, 4, "_b64");
+    // Also translate GFX12 _not1_ to GFX9 _n2_
+    size_t not1_pos = b64_mnem.find("_not1_");
+    if (not1_pos != std::string::npos) {
+      b64_mnem.replace(not1_pos, 6, "n2_");
+    }
+
+    // Parse operands
+    std::string ops_part = line.substr(line.find_first_of(" \t"));
+    size_t op_start = ops_part.find_first_not_of(" \t");
+    if (op_start != std::string::npos) {
+      std::string ops = ops_part.substr(op_start);
+      // First operand is the destination SGPR (sN) — expand to pair s[N:N+1]
+      size_t comma = ops.find(',');
+      if (comma != std::string::npos) {
+        std::string dst = ops.substr(0, comma);
+        // Trim whitespace
+        size_t ds = dst.find_first_not_of(" \t");
+        size_t de = dst.find_last_not_of(" \t");
+        dst = dst.substr(ds, de - ds + 1);
+        std::string src = ops.substr(comma + 1);
+        size_t ss = src.find_first_not_of(" \t");
+        src = src.substr(ss);
+
+        // Expand sN → s[N:N+1]
+        if (dst[0] == 's' && std::isdigit(dst[1])) {
+          int reg_num = std::stoi(dst.substr(1));
+          dst = "s[" + std::to_string(reg_num) + ":" +
+                std::to_string(reg_num + 1) + "]";
+        }
+        // Widen vcc_lo → vcc in source
+        size_t vcc_pos = src.find("vcc_lo");
+        if (vcc_pos != std::string::npos) {
+          src.replace(vcc_pos, 6, "vcc");
+        }
+
+        result.push_back(b64_mnem + " " + dst + ", " + src);
+        result.push_back("s_mov_b32 exec_hi, 0");
+        return result;
+      }
+    }
+    // Fallback: just fix mnemonic
+    result.push_back(b64_mnem + ops_part);
+    result.push_back("s_mov_b32 exec_hi, 0");
+    return result;
+  }
+
   result.push_back(line);  // Keep original operation on exec_lo
 
   if (WritesExecLo(line)) {
@@ -741,6 +796,12 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
   // Fix s_cbranch_execz: replace hardcoded offset with .L_exit label
   if (mnemonic == "s_cbranch_execz") {
     result.push_back("s_cbranch_execz .L_exit");
+    return result;
+  }
+
+  // s_code_end → s_nop 0 (GFX12 padding, not available on GFX9)
+  if (mnemonic == "s_code_end") {
+    result.push_back("s_nop 0");
     return result;
   }
 
