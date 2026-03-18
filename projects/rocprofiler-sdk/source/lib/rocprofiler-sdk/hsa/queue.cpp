@@ -45,7 +45,11 @@
 #include <hsa/hsa_ext_amd.h>
 
 #include <atomic>
+#include <chrono>
 #include <memory>
+#include <mutex>
+#include <string_view>
+#include <unordered_set>
 
 // static assert for rocprofiler_packet ABI compatibility
 static_assert(sizeof(hsa_ext_amd_aql_pm4_packet_t) == sizeof(hsa_kernel_dispatch_packet_t),
@@ -218,6 +222,7 @@ WriteInterceptor(const void* packets,
     // unique sequence id for the dispatch
     static auto sequence_counter = std::atomic<rocprofiler_dispatch_id_t>{0};
 
+    // Helper: creates a BARRIER_AND packet with optional dep/completion signals.
     auto&& CreateBarrierPacket = [](hsa_signal_t*                    dependency_signal,
                                     hsa_signal_t*                    completion_signal,
                                     std::vector<rocprofiler_packet>& _packets) {
@@ -446,6 +451,10 @@ WriteInterceptor(const void* packets,
         {
             for(const auto& pkt : pkt_injection.first->after_krn_pkt)
             {
+                ROCP_WARNING << fmt::format(
+                    "[ATT_STOP_PKT] injecting after_krn_pkt dispatch_id={} pkt_header={:#x}",
+                    dispatch_id,
+                    pkt.header);
                 transformed_packets.emplace_back(pkt);
                 injected_end_pkt = true;
             }
@@ -460,6 +469,11 @@ WriteInterceptor(const void* packets,
             completion_signal                                            = interrupt_signal;
             transformed_packets.back().ext_amd_aql_pm4.completion_signal = interrupt_signal;
             CreateBarrierPacket(&interrupt_signal, &interrupt_signal, transformed_packets);
+
+            ROCP_WARNING << fmt::format(
+                "[ATT_STOP_PKT] set stop packet completion_signal={} barrier inserted dispatch_id={}",
+                interrupt_signal.handle,
+                dispatch_id);
         }
         else
         {
@@ -506,7 +520,97 @@ WriteInterceptor(const void* packets,
 
     writer(transformed_packets.data(), transformed_packets.size());
 }
+
+template <typename WaitFn>
+void
+submit_profiling_activation_packet(const AgentCache&         agent,
+                                   const hsa_queue_t*        intercept_queue,
+                                   const Queue&              queue_obj,
+                                   const CoreApiTable&       core_api,
+                                   hsa::rocprofiler_packet   pkt,
+                                   WaitFn&&                  wait_fn,
+                                   std::string_view          wait_label)
+{
+    hsa_signal_t completion{};
+    queue_obj.create_signal(0, &completion);
+    pkt.ext_amd_aql_pm4.completion_signal = completion;
+
+    ROCP_WARNING << fmt::format(
+        "[ATT_QUEUE_ACTIVATE] begin agent={} queue={} completion_signal={} pkt_header={} "
+        "wait_mode={}",
+        agent.get_hsa_agent().handle,
+        (intercept_queue) ? intercept_queue->id : uint64_t{0},
+        completion.handle,
+        pkt.ext_amd_aql_pm4.header,
+        wait_label);
+
+    counters::submitPacket(const_cast<hsa_queue_t*>(intercept_queue), &pkt);
+
+    ROCP_WARNING << fmt::format(
+        "[ATT_QUEUE_ACTIVATE] submitted agent={} queue={} completion_signal={}",
+        agent.get_hsa_agent().handle,
+        (intercept_queue) ? intercept_queue->id : uint64_t{0},
+        completion.handle);
+
+    constexpr auto timeout_hint =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::seconds{1});
+
+    hsa_signal_value_t val = 1;
+    for(int attempt = 0; attempt < 3; ++attempt)
+    {
+        val = wait_fn(completion, timeout_hint.count());
+
+        ROCP_WARNING << fmt::format(
+            "[ATT_QUEUE_ACTIVATE] wait attempt={} agent={} queue={} completion_signal={} value={}",
+            attempt + 1,
+            agent.get_hsa_agent().handle,
+            (intercept_queue) ? intercept_queue->id : uint64_t{0},
+            completion.handle,
+            val);
+
+        if(val == 0)
+        {
+            core_api.hsa_signal_destroy_fn(completion);
+            ROCP_WARNING << fmt::format(
+                "[ATT_QUEUE_ACTIVATE] success agent={} queue={} completion_signal={}",
+                agent.get_hsa_agent().handle,
+                (intercept_queue) ? intercept_queue->id : uint64_t{0},
+                completion.handle);
+            return;
+        }
+    }
+
+    ROCP_FATAL << fmt::format(
+        "Could not set agent to be profiled - Signal Value: {} [agent={}, queue={}, "
+        "completion_signal={}, wait_mode={}]",
+        val,
+        agent.get_hsa_agent().handle,
+        (intercept_queue) ? intercept_queue->id : uint64_t{0},
+        completion.handle,
+        wait_label);
+}
 }  // namespace
+
+
+namespace
+{
+// Per-agent ATT profiling activation guard.
+// set_profiler_active_on_queue must only be called ONCE per agent for the lifetime
+// of the process. Calling it again while a kernel is in-flight resets the ATT
+// hardware state, causing the GPU to write trace data to an invalid address
+// (GPU memory access fault). This set tracks which agent handles have already
+// been activated so subsequent Queue constructions on the same agent skip the
+// call safely.
+std::mutex                     s_att_activated_mutex;
+std::unordered_set<uint64_t>   s_att_activated_agents;
+
+bool
+att_activation_needed(uint64_t agent_handle)
+{
+    std::lock_guard<std::mutex> lock(s_att_activated_mutex);
+    return s_att_activated_agents.insert(agent_handle).second;  // true = first time
+}
+}  // namespace (att guard)
 
 Queue::Queue(const AgentCache& agent, CoreApiTable table)
 : _core_api(table)
@@ -552,31 +656,38 @@ Queue::Queue(const AgentCache&  agent,
         CHECK(_agent.cpu_pool().handle != 0);
         CHECK(_agent.get_hsa_agent().handle != 0);
 
-        // Set state of the queue to allow profiling
-        aql::set_profiler_active_on_queue(
-            _agent.cpu_pool(), _agent.get_hsa_agent(), [&](hsa::rocprofiler_packet pkt) {
-                hsa_signal_t completion;
-                create_signal(0, &completion);
-                pkt.ext_amd_aql_pm4.completion_signal = completion;
-                counters::submitPacket(_intercept_queue, &pkt);
-                constexpr auto timeout_hint =
-                    std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::seconds{1});
-                hsa_signal_value_t val;
-                for(int i = 0; i < 3; i++)
-                {
-                    val = core_api.hsa_signal_wait_scacquire_fn(completion,
-                                                                HSA_SIGNAL_CONDITION_EQ,
-                                                                0,
-                                                                timeout_hint.count(),
-                                                                HSA_WAIT_STATE_ACTIVE);
-                    if(val == 0)
-                    {
-                        core_api.hsa_signal_destroy_fn(completion);
-                        return;
-                    }
-                }
-                ROCP_FATAL << "Could not set agent to be profiled - Signal Value: " << val;
-            });
+        // Set state of the queue to allow ATT profiling.
+        // Guard: only activate once per agent. Re-activating while a kernel is
+        // in-flight resets ATT hardware and causes a GPU memory access fault.
+        if(att_activation_needed(_agent.get_hsa_agent().handle))
+        {
+            ROCP_WARNING << fmt::format("[ATT_ACTIVATE] agent={} queue={} (first activation)",
+                                        _agent.get_hsa_agent().handle,
+                                        (_intercept_queue ? _intercept_queue->id : 0UL));
+            aql::set_profiler_active_on_queue(
+                _agent.cpu_pool(), _agent.get_hsa_agent(), [&](hsa::rocprofiler_packet pkt) {
+                    submit_profiling_activation_packet(
+                        _agent,
+                        _intercept_queue,
+                        *this,
+                        core_api,
+                        pkt,
+                        [&](hsa_signal_t signal, uint64_t timeout_ns) {
+                            return core_api.hsa_signal_wait_scacquire_fn(signal,
+                                                                         HSA_SIGNAL_CONDITION_EQ,
+                                                                         0,
+                                                                         timeout_ns,
+                                                                         HSA_WAIT_STATE_ACTIVE);
+                        },
+                        "scacquire");
+                });
+        }
+        else
+        {
+            ROCP_WARNING << fmt::format("[ATT_ACTIVATE] agent={} queue={} (skipped, already activated)",
+                                        _agent.get_hsa_agent().handle,
+                                        (_intercept_queue ? _intercept_queue->id : 0UL));
+        }
     }
 
     ROCP_HSA_TABLE_CALL(
@@ -611,25 +722,37 @@ Queue::Queue(
         CHECK(_agent.cpu_pool().handle != 0);
         CHECK(_agent.get_hsa_agent().handle != 0);
 
-        // Set state of the queue to allow profiling
-        aql::set_profiler_active_on_queue(
-            _agent.cpu_pool(), _agent.get_hsa_agent(), [&](hsa::rocprofiler_packet pkt) {
-                hsa_signal_t completion;
-                create_signal(0, &completion);
-                pkt.ext_amd_aql_pm4.completion_signal = completion;
-                counters::submitPacket(_intercept_queue, &pkt);
-                constexpr auto timeout_hint =
-                    std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::seconds{1});
-                if(core_api.hsa_signal_wait_relaxed_fn(completion,
-                                                       HSA_SIGNAL_CONDITION_EQ,
-                                                       0,
-                                                       timeout_hint.count(),
-                                                       HSA_WAIT_STATE_ACTIVE) != 0)
-                {
-                    ROCP_FATAL << "Could not set agent to be profiled";
-                }
-                core_api.hsa_signal_destroy_fn(completion);
-            });
+        // Set state of the queue to allow ATT profiling.
+        // Guard: only activate once per agent (see scacquire path above).
+        if(att_activation_needed(_agent.get_hsa_agent().handle))
+        {
+            ROCP_WARNING << fmt::format("[ATT_ACTIVATE] agent={} queue={} (first activation, relaxed)",
+                                        _agent.get_hsa_agent().handle,
+                                        (_intercept_queue ? _intercept_queue->id : 0UL));
+            aql::set_profiler_active_on_queue(
+                _agent.cpu_pool(), _agent.get_hsa_agent(), [&](hsa::rocprofiler_packet pkt) {
+                    submit_profiling_activation_packet(
+                        _agent,
+                        _intercept_queue,
+                        *this,
+                        core_api,
+                        pkt,
+                        [&](hsa_signal_t signal, uint64_t timeout_ns) {
+                            return core_api.hsa_signal_wait_relaxed_fn(signal,
+                                                                       HSA_SIGNAL_CONDITION_EQ,
+                                                                       0,
+                                                                       timeout_ns,
+                                                                       HSA_WAIT_STATE_ACTIVE);
+                        },
+                        "relaxed");
+                });
+        }
+        else
+        {
+            ROCP_WARNING << fmt::format("[ATT_ACTIVATE] agent={} queue={} (skipped, already activated)",
+                                        _agent.get_hsa_agent().handle,
+                                        (_intercept_queue ? _intercept_queue->id : 0UL));
+        }
     }
 
     set_write_interceptor(WriteInterceptor, this);

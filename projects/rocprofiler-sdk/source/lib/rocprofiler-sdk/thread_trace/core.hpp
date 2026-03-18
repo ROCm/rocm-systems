@@ -35,6 +35,7 @@
 #include <rocprofiler-sdk/cxx/operators.hpp>
 
 #include <atomic>
+#include <condition_variable>   // FIX: needed for trace_idle_cv
 #include <cstdint>
 #include <map>
 #include <memory>
@@ -118,6 +119,19 @@ private:
     hsa_queue_t*     queue{nullptr};
     std::atomic<int> active_traces{0};
     std::mutex       trace_resources_mut{};
+
+    // FIX: condition variable used by get_control(bStart=true) to wait until
+    // active_traces == 0 before starting a new ATT trace session.
+    //
+    // Root cause: ATT is a single hardware resource per agent. Without this guard,
+    // multiple HIP streams (queues) can each call get_control(true) concurrently,
+    // incrementing active_traces to N > 1 and causing all N dispatches to write
+    // simultaneously into the same 256MB trace buffer → buffer overflow → GPU fault.
+    //
+    // Fix: get_control(true) blocks here until the previous trace completes and
+    // iterate_data() calls notify_all(), ensuring at most one active ATT trace
+    // at any time per agent.
+    std::condition_variable trace_idle_cv{};
 
     std::unique_ptr<hsa::TraceControlAQLPacket>           control_packet{nullptr};
     std::unique_ptr<code_object::CodeobjCallbackRegistry> codeobj_reg{nullptr};

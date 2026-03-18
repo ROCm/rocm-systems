@@ -21,10 +21,18 @@
 // THE SOFTWARE.
 
 #include "lib/rocprofiler-sdk/hsa/aql_packet.hpp"
-#include <fmt/core.h>
-#include <cstdlib>
-#include <iostream>
+
 #include "lib/common/logging.hpp"
+
+#include <fmt/core.h>
+
+#include <cassert>
+#include <cstdint>
+#include <cstdlib>
+#include <cstring>
+#include <iostream>
+#include <unordered_map>
+#include <mutex>
 
 #define CHECK_HSA(fn, message)                                                                     \
     if((fn) != HSA_STATUS_SUCCESS)                                                                 \
@@ -40,6 +48,12 @@ namespace hsa
 constexpr uint16_t VENDOR_BIT  = HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE;
 constexpr uint16_t BARRIER_BIT = 1 << HSA_PACKET_HEADER_BARRIER;
 
+// FIX #2: Track original (pre-alignment) GPU allocation pointers so Free()
+// can release the correct address back to the HSA allocator.
+// Aligned ptr -> original ptr
+static std::unordered_map<void*, void*> s_gpu_aligned_to_orig;
+static std::mutex                       s_gpu_ptr_mutex;
+
 hsa_status_t
 CounterAQLPacket::CounterMemoryPool::Alloc(void** ptr, size_t size, desc_t flags, void* data)
 {
@@ -48,6 +62,7 @@ CounterAQLPacket::CounterMemoryPool::Alloc(void** ptr, size_t size, desc_t flags
         if(ptr != nullptr) *ptr = nullptr;
         return HSA_STATUS_SUCCESS;
     }
+
     if(!data) return HSA_STATUS_ERROR;
     auto& pool = *reinterpret_cast<CounterAQLPacket::CounterMemoryPool*>(data);
 
@@ -146,41 +161,157 @@ CounterAQLPacket::CounterAQLPacket(aqlprofile_agent_handle_t                  ag
 hsa_status_t
 TraceMemoryPool::Alloc(void** ptr, size_t size, desc_t flags, void* data)
 {
+    if(ptr == nullptr) return HSA_STATUS_ERROR;
+
+    if(size == 0)
+    {
+        *ptr = nullptr;
+        return HSA_STATUS_SUCCESS;
+    }
+
     if(!data) return HSA_STATUS_ERROR;
     auto& pool = *reinterpret_cast<TraceMemoryPool*>(data);
 
     if(!pool.allocate_fn || !pool.free_fn || !pool.allow_access_fn) return HSA_STATUS_ERROR;
 
     hsa_status_t status = HSA_STATUS_ERROR;
+
+    ROCP_WARNING << "[ATT_ALLOC] begin"
+                 << " host_access=" << flags.host_access
+                 << " size=" << size
+                 << " gpu_agent=" << pool.gpu_agent.handle;
+
     if(flags.host_access)
     {
         status = pool.allocate_fn(pool.cpu_pool_, size, hsa_amd_memory_pool_executable_flag, ptr);
 
+        ROCP_WARNING << "[ATT_ALLOC] cpu_pool allocate"
+                     << " status=" << status
+                     << " ptr_before_align=" << ((ptr && *ptr) ? *ptr : nullptr)
+                     << " size=" << size
+                     << " gpu_agent=" << pool.gpu_agent.handle;
+
         if(status == HSA_STATUS_SUCCESS)
+        {
             status = pool.allow_access_fn(1, &pool.gpu_agent, nullptr, *ptr);
+
+            ROCP_WARNING << "[ATT_ALLOC] cpu_pool allow_access"
+                         << " status=" << status
+                         << " ptr=" << *ptr
+                         << " gpu_agent=" << pool.gpu_agent.handle;
+        }
+
+        if(status != HSA_STATUS_SUCCESS)
+        {
+            ROCP_WARNING << "[ATT_ALLOC] cpu_pool failure"
+                         << " status=" << status
+                         << " ptr=" << ((ptr && *ptr) ? *ptr : nullptr);
+
+            if(ptr && *ptr && pool.free_fn) pool.free_fn(*ptr);
+            return status;
+        }
     }
     else
     {
-        // Return page aligned data to avoid cache flush overlap
+        // Allocate extra space for alignment padding
+        const size_t alloc_size = size + 0x2000;
+        void*        raw_ptr    = nullptr;
+
         status = pool.allocate_fn(
-            pool.gpu_pool_, size + 0x2000, hsa_amd_memory_pool_executable_flag, ptr);
-        *ptr = (void*) ((uintptr_t(*ptr) + 0xFFF) & ~0xFFFul);  // NOLINT(performance-no-int-to-ptr)
+            pool.gpu_pool_, alloc_size, hsa_amd_memory_pool_executable_flag, &raw_ptr);
+
+        ROCP_WARNING << "[ATT_ALLOC] gpu_pool allocate"
+                     << " status=" << status
+                     << " ptr_before_align=" << raw_ptr
+                     << " size=" << size
+                     << " alloc_size=" << alloc_size
+                     << " gpu_agent=" << pool.gpu_agent.handle;
+
+        if(status == HSA_STATUS_SUCCESS)
+        {
+            status = pool.allow_access_fn(1, &pool.gpu_agent, nullptr, raw_ptr);
+
+            ROCP_WARNING << "[ATT_ALLOC] gpu_pool allow_access"
+                         << " status=" << status
+                         << " ptr_before_align=" << raw_ptr
+                         << " gpu_agent=" << pool.gpu_agent.handle;
+        }
+
+        if(status != HSA_STATUS_SUCCESS)
+        {
+            ROCP_WARNING << "[ATT_ALLOC] gpu_pool failure"
+                         << " status=" << status
+                         << " ptr_before_align=" << raw_ptr;
+
+            if(raw_ptr && pool.free_fn) pool.free_fn(raw_ptr);
+            return status;
+        }
+
+        // Align to 4KB boundary
+        auto aligned_ptr =
+            reinterpret_cast<void*>((reinterpret_cast<uintptr_t>(raw_ptr) + 0xFFF) & ~0xFFFul);
+
+        ROCP_WARNING << "[ATT_ALLOC] gpu_pool aligned"
+                     << " ptr_before_align=" << raw_ptr
+                     << " ptr_after_align=" << aligned_ptr
+                     << " gpu_agent=" << pool.gpu_agent.handle;
+
+        // FIX #2: Record mapping from aligned ptr -> original raw ptr
+        // so that Free() can release the correct address.
+        {
+            std::lock_guard<std::mutex> lock(s_gpu_ptr_mutex);
+            s_gpu_aligned_to_orig[aligned_ptr] = raw_ptr;
+        }
+
+        *ptr = aligned_ptr;
     }
-    return status;
+
+    ROCP_WARNING << "[ATT_ALLOC] success"
+                 << " host_access=" << flags.host_access
+                 << " final_ptr=" << *ptr
+                 << " size=" << size
+                 << " gpu_agent=" << pool.gpu_agent.handle;
+
+    return HSA_STATUS_SUCCESS;
 }
 
 void
 TraceMemoryPool::Free(void* ptr, void* data)
 {
+    if(ptr == nullptr) return;
+
     assert(data);
     auto& pool = *reinterpret_cast<TraceMemoryPool*>(data);
 
-    if(pool.free_fn) pool.free_fn(ptr);
+    // FIX #2: If this was an aligned GPU pointer, free the original raw pointer instead.
+    void* free_ptr = ptr;
+    {
+        std::lock_guard<std::mutex> lock(s_gpu_ptr_mutex);
+        auto it = s_gpu_aligned_to_orig.find(ptr);
+        if(it != s_gpu_aligned_to_orig.end())
+        {
+            free_ptr = it->second;
+            s_gpu_aligned_to_orig.erase(it);
+            ROCP_WARNING << "[ATT_ALLOC] free (aligned->orig)"
+                         << " aligned_ptr=" << ptr
+                         << " orig_ptr=" << free_ptr
+                         << " gpu_agent=" << pool.gpu_agent.handle;
+        }
+        else
+        {
+            ROCP_WARNING << "[ATT_ALLOC] free"
+                         << " ptr=" << ptr
+                         << " gpu_agent=" << pool.gpu_agent.handle;
+        }
+    }
+
+    if(pool.free_fn) pool.free_fn(free_ptr);
 }
 
 hsa_status_t
 TraceMemoryPool::Copy(void* dst, const void* src, size_t size, void* data)
 {
+    if(size == 0) return HSA_STATUS_SUCCESS;
     if(!data) return HSA_STATUS_ERROR;
     auto& pool = *reinterpret_cast<TraceMemoryPool*>(data);
 
@@ -193,6 +324,18 @@ TraceControlAQLPacket::TraceControlAQLPacket(const TraceMemoryPool&          _tr
                                              const aqlprofile_att_profile_t& p)
 : tracepool(std::make_shared<TraceMemoryPool>(_tracepool))
 {
+    ROCP_WARNING << "[ATT_CTRL_CREATE] begin"
+                 << " gpu_agent=" << tracepool->gpu_agent.handle
+                 << " cpu_pool=" << tracepool->cpu_pool_.handle
+                 << " gpu_pool=" << tracepool->gpu_pool_.handle;
+
+    // FIX #1: Zero-initialize packets before passing to aqlprofile.
+    // Without this, aqlprofile may read garbage from the struct and embed
+    // those values into GPU-side control structures. When the GPU later
+    // executes and tries to write to a completion signal at one of those
+    // garbage addresses, it triggers a memory access fault.
+    memset(&packets, 0, sizeof(packets));
+
     auto status = aqlprofile_att_create_packets(&tracepool->handle,
                                                 &packets,
                                                 p,
@@ -200,8 +343,18 @@ TraceControlAQLPacket::TraceControlAQLPacket(const TraceMemoryPool&          _tr
                                                 &TraceMemoryPool::Free,
                                                 &TraceMemoryPool::Copy,
                                                 tracepool.get());
+
+    ROCP_WARNING << "[ATT_CTRL_CREATE] created"
+                 << " status=" << status
+                 << " gpu_agent=" << tracepool->gpu_agent.handle
+                 << " start_header=" << packets.start_packet.header
+                 << " stop_header=" << packets.stop_packet.header
+                 << " start_completion=" << packets.start_packet.completion_signal.handle
+                 << " stop_completion=" << packets.stop_packet.completion_signal.handle;
+
     CHECK_HSA(status, "failed to create ATT packet");
 
+    // Normalize header and completion signal regardless of what aqlprofile wrote.
     packets.start_packet.header            = VENDOR_BIT | BARRIER_BIT;
     packets.stop_packet.header             = VENDOR_BIT | BARRIER_BIT;
     packets.start_packet.completion_signal = hsa_signal_t{.handle = 0};
@@ -209,6 +362,13 @@ TraceControlAQLPacket::TraceControlAQLPacket(const TraceMemoryPool&          _tr
     this->empty                            = false;
 
     clear();
+
+    ROCP_WARNING << "[ATT_CTRL_CREATE] finalized"
+                 << " gpu_agent=" << tracepool->gpu_agent.handle
+                 << " start_header=" << packets.start_packet.header
+                 << " stop_header=" << packets.stop_packet.header
+                 << " start_completion=" << packets.start_packet.completion_signal.handle
+                 << " stop_completion=" << packets.stop_packet.completion_signal.handle;
 };
 
 CodeobjMarkerAQLPacket::CodeobjMarkerAQLPacket(const TraceMemoryPool& _tracepool,
@@ -219,6 +379,15 @@ CodeobjMarkerAQLPacket::CodeobjMarkerAQLPacket(const TraceMemoryPool& _tracepool
                                                bool                   bIsUnload)
 : tracepool(_tracepool)
 {
+    ROCP_WARNING << "[ATT_CODEOBJ_MARKER] begin"
+                 << " id=" << id
+                 << " addr=0x" << std::hex << addr
+                 << " size=0x" << size
+                 << std::dec
+                 << " fromStart=" << bFromStart
+                 << " isUnload=" << bIsUnload
+                 << " gpu_agent=" << tracepool.gpu_agent.handle;
+
     aqlprofile_att_codeobj_data_t codeobj{};
     codeobj.id        = id;
     codeobj.addr      = addr;
@@ -227,12 +396,23 @@ CodeobjMarkerAQLPacket::CodeobjMarkerAQLPacket(const TraceMemoryPool& _tracepool
     codeobj.isUnload  = bIsUnload;
     codeobj.fromStart = bFromStart;
 
+    // FIX #1: Zero-initialize packet before passing to aqlprofile (same reason as above).
+    memset(&packet, 0, sizeof(packet));
+
     auto status = aqlprofile_att_codeobj_marker(&packet,
                                                 &tracepool.handle,
                                                 codeobj,
                                                 &TraceMemoryPool::Alloc,
                                                 &TraceMemoryPool::Free,
                                                 &tracepool);
+
+    ROCP_WARNING << "[ATT_CODEOBJ_MARKER] created"
+                 << " status=" << status
+                 << " id=" << id
+                 << " gpu_agent=" << tracepool.gpu_agent.handle
+                 << " packet_header=" << packet.header
+                 << " completion_signal=" << packet.completion_signal.handle;
+
     CHECK_HSA(status, "failed to create ATT marker");
 
     packet.header            = HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE;
@@ -240,6 +420,12 @@ CodeobjMarkerAQLPacket::CodeobjMarkerAQLPacket(const TraceMemoryPool& _tracepool
     this->empty              = false;
 
     clear();
+
+    ROCP_WARNING << "[ATT_CODEOBJ_MARKER] finalized"
+                 << " id=" << id
+                 << " gpu_agent=" << tracepool.gpu_agent.handle
+                 << " packet_header=" << packet.header
+                 << " completion_signal=" << packet.completion_signal.handle;
 }
 
 }  // namespace hsa

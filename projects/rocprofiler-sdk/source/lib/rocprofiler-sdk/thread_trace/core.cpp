@@ -36,6 +36,7 @@
 #include <hsa/hsa_api_trace.h>
 
 #include <atomic>
+#include <condition_variable>
 #include <cstdint>
 #include <mutex>
 #include <stdexcept>
@@ -215,16 +216,43 @@ ThreadTracerQueue::~ThreadTracerQueue()
 /**
  * Callback we get from HSA interceptor when a kernel packet is being enqueued.
  * We return an AQLPacket containing the start/stop/read packets for injection.
+ *
+ * FIX: ATT is a single hardware resource per agent. Allowing multiple concurrent
+ * ATT traces on the same agent causes the shared 256MB trace buffer to overflow,
+ * resulting in a GPU memory access fault ~40 seconds after the first dispatch.
+ *
+ * The fix adds a condition variable that blocks get_control(bStart=true) until
+ * active_traces reaches 0, enforcing one-at-a-time ATT tracing per agent.
+ * This is the cross-queue serialization that the HSA profiler_serializer only
+ * partially provides (it serializes within an agent's queues but doesn't block
+ * new kernel dispatches from starting a new ATT session while one is active).
  */
 std::unique_ptr<hsa::TraceControlAQLPacket>
 ThreadTracerQueue::get_control(bool bStart)
 {
     std::unique_lock<std::mutex> lk(trace_resources_mut);
 
+    if(bStart)
+    {
+        // Wait until no ATT trace is active on this agent before starting a new one.
+        // Without this guard, parallel HIP streams can each start an ATT trace
+        // simultaneously, all writing to the same 256MB buffer → overflow → GPU fault.
+        trace_idle_cv.wait(lk, [this] {
+            return active_traces.load(std::memory_order_acquire) == 0;
+        });
+
+        ROCP_WARNING << "[ATT_GET_CONTROL] agent=" << agent_id.handle
+                     << " starting trace, active_traces was 0, now incrementing";
+    }
+
     auto active_resources = std::make_unique<hsa::TraceControlAQLPacket>(*control_packet);
     active_resources->clear();
 
-    if(bStart) active_traces.fetch_add(1);
+    if(bStart) active_traces.fetch_add(1, std::memory_order_release);
+
+    ROCP_WARNING << "[ATT_GET_CONTROL] agent=" << agent_id.handle
+                 << " bStart=" << bStart
+                 << " active_traces=" << active_traces.load();
 
     return active_resources;
 }
@@ -247,13 +275,22 @@ ThreadTracerQueue::iterate_data(aqlprofile_handle_t handle, rocprofiler_user_dat
     cb_dt.cb_fn    = params.shader_cb_fn;
     cb_dt.userdata = &data;
 
+    ROCP_WARNING << "[ATT_ITERATE] begin agent=" << agent_id.handle
+                 << " active_traces=" << active_traces.load();
+
     auto status = aqlprofile_att_iterate_data(handle, thread_trace_callback, &cb_dt);
     if(status == HSA_STATUS_ERROR_OUT_OF_RESOURCES)
-        ROCP_WARNING << "Thread trace buffer full!";
+        ROCP_WARNING << "[ATT_ITERATE] buffer full! agent=" << agent_id.handle;
     else
         CHECK_HSA(status, "Failed to iterate ATT data");
 
-    active_traces.fetch_sub(1);
+    // Decrement active_traces and notify any waiting get_control(bStart=true) calls
+    // that a slot is now available for the next ATT trace.
+    active_traces.fetch_sub(1, std::memory_order_release);
+    trace_idle_cv.notify_all();
+
+    ROCP_WARNING << "[ATT_ITERATE] done agent=" << agent_id.handle
+                 << " active_traces=" << active_traces.load();
 }
 
 void
@@ -352,6 +389,11 @@ DispatchThreadTracer::pre_kernel_call(const hsa::Queue&              queue,
     if(control_flags == ROCPROFILER_THREAD_TRACE_CONTROL_NONE)
         return {nullptr, parameters.bSerialize};
 
+    ROCP_WARNING << "[ATT_PRE_KERNEL] dispatch_id=" << dispatch_id
+                 << " agent=" << agent.agent_id.handle
+                 << " (will block in get_control if trace active)";
+
+    // get_control(true) will block until active_traces == 0
     auto packet = agent.get_control(true);
     post_move_data.fetch_add(1);
     packet->populate_before();

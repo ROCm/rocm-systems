@@ -252,6 +252,15 @@ class TraceMemoryManager : public MemoryManager {
   int GetSimdMask() const { return simd_mask; }
   bool isDoubleBuffer() const { return !extra_cmd_buffers.empty() && !extra_output_buffers.empty(); }
 
+  // Allocate HSA CPU-accessible buffer for use as hsa_memory_copy destination
+  std::unique_ptr<void, MemoryDeleter> AllocCpuBuffer(size_t size) {
+    aqlprofile_buffer_desc_flags_t flags{};
+    flags.host_access = true;
+    flags.device_access = true;
+    flags.memory_hint = AQLPROFILE_MEMORY_HINT_HOST;
+    return AllocMemory(size, flags);
+  }
+
   pm4_builder::TraceConfig config{};
   std::atomic<size_t> buffer_swaps{0};
 

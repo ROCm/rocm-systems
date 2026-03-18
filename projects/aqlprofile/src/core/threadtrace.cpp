@@ -98,6 +98,9 @@ hsa_status_t _internal_aqlprofile_att_iterate_data(aqlprofile_handle_t handle,
     // written by hardware. The index is incremented by size of 32 bytes.
     size_t wptr_mask = sqttbuilder->GetWritePtrMask();
     size_t sample_size = (control_ptr[se_index].wptr & wptr_mask) * sqttbuilder->GetWritePtrBlk();
+    fprintf(stderr, "[ATT_DBG] se=%zu wptr=0x%x wptr_mask=0x%zx sample_size=%zu capacity=%zu sample_ptr=%p\n",
+      se_index, control_ptr[se_index].wptr, wptr_mask, sample_size,
+      memorymgr->config.GetCapacity(se_index), sample_ptr);
 
     if (pm4_factory->GetGpuId() == aql_profile::GFX11_GPU_ID) {
       sample_size = sample_size - reinterpret_cast<uint64_t>(sample_ptr);
@@ -124,7 +127,14 @@ hsa_status_t _internal_aqlprofile_att_iterate_data(aqlprofile_handle_t handle,
   }
 
   constexpr size_t gfx9_header_size = sizeof(rocprof_trace_decoder_gfx9_header_t);
-  std::vector<size_t> cpu_sample(max_sample_size / sizeof(size_t) + gfx9_header_size, 0);
+  // FIX: hsa_memory_copy requires HSA-accessible memory for both src and dst.
+  // std::vector allocates from regular heap which is NOT HSA-registered,
+  // causing GPU memory access fault when used as copy destination.
+  const size_t cpu_sample_bytes = max_sample_size + gfx9_header_size * sizeof(size_t);
+  auto cpu_sample_mem = memorymgr->AllocCpuBuffer(cpu_sample_bytes);
+  memset(cpu_sample_mem.get(), 0, cpu_sample_bytes);
+  // Keep cpu_sample as a compatibility alias
+  void* cpu_sample_base = cpu_sample_mem.get();
 
   // The samples sizes are returned in the control buffer
   for (uint64_t se_index = 0; se_index < se_number_total; se_index++) {
@@ -135,16 +145,20 @@ hsa_status_t _internal_aqlprofile_att_iterate_data(aqlprofile_handle_t handle,
     size_t sample_size = sample_sizes.at(se_index);
     size_t sample_size_plus_header = sample_size;
 
-    char* sample_data_ptr = (char*)cpu_sample.data();
+    char* sample_data_ptr = (char*)cpu_sample_base;
     if (pm4_factory->GetGpuId() < aql_profile::GFX10_GPU_ID) {
-      auto* header = reinterpret_cast<rocprof_trace_decoder_gfx9_header_t*>(cpu_sample.data());
+      auto* header = reinterpret_cast<rocprof_trace_decoder_gfx9_header_t*>(cpu_sample_base);
       *header = getHeaderPacket(se_index, target_cu, memorymgr->GetSimdMask(), pm4_factory->GetGpuId(), false);
       sample_data_ptr += gfx9_header_size;
       sample_size_plus_header = sample_size + gfx9_header_size;
     }
 
+    fprintf(stderr, "[ATT_DBG2] before CopyMemory se=%lu dst=%p src=%p size=%zu\n", se_index, (void*)sample_data_ptr, sample_ptr, sample_size);
     memorymgr->CopyMemory((void*)sample_data_ptr, sample_ptr, sample_size);
-    callback(se_index, (void*)cpu_sample.data(), sample_size_plus_header, userdata);
+    fprintf(stderr, "[ATT_DBG2] after CopyMemory se=%lu\n", se_index);
+    fprintf(stderr, "[ATT_DBG2] before callback se=%lu size=%zu\n", se_index, sample_size_plus_header);
+    callback(se_index, cpu_sample_base, sample_size_plus_header, userdata);
+    fprintf(stderr, "[ATT_DBG2] after callback se=%lu\n", se_index);
   }
 
   // Reset swaps for next thread trace start
