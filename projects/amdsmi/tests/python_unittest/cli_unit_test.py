@@ -20,14 +20,15 @@
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 import argparse
-import locale
 import json
+import locale
+import multiprocessing
 import os
 import select
+import shutil
 import stat
 import sys
 import time
-import shutil
 
 import unittest
 
@@ -237,6 +238,86 @@ class TestAmdSmiCli(unittest.TestCase):
             if fail_on_results:
                 self.fail(f'Fail:\n\n{msg}')
         return
+
+    def _get_monitor_metric_data(self, monitor1, monitor2, metric):
+        data = []
+        for i in range(len(monitor1)):
+            data.append({
+                'power_usage':None,
+                'hotspot_temperature':None,
+                'memory_temperature':None,
+                'gfx_clk':None,
+                'gfx':None,
+                'mem':None,
+                'vram_used':None,
+                'vram_total':None,
+            })
+            for key in data[i]:
+                if isinstance(monitor1[i][key], str) and monitor1[i][key] == 'N/A':
+                    unit = 'N/A'
+                    data1 = 0
+                    data2 = 0
+                else:
+                    unit = monitor1[i][key]['unit']
+                    if key == 'vram_used' or key == 'vram_total':
+                        # Monitor data reported in GB, Metric data in GB
+                        # Convert GB to MB for comparison
+                        unit = monitor1[i][key]['unit'] = 'MB'
+                        data1 = int(monitor1[i][key]['value'] * 1000)
+                    else:
+                        data1 = int(monitor1[i][key]['value'])
+                    if monitor2 != None:
+                        if key == 'vram_used' or key == 'vram_total':
+                            data2 = int(monitor2[i][key]['value'] * 1000)
+                        else:
+                            data2 = int(monitor2[i][key]['value'])
+                    else:
+                        if key == 'power_usage':
+                            data2 = metric['gpu_data'][i]['power']['socket_power']['value']
+                        elif key == 'hotspot_temperature':
+                            data2 = metric['gpu_data'][i]['temperature']['hotspot']['value']
+                        elif key == 'memory_temperature':
+                            data2 = metric['gpu_data'][i]['temperature']['mem']['value']
+                        elif key == 'gfx_clk':
+                            data2 = metric['gpu_data'][i]['clock']['gfx_0']['clk']['value']
+                        elif key == 'gfx':
+                            data2 = metric['gpu_data'][i]['usage']['gfx_activity']['value']
+                        elif key == 'mem':
+                            data2 = metric['gpu_data'][i]['usage']['mm_activity']['value']
+                        elif key == 'vram_used':
+                            data2 = int(metric['gpu_data'][i]['mem_usage']['used_vram']['value'])
+                        elif key == 'vram_total':
+                            data2 = int(metric['gpu_data'][i]['mem_usage']['total_vram']['value'])
+                data[i][key] =[data1, data2, abs(data1-data2), unit]
+        return data
+
+    def _compare_monitor_metric_data(self, component, data):
+        failures = []
+        for i in range(len(data)):
+            msg_title = f'Monitor to {component}: gpu={i}'
+            msg_header = f'{"key":>20s} ({"Unit":>4s}): {"Monitor":>8s} {component:>8s}  {"Diff":>8s}   {"Threshold":>8s} {"Status":>7s}'
+            self.common.print(f'Compare {msg_title}')
+            self.common.print(msg_header)
+            for key in data[i]:
+                if data[i][key][3] == 'N/A':
+                    continue
+                max_diff = max(data[i][key][0], data[i][key][1])
+                max_diff = max(data[i][key][0], data[i][key][1]) * 0.1
+                if data[i][key][2] > max_diff:
+                    status = 'Failure'
+                    compare = '>'
+                    _msg = f'Failure: {_msg}'
+                else:
+                    status = 'Success'
+                    compare = '<'
+                _msg = f'{key:>20s} ({data[i][key][3]:>4s}): {data[i][key][0]:>8d} {data[i][key][1]:>8d} ({data[i][key][2]:>8d} {compare} {max_diff:>8.2f}) {status:>7s}'
+                self.common.print(_msg)
+                if status == 'Failure':
+                    cmd = msg_title
+                    if len(failures) == 0:
+                        failures.append(('*'*len(cmd), msg_header))
+                    failures.append((cmd, _msg))
+        return failures
 
     def FindArgs(self, cmd, match_str):
         if (
@@ -901,7 +982,7 @@ class TestAmdSmiCli(unittest.TestCase):
             os.remove(self.tmp_filename)
         if os.path.exists(self.tmp_folder):
             shutil.rmtree(self.tmp_folder)
-        print(f"Teardown triggered | Cleaned up file: {self.tmp_filename} and folder: {self.tmp_folder}")
+        self.common.print(f"Teardown triggered | Cleaned up file: {self.tmp_filename} and folder: {self.tmp_folder}")
 
     def test_help(self):
         self.common.print_func_name('')
@@ -1390,6 +1471,110 @@ class TestAmdSmiCli(unittest.TestCase):
         self.RunCmds(cmds)
         return
 
+    def test_monitor_serial(self):
+        self.common.print_func_name("")
+        msg = f"{self.tab}### amd-smi monitor"
+        self.common.print(msg)
+
+        cmd = 'amd-smi monitor --json'
+        (rc, data1, std_err) = self.util.RunCmdSync(cmd)
+        (rc, data2, std_err) = self.util.RunCmdSync(cmd)
+        cmd = 'amd-smi metric --json'
+        (rc, data3, std_err) = self.util.RunCmdSync(cmd)
+        monitor1 = json.loads(data1)
+        monitor2 = json.loads(data2)
+        metric3 = json.loads(data3)
+
+        data = self._get_monitor_metric_data(monitor1, monitor2, None)
+        monitor_fails = self._compare_monitor_metric_data("Monitor", data)
+
+        data = self._get_monitor_metric_data(monitor2, None, metric3)
+        metric_fails = self._compare_monitor_metric_data("Metric", data)
+
+        failures = monitor_fails + metric_fails
+        if len(failures) > 0:
+            self._PrintResults(failures, fail_on_results=True)
+        return
+
+    def test_monitor_parallel(self):
+        self.common.print_func_name("")
+        msg = f"{self.tab}### amd-smi monitor"
+        self.common.print(msg)
+
+        def _Process(q):
+            # Receive timestamp
+            time_stamp = q.get()
+
+            cmd = 'amd-smi monitor --json'
+            (rc, data, std_err) = self.util.RunCmdSync(cmd)
+            time_stamp2 = time.monotonic()
+            q.put(data)
+            q.put(time_stamp2)
+
+            print(f"_Process pid={os.getpid()} received: {time_stamp}")
+            #print(f"Difference: {time_stamp2 - time_stamp} seconds")
+            return
+        
+        q = multiprocessing.Queue()
+
+        # Monitor to Monitor
+        p1 = multiprocessing.Process(target=_Process, args=(q,))
+        p1.start()
+        # Send time_stamp
+        time_stamp = time.monotonic() 
+        #print(f"Producer pid={os.getpid()}  sending: {time_stamp}")
+        q.put(time_stamp)
+
+        # Get monitor data
+        cmd = 'amd-smi monitor --json'
+        (rc, data1, std_err) = self.util.RunCmdSync(cmd)
+        time_stamp = time.monotonic() 
+
+        # Receive process data and time_stamp
+        data2 = q.get()
+        time_stamp_process = q.get()
+        p1.join()
+        self.common.print(f"Collection TimeStamp: Monitor2={time_stamp_process}  Monitor1={time_stamp}")
+        self.common.print(f"          Difference: {abs(time_stamp_process - time_stamp)} seconds")
+
+        data2 = _Run_cmd_in_process(cmd)
+
+        monitor1 = json.loads(data1)
+        monitor2 = json.loads(data2)
+        data = self._get_monitor_metric_data(monitor1, monitor2, None)
+        monitor_fails = self._compare_monitor_metric_data("Monitor", data)
+
+        # Monitor to Metric
+        p1 = multiprocessing.Process(target=_Process, args=(q,))
+        p1.start()
+        # Send time_stamp
+        time_stamp = time.monotonic() 
+        #print(f"Producer pid={os.getpid()}  sending: {time_stamp}")
+        q.put(time_stamp)
+
+        # Get metric data
+        cmd = 'amd-smi metric --json'
+        (rc, data1, std_err) = self.util.RunCmdSync(cmd)
+        time_stamp = time.monotonic() 
+
+        # Receive process data and time_stamp
+        data2 = q.get()
+        time_stamp_process = q.get()
+        p1.join()
+        self.common.print(f"Collection TimeStamp: Monitor={time_stamp_process}  Metric={time_stamp}")
+        self.common.print(f"          Difference: {abs(time_stamp_process - time_stamp)} seconds")
+
+        monitor = json.loads(data2)
+        metric3 = json.loads(data1)
+        data = self._get_monitor_metric_data(monitor, None, metric3)
+        metric_fails = self._compare_monitor_metric_data("Metric", data)
+
+        # Report failures
+        failures = monitor_fails + metric_fails
+        if len(failures) > 0:
+            self._PrintResults(failures, fail_on_results=True)
+        return
+
     def test_xgmi(self):
         self.common.print_func_name("")
         msg = f"{self.tab}### amd-smi xgmi"
@@ -1504,3 +1689,4 @@ if __name__ == '__main__':
     sys.argv[1:] = remaining
     unittest.main()
     sys.exit(0)
+
