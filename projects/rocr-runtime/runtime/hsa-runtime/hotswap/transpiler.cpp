@@ -778,6 +778,24 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
 
   std::string mnemonic = ExtractMnemonic(line);
 
+  // ─── Early mnemonic fixups (before any handlers) ───
+  // GFX12 _nc_ (no-carry) VALU variants → remove _nc_
+  if (mnemonic.find("_nc_") != std::string::npos && mnemonic[0] == 'v') {
+    std::string fixed = mnemonic;
+    size_t nc_pos = fixed.find("_nc_");
+    fixed.replace(nc_pos, 4, "_");
+    line = ReplaceMnemonic(line, mnemonic, fixed);
+    mnemonic = fixed;
+  }
+  // GFX12 s_and_not1/s_or_not1 → s_andn2/s_orn2 (scalar bitwise rename)
+  if (mnemonic.find("_not1_") != std::string::npos && mnemonic[0] == 's') {
+    std::string fixed = mnemonic;
+    size_t not1_pos = fixed.find("_not1_");
+    fixed.replace(not1_pos, 6, "n2_");
+    line = ReplaceMnemonic(line, mnemonic, fixed);
+    mnemonic = fixed;
+  }
+
   // ─── Wait counter translation ───
   if (IsWaitInstruction(mnemonic)) {
     result.push_back(TranslateWaitInstruction(line));
@@ -947,9 +965,10 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
     auto [ap, a0, a1] = parseRange(ops, pos);
     auto [bp, b0, b1] = parseRange(ops, pos);
     if (d0 >= 0 && a0 >= 0 && b0 >= 0) {
-      result.push_back("v_add_co_u32_e32 " + fmt(dp,d0) +
+      // Use _e64 form to avoid constant bus restrictions (multiple SGPRs)
+      result.push_back("v_add_co_u32_e64 " + fmt(dp,d0) +
                         ", vcc, " + fmt(ap,a0) + ", " + fmt(bp,b0));
-      result.push_back("v_addc_co_u32_e32 " + fmt(dp,d1) +
+      result.push_back("v_addc_co_u32_e64 " + fmt(dp,d1) +
                         ", vcc, " + fmt(ap,a1) + ", " + fmt(bp,b1) + ", vcc");
       return result;
     }
