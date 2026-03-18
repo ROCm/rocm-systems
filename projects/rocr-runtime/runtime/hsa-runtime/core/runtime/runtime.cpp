@@ -52,6 +52,9 @@
 #define debug_warning(__VA_ARGS__)
 #endif
 
+#include <random>
+#include <cinttypes>
+
 #include "core/inc/runtime.h"
 #include "core/inc/hsa_table_interface.h"
 
@@ -1381,8 +1384,10 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
   if (agent->device_type() == Agent::kAmdGpuDevice) {
     AMD::GpuAgent* agent_ = reinterpret_cast<AMD::GpuAgent*>(agent);
 
-    srand(static_cast<uint32_t>(std::chrono::high_resolution_clock::now().time_since_epoch().count()));
-    handle->handle[7] = rand();
+    unsigned seed = std::chrono::high_resolution_clock::now().time_since_epoch().count();
+    std::mt19937 gen(seed);
+    std::uniform_int_distribution<int> distr(1, 1<<15);
+    handle->handle[7] = distr(gen);
 
     HsaExternalHandleDesc desc;
     desc.device_handle = agent_->libThunkDev();
