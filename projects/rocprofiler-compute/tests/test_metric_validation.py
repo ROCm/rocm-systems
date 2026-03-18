@@ -29,6 +29,7 @@ import test_utils
 
 config = {}
 config["memcopy"] = ["tests/memcopy"]
+config["vcopy"] = ["tests/vcopy", "-n", "1048576", "-b", "256", "-i", "3"]
 config["cleanup"] = True
 
 soc = test_utils.gpu_soc()
@@ -76,7 +77,122 @@ VALIDATE_METRICS = {
         # Collect roofline block
         "profile_options": ["-d", "2-1001", "-b", "4"],
         "roof": True,
-    }
+    },
+    "vcopy": {
+        "MI200": [
+            {
+                "name": "VALU Active Threads",
+                "metric_id": "2.1.13",
+                "csv_file": "2.1_System_Speed-of-Light.csv",
+                "column": "Max",
+                "expected_value_range": [0, 64.0],
+            },
+            {
+                "name": "Workgroup Manager Utilization",
+                "metric_id": "6.1.2",
+                "csv_file": "6.1_Workgroup_manager_utilizations.csv",
+                "column": "Max",
+                "expected_value_range": [0, 100],
+            },
+            {
+                "name": "Shader Engine Utilization",
+                "metric_id": "6.1.3",
+                "csv_file": "6.1_Workgroup_manager_utilizations.csv",
+                "column": "Max",
+                "expected_value_range": [0, 100],
+            },
+            {
+                "name": "Data Stall",
+                "metric_id": "15.1.2",
+                "csv_file": "15.1_Busy_and_stall_metrics.csv",
+                "column": "Max",
+                "expected_value_range": [0, 100],
+            },
+            {
+                "name": "Data-Return Busy",
+                "metric_id": "15.4.0",
+                "csv_file": "15.4_Vector_L1_data-return_path_or_Texture_Data_(TD).csv",
+                "column": "Max",
+                "expected_value_range": [0, 100],
+            },
+        ],
+        "MI300": [
+            {
+                "name": "VALU Active Threads",
+                "metric_id": "2.1.14",
+                "csv_file": "2.1_System_Speed-of-Light.csv",
+                "column": "Max",
+                "expected_value_range": [0, 64.0],
+            },
+            {
+                "name": "Workgroup Manager Utilization",
+                "metric_id": "6.1.2",
+                "csv_file": "6.1_Workgroup_manager_utilizations.csv",
+                "column": "Max",
+                "expected_value_range": [0, 100],
+            },
+            {
+                "name": "Shader Engine Utilization",
+                "metric_id": "6.1.3",
+                "csv_file": "6.1_Workgroup_manager_utilizations.csv",
+                "column": "Max",
+                "expected_value_range": [0, 100],
+            },
+            {
+                "name": "Data Stall",
+                "metric_id": "15.1.2",
+                "csv_file": "15.1_Busy_and_stall_metrics.csv",
+                "column": "Max",
+                "expected_value_range": [0, 100],
+            },
+            {
+                "name": "Data-Return Busy",
+                "metric_id": "15.4.0",
+                "csv_file": "15.4_Vector_L1_data-return_path_or_Texture_Data_(TD).csv",
+                "column": "Max",
+                "expected_value_range": [0, 100],
+            },
+        ],
+        "MI350": [
+            {
+                "name": "VALU Active Threads",
+                "metric_id": "2.1.15",
+                "csv_file": "2.1_System_Speed-of-Light.csv",
+                "column": "Max",
+                "expected_value_range": [0, 64.0],
+            },
+            {
+                "name": "Workgroup Manager Utilization",
+                "metric_id": "6.1.4",
+                "csv_file": "6.1_Workgroup_manager_utilizations.csv",
+                "column": "Max",
+                "expected_value_range": [0, 100],
+            },
+            {
+                "name": "Shader Engine Utilization",
+                "metric_id": "6.1.5",
+                "csv_file": "6.1_Workgroup_manager_utilizations.csv",
+                "column": "Max",
+                "expected_value_range": [0, 100],
+            },
+            {
+                "name": "Data Stall",
+                "metric_id": "15.1.2",
+                "csv_file": "15.1_Busy_and_stall_metrics.csv",
+                "column": "Max",
+                "expected_value_range": [0, 100],
+            },
+            {
+                "name": "Data-Return Busy",
+                "metric_id": "15.4.0",
+                "csv_file": "15.4_Vector_L1_data-return_path_or_Texture_Data_(TD).csv",
+                "column": "Max",
+                "expected_value_range": [0, 100],
+            },
+        ],
+        "profile_options": ["-b", "2", "6", "15"],
+        "num_kernels": 3,
+    },
 }
 
 
@@ -101,6 +217,7 @@ def test_validate_metrics(
         try:
             # Ensure non zero length of profile df
             options = VALIDATE_METRICS[workload].get("profile_options", [])
+            num_kernels = VALIDATE_METRICS[workload].get("num_kernels", 1)
             _ = binary_handler_profile_rocprof_compute(
                 config,
                 profile_workload_dir,
@@ -110,7 +227,7 @@ def test_validate_metrics(
                 app_name=workload,
             )
             _ = test_utils.check_csv_files(
-                profile_workload_dir, num_devices=1, num_kernels=1
+                profile_workload_dir, num_devices=1, num_kernels=num_kernels
             )
 
             # Check whether metric values are correct
@@ -128,21 +245,37 @@ def test_validate_metrics(
             assert code == 0
 
             for metric in metrics:
-                actual = pd.read_csv(f"{analysis_workload_dir}/{metric['csv_file']}")[
-                    metric["column"]
-                ].values[0]
-                expected_values = metric["expected_values"]
-                # 5% tolerance in checking - assert if actual matches any expected value
-                matches = [
-                    abs(actual - expected) / expected <= 0.05
-                    for expected in expected_values
-                ]
-                diffs = [(abs(actual - exp) / exp * 100) for exp in expected_values]
-                assert any(matches), (
-                    f"{metric['name']} ({metric['metric_id']}): "
-                    f"actual={actual}, expected_values={expected_values}, "
-                    f"diffs={diffs} (tolerance: 5%)"
+                csv_df = pd.read_csv(f"{analysis_workload_dir}/{metric['csv_file']}")
+                row = csv_df[csv_df["Metric"] == metric["name"]]
+                assert not row.empty, (
+                    f"Metric '{metric['name']}' not found in {metric['csv_file']}"
                 )
+                actual = row[metric["column"]].values[0]
+                if "expected_value_range" in metric:
+                    lo, hi = metric["expected_value_range"]
+                    assert lo <= actual <= hi, (
+                        f"{metric['name']} ({metric['metric_id']}): "
+                        f"actual={actual}, expected_value_range=[{lo}, {hi}]"
+                    )
+                elif "expected_values" in metric:
+                    expected_values = metric["expected_values"]
+                    # 5% tolerance in checking - assert if actual matches
+                    # any expected value
+                    matches = [
+                        abs(actual - expected) / expected <= 0.05
+                        for expected in expected_values
+                    ]
+                    diffs = [(abs(actual - exp) / exp * 100) for exp in expected_values]
+                    assert any(matches), (
+                        f"{metric['name']} ({metric['metric_id']}): "
+                        f"actual={actual}, expected_values={expected_values}, "
+                        f"diffs={diffs} (tolerance: 5%)"
+                    )
+                else:
+                    raise ValueError(
+                        f"Metric '{metric['name']}' must have either "
+                        "'expected_value_range' or 'expected_values'"
+                    )
         finally:
             test_utils.clean_output_dir(config["cleanup"], analysis_workload_dir)
             test_utils.clean_output_dir(config["cleanup"], profile_workload_dir)
