@@ -2,4 +2,3 @@ Diagnostics:
   UnusedIncludes: Strict
   # ClangTidy checks come from .clang-tidy (single source of truth)
   # see a list of checks here: https://clang.llvm.org/extra/clang-tidy/checks/list.html
-
