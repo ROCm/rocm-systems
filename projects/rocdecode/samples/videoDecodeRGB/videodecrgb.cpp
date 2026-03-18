@@ -182,6 +182,7 @@ int main(int argc, char **argv) {
     int current_frame_index = 0;
     hipStream_t hip_stream_dec = 0;
     hipStream_t hip_stream_csc = 0;
+    uint32_t num_decoded_frames = 0;  // default value is 0, meaning decode the entire stream
 
     // Parse command-line arguments
     if(argc <= 1) {
@@ -268,6 +269,13 @@ int main(int argc, char **argv) {
             disp_delay = atoi(argv[i]);
             continue;
         }
+        if (!strcmp(argv[i], "-f")) {
+            if (++i == argc) {
+                ShowHelpAndExit("-d");
+            }
+            num_decoded_frames = atoi(argv[i]);
+            continue;
+        }
         ShowHelpAndExit(argv[i]);
     }
 
@@ -349,6 +357,9 @@ int main(int argc, char **argv) {
             }
 
             n_frame += n_frames_returned;
+            if (num_decoded_frames && num_decoded_frames <= n_frame) {
+                break;
+            }
         } while (n_video_bytes);
 
         {
