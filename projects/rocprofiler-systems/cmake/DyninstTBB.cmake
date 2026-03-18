@@ -1,5 +1,8 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
+
 # =====================================================================================
-# ThreadingBuildingBlocks.cmake
+# DyninstTBB.cmake
 #
 # Configure Intel's Threading Building Blocks for Dyninst
 #
@@ -88,6 +91,17 @@ if(TBB_FOUND)
     set(TBB_LIBRARY_DIRS ${TBB_LIBRARY_DIRS} CACHE PATH "TBB library directory" FORCE)
     set(TBB_DEFINITIONS ${TBB_DEFINITIONS} CACHE STRING "TBB compiler definitions" FORCE)
     set(TBB_LIBRARIES ${TBB_LIBRARIES} CACHE FILEPATH "TBB library files" FORCE)
+
+    # Update TBB_ROOT_DIR to the found location for Dyninst
+    if(TBB_DIR)
+        get_filename_component(_tbb_root "${TBB_DIR}/../../.." ABSOLUTE)
+        set(TBB_ROOT_DIR "${_tbb_root}" CACHE PATH "TBB root directory" FORCE)
+    elseif(TBB_INCLUDE_DIRS)
+        # Fallback: derive from include directory
+        get_filename_component(_tbb_root "${TBB_INCLUDE_DIRS}" DIRECTORY)
+        set(TBB_ROOT_DIR "${_tbb_root}" CACHE PATH "TBB root directory" FORCE)
+    endif()
+    set(TBB_ROOT ${TBB_ROOT_DIR})
 elseif(STERILE_BUILD)
     rocprofiler_systems_message(
         FATAL_ERROR "TBB not found and cannot be downloaded because build is sterile."

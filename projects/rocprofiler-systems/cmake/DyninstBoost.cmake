@@ -1,5 +1,8 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
+
 # ========================================================================================================
-# Boost.cmake
+# DyninstBoost.cmake
 #
 # Configure Boost for Dyninst
 #
@@ -175,6 +178,28 @@ if(Boost_FOUND AND NOT ROCPROFSYS_BUILD_BOOST)
         FORCE
     )
     set(Boost_INCLUDE_DIR ${Boost_INCLUDE_DIR} CACHE PATH "Boost include directory" FORCE)
+
+    # Update Boost_ROOT_DIR to the found location for Dyninst
+    # If Boost_DIR is set by find_package, use its parent directories
+    if(Boost_DIR)
+        get_filename_component(_boost_root "${Boost_DIR}/../../.." ABSOLUTE)
+        set(Boost_ROOT_DIR
+            "${_boost_root}"
+            CACHE PATH
+            "Base directory the of Boost installation"
+            FORCE
+        )
+    elseif(Boost_INCLUDE_DIRS)
+        # Fallback: derive from include directory
+        get_filename_component(_boost_root "${Boost_INCLUDE_DIRS}" DIRECTORY)
+        set(Boost_ROOT_DIR
+            "${_boost_root}"
+            CACHE PATH
+            "Base directory the of Boost installation"
+            FORCE
+        )
+    endif()
+    set(BOOST_ROOT ${Boost_ROOT_DIR})
 elseif(NOT Boost_FOUND AND STERILE_BUILD)
     rocprofiler_systems_message(
         FATAL_ERROR "Boost not found and cannot be downloaded because build is sterile."
@@ -433,5 +458,11 @@ rocprofiler_systems_message(STATUS "Boost thread library: ${Boost_THREAD_LIBRARY
 rocprofiler_systems_message(STATUS "Boost libraries: ${Boost_LIBRARIES}")
 
 # Just the headers (effectively a simplified Boost::headers target)
-add_library(Dyninst::Boost_headers INTERFACE IMPORTED)
-target_include_directories(Dyninst::Boost_headers SYSTEM INTERFACE ${Boost_INCLUDE_DIRS})
+if(NOT TARGET Dyninst::Boost_headers)
+    add_library(Dyninst::Boost_headers INTERFACE IMPORTED)
+    target_include_directories(
+        Dyninst::Boost_headers
+        SYSTEM
+        INTERFACE ${Boost_INCLUDE_DIRS}
+    )
+endif()
