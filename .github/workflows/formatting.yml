@@ -1,4 +1,4 @@
-name: "Pre-Commit Formatting"
+name: "rocm-systems Formatting"
 on:
   pull_request:
 

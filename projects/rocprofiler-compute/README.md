@@ -1,5 +1,5 @@
 # ROCm Compute Profiler
-# Test
+
 ## General
 
 ROCm Compute Profiler is a system performance profiling tool for machine
