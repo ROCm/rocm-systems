@@ -242,6 +242,10 @@ static const MnemonicMapping kVALURenames[] = {
     {"v_minmax_num_f32", "v_minmax_f32"},
     {"v_maxmin_num_f16", "v_maxmin_f16"},
     {"v_minmax_num_f16", "v_minmax_f16"},
+    {"v_add_nc_u32", "v_add_u32"},
+    {"v_sub_nc_u32", "v_sub_u32"},
+    {"v_add_nc_i32", "v_add_i32"},
+    {"v_sub_nc_i32", "v_sub_i32"},
 };
 
 // Global atomic renames (GFX12 adds _u32/_i32/_b32 suffix)
@@ -1333,11 +1337,44 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
     emitRedistribute(acc.first, mfma_acc, dst_w64);
 
     // Step 6: Execute MFMA
-    result.push_back(mfma_mnem + " " +
-                      regRange(mfma_dst, dst_w64) + ", " +
-                      regRange(mfma_srcA, src_w64) + ", " +
-                      regRange(mfma_srcB, src_w64) + ", " +
-                      regRange(mfma_acc, dst_w64));
+    // Check if target supports this MFMA shape directly.
+    // gfx942 doesn't have v_mfma_f32_16x16x32_f16 — decompose into 2× 16x16x16.
+    bool need_decompose = false;
+    std::string actual_mfma = mfma_mnem;
+    if (target_cpu.find("gfx942") != std::string::npos ||
+        target_cpu.find("gfx940") != std::string::npos ||
+        target_cpu.find("gfx941") != std::string::npos) {
+      if (mfma_mnem == "v_mfma_f32_16x16x32_f16" ||
+          mfma_mnem == "v_mfma_f32_16x16x32bf16") {
+        need_decompose = true;
+        actual_mfma = (mfma_mnem.find("bf16") != std::string::npos)
+                    ? "v_mfma_f32_16x16x16bf16_1k"
+                    : "v_mfma_f32_16x16x16_f16";
+      }
+    }
+
+    if (need_decompose) {
+      // Decompose K=32 into 2× K=16:
+      //   MFMA1: acc += srcA[0:src_w64/2-1] * srcB[0:src_w64/2-1]
+      //   MFMA2: acc += srcA[src_w64/2:src_w64-1] * srcB[src_w64/2:src_w64-1]
+      int half_src = src_w64 / 2;  // 16x16x16 uses half the source regs
+      result.push_back(actual_mfma + " " +
+                        regRange(mfma_dst, dst_w64) + ", " +
+                        regRange(mfma_srcA, half_src) + ", " +
+                        regRange(mfma_srcB, half_src) + ", " +
+                        regRange(mfma_acc, dst_w64));
+      result.push_back(actual_mfma + " " +
+                        regRange(mfma_dst, dst_w64) + ", " +
+                        regRange(mfma_srcA + half_src, half_src) + ", " +
+                        regRange(mfma_srcB + half_src, half_src) + ", " +
+                        regRange(mfma_dst, dst_w64));
+    } else {
+      result.push_back(mfma_mnem + " " +
+                        regRange(mfma_dst, dst_w64) + ", " +
+                        regRange(mfma_srcA, src_w64) + ", " +
+                        regRange(mfma_srcB, src_w64) + ", " +
+                        regRange(mfma_acc, dst_w64));
+    }
 
     // Step 7: Collect MFMA results back to dst_w32 VGPRs in lower 32 lanes
     // MFMA lane 2L has lower half, lane 2L+1 has upper half.
@@ -1506,23 +1543,70 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
   // ─── Operand syntax translation (cache modifiers, etc.) ───
   line = TranslateOperandSyntax(line, mnemonic);
 
-  // ─── v_cmpx _e64 → add explicit exec destination for wave64 ───
-  // GFX12: v_cmpx_*_e64 src0, src1 (exec written implicitly)
-  // GFX9:  v_cmpx_*_e64 exec, src0, src1 (exec is explicit dst)
+  // ─── v_cmpx _e64 → VOPC form for wave64 ───
   if (mnemonic.find("v_cmpx_") == 0 && mnemonic.find("_e64") != std::string::npos) {
-    // Emit VOPC form only (no _e64, no explicit exec dest)
     std::string base_mnem = mnemonic.substr(0, mnemonic.find("_e64"));
     size_t op_start = line.find(mnemonic) + mnemonic.size();
     std::string ops = line.substr(op_start);
     size_t s = ops.find_first_not_of(" \t");
     if (s != std::string::npos) ops = ops.substr(s);
-    // Emit VOPC v_cmpx (no shift after — shift is in v_mad_u32)
     result.push_back(base_mnem + " " + ops);
     return result;
   }
 
-  // ─── VCC width translation (vcc_lo → vcc for wave64) ───
-  line = WidenVccReferences(line);
+  // ─── v_cmp _e64 with SGPR dest → expand to SGPR pair for wave64 ───
+  // GFX12 wave32: v_cmp_*_e64 s0, src0, src1 (32-bit result)
+  // GFX9 wave64: v_cmp_*_e64 s[0:1], src0, src1 (64-bit result)
+  if (mnemonic.find("v_cmp_") == 0 && mnemonic.find("_e64") != std::string::npos) {
+    size_t op_start = line.find(mnemonic) + mnemonic.size();
+    std::string ops = line.substr(op_start);
+    size_t s_pos = ops.find_first_not_of(" \t");
+    if (s_pos != std::string::npos) {
+      std::string trimmed = ops.substr(s_pos);
+      // If first operand is a single SGPR (sN), expand to s[N:N+1]
+      if (trimmed[0] == 's' && std::isdigit(trimmed[1])) {
+        size_t comma = trimmed.find(',');
+        if (comma != std::string::npos) {
+          std::string dst = trimmed.substr(0, comma);
+          size_t de = dst.find_last_not_of(" \t");
+          dst = dst.substr(0, de + 1);
+          int reg_num = std::stoi(dst.substr(1));
+          int even = reg_num & ~1;
+          std::string pair = "s[" + std::to_string(even) + ":" +
+                            std::to_string(even + 1) + "]";
+          std::string rest = trimmed.substr(comma);
+          line = mnemonic + " " + pair + rest;
+        }
+      }
+    }
+  }
+
+  // ─── VCC width translation ───
+  // For b32 scalar ops, vcc needs to stay as vcc_lo.
+  // For b64 ops and VOPC, widen vcc_lo → vcc.
+  bool is_b32_scalar = (mnemonic.find("_b32") != std::string::npos &&
+                        mnemonic[0] == 's');
+  if (!is_b32_scalar) {
+    line = WidenVccReferences(line);
+  }
+  // Also narrow bare "vcc" to "vcc_lo" in b32 scalar ops
+  if (is_b32_scalar) {
+    size_t mnem_end = line.find_first_of(" \t");
+    if (mnem_end != std::string::npos) {
+      std::string ops_part = line.substr(mnem_end);
+      size_t pos = 0;
+      while ((pos = ops_part.find("vcc", pos)) != std::string::npos) {
+        // Check it's bare "vcc" not "vcc_lo" or "vcc_hi"
+        size_t end = pos + 3;
+        if (end < ops_part.size() && ops_part[end] == '_') {
+          pos = end; continue;
+        }
+        ops_part.replace(pos, 3, "vcc_lo");
+        pos += 6;
+      }
+      line = line.substr(0, mnem_end) + ops_part;
+    }
+  }
 
   // ─── EXEC width adaptation (wave32 → wave64) ───
   auto exec_result = WidenExecOperation(line);
