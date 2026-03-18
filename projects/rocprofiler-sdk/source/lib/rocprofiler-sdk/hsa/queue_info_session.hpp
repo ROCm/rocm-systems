@@ -49,7 +49,7 @@ class Queue;
 struct queue_info_session
 {
     using context_t              = context::context;
-    using user_data_map_t        = std::unordered_map<const context_t*, rocprofiler_user_data_t>;
+    using user_data_map_t        = tracing::external_correlation_id_map_t;
     using external_corr_id_map_t = user_data_map_t;
     using callback_record_t      = rocprofiler_callback_tracing_kernel_dispatch_data_t;
     using context_array_t        = common::container::small_vector<const context_t*>;
