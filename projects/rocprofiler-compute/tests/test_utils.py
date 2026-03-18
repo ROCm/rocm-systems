@@ -7595,6 +7595,125 @@ def test_noise_clamper_instance_isolation():
 
 
 # =============================================================================
+# TESTS FOR NOISE_CLAMP: Upper-Bound (Max) Clamping
+# =============================================================================
+
+
+@pytest.mark.noise_clamp
+def test_noise_clamp_scalar_exceeds_reference():
+    """Scalar values exceeding reference are clamped to reference."""
+    from utils.parser import to_noise_clamp
+
+    assert to_noise_clamp(150.0, 100.0) == 100.0
+    assert to_noise_clamp(100.0, 100.0) == 100.0
+    assert to_noise_clamp(99.99, 100.0) == 99.99
+
+
+@pytest.mark.noise_clamp
+def test_noise_clamp_series_exceeds_reference():
+    """Series values exceeding their per-element reference are clamped."""
+    from utils.parser import to_noise_clamp
+
+    diff = pd.Series([50.0, 150.0, 100.0, 200.0])
+    ref = pd.Series([100.0, 100.0, 100.0, 100.0])
+    result = to_noise_clamp(diff, ref)
+    pd.testing.assert_series_equal(result, pd.Series([50.0, 100.0, 100.0, 100.0]))
+
+
+@pytest.mark.noise_clamp
+def test_noise_clamp_ndarray_exceeds_reference():
+    """NumPy array values exceeding reference are clamped."""
+    import numpy as np
+
+    from utils.parser import to_noise_clamp
+
+    diff = np.array([50.0, 150.0, 200.0])
+    ref = np.array([100.0, 100.0, 100.0])
+    result = to_noise_clamp(diff, ref)
+    np.testing.assert_array_equal(result, np.array([50.0, 100.0, 100.0]))
+
+
+@pytest.mark.noise_clamp
+def test_noise_clamp_scalar_reference_with_array():
+    """Scalar reference broadcasts correctly against an array difference."""
+    from utils.parser import to_noise_clamp
+
+    diff = pd.Series([50.0, 110.0, 99.0])
+    result = to_noise_clamp(diff, 100.0)
+    pd.testing.assert_series_equal(result, pd.Series([50.0, 100.0, 99.0]))
+
+
+@pytest.mark.noise_clamp
+def test_noise_clamp_mixed_negative_and_exceeding():
+    """Both min-clamp and max-clamp fire in a single call."""
+    from utils.parser import to_noise_clamp
+
+    diff = pd.Series([-10.0, 50.0, 150.0, 100.0])
+    ref = pd.Series([100.0, 100.0, 100.0, 100.0])
+    result = to_noise_clamp(diff, ref)
+    pd.testing.assert_series_equal(result, pd.Series([0.0, 50.0, 100.0, 100.0]))
+
+    assert to_noise_clamp(100 - 105, 100) == 0.0
+    assert to_noise_clamp(100 - 80, 100) == 20.0
+
+
+@pytest.mark.noise_clamp
+def test_noise_clamp_upper_warning_above_threshold():
+    """Warning recorded when upper-bound excess >= 1%."""
+    from utils.parser import (
+        clear_noise_clamp_warnings,
+        get_noise_clamp_warnings,
+        to_noise_clamp,
+    )
+
+    clear_noise_clamp_warnings()
+
+    to_noise_clamp(pd.Series([105.0]), pd.Series([100.0]))
+
+    stats = get_noise_clamp_warnings()
+    assert stats["count"] == 1
+    assert stats["max_rel"] >= 0.01
+
+
+@pytest.mark.noise_clamp
+def test_noise_clamp_upper_no_warning_below_threshold():
+    """No warning when upper-bound excess < 1%, but value is still clamped."""
+    from utils.parser import (
+        clear_noise_clamp_warnings,
+        get_noise_clamp_warnings,
+        to_noise_clamp,
+    )
+
+    clear_noise_clamp_warnings()
+
+    result = to_noise_clamp(pd.Series([100.005]), pd.Series([100.0]))
+    assert result.iloc[0] == 100.0
+    assert get_noise_clamp_warnings()["count"] == 0
+
+
+@pytest.mark.noise_clamp
+def test_noise_clamp_nan_with_exceeding_values():
+    """NaN and None inputs return np.nan regardless of reference."""
+    import numpy as np
+
+    from utils.parser import to_noise_clamp
+
+    assert np.isnan(to_noise_clamp(None, 100.0))
+    assert np.isnan(to_noise_clamp(float("nan"), 100.0))
+
+
+@pytest.mark.noise_clamp
+def test_noise_clamp_per_element_reference_array():
+    """Each element is clamped against its own reference value."""
+    from utils.parser import to_noise_clamp
+
+    diff = pd.Series([60.0, 200.0, 80.0])
+    ref = pd.Series([100.0, 150.0, 50.0])
+    result = to_noise_clamp(diff, ref)
+    pd.testing.assert_series_equal(result, pd.Series([60.0, 150.0, 50.0]))
+
+
+# =============================================================================
 # Experimental Feature Tests
 # =============================================================================
 
