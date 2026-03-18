@@ -41,10 +41,10 @@ declare -A unique_values
 
 # Use awk to compare and delete duplicates
 awk '!unique_values[$5]++' "$directory/.ninja_log" > temp_file.txt
-mv temp_file.txt "$directory/.ninja_log"
+#mv temp_file.txt "$directory/.ninja_log"
 
 # Rename the file with .csv extension
-mv "$directory/.ninja_log" "$directory/time_trace.log"
+mv temp_file.txt "$directory/time_trace.log"
 
 # Run the python program
-python3 time_trace_generator.py --min_val 5 --include_linking
+python3 time_trace_generator.py --min_val 0 --include_linking
