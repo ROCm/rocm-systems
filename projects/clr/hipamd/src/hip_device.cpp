@@ -135,20 +135,21 @@ void Device::AddSafeStream(Stream* event_stream, Stream* wait_stream) {
 
 // ================================================================================================
 void Device::Reset() {
+  std::set<MemoryPool*> poolsToClear;
   {
     std::scoped_lock lock(lock_);
-    for (auto* pool : mem_pools_) {
-      pool->ReleaseAllMemory();
-      delete pool;
-    }
-    mem_pools_.clear();
+    std::swap(poolsToClear, mem_pools_);
   }
+  for (auto* pool : poolsToClear) {
+    pool->ReleaseAllMemory();
+    delete pool;
+  }
+
   flags_ = hipDeviceScheduleSpin;
   destroyAllStreams();
 
   // Clear hostcall allocations to avoid ~Device() accessing freed Memory objects later.
   auto* dev = devices()[0];
-  dev->ClearHostcallMemories();
   amd::MemObjMap::Purge(dev);
   Create();
 }
@@ -228,18 +229,31 @@ bool Device::StreamExists(const Stream* stream) {
 
 // ================================================================================================
 void Device::destroyAllStreams() {
-  std::vector<Stream*> toBeDeleted;
+  // Steal all the current streams. This allows us to release locks before destroying streams
+  // without having to worry about race conditions. This leaves the set empty afterwards.
+  std::unordered_set<hip::Stream*> toBeDeleted;
   {
-    std::shared_lock lock(streamSetLock_);
-    toBeDeleted.reserve(streamSet_.size());
-    for (auto* stream : streamSet_) {
-      if (!stream->Null()) {
-        toBeDeleted.push_back(stream);
-      }
+    std::unique_lock lock(streamSetLock_);
+    toBeDeleted.swap(streamSet_);
+  }
+
+  // Remove all null-streams.
+  for (auto it = toBeDeleted.begin(); it != toBeDeleted.end();) {
+    if ((*it)->Null()) {
+      it = toBeDeleted.erase(it);
+    } else {
+      ++it;
     }
   }
+
+  assert(std::all_of(toBeDeleted.begin(), toBeDeleted.end(),
+                     [this](hip::Stream* s) { return s->device() == devices()[0]; }) &&
+         "All streams should belong to the underlying device");
+
+  // Clean up the streams.
+  devices()[0]->removeFromActiveQueues(toBeDeleted.begin(), toBeDeleted.end());
   for (auto* stream : toBeDeleted) {
-    hip::Stream::Destroy(stream);
+    stream->release();
   }
   hip::tls.stream_per_thread_obj_.Clear();
 }

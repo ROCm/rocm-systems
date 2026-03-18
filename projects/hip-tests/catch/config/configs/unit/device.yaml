@@ -151,6 +151,31 @@ device:
     # (amd_wsl) Note: Windows disabled
     # (nvidia_windows) Disabling tests which no longer behave the same on nvidia platform
     disabled: [amd_wsl, nvidia_windows]
+  Unit_hipDeviceReset_MultiThreadStreams_Concurrent:
+    <<: *level_2
+    # (amd_wsl) Note: Windows disabled
+    # (nvidia_windows) Disabling tests which no longer behave the same on nvidia platform
+    disabled: [amd_wsl, nvidia_windows]
+  Unit_hipDeviceReset_MultiThreadStreams_MixedStreamTypes:
+    <<: *level_2
+    # (amd_wsl) Note: Windows disabled
+    # (nvidia_windows) Disabling tests which no longer behave the same on nvidia platform
+    disabled: [amd_wsl, nvidia_windows]
+  Unit_hipDeviceReset_MultiThreadStreams_StressTest:
+    <<: *level_2
+    # (amd_wsl) Note: Windows disabled
+    # (nvidia_windows) Disabling tests which no longer behave the same on nvidia platform
+    disabled: [amd_wsl, nvidia_windows]
+  Unit_hipDeviceReset_MultiThreadStreams_ConcurrentReset:
+    <<: *level_2
+    # (amd_wsl) Note: Windows disabled
+    # (nvidia_windows) Disabling tests which no longer behave the same on nvidia platform
+    disabled: [amd_wsl, nvidia_windows]
+  Unit_hipDeviceReset_MultiThreadStreams_ConcurrentDeviceReset:
+    <<: *level_2
+    # (amd_wsl) Note: Windows disabled
+    # (nvidia_windows) Disabling tests which no longer behave the same on nvidia platform
+    disabled: [amd_wsl, nvidia_windows]
   Unit_hipDeviceSetMemPool_Positive_Basic: *level_2
   Unit_hipDeviceSetMemPool_Negative_Parameters: *level_2
   Unit_hipDeviceGetMemPool_Positive_Default: *level_2

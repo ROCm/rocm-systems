@@ -27,6 +27,7 @@ set(TEST_SRC
     hipDeviceSetGetLimit.cc
     hipDeviceSetGetSharedMemConfig.cc
     hipDeviceReset.cc
+    hipDeviceResetMultiThreadStreams.cc
     hipDeviceSetGetMemPool.cc
     hipInit.cc
     hipDriverGetVersion.cc
