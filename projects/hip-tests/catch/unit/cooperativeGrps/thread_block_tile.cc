@@ -3,7 +3,7 @@
  *
  * SPDX-License-Identifier: MIT
  */
-
+#include "warp_common.hh"
 #include "cooperative_groups_common.hh"
 #include "cg_common_kernels.hh"
 #include <array>
