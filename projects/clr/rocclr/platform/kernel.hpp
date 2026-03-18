@@ -79,6 +79,7 @@ class KernelSignature : public HeapObject {
   }
 
   std::vector<KernelParameterDescriptor>& params() { return params_; }
+  const std::vector<KernelParameterDescriptor>& params() const { return params_; }
 
   //! Return the size in bytes required for the arguments on the stack.
   uint32_t paramsSize() const { return paramsSize_; }
@@ -201,8 +202,11 @@ class KernelParameters : protected HeapObject {
   //! Capture the state of the parameters and return the stack base pointer.
   address captureOpenCLArgs(device::VirtualDevice& vDev, uint64_t lclMemSize, int32_t* error);
 
-  //! Capture the arguments from signature and set.
-  bool captureHIPArgs(void** kernelParams, address kernArgs, size_t kernArgsSize, address mem);
+  //! Capture the arguments in a list of pointers to arguments based on the signature and set.
+  bool captureHIPArgs(void** kernelParams, address mem);
+
+  //! Capture the arguments in pre-packed arguments based on the signature and set.
+  bool captureHIPArgs(address kernArgs, size_t kernArgsSize, address mem);
 
   //! Release the captured state of the parameters.
   void release(address parameters) const;
