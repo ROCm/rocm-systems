@@ -174,7 +174,7 @@ By default, AI NIC support is enabled in ROCm Systems Profiler. However, you can
 List available AI NICs
 ------------------------
 
-Get the list of available AI NICs with their unique identifiers by running ``amd-smi list``:
+List all the available AI NICs with their unique identifiers by running ``amd-smi list``:
 
 .. code-block:: shell
 
@@ -187,7 +187,7 @@ Get the list of available AI NICs with their unique identifiers by running ``amd
        SERIAL_NUMBER: FPL250300A1EC0V2
        VENDOR_NAME: AMD Pensando Systems, Inc.
 
-Get the NETDEV name and more details of each available AI NIC by running ``amd-smi static``:
+List the NETDEV name and more details of each available AI NIC by running ``amd-smi static``:
 
 .. code-block:: shell
 
