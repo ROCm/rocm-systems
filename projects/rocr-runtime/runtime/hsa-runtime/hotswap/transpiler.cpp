@@ -2332,27 +2332,6 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
     // Since we can't modify N, we do NOT shift here — the comparison must use
     // element indices. The shift will be done per memory op using v3 temp.
 
-    // Pre-pass: identify the TTMP computation range.
-    // The TTMP block starts at the first instruction referencing ttmp and ends
-    // at the last s_cselect_b32 referencing ttmp. ALL instructions in this range
-    // (including non-TTMP intermediates like s_add_i32) are part of the workgroup
-    // ID computation and should be skipped — the preamble handles IDs via SGPRs.
-    size_t ttmp_range_start = SIZE_MAX, ttmp_range_end = 0;
-    for (size_t ii = 0; ii < source_lines.size(); ++ii) {
-      const auto& sl = source_lines[ii];
-      if (sl.find("ttmp") != std::string::npos) {
-        if (ii < ttmp_range_start) ttmp_range_start = ii;
-        if (ii > ttmp_range_end) ttmp_range_end = ii;
-      }
-    }
-    // Extend to include s_cselect_b32 lines after the last ttmp reference
-    // (they depend on SCC set by getreg which is in the ttmp range)
-    for (size_t ii = ttmp_range_end + 1; ii < source_lines.size() && ii <= ttmp_range_end + 5; ++ii) {
-      if (source_lines[ii].find("s_cselect_b32") != std::string::npos) {
-        ttmp_range_end = ii;
-      }
-    }
-
     // Translate instructions for this kernel
     for (size_t ii = 0; ii < source_lines.size(); ++ii) {
       const auto& line = source_lines[ii];
@@ -2362,25 +2341,6 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
         auto lbl = branch_labels.find(source_instrs[ii].pc_offset);
         if (lbl != branch_labels.end()) {
           translated_asm += lbl->second + ":\n";
-        }
-      }
-
-      // Skip instructions in the TTMP computation range, except for
-      // s_cselect_b32 which gets replaced with v_readfirstlane_b32.
-      // Also skip s_setreg/s_getreg which are handled by TranslateInstruction.
-      if (ii >= ttmp_range_start && ii <= ttmp_range_end &&
-          ttmp_range_start != SIZE_MAX) {
-        std::string mnem = ExtractMnemonic(line);
-        // TTMP computation is all SALU. Skip SALU instructions in range
-        // EXCEPT: s_cselect (replaced), s_load/s_wait/s_waitcnt (kernel work).
-        // Let ALL VALU (v_*), memory (global_/ds_/flat_), and labels through.
-        bool is_salu = (mnem[0] == 's' && mnem[1] == '_');
-        if (is_salu && mnem != "s_cselect_b32" &&
-            mnem.find("s_load") != 0 && mnem.find("s_store") != 0 &&
-            mnem.find("s_wait") != 0 && mnem != "s_endpgm" &&
-            mnem != "s_barrier" && mnem.find("s_cbranch") != 0 &&
-            mnem != "s_branch") {
-          continue;  // skip this TTMP SALU intermediate
         }
       }
 
