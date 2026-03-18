@@ -550,6 +550,18 @@ add_test(
         tests/test_roofline_calc_ai_analyze.py ${WORKING_DIR_OPTION}
 )
 
+# ---------------------------
+# Noise clamp tests
+# ---------------------------
+
+add_test(
+    NAME test_noise_clamp
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_noise_clamp.xml ${COV_OPTION} tests/test_noise_clamp.py
+        ${WORKING_DIR_OPTION}
+)
+
 # -----------------------------------
 # Data imputation tests
 # -----------------------------------
@@ -620,6 +632,7 @@ if(${ENABLE_COVERAGE})
         test_num_xcds_spec_class
         test_num_xcds_cli_output
         test_utils
+        test_noise_clamp
         test_roofline_calc_ai_analyze
         test_data_imputation
         test_autogen_config

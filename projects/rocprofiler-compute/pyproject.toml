@@ -111,7 +111,6 @@ markers = [
     "iteration_multiplexing_1",
     "iteration_multiplexing_2",
     "iteration_multiplexing_stochastic",
-    "noise_clamp",
     "torch_ops",
     "torch_trace",
     "multi_rank",
