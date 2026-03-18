@@ -2371,11 +2371,16 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
       if (ii >= ttmp_range_start && ii <= ttmp_range_end &&
           ttmp_range_start != SIZE_MAX) {
         std::string mnem = ExtractMnemonic(line);
-        // Only emit s_cselect_b32 (which TranslateInstruction replaces with readfirstlane)
-        // and s_load (which is real kernel work that may be interleaved)
-        if (mnem != "s_cselect_b32" && mnem.find("s_load") != 0 &&
-            mnem.find("s_wait") != 0 && mnem.find("v_lshr") != 0) {
-          continue;  // skip this TTMP intermediate instruction
+        // TTMP computation is all SALU. Skip SALU instructions in range
+        // EXCEPT: s_cselect (replaced), s_load/s_wait/s_waitcnt (kernel work).
+        // Let ALL VALU (v_*), memory (global_/ds_/flat_), and labels through.
+        bool is_salu = (mnem[0] == 's' && mnem[1] == '_');
+        if (is_salu && mnem != "s_cselect_b32" &&
+            mnem.find("s_load") != 0 && mnem.find("s_store") != 0 &&
+            mnem.find("s_wait") != 0 && mnem != "s_endpgm" &&
+            mnem != "s_barrier" && mnem.find("s_cbranch") != 0 &&
+            mnem != "s_branch") {
+          continue;  // skip this TTMP SALU intermediate
         }
       }
 
