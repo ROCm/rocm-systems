@@ -140,13 +140,15 @@ perform_reduction(
     }
 
     std::unordered_map<int64_t, std::vector<rocprofiler_counter_record_t>> rec_groups;
-    size_t bit_length = DIM_BIT_LENGTH / ROCPROFILER_DIMENSION_LAST;
 
     for(auto& rec : *input_array)
     {
         for(auto dim : _reduce_dimension_set)
         {
-            int64_t mask_dim = (MAX_64 >> (64 - bit_length)) << ((dim - 1) * bit_length);
+            // Use variable bit allocation for each dimension
+            uint64_t dim_bit_length = get_dim_bit_length(dim);
+            uint64_t dim_bit_offset = get_dim_bit_offset(dim);
+            int64_t  mask_dim       = ((1ULL << dim_bit_length) - 1) << dim_bit_offset;
 
             rec.id = rec.id | mask_dim;
             rec.id = rec.id ^ mask_dim;
@@ -174,12 +176,16 @@ perform_reduction(
 }
 
 int64_t
-get_int_encoded_dimensions_from_string(const std::string& rangeStr)
+get_int_encoded_dimensions_from_string(const std::string&                         rangeStr,
+                                       rocprofiler_profile_counter_instance_types dim)
 {
     int64_t            result = 0;
     std::istringstream iss(rangeStr);
     std::string        token;
-    size_t             bit_length = DIM_BIT_LENGTH / ROCPROFILER_DIMENSION_LAST;
+
+    // Use variable bit allocation for this dimension
+    uint64_t bit_length = get_dim_bit_length(dim);
+    uint64_t max_value  = (1ULL << bit_length) - 1;
 
     while(std::getline(iss, token, ','))
     {
@@ -198,13 +204,17 @@ get_int_encoded_dimensions_from_string(const std::string& rangeStr)
         else
         {
             int num = std::stoi(token);
-            if(num < (1 << bit_length))
+            if(static_cast<uint64_t>(num) <= max_value)
             {
                 result |= (1LL << num);
             }
             else
             {
-                throw std::runtime_error(fmt::format("Dimension value exceeds max allowed."));
+                throw std::runtime_error(fmt::format(
+                    "Dimension value {} exceeds max allowed {} for dimension type {}.",
+                    num,
+                    max_value,
+                    static_cast<int>(dim)));
             }
         }
     }
@@ -218,9 +228,11 @@ perform_selection(std::map<rocprofiler_profile_counter_instance_types, std::stri
     if(input_array->empty()) return input_array;
     for(auto& dim_pair : dimension_map)
     {
-        int64_t encoded_dim_values = get_int_encoded_dimensions_from_string(dim_pair.second);
-        size_t  bit_length         = DIM_BIT_LENGTH / ROCPROFILER_DIMENSION_LAST;
-        int64_t mask = (MAX_64 >> (64 - bit_length)) << ((dim_pair.first - 1) * bit_length);
+        // Use variable bit allocation for this dimension
+        int64_t  encoded_dim_values = get_int_encoded_dimensions_from_string(dim_pair.second, dim_pair.first);
+        uint64_t dim_bit_length     = get_dim_bit_length(dim_pair.first);
+        uint64_t dim_bit_offset     = get_dim_bit_offset(dim_pair.first);
+        int64_t  mask               = ((1ULL << dim_bit_length) - 1) << dim_bit_offset;
 
         input_array->erase(std::remove_if(input_array->begin(),
                                           input_array->end(),

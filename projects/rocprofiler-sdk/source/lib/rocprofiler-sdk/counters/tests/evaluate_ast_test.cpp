@@ -1312,8 +1312,10 @@ TEST(evatuate_ast, evaluate_select)
         }
         for(auto& dim_pair : dims)
         {
-            size_t  bit_length = DIM_BIT_LENGTH / ROCPROFILER_DIMENSION_LAST;
-            int64_t mask = (MAX_64 >> (64 - bit_length)) << ((dim_pair.first - 1) * bit_length);
+            // Use variable bit allocation
+            uint64_t dim_bit_length = get_dim_bit_length(dim_pair.first);
+            uint64_t dim_bit_offset = get_dim_bit_offset(dim_pair.first);
+            int64_t  mask           = ((1ULL << dim_bit_length) - 1) << dim_bit_offset;
             for(auto& rec : a)
             {
                 rec.id = rec.id | mask;
@@ -1421,8 +1423,6 @@ TEST(evaluate_ast, counter_reduction_dimension)
 {
     using namespace rocprofiler::counters;
 
-    size_t bit_length = DIM_BIT_LENGTH / ROCPROFILER_DIMENSION_LAST;
-
     auto get_base_rec_id = [](uint64_t counter_id) {
         rocprofiler_counter_instance_id_t base_id = 0;
         set_counter_in_rec(base_id, {.handle = counter_id});
@@ -1435,7 +1435,10 @@ TEST(evaluate_ast, counter_reduction_dimension)
         std::vector<rocprofiler_record_counter_t>                 result;
         for(auto rec : a)
         {
-            int64_t mask_dim = (MAX_64 >> (64 - bit_length)) << (bit_length * 0);
+            // Use variable bit allocation for XCC dimension
+            uint64_t xcc_bit_length = get_dim_bit_length(ROCPROFILER_DIMENSION_XCC);
+            uint64_t xcc_bit_offset = get_dim_bit_offset(ROCPROFILER_DIMENSION_XCC);
+            int64_t  mask_dim       = ((1ULL << xcc_bit_length) - 1) << xcc_bit_offset;
 
             rec.id = rec.id | mask_dim;
             rec.id = rec.id ^ mask_dim;
