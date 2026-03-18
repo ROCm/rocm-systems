@@ -496,6 +496,169 @@ int run_test_mag2d(const char* co) {
   return ok==N?0:1;
 }
 
+// ── split-K matmul kernels (round 4) ────────────────────────────────────────
+// These exercise blockIdx.y (TTMP9-derived workgroup Y) which the plain 1D
+// matmul never reaches.  Two kernels per ELF: compute + reduce.
+
+extern "C" __global__ void matmul_splitk_compute(
+    float* __restrict__ workspace,
+    const float* __restrict__ A, const float* __restrict__ B,
+    int M, int N, int K, int num_splits)
+{
+  int row = blockIdx.x, split = blockIdx.y, tid = threadIdx.x;
+  if (row >= M) return;
+  int K_chunk = (K + num_splits - 1) / num_splits;
+  int k_lo = split * K_chunk, k_hi = k_lo + K_chunk;
+  if (k_hi > K) k_hi = K;
+  for (int col = tid; col < N; col += blockDim.x) {
+    float acc = 0.0f;
+    for (int k = k_lo; k < k_hi; k++) acc += A[row*K+k] * B[k*N+col];
+    workspace[split * M * N + row * N + col] = acc;
+  }
+}
+
+extern "C" __global__ void matmul_splitk_reduce(
+    float* __restrict__ C, const float* __restrict__ workspace,
+    int M, int N, int num_splits)
+{
+  int row = blockIdx.x, tid = threadIdx.x;
+  if (row >= M) return;
+  for (int col = tid; col < N; col += blockDim.x) {
+    float acc = 0.0f;
+    for (int s = 0; s < num_splits; s++) acc += workspace[s * M * N + row * N + col];
+    C[row * N + col] = acc;
+  }
+}
+
+// ── attention kernels (round 5) ──────────────────────────────────────────────
+// Exercises: exp, reciprocal, max/sum shared-memory reduction, FMA chains.
+// attn_multihead uses blockIdx.y → TTMP taint chain for workgroup-ID Y.
+
+extern "C" __global__ void softmax_row(
+    float* __restrict__ out, const float* __restrict__ in,
+    int rows, int cols)
+{
+  extern __shared__ float smem[];
+  int row = blockIdx.x, tid = threadIdx.x;
+  if (row >= rows) return;
+  const float* ri = in + row * cols;
+  float* ro = out + row * cols;
+  float mx = -1e30f;
+  for (int c = tid; c < cols; c += blockDim.x) mx = fmaxf(mx, ri[c]);
+  smem[tid] = mx; __syncthreads();
+  for (int s = blockDim.x/2; s > 0; s >>= 1) {
+    if (tid < s) smem[tid] = fmaxf(smem[tid], smem[tid+s]); __syncthreads();
+  }
+  float rmax = smem[0]; __syncthreads();
+  float sm = 0.0f;
+  for (int c = tid; c < cols; c += blockDim.x) {
+    float e = __expf(ri[c] - rmax); ro[c] = e; sm += e;
+  }
+  smem[tid] = sm; __syncthreads();
+  for (int s = blockDim.x/2; s > 0; s >>= 1) {
+    if (tid < s) smem[tid] += smem[tid+s]; __syncthreads();
+  }
+  float inv = 1.0f / smem[0]; __syncthreads();
+  for (int c = tid; c < cols; c += blockDim.x) ro[c] *= inv;
+}
+
+extern "C" __global__ void attn_forward(
+    float* __restrict__ O, const float* __restrict__ Q,
+    const float* __restrict__ K, const float* __restrict__ V,
+    int M, int N, int D)
+{
+  extern __shared__ float smem[];
+  float* S = smem; float* sc = smem + N;
+  int m = blockIdx.x, tid = threadIdx.x;
+  if (m >= M) return;
+  const float* Qm = Q + m * D;
+  float scale = 1.0f / sqrtf((float)D);
+  for (int n = 0; n < N; n++) {
+    const float* Kn = K + n * D;
+    float dot = 0.0f;
+    for (int d = tid; d < D; d += blockDim.x) dot += Qm[d] * Kn[d];
+    sc[tid] = dot; __syncthreads();
+    for (int s = blockDim.x/2; s > 0; s >>= 1) {
+      if (tid < s) sc[tid] += sc[tid+s]; __syncthreads();
+    }
+    if (tid == 0) S[n] = sc[0] * scale;
+    __syncthreads();
+  }
+  float mx = -1e30f;
+  for (int n = tid; n < N; n += blockDim.x) mx = fmaxf(mx, S[n]);
+  sc[tid] = mx; __syncthreads();
+  for (int s = blockDim.x/2; s > 0; s >>= 1) {
+    if (tid < s) sc[tid] = fmaxf(sc[tid], sc[tid+s]); __syncthreads();
+  }
+  float smax = sc[0]; __syncthreads();
+  float sm = 0.0f;
+  for (int n = tid; n < N; n += blockDim.x) {
+    S[n] = __expf(S[n] - smax); sm += S[n];
+  }
+  sc[tid] = sm; __syncthreads();
+  for (int s = blockDim.x/2; s > 0; s >>= 1) {
+    if (tid < s) sc[tid] += sc[tid+s]; __syncthreads();
+  }
+  float inv = 1.0f / sc[0]; __syncthreads();
+  for (int n = tid; n < N; n += blockDim.x) S[n] *= inv;
+  __syncthreads();
+  float* Om = O + m * D;
+  for (int d = tid; d < D; d += blockDim.x) {
+    float acc = 0.0f;
+    for (int n = 0; n < N; n++) acc += S[n] * V[n*D+d];
+    Om[d] = acc;
+  }
+}
+
+extern "C" __global__ void attn_multihead(
+    float* __restrict__ O, const float* __restrict__ Q,
+    const float* __restrict__ K, const float* __restrict__ V,
+    int M, int N, int D, int num_heads)
+{
+  extern __shared__ float smem[];
+  float* S = smem; float* sc = smem + N;
+  int m = blockIdx.x, h = blockIdx.y, tid = threadIdx.x;
+  if (m >= M || h >= num_heads) return;
+  const float* Qm = Q + h*M*D + m*D;
+  const float* Kh = K + h*N*D;
+  const float* Vh = V + h*N*D;
+  float* Om = O + h*M*D + m*D;
+  float scale = 1.0f / sqrtf((float)D);
+  for (int n = 0; n < N; n++) {
+    float dot = 0.0f;
+    for (int d = tid; d < D; d += blockDim.x) dot += Qm[d] * Kh[n*D+d];
+    sc[tid] = dot; __syncthreads();
+    for (int s = blockDim.x/2; s > 0; s >>= 1) {
+      if (tid < s) sc[tid] += sc[tid+s]; __syncthreads();
+    }
+    if (tid == 0) S[n] = sc[0] * scale;
+    __syncthreads();
+  }
+  float mx = -1e30f;
+  for (int n = tid; n < N; n += blockDim.x) mx = fmaxf(mx, S[n]);
+  sc[tid] = mx; __syncthreads();
+  for (int s = blockDim.x/2; s > 0; s >>= 1) {
+    if (tid < s) sc[tid] = fmaxf(sc[tid], sc[tid+s]); __syncthreads();
+  }
+  float smax = sc[0]; __syncthreads();
+  float sm = 0.0f;
+  for (int n = tid; n < N; n += blockDim.x) {
+    S[n] = __expf(S[n] - smax); sm += S[n];
+  }
+  sc[tid] = sm; __syncthreads();
+  for (int s = blockDim.x/2; s > 0; s >>= 1) {
+    if (tid < s) sc[tid] += sc[tid+s]; __syncthreads();
+  }
+  float inv = 1.0f / sc[0]; __syncthreads();
+  for (int n = tid; n < N; n += blockDim.x) S[n] *= inv;
+  __syncthreads();
+  for (int d = tid; d < D; d += blockDim.x) {
+    float acc = 0.0f;
+    for (int n = 0; n < N; n++) acc += S[n] * Vh[n*D+d];
+    Om[d] = acc;
+  }
+}
+
 // ── matmul multi-shape harness ───────────────────────────────────────────────
 
 static void ref_matmul(float* C, const float* A, const float* B, int M, int N, int K) {
@@ -584,6 +747,300 @@ int run_test_matmul(const char* co) {
   return pass == nshapes ? 0 : 1;
 }
 
+// ── split-K test harness ─────────────────────────────────────────────────────
+
+static int check_splitk_shape(hipFunction_t fn_compute, hipFunction_t fn_reduce,
+                               int M, int N, int K, int num_splits) {
+  size_t szA  = (size_t)M*K*4, szB = (size_t)K*N*4, szC = (size_t)M*N*4;
+  size_t szWS = szC * num_splits;
+  float *hA=(float*)malloc(szA), *hB=(float*)malloc(szB);
+  float *hC=(float*)calloc(M*N,4), *hRef=(float*)malloc(szC);
+  srand((unsigned)(M*6151u + N*4093u + K*2999u + num_splits*1777u));
+  for (int i=0;i<M*K;i++) hA[i]=(float)(rand()%5-2);
+  for (int i=0;i<K*N;i++) hB[i]=(float)(rand()%5-2);
+  ref_matmul(hRef, hA, hB, M, N, K);
+
+  float *dA,*dB,*dC,*dWS;
+  hipMalloc(&dA,szA); hipMalloc(&dB,szB);
+  hipMalloc(&dC,szC); hipMalloc(&dWS,szWS);
+  hipMemcpy(dA,hA,szA,hipMemcpyHostToDevice);
+  hipMemcpy(dB,hB,szB,hipMemcpyHostToDevice);
+  hipMemset(dC,0,szC); hipMemset(dWS,0,szWS);
+
+  int m=M, n=N, k=K, ns=num_splits;
+  void* cargs[]={&dWS,&dA,&dB,&m,&n,&k,&ns};
+  void* rargs[]={&dC,&dWS,&m,&n,&ns};
+
+  int result = -1;
+  hipError_t e = hipModuleLaunchKernel(fn_compute, M,num_splits,1, 32,1,1, 0,0, cargs, NULL);
+  if (e == hipSuccess) e = hipDeviceSynchronize();
+  if (e == hipSuccess) e = hipModuleLaunchKernel(fn_reduce, M,1,1, 32,1,1, 0,0, rargs, NULL);
+  if (e == hipSuccess && hipDeviceSynchronize() == hipSuccess) {
+    hipMemcpy(hC,dC,szC,hipMemcpyDeviceToHost);
+    float atol = K * 1.5e-5f + 1e-4f;
+    int ok=0;
+    for (int i=0;i<M*N;i++) {
+      float tol = atol * (fabsf(hRef[i]) + 1.0f);
+      if (fabsf(hC[i]-hRef[i]) <= tol) ok++;
+    }
+    result = ok;
+  }
+  hipFree(dA); hipFree(dB); hipFree(dC); hipFree(dWS);
+  free(hA); free(hB); free(hC); free(hRef);
+  return result;
+}
+
+// Each pass is a separate ELF: transpiler currently translates one kernel per
+// code object (multi-kernel ELF support requires per-kernel code range tracking
+// to update kernel_code_entry_byte_offset after translation).
+int run_test_matmul_splitk(const char* co_compute, const char* co_reduce) {
+  hipModule_t mod_c, mod_r; hipFunction_t fn_compute, fn_reduce;
+  if (hipModuleLoad(&mod_c, co_compute) != hipSuccess ||
+      hipModuleGetFunction(&fn_compute, mod_c, "matmul_splitk_compute") != hipSuccess) {
+    printf("  matmul_splitk:    LOAD FAILED (compute)\n");
+    return 1;
+  }
+  if (hipModuleLoad(&mod_r, co_reduce) != hipSuccess ||
+      hipModuleGetFunction(&fn_reduce, mod_r, "matmul_splitk_reduce") != hipSuccess) {
+    printf("  matmul_splitk:    LOAD FAILED (reduce)\n");
+    hipModuleUnload(mod_c);
+    return 1;
+  }
+
+  // Shapes: small/medium N, large K — classic split-K territory.
+  // num_splits chosen so K_chunk ≤ 256 (avoids very long inner loops in tests).
+  struct { int M, N, K, splits; const char* label; } shapes[] = {
+    {  32,  32,  512,  4, "   32x 32x 512 s4"},   // baseline
+    {  64,  32,  512,  4, "   64x 32x 512 s4"},   // 2x M
+    { 128,  32, 1024,  8, "  128x 32x1024 s8"},   // DNN FC-like
+    { 256,  32, 2048, 16, "  256x 32x2048 s16"},  // K-heavy (hipBLASLT deep)
+    { 512,  16, 1024,  8, "  512x 16x1024 s8"},   // tall-skinny
+    {1024,   8,  256,  4, " 1024x  8x 256 s4"},   // very tall-skinny
+    {  16,  32, 4096, 16, "   16x 32x4096 s16"},  // small M, very large K
+    { 192,  32,  768,  6, "  192x 32x 768 s6"},   // BERT-like (768 hidden)
+  };
+  int nshapes = (int)(sizeof(shapes)/sizeof(shapes[0]));
+  int pass = 0;
+  for (int i = 0; i < nshapes; i++) {
+    int M=shapes[i].M, N=shapes[i].N, K=shapes[i].K, S=shapes[i].splits;
+    int ok = check_splitk_shape(fn_compute, fn_reduce, M, N, K, S);
+    int total = M*N;
+    if (ok < 0)     printf("  matmul_splitk %s: LAUNCH ERROR\n", shapes[i].label);
+    else if (ok < total) printf("  matmul_splitk %s: %d/%d FAIL\n", shapes[i].label, ok, total);
+    else pass++;
+  }
+  printf("  matmul_splitk:    %d/%d shapes PASS\n", pass, nshapes);
+  hipModuleUnload(mod_c);
+  hipModuleUnload(mod_r);
+  return pass == nshapes ? 0 : 1;
+}
+
+// ── attention test harness ───────────────────────────────────────────────────
+
+static void ref_softmax_row(float* out, const float* in, int rows, int cols) {
+  for (int i = 0; i < rows; i++) {
+    float mx = -1e30f;
+    for (int j = 0; j < cols; j++) mx = fmaxf(mx, in[i*cols+j]);
+    float sm = 0.0f;
+    for (int j = 0; j < cols; j++) { out[i*cols+j] = expf(in[i*cols+j] - mx); sm += out[i*cols+j]; }
+    for (int j = 0; j < cols; j++) out[i*cols+j] /= sm;
+  }
+}
+
+static void ref_attn_forward(float* O, const float* Q, const float* K,
+                              const float* V, int M, int N, int D) {
+  float scale = 1.0f / sqrtf((float)D);
+  float* S = (float*)malloc(N * sizeof(float));
+  for (int m = 0; m < M; m++) {
+    float mx = -1e30f;
+    for (int n = 0; n < N; n++) {
+      float dot = 0.0f;
+      for (int d = 0; d < D; d++) dot += Q[m*D+d] * K[n*D+d];
+      S[n] = dot * scale;
+      mx = fmaxf(mx, S[n]);
+    }
+    float sm = 0.0f;
+    for (int n = 0; n < N; n++) { S[n] = expf(S[n] - mx); sm += S[n]; }
+    for (int n = 0; n < N; n++) S[n] /= sm;
+    for (int d = 0; d < D; d++) {
+      float acc = 0.0f;
+      for (int n = 0; n < N; n++) acc += S[n] * V[n*D+d];
+      O[m*D+d] = acc;
+    }
+  }
+  free(S);
+}
+
+static int check_softmax_shape(hipFunction_t fn, int rows, int cols) {
+  size_t sz = (size_t)rows * cols * 4;
+  float *hIn=(float*)malloc(sz), *hOut=(float*)calloc(rows*cols,4), *hRef=(float*)malloc(sz);
+  srand((unsigned)(rows*5501u + cols*3313u));
+  for (int i = 0; i < rows*cols; i++) hIn[i] = (float)(rand()%200 - 100) / 50.0f;
+  ref_softmax_row(hRef, hIn, rows, cols);
+  float *dIn, *dOut;
+  hipMalloc(&dIn, sz); hipMalloc(&dOut, sz);
+  hipMemcpy(dIn, hIn, sz, hipMemcpyHostToDevice); hipMemset(dOut, 0, sz);
+  int r=rows, c=cols;
+  void* args[]={&dOut, &dIn, &r, &c};
+  hipError_t e = hipModuleLaunchKernel(fn, rows,1,1, 32,1,1, 32*4,0, args, NULL);
+  int result = -1;
+  if (e == hipSuccess && hipDeviceSynchronize() == hipSuccess) {
+    hipMemcpy(hOut, dOut, sz, hipMemcpyDeviceToHost);
+    int ok = 0;
+    for (int i = 0; i < rows*cols; i++)
+      if (fabsf(hOut[i] - hRef[i]) <= 1e-3f * fabsf(hRef[i]) + 1e-5f) ok++;
+    result = ok;
+  }
+  hipFree(dIn); hipFree(dOut); free(hIn); free(hOut); free(hRef);
+  return result;
+}
+
+int run_test_softmax_row(const char* co) {
+  hipModule_t mod; hipFunction_t fn;
+  if (hipModuleLoad(&mod, co) != hipSuccess ||
+      hipModuleGetFunction(&fn, mod, "softmax_row") != hipSuccess) {
+    printf("  softmax_row:      LOAD FAILED\n"); return 1;
+  }
+  struct { int rows, cols; const char* label; } shapes[] = {
+    { 16,  32, "  16x  32"},  { 32,  64, "  32x  64"},
+    { 64, 128, "  64x 128"},  {128, 256, " 128x 256"},
+    {  8,  16, "   8x  16"},
+  };
+  int nshapes = (int)(sizeof(shapes)/sizeof(shapes[0]));
+  int pass = 0;
+  for (int i = 0; i < nshapes; i++) {
+    int R=shapes[i].rows, C=shapes[i].cols;
+    int ok = check_softmax_shape(fn, R, C);
+    int total = R*C;
+    if (ok < 0) printf("  softmax_row %s: LAUNCH ERROR\n", shapes[i].label);
+    else if (ok < total) printf("  softmax_row %s: %d/%d FAIL\n", shapes[i].label, ok, total);
+    else pass++;
+  }
+  printf("  softmax_row:      %d/%d shapes PASS\n", pass, nshapes);
+  hipModuleUnload(mod);
+  return pass == nshapes ? 0 : 1;
+}
+
+static int check_attn_shape(hipFunction_t fn, int M, int N, int D) {
+  size_t szQ=(size_t)M*D*4, szK=(size_t)N*D*4, szV=szK, szO=szQ;
+  float *hQ=(float*)malloc(szQ), *hK=(float*)malloc(szK);
+  float *hV=(float*)malloc(szV), *hO=(float*)calloc(M*D,4), *hRef=(float*)malloc(szO);
+  srand((unsigned)(M*7717u + N*5519u + D*3313u));
+  for (int i=0;i<M*D;i++) hQ[i]=(float)(rand()%200-100)/100.0f;
+  for (int i=0;i<N*D;i++) hK[i]=(float)(rand()%200-100)/100.0f;
+  for (int i=0;i<N*D;i++) hV[i]=(float)(rand()%200-100)/100.0f;
+  ref_attn_forward(hRef, hQ, hK, hV, M, N, D);
+  float *dQ,*dK,*dV,*dO;
+  hipMalloc(&dQ,szQ); hipMalloc(&dK,szK); hipMalloc(&dV,szV); hipMalloc(&dO,szO);
+  hipMemcpy(dQ,hQ,szQ,hipMemcpyHostToDevice);
+  hipMemcpy(dK,hK,szK,hipMemcpyHostToDevice);
+  hipMemcpy(dV,hV,szV,hipMemcpyHostToDevice);
+  hipMemset(dO,0,szO);
+  int m=M,n=N,d=D;
+  void* args[]={&dO,&dQ,&dK,&dV,&m,&n,&d};
+  size_t shmem = (N + 32) * 4;
+  hipError_t e = hipModuleLaunchKernel(fn, M,1,1, 32,1,1, shmem,0, args, NULL);
+  int result = -1;
+  if (e == hipSuccess && hipDeviceSynchronize() == hipSuccess) {
+    hipMemcpy(hO,dO,szO,hipMemcpyDeviceToHost);
+    int ok=0;
+    for (int i=0;i<M*D;i++)
+      if (fabsf(hO[i]-hRef[i]) <= 1e-2f*fabsf(hRef[i])+1e-4f) ok++;
+    result = ok;
+  }
+  hipFree(dQ);hipFree(dK);hipFree(dV);hipFree(dO);
+  free(hQ);free(hK);free(hV);free(hO);free(hRef);
+  return result;
+}
+
+int run_test_attn_forward(const char* co) {
+  hipModule_t mod; hipFunction_t fn;
+  if (hipModuleLoad(&mod, co) != hipSuccess ||
+      hipModuleGetFunction(&fn, mod, "attn_forward") != hipSuccess) {
+    printf("  attn_forward:     LOAD FAILED\n"); return 1;
+  }
+  struct { int M,N,D; const char* label; } shapes[] = {
+    {  8, 16, 16, "  8x 16x 16"},
+    { 16, 32, 32, " 16x 32x 32"},
+    { 32, 64, 16, " 32x 64x 16"},
+    {  4,128,  8, "  4x128x  8"},
+  };
+  int nshapes = (int)(sizeof(shapes)/sizeof(shapes[0]));
+  int pass = 0;
+  for (int i = 0; i < nshapes; i++) {
+    int M=shapes[i].M, N=shapes[i].N, D=shapes[i].D;
+    int ok = check_attn_shape(fn, M, N, D);
+    int total = M*D;
+    if (ok < 0) printf("  attn_forward %s: LAUNCH ERROR\n", shapes[i].label);
+    else if (ok < total) printf("  attn_forward %s: %d/%d FAIL\n", shapes[i].label, ok, total);
+    else pass++;
+  }
+  printf("  attn_forward:     %d/%d shapes PASS\n", pass, nshapes);
+  hipModuleUnload(mod);
+  return pass == nshapes ? 0 : 1;
+}
+
+static int check_attn_multihead_shape(hipFunction_t fn, int H, int M, int N, int D) {
+  size_t szQ=(size_t)H*M*D*4, szK=(size_t)H*N*D*4, szV=szK, szO=szQ;
+  float *hQ=(float*)malloc(szQ), *hK=(float*)malloc(szK);
+  float *hV=(float*)malloc(szV), *hO=(float*)calloc(H*M*D,4), *hRef=(float*)malloc(szO);
+  srand((unsigned)(H*9311u + M*7717u + N*5519u + D*3313u));
+  for (int i=0;i<H*M*D;i++) hQ[i]=(float)(rand()%200-100)/100.0f;
+  for (int i=0;i<H*N*D;i++) hK[i]=(float)(rand()%200-100)/100.0f;
+  for (int i=0;i<H*N*D;i++) hV[i]=(float)(rand()%200-100)/100.0f;
+  // Reference: run single-head attention per head
+  for (int h=0;h<H;h++)
+    ref_attn_forward(hRef+h*M*D, hQ+h*M*D, hK+h*N*D, hV+h*N*D, M, N, D);
+  float *dQ,*dK,*dV,*dO;
+  hipMalloc(&dQ,szQ); hipMalloc(&dK,szK); hipMalloc(&dV,szV); hipMalloc(&dO,szO);
+  hipMemcpy(dQ,hQ,szQ,hipMemcpyHostToDevice);
+  hipMemcpy(dK,hK,szK,hipMemcpyHostToDevice);
+  hipMemcpy(dV,hV,szV,hipMemcpyHostToDevice);
+  hipMemset(dO,0,szO);
+  int m=M,n=N,d=D,nh=H;
+  void* args[]={&dO,&dQ,&dK,&dV,&m,&n,&d,&nh};
+  size_t shmem = (N + 32) * 4;
+  hipError_t e = hipModuleLaunchKernel(fn, M,H,1, 32,1,1, shmem,0, args, NULL);
+  int result = -1;
+  if (e == hipSuccess && hipDeviceSynchronize() == hipSuccess) {
+    hipMemcpy(hO,dO,szO,hipMemcpyDeviceToHost);
+    int ok=0;
+    for (int i=0;i<H*M*D;i++)
+      if (fabsf(hO[i]-hRef[i]) <= 1e-2f*fabsf(hRef[i])+1e-4f) ok++;
+    result = ok;
+  }
+  hipFree(dQ);hipFree(dK);hipFree(dV);hipFree(dO);
+  free(hQ);free(hK);free(hV);free(hO);free(hRef);
+  return result;
+}
+
+int run_test_attn_multihead(const char* co) {
+  hipModule_t mod; hipFunction_t fn;
+  if (hipModuleLoad(&mod, co) != hipSuccess ||
+      hipModuleGetFunction(&fn, mod, "attn_multihead") != hipSuccess) {
+    printf("  attn_multihead:   LOAD FAILED\n"); return 1;
+  }
+  struct { int H,M,N,D; const char* label; } shapes[] = {
+    { 4,  8, 16,  8, "h4   8x 16x  8"},
+    { 2, 16, 32, 16, "h2  16x 32x 16"},
+    { 8,  4,  8, 16, "h8   4x  8x 16"},
+    { 1, 32, 64,  8, "h1  32x 64x  8"},
+  };
+  int nshapes = (int)(sizeof(shapes)/sizeof(shapes[0]));
+  int pass = 0;
+  for (int i = 0; i < nshapes; i++) {
+    int H=shapes[i].H, M=shapes[i].M, N=shapes[i].N, D=shapes[i].D;
+    int ok = check_attn_multihead_shape(fn, H, M, N, D);
+    int total = H*M*D;
+    if (ok < 0) printf("  attn_multihead %s: LAUNCH ERROR\n", shapes[i].label);
+    else if (ok < total) printf("  attn_multihead %s: %d/%d FAIL\n", shapes[i].label, ok, total);
+    else pass++;
+  }
+  printf("  attn_multihead:   %d/%d shapes PASS\n", pass, nshapes);
+  hipModuleUnload(mod);
+  return pass == nshapes ? 0 : 1;
+}
+
 int main() {
   printf("=== gfx1250 → gfx942 Transpiler Test Suite ===\n\n");
   int fails = 0;
@@ -603,7 +1060,12 @@ int main() {
   fails += run_test_recip_vals("/tmp/recip_vals_gfx1250.elf");
   fails += run_test_mag2d("/tmp/mag2d_gfx1250.elf");
   fails += run_test_matmul("/tmp/matmul_gfx1250.elf");
-  int total = 16;
+  fails += run_test_matmul_splitk("/tmp/matmul_splitk_compute_gfx1250.elf",
+                                   "/tmp/matmul_splitk_reduce_gfx1250.elf");
+  fails += run_test_softmax_row("/tmp/softmax_row_gfx1250.elf");
+  fails += run_test_attn_forward("/tmp/attn_forward_gfx1250.elf");
+  fails += run_test_attn_multihead("/tmp/attn_multihead_gfx1250.elf");
+  int total = 20;
   printf("\n%s: %d/%d tests passed\n", fails?"SOME FAILED":"ALL PASSED", total-fails, total);
   return fails;
 }
