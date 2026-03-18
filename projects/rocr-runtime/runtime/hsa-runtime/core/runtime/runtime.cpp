@@ -3441,7 +3441,7 @@ hsa_status_t Runtime::DmaBufExport(const void* ptr, size_t size, int* dmabuf, ui
 hsa_status_t Runtime::DmaBufClose(int dmabuf) {
 #ifdef __linux__
   int err;
-  if (fd >= 0) {
+  if (dmabuf >= 0) {
     err = close(dmabuf);
   }
   if (err == 0) return HSA_STATUS_SUCCESS;

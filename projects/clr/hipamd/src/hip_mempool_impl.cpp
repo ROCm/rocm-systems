@@ -8,6 +8,8 @@
 #include "hip_vm.hpp"
 #include "platform/command.hpp"
 
+#include <cinttypes>
+
 namespace hip {
 
 // ================================================================================================
@@ -493,15 +495,16 @@ amd::Os::FileDesc MemoryPool::Export() {
     return shared_->handle_;
   }
 
-  constexpr uint32_t kFileNameSize = 20;
+  constexpr uint32_t kFileNameSize = 24;
   char file_name[kFileNameSize];
   // Generate a unique name from the mempool pointer using process ID
   // Windows cannot support unnamed handles for global IPC without security attributes
   // For windows return the unique id to create filename on client for file mapping
-  static std::atomic<uint32_t> ipc_seq{1};
-  uint32_t ipc_id = (static_cast<uint32_t>(amd::Os::getProcessId()) << 16)
-                   | (ipc_seq.fetch_add(1) & 0xFFFF);
-  snprintf(file_name, kFileNameSize, "/hip_%08x", ipc_id);
+  static std::atomic<uint64_t> ipc_seq{1};
+  const uint64_t pid = static_cast<uint64_t>(amd::Os::getProcessId());
+  const uint64_t seq = ipc_seq.fetch_add(1, std::memory_order_relaxed);
+  const uint64_t ipc_id = (pid << 32) | seq;
+  snprintf(file_name, kFileNameSize, "/hip_%016" PRIx64, ipc_id);
   amd::Os::FileDesc handle{};
   shared_ = reinterpret_cast<SharedMemPool*>(
       amd::Os::CreateIpcMemory(file_name, sizeof(SharedMemPool), &handle));
@@ -517,7 +520,7 @@ amd::Os::FileDesc MemoryPool::Export() {
     }
   }
 #if defined(_WIN32)
-  return reinterpret_cast<amd::Os::FileDesc>(static_cast<uintptr_t>((ipc_id)));
+  return reinterpret_cast<amd::Os::FileDesc>(static_cast<uintptr_t>(ipc_id));
 #else
   return handle;
 #endif
@@ -529,11 +532,11 @@ bool MemoryPool::Import(amd::Os::FileDesc handle) {
   bool result = false;
 
 #if defined(_WIN32)
-  constexpr uint32_t kFileNameSize = 20;
+  constexpr uint32_t kFileNameSize = 24;
   char file_name[kFileNameSize];
   // Generate a unique name from the mempool pointer
-  uint32_t ipc_id = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(handle));
-  snprintf(file_name, kFileNameSize, "/hip_%08x", ipc_id);
+  const uint64_t ipc_id = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(handle));
+  snprintf(file_name, kFileNameSize, "/hip_%016" PRIx64, ipc_id);
 
   const void* addr = nullptr;
   if (!amd::Os::MemoryMapFileTruncated(file_name,
