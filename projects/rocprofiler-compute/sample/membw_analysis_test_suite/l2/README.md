@@ -32,7 +32,7 @@ Each workload targets specific TCC perfmon counters exposed in the new L2 metric
 | l2_coherence_traffic | NC_REQ, UC_REQ, CC_REQ, PROBE, PROBE_EVICT | `fg` mode: fine-grained memory (CC type) -> coherence protocol, internal probes. `nc` mode: `__builtin_nontemporal_store` -> NC traffic. | Coarse-grained memory with normal cached accesses. |
 | l2_multigpu_fabric | EA0_RDREQ_GMI_CREDIT_STALL, EA0_WRREQ_GMI_CREDIT_STALL, Remote Access Pressure (IF) | GPU 0 reads/writes memory on GPU 1 via P2P -> Infinity Fabric (GMI) credit exhaustion. | N/A (requires 2 GPUs) |
 | l2_io_stress | EA0_RDREQ_IO_CREDIT_STALL, EA0_WRREQ_IO_CREDIT_STALL | GPU kernel accesses host-pinned memory (hipHostMalloc) -> PCIe/IO credit exhaustion. | Same kernel on device-local memory. |
-| l2_normalized_throughput | All Normalized Stall Metrics (table 3007), All Throughput Metrics (table 3008), Combined Credit Pressure (table 3009) | Mixed R+W streaming over 4x L2 buffer, purely memory-bound. High stalls relative to GRBM_GUI_ACTIVE. | Compute-heavy FMA kernel with minimal memory -> near-zero normalized stalls. |
+| l2_normalized_throughput | All Normalized Stall Metrics (table 30.10), All Throughput Metrics (table 30.11), Combined Credit Pressure (table 30.12) | Mixed R+W streaming over 4x L2 buffer, purely memory-bound. High stalls relative to GRBM_GUI_ACTIVE. | Compute-heavy FMA kernel with minimal memory -> near-zero normalized stalls. |
 
 ### Expected Validation Results
 
