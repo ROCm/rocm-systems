@@ -968,7 +968,8 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
   // ─── v_add_nc_u64 → emulate with v_add_co_u32 + v_addc_co_u32 ───
   // GFX12: v_add_nc_u64 v[D:D+1], v[A:A+1], v[B:B+1] (single instruction)
   // GFX9: v_add_co_u32 vD, vcc, vA, vB + v_addc_co_u32 vD+1, vcc, vA+1, vB+1, vcc
-  if (mnemonic == "v_add_nc_u64" || mnemonic == "v_add_nc_u64_e32") {
+  if (mnemonic == "v_add_nc_u64" || mnemonic == "v_add_nc_u64_e32" ||
+      mnemonic == "v_add_u64" || mnemonic == "v_add_u64_e32") {
     std::string ops = line.substr(line.find(mnemonic) + mnemonic.size());
     // Parse: reg[D:D+1], reg[A:A+1], reg[B:B+1] where reg can be v or s
     auto parseRange = [](const std::string& s, size_t& pos) ->
@@ -2325,6 +2326,35 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
             << " waitcnt, " << stats->translated_exec
             << " exec-widened, " << stats->unsupported_skipped
             << " unsupported\n";
+
+  // Post-processing: fix any remaining GFX12-specific patterns that slipped through.
+  // This catches edge cases where the per-instruction handler didn't fire.
+  {
+    auto replaceAll = [](std::string& s, const std::string& from, const std::string& to) {
+      size_t pos = 0;
+      while ((pos = s.find(from, pos)) != std::string::npos) {
+        s.replace(pos, from.size(), to);
+        pos += to.size();
+      }
+    };
+    // v_add_nc_u32 → v_add_u32_e32 (may appear without _e32 from VOP3 encoding)
+    replaceAll(translated_asm, "v_add_nc_u32 ", "v_add_u32_e32 ");
+    replaceAll(translated_asm, "v_sub_nc_u32 ", "v_sub_u32_e32 ");
+    // v_bitop2_b32/v_bitop3_b32 → s_nop 0 (GFX12-only, no simple GFX9 equivalent)
+    // Replace entire lines containing v_bitop[23]_b32
+    std::istringstream iss(translated_asm);
+    std::string cleaned;
+    std::string asmline;
+    while (std::getline(iss, asmline)) {
+      if (asmline.find("v_bitop2_b32") != std::string::npos ||
+          asmline.find("v_bitop3_b32") != std::string::npos) {
+        cleaned += "s_nop 0 ; BITOP STUB\n";
+      } else {
+        cleaned += asmline + "\n";
+      }
+    }
+    translated_asm = cleaned;
+  }
 
   // Debug: dump translated assembly
   if (std::getenv("HSA_HOTSWAP_DUMP")) {
