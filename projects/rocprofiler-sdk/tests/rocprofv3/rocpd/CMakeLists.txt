@@ -308,7 +308,7 @@ rocprofiler_add_integration_validate_test(
 # Validate region category filtering
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-rocpd-region-category-validation
-    TEST_PATHS validate_region_categories.py
+    TEST_PATHS validate.py
     CONFIG pytest.ini
     ARGS --summary-kernel-dir
          ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary-kernel

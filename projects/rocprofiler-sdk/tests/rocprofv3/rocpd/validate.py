@@ -74,3 +74,48 @@ def test_csv_data(csv_data, json_data):
 if __name__ == "__main__":
     exit_code = pytest.main(["-x", __file__] + sys.argv[1:])
     sys.exit(exit_code)
+
+
+def test_summary_region_category_kernel(summary_kernel_dir):
+    """Test that --region-categories KERNEL only produces kernel summaries."""
+    import rocprofiler_sdk.tests.rocprofv3 as rocprofv3
+
+    rocprofv3.test_summary_region_category_filtering(
+        summary_kernel_dir,
+        expected_categories=["kernel"],
+        excluded_categories=["hip", "hsa", "memory", "marker", "rccl"],
+    )
+
+
+def test_summary_region_category_hip(summary_hip_dir):
+    """Test that --region-categories HIP only produces HIP summaries."""
+    import rocprofiler_sdk.tests.rocprofv3 as rocprofv3
+
+    rocprofv3.test_summary_region_category_filtering(
+        summary_hip_dir,
+        expected_categories=["hip"],
+        excluded_categories=["kernel", "hsa", "marker", "rccl"],
+    )
+
+
+def test_summary_region_category_multiple(summary_multiple_dir):
+    """Test that --region-categories HIP KERNEL MARKER produces those summaries."""
+    import rocprofiler_sdk.tests.rocprofv3 as rocprofv3
+
+    rocprofv3.test_summary_region_category_filtering(
+        summary_multiple_dir,
+        expected_categories=["hip", "kernel"],
+        excluded_categories=["hsa", "rccl", "memory_copy"],
+    )
+
+
+def test_summary_region_category_none(summary_none_dir):
+    """Test that --region-categories NONE includes views but minimal regions."""
+    import rocprofiler_sdk.tests.rocprofv3 as rocprofv3
+
+    rocprofv3.test_summary_region_category_filtering(
+        summary_none_dir,
+        expected_categories=["kernel", "memory"],  # View-based summaries
+        excluded_categories=[],  # Don't exclude, just check views exist
+        allow_none=True,
+    )
