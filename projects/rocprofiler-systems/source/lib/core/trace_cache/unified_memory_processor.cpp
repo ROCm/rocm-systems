@@ -20,11 +20,9 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <stdexcept>  // Must be before unified_memory_processor.hpp
-
+#include "core/trace_cache/unified_memory_processor.hpp"
 #include "core/config.hpp"
 #include "core/defines.hpp"
-#include "core/trace_cache/unified_memory_processor.hpp"
 #include "logger/debug.hpp"
 
 #include <cstdlib>

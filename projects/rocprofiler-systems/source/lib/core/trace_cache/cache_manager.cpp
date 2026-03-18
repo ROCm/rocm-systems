@@ -423,28 +423,23 @@ configure_processors(const std::shared_ptr<sample_processor_t>&       _type_proc
         _type_processing->add_handler(*processor_storage.perfetto_processor);
     }
 
-    // Add unified memory processor if enabled
     auto unified_memory_enabled =
         config::get_setting_value<bool>("ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING");
     if(unified_memory_enabled.value_or(false))
     {
-        // Determine output directory - works regardless of whether rocpd is enabled
         std::string output_dir;
         if(_enabled_formats.is_perfetto_enabled())
         {
-            // Use perfetto output directory
             output_dir = tim::filepath::dirname(config::get_perfetto_output_filename());
         }
         else if(_enabled_formats.is_rocpd_enabled())
         {
-            // Use rocpd database directory
             auto db_path = config::get_database_absolute_path(
                 "rocpd", std::to_string(_processor_config->_pid));
             output_dir = tim::filepath::dirname(db_path);
         }
         else
         {
-            // Fallback: use current working directory or configured output path
             auto perfetto_path = config::get_perfetto_output_filename();
             output_dir         = tim::filepath::dirname(perfetto_path);
         }

@@ -344,6 +344,11 @@ configure_settings(bool _init)
     ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_USE_ROCPD", "Enable rocpd backend", false,
                               "backend", "rocpd");
 
+    ROCPROFSYS_CONFIG_SETTING(
+        bool, "ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING",
+        "Enable unified memory profiling (requires HSA_XNACK=1 and KFD tracing)", false,
+        "backend", "unified_memory", "kfd");
+
     ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_USE_AMD_SMI",
                               "Enable sampling GPU power, temp, utilization, "
                               "vcn_activity, jpeg_activity and memory usage",

@@ -1439,7 +1439,6 @@ perfetto_processor_t::handle(const kfd_sample& _kfd)
     {
         emit_kfd_event(category::kfd_page_fault{});
 
-        // Emit page fault counter
         if(!unified_memory_fault_rate_track::exists(_kfd.device_id))
         {
             auto track_name =
@@ -1450,13 +1449,12 @@ perfetto_processor_t::handle(const kfd_sample& _kfd)
         }
         TRACE_COUNTER(trait::name<category::unified_memory_fault_rate>::value,
                       unified_memory_fault_rate_track::at(_kfd.device_id, 0), _end_ts,
-                      1.0);  // Increment counter by 1
+                      1.0);
     }
     else if(_category == trait::name<category::kfd_page_migrate>::value)
     {
         emit_kfd_event(category::kfd_page_migrate{});
 
-        // Emit bandwidth counter
         auto duration_ns = _end_ts - _beg_ts;
         if(duration_ns > 0)
         {
@@ -1469,9 +1467,7 @@ perfetto_processor_t::handle(const kfd_sample& _kfd)
                     trait::name<category::unified_memory_bandwidth>::value);
             }
 
-            // Calculate bandwidth: _kfd.value is size in bytes
-            double bandwidth_gbps =
-                (_kfd.value / static_cast<double>(duration_ns));  // bytes/ns = GB/s
+            double bandwidth_gbps = (_kfd.value / static_cast<double>(duration_ns));
             TRACE_COUNTER(trait::name<category::unified_memory_bandwidth>::value,
                           unified_memory_bandwidth_track::at(_kfd.device_id, 0), _end_ts,
                           bandwidth_gbps);
