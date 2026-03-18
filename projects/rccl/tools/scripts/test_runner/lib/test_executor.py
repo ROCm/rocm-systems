@@ -645,9 +645,6 @@ class TestExecutor:
             self.test_durations.append(result["duration"])
             self.test_suites.append(suite_name)
 
-        if self.args.verbose and skipped_count > 0:
-            print(f"  Skipped {skipped_count} test(s) due to --test-name filter")
-
             # If test failed and rerun flag is set, rerun immediately
             if self.args.rerun_failed and result["result"] in [TestResult.RESULT_FAILED.value, TestResult.RESULT_TIMEOUT.value]:
                 # Get rerun_env_variables from suite config or test config
@@ -701,6 +698,9 @@ class TestExecutor:
                 else:
                     if self.args.verbose:
                         print(f"SKIP: No rerun_env_variables defined for failed test '{test_name}'")
+
+        if self.args.verbose and skipped_count > 0:
+            print(f"  Skipped {skipped_count} test(s) due to --test-name filter")
 
         return results
 
