@@ -41,6 +41,7 @@ run_tests_all=false
 time_trace=false
 force_reduce_pipeline=false
 generate_sym_kernels=false
+device_linker=false
 warp_speed_enabled=true # note that this flag will be overridden to false for non MI350/MI300 platforms
 quiet_warnings=false
 build_rocshmem_support=false
@@ -88,6 +89,7 @@ function display_help()
     echo "       --verbose               Show compile commands"
     echo "       --force-reduce-pipeline Force reduce_copy sw pipeline to be used for every reduce-based collectives and datatypes"
     echo "       --generate-sym-kernels  Generate symmetric memory kernels"
+    echo "       --device-linker         Build with assembly-extract device linker (no -fgpu-rdc)"
     echo "    -q|--quiet-warnings        Suppress majority of compiler warnings (not recommended)"
     echo "       --rocshmem              Build with rocSHMEM support"
     echo "       --cmake-options         Pass additional CMake options (e.g. --cmake-options \"-DFOO=BAR -DBAZ=ON\")"
@@ -124,7 +126,7 @@ function display_help()
 # check if we have a modern version of getopt that can handle whitespace and long parameters
 getopt -T
 if [[ "$?" -eq 4 ]]; then
-    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtq --longoptions address-sanitizer,dependencies,debug,debug-fast,dump-asm,enable-code-coverage,enable_backtrace,disable-colltrace,disable-msccl-kernel,enable-mscclpp,enable-mpi-tests,fast,help,install,jobs:,kernel-resource-use,local_gpu_only,amdgpu_targets:,no_clean,npkit-enable,log-trace,openmp-test-enable,roctx-enable,package_build,prefix:,rm-legacy-include-dir,run_tests_all,run_tests_quick,static,tests_build,time-trace,force-reduce-pipeline,generate-sym-kernels,quiet-warnings,disable-warp-speed,verbose,rocshmem,cmake-options: -- "$@")
+    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtq --longoptions address-sanitizer,dependencies,debug,debug-fast,device-linker,dump-asm,enable-code-coverage,enable_backtrace,disable-colltrace,disable-msccl-kernel,enable-mscclpp,enable-mpi-tests,fast,help,install,jobs:,kernel-resource-use,local_gpu_only,amdgpu_targets:,no_clean,npkit-enable,log-trace,openmp-test-enable,roctx-enable,package_build,prefix:,rm-legacy-include-dir,run_tests_all,run_tests_quick,static,tests_build,time-trace,force-reduce-pipeline,generate-sym-kernels,quiet-warnings,disable-warp-speed,verbose,rocshmem,cmake-options: -- "$@")
 else
     echo "Need a new version of getopt"
     exit 1
@@ -147,6 +149,7 @@ while true; do
          --enable_backtrace)         build_bfd=true;                                                                                   shift ;;
          --disable-colltrace)        collective_trace=false;                                                                           shift ;;
          --disable-msccl-kernel)     msccl_kernel_enabled=false;                                                                       shift ;;
+         --device-linker)             device_linker=true;                                                                               shift ;;
          --dump-asm)                 dump_asm=true;                                                                                    shift ;;
          --enable-mscclpp)           mscclpp_enabled=true;                                                                             shift ;;
          --enable-mscclpp-clip)      enable_mscclpp_clip=true;                                                                         shift ;;
@@ -421,6 +424,11 @@ fi
 # Generate symmetric memory kernels
 if [[ "${generate_sym_kernels}" == true ]]; then
     cmake_common_options="${cmake_common_options} -DGENERATE_SYM_KERNELS=ON"
+fi
+
+# Device linker (assembly-extract pipeline, no -fgpu-rdc)
+if [[ "${device_linker}" == true ]]; then
+    cmake_common_options="${cmake_common_options} -DENABLE_DEVICE_LINKER=ON"
 fi
 
 # Enable NPKit

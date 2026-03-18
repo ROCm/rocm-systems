@@ -189,11 +189,12 @@ struct ncclShmemData {
   uint64_t barrier_pat;
 };
 
-extern __shared__ ncclShmemData ncclShmem;
-#if __CUDA_ARCH__ >= 700
-  extern __shared__ ulong2 ncclShmemPerWarp[/*ncclShmemDynamicSize()/sizeof(ulong2)*/];
+#ifdef NCCL_DEFINE_SHMEM
+__shared__ ulong2 ncclShmemPerWarp[ncclShmemScratchWarpSize()*(NCCL_MAX_NTHREADS/WARP_SIZE)/sizeof(ulong2)];
+__shared__ ncclShmemData ncclShmem;
 #else
-  extern __shared__ ulong2 ncclShmemPerWarp[ncclShmemScratchWarpSize()*(NCCL_MAX_NTHREADS/WARP_SIZE)/sizeof(ulong2)];
+extern __shared__ ulong2 ncclShmemPerWarp[ncclShmemScratchWarpSize()*(NCCL_MAX_NTHREADS/WARP_SIZE)/sizeof(ulong2)];
+extern __shared__ ncclShmemData ncclShmem;
 #endif
 
 #ifdef ENABLE_FAULT_INJECTION

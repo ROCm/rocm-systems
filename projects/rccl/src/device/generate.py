@@ -624,3 +624,60 @@ if is_msccl_kernels:
             "MSCCL_IMPL_KERNEL_ENTRY_FUNC_DEVREDOP_TYPE({redop}, {ty_cxx}, false);\n"
             .format(redop=redop, ty_cxx=ty_to_cxx[ty])
           )
+
+################################################################################
+# Generate per-function specialized kernel .cpp files for the parallel build.
+# Each file contains one device function + a kernel wrapper that calls it,
+# enabling the compiler to optimize the device function in kernel context
+# (LDS allocation, barriers, etc.) while keeping it as a separate linkable symbol.
+
+specialized_dir = os.path.join(gensrc, "specialized")
+if not os.path.exists(specialized_dir):
+  os.makedirs(specialized_dir)
+else:
+  for name in os.listdir(specialized_dir):
+    os.remove(os.path.join(specialized_dir, name))
+
+specialized_filelist = []
+for fn in primary_funcs:
+  if fn.coll == "Nop":
+    continue
+  sym = paste("_", fn.coll, fn.algo, fn.proto, fn.redop, fn.ty, fn.acc, fn.pipeline, fn.unroll)
+  func_name = "ncclDevFunc_" + sym
+  lower_coll = coll_camel_to_lower[fn.coll]
+  guard = get_arch_guard(fn)
+
+  filename = "specialized_%s.cpp" % sym.lower()
+  filepath = os.path.join(specialized_dir, filename)
+  specialized_filelist.append((filename, func_name, guard))
+
+  with open(filepath, "w") as f:
+    out = f.write
+    out('#define NCCL_DEFINE_SHMEM\n')
+    out('#include "common.h"\n')
+    out('#include "%s.h"\n\n' % lower_coll)
+    if guard:
+      out("#if %s\n" % guard)
+    out(
+      "DEFINE_ncclDevFunc({sym}, ncclFunc{coll}, {redop_cxx}, {ty_cxx}, "
+      "NCCL_ALGO_{algo}, NCCL_PROTO_{proto}, {acc}, {pipeline}, {unroll})\n\n"
+      "__launch_bounds__(NCCL_MAX_NTHREADS, 1)\n"
+      "__global__ void ncclDevKernel_{sym}_Specialized(\n"
+      "    ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {{\n"
+      "  ncclShmemPerWarp[0].x = 0;\n"
+      "  {func_name}();\n"
+      "}}\n"
+      .format(sym=sym, coll=fn.coll, redop_cxx=redop_to_cxx[fn.redop],
+              ty_cxx=ty_to_cxx[fn.ty], algo=(fn.algo or "RING"),
+              proto=(fn.proto or "SIMPLE"), acc=fn.acc, pipeline=fn.pipeline,
+              unroll=fn.unroll, func_name=func_name)
+    )
+    if guard:
+      out("#endif\n")
+
+# Write the list of specialized files for CMake consumption
+with open(os.path.join(gensrc, "specialized_files.txt"), "w") as f:
+  for filename, func_name, guard in specialized_filelist:
+    f.write("%s %s %s\n" % (filename, func_name, guard or ""))
+
+print("-- Generated %d specialized kernel files in %s" % (len(specialized_filelist), specialized_dir))
