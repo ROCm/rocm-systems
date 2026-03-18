@@ -586,7 +586,7 @@ void testReduceForTileSize()
 }
 
 
-TEMPLATE_TEST_CASE("Unit_Thread_Block_Tile_Reduce_Basic", "", int)
+TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Reduce_Basic, int)
 {
   unsigned int wavefrontSize = getWarpSize();
 
@@ -614,7 +614,7 @@ void __global__ partialSum(int* result)
 }
 
 // Not all the threads of a tile have to participate in a reduce (unlike reduce sync operations)
-TEST_CASE("Unit_Thread_Block_Tile_Reduce_Non_Participating_Threads")
+TEST_CASE(Unit_Thread_Block_Tile_Reduce_Non_Participating_Threads)
 {
   LinearAllocGuard<int> h_result(LinearAllocs::malloc, sizeof(int));
   LinearAllocGuard<int> d_result(LinearAllocs::hipMalloc, sizeof(int));
@@ -814,7 +814,7 @@ void runReduceRandomForOps(const std::tuple<Op, Ops...>)
 
 // for all the tile sizes and all input types, using random input values, calculates the reduce()
 // values. Additionally, randomly make some threads not participate
-TEMPLATE_TEST_CASE("Unit_Thread_Block_Tile_Reduce_Random_arithmetic", "", int, unsigned int, long long,
+TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Reduce_Random_arithmetic, int, unsigned int, long long,
                    unsigned long long, float, half, double)
 {
   std::tuple<cooperative_groups::plus<TestType>,
@@ -828,7 +828,7 @@ TEMPLATE_TEST_CASE("Unit_Thread_Block_Tile_Reduce_Random_arithmetic", "", int, u
   }
 }
 
-TEMPLATE_TEST_CASE("Unit_Thread_Block_Tile_Reduce_Random_boolean", "", int, unsigned int, long long,
+TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Reduce_Random_boolean, int, unsigned int, long long,
                    unsigned long long)
 {
   std::tuple<cooperative_groups::bit_and<TestType>,
@@ -843,7 +843,7 @@ TEMPLATE_TEST_CASE("Unit_Thread_Block_Tile_Reduce_Random_boolean", "", int, unsi
 }
 
 // passes a custom operator to cooperative_groups::reduce()
-TEST_CASE("Unit_Thread_Block_Tile_Reduce_Custom_Op")
+TEST_CASE(Unit_Thread_Block_Tile_Reduce_Custom_Op)
 {
   if (getWarpSize() == 32) {
     runReduceRandomForType<false, MaxOfAbsolute<int>, int, 32>();
@@ -882,7 +882,7 @@ void __global__ maxMagnitude(Vector* result)
 }
 
 // tests that we can pass trivially copyable structs as values to reduce
-TEST_CASE("Unit_Thread_Block_Tile_Reduce_Trivially_Copyable_Parameters")
+TEST_CASE(Unit_Thread_Block_Tile_Reduce_Trivially_Copyable_Parameters)
 {
   LinearAllocGuard<Vector> h_result(LinearAllocs::malloc, sizeof(Vector));
   LinearAllocGuard<Vector> d_result(LinearAllocs::hipMalloc, sizeof(Vector));
@@ -989,7 +989,7 @@ void testReduceSizes()
 
 // we allow any reduction size of T of up to 32 bytes; this tests that reduction works with user-defined
 // types in that range; including non-powers of two
-TEST_CASE("Unit_Thread_Block_Tile_Reduce_All_Parameter_Sizes")
+TEST_CASE(Unit_Thread_Block_Tile_Reduce_All_Parameter_Sizes)
 {
   SECTION("sum") {
     testReduceSizes<32, Sum>();
@@ -1000,7 +1000,7 @@ TEST_CASE("Unit_Thread_Block_Tile_Reduce_All_Parameter_Sizes")
   }
 }
 
-TEMPLATE_TEST_CASE("Unit_Thread_Block_Coalesced_Reduce_arithmetic", "", int, unsigned int, long long,
+TEMPLATE_TEST_CASE(Unit_Thread_Block_Coalesced_Reduce_arithmetic, int, unsigned int, long long,
                    unsigned long long, float, half, double)
 {
   std::tuple<cooperative_groups::plus<TestType>,
@@ -1015,7 +1015,7 @@ TEMPLATE_TEST_CASE("Unit_Thread_Block_Coalesced_Reduce_arithmetic", "", int, uns
 }
 
 
-TEMPLATE_TEST_CASE("Unit_Thread_Block_Coalesced_Reduce_boolean", "", int, unsigned int, long long, unsigned long long)
+TEMPLATE_TEST_CASE(Unit_Thread_Block_Coalesced_Reduce_boolean, int, unsigned int, long long, unsigned long long)
 {
   std::tuple<cooperative_groups::bit_and<TestType>,
              cooperative_groups::bit_or<TestType>,
