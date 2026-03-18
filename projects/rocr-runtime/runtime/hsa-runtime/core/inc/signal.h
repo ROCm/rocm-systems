@@ -111,7 +111,8 @@ inline void DoMwaitx(int64_t* addr, int64_t val_on_last_check, uint32_t timeout,
   if (atomic::Load(addr, std::memory_order_relaxed) != val_on_last_check) {
     return;
   }
-  _mm_mwaitx(0, timeout, timer_enable ? MWAITX_ECX_TIMER_ENABLE : 0);
+  // args are extensions (ecx), hints (eax), clock (ebx)
+  _mm_mwaitx(timer_enable ? MWAITX_ECX_TIMER_ENABLE : 0, 0, timeout);
 #endif
 }
 } // namespace timer
