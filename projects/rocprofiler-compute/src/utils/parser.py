@@ -262,11 +262,12 @@ def to_concat(a: Any, b: Any) -> str:  # noqa: ANN401
 
 class NoiseClamper:
     """
-    Tracks and clamps negative values from multi-pass counter variance.
+    Tracks and clamps values to [0, reference] from multi-pass counter variance.
 
-    Negative counts are physically impossible - they result from run-to-run
+    Values outside the valid range [0, reference] result from run-to-run
     variance when counters are collected across multiple profiling passes.
-    This class clamps negatives to 0 and tracks deviations for diagnostics.
+    This class clamps negatives to 0, clamps values exceeding the reference
+    to the reference, and tracks deviations for diagnostics.
     """
 
     WARN_THRESHOLD = 0.01  # 1% relative error threshold
@@ -280,7 +281,7 @@ class NoiseClamper:
         difference: Union[pd.Series, float, np.ndarray],
         reference: Union[pd.Series, float, np.ndarray],
     ) -> Union[pd.Series, float, np.ndarray]:
-        """Clamp negative values to 0 and track significant deviations."""
+        """Clamp values to [0, reference] and track significant deviations."""
         if difference is None or (np.isscalar(difference) and pd.isna(difference)):
             return np.nan
         if np.isscalar(difference):
@@ -288,29 +289,56 @@ class NoiseClamper:
         return self._clamp_array(difference, reference)
 
     def _clamp_scalar(self, difference: float, reference: float) -> float:
-        """Clamp a single scalar value."""
-        if difference >= 0:
-            return difference
-        rel_error = self._compute_relative_error(abs(difference), reference)
-        self._record_if_significant(1, rel_error)
-        return 0.0
+        """Clamp a single scalar value to [0, reference]."""
+        if difference < 0:
+            rel_error = self._compute_relative_error(abs(difference), reference)
+            self._record_if_significant(1, rel_error)
+            return 0.0
+        if difference > reference:
+            excess = difference - reference
+            rel_error = self._compute_relative_error(excess, reference)
+            self._record_if_significant(1, rel_error)
+            return float(reference)
+        return difference
 
     def _clamp_array(
         self,
         difference: Union[pd.Series, np.ndarray],
         reference: Union[pd.Series, np.ndarray, float],
     ) -> Union[pd.Series, np.ndarray]:
-        """Clamp negative values in an array or Series."""
+        """Clamp values in an array or Series to [0, reference]."""
         result = difference.copy()
+
         negative_mask = result < 0
+        if np.any(negative_mask):
+            safe_ref = self._make_safe_reference(reference)
+            rel_errors = self._compute_relative_errors(result, negative_mask, safe_ref)
+            result = self._apply_clamp(result, negative_mask)
+            self._record_significant_deviations(rel_errors)
 
-        if not np.any(negative_mask):
-            return result
-
-        safe_ref = self._make_safe_reference(reference)
-        rel_errors = self._compute_relative_errors(result, negative_mask, safe_ref)
-        result = self._apply_clamp(result, negative_mask)
-        self._record_significant_deviations(rel_errors)
+        exceed_mask = result > reference
+        if np.any(exceed_mask):
+            safe_ref = self._make_safe_reference(reference)
+            ref_vals = (
+                safe_ref[exceed_mask]
+                if hasattr(safe_ref, "__getitem__") and not np.isscalar(safe_ref)
+                else safe_ref
+            )
+            excess = result[exceed_mask] - (
+                reference[exceed_mask]
+                if hasattr(reference, "__getitem__") and not np.isscalar(reference)
+                else reference
+            )
+            rel_errors = np.abs(excess) / np.abs(ref_vals)
+            self._record_significant_deviations(rel_errors)
+            if isinstance(result, pd.Series):
+                result.loc[exceed_mask] = (
+                    reference if np.isscalar(reference) else reference[exceed_mask]
+                )
+            else:
+                result[exceed_mask] = (
+                    reference if np.isscalar(reference) else reference[exceed_mask]
+                )
 
         return result
 
@@ -400,7 +428,7 @@ def to_noise_clamp(
     difference: Union[pd.Series, float, np.ndarray],
     reference: Union[pd.Series, float, np.ndarray],
 ) -> Union[pd.Series, float, np.ndarray]:
-    """Clamp negative values from multi-pass variance. Delegates to global tracker."""
+    """Clamp to [0, reference] for multi-pass variance."""
     return _noise_clamper.clamp(difference, reference)
 
 
