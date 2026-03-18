@@ -4131,26 +4131,32 @@ gfx9_4_architecture_t::register_read_only_mask (amdgpu_regnum_t regnum) const
   switch (regnum)
     {
     case amdgpu_regnum_t::trapsts:
-      static uint32_t trapsts_read_only_bits
-        = (utils::bit_mask<uint32_t> (9, 9)       /* 0 */
-           | utils::bit_mask<uint32_t> (15, 15)   /* 0 */
-           | utils::bit_mask<uint32_t> (27, 27)); /* 0 */
-      return &trapsts_read_only_bits;
+      {
+        static uint32_t trapsts_read_only_bits
+          = (utils::bit_mask<uint32_t> (9, 9)       /* 0 */
+             | utils::bit_mask<uint32_t> (15, 15)   /* 0 */
+             | utils::bit_mask<uint32_t> (27, 27)); /* 0 */
+        return &trapsts_read_only_bits;
+      }
 
     case amdgpu_regnum_t::mode:
-      static uint32_t mode_read_only_bits
-        = utils::bit_mask<uint32_t> (22, 22); /* 0 */
-      return &mode_read_only_bits;
+      {
+        static uint32_t mode_read_only_bits
+          = utils::bit_mask<uint32_t> (22, 22); /* 0 */
+        return &mode_read_only_bits;
+      }
 
     case amdgpu_regnum_t::pseudo_status:
-      static uint32_t status_read_only_bits
-        = (utils::bit_mask<uint32_t> (5, 7)       /* priv, trap_en, ttrace_en */
-           | utils::bit_mask<uint32_t> (9, 12)    /* execz, vccz, in_tg, in_barrier */
-           | utils::bit_mask<uint32_t> (14, 16)   /* trap, ttrace_cu_en, valid */
-           | utils::bit_mask<uint32_t> (18, 19)   /* skip_export, perf_en */
-           | utils::bit_mask<uint32_t> (22, 26)   /* allow_replay, fatal_halt, 0 */
-           | utils::bit_mask<uint32_t> (29, 30)); /* 0 */
-      return &status_read_only_bits;
+      {
+        static uint32_t status_read_only_bits
+          = (utils::bit_mask<uint32_t> (5, 7)       /* priv, trap_en, ttrace_en */
+             | utils::bit_mask<uint32_t> (9, 12)    /* execz, vccz, in_tg, in_barrier */
+             | utils::bit_mask<uint32_t> (14, 16)   /* trap, ttrace_cu_en, valid */
+             | utils::bit_mask<uint32_t> (18, 19)   /* skip_export, perf_en */
+             | utils::bit_mask<uint32_t> (22, 26)   /* allow_replay, fatal_halt, 0 */
+             | utils::bit_mask<uint32_t> (29, 30)); /* 0 */
+        return &status_read_only_bits;
+      }
 
     default:
       return gfx90a_t::register_read_only_mask (regnum);
