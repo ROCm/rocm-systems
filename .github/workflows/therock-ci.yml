@@ -3,8 +3,7 @@ name: TheRock CI
 on:
   push:
     branches:
-      - develop
-      - release/therock-*
+      - release/therock-7.12
   pull_request:
     types:
       - opened
