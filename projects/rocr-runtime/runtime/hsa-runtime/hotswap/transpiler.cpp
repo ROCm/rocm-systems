@@ -921,35 +921,38 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
   // GFX9: v_add_co_u32 vD, vcc, vA, vB + v_addc_co_u32 vD+1, vcc, vA+1, vB+1, vcc
   if (mnemonic == "v_add_nc_u64" || mnemonic == "v_add_nc_u64_e32") {
     std::string ops = line.substr(line.find(mnemonic) + mnemonic.size());
-    // Parse: v[D:D+1], v[A:A+1], v[B:B+1]
-    auto parseRange = [](const std::string& s, size_t& pos) -> std::pair<int,int> {
+    // Parse: reg[D:D+1], reg[A:A+1], reg[B:B+1] where reg can be v or s
+    auto parseRange = [](const std::string& s, size_t& pos) ->
+        std::tuple<char, int, int> {
       while (pos < s.size() && (s[pos]==' '||s[pos]==','||s[pos]=='\t')) ++pos;
-      if (pos >= s.size() || s[pos] != 'v') return {-1,-1};
+      if (pos >= s.size()) return {'?', -1, -1};
+      char prefix = s[pos];
+      if (prefix != 'v' && prefix != 's') return {'?', -1, -1};
       ++pos;
       if (pos < s.size() && s[pos] == '[') {
-        ++pos; int lo=0,hi=0;
+        ++pos; int lo=0, hi=0;
         while (pos<s.size()&&s[pos]>='0'&&s[pos]<='9') lo=lo*10+(s[pos++]-'0');
         if (pos<s.size()&&s[pos]==':') ++pos;
         while (pos<s.size()&&s[pos]>='0'&&s[pos]<='9') hi=hi*10+(s[pos++]-'0');
         if (pos<s.size()&&s[pos]==']') ++pos;
-        return {lo,hi};
+        return {prefix, lo, hi};
       }
-      return {-1,-1};
+      return {'?', -1, -1};
+    };
+    auto fmt = [](char p, int n) -> std::string {
+      return std::string(1, p) + std::to_string(n);
     };
     size_t pos = 0;
-    auto d = parseRange(ops, pos);
-    auto a = parseRange(ops, pos);
-    auto b = parseRange(ops, pos);
-    if (d.first >= 0 && a.first >= 0 && b.first >= 0) {
-      result.push_back("v_add_co_u32_e32 v" + std::to_string(d.first) +
-                        ", vcc, v" + std::to_string(a.first) +
-                        ", v" + std::to_string(b.first));
-      result.push_back("v_addc_co_u32_e32 v" + std::to_string(d.second) +
-                        ", vcc, v" + std::to_string(a.second) +
-                        ", v" + std::to_string(b.second) + ", vcc");
+    auto [dp, d0, d1] = parseRange(ops, pos);
+    auto [ap, a0, a1] = parseRange(ops, pos);
+    auto [bp, b0, b1] = parseRange(ops, pos);
+    if (d0 >= 0 && a0 >= 0 && b0 >= 0) {
+      result.push_back("v_add_co_u32_e32 " + fmt(dp,d0) +
+                        ", vcc, " + fmt(ap,a0) + ", " + fmt(bp,b0));
+      result.push_back("v_addc_co_u32_e32 " + fmt(dp,d1) +
+                        ", vcc, " + fmt(ap,a1) + ", " + fmt(bp,b1) + ", vcc");
       return result;
     }
-    // Fallback: NOP
     result.push_back("s_nop 0 ; UNSUPPORTED: " + line);
     return result;
   }
@@ -1524,7 +1527,7 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
   if (mnemonic.find("_nc_") != std::string::npos && mnemonic[0] == 'v') {
     std::string fixed_mnem = mnemonic;
     size_t nc_pos = fixed_mnem.find("_nc_");
-    fixed_mnem.erase(nc_pos, 3);  // remove "_nc" (keep the trailing _)
+    fixed_mnem.replace(nc_pos, 4, "_");  // "_nc_" → "_" (v_add_nc_u32 → v_add_u32)
     line = ReplaceMnemonic(line, mnemonic, fixed_mnem);
     mnemonic = fixed_mnem;
   }
