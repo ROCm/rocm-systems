@@ -480,7 +480,7 @@ Panel Config:
             + (TCC_EA0_RDREQ_128B_sum * 128))) / (SUM(End_Timestamp - Start_Timestamp)))
           unit: GB/s
         L2-EA write and atomic BW:
-          value: ((SUM((TCC_EA0_WRREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum)
+          value: ((SUM((TCC_EA0_WRREQ_64B_sum * 64) + (NOISE_CLAMP((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum), TCC_EA0_WRREQ_sum)
             * 32))) / (SUM(End_Timestamp - Start_Timestamp)))
           unit: GB/s
         HBM read fraction:
