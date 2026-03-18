@@ -14,9 +14,9 @@ Panel Config:
         unit: Unit
       metric:
         Address Processing Unit Busy:
-          avg: AVG(((100 * TA_TA_BUSY_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
-          min: MIN(((100 * TA_TA_BUSY_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
-          max: MAX(((100 * TA_TA_BUSY_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
+          avg: AVG(NOISE_CLAMP(((100 * TA_TA_BUSY_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)), 100))
+          min: MIN(NOISE_CLAMP(((100 * TA_TA_BUSY_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)), 100))
+          max: MAX(NOISE_CLAMP(((100 * TA_TA_BUSY_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)), 100))
           unit: Percent
         Address Stall:
           avg: AVG(((100 * TA_ADDR_STALLED_BY_TC_CYCLES_sum) / ($GRBM_GUI_ACTIVE_PER_XCD
@@ -27,12 +27,12 @@ Panel Config:
             * $cu_per_gpu)))
           unit: Percent
         Data Stall:
-          avg: AVG(((100 * TA_DATA_STALLED_BY_TC_CYCLES_sum) / ($GRBM_GUI_ACTIVE_PER_XCD
-            * $cu_per_gpu)))
-          min: MIN(((100 * TA_DATA_STALLED_BY_TC_CYCLES_sum) / ($GRBM_GUI_ACTIVE_PER_XCD
-            * $cu_per_gpu)))
-          max: MAX(((100 * TA_DATA_STALLED_BY_TC_CYCLES_sum) / ($GRBM_GUI_ACTIVE_PER_XCD
-            * $cu_per_gpu)))
+          avg: AVG(NOISE_CLAMP(((100 * TA_DATA_STALLED_BY_TC_CYCLES_sum) / ($GRBM_GUI_ACTIVE_PER_XCD
+            * $cu_per_gpu)), 100))
+          min: MIN(NOISE_CLAMP(((100 * TA_DATA_STALLED_BY_TC_CYCLES_sum) / ($GRBM_GUI_ACTIVE_PER_XCD
+            * $cu_per_gpu)), 100))
+          max: MAX(NOISE_CLAMP(((100 * TA_DATA_STALLED_BY_TC_CYCLES_sum) / ($GRBM_GUI_ACTIVE_PER_XCD
+            * $cu_per_gpu)), 100))
           unit: Percent
         "Data-Processor \u2192 Address Stall":
           avg: AVG(((100 * TA_ADDR_STALLED_BY_TD_CYCLES_sum) / ($GRBM_GUI_ACTIVE_PER_XCD
@@ -133,14 +133,14 @@ Panel Config:
         unit: Unit
       metric:
         Data-Return Busy:
-          avg: AVG(((100 * TD_TD_BUSY_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
-          min: MIN(((100 * TD_TD_BUSY_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
-          max: MAX(((100 * TD_TD_BUSY_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
+          avg: AVG(NOISE_CLAMP(((100 * TD_TD_BUSY_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)), 100))
+          min: MIN(NOISE_CLAMP(((100 * TD_TD_BUSY_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)), 100))
+          max: MAX(NOISE_CLAMP(((100 * TD_TD_BUSY_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)), 100))
           unit: Percent
         "Cache RAM \u2192 Data-Return Stall":
-          avg: AVG(((100 * TD_TC_STALL_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
-          min: MIN(((100 * TD_TC_STALL_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
-          max: MAX(((100 * TD_TC_STALL_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
+          avg: AVG(NOISE_CLAMP(((100 * TD_TC_STALL_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)), 100))
+          min: MIN(NOISE_CLAMP(((100 * TD_TC_STALL_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)), 100))
+          max: MAX(NOISE_CLAMP(((100 * TD_TC_STALL_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)), 100))
           unit: Percent
         Coalescable Instructions:
           avg: AVG((TD_COALESCABLE_WAVEFRONT_sum / $denom))
@@ -148,12 +148,12 @@ Panel Config:
           max: MAX((TD_COALESCABLE_WAVEFRONT_sum / $denom))
           unit: (Instructions + $normUnit)
         Read Instructions:
-          avg: AVG((((TD_LOAD_WAVEFRONT_sum - TD_STORE_WAVEFRONT_sum) - TD_ATOMIC_WAVEFRONT_sum)
-            / $denom))
-          min: MIN((((TD_LOAD_WAVEFRONT_sum - TD_STORE_WAVEFRONT_sum) - TD_ATOMIC_WAVEFRONT_sum)
-            / $denom))
-          max: MAX((((TD_LOAD_WAVEFRONT_sum - TD_STORE_WAVEFRONT_sum) - TD_ATOMIC_WAVEFRONT_sum)
-            / $denom))
+          avg: AVG((NOISE_CLAMP(((TD_LOAD_WAVEFRONT_sum - TD_STORE_WAVEFRONT_sum)
+            - TD_ATOMIC_WAVEFRONT_sum), TD_LOAD_WAVEFRONT_sum) / $denom))
+          min: MIN((NOISE_CLAMP(((TD_LOAD_WAVEFRONT_sum - TD_STORE_WAVEFRONT_sum)
+            - TD_ATOMIC_WAVEFRONT_sum), TD_LOAD_WAVEFRONT_sum) / $denom))
+          max: MAX((NOISE_CLAMP(((TD_LOAD_WAVEFRONT_sum - TD_STORE_WAVEFRONT_sum)
+            - TD_ATOMIC_WAVEFRONT_sum), TD_LOAD_WAVEFRONT_sum) / $denom))
           unit: (Instructions + $normUnit)
         Write Instructions:
           avg: AVG((TD_STORE_WAVEFRONT_sum / $denom))

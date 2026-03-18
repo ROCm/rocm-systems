@@ -12,9 +12,9 @@ Panel Config:
         unit: Unit
       metric:
         Hit rate:
-          value: AVG(((100 - ((100 * (((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum)
+          value: AVG((NOISE_CLAMP((100 - ((100 * (((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum)
             + TCP_TCC_ATOMIC_WITH_RET_REQ_sum) + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum))
-            / TCP_TOTAL_CACHE_ACCESSES_sum)) if (TCP_TOTAL_CACHE_ACCESSES_sum != 0)
+            / TCP_TOTAL_CACHE_ACCESSES_sum)), 100) if (TCP_TOTAL_CACHE_ACCESSES_sum != 0)
             else None))
           unit: Percent
         Bandwidth Utilization:
@@ -267,12 +267,12 @@ Panel Config:
           max: MAX((TCP_UTCL1_REQUEST_sum / $denom))
           units: (Requests + $normUnit)
         Hit Ratio:
-          avg: AVG((((100 * TCP_UTCL1_TRANSLATION_HIT_sum) / TCP_UTCL1_REQUEST_sum)
-            if (TCP_UTCL1_REQUEST_sum != 0) else None))
-          min: MIN((((100 * TCP_UTCL1_TRANSLATION_HIT_sum) / TCP_UTCL1_REQUEST_sum)
-            if (TCP_UTCL1_REQUEST_sum != 0) else None))
-          max: MAX((((100 * TCP_UTCL1_TRANSLATION_HIT_sum) / TCP_UTCL1_REQUEST_sum)
-            if (TCP_UTCL1_REQUEST_sum != 0) else None))
+          avg: AVG((NOISE_CLAMP(((100 * TCP_UTCL1_TRANSLATION_HIT_sum) / TCP_UTCL1_REQUEST_sum),
+            100) if (TCP_UTCL1_REQUEST_sum != 0) else None))
+          min: MIN((NOISE_CLAMP(((100 * TCP_UTCL1_TRANSLATION_HIT_sum) / TCP_UTCL1_REQUEST_sum),
+            100) if (TCP_UTCL1_REQUEST_sum != 0) else None))
+          max: MAX((NOISE_CLAMP(((100 * TCP_UTCL1_TRANSLATION_HIT_sum) / TCP_UTCL1_REQUEST_sum),
+            100) if (TCP_UTCL1_REQUEST_sum != 0) else None))
           units: Percent
         Hits:
           avg: AVG((TCP_UTCL1_TRANSLATION_HIT_sum / $denom))
