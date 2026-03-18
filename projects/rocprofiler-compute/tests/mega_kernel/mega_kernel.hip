@@ -1166,7 +1166,7 @@ __device__ void test_atomic_operations_asm([[maybe_unused]] int* global_int_ptr,
     // ========================================================================
     // ds_add_f64, ds_min_f64, ds_max_f64
     //
-#if defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx950__)     {
+#if defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx950__)
         if (tid < 32) {
             ds_atomic_f64_test[tid] = 0.0;
         }
@@ -1273,7 +1273,7 @@ __device__ void test_atomic_operations_asm([[maybe_unused]] int* global_int_ptr,
         cas_passed = true;
         (void)old_val;
     }
-#elif defined(__gfx1200__) || defined(__gfx1201__)     {
+#elif defined(__gfx1200__) || defined(__gfx1201__)
         int compare_val = 0;
         int swap_val = tid + 1;
         int old_val = 0;
@@ -1336,7 +1336,7 @@ __device__ void test_lds_operations(TestResults* results, int lane_id, int tid) 
     lds_int[tid] = tid * 3;
     
     // For double, only use if we have enough threads (avoid wasting memory for small blocks)
-    if (tid < blockDim.x / 2) {
+    if (static_cast<unsigned>(tid) < blockDim.x / 2u) {
         lds_double[tid] = (double)tid * 2.5;
     }
     
@@ -1347,7 +1347,7 @@ __device__ void test_lds_operations(TestResults* results, int lane_id, int tid) 
     lds_rw_passed = lds_rw_passed && approx_equal_f32(lds_float[tid], (float)tid * 1.5f);
     lds_rw_passed = lds_rw_passed && (lds_int[tid] == tid * 3);
     
-    if (tid < blockDim.x / 2) {
+    if (static_cast<unsigned>(tid) < blockDim.x / 2u) {
         lds_rw_passed = lds_rw_passed && approx_equal_f64(lds_double[tid], (double)tid * 2.5);
     }
     
@@ -2867,8 +2867,10 @@ __device__ void test_async_lds_operations([[maybe_unused]] float* global_src, fl
 // These structures define tensor descriptors for multi-dimensional data movement
 #endif
 
-
-                                    TestResults* results, int lane_id, int tid) {
+__device__ void test_tensor_load_store([[maybe_unused]] float* global_src,
+                                       [[maybe_unused]] float* global_dst,
+                                       [[maybe_unused]] void* pShmem,
+                                       TestResults* results, int lane_id, int tid) {
     bool passed = true;
     
 #if 0  // defined() placeholder for future architecture
@@ -2974,6 +2976,7 @@ __device__ void test_async_lds_operations([[maybe_unused]] float* global_src, fl
 // Use cooperative launch APIs with cluster parameters for actual cluster usage.
 //
 
+__device__ void test_cluster_operations(TestResults* results, int lane_id, int tid) {
     bool passed = true;
     
 #if 0  // defined() placeholder for future architecture
@@ -2983,7 +2986,6 @@ __device__ void test_async_lds_operations([[maybe_unused]] float* global_src, fl
     // This is a -specific builtin that synchronizes all workgroups in a cluster
     // In a non-cluster kernel, this acts as a workgroup barrier
     passed = true;  // If we reach here, cluster barrier works
-    #endif
     
     // Test 2: Check if split barrier builtins are available at compile time
     #if __has_builtin(__builtin_amdgcn_s_barrier_signal) && \
@@ -3018,8 +3020,7 @@ __device__ void test_async_lds_operations([[maybe_unused]] float* global_src, fl
     // In cluster dispatch, they would indicate workgroup position in cluster
     
     // Use the values to prevent optimization
-    (void)sink;
-    #endif
+    (void)0;
     
 #else
     // Cluster operations are  only () - mark as bypassed
