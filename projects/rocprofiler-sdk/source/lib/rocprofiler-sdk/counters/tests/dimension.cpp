@@ -82,8 +82,8 @@ check_counter_id(rocprofiler_counter_instance_id_t id, uint64_t expected_base_me
 TEST(dimension, set_get)
 {
     using namespace rocprofiler::counters;
-    rocprofiler_counter_instance_id_t test_id = 0;
-    rocprofiler_counter_id_t          test_counter{.handle = 123};
+    auto test_id      = rocprofiler_counter_instance_id_t{0};
+    auto test_counter = rocprofiler_counter_id_t{.handle = 123};
 
     set_counter_in_rec(test_id, test_counter);
     // 0x007B000000000000 = decimal counter id 123 << DIM_BIT_LENGTH
@@ -96,7 +96,7 @@ TEST(dimension, set_get)
     check_counter_id(test_id, 321);
 
     // Test multiples of i, setting/getting those values across all
-    // dimensions (using variable bit allocation)
+    // dimensions
     for(size_t multi_factor = 1; multi_factor < 7; multi_factor++)
     {
         for(size_t i = 1; i < static_cast<size_t>(ROCPROFILER_DIMENSION_LAST); i++)

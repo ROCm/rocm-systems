@@ -1312,14 +1312,10 @@ TEST(evatuate_ast, evaluate_select)
         }
         for(auto& dim_pair : dims)
         {
-            // Use variable bit allocation
-            uint64_t dim_bit_length = get_dim_bit_length(dim_pair.first);
-            uint64_t dim_bit_offset = get_dim_bit_offset(dim_pair.first);
-            int64_t  mask           = ((1ULL << dim_bit_length) - 1) << dim_bit_offset;
+            uint64_t mask = get_dim_mask(dim_pair.first);
             for(auto& rec : a)
             {
-                rec.id = rec.id | mask;
-                rec.id = rec.id ^ mask;
+                rec.id = (rec.id | mask) ^ mask;
             }
         }
         return a;
@@ -1435,13 +1431,8 @@ TEST(evaluate_ast, counter_reduction_dimension)
         std::vector<rocprofiler_record_counter_t>                 result;
         for(auto rec : a)
         {
-            // Use variable bit allocation for XCC dimension
-            uint64_t xcc_bit_length = get_dim_bit_length(ROCPROFILER_DIMENSION_XCC);
-            uint64_t xcc_bit_offset = get_dim_bit_offset(ROCPROFILER_DIMENSION_XCC);
-            int64_t  mask_dim       = ((1ULL << xcc_bit_length) - 1) << xcc_bit_offset;
-
-            rec.id = rec.id | mask_dim;
-            rec.id = rec.id ^ mask_dim;
+            uint64_t mask = get_dim_mask(ROCPROFILER_DIMENSION_XCC);
+            rec.id        = (rec.id | mask) ^ mask;
             if(groups_dim.find(rec.id) == groups_dim.end())
             {
                 groups_dim[rec.id] = rec;
