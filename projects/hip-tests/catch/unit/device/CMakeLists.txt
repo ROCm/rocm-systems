@@ -31,6 +31,9 @@ set(TEST_SRC
     hipInit.cc
     hipDriverGetVersion.cc
     hipSetValidDevices.cc
+    hipIpcOpenMemHandle.cc
+    hipIpcGetMemHandle.cc
+    hipIpcCloseMemHandle.cc
 )
 
 if(HIP_PLATFORM MATCHES "amd" AND BUILD_SHARED_LIBS)
@@ -41,14 +44,6 @@ if(HIP_PLATFORM MATCHES "amd" AND BUILD_SHARED_LIBS)
     set(AMD_SRC ${AMD_SRC} hipGetProcAddressIpcApis.cc)
   endif()
   set(TEST_SRC ${TEST_SRC} ${AMD_SRC})
-endif()
-
-if(UNIX)
-    set(TEST_SRC ${TEST_SRC}
-                 hipIpcOpenMemHandle.cc
-                 hipIpcGetMemHandle.cc
-                 hipIpcCloseMemHandle.cc
-       )
 endif()
 
 add_executable(getDeviceCount EXCLUDE_FROM_ALL getDeviceCount_exe.cc)
@@ -118,3 +113,8 @@ if(HIP_PLATFORM MATCHES "amd")
   set_source_files_properties(hipDeviceSetGetScratchExe.cc PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
 endif()
 
+add_executable(hipIpcOpenMemHandle_ChildProcExe EXCLUDE_FROM_ALL hipIpcOpenMemHandle_ChildProcExe.cc)
+set_source_files_properties(hipIpcOpenMemHandle_ChildProcExe.cc PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
+target_link_libraries(hipIpcOpenMemHandle_ChildProcExe ${GPGPU_LINKER_LIBRARIES})
+set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hipIpcOpenMemHandle_ChildProcExe)
+add_dependencies(DeviceTest hipIpcOpenMemHandle_ChildProcExe)

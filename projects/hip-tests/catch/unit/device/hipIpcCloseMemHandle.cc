@@ -4,9 +4,11 @@
  * SPDX-License-Identifier: MIT
  */
 
+#if HT_LINUX
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#endif
 
 #include <hip_test_common.hh>
 #include <hip/hip_runtime_api.h>
@@ -24,6 +26,7 @@
  *  - @ref Unit_hipIpcMemAccess_ParameterValidation
  */
 
+#if HT_LINUX
 /**
  * Test Description
  * ------------------------
@@ -89,6 +92,7 @@ HIP_TEST_CASE(Unit_hipIpcCloseMemHandle_Positive_Reference_Counting) {
     HIP_CHECK(hipFree(ptr));
   }
 }
+#endif
 
 /**
  * Test Description
@@ -99,7 +103,7 @@ HIP_TEST_CASE(Unit_hipIpcCloseMemHandle_Positive_Reference_Counting) {
  *  - unit/device/hipIpcCloseMemHandle.cc
  * Test requirements
  * ------------------------
- *  - Host specific (LINUX)
+ *  - Host specific
  *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Unit_hipIpcCloseMemHandle_Negative_Close_In_Originating_Process) {

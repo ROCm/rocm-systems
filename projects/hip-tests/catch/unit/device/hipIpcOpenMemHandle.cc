@@ -5,12 +5,24 @@
  */
 
 #include <cstring>
+#if HT_LINUX
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#endif
 
 #include <hip_test_common.hh>
 #include <hip/hip_runtime_api.h>
+#include <hip_test_process.hh>
+
+static std::string bytesToHex(const hipIpcMemHandle_t& handle) {
+  std::ostringstream oss;
+  oss << std::hex << std::setfill('0');
+  for (size_t i = 0; i < sizeof(handle.reserved); i++) {
+    oss << std::setw(2) << static_cast<unsigned>(static_cast<unsigned char>(handle.reserved[i]));
+  }
+  return oss.str();
+}
 
 /**
  * @addtogroup hipIpcOpenMemHandle hipIpcOpenMemHandle
@@ -47,6 +59,8 @@ HIP_TEST_CASE(Unit_hipIpcOpenMemHandle_Negative_Open_In_Creating_Process) {
   HIP_CHECK(hipFree(reinterpret_cast<void*>(ptr1)));
 }
 
+
+#if HT_LINUX
 /**
  * Test Description
  * ------------------------
@@ -109,6 +123,7 @@ HIP_TEST_CASE(Unit_hipIpcOpenMemHandle_Negative_Open_In_Two_Contexts_Same_Device
     HIP_CHECK(hipFree(reinterpret_cast<void*>(ptr)));
   }
 }
+#endif
 
 /**
  * End doxygen group DeviceTest.
