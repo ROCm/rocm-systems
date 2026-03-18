@@ -454,8 +454,9 @@ static bool IsUnsupportedOnGFX9(const std::string& mnemonic) {
 
   // v_mad_u32 — now emulated in TranslateInstruction
 
-  // s_wait_alu — GFX12-only ALU dependency wait
+  // s_wait_alu / s_delay_alu — GFX12-only dependency hints
   if (mnemonic == "s_wait_alu") return true;
+  if (mnemonic == "s_delay_alu") return true;
 
   return false;
 }
@@ -1457,8 +1458,12 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
       if (second_half.find("v_dual_") == 0)
         second_half = "v_" + second_half.substr(7);
 
-      result.push_back(first_half);
-      result.push_back(second_half);
+      // Recursively translate each half so mnemonic renames and other
+      // fixups (constant bus, vcc widening, etc.) apply to both halves.
+      auto r1 = TranslateInstruction(first_half, source_cpu, target_cpu);
+      auto r2 = TranslateInstruction(second_half, source_cpu, target_cpu);
+      result.insert(result.end(), r1.begin(), r1.end());
+      result.insert(result.end(), r2.begin(), r2.end());
       return result;
     }
   }
@@ -1602,10 +1607,10 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
     }
   }
 
-  // ─── v_cndmask_b32_e64 SGPR src1 → move to v6 (constant bus fix) ───
-  // GFX9 constant bus restriction: at most one SGPR source per instruction.
-  // v_cndmask_b32_e64 has (src0, src1, mask).  When src1 is SGPR and mask is
-  // also SGPR (e.g., vcc), two SGPRs violate the restriction.  Move src1 to v6.
+  // ─── v_cndmask_b32_e64: bare SGPR mask widening + constant bus fix ───
+  // GFX12 wave32: cmp results are 32-bit (single SGPR sN as mask).
+  // GFX9 wave64: mask must be a 64-bit SGPR pair s[N:N+1].
+  // Also: if src1 is SGPR and mask is SGPR, move src1 to v6 (constant bus).
   if (mnemonic == "v_cndmask_b32_e64") {
     size_t ops_start = line.find(mnemonic) + mnemonic.size();
     std::string ops = line.substr(ops_start);
@@ -1618,26 +1623,103 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
       if (s != std::string::npos) operands.push_back(tok.substr(s, e - s + 1));
     }
     if (operands.size() >= 4) {
+      // Widen vcc_lo → vcc in all operands
+      for (auto& op : operands) {
+        if (op == "vcc_lo") op = "vcc";
+      }
+      // Widen bare SGPR mask sN → s[N:N+1] (GFX12 wave32 → GFX9 wave64)
+      auto& mask = operands[3];
+      if (!mask.empty() && mask[0] == 's' && mask.find('[') == std::string::npos &&
+          mask.find("vcc") == std::string::npos &&
+          mask.find("exec") == std::string::npos &&
+          mask.size() > 1 && std::isdigit((unsigned char)mask[1])) {
+        int n = std::stoi(mask.substr(1));
+        int even = n & ~1;
+        mask = "s[" + std::to_string(even) + ":" + std::to_string(even + 1) + "]";
+      }
+      // Constant bus: if src1 AND mask are both SGPR, move src1 to v6
       std::string& src1 = operands[2];
       bool src1_sgpr = !src1.empty() && src1[0] == 's';
-      // vcc / vcc_lo / vcc_hi are physically SGPRs and consume the constant bus
-      bool src2_sgpr = operands.size() >= 4 && !operands[3].empty() &&
-                       (operands[3][0] == 's' ||
-                        operands[3].substr(0, 3) == "vcc" ||
-                        operands[3].substr(0, 4) == "exec");
-      if (src1_sgpr && src2_sgpr) {
+      bool mask_sgpr = !mask.empty() && (mask[0] == 's' ||
+                       mask.substr(0, 3) == "vcc" || mask.substr(0, 4) == "exec");
+      if (src1_sgpr && mask_sgpr) {
         result.push_back("v_mov_b32_e32 v6, " + src1);
         src1 = "v6";
-        // Widen vcc_lo → vcc: GFX9 is wave64 and uses 64-bit VCC
-        for (auto& op : operands) {
-          if (op == "vcc_lo") op = "vcc";
-        }
+      }
+      std::string fixed = mnemonic + " " + operands[0];
+      for (size_t i = 1; i < operands.size(); ++i) fixed += ", " + operands[i];
+      result.push_back(fixed);
+      return result;
+    }
+  }
+
+  // ─── v_cndmask_b32_e32 SGPR src0 → move to v6 (constant bus fix) ───
+  // GFX12 (wave32) VOP2 form may have an SGPR src0.  On GFX9 (wave64) the
+  // implicit VCC mask already occupies the constant bus, so src0 cannot also
+  // be SGPR.  Move src0 to v6.  The explicit vcc_lo operand (from GFX12
+  // MCInstPrinter) is stripped by the post-processing pass.
+  if (mnemonic == "v_cndmask_b32_e32") {
+    size_t ops_start = line.find(mnemonic) + mnemonic.size();
+    std::string ops = line.substr(ops_start);
+    std::vector<std::string> operands;
+    std::istringstream oss2(ops);
+    std::string tok2;
+    while (std::getline(oss2, tok2, ',')) {
+      size_t s = tok2.find_first_not_of(" \t");
+      size_t e = tok2.find_last_not_of(" \t");
+      if (s != std::string::npos) operands.push_back(tok2.substr(s, e - s + 1));
+    }
+    // operands: [vdst, src0, src1] or [vdst, src0, src1, vcc_lo]
+    if (operands.size() >= 3) {
+      std::string& src0 = operands[1];
+      bool src0_sgpr = !src0.empty() && src0[0] == 's';
+      if (src0_sgpr) {
+        result.push_back("v_mov_b32_e32 v6, " + src0);
+        src0 = "v6";
         std::string fixed = mnemonic + " " + operands[0];
         for (size_t i = 1; i < operands.size(); ++i) fixed += ", " + operands[i];
+        // Explicit vcc_lo (if present) is stripped by the post-processing pass.
         result.push_back(fixed);
         return result;
       }
     }
+  }
+
+  // ─── v_cndmask_b32 (no suffix) with explicit mask → rename to _e64 ───
+  // GFX12 VOPD dual-issue emits bare "v_cndmask_b32" with an explicit SGPR mask.
+  // On GFX9, VOP2 v_cndmask_b32 uses implicit VCC only — need _e64 for explicit mask.
+  if (mnemonic == "v_cndmask_b32") {
+    size_t ops_start = line.find(mnemonic) + mnemonic.size();
+    std::string ops = line.substr(ops_start);
+    std::vector<std::string> operands;
+    std::istringstream oss(ops);
+    std::string tok;
+    while (std::getline(oss, tok, ',')) {
+      size_t s = tok.find_first_not_of(" \t");
+      size_t e = tok.find_last_not_of(" \t");
+      if (s != std::string::npos) operands.push_back(tok.substr(s, e - s + 1));
+    }
+    if (operands.size() >= 4) {
+      // Widen vcc_lo → vcc
+      for (auto& op : operands) {
+        if (op == "vcc_lo") op = "vcc";
+      }
+      // Widen bare SGPR mask sN → s[N:N+1] (GFX12 wave32 → GFX9 wave64)
+      auto& mask = operands[3];
+      if (!mask.empty() && mask[0] == 's' && mask.find('[') == std::string::npos &&
+          mask.find("vcc") == std::string::npos &&
+          mask.find("exec") == std::string::npos &&
+          mask.size() > 1 && std::isdigit((unsigned char)mask[1])) {
+        int n = std::stoi(mask.substr(1));
+        int even = n & ~1;
+        mask = "s[" + std::to_string(even) + ":" + std::to_string(even + 1) + "]";
+      }
+      std::string fixed = "v_cndmask_b32_e64 " + operands[0];
+      for (size_t i = 1; i < operands.size(); ++i) fixed += ", " + operands[i];
+      result.push_back(fixed);
+      return result;
+    }
+    // 3 operands: fall through as VOP2 (implicit VCC), vcc_lo strip will clean up
   }
 
   // ─── DPP8 → DPP16 or ds_bpermute conversion ───
@@ -2034,6 +2116,59 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
 
   // ─── Operand syntax translation (cache modifiers, etc.) ───
   line = TranslateOperandSyntax(line, mnemonic);
+
+  // ─── v_cmp_*_e64 with vcc dest + large literal → VOPC _e32 ───
+  // GFX9 VOP3 does not support literal constants in source positions.
+  // VOPC _e32 supports literals only in src0 (not src1, which must be VGPR).
+  // If src0 is VGPR and src1 is a large literal: load src1 into v6, use VOPC.
+  // If src0 is a large literal and src1 is VGPR: directly use VOPC.
+  if (mnemonic.find("v_cmp_") == 0 && mnemonic.find("_e64") != std::string::npos) {
+    size_t op_start = line.find(mnemonic) + mnemonic.size();
+    std::string ops_str = line.substr(op_start);
+    size_t sp = ops_str.find_first_not_of(" \t");
+    if (sp != std::string::npos) ops_str = ops_str.substr(sp);
+    // Check first operand is exactly "vcc" or "vcc_lo"
+    size_t first_comma = ops_str.find(',');
+    if (first_comma != std::string::npos) {
+      std::string first_op = ops_str.substr(0, first_comma);
+      size_t fe = first_op.find_last_not_of(" \t");
+      if (fe != std::string::npos) first_op = first_op.substr(0, fe + 1);
+      if (first_op == "vcc" || first_op == "vcc_lo") {
+        // Parse remaining operands (sources)
+        std::string src_str = ops_str.substr(first_comma + 1);
+        std::vector<std::string> srcs;
+        std::istringstream oss(src_str);
+        std::string tok;
+        while (std::getline(oss, tok, ',')) {
+          size_t ts = tok.find_first_not_of(" \t");
+          size_t te = tok.find_last_not_of(" \t");
+          if (ts != std::string::npos) srcs.push_back(tok.substr(ts, te - ts + 1));
+        }
+        if (srcs.size() >= 2) {
+          auto is_large_literal = [](const std::string& s) -> bool {
+            if (s.size() > 2 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) return true;
+            if (!s.empty() && std::isdigit((unsigned char)s[0]) && std::stol(s) > 64) return true;
+            if (s.size() > 1 && s[0] == '-' && std::isdigit((unsigned char)s[1]) &&
+                std::stol(s) < -16) return true;
+            return false;
+          };
+          std::string base_mnem = mnemonic.substr(0, mnemonic.size() - 4) + "_e32";
+          bool src0_lit = is_large_literal(srcs[0]);
+          bool src1_lit = is_large_literal(srcs[1]);
+          if (src1_lit && !src0_lit) {
+            // VOPC src1 must be VGPR — load literal into v6 first
+            result.push_back("v_mov_b32_e32 v6, " + srcs[1]);
+            result.push_back(base_mnem + " " + srcs[0] + ", v6");
+            return result;
+          } else if (src0_lit) {
+            // src0 can be literal in VOPC — direct conversion
+            result.push_back(base_mnem + " " + srcs[0] + ", " + srcs[1]);
+            return result;
+          }
+        }
+      }
+    }
+  }
 
   // ─── v_cmpx _e64 → VOPC form for wave64 ───
   if (mnemonic.find("v_cmpx_") == 0 && mnemonic.find("_e64") != std::string::npos) {
@@ -2781,16 +2916,19 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
     // v_add_nc_u32 → v_add_u32_e32 (may appear without _e32 from VOP3 encoding)
     replaceAll(translated_asm, "v_add_nc_u32 ", "v_add_u32_e32 ");
     replaceAll(translated_asm, "v_sub_nc_u32 ", "v_sub_u32_e32 ");
-    // v_cndmask_b32_e32 ... vcc_lo → strip explicit vcc_lo (GFX9 VOP2 uses implicit VCC)
+    // v_cndmask_b32_e32 ... vcc/vcc_lo → strip explicit mask (GFX9 VOP2 uses implicit VCC)
     // Only strip from _e32 form; _e64 always requires an explicit mask operand on GFX9.
+    // vcc_lo is stripped when the cndmask handler returns early (before WidenVccReferences).
+    // vcc is stripped when the instruction falls through and WidenVccReferences fires first.
     {
       std::string tmp;
       std::istringstream vcc_iss(translated_asm);
       std::string vcc_line;
       while (std::getline(vcc_iss, vcc_line)) {
         if (vcc_line.find("v_cndmask_b32_e32") != std::string::npos) {
-          // Strip trailing ", vcc_lo"
+          // Strip trailing ", vcc_lo" or ", vcc"
           size_t vcc_pos = vcc_line.rfind(", vcc_lo");
+          if (vcc_pos == std::string::npos) vcc_pos = vcc_line.rfind(", vcc");
           if (vcc_pos != std::string::npos)
             vcc_line = vcc_line.substr(0, vcc_pos);
         }
