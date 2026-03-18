@@ -35,7 +35,7 @@ from typing import Any, Optional
 import yaml
 
 import config
-from roofline import Roofline
+from roofline.roofline_main import Roofline
 from utils.amdsmi_interface import amdsmi_ctx, get_gpu_model, get_mem_max_clock
 from utils.file_io import create_df_pmc, load_profiling_config
 from utils.logger import (
@@ -682,7 +682,7 @@ class OmniSoC_Base:
             console_log("roofline", "Skipping roofline")
         else:
             # Dynamic import to isolate hip dependency during profile time only
-            from roofline.benchmark import benchmark
+            from roofline.run_benchmark import load_bench
 
             pmc_path = Path(self.get_args().path) / "pmc_perf.csv"
             if not pmc_path.is_file():
@@ -697,8 +697,9 @@ class OmniSoC_Base:
             )
             if not (Path(self.get_args().path) / "roofline.csv").is_file():
                 try:
-                    result = benchmark.run_on_devices([self.get_args().device])
-                    benchmark.dump_csv(result, f"{self.get_args().path}/roofline.csv")
+                    bench = load_bench([self.get_args().device])
+                    result = bench.run_on_devices([self.get_args().device])
+                    bench.dump_csv(result, f"{self.get_args().path}/roofline.csv")
                 except Exception as e:
                     console_error(
                         "roofline",

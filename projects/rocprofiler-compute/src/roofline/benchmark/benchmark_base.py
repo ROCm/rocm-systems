@@ -32,8 +32,8 @@ from ctypes import (
 from pathlib import Path
 from typing import Any
 
-import hip.hip as hip
-import hip.hiprtc as hiprtc
+import roofline.hip.hip as hip
+import roofline.hip.hiprtc as hiprtc
 
 # =============================================================================
 # GLOBAL VARIABLES

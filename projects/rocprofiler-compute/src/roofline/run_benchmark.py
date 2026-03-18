@@ -20,14 +20,15 @@
 # -----------------------------------------------------------------------------
 
 import importlib
+from typing import Optional
 
-from hip import hip
 
-
-def load_bench(device_ids: list[str]) -> object:
+def load_bench(device_ids: list[str], mode: Optional[str] = None) -> object:
     try:
+        from roofline.hip.hip import hipGetDeviceProperties
+
         # Get exact LLVM target name of the device
-        gfx_device = (hip.hipGetDeviceProperties(int(device_ids[0])).gcnArchName).split(
+        gfx_device = (hipGetDeviceProperties(int(device_ids[0])).gcnArchName).split(
             ":", 1
         )[0]
 
@@ -41,7 +42,7 @@ def load_bench(device_ids: list[str]) -> object:
 
         # Dynamically import the bench class module
         bench_module = importlib.import_module(
-            f"benchmark.{gfx_arch}.benchmark_{gfx_device}"
+            f"roofline.benchmark.{gfx_arch}.benchmark_{gfx_device}"
         )
         # Get the bench class from the module
         bench_class = getattr(bench_module, f"Bench_{gfx_device}")
@@ -55,6 +56,7 @@ def load_bench(device_ids: list[str]) -> object:
 
 if __name__ == "__main__":
     import sys
+    from pathlib import Path
 
     device_ids = [0]
 
@@ -62,7 +64,8 @@ if __name__ == "__main__":
         if sys.argv[1] == "-d":
             device_ids = int(sys.argv[2:])
 
+    sys.path.append(str(Path("..").absolute().resolve()))
     # TODO: verify multi-device scenario- only one device works at this time
-    bench = load_bench(device_ids)
+    bench = load_bench(device_ids, "standalone")
     metrics = bench.run_on_devices(device_ids)
     bench.dump_csv(metrics, "roofline.csv")
