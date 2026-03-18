@@ -102,8 +102,6 @@ TEST(dimension, set_get)
         for(size_t i = 1; i < static_cast<size_t>(ROCPROFILER_DIMENSION_LAST); i++)
         {
             auto dim = static_cast<rocprofiler_profile_counter_instance_types>(i);
-            // Get max value for this specific dimension
-            uint64_t dim_max_val = (1ULL << get_dim_bit_length(dim)) - 1;
 
             set_dim_in_rec(test_id, dim, i);
             check_dim_pos(test_id, dim, i);

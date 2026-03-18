@@ -53,41 +53,42 @@ enum rocprofiler_profile_counter_instance_types
 
 // Variable bit allocation for each dimension type
 // Layout (48 bits total for dimensions):
-//   INSTANCE:     8 bits (supports up to 256 instances)
 //   XCC:          6 bits (supports up to 64)
 //   AID:          6 bits (supports up to 64)
 //   SHADER_ENGINE: 6 bits (supports up to 64)
 //   AGENT:        6 bits (supports up to 64)
 //   SHADER_ARRAY: 6 bits (supports up to 64)
 //   WGP:          6 bits (supports up to 64)
-//   Total used:   44 bits, 4 bits reserved
+//   INSTANCE:    10 bits (supports up to 1024 instances)
+//   Total used:  46 bits, 2 bits reserved
 constexpr uint8_t DIM_BIT_LENGTHS[ROCPROFILER_DIMENSION_LAST] = {
-    0,  // DIMENSION_NONE - special case (uses all 48 bits)
-    6,  // DIMENSION_XCC
-    6,  // DIMENSION_AID
-    6,  // DIMENSION_SHADER_ENGINE
-    6,  // DIMENSION_AGENT
-    6,  // DIMENSION_SHADER_ARRAY
-    6,  // DIMENSION_WGP
-    8,  // DIMENSION_INSTANCE - increased from 6 to 8 bits
+    0,   // DIMENSION_NONE
+    6,   // DIMENSION_XCC
+    6,   // DIMENSION_AID
+    6,   // DIMENSION_SHADER_ENGINE
+    6,   // DIMENSION_AGENT
+    6,   // DIMENSION_SHADER_ARRAY
+    6,   // DIMENSION_WGP
+    10,  // DIMENSION_INSTANCE
 };
 
 // Precomputed bit offsets for each dimension
 // Offset is the starting bit position within the 48-bit dimension field
 constexpr uint8_t DIM_BIT_OFFSETS[ROCPROFILER_DIMENSION_LAST] = {
-    0,   // DIMENSION_NONE - special case
+    0,   // DIMENSION_NONE
     0,   // DIMENSION_XCC: bits 0-5
     6,   // DIMENSION_AID: bits 6-11
     12,  // DIMENSION_SHADER_ENGINE: bits 12-17
     18,  // DIMENSION_AGENT: bits 18-23
     24,  // DIMENSION_SHADER_ARRAY: bits 24-29
     30,  // DIMENSION_WGP: bits 30-35
-    36,  // DIMENSION_INSTANCE: bits 36-43
+    36,  // DIMENSION_INSTANCE: bits 36-45
 };
 
 // Compile-time validation that dimension bit allocation does not exceed 48 bits
 static_assert(DIM_BIT_OFFSETS[ROCPROFILER_DIMENSION_INSTANCE] +
-                  DIM_BIT_LENGTHS[ROCPROFILER_DIMENSION_INSTANCE] <= DIM_BIT_LENGTH,
+                      DIM_BIT_LENGTHS[ROCPROFILER_DIMENSION_INSTANCE] <=
+                  DIM_BIT_LENGTH,
               "Dimension bit allocation exceeds 48-bit limit");
 
 // Helper function to get bit length for a dimension

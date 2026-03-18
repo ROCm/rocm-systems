@@ -31,6 +31,8 @@
 #include "lib/rocprofiler-sdk/counters/parser/raw_ast.hpp"
 #include "lib/rocprofiler-sdk/counters/parser/reader.hpp"
 
+#include <rocprofiler-sdk/cxx/details/tokenize.hpp>
+
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
@@ -175,50 +177,57 @@ perform_reduction(
     return input_array;
 }
 
-int64_t
-get_int_encoded_dimensions_from_string(const std::string&                         rangeStr,
-                                       rocprofiler_profile_counter_instance_types dim)
+/**
+ * @brief Parse dimension selection string to get a single selected index.
+ *
+ * This function parses a string containing a single dimension index value.
+ * Only single index selection is supported (e.g., "5"). Range-based selection
+ * (e.g., "1:4") and multiple values (e.g., "1,2,3") are not supported.
+ *
+ * @param indexStr The string containing the dimension index
+ * @param dim The dimension type for validation
+ * @return size_t The selected dimension index value
+ */
+size_t
+parse_dimension_selection(const std::string&                         indexStr,
+                          rocprofiler_profile_counter_instance_types dim)
 {
-    int64_t            result = 0;
-    std::istringstream iss(rangeStr);
-    std::string        token;
+    auto token = sdk::parse::strip(std::string{indexStr}, " \t\n\r");
 
-    // Use variable bit allocation for this dimension
-    uint64_t bit_length = get_dim_bit_length(dim);
-    uint64_t max_value  = (1ULL << bit_length) - 1;
-
-    while(std::getline(iss, token, ','))
+    if(token.empty())
     {
-        token.erase(std::remove_if(token.begin(), token.end(), ::isspace), token.end());
-
-        size_t dash_pos = token.find(':');
-        if(dash_pos != std::string::npos)
-        {
-            throw std::runtime_error(
-                fmt::format("Range based selection not supported by Dimension API. only select "
-                            "single value for each dimension."));
-            int start = std::stoi(token.substr(0, dash_pos));
-            int end   = std::stoi(token.substr(dash_pos + 1));
-            result |= (1LL << std::min(64, end + 1)) - (1LL << std::max(start, 0));
-        }
-        else
-        {
-            int num = std::stoi(token);
-            if(static_cast<uint64_t>(num) <= max_value)
-            {
-                result |= (1LL << num);
-            }
-            else
-            {
-                throw std::runtime_error(fmt::format(
-                    "Dimension value {} exceeds max allowed {} for dimension type {}.",
-                    num,
-                    max_value,
-                    static_cast<int>(dim)));
-            }
-        }
+        throw std::runtime_error(
+            fmt::format("Empty dimension selection for dimension type {}.", static_cast<int>(dim)));
     }
-    return result;
+
+    if(token.find(':') != std::string::npos || token.find(',') != std::string::npos)
+    {
+        throw std::runtime_error(
+            fmt::format("Range or multi-value selection not supported by Dimension API. "
+                        "Only select a single index for each dimension."));
+    }
+
+    auto bit_length = get_dim_bit_length(dim);
+    auto max_value  = (size_t{1} << bit_length) - 1;
+
+    int num = sdk::parse::from_string<int>(token);
+    if(num < 0)
+    {
+        throw std::runtime_error(fmt::format(
+            "Dimension value {} is negative for dimension type {}.", num, static_cast<int>(dim)));
+    }
+
+    auto unum = static_cast<size_t>(num);
+    if(unum > max_value)
+    {
+        throw std::runtime_error(
+            fmt::format("Dimension value {} exceeds max allowed {} for dimension type {}.",
+                        num,
+                        max_value,
+                        static_cast<int>(dim)));
+    }
+
+    return unum;
 }
 
 std::vector<rocprofiler_counter_record_t>*
@@ -226,23 +235,29 @@ perform_selection(std::map<rocprofiler_profile_counter_instance_types, std::stri
                   std::vector<rocprofiler_counter_record_t>*                         input_array)
 {
     if(input_array->empty()) return input_array;
+
     for(auto& dim_pair : dimension_map)
     {
-        // Use variable bit allocation for this dimension
-        int64_t  encoded_dim_values = get_int_encoded_dimensions_from_string(dim_pair.second, dim_pair.first);
-        uint64_t dim_bit_length     = get_dim_bit_length(dim_pair.first);
-        uint64_t dim_bit_offset     = get_dim_bit_offset(dim_pair.first);
-        int64_t  mask               = ((1ULL << dim_bit_length) - 1) << dim_bit_offset;
+        size_t selected_index = parse_dimension_selection(dim_pair.second, dim_pair.first);
+
+        // Get bit layout for this dimension
+        uint64_t dim_bit_length = get_dim_bit_length(dim_pair.first);
+        uint64_t dim_bit_offset = get_dim_bit_offset(dim_pair.first);
+        int64_t  mask           = ((1ULL << dim_bit_length) - 1) << dim_bit_offset;
 
         input_array->erase(std::remove_if(input_array->begin(),
                                           input_array->end(),
                                           [&](rocprofiler_counter_record_t& rec) {
-                                              bool should_remove =
-                                                  (encoded_dim_values &
-                                                   (1 << rocprofiler::counters::rec_to_dim_pos(
-                                                        rec.id, dim_pair.first))) == 0;
+                                              size_t dim_val =
+                                                  rocprofiler::counters::rec_to_dim_pos(
+                                                      rec.id, dim_pair.first);
+
+                                              // Check if this value matches the selected index
+                                              bool should_remove = (dim_val != selected_index);
+
                                               if(!should_remove)
                                               {
+                                                  // Clear the dimension bits in the record
                                                   rec.id = rec.id | mask;
                                                   rec.id = rec.id ^ mask;
                                               }
