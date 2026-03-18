@@ -34,7 +34,7 @@ THE SOFTWARE.
         if(error != hipSuccess)                                                                    \
         {                                                                                          \
             std::cerr << "HIP error: " << hipGetErrorString(error) << " at " << __FILE__ << ":"    \
-                      << __LINE__ << " :: " << #cmd << std::endl;                                  \
+                      << __LINE__ << std::endl;                                                    \
             exit(EXIT_FAILURE);                                                                    \
         }                                                                                          \
     }
@@ -48,25 +48,11 @@ simpleKernel(int* data, int value)
 }
 
 int
-main(int argc, char** argv)
+main()
 {
-    int       NUM_KERNELS    = 2000;
-    int       NUM_ITERATIONS = 200;
+    const int NUM_KERNELS    = 2000;
+    const int NUM_ITERATIONS = 200;
     const int ARRAY_SIZE     = 256;
-
-    for(int i = 1; i < argc; i++)
-    {
-        if(std::string_view{argv[i]} == "--help" || std::string_view{argv[i]} == "-h" ||
-           std::string_view{argv[i]} == "-?")
-        {
-            std::cout << "Usage: " << argv[0] << " [num_kernels (default=" << NUM_KERNELS
-                      << ")] [num_iterations (default=" << NUM_ITERATIONS << ")]" << std::endl;
-            return 0;
-        }
-    }
-
-    if(argc > 1) NUM_KERNELS = std::stoi(argv[1]);
-    if(argc > 2) NUM_ITERATIONS = std::stoi(argv[2]);
 
     std::cout << "Creating HIP graph with " << NUM_KERNELS << " kernel launches" << std::endl;
     std::cout << "Will execute graph " << NUM_ITERATIONS << " times" << std::endl;
@@ -87,8 +73,8 @@ main(int argc, char** argv)
     HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
 
     // Launch many kernels
-    dim3 blockSize(ARRAY_SIZE, 1, 1);
-    dim3 gridSize(1, 1, 1);
+    dim3 blockSize(256);
+    dim3 gridSize(1);
 
     for(int i = 0; i < NUM_KERNELS; i++)
     {
@@ -119,14 +105,6 @@ main(int argc, char** argv)
         {
             std::cout << "Completed " << (iter + 1) << " iterations" << std::endl;
         }
-
-        // Wait for completion
-        // if(iter % 5 == 4)
-        HIP_CHECK(hipStreamSynchronize(stream));
-
-        // std::cout << "Synchronized after iteration " << (iter + 1) << std::endl;
-        // std::this_thread::sleep_for(std::chrono::milliseconds(100));  // Sleep to simulate work
-        // between iterations
     }
 
     // Wait for completion
