@@ -705,10 +705,11 @@ void VirtualGPU::HwQueueTracker::ResetCurrentSignal() {
 }
 
 // ================================================================================================
-bool VirtualGPU::processMemObjects(const amd::Kernel& kernel, const_address params,
+bool VirtualGPU::processOpenCLMemObjects(const amd::Kernel& kernel, const_address params,
                                    size_t& ldsAddress, bool cooperativeGroups,
                                    bool& imageBufferWrtBack,
                                    std::vector<device::Memory*>& wrtBackImageBuffer) {
+  assert(!amd::IS_HIP && "OpenCL-only function is called on HIP path");
   Kernel& hsaKernel =
       const_cast<Kernel&>(static_cast<const Kernel&>(*(kernel.getDeviceKernel(dev()))));
   const amd::KernelSignature& signature = kernel.signature();
@@ -722,19 +723,16 @@ bool VirtualGPU::processMemObjects(const amd::Kernel& kernel, const_address para
   amd::Memory* const* memories =
       reinterpret_cast<amd::Memory* const*>(params + kernelParams.memoryObjOffset());
 
-  // HIP shouldn't use cache coherency layer at any time
-  if (!amd::IS_HIP) {
-    // Process cache coherency first, since the extra transfers may affect
-    // other mem dependency tracking logic: TS and signalWrite()
-    for (uint i = 0; i < signature.numMemories(); ++i) {
-      amd::Memory* mem = memories[i];
-      if (mem != nullptr) {
-        roc::Memory* gpuMem = dev().getGpuMemory(mem);
-        // Don't sync for internal objects, since they are not shared between devices
-        if (gpuMem->owner()->getVirtualDevice() == nullptr) {
-          // Synchronize data with other memory instances if necessary
-          gpuMem->syncCacheFromHost(*this);
-        }
+  // Process cache coherency first, since the extra transfers may affect
+  // other mem dependency tracking logic: TS and signalWrite()
+  for (uint i = 0; i < signature.numMemories(); ++i) {
+    amd::Memory* mem = memories[i];
+    if (mem != nullptr) {
+      roc::Memory* gpuMem = dev().getGpuMemory(mem);
+      // Don't sync for internal objects, since they are not shared between devices
+      if (gpuMem->owner()->getVirtualDevice() == nullptr) {
+        // Synchronize data with other memory instances if necessary
+        gpuMem->syncCacheFromHost(*this);
       }
     }
   }
@@ -959,6 +957,71 @@ bool VirtualGPU::processMemObjects(const amd::Kernel& kernel, const_address para
   }
 
   return true;
+}
+
+// ================================================================================================
+bool VirtualGPU::processHIPMemObjects(const amd::Kernel& kernel, const_address params) {
+  assert(amd::IS_HIP && "HIP-only function is called on non-HIP path");
+
+  // HIP doesn't really require any processing, this whole function only exists for logging
+  // purposes, so skip it entirely if logging isn't enabled.
+  if (!IsLogEnabled(amd::LOG_INFO, amd::LOG_KERN))
+    return true;
+
+  Kernel& hsaKernel =
+      const_cast<Kernel&>(static_cast<const Kernel&>(*(kernel.getDeviceKernel(dev()))));
+  const amd::KernelSignature& signature = kernel.signature();
+
+  for (size_t i = 0; i < signature.numParameters(); ++i) {
+    const amd::KernelParameterDescriptor& desc = signature.at(i);
+
+    if (desc.type_ == T_POINTER) {
+      const void* globalAddress = *reinterpret_cast<const void* const*>(params + desc.offset_);
+
+      ClPrint(amd::LOG_DEBUG, amd::LOG_KERN, "Arg%d: %s %s = ptr:%p ", i, desc.typeName_.c_str(),
+              desc.name_.c_str(), globalAddress);
+    } else if (desc.type_ == T_VOID) {
+      const_address srcArgPtr = params + desc.offset_;
+      if (desc.size_ > 8) {
+        std::string bytes = "0x";
+        constexpr size_t kMaxBytes = 64;
+        for (size_t j = 0; j < std::min(desc.size_, kMaxBytes); j++) {
+          char byteStr[4];
+          snprintf(byteStr, sizeof(byteStr), "%02x ",
+                   reinterpret_cast<const uint8_t*>(srcArgPtr)[j]);
+          bytes += byteStr;
+        }
+        if (desc.size_ > kMaxBytes) {
+          bytes += "...";
+        }
+        ClPrint(amd::LOG_DEBUG, amd::LOG_KERN, "Arg%d: %s %s = %s (size:0x%x)", i,
+                desc.typeName_.c_str(), desc.name_.c_str(), bytes.c_str(), desc.size_);
+      } else {
+        ClPrint(amd::LOG_DEBUG, amd::LOG_KERN, "Arg%d: %s %s = val:0x%lx (size:0x%x)", i,
+                desc.typeName_.c_str(), desc.name_.c_str(),
+                (desc.size_ == 1)   ? *reinterpret_cast<const uint8_t*>(srcArgPtr)
+                : (desc.size_ == 2) ? *reinterpret_cast<const uint16_t*>(srcArgPtr)
+                : (desc.size_ == 4) ? *reinterpret_cast<const uint32_t*>(srcArgPtr)
+                : (desc.size_ == 8) ? *reinterpret_cast<const uint64_t*>(srcArgPtr)
+                                    : 0LL,
+                desc.size_);
+      }
+    }
+  }
+
+  return true;
+}
+
+// ================================================================================================
+bool VirtualGPU::processMemObjects(const amd::Kernel& kernel, const_address params,
+                                   size_t& ldsAddress, bool cooperativeGroups,
+                                   bool& imageBufferWrtBack,
+                                   std::vector<device::Memory*>& wrtBackImageBuffer) {
+  if (amd::IS_HIP)
+    return processHIPMemObjects(kernel, params);
+
+  return processOpenCLMemObjects(kernel, params, ldsAddress, cooperativeGroups, imageBufferWrtBack,
+                                 wrtBackImageBuffer);
 }
 
 // ================================================================================================

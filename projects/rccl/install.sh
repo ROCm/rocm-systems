@@ -447,16 +447,19 @@ if [[ "${run_tests}" == true ]]; then
         echo "RCCL-UnitTests have not been built yet; Please re-run script with \"-t\" to build the binary."
         exit 1
     fi
-    if [[ "${build_release}" == false && ! -x "./test/rccl-UnitTestsFixtures" ]]; then
-        echo "RCCL-UnitTestsFixtures have not been built yet; Please re-run script with \"-t\" to build the binary."
+    if [[ "${build_release}" == false && ! -x "./test/rccl-UnitTestsFixturesDebug" ]]; then
+        echo "RCCL-UnitTestsFixturesDebug have not been built yet; Please re-run script with \"-t\" to build the binary."
         exit 1
     fi
     if [[ "${run_tests_all}" == true ]]; then
         if [[ -x "./test/rccl-UnitTests" ]]; then
             ./test/rccl-UnitTests
         fi
-        if [[ "${build_release}" == false && -x "./test/rccl-UnitTestsFixtures" ]]; then
+        if [[ -x "./test/rccl-UnitTestsFixtures" ]]; then
             ./test/rccl-UnitTestsFixtures
+        fi
+        if [[ "${build_release}" == false && -x "./test/rccl-UnitTestsFixturesDebug" ]]; then
+            ./test/rccl-UnitTestsFixturesDebug
         fi
     else
         if [[ -x "./test/rccl-UnitTests" ]]; then

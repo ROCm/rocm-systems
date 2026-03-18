@@ -63,6 +63,7 @@ config["app_vcopy_multikernel_iter"] = [
 ]
 config["app_mpi_aware_laplace_eqn"] = ["./tests/mpi_aware_laplace_eqn", "-i", "5"]
 config["rocflop"] = ["./tests/rocflop", "--device", "0", "--fp16"]
+config["torch_test_app"] = ["python3", "./tests/simple_net.py"]
 config["cleanup"] = True
 config["COUNTER_LOGGING"] = False
 config["METRIC_COMPARE"] = False
@@ -3336,54 +3337,17 @@ def test_torch_trace_profile(
     Runs profiling with --torch-trace, verifies profile outputs (pmc_perf, marker
     and counter CSVs), then runs analyze with --list-torch-operators and
     --torch-operator relu, and verifies torch_trace directory, operator CSV
-    contents (hierarchy, kernel, counters), and CLI output format (numbering,
-    durations, kernel IDs, sort order). Requires PyTorch and GPU; not included
-    in default suite.
+    contents (hierarchy, kernel, counters), and CLI output format (call tree
+    grouped by source location, aggregated stats, kernel IDs, sort order).
+    Requires PyTorch and GPU; not included in default suite.
     """
     workload_dir = test_utils.get_output_dir(param_id="torch_trace")
-    Path(workload_dir).mkdir(parents=True, exist_ok=True)
-    torch_app_path = Path(workload_dir) / "test_torch_app.py"
-
-    torch_app_code = """
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-
-class SimpleNet(nn.Module):
-    def __init__(self):
-        super(SimpleNet, self).__init__()
-        self.fc1 = nn.Linear(10, 20)
-        self.fc2 = nn.Linear(20, 10)
-    def forward(self, x):
-        x = self.fc1(x)
-        x = F.relu(x)
-        x = self.fc2(x)
-        return x
-
-if __name__ == "__main__":
-    if not torch.cuda.is_available():
-        import sys
-        print("GPU is required for this test. Exiting.")
-        sys.exit(1)
-    model = SimpleNet()
-    model = model.cuda()
-    x = torch.randn(5, 10).cuda()
-    # Run a few iterations
-    for epoch in range(1):
-        output = model(x)
-        loss = output.sum()
-        loss.backward()
-        print("Training completed")
-"""
-
-    with open(torch_app_path, "w") as f:
-        f.write(torch_app_code)
-    config["torch_test_app"] = ["python3", str(torch_app_path)]
 
     # --torch-trace needs --experimental for profiling
     options = [
         "--experimental",
         "--torch-trace",
+        "--iteration-multiplexing",
     ]
 
     returncode = binary_handler_profile_rocprof_compute(
@@ -3543,54 +3507,42 @@ if __name__ == "__main__":
 
     # ---- Verify --list-torch-operators CLI output format (checks 9–14) ----
 
-    # 9. Banner and footer
-    assert "PyTorch Operators in:" in list_output, "Missing banner line"
-    assert re.search(r"Total: \d+ operators", list_output), "Missing footer count"
+    # 9. Banner
+    assert "PyTorch Operator Call Tree:" in list_output, "Missing banner line"
 
-    # 10. Sequential operator numbering
-    op_numbers = re.findall(r"Operator (\d+):", list_output)
-    assert op_numbers, "No operator numbering found in output"
-    assert op_numbers == [str(i) for i in range(1, len(op_numbers) + 1)], (
-        f"Operator numbering not sequential: {op_numbers}"
+    # 10. Source-location grouping (file:line headers)
+    location_headers = re.findall(
+        r"^(\S+:\d+)\s+\(kernel_launches:", list_output, re.MULTILINE
+    )
+    assert location_headers, "No source-location headers found in output"
+
+    # 11. Aggregated stats on tree nodes
+    assert re.search(r"\(kernel_launches:\s+\d+,\s+total_duration:", list_output), (
+        "No aggregated stats found in output"
     )
 
-    # 11. Operator duration stats
-    op_durations = re.findall(
-        r"\(total_duration:\s+([\d.]+)\s+ms,\s+count:\s+\d+\)", list_output
-    )
-    assert op_durations, "No operator duration stats found in output"
-
-    # 12. Kernel IDs and usage-hint banner
+    # 12. Kernel IDs
     kernel_ids = re.findall(r"\(id (\d+)\)", list_output)
     assert kernel_ids, "No kernel IDs found in output"
-    assert "Kernel (id N) can be used with -k" in list_output, (
-        "Missing kernel ID banner hint"
-    )
 
     # 13. Kernel launch durations
-    assert re.search(r"launches, total_duration:", list_output), (
+    assert re.search(r"kernel_launches:\s+\d+,\s+total_duration:", list_output), (
         "No kernel duration info in output"
     )
 
-    # 14. Descending duration sort order — recompute the same sort key used by
-    #     list_torch_operators (sum of root-prefix durations per CSV) and verify
-    #     the CLI output lists operators in that order.
-    from utils.utils import compute_operator_prefix_stats
-
-    csv_sort_keys: list[tuple[str, float]] = []
-    for op_file in operator_csv_files:
-        op_df = pd.read_csv(op_file)
-        ps = compute_operator_prefix_stats(op_df)
-        total_ms = sum(dur for key, (dur, _) in ps.items() if "/" not in key)
-        csv_sort_keys.append((op_file.stem, total_ms))
-    csv_sort_keys.sort(key=lambda x: x[1], reverse=True)
-    expected_order = [name for name, _ in csv_sort_keys]
-
-    displayed_names = re.findall(r"Operator \d+:\s+'([^']+)'", list_output)
-    assert displayed_names == expected_order, (
-        f"Operators not sorted by descending duration.\n"
-        f"  Expected: {expected_order}\n"
-        f"  Got:      {displayed_names}"
+    # 14. Source locations sorted by descending total duration
+    location_durations = re.findall(
+        r"^(\S+:\d+)\s+\(kernel_launches:\s+\d+,\s+total_duration:\s+([\d.]+)\s+(ms|us)\)",
+        list_output,
+        re.MULTILINE,
+    )
+    assert location_durations, "No location durations found for sort-order check"
+    durations_ms = [
+        float(val) if unit == "ms" else float(val) / 1000.0
+        for _, val, unit in location_durations
+    ]
+    assert durations_ms == sorted(durations_ms, reverse=True), (
+        f"Source locations not sorted by descending duration: {location_durations}"
     )
 
     # 15. --list-torch-operators succeeds at every --kernel-verbose level 0-4
@@ -3635,43 +3587,6 @@ def test_torch_trace_overhead(binary_handler_profile_rocprof_compute):
     Compares execution time with and without the flag to ensure overhead is acceptable.
     NOTE: Not included in the test suite since this requires PyTorch and GPU.
     """
-    helper_dir = Path(test_utils.get_output_dir(param_id="torch_trace_helper"))
-    helper_dir.mkdir(parents=True, exist_ok=True)
-    torch_app_path = helper_dir / "test_torch_app.py"
-    torch_app_code = """
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-
-class SimpleNet(nn.Module):
-    def __init__(self):
-        super(SimpleNet, self).__init__()
-        self.fc1 = nn.Linear(10, 20)
-        self.fc2 = nn.Linear(20, 10)
-    def forward(self, x):
-        x = self.fc1(x)
-        x = F.relu(x)
-        x = self.fc2(x)
-        return x
-
-if __name__ == "__main__":
-    if not torch.cuda.is_available():
-        import sys
-        print("GPU is required for this test. Exiting.")
-        sys.exit(1)
-    model = SimpleNet()
-    model = model.cuda()
-    x = torch.randn(5, 10).cuda()
-    # Run a few iterations
-    for epoch in range(1):
-        output = model(x)
-        loss = output.sum()
-        loss.backward()
-    print("Training completed")
-"""
-    with open(torch_app_path, "w") as f:
-        f.write(torch_app_code)
-    config["torch_test_app"] = ["python3", str(torch_app_path)]
     # Run WITHOUT --torch-trace (baseline)
     workload_dir_baseline = test_utils.get_output_dir(param_id="torch_trace_baseline")
     start_baseline = time.time()
