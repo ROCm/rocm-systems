@@ -85,6 +85,7 @@ Privileged users can map `primary_cuid` to `derived_cuid`:
 [GPU:0]
 primary_cuid=8faa1b22-c964-4d08-9eab-f0c19743dc5b
 derived_cuid=a430166f-0027-8ef5-8d5d-01981daf3276
+hardware_fingerprint=XXXXX.....
 vendor_id=1022
 device_id=1974
 pci_class=0004
@@ -112,7 +113,9 @@ The CUID tool supports both privileged and non-privileged users:
 - Allows creation of primary/derived CUIDs (if privileged).
 - Simplifies device management and integration.
 
-### Build Instructions
+### Build and Install Instructions
+
+The below instructions allow the building of the CUID project and also the installation of its files and services:
 
 ```sh
 mkdir build
@@ -120,6 +123,17 @@ cd build
 cmake ..
 make
 make install
+sudo /opt/rocm/core/share/amdcuid/amdcuid_postinst.sh
+```
+
+if needed, users can also create a portable install package using Cpack:
+
+```sh
+mkdir build
+cd build
+cmake ..
+make
+cpack -G <Package type>
 ```
 
 Both static and shared libraries are built.

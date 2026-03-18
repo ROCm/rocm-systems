@@ -92,11 +92,13 @@ else()
     set(CONFIG_INSTALL_DIR "${CMAKE_INSTALL_DATADIR}/${AMDCUID}/config")
 endif()
 
-# Pass install config directory path to library at compile time
+# Pass the version-independent shared config directory to the library at compile
+# time.  All installed versions of the library must agree on this path so that
+# the HMAC key is shared and CUIDs remain stable across version upgrades.
 target_compile_definitions(amdcuid_static PRIVATE
-    AMDCUID_CONFIG_DIR="${CMAKE_INSTALL_PREFIX}/${CONFIG_INSTALL_DIR}")
+    AMDCUID_CONFIG_DIR="${AMDCUID_SHARED_CONFIG_DIR}")
 target_compile_definitions(amdcuid_shared PRIVATE
-    AMDCUID_CONFIG_DIR="${CMAKE_INSTALL_PREFIX}/${CONFIG_INSTALL_DIR}")
+    AMDCUID_CONFIG_DIR="${AMDCUID_SHARED_CONFIG_DIR}")
 
 # Shared library
 install(

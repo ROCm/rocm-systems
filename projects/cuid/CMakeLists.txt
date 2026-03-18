@@ -78,6 +78,23 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # When cmake -DBUILD_TESTS=off, it will not build CUID tests.
 option(BUILD_TESTS "Build test suite" OFF)
 
+# Version-independent directory shared by all installed versions.
+# The HMAC key and daemon config file are stored here so that multi-version
+# ROCm installs all agree on the same key and settings, keeping CUIDs stable
+# across version upgrades.  The path must NOT contain CMAKE_INSTALL_PREFIX
+# (which is version-specific, e.g. /opt/rocm-6.1/core).
+if(WIN32)
+    set(AMDCUID_SHARED_CONFIG_DIR
+        "C:/ProgramData/AMD/AMDCUID/config"
+        CACHE PATH "Version-independent directory for the HMAC key and daemon config."
+    )
+else()
+    set(AMDCUID_SHARED_CONFIG_DIR
+        "/etc/amdcuid"
+        CACHE PATH "Version-independent directory for the HMAC key and daemon config."
+    )
+endif()
+
 # When cmake -DBUILD_EXAMPLES=off, it will not build CUID examples
 option(BUILD_EXAMPLES "Build examples" OFF)
 

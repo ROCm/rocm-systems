@@ -55,9 +55,10 @@ else()
     set(CONFIG_INSTALL_DIR "${CMAKE_INSTALL_DATADIR}/${AMDCUID}/config")
 endif()
 
-# Pass install paths to the daemon at compile time
+# Pass the version-independent shared config directory to the daemon at compile
+# time so that multi-version installs all reference the same HMAC key and conf.
 target_compile_definitions(${AMDCUID_DAEMON_EXECUTABLE} PRIVATE
-    AMDCUID_CONFIG_DIR="${CMAKE_INSTALL_PREFIX}/${CONFIG_INSTALL_DIR}")
+    AMDCUID_CONFIG_DIR="${AMDCUID_SHARED_CONFIG_DIR}")
 
 # Install the daemon
 install(
