@@ -37,6 +37,7 @@ import pandas as pd
 
 from utils import schema
 from utils.logger import console_debug, console_error, console_warning, demarcate
+from utils.pattern_matching import PatternMatcherEngine
 from utils.specs import MachineSpecs
 from utils.utils import normalize_filter_to_str_list
 
@@ -783,6 +784,44 @@ def calc_builtin_var(var: Union[int, str], sys_info: pd.Series) -> int:  # type:
         console_error(f'Built-in var "{var}" is not supported')
 
 
+def build_metric_list(
+    arch_configs: schema.ArchConfig,
+    sys_info: pd.Series,
+) -> None:
+    """
+    Populate arch_configs.metric_list from the panel configs.
+
+    Builds the metric_list mapping (panel/table/metric IDs -> display names)
+    without constructing DataFrames or metric_counters.  Use this directly when
+    only the metric listing is needed (e.g. --list-metrics, --list-blocks).
+    """
+    metric_list = {}
+
+    _expand_placeholder_ranges(arch_configs, sys_info)
+
+    for panel_id, panel in arch_configs.panel_configs.items():
+        for data_source in panel["data source"]:
+            for type, data_config in data_source.items():
+                if type == "metric_table":
+                    data_source_idx = str(data_config["id"] // 100)
+                    if data_source_idx != "0":
+                        metric_list[data_source_idx] = panel["title"]
+
+                    table_idx = f"{data_config['id'] // 100}.{data_config['id'] % 100}"
+                    metric_list[table_idx] = data_config["title"]
+
+                    for i, (key, entries) in enumerate(data_config["metric"].items()):
+                        metric_idx = f"{table_idx}.{i}"
+                        if _metric_has_valid_expr(entries, data_config):
+                            metric_list[metric_idx] = key
+
+                elif type in ("raw_csv_table", "pc_sampling_table"):
+                    data_source_idx = str(data_config["id"] // 100)
+                    metric_list[data_source_idx] = panel["title"]
+
+    setattr(arch_configs, "metric_list", metric_list)
+
+
 @demarcate
 def build_dfs(
     arch_configs: schema.ArchConfig,
@@ -790,10 +829,10 @@ def build_dfs(
     sys_info: pd.Series,
 ) -> None:
     """
-    - Build dataframe for each type of data source within each panel.
-      Each dataframe will be used as a template to load data with each run later.
-      For now, support "metric_table" and "raw_csv_table". Otherwise, put an empty df.
-    - Collect/build metric_list to suport customrized metrics profiling.
+    Build dataframe for each type of data source within each panel.
+
+    Each dataframe will be used as a template to load data with each run later.
+    For now, support "metric_table" and "raw_csv_table". Otherwise, put an empty df.
     """
 
     # TODO: more error checking for filter_metrics!!
@@ -806,38 +845,10 @@ def build_dfs(
     }
 
     dfs = {}
-    metric_list = {}
     dfs_type = {}
     metric_counters = {}
 
-    for panel_id, panel in arch_configs.panel_configs.items():
-        for data_source in panel["data source"]:
-            for type, data_config in data_source.items():
-                if (
-                    type == "metric_table"
-                    and "metric" in data_config
-                    and "placeholder_range" in data_config["metric"]
-                ):
-                    new_metrics = {}
-                    if sys_info is not None:
-                        # NB: support single placeholder for now!!
-                        p_range = data_config["metric"].pop("placeholder_range")
-                        metric, metric_expr = data_config["metric"].popitem()
-
-                        for p, r in p_range.items():
-                            # NB: We have to resolve placeholder range first if it
-                            #   is a build-in var. It will be too late to do it in
-                            #   eval_metric(). This is the only reason we need
-                            #   sys_info at this stage.
-                            var = calc_builtin_var(r, sys_info)
-                            for i in range(var):
-                                new_key = metric.replace(p, str(i))
-                                new_val = {}
-                                for k, v in metric_expr.items():
-                                    new_val[k] = metric_expr[k].replace(p, str(i))
-                                    new_metrics[new_key] = new_val
-
-                    data_config["metric"] = new_metrics
+    _expand_placeholder_ranges(arch_configs, sys_info)
 
     for panel_id, panel in arch_configs.panel_configs.items():
         for data_source in panel["data source"]:
@@ -846,10 +857,6 @@ def build_dfs(
                     headers = ["Metric_ID"]
                     data_source_idx = str(data_config["id"] // 100)
 
-                    if data_source_idx != 0 or (
-                        filter_metrics and data_source_idx in filter_metrics
-                    ):
-                        metric_list[data_source_idx] = panel["title"]
                     if (
                         "cli_style" in data_config
                         and data_config["cli_style"] == "simple_box"
@@ -875,12 +882,6 @@ def build_dfs(
 
                     df = pd.DataFrame(columns=headers)
 
-                    if not data_config["metric"]:
-                        data_source_idx = (
-                            f"{data_config['id'] // 100}.{data_config['id'] % 100}"
-                        )
-                        metric_list[data_source_idx] = data_config["title"]
-
                     for i, (key, entries) in enumerate(data_config["metric"].items()):
                         data_source_idx = (
                             f"{data_config['id'] // 100}.{data_config['id'] % 100}"
@@ -901,8 +902,6 @@ def build_dfs(
                             (str(panel_id // 100) in filter_metrics)
                         ):
                             values = [metric_idx, key]
-
-                            metric_list[data_source_idx] = data_config["title"]
 
                             if (
                                 "cli_style" in data_config
@@ -933,9 +932,6 @@ def build_dfs(
 
                             df_new_row = pd.DataFrame([values], columns=headers)
                             df = pd.concat([df, df_new_row])
-
-                        # collect metric_list
-                        metric_list[metric_idx] = key
 
                         # generate mapping of counters and metrics
                         filtered_counters = {}
@@ -968,7 +964,6 @@ def build_dfs(
                             df = pd.DataFrame(
                                 [data_config["source"]], columns=["from_csv"]
                             )
-                        metric_list[data_source_idx] = panel["title"]
                     else:
                         df = pd.DataFrame()
                 elif type == "pc_sampling_table":
@@ -976,7 +971,6 @@ def build_dfs(
                     df = pd.DataFrame(
                         [data_config["source"]], columns=["from_pc_sampling"]
                     )
-                    metric_list[data_source_idx] = panel["title"]
                 else:
                     df = pd.DataFrame()
 
@@ -984,7 +978,6 @@ def build_dfs(
                 dfs_type[data_config["id"]] = type
 
     setattr(arch_configs, "dfs", dfs)
-    setattr(arch_configs, "metric_list", metric_list)
     setattr(arch_configs, "dfs_type", dfs_type)
     setattr(arch_configs, "metric_counters", metric_counters)
 
@@ -1020,6 +1013,64 @@ def build_metric_value_string(
                     df[expr] = df[expr].apply(
                         update_normal_unit_string, normal_unit=normal_unit
                     )
+
+
+def _metric_has_valid_expr(entries: dict, data_config: dict) -> bool:
+    """
+    Return True if a metric entry has at least one evaluatable expression field
+    that is not None and not the string "None".
+
+    Expression fields are identified by matching the header display name against
+    schema.SUPPORTED_FIELD, excluding Peak-prefixed fields which are empirical values.
+    """
+    for header_key, header_display in data_config["header"].items():
+        if header_display in schema.SUPPORTED_FIELD and not header_display.startswith(
+            "Peak"
+        ):
+            expr_value = entries.get(header_key)
+            if expr_value is not None and expr_value != "None":
+                return True
+    return False
+
+
+def _expand_placeholder_ranges(
+    arch_configs: schema.ArchConfig,
+    sys_info: pd.Series,
+) -> None:
+    """
+    Expand placeholder_range entries in metric_table data configs in-place.
+
+    Some metric tables define a range of metrics via a placeholder key that is
+    expanded into individual entries at load time. sys_info is required to
+    resolve built-in range variables; if it is None the table is cleared.
+    """
+    for _panel_id, panel in arch_configs.panel_configs.items():
+        for data_source in panel["data source"]:
+            for type, data_config in data_source.items():
+                if (
+                    type == "metric_table"
+                    and "metric" in data_config
+                    and "placeholder_range" in data_config["metric"]
+                ):
+                    new_metrics = {}
+                    if sys_info is not None:
+                        # NB: support single placeholder for now!!
+                        p_range = data_config["metric"].pop("placeholder_range")
+                        metric, metric_expr = data_config["metric"].popitem()
+                        for p, r in p_range.items():
+                            # NB: We have to resolve placeholder range first if it
+                            #   is a build-in var. It will be too late to do it in
+                            #   eval_metric(). This is the only reason we need
+                            #   sys_info at this stage.
+                            var = calc_builtin_var(r, sys_info)
+                            for i in range(var):
+                                new_key = metric.replace(p, str(i))
+                                new_val = {
+                                    k: v.replace(p, str(i))
+                                    for k, v in metric_expr.items()
+                                }
+                                new_metrics[new_key] = new_val
+                    data_config["metric"] = new_metrics
 
 
 def create_empirical_peaks_dict(empirical_peaks_df: pd.DataFrame) -> dict[str, float]:
@@ -1186,7 +1237,7 @@ def eval_metric(
     metric_evaluator = MetricEvaluator(raw_pmc_df, sys_vars, empirical_peaks)
 
     exprs_to_eval = []
-    debugged_rows: set[tuple[int, Any]] = set()  # (df_id, row_id) already printed
+    debug_tracker = DebugRowTracker() if debug else None
 
     # Hmmm... apply + lambda should just work
     # df['Value'] = df['Value'].apply(
@@ -1202,10 +1253,15 @@ def eval_metric(
                         if row[expr]:
                             exprs_to_eval.append((df_id, row_id, expr, row[expr]))
 
-                            if debug and (df_id, row_id) not in debugged_rows:
-                                debugged_rows.add((df_id, row_id))
+                            if debug:
                                 debug_evaluate_metrics(
-                                    expr, row[expr], metric_evaluator, raw_pmc_df
+                                    expr,
+                                    row[expr],
+                                    metric_evaluator,
+                                    raw_pmc_df,
+                                    show_inputs=debug_tracker.should_show_inputs(
+                                        df_id, row_id
+                                    ),
                                 )
                         else:
                             # If not insert nan, the whole col might be treated
@@ -1318,67 +1374,88 @@ def validate_dual_issue_metrics(
                 continue
 
 
-def debug_evaluate_metrics(
-    expr: str,
-    row_expr: str,
-    metric_evaluator: MetricEvaluator,
-    raw_pmc_df: Union[pd.DataFrame, dict],
-) -> None:
-    """Debug helper for expression evaluation."""
-    print("~" * 40 + "\nExpression:")
-    print(f"{expr} = {row_expr}")
-    print("Inputs:")
+# ------------------------------------------------------------------------------
+# Debug helper functions for expression evaluation
+# ------------------------------------------------------------------------------
 
-    # Show matched variables
+_MAX_DEBUG_ROWS = 5
+
+
+class DebugRowTracker:
+    """Tracks which (df_id, row_id) pairs have already been debugged."""
+
+    def __init__(self) -> None:
+        self._debugged_rows: set[tuple[int, Any]] = set()
+
+    def should_show_inputs(self, df_id: int, row_id: Any) -> bool:
+        """Check if this row's inputs should be displayed and mark it as seen."""
+        key = (df_id, row_id)
+        if key in self._debugged_rows:
+            return False
+        self._debugged_rows.add(key)
+        return True
+
+
+def _print_debug_global_vars(row_expr: str, metric_evaluator: MetricEvaluator) -> None:
+    """Print global $xxx variables used in the expression."""
     matched_vars = re.findall(r"ammolite__\w+", row_expr)
-    if matched_vars:
-        for vars in matched_vars:
-            if vars in metric_evaluator.sys_vars:
-                print(f"Var {vars}: {metric_evaluator.sys_vars[vars]}")
-            elif vars in metric_evaluator.empirical_peaks:
-                print(f"Var {vars}: {metric_evaluator.empirical_peaks[vars]}")
-            else:
-                print(f"Var {vars}: [not found]")
+    seen_vars: set[str] = set()
+    for var_key in matched_vars:
+        if var_key in seen_vars:
+            continue
+        seen_vars.add(var_key)
+        # Display as $varname (strip ammolite__ prefix) to match config globals
+        dollar_name = f"${var_key.replace('ammolite__', '', 1)}"
+        if var_key in metric_evaluator.sys_vars:
+            print(f"  {dollar_name}: {metric_evaluator.sys_vars[var_key]}")
+        elif var_key in metric_evaluator.empirical_peaks:
+            print(f"  {dollar_name}: {metric_evaluator.empirical_peaks[var_key]}")
+        else:
+            print(f"  {dollar_name}: [not found]")
 
-    # Show matched columns (support both single and double quotes in expression)
+
+def _extract_column_data(
+    table_key: str, col_name: str, raw_pmc_df: Union[pd.DataFrame, dict]
+) -> Optional[list[Any]]:
+    """Extract column data from raw_pmc_df (dict or DataFrame)."""
+    if isinstance(raw_pmc_df, dict) and table_key in raw_pmc_df:
+        series = raw_pmc_df[table_key][col_name]
+        return series.tolist() if hasattr(series, "tolist") else list(series)
+    elif isinstance(raw_pmc_df, pd.DataFrame):
+        columns = raw_pmc_df.columns
+        # Handle MultiIndex columns by matching on the top-level table key
+        if isinstance(columns, pd.MultiIndex):
+            if table_key in columns.get_level_values(0):
+                series = raw_pmc_df[table_key][col_name]
+                return series.tolist() if hasattr(series, "tolist") else list(series)
+        # Fallback for flat (single-level) columns
+        if col_name in columns:
+            series = raw_pmc_df[col_name]
+            return series.tolist() if hasattr(series, "tolist") else list(series)
+    return None
+
+
+def _collect_debug_column_data(
+    row_expr: str, raw_pmc_df: Union[pd.DataFrame, dict]
+) -> tuple[list[tuple[str, Optional[list[Any]]]], int]:
+    """Collect column data and compute alignment width for debug output."""
     matched_cols = re.findall(
         r"raw_pmc_df\[[\"'](\w+)[\"']\]\[[\"'](\w+)[\"']\]", row_expr
     )
-    # Deduplicate while preserving order (same counter may appear multiple times)
-    _max_debug_rows = 5
     seen: set[tuple[str, str]] = set()
-    # Collect (label, column_data) and compute global width for right-align
-    rows_to_print: list[tuple[str, list[Any] | None]] = []
+    rows_to_print: list[tuple[str, Optional[list[Any]]]] = []
     global_width = 0
+
     for table_key, col_name in matched_cols:
         if (table_key, col_name) in seen:
             continue
         seen.add((table_key, col_name))
         try:
-            if isinstance(raw_pmc_df, dict) and table_key in raw_pmc_df:
-                series = raw_pmc_df[table_key][col_name]
-                column_data = (
-                    series.tolist() if hasattr(series, "tolist") else list(series)
-                )
-            elif isinstance(raw_pmc_df, pd.DataFrame):
-                if table_key in raw_pmc_df.columns.get_level_values(0):
-                    series = raw_pmc_df[table_key][col_name]
-                    column_data = (
-                        series.tolist() if hasattr(series, "tolist") else list(series)
-                    )
-                elif col_name in raw_pmc_df.columns:
-                    series = raw_pmc_df[col_name]
-                    column_data = (
-                        series.tolist() if hasattr(series, "tolist") else list(series)
-                    )
-                else:
-                    column_data = None
-            else:
-                column_data = None
+            column_data = _extract_column_data(table_key, col_name, raw_pmc_df)
             label = f"raw_pmc_df['{table_key}']['{col_name}']"
             rows_to_print.append((label, column_data))
             if column_data is not None:
-                display = column_data[:_max_debug_rows]
+                display = column_data[:_MAX_DEBUG_ROWS]
                 global_width = max(
                     global_width,
                     max((len(str(v)) for v in display), default=0),
@@ -1387,25 +1464,66 @@ def debug_evaluate_metrics(
             console_warning(
                 f"Skipping entry for '{table_key}'['{col_name}']. Encountered: {e}"
             )
+
+    return rows_to_print, global_width
+
+
+def _print_debug_column_data(
+    rows_to_print: list[tuple[str, Optional[list[Any]]]], global_width: int
+) -> None:
+    """Print collected column data with aligned formatting."""
     for label, column_data in rows_to_print:
         if column_data is not None:
             n = len(column_data)
-            display_data = column_data[:_max_debug_rows]
+            display_data = column_data[:_MAX_DEBUG_ROWS]
             formatted = ", ".join(str(v).rjust(global_width) for v in display_data)
-            if n > _max_debug_rows:
+            if n > _MAX_DEBUG_ROWS:
                 formatted += ", ..."
             print(f"  {label}: [{formatted}]")
         else:
             print(f"  {label}: [unknown type]")
 
+
+def _print_debug_inputs(
+    row_expr: str,
+    metric_evaluator: MetricEvaluator,
+    raw_pmc_df: Union[pd.DataFrame, dict],
+    show_inputs: bool,
+) -> None:
+    """Print input variables and column data for debug output."""
+    print("Inputs:")
+    if show_inputs:
+        _print_debug_global_vars(row_expr, metric_evaluator)
+        rows_to_print, global_width = _collect_debug_column_data(row_expr, raw_pmc_df)
+        _print_debug_column_data(rows_to_print, global_width)
+    else:
+        print("  The same as above.")
+
+
+def _print_debug_output(row_expr: str, metric_evaluator: MetricEvaluator) -> None:
+    """Evaluate and print the expression result."""
     print("\nOutput:", end=" ")
     try:
         eval_result = metric_evaluator.eval_expression(row_expr)
         print(eval_result)
-        print("~" * 40)
     except Exception as e:
         console_warning(f"Debug evaluation failed: {e}")
-        print("~" * 40)
+    print("~" * 40)
+
+
+def debug_evaluate_metrics(
+    expr: str,
+    row_expr: str,
+    metric_evaluator: MetricEvaluator,
+    raw_pmc_df: Union[pd.DataFrame, dict],
+    *,
+    show_inputs: bool = True,
+) -> None:
+    """Debug helper for expression evaluation."""
+    print("~" * 40 + "\nExpression:")
+    print(f"{expr} = {row_expr}")
+    _print_debug_inputs(row_expr, metric_evaluator, raw_pmc_df, show_inputs)
+    _print_debug_output(row_expr, metric_evaluator)
 
 
 @demarcate
@@ -2072,22 +2190,12 @@ def load_non_mertrics_table(
     workload.dfs.update(tmp)
 
 
-@demarcate
-def load_torch_trace_data(workload: schema.Workload, dir_path: str) -> None:
-    """
-    Loads all torch operator CSVs from torch_trace directory
-    into workload.torch_operators.
-    """
-    torch_trace_dir = Path(dir_path) / "torch_trace"
-    workload.torch_operators = {}
-    if torch_trace_dir.exists() and torch_trace_dir.is_dir():
-        for csv_file in torch_trace_dir.glob("*.csv"):
-            operator_name = csv_file.stem  # filename without .csv
-            try:
-                df = pd.read_csv(csv_file)
-                workload.torch_operators[operator_name] = df
-            except Exception as e:
-                console_warning(f"Could not load {csv_file}: {e}")
+torch_operator_matcher = PatternMatcherEngine(mode="glob-hierarchy")
+
+
+def torch_operator_pattern_matches(pattern: str, operator_name: str) -> bool:
+    """Return True if *pattern* glob-matches *operator_name* hierarchy path."""
+    return torch_operator_matcher.matches(pattern, operator_name)
 
 
 @demarcate
@@ -2106,9 +2214,6 @@ def load_table_data(
     """
     if not skip_kernel_top:
         load_non_mertrics_table(workload, dir_path, args)
-
-    # Load torch operator trace data if present
-    load_torch_trace_data(workload, dir_path)
 
     eval_metric(
         workload.dfs,

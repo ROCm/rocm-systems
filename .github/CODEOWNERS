@@ -103,3 +103,7 @@
 /projects/rocr-runtime/**/.readthedocs.yaml                           @kentrussell @dayatsin-amd @ROCm/rocm-documentation
 
 /projects/rocprof-trace-decoder/**/*.md                               @ROCm/rocm-devtools-team @ROCm/rocm-documentation
+
+# Media Libs
+/projects/rocdecode/                                                  @kiritigowda @AryanSalmanpour @rrawther
+/projects/rocjpeg/                                                    @kiritigowda @AryanSalmanpour @rrawther

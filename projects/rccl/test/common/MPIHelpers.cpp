@@ -141,7 +141,7 @@ MPIContext initializeMPI(int* argc, char*** argv)
 void setupGPU(int world_rank)
 {
     int device_count = 0;
-    hipGetDeviceCount(&device_count);
+    (void)hipGetDeviceCount(&device_count);
 
     if(device_count > 0)
     {
@@ -160,7 +160,7 @@ void setupGPU(int world_rank)
 
         // Assign GPU in round-robin fashion
         int device_id = local_rank % device_count;
-        hipSetDevice(device_id);
+        (void)hipSetDevice(device_id);
 
         MPI_Comm_free(&node_comm);
     }

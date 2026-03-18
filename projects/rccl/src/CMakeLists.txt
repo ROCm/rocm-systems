@@ -468,7 +468,7 @@ list(APPEND HIP_SOURCES ${PROJECT_BINARY_DIR}/git_version.cpp)
 ## Set RCCL source files
 add_library(rccl ${HIP_SOURCES})
 
-# Keep librccl outputs in the top-level build dir 
+# Keep librccl outputs in the top-level build dir
 # existing packaging/tests scripts that link via ${PROJECT_BINARY_DIR}.
 set_target_properties(rccl PROPERTIES
   ARCHIVE_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"
@@ -486,6 +486,19 @@ endif()
 
 if(HIP_HOST_UNCACHED_MEMORY)
   target_compile_definitions(rccl PRIVATE HIP_HOST_UNCACHED_MEMORY)
+endif()
+
+if(HIP_FABRIC_API_FUNC AND HIP_FABRIC_HANDLE_TYPE)
+  set(HIP_FABRIC_API ON)
+  message(STATUS "HIP Fabric API enabled (hipMemImportFromShareableHandle and hipMemFabricHandle_t found)")
+else()
+  set(HIP_FABRIC_API OFF)
+  if(NOT HIP_FABRIC_API_FUNC)
+    message(STATUS "hipMemImportFromShareableHandle not found - disabling HIP_FABRIC_API")
+  endif()
+  if(NOT HIP_FABRIC_HANDLE_TYPE)
+    message(STATUS "hipMemFabricHandle_t type not found - disabling HIP_FABRIC_API")
+  endif()
 endif()
 
 if(GENERATE_SYM_KERNELS)
@@ -926,6 +939,36 @@ if (HAVE_PARALLEL_JOBS)
 endif()
 if(BUILD_ADDRESS_SANITIZER)
   target_link_options(rccl PRIVATE -fuse-ld=lld)
+  ## ---- ASAN device-link acceleration ----------------------------------------
+  ## With -fgpu-rdc, the offload linker merges device bitcode from all object
+  ## files and performs full LTO (optimization + codegen) for each GPU target.
+  ## For ASAN/debug builds this is the dominant bottleneck for a
+  ## single GPU arch.
+  ##
+  ## The device LLD has three independent knobs that the amdclang++ driver
+  ## populates with defaults (--lto-partitions=8, -plugin-opt=O1, --lto-CGO1).
+  ## We override all three via -Xoffload-linker (last-wins semantics):
+  ## (lto-partitions didn't help since librccl has only one kernel)
+  ##
+  ## --lto-O0:  Skip all LTO optimization passes (inlining, SROA, InstCombine,
+  ##   LICM, loop opts, etc.) on the merged device bitcode.  The bitcode is
+  ##   still linked and backend codegen still runs, but the expensive mid-level
+  ##   optimization pipeline is completely bypassed.  For ASAN builds, optimized
+  ##   device code is counterproductive — it can hide bugs by reordering memory
+  ##   accesses or eliminating loads/stores.
+  ##
+  ## --lto-CGO0:  Set the backend CodeGen optimization level to 0.  This is
+  ##   separate from --lto-O0 — even at LTO O0 the backend (ISel, RegAlloc,
+  ##   scheduling) still runs at whatever CGO level the driver injected (O1 by
+  ##   default).  CGO0 disables machine-level optimizations, further reducing
+  ##   link time while preserving correct ASAN instrumentation.
+  ## --------------------------------------------------------------------------
+  target_link_options(rccl PRIVATE "SHELL:-Xoffload-linker --lto-O0")
+  target_link_options(rccl PRIVATE "SHELL:-Xoffload-linker --lto-CGO0")
+endif()
+if(CMAKE_BUILD_SUBTYPE MATCHES "DebugFast")
+  target_link_options(rccl PRIVATE "SHELL:-Xoffload-linker --lto-O0")
+  target_link_options(rccl PRIVATE "SHELL:-Xoffload-linker --lto-CGO0")
 endif()
 if(TIMETRACE)
   target_link_options(rccl PRIVATE -ftime-trace)
