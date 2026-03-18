@@ -116,13 +116,6 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=None,
         help="Set the test output directory (default: <build_dir>/rocprof-sys-pytest-output in build mode, /tmp/<user>/rocprof-sys-pytest-output in install mode)",
     )
-    # @output_dir@ is replaced with the value of --output-dir (or default) in the log file path
-    group.addoption(
-        "--output-log",
-        action="store",
-        default="@output_dir@/pytest-output.txt",
-        help="Write log output to the specified file (use 'none' to disable)",
-    )
     group.addoption(
         "--num-processes",
         action="store",
@@ -156,6 +149,7 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=None,
         help="Path to write the CTest definitions file when in CTest generate mode (default: None)",
     )
+    # TODO: Deprecate once TheRock switches to CTest
     group.addoption(
         "--dev",
         action="store_true",
@@ -341,42 +335,6 @@ def pytest_configure(config: pytest.Config) -> None:
 # ----------------------------------------------------------------------------
 
 
-def pytest_sessionstart(session):
-    """Set up terminal output redirection after plugins are loaded."""
-    config = session.config
-
-    try:
-        rocprof_config = get_rocprof_config()
-    except Exception as e:
-        pytest.exit(f"{e}")
-
-    log_file = config.getoption("--output-log", default="@output_dir@/pytest-output.txt")
-
-    if log_file.lower() == "none":
-        config._output_log_path = None
-        config._log_file_handle = None
-    else:
-        log_file = log_file.replace("@output_dir@", str(rocprof_config.test_output_dir))
-        log_path = Path(log_file)
-        config._output_log_path = log_path
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-        config._log_file_handle = open(log_path, "w")
-
-        terminal = config.pluginmanager.get_plugin("terminalreporter")
-        if terminal:
-            tw = terminal._tw
-            file_handle = config._log_file_handle
-
-            original_write = tw.write
-
-            def redirect_to_file(s, **kwargs):
-                original_write(s, **kwargs)
-                file_handle.write(str(s))
-                file_handle.flush()
-
-            tw.write = redirect_to_file
-
-
 def pytest_report_header(config) -> list[str]:
     # TODO: Deprecate once TheRock switches to CTest and CTest based filtering
     if not config.getoption("--ci-mode", default=False):
@@ -391,17 +349,37 @@ def pytest_report_header(config) -> list[str]:
 
 def pytest_generate_tests(metafunc):
     """Dynamically parametrize tests based on markers."""
-    # Generate an instance of the test for the python versions used
-    #   --python-versions (and --python-root-dirs) can be used to specify
-    #   extra versions
     marker = metafunc.definition.get_closest_marker("python_versions")
     if marker is not None:
         rocprof_config = get_rocprof_config()
-        versions = rocprof_config.capabilities.supported_python_versions or []
-        if versions:
-            metafunc.parametrize("python_version", versions)
+        supported = set(rocprof_config.capabilities.supported_python_versions or [])
+
+        # When --python-versions is explicitly passed (e.g. from CTest),
+        # always parametrize with those exact versions so node IDs match.
+        # Unsupported versions are marked as skip.
+        pytest_config = getattr(pytest, "_config_ref", None)
+        requested_str = (
+            pytest_config.getoption("--python-versions", default=None)
+            if pytest_config
+            else None
+        )
+        if requested_str:
+            requested = [v.strip() for v in requested_str.split(";") if v.strip()]
+            params = []
+            for ver in requested:
+                if ver in supported:
+                    params.append(ver)
+                else:
+                    params.append(
+                        pytest.param(
+                            ver,
+                            marks=pytest.mark.skip(f"Python {ver} not available"),
+                        )
+                    )
+            metafunc.parametrize("python_version", params)
+        elif supported:
+            metafunc.parametrize("python_version", sorted(supported))
         else:
-            # Skip if no Python versions available
             metafunc.parametrize(
                 "python_version",
                 [pytest.param(None, marks=pytest.mark.skip("No Python versions found"))],
@@ -627,7 +605,7 @@ def pytest_collection_finish(session):
 # Test execution hooks
 # ----------------------------------------------------------------------------
 
-
+# TODO: Deprecate once TheRock switches to CTest
 @pytest.hookimpl(hookwrapper=True)  # Allows yield
 def pytest_runtest_makereport(item, call):
     """Build runner output and attach to report."""
@@ -683,6 +661,7 @@ def pytest_runtest_makereport(item, call):
     rep.sections.append(("Runner Output", output_text))
 
 
+# TODO: Deprecate once TheRock switches to CTest
 def pytest_runtest_logreport(report):
     """Handle output display for passing tests."""
     # Determine if we should show runner output
@@ -723,13 +702,6 @@ def pytest_sessionfinish(session, exitstatus):
                 session.exitstatus = SKIP_RETURN_CODE
 
 
-def pytest_unconfigure(config):
-    """Clean up resources at end of session."""
-    log_handle = getattr(config, "_log_file_handle", None)
-    if log_handle:
-        log_handle.close()
-
-
 # ============================================================================
 #
 # Helper functions
@@ -737,6 +709,7 @@ def pytest_unconfigure(config):
 # ============================================================================
 
 
+# TODO: Deprecate once TheRock switches to CTest and CTest based filtering
 def configure_mode(config: pytest.Config) -> None:
     """Configure the mode based on the command line options.
 
@@ -747,13 +720,11 @@ def configure_mode(config: pytest.Config) -> None:
     """
 
     # MPI is disabled in CI mode, this is done in collection_modifyit
-    # # TODO: Deprecate once TheRock switches to CTest and CTest based filteringems
     ci_mode = config.getoption("--ci-mode", default=False)
     ctest_mode = config.getoption("--ctest-mode", default="off") == "run"
     dev_mode = config.getoption("--dev", default=False)
 
     if ci_mode or ctest_mode:
-        config.option.output_log = "none"  # Already reported to dashboard
         config.option.verbose = max(config.option.verbose, 1)  # -v
         config.option.tbstyle = "short"  # --tb=short
         if "s" not in config.option.reportchars:  # -rs
@@ -763,7 +734,6 @@ def configure_mode(config: pytest.Config) -> None:
         config.option.no_header = True
         config.option.show_test_output = "all"
 
-    # TODO: Deprecate once TheRock switches to CTest and CTest based filtering
     if ci_mode:
         config.option.show_config = True
         config.option.show_test_output = "subtest"
@@ -842,14 +812,6 @@ def _ctest_generate_tests(
     def _cmake_escape(s: str) -> str:
         return s.replace("\\", "\\\\").replace('"', '\\"')
 
-    # Collect all Python versions referenced by tests
-    python_versions_needed: set[str] = set()
-    for item in items:
-        if hasattr(item, "callspec") and "python_version" in item.callspec.params:
-            ver = item.callspec.params["python_version"]
-            if ver is not None:
-                python_versions_needed.add(str(ver))
-
     lines = [
         "# Auto-generated CTest definitions from rocprofiler-systems pytest suite",
         "# DO NOT EDIT — regenerate via: pytest <dir> --ctest-mode=generate",
@@ -862,7 +824,6 @@ def _ctest_generate_tests(
         "#   ROCPROFSYS_PYTHON_HINTS     - Additional search paths for versioned Python interpreters",
         "#",
         "",
-        "# Import configuration from environment variables",
         "if(DEFINED ENV{ROCPROFSYS_TEST_DIR} AND NOT DEFINED ROCPROFSYS_TEST_DIR)",
         '    set(ROCPROFSYS_TEST_DIR "$ENV{ROCPROFSYS_TEST_DIR}")',
         "endif()",
@@ -884,7 +845,7 @@ def _ctest_generate_tests(
         "",
         'if(EXISTS "${_INSTALL_PATH}")',
         "    if(NOT DEFINED ROCPROFSYS_TEST_EXECUTABLE)",
-        "        find_program(ROCPROFSYS_TEST_EXECUTABLE NAMES python3 python)",
+        "        find_program(ROCPROFSYS_TEST_EXECUTABLE NAMES python3 python HINTS ${ROCPROFSYS_PYTHON_HINTS})",
         "    endif()",
         '    set(_ROCPROFSYS_EXE "${ROCPROFSYS_TEST_EXECUTABLE}")',
         '    set(_ROCPROFSYS_EXE_ARGS "${_INSTALL_PATH}")',
@@ -892,7 +853,7 @@ def _ctest_generate_tests(
         '    set(_ROCPROFSYS_EXTRA_ARGS "${_TEST_ARGS}")',
         'elseif(EXISTS "${_BUILD_PATH}")',
         "    if(NOT DEFINED ROCPROFSYS_TEST_EXECUTABLE)",
-        "        find_program(ROCPROFSYS_TEST_EXECUTABLE NAMES pytest pytest3)",
+        "        find_program(ROCPROFSYS_TEST_EXECUTABLE NAMES pytest pytest3 HINTS ${ROCPROFSYS_PYTHON_HINTS})",
         "    endif()",
         '    set(_ROCPROFSYS_EXE "${ROCPROFSYS_TEST_EXECUTABLE}")',
         '    set(_ROCPROFSYS_EXE_ARGS "")',
@@ -903,19 +864,6 @@ def _ctest_generate_tests(
         "endif()",
         "",
     ]
-
-    # Used to skip python-versioned tests that the user does not have installed.
-    # Users set ROCPROFSYS_PYTHON_HINTS=/path/to/bin;... env var to help
-    # find_program locate non-PATH pythons (e.g. conda envs).
-    if python_versions_needed:
-        lines.append("# Detect available Python versions on this system")
-        for ver in sorted(python_versions_needed):
-            cmake_var = f"_HAS_PYTHON_{ver.replace('.', '_')}"
-            lines.append(
-                f'find_program({cmake_var} NAMES "python{ver}"'
-                f" HINTS ${{ROCPROFSYS_PYTHON_HINTS}})"
-            )
-        lines.append("")
 
     for item in items:
         test_id = item.stash.get(_original_nodeid_key, item.nodeid)
@@ -972,11 +920,6 @@ def _ctest_generate_tests(
             if py_ver is not None:
                 extra_args += f' "--python-versions={py_ver}"'
 
-        # Guard Python-versioned tests behind find_program check
-        if py_ver is not None:
-            cmake_var = f"_HAS_PYTHON_{str(py_ver).replace('.', '_')}"
-            lines.append(f"if({cmake_var})")
-
         lines.append(
             f'add_test("{escaped_name}" "${{_ROCPROFSYS_EXE}}"'
             f' "${{_ROCPROFSYS_EXE_ARGS}}"'
@@ -999,9 +942,6 @@ def _ctest_generate_tests(
         lines.append(f'set_tests_properties("{escaped_name}" PROPERTIES')
         lines.extend(props)
         lines.append(f")")
-
-        if py_ver is not None:
-            lines.append(f"endif()")
 
         lines.append("")
 
@@ -1098,7 +1038,6 @@ def _generate_rocprofsys_config_header(config: pytest.Config) -> list[str]:
         _row("ROCm path:", rocprof_config.rocm_path),
         _row("Is installed:", rocprof_config.is_installed),
         _row("Output dir:", rocprof_config.test_output_dir),
-        _row("Log file:", getattr(config, "_output_log_path", None) or "Disabled"),
         _row("Validate ROCPD:", check_use_rocpd()),
         _row("Validate Perfetto:", check_use_perfetto()),
         "-" * 70,
@@ -1857,6 +1796,7 @@ def run_test(
             details.append(f"Runner Output:\n{output}")
             detail_text = "\n\n".join(details)
 
+            # TODO: This will be made the standard once TheRock switches to CTest
             if ctest_mode == "run":
                 # Print details to stdout (captured by CTest) and fail with
                 # a short message to avoid the same output appearing twice.

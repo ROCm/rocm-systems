@@ -161,6 +161,14 @@ jobs:
           echo "ROCm installed to: ${{ env.ROCM_PATH }}"
           echo "✅ ROCm Installation Complete!"
 
+      - name: Install Python Test Dependencies
+        timeout-minutes: 10
+        shell: bash
+        working-directory: projects/rocprofiler-systems/
+        run: |
+          python3 -m pip install --break-system-packages -r requirements.txt || \
+          python3 -m pip install -r requirements.txt
+
       - name: Configure, Build, and Test
         id: run_ci
         timeout-minutes: 30

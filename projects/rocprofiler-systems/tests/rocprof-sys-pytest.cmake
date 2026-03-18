@@ -143,7 +143,6 @@ set(_generate_args
     --ctest-output-path
     "${ROCPROFSYS_PYTEST_CTEST_FILE}"
     --no-header
-    --output-log=none
     -q
     -p
     no:cacheprovider
