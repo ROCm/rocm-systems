@@ -132,7 +132,7 @@ VirtMemoryTestBasic::VirtMemoryTestBasic(void) : TestBase() {
 VirtMemoryTestBasic::~VirtMemoryTestBasic(void) {}
 
 void VirtMemoryTestBasic::TestCreateDestroy(hsa_agent_t agent, hsa_amd_memory_pool_t pool) {
-  hsa_agent_t* agents_accessible;
+  hsa_agent_t* agents_accessible = nullptr;
   hsa_amd_pointer_info_t ptrInfo = {};
   uint32_t num_agents_accessible = 0;
   std::vector<hsa_agent_t> gpus;
@@ -171,6 +171,8 @@ void VirtMemoryTestBasic::TestCreateDestroy(hsa_agent_t agent, hsa_amd_memory_po
 
   /* Verify that pointer info for unmapped VA offset return expected values */
   ptrInfo.size = sizeof(ptrInfo);
+  num_agents_accessible = 0;
+  agents_accessible = nullptr;
   ASSERT_SUCCESS(hsa_amd_pointer_info(reinterpret_cast<uint8_t*>(addrRangeUnmapped) + 10, &ptrInfo, &malloc,
                                       &num_agents_accessible, &agents_accessible));
   ASSERT_EQ(ptrInfo.type, HSA_EXT_POINTER_TYPE_RESERVED_ADDR);
