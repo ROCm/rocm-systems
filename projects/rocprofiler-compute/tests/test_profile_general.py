@@ -1660,6 +1660,21 @@ def test_device_filter(binary_handler_profile_rocprof_compute):
 
 
 @pytest.mark.kernel_execution
+def test_no_rocclr_kernels_in_profile(binary_handler_profile_rocprof_compute):
+    workload_dir = test_utils.get_output_dir()
+    binary_handler_profile_rocprof_compute(config, workload_dir, [])
+
+    pmc_perf_path = Path(workload_dir) / "pmc_perf.csv"
+    df = pd.read_csv(pmc_perf_path)
+    rocclr_rows = df[df["Kernel_Name"].str.startswith("__amd_rocclr_")]
+    assert rocclr_rows.empty, (
+        f"Found {len(rocclr_rows)} __amd_rocclr_ kernels in pmc_perf.csv "
+        f"that should have been filtered: {rocclr_rows['Kernel_Name'].unique()}"
+    )
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.kernel_execution
 def test_kernel(binary_handler_profile_rocprof_compute):
     options = ["--kernel", config["kernel_name_1"]]
     workload_dir = test_utils.get_output_dir()
