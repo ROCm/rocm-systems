@@ -491,7 +491,9 @@ add_library(rccl ${HIP_SOURCES})
 #==================================================================================================
 if(ENABLE_DEVICE_LINKER)
   include(${PROJECT_SOURCE_DIR}/cmake/DeviceLinker.cmake)
-  add_dependencies(rccl device_linker_build)
+  # Link-only dependency: host .cc compilations proceed in parallel with the
+  # device linker pipeline; only the final link of librccl.so waits.
+  set_property(TARGET rccl APPEND PROPERTY LINK_DEPENDS "${COMMON_FAT_OBJ};${ONERANK_FAT_OBJ}")
   target_link_libraries(rccl PRIVATE ${DEVICE_LINKER_OBJECTS})
 endif()
 
@@ -790,7 +792,11 @@ target_compile_options(rccl PRIVATE -Wall)
 target_compile_options(rccl PRIVATE -Werror=deprecated-copy-with-user-provided-copy)
 target_compile_options(rccl PRIVATE -Wno-format-nonliteral)
 target_compile_options(rccl PRIVATE -Wno-unused-function)
-target_compile_options(rccl PRIVATE -fgpu-rdc)
+if(ENABLE_DEVICE_LINKER)
+  target_compile_options(rccl PRIVATE --offload-host-only)
+else()
+  target_compile_options(rccl PRIVATE -fgpu-rdc)
+endif()
 
 if(QUIET_WARNINGS)
   target_compile_options(rccl PRIVATE -Wno-invalid-offsetof)

@@ -35,6 +35,17 @@ using u32_gptr = __attribute__((address_space(1))) uint32_t*;
 using u16_gptr = __attribute__((address_space(1))) uint16_t*;
 using u8_gptr = __attribute__((address_space(1))) uint8_t*;
 
+// LDS (address_space(3)) pointer type. Casting to LDSPtr<T> tells the compiler
+// to emit ds_read/ds_write instructions rather than flat_load/flat_store.
+// On the host, LDSPtr<T> is just T* since address_space(3) is device-only.
+#if defined(__HIP_DEVICE_COMPILE__)
+template<typename T>
+using LDSPtr = __attribute__((address_space(3))) T*;
+#else
+template<typename T>
+using LDSPtr = T*;
+#endif
+
 #ifdef __HIP_DEVICE_COMPILE__
 #if (defined(__gfx942__) || defined(__gfx950__)) && __has_builtin(__builtin_amdgcn_global_load_b128) && __has_builtin(__builtin_amdgcn_global_store_b128) && !defined(DWORDX4_INTRINSICS_FORCE_OFF)
 #define RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS 1

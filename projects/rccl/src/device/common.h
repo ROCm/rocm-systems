@@ -189,13 +189,8 @@ struct ncclShmemData {
   uint64_t barrier_pat;
 };
 
-#ifdef NCCL_DEFINE_SHMEM
 __shared__ ulong2 ncclShmemPerWarp[ncclShmemScratchWarpSize()*(NCCL_MAX_NTHREADS/WARP_SIZE)/sizeof(ulong2)];
 __shared__ ncclShmemData ncclShmem;
-#else
-extern __shared__ ulong2 ncclShmemPerWarp[ncclShmemScratchWarpSize()*(NCCL_MAX_NTHREADS/WARP_SIZE)/sizeof(ulong2)];
-extern __shared__ ncclShmemData ncclShmem;
-#endif
 
 #ifdef ENABLE_FAULT_INJECTION
 __device__ inline void insert_random_delay_per_warp() {
