@@ -99,7 +99,7 @@ def test_summary_region_category_hip(summary_hip_dir):
 
 
 def test_summary_region_category_multiple(summary_multiple_dir):
-    """Test that --region-categories HIP KERNEL MARKER produces those summaries."""
+    """Test that --region-categories HIP KERNEL produces those summaries."""
     import rocprofiler_sdk.tests.rocprofv3 as rocprofv3
 
     rocprofv3.test_summary_region_category_filtering(

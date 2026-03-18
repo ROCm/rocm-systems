@@ -572,11 +572,13 @@ def test_summary_region_category_filtering(
                 len(matching_files) == 0
             ), f"Excluded category '{category}' found in files: {matching_files}"
 
-    # For NONE test: check that region-based summaries are not present
+    # For NONE test: ensure no region-based summaries are generated
     if allow_none:
-        # Region summaries typically have patterns like "rocm_hip", "rocm_hsa"
+        # Region summaries have filenames like "rocm_hip_*.csv", "rocm_hsa_*.csv"
         region_files = [f for f in basenames if f.lower().startswith("rocm_")]
-        # It's okay to have these for other tests, but for NONE they should be minimal/absent
-        print(f"  Region summary files: {region_files}")
+        assert len(region_files) == 0, (
+            f"--region-categories NONE should not generate region summaries, "
+            f"but found: {region_files}"
+        )
 
     print(f"\n✓ Category filtering validated successfully")

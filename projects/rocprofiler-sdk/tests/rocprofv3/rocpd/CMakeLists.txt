@@ -250,8 +250,8 @@ rocprofiler_add_integration_execute_test(
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-rocpd-summary-region-category-multiple
     COMMAND
-        ${Python3_EXECUTABLE} -m rocpd summary --region-categories HIP KERNEL MARKER -f
-        csv -d ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary-multiple -i
+        ${Python3_EXECUTABLE} -m rocpd summary --region-categories HIP KERNEL -f csv -d
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/summary-multiple -i
         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 45
