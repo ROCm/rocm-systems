@@ -319,6 +319,10 @@ class Common:
             cond = self.PASS
             if member.name in ["UNKNOWN"]:
                 cond = self.FAIL
+            elif member.name in ["NPS4", "NPS8"]:
+                # NPS4/NPS8 are hardware-dependent; accept success or invalid depending on support
+                # BTW - no asic supports NPS8...
+                cond = [self.PASS, self.FAIL]
             self.memory_partition_types.append(
                 (member.name, amdsmi.AmdSmiMemoryPartitionType(member.value), cond)
             )

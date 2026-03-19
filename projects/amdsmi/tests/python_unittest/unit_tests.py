@@ -1057,11 +1057,6 @@ class TestAmdSmiPython(unittest.TestCase):
     def test_get_gpu_xgmi_link_status(self):
         self.common.print_func_name("")
 
-        if self.common.TODO_SKIP_FAIL:
-            msg = "\tSkipping test_get_gpu_xgmi_link_status as it fails (MI350, AMDSMI_STATUS_UNEXPECTED_DATA"
-            self.common.print(msg)
-            self.skipTest(msg)
-
         self.common.Test_API_Per_GPU(
             amdsmi_get_gpu_xgmi_link_status=amdsmi.amdsmi_get_gpu_xgmi_link_status
         )
@@ -1245,12 +1240,6 @@ class TestAmdSmiPython(unittest.TestCase):
 
     def test_get_violation_status(self):
         self.common.print_func_name("")
-
-        if self.common.TODO_SKIP_FAIL:
-            msg = "\tSkipping test_get_violation_status as it fails (MI350X, AMDSMI_STATUS_UNEXPECTED_DATA)."
-            self.common.print(msg)
-            self.skipTest(msg)
-
         self.common.Test_API_Per_GPU(amdsmi_get_violation_status=amdsmi.amdsmi_get_violation_status)
         return
 
@@ -1534,11 +1523,6 @@ class TestAmdSmiPython(unittest.TestCase):
 
     def test_set_gpu_memory_partition(self):
         self.common.print_func_name("")
-
-        if self.common.TODO_SKIP_FAIL:
-            msg = "\tSkipping test_set_gpu_memory_partition as it fails (MI350X, AMDSMI_STATUS_UNEXPECTED_DATA)."
-            self.common.print(msg)
-            self.skipTest(msg)
 
         self.common.Test_Per_GPU_With_One_Enum(
             amdsmi_set_gpu_memory_partition=amdsmi.amdsmi_set_gpu_memory_partition,
