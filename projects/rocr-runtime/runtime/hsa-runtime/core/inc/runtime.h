@@ -203,6 +203,11 @@ class Runtime {
                                                      void* data),
                             void* data);
 
+  /// @brief Iterate over all live queues across all GPU agents.
+  hsa_status_t IterateQueues(
+      hsa_status_t (*callback)(hsa_queue_t* queue, hsa_agent_t agent, void* data),
+      void* data);
+
   /// @brief Allocate memory on a particular region.
   ///
   /// @param [in] region Pointer to region object.

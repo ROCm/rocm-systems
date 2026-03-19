@@ -619,6 +619,16 @@ hsa_status_t hsa_amd_profiling_set_profiler_enabled(hsa_queue_t* queue, int enab
   CATCH;
 }
 
+hsa_status_t hsa_amd_queue_iterate(
+    hsa_status_t (*callback)(hsa_queue_t* queue, hsa_agent_t agent, void* data),
+    void* data) {
+  TRY;
+  IS_OPEN();
+  IS_BAD_PTR(callback);
+  return core::Runtime::runtime_singleton_->IterateQueues(callback, data);
+  CATCH;
+}
+
 hsa_status_t hsa_amd_profiling_async_copy_enable(bool enable) {
   TRY;
   IS_OPEN();

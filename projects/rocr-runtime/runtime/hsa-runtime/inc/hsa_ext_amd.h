@@ -919,6 +919,32 @@ hsa_status_t HSA_API
     hsa_amd_profiling_set_profiler_enabled(hsa_queue_t* queue, int enable);
 
 /**
+ * @brief Iterate over all live HSA queues across all GPU agents.
+ *
+ * @details Invokes @p callback once for each currently active queue managed
+ * by the runtime. The callback receives the queue handle and the agent that
+ * owns the queue. Iteration stops early if @p callback returns a status other
+ * than ::HSA_STATUS_SUCCESS.
+ *
+ * This API enables profilers to discover queues that were created before the
+ * profiler was loaded (late-attach).
+ *
+ * @param[in] callback Function to invoke for each queue. Must not be NULL.
+ *
+ * @param[in] data User-provided pointer passed through to @p callback.
+ *
+ * @retval ::HSA_STATUS_SUCCESS The function has been executed successfully.
+ *
+ * @retval ::HSA_STATUS_ERROR_NOT_INITIALIZED The HSA runtime has not been
+ * initialized.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p callback is NULL.
+ */
+hsa_status_t HSA_API hsa_amd_queue_iterate(
+    hsa_status_t (*callback)(hsa_queue_t* queue, hsa_agent_t agent, void* data),
+    void* data);
+
+/**
  * @brief Enable or disable asynchronous memory copy profiling.
  *
  * @details The runtime will provide the copy processing start timestamp and

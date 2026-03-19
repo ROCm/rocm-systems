@@ -1015,6 +1015,13 @@ hsa_status_t HSA_API
 }
 
 // Mirrors Amd Extension Apis
+hsa_status_t HSA_API hsa_amd_queue_iterate(
+    hsa_status_t (*callback)(hsa_queue_t* queue, hsa_agent_t agent, void* data),
+    void* data) {
+  return amdExtTable->hsa_amd_queue_iterate_fn(callback, data);
+}
+
+// Mirrors Amd Extension Apis
 hsa_status_t HSA_API
     hsa_amd_memory_copy_engine_status(hsa_agent_t dst_agent, hsa_agent_t src_agent,
                                       uint32_t *engine_ids_mask) {
