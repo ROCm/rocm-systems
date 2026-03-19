@@ -552,22 +552,18 @@ static std::vector<std::string> WidenExecOperation(const std::string& line) {
         // If N is odd, can't use s[N:N+1] (alignment error).
         // Use manual save+and instead.
         if (dst[0] == 's' && std::isdigit(dst[1])) {
-          // ALWAYS use the manual b32 sequence for saveexec.
-          // The b64 form picks up s[src+1] as high 32 bits of the mask,
-          // which may contain unrelated kernel data (e.g., cols, pointers)
-          // → exec_hi gets garbage bits → threads 32-63 spuriously active → crash.
+          int reg_num = std::stoi(dst.substr(1));
+          // ALWAYS use manual b32 sequence for saveexec.
+          // b64 form has subtle issues: s_or picks up garbage in exec_hi,
+          // s_and with odd dest saves exec_hi (0) to s[odd] instead of exec_lo,
+          // and even "safe" b64 AND causes ELF grow issues.
           std::string src32 = src;
           if (src32 == "vcc") src32 = "vcc_lo";
           result.push_back("s_mov_b32 " + dst + ", exec_lo");
-          if (b64_mnem.find("s_and_saveexec") == 0 ||
-              b64_mnem.find("s_andn2_saveexec") == 0) {
-            if (b64_mnem.find("andn2") != std::string::npos) {
-              result.push_back("s_andn2_b32 exec_lo, exec_lo, " + src32);
-            } else {
-              result.push_back("s_and_b32 exec_lo, exec_lo, " + src32);
-            }
-          } else if (b64_mnem.find("s_or_saveexec") == 0) {
+          if (b64_mnem.find("s_or_saveexec") == 0) {
             result.push_back("s_or_b32 exec_lo, exec_lo, " + src32);
+          } else if (b64_mnem.find("andn2") != std::string::npos) {
+            result.push_back("s_andn2_b32 exec_lo, exec_lo, " + src32);
           } else {
             result.push_back("s_and_b32 exec_lo, exec_lo, " + src32);
           }
