@@ -1191,9 +1191,10 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
   // (e.g., saveexec masking in softmax where exec=0 means "skip section",
   // not "exit kernel").
 
-  // s_code_end → skip entirely (GFX12 padding, saves space)
+  // s_code_end → s_nop 0 (GFX12 padding, not available on GFX9)
   if (mnemonic == "s_code_end") {
-    return result;  // empty — s_code_end is just padding
+    result.push_back("s_nop 0");
+    return result;
   }
 
   // Fix s_endpgm: add .L_exit label before it
@@ -2368,10 +2369,12 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
   // is broken for some kernels). The VCC clobber is acceptable for kernels
   // that don't read VCC across reduction boundaries.
   if (mnemonic.find("v_cmpx_") == 0 && mnemonic.find("_e64") == std::string::npos) {
-    // Always save/restore vcc_lo (v_cmpx clobbers VCC on GFX9)
+    // Save/restore vcc_lo (v_cmpx clobbers VCC on GFX9), and clear exec_hi
+    // (v_cmpx sets exec for ALL 64 threads — inactive lanes get garbage bits).
     std::string stemp = "s" + std::to_string(cmpx_temp_sgpr);
     result.push_back("s_mov_b32 " + stemp + ", vcc_lo");
     result.push_back(line);
+    result.push_back("s_mov_b32 exec_hi, 0");
     result.push_back("s_mov_b32 vcc_lo, " + stemp);
     return result;
   }
@@ -2751,11 +2754,21 @@ static void PatchKernelDescriptorsForWave64(uint8_t* elf, size_t elf_size,
     rsrc1 |= (rsrc1_vgpr_field << 6u);  // VGPR in bits [11:6]
     // SGPR: kernel's SGPRs + 8 extra for v_cmpx temp pair (GFX9 gran = 8)
     {
-      uint32_t orig_sgpr_field = sgpr_field12_kd;  // saved before bits [11:0] were cleared
+      uint32_t orig_sgpr_field = sgpr_field12_kd;
       uint32_t num_sgprs = (orig_sgpr_field + 1u) * 16u + 8u;
+      // Also check .note MSGPACK for .sgpr_count (RSRC1 underreports)
+      const char* sgpr_key = ".sgpr_count";
+      for (size_t i = 0; i + 12 < elf_size; i++) {
+        if (std::memcmp(elf + i, sgpr_key, 11) == 0) {
+          uint8_t val = elf[i + 11];
+          uint32_t sc = (val <= 0x7F) ? val : (val == 0xCC ? elf[i+12] : 0);
+          if (sc + 8 > num_sgprs) num_sgprs = sc + 8;  // sc + 8 for cmpx temp
+          break;
+        }
+      }
       uint32_t gfx9_sgpr = (num_sgprs / 8u) - 1u;
       if (gfx9_sgpr > 12u) gfx9_sgpr = 12u;
-      rsrc1 |= gfx9_sgpr;  // SGPR in bits [5:0]
+      rsrc1 |= gfx9_sgpr;
     }
 
     std::memcpy(elf + info.text_offset + offset + 48, &rsrc1, 4);
@@ -3046,6 +3059,36 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
         break;
       }
     }
+    // Scan .note section (MSGPACK) for .sgpr_count which isn't in the symbol table.
+    // Search for the MSGPACK string ".sgpr_count" (0xAB + 11 chars) followed by value.
+    {
+      const char* key = ".sgpr_count";
+      size_t key_len = 11;
+      for (const auto& sec : elf_info.sections) {
+        if (sec.name == ".note" && sec.size > key_len + 2) {
+          for (size_t i = 0; i + key_len + 1 < sec.size; i++) {
+            if (std::memcmp(elf + sec.offset + i, key, key_len) == 0) {
+              uint8_t val = elf[sec.offset + i + key_len];
+              uint32_t sgpr_count = 0;
+              if (val <= 0x7F) sgpr_count = val;  // MSGPACK positive fixint
+              else if (val == 0xCC) sgpr_count = elf[sec.offset + i + key_len + 1];  // uint8
+              else if (val == 0xCD) {  // uint16
+                uint16_t v16;
+                std::memcpy(&v16, elf + sec.offset + i + key_len + 1, 2);
+                sgpr_count = (v16 >> 8) | ((v16 & 0xFF) << 8);  // big-endian
+              }
+              if (sgpr_count > num_sgprs12) {
+                num_sgprs12 = sgpr_count;
+                std::cerr << "hotswap: transpile: .sgpr_count=" << sgpr_count
+                          << " from MSGPACK (overrides RSRC1)\n";
+              }
+              break;
+            }
+          }
+          break;
+        }
+      }
+    }
     // GFX12 RSRC1 VGPR field (granularity 8) may underreport actual usage.
     // E.g., .num_vgpr=20 but RSRC1 encodes field=1→16.  Add 8 padding to
     // ensure save registers are above the kernel's actual VGPR usage.
@@ -3246,11 +3289,9 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
       // compact_mode: skip redundant exec_hi clear after AND saveexec
       // (exec_hi is already 0). Helps save space without affecting correctness.
       // Note: even-dest v_cmp save/restore and v_cmpx VCC save are ALWAYS
-      // enabled (required for correctness). ELF grow handles overflow.
-      bool compact = (source_lines.size() > 300);
       auto translated_lines = TranslateInstruction(line, src_cpu, tgt_cpu,
                                                     save_vgpr_y + 1, cmpx_temp_sgpr,
-                                                    compact);
+                                                    false);
 
       // Post-process: replace branch offsets with labels (using actual PC offsets)
       if (ii < source_instrs.size() && !branch_labels.empty()) {
@@ -3695,9 +3736,19 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
             rsrc1 |= (rsrc1_vgpr_field << 6u);  // VGPR in bits [11:6]
             {
               uint32_t num_sgprs_rd = (sgpr_field12_rd + 1u) * 16u + 8u;
+              // Check .note MSGPACK for .sgpr_count
+              const char* sgpr_key = ".sgpr_count";
+              for (size_t si = 0; si + 12 < size; si++) {
+                if (std::memcmp(elf + si, sgpr_key, 11) == 0) {
+                  uint8_t val = elf[si + 11];
+                  uint32_t sc = (val <= 0x7F) ? val : (val == 0xCC ? elf[si+12] : 0);
+                  if (sc + 8 > num_sgprs_rd) num_sgprs_rd = sc + 8;
+                  break;
+                }
+              }
               uint32_t gfx9_sgpr = (num_sgprs_rd / 8u) - 1u;
               if (gfx9_sgpr > 12u) gfx9_sgpr = 12u;
-              rsrc1 |= gfx9_sgpr;  // SGPR in bits [5:0]
+              rsrc1 |= gfx9_sgpr;
             }
             std::memcpy(desc + 48, &rsrc1, 4);
 
