@@ -70,6 +70,12 @@ rocprof-sys-instrument -l --min-instructions=8 -E custom_push_region \
 ./user-api.inst 10 4 1000
 ```
 
+| Option | Purpose |
+|--------|---------|
+| `-l` | Instrument at the loop level so the Fibonacci loop in `run()` is profiled |
+| `--min-instructions=8` | Lower the default threshold (1024) so small functions like `run()` are included |
+| `-E custom_push_region` | Exclude the user callback from instrumentation to avoid recursion and trace noise (the callback runs on every region push; instrumenting it would profile the profiler rather than the workload) |
+
 ### IMPORTANT NOTE
 
  The `rocprof-sys-user` library will be removed in a future release. Please use `rocprofiler-sdk-roctx` instead!
