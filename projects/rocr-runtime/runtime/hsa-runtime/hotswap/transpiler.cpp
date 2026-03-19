@@ -2340,13 +2340,21 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
   }
 
   // ─── v_cmpx _e64 → VOPC form for wave64 ───
+  // CRITICAL: On GFX9, v_cmpx writes BOTH EXEC AND VCC. On GFX12 (RDNA),
+  // v_cmpx writes ONLY EXEC. The kernel may read VCC later (e.g., for
+  // saveexec masking in softmax). Save/restore VCC around v_cmpx.
   if (mnemonic.find("v_cmpx_") == 0 && mnemonic.find("_e64") != std::string::npos) {
     std::string base_mnem = mnemonic.substr(0, mnemonic.find("_e64"));
     size_t op_start = line.find(mnemonic) + mnemonic.size();
     std::string ops = line.substr(op_start);
     size_t s = ops.find_first_not_of(" \t");
     if (s != std::string::npos) ops = ops.substr(s);
+    // Save/restore VCC around v_cmpx using s[14:15] as temp.
+    // On GFX9, v_cmpx writes BOTH EXEC and VCC; on GFX12 only EXEC.
+    // The kernel may read VCC later (e.g., softmax saveexec uses vcc_lo).
+    result.push_back("s_mov_b64 s[14:15], vcc");
     result.push_back(base_mnem + " " + ops);
+    result.push_back("s_mov_b64 vcc, s[14:15]");
     return result;
   }
 

@@ -913,6 +913,7 @@ int run_test_softmax_row(const char* co) {
     printf("  softmax_row:      LOAD FAILED\n"); return 1;
   }
   struct { int rows, cols; const char* label; } shapes[] = {
+    {  1,   1, "   1x   1"},  {  1,  32, "   1x  32"},
     { 16,  32, "  16x  32"},  { 32,  64, "  32x  64"},
     { 64, 128, "  64x 128"},  {128, 256, " 128x 256"},
     {  8,  16, "   8x  16"},
