@@ -62,6 +62,10 @@ public:
   ErrorCode QueryMemoryTotal(uint32_t mem_type, uint64_t *total) const;
   ErrorCode QueryMemoryUsage(uint32_t mem_type, uint64_t *used) const;
 
+  // Enumerate all GPU processes visible on this adapter.
+  ErrorCode EnumGpuProcesses(
+      std::vector<thunk_proxy::GpuProcessInfo> *out) const;
+
   // Query live GPU metrics (clocks, temps, voltages, activity, fan) via PMLog.
   ErrorCode QueryGpuMetricsInfo(GpuMetricsInfo *info) const;
 

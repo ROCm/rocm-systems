@@ -83,6 +83,9 @@ public:
     typedef NTSTATUS (DXCORE_DEF(D3DKMTCreateHwQueue))(void* args);
     typedef NTSTATUS (DXCORE_DEF(D3DKMTDestroyHwQueue))(void* args);
     typedef NTSTATUS (DXCORE_DEF(D3DKMTSubmitCommandToHwQueue))(void* args);
+    // WSL2 dxgkrnl-specific APIs (not in Windows SDK d3dkmthk.h)
+    typedef NTSTATUS (DXCORE_DEF(D3DKMTEnumProcesses))(void* args);
+    typedef NTSTATUS (DXCORE_DEF(D3DKMTQueryVideoMemoryInfo))(void* args);
 
     static DxcoreLoader& Instance() {
         static DxcoreLoader* instance = new DxcoreLoader();
@@ -126,6 +129,9 @@ public:
     DXCORE_DEF(D3DKMTCreateHwQueue)* DXCORE_PFN(D3DKMTCreateHwQueue);
     DXCORE_DEF(D3DKMTDestroyHwQueue)* DXCORE_PFN(D3DKMTDestroyHwQueue);
     DXCORE_DEF(D3DKMTSubmitCommandToHwQueue)* DXCORE_PFN(D3DKMTSubmitCommandToHwQueue);
+    // WSL2 dxgkrnl-specific APIs
+    DXCORE_DEF(D3DKMTEnumProcesses)* DXCORE_PFN(D3DKMTEnumProcesses);
+    DXCORE_DEF(D3DKMTQueryVideoMemoryInfo)* DXCORE_PFN(D3DKMTQueryVideoMemoryInfo);
 
 private:
     DxcoreLoader();

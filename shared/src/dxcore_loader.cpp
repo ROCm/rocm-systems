@@ -46,7 +46,9 @@ DxcoreLoader::DxcoreLoader()
     , pfn_D3DKMTOpenResourceFromNtHandle(nullptr)
     , pfn_D3DKMTCreateHwQueue(nullptr)
     , pfn_D3DKMTDestroyHwQueue(nullptr)
-    , pfn_D3DKMTSubmitCommandToHwQueue(nullptr) {
+    , pfn_D3DKMTSubmitCommandToHwQueue(nullptr)
+    , pfn_D3DKMTEnumProcesses(nullptr)
+    , pfn_D3DKMTQueryVideoMemoryInfo(nullptr) {
 }
 
 DxcoreLoader::~DxcoreLoader() {
@@ -129,6 +131,9 @@ bool DxcoreLoader::LoadDxcoreApis() {
     LOAD_DXCORE_API(D3DKMTCreateHwQueue);
     LOAD_DXCORE_API(D3DKMTDestroyHwQueue);
     LOAD_DXCORE_API(D3DKMTSubmitCommandToHwQueue);
+    // WSL2 dxgkrnl-specific APIs — may not be present on Windows; dlsym failure is non-fatal
+    DXCORE_PFN(D3DKMTEnumProcesses) = (DXCORE_DEF(D3DKMTEnumProcesses)*)dlsym(dxcore_handle_, "D3DKMTEnumProcesses");
+    DXCORE_PFN(D3DKMTQueryVideoMemoryInfo) = (DXCORE_DEF(D3DKMTQueryVideoMemoryInfo)*)dlsym(dxcore_handle_, "D3DKMTQueryVideoMemoryInfo");
 
     #undef LOAD_DXCORE_API
 

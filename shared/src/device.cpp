@@ -115,5 +115,11 @@ ErrorCode Device::Escape(void *pData, size_t dataSize, bool hardwareAccess) cons
   return device_ctx_->Escape(pData, dataSize, hardwareAccess);
 }
 
+
+ErrorCode Device::EnumGpuProcesses(
+    std::vector<thunk_proxy::GpuProcessInfo> *out) const {
+  return device_ctx_->EnumGpuProcesses(out);
+}
+
 } // namespace thunk
 } // namespace wsl
