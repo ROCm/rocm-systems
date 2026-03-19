@@ -696,6 +696,9 @@ INSTRUMENTATION WORKFLOW:
 
     rocprofsys::common_utils::warn_if_output_not_writable("run");
     rocprofsys::common_utils::validate_configuration("run");
+    rocprofsys::common_utils::validate_domain_flags(
+        gpu_domain_enabled, rocm_domain_enabled, cpu_domain_enabled,
+        parallel_domain_enabled, active_preset_name);
 
     return _parser_data;
 }
