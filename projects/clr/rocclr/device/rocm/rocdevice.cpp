@@ -2057,11 +2057,15 @@ void* Device::hostAlloc(size_t size, size_t alignment, MemorySegment mem_seg,
 
   if (allowAccess) {
     stat = Hsa::agents_allow_access(gpu_agents_.size(), &gpu_agents_[0], nullptr, ptr);
-  }
-  else
-  {
-    hsa_agent_t local_agent = bkendDevice_;
-    stat = Hsa::agents_allow_access(1, &local_agent, nullptr, ptr);
+  } else {
+    hsa_amd_memory_pool_access_t access;
+    stat = Hsa::agent_memory_pool_get_info(bkendDevice_, pool,
+                                           HSA_AMD_AGENT_MEMORY_POOL_INFO_ACCESS, &access);
+                                           
+    if ((stat == HSA_STATUS_SUCCESS) && (access == HSA_AMD_MEMORY_POOL_ACCESS_DISALLOWED_BY_DEFAULT))
+    {
+      stat = Hsa::agents_allow_access(1, &bkendDevice_, nullptr, ptr);
+    }
   }
   
   if (stat != HSA_STATUS_SUCCESS) {
