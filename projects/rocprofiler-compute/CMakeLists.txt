@@ -572,7 +572,7 @@ add_test(
 )
 
 # -----------------------------------
-# TUI tests
+# TUI component tests
 # -----------------------------------
 
 add_test(
@@ -742,6 +742,7 @@ install(
     PATTERN "*.hip"
     PATTERN "*.h"
     PATTERN "*.cpp"
+    PATTERN "*.py"
     PATTERN "workloads" EXCLUDE
 )
 # modulefile

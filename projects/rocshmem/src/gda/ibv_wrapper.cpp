@@ -25,6 +25,7 @@
 #include "ibv_wrapper.hpp"
 #include "envvar.hpp"
 #include "util.hpp"
+#include "memory/default_allocator.hpp"
 
 #include "rocshmem/rocshmem.hpp"
 #include <dlfcn.h>
@@ -220,7 +221,7 @@ int IBVWrapper::dealloc_pd(struct ibv_pd *pd) {
   return ibv.dealloc_pd(pd);
 }
 
-struct ibv_mr* IBVWrapper::reg_mr(struct ibv_pd* pd, void* addr, size_t length, int access) {
+struct ibv_mr* IBVWrapper::reg_mr(struct ibv_pd* pd, void* addr, size_t length, int access, HIPAllocator *allocator) {
   if (is_dmabuf_supported()) {
     struct ibv_mr *mr;
     uint64_t offset = 0;
@@ -228,7 +229,13 @@ struct ibv_mr* IBVWrapper::reg_mr(struct ibv_pd* pd, void* addr, size_t length, 
 
     DPRINTF("Using ibv_reg_dmabuf_mr()\n");
 
-    CHECK_HSA(hsa_amd_portable_export_dmabuf(addr, length, &fd, &offset));
+    // Use provided allocator or fall back to default allocator
+    HIPAllocator* alloc = (allocator != nullptr) ? allocator : get_default_allocator();
+    hipError_t err = alloc->GetDmabufHandle(addr, length, &fd, &offset);
+    if (err != hipSuccess) {
+      fprintf(stderr, "Failed to get dmabuf handle: %s\n", hipGetErrorString(err));
+      return nullptr;
+    }
 
     mr = ibv.reg_dmabuf_mr(pd, offset, length, (uint64_t) addr, fd, access);
 

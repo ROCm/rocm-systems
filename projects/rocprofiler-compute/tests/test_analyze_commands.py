@@ -1701,7 +1701,7 @@ def test_iteration_multiplexing(binary_handler_analyze_rocprof_compute):
 
 
 @pytest.mark.torch_trace
-def test_list_torch_operators_no_path(binary_handler_analyze_rocprof_compute):
+def test_list_torch_operators_no_path(binary_handler_analyze_rocprof_compute, capsys):
     """Test --list-torch-operators fails gracefully without --path"""
     code = binary_handler_analyze_rocprof_compute([
         "--experimental",
@@ -1710,12 +1710,25 @@ def test_list_torch_operators_no_path(binary_handler_analyze_rocprof_compute):
     ])
     assert code == 1
 
+    captured = capsys.readouterr()
+    error_output = captured.err + captured.out
+    assert "-p/--path" in error_output or "required" in error_output.lower()
+
 
 @pytest.mark.torch_trace
-def test_list_torch_operators_no_trace_data(binary_handler_analyze_rocprof_compute):
-    """Test graceful handling when torch_trace/ directory doesn't exist"""
-    # Use regular vcopy workload (no torch data)
+def test_list_torch_operators_no_trace_data(
+    binary_handler_analyze_rocprof_compute, capsys
+):
+    """Test graceful handling when workload was profiled with --torch-trace but
+    contains no torch operator data (e.g. a non-PyTorch workload like vcopy).
+    """
     workload_dir = test_utils.setup_workload_dir(indirs[0])
+
+    # Simulate a workload profiled with --torch-trace so the sanitize guard
+    # passes, but no torch marker/counter files exist (non-torch workload).
+    config_path = Path(workload_dir) / "profiling_config.yaml"
+    config_path.write_text("torch_trace: true\n")
+
     code = binary_handler_analyze_rocprof_compute([
         "--experimental",
         "analyze",
@@ -1725,4 +1738,9 @@ def test_list_torch_operators_no_trace_data(binary_handler_analyze_rocprof_compu
     ])
     # Should show warning but exit successfully
     assert code == 0
+
+    output = capsys.readouterr().out
+    assert "PyTorch Operators in:" in output
+    assert "Total: 0 operators" in output
+
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
