@@ -4211,36 +4211,21 @@ amdsmi_status_t amdsmi_get_gpu_memory_usage(amdsmi_processor_handle processor_ha
 amdsmi_status_t amdsmi_get_gpu_overdrive_level(
             amdsmi_processor_handle processor_handle,
             uint32_t *od) {
-
-    // Bare Metal and passthrough only feature
-    amdsmi_virtualization_mode_t virt_mode;
-    if (amdsmi_get_gpu_virtualization_mode(processor_handle, &virt_mode) == AMDSMI_STATUS_SUCCESS) {
-        if (virt_mode == AMDSMI_VIRTUALIZATION_MODE_GUEST) {
-        return AMDSMI_STATUS_NOT_SUPPORTED;
-        }
-    }
-
-    return rsmi_wrapper(rsmi_dev_overdrive_level_get, processor_handle, 0, od);
+    // Overdrive requires sysfs pp_od_clk_voltage, not available on WSL2
+    return AMDSMI_STATUS_NOT_SUPPORTED;
 }
 
 amdsmi_status_t amdsmi_get_gpu_mem_overdrive_level(
             amdsmi_processor_handle processor_handle,
             uint32_t *od) {
-    return rsmi_wrapper(rsmi_dev_mem_overdrive_level_get, processor_handle, 0, od);
+    // Overdrive requires sysfs pp_od_clk_voltage, not available on WSL2
+    return AMDSMI_STATUS_NOT_SUPPORTED;
 }
 
 amdsmi_status_t  amdsmi_set_gpu_overdrive_level(
             amdsmi_processor_handle processor_handle, uint32_t od) {
-
-    // Bare Metal and passthrough only feature
-    amdsmi_virtualization_mode_t virt_mode;
-    if (amdsmi_get_gpu_virtualization_mode(processor_handle, &virt_mode) == AMDSMI_STATUS_SUCCESS) {
-        if (virt_mode == AMDSMI_VIRTUALIZATION_MODE_GUEST) {
-        return AMDSMI_STATUS_NOT_SUPPORTED;
-        }
-    }
-
-    return rsmi_wrapper(rsmi_dev_overdrive_level_set_v1, processor_handle, 0, od);
+    // Overdrive requires sysfs pp_od_clk_voltage, not available on WSL2
+    return AMDSMI_STATUS_NOT_SUPPORTED;
 }
 amdsmi_status_t  amdsmi_get_gpu_pci_replay_counter(
             amdsmi_processor_handle processor_handle, uint64_t *counter) {
