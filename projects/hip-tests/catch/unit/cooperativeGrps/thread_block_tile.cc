@@ -1000,6 +1000,54 @@ TEST_CASE(Unit_Thread_Block_Tile_Reduce_All_Parameter_Sizes)
   }
 }
 
+struct Point {
+    int x;
+    int y;
+
+    __device__ Point operator+(const Point& rhs)
+    {
+      return { x + rhs.x, y + rhs.y };
+    }
+
+};
+
+__global__ void sumPoints(Point* result)
+{
+  cg::thread_block mygroup = cg::this_thread_block();
+  auto mytile = cg::tiled_partition<32>(mygroup);
+  Point input;
+  
+  input.x = threadIdx.x;
+  input.y = threadIdx.x;
+
+  __syncwarp();
+  *result = cg::reduce(mytile, input, cooperative_groups::plus<Point> {});
+}
+
+// using a standard functor in the cooperative_groups namespace with a type that is not primitive
+TEST_CASE(Unit_Thread_Block_Tile_Reduce_Standard_Op_Custom_Type)
+{
+  LinearAllocGuard<Point> h_result(LinearAllocs::malloc, sizeof(Point) * 32);
+  LinearAllocGuard<Point> d_result(LinearAllocs::hipMalloc, sizeof(Point) * 32);
+  dim3 gridDim = { 1 };
+  dim3 blockDim = { 32 };
+  void* devicePtr = d_result.ptr();
+  void* args[] = { &devicePtr };
+  int expected = 31 * 16;
+
+  HIP_CHECK(hipLaunchCooperativeKernel(reinterpret_cast<void*>(sumPoints), gridDim, blockDim, args, 0, nullptr));
+  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipMemcpy(h_result.host_ptr(), d_result.ptr(),
+                      h_result.size_bytes(), hipMemcpyDeviceToHost));
+
+  for (int i = 0; i < 32; i++) {
+    INFO("Expected x: " << expected << " got: " << *h_result.host_ptr());
+    INFO("Expected y: " << expected << " got: " << *h_result.host_ptr());
+    REQUIRE((h_result.host_ptr()->x == expected && h_result.host_ptr()->y == expected));
+  }
+}
+
 TEMPLATE_TEST_CASE(Unit_Thread_Block_Coalesced_Reduce_arithmetic, int, unsigned int, long long,
                    unsigned long long, float, half, double)
 {

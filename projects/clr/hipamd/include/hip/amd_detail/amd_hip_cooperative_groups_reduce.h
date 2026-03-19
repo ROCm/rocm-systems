@@ -22,6 +22,60 @@ namespace impl {
   using is_param_type_same = __hip_internal::is_same<typename __hip_internal::remove_cvref<T>,
                                                      typename __hip_internal::remove_cvref<U>>;
 
+  template <typename T, typename = void>
+  struct has_add : std::false_type {
+  };
+
+  template <typename T>
+  struct has_add<T,
+                 std::void_t<decltype(__reduce_add_sync<unsigned long long>(0ull, T {}))>
+    > : std::true_type {};
+
+  template <typename T, typename = void>
+  struct has_min : std::false_type {
+  };
+
+  template <typename T>
+  struct has_min<T,
+                 std::void_t<decltype(__reduce_min_sync<unsigned long long>(0ull, T {}))>
+    > : std::true_type {};
+
+  template <typename T, typename = void>
+  struct has_max : std::false_type {
+  };
+
+  template <typename T>
+  struct has_max<T,
+                 std::void_t<decltype(__reduce_max_sync<unsigned long long>(0ull, T {}))>
+    > : std::true_type {};
+
+  template <typename T, typename = void>
+  struct has_and : std::false_type {
+  };
+
+  template <typename T>
+  struct has_and<T,
+                 std::void_t<decltype(__reduce_and_sync<unsigned long long>(0ull, T {}))>
+    > : std::true_type {};
+
+  template <typename T, typename = void>
+  struct has_or : std::false_type {
+  };
+
+  template <typename T>
+  struct has_or<T,
+                 std::void_t<decltype(__reduce_or_sync<unsigned long long>(0ull, T {}))>
+    > : std::true_type {};
+
+  template <typename T, typename = void>
+  struct has_xor : std::false_type {
+  };
+
+  template <typename T>
+  struct has_xor<T,
+                 std::void_t<decltype(__reduce_xor_sync<unsigned long long>(0ull, T {}))>
+    > : std::true_type {};
+
   // we can call reduce() only the block tiles that have a compile-time size
   template <class TyGroup>
   struct isTiledGroup : __hip_internal::false_type {
@@ -69,17 +123,23 @@ __CG_QUALIFIER__ auto reduce(const TyGroup& group, TyVal&& val, TyFn&& op) -> de
   // need to apply the active mask
   mask &= __activemask();
 
-  if constexpr (__hip_internal::is_same<Op, cooperative_groups::plus<Val>>::value) {
+  if constexpr (__hip_internal::is_same<Op, cooperative_groups::plus<Val>>::value &&
+                impl::has_add<Val>::value) {
     return __reduce_add_sync(mask, val);
-  } else if constexpr (__hip_internal::is_same<Op, cooperative_groups::less<Val>>::value) {
+  } else if constexpr (__hip_internal::is_same<Op, cooperative_groups::less<Val>>::value &&
+                impl::has_min<Val>::value) {
     return __reduce_min_sync(mask, val);
-  } else if constexpr (__hip_internal::is_same<Op, cooperative_groups::greater<Val>>::value) {
+  } else if constexpr (__hip_internal::is_same<Op, cooperative_groups::greater<Val>>::value &&
+                impl::has_max<Val>::value) {
     return __reduce_max_sync(mask, val);
-  } else if constexpr (__hip_internal::is_same<Op, cooperative_groups::bit_and<Val>>::value) {
+  } else if constexpr (__hip_internal::is_same<Op, cooperative_groups::bit_and<Val>>::value &&
+                impl::has_and<Val>::value) {
     return __reduce_and_sync(mask, val);
-  } else if constexpr (__hip_internal::is_same<Op, cooperative_groups::bit_or<Val>>::value) {
+  } else if constexpr (__hip_internal::is_same<Op, cooperative_groups::bit_or<Val>>::value &&
+                impl::has_or<Val>::value) {
     return __reduce_or_sync(mask, val);
-  } else if constexpr (__hip_internal::is_same<Op, cooperative_groups::bit_xor<Val>>::value) {
+  } else if constexpr (__hip_internal::is_same<Op, cooperative_groups::bit_xor<Val>>::value &&
+                impl::has_xor<Val>::value) {
     return __reduce_xor_sync(mask, val);
   } else {
     return __reduce_op_sync(mask, val, op, nullptr);
