@@ -33,7 +33,7 @@ __global__ void getAttrFn(float* px, float* py) {
   *py = *py + *px;
 }
 
-TEST_CASE(Unit_hipFuncGetAttributes_basic) {
+HIP_TEST_CASE(Unit_hipFuncGetAttributes_basic) {
   hipFuncAttributes attr{};
 
   auto r = hipFuncGetAttributes(&attr, reinterpret_cast<const void*>(&getAttrFn));

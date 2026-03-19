@@ -28,6 +28,7 @@ errorHandling:
   Unit_hipGetLastError_with_MemCpyAsync_thread: *level_2
   Unit_hipGetLastError_with_hipGraphAddMemcpyNode1D: *level_2
   Unit_hipGetLastError_with_hipStreamBegin_EndCapture: *level_2
+  Unit_hipGetLastError_error_check_with_hipGraphCreate: *level_2
   Unit_hipGetLastError_success_before_hipGetLastError: *level_2
   Unit_hipGetLastError_success_before_hipGetLastError_check_again: *level_2
   Unit_hipGetLastError_with_Kernel_divide_by_zero: *level_2
@@ -72,6 +73,7 @@ errorHandling:
   Unit_hipExtGetLastError_with_MemCpyAsync_thread: *level_2
   Unit_hipExtGetLastError_with_hipGraphAddMemcpyNode1D: *level_2
   Unit_hipExtGetLastError_with_hipStreamBegin_EndCapture: *level_2
+  Unit_hipExtGetLastError_error_check_with_hipGraphCreate: *level_2
   Unit_hipExtGetLastError_success_before_error_check_again: *level_2
   Unit_hipExtGetLastError_with_Kernel_divide_by_zero: *level_2
   Unit_hipDynamicLogging_Positive_Basic:

@@ -29,7 +29,7 @@ const uint32_t kApiNumber{1024};
  *  - HIP_VERSION >= 5.2
  *  - Platform specific (AMD)
  */
-TEST_CASE(Unit_hipApiName_Positive_Basic) {
+HIP_TEST_CASE(Unit_hipApiName_Positive_Basic) {
   int valid_api_count = 0;
   for (uint32_t i = 0; i < kApiNumber; ++i) {
     const char* api_name = hipApiName(i);
@@ -59,7 +59,7 @@ TEST_CASE(Unit_hipApiName_Positive_Basic) {
  *  - HIP_VERSION >= 5.2
  *  - Platform specific (AMD)
  */
-TEST_CASE(Unit_hipApiName_Negative_ReservedIds) {
+HIP_TEST_CASE(Unit_hipApiName_Negative_ReservedIds) {
   REQUIRE_THAT(hipApiName(std::numeric_limits<uint32_t>::min()),
                Catch::Matchers::Equals(kUnknownApi));
   REQUIRE_THAT(hipApiName(std::numeric_limits<uint32_t>::max()),

@@ -63,7 +63,7 @@ static void RunBenchmark(size_t size, bool enable_peer_access = false) {
  *  - Device supports Peer-to-Peer access
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Performance_hipMemcpyDtoDAsync_PeerAccessEnabled) {
+HIP_TEST_CASE(Performance_hipMemcpyDtoDAsync_PeerAccessEnabled) {
   if (HipTest::getDeviceCount() < 2) {
     HipTest::HIP_SKIP_TEST("This test requires 2 GPUs. Skipping.");
     return;
@@ -90,7 +90,7 @@ TEST_CASE(Performance_hipMemcpyDtoDAsync_PeerAccessEnabled) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Performance_hipMemcpyDtoDAsync_PeerAccessDisabled) {
+HIP_TEST_CASE(Performance_hipMemcpyDtoDAsync_PeerAccessDisabled) {
   const auto allocation_size = GENERATE(4_KB, 4_MB, 16_MB);
   RunBenchmark(allocation_size);
 }

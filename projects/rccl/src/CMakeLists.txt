@@ -787,7 +787,9 @@ if(ENABLE_CODE_COVERAGE)
   message(STATUS "Code coverage is enabled with build type '${CMAKE_BUILD_TYPE}'.")
 
   target_compile_options(rccl PRIVATE
-    -fvisibility=default -Xarch_host -fprofile-instr-generate -Xarch_host -fcoverage-mapping)
+    -fvisibility=default
+    "SHELL:-Xarch_host -fprofile-instr-generate"
+    "SHELL:-Xarch_host -fcoverage-mapping")
 
   set(COVERAGE_SHARED_LINKER_FLAGS
     -fprofile-generate

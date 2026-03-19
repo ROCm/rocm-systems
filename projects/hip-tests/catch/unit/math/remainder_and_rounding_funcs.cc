@@ -9,39 +9,39 @@
 #include "math_remainder_rounding_negative_kernels_rtc.hh"
 
 MATH_BINARY_WITHIN_ULP_TEST_DEF(fmod, std::fmod, 0, 0)
-TEST_CASE(Unit_Device_fmod_fmodf_Negative_RTC) { NegativeTestRTCWrapper<8>(kFmod); }
+HIP_TEST_CASE(Unit_Device_fmod_fmodf_Negative_RTC) { NegativeTestRTCWrapper<8>(kFmod); }
 
 MATH_BINARY_WITHIN_ULP_TEST_DEF(remainder, std::remainder, 0, 0)
-TEST_CASE(Unit_Device_remainder_remainder_Negative_RTC) { NegativeTestRTCWrapper<8>(kRemainder); }
+HIP_TEST_CASE(Unit_Device_remainder_remainder_Negative_RTC) { NegativeTestRTCWrapper<8>(kRemainder); }
 
 MATH_BINARY_WITHIN_ULP_TEST_DEF(fdim, std::fdim, 0, 0)
-TEST_CASE(Unit_Device_fdim_fdimf_Negative_RTC) { NegativeTestRTCWrapper<8>(kFdim); }
+HIP_TEST_CASE(Unit_Device_fdim_fdimf_Negative_RTC) { NegativeTestRTCWrapper<8>(kFdim); }
 
 MATH_UNARY_WITHIN_ULP_TEST_DEF(trunc, std::trunc, 0, 0)
-TEST_CASE(Unit_Device_trunc_truncf_Negative_RTC) { NegativeTestRTCWrapper<4>(kTrunc); }
+HIP_TEST_CASE(Unit_Device_trunc_truncf_Negative_RTC) { NegativeTestRTCWrapper<4>(kTrunc); }
 
 MATH_UNARY_WITHIN_ULP_TEST_DEF(round, std::round, 0, 0)
-TEST_CASE(Unit_Device_round_roundf_Negative_RTC) { NegativeTestRTCWrapper<4>(kRound); }
+HIP_TEST_CASE(Unit_Device_round_roundf_Negative_RTC) { NegativeTestRTCWrapper<4>(kRound); }
 
 MATH_UNARY_WITHIN_ULP_TEST_DEF(rint, std::rint, 0, 0)
-TEST_CASE(Unit_Device_rint_rintf_Negative_RTC) { NegativeTestRTCWrapper<4>(kRint); }
+HIP_TEST_CASE(Unit_Device_rint_rintf_Negative_RTC) { NegativeTestRTCWrapper<4>(kRint); }
 
 MATH_UNARY_WITHIN_ULP_TEST_DEF(nearbyint, std::nearbyint, 0, 0)
-TEST_CASE(Unit_Device_nearbyint_nearbyintf_Negative_RTC) {
+HIP_TEST_CASE(Unit_Device_nearbyint_nearbyintf_Negative_RTC) {
   NegativeTestRTCWrapper<4>(kNearbyint);
 }
 
 MATH_UNARY_WITHIN_ULP_TEST_DEF(ceil, std::ceil, 0, 0)
-TEST_CASE(Unit_Device_ceil_ceilf_Negative_RTC) { NegativeTestRTCWrapper<4>(kCeil); }
+HIP_TEST_CASE(Unit_Device_ceil_ceilf_Negative_RTC) { NegativeTestRTCWrapper<4>(kCeil); }
 
 MATH_UNARY_WITHIN_ULP_TEST_DEF(floor, std::floor, 0, 0)
-TEST_CASE(Unit_Device_floor_floorf_Negative_RTC) { NegativeTestRTCWrapper<4>(kFloor); }
+HIP_TEST_CASE(Unit_Device_floor_floorf_Negative_RTC) { NegativeTestRTCWrapper<4>(kFloor); }
 
 
 #define LONG_CONVERSION_FUNCTION_TEST_DEF(kern_name, ref_func, lt)                                 \
   MATH_UNARY_KERNEL_DEF(kern_name)                                                                 \
                                                                                                    \
-  TEST_CASE(Unit_Device_##kern_name##_Accuracy_Positive_float) {                                   \
+  HIP_TEST_CASE(Unit_Device_##kern_name##_Accuracy_Positive_float) {                               \
     lt (*ref)(double) = ref_func;                                                                  \
     UnarySinglePrecisionRangeTest(kern_name##_kernel<float, lt>, ref,                              \
                                   EqValidatorBuilderFactory<lt>(),                                 \
@@ -49,7 +49,7 @@ TEST_CASE(Unit_Device_floor_floorf_Negative_RTC) { NegativeTestRTCWrapper<4>(kFl
                                   static_cast<float>(std::numeric_limits<lt>::max()));             \
   }                                                                                                \
                                                                                                    \
-  TEST_CASE(Unit_Device_##kern_name##_Accuracy_Positive_double) {                                  \
+  HIP_TEST_CASE(Unit_Device_##kern_name##_Accuracy_Positive_double) {                              \
     lt (*ref)(long double) = ref_func;                                                             \
     UnaryDoublePrecisionBruteForceTest(kern_name##_kernel<double, lt>, ref,                        \
                                        EqValidatorBuilderFactory<lt>(),                            \
@@ -58,16 +58,16 @@ TEST_CASE(Unit_Device_floor_floorf_Negative_RTC) { NegativeTestRTCWrapper<4>(kFl
   }
 
 LONG_CONVERSION_FUNCTION_TEST_DEF(lrint, std::lrint, long)
-TEST_CASE(Unit_Device_lrint_lrintf_Negative_RTC) { NegativeTestRTCWrapper<4>(kLrint); }
+HIP_TEST_CASE(Unit_Device_lrint_lrintf_Negative_RTC) { NegativeTestRTCWrapper<4>(kLrint); }
 
 LONG_CONVERSION_FUNCTION_TEST_DEF(lround, std::lround, long)
-TEST_CASE(Unit_Device_lround_lroundf_Negative_RTC) { NegativeTestRTCWrapper<4>(kLround); }
+HIP_TEST_CASE(Unit_Device_lround_lroundf_Negative_RTC) { NegativeTestRTCWrapper<4>(kLround); }
 
 LONG_CONVERSION_FUNCTION_TEST_DEF(llrint, std::llrint, long long)
-TEST_CASE(Unit_Device_llrint_llrintf_Negative_RTC) { NegativeTestRTCWrapper<4>(kLlrint); }
+HIP_TEST_CASE(Unit_Device_llrint_llrintf_Negative_RTC) { NegativeTestRTCWrapper<4>(kLlrint); }
 
 LONG_CONVERSION_FUNCTION_TEST_DEF(llround, std::llround, long long)
-TEST_CASE(Unit_Device_llround_llroundf_Negative_RTC) { NegativeTestRTCWrapper<4>(kLlround); }
+HIP_TEST_CASE(Unit_Device_llround_llroundf_Negative_RTC) { NegativeTestRTCWrapper<4>(kLlround); }
 
 
 template <typename T> __global__ void remquo_kernel(std::pair<T, int>* const ys,
@@ -91,7 +91,7 @@ template <typename T> std::pair<T, int> remquo_wrapper(T x1, T x2) {
   return ret;
 }
 
-TEMPLATE_TEST_CASE(Unit_Device_remquo_Accuracy_Positive, float, double) {
+HIP_TEMPLATE_TEST_CASE(Unit_Device_remquo_Accuracy_Positive, float, double) {
   using RT = RefType_t<TestType>;
   std::pair<RT, int> (*ref)(RT, RT) = remquo_wrapper;
   const auto ulp_builder = ULPValidatorBuilderFactory<TestType>(0);
@@ -101,7 +101,7 @@ TEMPLATE_TEST_CASE(Unit_Device_remquo_Accuracy_Positive, float, double) {
                           PairValidatorBuilderFactory<TestType, int>(ulp_builder, eq_builder));
 }
 
-TEST_CASE(Unit_Device_remquo_remquof_Negative_RTC) { NegativeTestRTCWrapper<24>(kRemquo); }
+HIP_TEST_CASE(Unit_Device_remquo_remquof_Negative_RTC) { NegativeTestRTCWrapper<24>(kRemquo); }
 
 template <typename T>
 __global__ void modf_kernel(std::pair<T, T>* const ys, const size_t num_xs, T* const xs) {
@@ -123,16 +123,16 @@ template <typename T> std::pair<T, T> modf_wrapper(T x) {
   return ret;
 }
 
-TEST_CASE(Unit_Device_modf_Accuracy_Positive_float) {
+HIP_TEST_CASE(Unit_Device_modf_Accuracy_Positive_float) {
   UnarySinglePrecisionTest(
       modf_kernel<float>, modf_wrapper<double>,
       PairValidatorBuilderFactory<float>(ULPValidatorBuilderFactory<float>(0)));
 }
 
-TEST_CASE(Unit_Device_modf_Accuracy_Positive_double) {
+HIP_TEST_CASE(Unit_Device_modf_Accuracy_Positive_double) {
   UnaryDoublePrecisionTest(
       modf_kernel<double>, modf_wrapper<long double>,
       PairValidatorBuilderFactory<double>(ULPValidatorBuilderFactory<double>(0)));
 }
 
-TEST_CASE(Unit_Device_modf_modff_Negative_RTC) { NegativeTestRTCWrapper<19>(kModf); }
+HIP_TEST_CASE(Unit_Device_modf_modff_Negative_RTC) { NegativeTestRTCWrapper<19>(kModf); }

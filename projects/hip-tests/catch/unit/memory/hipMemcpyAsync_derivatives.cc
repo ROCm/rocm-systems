@@ -11,7 +11,7 @@
 #include <utils.hh>
 #include <numeric>
 
-TEST_CASE(Unit_hipMemcpyDtoHAsync_Positive_Basic) {
+HIP_TEST_CASE(Unit_hipMemcpyDtoHAsync_Positive_Basic) {
   const auto stream_type = GENERATE(Streams::nullstream, Streams::perThread, Streams::created);
   const StreamGuard stream_guard(stream_type);
 
@@ -21,7 +21,7 @@ TEST_CASE(Unit_hipMemcpyDtoHAsync_Positive_Basic) {
   MemcpyDeviceToHostShell<true>(f, stream_guard.stream());
 }
 
-TEST_CASE(Unit_hipMemcpyDtoHAsync_Positive_Synchronization_Behavior) {
+HIP_TEST_CASE(Unit_hipMemcpyDtoHAsync_Positive_Synchronization_Behavior) {
   HIP_CHECK(hipDeviceSynchronize());
 
   SECTION("Device memory to pageable host memory") {
@@ -41,7 +41,7 @@ TEST_CASE(Unit_hipMemcpyDtoHAsync_Positive_Synchronization_Behavior) {
   }
 }
 
-TEST_CASE(Unit_hipMemcpyDtoHAsync_Negative_Parameters) {
+HIP_TEST_CASE(Unit_hipMemcpyDtoHAsync_Negative_Parameters) {
   using namespace std::placeholders;
   LinearAllocGuard<int> device_alloc(LinearAllocs::hipMalloc, kPageSize);
   LinearAllocGuard<int> host_alloc(LinearAllocs::hipHostMalloc, kPageSize);
@@ -53,7 +53,7 @@ TEST_CASE(Unit_hipMemcpyDtoHAsync_Negative_Parameters) {
       host_alloc.ptr(), device_alloc.ptr(), kPageSize);
 }
 
-TEST_CASE(Unit_hipMemcpyHtoDAsync_Positive_Basic) {
+HIP_TEST_CASE(Unit_hipMemcpyHtoDAsync_Positive_Basic) {
   const auto stream_type = GENERATE(Streams::nullstream, Streams::perThread, Streams::created);
   const StreamGuard stream_guard(stream_type);
 
@@ -63,7 +63,7 @@ TEST_CASE(Unit_hipMemcpyHtoDAsync_Positive_Basic) {
   MemcpyHostToDeviceShell<true>(f, stream_guard.stream());
 }
 
-TEST_CASE(Unit_hipMemcpyHtoDAsync_Positive_Synchronization_Behavior) {
+HIP_TEST_CASE(Unit_hipMemcpyHtoDAsync_Positive_Synchronization_Behavior) {
   // This behavior differs on NVIDIA and AMD, on AMD the hipMemcpy calls is synchronous with
   // respect to the host
 #if HT_AMD
@@ -79,7 +79,7 @@ TEST_CASE(Unit_hipMemcpyHtoDAsync_Positive_Synchronization_Behavior) {
       false);
 }
 
-TEST_CASE(Unit_hipMemcpyHtoDAsync_Negative_Parameters) {
+HIP_TEST_CASE(Unit_hipMemcpyHtoDAsync_Negative_Parameters) {
   using namespace std::placeholders;
   LinearAllocGuard<int> device_alloc(LinearAllocs::hipMalloc, kPageSize);
   LinearAllocGuard<int> host_alloc(LinearAllocs::hipHostMalloc, kPageSize);
@@ -91,7 +91,7 @@ TEST_CASE(Unit_hipMemcpyHtoDAsync_Negative_Parameters) {
       device_alloc.ptr(), host_alloc.ptr(), kPageSize);
 }
 
-TEST_CASE(Unit_hipMemcpyDtoDAsync_Positive_Basic) {
+HIP_TEST_CASE(Unit_hipMemcpyDtoDAsync_Positive_Basic) {
   const auto stream_type = GENERATE(Streams::nullstream, Streams::perThread, Streams::created);
   const StreamGuard stream_guard(stream_type);
 
@@ -115,7 +115,7 @@ TEST_CASE(Unit_hipMemcpyDtoDAsync_Positive_Basic) {
   }
 }
 
-TEST_CASE(Unit_hipMemcpyDtoDAsync_Positive_Synchronization_Behavior) {
+HIP_TEST_CASE(Unit_hipMemcpyDtoDAsync_Positive_Synchronization_Behavior) {
   MemcpyDtoDSyncBehavior(
       [](void* dst, void* src, size_t count) {
         return hipMemcpyDtoDAsync(reinterpret_cast<hipDeviceptr_t>(dst),
@@ -124,7 +124,7 @@ TEST_CASE(Unit_hipMemcpyDtoDAsync_Positive_Synchronization_Behavior) {
       false);
 }
 
-TEST_CASE(Unit_hipMemcpyDtoDAsync_Negative_Parameters) {
+HIP_TEST_CASE(Unit_hipMemcpyDtoDAsync_Negative_Parameters) {
   using namespace std::placeholders;
   LinearAllocGuard<int> src_alloc(LinearAllocs::hipMalloc, kPageSize);
   LinearAllocGuard<int> dst_alloc(LinearAllocs::hipMalloc, kPageSize);
@@ -149,7 +149,7 @@ TEST_CASE(Unit_hipMemcpyDtoDAsync_Negative_Parameters) {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE(Unit_hipMemcpyDtoHAsync_Capture) {
+HIP_TEST_CASE(Unit_hipMemcpyDtoHAsync_Capture) {
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
 
@@ -187,7 +187,7 @@ TEST_CASE(Unit_hipMemcpyDtoHAsync_Capture) {
  * Test source
  * ------------------------
  */
-TEST_CASE(Unit_hipMemcpyHtoDAsync_Capture) {
+HIP_TEST_CASE(Unit_hipMemcpyHtoDAsync_Capture) {
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
 

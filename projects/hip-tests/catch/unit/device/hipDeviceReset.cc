@@ -31,7 +31,7 @@
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipDeviceReset_Positive_Basic) {
+HIP_TEST_CASE(Unit_hipDeviceReset_Positive_Basic) {
   const auto device = GENERATE(range(0, HipTest::getDeviceCount()));
   HIP_CHECK(hipSetDevice(device));
 
@@ -93,7 +93,7 @@ TEST_CASE(Unit_hipDeviceReset_Positive_Basic) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipDeviceReset_Positive_Threaded) {
+HIP_TEST_CASE(Unit_hipDeviceReset_Positive_Threaded) {
   HIP_CHECK(hipSetDevice(0));
   INFO("Current device is: " << 0);
   HIP_CHECK(hipDeviceReset());

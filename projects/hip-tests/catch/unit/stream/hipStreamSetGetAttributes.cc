@@ -30,7 +30,7 @@ static __global__ void doubleKernel(int *arr) {
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-TEST_CASE(Unit_hipStreamSetAttribute_hipStreamGetAttribute_Basic) {
+HIP_TEST_CASE(Unit_hipStreamSetAttribute_hipStreamGetAttribute_Basic) {
   constexpr int N = 1024;
   int hostMem[N];
   for (int i = 0; i < N; i++) {
@@ -90,7 +90,7 @@ TEST_CASE(Unit_hipStreamSetAttribute_hipStreamGetAttribute_Basic) {
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-TEST_CASE(Unit_hipStreamGetAttribute_Negative) {
+HIP_TEST_CASE(Unit_hipStreamGetAttribute_Negative) {
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
 
@@ -134,7 +134,7 @@ TEST_CASE(Unit_hipStreamGetAttribute_Negative) {
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-TEST_CASE(Unit_hipStreamSetAttribute_Negative) {
+HIP_TEST_CASE(Unit_hipStreamSetAttribute_Negative) {
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
 

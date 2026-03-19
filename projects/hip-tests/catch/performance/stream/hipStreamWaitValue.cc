@@ -108,7 +108,7 @@ static void RunBenchmark(const size_t array_size, unsigned int flag) {
  *  - Device supports Stream Wait Value operations
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Performance_hipStreamWaitValue32) {
+HIP_TEST_CASE(Performance_hipStreamWaitValue32) {
 #if HT_AMD
   if (!IsStreamWaitValueSupported(0)) {
     HipTest::HIP_SKIP_TEST(
@@ -145,7 +145,7 @@ TEST_CASE(Performance_hipStreamWaitValue32) {
  *  - Device supports Stream Wait Value operations
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Performance_hipStreamWaitValue64) {
+HIP_TEST_CASE(Performance_hipStreamWaitValue64) {
   if (!IsStreamWaitValueSupported(0)) {
     HipTest::HIP_SKIP_TEST(
         "GPU 0 doesn't support hipStreamWaitValue64() function. "
