@@ -10,7 +10,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Introduced support for MI350P GPU
 
-* ``--table-view`` debug option in analyze mode to force all TTY output to table view and ignore ``cli_style`` from YAML config (e.g. mem_chart, Roofline charts render as tables).
+* ``--view table`` option in analyze mode to force all TTY output to plain tables and ignore ``cli_style`` from YAML config (e.g. mem_chart, Roofline charts render as tables). The ``--view`` argument is reserved for future TTY views (e.g. other chart styles).
 
 ### Changed
 
