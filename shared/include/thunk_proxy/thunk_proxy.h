@@ -7,6 +7,21 @@
 #include "status.h"
 
 namespace thunk_proxy {
+
+/**
+ * @brief Per-process GPU usage information returned by EnumGpuProcesses.
+ *
+ * On WSL2, win_pid is the Windows-namespace PID returned by
+ * D3DKMTEnumProcesses (which equals the Linux PID in a flat namespace).
+ * vram_usage_bytes is populated via D3DKMTQueryVideoMemoryInfo
+ * (LOCAL segment group); 0 when the query is unsupported or the process
+ * has no current VRAM allocation.
+ */
+struct GpuProcessInfo {
+  uint32_t win_pid;           ///< Windows PID of the GPU-using process
+  uint64_t vram_usage_bytes;  ///< Current VRAM (LOCAL) usage in bytes
+};
+
 enum AllocDomain {
   kSystem,
   kLocal,
@@ -245,6 +260,18 @@ public:
 
   // Query memory used in bytes by type via D3DKMTQueryStatistics.
   ErrorCode QueryMemoryUsage(uint32_t mem_type, uint64_t *used) const;
+
+  // Enumerate all Windows processes currently using this adapter's GPU.
+  // Calls D3DKMTEnumProcesses (WSL2 dxgkrnl-specific API) and populates
+  // |out| with one GpuProcessInfo per process.  Also queries VRAM usage
+  // for each process via D3DKMTQueryVideoMemoryInfo.
+  // Returns ErrorCode::Unsupported when the WSL2 API is unavailable.
+  ErrorCode EnumGpuProcesses(std::vector<GpuProcessInfo> *out) const;
+
+  // Query VRAM usage (LOCAL segment group) for a specific Windows PID.
+  // |win_pid| == 0 queries the calling process itself.
+  // Returns ErrorCode::Unsupported when the WSL2 API is unavailable.
+  ErrorCode QueryProcessVram(uint32_t win_pid, uint64_t *vram_bytes) const;
 
   // Query live GPU metrics (clocks, temps, voltages, activity, fan) via PMLog escape.
   ErrorCode QueryGpuMetricsInfo(wsl::thunk::GpuMetricsInfo *info) const;

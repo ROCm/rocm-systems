@@ -3525,10 +3525,40 @@ amdsmi_get_gpu_compute_process_info(amdsmi_process_info_t *procs, uint32_t *num_
 
     if (num_items == nullptr)
         return AMDSMI_STATUS_INVAL;
-    auto r = rsmi_compute_process_info_get(
-        reinterpret_cast<rsmi_process_info_t*>(procs),
-        num_items);
-    return amd::smi::rsmi_to_amdsmi_status(r);
+
+    // Enumerate GPU processes across all devices via WSL2 D3DKMTEnumProcesses.
+    // Collect unique PIDs (a process may appear on multiple adapters).
+    auto& platform = Platform::instance();
+    std::unordered_map<uint32_t, uint64_t> pid_vram_map; // pid -> vram bytes
+    for (size_t i = 0; i < platform.GetDeviceCount(); ++i) {
+        std::vector<thunk_proxy::GpuProcessInfo> gplist;
+        if (platform.GetDevice(i)->EnumGpuProcesses(&gplist) != ErrorCode::Success)
+            continue;
+        for (const auto& gp : gplist) {
+            // accumulate VRAM across adapters for the same process
+            pid_vram_map[gp.win_pid] += gp.vram_usage_bytes;
+        }
+    }
+
+    const auto total = static_cast<uint32_t>(pid_vram_map.size());
+
+    if (procs == nullptr) {
+        *num_items = total;
+        return AMDSMI_STATUS_SUCCESS;
+    }
+
+    uint32_t written = 0;
+    for (const auto& [pid, vram_bytes] : pid_vram_map) {
+        if (written >= *num_items)
+            break;
+        amdsmi_process_info_t& out = procs[written++];
+        out = {};
+        out.process_id   = pid;
+        out.vram_usage   = vram_bytes / (1024ULL * 1024ULL); // bytes -> MB
+        // cu_occupancy / sdma_usage / evicted_time: unavailable on WSL2
+    }
+    *num_items = total;
+    return AMDSMI_STATUS_SUCCESS;
 }
 
 amdsmi_status_t amdsmi_get_gpu_compute_process_info_by_pid(uint32_t pid,
@@ -3537,9 +3567,28 @@ amdsmi_status_t amdsmi_get_gpu_compute_process_info_by_pid(uint32_t pid,
 
     if (proc == nullptr)
         return AMDSMI_STATUS_INVAL;
-    auto r = rsmi_compute_process_info_by_pid_get(pid,
-        reinterpret_cast<rsmi_process_info_t*>(proc));
-    return amd::smi::rsmi_to_amdsmi_status(r);
+
+    auto& platform = Platform::instance();
+    bool found = false;
+    uint64_t total_vram = 0;
+    for (size_t i = 0; i < platform.GetDeviceCount(); ++i) {
+        std::vector<thunk_proxy::GpuProcessInfo> gplist;
+        if (platform.GetDevice(i)->EnumGpuProcesses(&gplist) != ErrorCode::Success)
+            continue;
+        for (const auto& gp : gplist) {
+            if (gp.win_pid == pid) {
+                total_vram += gp.vram_usage_bytes;
+                found = true;
+            }
+        }
+    }
+    if (!found)
+        return AMDSMI_STATUS_NOT_FOUND;
+
+    *proc = {};
+    proc->process_id = pid;
+    proc->vram_usage = total_vram / (1024ULL * 1024ULL); // bytes -> MB
+    return AMDSMI_STATUS_SUCCESS;
 }
 
 amdsmi_status_t
@@ -3547,10 +3596,36 @@ amdsmi_get_gpu_compute_process_gpus(uint32_t pid, uint32_t *dv_indices,
                                                        uint32_t *num_devices) {
     AMDSMI_CHECK_INIT();
 
-    if (dv_indices == nullptr || num_devices == nullptr)
+    if (num_devices == nullptr)
         return AMDSMI_STATUS_INVAL;
-    auto r = rsmi_compute_process_gpus_get(pid, dv_indices, num_devices);
-    return amd::smi::rsmi_to_amdsmi_status(r);
+
+    auto& platform = Platform::instance();
+    std::vector<uint32_t> matching_devs;
+    for (size_t i = 0; i < platform.GetDeviceCount(); ++i) {
+        std::vector<thunk_proxy::GpuProcessInfo> gplist;
+        if (platform.GetDevice(i)->EnumGpuProcesses(&gplist) != ErrorCode::Success)
+            continue;
+        for (const auto& gp : gplist) {
+            if (gp.win_pid == pid) {
+                matching_devs.push_back(static_cast<uint32_t>(i));
+                break; // device already matched
+            }
+        }
+    }
+
+    const auto found = static_cast<uint32_t>(matching_devs.size());
+    if (dv_indices == nullptr) {
+        *num_devices = found;
+        return AMDSMI_STATUS_SUCCESS;
+    }
+
+    uint32_t written = 0;
+    for (uint32_t idx : matching_devs) {
+        if (written >= *num_devices) break;
+        dv_indices[written++] = idx;
+    }
+    *num_devices = found;
+    return AMDSMI_STATUS_SUCCESS;
 }
 
 amdsmi_status_t  amdsmi_get_gpu_ecc_count(amdsmi_processor_handle processor_handle,
@@ -4840,53 +4915,71 @@ amdsmi_status_t
 amdsmi_get_gpu_process_list(amdsmi_processor_handle processor_handle, uint32_t *max_processes, amdsmi_proc_info_t *list) {
     AMDSMI_CHECK_INIT();
 
-    // Validate the max_processes pointer
-    if (!max_processes) {
+    if (!max_processes)
         return AMDSMI_STATUS_INVAL;
+
+    // Get the Device object associated with this processor handle.
+    auto *device = reinterpret_cast<Device *>(processor_handle);
+    if (!device)
+        return AMDSMI_STATUS_INVAL;
+
+    // Query GPU processes on this adapter via WSL2 D3DKMTEnumProcesses.
+    std::vector<thunk_proxy::GpuProcessInfo> gplist;
+    ErrorCode ec = device->EnumGpuProcesses(&gplist);
+    if (ec == ErrorCode::UnSupported) {
+        *max_processes = 0;
+        return AMDSMI_STATUS_SUCCESS;
     }
+    if (ec != ErrorCode::Success)
+        return translateCodeToSmiStatus(ec);
 
-    // Retrieve the GPU device associated with the processor handle
-    amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
-    amdsmi_status_t status_code = get_gpu_device_from_handle(processor_handle, &gpu_device);
-    if (status_code != AMDSMI_STATUS_SUCCESS) {
-        return status_code;
-    }
+    const auto total = static_cast<uint32_t>(gplist.size());
 
-    // Get the list of compute processes running on the GPU
-    auto compute_process_list = gpu_device->amdgpu_get_compute_process_list();
-
-    // If max_processes is 0, return the number of processes currently running
-    // If compute_process_list is empty, return success with max_processes set to 0
-    if ((*max_processes == 0) || compute_process_list.empty()) {
-        *max_processes = static_cast<uint32_t>(compute_process_list.size());
+    // Caller passing max_processes==0 (or list==nullptr) requests the count.
+    if (*max_processes == 0 || list == nullptr) {
+        *max_processes = total;
         return AMDSMI_STATUS_SUCCESS;
     }
 
-    // Validate the list pointer
-    if (!list) {
-        return AMDSMI_STATUS_INVAL;
-    }
-
-    // Store the original size of max_processes
-    const auto max_processes_original_size(*max_processes);
-    auto idx = uint32_t(0);
-
-    // Populate the list with process information
-    for (auto& process : compute_process_list) {
-        if (idx < *max_processes) {
-            // Iterate over the map of processes and store the amdsmi_proc_info_t in the list
-            list[idx++] = static_cast<amdsmi_proc_info_t>(process.second);
-        } else {
+    const auto original_max = *max_processes;
+    uint32_t written = 0;
+    for (const auto& gp : gplist) {
+        if (written >= original_max)
             break;
+        amdsmi_proc_info_t& out = list[written++];
+        out = {};
+        out.pid = gp.win_pid;
+        // memory_usage.vram_mem is in bytes; mem is also bytes.
+        // On WSL2, cross-process queries are rejected by the kernel;
+        // use UINT64_MAX / UINT32_MAX as sentinel so Python shows N/A.
+        out.memory_usage.vram_mem = gp.vram_usage_bytes;  // UINT64_MAX = N/A
+        out.mem                   = gp.vram_usage_bytes;
+        out.memory_usage.gtt_mem  = UINT64_MAX;  // unavailable on WSL2
+        out.memory_usage.cpu_mem  = UINT64_MAX;  // unavailable on WSL2
+        // engine_usage, cu_occupancy, sdma_usage, evicted_time: unavailable on WSL2
+        out.engine_usage.gfx = UINT64_MAX;
+        out.engine_usage.enc = UINT64_MAX;
+        out.cu_occupancy     = UINT32_MAX;
+        out.sdma_usage       = UINT64_MAX;
+        out.evicted_time     = UINT32_MAX;
+        // Resolve process name via /proc/<pid>/exe (works in WSL2).
+        {
+            char exe_path[64];
+            char exe_real[PATH_MAX] = {};
+            std::snprintf(exe_path, sizeof(exe_path), "/proc/%u/exe", gp.win_pid);
+            ssize_t n = readlink(exe_path, exe_real, sizeof(exe_real) - 1);
+            if (n > 0) {
+                // Use basename only (strip directory prefix)
+                const char *base = std::strrchr(exe_real, '/');
+                const char *name = base ? base + 1 : exe_real;
+                std::strncpy(out.name, name, AMDSMI_MAX_STRING_LENGTH - 1);
+            } else {
+                std::strncpy(out.name, "N/A", AMDSMI_MAX_STRING_LENGTH - 1);
+            }
         }
     }
-
-    // Update max_processes to reflect the actual number of running processes
-    *max_processes = static_cast<uint32_t>(compute_process_list.size());
-
-    // Check if the caller-provided size for processes is sufficient to store all running processes
-    return (max_processes_original_size >= static_cast<uint32_t>(compute_process_list.size()))
-            ? AMDSMI_STATUS_SUCCESS : AMDSMI_STATUS_OUT_OF_RESOURCES;
+    *max_processes = total;
+    return (original_max >= total) ? AMDSMI_STATUS_SUCCESS : AMDSMI_STATUS_OUT_OF_RESOURCES;
 }
 
 amdsmi_status_t

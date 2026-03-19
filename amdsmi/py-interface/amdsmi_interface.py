@@ -3561,15 +3561,15 @@ def amdsmi_get_gpu_process_list(
         result.append({
             "name": process_name,
             "pid": process_list[index].pid,
-            "mem": process_list[index].mem,
+            "mem": _validate_if_max_uint(process_list[index].mem, MaxUIntegerTypes.UINT64_T),
             "engine_usage": {
-                "gfx": process_list[index].engine_usage.gfx,
-                "enc": process_list[index].engine_usage.enc
+                "gfx": _validate_if_max_uint(process_list[index].engine_usage.gfx, MaxUIntegerTypes.UINT64_T),
+                "enc": _validate_if_max_uint(process_list[index].engine_usage.enc, MaxUIntegerTypes.UINT64_T),
             },
             "memory_usage": {
-                "gtt_mem": process_list[index].memory_usage.gtt_mem,
-                "cpu_mem": process_list[index].memory_usage.cpu_mem,
-                "vram_mem": process_list[index].memory_usage.vram_mem,
+                "gtt_mem": _validate_if_max_uint(process_list[index].memory_usage.gtt_mem, MaxUIntegerTypes.UINT64_T),
+                "cpu_mem": _validate_if_max_uint(process_list[index].memory_usage.cpu_mem, MaxUIntegerTypes.UINT64_T),
+                "vram_mem": _validate_if_max_uint(process_list[index].memory_usage.vram_mem, MaxUIntegerTypes.UINT64_T),
             },
             "cu_occupancy": _validate_if_max_uint(process_list[index].cu_occupancy, MaxUIntegerTypes.UINT32_T),
             "sdma_usage": _validate_if_max_uint(process_list[index].sdma_usage, MaxUIntegerTypes.UINT64_T),
