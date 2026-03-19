@@ -2638,24 +2638,22 @@ int gpu_psp_load_all_fw(struct WddmLiteDevice *dev, const char *fw_dir)
     }
 
     /* === Step 2: Load SMU firmware (before TMR) === */
-    /* In VBIOS-preserve mode (HSAKMT_SKIP_MODE1_RESET=1), skip reloading
-     * SMU firmware. VBIOS's running SMU has the real board pptable (with PMIC
-     * I2C addresses for the RX 9070 XT). Reloading SMU via LOAD_IP_FW would
-     * restart SMU and wipe the pptable, causing EnableAllSmuFeatures to hang. */
+    /* ALWAYS load SMU firmware, even in VBIOS-preserve mode.
+     *
+     * Key finding: the VBIOS SMU goes to sleep after VBIOS completes and
+     * doesn't respond to the mailbox. We MUST load fresh SMU firmware to
+     * get a responsive mailbox. The fresh firmware has the combo pptable
+     * embedded (board-specific PMIC/I2C addresses).
+     *
+     * In VBIOS-preserve mode (skip Mode1 reset), the I2C/PMIC hardware
+     * stays in the state VBIOS left it (working). Loading fresh SMU on top
+     * of this should give us: active mailbox + working PMIC access. */
     {
-        char skip_m1r[8] = {};
-        GetEnvironmentVariableA("HSAKMT_SKIP_MODE1_RESET",
-            skip_m1r, sizeof(skip_m1r));
-        if (skip_m1r[0] == '1') {
-            pr_info("psp_ring: === Step 2: Skipping SMU firmware reload "
-                    "(HSAKMT_SKIP_MODE1_RESET=1 — keep VBIOS pptable) ===\n");
-        } else {
-            pr_info("psp_ring: === Step 2: Loading SMU firmware ===\n");
-            ret = psp_load_smu(&ctx, fw_dir);
-            if (ret != 0) {
-                pr_warn("psp_ring: SMU firmware load failed\n");
-                load_failures++;
-            }
+        pr_info("psp_ring: === Step 2: Loading SMU firmware ===\n");
+        ret = psp_load_smu(&ctx, fw_dir);
+        if (ret != 0) {
+            pr_warn("psp_ring: SMU firmware load failed\n");
+            load_failures++;
         }
     }
 
@@ -4715,7 +4713,7 @@ int gpu_smu_enable_features(struct WddmLiteDevice *dev)
     {
         ULONG fb_base_reg = mmhub_rreg(dev, regMMMC_VM_FB_LOCATION_BASE);
         ULONGLONG vram_mc_base = (ULONGLONG)fb_base_reg << 24;
-        ULONGLONG smu_table_mc = vram_mc_base + 0x900000;  /* 9MB offset */
+        ULONGLONG smu_table_mc = vram_mc_base + 0x100000;  /* 1MB offset */
         ULONG addr_hi = (ULONG)(smu_table_mc >> 32);
         ULONG addr_lo = (ULONG)(smu_table_mc & 0xFFFFFFFF);
         pr_info("gpu_smu: SetDriverDramAddr = 0x%08x_%08x (vram_base=0x%llx)\n",
@@ -4769,58 +4767,77 @@ int gpu_smu_enable_features(struct WddmLiteDevice *dev)
             gpu_smu_send_msg(dev, 0x23, 0x4000);  /* DramLogSetDramSize = 16KB */
         }
 
-        /* UseDefaultPPTable */
-        pr_info("gpu_smu: UseDefaultPPTable...\n");
-        ret = gpu_smu_send_msg(dev, PPSMC_MSG_UseDefaultPPTable, 0);
-        if (ret == 0)
-            pr_info("gpu_smu: UseDefaultPPTable OK\n");
-        else
-            pr_warn("gpu_smu: UseDefaultPPTable failed\n");
+        /* NOTE: UseDefaultPPTable is SKIPPED.
+         * The fresh SMU firmware (loaded via PSP LOAD_IP_FW) has the combo
+         * pptable embedded internally. UseDefaultPPTable may override this
+         * with a worse generic default. The Linux driver does NOT call
+         * UseDefaultPPTable — it does a combo pptable round-trip instead.
+         * Since Dram2Smu is broken on VFIO, we skip pptable setup entirely
+         * and let the SMU use its embedded combo pptable directly. */
+        pr_info("gpu_smu: SKIPPING UseDefaultPPTable — using embedded combo pptable\n");
 
-        /* TransferTable round-trip with HDP flush between read and write.
-         * Smu2Dram writes via GPU DMA → VRAM. Dram2Smu reads via GPU DMA ← VRAM.
-         * An HDP flush may be needed to make the written data visible to the
-         * DMA read path (Linux does amdgpu_asic_flush_hdp before Dram2Smu). */
-        pr_info("gpu_smu: TransferTableSmu2Dram(0)...\n");
-        ret = gpu_smu_send_msg(dev, PPSMC_MSG_TransferTableSmu2Dram, 0);
-        if (ret == 0) {
-            pr_info("gpu_smu: Smu2Dram(0) OK — flushing HDP + trying Dram2Smu...\n");
-            gpu_hdp_flush(dev);
-            Sleep(10);
-            ret = gpu_smu_send_msg(dev, PPSMC_MSG_TransferTableDram2Smu, 0);
-            if (ret == 0) {
-                pr_info("gpu_smu: Dram2Smu(0) OK — pptable registered!\n");
-            } else {
-                pr_warn("gpu_smu: Dram2Smu(0) failed after HDP flush\n");
-                /* Try table_id=1 (WATERMARKS), might be smaller/simpler */
-                gpu_smu_send_msg(dev, PPSMC_MSG_TransferTableSmu2Dram, 1);
+        /* TransferTable round-trip with VRAM buffer verification.
+         * Map the driver DRAM buffer to CPU, read back what Smu2Dram wrote,
+         * then CPU-write the data back and do Dram2Smu.
+         * The Linux driver does: CPU memcpy → HDP flush → Dram2Smu. */
+        {
+            PVOID buf_handle = NULL;
+            UCHAR *buf_cpu = (UCHAR *)psp_ring_map_vram(dev,
+                0x100000, 0x4000, &buf_handle);  /* 16KB at VRAM+1MB */
+
+            if (buf_cpu) {
+                pr_info("gpu_smu: driver DRAM buffer mapped at cpu=%p\n", buf_cpu);
+
+                /* Zero the buffer first */
+                memset(buf_cpu, 0, 0x4000);
                 gpu_hdp_flush(dev);
-                ret = gpu_smu_send_msg(dev, PPSMC_MSG_TransferTableDram2Smu, 1);
-                pr_info("gpu_smu: Dram2Smu(1) %s\n", ret == 0 ? "OK" : "failed");
 
-                /* Try the "WithAddr" variants (msg 0x52/0x53) which take
-                 * an explicit address parameter instead of using SetDriverDramAddr */
-                {
-                    ULONG fb_base_reg = mmhub_rreg(dev, regMMMC_VM_FB_LOCATION_BASE);
-                    ULONGLONG vram_mc = (ULONGLONG)fb_base_reg << 24;
-                    ULONGLONG buf_addr = vram_mc + 0x900000;
-                    pr_info("gpu_smu: trying TransferTableSmu2DramWithAddr "
-                            "(msg=0x52, addr=0x%llx)...\n",
-                            (unsigned long long)buf_addr);
-                    /* msg 0x50: SetDriverDramAddr (single message variant) */
-                    gpu_smu_send_msg(dev, 0x50, (ULONG)(buf_addr >> 20));
-                    /* msg 0x52: TransferTableSmu2DramWithAddr */
-                    ret = gpu_smu_send_msg(dev, 0x52, 0);
-                    pr_info("gpu_smu: Smu2DramWithAddr(0x52) %s\n",
-                            ret == 0 ? "OK" : "failed");
-                    if (ret == 0) {
-                        gpu_hdp_flush(dev);
-                        /* msg 0x53: TransferTableDram2SmuWithAddr */
-                        ret = gpu_smu_send_msg(dev, 0x53, 0);
-                        pr_info("gpu_smu: Dram2SmuWithAddr(0x53) %s\n",
-                                ret == 0 ? "OK" : "failed");
+                /* Smu2Dram: SMU writes pptable to our buffer */
+                pr_info("gpu_smu: TransferTableSmu2Dram(0)...\n");
+                ret = gpu_smu_send_msg(dev, PPSMC_MSG_TransferTableSmu2Dram, 0);
+                if (ret == 0) {
+                    /* Read back first 64 bytes to verify data was written */
+                    pr_info("gpu_smu: Smu2Dram OK. Buffer hex dump (first 64 bytes):\n");
+                    for (int row = 0; row < 4; row++) {
+                        pr_info("  +0x%02x: %02x %02x %02x %02x  %02x %02x %02x %02x  "
+                                "%02x %02x %02x %02x  %02x %02x %02x %02x\n",
+                                row * 16,
+                                buf_cpu[row*16+0],  buf_cpu[row*16+1],
+                                buf_cpu[row*16+2],  buf_cpu[row*16+3],
+                                buf_cpu[row*16+4],  buf_cpu[row*16+5],
+                                buf_cpu[row*16+6],  buf_cpu[row*16+7],
+                                buf_cpu[row*16+8],  buf_cpu[row*16+9],
+                                buf_cpu[row*16+10], buf_cpu[row*16+11],
+                                buf_cpu[row*16+12], buf_cpu[row*16+13],
+                                buf_cpu[row*16+14], buf_cpu[row*16+15]);
                     }
+
+                    /* Check if buffer is all zeros (Smu2Dram wrote nothing) */
+                    BOOLEAN all_zero = TRUE;
+                    for (int i = 0; i < 0x4000; i++) {
+                        if (buf_cpu[i] != 0) { all_zero = FALSE; break; }
+                    }
+                    if (all_zero)
+                        pr_warn("gpu_smu: Buffer is ALL ZEROS — Smu2Dram wrote nothing!\n");
+                    else
+                        pr_info("gpu_smu: Buffer has non-zero data — pptable present\n");
+
+                    /* Now CPU-write the data back (memcpy to same buffer is a no-op,
+                     * but the HDP flush is what matters — it makes CPU-written data
+                     * visible to the SMU's DMA read path) */
+                    pr_info("gpu_smu: HDP flush + Dram2Smu(0)...\n");
+                    gpu_hdp_flush(dev);
+                    ret = gpu_smu_send_msg(dev, PPSMC_MSG_TransferTableDram2Smu, 0);
+                    if (ret == 0)
+                        pr_info("gpu_smu: Dram2Smu(0) OK!\n");
+                    else
+                        pr_warn("gpu_smu: Dram2Smu(0) STILL FAILED\n");
                 }
+
+                psp_ring_unmap(dev, buf_cpu, buf_handle);
+            } else {
+                pr_warn("gpu_smu: failed to map driver DRAM buffer — "
+                        "skipping TransferTable diagnostic\n");
             }
         }
 
@@ -5024,7 +5041,7 @@ try_enable_smu_features:
         mp1_wreg_direct(dev, regMP1_SMN_C2PMSG_66, PPSMC_MSG_EnableAllSmuFeatures);
 
         BOOLEAN success = FALSE;
-        DWORD timeout_ms = 120000;
+        DWORD timeout_ms = 300000;  /* 5 min — VFIO may be very slow */
         DWORD start_tick = GetTickCount();
         DWORD last_print_s = 0;
         for (;;) {
