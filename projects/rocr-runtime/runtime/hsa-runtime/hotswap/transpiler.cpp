@@ -1036,7 +1036,8 @@ bool NeedsTranspile(const std::string& source_isa,
 
 std::vector<std::string> TranslateInstruction(const std::string& asm_line,
                                                const std::string& source_cpu,
-                                               const std::string& target_cpu) {
+                                               const std::string& target_cpu,
+                                               int scale_temp_vgpr = 7) {
   std::vector<std::string> result;
 
   std::string line = asm_line;
@@ -1492,8 +1493,8 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
 
       // Recursively translate each half so mnemonic renames and other
       // fixups (constant bus, vcc widening, etc.) apply to both halves.
-      auto r1 = TranslateInstruction(first_half, source_cpu, target_cpu);
-      auto r2 = TranslateInstruction(second_half, source_cpu, target_cpu);
+      auto r1 = TranslateInstruction(first_half, source_cpu, target_cpu, scale_temp_vgpr);
+      auto r2 = TranslateInstruction(second_half, source_cpu, target_cpu, scale_temp_vgpr);
       result.insert(result.end(), r1.begin(), r1.end());
       result.insert(result.end(), r2.begin(), r2.end());
       return result;
@@ -2204,11 +2205,11 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
       }
 
       if (!vaddr.empty()) {
-        // Use v7 as a temp for the byte offset.  vaddr must stay as element
-        // index because subsequent scale_offset instructions reuse it.  v7 is
-        // within the arch-VGPR range (ACCUM_OFFSET=1 ⇒ v0-v7) and is dead at
-        // this point (not used by the kernel body or the prologue after v6).
-        const std::string kScaleTemp = "v7";
+        // Use a temp VGPR for the byte offset, above the kernel's own VGPRs.
+        // scale_temp_vgpr is passed from the translation loop and set to
+        // num_vgprs12+2 (above save registers).  vaddr stays as element index
+        // because subsequent scale_offset instructions reuse it.
+        const std::string kScaleTemp = "v" + std::to_string(scale_temp_vgpr);
         result.push_back("v_lshlrev_b32_e32 " + kScaleTemp + ", " +
                           std::to_string(shift) + ", " + vaddr);
         // Replace vaddr in the instruction with the byte-offset temp register
@@ -3114,7 +3115,9 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
         }
       }
 
-      auto translated_lines = TranslateInstruction(line, src_cpu, tgt_cpu);
+      // scale_temp_vgpr: use num_vgprs12+2 (above save registers sv_x, sv_y)
+      auto translated_lines = TranslateInstruction(line, src_cpu, tgt_cpu,
+                                                    save_vgpr_y + 1);
 
       // Post-process: replace branch offsets with labels (using actual PC offsets)
       if (ii < source_instrs.size() && !branch_labels.empty()) {
