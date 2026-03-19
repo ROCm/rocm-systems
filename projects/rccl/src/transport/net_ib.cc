@@ -495,16 +495,22 @@ static int ncclIbMatchVfPath(char* path1, char* path2) {
   }
 }
 
-static void ncclIbNormalizePciPath(const char* in, char* out) {
-  strcpy(out, in);
-  size_t len = strlen(out);
+/**
+ * Assumes PCIe path ends with xxxx:xx:xx.x 
+ */
+static void ncclIbNormalizePciPath(const char* in, char* out, size_t out_size) {
+  if (!in || !out || out_size == 0) return;
+  // Safe copy with truncation
+  size_t len = strnlen(in, out_size - 1);
+  memmove(out, in, len);
+  out[len] = '\0';
   if (len < 4) return;
   // Merge multi-port NICs (.1/.2/.3 -> .0)
-  out[len-1] = '0';
+  out[len - 1] = '0';
   // Merge VFs if enabled
   if (ncclParamIbMergeVfs()) {
-    out[len-3] = '0';
-    out[len-4] = '0';
+    out[len - 3] = '0';
+    out[len - 4] = '0';
   }
 }
 
@@ -518,12 +524,12 @@ static ncclResult_t ncclIbGetPciPath(char* devName, char** path, int* realPort) 
     WARN("Could not find real path of %s (%s)", devName, devicePath);
   } else {
     char normalized[PATH_MAX];
-    ncclIbNormalizePciPath(p, normalized);
+    ncclIbNormalizePciPath(p, normalized, PATH_MAX);
     // Keep the real port aside (the ibv port is always 1 on recent cards)
     *realPort = 0;
     for (int d = 0; d < ncclNIbDevs; d++) {
       char otherNorm[PATH_MAX];
-      ncclIbNormalizePciPath(ncclIbDevs[d].pciPath, otherNorm);
+      ncclIbNormalizePciPath(ncclIbDevs[d].pciPath, otherNorm, PATH_MAX);
       if (ncclIbMatchVfPath(normalized, otherNorm)) {
         (*realPort)++;
       }
