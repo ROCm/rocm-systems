@@ -363,7 +363,8 @@ class SystemCapabilities:
     @cached_property
     def julia_exec(self) -> Optional[Path]:
         """Get the path to the Julia executable."""
-        return shutil.which("julia")
+        path = shutil.which("julia")
+        return Path(path) if path else None
 
     @cached_property
     def mpiexec_exec(self) -> Optional[Path]:

@@ -103,8 +103,15 @@ class TestCodeCoverage(RocprofsysTest):
             / "CodeCoverage_basic_blocks_hybrid_runtime_instrument"
             / "coverage.json"
         )
-        if not brw_coverage_path or not ri_coverage_path:
-            pytest.fail("coverage paths not found")
+        missing = []
+        if not brw_coverage_path.exists():
+            missing.append("CodeCoverage_basic_blocks_binary_rewrite/coverage.json")
+        if not ri_coverage_path.exists():
+            missing.append(
+                "CodeCoverage_basic_blocks_hybrid_runtime_instrument/coverage.json"
+            )
+        if missing:
+            pytest.skip(f"Missing output from dependency tests: {', '.join(missing)}")
 
         run_args = [
             "-i",

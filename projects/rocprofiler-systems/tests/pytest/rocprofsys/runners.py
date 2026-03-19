@@ -214,15 +214,17 @@ class BaseRunner(ABC):
             return command
 
         if self.launcher == "mpi":
-            exec = self.config.capabilities.mpiexec_exec
+            launcher_exec = self.config.capabilities.mpiexec_exec
         elif self.launcher == "shmem":
-            exec = self.config.capabilities.oshrun_exec
+            launcher_exec = self.config.capabilities.oshrun_exec
+        else:
+            raise ValueError(f"Unknown launcher: {self.launcher!r}")
 
-        if exec is None:
+        if launcher_exec is None:
             return command
 
         cmd = [
-            str(exec),
+            str(launcher_exec),
             "-n",
             str(self.num_procs),
         ]
@@ -230,7 +232,7 @@ class BaseRunner(ABC):
         if self.launcher == "mpi":
             try:
                 result = subprocess.run(
-                    [str(exec), "--oversubscribe", "-n", "1", "true"],
+                    [str(launcher_exec), "--oversubscribe", "-n", "1", "true"],
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
                     timeout=5,
