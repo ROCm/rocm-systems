@@ -121,7 +121,7 @@ bool KernelParameters::captureHIPArgs(address kernArgs, size_t kernArgsSize, add
   // Copy the arguments into the buffer allocated for the kernel parameters. Only copy as much as
   // the signature defines, even if the user passed more, to avoid out-of-bounds access in the case
   // where the user passed a size larger than what the kernel expects.
-  size_t copySize = std::min(kernArgsSize, signature_.paramsSize());
+  size_t copySize = std::min(kernArgsSize, size_t{signature_.paramsSize()});
   if (copySize > 0) ::memcpy(mem, kernArgs, copySize);
 
   // Zero out any remaining space in the kernel parameter buffer that wasn't overwritten by the user
