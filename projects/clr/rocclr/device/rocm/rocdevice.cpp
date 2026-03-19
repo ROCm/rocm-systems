@@ -2057,11 +2057,17 @@ void* Device::hostAlloc(size_t size, size_t alignment, MemorySegment mem_seg,
 
   if (allowAccess) {
     stat = Hsa::agents_allow_access(gpu_agents_.size(), &gpu_agents_[0], nullptr, ptr);
-    if (stat != HSA_STATUS_SUCCESS) {
-      LogPrintfError("Fail hsa_amd_agents_allow_access with err %d", stat);
-      hostFree(ptr, size);
-      return nullptr;
-    }
+  }
+  else
+  {
+    hsa_agent_t local_agent = bkendDevice_;
+    stat = Hsa::agents_allow_access(1, &local_agent, nullptr, ptr);
+  }
+  
+  if (stat != HSA_STATUS_SUCCESS) {
+    LogPrintfError("Fail hsa_amd_agents_allow_access with err %d", stat);
+    hostFree(ptr, size);
+    return nullptr;
   }
 
   return ptr;
