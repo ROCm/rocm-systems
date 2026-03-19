@@ -1,5 +1,5 @@
 # =============================================================================
-# RDNA3.5 (gfx1152) - RDNA3.5 TCP (Texture Cache Per-pipe) Performance Metrics
+# RDNA3.5 (gfx1151) - RDNA3.5 TCP (Texture Cache Per-pipe) Performance Metrics
 # =============================================================================
 # TCP is the L0 vector cache in RDNA3.5, providing per-WGP caching
 # Cache hierarchy: TCP (L0) -> GL1C (L1) -> GL2C (L2)

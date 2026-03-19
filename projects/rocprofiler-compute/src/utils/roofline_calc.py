@@ -108,7 +108,7 @@ SUPPORTED_DATATYPES: dict[str, list[str]] = {
         "I32",
         "I64",
     ],  # RDNA 3.5: VALU only, no MFMA
-    "gfx1152": [
+    "gfx1151": [
         "FP16",
         "FP32",
         "FP64",

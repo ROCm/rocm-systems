@@ -373,7 +373,7 @@ mi_gpu_spec:
 
   - gpu_series: krackan
     gpu_archs:
-      - gpu_arch: gfx1152
+      - gpu_arch: gfx1151
         perfmon_config:
           SQ: 8
           TA: 2
