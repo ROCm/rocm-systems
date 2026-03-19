@@ -493,24 +493,40 @@ int ROCDECAPI handle_video_sequence(void* user_data, RocdecVideoFormat* format) 
             case rocDecVideoSurfaceFormat_NV12:
             case rocDecVideoSurfaceFormat_YUV420:
             case rocDecVideoSurfaceFormat_YUV422:
-            case rocDecVideoSurfaceFormat_YUV444:
+            case rocDecVideoSurfaceFormat_YUV444: {
                 p_dec_info->bytes_per_pixel = 1;
                 p_dec_info->bit_depth = 8;
+            }
                 break;
 
             case rocDecVideoSurfaceFormat_P016:
             case rocDecVideoSurfaceFormat_YUV420_16Bit:
             case rocDecVideoSurfaceFormat_YUV444_16Bit:
-            case rocDecVideoSurfaceFormat_YUV422_16Bit:
-                p_dec_info->bytes_per_pixel = 2;
-                p_dec_info->bit_depth = bitdepth_minus_8 + 8;
+            case rocDecVideoSurfaceFormat_YUV422_16Bit: {
+                if (bitdepth_minus_8) {
+                    p_dec_info->bytes_per_pixel = 2;
+                    p_dec_info->bit_depth = bitdepth_minus_8 + 8;
+                } else {
+                    p_dec_info->bytes_per_pixel = 1;
+                    p_dec_info->bit_depth = 8;
+                    if (p_dec_info->surf_format == rocDecVideoSurfaceFormat_P016) {
+                        p_dec_info->surf_format = rocDecVideoSurfaceFormat_NV12;
+                    } else if (p_dec_info->surf_format == rocDecVideoSurfaceFormat_YUV420_16Bit) {
+                        p_dec_info->surf_format = rocDecVideoSurfaceFormat_YUV420;
+                    } else if (p_dec_info->surf_format == rocDecVideoSurfaceFormat_YUV422_16Bit) {
+                        p_dec_info->surf_format = rocDecVideoSurfaceFormat_YUV422;
+                    } else if (p_dec_info->surf_format == rocDecVideoSurfaceFormat_YUV444_16Bit) {
+                        p_dec_info->surf_format = rocDecVideoSurfaceFormat_YUV444;
+                    }
+                }
+            }
                 break;
             default:
                 break;
         }
     } else {
         rocDecVideoChromaFormat video_chroma_format = format->chroma_format;
-        if (video_chroma_format == rocDecVideoChromaFormat_420 || rocDecVideoChromaFormat_Monochrome)
+        if (video_chroma_format == rocDecVideoChromaFormat_420 || video_chroma_format == rocDecVideoChromaFormat_Monochrome)
             p_dec_info->surf_format = bitdepth_minus_8 ? rocDecVideoSurfaceFormat_P016 : rocDecVideoSurfaceFormat_NV12;
         else if (video_chroma_format == rocDecVideoChromaFormat_444)
             p_dec_info->surf_format = bitdepth_minus_8 ? rocDecVideoSurfaceFormat_YUV444_16Bit : rocDecVideoSurfaceFormat_YUV444;
@@ -650,7 +666,7 @@ void ShowHelpAndExit(const char *option = NULL) {
     << "-c codec (0 : HEVC, 1 : H264, 2: AV1, 4: VP9, 5: VP8 ); optional; default: 0" << std::endl
     << "-n Number of iteration - specify the number of iterations for performance evaluation; optional; default: 1" << std::endl
     << "-f Number of decoded frames - specify the number of pictures to be decoded; optional" << std::endl
-    << "-o_format Output surface format; optional; default: auto-detected from stream, [NV12, P016]" << std::endl
+    << "-o_format Output surface format; optional; [NV12, P016]; if net set: auto-detected from stream" << std::endl
     << "-m output_surface_memory_type - decoded surface memory; optional; default - 0"
     << " [0 : OUT_SURFACE_MEM_DEV_INTERNAL/ 1 : OUT_SURFACE_MEM_DEV_COPIED/ 2 : OUT_SURFACE_MEM_HOST_COPIED/ 3 : OUT_SURFACE_MEM_NOT_MAPPED]" << std::endl;
     exit(0);
