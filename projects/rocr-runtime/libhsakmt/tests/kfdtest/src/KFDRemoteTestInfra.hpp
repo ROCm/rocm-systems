@@ -50,6 +50,13 @@ bool ReceiveUalinkHandleMsg(RemoteSession& session,
                             uint64_t (&ualink_handle)[2],
                             int timeoutMs,
                             const char* prefix = "UALINK_HANDLE");
+bool SendResultStringMsg(RemoteSession& session,
+                         const std::string& result,
+                         const char* prefix = "RESULT");
+bool ReceiveResultStringMsg(RemoteSession& session,
+                            std::string& result,
+                            int timeoutMs,
+                            const char* prefix = "RESULT");
 
 }  // namespace KFDRemoteTestInfra
 

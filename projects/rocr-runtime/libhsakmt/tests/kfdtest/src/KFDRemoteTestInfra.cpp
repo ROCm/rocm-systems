@@ -275,6 +275,39 @@ bool ReceiveUalinkHandleMsg(RemoteSession& session,
     return true;
 }
 
+bool SendResultStringMsg(RemoteSession& session,
+                         const std::string& result,
+                         const char* prefix) {
+    const char* pfx = (prefix && prefix[0]) ? prefix : "RESULT";
+    std::string msg = std::string(pfx) + " " + result;
+    return SendToRemote(session, msg);
+}
+
+bool ReceiveResultStringMsg(RemoteSession& session,
+                            std::string& result,
+                            int timeoutMs,
+                            const char* prefix) {
+    char msg[256] = {};
+    if (!ReceiveFromRemote(session, msg, sizeof(msg), timeoutMs))
+        return false;
+
+    const char* expectedPrefix = (prefix && prefix[0]) ? prefix : "RESULT";
+    size_t prefixLen = strlen(expectedPrefix);
+
+    if (strncmp(msg, expectedPrefix, prefixLen) != 0)
+        return false;
+
+    if (msg[prefixLen] != ' ')
+        return false;
+
+    const char* value = msg + prefixLen + 1;
+    if (*value == '\0')
+        return false;
+
+    result = value;
+    return true;
+}
+
 namespace {
 
 enum class ReadStatus { Data, NoData, Closed };
