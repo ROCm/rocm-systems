@@ -1500,6 +1500,39 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
     }
   }
 
+  // ─── s_lshlN_add_u32 → s_lshl_b32 + s_add_u32 ───
+  // GFX12 has s_lshl1_add_u32 through s_lshl4_add_u32; GFX9 doesn't.
+  // Emulate: s_lshlN_add_u32 dst, src0, src1 → dst = (src0 << N) + src1
+  {
+    int shift_amt = -1;
+    if (mnemonic == "s_lshl1_add_u32") shift_amt = 1;
+    else if (mnemonic == "s_lshl2_add_u32") shift_amt = 2;
+    else if (mnemonic == "s_lshl3_add_u32") shift_amt = 3;
+    else if (mnemonic == "s_lshl4_add_u32") shift_amt = 4;
+    if (shift_amt >= 0) {
+      std::string ops = line.substr(line.find(mnemonic) + mnemonic.size());
+      size_t op_start = ops.find_first_not_of(" \t");
+      if (op_start != std::string::npos) ops = ops.substr(op_start);
+      std::vector<std::string> operands;
+      std::istringstream oss(ops);
+      std::string tok;
+      while (std::getline(oss, tok, ',')) {
+        size_t s = tok.find_first_not_of(" \t");
+        size_t e = tok.find_last_not_of(" \t");
+        if (s != std::string::npos) operands.push_back(tok.substr(s, e - s + 1));
+      }
+      if (operands.size() >= 3) {
+        result.push_back("s_lshl_b32 " + operands[0] + ", " + operands[1] +
+                         ", " + std::to_string(shift_amt));
+        // Skip add if src1 is 0
+        if (operands[2] != "0")
+          result.push_back("s_add_u32 " + operands[0] + ", " + operands[0] +
+                           ", " + operands[2]);
+        return result;
+      }
+    }
+  }
+
   // ─── SALU float → VALU emulation ───
   // GFX1250 has scalar float instructions; GFX9 doesn't.
   // Emulate: s_op_f32 sdst, ssrc0, ssrc1 →
@@ -1588,6 +1621,67 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
         result.push_back(valu_mnem + " v6, " + operands[1]);
         result.push_back("v_readfirstlane_b32 " + operands[0] + ", v6");
         return result;
+      }
+    }
+
+    // v_s_sqrt_f32 sdst, ssrc → VALU sqrt + readfirstlane
+    // GFX12 VALU→SGPR square root; GFX9 must go through VGPR.
+    if (mnemonic == "v_s_sqrt_f32") {
+      std::string ops = line.substr(line.find(mnemonic) + mnemonic.size());
+      size_t op_start = ops.find_first_not_of(" \t");
+      if (op_start != std::string::npos) ops = ops.substr(op_start);
+      std::vector<std::string> operands;
+      std::istringstream oss(ops);
+      std::string tok;
+      while (std::getline(oss, tok, ',')) {
+        size_t s = tok.find_first_not_of(" \t");
+        size_t e = tok.find_last_not_of(" \t");
+        if (s != std::string::npos)
+          operands.push_back(tok.substr(s, e - s + 1));
+      }
+      if (operands.size() >= 2) {
+        result.push_back("v_sqrt_f32_e32 v6, " + operands[1]);
+        result.push_back("v_readfirstlane_b32 " + operands[0] + ", v6");
+        return result;
+      }
+    }
+
+    // s_cmp_*_f32 → VALU float compare setting SCC via VCC bridge.
+    // GFX12 has SALU float compares (set SCC); GFX9 doesn't.
+    // Emulate: v_mov_b32 v6, literal; v_cmp_*_f32_e32 sA, v6; s_cmp_lg_u32 vcc_lo, 0
+    // This sets SCC = (comparison result), preserving branch semantics.
+    {
+      static const std::unordered_map<std::string, std::string> kScmpFloatMap = {
+        {"s_cmp_gt_f32", "v_cmp_gt_f32_e32"},
+        {"s_cmp_ge_f32", "v_cmp_ge_f32_e32"},
+        {"s_cmp_lt_f32", "v_cmp_lt_f32_e32"},
+        {"s_cmp_le_f32", "v_cmp_le_f32_e32"},
+        {"s_cmp_eq_f32", "v_cmp_eq_f32_e32"},
+        {"s_cmp_lg_f32", "v_cmp_lg_f32_e32"},
+      };
+      auto cmp_it = kScmpFloatMap.find(mnemonic);
+      if (cmp_it != kScmpFloatMap.end()) {
+        std::string ops = line.substr(line.find(mnemonic) + mnemonic.size());
+        size_t op_start = ops.find_first_not_of(" \t");
+        if (op_start != std::string::npos) ops = ops.substr(op_start);
+        std::vector<std::string> operands;
+        std::istringstream oss(ops);
+        std::string tok;
+        while (std::getline(oss, tok, ',')) {
+          size_t s = tok.find_first_not_of(" \t");
+          size_t e = tok.find_last_not_of(" \t");
+          if (s != std::string::npos)
+            operands.push_back(tok.substr(s, e - s + 1));
+        }
+        if (operands.size() >= 2) {
+          // Load second operand to v6 (could be literal or SGPR)
+          result.push_back("v_mov_b32_e32 v6, " + operands[1]);
+          // VOPC: v_cmp_*_f32_e32 src0, vsrc1 → src0=sA (SGPR), vsrc1=v6
+          result.push_back(cmp_it->second + " " + operands[0] + ", v6");
+          // Transfer VCC to SCC: SCC = (vcc_lo != 0)
+          result.push_back("s_cmp_lg_u32 vcc_lo, 0");
+          return result;
+        }
       }
     }
   }
@@ -2276,6 +2370,8 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
   // ─── v_cmp _e64 with SGPR dest → expand to SGPR pair for wave64 ───
   // GFX12 wave32: v_cmp_*_e64 s0, src0, src1 (32-bit result)
   // GFX9 wave64: v_cmp_*_e64 s[0:1], src0, src1 (64-bit result)
+  // Also handle large literals: GFX9 VOP3 doesn't support literal constants,
+  // so load them into v6 first (e.g., v_cmp_class_f32_e64 sN, s8, 0x260).
   if (mnemonic.find("v_cmp_") == 0 && mnemonic.find("_e64") != std::string::npos) {
     size_t op_start = line.find(mnemonic) + mnemonic.size();
     std::string ops = line.substr(op_start);
@@ -2295,6 +2391,28 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
                             std::to_string(even + 1) + "]";
           std::string rest = trimmed.substr(comma);
           line = mnemonic + " " + pair + rest;
+        }
+      }
+    }
+    // Check for large literal in last operand (GFX9 VOP3 doesn't allow literals)
+    auto is_large_literal = [](const std::string& s) -> bool {
+      if (s.empty()) return false;
+      if (s.size() > 2 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) return true;
+      if (std::isdigit((unsigned char)s[0]) && std::stol(s) > 64) return true;
+      if (s[0] == '-' && s.size() > 1 && std::stol(s) < -16) return true;
+      return false;
+    };
+    // Find last comma-separated operand
+    size_t last_comma = line.rfind(',');
+    if (last_comma != std::string::npos) {
+      std::string last_op = line.substr(last_comma + 1);
+      size_t ls = last_op.find_first_not_of(" \t");
+      size_t le = last_op.find_last_not_of(" \t");
+      if (ls != std::string::npos) {
+        std::string last_trimmed = last_op.substr(ls, le - ls + 1);
+        if (is_large_literal(last_trimmed)) {
+          result.push_back("v_mov_b32_e32 v6, " + last_trimmed);
+          line = line.substr(0, last_comma + 1) + " v6";
         }
       }
     }
@@ -2716,10 +2834,32 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
 
   if (kernels.empty()) {
     // No embedded kernel descriptors in .text — the compiler put them in
-    // .rodata. Treat entire .text as instruction code (no descriptor to skip).
+    // .rodata. Find the code's offset within .text from the .rodata descriptor
+    // so we can preserve the entry_byte_offset after reassembly.
+    uint64_t code_offset_in_text = 0;
+    uint64_t text_vaddr = 0;
+    if (elf_info.text_idx >= 0)
+      text_vaddr = elf_info.sections[elf_info.text_idx].addr;
+    for (const auto& sec : elf_info.sections) {
+      if (sec.name == ".rodata" && sec.size >= 64) {
+        for (uint64_t off = 0; off + 64 <= sec.size; off += 64) {
+          const uint8_t* desc = elf + sec.offset + off;
+          uint64_t entry;
+          std::memcpy(&entry, desc + 16, 8);
+          if (entry > 0 && entry < 1000000) {
+            uint64_t kd_vaddr = sec.addr + off;
+            uint64_t code_vaddr = kd_vaddr + entry;
+            if (code_vaddr >= text_vaddr)
+              code_offset_in_text = code_vaddr - text_vaddr;
+            break;
+          }
+        }
+        break;
+      }
+    }
     std::cerr << "hotswap: transpile: no embedded descriptors in .text, "
-              << "treating entire .text as code\n";
-    kernels.push_back({0, 0});  // desc_offset=0 (skip 0 bytes), code_offset=0
+              << "code at .text internal offset " << code_offset_in_text << "\n";
+    kernels.push_back({code_offset_in_text, code_offset_in_text});
   } else {
     std::cerr << "hotswap: transpile: found " << kernels.size()
               << " embedded kernel descriptor(s)\n";
@@ -2734,17 +2874,19 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
   for (size_t ki = 0; ki < kernels.size(); ++ki) {
     auto& kern = kernels[ki];
 
-    // Emit kernel descriptor as raw .long words (256 bytes = 64 dwords)
-    // Only if the kernel has an embedded descriptor (desc_offset != code_offset)
-    if (kern.desc_offset != kern.code_offset) {
-      for (uint64_t i = 0; i < 256; i += 4) {
-        if (kern.desc_offset + i + 4 > elf_info.text_size) break;
-        uint32_t word;
-        std::memcpy(&word, text + kern.desc_offset + i, 4);
-        std::ostringstream oss;
-        oss << ".long 0x" << std::hex << word;
-        translated_asm += oss.str() + "\n";
-      }
+    // Emit pre-code data as raw .long words to preserve the code's position.
+    // For embedded descriptors: emit 256-byte KD before code.
+    // For .rodata descriptors: emit all bytes before code_offset as raw data
+    // so the .rodata entry_byte_offset remains valid after reassembly.
+    uint64_t emit_end = kern.code_offset;
+    uint64_t emit_start = (kern.desc_offset != kern.code_offset) ? kern.desc_offset : 0;
+    for (uint64_t i = emit_start; i < emit_end; i += 4) {
+      if (i + 4 > elf_info.text_size) break;
+      uint32_t word;
+      std::memcpy(&word, text + i, 4);
+      std::ostringstream oss;
+      oss << ".long 0x" << std::hex << word;
+      translated_asm += oss.str() + "\n";
     }
 
     // Determine save-register indices for workgroup IDs.
@@ -2752,19 +2894,39 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
     // with the kernel's own register usage.  PatchKernelDescriptorsForWave64 will
     // add 4 to num_vgprs when computing gfx9_vgpr/ACCUM_OFFSET, ensuring these
     // extra registers are allocated as arch (non-accum) VGPRs.
-    uint32_t save_vgpr_x = 8;  // default: just above minimum allocation
-    uint32_t save_vgpr_y = 9;
+    // Read GFX12 VGPR count from kernel descriptor to place save registers above.
+    // Try embedded descriptor in .text first, then fall back to .rodata.
+    uint32_t num_vgprs12 = 8;  // default: minimum GFX12 allocation
     if (kern.desc_offset != kern.code_offset &&
         kern.desc_offset + 52 <= elf_info.text_size) {
+      // Embedded descriptor in .text
       uint32_t rsrc1_src;
       std::memcpy(&rsrc1_src, text + kern.desc_offset + 48, 4);
-      // GFX12 RSRC1: bits [5:0] = VGPR field, granularity 8
       uint32_t vgpr_field12 = rsrc1_src & 0x3Fu;
-      uint32_t num_vgprs12  = (vgpr_field12 + 1u) * 8u;
-      if (num_vgprs12 < 8u) num_vgprs12 = 8u;
-      save_vgpr_x = num_vgprs12;       // first free VGPR index
-      save_vgpr_y = num_vgprs12 + 1u;  // second free VGPR index
+      num_vgprs12 = (vgpr_field12 + 1u) * 8u;
+    } else {
+      // No embedded descriptor — scan .rodata for kernel descriptor
+      for (const auto& sec : elf_info.sections) {
+        if (sec.name == ".rodata" && sec.size >= 64) {
+          for (uint64_t off = 0; off + 64 <= sec.size; off += 64) {
+            const uint8_t* desc = elf + sec.offset + off;
+            uint64_t entry;
+            std::memcpy(&entry, desc + 16, 8);
+            if (entry > 0 && entry < 1000000) {
+              uint32_t rsrc1_src;
+              std::memcpy(&rsrc1_src, desc + 48, 4);
+              uint32_t vgpr_field12 = rsrc1_src & 0x3Fu;
+              num_vgprs12 = (vgpr_field12 + 1u) * 8u;
+              break;
+            }
+          }
+          break;
+        }
+      }
     }
+    if (num_vgprs12 < 8u) num_vgprs12 = 8u;
+    uint32_t save_vgpr_x = num_vgprs12;       // first free VGPR index
+    uint32_t save_vgpr_y = num_vgprs12 + 1u;  // second free VGPR index
     const std::string sv_x = "v" + std::to_string(save_vgpr_x);
     const std::string sv_y = "v" + std::to_string(save_vgpr_y);
 
