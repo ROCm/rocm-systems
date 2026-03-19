@@ -3997,9 +3997,7 @@ amdsmi_status_t
 amdsmi_get_gpu_memory_reserved_pages(amdsmi_processor_handle processor_handle,
                                     uint32_t *num_pages,
                                     amdsmi_retired_page_record_t *records) {
-    return rsmi_wrapper(rsmi_dev_memory_reserved_pages_get, processor_handle, 0,
-                    num_pages,
-                    reinterpret_cast<rsmi_retired_page_record_t*>(records));
+    return AMDSMI_STATUS_NOT_SUPPORTED;
 }
 amdsmi_status_t amdsmi_get_gpu_memory_total(amdsmi_processor_handle processor_handle,
                 amdsmi_memory_type_t mem_type, uint64_t *total) {
@@ -4186,15 +4184,52 @@ amdsmi_status_t amdsmi_get_utilization_count(amdsmi_processor_handle processor_h
                 amdsmi_utilization_counter_t utilization_counters[],
                 uint32_t count,
                 uint64_t *timestamp) {
-    return rsmi_wrapper(rsmi_utilization_count_get, processor_handle, 0,
-            reinterpret_cast<rsmi_utilization_counter_t*>(utilization_counters),
-            count, timestamp);
+    AMDSMI_CHECK_INIT();
+    if (utilization_counters == nullptr || timestamp == nullptr) {
+        return AMDSMI_STATUS_INVAL;
+    }
+    auto *device = reinterpret_cast<Device *>(processor_handle);
+    if (device == nullptr) return AMDSMI_STATUS_INVAL;
+
+    GpuActivity activity{};
+    auto code = device->QueryGpuActivity(&activity);
+    if (code != ErrorCode::Success) return translateCodeToSmiStatus(code);
+
+    // Use a monotonic clock as timestamp (microseconds since epoch)
+    struct timespec ts{};
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    *timestamp = static_cast<uint64_t>(ts.tv_sec) * 1000000ULL
+                 + static_cast<uint64_t>(ts.tv_nsec) / 1000ULL;
+
+    for (uint32_t i = 0; i < count; ++i) {
+        utilization_counters[i].fine_value_count = 0;
+        switch (utilization_counters[i].type) {
+            case AMDSMI_COARSE_GRAIN_GFX_ACTIVITY:
+            case AMDSMI_FINE_GRAIN_GFX_ACTIVITY:
+                utilization_counters[i].value = activity.gfx_activity;
+                break;
+            case AMDSMI_COARSE_GRAIN_MEM_ACTIVITY:
+            case AMDSMI_FINE_GRAIN_MEM_ACTIVITY:
+                utilization_counters[i].value = activity.umc_activity;
+                break;
+            case AMDSMI_COARSE_DECODER_ACTIVITY:
+            case AMDSMI_FINE_DECODER_ACTIVITY:
+                utilization_counters[i].value = activity.mm_activity;
+                break;
+            default:
+                utilization_counters[i].value = 0;
+                break;
+        }
+    }
+    return AMDSMI_STATUS_SUCCESS;
 }
 
 amdsmi_status_t amdsmi_get_energy_count(amdsmi_processor_handle processor_handle,
             uint64_t *energy_accumulator, float *counter_resolution, uint64_t *timestamp) {
-    return rsmi_wrapper(rsmi_dev_energy_count_get, processor_handle, 0,
-            energy_accumulator, counter_resolution, timestamp);
+    if (energy_accumulator == nullptr || counter_resolution == nullptr || timestamp == nullptr) {
+        return AMDSMI_STATUS_INVAL;
+    }
+    return AMDSMI_STATUS_NOT_SUPPORTED;
 }
 
 amdsmi_status_t amdsmi_get_gpu_bdf_id(
