@@ -30,6 +30,7 @@ def _tty_view_is_table(args: argparse.Namespace) -> bool:
     """True when ``--view table`` was given (plain tables; ignore cli_style)."""
     return getattr(args, "view", None) == "table"
 
+
 KERNEL_NAME_WRAP_WIDTH = 40
 
 
@@ -598,8 +599,7 @@ def format_table_output(
 
     if use_mem_chart:
         mem_data = (
-            pd
-            .DataFrame([df["Metric"], df["Value"]])
+            pd.DataFrame([df["Metric"], df["Value"]])
             .transpose()
             .set_index("Metric")
             .to_dict()["Value"]

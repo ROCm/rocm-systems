@@ -696,8 +696,7 @@ def gen_counter_list(formula: str) -> tuple[bool, list[str]]:
         return visited, counters
     try:
         tree = ast.parse(
-            formula
-            .replace("$normUnit", "SQ_WAVES")
+            formula.replace("$normUnit", "SQ_WAVES")
             .replace("$denom", "SQ_WAVES")
             .replace(
                 "$numActiveCUs",
@@ -1763,8 +1762,7 @@ def load_pc_sampling_data(
 
         # Group by Instruction_Comment and aggregate
         grouped_counts = (
-            merged_df
-            .groupby("Instruction_Comment")
+            merged_df.groupby("Instruction_Comment")
             .agg(
                 count=("Instruction_Comment", "count"),
                 instruction=("Instruction", "first"),
