@@ -80,11 +80,12 @@ Panel Config:
           min: MIN((100 * (TCP_REQ_sum - TCP_REQ_MISS_sum) / TCP_REQ_sum) if (TCP_REQ_sum != 0) else None)
           max: MAX((100 * (TCP_REQ_sum - TCP_REQ_MISS_sum) / TCP_REQ_sum) if (TCP_REQ_sum != 0) else None)
           unit: Percent
-        Read Hit Rate:
-          avg: AVG((100 * (TCP_REQ_READ_sum - TCP_REQ_MISS_sum) / TCP_REQ_READ_sum) if (TCP_REQ_READ_sum != 0) else None)
-          min: MIN((100 * (TCP_REQ_READ_sum - TCP_REQ_MISS_sum) / TCP_REQ_READ_sum) if (TCP_REQ_READ_sum != 0) else None)
-          max: MAX((100 * (TCP_REQ_READ_sum - TCP_REQ_MISS_sum) / TCP_REQ_READ_sum) if (TCP_REQ_READ_sum != 0) else None)
-          unit: Percent
+        # NOTE: "Read Hit Rate" was removed because the formula was incorrect.
+        # It subtracted ALL misses (TCP_REQ_MISS) from only read requests (TCP_REQ_READ),
+        # which can produce values > 100% or negative percentages.
+        # To correctly calculate Read Hit Rate, read-specific hit/miss counters are needed
+        # (e.g., TCP_TOTAL_HIT_LRU_READ, TCP_TOTAL_MISS_LRU_READ, TCP_TOTAL_MISS_EVICT_READ)
+        # which are not currently available in the counter definitions.
 
   # =========================================================================
   # TCP-GL1 Interface
