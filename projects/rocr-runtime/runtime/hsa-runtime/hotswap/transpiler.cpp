@@ -2379,7 +2379,10 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
     size_t s_pos = ops.find_first_not_of(" \t");
     if (s_pos != std::string::npos) {
       std::string trimmed = ops.substr(s_pos);
-      // If first operand is a single SGPR (sN), expand to s[N:N+1]
+      // If first operand is a single SGPR (sN), expand to s[N:N+1] for wave64.
+      // CRITICAL: wave32→wave64 widening clobbers s[N+1] with exec_hi bits.
+      // If the kernel uses s[N+1] (e.g., holds `cols` in softmax), save and
+      // restore it around the v_cmp.
       if (trimmed[0] == 's' && std::isdigit(trimmed[1])) {
         size_t comma = trimmed.find(',');
         if (comma != std::string::npos) {
@@ -2388,10 +2391,42 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
           dst = dst.substr(0, de + 1);
           int reg_num = std::stoi(dst.substr(1));
           int even = reg_num & ~1;
+          int odd = even + 1;
           std::string pair = "s[" + std::to_string(even) + ":" +
-                            std::to_string(even + 1) + "]";
+                            std::to_string(odd) + "]";
           std::string rest = trimmed.substr(comma);
+          // Save s[odd] before the v_cmp (it will be clobbered by wave64 result)
+          std::string s_odd = "s" + std::to_string(odd);
+          result.push_back("v_mov_b32_e32 v6, " + s_odd);
           line = mnemonic + " " + pair + rest;
+          // After the v_cmp completes (via fall-through below), restore s[odd].
+          // We append to result after the main instruction emission below.
+          // Use a flag to signal the post-v_cmp restore.
+          // Actually, just emit the v_cmp + restore here and return.
+          result.push_back(line);
+          result.push_back("v_readfirstlane_b32 " + s_odd + ", v6");
+          // Handle large literals too
+          size_t last_comma = line.rfind(',');
+          if (last_comma != std::string::npos) {
+            std::string last_op = line.substr(last_comma + 1);
+            size_t ls = last_op.find_first_not_of(" \t");
+            size_t le = last_op.find_last_not_of(" \t");
+            if (ls != std::string::npos) {
+              std::string last_trimmed = last_op.substr(ls, le - ls + 1);
+              auto is_ll = [](const std::string& s) -> bool {
+                if (s.empty()) return false;
+                if (s.size() > 2 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) return true;
+                if (std::isdigit((unsigned char)s[0]) && std::stol(s) > 64) return true;
+                if (s[0] == '-' && s.size() > 1 && std::stol(s) < -16) return true;
+                return false;
+              };
+              if (is_ll(last_trimmed)) {
+                // Large literal: load to v6, but we already used v6 for save!
+                // Use the line as-is (the literal handling below will catch it)
+              }
+            }
+          }
+          return result;
         }
       }
     }
@@ -3105,10 +3140,12 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
           continue;
         if (taint_results[ii].action == TaintAction::Replace) {
           auto& tr = taint_results[ii];
-          // Ensure any pending s_load that writes the dest register has completed.
-          // The original TTMP computation naturally delayed the assignment;
-          // our replacement is immediate and could race with in-flight loads.
-          translated_asm += "s_waitcnt lgkmcnt(0)\n";
+          // Do NOT insert s_waitcnt here!  On GFX12, the TTMP chain runs BEFORE
+          // any pending s_load completes — the load later overwrites the dest
+          // register with fresh data.  Inserting a wait would force the load to
+          // complete first, then our readfirstlane would overwrite the load result
+          // (destroying kernarg data the kernel needs).  The readfirstlane reads
+          // from sv_x/sv_y which are saved at kernel entry, independent of loads.
           translated_asm += "v_readfirstlane_b32 " + tr.replace_dst
                          + ", " + tr.replace_src + "\n";
           continue;

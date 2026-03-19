@@ -889,6 +889,17 @@ static int check_softmax_shape(hipFunction_t fn, int rows, int cols) {
     int ok = 0;
     for (int i = 0; i < rows*cols; i++)
       if (fabsf(hOut[i] - hRef[i]) <= 1e-3f * fabsf(hRef[i]) + 1e-5f) ok++;
+    // Diagnostic: dump first row of output vs reference
+    if (ok < rows * cols && rows <= 16) {
+      int n = cols < 8 ? cols : 8;
+      printf("    GPU[0..%d]: ", n-1);
+      for (int j=0; j<n; j++) printf("%.4f ", hOut[j]);
+      printf("\n    REF[0..%d]: ", n-1);
+      for (int j=0; j<n; j++) printf("%.4f ", hRef[j]);
+      printf("\n    IN[0..%d]:  ", n-1);
+      for (int j=0; j<n; j++) printf("%.4f ", hIn[j]);
+      printf("\n");
+    }
     result = ok;
   }
   hipFree(dIn); hipFree(dOut); free(hIn); free(hOut); free(hRef);
