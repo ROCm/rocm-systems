@@ -18,13 +18,7 @@
 
 #define __syncwarp()
 
-#ifdef __GFX9__
-#define STORE(DST, SRC) \
-  { __atomic_store_n((DST), (SRC), __ATOMIC_RELAXED); }
-#else
-#define STORE(DST, SRC) \
-  { __atomic_store_n((DST), (SRC), __ATOMIC_SEQ_CST); }
-#endif
+#define STORE(DST, SRC) st_relaxed_sys_global((DST), (SRC))
 
 #if defined(__gfx1100__) || defined(__gfx1101__) || defined(__gfx1102__) || defined(__gfx1151__) || defined(__gfx1200__) || defined(__gfx1201__)
 #define __trace_hwreg() \

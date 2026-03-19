@@ -112,7 +112,7 @@ private:
       int spins = 0;
       while (sendConnHeadCache + NCCL_STEPS < sendConnHead + 1) {
         __builtin_amdgcn_s_sleep(1);
-        sendConnHeadCache = atomicAdd((unsigned long long *)sendConnHeadPtr, 0);
+        sendConnHeadCache = ld_relaxed_sys_global(sendConnHeadPtr);
         if (checkAbort(abort, 1, spins)) break;
       }
       if (sendConnFifo) {
@@ -671,7 +671,7 @@ private:
   __device__ __forceinline__ void loadSendSync() {
     if (tid < fan.nsend()) {
       sendConnHeadPtr = sendConn->head;
-      sendConnHeadCache = *sendConnHeadPtr;
+      sendConnHeadCache = ld_relaxed_sys_global(sendConnHeadPtr);
       sendConnHead = sendConn->step;
       sendConnFifo = sendConn->connFifo;
     }
