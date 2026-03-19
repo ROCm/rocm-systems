@@ -19,8 +19,11 @@
 #if __cplusplus && defined(__clang__) && defined(__HIP__)
 #include <hip/amd_detail/amd_hip_cooperative_groups_reduce.h>
 #endif
+
+#elif !defined(__HIP_PLATFORM_AMD__) && defined(__HIP_PLATFORM_NVIDIA__)
+#include <hip/nvidia_detail/nvidia_hip_cooperative_groups_reduce.h>
 #else
 #error ("Must define exactly one of __HIP_PLATFORM_AMD__ or __HIP_PLATFORM_NVIDIA__");
 #endif
 
-#endif  // HIP_INCLUDE_HIP_HIP_COOPERATIVE_GROUP_H
+#endif  // HIP_INCLUDE_HIP_HIP_COOPERATIVE_GROUP_REDUCE_H
