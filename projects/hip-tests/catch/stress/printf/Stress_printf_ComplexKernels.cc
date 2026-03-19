@@ -5,9 +5,7 @@
  */
 
 #include <hip/hip_runtime.h>
-#ifdef __linux__
 #include "printf_common.h"
-#endif
 #include <hip_test_common.hh>
 
 #define MAX_BLOCK_SIZE 523
@@ -382,6 +380,11 @@ bool testPrintfMultGPU(int numOfGPUs, uint32_t num_blocks, uint32_t threads_per_
 }  // namespace hipPrintfStressTest
 
 HIP_TEST_CASE(Stress_printf_ComplexKernelMultStream) {
+  if (gpuCompositorLikelyActive()) {
+    FAIL("GPU compositor/DWM detected. Long-running printf kernels may "
+        "trigger GPU reset. Run from "
+        "a VT (chvt 3) or SSH. Set HIP_PRINTF_STRESS_FORCE_RUN=1 to override.");
+  }
 #ifdef __linux__
   printf("Test - Stress_printf_ComplexKernelMultStream start\n");
   bool TestPassed = true;
@@ -404,6 +407,11 @@ HIP_TEST_CASE(Stress_printf_ComplexKernelMultStream) {
 }
 
 HIP_TEST_CASE(Stress_printf_ComplexKernelMultStreamMultGpu) {
+  if (gpuCompositorLikelyActive()) {
+    FAIL("GPU compositor/DWM detected. Long-running printf kernels may "
+        "trigger GPU reset. Run from "
+        "a VT (chvt 3) or SSH. Set HIP_PRINTF_STRESS_FORCE_RUN=1 to override.");
+  }
 #ifdef __linux__
   printf("Test - Stress_printf_ComplexKernelMultStreamMultGpu start \n");
   bool TestPassed = true;

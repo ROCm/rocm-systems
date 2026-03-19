@@ -5,9 +5,7 @@
  */
 
 #include <hip/hip_runtime.h>
-#ifdef __linux__
 #include "printf_common.h"
-#endif
 #include <hip_test_common.hh>
 
 #define BLOCK_SIZE 512
@@ -578,6 +576,11 @@ bool test_synchronized_printf(uint32_t num_blocks, uint32_t threads_per_block,
 }  // namespace hipPrintfStressTest
 
 HIP_TEST_CASE(Stress_printf_ConstStr) {
+  if (gpuCompositorLikelyActive()) {
+    FAIL("GPU compositor/DWM detected. Long-running printf kernels may "
+        "trigger GPU reset. Run from "
+        "a VT (chvt 3) or SSH. Set HIP_PRINTF_STRESS_FORCE_RUN=1 to override.");
+  }
 #ifdef __linux__
   printf("Test: Stress_printf_ConstStr\n");
   bool TestPassed = true;
@@ -594,6 +597,11 @@ HIP_TEST_CASE(Stress_printf_ConstStr) {
 }
 
 HIP_TEST_CASE(Stress_printf_IfElseConditionalStr) {
+  if (gpuCompositorLikelyActive()) {
+    FAIL("GPU compositor/DWM detected. Long-running printf kernels may "
+        "trigger GPU reset. Run from "
+        "a VT (chvt 3) or SSH. Set HIP_PRINTF_STRESS_FORCE_RUN=1 to override.");
+  }
 #ifdef __linux__
   printf("Test: Stress_printf_IfElseConditionalStr\n");
   bool TestPassed = true;
@@ -610,6 +618,11 @@ HIP_TEST_CASE(Stress_printf_IfElseConditionalStr) {
 }
 
 HIP_TEST_CASE(Stress_printf_IfConditionalStr) {
+  if (gpuCompositorLikelyActive()) {
+    FAIL("GPU compositor/DWM detected. Long-running printf kernels may "
+        "trigger GPU reset. Run from "
+        "a VT (chvt 3) or SSH. Set HIP_PRINTF_STRESS_FORCE_RUN=1 to override.");
+  }
 #ifdef __linux__
   printf("Test: Stress_printf_IfConditionalStr\n");
   bool TestPassed = true;
@@ -626,6 +639,11 @@ HIP_TEST_CASE(Stress_printf_IfConditionalStr) {
 }
 
 HIP_TEST_CASE(Stress_printf_VariableStr) {
+  if (gpuCompositorLikelyActive()) {
+    FAIL("GPU compositor/DWM detected. Long-running printf kernels may "
+        "trigger GPU reset. Run from "
+        "a VT (chvt 3) or SSH. Set HIP_PRINTF_STRESS_FORCE_RUN=1 to override.");
+  }
 #ifdef __linux__
   printf("Test: Stress_printf_VariableStr\n");
   bool TestPassed = true;
@@ -641,6 +659,11 @@ HIP_TEST_CASE(Stress_printf_VariableStr) {
 }
 
 HIP_TEST_CASE(Stress_printf_DependentCalc) {
+  if (gpuCompositorLikelyActive()) {
+    FAIL("GPU compositor/DWM detected. Long-running printf kernels may "
+        "trigger GPU reset. Run from "
+        "a VT (chvt 3) or SSH. Set HIP_PRINTF_STRESS_FORCE_RUN=1 to override.");
+  }
 #ifdef __linux__
   printf("Test: Stress_printf_DependentCalc\n");
   bool TestPassed = true;
@@ -656,6 +679,11 @@ HIP_TEST_CASE(Stress_printf_DependentCalc) {
 }
 
 HIP_TEST_CASE(Stress_printf_DecimalStr) {
+  if (gpuCompositorLikelyActive()) {
+    FAIL("GPU compositor/DWM detected. Long-running printf kernels may "
+        "trigger GPU reset. Run from "
+        "a VT (chvt 3) or SSH. Set HIP_PRINTF_STRESS_FORCE_RUN=1 to override.");
+  }
 #ifdef __linux__
   printf("Test: Stress_printf_DecimalStr\n");
   bool TestPassed = true;
@@ -671,6 +699,11 @@ HIP_TEST_CASE(Stress_printf_DecimalStr) {
 }
 
 HIP_TEST_CASE(Stress_printf_SharedMem) {
+  if (gpuCompositorLikelyActive()) {
+    FAIL("GPU compositor/DWM detected. Long-running printf kernels may "
+        "trigger GPU reset. Run from "
+        "a VT (chvt 3) or SSH. Set HIP_PRINTF_STRESS_FORCE_RUN=1 to override.");
+  }
 #ifdef __linux__
   printf("Test: Stress_printf_SharedMem\n");
   bool TestPassed = true;
@@ -686,6 +719,11 @@ HIP_TEST_CASE(Stress_printf_SharedMem) {
 }
 
 HIP_TEST_CASE(Stress_printf_SynchronizedPrintf) {
+  if (gpuCompositorLikelyActive()) {
+    FAIL("GPU compositor/DWM detected. Long-running printf kernels may "
+        "trigger GPU reset. Run from "
+        "a VT (chvt 3) or SSH. Set HIP_PRINTF_STRESS_FORCE_RUN=1 to override.");
+  }
 #ifdef __linux__
   printf("Test: Stress_printf_SynchronizedPrintf\n");
   bool TestPassed = true;
@@ -700,6 +738,11 @@ HIP_TEST_CASE(Stress_printf_SynchronizedPrintf) {
 }
 
 HIP_TEST_CASE(Stress_printf_AtomicCalc) {
+  if (gpuCompositorLikelyActive()) {
+    FAIL("GPU compositor/DWM detected. Long-running printf kernels may "
+        "trigger GPU reset. Run from "
+        "a VT (chvt 3) or SSH. Set HIP_PRINTF_STRESS_FORCE_RUN=1 to override.");
+  }
 #ifdef __linux__
   printf("Test: Stress_printf_AtomicCalc\n");
   bool TestPassed = true;

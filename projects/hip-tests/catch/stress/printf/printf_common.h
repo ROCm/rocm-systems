@@ -7,6 +7,18 @@
 #ifndef _STRESSTEST_PRINTF_COMMON_H_
 #define _STRESSTEST_PRINTF_COMMON_H_
 
+#include <cstdlib>
+
+static inline bool gpuCompositorLikelyActive() {
+  if (std::getenv("HIP_PRINTF_STRESS_FORCE_RUN")) return false;
+#if defined(__linux__)
+  return (std::getenv("DISPLAY") != nullptr || std::getenv("WAYLAND_DISPLAY") != nullptr);
+#else
+  return false;
+#endif
+}
+
+#ifdef __linux__
 #include <errno.h>
 #include <error.h>
 #include <stdio.h>
@@ -77,5 +89,6 @@ struct CaptureStream {
     }
   }
 };
+#endif  // __linux__
 
 #endif  // _STRESSTEST_PRINTF_COMMON_H_
