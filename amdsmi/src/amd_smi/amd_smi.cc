@@ -3614,30 +3614,19 @@ amdsmi_get_gpu_compute_process_gpus(uint32_t pid, uint32_t *dv_indices,
 
 amdsmi_status_t  amdsmi_get_gpu_ecc_count(amdsmi_processor_handle processor_handle,
                         amdsmi_gpu_block_t block, amdsmi_error_count_t *ec) {
-    AMDSMI_CHECK_INIT();
-    // nullptr api supported
-
-    return rsmi_wrapper(rsmi_dev_ecc_count_get, processor_handle, 0,
-                    static_cast<rsmi_gpu_block_t>(block),
-                    reinterpret_cast<rsmi_error_count_t*>(ec));
+    // ECC error counts require KFD sysfs, not available on WSL2
+    return AMDSMI_STATUS_NOT_SUPPORTED;
 }
 amdsmi_status_t  amdsmi_get_gpu_ecc_enabled(amdsmi_processor_handle processor_handle,
                                                     uint64_t *enabled_blocks) {
-    AMDSMI_CHECK_INIT();
-    // nullptr api supported
-
-    return rsmi_wrapper(rsmi_dev_ecc_enabled_get, processor_handle, 0,
-                    enabled_blocks);
+    // ECC block enable mask requires KFD sysfs, not available on WSL2
+    return AMDSMI_STATUS_NOT_SUPPORTED;
 }
 amdsmi_status_t  amdsmi_get_gpu_ecc_status(amdsmi_processor_handle processor_handle,
                                 amdsmi_gpu_block_t block,
                                 amdsmi_ras_err_state_t *state) {
-    AMDSMI_CHECK_INIT();
-    // nullptr api supported
-
-    return rsmi_wrapper(rsmi_dev_ecc_status_get, processor_handle, 0,
-                    static_cast<rsmi_gpu_block_t>(block),
-                    reinterpret_cast<rsmi_ras_err_state_t*>(state));
+    // ECC block status requires KFD sysfs, not available on WSL2
+    return AMDSMI_STATUS_NOT_SUPPORTED;
 }
 
 amdsmi_status_t
