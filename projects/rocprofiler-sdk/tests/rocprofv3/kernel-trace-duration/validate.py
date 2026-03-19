@@ -22,7 +22,9 @@
 # THE SOFTWARE.
 
 import sys
+
 import pytest
+
 
 def extract_json_kernel_records(json_root):
     """Extract kernel dispatch records from JSON output."""
@@ -35,13 +37,18 @@ def extract_json_kernel_records(json_root):
     buffer_records = tool["buffer_records"]
 
     for key in ("kernel_dispatch", "kernel_trace", "kernel_dispatch_trace"):
-        if key in buffer_records and isinstance(buffer_records[key], list) and len(buffer_records[key]) > 0:
+        if (
+            key in buffer_records
+            and isinstance(buffer_records[key], list)
+            and len(buffer_records[key]) > 0
+        ):
             return buffer_records[key]
 
     assert False, (
         "no kernel dispatch records found in JSON buffer_records keys="
         f"{list(buffer_records.keys())}"
     )
+
 
 def _as_int(value, *, field="value"):
     assert value is not None, f"missing {field}"
@@ -52,11 +59,20 @@ def _as_int(value, *, field="value"):
             f"failed to parse int for {field}: {value!r} ({exc})"
         ) from exc
 
+
 def _get_first_present(mapping, *keys):
+    """
+    Look up keys in mapping in a case-insensitive manner.
+    Builds a lowercased lookup table once, then checks each key (lowercased).
+    Returns the first non-None value found, or None if nothing matches.
+    """
+    lowered = {k.lower(): v for k, v in mapping.items()}
     for key in keys:
-        if key in mapping and mapping[key] is not None:
-            return mapping[key]
+        normalized = key.lower()
+        if normalized in lowered and lowered[normalized] is not None:
+            return lowered[normalized]
     return None
+
 
 def _extract_dispatch_id_from_json_record(record):
     """
@@ -79,6 +95,7 @@ def _extract_dispatch_id_from_json_record(record):
 
     return _as_int(dispatch_id, field="dispatch_id/correlation_id")
 
+
 def build_json_duration_map(records):
     """
     Build map:
@@ -99,6 +116,7 @@ def build_json_duration_map(records):
 
     assert len(result) > 0, "no kernel records extracted from JSON"
     return result
+
 
 def load_kernel_rows_via_rocpd(db_path):
     """
@@ -127,21 +145,26 @@ def load_kernel_rows_via_rocpd(db_path):
     assert len(rows) > 0, f"no rows returned from kernel query in db: {db_path}"
     return rows
 
+
 def _extract_dispatch_id_from_db_row(row):
-    value = _get_first_present(row, "Dispatch_Id", "dispatch_id", "Correlation_Id", "correlation_id")
-    return _as_int(value, field="Dispatch_Id/dispatch_id/Correlation_Id/correlation_id")
+    value = _get_first_present(row, "dispatch_id", "correlation_id")
+    return _as_int(value, field="dispatch_id/correlation_id")
+
 
 def _extract_start_from_db_row(row):
-    value = _get_first_present(row, "Start_Timestamp", "start_timestamp")
-    return _as_int(value, field="Start_Timestamp/start_timestamp")
+    value = _get_first_present(row, "start_timestamp")
+    return _as_int(value, field="start_timestamp")
+
 
 def _extract_end_from_db_row(row):
-    value = _get_first_present(row, "End_Timestamp", "end_timestamp")
-    return _as_int(value, field="End_Timestamp/end_timestamp")
+    value = _get_first_present(row, "end_timestamp")
+    return _as_int(value, field="end_timestamp")
+
 
 def _extract_duration_from_db_row(row):
-    value = _get_first_present(row, "Duration", "duration")
-    return _as_int(value, field="Duration/duration")
+    value = _get_first_present(row, "duration")
+    return _as_int(value, field="duration")
+
 
 def test_rocpd_kernel_trace_duration(json_data, db_path):
     """
@@ -174,15 +197,15 @@ def test_rocpd_kernel_trace_duration(json_data, db_path):
         end = _extract_end_from_db_row(row)
         duration = _extract_duration_from_db_row(row)
 
-        assert start > 0 and end > 0, (
-            f"invalid DB timestamps: start={start} end={end} dispatch_id={dispatch_id}"
-        )
-        assert end >= start, (
-            f"DB end before start: start={start} end={end} dispatch_id={dispatch_id}"
-        )
-        assert duration >= 0, (
-            f"negative DB duration: duration={duration} dispatch_id={dispatch_id}"
-        )
+        assert (
+            start > 0 and end > 0
+        ), f"invalid DB timestamps: start={start} end={end} dispatch_id={dispatch_id}"
+        assert (
+            end >= start
+        ), f"DB end before start: start={start} end={end} dispatch_id={dispatch_id}"
+        assert (
+            duration >= 0
+        ), f"negative DB duration: duration={duration} dispatch_id={dispatch_id}"
         assert duration == (end - start), (
             f"DB duration mismatch: duration={duration} != end-start={end - start} "
             f"dispatch_id={dispatch_id}"
@@ -258,9 +281,10 @@ def test_rocpd_kernel_trace_duration(json_data, db_path):
         raise AssertionError("\n".join(lines) + detail)
 
     assert matched_count > 0, "No DB rows matched JSON records"
-    assert matched_count == total_count, (
-        f"Only {matched_count}/{total_count} DB rows matched JSON"
-    )
+    assert (
+        matched_count == total_count
+    ), f"Only {matched_count}/{total_count} DB rows matched JSON"
+
 
 if __name__ == "__main__":
     rc = pytest.main(["-x", __file__] + sys.argv[1:])

@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 # MIT License
 #
 # Copyright (c) 2024-2025 Advanced Micro Devices,
@@ -25,18 +23,22 @@
 
 import json
 import os
+
 import pytest
+
 
 def pytest_addoption(parser):
     parser.addoption("--json-input", action="store", required=True, help="Input JSON")
     parser.addoption("--db-input", action="store", required=True, help="Input rocpd DB")
 
+
 @pytest.fixture
 def json_data(request):
     path = request.config.getoption("--json-input")
     assert os.path.isfile(path), f"missing JSON input: {path}"
-    with open(path, "r") as f:
+    with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
+
 
 @pytest.fixture
 def db_path(request):

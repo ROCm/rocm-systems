@@ -212,6 +212,7 @@ def build_agent_id_string(agent_index_value, prefix=""):
     else:
         return ""
 
+
 def get_kernel_csv_query(config) -> str:
     agent_id = build_agent_id_string(config.agent_index_value)
 
@@ -257,9 +258,11 @@ def get_kernel_csv_query(config) -> str:
             guid ASC, start ASC, end DESC
     """
 
+
 def write_kernel_csv(importData, config) -> None:
     query = get_kernel_csv_query(config)
     write_sql_query_to_csv(importData, config, query, "kernel")
+
 
 def write_memory_copy_csv(importData, config) -> None:
 
@@ -282,6 +285,7 @@ def write_memory_copy_csv(importData, config) -> None:
             guid ASC, start ASC, end DESC
     """
     write_sql_query_to_csv(importData, config, query, "memory_copy")
+
 
 def write_memory_allocation_csv(importData, config) -> None:
 
@@ -337,7 +341,7 @@ def write_counters_csv(importData, config) -> None:
         "counter_name",
         "value AS Counter_Value",
         "start AS Start_Timestamp",
-        "end AS End_Timestamp"
+        "end AS End_Timestamp",
     ]
 
     aliased_headers = []
