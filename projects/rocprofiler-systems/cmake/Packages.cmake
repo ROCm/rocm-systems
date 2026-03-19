@@ -449,10 +449,6 @@ if(ROCPROFSYS_BUILD_DYNINST)
         FORCE
     )
 
-    # Create Dyninst::* targets BEFORE adding dyninst subdirectory
-    # This prevents Dyninst from trying to find packages we're building
-    include(ConfigureDyninstTargets)
-
     add_subdirectory(external/dyninst EXCLUDE_FROM_ALL)
     rocprofiler_systems_restore_variables(
         PIC VARIABLES CMAKE_POSITION_INDEPENDENT_CODE CMAKE_INSTALL_RPATH

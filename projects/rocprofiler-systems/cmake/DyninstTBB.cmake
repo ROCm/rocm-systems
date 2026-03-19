@@ -105,69 +105,6 @@ if(TBB_FOUND)
         set(TBB_ROOT_DIR "${_tbb_root}" CACHE PATH "TBB root directory" FORCE)
     endif()
     set(TBB_ROOT ${TBB_ROOT_DIR})
-
-    # Create standard TBB::* targets if they don't exist
-    # Older system packages may not provide modern CMake targets
-    if(NOT TARGET TBB::tbb)
-        rocprofiler_systems_message(
-            STATUS
-                "Creating standard TBB targets from system TBB (targets not provided by package)"
-        )
-
-        # Extract individual libraries from TBB_LIBRARIES list
-        set(_tbb_lib "")
-        set(_tbbmalloc_lib "")
-        set(_tbbmalloc_proxy_lib "")
-
-        foreach(_lib ${TBB_LIBRARIES})
-            if(_lib MATCHES "libtbb\\.(so|a)")
-                set(_tbb_lib "${_lib}")
-            elseif(_lib MATCHES "libtbbmalloc_proxy\\.(so|a)")
-                set(_tbbmalloc_proxy_lib "${_lib}")
-            elseif(_lib MATCHES "libtbbmalloc\\.(so|a)")
-                set(_tbbmalloc_lib "${_lib}")
-            endif()
-        endforeach()
-
-        # Create TBB::tbb target
-        if(_tbb_lib)
-            add_library(TBB::tbb UNKNOWN IMPORTED)
-            set_target_properties(
-                TBB::tbb
-                PROPERTIES
-                    IMPORTED_LOCATION "${_tbb_lib}"
-                    INTERFACE_INCLUDE_DIRECTORIES "${TBB_INCLUDE_DIRS}"
-            )
-            if(TBB_DEFINITIONS)
-                set_target_properties(
-                    TBB::tbb
-                    PROPERTIES INTERFACE_COMPILE_DEFINITIONS "${TBB_DEFINITIONS}"
-                )
-            endif()
-        endif()
-
-        # Create TBB::tbbmalloc target
-        if(_tbbmalloc_lib)
-            add_library(TBB::tbbmalloc UNKNOWN IMPORTED)
-            set_target_properties(
-                TBB::tbbmalloc
-                PROPERTIES
-                    IMPORTED_LOCATION "${_tbbmalloc_lib}"
-                    INTERFACE_INCLUDE_DIRECTORIES "${TBB_INCLUDE_DIRS}"
-            )
-        endif()
-
-        # Create TBB::tbbmalloc_proxy target
-        if(_tbbmalloc_proxy_lib)
-            add_library(TBB::tbbmalloc_proxy UNKNOWN IMPORTED)
-            set_target_properties(
-                TBB::tbbmalloc_proxy
-                PROPERTIES
-                    IMPORTED_LOCATION "${_tbbmalloc_proxy_lib}"
-                    INTERFACE_INCLUDE_DIRECTORIES "${TBB_INCLUDE_DIRS}"
-            )
-        endif()
-    endif()
 elseif(STERILE_BUILD)
     rocprofiler_systems_message(
         FATAL_ERROR "TBB not found and cannot be downloaded because build is sterile."
@@ -318,3 +255,91 @@ rocprofiler_systems_message(STATUS "TBB include directory: ${TBB_INCLUDE_DIRS}."
 rocprofiler_systems_message(STATUS "TBB library directory: ${TBB_LIBRARY_DIRS}.")
 rocprofiler_systems_message(STATUS "TBB libraries: ${TBB_LIBRARIES}.")
 rocprofiler_systems_message(STATUS "TBB definitions: ${TBB_DEFINITIONS}.")
+
+# --------------------------------------------------------------------------------------#
+# Create standard TBB::* targets for Dyninst
+# --------------------------------------------------------------------------------------#
+# Dyninst expects standard TBB::tbb, TBB::tbbmalloc, TBB::tbbmalloc_proxy targets.
+# We create these regardless of whether TBB was built from source or found on the system.
+
+if(NOT TARGET TBB::tbb)
+    if(ROCPROFSYS_BUILD_TBB)
+        # Built from source - create interface targets that link to rocprofiler-systems-tbb
+        rocprofiler_systems_message(
+            STATUS
+                "Creating TBB::* targets linked to rocprofiler-systems-tbb (building from source)"
+        )
+
+        add_library(TBB::tbb INTERFACE IMPORTED)
+        target_link_libraries(TBB::tbb INTERFACE rocprofiler-systems-tbb)
+
+        add_library(TBB::tbbmalloc INTERFACE IMPORTED)
+        target_link_libraries(TBB::tbbmalloc INTERFACE rocprofiler-systems-tbb)
+
+        add_library(TBB::tbbmalloc_proxy INTERFACE IMPORTED)
+        target_link_libraries(TBB::tbbmalloc_proxy INTERFACE rocprofiler-systems-tbb)
+    else()
+        # System package - create imported targets from found libraries
+        rocprofiler_systems_message(
+            STATUS
+                "Creating TBB::* targets from system TBB (targets not provided by package)"
+        )
+
+        # Extract individual libraries from TBB_LIBRARIES list
+        set(_tbb_lib "")
+        set(_tbbmalloc_lib "")
+        set(_tbbmalloc_proxy_lib "")
+
+        foreach(_lib ${TBB_LIBRARIES})
+            if(_lib MATCHES "libtbb\\.(so|a)")
+                set(_tbb_lib "${_lib}")
+            elseif(_lib MATCHES "libtbbmalloc_proxy\\.(so|a)")
+                set(_tbbmalloc_proxy_lib "${_lib}")
+            elseif(_lib MATCHES "libtbbmalloc\\.(so|a)")
+                set(_tbbmalloc_lib "${_lib}")
+            endif()
+        endforeach()
+
+        # Create TBB::tbb target
+        if(_tbb_lib)
+            add_library(TBB::tbb UNKNOWN IMPORTED)
+            set_target_properties(
+                TBB::tbb
+                PROPERTIES
+                    IMPORTED_LOCATION "${_tbb_lib}"
+                    INTERFACE_INCLUDE_DIRECTORIES "${TBB_INCLUDE_DIRS}"
+            )
+            if(TBB_DEFINITIONS)
+                set_target_properties(
+                    TBB::tbb
+                    PROPERTIES INTERFACE_COMPILE_DEFINITIONS "${TBB_DEFINITIONS}"
+                )
+            endif()
+        endif()
+
+        # Create TBB::tbbmalloc target
+        if(_tbbmalloc_lib)
+            add_library(TBB::tbbmalloc UNKNOWN IMPORTED)
+            set_target_properties(
+                TBB::tbbmalloc
+                PROPERTIES
+                    IMPORTED_LOCATION "${_tbbmalloc_lib}"
+                    INTERFACE_INCLUDE_DIRECTORIES "${TBB_INCLUDE_DIRS}"
+            )
+        endif()
+
+        # Create TBB::tbbmalloc_proxy target
+        if(_tbbmalloc_proxy_lib)
+            add_library(TBB::tbbmalloc_proxy UNKNOWN IMPORTED)
+            set_target_properties(
+                TBB::tbbmalloc_proxy
+                PROPERTIES
+                    IMPORTED_LOCATION "${_tbbmalloc_proxy_lib}"
+                    INTERFACE_INCLUDE_DIRECTORIES "${TBB_INCLUDE_DIRS}"
+            )
+        endif()
+    endif()
+
+    # Set TBB_ROOT for Dyninst to find
+    set(TBB_ROOT "${TBB_ROOT_DIR}" CACHE PATH "TBB root directory for Dyninst" FORCE)
+endif()
