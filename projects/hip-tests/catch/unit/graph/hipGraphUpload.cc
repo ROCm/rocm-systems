@@ -251,7 +251,6 @@ HIP_TEST_CASE(Unit_hipGraphUpload_Functional_With_Priority_Stream) {
 
 HIP_TEST_CASE(Unit_hipGraphUpload_Negative_Parameters) {
   hipGraphExec_t graphExec{};
-  hipError_t ret;
 
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));

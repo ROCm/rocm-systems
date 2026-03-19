@@ -52,6 +52,10 @@ from utils.utils import (
 # Bandwidth units that need human-readable formatting
 BW_UNITS = ["Bytes/s", "bytes/s"]
 
+def _tty_view_is_table(args: argparse.Namespace) -> bool:
+    """True when ``--view table`` was given (plain tables; ignore cli_style)."""
+    return getattr(args, "view", None) == "table"
+
 KERNEL_NAME_WRAP_WIDTH = 40
 
 
@@ -784,18 +788,16 @@ def format_table_output(
         value_cols = ["Value", "Avg", "Min", "Max"]
         df = format_bw_columns_human_readable(df, value_cols, args.decimal)
 
-    # When --table-view is set, force table output and ignore cli_style from config
-    if getattr(args, "table_view", False):
-        content += (
-            get_table_string(df, transpose=transpose, decimal=args.decimal) + "\n"
-        )
-    # enable mem_chart only with single run
-    elif (
-        table_config.get("cli_style") == "mem_chart"
+    # When --view table is set, force table output and ignore cli_style from config
+    use_mem_chart = (
+        not _tty_view_is_table(args)
+        and table_config.get("cli_style") == "mem_chart"
         and len(runs) == 1
         and "Metric" in df.columns
         and "Value" in df.columns
-    ):
+    )
+
+    if use_mem_chart:
         mem_data = (
             pd
             .DataFrame([df["Metric"], df["Value"]])
@@ -928,7 +930,8 @@ def show_all(
             continue
 
         # Handle roofline panel (400) with custom display logic
-        if panel_id == 400:
+        # Skip if --view table is set; tables 401/402 will be rendered as normal tables
+        if panel_id == 400 and not _tty_view_is_table(args):
             _ = is_roofline_shown(args, runs, output, panel, roof_plot, hidden_cols)
 
         panel_content = ""  # store content of all data_source from one panel
@@ -1018,8 +1021,11 @@ def show_all(
                         hidden_cols,
                     )
 
-        # Roofline printing is handled separately above in is_roofline_shown
-        if panel_content and table_config["id"] not in [401, 402]:
+        # Roofline printing is handled separately above in is_roofline_shown.
+        # When --view table is set, roofline tables (401/402) are rendered as normal tables.
+        if panel_content and (
+            table_config["id"] not in [401, 402] or _tty_view_is_table(args)
+        ):
             print(f"\n{'-' * 80}", file=output)
             print(f"{panel_id // 100}. {panel['title']}", file=output)
             print(panel_content, file=output)
