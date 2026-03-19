@@ -1101,12 +1101,14 @@ shutdown()
 void
 block_samples()
 {
+    LOG_CRITICAL("Blocking sampling...");
     trait::runtime_enabled<sampler_t>::set(false);
 }
 
 void
 unblock_samples()
 {
+    LOG_CRITICAL("Unblocking sampling...");
     trait::runtime_enabled<sampler_t>::set(true);
 }
 
@@ -1955,6 +1957,7 @@ pause()
         return;
     }
 
+    LOG_CRITICAL("Pausing sampling...");
     pending_pause_ts.store(tim::get_clock_real_now<uint64_t, std::nano>());
     block_samples();
 }
@@ -1969,6 +1972,7 @@ resume()
         return;
     }
 
+    LOG_CRITICAL("Resuming sampling...");
     auto _pause_ts  = pending_pause_ts.exchange(0);
     auto _resume_ts = tim::get_clock_real_now<uint64_t, std::nano>();
     if(_pause_ts > 0)

@@ -11,6 +11,7 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
 endif()
 
 find_package(hip QUIET HINTS ${ROCmVersion_DIR} PATHS ${ROCmVersion_DIR})
+find_package(Threads REQUIRED)
 
 find_program(
     HIPCC_EXECUTABLE

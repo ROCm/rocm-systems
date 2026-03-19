@@ -695,32 +695,62 @@ rocprofsys_init_tooling_hidden(void)
         auto trace_controller = rocprofiler_sdk::get_trace_controller();
         if(trace_controller)
         {
-            trace_controller->register_region_start_stop_callbacks(
-                rocprofiler_sdk::resume, rocprofiler_sdk::pause);
-            trace_controller->register_region_start_stop_callbacks(sampling::resume,
-                                                                   sampling::pause);
-            trace_controller->register_region_start_stop_callbacks(
-                component::mpi_gotcha::resume, component::mpi_gotcha::pause);
-            trace_controller->register_region_start_stop_callbacks(
-                component::ucx_gotcha::resume, component::ucx_gotcha::pause);
-            trace_controller->register_region_start_stop_callbacks(
-                component::shmem_gotcha<rocprofsys::DefaultSHMEMPolicy>::resume,
-                component::shmem_gotcha<rocprofsys::DefaultSHMEMPolicy>::pause);
-            trace_controller->register_region_start_stop_callbacks(
-                component::vaapi_gotcha::resume, component::vaapi_gotcha::pause);
-            trace_controller->register_region_start_stop_callbacks(
-                ::rocprofsys::pthread_gotcha::resume,
-                ::rocprofsys::pthread_gotcha::pause);
-            trace_controller->register_region_start_stop_callbacks(
-                component::numa_gotcha::resume, component::numa_gotcha::pause);
-            trace_controller->register_region_start_stop_callbacks(
-                rocprofsys::kokkosp::resume, rocprofsys::kokkosp::pause);
-            trace_controller->register_region_start_stop_callbacks(
-                invoke_external_resume_callbacks, invoke_external_pause_callbacks);
+            auto pause_callback = [](void) {
+                LOG_CRITICAL("Pause callback...");
+                rocprofiler_sdk::pause();
+                sampling::pause();
+                component::mpi_gotcha::pause();
+                component::ucx_gotcha::pause();
+                component::shmem_gotcha<rocprofsys::DefaultSHMEMPolicy>::pause();
+                component::vaapi_gotcha::pause();
+                ::rocprofsys::pthread_gotcha::pause();
+                component::numa_gotcha::pause();
+                rocprofsys::kokkosp::pause();
+                invoke_external_pause_callbacks();
+            };
+            auto resume_callback = [](void) {
+                LOG_CRITICAL("Resume callback...");
+                rocprofiler_sdk::resume();
+                sampling::resume();
+                component::mpi_gotcha::resume();
+                component::ucx_gotcha::resume();
+                component::shmem_gotcha<rocprofsys::DefaultSHMEMPolicy>::resume();
+                component::vaapi_gotcha::resume();
+                ::rocprofsys::pthread_gotcha::resume();
+                component::numa_gotcha::resume();
+                rocprofsys::kokkosp::resume();
+                invoke_external_resume_callbacks();
+            };
+            trace_controller->register_region_start_stop_callbacks(resume_callback,
+                                                                   pause_callback);
+
+            // trace_controller->register_region_start_stop_callbacks(
+            //     rocprofiler_sdk::resume, rocprofiler_sdk::pause);
+            // trace_controller->register_region_start_stop_callbacks(sampling::resume,
+            //                                                        sampling::pause);
+            // trace_controller->register_region_start_stop_callbacks(
+            //     component::mpi_gotcha::resume, component::mpi_gotcha::pause);
+            // trace_controller->register_region_start_stop_callbacks(
+            //     component::ucx_gotcha::resume, component::ucx_gotcha::pause);
+            // trace_controller->register_region_start_stop_callbacks(
+            //     component::shmem_gotcha<rocprofsys::DefaultSHMEMPolicy>::resume,
+            //     component::shmem_gotcha<rocprofsys::DefaultSHMEMPolicy>::pause);
+            // trace_controller->register_region_start_stop_callbacks(
+            //     component::vaapi_gotcha::resume, component::vaapi_gotcha::pause);
+            // trace_controller->register_region_start_stop_callbacks(
+            //     ::rocprofsys::pthread_gotcha::resume,
+            //     ::rocprofsys::pthread_gotcha::pause);
+            // trace_controller->register_region_start_stop_callbacks(
+            //     component::numa_gotcha::resume, component::numa_gotcha::pause);
+            // trace_controller->register_region_start_stop_callbacks(
+            //     rocprofsys::kokkosp::resume, rocprofsys::kokkosp::pause);
+            // trace_controller->register_region_start_stop_callbacks(
+            //     invoke_external_resume_callbacks, invoke_external_pause_callbacks);
 
             if(trace_controller->region_filter_active())
             {
-                trace_controller->handle_pause();
+                LOG_CRITICAL("Handling pause callback...");
+                pause_callback();
             }
         }
 

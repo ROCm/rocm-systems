@@ -1,0 +1,520 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
+
+find_package(ROCmVersion)
+
+if(NOT ROCmVersion_FOUND)
+    message(
+        WARNING
+        "ROCmVersion_FOUND not found, skipping tests in ${CMAKE_CURRENT_LIST_FILE}"
+    )
+    return()
+endif()
+
+# -------------------------------------------------------------------------------------- #
+#
+# selective region tests
+#
+# -------------------------------------------------------------------------------------- #
+
+set(_selective_region_environment
+    "${_base_environment}"
+    "ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,marker_api,kernel_dispatch,marker_core_range_api"
+)
+
+if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU})
+    list(APPEND _selective_region_environment "ROCPROFSYS_USE_ROCPD=ON")
+endif()
+
+# Validation args shared between sys-run and sampling for each test case
+# (kernel dispatch validation is identical — sampling should show same gaps)
+
+# =========================================================================
+# pause_resume — no region filter
+# =========================================================================
+# Code flow: Z (profiled), A (profiled), pause, B (NOT profiled), resume,
+#            C (profiled), D (profiled)
+
+rocprofiler_systems_add_test(
+    SKIP_BASELINE SKIP_REWRITE SKIP_RUNTIME
+    NAME pause-resume
+    TARGET pause_resume
+    GPU ON
+    LABELS "selective_regions;roctx"
+    ENVIRONMENT "${_selective_region_environment}"
+)
+
+set(_pause_resume_validation_args
+    -s
+    CodeBlock_Z
+    CodeBlock_A
+    CodeBlock_C
+    CodeBlock_D
+    -c
+    1
+    1
+    1
+    1
+    -d
+    0
+    0
+    0
+    0
+    -p
+)
+
+rocprofiler_systems_add_validation_test(
+    NAME pause-resume-sys-run
+    PERFETTO_METRIC "rocm_kernel_dispatch"
+    PERFETTO_FILE "perfetto-trace.proto"
+    LABELS "selective_regions;roctx"
+    FAIL_REGEX "CodeBlock_B"
+    ARGS ${_pause_resume_validation_args}
+)
+
+rocprofiler_systems_add_validation_test(
+    NAME pause-resume-sampling
+    PERFETTO_METRIC "rocm_kernel_dispatch"
+    PERFETTO_FILE "perfetto-trace.proto"
+    LABELS "selective_regions;roctx;sampling"
+    FAIL_REGEX "CodeBlock_B"
+    ARGS ${_pause_resume_validation_args}
+)
+
+# =========================================================================
+# selective_region — no filter (all regions traced)
+# =========================================================================
+# All 7 kernels should be present, all 3 regions present.
+
+rocprofiler_systems_add_test(
+    SKIP_BASELINE SKIP_REWRITE SKIP_RUNTIME
+    NAME selective-region-all
+    TARGET selective_region
+    GPU ON
+    LABELS "selective_regions;roctx"
+    ENVIRONMENT "${_selective_region_environment}"
+)
+
+set(_selective_region_all_validation_args
+    -s
+    CodeBlock_A
+    CodeBlock_B
+    CodeBlock_C
+    CodeBlock_D
+    CodeBlock_E
+    CodeBlock_F
+    CodeBlock_G
+    -c
+    1
+    1
+    1
+    1
+    1
+    1
+    1
+    -d
+    0
+    0
+    0
+    0
+    0
+    0
+    0
+    -p
+)
+
+rocprofiler_systems_add_validation_test(
+    NAME selective-region-all-sys-run
+    PERFETTO_METRIC "rocm_kernel_dispatch"
+    PERFETTO_FILE "perfetto-trace.proto"
+    LABELS "selective_regions;roctx"
+    ARGS ${_selective_region_all_validation_args}
+)
+
+rocprofiler_systems_add_validation_test(
+    NAME selective-region-all-sampling
+    PERFETTO_METRIC "rocm_kernel_dispatch"
+    PERFETTO_FILE "perfetto-trace.proto"
+    LABELS "selective_regions;roctx;sampling"
+    ARGS ${_selective_region_all_validation_args}
+)
+
+# =========================================================================
+# selective_region — Region 1 filter
+# =========================================================================
+# Region 1 spans: B, C (nested Region 2), D, F (second Region 1)
+# Outside: A (before), E (Region 3), G (after)
+
+rocprofiler_systems_add_test(
+    SKIP_BASELINE SKIP_REWRITE SKIP_RUNTIME
+    NAME selective-region-r1
+    TARGET selective_region
+    GPU ON
+    LABELS "selective_regions;roctx"
+    ENVIRONMENT "${_selective_region_environment};ROCPROFSYS_TRACE_REGION=Region 1"
+)
+
+set(_selective_region_r1_validation_args
+    -s
+    CodeBlock_B
+    CodeBlock_C
+    CodeBlock_D
+    CodeBlock_F
+    -c
+    1
+    1
+    1
+    1
+    -d
+    0
+    0
+    0
+    0
+    -p
+)
+
+rocprofiler_systems_add_validation_test(
+    NAME selective-region-r1-sys-run
+    PERFETTO_METRIC "rocm_kernel_dispatch"
+    PERFETTO_FILE "perfetto-trace.proto"
+    LABELS "selective_regions;roctx"
+    FAIL_REGEX "CodeBlock_A|CodeBlock_E|CodeBlock_G"
+    ARGS ${_selective_region_r1_validation_args}
+)
+
+rocprofiler_systems_add_validation_test(
+    NAME selective-region-r1-sampling
+    PERFETTO_METRIC "rocm_kernel_dispatch"
+    PERFETTO_FILE "perfetto-trace.proto"
+    LABELS "selective_regions;roctx;sampling"
+    FAIL_REGEX "CodeBlock_A|CodeBlock_E|CodeBlock_G"
+    ARGS ${_selective_region_r1_validation_args}
+)
+
+# =========================================================================
+# selective_region — Region 2 + Region 3 filter
+# =========================================================================
+# Region 2 spans: C (nested inside Region 1)
+# Region 3 spans: E
+# Outside: A, B, D, F, G
+
+rocprofiler_systems_add_test(
+    SKIP_BASELINE SKIP_REWRITE SKIP_RUNTIME
+    NAME selective-region-r2r3
+    TARGET selective_region
+    GPU ON
+    LABELS "selective_regions;roctx"
+    ENVIRONMENT
+        "${_selective_region_environment};ROCPROFSYS_TRACE_REGION=Region 2,Region 3"
+)
+
+set(_selective_region_r2r3_validation_args
+    -s
+    CodeBlock_C
+    CodeBlock_E
+    -c
+    1
+    1
+    -d
+    0
+    0
+    -p
+)
+
+rocprofiler_systems_add_validation_test(
+    NAME selective-region-r2r3-sys-run
+    PERFETTO_METRIC "rocm_kernel_dispatch"
+    PERFETTO_FILE "perfetto-trace.proto"
+    LABELS "selective_regions;roctx"
+    FAIL_REGEX "CodeBlock_A|CodeBlock_B|CodeBlock_D|CodeBlock_F|CodeBlock_G"
+    ARGS ${_selective_region_r2r3_validation_args}
+)
+
+rocprofiler_systems_add_validation_test(
+    NAME selective-region-r2r3-sampling
+    PERFETTO_METRIC "rocm_kernel_dispatch"
+    PERFETTO_FILE "perfetto-trace.proto"
+    LABELS "selective_regions;roctx;sampling"
+    FAIL_REGEX "CodeBlock_A|CodeBlock_B|CodeBlock_D|CodeBlock_F|CodeBlock_G"
+    ARGS ${_selective_region_r2r3_validation_args}
+)
+
+# =========================================================================
+# selective_region_pause_1 — no filter
+# =========================================================================
+# Pause/Resume both inside region. Without filter, pause still applies.
+# Code: Z, Region 1, A, pause, B, resume, C, Region 1 stop, D
+# Expected: Z, A, C, D profiled. B paused.
+
+rocprofiler_systems_add_test(
+    SKIP_BASELINE SKIP_REWRITE SKIP_RUNTIME
+    NAME selective-region-pause1-all
+    TARGET selective_region_pause_1
+    GPU ON
+    LABELS "selective_regions;roctx"
+    ENVIRONMENT "${_selective_region_environment}"
+)
+
+set(_selective_region_pause1_all_validation_args
+    -s
+    CodeBlock_Z
+    CodeBlock_A
+    CodeBlock_C
+    CodeBlock_D
+    -c
+    1
+    1
+    1
+    1
+    -d
+    0
+    0
+    0
+    0
+    -p
+)
+
+rocprofiler_systems_add_validation_test(
+    NAME selective-region-pause1-all-sys-run
+    PERFETTO_METRIC "rocm_kernel_dispatch"
+    PERFETTO_FILE "perfetto-trace.proto"
+    LABELS "selective_regions;roctx"
+    FAIL_REGEX "CodeBlock_B"
+    ARGS ${_selective_region_pause1_all_validation_args}
+)
+
+rocprofiler_systems_add_validation_test(
+    NAME selective-region-pause1-all-sampling
+    PERFETTO_METRIC "rocm_kernel_dispatch"
+    PERFETTO_FILE "perfetto-trace.proto"
+    LABELS "selective_regions;roctx;sampling"
+    FAIL_REGEX "CodeBlock_B"
+    ARGS ${_selective_region_pause1_all_validation_args}
+)
+
+# =========================================================================
+# selective_region_pause_1 — Region 1 filter
+# =========================================================================
+# With filter: Z outside, A profiled, B paused, C profiled, D outside
+# Expected: A, C profiled.
+
+rocprofiler_systems_add_test(
+    SKIP_BASELINE SKIP_REWRITE SKIP_RUNTIME
+    NAME selective-region-pause1-r1
+    TARGET selective_region_pause_1
+    GPU ON
+    LABELS "selective_regions;roctx"
+    ENVIRONMENT "${_selective_region_environment};ROCPROFSYS_TRACE_REGION=Region 1"
+)
+
+set(_selective_region_pause1_r1_validation_args
+    -s
+    CodeBlock_A
+    CodeBlock_C
+    -c
+    1
+    1
+    -d
+    0
+    0
+    -p
+)
+
+rocprofiler_systems_add_validation_test(
+    NAME selective-region-pause1-r1-sys-run
+    PERFETTO_METRIC "rocm_kernel_dispatch"
+    PERFETTO_FILE "perfetto-trace.proto"
+    LABELS "selective_regions;roctx"
+    FAIL_REGEX "CodeBlock_Z|CodeBlock_B|CodeBlock_D"
+    ARGS ${_selective_region_pause1_r1_validation_args}
+)
+
+rocprofiler_systems_add_validation_test(
+    NAME selective-region-pause1-r1-sampling
+    PERFETTO_METRIC "rocm_kernel_dispatch"
+    PERFETTO_FILE "perfetto-trace.proto"
+    LABELS "selective_regions;roctx;sampling"
+    FAIL_REGEX "CodeBlock_Z|CodeBlock_B|CodeBlock_D"
+    ARGS ${_selective_region_pause1_r1_validation_args}
+)
+
+# =========================================================================
+# selective_region_pause_2 — no filter
+# =========================================================================
+# Pause before region. Without filter, pause is global.
+# Code: pause, Z, Region 1, A, B, resume, C, Region 1 stop, D
+# Expected: C, D profiled. Z, A, B paused.
+
+rocprofiler_systems_add_test(
+    SKIP_BASELINE SKIP_REWRITE SKIP_RUNTIME
+    NAME selective-region-pause2-all
+    TARGET selective_region_pause_2
+    GPU ON
+    LABELS "selective_regions;roctx"
+    ENVIRONMENT "${_selective_region_environment}"
+)
+
+set(_selective_region_pause2_all_validation_args
+    -s
+    CodeBlock_C
+    CodeBlock_D
+    -c
+    1
+    1
+    -d
+    0
+    0
+    -p
+)
+
+rocprofiler_systems_add_validation_test(
+    NAME selective-region-pause2-all-sys-run
+    PERFETTO_METRIC "rocm_kernel_dispatch"
+    PERFETTO_FILE "perfetto-trace.proto"
+    LABELS "selective_regions;roctx"
+    FAIL_REGEX "CodeBlock_Z|CodeBlock_A|CodeBlock_B"
+    ARGS ${_selective_region_pause2_all_validation_args}
+)
+
+rocprofiler_systems_add_validation_test(
+    NAME selective-region-pause2-all-sampling
+    PERFETTO_METRIC "rocm_kernel_dispatch"
+    PERFETTO_FILE "perfetto-trace.proto"
+    LABELS "selective_regions;roctx;sampling"
+    FAIL_REGEX "CodeBlock_Z|CodeBlock_A|CodeBlock_B"
+    ARGS ${_selective_region_pause2_all_validation_args}
+)
+
+# =========================================================================
+# selective_region_pause_2 — Region 1 filter
+# =========================================================================
+# With filter: pause outside is invalid, A/B/C profiled, Z/D outside
+# Expected: A, B, C profiled.
+
+rocprofiler_systems_add_test(
+    SKIP_BASELINE SKIP_REWRITE SKIP_RUNTIME
+    NAME selective-region-pause2-r1
+    TARGET selective_region_pause_2
+    GPU ON
+    LABELS "selective_regions;roctx"
+    ENVIRONMENT "${_selective_region_environment};ROCPROFSYS_TRACE_REGION=Region 1"
+)
+
+set(_selective_region_pause2_r1_validation_args
+    -s
+    CodeBlock_A
+    CodeBlock_B
+    CodeBlock_C
+    -c
+    1
+    1
+    1
+    -d
+    0
+    0
+    0
+    -p
+)
+
+rocprofiler_systems_add_validation_test(
+    NAME selective-region-pause2-r1-sys-run
+    PERFETTO_METRIC "rocm_kernel_dispatch"
+    PERFETTO_FILE "perfetto-trace.proto"
+    LABELS "selective_regions;roctx"
+    FAIL_REGEX "CodeBlock_Z|CodeBlock_D"
+    ARGS ${_selective_region_pause2_r1_validation_args}
+)
+
+rocprofiler_systems_add_validation_test(
+    NAME selective-region-pause2-r1-sampling
+    PERFETTO_METRIC "rocm_kernel_dispatch"
+    PERFETTO_FILE "perfetto-trace.proto"
+    LABELS "selective_regions;roctx;sampling"
+    FAIL_REGEX "CodeBlock_Z|CodeBlock_D"
+    ARGS ${_selective_region_pause2_r1_validation_args}
+)
+
+# =========================================================================
+# selective_region_pause_3 — no filter
+# =========================================================================
+# Pause inside region, resume outside after region stop.
+# Code: Region 1, A, pause, C, Region 1 stop, D, resume
+# Expected: A profiled. C, D paused.
+
+rocprofiler_systems_add_test(
+    SKIP_BASELINE SKIP_REWRITE SKIP_RUNTIME
+    NAME selective-region-pause3-all
+    TARGET selective_region_pause_3
+    GPU ON
+    LABELS "selective_regions;roctx"
+    ENVIRONMENT "${_selective_region_environment}"
+)
+
+set(_selective_region_pause3_all_validation_args
+    -s
+    CodeBlock_A
+    -c
+    1
+    -d
+    0
+    -p
+)
+
+rocprofiler_systems_add_validation_test(
+    NAME selective-region-pause3-all-sys-run
+    PERFETTO_METRIC "rocm_kernel_dispatch"
+    PERFETTO_FILE "perfetto-trace.proto"
+    LABELS "selective_regions;roctx"
+    ARGS ${_selective_region_pause3_all_validation_args}
+)
+
+rocprofiler_systems_add_validation_test(
+    NAME selective-region-pause3-all-sampling
+    PERFETTO_METRIC "rocm_kernel_dispatch"
+    PERFETTO_FILE "perfetto-trace.proto"
+    LABELS "selective_regions;roctx;sampling"
+    ARGS ${_selective_region_pause3_all_validation_args}
+)
+
+# =========================================================================
+# selective_region_pause_3 — Region 1 filter
+# =========================================================================
+# With filter: A profiled, C paused, D outside
+# Expected: A profiled.
+
+rocprofiler_systems_add_test(
+    SKIP_BASELINE SKIP_REWRITE SKIP_RUNTIME
+    NAME selective-region-pause3-r1
+    TARGET selective_region_pause_3
+    GPU ON
+    LABELS "selective_regions;roctx"
+    ENVIRONMENT "${_selective_region_environment};ROCPROFSYS_TRACE_REGION=Region 1"
+)
+
+set(_selective_region_pause3_r1_validation_args
+    -s
+    CodeBlock_A
+    -c
+    1
+    -d
+    0
+    -p
+)
+
+rocprofiler_systems_add_validation_test(
+    NAME selective-region-pause3-r1-sys-run
+    PERFETTO_METRIC "rocm_kernel_dispatch"
+    PERFETTO_FILE "perfetto-trace.proto"
+    LABELS "selective_regions;roctx"
+    FAIL_REGEX "CodeBlock_C|CodeBlock_D"
+    ARGS ${_selective_region_pause3_r1_validation_args}
+)
+
+rocprofiler_systems_add_validation_test(
+    NAME selective-region-pause3-r1-sampling
+    PERFETTO_METRIC "rocm_kernel_dispatch"
+    PERFETTO_FILE "perfetto-trace.proto"
+    LABELS "selective_regions;roctx;sampling"
+    FAIL_REGEX "CodeBlock_C|CodeBlock_D"
+    ARGS ${_selective_region_pause3_r1_validation_args}
+)

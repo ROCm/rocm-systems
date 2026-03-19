@@ -10,14 +10,14 @@
 // was no valid pause to undo.
 //
 // Code flow:
-//   roctxProfilerPause                          (outside region — pause not valid)
+//   roctxProfilerPause
 //   CodeBlock_Z                                 (outside region — not profiled)
-//   roctxRangeStartA("Region 1")               (enter target region — profiling starts)
+//   roctxRangeStartA("Region 1")
 //     CodeBlock_A                               (profiled)
 //     CodeBlock_B                               (profiled)
-//     roctxProfilerResume                       (no valid pause to undo — no-op)
+//     roctxProfilerResume (no-op)
 //     CodeBlock_C                               (profiled)
-//   roctxRangeStop("Region 1")                  (region ends — profiling stops)
+//   roctxRangeStop(Region 1)
 //   CodeBlock_D                                 (outside region — not profiled)
 //
 // Run with filter:
@@ -39,29 +39,25 @@ main()
     gpu_buffer buf;
     float*     d = buf.get();
 
-    roctx_thread_id_t tid{};
-    roctxGetThreadId(&tid);
+    roctx_thread_id_t roctx_tid{};
+    roctxGetThreadId(&roctx_tid);
 
-    roctxProfilerPause(tid);
+    roctxProfilerPause(roctx_tid);
 
-    // Outside region
     LAUNCH_KERNEL(CodeBlock_Z, d);
 
-    // Region 1 — profiling starts despite prior pause (pause was outside region)
     roctx_range_id_t region1_id = roctxRangeStartA("Region 1");
 
     LAUNCH_KERNEL(CodeBlock_A, d);
 
     LAUNCH_KERNEL(CodeBlock_B, d);
 
-    // Resume (no valid pause to undo — no-op)
-    roctxProfilerResume(tid);
+    roctxProfilerResume(roctx_tid);
 
     LAUNCH_KERNEL(CodeBlock_C, d);
 
     roctxRangeStop(region1_id);
 
-    // Outside region
     LAUNCH_KERNEL(CodeBlock_D, d);
 
     return 0;

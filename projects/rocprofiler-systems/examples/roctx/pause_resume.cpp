@@ -32,18 +32,18 @@ main()
     gpu_buffer buf;
     float*     d = buf.get();
 
-    roctx_thread_id_t tid{};
-    roctxGetThreadId(&tid);
+    roctx_thread_id_t roctx_tid{};
+    roctxGetThreadId(&roctx_tid);
 
     LAUNCH_KERNEL(CodeBlock_Z, d);
 
     LAUNCH_KERNEL(CodeBlock_A, d);
 
-    roctxProfilerPause(tid);
+    roctxProfilerPause(roctx_tid);
 
     LAUNCH_KERNEL(CodeBlock_B, d);
 
-    roctxProfilerResume(tid);
+    roctxProfilerResume(roctx_tid);
 
     LAUNCH_KERNEL(CodeBlock_C, d);
 

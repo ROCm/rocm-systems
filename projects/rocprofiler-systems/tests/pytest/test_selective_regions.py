@@ -34,6 +34,7 @@ def selective_region_env() -> dict[str, str]:
 # =============================================================================
 
 
+@pytest.mark.parametrize("mode", ["sys_run", "sampling"])
 class TestPauseResume(RocprofsysTest):
     """Tests for roctxProfilerPause/Resume without region filtering.
 
@@ -43,9 +44,9 @@ class TestPauseResume(RocprofsysTest):
         CodeBlock_C (profiled), CodeBlock_D (profiled)
     """
 
-    def test(self, selective_region_env):
+    def test(self, mode, selective_region_env):
         result = self.run_test(
-            "sys_run",
+            mode,
             "pause_resume",
             env=selective_region_env,
             check_target_arch=True,
@@ -66,6 +67,7 @@ class TestPauseResume(RocprofsysTest):
 # =============================================================================
 
 
+@pytest.mark.parametrize("mode", ["sys_run", "sampling"])
 class TestSelectiveRegion(RocprofsysTest):
     """Tests for selective region tracing without pause/resume.
 
@@ -77,10 +79,10 @@ class TestSelectiveRegion(RocprofsysTest):
         CodeBlock_G (outside)
     """
 
-    def test_no_filter(self, selective_region_env):
+    def test_no_filter(self, mode, selective_region_env):
         """No ROCPROFSYS_TRACE_REGION — all regions traced."""
         result = self.run_test(
-            "sys_run",
+            mode,
             "selective_region",
             env=selective_region_env,
             check_target_arch=True,
@@ -103,7 +105,7 @@ class TestSelectiveRegion(RocprofsysTest):
             pass_regex=["Region 1", "Region 2", "Region 3"],
         )
 
-    def test_region_1_filter(self, selective_region_env):
+    def test_region_1_filter(self, mode, selective_region_env):
         """ROCPROFSYS_TRACE_REGION='Region 1' — only Region 1 content traced.
 
         Region 1 spans: CodeBlock_B, CodeBlock_C (nested Region 2), CodeBlock_D,
@@ -113,7 +115,7 @@ class TestSelectiveRegion(RocprofsysTest):
         env = selective_region_env.copy()
         env["ROCPROFSYS_TRACE_REGION"] = "Region 1"
         result = self.run_test(
-            "sys_run",
+            mode,
             "selective_region",
             env=env,
             check_target_arch=True,
@@ -135,7 +137,7 @@ class TestSelectiveRegion(RocprofsysTest):
             fail_regex=["Region 3"],
         )
 
-    def test_region_2_and_3_filter(self, selective_region_env):
+    def test_region_2_and_3_filter(self, mode, selective_region_env):
         """ROCPROFSYS_TRACE_REGION='Region 2,Region 3' — only Region 2+3 content traced.
 
         Region 2 spans: CodeBlock_C (nested inside Region 1)
@@ -145,7 +147,7 @@ class TestSelectiveRegion(RocprofsysTest):
         env = selective_region_env.copy()
         env["ROCPROFSYS_TRACE_REGION"] = "Region 2,Region 3"
         result = self.run_test(
-            "sys_run",
+            mode,
             "selective_region",
             env=env,
             check_target_arch=True,
@@ -176,6 +178,7 @@ class TestSelectiveRegion(RocprofsysTest):
 # =============================================================================
 
 
+@pytest.mark.parametrize("mode", ["sys_run", "sampling"])
 class TestSelectiveRegionPause1(RocprofsysTest):
     """Pause and Resume both occur INSIDE the target region.
 
@@ -185,10 +188,10 @@ class TestSelectiveRegionPause1(RocprofsysTest):
         CodeBlock_C (profiled), Region 1 stop, CodeBlock_D (outside)
     """
 
-    def test_no_filter(self, selective_region_env):
+    def test_no_filter(self, mode, selective_region_env):
         """Without filter, pause/resume still apply so B is absent."""
         result = self.run_test(
-            "sys_run",
+            mode,
             "selective_region_pause_1",
             env=selective_region_env,
             check_target_arch=True,
@@ -209,12 +212,12 @@ class TestSelectiveRegionPause1(RocprofsysTest):
             pass_regex=["Region 1"],
         )
 
-    def test_region_1_filter(self, selective_region_env):
+    def test_region_1_filter(self, mode, selective_region_env):
         """With Region 1 filter: Z and D outside, B paused — only A and C profiled."""
         env = selective_region_env.copy()
         env["ROCPROFSYS_TRACE_REGION"] = "Region 1"
         result = self.run_test(
-            "sys_run",
+            mode,
             "selective_region_pause_1",
             env=env,
             check_target_arch=True,
@@ -241,6 +244,7 @@ class TestSelectiveRegionPause1(RocprofsysTest):
 # =============================================================================
 
 
+@pytest.mark.parametrize("mode", ["sys_run", "sampling"])
 class TestSelectiveRegionPause2(RocprofsysTest):
     """Pause occurs BEFORE the target region.
 
@@ -250,10 +254,10 @@ class TestSelectiveRegionPause2(RocprofsysTest):
         Region 1 stop, CodeBlock_D
     """
 
-    def test_no_filter(self, selective_region_env):
+    def test_no_filter(self, mode, selective_region_env):
         """Without filter, pause is global: Z, A, B paused. Only C and D profiled."""
         result = self.run_test(
-            "sys_run",
+            mode,
             "selective_region_pause_2",
             env=selective_region_env,
             check_target_arch=True,
@@ -274,12 +278,12 @@ class TestSelectiveRegionPause2(RocprofsysTest):
             pass_regex=["Region 1"],
         )
 
-    def test_region_1_filter(self, selective_region_env):
+    def test_region_1_filter(self, mode, selective_region_env):
         """With Region 1 filter: pause outside is invalid, A/B/C profiled, Z/D outside."""
         env = selective_region_env.copy()
         env["ROCPROFSYS_TRACE_REGION"] = "Region 1"
         result = self.run_test(
-            "sys_run",
+            mode,
             "selective_region_pause_2",
             env=env,
             check_target_arch=True,
@@ -306,6 +310,7 @@ class TestSelectiveRegionPause2(RocprofsysTest):
 # =============================================================================
 
 
+@pytest.mark.parametrize("mode", ["sys_run", "sampling"])
 class TestSelectiveRegionPause3(RocprofsysTest):
     """Pause occurs INSIDE the region, resume occurs OUTSIDE after region stop.
 
@@ -314,10 +319,10 @@ class TestSelectiveRegionPause3(RocprofsysTest):
         Region 1 stop, CodeBlock_D, resume
     """
 
-    def test_no_filter(self, selective_region_env):
+    def test_no_filter(self, mode, selective_region_env):
         """Without filter, pause is global: C and D paused. Only A profiled."""
         result = self.run_test(
-            "sys_run",
+            mode,
             "selective_region_pause_3",
             env=selective_region_env,
             check_target_arch=True,
@@ -338,12 +343,12 @@ class TestSelectiveRegionPause3(RocprofsysTest):
             pass_regex=["Region 1"],
         )
 
-    def test_region_1_filter(self, selective_region_env):
+    def test_region_1_filter(self, mode, selective_region_env):
         """With Region 1 filter: A profiled, C paused, D outside. Only A profiled."""
         env = selective_region_env.copy()
         env["ROCPROFSYS_TRACE_REGION"] = "Region 1"
         result = self.run_test(
-            "sys_run",
+            mode,
             "selective_region_pause_3",
             env=env,
             check_target_arch=True,
