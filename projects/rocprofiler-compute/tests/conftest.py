@@ -172,6 +172,7 @@ def binary_handler_profile_rocprof_compute(request):
             if num_ranks > 1:
                 command_rocprof_compute = [
                     "mpirun",
+                    "--allow-run-as-root",
                     "-n",
                     str(num_ranks),
                 ] + command_rocprof_compute
@@ -236,6 +237,7 @@ def binary_handler_profile_rocprof_compute(request):
                 command_rocprof_compute[0] = rocprof_compute_script_path
                 command_rocprof_compute = [
                     "mpirun",
+                    "--allow-run-as-root",
                     "-n",
                     str(num_ranks),
                 ] + command_rocprof_compute
