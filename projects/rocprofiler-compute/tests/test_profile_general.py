@@ -3336,9 +3336,10 @@ def test_torch_trace_profile(
 
     Runs profiling with --torch-trace, verifies profile outputs (pmc_perf, marker
     and counter CSVs), then runs analyze with --list-torch-operators and
-    --torch-operator relu, and verifies torch_trace directory, operator CSV
-    contents (hierarchy, kernel, counters), and CLI output format (call tree
-    grouped by source location, aggregated stats, kernel IDs, sort order).
+    --torch-operator (PurePosixPath glob patterns like *relu, all), and verifies
+    torch_trace directory, consolidated CSV contents (hierarchy, kernel, counters),
+    and CLI output format (call tree grouped by source location, aggregated stats,
+    kernel IDs, sort order).
     Requires PyTorch and GPU; not included in default suite.
     """
     workload_dir = test_utils.get_output_dir(param_id="torch_trace")
@@ -3469,41 +3470,28 @@ def test_torch_trace_profile(
 
     list_output = capsys.readouterr().out
 
-    # 7. torch_trace directory created with per-operator CSVs
+    # 7. torch_trace directory created with consolidated.csv
     torch_trace_dir = Path(workload_dir) / "torch_trace"
     assert torch_trace_dir.exists(), "torch_trace directory not created"
 
-    operator_csv_files = list(torch_trace_dir.glob("*.csv"))
-    assert operator_csv_files, "No operator CSV files found in torch_trace"
+    consolidated_csv = torch_trace_dir / "consolidated.csv"
+    assert consolidated_csv.exists(), "consolidated.csv not found in torch_trace"
 
-    # 8. Operator CSVs contain hierarchy, kernel names, and counter values
-    hierarchy_present = False
-    for op_file in operator_csv_files:
-        df = pd.read_csv(op_file)
-        assert not df.empty, f"{op_file} is empty"
-        assert "Operator_Name" in df.columns, (
-            f"Operator_Name column missing in {op_file}"
-        )
-        if not hierarchy_present:
-            hierarchy_present = (
-                df["Operator_Name"]
-                .apply(lambda x: "/" in str(x) or "::" in str(x))
-                .any()
-            )
-        assert "Kernel_Name" in df.columns, f"Kernel_Name missing in {op_file}"
-        assert df["Kernel_Name"].notnull().all() and (df["Kernel_Name"] != "").all(), (
-            f"Empty Kernel_Name in {op_file}"
-        )
-        assert "Counter_Value" in df.columns, (
-            f"Counter_Value column missing in {op_file}"
-        )
-        assert df["Counter_Value"].notnull().all()
-        assert (df["Counter_Value"] != "").all(), f"Empty Counter_Value in {op_file}"
-
-    assert hierarchy_present, (
-        f"No hierarchy information in operator CSV files. "
-        f"Files checked: {[f.name for f in operator_csv_files]}"
+    # 8. Consolidated CSV contains hierarchy, kernel names, and counter values
+    df = pd.read_csv(consolidated_csv)
+    assert not df.empty, "consolidated.csv is empty"
+    assert "Operator_Name" in df.columns, "Operator_Name column missing"
+    hierarchy_present = (
+        df["Operator_Name"].apply(lambda x: "/" in str(x) or "::" in str(x)).any()
     )
+    assert hierarchy_present, "No hierarchy information in consolidated.csv"
+    assert "Kernel_Name" in df.columns, "Kernel_Name missing"
+    assert df["Kernel_Name"].notnull().all() and (df["Kernel_Name"] != "").all(), (
+        "Empty Kernel_Name in consolidated.csv"
+    )
+    assert "Counter_Value" in df.columns, "Counter_Value column missing"
+    assert df["Counter_Value"].notnull().all()
+    assert (df["Counter_Value"] != "").all(), "Empty Counter_Value in consolidated.csv"
 
     # ---- Verify --list-torch-operators CLI output format (checks 9–14) ----
 
@@ -3571,10 +3559,105 @@ def test_torch_trace_profile(
         "--path",
         workload_dir,
         "--torch-operator",
-        "relu",
+        "*relu",
     ])
-    # 16. Analyze with --torch-operator relu succeeds
-    assert returncode_analyze_relu == 0, "Analyze with --torch-operator relu failed"
+    # 16. Analyze with --torch-operator *relu succeeds
+    assert returncode_analyze_relu == 0, "Analyze with --torch-operator *relu failed"
+
+    # --- Verify torch-operator cli output ---
+
+    # 17. Multi-component pattern matches operator in the middle of hierarchy.
+    #     torch.nn.functional.relu is a wrapper that delegates to torch.relu;
+    #     only the leaf operator appears in consolidated trace, so we use
+    #     wildcards to match through the hierarchy.
+    capsys.readouterr()
+    rc_exact = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--path",
+        workload_dir,
+        "--torch-operator",
+        "*/torch.nn.functional.relu/*",
+    ])
+    assert rc_exact == 0, (
+        "Analyze with --torch-operator */torch.nn.functional.relu/* failed"
+    )
+    out_exact = capsys.readouterr().out
+    assert "Matched PyTorch Operators" in out_exact, (
+        "Expected 'Matched PyTorch Operators' header in --torch-operator output"
+    )
+    assert "kernel_launches" in out_exact, (
+        "Expected call tree with kernel_launches stats in --torch-operator output"
+    )
+
+    # 18. Glob wildcard pattern (*relu) matches the relu operator
+    capsys.readouterr()
+    rc_glob = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--path",
+        workload_dir,
+        "--torch-operator",
+        "*relu",
+    ])
+    assert rc_glob == 0, "Analyze with --torch-operator *relu failed"
+    out_glob = capsys.readouterr().out
+    assert "kernel_launches" in out_glob, (
+        "Glob pattern *relu should match relu operator and render call tree"
+    )
+
+    # 19. 'all' keyword matches every operator
+    capsys.readouterr()
+    rc_all = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--path",
+        workload_dir,
+        "--torch-operator",
+        "all",
+    ])
+    assert rc_all == 0, "Analyze with --torch-operator all failed"
+    out_all = capsys.readouterr().out
+    assert "kernel_launches" in out_all, "'all' keyword should match operators"
+
+    # 20. --torch-operator + -k intersection succeeds and renders call tree
+    capsys.readouterr()
+    rc_intersect = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--path",
+        workload_dir,
+        "--torch-operator",
+        "all",
+        "-k",
+        "0",
+    ])
+    assert rc_intersect == 0, "Analyze with --torch-operator all -k 0 failed"
+    out_intersect = capsys.readouterr().out
+    assert "Matched PyTorch Operators" in out_intersect, (
+        "Expected call tree output with --torch-operator all -k 0"
+    )
+    assert "Torch operator filter selected" in out_intersect, (
+        "Expected filter-selection log confirming -k intersection"
+    )
+
+    # 21. Non-matching pattern degrades gracefully with a warning
+    capsys.readouterr()
+    rc_nomatch = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--path",
+        workload_dir,
+        "--torch-operator",
+        "nonexistent_operator_xyz",
+    ])
+    assert rc_nomatch == 0, (
+        "Analyze with non-matching --torch-operator should not crash"
+    )
+    out_nomatch = capsys.readouterr().out
+    assert "No operators matched" in out_nomatch, (
+        "Expected warning about no operators matched"
+    )
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 

@@ -1719,9 +1719,16 @@ def test_list_torch_operators_no_path(binary_handler_analyze_rocprof_compute, ca
 def test_list_torch_operators_no_trace_data(
     binary_handler_analyze_rocprof_compute, capsys
 ):
-    """Test graceful handling when torch_trace/ directory doesn't exist"""
-    # Use regular vcopy workload (no torch data)
+    """Test graceful handling when workload was profiled with --torch-trace but
+    contains no torch operator data (e.g. a non-PyTorch workload like vcopy).
+    """
     workload_dir = test_utils.setup_workload_dir(indirs[0])
+
+    # Simulate a workload profiled with --torch-trace so the sanitize guard
+    # passes, but no torch marker/counter files exist (non-torch workload).
+    config_path = Path(workload_dir) / "profiling_config.yaml"
+    config_path.write_text("torch_trace: true\n")
+
     code = binary_handler_analyze_rocprof_compute([
         "--experimental",
         "analyze",

@@ -76,6 +76,9 @@ void GDABackend::init() {
 
   type = BackendType::GDA_BACKEND;
 
+  // Initialize QP allocator to finegrained allocator
+  qp_allocator_ = new HIPAllocatorFinegrained();
+
   select_nic();
 
   //TODO setup_host_interface();
@@ -124,6 +127,12 @@ GDABackend::~GDABackend() {
   cleanup_ibv();
 
   close_dv_libs();
+
+  // Cleanup QP allocator
+  if (qp_allocator_ != nullptr) {
+    delete qp_allocator_;
+    qp_allocator_ = nullptr;
+  }
 }
 
 void GDABackend::select_nic() {
@@ -731,8 +740,8 @@ void GDABackend::cleanup_ibv() {
       err = bnxt_re_dv.umem_dereg(bnxt_qps[i].attr.sq_umem_handle);
       CHECK_ZERO(err, "bnxt_re_dv_umem_dereg (SQ)");
 
-      CHECK_HIP(hipFree(bnxt_qps[i].sq_buf));
-      CHECK_HIP(hipFree(bnxt_qps[i].rq_buf));
+      qp_allocator_->deallocate(bnxt_qps[i].sq_buf);
+      qp_allocator_->deallocate(bnxt_qps[i].rq_buf);
 
       close(bnxt_qps[i].sq_dmabuf_fd);
       close(bnxt_qps[i].rq_dmabuf_fd);
@@ -752,8 +761,8 @@ void GDABackend::cleanup_ibv() {
       close(bnxt_scqs[i].dmabuf_fd);
       close(bnxt_rcqs[i].dmabuf_fd);
 
-      CHECK_HIP(hipFree(bnxt_scqs[i].buf));
-      CHECK_HIP(hipFree(bnxt_rcqs[i].buf));
+      qp_allocator_->deallocate(bnxt_scqs[i].buf);
+      qp_allocator_->deallocate(bnxt_rcqs[i].buf);
     }
   } else {
     for (int i = 0; i < qps.size(); i++) {
