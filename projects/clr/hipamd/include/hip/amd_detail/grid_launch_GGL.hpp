@@ -3,6 +3,7 @@
  *
  * SPDX-License-Identifier: MIT
  */
+
 #pragma once
 
 #if GENERIC_GRID_LAUNCH == 1

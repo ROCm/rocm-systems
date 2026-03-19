@@ -751,7 +751,8 @@ Examples:
         experimental_enabled=experimental_enabled,
         feature_label="List torch operators",
         help=(
-            "\t\tList PyTorch operators with hierarchy, numbering, and durations. "
+            "\t\tList PyTorch operators as a unified call tree grouped by "
+            "source location with kernel launch stats. "
             "Recreates torch_trace output directory."
         ),
     )
@@ -760,14 +761,26 @@ Examples:
         metavar="",
         type=str,
         dest="torch_operator",
-        nargs="+",
+        nargs="*",
         base_action="store",
         action=ExperimentalAction,
         experimental_enabled=experimental_enabled,
         feature_label="Torch operator filter",
         help=(
-            "\t\tShow details for selected operator(s) using existing torch_trace "
-            "directory (run --list-torch-operators first)."
+            "\t\tFilter operators using PurePosixPath glob patterns,\n"
+            "\t\t\tselect their kernels, and display metrics.\n"
+            "\t\t\tWith no arguments, matches all operators (default: **).\n"
+            "\t\t\tExamples (operator hierarchy is /-separated):\n"
+            "\t\t\t  *relu               ends with relu\n"
+            "\t\t\t  *conv*              contains conv\n"
+            "\t\t\t  torch.nn.functional.relu   exact match\n"
+            "\t\t\t  */torch.nn.functional.relu two-level match\n"
+            "\t\t\t  */*functional*/*    intermediate component match\n"
+            "\t\t\t  all  or  '*'        match every operator\n"
+            "\t\t\tMultiple patterns (space or comma-separated):\n"
+            "\t\t\t  --torch-operator *relu,*conv*,*linear\n"
+            "\t\t\t  --torch-operator */*conv2d */*relu\n"
+            "\t\t\tCombine with -k to intersect with kernel IDs."
         ),
     )
     analyze_group.add_argument(
