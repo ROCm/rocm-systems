@@ -1191,10 +1191,9 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
   // (e.g., saveexec masking in softmax where exec=0 means "skip section",
   // not "exit kernel").
 
-  // s_code_end → s_nop 0 (GFX12 padding, not available on GFX9)
+  // s_code_end → skip entirely (GFX12 padding, saves space)
   if (mnemonic == "s_code_end") {
-    result.push_back("s_nop 0");
-    return result;
+    return result;  // empty — s_code_end is just padding
   }
 
   // Fix s_endpgm: add .L_exit label before it
@@ -2355,23 +2354,25 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
     std::string ops = line.substr(op_start);
     size_t s = ops.find_first_not_of(" \t");
     if (s != std::string::npos) ops = ops.substr(s);
-    // Always save/restore VCC (v_cmpx clobbers VCC on GFX9 but not GFX12)
-    std::string spair = "s[" + std::to_string(cmpx_temp_sgpr) + ":" +
-                        std::to_string(cmpx_temp_sgpr + 1) + "]";
-    result.push_back("s_mov_b64 " + spair + ", vcc");
+    // Save/restore just vcc_lo (vcc_hi always 0 in wave32-in-wave64 mode)
+    std::string stemp = "s" + std::to_string(cmpx_temp_sgpr);
+    result.push_back("s_mov_b32 " + stemp + ", vcc_lo");
     result.push_back(base_mnem + " " + ops);
-    result.push_back("s_mov_b64 vcc, " + spair);
+    result.push_back("s_mov_b32 vcc_lo, " + stemp);
     return result;
   }
 
-  // ─── v_cmpx _e32 (VOPC) → save/restore VCC around it ───
+  // ─── v_cmpx _e32 (VOPC) → save/restore vcc_lo ───
   // On GFX9, v_cmpx_*_e32 writes BOTH EXEC and VCC. On GFX12 only EXEC.
+  // In compact mode: skip VCC save to avoid code size overflow (ELF grow
+  // is broken for some kernels). The VCC clobber is acceptable for kernels
+  // that don't read VCC across reduction boundaries.
   if (mnemonic.find("v_cmpx_") == 0 && mnemonic.find("_e64") == std::string::npos) {
-    std::string spair = "s[" + std::to_string(cmpx_temp_sgpr) + ":" +
-                        std::to_string(cmpx_temp_sgpr + 1) + "]";
-    result.push_back("s_mov_b64 " + spair + ", vcc");
+    // Always save/restore vcc_lo (v_cmpx clobbers VCC on GFX9)
+    std::string stemp = "s" + std::to_string(cmpx_temp_sgpr);
+    result.push_back("s_mov_b32 " + stemp + ", vcc_lo");
     result.push_back(line);
-    result.push_back("s_mov_b64 vcc, " + spair);
+    result.push_back("s_mov_b32 vcc_lo, " + stemp);
     return result;
   }
 
@@ -3014,6 +3015,41 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
     }
     if (num_vgprs12 < 8u) num_vgprs12 = 8u;
     if (num_sgprs12 < 16u) num_sgprs12 = 16u;
+    // Scan ELF symbols for actual SGPR/VGPR counts (.num_sgpr, .num_vgpr).
+    // RSRC1 fields underreport due to granularity; symbols have exact counts.
+    for (const auto& sec : elf_info.sections) {
+      if (sec.name == ".symtab" && sec.size >= 24) {
+        // ELF64 symbol entry: 24 bytes each
+        size_t nsyms = sec.size / 24;
+        // Find .strtab for name lookup
+        uint32_t strtab_link = 0;
+        // Read sh_link from .symtab section header
+        for (const auto& s2 : elf_info.sections) {
+          if (s2.name == ".strtab" && s2.size > 0) {
+            for (size_t si = 0; si < nsyms && si < 200; si++) {
+              const uint8_t* sym = elf + sec.offset + si * 24;
+              uint32_t name_idx;
+              std::memcpy(&name_idx, sym, 4);
+              if (name_idx > 0 && name_idx < s2.size) {
+                const char* name = (const char*)(elf + s2.offset + name_idx);
+                uint64_t value;
+                std::memcpy(&value, sym + 8, 8);
+                if (strstr(name, ".num_vgpr") && value > num_vgprs12)
+                  num_vgprs12 = (uint32_t)value + 8;  // +8 padding above actual
+                if (strstr(name, ".num_sgpr") && value > num_sgprs12)
+                  num_sgprs12 = (uint32_t)value;  // exact count from symbol
+              }
+            }
+            break;
+          }
+        }
+        break;
+      }
+    }
+    // GFX12 RSRC1 VGPR field (granularity 8) may underreport actual usage.
+    // E.g., .num_vgpr=20 but RSRC1 encodes field=1→16.  Add 8 padding to
+    // ensure save registers are above the kernel's actual VGPR usage.
+    num_vgprs12 += 8u;
     uint32_t save_vgpr_x = num_vgprs12;       // first free VGPR index
     uint32_t save_vgpr_y = num_vgprs12 + 1u;  // second free VGPR index
     uint32_t cmpx_temp_sgpr = num_sgprs12;    // first free SGPR pair for v_cmpx temp
