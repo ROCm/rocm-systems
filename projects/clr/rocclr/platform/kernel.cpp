@@ -94,7 +94,8 @@ address KernelParameters::alloc(device::VirtualDevice& vDev) {
 // parameters have been set.
 static void captureMemObjs(address mem, const KernelSignature& signature, size_t memoryObjOffset) {
   amd::Memory** memories = reinterpret_cast<amd::Memory**>(mem + memoryObjOffset);
-  for (const KernelParameterDescriptor& desc : signature.params()) {
+  for (size_t idx = 0; idx < signature.numParameters(); ++idx) {
+    const KernelParameterDescriptor& desc = signature.params()[idx];
     if (desc.type_ != T_POINTER) continue;
 
     Memory* memArg = nullptr;
@@ -110,17 +111,21 @@ static void captureMemObjs(address mem, const KernelSignature& signature, size_t
 }
 
 bool KernelParameters::captureHIPArgs(address kernArgs, size_t kernArgsSize, address mem) {
-  assert(kernArgs && kernArgsSize && "kernArgs cannot be null when the size is non-zero");
+  assert(kernArgs || !kernArgsSize && "kernArgs cannot be null when the size is non-zero");
   assert(std::none_of(signature_.params().begin(), signature_.params().end(),
                       [](const KernelParameterDescriptor& desc) {
-                        return desc.type_ != T_SAMPLER && desc.type_ != T_QUEUE;
+                        return desc.type_ == T_SAMPLER || desc.type_ == T_QUEUE;
                       }) &&
          "Unexpected argument type for a HIP kernel");
 
   // Copy the arguments into the buffer allocated for the kernel parameters. Only copy as much as
   // the signature defines, even if the user passed more, to avoid out-of-bounds access in the case
   // where the user passed a size larger than what the kernel expects.
-  ::memcpy(mem, kernArgs, std::min(kernArgsSize, size_t{signature_.paramsSize()}));
+  size_t copySize = std::min(kernArgsSize, signature_.paramsSize());
+  ::memcpy(mem, kernArgs, copySize);
+
+  // Zero out any remaining space in the kernel parameter buffer that wasn't overwritten by the user arguments, to ensure deterministic behavior if the kernel reads from those bytes.
+  ::memset(mem + copySize, 0, signature_.paramsSize() - copySize);
 
   // After the parameters have been registered, go through and capture the memory objects.
   captureMemObjs(mem, signature_, memoryObjOffset());
