@@ -311,34 +311,38 @@ static BOOLEAN psp_is_sos_alive(struct WddmLiteDevice *dev)
 #define regMP1_SMN_C2PMSG_82    0x0292  /* Parameter register */
 #define regMP1_SMN_C2PMSG_90    0x029A  /* Response register */
 
-/* SMU v14 message IDs (from smu_v14_0_2.py) */
-#define PPSMC_MSG_GetSmuVersion             0x02
+/* SMU v14_0_2 message IDs (from smu_v14_0_2_ppsmc.h in Linux kernel).
+ * VERIFIED against codebrowser.dev/linux source — DO NOT guess IDs. */
+#define PPSMC_MSG_TestMessage                0x01
+#define PPSMC_MSG_GetSmuVersion              0x02
+#define PPSMC_MSG_GetDriverIfVersion         0x03
 #define PPSMC_MSG_SetAllowedFeaturesMaskLow  0x04
 #define PPSMC_MSG_SetAllowedFeaturesMaskHigh 0x05
-#define PPSMC_MSG_EnableAllSmuFeatures      0x06
-
-/* FEATURE_PWR_DOMAIN_e values (from smu14_driver_if_v14_0_2.h)
- * Used as parameter to PPSMC_MSG_EnableAllSmuFeatures.
- * The Linux driver sends FEATURE_PWR_GFX (4) to enable only the
- * GFX power domain, which avoids the hang seen with FEATURE_PWR_ALL (0)
- * on VFIO where S5/BACO/SOC power domains have unmet prerequisites.
- * Source: smu_v14_0_2_enable_gfx_features() in smu_v14_0_2_ppt.c */
-#define FEATURE_PWR_ALL    0  /* Enable all power domains (hangs on VFIO) */
-#define FEATURE_PWR_S5     1
-#define FEATURE_PWR_BACO   2
-#define FEATURE_PWR_SOC    3
-#define FEATURE_PWR_GFX    4  /* Enable GFX power domain only — use this */
-#define PPSMC_MSG_SetPptableAddrHigh         0x0C
-#define PPSMC_MSG_SetPptableAddrLow          0x0D
+#define PPSMC_MSG_EnableAllSmuFeatures       0x06
+#define PPSMC_MSG_DisableAllSmuFeatures      0x07
+#define PPSMC_MSG_EnableSmuFeaturesLow       0x08
+#define PPSMC_MSG_EnableSmuFeaturesHigh      0x09
+#define PPSMC_MSG_DisableSmuFeaturesLow      0x0A
+#define PPSMC_MSG_DisableSmuFeaturesHigh     0x0B
+#define PPSMC_MSG_GetRunningSmuFeaturesLow   0x0C
+#define PPSMC_MSG_GetRunningSmuFeaturesHigh  0x0D
 #define PPSMC_MSG_SetDriverDramAddrHigh      0x0E
 #define PPSMC_MSG_SetDriverDramAddrLow       0x0F
 #define PPSMC_MSG_SetToolsDramAddrHigh       0x10
 #define PPSMC_MSG_SetToolsDramAddrLow        0x11
+#define PPSMC_MSG_TransferTableSmu2Dram      0x12
+#define PPSMC_MSG_TransferTableDram2Smu      0x13
 #define PPSMC_MSG_UseDefaultPPTable          0x14
-#define PPSMC_MSG_GetEnabledSmuFeaturesLow   0x09
-#define PPSMC_MSG_GetEnabledSmuFeaturesHigh  0x0A
+#define PPSMC_MSG_RunDcBtc                   0x36
 #define PPSMC_MSG_AllowGfxOff                0x28
 #define PPSMC_MSG_DisallowGfxOff             0x29
+/* NOTE: Old defines GetEnabledSmuFeaturesLow=0x09/High=0x0A were WRONG.
+ * 0x09 = EnableSmuFeaturesHigh, 0x0A = DisableSmuFeaturesLow.
+ * Sending those "queries" was actually enabling/disabling features!
+ * Correct getter is GetRunningSmuFeaturesLow=0x0C/High=0x0D. */
+/* NOTE: Old defines SetPptableAddrHigh=0x0C/Low=0x0D were WRONG.
+ * 0x0C/0x0D are GetRunningSmuFeaturesLow/High.
+ * There is no SetPptableAddr in v14_0_2 — use TransferTable instead. */
 
 static ULONG mp1_rreg(struct WddmLiteDevice *dev, ULONG reg)
 {
@@ -358,6 +362,27 @@ static void mp1_wreg(struct WddmLiteDevice *dev, ULONG reg, ULONG val)
     }
     ULONG offset = (dev->hw.ip.mp1_base + reg) * 4;
     wddm_lite_write_reg32(dev, offset, val);
+}
+
+/* Direct MMIO write to MP1 register (bypasses SMN indirect).
+ *
+ * The SMU's internal interrupt that triggers message processing may only
+ * fire on direct MMIO writes to C2PMSG_66, not on SMN bus writes.
+ * The Linux driver uses WREG32_SOC15(MP1, ...) which is direct MMIO.
+ * Our mp1_wreg uses SMN indirect (RSMU_INDEX/DATA) which updates the
+ * register value but might not trigger the SMU's interrupt.
+ *
+ * Use this for C2PMSG_66 writes (the message trigger register). */
+static void mp1_wreg_direct(struct WddmLiteDevice *dev, ULONG reg, ULONG val)
+{
+    ULONG offset = (dev->hw.ip.mp1_base + reg) * 4;
+    wddm_lite_write_reg32(dev, offset, val);
+}
+
+static ULONG mp1_rreg_direct(struct WddmLiteDevice *dev, ULONG reg)
+{
+    ULONG offset = (dev->hw.ip.mp1_base + reg) * 4;
+    return wddm_lite_read_reg32(dev, offset);
 }
 
 
@@ -2474,6 +2499,44 @@ int gpu_psp_load_all_fw(struct WddmLiteDevice *dev, const char *fw_dir)
         return -1;
     }
 
+    /* === SMU liveness probe: BEFORE we touch the PSP ring ===
+     * Test if the VBIOS SMU is still monitoring the mailbox.
+     * If it fails here, the VBIOS SMU went to sleep after VBIOS completed
+     * and NOTHING we do (ring destroy, TOC, etc.) caused it. */
+    if (dev->hw.ip.mp1_base != 0) {
+        pr_info("psp_ring: === SMU PROBE: before PSP ring init ===\n");
+        ULONG p_msg = mp1_rreg_direct(dev, regMP1_SMN_C2PMSG_66);
+        ULONG p_resp = mp1_rreg_direct(dev, regMP1_SMN_C2PMSG_90);
+        pr_info("psp_ring: SMU state: C2PMSG_66=0x%08x C2PMSG_90=0x%08x\n",
+                p_msg, p_resp);
+
+        /* Clear and send DisallowGfxOff probe */
+        mp1_wreg_direct(dev, regMP1_SMN_C2PMSG_66, 0);
+        Sleep(1);
+        mp1_wreg_direct(dev, regMP1_SMN_C2PMSG_90, 0);
+        mp1_wreg_direct(dev, regMP1_SMN_C2PMSG_82, 0);
+        mp1_wreg_direct(dev, regMP1_SMN_C2PMSG_66, 0x29);  /* DisallowGfxOff */
+
+        DWORD probe_start = GetTickCount();
+        BOOLEAN probe_ok = FALSE;
+        for (;;) {
+            ULONG pr = mp1_rreg_direct(dev, regMP1_SMN_C2PMSG_90);
+            if (pr != 0) {
+                pr_info("psp_ring: SMU PROBE RESPONDED! resp=0x%x (%u ms) "
+                        "— SMU is ALIVE before PSP ring init\n",
+                        pr, (unsigned)(GetTickCount() - probe_start));
+                probe_ok = TRUE;
+                break;
+            }
+            if (GetTickCount() - probe_start >= 2000) break;
+            Sleep(10);
+        }
+        if (!probe_ok) {
+            pr_warn("psp_ring: SMU PROBE FAILED — SMU not responding BEFORE "
+                    "PSP ring init. VBIOS SMU went to sleep after VBIOS.\n");
+        }
+    }
+
     /* Initialize ring */
     ret = psp_ring_init(&ctx, dev);
     if (ret != 0)
@@ -4244,13 +4307,15 @@ int gpu_smu_send_msg(struct WddmLiteDevice *dev, ULONG msg, ULONG param)
     }
 
     /* Step 1: Clear response register */
-    mp1_wreg(dev, regMP1_SMN_C2PMSG_90, 0);
+    mp1_wreg_direct(dev, regMP1_SMN_C2PMSG_90, 0);
 
     /* Step 2: Write parameter */
-    mp1_wreg(dev, regMP1_SMN_C2PMSG_82, param);
+    mp1_wreg_direct(dev, regMP1_SMN_C2PMSG_82, param);
 
-    /* Step 3: Write message (triggers SMU processing) */
-    mp1_wreg(dev, regMP1_SMN_C2PMSG_66, msg);
+    /* Step 3: Write message via direct MMIO (triggers SMU interrupt).
+     * SMN indirect writes update the register but may not trigger the
+     * SMU's internal interrupt. Direct BAR0 MMIO does. */
+    mp1_wreg_direct(dev, regMP1_SMN_C2PMSG_66, msg);
 
     /* Step 4: Poll for response (up to 2 seconds wall clock) */
     {
@@ -4313,47 +4378,57 @@ int gpu_smu_enable_features(struct WddmLiteDevice *dev)
          * (PrepareMp1ForUnload or SoftFiniSmu) — do not confuse them. */
         pr_info("gpu_smu: sending DisallowGfxOff (0x%02x) to wake SMU from GFXOFF...\n",
                 PPSMC_MSG_DisallowGfxOff);
-        ULONG cur66 = mp1_rreg(dev, regMP1_SMN_C2PMSG_66);
-        ULONG cur90 = mp1_rreg(dev, regMP1_SMN_C2PMSG_90);
-        pr_info("gpu_smu: C2PMSG_66 before DisallowGfxOff = 0x%08x, C2PMSG_90 = 0x%08x\n",
-                cur66, cur90);
-        /* Wedge detection: if C2PMSG_66 has a pending message (non-zero) and
-         * C2PMSG_90 has no response (0), SMU is stuck processing the old message.
-         * This happens when a previous EnableAllSmuFeatures (0x06) hung and left
-         * the mailbox in a pending state. An OS reboot without physical power
-         * cut preserves this state. DisallowGfxOff and EnableAllSmuFeatures
-         * will not respond. Flag it and proceed — VRAM copy fallback will run. */
-        smu_wedged = (cur66 != 0) && (cur90 == 0);
-        if (smu_wedged) {
-            pr_warn("gpu_smu: SMU WEDGED — C2PMSG_66=0x%02x pending with no response "
-                    "(C2PMSG_90=0). Physical power cycle needed to clear.\n",
-                    cur66);
-            pr_warn("gpu_smu: Skipping DisallowGfxOff/EnableAllSmuFeatures waits.\n");
+        /* Read mailbox state via BOTH SMN indirect and direct MMIO */
+        ULONG cur66_smn = mp1_rreg(dev, regMP1_SMN_C2PMSG_66);
+        ULONG cur90_smn = mp1_rreg(dev, regMP1_SMN_C2PMSG_90);
+        ULONG cur66_dir = mp1_rreg_direct(dev, regMP1_SMN_C2PMSG_66);
+        ULONG cur90_dir = mp1_rreg_direct(dev, regMP1_SMN_C2PMSG_90);
+        pr_info("gpu_smu: mailbox state: SMN(msg=0x%08x resp=0x%08x) "
+                "DIRECT(msg=0x%08x resp=0x%08x)\n",
+                cur66_smn, cur90_smn, cur66_dir, cur90_dir);
+
+        /* If stale message in C2PMSG_66, clear it via direct MMIO.
+         * Previous runs using SMN indirect may have written to C2PMSG_66
+         * without triggering the SMU's interrupt, leaving a stale value. */
+        if (cur66_smn != 0 || cur66_dir != 0) {
+            pr_info("gpu_smu: clearing stale C2PMSG_66 (0x%02x) via direct MMIO\n",
+                    cur66_smn ? cur66_smn : cur66_dir);
+            mp1_wreg_direct(dev, regMP1_SMN_C2PMSG_66, 0);
+            mp1_wreg_direct(dev, regMP1_SMN_C2PMSG_90, 0);
+            Sleep(10);
         }
-        if (cur66 == PPSMC_MSG_DisallowGfxOff) {
-            mp1_wreg(dev, regMP1_SMN_C2PMSG_66, 0);
-            Sleep(1);
-        }
-        if (!smu_wedged) {
-            mp1_wreg(dev, regMP1_SMN_C2PMSG_90, 0);
-            mp1_wreg(dev, regMP1_SMN_C2PMSG_82, 0);
-            mp1_wreg(dev, regMP1_SMN_C2PMSG_66, PPSMC_MSG_DisallowGfxOff);
-            {
-                DWORD dgfx_start = GetTickCount();
-                for (;;) {
-                    ULONG resp = mp1_rreg(dev, regMP1_SMN_C2PMSG_90);
-                    if (resp != 0) {
-                        pr_info("gpu_smu: DisallowGfxOff responded (resp=0x%x, %u ms)\n",
-                                resp, (unsigned)(GetTickCount() - dgfx_start));
-                        break;
-                    }
-                    if (GetTickCount() - dgfx_start >= 2000) break;
-                    Sleep(10);
+
+        /* Send DisallowGfxOff via DIRECT MMIO (not SMN indirect).
+         * The SMU's internal interrupt that triggers message processing
+         * may only fire on direct BAR0 MMIO writes to C2PMSG_66.
+         * Linux uses WREG32_SOC15(MP1,...) which is direct MMIO. */
+        pr_info("gpu_smu: sending DisallowGfxOff via DIRECT MMIO "
+                "(mp1_base=0x%x, byte_offset=0x%x)\n",
+                dev->hw.ip.mp1_base,
+                (dev->hw.ip.mp1_base + regMP1_SMN_C2PMSG_66) * 4);
+        mp1_wreg_direct(dev, regMP1_SMN_C2PMSG_90, 0);
+        mp1_wreg_direct(dev, regMP1_SMN_C2PMSG_82, 0);
+        mp1_wreg_direct(dev, regMP1_SMN_C2PMSG_66, PPSMC_MSG_DisallowGfxOff);
+        {
+            DWORD dgfx_start = GetTickCount();
+            for (;;) {
+                /* Read response via BOTH paths */
+                ULONG resp_smn = mp1_rreg(dev, regMP1_SMN_C2PMSG_90);
+                ULONG resp_dir = mp1_rreg_direct(dev, regMP1_SMN_C2PMSG_90);
+                if (resp_smn != 0 || resp_dir != 0) {
+                    pr_info("gpu_smu: DisallowGfxOff responded! "
+                            "smn_resp=0x%x direct_resp=0x%x (%u ms)\n",
+                            resp_smn, resp_dir,
+                            (unsigned)(GetTickCount() - dgfx_start));
+                    break;
                 }
+                if (GetTickCount() - dgfx_start >= 3000) break;
+                Sleep(10);
             }
-            pr_info("gpu_smu: post-DisallowGfxOff: C2PMSG_90=0x%08x\n",
-                    mp1_rreg(dev, regMP1_SMN_C2PMSG_90));
         }
+        pr_info("gpu_smu: post-DisallowGfxOff: SMN_resp=0x%08x DIRECT_resp=0x%08x\n",
+                mp1_rreg(dev, regMP1_SMN_C2PMSG_90),
+                mp1_rreg_direct(dev, regMP1_SMN_C2PMSG_90));
     }
 
     /* Check if GFX power domain is already up (VBIOS-preserve mode).
@@ -4509,9 +4584,10 @@ int gpu_smu_enable_features(struct WddmLiteDevice *dev)
         }
     }
 
-    mp1_wreg(dev, regMP1_SMN_C2PMSG_90, 0);
-    mp1_wreg(dev, regMP1_SMN_C2PMSG_82, 0);
-    mp1_wreg(dev, regMP1_SMN_C2PMSG_66, PPSMC_MSG_GetSmuVersion);
+    /* Use direct MMIO — SMN indirect writes may not trigger SMU interrupt */
+    mp1_wreg_direct(dev, regMP1_SMN_C2PMSG_90, 0);
+    mp1_wreg_direct(dev, regMP1_SMN_C2PMSG_82, 0);
+    mp1_wreg_direct(dev, regMP1_SMN_C2PMSG_66, PPSMC_MSG_GetSmuVersion);
 
     {
         DWORD gsv_start = GetTickCount();
@@ -4579,11 +4655,45 @@ int gpu_smu_enable_features(struct WddmLiteDevice *dev)
                     c2p_0, c2p_33);
         }
 
-        /* NOTE: Do NOT use debug mailbox msg=2 here to "check" SMU.
-         * On MP0 >= v14, debug mailbox msg=2 is __DEBUGSMC_MSG_Mode1Reset,
-         * NOT GetSmuVersion! Sending it would trigger a full GPU reset.
-         * Mode1 reset should only be done intentionally via
-         * gpu_smu_mode1_reset() in the init sequence. */
+        /* Probe the DEBUG mailbox to check if SMU firmware is alive.
+         * Debug mailbox: C2PMSG_75 (msg), C2PMSG_53 (param), C2PMSG_54 (resp).
+         * msg=1 is believed to be __DEBUGSMC_MSG_GetSmuVersion (safe).
+         * msg=2 is __DEBUGSMC_MSG_Mode1Reset (DANGEROUS — do not use). */
+        {
+            pr_info("gpu_smu: === Probing DEBUG mailbox (msg=1) ===\n");
+            /* Use direct MMIO for debug mailbox too */
+            ULONG dbg_resp_before = mp1_rreg_direct(dev, 0x0276);  /* C2PMSG_54 */
+            pr_info("gpu_smu: debug resp before clear = 0x%08x\n", dbg_resp_before);
+
+            mp1_wreg_direct(dev, 0x0276, 0);  /* Clear debug response */
+            mp1_wreg_direct(dev, 0x0275, 0);  /* Clear debug param */
+            mp1_wreg_direct(dev, 0x028B, 1);  /* Send debug msg=1 (GetSmuVersion?) */
+
+            /* Also try SMN indirect for comparison */
+            mp1_wreg(dev, 0x0276, 0);   /* Clear via SMN */
+            mp1_wreg(dev, 0x0275, 0);
+            mp1_wreg(dev, 0x028B, 1);   /* Send via SMN */
+
+            DWORD dbg_start = GetTickCount();
+            for (;;) {
+                ULONG dr_smn = mp1_rreg(dev, 0x0276);
+                ULONG dr_dir = mp1_rreg_direct(dev, 0x0276);
+                if (dr_smn != 0 || dr_dir != 0) {
+                    ULONG dbg_param = mp1_rreg(dev, 0x0275);
+                    pr_info("gpu_smu: DEBUG mailbox responded! "
+                            "smn_resp=0x%x dir_resp=0x%x param=0x%08x (%u ms)\n",
+                            dr_smn, dr_dir, dbg_param,
+                            (unsigned)(GetTickCount() - dbg_start));
+                    alive = TRUE;  /* SMU is alive on debug channel */
+                    break;
+                }
+                if (GetTickCount() - dbg_start >= 3000) break;
+                Sleep(10);
+            }
+            if (!alive)
+                pr_warn("gpu_smu: DEBUG mailbox also not responding\n");
+        }
+
         pr_warn("gpu_smu: SMU not responding on normal mailbox — "
                 "will still attempt EnableAllSmuFeatures(FEATURE_PWR_GFX)\n");
         /* Fall through: try EnableAllSmuFeatures even without GetSmuVersion
@@ -4636,32 +4746,28 @@ int gpu_smu_enable_features(struct WddmLiteDevice *dev)
             pr_info("gpu_smu: SetToolsDramAddr OK (tools addr=0)\n");
     }
 
-    /* UseDefaultPPTable: tell SMU to use its built-in default power play table.
-     * Linux smu_v14_0_upload_pptable_settings() calls this when
-     * use_default_pp_table=true.  Without a pptable (from VBIOS or default),
-     * SMU has no voltage/frequency curves and cannot power up the GFX domain.
-     * EnableAllSmuFeatures WILL HANG if no pptable is loaded.
+    /* PPTable initialization.
      *
-     * We skip the VBIOS pptable extraction path (complex, requires atom decode)
-     * and use UseDefaultPPTable (0x14) as the simpler alternative. */
+     * UseDefaultPPTable (0x14) tells the SMU to activate its built-in pptable.
+     * The Linux driver does a combo pptable round-trip instead, but:
+     *   - TransferTableSmu2Dram(COMBO=15) fails (resp=0xFF) on our firmware
+     *   - TransferTableDram2Smu(0) fails (pptable data uninitialized)
+     * UseDefaultPPTable is the simplest path that works. */
     {
+        pr_info("gpu_smu: UseDefaultPPTable...\n");
         int ret = gpu_smu_send_msg(dev, PPSMC_MSG_UseDefaultPPTable, 0);
         if (ret == 0)
-            pr_info("gpu_smu: UseDefaultPPTable OK — SMU using built-in pptable\n");
+            pr_info("gpu_smu: UseDefaultPPTable OK\n");
         else
-            pr_warn("gpu_smu: UseDefaultPPTable failed (ret=%d) — "
-                    "EnableAllSmuFeatures may still hang\n", ret);
-        /* Re-check CPC after pptable load: occasionally powering the GFX domain
-         * completes as a side effect of pptable initialization */
-        if (dev->hw.ip.gc_base1 != 0) {
-            ULONG cpc_pp = gpu_smn_rreg(dev, dev->hw.ip.gc_base1 + 0x5c11);
-            pr_info("gpu_smu: CPC_PSP_DEBUG after UseDefaultPPTable = 0x%08x%s\n",
-                    cpc_pp, (cpc_pp != 0xffffffff) ? " (GFX UP!)" : "");
-            if (cpc_pp != 0xffffffff) {
-                dev->hw.gfxoff_disabled = TRUE;
-                return 0;
-            }
-        }
+            pr_warn("gpu_smu: UseDefaultPPTable failed\n");
+
+        /* RunDcBtc — DC Built-in Test Command */
+        pr_info("gpu_smu: RunDcBtc...\n");
+        ret = gpu_smu_send_msg(dev, PPSMC_MSG_RunDcBtc, 0);
+        if (ret == 0)
+            pr_info("gpu_smu: RunDcBtc OK\n");
+        else
+            pr_warn("gpu_smu: RunDcBtc failed — continuing\n");
     }
 
     /* Now try DisallowGfxOff (0x29) with pptable in place.
@@ -4702,8 +4808,10 @@ int gpu_smu_enable_features(struct WddmLiteDevice *dev)
      * have corresponding pptable entries.  With UseDefaultPPTable above, the
      * default pptable may enable more bits, but start minimal. */
     {
-        const ULONG low_mask  = 0x00000004;  /* FEATURE_DPM_GFX bit 2 only */
-        const ULONG high_mask = 0x00000000;
+        /* Linux driver sets ALL features allowed (smu_v14_0_2_init_allowed_features
+         * calls smu_feature_list_set_all). Match that. */
+        const ULONG low_mask  = 0xFFFFFFFF;
+        const ULONG high_mask = 0xFFFFFFFF;
         pr_info("gpu_smu: SetAllowedFeaturesMaskLow = 0x%08x, High = 0x%08x\n",
                 low_mask, high_mask);
         int ret = gpu_smu_send_msg(dev, PPSMC_MSG_SetAllowedFeaturesMaskLow, low_mask);
@@ -4718,32 +4826,34 @@ int gpu_smu_enable_features(struct WddmLiteDevice *dev)
             pr_info("gpu_smu: SetAllowedFeaturesMaskHigh OK\n");
     }
 
-    /* Query currently enabled SMU features for diagnostics */
+    /* Query currently running SMU features for diagnostics.
+     * CORRECTED: use GetRunningSmuFeaturesLow/High (0x0C/0x0D).
+     * Old code used 0x09/0x0A which were EnableSmuFeaturesHigh/DisableSmuFeaturesLow! */
     {
         int ret;
         ULONG features_lo = 0, features_hi = 0;
 
-        ret = gpu_smu_send_msg(dev, PPSMC_MSG_GetEnabledSmuFeaturesLow, 0);
+        ret = gpu_smu_send_msg(dev, PPSMC_MSG_GetRunningSmuFeaturesLow, 0);
         if (ret == 0) {
             features_lo = mp1_rreg(dev, regMP1_SMN_C2PMSG_82);
-            pr_info("gpu_smu: enabled features LOW  = 0x%08x\n", features_lo);
+            pr_info("gpu_smu: running features LOW  = 0x%08x\n", features_lo);
         } else {
-            pr_warn("gpu_smu: GetEnabledSmuFeaturesLow failed\n");
+            pr_warn("gpu_smu: GetRunningSmuFeaturesLow failed\n");
         }
 
-        ret = gpu_smu_send_msg(dev, PPSMC_MSG_GetEnabledSmuFeaturesHigh, 0);
+        ret = gpu_smu_send_msg(dev, PPSMC_MSG_GetRunningSmuFeaturesHigh, 0);
         if (ret == 0) {
             features_hi = mp1_rreg(dev, regMP1_SMN_C2PMSG_82);
-            pr_info("gpu_smu: enabled features HIGH = 0x%08x\n", features_hi);
+            pr_info("gpu_smu: running features HIGH = 0x%08x\n", features_hi);
         } else {
-            pr_warn("gpu_smu: GetEnabledSmuFeaturesHigh failed\n");
+            pr_warn("gpu_smu: GetRunningSmuFeaturesHigh failed\n");
         }
 
         if (features_lo != 0 || features_hi != 0) {
-            pr_info("gpu_smu: SMU features already enabled (0x%08x_%08x)\n",
+            pr_info("gpu_smu: SMU features already running (0x%08x_%08x)\n",
                     features_hi, features_lo);
         } else {
-            pr_info("gpu_smu: no SMU features enabled — EnableAllSmuFeatures needed\n");
+            pr_info("gpu_smu: no SMU features running — EnableAllSmuFeatures needed\n");
         }
     }
 
@@ -4784,9 +4894,15 @@ try_enable_smu_features:
      * (SMU performs the action but doesn't write the response register).
      * DO NOT check GC registers during this wait in Mode1-reset mode —
      * at ~80s the GFX domain power transition freezes SMN access. */
-    pr_info("gpu_smu: sending EnableAllSmuFeatures(FEATURE_PWR_GFX=4) "
-            "(cpc_was_powered=%d, timeout=%ds)...\n",
-            (int)cpc_was_powered, cpc_was_powered ? 30 : 120);
+    /* Linux sequence: EnableAllSmuFeatures with param=0 (enable ALL allowed features).
+     * The Linux driver (smu_v14_0_2_ppt.c) calls smu_system_features_control(true)
+     * which sends EnableAllSmuFeatures with param=0. The combo pptable embedded
+     * in the SMU firmware has the board-specific PMIC/I2C addresses.
+     *
+     * Previous attempts used param=FEATURE_PWR_GFX(4) which only enables GFX.
+     * The Linux driver enables ALL features at once. */
+    pr_info("gpu_smu: sending EnableAllSmuFeatures(param=0, ALL features) "
+            "(timeout=120s)...\n");
     {
         /* Edge-detection: clear message register if it already holds 0x06 */
         {
@@ -4797,13 +4913,13 @@ try_enable_smu_features:
                 Sleep(1);
             }
         }
-        mp1_wreg(dev, regMP1_SMN_C2PMSG_90, 0);
-        /* Linux uses FEATURE_PWR_GFX (4) not FEATURE_PWR_ALL (0). */
-        mp1_wreg(dev, regMP1_SMN_C2PMSG_82, FEATURE_PWR_GFX);
-        mp1_wreg(dev, regMP1_SMN_C2PMSG_66, PPSMC_MSG_EnableAllSmuFeatures);
+        mp1_wreg_direct(dev, regMP1_SMN_C2PMSG_90, 0);
+        /* param=0 = enable ALL allowed features (matches Linux driver) */
+        mp1_wreg_direct(dev, regMP1_SMN_C2PMSG_82, 0);
+        mp1_wreg_direct(dev, regMP1_SMN_C2PMSG_66, PPSMC_MSG_EnableAllSmuFeatures);
 
         BOOLEAN success = FALSE;
-        DWORD timeout_ms = cpc_was_powered ? 30000 : 120000;
+        DWORD timeout_ms = 120000;
         DWORD start_tick = GetTickCount();
         DWORD last_print_s = 0;
         for (;;) {
