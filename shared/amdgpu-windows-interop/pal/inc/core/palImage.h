@@ -1,7 +1,7 @@
 /*
  ***********************************************************************************************************************
  *
- *  Copyright (c) 2014-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+ *  Copyright (c) 2026 Advanced Micro Devices, Inc. All Rights Reserved.
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -331,15 +331,11 @@ struct ImageCreateInfo
     /// by client with @ref GpuMemoryCreateInfo::compression.
     CompressionMode compressionMode;
 
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 876
     /// Client compression is part of distributed compression (aka physical compression); it can only be enabled if
     /// physical compression is enabled.
     ///
     /// On Gfx12, controls (legacy FMask based) color fragment compression and Z plane compression.
     ClientCompressionMode clientCompressionMode; ///< Controls client compression behavior for this resource.
-#else
-    TriState              clientCompressionMode; ///< Controls client compression behavior for this resource.
-#endif
 
     uint32 maxBaseAlign;      ///< Maximum address alignment for this image or zero for an unbounded alignment.
     float  imageMemoryBudget; ///< The memoryBudget value used in SW addrlib to determine the minSizeBlk for textures.
@@ -692,16 +688,6 @@ struct SubresLayout
     Extent3d extentElements; ///< Unpadded extent of the subresource in elements.
     Extent3d paddedExtent;   ///< Extent of the subresource in elements, including all internal padding for this subresource.
 
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 912
-    /// Reports supported engines and usages for this subresource while it can remain in its optimal compression state.
-    /// Clients using CmdRelease()/CmdAcquire() without complete knowledge of the application's next usage during
-    /// CmdRelease() or its previous usage at CmdAcquire() can treat this layout as a performant target for an
-    /// intermediate state that will avoid unnecessary decompressions.
-    ///
-    /// This value is only valid if supportSplitReleaseAcquire is set in @ref DeviceProperties.
-    ImageLayout defaultGfxLayout;
-#endif
-
     SwizzledFormat planeFormat; ///< Swizzled format for plane. Planar resource like D32-S8
                                 /// will have different swizzled format per plane.
     SwizzleMode swizzleMode;    ///< Swizzle mode for plane, based on AddrSwizzleMode
@@ -718,7 +704,6 @@ struct SubresLayout
 ///         is always plane 0. If the format is @ref ChNumFormat::YV12 it has three planes where plane 1 is the
 ///         red-difference chrominance plane and plane 2 is the blue-difference chrominance plane. Otherwise, plane 1
 ///         interleaves blue-difference and red-difference chrominance values.
-#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 886
 struct SubresId
 {
     uint8  plane;      ///< Selects a data plane.
@@ -734,25 +719,6 @@ struct SubresRange
     uint8    numMips;      ///< Number of mip levels in the range.
     uint16   numSlices;    ///< Number of slices in the range.
 };
-
-#else
-struct SubresId
-{
-    uint32 plane;      ///< Selects a data plane.
-    uint32 mipLevel;   ///< Selects a mip level.
-    uint32 arraySlice; ///< Selects an array slice.
-};
-
-/// Defines a range of subresources.
-struct SubresRange
-{
-    SubresId startSubres;  ///< First subresource in the range.
-    uint32   numPlanes;    ///< Number of planes in the range.
-    uint32   numMips;      ///< Number of mip levels in the range.
-    uint32   numSlices;    ///< Number of slices in the range.
-};
-
-#endif
 
 /// A variant struct of MemoryImageCopyRegion
 /// Specifies parameters for a copy from CPU memory to Image.
