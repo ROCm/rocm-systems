@@ -4265,7 +4265,15 @@ amdsmi_status_t amdsmi_gpu_driver_reload(void) {
 
 amdsmi_status_t amdsmi_get_gpu_busy_percent(amdsmi_processor_handle processor_handle,
                                             uint32_t *gpu_busy_percent) {
-    return rsmi_wrapper(rsmi_dev_busy_percent_get, processor_handle, 0, gpu_busy_percent);
+    AMDSMI_CHECK_INIT();
+    if (gpu_busy_percent == nullptr) return AMDSMI_STATUS_INVAL;
+    auto *device = reinterpret_cast<Device *>(processor_handle);
+    if (device == nullptr) return AMDSMI_STATUS_INVAL;
+    GpuActivity activity{};
+    auto code = device->QueryGpuActivity(&activity);
+    if (code != ErrorCode::Success) return translateCodeToSmiStatus(code);
+    *gpu_busy_percent = activity.gfx_activity;
+    return AMDSMI_STATUS_SUCCESS;
 }
 
 amdsmi_status_t amdsmi_get_utilization_count(amdsmi_processor_handle processor_handle,
