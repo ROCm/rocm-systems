@@ -198,7 +198,6 @@ if(ROCPROFSYS_BUILD_FOR_THEROCK)
         "Install testing scripts and pytest package"
         FORCE
     )
-    set(ROCPROFSYS_USE_PYTESTS ON CACHE BOOL "Enable pytest suite" FORCE)
     # Lulesh does not build with TheRock
     if(NOT DEFINED ROCPROFSYS_DISABLE_EXAMPLES)
         set(ROCPROFSYS_DISABLE_EXAMPLES

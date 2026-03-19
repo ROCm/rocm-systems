@@ -140,8 +140,8 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         "--ctest-mode",
         action="store",
         default="off",
-        choices=("off", "generate", "run"),
-        help="CTest integration mode (developer flag): 'off' (default), 'generate', or 'run'",
+        choices=("off", "generate", "run", "cleanup"),
+        help="CTest integration mode (developer flag): 'off' (default), 'generate', 'run', or 'cleanup'",
     )
     group.addoption(
         "--ctest-output-path",
@@ -174,6 +174,10 @@ def pytest_configure(config: pytest.Config) -> None:
     """Register custom markers and configure pytest"""
 
     configure_mode(config)
+
+    if config.getoption("--ctest-mode", default="off") == "cleanup":
+        _run_cleanup(config)
+        pytest.exit(reason="Cleanup complete", returncode=0)
 
     if config.getoption("--show-config-only", default=False):
         pytest._config_ref = config
@@ -263,7 +267,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "nic",
     ]
 
-    # Informational markers, not used for test selection
+    # Informational markers, only used for test labeling
 
     config.addinivalue_line(
         "markers", "rocprofiler: mark test as using ROCProfiler counters"
@@ -334,9 +338,8 @@ def pytest_configure(config: pytest.Config) -> None:
 # Session start hooks
 # ----------------------------------------------------------------------------
 
-
+# TODO: Deprecate once TheRock switches to CTest and CTest based filtering
 def pytest_report_header(config) -> list[str]:
-    # TODO: Deprecate once TheRock switches to CTest and CTest based filtering
     if not config.getoption("--ci-mode", default=False):
         return []
     return _generate_rocprofsys_config_header(config)
@@ -437,8 +440,8 @@ def pytest_collection_modifyitems(config, items) -> None:
         _standardize_test_name(item, verbose=verbose)
 
         # Handle optional markers
+        # The general form is <name>_optional(...). If the condition is met, <name> marker is added
         if "mpi_optional" in item.keywords and mpi_available():
-            # Check if the target supports MPI, if so, add the mpi marker
             target = item.get_closest_marker("mpi_optional").args[0]
             try:
                 target_path = rocprof_config.get_target_executable(target)
@@ -474,7 +477,6 @@ def pytest_collection_modifyitems(config, items) -> None:
         return
 
     # TODO: Deprecate once TheRock switches to CTest and CTest based filtering
-    # TheRock specific
     if config.getoption("--ci-mode", default=False):
         selected_tests = []
         deselected_tests = []
@@ -680,13 +682,11 @@ def pytest_runtest_logreport(report):
 
 
 def pytest_sessionfinish(session, exitstatus):
-    """Code that runs after all tests complete
+    """Code that runs after tests complete
 
-    In CTest mode, map "all skipped" to exit code 77 so that CTest can
-    distinguish skipped from passed (via SKIP_RETURN_CODE 77).
+    In CTest mode, map "all skipped" to exit code SKIP_RETURN_CODE
+    so that CTest can distinguish skipped from passed (via SKIP_RETURN_CODE).
     """
-
-    # Skipped tests return exit code so that CTests knows to report them as skipped
     if (
         session.config.getoption("--ctest-mode", default="off") == "run"
         and exitstatus == 0
@@ -783,7 +783,6 @@ def _ctest_generate_tests(
 
     no_report_markers = {
         "parametrize",  # Ignored, except for "mode" parameter (instrumentation mode)
-        "run_if_gpu_category",  # Contains an expression that must be evaluated at runtime
         # Pytest built-in
         "usefixtures",
         "filterwarnings",
@@ -798,6 +797,8 @@ def _ctest_generate_tests(
         "no_docker",
         "oshrun_min_version",
         "rocm_min_version",
+        "run_if_gpu_category",
+        "preserve",
         # For CTests
         "timeout",
         "depends_on",
@@ -872,6 +873,8 @@ def _ctest_generate_tests(
         else:
             test_nodeid = Path(test_id).name
 
+        # Handle certain markers that affect how the CTest is configured
+
         labels: set[str] = set()
         depends_on: list[str] = []
         run_serial = False
@@ -892,6 +895,8 @@ def _ctest_generate_tests(
 
         if hasattr(item, "callspec") and "mode" in item.callspec.params:
             labels.add(str(item.callspec.params["mode"]))
+
+        # Translate pytest markers to CTest labels
 
         for marker in item.iter_markers():
             if marker.name in no_report_markers:
@@ -917,13 +922,14 @@ def _ctest_generate_tests(
             if py_ver is not None:
                 extra_args += f' "--python-versions={py_ver}"'
 
+        # Generate the CTest
+
         lines.append(
             f'add_test("{escaped_name}" "${{_ROCPROFSYS_EXE}}"'
             f' "${{_ROCPROFSYS_EXE_ARGS}}"'
             f' "${{_ROCPROFSYS_NODEID_PFX}}{escaped_nodeid}"'
             f"{extra_args} ${{_ROCPROFSYS_EXTRA_ARGS}})"
         )
-
         props = []
         if labels:
             props.append(f'    LABELS "{";".join(sorted(labels))}"')
@@ -939,20 +945,15 @@ def _ctest_generate_tests(
         lines.append(f'set_tests_properties("{escaped_name}" PROPERTIES')
         lines.extend(props)
         lines.append(f")")
-
         lines.append("")
 
-    # Generate a cleanup test that removes temp files created by rocprofiler-systems
-    tmp_patterns = _cleanup_temp_patterns()
-    find_args = " -o ".join(f"-name '{Path(p).name}'" for p in tmp_patterns)
-    find_cmd = (
-        f"find /tmp -maxdepth 1 -user $(whoami)"
-        f" \\\\( {find_args} \\\\)"
-        f" -delete 2>/dev/null || true"
+    # Generate a cleanup test that runs pytest --ctest-mode=cleanup
+    lines.append(
+        'add_test("RocprofilerSystems_test_cleanup" "${_ROCPROFSYS_EXE}"'
+        ' "${_ROCPROFSYS_EXE_ARGS}"'
+        ' "${_ROCPROFSYS_NODEID_PFX}" "--ctest-mode" "cleanup")'
     )
-    lines.append("# Cleanup temp files created by rocprofiler-systems tests")
-    lines.append(f'add_test("rocprofsys-cleanup-tmp-files" "sh" "-c" "{find_cmd}")')
-    lines.append('set_tests_properties("rocprofsys-cleanup-tmp-files" PROPERTIES')
+    lines.append('set_tests_properties("RocprofilerSystems_test_cleanup" PROPERTIES')
     lines.append('    FIXTURES_CLEANUP "rocprofsys-global-tmp-files"')
     lines.append('    LABELS "cleanup;global"')
     lines.append("    TIMEOUT 30")
@@ -1197,6 +1198,34 @@ def get_gpu_info() -> GPUInfo:
     return detect_gpu(rocprof_config.rocm_path)
 
 
+def _run_cleanup(config: pytest.Config) -> None:
+    """Run cleanup of temp files and optionally the test output directory."""
+    import glob
+    import getpass
+
+    # Clean up temp files
+    for pattern in _cleanup_temp_patterns():
+        for filepath in glob.glob(pattern):
+            try:
+                p = Path(filepath)
+                if p.is_file() and p.owner() == getpass.getuser():
+                    p.unlink()
+                    print(f"Removed: {filepath}")
+            except (OSError, KeyError):
+                pass
+
+    # Clean up test output directory if ROCPROFSYS_KEEP_TEST_OUTPUT=0
+    if os.environ.get("ROCPROFSYS_KEEP_TEST_OUTPUT", "1") == "0":
+        try:
+            rocprof_config = get_rocprof_config()
+            output_dir = rocprof_config.test_output_dir
+            if output_dir.exists():
+                shutil.rmtree(output_dir)
+                print(f"Removed test output directory: {output_dir}")
+        except Exception as e:
+            print(f"Warning: Could not clean test output directory: {e}")
+
+
 def _cleanup_temp_patterns() -> list[str]:
     """Return list of rocprofiler-systems temp file patterns to clean up."""
     tmpdir = os.environ.get("ROCPROFSYS_TMPDIR", os.environ.get("TMPDIR", "/tmp"))
@@ -1223,10 +1252,12 @@ def _cleanup_temp_patterns() -> list[str]:
     return patterns
 
 
-def _safe_remove_file(filepath: Path) -> None:
-    """Safely remove a file, ignoring errors."""
+def _safe_remove(filepath: Path) -> None:
+    """Safely remove a file or directory, ignoring errors."""
     try:
-        if filepath.is_file():
+        if filepath.is_dir():
+            shutil.rmtree(filepath)
+        elif filepath.is_file():
             filepath.unlink()
     except OSError:
         pass
@@ -1390,8 +1421,9 @@ def test_output_base(rocprof_config, request) -> Path:
     return output_dir
 
 
+# TODO: Deprecate once TheRock switches to CTest
 @pytest.fixture(scope="module", autouse=True)
-def cleanup_module_temp_files(rocprof_config, request: pytest.FixtureRequest):
+def cleanup_module_temp_files(request: pytest.FixtureRequest):
     """Module-scoped cleanup that runs AFTER each test module completes.
 
     Execution Order:
@@ -1410,16 +1442,10 @@ def cleanup_module_temp_files(rocprof_config, request: pytest.FixtureRequest):
 
     import glob
 
-    # Clean up instrumented binaries in build directory
-    for pattern in ["*.inst", "*.inst.orig"]:
-        for filepath in glob.glob(str(rocprof_config.rocprofsys_build_dir / pattern)):
-            _safe_remove_file(Path(filepath))
-
-    # TODO: Once ci-mode is removed, this should be removed
     if not request.config.getoption("--ctest-mode", default=False) == "run":
         for pattern in ["/tmp/buffered_storage*.bin", "/tmp/metadata*.json"]:
             for filepath in glob.glob(pattern):
-                _safe_remove_file(Path(filepath))
+                _safe_remove(Path(filepath))
 
 
 # ----------------------------------------------------------------------------
@@ -1519,17 +1545,28 @@ def test_output_dir(
     if output_dir.exists() and not any(output_dir.iterdir()):
         shutil.rmtree(output_dir)
 
-    # Cleanup on success unless ROCPROFSYS_KEEP_TEST_OUTPUT is set
     keep_output = os.environ.get("ROCPROFSYS_KEEP_TEST_OUTPUT", "1") == "1"
     test_failed = hasattr(request.node, "rep_call") and request.node.rep_call.failed
 
-    if not keep_output and not test_failed and output_dir.exists():
-        preserve_marker = request.node.get_closest_marker("preserve")
-        if preserve_marker and preserve_marker.args:
-            for fname in preserve_marker.args:
-                preserved = output_dir / fname
-                if preserved.exists():
-                    return
+    if keep_output or test_failed or not output_dir.exists():
+        return
+
+    # Remove all files in the output directory, then the directory itself
+    # unless the preserve marker is present
+
+    to_preserve = []
+    preserve_marker = request.node.get_closest_marker("preserve")
+    if preserve_marker and preserve_marker.args:
+        for fname in preserve_marker.args:
+            preserved = output_dir / fname
+            to_preserve.append(preserved)
+
+    for entry in output_dir.iterdir():
+        if entry not in to_preserve:
+            _safe_remove(entry)
+
+    # Remove the output directory if empty
+    if not any(output_dir.iterdir()):
         shutil.rmtree(output_dir)
 
 
@@ -1592,7 +1629,6 @@ def _is_assert_disabled(request: pytest.FixtureRequest, subtest_name: str) -> bo
 class RocprofsysTest:
     """Base class that auto-captures parametrized values and common fixtures onto self."""
 
-    # Capture common fixtures and parametrized values onto self
     @pytest.fixture(autouse=True)
     def _setup(
         self,

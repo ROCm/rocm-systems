@@ -5,23 +5,28 @@ if(NOT ROCPROFSYS_USE_PYTHON)
     rocprofiler_systems_message(FATAL_ERROR "CTest suite requires Python to be enabled")
 endif()
 
+# ---------------------------------------------------------------------------
 # Find pytest executable
+# ---------------------------------------------------------------------------
+
 set(_pytest_hints "")
-if(ROCPROFSYS_TEST_PYTHON_VERSIONS AND ROCPROFSYS_PYTHON_ROOT_DIRS)
+if(ROCPROFSYS_PYTHON_ROOT_DIRS)
     # When both ROCPROFSYS_PYTHON_VERSIONS and ROCPROFSYS_PYTHON_PREFIX are set,
     # ROCPROFSYS_PYTHON_ROOT_DIRS will contain the list of versioned python prefixes
-    foreach(_pyroot ${ROCPROFSYS_PYTHON_ROOT_DIRS})
-        foreach(_ver ${ROCPROFSYS_TEST_PYTHON_VERSIONS})
-            if(EXISTS "${_pyroot}/bin/python${_ver}")
-                list(APPEND _pytest_hints "${_pyroot}/bin")
-                break()
-            endif()
+    if(ROCPROFSYS_TEST_PYTHON_VERSIONS)
+        foreach(_pyroot ${ROCPROFSYS_PYTHON_ROOT_DIRS})
+            foreach(_ver ${ROCPROFSYS_TEST_PYTHON_VERSIONS})
+                if(EXISTS "${_pyroot}/bin/python${_ver}")
+                    list(APPEND _pytest_hints "${_pyroot}/bin")
+                    break()
+                endif()
+            endforeach()
         endforeach()
-    endforeach()
-elseif(ROCPROFSYS_PYTHON_ROOT_DIRS)
-    foreach(_pyroot ${ROCPROFSYS_PYTHON_ROOT_DIRS})
-        list(APPEND _pytest_hints "${_pyroot}/bin")
-    endforeach()
+    else()
+        foreach(_pyroot ${ROCPROFSYS_PYTHON_ROOT_DIRS})
+            list(APPEND _pytest_hints "${_pyroot}/bin")
+        endforeach()
+    endif()
 endif()
 
 find_program(PYTEST_EXECUTABLE NAMES pytest HINTS ${_pytest_hints})
@@ -34,7 +39,10 @@ if(NOT PYTEST_EXECUTABLE)
     )
 endif()
 
-# Ensure proper pytest version
+# ---------------------------------------------------------------------------
+# Enforce a minimum pytest version
+# ---------------------------------------------------------------------------
+
 execute_process(
     COMMAND "${PYTEST_EXECUTABLE}" --version
     OUTPUT_VARIABLE _version
@@ -71,7 +79,9 @@ if(PYTEST_VERSION VERSION_LESS "${PYTEST_MIN_VERSION}")
     )
 endif()
 
+# ---------------------------------------------------------------------------
 # Configure test marker and keyword inclusions/exclusions
+# ---------------------------------------------------------------------------
 
 set(_ROCPROFSYS_PYTEST_TEST_MARKERS "")
 set(_ROCPROFSYS_PYTEST_TEST_KEYWORDS "")
@@ -114,7 +124,7 @@ endif()
 # Dependencies
 # ---------------------------------------------------------------------------
 
-# Pytest config requires that the base executables be found
+# Pytest config has a hard dependency on the base executables
 set(PYTEST_DEPENDENCIES
     copy-pytest-files
     rocprofiler-systems-instrument
@@ -123,21 +133,10 @@ set(PYTEST_DEPENDENCIES
     rocprofiler-systems-causal
     rocprofiler-systems-avail
 )
-
-# Python versioned tests look for the versioned libpyrocprofsys to be found
+# Versioned python tests require a matching version of libpyrocprofsys
 if(TARGET libpyrocprofsys)
     list(APPEND PYTEST_DEPENDENCIES libpyrocprofsys)
 endif()
-
-# Filter out targets that don't exist (e.g. when certain components are disabled)
-set(_valid_deps "")
-foreach(_dep ${PYTEST_DEPENDENCIES})
-    if(TARGET ${_dep})
-        list(APPEND _valid_deps ${_dep})
-    else()
-        rocprofiler_systems_message(STATUS "Pytest dependency target '${_dep}' not found, skipping")
-    endif()
-endforeach()
 
 # ---------------------------------------------------------------------------
 # Build the pytest arguments
@@ -159,13 +158,13 @@ set(_generate_args
     no:cacheprovider
 )
 
-# Note: ROCPROFSYS_PYTHON_VERSIONS will inherit the value of ROCPROFSYS_PYTHON_VERSION
-if(ROCPROFSYS_PYTHON_VERSIONS AND NOT ROCPROFSYS_TEST_PYTHON_VERSIONS)
-    list(JOIN ROCPROFSYS_PYTHON_VERSIONS "\\;" _py_versions_escaped)
-    list(APPEND _generate_args "--python-versions=${_py_versions_escaped}")
-elseif(ROCPROFSYS_TEST_PYTHON_VERSIONS)
+if(ROCPROFSYS_TEST_PYTHON_VERSIONS)
     # Rhel 8.10 has python 3.6 by default, which we need to exclude
     list(JOIN ROCPROFSYS_TEST_PYTHON_VERSIONS "\\;" _py_versions_escaped)
+    list(APPEND _generate_args "--python-versions=${_py_versions_escaped}")
+elseif(ROCPROFSYS_PYTHON_VERSIONS)
+    # ROCPROFSYS_PYTHON_VERSIONS inherits the value of ROCPROFSYS_PYTHON_VERSION
+    list(JOIN ROCPROFSYS_PYTHON_VERSIONS "\\;" _py_versions_escaped)
     list(APPEND _generate_args "--python-versions=${_py_versions_escaped}")
 endif()
 
@@ -188,7 +187,10 @@ endif()
 add_custom_command(
     OUTPUT "${ROCPROFSYS_PYTEST_CTEST_FILE}"
     COMMAND ${CMAKE_COMMAND} -E env PYTHONDONTWRITEBYTECODE=1 ${_generate_args}
-    DEPENDS ${_valid_deps} ${ROCPROFSYS_PYTEST_PACKAGE_FILES} ${ROCPROFSYS_PYTEST_FILES}
+    DEPENDS
+        ${PYTEST_DEPENDENCIES}
+        ${ROCPROFSYS_PYTEST_PACKAGE_FILES}
+        ${ROCPROFSYS_PYTEST_FILES}
     WORKING_DIRECTORY "${ROCPROFSYS_PYTEST_BUILD_DIR}"
     COMMENT "Generating CTest definitions from pytest suite"
     VERBATIM

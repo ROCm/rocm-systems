@@ -43,6 +43,7 @@ class TestAttach(RocprofsysTest):
         r"Dyninst was unable to attach to the specified process",
     ]
 
+    @pytest.mark.runtime_instrument
     def test_parallel_overhead(self, attach_env, rocprof_config):
         script_path = rocprof_config.rocprofsys_tests_dir / "run-rocprof-sys-pid.sh"
         if not script_path.exists():

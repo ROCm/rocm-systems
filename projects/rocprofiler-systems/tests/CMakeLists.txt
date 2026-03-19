@@ -41,6 +41,7 @@ endif()
 # ------------------------------------------------------------------------------#
 
 set(ROCPROFSYS_PYTHON_VALIDATION_FILES
+    ${CMAKE_CURRENT_LIST_DIR}/amd_smi_data_parse.py
     ${CMAKE_CURRENT_LIST_DIR}/validate-causal-json.py
     ${CMAKE_CURRENT_LIST_DIR}/validate-perfetto-proto.py
     ${CMAKE_CURRENT_LIST_DIR}/validate-rocpd.py
@@ -51,7 +52,6 @@ set(ROCPROFSYS_TEST_SCRIPTS
     ${CMAKE_CURRENT_LIST_DIR}/run-rocprof-sys-pid.sh
     ${CMAKE_CURRENT_LIST_DIR}/get_default_nic.sh
     ${CMAKE_CURRENT_LIST_DIR}/generate_papi_nic_events.sh
-    ${CMAKE_CURRENT_LIST_DIR}/amd_smi_data_parse.py
 )
 
 add_custom_target(
@@ -63,7 +63,9 @@ add_custom_target(
     COMMAND
         ${CMAKE_COMMAND} -E copy_if_different ${ROCPROFSYS_PYTHON_VALIDATION_FILES}
         ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests
-    # copy_directory for directories (copy_if_different only works for files)
+    COMMAND
+        ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_LIST_DIR}/README.md
+        ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests
     COMMAND
         ${CMAKE_COMMAND} -E copy_directory
         ${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules
@@ -98,7 +100,7 @@ if(ROCPROFSYS_INSTALL_TESTING)
         COMPONENT rocprofiler-systems-tests
     )
     # Capability check binary
-    if(ROCPROFSYS_USE_PYTESTS AND EXISTS "${_capchk_exe}")
+    if(EXISTS "${_capchk_exe}")
         install(
             PROGRAMS ${_capchk_exe}
             DESTINATION share/rocprofiler-systems/tests

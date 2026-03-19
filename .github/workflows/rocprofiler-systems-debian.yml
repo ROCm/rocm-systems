@@ -64,6 +64,7 @@ jobs:
       OMPI_ALLOW_RUN_AS_ROOT_CONFIRM: 1
       ROCPROFSYS_CI: 'ON'
       ROCPROFSYS_MAX_THREADS: '64'
+      ROCPROFSYS_KEEP_TEST_OUTPUT: 0
 
     steps:
     - uses: actions/checkout@v4

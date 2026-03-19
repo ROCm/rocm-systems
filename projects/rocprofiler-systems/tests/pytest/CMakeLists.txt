@@ -41,9 +41,6 @@ add_custom_target(
     COMMAND
         ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/requirements.txt
         ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests/
-    COMMAND
-        ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_LIST_DIR}/README.md
-        ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests/
     COMMENT "Copying pytest files to build directory"
 )
 
