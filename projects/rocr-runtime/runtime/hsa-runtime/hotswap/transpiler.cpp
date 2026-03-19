@@ -1020,7 +1020,8 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
                                                const std::string& source_cpu,
                                                const std::string& target_cpu,
                                                int scale_temp_vgpr = 7,
-                                               int cmpx_temp_sgpr = 16) {
+                                               int cmpx_temp_sgpr = 16,
+                                               bool compact_mode = false) {
   std::vector<std::string> result;
 
   std::string line = asm_line;
@@ -1476,8 +1477,8 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
 
       // Recursively translate each half so mnemonic renames and other
       // fixups (constant bus, vcc widening, etc.) apply to both halves.
-      auto r1 = TranslateInstruction(first_half, source_cpu, target_cpu, scale_temp_vgpr, cmpx_temp_sgpr);
-      auto r2 = TranslateInstruction(second_half, source_cpu, target_cpu, scale_temp_vgpr, cmpx_temp_sgpr);
+      auto r1 = TranslateInstruction(first_half, source_cpu, target_cpu, scale_temp_vgpr, cmpx_temp_sgpr, compact_mode);
+      auto r2 = TranslateInstruction(second_half, source_cpu, target_cpu, scale_temp_vgpr, cmpx_temp_sgpr, compact_mode);
       result.insert(result.end(), r1.begin(), r1.end());
       result.insert(result.end(), r2.begin(), r2.end());
       return result;
@@ -2402,13 +2403,18 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
           std::string save_reg = "v" + std::to_string(scale_temp_vgpr);
           line = mnemonic + " " + pair + rest;
           if (reg_num == even) {
-            // Even dest: save s[odd], v_cmp, restore s[odd]
-            std::string s_odd = "s" + std::to_string(odd);
-            result.push_back("v_mov_b32_e32 " + save_reg + ", " + s_odd);
-            result.push_back(line);
-            result.push_back("v_readfirstlane_b32 " + s_odd + ", " + save_reg);
+            if (compact_mode) {
+              // Skip save/restore for even dest in compact mode (code size)
+              result.push_back(line);
+            } else {
+              // Even dest: save s[odd], v_cmp, restore s[odd]
+              std::string s_odd = "s" + std::to_string(odd);
+              result.push_back("v_mov_b32_e32 " + save_reg + ", " + s_odd);
+              result.push_back(line);
+              result.push_back("v_readfirstlane_b32 " + s_odd + ", " + save_reg);
+            }
           } else {
-            // Odd dest: save s[even], v_cmp, copy result to sN, restore s[even]
+            // Odd dest: result in s[even], code reads s[odd]. MUST copy.
             std::string s_even = "s" + std::to_string(even);
             std::string s_orig = "s" + std::to_string(reg_num);
             result.push_back("v_mov_b32_e32 " + save_reg + ", " + s_even);
@@ -3189,8 +3195,12 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
 
       // scale_temp_vgpr: use num_vgprs12+2 (above save registers sv_x, sv_y)
       // cmpx_temp_sgpr: use num_sgprs12 (above kernel's SGPR allocation)
+      // compact_mode: skip even-dest v_cmp save/restore for large kernels
+      // that would overflow .text (the clobber is usually harmless)
+      bool compact = (source_lines.size() > 400);
       auto translated_lines = TranslateInstruction(line, src_cpu, tgt_cpu,
-                                                    save_vgpr_y + 1, cmpx_temp_sgpr);
+                                                    save_vgpr_y + 1, cmpx_temp_sgpr,
+                                                    compact);
 
       // Post-process: replace branch offsets with labels (using actual PC offsets)
       if (ii < source_instrs.size() && !branch_labels.empty()) {
