@@ -1201,11 +1201,11 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
     return result;  // skip any remaining TTMP references
   }
 
-  // Fix s_cbranch_execz: replace hardcoded offset with .L_exit label
-  if (mnemonic == "s_cbranch_execz") {
-    result.push_back("s_cbranch_execz .L_exit");
-    return result;
-  }
+  // s_cbranch_execz: let it fall through to the normal branch-label resolution
+  // below, which converts the numeric offset to the correct target label.
+  // Do NOT hardcode .L_exit — that kills kernels with complex control flow
+  // (e.g., saveexec masking in softmax where exec=0 means "skip section",
+  // not "exit kernel").
 
   // s_code_end → s_nop 0 (GFX12 padding, not available on GFX9)
   if (mnemonic == "s_code_end") {
@@ -2395,16 +2395,33 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
           std::string pair = "s[" + std::to_string(even) + ":" +
                             std::to_string(odd) + "]";
           std::string rest = trimmed.substr(comma);
-          // Save s[odd] before the v_cmp (it will be clobbered by wave64 result)
-          std::string s_odd = "s" + std::to_string(odd);
-          result.push_back("v_mov_b32_e32 v6, " + s_odd);
+          // Wave32→wave64 widening: v_cmp sN → s[even:odd].
+          // GFX9 requires even-aligned SGPR pairs, so even = N & ~1.
+          // The result for active threads (0-31) goes into s[even].
+          // The code reads sN (the original GFX12 dest).
+          //
+          // For even N: result in sN = s[even]. Code reads sN. ✓
+          //   Save s[odd], v_cmp, restore s[odd].
+          //
+          // For odd N: result in s[even] = s[N-1]. Code reads sN = s[odd]. ✗
+          //   Save s[even], v_cmp, copy s[even]→sN, restore s[even].
+          std::string save_reg = "v" + std::to_string(scale_temp_vgpr);
           line = mnemonic + " " + pair + rest;
-          // After the v_cmp completes (via fall-through below), restore s[odd].
-          // We append to result after the main instruction emission below.
-          // Use a flag to signal the post-v_cmp restore.
-          // Actually, just emit the v_cmp + restore here and return.
-          result.push_back(line);
-          result.push_back("v_readfirstlane_b32 " + s_odd + ", v6");
+          if (reg_num == even) {
+            // Even dest: save s[odd], v_cmp, restore s[odd]
+            std::string s_odd = "s" + std::to_string(odd);
+            result.push_back("v_mov_b32_e32 " + save_reg + ", " + s_odd);
+            result.push_back(line);
+            result.push_back("v_readfirstlane_b32 " + s_odd + ", " + save_reg);
+          } else {
+            // Odd dest: save s[even], v_cmp, copy result to sN, restore s[even]
+            std::string s_even = "s" + std::to_string(even);
+            std::string s_orig = "s" + std::to_string(reg_num);
+            result.push_back("v_mov_b32_e32 " + save_reg + ", " + s_even);
+            result.push_back(line);
+            result.push_back("s_mov_b32 " + s_orig + ", " + s_even);
+            result.push_back("v_readfirstlane_b32 " + s_even + ", " + save_reg);
+          }
           // Handle large literals too
           size_t last_comma = line.rfind(',');
           if (last_comma != std::string::npos) {
@@ -3035,8 +3052,7 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
       std::string m = ExtractMnemonic(info.text);
       bool is_branch = (m.find("s_branch") == 0 || m.find("s_cbranch_") == 0);
       if (!is_branch) continue;
-      // s_cbranch_execz is handled by .L_exit in TranslateInstruction
-      if (m == "s_cbranch_execz") continue;
+      // s_cbranch_execz now goes through normal branch resolution (not .L_exit)
 
       // Extract the immediate offset
       std::string ops = info.text.substr(info.text.find(m) + m.size());
@@ -3161,7 +3177,7 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
         for (auto& t : translated_lines) {
           std::string tm = ExtractMnemonic(t);
           if (tm.find("s_branch") == 0 || tm.find("s_cbranch_") == 0) {
-            if (tm == "s_cbranch_execz") continue;  // handled by .L_exit
+            // s_cbranch_execz now goes through normal branch resolution
             size_t op_pos = t.find(tm) + tm.size();
             std::string ops = t.substr(op_pos);
             size_t s = ops.find_first_not_of(" \t");
