@@ -1422,46 +1422,24 @@ amdsmi_get_gpu_board_info(amdsmi_processor_handle processor_handle, amdsmi_board
 amdsmi_status_t amdsmi_get_gpu_cache_info(
       amdsmi_processor_handle processor_handle, amdsmi_gpu_cache_info_t *info) {
     AMDSMI_CHECK_INIT();
-    if (info == nullptr) {
-        return AMDSMI_STATUS_INVAL;
+    if (info == nullptr) return AMDSMI_STATUS_INVAL;
+
+    auto *device = reinterpret_cast<Device *>(processor_handle);
+    if (device == nullptr) return AMDSMI_STATUS_INVAL;
+
+    CacheInfo ci{};
+    auto code = device->QueryCacheInfo(&ci);
+    if (code != ErrorCode::Success) return translateCodeToSmiStatus(code);
+
+    memset(info, 0, sizeof(*info));
+    info->num_cache_types = ci.num_cache_types;
+    for (uint32_t i = 0; i < ci.num_cache_types; ++i) {
+        info->cache[i].cache_size       = ci.cache[i].cache_size_kb;
+        info->cache[i].cache_level      = ci.cache[i].cache_level;
+        info->cache[i].cache_properties = ci.cache[i].cache_properties;
+        info->cache[i].max_num_cu_shared   = ci.cache[i].max_num_cu_shared;
+        info->cache[i].num_cache_instance  = ci.cache[i].num_cache_instance;
     }
-
-    amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
-    amdsmi_status_t status = get_gpu_device_from_handle(
-                        processor_handle, &gpu_device);
-    if (status != AMDSMI_STATUS_SUCCESS)
-        return status;
-
-    rsmi_gpu_cache_info_t rsmi_info;
-    status = rsmi_wrapper(rsmi_dev_cache_info_get, processor_handle, 0,
-                          &rsmi_info);
-    if (status != AMDSMI_STATUS_SUCCESS)
-        return status;
-    // Sysfs cache type
-    #define  HSA_CACHE_TYPE_DATA     0x00000001
-    #define  HSA_CACHE_TYPE_INSTRUCTION  0x00000002
-    #define  HSA_CACHE_TYPE_CPU      0x00000004
-    #define  HSA_CACHE_TYPE_HSACU    0x00000008
-
-    info->num_cache_types = rsmi_info.num_cache_types;
-    for (unsigned int i =0; i < rsmi_info.num_cache_types; i++) {
-        // convert from sysfs type to CRAT type(HSA Cache Affinity type)
-        info->cache[i].cache_properties = 0;
-        if (rsmi_info.cache[i].flags & HSA_CACHE_TYPE_DATA)
-            info->cache[i].cache_properties |= AMDSMI_CACHE_PROPERTY_DATA_CACHE;
-        if (rsmi_info.cache[i].flags & HSA_CACHE_TYPE_INSTRUCTION)
-            info->cache[i].cache_properties |= AMDSMI_CACHE_PROPERTY_INST_CACHE;
-        if (rsmi_info.cache[i].flags & HSA_CACHE_TYPE_CPU)
-            info->cache[i].cache_properties |= AMDSMI_CACHE_PROPERTY_CPU_CACHE;
-        if (rsmi_info.cache[i].flags & HSA_CACHE_TYPE_HSACU)
-            info->cache[i].cache_properties |= AMDSMI_CACHE_PROPERTY_SIMD_CACHE;
-
-        info->cache[i].cache_size = rsmi_info.cache[i].cache_size_kb;
-        info->cache[i].cache_level = rsmi_info.cache[i].cache_level;
-        info->cache[i].max_num_cu_shared = rsmi_info.cache[i].max_num_cu_shared;
-        info->cache[i].num_cache_instance = rsmi_info.cache[i].num_cache_instance;
-    }
-
     return AMDSMI_STATUS_SUCCESS;
 }
 
