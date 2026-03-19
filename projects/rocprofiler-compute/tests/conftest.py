@@ -170,12 +170,15 @@ def binary_handler_profile_rocprof_compute(request):
 
             # Wrap with mpirun if num_ranks > 1
             if num_ranks > 1:
-                command_rocprof_compute = [
-                    "mpirun",
-                    "--allow-run-as-root",
-                    "-n",
-                    str(num_ranks),
-                ] + command_rocprof_compute
+                mpirun_cmd = ["mpirun"]
+                # Add --allow-run-as-root only when running as root
+                # (needed for OpenMPI in containers)
+                # This flag is OpenMPI-specific and would cause errors
+                # with other MPI implementations
+                if os.geteuid() == 0:
+                    mpirun_cmd.append("--allow-run-as-root")
+                mpirun_cmd.extend(["-n", str(num_ranks)])
+                command_rocprof_compute = mpirun_cmd + command_rocprof_compute
 
             process = subprocess.run(
                 command_rocprof_compute,
@@ -235,12 +238,15 @@ def binary_handler_profile_rocprof_compute(request):
             if num_ranks > 1:
                 # Use rocprof_compute_script_path instead of rocprof-compute
                 command_rocprof_compute[0] = rocprof_compute_script_path
-                command_rocprof_compute = [
-                    "mpirun",
-                    "--allow-run-as-root",
-                    "-n",
-                    str(num_ranks),
-                ] + command_rocprof_compute
+                mpirun_cmd = ["mpirun"]
+                # Add --allow-run-as-root only when running as root
+                # (needed for OpenMPI in containers)
+                # This flag is OpenMPI-specific and would cause errors
+                # with other MPI implementations
+                if os.geteuid() == 0:
+                    mpirun_cmd.append("--allow-run-as-root")
+                mpirun_cmd.extend(["-n", str(num_ranks)])
+                command_rocprof_compute = mpirun_cmd + command_rocprof_compute
 
             # For capture_output or multi-rank, run the command with subprocess
             if capture_output or num_ranks > 1:
