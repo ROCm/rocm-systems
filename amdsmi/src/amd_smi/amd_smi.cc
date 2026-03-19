@@ -4256,15 +4256,15 @@ amdsmi_status_t amdsmi_get_gpu_pci_throughput(
 
 amdsmi_status_t  amdsmi_get_gpu_od_volt_info(amdsmi_processor_handle processor_handle,
                                             amdsmi_od_volt_freq_data_t *odv) {
-    return rsmi_wrapper(rsmi_dev_od_volt_info_get, processor_handle, 0,
-                    reinterpret_cast<rsmi_od_volt_freq_data_t*>(odv));
+    // OD voltage curve requires sysfs pp_od_clk_voltage, not available on WSL2
+    return AMDSMI_STATUS_NOT_SUPPORTED;
 }
 
 amdsmi_status_t  amdsmi_get_gpu_od_volt_curve_regions(
                     amdsmi_processor_handle processor_handle,
                     uint32_t *num_regions, amdsmi_freq_volt_region_t *buffer) {
-    return rsmi_wrapper(rsmi_dev_od_volt_curve_regions_get, processor_handle, 0,
-        num_regions, reinterpret_cast<rsmi_freq_volt_region_t* >(buffer));
+    // OD voltage curve requires sysfs pp_od_clk_voltage, not available on WSL2
+    return AMDSMI_STATUS_NOT_SUPPORTED;
 }
 
 amdsmi_status_t  amdsmi_get_gpu_volt_metric(amdsmi_processor_handle processor_handle,
