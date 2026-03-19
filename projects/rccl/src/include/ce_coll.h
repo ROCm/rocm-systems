@@ -25,6 +25,9 @@ struct ncclCeColl {
   uint32_t intraBatchSyncFreq;
   uint64_t intraBatchSyncMsgThreshold;
   struct ncclDevrWindow* ceSyncWin;
+  bool useBatchMemcpy;
+  int numStreams;
+  cudaStream_t* streams;
 };
 
 struct ncclCeInitTask {
@@ -49,7 +52,7 @@ struct ncclCeBatchOpsParams {
   size_t* sizes;
   size_t numOps;
   bool intraBatchSync;
-#if CUDART_VERSION >= 12080
+#ifdef RCCL_ENABLE_BATCH_MEMCPY
   cudaMemcpyAttributes* attrs;
   size_t* attrIdxs;
   size_t numAttrs;
