@@ -25,7 +25,7 @@
 #include "ce_coll.h"
 #include "nvtx.h"
 #include "scheduler.h"
-#include "common.h"
+#include "device_kernel_decls.h"
 #include "api_trace.h"
 #include "rccl_common.h"
 

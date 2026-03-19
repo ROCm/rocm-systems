@@ -1,0 +1,19 @@
+#ifndef NCCL_DEVICE_KERNEL_DECLS_H_
+#define NCCL_DEVICE_KERNEL_DECLS_H_
+
+#include "device.h"
+
+#ifndef NCCL_GRID_CONSTANT
+#define NCCL_GRID_CONSTANT
+#endif
+
+__global__ void ncclDevKernel_Generic_1(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
+__global__ void ncclDevKernel_Generic_2(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
+__global__ void ncclDevKernel_Generic_4(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
+#ifdef ENABLE_COLLTRACE
+__global__ void ncclDevKernelDebug_Generic_1(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
+__global__ void ncclDevKernelDebug_Generic_2(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
+__global__ void ncclDevKernelDebug_Generic_4(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
+#endif
+
+#endif
