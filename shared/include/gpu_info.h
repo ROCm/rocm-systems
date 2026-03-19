@@ -156,6 +156,20 @@ struct GpuMetricsInfo {
   uint32_t voltage_mem;            // MEM_VOLTAGE sensor
 };
 
+// GPU cache information sourced from KMD adapter info (GFX9_FAMILY.Features2).
+struct CacheEntry {
+  uint32_t cache_size_kb;      // size in KB
+  uint32_t cache_level;        // 1, 2, or 3
+  uint32_t cache_properties;   // bitmask (data/instruction/etc.)
+  uint32_t max_num_cu_shared;  // 0 = unknown
+  uint32_t num_cache_instance; // 0 = unknown
+};
+
+struct CacheInfo {
+  uint32_t   num_cache_types;
+  CacheEntry cache[10];  // up to 10 entries (L1-inst, L2, L3)
+};
+
 // ASIC static information sourced from KMD adapter info.
 struct AsicInfo {
   uint64_t device_id;          // PCI device ID

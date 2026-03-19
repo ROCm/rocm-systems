@@ -37,6 +37,8 @@ public:
 
   ErrorCode QueryAsicInfo(AsicInfo *info) const;
 
+  ErrorCode QueryCacheInfo(CacheInfo *info) const;
+
   ErrorCode QueryVBiosInfo(VBiosInfo *info) const;
 
   // Called once after creation to pre-fetch sensor limits.

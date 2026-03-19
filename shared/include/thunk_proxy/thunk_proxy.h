@@ -222,6 +222,9 @@ public:
   // Query static ASIC information from KMD adapter info.
   ErrorCode QueryAsicInfo(wsl::thunk::AsicInfo *info) const;
 
+  // Query cache sizes from KMD adapter info.
+  ErrorCode QueryCacheInfo(wsl::thunk::CacheInfo *info) const;
+
   // Query RAS feature flags via KMD escape.
   ErrorCode QueryRasFeature(wsl::thunk::RasFeature *info) const;
 

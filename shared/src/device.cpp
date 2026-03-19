@@ -58,6 +58,10 @@ ErrorCode Device::QueryAsicInfo(AsicInfo *info) const {
   return device_ctx_->QueryAsicInfo(info);
 }
 
+ErrorCode Device::QueryCacheInfo(CacheInfo *info) const {
+  return device_ctx_->QueryCacheInfo(info);
+}
+
 ErrorCode Device::QueryVBiosInfo(VBiosInfo *info) const {
   return device_ctx_->QueryVBiosInfo(info);
 }
