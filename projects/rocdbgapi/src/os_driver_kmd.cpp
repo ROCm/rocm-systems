@@ -23,6 +23,12 @@
 #include "os_driver.h"
 #include "utils_windows.h"
 
+/* Make sure windows.h doesn't define min/max, which conflicts with
+   our use of std::min.  */
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+
 /* Make sure we use the STATUS_XXX constants from ntstatus.h.  Some of
    the constants we use (but not all) are defined in winnt.h too, but
    defined as DWORD (aka 'unsigned long'), while ntstatus.h defines
