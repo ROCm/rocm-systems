@@ -485,11 +485,10 @@ static __device__ ValueT __reduce_add_sync_builtins_variant(MaskT mask, ValueT v
   // Adjust mask for 32 warp size
   __hip_adjust_mask_for_wave32(mask);
 
-  // Check for 0 and execution
-  __hip_check_mask(mask);
-
+  unsigned int ret{};
+  __hip_do_sync(ret, __builtin_amdgcn_wave_reduce_add_u32, mask, val, 0);
   // the builtin is unsigned but it should work fine for signed as well
-  return __builtin_amdgcn_wave_reduce_add_u32(val, 0 /* strategy */);
+  return static_cast<ValueT>(ret);
 }
 
 template <
@@ -506,14 +505,13 @@ static __device__ ValueT __reduce_min_sync_builtins_variant(MaskT mask, ValueT v
   // Adjust mask for 32 warp size
   __hip_adjust_mask_for_wave32(mask);
 
-  // Check for 0 and execution
-  __hip_check_mask(mask);
-
+  ValueT ret{};
   if constexpr (__hip_internal::is_same<ValueT, int>::value) {
-    return __builtin_amdgcn_wave_reduce_min_i32(val, 0);
+    __hip_do_sync(ret, __builtin_amdgcn_wave_reduce_min_i32, mask, val, 0);
   } else {
-    return __builtin_amdgcn_wave_reduce_min_u32(val, 0);
+    __hip_do_sync(ret, __builtin_amdgcn_wave_reduce_min_u32, mask, val, 0);
   }
+  return ret;
 }
 
 template <
@@ -530,14 +528,13 @@ static __device__ ValueT __reduce_max_sync_builtins_variant(MaskT mask, ValueT v
   // Adjust mask for 32 warp size
   __hip_adjust_mask_for_wave32(mask);
 
-  // Check for 0 and execution
-  __hip_check_mask(mask);
-
+  ValueT ret{};
   if constexpr (__hip_internal::is_same<ValueT, int>::value) {
-    return __builtin_amdgcn_wave_reduce_max_i32(val, 0);
+    __hip_do_sync(ret, __builtin_amdgcn_wave_reduce_max_i32, mask, val, 0);
   } else {
-    return __builtin_amdgcn_wave_reduce_max_u32(val, 0);
+    __hip_do_sync(ret, __builtin_amdgcn_wave_reduce_max_u32, mask, val, 0);
   }
+  return ret;
 }
 
 
@@ -553,10 +550,9 @@ static __device__ ValueT __reduce_and_sync_builtins_variant(MaskT mask, ValueT v
   // Adjust mask for 32 warp size
   __hip_adjust_mask_for_wave32(mask);
 
-  // Check for 0 and execution
-  __hip_check_mask(mask);
-
-  return __builtin_amdgcn_wave_reduce_and_b32(val, 0);
+  ValueT ret{};
+  __hip_do_sync(ret, __builtin_amdgcn_wave_reduce_and_b32, mask, val, 0);
+  return ret;
 }
 
 template <typename MaskT, typename ValueT,
@@ -571,10 +567,9 @@ static __device__ ValueT __reduce_or_sync_builtins_variant(MaskT mask, ValueT va
   // Adjust mask for 32 warp size
   __hip_adjust_mask_for_wave32(mask);
 
-  // Check for 0 and execution
-  __hip_check_mask(mask);
-
-  return __builtin_amdgcn_wave_reduce_or_b32(val, 0);
+  ValueT ret{};
+  __hip_do_sync(ret, __builtin_amdgcn_wave_reduce_or_b32, mask, val, 0);
+  return ret;
 }
 
 template <typename MaskT, typename ValueT,
@@ -589,10 +584,9 @@ static __device__ ValueT __reduce_xor_sync_builtins_variant(MaskT mask, ValueT v
   // Adjust mask for 32 warp size
   __hip_adjust_mask_for_wave32(mask);
 
-  // Check for 0 and execution
-  __hip_check_mask(mask);
-
-  return __builtin_amdgcn_wave_reduce_xor_b32(val, 0);
+  ValueT ret{};
+  __hip_do_sync(ret, __builtin_amdgcn_wave_reduce_xor_b32, mask, val, 0);
+  return ret;
 }
 #endif
 
