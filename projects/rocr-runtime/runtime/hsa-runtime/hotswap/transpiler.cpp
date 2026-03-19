@@ -3431,13 +3431,71 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
         std::cerr << "hotswap: transpile: .text grew " << elf_info.text_size
                   << " → " << new_text_size << " (fits in " << available << " byte gap)\n";
       } else {
-        // Doesn't fit — truncate and ensure s_endpgm at end
-        std::memcpy(new_elf + elf_info.text_offset, new_text, elf_info.text_size);
-        // Write s_endpgm at the last 4 bytes
-        uint8_t endpgm[] = {0x00, 0x00, 0x81, 0xBF};  // s_endpgm
-        std::memcpy(new_elf + elf_info.text_offset + elf_info.text_size - 4, endpgm, 4);
-        std::cerr << "hotswap: transpile: WARNING: .text too large ("
-                  << new_text_size << " > " << available << "), truncated\n";
+        // Doesn't fit — grow the ELF by shifting everything after .text
+        uint64_t text_end = elf_info.text_offset + elf_info.text_size;
+        uint64_t delta = ((new_text_size - elf_info.text_size + 255u) / 256u) * 256u;
+        uint64_t grown_size = new_elf_size + delta;
+        uint8_t* grown = (uint8_t*)calloc(1, grown_size);
+        // Copy everything before .text end
+        std::memcpy(grown, new_elf, text_end);
+        // Write new .text content
+        std::memcpy(grown + elf_info.text_offset, new_text, new_text_size);
+        // NOP-pad .text to aligned boundary
+        uint64_t new_sec_size = elf_info.text_size + delta;
+        for (uint64_t p = new_text_size; p < new_sec_size; p += 4) {
+          uint8_t nop[] = {0x00, 0x00, 0x80, 0xBF};  // s_nop 0
+          std::memcpy(grown + elf_info.text_offset + p, nop, 4);
+        }
+        // Copy everything after .text, shifted by delta
+        uint64_t tail = new_elf_size - text_end;
+        if (tail > 0) std::memcpy(grown + text_end + delta, new_elf + text_end, tail);
+        // Update section headers: shift file offsets for sections after .text
+        std::memcpy(&e_shoff, grown + 40, 8);
+        e_shoff += delta;
+        std::memcpy(grown + 40, &e_shoff, 8);  // section header table offset
+        for (uint16_t i = 0; i < e_shnum; ++i) {
+          uint64_t sh_off = e_shoff + i * e_shentsize;
+          uint64_t sec_offset;
+          std::memcpy(&sec_offset, grown + sh_off + 24, 8);
+          if (sec_offset > elf_info.text_offset) {
+            sec_offset += delta;
+            std::memcpy(grown + sh_off + 24, &sec_offset, 8);
+          }
+          // Update .text section size
+          if (static_cast<int>(i) == elf_info.text_idx) {
+            std::memcpy(grown + sh_off + 32, &new_sec_size, 8);
+          }
+        }
+        // Update program headers: shift offsets and sizes for LOAD segments
+        uint64_t e_phoff;
+        uint16_t e_phentsize, e_phnum;
+        std::memcpy(&e_phoff, grown + 32, 8);
+        std::memcpy(&e_phentsize, grown + 54, 2);
+        std::memcpy(&e_phnum, grown + 56, 2);
+        for (uint16_t i = 0; i < e_phnum; ++i) {
+          uint64_t ph_off = e_phoff + i * e_phentsize;
+          if (ph_off + 56 > grown_size) break;
+          uint64_t p_offset, p_filesz, p_memsz;
+          std::memcpy(&p_offset, grown + ph_off + 8, 8);
+          std::memcpy(&p_filesz, grown + ph_off + 32, 8);
+          std::memcpy(&p_memsz, grown + ph_off + 40, 8);
+          if (p_offset == elf_info.text_offset) {
+            // This LOAD segment contains .text — grow FileSiz and MemSiz
+            p_filesz += delta;
+            p_memsz += delta;
+            std::memcpy(grown + ph_off + 32, &p_filesz, 8);
+            std::memcpy(grown + ph_off + 40, &p_memsz, 8);
+          } else if (p_offset > elf_info.text_offset) {
+            // Segment after .text — shift offset
+            p_offset += delta;
+            std::memcpy(grown + ph_off + 8, &p_offset, 8);
+          }
+        }
+        free(new_elf);
+        new_elf = grown;
+        new_elf_size = grown_size;
+        std::cerr << "hotswap: transpile: .text grew " << elf_info.text_size
+                  << " → " << new_sec_size << " (ELF resized by +" << delta << ")\n";
       }
     }
 
