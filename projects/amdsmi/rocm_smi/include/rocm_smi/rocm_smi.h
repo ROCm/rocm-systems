@@ -1212,6 +1212,16 @@ typedef struct metrics_table_header_t metrics_table_header_t;
 #define RSMI_MAX_NUM_XCP 8
 
 /**
+ * @brief APU metrics: max number of cores, L3, and IPUs
+ *
+ * @cond @tag{gpu_bm_linux} @endcond
+ */
+ #define RSMI_APU_MAX_CORES  16   //!< v2_4 = 8, v3_0 = 16
+ #define RSMI_APU_MAX_L3     2    //!< v2_4
+ #define RSMI_APU_MAX_IPU    8    //!< v3_0, average_ipu_activity[]
+
+
+/**
  * @brief The following structures hold the gpu statistics for a device.
  */
 struct amdgpu_xcp_metrics_t {
@@ -1240,6 +1250,128 @@ struct amdgpu_xcp_metrics_t {
   uint64_t gfx_low_utilization_acc[RSMI_MAX_NUM_XCC];
   uint64_t gfx_below_host_limit_total_acc[RSMI_MAX_NUM_XCC];
 };
+
+
+/**
+ * @brief APU metrics auxiliary data
+ *
+ * This structure holds the unified APU metrics that are specific to the APU
+ * It covers gpu_metrics_v2_4 and gpu_metrics_v3_0, and it is atached via
+ * amdsmi_gpu_metrics_t.apu_metrics when the device is an APU
+ *
+ * Use version field to know which driver table was used to fill this.
+
+ *
+ * @cond @tag{gpu_bm_linux} @endcond
+ */
+typedef struct {
+    /**
+     * @brief Temperature (instant)
+     */
+    uint16_t temperature_gfx;
+    uint16_t temperature_soc;
+    uint16_t temperature_core[RSMI_APU_MAX_CORES];      //!< v2_4 = 8, v3_0 = 16
+    uint16_t temperature_l3[RSMI_APU_MAX_L3];           //!< v2_4 = 2
+    uint16_t temperature_skin;                          //!< v3_0
+
+    /**
+     * @brief Utilization
+     */
+    uint16_t average_gfx_activity;
+    uint16_t average_mm_activity;                         //!< v2_4
+    uint16_t average_vcn_activity;                        //!< v3_0
+    uint16_t average_ipu_activity[RSMI_APU_MAX_IPU];    //!< v3_0
+    uint16_t average_core_c0_activity[RSMI_APU_MAX_CORES];  //!< v3_0
+    uint16_t average_dram_reads;                          //!< v3_0 [MB/s]
+    uint16_t average_dram_writes;
+    uint16_t average_ipu_reads;
+    uint16_t average_ipu_writes;
+
+    /**
+     * @brief Power [mW]
+     */
+    uint32_t average_socket_power;    //!< v3_0 = uint32_t
+    uint16_t average_cpu_power;       //!< v2_4
+    uint16_t average_soc_power;
+    uint32_t average_gfx_power;       //!< v3_0 = uint32_t
+    uint16_t average_core_power[RSMI_APU_MAX_CORES];    //!< v2_4 [8], v3_0 [16]
+    uint16_t average_ipu_power;       //!< v3_0
+    uint32_t average_apu_power;       //!< v3_0
+    uint32_t average_dgpu_power;      //!< v3_0
+    uint32_t average_all_core_power;  //!< v3_0
+    uint16_t average_sys_power;       //!< v3_0
+    uint16_t stapm_power_limit;       //!< v3_0
+    uint16_t current_stapm_power_limit;   //!< v3_0
+
+    /**
+     * @brief Average clocks [MHz]
+     */
+    uint16_t average_gfxclk_frequency;
+    uint16_t average_socclk_frequency;
+    uint16_t average_uclk_frequency;
+    uint16_t average_fclk_frequency;
+    uint16_t average_vclk_frequency;
+    uint16_t average_dclk_frequency;      //!< v2_4
+    uint16_t average_vpeclk_frequency;    //!< v3_0
+    uint16_t average_ipuclk_frequency;
+    uint16_t average_mpipu_frequency;
+
+    /**
+     * @brief Current clocks [MHz]
+     */
+    uint16_t current_gfxclk;
+    uint16_t current_socclk;
+    uint16_t current_uclk;
+    uint16_t current_fclk;        //!< v2_4
+    uint16_t current_vclk;
+    uint16_t current_dclk;
+    uint16_t current_coreclk[RSMI_APU_MAX_CORES];    //!< v2_4 [8], v3_0 [16]
+    uint16_t current_l3clk[RSMI_APU_MAX_L3];         //!< v2_4
+    uint16_t current_core_maxfreq;    //!< v3_0
+    uint16_t current_gfx_maxfreq;
+
+    /**
+     * @brief Throttle
+     */
+    uint32_t throttle_status;                 //!< v2_4
+    uint64_t indep_throttle_status;           //!< v2_4
+    uint32_t throttle_residency_prochot;      //!< v3_0
+    uint32_t throttle_residency_spl;          //!< v3_0
+    uint32_t throttle_residency_fppt;         //!< v3_0
+    uint32_t throttle_residency_sppt;         //!< v3_0
+    uint32_t throttle_residency_thm_core;     //!< v3_0
+    uint32_t throttle_residency_thm_gfx;      //!< v3_0
+    uint32_t throttle_residency_thm_soc;      //!< v3_0
+
+    /**
+     * @brief Fan
+     */
+    uint16_t fan_pwm;              //!< v2_4
+
+    /**
+     * @brief Average temperature
+     */
+    uint16_t average_temperature_gfx;      //!< v2_4
+    uint16_t average_temperature_soc;      //!< v2_4
+    uint16_t average_temperature_core[RSMI_APU_MAX_CORES];      //!< v2_4
+    uint16_t average_temperature_l3[RSMI_APU_MAX_L3];           //!< v2_4
+
+    /**
+     * @brief Voltage [mV] / Current [mA]
+     */
+    uint16_t average_cpu_voltage;     //!< v2_4
+    uint16_t average_soc_voltage;     //!< v2_4
+    uint16_t average_gfx_voltage;     //!< v2_4
+    uint16_t average_cpu_current;     //!< v2_4
+    uint16_t average_soc_current;     //!< v2_4
+    uint16_t average_gfx_current;     //!< v2_4
+
+    /**
+     * @brief Other (v3_0)
+     */
+    uint32_t time_filter_alphavalue;      //!< v3_0 alpha filter time constant [us]
+
+} rsmi_apu_metrics_t;
 
 typedef struct {
   // TODO(amd) Doxygen documents
@@ -1448,6 +1580,9 @@ typedef struct {
 
   /* XGMI link status(up/down) */
   uint16_t xgmi_link_status[RSMI_MAX_NUM_XGMI_LINKS];
+
+  /* APU metrics auxiliary data */
+  rsmi_apu_metrics_t* apu_metrics;
 
   /// \endcond
 } rsmi_gpu_metrics_t;
