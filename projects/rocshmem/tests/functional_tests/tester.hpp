@@ -130,6 +130,7 @@ enum TestType {
   FloodAddTestType = 90,
   FloodFAddTestType = 91,
   FloodWaitAmoTestType = 92,
+  DeviceBitcodeTestType = 93,
 };
 
 enum OpType { PutType = 0, GetType = 1 };
@@ -144,7 +145,7 @@ class Tester {
   explicit Tester(TesterArguments args);
   virtual ~Tester();
 
-  void execute();
+  virtual void execute();
 
   static std::vector<Tester *> create(TesterArguments args);
 

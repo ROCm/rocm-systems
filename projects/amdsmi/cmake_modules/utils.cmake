@@ -23,7 +23,6 @@
 ## the first, second and third number values in
 ## the major, minor and patch variables.
 function(parse_version VERSION_STRING)
-
     string(FIND ${VERSION_STRING} "-" STRING_INDEX)
 
     if(${STRING_INDEX} GREATER -1)
@@ -74,7 +73,14 @@ endfunction()
 # Parses file for a pattern and replaces the value
 # associated with that pattern with a specified value
 # Replaces VERSION(MAJOR.MINOR.RELEASE) with updated values
-function(update_version_in_file REL_FILE_PATH DEFAULT_VERSION PAT1 PAT2 PAT3)
+function(
+    update_version_in_file
+    REL_FILE_PATH
+    DEFAULT_VERSION
+    PAT1
+    PAT2
+    PAT3
+)
     get_version_from_file(${REL_FILE_PATH} "MAJOR")
     get_version_from_file(${REL_FILE_PATH} "MINOR")
     get_version_from_file(${REL_FILE_PATH} "RELEASE")
@@ -86,12 +92,24 @@ function(update_version_in_file REL_FILE_PATH DEFAULT_VERSION PAT1 PAT2 PAT3)
             parse_version(${DEFAULT_VERSION})
             file(READ ${FILE_PATH} file_contents_new)
 
-            string(REGEX REPLACE "${PAT1}MAJOR${PAT2} *[0-9]*" "${PAT1}MAJOR${PAT3}${VERSION_MAJOR}" file_contents
-                                 "${file_contents_new}")
-            string(REGEX REPLACE "${PAT1}MINOR${PAT2} *[0-9]*" "${PAT1}MINOR${PAT3}${VERSION_MINOR}" file_contents_new
-                                 "${file_contents}")
-            string(REGEX REPLACE "${PAT1}RELEASE${PAT2} *[0-9]*" "${PAT1}RELEASE${PAT3}${VERSION_PATCH}" file_contents
-                                 "${file_contents_new}")
+            string(
+                REGEX REPLACE "${PAT1}MAJOR${PAT2} *[0-9]*"
+                "${PAT1}MAJOR${PAT3}${VERSION_MAJOR}"
+                file_contents
+                "${file_contents_new}"
+            )
+            string(
+                REGEX REPLACE "${PAT1}MINOR${PAT2} *[0-9]*"
+                "${PAT1}MINOR${PAT3}${VERSION_MINOR}"
+                file_contents_new
+                "${file_contents}"
+            )
+            string(
+                REGEX REPLACE "${PAT1}RELEASE${PAT2} *[0-9]*"
+                "${PAT1}RELEASE${PAT3}${VERSION_PATCH}"
+                file_contents
+                "${file_contents_new}"
+            )
 
             file(WRITE ${FILE_PATH} "${file_contents}")
         endif()
@@ -117,7 +135,9 @@ function(get_version_from_tag DEFAULT_VERSION_STRING VERSION_PREFIX GIT)
             COMMAND head -n 1
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
             OUTPUT_VARIABLE GIT_TAG_STRING
-            OUTPUT_STRIP_TRAILING_WHITESPACE RESULTS_VARIABLE RESULTS)
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            RESULTS_VARIABLE RESULTS
+        )
         if(GIT_TAG_STRING)
             parse_version(${GIT_TAG_STRING})
         endif()
@@ -144,7 +164,8 @@ function(num_change_since_prev_pkg VERSION_PREFIX)
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
             OUTPUT_VARIABLE NUM_COMMITS
             OUTPUT_STRIP_TRAILING_WHITESPACE
-            RESULT_VARIABLE RESULT)
+            RESULT_VARIABLE RESULT
+        )
 
         set(NUM_COMMITS "${NUM_COMMITS}" PARENT_SCOPE)
 
@@ -177,11 +198,15 @@ function(get_package_version_number DEFAULT_VERSION_STRING VERSION_PREFIX GIT)
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
             OUTPUT_VARIABLE VERSION_HASH
             OUTPUT_STRIP_TRAILING_WHITESPACE
-            RESULT_VARIABLE RESULT)
+            RESULT_VARIABLE RESULT
+        )
         if(${RESULT} EQUAL 0)
             # Check for dirty workspace.
-            execute_process(COMMAND git diff --quiet WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-                            RESULT_VARIABLE RESULT)
+            execute_process(
+                COMMAND git diff --quiet
+                WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+                RESULT_VARIABLE RESULT
+            )
             if(${RESULT} EQUAL 1)
                 set(VERSION_HASH "${VERSION_HASH}-dirty")
             endif()
@@ -217,18 +242,8 @@ function(
     # Check If Debian Platform
     find_file(DEBIAN debian_version debconf.conf PATHS /etc)
     if(DEBIAN)
-        set(BUILD_ENABLE_LINTIAN_OVERRIDES
-            ON
-            CACHE BOOL
-            "Enable/Disable Lintian Overrides"
-            FORCE
-        )
-        set(BUILD_DEBIAN_PKGING_FLAG
-            ON
-            CACHE BOOL
-            "Internal Status Flag to indicate Debian Packaging Build"
-            FORCE
-        )
+        set(BUILD_ENABLE_LINTIAN_OVERRIDES ON CACHE BOOL "Enable/Disable Lintian Overrides" FORCE)
+        set(BUILD_DEBIAN_PKGING_FLAG ON CACHE BOOL "Internal Status Flag to indicate Debian Packaging Build" FORCE)
         set_debian_pkg_cmake_flags(${PACKAGE_NAME_T} ${PACKAGE_VERSION_T}
                                   ${MAINTAINER_NM_T} ${MAINTAINER_EMAIL_T}
         )
@@ -237,34 +252,22 @@ function(
         file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/DEBIAN")
 
         # Configure the changelog file
-        set(CHANGELOG_DATA_FILES
-            "${CMAKE_SOURCE_DIR}/DEBIAN/changelog.in"
-            "${CMAKE_SOURCE_DIR}/CHANGELOG.md"
-        )
+        set(CHANGELOG_DATA_FILES "${CMAKE_SOURCE_DIR}/DEBIAN/changelog.in" "${CMAKE_SOURCE_DIR}/CHANGELOG.md")
         set(CHANGELOG_DATA_APPENDED "${CMAKE_BINARY_DIR}/DEBIAN/changelog.in")
         file(WRITE "${CHANGELOG_DATA_APPENDED}" "")
         foreach(changelog_data ${CHANGELOG_DATA_FILES})
             append_file("${changelog_data}" "${CHANGELOG_DATA_APPENDED}")
         endforeach()
-        configure_file(
-            "${CHANGELOG_DATA_APPENDED}"
-            "${CMAKE_BINARY_DIR}/DEBIAN/changelog.Debian"
-            @ONLY
-        )
+        configure_file("${CHANGELOG_DATA_APPENDED}" "${CMAKE_BINARY_DIR}/DEBIAN/changelog.Debian" @ONLY)
 
         # Install Change Log
         find_program(DEB_GZIP_EXEC gzip)
         if(NOT DEB_GZIP_EXEC)
-            message(
-                FATAL_ERROR
-                "gzip command not found: Failed to compress the changelog"
-            )
+            message(FATAL_ERROR "gzip command not found: Failed to compress the changelog")
         endif()
         if(EXISTS "${CMAKE_BINARY_DIR}/DEBIAN/changelog.Debian")
             execute_process(
-                COMMAND
-                    ${DEB_GZIP_EXEC} -f -n -9
-                    "${CMAKE_BINARY_DIR}/DEBIAN/changelog.Debian"
+                COMMAND ${DEB_GZIP_EXEC} -f -n -9 "${CMAKE_BINARY_DIR}/DEBIAN/changelog.Debian"
                 WORKING_DIRECTORY "${CMAKE_BINARY_DIR}/DEBIAN"
                 RESULT_VARIABLE result
                 OUTPUT_VARIABLE output
@@ -274,8 +277,7 @@ function(
                 message(FATAL_ERROR "Failed to compress: ${error}")
             endif()
             install(
-                FILES
-                    "${CMAKE_BINARY_DIR}/DEBIAN/${DEB_CHANGELOG_INSTALL_FILENM}"
+                FILES "${CMAKE_BINARY_DIR}/DEBIAN/${DEB_CHANGELOG_INSTALL_FILENM}"
                 DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/${PACKAGE_NAME_T}
                 COMPONENT ${COMPONENT_NAME_T}
             )
@@ -306,46 +308,16 @@ endfunction()
 
 # Set variables for changelog and copyright
 # For Debian specific Packages
-function(
-    set_debian_pkg_cmake_flags
-    DEB_PACKAGE_NAME_T
-    DEB_PACKAGE_VERSION_T
-    DEB_MAINTAINER_NM_T
-    DEB_MAINTAINER_EMAIL_T
-)
+function(set_debian_pkg_cmake_flags DEB_PACKAGE_NAME_T DEB_PACKAGE_VERSION_T DEB_MAINTAINER_NM_T DEB_MAINTAINER_EMAIL_T)
     # Setting configure flags
-    set(DEB_PACKAGE_NAME
-        "${DEB_PACKAGE_NAME_T}"
-        CACHE STRING
-        "Debian Package Name"
-    )
-    set(DEB_PACKAGE_VERSION
-        "${DEB_PACKAGE_VERSION_T}"
-        CACHE STRING
-        "Debian Package Version String"
-    )
-    set(DEB_MAINTAINER_NAME
-        "${DEB_MAINTAINER_NM_T}"
-        CACHE STRING
-        "Debian Package Maintainer Name"
-    )
-    set(DEB_MAINTAINER_EMAIL
-        "${DEB_MAINTAINER_EMAIL_T}"
-        CACHE STRING
-        "Debian Package Maintainer Email"
-    )
-    set(DEB_CHANGELOG_INSTALL_FILENM
-        "changelog.Debian.gz"
-        CACHE STRING
-        "Debian Package ChangeLog File Name"
-    )
+    set(DEB_PACKAGE_NAME "${DEB_PACKAGE_NAME_T}" CACHE STRING "Debian Package Name")
+    set(DEB_PACKAGE_VERSION "${DEB_PACKAGE_VERSION_T}" CACHE STRING "Debian Package Version String")
+    set(DEB_MAINTAINER_NAME "${DEB_MAINTAINER_NM_T}" CACHE STRING "Debian Package Maintainer Name")
+    set(DEB_MAINTAINER_EMAIL "${DEB_MAINTAINER_EMAIL_T}" CACHE STRING "Debian Package Maintainer Email")
+    set(DEB_CHANGELOG_INSTALL_FILENM "changelog.Debian.gz" CACHE STRING "Debian Package ChangeLog File Name")
 
     if(BUILD_ENABLE_LINTIAN_OVERRIDES)
-        set(DEB_OVERRIDES_INSTALL_FILENM
-            "${DEB_PACKAGE_NAME}"
-            CACHE STRING
-            "Debian Package Lintian Override File Name"
-        )
+        set(DEB_OVERRIDES_INSTALL_FILENM "${DEB_PACKAGE_NAME}" CACHE STRING "Debian Package Lintian Override File Name")
         set(DEB_OVERRIDES_INSTALL_PATH
             "/usr/share/lintian/overrides/"
             CACHE STRING
@@ -356,10 +328,7 @@ function(
     # Get TimeStamp
     find_program(DEB_DATE_TIMESTAMP_EXEC date)
     if(NOT DEB_DATE_TIMESTAMP_EXEC)
-        message(
-            FATAL_ERROR
-            "date command not found: Failed to Configure the timestamp for Copyright/Changelog."
-        )
+        message(FATAL_ERROR "date command not found: Failed to Configure the timestamp for Copyright/Changelog.")
     endif()
     set(DEB_TIMESTAMP_FORMAT_OPTION "-R")
     execute_process(
@@ -367,19 +336,12 @@ function(
         OUTPUT_VARIABLE TIMESTAMP_T
         OUTPUT_STRIP_TRAILING_WHITESPACE
     )
-    set(DEB_TIMESTAMP
-        "${TIMESTAMP_T}"
-        CACHE STRING
-        "Current Time Stamp for Copyright/Changelog"
-    )
+    set(DEB_TIMESTAMP "${TIMESTAMP_T}" CACHE STRING "Current Time Stamp for Copyright/Changelog")
 
     message(STATUS "DEB_PACKAGE_NAME             : ${DEB_PACKAGE_NAME}")
     message(STATUS "DEB_PACKAGE_VERSION          : ${DEB_PACKAGE_VERSION}")
     message(STATUS "DEB_MAINTAINER_NAME          : ${DEB_MAINTAINER_NAME}")
     message(STATUS "DEB_MAINTAINER_EMAIL         : ${DEB_MAINTAINER_EMAIL}")
     message(STATUS "DEB_TIMESTAMP                : ${DEB_TIMESTAMP}")
-    message(
-        STATUS
-        "DEB_CHANGELOG_INSTALL_FILENM : ${DEB_CHANGELOG_INSTALL_FILENM}"
-    )
+    message(STATUS "DEB_CHANGELOG_INSTALL_FILENM : ${DEB_CHANGELOG_INSTALL_FILENM}")
 endfunction()
