@@ -5,6 +5,7 @@
 
 #include "common/common_utils.hpp"
 #include "common/defines.h"
+#include "common/env_vars.hpp"
 #include "common/environment.hpp"
 #include "common/json_config.hpp"
 #include "common/path.hpp"
@@ -44,6 +45,7 @@ namespace console  = ::tim::utility::console;
 namespace argparse = ::tim::argparse;
 namespace signals  = ::tim::signals;
 namespace path     = rocprofsys::common::path;
+namespace env      = rocprofsys::env_vars;
 using settings     = ::rocprofsys::settings;
 using namespace ::timemory::join;
 using ::tim::get_env;
@@ -68,10 +70,10 @@ int
 get_verbose(parser_data_t& _data)
 {
     auto& verbose = _data.verbose;
-    verbose       = get_env("ROCPROFSYS_CAUSAL_VERBOSE",
-                            get_env<int>("ROCPROFSYS_VERBOSE", verbose, false));
-    auto _debug   = get_env("ROCPROFSYS_CAUSAL_DEBUG",
-                            get_env<bool>("ROCPROFSYS_DEBUG", false, false));
+    verbose       = get_env(std::string{ env::CAUSAL_VERBOSE },
+                            get_env<int>(std::string{ env::VERBOSE }, verbose, false));
+    auto _debug   = get_env(std::string{ env::CAUSAL_DEBUG },
+                            get_env<bool>(std::string{ env::DEBUG }, false, false));
     if(_debug) verbose += 8;
     return verbose;
 }
@@ -114,9 +116,9 @@ get_initial_environment(parser_data_t& _data)
     auto _libexecpath = path::realpath(path::get_internal_script_path());
     if(!_libexecpath.empty())
     {
-        rocprofsys::common::update_env(_data.current, "ROCPROFSYS_SCRIPT_PATH",
-                                       _libexecpath, update_mode::REPLACE, ":",
-                                       _data.updated, original_envs);
+        rocprofsys::common::update_env(_data.current, env::SCRIPT_PATH, _libexecpath,
+                                       update_mode::REPLACE, ":", _data.updated,
+                                       original_envs);
     }
 
     const bool verbose = (get_verbose(_data) > 0);
@@ -429,11 +431,11 @@ INSTRUMENTATION WORKFLOW:
         .dtype("string")
         .action([&](parser_t& p) {
             gpu_domain_enabled = true;
-            rocprofsys::common::update_env(_parser_data.current, "ROCPROFSYS_USE_AMD_SMI",
-                                           true, update_mode::REPLACE, ":",
+            rocprofsys::common::update_env(_parser_data.current, env::USE_AMD_SMI, true,
+                                           update_mode::REPLACE, ":",
                                            _parser_data.updated, original_envs);
             rocprofsys::common::update_env(
-                _parser_data.current, "ROCPROFSYS_USE_PROCESS_SAMPLING", true,
+                _parser_data.current, env::USE_PROCESS_SAMPLING, true,
                 update_mode::REPLACE, ":", _parser_data.updated, original_envs);
 
             if(p.exists("gpu"))
@@ -446,7 +448,7 @@ INSTRUMENTATION WORKFLOW:
                     if(!expanded.empty())
                     {
                         rocprofsys::common::update_env(
-                            _parser_data.current, "ROCPROFSYS_AMD_SMI_METRICS", expanded,
+                            _parser_data.current, env::AMD_SMI_METRICS, expanded,
                             update_mode::REPLACE, ":", _parser_data.updated,
                             original_envs);
                     }
@@ -478,9 +480,9 @@ INSTRUMENTATION WORKFLOW:
                 }
             }
 
-            rocprofsys::common::update_env(
-                _parser_data.current, "ROCPROFSYS_ROCM_DOMAINS", domains_str,
-                update_mode::REPLACE, ":", _parser_data.updated, original_envs);
+            rocprofsys::common::update_env(_parser_data.current, env::ROCM_DOMAINS,
+                                           domains_str, update_mode::REPLACE, ":",
+                                           _parser_data.updated, original_envs);
         });
 
     parser
@@ -492,9 +494,9 @@ INSTRUMENTATION WORKFLOW:
         .dtype("string")
         .action([&](parser_t& p) {
             cpu_domain_enabled = true;
-            rocprofsys::common::update_env(
-                _parser_data.current, "ROCPROFSYS_USE_SAMPLING", true,
-                update_mode::REPLACE, ":", _parser_data.updated, original_envs);
+            rocprofsys::common::update_env(_parser_data.current, env::USE_SAMPLING, true,
+                                           update_mode::REPLACE, ":",
+                                           _parser_data.updated, original_envs);
 
             std::string freq = "100";  // default
             if(p.exists("cpu"))
@@ -502,9 +504,9 @@ INSTRUMENTATION WORKFLOW:
                 auto input = p.get<std::string>("cpu");
                 if(!input.empty()) freq = input;
             }
-            rocprofsys::common::update_env(
-                _parser_data.current, "ROCPROFSYS_SAMPLING_FREQ", freq,
-                update_mode::REPLACE, ":", _parser_data.updated, original_envs);
+            rocprofsys::common::update_env(_parser_data.current, env::SAMPLING_FREQ, freq,
+                                           update_mode::REPLACE, ":",
+                                           _parser_data.updated, original_envs);
         });
 
     parser

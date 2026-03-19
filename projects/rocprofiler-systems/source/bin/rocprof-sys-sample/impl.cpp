@@ -4,6 +4,7 @@
 #include "rocprof-sys-sample.hpp"
 
 #include "common/common_utils.hpp"
+#include "common/env_vars.hpp"
 #include "common/environment.hpp"
 #include "common/json_config.hpp"
 #include "common/path.hpp"
@@ -28,6 +29,7 @@
 
 namespace color = tim::log::color;
 namespace path  = rocprofsys::common::path;
+namespace env   = rocprofsys::env_vars;
 using namespace timemory::join;
 using rocprofsys::common::remove_env;
 using rocprofsys::common::update_mode;
@@ -114,15 +116,14 @@ get_initial_environment()
     auto _libexecpath  = path::realpath(path::get_internal_script_path());
     auto _rootpath     = path::realpath(path::get_rocprofsys_root());
 
-    rocprofsys::common::update_env(_env, "ROCPROFSYS_ROOT", _rootpath,
-                                   update_mode::REPLACE, ":", updated_envs,
-                                   original_envs);
+    rocprofsys::common::update_env(_env, env::ROOT, _rootpath, update_mode::REPLACE, ":",
+                                   updated_envs, original_envs);
     rocprofsys::common::update_env(_env, "LD_PRELOAD", _dl_libpath, update_mode::APPEND,
                                    ":", updated_envs, original_envs);
     rocprofsys::common::update_env(_env, "LD_LIBRARY_PATH",
                                    tim::filepath::dirname(_dl_libpath),
                                    update_mode::APPEND, ":", updated_envs, original_envs);
-    rocprofsys::common::update_env(_env, "ROCPROFSYS_SCRIPT_PATH", _libexecpath,
+    rocprofsys::common::update_env(_env, env::SCRIPT_PATH, _libexecpath,
                                    update_mode::REPLACE, ":", updated_envs,
                                    original_envs);
 
@@ -135,9 +136,9 @@ get_initial_environment()
                                        original_envs);
     }
 
-    auto _mode = get_env<std::string>("ROCPROFSYS_MODE", "sampling", false);
+    auto _mode = get_env<std::string>(std::string{ env::MODE }, "sampling", false);
 
-    rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_SAMPLING", (_mode != "causal"),
+    rocprofsys::common::update_env(_env, env::USE_SAMPLING, (_mode != "causal"),
                                    update_mode::REPLACE, ":", updated_envs,
                                    original_envs);
 
@@ -147,7 +148,7 @@ get_initial_environment()
 void
 print_updated_environment(std::vector<char*> _env)
 {
-    if(get_env<int>("ROCPROFSYS_VERBOSE", 0) < 0) return;
+    if(get_env<int>(std::string{ env::VERBOSE }, 0) < 0) return;
 
     std::sort(_env.begin(), _env.end(), [](auto* _lhs, auto* _rhs) {
         if(!_lhs) return false;
@@ -312,8 +313,8 @@ PROFILING WORKFLOW:
             monochrome()     = _monochrome;
             p.set_use_color(!_monochrome);
             rocprofsys::common::update_env(
-                _env, "ROCPROFSYS_MONOCHROME", (_monochrome) ? "1" : "0",
-                update_mode::REPLACE, ":", updated_envs, original_envs);
+                _env, env::MONOCHROME, (_monochrome) ? "1" : "0", update_mode::REPLACE,
+                ":", updated_envs, original_envs);
             rocprofsys::common::update_env(_env, "MONOCHROME", (_monochrome) ? "1" : "0",
                                            update_mode::REPLACE, ":", updated_envs,
                                            original_envs);
@@ -325,18 +326,18 @@ PROFILING WORKFLOW:
         .choices({ "trace", "debug", "info", "warn", "error", "critical", "off" })
         .action([&](parser_t& p) {
             rocprofsys::common::update_env(
-                _env, "ROCPROFSYS_LOG_LEVEL", p.get<std::string>("log-level"),
+                _env, env::LOG_LEVEL, p.get<std::string>("log-level"),
                 update_mode::REPLACE, ":", updated_envs, original_envs);
         });
 
     parser.add_argument({ "--debug" }, "[DEPRECATED Use --log-level=debug] Debug output")
         .max_count(1)
         .action([&](parser_t& p) {
-            rocprofsys::common::update_env(_env, "ROCPROFSYS_DEBUG", p.get<bool>("debug"),
+            rocprofsys::common::update_env(_env, env::DEBUG, p.get<bool>("debug"),
                                            update_mode::REPLACE, ":", updated_envs,
                                            original_envs);
 
-            rocprofsys::common::update_env(_env, "ROCPROFSYS_LOG_LEVEL", "debug",
+            rocprofsys::common::update_env(_env, env::LOG_LEVEL, "debug",
                                            update_mode::REPLACE, ":", updated_envs,
                                            original_envs);
         });
@@ -348,17 +349,16 @@ PROFILING WORKFLOW:
             auto _v = p.get<int>("verbose");
             verbose = _v;
 
-            rocprofsys::common::update_env(_env, "ROCPROFSYS_VERBOSE", _v,
-                                           update_mode::REPLACE, ":", updated_envs,
-                                           original_envs);
+            rocprofsys::common::update_env(_env, env::VERBOSE, _v, update_mode::REPLACE,
+                                           ":", updated_envs, original_envs);
 
             constexpr std::array<const char*, 5> log_levels = { "off", "info", "debug",
                                                                 "debug", "trace" };
 
             auto index = std::clamp(_v + 1, 0, static_cast<int>(log_levels.size() - 1));
-            rocprofsys::common::update_env(_env, "ROCPROFSYS_LOG_LEVEL",
-                                           log_levels[index], update_mode::REPLACE, ":",
-                                           updated_envs, original_envs);
+            rocprofsys::common::update_env(_env, env::LOG_LEVEL, log_levels[index],
+                                           update_mode::REPLACE, ":", updated_envs,
+                                           original_envs);
         });
 
     // Track preset and domain flag state for validation and export
@@ -434,10 +434,10 @@ PROFILING WORKFLOW:
         .dtype("string")
         .action([&](parser_t& p) {
             gpu_domain_enabled = true;
-            rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_AMD_SMI", true,
+            rocprofsys::common::update_env(_env, env::USE_AMD_SMI, true,
                                            update_mode::REPLACE, ":", updated_envs,
                                            original_envs);
-            rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_PROCESS_SAMPLING", true,
+            rocprofsys::common::update_env(_env, env::USE_PROCESS_SAMPLING, true,
                                            update_mode::REPLACE, ":", updated_envs,
                                            original_envs);
 
@@ -450,7 +450,7 @@ PROFILING WORKFLOW:
                         rocprofsys::json_config::expand_gpu_metrics(metrics_str);
                     if(!expanded.empty())
                     {
-                        rocprofsys::common::update_env(_env, "ROCPROFSYS_AMD_SMI_METRICS",
+                        rocprofsys::common::update_env(_env, env::AMD_SMI_METRICS,
                                                        expanded, update_mode::REPLACE,
                                                        ":", updated_envs, original_envs);
                     }
@@ -482,7 +482,7 @@ PROFILING WORKFLOW:
                 }
             }
 
-            rocprofsys::common::update_env(_env, "ROCPROFSYS_ROCM_DOMAINS", domains_str,
+            rocprofsys::common::update_env(_env, env::ROCM_DOMAINS, domains_str,
                                            update_mode::REPLACE, ":", updated_envs,
                                            original_envs);
         });
@@ -496,7 +496,7 @@ PROFILING WORKFLOW:
         .dtype("string")
         .action([&](parser_t& p) {
             cpu_domain_enabled = true;
-            rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_SAMPLING", true,
+            rocprofsys::common::update_env(_env, env::USE_SAMPLING, true,
                                            update_mode::REPLACE, ":", updated_envs,
                                            original_envs);
 
@@ -506,7 +506,7 @@ PROFILING WORKFLOW:
                 auto input = p.get<std::string>("cpu");
                 if(!input.empty()) freq = input;
             }
-            rocprofsys::common::update_env(_env, "ROCPROFSYS_SAMPLING_FREQ", freq,
+            rocprofsys::common::update_env(_env, env::SAMPLING_FREQ, freq,
                                            update_mode::REPLACE, ":", updated_envs,
                                            original_envs);
         });
@@ -562,7 +562,7 @@ PROFILING WORKFLOW:
         .dtype("filepath")
         .action([&](parser_t& p) {
             rocprofsys::common::update_env(
-                _env, "ROCPROFSYS_CONFIG_FILE",
+                _env, env::CONFIG_FILE,
                 join(array_config{ ":" }, p.get<std::vector<std::string>>("config")),
                 update_mode::REPLACE, ":", updated_envs, original_envs);
         });
@@ -574,11 +574,11 @@ PROFILING WORKFLOW:
         .max_count(2)
         .action([&](parser_t& p) {
             auto _v = p.get<std::vector<std::string>>("output");
-            rocprofsys::common::update_env(_env, "ROCPROFSYS_OUTPUT_PATH", _v.at(0),
+            rocprofsys::common::update_env(_env, env::OUTPUT_PATH, _v.at(0),
                                            update_mode::REPLACE, ":", updated_envs,
                                            original_envs);
             if(_v.size() > 1)
-                rocprofsys::common::update_env(_env, "ROCPROFSYS_OUTPUT_PREFIX", _v.at(1),
+                rocprofsys::common::update_env(_env, env::OUTPUT_PREFIX, _v.at(1),
                                                update_mode::REPLACE, ":", updated_envs,
                                                original_envs);
         });
@@ -586,7 +586,7 @@ PROFILING WORKFLOW:
         .add_argument({ "-T", "--trace" }, "Generate a detailed trace (perfetto output)")
         .max_count(1)
         .action([&](parser_t& p) {
-            rocprofsys::common::update_env(_env, "ROCPROFSYS_TRACE", p.get<bool>("trace"),
+            rocprofsys::common::update_env(_env, env::TRACE, p.get<bool>("trace"),
                                            update_mode::REPLACE, ":", updated_envs,
                                            original_envs);
         });
@@ -597,7 +597,7 @@ PROFILING WORKFLOW:
         .max_count(1)
         .action([&](parser_t& p) {
             rocprofsys::common::update_env(
-                _env, "ROCPROFSYS_TRACE_LEGACY", p.get<bool>("trace-legacy"),
+                _env, env::TRACE_LEGACY, p.get<bool>("trace-legacy"),
                 update_mode::REPLACE, ":", updated_envs, original_envs);
         });
     parser
@@ -607,9 +607,9 @@ PROFILING WORKFLOW:
         .max_count(1)
         .conflicts({ "flat-profile" })
         .action([&](parser_t& p) {
-            rocprofsys::common::update_env(_env, "ROCPROFSYS_PROFILE",
-                                           p.get<bool>("profile"), update_mode::REPLACE,
-                                           ":", updated_envs, original_envs);
+            rocprofsys::common::update_env(_env, env::PROFILE, p.get<bool>("profile"),
+                                           update_mode::REPLACE, ":", updated_envs,
+                                           original_envs);
         });
     parser
         .add_argument({ "-F", "--flat-profile" },
@@ -618,10 +618,10 @@ PROFILING WORKFLOW:
         .conflicts({ "profile" })
         .action([&](parser_t& p) {
             rocprofsys::common::update_env(
-                _env, "ROCPROFSYS_PROFILE", p.get<bool>("flat-profile"),
-                update_mode::REPLACE, ":", updated_envs, original_envs);
+                _env, env::PROFILE, p.get<bool>("flat-profile"), update_mode::REPLACE,
+                ":", updated_envs, original_envs);
             rocprofsys::common::update_env(
-                _env, "ROCPROFSYS_FLAT_PROFILE", p.get<bool>("flat-profile"),
+                _env, env::FLAT_PROFILE, p.get<bool>("flat-profile"),
                 update_mode::REPLACE, ":", updated_envs, original_envs);
         });
     parser
@@ -632,14 +632,14 @@ PROFILING WORKFLOW:
         .action([&](parser_t& p) {
             auto _h = p.get<bool>("host");
             auto _d = p.get<bool>("device");
-            rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_PROCESS_SAMPLING",
-                                           _h || _d, update_mode::REPLACE, ":",
-                                           updated_envs, original_envs);
-            rocprofsys::common::update_env(_env, "ROCPROFSYS_CPU_FREQ_ENABLED", _h,
+            rocprofsys::common::update_env(_env, env::USE_PROCESS_SAMPLING, _h || _d,
+                                           update_mode::REPLACE, ":", updated_envs,
+                                           original_envs);
+            rocprofsys::common::update_env(_env, env::CPU_FREQ_ENABLED, _h,
                                            update_mode::REPLACE, ":", updated_envs,
                                            original_envs);
             if(_h)
-                rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_AMD_SMI", _d,
+                rocprofsys::common::update_env(_env, env::USE_AMD_SMI, _d,
                                                update_mode::REPLACE, ":", updated_envs,
                                                original_envs);
         });
@@ -651,14 +651,14 @@ PROFILING WORKFLOW:
         .action([&](parser_t& p) {
             auto _h = p.get<bool>("host");
             auto _d = p.get<bool>("device");
-            rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_PROCESS_SAMPLING",
-                                           _h || _d, update_mode::REPLACE, ":",
-                                           updated_envs, original_envs);
-            rocprofsys::common::update_env(_env, "ROCPROFSYS_USE_AMD_SMI", _d,
+            rocprofsys::common::update_env(_env, env::USE_PROCESS_SAMPLING, _h || _d,
+                                           update_mode::REPLACE, ":", updated_envs,
+                                           original_envs);
+            rocprofsys::common::update_env(_env, env::USE_AMD_SMI, _d,
                                            update_mode::REPLACE, ":", updated_envs,
                                            original_envs);
             if(_d)
-                rocprofsys::common::update_env(_env, "ROCPROFSYS_CPU_FREQ_ENABLED", _h,
+                rocprofsys::common::update_env(_env, env::CPU_FREQ_ENABLED, _h,
                                                update_mode::REPLACE, ":", updated_envs,
                                                original_envs);
         });
@@ -668,10 +668,10 @@ PROFILING WORKFLOW:
                       "'--sampling-wait'. See the descriptions for those two options.")
         .count(1)
         .action([&](parser_t& p) {
-            rocprofsys::common::update_env(_env, "ROCPROFSYS_TRACE_DELAY",
-                                           p.get<double>("wait"), update_mode::REPLACE,
-                                           ":", updated_envs, original_envs);
-            rocprofsys::common::update_env(_env, "ROCPROFSYS_SAMPLING_DELAY",
+            rocprofsys::common::update_env(_env, env::TRACE_DELAY, p.get<double>("wait"),
+                                           update_mode::REPLACE, ":", updated_envs,
+                                           original_envs);
+            rocprofsys::common::update_env(_env, env::SAMPLING_DELAY,
                                            p.get<double>("wait"), update_mode::REPLACE,
                                            ":", updated_envs, original_envs);
         });
@@ -683,10 +683,10 @@ PROFILING WORKFLOW:
         .count(1)
         .action([&](parser_t& p) {
             rocprofsys::common::update_env(
-                _env, "ROCPROFSYS_TRACE_DURATION", p.get<double>("duration"),
+                _env, env::TRACE_DURATION, p.get<double>("duration"),
                 update_mode::REPLACE, ":", updated_envs, original_envs);
             rocprofsys::common::update_env(
-                _env, "ROCPROFSYS_SAMPLING_DURATION", p.get<double>("duration"),
+                _env, env::SAMPLING_DURATION, p.get<double>("duration"),
                 update_mode::REPLACE, ":", updated_envs, original_envs);
         });
 
@@ -700,7 +700,7 @@ PROFILING WORKFLOW:
         .dtype("filepath")
         .action([&](parser_t& p) {
             rocprofsys::common::update_env(
-                _env, "ROCPROFSYS_PERFETTO_FILE", p.get<std::string>("trace-file"),
+                _env, env::PERFETTO_FILE, p.get<std::string>("trace-file"),
                 update_mode::REPLACE, ":", updated_envs, original_envs);
         });
     parser
@@ -709,19 +709,17 @@ PROFILING WORKFLOW:
         .count(1)
         .dtype("KB")
         .action([&](parser_t& p) {
-            rocprofsys::common::update_env(_env, "ROCPROFSYS_PERFETTO_BUFFER_SIZE_KB",
-                                           p.get<int64_t>("trace-buffer-size"),
-                                           update_mode::REPLACE, ":", updated_envs,
-                                           original_envs);
+            rocprofsys::common::update_env(
+                _env, env::PERFETTO_BUFFER_SIZE_KB, p.get<int64_t>("trace-buffer-size"),
+                update_mode::REPLACE, ":", updated_envs, original_envs);
         });
     parser.add_argument({ "--trace-fill-policy" }, _trace_policy_desc)
         .count(1)
         .choices({ "discard", "ring_buffer" })
         .action([&](parser_t& p) {
-            rocprofsys::common::update_env(_env, "ROCPROFSYS_PERFETTO_FILL_POLICY",
-                                           p.get<std::string>("trace-fill-policy"),
-                                           update_mode::REPLACE, ":", updated_envs,
-                                           original_envs);
+            rocprofsys::common::update_env(
+                _env, env::PERFETTO_FILL_POLICY, p.get<std::string>("trace-fill-policy"),
+                update_mode::REPLACE, ":", updated_envs, original_envs);
         });
     parser
         .add_argument({ "--trace-wait" },
@@ -732,8 +730,8 @@ PROFILING WORKFLOW:
         .count(1)
         .action([&](parser_t& p) {
             rocprofsys::common::update_env(
-                _env, "ROCPROFSYS_TRACE_DELAY", p.get<double>("trace-wait"),
-                update_mode::REPLACE, ":", updated_envs, original_envs);
+                _env, env::TRACE_DELAY, p.get<double>("trace-wait"), update_mode::REPLACE,
+                ":", updated_envs, original_envs);
         });
     parser
         .add_argument({ "--trace-duration" },
@@ -743,7 +741,7 @@ PROFILING WORKFLOW:
         .count(1)
         .action([&](parser_t& p) {
             rocprofsys::common::update_env(
-                _env, "ROCPROFSYS_TRACE_DURATION", p.get<double>("trace-duration"),
+                _env, env::TRACE_DURATION, p.get<double>("trace-duration"),
                 update_mode::REPLACE, ":", updated_envs, original_envs);
         });
     parser
@@ -755,7 +753,7 @@ PROFILING WORKFLOW:
         .min_count(1)
         .action([&](parser_t& p) {
             rocprofsys::common::update_env(
-                _env, "ROCPROFSYS_TRACE_PERIODS",
+                _env, env::TRACE_PERIODS,
                 join(array_config{ ",", "", "" },
                      p.get<std::vector<std::string>>("trace-periods")),
                 update_mode::REPLACE, ":", updated_envs, original_envs);
@@ -772,7 +770,7 @@ PROFILING WORKFLOW:
         .count(1)
         .action([&](parser_t& p) {
             rocprofsys::common::update_env(
-                _env, "ROCPROFSYS_TRACE_PERIOD_CLOCK_ID", p.get<double>("trace-clock-id"),
+                _env, env::TRACE_PERIOD_CLOCK_ID, p.get<double>("trace-clock-id"),
                 update_mode::REPLACE, ":", updated_envs, original_envs);
         })
         .choices(clock_id_choices.first)
@@ -788,19 +786,18 @@ PROFILING WORKFLOW:
         .choices({ "text", "json", "console" })
         .action([&](parser_t& p) {
             auto _v = p.get<std::set<std::string>>("profile");
-            rocprofsys::common::update_env(_env, "ROCPROFSYS_PROFILE", true,
-                                           update_mode::REPLACE, ":", updated_envs,
-                                           original_envs);
+            rocprofsys::common::update_env(_env, env::PROFILE, true, update_mode::REPLACE,
+                                           ":", updated_envs, original_envs);
             if(!_v.empty())
             {
                 rocprofsys::common::update_env(
-                    _env, "ROCPROFSYS_TEXT_OUTPUT", _v.count("text") != 0,
-                    update_mode::REPLACE, ":", updated_envs, original_envs);
+                    _env, env::TEXT_OUTPUT, _v.count("text") != 0, update_mode::REPLACE,
+                    ":", updated_envs, original_envs);
                 rocprofsys::common::update_env(
-                    _env, "ROCPROFSYS_JSON_OUTPUT", _v.count("json") != 0,
-                    update_mode::REPLACE, ":", updated_envs, original_envs);
+                    _env, env::JSON_OUTPUT, _v.count("json") != 0, update_mode::REPLACE,
+                    ":", updated_envs, original_envs);
                 rocprofsys::common::update_env(
-                    _env, "ROCPROFSYS_COUT_OUTPUT", _v.count("console") != 0,
+                    _env, env::COUT_OUTPUT, _v.count("console") != 0,
                     update_mode::REPLACE, ":", updated_envs, original_envs);
             }
         });
@@ -814,14 +811,14 @@ PROFILING WORKFLOW:
         .max_count(2)
         .action([&](parser_t& p) {
             auto _v = p.get<std::vector<std::string>>("profile-diff");
-            rocprofsys::common::update_env(_env, "ROCPROFSYS_DIFF_OUTPUT", true,
+            rocprofsys::common::update_env(_env, env::DIFF_OUTPUT, true,
                                            update_mode::REPLACE, ":", updated_envs,
                                            original_envs);
-            rocprofsys::common::update_env(_env, "ROCPROFSYS_INPUT_PATH", _v.at(0),
+            rocprofsys::common::update_env(_env, env::INPUT_PATH, _v.at(0),
                                            update_mode::REPLACE, ":", updated_envs,
                                            original_envs);
             if(_v.size() > 1)
-                rocprofsys::common::update_env(_env, "ROCPROFSYS_INPUT_PREFIX", _v.at(1),
+                rocprofsys::common::update_env(_env, env::INPUT_PREFIX, _v.at(1),
                                                update_mode::REPLACE, ":", updated_envs,
                                                original_envs);
         });
@@ -837,7 +834,7 @@ PROFILING WORKFLOW:
         .count(1)
         .action([&](parser_t& p) {
             rocprofsys::common::update_env(
-                _env, "ROCPROFSYS_PROCESS_SAMPLING_FREQ", p.get<double>("process-freq"),
+                _env, env::PROCESS_SAMPLING_FREQ, p.get<double>("process-freq"),
                 update_mode::REPLACE, ":", updated_envs, original_envs);
         });
     parser
@@ -847,7 +844,7 @@ PROFILING WORKFLOW:
         .count(1)
         .action([&](parser_t& p) {
             rocprofsys::common::update_env(
-                _env, "ROCPROFSYS_PROCESS_SAMPLING_DELAY", p.get<double>("process-wait"),
+                _env, env::PROCESS_SAMPLING_DELAY, p.get<double>("process-wait"),
                 update_mode::REPLACE, ":", updated_envs, original_envs);
         });
     parser
@@ -856,10 +853,9 @@ PROFILING WORKFLOW:
             "Set the duration of the host/device sampling (in seconds of realtime)")
         .count(1)
         .action([&](parser_t& p) {
-            rocprofsys::common::update_env(_env, "ROCPROFSYS_SAMPLING_PROCESS_DURATION",
-                                           p.get<double>("process-duration"),
-                                           update_mode::REPLACE, ":", updated_envs,
-                                           original_envs);
+            rocprofsys::common::update_env(
+                _env, env::SAMPLING_PROCESS_DURATION, p.get<double>("process-duration"),
+                update_mode::REPLACE, ":", updated_envs, original_envs);
         });
     parser
         .add_argument({ "--cpus" },
@@ -868,7 +864,7 @@ PROFILING WORKFLOW:
         .required({ "host" })
         .action([&](parser_t& p) {
             rocprofsys::common::update_env(
-                _env, "ROCPROFSYS_SAMPLING_CPUS",
+                _env, env::SAMPLING_CPUS,
                 join(array_config{ "," }, p.get<std::vector<std::string>>("cpus")),
                 update_mode::REPLACE, ":", updated_envs, original_envs);
         });
@@ -879,7 +875,7 @@ PROFILING WORKFLOW:
         .required({ "device" })
         .action([&](parser_t& p) {
             rocprofsys::common::update_env(
-                _env, "ROCPROFSYS_SAMPLING_GPUS",
+                _env, env::SAMPLING_GPUS,
                 join(array_config{ "," }, p.get<std::vector<std::string>>("gpus")),
                 update_mode::REPLACE, ":", updated_envs, original_envs);
         });
@@ -890,7 +886,7 @@ PROFILING WORKFLOW:
         .required({ "device" })
         .action([&](parser_t& p) {
             rocprofsys::common::update_env(
-                _env, "ROCPROFSYS_SAMPLING_AINICS",
+                _env, env::SAMPLING_AINICS,
                 join(array_config{ "," }, p.get<std::vector<std::string>>("ai-nics")),
                 update_mode::REPLACE, ":", updated_envs, original_envs);
         });
@@ -902,7 +898,7 @@ PROFILING WORKFLOW:
                                           "(number of interrupts per second)")
         .count(1)
         .action([&](parser_t& p) {
-            rocprofsys::common::update_env(_env, "ROCPROFSYS_SAMPLING_FREQ",
+            rocprofsys::common::update_env(_env, env::SAMPLING_FREQ,
                                            p.get<double>("freq"), update_mode::REPLACE,
                                            ":", updated_envs, original_envs);
         });
@@ -915,7 +911,7 @@ PROFILING WORKFLOW:
         .count(1)
         .action([&](parser_t& p) {
             rocprofsys::common::update_env(
-                _env, "ROCPROFSYS_SAMPLING_DELAY", p.get<double>("sampling-wait"),
+                _env, env::SAMPLING_DELAY, p.get<double>("sampling-wait"),
                 update_mode::REPLACE, ":", updated_envs, original_envs);
         });
     parser
@@ -927,7 +923,7 @@ PROFILING WORKFLOW:
         .count(1)
         .action([&](parser_t& p) {
             rocprofsys::common::update_env(
-                _env, "ROCPROFSYS_SAMPLING_DURATION", p.get<double>("sampling-duration"),
+                _env, env::SAMPLING_DURATION, p.get<double>("sampling-duration"),
                 update_mode::REPLACE, ":", updated_envs, original_envs);
         });
     parser
@@ -938,7 +934,7 @@ PROFILING WORKFLOW:
         .min_count(1)
         .action([&](parser_t& p) {
             rocprofsys::common::update_env(
-                _env, "ROCPROFSYS_SAMPLING_TIDS",
+                _env, env::SAMPLING_TIDS,
                 join(array_config{ ", " }, p.get<std::vector<int64_t>>("tids")),
                 update_mode::REPLACE, ":", updated_envs, original_envs);
         });
@@ -950,29 +946,28 @@ PROFILING WORKFLOW:
         .min_count(0)
         .action([&](parser_t& p) {
             auto _v = p.get<std::deque<std::string>>("cputime");
-            rocprofsys::common::update_env(_env, "ROCPROFSYS_SAMPLING_CPUTIME", true,
+            rocprofsys::common::update_env(_env, env::SAMPLING_CPUTIME, true,
                                            update_mode::REPLACE, ":", updated_envs,
                                            original_envs);
             if(!_v.empty())
             {
-                rocprofsys::common::update_env(_env, "ROCPROFSYS_SAMPLING_CPUTIME_FREQ",
+                rocprofsys::common::update_env(_env, env::SAMPLING_CPUTIME_FREQ,
                                                _v.front(), update_mode::REPLACE, ":",
                                                updated_envs, original_envs);
                 _v.pop_front();
             }
             if(!_v.empty())
             {
-                rocprofsys::common::update_env(_env, "ROCPROFSYS_SAMPLING_CPUTIME_DELAY",
+                rocprofsys::common::update_env(_env, env::SAMPLING_CPUTIME_DELAY,
                                                _v.front(), update_mode::REPLACE, ":",
                                                updated_envs, original_envs);
                 _v.pop_front();
             }
             if(!_v.empty())
             {
-                rocprofsys::common::update_env(_env, "ROCPROFSYS_SAMPLING_CPUTIME_TIDS",
-                                               join(array_config{ "," }, _v),
-                                               update_mode::REPLACE, ":", updated_envs,
-                                               original_envs);
+                rocprofsys::common::update_env(
+                    _env, env::SAMPLING_CPUTIME_TIDS, join(array_config{ "," }, _v),
+                    update_mode::REPLACE, ":", updated_envs, original_envs);
             }
         });
 
@@ -980,29 +975,28 @@ PROFILING WORKFLOW:
         .min_count(0)
         .action([&](parser_t& p) {
             auto _v = p.get<std::deque<std::string>>("realtime");
-            rocprofsys::common::update_env(_env, "ROCPROFSYS_SAMPLING_REALTIME", true,
+            rocprofsys::common::update_env(_env, env::SAMPLING_REALTIME, true,
                                            update_mode::REPLACE, ":", updated_envs,
                                            original_envs);
             if(!_v.empty())
             {
-                rocprofsys::common::update_env(_env, "ROCPROFSYS_SAMPLING_REALTIME_FREQ",
+                rocprofsys::common::update_env(_env, env::SAMPLING_REALTIME_FREQ,
                                                _v.front(), update_mode::REPLACE, ":",
                                                updated_envs, original_envs);
                 _v.pop_front();
             }
             if(!_v.empty())
             {
-                rocprofsys::common::update_env(_env, "ROCPROFSYS_SAMPLING_REALTIME_DELAY",
+                rocprofsys::common::update_env(_env, env::SAMPLING_REALTIME_DELAY,
                                                _v.front(), update_mode::REPLACE, ":",
                                                updated_envs, original_envs);
                 _v.pop_front();
             }
             if(!_v.empty())
             {
-                rocprofsys::common::update_env(_env, "ROCPROFSYS_SAMPLING_REALTIME_TIDS",
-                                               join(array_config{ "," }, _v),
-                                               update_mode::REPLACE, ":", updated_envs,
-                                               original_envs);
+                rocprofsys::common::update_env(
+                    _env, env::SAMPLING_REALTIME_TIDS, join(array_config{ "," }, _v),
+                    update_mode::REPLACE, ":", updated_envs, original_envs);
             }
         });
 
@@ -1032,14 +1026,14 @@ PROFILING WORKFLOW:
                     rocprofsys::common::update_env(_env, _opt, true, update_mode::REPLACE,
                                                    ":", updated_envs, original_envs);
             };
-            _update("ROCPROFSYS_USE_KOKKOSP", _v.count("kokkosp") > 0);
-            _update("ROCPROFSYS_USE_MPIP", _v.count("mpip") > 0);
-            _update("ROCPROFSYS_USE_OMPT", _v.count("ompt") > 0);
-            _update("ROCPROFSYS_USE_RCCLP", _v.count("rcclp") > 0);
-            _update("ROCPROFSYS_USE_AMD_SMI", _v.count("amd-smi") > 0);
-            _update("ROCPROFSYS_TRACE_THREAD_LOCKS", _v.count("mutex-locks") > 0);
-            _update("ROCPROFSYS_TRACE_THREAD_RW_LOCKS", _v.count("rw-locks") > 0);
-            _update("ROCPROFSYS_TRACE_THREAD_SPIN_LOCKS", _v.count("spin-locks") > 0);
+            _update(env::USE_KOKKOSP, _v.count("kokkosp") > 0);
+            _update(env::USE_MPIP, _v.count("mpip") > 0);
+            _update(env::USE_OMPT, _v.count("ompt") > 0);
+            _update(env::USE_RCCLP, _v.count("rcclp") > 0);
+            _update(env::USE_AMD_SMI, _v.count("amd-smi") > 0);
+            _update(env::TRACE_THREAD_LOCKS, _v.count("mutex-locks") > 0);
+            _update(env::TRACE_THREAD_RW_LOCKS, _v.count("rw-locks") > 0);
+            _update(env::TRACE_THREAD_SPIN_LOCKS, _v.count("spin-locks") > 0);
 
             if(_v.count("all") > 0 || _v.count("kokkosp") > 0)
                 rocprofsys::common::update_env(_env, "KOKKOS_TOOLS_LIBS", _omni_libpath,
@@ -1057,14 +1051,14 @@ PROFILING WORKFLOW:
                                                    update_mode::REPLACE, ":",
                                                    updated_envs, original_envs);
             };
-            _update("ROCPROFSYS_USE_KOKKOSP", _v.count("kokkosp") > 0);
-            _update("ROCPROFSYS_USE_MPIP", _v.count("mpip") > 0);
-            _update("ROCPROFSYS_USE_OMPT", _v.count("ompt") > 0);
-            _update("ROCPROFSYS_USE_RCCLP", _v.count("rcclp") > 0);
-            _update("ROCPROFSYS_USE_AMD_SMI", _v.count("amd-smi") > 0);
-            _update("ROCPROFSYS_TRACE_THREAD_LOCKS", _v.count("mutex-locks") > 0);
-            _update("ROCPROFSYS_TRACE_THREAD_RW_LOCKS", _v.count("rw-locks") > 0);
-            _update("ROCPROFSYS_TRACE_THREAD_SPIN_LOCKS", _v.count("spin-locks") > 0);
+            _update(env::USE_KOKKOSP, _v.count("kokkosp") > 0);
+            _update(env::USE_MPIP, _v.count("mpip") > 0);
+            _update(env::USE_OMPT, _v.count("ompt") > 0);
+            _update(env::USE_RCCLP, _v.count("rcclp") > 0);
+            _update(env::USE_AMD_SMI, _v.count("amd-smi") > 0);
+            _update(env::TRACE_THREAD_LOCKS, _v.count("mutex-locks") > 0);
+            _update(env::TRACE_THREAD_RW_LOCKS, _v.count("rw-locks") > 0);
+            _update(env::TRACE_THREAD_SPIN_LOCKS, _v.count("spin-locks") > 0);
 
             if(_v.count("all") > 0 || _v.count("kokkosp") > 0)
                 remove_env(_env, "KOKKOS_TOOLS_LIBS", original_envs);
@@ -1078,7 +1072,7 @@ PROFILING WORKFLOW:
         .action([&](parser_t& p) {
             auto _events =
                 join(array_config{ "," }, p.get<std::vector<std::string>>("cpu-events"));
-            rocprofsys::common::update_env(_env, "ROCPROFSYS_PAPI_EVENTS", _events,
+            rocprofsys::common::update_env(_env, env::PAPI_EVENTS, _events,
                                            update_mode::REPLACE, ":", updated_envs,
                                            original_envs);
         });
@@ -1090,7 +1084,7 @@ PROFILING WORKFLOW:
         .action([&](parser_t& p) {
             auto _events =
                 join(array_config{ "," }, p.get<std::vector<std::string>>("gpu-events"));
-            rocprofsys::common::update_env(_env, "ROCPROFSYS_ROCM_EVENTS", _events,
+            rocprofsys::common::update_env(_env, env::ROCM_EVENTS, _events,
                                            update_mode::REPLACE, ":", updated_envs,
                                            original_envs);
         });
@@ -1101,7 +1095,7 @@ PROFILING WORKFLOW:
                       "Include inline info in output when available")
         .max_count(1)
         .action([&](parser_t& p) {
-            rocprofsys::common::update_env(_env, "ROCPROFSYS_SAMPLING_INCLUDE_INLINES",
+            rocprofsys::common::update_env(_env, env::SAMPLING_INCLUDE_INLINES,
                                            p.get<bool>("inlines"), update_mode::REPLACE,
                                            ":", updated_envs, original_envs);
         });
@@ -1144,7 +1138,7 @@ PROFILING WORKFLOW:
         throw std::runtime_error(_cerr.what());
 
     if(parser.exists("realtime") && !parser.exists("cputime"))
-        rocprofsys::common::update_env(_env, "ROCPROFSYS_SAMPLING_CPUTIME", false,
+        rocprofsys::common::update_env(_env, env::SAMPLING_CPUTIME, false,
                                        update_mode::REPLACE, ":", updated_envs,
                                        original_envs);
     if(parser.exists("profile") && parser.exists("flat-profile"))

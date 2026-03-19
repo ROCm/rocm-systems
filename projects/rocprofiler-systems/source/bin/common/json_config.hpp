@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "common/env_vars.hpp"
+
 #include <nlohmann/json.hpp>
 
 #include <charconv>
@@ -70,6 +72,35 @@ extract_setting_value(const nlohmann::json& obj)
     return std::nullopt;
 }
 
+// ============================================================================
+// Resolve helpers (JSON -> env var map)
+// ============================================================================
+
+/**
+ * Set result[env_var] from a JSON "enabled" bool field.
+ */
+inline void
+resolve_enabled(std::map<std::string, std::string>& result, const nlohmann::json& section,
+                std::string_view json_key, std::string_view env_var)
+{
+    if(section.contains(json_key))
+        result[std::string{ env_var }] = section[json_key].get<bool>() ? "true" : "false";
+}
+
+/**
+ * Set result[env_var] from a JSON value/enabled field (uses extract_setting_value).
+ */
+inline void
+resolve_value(std::map<std::string, std::string>& result, const nlohmann::json& section,
+              std::string_view json_key, std::string_view env_var)
+{
+    if(section.contains(json_key))
+    {
+        if(auto val = extract_setting_value(section[json_key]))
+            result[std::string{ env_var }] = *val;
+    }
+}
+
 /**
  * Resolves the new schema-based JSON format into a flat map of ROCPROFSYS_* env vars.
  *
@@ -89,34 +120,21 @@ resolve_schema_config(const nlohmann::json& j)
     if(j.contains("tracing"))
     {
         const auto& tracing = j["tracing"];
-        if(tracing.contains("enabled"))
-            result["ROCPROFSYS_TRACE"] =
-                tracing["enabled"].get<bool>() ? "true" : "false";
-        if(tracing.contains("buffer_size_kb"))
-        {
-            if(auto val = extract_setting_value(tracing["buffer_size_kb"]))
-                result["ROCPROFSYS_PERFETTO_BUFFER_SIZE_KB"] = *val;
-        }
-        if(tracing.contains("fill_policy"))
-        {
-            if(auto val = extract_setting_value(tracing["fill_policy"]))
-                result["ROCPROFSYS_PERFETTO_FILL_POLICY"] = *val;
-        }
+        resolve_enabled(result, tracing, "enabled", env_vars::TRACE);
+        resolve_value(result, tracing, "buffer_size_kb",
+                      env_vars::PERFETTO_BUFFER_SIZE_KB);
+        resolve_value(result, tracing, "fill_policy", env_vars::PERFETTO_FILL_POLICY);
     }
 
     // --- Profiling section ---
     if(j.contains("profiling"))
     {
         const auto& profiling = j["profiling"];
-        if(profiling.contains("enabled"))
-            result["ROCPROFSYS_PROFILE"] =
-                profiling["enabled"].get<bool>() ? "true" : "false";
+        resolve_enabled(result, profiling, "enabled", env_vars::PROFILE);
         if(profiling.contains("flat_profile"))
         {
-            const auto& flat = profiling["flat_profile"];
-            if(flat.contains("enabled"))
-                result["ROCPROFSYS_FLAT_PROFILE"] =
-                    flat["enabled"].get<bool>() ? "true" : "false";
+            resolve_enabled(result, profiling["flat_profile"], "enabled",
+                            env_vars::FLAT_PROFILE);
         }
     }
 
@@ -124,39 +142,13 @@ resolve_schema_config(const nlohmann::json& j)
     if(j.contains("sampling"))
     {
         const auto& sampling = j["sampling"];
-        if(sampling.contains("enabled"))
-            result["ROCPROFSYS_USE_SAMPLING"] =
-                sampling["enabled"].get<bool>() ? "true" : "false";
-        if(sampling.contains("timer"))
-        {
-            if(auto val = extract_setting_value(sampling["timer"]))
-                result["ROCPROFSYS_SAMPLING_TIMER"] = *val;
-        }
-        if(sampling.contains("frequency_hz"))
-        {
-            if(auto val = extract_setting_value(sampling["frequency_hz"]))
-                result["ROCPROFSYS_SAMPLING_FREQ"] = *val;
-        }
-        if(sampling.contains("delay_sec"))
-        {
-            if(auto val = extract_setting_value(sampling["delay_sec"]))
-                result["ROCPROFSYS_SAMPLING_DELAY"] = *val;
-        }
-        if(sampling.contains("duration_sec"))
-        {
-            if(auto val = extract_setting_value(sampling["duration_sec"]))
-                result["ROCPROFSYS_SAMPLING_DURATION"] = *val;
-        }
-        if(sampling.contains("cpus"))
-        {
-            if(auto val = extract_setting_value(sampling["cpus"]))
-                result["ROCPROFSYS_SAMPLING_CPUS"] = *val;
-        }
-        if(sampling.contains("gpus"))
-        {
-            if(auto val = extract_setting_value(sampling["gpus"]))
-                result["ROCPROFSYS_SAMPLING_GPUS"] = *val;
-        }
+        resolve_enabled(result, sampling, "enabled", env_vars::USE_SAMPLING);
+        resolve_value(result, sampling, "timer", env_vars::SAMPLING_TIMER);
+        resolve_value(result, sampling, "frequency_hz", env_vars::SAMPLING_FREQ);
+        resolve_value(result, sampling, "delay_sec", env_vars::SAMPLING_DELAY);
+        resolve_value(result, sampling, "duration_sec", env_vars::SAMPLING_DURATION);
+        resolve_value(result, sampling, "cpus", env_vars::SAMPLING_CPUS);
+        resolve_value(result, sampling, "gpus", env_vars::SAMPLING_GPUS);
     }
 
     // --- Domains section ---
@@ -170,8 +162,8 @@ resolve_schema_config(const nlohmann::json& j)
             const auto& gpu = domains["gpu"];
             if(gpu.contains("enabled") && gpu["enabled"].get<bool>())
             {
-                result["ROCPROFSYS_USE_AMD_SMI"]          = "true";
-                result["ROCPROFSYS_USE_PROCESS_SAMPLING"] = "true";
+                result[std::string{ env_vars::USE_AMD_SMI }]          = "true";
+                result[std::string{ env_vars::USE_PROCESS_SAMPLING }] = "true";
 
                 // Collect enabled metrics
                 if(gpu.contains("metrics"))
@@ -194,15 +186,11 @@ resolve_schema_config(const nlohmann::json& j)
                             if(!metrics_str.empty()) metrics_str += ',';
                             metrics_str += m;
                         }
-                        result["ROCPROFSYS_AMD_SMI_METRICS"] = metrics_str;
+                        result[std::string{ env_vars::AMD_SMI_METRICS }] = metrics_str;
                     }
                 }
 
-                if(gpu.contains("sampling_rate_hz"))
-                {
-                    if(auto val = extract_setting_value(gpu["sampling_rate_hz"]))
-                        result["ROCPROFSYS_AMD_SMI_FREQ"] = *val;
-                }
+                resolve_value(result, gpu, "sampling_rate_hz", env_vars::AMD_SMI_FREQ);
             }
         }
 
@@ -213,8 +201,8 @@ resolve_schema_config(const nlohmann::json& j)
             if(rocm.contains("enabled") && rocm["enabled"].get<bool>())
             {
                 // Top-level rocm.enabled ensures tracing is on and default domains set
-                if(result.find("ROCPROFSYS_TRACE") == result.end())
-                    result["ROCPROFSYS_TRACE"] = "true";
+                if(result.find(std::string{ env_vars::TRACE }) == result.end())
+                    result[std::string{ env_vars::TRACE }] = "true";
             }
             if(rocm.contains("api_domains"))
             {
@@ -236,15 +224,13 @@ resolve_schema_config(const nlohmann::json& j)
                         if(!apis_str.empty()) apis_str += ',';
                         apis_str += a;
                     }
-                    result["ROCPROFSYS_ROCM_DOMAINS"] = apis_str;
+                    result[std::string{ env_vars::ROCM_DOMAINS }] = apis_str;
                 }
             }
             if(rocm.contains("group_by_queue"))
             {
-                const auto& gbq = rocm["group_by_queue"];
-                if(gbq.contains("enabled"))
-                    result["ROCPROFSYS_ROCM_GROUP_BY_QUEUE"] =
-                        gbq["enabled"].get<bool>() ? "true" : "false";
+                resolve_enabled(result, rocm["group_by_queue"], "enabled",
+                                env_vars::ROCM_GROUP_BY_QUEUE);
             }
         }
 
@@ -254,14 +240,14 @@ resolve_schema_config(const nlohmann::json& j)
             const auto& cpu = domains["cpu"];
             if(cpu.contains("enabled") && cpu["enabled"].get<bool>())
             {
-                result["ROCPROFSYS_USE_PROCESS_SAMPLING"] = "true";
+                result[std::string{ env_vars::USE_PROCESS_SAMPLING }] = "true";
                 if(cpu.contains("metrics"))
                 {
                     const auto& metrics = cpu["metrics"];
                     if(metrics.contains("freq") && metrics["freq"].contains("enabled") &&
                        metrics["freq"]["enabled"].get<bool>())
                     {
-                        result["ROCPROFSYS_CPU_FREQ"] = "true";
+                        result[std::string{ env_vars::CPU_FREQ }] = "true";
                     }
                 }
             }
@@ -277,24 +263,24 @@ resolve_schema_config(const nlohmann::json& j)
                 if(runtimes.contains("mpi") && runtimes["mpi"].contains("enabled") &&
                    runtimes["mpi"]["enabled"].get<bool>())
                 {
-                    result["ROCPROFSYS_USE_MPIP"] = "true";
+                    result[std::string{ env_vars::USE_MPIP }] = "true";
                 }
                 if(runtimes.contains("openmp") &&
                    runtimes["openmp"].contains("enabled") &&
                    runtimes["openmp"]["enabled"].get<bool>())
                 {
-                    result["ROCPROFSYS_USE_OMPT"] = "true";
+                    result[std::string{ env_vars::USE_OMPT }] = "true";
                 }
                 if(runtimes.contains("kokkos") &&
                    runtimes["kokkos"].contains("enabled") &&
                    runtimes["kokkos"]["enabled"].get<bool>())
                 {
-                    result["ROCPROFSYS_USE_KOKKOSP"] = "true";
+                    result[std::string{ env_vars::USE_KOKKOSP }] = "true";
                 }
                 if(runtimes.contains("rccl") && runtimes["rccl"].contains("enabled") &&
                    runtimes["rccl"]["enabled"].get<bool>())
                 {
-                    result["ROCPROFSYS_USE_RCCLP"] = "true";
+                    result[std::string{ env_vars::USE_RCCLP }] = "true";
                 }
             }
         }
@@ -304,73 +290,31 @@ resolve_schema_config(const nlohmann::json& j)
     if(j.contains("output"))
     {
         const auto& output = j["output"];
-        if(output.contains("path"))
-        {
-            if(auto val = extract_setting_value(output["path"]))
-                result["ROCPROFSYS_OUTPUT_PATH"] = *val;
-        }
+        resolve_value(result, output, "path", env_vars::OUTPUT_PATH);
         if(output.contains("time_output"))
-        {
-            const auto& to = output["time_output"];
-            if(to.contains("enabled"))
-                result["ROCPROFSYS_TIME_OUTPUT"] =
-                    to["enabled"].get<bool>() ? "true" : "false";
-        }
+            resolve_enabled(result, output["time_output"], "enabled",
+                            env_vars::TIME_OUTPUT);
         if(output.contains("file_output"))
-        {
-            const auto& fo = output["file_output"];
-            if(fo.contains("enabled"))
-                result["ROCPROFSYS_FILE_OUTPUT"] =
-                    fo["enabled"].get<bool>() ? "true" : "false";
-        }
+            resolve_enabled(result, output["file_output"], "enabled",
+                            env_vars::FILE_OUTPUT);
         if(output.contains("rocpd_output"))
-        {
-            const auto& rpd = output["rocpd_output"];
-            if(rpd.contains("enabled"))
-                result["ROCPROFSYS_USE_ROCPD"] =
-                    rpd["enabled"].get<bool>() ? "true" : "false";
-        }
+            resolve_enabled(result, output["rocpd_output"], "enabled",
+                            env_vars::USE_ROCPD);
     }
 
     // --- Causal profiling section ---
     if(j.contains("causal"))
     {
         const auto& causal = j["causal"];
-        if(causal.contains("enabled"))
-            result["ROCPROFSYS_USE_CAUSAL"] =
-                causal["enabled"].get<bool>() ? "true" : "false";
-        if(causal.contains("mode"))
-        {
-            if(auto val = extract_setting_value(causal["mode"]))
-                result["ROCPROFSYS_CAUSAL_MODE"] = *val;
-        }
-        if(causal.contains("backend"))
-        {
-            if(auto val = extract_setting_value(causal["backend"]))
-                result["ROCPROFSYS_CAUSAL_BACKEND"] = *val;
-        }
-        if(causal.contains("binary_scope"))
-        {
-            if(auto val = extract_setting_value(causal["binary_scope"]))
-                result["ROCPROFSYS_CAUSAL_BINARY_SCOPE"] = *val;
-        }
-        if(causal.contains("function_scope"))
-        {
-            if(auto val = extract_setting_value(causal["function_scope"]))
-                result["ROCPROFSYS_CAUSAL_FUNCTION_SCOPE"] = *val;
-        }
-        if(causal.contains("source_scope"))
-        {
-            if(auto val = extract_setting_value(causal["source_scope"]))
-                result["ROCPROFSYS_CAUSAL_SOURCE_SCOPE"] = *val;
-        }
+        resolve_enabled(result, causal, "enabled", env_vars::USE_CAUSAL);
+        resolve_value(result, causal, "mode", env_vars::CAUSAL_MODE);
+        resolve_value(result, causal, "backend", env_vars::CAUSAL_BACKEND);
+        resolve_value(result, causal, "binary_scope", env_vars::CAUSAL_BINARY_SCOPE);
+        resolve_value(result, causal, "function_scope", env_vars::CAUSAL_FUNCTION_SCOPE);
+        resolve_value(result, causal, "source_scope", env_vars::CAUSAL_SOURCE_SCOPE);
         if(causal.contains("end_to_end"))
-        {
-            const auto& e2e = causal["end_to_end"];
-            if(e2e.contains("enabled"))
-                result["ROCPROFSYS_CAUSAL_END_TO_END"] =
-                    e2e["enabled"].get<bool>() ? "true" : "false";
-        }
+            resolve_enabled(result, causal["end_to_end"], "enabled",
+                            env_vars::CAUSAL_END_TO_END);
     }
 
     // --- Hardware counters section ---
@@ -379,24 +323,12 @@ resolve_schema_config(const nlohmann::json& j)
         const auto& hw = j["hardware_counters"];
         if(hw.contains("enabled") && hw["enabled"].get<bool>())
         {
-            if(hw.contains("rocm_events"))
-            {
-                if(auto val = extract_setting_value(hw["rocm_events"]))
-                    result["ROCPROFSYS_ROCM_EVENTS"] = *val;
-            }
-            if(hw.contains("papi_events"))
-            {
-                if(auto val = extract_setting_value(hw["papi_events"]))
-                    result["ROCPROFSYS_PAPI_EVENTS"] = *val;
-            }
+            resolve_value(result, hw, "rocm_events", env_vars::ROCM_EVENTS);
+            resolve_value(result, hw, "papi_events", env_vars::PAPI_EVENTS);
         }
         if(hw.contains("papi_multiplexing"))
-        {
-            const auto& pm = hw["papi_multiplexing"];
-            if(pm.contains("enabled"))
-                result["ROCPROFSYS_PAPI_MULTIPLEXING"] =
-                    pm["enabled"].get<bool>() ? "true" : "false";
-        }
+            resolve_enabled(result, hw["papi_multiplexing"], "enabled",
+                            env_vars::PAPI_MULTIPLEXING);
     }
 
     // --- Advanced section ---
@@ -404,61 +336,20 @@ resolve_schema_config(const nlohmann::json& j)
     {
         const auto& adv = j["advanced"];
         if(adv.contains("cpu_affinity"))
-        {
-            const auto& ca = adv["cpu_affinity"];
-            if(ca.contains("enabled"))
-                result["ROCPROFSYS_CPU_AFFINITY"] =
-                    ca["enabled"].get<bool>() ? "true" : "false";
-        }
+            resolve_enabled(result, adv["cpu_affinity"], "enabled",
+                            env_vars::CPU_AFFINITY);
         if(adv.contains("collapse_threads"))
-        {
-            const auto& ct = adv["collapse_threads"];
-            if(ct.contains("enabled"))
-                result["ROCPROFSYS_COLLAPSE_THREADS"] =
-                    ct["enabled"].get<bool>() ? "true" : "false";
-        }
-        if(adv.contains("max_depth"))
-        {
-            if(auto val = extract_setting_value(adv["max_depth"]))
-                result["ROCPROFSYS_MAX_DEPTH"] = *val;
-        }
-        if(adv.contains("trace_delay_sec"))
-        {
-            if(auto val = extract_setting_value(adv["trace_delay_sec"]))
-                result["ROCPROFSYS_TRACE_DELAY"] = *val;
-        }
-        if(adv.contains("trace_duration_sec"))
-        {
-            if(auto val = extract_setting_value(adv["trace_duration_sec"]))
-                result["ROCPROFSYS_TRACE_DURATION"] = *val;
-        }
-        if(adv.contains("verbose"))
-        {
-            if(auto val = extract_setting_value(adv["verbose"]))
-                result["ROCPROFSYS_VERBOSE"] = *val;
-        }
+            resolve_enabled(result, adv["collapse_threads"], "enabled",
+                            env_vars::COLLAPSE_THREADS);
+        resolve_value(result, adv, "max_depth", env_vars::MAX_DEPTH);
+        resolve_value(result, adv, "trace_delay_sec", env_vars::TRACE_DELAY);
+        resolve_value(result, adv, "trace_duration_sec", env_vars::TRACE_DURATION);
+        resolve_value(result, adv, "verbose", env_vars::VERBOSE);
         if(adv.contains("debug"))
-        {
-            const auto& dbg = adv["debug"];
-            if(dbg.contains("enabled"))
-                result["ROCPROFSYS_DEBUG"] =
-                    dbg["enabled"].get<bool>() ? "true" : "false";
-        }
-        if(adv.contains("timemory_components"))
-        {
-            if(auto val = extract_setting_value(adv["timemory_components"]))
-                result["ROCPROFSYS_TIMEMORY_COMPONENTS"] = *val;
-        }
-        if(adv.contains("network_interface"))
-        {
-            if(auto val = extract_setting_value(adv["network_interface"]))
-                result["ROCPROFSYS_NETWORK_INTERFACE"] = *val;
-        }
-        if(adv.contains("trace_periods"))
-        {
-            if(auto val = extract_setting_value(adv["trace_periods"]))
-                result["ROCPROFSYS_TRACE_PERIODS"] = *val;
-        }
+            resolve_enabled(result, adv["debug"], "enabled", env_vars::DEBUG);
+        resolve_value(result, adv, "timemory_components", env_vars::TIMEMORY_COMPONENTS);
+        resolve_value(result, adv, "network_interface", env_vars::NETWORK_INTERFACE);
+        resolve_value(result, adv, "trace_periods", env_vars::TRACE_PERIODS);
     }
 
     return result;
@@ -614,19 +505,23 @@ expand_parallel_runtimes(const std::string& runtimes_str)
     // If empty or "all", enable all runtimes
     if(runtimes_str.empty() || runtimes_str == "all")
     {
-        result["ROCPROFSYS_USE_MPIP"]    = "true";
-        result["ROCPROFSYS_USE_OMPT"]    = "true";
-        result["ROCPROFSYS_USE_KOKKOSP"] = "true";
-        result["ROCPROFSYS_USE_RCCLP"]   = "true";
+        result[std::string{ env_vars::USE_MPIP }]    = "true";
+        result[std::string{ env_vars::USE_OMPT }]    = "true";
+        result[std::string{ env_vars::USE_KOKKOSP }] = "true";
+        result[std::string{ env_vars::USE_RCCLP }]   = "true";
         return result;
     }
 
     static const std::map<std::string, std::string> shortcuts = {
-        { "mpi", "ROCPROFSYS_USE_MPIP" },        { "mpip", "ROCPROFSYS_USE_MPIP" },
-        { "openmp", "ROCPROFSYS_USE_OMPT" },     { "ompt", "ROCPROFSYS_USE_OMPT" },
-        { "omp", "ROCPROFSYS_USE_OMPT" },        { "kokkos", "ROCPROFSYS_USE_KOKKOSP" },
-        { "kokkosp", "ROCPROFSYS_USE_KOKKOSP" }, { "rccl", "ROCPROFSYS_USE_RCCLP" },
-        { "rcclp", "ROCPROFSYS_USE_RCCLP" },
+        { "mpi", std::string{ env_vars::USE_MPIP } },
+        { "mpip", std::string{ env_vars::USE_MPIP } },
+        { "openmp", std::string{ env_vars::USE_OMPT } },
+        { "ompt", std::string{ env_vars::USE_OMPT } },
+        { "omp", std::string{ env_vars::USE_OMPT } },
+        { "kokkos", std::string{ env_vars::USE_KOKKOSP } },
+        { "kokkosp", std::string{ env_vars::USE_KOKKOSP } },
+        { "rccl", std::string{ env_vars::USE_RCCLP } },
+        { "rcclp", std::string{ env_vars::USE_RCCLP } },
     };
 
     std::string        token;
@@ -748,58 +643,125 @@ set_json_double(nlohmann::json& target, const std::string& value)
         target = value;
 }
 
+// ============================================================================
+// Export helpers (env var map -> JSON schema)
+// ============================================================================
+
+/**
+ * Checks if a string represents a truthy boolean value.
+ */
+[[nodiscard]] inline bool
+is_truthy(const std::string& v)
+{
+    return v == "true" || v == "TRUE" || v == "1" || v == "ON" || v == "on" ||
+           v == "yes" || v == "YES";
+}
+
+/**
+ * Export an "enabled" bool field from env vars to JSON.
+ */
+inline void
+export_enabled(nlohmann::json& j, const std::map<std::string, std::string>& env_map,
+               std::string_view env_var, const std::string& json_path_section,
+               const std::string& json_path_key)
+{
+    auto it = env_map.find(std::string{ env_var });
+    if(it != env_map.end())
+        j[json_path_section][json_path_key]["enabled"] = is_truthy(it->second);
+}
+
+/**
+ * Export a top-level "enabled" field (directly under a section, not nested in a subkey).
+ */
+inline void
+export_section_enabled(nlohmann::json&                           j,
+                       const std::map<std::string, std::string>& env_map,
+                       std::string_view env_var, const std::string& json_path_section)
+{
+    auto it = env_map.find(std::string{ env_var });
+    if(it != env_map.end()) j[json_path_section]["enabled"] = is_truthy(it->second);
+}
+
+/**
+ * Export a string value field from env vars to JSON.
+ */
+inline void
+export_string_value(nlohmann::json& j, const std::map<std::string, std::string>& env_map,
+                    std::string_view env_var, const std::string& json_path_section,
+                    const std::string& json_path_key)
+{
+    auto it = env_map.find(std::string{ env_var });
+    if(it != env_map.end()) j[json_path_section][json_path_key]["value"] = it->second;
+}
+
+/**
+ * Export an int value field from env vars to JSON.
+ */
+inline void
+export_int_value(nlohmann::json& j, const std::map<std::string, std::string>& env_map,
+                 std::string_view env_var, const std::string& json_path_section,
+                 const std::string& json_path_key)
+{
+    auto it = env_map.find(std::string{ env_var });
+    if(it != env_map.end())
+        set_json_int(j[json_path_section][json_path_key]["value"], it->second);
+}
+
+/**
+ * Export a double value field from env vars to JSON.
+ */
+inline void
+export_double_value(nlohmann::json& j, const std::map<std::string, std::string>& env_map,
+                    std::string_view env_var, const std::string& json_path_section,
+                    const std::string& json_path_key)
+{
+    auto it = env_map.find(std::string{ env_var });
+    if(it != env_map.end())
+        set_json_double(j[json_path_section][json_path_key]["value"], it->second);
+}
+
 /**
  * Converts a map of ROCPROFSYS_* env vars back to JSON schema format.
  * This allows exporting the resolved configuration for reuse.
  */
 [[nodiscard]] inline nlohmann::json
-env_vars_to_json_schema(const std::map<std::string, std::string>& env_vars)
+env_vars_to_json_schema(const std::map<std::string, std::string>& env_map)
 {
     nlohmann::json j;
 
     // Helper to check if env var exists and get value
-    auto get_val = [&](const std::string& key) -> std::optional<std::string> {
-        auto it = env_vars.find(key);
-        if(it != env_vars.end()) return it->second;
+    auto get_val = [&](std::string_view key) -> std::optional<std::string> {
+        auto it = env_map.find(std::string{ key });
+        if(it != env_map.end()) return it->second;
         return std::nullopt;
     };
 
-    auto is_true = [](const std::string& v) {
-        return v == "true" || v == "TRUE" || v == "1" || v == "ON" || v == "on" ||
-               v == "yes" || v == "YES";
-    };
-
     // --- Tracing ---
-    if(auto v = get_val("ROCPROFSYS_TRACE")) j["tracing"]["enabled"] = is_true(*v);
-    if(auto v = get_val("ROCPROFSYS_PERFETTO_BUFFER_SIZE_KB"))
-        set_json_int(j["tracing"]["buffer_size_kb"]["value"], *v);
-    if(auto v = get_val("ROCPROFSYS_PERFETTO_FILL_POLICY"))
-        j["tracing"]["fill_policy"]["value"] = *v;
+    export_section_enabled(j, env_map, env_vars::TRACE, "tracing");
+    export_int_value(j, env_map, env_vars::PERFETTO_BUFFER_SIZE_KB, "tracing",
+                     "buffer_size_kb");
+    export_string_value(j, env_map, env_vars::PERFETTO_FILL_POLICY, "tracing",
+                        "fill_policy");
 
     // --- Profiling ---
-    if(auto v = get_val("ROCPROFSYS_PROFILE")) j["profiling"]["enabled"] = is_true(*v);
-    if(auto v = get_val("ROCPROFSYS_FLAT_PROFILE"))
-        j["profiling"]["flat_profile"]["enabled"] = is_true(*v);
+    export_section_enabled(j, env_map, env_vars::PROFILE, "profiling");
+    export_enabled(j, env_map, env_vars::FLAT_PROFILE, "profiling", "flat_profile");
 
     // --- Sampling ---
-    if(auto v = get_val("ROCPROFSYS_USE_SAMPLING"))
-        j["sampling"]["enabled"] = is_true(*v);
-    if(auto v = get_val("ROCPROFSYS_SAMPLING_FREQ"))
-        set_json_int(j["sampling"]["frequency_hz"]["value"], *v);
-    if(auto v = get_val("ROCPROFSYS_SAMPLING_TIMER"))
-        j["sampling"]["timer"]["value"] = *v;
-    if(auto v = get_val("ROCPROFSYS_SAMPLING_DELAY"))
-        set_json_double(j["sampling"]["delay_sec"]["value"], *v);
-    if(auto v = get_val("ROCPROFSYS_SAMPLING_DURATION"))
-        set_json_double(j["sampling"]["duration_sec"]["value"], *v);
-    if(auto v = get_val("ROCPROFSYS_SAMPLING_CPUS")) j["sampling"]["cpus"]["value"] = *v;
-    if(auto v = get_val("ROCPROFSYS_SAMPLING_GPUS")) j["sampling"]["gpus"]["value"] = *v;
+    export_section_enabled(j, env_map, env_vars::USE_SAMPLING, "sampling");
+    export_int_value(j, env_map, env_vars::SAMPLING_FREQ, "sampling", "frequency_hz");
+    export_string_value(j, env_map, env_vars::SAMPLING_TIMER, "sampling", "timer");
+    export_double_value(j, env_map, env_vars::SAMPLING_DELAY, "sampling", "delay_sec");
+    export_double_value(j, env_map, env_vars::SAMPLING_DURATION, "sampling",
+                        "duration_sec");
+    export_string_value(j, env_map, env_vars::SAMPLING_CPUS, "sampling", "cpus");
+    export_string_value(j, env_map, env_vars::SAMPLING_GPUS, "sampling", "gpus");
 
     // --- Domains: GPU ---
-    if(auto v = get_val("ROCPROFSYS_USE_AMD_SMI"))
+    if(auto v = get_val(env_vars::USE_AMD_SMI))
     {
-        j["domains"]["gpu"]["enabled"] = is_true(*v);
-        if(auto metrics = get_val("ROCPROFSYS_AMD_SMI_METRICS"))
+        j["domains"]["gpu"]["enabled"] = is_truthy(*v);
+        if(auto metrics = get_val(env_vars::AMD_SMI_METRICS))
         {
             std::istringstream ss(*metrics);
             std::string        token;
@@ -814,12 +776,12 @@ env_vars_to_json_schema(const std::map<std::string, std::string>& env_vars)
                 }
             }
         }
-        if(auto freq = get_val("ROCPROFSYS_AMD_SMI_FREQ"))
+        if(auto freq = get_val(env_vars::AMD_SMI_FREQ))
             set_json_int(j["domains"]["gpu"]["sampling_rate_hz"]["value"], *freq);
     }
 
     // --- Domains: ROCm ---
-    if(auto v = get_val("ROCPROFSYS_ROCM_DOMAINS"))
+    if(auto v = get_val(env_vars::ROCM_DOMAINS))
     {
         std::istringstream ss(*v);
         std::string        token;
@@ -836,13 +798,13 @@ env_vars_to_json_schema(const std::map<std::string, std::string>& env_vars)
     }
 
     // --- Domains: CPU ---
-    if(auto v = get_val("ROCPROFSYS_USE_PROCESS_SAMPLING"))
+    if(auto v = get_val(env_vars::USE_PROCESS_SAMPLING))
     {
-        if(is_true(*v))
+        if(is_truthy(*v))
         {
-            if(auto freq = get_val("ROCPROFSYS_CPU_FREQ"))
+            if(auto freq = get_val(env_vars::CPU_FREQ))
             {
-                if(is_true(*freq))
+                if(is_truthy(*freq))
                 {
                     j["domains"]["cpu"]["enabled"]                    = true;
                     j["domains"]["cpu"]["metrics"]["freq"]["enabled"] = true;
@@ -852,61 +814,50 @@ env_vars_to_json_schema(const std::map<std::string, std::string>& env_vars)
     }
 
     // --- Domains: Parallel ---
-    if(auto v = get_val("ROCPROFSYS_USE_MPIP"))
-        j["domains"]["parallel"]["runtimes"]["mpi"]["enabled"] = is_true(*v);
-    if(auto v = get_val("ROCPROFSYS_USE_OMPT"))
-        j["domains"]["parallel"]["runtimes"]["openmp"]["enabled"] = is_true(*v);
-    if(auto v = get_val("ROCPROFSYS_USE_KOKKOSP"))
-        j["domains"]["parallel"]["runtimes"]["kokkos"]["enabled"] = is_true(*v);
-    if(auto v = get_val("ROCPROFSYS_USE_RCCLP"))
-        j["domains"]["parallel"]["runtimes"]["rccl"]["enabled"] = is_true(*v);
+    if(auto v = get_val(env_vars::USE_MPIP))
+        j["domains"]["parallel"]["runtimes"]["mpi"]["enabled"] = is_truthy(*v);
+    if(auto v = get_val(env_vars::USE_OMPT))
+        j["domains"]["parallel"]["runtimes"]["openmp"]["enabled"] = is_truthy(*v);
+    if(auto v = get_val(env_vars::USE_KOKKOSP))
+        j["domains"]["parallel"]["runtimes"]["kokkos"]["enabled"] = is_truthy(*v);
+    if(auto v = get_val(env_vars::USE_RCCLP))
+        j["domains"]["parallel"]["runtimes"]["rccl"]["enabled"] = is_truthy(*v);
 
     // --- Output ---
-    if(auto v = get_val("ROCPROFSYS_OUTPUT_PATH")) j["output"]["path"]["value"] = *v;
-    if(auto v = get_val("ROCPROFSYS_TIME_OUTPUT"))
-        j["output"]["time_output"]["enabled"] = is_true(*v);
-    if(auto v = get_val("ROCPROFSYS_FILE_OUTPUT"))
-        j["output"]["file_output"]["enabled"] = is_true(*v);
-    if(auto v = get_val("ROCPROFSYS_USE_ROCPD"))
-        j["output"]["rocpd_output"]["enabled"] = is_true(*v);
+    export_string_value(j, env_map, env_vars::OUTPUT_PATH, "output", "path");
+    export_enabled(j, env_map, env_vars::TIME_OUTPUT, "output", "time_output");
+    export_enabled(j, env_map, env_vars::FILE_OUTPUT, "output", "file_output");
+    export_enabled(j, env_map, env_vars::USE_ROCPD, "output", "rocpd_output");
 
     // --- Hardware counters ---
-    if(auto v = get_val("ROCPROFSYS_ROCM_EVENTS"))
+    if(auto v = get_val(env_vars::ROCM_EVENTS))
     {
         j["hardware_counters"]["enabled"]              = true;
         j["hardware_counters"]["rocm_events"]["value"] = *v;
     }
-    if(auto v = get_val("ROCPROFSYS_PAPI_EVENTS"))
+    if(auto v = get_val(env_vars::PAPI_EVENTS))
     {
         j["hardware_counters"]["enabled"]              = true;
         j["hardware_counters"]["papi_events"]["value"] = *v;
     }
+    export_enabled(j, env_map, env_vars::PAPI_MULTIPLEXING, "hardware_counters",
+                   "papi_multiplexing");
 
     // --- Advanced ---
-    if(auto v = get_val("ROCPROFSYS_VERBOSE"))
-        set_json_int(j["advanced"]["verbose"]["value"], *v);
-    if(auto v = get_val("ROCPROFSYS_DEBUG"))
-        j["advanced"]["debug"]["enabled"] = is_true(*v);
-    if(auto v = get_val("ROCPROFSYS_MAX_DEPTH"))
-        set_json_int(j["advanced"]["max_depth"]["value"], *v);
-    if(auto v = get_val("ROCPROFSYS_TRACE_DELAY"))
-        set_json_double(j["advanced"]["trace_delay_sec"]["value"], *v);
-    if(auto v = get_val("ROCPROFSYS_TRACE_DURATION"))
-        set_json_double(j["advanced"]["trace_duration_sec"]["value"], *v);
-    if(auto v = get_val("ROCPROFSYS_CPU_AFFINITY"))
-        j["advanced"]["cpu_affinity"]["enabled"] = is_true(*v);
-    if(auto v = get_val("ROCPROFSYS_COLLAPSE_THREADS"))
-        j["advanced"]["collapse_threads"]["enabled"] = is_true(*v);
-    if(auto v = get_val("ROCPROFSYS_TIMEMORY_COMPONENTS"))
-        j["advanced"]["timemory_components"]["value"] = *v;
-    if(auto v = get_val("ROCPROFSYS_NETWORK_INTERFACE"))
-        j["advanced"]["network_interface"]["value"] = *v;
-    if(auto v = get_val("ROCPROFSYS_TRACE_PERIODS"))
-        j["advanced"]["trace_periods"]["value"] = *v;
-
-    // --- Hardware counters: papi_multiplexing ---
-    if(auto v = get_val("ROCPROFSYS_PAPI_MULTIPLEXING"))
-        j["hardware_counters"]["papi_multiplexing"]["enabled"] = is_true(*v);
+    export_int_value(j, env_map, env_vars::VERBOSE, "advanced", "verbose");
+    export_enabled(j, env_map, env_vars::DEBUG, "advanced", "debug");
+    export_int_value(j, env_map, env_vars::MAX_DEPTH, "advanced", "max_depth");
+    export_double_value(j, env_map, env_vars::TRACE_DELAY, "advanced", "trace_delay_sec");
+    export_double_value(j, env_map, env_vars::TRACE_DURATION, "advanced",
+                        "trace_duration_sec");
+    export_enabled(j, env_map, env_vars::CPU_AFFINITY, "advanced", "cpu_affinity");
+    export_enabled(j, env_map, env_vars::COLLAPSE_THREADS, "advanced",
+                   "collapse_threads");
+    export_string_value(j, env_map, env_vars::TIMEMORY_COMPONENTS, "advanced",
+                        "timemory_components");
+    export_string_value(j, env_map, env_vars::NETWORK_INTERFACE, "advanced",
+                        "network_interface");
+    export_string_value(j, env_map, env_vars::TRACE_PERIODS, "advanced", "trace_periods");
 
     return j;
 }

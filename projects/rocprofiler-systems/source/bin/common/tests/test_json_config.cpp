@@ -1,6 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
 
+#include "common/env_vars.hpp"
 #include "common/json_config.hpp"
 
 #include <gtest/gtest.h>
@@ -487,4 +488,46 @@ TEST_F(JsonConfigTest, EnvVarsToJsonSchemaRoundTripsNewFields)
     EXPECT_EQ(j["advanced"]["network_interface"]["value"], "ib0");
     EXPECT_EQ(j["advanced"]["trace_periods"]["value"], "1:5,10:20");
     EXPECT_EQ(j["hardware_counters"]["papi_multiplexing"]["enabled"], true);
+}
+
+// Test resolve_enabled and resolve_value helpers with edge cases
+TEST_F(JsonConfigTest, ResolveHelpersHandleEdgeCases)
+{
+    std::map<std::string, std::string> result;
+
+    // Missing field - should not add to result
+    auto j_empty = nlohmann::json::parse("{}");
+    resolve_enabled(result, j_empty, "enabled", rocprofsys::env_vars::TRACE);
+    resolve_value(result, j_empty, "missing_key", rocprofsys::env_vars::VERBOSE);
+    EXPECT_TRUE(result.empty());
+
+    // Null field value - resolve_value should skip null
+    auto j_null = nlohmann::json::parse(R"({"some_key": null})");
+    resolve_value(result, j_null, "some_key", rocprofsys::env_vars::VERBOSE);
+    EXPECT_TRUE(result.empty());
+
+    // Non-bool "enabled" via resolve_enabled - should throw (or handle based on JSON lib)
+    // resolve_enabled expects a bool, so test a valid bool false
+    auto j_false = nlohmann::json::parse(R"({"enabled": false})");
+    resolve_enabled(result, j_false, "enabled", rocprofsys::env_vars::TRACE);
+    EXPECT_EQ(result.at(std::string{ rocprofsys::env_vars::TRACE }), "false");
+
+    // resolve_value with a direct scalar (non-object)
+    auto j_scalar = nlohmann::json::parse(R"({"freq": 42})");
+    resolve_value(result, j_scalar, "freq", rocprofsys::env_vars::SAMPLING_FREQ);
+    EXPECT_EQ(result.at(std::string{ rocprofsys::env_vars::SAMPLING_FREQ }), "42");
+}
+
+// Test env_vars constants match expected string values
+TEST_F(JsonConfigTest, EnvVarsConstantsMatchExpectedValues)
+{
+    EXPECT_EQ(rocprofsys::env_vars::TRACE, "ROCPROFSYS_TRACE");
+    EXPECT_EQ(rocprofsys::env_vars::PROFILE, "ROCPROFSYS_PROFILE");
+    EXPECT_EQ(rocprofsys::env_vars::USE_SAMPLING, "ROCPROFSYS_USE_SAMPLING");
+    EXPECT_EQ(rocprofsys::env_vars::USE_AMD_SMI, "ROCPROFSYS_USE_AMD_SMI");
+    EXPECT_EQ(rocprofsys::env_vars::ROCM_DOMAINS, "ROCPROFSYS_ROCM_DOMAINS");
+    EXPECT_EQ(rocprofsys::env_vars::USE_MPIP, "ROCPROFSYS_USE_MPIP");
+    EXPECT_EQ(rocprofsys::env_vars::OUTPUT_PATH, "ROCPROFSYS_OUTPUT_PATH");
+    EXPECT_EQ(rocprofsys::env_vars::USE_CAUSAL, "ROCPROFSYS_USE_CAUSAL");
+    EXPECT_EQ(rocprofsys::env_vars::VERBOSE, "ROCPROFSYS_VERBOSE");
 }
