@@ -108,28 +108,24 @@ TEST_F(TrafficClassMPITest, ConfiguredTrafficClass)
     constexpr int kTestTrafficClass = 46;
     configured_traffic_class_ = kTestTrafficClass;
 
-    // Capture stderr to verify NET plugin log
-    char tmpfile[] = "/tmp/rccl_tc_XXXXXX";
-    int fd = mkstemp(tmpfile);
-    int saved = dup(STDERR_FILENO);
-    dup2(fd, STDERR_FILENO);
+    // Set up NCCL_DEBUG_FILE to capture logs before NCCL init
+    std::string logfile = "/tmp/rccl_tc_" + std::to_string(getpid()) + ".log";
+    setenv("NCCL_DEBUG_FILE", logfile.c_str(), 1);
 
     ASSERT_EQ(ncclSuccess, createTestCommunicator());
-
-    fflush(stderr);
-    dup2(saved, STDERR_FILENO);
-    close(saved);
-    close(fd);
 
     // Verify trafficClass in communicator
     ASSERT_EQ(getActiveCommunicator()->config.trafficClass, kTestTrafficClass);
 
-    // Verify NET plugin logged the trafficClass
-    std::ifstream log(tmpfile);
+    // Read the NCCL debug log file
+    std::ifstream log(logfile);
     std::stringstream buf;
     buf << log.rdbuf();
-    unlink(tmpfile);
+    log.close();
+    unlink(logfile.c_str());
+    unsetenv("NCCL_DEBUG_FILE");
 
+    // Verify trafficClass appears in logs
     ASSERT_NE(buf.str().find("Traffic class set to 46"), std::string::npos)
         << "Traffic class log not found. Set NCCL_DEBUG=INFO.";
 }
