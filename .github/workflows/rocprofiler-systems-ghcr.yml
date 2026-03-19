@@ -44,7 +44,7 @@ jobs:
       matrix_data: ${{ steps.generate_matrix_ci_base.outputs.matrix_data }}
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           sparse-checkout: projects/rocprofiler-systems/docker
 
@@ -70,7 +70,7 @@ jobs:
 
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@v6
         with:
           sparse-checkout: projects/rocprofiler-systems
           submodules: recursive

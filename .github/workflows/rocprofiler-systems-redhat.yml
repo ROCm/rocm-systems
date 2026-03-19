@@ -62,7 +62,7 @@ jobs:
         build-type: ['Release']
 
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v6
       with:
         sparse-checkout: projects/rocprofiler-systems/
 
@@ -199,7 +199,7 @@ jobs:
     - name: CTest Artifacts
       if: failure()
       continue-on-error: True
-      uses: actions/upload-artifact@v5
+      uses: actions/upload-artifact@v7
       with:
         name: ctest-${{ github.job }}-${{ strategy.job-index }}-log
         path: |
@@ -208,7 +208,7 @@ jobs:
     - name: Data Artifacts
       if: failure()
       continue-on-error: True
-      uses: actions/upload-artifact@v5
+      uses: actions/upload-artifact@v7
       with:
         name: data-${{ github.job }}-${{ strategy.job-index }}-files
         path: |
