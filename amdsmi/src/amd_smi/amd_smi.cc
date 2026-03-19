@@ -4270,9 +4270,18 @@ amdsmi_status_t  amdsmi_get_gpu_od_volt_curve_regions(
 amdsmi_status_t  amdsmi_get_gpu_volt_metric(amdsmi_processor_handle processor_handle,
                             amdsmi_voltage_type_t sensor_type,
                             amdsmi_voltage_metric_t metric, int64_t *voltage) {
-    return rsmi_wrapper(rsmi_dev_volt_metric_get, processor_handle, 0,
-                static_cast<rsmi_voltage_type_t>(sensor_type),
-                static_cast<rsmi_voltage_metric_t>(metric), voltage);
+    // Check support first so nullptr path returns NOT_SUPPORTED consistently
+    if (metric != AMDSMI_VOLT_CURRENT) return AMDSMI_STATUS_NOT_SUPPORTED;
+    if (sensor_type != AMDSMI_VOLT_TYPE_VDDGFX) return AMDSMI_STATUS_NOT_SUPPORTED;
+    if (voltage == nullptr) return AMDSMI_STATUS_INVAL;
+    auto *device = reinterpret_cast<Device *>(processor_handle);
+    if (device == nullptr) return AMDSMI_STATUS_INVAL;
+    GpuMetricsInfo m{};
+    auto code = device->QueryGpuMetricsInfo(&m);
+    if (code != ErrorCode::Success) return translateCodeToSmiStatus(code);
+    if (m.voltage_gfx == UINT32_MAX) return AMDSMI_STATUS_NOT_SUPPORTED;
+    *voltage = static_cast<int64_t>(m.voltage_gfx);
+    return AMDSMI_STATUS_SUCCESS;
 }
 
 amdsmi_status_t  amdsmi_set_gpu_od_clk_info(amdsmi_processor_handle processor_handle,
