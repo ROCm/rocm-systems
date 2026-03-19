@@ -241,7 +241,7 @@ HIP_TEST_CASE(Unit_hipMemAdvise_TstAccessedByFlg3) {
 HIP_TEST_CASE(Unit_hipMemAdvise_TstAccessedByFlg4) {
   int managed = HmmAttrPrint();
   if (managed == 1) {
-    int *Hmm = NULL, NumElms = (1024 * 1024), InitVal = 123, blockSize = 1024;
+    int *Hmm = NULL, NumElms = (1024 * 1024), InitVal = 123;
     hipStream_t strm;
     HIP_CHECK(hipStreamCreate(&strm));
     HIP_CHECK(hipMallocManaged(&Hmm, (NumElms * sizeof(int))));

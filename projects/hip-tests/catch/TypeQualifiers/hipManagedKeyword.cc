@@ -49,7 +49,6 @@ HIP_TEST_CASE(Unit_hipManagedKeyword_SingleGpu) {
   HIP_CHECK(hipDeviceSynchronize());
   HIP_CHECK(hipGetLastError());
 
-  float maxError = 0.0f;
   for (size_t i = 0; i < N; i++) {
     INFO("Reading output from managed variable: Index: " << i << " output: " << m_B[i]);
     REQUIRE(3.0f == m_B[i]);

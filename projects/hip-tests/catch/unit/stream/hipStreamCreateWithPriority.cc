@@ -205,7 +205,6 @@ void queueTasksInStreams(std::vector<hipStream_t>& stream, size_t arrsize) {
  * (use 8 threads). Validate all the results.
  */
 bool runFuncTestsForAllPriorityLevelsMultThread(unsigned int flags) {
-  bool TestPassed = true;
   std::thread T[TOTALTHREADS];
   int priority_low;
   int priority_high;
