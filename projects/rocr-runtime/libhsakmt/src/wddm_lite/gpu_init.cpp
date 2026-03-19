@@ -3427,8 +3427,15 @@ static void mmhub_init_tlb(struct WddmLiteDevice *dev)
     val = (val & ~L1_TLB_SYSTEM_ACCESS_MODE_MASK) | (3 << 3);
     val |= L1_TLB_ENABLE_ADV_DRIVER_MODEL;
     val &= ~L1_TLB_SYSTEM_APERTURE_UNMAPPED_ACCESS;
+    /* Set MTYPE to Uncacheable (0) — matches Linux & tinygrad.
+     * MTYPE field is bits [12:9] in the register. Without this, default
+     * MTYPE may be cached, causing SMU DMA reads to get stale data
+     * while writes (posted/fire-and-forget) succeed. */
+    val &= ~(0xF << 9);   /* Clear MTYPE bits [12:9] → UC = 0 */
+    val &= ~(0x7 << 13);  /* Clear ECO_BITS [15:13] → 0 (match Linux) */
 
     mmhub_wreg(dev, regMMMC_VM_MX_L1_TLB_CNTL, val);
+    pr_info("mmhub: L1_TLB_CNTL = 0x%08x (MTYPE=UC)\n", val);
 }
 
 static void mmhub_init_cache(struct WddmLiteDevice *dev)
@@ -3449,19 +3456,40 @@ static void mmhub_init_cache(struct WddmLiteDevice *dev)
                (1 << 0) |   /* INVALIDATE_ALL_L1_TLBS */
                (1 << 1));   /* INVALIDATE_L2_CACHE */
 
-    /* MMVM_L2_CNTL3: write full value (matching tinygrad)
-     * bit 0: l2_cache_4k_associativity=1
-     * bit 12: l2_cache_bigk_associativity=1
-     * bits[18:15]: bank_select=9
-     * bits[23:20]: l2_cache_bigk_fragment_size=6 */
-    mmhub_wreg(dev, regMMVM_L2_CNTL3,
-               (1 << 0) | (1 << 12) | (9 << 15) | (6 << 20));
+    /* MMVM_L2_CNTL3: Linux starts from regMMVM_L2_CNTL3_DEFAULT=0x80100007.
+     * We must preserve the default bits (bit 31, bit 20, bits 0-2) that may
+     * contain important hardware configuration. Read-modify-write. */
+    {
+        ULONG cntl3 = mmhub_rreg(dev, regMMVM_L2_CNTL3);
+        pr_info("mmhub: L2_CNTL3 before = 0x%08x\n", cntl3);
+        cntl3 |= (1 << 0);    /* l2_cache_4k_associativity */
+        cntl3 |= (1 << 12);   /* l2_cache_bigk_associativity */
+        cntl3 = (cntl3 & ~(0xF << 15)) | (9 << 15);  /* bank_select=9 */
+        cntl3 = (cntl3 & ~(0xF << 20)) | (6 << 20);  /* bigk_fragment_size=6 */
+        mmhub_wreg(dev, regMMVM_L2_CNTL3, cntl3);
+        pr_info("mmhub: L2_CNTL3 after  = 0x%08x\n", cntl3);
+    }
 
-    /* MMVM_L2_CNTL4: partition count */
-    mmhub_wreg(dev, regMMVM_L2_CNTL4, (1 << 0));
+    /* MMVM_L2_CNTL4: Linux starts from regMMVM_L2_CNTL4_DEFAULT=0xc1.
+     * Read-modify-write to preserve default bits 6-7. */
+    {
+        ULONG cntl4 = mmhub_rreg(dev, regMMVM_L2_CNTL4);
+        pr_info("mmhub: L2_CNTL4 before = 0x%08x\n", cntl4);
+        cntl4 |= (1 << 0);  /* partition_count */
+        /* Clear VMC_TAP_PDE/PTE_REQUEST_PHYSICAL (Linux does this) */
+        cntl4 &= ~(1 << 6);  /* PDE */
+        cntl4 &= ~(1 << 7);  /* PTE */
+        mmhub_wreg(dev, regMMVM_L2_CNTL4, cntl4);
+        pr_info("mmhub: L2_CNTL4 after  = 0x%08x\n", cntl4);
+    }
 
-    /* MMVM_L2_CNTL5: walker priority (walker_priority_client_id=0x1ff) */
-    mmhub_wreg(dev, regMMVM_L2_CNTL5, (0x1FF << 6));
+    /* MMVM_L2_CNTL5: Read-modify-write (Linux starts from 0x3fe0) */
+    {
+        ULONG cntl5 = mmhub_rreg(dev, regMMVM_L2_CNTL5);
+        cntl5 = (cntl5 & ~(0x3FF << 6)) | (0x1FF << 6);  /* walker_priority */
+        cntl5 &= ~0x3F;  /* clear smallk_fragment_size (bits 5:0) */
+        mmhub_wreg(dev, regMMVM_L2_CNTL5, cntl5);
+    }
 }
 
 static void mmhub_enable_system_domain(struct WddmLiteDevice *dev)
@@ -3734,14 +3762,21 @@ static void flush_gpu_tlb(struct WddmLiteDevice *dev, int vmid, int is_gfxhub)
 {
     ULONG sem_reg, req_reg, ack_reg;
 
+    /* Use invalidation engine 17 (matches Linux & tinygrad).
+     * Engine 0 may conflict with hardware-reserved engines. */
+    const ULONG eng_offset = 17;  /* ENG17 */
+
+    /* HDP flush before TLB invalidation (required by Linux & tinygrad) */
+    gpu_hdp_flush(dev);
+
     if (is_gfxhub) {
-        sem_reg = regGCVM_INVALIDATE_ENG0_SEM;
-        req_reg = regGCVM_INVALIDATE_ENG0_REQ;
-        ack_reg = regGCVM_INVALIDATE_ENG0_ACK;
+        sem_reg = regGCVM_INVALIDATE_ENG0_SEM + eng_offset;
+        req_reg = regGCVM_INVALIDATE_ENG0_REQ + eng_offset;
+        ack_reg = regGCVM_INVALIDATE_ENG0_ACK + eng_offset;
     } else {
-        sem_reg = regMMVM_INVALIDATE_ENG0_SEM;
-        req_reg = regMMVM_INVALIDATE_ENG0_REQ;
-        ack_reg = regMMVM_INVALIDATE_ENG0_ACK;
+        sem_reg = regMMVM_INVALIDATE_ENG0_SEM + eng_offset;
+        req_reg = regMMVM_INVALIDATE_ENG0_REQ + eng_offset;
+        ack_reg = regMMVM_INVALIDATE_ENG0_ACK + eng_offset;
     }
 
     /* Acquire semaphore */
@@ -4822,11 +4857,23 @@ int gpu_smu_enable_features(struct WddmLiteDevice *dev)
                     else
                         pr_info("gpu_smu: Buffer has non-zero data — pptable present\n");
 
-                    /* Now CPU-write the data back (memcpy to same buffer is a no-op,
-                     * but the HDP flush is what matters — it makes CPU-written data
-                     * visible to the SMU's DMA read path) */
-                    pr_info("gpu_smu: HDP flush + Dram2Smu(0)...\n");
+                    /* CPU round-trip: copy buffer to temp, then back.
+                     * The Linux driver does CPU memcpy → HDP flush → Dram2Smu.
+                     * The SMU's DMA read path might require data to go through
+                     * the HDP write path (CPU→VRAM), not just SMU DMA→VRAM. */
+                    {
+                        UCHAR temp[256];
+                        /* Copy first 256 bytes via CPU (creates HDP entry) */
+                        memcpy(temp, buf_cpu, 256);
+                        /* Write back via CPU (ensures HDP has the data) */
+                        memcpy(buf_cpu, temp, 256);
+                        /* Also touch the full 16KB — force CPU write path */
+                        for (int i = 0; i < 0x4000; i += 64)
+                            buf_cpu[i] = buf_cpu[i];
+                    }
+                    pr_info("gpu_smu: CPU round-trip done, HDP flush + Dram2Smu(0)...\n");
                     gpu_hdp_flush(dev);
+                    Sleep(10);
                     ret = gpu_smu_send_msg(dev, PPSMC_MSG_TransferTableDram2Smu, 0);
                     if (ret == 0)
                         pr_info("gpu_smu: Dram2Smu(0) OK!\n");
