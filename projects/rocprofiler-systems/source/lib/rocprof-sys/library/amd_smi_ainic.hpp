@@ -68,7 +68,7 @@ private:
     uint64_t    _tx_ucast_bytes          = 0;
     uint64_t    _rx_ucast_pkts           = 0;
     uint64_t    _tx_ucast_pkts           = 0;
-    uint64_t    _req_tx_loc_acc_err      = 0;
+    uint64_t    _tx_rdma_ack_timeout      = 0;
     uint64_t    _resp_tx_pkt_seq_err     = 0;
     uint64_t    _req_rx_pkt_seq_err      = 0;
     uint64_t    _req_rx_impl_nak_seq_err = 0;

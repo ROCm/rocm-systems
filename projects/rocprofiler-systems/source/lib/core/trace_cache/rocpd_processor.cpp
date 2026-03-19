@@ -649,11 +649,11 @@ rocpd_processor_t::handle(const ainic_sample& _ainic)
                                 .c_str(),
                             _ainic.tx_ucast_pkts);
 
-    insert_event_and_sample(trait::name<category::amd_smi_nic_req_tx_loc_acc_err>::value,
-                            info::annotate_with_nic<category::amd_smi_nic_req_tx_loc_acc_err>(
+    insert_event_and_sample(trait::name<category::amd_smi_nic_tx_rdma_ack_timeout>::value,
+                            info::annotate_with_nic<category::amd_smi_nic_tx_rdma_ack_timeout>(
                                 nic_name, _ainic.nic_index)
                                 .c_str(),
-                            _ainic.req_tx_loc_acc_err);
+                            _ainic.tx_rdma_ack_timeout);
 
     insert_event_and_sample(trait::name<category::amd_smi_nic_resp_tx_pkt_seq_err>::value,
                             info::annotate_with_nic<category::amd_smi_nic_resp_tx_pkt_seq_err>(

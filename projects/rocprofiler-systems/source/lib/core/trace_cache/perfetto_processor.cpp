@@ -125,8 +125,8 @@ using amd_smi_nic_rx_ucast_pkts_track =
     perfetto_counter_track<category::amd_smi_nic_rx_ucast_pkts>;
 using amd_smi_nic_tx_ucast_pkts_track =
     perfetto_counter_track<category::amd_smi_nic_tx_ucast_pkts>;
-using amd_smi_nic_req_tx_loc_acc_err_track =
-    perfetto_counter_track<category::amd_smi_nic_req_tx_loc_acc_err>;
+using amd_smi_nic_tx_rdma_ack_timeout_track =
+    perfetto_counter_track<category::amd_smi_nic_tx_rdma_ack_timeout>;
 using amd_smi_nic_resp_tx_pkt_seq_err_track =
     perfetto_counter_track<category::amd_smi_nic_resp_tx_pkt_seq_err>;
 using amd_smi_nic_req_rx_pkt_seq_err_track =

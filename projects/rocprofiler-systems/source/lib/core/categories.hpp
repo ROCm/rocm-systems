@@ -113,7 +113,7 @@ ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_nic_rx_ucast_bytes, ROCPROFSYS_CATE
 ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_nic_rx_ucast_pkts, ROCPROFSYS_CATEGORY_AMD_SMI_AINIC_RX_UCAST_PKTS, "nic_rx_ucast_pkts", "AI NIC RX UCAST PKTS")
 ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_nic_tx_ucast_bytes, ROCPROFSYS_CATEGORY_AMD_SMI_AINIC_TX_UCAST_BYTES, "nic_tx_ucast_bytes", "AI NIC TX UCAST BYTES")
 ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_nic_tx_ucast_pkts, ROCPROFSYS_CATEGORY_AMD_SMI_AINIC_TX_UCAST_PKTS, "nic_tx_ucast_pkts", "AI NIC TX UCAST PKTS")
-ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_nic_req_tx_loc_acc_err, ROCPROFSYS_CATEGORY_AMD_SMI_AINIC_TX_LOC_ACC_ERR, "nic_req_tx_loc_acc_err", "AI NIC TX LOC ACC ERR")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_nic_tx_rdma_ack_timeout, ROCPROFSYS_CATEGORY_AMD_SMI_AINIC_TX_RDMA_ACK_TIMEOUT, "nic_tx_rdma_ack_timeout", "AI NIC TX RDMA ACK TIMEOUT")
 ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_nic_resp_tx_pkt_seq_err, ROCPROFSYS_CATEGORY_AMD_SMI_AINIC_TX_PKT_SEQ_ERR, "nic_resp_tx_pkt_seq_err", "AI NIC TX PKT SEQ ERR")
 ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_nic_req_rx_pkt_seq_err, ROCPROFSYS_CATEGORY_AMD_SMI_AINIC_RX_PKT_SEQ_ERR, "nic_req_rx_pkt_seq_err", "AI NIC RX PKT SEQ ERR")
 ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_nic_req_rx_impl_nak_seq_err, ROCPROFSYS_CATEGORY_AMD_SMI_AINIC_RX_IMPL_NAK_SEQ_ERR, "nic_req_rx_impl_nak_seq_err", "AI NIC RX IMPL NAK SEQ ERR")
@@ -207,7 +207,7 @@ using name = perfetto_category<Tp...>;
         ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_nic_tx_ucast_bytes),              \
         ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_nic_rx_ucast_pkts),               \
         ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_nic_tx_ucast_pkts),               \
-        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_nic_req_tx_loc_acc_err),          \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_nic_tx_rdma_ack_timeout),          \
         ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_nic_resp_tx_pkt_seq_err),          \
         ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_nic_req_rx_pkt_seq_err),          \
         ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_nic_req_rx_impl_nak_seq_err),          \

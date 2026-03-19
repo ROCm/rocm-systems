@@ -76,7 +76,7 @@ nic_data::sample()
     _tx_ucast_bytes   = stats._tx_rdma_ucast_bytes;
     _rx_ucast_pkts    = stats._rx_rdma_ucast_pkts;
     _tx_ucast_pkts    = stats._tx_rdma_ucast_pkts;
-    _req_tx_loc_acc_err = stats._req_tx_loc_acc_err;
+    _tx_rdma_ack_timeout = stats._tx_rdma_ack_timeout;
     _resp_tx_pkt_seq_err = stats._resp_tx_pkt_seq_err;
     _req_rx_pkt_seq_err = stats._req_rx_pkt_seq_err;
     _req_rx_impl_nak_seq_err = stats._req_rx_impl_nak_seq_err;
@@ -88,7 +88,7 @@ nic_data::sample()
     trace_cache::get_buffer_storage().store(trace_cache::ainic_sample{
         _timestamp, _nic_index, _rx_rdma_cnp_pkts, _tx_rdma_cnp_pkts, _rx_ucast_bytes,
         _tx_ucast_bytes, _rx_ucast_pkts, _tx_ucast_pkts,
-        _req_tx_loc_acc_err, _resp_tx_pkt_seq_err, _req_rx_pkt_seq_err,
+        _tx_rdma_ack_timeout, _resp_tx_pkt_seq_err, _req_rx_pkt_seq_err,
         _req_rx_impl_nak_seq_err });
 }
 
@@ -131,7 +131,7 @@ metadata_initialize_ainic_smi_tracks(uint32_t nic_index)
           thread_id, "{}" });
 
     trace_cache::get_metadata_registry().add_track(
-        { trace_cache::info::annotate_with_nic<category::amd_smi_nic_req_tx_loc_acc_err>(
+        { trace_cache::info::annotate_with_nic<category::amd_smi_nic_tx_rdma_ack_timeout>(
               nic, nic_index),
           thread_id, "{}" });
     trace_cache::get_metadata_registry().add_track(
@@ -260,7 +260,7 @@ nic_data::post_process(size_t nic_index)
         uint64_t _tx_ucast_bytes          = itr._tx_ucast_bytes;
         uint64_t _rx_ucast_pkts           = itr._rx_ucast_pkts;
         uint64_t _tx_ucast_pkts           = itr._tx_ucast_pkts;
-        uint64_t _req_tx_loc_acc_err      = itr._req_tx_loc_acc_err;
+        uint64_t _tx_rdma_ack_timeout      = itr._tx_rdma_ack_timeout;
         uint64_t _resp_tx_pkt_seq_err     = itr._resp_tx_pkt_seq_err;
         uint64_t _req_rx_pkt_seq_err      = itr._req_rx_pkt_seq_err;
         uint64_t _req_rx_impl_nak_seq_err = itr._req_rx_impl_nak_seq_err;
@@ -287,8 +287,8 @@ nic_data::post_process(size_t nic_index)
                       _ts, _rx_ucast_pkts);
         TRACE_COUNTER("nic_tx_ucast_pkts", counter_track::at(nic_index, track_index++),
                       _ts, _tx_ucast_pkts);
-        TRACE_COUNTER("nic_req_tx_loc_acc_err", counter_track::at(nic_index, track_index++),
-                      _ts, _req_tx_loc_acc_err);
+        TRACE_COUNTER("nic_tx_rdma_ack_timeout", counter_track::at(nic_index, track_index++),
+                      _ts, _tx_rdma_ack_timeout);
         TRACE_COUNTER("nic_resp_tx_pkt_seq_err", counter_track::at(nic_index, track_index++),
                       _ts, _resp_tx_pkt_seq_err);
         TRACE_COUNTER("nic_req_rx_pkt_seq_err", counter_track::at(nic_index, track_index++),
