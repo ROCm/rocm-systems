@@ -33,7 +33,6 @@ Tests cover:
 4. Memory chart generation
 """
 
-
 from utils import mem_chart_gfx11
 
 # =============================================================================

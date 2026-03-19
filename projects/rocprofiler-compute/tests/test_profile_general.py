@@ -995,8 +995,7 @@ def test_output_directory_all_placeholders_combined(
     binary_handler_profile_rocprof_compute(config, workload_dir)
 
     workload_dir = (
-        workload_dir
-        .replace("%hostname%", hostname)
+        workload_dir.replace("%hostname%", hostname)
         .replace("%gpumodel%", GPU_MODEL)
         .replace("%env{ENV_1}%", "custom_env")
         .replace("%rank%", rank)

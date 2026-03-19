@@ -403,9 +403,7 @@ class OmniSoC_Base:
         # hw counter name should have all capital letters or digits
         # and should not end with underscore
         # he counter name can either optionally end with '[' or '_sum'
-        hw_counter_regex = (
-            r"(?:SQ|SQC|SP|TA|TD|TCP|TCC|GL1A|GL1C|GL2A|GL2C|CPC|CPF|SPI|GCEA|GRBM)_[0-9A-Z_]*[0-9A-Z](?:\[|_sum|_avr|_max|_min)*"
-        )
+        hw_counter_regex = r"(?:SQ|SQC|SP|TA|TD|TCP|TCC|GL1A|GL1C|GL2A|GL2C|CPC|CPF|SPI|GCEA|GRBM)_[0-9A-Z_]*[0-9A-Z](?:\[|_sum|_avr|_max|_min)*"
         # only capture the variable name after $ using capturing group
         variable_regex = r"\$([0-9A-Za-z_]*[0-9A-Za-z])"
         hw_counter_matches = set(re.findall(hw_counter_regex, text))
@@ -804,5 +802,5 @@ class CounterFile:
             block = "SQ"
         if block == "SP":
             block = "SQ"
-            
+
         return self.blocks[block].add(counter)
