@@ -2943,7 +2943,11 @@ fail:
   // Mark connection and device as fatal
   ncclIbStatsFatalError(&r->base->stats);
   if (failDevIdx >= 0 && r->devBases[failDevIdx] != NULL) {
+    int ibDevN = r->devBases[failDevIdx]->ibDevN;
+    struct ncclIbDev* failedDev = ncclIbDevs + ibDevN;
     ncclIbStatsFatalError(&ncclIbDevs[r->devBases[failDevIdx]->ibDevN].stats);
+    WARN("NET/IB: Device failure - name: %s, port: %d, PCI: %s, ibDevN: %d",
+         failedDev->devName, failedDev->portNum, failedDev->pciPath ? failedDev->pciPath : "N/A", ibDevN);
   }
   // Mark request as failed so subsequent Test calls drain completions
   r->type = NCCL_NET_IB_REQ_FAILED;
