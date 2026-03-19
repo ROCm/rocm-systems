@@ -1059,16 +1059,24 @@ rocprofiler_force_configure(rocprofiler_configure_func_t configure_func)
     forced_config = configure_func;
     rocprofiler::registration::initialize();
 
-    // Trigger re-propagation of all registered API tables via rocprofiler-register.
-    // This enables late-start profiling where runtimes may have already initialized
-    // and registered their API tables before rocprofiler-sdk was loaded.
-    auto status = rocprofiler::registration::late::invoke_register_propagation();
-    if(status != ROCPROFILER_STATUS_SUCCESS)
+    // Late-start API-table re-propagation regressed kernel-trace stability for HIP-graph
+    // workloads in local validation. Keep it opt-in until the registration lifetime issue
+    // is resolved.
+    auto enable_late_register_propagation =
+        rocprofiler::common::get_env("ROCPROFILER_ENABLE_LATE_REGISTER_PROPAGATION", false);
+    if(enable_late_register_propagation)
     {
-        ROCP_WARNING << "Failed to invoke rocprofiler-register propagation. "
-                     << "This is normal if runtimes have not initialized yet, or if "
-                     << "rocprofiler-register is not loaded. Runtimes that initialize "
-                     << "after this call will be automatically profiled.";
+        // Trigger re-propagation of all registered API tables via rocprofiler-register.
+        // This enables late-start profiling where runtimes may have already initialized
+        // and registered their API tables before rocprofiler-sdk was loaded.
+        auto status = rocprofiler::registration::late::invoke_register_propagation();
+        if(status != ROCPROFILER_STATUS_SUCCESS)
+        {
+            ROCP_WARNING << "Failed to invoke rocprofiler-register propagation. "
+                         << "This is normal if runtimes have not initialized yet, or if "
+                         << "rocprofiler-register is not loaded. Runtimes that initialize "
+                         << "after this call will be automatically profiled.";
+        }
     }
 
     return ROCPROFILER_STATUS_SUCCESS;
