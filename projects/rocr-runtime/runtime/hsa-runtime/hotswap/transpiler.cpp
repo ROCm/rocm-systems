@@ -552,44 +552,26 @@ static std::vector<std::string> WidenExecOperation(const std::string& line) {
         // If N is odd, can't use s[N:N+1] (alignment error).
         // Use manual save+and instead.
         if (dst[0] == 's' && std::isdigit(dst[1])) {
-          int reg_num = std::stoi(dst.substr(1));
-          if (reg_num % 2 == 0) {
-            // Even: use saveexec_b64 with aligned pair
-            std::string dst_pair = "s[" + std::to_string(reg_num) + ":" +
-                                   std::to_string(reg_num + 1) + "]";
-            // Source also needs 64-bit: expand sN → s[N:N+1] if single SGPR
-            std::string src64 = src;
-            if (src.size() >= 2 && src[0] == 's' && std::isdigit(src[1]) &&
-                src.find('[') == std::string::npos) {
-              int src_num = std::stoi(src.substr(1));
-              // Round down to even for alignment
-              int src_even = src_num & ~1;
-              src64 = "s[" + std::to_string(src_even) + ":" +
-                      std::to_string(src_even + 1) + "]";
-            }
-            result.push_back(b64_mnem + " " + dst_pair + ", " + src64);
-            result.push_back("s_mov_b32 exec_hi, 0");
-          } else {
-            // Odd: manual save + op + clear exec_hi
-            // For b32 ops, narrow vcc → vcc_lo (b32 requires 32-bit operands)
-            std::string src32 = src;
-            if (src32 == "vcc") src32 = "vcc_lo";
-            result.push_back("s_mov_b32 " + dst + ", exec_lo");
-            // Extract the operation: s_and_saveexec → and, s_or_saveexec → or
-            if (b64_mnem.find("s_and_saveexec") == 0 ||
-                b64_mnem.find("s_andn2_saveexec") == 0) {
-              if (b64_mnem.find("andn2") != std::string::npos) {
-                result.push_back("s_andn2_b32 exec_lo, exec_lo, " + src32);
-              } else {
-                result.push_back("s_and_b32 exec_lo, exec_lo, " + src32);
-              }
-            } else if (b64_mnem.find("s_or_saveexec") == 0) {
-              result.push_back("s_or_b32 exec_lo, exec_lo, " + src32);
+          // ALWAYS use the manual b32 sequence for saveexec.
+          // The b64 form picks up s[src+1] as high 32 bits of the mask,
+          // which may contain unrelated kernel data (e.g., cols, pointers)
+          // → exec_hi gets garbage bits → threads 32-63 spuriously active → crash.
+          std::string src32 = src;
+          if (src32 == "vcc") src32 = "vcc_lo";
+          result.push_back("s_mov_b32 " + dst + ", exec_lo");
+          if (b64_mnem.find("s_and_saveexec") == 0 ||
+              b64_mnem.find("s_andn2_saveexec") == 0) {
+            if (b64_mnem.find("andn2") != std::string::npos) {
+              result.push_back("s_andn2_b32 exec_lo, exec_lo, " + src32);
             } else {
               result.push_back("s_and_b32 exec_lo, exec_lo, " + src32);
             }
-            result.push_back("s_mov_b32 exec_hi, 0");
+          } else if (b64_mnem.find("s_or_saveexec") == 0) {
+            result.push_back("s_or_b32 exec_lo, exec_lo, " + src32);
+          } else {
+            result.push_back("s_and_b32 exec_lo, exec_lo, " + src32);
           }
+          result.push_back("s_mov_b32 exec_hi, 0");
           return result;
         }
 
