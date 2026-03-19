@@ -27,7 +27,6 @@
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Release",
                 "ROCPROFSYS_BUILD_CI": "ON",
-                "ROCPROFSYS_BUILD_EXAMPLES": "ON",
                 "ROCPROFSYS_BUILD_GTEST": "ON",
                 "ROCPROFSYS_BUILD_TESTING": "ON",
                 "ROCPROFSYS_MAX_THREADS": "64"
@@ -42,7 +41,6 @@
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug",
                 "ROCPROFSYS_BUILD_DEBUG": "ON",
-                "ROCPROFSYS_BUILD_EXAMPLES": "ON",
                 "ROCPROFSYS_BUILD_TESTING": "ON"
             },
             "description": "Debug build parameters with tests",
@@ -54,7 +52,6 @@
             "binaryDir": "${sourceDir}/build/debug-optimized",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "RelWithDebInfo",
-                "ROCPROFSYS_BUILD_EXAMPLES": "ON",
                 "ROCPROFSYS_BUILD_TESTING": "ON"
             },
             "description": "Release build with debug info with tests",

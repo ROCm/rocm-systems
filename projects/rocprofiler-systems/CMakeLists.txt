@@ -318,6 +318,10 @@ if(ROCPROFSYS_INSTALL_EXAMPLES)
     set(ROCPROFSYS_BUILD_EXAMPLES ON CACHE BOOL "Enable building the examples" FORCE)
 endif()
 
+if(ROCPROFSYS_BUILD_TESTING)
+    set(ROCPROFSYS_BUILD_EXAMPLES ON CACHE BOOL "Enable building the examples" FORCE)
+endif()
+
 include(ProcessorCount)
 ProcessorCount(ROCPROFSYS_PROCESSOR_COUNT)
 
