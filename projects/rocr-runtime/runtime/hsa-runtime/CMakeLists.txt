@@ -465,11 +465,13 @@ install ( DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/inc/ DESTINATION ${CMAKE_INSTALL
 
 ## Configure and install package config file
 # Record our usage data for clients find_package calls.
-install ( EXPORT ${CORE_RUNTIME_NAME}Targets
-  FILE ${CORE_RUNTIME_NAME}Targets.cmake
-  NAMESPACE ${CORE_RUNTIME_NAME}::
-  DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${CORE_RUNTIME_NAME}
-  COMPONENT dev)
+if (UNIX)
+  install ( EXPORT ${CORE_RUNTIME_NAME}Targets
+    FILE ${CORE_RUNTIME_NAME}Targets.cmake
+    NAMESPACE ${CORE_RUNTIME_NAME}::
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${CORE_RUNTIME_NAME}
+    COMPONENT dev)
+endif()
 
 # Adds the target alias hsa-runtime64::hsa-runtime64 to the local cmake cache.
 # This isn't necessary today.  It's harmless preparation for some
@@ -489,9 +491,11 @@ configure_package_config_file(${CORE_RUNTIME_NAME}-config.cmake.in
 write_basic_package_version_file(${CORE_RUNTIME_NAME}-config-version.cmake
   VERSION ${SO_VERSION_STRING} COMPATIBILITY AnyNewerVersion )
 
-install(FILES ${CMAKE_CURRENT_BINARY_DIR}/${CORE_RUNTIME_NAME}-config.cmake ${CMAKE_CURRENT_BINARY_DIR}/${CORE_RUNTIME_NAME}-config-version.cmake
-  DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${CORE_RUNTIME_NAME}
-  COMPONENT dev)
+if (UNIX)
+  install(FILES ${CMAKE_CURRENT_BINARY_DIR}/${CORE_RUNTIME_NAME}-config.cmake ${CMAKE_CURRENT_BINARY_DIR}/${CORE_RUNTIME_NAME}-config-version.cmake
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${CORE_RUNTIME_NAME}
+    COMPONENT dev)
+endif()
 
 # Install build files needed only when using a static build.
 if( NOT ${BUILD_SHARED_LIBS} )
