@@ -83,7 +83,7 @@ class TestTranspose(RocprofsysTest):
 
 This produces names like:
 
-```
+```text
 Transpose_parametrized_1_16_16_sampling
 Transpose_parametrized_1_16_16_sys_run
 Transpose_parametrized_2_32_32_sampling

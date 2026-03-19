@@ -338,6 +338,7 @@ def pytest_configure(config: pytest.Config) -> None:
 # Session start hooks
 # ----------------------------------------------------------------------------
 
+
 # TODO: Deprecate once TheRock switches to CTest and CTest based filtering
 def pytest_report_header(config) -> list[str]:
     if not config.getoption("--ci-mode", default=False):
@@ -603,6 +604,7 @@ def pytest_collection_finish(session):
 # ----------------------------------------------------------------------------
 # Test execution hooks
 # ----------------------------------------------------------------------------
+
 
 # TODO: Deprecate once TheRock switches to CTest
 @pytest.hookimpl(hookwrapper=True)  # Allows yield

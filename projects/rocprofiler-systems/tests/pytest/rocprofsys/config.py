@@ -278,9 +278,11 @@ class RocprofsysConfig:
             "ROCPROFSYS_TREE_OUTPUT": "OFF",
             "ROCPROFSYS_USE_PID": "OFF",
             "ROCPROFSYS_TIMEMORY_COMPONENTS": "wall_clock,trip_count",
-            "PYTHONPATH": str(self.rocprofsys_site_packages)
-            if self.rocprofsys_site_packages
-            else "",
+            "PYTHONPATH": (
+                str(self.rocprofsys_site_packages)
+                if self.rocprofsys_site_packages
+                else ""
+            ),
             "ROCPROFSYS_CONFIG_FILE": "",
         }
 
