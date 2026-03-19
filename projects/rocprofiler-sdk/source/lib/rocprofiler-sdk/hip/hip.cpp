@@ -29,6 +29,7 @@
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/context/domain.hpp"
 #include "lib/rocprofiler-sdk/hip/utils.hpp"
+#include "lib/rocprofiler-sdk/hsa/native_queue_tracker.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/tracing/fwd.hpp"
 #include "lib/rocprofiler-sdk/tracing/tracing.hpp"
@@ -224,7 +225,15 @@ hip_api_impl<TableIdx, OpIdx>::functor(Args... args)
 
     if(callback_contexts.empty() && buffered_contexts.empty() && extended_contexts.empty())
     {
+        // need these hooks for late attach or it won't capture anything
+        if(auto* nqt = hsa::get_native_queue_tracker(); nqt && nqt->is_initialized())
+            nqt->on_hip_api_enter();
+
         [[maybe_unused]] auto _ret = exec(info_type::get_table_func(), std::forward<Args>(args)...);
+
+        if(auto* nqt = hsa::get_native_queue_tracker(); nqt && nqt->is_initialized())
+            nqt->on_hip_api_exit();
+
         if constexpr(!std::is_void<RetT>::value)
             return _ret;
         else
@@ -277,7 +286,13 @@ hip_api_impl<TableIdx, OpIdx>::functor(Args... args)
     // decrement the reference count before invoking
     corr_id->sub_ref_count();
 
+    if(auto* nqt = hsa::get_native_queue_tracker(); nqt && nqt->is_initialized())
+        nqt->on_hip_api_enter();
+
     auto _ret = exec(info_type::get_table_func(), std::forward<Args>(args)...);
+
+    if(auto* nqt = hsa::get_native_queue_tracker(); nqt && nqt->is_initialized())
+        nqt->on_hip_api_exit();
 
     // record the end timestamp as close to the function call as possible
     if(!buffered_contexts.empty() || !extended_contexts.empty())

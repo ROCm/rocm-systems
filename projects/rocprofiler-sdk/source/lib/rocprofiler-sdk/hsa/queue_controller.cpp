@@ -25,6 +25,7 @@
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
+#include "lib/rocprofiler-sdk/hsa/native_queue_tracker.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
@@ -327,6 +328,11 @@ QueueController::init(CoreApiTable& core_table, AmdExtTable& ext_table)
             core_table.hsa_queue_create_fn  = hsa::create_queue;
             core_table.hsa_queue_destroy_fn = hsa::destroy_queue;
         }
+
+        if(auto* tracker = get_native_queue_tracker())
+        {
+            tracker->discover_queues(core_table, ext_table);
+        }
     }
 }
 
@@ -535,6 +541,9 @@ queue_controller_init(HsaApiTable* table)
 void
 queue_controller_sync()
 {
+    if(auto* nqt = get_native_queue_tracker(); nqt && nqt->is_initialized())
+        nqt->flush(200);
+
     if(get_queue_controller())
         get_queue_controller()->iterate_queues([](const Queue* _queue) { _queue->sync(); });
 }

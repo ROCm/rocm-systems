@@ -138,7 +138,7 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
             });
     }
 
-    // Delete signals and packets, signal we have completed.
+    // Return signals to the pool instead of destroying them.
     if(queue_info_session.interrupt_signal.handle != 0u)
     {
 #if !defined(NDEBUG)
@@ -148,11 +148,11 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
 #endif
         hsa::get_core_table()->hsa_signal_store_screlease_fn(queue_info_session.interrupt_signal,
                                                              -1);
-        hsa::get_core_table()->hsa_signal_destroy_fn(queue_info_session.interrupt_signal);
+        queue_info_session.queue.release_signal(queue_info_session.interrupt_signal);
     }
     if(queue_info_session.kernel_pkt.ext_amd_aql_pm4.completion_signal.handle != 0u)
     {
-        hsa::get_core_table()->hsa_signal_destroy_fn(
+        queue_info_session.queue.release_signal(
             queue_info_session.kernel_pkt.ext_amd_aql_pm4.completion_signal);
     }
 
@@ -218,9 +218,13 @@ WriteInterceptor(const void* packets,
     // unique sequence id for the dispatch
     static auto sequence_counter = std::atomic<rocprofiler_dispatch_id_t>{0};
 
-    auto&& CreateBarrierPacket = [](hsa_signal_t*                    dependency_signal,
-                                    hsa_signal_t*                    completion_signal,
-                                    std::vector<rocprofiler_packet>& _packets) {
+    // Use small_vector to avoid heap allocation for the common case (kernel +
+    // barrier = 2-4 packets). Falls back to heap for larger instrumentation batches.
+    using packet_vec_t = common::container::small_vector<rocprofiler_packet, 8>;
+
+    auto&& CreateBarrierPacket = [](hsa_signal_t*    dependency_signal,
+                                    hsa_signal_t*    completion_signal,
+                                    packet_vec_t&    _packets) {
         hsa_barrier_and_packet_t barrier{};
         barrier.header = HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE;
         barrier.header |= 1 << HSA_PACKET_HEADER_BARRIER;
@@ -255,7 +259,7 @@ WriteInterceptor(const void* packets,
         tracing_data_v.external_correlation_ids.emplace(itr, tracing::empty_user_data);
 
     const auto* packets_arr         = static_cast<const rocprofiler_packet*>(packets);
-    auto        transformed_packets = std::vector<rocprofiler_packet>{};
+    auto        transformed_packets = packet_vec_t{};
 
     // Searching accross all the packets given during this write
     for(size_t i = 0; i < pkt_count; ++i)
@@ -321,10 +325,9 @@ WriteInterceptor(const void* packets,
 
         // Copy kernel pkt, copy is to allow for signal to be modified
         rocprofiler_packet kernel_pkt = packets_arr[i];
-        // create our own signal that we can get a callback on. if there is an original completion
-        // signal we will create a barrier packet, assign the original completion signal that that
-        // barrier packet, and add it right after the kernel packet
-        queue.create_signal(0, &kernel_pkt.kernel_dispatch.completion_signal);
+        // Acquire a signal from the pool (or create a new one) for completion tracking.
+        // The original completion signal is preserved via a barrier packet after the kernel.
+        kernel_pkt.kernel_dispatch.completion_signal = queue.acquire_signal(0);
 
         // computes the "size" based on the offset of reserved_padding field
         constexpr auto kernel_dispatch_info_rt_size =
@@ -418,10 +421,16 @@ WriteInterceptor(const void* packets,
         }
 
 #if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
-        if(pc_sampling::is_pc_sample_service_configured(queue.get_agent().get_rocp_agent()->id))
         {
-            transformed_packets.emplace_back(pc_sampling::hsa::generate_marker_packet_for_kernel(
-                corr_id, tracing_data_v.external_correlation_ids, dispatch_id));
+            auto _agent_id      = queue.get_agent().get_rocp_agent()->id;
+            auto _pcs_configured =
+                pc_sampling::is_pc_sample_service_configured(_agent_id);
+            if(_pcs_configured)
+            {
+                transformed_packets.emplace_back(
+                    pc_sampling::hsa::generate_marker_packet_for_kernel(
+                        corr_id, tracing_data_v.external_correlation_ids, dispatch_id));
+            }
         }
 #endif
 
@@ -456,7 +465,7 @@ WriteInterceptor(const void* packets,
         if(injected_end_pkt)
         {
             // Adding a barrier packet with the original packet's completion signal.
-            queue.create_signal(0, &interrupt_signal);
+            interrupt_signal = queue.acquire_signal(0);
             completion_signal                                            = interrupt_signal;
             transformed_packets.back().ext_amd_aql_pm4.completion_signal = interrupt_signal;
             CreateBarrierPacket(&interrupt_signal, &interrupt_signal, transformed_packets);
@@ -645,6 +654,9 @@ Queue::~Queue()
 {
     sync();
     _core_api.hsa_signal_destroy_fn(_active_kernels);
+    for(auto& sig : _signal_pool)
+        _core_api.hsa_signal_destroy_fn(sig);
+    _signal_pool.clear();
 }
 
 void
@@ -669,6 +681,36 @@ Queue::create_signal(uint32_t attribute, hsa_signal_t* signal) const
     ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK)
         << "Error: hsa_amd_signal_create failed with error code " << status
         << " :: " << hsa::get_hsa_status_string(status);
+}
+
+hsa_signal_t
+Queue::acquire_signal(uint32_t attribute)
+{
+    {
+        std::lock_guard<std::mutex> lock(_signal_pool_mutex);
+        if(!_signal_pool.empty())
+        {
+            auto sig = _signal_pool.back();
+            _signal_pool.pop_back();
+            _core_api.hsa_signal_store_screlease_fn(sig, 1);
+            return sig;
+        }
+    }
+    hsa_signal_t sig{.handle = 0};
+    create_signal(attribute, &sig);
+    return sig;
+}
+
+void
+Queue::release_signal(hsa_signal_t signal)
+{
+    if(signal.handle == 0) return;
+    std::lock_guard<std::mutex> lock(_signal_pool_mutex);
+    static constexpr size_t kMaxPoolSize = 64;
+    if(_signal_pool.size() < kMaxPoolSize)
+        _signal_pool.push_back(signal);
+    else
+        _core_api.hsa_signal_destroy_fn(signal);
 }
 
 void

@@ -7,6 +7,7 @@ set(ROCPROFILER_LIB_HSA_SOURCES
     hsa_barrier.cpp
     hsa.cpp
     memory_allocation.cpp
+    native_queue_tracker.cpp
     pc_sampling.hpp
     profile_serializer.cpp
     queue_controller.cpp
@@ -21,6 +22,7 @@ set(ROCPROFILER_LIB_HSA_HEADERS
     defines.hpp
     hsa_barrier.hpp
     hsa.hpp
+    native_queue_tracker.hpp
     pc_sampling.cpp
     profile_serializer.hpp
     queue_controller.hpp

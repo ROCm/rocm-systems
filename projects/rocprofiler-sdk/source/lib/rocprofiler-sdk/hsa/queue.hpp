@@ -46,7 +46,9 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <unordered_map>
+#include <vector>
 
 namespace rocprofiler
 {
@@ -129,6 +131,10 @@ public:
     void create_signal(uint32_t attribute, hsa_signal_t* signal) const;
     void signal_async_handler(const hsa_signal_t& signal, void* data) const;
 
+    // Signal pool: recycle HSA signals to avoid per-dispatch kernel/driver calls
+    hsa_signal_t acquire_signal(uint32_t attribute = 0);
+    void         release_signal(hsa_signal_t signal);
+
     template <typename FuncT>
     void signal_callback(FuncT&& func) const;
 
@@ -174,6 +180,9 @@ private:
     queue_state                          _state           = queue_state::normal;
     std::mutex                           _lock_queue;
     hsa_signal_t                         _active_kernels = {.handle = 0};
+    // Per-queue pool of recycled HSA signals
+    std::mutex                           _signal_pool_mutex;
+    std::vector<hsa_signal_t>            _signal_pool;
 };
 
 inline rocprofiler_queue_id_t

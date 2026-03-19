@@ -28,6 +28,7 @@
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/context/domain.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
+#include "lib/rocprofiler-sdk/hsa/native_queue_tracker.hpp"
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
@@ -318,6 +319,15 @@ rocprofiler_create_buffer(rocprofiler_context_id_t        context,
 rocprofiler_status_t
 rocprofiler_flush_buffer(rocprofiler_buffer_id_t buffer_id)
 {
+    // Drain NativeQueueTracker pending dispatches so their buffer records
+    // are emplaced before we flush the buffer contents to the client.
+    // without this, hipDeviceSynchronize called via dlsym bypasses SDK's HIP interception, so NQT on on_hip_api_exit() never fires during a flush.
+    if(auto* nqt = rocprofiler::hsa::get_native_queue_tracker())
+    {
+        if(nqt->is_initialized() && nqt->queue_count() > 0)
+            nqt->flush(50);
+    }
+
 #if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
     // Drain internal PC sampling buffers, if needed.
     auto status = rocprofiler::pc_sampling::flush_internal_agent_buffers(buffer_id);
