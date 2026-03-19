@@ -60,7 +60,7 @@ void HostKernelDouble(float* Hmm, float* hPtr, size_t n) {
 /*
    This testcase verifies the concurrent access of hipMallocManaged Memory on host and device.
  */
-TEST_CASE(Unit_hipMallocManaged_HostDeviceConcurrent) {
+HIP_TEST_CASE(Unit_hipMallocManaged_HostDeviceConcurrent) {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
     HipTest::HIP_SKIP_TEST("GPU doesn't support managed memory so skipping test.");
@@ -97,7 +97,7 @@ TEST_CASE(Unit_hipMallocManaged_HostDeviceConcurrent) {
 // Equal parts of Hmm is accessed and
 // kernel is launched on acessed chunk of hmm memory
 // and checks if there are any inconsistencies or access issues
-TEST_CASE(Unit_hipMallocManaged_MultiChunkSingleDevice) {
+HIP_TEST_CASE(Unit_hipMallocManaged_MultiChunkSingleDevice) {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
     HipTest::HIP_SKIP_TEST("GPU doesn't support managed memory so skipping test.");
@@ -149,7 +149,7 @@ TEST_CASE(Unit_hipMallocManaged_MultiChunkSingleDevice) {
 // Equal parts of Hmm is accessed on available gpus and
 // kernel is launched on acessed chunk of hmm memory
 // and checks if there are any inconsistencies or access issues
-TEST_CASE(Unit_hipMallocManaged_MultiChunkMultiDevice) {
+HIP_TEST_CASE(Unit_hipMallocManaged_MultiChunkMultiDevice) {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
     HipTest::HIP_SKIP_TEST("GPU doesn't support managed memory so skipping test.");
@@ -205,7 +205,7 @@ TEST_CASE(Unit_hipMallocManaged_MultiChunkMultiDevice) {
 }
 
 // The following tests oversubscription hipMallocManaged() api
-TEST_CASE(Unit_hipMallocManaged_OverSubscription) {
+HIP_TEST_CASE(Unit_hipMallocManaged_OverSubscription) {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
     HipTest::HIP_SKIP_TEST("GPU doesn't support managed memory so skipping test.");
@@ -232,7 +232,7 @@ TEST_CASE(Unit_hipMallocManaged_OverSubscription) {
 
 // The following test does negative testing of hipMallocManaged() api
 // by passing invalid values and check if the behavior is as expected
-TEST_CASE(Unit_hipMallocManaged_Negative) {
+HIP_TEST_CASE(Unit_hipMallocManaged_Negative) {
   void* A;
   size_t total = 0, free = 0;
   HIP_CHECK(hipMemGetInfo(&free, &total));
@@ -292,7 +292,7 @@ TEST_CASE(Unit_hipMallocManaged_Negative) {
 // Allocate two pointers using hipMallocManaged(), initialize,
 // then launch kernel using these pointers directly and
 // later validate the content without using any Memcpy.
-TEMPLATE_TEST_CASE(Unit_hipMallocManaged_TwoPointers, int,
+HIP_TEMPLATE_TEST_CASE(Unit_hipMallocManaged_TwoPointers, int,
                    float, double) {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
@@ -333,7 +333,7 @@ TEMPLATE_TEST_CASE(Unit_hipMallocManaged_TwoPointers, int,
 // to all other devices. This include verification and Device two Device
 // transfers and kernel launch o discover if there any access issues.
 
-TEMPLATE_TEST_CASE(Unit_hipMallocManaged_DeviceContextChange,
+HIP_TEMPLATE_TEST_CASE(Unit_hipMallocManaged_DeviceContextChange,
                    unsigned char, int, float, double) {
   auto managed = HmmAttrPrint();
   if (managed != 1) {

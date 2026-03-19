@@ -29,7 +29,7 @@
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipFuncSetAttribute_Positive_MaxDynamicSharedMemorySize) {
+HIP_TEST_CASE(Unit_hipFuncSetAttribute_Positive_MaxDynamicSharedMemorySize) {
   HIP_CHECK(hipFuncSetAttribute(reinterpret_cast<void*>(kernel),
                                 hipFuncAttributeMaxDynamicSharedMemorySize, 1024));
 
@@ -51,7 +51,7 @@ TEST_CASE(Unit_hipFuncSetAttribute_Positive_MaxDynamicSharedMemorySize) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipFuncSetAttribute_Positive_PreferredSharedMemoryCarveout) {
+HIP_TEST_CASE(Unit_hipFuncSetAttribute_Positive_PreferredSharedMemoryCarveout) {
   HIP_CHECK(hipFuncSetAttribute(reinterpret_cast<void*>(kernel),
                                 hipFuncAttributePreferredSharedMemoryCarveout, 50));
 
@@ -83,7 +83,7 @@ TEST_CASE(Unit_hipFuncSetAttribute_Positive_PreferredSharedMemoryCarveout) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipFuncSetAttribute_Positive_Parameters) {
+HIP_TEST_CASE(Unit_hipFuncSetAttribute_Positive_Parameters) {
   SECTION("hipFuncAttributeMaxDynamicSharedMemorySize == 0") {
     HIP_CHECK(hipFuncSetAttribute(reinterpret_cast<void*>(kernel),
                                   hipFuncAttributeMaxDynamicSharedMemorySize, 0));
@@ -144,7 +144,7 @@ TEST_CASE(Unit_hipFuncSetAttribute_Positive_Parameters) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipFuncSetAttribute_Negative_Parameters) {
+HIP_TEST_CASE(Unit_hipFuncSetAttribute_Negative_Parameters) {
   SECTION("func == nullptr") {
     HIP_CHECK_ERROR(hipFuncSetAttribute(nullptr, hipFuncAttributePreferredSharedMemoryCarveout, 50),
                     hipErrorInvalidDeviceFunction);
@@ -204,7 +204,7 @@ TEST_CASE(Unit_hipFuncSetAttribute_Negative_Parameters) {
  *  - Platform specific (AMD)
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipFuncSetAttribute_Positive_MaxDynamicSharedMemorySize_Not_Supported) {
+HIP_TEST_CASE(Unit_hipFuncSetAttribute_Positive_MaxDynamicSharedMemorySize_Not_Supported) {
 #if HT_NVIDIA
   HipTest::HIP_SKIP_TEST("This is an AMD specific test");
   return;
@@ -236,7 +236,7 @@ TEST_CASE(Unit_hipFuncSetAttribute_Positive_MaxDynamicSharedMemorySize_Not_Suppo
  *  - Platform specific (AMD)
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipFuncSetAttribute_Positive_PreferredSharedMemoryCarveout_Not_Supported) {
+HIP_TEST_CASE(Unit_hipFuncSetAttribute_Positive_PreferredSharedMemoryCarveout_Not_Supported) {
 #if HT_NVIDIA
   HipTest::HIP_SKIP_TEST("This is an AMD specific test");
   return;

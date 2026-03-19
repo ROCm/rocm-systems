@@ -14,19 +14,12 @@
     "NCCL_DEBUG": "WARN"
   },
   "build_configuration": {
-    "cmake_options": {
-      "CMAKE_BUILD_TYPE": "Release",
-      "ENABLE_CODE_COVERAGE": "OFF",
-      "BUILD_TESTS": "ON",
-      "BUILD_LOCAL_GPU_TARGET_ONLY": "ON",
-      "TRACE": "OFF",
-      "COLLTRACE": "OFF"
-    },
+    "install_flags": ["-t", "-l", "--disable-colltrace", "--no_clean"],
+    "cmake_options": "",
     "env_variables": {
       "HIPCC_COMPILE_FLAGS_APPEND": "-O3"
     },
-    "parallel_jobs": 64,
-    "generator": "Unix Makefiles"
+    "parallel_jobs": 64
   },
   "test_configurations": {
     "perf_base": {

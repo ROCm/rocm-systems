@@ -96,6 +96,7 @@ class GDABackend : public Backend {
   std::vector<struct bnxt_host_qp> bnxt_qps;
   std::vector<struct bnxt_host_cq> bnxt_scqs;
   std::vector<struct bnxt_host_cq> bnxt_rcqs;
+  HIPAllocator *qp_allocator_{nullptr};
   /* GDA_BNXT END */
 
   /* GDA_IONIC & GDA_MLX5 START */

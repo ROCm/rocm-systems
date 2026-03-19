@@ -11,13 +11,13 @@
 #include <utils.hh>
 
 // hipMemcpyDtoH
-TEST_CASE(Unit_hipMemcpyDtoH_Positive_Basic) {
+HIP_TEST_CASE(Unit_hipMemcpyDtoH_Positive_Basic) {
   MemcpyDeviceToHostShell<false>([](void* dst, void* src, size_t count) {
     return hipMemcpyDtoH(dst, reinterpret_cast<hipDeviceptr_t>(src), count);
   });
 }
 
-TEST_CASE(Unit_hipMemcpyDtoH_Positive_Synchronization_Behavior) {
+HIP_TEST_CASE(Unit_hipMemcpyDtoH_Positive_Synchronization_Behavior) {
   const auto f = [](void* dst, void* src, size_t count) {
     return hipMemcpyDtoH(dst, reinterpret_cast<hipDeviceptr_t>(src), count);
   };
@@ -25,7 +25,7 @@ TEST_CASE(Unit_hipMemcpyDtoH_Positive_Synchronization_Behavior) {
   MemcpyDtoHPinnedSyncBehavior(f, true);
 }
 
-TEST_CASE(Unit_hipMemcpyDtoH_Negative_Parameters) {
+HIP_TEST_CASE(Unit_hipMemcpyDtoH_Negative_Parameters) {
   using namespace std::placeholders;
   LinearAllocGuard<int> device_alloc(LinearAllocs::hipMalloc, kPageSize);
   LinearAllocGuard<int> host_alloc(LinearAllocs::hipHostMalloc, kPageSize);
@@ -38,13 +38,13 @@ TEST_CASE(Unit_hipMemcpyDtoH_Negative_Parameters) {
 }
 
 // hipMemcpyHtoD
-TEST_CASE(Unit_hipMemcpyHtoD_Positive_Basic) {
+HIP_TEST_CASE(Unit_hipMemcpyHtoD_Positive_Basic) {
   MemcpyHostToDeviceShell<false>([](void* dst, void* src, size_t count) {
     return hipMemcpyHtoD(reinterpret_cast<hipDeviceptr_t>(dst), src, count);
   });
 }
 
-TEST_CASE(Unit_hipMemcpyHtoD_Positive_Synchronization_Behavior) {
+HIP_TEST_CASE(Unit_hipMemcpyHtoD_Positive_Synchronization_Behavior) {
   MemcpyHPageabletoDSyncBehavior(
       [](void* dst, void* src, size_t count) {
         return hipMemcpyHtoD(reinterpret_cast<hipDeviceptr_t>(dst), src, count);
@@ -52,7 +52,7 @@ TEST_CASE(Unit_hipMemcpyHtoD_Positive_Synchronization_Behavior) {
       true);
 }
 
-TEST_CASE(Unit_hipMemcpyHtoD_Negative_Parameters) {
+HIP_TEST_CASE(Unit_hipMemcpyHtoD_Negative_Parameters) {
   using namespace std::placeholders;
   LinearAllocGuard<int> device_alloc(LinearAllocs::hipMalloc, kPageSize);
   LinearAllocGuard<int> host_alloc(LinearAllocs::hipHostMalloc, kPageSize);
@@ -65,7 +65,7 @@ TEST_CASE(Unit_hipMemcpyHtoD_Negative_Parameters) {
 }
 
 // hipMemcpyDtoD
-TEST_CASE(Unit_hipMemcpyDtoD_Positive_Basic) {
+HIP_TEST_CASE(Unit_hipMemcpyDtoD_Positive_Basic) {
   const auto f = [](void* dst, void* src, size_t count) {
     return hipMemcpyDtoD(reinterpret_cast<hipDeviceptr_t>(dst),
                          reinterpret_cast<hipDeviceptr_t>(src), count);
@@ -74,7 +74,7 @@ TEST_CASE(Unit_hipMemcpyDtoD_Positive_Basic) {
   SECTION("Peer access disabled") { MemcpyDeviceToDeviceShell<false, false>(f); }
 }
 
-TEST_CASE(Unit_hipMemcpyDtoD_Positive_Synchronization_Behavior) {
+HIP_TEST_CASE(Unit_hipMemcpyDtoD_Positive_Synchronization_Behavior) {
   // This behavior differs on NVIDIA and AMD, on AMD the hipMemcpy calls is synchronous with
   // respect to the host
 #if HT_AMD
@@ -90,7 +90,7 @@ TEST_CASE(Unit_hipMemcpyDtoD_Positive_Synchronization_Behavior) {
       false);
 }
 
-TEST_CASE(Unit_hipMemcpyDtoD_Negative_Parameters) {
+HIP_TEST_CASE(Unit_hipMemcpyDtoD_Negative_Parameters) {
   using namespace std::placeholders;
   LinearAllocGuard<int> src_alloc(LinearAllocs::hipMalloc, kPageSize);
   LinearAllocGuard<int> dst_alloc(LinearAllocs::hipMalloc, kPageSize);

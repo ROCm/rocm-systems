@@ -195,7 +195,7 @@ bool hipPerfMemcpy::run_d2d_nocu(unsigned int numTests) {
  *  - HIP_VERSION >= 5.6
  */
 
-TEST_CASE(Perf_hipPerfMemcpy_test) {
+HIP_TEST_CASE(Perf_hipPerfMemcpy_test) {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
 

@@ -149,7 +149,7 @@ static std::string TargetGenericMap(const std::string& input) {
 }
 
 // For sramecc and xnack
-static std::string TargetFeatureCheck(const std::string& input, std::string feature) {
+static std::string TargetFeatureCheck(const std::string& input, const std::string &feature) {
   if (input.find(feature) != std::string::npos) {
     auto feature_p = feature + "+";  // feature present eg: xnack+
     auto feature_m = feature + "-";  // feature absent eg: xnack-
@@ -162,7 +162,7 @@ static std::string TargetFeatureCheck(const std::string& input, std::string feat
   return "";
 }
 
-static std::string TargetToGeneric(std::string input) {
+static std::string TargetToGeneric(const std::string &input) {
   auto sramecc = TargetFeatureCheck(input, "sramecc");
   auto xnack = TargetFeatureCheck(input, "xnack");
 

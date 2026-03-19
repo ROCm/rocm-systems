@@ -415,7 +415,7 @@ endif()
 
 # Execute the python script to generate required collective functions
 execute_process(
-    COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/src/device/generate.py ${GEN_DIR} ${IFC_ENABLED} ${COLLTRACE} ${ENABLE_MSCCL_KERNEL} ${BUILD_LOCAL_GPU_TARGET_ONLY} ${ONLY_FUNCS}
+    COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/src/device/generate.py ${GEN_DIR} ${IFC_ENABLED} ${COLLTRACE} ${ENABLE_MSCCL_KERNEL} ${BUILD_LOCAL_GPU_TARGET_ONLY} ${ENABLE_ROCSHMEM} ${ONLY_FUNCS}
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
     RESULT_VARIABLE gen_py_result
     ERROR_VARIABLE gen_py_error
@@ -468,7 +468,7 @@ list(APPEND HIP_SOURCES ${PROJECT_BINARY_DIR}/git_version.cpp)
 ## Set RCCL source files
 add_library(rccl ${HIP_SOURCES})
 
-# Keep librccl outputs in the top-level build dir 
+# Keep librccl outputs in the top-level build dir
 # existing packaging/tests scripts that link via ${PROJECT_BINARY_DIR}.
 set_target_properties(rccl PROPERTIES
   ARCHIVE_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"
@@ -486,6 +486,19 @@ endif()
 
 if(HIP_HOST_UNCACHED_MEMORY)
   target_compile_definitions(rccl PRIVATE HIP_HOST_UNCACHED_MEMORY)
+endif()
+
+if(HIP_FABRIC_API_FUNC AND HIP_FABRIC_HANDLE_TYPE)
+  set(HIP_FABRIC_API ON)
+  message(STATUS "HIP Fabric API enabled (hipMemImportFromShareableHandle and hipMemFabricHandle_t found)")
+else()
+  set(HIP_FABRIC_API OFF)
+  if(NOT HIP_FABRIC_API_FUNC)
+    message(STATUS "hipMemImportFromShareableHandle not found - disabling HIP_FABRIC_API")
+  endif()
+  if(NOT HIP_FABRIC_HANDLE_TYPE)
+    message(STATUS "hipMemFabricHandle_t type not found - disabling HIP_FABRIC_API")
+  endif()
 endif()
 
 if(GENERATE_SYM_KERNELS)
@@ -774,7 +787,9 @@ if(ENABLE_CODE_COVERAGE)
   message(STATUS "Code coverage is enabled with build type '${CMAKE_BUILD_TYPE}'.")
 
   target_compile_options(rccl PRIVATE
-    -fvisibility=default -Xarch_host -fprofile-instr-generate -Xarch_host -fcoverage-mapping)
+    -fvisibility=default
+    "SHELL:-Xarch_host -fprofile-instr-generate"
+    "SHELL:-Xarch_host -fcoverage-mapping")
 
   set(COVERAGE_SHARED_LINKER_FLAGS
     -fprofile-generate

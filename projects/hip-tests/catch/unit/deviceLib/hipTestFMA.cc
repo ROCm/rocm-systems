@@ -160,7 +160,7 @@ void runTestHalfFMA() {
   HIP_CHECK(hipFree(Ad));
 }
 
-TEST_CASE(Unit_hipTestFMA) {
+HIP_TEST_CASE(Unit_hipTestFMA) {
   SECTION("test FMA") { runTestFMA(); }
   SECTION("test HalfFMA") { runTestHalfFMA(); }
 }

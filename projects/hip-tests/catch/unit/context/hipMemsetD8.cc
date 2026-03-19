@@ -8,7 +8,7 @@
 #define N 1024
 constexpr char memsetval = 'b';
 
-TEST_CASE(Unit_hipMemsetD8_Functional) {
+HIP_TEST_CASE(Unit_hipMemsetD8_Functional) {
   size_t Nbytes = N * sizeof(char);
   char* A_h = new char[Nbytes];
   ;

@@ -44,7 +44,7 @@ __global__ void vectorAdd(float* Ad, float* Bd) {
  *    - HIP_VERSION >= 5.5
  */
 
-TEST_CASE(Unit_hipDynamicShared2) {
+HIP_TEST_CASE(Unit_hipDynamicShared2) {
   float *A, *B, *Ad, *Bd;
   A = new float[LEN];
   B = new float[LEN];
