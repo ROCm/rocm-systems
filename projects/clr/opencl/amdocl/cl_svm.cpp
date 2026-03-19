@@ -973,7 +973,7 @@ RUNTIME_ENTRY(cl_int, clSetKernelExecInfo,
     return CL_INVALID_KERNEL;
   }
 
-  if ((param_value == NULL) && (param_value_size != 0)) { 
+  if ((param_value == NULL) && (param_value_size != 0)) {
     return CL_INVALID_VALUE;
   }
 
