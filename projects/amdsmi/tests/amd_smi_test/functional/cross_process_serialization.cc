@@ -57,9 +57,10 @@ TestCrossProcessSerialization::TestCrossProcessSerialization() : TestBase() {
       "Verifies that AMDSMI_MUTEX_CROSS_PROCESS=1 (blocking mode) correctly "
       "serializes GPU API calls across processes. Process A holds the device "
       "mutex for several seconds via rsmi_test_sleep. Process B then calls an "
-      "AMDSMI API and measures how long it blocks. A wait time >= "
-      "kMinWaitSeconds proves Process B was serialized rather than racing "
-      "through concurrently.");
+      "AMDSMI API and measures how long it blocks. A wait time >= " +
+      std::to_string(kMinWaitSeconds) +
+      " seconds proves Process B was serialized rather than racing"
+      " through concurrently.");
 }
 
 TestCrossProcessSerialization::~TestCrossProcessSerialization() {}
@@ -245,6 +246,8 @@ void TestCrossProcessSerialization::Run(void) {
   }
 
   if (holder_process_) {
+    PRINT_VERBOSITY();
+
     // Block SIGCHLD so it doesn't interrupt sleep inside rsmi_test_sleep.
     sigset_t sigchld_mask, old_mask;
     sigemptyset(&sigchld_mask);
@@ -287,18 +290,22 @@ void TestCrossProcessSerialization::Run(void) {
       _exit(1);
     };
 
-    IF_VERB(STANDARD) {
-      std::cout << "WAITER process: calling amdsmi_get_gpu_id() — should block until "
-                   "HOLDER releases mutex..."
-                << std::endl;
-    }
-
     // Block until holder signals it is about to acquire the mutex, then
     // pause briefly so rsmi_test_sleep's pthread_mutex_lock completes
     // before we attempt to acquire the same lock via amdsmi_get_gpu_id.
     char run_ready = 0;
     read(run_pipe_[0], &run_ready, 1);
     close(run_pipe_[0]);
+
+    // Print after the pipe read so this message always follows the holder's
+    // "acquiring mutex" message in the output (the holder writes to the pipe
+    // immediately after printing its own message).
+    IF_VERB(STANDARD) {
+      std::cout << "WAITER process: calling amdsmi_get_gpu_id() — should block until "
+                   "HOLDER releases mutex..."
+                << std::endl;
+    }
+
     struct timespec pause_ts = {0, kWaiterMutexPauseNs};
     nanosleep(&pause_ts, nullptr);
 

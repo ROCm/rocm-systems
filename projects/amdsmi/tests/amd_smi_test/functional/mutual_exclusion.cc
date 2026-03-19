@@ -30,6 +30,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <initializer_list>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -37,6 +38,7 @@
 #include "../test_common.h"
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_test_flags.h"
+#include "amd_smi/impl/amd_smi_utils.h"
 
 TestMutualExclusion::TestMutualExclusion() : TestBase() {
   set_title("Mutual Exclusion Test");
@@ -202,8 +204,10 @@ void TestMutualExclusion::Run(void) {
     // Restore signal mask before wait() so SIGCHLD can be delivered and the
     // child can be reaped normally.
     sigprocmask(SIG_SETMASK, &old_mask, nullptr);
-    pid_t cpid = wait(nullptr);
+    int child_status = 0;
+    pid_t cpid = wait(&child_status);
     ASSERT_EQ(cpid, child_);
+    EXPECT_EQ(WEXITSTATUS(child_status), 0) << "TESTER child process reported CHECK_RET failure(s)";
   } else {
     // Both processes should have completed amdsmi_init().
     // let the other process get started on rsmi_test_sleep().
@@ -230,13 +234,32 @@ void TestMutualExclusion::Run(void) {
     amdsmi_error_count_t dmy_err_cnt{};
     amdsmi_ras_err_state_t dmy_ras_err_st;
 
-    // This can be replaced with ASSERT_EQ() once env. stabilizes
-#define CHECK_RET(A, B)                                                               \
-  {                                                                                   \
-    if ((A) != (B)) {                                                                 \
-      std::cout << "Expected return value of " << B << " but got " << A << std::endl; \
-      std::cout << "at " << __FILE__ << ":" << __LINE__ << std::endl;                 \
-    }                                                                                 \
+// Accepts one or more expected values; passes if actual matches any of them.
+#define CHECK_RET(retVal, ...)                                                             \
+  {                                                                                        \
+    auto _tst_ret_val = (retVal);                                                          \
+    std::initializer_list<decltype(_tst_ret_val)> _expected_returns = {__VA_ARGS__};       \
+    bool _chk_matched = false;                                                             \
+    for (auto _chk_e : _expected_returns) {                                                \
+      if (_tst_ret_val == _chk_e) {                                                        \
+        _chk_matched = true;                                                               \
+        break;                                                                             \
+      }                                                                                    \
+    }                                                                                      \
+    if (!_chk_matched) {                                                                   \
+      std::cout << "Expected return value of one of {";                                    \
+      bool _chk_first = true;                                                              \
+      for (auto _chk_e : _expected_returns) {                                              \
+        if (!_chk_first) std::cout << ", ";                                                \
+        std::string status = smi_amdgpu_get_status_string(_chk_e, false);                  \
+        std::cout << status << " (" << _chk_e << ")";                                      \
+        _chk_first = false;                                                                \
+      }                                                                                    \
+      std::string ret_status = smi_amdgpu_get_status_string(_tst_ret_val, false);          \
+      std::cout << "} but got " << ret_status << " (" << _tst_ret_val << ")" << std::endl; \
+      std::cout << "at " << __FILE__ << ":" << __LINE__ << std::endl;                      \
+    }                                                                                      \
+    EXPECT_TRUE(_chk_matched);                                                             \
   }
     // TODO(amdsmi_team): Add more device calls here, we should also check how CPU/NIC/etc handle
     // These are APIs which either need to include:
@@ -299,8 +322,9 @@ void TestMutualExclusion::Run(void) {
 
     DISPLAY_AMDSMI_API("amdsmi_set_gpu_pci_bandwidth", "0", VERB(STANDARD));
     ret = amdsmi_set_gpu_pci_bandwidth(processor_handles_[0], 0);
-    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_BUSY);
-    CHECK_RET(ret, AMDSMI_STATUS_BUSY);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_BUSY,
+                          AMDSMI_STATUS_NO_PERM);
+    CHECK_RET(ret, AMDSMI_STATUS_BUSY, AMDSMI_STATUS_NO_PERM);
 
     DISPLAY_AMDSMI_API("amdsmi_get_gpu_fan_rpms", "0", VERB(STANDARD));
     ret = amdsmi_get_gpu_fan_rpms(processor_handles_[0], dmy_ui32, &dmy_i64);
@@ -319,13 +343,15 @@ void TestMutualExclusion::Run(void) {
 
     DISPLAY_AMDSMI_API("amdsmi_reset_gpu_fan", "0", VERB(STANDARD));
     ret = amdsmi_reset_gpu_fan(processor_handles_[0], 0);
-    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_BUSY);
-    CHECK_RET(ret, AMDSMI_STATUS_BUSY);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_BUSY,
+                          AMDSMI_STATUS_NO_PERM);
+    CHECK_RET(ret, AMDSMI_STATUS_BUSY, AMDSMI_STATUS_NO_PERM);
 
     DISPLAY_AMDSMI_API("amdsmi_set_gpu_fan_speed", "0", VERB(STANDARD));
     ret = amdsmi_set_gpu_fan_speed(processor_handles_[0], dmy_ui32, 0);
-    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_BUSY);
-    CHECK_RET(ret, AMDSMI_STATUS_BUSY);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_BUSY,
+                          AMDSMI_STATUS_NO_PERM);
+    CHECK_RET(ret, AMDSMI_STATUS_BUSY, AMDSMI_STATUS_NO_PERM);
 
     DISPLAY_AMDSMI_API("amdsmi_get_gpu_perf_level", "0", VERB(STANDARD));
     ret = amdsmi_get_gpu_perf_level(processor_handles_[0], &dmy_perf_lvl);
@@ -354,8 +380,9 @@ void TestMutualExclusion::Run(void) {
 
     DISPLAY_AMDSMI_API("amdsmi_set_clk_freq", "0", VERB(STANDARD));
     ret = amdsmi_set_clk_freq(processor_handles_[0], AMDSMI_CLK_TYPE_SYS, 0);
-    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_BUSY);
-    CHECK_RET(ret, AMDSMI_STATUS_BUSY);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_BUSY,
+                          AMDSMI_STATUS_NO_PERM);
+    CHECK_RET(ret, AMDSMI_STATUS_BUSY, AMDSMI_STATUS_NO_PERM);
 
     DISPLAY_AMDSMI_API("amdsmi_get_gpu_ecc_count", "0", VERB(STANDARD));
     ret = amdsmi_get_gpu_ecc_count(processor_handles_[0], AMDSMI_GPU_BLOCK_UMC, &dmy_err_cnt);
@@ -431,6 +458,8 @@ void TestMutualExclusion::Run(void) {
     // Use _exit() to terminate immediately without running atexit handlers or
     // static destructors — exit() would trigger gtest/RocmSMI cleanup that
     // was never meant to run in the child process, causing heap corruption.
-    _exit(0);
+    // Exit with 1 if any EXPECT_* in this process failed, so the parent can
+    // detect and report the failure via WEXITSTATUS.
+    _exit(::testing::Test::HasFailure() ? 1 : 0);
   }
 }
