@@ -20,7 +20,7 @@ static constexpr auto NUM_H{10};
  *         --> A_h host variable
  *         and verifying A_h with E_h[0]+i(i.e., 10+i)
  */
-TEST_CASE(Unit_hipMemcpy2DToArray_multiDevicePinnedMemPeerGpu) {
+HIP_TEST_CASE(Unit_hipMemcpy2DToArray_multiDevicePinnedMemPeerGpu) {
   CHECK_IMAGE_SUPPORT
 
   int numDevices = 0;
@@ -74,7 +74,7 @@ TEST_CASE(Unit_hipMemcpy2DToArray_multiDevicePinnedMemPeerGpu) {
  *         --> A_h host variable
  *         and verifying A_h with Phi
  * */
-TEST_CASE(Unit_hipMemcpy2DToArray_multiDeviceDeviceContextChange) {
+HIP_TEST_CASE(Unit_hipMemcpy2DToArray_multiDeviceDeviceContextChange) {
   CHECK_IMAGE_SUPPORT
 
   int numDevices = 0;

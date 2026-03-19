@@ -66,7 +66,7 @@ static hipError_t test_hipDeviceGetHdpAddress(int deviceId, hipDeviceAttribute_t
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipGetDeviceAttribute_CheckAttrValues) {
+HIP_TEST_CASE(Unit_hipGetDeviceAttribute_CheckAttrValues) {
   int deviceId;
   HIP_CHECK(hipGetDevice(&deviceId));
   hipDeviceProp_t props;
@@ -200,7 +200,7 @@ TEST_CASE(Unit_hipGetDeviceAttribute_CheckAttrValues) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipDeviceGetAttribute_NegTst) {
+HIP_TEST_CASE(Unit_hipDeviceGetAttribute_NegTst) {
   int deviceCount = 0;
   int pi = -1;
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
@@ -406,7 +406,7 @@ void printAttributes(const AttributeToStringMap<n>& attributes, const int device
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE(Unit_hipGetDeviceAttribute_hipDevAttrHostRegisterSupported) {
+HIP_TEST_CASE(Unit_hipGetDeviceAttribute_hipDevAttrHostRegisterSupported) {
   hipError_t ret_val;
   int hipDevAttr = 0;
   ret_val = hipDeviceGetAttribute(&hipDevAttr, hipDeviceAttributeHostRegisterSupported, 0);

@@ -27,7 +27,7 @@ __global__ void run_printf(int* count) { *count = printf("Hello World"); }
  * ------------------------
  * - HIP_VERSION >= 5.7
  */
-TEST_CASE(Unit_Host_Printf) {
+HIP_TEST_CASE(Unit_Host_Printf) {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {

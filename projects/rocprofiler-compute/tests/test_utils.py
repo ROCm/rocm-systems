@@ -41,6 +41,18 @@ import pandas as pd
 import pytest
 
 import utils.utils as utils
+from utils.tty import (
+    format_stats,
+    print_operator_node,
+    show_call_tree,
+)
+from utils.utils import (
+    CallTreeNode,
+    KernelStats,
+    build_call_trees,
+    parse_top_level_location,
+    rollup_node_stats,
+)
 
 SUPPORTED_ARCHS = {
     "gfx908": {"mi100": ["MI100"]},
@@ -3022,6 +3034,7 @@ def test_run_prof_sdk_creates_new_env_copy(tmp_path, monkeypatch):
         soc=MockSoc(),
     )
 
+    # Test 1: LD_PRELOAD is already set - should be preserved
     # Since we check all env. vars. in test,
     # empty them out while calling profiling function
     with mock.patch.dict(os.environ, {}, clear=True):
@@ -3029,6 +3042,7 @@ def test_run_prof_sdk_creates_new_env_copy(tmp_path, monkeypatch):
         original_env_var = "original_value"
         monkeypatch.setenv("EXISTING_VAR", original_env_var)
         monkeypatch.setenv("LD_LIBRARY_PATH", original_env_var)
+        monkeypatch.setenv("LD_PRELOAD", original_env_var)
         profiler_options = profiler.get_profiler_options(native_tool_path="native_tool")
 
         utils.run_prof(
@@ -3050,11 +3064,55 @@ def test_run_prof_sdk_creates_new_env_copy(tmp_path, monkeypatch):
     assert capture_subprocess_called_with_env["EXISTING_VAR"] == original_env_var
     # Ensure LD_LIBRARY_PATH is not touched
     assert capture_subprocess_called_with_env["LD_LIBRARY_PATH"] == original_env_var
+    # Ensure LD_PRELOAD is preserved and our tools are appended
+    assert original_env_var in capture_subprocess_called_with_env["LD_PRELOAD"], (
+        f"User's LD_PRELOAD '{original_env_var}' should be preserved"
+    )
+    assert "sdk_tool" in capture_subprocess_called_with_env["LD_PRELOAD"], (
+        "Profiler sdk_tool should be in LD_PRELOAD"
+    )
+    assert "native_tool" in capture_subprocess_called_with_env["LD_PRELOAD"], (
+        "Native tool should be in LD_PRELOAD"
+    )
+    # Verify the order: user's LD_PRELOAD comes first, then our tools appended
+    expected_ld_preload = f"{original_env_var}:sdk_tool:native_tool"
+    assert capture_subprocess_called_with_env["LD_PRELOAD"] == expected_ld_preload, (
+        f"LD_PRELOAD should be '{expected_ld_preload}' but got "
+        f"'{capture_subprocess_called_with_env['LD_PRELOAD']}'"
+    )
+
+    # Test 2: LD_PRELOAD is unset - should only contain profiler tools
+    capture_subprocess_called_with_env = None
+    with mock.patch.dict(os.environ, {}, clear=True):
+        assert len(os.environ) == 0
+        monkeypatch.setenv("EXISTING_VAR", original_env_var)
+        monkeypatch.setenv("LD_LIBRARY_PATH", original_env_var)
+        # Intentionally not setting LD_PRELOAD to test the unset case
+        profiler_options = profiler.get_profiler_options(native_tool_path="native_tool")
+
+        utils.run_prof(
+            fname_str,
+            profiler_options,
+            workload_dir_str,
+            mspec,
+            loglevel,
+            format_rocprof_output,
+        )
+
+    assert capture_subprocess_called_with_env is not None, (
+        "new_env should have been created"
+    )
+    # When LD_PRELOAD is unset, should only contain our profiler tools
+    expected_ld_preload_unset = "sdk_tool:native_tool"
+    actual_ld_preload = capture_subprocess_called_with_env["LD_PRELOAD"]
+    assert actual_ld_preload == expected_ld_preload_unset, (
+        f"LD_PRELOAD should be '{expected_ld_preload_unset}' when unset, "
+        f"but got '{actual_ld_preload}'"
+    )
     assert (
         capture_subprocess_called_with_env["ROCPROFILER_METRICS_PATH"] == "dummy_path"
     )
     assert capture_subprocess_called_with_env["ROCPROF_COUNTER_COLLECTION"] == "0"
-    assert capture_subprocess_called_with_env["LD_PRELOAD"] == "sdk_tool:native_tool"
     assert capture_subprocess_called_with_env["ROCPROF_KERNEL_TRACE"] == "1"
     assert capture_subprocess_called_with_env["ROCPROF_OUTPUT_FORMAT"] == "format"
     assert capture_subprocess_called_with_env["ROCPROF_OUTPUT_PATH"] == "path/out/pmc_1"
@@ -7940,6 +7998,313 @@ def test_gpu_benchmark_locking(tmp_path, monkeypatch, capsys):
     assert "Acquired lock for GPU 0" in output
 
 
+# ---------------------------------------------------------------------------
+# Tests for call-tree functions (build/display)
+# ---------------------------------------------------------------------------
+
+
+def test_parse_location_normal():
+    assert parse_top_level_location("10@main.py:60/#10@main.py:21") == "main.py:60"
+
+
+def test_parse_location_single_entry():
+    assert parse_top_level_location("5@train.py:42") == "train.py:42"
+
+
+def test_parse_location_nan():
+    assert parse_top_level_location(float("nan")) == "unknown:0"
+
+
+def test_parse_location_none():
+    assert parse_top_level_location(None) == "unknown:0"
+
+
+def test_parse_location_empty():
+    assert parse_top_level_location("") == "unknown:0"
+    assert parse_top_level_location("   ") == "unknown:0"
+
+
+def test_parse_location_no_at_sign():
+    assert parse_top_level_location("no_at_sign") == "unknown:0"
+
+
+def test_parse_location_no_colon():
+    assert parse_top_level_location("10@mainpy") == "unknown:0"
+
+
+def test_format_stats_microseconds():
+    assert "us" in format_stats(1, 0.005)
+
+
+def test_format_stats_milliseconds():
+    assert "1.50 ms" in format_stats(1, 1.5)
+
+
+def test_format_stats_boundary():
+    assert "ms" in format_stats(1, 0.01)
+
+
+def test_format_stats_basic():
+    result = format_stats(3, 1.5)
+    assert "kernel_launches: 3" in result
+    assert "total_duration: 1.50 ms" in result
+
+
+def test_rollup_leaf_node():
+    node = CallTreeNode(name="leaf")
+    node.kernels["kern_a"] = KernelStats(launches=2, total_duration_ns=1000.0)
+    launches, dur_ns = rollup_node_stats(node)
+    assert launches == 2
+    assert dur_ns == 1000.0
+    assert node.kernel_launches == 2
+
+
+def test_rollup_parent_rolls_up_children():
+    child = CallTreeNode(name="child")
+    child.kernels["kern_a"] = KernelStats(launches=3, total_duration_ns=3000.0)
+    parent = CallTreeNode(name="parent")
+    parent.children["child"] = child
+    parent.kernels["kern_b"] = KernelStats(launches=1, total_duration_ns=500.0)
+    rollup_node_stats(parent)
+    assert parent.kernel_launches == 4
+    assert child.kernel_launches == 3
+
+
+def test_rollup_deep_hierarchy():
+    grandchild = CallTreeNode(name="grandchild")
+    grandchild.kernels["k"] = KernelStats(launches=1, total_duration_ns=100.0)
+    child = CallTreeNode(name="child")
+    child.children["grandchild"] = grandchild
+    child.kernels["k2"] = KernelStats(launches=2, total_duration_ns=200.0)
+    root = CallTreeNode(name="root")
+    root.children["child"] = child
+    rollup_node_stats(root)
+    assert grandchild.kernel_launches == 1
+    assert child.kernel_launches == 3
+    assert root.kernel_launches == 3
+
+
+def test_build_call_trees_empty_df():
+    assert build_call_trees(pd.DataFrame()) == {}
+
+
+def test_build_call_trees_missing_columns():
+    assert build_call_trees(pd.DataFrame([{"Operator_Name": "a"}])) == {}
+
+
+def test_build_call_trees_single_dispatch():
+    df = pd.DataFrame([
+        {
+            "Operator_Name": "torch.nn.Linear",
+            "Kernel_Name": "gemm_kernel",
+            "Context_Id": "10@train.py:42",
+            "Start_Timestamp_kernel": 1000,
+            "End_Timestamp_kernel": 2000,
+        }
+    ])
+    call_trees = build_call_trees(df)
+    assert "train.py:42" in call_trees
+    assert call_trees["train.py:42"].kernel_launches == 1
+    assert "torch.nn.Linear" in call_trees["train.py:42"].children
+
+
+def test_build_call_trees_hierarchy_split():
+    df = pd.DataFrame([
+        {
+            "Operator_Name": "aten/linear/addmm",
+            "Kernel_Name": "gemm_kernel",
+            "Context_Id": "10@file.py:1",
+            "Start_Timestamp_kernel": 0,
+            "End_Timestamp_kernel": 1000,
+        }
+    ])
+    call_trees = build_call_trees(df)
+    root = call_trees["file.py:1"]
+    assert "aten" in root.children
+    assert "linear" in root.children["aten"].children
+    assert "addmm" in root.children["aten"].children["linear"].children
+
+
+def test_build_call_trees_multiple_dispatches_same_kernel():
+    rows = [
+        {
+            "Operator_Name": "op_a",
+            "Kernel_Name": "kern",
+            "Context_Id": "10@f.py:1",
+            "Start_Timestamp_kernel": i * 1000,
+            "End_Timestamp_kernel": (i + 1) * 1000,
+        }
+        for i in range(3)
+    ]
+    call_trees = build_call_trees(pd.DataFrame(rows))
+    assert call_trees["f.py:1"].kernel_launches == 3
+    assert call_trees["f.py:1"].children["op_a"].kernels["kern"].launches == 3
+
+
+def test_build_call_trees_dedup_identical_timestamps():
+    row = {
+        "Operator_Name": "op",
+        "Kernel_Name": "kern",
+        "Context_Id": "10@f.py:1",
+        "Start_Timestamp_kernel": 1000,
+        "End_Timestamp_kernel": 2000,
+    }
+    assert build_call_trees(pd.DataFrame([row, row]))["f.py:1"].kernel_launches == 1
+
+
+def test_build_call_trees_no_context_id():
+    df = pd.DataFrame([
+        {
+            "Operator_Name": "op",
+            "Kernel_Name": "kern",
+            "Start_Timestamp_kernel": 0,
+            "End_Timestamp_kernel": 1000,
+        }
+    ])
+    assert "unknown:0" in build_call_trees(df)
+
+
+def test_build_call_trees_duration_rollup():
+    df = pd.DataFrame([
+        {
+            "Operator_Name": "parent/child",
+            "Kernel_Name": "kern_a",
+            "Context_Id": "10@f.py:1",
+            "Start_Timestamp_kernel": 0,
+            "End_Timestamp_kernel": 1_000_000,
+        },
+        {
+            "Operator_Name": "parent",
+            "Kernel_Name": "kern_b",
+            "Context_Id": "10@f.py:1",
+            "Start_Timestamp_kernel": 2_000_000,
+            "End_Timestamp_kernel": 3_000_000,
+        },
+    ])
+    call_trees = build_call_trees(df)
+    root = call_trees["f.py:1"]
+    assert root.kernel_launches == 2
+    assert root.children["parent"].kernel_launches == 2
+    assert root.children["parent"].children["child"].kernel_launches == 1
+
+
+def test_build_call_trees_multiple_source_locations():
+    df = pd.DataFrame([
+        {
+            "Operator_Name": "op_a",
+            "Kernel_Name": "kern",
+            "Context_Id": "10@a.py:1",
+            "Start_Timestamp_kernel": 0,
+            "End_Timestamp_kernel": 1000,
+        },
+        {
+            "Operator_Name": "op_b",
+            "Kernel_Name": "kern",
+            "Context_Id": "10@b.py:2",
+            "Start_Timestamp_kernel": 0,
+            "End_Timestamp_kernel": 1000,
+        },
+    ])
+    call_trees = build_call_trees(df)
+    assert "a.py:1" in call_trees
+    assert "b.py:2" in call_trees
+
+
+def test_show_call_tree_prints_location_and_stats(capsys):
+    root = CallTreeNode(name="main.py:10")
+    root.kernel_launches = 1
+    root.total_duration_ms = 0.5
+    child = CallTreeNode(name="op_a")
+    child.kernel_launches = 1
+    child.total_duration_ms = 0.5
+    child.kernels["kern"] = KernelStats(launches=1, total_duration_ns=500_000.0)
+    root.children["op_a"] = child
+    show_call_tree({"main.py:10": root})
+    output = capsys.readouterr().out
+    assert "main.py:10" in output
+    assert "kernel_launches: 1" in output
+    assert "kern" in output
+
+
+def test_show_call_tree_sorted_by_duration(capsys):
+    root_a = CallTreeNode(name="a.py:1")
+    root_a.total_duration_ms = 10.0
+    root_a.kernel_launches = 1
+    root_b = CallTreeNode(name="b.py:1")
+    root_b.total_duration_ms = 20.0
+    root_b.kernel_launches = 2
+    show_call_tree({"a.py:1": root_a, "b.py:1": root_b})
+    output = capsys.readouterr().out
+    assert output.index("b.py:1") < output.index("a.py:1")
+
+
+def test_show_call_tree_kernel_id_printed(capsys):
+    root = CallTreeNode(name="f.py:1")
+    root.kernel_launches = 1
+    root.total_duration_ms = 1.0
+    child = CallTreeNode(name="op")
+    child.kernel_launches = 1
+    child.total_duration_ms = 1.0
+    child.kernels["kern_x"] = KernelStats(
+        launches=1, total_duration_ns=1_000_000.0, kernel_id=42
+    )
+    root.children["op"] = child
+    show_call_tree({"f.py:1": root})
+    output = capsys.readouterr().out
+    assert "(id 42)" in output
+
+
+def test_print_operator_node_branching_shows_stats(capsys):
+    node = CallTreeNode(name="branch")
+    node.kernel_launches = 2
+    node.total_duration_ms = 5.0
+    node.kernels["k1"] = KernelStats(launches=1, total_duration_ns=2_500_000.0)
+    node.kernels["k2"] = KernelStats(launches=1, total_duration_ns=2_500_000.0)
+    print_operator_node(node)
+    output = capsys.readouterr().out
+    assert "kernel_launches: 2" in output
+    assert "k1" in output
+    assert "k2" in output
+
+
+def test_print_operator_node_non_branching_omits_stats(capsys):
+    node = CallTreeNode(name="single")
+    node.kernel_launches = 1
+    node.total_duration_ms = 1.0
+    node.kernels["k1"] = KernelStats(launches=1, total_duration_ns=1_000_000.0)
+    print_operator_node(node)
+    output = capsys.readouterr().out
+    lines = output.strip().split("\n")
+    assert "└─ single" in lines[0]
+    assert "kernel_launches" not in lines[0]
+
+
+def test_print_operator_node_long_kernel_wraps(capsys):
+    node = CallTreeNode(name="single")
+    node.kernel_launches = 1
+    node.total_duration_ms = 1.0
+    long_kernel_name = "K" * 220
+    node.kernels[long_kernel_name] = KernelStats(
+        launches=1,
+        total_duration_ns=1_000_000.0,
+        kernel_id=7,
+    )
+    print_operator_node(node)
+    output_lines = capsys.readouterr().out.splitlines()
+    assert any("└─ single" in line for line in output_lines)
+    kernel_lines = [
+        line for line in output_lines if "(id 7)" in line or line.startswith("   ")
+    ]
+    assert any(line.startswith("   └─ ") for line in kernel_lines)
+    wrapped_kernel_lines = [
+        line
+        for line in kernel_lines
+        if line.startswith("   ") and not line.startswith("   └─ ")
+    ]
+    assert wrapped_kernel_lines
+    assert not any(line.strip().startswith("(id 7)") for line in output_lines)
+
+
 # =============================================================================
 # BUILD METRIC LIST TESTS
 # =============================================================================
@@ -8055,3 +8420,479 @@ class TestBuildMetricList:
         )
         self.build_metric_list(ac, None)
         assert "All None Metric" not in self._extract_leaf_metric_entries(ac).values()
+
+
+# ---------------------------------------------------------------------------
+# Torch operator pattern matching (PurePosixPath glob)
+# ---------------------------------------------------------------------------
+
+H3 = "nn.Module.Net.forward/torch.nn.functional.relu/torch.relu"
+H2 = "nn.Module.Net.forward/torch.nn.functional.conv2d"
+H1 = "torch.relu"
+
+
+@pytest.mark.torch_ops
+def test_all_keyword():
+    """'all' maps to '**' and matches every hierarchy."""
+    from utils.parser import torch_operator_pattern_matches as m
+
+    assert m("all", H3)
+    assert m("all", H2)
+    assert m("all", H1)
+    assert not m("all", "")
+
+
+@pytest.mark.torch_ops
+def test_bare_pattern_matches_last_component():
+    """Bare token is matched via PurePosixPath.match() against the full hierarchy."""
+    from utils.parser import torch_operator_pattern_matches as m
+
+    assert m("torch.relu", H3)
+    assert m("torch.nn.functional.conv2d", H2)
+    assert not m("relu", H3)
+    assert not m("forward", H3)
+    assert not m("sigmoid", H3)
+
+
+@pytest.mark.torch_ops
+def test_bare_wildcard_pattern():
+    """Wildcard bare token matched via PurePosixPath.match()."""
+    from utils.parser import torch_operator_pattern_matches as m
+
+    assert m("torch.*", H3)
+    assert m("*relu", H3)
+    assert m("*conv*", H2)
+    assert not m("conv*", H2)
+    assert not m("sigm*", H3)
+
+
+@pytest.mark.torch_ops
+def test_hierarchy_glob():
+    """Patterns with '/' match across multiple hierarchy components."""
+    from utils.parser import torch_operator_pattern_matches as m
+
+    assert m("nn.Module.Net.forward/*/torch.relu", H3)
+    assert m("*/torch.nn.functional.conv2d", H2)
+    assert not m("nn.Module.Net.forward/torch.relu", H3)
+
+
+@pytest.mark.torch_ops
+def test_leading_slash_is_cosmetic():
+    """Leading '/' is stripped during pattern normalization."""
+    from utils.parser import torch_operator_pattern_matches as m
+
+    assert m("/nn.Module.Net.forward/*/torch.relu", H3)
+    assert m("/torch.relu", H3)
+
+
+@pytest.mark.torch_ops
+def test_trailing_slash_stripped_by_posixpath():
+    """PurePosixPath strips trailing slashes, so they are cosmetic."""
+    from utils.parser import torch_operator_pattern_matches as m
+
+    assert not m("nn.Module.Net.forward/", H3)
+    assert m("torch.relu/", H3)
+
+
+@pytest.mark.torch_ops
+def test_regex_not_supported():
+    """Regex syntax has no special meaning; treated as literal glob text."""
+    from utils.parser import torch_operator_pattern_matches as m
+
+    assert not m("relu|conv2d", H3)
+    assert not m("^torch\\.relu$", H3)
+    assert not m("not:relu", H3)
+    assert not m("2:functional", H3)
+
+
+@pytest.mark.torch_ops
+def test_empty_inputs():
+    """Empty pattern or operator_name returns False."""
+    from utils.parser import torch_operator_pattern_matches as m
+
+    assert not m("", H3)
+    assert not m("relu", "")
+    assert not m("", "")
+
+
+@pytest.mark.torch_ops
+def test_slash_only_markers():
+    """Scope-marker-only tokens should not match any hierarchy."""
+    from utils.parser import torch_operator_pattern_matches as m
+
+    assert not m("/", H3)
+    assert not m("//", H3)
+
+
+# -- get_matched_torch_operators_for_display ---------------------------------
+
+
+def get_matched_torch_operators_for_display(
+    torch_operators: dict[str, pd.DataFrame],
+    pattern_list: list[str],
+) -> list[tuple[str, pd.DataFrame]]:
+    """Return (operator_name, filtered_df) for each operator matching any pattern.
+
+    Test-only helper: iterates every unique Operator_Name across all torch trace
+    DataFrames and checks each against the supplied glob patterns.
+    """
+    from utils.parser import torch_operator_pattern_matches
+
+    if not torch_operators or not pattern_list:
+        return []
+    result: list[tuple[str, pd.DataFrame]] = []
+    seen: set[str] = set()
+    for _, df in torch_operators.items():
+        if df is None or df.empty or "Operator_Name" not in df.columns:
+            continue
+        for op_name in df["Operator_Name"].dropna().unique():
+            op_str = str(op_name).strip()
+            if op_str in seen:
+                continue
+            for pattern in pattern_list:
+                if torch_operator_pattern_matches(pattern.strip(), op_str):
+                    seen.add(op_str)
+                    result.append((op_str, df.loc[df["Operator_Name"] == op_name]))
+                    break
+    return result
+
+
+@pytest.mark.torch_ops
+def test_display_match_hierarchy_glob():
+    """Full hierarchy globs are honored by display helper."""
+    df = pd.DataFrame({
+        "Operator_Name": [H3, H3, H2],
+        "Kernel_Name": ["k1", "k2", "k3"],
+    })
+    torch_operators = {"trace_0": df}
+
+    matched = get_matched_torch_operators_for_display(torch_operators, ["*/torch.relu"])
+    assert len(matched) == 1
+    assert matched[0][0] == H3
+
+
+@pytest.mark.torch_ops
+def test_display_match_multi_patterns():
+    """Multiple glob patterns match their respective operators."""
+    df = pd.DataFrame({
+        "Operator_Name": [H3, H2],
+        "Kernel_Name": ["k1", "k2"],
+    })
+    torch_operators = {"trace_0": df}
+
+    matched = get_matched_torch_operators_for_display(
+        torch_operators, ["*relu", "*conv*"]
+    )
+    assert len(matched) == 2
+
+
+@pytest.mark.torch_ops
+def test_display_no_match():
+    """No matches returns empty list."""
+    df = pd.DataFrame({
+        "Operator_Name": [H3],
+        "Kernel_Name": ["k1"],
+    })
+    assert get_matched_torch_operators_for_display({"t": df}, ["sigmoid"]) == []
+
+
+@pytest.mark.torch_ops
+def test_display_empty_inputs():
+    """Empty torch_operators or pattern_list returns []."""
+    assert get_matched_torch_operators_for_display({}, ["relu"]) == []
+    assert get_matched_torch_operators_for_display({"x": pd.DataFrame()}, []) == []
+
+
+# -- parse_torch_operator_patterns ------------------------------------------
+
+
+@pytest.mark.torch_ops
+def test_parse_patterns_basic():
+    """Single and multiple patterns are parsed correctly."""
+    from argparse import Namespace
+
+    from rocprof_compute_analyze.analysis_cli import parse_torch_operator_patterns
+
+    args = Namespace(torch_operator=["relu"])
+    assert parse_torch_operator_patterns(args) == ["relu"]
+
+    args = Namespace(torch_operator=["relu", "conv2d"])
+    assert parse_torch_operator_patterns(args) == ["relu", "conv2d"]
+
+
+@pytest.mark.torch_ops
+def test_parse_patterns_comma_split():
+    """Comma-separated patterns in a single arg are split."""
+    from argparse import Namespace
+
+    from rocprof_compute_analyze.analysis_cli import parse_torch_operator_patterns
+
+    args = Namespace(torch_operator=["relu,conv2d"])
+    assert parse_torch_operator_patterns(args) == ["relu", "conv2d"]
+
+
+@pytest.mark.torch_ops
+def test_parse_patterns_whitespace():
+    """Leading/trailing whitespace is stripped."""
+    from argparse import Namespace
+
+    from rocprof_compute_analyze.analysis_cli import parse_torch_operator_patterns
+
+    args = Namespace(torch_operator=["  relu  ", " conv2d , linear "])
+    assert parse_torch_operator_patterns(args) == ["relu", "conv2d", "linear"]
+
+
+@pytest.mark.torch_ops
+def test_parse_patterns_empty():
+    """Flag given with no args defaults to '**'; absent flag returns empty."""
+    from argparse import Namespace
+
+    from rocprof_compute_analyze.analysis_cli import parse_torch_operator_patterns
+
+    assert parse_torch_operator_patterns(Namespace(torch_operator=[])) == ["**"]
+    assert parse_torch_operator_patterns(Namespace(torch_operator=None)) == []
+    assert parse_torch_operator_patterns(Namespace()) == []
+
+
+# -- PatternMatcherEngine ---------------------------------------------------
+
+
+@pytest.mark.torch_ops
+def test_engine_glob_hierarchy_mode():
+    """Facade delegates matching to glob-hierarchy implementation."""
+    from utils.pattern_matching import PatternMatcherEngine
+
+    matcher = PatternMatcherEngine(mode="glob-hierarchy")
+    assert matcher.matches("torch.relu", H3)
+    assert matcher.matches("*relu", H3)
+    assert not matcher.matches("sigmoid", H3)
+
+
+@pytest.mark.torch_ops
+def test_engine_invalid_mode():
+    """Unsupported strategy names should raise ValueError."""
+    from utils.pattern_matching import PatternMatcherEngine
+
+    with pytest.raises(ValueError):
+        PatternMatcherEngine(mode="regex")
+
+
+# -- Additional coverage (xuchen #26) ----------------------------------------
+
+
+@pytest.mark.torch_ops
+def test_double_star_explicit():
+    """'**' matches any hierarchy depth."""
+    from utils.parser import torch_operator_pattern_matches as m
+
+    assert m("**", H3)
+    assert m("**", H2)
+    assert m("**", H1)
+    assert m("**", "a/b/c/d/e")
+    assert not m("**", "")
+
+
+@pytest.mark.torch_ops
+def test_single_char_wildcard():
+    """'?' matches exactly one character in a component."""
+    from utils.parser import torch_operator_pattern_matches as m
+
+    assert m("torch.rel?", H3)
+    assert m("torch.?elu", H3)
+    assert not m("torch.?", H3)
+    assert not m("?", H1)
+    assert m("torch.nn.functional.conv?d", H2)
+
+
+@pytest.mark.torch_ops
+def test_long_hierarchy():
+    """Deeply nested hierarchies match correctly."""
+    from utils.parser import torch_operator_pattern_matches as m
+
+    deep = "/".join([f"level{i}" for i in range(20)])
+    assert m("level19", deep)
+    assert m("*19", deep)
+    assert m("*/level19", deep)
+    assert m("all", deep)
+    assert not m("level0", deep)
+
+
+@pytest.mark.torch_ops
+def test_long_component_names():
+    """Components with very long names are handled correctly."""
+    from utils.parser import torch_operator_pattern_matches as m
+
+    long_name = "a" * 500
+    hierarchy = f"root/{long_name}"
+    assert m(f"{'a' * 500}", hierarchy)
+    assert m("a*", hierarchy)
+    assert not m("b*", hierarchy)
+
+
+@pytest.mark.torch_ops
+def test_special_characters_in_names():
+    """Dots, underscores, and other non-glob chars are treated literally."""
+    from utils.parser import torch_operator_pattern_matches as m
+
+    h = "nn.Module._internal/torch.nn.functional.conv2d"
+    assert m("torch.nn.functional.conv2d", h)
+    assert m("*conv2d", h)
+    assert m("nn.Module._internal/*", h)
+    assert not m("nn_Module._internal/*", h)
+
+
+@pytest.mark.torch_ops
+def test_bracket_glob_pattern():
+    """Character classes [abc] work in glob patterns."""
+    from utils.parser import torch_operator_pattern_matches as m
+
+    assert m("torch.rel[uv]", H3)
+    assert not m("torch.rel[ab]", H3)
+
+
+@pytest.mark.torch_ops
+def test_single_component_hierarchy():
+    """Single-component hierarchy (no slashes) matches bare patterns."""
+    from utils.parser import torch_operator_pattern_matches as m
+
+    assert m("torch.relu", "torch.relu")
+    assert m("*relu", "torch.relu")
+    assert m("torch.*", "torch.relu")
+    assert not m("*/torch.relu", "torch.relu")
+
+
+@pytest.mark.torch_ops
+def test_whitespace_only_pattern():
+    """Whitespace-only patterns normalize to empty and return False."""
+    from utils.parser import torch_operator_pattern_matches as m
+
+    assert not m("   ", H3)
+    assert not m("\t", H3)
+
+
+@pytest.mark.torch_ops
+def test_star_pattern_matches_all():
+    """Bare '*' is normalized to '**' and matches every hierarchy."""
+    from utils.parser import torch_operator_pattern_matches as m
+
+    assert m("*", H3)
+    assert m("*", H2)
+    assert m("*", H1)
+    assert m("*", "a/b/c/d/e")
+    assert not m("*", "")
+
+
+@pytest.mark.torch_ops
+def test_star_normalize_equivalence():
+    """'*' and 'all' produce the same normalization."""
+    from utils.pattern_matching import PurePosixGlobHierarchyMatcher
+
+    norm = PurePosixGlobHierarchyMatcher.normalize_pattern
+    assert norm("*") == norm("all") == "**"
+
+
+@pytest.mark.torch_ops
+def test_case_sensitivity():
+    """Pattern matching is case-sensitive."""
+    from utils.parser import torch_operator_pattern_matches as m
+
+    assert not m("Torch.Relu", H3)
+    assert not m("TORCH.RELU", H3)
+    assert not m("ALL", H3)
+    assert m("all", H3)
+
+
+@pytest.mark.torch_ops
+def test_all_keyword_case_sensitive():
+    """Only lowercase 'all' is the special keyword; mixed case is a literal."""
+    from utils.pattern_matching import PurePosixGlobHierarchyMatcher
+
+    norm = PurePosixGlobHierarchyMatcher.normalize_pattern
+    assert norm("all") == "**"
+    assert norm("ALL") == "ALL"
+    assert norm("All") == "All"
+
+
+@pytest.mark.torch_ops
+def test_consecutive_slashes_in_target():
+    """Consecutive slashes in the target are collapsed by PurePosixPath."""
+    from utils.parser import torch_operator_pattern_matches as m
+
+    h = "a//b///torch.relu"
+    assert m("torch.relu", h)
+    assert m("*relu", h)
+
+
+@pytest.mark.torch_ops
+def test_dots_in_patterns():
+    """Dots are literal characters in glob patterns, not regex wildcards."""
+    from utils.parser import torch_operator_pattern_matches as m
+
+    assert m("torch.relu", H3)
+    assert not m("torchXrelu", H3)
+    h = "root/torchXrelu"
+    assert not m("torch.relu", h)
+    assert m("torchXrelu", h)
+
+
+@pytest.mark.torch_ops
+def test_pattern_with_spaces():
+    """Spaces in patterns and targets are treated literally."""
+    from utils.parser import torch_operator_pattern_matches as m
+
+    h = "module/ spaced op /torch.relu"
+    assert m("torch.relu", h)
+    assert not m(" spaced op ", h)
+    assert m("* spaced op */*", h)
+
+
+@pytest.mark.torch_ops
+def test_colons_in_operator_names():
+    """Colons (e.g. aten::relu) are literal characters in glob matching."""
+    from utils.parser import torch_operator_pattern_matches as m
+
+    h = "nn.Module/aten::relu_"
+    assert m("aten::relu_", h)
+    assert m("*relu_", h)
+    assert m("aten::*", h)
+    assert not m("*relu", h)
+    assert not m("torch.relu", h)
+
+
+@pytest.mark.torch_ops
+def test_display_star_matches_all_operators():
+    """'*' pattern matches all operators in display helper."""
+    df = pd.DataFrame({
+        "Operator_Name": [H3, H2],
+        "Kernel_Name": ["k1", "k2"],
+    })
+    torch_operators = {"trace_0": df}
+
+    matched = get_matched_torch_operators_for_display(torch_operators, ["*"])
+    assert len(matched) == 2
+
+
+@pytest.mark.torch_ops
+def test_display_dedup_across_dataframes():
+    """Same operator in multiple DataFrames is matched only once."""
+    df1 = pd.DataFrame({"Operator_Name": [H3], "Kernel_Name": ["k1"]})
+    df2 = pd.DataFrame({"Operator_Name": [H3], "Kernel_Name": ["k2"]})
+    torch_operators = {"trace_0": df1, "trace_1": df2}
+
+    matched = get_matched_torch_operators_for_display(torch_operators, ["all"])
+    op_names = [name for name, _ in matched]
+    assert op_names.count(H3) == 1
+
+
+@pytest.mark.torch_ops
+def test_parse_patterns_star():
+    """'*' is passed through as-is by the pattern parser."""
+    from argparse import Namespace
+
+    from rocprof_compute_analyze.analysis_cli import parse_torch_operator_patterns
+
+    args = Namespace(torch_operator=["*"])
+    assert parse_torch_operator_patterns(args) == ["*"]
+
+    args = Namespace(torch_operator=["*,torch.relu"])
+    assert parse_torch_operator_patterns(args) == ["*", "torch.relu"]

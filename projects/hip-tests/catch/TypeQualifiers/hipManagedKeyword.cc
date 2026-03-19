@@ -25,7 +25,7 @@ static __global__ void managed_add(size_t size) {
 
 static __global__ void managed_inc() { atomicAdd(&m_X, 1.0f); }
 
-TEST_CASE("Unit_hipManagedKeyword_SingleGpu") {
+HIP_TEST_CASE(Unit_hipManagedKeyword_SingleGpu) {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   for (int i = 0; i < numDevices; i++) {
@@ -56,7 +56,7 @@ TEST_CASE("Unit_hipManagedKeyword_SingleGpu") {
   }
 }
 
-TEST_CASE(Unit_hipManagedKeyword_MultiGpu) {
+HIP_TEST_CASE(Unit_hipManagedKeyword_MultiGpu) {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
 
