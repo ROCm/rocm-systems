@@ -7,7 +7,18 @@ endif()
 
 # Find pytest executable
 set(_pytest_hints "")
-if(ROCPROFSYS_PYTHON_ROOT_DIRS)
+if(ROCPROFSYS_TEST_PYTHON_VERSIONS AND ROCPROFSYS_PYTHON_ROOT_DIRS)
+    # When both ROCPROFSYS_PYTHON_VERSIONS and ROCPROFSYS_PYTHON_PREFIX are set,
+    # ROCPROFSYS_PYTHON_ROOT_DIRS will contain the list of versioned python prefixes
+    foreach(_pyroot ${ROCPROFSYS_PYTHON_ROOT_DIRS})
+        foreach(_ver ${ROCPROFSYS_TEST_PYTHON_VERSIONS})
+            if(EXISTS "${_pyroot}/bin/python${_ver}")
+                list(APPEND _pytest_hints "${_pyroot}/bin")
+                break()
+            endif()
+        endforeach()
+    endforeach()
+elseif(ROCPROFSYS_PYTHON_ROOT_DIRS)
     foreach(_pyroot ${ROCPROFSYS_PYTHON_ROOT_DIRS})
         list(APPEND _pytest_hints "${_pyroot}/bin")
     endforeach()
@@ -149,8 +160,12 @@ set(_generate_args
 )
 
 # Note: ROCPROFSYS_PYTHON_VERSIONS will inherit the value of ROCPROFSYS_PYTHON_VERSION
-if(ROCPROFSYS_PYTHON_VERSIONS)
+if(ROCPROFSYS_PYTHON_VERSIONS AND NOT ROCPROFSYS_TEST_PYTHON_VERSIONS)
     list(JOIN ROCPROFSYS_PYTHON_VERSIONS "\\;" _py_versions_escaped)
+    list(APPEND _generate_args "--python-versions=${_py_versions_escaped}")
+elseif(ROCPROFSYS_TEST_PYTHON_VERSIONS)
+    # Rhel 8.10 has python 3.6 by default, which we need to exclude
+    list(JOIN ROCPROFSYS_TEST_PYTHON_VERSIONS "\\;" _py_versions_escaped)
     list(APPEND _generate_args "--python-versions=${_py_versions_escaped}")
 endif()
 
