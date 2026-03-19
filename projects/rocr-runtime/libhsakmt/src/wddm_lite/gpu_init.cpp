@@ -328,12 +328,17 @@ static BOOLEAN psp_is_sos_alive(struct WddmLiteDevice *dev)
 #define FEATURE_PWR_BACO   2
 #define FEATURE_PWR_SOC    3
 #define FEATURE_PWR_GFX    4  /* Enable GFX power domain only — use this */
-#define PPSMC_MSG_SetDriverDramAddrHigh     0x0E
-#define PPSMC_MSG_SetDriverDramAddrLow      0x0F
-#define PPSMC_MSG_GetEnabledSmuFeaturesLow  0x09
-#define PPSMC_MSG_GetEnabledSmuFeaturesHigh 0x0A
-#define PPSMC_MSG_AllowGfxOff               0x28
-#define PPSMC_MSG_DisallowGfxOff            0x29
+#define PPSMC_MSG_SetPptableAddrHigh         0x0C
+#define PPSMC_MSG_SetPptableAddrLow          0x0D
+#define PPSMC_MSG_SetDriverDramAddrHigh      0x0E
+#define PPSMC_MSG_SetDriverDramAddrLow       0x0F
+#define PPSMC_MSG_SetToolsDramAddrHigh       0x10
+#define PPSMC_MSG_SetToolsDramAddrLow        0x11
+#define PPSMC_MSG_UseDefaultPPTable          0x14
+#define PPSMC_MSG_GetEnabledSmuFeaturesLow   0x09
+#define PPSMC_MSG_GetEnabledSmuFeaturesHigh  0x0A
+#define PPSMC_MSG_AllowGfxOff                0x28
+#define PPSMC_MSG_DisallowGfxOff             0x29
 
 static ULONG mp1_rreg(struct WddmLiteDevice *dev, ULONG reg)
 {
@@ -2005,6 +2010,454 @@ struct ImuFirmwareHeaderV1 {
 #define GFX_FW_TYPE_RLC_IRAM                  26
 #define GFX_FW_TYPE_RLC_DRAM_BOOT             48
 
+/* ======================================================================
+ * GC VRAM staging buffer for backdoor AUTOLOAD_RLC
+ *
+ * GFX12 uses AMDGPU_FW_LOAD_RLC_BACKDOOR_AUTO: instead of individual
+ * LOAD_IP_FW calls for each GFX firmware, all encrypted firmware binaries
+ * are placed in a VRAM staging buffer at TOC-defined offsets.  PSP reads
+ * GFX_IMU_RLC_BOOTLOADER_ADDR to locate the staging buffer, decrypts the
+ * content during AUTOLOAD_RLC, and creates a valid TOC for RLC to consume.
+ * RLC then distributes firmware to MEC, RLCP, RLCV engines.
+ *
+ * Without the staging buffer, AUTOLOAD_RLC creates an empty/invalid TOC,
+ * RLC finds no firmware pointers → ID_STATUS stays 0 → MEC never starts.
+ * ====================================================================== */
+
+/*
+ * SOC24_FIRMWARE_ID values (from Linux amdgpu_rlc.h SOC24_FIRMWARE_ID enum).
+ * These identify firmware component slots in the VRAM staging buffer.
+ */
+#define SOC24_FW_RLC_G_UCODE        1
+#define SOC24_FW_RLC_TOC            2
+#define SOC24_FW_SDMA_UCODE_TH0     11
+#define SOC24_FW_RS64_PFP           18
+#define SOC24_FW_RS64_ME            19
+#define SOC24_FW_RS64_MEC           20
+#define SOC24_FW_RS64_PFP_P0_STACK  23
+#define SOC24_FW_RS64_PFP_P1_STACK  24
+#define SOC24_FW_RS64_ME_P0_STACK   25
+#define SOC24_FW_RS64_ME_P1_STACK   26
+#define SOC24_FW_RS64_MEC_P0_STACK  27
+#define SOC24_FW_RS64_MEC_P1_STACK  28
+#define SOC24_FW_RS64_MEC_P2_STACK  29
+#define SOC24_FW_RS64_MEC_P3_STACK  30
+#define SOC24_FW_ID_MAX             48  /* accommodate future IDs beyond MAX=43 */
+
+/*
+ * VRAM layout for GC staging buffer.
+ * Placed at 32MB to clear all existing allocations (PSP ring at 5-8MB,
+ * MEC fallback at 10-11MB).  Total size 24MB matches the TOC maximum.
+ */
+#define GC_STAGING_VRAM_OFFSET  (32ULL * 1024 * 1024)   /* 32 MB */
+#define GC_STAGING_BUF_SIZE     (24UL  * 1024 * 1024)   /* 24 MB */
+
+/* GC TOC firmware registers (BASE_IDX=1, PSP-protected, write via MMIO) */
+#define regGFX_IMU_RLC_BOOTLOADER_ADDR_HI   0x5f81
+#define regGFX_IMU_RLC_BOOTLOADER_ADDR_LO   0x5f82
+#define regGFX_IMU_RLC_BOOTLOADER_SIZE      0x5f83
+
+/* Per-firmware slot parsed from the GC TOC binary */
+struct GcStagingSlot {
+    ULONG offset;   /* byte offset within staging buffer */
+    ULONG size;     /* slot size in bytes */
+};
+
+/*
+ * Parse the GC TOC binary payload (after common firmware header) to
+ * fill the slot table.
+ *
+ * RLC_TABLE_OF_CONTENT_V2 entry format (8 bytes):
+ *   DW0: bits[31:25] = fw_id (7 bits), bits[24:0] = offset field
+ *   DW1: bits[31:14] = size field (18 bits), bit[12] = size_x16 flag
+ *
+ *   offset_bytes = offset_field × 32
+ *   size_bytes   = size_x16 ? size_field × 4096 : size_field × 4
+ *
+ * Terminated by an entry with fw_id == 0.
+ */
+static void gc_toc_parse(const UCHAR *payload, ULONG payload_size,
+                          struct GcStagingSlot *slots, int max_slots)
+{
+    for (ULONG i = 0; i + 8 <= payload_size; i += 8) {
+        ULONG dw0      = *(const ULONG *)(payload + i);
+        ULONG dw1      = *(const ULONG *)(payload + i + 4);
+        ULONG fw_id    = (dw0 >> 25) & 0x7F;
+        ULONG off_fld  = dw0 & 0x1FFFFFF;
+        ULONG sz_x16   = (dw1 >> 12) & 1;
+        ULONG sz_fld   = (dw1 >> 14) & 0x3FFFF;
+
+        if (fw_id == 0)
+            break;
+        if ((int)fw_id >= max_slots)
+            continue;
+
+        slots[fw_id].offset = off_fld * 32;
+        slots[fw_id].size   = sz_x16 ? sz_fld * 4096 : sz_fld * 4;
+    }
+}
+
+/*
+ * Copy a firmware payload into the staging buffer at the TOC-defined slot.
+ * Copies min(fw_size, slot_size) bytes; zeroes any remainder.
+ */
+/*
+ * Copy firmware payload to the correct partition of the staging buffer.
+ * buf_base_off: staging-area offset where this buffer starts (0 or P1_SIZE).
+ * Silently skips if the slot is outside this partition's range.
+ */
+static void gc_staging_copy(UCHAR *buf, ULONG buf_size, ULONG buf_base_off,
+                              const struct GcStagingSlot *slots, ULONG fw_id,
+                              const UCHAR *fw_data, ULONG fw_size,
+                              const char *name)
+{
+    ULONG slot_off = slots[fw_id].offset;
+    ULONG slot_sz  = slots[fw_id].size;
+
+    if (slot_sz == 0) {
+        pr_warn("gc_staging: no slot for fw_id=%u (%s)\n", fw_id, name);
+        return;
+    }
+    /* Skip silently if this slot lives in a different partition */
+    if (slot_off < buf_base_off ||
+        slot_off + slot_sz > buf_base_off + buf_size) {
+        return;
+    }
+
+    ULONG local_off = slot_off - buf_base_off;
+    ULONG copy_sz = (fw_size < slot_sz) ? fw_size : slot_sz;
+    memcpy(buf + local_off, fw_data, copy_sz);
+    if (copy_sz < slot_sz)
+        memset(buf + local_off + copy_sz, 0, slot_sz - copy_sz);
+
+    pr_info("gc_staging: id=%u (%s): slot off=%u sz=%u, copied %u bytes\n",
+            fw_id, name, slot_off, slot_sz, copy_sz);
+}
+
+/*
+ * Set up the GC VRAM staging buffer for backdoor AUTOLOAD_RLC.
+ *
+ * Steps:
+ *   1. Parse gc_12_0_1_toc.bin to get slot offsets/sizes.
+ *   2. Allocate 24 MB VRAM buffer at GC_STAGING_VRAM_OFFSET.
+ *   3. Copy each firmware's encrypted payload to its TOC-defined slot.
+ *   4. Write GFX_IMU_RLC_BOOTLOADER_ADDR_HI/LO/SIZE via direct MMIO BAR
+ *      (bypasses PSP protection that blocks SMN indirect access).
+ *
+ * PSP reads GFX_IMU_RLC_BOOTLOADER_ADDR, decrypts firmware from staging
+ * buffer, and creates a valid TOC at RLC_IMU_BOOTLOAD_ADDR.  RLC then
+ * distributes firmware to MEC, RLCP, RLCV → BOOTLOAD_STATUS bit 31 set.
+ *
+ * Returns 0 on success.  Caller should skip LOAD_IP_FW for GFX firmware
+ * if this succeeds.
+ */
+static int gpu_gc_staging_setup(struct WddmLiteDevice *dev,
+                                  const char *fw_dir)
+{
+    struct GcStagingSlot slots[SOC24_FW_ID_MAX];
+    memset(slots, 0, sizeof(slots));
+
+    /* ---- Step 1: Parse GC TOC binary ---- */
+    ULONG toc_file_len = 0;
+    UCHAR *toc_buf = find_and_read_fw(fw_dir, "gc_12_0_1_toc.bin",
+                                        &toc_file_len);
+    if (!toc_buf)
+        toc_buf = find_and_read_fw(fw_dir, "gc_12_0_0_toc.bin",
+                                    &toc_file_len);
+    if (!toc_buf) {
+        pr_warn("gc_staging: GC TOC binary not found in %s\n", fw_dir);
+        return -1;
+    }
+
+    if (toc_file_len < 0x20) {
+        pr_warn("gc_staging: GC TOC too small (%u bytes)\n", toc_file_len);
+        free(toc_buf);
+        return -1;
+    }
+
+    /* Common firmware header: ucode_size_bytes at +0x14, offset at +0x18 */
+    ULONG payload_size = *(ULONG *)(toc_buf + 0x14);
+    ULONG payload_off  = *(ULONG *)(toc_buf + 0x18);
+    if (payload_off + payload_size > toc_file_len || payload_size == 0) {
+        pr_warn("gc_staging: GC TOC payload out of bounds "
+                "(off=0x%x size=%u file=%u)\n",
+                payload_off, payload_size, toc_file_len);
+        free(toc_buf);
+        return -1;
+    }
+
+    gc_toc_parse(toc_buf + payload_off, payload_size, slots, SOC24_FW_ID_MAX);
+
+    pr_info("gc_staging: TOC parsed: RLC_G slot off=%u sz=%u, "
+            "MEC slot off=%u sz=%u, MEC_P0 slot off=%u sz=%u\n",
+            slots[SOC24_FW_RLC_G_UCODE].offset,
+            slots[SOC24_FW_RLC_G_UCODE].size,
+            slots[SOC24_FW_RS64_MEC].offset,
+            slots[SOC24_FW_RS64_MEC].size,
+            slots[SOC24_FW_RS64_MEC_P0_STACK].offset,
+            slots[SOC24_FW_RS64_MEC_P0_STACK].size);
+
+    if (slots[SOC24_FW_RLC_G_UCODE].size == 0 ||
+        slots[SOC24_FW_RS64_MEC].size == 0) {
+        pr_warn("gc_staging: required slots missing from TOC — "
+                "firmware may not support backdoor AUTOLOAD\n");
+        free(toc_buf);
+        return -1;
+    }
+
+    /* ---- Step 2: Allocate VRAM staging buffer ----
+     * The MAP_VRAM escape has a 16 MB per-mapping limit, so we split
+     * the 24 MB staging area into two parts.
+     */
+#define GC_STAGING_P1_SIZE  (16UL * 1024 * 1024)  /* 0 – 16 MB  */
+#define GC_STAGING_P2_SIZE  (GC_STAGING_BUF_SIZE - GC_STAGING_P1_SIZE) /* 16 – 24 MB */
+
+    PVOID staging_handle1 = NULL, staging_handle2 = NULL;
+    UCHAR *staging1 = (UCHAR *)psp_ring_map_vram(dev,
+                                  GC_STAGING_VRAM_OFFSET,
+                                  GC_STAGING_P1_SIZE,
+                                  &staging_handle1);
+    UCHAR *staging2 = (UCHAR *)psp_ring_map_vram(dev,
+                                  GC_STAGING_VRAM_OFFSET + GC_STAGING_P1_SIZE,
+                                  GC_STAGING_P2_SIZE,
+                                  &staging_handle2);
+    if (!staging1 || !staging2) {
+        pr_warn("gc_staging: failed to map VRAM staging parts "
+                "(part1=%p part2=%p)\n", staging1, staging2);
+        if (staging1) psp_ring_unmap(dev, staging1, staging_handle1);
+        if (staging2) psp_ring_unmap(dev, staging2, staging_handle2);
+        free(toc_buf);
+        return -1;
+    }
+
+    pr_info("gc_staging: mapped staging buffer at VRAM+32 MB "
+            "(MC=0x%llx), p1=%p p2=%p\n",
+            (unsigned long long)(dev->hw.gmc.vram_start +
+                                  GC_STAGING_VRAM_OFFSET),
+            staging1, staging2);
+
+    memset(staging1, 0, GC_STAGING_P1_SIZE);
+    memset(staging2, 0, GC_STAGING_P2_SIZE);
+    MemoryBarrier();
+
+    /* ---- Step 3: Copy firmware payloads ---- */
+
+    /* id=2 (RLC_TOC): the GC TOC payload itself — RLC reads this to find
+     * firmware locations within the staging buffer */
+    gc_staging_copy(staging1, GC_STAGING_P1_SIZE, 0,
+                     slots, SOC24_FW_RLC_TOC,
+                     toc_buf + payload_off, payload_size, "RLC_TOC");
+    gc_staging_copy(staging2, GC_STAGING_P2_SIZE, GC_STAGING_P1_SIZE,
+                     slots, SOC24_FW_RLC_TOC,
+                     toc_buf + payload_off, payload_size, "RLC_TOC");
+    free(toc_buf);
+    toc_buf = NULL;
+
+    /* id=1 (RLC_G_UCODE): RLC IRAM content (from gc_12_0_1_rlc.bin v2.2).
+     * GFX_IMU_RLC_BOOTLOADER_ADDR points here; IMU boots RLC from this. */
+    {
+        ULONG len = 0;
+        UCHAR *buf = find_and_read_fw(fw_dir, "gc_12_0_1_rlc.bin", &len);
+        if (!buf)
+            buf = find_and_read_fw(fw_dir, "gc_12_0_0_rlc.bin", &len);
+
+        if (buf && len >= 0xAC) {
+            ULONG iram_off  = *(ULONG *)(buf + 0xA0); /* rlc_iram_ucode_offset_bytes */
+            ULONG iram_size = *(ULONG *)(buf + 0x9C); /* rlc_iram_ucode_size_bytes */
+            pr_info("gc_staging: RLC IRAM: off=0x%x size=%u\n",
+                    iram_off, iram_size);
+            if (iram_size > 0 && iram_off + iram_size <= len) {
+                gc_staging_copy(staging1, GC_STAGING_P1_SIZE, 0,
+                                 slots, SOC24_FW_RLC_G_UCODE,
+                                 buf + iram_off, iram_size, "RLC_G_IRAM");
+                gc_staging_copy(staging2, GC_STAGING_P2_SIZE, GC_STAGING_P1_SIZE,
+                                 slots, SOC24_FW_RLC_G_UCODE,
+                                 buf + iram_off, iram_size, "RLC_G_IRAM");
+            } else {
+                pr_warn("gc_staging: RLC IRAM out of bounds\n");
+            }
+        } else {
+            pr_warn("gc_staging: gc_12_0_1_rlc.bin not found or too small\n");
+        }
+        if (buf) free(buf);
+    }
+
+    /* RS64 firmwares: PFP, ME, MEC — code section + all pipe stack sections.
+     * The data section (stack) content is identical for all pipe slots. */
+    struct {
+        const char *filename;
+        ULONG       code_id;
+        ULONG       stack_ids[4];
+        int         num_stacks;
+        const char *name;
+        ULONGLONG  *ucode_start_out;
+    } rs64_fw[] = {
+        { "gc_12_0_1_pfp.bin", SOC24_FW_RS64_PFP,
+          { SOC24_FW_RS64_PFP_P0_STACK, SOC24_FW_RS64_PFP_P1_STACK, 0, 0 }, 2,
+          "PFP", &dev->hw.gfx.pfp_ucode_start },
+        { "gc_12_0_1_me.bin",  SOC24_FW_RS64_ME,
+          { SOC24_FW_RS64_ME_P0_STACK, SOC24_FW_RS64_ME_P1_STACK, 0, 0 }, 2,
+          "ME",  &dev->hw.gfx.me_ucode_start },
+        { "gc_12_0_1_mec.bin", SOC24_FW_RS64_MEC,
+          { SOC24_FW_RS64_MEC_P0_STACK, SOC24_FW_RS64_MEC_P1_STACK,
+            SOC24_FW_RS64_MEC_P2_STACK, SOC24_FW_RS64_MEC_P3_STACK }, 4,
+          "MEC", &dev->hw.gfx.mec_ucode_start },
+    };
+
+    for (int fi = 0; fi < 3; fi++) {
+        ULONG len = 0;
+        UCHAR *buf = find_and_read_fw(fw_dir, rs64_fw[fi].filename, &len);
+        if (!buf) {
+            pr_warn("gc_staging: %s not found\n", rs64_fw[fi].filename);
+            continue;
+        }
+        if (len < sizeof(struct GfxFirmwareHeaderV2)) {
+            pr_warn("gc_staging: %s too small for v2 header\n",
+                    rs64_fw[fi].filename);
+            free(buf);
+            continue;
+        }
+
+        struct GfxFirmwareHeaderV2 *hdr = (struct GfxFirmwareHeaderV2 *)buf;
+        if (hdr->header_version_major < 2) {
+            pr_warn("gc_staging: %s: header v%u not v2.x, skipping\n",
+                    rs64_fw[fi].filename, hdr->header_version_major);
+            free(buf);
+            continue;
+        }
+
+        ULONG code_off  = hdr->ucode_offset_bytes;
+        ULONG code_size = hdr->ucode_size_bytes;
+        ULONG data_off  = hdr->data_offset_bytes;
+        ULONG data_size = hdr->data_size_bytes;
+
+        pr_info("gc_staging: %s: code off=0x%x sz=%u, data off=0x%x sz=%u\n",
+                rs64_fw[fi].name, code_off, code_size, data_off, data_size);
+
+        /* Code section → code slot */
+        if (code_size > 0 && code_off + code_size <= len) {
+            char nbuf[32];
+            snprintf(nbuf, sizeof(nbuf), "%s_code", rs64_fw[fi].name);
+            gc_staging_copy(staging1, GC_STAGING_P1_SIZE, 0,
+                             slots, rs64_fw[fi].code_id,
+                             buf + code_off, code_size, nbuf);
+            gc_staging_copy(staging2, GC_STAGING_P2_SIZE, GC_STAGING_P1_SIZE,
+                             slots, rs64_fw[fi].code_id,
+                             buf + code_off, code_size, nbuf);
+        } else {
+            pr_warn("gc_staging: %s code section out of bounds\n",
+                    rs64_fw[fi].filename);
+        }
+
+        /* Data/stack section → all pipe stack slots (same content) */
+        if (data_size > 0 && data_off + data_size <= len) {
+            for (int si = 0; si < rs64_fw[fi].num_stacks; si++) {
+                char nbuf[32];
+                snprintf(nbuf, sizeof(nbuf), "%s_P%d_stack",
+                         rs64_fw[fi].name, si);
+                gc_staging_copy(staging1, GC_STAGING_P1_SIZE, 0,
+                                 slots, rs64_fw[fi].stack_ids[si],
+                                 buf + data_off, data_size, nbuf);
+                gc_staging_copy(staging2, GC_STAGING_P2_SIZE, GC_STAGING_P1_SIZE,
+                                 slots, rs64_fw[fi].stack_ids[si],
+                                 buf + data_off, data_size, nbuf);
+            }
+        }
+
+        /* Save ucode_start address from firmware header */
+        if (rs64_fw[fi].ucode_start_out) {
+            *rs64_fw[fi].ucode_start_out =
+                ((ULONGLONG)hdr->ucode_start_addr_hi << 32) |
+                hdr->ucode_start_addr_lo;
+            pr_info("gc_staging: %s ucode_start = 0x%llx\n",
+                    rs64_fw[fi].name,
+                    (unsigned long long)*rs64_fw[fi].ucode_start_out);
+        }
+
+        /* Save MEC code/data bytes for fallback VRAM copy path */
+        if (fi == 2 && dev->hw.gfx.mec_fw_code == NULL) {
+            if (code_size > 0 && code_off + code_size <= len) {
+                dev->hw.gfx.mec_fw_code = (UCHAR *)malloc(code_size);
+                if (dev->hw.gfx.mec_fw_code) {
+                    memcpy(dev->hw.gfx.mec_fw_code, buf + code_off, code_size);
+                    dev->hw.gfx.mec_fw_code_size = code_size;
+                }
+            }
+            if (data_size > 0 && data_off + data_size <= len) {
+                dev->hw.gfx.mec_fw_data = (UCHAR *)malloc(data_size);
+                if (dev->hw.gfx.mec_fw_data) {
+                    memcpy(dev->hw.gfx.mec_fw_data, buf + data_off, data_size);
+                    dev->hw.gfx.mec_fw_data_size = data_size;
+                }
+            }
+        }
+
+        free(buf);
+    }
+
+    /* Flush staging buffer writes to VRAM */
+    MemoryBarrier();
+    gpu_hdp_flush(dev);
+
+    /* ---- Step 4: Write GFX_IMU_RLC_BOOTLOADER_ADDR via direct MMIO ----
+     *
+     * These registers (gc_base1 + 0x5f81/82/83) are in the pspdec block
+     * which PSP protects against SMN indirect reads/writes (returns 0xffffffff
+     * via gpu_smn_rreg/wreg).  However, wddm_lite_write_reg32 uses direct
+     * MMIO BAR access (BarIndex=0, same as Linux WREG32_SOC15), which bypasses
+     * the SMN protection.
+     *
+     * Value = full GPU MC address of the RLC_G firmware slot:
+     *   addr = VRAM_MC_BASE + GC_STAGING_VRAM_OFFSET + slots[RLC_G].offset
+     *        = 0x8000000000 + 32MB + 0 = 0x8002000000
+     * PSP needs the MC address to locate the staging buffer, not just the
+     * VRAM-relative offset.
+     */
+    ULONGLONG rlc_g_addr = dev->hw.gmc.vram_start +
+                            GC_STAGING_VRAM_OFFSET +
+                            (ULONGLONG)slots[SOC24_FW_RLC_G_UCODE].offset;
+    ULONG rlc_g_size = slots[SOC24_FW_RLC_G_UCODE].size;
+
+    pr_info("gc_staging: writing GFX_IMU_RLC_BOOTLOADER_ADDR = 0x%llx "
+            "SIZE = %u via direct MMIO\n",
+            (unsigned long long)rlc_g_addr, rlc_g_size);
+
+    /* Write LO first, then HI, then SIZE */
+    wddm_lite_write_reg32(dev,
+        (dev->hw.ip.gc_base1 + regGFX_IMU_RLC_BOOTLOADER_ADDR_LO) * 4,
+        (ULONG)(rlc_g_addr & 0xFFFFFFFF));
+    wddm_lite_write_reg32(dev,
+        (dev->hw.ip.gc_base1 + regGFX_IMU_RLC_BOOTLOADER_ADDR_HI) * 4,
+        (ULONG)((rlc_g_addr >> 32) & 0xFFFFFFFF));
+    wddm_lite_write_reg32(dev,
+        (dev->hw.ip.gc_base1 + regGFX_IMU_RLC_BOOTLOADER_SIZE) * 4,
+        rlc_g_size);
+
+    /* Readback via SMN to verify (PSP-gated so likely 0xffffffff, but log it) */
+    ULONG rb_lo = gpu_smn_rreg(dev, dev->hw.ip.gc_base1 +
+                                 regGFX_IMU_RLC_BOOTLOADER_ADDR_LO);
+    ULONG rb_hi = gpu_smn_rreg(dev, dev->hw.ip.gc_base1 +
+                                 regGFX_IMU_RLC_BOOTLOADER_ADDR_HI);
+    ULONG rb_sz = gpu_smn_rreg(dev, dev->hw.ip.gc_base1 +
+                                 regGFX_IMU_RLC_BOOTLOADER_SIZE);
+    pr_info("gc_staging: GFX_IMU_RLC_BOOTLOADER readback (SMN): "
+            "ADDR=0x%08x_%08x SIZE=0x%08x%s\n",
+            rb_hi, rb_lo, rb_sz,
+            (rb_lo == 0xffffffff) ?
+                " (PSP-gated, MMIO write may still work)" : " (readable!)");
+
+    /* Unmap — PSP/GPU accesses staging buffer directly via VRAM MC address */
+    psp_ring_unmap(dev, staging1, staging_handle1);
+    psp_ring_unmap(dev, staging2, staging_handle2);
+
+    pr_info("gc_staging: setup complete — staging buf MC=0x%llx, "
+            "GFX_IMU_RLC_BOOTLOADER=0x%llx size=%u\n",
+            (unsigned long long)(dev->hw.gmc.vram_start +
+                                  GC_STAGING_VRAM_OFFSET),
+            (unsigned long long)rlc_g_addr, rlc_g_size);
+    return 0;
+}
+
 int gpu_psp_load_all_fw(struct WddmLiteDevice *dev, const char *fw_dir)
 {
     struct PspRingContext ctx;
@@ -2122,12 +2575,25 @@ int gpu_psp_load_all_fw(struct WddmLiteDevice *dev, const char *fw_dir)
     }
 
     /* === Step 2: Load SMU firmware (before TMR) === */
-    pr_info("psp_ring: === Step 2: Loading SMU firmware ===\n");
-    ret = psp_load_smu(&ctx, fw_dir);
-    if (ret != 0) {
-        pr_warn("psp_ring: SMU firmware load failed (may already be loaded by VBIOS)\n");
-        load_failures++;
-        /* Continue — SMU may already be loaded by VBIOS */
+    /* In VBIOS-preserve mode (HSAKMT_SKIP_MODE1_RESET=1), skip reloading
+     * SMU firmware. VBIOS's running SMU has the real board pptable (with PMIC
+     * I2C addresses for the RX 9070 XT). Reloading SMU via LOAD_IP_FW would
+     * restart SMU and wipe the pptable, causing EnableAllSmuFeatures to hang. */
+    {
+        char skip_m1r[8] = {};
+        GetEnvironmentVariableA("HSAKMT_SKIP_MODE1_RESET",
+            skip_m1r, sizeof(skip_m1r));
+        if (skip_m1r[0] == '1') {
+            pr_info("psp_ring: === Step 2: Skipping SMU firmware reload "
+                    "(HSAKMT_SKIP_MODE1_RESET=1 — keep VBIOS pptable) ===\n");
+        } else {
+            pr_info("psp_ring: === Step 2: Loading SMU firmware ===\n");
+            ret = psp_load_smu(&ctx, fw_dir);
+            if (ret != 0) {
+                pr_warn("psp_ring: SMU firmware load failed\n");
+                load_failures++;
+            }
+        }
     }
 
     /* === Step 3: TMR setup — skipped for boot_time_tmr === */
@@ -2135,7 +2601,8 @@ int gpu_psp_load_all_fw(struct WddmLiteDevice *dev, const char *fw_dir)
 
     /* === Step 4: Load remaining firmware === */
 
-    /* SDMA firmware (GFX12 uses thread-based SDMA_UCODE_TH0) */
+    /* SDMA firmware (GFX12 uses thread-based SDMA_UCODE_TH0).
+     * Loaded via LOAD_IP_FW regardless of staging path. */
     pr_info("psp_ring: === Loading SDMA firmware ===\n");
     ret = load_fw_v1(&ctx, fw_dir, "sdma_7_0_1.bin",
                       GFX_FW_TYPE_SDMA_UCODE_TH0, "sdma_7_0_0.bin");
@@ -2144,7 +2611,7 @@ int gpu_psp_load_all_fw(struct WddmLiteDevice *dev, const char *fw_dir)
         load_failures++;
     }
 
-    /* RS64 PFP firmware (code + P0 stack only for GFX12) */
+    /* RS64 PFP firmware */
     pr_info("psp_ring: === Loading PFP firmware (RS64) ===\n");
     {
         ULONG pfp_stacks[] = { GFX_FW_TYPE_RS64_PFP_P0_STACK };
@@ -2157,7 +2624,7 @@ int gpu_psp_load_all_fw(struct WddmLiteDevice *dev, const char *fw_dir)
         }
     }
 
-    /* RS64 ME firmware (code + P0 stack only) */
+    /* RS64 ME firmware */
     pr_info("psp_ring: === Loading ME firmware (RS64) ===\n");
     {
         ULONG me_stacks[] = { GFX_FW_TYPE_RS64_ME_P0_STACK };
@@ -2170,7 +2637,7 @@ int gpu_psp_load_all_fw(struct WddmLiteDevice *dev, const char *fw_dir)
         }
     }
 
-    /* RS64 MEC firmware (code + P0 stack only) */
+    /* RS64 MEC firmware — also saves code/data for VRAM fallback copy path */
     pr_info("psp_ring: === Loading MEC firmware (RS64) ===\n");
     {
         ULONG mec_stacks[] = { GFX_FW_TYPE_RS64_MEC_P0_STACK };
@@ -2182,9 +2649,7 @@ int gpu_psp_load_all_fw(struct WddmLiteDevice *dev, const char *fw_dir)
             load_failures++;
         }
 
-        /* Save MEC firmware code+data bytes for GART-based loading.
-         * AUTOLOAD_RLC may not complete in VBIOS state, so we need
-         * to copy firmware to a GPU-accessible address ourselves. */
+        /* Save MEC firmware code+data bytes for GART-based loading fallback. */
         {
             ULONG mec_len = 0;
             UCHAR *mec_buf = find_and_read_fw(fw_dir,
@@ -2269,7 +2734,7 @@ int gpu_psp_load_all_fw(struct WddmLiteDevice *dev, const char *fw_dir)
         }
     }
 
-    /* RLC sub-components (v2.2: IRAM + DRAM_BOOT) */
+    /* RLC firmware */
     pr_info("psp_ring: === Loading RLC firmware ===\n");
     {
         ULONG rlc_len = 0;
@@ -2406,12 +2871,23 @@ int gpu_psp_trigger_autoload(struct WddmLiteDevice *dev)
             dev->hw.ip.gc_base1 + 0x4c43); /* RLC_PG_CNTL */
         pr_info("psp_autoload: RLC_CGCG_CGLS_CTRL = 0x%08x, "
                 "RLC_PG_CNTL = 0x%08x\n", cgcg, pg);
-        if (cgcg != 0 || pg != 0) {
-            pr_info("psp_autoload: disabling clock/power gating\n");
-            gpu_smn_wreg(dev,
-                dev->hw.ip.gc_base1 + 0x4c49, 0); /* CGCG=0 */
-            gpu_smn_wreg(dev,
-                dev->hw.ip.gc_base1 + 0x4c43, 0); /* PG=0 */
+        {
+            /* Preserve VBIOS upper bits (observed: bit 16 set = GFXOFF prevention
+             * by VBIOS) and assert bit 20 (GFXIP_FGCG_OVERRIDE) to force GFXOFF
+             * exit via RLC register instead of SMU mailbox.  Linux gfx_v12_0 uses
+             * this path in gfx_v12_0_gfxclk_fgcg_override().  Clear lower 16 bits
+             * to disable active CGCG/CGLS clock gating that would block RLC. */
+            ULONG new_cgcg = (cgcg & 0xFFFF0000) | 0x00100000;
+            if (new_cgcg != cgcg) {
+                pr_info("psp_autoload: RLC_CGCG_CGLS_CTRL 0x%08x → 0x%08x "
+                        "(preserve upper + GFXIP_FGCG_OVERRIDE, clear lower gating)\n",
+                        cgcg, new_cgcg);
+                gpu_smn_wreg(dev, dev->hw.ip.gc_base1 + 0x4c49, new_cgcg);
+            }
+            if (pg != 0) {
+                pr_info("psp_autoload: clearing RLC_PG_CNTL 0x%08x → 0\n", pg);
+                gpu_smn_wreg(dev, dev->hw.ip.gc_base1 + 0x4c43, 0); /* PG=0 */
+            }
         }
     }
 
@@ -2456,17 +2932,50 @@ int gpu_psp_trigger_autoload(struct WddmLiteDevice *dev)
     }
 
     /* IMU state and unhalt.
-     * Linux: gfx_v12_0_rlc_backdoor_autoload_enable() calls imu_v12_0_start()
-     * which clears bit 0 of GFX_IMU_CORE_CTRL to unhalt the IMU. For discrete
-     * GPU (not APU), the IMU handles GC power-up without any SMU message.
-     * Without IMU running, RLC stalls at bits 0-5 (0x3F) — engines stay off.
-     * GFX_IMU_CORE_CTRL = 0x40b6 (BASE_IDX=1 → gc_base1)
-     * GFX_IMU_GFX_RESET_CTRL = 0x40bc (BASE_IDX=1 → gc_base1) */
+     * Linux sequence (gfx_v12_0_rlc_backdoor_autoload_enable):
+     *   1. Set GFX_IMU_RLC_BOOTLOADER_ADDR_HI/LO/SIZE (PSP may set this for us)
+     *   2. Set C2PMSG access control (allow all C2PMSG registers)
+     *   3. Unhalt IMU (clear bit 0 of GFX_IMU_CORE_CTRL)
+     *   4. Wait for GFX_IMU_GFX_RESET_CTRL bits [4:0] = 0x1f (GFX powered up)
+     *   5. Disable GPA mode (CPC/CPG_PSP_DEBUG GPA_OVERRIDE)
+     *
+     * Without IMU completing power sequence:
+     *   - CPC_PSP_DEBUG remains 0xffffffff (CPC domain off)
+     *   - RLC stalls at BOOTLOAD_STATUS=0x3F — cannot distribute to MEC
+     *
+     * Register offsets (gc_base1):
+     *   GFX_IMU_CORE_CTRL = 0x40b6, GFX_IMU_GFX_RESET_CTRL = 0x40bc
+     *   GFX_IMU_C2PMSG_ACCESS_CTRL0 = 0x4040, _CTRL1 = 0x4041
+     *   GFX_IMU_RLC_BOOTLOADER_ADDR_HI = 0x5f81, _LO = 0x5f82, SIZE = 0x5f83
+     *   GFX_IMU_I_RAM_ADDR = 0x5f90, GFX_IMU_I_RAM_DATA = 0x5f91 */
     {
-        ULONG imu_ctrl = gpu_smn_rreg(dev,
-            dev->hw.ip.gc_base1 + 0x40b6);
-        ULONG imu_reset = gpu_smn_rreg(dev,
-            dev->hw.ip.gc_base1 + 0x40bc);
+        /* Diagnose GFX_IMU_RLC_BOOTLOADER_ADDR — kernel sets this to the
+         * VRAM-relative offset of the RLC_G firmware staging buffer before
+         * unhalting. PSP LOAD_IP_FW for RLC may have set it already. */
+        ULONG bl_hi   = gpu_smn_rreg(dev, dev->hw.ip.gc_base1 + 0x5f81);
+        ULONG bl_lo   = gpu_smn_rreg(dev, dev->hw.ip.gc_base1 + 0x5f82);
+        ULONG bl_size = gpu_smn_rreg(dev, dev->hw.ip.gc_base1 + 0x5f83);
+        pr_info("psp_autoload: GFX_IMU_RLC_BOOTLOADER: "
+                "ADDR=0x%08x_%08x SIZE=0x%08x\n", bl_hi, bl_lo, bl_size);
+
+        /* Check if IMU IRAM is loaded by PSP (peek first 4 words). */
+        gpu_smn_wreg(dev, dev->hw.ip.gc_base1 + 0x5f90, 0);  /* IRAM addr = 0 */
+        ULONG iram0 = gpu_smn_rreg(dev, dev->hw.ip.gc_base1 + 0x5f91);
+        ULONG iram1 = gpu_smn_rreg(dev, dev->hw.ip.gc_base1 + 0x5f91);
+        ULONG iram2 = gpu_smn_rreg(dev, dev->hw.ip.gc_base1 + 0x5f91);
+        ULONG iram3 = gpu_smn_rreg(dev, dev->hw.ip.gc_base1 + 0x5f91);
+        pr_info("psp_autoload: GFX_IMU_IRAM[0..3] = 0x%08x 0x%08x 0x%08x 0x%08x%s\n",
+                iram0, iram1, iram2, iram3,
+                (iram0 == 0 && iram1 == 0) ? " (EMPTY - IRAM not loaded!)" : " (loaded)");
+
+        /* Set C2PMSG access control — allow all C2PMSG registers (kernel does
+         * this in imu_v12_0_setup before unhalting the IMU). */
+        gpu_smn_wreg(dev, dev->hw.ip.gc_base1 + 0x4040, 0x00ffffff);
+        gpu_smn_wreg(dev, dev->hw.ip.gc_base1 + 0x4041, 0x0000ffff);
+        pr_info("psp_autoload: C2PMSG_ACCESS_CTRL0/1 set\n");
+
+        ULONG imu_ctrl = gpu_smn_rreg(dev, dev->hw.ip.gc_base1 + 0x40b6);
+        ULONG imu_reset = gpu_smn_rreg(dev, dev->hw.ip.gc_base1 + 0x40bc);
         pr_info("psp_autoload: GFX_IMU_CORE_CTRL=0x%08x "
                 "GFX_IMU_GFX_RESET_CTRL=0x%08x (halted=%d gc_ready=%d)\n",
                 imu_ctrl, imu_reset,
@@ -2480,9 +2989,11 @@ int gpu_psp_trigger_autoload(struct WddmLiteDevice *dev)
             gpu_smn_wreg(dev,
                 dev->hw.ip.gc_base1 + 0x40b6, imu_ctrl & ~0x1U);
 
-            /* Wait up to 1s for IMU to signal GFX reset complete
-             * (GFX_IMU_GFX_RESET_CTRL bits [4:0] all set = 0x1f) */
-            for (int i = 0; i < 1000; i++) {
+            /* Wait up to 30s for IMU to signal GFX reset complete
+             * (GFX_IMU_GFX_RESET_CTRL bits [4:0] all set = 0x1f).
+             * Kernel allows 10s; we extend to 30s on VFIO.
+             * Log every 5s including CPC_PSP_DEBUG to track power-up. */
+            for (int i = 0; i < 30000; i++) {
                 imu_reset = gpu_smn_rreg(dev,
                     dev->hw.ip.gc_base1 + 0x40bc);
                 if ((imu_reset & 0x1f) == 0x1f) {
@@ -2491,11 +3002,24 @@ int gpu_psp_trigger_autoload(struct WddmLiteDevice *dev)
                             i, imu_reset);
                     break;
                 }
+                if (i > 0 && (i % 5000) == 0) {
+                    ULONG cpc = gpu_smn_rreg(dev,
+                        dev->hw.ip.gc_base1 + 0x5c11);
+                    pr_info("psp_autoload: IMU wait [%ds]: "
+                            "GFX_RESET_CTRL=0x%08x CPC_PSP_DEBUG=0x%08x\n",
+                            i / 1000, imu_reset, cpc);
+                }
                 Sleep(1);
             }
             pr_info("psp_autoload: GFX_IMU_GFX_RESET_CTRL=0x%08x "
                     "(ready=%s)\n", imu_reset,
                     ((imu_reset & 0x1f) == 0x1f) ? "YES" : "NO");
+            /* Re-read CPC status after IMU sequence */
+            {
+                ULONG cpc = gpu_smn_rreg(dev, dev->hw.ip.gc_base1 + 0x5c11);
+                pr_info("psp_autoload: CPC_PSP_DEBUG after IMU wait = 0x%08x%s\n",
+                        cpc, (cpc == 0xffffffff) ? " (CPC STILL OFF)" : " (CPC ON!)");
+            }
         } else if (imu_ctrl == 0xFFFFFFFF) {
             pr_warn("psp_autoload: IMU registers inaccessible "
                     "(0xffffffff) — GFXOFF still active?\n");
@@ -2534,28 +3058,52 @@ int gpu_psp_trigger_autoload(struct WddmLiteDevice *dev)
         return ret;
     }
 
+    /* Read RLC_IMU_BOOTLOAD_ADDR after AUTOLOAD command — this is what RLC
+     * uses as a pointer to the firmware staging buffer.
+     * regRLC_IMU_BOOTLOAD_ADDR_HI = 0x4e10, _LO = 0x4e11, SIZE = 0x4e12
+     * (BASE_IDX=1, gc_base1, NOT PSP-protected unlike the 0x5f81/82 registers)
+     * Also read CP_MEC_CNTL (0x0802) to check if MEC is halted. */
+    {
+        ULONG rlc_buf_hi   = gpu_smn_rreg(dev, dev->hw.ip.gc_base1 + 0x4e10);
+        ULONG rlc_buf_lo   = gpu_smn_rreg(dev, dev->hw.ip.gc_base1 + 0x4e11);
+        ULONG rlc_buf_size = gpu_smn_rreg(dev, dev->hw.ip.gc_base1 + 0x4e12);
+        ULONG mec_cntl     = gpu_smn_rreg(dev, dev->hw.ip.gc_base1 + 0x0802);
+        pr_info("psp_autoload: post-AUTOLOAD: "
+                "RLC_IMU_BOOTLOAD_ADDR=0x%08x_%08x SIZE=0x%08x "
+                "CP_MEC_CNTL=0x%08x (me1_halt=%d)\n",
+                rlc_buf_hi, rlc_buf_lo, rlc_buf_size,
+                mec_cntl, (int)(mec_cntl & 0x1));
+    }
+
     /* Poll RLC bootload status (gc_base1 + 0x4e7c, bit 31 = complete) */
     pr_info("psp_autoload: polling RLC_RLCS_BOOTLOAD_STATUS (10s timeout)...\n");
     {
         ULONG bootload_status = 0;
         ULONG last_status = 0xFFFFFFFF;
         BOOLEAN bootload_done = FALSE;
-        for (int poll = 0; poll < 1000; poll++) {  /* Up to 10 seconds */
-            bootload_status = gpu_smn_rreg(dev,
-                dev->hw.ip.gc_base1 + 0x4e7c);
-            if (bootload_status & 0x80000000) {
-                bootload_done = TRUE;
-                pr_info("psp_autoload: BOOTLOAD COMPLETE at %d ms! "
-                        "status=0x%08x\n", poll * 10, bootload_status);
-                break;
+        {
+            DWORD bl_start = GetTickCount();
+            for (;;) {
+                bootload_status = gpu_smn_rreg(dev,
+                    dev->hw.ip.gc_base1 + 0x4e7c);
+                if (bootload_status & 0x80000000) {
+                    bootload_done = TRUE;
+                    pr_info("psp_autoload: BOOTLOAD COMPLETE at %u ms! "
+                            "status=0x%08x\n",
+                            (unsigned)(GetTickCount() - bl_start),
+                            bootload_status);
+                    break;
+                }
+                DWORD e = GetTickCount() - bl_start;
+                if (e >= 10000) break;
+                if (bootload_status != last_status) {
+                    pr_info("psp_autoload: bootload status changed: "
+                            "0x%08x → 0x%08x at %u ms\n",
+                            last_status, bootload_status, (unsigned)e);
+                    last_status = bootload_status;
+                }
+                Sleep(50);
             }
-            if (bootload_status != last_status) {
-                pr_info("psp_autoload: bootload status changed: "
-                        "0x%08x → 0x%08x at %d ms\n",
-                        last_status, bootload_status, poll * 10);
-                last_status = bootload_status;
-            }
-            Sleep(10);
         }
         pr_info("psp_autoload: RLC_RLCS_BOOTLOAD_STATUS = 0x%08x "
                 "(complete=%s, sec_policy=%d,%d, "
@@ -2606,58 +3154,67 @@ int gpu_psp_trigger_autoload(struct WddmLiteDevice *dev)
             pr_info("psp_autoload: re-polling bootload_status (120s)...\n");
             last_status = 0xFFFFFFFF;
             ULONG last_fault = 0xFFFFFFFF;
-            for (int poll2 = 0; poll2 < 12000; poll2++) {
-                bootload_status = gpu_smn_rreg(dev,
-                    dev->hw.ip.gc_base1 + 0x4e7c);
-                if (bootload_status & 0x80000000) {
-                    bootload_done = TRUE;
-                    pr_info("psp_autoload: BOOTLOAD COMPLETE "
-                            "at %d ms (after RLC enable)! "
-                            "status=0x%08x\n",
-                            poll2 * 10, bootload_status);
-                    break;
-                }
-                if (bootload_status != last_status) {
-                    pr_info("psp_autoload: bootload status: "
-                            "0x%08x → 0x%08x at %d ms\n",
-                            last_status, bootload_status,
-                            poll2 * 10);
-                    last_status = bootload_status;
-                }
-                /* Every 5s: check GCVM fault status.
-                 * Non-zero = firmware VA page fault (PT_BASE bad). */
-                if (poll2 > 0 && (poll2 % 500) == 0) {
-                    ULONG fault = gfxhub_rreg(dev,
-                        regGCVM_L2_PROTECTION_FAULT_STATUS_LO32);
-                    if (fault != last_fault) {
-                        if (fault != 0) {
-                            ULONG fa_lo = gfxhub_rreg(dev,
-                                regGCVM_L2_PROTECTION_FAULT_ADDR_LO32);
-                            ULONG fa_hi = gfxhub_rreg(dev,
-                                regGCVM_L2_PROTECTION_FAULT_ADDR_HI32);
-                            pr_warn("psp_autoload: GCVM FAULT at %ds: "
-                                    "STATUS=0x%08x ADDR=0x%08x_%08x "
-                                    "(firmware VA page fault?)\n",
-                                    poll2 / 100, fault, fa_hi, fa_lo);
-                        }
-                        last_fault = fault;
+            {
+                DWORD bl2_start = GetTickCount();
+                DWORD last_diag_s = 0;
+                for (;;) {
+                    bootload_status = gpu_smn_rreg(dev,
+                        dev->hw.ip.gc_base1 + 0x4e7c);
+                    if (bootload_status & 0x80000000) {
+                        bootload_done = TRUE;
+                        pr_info("psp_autoload: BOOTLOAD COMPLETE "
+                                "at %u ms (after RLC enable)! "
+                                "status=0x%08x\n",
+                                (unsigned)(GetTickCount() - bl2_start),
+                                bootload_status);
+                        break;
                     }
-                    ULONG rlc_s = gpu_smn_rreg(dev,
-                        dev->hw.ip.gc_base1 + 0x4c04);
-                    /* RLC_RLCS_BOOTLOAD_ID_STATUS1/2 (0x4ec3/0x4ec4):
-                     * one bit per firmware component RLC has distributed.
-                     * 0 = RLC hasn't loaded any component yet. */
-                    ULONG id_s1 = gpu_smn_rreg(dev,
-                        dev->hw.ip.gc_base1 + 0x4ec3);
-                    ULONG id_s2 = gpu_smn_rreg(dev,
-                        dev->hw.ip.gc_base1 + 0x4ec4);
-                    pr_info("psp_autoload: [%ds] bootload=0x%08x "
-                            "RLC_STAT=0x%08x GCVM_FAULT=0x%08x "
-                            "ID_STATUS=0x%08x_0x%08x\n",
-                            poll2 / 100, bootload_status, rlc_s, fault,
-                            id_s2, id_s1);
+                    DWORD e = GetTickCount() - bl2_start;
+                    if (e >= 120000) break;
+                    if (bootload_status != last_status) {
+                        pr_info("psp_autoload: bootload status: "
+                                "0x%08x → 0x%08x at %u ms\n",
+                                last_status, bootload_status, (unsigned)e);
+                        last_status = bootload_status;
+                    }
+                    /* Every 5s real time: diagnostic dump */
+                    DWORD e_s = e / 1000;
+                    if (e_s >= last_diag_s + 5) {
+                        last_diag_s = e_s;
+                        ULONG fault = gfxhub_rreg(dev,
+                            regGCVM_L2_PROTECTION_FAULT_STATUS_LO32);
+                        if (fault != last_fault) {
+                            if (fault != 0) {
+                                ULONG fa_lo = gfxhub_rreg(dev,
+                                    regGCVM_L2_PROTECTION_FAULT_ADDR_LO32);
+                                ULONG fa_hi = gfxhub_rreg(dev,
+                                    regGCVM_L2_PROTECTION_FAULT_ADDR_HI32);
+                                pr_warn("psp_autoload: GCVM FAULT at %us: "
+                                        "STATUS=0x%08x ADDR=0x%08x_%08x "
+                                        "(firmware VA page fault?)\n",
+                                        (unsigned)e_s, fault, fa_hi, fa_lo);
+                            }
+                            last_fault = fault;
+                        }
+                        ULONG rlc_s = gpu_smn_rreg(dev,
+                            dev->hw.ip.gc_base1 + 0x4c04);
+                        ULONG id_s1 = gpu_smn_rreg(dev,
+                            dev->hw.ip.gc_base1 + 0x4ec3);
+                        ULONG id_s2 = gpu_smn_rreg(dev,
+                            dev->hw.ip.gc_base1 + 0x4ec4);
+                        ULONG mec_cntl = gpu_smn_rreg(dev,
+                            dev->hw.ip.gc_base1 + 0x0802);
+                        ULONG cpc_psp = gpu_smn_rreg(dev,
+                            dev->hw.ip.gc_base1 + 0x5c11);
+                        pr_info("psp_autoload: [%us] bootload=0x%08x "
+                                "RLC_STAT=0x%08x GCVM_FAULT=0x%08x "
+                                "ID_STATUS=0x%08x_0x%08x MEC_CNTL=0x%08x "
+                                "CPC_PSP_DEBUG=0x%08x\n",
+                                (unsigned)e_s, bootload_status, rlc_s, fault,
+                                id_s2, id_s1, mec_cntl, cpc_psp);
+                    }
+                    Sleep(200);  /* Poll every 200 ms */
                 }
-                Sleep(10);
             }
             if (!bootload_done) {
                 pr_warn("psp_autoload: RLC bootload still not "
@@ -3642,20 +4199,25 @@ static int gpu_smu_send_debug_msg(struct WddmLiteDevice *dev, ULONG msg, ULONG p
     /* Write debug message (triggers) */
     mp1_wreg(dev, regMP1_SMN_C2PMSG_75, msg);
 
-    /* Poll debug response (up to 2 seconds) */
-    for (int i = 0; i < 2000; i++) {
-        ULONG resp = mp1_rreg(dev, regMP1_SMN_C2PMSG_54);
-        if (resp != 0) {
-            if (resp == 1) {
-                pr_info("gpu_smu: debug msg %u succeeded\n", msg);
-                return 0;
-            } else {
-                pr_warn("gpu_smu: debug msg %u failed (resp=0x%x)\n",
-                        msg, resp);
-                return -1;
+    /* Poll debug response (up to 2 seconds wall clock) */
+    {
+        DWORD start = GetTickCount();
+        for (;;) {
+            ULONG resp = mp1_rreg(dev, regMP1_SMN_C2PMSG_54);
+            if (resp != 0) {
+                if (resp == 1) {
+                    pr_info("gpu_smu: debug msg %u succeeded\n", msg);
+                    return 0;
+                } else {
+                    pr_warn("gpu_smu: debug msg %u failed (resp=0x%x)\n",
+                            msg, resp);
+                    return -1;
+                }
             }
+            if (GetTickCount() - start >= 2000)
+                break;
+            Sleep(10);
         }
-        Sleep(1);
     }
 
     pr_err("gpu_smu: debug msg %u timed out\n", msg);
@@ -3690,21 +4252,26 @@ int gpu_smu_send_msg(struct WddmLiteDevice *dev, ULONG msg, ULONG param)
     /* Step 3: Write message (triggers SMU processing) */
     mp1_wreg(dev, regMP1_SMN_C2PMSG_66, msg);
 
-    /* Step 4: Poll for response (up to 2 seconds) */
-    for (int i = 0; i < 2000; i++) {
-        ULONG resp = mp1_rreg(dev, regMP1_SMN_C2PMSG_90);
-        if (resp != 0) {
-            if (resp == 1) {
-                pr_debug("gpu_smu: msg 0x%02x param 0x%x succeeded\n",
-                         msg, param);
-                return 0;
-            } else {
-                pr_warn("gpu_smu: msg 0x%02x param 0x%x failed "
-                        "(resp=0x%x)\n", msg, param, resp);
-                return -1;
+    /* Step 4: Poll for response (up to 2 seconds wall clock) */
+    {
+        DWORD start = GetTickCount();
+        for (;;) {
+            ULONG resp = mp1_rreg(dev, regMP1_SMN_C2PMSG_90);
+            if (resp != 0) {
+                if (resp == 1) {
+                    pr_debug("gpu_smu: msg 0x%02x param 0x%x succeeded\n",
+                             msg, param);
+                    return 0;
+                } else {
+                    pr_warn("gpu_smu: msg 0x%02x param 0x%x failed "
+                            "(resp=0x%x)\n", msg, param, resp);
+                    return -1;
+                }
             }
+            if (GetTickCount() - start >= 2000)
+                break;
+            Sleep(10);
         }
-        Sleep(1);
     }
 
     pr_err("gpu_smu: msg 0x%02x param 0x%x timed out\n", msg, param);
@@ -3723,8 +4290,211 @@ int gpu_smu_enable_features(struct WddmLiteDevice *dev)
         return -1;
     }
 
-    /* First check if SMU is alive after firmware loading */
+    /* First check if SMU is alive after firmware loading.
+     *
+     * After VBIOS hands off, SMU may be in a GFXOFF low-power mode where
+     * the normal mailbox is gated and won't respond to GetSmuVersion.
+     * Send DisallowGfxOff (0x27) first to wake the SMU out of GFXOFF state,
+     * then retry GetSmuVersion.  Ignore the DisallowGfxOff response — if
+     * SMU is already in normal mode it's a no-op; if it's in GFXOFF it will
+     * wake up and respond to GetSmuVersion. */
+    /* Whether GFX was already powered before we start (VBIOS-preserve mode).
+     * If true: EnableAllSmuFeatures only needs to set internal feature flags
+     * (no PMIC voltage raise), so we use a shorter timeout.
+     * If false (Mode1-reset): SMU must physically power up GFX via PMIC,
+     * which takes longer. */
+    BOOLEAN cpc_was_powered = FALSE;
+    BOOLEAN smu_wedged = FALSE;
+
     pr_info("gpu_smu: checking if SMU is alive after firmware load...\n");
+    {
+        /* Send DisallowGfxOff (0x29 per smu_v14_0_2 message table) to wake
+         * SMU from GFXOFF low-power state.  Note: 0x27 is a different message
+         * (PrepareMp1ForUnload or SoftFiniSmu) — do not confuse them. */
+        pr_info("gpu_smu: sending DisallowGfxOff (0x%02x) to wake SMU from GFXOFF...\n",
+                PPSMC_MSG_DisallowGfxOff);
+        ULONG cur66 = mp1_rreg(dev, regMP1_SMN_C2PMSG_66);
+        ULONG cur90 = mp1_rreg(dev, regMP1_SMN_C2PMSG_90);
+        pr_info("gpu_smu: C2PMSG_66 before DisallowGfxOff = 0x%08x, C2PMSG_90 = 0x%08x\n",
+                cur66, cur90);
+        /* Wedge detection: if C2PMSG_66 has a pending message (non-zero) and
+         * C2PMSG_90 has no response (0), SMU is stuck processing the old message.
+         * This happens when a previous EnableAllSmuFeatures (0x06) hung and left
+         * the mailbox in a pending state. An OS reboot without physical power
+         * cut preserves this state. DisallowGfxOff and EnableAllSmuFeatures
+         * will not respond. Flag it and proceed — VRAM copy fallback will run. */
+        smu_wedged = (cur66 != 0) && (cur90 == 0);
+        if (smu_wedged) {
+            pr_warn("gpu_smu: SMU WEDGED — C2PMSG_66=0x%02x pending with no response "
+                    "(C2PMSG_90=0). Physical power cycle needed to clear.\n",
+                    cur66);
+            pr_warn("gpu_smu: Skipping DisallowGfxOff/EnableAllSmuFeatures waits.\n");
+        }
+        if (cur66 == PPSMC_MSG_DisallowGfxOff) {
+            mp1_wreg(dev, regMP1_SMN_C2PMSG_66, 0);
+            Sleep(1);
+        }
+        if (!smu_wedged) {
+            mp1_wreg(dev, regMP1_SMN_C2PMSG_90, 0);
+            mp1_wreg(dev, regMP1_SMN_C2PMSG_82, 0);
+            mp1_wreg(dev, regMP1_SMN_C2PMSG_66, PPSMC_MSG_DisallowGfxOff);
+            {
+                DWORD dgfx_start = GetTickCount();
+                for (;;) {
+                    ULONG resp = mp1_rreg(dev, regMP1_SMN_C2PMSG_90);
+                    if (resp != 0) {
+                        pr_info("gpu_smu: DisallowGfxOff responded (resp=0x%x, %u ms)\n",
+                                resp, (unsigned)(GetTickCount() - dgfx_start));
+                        break;
+                    }
+                    if (GetTickCount() - dgfx_start >= 2000) break;
+                    Sleep(10);
+                }
+            }
+            pr_info("gpu_smu: post-DisallowGfxOff: C2PMSG_90=0x%08x\n",
+                    mp1_rreg(dev, regMP1_SMN_C2PMSG_90));
+        }
+    }
+
+    /* Check if GFX power domain is already up (VBIOS-preserve mode).
+     *
+     * CPC_PSP_DEBUG (gc_base1 + 0x5c11) reads 0xffffffff when the CPC/GFX
+     * power domain is gated off.  Any other value means GFX is accessible.
+     * In VBIOS-preserve mode (HSAKMT_SKIP_MODE1_RESET=1), VBIOS already
+     * powered GFX up and we just need to enable the SMU feature flags.
+     *
+     * We do NOT skip EnableAllSmuFeatures even when GFX is already powered:
+     * RLC AUTOLOAD will not distribute firmware to MEC/CPC until SMU sets
+     * the FEATURE_PWR_GFX feature flag, which only happens after this message.
+     * In VBIOS-preserve mode, EnableAllSmuFeatures only needs to SET FLAGS
+     * (GFX already on, no PMIC voltage raise needed) → responds much faster.
+     * We use cpc_was_powered to select a shorter 30s timeout for that case. */
+    if (dev->hw.ip.gc_base1 != 0) {
+        ULONG cpc_psp = gpu_smn_rreg(dev, dev->hw.ip.gc_base1 + 0x5c11);
+        pr_info("gpu_smu: CPC_PSP_DEBUG (gc_base1+0x5c11) = 0x%08x%s\n",
+                cpc_psp, (cpc_psp != 0xffffffff) ? " (GFX already powered)" : " (GFX off)");
+        if (cpc_psp != 0xffffffff) {
+            cpc_was_powered = TRUE;
+            dev->hw.gfxoff_disabled = TRUE;
+            pr_info("gpu_smu: GFX already powered — calling EnableAllSmuFeatures "
+                    "with 30s timeout to set RLC AUTOLOAD trigger flags\n");
+        }
+    }
+
+    /* GFX domain is gated off (CPC_PSP_DEBUG=0xffffffff).
+     * Before hanging 120s on EnableAllSmuFeatures, try the RLC-based GFXOFF exit:
+     * assert GFXIP_FGCG_OVERRIDE (bit 20) in RLC_CGCG_CGLS_CTRL (gc_base1+0x4c49).
+     * Linux gfx_v12_0_gfxclk_fgcg_override() uses this to force GFXOFF exit via
+     * the RLC register path rather than the SMU mailbox path.
+     * If CPC_PSP_DEBUG changes from 0xffffffff → anything else, CPC is up. */
+    if (dev->hw.ip.gc_base1 != 0) {
+        ULONG cgcg = gpu_smn_rreg(dev, dev->hw.ip.gc_base1 + 0x4c49);
+        pr_info("gpu_smu: RLC_CGCG_CGLS_CTRL = 0x%08x (pre-FGCG_OVERRIDE)\n", cgcg);
+        ULONG new_cgcg = cgcg | 0x00100000;  /* bit 20 = GFXIP_FGCG_OVERRIDE */
+        gpu_smn_wreg(dev, dev->hw.ip.gc_base1 + 0x4c49, new_cgcg);
+        pr_info("gpu_smu: wrote RLC_CGCG_CGLS_CTRL = 0x%08x "
+                "(GFXIP_FGCG_OVERRIDE asserted, bit 20)\n", new_cgcg);
+        Sleep(500);
+        ULONG cpc2 = gpu_smn_rreg(dev, dev->hw.ip.gc_base1 + 0x5c11);
+        pr_info("gpu_smu: CPC_PSP_DEBUG after FGCG_OVERRIDE = 0x%08x%s\n",
+                cpc2, (cpc2 != 0xffffffff) ? " (CPC POWERED ON!)" : " (still off)");
+        if (cpc2 != 0xffffffff) {
+            pr_info("gpu_smu: FGCG_OVERRIDE powered up GFX — "
+                    "skipping EnableAllSmuFeatures\n");
+            dev->hw.gfxoff_disabled = TRUE;
+            return 0;
+        }
+    }
+
+    /* Unhalt IMU before calling EnableAllSmuFeatures.
+     * On GFX12, SMU's GFXOFF exit (and thus DisallowGfxOff) requires IMU to be
+     * running.  If IMU is halted (GFX_IMU_CORE_CTRL bit 0 = 1), DisallowGfxOff
+     * returns 0xff (PPSMC_Result_Fail_FitNotSupported) because SMU cannot drive
+     * the GFXOFF exit handshake without IMU.
+     * Note: IMU firmware must already have been loaded by psp_ring before this. */
+    if (dev->hw.ip.gc_base1 != 0) {
+        ULONG imu_ctrl = gpu_smn_rreg(dev, dev->hw.ip.gc_base1 + 0x40b6);
+        pr_info("gpu_smu: GFX_IMU_CORE_CTRL = 0x%08x (halted=%d)\n",
+                imu_ctrl, (int)(imu_ctrl & 0x1));
+        if (imu_ctrl != 0xFFFFFFFF && (imu_ctrl & 0x1)) {
+            pr_info("gpu_smu: IMU is halted — unhalting before EnableAllSmuFeatures\n");
+            gpu_smn_wreg(dev, dev->hw.ip.gc_base1 + 0x40b6, imu_ctrl & ~0x1U);
+            /* Wait up to 10s for IMU to signal GFX reset complete
+             * (GFX_IMU_GFX_RESET_CTRL bits [4:0] all set = 0x1f) */
+            ULONG imu_reset = 0;
+            {
+                DWORD imu_start = GetTickCount();
+                DWORD last_imu_s = 0;
+                for (;;) {
+                    imu_reset = gpu_smn_rreg(dev, dev->hw.ip.gc_base1 + 0x40bc);
+                    if ((imu_reset & 0x1f) == 0x1f) {
+                        DWORD e = GetTickCount() - imu_start;
+                        pr_info("gpu_smu: IMU GFX reset complete at %u ms "
+                                "(RESET_CTRL=0x%08x)\n", (unsigned)e, imu_reset);
+                        break;
+                    }
+                    DWORD e = GetTickCount() - imu_start;
+                    if (e >= 10000) break;
+                    DWORD es = e / 1000;
+                    if (es > last_imu_s && (es % 2) == 0) {
+                        pr_info("gpu_smu: IMU wait [%us]: RESET_CTRL=0x%08x\n",
+                                (unsigned)es, imu_reset);
+                        last_imu_s = es;
+                    }
+                    Sleep(50);
+                }
+            }
+            /* Check if IMU woke CPC */
+            ULONG cpc_after_imu = gpu_smn_rreg(dev, dev->hw.ip.gc_base1 + 0x5c11);
+            pr_info("gpu_smu: CPC_PSP_DEBUG after IMU boot = 0x%08x%s\n",
+                    cpc_after_imu,
+                    (cpc_after_imu != 0xffffffff) ? " (CPC ON!)" : " (still off)");
+            if (cpc_after_imu != 0xffffffff) {
+                dev->hw.gfxoff_disabled = TRUE;
+                return 0;
+            }
+            /* IMU booted, retry DisallowGfxOff — should now succeed */
+            pr_info("gpu_smu: retrying DisallowGfxOff after IMU boot...\n");
+            mp1_wreg(dev, regMP1_SMN_C2PMSG_90, 0);
+            mp1_wreg(dev, regMP1_SMN_C2PMSG_82, 0);
+            mp1_wreg(dev, regMP1_SMN_C2PMSG_66, PPSMC_MSG_DisallowGfxOff);
+            {
+                DWORD pIMU_start = GetTickCount();
+                for (;;) {
+                    ULONG resp = mp1_rreg(dev, regMP1_SMN_C2PMSG_90);
+                    if (resp != 0) {
+                        pr_info("gpu_smu: DisallowGfxOff (post-IMU): resp=0x%x at %u ms%s\n",
+                                resp, (unsigned)(GetTickCount() - pIMU_start),
+                                (resp == 1) ? " (OK)" : " (error)");
+                        break;
+                    }
+                    if (GetTickCount() - pIMU_start >= 5000) break;
+                    Sleep(10);
+                }
+            }
+            cpc_after_imu = gpu_smn_rreg(dev, dev->hw.ip.gc_base1 + 0x5c11);
+            pr_info("gpu_smu: CPC_PSP_DEBUG after DisallowGfxOff (post-IMU) = 0x%08x%s\n",
+                    cpc_after_imu,
+                    (cpc_after_imu != 0xffffffff) ? " (CPC ON!)" : " (still off)");
+            if (cpc_after_imu != 0xffffffff) {
+                dev->hw.gfxoff_disabled = TRUE;
+                return 0;
+            }
+        } else if (imu_ctrl == 0xFFFFFFFF) {
+            pr_info("gpu_smu: IMU registers inaccessible (GFXOFF active?)\n");
+        } else {
+            pr_info("gpu_smu: IMU already unhalted (bit 0 = 0)\n");
+        }
+    }
+
+    /* If SMU is wedged, skip GetSmuVersion and go directly to EnableAllSmuFeatures.
+     * A wedged SMU won't respond to GetSmuVersion either, so skip the 5s wait. */
+    BOOLEAN alive = FALSE;
+    ULONG smu_version = 0;
+    if (smu_wedged) {
+        pr_warn("gpu_smu: SMU wedged — skipping GetSmuVersion check\n");
+        goto try_enable_smu_features;
+    }
 
     /* Edge-detection: after FLR, C2PMSG_66 may hold stale VBIOS value
      * (e.g. 0x02 = GetSmuVersion). If we write the same value, SMU won't
@@ -3743,18 +4513,21 @@ int gpu_smu_enable_features(struct WddmLiteDevice *dev)
     mp1_wreg(dev, regMP1_SMN_C2PMSG_82, 0);
     mp1_wreg(dev, regMP1_SMN_C2PMSG_66, PPSMC_MSG_GetSmuVersion);
 
-    BOOLEAN alive = FALSE;
-    ULONG smu_version = 0;
-    for (int i = 0; i < 500; i++) {  /* Up to 5 seconds */
-        ULONG resp = mp1_rreg(dev, regMP1_SMN_C2PMSG_90);
-        if (resp != 0) {
-            alive = TRUE;
-            smu_version = mp1_rreg(dev, regMP1_SMN_C2PMSG_82);
-            pr_info("gpu_smu: SMU is alive! version=0x%08x (resp=%u, %d ms)\n",
-                    smu_version, resp, i * 10);
-            break;
+    {
+        DWORD gsv_start = GetTickCount();
+        for (;;) {
+            ULONG resp = mp1_rreg(dev, regMP1_SMN_C2PMSG_90);
+            if (resp != 0) {
+                alive = TRUE;
+                smu_version = mp1_rreg(dev, regMP1_SMN_C2PMSG_82);
+                pr_info("gpu_smu: SMU is alive! version=0x%08x (resp=%u, %u ms)\n",
+                        smu_version, resp,
+                        (unsigned)(GetTickCount() - gsv_start));
+                break;
+            }
+            if (GetTickCount() - gsv_start >= 5000) break;
+            Sleep(10);
         }
-        Sleep(10);
     }
 
     if (!alive) {
@@ -3811,9 +4584,16 @@ int gpu_smu_enable_features(struct WddmLiteDevice *dev)
          * NOT GetSmuVersion! Sending it would trigger a full GPU reset.
          * Mode1 reset should only be done intentionally via
          * gpu_smu_mode1_reset() in the init sequence. */
-        pr_warn("gpu_smu: SMU not responding on normal mailbox\n");
-
-        return -1;
+        pr_warn("gpu_smu: SMU not responding on normal mailbox — "
+                "will still attempt EnableAllSmuFeatures(FEATURE_PWR_GFX)\n");
+        /* Fall through: try EnableAllSmuFeatures even without GetSmuVersion
+         * response.  The SMU may be in GFXOFF low-power mode where the
+         * normal mailbox is gated, but EnableAllSmuFeatures should wake it.
+         * Skip the SetDriverDramAddr / feature-mask prerequisites — they
+         * also need a responsive mailbox and are not required for the GFX
+         * power-up path (Linux smu_v14_0_2_enable_gfx_features sends
+         * EnableAllSmuFeatures directly without prerequisites). */
+        goto try_enable_smu_features;
     }
 
     /* Send SetDriverDramAddr before EnableAllSmuFeatures.
@@ -3841,24 +4621,101 @@ int gpu_smu_enable_features(struct WddmLiteDevice *dev)
         }
     }
 
-    /* Set allowed feature mask before EnableAllSmuFeatures.
-     * VBIOS sets these masks to tell SMU which features are permitted.
-     * Without this, EnableAllSmuFeatures may have nothing to enable.
-     * Set all bits = allow all features. */
+    /* SetToolsDramAddr: optional tools table, send 0 (not used for compute).
+     * Linux smu_v14_0_set_tool_table_location() sends this as part of
+     * smu_v14_0_init_smc_tables().  SMU firmware may expect it before
+     * UseDefaultPPTable/EnableAllSmuFeatures. */
     {
-        pr_info("gpu_smu: setting allowed feature masks (all bits = 0xFFFFFFFF)...\n");
-        int ret = gpu_smu_send_msg(dev, PPSMC_MSG_SetAllowedFeaturesMaskLow, 0xFFFFFFFF);
-        if (ret != 0) {
+        int ret = gpu_smu_send_msg(dev, PPSMC_MSG_SetToolsDramAddrHigh, 0);
+        if (ret != 0)
+            pr_warn("gpu_smu: SetToolsDramAddrHigh failed\n");
+        ret = gpu_smu_send_msg(dev, PPSMC_MSG_SetToolsDramAddrLow, 0);
+        if (ret != 0)
+            pr_warn("gpu_smu: SetToolsDramAddrLow failed\n");
+        else
+            pr_info("gpu_smu: SetToolsDramAddr OK (tools addr=0)\n");
+    }
+
+    /* UseDefaultPPTable: tell SMU to use its built-in default power play table.
+     * Linux smu_v14_0_upload_pptable_settings() calls this when
+     * use_default_pp_table=true.  Without a pptable (from VBIOS or default),
+     * SMU has no voltage/frequency curves and cannot power up the GFX domain.
+     * EnableAllSmuFeatures WILL HANG if no pptable is loaded.
+     *
+     * We skip the VBIOS pptable extraction path (complex, requires atom decode)
+     * and use UseDefaultPPTable (0x14) as the simpler alternative. */
+    {
+        int ret = gpu_smu_send_msg(dev, PPSMC_MSG_UseDefaultPPTable, 0);
+        if (ret == 0)
+            pr_info("gpu_smu: UseDefaultPPTable OK — SMU using built-in pptable\n");
+        else
+            pr_warn("gpu_smu: UseDefaultPPTable failed (ret=%d) — "
+                    "EnableAllSmuFeatures may still hang\n", ret);
+        /* Re-check CPC after pptable load: occasionally powering the GFX domain
+         * completes as a side effect of pptable initialization */
+        if (dev->hw.ip.gc_base1 != 0) {
+            ULONG cpc_pp = gpu_smn_rreg(dev, dev->hw.ip.gc_base1 + 0x5c11);
+            pr_info("gpu_smu: CPC_PSP_DEBUG after UseDefaultPPTable = 0x%08x%s\n",
+                    cpc_pp, (cpc_pp != 0xffffffff) ? " (GFX UP!)" : "");
+            if (cpc_pp != 0xffffffff) {
+                dev->hw.gfxoff_disabled = TRUE;
+                return 0;
+            }
+        }
+    }
+
+    /* Now try DisallowGfxOff (0x29) with pptable in place.
+     * Previously this returned 0xff (Fail_FitNotSupported) because the pptable
+     * was missing — the SMU couldn't look up the GFXOFF feature entry. */
+    {
+        ULONG cur66 = mp1_rreg(dev, regMP1_SMN_C2PMSG_66);
+        if (cur66 == PPSMC_MSG_DisallowGfxOff) {
+            mp1_wreg(dev, regMP1_SMN_C2PMSG_66, 0);
+            Sleep(1);
+        }
+        mp1_wreg(dev, regMP1_SMN_C2PMSG_90, 0);
+        mp1_wreg(dev, regMP1_SMN_C2PMSG_82, 0);
+        mp1_wreg(dev, regMP1_SMN_C2PMSG_66, PPSMC_MSG_DisallowGfxOff);
+        for (int i = 0; i < 300; i++) {  /* 3s timeout */
+            ULONG resp = mp1_rreg(dev, regMP1_SMN_C2PMSG_90);
+            if (resp != 0) {
+                pr_info("gpu_smu: DisallowGfxOff (post-pptable): resp=0x%x at %d ms%s\n",
+                        resp, i * 10, (resp == 1) ? " (OK)" : " (error)");
+                break;
+            }
+            Sleep(10);
+        }
+        if (dev->hw.ip.gc_base1 != 0) {
+            ULONG cpc_dgfx = gpu_smn_rreg(dev, dev->hw.ip.gc_base1 + 0x5c11);
+            pr_info("gpu_smu: CPC_PSP_DEBUG after DisallowGfxOff (post-pptable) = 0x%08x%s\n",
+                    cpc_dgfx, (cpc_dgfx != 0xffffffff) ? " (GFX UP!)" : "");
+            if (cpc_dgfx != 0xffffffff) {
+                dev->hw.gfxoff_disabled = TRUE;
+                return 0;
+            }
+        }
+    }
+
+    /* Set allowed feature mask before EnableAllSmuFeatures.
+     * Only allow FEATURE_DPM_GFX (bit 2 = 0x00000004).  Wider masks caused
+     * resp=0xfd=PPSMC_Result_Failed — firmware rejects feature bits that don't
+     * have corresponding pptable entries.  With UseDefaultPPTable above, the
+     * default pptable may enable more bits, but start minimal. */
+    {
+        const ULONG low_mask  = 0x00000004;  /* FEATURE_DPM_GFX bit 2 only */
+        const ULONG high_mask = 0x00000000;
+        pr_info("gpu_smu: SetAllowedFeaturesMaskLow = 0x%08x, High = 0x%08x\n",
+                low_mask, high_mask);
+        int ret = gpu_smu_send_msg(dev, PPSMC_MSG_SetAllowedFeaturesMaskLow, low_mask);
+        if (ret != 0)
             pr_warn("gpu_smu: SetAllowedFeaturesMaskLow failed\n");
-        } else {
+        else
             pr_info("gpu_smu: SetAllowedFeaturesMaskLow OK\n");
-        }
-        ret = gpu_smu_send_msg(dev, PPSMC_MSG_SetAllowedFeaturesMaskHigh, 0xFFFFFFFF);
-        if (ret != 0) {
+        ret = gpu_smu_send_msg(dev, PPSMC_MSG_SetAllowedFeaturesMaskHigh, high_mask);
+        if (ret != 0)
             pr_warn("gpu_smu: SetAllowedFeaturesMaskHigh failed\n");
-        } else {
+        else
             pr_info("gpu_smu: SetAllowedFeaturesMaskHigh OK\n");
-        }
     }
 
     /* Query currently enabled SMU features for diagnostics */
@@ -3890,9 +4747,17 @@ int gpu_smu_enable_features(struct WddmLiteDevice *dev)
         }
     }
 
+try_enable_smu_features:
     /* Check if EnableAllSmuFeatures should be skipped.
      * HSAKMT_SKIP_ENABLE_SMU_FEATURES=1 skips this to avoid wedging
-     * the SMU mailbox (the command never responds on VFIO). */
+     * the SMU mailbox (the command never responds on VFIO).
+     * Also skip if SMU is detected as wedged (saves the full timeout wait). */
+    if (smu_wedged) {
+        pr_warn("gpu_smu: SMU wedged — skipping EnableAllSmuFeatures "
+                "(physical power cycle needed to recover SMU mailbox)\n");
+        dev->hw.gfxoff_disabled = TRUE;
+        return 0;
+    }
     {
         char skip_enable[32] = {};
         GetEnvironmentVariableA("HSAKMT_SKIP_ENABLE_SMU_FEATURES",
@@ -3904,14 +4769,24 @@ int gpu_smu_enable_features(struct WddmLiteDevice *dev)
         }
     }
 
-    /* Send EnableAllSmuFeatures with 15s timeout.
-     * On VFIO, the response register never gets set (stays 0) even though
-     * the command DOES work — GC power domain comes alive during the wait.
-     * After timeout, we check if GC registers became accessible.
-     * Do NOT attempt mailbox recovery — the mailbox stays wedged and
-     * sending further commands (even GetSmuVersion) will also hang. */
+    /* Send EnableAllSmuFeatures to trigger RLC AUTOLOAD.
+     *
+     * RLC will not distribute compute firmware to MEC/CPC until SMU sets
+     * the FEATURE_PWR_GFX flag — which only happens after this message.
+     *
+     * Timeout strategy:
+     *   cpc_was_powered=TRUE (VBIOS-preserve): GFX already on, SMU only needs
+     *     to set internal feature flags (no PMIC voltage raise) → fast, 30s max.
+     *   cpc_was_powered=FALSE (Mode1-reset): SMU must physically power up GFX
+     *     via PMIC, may take up to 120s on VFIO without response.
+     *
+     * On VFIO, resp=0 is expected even when the command actually works
+     * (SMU performs the action but doesn't write the response register).
+     * DO NOT check GC registers during this wait in Mode1-reset mode —
+     * at ~80s the GFX domain power transition freezes SMN access. */
     pr_info("gpu_smu: sending EnableAllSmuFeatures(FEATURE_PWR_GFX=4) "
-            "(Linux: smu_v14_0_2_enable_gfx_features)...\n");
+            "(cpc_was_powered=%d, timeout=%ds)...\n",
+            (int)cpc_was_powered, cpc_was_powered ? 30 : 120);
     {
         /* Edge-detection: clear message register if it already holds 0x06 */
         {
@@ -3923,44 +4798,45 @@ int gpu_smu_enable_features(struct WddmLiteDevice *dev)
             }
         }
         mp1_wreg(dev, regMP1_SMN_C2PMSG_90, 0);
-        /* Linux uses FEATURE_PWR_GFX (4) not FEATURE_PWR_ALL (0).
-         * smu_v14_0_2_enable_gfx_features() sends EnableAllSmuFeatures
-         * with param=FEATURE_PWR_GFX to enable only the GFX power domain.
-         * This avoids hanging on VFIO where S5/BACO/SOC are not ready. */
+        /* Linux uses FEATURE_PWR_GFX (4) not FEATURE_PWR_ALL (0). */
         mp1_wreg(dev, regMP1_SMN_C2PMSG_82, FEATURE_PWR_GFX);
         mp1_wreg(dev, regMP1_SMN_C2PMSG_66, PPSMC_MSG_EnableAllSmuFeatures);
 
         BOOLEAN success = FALSE;
-        /* On VFIO, SMU triggers GFX power-up but never writes resp.
-         * DO NOT check GC registers during this wait — at ~80s the GFX
-         * domain enters a power transition that temporarily blocks SMN
-         * access to GC registers (freezes the process). Only poll the
-         * SMU response register (MP1 remains accessible throughout). */
-        for (int i = 0; i < 120000; i++) {
+        DWORD timeout_ms = cpc_was_powered ? 30000 : 120000;
+        DWORD start_tick = GetTickCount();
+        DWORD last_print_s = 0;
+        for (;;) {
             ULONG resp = mp1_rreg(dev, regMP1_SMN_C2PMSG_90);
             if (resp != 0) {
+                DWORD elapsed = GetTickCount() - start_tick;
                 if (resp == 1) {
-                    pr_info("gpu_smu: EnableAllSmuFeatures succeeded! (%d ms)\n", i);
+                    pr_info("gpu_smu: EnableAllSmuFeatures succeeded! (%u ms)\n",
+                            (unsigned)elapsed);
                     success = TRUE;
                 } else {
                     pr_warn("gpu_smu: EnableAllSmuFeatures failed "
-                            "(resp=0x%x, %d ms)\n", resp, i);
+                            "(resp=0x%x, %u ms)\n", resp, (unsigned)elapsed);
                 }
                 break;
             }
-            if (i > 0 && (i % 5000) == 0) {
-                pr_info("gpu_smu: still waiting at %ds...\n", i / 1000);
+            DWORD elapsed = GetTickCount() - start_tick;
+            if (elapsed >= timeout_ms)
+                break;
+            DWORD elapsed_s = elapsed / 1000;
+            if (elapsed_s > last_print_s && (elapsed_s % 5) == 0) {
+                pr_info("gpu_smu: still waiting at %us...\n", (unsigned)elapsed_s);
+                last_print_s = elapsed_s;
             }
-            Sleep(1);
+            Sleep(100);  /* poll every 100 ms — escape overhead makes 1ms wasteful */
         }
         if (!success) {
-            /* On VFIO, timeout is expected — EnableAllSmuFeatures triggers
-             * GFX power-up internally but SMU never writes resp=1.
-             * GC scratch check is SKIPPED here: accessing GC registers
-             * immediately after GFX power-up transition freezes SMN.
-             * AUTOLOAD (triggered after this) will confirm GFX is live. */
-            pr_info("gpu_smu: EnableAllSmuFeatures timed out (120s) — "
-                    "assuming GFX power-up in progress, proceeding to AUTOLOAD\n");
+            DWORD elapsed = GetTickCount() - start_tick;
+            pr_info("gpu_smu: EnableAllSmuFeatures timed out (%u ms) — "
+                    "%s, proceeding to AUTOLOAD\n",
+                    (unsigned)elapsed,
+                    cpc_was_powered ? "GFX was already powered, SMU may have set flags"
+                                    : "assuming GFX power-up in progress");
             ULONG msg_after = mp1_rreg(dev, regMP1_SMN_C2PMSG_66);
             ULONG resp_after = mp1_rreg(dev, regMP1_SMN_C2PMSG_90);
             pr_info("gpu_smu: mailbox state after: msg=0x%x resp=0x%x\n",
