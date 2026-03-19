@@ -86,6 +86,7 @@ private:
     bool                                        m_use_annotations{ false };
 
     std::unordered_map<size_t, pmc_track_info> m_pmc_track_map;
+    std::map<uint32_t, int64_t>                m_unified_memory_fault_counts;
 };
 }  // namespace trace_cache
 }  // namespace rocprofsys

@@ -1439,6 +1439,8 @@ perfetto_processor_t::handle(const kfd_sample& _kfd)
     {
         emit_kfd_event(category::kfd_page_fault{});
 
+        m_unified_memory_fault_counts[_kfd.device_id]++;
+
         if(!unified_memory_fault_rate_track::exists(_kfd.device_id))
         {
             auto track_name =
@@ -1449,7 +1451,7 @@ perfetto_processor_t::handle(const kfd_sample& _kfd)
         }
         TRACE_COUNTER(trait::name<category::unified_memory_fault_rate>::value,
                       unified_memory_fault_rate_track::at(_kfd.device_id, 0), _end_ts,
-                      1.0);
+                      static_cast<double>(m_unified_memory_fault_counts[_kfd.device_id]));
     }
     else if(_category == trait::name<category::kfd_page_migrate>::value)
     {
