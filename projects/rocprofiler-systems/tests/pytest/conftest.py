@@ -1231,26 +1231,29 @@ def _run_cleanup(config: pytest.Config) -> None:
 def _cleanup_temp_patterns() -> list[str]:
     """Return list of rocprofiler-systems temp file patterns to clean up."""
     tmpdir = os.environ.get("ROCPROFSYS_TMPDIR", os.environ.get("TMPDIR", "/tmp"))
-    patterns = [
-        "/tmp/rocprof-sys-*.tmp",
-        "/tmp/rocprofsys-*.tmp",
-        f"{tmpdir}/buffered_storage*.bin",
-        f"{tmpdir}/metadata*.json",
-        # Perfetto temp files
-        "/tmp/perfetto-*.proto",
-        "/tmp/perfetto_trace*.proto",
-        # HSA/ROCm temp files
-        "/tmp/hsa-*.tmp",
-        "/tmp/rocm-*.tmp",
-        "/tmp/hip-*.tmp",
-        # Instrumented binaries that might be left over
-        "/tmp/*.inst",
-        # Causal profiling temp files
-        "/tmp/causal-*.json",
-        "/tmp/experiments-*.coz",
-        # Core dumps (if any)
-        "/tmp/core.*",
-    ]
+    dirs = ["/tmp"]
+    if tmpdir and not tmpdir.startswith("%") and tmpdir != "/tmp":
+        dirs.append(tmpdir)
+
+    patterns = []
+    for d in dirs:
+        patterns.extend(
+            [
+                f"{d}/rocprof-sys-*.tmp",
+                f"{d}/rocprofsys-*.tmp",
+                f"{d}/buffered_storage*.bin",
+                f"{d}/metadata*.json",
+                f"{d}/perfetto-*.proto",
+                f"{d}/perfetto_trace*.proto",
+                f"{d}/hsa-*.tmp",
+                f"{d}/rocm-*.tmp",
+                f"{d}/hip-*.tmp",
+                f"{d}/*.inst",
+                f"{d}/causal-*.json",
+                f"{d}/experiments-*.coz",
+                f"{d}/core.*",
+            ]
+        )
     return patterns
 
 
