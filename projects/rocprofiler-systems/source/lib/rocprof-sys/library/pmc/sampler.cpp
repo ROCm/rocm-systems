@@ -6,10 +6,13 @@
 #include "library/pmc/collectors/gpu/cache_policy.hpp"
 #include "library/pmc/collectors/gpu/collector.hpp"
 #include "library/pmc/collectors/gpu/perfetto_policy.hpp"
-#include "library/pmc/collectors/nic/cache_policy.hpp"
-#include "library/pmc/collectors/nic/collector.hpp"
-#include "library/pmc/collectors/nic/perfetto_policy.hpp"
 #include "library/pmc/device_providers/amd_smi/provider.hpp"
+
+#if defined(ROCPROFSYS_BUILD_AINIC)
+#    include "library/pmc/collectors/nic/cache_policy.hpp"
+#    include "library/pmc/collectors/nic/collector.hpp"
+#    include "library/pmc/collectors/nic/perfetto_policy.hpp"
+#endif
 
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"
@@ -65,23 +68,29 @@ struct gpu_production_config
     using CacheApi    = collectors::gpu::cache_policy;
 };
 
+#if defined(ROCPROFSYS_BUILD_AINIC)
 struct nic_production_config
 {
     using SettingsApi = collectors::settings_policy;
     using PerfettoApi = collectors::nic::perfetto_policy;
     using CacheApi    = collectors::nic::cache_policy;
 };
+#endif
 
 using provider_factory_t =
     device_providers::amd_smi::provider_factory<drivers::amd_smi::driver_factory>;
 using provider_t      = provider_factory_t::provider_t;
 using gpu_collector_t = collectors::gpu::collector<provider_t, gpu_production_config>;
+#if defined(ROCPROFSYS_BUILD_AINIC)
 using nic_collector_t = collectors::nic::collector<provider_t, nic_production_config>;
+#endif
 
 std::shared_ptr<provider_t> g_device_provider;
 
 std::unique_ptr<gpu_collector_t> g_gpu_collector;
+#if defined(ROCPROFSYS_BUILD_AINIC)
 std::unique_ptr<nic_collector_t> g_nic_collector;
+#endif
 
 std::vector<collectors::collector_slice> g_collector_slices;
 
@@ -140,11 +149,15 @@ setup()
         g_device_provider = provider_factory_t::create();
 
         g_gpu_collector = std::make_unique<gpu_collector_t>(g_device_provider);
+#if defined(ROCPROFSYS_BUILD_AINIC)
         g_nic_collector = std::make_unique<nic_collector_t>(g_device_provider);
+#endif
 
         g_collector_slices.clear();
         g_collector_slices.emplace_back(*g_gpu_collector);
+#if defined(ROCPROFSYS_BUILD_AINIC)
         g_collector_slices.emplace_back(*g_nic_collector);
+#endif
 
         for(auto& slice : g_collector_slices)
         {

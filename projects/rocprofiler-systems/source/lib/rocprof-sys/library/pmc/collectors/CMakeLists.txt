@@ -7,7 +7,16 @@
 add_subdirectory(common)
 add_subdirectory(base)
 add_subdirectory(gpu)
-add_subdirectory(nic)
+
+# Conditionally compile NIC collector based on AINIC support
+# ROCPROFSYS_BUILD_AINIC is set in cmake/Packages.cmake based on:
+# - ROCPROFSYS_USE_AINIC option being ON
+# - AMD SMI version >= 26.3
+if(ROCPROFSYS_BUILD_AINIC)
+    add_subdirectory(nic)
+else()
+    set(pmc_nic_sources "")
+endif()
 
 # Collect all sources
 set(pmc_collectors_sources

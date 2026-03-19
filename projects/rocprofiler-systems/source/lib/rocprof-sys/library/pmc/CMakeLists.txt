@@ -25,6 +25,14 @@ set(pmc_sources
 # Create PMC library object
 add_library(rocprofiler-systems-pmc-library OBJECT ${pmc_sources})
 
+# Add AINIC support definition if available
+if(ROCPROFSYS_BUILD_AINIC)
+    target_compile_definitions(
+        rocprofiler-systems-pmc-library
+        PRIVATE ROCPROFSYS_BUILD_AINIC=1
+    )
+endif()
+
 target_link_libraries(
     rocprofiler-systems-pmc-library
     PRIVATE

@@ -298,24 +298,25 @@ struct perfetto_policy
      *
      * @param enabled_metrics Metrics that were enabled during collection
      */
-    static void post_process(pmc::collectors::gpu::enabled_metrics enabled_metrics)
+    static void post_process(pmc::collectors::gpu::enabled_metrics enabled_metrics_cfg)
     {
         for(const auto& [device_index, data] : get_perfetto_data())
         {
-            post_process_device(device_index, enabled_metrics, data.supported_metrics);
+            post_process_device(device_index, enabled_metrics_cfg,
+                                data.supported_metrics);
         }
     }
 
 private:
     static void post_process_device(
-        size_t device_index, pmc::collectors::gpu::enabled_metrics enabled_metrics,
+        size_t device_index, pmc::collectors::gpu::enabled_metrics enabled_metrics_cfg,
         pmc::collectors::gpu::enabled_metrics supported_metrics)
     {
         auto& samples = *get_perfetto_data()[device_index].samples;
 
         LOG_DEBUG("[GPU perfetto_policy] Post-processing {} PMC samples for device [{}], "
                   "enabled=0x{:x}, supported=0x{:x}",
-                  samples.size(), device_index, enabled_metrics.value,
+                  samples.size(), device_index, enabled_metrics_cfg.value,
                   supported_metrics.value);
 
         const auto& thread_info = thread_info::get(0, InternalTID);
@@ -324,10 +325,9 @@ private:
             return;
         }
 
-        pmc::collectors::gpu::enabled_metrics effective_metrics = {
-            .value =
-                static_cast<uint32_t>(enabled_metrics.value & supported_metrics.value)
-        };
+        pmc::collectors::gpu::enabled_metrics effective_metrics;
+        effective_metrics.value =
+            static_cast<uint32_t>(enabled_metrics_cfg.value & supported_metrics.value);
 
         if(effective_metrics.value == 0)
         {

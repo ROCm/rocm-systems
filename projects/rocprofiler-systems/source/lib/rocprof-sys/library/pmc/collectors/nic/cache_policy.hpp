@@ -63,7 +63,8 @@ struct cache_policy
      * @param nic_id NIC device identifier
      * @param nic_name NIC device name (e.g., "enp226s0")
      */
-    static void initialize_pmc_metadata(size_t nic_id, const std::string& nic_name)
+    static void initialize_pmc_metadata(size_t                              nic_id,
+                                        [[maybe_unused]] const std::string& nic_name)
     {
         constexpr size_t      EVENT_CODE       = 0;
         constexpr size_t      INSTANCE_ID      = 0;
@@ -149,8 +150,8 @@ struct cache_policy
                              const enabled_metrics& supported_metrics,
                              const metrics& metric_values, unsigned long timestamp)
     {
-        enabled_metrics _enabled_metrics = { .value = enabled_metrics_cfg.value &
-                                                      supported_metrics.value };
+        enabled_metrics _enabled_metrics;
+        _enabled_metrics.value = enabled_metrics_cfg.value & supported_metrics.value;
 
         trace_cache::get_buffer_storage().store(
             trace_cache::ainic_sample{ _enabled_metrics, static_cast<uint32_t>(device_id),
