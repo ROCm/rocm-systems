@@ -50,6 +50,7 @@
 #include <memory>
 #include <tuple>
 #include <utility>
+#include <atomic>
 #include <thread>
 #include <shared_mutex>
 #if defined(__linux__)
@@ -583,6 +584,8 @@ class Runtime {
     AsyncEventsControl(AsyncEventsInfo *asyncInfo);
     void Start();
     void Shutdown();
+    bool RequestWake();
+    void ResetWake();
 
     hsa_signal_t wake;
     bool exit;
@@ -590,12 +593,14 @@ class Runtime {
     private:
     AsyncEventsInfo* info_;
     os::Thread thread_;
+    std::atomic<bool> wake_pending_;
  };
 
   struct AsyncEvents {
     void PushBack(hsa_signal_t signal, hsa_signal_condition_t cond,
                   hsa_signal_value_t value, hsa_amd_signal_handler handler,
                   void* arg);
+    void Reserve(size_t size);
 
     void CopyIndex(size_t dst, size_t src);
 

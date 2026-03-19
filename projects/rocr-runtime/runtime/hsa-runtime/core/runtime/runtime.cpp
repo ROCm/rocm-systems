@@ -842,8 +842,9 @@ hsa_status_t Runtime::SetAsyncSignalHandler(hsa_signal_t signal,
   struct AsyncEventsInfo* asyncInfo = exception ? (*asyncExceptions_).get() : (*asyncSignals_).get();
 
   asyncInfo->new_events.PushBack(signal, cond, value, handler, arg);
-
-  hsa_signal_handle(asyncInfo->control.wake)->StoreRelease(1);
+  if (asyncInfo->control.RequestWake()) {
+    hsa_signal_handle(asyncInfo->control.wake)->StoreRelease(1);
+  }
 
   return HSA_STATUS_SUCCESS;
 }
@@ -1896,6 +1897,7 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
     // Reset the control signal
     if (index == 0) {
       hsa_signal_handle(async_events_control_.wake)->StoreRelaxed(0);
+      async_events_control_.ResetWake();
     } else if (index != -1) {
       if (wait_any) {
         processEvent(index, value[0], wait_any);
@@ -1930,6 +1932,7 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
           if (CheckSignalCondition(value[0], async_events_.cond_[i], async_events_.value_[i])) {
             if (i == 0) {
               hsa_signal_handle(async_events_control_.wake)->StoreRelaxed(0);
+              async_events_control_.ResetWake();
             } else {
               if (!processEvent(i, value[0], wait_any)) {
                 i--;
@@ -1974,6 +1977,9 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
     std::vector<func_arg_t> functions;
     std::vector<AsyncEventItem> new_events;
     new_async_events_.GetAllEvents(new_events);
+    if (!new_events.empty()) {
+      async_events_.Reserve(async_events_.Size() + new_events.size());
+    }
     for (const auto& event : new_events) {
       if (event.signal.handle == 0) {
         functions.push_back(func_arg_t((void (*)(void*))event.handler, event.arg));
@@ -2392,11 +2398,19 @@ Runtime::AsyncEventsInfo::~AsyncEventsInfo() {
 }
 
 Runtime::AsyncEventsControl::AsyncEventsControl(AsyncEventsInfo *asyncInfo)
-  : info_(asyncInfo), exit(false) {
+  : exit(false), info_(asyncInfo), wake_pending_(false) {
 
   auto err = HSA::hsa_signal_create(0, 0, NULL, &wake);
   if (err != HSA_STATUS_SUCCESS)
     throw AMD::hsa_exception(HSA_STATUS_ERROR, "Failed to allocate async handler signal");
+}
+
+bool Runtime::AsyncEventsControl::RequestWake() {
+  return !wake_pending_.exchange(true, std::memory_order_acq_rel);
+}
+
+void Runtime::AsyncEventsControl::ResetWake() {
+  wake_pending_.store(false, std::memory_order_release);
 }
 
 void Runtime::AsyncEventsControl::Start() {
@@ -2931,6 +2945,14 @@ void Runtime::AsyncEvents::PushBack(hsa_signal_t signal,
   value_.push_back(value);
   handler_.push_back(handler);
   arg_.push_back(arg);
+}
+
+void Runtime::AsyncEvents::Reserve(size_t size) {
+  signal_.reserve(size);
+  cond_.reserve(size);
+  value_.reserve(size);
+  handler_.reserve(size);
+  arg_.reserve(size);
 }
 
 void Runtime::AsyncEvents::CopyIndex(size_t dst, size_t src) {
