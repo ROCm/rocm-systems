@@ -85,6 +85,7 @@ typedef ComgrUniqueHandle<amd_comgr_data_t> ComgrDataUniqueHandle;
 
 namespace helpers {
 enum DataKind {
+  kNone = 0x0,
   kLLVM = 0x1,
   kSPIRV = 0x2
 };
@@ -197,7 +198,7 @@ class RTCProgram {
   std::string isa_;
   std::string build_log_;
   std::vector<char> executable_;
-  helpers::DataKind bc_type_;
+  helpers::DataKind bc_type_{helpers::DataKind::kNone};
 
   hip::comgr_helper::ComgrDataSetUniqueHandle exec_input_;
 };

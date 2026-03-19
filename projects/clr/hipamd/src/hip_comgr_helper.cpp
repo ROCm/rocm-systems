@@ -347,6 +347,7 @@ bool compileToBitCode(const comgr_helper::ComgrDataSetUniqueHandle& compileInput
   comgr_helper::ComgrActionInfoUniqueHandle compileAction;
   amd_comgr_action_kind_t action_kind = AMD_COMGR_ACTION_COMPILE_SOURCE_WITH_DEVICE_LIBS_TO_BC;
   amd_comgr_data_kind_t data_kind = AMD_COMGR_DATA_KIND_BC;
+  // if BC type is SPIRV, use the new action and data kind
   if (bc_type == kSPIRV) {
     action_kind = AMD_COMGR_ACTION_COMPILE_SOURCE_TO_SPIRV;
     data_kind = AMD_COMGR_DATA_KIND_SPIRV;

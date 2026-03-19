@@ -160,6 +160,8 @@ bool RTCCompileProgram::transformOptions(std::vector<std::string>& compile_optio
       res != compile_options.end()) {
     auto isaName = getValueOf(*res);
     isa_ = "amdgcn-amd-amdhsa--" + isaName;
+    bc_type_ = hip::helpers::kLLVM;
+    // check if spirv output is requested
     if (isaName == "amdgcnspirv") {
       isa_ = "spir64-amd-amdhsa--" + isaName;
       bc_type_ = hip::helpers::kSPIRV;
@@ -179,6 +181,11 @@ bool RTCCompileProgram::compile(const std::vector<std::string>& options, bool fg
 
   fgpu_rdc_ = fgpu_rdc;
 
+  if (bc_type_ == hip::helpers::kSPIRV && fgpu_rdc_) {
+    LogError("Error in hiprtc: SPIRV output is not supported with fgpu-rdc");
+    return false;
+  }
+
   // Append compile options
   std::vector<std::string> compileOpts(compile_options_);
   compileOpts.reserve(compile_options_.size() + options.size() + 2);
@@ -188,11 +195,11 @@ bool RTCCompileProgram::compile(const std::vector<std::string>& options, bool fg
     LogError("Error in hiprtc: unable to transform options");
     return false;
   }
-
-  if (fgpu_rdc_) {
+  if (bc_type_ == hip::helpers::kSPIRV || fgpu_rdc_) {
+    // Generate SPIRV or Bitcode binary
     if (!hip::helpers::compileToBitCode(compile_input_, isa_, compileOpts, build_log_,
                                         LLVMBitcode_, bc_type_)) {
-      LogError("Error in hiprtc: unable to compile source to bitcode");
+      LogError("Error in hiprtc: unable to compile source to SPIRV or Bitcode binary");
       return false;
     }
   } else {
@@ -263,7 +270,7 @@ bool RTCCompileProgram::getMangledName(const char* name_expression, const char**
 }
 
 bool RTCCompileProgram::GetBitcode(char* bitcode) {
-  if (!fgpu_rdc_ || LLVMBitcode_.size() <= 0) {
+  if (LLVMBitcode_.size() <= 0 || bc_type_ == hip::helpers::kNone) {
     return false;
   }
 
@@ -272,7 +279,7 @@ bool RTCCompileProgram::GetBitcode(char* bitcode) {
 }
 
 bool RTCCompileProgram::GetBitcodeSize(size_t* bitcode_size) {
-  if (!fgpu_rdc_ || LLVMBitcode_.size() <= 0) {
+  if (LLVMBitcode_.size() <= 0 || bc_type_ == hip::helpers::kNone) {
     return false;
   }
 

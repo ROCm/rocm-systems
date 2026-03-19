@@ -217,9 +217,7 @@ rtc:
     <<: *level_2
   Unit_hiprtc_spirv_compilation:
     <<: *level_2
-    tags: [compile]
-    disabled: [nvidia_linux]
+    disabled: [amd_windows, amd_wsl]
   Unit_hiprtc_spirv_linker:
     <<: *level_2
-    tags: [link]
-    disabled: [nvidia_linux]
+    disabled: [amd_windows, amd_wsl]
