@@ -31,6 +31,7 @@ static inline float GetChromaWidthFactor(rocDecVideoSurfaceFormat surface_format
     case rocDecVideoSurfaceFormat_P016:
     case rocDecVideoSurfaceFormat_YUV444:
     case rocDecVideoSurfaceFormat_YUV444_16Bit:
+    default:
         factor = 1.0;
         break;
     case rocDecVideoSurfaceFormat_YUV420:

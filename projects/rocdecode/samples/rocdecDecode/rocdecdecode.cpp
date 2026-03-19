@@ -89,6 +89,8 @@ static inline float GetChromaHeightFactor(rocDecVideoSurfaceFormat surface_forma
     case rocDecVideoSurfaceFormat_YUV444_16Bit:
         factor = 1.0;
         break;
+    default:
+        break;
     }
 
     return factor;
@@ -119,6 +121,8 @@ static inline float GetChromaWidthFactor(rocDecVideoSurfaceFormat surface_format
     case rocDecVideoSurfaceFormat_YUV422:
     case rocDecVideoSurfaceFormat_YUV422_16Bit:
         factor = 0.5;
+        break;
+    default:
         break;
     }
     return factor;
@@ -164,7 +168,7 @@ struct DecoderInfo {
     OutputSurfaceMemoryType mem_type;
     rocDecVideoSurfaceFormat surf_format;
     bool output_format_override;  // true: user set output surface format; false: output surface format is determined by the coded stream
-    rocDecVideoSurfaceFormat video_chroma_format;
+    rocDecVideoChromaFormat video_chroma_format;
     uint32_t coded_width, coded_height;
     uint32_t bytes_per_pixel;
     bool is_decoder_reconfigured;
@@ -172,7 +176,7 @@ struct DecoderInfo {
     FILE *fp_out;
     DecoderInfo() : dec_device_id(0), backend(DECODER_BACKEND_DEVICE), decoder(nullptr), bit_depth(8), dump_decoded_frames(0), mem_type{OUT_SURFACE_MEM_DEV_INTERNAL},
                     surf_format{rocDecVideoSurfaceFormat_NV12}, output_format_override{false},
-                    video_chroma_format{rocDecVideoSurfaceFormat_NV12},
+                    video_chroma_format{rocDecVideoChromaFormat_420},
                     is_decoder_reconfigured{false}, fp_out{nullptr} {}
 };
 
@@ -323,7 +327,7 @@ std::vector<std::vector<uint8_t>> read_frames(std::vector<std::string>& names) {
             std::cerr << "Error opening " << name << " for reading." << std::endl;
             std::abort();
         }
-        std::cout << "Reading " << name << " for reading." << std::endl;
+        //std::cout << "Reading " << name << " for reading." << std::endl;
         // Determine the file size
         inputFile.seekg(0, std::ios::end);
         std::streamsize fileSize = inputFile.tellg();
@@ -363,8 +367,21 @@ void create_decoder(DecoderInfo& dec_info) {
     // video dimensions ( width, height, max_width, max_height), num_decode_surfaces, and bit_depth_minus_8 are hardcoded here
     // this will get changed in reconfigure when the sequence header is parsed from the stream to detect the actual video parameters
     create_info.chroma_format = rocDecVideoChromaFormat_420;
-    create_info.output_format = rocDecVideoSurfaceFormat_NV12;
-    create_info.bit_depth_minus_8 = 0;
+    if (dec_info.output_format_override) {
+        create_info.output_format = dec_info.surf_format;
+        if (create_info.output_format == rocDecVideoSurfaceFormat_P016) {
+            create_info.bit_depth_minus_8 = 2;
+        } else {
+            create_info.bit_depth_minus_8 = 0;
+        }
+    } else {
+        // Default setting
+        create_info.output_format = rocDecVideoSurfaceFormat_Native;
+        create_info.bit_depth_minus_8 = 0;
+        dec_info.surf_format = create_info.output_format;
+        dec_info.bit_depth = create_info.bit_depth_minus_8 + 8;
+        dec_info.bytes_per_pixel = (dec_info.bit_depth + 7) / 8;
+    }
     create_info.num_output_surfaces = 1;
     CHECK(rocDecCreateDecoder(&dec_info.decoder, &create_info));
 }
@@ -488,6 +505,8 @@ int ROCDECAPI handle_video_sequence(void* user_data, RocdecVideoFormat* format) 
                 p_dec_info->bytes_per_pixel = 2;
                 p_dec_info->bit_depth = bitdepth_minus_8 + 8;
                 break;
+            default:
+                break;
         }
     } else {
         rocDecVideoChromaFormat video_chroma_format = format->chroma_format;
@@ -507,7 +526,6 @@ int ROCDECAPI handle_video_sequence(void* user_data, RocdecVideoFormat* format) 
     reconfig_params.width = format->coded_width;
     reconfig_params.height = format->coded_height;
     reconfig_params.bit_depth_minus_8 = bitdepth_minus_8;
-    reconfig_params.output_format = p_dec_info->surf_format;
     reconfig_params.num_decode_surfaces = format->min_num_decode_surfaces;
     reconfig_params.target_width = target_width;
     reconfig_params.target_height = target_height;
@@ -632,8 +650,7 @@ void ShowHelpAndExit(const char *option = NULL) {
     << "-c codec (0 : HEVC, 1 : H264, 2: AV1, 4: VP9, 5: VP8 ); optional; default: 0" << std::endl
     << "-n Number of iteration - specify the number of iterations for performance evaluation; optional; default: 1" << std::endl
     << "-f Number of decoded frames - specify the number of pictures to be decoded; optional" << std::endl
-    << "-o_format Output surface format; optional; default: auto-detected from stream"
-    << " [NV12, P016, YUV444, YUV444_16Bit, YUV422, YUV422_16Bit, YUV420, YUV420_16Bit]" << std::endl
+    << "-o_format Output surface format; optional; default: auto-detected from stream, [NV12, P016]" << std::endl
     << "-m output_surface_memory_type - decoded surface memory; optional; default - 0"
     << " [0 : OUT_SURFACE_MEM_DEV_INTERNAL/ 1 : OUT_SURFACE_MEM_DEV_COPIED/ 2 : OUT_SURFACE_MEM_HOST_COPIED/ 3 : OUT_SURFACE_MEM_NOT_MAPPED]" << std::endl;
     exit(0);
@@ -675,12 +692,14 @@ bool compareFilenames(const std::string& a, const std::string& b) {
 static inline bool ParseOutputFormat(const char *str, rocDecVideoSurfaceFormat *surface_format) {
     if (!strcmp(str, "NV12"))           { *surface_format = rocDecVideoSurfaceFormat_NV12; return true; }
     if (!strcmp(str, "P016"))           { *surface_format = rocDecVideoSurfaceFormat_P016; return true; }
+    #if 0
     if (!strcmp(str, "YUV444"))         { *surface_format = rocDecVideoSurfaceFormat_YUV444; return true; }
     if (!strcmp(str, "YUV444_16Bit"))   { *surface_format = rocDecVideoSurfaceFormat_YUV444_16Bit; return true; }
     if (!strcmp(str, "YUV422"))         { *surface_format = rocDecVideoSurfaceFormat_YUV422; return true; }
     if (!strcmp(str, "YUV422_16Bit"))   { *surface_format = rocDecVideoSurfaceFormat_YUV422_16Bit; return true; }
     if (!strcmp(str, "YUV420"))         { *surface_format = rocDecVideoSurfaceFormat_YUV420; return true; }
     if (!strcmp(str, "YUV420_16Bit"))   { *surface_format = rocDecVideoSurfaceFormat_YUV420_16Bit; return true; }
+    #endif
     return false; // unrecognised
 }
 
@@ -734,8 +753,6 @@ int main(int argc, char** argv) {
             } else {
                 input_file_names.push_back(input_file_path);
             }
-        
-            std::cout << "Read " << input_file_names.size() << " frames from disk." << std::endl;
             continue;
         }
         if (!strcmp(argv[i], "-o")) {
@@ -815,6 +832,7 @@ int main(int argc, char** argv) {
         input_file_names.resize(num_decoded_frames);
     }
     auto input_frames = read_frames(input_file_names);
+    std::cout << "Read " << input_file_names.size() << " frames from disk." << std::endl;
     auto start = std::chrono::high_resolution_clock::now();
     for (int i = 0; i < num_iterations; i++) {
         decode_frames(dec_info, input_frames);
