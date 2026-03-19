@@ -210,7 +210,8 @@ trailing_zeroes_count (Integral x)
   return bit_count (v);
 }
 
-#if defined __has_builtin && __has_builtin(__builtin_ctzll)
+#if defined(__has_builtin)
+#if __has_builtin(__builtin_ctzll)
 template <>
 constexpr int
 trailing_zeroes_count<unsigned long long> (unsigned long long x)
@@ -219,7 +220,7 @@ trailing_zeroes_count<unsigned long long> (unsigned long long x)
 }
 #endif
 
-#if defined __has_builtin && __has_builtin(__builtin_ctzl)
+#if __has_builtin(__builtin_ctzl)
 template <>
 constexpr int
 trailing_zeroes_count<unsigned long> (unsigned long x)
@@ -228,7 +229,7 @@ trailing_zeroes_count<unsigned long> (unsigned long x)
 }
 #endif
 
-#if defined __has_builtin && __has_builtin(__builtin_ctz)
+#if __has_builtin(__builtin_ctz)
 template <>
 constexpr int
 trailing_zeroes_count<unsigned int> (unsigned int x)
@@ -236,6 +237,7 @@ trailing_zeroes_count<unsigned int> (unsigned int x)
   return __builtin_ctz (x);
 }
 #endif
+#endif /* defined(__has_builtin) */
 
 template <typename Val, typename Width>
 constexpr auto
