@@ -22,8 +22,16 @@
 #include "logging.h"
 #include "os_driver.h"
 
-#include <ntstatus.h>
+/* Make sure we use the STATUS_XXX constants from ntstatus.h.  Some of
+   the constants we use (but not all) are defined in winnt.h too, but
+   defined as DWORD (aka 'unsigned long'), while ntstatus.h defines
+   all STATUS constants as NTSTATUS (aka 'long').  */
+#define WIN32_NO_STATUS
 #include <windows.h>
+#undef WIN32_NO_STATUS
+#include <ntstatus.h>
+/* Needed for the NTSTATUS typedef.  */
+#include <winternl.h>
 
 #include <d3dkmthk.h>
 
