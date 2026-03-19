@@ -4746,28 +4746,87 @@ int gpu_smu_enable_features(struct WddmLiteDevice *dev)
             pr_info("gpu_smu: SetToolsDramAddr OK (tools addr=0)\n");
     }
 
-    /* PPTable initialization.
+    /* PPTable and feature initialization.
      *
-     * UseDefaultPPTable (0x14) tells the SMU to activate its built-in pptable.
-     * The Linux driver does a combo pptable round-trip instead, but:
-     *   - TransferTableSmu2Dram(COMBO=15) fails (resp=0xFF) on our firmware
-     *   - TransferTableDram2Smu(0) fails (pptable data uninitialized)
-     * UseDefaultPPTable is the simplest path that works. */
+     * Match the Linux driver's full smu_smc_hw_setup() sequence:
+     *   DramLogSetDramAddr → UseDefaultPPTable → TransferTable round-trip →
+     *   RunDcBtc → SetAllowedFeaturesMask → EnableAllSmuFeatures */
     {
+        pr_info("gpu_smu: === PPTable initialization ===\n");
+        int ret;
+
+        /* DramLogSetDramAddr — the Linux driver (smu_notify_memory_pool_location)
+         * sends this to set up a DRAM logging buffer. Place it at VRAM+10MB. */
+        {
+            ULONG fb_base_reg = mmhub_rreg(dev, regMMMC_VM_FB_LOCATION_BASE);
+            ULONGLONG vram_mc_base = (ULONGLONG)fb_base_reg << 24;
+            ULONGLONG log_addr = vram_mc_base + 0xA00000;  /* 10MB offset */
+            ULONG log_hi = (ULONG)(log_addr >> 32);
+            ULONG log_lo = (ULONG)(log_addr & 0xFFFFFFFF);
+            pr_info("gpu_smu: DramLogSetDramAddr = 0x%08x_%08x\n", log_hi, log_lo);
+            gpu_smu_send_msg(dev, 0x21, log_hi);  /* DramLogSetDramAddrHigh */
+            gpu_smu_send_msg(dev, 0x22, log_lo);  /* DramLogSetDramAddrLow */
+            gpu_smu_send_msg(dev, 0x23, 0x4000);  /* DramLogSetDramSize = 16KB */
+        }
+
+        /* UseDefaultPPTable */
         pr_info("gpu_smu: UseDefaultPPTable...\n");
-        int ret = gpu_smu_send_msg(dev, PPSMC_MSG_UseDefaultPPTable, 0);
+        ret = gpu_smu_send_msg(dev, PPSMC_MSG_UseDefaultPPTable, 0);
         if (ret == 0)
             pr_info("gpu_smu: UseDefaultPPTable OK\n");
         else
             pr_warn("gpu_smu: UseDefaultPPTable failed\n");
 
-        /* RunDcBtc — DC Built-in Test Command */
-        pr_info("gpu_smu: RunDcBtc...\n");
+        /* TransferTable round-trip with HDP flush between read and write.
+         * Smu2Dram writes via GPU DMA → VRAM. Dram2Smu reads via GPU DMA ← VRAM.
+         * An HDP flush may be needed to make the written data visible to the
+         * DMA read path (Linux does amdgpu_asic_flush_hdp before Dram2Smu). */
+        pr_info("gpu_smu: TransferTableSmu2Dram(0)...\n");
+        ret = gpu_smu_send_msg(dev, PPSMC_MSG_TransferTableSmu2Dram, 0);
+        if (ret == 0) {
+            pr_info("gpu_smu: Smu2Dram(0) OK — flushing HDP + trying Dram2Smu...\n");
+            gpu_hdp_flush(dev);
+            Sleep(10);
+            ret = gpu_smu_send_msg(dev, PPSMC_MSG_TransferTableDram2Smu, 0);
+            if (ret == 0) {
+                pr_info("gpu_smu: Dram2Smu(0) OK — pptable registered!\n");
+            } else {
+                pr_warn("gpu_smu: Dram2Smu(0) failed after HDP flush\n");
+                /* Try table_id=1 (WATERMARKS), might be smaller/simpler */
+                gpu_smu_send_msg(dev, PPSMC_MSG_TransferTableSmu2Dram, 1);
+                gpu_hdp_flush(dev);
+                ret = gpu_smu_send_msg(dev, PPSMC_MSG_TransferTableDram2Smu, 1);
+                pr_info("gpu_smu: Dram2Smu(1) %s\n", ret == 0 ? "OK" : "failed");
+
+                /* Try the "WithAddr" variants (msg 0x52/0x53) which take
+                 * an explicit address parameter instead of using SetDriverDramAddr */
+                {
+                    ULONG fb_base_reg = mmhub_rreg(dev, regMMMC_VM_FB_LOCATION_BASE);
+                    ULONGLONG vram_mc = (ULONGLONG)fb_base_reg << 24;
+                    ULONGLONG buf_addr = vram_mc + 0x900000;
+                    pr_info("gpu_smu: trying TransferTableSmu2DramWithAddr "
+                            "(msg=0x52, addr=0x%llx)...\n",
+                            (unsigned long long)buf_addr);
+                    /* msg 0x50: SetDriverDramAddr (single message variant) */
+                    gpu_smu_send_msg(dev, 0x50, (ULONG)(buf_addr >> 20));
+                    /* msg 0x52: TransferTableSmu2DramWithAddr */
+                    ret = gpu_smu_send_msg(dev, 0x52, 0);
+                    pr_info("gpu_smu: Smu2DramWithAddr(0x52) %s\n",
+                            ret == 0 ? "OK" : "failed");
+                    if (ret == 0) {
+                        gpu_hdp_flush(dev);
+                        /* msg 0x53: TransferTableDram2SmuWithAddr */
+                        ret = gpu_smu_send_msg(dev, 0x53, 0);
+                        pr_info("gpu_smu: Dram2SmuWithAddr(0x53) %s\n",
+                                ret == 0 ? "OK" : "failed");
+                    }
+                }
+            }
+        }
+
+        /* RunDcBtc */
         ret = gpu_smu_send_msg(dev, PPSMC_MSG_RunDcBtc, 0);
-        if (ret == 0)
-            pr_info("gpu_smu: RunDcBtc OK\n");
-        else
-            pr_warn("gpu_smu: RunDcBtc failed — continuing\n");
+        pr_info("gpu_smu: RunDcBtc %s\n", ret == 0 ? "OK" : "failed");
     }
 
     /* Now try DisallowGfxOff (0x29) with pptable in place.
@@ -4904,17 +4963,63 @@ try_enable_smu_features:
     pr_info("gpu_smu: sending EnableAllSmuFeatures(param=0, ALL features) "
             "(timeout=120s)...\n");
     {
-        /* Edge-detection: clear message register if it already holds 0x06 */
+        /* First try EnableSmuFeaturesLow/High for individual feature groups.
+         * This avoids the all-or-nothing hang of EnableAllSmuFeatures.
+         * Try each feature bit individually (0-31 low, 0-31 high) with
+         * a short timeout — features that need PMIC will fail quickly. */
+        pr_info("gpu_smu: === Trying individual EnableSmuFeatures ===\n");
+        {
+            ULONG enabled_lo = 0, enabled_hi = 0;
+            for (int bit = 0; bit < 32; bit++) {
+                ULONG mask = 1U << bit;
+                int r = gpu_smu_send_msg(dev, PPSMC_MSG_EnableSmuFeaturesLow, mask);
+                if (r == 0) {
+                    enabled_lo |= mask;
+                }
+            }
+            for (int bit = 0; bit < 32; bit++) {
+                ULONG mask = 1U << bit;
+                int r = gpu_smu_send_msg(dev, PPSMC_MSG_EnableSmuFeaturesHigh, mask);
+                if (r == 0) {
+                    enabled_hi |= mask;
+                }
+            }
+            pr_info("gpu_smu: individual features enabled: LOW=0x%08x HIGH=0x%08x\n",
+                    enabled_lo, enabled_hi);
+
+            /* Check what's actually running now */
+            gpu_smu_send_msg(dev, PPSMC_MSG_GetRunningSmuFeaturesLow, 0);
+            ULONG run_lo = mp1_rreg(dev, regMP1_SMN_C2PMSG_82);
+            gpu_smu_send_msg(dev, PPSMC_MSG_GetRunningSmuFeaturesHigh, 0);
+            ULONG run_hi = mp1_rreg(dev, regMP1_SMN_C2PMSG_82);
+            pr_info("gpu_smu: running features after individual enable: "
+                    "LOW=0x%08x HIGH=0x%08x\n", run_lo, run_hi);
+
+            /* Check CPC_PSP_DEBUG — did GFX power up? */
+            if (dev->hw.ip.gc_base1 != 0) {
+                ULONG cpc = gpu_smn_rreg(dev, dev->hw.ip.gc_base1 + 0x5c11);
+                pr_info("gpu_smu: CPC_PSP_DEBUG after individual features = 0x%08x%s\n",
+                        cpc, (cpc != 0xffffffff) ? " (GFX POWERED UP!)" : " (still off)");
+                if (cpc != 0xffffffff) {
+                    pr_info("gpu_smu: GFX powered up via individual features!\n");
+                    dev->hw.gfxoff_disabled = TRUE;
+                    /* Skip EnableAllSmuFeatures — already working */
+                    goto skip_enable_all;
+                }
+            }
+        }
+
+        /* Fallback: EnableAllSmuFeatures(param=0) with 120s timeout */
+        pr_info("gpu_smu: individual features didn't power GFX — "
+                "trying EnableAllSmuFeatures(param=0)...\n");
         {
             ULONG cur = mp1_rreg(dev, regMP1_SMN_C2PMSG_66);
             if (cur == PPSMC_MSG_EnableAllSmuFeatures) {
-                pr_info("gpu_smu: C2PMSG_66 already 0x06, clearing for edge\n");
                 mp1_wreg(dev, regMP1_SMN_C2PMSG_66, 0);
                 Sleep(1);
             }
         }
         mp1_wreg_direct(dev, regMP1_SMN_C2PMSG_90, 0);
-        /* param=0 = enable ALL allowed features (matches Linux driver) */
         mp1_wreg_direct(dev, regMP1_SMN_C2PMSG_82, 0);
         mp1_wreg_direct(dev, regMP1_SMN_C2PMSG_66, PPSMC_MSG_EnableAllSmuFeatures);
 
@@ -4961,6 +5066,7 @@ try_enable_smu_features:
         }
     }
 
+skip_enable_all:
     return 0;
 }
 
