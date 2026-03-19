@@ -151,6 +151,7 @@ struct driver
     }
 #endif
 
+#if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
     /**
      * @brief Get NIC ASIC information including vendor and product names.
      * @param processor_handle NIC processor to query.
@@ -203,6 +204,7 @@ struct driver
         return amdsmi_get_nic_rdma_port_statistics(processor_handle, rdma_port_idx,
                                                    num_stats, stats);
     }
+#endif
 };
 
 /**

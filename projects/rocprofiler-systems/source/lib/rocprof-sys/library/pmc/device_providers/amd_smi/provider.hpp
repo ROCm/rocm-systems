@@ -233,9 +233,21 @@ public:
     template <typename Device>
     [[nodiscard]] std::vector<std::shared_ptr<Device>> get_devices(device_type type)
     {
-        processor_type_t proc_type = (type == device_type::GPU)
-                                         ? AMDSMI_PROCESSOR_TYPE_AMD_GPU
-                                         : AMDSMI_PROCESSOR_TYPE_AMD_NIC;
+        processor_type_t proc_type{};
+        if(type == device_type::GPU)
+        {
+            proc_type = AMDSMI_PROCESSOR_TYPE_AMD_GPU;
+        }
+#if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
+        else if(type == device_type::NIC)
+        {
+            proc_type = AMDSMI_PROCESSOR_TYPE_AMD_NIC;
+        }
+#endif
+        else
+        {
+            return {};  // Unsupported device type
+        }
         return enumerate_devices<Device>(proc_type);
     }
 };
