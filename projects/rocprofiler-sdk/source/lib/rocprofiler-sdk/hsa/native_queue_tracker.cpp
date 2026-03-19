@@ -31,6 +31,7 @@
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/tracing.hpp"
+#include "lib/rocprofiler-sdk/pc_sampling/nqt_bridge.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/tracing/profiling_time.hpp"
 #include "lib/rocprofiler-sdk/tracing/tracing.hpp"
@@ -127,6 +128,13 @@ NativeQueueTracker::queue_iterate_cb(hsa_queue_t* queue, hsa_agent_t agent, void
         ROCP_WARNING << "Failed to enable profiling on native queue " << queue->id
                      << " (status " << status << ")";
         return HSA_STATUS_SUCCESS;
+    }
+
+    uint64_t doorbell = 0;
+    if(tracker->_ext_api.hsa_amd_queue_get_info_fn(
+           queue, HSA_AMD_QUEUE_INFO_DOORBELL_ID, &doorbell) == HSA_STATUS_SUCCESS)
+    {
+        entry->doorbell_id = doorbell;
     }
 
     const auto* rocp_agent = agent::get_rocprofiler_agent(agent);
@@ -357,6 +365,16 @@ NativeQueueTracker::on_hip_api_exit()
 
             _pending.push_back(std::move(pending));
 
+            pc_sampling::nqt_register_dispatch(
+                rqueue->get_agent().get_rocp_agent()->id,
+                entry->doorbell_id,
+                idx,
+                queue->size,
+                dispatch_id,
+                rocprofiler_async_correlation_id_t{
+                    .internal = internal_corr_id,
+                    .external = rocprofiler_user_data_t{.value = 0}});
+
             {
                 auto tracer_data = callback_record;
                 tracing::execute_phase_exit_callbacks(
@@ -426,11 +444,13 @@ NativeQueueTracker::drain_completed()
 
         if(pd->corr_id)
         {
+            pc_sampling::nqt_complete_dispatch(
+                pd->queue->get_agent().get_rocp_agent()->id,
+                pd->corr_id->internal);
+
             pd->corr_id->sub_kern_count();
             pd->corr_id->sub_ref_count();
         }
-
-        // No async_complete() — we don't use Queue's active kernel tracking.
 
         it = _pending.erase(it);
     }

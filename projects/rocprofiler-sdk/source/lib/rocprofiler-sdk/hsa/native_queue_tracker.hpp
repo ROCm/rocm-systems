@@ -41,6 +41,7 @@ struct NativeQueueEntry
     hsa_queue_t*           queue       = nullptr;
     hsa_agent_t            agent       = {};
     std::atomic<uint64_t>  last_index  = {0};
+    uint64_t               doorbell_id = 0;
     std::unique_ptr<Queue> rocp_queue;
 };
 
