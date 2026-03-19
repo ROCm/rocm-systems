@@ -78,7 +78,7 @@ struct cache_policy
         };
 
         auto add_jpeg_track = [&](std::optional<int> xcp_idx) {
-            for(int clk = 0; clk < ROCPROFSYS_MAX_NUM_JPEG_ENGINES; ++clk)
+            for(size_t clk = 0; clk < ROCPROFSYS_AMDSMI_JPEG_ENGINE_COUNT; ++clk)
             {
                 auto name =
                     trace_cache::info::format_track_name<category::amd_smi_jpeg_activity>(
@@ -237,9 +237,9 @@ struct cache_policy
             }
         }
 
-        for(int xcp = 0; xcp < AMDSMI_MAX_NUM_XCP; ++xcp)
+        for(size_t xcp = 0; xcp < AMDSMI_MAX_NUM_XCP; ++xcp)
         {
-            for(int jpeg = 0; jpeg < ROCPROFSYS_MAX_NUM_JPEG_ENGINES; ++jpeg)
+            for(size_t jpeg = 0; jpeg < ROCPROFSYS_AMDSMI_JPEG_ENGINE_COUNT; ++jpeg)
             {
                 auto jpeg_name =
                     trace_cache::info::format_track_name<category::amd_smi_jpeg_activity>(

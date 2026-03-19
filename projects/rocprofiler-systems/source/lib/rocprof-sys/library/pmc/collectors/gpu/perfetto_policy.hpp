@@ -229,7 +229,7 @@ struct perfetto_policy
                     process_xcp_array(description,
                                       enabled_metric == VCN_ACTIVITY_VALUE
                                           ? AMDSMI_MAX_NUM_VCN
-                                          : ROCPROFSYS_MAX_NUM_JPEG_ENGINES,
+                                          : ROCPROFSYS_AMDSMI_JPEG_ENGINE_COUNT,
                                       xcp);
                 }
             }

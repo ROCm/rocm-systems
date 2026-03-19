@@ -96,12 +96,14 @@ to_string(const enabled_metrics& metrics)
         static_cast<bool>(metrics.bits.pcie), static_cast<bool>(metrics.bits.sdma_usage));
 }
 
-// Ensure we have the correct max values defined
-#ifdef AMDSMI_MAX_NUM_JPEG_ENG_V1
-#    define ROCPROFSYS_MAX_NUM_JPEG_ENGINES AMDSMI_MAX_NUM_JPEG_ENG_V1
-#else
-#    define ROCPROFSYS_MAX_NUM_JPEG_ENGINES 40
-#endif
+// Get the actual JPEG engine count from the AMD SMI structure at compile time.
+// This ensures compatibility across ROCm versions where the jpeg_busy array size
+// may differ (32 in ROCm 6.x vs 40 in ROCm 7.x).
+constexpr size_t ROCPROFSYS_AMDSMI_JPEG_ENGINE_COUNT =
+    sizeof(amdsmi_gpu_xcp_metrics_t::jpeg_busy) / sizeof(uint16_t);
+
+// For our internal metrics structure, use the AMD SMI array size
+#define ROCPROFSYS_MAX_NUM_JPEG_ENGINES ROCPROFSYS_AMDSMI_JPEG_ENGINE_COUNT
 
 #ifndef AMDSMI_MAX_NUM_VCN
 #    define AMDSMI_MAX_NUM_VCN 4
@@ -119,8 +121,8 @@ struct metrics
 {
     struct xcp_metrics
     {
-        std::array<uint16_t, ROCPROFSYS_MAX_NUM_JPEG_ENGINES> jpeg_busy;
-        std::array<uint16_t, AMDSMI_MAX_NUM_VCN>              vcn_busy;
+        std::array<uint16_t, ROCPROFSYS_AMDSMI_JPEG_ENGINE_COUNT> jpeg_busy;
+        std::array<uint16_t, AMDSMI_MAX_NUM_VCN>                  vcn_busy;
     };
 
     uint32_t                                    current_socket_power = 0;

@@ -1,10 +1,9 @@
 // Copyright (c) 2018-2025 Advanced Micro Devices, Inc. All Rights Reserved.
 // SPDX-License-Identifier: MIT
 
-// Enable SDMA support for unit tests (we're using mocks, not real AMD SMI)
-#ifndef AMD_SMI_SDMA_SUPPORTED
-#    define AMD_SMI_SDMA_SUPPORTED 1
-#endif
+// Include amd_smi.hpp first to get proper AMD_SMI_SDMA_SUPPORTED detection
+// based on the actual AMD SMI library version
+#include "core/amd_smi.hpp"
 
 #include "library/pmc/collectors/gpu/device.hpp"
 #include "library/pmc/device_providers/amd_smi/drivers/tests/mock_driver.hpp"
@@ -59,13 +58,17 @@ protected:
     /**
      * @brief Setup SDMA mock expectations for any device mock.
      * Call this for any mock that will have devices constructed with it.
+     * No-op when SDMA is not supported.
      */
     template <typename MockPtr>
-    static void SetupSDMAExpectations(MockPtr& mock, amdsmi_processor_handle handle)
+    static void SetupSDMAExpectations([[maybe_unused]] MockPtr&                mock,
+                                      [[maybe_unused]] amdsmi_processor_handle handle)
     {
+#if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
         EXPECT_CALL(*mock, get_gpu_process_list(handle, _, _))
             .Times(AnyNumber())
             .WillRepeatedly(DoAll(SetArgPointee<1>(1), Return(AMDSMI_STATUS_SUCCESS)));
+#endif
     }
 
     /**
@@ -88,9 +91,11 @@ protected:
 
         // SDMA support - allow any number of calls (happens during construction and
         // metrics collection)
+#if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
         EXPECT_CALL(*mock_driver, get_gpu_process_list(test_handle, _, _))
             .Times(AnyNumber())
             .WillRepeatedly(DoAll(SetArgPointee<1>(1), Return(AMDSMI_STATUS_SUCCESS)));
+#endif
     }
 
     /**
@@ -112,9 +117,11 @@ protected:
                 DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
 
         // SDMA support
+#if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
         EXPECT_CALL(*mock_driver, get_gpu_process_list(test_handle, _, _))
             .Times(AnyNumber())
             .WillRepeatedly(Return(AMDSMI_STATUS_NOT_SUPPORTED));
+#endif
     }
 
     /**
@@ -148,9 +155,11 @@ protected:
                 DoAll(SetArgPointee<2>(sentinel_mem), Return(AMDSMI_STATUS_SUCCESS)));
 
         // SDMA support
+#if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
         EXPECT_CALL(*mock_driver, get_gpu_process_list(test_handle, _, _))
             .Times(AnyNumber())
             .WillRepeatedly(DoAll(SetArgPointee<1>(1), Return(AMDSMI_STATUS_SUCCESS)));
+#endif
     }
 
     /**
@@ -180,7 +189,7 @@ protected:
             {
                 metrics.xcp_stats[xcp].vcn_busy[i] = static_cast<uint16_t>(50 + i);
             }
-            for(size_t i = 0; i < ROCPROFSYS_MAX_NUM_JPEG_ENGINES; ++i)
+            for(size_t i = 0; i < ROCPROFSYS_AMDSMI_JPEG_ENGINE_COUNT; ++i)
             {
                 metrics.xcp_stats[xcp].jpeg_busy[i] = static_cast<uint16_t>(30 + i);
             }
@@ -229,7 +238,7 @@ protected:
             {
                 metrics.xcp_stats[xcp].vcn_busy[i] = 0xFFFF;
             }
-            for(size_t i = 0; i < ROCPROFSYS_MAX_NUM_JPEG_ENGINES; ++i)
+            for(size_t i = 0; i < ROCPROFSYS_AMDSMI_JPEG_ENGINE_COUNT; ++i)
             {
                 metrics.xcp_stats[xcp].jpeg_busy[i] = 0xFFFF;
             }
@@ -934,7 +943,7 @@ TEST_F(DeviceTest, jpeg_activity_collection_all_xcps)
     // Set JPEG activity values for all XCP instances
     for(size_t xcp = 0; xcp < AMDSMI_MAX_NUM_XCP; ++xcp)
     {
-        for(size_t jpeg = 0; jpeg < ROCPROFSYS_MAX_NUM_JPEG_ENGINES; ++jpeg)
+        for(size_t jpeg = 0; jpeg < ROCPROFSYS_AMDSMI_JPEG_ENGINE_COUNT; ++jpeg)
         {
             metrics.xcp_stats[xcp].jpeg_busy[jpeg] =
                 static_cast<uint16_t>(30 + xcp + jpeg);
@@ -968,7 +977,7 @@ TEST_F(DeviceTest, jpeg_activity_collection_all_xcps)
     // Verify all XCP JPEG arrays were copied correctly
     for(size_t xcp = 0; xcp < AMDSMI_MAX_NUM_XCP; ++xcp)
     {
-        for(size_t jpeg = 0; jpeg < ROCPROFSYS_MAX_NUM_JPEG_ENGINES; ++jpeg)
+        for(size_t jpeg = 0; jpeg < ROCPROFSYS_AMDSMI_JPEG_ENGINE_COUNT; ++jpeg)
         {
             EXPECT_EQ(collected_metrics.xcp_stats[xcp].jpeg_busy[jpeg],
                       static_cast<uint16_t>(30 + xcp + jpeg));
@@ -1007,7 +1016,7 @@ TEST_F(DeviceTest, xcp_metrics_not_collected_when_unsupported)
         {
             EXPECT_EQ(collected_metrics.xcp_stats[xcp].vcn_busy[vcn], 0);
         }
-        for(size_t jpeg = 0; jpeg < ROCPROFSYS_MAX_NUM_JPEG_ENGINES; ++jpeg)
+        for(size_t jpeg = 0; jpeg < ROCPROFSYS_AMDSMI_JPEG_ENGINE_COUNT; ++jpeg)
         {
             EXPECT_EQ(collected_metrics.xcp_stats[xcp].jpeg_busy[jpeg], 0);
         }
@@ -1074,7 +1083,7 @@ TEST_F(DeviceTest, mixed_vcn_jpeg_support)
     // Verify JPEG arrays remain default-initialized (zeros)
     for(size_t xcp = 0; xcp < AMDSMI_MAX_NUM_XCP; ++xcp)
     {
-        for(size_t jpeg = 0; jpeg < ROCPROFSYS_MAX_NUM_JPEG_ENGINES; ++jpeg)
+        for(size_t jpeg = 0; jpeg < ROCPROFSYS_AMDSMI_JPEG_ENGINE_COUNT; ++jpeg)
         {
             EXPECT_EQ(collected_metrics.xcp_stats[xcp].jpeg_busy[jpeg], 0);
         }
@@ -2224,12 +2233,12 @@ TEST_F(DeviceTest, large_array_indices_xcp)
  */
 TEST_F(DeviceTest, large_array_indices_jpeg)
 {
-    // Setup: Set all ROCPROFSYS_MAX_NUM_JPEG_ENGINES entries
+    // Setup: Set all ROCPROFSYS_AMDSMI_JPEG_ENGINE_COUNT entries
     amdsmi_gpu_metrics_t metrics = CreateSentinelMetrics();
 
     for(size_t xcp = 0; xcp < AMDSMI_MAX_NUM_XCP; ++xcp)
     {
-        for(size_t jpeg = 0; jpeg < ROCPROFSYS_MAX_NUM_JPEG_ENGINES; ++jpeg)
+        for(size_t jpeg = 0; jpeg < ROCPROFSYS_AMDSMI_JPEG_ENGINE_COUNT; ++jpeg)
         {
             metrics.xcp_stats[xcp].jpeg_busy[jpeg] =
                 static_cast<uint16_t>(xcp * 100 + jpeg);
@@ -2258,7 +2267,7 @@ TEST_F(DeviceTest, large_array_indices_jpeg)
     // Verify all JPEG engines were processed correctly
     for(size_t xcp = 0; xcp < AMDSMI_MAX_NUM_XCP; ++xcp)
     {
-        for(size_t jpeg = 0; jpeg < ROCPROFSYS_MAX_NUM_JPEG_ENGINES; ++jpeg)
+        for(size_t jpeg = 0; jpeg < ROCPROFSYS_AMDSMI_JPEG_ENGINE_COUNT; ++jpeg)
         {
             EXPECT_EQ(collected_metrics.xcp_stats[xcp].jpeg_busy[jpeg],
                       static_cast<uint16_t>(xcp * 100 + jpeg));
@@ -2461,8 +2470,9 @@ TEST_F(DeviceTest, full_lifecycle_with_realistic_data)
  *
  * Objective: Verify SDMA usage percentage is computed correctly from deltas.
  *
- * NOTE: AMD_SMI_SDMA_SUPPORTED is defined at the top of this file for testing.
+ * NOTE: This test is only compiled when AMD_SMI_SDMA_SUPPORTED is defined.
  */
+#if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
 TEST_F(DeviceTest, sdma_delta_computation)
 {
     // Setup: Mock SDMA process data
@@ -2512,5 +2522,6 @@ TEST_F(DeviceTest, sdma_delta_computation)
     EXPECT_GE(metrics2.sdma_usage, 0U);
     EXPECT_LE(metrics2.sdma_usage, 100U);
 }
+#endif
 
 }  // namespace rocprofsys::pmc::collectors::gpu::testing
