@@ -49,7 +49,7 @@
 
 class TestFanReadWrite : public TestBase {
  public:
-    TestFanReadWrite();
+  TestFanReadWrite();
 
   // @Brief: Destructor for test case of TestFanReadWrite
   virtual ~TestFanReadWrite();

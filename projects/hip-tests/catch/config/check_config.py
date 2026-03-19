@@ -1,17 +1,33 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
+import argparse
 import sys
 
 from common import iter_group_configs
 
 
-def main():
-    if not len(sys.argv) == 2:
-        raise ValueError("1 argument expected")
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Check that every test case in the YAML configs has a "
+        "'level' field defined.",
+    )
+    parser.add_argument(
+        "configs_path",
+        help="Path to the directory containing YAML config files.",
+    )
+    return parser.parse_args()
 
-    config_path = sys.argv[1]
+
+def main():
+    args = parse_args()
+
+    configs_path = args.configs_path
 
     missing = []
 
-    for group, cases in iter_group_configs(config_path):
+    for group, cases in iter_group_configs(configs_path):
         for case_name, case_config in cases.items():
             if "level" not in case_config:
                 missing.append(f"  {group}/{case_name}")

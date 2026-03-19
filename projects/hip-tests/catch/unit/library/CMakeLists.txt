@@ -1,3 +1,7 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
 set(TEST_SRC
     loadlib_rtc.cc
     #loadlib_co.cc TODO
@@ -6,10 +10,6 @@ set(TEST_SRC
     lib_attribute.cc
 )
 
-string(TOUPPER "${CMAKE_BUILD_TYPE}" _HIP_BUILD_TYPE_UPPER)
-separate_arguments(HIP_DEVICE_BUILD_FLAGS_NO_ARCH NATIVE_COMMAND
-  "${CMAKE_HIP_FLAGS} ${CMAKE_HIP_FLAGS_${_HIP_BUILD_TYPE_UPPER}}")
-list(FILTER HIP_DEVICE_BUILD_FLAGS_NO_ARCH EXCLUDE REGEX "--offload-arch=")
 if (HIP_PLATFORM MATCHES "amd")
   add_custom_target(library_code_load.code
     COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} --cuda-device-only -x hip ${CMAKE_CURRENT_SOURCE_DIR}/library_code_load.cc
@@ -53,4 +53,3 @@ endif()
 
 add_dependencies(LibraryTests library_code_load.code)
 add_dependencies(LibraryTests reverse_kernel.code)
-

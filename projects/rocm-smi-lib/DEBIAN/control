@@ -6,4 +6,3 @@ Version: MODULE_VERSION
 Depends:
 Homepage: https://github.com/RadeonOpenCompute/rocm_smi_lib
 Description: System Management Interface Library for ROCm
-

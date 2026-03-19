@@ -344,10 +344,6 @@ configure_settings(bool _init)
     ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_USE_ROCPD", "Enable rocpd backend", false,
                               "backend", "rocpd");
 
-    ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_USE_ROCM",
-                              "Enable ROCm API and kernel tracing", true, "backend",
-                              "rocm");
-
     ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_USE_AMD_SMI",
                               "Enable sampling GPU power, temp, utilization, "
                               "vcn_activity, jpeg_activity and memory usage",
@@ -678,8 +674,11 @@ configure_settings(bool _init)
         std::string{ "perf::PERF_COUNT_HW_CACHE_REFERENCES" }, "sampling",
         "hardware_counters");
 
-    rocprofiler_sdk::config_settings(_config);
-    amd_smi::config_settings(_config);
+    if(_init)
+    {
+        rocprofiler_sdk::config_settings(_config);
+        amd_smi::config_settings(_config);
+    }
 
     ROCPROFSYS_CONFIG_SETTING(size_t, "ROCPROFSYS_PERFETTO_SHMEM_SIZE_HINT_KB",
                               "Hint for shared-memory buffer size in perfetto (in KB)",
@@ -1204,10 +1203,7 @@ configure_mode_settings(const std::shared_ptr<settings>& _config)
 
     if(gpu::device_count() == 0)
     {
-#if ROCPROFSYS_ROCM_VERSION > 0
-        LOG_WARNING("No ROCm devices were found: disabling rocm and amd_smi...");
-#endif
-        _set("ROCPROFSYS_USE_ROCM", false);
+        LOG_WARNING("No ROCm devices were found: disabling amd_smi...");
         _set("ROCPROFSYS_USE_AMD_SMI", false);
     }
 
@@ -1239,7 +1235,6 @@ configure_mode_settings(const std::shared_ptr<settings>& _config)
         _set("ROCPROFSYS_USE_TRACE", false);
         _set("ROCPROFSYS_PROFILE", false);
         _set("ROCPROFSYS_USE_CAUSAL", false);
-        _set("ROCPROFSYS_USE_ROCM", false);
         _set("ROCPROFSYS_USE_AMD_SMI", false);
         _set("ROCPROFSYS_USE_KOKKOSP", false);
         _set("ROCPROFSYS_USE_RCCLP", false);
@@ -1424,21 +1419,6 @@ configure_disabled_settings(const std::shared_ptr<settings>& _config)
     _handle_use_option("ROCPROFSYS_USE_OMPT", "ompt");
     _handle_use_option("ROCPROFSYS_USE_RCCLP", "rcclp");
     _handle_use_option("ROCPROFSYS_USE_AMD_SMI", "amd_smi");
-    _handle_use_option("ROCPROFSYS_USE_ROCM", "rocm");
-
-#if !defined(ROCPROFSYS_USE_ROCM) || ROCPROFSYS_USE_ROCM == 0
-    _config->find("ROCPROFSYS_USE_AMD_SMI")->second->set_hidden(true);
-    for(const auto& itr : _config->disable_category("amd_smi"))
-        _config->find(itr)->second->set_hidden(true);
-
-    _config->find("ROCPROFSYS_USE_RCCLP")->second->set_hidden(true);
-    for(const auto& itr : _config->disable_category("rcclp"))
-        _config->find(itr)->second->set_hidden(true);
-
-    _config->find("ROCPROFSYS_USE_ROCM")->second->set_hidden(true);
-    for(const auto& itr : _config->disable_category("rocm"))
-        _config->find(itr)->second->set_hidden(true);
-#endif
 
 #if defined(ROCPROFSYS_USE_OMPT) || ROCPROFSYS_USE_OMPT == 0
     _config->find("ROCPROFSYS_USE_OMPT")->second->set_hidden(true);
@@ -1917,23 +1897,8 @@ get_use_causal()
 bool
 get_use_amd_smi()
 {
-#if defined(ROCPROFSYS_USE_ROCM) && ROCPROFSYS_USE_ROCM > 0
     static auto _v = get_config()->find("ROCPROFSYS_USE_AMD_SMI");
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
-#else
-    return false;
-#endif
-}
-
-bool
-get_use_rocm()
-{
-#if defined(ROCPROFSYS_USE_ROCM) && ROCPROFSYS_USE_ROCM > 0
-    static auto _v = get_config()->find("ROCPROFSYS_USE_ROCM");
-    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
-#else
-    return false;
-#endif
 }
 
 bool&
@@ -2018,7 +1983,6 @@ get_use_kokkosp_kernel_logger()
 bool
 get_use_vaapi_tracing()
 {
-#if defined(ROCPROFSYS_USE_ROCM) && ROCPROFSYS_USE_ROCM > 0
     static auto _v = get_config()->find("ROCPROFSYS_ROCM_DOMAINS");
     if(_v == get_config()->end())
     {
@@ -2030,9 +1994,6 @@ get_use_vaapi_tracing()
                domain_list.end() ||
            std::find(domain_list.begin(), domain_list.end(), "rocjpeg_api") !=
                domain_list.end();  // Check rocdecode_api or rocjpeg_api is present
-#else
-    return false;
-#endif
 }
 
 bool
@@ -2407,12 +2368,8 @@ get_process_sampling_duration()
 std::string
 get_sampling_gpus()
 {
-#if defined(ROCPROFSYS_USE_ROCM) && ROCPROFSYS_USE_ROCM > 0
     static auto _v = get_config()->find("ROCPROFSYS_SAMPLING_GPUS");
     return static_cast<tim::tsettings<std::string>&>(*_v->second).get();
-#else
-    return std::string{};
-#endif
 }
 
 bool
