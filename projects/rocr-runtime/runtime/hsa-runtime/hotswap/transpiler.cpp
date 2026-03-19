@@ -508,7 +508,7 @@ static std::string WidenVccReferences(const std::string& line) {
 // b32 operation on exec_lo and clear exec_hi separately. This preserves the
 // original computation on the lower 32 bits.
 
-static std::vector<std::string> WidenExecOperation(const std::string& line) {
+static std::vector<std::string> WidenExecOperation(const std::string& line, bool compact_mode = false) {
   std::vector<std::string> result;
 
   // Handle saveexec_b32 → saveexec_b64 (b32 form doesn't exist on GFX9)
@@ -554,20 +554,24 @@ static std::vector<std::string> WidenExecOperation(const std::string& line) {
         if (dst[0] == 's' && std::isdigit(dst[1])) {
           int reg_num = std::stoi(dst.substr(1));
           // ALWAYS use manual b32 sequence for saveexec.
-          // b64 form has subtle issues: s_or picks up garbage in exec_hi,
-          // s_and with odd dest saves exec_hi (0) to s[odd] instead of exec_lo,
-          // and even "safe" b64 AND causes ELF grow issues.
           std::string src32 = src;
           if (src32 == "vcc") src32 = "vcc_lo";
           result.push_back("s_mov_b32 " + dst + ", exec_lo");
-          if (b64_mnem.find("s_or_saveexec") == 0) {
+          bool is_or = (b64_mnem.find("s_or_saveexec") == 0);
+          if (is_or) {
             result.push_back("s_or_b32 exec_lo, exec_lo, " + src32);
           } else if (b64_mnem.find("andn2") != std::string::npos) {
             result.push_back("s_andn2_b32 exec_lo, exec_lo, " + src32);
           } else {
             result.push_back("s_and_b32 exec_lo, exec_lo, " + src32);
           }
-          result.push_back("s_mov_b32 exec_hi, 0");
+          // exec_hi is already 0 (cleared at kernel start and after every
+          // exec modification). Only OR saveexec can make exec_hi non-zero
+          // (0 OR s[src+1] = s[src+1]). AND/ANDN2 preserve 0 (0 AND x = 0).
+          // In compact mode, skip the redundant clear for AND/ANDN2.
+          if (is_or || !compact_mode) {
+            result.push_back("s_mov_b32 exec_hi, 0");
+          }
           return result;
         }
 
@@ -2351,10 +2355,22 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
     std::string ops = line.substr(op_start);
     size_t s = ops.find_first_not_of(" \t");
     if (s != std::string::npos) ops = ops.substr(s);
+    // Always save/restore VCC (v_cmpx clobbers VCC on GFX9 but not GFX12)
     std::string spair = "s[" + std::to_string(cmpx_temp_sgpr) + ":" +
                         std::to_string(cmpx_temp_sgpr + 1) + "]";
     result.push_back("s_mov_b64 " + spair + ", vcc");
     result.push_back(base_mnem + " " + ops);
+    result.push_back("s_mov_b64 vcc, " + spair);
+    return result;
+  }
+
+  // ─── v_cmpx _e32 (VOPC) → save/restore VCC around it ───
+  // On GFX9, v_cmpx_*_e32 writes BOTH EXEC and VCC. On GFX12 only EXEC.
+  if (mnemonic.find("v_cmpx_") == 0 && mnemonic.find("_e64") == std::string::npos) {
+    std::string spair = "s[" + std::to_string(cmpx_temp_sgpr) + ":" +
+                        std::to_string(cmpx_temp_sgpr + 1) + "]";
+    result.push_back("s_mov_b64 " + spair + ", vcc");
+    result.push_back(line);
     result.push_back("s_mov_b64 vcc, " + spair);
     return result;
   }
@@ -2508,7 +2524,7 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
   }
 
   // ─── EXEC width adaptation (wave32 → wave64) ───
-  auto exec_result = WidenExecOperation(line);
+  auto exec_result = WidenExecOperation(line, compact_mode);
   for (auto& l : exec_result) {
     result.push_back(std::move(l));
   }
@@ -2735,7 +2751,7 @@ static void PatchKernelDescriptorsForWave64(uint8_t* elf, size_t elf_size,
     // SGPR: kernel's SGPRs + 8 extra for v_cmpx temp pair (GFX9 gran = 8)
     {
       uint32_t orig_sgpr_field = sgpr_field12_kd;  // saved before bits [11:0] were cleared
-      uint32_t num_sgprs = (orig_sgpr_field + 1u) * 8u + 8u;
+      uint32_t num_sgprs = (orig_sgpr_field + 1u) * 16u + 8u;
       uint32_t gfx9_sgpr = (num_sgprs / 8u) - 1u;
       if (gfx9_sgpr > 12u) gfx9_sgpr = 12u;
       rsrc1 |= gfx9_sgpr;  // SGPR in bits [5:0]
@@ -2993,7 +3009,7 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
       }
       if (rsrc1_src) {
         num_vgprs12 = ((rsrc1_src & 0x3Fu) + 1u) * 8u;
-        num_sgprs12 = (((rsrc1_src >> 6) & 0x3Fu) + 1u) * 8u;
+        num_sgprs12 = (((rsrc1_src >> 6) & 0x3Fu) + 1u) * 16u;
       }
     }
     if (num_vgprs12 < 8u) num_vgprs12 = 8u;
@@ -3191,9 +3207,11 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
 
       // scale_temp_vgpr: use num_vgprs12+2 (above save registers sv_x, sv_y)
       // cmpx_temp_sgpr: use num_sgprs12 (above kernel's SGPR allocation)
-      // compact_mode: skip even-dest v_cmp save/restore for large kernels
-      // that would overflow .text (the clobber is usually harmless)
-      bool compact = (source_lines.size() > 400);
+      // compact_mode: skip redundant exec_hi clear after AND saveexec
+      // (exec_hi is already 0). Helps save space without affecting correctness.
+      // Note: even-dest v_cmp save/restore and v_cmpx VCC save are ALWAYS
+      // enabled (required for correctness). ELF grow handles overflow.
+      bool compact = (source_lines.size() > 300);
       auto translated_lines = TranslateInstruction(line, src_cpu, tgt_cpu,
                                                     save_vgpr_y + 1, cmpx_temp_sgpr,
                                                     compact);
@@ -3640,7 +3658,7 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
             rsrc1 &= ~0xFFFu;
             rsrc1 |= (rsrc1_vgpr_field << 6u);  // VGPR in bits [11:6]
             {
-              uint32_t num_sgprs_rd = (sgpr_field12_rd + 1u) * 8u + 8u;
+              uint32_t num_sgprs_rd = (sgpr_field12_rd + 1u) * 16u + 8u;
               uint32_t gfx9_sgpr = (num_sgprs_rd / 8u) - 1u;
               if (gfx9_sgpr > 12u) gfx9_sgpr = 12u;
               rsrc1 |= gfx9_sgpr;  // SGPR in bits [5:0]
