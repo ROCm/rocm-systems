@@ -20,7 +20,7 @@ The sample decodes raw elementary video frame files as input and produces indivi
 ``rocdecdecode.cpp`` takes the following arguments:
 
 .. list-table:: 
-    :widths: 10 60 30 
+    :widths: 15 60 30 
     :header-rows: 1
 
     * - Argument      
