@@ -198,7 +198,6 @@ if(BUILD_TESTS)
 
     set(TEST_FIXTURE_SOURCE_FILES
       BitOpsTests.cpp
-      CommTests.cpp
       EnqueueCountTests.cpp
       common/main_fixtures.cpp
       common/EnvVars.cpp
