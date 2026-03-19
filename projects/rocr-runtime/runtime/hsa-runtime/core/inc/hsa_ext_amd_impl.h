@@ -66,6 +66,11 @@ hsa_status_t
     hsa_amd_profiling_set_profiler_enabled(hsa_queue_t* queue, int enable);
 
 // Mirrors Amd Extension Apis
+hsa_status_t hsa_amd_queue_iterate(
+    hsa_status_t (*callback)(hsa_queue_t* queue, hsa_agent_t agent, void* data),
+    void* data);
+
+// Mirrors Amd Extension Apis
 hsa_status_t
     hsa_amd_profiling_async_copy_enable(bool enable);
 

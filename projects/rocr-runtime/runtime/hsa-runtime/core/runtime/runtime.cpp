@@ -317,6 +317,24 @@ hsa_status_t Runtime::IterateAgent(hsa_status_t (*callback)(hsa_agent_t agent,
   return HSA_STATUS_SUCCESS;
 }
 
+hsa_status_t Runtime::IterateQueues(
+    hsa_status_t (*callback)(hsa_queue_t* queue, hsa_agent_t agent, void* data),
+    void* data) {
+  AMD::callback_t<decltype(callback)> call(callback);
+
+  for (Agent* agent : gpu_agents_) {
+    auto* gpu = static_cast<AMD::GpuAgent*>(agent);
+    hsa_agent_t agent_handle = Agent::Convert(agent);
+    for (Queue* q : gpu->GetAqlQueues()) {
+      hsa_queue_t* pub = Queue::Convert(q);
+      if (pub == nullptr) continue;
+      hsa_status_t status = call(pub, agent_handle, data);
+      if (status != HSA_STATUS_SUCCESS) return status;
+    }
+  }
+  return HSA_STATUS_SUCCESS;
+}
+
 hsa_status_t Runtime::AllocateMemory(const MemoryRegion* region, size_t size,
                                      MemoryRegion::AllocateFlags alloc_flags,
                                      void** address, int agent_node_id) {
