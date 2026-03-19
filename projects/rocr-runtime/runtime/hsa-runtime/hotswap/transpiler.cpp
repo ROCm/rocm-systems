@@ -1019,7 +1019,8 @@ bool NeedsTranspile(const std::string& source_isa,
 std::vector<std::string> TranslateInstruction(const std::string& asm_line,
                                                const std::string& source_cpu,
                                                const std::string& target_cpu,
-                                               int scale_temp_vgpr = 7) {
+                                               int scale_temp_vgpr = 7,
+                                               int cmpx_temp_sgpr = 16) {
   std::vector<std::string> result;
 
   std::string line = asm_line;
@@ -1475,8 +1476,8 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
 
       // Recursively translate each half so mnemonic renames and other
       // fixups (constant bus, vcc widening, etc.) apply to both halves.
-      auto r1 = TranslateInstruction(first_half, source_cpu, target_cpu, scale_temp_vgpr);
-      auto r2 = TranslateInstruction(second_half, source_cpu, target_cpu, scale_temp_vgpr);
+      auto r1 = TranslateInstruction(first_half, source_cpu, target_cpu, scale_temp_vgpr, cmpx_temp_sgpr);
+      auto r2 = TranslateInstruction(second_half, source_cpu, target_cpu, scale_temp_vgpr, cmpx_temp_sgpr);
       result.insert(result.end(), r1.begin(), r1.end());
       result.insert(result.end(), r2.begin(), r2.end());
       return result;
@@ -2339,22 +2340,25 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
     }
   }
 
-  // ─── v_cmpx _e64 → VOPC form for wave64 ───
-  // CRITICAL: On GFX9, v_cmpx writes BOTH EXEC AND VCC. On GFX12 (RDNA),
-  // v_cmpx writes ONLY EXEC. The kernel may read VCC later (e.g., for
-  // saveexec masking in softmax). Save/restore VCC around v_cmpx.
+  // ─── v_cmpx _e64 → v_cmp_e64 + manual exec AND ───
+  // On GFX9, v_cmpx writes BOTH EXEC AND VCC. On GFX12 (RDNA), v_cmpx
+  // writes ONLY EXEC. The kernel may read VCC later (e.g., softmax
+  // saveexec uses vcc_lo). Instead of v_cmpx (which clobbers VCC), use
+  // v_cmp_e64 to write the result to s[16:17] (above kernel's 16 SGPRs),
+  // then manually AND into exec_lo. SGPR allocation is bumped to 24.
   if (mnemonic.find("v_cmpx_") == 0 && mnemonic.find("_e64") != std::string::npos) {
+    // Use VOPC v_cmpx (writes EXEC+VCC on GFX9), but save/restore VCC.
+    // Use dynamic SGPR pair (cmpx_temp_sgpr) above kernel's SGPR allocation.
     std::string base_mnem = mnemonic.substr(0, mnemonic.find("_e64"));
     size_t op_start = line.find(mnemonic) + mnemonic.size();
     std::string ops = line.substr(op_start);
     size_t s = ops.find_first_not_of(" \t");
     if (s != std::string::npos) ops = ops.substr(s);
-    // Save/restore VCC around v_cmpx using s[14:15] as temp.
-    // On GFX9, v_cmpx writes BOTH EXEC and VCC; on GFX12 only EXEC.
-    // The kernel may read VCC later (e.g., softmax saveexec uses vcc_lo).
-    result.push_back("s_mov_b64 s[14:15], vcc");
+    std::string spair = "s[" + std::to_string(cmpx_temp_sgpr) + ":" +
+                        std::to_string(cmpx_temp_sgpr + 1) + "]";
+    result.push_back("s_mov_b64 " + spair + ", vcc");
     result.push_back(base_mnem + " " + ops);
-    result.push_back("s_mov_b64 vcc, s[14:15]");
+    result.push_back("s_mov_b64 vcc, " + spair);
     return result;
   }
 
@@ -2699,6 +2703,7 @@ static void PatchKernelDescriptorsForWave64(uint8_t* elf, size_t elf_size,
     // Add 4 extra VGPRs to accommodate the two save registers (sv_x, sv_y) that
     // the translation inserts above the kernel's native VGPR allocation.
     uint32_t vgpr_field12 = rsrc1 & 0x3Fu;
+    uint32_t sgpr_field12_kd = (rsrc1 >> 6) & 0x3Fu;  // save before clear
     uint32_t num_vgprs = (vgpr_field12 + 1u) * 8u;  // GFX12 granularity
     if (num_vgprs < 8u) num_vgprs = 8u;
     num_vgprs += 4u;  // room for sv_x, sv_y (2 regs, rounded to GFX9 granularity of 4)
@@ -2712,7 +2717,14 @@ static void PatchKernelDescriptorsForWave64(uint8_t* elf, size_t elf_size,
     // Clear bits [11:0] and set GFX9 SGPR[5:0] and VGPR[11:6]
     rsrc1 &= ~0xFFFu;
     rsrc1 |= (rsrc1_vgpr_field << 6u);  // VGPR in bits [11:6]
-    rsrc1 |= 1u;                        // SGPR in bits [5:0]: 1 → (1+1)*8 = 16 SGPRs
+    // SGPR: kernel's SGPRs + 8 extra for v_cmpx temp pair (GFX9 gran = 8)
+    {
+      uint32_t orig_sgpr_field = sgpr_field12_kd;  // saved before bits [11:0] were cleared
+      uint32_t num_sgprs = (orig_sgpr_field + 1u) * 8u + 8u;
+      uint32_t gfx9_sgpr = (num_sgprs / 8u) - 1u;
+      if (gfx9_sgpr > 12u) gfx9_sgpr = 12u;
+      rsrc1 |= gfx9_sgpr;  // SGPR in bits [5:0]
+    }
 
     std::memcpy(elf + info.text_offset + offset + 48, &rsrc1, 4);
 
@@ -2939,37 +2951,41 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
     // extra registers are allocated as arch (non-accum) VGPRs.
     // Read GFX12 VGPR count from kernel descriptor to place save registers above.
     // Try embedded descriptor in .text first, then fall back to .rodata.
-    uint32_t num_vgprs12 = 8;  // default: minimum GFX12 allocation
-    if (kern.desc_offset != kern.code_offset &&
-        kern.desc_offset + 52 <= elf_info.text_size) {
-      // Embedded descriptor in .text
-      uint32_t rsrc1_src;
-      std::memcpy(&rsrc1_src, text + kern.desc_offset + 48, 4);
-      uint32_t vgpr_field12 = rsrc1_src & 0x3Fu;
-      num_vgprs12 = (vgpr_field12 + 1u) * 8u;
-    } else {
-      // No embedded descriptor — scan .rodata for kernel descriptor
-      for (const auto& sec : elf_info.sections) {
-        if (sec.name == ".rodata" && sec.size >= 64) {
-          for (uint64_t off = 0; off + 64 <= sec.size; off += 64) {
-            const uint8_t* desc = elf + sec.offset + off;
-            uint64_t entry;
-            std::memcpy(&entry, desc + 16, 8);
-            if (entry > 0 && entry < 1000000) {
-              uint32_t rsrc1_src;
-              std::memcpy(&rsrc1_src, desc + 48, 4);
-              uint32_t vgpr_field12 = rsrc1_src & 0x3Fu;
-              num_vgprs12 = (vgpr_field12 + 1u) * 8u;
-              break;
+    // Read GFX12 VGPR and SGPR counts from kernel descriptor.
+    // GFX12 RSRC1: bits [5:0] = VGPR field (gran 8), bits [11:6] = SGPR field (gran 8)
+    uint32_t num_vgprs12 = 8;   // default: minimum GFX12 allocation
+    uint32_t num_sgprs12 = 16;  // default
+    {
+      uint32_t rsrc1_src = 0;
+      if (kern.desc_offset != kern.code_offset &&
+          kern.desc_offset + 52 <= elf_info.text_size) {
+        std::memcpy(&rsrc1_src, text + kern.desc_offset + 48, 4);
+      } else {
+        for (const auto& sec : elf_info.sections) {
+          if (sec.name == ".rodata" && sec.size >= 64) {
+            for (uint64_t off = 0; off + 64 <= sec.size; off += 64) {
+              const uint8_t* desc = elf + sec.offset + off;
+              uint64_t entry;
+              std::memcpy(&entry, desc + 16, 8);
+              if (entry > 0 && entry < 1000000) {
+                std::memcpy(&rsrc1_src, desc + 48, 4);
+                break;
+              }
             }
+            break;
           }
-          break;
         }
+      }
+      if (rsrc1_src) {
+        num_vgprs12 = ((rsrc1_src & 0x3Fu) + 1u) * 8u;
+        num_sgprs12 = (((rsrc1_src >> 6) & 0x3Fu) + 1u) * 8u;
       }
     }
     if (num_vgprs12 < 8u) num_vgprs12 = 8u;
+    if (num_sgprs12 < 16u) num_sgprs12 = 16u;
     uint32_t save_vgpr_x = num_vgprs12;       // first free VGPR index
     uint32_t save_vgpr_y = num_vgprs12 + 1u;  // second free VGPR index
+    uint32_t cmpx_temp_sgpr = num_sgprs12;    // first free SGPR pair for v_cmpx temp
     const std::string sv_x = "v" + std::to_string(save_vgpr_x);
     const std::string sv_y = "v" + std::to_string(save_vgpr_y);
 
@@ -3159,8 +3175,9 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
       }
 
       // scale_temp_vgpr: use num_vgprs12+2 (above save registers sv_x, sv_y)
+      // cmpx_temp_sgpr: use num_sgprs12 (above kernel's SGPR allocation)
       auto translated_lines = TranslateInstruction(line, src_cpu, tgt_cpu,
-                                                    save_vgpr_y + 1);
+                                                    save_vgpr_y + 1, cmpx_temp_sgpr);
 
       // Post-process: replace branch offsets with labels (using actual PC offsets)
       if (ii < source_instrs.size() && !branch_labels.empty()) {
@@ -3592,6 +3609,7 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
             // Add 4 extra VGPRs for the two save registers (sv_x, sv_y) the
             // translation inserts above the kernel's native VGPR allocation.
             uint32_t vgpr_field12 = rsrc1 & 0x3Fu;
+            uint32_t sgpr_field12_rd = (rsrc1 >> 6) & 0x3Fu;  // save before clear
             uint32_t num_vgprs = (vgpr_field12 + 1u) * 8u;
             if (num_vgprs < 8u) num_vgprs = 8u;
             num_vgprs += 4u;  // room for sv_x, sv_y
@@ -3602,7 +3620,12 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
             // Clear bits [11:0] and set GFX9 SGPR[5:0] and VGPR[11:6]
             rsrc1 &= ~0xFFFu;
             rsrc1 |= (rsrc1_vgpr_field << 6u);  // VGPR in bits [11:6]
-            rsrc1 |= 1u;                         // SGPR in bits [5:0]: 1 → 16 SGPRs
+            {
+              uint32_t num_sgprs_rd = (sgpr_field12_rd + 1u) * 8u + 8u;
+              uint32_t gfx9_sgpr = (num_sgprs_rd / 8u) - 1u;
+              if (gfx9_sgpr > 12u) gfx9_sgpr = 12u;
+              rsrc1 |= gfx9_sgpr;  // SGPR in bits [5:0]
+            }
             std::memcpy(desc + 48, &rsrc1, 4);
 
             // Patch COMPUTE_PGM_RSRC2 (offset 52)
