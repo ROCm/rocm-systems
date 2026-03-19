@@ -34,6 +34,7 @@ set(SRC_FILES
   src/device/broadcast.h
   src/device/common.h
   src/device/common_kernel.h
+  src/device/device_kernel_decls.h
   src/device/op128.h
   src/device/primitives.h
   src/device/prims_ll128.h
@@ -922,7 +923,17 @@ if(NOT ENABLE_DEVICE_LINKER)
 endif()
 target_link_libraries(rccl PRIVATE   Threads::Threads)
 target_link_libraries(rccl INTERFACE hip::host)
-target_link_libraries(rccl PRIVATE   hip::device)
+if(ENABLE_DEVICE_LINKER)
+  # Device code is compiled separately by the DeviceLinker pipeline.
+  # Link hip::host for the runtime library but add -x hip manually so HIP
+  # builtins (warpSize, etc.) are available. Crucially, do NOT propagate
+  # --offload-arch from hip::device — that would make the compiler try to
+  # compile device code in host-only .cc files.
+  target_link_libraries(rccl PRIVATE hip::host)
+  target_compile_options(rccl PRIVATE -x hip)
+else()
+  target_link_libraries(rccl PRIVATE hip::device)
+endif()
 target_link_libraries(rccl PRIVATE   dl)
 target_link_libraries(rccl PRIVATE fmt::fmt-header-only)
 if(ENABLE_MSCCLPP)
