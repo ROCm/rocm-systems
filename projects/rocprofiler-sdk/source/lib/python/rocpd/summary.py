@@ -315,7 +315,8 @@ def _view_matches_category(view_name: str, category: str) -> bool:
     """Return True if view name matches the category."""
     v = view_name.lower()
     c = category.lower()
-    return v == c or v.startswith(c + "_") or v == c + "s" or v.startswith(c + "s_")
+    plural_map = (c, f"{c}s")
+    return v in plural_map or any(v.startswith(f"{itr}_") for itr in plural_map)
 
 
 def create_summary_queries(
