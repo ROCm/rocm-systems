@@ -29,6 +29,7 @@ message(STATUS "Device Linker: assembly-extract pipeline enabled")
 
 set(DEVICE_BUILD_DIR "${PROJECT_BINARY_DIR}/device_build")
 set(ASM_EXTRACT_DIR  "${PROJECT_SOURCE_DIR}/tools/asm_extract")
+set(SCRIPTS_DIR      "${PROJECT_SOURCE_DIR}/cmake/scripts")
 set(SPECIALIZED_DIR  "${GEN_DIR}/specialized")
 
 set(DL_CLANG "${ROCM_PATH}/bin/amdclang++")
@@ -121,6 +122,26 @@ set(DL_DEVICE_COMPILE_FLAGS
 )
 
 # ===========================================================================
+# LDS pointer transform: convert LDS-derived pointers to address_space(3)
+# ===========================================================================
+set(LDS_TRANSFORM_STAMP "${DEVICE_BUILD_DIR}/lds_transform.stamp")
+set(LDS_TRANSFORM_SCRIPT "${SCRIPTS_DIR}/lds_pointer_transform.py")
+
+add_custom_command(
+  OUTPUT  ${LDS_TRANSFORM_STAMP}
+  COMMAND ${Python3_EXECUTABLE} ${LDS_TRANSFORM_SCRIPT}
+    --dir ${HIPIFY_DIR}/src/device
+    --dir ${HIPIFY_DIR}/src/device/network/unpack
+    --gendir ${GEN_DIR}
+  COMMAND ${CMAKE_COMMAND} -E touch ${LDS_TRANSFORM_STAMP}
+  DEPENDS ${LDS_TRANSFORM_SCRIPT}
+  COMMENT "DL: LDS pointer transform on hipified device headers"
+  VERBATIM
+)
+add_custom_target(lds_transform DEPENDS ${LDS_TRANSFORM_STAMP})
+add_dependencies(lds_transform hipify_all)
+
+# ===========================================================================
 # Per-specialized-kernel commands (compile -> extract -> assemble)
 # ===========================================================================
 set(SPECIALIZED_FILES_TXT "${GEN_DIR}/specialized_files.txt")
@@ -158,7 +179,7 @@ foreach(ENTRY ${SPECIALIZED_ENTRIES})
       -S
       -o ${ASM_OUT}
       ${SRC}
-    DEPENDS ${SRC}
+    DEPENDS ${SRC} ${LDS_TRANSFORM_STAMP}
     COMMENT "DL compile: ${CPP_FILE}"
     VERBATIM
   )
@@ -211,7 +232,7 @@ add_custom_command(
     -S
     -o ${COMMON_DEVICE_ASM}
     ${HIPIFY_DIR}/src/device/common.cu.cpp
-  DEPENDS ${HIPIFY_DIR}/src/device/common.cu.cpp
+  DEPENDS ${HIPIFY_DIR}/src/device/common.cu.cpp ${LDS_TRANSFORM_STAMP}
   COMMENT "DL compile dispatcher: common.cu.cpp -> assembly (with -g)"
   VERBATIM
 )
@@ -318,7 +339,7 @@ add_custom_command(
     -w
     -c -o ${COMMON_FAT_OBJ}
     ${HIPIFY_DIR}/src/device/common.cu.cpp
-  DEPENDS ${DEVICE_HIPFB} ${HIPIFY_DIR}/src/device/common.cu.cpp
+  DEPENDS ${DEVICE_HIPFB} ${HIPIFY_DIR}/src/device/common.cu.cpp ${LDS_TRANSFORM_STAMP}
   COMMENT "DL host compile: common.cu.cpp with embedded device binary"
   VERBATIM
 )
@@ -341,7 +362,7 @@ add_custom_command(
     -w
     -c -o ${ONERANK_FAT_OBJ}
     ${HIPIFY_DIR}/src/device/onerank.cu.cpp
-  DEPENDS ${HIPIFY_DIR}/src/device/onerank.cu.cpp
+  DEPENDS ${HIPIFY_DIR}/src/device/onerank.cu.cpp ${LDS_TRANSFORM_STAMP}
   COMMENT "DL compile: onerank.cu.cpp (normal fat object)"
   VERBATIM
 )
@@ -384,7 +405,7 @@ foreach(ENTRY ${SPECIALIZED_ENTRIES})
       -emit-llvm -S
       -o ${IR_OUT}
       ${SRC}
-    DEPENDS ${SRC}
+    DEPENDS ${SRC} ${LDS_TRANSFORM_STAMP}
     COMMENT "DL IR: ${CPP_FILE}"
     VERBATIM
   )

@@ -35,6 +35,16 @@ using u32_gptr = __attribute__((address_space(1))) uint32_t*;
 using u16_gptr = __attribute__((address_space(1))) uint16_t*;
 using u8_gptr = __attribute__((address_space(1))) uint8_t*;
 
+// Global (address_space(1)) pointer type. Ensures global_load/global_store/
+// global_atomic instructions instead of flat_ variants.
+#if defined(__HIP_DEVICE_COMPILE__)
+template<typename T>
+using GPtr = __attribute__((address_space(1))) T*;
+#else
+template<typename T>
+using GPtr = T*;
+#endif
+
 // LDS (address_space(3)) pointer type. Casting to LDSPtr<T> tells the compiler
 // to emit ds_read/ds_write instructions rather than flat_load/flat_store.
 // On the host, LDSPtr<T> is just T* since address_space(3) is device-only.
