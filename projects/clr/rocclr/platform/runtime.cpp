@@ -5,6 +5,7 @@
  */
 
 #include "platform/runtime.hpp"
+#include "platform/activity.hpp"
 #include "os/os.hpp"
 #include "thread/thread.hpp"
 #include "device/device.hpp"
@@ -83,6 +84,7 @@ void Runtime::tearDown() {
   Device::tearDown();
   option::teardown();
   Flag::tearDown();
+  amd::activity_prof::TearDownActivityDumpFile();
   if (outFile != stderr && outFile != nullptr) {
     fclose(outFile);
   }

@@ -8,12 +8,81 @@
 #include "platform/command.hpp"
 #include "platform/commandqueue.hpp"
 #include "platform/command_utils.hpp"
+#include "os/os.hpp"
+#include "utils/flags.hpp"
 
 #include <atomic>
+#include <cstdio>
+#include <mutex>
+#include <string>
 
 namespace amd::activity_prof {
 
 decltype(report_activity) report_activity{nullptr};
+
+static FILE* activityDumpFile = nullptr;
+static std::once_flag activityDumpFileInitFlag;
+
+static const char* opIdToString(activity_op_t op) {
+  switch (op) {
+    case OP_ID_DISPATCH: return "DISPATCH";
+    case OP_ID_COPY:     return "COPY";
+    case OP_ID_BARRIER:  return "BARRIER";
+    default:             return "UNKNOWN";
+  }
+}
+
+static void DumpActivityRecord(const activity_record_t& record) {
+  std::call_once(activityDumpFileInitFlag, []() { InitActivityDumpFile(); });
+  if (activityDumpFile == nullptr) return;
+
+  const char* kindStr = getOclCommandKindString(static_cast<cl_command_type>(record.kind));
+  if (record.op == OP_ID_DISPATCH) {
+    fprintf(activityDumpFile,
+            "domain=%u kind=%s op=%s corr_id=%lu begin_ns=%lu end_ns=%lu "
+            "duration_ns=%lu device_id=%d queue_id=%lu kernel_name=%s\n",
+            record.domain, kindStr, opIdToString(record.op),
+            static_cast<unsigned long>(record.correlation_id),
+            static_cast<unsigned long>(record.begin_ns),
+            static_cast<unsigned long>(record.end_ns),
+            static_cast<unsigned long>(record.end_ns - record.begin_ns),
+            record.device_id,
+            static_cast<unsigned long>(record.queue_id),
+            record.kernel_name ? record.kernel_name : "(null)");
+  } else {
+    fprintf(activityDumpFile,
+            "domain=%u kind=%s op=%s corr_id=%lu begin_ns=%lu end_ns=%lu "
+            "duration_ns=%lu device_id=%d queue_id=%lu bytes=%zu\n",
+            record.domain, kindStr, opIdToString(record.op),
+            static_cast<unsigned long>(record.correlation_id),
+            static_cast<unsigned long>(record.begin_ns),
+            static_cast<unsigned long>(record.end_ns),
+            static_cast<unsigned long>(record.end_ns - record.begin_ns),
+            record.device_id,
+            static_cast<unsigned long>(record.queue_id),
+            record.bytes);
+  }
+  fflush(activityDumpFile);
+}
+
+void InitActivityDumpFile() {
+  if (flagIsDefault(DEBUG_HIP_DUMP_ACTIVITY_RECORDS)) return;
+  std::string fileName = DEBUG_HIP_DUMP_ACTIVITY_RECORDS;
+  if (fileName.empty()) return;
+  std::string pid = std::to_string(amd::Os::getProcessId());
+  fileName = fileName + "_" + pid;
+  activityDumpFile = fopen(fileName.c_str(), "a");
+  if (activityDumpFile == nullptr) {
+    activityDumpFile = fopen(("activity_records_" + pid + ".txt").c_str(), "a");
+  }
+}
+
+void TearDownActivityDumpFile() {
+  if (activityDumpFile != nullptr) {
+    fclose(activityDumpFile);
+    activityDumpFile = nullptr;
+  }
+}
 
 #if defined(__linux__)
 __thread activity_correlation_id_t correlation_id __attribute__((tls_model("initial-exec"))) = 0;
@@ -96,11 +165,13 @@ void ReportActivity(const amd::Command& command) {
       record.begin_ns = it.first;
       record.end_ns = it.second;
       record.kernel_name = kernel_names[i] != nullptr ? kernel_names[i]->c_str() : "";
+      DumpActivityRecord(record);
       function(ACTIVITY_DOMAIN_HIP_OPS, operation_id, &record);
     }
   } else {
     record.begin_ns = command.profilingInfo().start_;
     record.end_ns = command.profilingInfo().end_;
+    DumpActivityRecord(record);
     function(ACTIVITY_DOMAIN_HIP_OPS, operation_id, &record);
   }
 }
