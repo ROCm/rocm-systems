@@ -147,7 +147,8 @@ struct GpuMetricsInfo {
   uint32_t current_socclk;         // SOC_CLK sensor
 
   // Fan
-  uint32_t current_fan_speed;      // FAN_RPM sensor
+  uint32_t current_fan_speed;         // FAN_RPM sensor (revolutions per minute)
+  uint32_t current_fan_speed_percent; // FAN_PERCENTAGE sensor (0-100 %)
 
   // Voltages (mV)
   uint32_t voltage_soc;            // SOC_VOLTAGE sensor
