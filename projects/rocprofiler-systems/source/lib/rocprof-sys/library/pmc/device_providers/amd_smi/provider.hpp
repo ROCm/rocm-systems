@@ -72,18 +72,19 @@ private:
     }
 
     /**
-     * @brief Get processor handles of a specific type for a socket.
+     * @brief Get GPU processor handles for a socket.
+     *
+     * Uses the standard amdsmi_get_processor_handles() which is available on all
+     * ROCm versions and returns only GPU processors.
      *
      * @param socket_handle Socket to query.
-     * @param processor_type Type of processor to enumerate.
-     * @return Vector of processor handles of the specified type (empty if none found).
+     * @return Vector of GPU processor handles (empty if none found).
      */
-    [[nodiscard]] std::vector<amdsmi_processor_handle> get_processor_handles_for_socket(
-        amdsmi_socket_handle socket_handle, processor_type_t processor_type)
+    [[nodiscard]] std::vector<amdsmi_processor_handle> get_gpu_handles_for_socket(
+        amdsmi_socket_handle socket_handle)
     {
-        uint32_t count  = 0;
-        auto     status = m_driver_api->get_processor_handles_by_type(
-            socket_handle, processor_type, nullptr, &count);
+        uint32_t count = 0;
+        auto status = m_driver_api->get_processor_handles(socket_handle, &count, nullptr);
 
         if(status != AMDSMI_STATUS_SUCCESS || count == 0)
         {
@@ -91,8 +92,8 @@ private:
         }
 
         std::vector<amdsmi_processor_handle> handles(count);
-        status = m_driver_api->get_processor_handles_by_type(
-            socket_handle, processor_type, handles.data(), &count);
+        status =
+            m_driver_api->get_processor_handles(socket_handle, &count, handles.data());
 
         if(status != AMDSMI_STATUS_SUCCESS)
         {
@@ -102,16 +103,49 @@ private:
         return handles;
     }
 
+#if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
     /**
-     * @brief Enumerate devices of a specific processor type.
+     * @brief Get NIC processor handles for a socket.
+     *
+     * Uses amdsmi_get_processor_handles_by_type() which is only available on
+     * AMD SMI >= 26.3 (ROCm 7.0+).
+     *
+     * @param socket_handle Socket to query.
+     * @return Vector of NIC processor handles (empty if none found).
+     */
+    [[nodiscard]] std::vector<amdsmi_processor_handle> get_nic_handles_for_socket(
+        amdsmi_socket_handle socket_handle)
+    {
+        uint32_t count  = 0;
+        auto     status = m_driver_api->get_processor_handles_by_type(
+            socket_handle, AMDSMI_PROCESSOR_TYPE_AMD_NIC, nullptr, &count);
+
+        if(status != AMDSMI_STATUS_SUCCESS || count == 0)
+        {
+            return {};
+        }
+
+        std::vector<amdsmi_processor_handle> handles(count);
+        status = m_driver_api->get_processor_handles_by_type(
+            socket_handle, AMDSMI_PROCESSOR_TYPE_AMD_NIC, handles.data(), &count);
+
+        if(status != AMDSMI_STATUS_SUCCESS)
+        {
+            return {};
+        }
+
+        return handles;
+    }
+#endif
+
+    /**
+     * @brief Enumerate GPU devices across all sockets.
      *
      * @tparam Device The device type to create.
-     * @param processor_type AMD SMI processor type.
-     * @return Vector of shared pointers to device objects.
+     * @return Vector of shared pointers to GPU device objects.
      */
     template <typename Device>
-    [[nodiscard]] std::vector<std::shared_ptr<Device>> enumerate_devices(
-        processor_type_t processor_type)
+    [[nodiscard]] std::vector<std::shared_ptr<Device>> enumerate_gpu_devices()
     {
         std::vector<std::shared_ptr<Device>> devices;
 
@@ -120,18 +154,47 @@ private:
 
         for(auto& socket_handle : socket_handles)
         {
-            auto handles =
-                get_processor_handles_for_socket(socket_handle, processor_type);
+            auto handles = get_gpu_handles_for_socket(socket_handle);
             for(auto& handle : handles)
             {
-                devices.push_back(std::make_shared<Device>(m_driver_api, handle,
-                                                           processor_type, index));
+                devices.push_back(std::make_shared<Device>(
+                    m_driver_api, handle, AMDSMI_PROCESSOR_TYPE_AMD_GPU, index));
                 index++;
             }
         }
 
         return devices;
     }
+
+#if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
+    /**
+     * @brief Enumerate NIC devices across all sockets.
+     *
+     * @tparam Device The device type to create.
+     * @return Vector of shared pointers to NIC device objects.
+     */
+    template <typename Device>
+    [[nodiscard]] std::vector<std::shared_ptr<Device>> enumerate_nic_devices()
+    {
+        std::vector<std::shared_ptr<Device>> devices;
+
+        auto   socket_handles = get_socket_handles();
+        size_t index          = 0;
+
+        for(auto& socket_handle : socket_handles)
+        {
+            auto handles = get_nic_handles_for_socket(socket_handle);
+            for(auto& handle : handles)
+            {
+                devices.push_back(std::make_shared<Device>(
+                    m_driver_api, handle, AMDSMI_PROCESSOR_TYPE_AMD_NIC, index));
+                index++;
+            }
+        }
+
+        return devices;
+    }
+#endif
 
     std::shared_ptr<typename DriverFactory::driver_t>
             m_driver_api;  ///< Driver API instance
@@ -233,22 +296,17 @@ public:
     template <typename Device>
     [[nodiscard]] std::vector<std::shared_ptr<Device>> get_devices(device_type type)
     {
-        processor_type_t proc_type{};
         if(type == device_type::GPU)
         {
-            proc_type = AMDSMI_PROCESSOR_TYPE_AMD_GPU;
+            return enumerate_gpu_devices<Device>();
         }
 #if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
-        else if(type == device_type::NIC)
+        if(type == device_type::NIC)
         {
-            proc_type = AMDSMI_PROCESSOR_TYPE_AMD_NIC;
+            return enumerate_nic_devices<Device>();
         }
 #endif
-        else
-        {
-            return {};  // Unsupported device type
-        }
-        return enumerate_devices<Device>(proc_type);
+        return {};  // Unsupported device type
     }
 };
 
