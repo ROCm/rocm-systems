@@ -118,6 +118,45 @@ if(LibElf_FOUND AND LibDwarf_FOUND AND (NOT ENABLE_DEBUGINFOD OR LibDebuginfod_F
         set(_eu_lib_dirs ${LibElf_LIBRARY_DIRS} ${LibDwarf_LIBRARY_DIRS})
         set(_eu_libs ${LibElf_LIBRARIES} ${LibDwarf_LIBRARIES})
     endif()
+
+    # Create standard Elfutils::Elfutils target if it doesn't exist
+    # Dyninst expects this target but system packages may not provide it
+    if(NOT TARGET Elfutils::Elfutils)
+        rocprofiler_systems_message(
+            STATUS
+                "Creating standard Elfutils::Elfutils target from system LibElf/LibDwarf (target not provided by package)"
+        )
+
+        add_library(Elfutils::Elfutils INTERFACE IMPORTED)
+
+        # Link to the individual LibElf and LibDwarf targets
+        if(TARGET LibElf::LibElf AND TARGET LibDwarf::LibDwarf)
+            target_link_libraries(
+                Elfutils::Elfutils
+                INTERFACE LibElf::LibElf LibDwarf::LibDwarf
+            )
+            if(ENABLE_DEBUGINFOD AND TARGET LibDebuginfod::LibDebuginfod)
+                target_link_libraries(
+                    Elfutils::Elfutils
+                    INTERFACE LibDebuginfod::LibDebuginfod
+                )
+            endif()
+        else()
+            # Fallback: use raw libraries and include dirs
+            set_target_properties(
+                Elfutils::Elfutils
+                PROPERTIES
+                    INTERFACE_LINK_LIBRARIES "${_eu_libs}"
+                    INTERFACE_INCLUDE_DIRECTORIES "${_eu_inc_dirs}"
+            )
+            if(_eu_lib_dirs)
+                set_target_properties(
+                    Elfutils::Elfutils
+                    PROPERTIES INTERFACE_LINK_DIRECTORIES "${_eu_lib_dirs}"
+                )
+            endif()
+        endif()
+    endif()
 elseif(NOT (LibElf_FOUND AND LibDwarf_FOUND) AND STERILE_BUILD)
     rocprofiler_systems_message(
         FATAL_ERROR
