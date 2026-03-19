@@ -2019,41 +2019,47 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
 
 amdsmi_status_t amdsmi_get_gpu_fan_rpms(amdsmi_processor_handle processor_handle,
                             uint32_t sensor_ind, int64_t *speed) {
-    return rsmi_wrapper(rsmi_dev_fan_rpms_get, processor_handle, 0,
-                        sensor_ind, speed);
+    if (speed == nullptr) return AMDSMI_STATUS_INVAL;
+    auto *device = reinterpret_cast<Device *>(processor_handle);
+    if (device == nullptr) return AMDSMI_STATUS_INVAL;
+    GpuMetricsInfo m{};
+    auto code = device->QueryGpuMetricsInfo(&m);
+    if (code != ErrorCode::Success) return translateCodeToSmiStatus(code);
+    if (m.current_fan_speed == UINT32_MAX) return AMDSMI_STATUS_NOT_SUPPORTED;
+    *speed = static_cast<int64_t>(m.current_fan_speed);
+    return AMDSMI_STATUS_SUCCESS;
 }
 
 amdsmi_status_t amdsmi_get_gpu_fan_speed(amdsmi_processor_handle processor_handle,
                                         uint32_t sensor_ind, int64_t *speed) {
-    return rsmi_wrapper(rsmi_dev_fan_speed_get, processor_handle, 0,
-                        sensor_ind, speed);
+    if (speed == nullptr) return AMDSMI_STATUS_INVAL;
+    auto *device = reinterpret_cast<Device *>(processor_handle);
+    if (device == nullptr) return AMDSMI_STATUS_INVAL;
+    GpuMetricsInfo m{};
+    auto code = device->QueryGpuMetricsInfo(&m);
+    if (code != ErrorCode::Success) return translateCodeToSmiStatus(code);
+    if (m.current_fan_speed_percent == UINT32_MAX) return AMDSMI_STATUS_NOT_SUPPORTED;
+    // amdsmi fan speed is expressed as a PWM value 0-255 (percentage * 255 / 100)
+    *speed = static_cast<int64_t>(m.current_fan_speed_percent) * 255 / 100;
+    return AMDSMI_STATUS_SUCCESS;
 }
 
 amdsmi_status_t amdsmi_get_gpu_fan_speed_max(amdsmi_processor_handle processor_handle,
                                     uint32_t sensor_ind, uint64_t *max_speed) {
-    return rsmi_wrapper(rsmi_dev_fan_speed_max_get, processor_handle, 0,
-                        sensor_ind, max_speed);
+    if (max_speed == nullptr) return AMDSMI_STATUS_INVAL;
+    // Fan speed max is always 255 (full PWM range) when using percentage-based sensors
+    *max_speed = 255;
+    return AMDSMI_STATUS_SUCCESS;
 }
 
 amdsmi_status_t amdsmi_reset_gpu_fan(amdsmi_processor_handle processor_handle,
                                     uint32_t sensor_ind) {
-    return rsmi_wrapper(rsmi_dev_fan_reset, processor_handle, 0,
-                        sensor_ind);
+    return AMDSMI_STATUS_NOT_SUPPORTED;
 }
 
 amdsmi_status_t amdsmi_set_gpu_fan_speed(amdsmi_processor_handle processor_handle,
                                 uint32_t sensor_ind, uint64_t speed) {
-
-    // Bare Metal and passthrough only feature
-    amdsmi_virtualization_mode_t virt_mode;
-    if (amdsmi_get_gpu_virtualization_mode(processor_handle, &virt_mode) == AMDSMI_STATUS_SUCCESS) {
-        if (virt_mode == AMDSMI_VIRTUALIZATION_MODE_GUEST) {
-        return AMDSMI_STATUS_NOT_SUPPORTED;
-        }
-    }
-
-    return rsmi_wrapper(rsmi_dev_fan_speed_set, processor_handle, 0,
-                        sensor_ind, speed);
+    return AMDSMI_STATUS_NOT_SUPPORTED;
 }
 
 amdsmi_status_t amdsmi_get_gpu_id(amdsmi_processor_handle processor_handle,
