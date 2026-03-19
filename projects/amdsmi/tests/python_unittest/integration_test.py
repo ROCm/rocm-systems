@@ -248,7 +248,10 @@ class TestAmdSmiPython(unittest.TestCase):
         try:
             ret = amdsmi.amdsmi_get_socket_info(socket)
             self.common.print(msg, ret)
-            self.common.check_ret("", "", self.common.PASS)
+            self.fail(
+                f"{msg} Expected an exception for invalid socket index {socket}, "
+                f"but call succeeded with ret {ret}"
+            )
         except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
             if self.common.check_ret(msg, e, self.common.FAIL):
                 self.raise_exception = e
@@ -290,7 +293,10 @@ class TestAmdSmiPython(unittest.TestCase):
         try:
             ret = amdsmi.amdsmi_get_processor_handles_by_type(socket, processor_type)
             self.common.print(msg, ret)
-            self.common.check_ret("", "", self.common.PASS)
+            self.fail(
+                f"{msg} Expected an exception for invalid inputs (socket={socket}, "
+                f"processor_type=UNKNOWN), but call succeeded with ret {ret}"
+            )
         except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
             if self.common.check_ret(msg, e, self.common.FAIL):
                 self.raise_exception = e
@@ -325,21 +331,12 @@ class TestAmdSmiPython(unittest.TestCase):
     def test_utilization_count(self):
         self.common.print_func_name("")
 
-        if self.common.TODO_SKIP_FAIL:
-            msg = "\tSkipping test_gpu_event as it fails (Unexpected Data)."
-            self.common.print(msg)
-            self.skipTest(msg)
-
         util_good_counter_types = [
             amdsmi.AmdSmiUtilizationCounterType.COARSE_GRAIN_GFX_ACTIVITY,
             amdsmi.AmdSmiUtilizationCounterType.COARSE_GRAIN_MEM_ACTIVITY,
             amdsmi.AmdSmiUtilizationCounterType.COARSE_DECODER_ACTIVITY,
         ]
-        util_bad_counter_types = [
-            amdsmi.AmdSmiUtilizationCounterType.COARSE_GRAIN_GFX_ACTIVITY,
-            amdsmi.AmdSmiTemperatureMetric.CURRENT,
-            amdsmi.AmdSmiUtilizationCounterType.COARSE_DECODER_ACTIVITY,
-        ]
+        util_bad_counter_types = [amdsmi.AmdSmiTemperatureMetric.CURRENT]
 
         for i, gpu in enumerate(self.common.processors):
             self.common.print_device_header(i)
@@ -357,7 +354,11 @@ class TestAmdSmiPython(unittest.TestCase):
             try:
                 util_count = amdsmi.amdsmi_get_utilization_count(gpu, util_bad_counter_types)
                 self.common.print(msg, util_count)
-                self.common.check_ret("", "", self.common.PASS)
+                self.fail(
+                    f"{msg} Expected an exception for invalid counter type list "
+                    f"(mixed AmdSmiTemperatureMetric in util_bad_counter_types), "
+                    f"but call succeeded with util_count {util_count}"
+                )
             except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
                 if self.common.check_ret(msg, e, self.common.ANY_FAIL):
                     self.raise_exception = e
@@ -571,12 +572,24 @@ class TestAmdSmiPython(unittest.TestCase):
 
         for i, gpu in enumerate(self.common.processors):
             self.common.print_device_header(i)
+            # amdsmi_set_clk_freq() accepts only these specific string names.
+            # AmdSmiClkType enum names (e.g. SYS/MEM/DF/SOC) are not accepted;
+            # map only the supported ones and skip the rest.
+            clk_type_str_map = {"SYS": "sclk", "MEM": "mclk", "DF": "fclk", "SOC": "socclk"}
             for clk_type_name, clk_type, clk_cond in self.common.clk_types:
+                clk_type_str = clk_type_str_map.get(clk_type_name)
+                if clk_type_str is None:
+                    # No string mapping for this clock type; amdsmi_set_clk_freq
+                    # would raise AmdSmiParameterException before reaching the API.
+                    self.common.print(
+                        f"\t### amdsmi_set_clk_freq(gpu={i}, clk_type={clk_type_name}): skipped (no string mapping)"
+                    )
+                    continue
                 # Set invalid clock frequency
                 try:
                     freq_bitmask = 0x1234
-                    msg = f"\t### amdsmi_set_clk_freq(gpu={i}, clk_type={clk_type_name}, freq_bitmask={freq_bitmask}):"
-                    ret = amdsmi.amdsmi_set_clk_freq(gpu, clk_type_name, freq_bitmask)
+                    msg = f"\t### amdsmi_set_clk_freq(gpu={i}, clk_type={clk_type_str}, freq_bitmask={freq_bitmask}):"
+                    ret = amdsmi.amdsmi_set_clk_freq(gpu, clk_type_str, freq_bitmask)
                     self.common.print(msg, "")
                     self.common.check_ret("", "", self.common.FAIL)
                 except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
@@ -604,8 +617,8 @@ class TestAmdSmiPython(unittest.TestCase):
                     # Set clock frequency for each frequency supported
                     try:
                         freq_bitmask = frequencies[index]
-                        msg = f"\t### amdsmi_set_clk_freq(gpu={i}, clk_type={clk_type_name}, freq_bitmask={freq_bitmask}):"
-                        ret = amdsmi.amdsmi_set_clk_freq(gpu, clk_type_name, freq_bitmask)
+                        msg = f"\t### amdsmi_set_clk_freq(gpu={i}, clk_type={clk_type_str}, freq_bitmask={freq_bitmask}):"
+                        ret = amdsmi.amdsmi_set_clk_freq(gpu, clk_type_str, freq_bitmask)
                         self.common.print(msg, ret)
                         self.common.check_ret("", "", self.common.PASS)
                     except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
@@ -616,8 +629,8 @@ class TestAmdSmiPython(unittest.TestCase):
                 # Set clock frequency back
                 try:
                     freq_bitmask = frequencies[current]
-                    msg = f"\t### amdsmi_set_clk_freq(gpu={i}, clk_type={clk_type_name}, freq_bitmask={freq_bitmask}):"
-                    ret = amdsmi.amdsmi_set_clk_freq(gpu, clk_type_name, freq_bitmask)
+                    msg = f"\t### amdsmi_set_clk_freq(gpu={i}, clk_type={clk_type_str}, freq_bitmask={freq_bitmask}):"
+                    ret = amdsmi.amdsmi_set_clk_freq(gpu, clk_type_str, freq_bitmask)
                     self.common.print(msg, ret)
                     self.common.check_ret("", "", self.common.PASS)
                 except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
