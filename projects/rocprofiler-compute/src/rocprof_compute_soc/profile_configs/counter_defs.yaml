@@ -6310,6 +6310,7 @@ rocprofiler-sdk:
       - gfx1101
       - gfx1102
       - gfx1151
+      - gfx1152
       - gfx12
       - gfx1200
       - gfx1201
@@ -6338,6 +6339,7 @@ rocprofiler-sdk:
       - gfx1101
       - gfx1102
       - gfx1151
+      - gfx1152
       - gfx12
       - gfx1200
       - gfx1201
@@ -6366,6 +6368,7 @@ rocprofiler-sdk:
       - gfx1101
       - gfx1102
       - gfx1151
+      - gfx1152
       - gfx12
       - gfx1200
       - gfx1201
@@ -6592,6 +6595,7 @@ rocprofiler-sdk:
       - gfx1101
       - gfx1102
       - gfx1151
+      - gfx1152
       - gfx12
       - gfx1200
       - gfx1201
