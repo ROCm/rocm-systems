@@ -43,10 +43,14 @@
 #include <hsa/hsa_ven_amd_loader.h>
 
 #include <atomic>
+#include <condition_variable>
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
+#include <thread>
 #include <unordered_map>
+#include <vector>
 
 namespace rocprofiler
 {
@@ -128,6 +132,8 @@ public:
 
     void create_signal(uint32_t attribute, hsa_signal_t* signal) const;
     void signal_async_handler(const hsa_signal_t& signal, void* data) const;
+    void retire_signal(hsa_signal_t signal) const;
+    void drain_retired_signals() const;
 
     template <typename FuncT>
     void signal_callback(FuncT&& func) const;
@@ -143,8 +149,20 @@ public:
     // Tracks the number of in flight kernel executions we
     // are waiting on. We cannot destroy Queue until all kernels
     // have comleted.
-    void    async_started() { _core_api.hsa_signal_add_relaxed_fn(_active_kernels, 1); }
-    void    async_complete() { _core_api.hsa_signal_subtract_relaxed_fn(_active_kernels, 1); }
+    void    interceptor_started()
+    {
+        _active_async_packets.fetch_add(1, std::memory_order_acq_rel);
+    }
+    void interceptor_complete()
+    {
+        _active_async_packets.fetch_sub(1, std::memory_order_acq_rel);
+    }
+    int64_t active_interceptors() const
+    {
+        return _active_async_packets.load(std::memory_order_acquire);
+    }
+    void async_started() { _core_api.hsa_signal_add_relaxed_fn(_active_kernels, 1); }
+    void async_complete() { _core_api.hsa_signal_subtract_relaxed_fn(_active_kernels, 1); }
     int64_t active_async_packets() const
     {
         return _core_api.hsa_signal_load_scacquire_fn(_active_kernels);
@@ -161,7 +179,7 @@ public:
     hsa_signal_t                    block_signal;
     hsa_signal_t                    ready_signal;
     queue_state                     get_state() const;
-    void                            set_state(queue_state state);
+    void                            set_state(queue_state state) const;
 
 private:
     std::atomic<int>                     _notifiers            = {0};
@@ -171,7 +189,9 @@ private:
     const AgentCache&                    _agent;
     common::Synchronized<callback_map_t> _callbacks       = {};
     hsa_queue_t*                         _intercept_queue = nullptr;
-    queue_state                          _state           = queue_state::normal;
+    mutable std::atomic<queue_state>     _state           = queue_state::normal;
+    mutable std::mutex                   _retired_signals_mutex;
+    mutable std::vector<hsa_signal_t>    _retired_signals = {};
     std::mutex                           _lock_queue;
     hsa_signal_t                         _active_kernels = {.handle = 0};
 };

@@ -30,6 +30,8 @@
 
 #include <rocprofiler-sdk/fwd.h>
 
+#include <vector>
+
 namespace rocprofiler
 {
 namespace context
@@ -47,7 +49,7 @@ get_correlation_id_map()
 auto&
 get_latest_correlation_id_impl()
 {
-    static thread_local auto _v = common::container::small_vector<correlation_id*, 16>{};
+    static thread_local auto _v = std::vector<correlation_id*>{};
     return _v;
 }
 
