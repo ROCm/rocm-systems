@@ -124,7 +124,8 @@ bool KernelParameters::captureHIPArgs(address kernArgs, size_t kernArgsSize, add
   size_t copySize = std::min(kernArgsSize, signature_.paramsSize());
   ::memcpy(mem, kernArgs, copySize);
 
-  // Zero out any remaining space in the kernel parameter buffer that wasn't overwritten by the user arguments, to ensure deterministic behavior if the kernel reads from those bytes.
+  // Zero out any remaining space in the kernel parameter buffer that wasn't overwritten by the user
+  // arguments, to ensure deterministic behavior if the kernel reads from those bytes.
   ::memset(mem + copySize, 0, signature_.paramsSize() - copySize);
 
   // After the parameters have been registered, go through and capture the memory objects.
