@@ -40,6 +40,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
 
 jobs:
@@ -50,7 +51,7 @@ jobs:
       matrix_data: ${{ steps.generate_matrix_ci.outputs.matrix_data }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           sparse-checkout: projects/rocprofiler-systems/docker
 
@@ -71,7 +72,7 @@ jobs:
         include: ${{ fromJSON(needs.prepare_matrix_ci.outputs.matrix_data) }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           sparse-checkout: projects/rocprofiler-systems/docker
           submodules: recursive
@@ -132,7 +133,7 @@ jobs:
       matrix_data: ${{ steps.generate_matrix_release.outputs.matrix_data }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           sparse-checkout: projects/rocprofiler-systems
 
@@ -153,7 +154,7 @@ jobs:
         include: ${{ fromJSON(needs.prepare_matrix_release.outputs.matrix_data) }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           sparse-checkout: projects/rocprofiler-systems
 

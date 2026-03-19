@@ -33,6 +33,9 @@ on:
       - '!docs/**'
       - '!projects/*/docs/**'
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   prepare_matrix_ci:
     if: github.repository == 'ROCm/rocm-systems'
@@ -41,7 +44,7 @@ jobs:
       matrix_data: ${{ steps.generate_matrix_ci_base.outputs.matrix_data }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           sparse-checkout: projects/rocprofiler-systems/docker
 
