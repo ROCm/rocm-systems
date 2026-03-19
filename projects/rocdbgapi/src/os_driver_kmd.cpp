@@ -21,6 +21,7 @@
 #include "debug.h"
 #include "logging.h"
 #include "os_driver.h"
+#include "utils_windows.h"
 
 /* Make sure we use the STATUS_XXX constants from ntstatus.h.  Some of
    the constants we use (but not all) are defined in winnt.h too, but
@@ -1344,28 +1345,17 @@ kmd_driver_t::get_adapter_name (D3DKMT_HANDLE adapter) const
   query_info.pPrivateDriverData = &adapter_reg_info;
   query_info.PrivateDriverDataSize = sizeof (D3DKMT_ADAPTERREGISTRYINFO);
 
-  if (m_d3d.api.query_adapter_info (&query_info) != STATUS_SUCCESS)
-    return "<unknown>";
+  if (m_d3d.api.query_adapter_info (&query_info) == STATUS_SUCCESS)
+    {
+      size_t wide_len = ::wcsnlen (adapter_reg_info.AdapterString,
+                                   std::size (adapter_reg_info.AdapterString));
+      std::wstring_view ws (adapter_reg_info.AdapterString, wide_len);
+      std::string name = utils::convert_to_string (ws);
+      if (!name.empty ())
+        return name;
+    }
 
-  size_t wide_len = ::wcsnlen (adapter_reg_info.AdapterString,
-                               std::size (adapter_reg_info.AdapterString));
-  if (wide_len == 0)
-    return "<unknown>";
-
-  int size_needed
-    = WideCharToMultiByte (CP_ACP, 0, adapter_reg_info.AdapterString,
-                           (int)wide_len, nullptr, 0,
-                           nullptr, nullptr);
-  if (size_needed <= 0)
-    return "<unknown>";
-
-  std::string result (size_needed, '\0');
-  int size
-    = WideCharToMultiByte (CP_ACP, 0, adapter_reg_info.AdapterString,
-                           (int)wide_len, &result[0], size_needed,
-                           "?", nullptr);
-  dbgapi_assert (size == size_needed);
-  return result;
+  return "<unknown>";
 }
 
 amd_dbgapi_status_t
