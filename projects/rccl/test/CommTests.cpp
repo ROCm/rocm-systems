@@ -130,8 +130,8 @@ TEST_F(TrafficClassMPITest, ConfiguredTrafficClass)
     buf << log.rdbuf();
     unlink(tmpfile);
 
-    ASSERT_NE(buf.str().find("NET: Configured trafficClass=46"), std::string::npos)
-        << "NET plugin log not found. Set NCCL_DEBUG=INFO.";
+    ASSERT_NE(buf.str().find("Traffic class set to 46"), std::string::npos)
+        << "Traffic class log not found. Set NCCL_DEBUG=INFO.";
 }
 
 #endif // MPI_TESTS_ENABLED
