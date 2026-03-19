@@ -26,48 +26,44 @@ import sys
 import pytest
 
 
-def test_perfetto_data(pftrace_data, json_data):
+def test_summary_region_category_kernel(summary_kernel_dir):
+    """Test that --region-categories KERNEL only produces kernel summaries."""
     import rocprofiler_sdk.tests.rocprofv3 as rocprofv3
 
-    rocprofv3.test_perfetto_data(
-        pftrace_data,
-        json_data,
-        ("hip", "marker", "kernel", "memory_copy"),
+    rocprofv3.test_summary_region_category_filtering(
+        summary_kernel_dir,
+        expected_categories=["kernel"],
     )
 
 
-def test_otf2_data(otf2_data, json_data):
+def test_summary_region_category_hip(summary_hip_dir):
+    """Test that --region-categories HIP only produces HIP summaries."""
     import rocprofiler_sdk.tests.rocprofv3 as rocprofv3
 
-    rocprofv3.test_otf2_data(
-        otf2_data,
-        json_data,
-        ("hip", "marker", "kernel", "memory_copy", "memory_allocation"),
+    rocprofv3.test_summary_region_category_filtering(
+        summary_hip_dir,
+        expected_categories=["hip"],
     )
 
 
-def test_otf2_system_tree_node_data(otf2_system_tree_node_data):
+def test_summary_region_category_multiple(summary_multiple_dir):
+    """Test that --region-categories HIP KERNEL produces those summaries."""
     import rocprofiler_sdk.tests.rocprofv3 as rocprofv3
 
-    rocprofv3.test_otf2_system_tree_node(
-        otf2_system_tree_node_data,
+    rocprofv3.test_summary_region_category_filtering(
+        summary_multiple_dir,
+        expected_categories=["hip", "kernel"],
     )
 
 
-def test_csv_data(csv_data, json_data):
+def test_summary_region_category_none(summary_none_dir):
+    """Test that --region-categories NONE includes views but no regions."""
     import rocprofiler_sdk.tests.rocprofv3 as rocprofv3
 
-    rocprofv3.test_csv_data(
-        csv_data,
-        json_data,
-        (
-            "agent",
-            "counter_collection",
-            "kernel",
-            "memory_allocation",
-            "memory_copy",
-            "regions",
-        ),
+    rocprofv3.test_summary_region_category_filtering(
+        summary_none_dir,
+        expected_categories=["kernel", "memory"],
+        allow_none=True,
     )
 
 
