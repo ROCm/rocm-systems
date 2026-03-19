@@ -266,6 +266,7 @@ if(BUILD_TESTS)
       transport/ShmMPITests.cpp
       transport/NetIbMPITests.cpp
       ImplicitLaunchOrderMPITests.cpp
+      CommTests.cpp
       RegistrationMPITests.cpp
     )
 
