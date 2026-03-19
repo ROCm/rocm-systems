@@ -65,7 +65,7 @@ rocprof-sys-run -- ./user-api 10 4 1000
 For binary rewrite instrumentation:
 
 ```bash
-rocprof-sys-instrument -v 2 -l --min-instructions=8 -E custom_push_region \
+rocprof-sys-instrument -l --min-instructions=8 -E custom_push_region \
     -o user-api.inst -- ./user-api
 ./user-api.inst 10 4 1000
 ```
