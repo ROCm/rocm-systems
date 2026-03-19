@@ -269,8 +269,7 @@ def get_views() -> list[TextClause]:
         select(
             Kernel.kernel_uuid,
             (Dispatch.end_timestamp - Dispatch.start_timestamp).label("duration"),
-            func
-            .row_number()
+            func.row_number()
             .over(
                 partition_by=Kernel.kernel_uuid,
                 order_by=Dispatch.end_timestamp - Dispatch.start_timestamp,

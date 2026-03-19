@@ -122,6 +122,7 @@ def convert_dbs_to_csv(
                             f"from {db_path}: {e}"
                         )
 
+
 def _is_cycle_counter(name: str) -> bool:
     """Identify counters that measure cycles (scale with kernel duration).
 
@@ -135,6 +136,7 @@ def _is_cycle_counter(name: str) -> bool:
         return True
     cycle_keywords = ("CYCLES", "BUSY", "ACTIVE", "STALL", "WAIT", "ACCUM")
     return any(kw in upper for kw in cycle_keywords)
+
 
 def process_rocpd_csv(df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -161,15 +163,15 @@ def process_rocpd_csv(df: pd.DataFrame) -> pd.DataFrame:
         # to make cross-pass ratios accurate. Event-based counters (instruction
         # counts, cache requests, wave counts) are deterministic per dispatch
         # and are left unscaled.
-        durations = (
-            group_df["End_Timestamp"] - group_df["Start_Timestamp"]
-        ).astype(float)
+        durations = (group_df["End_Timestamp"] - group_df["Start_Timestamp"]).astype(
+            float
+        )
         ref_duration = durations.max()
         scale_factors = ref_duration / durations.clip(lower=1)
         is_cycle = group_df["Counter_Name"].map(_is_cycle_counter)
         adjusted_scales = scale_factors.where(is_cycle, 1.0)
         scaled_values = group_df["Counter_Value"].astype(float) * adjusted_scales
-        
+
         row = {
             "GPU_ID": group_df["GPU_ID"].iloc[0],
             "Grid_Size": group_df["Grid_Size"].iloc[0],

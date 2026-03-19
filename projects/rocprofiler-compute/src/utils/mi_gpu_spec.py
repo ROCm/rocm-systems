@@ -132,8 +132,7 @@ class MIGPUSpecs:
                     cls._all_gpu_models.append(curr_gpu_model)
                     cls._gpu_model_dict[curr_gpu_arch].append(curr_gpu_model)
                     cls._num_xcds_dict[curr_gpu_model] = (
-                        models
-                        .get("partition_mode", {})
+                        models.get("partition_mode", {})
                         .get("compute_partition_mode", {})
                         .get("num_xcds", {})
                     )

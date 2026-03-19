@@ -61,8 +61,7 @@ def simple_bar(df: pd.DataFrame, title: Optional[str] = None) -> Optional[str]:
 
     if "Metric" in df.columns and "Avg" in df.columns:
         metric_dict = (
-            pd
-            .DataFrame([df["Metric"], df["Avg"]])
+            pd.DataFrame([df["Metric"], df["Avg"]])
             .replace("", 0)
             .replace(float("inf"), -1)  # It should not happen
             .replace(float("-inf"), -1)
@@ -259,8 +258,7 @@ def px_simple_multi_bar(
 
     for group, metric in nested_bar.items():
         dfigs.append(
-            px
-            .bar(
+            px.bar(
                 title=group,
                 x=metric.values(),
                 y=metric.keys(),

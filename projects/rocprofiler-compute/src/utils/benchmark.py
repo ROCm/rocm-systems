@@ -77,7 +77,7 @@ unsupported_data_types = {
     "gfx941": ["MFMA-F4", "MFMA-F6", "MFMA-F6F4"],  # MI300X_A0
     "gfx942": ["MFMA-F4", "MFMA-F6", "MFMA-F6F4"],  # MI300A_A1, MI300X_A1, MI308
     "gfx950": [],  # MI350, MI355
-        "gfx1151": [
+    "gfx1151": [
         "MALL",
         "MFMA-F4",
         "MFMA-F6",
@@ -89,7 +89,7 @@ unsupported_data_types = {
         "MFMA-F64",
         "MFMA-I8",
     ],  # Strix Halo (RDNA 3.5, no MFMA)
-        "gfx1151": [
+    "gfx1151": [
         "MALL",
         "MFMA-F4",
         "MFMA-F6",
