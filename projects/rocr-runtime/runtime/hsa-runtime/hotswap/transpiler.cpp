@@ -2416,24 +2416,37 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
             result.push_back("s_mov_b32 " + s_orig + ", " + s_even);
             result.push_back("v_readfirstlane_b32 " + s_even + ", " + save_reg);
           }
-          // Handle large literals too
-          size_t last_comma = line.rfind(',');
-          if (last_comma != std::string::npos) {
-            std::string last_op = line.substr(last_comma + 1);
-            size_t ls = last_op.find_first_not_of(" \t");
-            size_t le = last_op.find_last_not_of(" \t");
-            if (ls != std::string::npos) {
-              std::string last_trimmed = last_op.substr(ls, le - ls + 1);
-              auto is_ll = [](const std::string& s) -> bool {
-                if (s.empty()) return false;
-                if (s.size() > 2 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) return true;
+          // Handle large literal in last operand (GFX9 VOP3 no literal support).
+          // Check the v_cmp line that was already emitted in result, and if its
+          // last operand is a large literal, prepend a v_mov to load it to v6.
+          {
+            auto is_ll = [](const std::string& s) -> bool {
+              if (s.empty()) return false;
+              if (s.size() > 2 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) return true;
+              try {
                 if (std::isdigit((unsigned char)s[0]) && std::stol(s) > 64) return true;
                 if (s[0] == '-' && s.size() > 1 && std::stol(s) < -16) return true;
-                return false;
-              };
-              if (is_ll(last_trimmed)) {
-                // Large literal: load to v6, but we already used v6 for save!
-                // Use the line as-is (the literal handling below will catch it)
+              } catch (...) {}
+              return false;
+            };
+            // Find the v_cmp line in result (it's the 2nd or 3rd element)
+            for (size_t ri = 0; ri < result.size(); ri++) {
+              if (result[ri].find("v_cmp_") != std::string::npos) {
+                size_t lc = result[ri].rfind(',');
+                if (lc != std::string::npos) {
+                  std::string lo = result[ri].substr(lc + 1);
+                  size_t ls = lo.find_first_not_of(" \t");
+                  size_t le = lo.find_last_not_of(" \t");
+                  if (ls != std::string::npos) {
+                    std::string lt = lo.substr(ls, le - ls + 1);
+                    if (is_ll(lt)) {
+                      // Insert v_mov before the v_cmp, replace literal with v6
+                      result.insert(result.begin() + ri, "v_mov_b32_e32 v6, " + lt);
+                      result[ri + 1] = result[ri + 1].substr(0, lc + 1) + " v6";
+                    }
+                  }
+                }
+                break;
               }
             }
           }
