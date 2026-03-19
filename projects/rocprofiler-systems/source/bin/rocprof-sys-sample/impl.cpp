@@ -77,88 +77,11 @@ auto clock_id_choices = []() {
 bool
 apply_preset_from_json(std::string_view preset_name)
 {
-    auto info =
-        rocprofsys::preset_loader::load_preset_or_file(std::string{ preset_name });
-    if(!info) return false;
-
-    for(const auto& [key, val] : info->settings)
-    {
-        updated_envs.emplace(key);
-        setenv(key.c_str(), val.c_str(), 0);  // Don't override existing
-    }
-    return true;
-}
-
-// Collect all resolved settings into a map for export
-// Compares current_env against original_envs to find modified/added ROCPROFSYS_ vars
-std::map<std::string, std::string>
-collect_resolved_settings(const std::vector<char*>& current_env)
-{
-    std::map<std::string, std::string> result;
-
-    // Build a map of original env vars for efficient lookup
-    std::unordered_map<std::string, std::string> initial_map;
-    for(const auto& env_str : original_envs)
-    {
-        auto eq_pos = env_str.find('=');
-        if(eq_pos != std::string::npos)
-        {
-            initial_map[env_str.substr(0, eq_pos)] = env_str.substr(eq_pos + 1);
-        }
-    }
-
-    // Compare current_env against original, only export ROCPROFSYS_ vars that changed
-    for(const auto* env_entry : current_env)
-    {
-        if(env_entry == nullptr) continue;
-
-        std::string_view entry(env_entry);
-        auto             eq_pos = entry.find('=');
-        if(eq_pos == std::string_view::npos) continue;
-
-        std::string key(entry.substr(0, eq_pos));
-        std::string val(entry.substr(eq_pos + 1));
-
-        // Only export ROCPROFSYS_ environment variables
-        if(key.find("ROCPROFSYS_") != 0) continue;
-
-        // Check if this is new or changed from original
-        auto it = initial_map.find(key);
-        if(it == initial_map.end() || it->second != val)
-        {
-            result[key] = val;
-        }
-    }
-    return result;
-}
-
-// Export configuration to JSON file or stdout
-void
-export_config(const std::vector<char*>& current_env, const std::string& preset_name,
-              const std::string& output_file = "")
-{
-    auto settings = collect_resolved_settings(current_env);
-    auto json_str = rocprofsys::json_config::export_config_as_json(settings, preset_name);
-
-    if(output_file.empty())
-    {
-        std::cout << json_str << std::endl;
-    }
-    else
-    {
-        std::ofstream ofs(output_file);
-        if(ofs.is_open())
-        {
-            ofs << json_str << std::endl;
-            std::cerr << "[rocprof-sys] Configuration exported to: " << output_file
-                      << std::endl;
-        }
-        else
-        {
-            std::cerr << "[rocprof-sys] ERROR: Could not write to: " << output_file
-                      << std::endl;
-        }
-    }
+    return rocprofsys::common_utils::apply_preset_from_json(
+        preset_name, [](const std::string& key, const std::string& val) {
+            updated_envs.emplace(key);
+            setenv(key.c_str(), val.c_str(), 0);  // Don't override existing
+        });
 }
 
 }  // namespace
@@ -1231,50 +1154,20 @@ PROFILING WORKFLOW:
     // Handle export-config: output configuration and exit
     if(export_config_requested)
     {
-        export_config(_env, active_preset_name, export_config_file);
+        rocprofsys::common_utils::export_config(_env, original_envs, active_preset_name,
+                                                export_config_file);
         exit(EXIT_SUCCESS);
     }
 
-    // Warn if GPU features requested but ROCm not available
-    if(gpu_domain_enabled || rocm_domain_enabled)
-    {
-        rocprofsys::common_utils::warn_if_rocm_unavailable();
-    }
-
+    // Sample-specific: warn for legacy --hip-trace flag
     if(parser.exists("hip-trace") && parser.get<bool>("hip-trace"))
     {
         rocprofsys::common_utils::warn_if_rocm_unavailable();
     }
 
-    // Check preset-related warnings
-    if(!active_preset_name.empty())
-    {
-        // Check if this is a GPU-oriented preset
-        static const std::vector<std::string> gpu_presets = {
-            "workload-trace", "trace-hpc",    "sys-trace",        "runtime-trace",
-            "trace-gpu",      "trace-openmp", "trace-hw-counters"
-        };
-        for(const auto& preset : gpu_presets)
-        {
-            if(active_preset_name == preset)
-            {
-                rocprofsys::common_utils::warn_if_rocm_unavailable();
-                break;
-            }
-        }
-
-        if(verbose >= 1)
-        {
-            rocprofsys::common_utils::print_pre_execution_info("sample",
-                                                               active_preset_name);
-        }
-    }
-
-    rocprofsys::common_utils::warn_if_output_not_writable("sample");
-    rocprofsys::common_utils::validate_configuration("sample");
-    rocprofsys::common_utils::validate_domain_flags(
-        gpu_domain_enabled, rocm_domain_enabled, cpu_domain_enabled,
-        parallel_domain_enabled, active_preset_name);
+    rocprofsys::common_utils::run_post_parse_validation(
+        "sample", active_preset_name, gpu_domain_enabled, rocm_domain_enabled,
+        cpu_domain_enabled, parallel_domain_enabled, verbose);
 
     return _outv;
 }

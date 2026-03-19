@@ -9,6 +9,8 @@
 #include <nlohmann/json.hpp>
 
 #include <cstdlib>
+#include <cstring>
+#include <dirent.h>
 #include <fstream>
 #include <iostream>
 #include <map>
@@ -112,20 +114,30 @@ load_all_presets()
     auto preset_dir = find_preset_directory();
     if(preset_dir.empty()) return presets;
 
-    static constexpr std::string_view known_presets[] = {
-        "balanced",       "profile-only", "detailed",          "trace-hpc",
-        "workload-trace", "sys-trace",    "runtime-trace",     "trace-gpu",
-        "trace-openmp",   "profile-mpi",  "trace-hw-counters",
-    };
+    auto* dir = opendir(preset_dir.c_str());
+    if(!dir) return presets;
 
-    for(const auto& preset_name : known_presets)
+    while(auto* entry = readdir(dir))
     {
-        auto filepath =
-            common::join('/', preset_dir, std::string{ preset_name } + ".json");
+        std::string_view filename{ entry->d_name };
+
+        // Skip non-.json files
+        constexpr std::string_view json_ext = ".json";
+        if(filename.size() <= json_ext.size() ||
+           filename.substr(filename.size() - json_ext.size()) != json_ext)
+            continue;
+
+        // Skip schema.json
+        if(filename == "schema.json") continue;
+
+        auto preset_name =
+            std::string{ filename.substr(0, filename.size() - json_ext.size()) };
+        auto filepath = common::join('/', preset_dir, std::string{ filename });
         if(auto info = load_preset_file(filepath))
-            presets[std::string{ preset_name }] = std::move(*info);
+            presets[preset_name] = std::move(*info);
     }
 
+    closedir(dir);
     return presets;
 }
 
@@ -136,6 +148,18 @@ load_preset(std::string_view name)
     if(preset_dir.empty()) return std::nullopt;
 
     auto filepath = common::join('/', preset_dir, std::string{ name } + ".json");
+
+    // Verify the resolved path stays within the preset directory
+    auto resolved  = common::path::realpath(filepath);
+    auto canon_dir = common::path::realpath(preset_dir);
+    if(resolved.empty() || canon_dir.empty() ||
+       resolved.substr(0, canon_dir.size()) != canon_dir)
+    {
+        std::cerr << "[rocprof-sys] WARNING: Preset path '" << filepath
+                  << "' resolves outside preset directory. Ignoring.\n";
+        return std::nullopt;
+    }
+
     return load_preset_file(filepath);
 }
 
@@ -153,6 +177,14 @@ load_preset_or_file(const std::string& name_or_path)
         name_or_path.substr(name_or_path.size() - 5) == ".json"))
     {
         return load_preset_file(name_or_path);
+    }
+
+    // Reject preset names containing ".." to prevent directory traversal
+    if(name_or_path.find("..") != std::string::npos)
+    {
+        std::cerr << "[rocprof-sys] WARNING: Preset name '" << name_or_path
+                  << "' contains '..'. Ignoring.\n";
+        return std::nullopt;
     }
 
     // Otherwise look up by preset name

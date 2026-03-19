@@ -354,3 +354,137 @@ TEST_F(JsonConfigTest, ExtractSettingValueHandlesFormats)
     auto bool_val = nlohmann::json(true);
     EXPECT_EQ(extract_setting_value(bool_val), "true");
 }
+
+// Test output.rocpd_output resolution
+TEST_F(JsonConfigTest, ResolvesRocpdOutput)
+{
+    auto j = nlohmann::json::parse(R"({
+        "output": {
+            "rocpd_output": {"enabled": true}
+        }
+    })");
+
+    auto result = resolve_config(j);
+
+    EXPECT_EQ(result.at("ROCPROFSYS_USE_ROCPD"), "true");
+}
+
+// Test advanced.network_interface resolution
+TEST_F(JsonConfigTest, ResolvesNetworkInterface)
+{
+    auto j = nlohmann::json::parse(R"({
+        "advanced": {
+            "network_interface": {"value": "eth0"}
+        }
+    })");
+
+    auto result = resolve_config(j);
+
+    EXPECT_EQ(result.at("ROCPROFSYS_NETWORK_INTERFACE"), "eth0");
+}
+
+// Test advanced.trace_periods resolution
+TEST_F(JsonConfigTest, ResolvesTracePeriods)
+{
+    auto j = nlohmann::json::parse(R"({
+        "advanced": {
+            "trace_periods": {"value": "0:10,20:30"}
+        }
+    })");
+
+    auto result = resolve_config(j);
+
+    EXPECT_EQ(result.at("ROCPROFSYS_TRACE_PERIODS"), "0:10,20:30");
+}
+
+// Test hardware_counters.papi_multiplexing resolution
+TEST_F(JsonConfigTest, ResolvesPapiMultiplexing)
+{
+    auto j = nlohmann::json::parse(R"({
+        "hardware_counters": {
+            "enabled": true,
+            "papi_multiplexing": {"enabled": true}
+        }
+    })");
+
+    auto result = resolve_config(j);
+
+    EXPECT_EQ(result.at("ROCPROFSYS_PAPI_MULTIPLEXING"), "true");
+}
+
+// Test domains.rocm.enabled top-level flag
+TEST_F(JsonConfigTest, ResolvesRocmEnabledFlag)
+{
+    auto j = nlohmann::json::parse(R"({
+        "domains": {
+            "rocm": {
+                "enabled": true
+            }
+        }
+    })");
+
+    auto result = resolve_config(j);
+
+    EXPECT_EQ(result.at("ROCPROFSYS_TRACE"), "true");
+}
+
+// Test safe_stoi with valid and invalid inputs
+TEST_F(JsonConfigTest, SafeStoiHandlesInvalidInput)
+{
+    EXPECT_EQ(safe_stoi("42"), 42);
+    EXPECT_EQ(safe_stoi("0"), 0);
+    EXPECT_EQ(safe_stoi("-1"), -1);
+    EXPECT_FALSE(safe_stoi("abc").has_value());
+    EXPECT_FALSE(safe_stoi("").has_value());
+    // std::stoi("12.5") returns 12 (stops at non-digit), so this succeeds
+    EXPECT_EQ(safe_stoi("12.5"), 12);
+}
+
+// Test safe_stod with valid and invalid inputs
+TEST_F(JsonConfigTest, SafeStodHandlesInvalidInput)
+{
+    EXPECT_DOUBLE_EQ(*safe_stod("3.14"), 3.14);
+    EXPECT_DOUBLE_EQ(*safe_stod("0"), 0.0);
+    EXPECT_DOUBLE_EQ(*safe_stod("42"), 42.0);
+    EXPECT_FALSE(safe_stod("abc").has_value());
+    EXPECT_FALSE(safe_stod("").has_value());
+}
+
+// Test env_vars_to_json_schema with non-numeric env var values
+TEST_F(JsonConfigTest, EnvVarsToJsonSchemaHandlesNonNumericValues)
+{
+    std::map<std::string, std::string> env_vars = {
+        { "ROCPROFSYS_PERFETTO_BUFFER_SIZE_KB", "not_a_number" },
+        { "ROCPROFSYS_SAMPLING_FREQ", "" },
+        { "ROCPROFSYS_VERBOSE", "abc" },
+        { "ROCPROFSYS_TRACE", "true" },
+    };
+
+    // Should not throw - values stored as strings when conversion fails
+    nlohmann::json j;
+    EXPECT_NO_THROW(j = env_vars_to_json_schema(env_vars));
+
+    EXPECT_EQ(j["tracing"]["enabled"], true);
+    // Non-numeric values should be stored as strings instead of crashing
+    EXPECT_EQ(j["tracing"]["buffer_size_kb"]["value"], "not_a_number");
+    EXPECT_EQ(j["sampling"]["frequency_hz"]["value"], "");
+    EXPECT_EQ(j["advanced"]["verbose"]["value"], "abc");
+}
+
+// Test env_vars_to_json_schema round-trip for new fields
+TEST_F(JsonConfigTest, EnvVarsToJsonSchemaRoundTripsNewFields)
+{
+    std::map<std::string, std::string> env_vars = {
+        { "ROCPROFSYS_USE_ROCPD", "true" },
+        { "ROCPROFSYS_NETWORK_INTERFACE", "ib0" },
+        { "ROCPROFSYS_TRACE_PERIODS", "1:5,10:20" },
+        { "ROCPROFSYS_PAPI_MULTIPLEXING", "true" },
+    };
+
+    auto j = env_vars_to_json_schema(env_vars);
+
+    EXPECT_EQ(j["output"]["rocpd_output"]["enabled"], true);
+    EXPECT_EQ(j["advanced"]["network_interface"]["value"], "ib0");
+    EXPECT_EQ(j["advanced"]["trace_periods"]["value"], "1:5,10:20");
+    EXPECT_EQ(j["hardware_counters"]["papi_multiplexing"]["enabled"], true);
+}

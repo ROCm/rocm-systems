@@ -79,60 +79,12 @@ get_verbose(parser_data_t& _data)
 bool
 apply_preset_from_json(std::string_view preset_name, parser_data_t& _parser_data)
 {
-    auto info =
-        rocprofsys::preset_loader::load_preset_or_file(std::string{ preset_name });
-    if(!info) return false;
-
-    for(const auto& [key, val] : info->settings)
-    {
-        rocprofsys::common::update_env(_parser_data.current, key, val,
-                                       update_mode::REPLACE, ":", _parser_data.updated,
-                                       original_envs);
-    }
-    return true;
-}
-
-// Collect all resolved settings into a map for export
-// Compares current environment against initial to find modified/added ROCPROFSYS_ vars
-std::map<std::string, std::string>
-collect_resolved_settings(const parser_data_t& _parser_data)
-{
-    std::map<std::string, std::string> result;
-
-    // Build a map of initial env vars for efficient lookup
-    std::unordered_map<std::string, std::string> initial_map;
-    for(const auto& env_str : _parser_data.initial)
-    {
-        auto eq_pos = env_str.find('=');
-        if(eq_pos != std::string::npos)
-        {
-            initial_map[env_str.substr(0, eq_pos)] = env_str.substr(eq_pos + 1);
-        }
-    }
-
-    // Compare current against initial, only export ROCPROFSYS_ vars that changed
-    for(const auto* env_entry : _parser_data.current)
-    {
-        if(env_entry == nullptr) continue;
-
-        std::string_view entry(env_entry);
-        auto             eq_pos = entry.find('=');
-        if(eq_pos == std::string_view::npos) continue;
-
-        std::string key(entry.substr(0, eq_pos));
-        std::string val(entry.substr(eq_pos + 1));
-
-        // Only export ROCPROFSYS_ environment variables
-        if(key.find("ROCPROFSYS_") != 0) continue;
-
-        // Check if this is new or changed from initial
-        auto it = initial_map.find(key);
-        if(it == initial_map.end() || it->second != val)
-        {
-            result[key] = val;
-        }
-    }
-    return result;
+    return rocprofsys::common_utils::apply_preset_from_json(
+        preset_name, [&](const std::string& key, const std::string& val) {
+            rocprofsys::common::update_env(_parser_data.current, key, val,
+                                           update_mode::REPLACE, ":",
+                                           _parser_data.updated, original_envs);
+        });
 }
 
 // Export configuration to JSON file or stdout
@@ -140,28 +92,8 @@ void
 export_config(const parser_data_t& _parser_data, const std::string& preset_name,
               const std::string& output_file = "")
 {
-    auto settings = collect_resolved_settings(_parser_data);
-    auto json_str = rocprofsys::json_config::export_config_as_json(settings, preset_name);
-
-    if(output_file.empty())
-    {
-        std::cout << json_str << std::endl;
-    }
-    else
-    {
-        std::ofstream ofs(output_file);
-        if(ofs.is_open())
-        {
-            ofs << json_str << std::endl;
-            std::cerr << "[rocprof-sys] Configuration exported to: " << output_file
-                      << std::endl;
-        }
-        else
-        {
-            std::cerr << "[rocprof-sys] ERROR: Could not write to: " << output_file
-                      << std::endl;
-        }
-    }
+    rocprofsys::common_utils::export_config(_parser_data.current, original_envs,
+                                            preset_name, output_file);
 }
 
 parser_data_t&
@@ -498,10 +430,10 @@ INSTRUMENTATION WORKFLOW:
         .action([&](parser_t& p) {
             gpu_domain_enabled = true;
             rocprofsys::common::update_env(_parser_data.current, "ROCPROFSYS_USE_AMD_SMI",
-                                           "ON", update_mode::REPLACE, ":",
+                                           true, update_mode::REPLACE, ":",
                                            _parser_data.updated, original_envs);
             rocprofsys::common::update_env(
-                _parser_data.current, "ROCPROFSYS_USE_PROCESS_SAMPLING", "ON",
+                _parser_data.current, "ROCPROFSYS_USE_PROCESS_SAMPLING", true,
                 update_mode::REPLACE, ":", _parser_data.updated, original_envs);
 
             if(p.exists("gpu"))
@@ -561,7 +493,7 @@ INSTRUMENTATION WORKFLOW:
         .action([&](parser_t& p) {
             cpu_domain_enabled = true;
             rocprofsys::common::update_env(
-                _parser_data.current, "ROCPROFSYS_USE_SAMPLING", "ON",
+                _parser_data.current, "ROCPROFSYS_USE_SAMPLING", true,
                 update_mode::REPLACE, ":", _parser_data.updated, original_envs);
 
             std::string freq = "100";  // default
@@ -665,40 +597,9 @@ INSTRUMENTATION WORKFLOW:
         exit(EXIT_SUCCESS);
     }
 
-    // Warn if GPU features requested but ROCm not available
-    if(gpu_domain_enabled || rocm_domain_enabled)
-    {
-        rocprofsys::common_utils::warn_if_rocm_unavailable();
-    }
-
-    // Check preset-related warnings
-    if(!active_preset_name.empty())
-    {
-        // Check if this is a GPU-oriented preset
-        static const std::vector<std::string> gpu_presets = {
-            "workload-trace", "trace-hpc",    "sys-trace",        "runtime-trace",
-            "trace-gpu",      "trace-openmp", "trace-hw-counters"
-        };
-        for(const auto& preset : gpu_presets)
-        {
-            if(active_preset_name == preset)
-            {
-                rocprofsys::common_utils::warn_if_rocm_unavailable();
-                break;
-            }
-        }
-
-        if(_parser_data.verbose >= 1)
-        {
-            rocprofsys::common_utils::print_pre_execution_info("run", active_preset_name);
-        }
-    }
-
-    rocprofsys::common_utils::warn_if_output_not_writable("run");
-    rocprofsys::common_utils::validate_configuration("run");
-    rocprofsys::common_utils::validate_domain_flags(
-        gpu_domain_enabled, rocm_domain_enabled, cpu_domain_enabled,
-        parallel_domain_enabled, active_preset_name);
+    rocprofsys::common_utils::run_post_parse_validation(
+        "run", active_preset_name, gpu_domain_enabled, rocm_domain_enabled,
+        cpu_domain_enabled, parallel_domain_enabled, _parser_data.verbose);
 
     return _parser_data;
 }
@@ -716,7 +617,18 @@ parse_command(int argc, char** argv, parser_data_t& _parser_data)
     bool  _hash = false;
     for(int i = 1; i < argc; ++i)
     {
-        _outv.emplace_back(strdup(argv[i]));
+        if(argv[i] == nullptr)
+        {
+            continue;
+        }
+        else if(_hash)
+        {
+            _outv.emplace_back(strdup(argv[i]));
+        }
+        else if(std::string_view{ argv[i] } == "--")
+        {
+            _hash = true;
+        }
     }
 
     return _parser_data;

@@ -1,9 +1,4 @@
 {
-    "advanced": {
-        "rocpd_output": {
-            "enabled": true
-        }
-    },
     "domains": {
         "gpu": {
             "enabled": true,
@@ -60,6 +55,11 @@
         "description": "General compute workload preset: comprehensive tracing for AI/ML, HPC, and GPU workloads",
         "name": "workload-trace",
         "use_case": "AI/ML training, GPU-accelerated HPC, long-running GPU workloads"
+    },
+    "output": {
+        "rocpd_output": {
+            "enabled": true
+        }
     },
     "profiling": {
         "enabled": true

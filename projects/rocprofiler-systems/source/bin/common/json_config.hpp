@@ -5,6 +5,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <charconv>
 #include <fstream>
 #include <iostream>
 #include <map>
@@ -209,6 +210,12 @@ resolve_schema_config(const nlohmann::json& j)
         if(domains.contains("rocm"))
         {
             const auto& rocm = domains["rocm"];
+            if(rocm.contains("enabled") && rocm["enabled"].get<bool>())
+            {
+                // Top-level rocm.enabled ensures tracing is on and default domains set
+                if(result.find("ROCPROFSYS_TRACE") == result.end())
+                    result["ROCPROFSYS_TRACE"] = "true";
+            }
             if(rocm.contains("api_domains"))
             {
                 std::vector<std::string> enabled_apis;
@@ -316,6 +323,13 @@ resolve_schema_config(const nlohmann::json& j)
                 result["ROCPROFSYS_FILE_OUTPUT"] =
                     fo["enabled"].get<bool>() ? "true" : "false";
         }
+        if(output.contains("rocpd_output"))
+        {
+            const auto& rpd = output["rocpd_output"];
+            if(rpd.contains("enabled"))
+                result["ROCPROFSYS_USE_ROCPD"] =
+                    rpd["enabled"].get<bool>() ? "true" : "false";
+        }
     }
 
     // --- Causal profiling section ---
@@ -376,6 +390,13 @@ resolve_schema_config(const nlohmann::json& j)
                     result["ROCPROFSYS_PAPI_EVENTS"] = *val;
             }
         }
+        if(hw.contains("papi_multiplexing"))
+        {
+            const auto& pm = hw["papi_multiplexing"];
+            if(pm.contains("enabled"))
+                result["ROCPROFSYS_PAPI_MULTIPLEXING"] =
+                    pm["enabled"].get<bool>() ? "true" : "false";
+        }
     }
 
     // --- Advanced section ---
@@ -427,6 +448,16 @@ resolve_schema_config(const nlohmann::json& j)
         {
             if(auto val = extract_setting_value(adv["timemory_components"]))
                 result["ROCPROFSYS_TIMEMORY_COMPONENTS"] = *val;
+        }
+        if(adv.contains("network_interface"))
+        {
+            if(auto val = extract_setting_value(adv["network_interface"]))
+                result["ROCPROFSYS_NETWORK_INTERFACE"] = *val;
+        }
+        if(adv.contains("trace_periods"))
+        {
+            if(auto val = extract_setting_value(adv["trace_periods"]))
+                result["ROCPROFSYS_TRACE_PERIODS"] = *val;
         }
     }
 
@@ -666,6 +697,58 @@ expand_gpu_metrics(const std::string& metrics_str)
 // ============================================================================
 
 /**
+ * Safely converts a string to int, returning std::nullopt on failure.
+ */
+[[nodiscard]] inline std::optional<int>
+safe_stoi(const std::string& s)
+{
+    if(s.empty()) return std::nullopt;
+    int        value  = 0;
+    const auto result = std::from_chars(s.data(), s.data() + s.size(), value);
+    if(result.ec != std::errc{}) return std::nullopt;
+    return value;
+}
+
+/**
+ * Safely converts a string to double, returning std::nullopt on failure.
+ */
+[[nodiscard]] inline std::optional<double>
+safe_stod(const std::string& s)
+{
+    if(s.empty()) return std::nullopt;
+    double     value  = 0.0;
+    const auto result = std::from_chars(s.data(), s.data() + s.size(), value);
+    if(result.ec != std::errc{}) return std::nullopt;
+    return value;
+}
+
+/**
+ * Sets a JSON field to a numeric int value if conversion succeeds,
+ * otherwise stores as a string to avoid data loss.
+ */
+inline void
+set_json_int(nlohmann::json& target, const std::string& value)
+{
+    if(auto n = safe_stoi(value))
+        target = *n;
+    else
+        target = value;
+}
+
+/**
+ * Sets a JSON field to a numeric double value if conversion succeeds,
+ * otherwise stores as a string to avoid data loss.
+ */
+inline void
+set_json_double(nlohmann::json& target, const std::string& value)
+{
+    if(auto n = safe_stod(value))
+        target = *n;
+    else
+        target = value;
+}
+
+/**
  * Converts a map of ROCPROFSYS_* env vars back to JSON schema format.
  * This allows exporting the resolved configuration for reuse.
  */
@@ -689,7 +772,7 @@ env_vars_to_json_schema(const std::map<std::string, std::string>& env_vars)
     // --- Tracing ---
     if(auto v = get_val("ROCPROFSYS_TRACE")) j["tracing"]["enabled"] = is_true(*v);
     if(auto v = get_val("ROCPROFSYS_PERFETTO_BUFFER_SIZE_KB"))
-        j["tracing"]["buffer_size_kb"]["value"] = std::stoi(*v);
+        set_json_int(j["tracing"]["buffer_size_kb"]["value"], *v);
     if(auto v = get_val("ROCPROFSYS_PERFETTO_FILL_POLICY"))
         j["tracing"]["fill_policy"]["value"] = *v;
 
@@ -702,13 +785,13 @@ env_vars_to_json_schema(const std::map<std::string, std::string>& env_vars)
     if(auto v = get_val("ROCPROFSYS_USE_SAMPLING"))
         j["sampling"]["enabled"] = is_true(*v);
     if(auto v = get_val("ROCPROFSYS_SAMPLING_FREQ"))
-        j["sampling"]["frequency_hz"]["value"] = std::stoi(*v);
+        set_json_int(j["sampling"]["frequency_hz"]["value"], *v);
     if(auto v = get_val("ROCPROFSYS_SAMPLING_TIMER"))
         j["sampling"]["timer"]["value"] = *v;
     if(auto v = get_val("ROCPROFSYS_SAMPLING_DELAY"))
-        j["sampling"]["delay_sec"]["value"] = std::stod(*v);
+        set_json_double(j["sampling"]["delay_sec"]["value"], *v);
     if(auto v = get_val("ROCPROFSYS_SAMPLING_DURATION"))
-        j["sampling"]["duration_sec"]["value"] = std::stod(*v);
+        set_json_double(j["sampling"]["duration_sec"]["value"], *v);
     if(auto v = get_val("ROCPROFSYS_SAMPLING_CPUS")) j["sampling"]["cpus"]["value"] = *v;
     if(auto v = get_val("ROCPROFSYS_SAMPLING_GPUS")) j["sampling"]["gpus"]["value"] = *v;
 
@@ -732,7 +815,7 @@ env_vars_to_json_schema(const std::map<std::string, std::string>& env_vars)
             }
         }
         if(auto freq = get_val("ROCPROFSYS_AMD_SMI_FREQ"))
-            j["domains"]["gpu"]["sampling_rate_hz"]["value"] = std::stoi(*freq);
+            set_json_int(j["domains"]["gpu"]["sampling_rate_hz"]["value"], *freq);
     }
 
     // --- Domains: ROCm ---
@@ -784,6 +867,8 @@ env_vars_to_json_schema(const std::map<std::string, std::string>& env_vars)
         j["output"]["time_output"]["enabled"] = is_true(*v);
     if(auto v = get_val("ROCPROFSYS_FILE_OUTPUT"))
         j["output"]["file_output"]["enabled"] = is_true(*v);
+    if(auto v = get_val("ROCPROFSYS_USE_ROCPD"))
+        j["output"]["rocpd_output"]["enabled"] = is_true(*v);
 
     // --- Hardware counters ---
     if(auto v = get_val("ROCPROFSYS_ROCM_EVENTS"))
@@ -799,21 +884,29 @@ env_vars_to_json_schema(const std::map<std::string, std::string>& env_vars)
 
     // --- Advanced ---
     if(auto v = get_val("ROCPROFSYS_VERBOSE"))
-        j["advanced"]["verbose"]["value"] = std::stoi(*v);
+        set_json_int(j["advanced"]["verbose"]["value"], *v);
     if(auto v = get_val("ROCPROFSYS_DEBUG"))
         j["advanced"]["debug"]["enabled"] = is_true(*v);
     if(auto v = get_val("ROCPROFSYS_MAX_DEPTH"))
-        j["advanced"]["max_depth"]["value"] = std::stoi(*v);
+        set_json_int(j["advanced"]["max_depth"]["value"], *v);
     if(auto v = get_val("ROCPROFSYS_TRACE_DELAY"))
-        j["advanced"]["trace_delay_sec"]["value"] = std::stod(*v);
+        set_json_double(j["advanced"]["trace_delay_sec"]["value"], *v);
     if(auto v = get_val("ROCPROFSYS_TRACE_DURATION"))
-        j["advanced"]["trace_duration_sec"]["value"] = std::stod(*v);
+        set_json_double(j["advanced"]["trace_duration_sec"]["value"], *v);
     if(auto v = get_val("ROCPROFSYS_CPU_AFFINITY"))
         j["advanced"]["cpu_affinity"]["enabled"] = is_true(*v);
     if(auto v = get_val("ROCPROFSYS_COLLAPSE_THREADS"))
         j["advanced"]["collapse_threads"]["enabled"] = is_true(*v);
     if(auto v = get_val("ROCPROFSYS_TIMEMORY_COMPONENTS"))
         j["advanced"]["timemory_components"]["value"] = *v;
+    if(auto v = get_val("ROCPROFSYS_NETWORK_INTERFACE"))
+        j["advanced"]["network_interface"]["value"] = *v;
+    if(auto v = get_val("ROCPROFSYS_TRACE_PERIODS"))
+        j["advanced"]["trace_periods"]["value"] = *v;
+
+    // --- Hardware counters: papi_multiplexing ---
+    if(auto v = get_val("ROCPROFSYS_PAPI_MULTIPLEXING"))
+        j["hardware_counters"]["papi_multiplexing"]["enabled"] = is_true(*v);
 
     return j;
 }

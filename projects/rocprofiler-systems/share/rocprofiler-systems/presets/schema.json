@@ -29,10 +29,6 @@
             ],
             "value": ""
         },
-        "rocpd_output": {
-            "description": "Generate RocPD database output format",
-            "enabled": false
-        },
         "signal_handler": {
             "description": "Enable signal handler for graceful termination",
             "enabled": true
@@ -491,6 +487,10 @@
             "default": "rocprof-sys-output",
             "description": "Output directory",
             "value": "rocprof-sys-output"
+        },
+        "rocpd_output": {
+            "description": "Generate RocPD SQLite3 database output format",
+            "enabled": false
         },
         "time_output": {
             "description": "Include timestamps in output filenames",

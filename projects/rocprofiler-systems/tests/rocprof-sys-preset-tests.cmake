@@ -285,7 +285,7 @@ rocprofiler_systems_add_bin_test(
     ARGS --gpu -v 2 -- ls
     LABELS domain run
     TIMEOUT 60
-    PASS_REGEX "ROCPROFSYS_USE_AMD_SMI=ON"
+    PASS_REGEX "ROCPROFSYS_USE_AMD_SMI=true"
 )
 
 rocprofiler_systems_add_bin_test(
@@ -321,7 +321,7 @@ rocprofiler_systems_add_bin_test(
     ARGS --parallel=mpi,openmp -v 2 -- ls
     LABELS domain run
     TIMEOUT 60
-    PASS_REGEX "ROCPROFSYS_USE_MPIP=ON"
+    PASS_REGEX "ROCPROFSYS_USE_MPIP=true"
 )
 
 rocprofiler_systems_add_bin_test(
