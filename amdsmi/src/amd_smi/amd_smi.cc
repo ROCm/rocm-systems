@@ -3904,157 +3904,79 @@ amdsmi_status_t  amdsmi_set_gpu_pci_bandwidth(amdsmi_processor_handle processor_
 
 amdsmi_status_t amdsmi_get_gpu_pci_bandwidth(amdsmi_processor_handle processor_handle,
             amdsmi_pcie_bandwidth_t *bandwidth) {
-    return rsmi_wrapper(rsmi_dev_pci_bandwidth_get, processor_handle, 0,
-                    reinterpret_cast<rsmi_pcie_bandwidth_t*>(bandwidth));
+    if (bandwidth == nullptr) return AMDSMI_STATUS_INVAL;
+    auto *device = reinterpret_cast<Device *>(processor_handle);
+    if (device == nullptr) return AMDSMI_STATUS_INVAL;
+
+    PCIeInfo pi{};
+    auto code = device->QueryPCIeInfo(&pi);
+    if (code != ErrorCode::Success) return translateCodeToSmiStatus(code);
+
+    // WSL2 does not expose the full PCIe DPM table (pp_dpm_pcie).
+    // Synthesise a 1-or-2-entry table from the static max and current values.
+    memset(bandwidth, 0, sizeof(*bandwidth));
+    uint32_t n = 0;
+    // Entry 0: max speed / max width (always available from KMD caps)
+    if (pi.max_pcie_speed > 0) {
+        bandwidth->transfer_rate.frequency[n] = static_cast<uint64_t>(pi.max_pcie_speed) * 1000000ULL;
+        bandwidth->lanes[n] = pi.max_pcie_width;
+        ++n;
+    }
+    // Entry 1: current speed / current width (from PMLog BUS_SPEED sensor)
+    if (pi.pcie_speed > 0 && pi.pcie_speed != pi.max_pcie_speed) {
+        bandwidth->transfer_rate.frequency[n] = static_cast<uint64_t>(pi.pcie_speed) * 1000000ULL;
+        bandwidth->lanes[n] = pi.pcie_width;
+        ++n;
+    }
+    if (n == 0) return AMDSMI_STATUS_NOT_SUPPORTED;
+    bandwidth->transfer_rate.num_supported = n;
+    // Mark the current speed entry as active
+    bandwidth->transfer_rate.current = (pi.pcie_speed > 0 && pi.pcie_speed != pi.max_pcie_speed) ? 1 : 0;
+    return AMDSMI_STATUS_SUCCESS;
 }
 
 // TODO(bliu): other frequencies in amdsmi_clk_type_t
 amdsmi_status_t  amdsmi_get_clk_freq(amdsmi_processor_handle processor_handle,
-                        amdsmi_clk_type_t clk_type, amdsmi_frequencies_t *f) {
+                               amdsmi_clk_type_t clk_type, amdsmi_frequencies_t *f) {
     AMDSMI_CHECK_INIT();
-    // nullptr api supported
+    // nullptr is explicitly allowed; caller passes nullptr to check support
 
-    // Read VCLK/DCLK from sysfs pp_dpm files instead of gpu_metrics
-    if (clk_type == AMDSMI_CLK_TYPE_VCLK0 ||
-        clk_type == AMDSMI_CLK_TYPE_VCLK1 ||
-        clk_type == AMDSMI_CLK_TYPE_DCLK0 ||
-        clk_type == AMDSMI_CLK_TYPE_DCLK1 ) {
-
-        // Get the GPU device to access renderD number
-        amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
-        amdsmi_status_t status = get_gpu_device_from_handle(processor_handle, &gpu_device);
-        if (status != AMDSMI_STATUS_SUCCESS) {
-            return status;
-        }
-
-        // Get renderD number for this GPU
-        uint32_t drm_render = gpu_device->get_drm_render_minor();
-
-        // Determine the sysfs file name based on clock type
-        const char* pp_dpm_file = nullptr;
-        if (clk_type == AMDSMI_CLK_TYPE_VCLK0) {
-            pp_dpm_file = "pp_dpm_vclk";
-        } else if (clk_type == AMDSMI_CLK_TYPE_VCLK1) {
-            pp_dpm_file = "pp_dpm_vclk1";
-        } else if (clk_type == AMDSMI_CLK_TYPE_DCLK0) {
-            pp_dpm_file = "pp_dpm_dclk";
-        } else if (clk_type == AMDSMI_CLK_TYPE_DCLK1) {
-            pp_dpm_file = "pp_dpm_dclk1";
-        }
-
-        // Construct the sysfs path: /sys/class/drm/renderD<num>/device/pp_dpm_*
-        std::string sysfs_path = "/sys/class/drm/renderD" + std::to_string(drm_render) + "/device/" + pp_dpm_file;
-
-        // Check if the file exists
-        std::ifstream file(sysfs_path);
-        if (!file.good()) {
-            // File doesn't exist, fallback to gpu_metrics for backward compatibility
-            // or return not supported
+    // Map amdsmi_clk_type_t to our internal clk_type integer used by QueryClockInfo.
+    // QueryClockInfo supports GFX/SYS (0) and MEM (4) via PMLog; all others
+    // are not available on WSL2 (no sysfs pp_dpm_* nodes) → NOT_SUPPORTED.
+    uint32_t internal_clk;
+    switch (clk_type) {
+        case AMDSMI_CLK_TYPE_SYS:   internal_clk = 0; break;  // GFX_CLK
+        case AMDSMI_CLK_TYPE_MEM:   internal_clk = 4; break;  // MEM_CLK
+        default:
             return AMDSMI_STATUS_NOT_SUPPORTED;
-        }
-
-        // Parse the pp_dpm file
-        // Format example:
-        // 0: 200Mhz
-        // 1: 400Mhz *
-        // 2: 800Mhz
-        if (f == nullptr) {
-            return AMDSMI_STATUS_INVAL;
-        }
-
-        f->num_supported = 0;
-        f->current = 0;
-        f->has_deep_sleep = 0;
-
-        std::string line;
-        uint32_t level_index = 0;
-
-        while (std::getline(file, line) && level_index < AMDSMI_MAX_NUM_FREQUENCIES) {
-            // Parse line format: "0: 200Mhz" or "1: 400Mhz *"
-            size_t colon_pos = line.find(':');
-            if (colon_pos == std::string::npos) {
-                continue;
-            }
-
-            // Extract level number
-            std::string level_str = line.substr(0, colon_pos);
-            level_str.erase(0, level_str.find_first_not_of(" \t"));
-            level_str.erase(level_str.find_last_not_of(" \t") + 1);
-
-            // Extract frequency value
-            std::string freq_str = line.substr(colon_pos + 1);
-
-            // Check if this is the current level (marked with *)
-            bool is_current = (freq_str.find('*') != std::string::npos);
-            if (is_current) {
-                f->current = level_index;
-            }
-
-            // Remove asterisk and spaces
-            freq_str.erase(std::remove(freq_str.begin(), freq_str.end(), '*'), freq_str.end());
-            freq_str.erase(0, freq_str.find_first_not_of(" \t"));
-            freq_str.erase(freq_str.find_last_not_of(" \t") + 1);
-
-            // Parse frequency value (e.g., "200Mhz" or "200 Mhz")
-            uint64_t freq_value = 0;
-            char unit = 'M';  // Default to MHz
-
-            size_t unit_pos = freq_str.find_first_not_of("0123456789 ");
-            if (unit_pos != std::string::npos) {
-                std::string value_str = freq_str.substr(0, unit_pos);
-                value_str.erase(std::remove(value_str.begin(), value_str.end(), ' '), value_str.end());
-
-                try {
-                    freq_value = std::stoull(value_str);
-                } catch (...) {
-                    continue;  // Skip invalid lines
-                }
-
-                // Extract unit (M for MHz, G for GHz, etc.)
-                std::string unit_str = freq_str.substr(unit_pos);
-                if (!unit_str.empty()) {
-                    unit = static_cast<char>(std::toupper(static_cast<unsigned char>(unit_str[0])));
-                }
-            }
-
-            // Convert to Hz based on unit
-            f->frequency[level_index] = freq_value * amd::smi::get_multiplier_from_char(unit);
-            level_index++;
-        }
-
-        f->num_supported = level_index;
-        file.close();
-
-        return (f->num_supported > 0) ? AMDSMI_STATUS_SUCCESS : AMDSMI_STATUS_NOT_SUPPORTED;
     }
 
-    return rsmi_wrapper(rsmi_dev_gpu_clk_freq_get, processor_handle, 0,
-                    static_cast<rsmi_clk_type_t>(clk_type),
-                    reinterpret_cast<rsmi_frequencies_t*>(f));
+    if (f == nullptr) return AMDSMI_STATUS_INVAL;
+
+    auto *device = reinterpret_cast<Device *>(processor_handle);
+    if (device == nullptr) return AMDSMI_STATUS_INVAL;
+
+    ClockInfo ci{};
+    auto code = device->QueryClockInfo(internal_clk, &ci);
+    if (code != ErrorCode::Success) return translateCodeToSmiStatus(code);
+    if (ci.clk == 0 && ci.min_clk == 0 && ci.max_clk == 0)
+        return AMDSMI_STATUS_NOT_SUPPORTED;
+
+    memset(f, 0, sizeof(*f));
+    // Populate a single-entry frequency table with the current clock.
+    // WSL2 does not expose the full DPM table; current clock is what PMLog provides.
+    f->num_supported = 1;
+    f->current       = 0;
+    f->has_deep_sleep = 0;
+    f->frequency[0]  = static_cast<uint64_t>(ci.clk) * 1000000ULL;  // MHz → Hz
+    return AMDSMI_STATUS_SUCCESS;
 }
 
 amdsmi_status_t  amdsmi_set_clk_freq(amdsmi_processor_handle processor_handle,
                          amdsmi_clk_type_t clk_type, uint64_t freq_bitmask) {
-    AMDSMI_CHECK_INIT();
-
-    // Not support the clock type write into gpu_metrics
-    if (clk_type == AMDSMI_CLK_TYPE_VCLK0 ||
-        clk_type == AMDSMI_CLK_TYPE_VCLK1 ||
-        clk_type == AMDSMI_CLK_TYPE_DCLK0 ||
-        clk_type == AMDSMI_CLK_TYPE_DCLK1 ) {
-            return AMDSMI_STATUS_NOT_SUPPORTED;
-    }
-
-    // Bare Metal and passthrough only feature
-    amdsmi_virtualization_mode_t virt_mode;
-    if (amdsmi_get_gpu_virtualization_mode(processor_handle, &virt_mode) == AMDSMI_STATUS_SUCCESS) {
-        if (virt_mode == AMDSMI_VIRTUALIZATION_MODE_GUEST) {
-        return AMDSMI_STATUS_NOT_SUPPORTED;
-        }
-    }
-
-    return rsmi_wrapper(rsmi_dev_gpu_clk_freq_set, processor_handle, 0,
-                    static_cast<rsmi_clk_type_t>(clk_type), freq_bitmask);
+    // Clock frequency DPM table write requires sysfs pp_dpm_*, not available on WSL2
+    return AMDSMI_STATUS_NOT_SUPPORTED;
 }
 
 amdsmi_status_t amdsmi_set_soc_pstate(amdsmi_processor_handle processor_handle,
