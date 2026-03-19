@@ -37,6 +37,7 @@ import pandas as pd
 
 from utils import schema
 from utils.logger import console_debug, console_error, console_warning, demarcate
+from utils.pattern_matching import PatternMatcherEngine
 from utils.specs import MachineSpecs
 from utils.utils import normalize_filter_to_str_list
 
@@ -2078,22 +2079,12 @@ def load_non_mertrics_table(
     workload.dfs.update(tmp)
 
 
-@demarcate
-def load_torch_trace_data(workload: schema.Workload, dir_path: str) -> None:
-    """
-    Loads all torch operator CSVs from torch_trace directory
-    into workload.torch_operators.
-    """
-    torch_trace_dir = Path(dir_path) / "torch_trace"
-    workload.torch_operators = {}
-    if torch_trace_dir.exists() and torch_trace_dir.is_dir():
-        for csv_file in torch_trace_dir.glob("*.csv"):
-            operator_name = csv_file.stem  # filename without .csv
-            try:
-                df = pd.read_csv(csv_file)
-                workload.torch_operators[operator_name] = df
-            except Exception as e:
-                console_warning(f"Could not load {csv_file}: {e}")
+torch_operator_matcher = PatternMatcherEngine(mode="glob-hierarchy")
+
+
+def torch_operator_pattern_matches(pattern: str, operator_name: str) -> bool:
+    """Return True if *pattern* glob-matches *operator_name* hierarchy path."""
+    return torch_operator_matcher.matches(pattern, operator_name)
 
 
 @demarcate
@@ -2112,9 +2103,6 @@ def load_table_data(
     """
     if not skip_kernel_top:
         load_non_mertrics_table(workload, dir_path, args)
-
-    # Load torch operator trace data if present
-    load_torch_trace_data(workload, dir_path)
 
     eval_metric(
         workload.dfs,

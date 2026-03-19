@@ -39,7 +39,7 @@ static __global__ void Inc(uint8_t* Ad) {
  * ------------------------
  *    - HIP_VERSION >= 5.6
  */
-TEST_CASE(Stress_hipHostRegister_Oversubscription) {
+HIP_TEST_CASE(Stress_hipHostRegister_Oversubscription) {
   hipDeviceProp_t prop;
   HIP_CHECK(hipGetDeviceProperties(&prop, 0));
   std::string arch = prop.gcnArchName;

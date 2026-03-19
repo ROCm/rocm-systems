@@ -84,7 +84,7 @@ template <typename TestType> static void runAtomicCASMultiKernelTest() {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_atomicCAS_Positive) {
+HIP_TEST_CASE(Unit_atomicCAS_Positive) {
   SECTION("int") { runAtomicCASTest<int>(); }
   SECTION("unsigned int") { runAtomicCASTest<unsigned int>(); }
   SECTION("unsigned long long") { runAtomicCASTest<unsigned long long>(); }
@@ -119,7 +119,7 @@ TEST_CASE(Unit_atomicCAS_Positive) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_atomicCAS_Positive_Multi_Kernel) {
+HIP_TEST_CASE(Unit_atomicCAS_Positive_Multi_Kernel) {
   SECTION("int") { runAtomicCASMultiKernelTest<int>(); }
   SECTION("unsigned int") { runAtomicCASMultiKernelTest<unsigned int>(); }
   SECTION("unsigned long long") { runAtomicCASMultiKernelTest<unsigned long long>(); }
@@ -142,7 +142,7 @@ TEST_CASE(Unit_atomicCAS_Positive_Multi_Kernel) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_atomicCAS_Negative_Parameters_RTC) {
+HIP_TEST_CASE(Unit_atomicCAS_Negative_Parameters_RTC) {
   hiprtcProgram program{};
 
   const auto program_source = GENERATE(kAtomicCAS_int, kAtomicCAS_uint, kAtomicCAS_ulong,

@@ -25,7 +25,7 @@ static __global__ void managed_add(size_t size) {
 
 static __global__ void managed_inc() { atomicAdd(&m_X, 1.0f); }
 
-TEST_CASE("Unit_hipManagedKeyword_SingleGpu") {
+HIP_TEST_CASE(Unit_hipManagedKeyword_SingleGpu) {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   for (int i = 0; i < numDevices; i++) {
@@ -49,14 +49,13 @@ TEST_CASE("Unit_hipManagedKeyword_SingleGpu") {
   HIP_CHECK(hipDeviceSynchronize());
   HIP_CHECK(hipGetLastError());
 
-  float maxError = 0.0f;
   for (size_t i = 0; i < N; i++) {
     INFO("Reading output from managed variable: Index: " << i << " output: " << m_B[i]);
     REQUIRE(3.0f == m_B[i]);
   }
 }
 
-TEST_CASE(Unit_hipManagedKeyword_MultiGpu) {
+HIP_TEST_CASE(Unit_hipManagedKeyword_MultiGpu) {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
 

@@ -314,7 +314,7 @@ void testWrapper(size_t numElements) {
  *    - HIP_VERSION >= 5.5
  */
 
-TEST_CASE(Unit_Copy_Coherency) {
+HIP_TEST_CASE(Unit_Copy_Coherency) {
   for (int index = 0; index < sizeof(g_elementSizes) / sizeof(int); index++) {
     size_t numElements = g_elementSizes[index];
     testWrapper(numElements);

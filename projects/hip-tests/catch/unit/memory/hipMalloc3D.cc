@@ -54,7 +54,7 @@ static void Malloc3DThreadFunc(int gpu) { MemoryAlloc3DDiffSizes(gpu); }
  * allocation whose combined size goes over PalSettings::subAllocationChunkSize_;
  * hipMemGetInfo() should indicate the memory went down after we hipFree() all of them
  */
-TEST_CASE(Unit_hipMalloc3D_Basic) {
+HIP_TEST_CASE(Unit_hipMalloc3D_Basic) {
   CHECK_IMAGE_SUPPORT
 
   static constexpr int ChunkSize = 64;  // (in megabytes)
@@ -103,7 +103,7 @@ TEST_CASE(Unit_hipMalloc3D_Basic) {
 This testcase verifies the hipMalloc3D API by allocating
 smaller and big chunk data.
 */
-TEST_CASE(Unit_hipMalloc3D_SmallandBigChunks) {
+HIP_TEST_CASE(Unit_hipMalloc3D_SmallandBigChunks) {
   CHECK_IMAGE_SUPPORT
 
   MemoryAlloc3DDiffSizes(0);
@@ -114,7 +114,7 @@ This testcase verifies the hipMalloc3D API in multithreaded
 scenario by launching threads in parallel on multiple GPUs
 and verifies the hipMalloc3D API with small and big chunks data
 */
-TEST_CASE(Unit_hipMalloc3D_MultiThread) {
+HIP_TEST_CASE(Unit_hipMalloc3D_MultiThread) {
   CHECK_IMAGE_SUPPORT
 
   std::vector<std::thread> threadlist;

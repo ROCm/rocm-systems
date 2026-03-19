@@ -133,10 +133,10 @@ void checkMemset(T value, size_t count, MemsetType memsetType, bool async = fals
   }
 }
 
-// Macro which defines a TEST_CASE which calls and then checks the result of the 1D memset macros
+// Macro which defines a HIP_TEST_CASE which calls and then checks the result of the 1D memset macros
 // for all combinations of sync/async and hipMalloc/hipHostMalloc, given the value and memory range.
 #define DEFINE_1D_BASIC_TEST(suffix, memsetType, T, value, count)                                  \
-  TEST_CASE(Unit_hipMemsetFunctional_##suffix) {                                                   \
+  HIP_TEST_CASE(Unit_hipMemsetFunctional_##suffix) {                                               \
     const std::string memsetStr = std::string(#suffix);                                            \
     SECTION(memsetStr + " - Device Malloc") {                                                      \
       checkMemset(static_cast<T>(value), count, memsetType, false, hipDeviceMalloc_t);             \
@@ -188,7 +188,7 @@ template <typename T> void partialMemsetTest(T valA, T valB, size_t count, size_
   HIP_CHECK(hipFree(devPtr));
 }
 
-TEST_CASE(Unit_hipMemsetFunctional_PartialSet_1D) {
+HIP_TEST_CASE(Unit_hipMemsetFunctional_PartialSet_1D) {
   auto widthOffset = GENERATE(8, 16, 32, 64, 128, 256, 512, 1024);
   SECTION("hipMemset - Partial Set") {
     partialMemsetTest<char>(0x1, 0x42, 1024, widthOffset, hipMemsetTypeDefault, false);
@@ -265,7 +265,7 @@ template <typename T> void checkMemset2D(T value, size_t width, size_t height, b
   HIP_CHECK(hipStreamDestroy(stream));
 }
 
-TEST_CASE(Unit_hipMemsetFunctional_ZeroValue_2D) {
+HIP_TEST_CASE(Unit_hipMemsetFunctional_ZeroValue_2D) {
   CHECK_IMAGE_SUPPORT
 
   constexpr size_t width{128};
@@ -275,7 +275,7 @@ TEST_CASE(Unit_hipMemsetFunctional_ZeroValue_2D) {
   SECTION("hipMemset2DAsync - Zero Value") { checkMemset2D(memsetVal, width, height, true); }
 }
 
-TEST_CASE(Unit_hipMemsetFunctional_SmallSize_2D) {
+HIP_TEST_CASE(Unit_hipMemsetFunctional_SmallSize_2D) {
   CHECK_IMAGE_SUPPORT
 
   constexpr char memsetVal = 0x42;
@@ -283,7 +283,7 @@ TEST_CASE(Unit_hipMemsetFunctional_SmallSize_2D) {
   SECTION("hipMemset2DAsync - Small Size") { checkMemset2D(memsetVal, 1, 1, true); }
 }
 
-TEST_CASE(Unit_hipMemsetFunctional_ZeroSize_2D) {
+HIP_TEST_CASE(Unit_hipMemsetFunctional_ZeroSize_2D) {
   CHECK_IMAGE_SUPPORT
 
   size_t pitch{0};
@@ -365,7 +365,7 @@ template <typename T> void partialMemsetTest2D(T valA, T valB, size_t width, siz
   HIP_CHECK(hipFree(devPtr));
 }
 
-TEST_CASE(Unit_hipMemsetFunctional_PartialSet_2D) {
+HIP_TEST_CASE(Unit_hipMemsetFunctional_PartialSet_2D) {
   CHECK_IMAGE_SUPPORT
 
   for (auto widthOffset = 8; widthOffset <= 128; widthOffset *= 2) {
@@ -479,19 +479,19 @@ void check_memset_3D(std::string sectionStr, size_t width, size_t height, size_t
   }
 }
 
-TEST_CASE(Unit_hipMemsetFunctional_ZeroValue_3D) {
+HIP_TEST_CASE(Unit_hipMemsetFunctional_ZeroValue_3D) {
   CHECK_IMAGE_SUPPORT
 
   check_memset_3D("Zero Value", 128, 128, 10, 0);
 }
 
-TEST_CASE(Unit_hipMemsetFunctional_SmallSize_3D) {
+HIP_TEST_CASE(Unit_hipMemsetFunctional_SmallSize_3D) {
   CHECK_IMAGE_SUPPORT
 
   check_memset_3D("Small Size", 1, 1, 1, 0x42);
 }
 
-TEST_CASE(Unit_hipMemsetFunctional_ZeroSize_3D) {
+HIP_TEST_CASE(Unit_hipMemsetFunctional_ZeroSize_3D) {
   CHECK_IMAGE_SUPPORT
 
   constexpr size_t elementSize = sizeof(char);
@@ -547,7 +547,7 @@ void partialMemsetTest3D(T valA, T valB, size_t width, size_t height, size_t dep
   HIP_CHECK(hipFree(devPitchedPtr.ptr));
 }
 
-TEST_CASE(Unit_hipMemsetFunctional_PartialSet_3D) {
+HIP_TEST_CASE(Unit_hipMemsetFunctional_PartialSet_3D) {
   CHECK_IMAGE_SUPPORT
 
   for (auto widthOffset = 8; widthOffset <= 128; widthOffset *= 2) {

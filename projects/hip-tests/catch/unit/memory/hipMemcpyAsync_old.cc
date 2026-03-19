@@ -87,7 +87,7 @@ This testcase verifies the following scenarios
 4. Device context change
 5. H2D-D2D-D2H peer GPU
 */
-TEMPLATE_TEST_CASE(Unit_hipMemcpyAsync_H2H_H2D_D2H_H2PinMem, char, int, float, double) {
+HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpyAsync_H2H_H2D_D2H_H2PinMem, char, int, float, double) {
   TestType *A_d{nullptr}, *B_d{nullptr};
   TestType *A_h{nullptr}, *B_h{nullptr};
   TestType *A_Ph{nullptr}, *B_Ph{nullptr};
@@ -188,7 +188,7 @@ TEMPLATE_TEST_CASE(Unit_hipMemcpyAsync_H2H_H2D_D2H_H2PinMem, char, int, float, d
 // and also launch hipMemcpyAsync() api. This test case is simulate the scenario
 // reported in SWDEV-181598
 
-TEMPLATE_TEST_CASE(Unit_hipMemcpyAsync_hipMultiMemcpyMultiThread, int, float, double) {
+HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpyAsync_hipMultiMemcpyMultiThread, int, float, double) {
   size_t Nbytes = N_ELMTS * sizeof(TestType);
 
   int Data_mismatch = 0;
@@ -228,7 +228,7 @@ TEMPLATE_TEST_CASE(Unit_hipMemcpyAsync_hipMultiMemcpyMultiThread, int, float, do
   Thread_count.exchange(0);
 }
 
-TEMPLATE_TEST_CASE(Unit_hipMemcpyAsync_hipMultiMemcpyMultiThreadMultiStream, int, float,
+HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpyAsync_hipMultiMemcpyMultiThreadMultiStream, int, float,
                    double) {
   std::thread T[NUM_THREADS];
   for (int i = 0; i < NUM_THREADS; i++) {
@@ -251,7 +251,7 @@ This testcase verifies hipMemcpy API with pinnedMemory and hostRegister
 along with kernel launches
 */
 
-TEMPLATE_TEST_CASE(Unit_hipMemcpyAsync_PinnedRegMemWithKernelLaunch, int, float, double) {
+HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpyAsync_PinnedRegMemWithKernelLaunch, int, float, double) {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices < 2) {

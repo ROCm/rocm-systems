@@ -25,6 +25,9 @@
     "default": {
       "env_variables": {
         "NCCL_LAUNCH_MODE": "GROUP"
+      },
+      "rerun_env_variables": {
+        "NCCL_DEBUG": "INFO"
       }
     },
     "shm_comprehensive": {
@@ -260,6 +263,9 @@
       "num_nodes": 1,
       "num_gpus": 8,
       "timeout": 0,
+      "rerun_env_variables": {
+        "NCCL_DEBUG": "INFO"
+      },
       "tests": [
         {
           "name": "BitOps",
@@ -358,6 +364,9 @@
       "timeout": 0,
       "env_variables": {
         "NCCL_DEBUG": ""
+      },
+      "rerun_env_variables": {
+        "NCCL_DEBUG": "INFO"
       },
       "tests": [
         {"name": "AllReduce.OutOfPlace", "description": "AllReduce out-of-place", "test_filter": "AllReduce.OutOfPlace"},
@@ -470,6 +479,9 @@
       "num_nodes": 1,
       "num_gpus": 1,
       "timeout": 120,
+      "rerun_env_variables": {
+        "NCCL_DEBUG": "INFO"
+      },
       "tests": [
         {
           "name": "AltRsmi_AllTests",

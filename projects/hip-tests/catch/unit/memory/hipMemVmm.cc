@@ -23,7 +23,7 @@
     This testcase verifies HIP Mem VMM API basic scenario - supported on all devices
  */
 
-TEST_CASE(Unit_hipMemVmm_Basic) {
+HIP_TEST_CASE(Unit_hipMemVmm_Basic) {
   int vmm = 0;
   HIP_CHECK(hipDeviceGetAttribute(&vmm, hipDeviceAttributeVirtualMemoryManagementSupported, 0));
   INFO("hipDeviceAttributeVirtualMemoryManagementSupported: " << vmm);
@@ -83,7 +83,7 @@ TEST_CASE(Unit_hipMemVmm_Basic) {
  */
 
 #if HT_AMD
-TEST_CASE(Unit_hipMemVmm_Uncached) {
+HIP_TEST_CASE(Unit_hipMemVmm_Uncached) {
   int vmm = 0;
   HIP_CHECK(hipDeviceGetAttribute(&vmm, hipDeviceAttributeVirtualMemoryManagementSupported, 0));
   INFO("hipDeviceAttributeVirtualMemoryManagementSupported: " << vmm);
