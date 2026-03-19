@@ -12,7 +12,7 @@ A specific attach is not repeatable, and it can only collect the set of counters
 
 Detachment can be achieved in two ways:
 
-a) By setting the ``--attach-duration-msec`` parameter to a specific duration (in milliseconds). In this case, the detachment occurs automatically after the specified time has elapsed since the ``rocprof`` subprocess started.
+a) By setting the ``--attach-duration-msec`` parameter to a specific duration (in milliseconds). In this case, the detachment occurs automatically after the specified time has elapsed since the ``rocprofiler-sdk`` subprocess started.
 b) By pressing the Enter key after a successful attach within the same profiling terminal session. Upon a successful attach, a confirmation message is displayed in the terminal log of the workload process.
 
 ---------------------
@@ -21,7 +21,7 @@ Profiling options
 For using profiling options for PC sampling the configuration needed are:
 
 * ``--attach-pid``: Should be the process ID of the process of workload's application.
-* ``--attach-duration-msec``: (Optional) This is for setting up the synchronized detach, and is optional. Its unit is in milliseconds. When setting up, the detach will happen after this time has elapsed since the ``rocprof`` subprocess started. For example, setting it to 60000 yields 1 minute.
+* ``--attach-duration-msec``: (Optional) This is for setting up the synchronized detach, and is optional. Its unit is in milliseconds. When setting up, the detach will happen after this time has elapsed since the ``rocprofiler-sdk`` subprocess started. For example, setting it to 60000 yields 1 minute.
 
 **Sample command:**
 

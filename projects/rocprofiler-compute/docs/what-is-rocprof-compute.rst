@@ -15,7 +15,7 @@ ROCm Compute Profiler primarily targets use with
 :doc:`accelerators in the MI300, MI200, and MI100 families <rocm:conceptual/gpu-arch>`.
 Development is in progress to support Radeon™ (RDNA) GPUs.
 
-ROCm Compute Profiler is built on top of :doc:`ROCProfiler <rocprofiler:index>` to
+ROCm Compute Profiler is built on top of :doc:`ROCprofiler-SDK <rocprofiler-sdk:index>` to
 monitor hardware performance counters.
 
 .. _high-level-design:
@@ -29,7 +29,7 @@ following diagram.
 Core ROCm Compute Profiler
 --------------------------
 
-Acquires raw performance counters via application replay using ``rocprof``.
+Acquires raw performance counters via application replay using ``rocprofiler-sdk``.
 Counters are stored in a comma-separated-values format for further
 :doc:`analysis <how-to/analyze/mode>`. It runs a set of accelerator-specific
 micro-benchmarks to acquire hierarchical roofline data. The roofline model is
