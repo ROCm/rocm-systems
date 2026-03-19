@@ -1130,9 +1130,11 @@ enum class AMDGpuMetricVersionFlags_t : AMDGpuMetricVersionFlagId_t {
   kGpuMetricV16 = (0x1 << 6),
   kGpuMetricV17 = (0x1 << 7),
   kGpuMetricV18 = (0x1 << 8),
-  kGpuXcpMetricV10 = (0x1 << 0),         // Added in v1.8 for partition metrics v1.0
-  kGpuMetricDynV19Plus = (0x1 << 9),     // Dyn. GPU Metrics v1.9+
-  kGpuXcpMetricDynV11Plus = (0x1 << 1),  // Added in v1.9 for Dyn. partition metrics v1.1+
+  kGpuXcpMetricV10 = (0x1 << 0),            // Added in v1.8 for partition metrics v1.0
+  kGpuMetricDynV19Plus = (0x1 << 9),        // Dyn. GPU Metrics v1.9+
+  kGpuXcpMetricDynV11Plus = (0x1 << 1),     // Added in v1.9 for Dyn. partition metrics v1.1+
+  kApuMetricV24 = (0x1 << 10),              // APU Metrics v2.4
+  kApuMetricV30 = (0x1 << 11),              // APU Metrics v3.0
 };
 using AMDGpuMetricVersionTranslationTbl_t = std::map<uint16_t, AMDGpuMetricVersionFlags_t>;
 using GpuMetricTypePtr_t = std::shared_ptr<void>;
@@ -1418,6 +1420,42 @@ class GpuMetricsBase_v18_t final : public GpuMetricsBase_t {
   AMDGpuMetrics_v18_Partition_v1_0_t m_gpu_metrics_partition_tbl;
   std::shared_ptr<AMDGpuMetrics_v18_Partition_v1_0_t> m_gpu_metric_partition_ptr;
 };
+
+class ApuMetricsBase_v30_t final : public GpuMetricsBase_t
+{
+    public:
+        ~ApuMetricsBase_v30_t() = default;
+
+        size_t sizeof_metric_table() override { return sizeof(AMDGpuMetrics_v18_t); }
+
+        GpuMetricTypePtr_t get_metrics_table() override {
+            std::ostringstream ss;
+            ss  << __PRETTY_FUNCTION__ << " ==== START ==== "
+                << " Initializing apu metrics table request: "
+                << " | Device ID: " << m_device_id
+                << " | m_gpu_metric_ptr: " << (!m_gpu_metric_ptr ? "nullptr" : "valid")
+                << " | m_apu_metric_ptr: " << (!m_apu_metric_ptr ? "nullptr" : "valid");
+            LOG_DEBUG(ss);
+
+            return std::shared_ptr<AMDGpuMetrics_v18_t>(&m_gpu_metrics_tbl,
+                                                     [](AMDGpuMetrics_v18_t*) { /* no-op */ });
+        }
+
+        AMDGpuMetricVersionFlags_t get_gpu_metrics_version_used() override {
+            return AMDGpuMetricVersionFlags_t::kApuMetricV30;
+        }
+
+        rsmi_status_t populate_metrics_dynamic_tbl() override;
+        AMGpuMetricsPublicLatestTupl_t copy_internal_to_external_metrics() override;
+
+
+    private:
+        AMDGpuMetrics_v18_t m_gpu_metrics_tbl;
+        std::shared_ptr<AMDGpuMetrics_v18_t> m_gpu_metric_ptr;
+        rsmi_apu_metrics_t m_apu_metrics_tbl;
+        std::shared_ptr<rsmi_apu_metrics_t> m_apu_metric_ptr;
+};
+
 
 class GpuMetricsBaseDynamic_t final : public GpuMetricsBase_t {
  public:
