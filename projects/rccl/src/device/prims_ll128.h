@@ -119,7 +119,7 @@ private:
       int spins = 0;
       while (sendConnHeadCache + NCCL_STEPS < sendConnHead + 1) {
         __builtin_amdgcn_s_sleep(1);
-        sendConnHeadCache = __atomic_load_n(sendConnHeadPtr, __ATOMIC_RELAXED);
+        sendConnHeadCache = ld_relaxed_sys_global(sendConnHeadPtr);
         if (checkAbort(abort, 1, spins)) break;
       }
       if (sendConnFifo) {
@@ -147,7 +147,7 @@ private:
 #if __CUDA_ARCH__ >= 900
       __threadfence_system();
 #endif
-      STORE((unsigned long long *)sendConnTailPtr, sendConnTail += 1);
+      STORE((uint64_t *)sendConnTailPtr, sendConnTail += 1);
     }
   }
 
@@ -556,7 +556,7 @@ private:
   __device__ __forceinline__ void loadSendSync() {
     if (tid < fan.nsend()) {
       sendConnHeadPtr = sendConn->head;
-      sendConnHeadCache = *sendConnHeadPtr;
+      sendConnHeadCache = ld_relaxed_sys_global(sendConnHeadPtr);
       sendConnHead = sendConn->step;
       sendConnFifo = sendConn->connFifo;
     }

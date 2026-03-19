@@ -424,6 +424,9 @@ __device__ __forceinline__ uint64_t ld_relaxed_sys_global(uint64_t *ptr) {
   #endif
   return ans;
 }
+__device__ __forceinline__ uint64_t ld_relaxed_sys_global(volatile uint64_t *ptr) {
+  return ld_relaxed_sys_global(const_cast<uint64_t*>(ptr));
+}
 
 // __device__ __forceinline__ uint64_t ld_relaxed_gpu_global(uint64_t *ptr) {
   // uint64_t ans;
@@ -455,6 +458,16 @@ __device__ __forceinline__ void st_volatile_global(uint64_t *ptr, uint64_t val) 
 __device__ __forceinline__ void st_relaxed_sys_global(uint64_t *ptr, uint64_t val) {
   #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
   __hip_atomic_store((__attribute__((address_space(1)))uint64_t *)ptr, val, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+  #else
+  __builtin_nontemporal_store(val, ptr);
+  #endif
+}
+__device__ __forceinline__ void st_relaxed_sys_global(volatile uint64_t *ptr, uint64_t val) {
+  st_relaxed_sys_global(const_cast<uint64_t*>(ptr), val);
+}
+__device__ __forceinline__ void st_relaxed_sys_global(uint32_t *ptr, uint32_t val) {
+  #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+  __hip_atomic_store((__attribute__((address_space(1)))uint32_t *)ptr, val, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
   #else
   __builtin_nontemporal_store(val, ptr);
   #endif
