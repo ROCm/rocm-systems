@@ -63,7 +63,6 @@ get_dispatch_time(const hsa::queue_info_session& session)
 void
 dispatch_complete(queue_info_session_t& session, profiling_time dispatch_time)
 {
-    // get the contexts that were active when the signal was created
     auto& tracing_data_v = session.tracing_data;
     if(tracing_data_v.callback_contexts.empty() && tracing_data_v.buffered_contexts.empty()) return;
 

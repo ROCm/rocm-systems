@@ -224,8 +224,10 @@ copySample<GFX9, rocprofiler_pc_sampling_record_stochastic_v0_t>(const void* sam
     auto perf_snapshot_data = sample_.perf_snapshot_data;
     // The sample is valid iff neither of perf_snapshot_data.valid and perf_snapshot_data.error == 0
     // is one
-    auto valid = static_cast<bool>(EXTRACT_BITS(perf_snapshot_data, 0, 0) &
-                                   ~EXTRACT_BITS(perf_snapshot_data, 26, 26));
+    auto valid_bit = EXTRACT_BITS(perf_snapshot_data, 0, 0);
+    auto error_bit = EXTRACT_BITS(perf_snapshot_data, 26, 26);
+    auto valid = static_cast<bool>(valid_bit & ~error_bit);
+
     if(!valid)
     {
         // To reduce refactoring of the PC sampling parser, we agreed to internally represent

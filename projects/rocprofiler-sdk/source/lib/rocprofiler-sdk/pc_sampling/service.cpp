@@ -67,7 +67,6 @@ start_service(const context::context* ctx)
     auto* service = ctx->pc_sampler.get();
 
     context::pc_sampling_service* _expected = nullptr;
-    // If there is no active pc_sampling_service, mark `service` as activated.
     bool success = get_active_pc_sampling_service().compare_exchange_strong(_expected, service);
 
     if(!success)
@@ -111,18 +110,14 @@ post_hsa_init_start_active_service()
 {
     // Called as part of the registration of the HSA table
     if(is_hsa_initialized().load())
-    {
-        // If there is a guarantee that the `rocprofiler_set_api_table`
-        // can be called only once for the HSA, then this condition is redundant.
         return;
-    }
 
     // If the PC sampling service is not configured on any of the agents, return.
-    if(!get_configured_pc_sampling_service().load()) return;
+    if(!get_configured_pc_sampling_service().load())
+        return;
 
     static auto _once = std::once_flag{};
     std::call_once(_once, []() {
-        // Configure PC sampling on the ROCr level only once.
         hsa::pc_sampling_service_finish_configuration(get_configured_pc_sampling_service().load());
     });
 
@@ -136,14 +131,11 @@ post_hsa_init_start_active_service()
 
     if(get_active_pc_sampling_service().compare_exchange_strong(_expected, pseudo_sevice))
     {
-        // At this point, we prevented any `start_context` instance from activating the service.
         is_hsa_initialized().store(true);
-        // Now, allow `start_context` to active the service.
         get_active_pc_sampling_service().compare_exchange_strong(pseudo_sevice, nullptr);
     }
     else
     {
-        // Someone already called `start_context` that activated service.
         // The pointer to this service is written inside `_expected`.
         // Start PC sampling service on the HSA level in the name of the
         // `start_context` caller.

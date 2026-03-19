@@ -254,8 +254,9 @@ pc_sampling_service_start(context::pc_sampling_service* service)
         // Please check `pc_sampling_service_finish_configuration` for more information.
         if(!agent_session->hsa_agent.has_value()) continue;
 
-        if(pc_sampling_table_->hsa_ven_amd_pcs_start_fn(agent_session->hsa_pc_sampling) !=
-           HSA_STATUS_SUCCESS)
+        auto hsa_status =
+            pc_sampling_table_->hsa_ven_amd_pcs_start_fn(agent_session->hsa_pc_sampling);
+        if(hsa_status != HSA_STATUS_SUCCESS)
         {
             // Two concurrent calls to the pc_sampling::start_service are invoked on the same
             // service. The "faster" one succeeds and starts the PC sampling service on the HSA
@@ -276,8 +277,9 @@ pc_sampling_service_stop(context::pc_sampling_service* service)
         // Please check `pc_sampling_service_finish_configuration` for more information.
         if(!agent_session->hsa_agent.has_value()) continue;
 
-        if(pc_sampling_table_->hsa_ven_amd_pcs_stop_fn(agent_session->hsa_pc_sampling) !=
-           HSA_STATUS_SUCCESS)
+        auto stop_status =
+            pc_sampling_table_->hsa_ven_amd_pcs_stop_fn(agent_session->hsa_pc_sampling);
+        if(stop_status != HSA_STATUS_SUCCESS)
         {
             // Two concurrent calls to the pc_sampling::stop_serivce are invoked on the same
             // service. The "faster" one succeeds and stops the PC sampling service on the HSA
@@ -288,7 +290,6 @@ pc_sampling_service_stop(context::pc_sampling_service* service)
             continue;
         };
 
-        // Flush internal PC sampling buffers (ROCr + 2nd level trap handler buffers)
         flush_internal_agent_buffers(agent_session.get());
     }
 }

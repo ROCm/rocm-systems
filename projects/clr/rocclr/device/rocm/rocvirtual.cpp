@@ -1151,13 +1151,10 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
 
   fence_state_ = static_cast<Device::CacheState>(expected_fence_state);
 
-  bool attachSignal = timestamp_ != nullptr || attach_signal;
-  // we rely on firmware writing timestamps into the completion signal. If no signal then no timestamp.
   bool queueProfilingEnabled = gpu_queue_ != nullptr &&
-    AMD_HSA_BITS_GET(reinterpret_cast<amd_queue_t*>(gpu_queue_)->queue_properties,
-                     AMD_QUEUE_PROPERTIES_ENABLE_PROFILING);
-  attachSignal = timestamp_ != nullptr || attach_signal || queueProfilingEnabled;
-  // Get active signal for current dispatch if profiling is necessary
+      AMD_HSA_BITS_GET(reinterpret_cast<amd_queue_t*>(gpu_queue_)->queue_properties,
+                       AMD_QUEUE_PROPERTIES_ENABLE_PROFILING);
+  bool attachSignal = timestamp_ != nullptr || attach_signal || queueProfilingEnabled;
   packet->completion_signal =
       Barriers().ActiveSignal(kInitSignalValueOne, timestamp_, attachSignal);
 

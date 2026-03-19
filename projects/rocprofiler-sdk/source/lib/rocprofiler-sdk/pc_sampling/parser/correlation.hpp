@@ -235,6 +235,10 @@ add_upcoming_samples(const device_handle     device,
     table->clear_backlog();
     auto table_read_lock = table->acquire_query_lock();
 
+    static std::atomic<uint64_t> _dbg_calls{0};
+    auto call_num = _dbg_calls.fetch_add(1);
+    uint64_t dbg_copy_invalid = 0, dbg_codeobj_none = 0, dbg_corr_err = 0, dbg_valid = 0;
+
     for(uint64_t p = 0; p < available_samples; p++)
     {
         const auto* snap = reinterpret_cast<const perf_sample_snapshot_v1*>(buffer + p);
@@ -242,7 +246,7 @@ add_upcoming_samples(const device_handle     device,
         auto& pc_sample = samples[p];
         pc_sample       = copySample<GFXIP, PcSamplingRecordT>(static_cast<const void*>(snap));
         // skip invalid samples
-        if(pc_sample.size == 0) continue;
+        if(pc_sample.size == 0) { ++dbg_copy_invalid; continue; }
 
         // Correct PC address of the original sample (if needed) prior to decoding it.
         auto pc_address = correct_pc_address<GFXIP, PcSamplingRecordT>(snap);
@@ -267,6 +271,11 @@ add_upcoming_samples(const device_handle     device,
                 // tagged with the error bit on time due to high latency in the trap handler.
                 // Thus, we are declaring the sample invalid, by setting its size to zero.
                 pc_sample.size = 0;
+                ++dbg_codeobj_none;
+            }
+            else
+            {
+                ++dbg_valid;
             }
         } catch(std::exception& e)
         {
@@ -276,6 +285,7 @@ add_upcoming_samples(const device_handle     device,
                                         .external = rocprofiler_user_data_t{
                                             .value = ROCPROFILER_CORRELATION_ID_INTERNAL_NONE}};
             status                   = PCSAMPLE_STATUS_PARSER_ERROR;
+            ++dbg_corr_err;
         }
     }
     return status;
