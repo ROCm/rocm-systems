@@ -33,6 +33,9 @@
 using namespace rocshmem;
 
 TesterArguments::TesterArguments(int argc, char *argv[]) {
+  if (argc > 0 && argv[0] != nullptr) {
+    executable_name = argv[0];
+  }
   for (int i = 1; i < argc; i++) {
     std::string arg = argv[i];
     if (arg == "-t") {
@@ -239,6 +242,7 @@ void TesterArguments::get_arguments() {
     case FloodAddTestType:
     case FloodFAddTestType:
     case FloodWaitAmoTestType:
+    case DeviceBitcodeTestType:
       requires_two_pes = false;
       break;
     default:

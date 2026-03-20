@@ -1,3 +1,7 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
 project(opencl)
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -106,6 +110,7 @@ configure_file(
   ${CMAKE_BINARY_DIR}/opencl/packages/opencl/${OPENCL_AMD_ICD_FILE}
   COPYONLY
 )
+# support legacy rocm-ci
 install(
   FILES ${CMAKE_BINARY_DIR}/opencl/packages/opencl/${OPENCL_AMD_ICD_FILE}
   DESTINATION /${CMAKE_INSTALL_SYSCONFDIR}/OpenCL/vendors
@@ -118,6 +123,8 @@ configure_file(
   ${CMAKE_BINARY_DIR}/opencl/packages/opencl/10-rocm-opencl.conf
   COPYONLY
 )
+
+# support legacy rocm-ci
 install(
   FILES ${CMAKE_BINARY_DIR}/opencl/packages/opencl/10-rocm-opencl.conf
   DESTINATION /${CMAKE_INSTALL_SYSCONFDIR}/ld.so.conf.d

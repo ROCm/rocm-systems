@@ -1,22 +1,8 @@
-/* Copyright (c) 2015 - 2025 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "platform/commandqueue.hpp"
 #include "device/rocm/rocdevice.hpp"
@@ -500,21 +486,33 @@ inline bool DmaBlitManager::rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, c
       (copyMetadata.copyEnginePreference_ == amd::CopyMetadata::CopyEnginePreference::SDMA);
   HwQueueEngine engine = HwQueueEngine::Unknown;
 
+  hsa_agent_t copyAgent, peerAgent;
   // Determine engine based on source and destination agents
   if (srcAgent.handle == dstAgent.handle) {
     // Device to same device
     engine = HwQueueEngine::SdmaD2D;
+    copyAgent = srcAgent;
+    peerAgent = dstAgent;
   } else {
     // Different devices
     if (srcAgent.handle == dev().getCpuAgent().handle) {
-      // CPU to device
+      // Host to device
       engine = HwQueueEngine::SdmaH2D;
+      copyAgent = dstAgent;
+      peerAgent = srcAgent;
     } else if (dstAgent.handle == dev().getCpuAgent().handle) {
-      // Device to CPU
+      // Device to host
       engine = HwQueueEngine::SdmaD2H;
+      copyAgent = srcAgent;
+      peerAgent = dstAgent;
     } else {
-      // Device to different device
+      // For P2P, always use the backendDevice as the copy agent. ROCr selects the
+      // SDMA engine from the src_agent, so we place backendDevice there.
+      // peerAgent must be the peer
       engine = HwQueueEngine::SdmaP2P;
+      copyAgent = dev().getBackendDevice();
+      peerAgent = (srcAgent.handle == copyAgent.handle) ? dstAgent : srcAgent;
+      forceSDMA = true;
     }
   }
 
@@ -540,7 +538,7 @@ inline bool DmaBlitManager::rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, c
               &gpu(), copyMask, engine);
     } else {
       // No assigned engine yet - allocate one using device-level allocator
-      copyMask = dev().AllocateSdmaEngine(&gpu(), engine, dstAgent, srcAgent);
+      copyMask = dev().AllocateSdmaEngine(&gpu(), engine, peerAgent, copyAgent);
 
       if (copyMask != 0) {
         // Store the assigned engine in the VirtualGPU for future use
@@ -561,13 +559,6 @@ inline bool DmaBlitManager::rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, c
       // Copy on the first available free engine if ROCr returns a valid mask
       hsa_amd_sdma_engine_id_t copyEngine = static_cast<hsa_amd_sdma_engine_id_t>(copyMask);
 
-      // Check if engine type is SdmaP2P and adjust agents accordingly
-      // ROCr copy api would always choose SDMA engine of the srcAgent if its a GPU
-      if (engine == HwQueueEngine::SdmaP2P) {
-        srcAgent = dev().getBackendDevice();
-        forceSDMA = true;
-      }
-
       ClPrint(amd::LOG_DEBUG, amd::LOG_COPY2,
               "HSA Copy copy_engine=0x%x, dst=0x%zx, src=0x%zx, "
               "size=%ld, forceSDMA=%d, engineOp=%s, wait_event=0x%zx, completion_signal=0x%zx",
@@ -575,7 +566,7 @@ inline bool DmaBlitManager::rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, c
               (wait_events.size() != 0) ? wait_events[0].handle : 0, active.handle);
 
       status =
-          Hsa::memory_async_copy_on_engine(dst, dstAgent, src, srcAgent, size, wait_events.size(),
+          Hsa::memory_async_copy_on_engine(dst, peerAgent, src, copyAgent, size, wait_events.size(),
                                            wait_events.data(), active, copyEngine, forceSDMA);
     } else {
       kUseRegularCopyApi = true;
@@ -589,7 +580,7 @@ inline bool DmaBlitManager::rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, c
             dst, src, size, (wait_events.size() != 0) ? wait_events[0].handle : 0, active.handle,
             EngineOpName(engine));
 
-    status = Hsa::memory_async_copy(dst, dstAgent, src, srcAgent, size, wait_events.size(),
+    status = Hsa::memory_async_copy(dst, peerAgent, src, copyAgent, size, wait_events.size(),
                                     wait_events.data(), active);
   }
 
@@ -704,8 +695,14 @@ bool DmaBlitManager::hsaCopyBatch(const std::vector<amd::BatchCopyOp>& copyOps,
       hsaOp.src_size = op.size;
       hsaOp.dst_size = op.size;
       break;
-    case amd::CopyMetadata::kCopyOpIndirect:
-      hsaOp.type = HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT;
+    case amd::CopyMetadata::kCopyOpIndirectSrc:
+      hsaOp.type = HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC;
+      break;
+    case amd::CopyMetadata::kCopyOpIndirectDst:
+      hsaOp.type = HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_DST;
+      break;
+    case amd::CopyMetadata::kCopyOpIndirectSrcDst:
+      hsaOp.type = HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST;
       break;
     default:
       hsaOp.type = HSA_AMD_MEMORY_COPY_OP_LINEAR;
@@ -755,8 +752,10 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
   }
 
   // Submit each non-empty engine group as a separate batch with its own signal.
-  // Within each group, ops sharing the same (src, src_agent, size) are
-  // collapsed into a single BROADCAST op.
+  // Within each group, ops are grouped by src_agent:
+  //  - Same (src, size) with multiple dsts → BROADCAST
+  //  - Multiple remaining ops from same src_agent → MULTI
+  //  - Single remaining op → LINEAR
   hsa_status_t status = HSA_STATUS_SUCCESS;
   std::vector<ProfilingSignal*> groupSignals;
 
@@ -766,61 +765,107 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
 
     HwQueueEngine engine = static_cast<HwQueueEngine>(e);
 
-    // Group ops by common source identity (src ptr, src_agent, size).
-    // Multi-destination groups become BROADCAST; single-destination stay LINEAR.
-    struct CopyOpKey {
+    // Two-level grouping: first by src_agent, then by (src, size) for broadcast.
+    struct BcastKey {
       const void* src;
-      uint64_t src_agent;
       size_t size;
-      bool operator<(const CopyOpKey& o) const {
+      bool operator<(const BcastKey& o) const {
         if (src != o.src) return src < o.src;
-        if (src_agent != o.src_agent) return src_agent < o.src_agent;
         return size < o.size;
       }
     };
-
-    struct CopyOpGroup {
+    struct BcastEntry {
       hsa_amd_memory_copy_op_t tmpl;
       std::vector<void*> dsts;
       std::vector<hsa_agent_t> dst_agents;
     };
-    std::map<CopyOpKey, CopyOpGroup> op_groups;
+    struct AgentGroup {
+      hsa_agent_t src_agent;
+      std::map<BcastKey, BcastEntry> sub_groups;
+    };
+    std::map<uint64_t, AgentGroup> agent_groups;
 
     for (const auto& op : ops) {
-      CopyOpKey key{op.src, op.src_agent.handle, op.size};
-      auto& grp = op_groups[key];
-      if (grp.dsts.empty()) {
-        grp.tmpl = op;
+      auto& ag = agent_groups[op.src_agent.handle];
+      ag.src_agent = op.src_agent;
+      BcastKey bkey{op.src, op.size};
+      auto& be = ag.sub_groups[bkey];
+      if (be.dsts.empty()) {
+        be.tmpl = op;
       }
-      grp.dsts.push_back(op.dst);
-      grp.dst_agents.push_back(op.dst_agent);
+      be.dsts.push_back(op.dst);
+      be.dst_agents.push_back(op.dst_agent);
     }
 
-    // Build final ops: each gets its own completion signal with value 1.
     gpu().Barriers().SetActiveEngine(engine);
 
+    struct MultiArrays {
+      std::vector<void*> srcs;
+      std::vector<void*> dsts;
+      std::vector<hsa_agent_t> dst_agents;
+      std::vector<size_t> sizes;
+    };
+    std::vector<MultiArrays> multiStore;
+    multiStore.reserve(agent_groups.size());
+
     std::vector<hsa_amd_memory_copy_op_t> finalOps;
-    finalOps.reserve(op_groups.size());
 
-    for (auto& [key, grp] : op_groups) {
-      hsa_signal_t completion_signal = gpu().Barriers().ActiveSignal(1, gpu().timestamp());
+    for (auto& [agent_handle, ag] : agent_groups) {
+      MultiArrays pending;
 
-      if (grp.dsts.size() > 1 && engine == HwQueueEngine::SdmaD2D) {
-        hsa_amd_memory_copy_op_t op = {};
-        op.version = HSA_AMD_MEMORY_COPY_OP_VERSION;
-        op.type = HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST;
-        op.src = grp.tmpl.src;
-        op.src_agent = grp.tmpl.src_agent;
-        op.dst_list = grp.dsts.data();
-        op.dst_agent_list = grp.dst_agents.data();
-        op.num_dsts = static_cast<uint32_t>(grp.dsts.size());
-        op.size = grp.tmpl.size;
-        op.completion_signal = completion_signal;
-        finalOps.push_back(op);
-      } else {
-        grp.tmpl.completion_signal = completion_signal;
-        finalOps.push_back(grp.tmpl);
+      for (auto& [bkey, be] : ag.sub_groups) {
+        if (be.dsts.size() > 1 && engine == HwQueueEngine::SdmaD2D) {
+          hsa_amd_memory_copy_op_t bcast = {};
+          bcast.version = HSA_AMD_MEMORY_COPY_OP_VERSION;
+          bcast.type = HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST;
+          bcast.src = be.tmpl.src;
+          bcast.src_agent = ag.src_agent;
+          bcast.dst_list = be.dsts.data();
+          bcast.dst_agent_list = be.dst_agents.data();
+          bcast.num_dsts = static_cast<uint16_t>(be.dsts.size());
+          bcast.size = be.tmpl.size;
+          finalOps.push_back(bcast);
+        } else {
+          for (size_t i = 0; i < be.dsts.size(); ++i) {
+            pending.srcs.push_back(const_cast<void*>(be.tmpl.src));
+            pending.dsts.push_back(be.dsts[i]);
+            pending.dst_agents.push_back(be.dst_agents[i]);
+            pending.sizes.push_back(be.tmpl.size);
+          }
+        }
       }
+
+      if (pending.srcs.size() > 1) {
+        multiStore.push_back(std::move(pending));
+        auto& stored = multiStore.back();
+
+        hsa_amd_memory_copy_op_t multi = {};
+        multi.version = HSA_AMD_MEMORY_COPY_OP_VERSION;
+        multi.type = HSA_AMD_MEMORY_COPY_OP_LINEAR;
+        multi.src_list = stored.srcs.data();
+        multi.src_agent = ag.src_agent;
+        multi.dst_list = stored.dsts.data();
+        multi.dst_agent_list = stored.dst_agents.data();
+        multi.size_list = stored.sizes.data();
+        multi.num_dsts = static_cast<uint16_t>(stored.srcs.size());
+        finalOps.push_back(multi);
+      } else if (pending.srcs.size() == 1) {
+        hsa_amd_memory_copy_op_t linear = {};
+        linear.version = HSA_AMD_MEMORY_COPY_OP_VERSION;
+        linear.type = HSA_AMD_MEMORY_COPY_OP_LINEAR;
+        linear.src = pending.srcs[0];
+        linear.src_agent = ag.src_agent;
+        linear.dst = pending.dsts[0];
+        linear.dst_agent = pending.dst_agents[0];
+        linear.size = pending.sizes[0];
+        finalOps.push_back(linear);
+      }
+    }
+
+    // Assign one completion signal per op in a single place.
+    for (auto& op : finalOps) {
+      op.completion_signal = gpu().Barriers().ActiveSignal(1, gpu().timestamp());
+      groupSignals.push_back(gpu().Barriers().GetLastSignal());
     }
 
     for (size_t i = 0; i < finalOps.size(); ++i) {
@@ -830,15 +875,26 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
           ClPrint(amd::LOG_DEBUG, amd::LOG_COPY2,
                   "HSA BatchCopy Broadcast [%u/%u] engineOp=%s, src=%p, dst=%p, "
                   "size=%zu, wait_event=0x%zx, completion_signal=0x%zx",
-                  d, op.num_dsts, EngineOpName(engine), op.src, op.dst_list[d],
+                  d + 1, op.num_dsts, EngineOpName(engine), op.src, op.dst_list[d],
                   op.size, (wait_events.size() != 0) ? wait_events[0].handle : 0,
+                  op.completion_signal.handle);
+        }
+      } else if (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR && op.num_dsts > 0) {
+        for (uint32_t d = 0; d < op.num_dsts; ++d) {
+          ClPrint(amd::LOG_DEBUG, amd::LOG_COPY2,
+                  "HSA BatchCopy Multi [%u/%u] engineOp=%s, src=%p, dst=%p, "
+                  "size=%zu, wait_event=0x%zx, completion_signal=0x%zx",
+                  d + 1, op.num_dsts, EngineOpName(engine), op.src_list[d],
+                  op.dst_list[d], op.size_list[d],
+                  (wait_events.size() != 0) ? wait_events[0].handle : 0,
                   op.completion_signal.handle);
         }
       } else {
         ClPrint(amd::LOG_DEBUG, amd::LOG_COPY2,
                 "HSA BatchCopy Linear [%zu/%zu] engineOp=%s, dst=%p, src=%p, size=%zu, "
-                "wait_event=0x%zx, completion_signal=0x%zx",
-                i, finalOps.size(), EngineOpName(engine), (void*)op.dst, op.src, op.size,
+                "src_agent=0x%zx, dst_agent=0x%zx, wait_event=0x%zx, completion_signal=0x%zx",
+                i, finalOps.size(), EngineOpName(engine), op.dst, op.src, op.size,
+                op.src_agent.handle, op.dst_agent.handle,
                 (wait_events.size() != 0) ? wait_events[0].handle : 0,
                 op.completion_signal.handle);
       }
@@ -854,7 +910,6 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
       return false;
     }
 
-    groupSignals.push_back(gpu().Barriers().GetLastSignal());
   }
 
   // All-but-last group signals go to outBatchSignals for external tracking.
