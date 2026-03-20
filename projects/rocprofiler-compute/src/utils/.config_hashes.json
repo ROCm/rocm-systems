@@ -18,13 +18,13 @@
         "1400_scalar_l1_data_cache.yaml": "393c4aea974c05e45590f3053d66e12e",
         "1500_address_processing_unit_and_data_return_path_ta_td.yaml": "58f72a8bd99f51d91c072cbe5bdb3c9b",
         "1600_vector_l1_data_cache.yaml": "36577069477d6ca674386f793db14b68",
-        "1700_l2_cache.yaml": "9e4794c294cfc2066f390aadcd3b044a",
+        "1700_l2_cache.yaml": "b6314628d4b61a48b41c19ba537e1973",
         "1800_l2_cache_per_channel.yaml": "edd38af39f2f76d014bb78ec2ae67aa5",
         "2100_pc_sampling.yaml": "8049866f25214544f1e53a9e2f08399b"
       }
     },
     "gfx90a": {
-      "delta_hash": "ec1a92b039c9d2c83fb30af24bcb05b5",
+      "delta_hash": "c7a9a7004bc4cfca697d6f7897e9036d",
       "files": {
         "0000_top_stats.yaml": "2819d96f5b1c3704f2ac50868a246a7f",
         "0100_system_info.yaml": "cefae2b10db8cf4b0d3a971cff5e82c8",
@@ -41,7 +41,7 @@
         "1400_scalar_l1_data_cache.yaml": "393c4aea974c05e45590f3053d66e12e",
         "1500_address_processing_unit_and_data_return_path_ta_td.yaml": "e8c02b523708a97dc2d9539d370166ec",
         "1600_vector_l1_data_cache.yaml": "36577069477d6ca674386f793db14b68",
-        "1700_l2_cache.yaml": "d339437989be3fd3c3fd6f8d604bcc52",
+        "1700_l2_cache.yaml": "abd46c1f5822626c87086e3007b67512",
         "1800_l2_cache_per_channel.yaml": "1a411b53688d1875ce73d9f968e344b6",
         "2100_pc_sampling.yaml": "8049866f25214544f1e53a9e2f08399b"
       }
@@ -64,7 +64,7 @@
         "1400_scalar_l1_data_cache.yaml": "393c4aea974c05e45590f3053d66e12e",
         "1500_address_processing_unit_and_data_return_path_ta_td.yaml": "15ccd9107489a67c223db1b4d9b04dba",
         "1600_vector_l1_data_cache.yaml": "bf009a23a2dc537c7d70063a3009b84c",
-        "1700_l2_cache.yaml": "66f0620f4e491adad2523047a0dbfb7d",
+        "1700_l2_cache.yaml": "12cc8953e13820b13bf8906761d94485",
         "1800_l2_cache_per_channel.yaml": "3d12350e5835d1ab1a5df9be05f17f09",
         "2100_pc_sampling.yaml": "8049866f25214544f1e53a9e2f08399b"
       }
@@ -87,7 +87,7 @@
         "1400_scalar_l1_data_cache.yaml": "393c4aea974c05e45590f3053d66e12e",
         "1500_address_processing_unit_and_data_return_path_ta_td.yaml": "15ccd9107489a67c223db1b4d9b04dba",
         "1600_vector_l1_data_cache.yaml": "bf009a23a2dc537c7d70063a3009b84c",
-        "1700_l2_cache.yaml": "7df085dd8981eb762f5a552faeb03cf0",
+        "1700_l2_cache.yaml": "f54795a9932c4870038c84d1b87c257e",
         "1800_l2_cache_per_channel.yaml": "3d12350e5835d1ab1a5df9be05f17f09",
         "2100_pc_sampling.yaml": "8049866f25214544f1e53a9e2f08399b"
       }
@@ -110,7 +110,7 @@
         "1400_scalar_l1_data_cache.yaml": "393c4aea974c05e45590f3053d66e12e",
         "1500_address_processing_unit_and_data_return_path_ta_td.yaml": "8fc0f15dc009269713b825e7c8bed400",
         "1600_vector_l1_data_cache.yaml": "bf009a23a2dc537c7d70063a3009b84c",
-        "1700_l2_cache.yaml": "6080c7be894251f04ac8d161fc3625d2",
+        "1700_l2_cache.yaml": "9ca8510be3923c97f1fb764566421682",
         "1800_l2_cache_per_channel.yaml": "3d12350e5835d1ab1a5df9be05f17f09",
         "2100_pc_sampling.yaml": "8049866f25214544f1e53a9e2f08399b"
       }
@@ -133,7 +133,7 @@
         "1400_scalar_l1_data_cache.yaml": "fd3c4e5965b57410fd0c3092030d75b6",
         "1500_address_processing_unit_and_data_return_path_ta_td.yaml": "0c94d9c1618a9adbfd9e2b982ba9c796",
         "1600_vector_l1_data_cache.yaml": "dcf8c9b5dd3d94fd83b20de6abc0aab2",
-        "1700_l2_cache.yaml": "70d6efc9e892db53452597b5839876f5",
+        "1700_l2_cache.yaml": "74c84ad96c67e61cfe2f844fdd6e644b",
         "1800_l2_cache_per_channel.yaml": "ffbaef1fea16af57b08d1e513cb5a29f",
         "2100_pc_sampling.yaml": "8049866f25214544f1e53a9e2f08399b",
         "3000_mem_bw.yaml": "a1769e144d16d4ce9842b76663722967"
