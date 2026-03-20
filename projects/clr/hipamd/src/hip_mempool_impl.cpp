@@ -493,7 +493,7 @@ amd::Os::FileDesc MemoryPool::Export() {
     return shared_->handle_;
   }
 
-  constexpr uint32_t kFileNameSize = 24;
+  constexpr uint32_t kFileNameSize = 20;
   char file_name[kFileNameSize];
   // Generate a unique name from the mempool pointer
   // Note: Windows can accept an unnamed allocation

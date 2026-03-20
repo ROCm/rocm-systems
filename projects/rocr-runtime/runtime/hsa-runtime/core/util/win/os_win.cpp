@@ -565,6 +565,7 @@ IPCSocket AcceptIPCConnection(IPCSocket server) {
   // Create a new instance so the server can accept the next client.
   HANDLE newPipe = CreatePipeInstance(serverInfo->pipeName.c_str());
   if (newPipe == INVALID_HANDLE_VALUE) {
+    DisconnectNamedPipe(connPipe);
     assert("!CreatePipeInstance failed.");
     return INVALID_SOCKET_VALUE;
   }

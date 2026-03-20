@@ -52,6 +52,7 @@
 #include <utility>
 #include <thread>
 #include <shared_mutex>
+#include <random>
 #if defined(__linux__)
 #include <sys/un.h>
 #include <xf86drm.h>

@@ -52,9 +52,6 @@
 #define debug_warning(__VA_ARGS__)
 #endif
 
-#include <random>
-#include <cinttypes>
-
 #include "core/inc/runtime.h"
 #include "core/inc/hsa_table_interface.h"
 
@@ -1297,7 +1294,8 @@ void Runtime::AsyncIPCSockServerConnLoop(void*) {
 
      int err = HSAKMT_CALL(hsaKmtExportDMABufHandle(ptr, len, &dmabuf_fd, &fragOffset));
      if (err != HSAKMT_STATUS_SUCCESS) continue;
-     os::IPCSendHandle(conn, dmabuf_fd);
+     err = os::IPCSendHandle(conn, dmabuf_fd);
+     if (err == -1) break;
      err = os::IPCSocketRead(conn, buf, sizeof(buf));
      if (err == -1) break;
      hsa_status_t status = runtime_singleton_->DmaBufClose(dmabuf_fd);
