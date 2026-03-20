@@ -93,20 +93,20 @@ Panel Config:
             if ((CPC_CPC_STAT_BUSY + CPC_CPC_STAT_IDLE) != 0) else None))
           unit: Percent
         CPC Stall Rate:
-          avg: AVG((NOISE_CLAMP(((100 * CPC_CPC_STAT_STALL) / CPC_CPC_STAT_BUSY),
-            100) if (CPC_CPC_STAT_BUSY != 0) else None))
-          min: MIN((NOISE_CLAMP(((100 * CPC_CPC_STAT_STALL) / CPC_CPC_STAT_BUSY),
-            100) if (CPC_CPC_STAT_BUSY != 0) else None))
-          max: MAX((NOISE_CLAMP(((100 * CPC_CPC_STAT_STALL) / CPC_CPC_STAT_BUSY),
-            100) if (CPC_CPC_STAT_BUSY != 0) else None))
+          avg: AVG((((100 * NOISE_CLAMP(CPC_CPC_STAT_STALL, CPC_CPC_STAT_BUSY))
+            / CPC_CPC_STAT_BUSY) if (CPC_CPC_STAT_BUSY != 0) else None))
+          min: MIN((((100 * NOISE_CLAMP(CPC_CPC_STAT_STALL, CPC_CPC_STAT_BUSY))
+            / CPC_CPC_STAT_BUSY) if (CPC_CPC_STAT_BUSY != 0) else None))
+          max: MAX((((100 * NOISE_CLAMP(CPC_CPC_STAT_STALL, CPC_CPC_STAT_BUSY))
+            / CPC_CPC_STAT_BUSY) if (CPC_CPC_STAT_BUSY != 0) else None))
           unit: Percent
         CPC Packet Decoding Utilization:
-          avg: AVG(NOISE_CLAMP((100 * CPC_ME1_BUSY_FOR_PACKET_DECODE) / CPC_CPC_STAT_BUSY,
-            100) if (CPC_CPC_STAT_BUSY != 0) else None)
-          min: MIN(NOISE_CLAMP((100 * CPC_ME1_BUSY_FOR_PACKET_DECODE) / CPC_CPC_STAT_BUSY,
-            100) if (CPC_CPC_STAT_BUSY != 0) else None)
-          max: MAX(NOISE_CLAMP((100 * CPC_ME1_BUSY_FOR_PACKET_DECODE) / CPC_CPC_STAT_BUSY,
-            100) if (CPC_CPC_STAT_BUSY != 0) else None)
+          avg: AVG((100 * NOISE_CLAMP(CPC_ME1_BUSY_FOR_PACKET_DECODE, CPC_CPC_STAT_BUSY))
+            / CPC_CPC_STAT_BUSY if (CPC_CPC_STAT_BUSY != 0) else None)
+          min: MIN((100 * NOISE_CLAMP(CPC_ME1_BUSY_FOR_PACKET_DECODE, CPC_CPC_STAT_BUSY))
+            / CPC_CPC_STAT_BUSY if (CPC_CPC_STAT_BUSY != 0) else None)
+          max: MAX((100 * NOISE_CLAMP(CPC_ME1_BUSY_FOR_PACKET_DECODE, CPC_CPC_STAT_BUSY))
+            / CPC_CPC_STAT_BUSY if (CPC_CPC_STAT_BUSY != 0) else None)
           unit: Percent
         CPC-Workgroup Manager Utilization:
           avg: AVG((100 * CPC_ME1_DC0_SPI_BUSY) / CPC_CPC_STAT_BUSY if (CPC_CPC_STAT_BUSY
