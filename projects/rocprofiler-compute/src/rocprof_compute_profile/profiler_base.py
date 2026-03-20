@@ -32,6 +32,7 @@ import time
 from abc import abstractmethod
 from pathlib import Path
 from typing import Any, Optional, Union
+
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils.logger import (
     console_debug,

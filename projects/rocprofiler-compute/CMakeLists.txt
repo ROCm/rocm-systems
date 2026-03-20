@@ -191,7 +191,7 @@ if(LOCALHOST MATCHES "TheraS01|.*\.thera\.amd\.com|thera-hn")
     file(READ ${PROJECT_SOURCE_DIR}/cmake/modfile.thera.mod mod_additions)
     file(
         APPEND
-        ${PROJECT_BINARY_DIR}/${MOD_INSTALL_PATH}/${ROCPROFCOMPUTE_FULL_VERSION}.lua
+            ${PROJECT_BINARY_DIR}/${MOD_INSTALL_PATH}/${ROCPROFCOMPUTE_FULL_VERSION}.lua
         ${mod_additions}
     )
     list(POP_BACK CMAKE_MESSAGE_INDENT)
@@ -685,8 +685,7 @@ install(
         src/config.py
         src/rocprof_compute_base.py
         src/roofline.py
-        VERSION
-        VERSION.sha
+        VERSION VERSION.sha
     DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
     COMPONENT main
 )
@@ -766,7 +765,8 @@ if(NOT EXISTS "${PROJECT_SOURCE_DIR}/src/vendored/pyyaml/lib/yaml")
     if(Git_FOUND)
         message(STATUS "Initializing vendored/pyyaml submodule...")
         execute_process(
-            COMMAND ${GIT_EXECUTABLE} submodule update --init --recursive src/vendored/pyyaml
+            COMMAND
+                ${GIT_EXECUTABLE} submodule update --init --recursive src/vendored/pyyaml
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
             RESULT_VARIABLE GIT_SUBMOD_RESULT
         )
@@ -783,7 +783,8 @@ install(
     DIRECTORY src/vendored/pyyaml/lib/yaml
     DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/vendored/pyyaml/lib
     COMPONENT main
-    FILES_MATCHING PATTERN "*.py"
+    FILES_MATCHING
+    PATTERN "*.py"
     PATTERN "__pycache__" EXCLUDE
     PATTERN "*.pyc" EXCLUDE
 )
