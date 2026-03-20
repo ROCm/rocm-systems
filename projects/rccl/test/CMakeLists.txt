@@ -339,6 +339,7 @@ if(BUILD_TESTS)
       ParamTests.cpp
       ParameterApiTests.cpp
       ArgCheckTests.cpp
+      ArchInfoTests.cpp
       BootstrapBidirTests.cpp
       DdaAlltoAllThresholdTests.cpp
       DdaIpcEligibilityTests.cpp
@@ -351,6 +352,7 @@ if(BUILD_TESTS)
       RcclWrapTests.cpp
       TransportTests.cpp
       TimeoutTests.cpp
+      UtilsTests.cpp
       mem_manager/MemManagerTests.cpp
       graph/SearchTests.cpp
       graph/XmlTests.cpp
