@@ -106,8 +106,13 @@ class TestSelectiveRegion(RocprofsysTest):
             subtest_name="All kernels present",
             categories=["rocm_kernel_dispatch"],
             pass_regex=[
-                "CodeBlock_A", "CodeBlock_B", "CodeBlock_C", "CodeBlock_D",
-                "CodeBlock_E", "CodeBlock_F", "CodeBlock_G",
+                "CodeBlock_A",
+                "CodeBlock_B",
+                "CodeBlock_C",
+                "CodeBlock_D",
+                "CodeBlock_E",
+                "CodeBlock_F",
+                "CodeBlock_G",
             ],
         )
         self.assert_perfetto(
@@ -172,8 +177,11 @@ class TestSelectiveRegion(RocprofsysTest):
             categories=["rocm_kernel_dispatch"],
             pass_regex=["CodeBlock_C", "CodeBlock_E"],
             fail_regex=[
-                "CodeBlock_A", "CodeBlock_B", "CodeBlock_D",
-                "CodeBlock_F", "CodeBlock_G",
+                "CodeBlock_A",
+                "CodeBlock_B",
+                "CodeBlock_D",
+                "CodeBlock_F",
+                "CodeBlock_G",
             ],
         )
         self.assert_perfetto(
@@ -413,8 +421,11 @@ class TestPauseResumeNoMarker(RocprofsysTest):
             subtest_name="Pause/Resume ignored without marker_api",
             categories=["rocm_kernel_dispatch"],
             pass_regex=[
-                "CodeBlock_Z", "CodeBlock_A", "CodeBlock_B",
-                "CodeBlock_C", "CodeBlock_D",
+                "CodeBlock_Z",
+                "CodeBlock_A",
+                "CodeBlock_B",
+                "CodeBlock_C",
+                "CodeBlock_D",
             ],
         )
 
