@@ -3357,29 +3357,19 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
 
         translated_asm += t + "\n";
       }
-      // Conditional exec_hi clear after v_cmpx_e64: clear exec_hi ONLY when
-      // the NEXT source instruction is NOT s_cbranch_execz. This handles:
-      // - Reduction loops: v_cmpx followed by ds_read → NEED exec_hi clear
-      // - Early exit: v_cmpx followed by s_cbranch_execz → DON'T clear (the
-      //   branch tests exec which needs both lo and hi to detect "all masked")
+      // Unconditional exec_hi clear after v_cmpx: on GFX9 wave64, v_cmpx
+      // compares ALL 64 lanes including 32-63 which have uninitialized VGPRs
+      // (from wave32 source). The garbage exec_hi bits cause upper lanes to
+      // execute global memory ops with garbage addresses → page fault.
+      // Must clear exec_hi even before s_cbranch_execz so the branch correctly
+      // tests only exec_lo (the valid lower 32 lanes).
       if (ii < source_instrs.size()) {
         bool has_vcmpx = false;
         for (const auto& t : translated_lines) {
           if (t.find("v_cmpx_") != std::string::npos) { has_vcmpx = true; break; }
         }
         if (has_vcmpx) {
-          // Check next source instruction
-          bool next_is_execz = false;
-          for (size_t nxt = ii + 1; nxt < source_instrs.size(); nxt++) {
-            std::string nm = ExtractMnemonic(source_instrs[nxt].text);
-            if (nm.find("s_delay") == 0 || nm.find("s_wait") == 0 ||
-                nm.find("s_nop") == 0 || nm.find("s_clause") == 0) continue;
-            if (nm == "s_cbranch_execz") next_is_execz = true;
-            break;
-          }
-          if (!next_is_execz) {
-            translated_asm += "s_mov_b32 exec_hi, 0\n";
-          }
+          translated_asm += "s_mov_b32 exec_hi, 0\n";
         }
       }
 
