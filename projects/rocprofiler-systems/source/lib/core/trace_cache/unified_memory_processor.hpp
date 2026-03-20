@@ -147,10 +147,11 @@ private:
      * Extracts GPU name from migration event labels.
      * @param src_label Source agent label from KFD event (e.g., "NODE_1", "CPU")
      * @param dst_label Destination agent label from KFD event
-     * @return GPU agent name if found (e.g., "AMD Instinct MI300X"), fallback to "GPU" or "GPU {id}"
+     * @return GPU agent name if found (e.g., "AMD Instinct MI300X"), fallback to "GPU" or
+     * "GPU {id}"
      */
     [[nodiscard]] std::string extract_gpu_name(const std::string& src_label,
-                                                const std::string& dst_label) const;
+                                               const std::string& dst_label) const;
 
     void write_text_output(std::ostream& out);
     void write_json_output(std::ostream& out);
@@ -162,7 +163,7 @@ private:
     std::string                        m_output_dir;
 
     // Performance optimization: cache node_id to agent_type mapping
-    std::unordered_map<uint32_t, agent_type> m_node_type_cache;
+    std::unordered_map<uint32_t, agent_type>  m_node_type_cache;
     std::unordered_map<uint32_t, std::string> m_gpu_name_cache;
 };
 

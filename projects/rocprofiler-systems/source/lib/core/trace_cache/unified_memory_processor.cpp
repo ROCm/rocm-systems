@@ -195,8 +195,9 @@ unified_memory_processor_t::handle(const kfd_sample& sample)
 
             auto cpu_agent = m_agent_manager->get_agent_by_type_index(
                 device_id, static_cast<agent_type>(sample.device_type));
-            std::string cpu_name =
-                cpu_agent.name.empty() ? fmt::format("CPU {}", device_id) : cpu_agent.name;
+            std::string cpu_name = cpu_agent.name.empty()
+                                       ? fmt::format("CPU {}", device_id)
+                                       : cpu_agent.name;
 
             std::string gpu_name = extract_gpu_name(src_label, dst_label);
 
@@ -255,8 +256,7 @@ unified_memory_processor_t::classify_direction(const std::string& src_label,
     {
         src_node_id = std::stoul(src_label);
         dst_node_id = std::stoul(dst_label);
-    }
-    catch(const std::exception&)
+    } catch(const std::exception&)
     {
         LOG_TRACE("Failed to parse node IDs from labels: src='{}', dst='{}'", src_label,
                   dst_label);
@@ -268,7 +268,8 @@ unified_memory_processor_t::classify_direction(const std::string& src_label,
 
     if(src_it == m_node_type_cache.end() || dst_it == m_node_type_cache.end())
     {
-        LOG_TRACE("Node IDs not found in cache: src={}, dst={}", src_node_id, dst_node_id);
+        LOG_TRACE("Node IDs not found in cache: src={}, dst={}", src_node_id,
+                  dst_node_id);
         return migration_direction::UNKNOWN;
     }
 
@@ -329,7 +330,7 @@ unified_memory_processor_t::parse_agent_ids_from_args(const std::string& args_st
 
 std::string
 unified_memory_processor_t::extract_gpu_name(const std::string& src_label,
-                                               const std::string& dst_label) const
+                                             const std::string& dst_label) const
 {
     uint32_t src_node_id = 0;
     uint32_t dst_node_id = 0;
@@ -338,8 +339,7 @@ unified_memory_processor_t::extract_gpu_name(const std::string& src_label,
     {
         src_node_id = std::stoul(src_label);
         dst_node_id = std::stoul(dst_label);
-    }
-    catch(const std::exception&)
+    } catch(const std::exception&)
     {
         return "GPU";
     }
