@@ -315,3 +315,36 @@ If your PR touches **metric configs** (panel YAMLs under `src/rocprof_compute_so
 - Verify hashes are updated and CI tests pass.
 
 For full details, see the [metric config management README](./tools/config_management/README.md)
+
+## AI Agent Guidelines
+
+AI coding assistants are configured via a shared set of files using a single-source-of-truth approach:
+guidelines live in one place and tool-specific adapter files point to them without duplicating content.
+
+### Directory Layout
+
+```
+AGENTS.md                          # Primary entry point — all AI guidelines live here
+CLAUDE.md                          # Claude Code adapter
+.cursor/
+    rules/
+        global-guidelines.mdc          # Cursor adapter
+        python-coding-style.mdc        # Cursor Python-specific adapter
+.github/copilot-instructions.md    # Copilot adapter
+.ai/
+    rules/
+        python-style.md                # Authoritative Python coding style rules
+```
+
+Each adapter file contains a single reference to `AGENTS.md`.
+
+### Design Principles
+
+- **Single source of truth:** All guidelines live in `AGENTS.md` and `.ai/`. Adapter files
+  never contain rules — they only point to `AGENTS.md`.
+- **No duplication:** Do not restate rules in adapter files or in `AGENTS.md` itself — reference them instead.
+- **Maintainability:** When a rule changes, update the relevant `.ai/` file and `AGENTS.md`.
+
+### Adding or Updating AI Guidelines
+
+- add or update the appropriate `.ai/` file, then add a reference in `AGENTS.md`.

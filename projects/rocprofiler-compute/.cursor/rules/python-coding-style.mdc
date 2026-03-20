@@ -4,8 +4,4 @@ globs: ["**/*.py"]
 alwaysApply: true
 ---
 
-# Python Coding Style — rocprofiler-compute
-
-When generating or modifying any Python code in this project, read and follow the instructions in:
-
-**[`AGENT.md` — Python Coding Style](../../AGENT.md#python-coding-style)**
+See **[`AGENTS.md`](../../AGENTS.md)**.
