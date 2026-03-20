@@ -15,7 +15,7 @@
 #include <optional>
 
 // Forward declaration for Unique FD
-struct UniqueFD;
+struct ManagedUniqueFD;
 
 namespace hip {
 
@@ -33,6 +33,10 @@ class FatBinaryInfo {
   // Constructor for kpack'd (split device code) binaries
   explicit FatBinaryInfo(KpackParams kpack_params);
   ~FatBinaryInfo();
+
+  // Due to self-managed ownership, this class cannot be copy constructed or assigned.
+  FatBinaryInfo(const FatBinaryInfo&) = delete;
+  FatBinaryInfo& operator=(const FatBinaryInfo&) = delete;
 
   hipError_t ExtractFatBinaryUsingCOMGR(const std::vector<hip::Device*>& devices);
   hipError_t ExtractKpackBinary(const std::vector<hip::Device*>& devices);
@@ -68,14 +72,28 @@ class FatBinaryInfo {
   std::recursive_mutex& FatBinaryLock() { return fb_lock_; }
 
  private:
-  void ReleaseImageAndFile();
-
   std::string fname_;  //!< File name
   size_t foffset_;     //!< File Offset where the fat binary is present.
 
-  // Even when file is passed image will be mmapped till ~desctructor.
-  const void* image_;  //!< Image
-  bool image_mapped_;  //!< flag to detect if image is mapped
+  // Helper class that ensures that mapped images get unmapped.
+  struct ManagedImage {
+    ManagedImage() {}
+    ManagedImage(const void* image) : image_(image) {}
+    ~ManagedImage();
+
+    ManagedImage(const ManagedImage&) = delete;
+    ManagedImage& operator=(const ManagedImage&) = delete;
+
+    amd::Os::FileDesc getFileDescOrDefault() const;
+
+    const void* getImage() const { return image_; }
+
+    hipError_t map(const std::string& fname, size_t foffset);
+
+   private:
+    std::shared_ptr<ManagedUniqueFD> ufd_ = nullptr;  //!< Unique file descriptor
+    const void* image_ = nullptr;                     //!< image
+  } managed_image_;  //!< Managed file descriptor and mapping for fat binary file
 
   // Only used for FBs where image is directly passed
   std::string uri_;  //!< Uniform resource indicator
@@ -85,7 +103,6 @@ class FatBinaryInfo {
 
   std::vector<amd::Program*> dev_programs_;  //!< Program info per Device
 
-  std::shared_ptr<UniqueFD> ufd_;                         //!< Unique file descriptor
   std::recursive_mutex fb_lock_;                          //!< Lock for the fat binary access
   std::unordered_set<const void*> code_obj_allocations_;  //!< Track allocations for code objects
 };

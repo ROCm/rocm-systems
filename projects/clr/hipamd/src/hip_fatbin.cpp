@@ -41,7 +41,7 @@ kpack_cache_t getHipKpackCache() {
 #endif
 
 FatBinaryInfo::FatBinaryInfo(const char* fname, const void* image)
-    : foffset_(0), image_(image), image_mapped_(false), uri_(std::string()) {
+    : foffset_(0), managed_image_(image), uri_(std::string()) {
   if (fname != nullptr) {
     fname_ = std::string(fname);
   } else {
@@ -76,25 +76,6 @@ FatBinaryInfo::~FatBinaryInfo() {
     } else {
       delete[] reinterpret_cast<const char*>(i);
     }
-  }
-  ReleaseImageAndFile();
-}
-
-void FatBinaryInfo::ReleaseImageAndFile() {
-  // Release image_ and ufd_
-  if (ufd_) {
-    if (image_mapped_ && !amd::Os::MemoryUnmapFile(image_, ufd_->fsize_)) {
-      guarantee(false, "Cannot unmap the file");
-    }
-
-    if (!PlatformState::Instance().CloseUniqueFileHandle(ufd_)) {
-      guarantee(false, "Cannot close file for fdesc: %d", ufd_->fdesc_);
-    }
-
-    ufd_ = nullptr;
-    image_ = nullptr;
-    uri_ = std::string();
-    image_mapped_ = false;
   }
 }
 
@@ -401,49 +382,34 @@ static bool PopulateCodeObjectMap(
 }
 
 hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Device*>& devices) {
-  if (fname_.empty() && image_ == nullptr) {
+  if (fname_.empty() && managed_image_.getImage() == nullptr) {
     LogError("Both Filename and image cannot be null");
     return hipErrorInvalidValue;
   }
 
-  if (image_ != nullptr) {
-    if (!amd::Os::FindFileNameFromAddress(image_, &fname_, &foffset_)) {
+  if (managed_image_.getImage() != nullptr) {
+    if (!amd::Os::FindFileNameFromAddress(managed_image_.getImage(), &fname_, &foffset_)) {
       fname_ = std::string("");
       foffset_ = 0;
     }
   } else {
-    ufd_ = PlatformState::Instance().GetUniqueFileHandle(fname_.c_str());
-    if (ufd_ == nullptr) {
-      return hipErrorFileNotFound;
-    }
-
-    // If the file name exists but the file size is 0, the something wrong with the file or its path
-    if (ufd_->fsize_ == 0) {
-      return hipErrorInvalidImage;
-    }
-
     // If image_ is nullptr, then file path is passed via hipMod* APIs, so map the file.
-    if (!amd::Os::MemoryMapFileDesc(ufd_->fdesc_, ufd_->fsize_, foffset_, &image_)) {
-      LogError("Cannot map the file descriptor");
-      PlatformState::Instance().CloseUniqueFileHandle(ufd_);
-      return hipErrorInvalidValue;
-    }
-
-    image_mapped_ = true;
+    hipError_t status = managed_image_.map(fname_, foffset_);
+    if (status != hipSuccess) return status;
   }
-  guarantee(image_ != nullptr, "Image cannot be nullptr, file:%s did not map for some reason",
-            fname_.c_str());
+  guarantee(managed_image_.getImage() != nullptr,
+            "Image cannot be nullptr, file:%s did not map for some reason", fname_.c_str());
 
-  bool is_compressed = IsCodeObjectCompressed(image_),
-       is_uncompressed = IsCodeObjectUncompressed(image_);
+  bool is_compressed = IsCodeObjectCompressed(managed_image_.getImage()),
+       is_uncompressed = IsCodeObjectUncompressed(managed_image_.getImage());
 
   // It better be elf if its neither compressed nor uncompressed
   if (!is_compressed && !is_uncompressed) {
-    if (IsCodeObjectElf(image_)) {
+    if (IsCodeObjectElf(managed_image_.getImage())) {
       // Load the binary directly
-      auto elf_size = amd::Elf::getElfSize(image_);
+      auto elf_size = amd::Elf::getElfSize(managed_image_.getImage());
       for (size_t i = 0; i < devices.size(); i++) {
-        if (hipSuccess != AddDevProgram(devices[i], image_, elf_size, 0))
+        if (hipSuccess != AddDevProgram(devices[i], managed_image_.getImage(), elf_size, 0))
           return hipErrorInvalidImage;
       }
       return hipSuccess;  // We are done since it was already ELF
@@ -471,7 +437,8 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
 
   std::map<std::string, std::pair<const void*, size_t>> code_obj_map;  //!< code object map
   if (is_compressed) {
-    if (!UncompressAndPopulateCodeObject(image_, unique_isa_names, code_obj_map)) {
+    if (!UncompressAndPopulateCodeObject(managed_image_.getImage(), unique_isa_names,
+                                         code_obj_map)) {
       return hipErrorInvalidImage;
     }
     // For compressed code objects, we use comgr to extract and make a copy.
@@ -479,7 +446,7 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
     std::for_each(code_obj_map.begin(), code_obj_map.end(),
                   [&](const auto& info) { code_obj_allocations_.insert(info.second.first); });
   } else {  // uncompressed code object
-    if (!PopulateCodeObjectMap(image_, unique_isa_names, code_obj_map)) {
+    if (!PopulateCodeObjectMap(managed_image_.getImage(), unique_isa_names, code_obj_map)) {
       return hipErrorInvalidImage;
     }
   }
@@ -740,10 +707,9 @@ hipError_t FatBinaryInfo::AddDevProgram(hip::Device* device, const void* binary_
   if (program == nullptr) {
     return hipErrorOutOfMemory;
   }
-  if (CL_SUCCESS !=
-      program->addDeviceProgram(*ctx->devices()[0], binary_image, binary_size, false, nullptr,
-                                nullptr, (ufd_ != nullptr ? ufd_->fdesc_ : amd::Os::FDescInit()),
-                                binary_offset, uri_)) {
+  if (CL_SUCCESS != program->addDeviceProgram(
+                        *ctx->devices()[0], binary_image, binary_size, false, nullptr, nullptr,
+                        managed_image_.getFileDescOrDefault(), binary_offset, uri_)) {
     return hipErrorInvalidKernelFile;
   }
   return hipSuccess;
@@ -770,6 +736,36 @@ hipError_t FatBinaryInfo::BuildProgram(const int device_id) {
       return hipErrorNoBinaryForGpu;
     }
   }
+  return hipSuccess;
+}
+
+FatBinaryInfo::ManagedImage::~ManagedImage() {
+  // If there is a descriptor, it means the file is mapped and needs to be unmapped.
+  if (ufd_ && !amd::Os::MemoryUnmapFile(image_, ufd_->fsize_))
+    guarantee(false, "Cannot unmap the file");
+}
+
+amd::Os::FileDesc FatBinaryInfo::ManagedImage::getFileDescOrDefault() const {
+  return ufd_ ? ufd_->fdesc_ : amd::Os::FDescInit();
+}
+
+hipError_t FatBinaryInfo::ManagedImage::map(const std::string& fname, size_t foffset) {
+  std::shared_ptr<ManagedUniqueFD> tempUfd;
+  hipError_t status = PlatformState::Instance().GetManagedImage(fname, tempUfd);
+
+  if (status != hipSuccess) {
+    LogError("Failed to get managed image");
+    return status;
+  }
+
+  const void* image = nullptr;
+  if (!amd::Os::MemoryMapFileDesc(tempUfd->fdesc_, tempUfd->fsize_, foffset, &image)) {
+    LogError("Cannot map the file descriptor");
+    return hipErrorInvalidValue;
+  }
+
+  ufd_ = std::move(tempUfd);
+  image_ = image;
   return hipSuccess;
 }
 }  // namespace hip
