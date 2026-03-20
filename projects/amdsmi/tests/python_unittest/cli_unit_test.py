@@ -146,11 +146,7 @@ class TestAmdSmiCli(unittest.TestCase):
         cls.tmp_folder = "_tmp"
 
         # TODO: Need to be able to get automatic answers
-        cls.skip_args_require_input = {
-            "reset --gtt",
-            "set --fan",
-            "set --memory-partition",
-        }
+        cls.skip_args_require_input = {"reset --gtt", "set --fan", "set --memory-partition"}
 
         cls.gpus = ["all"]
         for data in cls.list_data:
