@@ -10,5 +10,6 @@ target_link_libraries(
     PUBLIC
         rocprofiler-systems-common-library
         rocprofiler-systems-googletest-library
+        rocprofiler-systems::rocprofiler-systems-bin-common
         rocprofiler-systems::rocprofiler-systems-json
 )

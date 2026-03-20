@@ -3,6 +3,7 @@
 
 #include "rocprof-sys-run.hpp"
 
+#include "common/argument_registration.hpp"
 #include "common/common_utils.hpp"
 #include "common/defines.h"
 #include "common/env_vars.hpp"
@@ -359,199 +360,18 @@ INSTRUMENTATION WORKFLOW:
     rocprofsys::argparse::add_extended_arguments(parser, _parser_data);
 
     // Track preset and domain flag state for validation and export
-    std::string active_preset_name;
-    bool        export_config_requested = false;
-    std::string export_config_file;
-    bool        gpu_domain_enabled      = false;
-    bool        rocm_domain_enabled     = false;
-    bool        cpu_domain_enabled      = false;
-    bool        parallel_domain_enabled = false;
+    rocprofsys::common_utils::DomainFlagState domain_state;
 
-    parser.start_group("PRESET OPTIONS",
-                       "Load a profiling preset by name or from a JSON file");
-
-    parser
-        .add_argument(
-            { "--preset" },
-            "Load a preset configuration by name or file path. Available presets: "
-            "balanced, profile-only, detailed, trace-hpc, workload-trace, sys-trace, "
-            "runtime-trace, trace-gpu, trace-openmp, profile-mpi, trace-hw-counters. "
-            "For custom configs, provide a path containing '/' or ending with '.json'")
-        .max_count(1)
-        .dtype("string")
-        .action([&](parser_t& p) {
-            auto preset = p.get<std::string>("preset");
-            if(preset.empty()) return;
-            active_preset_name = preset;
-            if(!apply_preset_from_json(preset, _parser_data))
-            {
-                stream(std::cerr, color::warning())
-                    << "[rocprof-sys] WARNING: Could not load preset '" << preset
-                    << "'. Check preset name or file path.\n";
-            }
-        });
-
-    parser
-        .add_argument({ "--list-presets" },
-                      "List all available presets with descriptions and exit")
-        .max_count(0)
-        .action([&](parser_t&) {
-            rocprofsys::common_utils::list_presets("run");
-            exit(EXIT_SUCCESS);
-        });
-
-    parser
-        .add_argument({ "--explain" },
-                      "Show detailed information about a preset and exit")
-        .max_count(1)
-        .dtype("string")
-        .action([&](parser_t& p) {
-            auto preset_name = p.get<std::string>("explain");
-            if(preset_name.empty())
-            {
-                std::cerr << "[rocprof-sys] --explain requires a preset name\n";
-                exit(EXIT_FAILURE);
-            }
-            if(!rocprofsys::common_utils::explain_preset(preset_name, "run"))
-            {
-                exit(EXIT_FAILURE);
-            }
-            exit(EXIT_SUCCESS);
-        });
-
-    parser.start_group("DOMAIN OPTIONS", "High-level domain flags for composable "
-                                         "configuration (can combine with presets)");
-
-    parser
-        .add_argument({ "--gpu" },
-                      "Enable GPU metrics collection. Optional value specifies metrics: "
-                      "--gpu (all defaults) or --gpu=temp,power,busy,mem_usage")
-        .min_count(0)
-        .max_count(1)
-        .dtype("string")
-        .action([&](parser_t& p) {
-            gpu_domain_enabled = true;
-            rocprofsys::common::update_env(_parser_data.current, env::USE_AMD_SMI, true,
-                                           update_mode::REPLACE, ":",
+    // Register shared preset and domain arguments
+    rocprofsys::common_utils::register_preset_and_domain_arguments(
+        parser, "run", domain_state,
+        [&](std::string_view key, std::string_view val) {
+            rocprofsys::common::update_env(_parser_data.current, std::string{ key },
+                                           std::string{ val }, update_mode::REPLACE, ":",
                                            _parser_data.updated, original_envs);
-            rocprofsys::common::update_env(
-                _parser_data.current, env::USE_PROCESS_SAMPLING, true,
-                update_mode::REPLACE, ":", _parser_data.updated, original_envs);
-
-            if(p.exists("gpu"))
-            {
-                auto metrics_str = p.get<std::string>("gpu");
-                if(!metrics_str.empty())
-                {
-                    auto expanded =
-                        rocprofsys::json_config::expand_gpu_metrics(metrics_str);
-                    if(!expanded.empty())
-                    {
-                        rocprofsys::common::update_env(
-                            _parser_data.current, env::AMD_SMI_METRICS, expanded,
-                            update_mode::REPLACE, ":", _parser_data.updated,
-                            original_envs);
-                    }
-                }
-            }
-        });
-
-    parser
-        .add_argument(
-            { "--rocm" },
-            "Enable ROCm API tracing. Optional value specifies domains: "
-            "--rocm (all defaults) or --rocm=hip,kernel,memory. "
-            "Shortcuts: hip->hip_runtime_api, kernel->kernel_dispatch, "
-            "memory->memory_copy, hsa->hsa_api, marker->marker_api, rccl->rccl_api")
-        .min_count(0)
-        .max_count(1)
-        .dtype("string")
-        .action([&](parser_t& p) {
-            rocm_domain_enabled = true;
-            std::string domains_str =
-                "hip_runtime_api,marker_api,kernel_dispatch,memory_copy,scratch_memory";
-
-            if(p.exists("rocm"))
-            {
-                auto input = p.get<std::string>("rocm");
-                if(!input.empty())
-                {
-                    domains_str = rocprofsys::json_config::expand_rocm_domains(input);
-                }
-            }
-
-            rocprofsys::common::update_env(_parser_data.current, env::ROCM_DOMAINS,
-                                           domains_str, update_mode::REPLACE, ":",
-                                           _parser_data.updated, original_envs);
-        });
-
-    parser
-        .add_argument({ "--cpu" },
-                      "Enable CPU sampling. Optional value specifies frequency in Hz: "
-                      "--cpu (default 100Hz) or --cpu=50")
-        .min_count(0)
-        .max_count(1)
-        .dtype("string")
-        .action([&](parser_t& p) {
-            cpu_domain_enabled = true;
-            rocprofsys::common::update_env(_parser_data.current, env::USE_SAMPLING, true,
-                                           update_mode::REPLACE, ":",
-                                           _parser_data.updated, original_envs);
-
-            std::string freq = "100";  // default
-            if(p.exists("cpu"))
-            {
-                auto input = p.get<std::string>("cpu");
-                if(!input.empty()) freq = input;
-            }
-            rocprofsys::common::update_env(_parser_data.current, env::SAMPLING_FREQ, freq,
-                                           update_mode::REPLACE, ":",
-                                           _parser_data.updated, original_envs);
-        });
-
-    parser
-        .add_argument(
-            { "--parallel" },
-            "Enable parallel runtime profiling. Optional value specifies runtimes: "
-            "--parallel (all) or --parallel=mpi,openmp,kokkos,rccl")
-        .min_count(0)
-        .max_count(1)
-        .dtype("string")
-        .action([&](parser_t& p) {
-            parallel_domain_enabled = true;
-            std::string runtimes_str;
-
-            if(p.exists("parallel"))
-            {
-                runtimes_str = p.get<std::string>("parallel");
-            }
-
-            auto env_vars =
-                rocprofsys::json_config::expand_parallel_runtimes(runtimes_str);
-            for(const auto& [key, val] : env_vars)
-            {
-                rocprofsys::common::update_env(_parser_data.current, key, val,
-                                               update_mode::REPLACE, ":",
-                                               _parser_data.updated, original_envs);
-            }
-        });
-
-    parser.start_group("EXPORT OPTIONS", "Export resolved configuration");
-
-    parser
-        .add_argument({ "--export-config" },
-                      "Export the resolved configuration as JSON instead of running. "
-                      "Optional value specifies output file: --export-config (stdout) or "
-                      "--export-config=config.json")
-        .min_count(0)
-        .max_count(1)
-        .dtype("filepath")
-        .action([&](parser_t& p) {
-            export_config_requested = true;
-            if(p.exists("export-config"))
-            {
-                export_config_file = p.get<std::string>("export-config");
-            }
+        },
+        [&](std::string_view preset) {
+            return apply_preset_from_json(preset, _parser_data);
         });
 
     parser.start_group("EXECUTION OPTIONS", "");
@@ -593,15 +413,17 @@ INSTRUMENTATION WORKFLOW:
     tim::log::monochrome() = _parser_data.monochrome;
 
     // Handle export-config: output configuration and exit
-    if(export_config_requested)
+    if(domain_state.export_config_requested)
     {
-        export_config(_parser_data, active_preset_name, export_config_file);
+        export_config(_parser_data, domain_state.active_preset_name,
+                      domain_state.export_config_file);
         exit(EXIT_SUCCESS);
     }
 
     rocprofsys::common_utils::run_post_parse_validation(
-        "run", active_preset_name, gpu_domain_enabled, rocm_domain_enabled,
-        cpu_domain_enabled, parallel_domain_enabled, _parser_data.verbose);
+        "run", domain_state.active_preset_name, domain_state.gpu_domain_enabled,
+        domain_state.rocm_domain_enabled, domain_state.cpu_domain_enabled,
+        domain_state.parallel_domain_enabled, _parser_data.verbose);
 
     return _parser_data;
 }

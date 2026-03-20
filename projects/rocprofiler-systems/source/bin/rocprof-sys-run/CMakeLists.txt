@@ -25,6 +25,7 @@ target_link_libraries(
         rocprofiler-systems::rocprofiler-systems-compile-definitions
         rocprofiler-systems::rocprofiler-systems-headers
         rocprofiler-systems::rocprofiler-systems-common-library
+        rocprofiler-systems::rocprofiler-systems-bin-common
         rocprofiler-systems::rocprofiler-systems-core
         rocprofiler-systems::rocprofiler-systems-json
         rocprofiler-systems::rocprofiler-systems-sanitizer
