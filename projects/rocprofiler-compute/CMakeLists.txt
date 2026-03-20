@@ -742,6 +742,7 @@ install(
     PATTERN "*.hip"
     PATTERN "*.h"
     PATTERN "*.cpp"
+    PATTERN "*.py"
     PATTERN "workloads" EXCLUDE
 )
 # modulefile

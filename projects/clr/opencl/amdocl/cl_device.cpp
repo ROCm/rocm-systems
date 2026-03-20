@@ -190,7 +190,9 @@ RUNTIME_ENTRY(cl_int, clGetDeviceIDs,
       (num_entries == 0 && devices != NULL)) {
     return CL_INVALID_VALUE;
   }
-
+  if (device_type == 0) {
+    return CL_INVALID_DEVICE_TYPE;
+  }
   // Get all available devices
   if (!amd::Device::getDeviceIDs(device_type, num_entries, devices, num_devices, false)) {
     return CL_DEVICE_NOT_FOUND;

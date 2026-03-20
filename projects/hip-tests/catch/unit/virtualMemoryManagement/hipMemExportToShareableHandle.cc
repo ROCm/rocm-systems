@@ -29,7 +29,7 @@
  *    - Host specific (LINUX)
  *    - HIP_VERSION >= 6.1
  */
-TEST_CASE(Unit_hipMemExportToShareableHandle_Positive_Basic) {
+HIP_TEST_CASE(Unit_hipMemExportToShareableHandle_Positive_Basic) {
   HIP_CHECK(hipFree(0));
 
   hipDevice_t device;
@@ -68,7 +68,7 @@ TEST_CASE(Unit_hipMemExportToShareableHandle_Positive_Basic) {
  *    - Host specific (LINUX)
  *    - HIP_VERSION >= 6.1
  */
-TEST_CASE(Unit_hipMemExportToShareableHandle_Negative_Parameters) {
+HIP_TEST_CASE(Unit_hipMemExportToShareableHandle_Negative_Parameters) {
   HIP_CHECK(hipFree(0));
 
   hipDevice_t device;
@@ -117,7 +117,7 @@ TEST_CASE(Unit_hipMemExportToShareableHandle_Negative_Parameters) {
   HIP_CHECK(hipMemRelease(handle));
 }
 
-TEST_CASE(Unit_hipMemExportToShareableHandle_Capture) {
+HIP_TEST_CASE(Unit_hipMemExportToShareableHandle_Capture) {
   CTX_CREATE();
 
   hipDevice_t device;

@@ -1120,7 +1120,7 @@ hipError_t hipStreamBeginCapture_common(hipStream_t stream, hipStreamCaptureMode
   } else {
     s->SetCaptureGraph(reinterpret_cast<hip::Graph*>(graph));
   }
-  s->SetCaptureId();
+  s->SetCaptureID();
   s->SetCaptureMode(mode);
   s->SetOriginStream();
   if (mode != hipStreamCaptureModeRelaxed) {

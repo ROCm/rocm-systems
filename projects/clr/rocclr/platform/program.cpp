@@ -336,7 +336,7 @@ int32_t Program::link(const std::vector<Device*>& devices, size_t numInputs,
 
     const device::Program::kernels_t& kernels = program.kernels();
     for (const auto& it : kernels) {
-      const std::string& name = it.first;
+      const std::string_view name = it.first;
       const device::Kernel* devKernel = it.second;
 
       Symbol& symbol = (*symbolTable_)[name];
@@ -480,7 +480,7 @@ int32_t Program::build(const std::vector<Device*>& devices, const char* options,
 
       const device::Program::kernels_t& kernels = program.kernels();
       for (const auto& kit : kernels) {
-        const std::string& name = kit.first;
+        const std::string_view name = kit.first;
         const device::Kernel* devKernel = kit.second;
 
         Symbol& symbol = (*symbolTable_)[name];
@@ -541,7 +541,7 @@ const std::string& Program::kernelNames() {
       if (it != symbols().cbegin()) {
         kernelNames_.append(1, ';');
       }
-      kernelNames_.append(it->first.c_str());
+      kernelNames_.append(it->first);
     }
   }
   return kernelNames_;

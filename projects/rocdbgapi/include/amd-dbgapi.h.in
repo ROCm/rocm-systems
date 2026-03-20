@@ -543,7 +543,10 @@ extern "C" {
 #endif /* __linux__ */
 
 #if defined(_WIN32)
-#include <windef.h>
+/* Define these ourselves to avoid including windows.h in our public
+   header and polluting the namespace.  */
+typedef void *amd_dbgapi_HANDLE;
+typedef unsigned long amd_dbgapi_DWORD;
 #endif /* _WIN32 */
 
 #include <stddef.h>
@@ -692,7 +695,7 @@ typedef enum
 #if defined(__linux__)
 typedef pid_t amd_dbgapi_os_process_id_t;
 #elif defined(_WIN32)
-typedef DWORD amd_dbgapi_os_process_id_t;
+typedef amd_dbgapi_DWORD amd_dbgapi_os_process_id_t;
 #endif /* _WIN32 */
 
 /**
@@ -728,7 +731,7 @@ typedef DWORD amd_dbgapi_os_process_id_t;
 #if defined(__linux__)
 typedef int amd_dbgapi_notifier_t;
 #elif defined(_WIN32)
-typedef HANDLE amd_dbgapi_notifier_t;
+typedef amd_dbgapi_HANDLE amd_dbgapi_notifier_t;
 #endif /* _WIN32 */
 
 /**

@@ -68,7 +68,7 @@ __global__ void bfloat16(float *res) {
  *  - HIP_VERSION >= 6.1
  */
 
-TEST_CASE(Unit_Rtc_bfloat16_header) {
+HIP_TEST_CASE(Unit_Rtc_bfloat16_header) {
   std::string kernel_name = "bfloat16";
   const char* kername = kernel_name.c_str();
   float* result_h;

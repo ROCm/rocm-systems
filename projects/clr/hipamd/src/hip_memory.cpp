@@ -3663,8 +3663,7 @@ hipError_t ihipPointerGetAttributes(void* data, hipPointer_attribute attribute,
   switch (attribute) {
     case HIP_POINTER_ATTRIBUTE_CONTEXT: {
       if (memObj) {
-        amd::Context& context = memObj->getContext();
-        int devId = getDeviceID(context);
+        int devId = memObj->getUserData().deviceId;
         if (devId >= 0) {
           *reinterpret_cast<hipCtx_t*>(data) = reinterpret_cast<hipCtx_t>(g_devices[devId]);
         } else {

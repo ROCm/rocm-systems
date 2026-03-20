@@ -10,6 +10,7 @@
 
 #include <unordered_map>
 #include <string>
+#include <string_view>
 #include <cstdlib>
 #include <cstring>
 
@@ -79,7 +80,7 @@ void Flag::tearDown() {
 }
 
 bool Flag::init() {
-  typedef std::unordered_map<std::string, const char*> vars_type;
+  typedef std::unordered_map<std::string_view, const char*> vars_type;
   vars_type vars;
 
 #ifdef _WIN32
@@ -88,13 +89,13 @@ bool Flag::init() {
 
   for (; *str != '\0'; str += strlen(str) + 1) {
     // For all environment variables:
-    std::string var = str;
+    std::string_view var = str;
     size_t pos = var.find('=');
     if ((pos == std::string::npos) || ((pos + 1) > var.size())) {
       continue;
     }
 
-    std::string name = var.substr(0, pos);
+    std::string_view name = var.substr(0, pos);
     if ((pos + 1) == var.size()) {
       vars.insert(std::make_pair(name, " "));
     } else {
@@ -110,13 +111,13 @@ bool Flag::init() {
 #endif  // __APPLE__
 
   for (const char** p = const_cast<const char**>(environ); *p != NULL; ++p) {
-    std::string var = *p;
+    std::string_view var = *p;
     size_t pos = var.find('=');
     if ((pos == std::string::npos) || ((pos + 1) > var.size())) {
       continue;
     }
 
-    std::string name = var.substr(0, pos);
+    std::string_view name = var.substr(0, pos);
     if ((pos + 1) == var.size()) {
       vars.insert(std::make_pair(name, " "));
     } else {

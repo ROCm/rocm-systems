@@ -386,8 +386,11 @@ hsa_status_t Runtime::FreeMemory(void* ptr) {
     }
   }
 
-  if (alloc_flags & core::MemoryRegion::AllocateAsan)
-    assert(HSAKMT_CALL(hsaKmtReturnAsanHeaderPage(ptr)) == HSAKMT_STATUS_SUCCESS);
+  if (alloc_flags & core::MemoryRegion::AllocateAsan) {
+    HSAKMT_STATUS asan_status = HSAKMT_CALL(hsaKmtReturnAsanHeaderPage(ptr));
+    assert(asan_status == HSAKMT_STATUS_SUCCESS);
+    UNUSED(asan_status);
+  }
 
   const hsa_status_t err = region->Free(ptr, size);
   if (err != HSA_STATUS_SUCCESS) {
@@ -963,6 +966,38 @@ hsa_status_t Runtime::VMemoryPtrInfo(const void* ptr, hsa_amd_pointer_info_t* in
       info->registered = true;
       info->agentOwner = mappedHandleIt->second.mem_handle->agentOwner()->public_handle();
 
+      // Populate global_flags from the backing region's mem_flags.
+      const AMD::MemoryRegion* memRegion =
+          static_cast<const AMD::MemoryRegion*>(mappedHandleIt->second.mem_handle->region);
+      assert(memRegion && "MappedHandle has a MemoryHandle with NULL region");
+      const HsaMemFlags& regionFlags = memRegion->mem_flags();
+      info->global_flags = regionFlags.ui32.CoarseGrain
+          ? HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED
+          : HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_FINE_GRAINED;
+      info->global_flags |=
+          regionFlags.ui32.Uncached ? HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT : 0;
+      info->global_flags |=
+          regionFlags.ui32.ExtendedCoherent
+              ? HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_EXTENDED_SCOPE_FINE_GRAINED : 0;
+
+      // Populate alloc_flags from AllocateFlags stored in MemoryHandle and region flags.
+      MemoryRegion::AllocateFlags af = mappedHandleIt->second.mem_handle->alloc_flag;
+      info->alloc_flags = 0;
+      if (af & core::MemoryRegion::AllocateExecutable)
+        info->alloc_flags |= HSA_AMD_POINTER_INFO_ALLOC_FLAG_EXECUTABLE;
+      if (af & core::MemoryRegion::AllocateContiguous)
+        info->alloc_flags |= HSA_AMD_POINTER_INFO_ALLOC_FLAG_CONTIGUOUS;
+      if (af & core::MemoryRegion::AllocateNonPaged)
+        info->alloc_flags |= HSA_AMD_POINTER_INFO_ALLOC_FLAG_NONPAGED;
+      if (regionFlags.ui32.ReadOnly)
+        info->alloc_flags |= HSA_AMD_POINTER_INFO_ALLOC_FLAG_READONLY;
+      if (regionFlags.ui32.HostAccess)
+        info->alloc_flags |= HSA_AMD_POINTER_INFO_ALLOC_FLAG_HOST_ACCESS;
+      if (regionFlags.ui32.AtomicAccessFull)
+        info->alloc_flags |= HSA_AMD_POINTER_INFO_ALLOC_FLAG_ATOMIC_FULL;
+      if (regionFlags.ui32.AtomicAccessPartial)
+        info->alloc_flags |= HSA_AMD_POINTER_INFO_ALLOC_FLAG_ATOMIC_PARTIAL;
+
       if (alloc && num_agents_accessible && accessible) {
         std::vector<hsa_agent_t> allowed_agents;
 
@@ -972,13 +1007,18 @@ hsa_status_t Runtime::VMemoryPtrInfo(const void* ptr, hsa_amd_pointer_info_t* in
             allowed_agents.push_back((*agentPermsIt).second.targetAgent->public_handle());
         }
 
-        AMD::callback_t<decltype(alloc)> Alloc(alloc);
-
-        *accessible = (hsa_agent_t*)Alloc(sizeof(hsa_agent_t) * allowed_agents.size());
-        if ((*accessible) == nullptr) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
-
         *num_agents_accessible = allowed_agents.size();
-        memcpy(*accessible, allowed_agents.data(), sizeof(hsa_agent_t) * allowed_agents.size());
+
+        if (allowed_agents.empty()) {
+          *accessible = nullptr;
+        } else {
+          AMD::callback_t<decltype(alloc)> Alloc(alloc);
+
+          *accessible = (hsa_agent_t*)Alloc(sizeof(hsa_agent_t) * allowed_agents.size());
+          if ((*accessible) == nullptr) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+
+          memcpy(*accessible, allowed_agents.data(), sizeof(hsa_agent_t) * allowed_agents.size());
+        }
       }
 
       return HSA_STATUS_SUCCESS;
@@ -994,6 +1034,8 @@ hsa_status_t Runtime::VMemoryPtrInfo(const void* ptr, hsa_amd_pointer_info_t* in
     info->sizeInBytes = addressHandle->size;
     info->registered = addressHandle->registered;
     info->agentOwner = {};
+    info->global_flags = 0;
+    info->alloc_flags = 0;
 
     if (num_agents_accessible) {
       *num_agents_accessible = 0;
@@ -1087,6 +1129,27 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
         : HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_FINE_GRAINED;
     retInfo.global_flags |=
         thunkInfo.MemFlags.ui32.Uncached ? HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT : 0;
+    retInfo.global_flags |=
+        thunkInfo.MemFlags.ui32.ExtendedCoherent
+            ? HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_EXTENDED_SCOPE_FINE_GRAINED : 0;
+
+    // Populate alloc_flags from KFD HsaMemFlags.
+    retInfo.alloc_flags = 0;
+    if (thunkInfo.MemFlags.ui32.ExecuteAccess)
+      retInfo.alloc_flags |= HSA_AMD_POINTER_INFO_ALLOC_FLAG_EXECUTABLE;
+    if (thunkInfo.MemFlags.ui32.Contiguous)
+      retInfo.alloc_flags |= HSA_AMD_POINTER_INFO_ALLOC_FLAG_CONTIGUOUS;
+    if (thunkInfo.MemFlags.ui32.NonPaged)
+      retInfo.alloc_flags |= HSA_AMD_POINTER_INFO_ALLOC_FLAG_NONPAGED;
+    if (thunkInfo.MemFlags.ui32.ReadOnly)
+      retInfo.alloc_flags |= HSA_AMD_POINTER_INFO_ALLOC_FLAG_READONLY;
+    if (thunkInfo.MemFlags.ui32.HostAccess)
+      retInfo.alloc_flags |= HSA_AMD_POINTER_INFO_ALLOC_FLAG_HOST_ACCESS;
+    if (thunkInfo.MemFlags.ui32.AtomicAccessFull)
+      retInfo.alloc_flags |= HSA_AMD_POINTER_INFO_ALLOC_FLAG_ATOMIC_FULL;
+    if (thunkInfo.MemFlags.ui32.AtomicAccessPartial)
+      retInfo.alloc_flags |= HSA_AMD_POINTER_INFO_ALLOC_FLAG_ATOMIC_PARTIAL;
+
     if (block_info != nullptr) {
       // Block_info reports the thunk allocation from which we may have suballocated.
       // For locked memory we want to return the host address since hostBaseAddress is used to

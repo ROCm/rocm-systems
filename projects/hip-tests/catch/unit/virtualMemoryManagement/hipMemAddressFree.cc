@@ -28,7 +28,7 @@
  * ------------------------
  *    - HIP_VERSION >= 6.1
  */
-TEST_CASE(Unit_hipMemAddressFree_negative) {
+HIP_TEST_CASE(Unit_hipMemAddressFree_negative) {
   size_t granularity = 0;
   constexpr int N = DATA_SIZE;
   size_t buffer_size = N * sizeof(int);
@@ -59,7 +59,7 @@ TEST_CASE(Unit_hipMemAddressFree_negative) {
   CTX_DESTROY();
 }
 
-TEST_CASE(Unit_hipMemAddressFree_Capture) {
+HIP_TEST_CASE(Unit_hipMemAddressFree_Capture) {
   CTX_CREATE();
   size_t granularity = 0;
   size_t buffer_size = DATA_SIZE * sizeof(int);

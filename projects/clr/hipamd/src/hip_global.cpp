@@ -43,7 +43,7 @@ namespace hip {
 hipError_t ihipMallocManaged(void** ptr, size_t size, size_t align = 0, bool use_host_ptr = 0);
 
 // Device Vars
-DeviceVar::DeviceVar(std::string name, hipModule_t hmod, int deviceId)
+DeviceVar::DeviceVar(const std::string &name, hipModule_t hmod, int deviceId)
     : shadowVptr(nullptr), name_(name), amd_mem_obj_(nullptr), device_ptr_(nullptr), size_(0) {
   amd::Program* program = as_amd(reinterpret_cast<cl_program>(hmod));
   device::Program* dev_program = program->getDeviceProgram(*g_devices.at(deviceId)->devices()[0]);
@@ -85,7 +85,7 @@ DeviceVar::~DeviceVar() {
 }
 
 // Device Functions
-DeviceFunc::DeviceFunc(std::string name, hipModule_t hmod) : name_(name), kernel_(nullptr) {
+DeviceFunc::DeviceFunc(const std::string &name, hipModule_t hmod) : kernel_(nullptr) {
   amd::Program* program = as_amd(reinterpret_cast<cl_program>(hmod));
 
   const amd::Symbol* symbol = program->findSymbol(name.c_str());

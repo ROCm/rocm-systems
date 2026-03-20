@@ -134,16 +134,6 @@ hip::Stream* getNullStream(amd::Context& ctx, bool wait) {
 }
 
 // ================================================================================================
-int getDeviceID(amd::Context& ctx) {
-  for (auto& it : g_devices) {
-    if (it->asContext() == &ctx) {
-      return it->deviceId();
-    }
-  }
-  return -1;
-}
-
-// ================================================================================================
 hip::Stream* getNullStream(bool wait) {
   Device* device = getCurrentDevice();
   if (device == nullptr) {

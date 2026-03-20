@@ -710,7 +710,7 @@ bool run_erfinvf() {
   }
 }
 
-TEST_CASE(Unit_hipDeviceTrigFunc_Float) {
+HIP_TEST_CASE(Unit_hipDeviceTrigFunc_Float) {
   bool result = false;
   result = run_sincosf() && run_sincospif() && run_fdividef() && run_llrintf() && run_norm3df() &&
            run_norm4df() && run_normf() && run_rnorm3df() && run_rnorm4df() && run_rnormf() &&
