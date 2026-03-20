@@ -195,7 +195,6 @@ HIP_TEST_CASE(Unit_hipGraphAddDependencies_Negative_Parameters) {
   memsetParams.width = Nbytes;
   memsetParams.height = 1;
   hipGraphNode_t memcpyH2D_A;
-  hipGraphNode_t memcpyD2H_A;
   char* A_h;
   A_h = reinterpret_cast<char*>(malloc(Nbytes));
 

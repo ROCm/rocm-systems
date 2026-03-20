@@ -60,7 +60,6 @@ constexpr unsigned threadsPerBlock = 256;
     constexpr int blocks =
         (N % threadsPerBlock == 0) ? (N / threadsPerBlock) : ((N / threadsPerBlock) + 1);
 size_t Nbytes = N * sizeof(float);
-constexpr int LAUNCH_ITERS = 1;
 
 /*
  * Create 2 streams s1 and s2. Start capturing s1. Record event e1 on s1 and

@@ -159,7 +159,7 @@ def setup_workload_dir(input_dir, suffix="_tmp", clean_existing=True, param_id=N
     based on the name of the calling test function. For parametrized tests,
     pass param_id to ensure unique directory names and avoid NFS conflicts.
 
-    Setup is a NOOP when tests run serially.
+    Creates a copy to avoid modifying source workload data.
 
     Args:
         input_dir (str): Source directory to copy from.
@@ -171,9 +171,6 @@ def setup_workload_dir(input_dir, suffix="_tmp", clean_existing=True, param_id=N
             When provided, appended to the directory name to ensure uniqueness.
             Defaults to None.
     """
-
-    if "PYTEST_XDIST_WORKER_COUNT" not in os.environ:
-        return input_dir
 
     func_name = inspect.stack()[1].function
 
@@ -220,12 +217,43 @@ def check_csv_files(output_dir, num_devices, num_kernels):
 
     Returns:
         dict: dictionary housing file contents as pandas dataframe
+              (excludes PMC files - those are validated internally)
     """
 
     file_dict = {}
     files_in_workload = os.listdir(output_dir)
+
+    # Validate PMC data exists (profile creates pmc_perf_*.csv or results_*.csv)
+    has_separate = any(
+        f.startswith("pmc_perf_") and f.endswith(".csv") for f in files_in_workload
+    )
+    has_results = any(
+        f.startswith("results_") and f.endswith(".csv") for f in files_in_workload
+    )
+
+    assert has_separate or has_results, (
+        "Expected pmc_perf_*.csv or results_*.csv from profile mode"
+    )
+
+    # Validate row counts for PMC files (but don't add to return dict)
+    for file in files_in_workload:
+        is_pmc = file.startswith("pmc_perf_") or file.startswith("results_")
+        if is_pmc and file.endswith(".csv"):
+            df = pd.read_csv(output_dir + "/" + file)
+            err_msg = (
+                f"PMC file {file} has insufficient rows: "
+                f"{len(df.index)} < {num_kernels}"
+            )
+            assert len(df.index) >= num_kernels, err_msg
+
+    # Load non-PMC CSV files into return dict
     for file in files_in_workload:
         if file.endswith(".csv"):
+            # Skip PMC files (already validated above)
+            if file.startswith("pmc_perf_") or file.startswith("results_"):
+                continue
+
+            # Load other CSV files
             file_dict[file] = pd.read_csv(output_dir + "/" + file)
             if "roofline" in file:
                 assert len(file_dict[file].index) >= num_devices
@@ -235,6 +263,7 @@ def check_csv_files(output_dir, num_devices, num_kernels):
             file_dict[file] = "html"
         elif file.endswith(".json"):
             file_dict[file] = "json"
+
     return file_dict
 
 
@@ -261,9 +290,11 @@ def gpu_soc():
     rocminfo = rocminfo.split("\n")
     soc_regex = re.compile(r"^\s*Name\s*:\s+ ([a-zA-Z0-9]+)\s*$", re.MULTILINE)
     devices = list(filter(soc_regex.match, rocminfo))
+    if not devices:
+        return None
     gpu_arch = devices[0].split()[1]
 
-    if not gpu_arch in SUPPORTED_ARCHS.keys():
+    if gpu_arch not in SUPPORTED_ARCHS.keys():
         return None
 
     gpu_model = list(SUPPORTED_ARCHS[gpu_arch].keys())[0].upper()

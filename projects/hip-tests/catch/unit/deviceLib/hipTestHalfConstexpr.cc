@@ -26,8 +26,6 @@ __host__ __device__ constexpr __half makeHalfFromBits(unsigned short bits) {
 
 constexpr __half kConstTwo = makeHalfFromBits(kHalfTwo);
 constexpr __half kConstPi = makeHalfFromBits(kHalfPi);
-constexpr __half kConstInf = makeHalfFromBits(kHalfInf);
-
 
 /**
  * Device kernel that uses constexpr __half values.
