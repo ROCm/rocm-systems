@@ -154,7 +154,7 @@ class IpcOnImpl {
   __device__ void zero_byte_read(int pe) {
     int local_pe = pe % shm_size;
     uint32_t *pe_ipc_base = reinterpret_cast<uint32_t *>(ipc_bases[local_pe]);
-    volatile uint32_t read_value = __hip_atomic_load(
+    [[maybe_unused]] volatile uint32_t read_value = __hip_atomic_load(
         pe_ipc_base, __ATOMIC_SEQ_CST, __HIP_MEMORY_SCOPE_SYSTEM);
   }
 };

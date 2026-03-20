@@ -38,7 +38,7 @@ __global__ void wf_lane_ids(AWFQueue* awf_queue, unsigned int* device_array,
                            int wf_size) {
 
   int t_id {get_flat_id()};
-  int lane_id {t_id % wf_size};
+  [[maybe_unused]] int lane_id {t_id % wf_size};
   device_array[t_id] = awf_queue->active_logical_lane_id();
 }
 

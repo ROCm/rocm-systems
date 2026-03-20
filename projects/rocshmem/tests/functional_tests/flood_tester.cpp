@@ -125,7 +125,7 @@ static __global__ void verify_results_kernel(uint64_t *dest, size_t buf_size,
   int num_pe {rocshmem_n_pes()};
   int num_wg {get_grid_num_blocks()};
   int num_th {get_flat_block_size()};
-  int my_pe {rocshmem_my_pe()};
+  [[maybe_unused]] int my_pe {rocshmem_my_pe()};
   int wg_id {get_flat_grid_id()};
   int t_id {get_flat_block_id()};
 
@@ -183,7 +183,7 @@ void FloodTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
 
 void FloodTester::verifyResults(size_t size) {
   int num_pes {rocshmem_n_pes()};
-  int my_pe {rocshmem_my_pe()};
+  [[maybe_unused]] int my_pe {rocshmem_my_pe()};
 
   if (num_pes > 1<<20 || args.num_wgs > 1<<31 || args.wg_size > 1<<12) {
     // can't check

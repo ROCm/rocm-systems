@@ -82,7 +82,6 @@ void GDABackend::ionic_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
 
   uint64_t *gpu_db_ptr = &gpu_db_page_u64[dvctx.db_ptr - db_page_u64];
 
-  gpu_db_page = gpu_db_page;
   gpu_db_cq = &gpu_db_ptr[dvctx.cq_qtype];
   gpu_db_sq = &gpu_db_ptr[dvctx.sq_qtype];
 

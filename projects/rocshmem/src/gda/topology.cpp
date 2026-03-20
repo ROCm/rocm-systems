@@ -170,7 +170,6 @@ namespace rocshmem
       hsa_amd_pointer_info_t info;
       info.size = sizeof(info);
 
-      int err;
       int32_t* tempBuffer;
 
       // Index CPU agents
@@ -217,7 +216,7 @@ namespace rocshmem
   }
 
   // Get the hsa_agent_t associated with a MemDevice
-  static int GetHsaAgent(MemDevice const& memDevice, hsa_agent_t& agent)
+  [[maybe_unused]] static int GetHsaAgent(MemDevice const& memDevice, hsa_agent_t& agent)
   {
     if (IsCpuMemType(memDevice.memType)) return GetHsaAgent({EXE_CPU, memDevice.memIndex}, agent);
     if (IsGpuMemType(memDevice.memType)) return GetHsaAgent({EXE_GPU, memDevice.memIndex}, agent);
@@ -446,7 +445,7 @@ namespace rocshmem
   //========================================================================================
 
   // Prints off PCIe tree
-  static void PrintPCIeTree(PCIeNode    const& node,
+  [[maybe_unused]] static void PrintPCIeTree(PCIeNode    const& node,
                             std::string const& prefix = "",
                             bool               isLast = true)
   {
@@ -603,7 +602,6 @@ namespace rocshmem
     // Build PCIe tree on first use
     if (!isInitialized) {
       // Add NICs to the tree
-      int numNics = rocshmem::GetNumDevices(rocshmem::EXE_NIC);
       auto const& ibvDeviceList = rocshmem::GetIbvDeviceList();
       for (IbvDevice const& ibvDevice : ibvDeviceList) {
         if (!ibvDevice.hasActivePort || ibvDevice.busId == "") continue;

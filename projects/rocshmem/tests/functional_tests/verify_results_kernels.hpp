@@ -27,7 +27,7 @@
 
 namespace rocshmem {
 
-static __global__ void verify_results_kernel_char(char *source, char *dest, size_t buf_size,
+[[maybe_unused]] static __global__ void verify_results_kernel_char(char *source, char *dest, size_t buf_size,
                                                   bool *verification_error) {
 
   int idx = get_flat_id();

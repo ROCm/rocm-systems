@@ -68,7 +68,7 @@ __global__ void FloodAmoTest(int loop, int skip, long long int *start_time,
       // shuffle ordering so that threads in the wave put to a
       // different pe 'simultaneously'
       auto pe = (t_id + j) % num_pe;
-      uint64_t ret{0};
+      [[maybe_unused]] uint64_t ret{0};
       switch (type) {
       case FloodWaitAmoTestType:
       case FloodAddTestType:

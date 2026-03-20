@@ -248,7 +248,6 @@ void ROBackend::dump_backend_stats() {
   }
 
   int device_id;
-  hipDeviceProp_t device_props;
   CHECK_HIP(hipGetDevice(&device_id));
   int wallClockMhz;
   CHECK_HIP(hipDeviceGetAttribute(&wallClockMhz, hipDeviceAttributeWallClockRate, device_id));

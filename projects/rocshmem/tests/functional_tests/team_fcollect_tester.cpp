@@ -171,8 +171,8 @@ void TeamFcollectTester<T1>::launchKernel(dim3 gridSize, dim3 blockSize,
 
   int num_elems = size / sizeof(T1);
 
-  int my_pe = rocshmem_team_my_pe(ROCSHMEM_TEAM_WORLD);
-  int n_pes = rocshmem_team_n_pes(ROCSHMEM_TEAM_WORLD);
+  [[maybe_unused]] int my_pe = rocshmem_team_my_pe(ROCSHMEM_TEAM_WORLD);
+  [[maybe_unused]] int n_pes = rocshmem_team_n_pes(ROCSHMEM_TEAM_WORLD);
 
   hipLaunchKernelGGL(TeamFcollectTest<T1>, gridSize, blockSize, shared_bytes,
                      stream, loop, args.skip, start_time, end_time,

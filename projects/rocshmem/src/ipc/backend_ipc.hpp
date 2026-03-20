@@ -37,7 +37,7 @@
 namespace rocshmem {
 
 class IPCBackend : public Backend {
-  const unsigned MAX_NUM_BLOCKS{65536};
+  [[maybe_unused]] const unsigned MAX_NUM_BLOCKS{65536};
 
  public:
   /**

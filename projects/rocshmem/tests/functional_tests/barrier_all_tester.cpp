@@ -34,7 +34,7 @@ using namespace rocshmem;
 __global__ void BarrierAllTest(int loop, int skip, long long int *start_time,
                                long long int *end_time, TestType type,
                                int wf_size) {
-  __shared__ rocshmem_ctx_t ctx;
+  [[maybe_unused]] __shared__ rocshmem_ctx_t ctx;
   int t_id  = get_flat_block_id();
   int wg_id = get_flat_grid_id();
   int wf_id = t_id / wf_size;

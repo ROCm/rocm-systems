@@ -41,7 +41,7 @@ namespace rocshmem {
 #define SFENCE() asm volatile("sfence" ::: "memory")
 
 __device__ __forceinline__ int uncached_load_ubyte(uint8_t* src) {
-  int ret;
+  int ret = 0;
 #if defined(__gfx906__)
 #endif
 #if defined(__gfx908__)
@@ -136,7 +136,7 @@ __device__ __forceinline__ void refresh_volatile_dwordx2(volatile uint64_t *assi
 // clang-format off
 NOWARN(-Wdeprecated-volatile,
   template <typename T> __device__ __forceinline__ T uncached_load(T* src) {
-    T ret;
+    T ret{};
     switch (sizeof(T)) {
       case 4:
 #if defined(__gfx906__)
@@ -244,7 +244,7 @@ __device__ __forceinline__ void store_asm(uint8_t* val, uint8_t* dst,
       break;
     }
     case 4: {
-      int32_t val32{*(reinterpret_cast<int32_t*>(val))};
+      [[maybe_unused]] int32_t val32{*(reinterpret_cast<int32_t*>(val))};
 #if defined(__gfx906__)
 #endif
 #if defined(__gfx908__)
@@ -261,7 +261,7 @@ __device__ __forceinline__ void store_asm(uint8_t* val, uint8_t* dst,
       break;
     }
     case 8: {
-      int64_t val64{*(reinterpret_cast<int64_t*>(val))};
+      [[maybe_unused]] int64_t val64{*(reinterpret_cast<int64_t*>(val))};
 #if defined(__gfx906__)
 #endif
 #if defined(__gfx908__)

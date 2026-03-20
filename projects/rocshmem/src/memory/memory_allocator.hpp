@@ -156,7 +156,7 @@ class MemoryAllocator {
   /**
    * @brief a hip-specific return code
    */
-  hipError_t _hip_return_value{hipSuccess};
+  [[maybe_unused]] hipError_t _hip_return_value{hipSuccess};
 };
 
 }  // namespace rocshmem

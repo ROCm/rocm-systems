@@ -245,7 +245,7 @@ void TeamCtxInfraTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
   size_t shared_bytes = 0;
 
   /* Copy array of teams to device */
-  rocshmem_team_t *teams_on_device;
+  rocshmem_team_t *teams_on_device = nullptr;
 
   if (_splitType == ROCSHMEM_TEST_TEAM_DUP) {
     CHECK_HIP(hipMalloc(&teams_on_device, sizeof(rocshmem_team_t) * NUM_TEAMS));

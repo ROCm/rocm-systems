@@ -73,8 +73,8 @@ TYPED_TEST(FreeListTestFixture, pop_empty_device) {
   using Allocator = typename TestFixture::Allocator;
   using T = typename TestFixture::T;
 
-  auto& h_input = this->h_input;
-  auto& free_list = this->free_list;
+  [[maybe_unused]] auto& h_input = this->h_input;
+  [[maybe_unused]] auto& free_list = this->free_list;
   auto& hip_allocator_ = this->hip_allocator_;
 
   bool *is_empty {nullptr};
@@ -95,6 +95,7 @@ TYPED_TEST(FreeListTestFixture, pop_empty_device) {
 TYPED_TEST(FreeListTestFixture, push_host_pop_device) {
   using Allocator = typename TestFixture::Allocator;
   using T = typename TestFixture::T;
+  (void)sizeof(Allocator); // Suppress unused type alias warning
 
   auto& h_input = this->h_input;
   auto& free_list = this->free_list;
@@ -126,6 +127,7 @@ TYPED_TEST(FreeListTestFixture, push_host_pop_device) {
 TYPED_TEST(FreeListTestFixture, push_host_concurrent_pop_device) {
   using Allocator = typename TestFixture::Allocator;
   using T = typename TestFixture::T;
+  (void)sizeof(Allocator); // Suppress unused type alias warning
 
   auto& h_input = this->h_input;
   auto& free_list = this->free_list;
@@ -176,7 +178,7 @@ TYPED_TEST(FreeListTestFixture, push_host_pop_push_device) {
 
   T *results {nullptr};
   T *d_input {nullptr};
-  bool *is_empty {nullptr};
+  [[maybe_unused]] bool *is_empty {nullptr};
   size_t size_bytes = 2 * sizeof(T) * h_input.size() + sizeof(bool);
   hip_allocator_.allocate(reinterpret_cast<void**>(&results),
                           size_bytes);

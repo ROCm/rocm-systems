@@ -58,7 +58,7 @@ class LLMoEData {
     int num_experts_, InitMode init_mode_ = InitMode::Deterministic)
       : num_tokens(num_tokens_), hidden(hidden_),
         num_topk(num_topk_), num_experts(num_experts_),
-        init_mode(init_mode_), expert_token_count(num_experts, 0) {}
+        expert_token_count(num_experts, 0), init_mode(init_mode_) {}
 
   ~LLMoEData() {
     if (X) {
@@ -78,7 +78,7 @@ class LLMoEData {
     CHECK_HIP(hipMalloc(&X, x_size_bytes));
     CHECK_HIP(hipMalloc(&topk_idx, topk_idx_size_bytes));
 
-    size_t x_size = num_tokens * hidden;
+    [[maybe_unused]] size_t x_size = num_tokens * hidden;
 
     // Launch kernel to fill input data (X)
     int threads_per_block = 1024;

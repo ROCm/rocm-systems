@@ -88,7 +88,7 @@ BackendType get_backend_type() { return backend->get_backend_type(); }
 
 #if defined(USE_GDA) && defined(USE_RO) && defined(USE_IPC)
 static BackendType select_backend_type(MPI_Comm comm, TcpBootstrap *bootstrap) {
-  BackendType type;
+  [[maybe_unused]] BackendType type;
 
   /* Check whether the user explicitely requests a particular backend type */
   std::string envstr = envvar::backend;

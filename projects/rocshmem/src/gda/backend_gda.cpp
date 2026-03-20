@@ -597,7 +597,7 @@ bool GDABackend::device_matches_provider_vendor(GDAProvider provider,
                                                  const struct ibv_device_attr &device_attr,
                                                  const char *device_name) {
   uint32_t expected_vendor_id = 0;
-  const char *vendor_name = nullptr;
+  [[maybe_unused]] const char *vendor_name = nullptr;
 
   switch (provider) {
     case GDAProvider::BNXT:
@@ -1434,7 +1434,6 @@ void GDABackend::create_qps(int sq_length) {
 
 void GDABackend::select_gid_index() {
   struct ibv_gid_entry *gid_entries;
-  struct ibv_gid_entry *gid_entry;
   union ibv_gid current_gid;
   union ibv_gid selected_gid;
   uint32_t current_gid_type;

@@ -47,7 +47,7 @@ namespace rocshmem {
   }
 
 MPITransport::MPITransport(MPI_Comm comm, Queue* q)
-  : queue{q}, Transport{} {
+  : Transport{}, queue{q} {
 
   assert(comm != MPI_COMM_NULL);
 
@@ -607,7 +607,6 @@ void MPITransport::progress() {
     NET_CHECK(mpilib_ftable_.Testsome(incount, uptr_req_arr.get(), &outcount,
                            testsome_indices.data(), MPI_STATUSES_IGNORE));
 
-    auto *bp{backend_proxy->get()};
     for (int i{0}; i < outcount; i++) {
       int index{testsome_indices[i]};
       int contextId{requests[index].properties.contextId};
@@ -657,8 +656,6 @@ void MPITransport::progress() {
 }
 
 void MPITransport::quiet(int contextId, volatile char *status) {
-  auto *bp{backend_proxy->get()};
-
   if (!outstanding[contextId]) {
     DPRINTF("Finished Quiet immediately for contextId %d at status addr %p\n",
             contextId, status);

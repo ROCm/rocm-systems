@@ -71,7 +71,7 @@ __global__ void TeamBroadcastTest(int loop, int skip, long long int *start_time,
 
   rocshmem_wg_team_create_ctx(teams[wg_id], ctx_type, &ctx);
 
-  int n_pes = rocshmem_ctx_n_pes(ctx);
+  [[maybe_unused]] int n_pes = rocshmem_ctx_n_pes(ctx);
   source_buf += wg_id * size;
   dest_buf += wg_id * size;
 
@@ -178,7 +178,7 @@ template <typename T1>
 void TeamBroadcastTester<T1>::resetBuffers(size_t size) {
 
   int num_elems = size / sizeof(T1);
-  int buff_size = num_elems * sizeof(T1) * args.num_wgs;
+  [[maybe_unused]] int buff_size = num_elems * sizeof(T1) * args.num_wgs;
   int idx = 0;
 
   for (int wg_id = 0; wg_id < args.num_wgs; wg_id++) {
