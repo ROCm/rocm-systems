@@ -56,12 +56,12 @@ Panel Config:
             - Start_Timestamp)))
           unit: Gbps
         HBM Read Traffic:
-          avg: AVG((NOISE_CLAMP(100 * (TCC_EA0_RDREQ_DRAM_sum / TCC_EA0_RDREQ_sum),
-            100) if (TCC_EA0_RDREQ_sum != 0) else None))
-          min: MIN((NOISE_CLAMP(100 * (TCC_EA0_RDREQ_DRAM_sum / TCC_EA0_RDREQ_sum),
-            100) if (TCC_EA0_RDREQ_sum != 0) else None))
-          max: MAX((NOISE_CLAMP(100 * (TCC_EA0_RDREQ_DRAM_sum / TCC_EA0_RDREQ_sum),
-            100) if (TCC_EA0_RDREQ_sum != 0) else None))
+          avg: AVG(((100 * NOISE_CLAMP(TCC_EA0_RDREQ_DRAM_sum, TCC_EA0_RDREQ_sum))
+            / TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum != 0) else None))
+          min: MIN(((100 * NOISE_CLAMP(TCC_EA0_RDREQ_DRAM_sum, TCC_EA0_RDREQ_sum))
+            / TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum != 0) else None))
+          max: MAX(((100 * NOISE_CLAMP(TCC_EA0_RDREQ_DRAM_sum, TCC_EA0_RDREQ_sum))
+            / TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum != 0) else None))
           unit: Percent
         Remote Read Traffic:
           avg: AVG((100 * (NOISE_CLAMP((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum), TCC_EA0_RDREQ_sum) / TCC_EA0_RDREQ_sum)
@@ -88,12 +88,12 @@ Panel Config:
             * 32)) / (End_Timestamp - Start_Timestamp)))
           unit: Gbps
         HBM Write and Atomic Traffic:
-          avg: AVG((NOISE_CLAMP(100 * (TCC_EA0_WRREQ_DRAM_sum / TCC_EA0_WRREQ_sum),
-            100) if (TCC_EA0_WRREQ_sum != 0) else None))
-          min: MIN((NOISE_CLAMP(100 * (TCC_EA0_WRREQ_DRAM_sum / TCC_EA0_WRREQ_sum),
-            100) if (TCC_EA0_WRREQ_sum != 0) else None))
-          max: MAX((NOISE_CLAMP(100 * (TCC_EA0_WRREQ_DRAM_sum / TCC_EA0_WRREQ_sum),
-            100) if (TCC_EA0_WRREQ_sum != 0) else None))
+          avg: AVG(((100 * NOISE_CLAMP(TCC_EA0_WRREQ_DRAM_sum, TCC_EA0_WRREQ_sum))
+            / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum != 0) else None))
+          min: MIN(((100 * NOISE_CLAMP(TCC_EA0_WRREQ_DRAM_sum, TCC_EA0_WRREQ_sum))
+            / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum != 0) else None))
+          max: MAX(((100 * NOISE_CLAMP(TCC_EA0_WRREQ_DRAM_sum, TCC_EA0_WRREQ_sum))
+            / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum != 0) else None))
           unit: Percent
         Remote Write and Atomic Traffic:
           avg: AVG((100 * (NOISE_CLAMP((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum), TCC_EA0_WRREQ_sum) / TCC_EA0_WRREQ_sum)
@@ -189,12 +189,12 @@ Panel Config:
           max: MAX((TCC_PROBE_sum / $denom))
           unit: (Req + $normUnit)
         Cache Hit:
-          avg: AVG((NOISE_CLAMP(((100 * TCC_HIT_sum) / (TCC_HIT_sum + TCC_MISS_sum)),
-            100) if ((TCC_HIT_sum + TCC_MISS_sum) != 0) else None))
-          min: MIN((NOISE_CLAMP(((100 * TCC_HIT_sum) / (TCC_HIT_sum + TCC_MISS_sum)),
-            100) if ((TCC_HIT_sum + TCC_MISS_sum) != 0) else None))
-          max: MAX((NOISE_CLAMP(((100 * TCC_HIT_sum) / (TCC_HIT_sum + TCC_MISS_sum)),
-            100) if ((TCC_HIT_sum + TCC_MISS_sum) != 0) else None))
+          avg: AVG((((100 * NOISE_CLAMP(TCC_HIT_sum, (TCC_HIT_sum + TCC_MISS_sum)))
+            / (TCC_HIT_sum + TCC_MISS_sum)) if ((TCC_HIT_sum + TCC_MISS_sum) != 0) else None))
+          min: MIN((((100 * NOISE_CLAMP(TCC_HIT_sum, (TCC_HIT_sum + TCC_MISS_sum)))
+            / (TCC_HIT_sum + TCC_MISS_sum)) if ((TCC_HIT_sum + TCC_MISS_sum) != 0) else None))
+          max: MAX((((100 * NOISE_CLAMP(TCC_HIT_sum, (TCC_HIT_sum + TCC_MISS_sum)))
+            / (TCC_HIT_sum + TCC_MISS_sum)) if ((TCC_HIT_sum + TCC_MISS_sum) != 0) else None))
           unit: Percent
         Hits:
           avg: AVG((TCC_HIT_sum / $denom))
