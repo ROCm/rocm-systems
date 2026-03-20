@@ -22,10 +22,6 @@
 
 #include "library/pmc/sampler.hpp"
 
-#if defined(NDEBUG)
-#    undef NDEBUG
-#endif
-
 #include <amd_smi/amdsmi.h>
 #include <timemory/backends/threading.hpp>
 #include <timemory/components/timing/backends.hpp>
@@ -219,6 +215,10 @@ postfork_child_cleanup()
         slice.shutdown();
     }
     g_collector_slices.clear();
+    g_gpu_collector.reset();
+#if defined(ROCPROFSYS_BUILD_AINIC)
+    g_nic_collector.reset();
+#endif
     g_device_provider.reset();
     is_initialized() = false;
 }

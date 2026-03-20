@@ -19,9 +19,6 @@
 namespace rocprofsys::pmc::collectors::gpu
 {
 
-using ::rocprofsys::pmc::collectors::gpu::enabled_metrics;
-using ::rocprofsys::pmc::collectors::gpu::metrics;
-
 template <typename Driver>
 class device
 {
@@ -59,7 +56,7 @@ public:
 
     [[nodiscard]] metrics get_gpu_metrics(
         [[maybe_unused]] const enabled_metrics& enabled_cfg,
-        [[maybe_unused]] uint64_t               timestamp) const
+        [[maybe_unused]] uint64_t               timestamp)
     {
         metrics metrics{};
 
@@ -435,7 +432,7 @@ private:
     std::string             m_product_name;
     std::string             m_vendor_name;
     bool                    m_is_supported = false;
-    mutable sdma_state      m_sdma_state;  // mutable for const getter
+    sdma_state              m_sdma_state;
 };
 
 }  // namespace rocprofsys::pmc::collectors::gpu

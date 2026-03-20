@@ -13,7 +13,6 @@ set(pmc_gpu_sources
     ${CMAKE_CURRENT_LIST_DIR}/gpu_traits.hpp
     ${CMAKE_CURRENT_LIST_DIR}/perfetto_policy.hpp
     ${CMAKE_CURRENT_LIST_DIR}/cache_policy.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/metric_descriptors.hpp
 )
 
 # Add to parent variable (will be used by collectors CMakeLists.txt)

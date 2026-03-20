@@ -7,12 +7,10 @@
 #include "logger/debug.hpp"
 
 #include <algorithm>
-#include <cassert>
 #include <cstdint>
-#include <limits>
 #include <memory>
 #include <stdexcept>
-#include <string>
+#include <vector>
 
 namespace rocprofsys::pmc::collectors::base
 {
@@ -133,8 +131,6 @@ struct collector
             m_device_entries.begin(), m_device_entries.end(),
             [this, timestamp](const device_entry& entry) {
                 auto _timestamp = static_cast<uint64_t>(timestamp);
-                assert(_timestamp <
-                       static_cast<unsigned long>(std::numeric_limits<int64_t>::max()));
 
                 try
                 {

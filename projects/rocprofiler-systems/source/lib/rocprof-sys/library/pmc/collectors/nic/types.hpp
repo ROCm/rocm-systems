@@ -4,8 +4,6 @@
 #pragma once
 
 #include <cstdint>
-#include <sstream>
-#include <string>
 
 namespace rocprofsys
 {
@@ -41,20 +39,8 @@ union enabled_metrics
     uint32_t value = 0;
 };
 
-inline std::string
-to_string(const enabled_metrics& metrics)
-{
-    std::stringstream ss;
-    ss << "[NIC enabled metrics] ";
-    ss << "RX RDMA ucast bytes: " << static_cast<bool>(metrics.bits.rx_rdma_ucast_bytes)
-       << ", TX RDMA ucast bytes: " << static_cast<bool>(metrics.bits.tx_rdma_ucast_bytes)
-       << ", RX RDMA ucast pkts: " << static_cast<bool>(metrics.bits.rx_rdma_ucast_pkts)
-       << ", TX RDMA ucast pkts: " << static_cast<bool>(metrics.bits.tx_rdma_ucast_pkts)
-       << ", RX RDMA CNP pkts: " << static_cast<bool>(metrics.bits.rx_rdma_cnp_pkts)
-       << ", TX RDMA CNP pkts: " << static_cast<bool>(metrics.bits.tx_rdma_cnp_pkts)
-       << "\n";
-    return ss.str();
-}
+/// All 6 NIC RDMA metrics enabled (bits 0-5)
+static constexpr uint32_t ALL_NIC_METRICS = 0x3F;
 
 /**
  * @brief Container for NIC RDMA metrics collected from AMD SMI.

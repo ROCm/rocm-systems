@@ -20,9 +20,6 @@
 namespace rocprofsys::pmc::collectors::nic
 {
 
-using ::rocprofsys::pmc::collectors::nic::enabled_metrics;
-using ::rocprofsys::pmc::collectors::nic::metrics;
-
 /**
  * @brief NIC device wrapper for collecting RDMA statistics.
  *

@@ -4,7 +4,6 @@
 #pragma once
 
 #include <cstdint>
-#include <functional>
 
 namespace rocprofsys::pmc::collectors
 {
@@ -98,13 +97,18 @@ public:
     void shutdown() { m_shutdown_impl(m_object); }
 
 private:
-    void*                               m_object; /**< Non-owning pointer to collector */
-    std::function<void(void*)>          m_setup_impl;  /**< Type-erased setup function */
-    std::function<void(void*)>          m_config_impl; /**< Type-erased config function */
-    std::function<void(void*, int64_t)> m_sample_impl; /**< Type-erased sample function */
-    std::function<void(void*)>
-        m_post_process_impl;                    /**< Type-erased post_process function */
-    std::function<void(void*)> m_shutdown_impl; /**< Type-erased shutdown function */
+    using setup_fn_t        = void (*)(void*);
+    using config_fn_t       = void (*)(void*);
+    using sample_fn_t       = void (*)(void*, int64_t);
+    using post_process_fn_t = void (*)(void*);
+    using shutdown_fn_t     = void (*)(void*);
+
+    void*             m_object;            /**< Non-owning pointer to collector */
+    setup_fn_t        m_setup_impl;        /**< Type-erased setup function */
+    config_fn_t       m_config_impl;       /**< Type-erased config function */
+    sample_fn_t       m_sample_impl;       /**< Type-erased sample function */
+    post_process_fn_t m_post_process_impl; /**< Type-erased post_process function */
+    shutdown_fn_t     m_shutdown_impl;     /**< Type-erased shutdown function */
 };
 
 }  // namespace rocprofsys::pmc::collectors

@@ -5,13 +5,8 @@
 
 #include "library/pmc/common/types.hpp"
 
-#include <spdlog/fmt/fmt.h>
-
 #include <array>
 #include <cstdint>
-#include <set>
-#include <stdexcept>
-#include <string>
 
 #include <amd_smi/amdsmi.h>
 
@@ -24,10 +19,8 @@ namespace collectors
 namespace gpu
 {
 
-// Sentinel values used by AMD SMI to indicate unsupported/unavailable metrics
-// These match the AMD SMI library's convention for indicating N/A values
-constexpr uint16_t METRIC_VALUE_NOT_SUPPORTED    = 0xffff;              // 16-bit sentinel
-constexpr uint64_t METRIC_VALUE_NOT_SUPPORTED_64 = 0xffffffffffffffff;  // 64-bit sentinel
+// Sentinel value used by AMD SMI to indicate unsupported/unavailable 64-bit metrics
+constexpr uint64_t METRIC_VALUE_NOT_SUPPORTED_64 = 0xffffffffffffffff;
 
 /**
  * @brief Bitfield union for selecting which AMD SMI metrics to collect.
@@ -72,38 +65,11 @@ union enabled_metrics
     uint32_t value = 0;
 };
 
-inline std::string
-to_string(const enabled_metrics& metrics)
-{
-    return fmt::format(
-        "[SMI enabled metrics] Current socket power: {}, Average socket power: {}, "
-        "Memory usage: {}, Hotspot temperature: {}, Edge temperature: {}, "
-        "GFX activity: {}, UMC activity: {}, MM activity: {}, "
-        "VCN activity: {}, JPEG activity: {}, VCN busy: {}, JPEG busy: {}, "
-        "XGMI: {}, PCIE: {}, SDMA: {}\n",
-        static_cast<bool>(metrics.bits.current_socket_power),
-        static_cast<bool>(metrics.bits.average_socket_power),
-        static_cast<bool>(metrics.bits.memory_usage),
-        static_cast<bool>(metrics.bits.hotspot_temperature),
-        static_cast<bool>(metrics.bits.edge_temperature),
-        static_cast<bool>(metrics.bits.gfx_activity),
-        static_cast<bool>(metrics.bits.umc_activity),
-        static_cast<bool>(metrics.bits.mm_activity),
-        static_cast<bool>(metrics.bits.vcn_activity),
-        static_cast<bool>(metrics.bits.jpeg_activity),
-        static_cast<bool>(metrics.bits.vcn_busy),
-        static_cast<bool>(metrics.bits.jpeg_busy), static_cast<bool>(metrics.bits.xgmi),
-        static_cast<bool>(metrics.bits.pcie), static_cast<bool>(metrics.bits.sdma_usage));
-}
-
 // Get the actual JPEG engine count from the AMD SMI structure at compile time.
 // This ensures compatibility across ROCm versions where the jpeg_busy array size
 // may differ (32 in ROCm 6.x vs 40 in ROCm 7.x).
 constexpr size_t ROCPROFSYS_AMDSMI_JPEG_ENGINE_COUNT =
     sizeof(amdsmi_gpu_xcp_metrics_t::jpeg_busy) / sizeof(uint16_t);
-
-// For our internal metrics structure, use the AMD SMI array size
-#define ROCPROFSYS_MAX_NUM_JPEG_ENGINES ROCPROFSYS_AMDSMI_JPEG_ENGINE_COUNT
 
 #ifndef AMDSMI_MAX_NUM_VCN
 #    define AMDSMI_MAX_NUM_VCN 4
@@ -171,16 +137,6 @@ struct metrics
 
     uint32_t sdma_usage = 0;  // SDMA utilization percentage (0-100)
 };
-
-inline void
-check_status(amdsmi_status_t status, const char* error_message)
-{
-    if(status != AMDSMI_STATUS_SUCCESS)
-    {
-        throw std::runtime_error(fmt::format("{} AMD SMI Error code: {}", error_message,
-                                             static_cast<int>(status)));
-    }
-}
 
 }  // namespace gpu
 }  // namespace collectors

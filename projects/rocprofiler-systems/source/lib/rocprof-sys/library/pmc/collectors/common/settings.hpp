@@ -37,10 +37,10 @@ using ::rocprofsys::pmc::collectors::nic::enabled_metrics;
 namespace
 {
 // Bitfield values for enabling/disabling all metrics at once
-// 0xffff sets all 16 metric bits to 1 (all enabled)
+// 0x7FFF sets GPU metric bits 0-14 to 1 (all 15 GPU metrics enabled)
 // 0x0000 sets all bits to 0 (all disabled)
-constexpr uint16_t ENABLE_ALL_METRICS  = 0xffff;
-constexpr uint16_t DISABLE_ALL_METRICS = 0x0000;
+constexpr uint32_t ENABLE_ALL_METRICS  = 0x7FFF;
+constexpr uint32_t DISABLE_ALL_METRICS = 0x0000;
 }  // namespace
 
 struct settings_policy
@@ -129,8 +129,7 @@ struct settings_policy
     static nic::enabled_metrics get_nic_enabled_metrics() noexcept
     {
         nic::enabled_metrics result;
-        // Enable all 6 NIC metrics
-        result.value = 0x3F;  // bits 0-5
+        result.value = nic::ALL_NIC_METRICS;
         return result;
     }
 

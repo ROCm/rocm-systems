@@ -76,20 +76,6 @@ struct cache_policy
 
         trace_cache::get_metadata_registry().add_pmc_info(
             { agent_type::NIC, nic_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-              trait::name<category::amd_smi_nic_rx_cnp_pkts>::value, "NIC RX CNP PKTS",
-              trait::name<category::amd_smi_nic_rx_cnp_pkts>::description,
-              LONG_DESCRIPTION, COMPONENT, "bytes", rocprofsys::trace_cache::ABSOLUTE,
-              BLOCK, EXPRESSION, 0, 0 });
-
-        trace_cache::get_metadata_registry().add_pmc_info(
-            { agent_type::NIC, nic_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-              trait::name<category::amd_smi_nic_tx_cnp_pkts>::value, "NIC TX CNP PKTS",
-              trait::name<category::amd_smi_nic_tx_cnp_pkts>::description,
-              LONG_DESCRIPTION, COMPONENT, "bytes", rocprofsys::trace_cache::ABSOLUTE,
-              BLOCK, EXPRESSION, 0, 0 });
-
-        trace_cache::get_metadata_registry().add_pmc_info(
-            { agent_type::NIC, nic_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
               trait::name<category::amd_smi_nic_rx_ucast_pkts>::value,
               "NIC RX UCast PKTS",
               trait::name<category::amd_smi_nic_rx_ucast_pkts>::description,
@@ -148,7 +134,7 @@ struct cache_policy
     static void store_sample(size_t device_id, const std::string& device_name,
                              const enabled_metrics& enabled_metrics_cfg,
                              const enabled_metrics& supported_metrics,
-                             const metrics& metric_values, unsigned long timestamp)
+                             const metrics& metric_values, uint64_t timestamp)
     {
         enabled_metrics _enabled_metrics;
         _enabled_metrics.value = enabled_metrics_cfg.value & supported_metrics.value;

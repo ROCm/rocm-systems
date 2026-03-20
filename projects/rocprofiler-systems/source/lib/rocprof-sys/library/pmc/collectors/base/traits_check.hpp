@@ -84,29 +84,4 @@ struct has_enumerate_devices<
 template <typename Traits>
 inline constexpr bool has_enumerate_devices_v = has_enumerate_devices<Traits>::value;
 
-/**
- * @brief Validate that a Traits type satisfies all collector requirements.
- *
- * This function uses static_assert to provide clear compile-time error messages
- * when a traits type is missing required members. Call this at the beginning of
- * the collector template to catch errors early.
- *
- * Required Traits interface:
- * - Types: metrics_t, enabled_metrics_t, device_t, device_ptr_t, container_t
- * - Constants: device_name (const char*)
- *
- * @tparam Traits The traits type to validate
- */
-template <typename Traits>
-constexpr void
-validate_traits()
-{
-    static_assert(has_required_types_v<Traits>,
-                  "Traits must define: metrics_t, enabled_metrics_t, device_t, "
-                  "device_ptr_t, container_t");
-
-    static_assert(has_device_name_v<Traits>,
-                  "Traits must define: static constexpr const char* device_name");
-}
-
 }  // namespace rocprofsys::pmc::collectors::base
