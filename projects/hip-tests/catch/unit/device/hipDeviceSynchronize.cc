@@ -39,9 +39,13 @@ size_t functionalDeviceSynchronizeCopyBytes() {
       return mb * 1024ULL * 1024ULL;
     }
   }
-  // 1 GiB per buffer (four allocations in this test ≈ 4 GiB total) — a practical default
-  // for fast links; use a smaller HIP_TEST_DEVICE_SYNCHRONIZE_FUNCTIONAL_COPY_MB on
-  // memory-constrained runners if the pre-sync check is not required there.
+  // 1 GiB per buffer by default. The large transfer is intentional: it widens the window
+  // during which the pre-sync hipStreamQuery still returns hipErrorNotReady, making the
+  // best-effort pre-sync assertion (guarded by hipStreamQuery) effective on typical
+  // hardware. A smaller value, e.g. 64 MiB, is enough for the copy to finish before the
+  // host check on fast ASICs, causing the assertion to be silently skipped every run.
+  // Use HIP_TEST_DEVICE_SYNCHRONIZE_FUNCTIONAL_COPY_MB to reduce on memory-constrained
+  // runners where the 1 GiB default cannot be satisfied.
   return 1024ULL * 1024 * 1024;
 }
 
@@ -152,12 +156,14 @@ HIP_TEST_CASE(Unit_hipDeviceSynchronize_Functional) {
   }
 
 
-  // This check assumes per-stream work is still in flight (typically still in a large H2D
-  // or the long kernel) when the host reads A[NUM_STREAMS-1][0]. Very fast GPUs or
-  // HIP_LAUNCH_BLOCKING=true can still fail it; increase copy size via
-  // HIP_TEST_DEVICE_SYNCHRONIZE_FUNCTIONAL_COPY_MB or drop the assertion if needed.
-
-  REQUIRE(NUM_ITERS != A[NUM_STREAMS - 1][0] - 1);
+  // Best-effort pre-sync check: assert that the last stream's D2H copy has not yet
+  // landed in host memory. We gate this on hipStreamQuery so that very fast ASICs (or
+  // HIP_LAUNCH_BLOCKING=1 environments) where the GPU finishes before the host reaches
+  // this point simply skip the assertion rather than fail. The large copyBytes buffer
+  // (default 1 GiB) widens the race window so this check fires on typical hardware.
+  if (hipStreamQuery(stream[NUM_STREAMS - 1]) == hipErrorNotReady) {
+    REQUIRE(NUM_ITERS != A[NUM_STREAMS - 1][0] - 1);
+  }
   HIP_CHECK(hipDeviceSynchronize());
   REQUIRE(NUM_ITERS == A[NUM_STREAMS - 1][0] - 1);
   for (int i = 0; i < NUM_STREAMS; i++) {
