@@ -3375,6 +3375,14 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
       ++emitted_count;
       // Debug early exit: insert s_endpgm after N source instructions
       if (early_exit_after > 0 && emitted_count >= early_exit_after && !early_exit_done) {
+        // Emit all remaining branch target labels pointing to the exit, then s_endpgm.
+        // This prevents assembly errors from unresolved forward references.
+        for (size_t jj = ii + 1; jj < source_instrs.size(); jj++) {
+          auto lbl = branch_labels.find(source_instrs[jj].pc_offset);
+          if (lbl != branch_labels.end())
+            translated_asm += lbl->second + ":\n";
+        }
+        translated_asm += ".L_exit:\n";
         translated_asm += "s_endpgm ; EARLY EXIT after " + std::to_string(emitted_count) + " instrs\n";
         early_exit_done = true;
         std::cerr << "hotswap: transpile: EARLY EXIT after " << emitted_count << " source instructions\n";
