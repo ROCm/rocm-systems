@@ -344,6 +344,7 @@ find_program(hipify-perl_executable hipify-perl)
 if(NOT hipify-perl_executable)
   message(FATAL_ERROR "hipify-perl not found")
 endif()
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
 # Keep build output layout identical to the historical root-CMake build.
 set(HIPIFY_DIR "${PROJECT_BINARY_DIR}/hipify")
@@ -368,6 +369,11 @@ foreach(SRC_FILE ${SRC_FILES})
   list(APPEND HIP_SOURCES ${HIP_FILE})
 
   # Create a custom command to create hipified source code
+  if(ENABLE_SPLIT_DEVICE_COMPILE)
+    set(_lds_transform_cmd && ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/cmake/scripts/lds_pointer_transform.py ${HIP_FILE})
+  else()
+    set(_lds_transform_cmd "")
+  endif()
   if (FAULT_INJECTION)
     add_custom_command(
       OUTPUT ${HIP_FILE}
@@ -375,6 +381,7 @@ foreach(SRC_FILE ${SRC_FILES})
               && ${hipify-perl_executable} -quiet-warnings ${PROJECT_SOURCE_DIR}/${SRC_FILE} -o ${HIP_FILE}
               && ${CMAKE_COMMAND} -E env bash ${PROJECT_SOURCE_DIR}/cmake/scripts/add_unroll.sh ${HIP_FILE}
               && ${CMAKE_COMMAND} -E env bash ${PROJECT_SOURCE_DIR}/cmake/scripts/add_faults.sh ${HIP_FILE}
+              ${_lds_transform_cmd}
       MAIN_DEPENDENCY ${PROJECT_SOURCE_DIR}/${SRC_FILE}
       COMMENT "Hipifying ${SRC_FILE} -> ${HIP_FILE}"
     )
@@ -384,6 +391,7 @@ foreach(SRC_FILE ${SRC_FILES})
       COMMAND mkdir -p ${HIP_FILE_DIR}
               && ${hipify-perl_executable} -quiet-warnings ${PROJECT_SOURCE_DIR}/${SRC_FILE} -o ${HIP_FILE}
               && ${CMAKE_COMMAND} -E env bash ${PROJECT_SOURCE_DIR}/cmake/scripts/add_unroll.sh ${HIP_FILE}
+              ${_lds_transform_cmd}
       MAIN_DEPENDENCY ${PROJECT_SOURCE_DIR}/${SRC_FILE}
       COMMENT "Hipifying ${SRC_FILE} -> ${HIP_FILE}"
     )
@@ -401,11 +409,6 @@ list(APPEND HIP_SOURCES "${HIPIFY_DIR}/src/transport/net_ib_rocm.cc")
 
 # Generate device/host tables and all the collective functions that are going to be in librccl.so
 #==================================================================================================
-find_package(Python3 COMPONENTS Interpreter REQUIRED)
-if (NOT Python3_FOUND)
-  message(FATAL_ERROR "RCCL requires Python3 for generating host/device tables")
-endif()
-
 set(GEN_DIR "${HIPIFY_DIR}/gensrc")
 set(GEN_SYM_DIR "${GEN_DIR}/symmetric")
 
@@ -439,6 +442,22 @@ if (GENERATE_SYM_KERNELS)
   endif()
 endif()
 
+if(ENABLE_SPLIT_DEVICE_COMPILE)
+  # Run the LDS pointer translation on generated headers so that
+  # device function declarations match the transformed definitions.
+  file(GLOB _gen_headers "${GEN_DIR}/*.h")
+  foreach(_gh ${_gen_headers})
+    execute_process(
+      COMMAND ${Python3_EXECUTABLE}
+        ${PROJECT_SOURCE_DIR}/cmake/scripts/lds_pointer_transform.py ${_gh}
+      RESULT_VARIABLE _transform_rc
+    )
+    if(NOT _transform_rc EQUAL 0)
+      message(FATAL_ERROR "lds_pointer_transform.py failed on ${_gh}")
+    endif()
+  endforeach()
+endif()
+
 # Find the generated files in the output directory
 file(GLOB_RECURSE GENERATED_FILES "${GEN_DIR}/*")
 
@@ -446,6 +465,34 @@ file(GLOB_RECURSE GENERATED_FILES "${GEN_DIR}/*")
 foreach(file ${GENERATED_FILES})
   list(APPEND HIP_SOURCES ${file})
 endforeach()
+
+if(ENABLE_SPLIT_DEVICE_COMPILE)
+  set(DEVICE_TU_SOURCES "")
+  set(DEVICE_FUNC_ONLY_SOURCES "")
+
+  foreach(file ${GENERATED_FILES})
+    get_filename_component(_fname ${file} NAME_WE)
+    get_filename_component(_fext  ${file} EXT)
+    if(_fext STREQUAL ".cpp"
+       AND NOT _fname STREQUAL "host_table"
+       AND NOT _fname STREQUAL "device_table")
+      list(APPEND DEVICE_TU_SOURCES ${file})
+      # These TUs get -DRCCL_SPLIT_DEVICE_TU so they skip kernel dispatch code
+      list(APPEND DEVICE_FUNC_ONLY_SOURCES ${file})
+      list(REMOVE_ITEM HIP_SOURCES ${file})
+    endif()
+  endforeach()
+
+  # Move common.cu.cpp into the split pipeline as well, but do NOT add it
+  # to DEVICE_FUNC_ONLY_SOURCES -- it must NOT get -DRCCL_SPLIT_DEVICE_TU because
+  # it defines the generic kernel (ncclKernelMain) and the dispatch table.
+  set(_COMMON_CU "${HIPIFY_DIR}/src/device/common.cu.cpp")
+  list(APPEND DEVICE_TU_SOURCES ${_COMMON_CU})
+  list(REMOVE_ITEM HIP_SOURCES ${_COMMON_CU})
+
+  list(LENGTH DEVICE_TU_SOURCES _n_device_tus)
+  message(STATUS "Split device compile: ${_n_device_tus} device TUs separated from HIP_SOURCES")
+endif()
 
 # Create an initial git_version.cpp file (that will be updated with latest git version)
 #==================================================================================================
@@ -763,7 +810,11 @@ target_compile_options(rccl PRIVATE -Wall)
 target_compile_options(rccl PRIVATE -Werror=deprecated-copy-with-user-provided-copy)
 target_compile_options(rccl PRIVATE -Wno-format-nonliteral)
 target_compile_options(rccl PRIVATE -Wno-unused-function)
-target_compile_options(rccl PRIVATE -fgpu-rdc)
+if(ENABLE_SPLIT_DEVICE_COMPILE)
+  target_compile_definitions(rccl PRIVATE RCCL_LDS_POINTERS)
+else()
+  target_compile_options(rccl PRIVATE -fgpu-rdc)
+endif()
 
 if(QUIET_WARNINGS)
   target_compile_options(rccl PRIVATE -Wno-invalid-offsetof)
@@ -884,7 +935,10 @@ endif()
 if (ROCTX_ENABLE)
   target_link_libraries(rccl PRIVATE ${ROCTX_LIB})
 endif()
-target_link_libraries(rccl PRIVATE   -fgpu-rdc)             # Required when linking relocatable device code
+if(NOT ENABLE_SPLIT_DEVICE_COMPILE)
+  target_link_libraries(rccl PRIVATE -fgpu-rdc)
+  target_link_options(rccl PRIVATE --hip-link)
+endif()
 target_link_libraries(rccl PRIVATE   Threads::Threads)
 target_link_libraries(rccl INTERFACE hip::host)
 target_link_libraries(rccl PRIVATE   hip::device)
@@ -987,3 +1041,47 @@ endif()
 
 ## Track linking time
 set_property(TARGET rccl PROPERTY RULE_LAUNCH_LINK "${CMAKE_COMMAND} -E time")
+
+# ── Split device compilation pipeline ─────────────────────────────────────────
+if(ENABLE_SPLIT_DEVICE_COMPILE)
+  list(GET GPU_TARGETS 0 _split_gpu_arch)
+  message(STATUS "Split device compile: targeting ${_split_gpu_arch}")
+
+  set(_bundler_device_target "hip-amdgcn-amd-amdhsa--${_split_gpu_arch}")
+  set(_bundler_host_target "host-x86_64-unknown-linux-gnu-")
+
+  # Read properties from the rccl target so the pipeline stays in sync
+  get_target_property(_split_include_dirs rccl INCLUDE_DIRECTORIES)
+  get_target_property(_split_compile_defs rccl COMPILE_DEFINITIONS)
+  get_target_property(_split_compile_opts rccl COMPILE_OPTIONS)
+
+  if(NOT _split_include_dirs)
+    set(_split_include_dirs "")
+  endif()
+  if(NOT _split_compile_defs)
+    set(_split_compile_defs "")
+  endif()
+  if(NOT _split_compile_opts)
+    set(_split_compile_opts "")
+  endif()
+
+  include(${PROJECT_SOURCE_DIR}/cmake/SplitDeviceCompile.cmake)
+  setup_split_device_compile(
+    TARGET              rccl
+    SOURCES             ${DEVICE_TU_SOURCES}
+    FUNC_ONLY_SOURCES   ${DEVICE_FUNC_ONLY_SOURCES}
+    GPU_ARCH            ${_split_gpu_arch}
+    ROCM_PATH           ${ROCM_PATH}
+    OUTPUT_DIR          ${CMAKE_CURRENT_BINARY_DIR}
+    INCLUDE_DIRS        ${_split_include_dirs}
+    COMPILE_DEFS        ${_split_compile_defs}
+    COMPILE_OPTS        ${_split_compile_opts}
+    BUNDLER_DEVICE_TARGET ${_bundler_device_target}
+    BUNDLER_HOST_TARGET   ${_bundler_host_target}
+  )
+
+  add_dependencies(rccl rccl_device_objects)
+  add_dependencies(rccl_device_objects hipify_all)
+
+  target_link_options(rccl PRIVATE ${DEVICE_FAT_OBJECTS})
+endif()

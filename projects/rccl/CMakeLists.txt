@@ -173,13 +173,16 @@ if (BUILD_LOCAL_GPU_TARGET_ONLY)
   message(STATUS "Building only for local GPU target")
   if (COMMAND rocm_local_targets)
     rocm_local_targets(DEFAULT_GPUS)
+    message(STATUS "Detected local GPU target(s): ${DEFAULT_GPUS}")
   else()
     message(WARNING "Unable to determine local GPU targets. Falling back to default GPUs.")
   endif()
+  # Force-update the cache so re-configuring on a different machine always
+  # picks up the newly detected architecture instead of a stale cached value.
+  set(GPU_TARGETS "${DEFAULT_GPUS}" CACHE STRING "Target default GPUs if GPU_TARGETS is not defined." FORCE)
+else()
+  set(GPU_TARGETS "${DEFAULT_GPUS}" CACHE STRING "Target default GPUs if GPU_TARGETS is not defined.")
 endif()
-
-# Determine which GPU architectures to build for
-set(GPU_TARGETS "${DEFAULT_GPUS}" CACHE STRING "Target default GPUs if GPU_TARGETS is not defined.")
 
 # For ASAN builds, only one GPU target is supported to avoid clang-offload-bundler
 # v2 size limits. ASAN-instrumented device code is 2-3x larger, and even with
@@ -634,6 +637,15 @@ configure_file(src/nccl.h.in ${PROJECT_BINARY_DIR}/include/nccl.h)      # Used b
 
 ## RCCL library
 #==================================================================================================
+option(ENABLE_SPLIT_DEVICE_COMPILE
+  "Pre-compile device code per-TU via LLC for fast linking" OFF)
+
+if(ENABLE_SPLIT_DEVICE_COMPILE AND NOT IFC_ENABLED)
+  message(STATUS "ENABLE_SPLIT_DEVICE_COMPILE requires IFC; enabling it automatically")
+  set(ENABLE_IFC ON CACHE BOOL "Enable indirect function call" FORCE)
+  set(IFC_ENABLED ON)
+endif()
+
 add_subdirectory(src)
 
 ## Setup librccl.so version
@@ -644,12 +656,10 @@ set(_rccl_cxxflags "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_${CMAKE_BUILD_TYPE}}")
 separate_arguments(CXXFLAGS NATIVE_COMMAND "${_rccl_cxxflags}")
 
 if(NOT BUILD_SHARED_LIBS)
-  # To create a static lib with `-fgpu-rdc`, you need `--emit-static-lib` and `--hip-link`.
-  # You also need to invoke amdclang++ again to trigger GPU code generation.
+  # Without -fgpu-rdc, device code is fully compiled per-TU.
+  # --emit-static-lib is still needed to produce a static library.
   set(static_link_flags
     ${CXXFLAGS}
-    --hip-link
-    -fgpu-rdc
     --emit-static-lib
   )
 
