@@ -697,9 +697,9 @@ __device__ void GDAContext::alltoallv_copy(rocshmem_team_t team,
 
 template <typename T>
 __device__ void GDAContext::alltoallv_get(rocshmem_team_t team,
-                                          T *dest, const size_t dest_nelems[],
+                                          T *dest, [[maybe_unused]] const size_t dest_nelems[],
                                           const size_t dest_displs[],
-                                          T *source, const size_t source_nelems[],
+                                          T *source, [[maybe_unused]] const size_t source_nelems[],
                                           const size_t source_displs[]) {
   GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
   int pe_size       = team_obj->num_pes;

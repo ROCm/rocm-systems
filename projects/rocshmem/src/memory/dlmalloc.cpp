@@ -27,9 +27,14 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 /* BEGIN AMD ROCSHMEM CHANGES */
 // To improve code coverage score, code for the following cases has been
 // stripped from imported dlmalloc.c:
-//   !ONLY_MSPACES; MALLOC_INSPECT_ALL; USE_LOCKS; DEBUG; 
+//   !ONLY_MSPACES; MALLOC_INSPECT_ALL; USE_LOCKS; DEBUG;
 #include "dlmalloc.hpp"
 #include <cstdio>
+
+// Suppress GNU null pointer arithmetic warnings for dlmalloc's intentional
+// use of chunk2mem(0) for compile-time offset calculations
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wgnu-null-pointer-arithmetic"
 
 namespace rocshmem {
 
@@ -3942,16 +3947,19 @@ size_t DLMalloc::mspace_max_footprint(mspace msp) {
   return ::rocshmem::mspace_max_footprint(msp);
 }
 size_t DLMalloc::mspace_used(mspace msp) {
-  struct mallinfo mi{0};
+  struct mallinfo mi{};
   mi = mspace_mallinfo(msp);
   return mi.uordblks;
 }
 size_t DLMalloc::mspace_avail(mspace msp) {
-  struct mallinfo mi{0};
+  struct mallinfo mi{};
   mi = mspace_mallinfo(msp);
   return mi.fordblks;
 }
 #endif // MSPACES
 #endif // ROCSHMEM_ENCAPSULATE
 } // namespace rocshmem
+
+#pragma clang diagnostic pop
+
 /* END AMD ROCSHMEM CHANGES */

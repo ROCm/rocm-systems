@@ -179,9 +179,9 @@ class LLMoEData {
       expert_indices[j] = j;
     }
 
-    for (size_t i = 0; i < num_tokens; i++) {
+    for (size_t i = 0; i < static_cast<size_t>(num_tokens); i++) {
       std::shuffle(expert_indices.begin(), expert_indices.end(), gen);
-      for (int k = 0; k < num_topk; k++) {
+      for (size_t k = 0; k < static_cast<size_t>(num_topk); k++) {
         h_topk_idx[i * num_topk + k] = expert_indices[k];
         expert_token_count[expert_indices[k]]++;
       }
@@ -195,8 +195,8 @@ class LLMoEData {
   void generate_topk_deterministic() {
     size_t topk_idx_size = num_tokens * num_topk;
     std::vector<int64_t> h_topk_idx(topk_idx_size);
-    for (size_t i = 0; i < num_tokens; i++) {
-      for (int k = 0; k < num_topk; k++) {
+    for (size_t i = 0; i < static_cast<size_t>(num_tokens); i++) {
+      for (size_t k = 0; k < static_cast<size_t>(num_topk); k++) {
         h_topk_idx[i * num_topk + k] = (i * num_topk + k) % num_experts;
         expert_token_count[h_topk_idx[i * num_topk + k]]++;
       }

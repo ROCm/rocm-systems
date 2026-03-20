@@ -225,7 +225,7 @@ static void setFilesLimit() {
   init_constant_memory();
 }
 
-[[maybe_unused]] __host__ static void inline library_init_subcomm(TcpBootstrap *bootstrap, int nranks, int rank) {
+[[maybe_unused]] __host__ static void inline library_init_subcomm([[maybe_unused]] TcpBootstrap *bootstrap, int nranks, int rank) {
   int initialized;
   int world_size = -1;
 

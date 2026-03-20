@@ -128,7 +128,7 @@ __device__ void GDAContext::fence() { //TODO: optimize
   __threadfence_system();
 }
 
-__device__ void GDAContext::fence(int pe) {
+__device__ void GDAContext::fence([[maybe_unused]] int pe) {
   fence(); //TODO: optimize
 }
 

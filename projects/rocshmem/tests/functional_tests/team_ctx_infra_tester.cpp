@@ -144,7 +144,7 @@ TeamCtxInfraTester::TeamCtxInfraTester(TesterArguments args) : Tester(args) {
 
 TeamCtxInfraTester::~TeamCtxInfraTester() {}
 
-void TeamCtxInfraTester::resetBuffers(size_t size) {}
+void TeamCtxInfraTester::resetBuffers([[maybe_unused]] size_t size) {}
 
 void TeamCtxInfraTester::preLaunchKernel() {
   int n_pes = rocshmem_team_n_pes(_parentTeam);
@@ -240,8 +240,8 @@ void TeamCtxInfraTester::preLaunchKernel() {
   }
 }
 
-void TeamCtxInfraTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
-                                      size_t size) {
+void TeamCtxInfraTester::launchKernel(dim3 gridSize, dim3 blockSize, [[maybe_unused]] int loop,
+                                      [[maybe_unused]] size_t size) {
   size_t shared_bytes = 0;
 
   /* Copy array of teams to device */
@@ -275,4 +275,4 @@ void TeamCtxInfraTester::postLaunchKernel() {
   }
 }
 
-void TeamCtxInfraTester::verifyResults(size_t size) {}
+void TeamCtxInfraTester::verifyResults([[maybe_unused]] size_t size) {}

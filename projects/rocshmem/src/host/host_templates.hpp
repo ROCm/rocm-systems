@@ -622,10 +622,10 @@ __host__ size_t HostInterface::wait_until_some(T* ivars, size_t nelems,
 }
 
 template <typename T>
-__host__ void HostInterface::wait_until_all_vector(T* ivars, size_t nelems,
-                                                   const int *status,
-                                                   int cmp, T* vals,
-                                                   WindowInfo* window_info) {
+__host__ void HostInterface::wait_until_all_vector([[maybe_unused]] T* ivars, [[maybe_unused]] size_t nelems,
+                                                   [[maybe_unused]] const int *status,
+                                                   [[maybe_unused]] int cmp, [[maybe_unused]] T* vals,
+                                                   [[maybe_unused]] WindowInfo* window_info) {
   DPRINTF("Function: host_wait_until_all_vector\n");
 
   // zero nelems error condition
@@ -650,10 +650,10 @@ __host__ void HostInterface::wait_until_all_vector(T* ivars, size_t nelems,
 }
 
 template <typename T>
-__host__ size_t HostInterface::wait_until_any_vector(T* ivars, size_t nelems,
-                                                     const int *status,
-                                                     int cmp, T* vals,
-                                                     WindowInfo* window_info) {
+__host__ size_t HostInterface::wait_until_any_vector([[maybe_unused]] T* ivars, [[maybe_unused]] size_t nelems,
+                                                     [[maybe_unused]] const int *status,
+                                                     [[maybe_unused]] int cmp, [[maybe_unused]] T* vals,
+                                                     [[maybe_unused]] WindowInfo* window_info) {
   DPRINTF("Function: host_wait_until_any_vector\n");
 
   // zero nelems error condition
@@ -683,11 +683,11 @@ __host__ size_t HostInterface::wait_until_any_vector(T* ivars, size_t nelems,
 }
 
 template <typename T>
-__host__ size_t HostInterface::wait_until_some_vector(T* ivars, size_t nelems,
-                                                    size_t* indices,
-                                                    const int *status,
-                                                    int cmp, T* vals,
-                                                    WindowInfo* window_info) {
+__host__ size_t HostInterface::wait_until_some_vector([[maybe_unused]] T* ivars, [[maybe_unused]] size_t nelems,
+                                                    [[maybe_unused]] size_t* indices,
+                                                    [[maybe_unused]] const int *status,
+                                                    [[maybe_unused]] int cmp, [[maybe_unused]] T* vals,
+                                                    [[maybe_unused]] WindowInfo* window_info) {
   DPRINTF("Function: host_wait_until_some_vector\n");
 
   // zero nelems error condition

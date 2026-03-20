@@ -83,7 +83,7 @@ static void init_sendbuf (int *source, int nelem, int my_pe)
     }
 }
 
-static bool check_recvbuf(int *dest, int nelem, int my_pe, int npes)
+static bool check_recvbuf(int *dest, int nelem, [[maybe_unused]] int my_pe, int npes)
 {
     bool res=true;
     int expected = npes * (npes -1) / 2;

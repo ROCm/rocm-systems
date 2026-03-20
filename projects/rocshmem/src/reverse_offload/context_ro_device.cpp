@@ -148,7 +148,7 @@ __device__ void ROContext::fence() {
                       true, get_status_flag(), is_default_ctx);
 }
 
-__device__ void ROContext::fence(int pe) {
+__device__ void ROContext::fence([[maybe_unused]] int pe) {
   // TODO(khamidou): need to check if per pe has any special handling
   build_queue_element(RO_NET_FENCE, nullptr, nullptr, 0, 0, 0, 0, 0, nullptr,
                       nullptr, NULL, ro_net_win_id, block_handle,
@@ -161,7 +161,7 @@ __device__ void ROContext::quiet() {
                       true, get_status_flag(), is_default_ctx);
 }
 
-__device__ void ROContext::pe_quiet(size_t pe) {
+__device__ void ROContext::pe_quiet([[maybe_unused]] size_t pe) {
   // TODO: Optimize
   quiet();
 }
@@ -669,7 +669,7 @@ __device__ uint64_t next_write_slot(BlockHandle *handle) {
 
 __device__ void build_queue_element(
     ro_net_cmds type, void *dst, void *src, size_t size, int pe,
-    int logPE_stride, int PE_size, int PE_root, void *pWrk, long *pSync,
+    [[maybe_unused]] int logPE_stride, [[maybe_unused]] int PE_size, int PE_root, void *pWrk, [[maybe_unused]] long *pSync,
     intptr_t team_comm, int ro_net_win_id, BlockHandle *handle,
     bool blocking, volatile char *status, bool default_ctx, ROCSHMEM_OP op,
     ro_net_types datatype) {

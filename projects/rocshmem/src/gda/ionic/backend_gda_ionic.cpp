@@ -46,7 +46,7 @@ void GDABackend::ionic_create_cqs(int ncqes) {
     ionic_cq_attr.flags = IONIC_CQ_INIT_ATTR_CCQE;
   }
 
-  for (int i = 0; i < qps.size(); i++) {
+  for (size_t i = 0; i < qps.size(); i++) {
     struct ibv_cq_ex *cq_ex = nullptr;
 
     cq_attr.parent_domain = pd_uxdma[i & 1];

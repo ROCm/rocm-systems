@@ -57,7 +57,7 @@ __device__ bool thread_passing(int num_bins, uint32_t *bin_threads,
 __global__ void RandomAccessTest(int loop, int skip, long long int *start_time,
                                  long long int *end_time, int *s_buf,
                                  int *r_buf, size_t size, OpType type,
-                                 int coal_coef, int num_bins, int num_waves,
+                                 int coal_coef, int num_bins, [[maybe_unused]] int num_waves,
                                  uint32_t *threads_bins, uint32_t *off_bins,
                                  uint32_t *PE_bins, ShmemContextType ctx_type) {
   __shared__ rocshmem_ctx_t ctx;
@@ -165,7 +165,7 @@ RandomAccessTester::~RandomAccessTester() {
   CHECK_HIP(hipFree(_PE_bins));
 }
 
-void RandomAccessTester::resetBuffers(size_t size) {
+void RandomAccessTester::resetBuffers([[maybe_unused]] size_t size) {
   for (size_t i = 0; i < max_msg_size / sizeof(int) * args.wg_size * space;
        i++) {
     s_buf[i] = 1;
