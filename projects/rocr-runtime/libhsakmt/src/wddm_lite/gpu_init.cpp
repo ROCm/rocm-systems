@@ -112,6 +112,7 @@
 #define regMMVM_L2_PROTECTION_FAULT_DEFAULT_ADDR_LO32   0x04F4
 #define regMMVM_L2_PROTECTION_FAULT_DEFAULT_ADDR_HI32   0x04F5
 #define regMMVM_L2_PROTECTION_FAULT_STATUS_LO32         0x04F0
+#define regMMVM_L2_PROTECTION_FAULT_CNTL                0x04EC
 #define regMMVM_L2_PROTECTION_FAULT_CNTL2               0x04ED
 
 /* Identity aperture */
@@ -3409,6 +3410,30 @@ static void mmhub_init_system_aperture(struct WddmLiteDevice *dev)
                (ULONG)(gmc->dummy_page_bus_addr >> 12));
     mmhub_wreg(dev, regMMVM_L2_PROTECTION_FAULT_DEFAULT_ADDR_HI32,
                (ULONG)(gmc->dummy_page_bus_addr >> 44));
+
+    /* MMVM_L2_PROTECTION_FAULT_CNTL: enable all protection fault types.
+     * Linux mmhub_v4_1_0_set_fault_enable_default(true) sets all 11 fault
+     * enable bits. Without this, the L2 cache may NACK DMA reads silently,
+     * causing TransferTableDram2Smu to fail with 0xFF. */
+    {
+        ULONG cntl = mmhub_rreg(dev, regMMVM_L2_PROTECTION_FAULT_CNTL);
+        pr_info("mmhub: PROT_FAULT_CNTL before = 0x%08x\n", cntl);
+        /* Enable all protection fault types (bits 0-10):
+         * bit 0: RANGE_PROTECTION_FAULT_ENABLE_DEFAULT
+         * bit 1: PDE0_PROTECTION_FAULT_ENABLE_DEFAULT
+         * bit 2: PDE1_PROTECTION_FAULT_ENABLE_DEFAULT
+         * bit 3: PDE2_PROTECTION_FAULT_ENABLE_DEFAULT
+         * bit 4: TRANSLATE_FURTHER_PROTECTION_FAULT_ENABLE_DEFAULT
+         * bit 5: NACK_PROTECTION_FAULT_ENABLE_DEFAULT
+         * bit 6: DUMMY_PAGE_PROTECTION_FAULT_ENABLE_DEFAULT
+         * bit 7: VALID_PROTECTION_FAULT_ENABLE_DEFAULT
+         * bit 8: READ_PROTECTION_FAULT_ENABLE_DEFAULT
+         * bit 9: WRITE_PROTECTION_FAULT_ENABLE_DEFAULT
+         * bit 10: EXECUTE_PROTECTION_FAULT_ENABLE_DEFAULT */
+        cntl |= 0x7FF;  /* bits 0-10 all set */
+        mmhub_wreg(dev, regMMVM_L2_PROTECTION_FAULT_CNTL, cntl);
+        pr_info("mmhub: PROT_FAULT_CNTL after  = 0x%08x\n", cntl);
+    }
 
     /* MMVM_L2_PROTECTION_FAULT_CNTL2: enable PTE read retry
      * bit 18: active_page_migration_pte_read_retry=1 (tinygrad) */
