@@ -3384,6 +3384,7 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
             translated_asm += lbl->second + ":\n";
         }
         translated_asm += ".L_exit:\n";
+        translated_asm += "s_waitcnt vmcnt(0) lgkmcnt(0) expcnt(0)\n";
         translated_asm += "s_endpgm ; EARLY EXIT after " + std::to_string(emitted_count) + " instrs\n";
         early_exit_done = true;
         std::cerr << "hotswap: transpile: EARLY EXIT after " << emitted_count << " source instructions\n";
