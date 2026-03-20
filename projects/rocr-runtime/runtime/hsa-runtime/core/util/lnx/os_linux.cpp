@@ -965,7 +965,7 @@ static inline int IPCSockToFd(IPCSocket sock) {
 }
 
 static inline IPCSocket FdToIPCSock(int fd) {
-  return reinterpret_cast<IPCSocket>(fd);
+  return static_cast<IPCSocket>(fd);
 }
 
 IPCSocket CreateIPCServer(const char* name, int backlog) {
