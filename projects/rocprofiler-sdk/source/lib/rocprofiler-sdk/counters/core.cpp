@@ -168,13 +168,13 @@ start_context(const context::context* ctx)
             if(cb->queue_id != rocprofiler::hsa::ClientID{-1}) continue;
             cb->queue_id = controller->add_callback(
                 std::nullopt,
-                [=](const hsa::Queue&                                               q,
-                    const hsa::rocprofiler_packet&                                  kern_pkt,
-                    rocprofiler_kernel_id_t                                         kernel_id,
-                    rocprofiler_dispatch_id_t                                       dispatch_id,
-                    rocprofiler_user_data_t*                                        user_data,
-                    const hsa::Queue::queue_info_session_t::external_corr_id_map_t& extern_corr_ids,
-                    const context::correlation_id* correlation_id) {
+                [=](const hsa::Queue&                                        q,
+                    const hsa::rocprofiler_packet&                           kern_pkt,
+                    rocprofiler_kernel_id_t                                  kernel_id,
+                    rocprofiler_dispatch_id_t                                dispatch_id,
+                    rocprofiler_user_data_t*                                 user_data,
+                    const hsa::queue_info_session_t::external_corr_id_map_t& extern_corr_ids,
+                    const context::correlation_id*                           correlation_id) {
                     return queue_cb(ctx,
                                     cb,
                                     q,
@@ -188,10 +188,11 @@ start_context(const context::context* ctx)
                 // Completion CB
                 [=](const hsa::Queue& /* q */,
                     hsa::rocprofiler_packet /* kern_pkt */,
-                    std::shared_ptr<hsa::Queue::queue_info_session_t>& session,
-                    inst_pkt_t&                                        aql,
-                    kernel_dispatch::profiling_time                    dispatch_time) {
-                    completed_cb(ctx, cb, session, aql, dispatch_time);
+                    std::shared_ptr<hsa::queue_info_session_t>& session,
+                    hsa::packet_data_t&                         packet,
+                    inst_pkt_t&                                 aql,
+                    kernel_dispatch::profiling_time             dispatch_time) {
+                    completed_cb(ctx, cb, session, packet, aql, dispatch_time);
                 });
         }
     }

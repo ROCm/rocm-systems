@@ -125,7 +125,7 @@ amd_intercept_marker_handler_callback(const struct amd_aql_intercept_marker_s* p
 void
 kernel_completion_cb(const rocprofiler_agent_t* rocp_agent,
                      rocprofiler::hsa::rocprofiler_packet& /*kernel_pkt*/,
-                     const rocprofiler::hsa::Queue::queue_info_session_t& session)
+                     const rocprofiler::hsa::queue_info_session_t& session)
 {
     // No internal correlation IDs, meaning there is no need to call CID manager.
     if(!session.correlation_id) return;
@@ -349,14 +349,15 @@ pc_sampling_service_finish_configuration(context::pc_sampling_service* service)
            rocprofiler_kernel_id_t /*kernel_id*/,
            rocprofiler_dispatch_id_t /*dispatch_id*/,
            rocprofiler_user_data_t*,
-           const rocprofiler::hsa::Queue::queue_info_session_t::external_corr_id_map_t&,
+           const rocprofiler::hsa::queue_info_session_t::external_corr_id_map_t&,
            const context::correlation_id*) {
             return rocprofiler::hsa::Queue::pkt_and_serialize_t{};
         },
         // Completion CB
-        [](const rocprofiler::hsa::Queue&                                  q,
-           rocprofiler::hsa::rocprofiler_packet                            kern_pkt,
-           std::shared_ptr<rocprofiler::hsa::Queue::queue_info_session_t>& session,
+        [](const rocprofiler::hsa::Queue&                           q,
+           rocprofiler::hsa::rocprofiler_packet                     kern_pkt,
+           std::shared_ptr<rocprofiler::hsa::queue_info_session_t>& session,
+           rocprofiler::hsa::packet_data_t& /*packet*/,
            rocprofiler::hsa::inst_pkt_t&,
            kernel_dispatch::profiling_time) {
             kernel_completion_cb(q.get_agent().get_rocp_agent(), kern_pkt, *session);

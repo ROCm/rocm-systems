@@ -432,7 +432,7 @@ TEST(core, check_callbacks)
             expected.queue_id       = qid;
             expected.agent_id       = fq.get_agent().get_rocp_agent()->id;
 
-            hsa::Queue::queue_info_session_t::external_corr_id_map_t extern_ids = {};
+            hsa::queue_info_session_t::external_corr_id_map_t extern_ids = {};
 
             auto user_data = rocprofiler_user_data_t{.value = corr_id.internal};
             auto ret_pkt   = counters::queue_cb(&ctx,
@@ -463,15 +463,16 @@ TEST(core, check_callbacks)
                              "Could not create buffer");
             cb_info->buffer = opt_buff_id;
 
-            auto _sess           = hsa::Queue::queue_info_session_t{.queue = fq};
+            auto _sess           = hsa::queue_info_session_t{.queue = fq};
             _sess.correlation_id = &corr_id;
 
-            auto sess = std::make_shared<hsa::Queue::queue_info_session_t>(std::move(_sess));
+            auto  sess        = std::make_shared<hsa::queue_info_session_t>(std::move(_sess));
+            auto& packet_data = sess->packet_data.emplace_back();
 
             counters::inst_pkt_t pkts;
             pkts.emplace_back(
                 std::make_pair(std::move(ret_pkt.pkt), static_cast<counters::ClientID>(0)));
-            completed_cb(&ctx, cb_info, sess, pkts, kernel_dispatch::profiling_time{});
+            completed_cb(&ctx, cb_info, sess, packet_data, pkts, kernel_dispatch::profiling_time{});
             rocprofiler_flush_buffer(opt_buff_id);
             rocprofiler_destroy_buffer(opt_buff_id);
         }
@@ -774,7 +775,7 @@ rocprofiler-sdk:
       description: cycles
       properties: []
       definitions:
-        - architectures:  
+        - architectures:
           - gfx950
           - gfx942
           - gfx10
@@ -822,12 +823,12 @@ TEST(core, check_load_counter_def)
     const std::string test_yaml = R"(
 rocprofiler-sdk:
   counters-schema-version: 1
-  counters:  
+  counters:
     - name: GRBM_GUI_ACTIVE
       description: The GUI is Active
       properties: []
       definitions:
-        - architectures:  
+        - architectures:
           - gfx950
           - gfx942
           - gfx941
@@ -859,7 +860,7 @@ rocprofiler-sdk:
       description: cycles
       properties: []
       definitions:
-        - architectures:  
+        - architectures:
           - gfx950
           - gfx942
           - gfx10

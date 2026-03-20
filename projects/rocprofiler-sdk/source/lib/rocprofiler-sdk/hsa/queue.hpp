@@ -69,10 +69,9 @@ enum class queue_state
 class Queue
 {
 public:
-    using context_t            = context::context;
-    using context_array_t      = common::container::small_vector<const context_t*>;
-    using callback_t           = void (*)(hsa_status_t status, hsa_queue_t* source, void* data);
-    using queue_info_session_t = queue_info_session;
+    using context_t       = context::context;
+    using context_array_t = common::container::small_vector<const context_t*>;
+    using callback_t      = void (*)(hsa_status_t status, hsa_queue_t* source, void* data);
 
     struct pkt_and_serialize_t
     {
@@ -80,15 +79,7 @@ public:
         bool                       request_serialize{false};
     };
 
-    // pair of hsa signal and user data pointer for async handler
-    struct signal_impl
-    {
-        bool         handler_is_set = false;
-        hsa_signal_t value          = {.handle = 0};
-        void*        data           = nullptr;
-    };
-
-    using pooled_signal_t = common::container::pool_object<signal_impl>;
+    using pooled_signal_t = common::container::pool_object<signal_t>;
 
     // Function prototype used to notify consumers that a kernel has been enqueued.
     // Pair first: An AQL packet can be returned that will be injected into the queue.
@@ -104,7 +95,8 @@ public:
     // Signals the completion of the kernel packet.
     using completed_cb_t = std::function<void(const Queue&,
                                               const rocprofiler_packet&,
-                                              std::shared_ptr<Queue::queue_info_session_t>&,
+                                              std::shared_ptr<queue_info_session_t>&,
+                                              packet_data_t&,
                                               inst_pkt_t&,
                                               kernel_dispatch::profiling_time)>;
     using callback_map_t = std::unordered_map<ClientID, std::pair<queue_cb_t, completed_cb_t>>;

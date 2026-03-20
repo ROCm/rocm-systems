@@ -99,12 +99,13 @@ struct pool
 
     void report_reuse()
     {
-        ROCP_WARNING << fmt::format("Pool of type {}: Total pool size: {}. Reused objects: {}. Released objects: {}. New batches: {}.",
-                           cxx_demangle(typeid(Tp).name()),
-                           m_pool.size(),
-                           m_reused.load(),
-                           m_released.load(),
-                           m_new_batch.load());
+        ROCP_WARNING << fmt::format("Pool of type {}: Total pool size: {}. Reused objects: {}. "
+                                    "Released objects: {}. New batches: {}.",
+                                    cxx_demangle(typeid(Tp).name()),
+                                    m_pool.size(),
+                                    m_reused.load(),
+                                    m_released.load(),
+                                    m_new_batch.load());
     }
 
 private:
