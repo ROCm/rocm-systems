@@ -24,7 +24,7 @@
 
 #include "d3dukmdt.h"
 
-#if !defined(__MINGW32__)
+#if defined(__linux__)
 #define NTSTATUS                int32_t
 
 /*
@@ -75,7 +75,7 @@ typedef enum _DEVICE_POWER_STATE {
     PowerDeviceMaximum
 } DEVICE_POWER_STATE, *PDEVICE_POWER_STATE;
 
-#endif // !defined(__MINGW32__)
+#endif // __linux__
 
 #pragma region Desktop Family
 #if WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_DESKTOP)
