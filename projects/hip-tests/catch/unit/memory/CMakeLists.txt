@@ -78,11 +78,11 @@ set(TEST_SRC
     hipMemsetD2D32Async.cc
     hipMemcpy3DPeer.cc
     hipMemcpy3DPeerAsync.cc
+    hipMemPoolExportToShareableHandle.cc
     )
 
 if(UNIX)
   set(TEST_SRC ${TEST_SRC} hipMemPoolExportPointer.cc
-  hipMemPoolExportToShareableHandle.cc
   hipMemPoolImportFromShareableHandle.cc
   hipMemPoolImportPointer.cc)
 endif()
@@ -123,6 +123,8 @@ if(UNIX)
     find_library(NUMA NAMES numa REQUIRED)
   endif()
   target_link_libraries(MemoryTest1 ${NUMA})
+  # link rt for shm_open/shm_unlink used by cross-platform IPC helpers
+  target_link_libraries(MemoryTest1 rt)
 endif()
 
 if(HIP_PLATFORM MATCHES "amd" AND UNIX)
