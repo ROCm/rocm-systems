@@ -110,6 +110,13 @@ configure_file(
   ${CMAKE_BINARY_DIR}/opencl/packages/opencl/${OPENCL_AMD_ICD_FILE}
   COPYONLY
 )
+# support legacy rocm-ci
+install(
+  FILES ${CMAKE_BINARY_DIR}/opencl/packages/opencl/${OPENCL_AMD_ICD_FILE}
+  DESTINATION /${CMAKE_INSTALL_SYSCONFDIR}/OpenCL/vendors
+  COMPONENT binary
+  EXCLUDE_FROM_ALL
+)
 
 configure_file(
   packaging/rocm-opencl.conf
@@ -117,6 +124,13 @@ configure_file(
   COPYONLY
 )
 
+# support legacy rocm-ci
+install(
+  FILES ${CMAKE_BINARY_DIR}/opencl/packages/opencl/10-rocm-opencl.conf
+  DESTINATION /${CMAKE_INSTALL_SYSCONFDIR}/ld.so.conf.d
+  COMPONENT binary
+  EXCLUDE_FROM_ALL
+)
 
 #Package: rocm-opencl,rocm-opencl-dev/devel,rocm-ocl-icd
 

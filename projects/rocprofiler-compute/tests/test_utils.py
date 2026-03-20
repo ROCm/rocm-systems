@@ -159,7 +159,7 @@ def setup_workload_dir(input_dir, suffix="_tmp", clean_existing=True, param_id=N
     based on the name of the calling test function. For parametrized tests,
     pass param_id to ensure unique directory names and avoid NFS conflicts.
 
-    Setup is a NOOP when tests run serially.
+    Creates a copy to avoid modifying source workload data.
 
     Args:
         input_dir (str): Source directory to copy from.
@@ -171,9 +171,6 @@ def setup_workload_dir(input_dir, suffix="_tmp", clean_existing=True, param_id=N
             When provided, appended to the directory name to ensure uniqueness.
             Defaults to None.
     """
-
-    if "PYTEST_XDIST_WORKER_COUNT" not in os.environ:
-        return input_dir
 
     func_name = inspect.stack()[1].function
 
@@ -261,9 +258,11 @@ def gpu_soc():
     rocminfo = rocminfo.split("\n")
     soc_regex = re.compile(r"^\s*Name\s*:\s+ ([a-zA-Z0-9]+)\s*$", re.MULTILINE)
     devices = list(filter(soc_regex.match, rocminfo))
+    if not devices:
+        return None
     gpu_arch = devices[0].split()[1]
 
-    if not gpu_arch in SUPPORTED_ARCHS.keys():
+    if gpu_arch not in SUPPORTED_ARCHS.keys():
         return None
 
     gpu_model = list(SUPPORTED_ARCHS[gpu_arch].keys())[0].upper()

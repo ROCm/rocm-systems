@@ -1752,7 +1752,7 @@ def gen_sysinfo(
     df["workload_name"] = workload_name
 
     blocks = ["SQ", "LDS", "SQC", "TA", "TD", "TCP", "TCC", "SPI", "CPC", "CPF"]
-    if hasattr(soc, "roofline_obj") and (not skip_roof):
+    if not skip_roof:
         blocks.append("roofline")
     df["ip_blocks"] = "|".join(blocks)
 
