@@ -13,7 +13,6 @@ This document outlines coding conventions and best practices for Python developm
 - [Avoiding Deep Nesting](#avoiding-deep-nesting)
 - [Code Organization](#code-organization)
 - [Key Principles Summary](#key-principles-summary)
-- [AI Rules (Authoritative for AI Tools)](#ai-rules-authoritative-for-ai-tools)
 
 ## Function Length
 
@@ -643,54 +642,3 @@ def _other_helper():
 | **Shallow nesting** | Use guard clauses and early returns to keep nesting to 2-3 levels |
 | **Meaningful extraction** | Extract helpers when they improve clarity, reusability, or testability |
 | **Appropriate naming** | Prefer descriptive names; readability matters more than brevity |
-
-## AI Rules (Authoritative for AI Tools)
-
-> These rules are the authoritative source for AI coding assistants when generating or modifying Python code in this project. Follow them strictly and without exception.
-
-### Functions
-
-- Every function must do exactly ONE thing. If "and" appears in its description, split it.
-- Do not write inline logic when it can be named and extracted. Always prefer a named helper over an anonymous block of logic, even if used only once.
-- Do not reimplement logic that already exists in a helper function — find it and call it.
-- Do not produce nested functions unless the inner function is genuinely private to the outer scope and not reusable.
-- Never mix I/O with computation in the same function. Separate them.
-
-### Naming
-
-- Use descriptive names. Never shorten a name for brevity.
-- The smaller the scope of a function, the more specific its name must be — a private helper used once should leave no ambiguity about what it does.
-- The larger the scope of a variable, the more specific its name must be — module-level, class attributes, and function parameters must be unambiguous.
-- Do not use single-letter names, abbreviations, or vague names like `data`, `info`, `result`, `tmp`, `val` except within a very tight, obvious loop.
-
-### Helper function extraction
-
-- Extract a helper when: logic is repeated, an expression is complex enough to benefit from a name, or a block mixes abstraction levels.
-- Prefer combining existing helpers in new ways over modifying them — fewer changes to existing functions means fewer regressions (open-closed principle).
-- Do NOT extract a helper when: the function name would add no information over reading the code directly, or the operation is a single standard library call.
-
-### Nesting
-
-- Maximum 2 levels of nesting preferred; 3 is the hard limit.
-- Use guard clauses (early returns/continues) to eliminate nesting rather than adding `else` branches.
-- Invert conditions when possible — prefer `if not condition: return` over wrapping the entire function body in `if condition: { ... }`.
-- If reaching the nesting limit, extract the inner block into a named function.
-
-### Abstraction levels
-
-- Every statement in a function must operate at the same abstraction level.
-- High-level orchestration functions call named helpers — they do not contain raw file I/O, string manipulation, or byte operations inline.
-- If adding a low-level operation to a high-level function, extract it into a helper first.
-
-### Code organization
-
-- Module structure order: docstring → imports → constants → public functions → private helpers → classes.
-- Public functions appear before private helpers in every file.
-- Imports are grouped (stdlib, then third-party, then local) and sorted within each group.
-- Use `is None` / `is not None` — never `== None` or `!= None`.
-
-### What NOT to generate
-
-- Do not generate wrapper functions whose body is a single, already-readable expression.
-- Do not generate functions whose name repeats what the code obviously does (`def get_len(x): return len(x)`).
-- Do not duplicate logic that already exists elsewhere in the codebase — search first, reuse second, write last.
