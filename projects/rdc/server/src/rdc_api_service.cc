@@ -286,9 +286,8 @@ RdcAPIServiceImpl::~RdcAPIServiceImpl() {
     return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty contents");
   }
 
-  rdc_status_t result =
-      rdc_group_field_add_field(rdc_handle_, request->field_group_id(),
-                                static_cast<rdc_field_t>(request->field_id()));
+  rdc_status_t result = rdc_group_field_add_field(rdc_handle_, request->field_group_id(),
+                                                  static_cast<rdc_field_t>(request->field_id()));
   reply->set_status(result);
 
   return ::grpc::Status::OK;

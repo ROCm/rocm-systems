@@ -674,6 +674,9 @@ class GpuAgent : public GpuAgentInt {
   // @brief Pool of shared queues owned by this agent
   rocr::core::CountedQueuePoolManager queue_pool_;
 
+  // @brief /// Cached derived CUID for this GPU agent (16 bytes, zeroed if unavailable).
+  uint8_t derived_cuid_[16] = {};
+
   void* trap_code_buf_;
 
   size_t trap_code_buf_size_;
@@ -717,6 +720,10 @@ class GpuAgent : public GpuAgentInt {
   // @brief Initialize scratch handler thresholds
   void InitAsyncScratchThresholds();
 
+  // @brief Initialize Secondary CUID for GPU device that 
+  // this agent is running on.
+  void InitDerivedCuid() override;
+
   // @brief Register signal for notification when scratch may become available.
   // @p signal is notified by OR'ing with @p value.
   bool AddScratchNotifier(hsa_signal_t signal, hsa_signal_value_t value) {
@@ -738,6 +745,24 @@ class GpuAgent : public GpuAgentInt {
   hsa_status_t DmaCopyBroadcast(
       const hsa_amd_memory_copy_op_t& op,
       std::vector<core::Signal*>& dep_signals);
+
+  // Multi-linear copy: LINEAR op with num_dsts > 0, independent copies
+  // (different src/dst/size per entry) sharing a single completion signal.
+  // Uses prologue/body/epilogue fan-out across available SDMA engines.
+  hsa_status_t DmaCopyMulti(
+      const hsa_amd_memory_copy_op_t& op,
+      std::vector<core::Signal*>& dep_signals);
+
+  // Common fan-out implementation shared by DmaCopyBroadcast and DmaCopyMulti.
+  // Submits prologue, per-entry copy bodies, and epilogue with one signal.
+  hsa_status_t DmaCopyFanOut(
+      core::Signal& out_signal,
+      std::vector<core::Signal*>& dep_signals,
+      uint16_t num_entries,
+      const void* const* src_list,
+      void* const* dst_list,
+      const hsa_agent_t* dst_agent_list,
+      const size_t* size_list);
 
   // Bind index of peer device that is connected via xGMI links
   lazy_ptr<core::Blit>& GetXgmiBlit(const core::Agent& peer_agent);

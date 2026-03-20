@@ -49,7 +49,7 @@
 
 class TestPowerCapReadWrite : public TestBase {
  public:
-    TestPowerCapReadWrite();
+  TestPowerCapReadWrite();
 
   // @Brief: Destructor for test case of TestPowerCapReadWrite
   virtual ~TestPowerCapReadWrite();

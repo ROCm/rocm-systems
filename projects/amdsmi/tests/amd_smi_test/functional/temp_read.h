@@ -27,7 +27,7 @@
 
 class TestTempRead : public TestBase {
  public:
-    TestTempRead();
+  TestTempRead();
 
   // @Brief: Destructor for test case of TestTempRead
   virtual ~TestTempRead();

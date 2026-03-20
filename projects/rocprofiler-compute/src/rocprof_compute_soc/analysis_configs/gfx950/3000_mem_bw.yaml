@@ -160,49 +160,49 @@ Panel Config:
       metric:
         # SQ stalls (upstream)
         Normalized L1 Cache - VMEM stalled by L1 Cache:
-          value: SUM((SQ_VMEM_TA_CMD_FIFO_FULL * 100)) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)
+          value: SUM((SQ_VMEM_TA_CMD_FIFO_FULL * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
           unit: Percent
         # TA stalls
         Normalized L1 Cache - TA addr stalled by TCP:
-          value: SUM((TA_ADDR_STALLED_BY_TC_CYCLES_sum * 100)) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)
+          value: SUM((TA_ADDR_STALLED_BY_TC_CYCLES_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
           unit: Percent
         Normalized L1 Cache - TA addr stalled by TD:
-          value: SUM((TA_ADDR_STALLED_BY_TD_CYCLES_sum * 100)) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)
+          value: SUM((TA_ADDR_STALLED_BY_TD_CYCLES_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
           unit: Percent
         Normalized L1 Cache - TA data stalled by TCP:
-          value: SUM((TA_DATA_STALLED_BY_TC_CYCLES_sum * 100)) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)
+          value: SUM((TA_DATA_STALLED_BY_TC_CYCLES_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
           unit: Percent
         Normalized L1 Cache - TA addresser stalled:
-          value: SUM((TA_ADDRESSER_STALLED_CYCLES_sum * 100)) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)
+          value: SUM((TA_ADDRESSER_STALLED_CYCLES_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
           unit: Percent
         Normalized L1 Cache - TA stalled by TCP (aggregated):
-          value: SUM((TCP_TCP_TA_ADDR_STALL_CYCLES_sum * 100)) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)
+          value: SUM((TCP_TCP_TA_ADDR_STALL_CYCLES_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
           unit: Percent
         # TCP stalls
         Normalized L1 Cache - TCP stalled by UTCL1:
-          value: SUM((TCP_UTCL1_STALL_INFLIGHT_MAX_sum * 100)) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)
+          value: SUM((TCP_UTCL1_STALL_INFLIGHT_MAX_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
           unit: Percent
         Normalized L1 Cache - TCP stalled by UTCL2:
-          value: SUM((TCP_UTCL1_STALL_LFIFO_NO_RES_sum * 100)) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)
+          value: SUM((TCP_UTCL1_STALL_LFIFO_NO_RES_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
           unit: Percent
         Normalized L1 Cache - TCP stalled by TD:
-          value: SUM((TCP_TD_TCP_STALL_CYCLES_sum * 100)) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)
+          value: SUM((TCP_TD_TCP_STALL_CYCLES_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
           unit: Percent
         Normalized L1 Cache - TCP stalled by L2:
-          value: SUM((TCP_TCR_TCP_STALL_CYCLES_sum * 100)) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)
+          value: SUM((TCP_TCR_TCP_STALL_CYCLES_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
           unit: Percent
         # TD stalls
         Normalized TD - stalled by TCP:
-          value: SUM((TD_TC_STALL_sum * 100)) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)
+          value: SUM((TD_TC_STALL_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
           unit: Percent
         Normalized TD - input FIFO full:
-          value: SUM((TD_TC_TD_FIFO_FULL_sum * 100)) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)
+          value: SUM((TD_TC_TD_FIFO_FULL_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
           unit: Percent
         Normalized TD - output FIFO full:
-          value: SUM((TD_OUTPUT_FIFO_FULL_sum * 100)) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)
+          value: SUM((TD_OUTPUT_FIFO_FULL_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
           unit: Percent
         Normalized TD - stalled by SPI:
-          value: SUM((TD_SPI_STALL_sum * 100)) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)
+          value: SUM((TD_SPI_STALL_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
           unit: Percent
   - metric_table:
       id: 3005
@@ -214,7 +214,7 @@ Panel Config:
       metric:
         Normalized TA processing rate:
           value: SUM(TA_TOTAL_WAVEFRONTS_sum) / (SUM((End_Timestamp - Start_Timestamp)) / 1000000000)
-          unit: Requests/s
+          unit: Instructions/s
         Normalized CU-L1 throughput:
           value: SUM(TCP_TOTAL_ACCESSES_sum) / (SUM((End_Timestamp - Start_Timestamp)) / 1000000000)
           unit: Requests/s
@@ -226,7 +226,7 @@ Panel Config:
           unit: Requests/s
         Normalized TD - L1-CU throughput:
           value: SUM(TD_LOAD_WAVEFRONT_sum) / (SUM((End_Timestamp - Start_Timestamp)) / 1000000000)
-          unit: Requests/s
+          unit: Instructions/s
   - metric_table:
       id: 3006
       title: Raw Counter Value
@@ -372,16 +372,16 @@ Panel Config:
           unit: (Cycles + $normUnit)
         TD_LOAD_WAVEFRONT:
           value: SUM(TD_LOAD_WAVEFRONT_sum) / SUM($denom)
-          unit: (Wavefronts + $normUnit)
+          unit: (Instructions + $normUnit)
         TD_ATOMIC_WAVEFRONT:
           value: SUM(TD_ATOMIC_WAVEFRONT_sum) / SUM($denom)
-          unit: (Wavefronts + $normUnit)
+          unit: (Instructions + $normUnit)
         TD_STORE_WAVEFRONT:
           value: SUM(TD_STORE_WAVEFRONT_sum) / SUM($denom)
-          unit: (Wavefronts + $normUnit)
+          unit: (Instructions + $normUnit)
         TD_COALESCABLE_WAVEFRONT:
           value: SUM(TD_COALESCABLE_WAVEFRONT_sum) / SUM($denom)
-          unit: (Wavefronts + $normUnit)
+          unit: (Instructions + $normUnit)
         # GRBM counters (global)
         GRBM_GUI_ACTIVE:
           value: SUM(GRBM_GUI_ACTIVE) / SUM($denom)

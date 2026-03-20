@@ -1,22 +1,8 @@
-/* Copyright (c) 2008 - 2023 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "device/device.hpp"
 #include "thread/monitor.hpp"
@@ -422,17 +408,27 @@ void MemObjMap::UpdateAccess(amd::Device* peerDev) {
 
 void MemObjMap::Purge(amd::Device* dev) {
   assert(dev != nullptr);
-  std::unique_lock lock(AllocatedLock_);
-  for (auto it = MemObjMap_.cbegin(); it != MemObjMap_.cend();) {
-    amd::Memory* memObj = it->second;
-    unsigned int flags = memObj->getMemFlags();
-    const std::vector<Device*>& devices = memObj->getContext().devices();
-    if (devices.size() == 1 && devices[0] == dev && !(flags & ROCCLR_MEM_INTERNAL_MEMORY)) {
-      memObj->release();
-      it = MemObjMap_.erase(it);
-    } else {
-      ++it;
+  std::vector<amd::Memory*> toRelease{};
+  {
+    std::unique_lock lock(AllocatedLock_);
+    for (auto it = MemObjMap_.cbegin(); it != MemObjMap_.cend();) {
+      amd::Memory* memObj = it->second;
+      unsigned int flags = memObj->getMemFlags();
+      const std::vector<Device*>& devices = memObj->getContext().devices();
+      if (devices.size() == 1 && devices[0] == dev && !(flags & ROCCLR_MEM_INTERNAL_MEMORY)) {
+        toRelease.push_back(memObj);
+        it = MemObjMap_.erase(it);
+      } else {
+        ++it;
+      }
     }
+  }
+
+  // Release memObjs outside the locked region
+  // memObj->release() may trigger RemoveIpcHandleMemObj() call if memObj is an IpcBuffer
+  // where the lock would be acquired a second time
+  for (auto* memObj : toRelease) {
+    memObj->release();
   }
 }
 
@@ -797,8 +793,8 @@ Device::~Device() {
 }
 
 bool Device::ValidateComgr() {
-  // Check if Lightning compiler was requested
-  constexpr bool kComgrVersioned = false;
+  // use versioned comgr for HIP, unversioned for Opencl
+  const bool kComgrVersioned = amd::IS_HIP;
   std::call_once(amd::Comgr::initialized, amd::Comgr::LoadLib, kComgrVersioned);
   return amd::Comgr::IsReady();
 }
