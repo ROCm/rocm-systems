@@ -166,8 +166,13 @@ set_target_properties(amd-dbgapi PROPERTIES
   VERSION ${PROJECT_VERSION}
   SOVERSION ${PROJECT_VERSION_MAJOR})
 
-target_compile_options(amd-dbgapi PRIVATE
-  -fno-rtti -Werror -Wall -Wextra -Wshadow -Wno-attributes -Wconversion) #-pedantic)
+if(MSVC)
+  target_compile_options(amd-dbgapi PRIVATE
+    /GR- /permissive-)
+else()
+  target_compile_options(amd-dbgapi PRIVATE
+    -fno-rtti -Werror -Wall -Wextra -Wshadow -Wno-attributes -Wconversion) #-pedantic)
+endif()
 
 target_compile_definitions(amd-dbgapi
   PRIVATE __STDC_LIMIT_MACROS __STDC_CONSTANT_MACROS __STDC_FORMAT_MACROS)
@@ -200,6 +205,7 @@ if(libbacktrace_FOUND)
   target_link_libraries(amd-dbgapi PRIVATE libbacktrace::libbacktrace)
 else()
   message(STATUS "[libbacktrace check] Could not find libbacktrace through find_package.")
+if(NOT MSVC)
   message(STATUS "[libbacktrace check] Trying compiler fallback.")
 
   message(STATUS "[libbacktrace check] Executing command: ${CMAKE_CXX_COMPILER} ${CMAKE_CXX_FLAGS} --print-file-name libbacktrace.a")
@@ -220,6 +226,9 @@ else()
     OUTPUT_STRIP_TRAILING_WHITESPACE
   )
   message(STATUS "[libbacktrace check] Command output: ${libbacktrace_path}")
+else()
+  set(libbacktrace_check 1)
+endif()
 
   if(${libbacktrace_check} EQUAL 0)
     get_filename_component(BACKTRACE_PREFIX ${libbacktrace_path} DIRECTORY)
