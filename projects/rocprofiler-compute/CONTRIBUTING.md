@@ -298,10 +298,7 @@ You can also disable specific linting rules for a line by using `# noqa: <rule_c
 
 ### Coding guidelines
 
-Below are some repository specific guidelines which are followed throughout the repository.
-Any future contributions should adhere to these guidelines:
-* Use the `pathlib` library functions instead of `os.path` for manipulating the file paths.
-* Follow the project's [Python Coding Style Guidelines](PYTHON_CODING_STYLE.md) for function design, naming conventions, code organization, and other Python best practices.
+Any future contributions should follow the project's [Python Coding Style Guidelines](PYTHON_CODING_STYLE.md) for function design, naming conventions, code organization, and other Python best practices.
 
 ### Build and test documentation changes
 
