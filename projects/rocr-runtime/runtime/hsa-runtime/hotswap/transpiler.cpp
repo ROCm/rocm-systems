@@ -3268,6 +3268,14 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
         replace_regs.emplace_back(tr.replace_dst, tr.replace_src);
     }
 
+    // Debug: HSA_HOTSWAP_EARLY_EXIT=N inserts s_endpgm after N source instructions
+    // to bisect crash location. Set to 0 to disable.
+    int early_exit_after = 0;
+    if (const char* ee = std::getenv("HSA_HOTSWAP_EARLY_EXIT"))
+      early_exit_after = std::atoi(ee);
+    int emitted_count = 0;
+    bool early_exit_done = false;
+
     // Translate instructions for this kernel
     for (size_t ii = 0; ii < source_lines.size(); ++ii) {
       const auto& line = source_lines[ii];
@@ -3363,6 +3371,14 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
         }
 
         translated_asm += t + "\n";
+      }
+      ++emitted_count;
+      // Debug early exit: insert s_endpgm after N source instructions
+      if (early_exit_after > 0 && emitted_count >= early_exit_after && !early_exit_done) {
+        translated_asm += "s_endpgm ; EARLY EXIT after " + std::to_string(emitted_count) + " instrs\n";
+        early_exit_done = true;
+        std::cerr << "hotswap: transpile: EARLY EXIT after " << emitted_count << " source instructions\n";
+        break;
       }
       // exec_hi clear after v_cmpx: on GFX9 wave64, v_cmpx compares ALL
       // 64 lanes including 32-63 which have uninitialized VGPRs (from wave32
