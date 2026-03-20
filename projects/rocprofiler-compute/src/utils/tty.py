@@ -58,7 +58,6 @@ def _tty_view_is_table(args: argparse.Namespace) -> bool:
 
 KERNEL_NAME_WRAP_WIDTH = 40
 
-
 def wrap_kernel_name(name: str) -> str:
     """Wrap a kernel name at KERNEL_NAME_WRAP_WIDTH for table display."""
     return textwrap.fill(str(name), width=KERNEL_NAME_WRAP_WIDTH)
