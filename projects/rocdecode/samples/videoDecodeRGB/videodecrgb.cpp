@@ -357,6 +357,10 @@ int main(int argc, char **argv) {
                 cv.notify_one(); // Notify the ColorSpaceConversionThread that a frame is available for post-processing
                 n_frame++;
             }
+
+            if (num_decoded_frames && num_decoded_frames <= n_frame) {
+                break;
+            }
         } while (n_video_bytes);
 
         {

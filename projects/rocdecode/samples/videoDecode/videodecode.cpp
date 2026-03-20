@@ -380,6 +380,9 @@ int main(int argc, char **argv) {
             auto time_per_decode = std::chrono::duration<double, std::milli>(end_time - start_time).count();
             total_dec_time += time_per_decode;
             n_pic_decoded += decoded_pics;
+            if (num_decoded_frames && num_decoded_frames <= n_frame) {
+                break;
+            }
         } while (n_video_bytes);
         
         n_frame += viddec->GetNumOfFlushedFrames();
