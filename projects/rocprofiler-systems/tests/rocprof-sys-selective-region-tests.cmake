@@ -26,8 +26,15 @@ if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU})
     list(APPEND _selective_region_environment "ROCPROFSYS_USE_ROCPD=ON")
 endif()
 
-# Validation args shared between sys-run and sampling for each test case
-# (kernel dispatch validation is identical — sampling should show same gaps)
+# Validation strategy: use -p to print kernel dispatch data, then FAIL_REGEX to
+# verify that excluded kernels are NOT present.  This mirrors the shell test
+# (test_roctx_regions.sh) which uses assert_kernel_absent for negative checks.
+# Positional label matching (-s/-c/-d) is intentionally omitted because:
+#   1. Internal kernels (e.g. __amd_rocclr_fillBufferAligned.kd) can appear at
+#      any position and shift the expected order.
+#   2. Per-kernel counts vary with thread count and iteration count.
+
+set(_print_args -p)
 
 # =========================================================================
 # pause_resume — no region filter
@@ -44,32 +51,14 @@ rocprofiler_systems_add_test(
     ENVIRONMENT "${_selective_region_environment}"
 )
 
-set(_pause_resume_validation_args
-    -s
-    CodeBlock_Z
-    CodeBlock_A
-    CodeBlock_C
-    CodeBlock_D
-    -c
-    1
-    1
-    1
-    1
-    -d
-    0
-    0
-    0
-    0
-    -p
-)
-
 rocprofiler_systems_add_validation_test(
     NAME pause-resume-sys-run
     PERFETTO_METRIC "rocm_kernel_dispatch"
     PERFETTO_FILE "perfetto-trace.proto"
     LABELS "selective_regions;roctx"
+    PASS_REGEX "CodeBlock_Z|CodeBlock_A|CodeBlock_C|CodeBlock_D"
     FAIL_REGEX "CodeBlock_B|ROCPROFSYS_ABORT_FAIL_REGEX"
-    ARGS ${_pause_resume_validation_args}
+    ARGS ${_print_args}
 )
 
 rocprofiler_systems_add_validation_test(
@@ -77,8 +66,9 @@ rocprofiler_systems_add_validation_test(
     PERFETTO_METRIC "rocm_kernel_dispatch"
     PERFETTO_FILE "perfetto-trace.proto"
     LABELS "selective_regions;roctx;sampling"
+    PASS_REGEX "CodeBlock_Z|CodeBlock_A|CodeBlock_C|CodeBlock_D"
     FAIL_REGEX "CodeBlock_B|ROCPROFSYS_ABORT_FAIL_REGEX"
-    ARGS ${_pause_resume_validation_args}
+    ARGS ${_print_args}
 )
 
 # =========================================================================
@@ -95,40 +85,13 @@ rocprofiler_systems_add_test(
     ENVIRONMENT "${_selective_region_environment}"
 )
 
-set(_selective_region_all_validation_args
-    -s
-    CodeBlock_A
-    CodeBlock_B
-    CodeBlock_C
-    CodeBlock_D
-    CodeBlock_E
-    CodeBlock_F
-    CodeBlock_G
-    -c
-    1
-    1
-    1
-    1
-    1
-    1
-    1
-    -d
-    0
-    0
-    0
-    0
-    0
-    0
-    0
-    -p
-)
-
 rocprofiler_systems_add_validation_test(
     NAME selective-region-all-sys-run
     PERFETTO_METRIC "rocm_kernel_dispatch"
     PERFETTO_FILE "perfetto-trace.proto"
     LABELS "selective_regions;roctx"
-    ARGS ${_selective_region_all_validation_args}
+    PASS_REGEX "CodeBlock_A|CodeBlock_B|CodeBlock_C|CodeBlock_D|CodeBlock_E|CodeBlock_F|CodeBlock_G"
+    ARGS ${_print_args}
 )
 
 rocprofiler_systems_add_validation_test(
@@ -136,7 +99,8 @@ rocprofiler_systems_add_validation_test(
     PERFETTO_METRIC "rocm_kernel_dispatch"
     PERFETTO_FILE "perfetto-trace.proto"
     LABELS "selective_regions;roctx;sampling"
-    ARGS ${_selective_region_all_validation_args}
+    PASS_REGEX "CodeBlock_A|CodeBlock_B|CodeBlock_C|CodeBlock_D|CodeBlock_E|CodeBlock_F|CodeBlock_G"
+    ARGS ${_print_args}
 )
 
 # =========================================================================
@@ -154,32 +118,14 @@ rocprofiler_systems_add_test(
     ENVIRONMENT "${_selective_region_environment};ROCPROFSYS_TRACE_REGION=Region 1"
 )
 
-set(_selective_region_r1_validation_args
-    -s
-    CodeBlock_B
-    CodeBlock_C
-    CodeBlock_D
-    CodeBlock_F
-    -c
-    1
-    1
-    1
-    1
-    -d
-    0
-    0
-    0
-    0
-    -p
-)
-
 rocprofiler_systems_add_validation_test(
     NAME selective-region-r1-sys-run
     PERFETTO_METRIC "rocm_kernel_dispatch"
     PERFETTO_FILE "perfetto-trace.proto"
     LABELS "selective_regions;roctx"
+    PASS_REGEX "CodeBlock_B|CodeBlock_C|CodeBlock_D|CodeBlock_F"
     FAIL_REGEX "CodeBlock_A|CodeBlock_E|CodeBlock_G|ROCPROFSYS_ABORT_FAIL_REGEX"
-    ARGS ${_selective_region_r1_validation_args}
+    ARGS ${_print_args}
 )
 
 rocprofiler_systems_add_validation_test(
@@ -187,8 +133,9 @@ rocprofiler_systems_add_validation_test(
     PERFETTO_METRIC "rocm_kernel_dispatch"
     PERFETTO_FILE "perfetto-trace.proto"
     LABELS "selective_regions;roctx;sampling"
+    PASS_REGEX "CodeBlock_B|CodeBlock_C|CodeBlock_D|CodeBlock_F"
     FAIL_REGEX "CodeBlock_A|CodeBlock_E|CodeBlock_G|ROCPROFSYS_ABORT_FAIL_REGEX"
-    ARGS ${_selective_region_r1_validation_args}
+    ARGS ${_print_args}
 )
 
 # =========================================================================
@@ -208,26 +155,14 @@ rocprofiler_systems_add_test(
         "${_selective_region_environment};ROCPROFSYS_TRACE_REGION=Region 2,Region 3"
 )
 
-set(_selective_region_r2r3_validation_args
-    -s
-    CodeBlock_C
-    CodeBlock_E
-    -c
-    1
-    1
-    -d
-    0
-    0
-    -p
-)
-
 rocprofiler_systems_add_validation_test(
     NAME selective-region-r2r3-sys-run
     PERFETTO_METRIC "rocm_kernel_dispatch"
     PERFETTO_FILE "perfetto-trace.proto"
     LABELS "selective_regions;roctx"
+    PASS_REGEX "CodeBlock_C|CodeBlock_E"
     FAIL_REGEX "CodeBlock_A|CodeBlock_B|CodeBlock_D|CodeBlock_F|CodeBlock_G|ROCPROFSYS_ABORT_FAIL_REGEX"
-    ARGS ${_selective_region_r2r3_validation_args}
+    ARGS ${_print_args}
 )
 
 rocprofiler_systems_add_validation_test(
@@ -235,8 +170,9 @@ rocprofiler_systems_add_validation_test(
     PERFETTO_METRIC "rocm_kernel_dispatch"
     PERFETTO_FILE "perfetto-trace.proto"
     LABELS "selective_regions;roctx;sampling"
+    PASS_REGEX "CodeBlock_C|CodeBlock_E"
     FAIL_REGEX "CodeBlock_A|CodeBlock_B|CodeBlock_D|CodeBlock_F|CodeBlock_G|ROCPROFSYS_ABORT_FAIL_REGEX"
-    ARGS ${_selective_region_r2r3_validation_args}
+    ARGS ${_print_args}
 )
 
 # =========================================================================
@@ -255,32 +191,14 @@ rocprofiler_systems_add_test(
     ENVIRONMENT "${_selective_region_environment}"
 )
 
-set(_selective_region_pause1_all_validation_args
-    -s
-    CodeBlock_Z
-    CodeBlock_A
-    CodeBlock_C
-    CodeBlock_D
-    -c
-    1
-    1
-    1
-    1
-    -d
-    0
-    0
-    0
-    0
-    -p
-)
-
 rocprofiler_systems_add_validation_test(
     NAME selective-region-pause1-all-sys-run
     PERFETTO_METRIC "rocm_kernel_dispatch"
     PERFETTO_FILE "perfetto-trace.proto"
     LABELS "selective_regions;roctx"
+    PASS_REGEX "CodeBlock_Z|CodeBlock_A|CodeBlock_C|CodeBlock_D"
     FAIL_REGEX "CodeBlock_B|ROCPROFSYS_ABORT_FAIL_REGEX"
-    ARGS ${_selective_region_pause1_all_validation_args}
+    ARGS ${_print_args}
 )
 
 rocprofiler_systems_add_validation_test(
@@ -288,8 +206,9 @@ rocprofiler_systems_add_validation_test(
     PERFETTO_METRIC "rocm_kernel_dispatch"
     PERFETTO_FILE "perfetto-trace.proto"
     LABELS "selective_regions;roctx;sampling"
+    PASS_REGEX "CodeBlock_Z|CodeBlock_A|CodeBlock_C|CodeBlock_D"
     FAIL_REGEX "CodeBlock_B|ROCPROFSYS_ABORT_FAIL_REGEX"
-    ARGS ${_selective_region_pause1_all_validation_args}
+    ARGS ${_print_args}
 )
 
 # =========================================================================
@@ -307,26 +226,14 @@ rocprofiler_systems_add_test(
     ENVIRONMENT "${_selective_region_environment};ROCPROFSYS_TRACE_REGION=Region 1"
 )
 
-set(_selective_region_pause1_r1_validation_args
-    -s
-    CodeBlock_A
-    CodeBlock_C
-    -c
-    1
-    1
-    -d
-    0
-    0
-    -p
-)
-
 rocprofiler_systems_add_validation_test(
     NAME selective-region-pause1-r1-sys-run
     PERFETTO_METRIC "rocm_kernel_dispatch"
     PERFETTO_FILE "perfetto-trace.proto"
     LABELS "selective_regions;roctx"
+    PASS_REGEX "CodeBlock_A|CodeBlock_C"
     FAIL_REGEX "CodeBlock_Z|CodeBlock_B|CodeBlock_D|ROCPROFSYS_ABORT_FAIL_REGEX"
-    ARGS ${_selective_region_pause1_r1_validation_args}
+    ARGS ${_print_args}
 )
 
 rocprofiler_systems_add_validation_test(
@@ -334,8 +241,9 @@ rocprofiler_systems_add_validation_test(
     PERFETTO_METRIC "rocm_kernel_dispatch"
     PERFETTO_FILE "perfetto-trace.proto"
     LABELS "selective_regions;roctx;sampling"
+    PASS_REGEX "CodeBlock_A|CodeBlock_C"
     FAIL_REGEX "CodeBlock_Z|CodeBlock_B|CodeBlock_D|ROCPROFSYS_ABORT_FAIL_REGEX"
-    ARGS ${_selective_region_pause1_r1_validation_args}
+    ARGS ${_print_args}
 )
 
 # =========================================================================
@@ -354,26 +262,14 @@ rocprofiler_systems_add_test(
     ENVIRONMENT "${_selective_region_environment}"
 )
 
-set(_selective_region_pause2_all_validation_args
-    -s
-    CodeBlock_C
-    CodeBlock_D
-    -c
-    1
-    1
-    -d
-    0
-    0
-    -p
-)
-
 rocprofiler_systems_add_validation_test(
     NAME selective-region-pause2-all-sys-run
     PERFETTO_METRIC "rocm_kernel_dispatch"
     PERFETTO_FILE "perfetto-trace.proto"
     LABELS "selective_regions;roctx"
+    PASS_REGEX "CodeBlock_C|CodeBlock_D"
     FAIL_REGEX "CodeBlock_Z|CodeBlock_A|CodeBlock_B|ROCPROFSYS_ABORT_FAIL_REGEX"
-    ARGS ${_selective_region_pause2_all_validation_args}
+    ARGS ${_print_args}
 )
 
 rocprofiler_systems_add_validation_test(
@@ -381,8 +277,9 @@ rocprofiler_systems_add_validation_test(
     PERFETTO_METRIC "rocm_kernel_dispatch"
     PERFETTO_FILE "perfetto-trace.proto"
     LABELS "selective_regions;roctx;sampling"
+    PASS_REGEX "CodeBlock_C|CodeBlock_D"
     FAIL_REGEX "CodeBlock_Z|CodeBlock_A|CodeBlock_B|ROCPROFSYS_ABORT_FAIL_REGEX"
-    ARGS ${_selective_region_pause2_all_validation_args}
+    ARGS ${_print_args}
 )
 
 # =========================================================================
@@ -400,29 +297,14 @@ rocprofiler_systems_add_test(
     ENVIRONMENT "${_selective_region_environment};ROCPROFSYS_TRACE_REGION=Region 1"
 )
 
-set(_selective_region_pause2_r1_validation_args
-    -s
-    CodeBlock_A
-    CodeBlock_B
-    CodeBlock_C
-    -c
-    1
-    1
-    1
-    -d
-    0
-    0
-    0
-    -p
-)
-
 rocprofiler_systems_add_validation_test(
     NAME selective-region-pause2-r1-sys-run
     PERFETTO_METRIC "rocm_kernel_dispatch"
     PERFETTO_FILE "perfetto-trace.proto"
     LABELS "selective_regions;roctx"
+    PASS_REGEX "CodeBlock_A|CodeBlock_B|CodeBlock_C"
     FAIL_REGEX "CodeBlock_Z|CodeBlock_D|ROCPROFSYS_ABORT_FAIL_REGEX"
-    ARGS ${_selective_region_pause2_r1_validation_args}
+    ARGS ${_print_args}
 )
 
 rocprofiler_systems_add_validation_test(
@@ -430,8 +312,9 @@ rocprofiler_systems_add_validation_test(
     PERFETTO_METRIC "rocm_kernel_dispatch"
     PERFETTO_FILE "perfetto-trace.proto"
     LABELS "selective_regions;roctx;sampling"
+    PASS_REGEX "CodeBlock_A|CodeBlock_B|CodeBlock_C"
     FAIL_REGEX "CodeBlock_Z|CodeBlock_D|ROCPROFSYS_ABORT_FAIL_REGEX"
-    ARGS ${_selective_region_pause2_r1_validation_args}
+    ARGS ${_print_args}
 )
 
 # =========================================================================
@@ -450,23 +333,14 @@ rocprofiler_systems_add_test(
     ENVIRONMENT "${_selective_region_environment}"
 )
 
-set(_selective_region_pause3_all_validation_args
-    -s
-    CodeBlock_A
-    -c
-    1
-    -d
-    0
-    -p
-)
-
 rocprofiler_systems_add_validation_test(
     NAME selective-region-pause3-all-sys-run
     PERFETTO_METRIC "rocm_kernel_dispatch"
     PERFETTO_FILE "perfetto-trace.proto"
     LABELS "selective_regions;roctx"
+    PASS_REGEX "CodeBlock_A"
     FAIL_REGEX "CodeBlock_C|CodeBlock_D|ROCPROFSYS_ABORT_FAIL_REGEX"
-    ARGS ${_selective_region_pause3_all_validation_args}
+    ARGS ${_print_args}
 )
 
 rocprofiler_systems_add_validation_test(
@@ -474,8 +348,9 @@ rocprofiler_systems_add_validation_test(
     PERFETTO_METRIC "rocm_kernel_dispatch"
     PERFETTO_FILE "perfetto-trace.proto"
     LABELS "selective_regions;roctx;sampling"
+    PASS_REGEX "CodeBlock_A"
     FAIL_REGEX "CodeBlock_C|CodeBlock_D|ROCPROFSYS_ABORT_FAIL_REGEX"
-    ARGS ${_selective_region_pause3_all_validation_args}
+    ARGS ${_print_args}
 )
 
 # =========================================================================
@@ -493,23 +368,14 @@ rocprofiler_systems_add_test(
     ENVIRONMENT "${_selective_region_environment};ROCPROFSYS_TRACE_REGION=Region 1"
 )
 
-set(_selective_region_pause3_r1_validation_args
-    -s
-    CodeBlock_A
-    -c
-    1
-    -d
-    0
-    -p
-)
-
 rocprofiler_systems_add_validation_test(
     NAME selective-region-pause3-r1-sys-run
     PERFETTO_METRIC "rocm_kernel_dispatch"
     PERFETTO_FILE "perfetto-trace.proto"
     LABELS "selective_regions;roctx"
+    PASS_REGEX "CodeBlock_A"
     FAIL_REGEX "CodeBlock_C|CodeBlock_D|ROCPROFSYS_ABORT_FAIL_REGEX"
-    ARGS ${_selective_region_pause3_r1_validation_args}
+    ARGS ${_print_args}
 )
 
 rocprofiler_systems_add_validation_test(
@@ -517,8 +383,9 @@ rocprofiler_systems_add_validation_test(
     PERFETTO_METRIC "rocm_kernel_dispatch"
     PERFETTO_FILE "perfetto-trace.proto"
     LABELS "selective_regions;roctx;sampling"
+    PASS_REGEX "CodeBlock_A"
     FAIL_REGEX "CodeBlock_C|CodeBlock_D|ROCPROFSYS_ABORT_FAIL_REGEX"
-    ARGS ${_selective_region_pause3_r1_validation_args}
+    ARGS ${_print_args}
 )
 
 # =========================================================================
@@ -552,34 +419,13 @@ rocprofiler_systems_add_test(
     ENVIRONMENT "${_no_marker_environment}"
 )
 
-set(_pause_resume_no_marker_validation_args
-    -s
-    CodeBlock_Z
-    CodeBlock_A
-    CodeBlock_B
-    CodeBlock_C
-    CodeBlock_D
-    -c
-    1
-    1
-    1
-    1
-    1
-    -d
-    0
-    0
-    0
-    0
-    0
-    -p
-)
-
 rocprofiler_systems_add_validation_test(
     NAME pause-resume-no-marker-sys-run
     PERFETTO_METRIC "rocm_kernel_dispatch"
     PERFETTO_FILE "perfetto-trace.proto"
     LABELS "selective_regions;roctx"
-    ARGS ${_pause_resume_no_marker_validation_args}
+    PASS_REGEX "CodeBlock_Z|CodeBlock_A|CodeBlock_B|CodeBlock_C|CodeBlock_D"
+    ARGS ${_print_args}
 )
 
 rocprofiler_systems_add_validation_test(
@@ -587,7 +433,8 @@ rocprofiler_systems_add_validation_test(
     PERFETTO_METRIC "rocm_kernel_dispatch"
     PERFETTO_FILE "perfetto-trace.proto"
     LABELS "selective_regions;roctx;sampling"
-    ARGS ${_pause_resume_no_marker_validation_args}
+    PASS_REGEX "CodeBlock_Z|CodeBlock_A|CodeBlock_B|CodeBlock_C|CodeBlock_D"
+    ARGS ${_print_args}
 )
 
 # =========================================================================
@@ -610,8 +457,9 @@ rocprofiler_systems_add_validation_test(
     PERFETTO_METRIC "rocm_kernel_dispatch"
     PERFETTO_FILE "perfetto-trace.proto"
     LABELS "selective_regions;roctx"
+    PASS_REGEX "CodeBlock_B|CodeBlock_C|CodeBlock_D|CodeBlock_F"
     FAIL_REGEX "CodeBlock_A|CodeBlock_E|CodeBlock_G|ROCPROFSYS_ABORT_FAIL_REGEX"
-    ARGS ${_selective_region_r1_validation_args}
+    ARGS ${_print_args}
 )
 
 rocprofiler_systems_add_validation_test(
@@ -619,8 +467,9 @@ rocprofiler_systems_add_validation_test(
     PERFETTO_METRIC "rocm_kernel_dispatch"
     PERFETTO_FILE "perfetto-trace.proto"
     LABELS "selective_regions;roctx;sampling"
+    PASS_REGEX "CodeBlock_B|CodeBlock_C|CodeBlock_D|CodeBlock_F"
     FAIL_REGEX "CodeBlock_A|CodeBlock_E|CodeBlock_G|ROCPROFSYS_ABORT_FAIL_REGEX"
-    ARGS ${_selective_region_r1_validation_args}
+    ARGS ${_print_args}
 )
 
 # =========================================================================
@@ -638,29 +487,14 @@ rocprofiler_systems_add_test(
     ENVIRONMENT "${_no_marker_environment};ROCPROFSYS_TRACE_REGION=Region 1"
 )
 
-set(_selective_region_pause1_r1_no_marker_validation_args
-    -s
-    CodeBlock_A
-    CodeBlock_B
-    CodeBlock_C
-    -c
-    1
-    1
-    1
-    -d
-    0
-    0
-    0
-    -p
-)
-
 rocprofiler_systems_add_validation_test(
     NAME selective-region-pause1-r1-no-marker-sys-run
     PERFETTO_METRIC "rocm_kernel_dispatch"
     PERFETTO_FILE "perfetto-trace.proto"
     LABELS "selective_regions;roctx"
+    PASS_REGEX "CodeBlock_A|CodeBlock_B|CodeBlock_C"
     FAIL_REGEX "CodeBlock_Z|CodeBlock_D|ROCPROFSYS_ABORT_FAIL_REGEX"
-    ARGS ${_selective_region_pause1_r1_no_marker_validation_args}
+    ARGS ${_print_args}
 )
 
 rocprofiler_systems_add_validation_test(
@@ -668,8 +502,9 @@ rocprofiler_systems_add_validation_test(
     PERFETTO_METRIC "rocm_kernel_dispatch"
     PERFETTO_FILE "perfetto-trace.proto"
     LABELS "selective_regions;roctx;sampling"
+    PASS_REGEX "CodeBlock_A|CodeBlock_B|CodeBlock_C"
     FAIL_REGEX "CodeBlock_Z|CodeBlock_D|ROCPROFSYS_ABORT_FAIL_REGEX"
-    ARGS ${_selective_region_pause1_r1_no_marker_validation_args}
+    ARGS ${_print_args}
 )
 
 # =========================================================================
@@ -687,29 +522,14 @@ rocprofiler_systems_add_test(
     ENVIRONMENT "${_no_marker_environment};ROCPROFSYS_TRACE_REGION=Region 1"
 )
 
-set(_selective_region_pause2_r1_no_marker_validation_args
-    -s
-    CodeBlock_A
-    CodeBlock_B
-    CodeBlock_C
-    -c
-    1
-    1
-    1
-    -d
-    0
-    0
-    0
-    -p
-)
-
 rocprofiler_systems_add_validation_test(
     NAME selective-region-pause2-r1-no-marker-sys-run
     PERFETTO_METRIC "rocm_kernel_dispatch"
     PERFETTO_FILE "perfetto-trace.proto"
     LABELS "selective_regions;roctx"
+    PASS_REGEX "CodeBlock_A|CodeBlock_B|CodeBlock_C"
     FAIL_REGEX "CodeBlock_Z|CodeBlock_D|ROCPROFSYS_ABORT_FAIL_REGEX"
-    ARGS ${_selective_region_pause2_r1_no_marker_validation_args}
+    ARGS ${_print_args}
 )
 
 rocprofiler_systems_add_validation_test(
@@ -717,8 +537,9 @@ rocprofiler_systems_add_validation_test(
     PERFETTO_METRIC "rocm_kernel_dispatch"
     PERFETTO_FILE "perfetto-trace.proto"
     LABELS "selective_regions;roctx;sampling"
+    PASS_REGEX "CodeBlock_A|CodeBlock_B|CodeBlock_C"
     FAIL_REGEX "CodeBlock_Z|CodeBlock_D|ROCPROFSYS_ABORT_FAIL_REGEX"
-    ARGS ${_selective_region_pause2_r1_no_marker_validation_args}
+    ARGS ${_print_args}
 )
 
 # =========================================================================
@@ -736,26 +557,14 @@ rocprofiler_systems_add_test(
     ENVIRONMENT "${_no_marker_environment};ROCPROFSYS_TRACE_REGION=Region 1"
 )
 
-set(_selective_region_pause3_r1_no_marker_validation_args
-    -s
-    CodeBlock_A
-    CodeBlock_C
-    -c
-    1
-    1
-    -d
-    0
-    0
-    -p
-)
-
 rocprofiler_systems_add_validation_test(
     NAME selective-region-pause3-r1-no-marker-sys-run
     PERFETTO_METRIC "rocm_kernel_dispatch"
     PERFETTO_FILE "perfetto-trace.proto"
     LABELS "selective_regions;roctx"
+    PASS_REGEX "CodeBlock_A|CodeBlock_C"
     FAIL_REGEX "CodeBlock_D|ROCPROFSYS_ABORT_FAIL_REGEX"
-    ARGS ${_selective_region_pause3_r1_no_marker_validation_args}
+    ARGS ${_print_args}
 )
 
 rocprofiler_systems_add_validation_test(
@@ -763,6 +572,7 @@ rocprofiler_systems_add_validation_test(
     PERFETTO_METRIC "rocm_kernel_dispatch"
     PERFETTO_FILE "perfetto-trace.proto"
     LABELS "selective_regions;roctx;sampling"
+    PASS_REGEX "CodeBlock_A|CodeBlock_C"
     FAIL_REGEX "CodeBlock_D|ROCPROFSYS_ABORT_FAIL_REGEX"
-    ARGS ${_selective_region_pause3_r1_no_marker_validation_args}
+    ARGS ${_print_args}
 )
