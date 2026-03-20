@@ -3468,6 +3468,22 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
       }
       translated_asm = tmp;
     }
+    // Debug: HSA_HOTSWAP_NOP_SLOAD=1 replaces s_load_dword sN, s[8:9], 0xc with nop
+    // to test if this specific load causes the attn_forward LAUNCH ERROR.
+    if (std::getenv("HSA_HOTSWAP_NOP_SLOAD")) {
+      auto replaceLoad = [](std::string& s, const std::string& pattern) {
+        size_t pos = 0;
+        while ((pos = s.find(pattern, pos)) != std::string::npos) {
+          size_t eol = s.find('\n', pos);
+          if (eol == std::string::npos) eol = s.size();
+          std::string replacement = "s_mov_b32 s1, 0 ; NOP'd s_load";
+          s.replace(pos, eol - pos, replacement);
+          pos += replacement.size();
+        }
+      };
+      replaceLoad(translated_asm, "s_load_dword s1, s[8:9], 0xc");
+      replaceLoad(translated_asm, "s_load_dword s0, s[8:9], 0xc");
+    }
     // v_bitop2_b32/v_bitop3_b32 → s_nop 0 (GFX12-only, no simple GFX9 equivalent)
     // Replace entire lines containing v_bitop[23]_b32
     std::istringstream iss(translated_asm);
