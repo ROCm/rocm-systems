@@ -6,6 +6,8 @@
 
 #include <hip_test_common.hh>
 
+#include <cstdlib>
+
 /**
  * @addtogroup hipDeviceSynchronize hipDeviceSynchronize
  * @{
@@ -19,6 +21,31 @@
 #define _SIZE sizeof(int) * 1024 * 1024
 #define NUM_STREAMS 2
 #define NUM_ITERS 1 << 30
+
+namespace {
+
+// Unit_hipDeviceSynchronize_Functional reads host memory before hipDeviceSynchronize().
+// That only works if per-stream H2D (and thus kernel/D2H) has not finished yet; a small
+// copy size lets very fast GPUs finish the whole stream before the CPU runs the next
+// instruction. Use a larger transfer for this test only (not global _SIZE, which would
+// bloat Unit_hipDeviceSynchronize_Positive_Nullstream). Override with
+// HIP_TEST_DEVICE_SYNCHRONIZE_FUNCTIONAL_COPY_MB (megabytes, 1-8192) if the pre-sync
+// assertion still races on your hardware.
+size_t functionalDeviceSynchronizeCopyBytes() {
+  if (const char* env = std::getenv("HIP_TEST_DEVICE_SYNCHRONIZE_FUNCTIONAL_COPY_MB")) {
+    char* end = nullptr;
+    unsigned long mb = std::strtoul(env, &end, 10);
+    if (end != env && mb > 0 && mb <= 8192) {
+      return mb * 1024ULL * 1024ULL;
+    }
+  }
+  // 1 GiB per buffer (four allocations in this test ≈ 4 GiB total) — a practical default
+  // for fast links; use a smaller HIP_TEST_DEVICE_SYNCHRONIZE_FUNCTIONAL_COPY_MB on
+  // memory-constrained runners if the pre-sync check is not required there.
+  return 1024ULL * 1024 * 1024;
+}
+
+}  // namespace
 
 static __global__ void Iter(int* Ad, int num) {
   int tx = threadIdx.x + blockIdx.x * blockDim.x;
@@ -92,6 +119,9 @@ HIP_TEST_CASE(Unit_hipDeviceSynchronize_Positive_Nullstream) {
  * ------------------------
  *  - Performs synchronization between large kernel execution
  *    and asynchronous copying of the array, on multiple streams.
+ *    Uses a larger copy than \c _SIZE so the pre-sync host read usually wins its race;
+ *    see functionalDeviceSynchronizeCopyBytes() and
+ *    HIP_TEST_DEVICE_SYNCHRONIZE_FUNCTIONAL_COPY_MB.
  * Test source
  * ------------------------
  *  - unit/device/hipDeviceSynchronize.cc
@@ -100,32 +130,32 @@ HIP_TEST_CASE(Unit_hipDeviceSynchronize_Positive_Nullstream) {
  *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Unit_hipDeviceSynchronize_Functional) {
+  const size_t copyBytes = functionalDeviceSynchronizeCopyBytes();
   int* A[NUM_STREAMS];
   int* Ad[NUM_STREAMS];
   hipStream_t stream[NUM_STREAMS];
 
   for (int i = 0; i < NUM_STREAMS; i++) {
-    HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&A[i]), _SIZE, hipHostMallocDefault));
+    HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&A[i]), copyBytes, hipHostMallocDefault));
     A[i][0] = 1;
-    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Ad[i]), _SIZE));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Ad[i]), copyBytes));
     HIP_CHECK(hipStreamCreate(&stream[i]));
   }
   for (int i = 0; i < NUM_STREAMS; i++) {
-    HIP_CHECK(hipMemcpyAsync(Ad[i], A[i], _SIZE, hipMemcpyHostToDevice, stream[i]));
+    HIP_CHECK(hipMemcpyAsync(Ad[i], A[i], copyBytes, hipMemcpyHostToDevice, stream[i]));
   }
   for (int i = 0; i < NUM_STREAMS; i++) {
     hipLaunchKernelGGL(HIP_KERNEL_NAME(Iter), dim3(1), dim3(1), 0, stream[i], Ad[i], NUM_ITERS);
   }
   for (int i = 0; i < NUM_STREAMS; i++) {
-    HIP_CHECK(hipMemcpyAsync(A[i], Ad[i], _SIZE, hipMemcpyDeviceToHost, stream[i]));
+    HIP_CHECK(hipMemcpyAsync(A[i], Ad[i], copyBytes, hipMemcpyDeviceToHost, stream[i]));
   }
 
 
-  // This first check but relies on the kernel running for so long that the
-  // D2H async memcopy has not started yet. This will be true in an optimal
-  // asynchronous implementation.
-  // Conservative implementations which synchronize the hipMemcpyAsync will
-  // fail, ie if HIP_LAUNCH_BLOCKING=true.
+  // This check assumes per-stream work is still in flight (typically still in a large H2D
+  // or the long kernel) when the host reads A[NUM_STREAMS-1][0]. Very fast GPUs or
+  // HIP_LAUNCH_BLOCKING=true can still fail it; increase copy size via
+  // HIP_TEST_DEVICE_SYNCHRONIZE_FUNCTIONAL_COPY_MB or drop the assertion if needed.
 
   REQUIRE(NUM_ITERS != A[NUM_STREAMS - 1][0] - 1);
   HIP_CHECK(hipDeviceSynchronize());
