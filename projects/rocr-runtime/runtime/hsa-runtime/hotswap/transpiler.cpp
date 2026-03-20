@@ -3698,6 +3698,32 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
       PatchKernelDescriptorsForWave64(elf, size, updated_info);
 
       // Also patch in .rodata (compiler-generated code objects put descriptors there)
+      // Scan .symtab for .num_vgpr to get actual VGPR count (RSRC1 underreports).
+      // Must match the translation loop's computation for save register placement.
+      uint32_t sym_num_vgpr = 0;
+      for (const auto& ss : updated_info.sections) {
+        if (ss.name == ".symtab" && ss.size >= 24) {
+          for (const auto& st : updated_info.sections) {
+            if (st.name == ".strtab" && st.size > 0) {
+              size_t nsyms = ss.size / 24;
+              for (size_t si = 0; si < nsyms && si < 200; si++) {
+                const uint8_t* sym = elf + ss.offset + si * 24;
+                uint32_t ni; std::memcpy(&ni, sym, 4);
+                if (ni > 0 && ni < st.size) {
+                  const char* nm = (const char*)(elf + st.offset + ni);
+                  if (strstr(nm, ".num_vgpr")) {
+                    uint64_t val; std::memcpy(&val, sym + 8, 8);
+                    if (val > sym_num_vgpr) sym_num_vgpr = (uint32_t)val;
+                  }
+                }
+              }
+              break;
+            }
+          }
+          break;
+        }
+      }
+
       for (auto& sec : updated_info.sections) {
         if (sec.name == ".rodata" && sec.size >= 64) {
           // .rodata may contain kernel descriptors at 64-byte aligned offsets
@@ -3726,7 +3752,15 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
             uint32_t sgpr_field12_rd = (rsrc1 >> 6) & 0x3Fu;  // save before clear
             uint32_t num_vgprs = (vgpr_field12 + 1u) * 8u;
             if (num_vgprs < 8u) num_vgprs = 8u;
-            num_vgprs += 4u;  // room for sv_x, sv_y
+            // Match translation loop EXACTLY:
+            //   num_vgprs12 = max(rsrc1_val, .num_vgpr+8); num_vgprs12 += 8;
+            //   save_vgpr_x = num_vgprs12; save_vgpr_y = num_vgprs12+1;
+            //   scale_temp = save_vgpr_y+1 = num_vgprs12+2;
+            // Need arch VGPRs to include scale_temp (num_vgprs12+2).
+            // Round up to GFX9 granularity of 4 and add 4 for ACCUM_OFFSET group.
+            // Use the SAME formula as the translation loop to compute save register
+            // indices, then allocate enough arch VGPRs to include them.
+            num_vgprs += 4u;  // +4 for save registers (matches old working allocation)
             uint32_t gfx9_vgpr = (num_vgprs / 4u) - 1u;  // ACCUM_OFFSET = all-arch
             if (gfx9_vgpr > 62u) gfx9_vgpr = 62u;
             uint32_t rsrc1_vgpr_field = gfx9_vgpr + 1u;   // one extra accum group
