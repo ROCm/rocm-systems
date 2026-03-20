@@ -190,6 +190,12 @@ def pytest_configure(config: pytest.Config) -> None:
     if is_monochrome:
         config.option.color = "no"
 
+    # Disable pytest-timeout plugin if detected
+    # It will interfere with our timeout marker
+    timeout_plugin = config.pluginmanager.get_plugin("timeout")
+    if timeout_plugin:
+        config.pluginmanager.unregister(timeout_plugin)
+
     # Functional markers (do more than just label a test)
     #   See pytest_collection_modifyitems
     config.addinivalue_line(
@@ -847,6 +853,12 @@ def _ctest_generate_tests(
         "    if(NOT DEFINED ROCPROFSYS_TEST_EXECUTABLE)",
         "        find_program(ROCPROFSYS_TEST_EXECUTABLE NAMES python3 python HINTS ${ROCPROFSYS_PYTHON_HINTS})",
         "    endif()",
+        "    if(NOT ROCPROFSYS_TEST_EXECUTABLE)",
+        "        message(FATAL_ERROR",
+        '            "python executable not found. "',
+        '            "Set ROCPROFSYS_TEST_EXECUTABLE to the correct path "',
+        '            "or provide ROCPROFSYS_PYTHON_HINTS to search for the executable.")',
+        "    endif()",
         '    set(_ROCPROFSYS_EXE "${ROCPROFSYS_TEST_EXECUTABLE}")',
         '    set(_ROCPROFSYS_EXE_ARGS "${_INSTALL_PATH}")',
         '    set(_ROCPROFSYS_NODEID_PFX "")',
@@ -854,6 +866,12 @@ def _ctest_generate_tests(
         'elseif(EXISTS "${_BUILD_PATH}")',
         "    if(NOT DEFINED ROCPROFSYS_TEST_EXECUTABLE)",
         "        find_program(ROCPROFSYS_TEST_EXECUTABLE NAMES pytest pytest3 HINTS ${ROCPROFSYS_PYTHON_HINTS})",
+        "    endif()",
+        "    if(NOT ROCPROFSYS_TEST_EXECUTABLE)",
+        "        message(FATAL_ERROR",
+        '            "pytest executable not found. "',
+        '            "Set ROCPROFSYS_TEST_EXECUTABLE to the correct path "',
+        '            "or provide ROCPROFSYS_PYTHON_HINTS to search for the executable.")',
         "    endif()",
         '    set(_ROCPROFSYS_EXE "${ROCPROFSYS_TEST_EXECUTABLE}")',
         '    set(_ROCPROFSYS_EXE_ARGS "")',
@@ -881,6 +899,7 @@ def _ctest_generate_tests(
         depends_on: list[str] = []
         run_serial = False
 
+        TIMEOUT_BUFFER = 5  # So that pytest has time to dump its output
         timeout_marker = item.get_closest_marker("timeout")
         timeout = (
             int(timeout_marker.args[0])
@@ -935,7 +954,7 @@ def _ctest_generate_tests(
         props = []
         if labels:
             props.append(f'    LABELS "{";".join(sorted(labels))}"')
-        props.append(f"    TIMEOUT {timeout}")
+        props.append(f"    TIMEOUT {timeout + TIMEOUT_BUFFER}")
         props.append(f"    SKIP_RETURN_CODE {SKIP_RETURN_CODE}")
         props.append(f'    FIXTURES_REQUIRED "rocprofsys-global-tmp-files"')
         if run_serial:
@@ -1760,10 +1779,7 @@ def run_test(
                 pass
 
         # Timeout marker
-        ctest_mode = request.config.getoption("--ctest-mode", default="off")
-        if ctest_mode == "run":
-            timeout = 10000  # CTest will handle the timeout
-        elif request.node.get_closest_marker("timeout"):
+        if request.node.get_closest_marker("timeout"):
             timeout = request.node.get_closest_marker("timeout").args[0]
         else:
             timeout = 300
