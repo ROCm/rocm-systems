@@ -26,11 +26,10 @@ import sys
 import pytest
 
 
-def test_arg_annotations(pftrace_data, request):
+def test_arg_annotations(pftrace_reader):
     import rocprofiler_sdk.tests.rocprofv3 as rocprofv3
 
-    pftrace_filename = request.config.getoption("--pftrace-input")
-    rocprofv3.test_perfetto_arg_annotations(pftrace_data, pftrace_filename)
+    rocprofv3.test_perfetto_arg_annotations(pftrace_reader)
 
 
 if __name__ == "__main__":

@@ -518,25 +518,13 @@ def test_csv_data(
             _perform_csv_json_match(a, b, keys_mapping[category], json_data)
 
 
-def test_perfetto_arg_annotations(pftrace_data, pftrace_filename):
+def test_perfetto_arg_annotations(pftrace_reader):
     """
     Test that function argument annotations are available in perfetto with --annotate-args.
     This validates that all API call arguments are annotated as debug annotations
     across all categories (hip_api, marker_api, etc.).
     """
     import pytest
-    from rocprofiler_sdk.pytest_utils.perfetto_reader import PerfettoReader
-
-    # Check if trace has any data
-    if pftrace_data.empty:
-        pytest.skip("No trace data found")
-
-    # Get the PerfettoReader to query the args table
-    reader = PerfettoReader(pftrace_filename)
-
-    # Access the trace processor directly
-    if not reader.trace_processor:
-        pytest.skip("Trace processor not available")
 
     # Query for API function argument annotations from --annotate-args
     # Filter for hip_api/hsa_api/marker_api (KFD/kernel have args from other sources)
@@ -559,7 +547,7 @@ def test_perfetto_arg_annotations(pftrace_data, pftrace_filename):
       )
     """
 
-    result = reader.query_tp(query)
+    result = pftrace_reader.query_tp(query)
 
     # Function argument annotations must exist - perfetto was generated with --annotate-args
     assert not result.empty, (
