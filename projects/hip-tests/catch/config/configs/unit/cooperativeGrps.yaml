@@ -202,20 +202,6 @@ cooperativeGrps:
   Unit_coop_thread_block_split_barrier:
     <<: *level_2
     tags: [cooperative, ops]
-  Unit_Grid_Group_Getters_Positive_Basic: *level_2
-  Unit_Grid_Group_Getters_Via_Non_Member_Functions_Positive_Basic: *level_2
-  Unit_Grid_Group_Sync_Positive_Basic: *level_2
-  Unit_tiled_groups_metagrp_basic: *level_2
-  Unit_coalesced_groups_metagrp_basic: *level_2
-  Unit_cg_binary_part: *level_2
-  Unit_coopgroups_ballot: *level_2
-  Unit_binary_part_ballot: *level_2
-  Unit_coopgroups_any: *level_2
-  Unit_coopgroups_coal_all: *level_2
-  Unit_coopgroups_match_any_coal: *level_2
-  Unit_coopgroups_match_all_coal: *level_2
-  Unit_coop_grids_split_barrier: *level_2
-  Unit_coop_thread_block_split_barrier: *level_2
   Unit_Thread_Block_Coalesced_Reduce_arithmetic: *level_2
   Unit_Thread_Block_Tile_Reduce_Basic: *level_2
   Unit_Thread_Block_Tile_Reduce_Custom_Op: *level_2
