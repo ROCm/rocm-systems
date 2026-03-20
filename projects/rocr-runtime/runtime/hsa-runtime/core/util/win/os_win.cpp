@@ -499,6 +499,7 @@ int Ctz(uint64_t i) {
 char* DlError() { return nullptr; }
 
 static const char* kPipePrefix = "\\\\.\\pipe\\";
+static const DWORD kMaxPipeInstances = 128;
 
 struct IPCPipeInfo {
   HANDLE pipe;
@@ -534,13 +535,19 @@ static HANDLE CreatePipeInstance(const char* fullName) {
       fullName,
       PIPE_ACCESS_DUPLEX,
       PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
-      PIPE_UNLIMITED_INSTANCES,
+      kMaxPipeInstances,
       4096, 4096, 0, NULL);
 }
 
 IPCSocket CreateIPCServer(const char* name, int backlog) {
   std::string pipeName = PipeName(name);
-  HANDLE pipe = CreatePipeInstance(pipeName.c_str());
+  //HANDLE pipe = CreatePipeInstance(pipeName.c_str());
+  HANDLE pipe = CreateNamedPipe(
+      pipeName.c_str(),
+      PIPE_ACCESS_DUPLEX | FILE_FLAG_FIRST_PIPE_INSTANCE,
+      PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+      kMaxPipeInstances,
+      4096, 4096, 0, NULL);
   if (pipe == INVALID_HANDLE_VALUE) return nullptr;
   auto* info = new IPCPipeInfo{pipe, pipeName, true, 0};
   return reinterpret_cast<IPCSocket>(info);
@@ -558,6 +565,10 @@ IPCSocket AcceptIPCConnection(IPCSocket server) {
   // The current pipe instance is now connected to the client.
   // Create a new instance so the server can accept the next client.
   HANDLE newPipe = CreatePipeInstance(serverInfo->pipeName.c_str());
+  if (newPipe == INVALID_HANDLE_VALUE) {
+    assert("!CreatePipeInstance failed.");
+    return nullptr;
+  }
   serverInfo->pipe = newPipe;
 
   auto* connInfo = new IPCPipeInfo{connPipe, "", true, 0};
