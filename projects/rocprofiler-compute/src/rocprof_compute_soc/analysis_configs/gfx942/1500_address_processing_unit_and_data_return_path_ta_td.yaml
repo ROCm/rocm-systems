@@ -14,9 +14,9 @@ Panel Config:
         unit: Unit
       metric:
         Address Processing Unit Busy:
-          avg: AVG(NOISE_CLAMP(((100 * TA_TA_BUSY_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)), 100))
-          min: MIN(NOISE_CLAMP(((100 * TA_TA_BUSY_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)), 100))
-          max: MAX(NOISE_CLAMP(((100 * TA_TA_BUSY_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)), 100))
+          avg: AVG(((100 * NOISE_CLAMP(TA_TA_BUSY_sum, ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
+          min: MIN(((100 * NOISE_CLAMP(TA_TA_BUSY_sum, ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
+          max: MAX(((100 * NOISE_CLAMP(TA_TA_BUSY_sum, ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
           unit: Percent
         Address Stall:
           avg: AVG(((100 * TA_ADDR_STALLED_BY_TC_CYCLES_sum) / ($GRBM_GUI_ACTIVE_PER_XCD
@@ -27,12 +27,12 @@ Panel Config:
             * $cu_per_gpu)))
           unit: Percent
         Data Stall:
-          avg: AVG(NOISE_CLAMP(((100 * TA_DATA_STALLED_BY_TC_CYCLES_sum) / ($GRBM_GUI_ACTIVE_PER_XCD
-            * $cu_per_gpu)), 100))
-          min: MIN(NOISE_CLAMP(((100 * TA_DATA_STALLED_BY_TC_CYCLES_sum) / ($GRBM_GUI_ACTIVE_PER_XCD
-            * $cu_per_gpu)), 100))
-          max: MAX(NOISE_CLAMP(((100 * TA_DATA_STALLED_BY_TC_CYCLES_sum) / ($GRBM_GUI_ACTIVE_PER_XCD
-            * $cu_per_gpu)), 100))
+          avg: AVG(((100 * NOISE_CLAMP(TA_DATA_STALLED_BY_TC_CYCLES_sum, ($GRBM_GUI_ACTIVE_PER_XCD
+            * $cu_per_gpu))) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
+          min: MIN(((100 * NOISE_CLAMP(TA_DATA_STALLED_BY_TC_CYCLES_sum, ($GRBM_GUI_ACTIVE_PER_XCD
+            * $cu_per_gpu))) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
+          max: MAX(((100 * NOISE_CLAMP(TA_DATA_STALLED_BY_TC_CYCLES_sum, ($GRBM_GUI_ACTIVE_PER_XCD
+            * $cu_per_gpu))) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
           unit: Percent
         "Data-Processor \u2192 Address Stall":
           avg: AVG(((100 * TA_ADDR_STALLED_BY_TD_CYCLES_sum) / ($GRBM_GUI_ACTIVE_PER_XCD
@@ -148,14 +148,14 @@ Panel Config:
         unit: Unit
       metric:
         Data-Return Busy:
-          avg: AVG(NOISE_CLAMP(((100 * TD_TD_BUSY_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)), 100))
-          min: MIN(NOISE_CLAMP(((100 * TD_TD_BUSY_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)), 100))
-          max: MAX(NOISE_CLAMP(((100 * TD_TD_BUSY_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)), 100))
+          avg: AVG(((100 * NOISE_CLAMP(TD_TD_BUSY_sum, ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
+          min: MIN(((100 * NOISE_CLAMP(TD_TD_BUSY_sum, ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
+          max: MAX(((100 * NOISE_CLAMP(TD_TD_BUSY_sum, ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
           unit: Percent
         "Cache RAM \u2192 Data-Return Stall":
-          avg: AVG(NOISE_CLAMP(((100 * TD_TC_STALL_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)), 100))
-          min: MIN(NOISE_CLAMP(((100 * TD_TC_STALL_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)), 100))
-          max: MAX(NOISE_CLAMP(((100 * TD_TC_STALL_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)), 100))
+          avg: AVG(((100 * NOISE_CLAMP(TD_TC_STALL_sum, ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
+          min: MIN(((100 * NOISE_CLAMP(TD_TC_STALL_sum, ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
+          max: MAX(((100 * NOISE_CLAMP(TD_TC_STALL_sum, ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
           unit: Percent
         "Workgroup manager \u2192 Data-Return Stall":
           avg: AVG(((100 * TD_SPI_STALL_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
