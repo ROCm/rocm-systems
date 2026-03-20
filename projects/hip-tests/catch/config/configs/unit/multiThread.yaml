@@ -1,23 +1,37 @@
 ---
 multiThread:
-  Unit_hipMemsetAsync_QueueJobsMultithreaded: *level_2
-  Unit_hipMultiThreadDevice_Streams: *level_2
+  Unit_hipMemsetAsync_QueueJobsMultithreaded:
+    <<: *level_2
+    tags: [memory]
+  Unit_hipMultiThreadDevice_Streams:
+    <<: *level_2
+    tags: [device_mgmt]
   Unit_hipMultiThreadDevice_SerialPyramid:
     <<: *level_2
     # Rock_Linux_Failures_on_gfx94X
     disabled: [amd_linux]
-  Unit_hipMultiThreadDevice_ParallelPyramid: *level_2
+    tags: [device_mgmt]
+  Unit_hipMultiThreadDevice_ParallelPyramid:
+    <<: *level_2
+    tags: [device_mgmt]
   Unit_hipMultiThreadDevice_NearZero:
     <<: *level_2
     # Note: Windows disabled
     disabled: [amd_windows, amd_wsl]
-  Unit_hipMultiThreadStreams1_AsyncSync: *level_2
+    tags: [device_mgmt]
+  Unit_hipMultiThreadStreams1_AsyncSync:
+    <<: *level_2
+    tags: [stream]
   Unit_hipMultiThreadStreams1_AsyncAsync:
     <<: *level_2
     # Rock_Window_Failures_on_gfx1151
     disabled: [amd_windows]
+    tags: [stream]
   Unit_hipMultiThreadStreams1_AsyncSame:
     <<: *level_2
     # Rock_Window_Failures_on_gfx1151
     disabled: [amd_windows]
-  Unit_hipMultiThreadStreams2: *level_2
+    tags: [stream]
+  Unit_hipMultiThreadStreams2:
+    <<: *level_2
+    tags: [stream]

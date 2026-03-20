@@ -10,7 +10,7 @@
 #include <resource_guards.hh>
 #include <utils.hh>
 
-TEST_CASE(Unit_hipMemcpyAsync_Positive_Basic) {
+HIP_TEST_CASE(Unit_hipMemcpyAsync_Positive_Basic) {
   using namespace std::placeholders;
   const auto stream_type = GENERATE(Streams::nullstream, Streams::perThread, Streams::created);
   const StreamGuard stream_guard(stream_type);
@@ -19,7 +19,7 @@ TEST_CASE(Unit_hipMemcpyAsync_Positive_Basic) {
   MemcpyWithDirectionCommonTests<true>(std::bind(hipMemcpyAsync, _1, _2, _3, _4, stream), stream);
 }
 
-TEST_CASE(Unit_hipMemcpyAsync_Positive_Synchronization_Behavior) {
+HIP_TEST_CASE(Unit_hipMemcpyAsync_Positive_Synchronization_Behavior) {
   using namespace std::placeholders;
   HIP_CHECK(hipDeviceSynchronize());
 
@@ -63,7 +63,7 @@ TEST_CASE(Unit_hipMemcpyAsync_Positive_Synchronization_Behavior) {
   }
 }
 
-TEST_CASE(Unit_hipMemcpyAsync_Negative_Parameters) {
+HIP_TEST_CASE(Unit_hipMemcpyAsync_Negative_Parameters) {
   using namespace std::placeholders;
 
   SECTION("Host to device") {
@@ -124,7 +124,7 @@ TEST_CASE(Unit_hipMemcpyAsync_Negative_Parameters) {
   }
 }
 
-TEST_CASE(Unit_hipMemcpyAsync_Capture) {
+HIP_TEST_CASE(Unit_hipMemcpyAsync_Capture) {
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
 

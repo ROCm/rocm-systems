@@ -277,7 +277,7 @@ static void runTestPrefered(std::vector<NumaNodeInfo> &nodes, MallocType type, u
 }
 
 /* Test memory allocation on preferred host numa node on each CPU */
-TEST_CASE(Perf_hipPerfHostNumaAlloc_test_preferred_host_numa_node_on_each_GPU) {
+HIP_TEST_CASE(Perf_hipPerfHostNumaAlloc_test_preferred_host_numa_node_on_each_GPU) {
   std::vector<NumaNodeInfo> nodes;
   enumerateNumaNodes(nodes);
   if (nodes.empty()) {

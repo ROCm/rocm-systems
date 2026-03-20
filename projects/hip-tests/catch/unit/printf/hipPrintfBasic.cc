@@ -178,7 +178,7 @@ static void test_series(int* retval, uint num_blocks, uint threads_per_block) {
  * ------------------------
  * - HIP_VERSION >= 6.2
  */
-TEST_CASE(Unit_Printf_PrintfBasicTsts) {
+HIP_TEST_CASE(Unit_Printf_PrintfBasicTsts) {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {

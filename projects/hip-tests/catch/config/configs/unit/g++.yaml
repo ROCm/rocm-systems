@@ -1,3 +1,5 @@
 ---
 g++:
-  Unit_hipMalloc_gpptest: *level_2
+  Unit_hipMalloc_gpptest:
+    <<: *level_2
+    tags: [compiler]

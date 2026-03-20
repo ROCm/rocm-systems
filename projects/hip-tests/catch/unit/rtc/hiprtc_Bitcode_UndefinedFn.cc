@@ -19,7 +19,7 @@
 // hiprtc kernel has an undefined function which will be linked in the later stages using hiprtc
 // linker APIs
 
-TEST_CASE(Unit_hiprtc_bitcode_undefined_function) {
+HIP_TEST_CASE(Unit_hiprtc_bitcode_undefined_function) {
   using namespace std;
 
   static constexpr auto kernel{

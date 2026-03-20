@@ -7,7 +7,7 @@
 #include <hip_test_common.hh>
 #include <hip/hip_runtime_api.h>
 
-TEST_CASE(Unit_hipModuleLoad_Positive_Basic) {
+HIP_TEST_CASE(Unit_hipModuleLoad_Positive_Basic) {
   HIP_CHECK(hipFree(nullptr));
   hipModule_t module = nullptr;
   HIP_CHECK(hipModuleLoad(&module, "empty_module.code"));
@@ -15,7 +15,7 @@ TEST_CASE(Unit_hipModuleLoad_Positive_Basic) {
   HIP_CHECK(hipModuleUnload(module));
 }
 
-TEST_CASE(Unit_hipModuleLoad_Negative_Parameters) {
+HIP_TEST_CASE(Unit_hipModuleLoad_Negative_Parameters) {
   HIP_CHECK(hipFree(nullptr));
   hipModule_t module;
 
@@ -36,7 +36,7 @@ TEST_CASE(Unit_hipModuleLoad_Negative_Parameters) {
   }
 }
 
-TEST_CASE(Unit_hipModuleLoad_Negative_Load_From_A_File_That_Is_Not_A_Module) {
+HIP_TEST_CASE(Unit_hipModuleLoad_Negative_Load_From_A_File_That_Is_Not_A_Module) {
   HIP_CHECK(hipFree(nullptr));
   hipModule_t module;
 

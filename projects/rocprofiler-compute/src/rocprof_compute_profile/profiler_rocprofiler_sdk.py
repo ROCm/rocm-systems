@@ -43,11 +43,6 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
         soc: OmniSoC_Base,
     ) -> None:
         super().__init__(profiling_args, profiler_mode, soc)
-        self.ready_to_profile = (
-            self.get_args().roof_only
-            and not (Path(self.get_args().path) / "pmc_perf.csv").is_file()
-            or not self.get_args().roof_only
-        )
 
     def get_profiler_options(
         self, native_tool_path: Optional[str] = None
@@ -159,12 +154,8 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
     @demarcate
     def run_profiling(self, version: str, prog: str) -> None:
         """Run profiling."""
-        if not self.ready_to_profile:
-            console_log("roofline", "Detected existing pmc_perf.csv")
-            return
-
         if self.get_args().roof_only:
-            console_log("roofline", "Generating pmc_perf.csv (roofline counters only).")
+            console_log("roofline", "Profiling roofline counters only.")
 
         # Log profiling options and setup filtering
         super().run_profiling(version, prog)
@@ -172,10 +163,4 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
     @demarcate
     def post_processing(self) -> None:
         """Perform any post-processing steps prior to profiling."""
-        if self.ready_to_profile:
-            # Manually join each pmc_perf*.csv output
-            self.join_prof()
-            # Run roofline microbenchmark
-            super().post_processing()
-        else:
-            console_log("roofline", "Detected existing pmc_perf.csv")
+        super().post_processing()

@@ -67,7 +67,7 @@ static void HIPRT_CB Callback1(hipStream_t stream, hipError_t status, void* user
  Test multiple hipStreamAddCallback() called over
  multiple Threads.
  */
-TEST_CASE(Unit_hipStreamAddCallback_StrmSyncTiming) {
+HIP_TEST_CASE(Unit_hipStreamAddCallback_StrmSyncTiming) {
   float *A_d, *C_d;
   size_t Nbytes = N_elmts * sizeof(float);
 

@@ -18,7 +18,7 @@ __global__ void floatx2(float* ptr, size_t size) {
   }
 }
 
-TEST_CASE(Stress_HMM_OverSubscriptionTst) {
+HIP_TEST_CASE(Stress_HMM_OverSubscriptionTst) {
   int hmm = 0;
   HIP_CHECK(hipDeviceGetAttribute(&hmm, hipDeviceAttributeManagedMemory, 0));
 
