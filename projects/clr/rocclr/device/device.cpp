@@ -344,8 +344,7 @@ std::map<MemObjMap::IpcMemHandle, amd::Memory*> MemObjMap::IpcHandleMemObjMap_ R
     101);
 
 
-void MemObjMap::AddMemObj(const void* k, amd::Memory* v) {
-  std::unique_lock lock(AllocatedLock_);
+void MemObjMap::LockfreeAddMemObj(const void* k, amd::Memory* v) {
   auto rval = MemObjMap_.insert({reinterpret_cast<uintptr_t>(k), v});
   if (!rval.second) {
     ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM, "Memobj map already has an entry for ptr: 0x%x",
@@ -353,10 +352,30 @@ void MemObjMap::AddMemObj(const void* k, amd::Memory* v) {
   }
 }
 
+void MemObjMap::AddMemObj(const void* k, amd::Memory* v) {
+  std::unique_lock lock(AllocatedLock_);
+  LockfreeAddMemObj(k, v);
+}
+
+void MemObjMap::AddHostcallMemObj(const void* k, amd::Memory* v, amd::Device* dev) {
+  std::unique_lock lock(AllocatedLock_);
+  LockfreeAddMemObj(k, v);
+  dev->hostcallMemObjTracker_.TrackHostcallMemory(v);
+}
+
 void MemObjMap::RemoveMemObj(const void* k) {
   std::unique_lock lock(AllocatedLock_);
   auto rval = MemObjMap_.erase(reinterpret_cast<uintptr_t>(k));
   guarantee(rval == 1, "Memobj map does not have ptr: 0x%x", reinterpret_cast<uintptr_t>(k));
+}
+
+void MemObjMap::RemoveHostcallMemObj(const void* k, amd::Device* dev) {
+  std::unique_lock lock(AllocatedLock_);
+  auto it = MemObjMap_.find(reinterpret_cast<uintptr_t>(k));
+  guarantee(it != MemObjMap_.end(), "Memobj map does not have ptr: 0x%x",
+            reinterpret_cast<uintptr_t>(k));
+  dev->hostcallMemObjTracker_.RemoveHostcallMemory(it->second);
+  MemObjMap_.erase(it);
 }
 
 amd::Memory* MemObjMap::FindMemObj(const void* k, size_t* offset, Device* dev) {
@@ -422,6 +441,9 @@ void MemObjMap::Purge(amd::Device* dev) {
         ++it;
       }
     }
+    // All hostcall memory objects for the device should now be in toRelease, so we need to clear
+    // the tracking of them.
+    dev->hostcallMemObjTracker_.ClearHostcallMemories();
   }
 
   // Release memObjs outside the locked region
@@ -777,15 +799,7 @@ Device::~Device() {
     delete vaCacheMap_;
   }
 
-  for (auto memory : hostcall_allocated_memories_) {
-    if (memory != nullptr) {
-      amd::MemObjMap::RemoveMemObj(
-          reinterpret_cast<void*>(memory->getDeviceMemory(*this, false)->virtualAddress()));
-      memory->release();
-    }
-  }
-
-  hostcall_allocated_memories_.clear();
+  hostcallMemObjTracker_.ReleaseAll(this);
 
   delete vaCacheAccess_;
   delete settings_;
@@ -1166,12 +1180,24 @@ bool Device::GetHandleForAddressRange(void* dev_ptr, size_t size, void* handle) 
 }
 
 // ================================================================================================
-void Device::TrackHostcallMemory(amd::Memory* memory) {
+void Device::HostcallMemObjTracker::ReleaseAll(amd::Device* dev) {
+  for (auto memory : hostcall_allocated_memories_) {
+    if (memory != nullptr) {
+      amd::MemObjMap::RemoveMemObj(
+          reinterpret_cast<void*>(memory->getDeviceMemory(*dev, false)->virtualAddress()));
+      memory->release();
+    }
+  }
+  hostcall_allocated_memories_.clear();
+}
+
+// ================================================================================================
+void Device::HostcallMemObjTracker::TrackHostcallMemory(amd::Memory* memory) {
   hostcall_allocated_memories_.push_back(memory);
 }
 
 // ================================================================================================
-void Device::RemoveHostcallMemory(amd::Memory* memory) {
+void Device::HostcallMemObjTracker::RemoveHostcallMemory(amd::Memory* memory) {
   auto it =
       std::find(hostcall_allocated_memories_.begin(), hostcall_allocated_memories_.end(), memory);
   if (it != hostcall_allocated_memories_.end()) {
@@ -1179,7 +1205,10 @@ void Device::RemoveHostcallMemory(amd::Memory* memory) {
   }
 }
 
-void Device::ClearHostcallMemories() { hostcall_allocated_memories_.clear(); }
+// ================================================================================================
+void Device::HostcallMemObjTracker::ClearHostcallMemories() {
+  hostcall_allocated_memories_.clear();
+}
 
 // ================================================================================================
 void Device::AddDevMemObj(const void* k, amd::Memory* memObj) {

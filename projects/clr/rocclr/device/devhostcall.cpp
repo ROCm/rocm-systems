@@ -79,8 +79,8 @@ static void handlePayload(MessageHandler& messages, uint32_t service, uint64_t* 
       if (payload[0]) {
         amd::Memory* mem = amd::MemObjMap::FindMemObj(reinterpret_cast<void*>(payload[0]));
         if (mem) {
-          const_cast<amd::Device*>(&dev)->RemoveHostcallMemory(mem);
-          amd::MemObjMap::RemoveMemObj(reinterpret_cast<void*>(payload[0]));
+          amd::MemObjMap::RemoveHostcallMemObj(reinterpret_cast<void*>(payload[0]),
+                                               const_cast<amd::Device*>(&dev));
           mem->release();
         } else {
           ClPrint(amd::LOG_ERROR, amd::LOG_ALWAYS, "Hostcall: Unknown pointer %p in devmem service",
@@ -95,8 +95,8 @@ static void handlePayload(MessageHandler& messages, uint32_t service, uint64_t* 
           if (buf->create()) {
             device::Memory* dm = buf->getDeviceMemory(dev);
             va = dm->virtualAddress();
-            amd::MemObjMap::AddMemObj(reinterpret_cast<void*>(va), buf);
-            const_cast<amd::Device*>(&dev)->TrackHostcallMemory(buf);
+            amd::MemObjMap::AddHostcallMemObj(reinterpret_cast<void*>(va), buf,
+                                              const_cast<amd::Device*>(&dev));
           } else {
             buf->release();
           }

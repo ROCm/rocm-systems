@@ -1401,8 +1401,14 @@ class MemObjMap : public AllStatic {
   //!< add the host mem pointer and buffer in the container
   static void AddMemObj(const void* k, amd::Memory* v);
 
+  //!< add the hostcall mem pointer and buffer in the container
+  static void AddHostcallMemObj(const void* k, amd::Memory* v, amd::Device* dev);
+
   //!< Remove an entry of mem object from the container
   static void RemoveMemObj(const void* k);
+
+  //!< Remove an entry of hostcall mem object from the container
+  static void RemoveHostcallMemObj(const void* k, amd::Device* dev);
 
   //!< Find the mem object based on the input pointer, outputs the offset
   static amd::Memory* FindMemObj(const void* k, size_t* offset = nullptr, Device* dev = nullptr);
@@ -1428,6 +1434,9 @@ class MemObjMap : public AllStatic {
   static std::shared_mutex AllocatedLock_;
 
  private:
+  //!< add the host mem pointer and buffer in the container
+  static void LockfreeAddMemObj(const void* k, amd::Memory* v);
+
   //!< the mem object<->hostptr information container
   static std::map<uintptr_t, amd::Memory*> MemObjMap_;
   //!< the virtual mem object<->hostptr information container
@@ -2189,15 +2198,6 @@ class Device : public RuntimeObject {
 
   bool GetHandleForAddressRange(void* dev_ptr, size_t size, void* handle);
 
-  // Registers a memory object allocated via hostcall for later cleanup.
-  void TrackHostcallMemory(amd::Memory* memory);
-
-  // Removes a memory object from hostcall tracking.
-  void RemoveHostcallMemory(amd::Memory* memory);
-
-  //! Clears hostcall memory tracking list without releasing.
-  void ClearHostcallMemories();
-
   //! Enable the specified extension
   char* getExtensionString();
 
@@ -2241,6 +2241,30 @@ class Device : public RuntimeObject {
   amd::Monitor activeQueuesLock_{};                     //!< Guards access to the activeQueues set
   std::unordered_set<amd::CommandQueue*> activeQueues;  //!< The set of active queues
 
+  // Tracks all amd::Memory objects allocated via hostcall for this device.
+  // The members should only be accessed from MemObjMap to properly protect concurrent access.
+  struct HostcallMemObjTracker {
+   public:
+    // Releases all memory objects allocated via hostcall for the parent device.
+    // THis should only be called from either the parent device's destructor or from MemObjMap under
+    // the same protection as the other members of this class.
+    void ReleaseAll(amd::Device* dev);
+
+   private:
+    // Registers a memory object allocated via hostcall for later cleanup.
+    void TrackHostcallMemory(amd::Memory* memory);
+
+    // Removes a memory object from hostcall tracking.
+    void RemoveHostcallMemory(amd::Memory* memory);
+
+    //! Clears hostcall memory tracking list without releasing.
+    void ClearHostcallMemories();
+
+    std::vector<amd::Memory*> hostcall_allocated_memories_;
+
+    friend class MemObjMap;
+  } hostcallMemObjTracker_;
+
  private:
   const Isa* isa_;  //!< Device isa
   bool IsTypeMatching(cl_device_type type, bool offlineDevices);
@@ -2258,8 +2282,6 @@ class Device : public RuntimeObject {
   std::map<uintptr_t, amd::Memory*>
       devMemObjMap_;  //!< Per-device VA map for interleaved device VAs (Windows)
   static constexpr int kDefaultNumaNode = -1;         //! Default NUMA node value for SVM operations
-  // Tracks all amd::Memory objects allocated via hostcall for this device.
-  std::vector<amd::Memory*> hostcall_allocated_memories_;
 };
 
 /*! @}
