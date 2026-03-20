@@ -1,3 +1,7 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
 import argparse
 
 from common import iter_group_configs, load_definitions, parse_size_string

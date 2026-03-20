@@ -79,7 +79,7 @@ TEST_F(KFDTopologyTest , BasicTest) {
 TEST_F(KFDTopologyTest, GetNodePropertiesInvalidParams) {
     TEST_START(TESTPROFILE_RUNALL)
 
-    EXPECT_EQ(HSAKMT_STATUS_INVALID_PARAMETER, hsaKmtGetNodeProperties(0, NULL));
+    EXPECT_EQ(HSAKMT_STATUS_INVALID_PARAMETER, HSAKMT_CALL(hsaKmtGetNodeProperties, g_baseTest->m_hsakmt_current_ctx, 0, NULL));
 
     TEST_END
 }
@@ -90,7 +90,7 @@ TEST_F(KFDTopologyTest, GetNodePropertiesInvalidNodeNum) {
 
     HsaNodeProperties nodeProperties;
     memset(&nodeProperties, 0, sizeof(nodeProperties));
-    EXPECT_EQ(HSAKMT_STATUS_INVALID_NODE_UNIT, hsaKmtGetNodeProperties(m_SystemProperties.NumNodes, &nodeProperties));
+    EXPECT_EQ(HSAKMT_STATUS_INVALID_NODE_UNIT, HSAKMT_CALL(hsaKmtGetNodeProperties, g_baseTest->m_hsakmt_current_ctx, m_SystemProperties.NumNodes, &nodeProperties));
 
     TEST_END
 }
@@ -106,7 +106,7 @@ TEST_F(KFDTopologyTest, GetNodeMemoryProperties) {
 
         if (pNodeProperties != NULL) {
             HsaMemoryProperties *memoryProperties = new HsaMemoryProperties[pNodeProperties->NumMemoryBanks];
-            EXPECT_SUCCESS(hsaKmtGetNodeMemoryProperties(node, pNodeProperties->NumMemoryBanks, memoryProperties));
+            EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtGetNodeMemoryProperties, g_baseTest->m_hsakmt_current_ctx, node, pNodeProperties->NumMemoryBanks, memoryProperties));
             delete [] memoryProperties;
         }
     }
@@ -131,7 +131,7 @@ TEST_F(KFDTopologyTest, GpuvmApertureValidate) {
                 return;
             }
             HsaMemoryProperties *memoryProperties =  new HsaMemoryProperties[pNodeProperties->NumMemoryBanks];
-            EXPECT_SUCCESS(hsaKmtGetNodeMemoryProperties(GpuNodes.at(i), pNodeProperties->NumMemoryBanks,
+            EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtGetNodeMemoryProperties, g_baseTest->m_hsakmt_current_ctx, GpuNodes.at(i), pNodeProperties->NumMemoryBanks,
                                                          memoryProperties));
             bool GpuVMHeapFound = false;
             for (unsigned int bank = 0 ; bank  < pNodeProperties->NumMemoryBanks ; bank++) {
@@ -159,7 +159,8 @@ TEST_F(KFDTopologyTest, GetNodeCacheProperties) {
         pNodeProperties = m_NodeInfo.GetNodeProperties(node);
         if (pNodeProperties != NULL) {
             HsaCacheProperties *cacheProperties = new HsaCacheProperties[pNodeProperties->NumCaches];
-            EXPECT_SUCCESS(hsaKmtGetNodeCacheProperties(node, pNodeProperties->CComputeIdLo,
+            EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtGetNodeCacheProperties, g_baseTest->m_hsakmt_current_ctx,
+                           node, pNodeProperties->CComputeIdLo,
                            pNodeProperties->NumCaches, cacheProperties));
             if (pNodeProperties->NumCPUCores > 0) {  // this is a CPU node
                 LOG() << "CPU Node " << std::dec << node << ": " << pNodeProperties->NumCaches << " caches"
@@ -227,7 +228,8 @@ TEST_F(KFDTopologyTest, GetNodeIoLinkProperties) {
 
         if (pNodeProperties != NULL) {
             HsaIoLinkProperties  *IolinkProperties =  new HsaIoLinkProperties[pNodeProperties->NumIOLinks];
-            EXPECT_SUCCESS(hsaKmtGetNodeIoLinkProperties(node, pNodeProperties->NumIOLinks, IolinkProperties));
+            EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtGetNodeIoLinkProperties, g_baseTest->m_hsakmt_current_ctx,
+                           node, pNodeProperties->NumIOLinks, IolinkProperties));
             if (pNodeProperties->NumIOLinks == 0) {
                 // No io_links. Just print the node
                 LOG() << "[" << node << "]" << std::endl;
