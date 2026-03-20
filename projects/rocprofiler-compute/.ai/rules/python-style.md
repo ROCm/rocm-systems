@@ -9,8 +9,9 @@
 ## Functions
 
 - Every function must do exactly **one** thing. If "and" appears in its description, split it.
-- Never write inline logic when it can be named and extracted. Always prefer a named helper over an
-  anonymous block of logic, even if used only once.
+- For any non-trivial or multi-step logic, prefer extracting a named helper over keeping an anonymous
+  inline block, even if the helper is used only once. This does **not** apply to trivially readable
+  single expressions or single standard-library calls.
 - Do not reimplement logic that already exists in a helper — find it and call it.
 - Do not produce nested functions unless the inner function is genuinely private to the outer scope
   and not reusable.
