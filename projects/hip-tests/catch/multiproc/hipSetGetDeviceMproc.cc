@@ -13,6 +13,9 @@
 
 #include <hip_test_common.hh>
 
+#include <string>
+#include <vector>
+
 #ifdef __linux__
 #include <sys/wait.h>
 #include <unistd.h>
