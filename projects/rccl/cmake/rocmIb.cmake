@@ -44,7 +44,7 @@ set(ROCM_NETIB_PATCH_FILE "${CMAKE_SOURCE_DIR}/ext-src/rocm_netib.patch" CACHE F
 
 # Use the hipify staging area in the build directory instead of modifying source tree
 set(ROCM_NETIB_STAGING_DIR "${CMAKE_BINARY_DIR}/hipify/src/transport")
-set(ROCM_NETIB_FILE "${ROCM_NETIB_STAGING_DIR}/net_ib_rocm.cc" CACHE FILEPATH "Generated ROCM NETIB file (in staging area)")
+set(ROCM_NETIB_FILE "${ROCM_NETIB_STAGING_DIR}/net_ib_rocm.cc" CACHE FILEPATH "Generated ROCM NETIB file (in staging area)" FORCE)
 
 # -------------------------
 # Find tools
@@ -55,8 +55,8 @@ find_program(SED_EXECUTABLE sed)
 # Ensure the staging directory exists
 file(MAKE_DIRECTORY ${ROCM_NETIB_STAGING_DIR})
 
+message(STATUS "Applying RCCL ROCM NetIB patch to staging area: ${ROCM_NETIB_FILE}")
 execute_process(
-  COMMAND ${CMAKE_COMMAND} -E echo "Applying RCCL ROCM NetIB patch to staging area: ${ROCM_NETIB_FILE}"
   COMMAND bash -c "patch -p1 -i ${ROCM_NETIB_PATCH_FILE} -o ${ROCM_NETIB_FILE}"
   WORKING_DIRECTORY ${RCCL_SRC_DIR}
 )

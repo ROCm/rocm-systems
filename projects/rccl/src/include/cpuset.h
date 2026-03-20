@@ -24,10 +24,11 @@ static ncclResult_t ncclStrToCpuset(const char* maskStr, cpu_set_t* set) {
   // transform the string into an array of 32 bit masks, starting with the highest mask
   int m = CPU_SET_N_U32;
   char* str = strdup(maskStr);
-  char* token = strtok(str, ",");
+  char* saveptr;
+  char* token = strtok_r(str, ",", &saveptr);
   while (token != NULL && m > 0) {
     cpumasks[--m] = strtoul(token, NULL, /*base = hex*/ 16);
-    token = strtok(NULL, ",");
+    token = strtok_r(NULL, ",", &saveptr);
   }
   free(str);
 
@@ -72,11 +73,12 @@ static ncclResult_t ncclStrListToCpuset(const char* userStr, cpu_set_t* mask) {
   CPU_ZERO(mask);
   const char delim[] = ",";
   char* str = strdup(userStr);
-  char* token = strtok(str, delim);
+  char* saveptr;
+  char* token = strtok_r(str, delim, &saveptr);
   while (token != NULL) {
     uint64_t cpu = strtoull(token, NULL, 0);
     CPU_SET(cpu, mask);
-    token = strtok(NULL, delim);
+    token = strtok_r(NULL, delim, &saveptr);
   }
   free(str);
   return ncclSuccess;
