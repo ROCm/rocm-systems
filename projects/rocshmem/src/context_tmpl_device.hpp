@@ -228,8 +228,9 @@ __device__ __forceinline__ void Context::wait_until(T *ivars, int cmp,
 __device__ __forceinline__ size_t status_entry(size_t nelems,
                                                const int *status) {
   size_t i{0};
+  if (nullptr == status) return 0;
   while (i < nelems) {
-    if (status[i] == 0) {
+    if (status[i]) {
       return i;
     }
     i++;
@@ -257,7 +258,7 @@ size_t Context::wait_until_any(T *ivars, size_t nelems,
   while (true) {
     for (size_t i{pos}; i < nelems; i++) {
       // skip entries marked with non-zero status
-      if (status[i]) {
+      if (nullptr != status && status[i]) {
         continue;
       }
       if (test(ivars + i, cmp, val)) {
@@ -285,7 +286,7 @@ void Context::wait_until_all(T *ivars, size_t nelems,
   }
 
   for (size_t i{pos}; i < nelems; i++) {
-    if (status[i]) {
+    if (nullptr != status && status[i]) {
       continue;
     }
     while (!test(ivars + i, cmp, val)) {
@@ -316,7 +317,7 @@ size_t Context::wait_until_some(T *ivars, size_t nelems,
   while (!done) {
     for (size_t i{pos}; i < nelems; i++) {
       // skip entries marked with non-zero status
-      if (status[i]) {
+      if (nullptr != status && status[i]) {
         continue;
       }
       if (test(ivars + i, cmp, val)) {
@@ -347,7 +348,7 @@ void Context::wait_until_all_vector(T *ivars, size_t nelems,
   }
 
   for (size_t i{pos}; i < nelems; i++) {
-    if (status[i]) {
+    if (nullptr != status && status[i]) {
       continue;
     }
     while (!test(ivars + i, cmp, vals[i])) {
@@ -375,7 +376,7 @@ size_t Context::wait_until_any_vector(T *ivars, size_t nelems,
   while (true) {
     for (size_t i{pos}; i < nelems; i++) {
       // skip entries marked with non-zero status
-      if (status[i]) {
+      if (nullptr != status && status[i]) {
         continue;
       }
       if (test(ivars + i, cmp, vals[i])) {
@@ -408,7 +409,7 @@ size_t Context::wait_until_some_vector(T *ivars, size_t nelems,
   while (!done) {
     for (size_t i{pos}; i < nelems; i++) {
       // skip entries marked with non-zero status
-      if (status[i]) {
+      if (nullptr != status && status[i]) {
         continue;
       }
       if (test(ivars + i, cmp, vals[i])) {
