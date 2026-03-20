@@ -1,3 +1,7 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
 if(TARGET OpenCL)
   set(CLINFO_OPENCL_LIB OpenCL)
 else()

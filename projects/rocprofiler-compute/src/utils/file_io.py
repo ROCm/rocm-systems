@@ -217,9 +217,9 @@ def create_df_kernel_top_stats(
     if "Dispatch_ID" in df.columns:
         grouped = grouped.reset_index()
 
-    # Calculate percentage
+    # Calculate percent
     sum_column = f"Sum{time_unit_suffix}"
-    grouped["Pct"] = grouped[sum_column] / grouped[sum_column].sum() * 100
+    grouped["Percent"] = grouped[sum_column] / grouped[sum_column].sum() * 100
 
     #   Sort by total time as default.
     if sortby == "sum":

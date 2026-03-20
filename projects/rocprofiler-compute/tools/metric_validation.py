@@ -74,7 +74,7 @@ class Analyzer(OmniAnalyze_Base):
             "Sum(ns)",
             "Mean(ns)",
             "Median(ns)",
-            "Pct",
+            "Percent",
             "Dispatch_ID",
             "GPU_ID",
             "Info",

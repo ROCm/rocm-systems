@@ -1,238 +1,518 @@
 ---
 atomics:
-  Unit_atomicAnd_Positive_SameAddress: *level_2
-  Unit_atomicAnd_Positive_Adjacent_Addresses: *level_2
-  Unit_atomicAnd_Positive_Scattered_Addresses: *level_2
-  Unit_atomicAnd_Positive_Multi_Kernel_Same_Address: *level_2
-  Unit_atomicAnd_Positive_Multi_Kernel_Adjacent_Addresses: *level_2
-  Unit_atomicAnd_Positive_Multi_Kernel_Scattered_Addresses: *level_2
-  Unit_atomicAnd_Negative_Parameters_RTC: *level_2
+  Unit_atomicAnd_Positive_SameAddress:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit_atomicAnd_Positive_Adjacent_Addresses:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit_atomicAnd_Positive_Scattered_Addresses:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit_atomicAnd_Positive_Multi_Kernel_Same_Address:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit_atomicAnd_Positive_Multi_Kernel_Adjacent_Addresses:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit_atomicAnd_Positive_Multi_Kernel_Scattered_Addresses:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit_atomicAnd_Negative_Parameters_RTC:
+    <<: *level_2
+    tags: [deviceLib, ops]
   Unit_atomicAnd_system_Positive_Peer_GPUs_Same_Address:
     <<: *level_2
-    tags: [multigpu]
+    tags: [deviceLib, system, multigpu]
   Unit_atomicAnd_system_Positive_Peer_GPUs_Adjacent_Addresses:
     <<: *level_2
-    tags: [multigpu]
+    tags: [deviceLib, system, multigpu]
   Unit_atomicAnd_system_Positive_Peer_GPUs_Scattered_Addresses:
     <<: *level_2
-    tags: [multigpu]
-  Unit_atomicOr_Positive_SameAddress: *level_2
-  Unit_atomicOr_Positive_Adjacent_Addresses: *level_2
-  Unit_atomicOr_Positive_Scattered_Addresses: *level_2
-  Unit_atomicOr_Positive_Multi_Kernel_Same_Address: *level_2
-  Unit_atomicOr_Positive_Multi_Kernel_Adjacent_Addresses: *level_2
-  Unit_atomicOr_Positive_Multi_Kernel_Scattered_Addresses: *level_2
-  Unit_atomicOr_Negative_Parameters_RTC: *level_2
+    tags: [deviceLib, system, multigpu]
+  Unit_atomicOr_Positive_SameAddress:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit_atomicOr_Positive_Adjacent_Addresses:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit_atomicOr_Positive_Scattered_Addresses:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit_atomicOr_Positive_Multi_Kernel_Same_Address:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit_atomicOr_Positive_Multi_Kernel_Adjacent_Addresses:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit_atomicOr_Positive_Multi_Kernel_Scattered_Addresses:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit_atomicOr_Negative_Parameters_RTC:
+    <<: *level_2
+    tags: [deviceLib, ops]
   Unit_atomicOr_system_Positive_Peer_GPUs_Same_Address:
     <<: *level_2
-    tags: [multigpu]
+    tags: [deviceLib, system, multigpu]
   Unit_atomicOr_system_Positive_Peer_GPUs_Adjacent_Addresses:
     <<: *level_2
-    tags: [multigpu]
+    tags: [deviceLib, system, multigpu]
   Unit_atomicOr_system_Positive_Peer_GPUs_Scattered_Addresses:
     <<: *level_2
-    tags: [multigpu]
-  Unit_atomicXor_Positive_SameAddress: *level_2
-  Unit_atomicXor_Positive_Adjacent_Addresses: *level_2
-  Unit_atomicXor_Positive_Scattered_Addresses: *level_2
-  Unit_atomicXor_Positive_Multi_Kernel_Same_Address: *level_2
-  Unit_atomicXor_Positive_Multi_Kernel_Adjacent_Addresses: *level_2
-  Unit_atomicXor_Positive_Multi_Kernel_Scattered_Addresses: *level_2
-  Unit_atomicXor_Negative_Parameters_RTC: *level_2
+    tags: [deviceLib, system, multigpu]
+  Unit_atomicXor_Positive_SameAddress:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit_atomicXor_Positive_Adjacent_Addresses:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit_atomicXor_Positive_Scattered_Addresses:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit_atomicXor_Positive_Multi_Kernel_Same_Address:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit_atomicXor_Positive_Multi_Kernel_Adjacent_Addresses:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit_atomicXor_Positive_Multi_Kernel_Scattered_Addresses:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit_atomicXor_Negative_Parameters_RTC:
+    <<: *level_2
+    tags: [deviceLib, ops]
   Unit_atomicXor_system_Positive_Peer_GPUs_Same_Address:
     <<: *level_2
-    tags: [multigpu]
+    tags: [deviceLib, system, multigpu]
   Unit_atomicXor_system_Positive_Peer_GPUs_Adjacent_Addresses:
     <<: *level_2
-    tags: [multigpu]
+    tags: [deviceLib, system, multigpu]
   Unit_atomicXor_system_Positive_Peer_GPUs_Scattered_Addresses:
     <<: *level_2
-    tags: [multigpu]
-  Unit_atomicMin_Positive_SameAddress: *level_2
-  Unit_atomicMin_Positive_Adjacent_Addresses: *level_2
-  Unit_atomicMin_Positive_Scattered_Addresses: *level_2
-  Unit_atomicMin_Positive_Multi_Kernel_Same_Address: *level_2
-  Unit_atomicMin_Positive_Multi_Kernel_Adjacent_Addresses: *level_2
-  Unit_atomicMin_Positive_Multi_Kernel_Scattered_Addresses: *level_2
-  Unit_atomicMin_Negative_Parameters_RTC: *level_2
+    tags: [deviceLib, system, multigpu]
+  Unit_atomicMin_Positive_SameAddress:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit_atomicMin_Positive_Adjacent_Addresses:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit_atomicMin_Positive_Scattered_Addresses:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit_atomicMin_Positive_Multi_Kernel_Same_Address:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit_atomicMin_Positive_Multi_Kernel_Adjacent_Addresses:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit_atomicMin_Positive_Multi_Kernel_Scattered_Addresses:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit_atomicMin_Negative_Parameters_RTC:
+    <<: *level_2
+    tags: [deviceLib, ops]
   Unit_atomicMin_system_Positive_Peer_GPUs_Same_Address:
     <<: *level_2
-    tags: [multigpu]
+    tags: [deviceLib, system, multigpu]
   Unit_atomicMin_system_Positive_Peer_GPUs_Adjacent_Addresses:
     <<: *level_2
-    tags: [multigpu]
+    tags: [deviceLib, system, multigpu]
   Unit_atomicMin_system_Positive_Peer_GPUs_Scattered_Addresses:
     <<: *level_2
-    tags: [multigpu]
-  Unit_atomicMax_Positive_SameAddress: *level_2
-  Unit_atomicMax_Positive_Adjacent_Addresses: *level_2
-  Unit_atomicMax_Positive_Scattered_Addresses: *level_2
-  Unit_atomicMax_Positive_Multi_Kernel_Same_Address: *level_2
-  Unit_atomicMax_Positive_Multi_Kernel_Adjacent_Addresses: *level_2
-  Unit_atomicMax_Positive_Multi_Kernel_Scattered_Addresses: *level_2
-  Unit_atomicMax_Negative_Parameters_RTC: *level_2
+    tags: [deviceLib, system, multigpu]
+  Unit_atomicMax_Positive_SameAddress:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit_atomicMax_Positive_Adjacent_Addresses:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit_atomicMax_Positive_Scattered_Addresses:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit_atomicMax_Positive_Multi_Kernel_Same_Address:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit_atomicMax_Positive_Multi_Kernel_Adjacent_Addresses:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit_atomicMax_Positive_Multi_Kernel_Scattered_Addresses:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit_atomicMax_Negative_Parameters_RTC:
+    <<: *level_2
+    tags: [deviceLib, ops]
   Unit_atomicMax_system_Positive_Peer_GPUs_Same_Address:
     <<: *level_2
-    tags: [multigpu]
+    tags: [deviceLib, system, multigpu]
   Unit_atomicMax_system_Positive_Peer_GPUs_Adjacent_Addresses:
     <<: *level_2
-    tags: [multigpu]
+    tags: [deviceLib, system, multigpu]
   Unit_atomicMax_system_Positive_Peer_GPUs_Scattered_Addresses:
     <<: *level_2
-    tags: [multigpu]
-  Unit_safeAtomicMin_Positive_SameAddress: *level_2
-  Unit_safeAtomicMin_Positive_Adjacent_Addresses: *level_2
-  Unit_safeAtomicMin_Positive_Scattered_Addresses: *level_2
-  Unit_safeAtomicMin_Positive_Multi_Kernel_Same_Address: *level_2
-  Unit_safeAtomicMin_Positive_Multi_Kernel_Adjacent_Addresses: *level_2
-  Unit_safeAtomicMin_Positive_Multi_Kernel_Scattered_Addresses: *level_2
-  Unit_unsafeAtomicMin_Positive_SameAddress: *level_2
-  Unit_unsafeAtomicMin_Positive_Adjacent_Addresses: *level_2
-  Unit_unsafeAtomicMin_Positive_Scattered_Addresses: *level_2
-  Unit_unsafeAtomicMin_Positive_Multi_Kernel_Same_Address: *level_2
-  Unit_unsafeAtomicMin_Positive_Multi_Kernel_Adjacent_Addresses: *level_2
-  Unit_unsafeAtomicMin_Positive_Multi_Kernel_Scattered_Addresses: *level_2
-  Unit_safeAtomicMax_Positive_SameAddress: *level_2
-  Unit_safeAtomicMax_Positive_Adjacent_Addresses: *level_2
-  Unit_safeAtomicMax_Positive_Scattered_Addresses: *level_2
-  Unit_safeAtomicMax_Positive_Multi_Kernel_Same_Address: *level_2
-  Unit_safeAtomicMax_Positive_Multi_Kernel_Adjacent_Addresses: *level_2
-  Unit_safeAtomicMax_Positive_Multi_Kernel_Scattered_Addresses: *level_2
-  Unit_unsafeAtomicMax_Positive_SameAddress: *level_2
-  Unit_unsafeAtomicMax_Positive_Adjacent_Addresses: *level_2
-  Unit_unsafeAtomicMax_Positive_Scattered_Addresses: *level_2
-  Unit_unsafeAtomicMax_Positive_Multi_Kernel_Same_Address: *level_2
-  Unit_unsafeAtomicMax_Positive_Multi_Kernel_Adjacent_Addresses: *level_2
-  Unit_unsafeAtomicMax_Positive_Multi_Kernel_Scattered_Addresses: *level_2
-  Unit___hip_atomic_fetch_min_Positive_Wavefront_SameAddress: *level_2
-  Unit___hip_atomic_fetch_min_Positive_Wavefront_Adjacent_Addresses: *level_2
-  Unit___hip_atomic_fetch_min_Positive_Wavefront_Scattered_Addresses: *level_2
-  Unit___hip_atomic_fetch_min_Positive_Workgroup_SameAddress: *level_2
-  Unit___hip_atomic_fetch_min_Positive_Workgroup_Adjacent_Addresses: *level_2
-  Unit___hip_atomic_fetch_min_Positive_Workgroup_Scattered_Addresses: *level_2
-  Unit___hip_atomic_fetch_max_Positive_Wavefront_SameAddress: *level_2
-  Unit___hip_atomic_fetch_max_Positive_Wavefront_Adjacent_Addresses: *level_2
-  Unit___hip_atomic_fetch_max_Positive_Wavefront_Scattered_Addresses: *level_2
-  Unit___hip_atomic_fetch_max_Positive_Workgroup_SameAddress: *level_2
-  Unit___hip_atomic_fetch_max_Positive_Workgroup_Adjacent_Addresses: *level_2
-  Unit___hip_atomic_fetch_max_Positive_Workgroup_Scattered_Addresses: *level_2
-  Unit_AtomicBuiltins_Negative_Parameters_RTC: *level_2
-  Unit___hip_atomic_load_store_Positive_Acquire_Release: *level_2
-  Unit___hip_atomic_exchange_Positive_Acquire_Release: *level_2
-  Unit___hip_atomic_compare_exchange_strong_Positive_Acquire_Release: *level_2
-  Unit___hip_atomic_compare_exchange_weak_Positive_Acquire_Release: *level_2
-  Unit___hip_atomic_fetch_add_Positive_Acquire_Release: *level_2
-  Unit___hip_atomic_fetch_and_Positive_Acquire_Release: *level_2
-  Unit___hip_atomic_fetch_or_Positive_Acquire_Release: *level_2
-  Unit___hip_atomic_fetch_xor_Positive_Acquire_Release: *level_2
-  Unit___hip_atomic_fetch_min_Positive_Acquire_Release: *level_2
-  Unit___hip_atomic_fetch_max_Positive_Acquire_Release: *level_2
-  Unit___hip_atomic_load_store_Positive_Sequential_Consistency: *level_2
-  Unit___hip_atomic_exchange_Positive_Sequential_Consistency: *level_2
-  Unit___hip_atomic_compare_exchange_strong_Positive_Sequential_Consistency: *level_2
-  Unit___hip_atomic_compare_exchange_weak_Positive_Sequential_Consistency: *level_2
-  Unit___hip_atomic_fetch_add_Positive_Sequential_Consistency: *level_2
-  Unit___hip_atomic_fetch_and_Positive_Sequential_Consistency: *level_2
-  Unit___hip_atomic_fetch_or_Positive_Sequential_Consistency: *level_2
-  Unit___hip_atomic_fetch_xor_Positive_Sequential_Consistency: *level_2
-  Unit___hip_atomic_fetch_min_Positive_Sequential_Consistency: *level_2
-  Unit___hip_atomic_fetch_max_Positive_Sequential_Consistency: *level_2
-  Unit_atomicAdd_Positive: *level_2
-  Unit_atomicAdd_Positive_Multi_Kernel: *level_2
-  Unit_atomicAdd_Negative_Parameters_RTC: *level_2
+    tags: [deviceLib, system, multigpu]
+  Unit_safeAtomicMin_Positive_SameAddress:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit_safeAtomicMin_Positive_Adjacent_Addresses:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit_safeAtomicMin_Positive_Scattered_Addresses:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit_safeAtomicMin_Positive_Multi_Kernel_Same_Address:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit_safeAtomicMin_Positive_Multi_Kernel_Adjacent_Addresses:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit_safeAtomicMin_Positive_Multi_Kernel_Scattered_Addresses:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit_unsafeAtomicMin_Positive_SameAddress:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit_unsafeAtomicMin_Positive_Adjacent_Addresses:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit_unsafeAtomicMin_Positive_Scattered_Addresses:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit_unsafeAtomicMin_Positive_Multi_Kernel_Same_Address:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit_unsafeAtomicMin_Positive_Multi_Kernel_Adjacent_Addresses:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit_unsafeAtomicMin_Positive_Multi_Kernel_Scattered_Addresses:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit_safeAtomicMax_Positive_SameAddress:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit_safeAtomicMax_Positive_Adjacent_Addresses:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit_safeAtomicMax_Positive_Scattered_Addresses:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit_safeAtomicMax_Positive_Multi_Kernel_Same_Address:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit_safeAtomicMax_Positive_Multi_Kernel_Adjacent_Addresses:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit_safeAtomicMax_Positive_Multi_Kernel_Scattered_Addresses:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit_unsafeAtomicMax_Positive_SameAddress:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit_unsafeAtomicMax_Positive_Adjacent_Addresses:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit_unsafeAtomicMax_Positive_Scattered_Addresses:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit_unsafeAtomicMax_Positive_Multi_Kernel_Same_Address:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit_unsafeAtomicMax_Positive_Multi_Kernel_Adjacent_Addresses:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit_unsafeAtomicMax_Positive_Multi_Kernel_Scattered_Addresses:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit___hip_atomic_fetch_min_Positive_Wavefront_SameAddress:
+    <<: *level_2
+    tags: [deviceLib, builtin]
+  Unit___hip_atomic_fetch_min_Positive_Wavefront_Adjacent_Addresses:
+    <<: *level_2
+    tags: [deviceLib, builtin]
+  Unit___hip_atomic_fetch_min_Positive_Wavefront_Scattered_Addresses:
+    <<: *level_2
+    tags: [deviceLib, builtin]
+  Unit___hip_atomic_fetch_min_Positive_Workgroup_SameAddress:
+    <<: *level_2
+    tags: [deviceLib, builtin]
+  Unit___hip_atomic_fetch_min_Positive_Workgroup_Adjacent_Addresses:
+    <<: *level_2
+    tags: [deviceLib, builtin]
+  Unit___hip_atomic_fetch_min_Positive_Workgroup_Scattered_Addresses:
+    <<: *level_2
+    tags: [deviceLib, builtin]
+  Unit___hip_atomic_fetch_max_Positive_Wavefront_SameAddress:
+    <<: *level_2
+    tags: [deviceLib, builtin]
+  Unit___hip_atomic_fetch_max_Positive_Wavefront_Adjacent_Addresses:
+    <<: *level_2
+    tags: [deviceLib, builtin]
+  Unit___hip_atomic_fetch_max_Positive_Wavefront_Scattered_Addresses:
+    <<: *level_2
+    tags: [deviceLib, builtin]
+  Unit___hip_atomic_fetch_max_Positive_Workgroup_SameAddress:
+    <<: *level_2
+    tags: [deviceLib, builtin]
+  Unit___hip_atomic_fetch_max_Positive_Workgroup_Adjacent_Addresses:
+    <<: *level_2
+    tags: [deviceLib, builtin]
+  Unit___hip_atomic_fetch_max_Positive_Workgroup_Scattered_Addresses:
+    <<: *level_2
+    tags: [deviceLib, builtin]
+  Unit_AtomicBuiltins_Negative_Parameters_RTC:
+    <<: *level_2
+    tags: [builtin, deviceLib]
+  Unit___hip_atomic_load_store_Positive_Acquire_Release:
+    <<: *level_2
+    tags: [deviceLib, memorder]
+  Unit___hip_atomic_exchange_Positive_Acquire_Release:
+    <<: *level_2
+    tags: [deviceLib, memorder]
+  Unit___hip_atomic_compare_exchange_strong_Positive_Acquire_Release:
+    <<: *level_2
+    tags: [deviceLib, memorder]
+  Unit___hip_atomic_compare_exchange_weak_Positive_Acquire_Release:
+    <<: *level_2
+    tags: [deviceLib, memorder]
+  Unit___hip_atomic_fetch_add_Positive_Acquire_Release:
+    <<: *level_2
+    tags: [deviceLib, memorder]
+  Unit___hip_atomic_fetch_and_Positive_Acquire_Release:
+    <<: *level_2
+    tags: [deviceLib, memorder]
+  Unit___hip_atomic_fetch_or_Positive_Acquire_Release:
+    <<: *level_2
+    tags: [deviceLib, memorder]
+  Unit___hip_atomic_fetch_xor_Positive_Acquire_Release:
+    <<: *level_2
+    tags: [deviceLib, memorder]
+  Unit___hip_atomic_fetch_min_Positive_Acquire_Release:
+    <<: *level_2
+    tags: [deviceLib, memorder]
+  Unit___hip_atomic_fetch_max_Positive_Acquire_Release:
+    <<: *level_2
+    tags: [deviceLib, memorder]
+  Unit___hip_atomic_load_store_Positive_Sequential_Consistency:
+    <<: *level_2
+    tags: [deviceLib, memorder]
+  Unit___hip_atomic_exchange_Positive_Sequential_Consistency:
+    <<: *level_2
+    tags: [deviceLib, memorder]
+  Unit___hip_atomic_compare_exchange_strong_Positive_Sequential_Consistency:
+    <<: *level_2
+    tags: [deviceLib, memorder]
+  Unit___hip_atomic_compare_exchange_weak_Positive_Sequential_Consistency:
+    <<: *level_2
+    tags: [deviceLib, memorder]
+  Unit___hip_atomic_fetch_add_Positive_Sequential_Consistency:
+    <<: *level_2
+    tags: [deviceLib, memorder]
+  Unit___hip_atomic_fetch_and_Positive_Sequential_Consistency:
+    <<: *level_2
+    tags: [deviceLib, memorder]
+  Unit___hip_atomic_fetch_or_Positive_Sequential_Consistency:
+    <<: *level_2
+    tags: [deviceLib, memorder]
+  Unit___hip_atomic_fetch_xor_Positive_Sequential_Consistency:
+    <<: *level_2
+    tags: [deviceLib, memorder]
+  Unit___hip_atomic_fetch_min_Positive_Sequential_Consistency:
+    <<: *level_2
+    tags: [deviceLib, memorder]
+  Unit___hip_atomic_fetch_max_Positive_Sequential_Consistency:
+    <<: *level_2
+    tags: [deviceLib, memorder]
+  Unit_atomicAdd_Positive:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit_atomicAdd_Positive_Multi_Kernel:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit_atomicAdd_Negative_Parameters_RTC:
+    <<: *level_2
+    tags: [deviceLib, ops]
   Unit_atomicAdd_system_Positive_Peer_GPUs:
     <<: *level_2
-    tags: [multigpu]
+    tags: [deviceLib, system, multigpu]
     # Rock_Linux_Failures_on_gfx94X
     disabled: [amd_linux]
   Unit_atomicAdd_system_Positive_Host_And_GPU:
     <<: *level_2
-    tags: [multigpu]
+    tags: [deviceLib, system, multigpu]
   Unit_atomicAdd_system_Positive_Host_And_Peer_GPUs:
     <<: *level_2
-    tags: [multigpu]
-  Unit_unsafeAtomicAdd_Positive: *level_2
-  Unit_unsafeAtomicAdd_Positive_Multi_Kernel: *level_2
-  Unit_unsafe_atomic_add_half_and_bfloat: *level_2
-  Unit_safeAtomicAdd_Positive: *level_2
-  Unit_safeAtomicAdd_Positive_Multi_Kernel: *level_2
-  Unit_atomicSub_Positive: *level_2
-  Unit_atomicSub_Positive_Multi_Kernel: *level_2
-  Unit_atomicSub_Negative_Parameters_RTC: *level_2
+    tags: [deviceLib, system, multigpu]
+  Unit_unsafeAtomicAdd_Positive:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit_unsafeAtomicAdd_Positive_Multi_Kernel:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit_unsafe_atomic_add_half_and_bfloat:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit_safeAtomicAdd_Positive:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit_safeAtomicAdd_Positive_Multi_Kernel:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit_atomicSub_Positive:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit_atomicSub_Positive_Multi_Kernel:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit_atomicSub_Negative_Parameters_RTC:
+    <<: *level_2
+    tags: [deviceLib, ops]
   Unit_atomicSub_system_Positive_Peer_GPUs:
     <<: *level_2
-    tags: [multigpu]
+    tags: [deviceLib, system, multigpu]
   Unit_atomicSub_system_Positive_Host_And_GPU:
     <<: *level_2
-    tags: [multigpu]
+    tags: [deviceLib, system, multigpu]
   Unit_atomicSub_system_Positive_Host_And_Peer_GPUs:
     <<: *level_2
-    tags: [multigpu]
-  Unit_atomicCAS_Positive: *level_2
-  Unit_atomicCAS_Positive_Multi_Kernel: *level_2
-  Unit_atomicCAS_Negative_Parameters_RTC: *level_2
+    tags: [deviceLib, system, multigpu]
+  Unit_atomicCAS_Positive:
+    <<: *level_2
+    tags: [deviceLib, cas]
+  Unit_atomicCAS_Positive_Multi_Kernel:
+    <<: *level_2
+    tags: [deviceLib, cas]
+  Unit_atomicCAS_Negative_Parameters_RTC:
+    <<: *level_2
+    tags: [deviceLib, cas]
   Unit_atomicCAS_system_Positive_Peer_GPUs:
     <<: *level_2
-    tags: [multigpu]
+    tags: [deviceLib, system, multigpu]
   Unit_atomicCAS_system_Positive_Host_And_GPU:
     <<: *level_2
-    tags: [multigpu]
+    tags: [deviceLib, system, multigpu]
   Unit_atomicCAS_system_Positive_Host_And_Peer_GPUs:
     <<: *level_2
-    tags: [multigpu]
-  Unit___hip_atomic_fetch_add_Positive_Wavefront: *level_2
-  Unit___hip_atomic_fetch_add_Positive_Workgroup: *level_2
-  Unit___hip_atomic_compare_exchange_strong_Positive_Wavefront: *level_2
-  Unit___hip_atomic_compare_exchange_strong_Positive_Workgroup: *level_2
+    tags: [deviceLib, system, multigpu]
+  Unit___hip_atomic_fetch_add_Positive_Wavefront:
+    <<: *level_2
+    tags: [deviceLib, builtin]
+  Unit___hip_atomic_fetch_add_Positive_Workgroup:
+    <<: *level_2
+    tags: [deviceLib, builtin]
+  Unit___hip_atomic_compare_exchange_strong_Positive_Wavefront:
+    <<: *level_2
+    tags: [deviceLib, builtin]
+  Unit___hip_atomic_compare_exchange_strong_Positive_Workgroup:
+    <<: *level_2
+    tags: [deviceLib, builtin]
   Unit_atomicExch_Positive_Same_Address_Compile_Time:
     <<: *level_2
     # SWDEV-435667: Below tests failing randomly in stress test on 01/12/23
     disabled: [amd_wsl, nvidia_linux]
-  Unit_atomicExch_Positive: *level_2
+    tags: [deviceLib, ops]
+  Unit_atomicExch_Positive:
+    <<: *level_2
+    tags: [deviceLib, ops]
   Unit_atomicExch_Positive_Multi_Kernel:
     <<: *level_2
     # SWDEV-435667: Below tests failing randomly in stress test on 01/12/23
     disabled: [amd_wsl]
-  Unit_atomicExch_Negative_Parameters_RTC: *level_2
+    tags: [deviceLib, ops]
+  Unit_atomicExch_Negative_Parameters_RTC:
+    <<: *level_2
+    tags: [deviceLib, ops]
   Unit_atomicExch_system_Positive_Peer_GPUs:
     <<: *level_2
-    tags: [multigpu]
+    tags: [deviceLib, system, multigpu]
     # SWDEV-435667: Below tests failing randomly in stress test on 01/12/23
     disabled: [amd_wsl]
   Unit_atomicExch_system_Positive_Host_And_GPU:
     <<: *level_2
-    tags: [multigpu]
+    tags: [deviceLib, system, multigpu]
     # SWDEV-435667: Below tests failing randomly in stress test on 01/12/23
     disabled: [amd_wsl, nvidia_linux]
   Unit_atomicExch_system_Positive_Host_And_Peer_GPUs:
     <<: *level_2
-    tags: [multigpu]
+    tags: [deviceLib, system, multigpu]
     # SWDEV-435667: Below tests failing randomly in stress test on 01/12/23
     disabled: [amd_wsl]
-  Unit_atomicExch_system_Negative_Parameters_RTC: *level_2
-  Unit___hip_atomic_fetch_and_Positive_Wavefront_SameAddress: *level_2
-  Unit___hip_atomic_fetch_and_Positive_Wavefront_Adjacent_Addresses: *level_2
-  Unit___hip_atomic_fetch_and_Positive_Wavefront_Scattered_Addresses: *level_2
-  Unit___hip_atomic_fetch_and_Positive_Workgroup_SameAddress: *level_2
-  Unit___hip_atomic_fetch_and_Positive_Workgroup_Adjacent_Addresses: *level_2
-  Unit___hip_atomic_fetch_and_Positive_Workgroup_Scattered_Addresses: *level_2
-  Unit___hip_atomic_fetch_or_Positive_Wavefront_SameAddress: *level_2
-  Unit___hip_atomic_fetch_or_Positive_Wavefront_Adjacent_Addresses: *level_2
-  Unit___hip_atomic_fetch_or_Positive_Wavefront_Scattered_Addresses: *level_2
-  Unit___hip_atomic_fetch_or_Positive_Workgroup_SameAddress: *level_2
-  Unit___hip_atomic_fetch_or_Positive_Workgroup_Adjacent_Addresses: *level_2
-  Unit___hip_atomic_fetch_or_Positive_Workgroup_Scattered_Addresses: *level_2
-  Unit___hip_atomic_fetch_xor_Positive_Wavefront_SameAddress: *level_2
-  Unit___hip_atomic_fetch_xor_Positive_Wavefront_Adjacent_Addresses: *level_2
-  Unit___hip_atomic_fetch_xor_Positive_Wavefront_Scattered_Addresses: *level_2
-  Unit___hip_atomic_fetch_xor_Positive_Workgroup_SameAddress: *level_2
-  Unit___hip_atomic_fetch_xor_Positive_Workgroup_Adjacent_Addresses: *level_2
-  Unit___hip_atomic_fetch_xor_Positive_Workgroup_Scattered_Addresses: *level_2
-  Unit___hip_atomic_exchange_Positive_Wavefront: *level_2
-  Unit___hip_atomic_exchange_Positive_Workgroup: *level_2
-  Unit_atomicInc_Positive: *level_2
-  Unit_atomicInc_Positive_Multi_Kernel: *level_2
-  Unit_atomicInc_Negative_Parameters_RTC: *level_2
-  Unit_atomicDec_Positive: *level_2
-  Unit_atomicDec_Positive_Multi_Kernel: *level_2
-  Unit_atomicDec_Negative_Parameters_RTC: *level_2
+  Unit_atomicExch_system_Negative_Parameters_RTC:
+    <<: *level_2
+    tags: [deviceLib, system]
+  Unit___hip_atomic_fetch_and_Positive_Wavefront_SameAddress:
+    <<: *level_2
+    tags: [deviceLib, builtin]
+  Unit___hip_atomic_fetch_and_Positive_Wavefront_Adjacent_Addresses:
+    <<: *level_2
+    tags: [deviceLib, builtin]
+  Unit___hip_atomic_fetch_and_Positive_Wavefront_Scattered_Addresses:
+    <<: *level_2
+    tags: [deviceLib, builtin]
+  Unit___hip_atomic_fetch_and_Positive_Workgroup_SameAddress:
+    <<: *level_2
+    tags: [deviceLib, builtin]
+  Unit___hip_atomic_fetch_and_Positive_Workgroup_Adjacent_Addresses:
+    <<: *level_2
+    tags: [deviceLib, builtin]
+  Unit___hip_atomic_fetch_and_Positive_Workgroup_Scattered_Addresses:
+    <<: *level_2
+    tags: [deviceLib, builtin]
+  Unit___hip_atomic_fetch_or_Positive_Wavefront_SameAddress:
+    <<: *level_2
+    tags: [deviceLib, builtin]
+  Unit___hip_atomic_fetch_or_Positive_Wavefront_Adjacent_Addresses:
+    <<: *level_2
+    tags: [deviceLib, builtin]
+  Unit___hip_atomic_fetch_or_Positive_Wavefront_Scattered_Addresses:
+    <<: *level_2
+    tags: [deviceLib, builtin]
+  Unit___hip_atomic_fetch_or_Positive_Workgroup_SameAddress:
+    <<: *level_2
+    tags: [deviceLib, builtin]
+  Unit___hip_atomic_fetch_or_Positive_Workgroup_Adjacent_Addresses:
+    <<: *level_2
+    tags: [deviceLib, builtin]
+  Unit___hip_atomic_fetch_or_Positive_Workgroup_Scattered_Addresses:
+    <<: *level_2
+    tags: [deviceLib, builtin]
+  Unit___hip_atomic_fetch_xor_Positive_Wavefront_SameAddress:
+    <<: *level_2
+    tags: [deviceLib, builtin]
+  Unit___hip_atomic_fetch_xor_Positive_Wavefront_Adjacent_Addresses:
+    <<: *level_2
+    tags: [deviceLib, builtin]
+  Unit___hip_atomic_fetch_xor_Positive_Wavefront_Scattered_Addresses:
+    <<: *level_2
+    tags: [deviceLib, builtin]
+  Unit___hip_atomic_fetch_xor_Positive_Workgroup_SameAddress:
+    <<: *level_2
+    tags: [deviceLib, builtin]
+  Unit___hip_atomic_fetch_xor_Positive_Workgroup_Adjacent_Addresses:
+    <<: *level_2
+    tags: [deviceLib, builtin]
+  Unit___hip_atomic_fetch_xor_Positive_Workgroup_Scattered_Addresses:
+    <<: *level_2
+    tags: [deviceLib, builtin]
+  Unit___hip_atomic_exchange_Positive_Wavefront:
+    <<: *level_2
+    tags: [deviceLib, builtin]
+  Unit___hip_atomic_exchange_Positive_Workgroup:
+    <<: *level_2
+    tags: [deviceLib, builtin]
+  Unit_atomicInc_Positive:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit_atomicInc_Positive_Multi_Kernel:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit_atomicInc_Negative_Parameters_RTC:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit_atomicDec_Positive:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit_atomicDec_Positive_Multi_Kernel:
+    <<: *level_2
+    tags: [deviceLib, ops]
+  Unit_atomicDec_Negative_Parameters_RTC:
+    <<: *level_2
+    tags: [deviceLib, ops]

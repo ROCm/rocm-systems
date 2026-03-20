@@ -747,7 +747,7 @@ __device__ void GDAContext::alltoallv_get(rocshmem_team_t team,
       ctrl_value = uncached_load(vol_ctrl);
       seq_bits = (ctrl_value >> seq_shift) & seq_mask;
       displ_bits = ctrl_value & displs_mask;
-    } while (seq_bits != (a2a_sn + 1));
+    } while (seq_bits != ((a2a_sn + 1) & seq_mask));
 
     /* Get data */
     size_t nelems = dest_nelems[dest_pe] * sizeof(T);
