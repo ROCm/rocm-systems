@@ -317,7 +317,7 @@ else()
   set ( CMAKE_INSTALL_PREFIX ${CMAKE_INSTALL_PREFIX} CACHE STRING "Default installation directory." FORCE )
 
   # Installs binaries and exports the library usage data to ${HSAKMT_TARGET}Targets
-  if (UNIX)
+  if (NOT WIN32)
     install ( TARGETS ${HSAKMT_TARGET} EXPORT ${HSAKMT_TARGET}Targets
       ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT asan
       LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT asan )
@@ -331,7 +331,7 @@ else()
     COMPONENT dev PATTERN "linux" EXCLUDE PATTERN "*virtio*" EXCLUDE)
 
   # Record our usage data for clients find_package calls.
-  if (UNIX)
+  if (NOT WIN32)
     install ( EXPORT ${HSAKMT_TARGET}Targets
       FILE ${HSAKMT_TARGET}Targets.cmake
       NAMESPACE ${HSAKMT_TARGET}::
@@ -358,7 +358,7 @@ else()
                    VERSION ${BUILD_VERSION_STRING}
                    COMPATIBILITY
                    AnyNewerVersion)
-  if (UNIX)
+  if (NOT WIN32)
     install(FILES
             ${CMAKE_CURRENT_BINARY_DIR}/${HSAKMT_TARGET}-config.cmake
             ${CMAKE_CURRENT_BINARY_DIR}/${HSAKMT_TARGET}-config-version.cmake
@@ -385,7 +385,7 @@ else()
   # CPACK_PACKAGING_INSTALL_PREFIX is needed in libhsakmt.pc.in
   # TODO: Add support for relocatable packages.
   configure_file ( libhsakmt.pc.in libhsakmt.pc @ONLY )
-  if (UNIX)
+  if (NOT WIN32)
     install ( FILES ${CMAKE_CURRENT_BINARY_DIR}/libhsakmt.pc DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig COMPONENT dev)
   endif()
 
@@ -429,7 +429,7 @@ else()
     endif()
     target_compile_options(${HSAKMT_STATIC_DRM_TARGET} PRIVATE ${DRM_CFLAGS} ${HSAKMT_C_FLAGS})
 
-    if (UNIX)
+    if (NOT WIN32)
       install ( TARGETS ${HSAKMT_STATIC_DRM_TARGET} EXPORT ${HSAKMT_STATIC_DRM_TARGET}Targets
               ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT binary
               LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT binary)

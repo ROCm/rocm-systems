@@ -448,7 +448,7 @@ endif()
 
 ## Set install information
 # Installs binaries and exports the library usage data to ${HSAKMT_TARGET}Targets
-if (UNIX)
+if (NOT WIN32)
   install ( TARGETS ${CORE_RUNTIME_TARGET} EXPORT ${CORE_RUNTIME_NAME}Targets
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT binary
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT binary )
@@ -461,7 +461,7 @@ endif()
 if(ENABLE_ASAN_PACKAGING)
   install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md DESTINATION ${CMAKE_INSTALL_DOCDIR}-asan COMPONENT asan )
 endif()
-if (UNIX)
+if (NOT WIN32)
   install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md DESTINATION ${CMAKE_INSTALL_DOCDIR} COMPONENT binary )
 endif()
 
@@ -470,7 +470,7 @@ install ( DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/inc/ DESTINATION ${CMAKE_INSTALL
 
 ## Configure and install package config file
 # Record our usage data for clients find_package calls.
-if (UNIX)
+if (NOT WIN32)
   install ( EXPORT ${CORE_RUNTIME_NAME}Targets
     FILE ${CORE_RUNTIME_NAME}Targets.cmake
     NAMESPACE ${CORE_RUNTIME_NAME}::
@@ -496,7 +496,7 @@ configure_package_config_file(${CORE_RUNTIME_NAME}-config.cmake.in
 write_basic_package_version_file(${CORE_RUNTIME_NAME}-config-version.cmake
   VERSION ${SO_VERSION_STRING} COMPATIBILITY AnyNewerVersion )
 
-if (UNIX)
+if (NOT WIN32)
   install(FILES ${CMAKE_CURRENT_BINARY_DIR}/${CORE_RUNTIME_NAME}-config.cmake ${CMAKE_CURRENT_BINARY_DIR}/${CORE_RUNTIME_NAME}-config-version.cmake
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${CORE_RUNTIME_NAME}
     COMPONENT dev)
