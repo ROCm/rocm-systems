@@ -41,10 +41,10 @@ except ImportError as e:
 #################################################
 # Module level functions, not part of the class #
 #################################################
-
 VERBOSITY_QUIET = 0  # -q / --quiet
 VERBOSITY_NORMAL = 1  # default (dot-per-test)
 VERBOSITY_VERBOSE = 2  # -v / --verbose (per-test result lines)
+
 
 def print_test_ids(suite):
     for test in suite:

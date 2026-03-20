@@ -123,13 +123,20 @@ class Util:
             # Respects ROCM_HOME/ROCM_PATH env vars, falling back to /opt/rocm.
             # os.environ.copy() is used so the parent process environment is never
             # mutated globally — changes apply only to this subprocess call.
-            rocm_root = os.getenv('ROCM_HOME', os.getenv('ROCM_PATH', '/opt/rocm'))
-            rocm_bin = os.path.join(rocm_root, 'bin')
+            rocm_root = os.getenv("ROCM_HOME", os.getenv("ROCM_PATH", "/opt/rocm"))
+            rocm_bin = os.path.join(rocm_root, "bin")
             env = os.environ.copy()
-            env['PATH'] = rocm_bin + ':' + env.get('PATH', '')
+            env["PATH"] = rocm_bin + ":" + env.get("PATH", "")
 
-            proc = subprocess.Popen(cmd, encoding=self.use_encoding, shell=use_shell,
-                stdin=std_in, stderr=pipe_err, stdout=pipe_out, env=env)
+            proc = subprocess.Popen(
+                cmd,
+                encoding=self.use_encoding,
+                shell=use_shell,
+                stdin=std_in,
+                stderr=pipe_err,
+                stdout=pipe_out,
+                env=env,
+            )
 
             if msg_in:
                 if not self.use_encoding:
@@ -211,7 +218,7 @@ class Util:
         return (rc, std_out, std_err)
 
     def RunCmdAsync(self, cmd, use_shell=False, msg_in=None, capture_stdout=False):
-        '''
+        """
         Run a System Command asynchronously and return rc, std_out, std_err, proc
 
         Args:
@@ -234,9 +241,11 @@ class Util:
             | rc, std_out, std_err, proc = RunCmdAsync('<Some Command>')
             | rc, std_out, std_err, proc = RunCmdAsync('<Some Command>', use_shell=True)
             | rc, std_out, std_err, proc = RunCmdAsync('<Some Command>', capture_stdout=True)
-        '''
+        """
 
-        rc, std_out, std_err, proc = self._RunCmd(cmd, use_shell, msg_in, time_out=None, wait=False, capture_stdout=capture_stdout)
+        rc, std_out, std_err, proc = self._RunCmd(
+            cmd, use_shell, msg_in, time_out=None, wait=False, capture_stdout=capture_stdout
+        )
         return (rc, std_out, std_err, proc)
 
 
