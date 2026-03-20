@@ -225,6 +225,8 @@ if (NOT BUILD_TESTS_ONLY)
       dl
       hsa-runtime64::hsa-runtime64
       -fgpu-rdc
+      $<$<AND:$<CXX_COMPILER_ID:GNU>,$<VERSION_LESS:$<CXX_COMPILER_VERSION>,9.0>>:stdc++fs>
+      $<$<AND:$<CXX_COMPILER_ID:Clang>,$<VERSION_LESS:$<CXX_COMPILER_VERSION>,9.0>>:stdc++fs>
   )
 
   if(${ROCM_MAJOR_VERSION} LESS 7)
