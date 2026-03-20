@@ -183,9 +183,8 @@ void FloodTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
 
 void FloodTester::verifyResults([[maybe_unused]] size_t size) {
   int num_pes {rocshmem_n_pes()};
-  [[maybe_unused]] int my_pe {rocshmem_my_pe()};
 
-  if (num_pes > (1<<20) || args.num_wgs > (1U<<31) || args.wg_size > (1<<12)) {
+  if (num_pes > (1<<20) || args.num_wgs > (1U<<31) || args.wg_size > (1U<<12)) {
     // can't check
     return;
   }

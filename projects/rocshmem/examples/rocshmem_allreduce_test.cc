@@ -66,7 +66,6 @@ __global__ void allreduce_test(int *source, int *dest, size_t nelem,
     int64_t ctx_type = 0;
 
     rocshmem_wg_ctx_create(ctx_type, &ctx);
-    [[maybe_unused]] int num_pes = rocshmem_ctx_n_pes(ctx);
 
     rocshmem_ctx_int_sum_reduce_wg(ctx, team, dest, source, nelem);
 

@@ -416,8 +416,6 @@ __device__ void GDAContext::internal_ring_allreduce(
     T *dst, const T *src, int nelems, GDATeam *team_obj,  // NOLINT(runtime/int)
     int n_seg, int seg_size, int chunk_size) {
 
-  [[maybe_unused]] int stride = team_obj->tinfo_wrt_world->stride;
-  [[maybe_unused]] int PE_start = team_obj->tinfo_wrt_world->pe_start;
   int PE_size = team_obj->tinfo_wrt_world->size;
   long *pSync = team_obj->reduce_pSync;
   T *pWrk = reinterpret_cast<T *>(team_obj->pWrk);
@@ -703,8 +701,6 @@ __device__ void GDAContext::alltoallv_get(rocshmem_team_t team,
                                           const size_t source_displs[]) {
   GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
   int pe_size       = team_obj->num_pes;
-  [[maybe_unused]] int pe_start = team_obj->tinfo_wrt_world->pe_start;
-  [[maybe_unused]] int stride = team_obj->tinfo_wrt_world->stride;
   long *pSync = team_obj->alltoall_pSync;
   int my_pe_in_team = team_obj->my_pe;
   uint64_t a2a_sn   = team_obj->alltoall_sequence_number;
@@ -809,9 +805,7 @@ __device__ void GDAContext::alltoall_linear_thread_puts(rocshmem_team_t team, T 
                                                         const T *src, int nelems) {
   GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
 
-  [[maybe_unused]] int pe_start = team_obj->tinfo_wrt_world->pe_start;
   int pe_size = team_obj->num_pes;
-  [[maybe_unused]] int stride = team_obj->tinfo_wrt_world->stride;
   long *pSync = team_obj->alltoall_pSync;
   int my_pe_in_team = team_obj->my_pe;
   uint64_t alltoall_pSync_offset = (team_obj->alltoall_sequence_number % 2) * pe_size;

@@ -1310,7 +1310,8 @@ void GDABackend::alternate_qp_ports() {
 void* GDABackend::pd_alloc_device_uncached([[maybe_unused]] struct ibv_pd* pd, [[maybe_unused]] void* pd_context, size_t size, [[maybe_unused]] size_t alignment, [[maybe_unused]] uint64_t resource_type) {
   void* dev_ptr{nullptr};
   CHECK_HIP(hipExtMallocWithFlags(reinterpret_cast<void**>(&dev_ptr), size, hipDeviceMallocUncached));
-  memset(dev_ptr, 0, size);
+  CHECK_HIP(hipMemset(dev_ptr, 0, size));
+  CHECK_HIP(hipStreamSynchronize(0));
   return dev_ptr;
 }
 

@@ -138,8 +138,6 @@ struct gda_mlx5_wqe_amo {
 } __attribute__((__packed__)) __attribute__((__aligned__(16)));
 
 // WQEs have a 16B control segment, 16B remote address segment, and one or two additional 16B segments
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wpacked-non-pod"
 struct gda_mlx5_wqe {
   gda_mlx5_wqe_ctrl  ctrl;
   gda_mlx5_wqe_raddr raddr;
@@ -203,8 +201,8 @@ public:
         raddr, rkey,
         laddr, lkey, byte_count,
         send_inline)} { }
-} __attribute__((__packed__)) __attribute__((__aligned__(64)));
-#pragma clang diagnostic pop
+} __attribute__((__aligned__(64)));
+
 static_assert(sizeof(gda_mlx5_wqe) == sizeof(gda_mlx5_wqe_segment[4]),
               "mlx5 WQEs have up to 4 segments");
 
