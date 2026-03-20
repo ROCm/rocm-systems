@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -21,6 +21,7 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip/hip_runtime.h>
 #include <cstdlib>
 #include <vector>
@@ -47,7 +48,7 @@ constexpr int NBUF_FLAGS = 3;
  * ------------------------
  *    - unit/sanityTests/hipHostRegister.cc
  */
-TEST_CASE("Stress_hipHostRegister_RegisterUnregister") {
+HIP_TEST_CASE(Unit_hipHostRegister_RegisterUnregister) {
   HIP_CHECK(hipSetDevice(0));
 
   for (int count = 1; count <= NUM_ITERATIONS; ++count) {
@@ -79,7 +80,7 @@ TEST_CASE("Stress_hipHostRegister_RegisterUnregister") {
  *    - unit/sanityTests/hipHostRegister.cc
  */
 
-TEST_CASE("Stress_hipHostRegister_Nbuf_MultiFlag_RegisterUnregister") {
+HIP_TEST_CASE(Unit_hipHostRegister_Nbuf_MultiFlag_RegisterUnregister) {
   static const size_t sizes[NBUF_SIZES] = {1024, 1048576, 10485760};
 
   static const unsigned int flags[NBUF_FLAGS] = {

@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -21,6 +21,7 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip/hip_runtime.h>
 #include <cstdlib>
 #include <cstring>
@@ -69,7 +70,7 @@ __global__ void freememKernel() {
  * ------------------------
  *    - unit/sanityTests/deviceSideMalloc.cc
  */
-TEST_CASE("Unit_AccessMallocAcrossKernels") {
+HIP_TEST_CASE(Unit_AccessMallocAcrossKernels) {
   allocmemKernel<<<NUM_BLOCKS_DSM, 10>>>();
   HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipDeviceSynchronize());
