@@ -33,6 +33,7 @@
 #cmakedefine USE_HEAP_DEVICE_FINEGRAIN
 #cmakedefine USE_HEAP_DEVICE_UNCACHED
 #cmakedefine USE_HEAP_DEVICE_COARSEGRAIN
+#cmakedefine USE_HEAP_DEVICE_VMM_POSIX
 #cmakedefine USE_FUNC_CALL
 #cmakedefine USE_SINGLE_NODE
 #cmakedefine USE_HDP_FLUSH

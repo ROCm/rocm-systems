@@ -11,14 +11,53 @@ Panel Config:
         value: Avg
         unit: Unit
       metric:
-        L1 Cache stalled by L2:
-          value: SUM((TCP_TCR_TCP_STALL_CYCLES * 100)) / SUM(TCP_GATE_EN2_sum)
+        L1 Cache - VMEM stalled by L1 Cache:
+          value: SUM((SQ_VMEM_TA_CMD_FIFO_FULL * 100)) / SUM(SQ_BUSY_CYCLES)
           unit: Percent
         L1 Cache - TA coalesce rate:
           value: SUM(((4 * TA_BUFFER_WAVEFRONTS_sum) * 100)) / SUM(TA_BUFFER_TOTAL_CYCLES_sum)
           unit: Percent
-        L1 Cache - TA stalled by TCP:
+        L1 Cache - VL1 coalesce efficiency:
+          value: SUM(((TA_TOTAL_WAVEFRONTS_sum * 64) * 100)) / SUM((TCP_TOTAL_ACCESSES_sum * 4))
+          unit: Percent
+        L1 Cache - TA addr stalled by TCP:
+          value: SUM((TA_ADDR_STALLED_BY_TC_CYCLES_sum * 100)) / SUM(TA_TA_BUSY_sum)
+          unit: Percent
+        L1 Cache - TA addr stalled by TD:
+          value: SUM((TA_ADDR_STALLED_BY_TD_CYCLES_sum * 100)) / SUM(TA_TA_BUSY_sum)
+          unit: Percent
+        L1 Cache - TA data stalled by TCP:
+          value: SUM((TA_DATA_STALLED_BY_TC_CYCLES_sum * 100)) / SUM(TA_TA_BUSY_sum)
+          unit: Percent
+        L1 Cache - TA addresser stalled:
+          value: SUM((TA_ADDRESSER_STALLED_CYCLES_sum * 100)) / SUM(TA_TA_BUSY_sum)
+          unit: Percent
+        L1 Cache - TA stalled by TCP (aggregated):
           value: SUM((TCP_TCP_TA_ADDR_STALL_CYCLES_sum * 100)) / SUM(TCP_GATE_EN2_sum)
+          unit: Percent
+        L1 Cache - TCP hit rate:
+          value: SUM(((TCP_TOTAL_CACHE_ACCESSES_sum - TCP_CACHE_MISS_sum) * 100)) / SUM(TCP_TOTAL_CACHE_ACCESSES_sum)
+          unit: Percent
+        L1 Cache - TCP miss rate:
+          value: SUM((TCP_CACHE_MISS_sum * 100)) / SUM(TCP_TOTAL_CACHE_ACCESSES_sum)
+          unit: Percent
+        L1 Cache - TCP stalled by UTCL1:
+          value: SUM((TCP_UTCL1_STALL_INFLIGHT_MAX_sum * 100)) / SUM(TCP_GATE_EN2_sum)
+          unit: Percent
+        L1 Cache - TCP stalled by UTCL2:
+          value: SUM((TCP_UTCL1_STALL_LFIFO_NO_RES_sum * 100)) / SUM(TCP_GATE_EN2_sum)
+          unit: Percent
+        L1 Cache - UTCL1 hit rate:
+          value: SUM((TCP_UTCL1_TRANSLATION_HIT_sum * 100)) / SUM(TCP_UTCL1_REQUEST_sum)
+          unit: Percent
+        L1 Cache - UTCL1 miss rate:
+          value: SUM((TCP_UTCL1_TRANSLATION_MISS_sum * 100)) / SUM(TCP_UTCL1_REQUEST_sum)
+          unit: Percent
+        L1 Cache - TCP stalled by TD:
+          value: SUM((TCP_TD_TCP_STALL_CYCLES_sum * 100)) / SUM(TCP_GATE_EN2_sum)
+          unit: Percent
+        L1 Cache - TCP stalled by L2:
+          value: SUM((TCP_TCR_TCP_STALL_CYCLES_sum * 100)) / SUM(TCP_GATE_EN2_sum)
           unit: Percent
         L1 Cache - Tag RAM 0 Req:
           value: SUM(TCP_TAGRAM0_REQ_sum) / SUM($denom)
@@ -32,18 +71,9 @@ Panel Config:
         L1 Cache - Tag RAM 3 Req:
           value: SUM(TCP_TAGRAM3_REQ_sum) / SUM($denom)
           unit: (Requests + $normUnit)
-        L1 Cache - VMEM stalled by L1 Cache:
-          value: SUM((SQ_VMEM_TA_CMD_FIFO_FULL * 100)) / SUM(SQ_BUSY_CYCLES)
-          unit: Percent
-        L1 Cache - TCP stalled caused by UTCL1:
-          value: SUM((TCP_UTCL1_STALL_INFLIGHT_MAX_sum * 100)) / SUM(TCP_GATE_EN2_sum)
-          unit: Percent
-        L1 Cache - TCP stalled caused by UTCL2:
-          value: SUM((TCP_UTCL1_STALL_LFIFO_NO_RES_sum * 100)) / SUM(TCP_GATE_EN2_sum)
-          unit: Percent
   - metric_table:
       id: 3002
-      title: L1 traffic
+      title: L1 Traffic
       header:
         metric: Metric
         value: Avg
@@ -52,26 +82,26 @@ Panel Config:
         VMEM issue rate:
           value: SUM(SQ_INSTS_VMEM) / SUM(SQ_WAVE_CYCLES)
           unit: Instructions per Cycle
+        L1 inbound traffic (TA_TOTAL_WAVEFRONTS):
+          value: SUM(TA_TOTAL_WAVEFRONTS_sum) / SUM($denom)
+          unit: (Instructions + $normUnit)
+        TA processing rate:
+          value: SUM(TA_TOTAL_WAVEFRONTS_sum) / SUM(TA_TA_BUSY_sum)
+          unit: Instructions per Cycle
         CU-L1 throughput:
           value: SUM(TCP_TOTAL_ACCESSES_sum) / SUM(TCP_GATE_EN2_sum)
           unit: Requests per Cycle
-        L1-CU throughput:
-          value: SUM(TD_LOAD_WAVEFRONT_sum) / SUM(TD_TD_BUSY_sum)
-          unit: Instructions per Cycle
-        L1 in bound traffic (TA_TOTAL_WAVEFRONTS):
-          value: SUM(TA_TOTAL_WAVEFRONTS_sum) / SUM($denom)
-          unit: (Instructions + $normUnit)
         L1 utilization:
           value: SUM((TCP_GATE_EN2_sum * 100)) / SUM(TCP_GATE_EN1_sum)
           unit: Percent
-        L1 processing rate:
-          value: SUM(TA_TOTAL_WAVEFRONTS_sum) / SUM(TA_TA_BUSY_sum)
-          unit: Instructions per Cycle
         L1 latency:
           value: SUM(TCP_TCP_LATENCY_sum) / SUM(TCP_TOTAL_ACCESSES_sum)
           unit: Cycles per Request
-        L1-L2 throughput:
+        L1-L2 throughput (reads + writes):
           value: SUM((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum)) / SUM(TCP_GATE_EN2_sum)
+          unit: Requests per Cycle
+        L1-L2 throughput (total):
+          value: SUM((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / SUM(TCP_GATE_EN2_sum)
           unit: Requests per Cycle
         L2 read latency:
           value: SUM(TCP_TCC_READ_REQ_LATENCY_sum) / SUM(TCP_TCC_READ_REQ_sum)
@@ -79,28 +109,138 @@ Panel Config:
         L2 write latency:
           value: SUM(TCP_TCC_WRITE_REQ_LATENCY_sum) / SUM(TCP_TCC_WRITE_REQ_sum)
           unit: Cycles per Request
+        UTCL1 latency:
+          value: SUM(TCP_CLIENT_UTCL1_INFLIGHT_sum) / SUM(TCP_UTCL1_REQUEST_sum)
+          unit: Cycles per Request
+        UTCL1 to UTCL2 latency:
+          value: SUM(TCP_UTCL1_UTCL2_INFLIGHT_sum) / SUM(TCP_UTCL1_TRANSLATION_MISS_sum)
+          unit: Cycles per Request
   - metric_table:
       id: 3003
+      title: TD Return Path
+      header:
+        metric: Metric
+        value: Avg
+        unit: Unit
+      metric:
+        TD - stalled by TCP:
+          value: SUM((TD_TC_STALL_sum * 100)) / SUM(TD_TD_BUSY_sum)
+          unit: Percent
+        TD - input FIFO full:
+          value: SUM((TD_TC_TD_FIFO_FULL_sum * 100)) / SUM(TD_TD_BUSY_sum)
+          unit: Percent
+        TD - output FIFO full:
+          value: SUM((TD_OUTPUT_FIFO_FULL_sum * 100)) / SUM(TD_TD_BUSY_sum)
+          unit: Percent
+        TD - stalled by SPI:
+          value: SUM((TD_SPI_STALL_sum * 100)) / SUM(TD_TD_BUSY_sum)
+          unit: Percent
+        TD - L1-CU throughput:
+          value: SUM(TD_LOAD_WAVEFRONT_sum) / SUM(TD_TD_BUSY_sum)
+          unit: Instructions per Cycle
+        TD - load wavefronts:
+          value: SUM(TD_LOAD_WAVEFRONT_sum) / SUM($denom)
+          unit: (Wavefronts + $normUnit)
+        TD - atomic wavefronts:
+          value: SUM(TD_ATOMIC_WAVEFRONT_sum) / SUM($denom)
+          unit: (Wavefronts + $normUnit)
+        TD - store wavefronts:
+          value: SUM(TD_STORE_WAVEFRONT_sum) / SUM($denom)
+          unit: (Wavefronts + $normUnit)
+        TD - coalescable wavefronts rate:
+          value: SUM((TD_COALESCABLE_WAVEFRONT_sum * 100)) / SUM(TD_LOAD_WAVEFRONT_sum)
+          unit: Percent
+  - metric_table:
+      id: 3004
+      title: Normalized Stall Metrics (%)
+      header:
+        metric: Metric
+        value: Avg
+        unit: Unit
+      metric:
+        # SQ stalls (upstream)
+        Normalized L1 Cache - VMEM stalled by L1 Cache:
+          value: SUM((SQ_VMEM_TA_CMD_FIFO_FULL * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
+          unit: Percent
+        # TA stalls
+        Normalized L1 Cache - TA addr stalled by TCP:
+          value: SUM((TA_ADDR_STALLED_BY_TC_CYCLES_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
+          unit: Percent
+        Normalized L1 Cache - TA addr stalled by TD:
+          value: SUM((TA_ADDR_STALLED_BY_TD_CYCLES_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
+          unit: Percent
+        Normalized L1 Cache - TA data stalled by TCP:
+          value: SUM((TA_DATA_STALLED_BY_TC_CYCLES_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
+          unit: Percent
+        Normalized L1 Cache - TA addresser stalled:
+          value: SUM((TA_ADDRESSER_STALLED_CYCLES_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
+          unit: Percent
+        Normalized L1 Cache - TA stalled by TCP (aggregated):
+          value: SUM((TCP_TCP_TA_ADDR_STALL_CYCLES_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
+          unit: Percent
+        # TCP stalls
+        Normalized L1 Cache - TCP stalled by UTCL1:
+          value: SUM((TCP_UTCL1_STALL_INFLIGHT_MAX_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
+          unit: Percent
+        Normalized L1 Cache - TCP stalled by UTCL2:
+          value: SUM((TCP_UTCL1_STALL_LFIFO_NO_RES_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
+          unit: Percent
+        Normalized L1 Cache - TCP stalled by TD:
+          value: SUM((TCP_TD_TCP_STALL_CYCLES_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
+          unit: Percent
+        Normalized L1 Cache - TCP stalled by L2:
+          value: SUM((TCP_TCR_TCP_STALL_CYCLES_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
+          unit: Percent
+        # TD stalls
+        Normalized TD - stalled by TCP:
+          value: SUM((TD_TC_STALL_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
+          unit: Percent
+        Normalized TD - input FIFO full:
+          value: SUM((TD_TC_TD_FIFO_FULL_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
+          unit: Percent
+        Normalized TD - output FIFO full:
+          value: SUM((TD_OUTPUT_FIFO_FULL_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
+          unit: Percent
+        Normalized TD - stalled by SPI:
+          value: SUM((TD_SPI_STALL_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
+          unit: Percent
+  - metric_table:
+      id: 3005
+      title: Normalized Throughput Metrics (per Second)
+      header:
+        metric: Metric
+        value: Avg
+        unit: Unit
+      metric:
+        Normalized TA processing rate:
+          value: SUM(TA_TOTAL_WAVEFRONTS_sum) / (SUM((End_Timestamp - Start_Timestamp)) / 1000000000)
+          unit: Instructions/s
+        Normalized CU-L1 throughput:
+          value: SUM(TCP_TOTAL_ACCESSES_sum) / (SUM((End_Timestamp - Start_Timestamp)) / 1000000000)
+          unit: Requests/s
+        Normalized L1-L2 throughput (reads + writes):
+          value: SUM((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum)) / (SUM((End_Timestamp - Start_Timestamp)) / 1000000000)
+          unit: Requests/s
+        Normalized L1-L2 throughput (total):
+          value: SUM((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / (SUM((End_Timestamp - Start_Timestamp)) / 1000000000)
+          unit: Requests/s
+        Normalized TD - L1-CU throughput:
+          value: SUM(TD_LOAD_WAVEFRONT_sum) / (SUM((End_Timestamp - Start_Timestamp)) / 1000000000)
+          unit: Instructions/s
+  - metric_table:
+      id: 3006
       title: Raw Counter Value
       header:
         metric: Metric
         value: Avg
         unit: Unit
       metric:
-        TCP_TCR_TCP_STALL_CYCLES:
-          value: SUM(TCP_TCR_TCP_STALL_CYCLES_sum) / SUM($denom)
-          unit: (Cycles + $normUnit)
-        TCP Busy (TCP_GATE_EN2_sum):
-          value: SUM(TCP_GATE_EN2_sum) / SUM($denom)
-          unit: (Cycles + $normUnit)
-        TA_BUFFER_WAVEFRONTS:
-          value: SUM(TA_BUFFER_WAVEFRONTS_sum) / SUM($denom)
+        # SQ counters (upstream)
+        SQ_INSTS_VMEM:
+          value: SUM(SQ_INSTS_VMEM) / SUM($denom)
           unit: (Instructions + $normUnit)
-        TA_BUFFER_TOTAL_CYCLES (# of buffer memory accesses cycles):
-          value: SUM(TA_BUFFER_TOTAL_CYCLES_sum) / SUM($denom)
-          unit: (Cycles + $normUnit)
-        TCP_TCP_TA_ADDR_STALL_CYCLES:
-          value: SUM(TCP_TCP_TA_ADDR_STALL_CYCLES_sum) / SUM($denom)
+        SQ_WAVE_CYCLES:
+          value: SUM(SQ_WAVE_CYCLES) / SUM($denom)
           unit: (Cycles + $normUnit)
         SQ_VMEM_TA_CMD_FIFO_FULL:
           value: SUM(SQ_VMEM_TA_CMD_FIFO_FULL) / SUM($denom)
@@ -108,44 +248,105 @@ Panel Config:
         SQ_BUSY_CYCLES:
           value: SUM(SQ_BUSY_CYCLES) / SUM($denom)
           unit: (Cycles + $normUnit)
+        # TA counters
+        TA_TOTAL_WAVEFRONTS:
+          value: SUM(TA_TOTAL_WAVEFRONTS_sum) / SUM($denom)
+          unit: (Instructions + $normUnit)
+        TA_BUFFER_WAVEFRONTS:
+          value: SUM(TA_BUFFER_WAVEFRONTS_sum) / SUM($denom)
+          unit: (Instructions + $normUnit)
+        TA_BUFFER_TOTAL_CYCLES:
+          value: SUM(TA_BUFFER_TOTAL_CYCLES_sum) / SUM($denom)
+          unit: (Cycles + $normUnit)
+        TA_TA_BUSY:
+          value: SUM(TA_TA_BUSY_sum) / SUM($denom)
+          unit: (Cycles + $normUnit)
+        TA_ADDR_STALLED_BY_TC_CYCLES:
+          value: SUM(TA_ADDR_STALLED_BY_TC_CYCLES_sum) / SUM($denom)
+          unit: (Cycles + $normUnit)
+        TA_ADDR_STALLED_BY_TD_CYCLES:
+          value: SUM(TA_ADDR_STALLED_BY_TD_CYCLES_sum) / SUM($denom)
+          unit: (Cycles + $normUnit)
+        TA_DATA_STALLED_BY_TC_CYCLES:
+          value: SUM(TA_DATA_STALLED_BY_TC_CYCLES_sum) / SUM($denom)
+          unit: (Cycles + $normUnit)
+        TA_ADDRESSER_STALLED_CYCLES:
+          value: SUM(TA_ADDRESSER_STALLED_CYCLES_sum) / SUM($denom)
+          unit: (Cycles + $normUnit)
+        # TCP counters
+        TCP_GATE_EN1 (free running cycles):
+          value: SUM(TCP_GATE_EN1_sum) / SUM($denom)
+          unit: (Cycles + $normUnit)
+        TCP_GATE_EN2 (busy cycles):
+          value: SUM(TCP_GATE_EN2_sum) / SUM($denom)
+          unit: (Cycles + $normUnit)
+        TCP_TOTAL_ACCESSES:
+          value: SUM(TCP_TOTAL_ACCESSES_sum) / SUM($denom)
+          unit: (Requests + $normUnit)
+        TCP_TOTAL_CACHE_ACCESSES:
+          value: SUM(TCP_TOTAL_CACHE_ACCESSES_sum) / SUM($denom)
+          unit: (Requests + $normUnit)
+        TCP_CACHE_MISS:
+          value: SUM(TCP_CACHE_MISS_sum) / SUM($denom)
+          unit: (Requests + $normUnit)
+        TCP_TCP_LATENCY:
+          value: SUM(TCP_TCP_LATENCY_sum) / SUM($denom)
+          unit: (Cycles + $normUnit)
+        TCP_TCP_TA_ADDR_STALL_CYCLES:
+          value: SUM(TCP_TCP_TA_ADDR_STALL_CYCLES_sum) / SUM($denom)
+          unit: (Cycles + $normUnit)
+        TCP_TD_TCP_STALL_CYCLES:
+          value: SUM(TCP_TD_TCP_STALL_CYCLES_sum) / SUM($denom)
+          unit: (Cycles + $normUnit)
+        TCP_TCR_TCP_STALL_CYCLES:
+          value: SUM(TCP_TCR_TCP_STALL_CYCLES_sum) / SUM($denom)
+          unit: (Cycles + $normUnit)
+        TCP_TAGRAM0_REQ:
+          value: SUM(TCP_TAGRAM0_REQ_sum) / SUM($denom)
+          unit: (Requests + $normUnit)
+        TCP_TAGRAM1_REQ:
+          value: SUM(TCP_TAGRAM1_REQ_sum) / SUM($denom)
+          unit: (Requests + $normUnit)
+        TCP_TAGRAM2_REQ:
+          value: SUM(TCP_TAGRAM2_REQ_sum) / SUM($denom)
+          unit: (Requests + $normUnit)
+        TCP_TAGRAM3_REQ:
+          value: SUM(TCP_TAGRAM3_REQ_sum) / SUM($denom)
+          unit: (Requests + $normUnit)
+        # TCP UTCL1 counters
+        TCP_UTCL1_REQUEST:
+          value: SUM(TCP_UTCL1_REQUEST_sum) / SUM($denom)
+          unit: (Requests + $normUnit)
+        TCP_UTCL1_TRANSLATION_HIT:
+          value: SUM(TCP_UTCL1_TRANSLATION_HIT_sum) / SUM($denom)
+          unit: (Requests + $normUnit)
+        TCP_UTCL1_TRANSLATION_MISS:
+          value: SUM(TCP_UTCL1_TRANSLATION_MISS_sum) / SUM($denom)
+          unit: (Requests + $normUnit)
         TCP_UTCL1_STALL_INFLIGHT_MAX:
           value: SUM(TCP_UTCL1_STALL_INFLIGHT_MAX_sum) / SUM($denom)
           unit: (Cycles + $normUnit)
         TCP_UTCL1_STALL_LFIFO_NO_RES:
           value: SUM(TCP_UTCL1_STALL_LFIFO_NO_RES_sum) / SUM($denom)
           unit: (Cycles + $normUnit)
-        SQ_INSTS_VMEM:
-          value: SUM(SQ_INSTS_VMEM) / SUM($denom)
-          unit: (Instructions + $normUnit)
-        SQ_WAVE_CYCLES:
-          value: SUM(SQ_WAVE_CYCLES) / SUM($denom)
+        TCP_CLIENT_UTCL1_INFLIGHT:
+          value: SUM(TCP_CLIENT_UTCL1_INFLIGHT_sum) / SUM($denom)
           unit: (Cycles + $normUnit)
-        TCP_TOTAL_ACCESSES:
-          value: SUM(TCP_TOTAL_ACCESSES_sum) / SUM($denom)
-          unit: (Requests + $normUnit)
-        TD_LOAD_WAVEFRONT:
-          value: SUM(TD_LOAD_WAVEFRONT_sum) / SUM($denom)
-          unit: (Instructions + $normUnit)
-        TD_TD_BUSY:
-          value: SUM(TD_TD_BUSY_sum) / SUM($denom)
+        TCP_UTCL1_UTCL2_INFLIGHT:
+          value: SUM(TCP_UTCL1_UTCL2_INFLIGHT_sum) / SUM($denom)
           unit: (Cycles + $normUnit)
-        TA_TOTAL_WAVEFRONTS:
-          value: SUM(TA_TOTAL_WAVEFRONTS_sum) / SUM($denom)
-          unit: (Instructions + $normUnit)
-        TCP_GATE_EN1 (# of free running cycles):
-          value: SUM(TCP_GATE_EN1_sum) / SUM($denom)
-          unit: (Cycles + $normUnit)
-        TA_TA_BUSY:
-          value: SUM(TA_TA_BUSY_sum) / SUM($denom)
-          unit: (Cycles + $normUnit)
-        TCP_TCP_LATENCY:
-          value: SUM(TCP_TCP_LATENCY_sum) / SUM($denom)
-          unit: (Cycles + $normUnit)
+        # TCP-TCC interface counters
         TCP_TCC_READ_REQ:
           value: SUM(TCP_TCC_READ_REQ_sum) / SUM($denom)
           unit: (Requests + $normUnit)
         TCP_TCC_WRITE_REQ:
           value: SUM(TCP_TCC_WRITE_REQ_sum) / SUM($denom)
+          unit: (Requests + $normUnit)
+        TCP_TCC_ATOMIC_WITH_RET_REQ:
+          value: SUM(TCP_TCC_ATOMIC_WITH_RET_REQ_sum) / SUM($denom)
+          unit: (Requests + $normUnit)
+        TCP_TCC_ATOMIC_WITHOUT_RET_REQ:
+          value: SUM(TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum) / SUM($denom)
           unit: (Requests + $normUnit)
         TCP_TCC_READ_REQ_LATENCY:
           value: SUM(TCP_TCC_READ_REQ_LATENCY_sum) / SUM($denom)
@@ -153,77 +354,246 @@ Panel Config:
         TCP_TCC_WRITE_REQ_LATENCY:
           value: SUM(TCP_TCC_WRITE_REQ_LATENCY_sum) / SUM($denom)
           unit: (Cycles + $normUnit)
-        TCP_TOTAL_CACHE_ACCESSES:
-          value: SUM(TCP_TOTAL_CACHE_ACCESSES_sum) / SUM($denom)
-          unit: (Requests + $normUnit)
+        # TD counters (return path)
+        TD_TD_BUSY:
+          value: SUM(TD_TD_BUSY_sum) / SUM($denom)
+          unit: (Cycles + $normUnit)
+        TD_TC_STALL:
+          value: SUM(TD_TC_STALL_sum) / SUM($denom)
+          unit: (Cycles + $normUnit)
+        TD_TC_TD_FIFO_FULL:
+          value: SUM(TD_TC_TD_FIFO_FULL_sum) / SUM($denom)
+          unit: (Cycles + $normUnit)
+        TD_OUTPUT_FIFO_FULL:
+          value: SUM(TD_OUTPUT_FIFO_FULL_sum) / SUM($denom)
+          unit: (Cycles + $normUnit)
+        TD_SPI_STALL:
+          value: SUM(TD_SPI_STALL_sum) / SUM($denom)
+          unit: (Cycles + $normUnit)
+        TD_LOAD_WAVEFRONT:
+          value: SUM(TD_LOAD_WAVEFRONT_sum) / SUM($denom)
+          unit: (Instructions + $normUnit)
+        TD_ATOMIC_WAVEFRONT:
+          value: SUM(TD_ATOMIC_WAVEFRONT_sum) / SUM($denom)
+          unit: (Instructions + $normUnit)
+        TD_STORE_WAVEFRONT:
+          value: SUM(TD_STORE_WAVEFRONT_sum) / SUM($denom)
+          unit: (Instructions + $normUnit)
+        TD_COALESCABLE_WAVEFRONT:
+          value: SUM(TD_COALESCABLE_WAVEFRONT_sum) / SUM($denom)
+          unit: (Instructions + $normUnit)
+        # GRBM counters (global)
+        GRBM_GUI_ACTIVE:
+          value: SUM(GRBM_GUI_ACTIVE) / SUM($denom)
+          unit: (Cycles + $normUnit)
+        GRBM_COUNT:
+          value: SUM(GRBM_COUNT) / SUM($denom)
+          unit: (Cycles + $normUnit)
+        # Misc
         Num CUs:
           value: $cu_per_gpu
           unit: Count
-        TCP_TCC_ATOMIC_WITH_RET_REQ:
-          value: SUM(TCP_TCC_ATOMIC_WITH_RET_REQ_sum) / SUM($denom)
-          unit: (Requests + $normUnit)
-        TCP_TCC_ATOMIC_WITHOUT_RET_REQ:
-          value: SUM(TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum) / SUM($denom)
-          unit: (Requests + $normUnit)
   metrics_description:
-    TCP Busy: The number of cycles TCP is processing pending requests.
-    L1 Cache - L1 Cache stalled by L2: >-
-      Measures backpressure from L2 Cache to L1 Cache. A high stall rate of 10% (>= 10%) indicates that L2 is the bottleneck.
-      Equation: SUM((TCP_TCR_TCP_STALL_CYCLES * 100)) / SUM(TCP_GATE_EN2_sum)
-    L1 Cache - TA coalesce rate: >-
-      Measures the TA's capability in coalescing Buffer or Flat addresses. The optimal rate is 100%, the worst case rate is 25%. A low rate of 50% (<= 50%) indicates that TA is the bottleneck.
-      Equation: SUM(((4 * TA_BUFFER_WAVEFRONTS_sum) * 100)) / SUM(TA_BUFFER_TOTAL_CYCLES_sum)
-    L1 Cache - TA stalled by TCP: >-
-      Measures the aggregated impact of TCP events on TA. A high stall rate of 10% (>= 10%) indicates that TCP is the bottleneck.
-      Equation: SUM((TCP_TCP_TA_ADDR_STALL_CYCLES_sum * 100)) / SUM(TCP_GATE_EN2_sum)
-    L1 Cache - Tag RAM 0 Req: >-
-      The number of TCC (L2) requests from tagram0.
-      Equation: SUM(TCP_TAGRAM0_REQ_sum) / SUM($denom)
-    L1 Cache - Tag RAM 1 Req: >-
-      The number of TCC (L2) requests from tagram1.
-      Equation: SUM(TCP_TAGRAM1_REQ_sum) / SUM($denom)
-    L1 Cache - Tag RAM 2 Req: >-
-      The number of TCC (L2) requests from tagram2.
-      Equation: SUM(TCP_TAGRAM2_REQ_sum) / SUM($denom)
-    L1 Cache - Tag RAM 3 Req: >-
-      The number of TCC (L2) requests from tagram3.
-      Equation: SUM(TCP_TAGRAM3_REQ_sum) / SUM($denom)
+    # Table 3001: L1 Cache Stalls (upstream to downstream)
     L1 Cache - VMEM stalled by L1 Cache: >-
-      Measures backpressure from TCP to SQ. A high stall rate of 10% (>= 10%) indicates that TCP stall is backpressured to SQ.
+      Measures backpressure from TCP to SQ. A high stall rate (>= 10%) indicates that TCP stall is backpressured to SQ.
       Equation: SUM((SQ_VMEM_TA_CMD_FIFO_FULL * 100)) / SUM(SQ_BUSY_CYCLES)
-    L1 Cache - TCP stalled caused by UTCL1: >-
-      Measures backpressure from UTCL1 to TCP (L1). A high stall rate of 10% (>= 10%) indicates that UTCL1 is stalled due to reaching the max inflight count.
+    L1 Cache - TA coalesce rate: >-
+      Measures the TA's capability in coalescing Buffer or Flat addresses. TA can pass 4 unique addresses per cycle.
+      The optimal rate is 100% (4 cycles per wavefront), the worst case rate is 25% (16 cycles per wavefront).
+      A low rate (<= 50%) indicates poor address locality.
+      Equation: SUM(((4 * TA_BUFFER_WAVEFRONTS_sum) * 100)) / SUM(TA_BUFFER_TOTAL_CYCLES_sum)
+    L1 Cache - VL1 coalesce efficiency: >-
+      Measures how efficiently threads are packed into TCP requests via TA coalescing.
+      Numerator: Total threads processed (64 threads/wavefront × wavefronts).
+      Denominator: Maximum threads that could be served if every TCP request was fully coalesced (4 threads/request).
+      100% = perfect 4:1 coalescing (4 contiguous threads share each cache line access).
+      25% = no coalescing (each thread requires a separate TCP request).
+      A low rate indicates scattered memory access patterns that defeat coalescing.
+      Equation: SUM(((TA_TOTAL_WAVEFRONTS_sum * 64) * 100)) / SUM((TCP_TOTAL_ACCESSES_sum * 4))
+    L1 Cache - TA addr stalled by TCP: >-
+      Measures cycles the TA address path is stalled by TCP (L1 cache). A high rate indicates TCP backpressure.
+      Equation: SUM((TA_ADDR_STALLED_BY_TC_CYCLES_sum * 100)) / SUM(TA_TA_BUSY_sum)
+    L1 Cache - TA addr stalled by TD: >-
+      Measures cycles the TA address path is stalled by TD (texture data). A high rate indicates TD return path congestion.
+      Equation: SUM((TA_ADDR_STALLED_BY_TD_CYCLES_sum * 100)) / SUM(TA_TA_BUSY_sum)
+    L1 Cache - TA data stalled by TCP: >-
+      Measures cycles the TA data path is stalled by TCP (L1 cache). A high rate indicates TCP write data backpressure.
+      Equation: SUM((TA_DATA_STALLED_BY_TC_CYCLES_sum * 100)) / SUM(TA_TA_BUSY_sum)
+    L1 Cache - TA addresser stalled: >-
+      Measures total cycles the TA addresser is stalled. High values indicate address generation bottlenecks.
+      Equation: SUM((TA_ADDRESSER_STALLED_CYCLES_sum * 100)) / SUM(TA_TA_BUSY_sum)
+    L1 Cache - TA stalled by TCP (aggregated): >-
+      Measures the aggregated impact of TCP events on TA. A high stall rate (>= 10%) indicates that TCP is the bottleneck.
+      Equation: SUM((TCP_TCP_TA_ADDR_STALL_CYCLES_sum * 100)) / SUM(TCP_GATE_EN2_sum)
+    L1 Cache - TCP hit rate: >-
+      Percentage of L1 cache accesses that hit in the cache. Higher is better.
+      Equation: SUM(((TCP_TOTAL_CACHE_ACCESSES_sum - TCP_CACHE_MISS_sum) * 100)) / SUM(TCP_TOTAL_CACHE_ACCESSES_sum)
+    L1 Cache - TCP miss rate: >-
+      Percentage of L1 cache accesses that miss. Lower is better. Misses go to L2 (TCC).
+      Equation: SUM((TCP_CACHE_MISS_sum * 100)) / SUM(TCP_TOTAL_CACHE_ACCESSES_sum)
+    L1 Cache - TCP stalled by UTCL1: >-
+      Measures backpressure from UTCL1 (TLB) to TCP. A high stall rate (>= 10%) indicates UTCL1 is saturated with inflight requests.
       Equation: SUM((TCP_UTCL1_STALL_INFLIGHT_MAX_sum * 100)) / SUM(TCP_GATE_EN2_sum)
-    L1 Cache - TCP stalled caused by UTCL2: >-
-      Measures backpressure from UTCL2 to TCP (L1). A high stall rate of 10% (>= 10%) indicates that UTCL2 misses is the bottleneck.
+    L1 Cache - TCP stalled by UTCL2: >-
+      Measures backpressure from UTCL2 to TCP. A high stall rate (>= 10%) indicates UTCL2 misses causing TLB latency.
       Equation: SUM((TCP_UTCL1_STALL_LFIFO_NO_RES_sum * 100)) / SUM(TCP_GATE_EN2_sum)
+    L1 Cache - UTCL1 hit rate: >-
+      Percentage of UTCL1 (TLB) translation requests that hit. Higher is better for address translation performance.
+      Equation: SUM((TCP_UTCL1_TRANSLATION_HIT_sum * 100)) / SUM(TCP_UTCL1_REQUEST_sum)
+    L1 Cache - UTCL1 miss rate: >-
+      Percentage of UTCL1 (TLB) translation requests that miss. Misses require UTCL2 lookup, adding latency.
+      Equation: SUM((TCP_UTCL1_TRANSLATION_MISS_sum * 100)) / SUM(TCP_UTCL1_REQUEST_sum)
+    L1 Cache - TCP stalled by TD: >-
+      Measures backpressure from TD (texture data) to TCP. A high rate indicates TD cannot consume return data fast enough.
+      Equation: SUM((TCP_TD_TCP_STALL_CYCLES_sum * 100)) / SUM(TCP_GATE_EN2_sum)
+    L1 Cache - TCP stalled by L2: >-
+      Measures backpressure from L2 (TCC) to L1 (TCP) via TCR. A high stall rate (>= 10%) indicates L2 is the bottleneck.
+      Equation: SUM((TCP_TCR_TCP_STALL_CYCLES_sum * 100)) / SUM(TCP_GATE_EN2_sum)
+    # Table 3002: L1 Traffic
     VMEM issue rate: >-
-      The number of VMEM instructions issued by the SQ (CU) per SQ (CU) wave cycle.
+      The number of VMEM instructions issued by the SQ (CU) per wave cycle.
       Equation: SUM(SQ_INSTS_VMEM) / SUM(SQ_WAVE_CYCLES)
-    CU-L1 throughput: >-
-      The total number of TA (L1) accesses per active cycle.
-      Equation: SUM(TCP_TOTAL_ACCESSES_sum) / SUM(TCP_GATE_EN2_sum)
-    L1-CU throughput: >-
-      The number of instructions returned to the SQ (CU) per active cycle.
-      Equation: SUM(TD_LOAD_WAVEFRONT_sum) / SUM(TD_TD_BUSY_sum)
-    L1 in bound traffic (TA_TOTAL_WAVEFRONTS): >-
-      The number of instructions processed by TA (L1).
-      Equation: SUM(TA_TOTAL_WAVEFRONTS_sum)
-    L1 utilization: >-
-      Active TA (L1) cycle divide by free cycle.
-      Equation: SUM((TCP_GATE_EN2_sum * 100)) / SUM(TCP_GATE_EN1_sum)
-    L1 processing rate: >-
-      The number of instruction TA (L1) processes in one cycle.
+    L1 inbound traffic (TA_TOTAL_WAVEFRONTS): >-
+      The number of wavefronts processed by TA (L1 front-end).
+      Equation: SUM(TA_TOTAL_WAVEFRONTS_sum) / SUM($denom)
+    TA processing rate: >-
+      The number of wavefronts TA processes per busy cycle. Measures TA throughput efficiency.
       Equation: SUM(TA_TOTAL_WAVEFRONTS_sum) / SUM(TA_TA_BUSY_sum)
+    CU-L1 throughput: >-
+      The total number of L1 accesses per TCP busy cycle. Measures inbound request throughput.
+      Equation: SUM(TCP_TOTAL_ACCESSES_sum) / SUM(TCP_GATE_EN2_sum)
+    L1 utilization: >-
+      Percentage of time TCP is actively processing requests (busy cycles / free-running cycles).
+      Equation: SUM((TCP_GATE_EN2_sum * 100)) / SUM(TCP_GATE_EN1_sum)
     L1 latency: >-
-      The number of cycles to complete memory access instructions normalized by the total number of L1 accesses.
+      Average cycles to complete memory access, from wave entering to wave leaving TCP.
       Equation: SUM(TCP_TCP_LATENCY_sum) / SUM(TCP_TOTAL_ACCESSES_sum)
-    L1-L2 throughput: >-
-      The total number of TCC (L2) read and TCC (L2) write requests processed in a cycle.
+    L1-L2 throughput (reads + writes): >-
+      L1 to L2 request throughput for reads and writes per TCP busy cycle.
       Equation: SUM((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum)) / SUM(TCP_GATE_EN2_sum)
+    L1-L2 throughput (total): >-
+      Total L1 to L2 request throughput including reads, writes, and atomics per TCP busy cycle.
+      Equation: SUM((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / SUM(TCP_GATE_EN2_sum)
     L2 read latency: >-
-      The number of cycles to get 1 cache read response from TCC (L2), including reads and atomics with return.
+      Average cycles to get a read response from L2 (TCC), including reads and atomics with return.
       Equation: SUM(TCP_TCC_READ_REQ_LATENCY_sum) / SUM(TCP_TCC_READ_REQ_sum)
     L2 write latency: >-
-      The number of cycles to get 1 cache write response from TCC (L2), including writes and atomics without return.
+      Average cycles to get a write acknowledgment from L2 (TCC), including writes and atomics without return.
       Equation: SUM(TCP_TCC_WRITE_REQ_LATENCY_sum) / SUM(TCP_TCC_WRITE_REQ_sum)
+    UTCL1 latency: >-
+      Average cycles for UTCL1 (L1 TLB) address translation, from request to completion.
+      Includes both hits and misses. High latency indicates TLB pressure or UTCL2 miss penalty.
+      MI350 restored this counter (removed in MI300 for power savings).
+      Equation: SUM(TCP_CLIENT_UTCL1_INFLIGHT_sum) / SUM(TCP_UTCL1_REQUEST_sum)
+    UTCL1 to UTCL2 latency: >-
+      Average cycles for UTCL1 misses to be resolved by UTCL2 (L2 TLB).
+      Only counts requests that missed UTCL1 and went to UTCL2. High latency indicates page table walk overhead.
+      Equation: SUM(TCP_UTCL1_UTCL2_INFLIGHT_sum) / SUM(TCP_UTCL1_TRANSLATION_MISS_sum)
+    # Table 3003: TD Return Path
+    TD - stalled by TCP: >-
+      Percentage of TD busy time spent waiting for TCP (L1 cache) data. A high rate indicates L1 data return bottleneck.
+      Equation: SUM((TD_TC_STALL_sum * 100)) / SUM(TD_TD_BUSY_sum)
+    TD - input FIFO full: >-
+      Percentage of TD busy time when the TCP-TD input FIFO is full. Indicates TD pipeline stall or power throttling.
+      Equation: SUM((TD_TC_TD_FIFO_FULL_sum * 100)) / SUM(TD_TD_BUSY_sum)
+    TD - output FIFO full: >-
+      Percentage of TD busy time when the output FIFO is full. Indicates TD-to-VGPR/LDS backpressure.
+      Equation: SUM((TD_OUTPUT_FIFO_FULL_sum * 100)) / SUM(TD_TD_BUSY_sum)
+    TD - stalled by SPI: >-
+      Percentage of TD busy time stalled by SPI (shader processor input). Indicates VGPR write contention.
+      Equation: SUM((TD_SPI_STALL_sum * 100)) / SUM(TD_TD_BUSY_sum)
+    TD - L1-CU throughput: >-
+      Wavefronts returned to CU per TD busy cycle. Measures return path throughput.
+      Equation: SUM(TD_LOAD_WAVEFRONT_sum) / SUM(TD_TD_BUSY_sum)
+    TD - load wavefronts: >-
+      Number of load wavefronts processed by TD (includes atomics and stores per counter definition).
+      Equation: SUM(TD_LOAD_WAVEFRONT_sum) / SUM($denom)
+    TD - atomic wavefronts: >-
+      Number of atomic operation wavefronts processed by TD.
+      Equation: SUM(TD_ATOMIC_WAVEFRONT_sum) / SUM($denom)
+    TD - store wavefronts: >-
+      Number of store wavefronts processed by TD.
+      Equation: SUM(TD_STORE_WAVEFRONT_sum) / SUM($denom)
+    TD - coalescable wavefronts rate: >-
+      Percentage of wavefronts that TA identified as coalescable. Higher is better for bandwidth efficiency.
+      Equation: SUM((TD_COALESCABLE_WAVEFRONT_sum * 100)) / SUM(TD_LOAD_WAVEFRONT_sum)
+    # Table 3004: Normalized Stall Metrics (%)
+    # These metrics use GRBM_GUI_ACTIVE_PER_XCD as denominator, enabling direct comparison across components.
+    Normalized L1 Cache - VMEM stalled by L1 Cache: >-
+      Percentage of kernel execution time that SQ VMEM instructions are stalled waiting for L1 Cache.
+      Normalized to kernel cycles for cross-component comparison.
+      Equation: SUM((SQ_VMEM_TA_CMD_FIFO_FULL * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
+    Normalized L1 Cache - TA addr stalled by TCP: >-
+      Percentage of kernel execution time that TA address path is stalled by TCP.
+      Normalized to kernel cycles for cross-component comparison.
+      Equation: SUM((TA_ADDR_STALLED_BY_TC_CYCLES_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
+    Normalized L1 Cache - TA addr stalled by TD: >-
+      Percentage of kernel execution time that TA address path is stalled by TD.
+      Normalized to kernel cycles for cross-component comparison.
+      Equation: SUM((TA_ADDR_STALLED_BY_TD_CYCLES_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
+    Normalized L1 Cache - TA data stalled by TCP: >-
+      Percentage of kernel execution time that TA data path is stalled by TCP.
+      Normalized to kernel cycles for cross-component comparison.
+      Equation: SUM((TA_DATA_STALLED_BY_TC_CYCLES_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
+    Normalized L1 Cache - TA addresser stalled: >-
+      Percentage of kernel execution time that TA addresser is stalled.
+      Normalized to kernel cycles for cross-component comparison.
+      Equation: SUM((TA_ADDRESSER_STALLED_CYCLES_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
+    Normalized L1 Cache - TA stalled by TCP (aggregated): >-
+      Percentage of kernel execution time that TA is stalled by TCP (from TCP perspective).
+      Normalized to kernel cycles for cross-component comparison.
+      Equation: SUM((TCP_TCP_TA_ADDR_STALL_CYCLES_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
+    Normalized L1 Cache - TCP stalled by UTCL1: >-
+      Percentage of kernel execution time that TCP is stalled by UTCL1 (TLB inflight saturation).
+      Normalized to kernel cycles for cross-component comparison.
+      Equation: SUM((TCP_UTCL1_STALL_INFLIGHT_MAX_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
+    Normalized L1 Cache - TCP stalled by UTCL2: >-
+      Percentage of kernel execution time that TCP is stalled by UTCL2 (TLB miss latency).
+      Normalized to kernel cycles for cross-component comparison.
+      Equation: SUM((TCP_UTCL1_STALL_LFIFO_NO_RES_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
+    Normalized L1 Cache - TCP stalled by TD: >-
+      Percentage of kernel execution time that TCP is stalled by TD (return path backpressure).
+      Normalized to kernel cycles for cross-component comparison.
+      Equation: SUM((TCP_TD_TCP_STALL_CYCLES_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
+    Normalized L1 Cache - TCP stalled by L2: >-
+      Percentage of kernel execution time that TCP is stalled by L2 (TCC backpressure via TCR).
+      Normalized to kernel cycles for cross-component comparison.
+      Equation: SUM((TCP_TCR_TCP_STALL_CYCLES_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
+    Normalized TD - stalled by TCP: >-
+      Percentage of kernel execution time that TD is stalled waiting for TCP data.
+      Normalized to kernel cycles for cross-component comparison.
+      Equation: SUM((TD_TC_STALL_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
+    Normalized TD - input FIFO full: >-
+      Percentage of kernel execution time that TD input FIFO is full.
+      Normalized to kernel cycles for cross-component comparison.
+      Equation: SUM((TD_TC_TD_FIFO_FULL_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
+    Normalized TD - output FIFO full: >-
+      Percentage of kernel execution time that TD output FIFO is full.
+      Normalized to kernel cycles for cross-component comparison.
+      Equation: SUM((TD_OUTPUT_FIFO_FULL_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
+    Normalized TD - stalled by SPI: >-
+      Percentage of kernel execution time that TD is stalled by SPI.
+      Normalized to kernel cycles for cross-component comparison.
+      Equation: SUM((TD_SPI_STALL_sum * 100)) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
+    # Table 3005: Normalized Throughput Metrics (per Second)
+    Normalized TA processing rate: >-
+      Wavefronts processed by TA per second of kernel execution.
+      Normalized to wall-clock time for absolute throughput measurement.
+      Equation: SUM(TA_TOTAL_WAVEFRONTS_sum) / (SUM((End_Timestamp - Start_Timestamp)) / 1000000000)
+    Normalized CU-L1 throughput: >-
+      L1 cache accesses per second of kernel execution.
+      Normalized to wall-clock time for absolute throughput measurement.
+      Equation: SUM(TCP_TOTAL_ACCESSES_sum) / (SUM((End_Timestamp - Start_Timestamp)) / 1000000000)
+    Normalized L1-L2 throughput (reads + writes): >-
+      L1 to L2 read and write requests per second of kernel execution.
+      Normalized to wall-clock time for absolute throughput measurement.
+      Equation: SUM((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum)) / (SUM((End_Timestamp - Start_Timestamp)) / 1000000000)
+    Normalized L1-L2 throughput (total): >-
+      Total L1 to L2 requests (reads, writes, atomics) per second of kernel execution.
+      Normalized to wall-clock time for absolute throughput measurement.
+      Equation: SUM((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / (SUM((End_Timestamp - Start_Timestamp)) / 1000000000)
+    Normalized TD - L1-CU throughput: >-
+      Wavefronts returned to CU via TD per second of kernel execution.
+      Normalized to wall-clock time for absolute throughput measurement.
+      Equation: SUM(TD_LOAD_WAVEFRONT_sum) / (SUM((End_Timestamp - Start_Timestamp)) / 1000000000)

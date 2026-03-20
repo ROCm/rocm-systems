@@ -65,6 +65,11 @@ class TesterArguments {
 
 public:
   /**
+   * Program name (argv[0]) for path resolution, e.g. finding HSACO next to binary
+   */
+  std::string executable_name;
+
+  /**
    * Arguments obtained from command line
    */
   unsigned num_wgs = 1;
