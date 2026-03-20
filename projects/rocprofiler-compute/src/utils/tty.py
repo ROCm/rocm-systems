@@ -599,7 +599,8 @@ def format_table_output(
 
     if use_mem_chart:
         mem_data = (
-            pd.DataFrame([df["Metric"], df["Value"]])
+            pd
+            .DataFrame([df["Metric"], df["Value"]])
             .transpose()
             .set_index("Metric")
             .to_dict()["Value"]
