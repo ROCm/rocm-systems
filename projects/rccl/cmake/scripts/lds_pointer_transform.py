@@ -230,17 +230,9 @@ def apply_lds_type_conversions(text):
         text
     )
 
-    # A12. barrier_generic: replace __hip_atomic_* on LDS with plain operations.
-    # The barriers pointer is in LDS; atomics are unnecessary — a plain
-    # increment and load generate ds_write/ds_read instead of flat_atomic.
-    text = text.replace(
-        '__hip_atomic_fetch_add((BARRIERS_PTR), 1, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_WORKGROUP)',
-        '(*(BARRIERS_PTR) += 1)'
-    )
-    text = text.replace(
-        '__hip_atomic_load((BARRIERS_PTR), __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_WORKGROUP)',
-        '(*(BARRIERS_PTR))'
-    )
+    # A12. barrier_generic: keep atomics — they are needed for inter-warp
+    # synchronization even on LDS.  The LDSPtr type on BARRIERS_PTR already
+    # ensures ds_ instructions; the atomic ordering must be preserved.
 
     # A13. collTrace / collTraceTail: declare as global pointers so atomics
     # and stores through them generate global_ instructions, not flat_.
