@@ -55,10 +55,10 @@ const auto XGMI_VALUE          = make_metric_value({ 12 });    // xgmi
 const auto PCIE_VALUE          = make_metric_value({ 13 });    // pcie
 const auto SDMA_USAGE_VALUE    = make_metric_value({ 14 });    // sdma_usage
 
-inline std::unordered_map<uint32_t, track_description>&
-get_perfetto_tracks()
+inline std::unordered_map<uint32_t, track_description>
+make_default_tracks()
 {
-    static std::unordered_map<uint32_t, track_description> tracks{
+    return {
         { GFX_BUSY_VALUE, { "GFX Busy", "%", {} } },
         { UMC_BUSY_VALUE, { "UMC Busy", "%", {} } },
         { MM_BUSY_VALUE, { "MM Busy", "%", {} } },
@@ -73,7 +73,6 @@ get_perfetto_tracks()
         { PCIE_VALUE, { "PCIe", "", {} } },
         { SDMA_USAGE_VALUE, { "SDMA Usage", "%", {} } },
     };
-    return tracks;
 }
 
 struct xgmi_track_set
@@ -92,20 +91,6 @@ struct pcie_track_set
     std::vector<size_t> bandwidth_inst;
 };
 
-inline std::map<size_t, xgmi_track_set>&
-get_xgmi_tracks()
-{
-    static std::map<size_t, xgmi_track_set> tracks;
-    return tracks;
-}
-
-inline std::map<size_t, pcie_track_set>&
-get_pcie_tracks()
-{
-    static std::map<size_t, pcie_track_set> tracks;
-    return tracks;
-}
-
 struct perfetto_amd_smi_sample
 {
     uint64_t                      timestamp;
@@ -116,6 +101,9 @@ struct perfetto_device_data
 {
     std::unique_ptr<std::vector<perfetto_amd_smi_sample>> samples;
     enabled_metrics                                       supported_metrics;
+    std::unordered_map<uint32_t, track_description>       tracks;
+    xgmi_track_set                                        xgmi_tracks;
+    pcie_track_set                                        pcie_tracks;
 };
 
 inline std::map<size_t, perfetto_device_data>&
@@ -158,7 +146,10 @@ struct perfetto_policy
             auto idx                         = entry.device->get_index();
             detail::get_perfetto_data()[idx] = {
                 std::make_unique<std::vector<detail::perfetto_amd_smi_sample>>(),
-                entry.supported_metrics
+                entry.supported_metrics,
+                detail::make_default_tracks(),
+                {},
+                {}
             };
         }
     }
@@ -189,7 +180,8 @@ struct perfetto_policy
             return fmt::format("GPU [{}] {} [{:02d}] (S)", device_index, metric, i);
         };
 
-        auto& tracks = detail::get_perfetto_tracks();
+        auto& device_data = detail::get_perfetto_data()[device_index];
+        auto& tracks      = device_data.tracks;
 
         // Clear track indexes from previous setup calls to prevent
         // stale track IDs when metric configuration changes between runs
@@ -197,6 +189,8 @@ struct perfetto_policy
         {
             description.track_indexes.clear();
         }
+        device_data.xgmi_tracks = {};
+        device_data.pcie_tracks = {};
 
         LOG_DEBUG("[GPU perfetto_policy] Setting up counter tracks for device {}, "
                   "enabled_metrics=0x{:x}",
@@ -221,19 +215,30 @@ struct perfetto_policy
                 }
             };
 
-            if(enabled_metric == detail::VCN_ACTIVITY_VALUE ||
-               enabled_metric == detail::VCN_BUSY_VALUE ||
-               enabled_metric == detail::JPEG_ACTIVITY_VALUE ||
+            if(enabled_metric == detail::VCN_BUSY_VALUE ||
                enabled_metric == detail::JPEG_BUSY_VALUE)
             {
+                // Per-XCP metrics (MI300): create tracks for each XCP partition
+                auto array_size = (enabled_metric == detail::VCN_BUSY_VALUE)
+                                      ? AMDSMI_MAX_NUM_VCN
+                                      : ROCPROFSYS_AMDSMI_JPEG_ENGINE_COUNT;
                 for(std::size_t xcp = 0; xcp < AMDSMI_MAX_NUM_XCP; ++xcp)
                 {
-                    process_xcp_array(description,
-                                      (enabled_metric == detail::VCN_ACTIVITY_VALUE ||
-                                       enabled_metric == detail::VCN_BUSY_VALUE)
-                                          ? AMDSMI_MAX_NUM_VCN
-                                          : ROCPROFSYS_AMDSMI_JPEG_ENGINE_COUNT,
-                                      xcp);
+                    process_xcp_array(description, array_size, xcp);
+                }
+            }
+            else if(enabled_metric == detail::VCN_ACTIVITY_VALUE ||
+                    enabled_metric == detail::JPEG_ACTIVITY_VALUE)
+            {
+                // Device-level metrics (Radeon): flat array, no XCP dimension
+                auto array_size = (enabled_metric == detail::VCN_ACTIVITY_VALUE)
+                                      ? AMDSMI_MAX_NUM_VCN
+                                      : ROCPROFSYS_AMDSMI_JPEG_ENGINE_COUNT;
+                for(std::size_t i = 0; i < array_size; ++i)
+                {
+                    description.track_indexes.emplace_back(counter_track::emplace(
+                        device_index, addendum_blk(i, description.track_name),
+                        description.units));
                 }
             }
             else
@@ -245,7 +250,7 @@ struct perfetto_policy
 
         if(enabled_metric_config.bits.xgmi)
         {
-            auto& xgmi_tracks = detail::get_xgmi_tracks()[device_index];
+            auto& xgmi_tracks = device_data.xgmi_tracks;
 
             xgmi_tracks.link_width.emplace_back(counter_track::emplace(
                 device_index, addendum("XGMI Link Width"), "lanes"));
@@ -263,7 +268,7 @@ struct perfetto_policy
 
         if(enabled_metric_config.bits.pcie)
         {
-            auto& pcie_tracks = detail::get_pcie_tracks()[device_index];
+            auto& pcie_tracks = device_data.pcie_tracks;
 
             pcie_tracks.link_width.emplace_back(counter_track::emplace(
                 device_index, addendum("PCIe Link Width"), "lanes"));
@@ -338,7 +343,8 @@ private:
             return;
         }
 
-        auto& tracks = detail::get_perfetto_tracks();
+        auto& device_data = detail::get_perfetto_data()[device_index];
+        auto& tracks      = device_data.tracks;
 
         for(const auto& sample : samples)
         {
@@ -354,8 +360,10 @@ private:
                                   tracks);
             process_xcp_activity(device_index, ts, sample.metrics, effective_metrics,
                                  tracks);
-            process_xgmi_metrics(device_index, ts, sample.metrics, effective_metrics);
-            process_pcie_metrics(device_index, ts, sample.metrics, effective_metrics);
+            process_xgmi_metrics(device_index, ts, sample.metrics, effective_metrics,
+                                 device_data.xgmi_tracks);
+            process_pcie_metrics(device_index, ts, sample.metrics, effective_metrics,
+                                 device_data.pcie_tracks);
         }
     }
 
@@ -540,21 +548,14 @@ private:
     }
 
     static void process_xgmi_metrics(size_t device_index, uint64_t ts,
-                                     const metrics&         metric_values,
-                                     const enabled_metrics& effective_metrics)
+                                     const metrics&                metric_values,
+                                     const enabled_metrics&        effective_metrics,
+                                     const detail::xgmi_track_set& xgmi_tracks)
     {
         if(!effective_metrics.bits.xgmi)
         {
             return;
         }
-
-        auto xgmi_it = detail::get_xgmi_tracks().find(device_index);
-        if(xgmi_it == detail::get_xgmi_tracks().end())
-        {
-            return;
-        }
-
-        const auto& xgmi_tracks = xgmi_it->second;
 
         if(!xgmi_tracks.link_width.empty() && metric_values.xgmi.link.width != 0)
         {
@@ -598,21 +599,14 @@ private:
     }
 
     static void process_pcie_metrics(size_t device_index, uint64_t ts,
-                                     const metrics&         metric_values,
-                                     const enabled_metrics& effective_metrics)
+                                     const metrics&                metric_values,
+                                     const enabled_metrics&        effective_metrics,
+                                     const detail::pcie_track_set& pcie_tracks)
     {
         if(!effective_metrics.bits.pcie)
         {
             return;
         }
-
-        auto pcie_it = detail::get_pcie_tracks().find(device_index);
-        if(pcie_it == detail::get_pcie_tracks().end())
-        {
-            return;
-        }
-
-        const auto& pcie_tracks = pcie_it->second;
 
         if(!pcie_tracks.link_width.empty() && metric_values.pcie.link.width != 0)
         {

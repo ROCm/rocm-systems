@@ -1143,13 +1143,13 @@ perfetto_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& _gpu_pmc)
     EMIT_GPU_SCALAR(amd_smi_sdma_track, _device_id, _ts, _em.bits.sdma_usage,
                     "SDMA Usage", "%", "device_sdma_usage", _m.sdma_usage);
 
-    // Per-XCP VCN/JPEG array metrics
-    if(_em.bits.vcn_activity)
+    // Per-XCP VCN busy metrics (MI300)
+    if(_em.bits.vcn_busy)
     {
         for(size_t xcp = 0; xcp < _m.xcp_stats.size(); ++xcp)
         {
             emit_xcp_array_metrics<amd_smi_vcn_track>(
-                _device_id, _ts, "VCN Activity", _m.xcp_stats[xcp].vcn_busy, xcp,
+                _device_id, _ts, "VCN Busy", _m.xcp_stats[xcp].vcn_busy, xcp,
                 [](size_t key, size_t t, double v) {
                     TRACE_COUNTER("device_vcn_activity", amd_smi_vcn_track::at(key, 0), t,
                                   v);
@@ -1157,17 +1157,39 @@ perfetto_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& _gpu_pmc)
         }
     }
 
-    if(_em.bits.jpeg_activity)
+    // Device-level VCN activity (Radeon)
+    if(_em.bits.vcn_activity)
+    {
+        emit_xcp_array_metrics<amd_smi_vcn_track>(
+            _device_id, _ts, "VCN Activity", _m.vcn_activity, std::nullopt,
+            [](size_t key, size_t t, double v) {
+                TRACE_COUNTER("device_vcn_activity", amd_smi_vcn_track::at(key, 0), t, v);
+            });
+    }
+
+    // Per-XCP JPEG busy metrics (MI300)
+    if(_em.bits.jpeg_busy)
     {
         for(size_t xcp = 0; xcp < _m.xcp_stats.size(); ++xcp)
         {
             emit_xcp_array_metrics<amd_smi_jpeg_track>(
-                _device_id, _ts, "JPEG Activity", _m.xcp_stats[xcp].jpeg_busy, xcp,
+                _device_id, _ts, "JPEG Busy", _m.xcp_stats[xcp].jpeg_busy, xcp,
                 [](size_t key, size_t t, double v) {
                     TRACE_COUNTER("device_jpeg_activity", amd_smi_jpeg_track::at(key, 0),
                                   t, v);
                 });
         }
+    }
+
+    // Device-level JPEG activity (Radeon)
+    if(_em.bits.jpeg_activity)
+    {
+        emit_xcp_array_metrics<amd_smi_jpeg_track>(
+            _device_id, _ts, "JPEG Activity", _m.jpeg_activity, std::nullopt,
+            [](size_t key, size_t t, double v) {
+                TRACE_COUNTER("device_jpeg_activity", amd_smi_jpeg_track::at(key, 0), t,
+                              v);
+            });
     }
 
     // Grouped interconnect metrics
