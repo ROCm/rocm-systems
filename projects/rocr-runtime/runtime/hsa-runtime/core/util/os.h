@@ -369,12 +369,13 @@ int Ctz(uint64_t i);
 char* DlError();
 
 // IPC socket abstraction for cross-process handle (FD / HANDLE) passing.
-typedef void* IPCSocket;
+typedef intptr_t IPCSocket;
+static const IPCSocket INVALID_SOCKET_VALUE = -1;
 
 /// @brief Create an IPC server socket bound to an abstract name and listening.
 /// @param name Abstract socket name (will be prefixed internally on each platform).
 /// @param backlog Maximum pending connections.
-/// @return IPCSocket handle, or nullptr on failure.
+/// @return IPCSocket handle, or invalid handle (-1) on failure.
 IPCSocket CreateIPCServer(const char* name, int backlog);
 
 /// @brief Accept a connection on an IPC server socket (blocking).

@@ -1422,13 +1422,13 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
 
     ipc_sock_server_fd_ = os::CreateIPCServer(socketName, 1);
     assert(ipc_sock_server_fd_ && "DMA buffer could not be exported for IPC!");
-    if (!ipc_sock_server_fd_) return HSA_STATUS_ERROR;
+    if (ipc_sock_server_fd_ == os::INVALID_SOCKET_VALUE) return HSA_STATUS_ERROR;
 
     ipc_sock_server_thread_ = os::CreateThread(AsyncIPCSockServerConnLoop, NULL);
     if (!ipc_sock_server_thread_) {
       ipc_sock_server_conns_.clear();
       os::CloseIPCSocket(ipc_sock_server_fd_);
-      ipc_sock_server_fd_ = nullptr;
+      ipc_sock_server_fd_ = os::INVALID_SOCKET_VALUE;
       return HSA_STATUS_ERROR;
     }
   }
@@ -1450,7 +1450,7 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle,
     int timeoutLimitMs = 10000, timeoutIntervalMs = 1;
     os::IPCSocket socket_fd = os::ConnectToIPCServer(socketName, timeoutLimitMs, timeoutIntervalMs);
     assert(socket_fd && "Connection to export DMA buffer not made!");
-    if (!socket_fd) return -1;
+    if (socket_fd == os::INVALID_SOCKET_VALUE) return -1;
 
     os::SetIPCSocketRecvTimeout(socket_fd, 10);
 
@@ -2299,7 +2299,7 @@ Runtime::Runtime()
       ref_count_(0),
       thunkLoader_(nullptr),
       kfd_version{},
-      ipc_sock_server_fd_(nullptr),
+      ipc_sock_server_fd_(os::INVALID_SOCKET_VALUE),
       ipc_sock_server_thread_(nullptr) {
   virtual_mem_api_supported_ = false;
   aqlprofile_lib_ = nullptr;

@@ -961,16 +961,16 @@ int Ctz(uint64_t i) { return __builtin_ctz(i); }
 char* DlError() { return dlerror(); }
 
 static inline int IPCSockToFd(IPCSocket sock) {
-  return static_cast<int>(reinterpret_cast<intptr_t>(sock));
+  return static_cast<int>(sock);
 }
 
 static inline IPCSocket FdToIPCSock(int fd) {
-  return reinterpret_cast<IPCSocket>(static_cast<intptr_t>(fd));
+  return reinterpret_cast<IPCSocket>(fd);
 }
 
 IPCSocket CreateIPCServer(const char* name, int backlog) {
   int fd = socket(AF_UNIX, SOCK_STREAM, 0);
-  if (fd == -1) return nullptr;
+  if (fd == -1) return INVALID_SOCKET_VALUE;
 
   struct sockaddr_un address;
   memset(&address, 0, sizeof(address));
@@ -980,24 +980,24 @@ IPCSocket CreateIPCServer(const char* name, int backlog) {
 
   if (bind(fd, (struct sockaddr*)&address, sizeof(address)) != 0) {
     close(fd);
-    return nullptr;
+    return INVALID_SOCKET_VALUE;
   }
   if (listen(fd, backlog) != 0) {
     close(fd);
-    return nullptr;
+    return INVALID_SOCKET_VALUE;
   }
   return FdToIPCSock(fd);
 }
 
 IPCSocket AcceptIPCConnection(IPCSocket server) {
   int fd = accept(IPCSockToFd(server), NULL, NULL);
-  if (fd == -1) return nullptr;
+  if (fd == -1) return INVALID_SOCKET_VALUE;
   return FdToIPCSock(fd);
 }
 
 IPCSocket ConnectToIPCServer(const char* name, int timeoutMs, int timeoutIntervalMs) {
   int fd = socket(AF_UNIX, SOCK_STREAM, 0);
-  if (fd == -1) return nullptr;
+  if (fd == -1) return INVALID_SOCKET_VALUE;
 
   struct sockaddr_un address;
   memset(&address, 0, sizeof(address));
@@ -1014,7 +1014,7 @@ IPCSocket ConnectToIPCServer(const char* name, int timeoutMs, int timeoutInterva
   }
 
   close(fd);
-  return nullptr;
+  return INVALID_SOCKET_VALUE;
 }
 
 void SetIPCSocketRecvTimeout(IPCSocket sock, int timeoutSec) {
@@ -1083,7 +1083,8 @@ intptr_t IPCRecvHandle(IPCSocket conn) {
 }
 
 void CloseIPCSocket(IPCSocket sock) {
-  if (sock) close(IPCSockToFd(sock));
+  if (sock != INVALID_SOCKET_VALUE)
+    close(IPCSockToFd(sock));
 }
 
 }   //  namespace os

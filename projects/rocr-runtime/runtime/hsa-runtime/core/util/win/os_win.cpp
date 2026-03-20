@@ -541,14 +541,13 @@ static HANDLE CreatePipeInstance(const char* fullName) {
 
 IPCSocket CreateIPCServer(const char* name, int backlog) {
   std::string pipeName = PipeName(name);
-  //HANDLE pipe = CreatePipeInstance(pipeName.c_str());
   HANDLE pipe = CreateNamedPipe(
       pipeName.c_str(),
       PIPE_ACCESS_DUPLEX | FILE_FLAG_FIRST_PIPE_INSTANCE,
       PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
       kMaxPipeInstances,
       4096, 4096, 0, NULL);
-  if (pipe == INVALID_HANDLE_VALUE) return nullptr;
+  if (pipe == INVALID_HANDLE_VALUE) return INVALID_SOCKET_VALUE;
   auto* info = new IPCPipeInfo{pipe, pipeName, true, 0};
   return reinterpret_cast<IPCSocket>(info);
 }
@@ -559,7 +558,7 @@ IPCSocket AcceptIPCConnection(IPCSocket server) {
 
   if (!ConnectNamedPipe(connPipe, NULL)) {
     DWORD err = GetLastError();
-    if (err != ERROR_PIPE_CONNECTED) return nullptr;
+    if (err != ERROR_PIPE_CONNECTED) return INVALID_SOCKET_VALUE;
   }
 
   // The current pipe instance is now connected to the client.
@@ -567,7 +566,7 @@ IPCSocket AcceptIPCConnection(IPCSocket server) {
   HANDLE newPipe = CreatePipeInstance(serverInfo->pipeName.c_str());
   if (newPipe == INVALID_HANDLE_VALUE) {
     assert("!CreatePipeInstance failed.");
-    return nullptr;
+    return INVALID_SOCKET_VALUE;
   }
   serverInfo->pipe = newPipe;
 
@@ -588,12 +587,12 @@ IPCSocket ConnectToIPCServer(const char* name, int timeoutMs, int timeoutInterva
     }
     DWORD err = GetLastError();
     if (err != ERROR_PIPE_BUSY && err != ERROR_FILE_NOT_FOUND) {
-      return nullptr;
+      return INVALID_SOCKET_VALUE;
     }
     ::Sleep(timeoutIntervalMs);
     elapsed += timeoutIntervalMs;
   }
-  return nullptr;
+  return INVALID_SOCKET_VALUE;
 }
 
 void SetIPCSocketRecvTimeout(IPCSocket sock, int timeoutSec) {
@@ -674,7 +673,7 @@ intptr_t IPCRecvHandle(IPCSocket conn) {
 }
 
 void CloseIPCSocket(IPCSocket sock) {
-  if (sock) {
+  if (sock != INVALID_SOCKET_VALUE) {
     auto* info = reinterpret_cast<IPCPipeInfo*>(sock);
     // Server-side accepted connections need DisconnectNamedPipe to
     // release the client before closing the handle.
