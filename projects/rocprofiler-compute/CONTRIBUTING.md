@@ -2,41 +2,7 @@
 
 ## Getting Started
 
-> Sourced from [ROCm Systems CONTRIBUTING.md](https://github.com/ROCm/rocm-systems/blob/develop/CONTRIBUTING.md#contributing-to-the-rocm-libraries).
-
-ROCm Compute Profiler lives under `projects/rocprofiler-compute` in the [ROCm Systems super-repo](https://github.com/ROCm/rocm-systems). You have two options for cloning it locally.
-
-### Option A: Full Clone
-
-Clone the entire super-repo and navigate to the project:
-
-```bash
-git clone https://github.com/ROCm/rocm-systems.git
-cd rocm-systems/projects/rocprofiler-compute
-```
-
-### Option B: Sparse Checkout (Recommended for most contributors)
-
-If you only need to work on `rocprofiler-compute`, a sparse checkout significantly reduces how much data is downloaded and checked out:
-
-```bash
-git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-systems.git
-cd rocm-systems
-git sparse-checkout init --cone
-git sparse-checkout set projects/rocprofiler-compute
-git checkout develop
-cd projects/rocprofiler-compute
-```
-
-This uses Git's partial clone feature to avoid downloading blobs you don't need. For more background on partial and shallow clones, see GitHub's [blog post on the topic](https://github.blog/open-source/git/get-up-to-speed-with-partial-clone-and-shallow-clone).
-
-### Working Alongside Other Projects
-
-If your changes span multiple projects in the super-repo, expand your sparse checkout:
-
-```bash
-git sparse-checkout set projects/rocprofiler-compute projects/rocprofiler-sdk
-```
+ROCm Compute Profiler lives under `projects/rocprofiler-compute` in the [ROCm Systems super-repo](https://github.com/ROCm/rocm-systems). To set up your local environment, follow the [clone and setup instructions](https://github.com/ROCm/rocm-systems/blob/develop/CONTRIBUTING.md#getting-started) in the rocm-systems CONTRIBUTING.md. Sparse checkout is recommended for most contributors.
 
 ## Reporting Issues and Bugs
 
@@ -45,33 +11,9 @@ git sparse-checkout set projects/rocprofiler-compute projects/rocprofiler-sdk
 
 ## Submitting a Pull Request
 
-> Sourced from [ROCm Systems CONTRIBUTING.md](https://github.com/ROCm/rocm-systems/blob/develop/CONTRIBUTING.md#pull-request-guidelines).
+Follow the [pull request guidelines](https://github.com/ROCm/rocm-systems/blob/develop/CONTRIBUTING.md#pull-request-guidelines) in the rocm-systems CONTRIBUTING.md.
 
-### Branch Naming
-
-Name your branch using the following convention:
-
-```
-users/<github-username>/<branch-name>
-```
-
-Keep names descriptive but concise. If your PR addresses a GitHub issue, include the issue number in the branch name.
-
-> **Note:** Branches within the super-repo have full CI/CD access. Pull requests from forks are welcome, but may have limited access to certain build and test infrastructure while we work toward full parity.
-
-### Pushing and Opening the PR
-
-When your changes are ready:
-
-```bash
-git push origin users/<github-username>/<branch-name>
-```
-
-Then open a pull request against the `develop` branch in the [ROCm Systems repository](https://github.com/ROCm/rocm-systems/compare). In your PR description:
-
-- Summarize what the change does and why.
-- Reference any related GitHub issues.
-- Note any areas that need special attention during review.
+> **Note for external contributors:** Please refer to the [ROCm contribution guide](https://rocm.docs.amd.com/en/develop/contribute/contributing.html) for instructions on contributing from a fork.
 
 ### Review and Labeling
 
@@ -217,10 +159,10 @@ ROCm Compute Profiler uses [Ruff](https://docs.astral.sh/ruff/) for linting and 
 
 ### Running Ruff
 
-Install Ruff:
+Install the version of Ruff pinned in [`.pre-commit-config.yaml`](.pre-commit-config.yaml):
 
 ```bash
-pip install ruff
+pip install ruff==<version>  # replace <version> with the rev in .pre-commit-config.yaml
 ```
 
 Check for issues:
