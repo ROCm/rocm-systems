@@ -29,6 +29,18 @@ def selective_region_env() -> dict[str, str]:
     }
 
 
+@pytest.fixture
+def no_marker_env() -> dict[str, str]:
+    """Environment variables for tests without marker_api (ConditionB only).
+
+    When marker_api is NOT in ROCM_DOMAINS, pause/resume is IGNORED.
+    Region filtering via ROCPROFSYS_TRACE_REGION still works.
+    """
+    return {
+        "ROCPROFSYS_ROCM_DOMAINS": "hip_runtime_api,kernel_dispatch",
+    }
+
+
 # =============================================================================
 # Test Class: Pause/Resume
 # =============================================================================
@@ -367,4 +379,195 @@ class TestSelectiveRegionPause3(RocprofsysTest):
             subtest_name="Pause inside Region 1, resume outside filtered markers",
             categories=["rocm_marker_api"],
             pass_regex=["Region 1"],
+        )
+
+
+# =============================================================================
+# Test Class: Pause/Resume without marker_api (ConditionB-only)
+# =============================================================================
+
+
+@pytest.mark.parametrize("mode", ["sys_run", "sampling"])
+class TestPauseResumeNoMarker(RocprofsysTest):
+    """Tests for pause/resume when marker_api is NOT in ROCM_DOMAINS.
+
+    Neither ConditionA (marker_api) nor ConditionB (TRACE_REGION) is set,
+    so pause/resume should be IGNORED — ALL kernels profiled.
+
+    Code flow:
+        CodeBlock_Z, CodeBlock_A, pause (IGNORED), CodeBlock_B,
+        resume (IGNORED), CodeBlock_C, CodeBlock_D
+    """
+
+    def test(self, mode, no_marker_env):
+        result = self.run_test(
+            mode,
+            "pause_resume",
+            env=no_marker_env,
+            check_target_arch=True,
+            timeout=120,
+        )
+        self.assert_regex(result)
+        self.assert_perfetto(
+            result,
+            subtest_name="Pause/Resume ignored without marker_api",
+            categories=["rocm_kernel_dispatch"],
+            pass_regex=[
+                "CodeBlock_Z", "CodeBlock_A", "CodeBlock_B",
+                "CodeBlock_C", "CodeBlock_D",
+            ],
+        )
+
+
+# =============================================================================
+# Test Class: Selective Region without marker_api (ConditionB only)
+# =============================================================================
+
+
+@pytest.mark.parametrize("mode", ["sys_run", "sampling"])
+class TestSelectiveRegionNoMarker(RocprofsysTest):
+    """Tests for region filtering with ConditionB only (no marker_api).
+
+    Region filtering works via ROCPROFSYS_TRACE_REGION even without marker_api.
+    Pause/resume is IGNORED.
+
+    Code flow:
+        CodeBlock_A (outside),
+        Region 1: CodeBlock_B, Region 2: CodeBlock_C, CodeBlock_D,
+        Region 3: CodeBlock_E,
+        Region 1: CodeBlock_F,
+        CodeBlock_G (outside)
+    """
+
+    def test_region_1_filter(self, mode, no_marker_env):
+        """ROCPROFSYS_TRACE_REGION='Region 1' without marker_api."""
+        env = no_marker_env.copy()
+        env["ROCPROFSYS_TRACE_REGION"] = "Region 1"
+        result = self.run_test(
+            mode,
+            "selective_region",
+            env=env,
+            check_target_arch=True,
+            timeout=120,
+        )
+        self.assert_regex(result)
+        self.assert_perfetto(
+            result,
+            subtest_name="Region 1 filtered kernels (no marker_api)",
+            categories=["rocm_kernel_dispatch"],
+            pass_regex=["CodeBlock_B", "CodeBlock_C", "CodeBlock_D", "CodeBlock_F"],
+            fail_regex=["CodeBlock_A", "CodeBlock_E", "CodeBlock_G"],
+        )
+
+
+# =============================================================================
+# Test Class: Selective Region + Pause 1 without marker_api (ConditionB only)
+# =============================================================================
+
+
+@pytest.mark.parametrize("mode", ["sys_run", "sampling"])
+class TestSelectiveRegionPause1NoMarker(RocprofsysTest):
+    """Pause/Resume INSIDE region with ConditionB only (no marker_api).
+
+    Pause/resume is IGNORED — all in-region kernels profiled.
+
+    Code flow:
+        CodeBlock_Z (outside), Region 1 start,
+        CodeBlock_A, pause (IGNORED), CodeBlock_B, resume (IGNORED),
+        CodeBlock_C, Region 1 stop, CodeBlock_D (outside)
+    """
+
+    def test_region_1_filter(self, mode, no_marker_env):
+        """With Region 1 filter: pause ignored, A/B/C profiled, Z/D outside."""
+        env = no_marker_env.copy()
+        env["ROCPROFSYS_TRACE_REGION"] = "Region 1"
+        result = self.run_test(
+            mode,
+            "selective_region_pause_1",
+            env=env,
+            check_target_arch=True,
+            timeout=120,
+        )
+        self.assert_regex(result)
+        self.assert_perfetto(
+            result,
+            subtest_name="Pause inside Region 1 ignored (no marker_api)",
+            categories=["rocm_kernel_dispatch"],
+            pass_regex=["CodeBlock_A", "CodeBlock_B", "CodeBlock_C"],
+            fail_regex=["CodeBlock_Z", "CodeBlock_D"],
+        )
+
+
+# =============================================================================
+# Test Class: Selective Region + Pause 2 without marker_api (ConditionB only)
+# =============================================================================
+
+
+@pytest.mark.parametrize("mode", ["sys_run", "sampling"])
+class TestSelectiveRegionPause2NoMarker(RocprofsysTest):
+    """Pause OUTSIDE region with ConditionB only (no marker_api).
+
+    Pause/resume is IGNORED — all in-region kernels profiled.
+
+    Code flow:
+        pause (IGNORED), CodeBlock_Z, Region 1 start,
+        CodeBlock_A, CodeBlock_B, resume (IGNORED), CodeBlock_C,
+        Region 1 stop, CodeBlock_D
+    """
+
+    def test_region_1_filter(self, mode, no_marker_env):
+        """With Region 1 filter: pause ignored, A/B/C profiled, Z/D outside."""
+        env = no_marker_env.copy()
+        env["ROCPROFSYS_TRACE_REGION"] = "Region 1"
+        result = self.run_test(
+            mode,
+            "selective_region_pause_2",
+            env=env,
+            check_target_arch=True,
+            timeout=120,
+        )
+        self.assert_regex(result)
+        self.assert_perfetto(
+            result,
+            subtest_name="Pause before Region 1 ignored (no marker_api)",
+            categories=["rocm_kernel_dispatch"],
+            pass_regex=["CodeBlock_A", "CodeBlock_B", "CodeBlock_C"],
+            fail_regex=["CodeBlock_Z", "CodeBlock_D"],
+        )
+
+
+# =============================================================================
+# Test Class: Selective Region + Pause 3 without marker_api (ConditionB only)
+# =============================================================================
+
+
+@pytest.mark.parametrize("mode", ["sys_run", "sampling"])
+class TestSelectiveRegionPause3NoMarker(RocprofsysTest):
+    """Pause INSIDE region, resume OUTSIDE with ConditionB only (no marker_api).
+
+    Pause/resume is IGNORED — all in-region kernels profiled.
+
+    Code flow:
+        Region 1 start, CodeBlock_A, pause (IGNORED), CodeBlock_C,
+        Region 1 stop, CodeBlock_D, resume (IGNORED)
+    """
+
+    def test_region_1_filter(self, mode, no_marker_env):
+        """With Region 1 filter: pause ignored, A/C profiled, D outside."""
+        env = no_marker_env.copy()
+        env["ROCPROFSYS_TRACE_REGION"] = "Region 1"
+        result = self.run_test(
+            mode,
+            "selective_region_pause_3",
+            env=env,
+            check_target_arch=True,
+            timeout=120,
+        )
+        self.assert_regex(result)
+        self.assert_perfetto(
+            result,
+            subtest_name="Pause inside Region 1 ignored (no marker_api)",
+            categories=["rocm_kernel_dispatch"],
+            pass_regex=["CodeBlock_A", "CodeBlock_C"],
+            fail_regex=["CodeBlock_D"],
         )
