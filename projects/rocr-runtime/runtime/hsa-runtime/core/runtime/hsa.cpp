@@ -503,7 +503,7 @@ hsa_status_t hsa_system_get_major_extension_table(uint16_t extension, uint16_t v
     // and closed in Runtime::Unload(), avoiding a dlopen handle leak.
     os::LibHandle lib = core::Runtime::runtime_singleton_->AqlProfileLib();
     if (lib == NULL) {
-      debug_print("Loading '%s' failed\n", kAqlProfileLib);
+      debug_print("AQL profile library '%s' is unavailable.\n", kAqlProfileLib);
       return HSA_STATUS_ERROR;
     }
 
