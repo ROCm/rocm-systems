@@ -217,12 +217,14 @@ if(BUILD_TESTS)
       AllocTests.cpp
       ParamTests.cpp
       ArgCheckTests.cpp
+      ArchInfoTests.cpp
       EnqueueTests.cpp
       IpcsocketTests.cpp
       NetSocketTests.cpp
       ProxyTests.cpp
       RcclWrapTests.cpp
       TransportTests.cpp
+      UtilsTests.cpp
       graph/XmlTests.cpp
       common/main_fixtures.cpp
       common/EnvVars.cpp
