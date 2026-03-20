@@ -1117,16 +1117,17 @@ public:
         auto key_value_pair = T{std::forward<Args>(args)...};
 
         // Search for existing element by key
-        auto it = std::find_if(this->begin(), this->end(), [&key_value_pair](const auto& existing) {
-            return existing.first == key_value_pair.first;
-        });
+        iterator itr =
+            std::find_if(this->begin(), this->end(), [&key_value_pair](const auto& existing) {
+                return existing.first == key_value_pair.first;
+            });
 
         // If key already exists, return iterator to existing and false
-        if(it != this->end()) return std::make_pair(it, false);
+        if(itr != this->end()) return std::make_pair(itr, false);
 
         // Key not found, insert it and return iterator to new element and true
-        emplace_back(std::move(key_value_pair));
-        return std::make_pair(this->end() - 1, true);
+        auto& ref = emplace_back(std::move(key_value_pair));
+        return std::make_pair(&ref, true);
     }
 
     small_vector_impl& operator=(const small_vector_impl& RHS);

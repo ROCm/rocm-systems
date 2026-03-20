@@ -86,7 +86,7 @@ main()
 
     // Create executable graph
     hipGraphExec_t graphExec;
-    HIP_CHECK(hipGraphInstantiate(&graphExec, graph, NULL, NULL, 0));
+    HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
 
     std::cout << "Graph created and instantiated successfully" << std::endl;
     std::cout << "Starting graph execution loop..." << std::endl;
@@ -105,6 +105,13 @@ main()
         {
             std::cout << "Completed " << (iter + 1) << " iterations" << std::endl;
         }
+
+        // // Wait for completion
+        // HIP_CHECK(hipStreamSynchronize(stream));
+
+        // std::cout << "Synchronized after iteration " << (iter + 1) << std::endl;
+        // std::this_thread::sleep_for(std::chrono::milliseconds(100));  // Sleep to simulate work
+        // between iterations
     }
 
     // Wait for completion

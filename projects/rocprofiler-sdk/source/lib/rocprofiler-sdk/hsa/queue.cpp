@@ -21,7 +21,10 @@
  THE SOFTWARE. */
 
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
+#include "lib/common/container/pool.hpp"
+#include "lib/common/logging.hpp"
 #include "lib/common/scope_destructor.hpp"
+#include "lib/common/static_object.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/code_object/code_object.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
@@ -46,6 +49,7 @@
 
 #include <atomic>
 #include <memory>
+#include <utility>
 
 // static assert for rocprofiler_packet ABI compatibility
 static_assert(sizeof(hsa_ext_amd_aql_pm4_packet_t) == sizeof(hsa_kernel_dispatch_packet_t),
@@ -70,6 +74,8 @@ namespace hsa
 {
 namespace
 {
+constexpr auto null_hsa_signal = hsa_signal_t{.handle = 0};
+
 template <typename DomainT, typename... Args>
 inline bool
 context_filter(const context::context* ctx, DomainT domain, Args... args)
@@ -96,21 +102,91 @@ context_filter(const context::context* ctx)
             context_filter(ctx, ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH));
 }
 
+Queue::signal_impl&
+construct_hsa_signal(Queue::signal_impl& signal,
+                     hsa_signal_value_t  initial_value = 0,
+                     uint32_t            num_consumers = 0,
+                     const hsa_agent_t*  consumers     = nullptr,
+                     uint64_t            attributes    = 0)
+{
+    auto status = HSA_STATUS_SUCCESS;
+    if(!get_amd_ext_table() || !get_amd_ext_table()->hsa_amd_signal_create_fn)
+        status = HSA_STATUS_ERROR;
+    else
+        status = get_amd_ext_table()->hsa_amd_signal_create_fn(
+            initial_value, num_consumers, consumers, attributes, &signal.value);
+
+    ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS)
+        << fmt::format("Error: hsa_amd_signal_create failed with error code {} :: {}",
+                       static_cast<int>(status),
+                       hsa::get_hsa_status_string(status));
+
+    return signal;
+}
+
+auto*
+get_signal_pool()
+{
+    constexpr size_t default_signal_pool_size = 8000;
+
+    // static auto pool = common::container::pool<Queue::signal_impl>{
+    //     std::piecewise_construct, default_signal_pool_size, [](Queue::signal_impl& signal) {
+    //         construct_hsa_signal(signal, 0, 0, nullptr, 0);
+    //     }};
+    // return &pool;
+
+    static auto*& pool =
+        common::static_object<common::container::pool<Queue::signal_impl>>::construct(
+            std::piecewise_construct, default_signal_pool_size, [](Queue::signal_impl& signal) {
+                construct_hsa_signal(signal, 0, 0, nullptr, 0);
+            });
+
+    return pool;
+}
+
 bool
 AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
 {
-    if(!data) return true;
+    using data_type      = Queue::pooled_signal_t;
+    using session_info_t = std::shared_ptr<Queue::queue_info_session_t>;
+
+    if(!data)
+    {
+        ROCP_FATAL << "AsyncSignalHandler called with null data pointer";
+        return true;
+    }
+
+    auto* _pooled_signal = static_cast<data_type*>(data);
+    auto* _session_ptr   = static_cast<session_info_t*>(_pooled_signal->get().data);
 
     // if we have fully finalized, delete the data and return
     if(registration::get_fini_status() > 0)
     {
-        auto* _session = static_cast<Queue::queue_info_session_t**>(data);
-        delete _session;
+        delete _session_ptr;
+        Queue::destroy_signal(_pooled_signal);
+        return true;
+    }
+
+    // ROCP_WARNING << fmt::format("Pooled signal from pool: hsa_signal_t{{.handle={}}}",
+    //                             _pooled_signal->get().value.handle);
+
+    // cleanup the pooled signal data and release the signal back to the pool for reuse
+    auto _cleanup = common::scope_destructor{[&_pooled_signal, &_session_ptr]() {
+        delete _session_ptr;
+        _session_ptr = nullptr;
+        if(_pooled_signal) Queue::release_signal(_pooled_signal);
+    }};
+
+    auto _session = *_session_ptr;
+    if(!_session.get())
+    {
+        ROCP_FATAL << fmt::format(
+            "Pooled signal for hsa_signal_t{{.handle={}}} is missing session data",
+            _pooled_signal->get().value.handle);
         return false;
     }
 
-    auto& shared_ptr_info    = *static_cast<std::shared_ptr<Queue::queue_info_session_t>*>(data);
-    auto& queue_info_session = *shared_ptr_info;
+    auto& queue_info_session = *_session;
 
     auto dispatch_time = kernel_dispatch::get_dispatch_time(queue_info_session);
 
@@ -123,7 +199,7 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
         {
             cb_pair.second(queue_info_session.queue,
                            queue_info_session.kernel_pkt,
-                           shared_ptr_info,
+                           _session,
                            queue_info_session.inst_pkt,
                            dispatch_time);
         }
@@ -168,7 +244,6 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
     }
 
     queue_info_session.queue.async_complete();
-    delete &shared_ptr_info;
 
     return false;
 }
@@ -213,14 +288,17 @@ WriteInterceptor(const void* packets,
         return;
     }
 
+    ROCP_INFO << fmt::format("WriteInterceptor called with pkt_count={}", pkt_count);
+
     using callback_record_t = Queue::queue_info_session_t::callback_record_t;
+    using packet_vector_t   = common::container::small_vector<rocprofiler_packet, 32>;
 
     // unique sequence id for the dispatch
     static auto sequence_counter = std::atomic<rocprofiler_dispatch_id_t>{0};
 
-    auto&& CreateBarrierPacket = [](hsa_signal_t*                    dependency_signal,
-                                    hsa_signal_t*                    completion_signal,
-                                    std::vector<rocprofiler_packet>& _packets) {
+    auto&& CreateBarrierPacket = [](hsa_signal_t*    dependency_signal,
+                                    hsa_signal_t*    completion_signal,
+                                    packet_vector_t& _packets) {
         hsa_barrier_and_packet_t barrier{};
         barrier.header = HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE;
         barrier.header |= 1 << HSA_PACKET_HEADER_BARRIER;
@@ -255,7 +333,7 @@ WriteInterceptor(const void* packets,
         tracing_data_v.external_correlation_ids.emplace(itr, tracing::empty_user_data);
 
     const auto* packets_arr         = static_cast<const rocprofiler_packet*>(packets);
-    auto        transformed_packets = std::vector<rocprofiler_packet>{};
+    auto        transformed_packets = packet_vector_t{};
 
     // Searching accross all the packets given during this write
     for(size_t i = 0; i < pkt_count; ++i)
@@ -324,7 +402,8 @@ WriteInterceptor(const void* packets,
         // create our own signal that we can get a callback on. if there is an original completion
         // signal we will create a barrier packet, assign the original completion signal that that
         // barrier packet, and add it right after the kernel packet
-        queue.create_signal(0, &kernel_pkt.kernel_dispatch.completion_signal);
+        auto* pooled_signal =
+            queue.create_signal(0, &kernel_pkt.kernel_dispatch.completion_signal, true);
 
         // computes the "size" based on the offset of reserved_padding field
         constexpr auto kernel_dispatch_info_rt_size =
@@ -451,12 +530,12 @@ WriteInterceptor(const void* packets,
             }
         }
 
-        auto completion_signal = hsa_signal_t{.handle = 0};
-        auto interrupt_signal  = hsa_signal_t{.handle = 0};
+        auto completion_signal = null_hsa_signal;
+        auto interrupt_signal  = null_hsa_signal;
         if(injected_end_pkt)
         {
             // Adding a barrier packet with the original packet's completion signal.
-            queue.create_signal(0, &interrupt_signal);
+            queue.create_signal(0, &interrupt_signal, false);
             completion_signal                                            = interrupt_signal;
             transformed_packets.back().ext_amd_aql_pm4.completion_signal = interrupt_signal;
             CreateBarrierPacket(&interrupt_signal, &interrupt_signal, transformed_packets);
@@ -474,22 +553,24 @@ WriteInterceptor(const void* packets,
         // signal completes.
 
         {
-            Queue::queue_info_session_t info_session{.queue            = queue,
-                                                     .inst_pkt         = std::move(inst_pkt),
-                                                     .interrupt_signal = interrupt_signal,
-                                                     .tid              = thr_id,
-                                                     .enqueue_ts       = common::timestamp_ns(),
-                                                     .user_data        = user_data,
-                                                     .correlation_id   = corr_id,
-                                                     .kernel_pkt       = kernel_pkt,
-                                                     .callback_record  = callback_record,
-                                                     .tracing_data     = tracing_data_v,
-                                                     .is_serialized    = bRequest_Serialize};
+            using info_session_t = Queue::queue_info_session_t;
 
-            auto shared = std::make_shared<Queue::queue_info_session_t>(std::move(info_session));
+            auto info_session = info_session_t{.queue            = queue,
+                                               .inst_pkt         = std::move(inst_pkt),
+                                               .interrupt_signal = interrupt_signal,
+                                               .tid              = thr_id,
+                                               .enqueue_ts       = common::timestamp_ns(),
+                                               .user_data        = user_data,
+                                               .correlation_id   = corr_id,
+                                               .kernel_pkt       = kernel_pkt,
+                                               .callback_record  = callback_record,
+                                               .tracing_data     = tracing_data_v,
+                                               .is_serialized    = bRequest_Serialize};
 
-            queue.signal_async_handler(completion_signal,
-                                       new std::shared_ptr<Queue::queue_info_session_t>(shared));
+            auto shared = std::make_shared<info_session_t>(std::move(info_session));
+
+            queue.signal_async_handler(
+                pooled_signal, completion_signal, new std::shared_ptr<info_session_t>(shared));
 
             auto tracer_data = callback_record;
             tracing::execute_phase_exit_callbacks(tracing_data_v.callback_contexts,
@@ -556,7 +637,7 @@ Queue::Queue(const AgentCache&  agent,
         aql::set_profiler_active_on_queue(
             _agent.cpu_pool(), _agent.get_hsa_agent(), [&](hsa::rocprofiler_packet pkt) {
                 hsa_signal_t completion;
-                create_signal(0, &completion);
+                create_signal(0, &completion, false);
                 pkt.ext_amd_aql_pm4.completion_signal = completion;
                 counters::submitPacket(_intercept_queue, &pkt);
                 constexpr auto timeout_hint =
@@ -584,9 +665,9 @@ Queue::Queue(const AgentCache&  agent,
         _ext_api.hsa_amd_queue_intercept_register_fn(_intercept_queue, WriteInterceptor, this))
         << "Could not register interceptor";
 
-    create_signal(0, &ready_signal);
-    create_signal(0, &block_signal);
-    create_signal(0, &_active_kernels);
+    create_signal(0, &ready_signal, false);
+    create_signal(0, &block_signal, false);
+    create_signal(0, &_active_kernels, false);
     _core_api.hsa_signal_store_screlease_fn(ready_signal, 0);
     _core_api.hsa_signal_store_screlease_fn(_active_kernels, 0);
     *queue = _intercept_queue;
@@ -615,7 +696,7 @@ Queue::Queue(
         aql::set_profiler_active_on_queue(
             _agent.cpu_pool(), _agent.get_hsa_agent(), [&](hsa::rocprofiler_packet pkt) {
                 hsa_signal_t completion;
-                create_signal(0, &completion);
+                create_signal(0, &completion, false);
                 pkt.ext_amd_aql_pm4.completion_signal = completion;
                 counters::submitPacket(_intercept_queue, &pkt);
                 constexpr auto timeout_hint =
@@ -634,9 +715,9 @@ Queue::Queue(
 
     set_write_interceptor(WriteInterceptor, this);
 
-    create_signal(0, &ready_signal);
-    create_signal(0, &block_signal);
-    create_signal(0, &_active_kernels);
+    create_signal(0, &ready_signal, false);
+    create_signal(0, &block_signal, false);
+    create_signal(0, &_active_kernels, false);
     _core_api.hsa_signal_store_screlease_fn(ready_signal, 0);
     _core_api.hsa_signal_store_screlease_fn(_active_kernels, 0);
 }
@@ -648,27 +729,96 @@ Queue::~Queue()
 }
 
 void
-Queue::signal_async_handler(const hsa_signal_t& signal, void* data) const
+Queue::signal_async_handler(pooled_signal_t* signal, hsa_signal_t raw_signal, void* data) const
 {
 #if !defined(NDEBUG)
     CHECK_NOTNULL(hsa::get_queue_controller())->_debug_signals.wlock([&](auto& signals) {
-        signals[signal.handle] = signal;
+        signals[raw_signal.handle] = raw_signal;
     });
 #endif
-    hsa_status_t status = _ext_api.hsa_amd_signal_async_handler_fn(
-        signal, HSA_SIGNAL_CONDITION_EQ, -1, AsyncSignalHandler, data);
-    ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK)
-        << "Error: hsa_amd_signal_async_handler failed with error code " << status
-        << " :: " << hsa::get_hsa_status_string(status);
+
+    if(signal)
+    {
+        ROCP_FATAL_IF(signal->get().value.handle != raw_signal.handle)
+            << fmt::format("signal handle does not match raw signal handle: {} vs {}",
+                           signal->get().value.handle,
+                           raw_signal.handle);
+
+        ROCP_FATAL_IF(!signal->in_use())
+            << fmt::format("pooled signal has not been acquired: hsa_signal_t(.handle={})",
+                           signal->get().value.handle);
+
+        signal->get().data = data;
+
+        if(!signal->get().handler_is_set)
+        {
+            hsa_status_t status = _ext_api.hsa_amd_signal_async_handler_fn(
+                signal->get().value, HSA_SIGNAL_CONDITION_EQ, -1, AsyncSignalHandler, signal);
+            ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK)
+                << "Error: hsa_amd_signal_async_handler failed with error code " << status
+                << " :: " << hsa::get_hsa_status_string(status);
+            // signal->get().handler_is_set = true;
+        }
+    }
+    else
+    {
+        hsa_status_t status = _ext_api.hsa_amd_signal_async_handler_fn(
+            raw_signal, HSA_SIGNAL_CONDITION_EQ, -1, AsyncSignalHandler, data);
+        ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK)
+            << "Error: hsa_amd_signal_async_handler failed with error code " << status
+            << " :: " << hsa::get_hsa_status_string(status);
+    }
 }
 
-void
-Queue::create_signal(uint32_t attribute, hsa_signal_t* signal) const
+Queue::pooled_signal_t*
+Queue::create_signal(uint32_t attribute, hsa_signal_t* signal, bool use_pool)
 {
-    hsa_status_t status = _ext_api.hsa_amd_signal_create_fn(1, 0, nullptr, attribute, signal);
+    if(auto* pool = get_signal_pool(); use_pool && pool && attribute == 0)
+    {
+        auto& _signal = pool->acquire(construct_hsa_signal, 0, 0, nullptr, attribute);
+        ROCP_FATAL_IF(!_signal.in_use()) << "Acquired signal from pool that is not in use";
+        *signal = _signal.get().value;
+        // ROCP_INFO << fmt::format("acquired signal {} from pool: hsa_signal_t{{.handle={}}}",
+        //                          _signal.index(),
+        //                          _signal.get().value.handle);
+        get_core_table()->hsa_signal_store_screlease_fn(_signal.get().value, 1);
+        return &_signal;
+    }
+
+    hsa_status_t status =
+        get_amd_ext_table()->hsa_amd_signal_create_fn(1, 0, nullptr, attribute, signal);
     ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK)
         << "Error: hsa_amd_signal_create failed with error code " << status
         << " :: " << hsa::get_hsa_status_string(status);
+
+    return nullptr;
+}
+
+void
+Queue::release_signal(pooled_signal_t* signal)
+{
+    if(signal && signal->in_use())
+    {
+        signal->get().data = nullptr;
+        ROCP_WARNING_IF(!signal->release())
+            << fmt::format("Failed to release a pooled signal: hsa_signal_t{{.handle={}}}",
+                           signal->get().value.handle);
+        ROCP_INFO << fmt::format("released signal {}: hsa_signal_t{{.handle={}}}",
+                                 signal->index(),
+                                 signal->get().value.handle);
+    }
+}
+
+void
+Queue::destroy_signal(pooled_signal_t* signal)
+{
+    release_signal(signal);
+
+    if(signal && get_core_table() && get_core_table()->hsa_signal_destroy_fn)
+    {
+        get_core_table()->hsa_signal_destroy_fn(signal->get().value);
+        signal->get().value = null_hsa_signal;
+    }
 }
 
 void
@@ -676,9 +826,17 @@ Queue::sync() const
 {
     if(_active_kernels.handle != 0u)
     {
-        _core_api.hsa_signal_wait_relaxed_fn(
-            _active_kernels, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_ACTIVE);
+        constexpr auto timeout_hint =
+            std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::seconds{1});
+        _core_api.hsa_signal_wait_relaxed_fn(_active_kernels,
+                                             HSA_SIGNAL_CONDITION_EQ,
+                                             0,
+                                             timeout_hint.count(),
+                                             HSA_WAIT_STATE_BLOCKED);
     }
+
+    if(get_signal_pool())
+        get_signal_pool()->report_reuse();
 }
 
 void
