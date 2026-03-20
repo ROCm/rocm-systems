@@ -44,7 +44,7 @@ static __global__ void Iter(int* Ad, int num) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipDeviceSynchronize_Positive_Empty_Streams) {
+HIP_TEST_CASE(Unit_hipDeviceSynchronize_Positive_Empty_Streams) {
   const auto device = GENERATE(range(0, HipTest::getDeviceCount()));
   HIP_CHECK(hipSetDevice(device));
   INFO("Current device: " << device);
@@ -67,7 +67,7 @@ TEST_CASE(Unit_hipDeviceSynchronize_Positive_Empty_Streams) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipDeviceSynchronize_Positive_Nullstream) {
+HIP_TEST_CASE(Unit_hipDeviceSynchronize_Positive_Nullstream) {
   const auto device = GENERATE(range(0, HipTest::getDeviceCount()));
   HIP_CHECK(hipSetDevice(device));
   INFO("Current device: " << device);
@@ -99,7 +99,7 @@ TEST_CASE(Unit_hipDeviceSynchronize_Positive_Nullstream) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipDeviceSynchronize_Functional) {
+HIP_TEST_CASE(Unit_hipDeviceSynchronize_Functional) {
   int* A[NUM_STREAMS];
   int* Ad[NUM_STREAMS];
   hipStream_t stream[NUM_STREAMS];

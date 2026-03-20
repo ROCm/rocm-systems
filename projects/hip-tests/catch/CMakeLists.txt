@@ -30,6 +30,7 @@ option(BUILD_STRESS_TESTS "Build stress tests" OFF)
 option(TEST_CLOCK_CYCLE "Option to use clock64" OFF)
 option(RTC_TESTING "Run tests using HIP RTC to compile the kernels" OFF)
 option(ENABLE_SPIRV "Build hip-tests for SPIRV" OFF)
+option(ENABLE_YAML_TAGS "Enable YAML tags for test cases" ON)
 
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "Release")
@@ -79,6 +80,10 @@ set(HIP_PATH_OPT "--hip-path=${HIP_PATH}")
 
 if(TEST_CLOCK_CYCLE)
   add_definitions(-DTEST_CLOCK_CYCLE)
+endif()
+
+if(ENABLE_YAML_TAGS)
+    add_definitions(-DENABLE_YAML_TAGS)
 endif()
 
 # flag to generate standalone exe per src file.

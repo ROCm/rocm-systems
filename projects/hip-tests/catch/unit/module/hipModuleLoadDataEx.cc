@@ -10,7 +10,7 @@
 #include <hip/hip_runtime_api.h>
 
 
-TEST_CASE(Unit_hipModuleLoadDataEx_Positive_Basic) {
+HIP_TEST_CASE(Unit_hipModuleLoadDataEx_Positive_Basic) {
   HIP_CHECK(hipFree(nullptr));
   hipModule_t module = nullptr;
 
@@ -29,7 +29,7 @@ TEST_CASE(Unit_hipModuleLoadDataEx_Positive_Basic) {
   }
 }
 
-TEST_CASE(Unit_hipModuleLoadDataEx_Negative_Parameters) {
+HIP_TEST_CASE(Unit_hipModuleLoadDataEx_Negative_Parameters) {
   HIP_CHECK(hipFree(nullptr));
   hipModule_t module = nullptr;
 

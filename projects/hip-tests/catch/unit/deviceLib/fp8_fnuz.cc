@@ -93,7 +93,7 @@ std::vector<T> cpu_cvt_float_fp8_float_fnuz(const std::vector<T>& nums) {
 }
 
 // floats to fp8
-TEMPLATE_TEST_CASE(Unit_fp8_fnuz_compare_host_device, float, double) {
+HIP_TEMPLATE_TEST_CASE(Unit_fp8_fnuz_compare_host_device, float, double) {
   FP8_FNUZ_SKIP_TEST
   std::vector<TestType> numbers = {0.0f, 1.0f, 1.1f, 2.0f,  2.1f,  3.0f,  3.2f,
                                    3.3f, 4.0f, 4.5f, 10.0f, 11.0f, 12.2f, 14.1f};
@@ -179,7 +179,7 @@ std::vector<float2> cpu_cvt_float2_fp8x2_float2_fnuz(const std::vector<float2>& 
   return ret;
 }
 
-TEST_CASE(Unit_fp8x2_fnuz_compare_host_device) {
+HIP_TEST_CASE(Unit_fp8x2_fnuz_compare_host_device) {
   FP8_FNUZ_SKIP_TEST
   std::vector<float> numbers_input = {0.0f, 1.0f, 1.1f, 2.0f,  2.1f,  3.0f,  3.2f,
                                       3.3f, 4.0f, 4.5f, 10.0f, 11.0f, 12.2f, 14.1f};
@@ -221,7 +221,7 @@ TEST_CASE(Unit_fp8x2_fnuz_compare_host_device) {
   }
 }
 
-TEST_CASE(Unit_fp8x2_fnuz_split_compare) {
+HIP_TEST_CASE(Unit_fp8x2_fnuz_split_compare) {
   FP8_FNUZ_SKIP_TEST
   std::vector<float> numbers_input = {0.0f, 1.0f, 1.1f, 2.0f,  2.1f,  3.0f,  3.2f,
                                       3.3f, 4.0f, 4.5f, 10.0f, 11.0f, 12.2f, 14.1f};
@@ -309,7 +309,7 @@ template <bool is_e4m3_fnuz> __global__ void cvt_float4_fp8x4_float4_fnuz(float4
   }
 }
 
-TEST_CASE(Unit_fp8x4_fnuz_split_compare) {
+HIP_TEST_CASE(Unit_fp8x4_fnuz_split_compare) {
   FP8_FNUZ_SKIP_TEST
   std::vector<float> numbers_input = {0.0f, 1.0f, 1.1f, 2.0f,  2.1f,  3.0f,  3.2f,
                                       3.3f, 4.0f, 4.5f, 10.0f, 11.0f, 12.2f, 14.1f};
@@ -411,7 +411,7 @@ template <bool is_e4m3_fnuz> __global__ void fp8_2_bool_fnuz(float* f, bool* ret
   }
 }
 
-TEST_CASE(Unit_fp8_fnuz_bool_device) {
+HIP_TEST_CASE(Unit_fp8_fnuz_bool_device) {
   FP8_FNUZ_SKIP_TEST
   // clang-format off
   std::vector<float> fvals{-10.0f, -1.0f, -0.0f,  0.0f, 1.0f, 10.0f};
@@ -508,7 +508,7 @@ __global__ void Type_to_fp8_fnuz(float* f, __hip_fp8_storage_t* res, size_t size
   }
 }
 
-TEST_CASE(Unit_all_fp8_fnuz_cvt) {
+HIP_TEST_CASE(Unit_all_fp8_fnuz_cvt) {
   FP8_FNUZ_SKIP_TEST
   bool is_e4m3_fnuz = GENERATE(true, false);
   std::vector<float> f_vals;
@@ -648,7 +648,7 @@ __global__ void Type_to_fp8_fnuz_cvt(T* f, float* cvt1, float* cvt2, size_t size
   }
 }
 
-TEMPLATE_TEST_CASE(Unit_fp8_fnuz_correctness_device, float, double) {
+HIP_TEMPLATE_TEST_CASE(Unit_fp8_fnuz_correctness_device, float, double) {
   FP8_FNUZ_SKIP_TEST
 
   SECTION("e4m3_fnuz") {

@@ -80,7 +80,7 @@ bool verifyResult(int* a, int* output_ref, int arrSize) {
  * - HIP_VERSION >= 6.2
  */
 
-TEST_CASE(Unit_hipGetFuncBySymbol_PositiveTest) {
+HIP_TEST_CASE(Unit_hipGetFuncBySymbol_PositiveTest) {
   uint32_t *A_d, *C_d;
   uint32_t *A_h, *C_h;
   size_t N = 1000000;
@@ -153,7 +153,7 @@ TEST_CASE(Unit_hipGetFuncBySymbol_PositiveTest) {
  *    - HIP_VERSION >= 6.2
  */
 
-TEST_CASE(Unit_hipGetFuncBySymbol_NegativeTests) {
+HIP_TEST_CASE(Unit_hipGetFuncBySymbol_NegativeTests) {
   hipFunction_t funcPointer;
 
   // Passing NULL as second parameter
@@ -176,7 +176,7 @@ TEST_CASE(Unit_hipGetFuncBySymbol_NegativeTests) {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE(Unit_hipGetFuncBySymbol_InChildProcess) {
+HIP_TEST_CASE(Unit_hipGetFuncBySymbol_InChildProcess) {
   hip::SpawnProc proc("hipGetFuncBySymbol_exe", true);
   REQUIRE(proc.run() == 0);
 }
@@ -194,7 +194,7 @@ TEST_CASE(Unit_hipGetFuncBySymbol_InChildProcess) {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE(Unit_hipGetFuncBySymbol_MultiDev) {
+HIP_TEST_CASE(Unit_hipGetFuncBySymbol_MultiDev) {
   int deviceCount = 0;
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
   if (deviceCount < 2) {
@@ -310,7 +310,7 @@ void MultiThreadMultiDevFunc(int DevId) {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE(Unit_hipGetFuncBySymbol_MultiDevMultiThread) {
+HIP_TEST_CASE(Unit_hipGetFuncBySymbol_MultiDevMultiThread) {
   int deviceCount = 0;
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
   if (deviceCount < 2) {
