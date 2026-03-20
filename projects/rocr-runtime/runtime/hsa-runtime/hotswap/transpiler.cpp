@@ -3757,7 +3757,7 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
             // With field = ACCUM_OFFSET (no accum), ALL allocated VGPRs are arch.
             if (sym_num_vgpr > 0 && sym_num_vgpr + 8u > num_vgprs)
               num_vgprs = sym_num_vgpr + 8u;
-            num_vgprs += 4u;  // save registers (keep .vgpr_count compatible)
+            num_vgprs += 4u;  // save registers
             uint32_t gfx9_vgpr = (num_vgprs / 4u) - 1u;  // ACCUM_OFFSET = all-arch
             if (gfx9_vgpr > 62u) gfx9_vgpr = 62u;
             uint32_t rsrc1_vgpr_field = gfx9_vgpr + 1u;   // one extra accum group
