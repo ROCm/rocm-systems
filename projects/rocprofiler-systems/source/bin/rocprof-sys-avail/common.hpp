@@ -112,7 +112,7 @@ struct format_options
     int32_t     num_cols       = 0;
     int32_t     min_width      = 40;
     int32_t     padding        = 4;
-    // Preset export metadata (used with -F preset)
+    // Preset export metadata (used with -F json)
     std::string preset_name;
     std::string preset_description;
 };

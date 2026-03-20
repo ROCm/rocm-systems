@@ -522,7 +522,8 @@ safe_stoi(const std::string& s)
     if(s.empty()) return std::nullopt;
     int        value  = 0;
     const auto result = std::from_chars(s.data(), s.data() + s.size(), value);
-    if(result.ec != std::errc{}) return std::nullopt;
+    // Reject partial parses (e.g. "12.5" -> 12) by checking entire string was consumed
+    if(result.ec != std::errc{} || result.ptr != s.data() + s.size()) return std::nullopt;
     return value;
 }
 
@@ -530,9 +531,24 @@ std::optional<double>
 safe_stod(const std::string& s)
 {
     if(s.empty()) return std::nullopt;
-    double     value  = 0.0;
+    double value = 0.0;
+#if defined(__cpp_lib_to_chars) && __cpp_lib_to_chars >= 201611L
+    // Prefer from_chars: locale-independent, zero-allocation
     const auto result = std::from_chars(s.data(), s.data() + s.size(), value);
-    if(result.ec != std::errc{}) return std::nullopt;
+    if(result.ec != std::errc{} || result.ptr != s.data() + s.size()) return std::nullopt;
+#else
+    // Fallback for older compilers (GCC <11, Clang <16).
+    // Note: std::stod is locale-sensitive — assumes C/POSIX locale.
+    try
+    {
+        std::size_t pos = 0;
+        value           = std::stod(s, &pos);
+        if(pos != s.size()) return std::nullopt;
+    } catch(const std::exception&)
+    {
+        return std::nullopt;
+    }
+#endif
     return value;
 }
 
@@ -749,15 +765,21 @@ env_vars_to_json_schema(const std::map<std::string, std::string>& env_map)
 
 std::string
 export_config_as_json(const std::map<std::string, std::string>& env_vars,
-                      const std::string& preset_name, int indent)
+                      const std::string& preset_name, std::string_view tool_name,
+                      int indent)
 {
     auto j = env_vars_to_json_schema(env_vars);
 
-    // Add metadata if preset name provided
     if(!preset_name.empty())
     {
-        j["metadata"]["name"]        = preset_name;
-        j["metadata"]["description"] = "Exported configuration from rocprof-sys-run";
+        j["metadata"]["name"] = preset_name;
+        std::string desc      = "Exported configuration from rocprof-sys";
+        if(!tool_name.empty())
+        {
+            desc += '-';
+            desc += tool_name;
+        }
+        j["metadata"]["description"] = desc;
     }
 
     return j.dump(indent);

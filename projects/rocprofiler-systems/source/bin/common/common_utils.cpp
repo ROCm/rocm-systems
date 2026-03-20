@@ -3,6 +3,8 @@
 
 #include "common/common_utils.hpp"
 
+#include "common/json_config.hpp"
+
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
@@ -52,21 +54,15 @@ check_directory_writable(const std::string& dir)
 std::string
 generate_preset_description(std::string_view preset_mode)
 {
-    // Normalize the preset_mode by stripping leading "--" if present
-    std::string normalized{ preset_mode };
-    if(normalized.size() > 2 && normalized.substr(0, 2) == "--")
-        normalized = normalized.substr(2);
+    auto normalized = strip_flag_prefix(preset_mode);
 
-    auto info = rocprofsys::preset_loader::load_preset_or_file(normalized);
-    if(!info) return "";
-
-    // Load the raw JSON to access hierarchical structure
+    // Load the raw JSON once — used for both metadata and tree display
     auto preset_dir = rocprofsys::preset_loader::find_preset_directory();
-    if(preset_dir.empty()) return info->description;
+    if(preset_dir.empty()) return "";
 
     auto          filepath = preset_dir + "/" + normalized + ".json";
     std::ifstream ifs{ filepath };
-    if(!ifs.is_open()) return info->description;
+    if(!ifs.is_open()) return "";
 
     nlohmann::json j;
     try
@@ -74,8 +70,12 @@ generate_preset_description(std::string_view preset_mode)
         j = nlohmann::json::parse(ifs);
     } catch(const nlohmann::json::exception&)
     {
-        return info->description;
+        return "";
     }
+
+    // Extract description from metadata
+    auto meta        = rocprofsys::json_config::get_config_metadata(j);
+    auto description = meta ? meta->description : "";
 
     // Build tree lines from JSON sections
     std::vector<std::string> lines;
@@ -225,14 +225,14 @@ generate_preset_description(std::string_view preset_mode)
     if(j.contains("output") && j["output"].contains("rocpd_output") &&
        j["output"]["rocpd_output"].value("enabled", false))
     {
-        lines.push_back("rocPD Output:    ON");
+        lines.emplace_back("rocPD Output:    ON");
     }
 
-    if(lines.empty()) return info->description;
+    if(lines.empty()) return description;
 
     // Format with tree characters
     std::ostringstream oss;
-    oss << info->description << "\n";
+    oss << description << "\n";
     for(size_t i = 0; i < lines.size(); ++i)
     {
         bool is_last = (i + 1 == lines.size());
@@ -340,6 +340,13 @@ validate_preset_modes(const std::vector<std::string>& active_presets)
 bool
 check_rocm_available()
 {
+    // Check ROCM_PATH first, then fall back to default /opt/rocm
+    const char* rocm_path = std::getenv("ROCM_PATH");
+    if(rocm_path && std::strlen(rocm_path) > 0)
+    {
+        auto hipconfig = std::string(rocm_path) + "/bin/hipconfig";
+        if(access(hipconfig.c_str(), X_OK) == 0) return true;
+    }
     return (access("/opt/rocm/bin/hipconfig", X_OK) == 0);
 }
 
@@ -350,22 +357,6 @@ warn_if_rocm_unavailable()
     {
         std::cerr << "\nWARNING: GPU tracing requested but ROCm is not available\n\n";
         std::cerr << "GPU features will be disabled.\n\n";
-    }
-}
-
-void
-warn_if_gpu_preset_without_rocm(const std::vector<std::string>& active_presets)
-{
-    for(const auto& preset : active_presets)
-    {
-        if(preset == "--workload-trace" || preset == "--trace-hpc" ||
-           preset == "--sys-trace" || preset == "--runtime-trace" ||
-           preset == "--trace-gpu" || preset == "--trace-openmp" ||
-           preset == "--trace-hw-counters")
-        {
-            warn_if_rocm_unavailable();
-            return;
-        }
     }
 }
 
@@ -571,28 +562,30 @@ collect_resolved_settings(const std::vector<char*>&              current_env,
 void
 export_config(const std::vector<char*>&              current_env,
               const std::unordered_set<std::string>& initial_envs,
-              const std::string& preset_name, const std::string& output_file)
+              const std::string& preset_name, std::string_view tool_name,
+              const std::string& output_file)
 {
     auto settings = collect_resolved_settings(current_env, initial_envs);
-    auto json_str = rocprofsys::json_config::export_config_as_json(settings, preset_name);
+    auto json_str =
+        rocprofsys::json_config::export_config_as_json(settings, preset_name, tool_name);
 
     if(output_file.empty())
     {
-        std::cout << json_str << std::endl;
+        std::cout << json_str << '\n';
     }
     else
     {
         std::ofstream ofs(output_file);
         if(ofs.is_open())
         {
-            ofs << json_str << std::endl;
+            ofs << json_str << '\n';
             std::cerr << "[rocprof-sys] Configuration exported to: " << output_file
-                      << std::endl;
+                      << '\n';
         }
         else
         {
             std::cerr << "[rocprof-sys] ERROR: Could not write to: " << output_file
-                      << std::endl;
+                      << '\n';
         }
     }
 }
@@ -602,12 +595,9 @@ run_post_parse_validation(std::string_view tool_name, std::string_view preset_na
                           bool gpu_enabled, bool rocm_enabled, bool cpu_enabled,
                           bool parallel_enabled, int verbose_level)
 {
-    if(gpu_enabled || rocm_enabled)
-    {
-        warn_if_rocm_unavailable();
-    }
-
-    if(!preset_name.empty())
+    // Check ROCm availability once for all relevant conditions
+    bool rocm_needed = gpu_enabled || rocm_enabled;
+    if(!rocm_needed && !preset_name.empty())
     {
         static const std::vector<std::string> gpu_presets = {
             "workload-trace", "trace-hpc",    "sys-trace",        "runtime-trace",
@@ -617,15 +607,16 @@ run_post_parse_validation(std::string_view tool_name, std::string_view preset_na
         {
             if(preset_name == preset)
             {
-                warn_if_rocm_unavailable();
+                rocm_needed = true;
                 break;
             }
         }
+    }
+    if(rocm_needed) warn_if_rocm_unavailable();
 
-        if(verbose_level >= 1)
-        {
-            print_pre_execution_info(tool_name, preset_name);
-        }
+    if(!preset_name.empty() && verbose_level >= 1)
+    {
+        print_pre_execution_info(tool_name, preset_name);
     }
 
     warn_if_output_not_writable(tool_name);

@@ -83,7 +83,7 @@ apply_preset_from_json(std::string_view preset_name)
     return rocprofsys::common_utils::apply_preset_from_json(
         preset_name, [](const std::string& key, const std::string& val) {
             updated_envs.emplace(key);
-            setenv(key.c_str(), val.c_str(), 0);  // Don't override existing
+            setenv(key.c_str(), val.c_str(), 1);  // Override to match run behavior
         });
 }
 
@@ -970,7 +970,7 @@ PROFILING WORKFLOW:
     if(domain_state.export_config_requested)
     {
         rocprofsys::common_utils::export_config(_env, original_envs,
-                                                domain_state.active_preset_name,
+                                                domain_state.active_preset_name, "sample",
                                                 domain_state.export_config_file);
         exit(EXIT_SUCCESS);
     }

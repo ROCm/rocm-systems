@@ -298,7 +298,10 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
 
     if(_fmts.count("json") > 0)
     {
-        // Collect all ROCPROFSYS_* settings as a flat env var map
+        // JSON schema output includes all ROCPROFSYS_* settings regardless of
+        // --filter, --categories, or --advanced flags. This is intentional: the
+        // schema has a fixed hierarchical structure and is designed for reuse
+        // with --preset, so partial exports would produce incomplete configs.
         std::map<std::string, std::string> env_map;
         for(const auto& itr : *_settings)
         {

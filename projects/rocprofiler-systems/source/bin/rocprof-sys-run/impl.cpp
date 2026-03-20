@@ -52,15 +52,6 @@ using namespace ::timemory::join;
 using ::tim::get_env;
 using ::tim::log::stream;
 
-namespace std
-{
-std::string
-to_string(bool _v)
-{
-    return (_v) ? "true" : "false";
-}
-}  // namespace std
-
 namespace
 {
 using rocprofsys::common::update_mode;
@@ -96,7 +87,7 @@ export_config(const parser_data_t& _parser_data, const std::string& preset_name,
               const std::string& output_file = "")
 {
     rocprofsys::common_utils::export_config(_parser_data.current, original_envs,
-                                            preset_name, output_file);
+                                            preset_name, "run", output_file);
 }
 
 parser_data_t&

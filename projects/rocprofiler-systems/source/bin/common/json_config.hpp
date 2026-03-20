@@ -218,10 +218,15 @@ env_vars_to_json_schema(const std::map<std::string, std::string>& env_map);
 
 /**
  * Exports the configuration as a formatted JSON string.
+ * @param env_vars Map of environment variable name to value.
+ * @param preset_name Name to use in metadata (empty for no metadata).
+ * @param tool_name Tool name for the description (e.g., "run", "sample").
+ * @param indent JSON indentation level.
  */
 [[nodiscard]] std::string
 export_config_as_json(const std::map<std::string, std::string>& env_vars,
-                      const std::string& preset_name = "", int indent = 4);
+                      const std::string&                        preset_name = "",
+                      std::string_view tool_name = "", int indent = 4);
 
 }  // namespace json_config
 }  // namespace rocprofsys
