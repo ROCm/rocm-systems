@@ -78,6 +78,38 @@ void print_gpu_pass_through(){
     pclose(pipe);
 }
 
+void print_kfd_ioctl_header() {
+    // First, find and print the full path/name of the amdgpu* directory
+    char buf[256] = {};
+    FILE* pipe = popen("ls -d /usr/src/amdgpu*/", "r");
+    if (!pipe) {
+        std::cout << "amdgpu src dir: (not found)" << std::endl;
+        return;
+    }
+    std::string amdgpu_dir;
+    while (fgets(buf, sizeof(buf), pipe))
+        amdgpu_dir += buf;
+    pclose(pipe);
+
+    // Trim trailing newline
+    if (!amdgpu_dir.empty() && amdgpu_dir.back() == '\n')
+        amdgpu_dir.pop_back();
+
+    std::cout << "amdgpu src dir: " << amdgpu_dir << std::endl;
+
+    // Now cat the kfd_ioctl.h from that directory
+    std::string cmd = "cat " + amdgpu_dir + "/include/uapi/linux/kfd_ioctl.h";
+    pipe = popen(cmd.c_str(), "r");
+    if (!pipe) {
+        std::cout << "kfd_ioctl.h: (not readable)" << std::endl;
+        return;
+    }
+    memset(buf, 0, sizeof(buf));
+    while (fgets(buf, sizeof(buf), pipe))
+        std::cout << buf;
+    pclose(pipe);
+}
+
 // ---------------------------------------------------------------------------
 // Expect false on bare-metal / non-VF environment
 // ---------------------------------------------------------------------------
@@ -98,10 +130,14 @@ TEST(DetectVirtualization, VmDetectionReturnsFalseOnBareMetal) {
         print_kvm_signature();
         std::cout << "GPU pass-through devices: " << std::endl;
         print_gpu_pass_through();
+        std::cout << "KFD ioctl header: " << std::endl;
+        print_kfd_ioctl_header();
     }
 }
 
 TEST(DetectVirtualization, ContainerDetectionReturnsFalseOnBareMetal) {
+    std::cout << "KFD ioctl header: " << std::endl;
+    print_kfd_ioctl_header();
     EXPECT_FALSE(is_running_in_container());
 }
 
