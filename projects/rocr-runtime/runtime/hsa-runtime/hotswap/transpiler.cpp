@@ -2747,7 +2747,7 @@ static void PatchKernelDescriptorsForWave64(uint8_t* elf, size_t elf_size,
     // Hardware requires ACCUM_OFFSET < RSRC1 VGPR field, so add one extra accum group.
     uint32_t gfx9_vgpr = (num_vgprs / 4u) - 1u;  // ACCUM_OFFSET = all-arch
     if (gfx9_vgpr > 62u) gfx9_vgpr = 62u;
-    uint32_t rsrc1_vgpr_field = gfx9_vgpr + 1u;   // one extra accum group (required)
+    uint32_t rsrc1_vgpr_field = gfx9_vgpr + 1u;   // one extra accum group
     if (rsrc1_vgpr_field > 63u) rsrc1_vgpr_field = 63u;
     // Clear bits [11:0] and set GFX9 SGPR[5:0] and VGPR[11:6]
     rsrc1 &= ~0xFFFu;
@@ -3752,15 +3752,12 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
             uint32_t sgpr_field12_rd = (rsrc1 >> 6) & 0x3Fu;  // save before clear
             uint32_t num_vgprs = (vgpr_field12 + 1u) * 8u;
             if (num_vgprs < 8u) num_vgprs = 8u;
-            // Match translation loop EXACTLY:
-            //   num_vgprs12 = max(rsrc1_val, .num_vgpr+8); num_vgprs12 += 8;
-            //   save_vgpr_x = num_vgprs12; save_vgpr_y = num_vgprs12+1;
-            //   scale_temp = save_vgpr_y+1 = num_vgprs12+2;
-            // Need arch VGPRs to include scale_temp (num_vgprs12+2).
-            // Round up to GFX9 granularity of 4 and add 4 for ACCUM_OFFSET group.
-            // Use the SAME formula as the translation loop to compute save register
-            // indices, then allocate enough arch VGPRs to include them.
-            num_vgprs += 4u;  // +4 for save registers (matches old working allocation)
+            // Match translation loop: save_vgpr_x = max(base, .num_vgpr+8) + 8.
+            // Need arch VGPRs ≥ save_vgpr_y + 2 = save_vgpr_x + 3.
+            // With field = ACCUM_OFFSET (no accum), ALL allocated VGPRs are arch.
+            if (sym_num_vgpr > 0 && sym_num_vgpr + 8u > num_vgprs)
+              num_vgprs = sym_num_vgpr + 8u;
+            num_vgprs += 4u;  // save registers (keep .vgpr_count compatible)
             uint32_t gfx9_vgpr = (num_vgprs / 4u) - 1u;  // ACCUM_OFFSET = all-arch
             if (gfx9_vgpr > 62u) gfx9_vgpr = 62u;
             uint32_t rsrc1_vgpr_field = gfx9_vgpr + 1u;   // one extra accum group
