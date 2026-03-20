@@ -1440,9 +1440,10 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
             case ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY: [[fallthrough]];
 #if (ROCPROFILER_VERSION >= 600)
             case ROCPROFILER_CALLBACK_TRACING_MEMORY_ALLOCATION: [[fallthrough]];
-            case ROCPROFILER_CALLBACK_TRACING_RUNTIME_INITIALIZATION: [[fallthrough]];
+            case ROCPROFILER_CALLBACK_TRACING_RUNTIME_INITIALIZATION:
 #endif
 #if (ROCPROFILER_VERSION >= 700)
+                [[fallthrough]];
             case ROCPROFILER_CALLBACK_TRACING_HIP_STREAM:
 #endif
             {
@@ -1533,9 +1534,10 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
             case ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY:
 #if (ROCPROFILER_VERSION >= 600)
             case ROCPROFILER_CALLBACK_TRACING_MEMORY_ALLOCATION: [[fallthrough]];
-            case ROCPROFILER_CALLBACK_TRACING_RUNTIME_INITIALIZATION: [[fallthrough]];
+            case ROCPROFILER_CALLBACK_TRACING_RUNTIME_INITIALIZATION:
 #endif
 #if (ROCPROFILER_VERSION >= 700)
+                [[fallthrough]];
             case ROCPROFILER_CALLBACK_TRACING_HIP_STREAM:
 #endif
             {
