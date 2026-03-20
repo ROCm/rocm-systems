@@ -8660,7 +8660,7 @@ amdsmi_status_t amdsmi_get_nic_rdma_port_statistics(amdsmi_processor_handle proc
 
 /** @} End tagNicInfo */
 
-/** @defgroup MemConfig Memory Configuration
+/** @defgroup tagMemConfig Memory Configuration
  *  These functions are used to configure UMA (Unified Memory Architecture)
  *  carveout and TTM (Translation Table Manager) settings.
  *
@@ -8706,6 +8706,8 @@ typedef struct {
  *
  *  @note This uses a kernel UAPI sysfs interface, not libdrm.
  *
+ *  @ingroup tagMemConfig
+ *
  *  @platform{gpu_bm_linux}
  *
  *  @param[in] processor_handle GPU device handle
@@ -8749,6 +8751,8 @@ amdsmi_status_t amdsmi_set_gpu_uma_carveout(amdsmi_processor_handle processor_ha
  *
  *  @note This uses a kernel UAPI interface (modprobe.d), not libdrm.
  *
+ *  @ingroup tagMemConfig
+ *
  *  @platform{gpu_bm_linux}
  *
  *  @param[out] info Pointer to receive TTM configuration information
@@ -8768,6 +8772,8 @@ amdsmi_status_t amdsmi_get_ttm_info(amdsmi_ttm_info_t* info);
  *
  *  @note This uses a kernel UAPI interface (modprobe.d), not libdrm.
  *
+ *  @ingroup tagMemConfig
+ *
  *  @platform{gpu_bm_linux}
  *
  *  @param[in] pages Number of pages to allocate for TTM
@@ -8786,6 +8792,8 @@ amdsmi_status_t amdsmi_set_ttm_pages_limit(uint64_t pages);
  *  /etc/modprobe.d/ttm.conf. The system must be rebooted for changes to take effect.
  *
  *  @note This uses a kernel UAPI interface (modprobe.d), not libdrm.
+ *
+ *  @ingroup tagMemConfig
  *
  *  @platform{gpu_bm_linux}
  *
