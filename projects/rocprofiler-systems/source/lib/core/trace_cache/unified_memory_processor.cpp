@@ -26,6 +26,7 @@
 #include "logger/debug.hpp"
 
 #include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <iomanip>
 #include <nlohmann/json.hpp>
@@ -39,7 +40,45 @@ namespace trace_cache
 
 namespace
 {
-// Empty namespace for now - Perfetto counters handled by perfetto_processor
+constexpr size_t SRC_AGENT_PREFIX_LEN = 11;
+constexpr size_t DST_AGENT_PREFIX_LEN = 11;
+
+std::string
+format_size(uint64_t bytes) noexcept
+{
+    std::ostringstream oss;
+    oss << std::fixed << std::setprecision(4);
+
+    if(bytes >= 1024ULL * 1024 * 1024)
+        oss << (bytes / (1024.0 * 1024 * 1024)) << "GB";
+    else if(bytes >= 1024ULL * 1024)
+        oss << (bytes / (1024.0 * 1024)) << "MB";
+    else if(bytes >= 1024ULL)
+        oss << (bytes / 1024.0) << "KB";
+    else
+        oss << bytes << "B";
+
+    return oss.str();
+}
+
+std::string
+format_time(uint64_t nanoseconds) noexcept
+{
+    std::ostringstream oss;
+    oss << std::fixed << std::setprecision(4);
+
+    if(nanoseconds >= 1000000000ULL)
+        oss << (nanoseconds / 1000000000.0) << "s";
+    else if(nanoseconds >= 1000000ULL)
+        oss << (nanoseconds / 1000000.0) << "ms";
+    else if(nanoseconds >= 1000ULL)
+        oss << (nanoseconds / 1000.0) << "us";
+    else
+        oss << nanoseconds << "ns";
+
+    return oss.str();
+}
+
 }  // namespace
 
 unified_memory_processor_t::unified_memory_processor_t(
@@ -53,7 +92,20 @@ unified_memory_processor_t::unified_memory_processor_t(
 , m_output_dir(output_dir)
 {
     const char* xnack    = std::getenv("HSA_XNACK");
-    m_data.xnack_enabled = (xnack && std::string(xnack) == "1");
+    m_data.xnack_enabled = (xnack && std::strcmp(xnack, "1") == 0);
+
+    const auto& all_agents = m_agent_manager->get_agents();
+    for(const auto& agent_ptr : all_agents)
+    {
+        if(!agent_ptr) continue;
+
+        m_node_type_cache[agent_ptr->node_id] = agent_ptr->type;
+
+        if(agent_ptr->type == agent_type::GPU)
+        {
+            m_gpu_name_cache[agent_ptr->node_id] = agent_ptr->name;
+        }
+    }
 }
 
 void
@@ -91,7 +143,7 @@ unified_memory_processor_t::finalize_processing()
         return;
     }
 
-    std::string   txt_path = m_output_dir + "/unified_memory.txt";
+    std::string   txt_path = fmt::format("{}/unified_memory.txt", m_output_dir);
     std::ofstream txt_file(txt_path);
     if(!txt_file.is_open())
     {
@@ -104,7 +156,7 @@ unified_memory_processor_t::finalize_processing()
         LOG_INFO("Unified memory text report written to: {}", txt_path);
     }
 
-    std::string   json_path = m_output_dir + "/unified_memory.json";
+    std::string   json_path = fmt::format("{}/unified_memory.json", m_output_dir);
     std::ofstream json_file(json_path);
     if(!json_file.is_open())
     {
@@ -125,7 +177,6 @@ unified_memory_processor_t::handle(const kfd_sample& sample)
 {
     if(sample.category == "kfd_page_migrate")
     {
-        // Format: "...2;;string;;src_agent;;NODE_ID;;3;;string;;dst_agent;;NODE_ID;;"
         auto agent_ids = parse_agent_ids_from_args(sample.args_str);
         if(!agent_ids.has_value())
         {
@@ -142,10 +193,14 @@ unified_memory_processor_t::handle(const kfd_sample& sample)
             device_migration_summary summary;
             summary.device_id = device_id;
 
-            auto agent = m_agent_manager->get_agent_by_type_index(
+            auto cpu_agent = m_agent_manager->get_agent_by_type_index(
                 device_id, static_cast<agent_type>(sample.device_type));
-            summary.device_name =
-                agent.name.empty() ? fmt::format("Device {}", device_id) : agent.name;
+            std::string cpu_name =
+                cpu_agent.name.empty() ? fmt::format("CPU {}", device_id) : cpu_agent.name;
+
+            std::string gpu_name = extract_gpu_name(src_label, dst_label);
+
+            summary.device_name = fmt::format("{} (via {})", gpu_name, cpu_name);
 
             m_data.devices[device_id] = summary;
         }
@@ -193,8 +248,32 @@ unified_memory_processor_t::migration_direction
 unified_memory_processor_t::classify_direction(const std::string& src_label,
                                                const std::string& dst_label) const
 {
-    bool src_is_cpu = src_label.find("CPU") != std::string::npos;
-    bool dst_is_cpu = dst_label.find("CPU") != std::string::npos;
+    uint32_t src_node_id = 0;
+    uint32_t dst_node_id = 0;
+
+    try
+    {
+        src_node_id = std::stoul(src_label);
+        dst_node_id = std::stoul(dst_label);
+    }
+    catch(const std::exception&)
+    {
+        LOG_TRACE("Failed to parse node IDs from labels: src='{}', dst='{}'", src_label,
+                  dst_label);
+        return migration_direction::UNKNOWN;
+    }
+
+    auto src_it = m_node_type_cache.find(src_node_id);
+    auto dst_it = m_node_type_cache.find(dst_node_id);
+
+    if(src_it == m_node_type_cache.end() || dst_it == m_node_type_cache.end())
+    {
+        LOG_TRACE("Node IDs not found in cache: src={}, dst={}", src_node_id, dst_node_id);
+        return migration_direction::UNKNOWN;
+    }
+
+    bool src_is_cpu = (src_it->second == agent_type::CPU);
+    bool dst_is_cpu = (dst_it->second == agent_type::CPU);
 
     if(src_is_cpu && !dst_is_cpu)
         return migration_direction::HOST_TO_DEVICE;
@@ -218,11 +297,10 @@ unified_memory_processor_t::parse_agent_ids_from_args(const std::string& args_st
 {
     std::string src_agent, dst_agent;
 
-    // Find "src_agent;;" pattern
     size_t src_pos = args_str.find("src_agent;;");
     if(src_pos != std::string::npos)
     {
-        src_pos += 11;  // Move past "src_agent;;"
+        src_pos += SRC_AGENT_PREFIX_LEN;
         size_t end_pos = args_str.find(";;", src_pos);
         if(end_pos != std::string::npos)
         {
@@ -230,11 +308,10 @@ unified_memory_processor_t::parse_agent_ids_from_args(const std::string& args_st
         }
     }
 
-    // Find "dst_agent;;" pattern
     size_t dst_pos = args_str.find("dst_agent;;");
     if(dst_pos != std::string::npos)
     {
-        dst_pos += 11;  // Move past "dst_agent;;"
+        dst_pos += DST_AGENT_PREFIX_LEN;
         size_t end_pos = args_str.find(";;", dst_pos);
         if(end_pos != std::string::npos)
         {
@@ -250,40 +327,38 @@ unified_memory_processor_t::parse_agent_ids_from_args(const std::string& args_st
     return std::make_pair(src_agent, dst_agent);
 }
 
-static std::string
-format_size(uint64_t bytes) noexcept
+std::string
+unified_memory_processor_t::extract_gpu_name(const std::string& src_label,
+                                               const std::string& dst_label) const
 {
-    std::ostringstream oss;
-    oss << std::fixed << std::setprecision(4);
+    uint32_t src_node_id = 0;
+    uint32_t dst_node_id = 0;
 
-    if(bytes >= 1024ULL * 1024 * 1024)
-        oss << (bytes / (1024.0 * 1024 * 1024)) << "GB";
-    else if(bytes >= 1024ULL * 1024)
-        oss << (bytes / (1024.0 * 1024)) << "MB";
-    else if(bytes >= 1024ULL)
-        oss << (bytes / 1024.0) << "KB";
-    else
-        oss << bytes << "B";
+    try
+    {
+        src_node_id = std::stoul(src_label);
+        dst_node_id = std::stoul(dst_label);
+    }
+    catch(const std::exception&)
+    {
+        return "GPU";
+    }
 
-    return oss.str();
-}
+    auto src_it = m_gpu_name_cache.find(src_node_id);
+    if(src_it != m_gpu_name_cache.end())
+    {
+        return src_it->second.empty() ? fmt::format("GPU {}", src_node_id)
+                                      : src_it->second;
+    }
 
-static std::string
-format_time(uint64_t nanoseconds) noexcept
-{
-    std::ostringstream oss;
-    oss << std::fixed << std::setprecision(4);
+    auto dst_it = m_gpu_name_cache.find(dst_node_id);
+    if(dst_it != m_gpu_name_cache.end())
+    {
+        return dst_it->second.empty() ? fmt::format("GPU {}", dst_node_id)
+                                      : dst_it->second;
+    }
 
-    if(nanoseconds >= 1000000000ULL)
-        oss << (nanoseconds / 1000000000.0) << "s";
-    else if(nanoseconds >= 1000000ULL)
-        oss << (nanoseconds / 1000000.0) << "ms";
-    else if(nanoseconds >= 1000ULL)
-        oss << (nanoseconds / 1000.0) << "us";
-    else
-        oss << nanoseconds << "ns";
-
-    return oss.str();
+    return "GPU";
 }
 
 void

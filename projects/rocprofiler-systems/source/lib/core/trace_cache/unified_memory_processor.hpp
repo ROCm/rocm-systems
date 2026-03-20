@@ -31,8 +31,8 @@
 #include <map>
 #include <memory>
 #include <optional>
-#include <stdexcept>
 #include <string>
+#include <unordered_map>
 
 namespace rocprofsys
 {
@@ -56,14 +56,14 @@ struct migration_stats
         if(size_bytes > max_size_bytes) max_size_bytes = size_bytes;
     }
 
-    double avg_size_bytes() const
+    double avg_size_bytes() const noexcept
     {
         return count > 0 ? static_cast<double>(total_size_bytes) / count : 0.0;
     }
-    double bandwidth_gbps() const
+    double bandwidth_gbps() const noexcept
     {
         if(total_time_ns == 0) return 0.0;
-        // Convert bytes/ns to GB/s: (bytes / ns) * 1e9 / 1e9 = bytes/s / 1e9 = GB/s
+        // bytes/ns = GB/s
         return (static_cast<double>(total_size_bytes) / total_time_ns);
     }
 };
@@ -143,6 +143,15 @@ private:
     [[nodiscard]] std::optional<std::pair<std::string, std::string>>
     parse_agent_ids_from_args(const std::string& args_str) const;
 
+    /**
+     * Extracts GPU name from migration event labels.
+     * @param src_label Source agent label from KFD event (e.g., "NODE_1", "CPU")
+     * @param dst_label Destination agent label from KFD event
+     * @return GPU agent name if found (e.g., "AMD Instinct MI300X"), fallback to "GPU" or "GPU {id}"
+     */
+    [[nodiscard]] std::string extract_gpu_name(const std::string& src_label,
+                                                const std::string& dst_label) const;
+
     void write_text_output(std::ostream& out);
     void write_json_output(std::ostream& out);
 
@@ -151,6 +160,10 @@ private:
     std::shared_ptr<agent_manager>     m_agent_manager;
     int                                m_pid;
     std::string                        m_output_dir;
+
+    // Performance optimization: cache node_id to agent_type mapping
+    std::unordered_map<uint32_t, agent_type> m_node_type_cache;
+    std::unordered_map<uint32_t, std::string> m_gpu_name_cache;
 };
 
 }  // namespace trace_cache
