@@ -28,10 +28,13 @@ HIP_TEST_CASE(Unit_hipMipmappedArrayGetMemoryRequirements_Negative_Parameters) {
   HIP_CHECK(hipMipmappedArrayCreate(&array, &desc, levels));
 
   SECTION("memoryRequirements is nullptr") {
-    HIP_CHECK_ERROR(hipMipmappedArrayGetMemoryRequirements(nullptr, array, device_id), hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipMipmappedArrayGetMemoryRequirements(
+                        nullptr, reinterpret_cast<hipMipmappedArray_t>(array), device_id),
+                    hipErrorInvalidValue);
   }
 
   SECTION("mipmap is nullptr") {
-    HIP_CHECK_ERROR(hipMipmappedArrayGetMemoryRequirements(&memoryRequirements, nullptr, device_id), hipErrorInvalidHandle);
+    HIP_CHECK_ERROR(hipMipmappedArrayGetMemoryRequirements(&memoryRequirements, nullptr, device_id),
+                    hipErrorInvalidHandle);
   }
 }
