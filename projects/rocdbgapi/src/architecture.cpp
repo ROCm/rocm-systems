@@ -7980,7 +7980,7 @@ amd_dbgapi_classify_instruction (
 
     if (instruction_information_p != nullptr)
       {
-        using information_type = decltype (information)::value_type;
+        using information_type = typename decltype (information)::value_type;
         size_t mem_size = information.size () * sizeof (information_type);
 
         if (!mem_size)
