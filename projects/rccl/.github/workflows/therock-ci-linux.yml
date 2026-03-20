@@ -42,6 +42,10 @@ jobs:
           repository: "ROCm/rccl"
           path: rccl
 
+      - name: Enable split device compile for RCCL
+        run: |
+          sed -i 's/"Pre-compile device code per-TU via LLC for fast linking" OFF)/"Pre-compile device code per-TU via LLC for fast linking" ON)/' rccl/CMakeLists.txt
+
       - name: Checkout rccl-tests repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
