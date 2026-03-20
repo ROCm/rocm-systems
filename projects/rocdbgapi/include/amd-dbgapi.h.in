@@ -492,19 +492,19 @@
 #endif /* !defined (AMD_DBGAPI_CALL) */
 
 #if !defined(AMD_DBGAPI_EXPORT_DECORATOR)
-#if defined(__GNUC__)
-#define AMD_DBGAPI_EXPORT_DECORATOR __attribute__ ((visibility ("default")))
-#elif defined(_MSC_VER)
-#define AMD_DBGAPI_EXPORT_DECORATOR __declspec(dllexport)
-#endif /* defined (_MSC_VER) */
+# if defined(_WIN32)
+#  define AMD_DBGAPI_EXPORT_DECORATOR __declspec(dllexport)
+# elif defined(__GNUC__)
+#  define AMD_DBGAPI_EXPORT_DECORATOR __attribute__ ((visibility ("default")))
+# endif
 #endif /* !defined (AMD_DBGAPI_EXPORT_DECORATOR) */
 
 #if !defined(AMD_DBGAPI_IMPORT_DECORATOR)
-#if defined(__GNUC__)
-#define AMD_DBGAPI_IMPORT_DECORATOR
-#elif defined(_MSC_VER)
-#define AMD_DBGAPI_IMPORT_DECORATOR __declspec(dllimport)
-#endif /* defined (_MSC_VER) */
+# if defined(_WIN32)
+#  define AMD_DBGAPI_IMPORT_DECORATOR __declspec(dllimport)
+# else
+#  define AMD_DBGAPI_IMPORT_DECORATOR
+# endif
 #endif /* !defined (AMD_DBGAPI_IMPORT_DECORATOR) */
 
 #define AMD_DBGAPI_EXPORT AMD_DBGAPI_EXPORT_DECORATOR AMD_DBGAPI_CALL

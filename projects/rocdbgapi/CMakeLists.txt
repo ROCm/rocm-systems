@@ -434,8 +434,10 @@ target_include_directories(amd-dbgapi
     $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include/amd-dbgapi>
     $<INSTALL_INTERFACE:include>)
 
-target_link_libraries(amd-dbgapi
-  PRIVATE -Wl,--version-script=${CMAKE_CURRENT_BINARY_DIR}/src/exportmap -Wl,--no-undefined)
+if(NOT WIN32)
+  target_link_libraries(amd-dbgapi
+    PRIVATE -Wl,--version-script=${CMAKE_CURRENT_BINARY_DIR}/src/exportmap -Wl,--no-undefined)
+endif()
 
 set(AMD_DBGAPI_CONFIG_NAME amd-dbgapi-config.cmake)
 set(AMD_DBGAPI_TARGETS_NAME amd-dbgapi-targets.cmake)
