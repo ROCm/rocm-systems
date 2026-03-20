@@ -25,6 +25,8 @@
 #include "defines.hpp"
 #include "info_type.hpp"
 
+#include "common/json_config.hpp"
+
 #include <nlohmann/json.hpp>
 #include <timemory/mpl/concepts.hpp>
 #include <timemory/mpl/policy.hpp>
@@ -296,13 +298,34 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
 
     if(_fmts.count("json") > 0)
     {
-        std::stringstream _ss{};
-        output_archive<cereal::PrettyJSONOutputArchive>::indent_length() = 4;
-        _serialize(output_archive<cereal::PrettyJSONOutputArchive>::get(_ss));
+        // Collect all ROCPROFSYS_* settings as a flat env var map
+        std::map<std::string, std::string> env_map;
+        for(const auto& itr : *_settings)
+        {
+            if(exclude_setting(itr.second->get_env_name())) continue;
+            if(itr.second->get_hidden()) continue;
+
+            const auto& env_name = itr.second->get_env_name();
+            if(env_name.find("ROCPROFSYS_") != 0) continue;
+
+            auto val = itr.second->as_string();
+            if(!val.empty()) env_map[env_name] = val;
+        }
+
+        // Convert to hierarchical preset JSON schema (compatible with --preset)
+        auto j = rocprofsys::json_config::env_vars_to_json_schema(env_map);
+
+        // Add metadata
+        auto preset_name = fmt_opts.preset_name;
+        if(preset_name.empty()) preset_name = _config_file;
+        j["metadata"]["name"] = preset_name;
+        if(!fmt_opts.preset_description.empty())
+            j["metadata"]["description"] = fmt_opts.preset_description;
+
         auto _fname = settings::compose_output_filename(_config_file, ".json", false, -1,
                                                         true, _output_dir);
         std::ofstream ofs{};
-        _open(ofs, _fname, "JSON") << _ss.str() << "\n";
+        _open(ofs, _fname, "JSON") << j.dump(4) << "\n";
     }
 
     if(_fmts.count("xml") > 0)

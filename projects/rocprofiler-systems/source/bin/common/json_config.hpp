@@ -3,8 +3,6 @@
 
 #pragma once
 
-#include "common/env_vars.hpp"
-
 #include <nlohmann/json.hpp>
 
 #include <map>

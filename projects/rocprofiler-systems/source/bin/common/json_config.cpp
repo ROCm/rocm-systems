@@ -3,6 +3,8 @@
 
 #include "common/json_config.hpp"
 
+#include "common/env_vars.hpp"
+
 #include <algorithm>
 #include <charconv>
 #include <fstream>
