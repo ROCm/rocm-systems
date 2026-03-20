@@ -1,7 +1,9 @@
 # =============================================================================
 # RDNA3.5 (gfx1152) - RDNA3.5 System Speed-of-Light Performance Metrics
 # =============================================================================
-# Note: RDNA3.5 uses standard VALU FLOPs (no matrix cores)
+# Note: RDNA3.5 uses standard VALU FLOPs (no matrix cores).
+# Theoretical VALU peaks follow Navi3 / RDNA3 (GFX11) rates: 128 FP32 FMAs/CU/cycle (wave64),
+# 256 FP16 ops/CU/cycle (2× FP32); per AMD shader throughput tables (Navi3 column).
 # Cache hierarchy: TCP (L0) -> GL1C (L1) -> GL2C (L2)
 # =============================================================================
 
@@ -66,13 +68,13 @@ Panel Config:
         VALU FLOPs (FP16):
           value: AVG(((SQ_INSTS_VALU_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
           unit: GFLOP/s
-          peak: ((($max_sclk * $cu_per_gpu) * 128) / 1000)
-          pop: ((100 * AVG(((SQ_INSTS_VALU_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)) / ((($max_sclk * $cu_per_gpu) * 128) / 1000))
+          peak: ((($max_sclk * $cu_per_gpu) * 256) / 1000)
+          pop: ((100 * AVG(((SQ_INSTS_VALU_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)) / ((($max_sclk * $cu_per_gpu) * 256) / 1000))
         VALU FLOPs (FP32):
           value: AVG(((SQ_INSTS_VALU_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
           unit: GFLOP/s
-          peak: ((($max_sclk * $cu_per_gpu) * 64) / 1000)
-          pop: ((100 * AVG(((SQ_INSTS_VALU_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)) / ((($max_sclk * $cu_per_gpu) * 64) / 1000))
+          peak: ((($max_sclk * $cu_per_gpu) * 128) / 1000)
+          pop: ((100 * AVG(((SQ_INSTS_VALU_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)) / ((($max_sclk * $cu_per_gpu) * 128) / 1000))
         IPC:
           value: AVG(((SQ_INSTS_ALL_sum - SQ_INSTS_INTERNAL_sum) / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
           unit: Instr/cycle
@@ -278,12 +280,12 @@ Panel Config:
     VALU FLOPs (FP16): |-
       The number of 16-bit floating point VALU operations executed per second on 
       RDNA3.5 (RDNA3.5). RDNA3.5 WGPs contain 2 CUs with 2 SIMD32 units each.
-      FP16 operations execute at 2x the rate of FP32 operations.
-      Peak calculation: max_sclk × CU_count × 128 ops/cycle.
+      Theoretical FP16 peak is 2× the FP32 FMA peak (packed half precision).
+      Peak calculation: max_sclk × CU_count × 256 ops/cycle (Navi3 / RDNA3-class).
     VALU FLOPs (FP32): |-
       The number of 32-bit floating point VALU operations executed per second.
-      Each RDNA3.5 CU can execute 64 FP32 FLOPs per cycle (2 SIMD32 × 32 lanes).
-      Peak: max_sclk × CU_count × 64 ops/cycle.
+      Navi3-class (RDNA3) CUs sustain up to 128 V_FMA_F32 ops per cycle per CU
+      in wave64 mode (dual-issue VALU). Peak: max_sclk × CU_count × 128 ops/cycle.
     IPC: |-
       Instructions Per Cycle - The ratio of instructions executed over busy cycles.
       Calculated as (Total Instructions - Internal Instructions) / Busy Cycles.

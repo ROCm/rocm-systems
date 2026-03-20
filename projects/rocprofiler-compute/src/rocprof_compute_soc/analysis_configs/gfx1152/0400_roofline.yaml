@@ -86,12 +86,13 @@ Panel Config:
   metrics_description:
     VALU FLOPs (F16): >-
       The total 16-bit floating-point operations executed per second on the VALU.
-      RDNA3.5 executes FP16 operations at 2x the rate of FP32 operations per SIMD.
+      Theoretical FP16 throughput is 2× the FP32 FMA peak (packed half on Navi3 / RDNA3-class VALU).
       This is presented with the value of the peak empirical F16 FLOPs achievable
       on the specific accelerator.
     VALU FLOPs (F32): >-
       The total 32-bit floating-point operations executed per second on the VALU.
-      Each RDNA3.5 CU has 2 SIMD32 units capable of 64 FP32 FLOPs per cycle.
+      Navi3 / RDNA3-class CUs sustain up to 128 V_FMA_F32 ops per cycle per CU
+      in wave64 mode; the roofline peak column uses empirically measured F32 throughput.
       This is presented with the value of the peak empirical F32 FLOPs achievable
       on the specific accelerator.
     VALU FLOPs (F64): >-
