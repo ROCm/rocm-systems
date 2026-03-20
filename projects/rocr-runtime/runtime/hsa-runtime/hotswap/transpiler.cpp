@@ -3479,10 +3479,11 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
           pos += to.size();
         }
       };
+      // Test: load from offset 0x28 (user arg 'd', known valid) instead of 0x3c
       replaceLoad(translated_asm, "s_load_dword s1, s[8:9], 0xc",
-                                   "s_load_dword s1, s[0:1], 0x3c");
+                                   "s_load_dword s1, s[0:1], 0x28");
       replaceLoad(translated_asm, "s_load_dword s0, s[8:9], 0xc",
-                                   "s_load_dword s0, s[0:1], 0x3c");
+                                   "s_load_dword s0, s[0:1], 0x28");
     }
     // v_bitop2_b32/v_bitop3_b32 → s_nop 0 (GFX12-only, no simple GFX9 equivalent)
     // Replace entire lines containing v_bitop[23]_b32
