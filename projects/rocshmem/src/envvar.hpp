@@ -149,7 +149,7 @@ namespace envvar {
         template <> struct _is_narrow_character<char>          : std::true_type  { };
         template <> struct _is_narrow_character<signed char>   : std::true_type  { };
         template <> struct _is_narrow_character<unsigned char> : std::true_type  { };
-        template <> struct _is_narrow_character<char8_t>       : std::true_type  { };
+        //template <> struct _is_narrow_character<char8_t>       : std::true_type  { }; //C++20 required
 
         template <typename T>
         struct is_narrow_character
