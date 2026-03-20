@@ -4802,89 +4802,70 @@ int gpu_smu_enable_features(struct WddmLiteDevice *dev)
             gpu_smu_send_msg(dev, 0x23, 0x4000);  /* DramLogSetDramSize = 16KB */
         }
 
-        /* NOTE: UseDefaultPPTable is SKIPPED.
-         * The fresh SMU firmware (loaded via PSP LOAD_IP_FW) has the combo
-         * pptable embedded internally. UseDefaultPPTable may override this
-         * with a worse generic default. The Linux driver does NOT call
-         * UseDefaultPPTable — it does a combo pptable round-trip instead.
-         * Since Dram2Smu is broken on VFIO, we skip pptable setup entirely
-         * and let the SMU use its embedded combo pptable directly. */
-        pr_info("gpu_smu: SKIPPING UseDefaultPPTable — using embedded combo pptable\n");
-
-        /* TransferTable round-trip with VRAM buffer verification.
-         * Map the driver DRAM buffer to CPU, read back what Smu2Dram wrote,
-         * then CPU-write the data back and do Dram2Smu.
-         * The Linux driver does: CPU memcpy → HDP flush → Dram2Smu. */
+        /* Load the REAL pptable extracted from a native Linux amdgpu init.
+         * The file pp_table_rx9070xt.bin (4095 bytes) was dumped from
+         * /sys/class/drm/card1/device/pp_table in a Linux VM where amdgpu
+         * initialized the same GPU successfully. This is the exact PPTable_t
+         * that the Linux driver wrote via TransferTableDram2Smu(TABLE_PPTABLE=0).
+         *
+         * Sequence: load file → write to VRAM buffer → HDP flush → Dram2Smu */
         {
             PVOID buf_handle = NULL;
             UCHAR *buf_cpu = (UCHAR *)psp_ring_map_vram(dev,
                 0x100000, 0x4000, &buf_handle);  /* 16KB at VRAM+1MB */
 
             if (buf_cpu) {
-                pr_info("gpu_smu: driver DRAM buffer mapped at cpu=%p\n", buf_cpu);
-
-                /* Zero the buffer first */
+                /* Zero the buffer */
                 memset(buf_cpu, 0, 0x4000);
-                gpu_hdp_flush(dev);
 
-                /* Smu2Dram: SMU writes pptable to our buffer */
-                pr_info("gpu_smu: TransferTableSmu2Dram(0)...\n");
-                ret = gpu_smu_send_msg(dev, PPSMC_MSG_TransferTableSmu2Dram, 0);
-                if (ret == 0) {
-                    /* Read back first 64 bytes to verify data was written */
-                    pr_info("gpu_smu: Smu2Dram OK. Buffer hex dump (first 64 bytes):\n");
-                    for (int row = 0; row < 4; row++) {
-                        pr_info("  +0x%02x: %02x %02x %02x %02x  %02x %02x %02x %02x  "
-                                "%02x %02x %02x %02x  %02x %02x %02x %02x\n",
-                                row * 16,
-                                buf_cpu[row*16+0],  buf_cpu[row*16+1],
-                                buf_cpu[row*16+2],  buf_cpu[row*16+3],
-                                buf_cpu[row*16+4],  buf_cpu[row*16+5],
-                                buf_cpu[row*16+6],  buf_cpu[row*16+7],
-                                buf_cpu[row*16+8],  buf_cpu[row*16+9],
-                                buf_cpu[row*16+10], buf_cpu[row*16+11],
-                                buf_cpu[row*16+12], buf_cpu[row*16+13],
-                                buf_cpu[row*16+14], buf_cpu[row*16+15]);
-                    }
+                /* Load pptable from file */
+                char pp_path[MAX_PATH];
+                char fw_dir_buf[MAX_PATH] = {};
+                GetEnvironmentVariableA("HSAKMT_FW_DIR", fw_dir_buf, sizeof(fw_dir_buf));
+                _snprintf(pp_path, sizeof(pp_path), "%s\\pp_table_rx9070xt.bin",
+                          fw_dir_buf[0] ? fw_dir_buf : "C:\\dev\\firmware");
 
-                    /* Check if buffer is all zeros (Smu2Dram wrote nothing) */
-                    BOOLEAN all_zero = TRUE;
-                    for (int i = 0; i < 0x4000; i++) {
-                        if (buf_cpu[i] != 0) { all_zero = FALSE; break; }
-                    }
-                    if (all_zero)
-                        pr_warn("gpu_smu: Buffer is ALL ZEROS — Smu2Dram wrote nothing!\n");
-                    else
-                        pr_info("gpu_smu: Buffer has non-zero data — pptable present\n");
+                ULONG pp_len = 0;
+                UCHAR *pp_data = find_and_read_fw("", pp_path, &pp_len);
+                if (!pp_data) {
+                    /* Try with fw_dir prefix */
+                    pp_data = find_and_read_fw(fw_dir_buf, "pp_table_rx9070xt.bin", &pp_len);
+                }
 
-                    /* CPU round-trip: copy buffer to temp, then back.
-                     * The Linux driver does CPU memcpy → HDP flush → Dram2Smu.
-                     * The SMU's DMA read path might require data to go through
-                     * the HDP write path (CPU→VRAM), not just SMU DMA→VRAM. */
-                    {
-                        UCHAR temp[256];
-                        /* Copy first 256 bytes via CPU (creates HDP entry) */
-                        memcpy(temp, buf_cpu, 256);
-                        /* Write back via CPU (ensures HDP has the data) */
-                        memcpy(buf_cpu, temp, 256);
-                        /* Also touch the full 16KB — force CPU write path */
-                        for (int i = 0; i < 0x4000; i += 64)
-                            buf_cpu[i] = buf_cpu[i];
-                    }
-                    pr_info("gpu_smu: CPU round-trip done, HDP flush + Dram2Smu(0)...\n");
+                if (pp_data && pp_len > 0) {
+                    pr_info("gpu_smu: loaded pp_table_rx9070xt.bin (%u bytes)\n", pp_len);
+                    /* Copy to VRAM buffer */
+                    ULONG copy_len = (pp_len < 0x4000) ? pp_len : 0x4000;
+                    memcpy(buf_cpu, pp_data, copy_len);
+                    free(pp_data);
+
+                    /* Hex dump first 32 bytes for verification */
+                    pr_info("gpu_smu: pptable first 32 bytes: "
+                            "%02x%02x %02x%02x %02x%02x %02x%02x "
+                            "%02x%02x %02x%02x %02x%02x %02x%02x\n",
+                            buf_cpu[0], buf_cpu[1], buf_cpu[2], buf_cpu[3],
+                            buf_cpu[4], buf_cpu[5], buf_cpu[6], buf_cpu[7],
+                            buf_cpu[8], buf_cpu[9], buf_cpu[10], buf_cpu[11],
+                            buf_cpu[12], buf_cpu[13], buf_cpu[14], buf_cpu[15]);
+
+                    /* HDP flush to make CPU-written data visible to SMU DMA */
                     gpu_hdp_flush(dev);
                     Sleep(10);
+
+                    /* TransferTableDram2Smu — load the pptable into SMU */
+                    pr_info("gpu_smu: TransferTableDram2Smu(0) with native pptable...\n");
                     ret = gpu_smu_send_msg(dev, PPSMC_MSG_TransferTableDram2Smu, 0);
                     if (ret == 0)
-                        pr_info("gpu_smu: Dram2Smu(0) OK!\n");
+                        pr_info("gpu_smu: *** Dram2Smu(0) SUCCEEDED with native pptable! ***\n");
                     else
-                        pr_warn("gpu_smu: Dram2Smu(0) STILL FAILED\n");
+                        pr_warn("gpu_smu: Dram2Smu(0) failed with native pptable too\n");
+                } else {
+                    pr_warn("gpu_smu: pp_table_rx9070xt.bin not found in %s\n", pp_path);
                 }
 
                 psp_ring_unmap(dev, buf_cpu, buf_handle);
             } else {
-                pr_warn("gpu_smu: failed to map driver DRAM buffer — "
-                        "skipping TransferTable diagnostic\n");
+                pr_warn("gpu_smu: failed to map VRAM buffer\n");
             }
         }
 
