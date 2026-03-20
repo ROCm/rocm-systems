@@ -2562,22 +2562,22 @@ void Device::HiddenHeapAlloc(const VirtualGPU& gpu) {
   auto HeapAlloc = [this, &gpu]() -> bool {
     // Allocate initial heap for device memory allocator
     static constexpr size_t HeapBufferSize = 128 * Ki;
-    heap_buffer_ = createMemory(HeapBufferSize);
-    if (initial_heap_size_ != 0) {
-      initial_heap_size_ = amd::alignUp(initial_heap_size_, 2 * Mi);
-      initial_heap_buffer_ = createMemory(initial_heap_size_, 2 * Mi);
+    heap_->buffer_.reset(createMemory(HeapBufferSize));
+    if (heap_->initial_size_ != 0) {
+      heap_->initial_size_ = amd::alignUp(heap_->initial_size_, 2 * Mi);
+      heap_->initial_buffer_.reset(createMemory(heap_->initial_size_, 2 * Mi));
     }
-    if (heap_buffer_ == nullptr) {
+    if (heap_->buffer_ == nullptr) {
       LogError("Heap buffer allocation failed!");
       return false;
     }
     bool result = static_cast<const KernelBlitManager&>(gpu.blitMgr())
-                      .initHeap(heap_buffer_, initial_heap_buffer_, HeapBufferSize,
-                                initial_heap_size_ / (2 * Mi));
+                      .initHeap(heap_->buffer_.get(), heap_->initial_buffer_.get(), HeapBufferSize,
+                                heap_->initial_size_ / (2 * Mi));
 
     return result;
   };
-  std::call_once(heap_initialized_, HeapAlloc);
+  std::call_once(heap_->initialized_, HeapAlloc);
 }
 
 // ================================================================================================

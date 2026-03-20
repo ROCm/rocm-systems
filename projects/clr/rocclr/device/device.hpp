@@ -41,6 +41,7 @@
 #include <unordered_set>
 #include <utility>
 #include <shared_mutex>
+#include <optional>
 
 namespace amd {
 class Command;
@@ -2120,7 +2121,7 @@ class Device : public RuntimeObject {
   Memory* P2PStage() const { return p2p_stage_; }
 
   //! Returns heap buffer object for device allocator
-  device::Memory* HeapBuffer() const { return heap_buffer_; }
+  device::Memory* HeapBuffer() const { return heap_->buffer_.get(); }
 
   //! Returns stack size set for the device
   uint64_t StackSize() const { return stack_size_; }
@@ -2129,7 +2130,7 @@ class Device : public RuntimeObject {
   bool UpdateStackSize(uint64_t stackSize);
 
   //! Returns initial heap size
-  uint64_t InitialHeapSize() const { return initial_heap_size_; }
+  uint64_t InitialHeapSize() const { return heap_->initial_size_; }
 
   //! Sets the heap size of the device
   bool UpdateInitialHeapSize(uint64_t initialHeapSize);
@@ -2229,15 +2230,19 @@ class Device : public RuntimeObject {
   static Memory* p2p_stage_;                  //!< Staging resources
   std::vector<Device*> enabled_p2p_devices_;  //!< List of user enabled P2P devices for this device
 
-  std::once_flag heap_initialized_;  //!< Heap buffer initialization flag
-  std::once_flag heap_allocated_;    //!< Heap buffer allocation flag
-
-  device::Memory* heap_buffer_;  //!< Preallocated heap buffer for memory allocations on device
+  struct Heap {
+    std::once_flag initialized_;                                //!< Heap buffer initialization flag
+    std::once_flag allocated_;                                  //!< Heap buffer allocation flag
+    std::unique_ptr<device::Memory> initial_buffer_ = nullptr;  //!< Initial heap buffer
+    uint64_t initial_size_{HIP_INITIAL_DM_SIZE};                //!< Initial device heap size
+    std::unique_ptr<device::Memory> buffer_ =
+        nullptr;  //!< Preallocated heap buffer for memory allocations on device
+  };
+  std::optional<Heap>
+      heap_;  //!< Heap buffer and related info for the device. Should never be empty
 
   amd::Memory* arena_mem_obj_;                          //!< Arena memory object
   uint64_t stack_size_{1024};                           //!< Device stack size
-  device::Memory* initial_heap_buffer_;                 //!< Initial heap buffer
-  uint64_t initial_heap_size_{HIP_INITIAL_DM_SIZE};     //!< Initial device heap size
   amd::Monitor activeQueuesLock_{};                     //!< Guards access to the activeQueues set
   std::unordered_set<amd::CommandQueue*> activeQueues;  //!< The set of active queues
 

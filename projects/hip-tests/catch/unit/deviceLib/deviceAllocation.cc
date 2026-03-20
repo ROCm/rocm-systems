@@ -1542,3 +1542,20 @@ HIP_TEST_CASE(Unit_deviceAllocationFollowedByDeviceReset) {
   REQUIRE(true == TestAllocInDeviceFunc(TEST_MALLOC_FREE));
   HIP_CHECK(hipDeviceReset());
 }
+
+/**
+ * @brief Regression test for device allocation interaction with hipDeviceReset.
+ * It should be possible to call device functions that perform allocations after a device reset
+ * without causing double free or memory leak issues.
+ */
+HIP_TEST_CASE(Unit_deviceAllocationAfterDeviceReset) {
+  int pcieAtomic = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
+  if (!pcieAtomic) {
+    HipTest::HIP_SKIP_TEST("Device doesn't support pcie atomic, Skipped");
+    return;
+  }
+  REQUIRE(TestAllocInDeviceFunc(TEST_MALLOC_FREE));
+  HIP_CHECK(hipDeviceReset());
+  REQUIRE(TestAllocInDeviceFunc(TEST_MALLOC_FREE));
+}

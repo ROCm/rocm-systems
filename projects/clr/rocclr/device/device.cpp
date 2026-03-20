@@ -746,8 +746,7 @@ Device::Device()
       activeWait_(false),
       blitProgram_(nullptr),
       context_(nullptr),
-      heap_buffer_(nullptr),
-      initial_heap_buffer_(nullptr),
+      heap_(std::in_place_t{}),
       arena_mem_obj_(nullptr),
       vaCacheAccess_(nullptr),
       vaCacheMap_(nullptr),
@@ -758,16 +757,6 @@ Device::Device()
 }
 
 Device::~Device() {
-  if (heap_buffer_ != nullptr) {
-    delete heap_buffer_;
-    heap_buffer_ = nullptr;
-  }
-
-  if (initial_heap_buffer_ != nullptr) {
-    delete initial_heap_buffer_;
-    initial_heap_buffer_ = nullptr;
-  }
-
   if (arena_mem_obj_ != nullptr) {
     arena_mem_obj_->release();
   }
@@ -1013,7 +1002,7 @@ bool Device::UpdateInitialHeapSize(uint64_t initialHeapSize) {
   if (initialHeapSize >= info().globalMemSize_) {
     return false;
   }
-  initial_heap_size_ = initialHeapSize;
+  heap_->initial_size_ = initialHeapSize;
   return true;
 }
 

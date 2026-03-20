@@ -150,6 +150,10 @@ void Device::Reset() {
   auto* dev = devices()[0];
   dev->ClearHostcallMemories();
   amd::MemObjMap::Purge(dev);
+
+  // Reset the heap now that the corresponding memory is gone.
+  dev->heap_.emplace();
+
   Create();
 }
 
