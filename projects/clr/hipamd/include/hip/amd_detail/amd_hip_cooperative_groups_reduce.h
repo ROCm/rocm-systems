@@ -23,58 +23,58 @@ namespace impl {
                                                      typename __hip_internal::remove_cvref<U>>;
 
   template <typename T, typename = void>
-  struct has_add : std::false_type {
+  struct has_add : __hip_internal::false_type {
   };
 
   template <typename T>
   struct has_add<T,
-                 std::void_t<decltype(__reduce_add_sync<unsigned long long>(0ull, T {}))>
-    > : std::true_type {};
+                 __hip_internal::void_t<decltype(__reduce_add_sync<unsigned long long>(0ull, T {}))>
+    > : __hip_internal::true_type {};
 
   template <typename T, typename = void>
-  struct has_min : std::false_type {
+  struct has_min : __hip_internal::false_type {
   };
 
   template <typename T>
   struct has_min<T,
-                 std::void_t<decltype(__reduce_min_sync<unsigned long long>(0ull, T {}))>
-    > : std::true_type {};
+                 __hip_internal::void_t<decltype(__reduce_min_sync<unsigned long long>(0ull, T {}))>
+    > : __hip_internal::true_type {};
 
   template <typename T, typename = void>
-  struct has_max : std::false_type {
+  struct has_max : __hip_internal::false_type {
   };
 
   template <typename T>
   struct has_max<T,
-                 std::void_t<decltype(__reduce_max_sync<unsigned long long>(0ull, T {}))>
-    > : std::true_type {};
+                 __hip_internal::void_t<decltype(__reduce_max_sync<unsigned long long>(0ull, T {}))>
+    > : __hip_internal::true_type {};
 
   template <typename T, typename = void>
-  struct has_and : std::false_type {
+  struct has_and : __hip_internal::false_type {
   };
 
   template <typename T>
   struct has_and<T,
-                 std::void_t<decltype(__reduce_and_sync<unsigned long long>(0ull, T {}))>
-    > : std::true_type {};
+                 __hip_internal::void_t<decltype(__reduce_and_sync<unsigned long long>(0ull, T {}))>
+    > : __hip_internal::true_type {};
 
   template <typename T, typename = void>
-  struct has_or : std::false_type {
+  struct has_or : __hip_internal::false_type {
   };
 
   template <typename T>
   struct has_or<T,
-                 std::void_t<decltype(__reduce_or_sync<unsigned long long>(0ull, T {}))>
-    > : std::true_type {};
+                 __hip_internal::void_t<decltype(__reduce_or_sync<unsigned long long>(0ull, T {}))>
+    > : __hip_internal::true_type {};
 
   template <typename T, typename = void>
-  struct has_xor : std::false_type {
+  struct has_xor : __hip_internal::false_type {
   };
 
   template <typename T>
   struct has_xor<T,
-                 std::void_t<decltype(__reduce_xor_sync<unsigned long long>(0ull, T {}))>
-    > : std::true_type {};
+                 __hip_internal::void_t<decltype(__reduce_xor_sync<unsigned long long>(0ull, T {}))>
+    > : __hip_internal::true_type {};
 
   // we can call reduce() only the block tiles that have a compile-time size
   template <class TyGroup>

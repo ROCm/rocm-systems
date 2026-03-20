@@ -101,6 +101,9 @@ template <typename _Tp, bool = is_arithmetic<_Tp>::value> struct is_signed : pub
 template <typename _Tp> struct is_signed<_Tp, true> : public true_or_false_type<_Tp(-1) < _Tp(0)> {
 };
 
+template< class... >
+using void_t = void;
+
 template <class T> auto test_returnable(int)
     -> decltype(void(static_cast<T (*)()>(nullptr)), true_type{});
 template <class> auto test_returnable(...) -> false_type;
