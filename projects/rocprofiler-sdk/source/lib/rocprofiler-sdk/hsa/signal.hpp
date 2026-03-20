@@ -32,7 +32,7 @@ namespace hsa
 struct signal_t
 {
     // bool         handler_is_set = false;
-    hsa_signal_t value          = {.handle = 0};
+    hsa_signal_t value = {.handle = 0};
     // void*        data           = nullptr;
 };
 }  // namespace hsa
