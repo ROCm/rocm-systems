@@ -1198,7 +1198,7 @@ perfetto_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& _gpu_pmc)
 }
 
 void
-perfetto_processor_t::handle([[maybe_unused]] const ainic_sample& _nic_sample)
+perfetto_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& _nic_sample)
 {
     auto _ts        = _nic_sample.timestamp;
     auto _device_id = _nic_sample.device_id;

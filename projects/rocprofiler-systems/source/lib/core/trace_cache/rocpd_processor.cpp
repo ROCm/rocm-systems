@@ -460,7 +460,7 @@ rocpd_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& _gpu_pmc)
 }
 
 void
-rocpd_processor_t::handle([[maybe_unused]] const ainic_sample& _nic_sample)
+rocpd_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& _nic_sample)
 {
     // Insert NIC RDMA metrics into rocpd database
     const auto* _name            = "ainic";

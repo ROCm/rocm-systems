@@ -22,7 +22,7 @@ namespace rocprofsys::pmc::collectors::nic
 struct sample : trace_cache::cacheable_t
 {
     static constexpr trace_cache::type_identifier_t type_identifier{
-        trace_cache::type_identifier_t::ainic_sample
+        trace_cache::type_identifier_t::ainic_pmc_sample
     };
 
     sample() = default;
@@ -49,8 +49,8 @@ namespace rocprofsys
 namespace trace_cache
 {
 
-/// @brief AINIC sample type alias
-using ainic_sample = pmc::collectors::nic::sample;
+/// @brief AINIC PMC sample type alias
+using ainic_pmc_sample = pmc::collectors::nic::sample;
 
 template <>
 inline void

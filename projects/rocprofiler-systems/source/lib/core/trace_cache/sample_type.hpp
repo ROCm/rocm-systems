@@ -47,7 +47,7 @@ enum class type_identifier_t : uint32_t
     cpu_freq_sample         = 0x0007,
     backtrace_region_sample = 0x0008,
     scratch_memory          = 0x0009,
-    ainic_sample            = 0x000A,
+    ainic_pmc_sample        = 0x000A,
     fragmented_space        = 0xFFFF
 };
 
