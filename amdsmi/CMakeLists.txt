@@ -76,15 +76,12 @@ update_version_in_file("rust-interface/src/amdsmi_wrapper.rs" ${DEFAULT_VERSION}
                        ": u32 = ")
 
 # Make proper version for appending
-# Default Value is 99999
-set(ROCM_VERSION_FOR_PACKAGE "99999")
-if(DEFINED ENV{ROCM_LIBPATCH_VERSION})
-    set(ROCM_VERSION_FOR_PACKAGE $ENV{ROCM_LIBPATCH_VERSION})
-endif()
 #Prepare final version for the CPACK use
-set(CPACK_PACKAGE_VERSION
-    "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}.${ROCM_VERSION_FOR_PACKAGE}"
-)
+# Use package version from top-level CMakeLists.txt
+if(NOT DEFINED AMDSMI_PACKAGE_VERSION)
+    set(AMDSMI_PACKAGE_VERSION "1.1.0")  # fallback for standalone build
+endif()
+set(CPACK_PACKAGE_VERSION "${AMDSMI_PACKAGE_VERSION}")
 
 # The following default version values should be updated as appropriate for
 # ABI breaks (update MAJOR and MINOR), and ABI/API additions (update MINOR).
@@ -509,7 +506,7 @@ configure_pkg( ${CPACK_PACKAGE_NAME} ${COMP_TYPE} ${CPACK_PACKAGE_VERSION} ${PKG
 # Custom installation for Debian Lintian File
 if(BUILD_ENABLE_LINTIAN_OVERRIDES AND BUILD_DEBIAN_PKGING_FLAG)
     set(OVERRIDE_FILE
-        "${CMAKE_BINARY_DIR}/DEBIAN/${DEB_OVERRIDES_INSTALL_FILENM}"
+        "${CMAKE_CURRENT_BINARY_DIR}/DEBIAN/${DEB_OVERRIDES_INSTALL_FILENM}"
     )
     set(OVERRIDE_TEMP_INSTALL_LOC
         "/_CPack_Packages/Linux/DEB/${CPACK_PACKAGE_NAME}-${CPACK_PACKAGE_VERSION}-Linux/runtime"
@@ -529,6 +526,12 @@ if(BUILD_ENABLE_LINTIAN_OVERRIDES AND BUILD_DEBIAN_PKGING_FLAG)
             "${CMAKE_COMMAND} -E copy ${OVERRIDE_FILE} ${OVERRIDE_FILE_STATIC_DEST}"
         )
     endif()
+endif()
+
+# If rocdxg is also being built, hook its CPack into the built-in 'package' target
+# by appending a post-build script. This makes 'make package' generate both packages.
+if(BUILD_ROCDXG)
+    list(APPEND CPACK_POST_BUILD_SCRIPTS "${CMAKE_BINARY_DIR}/rocdxg_cpack_post.cmake")
 endif()
 
 include(CPack)
