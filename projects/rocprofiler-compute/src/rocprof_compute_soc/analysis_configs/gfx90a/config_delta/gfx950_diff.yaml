@@ -50,17 +50,23 @@ Addition:
         avg: AVG((100 * CPC_SYNC_FIFO_FULL) / CPC_SYNC_WRREQ_FIFO_BUSY if (CPC_SYNC_WRREQ_FIFO_BUSY != 0) else None)
         min: MIN((100 * CPC_SYNC_FIFO_FULL) / CPC_SYNC_WRREQ_FIFO_BUSY if (CPC_SYNC_WRREQ_FIFO_BUSY != 0) else None)
         max: MAX((100 * CPC_SYNC_FIFO_FULL) / CPC_SYNC_WRREQ_FIFO_BUSY if (CPC_SYNC_WRREQ_FIFO_BUSY != 0) else None)
-        unit: pct
+        unit: Percent
     - CPC CANE Stall Rate:
         avg: AVG((100 * CPC_CANE_STALL) / CPC_CANE_BUSY if (CPC_CANE_BUSY != 0) else None)
         min: MIN((100 * CPC_CANE_STALL) / CPC_CANE_BUSY if (CPC_CANE_BUSY != 0) else None)
         max: MAX((100 * CPC_CANE_STALL) / CPC_CANE_BUSY if (CPC_CANE_BUSY != 0) else None)
-        unit: pct
+        unit: Percent
     - CPC ADC Utilization:
         avg: AVG((100 * CPC_TG_SEND) / CPC_GD_BUSY if (CPC_GD_BUSY != 0) else None)
         min: MIN((100 * CPC_TG_SEND) / CPC_GD_BUSY if (CPC_GD_BUSY != 0) else None)
         max: MAX((100 * CPC_TG_SEND) / CPC_GD_BUSY if (CPC_GD_BUSY != 0) else None)
-        unit: pct
+        unit: Percent
+- Panel Config:
+    id: 500
+  metric_descriptions:
+    CPC SYNC FIFO Full Rate: Percent of CPC sync counter request FIFO busy cycles where the FIFO was full. High values indicate backpressure in synchronization counter processing.
+    CPC CANE Stall Rate: Percent of CPC CANE bus busy cycles where sync counter requests were stalled. High values indicate contention on the CANE bus for synchronization counter operations.
+    CPC ADC Utilization: Percent of ADC busy cycles spent dispatching thread groups. The ADC is responsible for sending workgroups from the command processor to the workgroup manager.
 - Panel Config:
     id: 600
   metric_table:
@@ -75,7 +81,7 @@ Addition:
         avg: AVG(100 * (SPI_CSC_WAVE_CNT_BUSY) / ($GRBM_GUI_ACTIVE_PER_XCD * $pipes_per_gpu * $se_per_gpu))
         min: MIN(100 * (SPI_CSC_WAVE_CNT_BUSY) / ($GRBM_GUI_ACTIVE_PER_XCD * $pipes_per_gpu * $se_per_gpu))
         max: MAX(100 * (SPI_CSC_WAVE_CNT_BUSY) / ($GRBM_GUI_ACTIVE_PER_XCD * $pipes_per_gpu * $se_per_gpu))
-        unit: Pct
+        unit: Percent
 - Panel Config:
     id: 600
   metric_table:
@@ -85,7 +91,13 @@ Addition:
         avg: AVG((100 * (SPI_CS0_CRAWLER_STALL + SPI_CS1_CRAWLER_STALL + SPI_CS2_CRAWLER_STALL + SPI_CS3_CRAWLER_STALL) / ($GRBM_SPI_BUSY_PER_XCD * $se_per_gpu)) if ($GRBM_SPI_BUSY_PER_XCD != 0) else None)
         min: MIN((100 * (SPI_CS0_CRAWLER_STALL + SPI_CS1_CRAWLER_STALL + SPI_CS2_CRAWLER_STALL + SPI_CS3_CRAWLER_STALL) / ($GRBM_SPI_BUSY_PER_XCD * $se_per_gpu)) if ($GRBM_SPI_BUSY_PER_XCD != 0) else None)
         max: MAX((100 * (SPI_CS0_CRAWLER_STALL + SPI_CS1_CRAWLER_STALL + SPI_CS2_CRAWLER_STALL + SPI_CS3_CRAWLER_STALL) / ($GRBM_SPI_BUSY_PER_XCD * $se_per_gpu)) if ($GRBM_SPI_BUSY_PER_XCD != 0) else None)
-        unit: Pct
+        unit: Percent
+- Panel Config:
+    id: 600
+  metric_descriptions:
+    Schedule-Pipe Wave Occupancy: Total number of waves occupying all scheduler-pipe queues. The SPI has 4 scheduler-pipes, each with 8 hardware queues.
+    Scheduler-Pipe Wave Utilization: Percent of total scheduler-pipe cycles when waves are actively resident in the scheduler-pipe structures. This measures wave presence in the pipes before dispatch to compute units.
+    Scheduler-Pipe FIFO Full Rate: Percent of workgroup manager busy cycles where the event/wave order FIFO was full. High values indicate backpressure in the scheduler-pipe dispatch ordering logic.
 - Panel Config:
     id: 1000
   metric_table:
@@ -95,7 +107,7 @@ Addition:
         avg: AVG((TA_BUFFER_COALESCEABLE_WAVEFRONTS_sum / $denom))
         min: MIN((TA_BUFFER_COALESCEABLE_WAVEFRONTS_sum / $denom))
         max: MAX((TA_BUFFER_COALESCEABLE_WAVEFRONTS_sum / $denom))
-        unit: (instr + $normUnit)
+        unit: (Instructions + $normUnit)
 - Panel Config:
     id: 1000
   metric_table:
@@ -105,16 +117,18 @@ Addition:
         avg: AVG((SQ_INSTS_VALU_MFMA_F8 / $denom))
         min: MIN((SQ_INSTS_VALU_MFMA_F8 / $denom))
         max: MAX((SQ_INSTS_VALU_MFMA_F8 / $denom))
-        unit: (instr + $normUnit)
+        unit: (Instructions + $normUnit)
     - MFMA-F6F4:
         avg: AVG((SQ_INSTS_VALU_MFMA_F6F4 / $denom))
         min: MIN((SQ_INSTS_VALU_MFMA_F6F4 / $denom))
         max: MAX((SQ_INSTS_VALU_MFMA_F6F4 / $denom))
-        unit: (instr + $normUnit)
+        unit: (Instructions + $normUnit)
 - Panel Config:
     id: 1000
   metric_descriptions:
+    Spill/Stack Coalesceable Instr: The total number of coalesceable spill/stack memory instructions executed on all compute units, per normalization unit. Higher values indicate better memory access patterns for private memory operations.
     MFMA-F8: The total number of 8-bit floating point MFMA instructions issued per normalization unit. This is supported in AMD Instinct MI300 series and later only.
+    MFMA-F6F4: The total number of 4-bit and 6-bit floating point MFMA instructions issued per normalization unit. This is supported in AMD Instinct MI350 series (gfx950) and later only.
 - Panel Config:
     id: 1100
   metric_table:
@@ -122,12 +136,12 @@ Addition:
     metrics:
     - MFMA FLOPs (F8):
         value: AVG(((SQ_INSTS_VALU_MFMA_MOPS_F8 * 512) / (End_Timestamp - Start_Timestamp)))
-        unit: GFLOP
+        unit: GFLOPs
         peak: ((($max_sclk * $cu_per_gpu) * 8192) / 1000)
         pop: ((100 * AVG(((SQ_INSTS_VALU_MFMA_MOPS_F8 * 512) / (End_Timestamp - Start_Timestamp)))) / ((($max_sclk * $cu_per_gpu) * 8192) / 1000))
     - MFMA FLOPs (F6F4):
         value: AVG(((SQ_INSTS_VALU_MFMA_MOPS_F6F4 * 512) / (End_Timestamp - Start_Timestamp)))
-        unit: GFLOP
+        unit: GFLOPs
         peak: ((($max_sclk * $cu_per_gpu) * 16834) / 1000)
         pop: ((100 * AVG(((SQ_INSTS_VALU_MFMA_MOPS_F6F4 * 512) / (End_Timestamp - Start_Timestamp)))) / ((($max_sclk * $cu_per_gpu) * 16834) / 1000))
 - Panel Config:
@@ -139,12 +153,12 @@ Addition:
         avg: AVG((((100 * SQ_ACTIVE_INST_VALU2) / $GRBM_GUI_ACTIVE_PER_XCD) / $cu_per_gpu))
         min: MIN((((100 * SQ_ACTIVE_INST_VALU2) / $GRBM_GUI_ACTIVE_PER_XCD) / $cu_per_gpu))
         max: MAX((((100 * SQ_ACTIVE_INST_VALU2) / $GRBM_GUI_ACTIVE_PER_XCD) / $cu_per_gpu))
-        unit: pct
+        unit: Percent
     - VALU Co-Issue Efficiency:
         avg: AVG((100 * SQ_ACTIVE_INST_VALU2) / (SQ_ACTIVE_INST_VALU - SQ_ACTIVE_INST_VALU2))
         min: MIN((100 * SQ_ACTIVE_INST_VALU2) / (SQ_ACTIVE_INST_VALU - SQ_ACTIVE_INST_VALU2))
         max: MAX((100 * SQ_ACTIVE_INST_VALU2) / (SQ_ACTIVE_INST_VALU - SQ_ACTIVE_INST_VALU2))
-        unit: pct
+        unit: Percent
 - Panel Config:
     id: 1100
   metric_table:
@@ -154,16 +168,41 @@ Addition:
         avg: AVG(((512 * SQ_INSTS_VALU_MFMA_MOPS_F8) / $denom))
         min: MIN(((512 * SQ_INSTS_VALU_MFMA_MOPS_F8) / $denom))
         max: MAX(((512 * SQ_INSTS_VALU_MFMA_MOPS_F8) / $denom))
-        unit: (OPs + $normUnit)
+        unit: (FLOPs + $normUnit)
     - F6F4 OPs:
         avg: AVG((512 * SQ_INSTS_VALU_MFMA_MOPS_F6F4) / $denom)
         min: MIN((512 * SQ_INSTS_VALU_MFMA_MOPS_F6F4) / $denom)
         max: MAX((512 * SQ_INSTS_VALU_MFMA_MOPS_F6F4) / $denom)
-        unit: (OPs + $normUnit)
+        unit: (FLOPs + $normUnit)
 - Panel Config:
     id: 1100
   metric_descriptions:
-    Dual-issue VALU Utilization: Indicates what percent of the kernel's duration the VALU was busy executing dual-issued instructions. Computed as the ratio of the total number of cycles spent by the scheduler co-issuing VALU instructions over the total CU cycles.
+    MFMA FLOPs (F8): >-
+      The total number of 8-bit floating-point operations executed on MFMA units,
+      per normalization unit. F8 (FP8) uses either E4M3 or E5M2 format.
+    MFMA FLOPs (F6F4): >-
+      The total number of 4-bit and 6-bit floating-point operations executed on
+      MFMA units, per second. F6/F4 formats are supported in AMD Instinct
+      MI350 series (gfx950) and later only.
+    Dual-issue VALU Utilization: >-
+      Indicates what percent of the kernel's duration the VALU was busy executing
+      dual-issued instructions. Computed as the ratio of the total number of cycles
+      spent by the scheduler co-issuing VALU instructions over the total
+      CU cycles.
+    VALU Co-Issue Efficiency: >-
+      The ratio of quad-cycles where two VALU instructions were co-issued (executed
+      simultaneously) to quad-cycles where only a single VALU instruction was issued.
+      Measures how efficiently the kernel leverages the MI350's ability to co-issue
+      VALU instructions. Unlike Dual-issue VALU Utilization which measures percentage
+      of total time, this metric can exceed 100% when dual-issue cycles outnumber
+      single-issue cycles.
+    F8 OPs: >-
+      The total number of 8-bit floating-point operations executed on MFMA units,
+      per normalization unit. F8 (FP8) uses either E4M3 or E5M2 format.
+    F6F4 OPs: >-
+      The total number of 4-bit and 6-bit floating-point operations executed on
+      MFMA units, per normalization unit. F6/F4 formats are supported in AMD Instinct
+      MI350 series (gfx950) and later only.
 - Panel Config:
     id: 1200
   metric_table:
@@ -173,17 +212,17 @@ Addition:
         avg: AVG((SQ_INSTS_LDS_LOAD / $denom))
         min: MIN((SQ_INSTS_LDS_LOAD / $denom))
         max: MAX((SQ_INSTS_LDS_LOAD / $denom))
-        unit: (instr + $normUnit)
+        unit: (Instructions + $normUnit)
     - LDS STORE:
         avg: AVG((SQ_INSTS_LDS_STORE / $denom))
         min: MIN((SQ_INSTS_LDS_STORE / $denom))
         max: MAX((SQ_INSTS_LDS_STORE / $denom))
-        unit: (instr + $normUnit)
+        unit: (Instructions + $normUnit)
     - LDS ATOMIC:
         avg: AVG((SQ_INSTS_LDS_ATOMIC / $denom))
         min: MIN((SQ_INSTS_LDS_ATOMIC / $denom))
         max: MAX((SQ_INSTS_LDS_ATOMIC / $denom))
-        unit: (instr + $normUnit)
+        unit: (Instructions + $normUnit)
     - LDS LOAD Bandwidth:
         avg: AVG(64 * SQ_INSTS_LDS_LOAD_BANDWIDTH / (End_Timestamp - Start_Timestamp))
         min: MIN(64 * SQ_INSTS_LDS_LOAD_BANDWIDTH / (End_Timestamp - Start_Timestamp))
@@ -209,6 +248,35 @@ Addition:
         min: MIN((SQ_LDS_DATA_FIFO_FULL / $denom))
         max: MAX((SQ_LDS_DATA_FIFO_FULL / $denom))
         unit: (Cycles + $normUnit)
+- Panel Config:
+    id: 1200
+  metric_descriptions:
+    LDS LOAD Bandwidth: >-
+      The effective bandwidth of LDS load operations, accounting for the work-items
+      executed (execution mask). Calculated as the total bytes loaded from LDS
+      divided by the kernel duration.
+    LDS STORE Bandwidth: >-
+      The effective bandwidth of LDS store operations, accounting for the work-items
+      executed (execution mask). Calculated as the total bytes stored to LDS
+      divided by the kernel duration.
+    LDS ATOMIC Bandwidth: >-
+      The effective bandwidth of LDS atomic operations, accounting for the work-items
+      executed (execution mask). Calculated as the total bytes accessed by LDS
+      atomic operations divided by the kernel duration.
+    LDS LOAD: >-
+      The total number of LDS load instructions issued per normalization unit.
+    LDS STORE: >-
+      The total number of LDS store instructions issued per normalization unit.
+    LDS ATOMIC: >-
+      The total number of LDS atomic instructions issued per normalization unit.
+    LDS Command FIFO Full Rate: >-
+      The number of cycles where the LDS command FIFO was full, per normalization
+      unit. High values indicate backpressure in LDS instruction dispatch, which
+      may stall wavefronts waiting to issue LDS operations.
+    LDS Data FIFO Full Rate: >-
+      The number of cycles where the LDS data FIFO was full, per normalization
+      unit. High values indicate backpressure in LDS data return path, which may
+      stall wavefronts waiting for LDS read/atomic results.
 - Panel Config:
     id: 1500
   metric_table:
@@ -237,6 +305,16 @@ Addition:
 - Panel Config:
     id: 1500
   metric_descriptions:
+    Global/Generic Read Instructions for LDS: >-
+      The total number of global & generic memory read instructions that return
+      data directly to LDS, executed on all compute units on the accelerator, per
+      normalization unit. These operations bypass the register file and write
+      results directly into LDS memory.
+    Spill/Stack Read Instructions for LDS: >-
+      The total number of spill/stack memory read instructions that return data
+      directly to LDS, executed on all compute units on the accelerator, per
+      normalization unit. These operations bypass the register file and write
+      results directly into LDS memory.
     Write Ack Instructions: The total number of write acknowledgements submitted by data-return unit to SQ, summed over all compute units on the accelerator, per normalization unit.
 - Panel Config:
     id: 1600
@@ -262,22 +340,22 @@ Addition:
         avg: AVG((TCP_TAGRAM0_REQ_sum / $denom))
         min: MIN((TCP_TAGRAM0_REQ_sum / $denom))
         max: MAX((TCP_TAGRAM0_REQ_sum / $denom))
-        unit: (Req + $normUnit)
+        unit: (Requests + $normUnit)
     - Tag RAM 1 Req:
         avg: AVG((TCP_TAGRAM1_REQ_sum / $denom))
         min: MIN((TCP_TAGRAM1_REQ_sum / $denom))
         max: MAX((TCP_TAGRAM1_REQ_sum / $denom))
-        unit: (Req + $normUnit)
+        unit: (Requests + $normUnit)
     - Tag RAM 2 Req:
         avg: AVG((TCP_TAGRAM2_REQ_sum / $denom))
         min: MIN((TCP_TAGRAM2_REQ_sum / $denom))
         max: MAX((TCP_TAGRAM2_REQ_sum / $denom))
-        unit: (Req + $normUnit)
+        unit: (Requests + $normUnit)
     - Tag RAM 3 Req:
         avg: AVG((TCP_TAGRAM3_REQ_sum / $denom))
         min: MIN((TCP_TAGRAM3_REQ_sum / $denom))
         max: MAX((TCP_TAGRAM3_REQ_sum / $denom))
-        unit: (Req + $normUnit)
+        unit: (Requests + $normUnit)
 - Panel Config:
     id: 1600
   metric_table:
@@ -287,12 +365,12 @@ Addition:
         avg: AVG((TCP_CLIENT_UTCL1_INFLIGHT_sum / $denom))
         min: MIN((TCP_CLIENT_UTCL1_INFLIGHT_sum / $denom))
         max: MAX((TCP_CLIENT_UTCL1_INFLIGHT_sum / $denom))
-        units: (Req + $normUnit)
+        units: (Requests + $normUnit)
     - Misses under Translation Miss:
         avg: AVG((TCP_UTCL1_TRANSLATION_MISS_UNDER_MISS_sum / $denom))
         min: MIN((TCP_UTCL1_TRANSLATION_MISS_UNDER_MISS_sum / $denom))
         max: MAX((TCP_UTCL1_TRANSLATION_MISS_UNDER_MISS_sum / $denom))
-        units: (Req + $normUnit)
+        units: (Requests + $normUnit)
 - Panel Config:
     id: 1600
   metric_table:
@@ -334,6 +412,81 @@ Addition:
         max: MAX((TCP_UTCL1_STALL_UTCL2_REQ_OUT_OF_CREDITS_sum / $denom))
         units: (Cycles + $normUnit)
 - Panel Config:
+    id: 1600
+  metric_descriptions:
+    Stalled on Address: >-
+      The ratio of the number of cycles where the vL1D is stalled waiting for the
+      address processing unit to send address information, divided by the number
+      of cycles where the vL1D is active.
+    Stalled on Data: >-
+      The ratio of the number of cycles where the vL1D is stalled waiting for the
+      address processing unit to send write/atomic data, divided by the number of
+      cycles where the vL1D is active.
+    Stalled on Latency FIFO: >-
+      The ratio of the number of cycles where the vL1D is stalled because the
+      latency FIFO (tracking outstanding requests) is full, divided by the number
+      of cycles where the vL1D is active.
+    Stalled on Request FIFO: >-
+      The ratio of the number of cycles where the vL1D is stalled because the
+      request FIFO (queuing memory requests) is full, divided by the number of
+      cycles where the vL1D is active.
+    Stalled on Read Return: >-
+      The ratio of the number of cycles where the vL1D is stalled waiting for read
+      data to return from L2 before it can write into the cache, divided by the
+      number of cycles where the vL1D is active.
+    Tag RAM 0 Req: >-
+      The total number of vL1D cache requests (cache line lookups) that mapped to
+      Tag RAM bank 0 during the vL1D tag lookup process, per normalization unit.
+      The vL1D cache uses multiple Tag RAM banks for parallel tag lookups.
+      Distribution across banks affects lookup efficiency.
+    Tag RAM 1 Req: >-
+      The total number of vL1D cache requests (cache line lookups) that mapped to
+      Tag RAM bank 1 during the vL1D tag lookup process, per normalization unit.
+      The vL1D cache uses multiple Tag RAM banks for parallel tag lookups.
+      Distribution across banks affects lookup efficiency.
+    Tag RAM 2 Req: >-
+      The total number of vL1D cache requests (cache line lookups) that mapped to
+      Tag RAM bank 2 during the vL1D tag lookup process, per normalization unit.
+      The vL1D cache uses multiple Tag RAM banks for parallel tag lookups.
+      Distribution across banks affects lookup efficiency.
+    Tag RAM 3 Req: >-
+      The total number of vL1D cache requests (cache line lookups) that mapped to
+      Tag RAM bank 3 during the vL1D tag lookup process, per normalization unit.
+      The vL1D cache uses multiple Tag RAM banks for parallel tag lookups.
+      Distribution across banks affects lookup efficiency.
+    Inflight Req: >-
+      The sum of inflight client-to-UTCL1 translation requests per cycle, per
+      normalization unit. Measures the average number of translation requests
+      actively being processed by the UTCL1 at any given time.
+    Misses under Translation Miss: >-
+      The number of translation requests that missed in the UTCL1 while another
+      miss for the same translation was already being processed, per normalization
+      unit. These are secondary misses that occur before the first miss completes.
+    Cache Full Stall: >-
+      The number of cycles the UTCL1 was stalled due to the inflight request
+      counter reaching its maximum capacity, per normalization unit. Indicates
+      the translation cache cannot accept more requests.
+    Cache Miss Stall: >-
+      The number of cycles the UTCL1 was stalled due to multiple cache misses
+      being arbitrated simultaneously, per normalization unit.
+    Serialization Stall: >-
+      The number of cycles the UTCL1 was stalled due to serializing translation
+      requests through the cache, per normalization unit.
+    Thrashing Stall: >-
+      The number of cycles the UTCL1 was stalled due to cache thrashing (rapid
+      eviction and reload of translations), per normalization unit. This is an
+      estimation when thrashing detection is active.
+    Latency FIFO Stall: >-
+      The number of cycles the UTCL1-to-UTCL2 latency-hiding FIFO was full,
+      per normalization unit. This FIFO queues requests to the L2 translation
+      cache (UTCL2).
+    Resident Page Full Stall: >-
+      The number of cycles the UTCL1 was stalled because the latency-hiding
+      FIFO output indicated a non-resident page, per normalization unit.
+    UTCL2 Stall: >-
+      The number of cycles the UTCL1 was stalled due to running out of request
+      credits for the UTCL2 (L2 translation cache), per normalization unit.
+- Panel Config:
     id: 1700
   metric_table:
     id: 1702
@@ -342,12 +495,12 @@ Addition:
         avg: AVG((((100 * ((TCC_EA0_RDREQ_IO_CREDIT_STALL_sum + TCC_EA0_RDREQ_GMI_CREDIT_STALL_sum) + TCC_EA0_RDREQ_DRAM_CREDIT_STALL_sum)) / TCC_BUSY_sum) if (TCC_BUSY_sum != 0) else None))
         min: MIN((((100 * ((TCC_EA0_RDREQ_IO_CREDIT_STALL_sum + TCC_EA0_RDREQ_GMI_CREDIT_STALL_sum) + TCC_EA0_RDREQ_DRAM_CREDIT_STALL_sum)) / TCC_BUSY_sum) if (TCC_BUSY_sum != 0) else None))
         max: MAX((((100 * ((TCC_EA0_RDREQ_IO_CREDIT_STALL_sum + TCC_EA0_RDREQ_GMI_CREDIT_STALL_sum) + TCC_EA0_RDREQ_DRAM_CREDIT_STALL_sum)) / TCC_BUSY_sum) if (TCC_BUSY_sum != 0) else None))
-        unit: pct
+        unit: Percent
     - Write Stall:
         avg: AVG(((100 * (TCC_EA0_WRREQ_STALL_sum) / TCC_BUSY_sum) if (TCC_BUSY_sum != 0) else None))
         min: MIN(((100 * (TCC_EA0_WRREQ_STALL_sum) / TCC_BUSY_sum) if (TCC_BUSY_sum != 0) else None))
         max: MAX(((100 * (TCC_EA0_WRREQ_STALL_sum) / TCC_BUSY_sum) if (TCC_BUSY_sum != 0) else None))
-        unit: pct
+        unit: Percent
 - Panel Config:
     id: 1700
   metric_table:
@@ -409,42 +562,42 @@ Addition:
         avg: AVG(((100 * (TCC_EA0_RDREQ_IO_CREDIT_STALL_sum / TCC_BUSY_sum)) if (TCC_BUSY_sum != 0) else None))
         min: MIN(((100 * (TCC_EA0_RDREQ_IO_CREDIT_STALL_sum / TCC_BUSY_sum)) if (TCC_BUSY_sum != 0) else None))
         max: MAX(((100 * (TCC_EA0_RDREQ_IO_CREDIT_STALL_sum / TCC_BUSY_sum)) if (TCC_BUSY_sum != 0) else None))
-        unit: pct
+        unit: Percent
     - Read - Infinity Fabric Stall:
         type: "Infinity Fabric™ Stall"
         transaction: Read
         avg: AVG(((100 * (TCC_EA0_RDREQ_GMI_CREDIT_STALL_sum / TCC_BUSY_sum)) if (TCC_BUSY_sum != 0) else None))
         min: MIN(((100 * (TCC_EA0_RDREQ_GMI_CREDIT_STALL_sum / TCC_BUSY_sum)) if (TCC_BUSY_sum != 0) else None))
         max: MAX(((100 * (TCC_EA0_RDREQ_GMI_CREDIT_STALL_sum / TCC_BUSY_sum)) if (TCC_BUSY_sum != 0) else None))
-        unit: pct
+        unit: Percent
     - Read - HBM Stall:
         type: HBM Stall
         transaction: Read
         avg: AVG(((100 * (TCC_EA0_RDREQ_DRAM_CREDIT_STALL_sum / TCC_BUSY_sum)) if (TCC_BUSY_sum != 0) else None))
         min: MIN(((100 * (TCC_EA0_RDREQ_DRAM_CREDIT_STALL_sum / TCC_BUSY_sum)) if (TCC_BUSY_sum != 0) else None))
         max: MAX(((100 * (TCC_EA0_RDREQ_DRAM_CREDIT_STALL_sum / TCC_BUSY_sum)) if (TCC_BUSY_sum != 0) else None))
-        unit: pct
+        unit: Percent
     - Write - PCIe Stall:
         type: PCIe Stall
         transaction: Write
         avg: AVG(((100 * (TCC_EA0_WRREQ_IO_CREDIT_STALL_sum / TCC_BUSY_sum)) if (TCC_BUSY_sum != 0) else None))
         min: MIN(((100 * (TCC_EA0_WRREQ_IO_CREDIT_STALL_sum / TCC_BUSY_sum)) if (TCC_BUSY_sum != 0) else None))
         max: MAX(((100 * (TCC_EA0_WRREQ_IO_CREDIT_STALL_sum / TCC_BUSY_sum)) if (TCC_BUSY_sum != 0) else None))
-        unit: pct
+        unit: Percent
     - Write - Infinity Fabric Stall:
         type: "Infinity Fabric™ Stall"
         transaction: Write
         avg: AVG(((100 * (TCC_EA0_WRREQ_GMI_CREDIT_STALL_sum / TCC_BUSY_sum)) if (TCC_BUSY_sum != 0) else None))
         min: MIN(((100 * (TCC_EA0_WRREQ_GMI_CREDIT_STALL_sum / TCC_BUSY_sum)) if (TCC_BUSY_sum != 0) else None))
         max: MAX(((100 * (TCC_EA0_WRREQ_GMI_CREDIT_STALL_sum / TCC_BUSY_sum)) if (TCC_BUSY_sum != 0) else None))
-        unit: pct
+        unit: Percent
     - Write - HBM Stall:
         type: HBM Stall
         transaction: Write
         avg: AVG(((100 * (TCC_EA0_WRREQ_DRAM_CREDIT_STALL_sum / TCC_BUSY_sum)) if (TCC_BUSY_sum != 0) else None))
         min: MIN(((100 * (TCC_EA0_WRREQ_DRAM_CREDIT_STALL_sum / TCC_BUSY_sum)) if (TCC_BUSY_sum != 0) else None))
         max: MAX(((100 * (TCC_EA0_WRREQ_DRAM_CREDIT_STALL_sum / TCC_BUSY_sum)) if (TCC_BUSY_sum != 0) else None))
-        unit: pct
+        unit: Percent
 - Panel Config:
     id: 1700
   metric_table:
@@ -511,6 +664,9 @@ Addition:
     Read Bandwidth: Total number of bytes looked up in the L2 cache for read requests, divided by total duration.
     Write Bandwidth: Total number of bytes looked up in the L2 cache for write requests, divided by total duration.
     Atomic Bandwidth: Total number of bytes looked up in the L2 cache for atomic requests, divided by total duration.
+    Bypass Req: Number of L2 cache bypass requests measured at the tag block. These requests skip normal cache lookup and go directly to memory, typically for uncacheable or write-combined memory accesses.
+    Input Buffer Req: Number of raw memory requests received through the L2 cache Input Buffer (IB) from compute units and other hardware clients. This counts all incoming requests before cache lookup processing and represents the total incoming demand on the L2 cache.
+    Read (128B): The total number of L2 requests to Infinity Fabric to read 128B of data from any memory location, per normalization unit.
     Read Bandwidth - PCIe: Total number of bytes due to L2 read requests due to PCIe traffic, divided by total duration.
     "Read Bandwidth - Infinity Fabric™": Total number of bytes due to L2 read requests due to Infinity Fabric traffic, divided by total duration.
     Read Bandwidth - HBM: Total number of bytes due to L2 read requests due to HBM traffic, divided by total duration.
@@ -520,6 +676,7 @@ Addition:
     Atomic Bandwidth - PCIe: Total number of bytes due to L2 atomic requests due to PCIe traffic, divided by total duration.
     "Atomic Bandwidth - Infinity Fabric™": Total number of bytes due to L2 atomic requests due to Infinity Fabric traffic, divided by total duration.
     Atomic Bandwidth - HBM: Total number of bytes due to L2 atomic requests due to HBM traffic, divided by total duration.
+    Atomic - HBM: The total number of L2 atomic requests (either 32-byte or 64-byte) destined for the accelerator's local high-bandwidth memory (HBM), per normalization unit. These are read-modify-write operations that update memory atomically.
     Read Stall: >-
       The ratio of the total number of cycles the L2-Fabric interface was
       stalled on a read request to any destination (local HBM, remote PCIe\xAE
@@ -570,6 +727,12 @@ Modification:
         value: AVG(((TCC_EA0_RDREQ_LEVEL_sum / TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum != 0) else None))
     - L2-Fabric Write Latency:
         value: AVG(((TCC_EA0_WRREQ_LEVEL_sum / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum != 0) else None))
+- Panel Config:
+    id: 200
+  metric_descriptions:
+    Theoretical LDS Bandwidth: Indicates the maximum amount of bytes that could have been loaded from, stored to, or atomically updated in the LDS per unit time (see LDS Bandwidth example for more detail).
+    L1I Hit Rate: The percent of L1I requests that hit on a previously loaded line the cache. Calculated as the ratio of the number of L1I requests that hit over the number of all L1I requests.
+    L1I BW: The number of bytes looked up in the L1I cache per unit time. This is also presented as a percent of the peak theoretical bandwidth achievable on the specific accelerator.
 - Panel Config:
     id: 300
   metric_table:
@@ -684,6 +847,10 @@ Modification:
         avg: AVG((((((((64 * (((SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16) + SQ_INSTS_VALU_TRANS_F16) + (SQ_INSTS_VALU_FMA_F16 * 2))) + ((512 * SQ_INSTS_VALU_MFMA_MOPS_F8) + (512 * SQ_INSTS_VALU_MFMA_MOPS_F16) + (512 * SQ_INSTS_VALU_MFMA_MOPS_BF16))) + (64 * (((SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32) + SQ_INSTS_VALU_TRANS_F32) + (SQ_INSTS_VALU_FMA_F32 * 2)))) + (512 * SQ_INSTS_VALU_MFMA_MOPS_F32)) + (64 * (((SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64) + SQ_INSTS_VALU_TRANS_F64) + (SQ_INSTS_VALU_FMA_F64 * 2)))) + (512 * SQ_INSTS_VALU_MFMA_MOPS_F64) + (512 * SQ_INSTS_VALU_MFMA_MOPS_F6F4)) / $denom))
         min: MIN((((((((64 * (((SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16) + SQ_INSTS_VALU_TRANS_F16) + (SQ_INSTS_VALU_FMA_F16 * 2))) + ((512 * SQ_INSTS_VALU_MFMA_MOPS_F8) + (512 * SQ_INSTS_VALU_MFMA_MOPS_F16) + (512 * SQ_INSTS_VALU_MFMA_MOPS_BF16))) + (64 * (((SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32) + SQ_INSTS_VALU_TRANS_F32) + (SQ_INSTS_VALU_FMA_F32 * 2)))) + (512 * SQ_INSTS_VALU_MFMA_MOPS_F32)) + (64 * (((SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64) + SQ_INSTS_VALU_TRANS_F64) + (SQ_INSTS_VALU_FMA_F64 * 2)))) + (512 * SQ_INSTS_VALU_MFMA_MOPS_F64) + (512 * SQ_INSTS_VALU_MFMA_MOPS_F6F4)) / $denom))
         max: MAX((((((((64 * (((SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16) + SQ_INSTS_VALU_TRANS_F16) + (SQ_INSTS_VALU_FMA_F16 * 2))) + ((512 * SQ_INSTS_VALU_MFMA_MOPS_F8) + (512 * SQ_INSTS_VALU_MFMA_MOPS_F16) + (512 * SQ_INSTS_VALU_MFMA_MOPS_BF16))) + (64 * (((SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32) + SQ_INSTS_VALU_TRANS_F32) + (SQ_INSTS_VALU_FMA_F32 * 2)))) + (512 * SQ_INSTS_VALU_MFMA_MOPS_F32)) + (64 * (((SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64) + SQ_INSTS_VALU_TRANS_F64) + (SQ_INSTS_VALU_FMA_F64 * 2)))) + (512 * SQ_INSTS_VALU_MFMA_MOPS_F64) + (512 * SQ_INSTS_VALU_MFMA_MOPS_F6F4)) / $denom))
+- Panel Config:
+    id: 1400
+  metric_descriptions:
+    Atomic Req: The total number of atomic requests from sL1D to the L2, per normalization unit. Atomic requests to the sL1D are typically unused on current CDNA accelerators.
 - Panel Config:
     id: 1500
   metric_table:

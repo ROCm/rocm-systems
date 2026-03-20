@@ -223,9 +223,9 @@ an Instinct MI210 vs an Instinct MI250.
    Additionally, you will notice a few extra files. An SoC parameters file,
    ``sysinfo.csv``, is created to reflect the target device settings. All
    profiling output is stored in ``log.txt``. Roofline-specific benchmark
-   results are stored in ``roofline.csv`` and roofline plots are outputted into HTMLs as
-   ``empirRoof_gpu-0_[datatype1]_..._[datatypeN].html`` where data types requested through
-   ``--roofline-data-type`` option are listed in the file name.
+   results are stored in ``roofline.csv``. To generate roofline HTML plots,
+   run ``rocprof-compute analyze`` on the profiling output directory
+   (see :doc:`../analyze/mode`).
 
 .. code-block:: shell-session
 
@@ -284,7 +284,6 @@ Examples:
    $ tree workloads/vcopy
 
    └── MI200
-    ├── empirRoof_gpu-0_FP32.html
     ├── log.txt
     ├── perfmon
     │   ├── pmc_perf_0.txt
@@ -326,7 +325,6 @@ Examples:
    $ tree /tmp/profiles/amd-ryzen/0
 
    └── MI200
-    ├── empirRoof_gpu-0_FP32.html
     ├── log.txt
     ├── perfmon
     │   ├── pmc_perf_0.txt
@@ -685,24 +683,21 @@ Standalone roofline
 Roofline analysis occurs on any profile mode run, provided ``--no-roof`` option is not included.
 You don't need to include any additional roofline-specific options for roofline analysis.
 If you want to focus only on roofline-specific performance data and reduce the time it takes to profile, you can use the ``--roof-only`` option.
-This option checks if there is existing profiling data in the workload directory (``pmc_perf.csv`` and ``roofline.csv``):
+This option checks if there is existing roofline benchmark data in the workload directory (``roofline.csv``):
 
-a) If found, uses the data files with the provided arguments to create another roofline HTML output; otherwise,
+a) If found, skips microbenchmark execution;
 
-b) Profile mode runs but is limited to collecting only roofline performance counters.
+b) Otherwise, profile mode runs microbenchmarks and collects roofline performance counters.
 
 Note that ``--roof-only`` cannot be used with ``--block`` or ``--set`` options.
 
-Roofline options
-----------------
+Profile mode generates ``roofline.csv`` containing microbenchmark data. To generate
+roofline HTML plots, use ``rocprof-compute analyze`` on the profiling output directory
+(see :doc:`../analyze/mode`). Visualization options (``--sort``, ``--mem-level``,
+``--roofline-data-type``) are available in analyze mode.
 
-``--sort <desired_sort>``
-   Allows you to specify whether you would like to overlay top kernel or top
-   dispatch data in your roofline plot.
-
-``-m``, ``--mem-level <cache_level>``
-   Allows you to specify specific levels of cache to include in your roofline
-   plot.
+Roofline options (profile)
+--------------------------
 
 ``--device <gpu_id>``
    Allows you to specify a device ID to collect performance data from when
@@ -712,18 +707,9 @@ Roofline options
    Allows for kernel filtering. Usage is equivalent with the current ``rocprof``
    utility. See :ref:`profiling-kernel-filtering`.
 
-``--roofline-data-type <datatype>``
-   Allows you to specify data types that you want plotted in the roofline HTML output(s). Selecting more than one data type will overlay the results onto the same plot. Default: FP32
-
 .. note::
 
   For more information on data types supported based on the GPU architecture, see :doc:`../../conceptual/performance-model`
-
-Each kernel in your ``.html`` roofline plot is automatically distinguished with a unique marker identifiable from the plot's key. The roofline HTML includes an integrated multi-subplot layout with:
-
-1. **Roofline Plot** - Shows performance ceilings and kernel arithmetic intensity points
-2. **Plot Points & Values Table** - Displays AI values, performance metrics, memory/compute bound status, and cache levels for each kernel
-3. **Full Kernel Names Table** - Lists complete kernel names with their corresponding plot markers
 
 
 Roofline only
@@ -734,69 +720,22 @@ The following example demonstrates profiling roofline data only:
 .. code-block:: shell-session
 
    $ rocprof-compute profile --name occupancy --roof-only -- ./tests/occupancy -n 1048576 -b 256
-                                    __                                       _
-   _ __ ___   ___ _ __  _ __ ___  / _|       ___ ___  _ __ ___  _ __  _   _| |_ ___
-   | '__/ _ \ / __| '_ \| '__/ _ \| |_ _____ / __/ _ \| '_ ` _ \| '_ \| | | | __/ _ \
-   | | | (_) | (__| |_) | | | (_) |  _|_____| (_| (_) | | | | | | |_) | |_| | ||  __/
-   |_|  \___/ \___| .__/|_|  \___/|_|        \___\___/|_| |_| |_| .__/ \__,_|\__\___|
-                  |_|                                           |_|
-   ...
-   INFO [roofline] Generating pmc_perf.csv (roofline counters only).
-   INFO Rocprofiler-Compute version: 3.3.0
-   INFO Profiler choice: rocprofiler-sdk
-   INFO Path: /app/projects/rocprofiler-compute/workloads/occupancy/MI300X_A1
-   INFO Target: MI300X_A1
-   INFO Command: ./tests/occupancy -n 1048576 -b 256
-   INFO Kernel Selection: None
-   INFO Dispatch Selection: None
-   INFO Filtered sections: ['4']
-   INFO
-   INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-   INFO Collecting Performance Counters (Roofline Only)
-   INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-   INFO
-   INFO [Run 1/3][Approximate profiling time left: pending first measurement...]
-   INFO [profiling] Current input file: /app/projects/rocprofiler-compute/workloads/occupancy/MI300X_A1/perfmon/pmc_perf_0.txt
-   ...
-   INFO [roofline] Checking for roofline.csv in /app/projects/rocprofiler-compute/workloads/occupancy/MI300X_A1
-   INFO [roofline] No roofline data found. Generating...
-   Empirical Roofline Calculation
-   Copyright © 2025  Advanced Micro Devices, Inc. All rights reserved.
-   Total detected GPU devices: 8
-   GPU Device 0 (gfx942) with 304 CUs: Profiling...
-   99% [||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| ]
    ...
 
-
-An inspection of our workload output folder shows ``.html`` plots were generated
+An inspection of our workload output folder shows ``roofline.csv`` was generated
 successfully.
-
-.. warning::
-
-   Deprecation warning: Standalone Roofline Analysis plot output ``empirRoof_gpu-<device ID><datatypes><kernels>.html`` will be auto-generated in analyze mode instead of profile mode in a future release.
 
 .. code-block:: shell-session
 
    $ ls workloads/occupancy/MI300X_A1
    total 48
-   -rw-r--r-- 1 auser agroup 13331 Oct 29 10:33 empirRoof_gpu-0_FP32.html
    drwxr-xr-x 1 auser agroup     0 Oct 29 10:33 perfmon
    -rw-r--r-- 1 auser agroup  1101 Oct 29 10:33 pmc_perf.csv
    -rw-r--r-- 1 auser agroup  1715 Oct 29 10:33 roofline.csv
    -rw-r--r-- 1 auser agroup   650 Oct 29 10:33 sysinfo.csv
    -rw-r--r-- 1 auser agroup   399 Oct 29 10:33 timestamps.csv
 
-.. note::
-
-  ROCm Compute Profiler currently captures roofline profiling for all data types, and you can reduce the clutter in the HTML outputs by filtering the data type(s). Selecting multiple data types will overlay the results into the same HTML. To generate results in separate HTML for each data type from the same workload run, you can re-run the profiling command with each data type as long as the ``roofline.csv`` file still exists in the workload folder.
-
-The following image is a sample ``empirRoof_gpu-0_FP32.html`` roofline
-plot.
-
-.. image:: ../../data/profile/sample-roof-plot.jpg
-   :align: center
-   :alt: Sample ROCm Compute Profiler roofline output
-   :width: 800
+To generate roofline HTML plots from this data, see :doc:`../analyze/mode`.
 
 .. _torch-operator-mapping:
 
@@ -873,12 +812,13 @@ When Torch operator mapping is enabled, profiling writes additional CSV files in
 the workload directory: **marker_api_trace** and **counter_collection** files with
 the ``torch_trace`` prefix. These correlate PyTorch operators
 with GPU kernels and performance counters. When you run analyze (e.g. with
-``--list-torch-operators``), it builds per-operator CSVs under ``torch_trace/``;
-the source marker and counter files are **retained** in the workload directory and
-are not deleted.
+``--list-torch-operators`` or ``--torch-operator``), a consolidated CSV is written
+to ``torch_trace/consolidated.csv``; the source marker and counter files are
+**retained** in the workload directory and are not deleted.
 
 ``torch_trace/`` directory
-The ``torch_trace/`` directory contains per-operator CSV files. The columns include:
+The ``torch_trace/`` directory contains ``consolidated.csv`` with all
+operator/kernel data. The columns include:
 
    * ``Operator_Name``: Full operator hierarchy (e.g. ``nn.Module.Net.forward/nn.Module.Conv2d.forward/torch.nn.functional.relu``, ``nn.Module.ResNet.forward/torch.nn.functional.relu``).
    * ``Context_Id``: Call context (e.g., ``1@__init__.py:231``)
@@ -886,10 +826,11 @@ The ``torch_trace/`` directory contains per-operator CSV files. The columns incl
    * ``Start_Timestamp_function`` / ``End_Timestamp_function``: Operator timing
    * ``Start_Timestamp_kernel`` / ``End_Timestamp_kernel``: Kernel timing
 
-This per-operator organization allows focused analysis of specific operators without
-processing the entire trace.
+The consolidated CSV is generated automatically on the first analysis run that
+requires it (``--list-torch-operators`` or ``--torch-operator``) and is reused on
+subsequent runs.
 
-Sample rows from ``torch_trace/ones_like.csv`` (from profiling an mnist model).
+Sample rows from ``torch_trace/consolidated.csv`` (from profiling an mnist model).
 
 .. list-table::
    :header-rows: 1
@@ -976,9 +917,8 @@ operator occurs in your PyTorch application:
    nn.Module.MyModel.forward/nn.Module.Linear.forward
    torch.nn.functional.relu
 
-The per-operator CSV under ``torch_trace/`` is named after the operator 
-such as, ``ones_like.csv`` and ``relu.csv``. The ``Operator_Name`` column in the CSV
-contains the full operator hierarchy.
+The ``Operator_Name`` column in ``torch_trace/consolidated.csv`` contains
+the full operator hierarchy.
 
 This hierarchical information enables:
 
@@ -998,15 +938,14 @@ Example with hierarchical naming:
 
        def forward(self, x):
            x = self.encoder(x)  # Captured as nn.Module.MyModel.forward/nn.Module.Linear.forward
-           x = self.decoder(x)  # Same hierarchy; both write to nn_Module_Linear_forward.csv
+           x = self.decoder(x)  # Same hierarchy; both appear in consolidated.csv under Operator_Name
            return x
 
 **Analyzing captured operators**: After profiling, use the analyze CLI (see
 :doc:`../analyze/cli`) to list and filter by operator name. Filtering
-(``--torch-operator``) accepts either the full hierarchical name (e.g.
-``nn.Module.Net.forward/nn.Module.Conv2d.forward/torch.nn.functional.conv2d``)
-or the last segment only (e.g. ``conv2d``). Selection
-at intermediate levels is not supported yet.
+(``--torch-operator``) accepts PurePosixPath glob patterns (e.g. ``*conv2d``,
+``torch.nn.functional.conv2d``, ``*/*conv2d``). To select all operators, pass
+no arguments, ``all``, ``*``, or ``**`` — all four forms are equivalent.
 
 Combining Torch operator with other options
 -------------------------------------------
@@ -1063,6 +1002,8 @@ the policy for multiplexing. The available policies are:
 By default, if no policy is specified, ROCm Compute Profiler uses the ``kernel_launch_params`` policy.
 
 .. note::
+
+   * Iteration multiplexing requires rocprofiler-sdk from ROCm 7.0.0 or later.
 
    * Do not use ``--no-native-tool`` with ``--iteration-multiplexing``.
      Iteration multiplexing is only supported when using ROCm Compute Profiler with
@@ -1182,7 +1123,6 @@ The example above produces:
    $ tree /tmp/mpi_profile/0
 
    └── MI200
-    ├── empirRoof_gpu-0_FP32.html
     ├── log.txt
     ├── perfmon
     │   ├── pmc_perf_0.txt
@@ -1231,7 +1171,6 @@ The example above produces:
    $ tree ./workloads/laplace_eqn/0
 
    └── MI200
-    ├── empirRoof_gpu-0_FP32.html
     ├── log.txt
     ├── perfmon
     │   ├── pmc_perf_0.txt
@@ -1278,7 +1217,6 @@ to your output directory. The following example is run on the host ``amd-ryzen``
    $ tree /tmp/mpi_profile/amd-ryzen/0
 
    └── MI200
-    ├── empirRoof_gpu-0_FP32.html
     ├── log.txt
     ├── perfmon
     │   ├── pmc_perf_0.txt
