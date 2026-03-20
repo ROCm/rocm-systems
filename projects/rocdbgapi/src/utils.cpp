@@ -231,7 +231,7 @@ string_vprintf (const char *format, va_list va)
 
   dbgapi_assert (size >= 0);
 
-  std::string str (size, '\0');
+  std::string str (static_cast<size_t> (size), '\0');
   vsnprintf (&str[0], str.size () + 1, format, va);
   return str;
 }

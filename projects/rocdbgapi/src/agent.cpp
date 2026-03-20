@@ -266,7 +266,8 @@ agent_t::remove_watchpoint (const watchpoint_t &watchpoint)
   if (it == std::end (m_watchpoints))
     return;
 
-  os_watch_id_t os_watch_id = std::distance (begin (m_watchpoints), it);
+  auto os_watch_id
+    = utils::narrow<os_watch_id_t> (std::distance (begin (m_watchpoints), it));
 
   amd_dbgapi_status_t status = process ().os_driver ().clear_address_watch (
     os_agent_id (), os_watch_id);

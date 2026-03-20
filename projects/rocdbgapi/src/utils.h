@@ -33,6 +33,7 @@
 #include <exception>
 #include <functional>
 #include <iterator>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <string>
@@ -93,16 +94,78 @@ namespace utils
 /* Get the filename containing dbgapi's code.  */
 const char *get_self_name ();
 
+/* An explicit, checked, narrowing conversion.  Throws a fatal error
+   if the conversion would lose information.  */
+
+template <typename To, typename From>
+constexpr To
+narrow (From from)
+{
+  using ToLimits = std::numeric_limits<To>;
+  using FromLimits = std::numeric_limits<From>;
+
+  /* Check for negative values when converting to an unsigned
+     type.  */
+  if constexpr (std::is_unsigned_v<To> && std::is_signed_v<From>)
+    {
+      if (from < 0)
+        fatal_error ("narrowing error: negative value to unsigned");
+    }
+
+  /* For signed to signed, check for values smaller than the
+     destination can hold.  */
+  if constexpr (std::is_signed_v<To> && std::is_signed_v<From>)
+    {
+      if (from < ToLimits::min ())
+        fatal_error ("narrowing error: underflow");
+    }
+
+  /* Check for values larger than the destination can hold.  We cast
+     to From to ensure the comparison is performed in the
+     wider/original domain.  */
+  if constexpr (static_cast<std::uintmax_t> (FromLimits::max ())
+                > static_cast<std::uintmax_t> (ToLimits::max ()))
+    {
+      if (from > static_cast<From> (ToLimits::max ()))
+        fatal_error ("narrowing error: overflow");
+    }
+
+  return static_cast<To> (from);
+}
+
+/* Like narrow, but takes the destination as argument.  Useful for
+   assignments, to avoid spelling out the destination's type.  */
+
+template <typename To, typename From>
+void
+narrow_assign (To &to, From from)
+{
+  to = narrow<To> (from);
+}
+
 template <typename Integral = uint64_t>
 constexpr Integral
 bit_mask (int first, int last)
 {
   dbgapi_assert (last >= first && "invalid argument");
-  size_t num_bits = last - first + 1;
-  return ((num_bits >= sizeof (Integral) * 8)
-            ? ~Integral{ 0 } /* num_bits exceed the size of Integral */
-            : ((Integral{ 1 } << num_bits) - 1))
-         << first;
+  auto num_bits = static_cast<size_t> (last - first + 1);
+  auto mask = (((num_bits >= sizeof (Integral) * 8)
+                  ? ~Integral{ 0 } /* num_bits exceed the size of Integral */
+                  : ((Integral{ 1 } << num_bits) - 1))
+               << first);
+  /* If Integral is narrower than int, mask is now int.  Do an
+     explicit cast to avoid -Wconversion warnings.  */
+  return static_cast<Integral> (mask);
+}
+
+template <typename Integral = uint64_t, typename First,
+          typename Last>
+constexpr Integral
+bit_mask (First first, Last last)
+{
+  /* Defer to the int, int overload, with narrow checking.  */
+  return bit_mask<Integral> (narrow<int> (first),
+                             narrow<int> (last));
 }
 
 template <typename Integral>
@@ -118,7 +181,18 @@ bit_count (Integral x)
   x = x - ((x >> 1) & ~T{ 0 } / 3);
   x = (x & ~T{ 0 } / 15 * 3) + ((x >> 2) & ~T{ 0 } / 15 * 3);
   x = (x + (x >> 4)) & ~T{ 0 } / 255 * 15;
-  return (x * (~T{ 0 } / 255)) >> (sizeof (T) - 1) * 8;
+  auto count = (x * (~T{ 0 } / 255)) >> (sizeof (T) - 1) * 8;
+  return static_cast<int> (count);
+}
+
+/* Split an unsigned 64-bit value into a pair of unsigned 32-bit
+   values.  */
+inline std::pair<uint32_t, uint32_t>
+split (uint64_t val)
+{
+  auto lo = static_cast<uint32_t> (val);
+  auto hi = static_cast<uint32_t> (val >> 32);
+  return { lo, hi };
 }
 
 template <typename Integral>
@@ -163,27 +237,33 @@ trailing_zeroes_count<unsigned int> (unsigned int x)
 }
 #endif
 
-template <typename Integral>
-constexpr std::make_unsigned_t<Integral>
-zero_extend (Integral x, int width)
+template <typename Val, typename Width>
+constexpr auto
+zero_extend (Val x, Width width)
 {
-  return x & bit_mask (0, width - 1);
+  using UVal = std::make_unsigned_t<Val>;
+  return static_cast<UVal> (x) & bit_mask (0, width - 1);
 }
 
-template <typename Integral>
-constexpr std::make_signed_t<Integral>
-sign_extend (Integral x, int width)
+template <typename Val, typename Width>
+constexpr std::make_signed_t<Val>
+sign_extend (Val x, Width width)
 {
-  Integral sign_mask = bit_mask (width - 1, sizeof (Integral) * 8 - 1);
+  Val sign_mask = bit_mask (width - 1, sizeof (Val) * 8 - 1);
   return (zero_extend (x, width) ^ sign_mask) - sign_mask;
 }
 
-/* Extract bits [last:first] from t.  */
-template <typename Integral>
-constexpr Integral
-bit_extract (Integral x, int first, int last)
+/* Extract bits [last:first] from X.  */
+template <typename Res = void, typename From>
+constexpr auto
+bit_extract (From x, int first, int last)
 {
-  return (x >> first) & bit_mask<Integral> (0, last - first);
+  /* If Res is void, we use the type of From. If Res is specified, we
+     use that.  */
+  using ActualRes = std::conditional_t<std::is_void_v<Res>, From, Res>;
+
+  return static_cast<ActualRes> ((x >> first)
+                                 & bit_mask<From> (0, last - first));
 }
 
 template <typename Integral>
@@ -216,25 +296,27 @@ next_power_of_two (Integral x)
   return ++v;
 }
 
-template <typename Integral>
+template <typename Integral, typename Align>
 constexpr Integral
-align_down (Integral x, int alignment)
+align_down (Integral x, Align alignment)
 {
   dbgapi_assert (is_power_of_two (alignment));
-  return x & -alignment;
+  auto align = narrow<Integral> (alignment);
+  return x & -align;
 }
 
-template <typename Integral>
+template <typename Integral, typename Align>
 constexpr Integral
-align_up (Integral x, int alignment)
+align_up (Integral x, Align alignment)
 {
   dbgapi_assert (is_power_of_two (alignment));
-  return (x + alignment - 1) & -alignment;
+  auto align = narrow<Integral> (alignment);
+  return (x + align - 1) & -align;
 }
 
-template <typename Integral>
+template <typename Integral, typename Align>
 constexpr bool
-is_aligned (Integral x, int alignment)
+is_aligned (Integral x, Align alignment)
 {
   dbgapi_assert (is_power_of_two (alignment));
   return x == align_down (x, alignment);

@@ -166,7 +166,7 @@ set_target_properties(amd-dbgapi PROPERTIES
   SOVERSION ${PROJECT_VERSION_MAJOR})
 
 target_compile_options(amd-dbgapi PRIVATE
-  -fno-rtti -Werror -Wall -Wextra -Wshadow -Wno-attributes) #-pedantic)
+  -fno-rtti -Werror -Wall -Wextra -Wshadow -Wno-attributes -Wconversion) #-pedantic)
 
 target_compile_definitions(amd-dbgapi
   PRIVATE __STDC_LIMIT_MACROS __STDC_CONSTANT_MACROS __STDC_FORMAT_MACROS)
