@@ -226,12 +226,13 @@ string_vprintf (const char *format, va_list va)
   va_list copy;
 
   va_copy (copy, va);
-  size_t size = vsnprintf (NULL, 0, format, copy);
+  int size = vsnprintf (NULL, 0, format, copy);
   va_end (copy);
 
-  std::string str (size, '\0');
-  vsprintf (&str[0], format, va);
+  dbgapi_assert (size >= 0);
 
+  std::string str (size, '\0');
+  vsnprintf (&str[0], str.size () + 1, format, va);
   return str;
 }
 
