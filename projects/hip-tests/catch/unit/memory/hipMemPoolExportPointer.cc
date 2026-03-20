@@ -28,7 +28,7 @@ constexpr size_t byte_size = DATA_SIZE * sizeof(int);
  *    - Host specific (LINUX)
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE(Unit_hipMemPoolExportPointer_Negative) {
+HIP_TEST_CASE(Unit_hipMemPoolExportPointer_Negative) {
   hipMemPoolPtrExportData ptrExp;
   hipShareableHdl sharedHandle;
   hipMemPoolProps pool_props{};

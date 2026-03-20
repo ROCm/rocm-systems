@@ -205,7 +205,6 @@ void queueTasksInStreams(std::vector<hipStream_t>& stream, size_t arrsize) {
  * (use 8 threads). Validate all the results.
  */
 bool runFuncTestsForAllPriorityLevelsMultThread(unsigned int flags) {
-  bool TestPassed = true;
   std::thread T[TOTALTHREADS];
   int priority_low;
   int priority_high;
@@ -790,7 +789,7 @@ template <typename T> void TestForMultipleStreamWithPriority(void) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipStreamCreateWithPriority_FunctionalForAllPriorities) {
+HIP_TEST_CASE(Unit_hipStreamCreateWithPriority_FunctionalForAllPriorities) {
   SECTION("Default flag and device synchronize") {
     hipStreamCreateWithPriorityTest::funcTestsForAllPriorityLevelsWrtNullStrm(hipStreamDefault,
                                                                               true);
@@ -824,7 +823,7 @@ TEST_CASE(Unit_hipStreamCreateWithPriority_FunctionalForAllPriorities) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipStreamCreateWithPriority_MulthreadDefaultflag) {
+HIP_TEST_CASE(Unit_hipStreamCreateWithPriority_MulthreadDefaultflag) {
   bool TestPassed = true;
   TestPassed =
       hipStreamCreateWithPriorityTest::runFuncTestsForAllPriorityLevelsMultThread(hipStreamDefault);
@@ -843,7 +842,7 @@ TEST_CASE(Unit_hipStreamCreateWithPriority_MulthreadDefaultflag) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipStreamCreateWithPriority_MulthreadNonblockingflag) {
+HIP_TEST_CASE(Unit_hipStreamCreateWithPriority_MulthreadNonblockingflag) {
   bool TestPassed = true;
   TestPassed = hipStreamCreateWithPriorityTest::runFuncTestsForAllPriorityLevelsMultThread(
       hipStreamNonBlocking);
@@ -861,7 +860,7 @@ TEST_CASE(Unit_hipStreamCreateWithPriority_MulthreadNonblockingflag) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipStreamCreateWithPriority_NegTst) {
+HIP_TEST_CASE(Unit_hipStreamCreateWithPriority_NegTst) {
   hipStream_t stream{nullptr};
   int priority_low{0};
   int priority_high{0};
@@ -894,7 +893,7 @@ TEST_CASE(Unit_hipStreamCreateWithPriority_NegTst) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipStreamCreateWithPriority_CheckPriorityVal) {
+HIP_TEST_CASE(Unit_hipStreamCreateWithPriority_CheckPriorityVal) {
   int id = GENERATE(range(0, HipTest::getDeviceCount()));
 
   HIP_CHECK(hipSetDevice(id));
@@ -949,7 +948,7 @@ TEST_CASE(Unit_hipStreamCreateWithPriority_CheckPriorityVal) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipStreamCreateWithPriority_ValidateWithEvents) {
+HIP_TEST_CASE(Unit_hipStreamCreateWithPriority_ValidateWithEvents) {
   bool TestPassed = true;
   TestPassed = hipStreamCreateWithPriorityTest::validateStreamPrioritiesWithEvents<int>();
   REQUIRE(TestPassed);
@@ -966,7 +965,7 @@ TEST_CASE(Unit_hipStreamCreateWithPriority_ValidateWithEvents) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipStreamCreateWithPriority_TestMultipleStreamWithPriority) {
+HIP_TEST_CASE(Unit_hipStreamCreateWithPriority_TestMultipleStreamWithPriority) {
   hipStreamCreateWithPriorityTest::TestForMultipleStreamWithPriority<int>();
 }
 

@@ -66,7 +66,7 @@ static hipError_t test_hipDeviceGetHdpAddress(int deviceId, hipDeviceAttribute_t
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipGetDeviceAttribute_CheckAttrValues) {
+HIP_TEST_CASE(Unit_hipGetDeviceAttribute_CheckAttrValues) {
   int deviceId;
   HIP_CHECK(hipGetDevice(&deviceId));
   hipDeviceProp_t props;
@@ -200,7 +200,7 @@ TEST_CASE(Unit_hipGetDeviceAttribute_CheckAttrValues) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipDeviceGetAttribute_NegTst) {
+HIP_TEST_CASE(Unit_hipDeviceGetAttribute_NegTst) {
   int deviceCount = 0;
   int pi = -1;
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
@@ -233,168 +233,6 @@ TEST_CASE(Unit_hipDeviceGetAttribute_NegTst) {
   }
 }
 
-template <size_t n> using AttributeToStringMap =
-    std::array<std::pair<hipDeviceAttribute_t, const char*>, n>;
-
-namespace {
-
-constexpr AttributeToStringMap<59> kCommonAttributes{
-    {{hipDeviceAttributeEccEnabled, "hipDeviceAttributeEccEnabled"},
-     {hipDeviceAttributeCanMapHostMemory, "hipDeviceAttributeCanMapHostMemory"},
-     {hipDeviceAttributeClockRate, "hipDeviceAttributeClockRate"},
-     {hipDeviceAttributeComputeMode, "hipDeviceAttributeComputeMode"},
-     {hipDeviceAttributeConcurrentKernels, "hipDeviceAttributeConcurrentKernels"},
-     {hipDeviceAttributeConcurrentManagedAccess, "hipDeviceAttributeConcurrentManagedAccess"},
-     {hipDeviceAttributeCooperativeLaunch, "hipDeviceAttributeCooperativeLaunch"},
-     {hipDeviceAttributeCooperativeMultiDeviceLaunch,
-      "hipDeviceAttributeCooperativeMultiDeviceLaunch"},
-     {hipDeviceAttributeDirectManagedMemAccessFromHost,
-      "hipDeviceAttributeDirectManagedMemAccessFromHost"},
-     {hipDeviceAttributeIntegrated, "hipDeviceAttributeIntegrated"},
-     {hipDeviceAttributeIsMultiGpuBoard, "hipDeviceAttributeIsMultiGpuBoard"},
-     {hipDeviceAttributeKernelExecTimeout, "hipDeviceAttributeKernelExecTimeout"},
-     {hipDeviceAttributeL2CacheSize, "hipDeviceAttributeL2CacheSize"},
-     {hipDeviceAttributeLocalL1CacheSupported, "hipDeviceAttributeLocalL1CacheSupported"},
-     {hipDeviceAttributeComputeCapabilityMajor, "hipDeviceAttributeComputeCapabilityMajor"},
-     {hipDeviceAttributeManagedMemory, "hipDeviceAttributeManagedMemory"},
-     {hipDeviceAttributeMaxBlockDimX, "hipDeviceAttributeMaxBlockDimX"},
-     {hipDeviceAttributeMaxBlockDimY, "hipDeviceAttributeMaxBlockDimY"},
-     {hipDeviceAttributeMaxBlockDimZ, "hipDeviceAttributeMaxBlockDimZ"},
-     {hipDeviceAttributeMaxGridDimX, "hipDeviceAttributeMaxGridDimX"},
-     {hipDeviceAttributeMaxGridDimY, "hipDeviceAttributeMaxGridDimY"},
-     {hipDeviceAttributeMaxGridDimZ, "hipDeviceAttributeMaxGridDimZ"},
-     {hipDeviceAttributeMaxSurface1D, "hipDeviceAttributeMaxSurface1D"},
-     {hipDeviceAttributeMaxSurface2D, "hipDeviceAttributeMaxSurface2D"},
-     {hipDeviceAttributeMaxSurface3D, "hipDeviceAttributeMaxSurface3D"},
-     {hipDeviceAttributeMaxTexture1DWidth, "hipDeviceAttributeMaxTexture1DWidth"},
-     {hipDeviceAttributeMaxTexture1DLinear, "hipDeviceAttributeMaxTexture1DLinear"},
-     {hipDeviceAttributeMaxTexture2DWidth, "hipDeviceAttributeMaxTexture2DWidth"},
-     {hipDeviceAttributeMaxTexture2DHeight, "hipDeviceAttributeMaxTexture2DHeight"},
-     {hipDeviceAttributeMaxTexture3DWidth, "hipDeviceAttributeMaxTexture3DWidth"},
-     {hipDeviceAttributeMaxTexture3DHeight, "hipDeviceAttributeMaxTexture3DHeight"},
-     {hipDeviceAttributeMaxTexture3DDepth, "hipDeviceAttributeMaxTexture3DDepth"},
-     {hipDeviceAttributeMaxThreadsDim, "hipDeviceAttributeMaxThreadsDim"},
-     {hipDeviceAttributeMaxThreadsPerBlock, "hipDeviceAttributeMaxThreadsPerBlock"},
-     {hipDeviceAttributeMaxThreadsPerMultiProcessor,
-      "hipDeviceAttributeMaxThreadsPerMultiProcessor"},
-     {hipDeviceAttributeMaxPitch, "hipDeviceAttributeMaxPitch"},
-     {hipDeviceAttributeMemoryBusWidth, "hipDeviceAttributeMemoryBusWidth"},
-     {hipDeviceAttributeMemoryClockRate, "hipDeviceAttributeMemoryClockRate"},
-     {hipDeviceAttributeComputeCapabilityMinor, "hipDeviceAttributeComputeCapabilityMinor"},
-     {hipDeviceAttributeMultiprocessorCount, "hipDeviceAttributeMultiprocessorCount"},
-     {hipDeviceAttributeUnused1, "hipDeviceAttributeUnused1"},
-     {hipDeviceAttributePageableMemoryAccess, "hipDeviceAttributePageableMemoryAccess"},
-     {hipDeviceAttributePageableMemoryAccessUsesHostPageTables,
-      "hipDeviceAttributePageableMemoryAccessUsesHostPageTables"},
-     {hipDeviceAttributePciBusId, "hipDeviceAttributePciBusId"},
-     {hipDeviceAttributePciDeviceId, "hipDeviceAttributePciDeviceId"},
-     {hipDeviceAttributePciDomainID, "hipDeviceAttributePciDomainID"},
-     {hipDeviceAttributeMaxRegistersPerBlock, "hipDeviceAttributeMaxRegistersPerBlock"},
-     {hipDeviceAttributeMaxRegistersPerMultiprocessor,
-      "hipDeviceAttributeMaxRegistersPerMultiprocessor"},
-     {hipDeviceAttributeMaxSharedMemoryPerBlock, "hipDeviceAttributeMaxSharedMemoryPerBlock"},
-     {hipDeviceAttributeTextureAlignment, "hipDeviceAttributeTextureAlignment"},
-     {hipDeviceAttributeTexturePitchAlignment, "hipDeviceAttributeTexturePitchAlignment"},
-     {hipDeviceAttributeTotalConstantMemory, "hipDeviceAttributeTotalConstantMemory"},
-     {hipDeviceAttributeTotalGlobalMem, "hipDeviceAttributeTotalGlobalMem"},
-     {hipDeviceAttributeWarpSize, "hipDeviceAttributeWarpSize"},
-     {hipDeviceAttributeMemoryPoolsSupported, "hipDeviceAttributeMemoryPoolsSupported"},
-     {hipDeviceAttributeUnifiedAddressing, "hipDeviceAttributeUnifiedAddressing"},
-     {hipDeviceAttributeVirtualMemoryManagementSupported,
-      "hipDeviceAttributeVirtualMemoryManagementSupported"},
-     {hipDeviceAttributeHostRegisterSupported, "hipDeviceAttributeHostRegisterSupported"},
-    {hipDeviceAttributeDmaBufSupported, "hipDeviceAttributeDmaBufSupported"}}};
-
-#if HT_NVIDIA
-constexpr AttributeToStringMap<33> kCudaOnlyAttributes{
-    {{hipDeviceAttributeAccessPolicyMaxWindowSize, "hipDeviceAttributeAccessPolicyMaxWindowSize"},
-     {hipDeviceAttributeAsyncEngineCount, "hipDeviceAttributeAsyncEngineCount"},
-     {hipDeviceAttributeCanUseHostPointerForRegisteredMem,
-      "hipDeviceAttributeCanUseHostPointerForRegisteredMem"},
-     {hipDeviceAttributeComputePreemptionSupported, "hipDeviceAttributeComputePreemptionSupported"},
-     {hipDeviceAttributeDeviceOverlap, "hipDeviceAttributeDeviceOverlap"},
-     {hipDeviceAttributeGlobalL1CacheSupported, "hipDeviceAttributeGlobalL1CacheSupported"},
-     {hipDeviceAttributeHostNativeAtomicSupported, "hipDeviceAttributeHostNativeAtomicSupported"},
-     {hipDeviceAttributeLuid, "hipDeviceAttributeLuid"},
-     {hipDeviceAttributeLuidDeviceNodeMask, "hipDeviceAttributeLuidDeviceNodeMask"},
-     {hipDeviceAttributeMaxBlocksPerMultiProcessor, "hipDeviceAttributeMaxBlocksPerMultiProcessor"},
-     {hipDeviceAttributeMaxSurface1DLayered, "hipDeviceAttributeMaxSurface1DLayered"},
-     {hipDeviceAttributeMaxSurface2DLayered, "hipDeviceAttributeMaxSurface2DLayered"},
-     {hipDeviceAttributeMaxSurfaceCubemap, "hipDeviceAttributeMaxSurfaceCubemap"},
-     {hipDeviceAttributeMaxSurfaceCubemapLayered, "hipDeviceAttributeMaxSurfaceCubemapLayered"},
-     {hipDeviceAttributeMaxTexture1DLayered, "hipDeviceAttributeMaxTexture1DLayered"},
-     {hipDeviceAttributeMaxTexture1DMipmap, "hipDeviceAttributeMaxTexture1DMipmap"},
-     {hipDeviceAttributeMaxTexture2DGather, "hipDeviceAttributeMaxTexture2DGather"},
-     {hipDeviceAttributeMaxTexture2DLayered, "hipDeviceAttributeMaxTexture2DLayered"},
-     {hipDeviceAttributeMaxTexture2DLinear, "hipDeviceAttributeMaxTexture2DLinear"},
-     {hipDeviceAttributeMaxTexture2DMipmap, "hipDeviceAttributeMaxTexture2DMipmap"},
-     {hipDeviceAttributeMaxTexture3DAlt, "hipDeviceAttributeMaxTexture3DAlt"},
-     {hipDeviceAttributeMaxTextureCubemap, "hipDeviceAttributeMaxTextureCubemap"},
-     {hipDeviceAttributeMaxTextureCubemapLayered, "hipDeviceAttributeMaxTextureCubemapLayered"},
-     {hipDeviceAttributeMultiGpuBoardGroupID, "hipDeviceAttributeMultiGpuBoardGroupID"},
-     {hipDeviceAttributePersistingL2CacheMaxSize, "hipDeviceAttributePersistingL2CacheMaxSize"},
-     {hipDeviceAttributeReservedSharedMemPerBlock, "hipDeviceAttributeReservedSharedMemPerBlock"},
-     {hipDeviceAttributeSharedMemPerBlockOptin, "hipDeviceAttributeSharedMemPerBlockOptin"},
-     {hipDeviceAttributeSharedMemPerMultiprocessor, "hipDeviceAttributeSharedMemPerMultiprocessor"},
-     {hipDeviceAttributeSingleToDoublePrecisionPerfRatio,
-      "hipDeviceAttributeSingleToDoublePrecisionPerfRatio"},
-     {hipDeviceAttributeStreamPrioritiesSupported, "hipDeviceAttributeStreamPrioritiesSupported"},
-     {hipDeviceAttributeSurfaceAlignment, "hipDeviceAttributeSurfaceAlignment"},
-     {hipDeviceAttributeTccDriver, "hipDeviceAttributeTccDriver"},
-     {hipDeviceAttributeUnused2, "hipDeviceAttributeUnused2"}}};
-#endif
-
-#if HT_AMD
-constexpr AttributeToStringMap<19> kAmdOnlyAttributes{{
-    {hipDeviceAttributeClockInstructionRate, "hipDeviceAttributeClockInstructionRate"},
-    {hipDeviceAttributeUnused3, "hipDeviceAttributeUnused3"},
-    {hipDeviceAttributeMaxSharedMemoryPerMultiprocessor,
-     "hipDeviceAttributeMaxSharedMemoryPerMultiprocessor"},
-    {hipDeviceAttributeUnused4, "hipDeviceAttributeUnused4"},
-    {hipDeviceAttributeUnused5, "hipDeviceAttributeUnused5"},
-    {hipDeviceAttributeHdpMemFlushCntl, "hipDeviceAttributeHdpMemFlushCntl"},
-    {hipDeviceAttributeHdpRegFlushCntl, "hipDeviceAttributeHdpRegFlushCntl"},
-    {hipDeviceAttributeCooperativeMultiDeviceUnmatchedFunc,
-     "hipDeviceAttributeCooperativeMultiDeviceUnmatchedFunc"},
-    {hipDeviceAttributeCooperativeMultiDeviceUnmatchedGridDim,
-     "hipDeviceAttributeCooperativeMultiDeviceUnmatchedGridDim"},
-    {hipDeviceAttributeCooperativeMultiDeviceUnmatchedBlockDim,
-     "hipDeviceAttributeCooperativeMultiDeviceUnmatchedBlockDim"},
-    {hipDeviceAttributeCooperativeMultiDeviceUnmatchedSharedMem,
-     "hipDeviceAttributeCooperativeMultiDeviceUnmatchedSharedMem"},
-    {hipDeviceAttributeIsLargeBar, "hipDeviceAttributeIsLargeBar"},
-    {hipDeviceAttributeAsicRevision, "hipDeviceAttributeAsicRevision"},
-    {hipDeviceAttributeCanUseStreamWaitValue, "hipDeviceAttributeCanUseStreamWaitValue"},
-    {hipDeviceAttributeImageSupport, "hipDeviceAttributeImageSupport"},
-    {hipDeviceAttributePhysicalMultiProcessorCount,
-     "hipDeviceAttributePhysicalMultiProcessorCount"},
-    {hipDeviceAttributeFineGrainSupport, "hipDeviceAttributeFineGrainSupport"},
-    {hipDeviceAttributeNumberOfXccs, "hipDeviceAttributeNumberOfXccs"},
-    {hipDeviceAttributeExpertSchedMode, "hipDeviceAttributeExpertSchedMode"}
-    // {hipDeviceAttributeWallClockRate, "hipDeviceAttributeWallClockRate"}
-}};
-#endif
-
-constexpr int kW = 60;
-
-}  // anonymous namespace
-
-template <size_t n>
-void printAttributes(const AttributeToStringMap<n>& attributes, const int device) {
-  hipError_t ret_val;
-  for (const auto& attribute : attributes) {
-    int64_t attribute_value = 0;
-    ret_val =
-        hipDeviceGetAttribute(reinterpret_cast<int*>(&attribute_value), attribute.first, device);
-    std::cout << std::setw(kW) << std::string(attribute.second).append(": ");
-    if (ret_val == hipSuccess)
-      std::cout << attribute_value << "\n";
-    else
-      std::cout << "unsupported\n";
-  }
-  std::flush(std::cout);
-}
-
 /**
  * Test Description
  * ------------------------
@@ -406,7 +244,7 @@ void printAttributes(const AttributeToStringMap<n>& attributes, const int device
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE(Unit_hipGetDeviceAttribute_hipDevAttrHostRegisterSupported) {
+HIP_TEST_CASE(Unit_hipGetDeviceAttribute_hipDevAttrHostRegisterSupported) {
   hipError_t ret_val;
   int hipDevAttr = 0;
   ret_val = hipDeviceGetAttribute(&hipDevAttr, hipDeviceAttributeHostRegisterSupported, 0);

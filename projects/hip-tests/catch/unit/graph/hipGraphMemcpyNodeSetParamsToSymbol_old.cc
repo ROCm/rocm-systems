@@ -46,7 +46,7 @@ __global__ void CpyToConstSymbolKernel(int* B_d) {
 
 /* This testcase verifies negative scenarios of
    hipGraphMemcpyNodeSetParamsToSymbol API */
-TEST_CASE(Unit_hipGraphMemcpyNodeSetParamsToSymbol_Negative) {
+HIP_TEST_CASE(Unit_hipGraphMemcpyNodeSetParamsToSymbol_Negative) {
   constexpr size_t Nbytes = SIZE * sizeof(int);
   int *A_d{nullptr}, *B_d{nullptr};
   int *A_h{nullptr}, *B_h{nullptr};

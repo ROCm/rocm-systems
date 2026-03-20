@@ -21,7 +21,7 @@
  * ------------------------
  *  - HIP_VERSION >= 6.4
  */
-TEST_CASE(Unit_hipDevicePrimaryCtxSetFlags_Negative) {
+HIP_TEST_CASE(Unit_hipDevicePrimaryCtxSetFlags_Negative) {
   hipDevice_t dev;
   unsigned int flags = 0;
   SECTION("Negative device index") {
@@ -51,7 +51,7 @@ TEST_CASE(Unit_hipDevicePrimaryCtxSetFlags_Negative) {
  * ------------------------
  *  - HIP_VERSION >= 6.4
  */
-TEST_CASE(Unit_hipDeviceAPIs_not_supported) {
+HIP_TEST_CASE(Unit_hipDeviceAPIs_not_supported) {
   hipDevice_t device;
   int numDevices = -1;
   HIP_CHECK(hipDeviceGet(&device, 0));
@@ -91,7 +91,7 @@ TEST_CASE(Unit_hipDeviceAPIs_not_supported) {
  * ------------------------
  *  - HIP_VERSION >= 6.4
  */
-TEST_CASE(Unit_hipCtxGetSetCacheConfig_not_supported) {
+HIP_TEST_CASE(Unit_hipCtxGetSetCacheConfig_not_supported) {
   hipFuncCache_t cacheConfig;
   SECTION("hipCtxSetCacheConfig_not_supported") {
     SECTION("Invalid enum value") {
@@ -130,7 +130,7 @@ TEST_CASE(Unit_hipCtxGetSetCacheConfig_not_supported) {
  *  - Textures supported on device
  *  - HIP_VERSION >= 6.4
  */
-TEST_CASE(Unit_hipCtxGetSetSharedMemConfig_not_supported) {
+HIP_TEST_CASE(Unit_hipCtxGetSetSharedMemConfig_not_supported) {
   hipSharedMemConfig config;
   config = hipSharedMemBankSizeEightByte;
   SECTION("hipCtxSetSharedMemConfig_not_supported") {
@@ -156,7 +156,7 @@ TEST_CASE(Unit_hipCtxGetSetSharedMemConfig_not_supported) {
  *  - Textures supported on device
  *  - HIP_VERSION >= 6.4
  */
-TEST_CASE(Unit_hipCtxPeerAccess_not_supported) {
+HIP_TEST_CASE(Unit_hipCtxPeerAccess_not_supported) {
   hipCtx_t peerCtx = nullptr;
   unsigned int flags = 0;
   SECTION("hipCtxEnablePeerAccess_not_supported") {
@@ -180,7 +180,7 @@ TEST_CASE(Unit_hipCtxPeerAccess_not_supported) {
  * ------------------------
  *  - HIP_VERSION >= 6.4
  */
-TEST_CASE(Unit_hipCtxAPIs_not_supported) {
+HIP_TEST_CASE(Unit_hipCtxAPIs_not_supported) {
   SECTION("hipCtxGetFlags_not_supported") {
     unsigned int flags = 0x100;
     auto res = hipCtxGetFlags(&flags);
@@ -217,7 +217,7 @@ TEST_CASE(Unit_hipCtxAPIs_not_supported) {
  * ------------------------
  *  - HIP_VERSION >= 6.4
  */
-TEST_CASE(hipDevicePrimaryCtxGetState_Negative) {
+HIP_TEST_CASE(hipDevicePrimaryCtxGetState_Negative) {
   hipDevice_t device;
   HIP_CHECK(hipDeviceGet(&device, 0));
   hipCtx_t primaryCtx = nullptr;

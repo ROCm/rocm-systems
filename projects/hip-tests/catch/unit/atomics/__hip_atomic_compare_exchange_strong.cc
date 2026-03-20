@@ -87,7 +87,7 @@ template <typename TestType> static void runHipAtomicCompareExchangeStrongWorkgr
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit___hip_atomic_compare_exchange_strong_Positive_Wavefront) {
+HIP_TEST_CASE(Unit___hip_atomic_compare_exchange_strong_Positive_Wavefront) {
   SECTION("int") { runHipAtomicCompareExchangeStrongWavefrontTest<int>(); }
   SECTION("unsigned int") { runHipAtomicCompareExchangeStrongWavefrontTest<unsigned int>(); }
   SECTION("unsigned long") { runHipAtomicCompareExchangeStrongWavefrontTest<unsigned long>(); }
@@ -123,7 +123,7 @@ TEST_CASE(Unit___hip_atomic_compare_exchange_strong_Positive_Wavefront) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit___hip_atomic_compare_exchange_strong_Positive_Workgroup) {
+HIP_TEST_CASE(Unit___hip_atomic_compare_exchange_strong_Positive_Workgroup) {
   SECTION("int") { runHipAtomicCompareExchangeStrongWorkgroupTest<int>(); }
   SECTION("unsigned int") { runHipAtomicCompareExchangeStrongWorkgroupTest<unsigned int>(); }
   SECTION("unsigned long") { runHipAtomicCompareExchangeStrongWorkgroupTest<unsigned long>(); }

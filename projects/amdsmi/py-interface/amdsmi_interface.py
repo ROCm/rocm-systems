@@ -4305,7 +4305,7 @@ def amdsmi_topo_get_p2p_status(
     )
 
     return {
-        "type": type,
+        "type": type_32.value,
         "cap": {
             "is_iolink_coherent": cap.is_iolink_coherent,
             "is_iolink_atomics_32bit": cap.is_iolink_atomics_32bit,

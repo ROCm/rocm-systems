@@ -31,7 +31,7 @@
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE(Unit_hipMemPoolTrimTo_Negative_Parameter) {
+HIP_TEST_CASE(Unit_hipMemPoolTrimTo_Negative_Parameter) {
   int device_id = 0;
   HIP_CHECK(hipSetDevice(device_id));
   checkMempoolSupported(device_id) size_t trim_size = 1024;
@@ -53,7 +53,7 @@ TEST_CASE(Unit_hipMemPoolTrimTo_Negative_Parameter) {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE(Unit_hipMemPoolTrimTo_Positive_Basic) {
+HIP_TEST_CASE(Unit_hipMemPoolTrimTo_Positive_Basic) {
   int device_id = 0;
   HIP_CHECK(hipSetDevice(device_id));
   checkMempoolSupported(device_id) unsigned int* notified = nullptr;
@@ -185,7 +185,7 @@ static bool checkhipMemPoolTrimTo(hipStream_t stream, int N, int dev = 0) {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE(Unit_hipMemPoolTrimTo_VaryingMinBytesToHold) {
+HIP_TEST_CASE(Unit_hipMemPoolTrimTo_VaryingMinBytesToHold) {
   checkMempoolSupported(0)
       // create a stream
       hipStream_t stream;
@@ -205,7 +205,7 @@ TEST_CASE(Unit_hipMemPoolTrimTo_VaryingMinBytesToHold) {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE(Unit_hipMemPoolTrimTo_MGpuVaryingMinBytesToHold) {
+HIP_TEST_CASE(Unit_hipMemPoolTrimTo_MGpuVaryingMinBytesToHold) {
   constexpr int N = 1 << 20;
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
@@ -273,7 +273,7 @@ static void checkhipMemPoolTrimToMultiThreaded(hipStream_t stream, int N, int de
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMemPoolTrimTo_Multithreaded") {
+HIP_TEST_CASE(Unit_hipMemPoolTrimTo_Multithreaded) {
   checkMempoolSupported(0);
   constexpr int N = 1 << 10;
 

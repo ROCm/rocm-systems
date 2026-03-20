@@ -142,7 +142,7 @@ static void get_multi_grid_dims(dim3& grid_dim, dim3& block_dim, unsigned int de
  *  - HIP_VERSION >= 5.2
  *  - Devices support cooperative multi device launch
  */
-TEST_CASE(Unit_Multi_Grid_Group_Getters_Positive_Basic) {
+HIP_TEST_CASE(Unit_Multi_Grid_Group_Getters_Positive_Basic) {
   int num_devices = 0;
   HIP_CHECK(hipGetDeviceCount(&num_devices));
   num_devices = min(num_devices, kMaxGPUs);
@@ -290,7 +290,7 @@ TEST_CASE(Unit_Multi_Grid_Group_Getters_Positive_Basic) {
  *  - HIP_VERSION >= 5.2
  *  - Devices support cooperative multi device launch
  */
-TEST_CASE(Unit_Multi_Grid_Group_Getters_Positive_Base_Type) {
+HIP_TEST_CASE(Unit_Multi_Grid_Group_Getters_Positive_Base_Type) {
   int num_devices = 0;
   HIP_CHECK(hipGetDeviceCount(&num_devices));
   num_devices = min(num_devices, kMaxGPUs);
@@ -411,7 +411,7 @@ TEST_CASE(Unit_Multi_Grid_Group_Getters_Positive_Base_Type) {
  *  - HIP_VERSION >= 5.2
  *  - Devices support cooperative multi device launch
  */
-TEST_CASE(Unit_Multi_Grid_Group_Getters_Positive_Non_Member_Functions) {
+HIP_TEST_CASE(Unit_Multi_Grid_Group_Getters_Positive_Non_Member_Functions) {
   int num_devices = 0;
   HIP_CHECK(hipGetDeviceCount(&num_devices));
   num_devices = min(num_devices, kMaxGPUs);
@@ -523,7 +523,7 @@ TEST_CASE(Unit_Multi_Grid_Group_Getters_Positive_Non_Member_Functions) {
  *  - HIP_VERSION >= 5.2
  *  - Devices support cooperative multi device launch
  */
-TEST_CASE(Unit_Multi_Grid_Group_Positive_Sync) {
+HIP_TEST_CASE(Unit_Multi_Grid_Group_Positive_Sync) {
   CHECK_IMAGE_SUPPORT
   int num_devices = 0;
   HIP_CHECK(hipGetDeviceCount(&num_devices));
