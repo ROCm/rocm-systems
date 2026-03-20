@@ -19,28 +19,28 @@ Panel Config:
           max: MAX(100 * $GRBM_GUI_ACTIVE_PER_XCD / $GRBM_COUNT_PER_XCD)
           unit: Percent
         Scheduler-Pipe Utilization:
-          avg: AVG(NOISE_CLAMP(100 * SPI_CSN_BUSY / ($GRBM_GUI_ACTIVE_PER_XCD * $pipes_per_gpu
-            * $se_per_gpu), 100))
-          min: MIN(NOISE_CLAMP(100 * SPI_CSN_BUSY / ($GRBM_GUI_ACTIVE_PER_XCD * $pipes_per_gpu
-            * $se_per_gpu), 100))
-          max: MAX(NOISE_CLAMP(100 * SPI_CSN_BUSY / ($GRBM_GUI_ACTIVE_PER_XCD * $pipes_per_gpu
-            * $se_per_gpu), 100))
+          avg: AVG(100 * NOISE_CLAMP(SPI_CSN_BUSY, ($GRBM_GUI_ACTIVE_PER_XCD * $pipes_per_gpu
+            * $se_per_gpu)) / ($GRBM_GUI_ACTIVE_PER_XCD * $pipes_per_gpu * $se_per_gpu))
+          min: MIN(100 * NOISE_CLAMP(SPI_CSN_BUSY, ($GRBM_GUI_ACTIVE_PER_XCD * $pipes_per_gpu
+            * $se_per_gpu)) / ($GRBM_GUI_ACTIVE_PER_XCD * $pipes_per_gpu * $se_per_gpu))
+          max: MAX(100 * NOISE_CLAMP(SPI_CSN_BUSY, ($GRBM_GUI_ACTIVE_PER_XCD * $pipes_per_gpu
+            * $se_per_gpu)) / ($GRBM_GUI_ACTIVE_PER_XCD * $pipes_per_gpu * $se_per_gpu))
           unit: Percent
         Workgroup Manager Utilization:
-          avg: AVG(NOISE_CLAMP(100 * $GRBM_SPI_BUSY_PER_XCD / $GRBM_GUI_ACTIVE_PER_XCD,
-            100))
-          min: MIN(NOISE_CLAMP(100 * $GRBM_SPI_BUSY_PER_XCD / $GRBM_GUI_ACTIVE_PER_XCD,
-            100))
-          max: MAX(NOISE_CLAMP(100 * $GRBM_SPI_BUSY_PER_XCD / $GRBM_GUI_ACTIVE_PER_XCD,
-            100))
+          avg: AVG(100 * NOISE_CLAMP($GRBM_SPI_BUSY_PER_XCD, $GRBM_GUI_ACTIVE_PER_XCD)
+            / $GRBM_GUI_ACTIVE_PER_XCD)
+          min: MIN(100 * NOISE_CLAMP($GRBM_SPI_BUSY_PER_XCD, $GRBM_GUI_ACTIVE_PER_XCD)
+            / $GRBM_GUI_ACTIVE_PER_XCD)
+          max: MAX(100 * NOISE_CLAMP($GRBM_SPI_BUSY_PER_XCD, $GRBM_GUI_ACTIVE_PER_XCD)
+            / $GRBM_GUI_ACTIVE_PER_XCD)
           unit: Percent
         Shader Engine Utilization:
-          avg: AVG(NOISE_CLAMP(100 * SQ_BUSY_CYCLES / ($GRBM_GUI_ACTIVE_PER_XCD
-            * $se_per_gpu), 100))
-          min: MIN(NOISE_CLAMP(100 * SQ_BUSY_CYCLES / ($GRBM_GUI_ACTIVE_PER_XCD
-            * $se_per_gpu), 100))
-          max: MAX(NOISE_CLAMP(100 * SQ_BUSY_CYCLES / ($GRBM_GUI_ACTIVE_PER_XCD
-            * $se_per_gpu), 100))
+          avg: AVG(100 * NOISE_CLAMP(SQ_BUSY_CYCLES, ($GRBM_GUI_ACTIVE_PER_XCD
+            * $se_per_gpu)) / ($GRBM_GUI_ACTIVE_PER_XCD * $se_per_gpu))
+          min: MIN(100 * NOISE_CLAMP(SQ_BUSY_CYCLES, ($GRBM_GUI_ACTIVE_PER_XCD
+            * $se_per_gpu)) / ($GRBM_GUI_ACTIVE_PER_XCD * $se_per_gpu))
+          max: MAX(100 * NOISE_CLAMP(SQ_BUSY_CYCLES, ($GRBM_GUI_ACTIVE_PER_XCD
+            * $se_per_gpu)) / ($GRBM_GUI_ACTIVE_PER_XCD * $se_per_gpu))
           unit: Percent
         SIMD Utilization:
           avg: AVG(100 * SQ_BUSY_CU_CYCLES / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
