@@ -20,7 +20,7 @@ The sample decodes raw elementary video frame files as input and produces indivi
 ``rocdecdecode.cpp`` takes the following arguments:
 
 .. list-table:: 
-    :widths: 15 60 30 
+    :widths: 20 60 30 
     :header-rows: 1
 
     * - Argument      
@@ -62,7 +62,7 @@ The sample decodes raw elementary video frame files as input and produces indivi
 
     * - ``-o_format``
       - Output surface format; [NV12, P016].
-      - Optional. If net set: auto-detected from stream.
+      - Optional. If not set: auto-detected from stream.
 
 The ``DecoderInfo`` struct defined in the sample is used to store user-supplied parameters as well as the decoder and parser handles. 
 

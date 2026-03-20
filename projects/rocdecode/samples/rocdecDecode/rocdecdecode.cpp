@@ -666,7 +666,7 @@ void ShowHelpAndExit(const char *option = NULL) {
     << "-c codec (0 : HEVC, 1 : H264, 2: AV1, 4: VP9, 5: VP8 ); optional; default: 0" << std::endl
     << "-n Number of iteration - specify the number of iterations for performance evaluation; optional; default: 1" << std::endl
     << "-f Number of decoded frames - specify the number of pictures to be decoded; optional" << std::endl
-    << "-o_format Output surface format; optional; [NV12, P016]; if net set: auto-detected from stream" << std::endl
+    << "-o_format Output surface format; optional; [NV12, P016]; if not set: auto-detected from stream" << std::endl
     << "-m output_surface_memory_type - decoded surface memory; optional; default - 0"
     << " [0 : OUT_SURFACE_MEM_DEV_INTERNAL/ 1 : OUT_SURFACE_MEM_DEV_COPIED/ 2 : OUT_SURFACE_MEM_HOST_COPIED/ 3 : OUT_SURFACE_MEM_NOT_MAPPED]" << std::endl;
     exit(0);
@@ -814,7 +814,7 @@ int main(int argc, char** argv) {
             if (++i == argc) {
                 ShowHelpAndExit("-f");
             }
-            num_decoded_frames = atoi(argv[i]);
+            num_decoded_frames = std::stoul(argv[i]);
             continue;
         }
         if (!strcmp(argv[i], "-o_format")) {
