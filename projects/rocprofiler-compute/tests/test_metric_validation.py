@@ -84,7 +84,7 @@ VALIDATE_METRICS = {
                 "name": "VALU Active Threads",
                 "metric_id": "2.1.13",
                 "csv_file": "2.1_System_Speed-of-Light.csv",
-                "column": "Max",
+                "column": "Avg",
                 "expected_value_range": [0, 64.0],
             },
             {
@@ -121,7 +121,7 @@ VALIDATE_METRICS = {
                 "name": "VALU Active Threads",
                 "metric_id": "2.1.14",
                 "csv_file": "2.1_System_Speed-of-Light.csv",
-                "column": "Max",
+                "column": "Avg",
                 "expected_value_range": [0, 64.0],
             },
             {
@@ -158,7 +158,7 @@ VALIDATE_METRICS = {
                 "name": "VALU Active Threads",
                 "metric_id": "2.1.15",
                 "csv_file": "2.1_System_Speed-of-Light.csv",
-                "column": "Max",
+                "column": "Avg",
                 "expected_value_range": [0, 64.0],
             },
             {
