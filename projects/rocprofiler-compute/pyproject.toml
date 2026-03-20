@@ -4,7 +4,7 @@ requires-python = ">=3.9"
 
 [project.optional-dependencies]
 developer = [
-    "ruff>=0.12.7",
+    "ruff>=0.14.11",
     "pre-commit",
 ]
 
