@@ -20,9 +20,7 @@ extend-exclude = [
     ".github",
     ".misc",
     "external",
-    "build-rocprof_compute",
-    "src/rocprof_compute_analyze/analysis_db.py",
-    "src/rocprof_compute_tui/widgets/splitter.py"
+    "build-rocprof_compute"
 ]
 
 [tool.ruff.lint]
