@@ -13,7 +13,6 @@
 
 #include <memory>
 #include <string>
-#include <tuple>
 #include <vector>
 
 namespace rocprofsys
@@ -30,12 +29,11 @@ struct roctx_client_config
     std::string selected_trace_regions{};
 };
 
-/// @tparam MarkerWriterPolicy Compile-time policy passed through to marker_writer.
 template <typename MarkerWriterPolicy = default_marker_policy>
 class roctx_client
 {
 public:
-    roctx_client(const roctx_client_config& roctx_cfg);
+    explicit roctx_client(const roctx_client_config& roctx_cfg);
 
     ~roctx_client()                              = default;
     roctx_client(const roctx_client&)            = delete;
@@ -44,13 +42,21 @@ public:
     roctx_client& operator=(roctx_client&&)      = default;
 
     void configure_services(rocprofiler_context_id_t ctx);
-    bool should_write_markers() const;
-    void shutdown();
-    std::shared_ptr<control::trace_control> get_controller() const;
+
+    std::shared_ptr<control::trace_control> get_controller() const
+    {
+        return m_controller;
+    }
 
 private:
-    using marker_range_stack_t =
-        std::vector<std::tuple<tim::hash_value_t, rocprofiler_timestamp_t, bool>>;
+    struct marker_range_entry
+    {
+        tim::hash_value_t       hash;
+        rocprofiler_timestamp_t begin_ts;
+        bool                    write_enabled;
+    };
+
+    using marker_range_stack_t = std::vector<marker_range_entry>;
 
     rocprofiler_context_id_t                m_ctx{ 0 };
     roctx_client_config                     m_config;

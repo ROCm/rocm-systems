@@ -22,9 +22,6 @@ namespace control
 
 using callback_t = std::function<void()>;
 
-// Handles roctx-based tracing control: region filtering and pause/resume.
-// Provides handler methods that roctx_client calls from its callbacks.
-// Triggers registered start/stop callbacks to control main tracing contexts.
 class trace_control
 {
 public:
@@ -36,32 +33,31 @@ public:
     void register_region_start_stop_callbacks(callback_t start_callback,
                                               callback_t stop_callback);
 
-    bool region_filter_active() const;
-
-    // Returns true if currently inside an active filtered region (or if no filter active)
+    bool region_filter_active() const
+    {
+        return m_region_filter_active.load(std::memory_order_relaxed);
+    }
     bool should_write_markers() const;
 
-    // Triggers stop callbacks if region filtering is active.
-    // Called at workload start to auto-pause until a target region is entered.
     void force_initial_pause();
 
-    // Handler methods called by roctx_client
     void handle_range_start(uint64_t range_id, const char* message);
     void handle_range_stop(uint64_t range_id);
     void handle_pause();
     void handle_resume();
 
 private:
-    // Region filter state
     std::set<std::string, std::less<>> m_trace_regions;
     std::unordered_set<uint64_t>       m_active_range_ids;
+    std::atomic<bool>                  m_region_filter_active{ false };
+    std::atomic<uint32_t>              m_active_region_count{ 0 };
     std::atomic<bool>                  m_user_paused{ false };
 
     std::vector<callback_t> m_start_callbacks;
     std::vector<callback_t> m_stop_callbacks;
 
-    mutable std::mutex m_region_mutex;
-    std::mutex         m_callback_mutex;
+    std::mutex m_region_mutex;
+    std::mutex m_callback_mutex;
 
     void trigger_callbacks(const std::vector<callback_t>& callbacks);
 };

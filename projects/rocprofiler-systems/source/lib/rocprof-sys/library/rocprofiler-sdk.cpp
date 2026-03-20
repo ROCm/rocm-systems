@@ -2657,10 +2657,11 @@ setup()
 void
 shutdown()
 {
+    auto roctx_client = get_roctx_client();
     // Shutdown marker client (and trace_control) before rocprofiler-sdk finalization
-    if(g_roctx_client)
+    if(roctx_client)
     {
-        g_roctx_client->shutdown();
+        roctx_client->get_controller()->shutdown();
     }
 
     // shutdown

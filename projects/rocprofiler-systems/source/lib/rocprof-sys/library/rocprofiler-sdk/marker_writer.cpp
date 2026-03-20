@@ -43,11 +43,13 @@ default_marker_policy::push_perfetto_ts(const char* name, uint64_t ts, uint64_t 
         category::rocm_marker_api{}, name, ts, ::perfetto::Flow::ProcessScoped(flow_id),
         [&](::perfetto::EventContext ctx) {
             for(const auto& ann : annotations)
+            {
                 std::visit(
                     [&](const auto& v) {
                         tracing::add_perfetto_annotation(ctx, ann.key, v);
                     },
                     ann.value);
+            }
         });
 }
 
@@ -58,11 +60,13 @@ default_marker_policy::pop_perfetto_ts(const char* name, uint64_t ts,
     tracing::pop_perfetto_ts(
         category::rocm_marker_api{}, name, ts, [&](::perfetto::EventContext ctx) {
             for(const auto& ann : annotations)
+            {
                 std::visit(
                     [&](const auto& v) {
                         tracing::add_perfetto_annotation(ctx, ann.key, v);
                     },
                     ann.value);
+            }
         });
 }
 

@@ -26,11 +26,11 @@ namespace rocprofiler_sdk
 /// Writer builds these; policy iterates and calls add_perfetto_annotation for each.
 struct annotation_entry
 {
-    annotation_entry(const char*                   key,
+    annotation_entry(const char*                   anno_key,
                      const std::variant<std::string, uint64_t, int64_t, double, int32_t,
-                                        uint32_t>& value)
-    : key(key)
-    , value(value)
+                                        uint32_t>& anno_value)
+    : key(anno_key)
+    , value(anno_value)
     {}
     const char*                                                             key;
     std::variant<std::string, uint64_t, int64_t, double, int32_t, uint32_t> value;
