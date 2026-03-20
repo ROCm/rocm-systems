@@ -297,6 +297,11 @@ if(BUILD_TESTS)
       target_link_libraries(${test_executable} PRIVATE dl rt numa -lrccl -L${CMAKE_BINARY_DIR} -lrocm_smi64 -L${ROCM_PATH}/lib -L${ROCM_PATH}/rocm_smi/lib)
     endif()
 
+    if(BUILD_ADDRESS_SANITIZER)
+      target_compile_options(${test_executable} PRIVATE -fsanitize=address -shared-libasan)
+      target_link_options(${test_executable} PRIVATE -fsanitize=address -shared-libasan)
+    endif()
+
     rocm_install(TARGETS ${test_executable} COMPONENT tests)
   endforeach()
 

@@ -6,8 +6,79 @@
 
 #include "PtrUnion.hpp"
 #include "api_trace.h"
+#include <cstdint>
+#include <cstring>
+#include <cmath>
+
+static inline float rcclFp16BitsToFloat(uint16_t bits) {
+  uint32_t sign = (uint32_t(bits & 0x8000u)) << 16;
+  int exp = (bits >> 10) & 0x1f;
+  uint32_t mant = bits & 0x03ffu;
+  uint32_t out;
+  if (exp == 0) {
+    if (mant == 0) {
+      out = sign;
+    } else {
+      exp = 1;
+      while ((mant & 0x0400u) == 0) {
+        mant <<= 1;
+        exp--;
+      }
+      mant &= 0x03ffu;
+      out = sign | ((exp + (127 - 15)) << 23) | (mant << 13);
+    }
+  } else if (exp == 0x1fu) {
+    out = sign | 0x7f800000u | (mant << 13);
+  } else {
+    out = sign | ((exp + (127 - 15)) << 23) | (mant << 13);
+  }
+  float f;
+  memcpy(&f, &out, sizeof(f));
+  return f;
+}
+
+static inline uint16_t rcclFloatToFp16Bits(float f) {
+  uint32_t x;
+  memcpy(&x, &f, sizeof(x));
+  uint16_t sign = (x >> 16) & 0x8000u;
+  int exp = int((x >> 23) & 0xffu) - 127 + 15;
+  uint32_t mant = x & 0x7fffffu;
+
+  if (((x >> 23) & 0xffu) == 0xffu) {
+    if (mant == 0) return sign | 0x7c00u;
+    uint16_t nanMant = uint16_t(mant >> 13);
+    if (nanMant == 0) nanMant = 1;
+    return sign | 0x7c00u | nanMant;
+  }
+
+  if (exp <= 0) {
+    if (exp < -10) return sign;
+    mant |= 0x800000u;
+    int shift = 14 - exp;
+    uint16_t outMant = uint16_t(mant >> shift);
+    uint32_t roundBit = (mant >> (shift - 1)) & 1u;
+    if (roundBit) outMant = uint16_t(outMant + 1);
+    return sign | outMant;
+  }
+
+  if (exp >= 31) return sign | 0x7c00u;
+
+  uint16_t outExp = uint16_t(exp) << 10;
+  uint16_t outMant = uint16_t(mant >> 13);
+  if (mant & 0x1000u) {
+    outMant = uint16_t(outMant + 1);
+    if (outMant == 0x0400u) {
+      outMant = 0;
+      outExp = uint16_t(outExp + 0x0400u);
+      if (outExp >= 0x7c00u) return sign | 0x7c00u;
+    }
+  }
+  return sign | outExp | outMant;
+}
+
 namespace RcclUnitTesting
 {
+
   size_t DataTypeToBytes(ncclDataType_t const dataType)
   {
     switch (dataType)
@@ -164,7 +235,11 @@ namespace RcclUnitTesting
     case ncclInt64:    I8[idx] = valueI; break;
     case ncclUint64:   U8[idx] = valueI; break;
     case ncclFloat8e4m3:  F1[idx] = rccl_float8(valueF); break;
-    case ncclFloat16:  F2[idx] = __float2half(static_cast<float>(valueF)); break;
+    case ncclFloat16: {
+      uint16_t bits = rcclFloatToFp16Bits(static_cast<float>(valueF));
+      memcpy(&F2[idx], &bits, sizeof(bits));
+      break;
+    }
     case ncclFloat32:  F4[idx] = valueF; break;
     case ncclFloat64:  F8[idx] = valueF; break;
     case ncclFloat8e5m2:  B1[idx] = rccl_bfloat8(valueF); break;
@@ -187,7 +262,12 @@ namespace RcclUnitTesting
     case ncclInt64:    valueI = I8[idx]; break;
     case ncclUint64:   valueI = U8[idx]; break;
     case ncclFloat8e4m3:  valueF = float(F1[idx]); break;
-    case ncclFloat16:  valueF = __half2float(F2[idx]); break;
+    case ncclFloat16: {
+      uint16_t bits = 0;
+      memcpy(&bits, &F2[idx], sizeof(bits));
+      valueF = rcclFp16BitsToFloat(bits);
+      break;
+    }
     case ncclFloat32:  valueF = F4[idx]; break;
     case ncclFloat64:  valueF = F8[idx]; break;
     case ncclFloat8e5m2:  valueF = float(B1[idx]); break;
@@ -219,7 +299,15 @@ namespace RcclUnitTesting
       case ncclInt64:    I8[idx] *= scalarsPerRank.I8[rank]; break;
       case ncclUint64:   U8[idx] *= scalarsPerRank.U8[rank]; break;
       case ncclFloat8e4m3:  F1[idx]  = rccl_float8((float)F1[idx] * (float)scalarsPerRank.F1[rank]); break;
-      case ncclFloat16:  F2[idx]  = __float2half(__half2float(F2[idx]) * __half2float(scalarsPerRank.F2[rank])); break;
+      case ncclFloat16: {
+        uint16_t bitsA = 0, bitsB = 0, bitsOut = 0;
+        memcpy(&bitsA, &F2[idx], sizeof(bitsA));
+        memcpy(&bitsB, &scalarsPerRank.F2[rank], sizeof(bitsB));
+        float out = rcclFp16BitsToFloat(bitsA) * rcclFp16BitsToFloat(bitsB);
+        bitsOut = rcclFloatToFp16Bits(out);
+        memcpy(&F2[idx], &bitsOut, sizeof(bitsOut));
+        break;
+      }
       case ncclFloat32:  F4[idx] *= scalarsPerRank.F4[rank]; break;
       case ncclFloat64:  F8[idx] *= scalarsPerRank.F8[rank]; break;
       case ncclFloat8e5m2:  B1[idx]  = rccl_bfloat8((float)B1[idx] * (float)scalarsPerRank.B1[rank]); break;
@@ -254,7 +342,15 @@ namespace RcclUnitTesting
       case ncclInt64:    I8[idx] = ReduceOp(op, I8[idx], inputCpu.I8[idx]); break;
       case ncclUint64:   U8[idx] = ReduceOp(op, U8[idx], inputCpu.U8[idx]); break;
       case ncclFloat8e4m3:  F1[idx] = rccl_float8(ReduceOp(op, float(F1[idx]), float(inputCpu.F1[idx]))); break;
-      case ncclFloat16:  F2[idx] = __float2half(ReduceOp(op, __half2float(F2[idx]), __half2float(inputCpu.F2[idx]))); break;
+      case ncclFloat16: {
+        uint16_t bitsA = 0, bitsB = 0, bitsOut = 0;
+        memcpy(&bitsA, &F2[idx], sizeof(bitsA));
+        memcpy(&bitsB, &inputCpu.F2[idx], sizeof(bitsB));
+        float out = ReduceOp(op, rcclFp16BitsToFloat(bitsA), rcclFp16BitsToFloat(bitsB));
+        bitsOut = rcclFloatToFp16Bits(out);
+        memcpy(&F2[idx], &bitsOut, sizeof(bitsOut));
+        break;
+      }
       case ncclFloat32:  F4[idx] = ReduceOp(op, F4[idx], inputCpu.F4[idx]); break;
       case ncclFloat64:  F8[idx] = ReduceOp(op, F8[idx], inputCpu.F8[idx]); break;
       case ncclFloat8e5m2:  B1[idx] = rccl_bfloat8(ReduceOp(op, float(B1[idx]), float(inputCpu.B1[idx]))); break;
@@ -283,7 +379,13 @@ namespace RcclUnitTesting
       case ncclInt64:    I8[idx] /= divisor; break;
       case ncclUint64:   U8[idx] /= divisor; break;
       case ncclFloat8e4m3:  F1[idx] = (rccl_float8((float)(F1[idx]) / divisor)); break;
-      case ncclFloat16:  F2[idx] = __float2half(__half2float(F2[idx])/divisor); break;
+      case ncclFloat16: {
+        uint16_t bits = 0, bitsOut = 0;
+        memcpy(&bits, &F2[idx], sizeof(bits));
+        bitsOut = rcclFloatToFp16Bits(rcclFp16BitsToFloat(bits) / divisor);
+        memcpy(&F2[idx], &bitsOut, sizeof(bitsOut));
+        break;
+      }
       case ncclFloat32:  F4[idx] /= divisor; break;
       case ncclFloat64:  F8[idx] /= divisor; break;
       case ncclFloat8e5m2:  B1[idx] = (rccl_bfloat8((float)(B1[idx]) / divisor)); break;
@@ -315,7 +417,20 @@ namespace RcclUnitTesting
       case ncclInt64:   isMatch = (I8[idx] == expected.I8[idx]); break;
       case ncclUint64:  isMatch = (U8[idx] == expected.U8[idx]); break;
       case ncclFloat8e4m3: isMatch = (fabs(float(F1[idx]) - float(expected.F1[idx])) < 9e-2); break;
-      case ncclFloat16: isMatch = (fabs(__half2float(F2[idx]) - __half2float(expected.F2[idx])) < 9e-2); break;
+      case ncclFloat16: {
+        uint16_t expBits = 0;
+        uint16_t outBits = 0;
+        memcpy(&expBits, &expected.F2[idx], sizeof(expBits));
+        memcpy(&outBits, &F2[idx], sizeof(outBits));
+        float outF = rcclFp16BitsToFloat(outBits);
+        float expF = rcclFp16BitsToFloat(expBits);
+        if (std::isnan(outF) && std::isnan(expF)) {
+          isMatch = (outBits == expBits);
+        } else {
+          isMatch = (fabs(outF - expF) < 9e-2);
+        }
+        break;
+      }
       case ncclFloat32: isMatch = (fabs(F4[idx] - expected.F4[idx]) < 1e-5); break;
       case ncclFloat64: isMatch = (fabs(F8[idx] - expected.F8[idx]) < 1e-12); break;
       case ncclFloat8e5m2: isMatch = (fabs(float(B1[idx]) - float(expected.B1[idx])) < 9e-2); break;
@@ -378,7 +493,12 @@ namespace RcclUnitTesting
       case ncclInt64:    ss << I8[i]; break;
       case ncclUint64:   ss << U8[i]; break;
       case ncclFloat8e4m3:  ss << (float)F1[i]; break;
-      case ncclFloat16:  ss << __half2float(F2[i]); break;
+      case ncclFloat16: {
+        uint16_t bits = 0;
+        memcpy(&bits, &F2[i], sizeof(bits));
+        ss << rcclFp16BitsToFloat(bits);
+        break;
+      }
       case ncclFloat32:  ss << F4[i]; break;
       case ncclFloat64:  ss << F8[i]; break;
       case ncclFloat8e5m2:  ss << (float)B1[i]; break;
