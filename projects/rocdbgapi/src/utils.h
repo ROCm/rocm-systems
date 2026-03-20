@@ -296,13 +296,45 @@ next_power_of_two (Integral x)
   return ++v;
 }
 
+/* Convert a power-of-two ALIGNMENT into an alignment mask.  The
+   result has the lower log2(ALIGNMENT) bits cleared and all higher
+   bits set.  For example, ALIGNMENT == 8 (0b00001000) yields a mask
+   of 0b1...11111000.
+
+   ALIGNMENT must be a non-zero power of two.  */
+
+template <typename Integral>
+constexpr Integral
+alignment_to_mask (Integral alignment)
+{
+  static_assert (!std::numeric_limits<Integral>::is_signed);
+  dbgapi_assert (is_power_of_two (alignment));
+  return ~(alignment - 1);
+}
+
+/* Convert an alignment MASK to a power-of-two alignment.  MASK has
+   some lower bits cleared and all higher bits set.  For example, a
+   mask of 0b1...11111000 yields ALIGNMENT == 8 (0b00001000).
+
+   The result is a non-zero power of two.  */
+
+template <typename Integral>
+constexpr Integral
+mask_to_alignment (Integral mask)
+{
+  static_assert (!std::numeric_limits<Integral>::is_signed);
+  auto alignment = ~(mask - 1);
+  dbgapi_assert (is_power_of_two (alignment));
+  return alignment;
+}
+
 template <typename Integral, typename Align>
 constexpr Integral
 align_down (Integral x, Align alignment)
 {
   dbgapi_assert (is_power_of_two (alignment));
   auto align = narrow<Integral> (alignment);
-  return x & -align;
+  return x & alignment_to_mask (align);
 }
 
 template <typename Integral, typename Align>
@@ -311,7 +343,7 @@ align_up (Integral x, Align alignment)
 {
   dbgapi_assert (is_power_of_two (alignment));
   auto align = narrow<Integral> (alignment);
-  return (x + align - 1) & -align;
+  return (x + align - 1) & alignment_to_mask (align);
 }
 
 template <typename Integral, typename Align>

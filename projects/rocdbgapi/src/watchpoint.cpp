@@ -132,8 +132,11 @@ watchpoint_t::watchpoint_t (amd_dbgapi_watchpoint_id_t watchpoint_id,
       dbgapi_assert (stable_bits >= field_A);
     }
 
-  m_size = -(stable_bits & ~field_C);
-  m_address = requested_address & -m_size;
+  /* Mask out field_C.  */
+  uint64_t usable_bits = stable_bits & ~field_C;
+
+  m_size = utils::mask_to_alignment (usable_bits);
+  m_address = utils::align_down (requested_address, m_size);
 }
 
 void

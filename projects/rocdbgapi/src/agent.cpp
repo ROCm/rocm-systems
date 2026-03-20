@@ -233,8 +233,8 @@ agent_t::insert_watchpoint (const watchpoint_t &watchpoint)
 
   os_watch_id_t os_watch_id;
   amd_dbgapi_status_t status = process ().os_driver ().set_address_watch (
-    os_agent_id (), watchpoint.address (), -watchpoint.size (), watch_mode,
-    &os_watch_id);
+    os_agent_id (), watchpoint.address (),
+    utils::alignment_to_mask (watchpoint.size ()), watch_mode, &os_watch_id);
 
   if (status == AMD_DBGAPI_STATUS_ERROR_NO_WATCHPOINT_AVAILABLE)
     throw api_error_t (AMD_DBGAPI_STATUS_ERROR_NO_WATCHPOINT_AVAILABLE);
