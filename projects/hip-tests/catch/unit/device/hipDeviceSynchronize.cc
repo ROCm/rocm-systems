@@ -152,12 +152,16 @@ HIP_TEST_CASE(Unit_hipDeviceSynchronize_Functional) {
   }
 
 
-  // This check assumes per-stream work is still in flight (typically still in a large H2D
-  // or the long kernel) when the host reads A[NUM_STREAMS-1][0]. Very fast GPUs or
-  // HIP_LAUNCH_BLOCKING=true can still fail it; increase copy size via
-  // HIP_TEST_DEVICE_SYNCHRONIZE_FUNCTIONAL_COPY_MB or drop the assertion if needed.
-
-  REQUIRE(NUM_ITERS != A[NUM_STREAMS - 1][0] - 1);
+  // Verify that work is still in flight on at least one stream without touching shared
+  // host memory. hipStreamQuery returns hipErrorNotReady when the stream has pending work.
+  bool anyStreamBusy = false;
+  for (int i = 0; i < NUM_STREAMS; i++) {
+    if (hipStreamQuery(stream[i]) == hipErrorNotReady) {
+      anyStreamBusy = true;
+      break;
+    }
+  }
+  REQUIRE(anyStreamBusy);
   HIP_CHECK(hipDeviceSynchronize());
   REQUIRE(NUM_ITERS == A[NUM_STREAMS - 1][0] - 1);
   for (int i = 0; i < NUM_STREAMS; i++) {
