@@ -136,12 +136,12 @@ const char* ihipGetErrorName(hipError_t hip_error);
 // Version without logging for internal __hip* functions (high frequency, low value logs)
 #define HIP_INIT_API_NOLOG(cid)                                                                    \
   if (amd::Device::IsGPUInError()) {                                                              \
-    HIP_RETURN(ConvertCLErrorIntoHIPError(amd::Device::GetGPUError()));                            \
+    HIP_RETURN_NOLOG(ConvertCLErrorIntoHIPError(amd::Device::GetGPUError()));                      \
   }                                                                                                \
   HIP_INIT(0)                                                                                      \
   HIP_CB_SPAWNER_OBJECT(cid);                                                                      \
   if (hip::g_devices.empty()) {                                                                    \
-    HIP_RETURN(hipErrorNoDevice);                                                                  \
+    HIP_RETURN_NOLOG(hipErrorNoDevice);                                                            \
   }
 
 // Helper: update thread-local error state from a return code.
@@ -171,17 +171,7 @@ const char* ihipGetErrorName(hipError_t hip_error);
 
 // Version without logging for internal __hip* functions
 #define HIP_RETURN_NOLOG(ret)                                                                      \
-  hip::tls.last_command_error_ = ret;                                                              \
-  if (amd::Device::IsGPUInError()) {                                                               \
-    hipError_t hip_error = ConvertCLErrorIntoHIPError(amd::Device::GetGPUError());                 \
-    hip::tls.last_error_ = hip_error;                                                              \
-    hip::tls.last_command_error_ = hip_error;                                                      \
-  } else {                                                                                         \
-    if (hip::tls.last_command_error_ != hipSuccess &&                                              \
-           hip::tls.last_command_error_ != hipErrorNotReady) {                                     \
-      hip::tls.last_error_ = hip::tls.last_command_error_;                                         \
-    }                                                                                              \
-  }                                                                                                \
+  HIP_UPDATE_ERROR_STATE(ret)                                                                      \
   return hip::tls.last_command_error_;
 
 #define HIP_RETURN_ONFAIL(func)          \
