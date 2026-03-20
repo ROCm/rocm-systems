@@ -138,15 +138,15 @@ ensure_gpu_track(uint32_t device_id, bool enabled, const char* track_suffix,
     return true;
 }
 
-// TRACE_COUNTER requires a string-literal category name (Perfetto constraint),
-// so the TRACE_COUNTER call must remain at the call site with a literal.
-#define EMIT_GPU_SCALAR(Track, device_id, ts, enabled, suffix, units, event, value)      \
-    do                                                                                   \
-    {                                                                                    \
-        if(ensure_gpu_track<Track>(device_id, enabled, suffix, units))                   \
-            TRACE_COUNTER(event, Track::at(device_id, 0), ts,                            \
-                          static_cast<double>(value));                                   \
-    } while(false)
+template <typename Track, typename ValueT>
+void
+emit_gpu_scalar(uint32_t device_id, size_t ts, bool enabled, const char* track_suffix,
+                const char* units, ValueT value)
+{
+    if(ensure_gpu_track<Track>(device_id, enabled, track_suffix, units))
+        TRACE_COUNTER(trait::name<typename Track::category_type>::value,
+                      Track::at(device_id, 0), ts, static_cast<double>(value));
+}
 
 template <typename Track, typename Array, typename Fn>
 void
@@ -185,10 +185,10 @@ emit_xcp_array_metrics(uint32_t device_id, size_t ts, const char* metric_name,
 void
 emit_xgmi_metrics(uint32_t device_id, size_t ts, const pmc::collectors::gpu::metrics& m)
 {
-    EMIT_GPU_SCALAR(amd_smi_xgmi_link_width_track, device_id, ts, true, "XGMI Link Width",
-                    "lanes", "device_xgmi_link_width", m.xgmi.link.width);
-    EMIT_GPU_SCALAR(amd_smi_xgmi_link_speed_track, device_id, ts, true, "XGMI Link Speed",
-                    "Mbps", "device_xgmi_link_speed", m.xgmi.link.speed);
+    emit_gpu_scalar<amd_smi_xgmi_link_width_track>(device_id, ts, true, "XGMI Link Width",
+                                                   "lanes", m.xgmi.link.width);
+    emit_gpu_scalar<amd_smi_xgmi_link_speed_track>(device_id, ts, true, "XGMI Link Speed",
+                                                   "Mbps", m.xgmi.link.speed);
 
     for(size_t link = 0; link < m.xgmi.data_acc.read.size(); ++link)
     {
@@ -229,16 +229,14 @@ emit_xgmi_metrics(uint32_t device_id, size_t ts, const pmc::collectors::gpu::met
 void
 emit_pcie_metrics(uint32_t device_id, size_t ts, const pmc::collectors::gpu::metrics& m)
 {
-    EMIT_GPU_SCALAR(amd_smi_pcie_link_width_track, device_id, ts, true, "PCIe Link Width",
-                    "lanes", "device_pcie_link_width", m.pcie.link.width);
-    EMIT_GPU_SCALAR(amd_smi_pcie_link_speed_track, device_id, ts, true, "PCIe Link Speed",
-                    "MT/s", "device_pcie_link_speed", m.pcie.link.speed);
-    EMIT_GPU_SCALAR(amd_smi_pcie_bandwidth_acc_track, device_id, ts, true,
-                    "PCIe Bandwidth Acc", "bytes", "device_pcie_bandwidth_acc",
-                    m.pcie.bandwidth.acc);
-    EMIT_GPU_SCALAR(amd_smi_pcie_bandwidth_inst_track, device_id, ts, true,
-                    "PCIe Bandwidth Inst", "bytes/s", "device_pcie_bandwidth_inst",
-                    m.pcie.bandwidth.inst);
+    emit_gpu_scalar<amd_smi_pcie_link_width_track>(device_id, ts, true, "PCIe Link Width",
+                                                   "lanes", m.pcie.link.width);
+    emit_gpu_scalar<amd_smi_pcie_link_speed_track>(device_id, ts, true, "PCIe Link Speed",
+                                                   "MT/s", m.pcie.link.speed);
+    emit_gpu_scalar<amd_smi_pcie_bandwidth_acc_track>(
+        device_id, ts, true, "PCIe Bandwidth Acc", "bytes", m.pcie.bandwidth.acc);
+    emit_gpu_scalar<amd_smi_pcie_bandwidth_inst_track>(
+        device_id, ts, true, "PCIe Bandwidth Inst", "bytes/s", m.pcie.bandwidth.inst);
 }
 
 template <typename Category>
@@ -1117,31 +1115,30 @@ perfetto_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& _gpu_pmc)
     const auto& _m         = _gpu_pmc.metric_values;
 
     // Scalar metrics
-    EMIT_GPU_SCALAR(amd_smi_gfx_track, _device_id, _ts, _em.bits.gfx_activity, "GFX Busy",
-                    "%", "device_busy_gfx", _m.gfx_activity);
-    EMIT_GPU_SCALAR(amd_smi_umc_track, _device_id, _ts, _em.bits.umc_activity, "UMC Busy",
-                    "%", "device_busy_umc", _m.umc_activity);
-    EMIT_GPU_SCALAR(amd_smi_mm_track, _device_id, _ts, _em.bits.mm_activity, "MM Busy",
-                    "%", "device_busy_mm", _m.mm_activity);
+    emit_gpu_scalar<amd_smi_gfx_track>(_device_id, _ts, _em.bits.gfx_activity, "GFX Busy",
+                                       "%", _m.gfx_activity);
+    emit_gpu_scalar<amd_smi_umc_track>(_device_id, _ts, _em.bits.umc_activity, "UMC Busy",
+                                       "%", _m.umc_activity);
+    emit_gpu_scalar<amd_smi_mm_track>(_device_id, _ts, _em.bits.mm_activity, "MM Busy",
+                                      "%", _m.mm_activity);
 
-    EMIT_GPU_SCALAR(amd_smi_temp_track, _device_id, _ts,
-                    _em.bits.hotspot_temperature || _em.bits.edge_temperature,
-                    "Temperature", "deg C", "device_temp",
-                    _em.bits.hotspot_temperature ? _m.hotspot_temperature
-                                                 : _m.edge_temperature);
+    emit_gpu_scalar<amd_smi_temp_track>(
+        _device_id, _ts, _em.bits.hotspot_temperature || _em.bits.edge_temperature,
+        "Temperature", "deg C",
+        _em.bits.hotspot_temperature ? _m.hotspot_temperature : _m.edge_temperature);
 
-    EMIT_GPU_SCALAR(amd_smi_power_track, _device_id, _ts,
-                    _em.bits.current_socket_power || _em.bits.average_socket_power,
-                    "Current Power", "watts", "device_power",
-                    _em.bits.average_socket_power ? _m.average_socket_power
-                                                  : _m.current_socket_power);
+    emit_gpu_scalar<amd_smi_power_track>(
+        _device_id, _ts, _em.bits.current_socket_power || _em.bits.average_socket_power,
+        "Current Power", "watts",
+        _em.bits.average_socket_power ? _m.average_socket_power
+                                      : _m.current_socket_power);
 
-    EMIT_GPU_SCALAR(amd_smi_mem_track, _device_id, _ts, _em.bits.memory_usage,
-                    "Memory Usage", "megabytes", "device_memory_usage",
-                    _m.memory_usage / static_cast<double>(units::megabyte));
+    emit_gpu_scalar<amd_smi_mem_track>(
+        _device_id, _ts, _em.bits.memory_usage, "Memory Usage", "megabytes",
+        _m.memory_usage / static_cast<double>(units::megabyte));
 
-    EMIT_GPU_SCALAR(amd_smi_sdma_track, _device_id, _ts, _em.bits.sdma_usage,
-                    "SDMA Usage", "%", "device_sdma_usage", _m.sdma_usage);
+    emit_gpu_scalar<amd_smi_sdma_track>(_device_id, _ts, _em.bits.sdma_usage,
+                                        "SDMA Usage", "%", _m.sdma_usage);
 
     // Per-XCP VCN busy metrics (MI300)
     if(_em.bits.vcn_busy)
