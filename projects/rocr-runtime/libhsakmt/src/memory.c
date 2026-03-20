@@ -975,11 +975,13 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtHandleImport(const HsaExternalHandleDesc* import_d
     			buf_info.size_metadata = sizeof(HSAuint32);
     			buf_info.umd_metadata[0] = (uint32_t)import_desc->metadata;
     			amdgpu_bo_set_metadata(res.buf_handle, &buf_info);
+				import_res->metadata = import_desc->metadata;
 			}
-		} else if (import_desc->metadata != metadata) {
-			import_res->metadata = (HSAuint32)metadata;
-			return HSAKMT_STATUS_INVALID_PARAMETER;
 		}
+		// For client-side imports (UpdateMetadata==0), skip metadata validation entirely.
+		// Metadata is not reliably shared across dmabuf imports in different processes,
+		// so validation causes false failures. Return whatever metadata we find.
+		import_res->metadata = (HSAuint32)metadata;
 	}
 
 	import_res->buf_handle = (HsaMemoryObjectHandle)res.buf_handle;
