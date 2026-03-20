@@ -747,11 +747,7 @@ rocprofsys_init_tooling_hidden(void)
             // trace_controller->register_region_start_stop_callbacks(
             //     invoke_external_resume_callbacks, invoke_external_pause_callbacks);
 
-            if(trace_controller->region_filter_active())
-            {
-                LOG_CRITICAL("Handling pause callback...");
-                pause_callback();
-            }
+            trace_controller->force_initial_pause();
         }
 
         set_state(State::Active);  // set to active as very last operation

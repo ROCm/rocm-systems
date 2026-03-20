@@ -38,6 +38,13 @@ trace_control::trace_control(std::string_view trace_regions)
 }
 
 void
+trace_control::force_initial_pause()
+{
+    if(!region_filter_active()) return;
+    trigger_callbacks(m_stop_callbacks);
+}
+
+void
 trace_control::handle_range_start(uint64_t range_id, const char* message)
 {
     if(message == nullptr || m_trace_regions.count(message) == 0)
@@ -76,15 +83,18 @@ trace_control::handle_range_stop(uint64_t range_id)
     // Last target region exited - trigger stop callbacks
     if(now_empty)
     {
-        // Check if region ended while user had it paused
         if(m_user_paused.load(std::memory_order_relaxed))
         {
+            // Region ended while user had it paused — stop callbacks were already
+            // fired by handle_pause(), so skip them to avoid double-stop.
             LOG_WARNING(
                 "Target region ended while paused. Subsequent resume will be ignored.");
             m_user_paused.store(false, std::memory_order_relaxed);
         }
-
-        trigger_callbacks(m_stop_callbacks);
+        else
+        {
+            trigger_callbacks(m_stop_callbacks);
+        }
     }
 }
 

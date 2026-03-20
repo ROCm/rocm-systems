@@ -41,6 +41,10 @@ public:
     // Returns true if currently inside an active filtered region (or if no filter active)
     bool should_write_markers() const;
 
+    // Triggers stop callbacks if region filtering is active.
+    // Called at workload start to auto-pause until a target region is entered.
+    void force_initial_pause();
+
     // Handler methods called by roctx_client
     void handle_range_start(uint64_t range_id, const char* message);
     void handle_range_stop(uint64_t range_id);

@@ -23,7 +23,7 @@ namespace rocprofiler_sdk
 
 struct roctx_client_config
 {
-    bool        is_write_enabled{ false };
+    bool        pause_resume_enabled{ false };
     bool        use_perfetto{ false };
     bool        use_timemory{ false };
     bool        perfetto_annotations{ false };

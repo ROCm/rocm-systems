@@ -91,7 +91,7 @@ template <typename MarkerWriterPolicy>
 bool
 roctx_client<MarkerWriterPolicy>::should_write_markers() const
 {
-    return (m_config.is_write_enabled && m_controller->should_write_markers());
+    return m_controller->should_write_markers();
 }
 
 template <typename MarkerWriterPolicy>
@@ -119,14 +119,18 @@ roctx_client<MarkerWriterPolicy>::configure_services(rocprofiler_context_id_t ct
                                            ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API,
                                            nullptr, 0, marker_core_callback, this);
 
-    // Configure MARKER_CONTROL_API for pause/resume
-    auto control_ops = std::array<rocprofiler_tracing_operation_t, 2>{
-        ROCPROFILER_MARKER_CONTROL_API_ID_roctxProfilerPause,
-        ROCPROFILER_MARKER_CONTROL_API_ID_roctxProfilerResume
-    };
-    configure_rocprofiler_callback_tracing(
-        m_ctx, ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API, control_ops.data(),
-        control_ops.size(), marker_control_callback, this);
+    // Configure MARKER_CONTROL_API for pause/resume (only when marker_api/roctx
+    // is in ROCM_DOMAINS — Cases 3 and 4)
+    if(m_config.pause_resume_enabled)
+    {
+        auto control_ops = std::array<rocprofiler_tracing_operation_t, 2>{
+            ROCPROFILER_MARKER_CONTROL_API_ID_roctxProfilerPause,
+            ROCPROFILER_MARKER_CONTROL_API_ID_roctxProfilerResume
+        };
+        configure_rocprofiler_callback_tracing(
+            m_ctx, ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API, control_ops.data(),
+            control_ops.size(), marker_control_callback, this);
+    }
 }
 
 template <typename MarkerWriterPolicy>

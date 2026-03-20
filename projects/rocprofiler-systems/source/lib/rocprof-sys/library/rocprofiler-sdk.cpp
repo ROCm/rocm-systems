@@ -96,15 +96,25 @@ get_roctx_client()
             tim::delimit(config::get_setting_value<std::string>("ROCPROFSYS_ROCM_DOMAINS")
                              .value_or(std::string{}),
                          " ,;:\t\n");
-        const auto roctx_write_enabled =
+        const auto has_marker_domain =
             (std::find(_domains.begin(), _domains.end(), "marker_api") !=
                  _domains.end() ||
              std::find(_domains.begin(), _domains.end(), "roctx") != _domains.end());
         const auto roctx_traced_regions = config::get_trace_region();
+        const auto has_trace_regions    = !roctx_traced_regions.empty();
+
+        // Case 1: no marker domain and no trace regions — nothing to do
+        if(!has_marker_domain && !has_trace_regions)
+        {
+            return nullptr;
+        }
 
         const auto roctx_config = roctx_client_config{
-            roctx_write_enabled, config::get_use_perfetto(), config::get_use_timemory(),
-            config::get_perfetto_annotations(), roctx_traced_regions
+            has_marker_domain,  // pause_resume_enabled
+            config::get_use_perfetto(),
+            config::get_use_timemory(),
+            config::get_perfetto_annotations(),
+            roctx_traced_regions,
         };
         g_roctx_client = std::make_shared<roctx_client<>>(roctx_config);
     }
@@ -2548,21 +2558,29 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     // creation). Roctx client configures MARKER_CORE_API and MARKER_CONTROL_API
     // on control_ctx. trace_control's pause/resume callbacks are routed through
     // roctx_client (registered later in library.cpp).
-    g_roctx_client->configure_services(_data->get_control_context());
-
-    const auto control          = get_roctx_client()->get_controller();
-    const auto filtering_active = control->region_filter_active();
-    if(!filtering_active)
+    auto roctx_client = get_roctx_client();
+    if(roctx_client)
     {
-        start();
+        roctx_client->configure_services(_data->get_control_context());
+
+        const auto filtering_active =
+            roctx_client->get_controller()->region_filter_active();
+        if(!filtering_active)
+        {
+            start();
+        }
+        else
+        {
+            if(_data != nullptr)
+            {
+                start_context(_data->get_code_obj_context());
+                start_context(_data->get_control_context());
+            }
+        }
     }
     else
     {
-        if(_data != nullptr)
-        {
-            start_context(_data->get_code_obj_context());
-            start_context(_data->get_control_context());
-        }
+        start();
     }
     // no errors
     return 0;
@@ -2627,7 +2645,9 @@ flush_counter_tracks_to_zero(rocprofiler_timestamp_t timestamp)
 std::shared_ptr<control::trace_control>
 get_trace_controller()
 {
-    return get_roctx_client()->get_controller();
+    const auto rocx_client = get_roctx_client();
+    if(!rocx_client) return nullptr;
+    return rocx_client->get_controller();
 }
 
 void

@@ -49,21 +49,11 @@ TEST_F(roctx_client_test, constructor_with_region_filter)
     EXPECT_TRUE(client.get_controller()->region_filter_active());
 }
 
-TEST_F(roctx_client_test, should_write_requires_write_enabled)
+TEST_F(roctx_client_test, should_write_no_filter)
 {
     using namespace rocprofsys::rocprofiler_sdk;
 
-    // is_write_enabled = false, no region filter
-    const roctx_client_config config{ false, true, true, false, "" };
-    const roctx_client<>      client(config);
-    EXPECT_FALSE(client.should_write_markers());
-}
-
-TEST_F(roctx_client_test, should_write_no_filter_and_enabled)
-{
-    using namespace rocprofsys::rocprofiler_sdk;
-
-    // is_write_enabled = true, no region filter => always write
+    // No region filter => always write
     const roctx_client_config config{ true, true, true, false, "" };
     const roctx_client<>      client(config);
     EXPECT_TRUE(client.should_write_markers());
@@ -73,7 +63,7 @@ TEST_F(roctx_client_test, should_write_with_filter_not_in_region)
 {
     using namespace rocprofsys::rocprofiler_sdk;
 
-    // is_write_enabled = true, has region filter, but no active region
+    // Has region filter, but no active region => don't write
     const roctx_client_config config{ true, true, true, false, "Region 1" };
     const roctx_client<>      client(config);
     EXPECT_FALSE(client.should_write_markers());
@@ -322,7 +312,8 @@ TEST_F(roctx_client_control_test, selective_region_pause_outside_resume_inside)
 //   roctx_pause                   => stop callback; paused
 //   CodeC                         => NOT profiled (paused)
 //   Pop Region1 (id=1)            => region ends while paused; warning;
-//                                    paused reset to false; stop callback
+//                                    paused reset to false; NO stop callback
+//                                    (already fired by pause)
 //   CodeD                         => NOT profiled (outside region)
 //   roctx_resume                  => outside region => ignored
 //
@@ -344,9 +335,9 @@ TEST_F(roctx_client_control_test, selective_region_pause_then_region_ends)
 
     // Pop Region1: region ends while paused.
     // handle_range_stop sees user_paused=true => logs warning,
-    // resets paused to false, triggers stop callbacks.
+    // resets paused to false. Stop callbacks NOT fired (already fired by pause).
     ctrl->handle_range_stop(1);
-    EXPECT_EQ(stop_count, 2);
+    EXPECT_EQ(stop_count, 1);                      // no double-stop
     EXPECT_FALSE(client->should_write_markers());  // CodeD: outside region
 
     // roctx_resume: paused was reset to false by range_stop,
