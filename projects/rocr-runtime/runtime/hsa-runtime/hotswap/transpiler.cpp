@@ -2741,13 +2741,13 @@ static void PatchKernelDescriptorsForWave64(uint8_t* elf, size_t elf_size,
     uint32_t sgpr_field12_kd = (rsrc1 >> 6) & 0x3Fu;  // save before clear
     uint32_t num_vgprs = (vgpr_field12 + 1u) * 8u;  // GFX12 granularity
     if (num_vgprs < 8u) num_vgprs = 8u;
-    num_vgprs += 4u;  // room for sv_x, sv_y (embedded .text descriptors are for simple kernels)
+    num_vgprs += 4u;  // room for sv_x, sv_y
     // ACCUM_OFFSET: on GFX942, arch VGPRs = (ACCUM_OFFSET+1)*4.  Set ACCUM_OFFSET
     // so ALL allocated VGPRs (kernel's + save regs) are arch VGPRs (accessible by VALU).
     // Hardware requires ACCUM_OFFSET < RSRC1 VGPR field, so add one extra accum group.
     uint32_t gfx9_vgpr = (num_vgprs / 4u) - 1u;  // ACCUM_OFFSET = all-arch
     if (gfx9_vgpr > 62u) gfx9_vgpr = 62u;
-    uint32_t rsrc1_vgpr_field = gfx9_vgpr + 1u;   // one extra accum group
+    uint32_t rsrc1_vgpr_field = gfx9_vgpr + 1u;   // one extra accum group (ACCUM < field required)
     if (rsrc1_vgpr_field > 63u) rsrc1_vgpr_field = 63u;
     // Clear bits [11:0] and set GFX9 SGPR[5:0] and VGPR[11:6]
     rsrc1 &= ~0xFFFu;
@@ -3048,7 +3048,7 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
                 uint64_t value;
                 std::memcpy(&value, sym + 8, 8);
                 if (strstr(name, ".num_vgpr") && value > num_vgprs12)
-                  num_vgprs12 = (uint32_t)value + 8;  // +8 padding above actual
+                  num_vgprs12 = (uint32_t)value;  // actual VGPR count from symbol
                 if (strstr(name, ".num_sgpr") && value > num_sgprs12)
                   num_sgprs12 = (uint32_t)value;  // exact count from symbol
               }
@@ -3089,10 +3089,8 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
         }
       }
     }
-    // GFX12 RSRC1 VGPR field (granularity 8) may underreport actual usage.
-    // E.g., .num_vgpr=20 but RSRC1 encodes field=1→16.  Add 8 padding to
-    // ensure save registers are above the kernel's actual VGPR usage.
-    num_vgprs12 += 8u;
+    // Save registers right above the kernel's actual VGPR usage.
+    // The KD allocates .num_vgpr + 4 arch VGPRs, matching native gfx942 pattern.
     uint32_t save_vgpr_x = num_vgprs12;       // first free VGPR index
     uint32_t save_vgpr_y = num_vgprs12 + 1u;  // second free VGPR index
     uint32_t cmpx_temp_sgpr = num_sgprs12;    // first free SGPR pair for v_cmpx temp
@@ -3724,6 +3722,9 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
         }
       }
 
+      if (sym_num_vgpr > 0)
+        std::cerr << "hotswap: transpile: KD sym_num_vgpr=" << sym_num_vgpr << "\n";
+
       for (auto& sec : updated_info.sections) {
         if (sec.name == ".rodata" && sec.size >= 64) {
           // .rodata may contain kernel descriptors at 64-byte aligned offsets
@@ -3752,15 +3753,10 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
             uint32_t sgpr_field12_rd = (rsrc1 >> 6) & 0x3Fu;  // save before clear
             uint32_t num_vgprs = (vgpr_field12 + 1u) * 8u;
             if (num_vgprs < 8u) num_vgprs = 8u;
-            // Match translation loop: save_vgpr_x = max(base, .num_vgpr+8) + 8.
-            // Need arch VGPRs ≥ save_vgpr_y + 2 = save_vgpr_x + 3.
-            // With field = ACCUM_OFFSET (no accum), ALL allocated VGPRs are arch.
-            if (sym_num_vgpr > 0 && sym_num_vgpr + 8u > num_vgprs)
-              num_vgprs = sym_num_vgpr + 8u;
-            num_vgprs += 4u;  // save registers
+            num_vgprs += 4u;  // room for sv_x, sv_y
             uint32_t gfx9_vgpr = (num_vgprs / 4u) - 1u;  // ACCUM_OFFSET = all-arch
             if (gfx9_vgpr > 62u) gfx9_vgpr = 62u;
-            uint32_t rsrc1_vgpr_field = gfx9_vgpr + 1u;   // one extra accum group
+            uint32_t rsrc1_vgpr_field = gfx9_vgpr + 1u;   // one extra accum group (ACCUM < field required)
             if (rsrc1_vgpr_field > 63u) rsrc1_vgpr_field = 63u;
             // Clear bits [11:0] and set GFX9 SGPR[5:0] and VGPR[11:6]
             rsrc1 &= ~0xFFFu;
