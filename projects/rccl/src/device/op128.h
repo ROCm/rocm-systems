@@ -35,10 +35,6 @@ inline __device__ void store128(uint64_t* ptr, uint64_t v0, uint64_t v1) {
 #endif
 }
 
-inline __device__ uint64_t* shmemCvtPtr(volatile uint64_t* shmemGenericPtr) {
-  return (uint64_t*)shmemGenericPtr;
-}
-
 inline __device__ void loadShmem128(uint64_t* shmemAsmPtr, uint64_t &v0, uint64_t &v1) {
   v0 = *(shmemAsmPtr);
   v1 = *(shmemAsmPtr+1);
@@ -266,7 +262,7 @@ template<> __device__ __forceinline__ void st_global<0>(uintptr_t addr, BytePack
   template<> \
   __device__ __forceinline__ BytePack<bytes> ld_volatile_##space<bytes>(addr_cxx_ty addr) { \
     data_cxx_ty tmp; \
-    tmp =  __hip_atomic_load((__attribute__((address_space(1))) data_cxx_ty *)addr, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM); \
+    tmp = __hip_atomic_load((__attribute__((address_space(1))) data_cxx_ty *)addr, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM); \
     BytePack<bytes> ans; \
     ans.native = tmp; \
     return ans; \
