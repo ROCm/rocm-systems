@@ -1,0 +1,11 @@
+---
+description: Python coding style rules for rocprofiler-compute. Apply when generating or modifying Python files.
+globs: ["**/*.py"]
+alwaysApply: true
+---
+
+# Python Coding Style — rocprofiler-compute
+
+When generating or modifying any Python code in this project, read and follow the instructions in:
+
+**[`AGENT.md` — Python Coding Style](../../AGENT.md#python-coding-style)**
