@@ -30,38 +30,38 @@ Panel Config:
         VALU Insts per Wave:
           value: AVG((SQ_INSTS_VALU / SQ_WAVES) if (SQ_WAVES != 0) else None)
           unit: Insts/Wave
-          peak: None
-          pop: None
+          peak: AVG((SQ_INSTS_VALU / SQ_WAVES) if (SQ_WAVES != 0) else None)
+          pop: AVG((SQ_INSTS_VALU / SQ_WAVES) if (SQ_WAVES != 0) else None)
         SALU Insts per Wave:
           value: AVG((SQ_INSTS_SALU / SQ_WAVES) if (SQ_WAVES != 0) else None)
           unit: Insts/Wave
-          peak: None
-          pop: None
+          peak: AVG((SQ_INSTS_SALU / SQ_WAVES) if (SQ_WAVES != 0) else None)
+          pop: AVG((SQ_INSTS_SALU / SQ_WAVES) if (SQ_WAVES != 0) else None)
         SMEM Insts per Wave:
           value: AVG((SQ_INSTS_SMEM / SQ_WAVES) if (SQ_WAVES != 0) else None)
           unit: Insts/Wave
-          peak: None
-          pop: None
+          peak: AVG((SQ_INSTS_SMEM / SQ_WAVES) if (SQ_WAVES != 0) else None)
+          pop: AVG((SQ_INSTS_SMEM / SQ_WAVES) if (SQ_WAVES != 0) else None)
         LDS Insts per Wave:
           value: AVG((SQ_INSTS_LDS / SQ_WAVES) if (SQ_WAVES != 0) else None)
           unit: Insts/Wave
-          peak: None
-          pop: None
+          peak: AVG((SQ_INSTS_LDS / SQ_WAVES) if (SQ_WAVES != 0) else None)
+          pop: AVG((SQ_INSTS_LDS / SQ_WAVES) if (SQ_WAVES != 0) else None)
         Tex Load Insts per Wave:
           value: AVG((SQ_INSTS_TEX_LOAD / SQ_WAVES) if (SQ_WAVES != 0) else None)
           unit: Insts/Wave
-          peak: None
-          pop: None
+          peak: AVG((SQ_INSTS_TEX_LOAD / SQ_WAVES) if (SQ_WAVES != 0) else None)
+          pop: AVG((SQ_INSTS_TEX_LOAD / SQ_WAVES) if (SQ_WAVES != 0) else None)
         Tex Store Insts per Wave:
           value: AVG((SQ_INSTS_TEX_STORE / SQ_WAVES) if (SQ_WAVES != 0) else None)
           unit: Insts/Wave
-          peak: None
-          pop: None
+          peak: AVG((SQ_INSTS_TEX_STORE / SQ_WAVES) if (SQ_WAVES != 0) else None)
+          pop: AVG((SQ_INSTS_TEX_STORE / SQ_WAVES) if (SQ_WAVES != 0) else None)
         Flat Insts per Wave:
           value: AVG((SQ_INSTS_FLAT / SQ_WAVES) if (SQ_WAVES != 0) else None)
           unit: Insts/Wave
-          peak: None
-          pop: None
+          peak: AVG((SQ_INSTS_FLAT / SQ_WAVES) if (SQ_WAVES != 0) else None)
+          pop: AVG((SQ_INSTS_FLAT / SQ_WAVES) if (SQ_WAVES != 0) else None)
         # RDNA3.5 VALU FLOPs - Standard vector operations
         VALU FLOPs (FP16):
           value: AVG(((SQ_INSTS_VALU_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
@@ -86,8 +86,8 @@ Panel Config:
         Wave Life (cycles):
           value: AVG(((SQ_WAVE_CYCLES / SQ_WAVES) if (SQ_WAVES != 0) else None))
           unit: Cycles
-          peak: None
-          pop: None
+          peak: AVG(((SQ_WAVE_CYCLES / SQ_WAVES) if (SQ_WAVES != 0) else None))
+          pop: AVG(((SQ_WAVE_CYCLES / SQ_WAVES) if (SQ_WAVES != 0) else None))
         SQ Busy:
           value: AVG((100 * SQ_BUSY_CYCLES / (GRBM_GUI_ACTIVE * $cu_per_gpu)) if (GRBM_GUI_ACTIVE * $cu_per_gpu != 0) else None)
           unit: Percent
@@ -108,26 +108,32 @@ Panel Config:
         L2-Fabric Read BW:
           value: AVG(((GL2C_EA_RDREQ_32B * 32 + GL2C_EA_RDREQ_64B * 64
             + GL2C_EA_RDREQ_96B * 96 + GL2C_EA_RDREQ_128B * 128)
-            / (End_Timestamp - Start_Timestamp)))
-          unit: GB/s
-          peak: None
-          pop: None
+            / ((End_Timestamp - Start_Timestamp) / 1e9)))
+          unit: Bytes/s
+          peak: AVG(((GL2C_EA_RDREQ_32B * 32 + GL2C_EA_RDREQ_64B * 64
+            + GL2C_EA_RDREQ_96B * 96 + GL2C_EA_RDREQ_128B * 128)
+            / ((End_Timestamp - Start_Timestamp) / 1e9)))
+          pop: AVG(((GL2C_EA_RDREQ_32B * 32 + GL2C_EA_RDREQ_64B * 64
+            + GL2C_EA_RDREQ_96B * 96 + GL2C_EA_RDREQ_128B * 128)
+            / ((End_Timestamp - Start_Timestamp) / 1e9)))
         L2-Fabric Write BW:
           value: AVG(((GL2C_EA_WRREQ_64B * 64)
-            / (End_Timestamp - Start_Timestamp)))
-          unit: GB/s
-          peak: None
-          pop: None
+            / ((End_Timestamp - Start_Timestamp) / 1e9)))
+          unit: Bytes/s
+          peak: AVG(((GL2C_EA_WRREQ_64B * 64)
+            / ((End_Timestamp - Start_Timestamp) / 1e9)))
+          pop: AVG(((GL2C_EA_WRREQ_64B * 64)
+            / ((End_Timestamp - Start_Timestamp) / 1e9)))
         Memory Controller Read BW:
-          value: AVG(((GL2C_MC_RDREQ * 64) / (End_Timestamp - Start_Timestamp)))
-          unit: GB/s
-          peak: None
-          pop: None
+          value: AVG(((GL2C_MC_RDREQ * 64) / ((End_Timestamp - Start_Timestamp) / 1e9)))
+          unit: Bytes/s
+          peak: AVG(((GL2C_MC_RDREQ * 64) / ((End_Timestamp - Start_Timestamp) / 1e9)))
+          pop: AVG(((GL2C_MC_RDREQ * 64) / ((End_Timestamp - Start_Timestamp) / 1e9)))
         Memory Controller Write BW:
-          value: AVG(((GL2C_MC_WRREQ * 64) / (End_Timestamp - Start_Timestamp)))
-          unit: GB/s
-          peak: None
-          pop: None
+          value: AVG(((GL2C_MC_WRREQ * 64) / ((End_Timestamp - Start_Timestamp) / 1e9)))
+          unit: Bytes/s
+          peak: AVG(((GL2C_MC_WRREQ * 64) / ((End_Timestamp - Start_Timestamp) / 1e9)))
+          pop: AVG(((GL2C_MC_WRREQ * 64) / ((End_Timestamp - Start_Timestamp) / 1e9)))
         MC Write Stall:
           value: AVG((100 * GL2C_MC_WRREQ_STALL / (GRBM_GUI_ACTIVE * $total_l2_chan)))
           unit: Percent
@@ -136,8 +142,8 @@ Panel Config:
         LDS Bank Conflicts:
           value: AVG(SQC_LDS_BANK_CONFLICT)
           unit: Conflicts
-          peak: None
-          pop: None
+          peak: AVG(SQC_LDS_BANK_CONFLICT)
+          pop: AVG(SQC_LDS_BANK_CONFLICT)
         LDS Active Cycles:
           value: AVG((100 * SQC_LDS_IDX_ACTIVE / (GRBM_GUI_ACTIVE * $cu_per_gpu)))
           unit: Percent
@@ -146,29 +152,31 @@ Panel Config:
         Wave32 VALU Insts per Wave:
           value: AVG(((SQ_INSTS_WAVE32_VALU / SQ_WAVES) if (SQ_WAVES != 0) else 0))
           unit: Insts/Wave
-          peak: None
-          pop: None
+          peak: AVG(((SQ_INSTS_WAVE32_VALU / SQ_WAVES) if (SQ_WAVES != 0) else 0))
+          pop: AVG(((SQ_INSTS_WAVE32_VALU / SQ_WAVES) if (SQ_WAVES != 0) else 0))
         Wave32 LDS Insts per Wave:
           value: AVG(((SQ_INSTS_WAVE32_LDS / SQ_WAVES) if (SQ_WAVES != 0) else 0))
           unit: Insts/Wave
-          peak: None
-          pop: None
+          peak: AVG(((SQ_INSTS_WAVE32_LDS / SQ_WAVES) if (SQ_WAVES != 0) else 0))
+          pop: AVG(((SQ_INSTS_WAVE32_LDS / SQ_WAVES) if (SQ_WAVES != 0) else 0))
         Occupancy per Active CU:
           value: AVG(((SQ_WAVE_CYCLES / SQ_BUSY_CYCLES) if (SQ_BUSY_CYCLES != 0) else 0))
           unit: Wavefronts
-          peak: None
-          pop: None
+          peak: AVG(((SQ_WAVE_CYCLES / SQ_BUSY_CYCLES) if (SQ_BUSY_CYCLES != 0) else 0))
+          pop: AVG(((SQ_WAVE_CYCLES / SQ_BUSY_CYCLES) if (SQ_BUSY_CYCLES != 0) else 0))
         Fetch Size:
           value: AVG(((GL2C_EA_RDREQ_32B * 32 + GL2C_EA_RDREQ_64B * 64
             + GL2C_EA_RDREQ_96B * 96 + GL2C_EA_RDREQ_128B * 128) / 1024))
           unit: KB
-          peak: None
-          pop: None
+          peak: AVG(((GL2C_EA_RDREQ_32B * 32 + GL2C_EA_RDREQ_64B * 64
+            + GL2C_EA_RDREQ_96B * 96 + GL2C_EA_RDREQ_128B * 128) / 1024))
+          pop: AVG(((GL2C_EA_RDREQ_32B * 32 + GL2C_EA_RDREQ_64B * 64
+            + GL2C_EA_RDREQ_96B * 96 + GL2C_EA_RDREQ_128B * 128) / 1024))
         Write Size:
           value: AVG((((GL2C_MC_WRREQ - GL2C_EA_WRREQ_64B) * 32 + GL2C_EA_WRREQ_64B * 64) / 1024))
           unit: KB
-          peak: None
-          pop: None
+          peak: AVG((((GL2C_MC_WRREQ - GL2C_EA_WRREQ_64B) * 32 + GL2C_EA_WRREQ_64B * 64) / 1024))
+          pop: AVG((((GL2C_MC_WRREQ - GL2C_EA_WRREQ_64B) * 32 + GL2C_EA_WRREQ_64B * 64) / 1024))
         TA Busy (avg):
           value: AVG((100 * TA_BUSY_avr / GRBM_GUI_ACTIVE))
           unit: Percent
@@ -192,8 +200,8 @@ Panel Config:
         VMEM Issue Cycles per Wave:
           value: AVG(((4 * SQ_INST_CYCLES_VMEM / SQ_WAVES) if (SQ_WAVES != 0) else 0))
           unit: Cycles/Wave
-          peak: None
-          pop: None
+          peak: AVG(((4 * SQ_INST_CYCLES_VMEM / SQ_WAVES) if (SQ_WAVES != 0) else 0))
+          pop: AVG(((4 * SQ_INST_CYCLES_VMEM / SQ_WAVES) if (SQ_WAVES != 0) else 0))
         Wave Dependency Wait:
           value: AVG(((100 * SQ_WAIT_ANY / SQ_WAVE_CYCLES) if (SQ_WAVE_CYCLES != 0) else 0))
           unit: Percent

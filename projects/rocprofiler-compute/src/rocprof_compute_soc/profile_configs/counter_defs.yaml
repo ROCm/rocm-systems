@@ -1308,6 +1308,7 @@ rocprofiler-sdk:
       - gfx1101
       - gfx1102
       - gfx1151
+      - gfx1152
       expression: reduce(GL2C_MC_WRREQ_STALL,max)
     - architectures:
       - gfx12
