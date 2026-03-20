@@ -3374,7 +3374,8 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
       }
       ++emitted_count;
       // Debug early exit: insert s_endpgm after N source instructions
-      if (early_exit_after > 0 && emitted_count >= early_exit_after && !early_exit_done) {
+      if (early_exit_after > 0 && emitted_count >= early_exit_after && !early_exit_done
+          && source_lines.size() > 400) {  // only for large kernels (attn_forward=548)
         // Emit all remaining branch target labels pointing to the exit, then s_endpgm.
         // This prevents assembly errors from unresolved forward references.
         for (size_t jj = ii + 1; jj < source_instrs.size(); jj++) {
