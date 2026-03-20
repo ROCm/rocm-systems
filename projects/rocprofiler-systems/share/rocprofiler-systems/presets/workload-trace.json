@@ -71,9 +71,6 @@
         "enabled": false,
         "frequency_hz": {
             "value": 50
-        },
-        "gpus": {
-            "value": "$HIP_VISIBLE_DEVICES"
         }
     },
     "tracing": {

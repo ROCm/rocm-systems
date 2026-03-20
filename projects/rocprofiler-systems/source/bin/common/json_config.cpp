@@ -573,8 +573,13 @@ set_json_double(nlohmann::json& target, const std::string& value)
 bool
 is_truthy(const std::string& v)
 {
-    return v == "true" || v == "TRUE" || v == "1" || v == "ON" || v == "on" ||
-           v == "yes" || v == "YES";
+    if(v == "1") return true;
+    if(v.size() < 2 || v.size() > 4) return false;
+    std::string lower;
+    lower.reserve(v.size());
+    for(auto c : v)
+        lower += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return lower == "true" || lower == "on" || lower == "yes";
 }
 
 void
@@ -684,6 +689,7 @@ env_vars_to_json_schema(const std::map<std::string, std::string>& env_map)
     // --- Domains: ROCm ---
     if(auto v = get_val(env_vars::ROCM_DOMAINS))
     {
+        j["domains"]["rocm"]["enabled"] = true;
         std::istringstream ss(*v);
         std::string        token;
         while(std::getline(ss, token, ','))

@@ -18,10 +18,7 @@
         "cpus": {
             "value": "all"
         },
-        "enabled": true,
-        "gpus": {
-            "value": "$HIP_VISIBLE_DEVICES"
-        }
+        "enabled": true
     },
     "tracing": {
         "enabled": true

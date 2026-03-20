@@ -77,7 +77,7 @@ register_preset_and_domain_arguments(ParserT& parser, std::string_view tool_name
             "For custom configs, provide a path containing '/' or ending with '.json'")
         .max_count(1)
         .dtype("string")
-        .action([&state, &preset_applier](ParserT& p) mutable {
+        .action([&state, preset_applier](ParserT& p) mutable {
             auto preset = p.template get<std::string>("preset");
             if(preset.empty()) return;
             state.active_preset_name = preset;
@@ -126,7 +126,7 @@ register_preset_and_domain_arguments(ParserT& parser, std::string_view tool_name
         .min_count(0)
         .max_count(1)
         .dtype("string")
-        .action([&state, &env_updater](ParserT& p) mutable {
+        .action([&state, env_updater](ParserT& p) mutable {
             state.gpu_domain_enabled = true;
             env_updater(env::USE_AMD_SMI, "true");
             env_updater(env::USE_PROCESS_SAMPLING, "true");
@@ -156,7 +156,7 @@ register_preset_and_domain_arguments(ParserT& parser, std::string_view tool_name
         .min_count(0)
         .max_count(1)
         .dtype("string")
-        .action([&state, &env_updater](ParserT& p) mutable {
+        .action([&state, env_updater](ParserT& p) mutable {
             state.rocm_domain_enabled = true;
             std::string domains_str =
                 "hip_runtime_api,marker_api,kernel_dispatch,memory_copy,scratch_memory";
@@ -180,7 +180,7 @@ register_preset_and_domain_arguments(ParserT& parser, std::string_view tool_name
         .min_count(0)
         .max_count(1)
         .dtype("string")
-        .action([&state, &env_updater](ParserT& p) mutable {
+        .action([&state, env_updater](ParserT& p) mutable {
             state.cpu_domain_enabled = true;
             env_updater(env::USE_SAMPLING, "true");
 
@@ -210,7 +210,7 @@ register_preset_and_domain_arguments(ParserT& parser, std::string_view tool_name
         .min_count(0)
         .max_count(1)
         .dtype("string")
-        .action([&state, &env_updater](ParserT& p) mutable {
+        .action([&state, env_updater](ParserT& p) mutable {
             state.parallel_domain_enabled = true;
             std::string runtimes_str;
 

@@ -141,7 +141,11 @@ load_preset(std::string_view name)
 std::optional<preset_info>
 load_preset_or_file(const std::string& name_or_path)
 {
-    // If it looks like a path, load it directly
+    // If it looks like a path (contains '/' or ends with '.json'), load it directly as a
+    // user-specified file. This intentionally allows loading arbitrary JSON config files
+    // from any location — it is a feature for custom configurations. Path traversal
+    // protection in load_preset() only applies to bare preset names resolved against the
+    // preset directory.
     if(name_or_path.find('/') != std::string::npos ||
        (name_or_path.size() > 5 &&
         name_or_path.substr(name_or_path.size() - 5) == ".json"))
@@ -149,7 +153,7 @@ load_preset_or_file(const std::string& name_or_path)
         return load_preset_file(name_or_path);
     }
 
-    // Reject preset names containing ".." to prevent directory traversal
+    // Reject bare preset names containing ".." as a defense-in-depth measure
     if(name_or_path.find("..") != std::string::npos)
     {
         std::cerr << "[rocprof-sys] WARNING: Preset name '" << name_or_path

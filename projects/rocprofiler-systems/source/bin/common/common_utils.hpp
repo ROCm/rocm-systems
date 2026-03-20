@@ -39,14 +39,15 @@ check_directory_writable(const std::string& dir);
 // ============================================================================
 
 /**
- * Generates a tree-formatted description of a preset by reading its JSON data.
+ * Generates a tree-formatted description of a preset from its parsed JSON data.
  * This avoids hardcoding descriptions that can diverge from the actual preset config.
  */
 std::string
-generate_preset_description(std::string_view preset_mode);
+generate_preset_description(const nlohmann::json& preset_json);
 
 /**
  * Prints pre-execution information including preset details and output location.
+ * All output goes to stderr to keep stdout clean for structured output (--export-config).
  */
 void
 print_pre_execution_info(std::string_view tool_name, std::string_view preset_mode = "");
@@ -72,12 +73,6 @@ strip_flag_prefix(std::string_view name)
 // ============================================================================
 
 /**
- * Validates that only one preset mode is specified.
- */
-bool
-validate_preset_modes(const std::vector<std::string>& active_presets);
-
-/**
  * Checks if ROCm is available on the system.
  */
 bool
@@ -99,7 +94,7 @@ warn_if_output_not_writable(std::string_view tool_name);
  * Validates the configuration for common issues.
  */
 void
-validate_configuration(std::string_view tool_name);
+validate_configuration();
 
 // ============================================================================
 // Preset listing and explanation

@@ -316,6 +316,7 @@ The features of ``rocpd`` output format are:
 * **Advanced Analytics Integration**: Facilitates sophisticated post-processing workflows through custom analytical scripts, automated reporting systems, and integration with third-party visualization and analysis frameworks that provide SQLite3 connectivity.
 
 Generating rocpd output
+
 -------------------------
 
 To generate profiling data in the rocpd format, add ``ROCPROFSYS_USE_ROCPD=ON`` to your profiling configuration.

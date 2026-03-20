@@ -52,27 +52,8 @@ check_directory_writable(const std::string& dir)
 }
 
 std::string
-generate_preset_description(std::string_view preset_mode)
+generate_preset_description(const nlohmann::json& j)
 {
-    auto normalized = strip_flag_prefix(preset_mode);
-
-    // Load the raw JSON once — used for both metadata and tree display
-    auto preset_dir = rocprofsys::preset_loader::find_preset_directory();
-    if(preset_dir.empty()) return "";
-
-    auto          filepath = preset_dir + "/" + normalized + ".json";
-    std::ifstream ifs{ filepath };
-    if(!ifs.is_open()) return "";
-
-    nlohmann::json j;
-    try
-    {
-        j = nlohmann::json::parse(ifs);
-    } catch(const nlohmann::json::exception&)
-    {
-        return "";
-    }
-
     // Extract description from metadata
     auto meta        = rocprofsys::json_config::get_config_metadata(j);
     auto description = meta ? meta->description : "";
@@ -247,38 +228,72 @@ print_pre_execution_info(std::string_view tool_name, std::string_view preset_mod
 {
     auto output_dir = get_output_directory();
 
+    // Load the preset JSON once for description + conditional output listing
+    nlohmann::json preset_json;
+    bool           tracing_on   = true;  // assume on unless preset says otherwise
+    bool           profiling_on = true;
+
     if(!preset_mode.empty() && !tool_name.empty())
     {
-        constexpr size_t           box_width       = 60;
-        constexpr size_t           box_inner_width = box_width - 2;
-        constexpr std::string_view box_line =
-            "\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550"
-            "\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550"
-            "\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550"
-            "\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550"
-            "\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550";
+        auto normalized = strip_flag_prefix(preset_mode);
+        auto preset_dir = rocprofsys::preset_loader::find_preset_directory();
+        if(!preset_dir.empty())
+        {
+            auto          filepath = preset_dir + "/" + normalized + ".json";
+            std::ifstream ifs{ filepath };
+            if(ifs.is_open())
+            {
+                try
+                {
+                    preset_json = nlohmann::json::parse(ifs);
+                } catch(const nlohmann::json::exception&)
+                {
+                    // fall through with empty JSON
+                }
+            }
+        }
+
+        if(!preset_json.is_null())
+        {
+            if(preset_json.contains("tracing"))
+                tracing_on = preset_json["tracing"].value("enabled", true);
+            if(preset_json.contains("profiling"))
+                profiling_on = preset_json["profiling"].value("enabled", true);
+        }
+
+        constexpr size_t box_width       = 60;
+        constexpr size_t box_inner_width = box_width - 2;
+        // Build the box line from Unicode box-drawing character U+2550 (═)
+        std::string box_line;
+        box_line.reserve(box_width * 3);
+        for(size_t i = 0; i < box_width; ++i)
+            box_line += "\u2550";
+
         constexpr std::string_view prefix       = "ROCm Systems Profiler - ";
         const size_t               content_size = prefix.size() + tool_name.size();
         const size_t               padding =
             content_size < box_inner_width ? box_inner_width - content_size : 0;
 
-        std::cout << "\n"
+        std::cerr << "\n"
                   << "\u2554" << box_line << "\u2557\n"
                   << "\u2551 " << prefix << tool_name << std::string(padding, ' ')
                   << " \u2551\n"
                   << "\u255a" << box_line << "\u255d\n"
                   << "\n";
 
-        std::cout << "Preset:        " << preset_mode << "\n";
+        std::cerr << "Preset:        " << preset_mode << "\n";
 
-        auto description = generate_preset_description(preset_mode);
-        if(!description.empty())
+        if(!preset_json.is_null())
         {
-            std::cout << "\n" << description << "\n";
+            auto description = generate_preset_description(preset_json);
+            if(!description.empty())
+            {
+                std::cerr << "\n" << description << "\n";
+            }
         }
     }
 
-    std::cout << "\nOutput:        " << output_dir << "\n";
+    std::cerr << "\nOutput:        " << output_dir << "\n";
 
     if(!check_directory_writable(output_dir))
     {
@@ -287,54 +302,24 @@ print_pre_execution_info(std::string_view tool_name, std::string_view preset_mod
                   << " -o /tmp/profile -- <command>\n\n";
     }
 
-    std::cout << "\nResults will be available in:\n"
-              << "  \u2022 Text profile:  " << output_dir << "/wall_clock.txt\n"
-              << "  \u2022 Trace (visual): " << output_dir << "/perfetto-trace.proto\n"
-              << "  \u2022 JSON data:      " << output_dir << "/wall_clock.json\n"
-              << "\nTo visualize trace:\n"
-              << "  Open " << output_dir
-              << "/perfetto-trace.proto in https://ui.perfetto.dev\n"
-              << "\n";
-}
-
-bool
-validate_preset_modes(const std::vector<std::string>& active_presets)
-{
-    if(active_presets.size() > 1)
+    std::cerr << "\nResults will be available in:\n";
+    if(profiling_on)
     {
-        std::cerr << "\nERROR: Multiple preset modes specified: ";
-        for(const auto& active_preset : active_presets)
-        {
-            std::cerr << active_preset;
-            if(active_preset != active_presets.back()) std::cerr << ", ";
-        }
-        std::cerr << "\n\n";
-
-        std::cerr << "Only ONE preset mode can be used at a time.\n\n";
-        std::cerr
-            << "Available presets (use with --preset=<name>):\n"
-            << "  General Purpose:\n"
-            << "    balanced           Balanced profiling with moderate overhead\n"
-            << "    profile-only       Profiling without tracing, minimal overhead\n"
-            << "    detailed           Full trace + hardware counters\n"
-            << "  Workload-Specific:\n"
-            << "    trace-hpc          MPI/OpenMP/HPC applications\n"
-            << "    workload-trace     General compute workloads (AI/ML, HPC, etc.)\n"
-            << "    trace-gpu          GPU workload analysis\n"
-            << "    trace-openmp       OpenMP offload workloads\n"
-            << "    profile-mpi        MPI communication latency profiling\n"
-            << "    trace-hw-counters  Hardware counter collection\n"
-            << "  API Tracing:\n"
-            << "    sys-trace          Comprehensive system API tracing\n"
-            << "    runtime-trace      Runtime API tracing (no compiler/HSA)\n\n";
-
-        std::cerr
-            << "Choose one preset or use manual options for custom configuration.\n";
-        std::cerr << "See --help for all options.\n\n";
-
-        return false;
+        std::cerr << "  \u2022 Text profile:  " << output_dir << "/wall_clock.txt\n"
+                  << "  \u2022 JSON data:      " << output_dir << "/wall_clock.json\n";
     }
-    return true;
+    if(tracing_on)
+    {
+        std::cerr << "  \u2022 Trace (visual): " << output_dir
+                  << "/perfetto-trace.proto\n";
+    }
+    if(tracing_on)
+    {
+        std::cerr << "\nTo visualize trace:\n"
+                  << "  Open " << output_dir
+                  << "/perfetto-trace.proto in https://ui.perfetto.dev\n";
+    }
+    std::cerr << "\n";
 }
 
 bool
@@ -374,7 +359,7 @@ warn_if_output_not_writable(std::string_view tool_name)
 }
 
 void
-validate_configuration(std::string_view tool_name)
+validate_configuration()
 {
     // Check for conflicting ENABLE/DISABLE categories (causes std::abort() at runtime)
     const char* enable_cats  = std::getenv("ROCPROFSYS_ENABLE_CATEGORIES");
@@ -398,8 +383,6 @@ validate_configuration(std::string_view tool_name)
                   << "' is not writable!\n"
                   << "  Try: export ROCPROFSYS_TMPDIR=/tmp\n";
     }
-
-    (void) tool_name;
 }
 
 void
@@ -620,7 +603,7 @@ run_post_parse_validation(std::string_view tool_name, std::string_view preset_na
     }
 
     warn_if_output_not_writable(tool_name);
-    validate_configuration(tool_name);
+    validate_configuration();
     validate_domain_flags(gpu_enabled, rocm_enabled, cpu_enabled, parallel_enabled,
                           preset_name);
 }

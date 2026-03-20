@@ -975,12 +975,6 @@ PROFILING WORKFLOW:
         exit(EXIT_SUCCESS);
     }
 
-    // Sample-specific: warn for legacy --hip-trace flag
-    if(parser.exists("hip-trace") && parser.get<bool>("hip-trace"))
-    {
-        rocprofsys::common_utils::warn_if_rocm_unavailable();
-    }
-
     rocprofsys::common_utils::run_post_parse_validation(
         "sample", domain_state.active_preset_name, domain_state.gpu_domain_enabled,
         domain_state.rocm_domain_enabled, domain_state.cpu_domain_enabled,

@@ -1,594 +1,525 @@
 {
-    "advanced": {
-        "collapse_threads": {
-            "description": "Collapse thread data into process-level view",
-            "enabled": false
-        },
-        "cpu_affinity": {
-            "description": "Enable CPU affinity tracking",
-            "enabled": false
-        },
-        "cpu_freq": {
-            "description": "Enable CPU frequency monitoring",
-            "enabled": false
-        },
-        "debug": {
-            "description": "Enable debug output",
-            "enabled": false
-        },
-        "description": "Advanced configuration options",
-        "max_depth": {
-            "description": "Maximum call stack depth to record",
-            "value": 65535
-        },
-        "network_interface": {
-            "description": "Network interface for distributed profiling",
-            "examples": [
-                "eth0",
-                "ib0"
+    "$defs": {
+        "apiDomainField": {
+            "additionalProperties": true,
+            "description": "An API tracing domain with enabled toggle",
+            "properties": {
+                "category": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "enabled": {
+                    "type": "boolean"
+                }
+            },
+            "required": [
+                "enabled"
             ],
-            "value": ""
+            "type": "object"
         },
-        "signal_handler": {
-            "description": "Enable signal handler for graceful termination",
-            "enabled": true
-        },
-        "timemory_components": {
-            "description": "Timemory components to enable",
-            "examples": [
-                "wall_clock",
-                "cpu_clock",
-                "peak_rss",
-                "page_rss"
+        "enabledField": {
+            "additionalProperties": true,
+            "description": "A simple enabled/disabled toggle",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "enabled": {
+                    "type": "boolean"
+                }
+            },
+            "required": [
+                "enabled"
             ],
-            "value": [
-                "wall_clock"
-            ]
+            "type": "object"
         },
-        "trace_delay_sec": {
-            "description": "Delay before starting trace collection",
-            "unit": "seconds",
-            "value": 0
-        },
-        "trace_duration_sec": {
-            "description": "Duration of trace collection (0 = until end)",
-            "unit": "seconds",
-            "value": 0
-        },
-        "trace_periods": {
-            "description": "Periodic trace collection intervals",
-            "examples": [
-                "1:5",
-                "0:10,20:30"
+        "intValueField": {
+            "additionalProperties": true,
+            "description": "A field with an integer value",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "typical_range": {
+                    "items": {
+                        "type": "integer"
+                    },
+                    "maxItems": 2,
+                    "minItems": 2,
+                    "type": "array"
+                },
+                "unit": {
+                    "type": "string"
+                },
+                "value": {
+                    "type": "integer"
+                }
+            },
+            "required": [
+                "value"
             ],
-            "note": "Format: start:stop or start1:stop1,start2:stop2,...",
-            "value": ""
+            "type": "object"
         },
-        "verbose": {
-            "description": "Verbosity level (0=quiet, 1=info, 2=debug)",
-            "typical_range": [
-                0,
-                3
+        "metricField": {
+            "additionalProperties": true,
+            "description": "A hardware metric with enabled toggle",
+            "properties": {
+                "category": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "unit": {
+                    "type": "string"
+                }
+            },
+            "required": [
+                "enabled"
             ],
-            "value": 0
+            "type": "object"
+        },
+        "numberValueField": {
+            "additionalProperties": true,
+            "description": "A field with a numeric value (integer or float)",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "unit": {
+                    "type": "string"
+                },
+                "value": {
+                    "type": "number"
+                }
+            },
+            "required": [
+                "value"
+            ],
+            "type": "object"
+        },
+        "runtimeField": {
+            "additionalProperties": true,
+            "description": "A parallel runtime with enabled toggle",
+            "properties": {
+                "category": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "requires": {
+                    "type": "string"
+                }
+            },
+            "required": [
+                "enabled"
+            ],
+            "type": "object"
+        },
+        "stringOrArrayValueField": {
+            "additionalProperties": true,
+            "description": "A field with a string or array value",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "value": {
+                    "oneOf": [
+                        {
+                            "type": "string"
+                        },
+                        {
+                            "items": {
+                                "type": "string"
+                            },
+                            "type": "array"
+                        }
+                    ]
+                }
+            },
+            "required": [
+                "value"
+            ],
+            "type": "object"
+        },
+        "stringValueField": {
+            "additionalProperties": true,
+            "description": "A field with a string value",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "value": {
+                    "type": "string"
+                }
+            },
+            "required": [
+                "value"
+            ],
+            "type": "object"
         }
     },
-    "causal": {
-        "backend": {
-            "description": "Causal profiling backend",
-            "options": {
-                "auto": {
-                    "description": "Automatically select best available backend"
+    "$id": "https://rocm.docs.amd.com/projects/rocprofiler-systems/presets/schema.json",
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "description": "Schema for rocprofiler-systems preset configuration files. Use with --preset=<name> in rocprof-sys-run or rocprof-sys-sample.",
+    "properties": {
+        "advanced": {
+            "additionalProperties": false,
+            "description": "Advanced configuration options",
+            "properties": {
+                "collapse_threads": {
+                    "$ref": "#/$defs/enabledField",
+                    "description": "Collapse thread data into process-level view"
                 },
-                "perf": {
-                    "description": "Use Linux perf events"
+                "cpu_affinity": {
+                    "$ref": "#/$defs/enabledField",
+                    "description": "Enable CPU affinity tracking"
+                },
+                "debug": {
+                    "$ref": "#/$defs/enabledField",
+                    "description": "Enable debug output"
+                },
+                "max_depth": {
+                    "$ref": "#/$defs/intValueField",
+                    "description": "Maximum call stack depth to record"
+                },
+                "network_interface": {
+                    "$ref": "#/$defs/stringValueField",
+                    "description": "Network interface for distributed profiling (e.g., 'eth0', 'ib0')"
+                },
+                "timemory_components": {
+                    "$ref": "#/$defs/stringOrArrayValueField",
+                    "description": "Timemory components to enable (e.g., 'wall_clock', 'cpu_clock')"
+                },
+                "trace_delay_sec": {
+                    "$ref": "#/$defs/numberValueField",
+                    "description": "Delay before starting trace collection (seconds)"
+                },
+                "trace_duration_sec": {
+                    "$ref": "#/$defs/numberValueField",
+                    "description": "Duration of trace collection in seconds (0 = until end)"
+                },
+                "trace_periods": {
+                    "$ref": "#/$defs/stringValueField",
+                    "description": "Periodic trace intervals (format: start:stop or start1:stop1,start2:stop2)"
+                },
+                "verbose": {
+                    "$ref": "#/$defs/intValueField",
+                    "description": "Verbosity level (0=quiet, 1=info, 2=debug)"
+                }
+            },
+            "type": "object"
+        },
+        "causal": {
+            "additionalProperties": false,
+            "description": "Causal profiling for identifying optimization opportunities",
+            "properties": {
+                "backend": {
+                    "$ref": "#/$defs/stringValueField",
+                    "description": "Causal profiling backend: 'auto', 'perf', or 'timer'"
+                },
+                "binary_scope": {
+                    "$ref": "#/$defs/stringValueField",
+                    "description": "Binary scope for causal profiling (e.g., '%MAIN%')"
+                },
+                "enabled": {
+                    "default": false,
+                    "description": "Enable causal profiling",
+                    "type": "boolean"
+                },
+                "end_to_end": {
+                    "$ref": "#/$defs/enabledField",
+                    "description": "Enable end-to-end causal profiling"
+                },
+                "function_scope": {
+                    "$ref": "#/$defs/stringValueField",
+                    "description": "Function scope regex for causal profiling"
+                },
+                "mode": {
+                    "$ref": "#/$defs/stringValueField",
+                    "description": "Causal profiling mode: 'function' or 'line'"
+                },
+                "source_scope": {
+                    "$ref": "#/$defs/stringValueField",
+                    "description": "Source file scope regex for causal profiling"
+                }
+            },
+            "type": "object"
+        },
+        "domains": {
+            "additionalProperties": false,
+            "description": "Profiling domains for different hardware and software subsystems",
+            "properties": {
+                "cpu": {
+                    "additionalProperties": false,
+                    "description": "CPU profiling domain",
+                    "properties": {
+                        "enabled": {
+                            "description": "Enable CPU metric collection",
+                            "type": "boolean"
+                        },
+                        "metrics": {
+                            "additionalProperties": {
+                                "$ref": "#/$defs/metricField"
+                            },
+                            "description": "CPU metrics to collect",
+                            "type": "object"
+                        }
+                    },
+                    "type": "object"
+                },
+                "gpu": {
+                    "additionalProperties": false,
+                    "description": "AMD GPU metrics domain (AMD SMI)",
+                    "properties": {
+                        "enabled": {
+                            "description": "Enable GPU metric collection via AMD SMI",
+                            "type": "boolean"
+                        },
+                        "metrics": {
+                            "additionalProperties": {
+                                "$ref": "#/$defs/metricField"
+                            },
+                            "description": "Individual GPU metrics to collect",
+                            "type": "object"
+                        },
+                        "sampling_rate_hz": {
+                            "$ref": "#/$defs/intValueField",
+                            "description": "GPU metric sampling frequency in Hz"
+                        }
+                    },
+                    "type": "object"
+                },
+                "parallel": {
+                    "additionalProperties": false,
+                    "description": "Parallel runtime tracing domain",
+                    "properties": {
+                        "enabled": {
+                            "description": "Enable parallel runtime tracing",
+                            "type": "boolean"
+                        },
+                        "runtimes": {
+                            "additionalProperties": {
+                                "$ref": "#/$defs/runtimeField"
+                            },
+                            "description": "Individual parallel runtimes to trace",
+                            "properties": {
+                                "kokkos": {
+                                    "$ref": "#/$defs/runtimeField"
+                                },
+                                "mpi": {
+                                    "$ref": "#/$defs/runtimeField"
+                                },
+                                "openmp": {
+                                    "$ref": "#/$defs/runtimeField"
+                                },
+                                "rccl": {
+                                    "$ref": "#/$defs/runtimeField"
+                                },
+                                "shmem": {
+                                    "$ref": "#/$defs/runtimeField"
+                                }
+                            },
+                            "type": "object"
+                        }
+                    },
+                    "type": "object"
+                },
+                "rocm": {
+                    "additionalProperties": false,
+                    "description": "ROCm API tracing domain",
+                    "properties": {
+                        "api_domains": {
+                            "additionalProperties": {
+                                "$ref": "#/$defs/apiDomainField"
+                            },
+                            "description": "Individual ROCm API domains to trace",
+                            "type": "object"
+                        },
+                        "enabled": {
+                            "description": "Enable ROCm API tracing (implicitly enables tracing)",
+                            "type": "boolean"
+                        },
+                        "group_by_queue": {
+                            "$ref": "#/$defs/enabledField",
+                            "description": "Group GPU operations by hardware queue"
+                        }
+                    },
+                    "type": "object"
+                }
+            },
+            "type": "object"
+        },
+        "hardware_counters": {
+            "additionalProperties": false,
+            "description": "Hardware performance counter collection",
+            "properties": {
+                "enabled": {
+                    "default": false,
+                    "description": "Enable hardware counter collection",
+                    "type": "boolean"
+                },
+                "papi_events": {
+                    "$ref": "#/$defs/stringOrArrayValueField",
+                    "description": "PAPI/CPU hardware counters (use 'rocprof-sys-avail --hw-counters' to list)"
+                },
+                "papi_multiplexing": {
+                    "$ref": "#/$defs/enabledField",
+                    "description": "Enable PAPI counter multiplexing"
+                },
+                "rocm_events": {
+                    "$ref": "#/$defs/stringOrArrayValueField",
+                    "description": "ROCm/GPU hardware counters (use 'rocprof-sys-avail --hw-counters' to list)"
+                }
+            },
+            "type": "object"
+        },
+        "metadata": {
+            "additionalProperties": false,
+            "description": "Preset metadata for identification and documentation",
+            "properties": {
+                "category": {
+                    "description": "Preset grouping category",
+                    "examples": [
+                        "general",
+                        "workload",
+                        "api_tracing"
+                    ],
+                    "type": "string"
+                },
+                "cli_flag": {
+                    "description": "Legacy CLI flag name (e.g., --balanced)",
+                    "type": "string"
+                },
+                "description": {
+                    "description": "Human-readable description of what this preset does",
+                    "type": "string"
+                },
+                "name": {
+                    "description": "Preset identifier (matches filename without .json)",
+                    "type": "string"
+                },
+                "schema_version": {
+                    "description": "Schema version this preset conforms to",
+                    "type": "string"
+                },
+                "tool_version": {
+                    "description": "Tool version this preset was created for",
+                    "type": "string"
+                },
+                "use_case": {
+                    "description": "When to use this preset",
+                    "type": "string"
+                }
+            },
+            "type": "object"
+        },
+        "output": {
+            "additionalProperties": false,
+            "description": "Output configuration",
+            "properties": {
+                "file_output": {
+                    "$ref": "#/$defs/enabledField",
+                    "description": "Write output to files"
+                },
+                "path": {
+                    "$ref": "#/$defs/stringValueField",
+                    "description": "Output directory path"
+                },
+                "rocpd_output": {
+                    "$ref": "#/$defs/enabledField",
+                    "description": "Generate RocPD SQLite3 database output"
+                },
+                "time_output": {
+                    "$ref": "#/$defs/enabledField",
+                    "description": "Include timestamps in output filenames"
+                }
+            },
+            "type": "object"
+        },
+        "profiling": {
+            "additionalProperties": false,
+            "description": "Call-stack profile output configuration",
+            "properties": {
+                "enabled": {
+                    "default": false,
+                    "description": "Enable call-stack profiling output",
+                    "type": "boolean"
+                },
+                "flat_profile": {
+                    "$ref": "#/$defs/enabledField",
+                    "description": "Generate flat profile (no call hierarchy)"
+                }
+            },
+            "type": "object"
+        },
+        "sampling": {
+            "additionalProperties": false,
+            "description": "Call-stack sampling configuration",
+            "properties": {
+                "cpus": {
+                    "$ref": "#/$defs/stringValueField",
+                    "description": "CPUs to sample (e.g., 'all', '0-3', '0,2,4', 'none')"
+                },
+                "delay_sec": {
+                    "$ref": "#/$defs/numberValueField",
+                    "description": "Delay before starting sampling (seconds)"
+                },
+                "duration_sec": {
+                    "$ref": "#/$defs/numberValueField",
+                    "description": "Sampling duration in seconds (0 = until end)"
+                },
+                "enabled": {
+                    "default": false,
+                    "description": "Enable statistical call-stack sampling",
+                    "type": "boolean"
+                },
+                "frequency_hz": {
+                    "$ref": "#/$defs/intValueField",
+                    "description": "Sampling frequency in Hz (higher = more overhead, better resolution)"
+                },
+                "gpus": {
+                    "$ref": "#/$defs/stringValueField",
+                    "description": "GPUs to sample (inherits from HIP_VISIBLE_DEVICES if empty)"
                 },
                 "timer": {
-                    "description": "Use timer-based sampling"
+                    "$ref": "#/$defs/stringValueField",
+                    "description": "Timer type: 'cputime' (CPU-bound) or 'realtime' (I/O-bound)"
                 }
             },
-            "value": "auto"
+            "type": "object"
         },
-        "binary_scope": {
-            "description": "Binary scope for causal profiling",
-            "examples": [
-                "%MAIN%",
-                "libfoo.so",
-                "myapp"
-            ],
-            "value": "%MAIN%"
-        },
-        "delay_sec": {
-            "description": "Delay before starting causal profiling",
-            "unit": "seconds",
-            "value": 0
-        },
-        "description": "Causal profiling for identifying optimization opportunities",
-        "duration_sec": {
-            "description": "Duration of causal profiling (0 = until end)",
-            "unit": "seconds",
-            "value": 0
-        },
-        "enabled": false,
-        "end_to_end": {
-            "description": "Enable end-to-end causal profiling",
-            "enabled": false
-        },
-        "function_scope": {
-            "description": "Function scope regex for causal profiling",
-            "examples": [
-                "compute_*",
-                "kernel_*"
-            ],
-            "value": ""
-        },
-        "mode": {
-            "description": "Causal profiling mode",
-            "options": {
-                "function": {
-                    "description": "Profile at function granularity"
+        "tracing": {
+            "additionalProperties": false,
+            "description": "Perfetto trace output configuration",
+            "properties": {
+                "buffer_size_kb": {
+                    "$ref": "#/$defs/intValueField",
+                    "description": "Trace buffer size"
                 },
-                "line": {
-                    "description": "Profile at source line granularity"
+                "enabled": {
+                    "default": true,
+                    "description": "Enable trace output (Perfetto .proto file)",
+                    "type": "boolean"
+                },
+                "fill_policy": {
+                    "$ref": "#/$defs/stringValueField",
+                    "description": "Buffer fill policy when full"
                 }
             },
-            "value": "function"
-        },
-        "source_scope": {
-            "description": "Source file scope regex for causal profiling",
-            "examples": [
-                "*.cpp",
-                "src/*.c"
-            ],
-            "value": ""
+            "type": "object"
         }
     },
-    "domains": {
-        "cpu": {
-            "description": "CPU profiling domain",
-            "enabled": false,
-            "metrics": {
-                "freq": {
-                    "category": "performance",
-                    "description": "CPU frequency monitoring",
-                    "enabled": false,
-                    "per_core": true,
-                    "unit": "MHz"
-                },
-                "utilization": {
-                    "category": "utilization",
-                    "description": "CPU utilization percentage",
-                    "enabled": false,
-                    "per_core": true,
-                    "typical_range": [
-                        0,
-                        100
-                    ],
-                    "unit": "%"
-                }
-            }
-        },
-        "gpu": {
-            "description": "AMD GPU profiling domain",
-            "enabled": false,
-            "metrics": {
-                "busy": {
-                    "category": "utilization",
-                    "description": "GPU utilization percentage",
-                    "enabled": false,
-                    "typical_range": [
-                        0,
-                        100
-                    ],
-                    "unit": "%"
-                },
-                "fan_speed": {
-                    "category": "thermal",
-                    "description": "GPU fan speed",
-                    "enabled": false,
-                    "unit": "RPM"
-                },
-                "mem_usage": {
-                    "category": "memory",
-                    "description": "GPU memory usage",
-                    "enabled": false,
-                    "unit": "bytes"
-                },
-                "pcie_throughput": {
-                    "category": "bandwidth",
-                    "description": "PCIe data transfer rates",
-                    "enabled": false,
-                    "unit": "bytes/sec"
-                },
-                "power": {
-                    "category": "power",
-                    "description": "GPU power consumption in Watts",
-                    "enabled": false,
-                    "unit": "W"
-                },
-                "temp": {
-                    "category": "thermal",
-                    "critical_threshold": 105,
-                    "description": "GPU temperature in Celsius",
-                    "enabled": false,
-                    "typical_range": [
-                        20,
-                        110
-                    ],
-                    "unit": "C",
-                    "warning_threshold": 95
-                }
-            },
-            "sampling_rate_hz": {
-                "description": "Metric sampling frequency",
-                "typical_range": [
-                    1,
-                    100
-                ],
-                "unit": "Hz",
-                "value": 1
-            }
-        },
-        "parallel": {
-            "description": "Parallel runtime tracing",
-            "enabled": false,
-            "runtimes": {
-                "kokkos": {
-                    "category": "performance_portability",
-                    "description": "Kokkos performance portability tracing",
-                    "enabled": false,
-                    "requires": "Kokkos with profiling hooks"
-                },
-                "mpi": {
-                    "category": "distributed",
-                    "description": "MPI communication tracing",
-                    "enabled": false,
-                    "requires": "MPI library",
-                    "traced_ops": [
-                        "MPI_Send",
-                        "MPI_Recv",
-                        "MPI_Allreduce",
-                        "MPI_Barrier"
-                    ]
-                },
-                "openmp": {
-                    "category": "threading",
-                    "description": "OpenMP runtime tracing via OMPT",
-                    "enabled": false,
-                    "requires": "OpenMP 5.0+ runtime with OMPT support",
-                    "traced_constructs": [
-                        "parallel",
-                        "for",
-                        "task",
-                        "target"
-                    ]
-                },
-                "rccl": {
-                    "category": "distributed",
-                    "description": "RCCL collective communication tracing",
-                    "enabled": false,
-                    "requires": "RCCL library"
-                },
-                "shmem": {
-                    "category": "distributed",
-                    "description": "OpenSHMEM communication tracing",
-                    "enabled": false,
-                    "requires": "ROC-SHMEM library"
-                }
-            }
-        },
-        "rocm": {
-            "api_domains": {
-                "hip_compiler_api": {
-                    "category": "compiler_api",
-                    "description": "HIP compiler API calls",
-                    "enabled": false,
-                    "examples": [
-                        "hiprtcCompileProgram",
-                        "hiprtcGetCode"
-                    ]
-                },
-                "hip_runtime_api": {
-                    "category": "runtime_api",
-                    "description": "HIP runtime API calls",
-                    "enabled": false,
-                    "examples": [
-                        "hipMalloc",
-                        "hipMemcpy",
-                        "hipLaunchKernel"
-                    ]
-                },
-                "hsa_amd_ext_api": {
-                    "category": "runtime_api",
-                    "description": "HSA AMD extension API calls",
-                    "enabled": false
-                },
-                "hsa_api": {
-                    "category": "runtime_api",
-                    "description": "HSA runtime API calls",
-                    "enabled": false,
-                    "examples": [
-                        "hsa_init",
-                        "hsa_signal_create",
-                        "hsa_queue_create"
-                    ]
-                },
-                "hsa_core_api": {
-                    "category": "runtime_api",
-                    "description": "HSA core API calls",
-                    "enabled": false
-                },
-                "hsa_finalize_ext_api": {
-                    "category": "runtime_api",
-                    "description": "HSA finalize extension API calls",
-                    "enabled": false
-                },
-                "hsa_image_ext_api": {
-                    "category": "runtime_api",
-                    "description": "HSA image extension API calls",
-                    "enabled": false
-                },
-                "kernel_dispatch": {
-                    "category": "execution",
-                    "description": "GPU kernel dispatches",
-                    "enabled": false,
-                    "provides": [
-                        "kernel_name",
-                        "duration",
-                        "grid_size",
-                        "workgroup_size"
-                    ]
-                },
-                "kfd_page_fault": {
-                    "category": "memory",
-                    "description": "KFD page fault events",
-                    "enabled": false
-                },
-                "kfd_page_migrate": {
-                    "category": "memory",
-                    "description": "KFD page migration events",
-                    "enabled": false
-                },
-                "kfd_queue": {
-                    "category": "execution",
-                    "description": "KFD queue events",
-                    "enabled": false
-                },
-                "marker_api": {
-                    "category": "annotation",
-                    "description": "ROCTx user annotation markers",
-                    "enabled": false,
-                    "examples": [
-                        "roctxRangePush",
-                        "roctxRangePop",
-                        "roctxMark"
-                    ]
-                },
-                "memory_allocation": {
-                    "category": "memory",
-                    "description": "Memory allocation tracking",
-                    "enabled": false
-                },
-                "memory_copy": {
-                    "category": "memory",
-                    "description": "Memory copy operations",
-                    "enabled": false,
-                    "provides": [
-                        "src",
-                        "dst",
-                        "size",
-                        "duration"
-                    ]
-                },
-                "rccl_api": {
-                    "category": "runtime_api",
-                    "description": "RCCL collective communication API",
-                    "enabled": false,
-                    "examples": [
-                        "ncclAllReduce",
-                        "ncclBroadcast"
-                    ],
-                    "requires": "RCCL library"
-                },
-                "scratch_memory": {
-                    "category": "memory",
-                    "description": "Scratch memory allocations",
-                    "enabled": false
-                }
-            },
-            "description": "ROCm API tracing domain",
-            "enabled": false,
-            "group_by_queue": {
-                "description": "Group GPU operations by hardware queue",
-                "enabled": false
-            }
-        }
-    },
-    "hardware_counters": {
-        "description": "Hardware performance counter collection",
-        "enabled": false,
-        "overflow_sampling": {
-            "description": "Sample on hardware counter overflow",
-            "enabled": false,
-            "overflow_count": {
-                "description": "Counter value at which to trigger overflow (0 = disabled)",
-                "value": 0
-            },
-            "overflow_event": {
-                "description": "Event to use for overflow-based sampling",
-                "value": "perf::PERF_COUNT_HW_CACHE_REFERENCES"
-            }
-        },
-        "papi_events": {
-            "description": "PAPI/CPU hardware performance counters to collect",
-            "examples": [
-                "PAPI_TOT_CYC",
-                "PAPI_TOT_INS",
-                "PAPI_L1_DCM",
-                "PAPI_L2_DCM"
-            ],
-            "note": "Use 'rocprof-sys-avail --hw-counters' to list available counters",
-            "requires": "PAPI library and perf_event_paranoid <= 2",
-            "value": []
-        },
-        "papi_multiplexing": {
-            "description": "Enable PAPI counter multiplexing for more counters than hardware supports",
-            "enabled": false
-        },
-        "rocm_events": {
-            "description": "ROCm/GPU hardware performance counters to collect",
-            "examples": [
-                "VALUUtilization",
-                "Occupancy",
-                "MemUnitBusy",
-                "L2CacheHit"
-            ],
-            "note": "Use 'rocprof-sys-avail --hw-counters' to list available counters",
-            "value": []
-        }
-    },
-    "metadata": {
-        "description": "ROCProfiler-Systems configuration schema",
-        "name": "rocprofsys-config-schema",
-        "schema_version": "1.0",
-        "tool_version": "2.0.0"
-    },
-    "output": {
-        "description": "Output configuration",
-        "file_output": {
-            "description": "Write output to files",
-            "enabled": true
-        },
-        "format": {
-            "description": "Trace format",
-            "options": {
-                "json": {
-                    "benefits": [
-                        "Human-readable",
-                        "Easy to parse"
-                    ],
-                    "description": "JSON trace format",
-                    "file_extension": ".json"
-                },
-                "perfetto": {
-                    "benefits": [
-                        "Timeline visualization",
-                        "SQL querying",
-                        "Industry standard"
-                    ],
-                    "description": "Perfetto protobuf trace format",
-                    "file_extension": ".proto",
-                    "viewer": "https://ui.perfetto.dev"
-                }
-            },
-            "value": "perfetto"
-        },
-        "path": {
-            "default": "rocprof-sys-output",
-            "description": "Output directory",
-            "value": "rocprof-sys-output"
-        },
-        "rocpd_output": {
-            "description": "Generate RocPD SQLite3 database output format",
-            "enabled": false
-        },
-        "time_output": {
-            "description": "Include timestamps in output filenames",
-            "enabled": true
-        }
-    },
-    "profiling": {
-        "description": "Call-stack profile output configuration",
-        "enabled": false,
-        "flat_profile": {
-            "description": "Generate flat profile (no call hierarchy)",
-            "enabled": false
-        }
-    },
-    "sampling": {
-        "cpus": {
-            "description": "CPUs to sample",
-            "examples": [
-                "all",
-                "0-3",
-                "0,2,4",
-                "none"
-            ],
-            "value": "all"
-        },
-        "delay_sec": {
-            "description": "Delay before starting sampling",
-            "unit": "seconds",
-            "value": 0.0
-        },
-        "description": "Call-stack sampling configuration",
-        "duration_sec": {
-            "description": "Sampling duration (0 = until end)",
-            "unit": "seconds",
-            "value": 0.0
-        },
-        "enabled": false,
-        "frequency_hz": {
-            "description": "Sampling frequency",
-            "note": "Higher values increase overhead but improve resolution",
-            "recommended_range": [
-                10,
-                100
-            ],
-            "typical_range": [
-                1,
-                1000
-            ],
-            "unit": "Hz",
-            "value": 100
-        },
-        "gpus": {
-            "description": "GPUs to sample (inherits from HIP_VISIBLE_DEVICES if empty)",
-            "examples": [
-                "0",
-                "0-1",
-                "0,2"
-            ],
-            "value": ""
-        },
-        "timer": {
-            "description": "Timer type for sampling",
-            "options": {
-                "cputime": {
-                    "description": "Sample based on CPU time consumed",
-                    "recommended_for": "CPU-bound workloads"
-                },
-                "realtime": {
-                    "description": "Sample based on wall-clock time",
-                    "recommended_for": "I/O-bound or mixed workloads"
-                }
-            },
-            "value": "cputime"
-        }
-    },
-    "tracing": {
-        "buffer_size_kb": {
-            "description": "Trace buffer size",
-            "typical_range": [
-                1024,
-                4194304
-            ],
-            "unit": "KB",
-            "value": 1048576
-        },
-        "description": "Perfetto trace output configuration",
-        "enabled": true,
-        "fill_policy": {
-            "description": "Buffer fill policy when full",
-            "options": {
-                "discard": {
-                    "description": "Discard new events when buffer is full"
-                },
-                "ring_buffer": {
-                    "description": "Overwrite oldest events when buffer is full"
-                }
-            },
-            "value": "discard"
-        }
-    }
+    "title": "ROCProfiler-Systems Preset Configuration",
+    "type": "object"
 }
