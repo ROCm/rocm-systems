@@ -41,7 +41,7 @@ convert_to_string (std::wstring_view ws)
   if (size_needed <= 0)
     return {};
 
-  std::string result (size_needed, '\0');
+  std::string result (static_cast<size_t> (size_needed), '\0');
 
   [[maybe_unused]] int size
     = ::WideCharToMultiByte (CP_ACP, 0, ws.data (), (int)ws.size (),

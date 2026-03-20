@@ -283,7 +283,7 @@ kmd_wave_launch_traps_mask (os_wave_launch_trap_mask_t mask)
   if (!!(mask & os_wave_launch_trap_mask_t::wave_start))
     kmd_mask |= 1 << 30;
   if (!!(mask & os_wave_launch_trap_mask_t::wave_end))
-    kmd_mask |= 1 << 31;
+    kmd_mask |= 1u << 31;
 
   return kmd_mask;
 }
@@ -1206,7 +1206,7 @@ kmd_driver_t::send_escape (const kmd::agent_handle_t &agent,
   static_assert (sizeof (payload)
                  == sizeof (PROXY_ESCAPE_INFO) + sizeof (KMDDBGRIF_DBGR_CMDS));
 
-  payload.proxy_header.gpuOrdinal = agent.chain_ordinal;
+  utils::narrow_assign (payload.proxy_header.gpuOrdinal, agent.chain_ordinal);
   payload.proxy_header.privateDataLengthBytes = sizeof (KMDDBGRIF_DBGR_CMDS);
   payload.proxy_header.version = PXDRV_HEADER_VERSION;
   payload.proxy_header.adapterDriverId = AdapterProxyDriver;
@@ -1329,13 +1329,14 @@ kmd_driver_t::agent_snapshot (os_agent_info_t *snapshots,
         return nt_status_to_dbgapi_status (status);
 
       KMDDBGR_DEVICE_INFO &kmd_snap = cmd.Output.getDeviceInfoOut.deviceInfo;
-      agent.os_agent_id = std::distance (&m_agents.front (), &agent_handle);
+      utils::narrow_assign (agent.os_agent_id,
+                            std::distance (&m_agents.front (), &agent_handle));
       agent.gfxip = { kmd_snap.gfxTargetVersion / 10000,
                       (kmd_snap.gfxTargetVersion / 100) % 100,
                       kmd_snap.gfxTargetVersion % 100 };
 
-      agent.domain = kmd_snap.pciSegment;
-      agent.location_id = kmd_snap.locationId;
+      utils::narrow_assign (agent.domain, kmd_snap.pciSegment);
+      utils::narrow_assign (agent.location_id, kmd_snap.locationId);
 
       agent.vendor_id = kmd_snap.vendorId;
       agent.device_id = kmd_snap.deviceId;
@@ -1578,8 +1579,8 @@ kmd_driver_t::query_debug_event (os_exception_mask_t *exceptions_present,
   /* TODO some fairness so we round-robin-ish across all the adapters?  */
   for (const auto &agent_handle : m_agents)
     {
-      os_agent_id_t agent_id
-        = std::distance (&m_agents.front (), &agent_handle);
+      auto distance = std::distance (&m_agents.front (), &agent_handle);
+      auto agent_id = utils::narrow<os_agent_id_t> (distance);
 
       KMDDBGRIF_DBGR_CMDS cmd{};
       cmd.Input.cmd = KMD_DBGR_CMD_OP_GET_EXCEPTIONS;
@@ -1718,7 +1719,8 @@ kmd_driver_t::suspend_queues (const os_queue_id_t *queues, size_t queue_count,
       cmd.Input.suspendQueueIn.exceptionMaskToClear
         = kmd_exception_mask (exceptions_cleared);
       cmd.Input.suspendQueueIn.gracePeriodIn100us = 500;
-      cmd.Input.suspendQueueIn.numQueues = agent_queue_ids.size ();
+      utils::narrow_assign (cmd.Input.suspendQueueIn.numQueues,
+                            agent_queue_ids.size ());
       std::transform (agent_queue_ids.begin (), agent_queue_ids.end (),
                       cmd.Input.suspendQueueIn.queueIds,
                       [this] (auto &&queue_id)
@@ -1769,7 +1771,8 @@ kmd_driver_t::resume_queues (const os_queue_id_t *queues, size_t queue_count,
     {
       KMDDBGRIF_DBGR_CMDS cmd{};
       cmd.Input.cmd = KMD_DBGR_CMD_OP_RESUME_QUEUE;
-      cmd.Input.resumeQueueIn.numQueues = agent_queue_ids.size ();
+      utils::narrow_assign (cmd.Input.resumeQueueIn.numQueues,
+                            agent_queue_ids.size ());
       std::transform (agent_queue_ids.begin (), agent_queue_ids.end (),
                       cmd.Input.resumeQueueIn.queueIds,
                       [this] (auto &&queue_id)
@@ -1923,7 +1926,7 @@ kmd_driver_t::set_address_watch (os_agent_id_t os_agent_id,
 
   /* TODO we should use the number of watchpoints from the agent info snapshot.
    */
-  int id = 0;
+  os_watch_id_t id = 0;
   for (; id < 4; id += 1)
     {
       KMDDBGRIF_DBGR_CMDS cmd{};
@@ -1932,7 +1935,9 @@ kmd_driver_t::set_address_watch (os_agent_id_t os_agent_id,
         = static_cast<KMDDBGRIF_ADDR_WATCH_ID> (id);
       cmd.Input.setAddrWatchIn.mode = kmd_addr_watch_mode (os_watch_mode);
       cmd.Input.setAddrWatchIn.watchAddr = address;
-      cmd.Input.setAddrWatchIn.watchAddrMask = mask;
+      using mask_t = decltype (cmd.Input.setAddrWatchIn.watchAddrMask);
+      utils::narrow_assign (cmd.Input.setAddrWatchIn.watchAddrMask,
+                            mask & mask_t (-1));
 
       NTSTATUS status = send_escape (m_agents[os_agent_id], cmd);
       if (status == STATUS_RESOURCE_IN_USE)
@@ -2212,14 +2217,14 @@ kmd_driver_t::xfer_agent_memory_partial (os_agent_id_t agent_id,
       cmd.Input.cmd = KMD_DBGR_CMD_OP_WRITE_BUFFER;
       cmd.Input.writeBufferIn.srcCpuVA = reinterpret_cast<uint64_t> (write);
       cmd.Input.writeBufferIn.dstGpuVA = static_cast<uint64_t> (address);
-      cmd.Input.writeBufferIn.size = *size;
+      utils::narrow_assign (cmd.Input.writeBufferIn.size, *size);
     }
   else
     {
       cmd.Input.cmd = KMD_DBGR_CMD_OP_READ_BUFFER;
       cmd.Input.readBufferIn.srcGpuVA = static_cast<uint64_t> (address);
       cmd.Input.readBufferIn.dstCpuVA = reinterpret_cast<uint64_t> (read);
-      cmd.Input.readBufferIn.size = *size;
+      utils::narrow_assign (cmd.Input.readBufferIn.size, *size);
     }
 
   auto status = send_escape (m_agents[agent_id], cmd);

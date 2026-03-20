@@ -126,18 +126,19 @@ protected:
   static constexpr uint32_t sq_wave_status_cond_dbg_user_mask = 1 << 20;
   static constexpr uint32_t sq_wave_status_cond_dbg_sys_mask = 1 << 21;
 
-  static constexpr uint32_t ttmp11_wave_in_group_mask = utils::bit_mask (0, 5);
+  static constexpr auto ttmp11_wave_in_group_mask
+    = utils::bit_mask<uint32_t> (0, 5);
   static constexpr int ttmp11_wave_in_group_shift = 0;
-  static constexpr uint32_t ttmp6_spi_ttmps_setup_disabled_mask = 1 << 31;
+  static constexpr uint32_t ttmp6_spi_ttmps_setup_disabled_mask = 1u << 31;
   static constexpr uint32_t ttmp6_wave_stopped_mask = 1 << 30;
   static constexpr uint32_t ttmp6_saved_status_halt_mask = 1 << 29;
   static constexpr int ttmp6_saved_trap_id_shift = 25;
   static constexpr int ttmp6_saved_trap_id_size = 4;
-  static constexpr uint32_t ttmp6_saved_trap_id_mask = utils::bit_mask (
+  static constexpr auto ttmp6_saved_trap_id_mask = utils::bit_mask<uint32_t> (
     ttmp6_saved_trap_id_shift,
     ttmp6_saved_trap_id_shift + ttmp6_saved_trap_id_size - 1);
-  static constexpr uint32_t ttmp6_queue_packet_id_mask
-    = utils::bit_mask (0, 24);
+  static constexpr auto ttmp6_queue_packet_id_mask
+    = utils::bit_mask<uint32_t> (0, 24);
   static constexpr int ttmp6_queue_packet_id_shift = 0;
 
   /* See https://llvm.org/docs/AMDGPUUsage.html#trap-handler-abi  */
@@ -155,7 +156,7 @@ protected:
      library only handles trap IDs between 1 and 14.  */
   static constexpr std::optional<trap_id_t> ttmp6_saved_trap_id (uint32_t x)
   {
-    if (uint8_t trap_id = utils::bit_extract (
+    if (auto trap_id = utils::bit_extract<uint8_t> (
           x, ttmp6_saved_trap_id_shift,
           ttmp6_saved_trap_id_shift + ttmp6_saved_trap_id_size - 1);
         trap_id != 0)
@@ -189,9 +190,10 @@ protected:
   static constexpr uint32_t sq_wave_trapsts_excp_hi_addr_watch3_mask = 1 << 14;
   static constexpr uint32_t sq_wave_trapsts_xnack_error_mask = 1 << 28;
 
-  static constexpr uint32_t sq_wave_trapsts_excp_mask = utils::bit_mask (0, 8);
-  static constexpr uint32_t sq_wave_trapsts_excp_hi_mask
-    = utils::bit_mask (12, 14);
+  static constexpr auto sq_wave_trapsts_excp_mask
+    = utils::bit_mask<uint32_t> (0, 8);
+  static constexpr auto sq_wave_trapsts_excp_hi_mask
+    = utils::bit_mask<uint32_t> (12, 14);
 
   static constexpr uint32_t compute_relaunch_is_event (uint32_t relaunch)
   {
@@ -877,7 +879,8 @@ amdgcn_architecture_t::branch_target (wave_t &wave, agent_address_t pc,
       uint32_t csp;
       wave.read_register (amdgpu_regnum_t::csp, &csp);
 
-      amdgpu_regnum_t regnum = amdgpu_regnum_t::s0 + --csp * 4;
+      amdgpu_regnum_t regnum
+        = amdgpu_regnum_t::s0 + static_cast<int> (--csp * 4);
 
       uint32_t pc_lo, pc_hi;
       wave.read_register (regnum + 2, &pc_lo);
@@ -1148,15 +1151,15 @@ amdgcn_architecture_t::simulate_instruction (
             = (taken ? pc + instruction.size ()
                      : branch_target (wave, pc, instruction));
 
-          uint32_t saved_exec_lo = taken ? mask_fail : mask_pass;
-          uint32_t saved_exec_hi = (taken ? mask_fail : mask_pass) >> 32;
-          uint32_t saved_pc_lo = saved_pc;
-          uint32_t saved_pc_hi = saved_pc >> 32;
+          auto saved_exec = taken ? mask_fail : mask_pass;
+          auto [saved_exec_lo, saved_exec_hi] = utils::split (saved_exec);
+          auto [saved_pc_lo, saved_pc_hi] = utils::split (saved_pc);
 
           uint32_t csp;
           wave.read_register (amdgpu_regnum_t::csp, &csp);
 
-          amdgpu_regnum_t regnum = amdgpu_regnum_t::s0 + csp++ * 4;
+          amdgpu_regnum_t regnum
+            = (amdgpu_regnum_t::s0 + static_cast<int> (csp++ * 4));
           wave.write_register (regnum + 0, saved_exec_lo);
           wave.write_register (regnum + 1, saved_exec_hi);
           wave.write_register (regnum + 2, saved_pc_lo);
@@ -1176,7 +1179,8 @@ amdgcn_architecture_t::simulate_instruction (
           uint32_t csp;
           wave.read_register (amdgpu_regnum_t::csp, &csp);
 
-          amdgpu_regnum_t regnum = amdgpu_regnum_t::s0 + --csp * 4;
+          amdgpu_regnum_t regnum
+            = amdgpu_regnum_t::s0 + static_cast<int> (--csp * 4);
 
           uint32_t exec_lo, exec_hi;
           wave.read_register (regnum + 0, &exec_lo);
@@ -1751,31 +1755,31 @@ amdgcn_architecture_t::wave_disable_traps (
 uint8_t
 amdgcn_architecture_t::ssrc0_operand (const instruction_t &instruction)
 {
-  return utils::bit_extract (instruction.word<0> (), 0, 7);
+  return utils::bit_extract<uint8_t> (instruction.word<0> (), 0, 7);
 }
 
 uint8_t
 amdgcn_architecture_t::ssrc1_operand (const instruction_t &instruction)
 {
-  return utils::bit_extract (instruction.word<0> (), 8, 15);
+  return utils::bit_extract<uint8_t> (instruction.word<0> (), 8, 15);
 }
 
 uint8_t
 amdgcn_architecture_t::sdst_operand (const instruction_t &instruction)
 {
-  return utils::bit_extract (instruction.word<0> (), 16, 22);
+  return utils::bit_extract<uint8_t> (instruction.word<0> (), 16, 22);
 }
 
 int16_t
 amdgcn_architecture_t::simm16_operand (const instruction_t &instruction)
 {
-  return utils::bit_extract (instruction.word<0> (), 0, 15);
+  return utils::bit_extract<int16_t> (instruction.word<0> (), 0, 15);
 }
 
 uint8_t
 amdgcn_architecture_t::encoding_op7 (const instruction_t &instruction)
 {
-  return utils::bit_extract (instruction.word<0> (), 16, 22);
+  return utils::bit_extract<uint8_t> (instruction.word<0> (), 16, 22);
 }
 
 template <int... op5>
@@ -1852,19 +1856,18 @@ amdgcn_architecture_t::register_name (amdgpu_regnum_t regnum) const
   if (regnum >= amdgpu_regnum_t::first_shadow_sgpr
       && regnum <= amdgpu_regnum_t::last_shadow_sgpr)
     {
-      return string_printf ("s%" PRId64,
+      return string_printf ("s%d",
                             regnum - amdgpu_regnum_t::first_shadow_sgpr);
     }
   if (regnum >= amdgpu_regnum_t::first_sgpr
       && regnum <= amdgpu_regnum_t::last_sgpr)
     {
-      return string_printf ("s%" PRId64, regnum - amdgpu_regnum_t::first_sgpr);
+      return string_printf ("s%d", regnum - amdgpu_regnum_t::first_sgpr);
     }
   if (regnum >= amdgpu_regnum_t::first_vgpr_64
       && regnum <= amdgpu_regnum_t::last_vgpr_64)
     {
-      return string_printf ("v%" PRId64,
-                            regnum - amdgpu_regnum_t::first_vgpr_64);
+      return string_printf ("v%d", regnum - amdgpu_regnum_t::first_vgpr_64);
     }
   if (regnum >= amdgpu_regnum_t::first_ttmp
       && regnum <= amdgpu_regnum_t::last_ttmp)
@@ -1880,7 +1883,7 @@ amdgcn_architecture_t::register_name (amdgpu_regnum_t regnum) const
         case amdgpu_regnum_t::ttmp10:
         case amdgpu_regnum_t::ttmp11:
         case amdgpu_regnum_t::ttmp13:
-          return string_printf ("ttmp%" PRId64,
+          return string_printf ("ttmp%d",
                                 regnum - amdgpu_regnum_t::first_ttmp);
         default:
           break;
@@ -1889,8 +1892,7 @@ amdgcn_architecture_t::register_name (amdgpu_regnum_t regnum) const
   if (regnum >= amdgpu_regnum_t::first_hwreg
       && regnum <= amdgpu_regnum_t::last_hwreg)
     {
-      return string_printf ("hwreg%" PRId64,
-                            regnum - amdgpu_regnum_t::first_hwreg);
+      return string_printf ("hwreg%d", regnum - amdgpu_regnum_t::first_hwreg);
     }
 
   if (regnum == amdgpu_regnum_t::exec_64
@@ -2087,32 +2089,35 @@ amdgcn_architecture_t::register_read_only_mask (amdgpu_regnum_t regnum) const
     case amdgpu_regnum_t::trapsts:
       {
         static uint32_t trapsts_read_only_bits
-          = utils::bit_mask (9, 9) /* 0  */ | utils::bit_mask (15, 15) /* 0  */
-            | utils::bit_mask (22, 27) /* 0  */;
+          = (utils::bit_mask<uint32_t> (9, 9)       /* 0 */
+             | utils::bit_mask<uint32_t> (15, 15)   /* 0 */
+             | utils::bit_mask<uint32_t> (22, 27)); /* 0 */
         return &trapsts_read_only_bits;
       }
 
     case amdgpu_regnum_t::mode:
       {
-        static uint32_t mode_read_only_bits = utils::bit_mask (21, 22); /* 0 */
+        static uint32_t mode_read_only_bits
+          = utils::bit_mask<uint32_t> (21, 22); /* 0 */
         return &mode_read_only_bits;
       }
 
     case amdgpu_regnum_t::pseudo_status:
       {
         static uint32_t status_read_only_bits
-          = utils::bit_mask (5, 7)      /* priv, trap_en, ttrace_en  */
-            | utils::bit_mask (9, 12)   /* execz, vccz, in_tg, in_barrier  */
-            | utils::bit_mask (14, 16)  /* trap, ttrace_cu_en, valid  */
-            | utils::bit_mask (18, 19)  /* skip_export, perf_en  */
-            | utils::bit_mask (22, 26)  /* allow_replay, fatal_halt, 0  */
-            | utils::bit_mask (28, 31); /* 0  */
+          = (utils::bit_mask<uint32_t> (5, 7)       /* priv, trap_en, ttrace_en */
+             | utils::bit_mask<uint32_t> (9, 12)    /* execz, vccz, in_tg, in_barrier */
+             | utils::bit_mask<uint32_t> (14,16)    /* trap, ttrace_cu_en, valid */
+             | utils::bit_mask<uint32_t> (18, 19)   /* skip_export, perf_en */
+             | utils::bit_mask<uint32_t> (22, 26)   /* allow_replay, fatal_halt, 0 */
+             | utils::bit_mask<uint32_t> (28, 31)); /* 0 */
         return &status_read_only_bits;
       }
 
     case amdgpu_regnum_t::pc:
       {
-        static uint64_t pc_read_only_bits = utils::bit_mask (0, 1); /* 0  */
+        static uint64_t pc_read_only_bits
+          = utils::bit_mask<uint32_t> (0, 1); /* 0  */
         return &pc_read_only_bits;
       }
 
@@ -2344,7 +2349,7 @@ amdgcn_architecture_t::write_pseudo_register (const wave_t &wave,
       memcpy (reinterpret_cast<std::byte *> (&csp) + offset, value,
               value_size);
 
-      mode = (mode & ~utils::bit_mask (29, 31)) | (csp << 29);
+      mode = (mode & ~utils::bit_mask<uint32_t> (29, 31)) | (csp << 29);
 
       wave.write_register (amdgpu_regnum_t::mode, mode);
       return;
@@ -2362,13 +2367,13 @@ amdgcn_architecture_t::save_pc_for_park (const wave_t &wave,
 
   uint32_t ttmp7, ttmp11;
   /* The trap handler saves PC[31:0] in ttmp7[31:0] ...  */
-  ttmp7 = utils::bit_extract (pc, 0, 31);
+  ttmp7 = utils::bit_extract<uint32_t> (pc, 0, 31);
   wave.write_register (amdgpu_regnum_t::ttmp7, ttmp7);
 
   /* ... and PC[47:32] in ttmp11[22:7].  */
   wave.read_register (amdgpu_regnum_t::ttmp11, &ttmp11);
-  ttmp11 &= ~utils::bit_mask (7, 22);
-  ttmp11 |= (utils::bit_extract (pc, 32, 47) << 7);
+  ttmp11 &= ~utils::bit_mask<uint32_t> (7, 22);
+  ttmp11 |= (utils::bit_extract<uint32_t> (pc, 32, 47) << 7);
   wave.write_register (amdgpu_regnum_t::ttmp11, ttmp11);
 }
 
@@ -2597,14 +2602,15 @@ gfx9_architecture_t::gfx9_architecture_t (elf_amdgpu_machine_t e_machine,
 
   /* Scalar registers: [s0-s102].  */
   auto &scalar_registers = create<register_class_t> (*this, "scalar");
-  scalar_registers.add_registers (
-    amdgpu_regnum_t::first_sgpr,
-    amdgpu_regnum_t::first_sgpr + gfx9_architecture_t::scalar_register_count ()
-      - 1);
-  scalar_registers.add_registers (
-    amdgpu_regnum_t::first_shadow_sgpr,
-    amdgpu_regnum_t::first_shadow_sgpr
-      + gfx9_architecture_t::scalar_register_count () - 1);
+  const auto scalar_register_count
+    = utils::narrow<int> (gfx9_architecture_t::scalar_register_count ());
+
+  scalar_registers.add_registers (amdgpu_regnum_t::first_sgpr,
+                                  (amdgpu_regnum_t::first_sgpr
+                                   + scalar_register_count - 1));
+  scalar_registers.add_registers (amdgpu_regnum_t::first_shadow_sgpr,
+                                  (amdgpu_regnum_t::first_shadow_sgpr
+                                   + scalar_register_count - 1));
 
   /* Vector registers: [v0-v255]  */
   auto &vector_registers = create<register_class_t> (*this, "vector");
@@ -2633,10 +2639,9 @@ gfx9_architecture_t::gfx9_architecture_t (elf_amdgpu_machine_t e_machine,
 
   /* General registers: [{scalar}, {vector}, pc, exec, vcc]  */
   auto &general_registers = create<register_class_t> (*this, "general");
-  general_registers.add_registers (
-    amdgpu_regnum_t::first_sgpr,
-    amdgpu_regnum_t::first_sgpr + gfx9_architecture_t::scalar_register_count ()
-      - 1);
+  general_registers.add_registers (amdgpu_regnum_t::first_sgpr,
+                                   amdgpu_regnum_t::first_sgpr
+                                     + scalar_register_count - 1);
   general_registers.add_registers (amdgpu_regnum_t::first_vgpr_64,
                                    amdgpu_regnum_t::last_vgpr_64);
   general_registers.add_registers (amdgpu_regnum_t::m0, amdgpu_regnum_t::m0);
@@ -3149,8 +3154,8 @@ gfx9_architecture_t::cwsr_record_t::register_address (
         return save_area_addr;
     }
 
-  size_t ttmp_size = sizeof (uint32_t);
-  size_t ttmp_count = 16;
+  int ttmp_size = sizeof (uint32_t);
+  int ttmp_count = 16;
   agent_address_t ttmps_addr = save_area_addr - ttmp_count * ttmp_size;
 
   if (regnum >= amdgpu_regnum_t::first_ttmp
@@ -3159,8 +3164,8 @@ gfx9_architecture_t::cwsr_record_t::register_address (
       return ttmps_addr + (regnum - amdgpu_regnum_t::first_ttmp) * ttmp_size;
     }
 
-  size_t hwreg_count = 16;
-  size_t hwreg_size = sizeof (uint32_t);
+  int hwreg_count = 16;
+  int hwreg_size = sizeof (uint32_t);
   agent_address_t hwregs_addr = ttmps_addr - hwreg_count * hwreg_size;
 
   /* Rename registers that map to the hwreg block.  */
@@ -3206,18 +3211,19 @@ gfx9_architecture_t::cwsr_record_t::register_address (
              + (regnum - amdgpu_regnum_t::first_hwreg) * hwreg_size;
     }
 
-  size_t sgpr_count = this->sgpr_count ();
-  size_t sgpr_size = sizeof (int32_t);
+  auto sgpr_count = utils::narrow<int> (this->sgpr_count ());
+  int sgpr_size = sizeof (int32_t);
   agent_address_t sgprs_addr = hwregs_addr - sgpr_count * sgpr_size;
 
+  auto arch_scalars_count
+    = utils::narrow<int> (architecture.scalar_register_count ()
+                          + architecture.scalar_alias_count ());
   amdgpu_regnum_t aliased_sgpr_end
-    = amdgpu_regnum_t::first_sgpr
-      + std::min (architecture.scalar_register_count ()
-                    + architecture.scalar_alias_count (),
-                  sgpr_count);
+    = amdgpu_regnum_t::first_sgpr + std::min (arch_scalars_count, sgpr_count);
 
   /* Exclude the aliased sgprs.  */
-  if (regnum >= (aliased_sgpr_end - architecture.scalar_alias_count ())
+  if (regnum >= (aliased_sgpr_end
+                 - utils::narrow<int> (architecture.scalar_alias_count ()))
       && regnum < aliased_sgpr_end)
     return std::nullopt;
 
@@ -3247,7 +3253,8 @@ gfx9_architecture_t::cwsr_record_t::register_address (
       + (amdgpu_regnum_t::first_shadow_sgpr - amdgpu_regnum_t::first_sgpr);
 
   /* Map the shadow sgprs onto the same slots as "regular" sgprs.  */
-  if (regnum >= (shadow_sgpr_end - architecture.scalar_alias_count ())
+  if (regnum >= (shadow_sgpr_end
+                 - utils::narrow<int> (architecture.scalar_alias_count ()))
       && regnum < shadow_sgpr_end)
     {
       /* The xnack_mask register (shadow_sgpr_end[-4:-3]) really is saved in
@@ -3264,8 +3271,8 @@ gfx9_architecture_t::cwsr_record_t::register_address (
       return sgprs_addr + (regnum - amdgpu_regnum_t::s0) * sgpr_size;
     }
 
-  size_t vgpr_count = this->vgpr_count ();
-  size_t vgpr_size = sizeof (int32_t) * 64;
+  auto vgpr_count = utils::narrow<int> (this->vgpr_count ());
+  int vgpr_size = sizeof (int32_t) * 64;
   agent_address_t vgprs_addr = sgprs_addr - vgpr_count * vgpr_size;
 
   if (regnum >= amdgpu_regnum_t::first_vgpr_64
@@ -3357,8 +3364,8 @@ gfx9_architecture_t::scratch_memory_region (
   amd_dbgapi_size_t wavesize
     = utils::bit_extract (compute_tmpring_size_register, 12, 24) * 1024;
 
-  uint32_t shader_engine_count
-    = agent.os_info ().shader_engine_count / agent.os_info ().xcc_count;
+  auto shader_engine_count = utils::narrow<uint32_t> (
+    agent.os_info ().shader_engine_count / agent.os_info ().xcc_count);
   dbgapi_assert (shader_engine_count != 0);
 
   amd_dbgapi_size_t offset
@@ -3491,8 +3498,7 @@ mi_architecture_t::register_name (amdgpu_regnum_t regnum) const
   if (regnum >= amdgpu_regnum_t::first_accvgpr_64
       && regnum <= amdgpu_regnum_t::last_accvgpr_64)
     {
-      return string_printf ("a%" PRId64,
-                            regnum - amdgpu_regnum_t::first_accvgpr_64);
+      return string_printf ("a%d", regnum - amdgpu_regnum_t::first_accvgpr_64);
     }
 
   return gfx9_architecture_t::register_name (regnum);
@@ -3537,8 +3543,8 @@ mi_architecture_t::cwsr_record_t::register_address (
 
   agent_address_t sgprs_addr = *first_sgpr_addr;
 
-  size_t accvgpr_count = this->acc_vgpr_count ();
-  size_t accvgpr_size = sizeof (int32_t) * 64;
+  auto accvgpr_count = utils::narrow<int> (this->acc_vgpr_count ());
+  int accvgpr_size = sizeof (int32_t) * 64;
   agent_address_t accvgprs_addr = sgprs_addr - accvgpr_count * accvgpr_size;
 
   if (regnum >= amdgpu_regnum_t::first_accvgpr_64
@@ -3548,8 +3554,8 @@ mi_architecture_t::cwsr_record_t::register_address (
       return accvgprs_addr + (regnum - amdgpu_regnum_t::a0_64) * accvgpr_size;
     }
 
-  size_t vgpr_count = this->vgpr_count ();
-  size_t vgpr_size = sizeof (int32_t) * 64;
+  auto vgpr_count = utils::narrow<int> (this->vgpr_count ());
+  int vgpr_size = sizeof (int32_t) * 64;
   agent_address_t vgprs_addr = accvgprs_addr - vgpr_count * vgpr_size;
 
   if (regnum >= amdgpu_regnum_t::first_vgpr_64
@@ -3716,10 +3722,10 @@ protected:
   static constexpr uint32_t sq_wave_trapsts_trap_after_inst_mask = 1 << 25;
   static constexpr uint32_t sq_wave_trapsts_perf_snapshot_mask = 1 << 26;
 
-  static constexpr uint32_t ttmp11_queue_packet_id_mask
-    = utils::bit_mask (6, 30);
+  static constexpr auto ttmp11_queue_packet_id_mask
+    = utils::bit_mask<uint32_t> (6, 30);
   static constexpr int ttmp11_queue_packet_id_shift = 6;
-  static constexpr uint32_t ttmp11_trap_hander_ttmps_setup_mask = 1 << 31;
+  static constexpr uint32_t ttmp11_trap_hander_ttmps_setup_mask = 1u << 31;
 
   class cwsr_record_t : public gfx90a_t::cwsr_record_t
   {
@@ -4109,22 +4115,24 @@ gfx9_4_architecture_t::register_read_only_mask (amdgpu_regnum_t regnum) const
     {
     case amdgpu_regnum_t::trapsts:
       static uint32_t trapsts_read_only_bits
-        = utils::bit_mask (9, 9) /* 0  */ | utils::bit_mask (15, 15) /* 0  */
-          | utils::bit_mask (27, 27) /* 0  */;
+        = (utils::bit_mask<uint32_t> (9, 9)       /* 0 */
+           | utils::bit_mask<uint32_t> (15, 15)   /* 0 */
+           | utils::bit_mask<uint32_t> (27, 27)); /* 0 */
       return &trapsts_read_only_bits;
 
     case amdgpu_regnum_t::mode:
-      static uint32_t mode_read_only_bits = utils::bit_mask (22, 22); /* 0 */
+      static uint32_t mode_read_only_bits
+        = utils::bit_mask<uint32_t> (22, 22); /* 0 */
       return &mode_read_only_bits;
 
     case amdgpu_regnum_t::pseudo_status:
       static uint32_t status_read_only_bits
-        = utils::bit_mask (5, 7)      /* priv, trap_en, ttrace_en  */
-          | utils::bit_mask (9, 12)   /* execz, vccz, in_tg, in_barrier  */
-          | utils::bit_mask (14, 16)  /* trap, ttrace_cu_en, valid  */
-          | utils::bit_mask (18, 19)  /* skip_export, perf_en  */
-          | utils::bit_mask (22, 26)  /* allow_replay, fatal_halt, 0  */
-          | utils::bit_mask (29, 30); /* 0  */
+        = (utils::bit_mask<uint32_t> (5, 7)       /* priv, trap_en, ttrace_en */
+           | utils::bit_mask<uint32_t> (9, 12)    /* execz, vccz, in_tg, in_barrier */
+           | utils::bit_mask<uint32_t> (14, 16)   /* trap, ttrace_cu_en, valid */
+           | utils::bit_mask<uint32_t> (18, 19)   /* skip_export, perf_en */
+           | utils::bit_mask<uint32_t> (22, 26)   /* allow_replay, fatal_halt, 0 */
+           | utils::bit_mask<uint32_t> (29, 30)); /* 0 */
       return &status_read_only_bits;
 
     default:
@@ -4394,17 +4402,18 @@ gfx10_architecture_t::gfx10_architecture_t (elf_amdgpu_machine_t e_machine,
                { return register_class.name () == "scalar"; });
   dbgapi_assert (scalar_registers != nullptr);
 
-  scalar_registers->add_registers (
-    amdgpu_regnum_t::first_sgpr
-      + gfx9_architecture_t::scalar_register_count (),
-    amdgpu_regnum_t::first_sgpr
-      + gfx10_architecture_t::scalar_register_count () - 1);
+  auto gfx9_scalar_register_count
+    = utils::narrow<int> (gfx9_architecture_t::scalar_register_count ());
+  auto gfx10_scalar_register_count
+    = utils::narrow<int> (gfx10_architecture_t::scalar_register_count ());
 
   scalar_registers->add_registers (
-    amdgpu_regnum_t::first_shadow_sgpr
-      + gfx9_architecture_t::scalar_register_count (),
-    amdgpu_regnum_t::first_shadow_sgpr
-      + gfx10_architecture_t::scalar_register_count () - 1);
+    amdgpu_regnum_t::first_sgpr + gfx9_scalar_register_count,
+    amdgpu_regnum_t::first_sgpr + gfx10_scalar_register_count - 1);
+
+  scalar_registers->add_registers (
+    amdgpu_regnum_t::first_shadow_sgpr + gfx9_scalar_register_count,
+    amdgpu_regnum_t::first_shadow_sgpr + gfx10_scalar_register_count - 1);
 
   /* Vector registers: [v0_32-v255_32]  */
   register_class_t *vector_registers
@@ -4438,10 +4447,8 @@ gfx10_architecture_t::gfx10_architecture_t (elf_amdgpu_machine_t e_machine,
   dbgapi_assert (general_registers != nullptr);
 
   general_registers->add_registers (
-    amdgpu_regnum_t::first_sgpr
-      + gfx9_architecture_t::scalar_register_count (),
-    amdgpu_regnum_t::first_sgpr
-      + gfx10_architecture_t::scalar_register_count () - 1);
+    amdgpu_regnum_t::first_sgpr + gfx9_scalar_register_count,
+    amdgpu_regnum_t::first_sgpr + gfx10_scalar_register_count - 1);
   general_registers->add_registers (amdgpu_regnum_t::first_vgpr_32,
                                     amdgpu_regnum_t::last_vgpr_32);
   general_registers->add_registers (amdgpu_regnum_t::pseudo_exec_32,
@@ -4456,8 +4463,7 @@ gfx10_architecture_t::register_name (amdgpu_regnum_t regnum) const
   if (regnum >= amdgpu_regnum_t::first_vgpr_32
       && regnum <= amdgpu_regnum_t::last_vgpr_32)
     {
-      return string_printf ("v%" PRId64,
-                            regnum - amdgpu_regnum_t::first_vgpr_32);
+      return string_printf ("v%d", regnum - amdgpu_regnum_t::first_vgpr_32);
     }
   if (regnum == amdgpu_regnum_t::exec_32
       || regnum == amdgpu_regnum_t::pseudo_exec_32)
@@ -4888,13 +4894,13 @@ gfx10_architecture_t::cwsr_record_t::register_address (
      of a wave64 on gfx10.  They are logically addressed right after the
      64-wide private vector registers.  Note: In wave32, although unsupported,
      they are still allocated.  */
-  size_t shared_vgpr_count = this->shared_vgpr_count ();
-  size_t shared_vgpr_size = sizeof (int32_t) * 32;
+  auto shared_vgpr_count = utils::narrow<int> (this->shared_vgpr_count ());
+  int shared_vgpr_size = sizeof (int32_t) * 32;
   agent_address_t shared_vgprs_addr
     = sgprs_addr - shared_vgpr_count * shared_vgpr_size;
 
-  size_t private_vgpr_count = this->vgpr_count ();
-  size_t private_vgpr_size = sizeof (int32_t) * lane_count;
+  auto private_vgpr_count = utils::narrow<int> (this->vgpr_count ());
+  auto private_vgpr_size = utils::narrow<int> (sizeof (int32_t) * lane_count);
   agent_address_t private_vgprs_addr
     = shared_vgprs_addr - private_vgpr_count * private_vgpr_size;
 
@@ -5750,23 +5756,25 @@ gfx11_architecture_t::register_read_only_mask (amdgpu_regnum_t regnum) const
     case amdgpu_regnum_t::trapsts:
       {
         static uint32_t trapsts_read_only_bits
-          = utils::bit_mask (9, 9) /* 0  */ | utils::bit_mask (21, 27) /* 0  */
-            | utils::bit_mask (29, 31) /* 0  */;
+          = (utils::bit_mask<uint32_t> (9, 9)       /* 0  */
+             | utils::bit_mask<uint32_t> (21, 27)   /* 0  */
+             | utils::bit_mask<uint32_t> (29, 31)); /* 0  */
         return &trapsts_read_only_bits;
       }
 
     case amdgpu_regnum_t::mode:
       {
         static uint32_t mode_read_only_bits
-          = utils::bit_mask (22, 22)   /* 0 */
-            | utils::bit_mask (24, 26) /* 0 */
-            | utils::bit_mask (28, 31) /* 0 */;
+          = (utils::bit_mask<uint32_t> (22, 22)     /* 0 */
+             | utils::bit_mask<uint32_t> (24, 26)   /* 0 */
+             | utils::bit_mask<uint32_t> (28, 31)); /* 0 */
         return &mode_read_only_bits;
       }
 
     case amdgpu_regnum_t::pseudo_status:
       {
-        static uint32_t status_read_only_bits = utils::bit_mask (0, 31);
+        static uint32_t status_read_only_bits
+          = utils::bit_mask<uint32_t> (0, 31);
         return &status_read_only_bits;
       }
 
@@ -5969,7 +5977,7 @@ gfx11_architecture_t::is_sendmsg (const instruction_t &instruction,
   if (message != nullptr)
     {
       /* Message type is in SIMM16[7:0] */
-      *message = simm16_operand (instruction) & 0xff;
+      utils::narrow_assign (*message, simm16_operand (instruction) & 0xff);
     }
 
   return true;
@@ -6020,8 +6028,8 @@ gfx11_architecture_t::scratch_memory_region (
                               + cwsr_record.scratch_scoreboard_id ())
                              * wavesize;
 
-  uint32_t shader_engine_count
-    = agent.os_info ().shader_engine_count / agent.os_info ().xcc_count;
+  auto shader_engine_count = utils::narrow<uint32_t> (
+    agent.os_info ().shader_engine_count / agent.os_info ().xcc_count);
 
   /* The scratch memory is evenly divided between all XCCs, so each XCC has its
      own scratch base.  */
@@ -6125,13 +6133,13 @@ protected:
   static constexpr uint32_t sq_wave_state_priv_barrier_complete_mask = 1 << 2;
   static constexpr uint32_t sq_wave_state_priv_named_barrier_complete_mask
     = 1 << 3;
-  static constexpr uint32_t sq_wave_state_priv_named_barrier_id_mask
-    = utils::bit_mask (4, 8);
+  static constexpr auto sq_wave_state_priv_named_barrier_id_mask
+    = utils::bit_mask<uint32_t> (4, 8);
   static constexpr uint32_t sq_wave_state_priv_scc_mask = 1 << 9;
-  static constexpr uint32_t sq_wave_state_priv_sys_prio_mask
-    = utils::bit_mask (10, 11);
-  static constexpr uint32_t sq_wave_state_priv_user_prio_mask
-    = utils::bit_mask (12, 13);
+  static constexpr auto sq_wave_state_priv_sys_prio_mask
+    = utils::bit_mask<uint32_t> (10, 11);
+  static constexpr auto sq_wave_state_priv_user_prio_mask
+    = utils::bit_mask<uint32_t> (12, 13);
   static constexpr uint32_t sq_wave_state_priv_halt_mask = 1 << 14;
   static constexpr uint32_t sq_wave_state_priv_poison_err_mask = 1 << 15;
   static constexpr uint32_t sq_wave_state_priv_cond_dbg_user_mask = 1 << 16;
@@ -6140,13 +6148,13 @@ protected:
   static constexpr uint32_t sq_wave_state_priv_perf_en_mask = 1 << 19;
   static constexpr uint32_t sq_wave_state_priv_ttrace_en_mask = 1 << 20;
 
-  static constexpr uint32_t ttmp8_queue_packet_id_mask
-    = utils::bit_mask (0, 24);
+  static constexpr auto ttmp8_queue_packet_id_mask
+    = utils::bit_mask<uint32_t> (0, 24);
   static constexpr uint32_t ttmp8_queue_packet_id_shift = 0;
-  static constexpr uint32_t ttmp8_wave_in_group_mask
-    = utils::bit_mask (25, 29);
+  static constexpr auto ttmp8_wave_in_group_mask
+    = utils::bit_mask<uint32_t> (25, 29);
   static constexpr uint32_t ttmp8_grid_yz_valid = 1 << 30;
-  static constexpr uint32_t ttmp8_debug_mark_mask = 1 << 31;
+  static constexpr uint32_t ttmp8_debug_mark_mask = 1u << 31;
 
   static constexpr uint32_t sq_wave_trap_ctrl_alu_invalid_mask = 1 << 0;
   static constexpr uint32_t sq_wave_trap_ctrl_alu_input_denorm_mask = 1 << 1;
@@ -6172,8 +6180,8 @@ protected:
   static constexpr uint32_t sq_wave_excp_priv_perf_snapshot_mask = 1 << 10;
   static constexpr uint32_t sq_wave_excp_priv_trap_after_inst_mask = 1 << 11;
   static constexpr uint32_t sq_wave_excp_priv_xnack_error_mask = 1 << 12;
-  static constexpr uint32_t sq_wave_excp_priv_first_memviol_source_watch
-    = utils::bit_mask (30, 31);
+  static constexpr auto sq_wave_excp_priv_first_memviol_source_watch
+    = utils::bit_mask<uint32_t> (30, 31);
 
   static constexpr uint32_t sq_wave_excp_user_alu_invalid_mask = 1 << 0;
   static constexpr uint32_t sq_wave_excp_user_alu_input_denorm_mask = 1 << 1;
@@ -6183,7 +6191,7 @@ protected:
   static constexpr uint32_t sq_wave_excp_user_alu_inexact_mask = 1 << 5;
   static constexpr uint32_t sq_wave_excp_user_alu_int_div0_mask = 1 << 6;
   static constexpr uint32_t sq_wave_excp_user_buffer_oob_mask = 1 << 30;
-  static constexpr uint32_t sq_wave_excp_user_lod_clamped_mask = 1 << 31;
+  static constexpr uint32_t sq_wave_excp_user_lod_clamped_mask = 1u << 31;
 
   class cwsr_record_t : public gfx11_architecture_t::cwsr_record_t
   {
@@ -6837,39 +6845,43 @@ gfx12_architecture_t::register_read_only_mask (amdgpu_regnum_t regnum) const
       {
         /* PRIV is RO, all unasigned bits are 0.  */
         static uint32_t status_ro_bits
-          = utils::bit_mask (0, 5) | utils::bit_mask (7, 7)
-            | utils::bit_mask (12, 13) | utils::bit_mask (17, 17)
-            | utils::bit_mask (19, 21);
+          = (utils::bit_mask<uint32_t> (0, 5)
+             | utils::bit_mask<uint32_t> (7, 7)
+             | utils::bit_mask<uint32_t> (12, 13)
+             | utils::bit_mask<uint32_t> (17, 17)
+             | utils::bit_mask<uint32_t> (19, 21));
         return &status_ro_bits;
       }
     case amdgpu_regnum_t::pseudo_state_priv:
       {
         static uint32_t state_priv_ro_bits
-          = utils::bit_mask (15, 17)
-            | utils::bit_mask (19, 20) /* PERF_EN and TTRACE_EN are RO.  */
-            | utils::bit_mask (21, 31);
+          = (utils::bit_mask<uint32_t> (15, 17)
+             | utils::bit_mask<uint32_t> (19, 20) /* PERF_EN and TTRACE_EN are RO.  */
+             | utils::bit_mask<uint32_t> (21, 31));
         return &state_priv_ro_bits;
       }
     case amdgpu_regnum_t::mode:
       {
-        static uint32_t mode_ro_bits = utils::bit_mask (8, 22)
-                                       | utils::bit_mask (25, 26)
-                                       | utils::bit_mask (28, 31);
+        static uint32_t mode_ro_bits = (utils::bit_mask<uint32_t> (8, 22)
+                                        | utils::bit_mask<uint32_t> (25, 26)
+                                        | utils::bit_mask<uint32_t> (28, 31));
         return &mode_ro_bits;
       }
     case amdgpu_regnum_t::trap_ctrl:
       {
-        static uint32_t trap_ctrl_ro_bits = utils::bit_mask (10, 31);
+        static uint32_t trap_ctrl_ro_bits = utils::bit_mask<uint32_t> (10, 31);
         return &trap_ctrl_ro_bits;
       }
     case amdgpu_regnum_t::excp_flag_priv:
       {
-        static uint32_t excp_flag_priv_ro_bits = utils::bit_mask (13, 29);
+        static uint32_t excp_flag_priv_ro_bits
+          = utils::bit_mask<uint32_t> (13, 29);
         return &excp_flag_priv_ro_bits;
       }
     case amdgpu_regnum_t::excp_flag_user:
       {
-        static uint32_t excp_flag_user_ro_bits = utils::bit_mask (7, 29);
+        static uint32_t excp_flag_user_ro_bits
+          = utils::bit_mask<uint32_t> (7, 29);
         return &excp_flag_user_ro_bits;
       }
 
@@ -7147,13 +7159,13 @@ gfx12_architecture_t::save_pc_for_park (const wave_t &wave,
 
   uint32_t ttmp10, ttmp11;
   /* The trap handler saves PC[31:0] in ttmp10[31:0] ...  */
-  ttmp10 = utils::bit_extract (pc, 0, 31);
+  ttmp10 = utils::bit_extract<uint32_t> (pc, 0, 31);
   wave.write_register (amdgpu_regnum_t::ttmp10, ttmp10);
 
   /* ... and PC[47:32] in ttmp11[22:7].  */
   wave.read_register (amdgpu_regnum_t::ttmp11, &ttmp11);
-  ttmp11 &= ~utils::bit_mask (7, 22);
-  ttmp11 |= (utils::bit_extract (pc, 32, 47) << 7);
+  ttmp11 &= ~utils::bit_mask<uint32_t> (7, 22);
+  ttmp11 |= (utils::bit_extract<uint32_t> (pc, 32, 47) << 7);
   wave.write_register (amdgpu_regnum_t::ttmp11, ttmp11);
 }
 
@@ -7300,8 +7312,8 @@ gfx12_architecture_t::cwsr_record_t::group_ids () const
   coordinates[0] = ttmp9;
   if (ttmp8 & ttmp8_grid_yz_valid)
     {
-      coordinates[1] = ttmp7 & utils::bit_mask (0, 15);
-      coordinates[2] = (ttmp7 & utils::bit_mask (16, 31)) >> 16;
+      coordinates[1] = ttmp7 & utils::bit_mask<uint32_t> (0, 15);
+      coordinates[2] = (ttmp7 & utils::bit_mask<uint32_t> (16, 31)) >> 16;
     }
 
   return coordinates;
@@ -7320,7 +7332,7 @@ gfx12_architecture_t::cwsr_record_t::position_in_group () const
 
   agent ().read_agent_memory (ttmp8_address, &ttmp8);
 
-  return (ttmp8 & utils::bit_mask (25, 29)) >> 25;
+  return utils::narrow<uint32_t> ((ttmp8 & utils::bit_mask (25, 29)) >> 25);
 }
 
 size_t
@@ -7467,8 +7479,8 @@ gfx12_architecture_t::scratch_memory_region (
                               + cwsr_record.scratch_scoreboard_id ())
                              * wavesize;
 
-  uint32_t shader_engine_count
-    = agent.os_info ().shader_engine_count / agent.os_info ().xcc_count;
+  auto shader_engine_count = utils::narrow<uint32_t> (
+    agent.os_info ().shader_engine_count / agent.os_info ().xcc_count);
 
   /* The scratch memory is evenly divided between all XCCs, so each XCC has its
      own scratch base.  */

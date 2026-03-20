@@ -1296,7 +1296,7 @@ process_t::update_code_objects ()
                             &l_name_address);
 
           std::string uri;
-          read_string (l_name_address, &uri, -1);
+          read_string (l_name_address, &uri, size_t (-1));
 
           /* Check if the code object already exists.  */
           code_object_t *code_object = find_if (

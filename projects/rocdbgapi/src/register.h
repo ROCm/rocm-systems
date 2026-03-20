@@ -182,29 +182,30 @@ enum class amdgpu_regnum_t : uint32_t
   last_regnum = last_pseudo
 };
 
-constexpr size_t
+/* Distance between two regnums.  Returns int as that is the type that
+   operator+ and operator- take as rhs.  */
+constexpr int
 operator- (amdgpu_regnum_t lhs, amdgpu_regnum_t rhs)
 {
-  return static_cast<std::underlying_type_t<decltype (lhs)>> (lhs)
-         - static_cast<std::underlying_type_t<decltype (rhs)>> (rhs);
+  using underlying = std::underlying_type_t<decltype (lhs)>;
+  return utils::narrow<int> (static_cast<underlying> (lhs)
+                             - static_cast<underlying> (rhs));
 }
 
 constexpr amdgpu_regnum_t
 operator+ (amdgpu_regnum_t lhs, int rhs)
 {
-  return static_cast<amdgpu_regnum_t> (
-    static_cast<std::underlying_type_t<decltype (lhs)>> (lhs) + rhs);
+  return static_cast<amdgpu_regnum_t> (static_cast<int> (lhs) + rhs);
 }
 
 constexpr amdgpu_regnum_t
 operator- (amdgpu_regnum_t lhs, int rhs)
 {
-  return static_cast<amdgpu_regnum_t> (
-    static_cast<std::underlying_type_t<decltype (lhs)>> (lhs) - rhs);
+  return static_cast<amdgpu_regnum_t> (static_cast<int> (lhs) - rhs);
 }
 
 constexpr std::underlying_type_t<amdgpu_regnum_t>
-operator& (amdgpu_regnum_t lhs, int rhs)
+operator& (amdgpu_regnum_t lhs, std::underlying_type_t<amdgpu_regnum_t> rhs)
 {
   return static_cast<std::underlying_type_t<decltype (lhs)>> (lhs) & rhs;
 }
