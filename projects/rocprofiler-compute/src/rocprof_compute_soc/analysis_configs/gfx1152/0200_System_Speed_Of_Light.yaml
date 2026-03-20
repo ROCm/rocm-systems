@@ -250,11 +250,12 @@ Panel Config:
           peak: 100
           pop: AVG((((100 * GL2C_HIT_sum) / (GL2C_HIT_sum + GL2C_MISS_sum)) if ((GL2C_HIT_sum + GL2C_MISS_sum) != 0) else None))
         GL2C Cache BW:
-          # Note: GL2C requests can be 32B, 64B, or 128B. Using size-specific counters for accuracy.
-          value: AVG((GL2C_READ_32_REQ_sum*32 + GL2C_READ_64_REQ_sum*64 + GL2C_READ_128_REQ_sum*128) / ((End_Timestamp - Start_Timestamp) / 1e9))
+          # Client read bytes: 32/64/128 B bins (GL2C_READ_*), plus 96 B compressed read requests.
+          # EA / fabric 96 B reads are tracked separately (GL2C_EA_RDREQ_96B) in L2-Fabric Read BW and FETCH_SIZE.
+          value: AVG((GL2C_READ_32_REQ_sum*32 + GL2C_READ_64_REQ_sum*64 + GL2C_READ_128_REQ_sum*128 + GL2C_COMPRESSED_READ_96_REQ_sum*96) / ((End_Timestamp - Start_Timestamp) / 1e9))
           unit: Bytes/s
           peak: ((($max_sclk / 1000) * 128) * TO_INT_sum($total_l2_chan) * 1e9)
-          pop: ((100 * AVG((GL2C_READ_32_REQ_sum*32 + GL2C_READ_64_REQ_sum*64 + GL2C_READ_128_REQ_sum*128) / ((End_Timestamp - Start_Timestamp) / 1e9))) / ((($max_sclk / 1000) * 128) * TO_INT_sum($total_l2_chan) * 1e9))
+          pop: ((100 * AVG((GL2C_READ_32_REQ_sum*32 + GL2C_READ_64_REQ_sum*64 + GL2C_READ_128_REQ_sum*128 + GL2C_COMPRESSED_READ_96_REQ_sum*96) / ((End_Timestamp - Start_Timestamp) / 1e9))) / ((($max_sclk / 1000) * 128) * TO_INT_sum($total_l2_chan) * 1e9))
         Scalar Data Cache Hit Rate:
           value: AVG((((100 * SQC_DCACHE_HITS_sum) / (SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum)) if ((SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum) != 0) else None))
           unit: pct
@@ -312,8 +313,9 @@ Panel Config:
       GL2 Cache (L2) hit rate. GL2C is the last-level cache shared across the GPU
       before accessing system memory. Higher hit rates reduce off-chip memory traffic.
     GL2C Cache BW: |-
-      Achieved bandwidth at the GL2C (L2 cache) level. This represents the total
-      cache bandwidth before going to DRAM or system memory.
+      Achieved bandwidth at the GL2C (L2 cache) level from client read size counters
+      (32/64/128 B) plus 96 B compressed read requests. Memory-fabric read traffic
+      including 96 B EA requests is reflected in L2-Fabric Read BW (GL2C_EA_RDREQ_*).
     Scalar Data Cache Hit Rate: |-
       The percent of Scalar Data Cache requests that hit. SQC-Dcache stores uniform
       scalar data accessed via SMEM instructions. High hit rates indicate good 

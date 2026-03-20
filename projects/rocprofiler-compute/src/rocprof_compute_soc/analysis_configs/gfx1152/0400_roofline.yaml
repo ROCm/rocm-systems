@@ -34,7 +34,7 @@ Panel Config:
           peak: $FP64Flops_empirical_peak
         # Fixme: GL2C_EA_WRREQ_sum not available - commenting out metric
         # System Memory Bandwidth:
-        #   value: AVG(((GL2C_EA_RDREQ_128B_sum * 128 + GL2C_EA_RDREQ_32B_sum * 32 + GL2C_EA_RDREQ_64B_sum * 64 + GL2C_EA_WRREQ_64B_sum * 64 + ((GL2C_EA_WRREQ_sum - GL2C_EA_WRREQ_64B_sum) * 32)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+        #   value: AVG(((GL2C_EA_RDREQ_128B_sum * 128 + GL2C_EA_RDREQ_32B_sum * 32 + GL2C_EA_RDREQ_64B_sum * 64 + GL2C_EA_RDREQ_96B_sum * 96 + GL2C_EA_WRREQ_64B_sum * 64 + ((GL2C_EA_WRREQ_sum - GL2C_EA_WRREQ_64B_sum) * 32)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
         #   unit: GB/s
         #   peak: $SysMemBw_empirical_peak
         GL2 Cache Bandwidth:
@@ -67,7 +67,7 @@ Panel Config:
       metric:
         # Fixme: GL2C_EA_WRREQ_sum not available - commenting out metric
         # AI System Memory:
-        #   value: ( SUM($wave_size * SQ_INSTS_VALU_sum) / SUM((GL2C_EA_RDREQ_128B_sum * 128) + (GL2C_EA_RDREQ_32B_sum * 32) + (GL2C_EA_RDREQ_64B_sum * 64) + (GL2C_EA_WRREQ_64B_sum * 64) + ((GL2C_EA_WRREQ_sum - GL2C_EA_WRREQ_64B_sum) * 32)) )
+        #   value: ( SUM($wave_size * SQ_INSTS_VALU_sum) / SUM((GL2C_EA_RDREQ_128B_sum * 128) + (GL2C_EA_RDREQ_32B_sum * 32) + (GL2C_EA_RDREQ_64B_sum * 64) + (GL2C_EA_RDREQ_96B_sum * 96) + (GL2C_EA_WRREQ_64B_sum * 64) + ((GL2C_EA_WRREQ_sum - GL2C_EA_WRREQ_64B_sum) * 32)) )
         #   unit: FLOPs/Byte
         AI GL2:
           # Note: GL1C-GL2 reads can be 32B, 64B, or 128B. Writes can be 32B or 64B.

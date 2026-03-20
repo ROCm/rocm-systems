@@ -749,6 +749,7 @@ rocprofiler-sdk:
       - gfx1101
       - gfx1102
       - gfx1151
+      - gfx1152
       expression: (GL2C_EA_RDREQ_32B_sum*32+GL2C_EA_RDREQ_64B_sum*64+GL2C_EA_RDREQ_96B_sum*96+GL2C_EA_RDREQ_128B_sum*128)/1024
     - architectures:
       - gfx12
