@@ -13,7 +13,7 @@ if (HIP_PLATFORM MATCHES "amd")
                   -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 else()
-  add_custom_target(memcpyInt.hsaco COMMAND ${CMAKE_HIP_COMPILER} --fatbin ${OFFLOAD_ARCH_LIST}
+  add_custom_target(memcpyInt.hsaco COMMAND ${CMAKE_HIP_COMPILER} --fatbin
                   -x cu ${CMAKE_CURRENT_SOURCE_DIR}/memcpyIntDevice.cpp -o
                   ${CMAKE_CURRENT_BINARY_DIR}/../synchronization/memcpyInt.hsaco
                   -I${HIP_INCLUDE_DIR}

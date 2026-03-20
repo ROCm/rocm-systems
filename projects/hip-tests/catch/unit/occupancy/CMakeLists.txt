@@ -24,7 +24,7 @@ if (HIP_PLATFORM MATCHES "amd")
                    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/simple_kernel.cc)
 else()
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/simple_kernel.code
-                   COMMAND ${CMAKE_HIP_COMPILER} --fatbin ${OFFLOAD_ARCH_LIST}
+                   COMMAND ${CMAKE_HIP_COMPILER} --fatbin
                    -x cu ${CMAKE_CURRENT_SOURCE_DIR}/simple_kernel.cc
                    -o simple_kernel.code
                    -I${HIP_INCLUDE_DIR}

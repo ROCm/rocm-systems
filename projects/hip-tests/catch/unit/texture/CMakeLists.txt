@@ -115,7 +115,7 @@ if (HIP_PLATFORM MATCHES "amd")
                    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/tex_ref_get_module.cc)
 else()
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/tex_ref_get_module.code
-                   COMMAND ${CMAKE_HIP_COMPILER} --fatbin ${OFFLOAD_ARCH_LIST}
+                   COMMAND ${CMAKE_HIP_COMPILER} --fatbin
                    -x cu ${CMAKE_CURRENT_SOURCE_DIR}/tex_ref_get_module.cc
                    -I${HIP_INCLUDE_DIR}
                    -o tex_ref_get_module.code

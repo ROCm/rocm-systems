@@ -171,7 +171,7 @@ if(HIP_PLATFORM MATCHES "amd")
                G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/hipMatMul.code)
 else()
   add_custom_target(add_Kernel.code COMMAND ${CMAKE_HIP_COMPILER}
-  --fatbin ${OFFLOAD_ARCH_LIST} -x cu ${CMAKE_CURRENT_SOURCE_DIR}/add_Kernel.cpp
+  --fatbin -x cu ${CMAKE_CURRENT_SOURCE_DIR}/add_Kernel.cpp
   -o ${CMAKE_CURRENT_BINARY_DIR}/../graph/add_Kernel.code
   -I${HIP_INCLUDE_DIR}
   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
