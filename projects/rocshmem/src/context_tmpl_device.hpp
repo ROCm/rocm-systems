@@ -334,7 +334,25 @@ __device__ __forceinline__
 void Context::wait_until_all_vector(T *ivars, size_t nelems,
                                     const int *status,
                                     int cmp, T* vals) {
-  ;
+  // zero nelems error condition
+  if (!nelems) {
+    return;
+  }
+
+  size_t pos{status_entry(nelems, status)};
+
+  // invalid (empty) status array error condition
+  if (pos == nelems) {
+    return;
+  }
+
+  for (size_t i{pos}; i < nelems; i++) {
+    if (status[i]) {
+      continue;
+    }
+    while (!test(ivars + i, cmp, vals[i])) {
+    }
+  }
 }
 
 template <typename T>
@@ -342,7 +360,29 @@ __device__ __forceinline__
 size_t Context::wait_until_any_vector(T *ivars, size_t nelems,
                                       const int *status,
                                       int cmp, T* vals) {
-  return 0;
+  // zero nelems error condition
+  if (!nelems) {
+    return SIZE_MAX;
+  }
+
+  size_t pos{status_entry(nelems, status)};
+
+  // invalid (empty) status array error condition
+  if (pos == nelems) {
+    return SIZE_MAX;
+  }
+
+  while (true) {
+    for (size_t i{pos}; i < nelems; i++) {
+      // skip entries marked with non-zero status
+      if (status[i]) {
+        continue;
+      }
+      if (test(ivars + i, cmp, vals[i])) {
+        return i;
+      }
+    }
+  }
 }
 
 template <typename T>
@@ -351,7 +391,34 @@ size_t Context::wait_until_some_vector(T *ivars, size_t nelems,
                                      size_t* indices,
                                      const int *status,
                                      int cmp, T* vals) {
-  return 0;
+  // zero nelems error condition
+  if (!nelems) {
+    return 0;
+  }
+
+  size_t pos{status_entry(nelems, status)};
+
+  // invalid (empty) status array error condition
+  if (pos == nelems) {
+    return 0;
+  }
+
+  bool done {false};
+  size_t ncompleted {0};
+  while (!done) {
+    for (size_t i{pos}; i < nelems; i++) {
+      // skip entries marked with non-zero status
+      if (status[i]) {
+        continue;
+      }
+      if (test(ivars + i, cmp, vals[i])) {
+        done = true;
+        indices[ncompleted] = i;
+        ncompleted++;
+      }
+    }
+  }
+  return ncompleted;
 }
 
 template <typename T>
