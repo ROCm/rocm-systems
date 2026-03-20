@@ -63,6 +63,28 @@ def wrap_kernel_name(name: str) -> str:
     return textwrap.fill(str(name), width=KERNEL_NAME_WRAP_WIDTH)
 
 
+def _get_bw_scale_and_unit(value: float) -> tuple[float, str]:
+    """
+    Determine the appropriate scale and unit for a bandwidth value.
+
+    Args:
+        value: Bandwidth value in Bytes/s
+
+    Returns:
+        Tuple of (divisor, unit_string)
+    """
+    if value >= 1e12:
+        return 1e12, "TB/s"
+    elif value >= 1e9:
+        return 1e9, "GB/s"
+    elif value >= 1e6:
+        return 1e6, "MB/s"
+    elif value >= 1e3:
+        return 1e3, "KB/s"
+    else:
+        return 1.0, "B/s"
+
+
 def format_bw_human_readable(value: float, precision: int = 2) -> str:
     """
     Format bandwidth value from Bytes/s to human-readable format.
@@ -83,17 +105,8 @@ def format_bw_human_readable(value: float, precision: int = 2) -> str:
     except (ValueError, TypeError):
         return str(value)
 
-    # Convert to appropriate unit
-    if value >= 1e12:
-        return f"{value / 1e12:.{precision}f} TB/s"
-    elif value >= 1e9:
-        return f"{value / 1e9:.{precision}f} GB/s"
-    elif value >= 1e6:
-        return f"{value / 1e6:.{precision}f} MB/s"
-    elif value >= 1e3:
-        return f"{value / 1e3:.{precision}f} KB/s"
-    else:
-        return f"{value:.{precision}f} B/s"
+    divisor, unit = _get_bw_scale_and_unit(value)
+    return f"{value / divisor:.{precision}f} {unit}"
 
 
 def format_bw_columns_human_readable(
@@ -103,6 +116,9 @@ def format_bw_columns_human_readable(
     Format bandwidth columns in a DataFrame to human-readable format.
 
     Detects rows with 'Bytes/s' in Unit column and formats corresponding value columns.
+    The scaling is determined by the primary value column (Value or Avg), and all
+    related columns (Peak, etc.) are scaled to the same unit for consistency.
+    Pct of Peak is recalculated as (Value / Peak) * 100.
 
     Args:
         df: DataFrame with Unit column and value columns
@@ -110,7 +126,7 @@ def format_bw_columns_human_readable(
         decimal: Number of decimal places
 
     Returns:
-        DataFrame with formatted bandwidth values
+        DataFrame with formatted bandwidth values (values and units separated)
     """
     if "Unit" not in df.columns:
         return df
@@ -123,24 +139,72 @@ def format_bw_columns_human_readable(
     if not bw_rows.any():
         return df_copy
 
-    for col in value_columns:
-        if col not in df_copy.columns:
+    # Columns that should all be scaled together (numeric bandwidth values)
+    bw_numeric_cols = ["Value", "Avg", "Min", "Max", "Peak", "Peak (Empirical)"]
+    # Columns that hold percentage values (should be recalculated)
+    pct_cols = ["Pct of Peak", "PoP"]
+
+    for idx in df_copy.index[bw_rows]:
+        # Determine the scale based on the primary value column
+        primary_value = None
+        for col in ["Value", "Avg"]:
+            if col in df_copy.columns:
+                try:
+                    val = df_copy.loc[idx, col]
+                    if pd.notna(val) and val != "N/A":
+                        primary_value = float(val)
+                        break
+                except (ValueError, TypeError):
+                    continue
+
+        if primary_value is None or primary_value == 0:
             continue
-        # Format the bandwidth values in these rows
-        for idx in df_copy.index[bw_rows]:
+
+        # Get the scale and unit based on the primary value
+        divisor, unit = _get_bw_scale_and_unit(primary_value)
+
+        # Scale all numeric bandwidth columns with the same divisor
+        for col in bw_numeric_cols:
+            if col not in df_copy.columns:
+                continue
             try:
                 val = df_copy.loc[idx, col]
                 if pd.notna(val) and val != "N/A":
-                    df_copy.loc[idx, col] = format_bw_human_readable(
-                        float(val), decimal
-                    )
+                    scaled_val = float(val) / divisor
+                    df_copy.loc[idx, col] = round(scaled_val, decimal)
             except (ValueError, TypeError):
                 pass  # Keep original value if conversion fails
 
-    # Update Unit column for formatted rows
-    df_copy.loc[bw_rows, "Unit"] = df_copy.loc[bw_rows, "Unit"].str.replace(
-        "Bytes/s", "(auto)", case=False
-    )
+        # Recalculate Pct of Peak = (Value or Avg) / Peak * 100
+        for pct_col in pct_cols:
+            if pct_col not in df_copy.columns:
+                continue
+            try:
+                # Get the value and peak in the same scaled units
+                value_col = "Value" if "Value" in df_copy.columns else "Avg"
+                peak_col = (
+                    "Peak (Empirical)"
+                    if "Peak (Empirical)" in df_copy.columns
+                    else "Peak"
+                )
+
+                if value_col in df_copy.columns and peak_col in df_copy.columns:
+                    val = df_copy.loc[idx, value_col]
+                    peak = df_copy.loc[idx, peak_col]
+                    if (
+                        pd.notna(val)
+                        and pd.notna(peak)
+                        and val != "N/A"
+                        and peak != "N/A"
+                        and float(peak) != 0
+                    ):
+                        pct = (float(val) / float(peak)) * 100
+                        df_copy.loc[idx, pct_col] = round(pct, decimal)
+            except (ValueError, TypeError, ZeroDivisionError):
+                pass  # Keep original value if calculation fails
+
+        # Update the Unit column with the actual unit
+        df_copy.loc[idx, "Unit"] = unit
 
     return df_copy
 
