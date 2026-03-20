@@ -2745,7 +2745,9 @@ static void PatchKernelDescriptorsForWave64(uint8_t* elf, size_t elf_size,
     // the translation inserts above the kernel's native VGPR allocation.
     uint32_t vgpr_field12 = rsrc1 & 0x3Fu;
     uint32_t sgpr_field12_kd = (rsrc1 >> 6) & 0x3Fu;  // save before clear
-    uint32_t num_vgprs = (vgpr_field12 + 1u) * 8u;  // GFX12 granularity
+    // GFX12 (RDNA4) wave32 VGPR granularity is 12 (GFX10=8, GFX11+=12).
+    // RSRC1 VGPR field encodes ceil(VGPRs/gran)-1.
+    uint32_t num_vgprs = (vgpr_field12 + 1u) * 12u;
     if (num_vgprs < 8u) num_vgprs = 8u;
     num_vgprs += 4u;  // room for sv_x, sv_y
     // ACCUM_OFFSET: on GFX942, arch VGPRs = (ACCUM_OFFSET+1)*4.  Set ACCUM_OFFSET
@@ -3028,7 +3030,7 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
         }
       }
       if (rsrc1_src) {
-        num_vgprs12 = ((rsrc1_src & 0x3Fu) + 1u) * 8u;
+        num_vgprs12 = ((rsrc1_src & 0x3Fu) + 1u) * 12u;  // GFX12 wave32 gran=12
         num_sgprs12 = (((rsrc1_src >> 6) & 0x3Fu) + 1u) * 16u;
         std::cerr << "hotswap: transpile: GFX12 RSRC1=0x" << std::hex
                   << rsrc1_src << std::dec << " vgpr_field=" << (rsrc1_src & 0x3Fu)
@@ -3794,7 +3796,7 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
             // translation inserts above the kernel's native VGPR allocation.
             uint32_t vgpr_field12 = rsrc1 & 0x3Fu;
             uint32_t sgpr_field12_rd = (rsrc1 >> 6) & 0x3Fu;  // save before clear
-            uint32_t num_vgprs = (vgpr_field12 + 1u) * 8u;
+            uint32_t num_vgprs = (vgpr_field12 + 1u) * 12u;  // GFX12 wave32 gran=12
             if (num_vgprs < 8u) num_vgprs = 8u;
             num_vgprs += 4u;  // room for save registers
             uint32_t gfx9_vgpr = (num_vgprs / 4u) - 1u;
