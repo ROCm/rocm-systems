@@ -2328,7 +2328,7 @@ amdsmi_status_t amdsmi_get_gpu_vram_info(
 
 amdsmi_status_t
 amdsmi_init_gpu_event_notification(amdsmi_processor_handle processor_handle) {
-    return rsmi_wrapper(rsmi_event_notification_init, processor_handle, 0);
+    return AMDSMI_STATUS_NOT_SUPPORTED;
 }
 
 amdsmi_status_t
@@ -2378,8 +2378,7 @@ amdsmi_status_t amdsmi_stop_gpu_event_notification(
 
 amdsmi_status_t amdsmi_gpu_counter_group_supported(
         amdsmi_processor_handle processor_handle, amdsmi_event_group_t group) {
-    return rsmi_wrapper(rsmi_dev_counter_group_supported, processor_handle, 0,
-                    static_cast<rsmi_event_group_t>(group));
+    return AMDSMI_STATUS_NOT_SUPPORTED;
 }
 
 amdsmi_status_t amdsmi_gpu_create_counter(amdsmi_processor_handle processor_handle,
@@ -2543,34 +2542,22 @@ amdsmi_topo_get_p2p_status(amdsmi_processor_handle processor_handle_src,
 amdsmi_status_t
 amdsmi_get_gpu_compute_partition(amdsmi_processor_handle processor_handle,
                                   char *compute_partition, uint32_t len) {
-    AMDSMI_CHECK_INIT();
-    std::ostringstream ss;
-
-    auto status = rsmi_wrapper(rsmi_dev_compute_partition_get, processor_handle, 0,
-                          compute_partition, len);
-    ss << __PRETTY_FUNCTION__ << " |  rsmi_dev_compute_partition_get() returned: "
-    << smi_amdgpu_get_status_string(status, false);
-    LOG_INFO(ss);
-    return status;
+    if (compute_partition == nullptr || len == 0) return AMDSMI_STATUS_INVAL;
+    return AMDSMI_STATUS_NOT_SUPPORTED;
 }
 
 amdsmi_status_t
 amdsmi_set_gpu_compute_partition(amdsmi_processor_handle processor_handle,
                                   amdsmi_compute_partition_type_t compute_partition) {
-    AMDSMI_CHECK_INIT();
-    auto ret_resp = rsmi_wrapper(rsmi_dev_compute_partition_set, processor_handle, 0,
-                          static_cast<rsmi_compute_partition_type_t>(compute_partition));
-    return ret_resp;
+    return AMDSMI_STATUS_NOT_SUPPORTED;
 }
 
 // Memory Partition functions
 amdsmi_status_t
 amdsmi_get_gpu_memory_partition(amdsmi_processor_handle processor_handle,
                                   char *memory_partition, uint32_t len) {
-    AMDSMI_CHECK_INIT();
-    amdsmi_status_t ret = rsmi_wrapper(rsmi_dev_memory_partition_get, processor_handle, 0,
-                          memory_partition, len);
-    return ret;
+    if (memory_partition == nullptr || len == 0) return AMDSMI_STATUS_INVAL;
+    return AMDSMI_STATUS_NOT_SUPPORTED;
 }
 
 amdsmi_status_t
@@ -2618,24 +2605,7 @@ amdsmi_set_gpu_memory_partition(amdsmi_processor_handle processor_handle,
         return AMDSMI_STATUS_INVAL;
     }
 
-    amdsmi_status_t ret = rsmi_wrapper(rsmi_dev_memory_partition_set, processor_handle, 0,
-                                        rsmi_type);
-
-    amdsmi_status_t ret_get = rsmi_wrapper(rsmi_dev_memory_partition_get, processor_handle, 0,
-                                           current_partition, k256);
-
-    if (ret_get == AMDSMI_STATUS_SUCCESS) {
-      current_partition_str.clear();
-      current_partition_str = current_partition;
-    }
-
-    ss << __PRETTY_FUNCTION__
-    << " | After attepting to set memory partition to " << req_user_partition << "\n"
-    << " | Current memory partition is " << current_partition_str << "\n"
-    << " | Returning: " << smi_amdgpu_get_status_string(ret, false)
-    << " | User will need to reload driver in order to see a NPS mode change";
-    LOG_INFO(ss);
-    return ret;
+    return AMDSMI_STATUS_NOT_SUPPORTED;
 }
 
 amdsmi_status_t
@@ -2724,9 +2694,8 @@ amdsmi_status_t
 amdsmi_get_gpu_accelerator_partition_profile_config(amdsmi_processor_handle processor_handle,
                                   amdsmi_accelerator_partition_profile_config_t *profile_config) {
     AMDSMI_CHECK_INIT();
-    if (!amd::smi::is_sudo_user()) {
-        return AMDSMI_STATUS_NO_PERM;
-    }
+    if (profile_config == nullptr) return AMDSMI_STATUS_INVAL;
+    return AMDSMI_STATUS_NOT_SUPPORTED;
     std::ostringstream ss;
     ss << __PRETTY_FUNCTION__
        << " | START ";
@@ -4998,7 +4967,8 @@ amdsmi_status_t amdsmi_get_pcie_info(amdsmi_processor_handle processor_handle, a
 
 amdsmi_status_t amdsmi_get_gpu_xcd_counter(amdsmi_processor_handle processor_handle,
                                            uint16_t *xcd_count) {
-  return rsmi_wrapper(rsmi_dev_metrics_xcd_counter_get, processor_handle, 0, xcd_count);
+    if (xcd_count == nullptr) return AMDSMI_STATUS_INVAL;
+    return AMDSMI_STATUS_NOT_SUPPORTED;
 }
 
 amdsmi_status_t amdsmi_get_processor_handle_from_bdf(amdsmi_bdf_t bdf,
