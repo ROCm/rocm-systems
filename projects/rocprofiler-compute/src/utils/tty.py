@@ -775,7 +775,8 @@ def show_all(
                     )
 
         # Roofline printing is handled separately above in is_roofline_shown.
-        # When --view table is set, roofline tables (401/402) are rendered as normal tables.
+        # When --view table is set, roofline tables (401/402) are rendered as normal
+        # tables.
         if panel_content and (
             table_config["id"] not in [401, 402] or _tty_view_is_table(args)
         ):
