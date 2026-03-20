@@ -123,6 +123,8 @@ if(UNIX)
     target_include_directories(MemoryTest1 PRIVATE ${NUMA_INCLUDE_DIR})
   endif()
   target_link_libraries(MemoryTest1 ${NUMA})
+  # link rt for shm_open/shm_unlink used by cross-platform IPC helpers
+  target_link_libraries(MemoryTest1 rt)
 endif()
 
 if(HIP_PLATFORM MATCHES "amd" AND UNIX)
