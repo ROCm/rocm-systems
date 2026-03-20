@@ -124,20 +124,28 @@ protected:
     ncclNet_t* net_;
     int numDevices_;
     std::vector<int> deviceIds_;
+    void* initCtx_;
 
     void SetUp() override {
         MPITestBase::SetUp();
         net_ = &ncclNetIb;
         numDevices_ = 0;
+        initCtx_ = nullptr;
     }
 
     void TearDown() override {
+        if (initCtx_) {
+            net_->finalize(initCtx_);
+            initCtx_ = nullptr;
+        }
         MPITestBase::TearDown();
     }
 
     // Helper: Initialize NET IB plugin
     ncclResult_t InitNetIb() {
-        return net_->init(nullptr, 0, nullptr, nullptr, nullptr);
+        ncclNetCommConfig_t commConfig = {};
+        commConfig.trafficClass = NCCL_NET_TRAFFIC_CLASS_UNDEF;
+        return net_->init(&initCtx_, 0, &commConfig, nullptr, nullptr);
     }
 
     // Helper: Get number of devices
@@ -152,12 +160,12 @@ protected:
 
     // Helper: Create listen comm
     ncclResult_t CreateListenComm(int dev, ncclNetHandle_t* handle, void** listenComm) {
-        return net_->listen(nullptr, dev, handle, listenComm);
+        return net_->listen(initCtx_, dev, handle, listenComm);
     }
 
     // Helper: Connect to remote
     ncclResult_t ConnectToRemote(int dev, ncclNetHandle_t* handle, void** sendComm) {
-        return net_->connect(nullptr, dev, handle, sendComm, nullptr);
+        return net_->connect(initCtx_, dev, handle, sendComm, nullptr);
     }
 
     // Helper: Accept connection
@@ -289,6 +297,8 @@ protected:
 
     // Helper: Wait for request completion with timeout
     ncclResult_t WaitForCompletion(void* request, int* sizes, int timeoutMs = kDefaultTimeoutMs) {
+        if (!request) return ncclInternalError;
+
         int done = 0;
         int attempts = 0;
         const int maxAttempts = timeoutMs / kPollIntervalMs;
@@ -320,7 +330,8 @@ TEST_F(NetIbMPITest, InitializePlugin) {
         << "Test requirements not met";
 
     ncclResult_t result = InitNetIb();
-    EXPECT_EQ(result, ncclSuccess) << "Failed to initialize NET IB plugin";
+    ASSERT_EQ(result, ncclSuccess) << "Failed to initialize NET IB plugin";
+    EXPECT_NE(initCtx_, nullptr) << "Init context should be set on success";
 }
 
 TEST_F(NetIbMPITest, GetDeviceCount) {
@@ -653,13 +664,25 @@ TEST_F(NetIbMPITest, SimpleSendRecv) {
             hostBuffer[i] = static_cast<uint8_t>((rank + i) % kBytePatternModulo);
         }
 
-        ASSERT_EQ(PostSend(pair.sendComm, buffer, bufferSize, tag, mhandle, &request), ncclSuccess);
+        // NET IB isend can return success with NULL request if FIFO isn't ready
+        // (receiver's irecv RDMA write hasn't reached sender yet) — retry until ready
+        int attempts = 0;
+        do {
+            ncclResult_t result = PostSend(pair.sendComm, buffer, bufferSize, tag, mhandle, &request);
+            ASSERT_EQ(result, ncclSuccess);
+            if (request != nullptr) break;
+            if (++attempts >= kMaxRetryAttempts) {
+                FAIL() << "PostSend returned NULL request after " << kMaxRetryAttempts << " attempts";
+            }
+            usleep(kPollIntervalUs);
+        } while (request == nullptr);
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
 
     // Wait for completion
     int sizes[1] = {0};
+    ASSERT_NE(request, nullptr) << "Request must be non-NULL before waiting";
     ASSERT_EQ(WaitForCompletion(request, sizes), ncclSuccess);
 
     if (rank == 0) {
@@ -847,14 +870,24 @@ TEST_F(NetIbMPITest, SendRecvZeroSize) {
         ASSERT_EQ(PostRecv(pair.recvComm, 1, recvBuffers, recvSizes, recvTags,
                           recvHandles, &request), ncclSuccess);
     } else {
-        // Sender - send zero bytes
-        ASSERT_EQ(PostSend(pair.sendComm, buffer, 0, tag, mhandle, &request), ncclSuccess);
+        // Sender - send zero bytes (retry on NULL request — FIFO may not be ready)
+        int attempts = 0;
+        do {
+            ncclResult_t result = PostSend(pair.sendComm, buffer, 0, tag, mhandle, &request);
+            ASSERT_EQ(result, ncclSuccess);
+            if (request != nullptr) break;
+            if (++attempts >= kMaxRetryAttempts) {
+                FAIL() << "PostSend returned NULL request after " << kMaxRetryAttempts << " attempts";
+            }
+            usleep(kPollIntervalUs);
+        } while (request == nullptr);
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
 
     // Wait for completion
     int sizes[1] = {-1};
+    ASSERT_NE(request, nullptr) << "Request must be non-NULL before waiting";
     ASSERT_EQ(WaitForCompletion(request, sizes), ncclSuccess);
 
     if (rank == 0) {
@@ -934,13 +967,23 @@ TEST_F(NetIbMPITest, FlushAfterRecv) {
         }
         HIP_TEST_CHECK_GTEST_FAIL(hipMemcpy(buffer, hostBuffer, bufferSize, hipMemcpyHostToDevice));
 
-        ASSERT_EQ(PostSend(pair.sendComm, buffer, bufferSize, tag, mhandle, &request), ncclSuccess);
+        int attempts = 0;
+        do {
+            ncclResult_t result = PostSend(pair.sendComm, buffer, bufferSize, tag, mhandle, &request);
+            ASSERT_EQ(result, ncclSuccess);
+            if (request != nullptr) break;
+            if (++attempts >= kMaxRetryAttempts) {
+                FAIL() << "PostSend returned NULL request after " << kMaxRetryAttempts << " attempts";
+            }
+            usleep(kPollIntervalUs);
+        } while (request == nullptr);
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
 
     // Wait for completion
     int sizes[1] = {0};
+    ASSERT_NE(request, nullptr) << "Request must be non-NULL before waiting";
     ASSERT_EQ(WaitForCompletion(request, sizes), ncclSuccess);
 
     if (rank == 0) {
@@ -1235,13 +1278,23 @@ TEST_F(NetIbMPITest, LargeTransfer) {
             hostBuffer[i] = static_cast<uint8_t>((rank + i) % kBytePatternModulo);
         }
 
-        ASSERT_EQ(PostSend(pair.sendComm, buffer, bufferSize, tag, mhandle, &request), ncclSuccess);
+        int attempts = 0;
+        do {
+            ncclResult_t result = PostSend(pair.sendComm, buffer, bufferSize, tag, mhandle, &request);
+            ASSERT_EQ(result, ncclSuccess);
+            if (request != nullptr) break;
+            if (++attempts >= kMaxRetryAttempts) {
+                FAIL() << "PostSend returned NULL request after " << kMaxRetryAttempts << " attempts";
+            }
+            usleep(kPollIntervalUs);
+        } while (request == nullptr);
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
 
     // Wait for completion with longer timeout for large transfer
     int sizes[1] = {0};
+    ASSERT_NE(request, nullptr) << "Request must be non-NULL before waiting";
     ASSERT_EQ(WaitForCompletion(request, sizes, kLargeTransferTimeout), ncclSuccess);
 
     if (rank == 0) {
