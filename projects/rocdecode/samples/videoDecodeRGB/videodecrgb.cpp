@@ -334,7 +334,7 @@ int main(int argc, char **argv) {
             }
 
             int last_index = 0;
-            for (int i = 0; i < n_frames_returned; i++) {
+            for (int i = 0; i < n_frames_returned && (!num_decoded_frames || n_frame < num_decoded_frames); i++) {
                 p_frame = viddec.GetFrame(&pts);
                 // allocate extra device memories to use double-buffering for keeping two decoded frames
                 if (frame_buffers[0] == nullptr) {
@@ -355,11 +355,7 @@ int main(int argc, char **argv) {
                 viddec.ReleaseFrame(pts);
                 current_frame_index = (current_frame_index + 1) % frame_buffers_size; // update the current_frame_index to the next index in the frame_buffers
                 cv.notify_one(); // Notify the ColorSpaceConversionThread that a frame is available for post-processing
-            }
-
-            n_frame += n_frames_returned;
-            if (num_decoded_frames && num_decoded_frames <= n_frame) {
-                break;
+                n_frame++;
             }
         } while (n_video_bytes);
 
