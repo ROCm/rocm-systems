@@ -40,9 +40,11 @@ if(BUILD_TESTS)
 
   # MPI configuration
   if(ENABLE_MPI_TESTS)
-    # Set default MPI path, allow user to override
-    if(NOT DEFINED MPI_PATH)
-        set(MPI_PATH "/opt/ompi" CACHE PATH "Path to MPI installation")
+    # Set MPI path: 1) environment variable (always wins), 2) CMake variable, 3) default
+    if(DEFINED ENV{MPI_PATH})
+      set(MPI_PATH "$ENV{MPI_PATH}" CACHE PATH "Path to MPI installation" FORCE)
+    elseif(NOT DEFINED MPI_PATH)
+      set(MPI_PATH "/opt/ompi" CACHE PATH "Path to MPI installation")
     endif()
 
     # Verify MPI path exists
@@ -189,55 +191,45 @@ if(BUILD_TESTS)
   # Create rccl-UnitTests binary
   add_executable(rccl-UnitTests ${TEST_SOURCE_FILES})
 
-  # Create rccl-UnitTestsFixtures binary if ROCm version is 4.6.0 or greater
-  # and build type is Debug
-  if (ROCM_VERSION VERSION_GREATER_EQUAL "60400" AND CMAKE_BUILD_TYPE MATCHES "Debug")
-    # Add rccl-UnitTestsFixtures binary
+  # rccl-UnitTestsFixtures: Tests that only use header-only internal dependencies
+  # (inline, static, constexpr, template functions) and can run in both Release and Debug.
+  if (ROCM_VERSION VERSION_GREATER_EQUAL "60400")
     list(APPEND RCCL_TEST_EXECUTABLES rccl-UnitTestsFixtures)
 
     set(TEST_FIXTURE_SOURCE_FILES
+      BitOpsTests.cpp
+      CommTests.cpp
+      EnqueueCountTests.cpp
+      common/main_fixtures.cpp
+      common/EnvVars.cpp
+      common/ProcessIsolatedTestRunner.cpp
+    )
+
+    add_executable(rccl-UnitTestsFixtures ${TEST_FIXTURE_SOURCE_FILES})
+  endif()
+
+  # rccl-UnitTestsFixturesDebug: Tests that access internal symbols compiled into
+  # librccl.so which are only visible in Debug builds (hidden visibility in Release).
+  if (ROCM_VERSION VERSION_GREATER_EQUAL "60400" AND CMAKE_BUILD_TYPE MATCHES "Debug")
+    list(APPEND RCCL_TEST_EXECUTABLES rccl-UnitTestsFixturesDebug)
+
+    set(TEST_FIXTURE_DEBUG_SOURCE_FILES
       AllocTests.cpp
       ParamTests.cpp
       ArgCheckTests.cpp
-      BitOpsTests.cpp
-      CommTests.cpp
       EnqueueTests.cpp
       IpcsocketTests.cpp
       NetSocketTests.cpp
       ProxyTests.cpp
       RcclWrapTests.cpp
       TransportTests.cpp
+      graph/XmlTests.cpp
       common/main_fixtures.cpp
       common/EnvVars.cpp
       common/ProcessIsolatedTestRunner.cpp
-      graph/XmlTests.cpp
     )
 
-    add_executable(rccl-UnitTestsFixtures ${TEST_FIXTURE_SOURCE_FILES})
-
-    # Create separate MPI test binary if MPI tests are enabled
-    if(ENABLE_MPI_TESTS)
-      # Define MPI test source files
-      set(MPI_TEST_SOURCE_FILES
-        common/main_mpi.cpp
-        common/MPIHelpers.cpp
-        common/MPITestCore.cpp
-        common/MPIEnvironment.cpp
-        common/TestChecks.cpp
-        transport/TransportMPIBase.cpp
-        transport/P2pMPITests.cpp
-        transport/NetMPITests.cpp
-        transport/ShmMPITests.cpp
-        transport/NetIbMPITests.cpp
-      )
-
-      # Create the MPI test executable
-      add_executable(rccl-UnitTestsMPI ${MPI_TEST_SOURCE_FILES})
-
-      # Add to test executables list for proper linking
-      list(APPEND RCCL_TEST_EXECUTABLES rccl-UnitTestsMPI)
-
-    endif()
+    add_executable(rccl-UnitTestsFixturesDebug ${TEST_FIXTURE_DEBUG_SOURCE_FILES})
 
     # rccl-UnitTestsAltRsmi: Uses TEST BUILD alt_rsmi.cc (ARSMI_TEST_BUILD)
     # This separate executable compiles alt_rsmi.cc with ARSMI_TEST_BUILD,
@@ -257,6 +249,26 @@ if(BUILD_TESTS)
 
     # Define ARSMI_TEST_BUILD specifically for rccl-UnitTestsAltRsmi
     target_compile_definitions(rccl-UnitTestsAltRsmi PRIVATE ARSMI_TEST_BUILD)
+  endif()
+
+  # Create separate MPI test binary if MPI tests are enabled
+  if(ENABLE_MPI_TESTS)
+    set(MPI_TEST_SOURCE_FILES
+      common/main_mpi.cpp
+      common/MPIHelpers.cpp
+      common/MPITestCore.cpp
+      common/MPIEnvironment.cpp
+      common/TestChecks.cpp
+      transport/TransportMPIBase.cpp
+      transport/P2pMPITests.cpp
+      transport/NetMPITests.cpp
+      transport/ShmMPITests.cpp
+      transport/NetIbMPITests.cpp
+      ImplicitLaunchOrderMPITests.cpp
+    )
+
+    add_executable(rccl-UnitTestsMPI ${MPI_TEST_SOURCE_FILES})
+    list(APPEND RCCL_TEST_EXECUTABLES rccl-UnitTestsMPI)
   endif()
 
   foreach(test_executable IN LISTS RCCL_TEST_EXECUTABLES)

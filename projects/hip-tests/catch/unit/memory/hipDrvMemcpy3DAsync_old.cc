@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2022-2023 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /**
  * @addtogroup hipDrvMemcpy3DAsync hipDrvMemcpy3DAsync
@@ -445,89 +432,6 @@ template <typename T> void DrvMemcpy3DAsync<T>::DeAllocateMemory() {
   free(hData);
 }
 
-/**
- * Test Description
- * ------------------------
- *  - Verifying hipDrvMemcpy3DAsync API Host to Array for different datatypes
- * Test source
- * ------------------------
- *  - unit/memory/hipDrvMemcpy3DAsync_old.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 6.0
- */
-
-TEMPLATE_TEST_CASE("Unit_hipDrvMemcpy3DAsync_MultipleDataTypes", "", uint8_t, int, float) {
-  CHECK_IMAGE_SUPPORT
-  for (int i = 1; i < 25; i++) {
-    if (std::is_same<TestType, float>::value) {
-      DrvMemcpy3DAsync<TestType> memcpy3d_float(i, i, i, HIP_AD_FORMAT_FLOAT);
-      memcpy3d_float.HostArray_DrvMemcpy3DAsync();
-    } else if (std::is_same<TestType, uint8_t>::value) {
-      DrvMemcpy3DAsync<TestType> memcpy3d_intx(i, i, i, HIP_AD_FORMAT_UNSIGNED_INT8);
-      memcpy3d_intx.HostArray_DrvMemcpy3DAsync();
-    } else if (std::is_same<TestType, int>::value) {
-      DrvMemcpy3DAsync<TestType> memcpy3d_inty(i, i, i, HIP_AD_FORMAT_SIGNED_INT32);
-      memcpy3d_inty.HostArray_DrvMemcpy3DAsync();
-    }
-  }
-}
-
-/**
- * Test Description
- * ------------------------
- *  - This testcase verifies H2D copy of hipDrvMemcpy3DAsync API
- * Test source
- * ------------------------
- *  - unit/memory/hipDrvMemcpy3DAsync_old.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 6.0
- */
-
-TEST_CASE("Unit_hipDrvMemcpy3DAsync_HosttoDevice") {
-  CHECK_IMAGE_SUPPORT
-  DrvMemcpy3DAsync<float> memcpy3d_D2H_float(10, 10, 1, HIP_AD_FORMAT_FLOAT);
-  memcpy3d_D2H_float.HostDevice_DrvMemcpy3DAsync();
-}
-
-/**
- * Test Description
- * ------------------------
- *  - This testcase verifies negative scenarios of hipDrvMemcpy3DAsync API
- * Test source
- * ------------------------
- *  - unit/memory/hipDrvMemcpy3DAsync_old.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 6.0
- */
-
-#if HT_NVIDIA
-TEST_CASE("Unit_hipDrvMemcpy3DAsync_Negative") {
-  DrvMemcpy3DAsync<float> memcpy3d(10, 10, 1, HIP_AD_FORMAT_FLOAT);
-  memcpy3d.NegativeTests();
-}
-#endif
-
-/**
- * Test Description
- * ------------------------
- *  - This testcase verifies extent validation scenarios of
-      hipDrvMemcpy3DAsync API
- * Test source
- * ------------------------
- *  - unit/memory/hipDrvMemcpy3DAsync_old.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 6.0
- */
-
-TEST_CASE("Unit_hipDrvMemcpy3DAsync_ExtentValidation") {
-  CHECK_IMAGE_SUPPORT
-  DrvMemcpy3DAsync<float> memcpy3d(10, 10, 1, HIP_AD_FORMAT_FLOAT);
-  memcpy3d.Extent_Validation();
-}
 
 /**
  * Test Description
@@ -542,7 +446,7 @@ TEST_CASE("Unit_hipDrvMemcpy3DAsync_ExtentValidation") {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipDrvMemcpy3DAsync_H2DDeviceContextChange", "[multigpu]") {
+HIP_TEST_CASE(Unit_hipDrvMemcpy3DAsync_H2DDeviceContextChange) {
   CHECK_IMAGE_SUPPORT
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
@@ -567,8 +471,7 @@ TEST_CASE("Unit_hipDrvMemcpy3DAsync_H2DDeviceContextChange", "[multigpu]") {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipDrvMemcpy3DAsync_Host2ArrayDeviceContextChange",
-          "[multigpu]") {
+HIP_TEST_CASE(Unit_hipDrvMemcpy3DAsync_Host2ArrayDeviceContextChange) {
   CHECK_IMAGE_SUPPORT
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
@@ -596,8 +499,7 @@ TEST_CASE("Unit_hipDrvMemcpy3DAsync_Host2ArrayDeviceContextChange",
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipDrvMemcpy3DAsync_multiDevice_Basic_Size_Test",
-          "[multigpu]") {
+HIP_TEST_CASE(Unit_hipDrvMemcpy3DAsync_multiDevice_Basic_Size_Test) {
   CHECK_IMAGE_SUPPORT
   constexpr int size_128b = 128, size_256b = 256;
   int numDevices = 0;

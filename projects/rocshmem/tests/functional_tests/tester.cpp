@@ -26,6 +26,7 @@
 
 #include <hip/hip_runtime.h>
 
+#include <cstdlib>
 #include <functional>
 #include <iostream>
 #include <rocshmem/rocshmem.hpp>
@@ -64,6 +65,9 @@
 #include "wavefront_primitives.hpp"
 #include "workgroup_primitives.hpp"
 #include "flood_tester.hpp"
+#include "flood_amo_tester.hpp"
+#include "hipmodule_init_tester.hpp"
+#include "device_bitcode_tester.hpp"
 
 #include "backend_bc.hpp"
 extern Backend* backend;
@@ -617,6 +621,26 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       if (rank == 0) std::cout << "Flood G (multidirectional) ###" << std::endl;
       testers.push_back(new FloodTester(args));
       return testers;
+    case HipModuleInitTestType:
+      if (rank == 0) std::cout << "HIP Module Init Test ###" << std::endl;
+      testers.push_back(new HipModuleInitTester(args));
+      return testers;
+    case FloodAddTestType:
+      if (rank == 0) std::cout << "Flood Add (multidirectional) ###" << std::endl;
+      testers.push_back(new FloodAmoTester(args));
+      return testers;
+    case FloodFAddTestType:
+      if (rank == 0) std::cout << "Flood FAdd (multidirectional) ###" << std::endl;
+      testers.push_back(new FloodAmoTester(args));
+      return testers;
+    case FloodWaitAmoTestType:
+      if (rank == 0) std::cout << "Flood WaitAdd (multidirectional) ###" << std::endl;
+      testers.push_back(new FloodAmoTester(args));
+      return testers;
+    case DeviceBitcodeTestType:
+      if (rank == 0) std::cout << "Device Bitcode Test ###" << std::endl;
+      testers.push_back(new DeviceBitcodeTester(args));
+      return testers;
     default:
       if (rank == 0) std::cout << "Empty Test ###" << std::endl;
       return testers;
@@ -739,6 +763,11 @@ bool Tester::peLaunchesKernel() {
     case FloodGetTestType:
     case FloodGetNBITestType:
     case FloodGTestType:
+    case HipModuleInitTestType:
+    case FloodAddTestType:
+    case FloodFAddTestType:
+    case FloodWaitAmoTestType:
+    case DeviceBitcodeTestType:
       is_launcher = true;
       break;
     default:
@@ -788,7 +817,7 @@ void Tester::print(uint64_t size) {
     _print_header = 0;
   }
 
-  printf("%-*lu%-*lu%-*d%*.*f%*.*f%*.*f\n",
+  printf("%-*lu%-*lu%-*zu%*.*f%*.*f%*.*f\n",
          15, volume,
          15, size,
          15, num_timed_msgs,

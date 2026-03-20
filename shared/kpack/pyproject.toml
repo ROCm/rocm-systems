@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rocm-kpack"
+version = "0.1.0"
+description = "Kernel packaging and compression tool for ROCm"
+authors = [{ name = "Stella Laurenzo", email = "slaurenz@amd.com" }]
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "zstandard>=0.20.0",
+]
+
+[tool.setuptools]
+packages = ["rocm_kpack"]
+
+[tool.setuptools.package-dir]
+"" = "python"
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-ra"
+
+[tool.coverage.run]
+source = ["python/rocm_kpack"]
+
+[tool.coverage.report]
+show_missing = true

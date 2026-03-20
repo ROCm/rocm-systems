@@ -26,7 +26,7 @@
 #define LIBRARY_SRC_GDA_BACKEND_HPP_
 
 #include <dlfcn.h>
-#include <infiniband/verbs.h>
+#include "ibv_core.hpp"
 
 #include "backend_bc.hpp"
 #include "containers/free_list_impl.hpp"
@@ -96,6 +96,7 @@ class GDABackend : public Backend {
   std::vector<struct bnxt_host_qp> bnxt_qps;
   std::vector<struct bnxt_host_cq> bnxt_scqs;
   std::vector<struct bnxt_host_cq> bnxt_rcqs;
+  HIPAllocator *qp_allocator_{nullptr};
   /* GDA_BNXT END */
 
   /* GDA_IONIC & GDA_MLX5 START */
@@ -472,11 +473,6 @@ class GDABackend : public Backend {
    * @brief Size of the bitmask
    */
   int team_bitmask_size_{-1};
-
-  /**
-   * Fine grained memory allocator for buffers used in collectives Routines
-   */
-  HIPDefaultFinegrainedAllocator fine_grained_allocator_ {};
 
   /**
    * @brief Collective routines work/sync buffer size

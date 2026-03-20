@@ -28,7 +28,6 @@ import importlib.util
 import inspect
 import os
 import re
-import shutil
 import socket
 import sqlite3
 import subprocess
@@ -51,8 +50,20 @@ config["app_mat_mul_max"] = ["./tests/mat_mul_max"]
 config["app_hip_dynamic_shared"] = ["./tests/hip_dynamic_shared"]
 config["app_laplace_eqn"] = ["./tests/laplace_eqn", "-i", "5000"]
 config["app_laplace_eqn_iter"] = ["./tests/laplace_eqn", "-i", "15000"]
+config["app_laplace_eqn_insufficient"] = ["./tests/laplace_eqn", "-i", "3"]
+config["app_vcopy_multikernel_iter"] = [
+    "./tests/vcopy",
+    "-n",
+    "1048576",
+    "-b",
+    "256",
+    "-i",
+    "500",
+    "--multikernel",
+]
 config["app_mpi_aware_laplace_eqn"] = ["./tests/mpi_aware_laplace_eqn", "-i", "5"]
-config["rocflop"] = ["./tests/rocflop", "--device", "0"]
+config["rocflop"] = ["./tests/rocflop", "--device", "0", "--fp16"]
+config["torch_test_app"] = ["python3", "./tests/simple_net.py"]
 config["cleanup"] = True
 config["COUNTER_LOGGING"] = False
 config["METRIC_COMPARE"] = False
@@ -1311,20 +1322,24 @@ def test_analyze_rocpd(
     from utils.analysis_orm import (
         Dispatch,
         Kernel,
+        KernelMetricValue,
+        KernelRooflineData,
         Metadata,
         MetricDefinition,
-        MetricValue,
-        RooflineData,
         Workload,
+        WorkloadMetricValue,
+        WorkloadRooflineData,
     )
 
     table_name_map = {
         "compute_workload": Workload,
         "compute_metric_definition": MetricDefinition,
-        "compute_roofline_data": RooflineData,
+        "compute_kernel_roofline_data": KernelRooflineData,
+        "compute_workload_roofline_data": WorkloadRooflineData,
         "compute_dispatch": Dispatch,
         "compute_kernel": Kernel,
-        "compute_metric_value": MetricValue,
+        "compute_kernel_metric_value": KernelMetricValue,
+        "compute_workload_metric_value": WorkloadMetricValue,
         "compute_metadata": Metadata,
     }
 
@@ -1427,50 +1442,17 @@ def test_roof_workload_dir_validation(binary_handler_profile_rocprof_compute):
 
 
 @pytest.mark.roofline_1
-def test_roofline_empty_kernel_names_handling(binary_handler_profile_rocprof_compute):
-    """
-    Test roofline behavior when kernel filter doesn't match any
-    kernels during profiling.
-
-    When profiling with a non-matching kernel filter, the workload
-    still executes and profiling data is collected for all kernels.
-    However, when roofline attempts to filter the collected data
-    to match the requested kernel name, it finds no match and
-    produces an error.
-    """
-    if soc in ("MI100"):
-        pytest.skip("Skipping roofline test for MI100")
-        return
-
-    options = [
-        "--device",
-        "0",
-        "--roof-only",
-        "--kernel",
-        "nonexistent_kernel_name_that_should_not_match_anything",
-    ]
-    workload_dir = test_utils.get_output_dir()
-
-    returncode = binary_handler_profile_rocprof_compute(
-        config, workload_dir, options, check_success=False, roof=True
-    )
-
-    assert returncode == 1, f"Expected error (returncode=1), got {returncode}"
-
-    html_files = list(Path(workload_dir).glob("empirRoof_*.html"))
-    assert len(html_files) == 0, (
-        "No roofline HTML should be generated when no kernels match"
-    )
-
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.roofline_1
 def test_roofline_kernel_filter(binary_handler_profile_rocprof_compute):
     """
     Test roofline multi-attempt profiling with `--kernel`
     Expect to be able to re-profile from same workload if kernels are valid.
-    (Validity of --kernels tested in test_roofline_kernel_filter_error_handling already)
+
+    Roofline now takes in a dataframe that should already have filtering applied.
+    Any invald kernels should be handled prior to roof activity.
+    Check the following cases:
+    - no valid kernels
+    - one valid kernel
+    - 2 kernels, one valid and one invalid
     """
     if soc in ("MI100"):
         pytest.skip("Skipping roofline test for MI100")
@@ -1487,18 +1469,50 @@ def test_roofline_kernel_filter(binary_handler_profile_rocprof_compute):
         config, workload_dir, options, check_success=True, roof=True
     )
     # Don't clean output dir, use same workload
-    options.extend(["--kernel", config["kernel_name_1"]])
+    # Test only non-existent kernel: result should be passing
+    # Dataframe given to roofline should just be all available kernels with no filtering
+    options_bad = options.copy()
+    options_bad.extend([
+        "--kernel",
+        "nonexistent_kernel_name_that_should_not_match_anything",
+    ])
     returncode = binary_handler_profile_rocprof_compute(  # noqa: F841
-        config, workload_dir, options, check_success=True, roof=True
+        config,
+        workload_dir,
+        options_bad,
+        check_success=True,
+        roof=True,
     )
+    assert returncode == 0
 
-    # Test nonexistent kernel on roof profile using existing profiling data
-    # Since already profiled, throw error if non-existent kernel requested for roofline
-    options.append("nonexistent_kernel_name_that_should_not_match_anything")
+    # Test one good kernel using existing profiling data
+    # Result should be passing as usual
+    options_good = options.copy()
+    options_good.extend(["--kernel", config["kernel_name_1"]])
     returncode = binary_handler_profile_rocprof_compute(  # noqa: F841
-        config, workload_dir, options, check_success=False, roof=True
+        config, workload_dir, options_good, check_success=True, roof=True
     )
-    assert returncode == 1
+    assert returncode == 0
+
+    # Test one good and one nonexistent kernel using existing profiling data
+    # Result should be passing as usual
+    options_both = options.copy()
+    options_both.extend([
+        "--kernel",
+        config["kernel_name_1"],
+        "nonexistent_kernel_name_that_should_not_match_anything",
+    ])
+    returncode = binary_handler_profile_rocprof_compute(  # noqa: F841
+        config, workload_dir, options_both, check_success=False, roof=True
+    )
+    assert returncode == 0
+
+    # html file should still be present in all cases
+    # check at the end just in case that it is non-zero file
+    html_files = list(Path(workload_dir).glob("empirRoof_*.html"))
+    assert len(html_files) > 0, (
+        "Roofline HTML should still be generated when non-existent kernels are provided"
+    )
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -2981,9 +2995,11 @@ def test_iteration_multiplexing_kernel_launch_params(
 @pytest.mark.iteration_multiplexing_2
 def test_iteration_multiplexing_deterministic_counter_accuracy(
     binary_handler_profile_rocprof_compute,
+    binary_handler_analyze_rocprof_compute,
 ):
     # These metrics should cover the deterministic counters being checked
-    options = ["--block", "6.1.5", "6.1.6", "7.2.2", "10.1"]
+    # Block 4 (roofline) included to verify roofline counters under multiplexing
+    options = ["--block", "4", "6.1.5", "6.1.6", "7.2.2", "10.1"]
     workload_dir = test_utils.get_output_dir(param_id="no_iter_mplx")
     _ = binary_handler_profile_rocprof_compute(
         config,
@@ -3000,6 +3016,7 @@ def test_iteration_multiplexing_deterministic_counter_accuracy(
 
     options = [
         "--block",
+        "4",
         "6.1.5",
         "6.1.6",
         "7.2.2",
@@ -3023,6 +3040,7 @@ def test_iteration_multiplexing_deterministic_counter_accuracy(
 
     options = [
         "--block",
+        "4",
         "6.1.5",
         "6.1.6",
         "7.2.2",
@@ -3030,32 +3048,48 @@ def test_iteration_multiplexing_deterministic_counter_accuracy(
         "--iteration-multiplexing",
         "kernel_launch_params",
     ]
-    workload_dir = test_utils.get_output_dir(param_id="iter_mplx_params")
+    workload_dir_klp = test_utils.get_output_dir(param_id="iter_mplx_params")
     _ = binary_handler_profile_rocprof_compute(
         config,
-        workload_dir,
+        workload_dir_klp,
         options,
         check_success=True,
-        roof=False,
+        roof=True,
         app_name="app_laplace_eqn_iter",
     )
     counters_kernel_launch_params = test_utils.check_csv_files(
-        workload_dir, num_devices, num_kernels
+        workload_dir_klp, num_devices, num_kernels
     )["pmc_perf.csv"]
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
     assert are_deterministic_counters_equal(
         [counters_kernel, counters_kernel_launch_params], counters_no_multiplexing
     )
 
+    # Roofline assertions (MI100 doesn't support roofline)
+    if soc not in ("MI100"):
+        assert os.path.exists(f"{workload_dir_klp}/roofline.csv")
+        roofline_df = pd.read_csv(f"{workload_dir_klp}/roofline.csv")
+        assert len(roofline_df) >= num_devices
+
+    code = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "--path",
+        workload_dir_klp,
+    ])
+    assert code == 0
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir_klp)
+
 
 @pytest.mark.iteration_multiplexing_stochastic
 def test_iteration_multiplexing_stochastic_counter_accuracy(
     binary_handler_profile_rocprof_compute,
+    binary_handler_analyze_rocprof_compute,
 ):
     workload_dir = test_utils.get_output_dir(param_id="no_iter_mplx")
     # These metrics should cover the L1 cache stochastic counters
-    options = ["--block", "16.1", "16.3"]
+    # Block 4 (roofline) included to verify roofline counters under multiplexing
+    options = ["--block", "4", "16.1", "16.3"]
     _ = binary_handler_profile_rocprof_compute(
         config,
         workload_dir,
@@ -3069,7 +3103,14 @@ def test_iteration_multiplexing_stochastic_counter_accuracy(
     )["pmc_perf.csv"]
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
-    options = ["--block", "16.1", "16.3", "--iteration-multiplexing", "kernel"]
+    options = [
+        "--block",
+        "4",
+        "16.1",
+        "16.3",
+        "--iteration-multiplexing",
+        "kernel",
+    ]
     workload_dir = test_utils.get_output_dir(param_id="iter_mplx_kernel")
     _ = binary_handler_profile_rocprof_compute(
         config,
@@ -3086,28 +3127,43 @@ def test_iteration_multiplexing_stochastic_counter_accuracy(
 
     options = [
         "--block",
+        "4",
         "16.1",
         "16.3",
         "--iteration-multiplexing",
         "kernel_launch_params",
     ]
-    workload_dir = test_utils.get_output_dir(param_id="iter_mplx_params")
+    workload_dir_klp = test_utils.get_output_dir(param_id="iter_mplx_params")
     _ = binary_handler_profile_rocprof_compute(
         config,
-        workload_dir,
+        workload_dir_klp,
         options,
         check_success=True,
-        roof=False,
+        roof=True,
         app_name="app_laplace_eqn_iter",
     )
     counters_kernel_launch_params = test_utils.check_csv_files(
-        workload_dir, num_devices, num_kernels
+        workload_dir_klp, num_devices, num_kernels
     )["pmc_perf.csv"]
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
     assert are_stochastic_counters_similar(
         [counters_kernel, counters_kernel_launch_params], counters_no_multiplexing
     )
+
+    # Roofline assertions (MI100 doesn't support roofline)
+    if soc not in ("MI100"):
+        assert os.path.exists(f"{workload_dir_klp}/roofline.csv")
+        roofline_df = pd.read_csv(f"{workload_dir_klp}/roofline.csv")
+        assert len(roofline_df) >= num_devices
+
+    code = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "--path",
+        workload_dir_klp,
+    ])
+    assert code == 0
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir_klp)
 
 
 # Not part of automated test runs since testing all counters is expensive
@@ -3165,6 +3221,100 @@ def test_iteration_multiplexing_all_counter_accuracy(
     )
 
 
+@pytest.mark.iteration_multiplexing_2
+def test_iteration_multiplexing_insufficient_dispatches(
+    binary_handler_profile_rocprof_compute,
+    binary_handler_analyze_rocprof_compute,
+    capsys,
+):
+    """Verify graceful degradation when dispatches are too few for full
+    counter coverage under iteration multiplexing.
+    """
+    options = [
+        "--iteration-multiplexing",
+        "kernel_launch_params",
+    ]
+    workload_dir = test_utils.get_output_dir(param_id="iter_mplx_insufficient")
+    binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir,
+        options,
+        check_success=True,
+        roof=False,
+        app_name="app_laplace_eqn_insufficient",
+    )
+
+    assert test_utils.check_file_pattern(
+        "kernels_with_missing_counters",
+        f"{workload_dir}/profiling_config.yaml",
+    )
+
+    code = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "--path",
+        workload_dir,
+    ])
+    assert code == 0
+
+    captured = capsys.readouterr()
+    assert "missing counter data" in captured.out
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.iteration_multiplexing_2
+def test_iteration_multiplexing_data_types(
+    binary_handler_profile_rocprof_compute,
+    binary_handler_analyze_rocprof_compute,
+):
+    """Verify roofline analysis with different data types (FP32 and FP16)
+    on iteration-multiplexed profiling data.
+    """
+    if soc in ("MI100"):
+        pytest.skip("Roofline not supported on MI100")
+        return
+
+    options = [
+        "--block",
+        "4",
+        "--iteration-multiplexing",
+        "kernel_launch_params",
+    ]
+    workload_dir = test_utils.get_output_dir(param_id="iter_mplx_dtypes")
+    binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir,
+        options,
+        check_success=True,
+        roof=True,
+        app_name="app_laplace_eqn",
+    )
+
+    assert os.path.exists(f"{workload_dir}/roofline.csv")
+    roofline_df = pd.read_csv(f"{workload_dir}/roofline.csv")
+    assert len(roofline_df) >= num_devices
+
+    code_fp32 = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "--path",
+        workload_dir,
+        "--roofline-data-type",
+        "FP32",
+    ])
+    assert code_fp32 == 0
+
+    code_fp16 = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "--path",
+        workload_dir,
+        "--roofline-data-type",
+        "FP16",
+    ])
+    assert code_fp16 == 0
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
 skip_if_no_torch_gpu = pytest.mark.skipif(
     (
         importlib.util.find_spec("torch") is None
@@ -3175,57 +3325,30 @@ skip_if_no_torch_gpu = pytest.mark.skipif(
 
 
 @skip_if_no_torch_gpu
-@pytest.mark.torch_operators
-def test_torch_trace_profile(binary_handler_profile_rocprof_compute):
+@pytest.mark.torch_trace
+def test_torch_trace_profile(
+    binary_handler_profile_rocprof_compute,
+    binary_handler_analyze_rocprof_compute,
+    capsys,
+):
     """
-    Test profiling a PyTorch application with --torch-trace option.
-    Verifies that all required files are generated and counter values are valid.
-    NOTE: Not included in the test suite since this requires PyTorch installation.
+    Test profile and analyze flow for PyTorch torch-trace.
+
+    Runs profiling with --torch-trace, verifies profile outputs (pmc_perf, marker
+    and counter CSVs), then runs analyze with --list-torch-operators and
+    --torch-operator (PurePosixPath glob patterns like *relu, all), and verifies
+    torch_trace directory, consolidated CSV contents (hierarchy, kernel, counters),
+    and CLI output format (call tree grouped by source location, aggregated stats,
+    kernel IDs, sort order).
+    Requires PyTorch and GPU; not included in default suite.
     """
-    workload_dir = test_utils.get_output_dir(param_id="torch_ops")
-    Path(workload_dir).mkdir(parents=True, exist_ok=True)
-    torch_app_path = Path(workload_dir) / "test_torch_app.py"
+    workload_dir = test_utils.get_output_dir(param_id="torch_trace")
 
-    torch_app_code = """
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-
-class SimpleNet(nn.Module):
-    def __init__(self):
-        super(SimpleNet, self).__init__()
-        self.fc1 = nn.Linear(10, 20)
-        self.fc2 = nn.Linear(20, 10)
-    def forward(self, x):
-        x = self.fc1(x)
-        x = F.relu(x)
-        x = self.fc2(x)
-        return x
-
-if __name__ == "__main__":
-    if not torch.cuda.is_available():
-        import sys
-        print("GPU is required for this test. Exiting.")
-        sys.exit(1)
-    model = SimpleNet()
-    model = model.cuda()
-    x = torch.randn(5, 10).cuda()
-    # Run a few iterations
-    for epoch in range(1):
-        output = model(x)
-        loss = output.sum()
-        loss.backward()
-        print("Training completed")
-"""
-
-    with open(torch_app_path, "w") as f:
-        f.write(torch_app_code)
-
-    config["torch_test_app"] = ["python3", str(torch_app_path)]
-
-    # Profile with --torch-trace option
+    # --torch-trace needs --experimental for profiling
     options = [
+        "--experimental",
         "--torch-trace",
+        "--iteration-multiplexing",
     ]
 
     returncode = binary_handler_profile_rocprof_compute(
@@ -3235,34 +3358,33 @@ if __name__ == "__main__":
         check_success=True,
         app_name="torch_test_app",
     )
+
+    # ---- Verify profiling output (checks 1–5) ----
+
+    # 1. Profiling completed successfully
     assert returncode == 0, "Profiling the torch application failed"
-    # Verify files are generated
-    # 1. Check basic CSV files
+
+    # 2. pmc_perf.csv generated
     num_devices = config.get("num_devices", 1)
     file_dict = test_utils.check_csv_files(workload_dir, num_devices, 1)
     assert "pmc_perf.csv" in file_dict, "pmc_perf.csv not generated"
 
-    # 2. Look for corresponding marker_api_trace.csv file
-    # and counter_collection.csv file in workload_dir/ and workload/*/
+    # 3. Marker/counter CSV pairs exist and counts match
     marker_api_trace_files = list(Path(workload_dir).glob("**/*marker_api_trace.csv"))
     counter_collection_files = list(
         Path(workload_dir).glob("**/*counter_collection.csv")
     )
-    # Check if there is one-to-one mapping between marker_api_trace
-    # and counter_collection files.
-    # They should be present in the same subdirectories.
     assert len(marker_api_trace_files) == len(counter_collection_files), (
         "Mismatch in number of marker_api_trace.csv and counter_collection.csv files"
     )
     for marker_file in marker_api_trace_files:
-        # Build corresponding counter_collection file path by replacing filename
         corresponding_counter_file = marker_file.parent / marker_file.name.replace(
             "marker_api_trace", "counter_collection"
         )
         assert corresponding_counter_file.exists(), (
             f"counter_collection.csv not found for {marker_file}"
         )
-        # Check marker_api_trace.csv
+        # 4. marker_api_trace CSVs: required columns and non-empty rows
         expected_marker_columns = {
             "Domain",
             "Function",
@@ -3288,7 +3410,7 @@ if __name__ == "__main__":
                 assert row["Start_Timestamp"], f"Empty Start_Timestamp in {marker_file}"
                 assert row["End_Timestamp"], f"Empty End_Timestamp in {marker_file}"
             assert found_row, f"{marker_file} is empty"
-        # Check counter_collection.csv
+        # 5. counter_collection CSVs: required columns and non-empty rows
         expected_counter_columns = {
             "Correlation_Id",
             "Kernel_Name",
@@ -3331,59 +3453,225 @@ if __name__ == "__main__":
 
             assert found_row, f"{corresponding_counter_file} is empty"
 
-    destination_dir = test_utils.get_output_dir(param_id="torch_ops_analyze")
-    # Saving the profiler output to analyze with the torch trace analyzer script
-    shutil.copytree(workload_dir, destination_dir, dirs_exist_ok=True)
+    # Flush any profiling output so capsys captures only the analyze output
+    capsys.readouterr()
+
+    # ---- Verify analysis output from --list-torch-operators (checks 6–8) ----
+
+    # 6. Analyze with --list-torch-operators succeeds
+    returncode_analyze = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--path",
+        workload_dir,
+        "--list-torch-operators",
+    ])
+    assert returncode_analyze == 0, "Analyze with --list-torch-operators failed"
+
+    list_output = capsys.readouterr().out
+
+    # 7. torch_trace directory created with consolidated.csv
+    torch_trace_dir = Path(workload_dir) / "torch_trace"
+    assert torch_trace_dir.exists(), "torch_trace directory not created"
+
+    consolidated_csv = torch_trace_dir / "consolidated.csv"
+    assert consolidated_csv.exists(), "consolidated.csv not found in torch_trace"
+
+    # 8. Consolidated CSV contains hierarchy, kernel names, and counter values
+    df = pd.read_csv(consolidated_csv)
+    assert not df.empty, "consolidated.csv is empty"
+    assert "Operator_Name" in df.columns, "Operator_Name column missing"
+    hierarchy_present = (
+        df["Operator_Name"].apply(lambda x: "/" in str(x) or "::" in str(x)).any()
+    )
+    assert hierarchy_present, "No hierarchy information in consolidated.csv"
+    assert "Kernel_Name" in df.columns, "Kernel_Name missing"
+    assert df["Kernel_Name"].notnull().all() and (df["Kernel_Name"] != "").all(), (
+        "Empty Kernel_Name in consolidated.csv"
+    )
+    assert "Counter_Value" in df.columns, "Counter_Value column missing"
+    assert df["Counter_Value"].notnull().all()
+    assert (df["Counter_Value"] != "").all(), "Empty Counter_Value in consolidated.csv"
+
+    # ---- Verify --list-torch-operators CLI output format (checks 9–14) ----
+
+    # 9. Banner
+    assert "PyTorch Operator Call Tree:" in list_output, "Missing banner line"
+
+    # 10. Source-location grouping (file:line headers)
+    location_headers = re.findall(
+        r"^(\S+:\d+)\s+\(kernel_launches:", list_output, re.MULTILINE
+    )
+    assert location_headers, "No source-location headers found in output"
+
+    # 11. Aggregated stats on tree nodes
+    assert re.search(r"\(kernel_launches:\s+\d+,\s+total_duration:", list_output), (
+        "No aggregated stats found in output"
+    )
+
+    # 12. Kernel IDs
+    kernel_ids = re.findall(r"\(id (\d+)\)", list_output)
+    assert kernel_ids, "No kernel IDs found in output"
+
+    # 13. Kernel launch durations
+    assert re.search(r"kernel_launches:\s+\d+,\s+total_duration:", list_output), (
+        "No kernel duration info in output"
+    )
+
+    # 14. Source locations sorted by descending total duration
+    location_durations = re.findall(
+        r"^(\S+:\d+)\s+\(kernel_launches:\s+\d+,\s+total_duration:\s+([\d.]+)\s+(ms|us)\)",
+        list_output,
+        re.MULTILINE,
+    )
+    assert location_durations, "No location durations found for sort-order check"
+    durations_ms = [
+        float(val) if unit == "ms" else float(val) / 1000.0
+        for _, val, unit in location_durations
+    ]
+    assert durations_ms == sorted(durations_ms, reverse=True), (
+        f"Source locations not sorted by descending duration: {location_durations}"
+    )
+
+    # 15. --list-torch-operators succeeds at every --kernel-verbose level 0-4
+    #     (level 5 is the baseline run above)
+    for verbose_level in range(5):
+        capsys.readouterr()
+        rc = binary_handler_analyze_rocprof_compute([
+            "--experimental",
+            "analyze",
+            "--path",
+            workload_dir,
+            "--list-torch-operators",
+            "--kernel-verbose",
+            str(verbose_level),
+        ])
+        assert rc == 0, (
+            f"--list-torch-operators failed with --kernel-verbose {verbose_level}"
+        )
+
+    # ---- Verify analysis output from --torch-operator (check 16) ----
+
+    # Analyze with --torch-operator needs --experimental flag
+    returncode_analyze_relu = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--path",
+        workload_dir,
+        "--torch-operator",
+        "*relu",
+    ])
+    # 16. Analyze with --torch-operator *relu succeeds
+    assert returncode_analyze_relu == 0, "Analyze with --torch-operator *relu failed"
+
+    # --- Verify torch-operator cli output ---
+
+    # 17. Multi-component pattern matches operator in the middle of hierarchy.
+    #     torch.nn.functional.relu is a wrapper that delegates to torch.relu;
+    #     only the leaf operator appears in consolidated trace, so we use
+    #     wildcards to match through the hierarchy.
+    capsys.readouterr()
+    rc_exact = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--path",
+        workload_dir,
+        "--torch-operator",
+        "*/torch.nn.functional.relu/*",
+    ])
+    assert rc_exact == 0, (
+        "Analyze with --torch-operator */torch.nn.functional.relu/* failed"
+    )
+    out_exact = capsys.readouterr().out
+    assert "Matched PyTorch Operators" in out_exact, (
+        "Expected 'Matched PyTorch Operators' header in --torch-operator output"
+    )
+    assert "kernel_launches" in out_exact, (
+        "Expected call tree with kernel_launches stats in --torch-operator output"
+    )
+
+    # 18. Glob wildcard pattern (*relu) matches the relu operator
+    capsys.readouterr()
+    rc_glob = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--path",
+        workload_dir,
+        "--torch-operator",
+        "*relu",
+    ])
+    assert rc_glob == 0, "Analyze with --torch-operator *relu failed"
+    out_glob = capsys.readouterr().out
+    assert "kernel_launches" in out_glob, (
+        "Glob pattern *relu should match relu operator and render call tree"
+    )
+
+    # 19. 'all' keyword matches every operator
+    capsys.readouterr()
+    rc_all = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--path",
+        workload_dir,
+        "--torch-operator",
+        "all",
+    ])
+    assert rc_all == 0, "Analyze with --torch-operator all failed"
+    out_all = capsys.readouterr().out
+    assert "kernel_launches" in out_all, "'all' keyword should match operators"
+
+    # 20. --torch-operator + -k intersection succeeds and renders call tree
+    capsys.readouterr()
+    rc_intersect = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--path",
+        workload_dir,
+        "--torch-operator",
+        "all",
+        "-k",
+        "0",
+    ])
+    assert rc_intersect == 0, "Analyze with --torch-operator all -k 0 failed"
+    out_intersect = capsys.readouterr().out
+    assert "Matched PyTorch Operators" in out_intersect, (
+        "Expected call tree output with --torch-operator all -k 0"
+    )
+    assert "Torch operator filter selected" in out_intersect, (
+        "Expected filter-selection log confirming -k intersection"
+    )
+
+    # 21. Non-matching pattern degrades gracefully with a warning
+    capsys.readouterr()
+    rc_nomatch = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--path",
+        workload_dir,
+        "--torch-operator",
+        "nonexistent_operator_xyz",
+    ])
+    assert rc_nomatch == 0, (
+        "Analyze with non-matching --torch-operator should not crash"
+    )
+    out_nomatch = capsys.readouterr().out
+    assert "No operators matched" in out_nomatch, (
+        "Expected warning about no operators matched"
+    )
+
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @skip_if_no_torch_gpu
-@pytest.mark.torch_operators
+@pytest.mark.torch_trace
 def test_torch_trace_overhead(binary_handler_profile_rocprof_compute):
     """
     Measure overhead introduced by --torch-trace flag.
     Compares execution time with and without the flag to ensure overhead is acceptable.
-    NOTE: Not included in the test suite since this requires PyTorch installation.
+    NOTE: Not included in the test suite since this requires PyTorch and GPU.
     """
-    helper_dir = Path(test_utils.get_output_dir(param_id="torch_helper_script"))
-    helper_dir.mkdir(parents=True, exist_ok=True)
-    torch_app_path = helper_dir / "test_torch_app.py"
-    torch_app_code = """
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-
-class SimpleNet(nn.Module):
-    def __init__(self):
-        super(SimpleNet, self).__init__()
-        self.fc1 = nn.Linear(10, 20)
-        self.fc2 = nn.Linear(20, 10)
-    def forward(self, x):
-        x = self.fc1(x)
-        x = F.relu(x)
-        x = self.fc2(x)
-        return x
-
-if __name__ == "__main__":
-    if not torch.cuda.is_available():
-        import sys
-        print("GPU is required for this test. Exiting.")
-        sys.exit(1)
-    model = SimpleNet()
-    model = model.cuda()
-    x = torch.randn(5, 10).cuda()
-    # Run a few iterations
-    for epoch in range(1):
-        output = model(x)
-        loss = output.sum()
-        loss.backward()
-    print("Training completed")
-"""
-    with open(torch_app_path, "w") as f:
-        f.write(torch_app_code)
-    config["torch_test_app"] = ["python3", str(torch_app_path)]
     # Run WITHOUT --torch-trace (baseline)
-    workload_dir_baseline = test_utils.get_output_dir(param_id="torch_baseline")
+    workload_dir_baseline = test_utils.get_output_dir(param_id="torch_trace_baseline")
     start_baseline = time.time()
     returncode_baseline = binary_handler_profile_rocprof_compute(
         config,
@@ -3402,13 +3690,13 @@ if __name__ == "__main__":
         baseline_df["End_Timestamp"].max() - baseline_df["Start_Timestamp"].min()
     )
     test_utils.clean_output_dir(config["cleanup"], workload_dir_baseline)
-    # Run WITH --torch-trace
-    workload_dir_with_flag = test_utils.get_output_dir(param_id="torch_with_ops")
+    # Run WITH --torch-trace (requires --experimental)
+    workload_dir_with_flag = test_utils.get_output_dir(param_id="torch_trace_with_flag")
     start_with_flag = time.time()
     returncode_with_flag = binary_handler_profile_rocprof_compute(
         config,
         workload_dir_with_flag,
-        ["--torch-trace"],
+        ["--experimental", "--torch-trace"],
         check_success=True,
         roof=False,
         app_name="torch_test_app",
@@ -3605,8 +3893,38 @@ def test_multi_rank_warning_application_replay(
     assert "Multi-rank application detected" in output
     assert "Application replay mode" in output
     assert "--iteration-multiplexing" in output
-    assert "--block" in output
+    assert "--block" not in output
     assert "--set" in output
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.multi_rank
+def test_multi_rank_no_warning_with_iteration_multiplexing(
+    binary_handler_profile_rocprof_compute, monkeypatch
+):
+    """
+    Test that no application replay warning is printed when running a
+    multi-rank application with iteration multiplexing enabled.
+    """
+    monkeypatch.setenv("OMPI_COMM_WORLD_RANK", "0")
+
+    workload_dir = test_utils.get_output_dir()
+
+    options = ["--iteration-multiplexing"]
+
+    _, stdout, stderr = binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir,
+        options,
+        app_name="app_1",
+        capture_output=True,
+        check_success=False,
+    )
+
+    output = stdout + stderr
+    assert "Multi-rank application detected" not in output
+    assert "Application replay mode" not in output
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -3640,7 +3958,7 @@ def test_multi_rank_warning_pc_sampling(
     output = stdout + stderr
     assert "Multi-rank application detected with PC sampling enabled" in output
     assert "--iteration-multiplexing" in output
-    assert "--block" in output
+    assert "--block" not in output
     assert "--set" in output
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)

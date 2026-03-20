@@ -28,27 +28,43 @@ import unittest
 import common
 
 
+# ---------------------------------------------------------------------------
+# Per-ASIC test exclusions (mirrors amdsmitst.exclude for GTest)
+# Maps gfx target version -> set of test method names to skip.
+# ---------------------------------------------------------------------------
+GFX_FILTER = {
+    # SWDEV-306889 — aldebaran: TestFrequenciesRead / TestFrequenciesReadWrite
+    "gfx90a": {"test_clock_frequency"}
+}
+
+
 amdsmi_path = os.environ.get("AMDSMI_PATH", "/opt/rocm/share/amd_smi")
 if not os.path.exists(amdsmi_path):
-    raise FileNotFoundError(f"AMDSMI_PATH '{amdsmi_path}' does not exist. Please set the correct path in your environment.")
+    raise FileNotFoundError(
+        f"AMDSMI_PATH '{amdsmi_path}' does not exist. Please set the correct path in your environment."
+    )
 sys.path.append(amdsmi_path)
 
 try:
     import amdsmi
 except ImportError as exc:
-    raise ImportError(f'Could not import {amdsmi_path}') from exc
+    raise ImportError(f"Could not import {amdsmi_path}") from exc
+
 
 class TestAmdSmiInit(unittest.TestCase):
     def test_init(self):
         amdsmi.amdsmi_init()
         amdsmi.amdsmi_shut_down()
 
+
 class TestAmdSmiPythonInterface(unittest.TestCase):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
         self.verbose = verbose
-        self.max_num_physical_devices = amdsmi.amdsmi_interface.AMDSMI_MAX_NUM_XCP * amdsmi.amdsmi_interface.AMDSMI_MAX_DEVICES
+        self.max_num_physical_devices = (
+            amdsmi.amdsmi_interface.AMDSMI_MAX_NUM_XCP * amdsmi.amdsmi_interface.AMDSMI_MAX_DEVICES
+        )
         global has_info_printed
         if self.verbose and has_info_printed is False:
             # Execute the following to print the asic and board info once per test run
@@ -60,7 +76,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
             for i in range(0, len(processors)):
                 try:
                     # Print asic info
-                    msg = f'asic info(gpu={i})'
+                    msg = f"asic info(gpu={i})"
                     ret = amdsmi.amdsmi_get_gpu_asic_info(processors[i])
                     print(msg)
                     print(json.dumps(ret, sort_keys=False, indent=4), flush=True)
@@ -69,7 +85,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
             for i in range(0, len(processors)):
                 try:
                     # Print board info
-                    msg = f'board info(gpu={i})'
+                    msg = f"board info(gpu={i})"
                     ret = amdsmi.amdsmi_get_gpu_board_info(processors[i])
                     print(msg)
                     print(json.dumps(ret, sort_keys=False, indent=4), flush=True)
@@ -97,7 +113,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
         print(f"  vbios_info['build_date'] is: {vbios_info['build_date']}")
         print(f"  vbios_info['name'] is: {vbios_info['name']}")
         print(f"  vbios_info['version'] is: {vbios_info['version']}")
-        if 'boot_firmware' in vbios_info:
+        if "boot_firmware" in vbios_info:
             print(f"  vbios_info['boot_firmware'] is: {vbios_info['boot_firmware']}")
         else:
             print("  vbios_info['boot_firmware'] is: N/A")
@@ -116,39 +132,35 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
             except amdsmi.AmdSmiLibraryException as e:
                 self._check_exception(e)
                 continue
-            print("  asic_info['market_name'] is: {}".format(
-                asic_info['market_name']))
-            print("  asic_info['vendor_id'] is: {}".format(
-                asic_info['vendor_id']))
-            print("  asic_info['vendor_name'] is: {}".format(
-                asic_info['vendor_name']))
-            print("  asic_info['device_id'] is: {}".format(
-                asic_info['device_id']))
-            print("  asic_info['rev_id'] is: {}".format(
-                asic_info['rev_id']))
-            print("  asic_info['subsystem_id'] is: {}".format(
-                asic_info['subsystem_id']))
-            print("  asic_info['asic_serial'] is: {}".format(
-                asic_info['asic_serial']))
-            print("  asic_info['oam_id'] is: {}".format(
-                asic_info['oam_id']))
-            print("  asic_info['target_graphics_version'] is: {}".format(
-                asic_info['target_graphics_version']))
-            print("  asic_info['num_compute_units'] is: {}".format(
-                asic_info['num_compute_units']))
+            print("  asic_info['market_name'] is: {}".format(asic_info["market_name"]))
+            print("  asic_info['vendor_id'] is: {}".format(asic_info["vendor_id"]))
+            print("  asic_info['vendor_name'] is: {}".format(asic_info["vendor_name"]))
+            print("  asic_info['device_id'] is: {}".format(asic_info["device_id"]))
+            print("  asic_info['rev_id'] is: {}".format(asic_info["rev_id"]))
+            print("  asic_info['subsystem_id'] is: {}".format(asic_info["subsystem_id"]))
+            print("  asic_info['asic_serial'] is: {}".format(asic_info["asic_serial"]))
+            print("  asic_info['oam_id'] is: {}".format(asic_info["oam_id"]))
+            print(
+                "  asic_info['target_graphics_version'] is: {}".format(
+                    asic_info["target_graphics_version"]
+                )
+            )
+            print("  asic_info['num_compute_units'] is: {}".format(asic_info["num_compute_units"]))
             try:
                 print("\n###Test amdsmi_get_gpu_kfd_info \n")
                 kfd_info = amdsmi.amdsmi_get_gpu_kfd_info(processors[i])
             except amdsmi.AmdSmiLibraryException as e:
                 self._check_exception(e)
                 continue
-            print("  kfd_info['kfd_id'] is: {}".format(
-                kfd_info['kfd_id']))
-            print("  kfd_info['node_id'] is: {}".format(
-                kfd_info['node_id']))
-            print("  kfd_info['current_partition_id'] is: {}\n".format(
-                kfd_info['current_partition_id']))
+            print("  kfd_info['kfd_id'] is: {}".format(kfd_info["kfd_id"]))
+            print("  kfd_info['node_id'] is: {}".format(kfd_info["node_id"]))
+            print(
+                "  kfd_info['current_partition_id'] is: {}\n".format(
+                    kfd_info["current_partition_id"]
+                )
+            )
         print("\n")
+
     # amdsmi_get_vram_info should be supported on all ASICs
     def test_get_vram_info(self):
         processors = amdsmi.amdsmi_get_processor_handles()
@@ -160,21 +172,21 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
 
             vram_types = {
                 amdsmi.AmdSmiVramType.UNKNOWN: "UNKNOWN",
-                amdsmi.AmdSmiVramType.HBM:     "HBM",
-                amdsmi.AmdSmiVramType.HBM2:    "HBM2",
-                amdsmi.AmdSmiVramType.HBM2E:   "HBM2E",
-                amdsmi.AmdSmiVramType.HBM3:    "HBM3",
-                amdsmi.AmdSmiVramType.DDR2:    "DDR2",
-                amdsmi.AmdSmiVramType.DDR3:    "DDR3",
-                amdsmi.AmdSmiVramType.DDR4:    "DDR4",
-                amdsmi.AmdSmiVramType.GDDR1:   "GDDR1",
-                amdsmi.AmdSmiVramType.GDDR2:   "GDDR2",
-                amdsmi.AmdSmiVramType.GDDR3:   "GDDR3",
-                amdsmi.AmdSmiVramType.GDDR4:   "GDDR4",
-                amdsmi.AmdSmiVramType.GDDR5:   "GDDR5",
-                amdsmi.AmdSmiVramType.GDDR6:   "GDDR6",
-                amdsmi.AmdSmiVramType.GDDR7:   "GDDR7",
-                amdsmi.AmdSmiVramType.MAX:     "MAX"
+                amdsmi.AmdSmiVramType.HBM: "HBM",
+                amdsmi.AmdSmiVramType.HBM2: "HBM2",
+                amdsmi.AmdSmiVramType.HBM2E: "HBM2E",
+                amdsmi.AmdSmiVramType.HBM3: "HBM3",
+                amdsmi.AmdSmiVramType.DDR2: "DDR2",
+                amdsmi.AmdSmiVramType.DDR3: "DDR3",
+                amdsmi.AmdSmiVramType.DDR4: "DDR4",
+                amdsmi.AmdSmiVramType.GDDR1: "GDDR1",
+                amdsmi.AmdSmiVramType.GDDR2: "GDDR2",
+                amdsmi.AmdSmiVramType.GDDR3: "GDDR3",
+                amdsmi.AmdSmiVramType.GDDR4: "GDDR4",
+                amdsmi.AmdSmiVramType.GDDR5: "GDDR5",
+                amdsmi.AmdSmiVramType.GDDR6: "GDDR6",
+                amdsmi.AmdSmiVramType.GDDR7: "GDDR7",
+                amdsmi.AmdSmiVramType.MAX: "MAX",
             }
 
             try:
@@ -183,16 +195,15 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
             except amdsmi.AmdSmiLibraryException as e:
                 self._check_exception(e)
                 continue
-            print("  vram_info['vram_type'] is: {}".format(
-                vram_types[vram_info['vram_type']]))
-            print("  vram_info['vram_vendor'] is: {}".format(
-                vram_info['vram_vendor']))
-            print("  vram_info['vram_size'] is: {} MB".format(
-                vram_info['vram_size']))
-            print("  vram_info['vram_bit_width'] is: {}".format(
-                vram_info['vram_bit_width']))
-            print("  vram_info['vram_max_bandwidth'] is: {} GB/s".format(
-                vram_info['vram_max_bandwidth']))
+            print("  vram_info['vram_type'] is: {}".format(vram_types[vram_info["vram_type"]]))
+            print("  vram_info['vram_vendor'] is: {}".format(vram_info["vram_vendor"]))
+            print("  vram_info['vram_size'] is: {} MB".format(vram_info["vram_size"]))
+            print("  vram_info['vram_bit_width'] is: {}".format(vram_info["vram_bit_width"]))
+            print(
+                "  vram_info['vram_max_bandwidth'] is: {} GB/s".format(
+                    vram_info["vram_max_bandwidth"]
+                )
+            )
 
     # amdsmi_get_gpu_xcd_counter should be supported on all ASICs
     def test_get_xcd_counter(self):
@@ -208,8 +219,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
             except amdsmi.AmdSmiLibraryException as e:
                 self._check_exception(e)
                 continue
-            print("  xcd_counter['counter'] is: {}".format(
-                xcd_count))
+            print("  xcd_counter['counter'] is: {}".format(xcd_count))
 
     # amdsmi_get_gpu_bad_page_info is not supported in Navi2x, Navi3x
     def test_bad_page_info(self):
@@ -230,7 +240,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
             print("Number of bad pages: {}".format(len(bad_page_info)))
             j = 0
             for table_record in bad_page_info:
-                print("\ntable_record[\"value\"]" + str(table_record["value"]))
+                print('\ntable_record["value"]' + str(table_record["value"]))
                 print("Page: {}".format(j))
                 print("Page Address: " + str(table_record["page_address"]))
                 print("Page Size: " + str(table_record["page_size"]))
@@ -245,7 +255,11 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), self.max_num_physical_devices)
         for i in range(0, len(processors)):
-            print("\n\n###Test Processor {}, bdf: {}".format(i, amdsmi.amdsmi_get_gpu_device_bdf(processors[i])))
+            print(
+                "\n\n###Test Processor {}, bdf: {}".format(
+                    i, amdsmi.amdsmi_get_gpu_device_bdf(processors[i])
+                )
+            )
             try:
                 print("\n###Test amdsmi_interface.amdsmi_get_gpu_cache_info \n")
                 cache_info = amdsmi.amdsmi_interface.amdsmi_get_gpu_cache_info(processors[i])
@@ -256,11 +270,11 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
             if isinstance(cache_info, dict):
                 for key, value in cache_info.items():
                     print(f"{key}: {value}")
-                for cache_entry in cache_info.get('cache', []):
-                    self.assertIn('cache_size', cache_entry)
-                    self.assertIn('cache_level', cache_entry)
-                    self.assertIn('num_cache_instance', cache_entry)
-                    self.assertIn('max_num_cu_shared', cache_entry)
+                for cache_entry in cache_info.get("cache", []):
+                    self.assertIn("cache_size", cache_entry)
+                    self.assertIn("cache_level", cache_entry)
+                    self.assertIn("num_cache_instance", cache_entry)
+                    self.assertIn("max_num_cu_shared", cache_entry)
             else:
                 self.assertIsInstance(cache_info, dict)
 
@@ -305,11 +319,14 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
         print("\n")
 
     def test_nic_bdf_device_id(self):
-        common.Common._skip_if_missing(self, [
-                                "amdsmi_get_nic_processor_handles",
-                                "amdsmi_get_nic_info",
-                                "amdsmi_get_nic_device_uuid",
-                            ])
+        common.Common._skip_if_missing(
+            self,
+            [
+                "amdsmi_get_nic_processor_handles",
+                "amdsmi_get_nic_info",
+                "amdsmi_get_nic_device_uuid",
+            ],
+        )
         self.setUp()
         processors = amdsmi.amdsmi_get_nic_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
@@ -318,7 +335,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
             bdf = ""
             nic_info = amdsmi.amdsmi_get_nic_info(processors[i])
             if nic_info:
-                bdf = nic_info['bdf']
+                bdf = nic_info["bdf"]
             print("\n\n###Test nic Processor {}, bdf: {}".format(i, bdf))
             print("\n###Test amdsmi_get_processor_handle_from_bdf \n")
             processor = amdsmi.amdsmi_get_processor_handle_from_bdf(bdf)
@@ -329,11 +346,14 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
         self.tearDown()
 
     def test_switch_bdf_device_id(self):
-        common.Common._skip_if_missing(self, [
-                                "amdsmi_get_switch_processor_handles",
-                                "amdsmi_get_switch_device_bdf",
-                                "amdsmi_get_device_id",
-                            ])
+        common.Common._skip_if_missing(
+            self,
+            [
+                "amdsmi_get_switch_processor_handles",
+                "amdsmi_get_switch_device_bdf",
+                "amdsmi_get_device_id",
+            ],
+        )
         self.setUp()
         processors = amdsmi.amdsmi_get_switch_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
@@ -349,7 +369,6 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
         print()
         self.tearDown()
 
-
     def test_board_info(self):
         processors = amdsmi.amdsmi_get_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
@@ -363,16 +382,13 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
             except amdsmi.AmdSmiLibraryException as e:
                 self._check_exception(e)
                 continue
-            print("  board_info['model_number'] is: {}".format(
-                board_info['model_number']))
-            print("  board_info['product_serial'] is: {}".format(
-                board_info['product_serial']))
-            print("  board_info['fru_id'] is: {}".format(
-                board_info['fru_id']))
-            print("  board_info['manufacturer_name'] is: {}".format(
-                board_info['manufacturer_name']))
-            print("  board_info['product_name'] is: {}".format(
-                board_info['product_name']))
+            print("  board_info['model_number'] is: {}".format(board_info["model_number"]))
+            print("  board_info['product_serial'] is: {}".format(board_info["product_serial"]))
+            print("  board_info['fru_id'] is: {}".format(board_info["fru_id"]))
+            print(
+                "  board_info['manufacturer_name'] is: {}".format(board_info["manufacturer_name"])
+            )
+            print("  board_info['product_name'] is: {}".format(board_info["product_name"]))
         print("\n")
 
     def test_clock_frequency(self):
@@ -384,29 +400,30 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
             print("\n\n###Test Processor {}, bdf: {}".format(i, bdf))
             try:
                 print("\n###Test amdsmi_get_clk_freq \n")
-                clock_frequency = amdsmi.amdsmi_get_clk_freq(processors[i], amdsmi.AmdSmiClkType.SYS)
+                clock_frequency = amdsmi.amdsmi_get_clk_freq(
+                    processors[i], amdsmi.AmdSmiClkType.SYS
+                )
             except amdsmi.AmdSmiLibraryException as e:
                 self._check_exception(e)
                 continue
-            print("  SYS clock_frequency['num_supported']: {}".format(
-                clock_frequency['num_supported']))
-            print("  SYS clock_frequency['current']: {}".format(
-                clock_frequency['current']))
-            print("  SYS clock_frequency['frequency']: {}".format(
-                clock_frequency['frequency']))
+            print(
+                "  SYS clock_frequency['num_supported']: {}".format(
+                    clock_frequency["num_supported"]
+                )
+            )
+            print("  SYS clock_frequency['current']: {}".format(clock_frequency["current"]))
+            print("  SYS clock_frequency['frequency']: {}".format(clock_frequency["frequency"]))
             try:
                 clock_frequency = amdsmi.amdsmi_get_clk_freq(processors[i], amdsmi.AmdSmiClkType.DF)
             except amdsmi.AmdSmiLibraryException as e:
                 self._check_exception(e)
                 continue
-            print("  DF clock_frequency['num_supported']: {}".format(
-                clock_frequency['num_supported']))
-            print("  DF clock_frequency['current']: {}".format(
-                clock_frequency['current']))
-            print("  DF clock_frequency['frequency']: {}".format(
-                clock_frequency['frequency']))
+            print(
+                "  DF clock_frequency['num_supported']: {}".format(clock_frequency["num_supported"])
+            )
+            print("  DF clock_frequency['current']: {}".format(clock_frequency["current"]))
+            print("  DF clock_frequency['frequency']: {}".format(clock_frequency["frequency"]))
         print("\n")
-
 
     # amdsmi_get_clk_freq with AmdSmiClkType.DCEF is not supported in MI210, MI300A
     def test_clock_frequency_DCEF(self):
@@ -418,18 +435,20 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
             print("\n\n###Test Processor {}, bdf: {}".format(i, bdf))
             try:
                 print("\n###Test amdsmi_get_clk_freq \n")
-                clock_frequency = amdsmi.amdsmi_get_clk_freq(processors[i], amdsmi.AmdSmiClkType.DCEF)
+                clock_frequency = amdsmi.amdsmi_get_clk_freq(
+                    processors[i], amdsmi.AmdSmiClkType.DCEF
+                )
             except amdsmi.AmdSmiLibraryException as e:
                 self._check_exception(e)
                 continue
-            print("  DCEF clock_frequency['num_supported']: {}".format(
-                clock_frequency['num_supported']))
-            print("  DCEF clock_frequency['current']: {}".format(
-                clock_frequency['current']))
-            print("  DCEF clock_frequency['frequency']: {}".format(
-                clock_frequency['frequency']))
+            print(
+                "  DCEF clock_frequency['num_supported']: {}".format(
+                    clock_frequency["num_supported"]
+                )
+            )
+            print("  DCEF clock_frequency['current']: {}".format(clock_frequency["current"]))
+            print("  DCEF clock_frequency['frequency']: {}".format(clock_frequency["frequency"]))
         print("\n")
-
 
     def test_clock_info(self):
         processors = amdsmi.amdsmi_get_processor_handles()
@@ -440,35 +459,29 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
             print("\n\n###Test Processor {}, bdf: {}".format(i, bdf))
             try:
                 print("\n###Test amdsmi_get_clock_info \n")
-                clock_measure = amdsmi.amdsmi_get_clock_info(processors[i], amdsmi.AmdSmiClkType.GFX)
+                clock_measure = amdsmi.amdsmi_get_clock_info(
+                    processors[i], amdsmi.AmdSmiClkType.GFX
+                )
             except amdsmi.AmdSmiLibraryException as e:
                 self._check_exception(e)
                 continue
-            print("  Current clock for domain GFX is: {}".format(
-                clock_measure['clk']))
-            print("  Max clock for domain GFX is: {}".format(
-                clock_measure['max_clk']))
-            print("  Min clock for domain GFX is: {}".format(
-                clock_measure['min_clk']))
-            print("  Is GFX clock locked: {}".format(
-                clock_measure['clk_locked']))
-            print("  Is GFX clock in deep sleep: {}".format(
-                clock_measure['clk_deep_sleep']))
+            print("  Current clock for domain GFX is: {}".format(clock_measure["clk"]))
+            print("  Max clock for domain GFX is: {}".format(clock_measure["max_clk"]))
+            print("  Min clock for domain GFX is: {}".format(clock_measure["min_clk"]))
+            print("  Is GFX clock locked: {}".format(clock_measure["clk_locked"]))
+            print("  Is GFX clock in deep sleep: {}".format(clock_measure["clk_deep_sleep"]))
             try:
-                clock_measure = amdsmi.amdsmi_get_clock_info(processors[i], amdsmi.AmdSmiClkType.MEM)
+                clock_measure = amdsmi.amdsmi_get_clock_info(
+                    processors[i], amdsmi.AmdSmiClkType.MEM
+                )
             except amdsmi.AmdSmiLibraryException as e:
                 self._check_exception(e)
                 continue
-            print("  Current clock for domain MEM is: {}".format(
-                clock_measure['clk']))
-            print("  Max clock for domain MEM is: {}".format(
-                clock_measure['max_clk']))
-            print("  Min clock for domain MEM is: {}".format(
-                clock_measure['min_clk']))
-            print("  Is MEM clock in deep sleep: {}".format(
-                clock_measure['clk_deep_sleep']))
+            print("  Current clock for domain MEM is: {}".format(clock_measure["clk"]))
+            print("  Max clock for domain MEM is: {}".format(clock_measure["max_clk"]))
+            print("  Min clock for domain MEM is: {}".format(clock_measure["min_clk"]))
+            print("  Is MEM clock in deep sleep: {}".format(clock_measure["clk_deep_sleep"]))
         print("\n")
-
 
     # AmdSmiClkType.VCLK0 and DCLK0 are not supported in MI210
     def test_clock_info_vclk0_dclk0(self):
@@ -480,33 +493,28 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
             print("\n\n###Test Processor {}, bdf: {}".format(i, bdf))
             try:
                 print("\n###Test amdsmi_get_clock_info \n")
-                clock_measure = amdsmi.amdsmi_get_clock_info(processors[i], amdsmi.AmdSmiClkType.VCLK0)
+                clock_measure = amdsmi.amdsmi_get_clock_info(
+                    processors[i], amdsmi.AmdSmiClkType.VCLK0
+                )
             except amdsmi.AmdSmiLibraryException as e:
                 self._check_exception(e)
                 continue
-            print("  Current clock for domain VCLK0 is: {}".format(
-                clock_measure['clk']))
-            print("  Max clock for domain VCLK0 is: {}".format(
-                clock_measure['max_clk']))
-            print("  Min clock for domain VCLK0 is: {}".format(
-                clock_measure['min_clk']))
-            print("  Is VCLK0 clock in deep sleep: {}".format(
-                clock_measure['clk_deep_sleep']))
+            print("  Current clock for domain VCLK0 is: {}".format(clock_measure["clk"]))
+            print("  Max clock for domain VCLK0 is: {}".format(clock_measure["max_clk"]))
+            print("  Min clock for domain VCLK0 is: {}".format(clock_measure["min_clk"]))
+            print("  Is VCLK0 clock in deep sleep: {}".format(clock_measure["clk_deep_sleep"]))
             try:
-                clock_measure = amdsmi.amdsmi_get_clock_info(processors[i], amdsmi.AmdSmiClkType.DCLK0)
+                clock_measure = amdsmi.amdsmi_get_clock_info(
+                    processors[i], amdsmi.AmdSmiClkType.DCLK0
+                )
             except amdsmi.AmdSmiLibraryException as e:
                 self._check_exception(e)
                 continue
-            print("  Current clock for domain DCLK0 is: {}".format(
-                clock_measure['clk']))
-            print("  Max clock for domain DCLK0 is: {}".format(
-                clock_measure['max_clk']))
-            print("  Min clock for domain DCLK0 is: {}".format(
-                clock_measure['min_clk']))
-            print("  Is DCLK0 clock in deep sleep: {}".format(
-                clock_measure['clk_deep_sleep']))
+            print("  Current clock for domain DCLK0 is: {}".format(clock_measure["clk"]))
+            print("  Max clock for domain DCLK0 is: {}".format(clock_measure["max_clk"]))
+            print("  Min clock for domain DCLK0 is: {}".format(clock_measure["min_clk"]))
+            print("  Is DCLK0 clock in deep sleep: {}".format(clock_measure["clk_deep_sleep"]))
         print("\n")
-
 
     # AmdSmiClkType.VCLK1 and DCLK1 are not supported in MI210, MI300A, MI300X
     def test_clock_info_vclk1_dclk1(self):
@@ -518,33 +526,28 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
             print("\n\n###Test Processor {}, bdf: {}".format(i, bdf))
             try:
                 print("\n###Test amdsmi_get_clock_info \n")
-                clock_measure = amdsmi.amdsmi_get_clock_info(processors[i], amdsmi.AmdSmiClkType.VCLK1)
+                clock_measure = amdsmi.amdsmi_get_clock_info(
+                    processors[i], amdsmi.AmdSmiClkType.VCLK1
+                )
             except amdsmi.AmdSmiLibraryException as e:
                 self._check_exception(e)
                 continue
-            print("  Current clock for domain VCLK1 is: {}".format(
-                clock_measure['clk']))
-            print("  Max clock for domain VCLK1 is: {}".format(
-                clock_measure['max_clk']))
-            print("  Min clock for domain VCLK1 is: {}".format(
-                clock_measure['min_clk']))
-            print("  Is VCLK1 clock in deep sleep: {}".format(
-                clock_measure['clk_deep_sleep']))
+            print("  Current clock for domain VCLK1 is: {}".format(clock_measure["clk"]))
+            print("  Max clock for domain VCLK1 is: {}".format(clock_measure["max_clk"]))
+            print("  Min clock for domain VCLK1 is: {}".format(clock_measure["min_clk"]))
+            print("  Is VCLK1 clock in deep sleep: {}".format(clock_measure["clk_deep_sleep"]))
             try:
-                clock_measure = amdsmi.amdsmi_get_clock_info(processors[i], amdsmi.AmdSmiClkType.DCLK1)
+                clock_measure = amdsmi.amdsmi_get_clock_info(
+                    processors[i], amdsmi.AmdSmiClkType.DCLK1
+                )
             except amdsmi.AmdSmiLibraryException as e:
                 self._check_exception(e)
                 continue
-            print("  Current clock for domain DCLK1 is: {}".format(
-                clock_measure['clk']))
-            print("  Max clock for domain DCLK1 is: {}".format(
-                clock_measure['max_clk']))
-            print("  Min clock for domain DCLK1 is: {}".format(
-                clock_measure['min_clk']))
-            print("  Is DCLK1 clock in deep sleep: {}".format(
-                clock_measure['clk_deep_sleep']))
+            print("  Current clock for domain DCLK1 is: {}".format(clock_measure["clk"]))
+            print("  Max clock for domain DCLK1 is: {}".format(clock_measure["max_clk"]))
+            print("  Min clock for domain DCLK1 is: {}".format(clock_measure["min_clk"]))
+            print("  Is DCLK1 clock in deep sleep: {}".format(clock_measure["clk_deep_sleep"]))
         print("\n")
-
 
     def test_driver_info(self):
         processors = amdsmi.amdsmi_get_processor_handles()
@@ -561,7 +564,6 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
                 continue
             print("Driver info:  {}".format(driver_info))
         print("\n")
-
 
     # amdsmi_get_gpu_ecc_count is not supported in Navi2x, Navi3x, MI210, MI300A
     def test_ecc_count_block(self):
@@ -589,7 +591,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
             "JPEG": amdsmi.AmdSmiGpuBlock.JPEG,
             "IH": amdsmi.AmdSmiGpuBlock.IH,
             "MPIO": amdsmi.AmdSmiGpuBlock.MPIO,
-            "RESERVED": amdsmi.AmdSmiGpuBlock.RESERVED
+            "RESERVED": amdsmi.AmdSmiGpuBlock.RESERVED,
         }
         for i in range(0, len(processors)):
             bdf = amdsmi.amdsmi_get_gpu_device_bdf(processors[i])
@@ -601,18 +603,26 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
                 except amdsmi.AmdSmiLibraryException as e:
                     self._check_exception(e)
                     continue
-                print("  Number of uncorrectable errors for {}: {}".format(
-                    block_name, ecc_count['uncorrectable_count']))
-                print("  Number of correctable errors for {}: {}".format(
-                    block_name, ecc_count['correctable_count']))
-                print("  Number of deferred errors for {}: {}".format(
-                    block_name, ecc_count['deferred_count']))
-                self.assertGreaterEqual(ecc_count['uncorrectable_count'], 0)
-                self.assertGreaterEqual(ecc_count['correctable_count'], 0)
-                self.assertGreaterEqual(ecc_count['deferred_count'], 0)
+                print(
+                    "  Number of uncorrectable errors for {}: {}".format(
+                        block_name, ecc_count["uncorrectable_count"]
+                    )
+                )
+                print(
+                    "  Number of correctable errors for {}: {}".format(
+                        block_name, ecc_count["correctable_count"]
+                    )
+                )
+                print(
+                    "  Number of deferred errors for {}: {}".format(
+                        block_name, ecc_count["deferred_count"]
+                    )
+                )
+                self.assertGreaterEqual(ecc_count["uncorrectable_count"], 0)
+                self.assertGreaterEqual(ecc_count["correctable_count"], 0)
+                self.assertGreaterEqual(ecc_count["deferred_count"], 0)
             print("\n")
         print("\n")
-
 
     def test_ecc_count_total(self):
         processors = amdsmi.amdsmi_get_processor_handles()
@@ -627,17 +637,13 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
             except amdsmi.AmdSmiLibraryException as e:
                 self._check_exception(e)
                 continue
-            print("Number of uncorrectable errors: {}".format(
-                ecc_info['uncorrectable_count']))
-            print("Number of correctable errors: {}".format(
-                ecc_info['correctable_count']))
-            print("Number of deferred errors: {}".format(
-                ecc_info['deferred_count']))
-            self.assertGreaterEqual(ecc_info['uncorrectable_count'], 0)
-            self.assertGreaterEqual(ecc_info['correctable_count'], 0)
-            self.assertGreaterEqual(ecc_info['deferred_count'], 0)
+            print("Number of uncorrectable errors: {}".format(ecc_info["uncorrectable_count"]))
+            print("Number of correctable errors: {}".format(ecc_info["correctable_count"]))
+            print("Number of deferred errors: {}".format(ecc_info["deferred_count"]))
+            self.assertGreaterEqual(ecc_info["uncorrectable_count"], 0)
+            self.assertGreaterEqual(ecc_info["correctable_count"], 0)
+            self.assertGreaterEqual(ecc_info["deferred_count"], 0)
         print("\n")
-
 
     def test_fw_info(self):
         processors = amdsmi.amdsmi_get_processor_handles()
@@ -652,17 +658,14 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
             except amdsmi.AmdSmiLibraryException as e:
                 self._check_exception(e)
                 continue
-            num_fw_blocks = len(fw_info['fw_list'])
+            num_fw_blocks = len(fw_info["fw_list"])
             self.assertLessEqual(num_fw_blocks, len(amdsmi.AmdSmiFwBlock))
-            for fw in fw_info['fw_list']:
+            for fw in fw_info["fw_list"]:
                 # Skip firmware blocks with version 0 as they are not valid or not present
-                if fw['fw_version'] != 0:
-                    print("  FW name:           {}".format(
-                        str(fw['fw_name'])))
-                    print("  FW version:        {}".format(
-                        fw['fw_version']))
+                if fw["fw_version"] != 0:
+                    print("  FW name:           {}".format(str(fw["fw_name"])))
+                    print("  FW version:        {}".format(fw["fw_version"]))
         print("\n")
-
 
     def test_gpu_activity(self):
 
@@ -678,14 +681,10 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
             except amdsmi.AmdSmiLibraryException as e:
                 self._check_exception(e)
                 continue
-            print("  engine_usage['gfx_activity'] is: {} %".format(
-                engine_usage['gfx_activity']))
-            print("  engine_usage['umc_activity'] is: {} %".format(
-                engine_usage['umc_activity']))
-            print("  engine_usage['mm_activity'] is: {} %".format(
-                engine_usage['mm_activity']))
+            print("  engine_usage['gfx_activity'] is: {} %".format(engine_usage["gfx_activity"]))
+            print("  engine_usage['umc_activity'] is: {} %".format(engine_usage["umc_activity"]))
+            print("  engine_usage['mm_activity'] is: {} %".format(engine_usage["mm_activity"]))
         print("\n")
-
 
     def test_memory_usage(self):
 
@@ -697,17 +696,22 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
             print("\n\n###Test Processor {}, bdf: {}".format(i, bdf))
             try:
                 print("\n###Test amdsmi_get_gpu_memory_usage \n")
-                memory_usage = amdsmi.amdsmi_get_gpu_memory_usage(processors[i], amdsmi.AmdSmiMemoryType.VRAM)
+                memory_usage = amdsmi.amdsmi_get_gpu_memory_usage(
+                    processors[i], amdsmi.AmdSmiMemoryType.VRAM
+                )
                 print("  memory_usage for VRAM is: {}".format(memory_usage))
-                memory_usage = amdsmi.amdsmi_get_gpu_memory_usage(processors[i], amdsmi.AmdSmiMemoryType.VIS_VRAM)
+                memory_usage = amdsmi.amdsmi_get_gpu_memory_usage(
+                    processors[i], amdsmi.AmdSmiMemoryType.VIS_VRAM
+                )
                 print("  memory_usage for VIS_VRAM is: {}".format(memory_usage))
-                memory_usage = amdsmi.amdsmi_get_gpu_memory_usage(processors[i], amdsmi.AmdSmiMemoryType.GTT)
+                memory_usage = amdsmi.amdsmi_get_gpu_memory_usage(
+                    processors[i], amdsmi.AmdSmiMemoryType.GTT
+                )
                 print("  memory_usage for GTT is: {}".format(memory_usage))
             except amdsmi.AmdSmiLibraryException as e:
                 self._check_exception(e)
                 continue
         print("\n")
-
 
     def test_pcie_info(self):
 
@@ -723,34 +727,72 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
             except amdsmi.AmdSmiLibraryException as e:
                 self._check_exception(e)
                 continue
-            print("  pcie_info['pcie_metric']['pcie_width'] is: {}".format(
-                pcie_info['pcie_metric']['pcie_width']))
-            print("  pcie_info['pcie_static']['max_pcie_width'] is: {} ".format(
-                pcie_info['pcie_static']['max_pcie_width']))
-            print("  pcie_info['pcie_metric']['pcie_speed'] is: {} MT/s".format(
-                pcie_info['pcie_metric']['pcie_speed']))
-            print("  pcie_info['pcie_static']['max_pcie_speed'] is: {} ".format(
-                pcie_info['pcie_static']['max_pcie_speed']))
-            print("  pcie_info['pcie_static']['pcie_interface_version'] is: {}".format(
-                pcie_info['pcie_static']['pcie_interface_version']))
-            print("  pcie_info['pcie_static']['slot_type'] is: {}".format(
-                pcie_info['pcie_static']['slot_type']))
-            print("  pcie_info['pcie_metric']['pcie_replay_count'] is: {}".format(
-                pcie_info['pcie_metric']['pcie_replay_count']))
-            print("  pcie_info['pcie_metric']['pcie_bandwidth'] is: {}".format(
-                pcie_info['pcie_metric']['pcie_bandwidth']))
-            print("  pcie_info['pcie_metric']['pcie_l0_to_recovery_count'] is: {}".format(
-                pcie_info['pcie_metric']['pcie_l0_to_recovery_count']))
-            print("  pcie_info['pcie_metric']['pcie_replay_roll_over_count'] is: {}".format(
-                pcie_info['pcie_metric']['pcie_replay_roll_over_count']))
-            print("  pcie_info['pcie_metric']['pcie_nak_sent_count'] is: {}".format(
-                pcie_info['pcie_metric']['pcie_nak_sent_count']))
-            print("  pcie_info['pcie_metric']['pcie_nak_received_count'] is: {}".format(
-                pcie_info['pcie_metric']['pcie_nak_received_count']))
-            print("  pcie_info['pcie_metric']['pcie_lc_perf_other_end_recovery_count'] is: {}".format(
-                pcie_info['pcie_metric']['pcie_lc_perf_other_end_recovery_count']))
+            print(
+                "  pcie_info['pcie_metric']['pcie_width'] is: {}".format(
+                    pcie_info["pcie_metric"]["pcie_width"]
+                )
+            )
+            print(
+                "  pcie_info['pcie_static']['max_pcie_width'] is: {} ".format(
+                    pcie_info["pcie_static"]["max_pcie_width"]
+                )
+            )
+            print(
+                "  pcie_info['pcie_metric']['pcie_speed'] is: {} MT/s".format(
+                    pcie_info["pcie_metric"]["pcie_speed"]
+                )
+            )
+            print(
+                "  pcie_info['pcie_static']['max_pcie_speed'] is: {} ".format(
+                    pcie_info["pcie_static"]["max_pcie_speed"]
+                )
+            )
+            print(
+                "  pcie_info['pcie_static']['pcie_interface_version'] is: {}".format(
+                    pcie_info["pcie_static"]["pcie_interface_version"]
+                )
+            )
+            print(
+                "  pcie_info['pcie_static']['slot_type'] is: {}".format(
+                    pcie_info["pcie_static"]["slot_type"]
+                )
+            )
+            print(
+                "  pcie_info['pcie_metric']['pcie_replay_count'] is: {}".format(
+                    pcie_info["pcie_metric"]["pcie_replay_count"]
+                )
+            )
+            print(
+                "  pcie_info['pcie_metric']['pcie_bandwidth'] is: {}".format(
+                    pcie_info["pcie_metric"]["pcie_bandwidth"]
+                )
+            )
+            print(
+                "  pcie_info['pcie_metric']['pcie_l0_to_recovery_count'] is: {}".format(
+                    pcie_info["pcie_metric"]["pcie_l0_to_recovery_count"]
+                )
+            )
+            print(
+                "  pcie_info['pcie_metric']['pcie_replay_roll_over_count'] is: {}".format(
+                    pcie_info["pcie_metric"]["pcie_replay_roll_over_count"]
+                )
+            )
+            print(
+                "  pcie_info['pcie_metric']['pcie_nak_sent_count'] is: {}".format(
+                    pcie_info["pcie_metric"]["pcie_nak_sent_count"]
+                )
+            )
+            print(
+                "  pcie_info['pcie_metric']['pcie_nak_received_count'] is: {}".format(
+                    pcie_info["pcie_metric"]["pcie_nak_received_count"]
+                )
+            )
+            print(
+                "  pcie_info['pcie_metric']['pcie_lc_perf_other_end_recovery_count'] is: {}".format(
+                    pcie_info["pcie_metric"]["pcie_lc_perf_other_end_recovery_count"]
+                )
+            )
         print("\n")
-
 
     def test_power_info(self):
 
@@ -766,38 +808,38 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
             except amdsmi.AmdSmiLibraryException as e:
                 self._check_exception(e)
                 continue
-            print("  power_info['current_socket_power'] is: {}".format(
-                power_info['current_socket_power']))
-            print("  power_info['average_socket_power'] is: {}".format(
-                power_info['average_socket_power']))
-            print("  power_info['gfx_voltage'] is: {}".format(
-                power_info['gfx_voltage']))
-            print("  power_info['soc_voltage'] is: {}".format(
-                power_info['soc_voltage']))
-            print("  power_info['mem_voltage'] is: {}".format(
-                power_info['mem_voltage']))
-            print("  power_info['power_limit'] is: {}".format(
-                power_info['power_limit']))
+            print(
+                "  power_info['current_socket_power'] is: {}".format(
+                    power_info["current_socket_power"]
+                )
+            )
+            print(
+                "  power_info['average_socket_power'] is: {}".format(
+                    power_info["average_socket_power"]
+                )
+            )
+            print("  power_info['gfx_voltage'] is: {}".format(power_info["gfx_voltage"]))
+            print("  power_info['soc_voltage'] is: {}".format(power_info["soc_voltage"]))
+            print("  power_info['mem_voltage'] is: {}".format(power_info["mem_voltage"]))
+            print("  power_info['power_limit'] is: {}".format(power_info["power_limit"]))
             try:
                 print("\n###Test amdsmi_get_power_cap_info \n")
                 power_cap_info = amdsmi.amdsmi_get_power_cap_info(processors[i], 0)
             except amdsmi.AmdSmiLibraryException as e:
                 self._check_exception(e)
                 continue
-            print("  power_info['dpm_cap'] is: {}".format(
-                power_cap_info['dpm_cap']))
-            print("  power_info['power_cap'] is: {}".format(
-                power_cap_info['power_cap']))
+            print("  power_info['dpm_cap'] is: {}".format(power_cap_info["dpm_cap"]))
+            print("  power_info['power_cap'] is: {}".format(power_cap_info["power_cap"]))
             try:
                 print("\n###Test amdsmi_is_gpu_power_management_enabled \n")
-                is_power_management_enabled = amdsmi.amdsmi_is_gpu_power_management_enabled(processors[i])
+                is_power_management_enabled = amdsmi.amdsmi_is_gpu_power_management_enabled(
+                    processors[i]
+                )
             except amdsmi.AmdSmiLibraryException as e:
                 self._check_exception(e)
                 continue
-            print("  Power management enabled: {}".format(
-                is_power_management_enabled))
+            print("  Power management enabled: {}".format(is_power_management_enabled))
         print("\n")
-
 
     def test_process_list(self):
 
@@ -829,8 +871,8 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
             except amdsmi.AmdSmiLibraryException as e:
                 self._check_exception(e)
                 continue
-            if isinstance(processor_type, dict) and 'processor_type' in processor_type:
-                print("  Processor type is: {}".format(processor_type['processor_type']))
+            if isinstance(processor_type, dict) and "processor_type" in processor_type:
+                print("  Processor type is: {}".format(processor_type["processor_type"]))
             else:
                 print("  Processor type (non-dict): {}".format(processor_type))
                 self.assertIsInstance(processor_type, (str, int), "Unexpected processor_type type")
@@ -852,9 +894,12 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
                 self._check_exception(e)
                 continue
             for j in range(0, len(ras_enabled)):
-                print("  RAS status for {} is: {}".format(ras_enabled[j]['block'], ras_enabled[j]['status']))
+                print(
+                    "  RAS status for {} is: {}".format(
+                        ras_enabled[j]["block"], ras_enabled[j]["status"]
+                    )
+                )
         print("\n")
-
 
     # amdsmi_get_gpu_ras_feature_info is not supported in Navi2x, Navi3x
     def test_ras_feature_info(self):
@@ -872,13 +917,12 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
                 self._check_exception(e)
                 continue
             if ras_feature != None:
-                print("RAS eeprom version: {}".format(ras_feature['eeprom_version']))
-                print("RAS parity schema: {}".format(ras_feature['parity_schema']))
-                print("RAS single bit schema: {}".format(ras_feature['single_bit_schema']))
-                print("RAS double bit schema: {}".format(ras_feature['double_bit_schema']))
-                print("Poisoning supported: {}".format(ras_feature['poison_schema']))
+                print("RAS eeprom version: {}".format(ras_feature["eeprom_version"]))
+                print("RAS parity schema: {}".format(ras_feature["parity_schema"]))
+                print("RAS single bit schema: {}".format(ras_feature["single_bit_schema"]))
+                print("RAS double bit schema: {}".format(ras_feature["double_bit_schema"]))
+                print("Poisoning supported: {}".format(ras_feature["poison_schema"]))
         print("\n")
-
 
     def test_socket_info(self):
 
@@ -899,7 +943,6 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
             print("  Socket: {}".format(socket_name))
         print("\n")
 
-
     def test_temperature_metric(self):
 
         processors = amdsmi.amdsmi_get_processor_handles()
@@ -911,36 +954,55 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
             try:
                 print("\n###Test amdsmi_get_temp_metric \n")
                 temperature_measure = amdsmi.amdsmi_get_temp_metric(
-                    processors[i], amdsmi.AmdSmiTemperatureType.HOTSPOT, amdsmi.AmdSmiTemperatureMetric.CURRENT)
-                print("  Current temperature for HOTSPOT is: {}".format(
-                    temperature_measure))
+                    processors[i],
+                    amdsmi.AmdSmiTemperatureType.HOTSPOT,
+                    amdsmi.AmdSmiTemperatureMetric.CURRENT,
+                )
+                print("  Current temperature for HOTSPOT is: {}".format(temperature_measure))
                 temperature_measure = amdsmi.amdsmi_get_temp_metric(
-                    processors[i], amdsmi.AmdSmiTemperatureType.VRAM, amdsmi.AmdSmiTemperatureMetric.CURRENT)
-                print("  Current temperature for VRAM is: {}".format(
-                    temperature_measure))
+                    processors[i],
+                    amdsmi.AmdSmiTemperatureType.VRAM,
+                    amdsmi.AmdSmiTemperatureMetric.CURRENT,
+                )
+                print("  Current temperature for VRAM is: {}".format(temperature_measure))
                 print("\n###Test amdsmi_get_temp_metric \n")
                 temperature_measure = amdsmi.amdsmi_get_temp_metric(
-                    processors[i], amdsmi.AmdSmiTemperatureType.HOTSPOT, amdsmi.AmdSmiTemperatureMetric.CRITICAL)
-                print("  Limit (critical) temperature for HOTSPOT is: {}".format(
-                    temperature_measure))
+                    processors[i],
+                    amdsmi.AmdSmiTemperatureType.HOTSPOT,
+                    amdsmi.AmdSmiTemperatureMetric.CRITICAL,
+                )
+                print(
+                    "  Limit (critical) temperature for HOTSPOT is: {}".format(temperature_measure)
+                )
                 temperature_measure = amdsmi.amdsmi_get_temp_metric(
-                    processors[i], amdsmi.AmdSmiTemperatureType.VRAM, amdsmi.AmdSmiTemperatureMetric.CRITICAL)
-                print("  Limit (critical) temperature for VRAM is: {}".format(
-                    temperature_measure))
+                    processors[i],
+                    amdsmi.AmdSmiTemperatureType.VRAM,
+                    amdsmi.AmdSmiTemperatureMetric.CRITICAL,
+                )
+                print("  Limit (critical) temperature for VRAM is: {}".format(temperature_measure))
                 print("\n###Test amdsmi_get_temp_metric \n")
                 temperature_measure = amdsmi.amdsmi_get_temp_metric(
-                    processors[i], amdsmi.AmdSmiTemperatureType.HOTSPOT, amdsmi.AmdSmiTemperatureMetric.EMERGENCY)
-                print("  Shutdown (emergency) temperature for HOTSPOT is: {}".format(
-                    temperature_measure))
+                    processors[i],
+                    amdsmi.AmdSmiTemperatureType.HOTSPOT,
+                    amdsmi.AmdSmiTemperatureMetric.EMERGENCY,
+                )
+                print(
+                    "  Shutdown (emergency) temperature for HOTSPOT is: {}".format(
+                        temperature_measure
+                    )
+                )
                 temperature_measure = amdsmi.amdsmi_get_temp_metric(
-                    processors[i], amdsmi.AmdSmiTemperatureType.VRAM, amdsmi.AmdSmiTemperatureMetric.EMERGENCY)
-                print("  Shutdown (emergency) temperature for VRAM is: {}".format(
-                    temperature_measure))
+                    processors[i],
+                    amdsmi.AmdSmiTemperatureType.VRAM,
+                    amdsmi.AmdSmiTemperatureMetric.EMERGENCY,
+                )
+                print(
+                    "  Shutdown (emergency) temperature for VRAM is: {}".format(temperature_measure)
+                )
             except amdsmi.AmdSmiLibraryException as e:
                 self._check_exception(e)
                 continue
         print("\n")
-
 
     # AmdSmiTemperatureType.EDGE is not supported in MI300A, MI300X
     def test_temperature_metric_edge(self):
@@ -954,22 +1016,29 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
             try:
                 print("\n###Test amdsmi_get_temp_metric \n")
                 temperature_measure = amdsmi.amdsmi_get_temp_metric(
-                    processors[i], amdsmi.AmdSmiTemperatureType.EDGE, amdsmi.AmdSmiTemperatureMetric.CURRENT)
-                print("  Current temperature for EDGE is: {}".format(
-                    temperature_measure))
+                    processors[i],
+                    amdsmi.AmdSmiTemperatureType.EDGE,
+                    amdsmi.AmdSmiTemperatureMetric.CURRENT,
+                )
+                print("  Current temperature for EDGE is: {}".format(temperature_measure))
                 temperature_measure = amdsmi.amdsmi_get_temp_metric(
-                    processors[i], amdsmi.AmdSmiTemperatureType.EDGE, amdsmi.AmdSmiTemperatureMetric.CRITICAL)
-                print("  Limit (critical) temperature for EDGE is: {}".format(
-                    temperature_measure))
+                    processors[i],
+                    amdsmi.AmdSmiTemperatureType.EDGE,
+                    amdsmi.AmdSmiTemperatureMetric.CRITICAL,
+                )
+                print("  Limit (critical) temperature for EDGE is: {}".format(temperature_measure))
                 temperature_measure = amdsmi.amdsmi_get_temp_metric(
-                    processors[i], amdsmi.AmdSmiTemperatureType.EDGE, amdsmi.AmdSmiTemperatureMetric.EMERGENCY)
-                print("  Shutdown (emergency) temperature for EDGE is: {}".format(
-                    temperature_measure))
+                    processors[i],
+                    amdsmi.AmdSmiTemperatureType.EDGE,
+                    amdsmi.AmdSmiTemperatureMetric.EMERGENCY,
+                )
+                print(
+                    "  Shutdown (emergency) temperature for EDGE is: {}".format(temperature_measure)
+                )
             except amdsmi.AmdSmiLibraryException as e:
                 self._check_exception(e)
                 continue
         print("\n")
-
 
     def test_temperature_metric_plx(self):
 
@@ -982,22 +1051,29 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
             try:
                 print("\n###Test amdsmi_get_temp_metric \n")
                 temperature_measure = amdsmi.amdsmi_get_temp_metric(
-                    processors[i], amdsmi.AmdSmiTemperatureType.PLX, amdsmi.AmdSmiTemperatureMetric.CURRENT)
-                print("  Current temperature for PLX is: {}".format(
-                    temperature_measure))
+                    processors[i],
+                    amdsmi.AmdSmiTemperatureType.PLX,
+                    amdsmi.AmdSmiTemperatureMetric.CURRENT,
+                )
+                print("  Current temperature for PLX is: {}".format(temperature_measure))
                 temperature_measure = amdsmi.amdsmi_get_temp_metric(
-                    processors[i], amdsmi.AmdSmiTemperatureType.PLX, amdsmi.AmdSmiTemperatureMetric.CRITICAL)
-                print("  Limit (critical) temperature for PLX is: {}".format(
-                    temperature_measure))
+                    processors[i],
+                    amdsmi.AmdSmiTemperatureType.PLX,
+                    amdsmi.AmdSmiTemperatureMetric.CRITICAL,
+                )
+                print("  Limit (critical) temperature for PLX is: {}".format(temperature_measure))
                 temperature_measure = amdsmi.amdsmi_get_temp_metric(
-                    processors[i], amdsmi.AmdSmiTemperatureType.PLX, amdsmi.AmdSmiTemperatureMetric.EMERGENCY)
-                print("  Shutdown (emergency) temperature for PLX is: {}".format(
-                    temperature_measure))
+                    processors[i],
+                    amdsmi.AmdSmiTemperatureType.PLX,
+                    amdsmi.AmdSmiTemperatureMetric.EMERGENCY,
+                )
+                print(
+                    "  Shutdown (emergency) temperature for PLX is: {}".format(temperature_measure)
+                )
             except amdsmi.AmdSmiLibraryException as e:
                 self._check_exception(e)
                 continue
         print("\n")
-
 
     # AmdSmiTemperatureType.HBM_0, HBM_1, HBM_2, HBM_3 are not supported in Navi2x, Navi3x, MI210, MI300A
     def test_temperature_metric_hbm(self):
@@ -1018,22 +1094,33 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
             for temp_type_name, temp_type_code in temp_types.items():
                 try:
                     temperature_measure = amdsmi.amdsmi_get_temp_metric(
-                        processors[i], temp_type_code, amdsmi.AmdSmiTemperatureMetric.CURRENT)
-                    print("  Current temperature for {} is: {}".format(
-                        temp_type_name, temperature_measure))
+                        processors[i], temp_type_code, amdsmi.AmdSmiTemperatureMetric.CURRENT
+                    )
+                    print(
+                        "  Current temperature for {} is: {}".format(
+                            temp_type_name, temperature_measure
+                        )
+                    )
                     temperature_measure = amdsmi.amdsmi_get_temp_metric(
-                        processors[i], temp_type_code, amdsmi.AmdSmiTemperatureMetric.CRITICAL)
-                    print("  Limit (critical) temperature for {} is: {}".format(
-                        temp_type_name, temperature_measure))
+                        processors[i], temp_type_code, amdsmi.AmdSmiTemperatureMetric.CRITICAL
+                    )
+                    print(
+                        "  Limit (critical) temperature for {} is: {}".format(
+                            temp_type_name, temperature_measure
+                        )
+                    )
                     temperature_measure = amdsmi.amdsmi_get_temp_metric(
-                        processors[i], temp_type_code, amdsmi.AmdSmiTemperatureMetric.EMERGENCY)
-                    print("  Shutdown (emergency) temperature for {} is: {}".format(
-                        temp_type_name, temperature_measure))
+                        processors[i], temp_type_code, amdsmi.AmdSmiTemperatureMetric.EMERGENCY
+                    )
+                    print(
+                        "  Shutdown (emergency) temperature for {} is: {}".format(
+                            temp_type_name, temperature_measure
+                        )
+                    )
                 except amdsmi.AmdSmiLibraryException as e:
                     self._check_exception(e)
                     continue
         print("\n")
-
 
     def test_utilization_count(self):
 
@@ -1047,41 +1134,61 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
             utilization_counter_types = [
                 amdsmi.AmdSmiUtilizationCounterType.COARSE_GRAIN_GFX_ACTIVITY,
                 amdsmi.AmdSmiUtilizationCounterType.COARSE_GRAIN_MEM_ACTIVITY,
-                amdsmi.AmdSmiUtilizationCounterType.COARSE_DECODER_ACTIVITY
+                amdsmi.AmdSmiUtilizationCounterType.COARSE_DECODER_ACTIVITY,
             ]
             try:
-                utilization_count = amdsmi.amdsmi_get_utilization_count(processors[i], utilization_counter_types)
+                utilization_count = amdsmi.amdsmi_get_utilization_count(
+                    processors[i], utilization_counter_types
+                )
             except amdsmi.AmdSmiLibraryException as e:
                 self._check_exception(e)
                 continue
-            print("  Timestamp: {}".format(
-                utilization_count[0]['timestamp']))
-            print("  Utilization count for {} is: {}".format(
-                utilization_count[1]['type'], utilization_count[1]['value']))
-            print("  Utilization count for {} is: {}".format(
-                utilization_count[2]['type'], utilization_count[2]['value']))
-            print("  Utilization count for {} is: {}".format(
-                utilization_count[3]['type'], utilization_count[3]['value']))
+            print("  Timestamp: {}".format(utilization_count[0]["timestamp"]))
+            print(
+                "  Utilization count for {} is: {}".format(
+                    utilization_count[1]["type"], utilization_count[1]["value"]
+                )
+            )
+            print(
+                "  Utilization count for {} is: {}".format(
+                    utilization_count[2]["type"], utilization_count[2]["value"]
+                )
+            )
+            print(
+                "  Utilization count for {} is: {}".format(
+                    utilization_count[3]["type"], utilization_count[3]["value"]
+                )
+            )
             self.assertLessEqual(len(processors), self.max_num_physical_devices)
             print("\n")
             utilization_counter_types = [
                 amdsmi.AmdSmiUtilizationCounterType.FINE_GRAIN_GFX_ACTIVITY,
                 amdsmi.AmdSmiUtilizationCounterType.FINE_GRAIN_MEM_ACTIVITY,
-                amdsmi.AmdSmiUtilizationCounterType.FINE_DECODER_ACTIVITY
+                amdsmi.AmdSmiUtilizationCounterType.FINE_DECODER_ACTIVITY,
             ]
             try:
-                utilization_count = amdsmi.amdsmi_get_utilization_count(processors[i], utilization_counter_types)
+                utilization_count = amdsmi.amdsmi_get_utilization_count(
+                    processors[i], utilization_counter_types
+                )
             except amdsmi.AmdSmiLibraryException as e:
                 self._check_exception(e)
                 continue
-            print("  Timestamp: {}".format(
-                utilization_count[0]['timestamp']))
-            print("  Utilization count for {} is: {}".format(
-                utilization_count[1]['type'], utilization_count[1]['value']))
-            print("  Utilization count for {} is: {}".format(
-                utilization_count[2]['type'], utilization_count[2]['value']))
-            print("  Utilization count for {} is: {}".format(
-                utilization_count[3]['type'], utilization_count[3]['value']))
+            print("  Timestamp: {}".format(utilization_count[0]["timestamp"]))
+            print(
+                "  Utilization count for {} is: {}".format(
+                    utilization_count[1]["type"], utilization_count[1]["value"]
+                )
+            )
+            print(
+                "  Utilization count for {} is: {}".format(
+                    utilization_count[2]["type"], utilization_count[2]["value"]
+                )
+            )
+            print(
+                "  Utilization count for {} is: {}".format(
+                    utilization_count[3]["type"], utilization_count[3]["value"]
+                )
+            )
         print("\n")
 
     def test_vbios_info(self):
@@ -1129,22 +1236,34 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
             print("\n\n###Test Processor {}, bdf: {}".format(i, bdf))
             try:
                 print("\n###Test amdsmi_get_gpu_accelerator_partition_profile \n")
-                accelerator_partition = amdsmi.amdsmi_get_gpu_accelerator_partition_profile(processors[i])
+                accelerator_partition = amdsmi.amdsmi_get_gpu_accelerator_partition_profile(
+                    processors[i]
+                )
             except amdsmi.AmdSmiLibraryException as e:
                 self._check_exception(e)
                 continue
-            print("  Current partition id: {}".format(
-                accelerator_partition['partition_id']))
-            print("  Profile_type: {}".format(
-                accelerator_partition['partition_profile']['profile_type']))
-            print("  profile_index: {}".format(
-                accelerator_partition['partition_profile']['profile_index']))
-            print("  memory_caps: {}".format(
-                accelerator_partition['partition_profile']['memory_caps']))
-            print("  num_resources: {}".format(
-                accelerator_partition['partition_profile']['num_resources']))
+            print("  Current partition id: {}".format(accelerator_partition["partition_id"]))
+            print(
+                "  Profile_type: {}".format(
+                    accelerator_partition["partition_profile"]["profile_type"]
+                )
+            )
+            print(
+                "  profile_index: {}".format(
+                    accelerator_partition["partition_profile"]["profile_index"]
+                )
+            )
+            print(
+                "  memory_caps: {}".format(
+                    accelerator_partition["partition_profile"]["memory_caps"]
+                )
+            )
+            print(
+                "  num_resources: {}".format(
+                    accelerator_partition["partition_profile"]["num_resources"]
+                )
+            )
         print("\n")
-
 
     # Requires sudo (to see full resource/config detail).
     # Should only be supported on MI300+ ASICs
@@ -1158,26 +1277,34 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
             print("\n\n###Test Processor {}, bdf: {}".format(i, bdf))
             try:
                 print("\n###Test amdsmi_get_gpu_accelerator_partition_profile_config \n")
-                profile_config = amdsmi.amdsmi_get_gpu_accelerator_partition_profile_config(processors[i])
+                profile_config = amdsmi.amdsmi_get_gpu_accelerator_partition_profile_config(
+                    processors[i]
+                )
             except amdsmi.AmdSmiLibraryException as e:
                 self._check_exception(e)
                 continue
-            print("  num_profiles: {}".format(profile_config['num_profiles']))
-            print("  num_resource_profiles: {}".format(profile_config['num_resource_profiles']))
-            print("  default_profile_index: {}".format(profile_config['default_profile_index']))
-            for p in profile_config['profiles']:
-                print("\t\t  profile_type: {}".format(p['profile_type']))
-                print("\t\t  num_partitions: {}".format(p['num_partitions']))
-                print("\t\t  profile_index: {}".format(p['profile_index']))
-                print("\t\t  num_resources: {}".format(p['num_resources']))
-                for r in range(0, p['num_resources']):
-                    print("\t\t\t  profile_index: {}".format(p['resources'][r]['profile_index']))
-                    print("\t\t\t  resource_type: {}".format(p['resources'][r]['resource_type']))
-                    print("\t\t\t  partition_resource: {}".format(p['resources'][r]['partition_resource']))
-                    print("\t\t\t  num_partitions_share_resource: {}".format(
-                        p['resources'][r]['num_partitions_share_resource']))
+            print("  num_profiles: {}".format(profile_config["num_profiles"]))
+            print("  num_resource_profiles: {}".format(profile_config["num_resource_profiles"]))
+            print("  default_profile_index: {}".format(profile_config["default_profile_index"]))
+            for p in profile_config["profiles"]:
+                print("\t\t  profile_type: {}".format(p["profile_type"]))
+                print("\t\t  num_partitions: {}".format(p["num_partitions"]))
+                print("\t\t  profile_index: {}".format(p["profile_index"]))
+                print("\t\t  num_resources: {}".format(p["num_resources"]))
+                for r in range(0, p["num_resources"]):
+                    print("\t\t\t  profile_index: {}".format(p["resources"][r]["profile_index"]))
+                    print("\t\t\t  resource_type: {}".format(p["resources"][r]["resource_type"]))
+                    print(
+                        "\t\t\t  partition_resource: {}".format(
+                            p["resources"][r]["partition_resource"]
+                        )
+                    )
+                    print(
+                        "\t\t\t  num_partitions_share_resource: {}".format(
+                            p["resources"][r]["num_partitions_share_resource"]
+                        )
+                    )
         print("\n")
-
 
     # amdsmi_get_violation_status is only supported on MI300+ ASICs
     # We should expect a not supported status for Navi / MI100 / MI2x ASICs
@@ -1195,51 +1322,64 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
             except amdsmi.AmdSmiLibraryException as e:
                 self._check_exception(e)
                 continue
-            print("  Reference Timestamp: {}".format(
-                violation_status['reference_timestamp']))
-            print("  Violation Timestamp: {}".format(
-                violation_status['violation_timestamp']))
+            print("  Reference Timestamp: {}".format(violation_status["reference_timestamp"]))
+            print("  Violation Timestamp: {}".format(violation_status["violation_timestamp"]))
 
-            print(" Current Prochot Thrm Accumulated (Count): {}".format(
-                violation_status['acc_prochot_thrm']))
-            print(" Current PVIOL (acc_ppt_pwr) Accumulated (Count): {}".format(
-                violation_status['acc_ppt_pwr']))
-            print(" Current TVIOL (acc_socket_thrm) Accumulated (Count): {}".format(
-                violation_status['acc_socket_thrm']))
-            print(" Current VR_THRM Accumulated (Count): {}".format(
-                violation_status['acc_vr_thrm']))
-            print(" Current HBM Thrm Accumulated (Count): {}".format(
-                violation_status['acc_hbm_thrm']))
-            print(" Current GFX CLK Below Host Limit Accumulated (Count): {}".format(
-                violation_status['acc_gfx_clk_below_host_limit']))
+            print(
+                " Current Prochot Thrm Accumulated (Count): {}".format(
+                    violation_status["acc_prochot_thrm"]
+                )
+            )
+            print(
+                " Current PVIOL (acc_ppt_pwr) Accumulated (Count): {}".format(
+                    violation_status["acc_ppt_pwr"]
+                )
+            )
+            print(
+                " Current TVIOL (acc_socket_thrm) Accumulated (Count): {}".format(
+                    violation_status["acc_socket_thrm"]
+                )
+            )
+            print(
+                " Current VR_THRM Accumulated (Count): {}".format(violation_status["acc_vr_thrm"])
+            )
+            print(
+                " Current HBM Thrm Accumulated (Count): {}".format(violation_status["acc_hbm_thrm"])
+            )
+            print(
+                " Current GFX CLK Below Host Limit Accumulated (Count): {}".format(
+                    violation_status["acc_gfx_clk_below_host_limit"]
+                )
+            )
 
-            print(" Prochot Thrm Violation (%): {}".format(
-                violation_status['per_prochot_thrm']))
-            print(" PVIOL (per_ppt_pwr) (%): {}".format(
-                violation_status['per_ppt_pwr']))
-            print(" TVIOL (per_socket_thrm) (%): {}".format(
-                violation_status['per_socket_thrm']))
-            print(" VR_THRM Violation (%): {}".format(
-                violation_status['per_vr_thrm']))
-            print(" HBM Thrm Violation (%): {}".format(
-                violation_status['per_hbm_thrm']))
-            print(" GFX CLK Below Host Limit Violation (%): {}".format(
-                violation_status['per_gfx_clk_below_host_limit']))
+            print(" Prochot Thrm Violation (%): {}".format(violation_status["per_prochot_thrm"]))
+            print(" PVIOL (per_ppt_pwr) (%): {}".format(violation_status["per_ppt_pwr"]))
+            print(" TVIOL (per_socket_thrm) (%): {}".format(violation_status["per_socket_thrm"]))
+            print(" VR_THRM Violation (%): {}".format(violation_status["per_vr_thrm"]))
+            print(" HBM Thrm Violation (%): {}".format(violation_status["per_hbm_thrm"]))
+            print(
+                " GFX CLK Below Host Limit Violation (%): {}".format(
+                    violation_status["per_gfx_clk_below_host_limit"]
+                )
+            )
 
-            print(" Prochot Thrm Violation (bool): {}".format(
-                violation_status['active_prochot_thrm']))
-            print(" PVIOL (active_ppt_pwr) (bool): {}".format(
-                violation_status['active_ppt_pwr']))
-            print(" TVIOL (active_socket_thrm) (bool): {}".format(
-                violation_status['active_socket_thrm']))
-            print(" VR_THRM Violation (bool): {}".format(
-                violation_status['active_vr_thrm']))
-            print(" HBM Thrm Violation (bool): {}".format(
-                violation_status['active_hbm_thrm']))
-            print(" GFX CLK Below Host Limit Violation (bool): {}".format(
-                violation_status['active_gfx_clk_below_host_limit']))
+            print(
+                " Prochot Thrm Violation (bool): {}".format(violation_status["active_prochot_thrm"])
+            )
+            print(" PVIOL (active_ppt_pwr) (bool): {}".format(violation_status["active_ppt_pwr"]))
+            print(
+                " TVIOL (active_socket_thrm) (bool): {}".format(
+                    violation_status["active_socket_thrm"]
+                )
+            )
+            print(" VR_THRM Violation (bool): {}".format(violation_status["active_vr_thrm"]))
+            print(" HBM Thrm Violation (bool): {}".format(violation_status["active_hbm_thrm"]))
+            print(
+                " GFX CLK Below Host Limit Violation (bool): {}".format(
+                    violation_status["active_gfx_clk_below_host_limit"]
+                )
+            )
         print("\n")
-
 
     # Add test for amdsmi_get_gpu_reg_table_info
     def test_gpu_reg_table_info(self):
@@ -1250,14 +1390,14 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
             print("\n\n###Test Processor {}".format(i))
             try:
                 print("\n###Test amdsmi_get_gpu_reg_table_info \n")
-                reg_table_info = amdsmi.amdsmi_get_gpu_reg_table_info(processors[i], amdsmi.amdsmi_interface.AmdSmiRegType.PCIE)
+                reg_table_info = amdsmi.amdsmi_get_gpu_reg_table_info(
+                    processors[i], amdsmi.amdsmi_interface.AmdSmiRegType.PCIE
+                )
             except amdsmi.AmdSmiLibraryException as e:
                 self._check_exception(e)
                 continue
-            print("  reg_table_info['reg_table'] is: {}".format(
-                reg_table_info))
+            print("  reg_table_info['reg_table'] is: {}".format(reg_table_info))
         print("\n")
-
 
     def test_get_gpu_revision(self):
 
@@ -1276,7 +1416,6 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
             print(f"  GPU revision is: {revision}")
         print("\n")
 
-
     # Add test for amdsmi_get_gpu_pm_metrics_info
     def test_gpu_pm_metrics_info(self):
 
@@ -1290,10 +1429,8 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
             except amdsmi.AmdSmiLibraryException as e:
                 self._check_exception(e)
                 continue
-            print("  pm_metrics_info['pm_metrics'] is: {}".format(
-                pm_metrics_info))
+            print("  pm_metrics_info['pm_metrics'] is: {}".format(pm_metrics_info))
         print("\n")
-
 
     def test_walkthrough(self):
         print("\n\n#######################################################################")
@@ -1395,6 +1532,178 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
     #         # t3.join()
     #     print("\n========> test_z_gpureset_asicinfo_multithread end <========\n")
 
+    def test_uma_carveout_info(self):
+        """Test UMA carveout (VRAM) information retrieval"""
+        processors = amdsmi.amdsmi_get_processor_handles()
+        self.assertGreaterEqual(len(processors), 1)
+        self.assertLessEqual(len(processors), self.max_num_physical_devices)
+
+        for i in range(0, len(processors)):
+            bdf = amdsmi.amdsmi_get_gpu_device_bdf(processors[i])
+            print(f"\n\n###Test Processor {i}, bdf: {bdf}")
+
+            try:
+                print("\n###Test amdsmi_get_gpu_uma_carveout_info \n")
+                uma_info = amdsmi.amdsmi_get_gpu_uma_carveout_info(processors[i])
+            except amdsmi.AmdSmiLibraryException as e:
+                self._check_exception(e)
+                continue
+
+            # Validate returned data structure
+            self.assertIn("current_index", uma_info)
+            self.assertIn("num_options", uma_info)
+            self.assertIn("options", uma_info)
+
+            print(f"  current_index: {uma_info['current_index']}")
+            print(f"  num_options: {uma_info['num_options']}")
+
+            # Validate that current_index is within valid range
+            self.assertGreaterEqual(uma_info["current_index"], 0)
+            self.assertLess(uma_info["current_index"], uma_info["num_options"])
+
+            # Validate that we have at least one option
+            self.assertGreater(uma_info["num_options"], 0)
+            self.assertLessEqual(uma_info["num_options"], 16)
+
+            # Validate options list
+            self.assertEqual(len(uma_info["options"]), uma_info["num_options"])
+
+            for j, opt in enumerate(uma_info["options"]):
+                self.assertIn("index", opt)
+                self.assertIn("description", opt)
+                self.assertEqual(opt["index"], j)
+                self.assertGreater(len(opt["description"]), 0)
+
+                marker = "*" if opt["index"] == uma_info["current_index"] else " "
+                print(f"  {marker} Option {opt['index']}: {opt['description']}")
+
+            print("\n  UMA carveout info test passed\n")
+
+    def test_uma_carveout_set_dry_run(self):
+        """Test UMA carveout write operations in DRY_RUN mode"""
+        processors = amdsmi.amdsmi_get_processor_handles()
+        self.assertGreaterEqual(len(processors), 1)
+        self.assertLessEqual(len(processors), self.max_num_physical_devices)
+
+        # Enable DRY_RUN mode; ensure cleanup even if test fails
+        os.environ["AMDSMI_DRY_RUN"] = "1"
+        self.addCleanup(os.environ.pop, "AMDSMI_DRY_RUN", None)
+
+        for i in range(0, len(processors)):
+            bdf = amdsmi.amdsmi_get_gpu_device_bdf(processors[i])
+            print(f"\n\n###Test Processor {i}, bdf: {bdf}")
+
+            try:
+                print("\n###Test amdsmi_set_gpu_uma_carveout (DRY_RUN)\n")
+                uma_info = amdsmi.amdsmi_get_gpu_uma_carveout_info(processors[i])
+            except amdsmi.AmdSmiLibraryException as e:
+                self._check_exception(e)
+                continue
+
+            # Test setting to current value
+            try:
+                amdsmi.amdsmi_set_gpu_uma_carveout(processors[i], uma_info["current_index"])
+                print(f"  Set to current index {uma_info['current_index']} succeeded (DRY_RUN)")
+            except amdsmi.AmdSmiLibraryException as e:
+                self.fail(f"Failed to set UMA carveout to current value in DRY_RUN mode: {e}")
+
+            # Test setting to different valid index if available
+            if uma_info["num_options"] > 1:
+                test_index = (uma_info["current_index"] + 1) % uma_info["num_options"]
+                try:
+                    amdsmi.amdsmi_set_gpu_uma_carveout(processors[i], test_index)
+                    print(f"  Set to different index {test_index} succeeded (DRY_RUN)")
+                except amdsmi.AmdSmiLibraryException as e:
+                    self.fail(f"Failed to set UMA carveout to valid index in DRY_RUN mode: {e}")
+
+            # Test setting to invalid index (should fail)
+            invalid_index = uma_info["num_options"] + 10
+            try:
+                amdsmi.amdsmi_set_gpu_uma_carveout(processors[i], invalid_index)
+                self.fail(f"Should have raised exception for invalid index {invalid_index}")
+            except amdsmi.AmdSmiLibraryException as e:
+                error_code = e.get_error_code()
+                self.assertEqual(error_code, amdsmi.amdsmi_wrapper.AMDSMI_STATUS_INVAL)
+                print(f"  Invalid index {invalid_index} correctly rejected (DRY_RUN)")
+
+            print("\n  UMA carveout set test passed (DRY_RUN)\n")
+
+    def test_ttm_info(self):
+        """Test TTM (GTT/shared memory) information retrieval"""
+        print("\n\n###Test amdsmi_get_ttm_info \n")
+
+        try:
+            ttm_info = amdsmi.amdsmi_get_ttm_info()
+        except amdsmi.AmdSmiLibraryException as e:
+            self._check_exception(e)
+            return
+
+        # Validate returned data structure
+        self.assertIn("current_pages", ttm_info)
+
+        print(f"  current_pages: {ttm_info['current_pages']}")
+
+        # Validate that pages value is reasonable (> 0)
+        self.assertGreater(ttm_info["current_pages"], 0)
+
+        # Convert to GB for display
+        page_size = os.sysconf("SC_PAGESIZE")
+        gb = (ttm_info["current_pages"] * page_size) / (1024**3)
+        print(f"  TTM size: {gb:.2f} GB")
+
+        print("\n  TTM info test passed\n")
+
+    def test_ttm_set_dry_run(self):
+        """Test TTM write operations in DRY_RUN mode"""
+        print("\n\n###Test TTM write operations (DRY_RUN)\n")
+
+        # Get current TTM info first
+        try:
+            ttm_info = amdsmi.amdsmi_get_ttm_info()
+        except amdsmi.AmdSmiLibraryException as e:
+            self._check_exception(e)
+            return
+
+        # Enable DRY_RUN mode; ensure cleanup even if test fails
+        os.environ["AMDSMI_DRY_RUN"] = "1"
+        self.addCleanup(os.environ.pop, "AMDSMI_DRY_RUN", None)
+
+        # Test setting TTM pages limit to current value
+        try:
+            amdsmi.amdsmi_set_ttm_pages_limit(ttm_info["current_pages"])
+            print(
+                f"  Set TTM to current value ({ttm_info['current_pages']} pages) succeeded (DRY_RUN)"
+            )
+        except amdsmi.AmdSmiLibraryException as e:
+            self.fail(f"Failed to set TTM to current value in DRY_RUN mode: {e}")
+
+        # Test setting TTM to a different value
+        test_pages = ttm_info["current_pages"] // 2
+        if test_pages > 0:
+            try:
+                amdsmi.amdsmi_set_ttm_pages_limit(test_pages)
+                print(f"  Set TTM to different value ({test_pages} pages) succeeded (DRY_RUN)")
+            except amdsmi.AmdSmiLibraryException as e:
+                self.fail(f"Failed to set TTM to different value in DRY_RUN mode: {e}")
+
+        # Test setting TTM to 0 (should fail)
+        try:
+            amdsmi.amdsmi_set_ttm_pages_limit(0)
+            self.fail("Should have raised exception for pages=0")
+        except amdsmi.AmdSmiLibraryException as e:
+            error_code = e.get_error_code()
+            self.assertEqual(error_code, amdsmi.amdsmi_wrapper.AMDSMI_STATUS_INVAL)
+            print("  Invalid pages value (0) correctly rejected (DRY_RUN)")
+
+        # Test resetting TTM pages limit
+        try:
+            amdsmi.amdsmi_reset_ttm_pages_limit()
+            print("  Reset TTM succeeded (DRY_RUN)")
+        except amdsmi.AmdSmiLibraryException as e:
+            self.fail(f"Failed to reset TTM in DRY_RUN mode: {e}")
+
+        print("\n  TTM write operations test passed (DRY_RUN)\n")
+
 
 def print_test_ids(suite):
     for test in suite:
@@ -1403,20 +1712,21 @@ def print_test_ids(suite):
         else:
             print(" -", test.id())
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     import sys
     import unittest
 
     print("AMD SMI Integration Tests")
-    verbose=1
-    if '-q' in sys.argv or '--quiet' in sys.argv:
-        verbose=0
-    elif '-v' in sys.argv or '--verbose' in sys.argv:
-        verbose=2
+    verbose = 1
+    if "-q" in sys.argv or "--quiet" in sys.argv:
+        verbose = 0
+    elif "-v" in sys.argv or "--verbose" in sys.argv:
+        verbose = 2
     has_info_printed = False
 
     # If no -k or --keyword argument is given, print all available tests
-    if not ('-k' in sys.argv or '--keyword' in sys.argv):
+    if not ("-k" in sys.argv or "--keyword" in sys.argv):
         loader = unittest.TestLoader()
         suite = loader.loadTestsFromModule(sys.modules[__name__])
         print("==============================================================")
@@ -1431,9 +1741,33 @@ if __name__ == '__main__':
 
     # Detect if ran without sudo or root privileges
     if os.geteuid() != 0:
-        print("Warning: Some tests may require elevated privileges (sudo/root) to run completely.\n")
+        print(
+            "Warning: Some tests may require elevated privileges (sudo/root) to run completely.\n"
+        )
         print("Please relaunch with elevated privileges.\n")
         sys.exit(1)
+
+    # Apply per-ASIC test exclusions
+    try:
+        amdsmi.amdsmi_init()
+        gpu = amdsmi.amdsmi_get_processor_handles()[0]
+        gfx = amdsmi.amdsmi_get_gpu_asic_info(gpu)["target_graphics_version"]
+        amdsmi.amdsmi_shut_down()
+        skip_set = GFX_FILTER.get(gfx, set())
+        if skip_set:
+            print(
+                f"ASIC filter: {gfx} — skipping {len(skip_set)} test(s): {', '.join(sorted(skip_set))}"
+            )
+            for name in skip_set:
+                method = getattr(TestAmdSmiPythonInterface, name, None)
+                if method is not None:
+                    setattr(
+                        TestAmdSmiPythonInterface,
+                        name,
+                        unittest.skip(f"Excluded for {gfx} (see amdsmitst.exclude)")(method),
+                    )
+    except Exception as e:
+        print(f"ASIC filter: could not detect GPU ({e}), running all tests")
 
     runner = unittest.TextTestRunner(verbosity=verbose)
     unittest.main(testRunner=runner)

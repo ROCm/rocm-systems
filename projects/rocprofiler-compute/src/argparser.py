@@ -191,6 +191,7 @@ def add_general_group(
         help=(
             "Enable experimental feature(s):\n"
             "   Spatial multiplexing (--spatial-multiplexing)\n"
+            "   Torch trace (--torch-trace, --list-torch-operators, --torch-operator)\n"
         ),
     )
 
@@ -339,17 +340,6 @@ Examples:
         ),
     )
     profile_group.add_argument(
-        "--hip-trace",
-        dest="hip_trace",
-        required=False,
-        default=False,
-        action="store_true",
-        help=(
-            "\t\t\tHIP trace, execturion trace for the entire application at the HIP "
-            "level."
-        ),
-    )
-    profile_group.add_argument(
         "--kokkos-trace",
         dest="kokkos_trace",
         required=False,
@@ -363,7 +353,12 @@ Examples:
         dest="torch_trace",
         required=False,
         default=False,
-        action="store_true",
+        const=True,
+        nargs=0,
+        base_action="store_true",
+        action=ExperimentalAction,
+        experimental_enabled=experimental_enabled,
+        feature_label="Torch trace",
         help=(
             "\t\t\tTorch Trace, maps PyTorch operators to performance counters.\n"
             "\t\t\tShould be used only when profiling PyTorch applications."
@@ -678,6 +673,20 @@ Examples:
         help="\t\t\tProvide Node ID and GPU number per node.",
     )
 
+    profile_group.add_argument(
+        "--membw-analysis",
+        dest="membw_analysis",
+        required=False,
+        default=False,
+        base_action="store_const",
+        action=ExperimentalAction,
+        experimental_enabled=experimental_enabled,
+        feature_label="Memory Bandwidth Analysis",
+        nargs=0,
+        const=True,
+        help="\t\t\tEnable block 30 (memory bandwidth specific) for profile mode.",
+    )
+
     ## Analyze Command Line Options
     ## ----------------------------
     analyze_parser = subparsers.add_parser(
@@ -734,16 +743,45 @@ Examples:
     analyze_group.add_argument(
         "--list-torch-operators",
         dest="list_torch_operators",
-        help="\t\tList all operators from PyTorch trace.",
-        action="store_true",
+        default=False,
+        const=True,
+        nargs=0,
+        base_action="store_true",
+        action=ExperimentalAction,
+        experimental_enabled=experimental_enabled,
+        feature_label="List torch operators",
+        help=(
+            "\t\tList PyTorch operators as a unified call tree grouped by "
+            "source location with kernel launch stats. "
+            "Recreates torch_trace output directory."
+        ),
     )
     analyze_group.add_argument(
         "--torch-operator",
         metavar="",
         type=str,
         dest="torch_operator",
-        nargs="+",
-        help="\t\tSpecify operator name for filtering.",
+        nargs="*",
+        base_action="store",
+        action=ExperimentalAction,
+        experimental_enabled=experimental_enabled,
+        feature_label="Torch operator filter",
+        help=(
+            "\t\tFilter operators using PurePosixPath glob patterns,\n"
+            "\t\t\tselect their kernels, and display metrics.\n"
+            "\t\t\tWith no arguments, matches all operators (default: **).\n"
+            "\t\t\tExamples (operator hierarchy is /-separated):\n"
+            "\t\t\t  *relu               ends with relu\n"
+            "\t\t\t  *conv*              contains conv\n"
+            "\t\t\t  torch.nn.functional.relu   exact match\n"
+            "\t\t\t  */torch.nn.functional.relu two-level match\n"
+            "\t\t\t  */*functional*/*    intermediate component match\n"
+            "\t\t\t  all  or  '*'        match every operator\n"
+            "\t\t\tMultiple patterns (space or comma-separated):\n"
+            "\t\t\t  --torch-operator *relu,*conv*,*linear\n"
+            "\t\t\t  --torch-operator */*conv2d */*relu\n"
+            "\t\t\tCombine with -k to intersect with kernel IDs."
+        ),
     )
     analyze_group.add_argument(
         "-k",
@@ -800,7 +838,7 @@ Examples:
         metavar="",
         dest="output_name",
         help=(
-            "\t\tOverride the default output file name rocprof_compue_<uuid> "
+            "\t\tOverride the default output file name rocprof_compute_<uuid> "
             "with the specified name.\n"
             "\t\tThis is only applicable when --output-format txt/csv/db is used.\n"
         ),
@@ -997,4 +1035,18 @@ Examples:
         nargs=0,
         const=True,
         help="\t\tMode of spatial multiplexing.",
+    )
+
+    analyze_group.add_argument(
+        "--membw-analysis",
+        dest="membw_analysis",
+        required=False,
+        default=False,
+        base_action="store_const",
+        action=ExperimentalAction,
+        experimental_enabled=experimental_enabled,
+        feature_label="Memory Bandwidth Analysis",
+        nargs=0,
+        const=True,
+        help="\t\tEnable block 30 (memory bandwidth specific) for analysis mode.",
     )

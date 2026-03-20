@@ -266,10 +266,6 @@ class RocProfCompute_Base:
                 for file in Path(args.path).glob(pattern)
             ]
 
-            if args.hip_trace:
-                # remove hip api trace outputs from this list
-                files = [f for f in files if not f.name.endswith("_hip_api_trace.csv")]
-
             if args.kokkos_trace:
                 # remove marker api trace outputs from this list
                 files = [
@@ -595,7 +591,10 @@ class RocProfCompute_Base:
             # Use native counter collection tool
             # Use lib* glob pattern to handle CMAKE_INSTALL_LIBDIR variations
             # (lib, lib64, lib32, etc. depending on distribution)
-            native_tool_base_path = Path(sys.argv[0]).resolve().parents[2]
+            script_path = Path(sys.argv[0]).resolve()
+            native_tool_base_path = (
+                script_path.parents[2] if len(script_path.parents) >= 3 else Path()
+            )
             native_tool_glob_pattern = (
                 "lib*/rocprofiler-compute/librocprofiler-compute-tool.so"
             )
@@ -605,7 +604,9 @@ class RocProfCompute_Base:
                 )
             except Exception as e:
                 console_debug(
-                    f"Could not find pre-built native tool: {e}. "
+                    f"Could not find pre-built native tool: {e}.\n"
+                    f"Search path: {native_tool_base_path}\n"
+                    f"Glob pattern: {native_tool_glob_pattern}\n"
                     "Building native tool now."
                 )
                 native_tool_path = None
@@ -668,7 +669,12 @@ class RocProfCompute_Base:
             total_workload_runs += 1
 
         # Warn about multi-rank profiling when multiple workload runs are needed
-        if total_workload_runs > 1 and get_rank() is not None:
+        # Skip warning when iteration multiplexing is enabled (single application run)
+        if (
+            total_workload_runs > 1
+            and get_rank() is not None
+            and args.iteration_multiplexing is None
+        ):
             console_warning(
                 "Multi-rank application detected. Application replay mode "
                 "(running the workload multiple times) may fail to collect "
@@ -676,8 +682,6 @@ class RocProfCompute_Base:
                 "Consider using single-pass modes:\n"
                 "  --iteration-multiplexing  : Collect all counters in a "
                 "single application run\n"
-                "  --block <N>               : Profile specific block(s), "
-                "excluding block 21\n"
                 "  --set <name>              : Profile a predefined counter set\n"
                 "See documentation for more information."
             )
@@ -693,8 +697,6 @@ class RocProfCompute_Base:
                 "Consider using single-pass modes without PC sampling:\n"
                 "  --iteration-multiplexing  : Collect all counters in a "
                 "single application run\n"
-                "  --block <N>               : Profile specific block(s), "
-                "excluding block 21\n"
                 "  --set <name>              : Profile a predefined counter set\n"
                 "See documentation for more information."
             )
@@ -733,6 +735,11 @@ class RocProfCompute_Base:
                     console_debug(output)
 
         if args.iteration_multiplexing is not None:
+            if native_tool_path is None:
+                console_error(
+                    "Native tool is not supported which is required for "
+                    "iteration multiplexing."
+                )
             console_log(
                 "profiling", f"Iteration multiplexing: {args.iteration_multiplexing}"
             )

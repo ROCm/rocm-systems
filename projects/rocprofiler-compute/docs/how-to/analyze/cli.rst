@@ -616,13 +616,16 @@ Analysis database example
 PyTorch Operator Analysis
 --------------------------
 
-.. note::
+.. warning::
    
    PyTorch operator analysis is currently available only in CLI mode. GUI and TUI 
    will provide different interfaces for operator selection and visualization.
 
-After profiling with ``--torch-trace`` (see :ref:`torch-operator-profiling`), use 
-the analyze CLI to explore captured operators with hierarchical names.
+   These options require ``--experimental``. After profiling with 
+   ``--experimental --torch-trace`` (see :ref:`torch-operator-profiling`), 
+   use ``rocprof-compute --experimental analyze ...`` with 
+   ``--list-torch-operators`` or ``--torch-operator`` as needed.
+   
 
 Listing All Operators
 ^^^^^^^^^^^^^^^^^^^^^^
@@ -631,41 +634,52 @@ Display all PyTorch operators captured during profiling:
 
 .. code-block:: shell-session
 
-   $ rocprof-compute analyze --path ./workload --list-torch-operators
+   $ rocprof-compute --experimental analyze --path ./workload --list-torch-operators
 
    ================================================================================
-   PyTorch Operators in: ./workload
+   PyTorch Operator Call Tree: ./workload
+   Grouped by source location, sorted by total GPU kernel duration.
    ================================================================================
 
-     1. ResNet_layer1_conv1
-     2. ResNet_layer1_bn1  
-     3. ResNet_layer4_conv2
+   main.py:60 (kernel_launches: 110, total_duration: 59.31 ms)
+   └─ nn.Module.Net.forward (kernel_launches: 110, total_duration: 59.31 ms)
+      ├─ nn.Module.Conv2d.forward
+      |  └─ torch.nn.functional.conv2d (kernel_launches: 40, total_duration: 27.08 ms)
+      └─ nn.Module.Linear.forward
+         └─ torch.nn.functional.linear (kernel_launches: 20, total_duration: 15.41 ms)
 
-   ================================================================================
-   Total: 3 operators
-   ================================================================================
-
-The operators are shown with sanitized names (forward slashes replaced with underscores)
-matching the CSV filenames created in the ``torch_trace/`` directory.
+Output is grouped by source location (``file:line``) and shows full operator
+hierarchy (``/``-separated) and kernel stats. A consolidated CSV
+(``torch_trace/consolidated.csv``) is written with all operator/kernel data;
+see :ref:`torch-operator-profiling` for details.
 
 Filtering by Operator
 ^^^^^^^^^^^^^^^^^^^^^^
 
-Analyze specific operators by name or pattern:
+``--torch-operator`` uses PurePosixPath glob patterns to select operators.
+Operator hierarchies are ``/``-separated (e.g.
+``nn.Module.Net.forward/torch.nn.functional.relu``), and patterns are matched
+using ``PurePosixPath.match()``:
+
+* **Wildcard** — ``*relu`` (ends with relu), ``*conv*`` (contains conv)
+* **Exact** — ``torch.nn.functional.relu``
+* **Multi-level** — ``*/torch.nn.functional.relu``, ``*/*functional*/*``
+* **Match all** — no arguments, ``all``, ``*``, or ``**``
 
 .. code-block:: shell-session
 
-   $ rocprof-compute analyze --path ./workload --torch-operator "ResNet/layer4"
+   # Wildcard match
+   $ rocprof-compute --experimental analyze --path ./workload --torch-operator "*relu"
 
-This filters the analysis to show only kernels and metrics for the specified operator,
-enabling focused performance investigation of specific model components.
+   # Exact match
+   $ rocprof-compute --experimental analyze --path ./workload --torch-operator torch.nn.functional.relu
 
-**Filter multiple operators**:
+   # Match all operators (no arguments)
+   $ rocprof-compute --experimental analyze --path ./workload --torch-operator
+
+**Filter multiple operators** (space or comma separated):
 
 .. code-block:: shell-session
 
-   $ rocprof-compute analyze --path ./workload \
-       --torch-operator "Model/encoder" "Model/decoder"
-
-Use the hierarchical names (with forward slashes) as they appear in your model structure,
-not the sanitized underscore-separated names from the CSV files.
+   $ rocprof-compute --experimental analyze --path ./workload \
+       --torch-operator "*relu,*conv*,*linear"

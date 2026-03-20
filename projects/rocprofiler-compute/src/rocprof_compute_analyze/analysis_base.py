@@ -27,7 +27,6 @@ import argparse
 import copy
 import re
 import sys
-import textwrap
 from abc import abstractmethod
 from collections import OrderedDict
 from pathlib import Path
@@ -37,7 +36,7 @@ import pandas as pd
 
 import config
 from rocprof_compute_soc.soc_base import OmniSoC_Base
-from utils import file_io, parser, schema, tty
+from utils import file_io, parser, schema
 from utils.logger import (
     console_debug,
     console_error,
@@ -47,12 +46,10 @@ from utils.logger import (
 )
 from utils.roofline_calc import validate_roofline_csv
 from utils.utils import (
-    get_panel_alias,
     get_uuid,
     impute_counters_iteration_multiplex,
     is_workload_empty,
     merge_counters_spatial_multiplex,
-    process_torch_trace_output,
 )
 
 # the build-in config to list kernel names purpose only
@@ -153,103 +150,6 @@ class OmniAnalyze_Base:
         return self._arch_configs
 
     @demarcate
-    def list_metrics(self) -> None:
-        args = self.get_args()
-        arch = args.list_metrics
-
-        if arch not in self.__supported_archs:
-            console_error("analysis", "Unsupported arch")
-        if arch not in self._arch_configs:
-            sys_info = file_io.load_sys_info(f"{args.path[0][0]}/sysinfo.csv")
-            self.generate_configs(
-                arch,
-                args.config_dir,
-                args.list_stats,
-                args.filter_metrics,
-                sys_info.iloc[0],
-            )
-
-        metric_descriptions = {
-            k: v
-            for dfs in self._arch_configs[arch].dfs.values()
-            for k, v in dfs.to_dict().get("Description", {}).items()
-        }
-        for key, value in self._arch_configs[arch].metric_list.items():
-            dot_count = str(key).count(".")
-            indent = "\t" * min(dot_count, 2)
-
-            print(f"{indent}{key} -> {value}\n")
-
-            if dot_count > 1:
-                description = metric_descriptions.get(key, "")
-                if description:
-                    wrapped = textwrap.wrap(description, width=40)
-                    print(f"{indent}" + f"\n{indent}".join(wrapped) + "\n")
-
-        sys.exit(0)
-
-    @demarcate
-    def list_torch_operators(self) -> None:
-        """List PyTorch operators or show operator-to-kernel mapping and exit."""
-        workload_path = (
-            self.__args.path[0][0]
-            if isinstance(self.__args.path[0], list)
-            else self.__args.path[0]
-        )
-        process_torch_trace_output(workload_path)
-        torch_trace_dir = Path(workload_path) / "torch_trace"
-        all_files = list(torch_trace_dir.glob("*.csv"))
-        print(f"\n{'=' * 80}")
-        print(f"PyTorch Operators in: {workload_path}")
-        print(f"{'=' * 80}\n")
-        operator_count = 0
-        for f in all_files:
-            try:
-                df = pd.read_csv(f)
-                tty.show_torch_operator_hierarchy(str(f.name).replace(".csv", ""), df)
-                operator_count += 1
-            except Exception as e:
-                console_log(f"Failed to read operator from {f.name}: {e}")
-                sys.exit(1)
-
-        if not operator_count:
-            console_warning(
-                "No PyTorch operator data found. "
-                "Please ensure profiling was done with --torch-trace option."
-            )
-
-        print(f"\n{'=' * 80}")
-        print(f"Total: {operator_count} operators")
-        print(f"{'=' * 80}\n")
-        sys.exit(0)
-
-    @demarcate
-    def list_blocks(self) -> None:
-        args = self.get_args()
-        arch = args.list_blocks
-
-        if arch not in self.__supported_archs:
-            console_error("analysis", "Unsupported arch")
-        if arch not in self._arch_configs:
-            sys_info = file_io.load_sys_info(f"{args.path[0][0]}/sysinfo.csv")
-            self.generate_configs(
-                arch,
-                args.config_dir,
-                args.list_stats,
-                args.filter_metrics,
-                sys_info.iloc[0],
-            )
-
-        print(f"{'INDEX':<8} {'BLOCK ALIAS':<16} {'BLOCK NAME'}")
-        panel_alias_dict = {value: key for key, value in get_panel_alias().items()}
-        for key, value in self._arch_configs[arch].metric_list.items():
-            if key.count(".") > 0:
-                continue
-            print(f"{key:<8} {panel_alias_dict[key]:<16} {value}")
-
-        sys.exit(0)
-
-    @demarcate
     def load_options(self, normalization_filter: Optional[str]) -> None:
         args = self.get_args()
         profiling_config = self.get_profiling_config()
@@ -277,14 +177,6 @@ class OmniAnalyze_Base:
         self, normalization_filter: Optional[str] = None
     ) -> OrderedDict[str, schema.Workload]:
         args = self.get_args()
-        if args.list_metrics:
-            self.list_metrics()
-
-        if args.list_blocks:
-            self.list_blocks()
-
-        if getattr(args, "list_torch_operators", False):
-            self.list_torch_operators()
 
         def get_sysinfo_path(data_path: str) -> Optional[str]:
             return (
@@ -396,6 +288,16 @@ class OmniAnalyze_Base:
         )
         profiling_config = self.get_profiling_config()
 
+        needs_torch_trace = getattr(
+            args, "torch_operator", None
+        ) is not None or getattr(args, "list_torch_operators", False)
+        if needs_torch_trace and not profiling_config.get("torch_trace", False):
+            console_error(
+                "torch trace",
+                'Workload was not profiled with "--torch-trace". '
+                "Cannot use --torch-operator or --list-torch-operators.",
+            )
+
         for dir_info in args.path:
             if not any([
                 args.nodes,
@@ -423,6 +325,39 @@ class OmniAnalyze_Base:
             ]
             print("Node list:", "  ".join(nodes))
             sys.exit(0)
+
+        # Validate --nodes option against workload structure
+        if args.nodes is not None:
+            for dir_info in args.path:
+                workload_path = dir_info[0]
+                valid_nodes = file_io.get_valid_nodes(workload_path)
+
+                if not valid_nodes:
+                    # Single-node workload: sysinfo.csv is in root, not in
+                    # subdirectories
+                    console_error(
+                        "analysis",
+                        f"The workload at '{workload_path}' is single-node "
+                        "(sysinfo.csv is in the root directory).\n"
+                        "The --nodes option is only supported for multi-node "
+                        "workloads where each node subdirectory contains its "
+                        "own sysinfo.csv.\n"
+                        "Remove the --nodes option to analyze this "
+                        "single-node workload.",
+                    )
+
+                # If specific nodes are provided (not empty list), validate them
+                if args.nodes:
+                    invalid_nodes = [n for n in args.nodes if n not in valid_nodes]
+                    if invalid_nodes:
+                        console_error(
+                            "analysis",
+                            f"Invalid node(s): {', '.join(invalid_nodes)}\n"
+                            f"Valid nodes for '{workload_path}': "
+                            f"{', '.join(valid_nodes)}\n"
+                            "Each valid node must be a subdirectory "
+                            "containing sysinfo.csv.",
+                        )
 
         # Ensure analysis output does not overwrite existing files
         if args.output_name:
@@ -495,8 +430,7 @@ class OmniAnalyze_Base:
             (args.gpu_kernel, "filter_kernel_ids"),
             (args.gpu_id, "filter_gpu_ids"),
             (args.gpu_dispatch_id, "filter_dispatch_ids"),
-            (args.nodes, "nodes"),
-            (args.torch_operator, "filter_torch_operators"),
+            (args.nodes, "filter_nodes"),
         ]
 
         for filter_list, attr_name in filter_configs:

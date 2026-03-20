@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2021-22-present Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /*
  * Different test for checking functionality of
@@ -55,7 +42,6 @@ static constexpr unsigned blocksPerCU{6};  // to hide latency
 static constexpr unsigned threadsPerBlock{256};
 
 enum class ops {
-  TestwithOnestream,
   TestwithTwoStream,
   TestOnMultiGPUwithOneStream,
   TestkindDtoH,
@@ -78,30 +64,6 @@ struct joinable_thread : std::thread {
     if (this->joinable()) this->join();
   }
 };
-
-void TestwithOnestream(void) {
-  size_t Nbytes = N * sizeof(int);
-  int *A_d, *B_d, *C_d;
-  int *A_h, *B_h, *C_h;
-
-  unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, N);
-  HipTest::initArrays(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, N, false);
-
-  hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
-
-  HIP_CHECK(hipMemcpyWithStream(A_d, A_h, Nbytes, hipMemcpyHostToDevice, stream));
-  HIP_CHECK(hipMemcpyWithStream(B_d, B_h, Nbytes, hipMemcpyHostToDevice, stream));
-  hipLaunchKernelGGL(HipTest::vectorADD, dim3(blocks), dim3(threadsPerBlock), 0, stream,
-                     static_cast<const int*>(A_d), static_cast<const int*>(B_d), C_d, N);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipStreamSynchronize(stream));
-  HIP_CHECK(hipMemcpy(C_h, C_d, Nbytes, hipMemcpyDeviceToHost));
-  HipTest::checkVectorADD(A_h, B_h, C_h, N);
-
-  HipTest::freeArrays(A_d, B_d, C_d, A_h, B_h, C_h, false);
-  HIP_CHECK(hipStreamDestroy(stream));
-}
 
 void TestwithTwoStream(void) {
   size_t Nbytes = N * sizeof(int);
@@ -512,28 +474,25 @@ void TestkindHtoH(void) {
 }
 
 
-TEST_CASE("Unit_hipMemcpyWithStream_TestWithOneStream") { TestwithOnestream(); }
+HIP_TEST_CASE(Unit_hipMemcpyWithStream_TestwithTwoStream) { TestwithTwoStream(); }
 
-TEST_CASE("Unit_hipMemcpyWithStream_TestwithTwoStream") { TestwithTwoStream(); }
+HIP_TEST_CASE(Unit_hipMemcpyWithStream_TestkindDtoH) { TestkindDtoH(); }
 
-TEST_CASE("Unit_hipMemcpyWithStream_TestkindDtoH") { TestkindDtoH(); }
+HIP_TEST_CASE(Unit_hipMemcpyWithStream_TestkindHtoH) { TestkindHtoH(); }
 
-TEST_CASE("Unit_hipMemcpyWithStream_TestkindHtoH") { TestkindHtoH(); }
-
-TEST_CASE("Unit_hipMemcpyWithStream_TestkindDtoD", "[multigpu]") {
+HIP_TEST_CASE(Unit_hipMemcpyWithStream_TestkindDtoD) {
   TestkindDtoD();
 }
 
-TEST_CASE("Unit_hipMemcpyWithStream_TestOnMultiGPUwithOneStream",
-          "[multigpu]") {
+HIP_TEST_CASE(Unit_hipMemcpyWithStream_TestOnMultiGPUwithOneStream) {
   TestOnMultiGPUwithOneStream();
 }
 
-TEST_CASE("Unit_hipMemcpyWithStream_TestkindDefault") { TestkindDefault(); }
+HIP_TEST_CASE(Unit_hipMemcpyWithStream_TestkindDefault) { TestkindDefault(); }
 #ifndef __HIP_PLATFORM_NVIDIA__
-TEST_CASE("Unit_hipMemcpyWithStream_TestkindDefaultForDtoD", "[multigpu]") {
+HIP_TEST_CASE(Unit_hipMemcpyWithStream_TestkindDefaultForDtoD) {
   TestkindDefaultForDtoD();
 }
 #endif
 
-TEST_CASE("Unit_hipMemcpyWithStream_TestDtoDonSameDevice") { TestDtoDonSameDevice(); }
+HIP_TEST_CASE(Unit_hipMemcpyWithStream_TestDtoDonSameDevice) { TestDtoDonSameDevice(); }

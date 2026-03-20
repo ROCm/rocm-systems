@@ -1,21 +1,9 @@
 /*
-Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 #define HIP_ENABLE_WARP_SYNC_BUILTINS
 #define HIP_ENABLE_EXTRA_WARP_SYNC_TYPES
 
@@ -113,9 +101,9 @@ __global__ void reduceOpSync(T* __restrict__ output, const T* __restrict__ input
       result = __reduce_min_sync(mask, input[idx]);
     else if constexpr (std::is_same<Op<T>, MaxOp<T>>::value)
       result = __reduce_max_sync(mask, input[idx]);
-    else if constexpr (std::is_same<Op<T>, std::logical_and<T>>::value)
+    else if constexpr (std::is_same<Op<T>, AndOp<T>>::value)
       result = __reduce_and_sync(mask, input[idx]);
-    else if constexpr (std::is_same<Op<T>, std::logical_or<T>>::value)
+    else if constexpr (std::is_same<Op<T>, OrOp<T>>::value)
       result = __reduce_or_sync(mask, input[idx]);
     else if constexpr (std::is_same<Op<T>, XorOp<T>>::value)
       result = __reduce_xor_sync(mask, input[idx]);
@@ -145,9 +133,9 @@ template <class T, template <typename> class Op> class AtomicBenchmark
         reduceAllAtomics<T, AtomicMinOp><<<gridDim, blockDim, sharedSize>>>(output, input, mask);
       else if constexpr (std::is_same<Op<T>, MaxOp<T>>::value)
         reduceAllAtomics<T, AtomicMaxOp><<<gridDim, blockDim, sharedSize>>>(output, input, mask);
-      else if constexpr (std::is_same<Op<T>, std::logical_and<T>>::value)
+      else if constexpr (std::is_same<Op<T>, AndOp<T>>::value)
         reduceAllAtomics<T, AtomicAndOp><<<gridDim, blockDim, sharedSize>>>(output, input, mask);
-      else if constexpr (std::is_same<Op<T>, std::logical_or<T>>::value)
+      else if constexpr (std::is_same<Op<T>, OrOp<T>>::value)
         reduceAllAtomics<T, AtomicOrOp><<<gridDim, blockDim, sharedSize>>>(output, input, mask);
       else if constexpr (std::is_same<Op<T>, XorOp<T>>::value)
         reduceAllAtomics<T, AtomicXorOp><<<gridDim, blockDim, sharedSize>>>(output, input, mask);
@@ -205,11 +193,11 @@ template <class T, template <typename> class Op> struct IsLogicalOp {
   static constexpr bool value = false;
 };
 
-template <class T> struct IsLogicalOp<T, std::logical_and> {
+template <class T> struct IsLogicalOp<T, AndOp> {
   static constexpr bool value = true;
 };
 
-template <class T> struct IsLogicalOp<T, std::logical_or> {
+template <class T> struct IsLogicalOp<T, OrOp> {
   static constexpr bool value = true;
 };
 
@@ -326,42 +314,42 @@ template <class T, template <typename> class Op> struct ReduceBenchmark {
   }
 };
 
-TEMPLATE_TEST_CASE("Performance_Reduce_Sync_Add", "", int, unsigned int, unsigned long long,
+HIP_TEMPLATE_TEST_CASE(Performance_Reduce_Sync_Add, int, unsigned int, unsigned long long,
                    long long, float, half, double) {
   ReduceBenchmark<TestType, std::plus> benchmark;
 
   benchmark.Run();
 }
 
-TEMPLATE_TEST_CASE("Performance_Reduce_Sync_Min", "", int, unsigned int, unsigned long long,
+HIP_TEMPLATE_TEST_CASE(Performance_Reduce_Sync_Min, int, unsigned int, unsigned long long,
                    long long, float, half, double) {
   ReduceBenchmark<TestType, MinOp> benchmark;
 
   benchmark.Run();
 }
 
-TEMPLATE_TEST_CASE("Performance_Reduce_Sync_Max", "", int, unsigned int, unsigned long long,
+HIP_TEMPLATE_TEST_CASE(Performance_Reduce_Sync_Max, int, unsigned int, unsigned long long,
                    long long, float, half, double) {
   ReduceBenchmark<TestType, MaxOp> benchmark;
 
   benchmark.Run();
 }
 
-TEMPLATE_TEST_CASE("Performance_Reduce_Sync_And", "", int, unsigned int, unsigned long long,
+HIP_TEMPLATE_TEST_CASE(Performance_Reduce_Sync_And, int, unsigned int, unsigned long long,
                    long long) {
-  ReduceBenchmark<TestType, std::logical_and> benchmark;
+  ReduceBenchmark<TestType, AndOp> benchmark;
 
   benchmark.Run();
 }
 
-TEMPLATE_TEST_CASE("Performance_Reduce_Sync_Or", "", int, unsigned int, unsigned long long,
+HIP_TEMPLATE_TEST_CASE(Performance_Reduce_Sync_Or, int, unsigned int, unsigned long long,
                    long long) {
-  ReduceBenchmark<TestType, std::logical_or> benchmark;
+  ReduceBenchmark<TestType, OrOp> benchmark;
 
   benchmark.Run();
 }
 
-TEMPLATE_TEST_CASE("Performance_Reduce_Sync_Xor", "", int, unsigned int, unsigned long long,
+HIP_TEMPLATE_TEST_CASE(Performance_Reduce_Sync_Xor, int, unsigned int, unsigned long long,
                    long long) {
   ReduceBenchmark<TestType, XorOp> benchmark;
 

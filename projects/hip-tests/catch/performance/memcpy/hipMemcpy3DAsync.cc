@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "memcpy_performance_common.hh"
 
@@ -105,7 +92,7 @@ static void RunBenchmark(const hipExtent extent, hipMemcpyKind kind,
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Performance_hipMemcpy3DAsync_DeviceToHost") {
+HIP_TEST_CASE(Performance_hipMemcpy3DAsync_DeviceToHost) {
   CHECK_IMAGE_SUPPORT
   const auto width = GENERATE(4_KB, 4_MB, 16_MB);
   RunBenchmark(make_hipExtent(width, 16, 4), hipMemcpyDeviceToHost);
@@ -126,7 +113,7 @@ TEST_CASE("Performance_hipMemcpy3DAsync_DeviceToHost") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Performance_hipMemcpy3DAsync_HostToDevice") {
+HIP_TEST_CASE(Performance_hipMemcpy3DAsync_HostToDevice) {
   CHECK_IMAGE_SUPPORT
   const auto width = GENERATE(4_KB, 4_MB, 16_MB);
   RunBenchmark(make_hipExtent(width, 16, 4), hipMemcpyHostToDevice);
@@ -147,7 +134,7 @@ TEST_CASE("Performance_hipMemcpy3DAsync_HostToDevice") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Performance_hipMemcpy3DAsync_HostToHost") {
+HIP_TEST_CASE(Performance_hipMemcpy3DAsync_HostToHost) {
   CHECK_IMAGE_SUPPORT
   const auto width = GENERATE(4_KB, 4_MB, 16_MB);
   RunBenchmark(make_hipExtent(width, 16, 4), hipMemcpyHostToHost);
@@ -168,7 +155,7 @@ TEST_CASE("Performance_hipMemcpy3DAsync_HostToHost") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Performance_hipMemcpy3DAsync_DeviceToDevice_DisablePeerAccess") {
+HIP_TEST_CASE(Performance_hipMemcpy3DAsync_DeviceToDevice_DisablePeerAccess) {
   CHECK_IMAGE_SUPPORT
   const auto width = GENERATE(4_KB, 4_MB, 16_MB);
   RunBenchmark(make_hipExtent(width, 16, 4), hipMemcpyDeviceToDevice);
@@ -189,7 +176,7 @@ TEST_CASE("Performance_hipMemcpy3DAsync_DeviceToDevice_DisablePeerAccess") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Performance_hipMemcpy3DAsync_DeviceToDevice_EnablePeerAccess") {
+HIP_TEST_CASE(Performance_hipMemcpy3DAsync_DeviceToDevice_EnablePeerAccess) {
   CHECK_IMAGE_SUPPORT
   if (HipTest::getDeviceCount() < 2) {
     HipTest::HIP_SKIP_TEST("This test requires 2 GPUs. Skipping.");

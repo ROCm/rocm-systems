@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip_test_common.hh>
 #include <hip_test_process.hh>
@@ -42,7 +26,7 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGetDeviceCount_NegTst") {
+HIP_TEST_CASE(Unit_hipGetDeviceCount_NegTst) {
   REQUIRE_FALSE(hipGetDeviceCount(nullptr) == hipSuccess);
 }
 
@@ -59,7 +43,7 @@ TEST_CASE("Unit_hipGetDeviceCount_NegTst") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGetDeviceCount_HideDevices") {
+HIP_TEST_CASE(Unit_hipGetDeviceCount_HideDevices) {
   int deviceCount = HipTest::getDeviceCount();
   if (deviceCount < 2) {
     HipTest::HIP_SKIP_TEST("This test requires more than 2 GPUs. Skipping.");
@@ -79,21 +63,6 @@ TEST_CASE("Unit_hipGetDeviceCount_HideDevices") {
     INFO("Output from process : " << proc.getOutput());
     REQUIRE(proc.run(visibleStr) == i);
   }
-}
-
-/**
- * Test Description
- * ------------------------
- *  - Prints device count to the standard output.
- * Test source
- * ------------------------
- *  - unit/device/hipGetDeviceCount.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 5.2
- */
-TEST_CASE("Print_Out_Device_Count") {
-  std::cout << "Device Count: " << HipTest::getDeviceCount() << std::endl;
 }
 
 /**

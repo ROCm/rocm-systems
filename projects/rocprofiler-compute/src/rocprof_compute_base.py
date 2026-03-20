@@ -71,6 +71,7 @@ class RocProfCompute:
         self.__version: dict[str, Optional[str]] = {"ver": None, "ver_pretty": None}
         self.__supported_archs = mi_gpu_specs.get_gpu_series_dict()
         self.__mspec: MachineSpecs  # to be initialized in load_soc_specs()
+        self.__parser: argparse.ArgumentParser  # to be initialized in parse_args()
 
         setup_console_handler()
         self.set_version()
@@ -85,10 +86,20 @@ class RocProfCompute:
         setattr(self.__args, "loglevel", self.__loglevel)
         set_locale_encoding()
 
-        if self.__mode == "profile":
+        self.sanitize()
+
+        # Skip machine specs generation for general list options that don't need it
+        # or will generate it themselves
+        skip_machine_specs = (
+            getattr(self.__args, "specs", False)
+            or self.__args.list_metrics is not None
+            or self.__args.list_blocks is not None
+        )
+
+        if self.__mode != "analyze" and not skip_machine_specs:
             self.generate_machine_specs()
 
-        self.sanitize()
+        self.handle_list_args()
 
         if self.__mode == "profile":
             self.detect_profiler()
@@ -142,6 +153,16 @@ class RocProfCompute:
             self.__analyze_mode = "cli"
 
     def sanitize(self) -> None:
+        if self.__args.mode is None and not (
+            getattr(self.__args, "list_metrics", False)
+            or getattr(self.__args, "list_blocks", False)
+            or getattr(self.__args, "specs", False)
+        ):
+            self.__parser.print_help(sys.stderr)
+            console_error(
+                "rocprof-compute requires you to pass a valid mode. Detected None."
+            )
+
         block = False
         if (hasattr(self.__args, "filter_metrics") and self.__args.filter_metrics) or (
             hasattr(self.__args, "filter_blocks") and self.__args.filter_blocks
@@ -157,6 +178,26 @@ class RocProfCompute:
             and self.__args.list_available_metrics
         ) and block:
             console_error("Cannot use --list-available-metrics with --blocks")
+
+        # Validate block 30 requires --membw-analysis and --experimental
+        filter_list: list[str] = []
+        if hasattr(self.__args, "filter_blocks") and self.__args.filter_blocks:
+            filter_list = self.__args.filter_blocks
+        elif hasattr(self.__args, "filter_metrics") and self.__args.filter_metrics:
+            filter_list = self.__args.filter_metrics
+
+        for block_input in filter_list:
+            # Check if this is block 30 (starts with "30" or "30.")
+            if block_input.startswith("30") and (
+                len(block_input) == 2 or block_input[2] == "."
+            ):
+                if not self.__args.membw_analysis or not self.__args.experimental:
+                    console_error(
+                        "Block 30 (Memory Bandwidth Analysis) is an experimental :"
+                        f"feature.\n"
+                        f'To use "-b {block_input}", you must also specify: '
+                        f"--membw-analysis --experimental"
+                    )
 
         # fallback to csv output format, if rocpd public api not available
         if self.__mode == "profile" and self.__args.format_rocprof_output == "rocpd":
@@ -180,6 +221,8 @@ class RocProfCompute:
             self.__args.list_metrics is None
             and not getattr(self.__args, "list_available_metrics", False)
             and not getattr(self.__args, "list_sets", False)
+            and not getattr(self.__args, "list_blocks", False)
+            and not getattr(self.__args, "specs", False)
         ):
             if self.__args.name is None and self.__args.output_directory == str(
                 Path.cwd() / "workloads"
@@ -252,9 +295,6 @@ class RocProfCompute:
     def generate_machine_specs(self) -> None:
         """Generate MachineSpecs for RocProfCompute"""
         self.__mspec = generate_machine_specs(self.__args)
-        if self.__args and self.__args.specs:
-            print(self.__mspec)
-            sys.exit(0)
 
     @demarcate
     def load_soc_specs(self, sysinfo: Optional[dict] = None) -> None:
@@ -286,7 +326,7 @@ class RocProfCompute:
         experimental_requested: bool = prelim_args.experimental
 
         # Build full parser with experimental knowledge
-        parser = argparse.ArgumentParser(
+        self.__parser = argparse.ArgumentParser(
             description=(
                 "Command line interface for AMD's GPU profiler, ROCm Compute Profiler"
             ),
@@ -297,35 +337,15 @@ class RocProfCompute:
             usage="rocprof-compute [mode] [options]",
         )
         omniarg_parser(
-            parser,
+            self.__parser,
             config.rocprof_compute_home,
             self.__supported_archs,
             self.__version,
             experimental_requested,
         )
-        self.__args = parser.parse_args()
+        self.__args = self.__parser.parse_args()
 
-        if self.__args.mode is None:
-            if self.__args.specs:
-                print(generate_machine_specs(self.__args))
-                sys.exit(0)
-            elif self.__args.list_metrics is not None:
-                self.list_metrics()
-                sys.exit(0)
-            elif self.__args.list_blocks is not None:
-                self.list_blocks()
-                sys.exit(0)
-            elif self.__args.config_dir:
-                parser.print_help(sys.stderr)
-                console_error(
-                    "rocprof-compute requires you to pass --list-metrics "
-                    "with --config-dir."
-                )
-            parser.print_help(sys.stderr)
-            console_error(
-                "rocprof-compute requires you to pass a valid mode. Detected None."
-            )
-        elif self.__args.mode == "profile":
+        if self.__args.mode == "profile":
             self.handle_profile_args()
         elif self.__args.mode == "analyze":
             self.handle_analyze_args()
@@ -347,23 +367,31 @@ class RocProfCompute:
             self.__args.nodes = None
 
     @demarcate
+    def handle_list_args(self) -> None:
+        if self.__args.specs:
+            print(generate_machine_specs(self.__args))
+            sys.exit(0)
+        elif self.__args.list_metrics is not None:
+            self.list_metrics()
+        elif self.__args.list_blocks is not None:
+            self.list_blocks()
+
+        if self.__mode == "profile":
+            if self.__args.list_sets:
+                self.list_sets()
+            elif self.__args.list_available_metrics:
+                self.list_metrics()
+
+    @demarcate
     def list_metrics(self) -> None:
         for_current_arch = getattr(self.__args, "list_available_metrics", False)
+        arch = self.__mspec.gpu_arch if for_current_arch else self.__args.list_metrics
 
-        arch = (
-            self.__mspec.gpu_arch
-            if (for_current_arch or self.__args.list_metrics is None)
-            else self.__args.list_metrics
-        )
         if arch in self.__supported_archs.keys():
-            ac = schema.ArchConfig()
-            ac.panel_configs = file_io.load_panel_configs([
-                str(Path(self.__args.config_dir) / arch)
-            ])
             sys_info = (
                 self.__mspec.get_class_members().iloc[0] if for_current_arch else None
             )
-            parser.build_dfs(arch_configs=ac, filter_metrics=[], sys_info=sys_info)
+            ac = self._build_arch_metric_list(arch, sys_info)
             for key, value in ac.metric_list.items():
                 prefix = "\t" * min(key.count("."), 2)
                 print(f"{prefix}{key} -> {value}")
@@ -373,23 +401,10 @@ class RocProfCompute:
 
     @demarcate
     def list_blocks(self) -> None:
-        for_current_arch = getattr(self.__args, "list_available_metrics", False)
+        arch = self.__args.list_blocks
 
-        arch = (
-            self.__mspec.gpu_arch
-            if (for_current_arch or self.__args.list_blocks is None)
-            else self.__args.list_blocks
-        )
         if arch in self.__supported_archs.keys():
-            ac = schema.ArchConfig()
-            ac.panel_configs = file_io.load_panel_configs([
-                str(Path(self.__args.config_dir) / arch)
-            ])
-            sys_info = (
-                self.__mspec.get_class_members().iloc[0] if for_current_arch else None
-            )
-            parser.build_dfs(arch_configs=ac, filter_metrics=[], sys_info=sys_info)
-
+            ac = self._build_arch_metric_list(arch, sys_info=None)
             print(f"{'INDEX':<8} {'BLOCK ALIAS':<16} {'BLOCK NAME'}")
             panel_alias_dict = {value: key for key, value in get_panel_alias().items()}
             for key, value in ac.metric_list.items():
@@ -399,6 +414,20 @@ class RocProfCompute:
             sys.exit(0)
         else:
             console_error("Unsupported arch")
+
+    def _build_arch_metric_list(
+        self,
+        arch: str,
+        sys_info: "pd.Series",  # noqa: F821
+    ) -> schema.ArchConfig:
+        """Load panel configs for arch and populate metric_list.
+        Returns the ArchConfig."""
+        ac = schema.ArchConfig()
+        ac.panel_configs = file_io.load_panel_configs([
+            str(Path(self.__args.config_dir) / arch)
+        ])
+        parser.build_metric_list(ac, sys_info)
+        return ac
 
     @demarcate
     def list_sets(self) -> None:
@@ -449,30 +478,6 @@ class RocProfCompute:
 
         sys.exit(0)
 
-        profiler_classes = {
-            "rocprofv3": (
-                "rocprof_compute_profile.profiler_rocprof_v3",
-                "rocprof_v3_profiler",
-            ),
-            "rocprofiler-sdk": (
-                "rocprof_compute_profile.profiler_rocprofiler_sdk",
-                "rocprofiler_sdk_profiler",
-            ),
-        }
-
-        if self.__profiler_mode not in profiler_classes:
-            console_error("Unsupported profiler")
-
-        module_name, class_name = profiler_classes[self.__profiler_mode]
-        module = importlib.import_module(module_name)
-        profiler_class = getattr(module, class_name)
-
-        return profiler_class(
-            self.__args,
-            self.__profiler_mode,
-            self.__soc[self.__mspec.gpu_arch],
-        )
-
     def create_profiler(self) -> object:
         profiler_classes = {
             "rocprofv3": (
@@ -516,11 +521,6 @@ class RocProfCompute:
             self.__args.path = self.__args.output_directory
 
         self.load_soc_specs()
-
-        if self.__args.list_metrics is not None or self.__args.list_available_metrics:
-            self.list_metrics()
-        elif self.__args.list_sets:
-            self.list_sets()
 
         # instantiate desired profiler
         profiler = self.create_profiler()
@@ -605,6 +605,9 @@ class RocProfCompute:
                 key: value[0] for key, value in sys_info.to_dict("list").items()
             }
             self.load_soc_specs(sys_info_dict)
+
+        if getattr(self.__args, "list_available_metrics", False):
+            self.list_metrics()
 
         analyzer.set_soc(self.__soc)
         analyzer.pre_processing()

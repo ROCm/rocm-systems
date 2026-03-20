@@ -48,6 +48,7 @@
 #include "ipc/backend_ipc.hpp"
 #include "ipc/context_ipc_tmpl_host.hpp"
 #endif
+#include "constmem.hpp"
 #include "mpi_instance.hpp"
 #include "team.hpp"
 #include "templates_host.hpp"
@@ -158,6 +159,14 @@ static void setFilesLimit() {
 
 [[maybe_unused]] __host__ void inline library_init(MPI_Comm comm) {
   assert(!backend);
+
+#if defined(USE_HEAP_DEVICE_VMM_POSIX)
+  fprintf(stderr, "ROCSHMEM_ERROR: VMM POSIX allocator (USE_HEAP_DEVICE_VMM_POSIX) "
+          "is not compatible with MPI-based initialization. "
+          "Please use ROCSHMEM_INIT_WITH_UNIQUEID instead or disable VMM POSIX allocator.\n");
+  exit(1);
+#endif
+
   int count = 0;
   CHECK_HIP(hipGetDeviceCount(&count));
 
@@ -212,6 +221,8 @@ static void setFilesLimit() {
     printf("No Backend could be initialized! Aborting.\n");
     exit(1);
   }
+
+  init_constant_memory();
 }
 
 [[maybe_unused]] __host__ static void inline library_init_subcomm(TcpBootstrap *bootstrap, int nranks, int rank) {
@@ -319,6 +330,8 @@ static void setFilesLimit() {
     printf("No Backend could be initialized! Aborting.\n");
     exit(1);
   }
+
+  init_constant_memory();
 }
 
 [[maybe_unused]] __host__ int rocshmem_init_attr(unsigned int flags,
@@ -502,6 +515,7 @@ __host__ void * rocshmem_ptr(const void * dest, int pe){
   if (bootstr != nullptr)
     delete bootstr;
 
+  delete_default_allocator();
   //TODO This crashes
   //MPIInstance::mpilib_dl_close();
 }

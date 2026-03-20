@@ -1,21 +1,9 @@
 /*
-   Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
-   Permission is hereby granted, free of charge, to any person obtaining a copy
-   of this software and associated documentation files (the "Software"), to deal
-   in the Software without restriction, including without limitation the rights
-   to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-   copies of the Software, and to permit persons to whom the Software is
-   furnished to do so, subject to the following conditions:
-   The above copyright notice and this permission notice shall be included in
-   all copies or substantial portions of the Software.
-   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-   IMPLIED, INNCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-   FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-   AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANNY CLAIM, DAMAGES OR OTHER
-   LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-   OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-   THE SOFTWARE.
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
  */
+
 #pragma once
 
 #include <hip_test_common.hh>
@@ -403,23 +391,23 @@ class streamMemAllocTest {
   }
   // Execute Kernel to process input data and wait for it.
   void runKernel(hipStream_t stream) {
-    hipLaunchKernelGGL(HipTest::vectorADD, dim3(size / THREADS_PER_BLOCK),
-                        dim3(THREADS_PER_BLOCK), 0, stream,
-                        static_cast<const int*>(A_d),
-                        static_cast<const int*>(B_d), C_d, size);
+    int blocks = (size % THREADS_PER_BLOCK == 0) ? (size / THREADS_PER_BLOCK)
+                                                 : ((size / THREADS_PER_BLOCK) + 1);
+    hipLaunchKernelGGL(HipTest::vectorADD, dim3(blocks), dim3(THREADS_PER_BLOCK), 0, stream,
+                       static_cast<const int*>(A_d), static_cast<const int*>(B_d), C_d, size);
     HIP_CHECK(hipGetLastError());
   }
   // Transfer data from device to host asynchronously.
   void transferFromMempool(hipStream_t stream) {
     HIP_CHECK(hipMemcpyAsync(C_h, C_d, byte_size, hipMemcpyDeviceToHost,
                         stream));
+    HIP_CHECK(hipStreamSynchronize(stream));
   }
   // Validate the data returned from device.
   bool validateResult() {
     for (int i = 0; i < size; i++) {
-      if (C_h[i] != (A_h[i] + B_h[i])) {
-        return false;
-      }
+      auto res = A_h[i] + B_h[i];
+      REQUIRE(res == C_h[i]);
     }
     return true;
   }
@@ -577,14 +565,14 @@ public:
   }
   // method to receive shareable handle via socket
   int recvShareableHdl(hipShareableHdl *shHandle) {
-    struct msghdr msg;
+    struct msghdr msg = {};
     struct iovec iov[1];
 
     // Union to guarantee alignment requirements for control array
     union {
       struct cmsghdr cm;
       char control[CMSG_SPACE(sizeof(int))];
-    } control_un;
+    } control_un = {};
 
     struct cmsghdr *cmptr;
     ssize_t n;
@@ -621,14 +609,14 @@ public:
   }
   // method to send shareable handle via sockets
   int sendShareableHdl(hipShareableHdl shareableHdl, Process process) {
-    struct msghdr msg;
+    struct msghdr msg = {};
     struct iovec iov[1];
     int dummy_data = 0;
 
     union {
       struct cmsghdr cm;
       char control[CMSG_SPACE(sizeof(int))];
-    } control_un;
+    } control_un = {};
 
     struct cmsghdr *cmptr;
     struct sockaddr_un cliaddr;

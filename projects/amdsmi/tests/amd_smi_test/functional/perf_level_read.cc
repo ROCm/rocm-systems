@@ -20,24 +20,25 @@
  * THE SOFTWARE.
  */
 
-#include <stdint.h>
-#include <stddef.h>
+#include "perf_level_read.h"
+
 #include <gtest/gtest.h>
+#include <stddef.h>
+#include <stdint.h>
 
 #include <iostream>
 #include <string>
 
 #include "amd_smi/amdsmi.h"
-#include "perf_level_read.h"
 
 TestPerfLevelRead::TestPerfLevelRead() : TestBase() {
   set_title("AMDSMI Performance Level Read Test");
-  set_description("The Performance Level Read tests verifies that the "
-                          "performance level monitors can be read properly.");
+  set_description(
+      "The Performance Level Read tests verifies that the "
+      "performance level monitors can be read properly.");
 }
 
-TestPerfLevelRead::~TestPerfLevelRead(void) {
-}
+TestPerfLevelRead::~TestPerfLevelRead(void) {}
 
 void TestPerfLevelRead::SetUp(void) {
   TestBase::SetUp();
@@ -45,9 +46,7 @@ void TestPerfLevelRead::SetUp(void) {
   return;
 }
 
-void TestPerfLevelRead::DisplayTestInfo(void) {
-  TestBase::DisplayTestInfo();
-}
+void TestPerfLevelRead::DisplayTestInfo(void) { TestBase::DisplayTestInfo(); }
 
 void TestPerfLevelRead::DisplayResults(void) const {
   TestBase::DisplayResults();
@@ -59,7 +58,6 @@ void TestPerfLevelRead::Close() {
   // amdsmi_shut_down(), so it should be done after other hsa cleanup
   TestBase::Close();
 }
-
 
 void TestPerfLevelRead::Run(void) {
   amdsmi_status_t err;
@@ -81,8 +79,7 @@ void TestPerfLevelRead::Run(void) {
     } else {
       CHK_ERR_ASRT(err)
       IF_VERB(STANDARD) {
-        std::cout << "\t**Performance Level:" << std::dec << (uint32_t)pfl
-                  << std::endl;
+        std::cout << "\t**Performance Level:" << std::dec << (uint32_t)pfl << std::endl;
       }
     }
     // Verify api support checking functionality is working

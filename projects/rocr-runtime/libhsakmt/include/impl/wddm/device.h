@@ -58,7 +58,7 @@
 #include <bitset>
 
 #include "impl/wddm/types.h"
-#include "impl/thunk_proxy/thunk_proxy.h"
+#include "wkmi.h"
 #include "impl/wddm/va_mgr.h"
 #include "impl/wddm/status.h"
 #include "impl/wddm/types.h"
@@ -167,12 +167,13 @@ public:
   bool CreateSyncobj(D3DKMT_HANDLE *handle, uint64_t **addr);
   void DestroySyncobj(D3DKMT_HANDLE handle);
 
-  bool CreateQueue(WDDMQueue *queue);
+  bool CreateQueue(WDDMQueue *queue, uint64_t debugger_data = 0);
   void DestroyQueue(WDDMQueue *queue);
   bool CreateHwQueue(WDDMQueue *queue);
   bool DestroyHwQueue(WDDMQueue *queue);
   bool SubmitToSwQueue(WDDMQueue *queue, uint64_t command_addr,
                       uint64_t command_size, uint64_t fence_value);
+  bool SetCuMask(uint32_t doorbell, uint32_t cu_mask_count, const uint32_t* queue_cu_mask);
   bool SubmitToHwQueue(WDDMQueue *queue, uint64_t command_addr,
                       uint64_t command_size, uint64_t fence_value);
   bool SubmitToAqlQueue(WDDMQueue* queue, uint64_t command_addr, uint64_t command_size,
@@ -208,7 +209,7 @@ public:
   }
 
   bool IsHwsEnabled(int engine) {
-    return thunk_proxy::GetHwsEnabled(engine, &device_info_);
+    return Wkmi::GetHwsEnabled(engine, &device_info_);
   }
 
   void UpdatePageFence(uint64_t fence_value);
@@ -219,7 +220,7 @@ public:
   LUID GetLuid() const { return adapter_luid_; }
   D3DKMT_HANDLE GetAdapter() const { return adapter_; }
 
-  const thunk_proxy::DeviceInfo& DeviceInfo() const { return device_info_; }
+  const Wkmi::DeviceInfo& DeviceInfo() const { return device_info_; }
 
   ErrorCode CreateGpuMemory(const GpuMemoryCreateInfo &create_info, GpuMemory **gpu_mem, gpusize *gpu_va = nullptr);
   uint32_t RegisterEvent(uint32_t type, HANDLE event_handle, uint64_t* mailbox);
@@ -228,8 +229,13 @@ public:
   device_init_result InitStatus() const { return init_status_; }
   uint32_t GbAddrConfig() const { return device_info_.gb_addr_config; }
 
+  // Debugger support
+  bool GetKmdDbgVersion(struct Wkmi::KmdDbgVersion *version) const;
+  bool RegisterRuntimeState(uint32_t runtime_state, const void* r_debug, bool ttmp_setup_hint) const;
+  bool SetTrapHandler(uint64_t tba, uint64_t tma) const;
+
 private:
-  bool Escape(void* priv_data, uint32_t priv_size, bool hw_access);
+  bool Escape(void* priv_data, uint32_t priv_size, bool hw_access) const;
   NTSTATUS ParseDeviceInfo(void);
   void DestroyDeviceInfo(void);
   bool CreateDevice(void);
@@ -238,7 +244,7 @@ private:
   bool DestroyPagingQueue(void);
   void *Lock(D3DKMT_HANDLE handle);
   bool Unlock(D3DKMT_HANDLE handle);
-  bool CreateContext(int engine, D3DKMT_HANDLE *handle);
+  bool CreateContext(int engine, D3DKMT_HANDLE *handle, uint64_t debugger_data = 0);
   bool DestroyContext(D3DKMT_HANDLE handle);
 
   void SetPowerOptimization(bool restore);
@@ -261,7 +267,7 @@ private:
   static const uint32_t cmdbuf_aql_frame_num_;
   uint32_t node_id_;
   // device info
-  thunk_proxy::DeviceInfo device_info_;
+  Wkmi::DeviceInfo device_info_;
   std::vector<struct SegmentInfo> segment_infos_;
   //CmdUtil cmd_util;
   device_init_result init_status_;

@@ -73,7 +73,7 @@ hsa_status_t WDDMQueue::SwsInit(void) {
     GpuMemory *gpu_mem = nullptr;
     GpuMemoryCreateInfo create_info{};
 
-    create_info.domain = thunk_proxy::kUserQueue;
+    create_info.domain = Wkmi::kUserQueue;
     create_info.size = device->GetSwsQueueSize();
     // GetComputeEngine returns schedId instead of engine flag
     create_info.engine_flag = device->GetComputeEngine();
@@ -139,10 +139,10 @@ hsa_status_t WDDMQueue::HwsSubmit(uint64_t command_addr,
 }
 
 hsa_status_t WDDMQueue::SetPriority(hsa_amd_queue_priority_t priority) {
-  if (!use_hws)
+  if (!use_hws) 
     return HSA_STATUS_SUCCESS;
 
-  thunk_proxy::SchedLevel new_prio = ConvertSchedLevel(priority);
+  Wkmi::SchedLevel new_prio = ConvertSchedLevel(priority);
   if (prio == new_prio)
     return HSA_STATUS_SUCCESS;
 
@@ -153,6 +153,17 @@ hsa_status_t WDDMQueue::SetPriority(hsa_amd_queue_priority_t priority) {
   return HwsInit();
 }
 
+// ================================================================================================
+hsa_status_t WDDMQueue::SetCuMask(uint32_t cu_mask_count, const uint32_t* queue_cu_mask) {
+  if ((aql_doorbell_offset_ == 0) ||
+      device->SetCuMask(aql_doorbell_offset_, cu_mask_count, queue_cu_mask)) {
+    return HSA_STATUS_SUCCESS;
+  } else {
+    return HSA_STATUS_ERROR;
+  }
+}
+
+// ================================================================================================
 void ComputeQueue::HandleError(hsa_status_t status) {
   hsa_signal_t sig = amd_queue_rocr_->queue_inactive_signal;
   hsa_signal_value_t val = -1;
@@ -275,12 +286,13 @@ ComputeQueue::ComputeQueue(WDDMDevice *device,
   amd_queue_rocr_ = (amd_queue_v2_t*)((char*)ring_rptr - offsetof(amd_queue_t, read_dispatch_id));
   amd_queue_memory_ = GetGpuMemoryFromAddress(amd_queue_rocr_);
   aql_ = device->DeviceInfo().hwsInfo.hwsMask.aql_queue;
-  bool ret = device->CreateQueue(this);
+  bool ret = device->CreateQueue(
+      this, !device->IsAqlSupported() ? reinterpret_cast<uint64_t>(_ring_rptr) : 0);
   assert(ret);
 
   GpuMemoryCreateInfo create_info{};
   create_info.size = dxg_runtime->page_size;
-  create_info.domain = thunk_proxy::kSystem;
+  create_info.domain = Wkmi::kSystem;
   GpuMemory *gpu_mem = nullptr;
   auto code = device->CreateGpuMemory(create_info, &gpu_mem);
   assert(code == ErrorCode::Success);
@@ -467,6 +479,15 @@ void ComputeQueue::InitScratchSRD() {
     amd_queue_->compute_tmpring_size = tmpring_size.u32All;
   }
 
+  // Update the amd_queue_rocr_
+  amd_queue_rocr_->compute_tmpring_size = amd_queue_->compute_tmpring_size;
+  amd_queue_rocr_->scratch_resource_descriptor[0] = amd_queue_->scratch_resource_descriptor[0];
+  amd_queue_rocr_->scratch_resource_descriptor[1] = amd_queue_->scratch_resource_descriptor[1];
+  amd_queue_rocr_->scratch_resource_descriptor[2] = amd_queue_->scratch_resource_descriptor[2];
+  amd_queue_rocr_->scratch_resource_descriptor[3] = amd_queue_->scratch_resource_descriptor[3];
+  amd_queue_rocr_->scratch_backing_memory_location = amd_queue_->scratch_backing_memory_location;
+  amd_queue_rocr_->scratch_wave64_lane_byte_size = amd_queue_->scratch_wave64_lane_byte_size;
+
   return;
 }
 
@@ -541,7 +562,7 @@ bool ComputeQueue::UpdateScratch(hsa_kernel_dispatch_packet_t *packet, bool wave
 
   GpuMemoryCreateInfo create_info{};
   create_info.size = scratch_size_;
-  create_info.domain = thunk_proxy::kLocal;
+  create_info.domain = Wkmi::kLocal;
   GpuMemory *gpu_mem = nullptr;
   auto code = device->CreateGpuMemory(create_info, &gpu_mem);
   if (code != ErrorCode::Success)
@@ -787,6 +808,9 @@ ComputeQueue::KernelDispatchAqlToPm4(char *cpu, hsa_kernel_dispatch_packet_t *pa
   info.scratchSizePerWave = ScratchSizePerWave();
   memset(info.scratchBaseOffset, 0, sizeof(info.scratchBaseOffset));
   info.offsetCnt = 0;
+  info.packetIndex = (reinterpret_cast<uint64_t>(packet) -
+                      reinterpret_cast<uint64_t>(amd_queue_rocr_->hsa_queue.base_address)) /
+      64;
 
   size_t size;
   size = cmd_util.BuildDispatch(&info, cpu + i);
