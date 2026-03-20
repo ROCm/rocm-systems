@@ -217,7 +217,50 @@ __device__ __forceinline__ void __roc_flush() {
 #endif
 }
 
-__device__ __forceinline__ void store_asm(uint8_t* val, [[maybe_unused]] uint8_t* dst,
+// 128-bit (16-byte) vector type for use with flat_store_dwordx4 and buffer intrinsics
+using i32x4 = int32_t __attribute__((ext_vector_type(4)));
+
+struct buffer_resource {
+  uint64_t ptr;
+  uint32_t range;
+  uint32_t config;
+};
+
+template <class To, class From>
+__device__ To bit_cast_fallback(const From& src) noexcept {
+  To dst;
+  __builtin_memcpy(&dst, &src, sizeof(To));
+  return dst;
+}
+
+template <typename T>
+__device__ __forceinline__ buffer_resource make_buffer_resource(T* ptr, uint32_t buffer_size) {
+  // ref: https://github.com/HazyResearch/HipKittens
+  constexpr uint32_t config = 0x00020000;
+  uint64_t as_u64 = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(ptr));
+  return {as_u64, buffer_size, config};
+}
+
+__device__ __forceinline__ buffer_resource& move_buffer_resource(buffer_resource& br, size_t size) {
+  br.ptr += static_cast<uint64_t>(size);
+  br.range -= static_cast<uint32_t>(size);
+  return br;
+}
+
+#if defined(__gfx942__) || defined(__gfx950__)
+
+__device__ __uint128_t llvm_amdgcn_raw_buffer_load_b128(i32x4 srsrc, uint32_t voffset,
+                                                         uint32_t soffset, uint32_t coherency)
+    __asm("llvm.amdgcn.raw.buffer.load.i128");
+
+__device__ void llvm_amdgcn_raw_buffer_store_b128(__uint128_t vdata, i32x4 srsrc,
+                                                   uint32_t voffset, uint32_t soffset,
+                                                   uint32_t coherency)
+    __asm("llvm.amdgcn.raw.buffer.store.i128");
+
+#endif  // __gfx942__ || __gfx950__
+
+__device__ __forceinline__ void store_asm(uint8_t* val, uint8_t* dst,
                                           int size) {
   switch (size) {
     case 2: {
@@ -274,6 +317,53 @@ __device__ __forceinline__ void store_asm(uint8_t* val, [[maybe_unused]] uint8_t
 #endif
 #if defined(__gfx1201__)
       asm volatile("flat_store_b64 %0 %1 scope:SCOPE_SYS" : : "v"(dst), "v"(val64));
+#endif
+      break;
+    }
+    case 16: {
+      // 16-byte (128-bit) transfer
+#if defined(__gfx906__)
+#endif
+#if defined(__gfx908__)
+#endif
+#if defined(__gfx90a__) || defined(__gfx1100__)
+      // #pragma unroll
+      // for (int i = 0; i < 8; i++) {
+      //   i32x4 chunk = *(reinterpret_cast<i32x4*>(val) + i);
+      //   uint8_t* dst_i = dst + i * sizeof(i32x4);
+      //   asm volatile("flat_store_dwordx4 %0 %1 glc slc" : : "v"(dst_i), "v"(chunk));
+      // }
+#endif
+#if defined(__gfx942__) || defined(__gfx950__)
+      {
+        constexpr int NUM_REG = 1;
+        __uint128_t regs[NUM_REG];
+        buffer_resource *br_val_ptr = reinterpret_cast<buffer_resource *>(val);
+        buffer_resource *br_dst_ptr = reinterpret_cast<buffer_resource *>(dst);
+
+        #pragma unroll
+        for (int i = 0; i < NUM_REG; i++) {
+          regs[i] = llvm_amdgcn_raw_buffer_load_b128(
+              *reinterpret_cast<i32x4*>(br_val_ptr),
+              static_cast<uint32_t>(i) * 16u, 0u, 0b10001u);
+        }
+        #pragma unroll
+        for (int i = 0; i < NUM_REG; i++) {
+          llvm_amdgcn_raw_buffer_store_b128(
+              regs[i],
+              *reinterpret_cast<i32x4*>(br_dst_ptr),
+              static_cast<uint32_t>(i) * 16u, 0u, 0b10001u);
+        }
+        __builtin_amdgcn_s_waitcnt(0xF70);
+      }
+#endif
+#if defined(__gfx1201__)
+      #pragma unroll
+      for (int i = 0; i < 8; i++) {
+        i32x4 chunk = *(reinterpret_cast<i32x4*>(val) + i);
+        uint8_t* dst_i = dst + i * sizeof(i32x4);
+        asm volatile("flat_store_b128 %0 %1 scope:SCOPE_SYS" : : "v"(dst_i), "v"(chunk));
+      }
 #endif
       break;
     }
