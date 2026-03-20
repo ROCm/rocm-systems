@@ -1191,8 +1191,7 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
   // (e.g., saveexec masking in softmax where exec=0 means "skip section",
   // not "exit kernel").
 
-  // s_code_end → skip entirely. Only appears after s_endpgm as padding.
-  // Saves ~96+ bytes, making room for wave32→wave64 instruction expansion.
+  // s_code_end → skip entirely (saves space so translated code fits in .text)
   if (mnemonic == "s_code_end") {
     return result;
   }
@@ -1564,12 +1563,19 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
         std::string ssrc1 = operands[2];
         std::string valu_op = salu_it->second;
 
-        // Emulate SALU float op via VALU using v6 as temp (same temp register
-        // as v_mad_u32 and v_cmp literal emulations — brief clobber, no cross-
-        // instruction state).  v6 is within arch VGPRs for all kernels (min 12).
-        result.push_back("v_mov_b32_e32 v6, " + ssrc0);
-        result.push_back(valu_op + " v6, " + ssrc1 + ", v6");
-        result.push_back("v_readfirstlane_b32 " + sdst + ", v6");
+        if (mnemonic == "s_fmac_f32") {
+          // s_fmac_f32 sdst, ssrc0, ssrc1 → sdst += ssrc0 * ssrc1
+          // Use v6 only: mul then add (avoids constant bus violation and v5 clobber).
+          result.push_back("v_mov_b32_e32 v6, " + ssrc0);
+          result.push_back("v_mul_f32_e32 v6, " + ssrc1 + ", v6");
+          result.push_back("v_add_f32_e32 v6, " + sdst + ", v6");
+          result.push_back("v_readfirstlane_b32 " + sdst + ", v6");
+        } else {
+          // Other SALU float ops: v6 = ssrc0; v6 = op(ssrc1, v6); sdst = v6
+          result.push_back("v_mov_b32_e32 v6, " + ssrc0);
+          result.push_back(valu_op + " v6, " + ssrc1 + ", v6");
+          result.push_back("v_readfirstlane_b32 " + sdst + ", v6");
+        }
         return result;
       }
     }
@@ -3047,8 +3053,11 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
                 const char* name = (const char*)(elf + s2.offset + name_idx);
                 uint64_t value;
                 std::memcpy(&value, sym + 8, 8);
-                if (strstr(name, ".num_vgpr") && value > num_vgprs12)
-                  num_vgprs12 = (uint32_t)value;  // actual VGPR count from symbol
+                // Don't inflate num_vgprs12 with .num_vgpr — save regs must fit
+                // within KD's arch VGPRs (RSRC1 base + 4). The saves overlap
+                // with kernel VGPRs but are read in the prologue before the
+                // kernel's computation overwrites them.
+                (void)name;  // .num_vgpr not used for save placement
                 if (strstr(name, ".num_sgpr") && value > num_sgprs12)
                   num_sgprs12 = (uint32_t)value;  // exact count from symbol
               }
@@ -3753,10 +3762,12 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
             uint32_t sgpr_field12_rd = (rsrc1 >> 6) & 0x3Fu;  // save before clear
             uint32_t num_vgprs = (vgpr_field12 + 1u) * 8u;
             if (num_vgprs < 8u) num_vgprs = 8u;
-            num_vgprs += 4u;  // room for sv_x, sv_y
-            uint32_t gfx9_vgpr = (num_vgprs / 4u) - 1u;  // ACCUM_OFFSET = all-arch
+            num_vgprs += 4u;  // room for save registers
+            uint32_t gfx9_vgpr = (num_vgprs / 4u) - 1u;
             if (gfx9_vgpr > 62u) gfx9_vgpr = 62u;
-            uint32_t rsrc1_vgpr_field = gfx9_vgpr + 1u;   // one extra accum group (ACCUM < field required)
+            // Match native gfx942: field = ACCUM (all arch, no accum group).
+            // Native uses ACCUM=field (e.g., ACCUM=4, field=4 for .num_vgpr=20).
+            uint32_t rsrc1_vgpr_field = gfx9_vgpr;
             if (rsrc1_vgpr_field > 63u) rsrc1_vgpr_field = 63u;
             // Clear bits [11:0] and set GFX9 SGPR[5:0] and VGPR[11:6]
             rsrc1 &= ~0xFFFu;
