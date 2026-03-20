@@ -3357,6 +3357,32 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
 
         translated_asm += t + "\n";
       }
+      // Conditional exec_hi clear after v_cmpx_e64: clear exec_hi ONLY when
+      // the NEXT source instruction is NOT s_cbranch_execz. This handles:
+      // - Reduction loops: v_cmpx followed by ds_read → NEED exec_hi clear
+      // - Early exit: v_cmpx followed by s_cbranch_execz → DON'T clear (the
+      //   branch tests exec which needs both lo and hi to detect "all masked")
+      if (ii < source_instrs.size()) {
+        bool has_vcmpx = false;
+        for (const auto& t : translated_lines) {
+          if (t.find("v_cmpx_") != std::string::npos) { has_vcmpx = true; break; }
+        }
+        if (has_vcmpx) {
+          // Check next source instruction
+          bool next_is_execz = false;
+          for (size_t nxt = ii + 1; nxt < source_instrs.size(); nxt++) {
+            std::string nm = ExtractMnemonic(source_instrs[nxt].text);
+            if (nm.find("s_delay") == 0 || nm.find("s_wait") == 0 ||
+                nm.find("s_nop") == 0 || nm.find("s_clause") == 0) continue;
+            if (nm == "s_cbranch_execz") next_is_execz = true;
+            break;
+          }
+          if (!next_is_execz) {
+            translated_asm += "s_mov_b32 exec_hi, 0\n";
+          }
+        }
+      }
+
       // After a saveexec the b32→b64 widening writes exec_hi into the upper
       // SGPR of the pair, potentially overwriting a workgroup_id register.
       // Restore all REPLACE destinations from their VGPR copies.
