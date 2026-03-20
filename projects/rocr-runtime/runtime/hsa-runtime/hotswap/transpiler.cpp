@@ -1191,9 +1191,9 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
   // (e.g., saveexec masking in softmax where exec=0 means "skip section",
   // not "exit kernel").
 
-  // s_code_end → s_nop 0 (GFX12 padding, not available on GFX9)
+  // s_code_end → skip entirely. Only appears after s_endpgm as padding.
+  // Saves ~96+ bytes, making room for wave32→wave64 instruction expansion.
   if (mnemonic == "s_code_end") {
-    result.push_back("s_nop 0");
     return result;
   }
 
@@ -2741,7 +2741,7 @@ static void PatchKernelDescriptorsForWave64(uint8_t* elf, size_t elf_size,
     uint32_t sgpr_field12_kd = (rsrc1 >> 6) & 0x3Fu;  // save before clear
     uint32_t num_vgprs = (vgpr_field12 + 1u) * 8u;  // GFX12 granularity
     if (num_vgprs < 8u) num_vgprs = 8u;
-    num_vgprs += 4u;  // room for sv_x, sv_y (2 regs, rounded to GFX9 granularity of 4)
+    num_vgprs += 4u;  // room for sv_x, sv_y (embedded .text descriptors are for simple kernels)
     // ACCUM_OFFSET: on GFX942, arch VGPRs = (ACCUM_OFFSET+1)*4.  Set ACCUM_OFFSET
     // so ALL allocated VGPRs (kernel's + save regs) are arch VGPRs (accessible by VALU).
     // Hardware requires ACCUM_OFFSET < RSRC1 VGPR field, so add one extra accum group.
