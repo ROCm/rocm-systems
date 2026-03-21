@@ -3489,10 +3489,13 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
           pos += to.size();
         }
       };
-      // At .L_br25, skip the store and go directly to exit
+      // Replace s[12:13] with s[16:17] in .L_br27 loads to test if V pointer is bad
       replaceAll(translated_asm,
-        ".L_br25:\n",
-        ".L_br25:\ns_branch .L_br0 ; SKIP store, exit immediately\n");
+        "v_lshl_add_u64 v[6:7], v[2:3], 2, s[12:13]",
+        "v_lshl_add_u64 v[6:7], v[2:3], 2, s[16:17] ; DBG use Q ptr instead of V");
+      replaceAll(translated_asm,
+        "global_load_dword v3, v26, s[12:13]",
+        "global_load_dword v3, v26, s[16:17] ; DBG use Q ptr instead of V");
     }
     // Debug: HSA_HOTSWAP_FORCE_REMAINDER=1 forces the remainder loop to always
     // execute by replacing "s_mov_b32 s15, s10" (remainder count) with "s_mov_b32 s15, 1"
