@@ -2171,77 +2171,77 @@ kmd_driver_t::xfer_agent_memory_partial (os_agent_id_t agent_id,
      aligned.  If so, use an intermediate guaranteed-aligned
      buffer.  */
   size_t misalign = (read != nullptr
-		     ? (uintptr_t) read % sizeof (DWORD)
-		     : (uintptr_t) write % sizeof (DWORD));
+                     ? (uintptr_t) read % sizeof (DWORD)
+                     : (uintptr_t) write % sizeof (DWORD));
   if (misalign != 0)
     {
       /* Large enough to fit most xfers in one escape call, and small
-	 enough to not cause stack overflow problems.  */
+         enough to not cause stack overflow problems.  */
       constexpr size_t aligned_buffer_size = 64;
       alignas(DWORD) std::byte aligned_buffer[aligned_buffer_size];
 
       /* If we need a second xfer, read/write enough bytes such that
-	 that xfer will be aligned.  */
+         that xfer will be aligned.  */
       size_t partial_size = (*size > sizeof (aligned_buffer)
-			     ? misalign
-			     : *size);
+                             ? misalign
+                             : *size);
 
       if (write != nullptr)
-	std::memcpy (aligned_buffer, write, partial_size);
+        std::memcpy (aligned_buffer, write, partial_size);
 
       /* Recurse to do the aligned partial xfer.  */
       size_t wanted_partial_size = partial_size;
       amd_dbgapi_status_t status
-	= xfer_agent_memory_partial (agent_id,
-				     address,
-				     (read != nullptr
-				      ? aligned_buffer
-				      : nullptr),
-				     (write != nullptr
-				      ? aligned_buffer
-				      : nullptr),
-				     &partial_size);
+        = xfer_agent_memory_partial (agent_id,
+                                     address,
+                                     (read != nullptr
+                                      ? aligned_buffer
+                                      : nullptr),
+                                     (write != nullptr
+                                      ? aligned_buffer
+                                      : nullptr),
+                                     &partial_size);
       if (status != AMD_DBGAPI_STATUS_SUCCESS)
-	return status;
+        return status;
       if (read != nullptr)
-	std::memcpy (read, aligned_buffer, partial_size);
+        std::memcpy (read, aligned_buffer, partial_size);
 
       /* If we got less than we wanted, then we're already done.  */
       if (wanted_partial_size != partial_size)
-	{
-	  *size = partial_size;
-	  return status;
-	}
+        {
+          *size = partial_size;
+          return status;
+        }
 
       /* Now xfer the remainder.  Several callers don't currently
-	 handle partial xfers, so if this fails, return failure for
-	 the whole xfer.  Once all such callers are fixed, this whole
-	 if block can be removed.  */
+         handle partial xfers, so if this fails, return failure for
+         the whole xfer.  Once all such callers are fixed, this whole
+         if block can be removed.  */
       size_t remaining_size = *size - partial_size;
       if (remaining_size != 0)
-	{
-	  if (read != nullptr)
-	    read = (char *) read + partial_size;
-	  else
-	    write = (char *) write + partial_size;
+        {
+          if (read != nullptr)
+            read = (char *) read + partial_size;
+          else
+            write = (char *) write + partial_size;
 
-	  /* This access is now guaranteed to be word-aligned.  */
-	  size_t new_misalign = (read != nullptr
-				 ? (uintptr_t) read % sizeof (DWORD)
-				 : (uintptr_t) write % sizeof (DWORD));
-	  dbgapi_assert (new_misalign == 0);
+          /* This access is now guaranteed to be word-aligned.  */
+          size_t new_misalign = (read != nullptr
+                                 ? (uintptr_t) read % sizeof (DWORD)
+                                 : (uintptr_t) write % sizeof (DWORD));
+          dbgapi_assert (new_misalign == 0);
 
-	  address += partial_size;
+          address += partial_size;
 
-	  /* Recurse.  */
-	  status
-	    = xfer_agent_memory_partial (agent_id, address,
-					 read, write, &remaining_size);
+          /* Recurse.  */
+          status
+            = xfer_agent_memory_partial (agent_id, address,
+                                         read, write, &remaining_size);
 
-	  /* Don't update SIZE unless we succeeded.  */
-	  if (status != AMD_DBGAPI_STATUS_SUCCESS)
-	    return status;
-	}
+          /* Don't update SIZE unless we succeeded.  */
+          if (status != AMD_DBGAPI_STATUS_SUCCESS)
+            return status;
+        }
 
       *size = partial_size + remaining_size;
       return status;
