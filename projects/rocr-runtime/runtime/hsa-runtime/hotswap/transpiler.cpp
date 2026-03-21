@@ -3528,22 +3528,20 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
           "s_load_dword s0, " + ka_pair + ", 0x3c ; use saved kernarg ptr");
       }
     }
-    // Debug: HSA_HOTSWAP_NOP_GLOBAL=1 replaces .L_br3 output section with
-    // a simple "write zeros" to isolate the crash (large kernels only).
+    // Debug: HSA_HOTSWAP_NOP_GLOBAL=1 caps outer loop to 2 iterations
     if (std::getenv("HSA_HOTSWAP_NOP_GLOBAL") && stats->total_instructions > 400) {
-      size_t br3_pos = translated_asm.find(".L_br3:");
-      size_t exit_pos = translated_asm.find(".L_exit:");
-      if (br3_pos != std::string::npos && exit_pos != std::string::npos) {
-        // Replace everything from .L_br3 to .L_exit with a simple exit
-        std::string replacement =
-          ".L_br3:\n"
-          ".L_br11:\n.L_br13:\n.L_br12:\n.L_br16:\n.L_br15:\n.L_br14:\n"
-          ".L_br18:\n.L_br17:\n.L_br21:\n.L_br20:\n.L_br19:\n.L_br23:\n"
-          ".L_br22:\n.L_br25:\n.L_br24:\n.L_br27:\n.L_br26:\n.L_br28:\n"
-          ".L_br29:\n.L_br0:\n"
-          ".L_exit:\n";
-        translated_asm.replace(br3_pos, exit_pos - br3_pos, replacement);
-      }
+      auto replaceAll = [](std::string& s, const std::string& from, const std::string& to) {
+        size_t pos = 0;
+        while ((pos = s.find(from, pos)) != std::string::npos) {
+          s.replace(pos, from.size(), to);
+          pos += to.size();
+        }
+      };
+      // Cap s5 to 2 right after the s_waitcnt that loads it
+      replaceAll(translated_asm,
+        "s_cmp_ge_i32 s2, s4\n",
+        "s_mov_b32 s5, 2 ; DBG cap outer loop\n"
+        "s_cmp_ge_i32 s2, s4\n");
     }
     // v_bitop2_b32/v_bitop3_b32 → s_nop 0 (GFX12-only, no simple GFX9 equivalent)
     // Replace entire lines containing v_bitop[23]_b32
