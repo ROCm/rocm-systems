@@ -3484,8 +3484,22 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
           pos += to.size();
         }
       };
-      std::string ka_pair = "s[" + std::to_string(kernarg_save_lo) + ":" +
-                            std::to_string(kernarg_save_hi) + "]";
+      // Recompute the kernarg save pair from the translated asm prologue.
+      // Look for the save comment to extract the register numbers.
+      std::string ka_pair = "s[30:31]";  // fallback
+      {
+        size_t pos = translated_asm.find("; save kernarg ptr lo");
+        if (pos != std::string::npos) {
+          // Extract sN from "s_mov_b32 sN, s0 ; save kernarg ptr lo"
+          size_t s_pos = translated_asm.rfind("s_mov_b32 s", pos);
+          if (s_pos != std::string::npos) {
+            size_t num_start = s_pos + 11;  // after "s_mov_b32 s"
+            size_t num_end = translated_asm.find(',', num_start);
+            int lo = std::stoi(translated_asm.substr(num_start, num_end - num_start));
+            ka_pair = "s[" + std::to_string(lo) + ":" + std::to_string(lo + 1) + "]";
+          }
+        }
+      }
       replaceAll(translated_asm,
         "s_load_dword s1, s[8:9], 0xc",
         "s_load_dword s1, " + ka_pair + ", 0x3c ; use saved kernarg ptr");
