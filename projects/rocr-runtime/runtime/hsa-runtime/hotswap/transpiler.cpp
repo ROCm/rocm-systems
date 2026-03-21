@@ -3489,10 +3489,10 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
           pos += to.size();
         }
       };
-      // At .L_br24, skip directly to .L_br25 (the store)
+      // At .L_br25, skip the store and go directly to exit
       replaceAll(translated_asm,
-        ".L_br24:\nv_mov_b32_e32 v4, 0",
-        ".L_br24:\nv_mov_b32_e32 v4, 0\ns_branch .L_br25 ; SKIP inner product");
+        ".L_br25:\n",
+        ".L_br25:\ns_branch .L_br0 ; SKIP store, exit immediately\n");
     }
     // Debug: HSA_HOTSWAP_FORCE_REMAINDER=1 forces the remainder loop to always
     // execute by replacing "s_mov_b32 s15, s10" (remainder count) with "s_mov_b32 s15, 1"
