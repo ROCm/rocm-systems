@@ -3484,6 +3484,25 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
       }
       translated_asm = tmp;
     }
+    // Redundant remainder guard: add s8==0 check at .L_br28 entry.
+    // The VCC-based guard (s_cbranch_vccz .L_br25) should prevent entry to .L_br28
+    // when remainder=0, but it fails on GFX942. This adds a belt-and-suspenders
+    // SCC-based check right at .L_br28 entry.
+    if (stats->total_instructions > 400) {
+      auto replaceAll = [](std::string& s, const std::string& from, const std::string& to) {
+        size_t pos = 0;
+        while ((pos = s.find(from, pos)) != std::string::npos) {
+          s.replace(pos, from.size(), to);
+          pos += to.size();
+        }
+      };
+      // At .L_br28, check s8 (remainder count). If 0, skip to .L_br25.
+      replaceAll(translated_asm,
+        ".L_br28:\n",
+        ".L_br28:\n"
+        "s_cmp_eq_u32 s8, 0\n"
+        "s_cbranch_scc1 .L_br25 ; redundant remainder guard\n");
+    }
     // Debug: NOP flat-address global_loads (v[pair], off) in large kernels
     // to check if the flat addressing form is the crash cause.
     if (std::getenv("HSA_HOTSWAP_NOP_FLAT") && stats->total_instructions > 400) {
