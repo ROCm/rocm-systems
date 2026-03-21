@@ -3444,6 +3444,23 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
         pos += to.size();
       }
     };
+    // Wave32→wave64 VCC_hi fix: on GFX9 wave64, s_cbranch_vccz/vccnz checks
+    // the full 64-bit VCC. But wave32 code only writes VCC_lo via
+    // s_and_b32 vcc_lo / s_andn2_b32 vcc_lo etc. VCC_hi retains garbage from
+    // previous v_cmp/v_cmpx. Insert vcc_hi=0 before every VCC-based branch.
+    {
+      std::string tmp;
+      std::istringstream vhi_iss(translated_asm);
+      std::string vhi_line;
+      while (std::getline(vhi_iss, vhi_line)) {
+        if (vhi_line.find("s_cbranch_vccz") != std::string::npos ||
+            vhi_line.find("s_cbranch_vccnz") != std::string::npos) {
+          tmp += "s_mov_b32 vcc_hi, 0\n";
+        }
+        tmp += vhi_line + "\n";
+      }
+      translated_asm = tmp;
+    }
     // v_add_nc_u32 → v_add_u32_e32 (may appear without _e32 from VOP3 encoding)
     replaceAll(translated_asm, "v_add_nc_u32 ", "v_add_u32_e32 ");
     replaceAll(translated_asm, "v_sub_nc_u32 ", "v_sub_u32_e32 ");
