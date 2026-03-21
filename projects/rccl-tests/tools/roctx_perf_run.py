@@ -219,6 +219,7 @@ def collect_metadata(args, run_dir):
         "np": args.np,
         "perf_args": args.perf_args,
         "build_dir": os.path.abspath(args.build_dir),
+        "baseline": args.baseline,
     }
 
     rocm_path = os.environ.get("ROCM_PATH", "/opt/rocm")
@@ -269,6 +270,7 @@ def collect_metadata(args, run_dir):
         "repeats": args.repeats,
         "np": args.np,
         "perf_args": args.perf_args,
+        "baseline": args.baseline,
     }
 
     meta["results"] = []
@@ -307,7 +309,24 @@ def build_rocprofv3_cmd(args, test, dtype, output_dir):
     return cmd
 
 
-def run_one(cmd, log_path, dry_run=False):
+def build_baseline_cmd(args, test, dtype, csv_path):
+    """Build command for an uninstrumented baseline run (no rocprofv3)."""
+    perf_binary = os.path.join(os.path.abspath(args.build_dir), f"{test}_perf")
+    perf_args_list = shlex.split(args.perf_args)
+
+    cmd = [
+        args.mpirun,
+        "-np", str(args.np),
+        perf_binary,
+    ] + perf_args_list + [
+        "-d", dtype,
+        "-Z", "csv",
+        "-X", csv_path,
+    ]
+    return cmd
+
+
+def run_one(cmd, log_path, dry_run=False, cwd=None):
     cmd_str = " ".join(shlex.quote(str(c)) for c in cmd)
     if dry_run:
         print(f"  [dry-run] {cmd_str}")
@@ -315,7 +334,7 @@ def run_one(cmd, log_path, dry_run=False):
 
     print(f"  $ {cmd_str}")
     sys.stdout.flush()
-    proc = subprocess.run(cmd, capture_output=True)
+    proc = subprocess.run(cmd, capture_output=True, cwd=cwd)
     cleaned = strip_ansi(proc.stdout.decode("utf-8", errors="replace"))
     if proc.stderr:
         cleaned += strip_ansi(proc.stderr.decode("utf-8", errors="replace"))
@@ -331,6 +350,7 @@ def run_matrix(args, meta, run_dir):
 
     for test in args.test:
         for dtype in args.dtypes:
+            # --- instrumented (profiled) runs ---
             for rep in range(1, args.repeats + 1):
                 tag = f"{test}/{dtype}/rep{rep}"
                 prof_dir = os.path.join(run_dir, f"{test}_{dtype}_rep{rep}")
@@ -359,6 +379,38 @@ def run_matrix(args, meta, run_dir):
                 else:
                     print(f"  [{tag}] ok")
 
+            # --- baseline (uninstrumented) runs ---
+            if args.baseline:
+                for rep in range(1, args.repeats + 1):
+                    tag = f"{test}/{dtype}/baseline/rep{rep}"
+                    csv_path = os.path.join(
+                        run_dir, f"{test}_{dtype}_baseline_rep{rep}.csv")
+                    log_path = os.path.join(
+                        run_dir, f"{test}_{dtype}_baseline_rep{rep}.log")
+
+                    cmd = build_baseline_cmd(args, test, dtype, csv_path)
+                    print(f"  [{tag}] baseline ...")
+                    rc, cmd_str = run_one(cmd, log_path, dry_run=args.dry_run)
+
+                    entry = {
+                        "test": test,
+                        "dtype": dtype,
+                        "rep": rep,
+                        "baseline": True,
+                        "rc": rc,
+                        "log": os.path.relpath(log_path, run_dir),
+                        "baseline_csv": os.path.relpath(csv_path, run_dir),
+                    }
+                    results.append(entry)
+                    meta["results"].append(entry)
+                    write_metadata(meta, run_dir)
+
+                    if rc != 0:
+                        errors += 1
+                        print(f"  [{tag}] exited {rc}")
+                    else:
+                        print(f"  [{tag}] ok")
+
     return results, errors
 
 
@@ -370,14 +422,24 @@ def print_summary(results):
     print("Summary")
     print("=" * 60)
 
+    has_baseline = any(r.get("baseline") for r in results)
     max_test = max(len(r["test"]) for r in results)
     max_dtype = max(len(r["dtype"]) for r in results)
-    header = f"  {'test':<{max_test}}  {'dtype':<{max_dtype}}  rep  rc"
+
+    if has_baseline:
+        header = f"  {'test':<{max_test}}  {'dtype':<{max_dtype}}  {'type':<10}  rep  rc"
+    else:
+        header = f"  {'test':<{max_test}}  {'dtype':<{max_dtype}}  rep  rc"
     print(header)
     print("  " + "-" * (len(header) - 2))
+
     for r in results:
         status = "ok" if r["rc"] == 0 else f"FAIL({r['rc']})"
-        print(f"  {r['test']:<{max_test}}  {r['dtype']:<{max_dtype}}  {r['rep']:>3}  {status}")
+        kind = "baseline" if r.get("baseline") else "profiled"
+        if has_baseline:
+            print(f"  {r['test']:<{max_test}}  {r['dtype']:<{max_dtype}}  {kind:<10}  {r['rep']:>3}  {status}")
+        else:
+            print(f"  {r['test']:<{max_test}}  {r['dtype']:<{max_dtype}}  {r['rep']:>3}  {status}")
 
     passed = sum(1 for r in results if r["rc"] == 0)
     total = len(results)
@@ -397,6 +459,7 @@ def parse_args(argv=None):
             examples:
               %(prog)s --test all_reduce
               %(prog)s --test all_reduce --dtypes float,half --repeats 4
+              %(prog)s --test all_reduce --baseline
               %(prog)s --list-tests
               %(prog)s --dry-run --test broadcast --np 2
 
@@ -445,6 +508,12 @@ def parse_args(argv=None):
     parser.add_argument(
         "--rocprofv3", type=str, default=None,
         help="Path to rocprofv3 (default: $ROCM_PATH/bin, then PATH)",
+    )
+    parser.add_argument(
+        "--baseline", action="store_true",
+        help="Also run each test without rocprofv3 to collect uninstrumented timings. "
+             "Passes -Z csv -X file to the perf binary.  Baseline runs follow the "
+             "instrumented runs within each (test, dtype) group.",
     )
     parser.add_argument(
         "--dry-run", action="store_true",
@@ -525,12 +594,14 @@ def main():
 
     run_dir = tmp_dir
 
-    print(f"Output: {final_dir}  (staging in {os.path.basename(tmp_dir)})")
-    print(f"Tests:  {', '.join(args.test)}")
-    print(f"Dtypes: {', '.join(args.dtypes)}")
-    print(f"Ranks:  {args.np}")
-    print(f"Reps:   {args.repeats}")
-    print(f"Args:   {args.perf_args}")
+    print(f"Output:   {final_dir}  (staging in {os.path.basename(tmp_dir)})")
+    print(f"Tests:    {', '.join(args.test)}")
+    print(f"Dtypes:   {', '.join(args.dtypes)}")
+    print(f"Ranks:    {args.np}")
+    print(f"Reps:     {args.repeats}")
+    print(f"Args:     {args.perf_args}")
+    if args.baseline:
+        print(f"Baseline: enabled (uninstrumented runs with -Z csv -X file)")
     print()
 
     meta = collect_metadata(args, run_dir)
