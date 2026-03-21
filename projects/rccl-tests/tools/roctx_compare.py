@@ -8,6 +8,7 @@ bandwidth deltas.  Optionally writes the comparison to CSV.
 Examples:
   %(prog)s perf-runs/20260319-201332 perf-runs/20260319-201434
   %(prog)s perf-runs/A perf-runs/B --source profiled --csv cmp.csv
+  %(prog)s perf-runs/A perf-runs/B --source log
   %(prog)s perf-runs/A perf-runs/B --label-a "build-A" --label-b "build-B"
 """
 
@@ -28,6 +29,14 @@ import roctx_analyze as ra
 
 _BASELINE_FILE_RE = re.compile(
     r"^(?P<collective>.+?)_(?P<dtype>[a-zA-Z0-9]+)_baseline_rep(?P<rep>\d+)\.csv$"
+)
+_LOG_FILE_RE = re.compile(
+    r"^(?P<collective>.+?)_(?P<dtype>[a-zA-Z0-9]+)_(?:baseline_)?rep(?P<rep>\d+)\.log$"
+)
+_LOG_DATA_RE = re.compile(
+    r"^\s*(?P<size>\d+)\s+\d+\s+\S+\s+\S+\s+[-\d]+\s+"
+    r"(?P<time_oop>[\d.]+)\s+(?P<algbw_oop>[\d.]+)\s+(?P<busbw_oop>[\d.]+)\s+\d+\s+"
+    r"(?P<time_ip>[\d.]+)\s+(?P<algbw_ip>[\d.]+)\s+(?P<busbw_ip>[\d.]+)\s+\d+"
 )
 
 
@@ -133,6 +142,118 @@ def load_baseline_data(run_dir, outlier_fn):
 
         for path in csv_paths:
             for row in _parse_baseline_csv(path):
+                key = (row["size"], row["inplace"])
+                time_samples[key].append(row["time_us"])
+                algbw_samples[key].append(row["algbw"])
+                busbw_samples[key].append(row["busbw"])
+
+        rows = []
+        for key in sorted(time_samples, key=lambda k: (k[1], k[0])):
+            size, in_place = key
+            times = time_samples[key]
+            total = len(times)
+            inlier_times, n_outliers = outlier_fn(times)
+            if not inlier_times:
+                rows.append({
+                    "size": size, "in_place": in_place,
+                    "total": total, "retained": 0, "outliers": n_outliers,
+                    "min_us": None, "max_us": None, "median_us": None,
+                    "algbw": None, "busbw": None,
+                })
+                continue
+
+            med_time = ra.median(inlier_times)
+            inlier_algbw, _ = outlier_fn(algbw_samples[key])
+            inlier_busbw, _ = outlier_fn(busbw_samples[key])
+            med_algbw = ra.median(inlier_algbw) if inlier_algbw else None
+            med_busbw = ra.median(inlier_busbw) if inlier_busbw else None
+
+            rows.append({
+                "size": size, "in_place": in_place,
+                "total": total, "retained": len(inlier_times),
+                "outliers": n_outliers,
+                "min_us": min(inlier_times), "max_us": max(inlier_times),
+                "median_us": med_time,
+                "algbw": med_algbw, "busbw": med_busbw,
+            })
+
+        result[(collective, dtype)] = rows
+
+    return result, np_val
+
+
+# ---------------------------------------------------------------------------
+# Log-file loading (parses rccl-tests stdout table format)
+# ---------------------------------------------------------------------------
+
+def _discover_log_files(run_dir, prefer_baseline=True):
+    """Return dict: (collective, dtype) -> [log_path, ...].
+
+    When *prefer_baseline* is True and ``*_baseline_rep*.log`` files exist for
+    a (collective, dtype) group, only those are returned (they have no profiler
+    overhead).  Otherwise the profiled ``*_rep*.log`` files are used.
+    """
+    baseline_groups = defaultdict(list)
+    profiled_groups = defaultdict(list)
+    for entry in sorted(os.listdir(run_dir)):
+        m = _LOG_FILE_RE.match(entry)
+        if not m:
+            continue
+        key = (m.group("collective"), m.group("dtype"))
+        path = os.path.join(run_dir, entry)
+        if "baseline" in entry:
+            baseline_groups[key].append(path)
+        else:
+            profiled_groups[key].append(path)
+
+    if prefer_baseline and baseline_groups:
+        return dict(baseline_groups)
+    return dict(profiled_groups) if profiled_groups else dict(baseline_groups)
+
+
+def _parse_log_file(path):
+    """Parse one rccl-tests stdout log.  Returns list of row dicts.
+
+    Each data line contains both out-of-place and in-place results.
+    """
+    rows = []
+    with open(path) as f:
+        for line in f:
+            m = _LOG_DATA_RE.match(line)
+            if not m:
+                continue
+            size = int(m.group("size"))
+            rows.append({
+                "size": size, "inplace": 0,
+                "time_us": float(m.group("time_oop")),
+                "algbw": float(m.group("algbw_oop")),
+                "busbw": float(m.group("busbw_oop")),
+            })
+            rows.append({
+                "size": size, "inplace": 1,
+                "time_us": float(m.group("time_ip")),
+                "algbw": float(m.group("algbw_ip")),
+                "busbw": float(m.group("busbw_ip")),
+            })
+    return rows
+
+
+def load_log_data(run_dir, outlier_fn):
+    """Load performance data by parsing rccl-tests stdout log files.
+
+    Same return schema as ``load_baseline_data``.
+    """
+    file_groups = _discover_log_files(run_dir)
+    np_val, _ = ra.load_run_metadata(run_dir)
+    result = {}
+
+    for (collective, dtype), log_paths in file_groups.items():
+        time_samples = defaultdict(list)
+        algbw_samples = defaultdict(list)
+        busbw_samples = defaultdict(list)
+
+        for path in log_paths:
+            for row in _parse_log_file(path):
                 key = (row["size"], row["inplace"])
                 time_samples[key].append(row["time_us"])
                 algbw_samples[key].append(row["algbw"])
@@ -420,6 +541,61 @@ def write_comparison_csv(path, all_merged, label_a, label_b):
 # CLI
 # ---------------------------------------------------------------------------
 
+def _has_baseline_csvs(run_dir):
+    """True if *run_dir* contains at least one ``*_baseline_rep*.csv``."""
+    for entry in os.listdir(run_dir):
+        if _BASELINE_FILE_RE.match(entry):
+            return True
+    return False
+
+
+def _has_profiled_traces(run_dir):
+    """True if *run_dir* contains profiled trace sub-directories."""
+    return bool(ra.discover_multi_run_groups(run_dir))
+
+
+def _has_log_files(run_dir):
+    """True if *run_dir* contains at least one ``*_rep*.log``."""
+    for entry in os.listdir(run_dir):
+        if _LOG_FILE_RE.match(entry):
+            return True
+    return False
+
+
+def _resolve_auto_source(dir_a, dir_b):
+    """Pick the best common data source for two run directories.
+
+    Returns (source_name, note_string).
+
+    Priority:
+      1. baseline CSVs if both dirs have them (cleanest host-side timing)
+      2. profiled traces if both dirs have them (GPU kernel timing, comparable
+         even when one dir was profiled and the other wasn't)
+      3. log files as last resort (host-side timing from rccl-tests stdout;
+         beware that profiled-run logs include profiler overhead)
+    """
+    a_base = _has_baseline_csvs(dir_a)
+    b_base = _has_baseline_csvs(dir_b)
+    if a_base and b_base:
+        return "baseline", "both dirs have baseline CSVs"
+
+    a_prof = _has_profiled_traces(dir_a)
+    b_prof = _has_profiled_traces(dir_b)
+    if a_prof and b_prof:
+        note = "both dirs have profiled traces"
+        if a_base != b_base:
+            missing = "B" if a_base else "A"
+            note += f" (dir {missing} has no baseline CSVs)"
+        return "profiled", note
+
+    a_log = _has_log_files(dir_a)
+    b_log = _has_log_files(dir_b)
+    if a_log and b_log:
+        return "log", "using log files (no profiled traces in common)"
+
+    return "baseline", "could not auto-detect; defaulting to baseline"
+
+
 def _build_outlier_fn(args):
     if args.outlier == "mad":
         return (
@@ -447,8 +623,10 @@ def parse_args(argv=None):
     parser.add_argument("run_dir_a", help="First run directory (A)")
     parser.add_argument("run_dir_b", help="Second run directory (B)")
     parser.add_argument(
-        "--source", choices=["baseline", "profiled"], default="baseline",
-        help="Data source to compare (default: baseline)",
+        "--source", choices=["auto", "baseline", "profiled", "log"],
+        default="auto",
+        help="Data source to compare (default: auto).  'auto' picks the best"
+             " common source; 'log' parses rccl-tests stdout log files.",
     )
     parser.add_argument("--label-a", default=None, help="Label for run A")
     parser.add_argument("--label-b", default=None, help="Label for run B")
@@ -475,21 +653,32 @@ def main():
     args = parse_args()
     outlier_fn, method_name = _build_outlier_fn(args)
 
+    source = args.source
+    if source == "auto":
+        source, note = _resolve_auto_source(args.run_dir_a, args.run_dir_b)
+        auto_msg = f"  Auto-selected source: {source}  ({note})"
+    else:
+        auto_msg = None
+
     label_a = _run_label(args.run_dir_a, args.label_a)
     label_b = _run_label(args.run_dir_b, args.label_b)
 
     print(f"Comparing:")
     print(f"  A: {args.run_dir_a}  ({label_a})")
     print(f"  B: {args.run_dir_b}  ({label_b})")
-    print(f"  Source: {args.source}   Outlier: {method_name}")
+    print(f"  Source: {source}   Outlier: {method_name}")
+    if auto_msg:
+        print(auto_msg)
     print()
 
-    if args.source == "baseline":
-        data_a, np_a = load_baseline_data(args.run_dir_a, outlier_fn)
-        data_b, np_b = load_baseline_data(args.run_dir_b, outlier_fn)
-    else:
-        data_a, np_a = load_profiled_data(args.run_dir_a, outlier_fn)
-        data_b, np_b = load_profiled_data(args.run_dir_b, outlier_fn)
+    _LOADERS = {
+        "baseline": load_baseline_data,
+        "profiled": load_profiled_data,
+        "log":      load_log_data,
+    }
+    loader = _LOADERS[source]
+    data_a, np_a = loader(args.run_dir_a, outlier_fn)
+    data_b, np_b = loader(args.run_dir_b, outlier_fn)
 
     np_val = np_a or np_b
 
