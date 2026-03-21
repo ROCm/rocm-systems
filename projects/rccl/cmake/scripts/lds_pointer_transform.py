@@ -782,11 +782,11 @@ def apply_ifc_noinline_guards(text):
     )
 
     # G3. genericOp: force noinline
-    text = re.sub(
-        r'__device__ __forceinline__ void genericOp\(',
-        '__device__ __attribute__((noinline)) void genericOp(',
-        text
-    )
+    #text = re.sub(
+    #    r'__device__ __forceinline__ void genericOp\(',
+    #    '__device__ __attribute__((noinline)) void genericOp(',
+    #    text
+    #)
 
     # Remove __forceinline__ from IFC+gfx guard branches for sendrecv
     text = re.sub(
