@@ -43,8 +43,13 @@ template <typename T> static inline hipChannelFormatDesc hipCreateChannelDesc() 
 }
 
 template <> inline hipChannelFormatDesc hipCreateChannelDesc<char>() {
-  int e = (int)sizeof(char) * 8;
+#ifdef __CHAR_UNSIGNED__
+  int e = (int)sizeof(unsigned char) * 8;
+  return hipCreateChannelDesc(e, 0, 0, 0, hipChannelFormatKindUnsigned);
+#else
+  int e = (int)sizeof(signed char) * 8;
   return hipCreateChannelDesc(e, 0, 0, 0, hipChannelFormatKindSigned);
+#endif
 }
 
 template <> inline hipChannelFormatDesc hipCreateChannelDesc<signed char>() {
@@ -63,8 +68,13 @@ template <> inline hipChannelFormatDesc hipCreateChannelDesc<uchar1>() {
 }
 
 template <> inline hipChannelFormatDesc hipCreateChannelDesc<char1>() {
+#ifdef __CHAR_UNSIGNED__
+  int e = (int)sizeof(unsigned char) * 8;
+  return hipCreateChannelDesc(e, 0, 0, 0, hipChannelFormatKindUnsigned);
+#else
   int e = (int)sizeof(signed char) * 8;
   return hipCreateChannelDesc(e, 0, 0, 0, hipChannelFormatKindSigned);
+#endif
 }
 
 template <> inline hipChannelFormatDesc hipCreateChannelDesc<uchar2>() {
@@ -73,8 +83,13 @@ template <> inline hipChannelFormatDesc hipCreateChannelDesc<uchar2>() {
 }
 
 template <> inline hipChannelFormatDesc hipCreateChannelDesc<char2>() {
+#ifdef __CHAR_UNSIGNED__
+  int e = (int)sizeof(unsigned char) * 8;
+  return hipCreateChannelDesc(e, e, 0, 0, hipChannelFormatKindUnsigned);
+#else
   int e = (int)sizeof(signed char) * 8;
   return hipCreateChannelDesc(e, e, 0, 0, hipChannelFormatKindSigned);
+#endif
 }
 
 #ifndef __GNUC__  // vector3 is the same as vector4
@@ -84,8 +99,13 @@ template <> inline hipChannelFormatDesc hipCreateChannelDesc<uchar3>() {
 }
 
 template <> inline hipChannelFormatDesc hipCreateChannelDesc<char3>() {
+#ifdef __CHAR_UNSIGNED__
+  int e = (int)sizeof(unsigned char) * 8;
+  return hipCreateChannelDesc(e, e, e, 0, hipChannelFormatKindUnsigned);
+#else
   int e = (int)sizeof(signed char) * 8;
   return hipCreateChannelDesc(e, e, e, 0, hipChannelFormatKindSigned);
+#endif
 }
 #endif
 
@@ -95,8 +115,13 @@ template <> inline hipChannelFormatDesc hipCreateChannelDesc<uchar4>() {
 }
 
 template <> inline hipChannelFormatDesc hipCreateChannelDesc<char4>() {
+#ifdef __CHAR_UNSIGNED__
+  int e = (int)sizeof(unsigned char) * 8;
+  return hipCreateChannelDesc(e, e, e, e, hipChannelFormatKindUnsigned);
+#else
   int e = (int)sizeof(signed char) * 8;
   return hipCreateChannelDesc(e, e, e, e, hipChannelFormatKindSigned);
+#endif
 }
 
 template <> inline hipChannelFormatDesc hipCreateChannelDesc<unsigned short>() {
