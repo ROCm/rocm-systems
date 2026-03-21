@@ -24,6 +24,7 @@
 #include <utility>
 #include <errno.h>     /* program_invocation_short_name */
 #include <dlfcn.h>
+#include <stdlib.h>
 //#define DEBUG_PRINT
 
 #include "verifiable.h"
@@ -164,6 +165,52 @@ static int ctaPolicy = -1;
 #endif
 #endif
 static int minCudaArch = 1<<30;
+
+typedef int (*roctxRangePushA_t)(const char*);
+typedef int (*roctxRangePop_t)(void);
+static roctxRangePushA_t roctxRangePushAFn = nullptr;
+static roctxRangePop_t roctxRangePopFn = nullptr;
+static int roctxRangeState = -1;
+
+static bool roctxRangeEnabled() {
+  if (roctxRangeState != -1) return roctxRangeState == 1;
+  roctxRangeState = 0;
+  const char* env = getenv("RCCL_TESTS_ROCTX");
+  if (env == nullptr || strcmp(env, "0") == 0) return false;
+
+  // Try RTLD_DEFAULT first so profiler interposition can observe marker API calls.
+  roctxRangePushAFn = (roctxRangePushA_t)dlsym(RTLD_DEFAULT, "roctxRangePushA");
+  roctxRangePopFn = (roctxRangePop_t)dlsym(RTLD_DEFAULT, "roctxRangePop");
+  if (roctxRangePushAFn == nullptr || roctxRangePopFn == nullptr) {
+    void* handle = dlopen("libroctx64.so", RTLD_LAZY | RTLD_LOCAL);
+    if (handle != nullptr) {
+      roctxRangePushAFn = (roctxRangePushA_t)dlsym(handle, "roctxRangePushA");
+      roctxRangePopFn = (roctxRangePop_t)dlsym(handle, "roctxRangePop");
+    }
+  }
+  if (roctxRangePushAFn == nullptr || roctxRangePopFn == nullptr) {
+    roctxRangePushAFn = nullptr;
+    roctxRangePopFn = nullptr;
+    return false;
+  }
+  roctxRangeState = 1;
+  return true;
+}
+
+class scopedRoctxRange {
+public:
+  explicit scopedRoctxRange(const char* message) {
+    active = roctxRangeEnabled();
+    if (active) roctxRangePushAFn(message);
+  }
+
+  ~scopedRoctxRange() {
+    if (active) roctxRangePopFn();
+  }
+
+private:
+  bool active = false;
+};
 
 // Test bias
 static int test_bias = 0;
@@ -818,74 +865,82 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
   }
 #endif
 
-  // Performance Benchmark
+  // Performance Benchmark: this rocTX range intentionally brackets only the
+  // timed launch region and completion sync.
+  char roctxMsg[256];
+  snprintf(roctxMsg, sizeof(roctxMsg),
+      "rccl-tests timed_loop size=%zu count=%zu type=%d op=%d in_place=%d proc=%d thread=%d ngpus=%d graph=%d",
+      args->nbytes, count, (int)type, (int)op, in_place, args->proc, args->thread, args->nGpus, cudaGraphLaunches >= 1);
   timer tim;
-  for (int iter = 0; iter < iters; iter++) {
-    if (agg_iters>1) NCCLCHECK(ncclGroupStart());
-    for (int aiter = 0; aiter < agg_iters; aiter++) {
-      TESTCHECK(startColl(args, type, op, root, in_place, iter*agg_iters+aiter));
+  {
+    scopedRoctxRange timedRange(roctxMsg);
+    for (int iter = 0; iter < iters; iter++) {
+      if (agg_iters>1) NCCLCHECK(ncclGroupStart());
+      for (int aiter = 0; aiter < agg_iters; aiter++) {
+        TESTCHECK(startColl(args, type, op, root, in_place, iter*agg_iters+aiter));
+      }
+      if (agg_iters>1) NCCLCHECK(ncclGroupEnd());
     }
-    if (agg_iters>1) NCCLCHECK(ncclGroupEnd());
-  }
 
 #if HIP_VERSION >= 50221310
-  if (cudaGraphLaunches >= 1) {
-    // HIP (and CUDA) graph limitation: in single-process multi-GPU mode (-g N),
-    // graph nodes are associated with the calling thread's current device at
-    // capture time, not the stream's device. RCCL internally calls cudaSetDevice()
-    // per communicator during ncclGroupEnd, so graph nodes are captured correctly.
-    //
-    // Two internal IDs control graph execution:
-    //   - instantiateDeviceId: recorded from the calling thread's current device
-    //     at cudaGraphInstantiate() time.
-    //   - launchStreamDeviceId: the device that owns the stream passed to
-    //     cudaGraphLaunch().
-    //
-    // When instantiateDeviceId != launchStreamDeviceId, the runtime takes a
-    // fallback (TOPOORDER) path that crashes on HIP (SIGSEGV at 0x1b8) and
-    // produces silent data corruption on CUDA.
-    //
-    // Example with -g 8 (8 GPUs, single process):
-    //   ncclGroupEnd -> doLaunches calls cudaSetDevice(7) last during capture.
-    //   Without fix:
-    //     cudaGraphInstantiate(graph[0]) -> instantiateDeviceId = 7 (wrong)
-    //     cudaGraphLaunch(graph[0], stream[0]) -> launchStreamDeviceId = 0
-    //     7 != 0 -> fallback path -> SIGSEGV on HIP
-    //   With fix:
-    //     cudaSetDevice(0); cudaGraphInstantiate(graph[0]) -> instantiateDeviceId = 0
-    //     cudaSetDevice(0); cudaGraphLaunch(graph[0], stream[0]) -> launchStreamDeviceId = 0
-    //     0 == 0 -> normal path -> OK
+    if (cudaGraphLaunches >= 1) {
+      // HIP (and CUDA) graph limitation: in single-process multi-GPU mode (-g N),
+      // graph nodes are associated with the calling thread's current device at
+      // capture time, not the stream's device. RCCL internally calls cudaSetDevice()
+      // per communicator during ncclGroupEnd, so graph nodes are captured correctly.
+      //
+      // Two internal IDs control graph execution:
+      //   - instantiateDeviceId: recorded from the calling thread's current device
+      //     at cudaGraphInstantiate() time.
+      //   - launchStreamDeviceId: the device that owns the stream passed to
+      //     cudaGraphLaunch().
+      //
+      // When instantiateDeviceId != launchStreamDeviceId, the runtime takes a
+      // fallback (TOPOORDER) path that crashes on HIP (SIGSEGV at 0x1b8) and
+      // produces silent data corruption on CUDA.
+      //
+      // Example with -g 8 (8 GPUs, single process):
+      //   ncclGroupEnd -> doLaunches calls cudaSetDevice(7) last during capture.
+      //   Without fix:
+      //     cudaGraphInstantiate(graph[0]) -> instantiateDeviceId = 7 (wrong)
+      //     cudaGraphLaunch(graph[0], stream[0]) -> launchStreamDeviceId = 0
+      //     7 != 0 -> fallback path -> SIGSEGV on HIP
+      //   With fix:
+      //     cudaSetDevice(0); cudaGraphInstantiate(graph[0]) -> instantiateDeviceId = 0
+      //     cudaSetDevice(0); cudaGraphLaunch(graph[0], stream[0]) -> launchStreamDeviceId = 0
+      //     0 == 0 -> normal path -> OK
 
-    // End cuda graph capture
-    for (int i=0; i<args->nGpus; i++) {
-#ifdef __HIP_PLATFORM_AMD__
-      CUDACHECK(cudaSetDevice(args->gpus[i]));
-#endif
-      CUDACHECK(cudaStreamEndCapture(args->streams[i], graphs.data()+i));
-    }
-    // Instantiate cuda graph
-    for (int i=0; i<args->nGpus; i++) {
-#ifdef __HIP_PLATFORM_AMD__
-      CUDACHECK(cudaSetDevice(args->gpus[i]));
-#endif
-      CUDACHECK(cudaGraphInstantiate(graphExec.data()+i, graphs[i], NULL, NULL, 0));
-    }
-    // Resync CPU, restart timing, launch cuda graph
-    Barrier(args);
-    tim.reset();
-    for (int l=0; l<cudaGraphLaunches; l++) {
+      // End cuda graph capture
       for (int i=0; i<args->nGpus; i++) {
 #ifdef __HIP_PLATFORM_AMD__
         CUDACHECK(cudaSetDevice(args->gpus[i]));
 #endif
-        CUDACHECK(cudaGraphLaunch(graphExec[i], args->streams[i]));
+        CUDACHECK(cudaStreamEndCapture(args->streams[i], graphs.data()+i));
+      }
+      // Instantiate cuda graph
+      for (int i=0; i<args->nGpus; i++) {
+#ifdef __HIP_PLATFORM_AMD__
+        CUDACHECK(cudaSetDevice(args->gpus[i]));
+#endif
+        CUDACHECK(cudaGraphInstantiate(graphExec.data()+i, graphs[i], NULL, NULL, 0));
+      }
+      // Resync CPU, restart timing, launch cuda graph
+      Barrier(args);
+      tim.reset();
+      for (int l=0; l<cudaGraphLaunches; l++) {
+        for (int i=0; i<args->nGpus; i++) {
+#ifdef __HIP_PLATFORM_AMD__
+          CUDACHECK(cudaSetDevice(args->gpus[i]));
+#endif
+          CUDACHECK(cudaGraphLaunch(graphExec[i], args->streams[i]));
+        }
       }
     }
-  }
 #endif
 
+    TESTCHECK(completeColl(args));
+  }
   double cputimeSec = tim.elapsed()/(iters*agg_iters);
-  TESTCHECK(completeColl(args));
 
   double deltaSec = tim.elapsed();
   deltaSec = deltaSec/(iters*agg_iters);
@@ -1834,6 +1889,7 @@ int main(int argc, char* argv[], char **envp) {
             "[-Z,--rccl_output_format <output format <csv|json>] \n\t"                                              //RCCL
             "[-X,--rccl_output_file <file> RCCL Reporter output file for csv/json (used with -Z)] \n\t"             //RCCL
             "[-A,--output_algo_proto_channels <0/1> enable algorithm/protocol/channels output (default: 0)] \n\t"   //RCCL
+            "[env] RCCL_TESTS_ROCTX=1 enable rocTX timed-loop ranges around benchmark launches+sync \n\t"
             "[-h,--help]\n",
           basename(argv[0]));
         return 0;
