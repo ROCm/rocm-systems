@@ -3528,23 +3528,22 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
           "s_load_dword s0, " + ka_pair + ", 0x3c ; use saved kernarg ptr");
       }
     }
-    // Debug: HSA_HOTSWAP_NOP_GLOBAL=1 replaces global_store/load with NOPs (large kernels only)
+    // Debug: HSA_HOTSWAP_NOP_GLOBAL=1 replaces .L_br3 output section with
+    // a simple "write zeros" to isolate the crash (large kernels only).
     if (std::getenv("HSA_HOTSWAP_NOP_GLOBAL") && stats->total_instructions > 400) {
-      std::string tmp;
-      std::istringstream ng_iss(translated_asm);
-      std::string ng_line;
-      while (std::getline(ng_iss, ng_line)) {
-        if (ng_line.find("global_store") != std::string::npos ||
-            ng_line.find("global_load") != std::string::npos ||
-            ng_line.find("ds_read") != std::string::npos ||
-            ng_line.find("ds_write") != std::string::npos)
-          tmp += "s_nop 0 ; NOP'd " + ng_line + "\n";
-        else if (ng_line.find("s_barrier") != std::string::npos)
-          tmp += "s_nop 0 ; NOP'd barrier\n";
-        else
-          tmp += ng_line + "\n";
+      size_t br3_pos = translated_asm.find(".L_br3:");
+      size_t exit_pos = translated_asm.find(".L_exit:");
+      if (br3_pos != std::string::npos && exit_pos != std::string::npos) {
+        // Replace everything from .L_br3 to .L_exit with a simple exit
+        std::string replacement =
+          ".L_br3:\n"
+          ".L_br11:\n.L_br13:\n.L_br12:\n.L_br16:\n.L_br15:\n.L_br14:\n"
+          ".L_br18:\n.L_br17:\n.L_br21:\n.L_br20:\n.L_br19:\n.L_br23:\n"
+          ".L_br22:\n.L_br25:\n.L_br24:\n.L_br27:\n.L_br26:\n.L_br28:\n"
+          ".L_br29:\n.L_br0:\n"
+          ".L_exit:\n";
+        translated_asm.replace(br3_pos, exit_pos - br3_pos, replacement);
       }
-      translated_asm = tmp;
     }
     // v_bitop2_b32/v_bitop3_b32 → s_nop 0 (GFX12-only, no simple GFX9 equivalent)
     // Replace entire lines containing v_bitop[23]_b32
