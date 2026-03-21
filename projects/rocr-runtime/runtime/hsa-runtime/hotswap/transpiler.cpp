@@ -3463,6 +3463,22 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
         pos += to.size();
       }
     };
+    // Debug: NOP flat-address global_loads (v[pair], off) in large kernels
+    // to check if the flat addressing form is the crash cause.
+    if (std::getenv("HSA_HOTSWAP_NOP_FLAT") && stats->total_instructions > 400) {
+      std::string tmp;
+      std::istringstream gl_iss(translated_asm);
+      std::string gl_line;
+      while (std::getline(gl_iss, gl_line)) {
+        if (gl_line.find("global_load_dword") != std::string::npos &&
+            gl_line.find(", off") != std::string::npos) {
+          tmp += "s_nop 0 ; NOP'd flat " + gl_line + "\n";
+        } else {
+          tmp += gl_line + "\n";
+        }
+      }
+      translated_asm = tmp;
+    }
     // Debug: HSA_HOTSWAP_SKIP_INNER=1 skips the inner product (.L_br24→.L_br27)
     // by jumping directly from .L_br24 to .L_br25 (store zeros).
     if (std::getenv("HSA_HOTSWAP_SKIP_INNER") && stats->total_instructions > 400) {
