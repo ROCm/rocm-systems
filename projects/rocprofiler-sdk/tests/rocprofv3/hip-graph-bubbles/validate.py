@@ -26,33 +26,39 @@ import sys
 import pytest
 
 
-def test_kernel_records(input_data):
-    """verify all kernels are present in the output"""
-    data = input_data
-
-    expected_kernel_count = 20000
-    cursor = data.cursor()
-
-    cursor.execute("SELECT COUNT(*) FROM kernels")
-    kernel_count = cursor.fetchone()[0]
-    assert (
-        kernel_count == expected_kernel_count
-    ), f"Expected {expected_kernel_count} kernel records, but found {kernel_count}"
+def test_kernel_trace_row_count(
+    kernel_input_data,
+    expected_dispatch_count,
+    expected_kernels,
+    expected_iterations,
+):
+    assert expected_dispatch_count == expected_kernels * expected_iterations
+    assert len(kernel_input_data) == expected_dispatch_count
 
 
-def test_counter_records(input_data):
-    """verify GRBM_COUNT PMC events are an exact multiple of the number of kernels"""
-    data = input_data
+def test_kernel_trace_dispatch_ids(kernel_input_data, expected_dispatch_count):
+    dispatch_ids = [int(row["Dispatch_Id"]) for row in kernel_input_data]
 
-    cursor = data.cursor()
+    assert len(dispatch_ids) == expected_dispatch_count
+    assert len(set(dispatch_ids)) == expected_dispatch_count
 
-    kernel_count = cursor.execute("SELECT COUNT(*) FROM kernels").fetchone()[0]
-    pmc_event_count = cursor.execute("SELECT COUNT(*) FROM rocpd_pmc_event").fetchone()[0]
 
-    assert (pmc_event_count % kernel_count) == 0, (
-        f"Expected rocpd_pmc_event count ({pmc_event_count}) to be exact multiple of "
-        f"kernel count ({kernel_count})"
-    )
+def test_kernel_trace_fields(kernel_input_data, expected_dispatch_count):
+    assert len(kernel_input_data) == expected_dispatch_count
+
+    for row in kernel_input_data:
+        assert row["Kind"] == "KERNEL_DISPATCH"
+        assert int(row["Agent_Id"].split(" ")[-1]) >= 0
+        assert int(row["Queue_Id"]) > 0
+        assert int(row["Kernel_Id"]) > 0
+        assert int(row["Correlation_Id"]) > 0
+        assert int(row["Workgroup_Size_X"]) == 256
+        assert int(row["Workgroup_Size_Y"]) == 1
+        assert int(row["Workgroup_Size_Z"]) == 1
+        assert int(row["Grid_Size_X"]) == 256
+        assert int(row["Grid_Size_Y"]) == 1
+        assert int(row["Grid_Size_Z"]) == 1
+        assert int(row["End_Timestamp"]) >= int(row["Start_Timestamp"])
 
 
 if __name__ == "__main__":

@@ -24,6 +24,7 @@ THE SOFTWARE.
 #include <rocprofiler-sdk-roctx/roctx.h>
 
 #include <chrono>
+#include <cstdlib>
 #include <iomanip>
 #include <iostream>
 #include <vector>
@@ -47,19 +48,79 @@ simpleKernel(int* data, int value)
     data[idx] = value + idx;
 }
 
-int
-main()
+namespace
 {
-    const int NUM_KERNELS    = 2000;
-    const int NUM_ITERATIONS = 200;
-    const int ARRAY_SIZE     = 256;
+struct config
+{
+    int num_kernels       = 2000;
+    int num_iterations    = 200;
+    int array_size        = 256;
+    int progress_interval = 50;
+};
 
-    std::cout << "Creating HIP graph with " << NUM_KERNELS << " kernel launches" << std::endl;
-    std::cout << "Will execute graph " << NUM_ITERATIONS << " times" << std::endl;
+void
+print_usage(const char* argv0)
+{
+    std::cerr << "Usage: " << argv0
+              << " [num_kernels] [num_iterations] [array_size] [progress_interval]"
+              << std::endl;
+}
+
+int
+parse_positive_integer(const char* arg_name, const char* value)
+{
+    char* end = nullptr;
+    auto  ret = std::strtol(value, &end, 10);
+    if(end == value || (end != nullptr && *end != '\0') || ret <= 0)
+    {
+        std::cerr << "Invalid " << arg_name << ": " << value << std::endl;
+        exit(EXIT_FAILURE);
+    }
+
+    return static_cast<int>(ret);
+}
+
+config
+parse_args(int argc, char** argv)
+{
+    config cfg{};
+
+    if(argc > 5)
+    {
+        print_usage(argv[0]);
+        exit(EXIT_FAILURE);
+    }
+
+    if(argc > 1) cfg.num_kernels = parse_positive_integer("num_kernels", argv[1]);
+    if(argc > 2) cfg.num_iterations = parse_positive_integer("num_iterations", argv[2]);
+    if(argc > 3) cfg.array_size = parse_positive_integer("array_size", argv[3]);
+    if(argc > 4)
+        cfg.progress_interval = parse_positive_integer("progress_interval", argv[4]);
+
+    if(cfg.array_size < 256)
+    {
+        std::cerr << "array_size must be at least 256, got " << cfg.array_size << std::endl;
+        exit(EXIT_FAILURE);
+    }
+
+    return cfg;
+}
+}  // namespace
+
+int
+main(int argc, char** argv)
+{
+    const auto cfg = parse_args(argc, argv);
+
+    std::cout << "Creating HIP graph with " << cfg.num_kernels << " kernel launches"
+              << std::endl;
+    std::cout << "Will execute graph " << cfg.num_iterations << " times" << std::endl;
+    std::cout << "Array size: " << cfg.array_size << std::endl;
+    std::cout << "Progress interval: " << cfg.progress_interval << std::endl;
 
     // Allocate device memory
     int* d_data;
-    HIP_CHECK(hipMalloc(&d_data, ARRAY_SIZE * sizeof(int)));
+    HIP_CHECK(hipMalloc(&d_data, cfg.array_size * sizeof(int)));
 
     // Create graph
     hipGraph_t graph;
@@ -76,7 +137,7 @@ main()
     dim3 blockSize(256);
     dim3 gridSize(1);
 
-    for(int i = 0; i < NUM_KERNELS; i++)
+    for(int i = 0; i < cfg.num_kernels; i++)
     {
         hipLaunchKernelGGL(simpleKernel, gridSize, blockSize, 0, stream, d_data, i);
     }
@@ -95,13 +156,13 @@ main()
     auto start = std::chrono::high_resolution_clock::now();
 
     // Execute the graph multiple times
-    for(int iter = 0; iter < NUM_ITERATIONS; iter++)
+    for(int iter = 0; iter < cfg.num_iterations; iter++)
     {
         roctxRangePush("graph_launch");
         HIP_CHECK(hipGraphLaunch(graphExec, stream));
         roctxRangePop();
 
-        if((iter + 1) % 50 == 0)
+        if((iter + 1) % cfg.progress_interval == 0 || (iter + 1) == cfg.num_iterations)
         {
             std::cout << "Completed " << (iter + 1) << " iterations" << std::endl;
         }
@@ -118,9 +179,10 @@ main()
     std::cout << std::fixed << std::setprecision(4);
     std::cout << "\n=== Timing Results ===" << std::endl;
     std::cout << "Total execution time: " << elapsed.count() << " seconds" << std::endl;
-    std::cout << "Total kernel launches: " << (NUM_KERNELS * NUM_ITERATIONS) << std::endl;
-    std::cout << "Average time per iteration: " << (elapsed.count() / NUM_ITERATIONS) << " seconds"
+    std::cout << "Total kernel launches: " << (cfg.num_kernels * cfg.num_iterations)
               << std::endl;
+    std::cout << "Average time per iteration: " << (elapsed.count() / cfg.num_iterations)
+              << " seconds" << std::endl;
     std::cout << "======================" << std::endl;
 
     // Cleanup

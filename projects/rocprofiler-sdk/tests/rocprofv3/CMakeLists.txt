@@ -24,6 +24,7 @@ enable_testing()
 include(CTest)
 
 add_subdirectory(tracing)
+add_subdirectory(hip-graph-bubbles)
 add_subdirectory(tracing-plus-counter-collection)
 add_subdirectory(tracing-hip-in-libraries)
 add_subdirectory(counter-collection)

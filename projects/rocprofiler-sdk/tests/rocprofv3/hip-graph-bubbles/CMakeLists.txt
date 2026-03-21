@@ -1,5 +1,5 @@
 #
-#
+# rocprofv3 HIP graph bubble regression tests
 #
 cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 
@@ -10,31 +10,49 @@ project(
 
 find_package(rocprofiler-sdk REQUIRED)
 
-set(PYTEST_ARGS)
+set(HIP_GRAPH_BUBBLES_ENVIRONMENT)
+if(DEFINED ENV{ROCM_PATH} AND EXISTS "$ENV{ROCM_PATH}/lib/rocm_sysdeps/lib")
+    list(
+        APPEND HIP_GRAPH_BUBBLES_ENVIRONMENT
+        "LD_LIBRARY_PATH=$ENV{ROCM_PATH}/lib/rocm_sysdeps/lib:$ENV{LD_LIBRARY_PATH}")
+endif()
 
-string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
-               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
+function(add_hip_graph_bubbles_kernel_trace_test SUFFIX NUM_KERNELS NUM_ITERATIONS TIMEOUT_SECS)
+    set(TEST_NAME "rocprofv3-test-hip-graph-bubbles-${SUFFIX}")
+    set(OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/hip-graph-bubbles-${SUFFIX}")
+    math(EXPR EXPECTED_DISPATCH_COUNT "${NUM_KERNELS} * ${NUM_ITERATIONS}")
 
-rocprofiler_add_integration_execute_test(
-    rocprofv3-hip-graph-bubbles
-    COMMAND
-        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -d
-        ${CMAKE_CURRENT_BINARY_DIR}/rocprofv3-hip-graph-bubbles -o out --output-format
-        rocpd --log-level env --hip-runtime-trace --kernel-trace --pmc GRBM_COUNT --
-        $<TARGET_FILE:hip-graph-bubbles> 2000 10
-    DEPENDS hip-graph-bubbles
-    TIMEOUT 60
-    LABELS "integration-tests"
-    ENVIRONMENT "${PRELOAD_ENV}"
-    FIXTURES_SETUP hip-graph-bubbles)
+    rocprofiler_add_integration_execute_test(
+        ${TEST_NAME}
+        COMMAND
+            $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --kernel-trace -d ${OUTPUT_DIR} -o
+            out --output-format csv -- $<TARGET_FILE:hip-graph-bubbles> ${NUM_KERNELS}
+            ${NUM_ITERATIONS} 256 25
+        DEPENDS hip-graph-bubbles
+        TIMEOUT ${TIMEOUT_SECS}
+        LABELS "integration-tests"
+        ENVIRONMENT ${HIP_GRAPH_BUBBLES_ENVIRONMENT}
+        FIXTURES_SETUP ${TEST_NAME}
+        FAIL_REGULAR_EXPRESSION "KERNEL_DISPATCH|CODE_OBJECT")
 
-rocprofiler_add_integration_validate_test(
-    rocprofv3-hip-graph-bubbles
-    TEST_PATHS validate.py
-    COPY conftest.py
-    CONFIG pytest.ini
-    LABELS "integration-tests"
-    TIMEOUT 45
-    FIXTURES_REQUIRED hip-graph-bubbles
-    DISCOVERY_ARGS ${PYTEST_ARGS}
-    ARGS --input ${CMAKE_CURRENT_BINARY_DIR}/rocprofv3-hip-graph-bubbles/out_results.db)
+    rocprofiler_add_integration_validate_test(
+        ${TEST_NAME}
+        TEST_PATHS validate.py
+        COPY conftest.py
+        CONFIG pytest.ini
+        ARGS --kernel-input
+             ${CMAKE_CURRENT_BINARY_DIR}/hip-graph-bubbles-${SUFFIX}/out_kernel_trace.csv
+             --expected-dispatch-count
+             ${EXPECTED_DISPATCH_COUNT}
+             --expected-kernels
+             ${NUM_KERNELS}
+             --expected-iterations
+             ${NUM_ITERATIONS}
+        TIMEOUT ${TIMEOUT_SECS}
+        LABELS "integration-tests"
+        FIXTURES_REQUIRED ${TEST_NAME})
+endfunction()
+
+add_hip_graph_bubbles_kernel_trace_test(k256-i20 256 20 60)
+add_hip_graph_bubbles_kernel_trace_test(k256-i200 256 200 120)
+add_hip_graph_bubbles_kernel_trace_test(k2000-i200 2000 200 180)

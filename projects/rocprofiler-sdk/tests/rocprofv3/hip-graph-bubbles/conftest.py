@@ -22,22 +22,58 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-import json
+import csv
 import pytest
-
-from rocprofiler_sdk.pytest_utils.rocpd_reader import RocpdReader
 
 
 def pytest_addoption(parser):
     parser.addoption(
-        "--input",
+        "--kernel-input",
         action="store",
-        default="rocprofv3-hip-graph-bubbles/out_results.db",
-        help="Input database file",
+        help="Path to kernel tracing CSV file.",
+    )
+    parser.addoption(
+        "--expected-dispatch-count",
+        action="store",
+        type=int,
+        help="Expected number of kernel dispatch records.",
+    )
+    parser.addoption(
+        "--expected-kernels",
+        action="store",
+        type=int,
+        help="Expected kernels per graph launch.",
+    )
+    parser.addoption(
+        "--expected-iterations",
+        action="store",
+        type=int,
+        help="Expected number of graph launches.",
     )
 
 
 @pytest.fixture
-def input_data(request):
-    filename = request.config.getoption("--input")
-    return RocpdReader(filename).read()[0]
+def kernel_input_data(request):
+    filename = request.config.getoption("--kernel-input")
+    data = []
+    with open(filename, "r") as inp:
+        reader = csv.DictReader(inp)
+        for row in reader:
+            data.append(row)
+
+    return data
+
+
+@pytest.fixture
+def expected_dispatch_count(request):
+    return request.config.getoption("--expected-dispatch-count")
+
+
+@pytest.fixture
+def expected_kernels(request):
+    return request.config.getoption("--expected-kernels")
+
+
+@pytest.fixture
+def expected_iterations(request):
+    return request.config.getoption("--expected-iterations")
