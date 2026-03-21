@@ -3397,18 +3397,21 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
         std::cerr << "hotswap: transpile: EARLY EXIT after " << emitted_count << " source instructions\n";
         break;
       }
-      // Unconditional exec_hi clear after v_cmpx: on GFX9 wave64, v_cmpx
-      // compares ALL 64 lanes including 32-63 which have uninitialized VGPRs.
-      // The garbage exec_hi causes upper lanes to execute memory operations
-      // (global_store/global_load) with garbage VGPR addresses → page fault.
-      // Must clear exec_hi even before s_cbranch_execz so the branch correctly
-      // tests only exec_lo and later memory ops don't use garbage upper lanes.
+      // exec_hi clear after v_cmpx: on GFX9 wave64, v_cmpx compares ALL
+      // 64 lanes including 32-63 which have uninitialized VGPRs. Clear exec_hi
+      // ALWAYS — even before s_cbranch_execz — to prevent garbage upper lanes
+      // from executing memory operations (global_store/load) later in the code.
+      // The v_cmpx+s_cbranch_execz pattern: with exec_hi=0, the branch correctly
+      // checks only exec_lo (the 32 valid lanes).
       if (ii < source_instrs.size()) {
         bool has_vcmpx = false;
         for (const auto& t : translated_lines) {
           if (t.find("v_cmpx_") != std::string::npos) { has_vcmpx = true; break; }
         }
         if (has_vcmpx) {
+          // Insert exec_hi=0 BEFORE the s_cbranch_execz (which is the NEXT
+          // source instruction's translation). The clear goes right after the
+          // v_cmpx translation (including VCC restore).
           translated_asm += "s_mov_b32 exec_hi, 0\n";
         }
       }
