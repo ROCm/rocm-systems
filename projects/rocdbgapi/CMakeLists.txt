@@ -284,19 +284,18 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Windows")
 
   target_include_directories(amd-dbgapi PRIVATE
     src/windows/imported
-    ${D3DKMT_INCLUDE_PATH}
+    ${D3DKMT_INCLUDE_PATH})
+
+  # Including libdxg raises some warnings (unknown pragmas) as well as
+  # "X too small to hold all values of Y".  The latter warning cannot
+  # be silenced, so tell the compiler to treat the libdxg directory as
+  # a system headers include path, so that warnings are disabled for
+  # that directory's headers.
+  target_include_directories(amd-dbgapi SYSTEM PRIVATE
     third_party/libdxg/include)
 
   target_compile_definitions(amd-dbgapi
     PRIVATE D3DKMDT_SPECIAL_MULTIPLATFORM_TOOL)
-
-  # Including libdxg raises some warnings (unknown pargmas) as well us
-  # "X too small to hold all values of Y".  The latter warning cannot be
-  # silenced, se we need to disable -Werror for this file.
-  set_source_files_properties(
-    src/os_driver_kmd.cpp
-    PROPERTIES
-      COMPILE_OPTIONS "-Wno-error;-Wno-unknown-pragmas")
 else()
   message(FATAL_ERROR "Platform ${CMAKE_SYSTEM_NAME} is not supported")
 endif()
