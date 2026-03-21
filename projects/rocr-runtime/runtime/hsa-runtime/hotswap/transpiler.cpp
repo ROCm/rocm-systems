@@ -3489,15 +3489,7 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
           pos += to.size();
         }
       };
-      // Add 16 NOPs before .L_br27 to shift code alignment.
-      // This tests the theory that the crash is alignment-dependent.
-      replaceAll(translated_asm,
-        ".L_br27:\n",
-        ".L_br27:\n"
-        "s_nop 0\ns_nop 0\ns_nop 0\ns_nop 0\n"
-        "s_nop 0\ns_nop 0\ns_nop 0\ns_nop 0\n"
-        "s_nop 0\ns_nop 0\ns_nop 0\ns_nop 0\n"
-        "s_nop 0\ns_nop 0\ns_nop 0\ns_nop 0\n");
+      // No debug patches — essential fixes only
     }
     // Debug: HSA_HOTSWAP_FORCE_REMAINDER=1 forces the remainder loop to always
     // execute by replacing "s_mov_b32 s15, s10" (remainder count) with "s_mov_b32 s15, 1"
