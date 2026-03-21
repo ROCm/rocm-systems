@@ -3470,8 +3470,7 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
       std::istringstream gl_iss(translated_asm);
       std::string gl_line;
       while (std::getline(gl_iss, gl_line)) {
-        if ((gl_line.find("global_load_dword") != std::string::npos &&
-             gl_line.find(", off") != std::string::npos) ||
+        if (gl_line.find("global_load_dword") != std::string::npos ||
             gl_line.find("ds_read2_b32") != std::string::npos) {
           tmp += "s_nop 0 ; NOP'd " + gl_line + "\n";
         } else {
