@@ -3463,18 +3463,24 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
         pos += to.size();
       }
     };
-    // Add s_waitcnt before EVERY global_load in large kernels to test
-    // if wrong waitcnt counters are the crash cause.
-    if (stats->total_instructions > 400) {
+    // Wave32→64 VCC fix: widen s_cbranch_vccz/vccnz.
+    // Replace the 32-bit VCC operations AND the branch with 64-bit equivalents.
+    // The key: s_and_b32 vcc_lo only writes vcc_lo. We need s_and_b64 vcc,exec,s[N:N+1]
+    // But s15 is a single SGPR. So we widen: s_and_b64 vcc, vcc, exec (masks VCC_hi with exec_hi=0).
+    // Then s_cbranch_vccz checks the cleaned VCC.
+    {
       std::string tmp;
-      std::istringstream wc_iss(translated_asm);
-      std::string wc_line;
-      while (std::getline(wc_iss, wc_line)) {
-        if (wc_line.find("global_load") != std::string::npos ||
-            wc_line.find("global_store") != std::string::npos) {
-          tmp += "s_waitcnt vmcnt(0) lgkmcnt(0) expcnt(0)\n";
+      std::istringstream vfix_iss(translated_asm);
+      std::string vfix_line;
+      while (std::getline(vfix_iss, vfix_line)) {
+        if (vfix_line.find("s_cbranch_vccz") != std::string::npos ||
+            vfix_line.find("s_cbranch_vccnz") != std::string::npos) {
+          // Use s_and_b64 to zero VCC_hi (exec_hi is 0)
+          tmp += "s_and_b64 vcc, vcc, exec\n";
+          tmp += "s_nop 7\n";
+          tmp += "s_nop 7\n";
         }
-        tmp += wc_line + "\n";
+        tmp += vfix_line + "\n";
       }
       translated_asm = tmp;
     }
