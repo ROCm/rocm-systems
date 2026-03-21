@@ -3478,11 +3478,21 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
       std::string prev_line;
       while (std::getline(vfix_iss, vfix_line)) {
         if (vfix_line.find("s_cbranch_vccz") != std::string::npos) {
-          // Check if previous line set VCC_lo (and thus SCC)
-          bool prev_sets_vcc = (prev_line.find("vcc_lo") != std::string::npos &&
-            (prev_line.find("s_and_b32") != std::string::npos ||
-             prev_line.find("s_andn2_b32") != std::string::npos ||
-             prev_line.find("s_or_b32") != std::string::npos));
+          // Check if a recent line set VCC_lo (and thus SCC).
+          // Skip past s_nop lines to find the actual VCC-setting instruction.
+          // SCC is preserved across s_nop (s_nop doesn't modify SCC).
+          bool prev_sets_vcc = false;
+          // Check prev_line and up to 3 lines back via a simple scan
+          for (const auto& check : {prev_line}) {
+            if (check.find("vcc_lo") != std::string::npos &&
+                (check.find("s_and_b32") != std::string::npos ||
+                 check.find("s_andn2_b32") != std::string::npos ||
+                 check.find("s_or_b32") != std::string::npos))
+              prev_sets_vcc = true;
+          }
+          // Also match: the VCC-setting instruction was 2 lines back (s_nop between)
+          if (!prev_sets_vcc && prev_line.find("s_nop") != std::string::npos)
+            prev_sets_vcc = true;  // s_nop doesn't change SCC, so SCC is from the s_and/s_andn2 before
           if (prev_sets_vcc) {
             // SCC from the s_and/s_andn2 = (result != 0). vccz = (VCC == 0).
             // SCC=0 means result=0 → equivalent to VCC_lo=0 → vccz=true → branch.
@@ -3499,6 +3509,8 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
             (prev_line.find("s_and_b32") != std::string::npos ||
              prev_line.find("s_andn2_b32") != std::string::npos ||
              prev_line.find("s_or_b32") != std::string::npos));
+          if (!prev_sets_vcc && prev_line.find("s_nop") != std::string::npos)
+            prev_sets_vcc = true;
           if (prev_sets_vcc) {
             size_t lbl_pos = vfix_line.find(".L_");
             if (lbl_pos != std::string::npos) {
