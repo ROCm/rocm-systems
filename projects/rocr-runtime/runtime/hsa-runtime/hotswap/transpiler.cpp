@@ -3489,29 +3489,15 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
           pos += to.size();
         }
       };
-      // Save s[12:13] (V pointer) to s[26:27] at kernel start.
-      // Use s[26:27] in the inner product to bypass any corruption.
+      // Add 16 NOPs before .L_br27 to shift code alignment.
+      // This tests the theory that the crash is alignment-dependent.
       replaceAll(translated_asm,
-        "; save workgroup_id_x\n",
-        "; save workgroup_id_x\n"
-        "s_mov_b32 s26, s12 ; save V ptr lo\n"
-        "s_mov_b32 s27, s13 ; save V ptr hi\n");
-      // But wait, s[12:13] hasn't been loaded yet at kernel start!
-      // It's loaded by s_load_dwordx2 s[12:13], s[0:1], 0x18 later.
-      // Need to save AFTER the s_waitcnt that drains that load.
-      // Actually, save after the FIRST s_waitcnt lgkmcnt(0):
-      replaceAll(translated_asm,
-        "s_cmp_ge_i32 s2, s4\n",
-        "s_mov_b32 s26, s12 ; save V ptr lo (after load)\n"
-        "s_mov_b32 s27, s13 ; save V ptr hi\n"
-        "s_cmp_ge_i32 s2, s4\n");
-      // Replace s[12:13] with s[26:27] in the inner product
-      replaceAll(translated_asm,
-        "v_lshl_add_u64 v[6:7], v[2:3], 2, s[12:13]",
-        "v_lshl_add_u64 v[6:7], v[2:3], 2, s[26:27] ; use saved V ptr");
-      replaceAll(translated_asm,
-        "global_load_dword v3, v26, s[12:13]",
-        "global_load_dword v3, v26, s[26:27] ; use saved V ptr");
+        ".L_br27:\n",
+        ".L_br27:\n"
+        "s_nop 0\ns_nop 0\ns_nop 0\ns_nop 0\n"
+        "s_nop 0\ns_nop 0\ns_nop 0\ns_nop 0\n"
+        "s_nop 0\ns_nop 0\ns_nop 0\ns_nop 0\n"
+        "s_nop 0\ns_nop 0\ns_nop 0\ns_nop 0\n");
     }
     // Debug: HSA_HOTSWAP_FORCE_REMAINDER=1 forces the remainder loop to always
     // execute by replacing "s_mov_b32 s15, s10" (remainder count) with "s_mov_b32 s15, 1"
