@@ -3254,6 +3254,13 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
     // num_vgprs when computing ACCUM_OFFSET so these registers are arch VGPRs.
     translated_asm += "v_mov_b32_e32 " + sv_x + ", s2 ; save workgroup_id_x\n";
     translated_asm += "v_mov_b32_e32 " + sv_y + ", s3 ; save workgroup_id_y\n";
+    // Save kernarg pointer s[0:1] to s[30:31] for later use.
+    // On GFX12, some kernels compute s[8:9] = s[0:1]+48 and later load hidden
+    // args via s_load sN, s[8:9], offset. The wave32→wave64 v_cmp_e64 widening
+    // can corrupt intermediate SGPRs. Saving the original kernarg pointer lets
+    // us bypass the corrupted intermediaries.
+    translated_asm += "s_mov_b32 s30, s0 ; save kernarg ptr lo\n";
+    translated_asm += "s_mov_b32 s31, s1 ; save kernarg ptr hi\n";
 
     // Collect all REPLACE registrations so we can refresh them after saveexec.
     // On gfx1250, workgroup_id lives in TTMP (always valid).  After transpiling
@@ -3390,29 +3397,19 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
         std::cerr << "hotswap: transpile: EARLY EXIT after " << emitted_count << " source instructions\n";
         break;
       }
-      // exec_hi clear after v_cmpx: on GFX9 wave64, v_cmpx compares ALL
-      // 64 lanes including 32-63 which have uninitialized VGPRs (from wave32
-      // source). Clear exec_hi after v_cmpx when next instruction is NOT
-      // s_cbranch_execz (the branch needs to see the full exec to detect
-      // "all masked" correctly for the conditional clear case).
+      // Unconditional exec_hi clear after v_cmpx: on GFX9 wave64, v_cmpx
+      // compares ALL 64 lanes including 32-63 which have uninitialized VGPRs.
+      // The garbage exec_hi causes upper lanes to execute memory operations
+      // (global_store/global_load) with garbage VGPR addresses → page fault.
+      // Must clear exec_hi even before s_cbranch_execz so the branch correctly
+      // tests only exec_lo and later memory ops don't use garbage upper lanes.
       if (ii < source_instrs.size()) {
         bool has_vcmpx = false;
         for (const auto& t : translated_lines) {
           if (t.find("v_cmpx_") != std::string::npos) { has_vcmpx = true; break; }
         }
         if (has_vcmpx) {
-          // Check next source instruction
-          bool next_is_execz = false;
-          for (size_t nxt = ii + 1; nxt < source_instrs.size(); nxt++) {
-            std::string nm = ExtractMnemonic(source_instrs[nxt].text);
-            if (nm.find("s_delay") == 0 || nm.find("s_wait") == 0 ||
-                nm.find("s_nop") == 0 || nm.find("s_clause") == 0) continue;
-            if (nm == "s_cbranch_execz") next_is_execz = true;
-            break;
-          }
-          if (!next_is_execz) {
-            translated_asm += "s_mov_b32 exec_hi, 0\n";
-          }
+          translated_asm += "s_mov_b32 exec_hi, 0\n";
         }
       }
 
@@ -3468,9 +3465,11 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
       }
       translated_asm = tmp;
     }
-    // Debug: HSA_HOTSWAP_NOP_SLOAD=1 — save kernarg+48 to v27:v28 after
-    // computation, reload before s_load from s[8:9] to test corruption.
-    if (std::getenv("HSA_HOTSWAP_NOP_SLOAD")) {
+    // Fix: replace s_load from s[8:9]+0xc with s[30:31]+0x3c (saved kernarg ptr).
+    // The GFX12 code computes s[8:9] = s[0:1]+48 for hidden arg access, but on
+    // GFX9 the value gets corrupted between computation and use. Using the saved
+    // kernarg pointer bypasses the corrupted intermediate.
+    {
       auto replaceAll = [](std::string& s, const std::string& from, const std::string& to) {
         size_t pos = 0;
         while ((pos = s.find(from, pos)) != std::string::npos) {
@@ -3478,29 +3477,12 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
           pos += to.size();
         }
       };
-      // Save kernarg pointer s[0:1] to s[30:31] at kernel start,
-      // then use s[30:31]+0x3c directly instead of s[8:9]+0xc.
-      // This bypasses any s[8:9] corruption.
-      replaceAll(translated_asm,
-        "; save workgroup_id_x\n",
-        "; save workgroup_id_x\n"
-        "s_mov_b32 s30, s0 ; DBG save kernarg lo\n"
-        "s_mov_b32 s31, s1 ; DBG save kernarg hi\n");
-      // Fix: add extra s_waitcnt + nops before s_add_u32 s8, s0, 48 to ensure
-      // the s_load_dwordx4 s[8:11] has FULLY completed before we overwrite s8.
-      // Also replace the crashing s_loads with saved kernarg pointer.
-      replaceAll(translated_asm,
-        "s_add_u32 s8, s0, 48\n",
-        "s_waitcnt lgkmcnt(0) ; DBG ensure s_load_dwordx4 complete\n"
-        "s_nop 7\n"
-        "s_add_u32 s8, s0, 48\n");
-      // Also fix: use s[30:31] for the hidden arg loads as backup
       replaceAll(translated_asm,
         "s_load_dword s1, s[8:9], 0xc",
-        "s_load_dword s1, s[30:31], 0x3c ; FIX use saved kernarg");
+        "s_load_dword s1, s[30:31], 0x3c ; use saved kernarg ptr");
       replaceAll(translated_asm,
         "s_load_dword s0, s[8:9], 0xc",
-        "s_load_dword s0, s[30:31], 0x3c ; FIX use saved kernarg");
+        "s_load_dword s0, s[30:31], 0x3c ; use saved kernarg ptr");
     }
     // v_bitop2_b32/v_bitop3_b32 → s_nop 0 (GFX12-only, no simple GFX9 equivalent)
     // Replace entire lines containing v_bitop[23]_b32
