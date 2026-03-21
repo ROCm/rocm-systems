@@ -3463,6 +3463,21 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
         pos += to.size();
       }
     };
+    // Debug: HSA_HOTSWAP_SKIP_INNER=1 skips the inner product (.L_br24→.L_br27)
+    // by jumping directly from .L_br24 to .L_br25 (store zeros).
+    if (std::getenv("HSA_HOTSWAP_SKIP_INNER") && stats->total_instructions > 400) {
+      auto replaceAll = [](std::string& s, const std::string& from, const std::string& to) {
+        size_t pos = 0;
+        while ((pos = s.find(from, pos)) != std::string::npos) {
+          s.replace(pos, from.size(), to);
+          pos += to.size();
+        }
+      };
+      // At .L_br24, skip directly to .L_br25 (the store)
+      replaceAll(translated_asm,
+        ".L_br24:\nv_mov_b32_e32 v4, 0",
+        ".L_br24:\nv_mov_b32_e32 v4, 0\ns_branch .L_br25 ; SKIP inner product");
+    }
     // Debug: HSA_HOTSWAP_FORCE_REMAINDER=1 forces the remainder loop to always
     // execute by replacing "s_mov_b32 s15, s10" (remainder count) with "s_mov_b32 s15, 1"
     if (std::getenv("HSA_HOTSWAP_FORCE_REMAINDER") && stats->total_instructions > 400) {
