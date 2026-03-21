@@ -3534,10 +3534,13 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
       std::istringstream ng_iss(translated_asm);
       std::string ng_line;
       while (std::getline(ng_iss, ng_line)) {
-        if (ng_line.find("global_store") != std::string::npos)
+        if (ng_line.find("global_store") != std::string::npos ||
+            ng_line.find("global_load") != std::string::npos ||
+            ng_line.find("ds_read") != std::string::npos ||
+            ng_line.find("ds_write") != std::string::npos)
           tmp += "s_nop 0 ; NOP'd " + ng_line + "\n";
-        else if (ng_line.find("global_load") != std::string::npos)
-          tmp += "s_nop 0 ; NOP'd " + ng_line + "\n";
+        else if (ng_line.find("s_barrier") != std::string::npos)
+          tmp += "s_nop 0 ; NOP'd barrier\n";
         else
           tmp += ng_line + "\n";
       }
