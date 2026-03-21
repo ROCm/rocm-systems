@@ -3261,8 +3261,8 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
     uint32_t kernarg_save_hi = cmpx_temp_sgpr + 3;
     std::string ka_lo = "s" + std::to_string(kernarg_save_lo);
     std::string ka_hi = "s" + std::to_string(kernarg_save_hi);
-    // Defer the actual save emission — only emit if needed (checked later)
-    bool needs_kernarg_save = false;
+    // Note: kernarg save is deferred — only emitted in post-processing
+    // if the kernel has s_load from s[8:9]+0xc patterns.
 
     // Collect all REPLACE registrations so we can refresh them after saveexec.
     // On gfx1250, workgroup_id lives in TTMP (always valid).  After transpiling
@@ -3487,18 +3487,31 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
           pos += to.size();
         }
       };
-      std::string ka_pair = "s[" + std::to_string(kernarg_save_lo) + ":" +
-                            std::to_string(kernarg_save_hi) + "]";
-      // Check if the pattern exists before doing replacements
+      // Check if the pattern exists before doing replacements.
+      // Extract the kernarg save register pair from the prologue comment.
       if (translated_asm.find("s_load_dword s1, s[8:9], 0xc") != std::string::npos ||
           translated_asm.find("s_load_dword s0, s[8:9], 0xc") != std::string::npos) {
-        // Emit the kernarg save in the prologue (insert after workgroup ID saves)
-        size_t insert_pos = translated_asm.find("; save workgroup_id_y\n");
-        if (insert_pos != std::string::npos) {
-          insert_pos = translated_asm.find('\n', insert_pos) + 1;
-          std::string save = "s_mov_b32 " + ka_lo + ", s0 ; save kernarg ptr lo\n"
-                           "s_mov_b32 " + ka_hi + ", s1 ; save kernarg ptr hi\n";
-          translated_asm.insert(insert_pos, save);
+        // Find the kernarg save registers from prologue
+        std::string ka_pair = "s[30:31]";  // fallback
+        size_t ka_pos = translated_asm.find("; save kernarg ptr lo");
+        if (ka_pos != std::string::npos) {
+          size_t s_pos = translated_asm.rfind("s_mov_b32 s", ka_pos);
+          if (s_pos != std::string::npos) {
+            size_t n_start = s_pos + 11;
+            size_t n_end = translated_asm.find(',', n_start);
+            int lo = std::stoi(translated_asm.substr(n_start, n_end - n_start));
+            ka_pair = "s[" + std::to_string(lo) + ":" + std::to_string(lo + 1) + "]";
+          }
+        } else {
+          // No save emitted yet — emit it now
+          size_t insert_pos = translated_asm.find("; save workgroup_id_y\n");
+          if (insert_pos != std::string::npos) {
+            insert_pos = translated_asm.find('\n', insert_pos) + 1;
+            // Use s28+2=s30 and s29+2=s31 as safe default (large kernels)
+            translated_asm.insert(insert_pos,
+              "s_mov_b32 s30, s0 ; save kernarg ptr lo\n"
+              "s_mov_b32 s31, s1 ; save kernarg ptr hi\n");
+          }
         }
         replaceAll(translated_asm,
           "s_load_dword s1, s[8:9], 0xc",
