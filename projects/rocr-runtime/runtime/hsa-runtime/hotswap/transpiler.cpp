@@ -3254,13 +3254,17 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
     // num_vgprs when computing ACCUM_OFFSET so these registers are arch VGPRs.
     translated_asm += "v_mov_b32_e32 " + sv_x + ", s2 ; save workgroup_id_x\n";
     translated_asm += "v_mov_b32_e32 " + sv_y + ", s3 ; save workgroup_id_y\n";
-    // Save kernarg pointer s[0:1] to s[30:31] for later use.
+    // Save kernarg pointer s[0:1] to dedicated SGPRs for later use.
     // On GFX12, some kernels compute s[8:9] = s[0:1]+48 and later load hidden
-    // args via s_load sN, s[8:9], offset. The wave32→wave64 v_cmp_e64 widening
-    // can corrupt intermediate SGPRs. Saving the original kernarg pointer lets
-    // us bypass the corrupted intermediaries.
-    translated_asm += "s_mov_b32 s30, s0 ; save kernarg ptr lo\n";
-    translated_asm += "s_mov_b32 s31, s1 ; save kernarg ptr hi\n";
+    // args via s_load sN, s[8:9], offset. The value can get corrupted on GFX9.
+    // Place the save at cmpx_temp_sgpr+2 and +3 (above the kernel's own SGPRs
+    // and the v_cmpx VCC save register, within the KD SGPR allocation).
+    uint32_t kernarg_save_lo = cmpx_temp_sgpr + 2;
+    uint32_t kernarg_save_hi = cmpx_temp_sgpr + 3;
+    std::string ka_lo = "s" + std::to_string(kernarg_save_lo);
+    std::string ka_hi = "s" + std::to_string(kernarg_save_hi);
+    translated_asm += "s_mov_b32 " + ka_lo + ", s0 ; save kernarg ptr lo\n";
+    translated_asm += "s_mov_b32 " + ka_hi + ", s1 ; save kernarg ptr hi\n";
 
     // Collect all REPLACE registrations so we can refresh them after saveexec.
     // On gfx1250, workgroup_id lives in TTMP (always valid).  After transpiling
@@ -3480,12 +3484,14 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
           pos += to.size();
         }
       };
+      std::string ka_pair = "s[" + std::to_string(kernarg_save_lo) + ":" +
+                            std::to_string(kernarg_save_hi) + "]";
       replaceAll(translated_asm,
         "s_load_dword s1, s[8:9], 0xc",
-        "s_load_dword s1, s[30:31], 0x3c ; use saved kernarg ptr");
+        "s_load_dword s1, " + ka_pair + ", 0x3c ; use saved kernarg ptr");
       replaceAll(translated_asm,
         "s_load_dword s0, s[8:9], 0xc",
-        "s_load_dword s0, s[30:31], 0x3c ; use saved kernarg ptr");
+        "s_load_dword s0, " + ka_pair + ", 0x3c ; use saved kernarg ptr");
     }
     // v_bitop2_b32/v_bitop3_b32 → s_nop 0 (GFX12-only, no simple GFX9 equivalent)
     // Replace entire lines containing v_bitop[23]_b32
