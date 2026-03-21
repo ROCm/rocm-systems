@@ -3478,23 +3478,20 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
           pos += to.size();
         }
       };
-      // After s_addc_u32 s9, s1, 0 → save to v27 (last valid VGPR) + s29 (spare SGPR)
+      // Save kernarg pointer s[0:1] to s[30:31] at kernel start,
+      // then use s[30:31]+0x3c directly instead of s[8:9]+0xc.
+      // This bypasses any s[8:9] corruption.
       replaceAll(translated_asm,
-        "s_addc_u32 s9, s1, 0\n",
-        "s_addc_u32 s9, s1, 0\n"
-        "v_mov_b32_e32 v27, s8 ; DBG save kernarg+48 lo\n"
-        "s_mov_b32 s29, s9 ; DBG save kernarg+48 hi\n");
-      // Before s_load from s[8:9] → reload
+        "; save workgroup_id_x\n",
+        "; save workgroup_id_x\n"
+        "s_mov_b32 s30, s0 ; DBG save kernarg lo\n"
+        "s_mov_b32 s31, s1 ; DBG save kernarg hi\n");
       replaceAll(translated_asm,
         "s_load_dword s1, s[8:9], 0xc",
-        "v_readfirstlane_b32 s8, v27 ; DBG reload lo\n"
-        "s_mov_b32 s9, s29 ; DBG reload hi\n"
-        "s_load_dword s1, s[8:9], 0xc");
+        "s_load_dword s1, s[30:31], 0x3c ; DBG load via saved kernarg");
       replaceAll(translated_asm,
         "s_load_dword s0, s[8:9], 0xc",
-        "v_readfirstlane_b32 s8, v27 ; DBG reload lo\n"
-        "s_mov_b32 s9, s29 ; DBG reload hi\n"
-        "s_load_dword s0, s[8:9], 0xc");
+        "s_load_dword s0, s[30:31], 0x3c ; DBG load via saved kernarg");
     }
     // v_bitop2_b32/v_bitop3_b32 → s_nop 0 (GFX12-only, no simple GFX9 equivalent)
     // Replace entire lines containing v_bitop[23]_b32
