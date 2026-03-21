@@ -3463,24 +3463,53 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
         pos += to.size();
       }
     };
-    // Wave32→64 VCC fix: widen s_cbranch_vccz/vccnz.
-    // Replace the 32-bit VCC operations AND the branch with 64-bit equivalents.
-    // The key: s_and_b32 vcc_lo only writes vcc_lo. We need s_and_b64 vcc,exec,s[N:N+1]
-    // But s15 is a single SGPR. So we widen: s_and_b64 vcc, vcc, exec (masks VCC_hi with exec_hi=0).
-    // Then s_cbranch_vccz checks the cleaned VCC.
+    // Wave32→64 VCC branch fix: convert s_cbranch_vccz/vccnz to use SCC.
+    // On GFX942, s_cbranch_vccz checks full 64-bit VCC, but wave32 code only
+    // writes VCC_lo. Multiple attempts to clear VCC_hi failed. The solution:
+    // use SCC from the PRECEDING s_and_b32/s_andn2_b32 that wrote VCC_lo.
+    // These SALU ops set SCC = (result != 0), which is equivalent to VCC_lo != 0.
+    // IMPORTANT: This ONLY works if the instruction immediately before the
+    // cbranch_vccz/vccnz is the s_and/s_andn2 that writes VCC_lo. If there's
+    // an intervening instruction that sets SCC, the conversion is wrong.
     {
       std::string tmp;
       std::istringstream vfix_iss(translated_asm);
       std::string vfix_line;
+      std::string prev_line;
       while (std::getline(vfix_iss, vfix_line)) {
-        if (vfix_line.find("s_cbranch_vccz") != std::string::npos ||
-            vfix_line.find("s_cbranch_vccnz") != std::string::npos) {
-          // FORCE exec_hi=0 right here (in case it drifted from a missing clear)
-          tmp += "s_mov_b32 exec_hi, 0\n";
-          // Then mask VCC with exec to zero VCC_hi
-          tmp += "s_and_b64 vcc, vcc, exec\n";
+        if (vfix_line.find("s_cbranch_vccz") != std::string::npos) {
+          // Check if previous line set VCC_lo (and thus SCC)
+          bool prev_sets_vcc = (prev_line.find("vcc_lo") != std::string::npos &&
+            (prev_line.find("s_and_b32") != std::string::npos ||
+             prev_line.find("s_andn2_b32") != std::string::npos ||
+             prev_line.find("s_or_b32") != std::string::npos));
+          if (prev_sets_vcc) {
+            // SCC from the s_and/s_andn2 = (result != 0). vccz = (VCC == 0).
+            // SCC=0 means result=0 → equivalent to VCC_lo=0 → vccz=true → branch.
+            size_t lbl_pos = vfix_line.find(".L_");
+            if (lbl_pos != std::string::npos) {
+              tmp += "s_cbranch_scc0 " + vfix_line.substr(lbl_pos) + " ; vccz→scc0\n";
+              prev_line = vfix_line;
+              continue;
+            }
+          }
+        }
+        if (vfix_line.find("s_cbranch_vccnz") != std::string::npos) {
+          bool prev_sets_vcc = (prev_line.find("vcc_lo") != std::string::npos &&
+            (prev_line.find("s_and_b32") != std::string::npos ||
+             prev_line.find("s_andn2_b32") != std::string::npos ||
+             prev_line.find("s_or_b32") != std::string::npos));
+          if (prev_sets_vcc) {
+            size_t lbl_pos = vfix_line.find(".L_");
+            if (lbl_pos != std::string::npos) {
+              tmp += "s_cbranch_scc1 " + vfix_line.substr(lbl_pos) + " ; vccnz→scc1\n";
+              prev_line = vfix_line;
+              continue;
+            }
+          }
         }
         tmp += vfix_line + "\n";
+        prev_line = vfix_line;
       }
       translated_asm = tmp;
     }
