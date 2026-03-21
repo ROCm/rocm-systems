@@ -3528,8 +3528,8 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
           "s_load_dword s0, " + ka_pair + ", 0x3c ; use saved kernarg ptr");
       }
     }
-    // Debug: HSA_HOTSWAP_NOP_GLOBAL=1 replaces all global_store/global_load with NOPs
-    if (std::getenv("HSA_HOTSWAP_NOP_GLOBAL")) {
+    // Debug: HSA_HOTSWAP_NOP_GLOBAL=1 replaces global_store/load with NOPs (large kernels only)
+    if (std::getenv("HSA_HOTSWAP_NOP_GLOBAL") && stats->total_instructions > 400) {
       std::string tmp;
       std::istringstream ng_iss(translated_asm);
       std::string ng_line;
