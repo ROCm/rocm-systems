@@ -3453,10 +3453,26 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
       std::istringstream vhi_iss(translated_asm);
       std::string vhi_line;
       while (std::getline(vhi_iss, vhi_line)) {
-        if (vhi_line.find("s_cbranch_vccz") != std::string::npos ||
-            vhi_line.find("s_cbranch_vccnz") != std::string::npos) {
-          tmp += "s_mov_b32 vcc_hi, 0\n";
-          tmp += "s_nop 1\n";  // hazard: VCC write → VCC branch needs delay
+        if (vhi_line.find("s_cbranch_vccz") != std::string::npos) {
+          // Convert: s_cbranch_vccz target → s_cmp_eq_u32 vcc_lo, 0; s_cbranch_scc1 target
+          // This checks only VCC_lo, avoiding VCC_hi garbage entirely.
+          size_t lbl_pos = vhi_line.find(".L_");
+          if (lbl_pos != std::string::npos) {
+            std::string target = vhi_line.substr(lbl_pos);
+            tmp += "s_cmp_eq_u32 vcc_lo, 0\n";
+            tmp += "s_cbranch_scc1 " + target + "\n";
+            continue;
+          }
+        }
+        if (vhi_line.find("s_cbranch_vccnz") != std::string::npos) {
+          // Convert: s_cbranch_vccnz target → s_cmp_lg_u32 vcc_lo, 0; s_cbranch_scc1 target
+          size_t lbl_pos = vhi_line.find(".L_");
+          if (lbl_pos != std::string::npos) {
+            std::string target = vhi_line.substr(lbl_pos);
+            tmp += "s_cmp_lg_u32 vcc_lo, 0\n";
+            tmp += "s_cbranch_scc1 " + target + "\n";
+            continue;
+          }
         }
         tmp += vhi_line + "\n";
       }
