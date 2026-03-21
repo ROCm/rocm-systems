@@ -2226,9 +2226,10 @@ kmd_driver_t::xfer_agent_memory_partial (os_agent_id_t agent_id,
             write = (char *) write + partial_size;
 
           /* This access is now guaranteed to be word-aligned.  */
-          size_t new_misalign = (read != nullptr
-                                 ? (uintptr_t) read % sizeof (DWORD)
-                                 : (uintptr_t) write % sizeof (DWORD));
+          [[maybe_unused]] size_t new_misalign
+            = (read != nullptr
+               ? (uintptr_t)read % sizeof (DWORD)
+               : (uintptr_t)write % sizeof (DWORD));
           dbgapi_assert (new_misalign == 0);
 
           address += partial_size;
