@@ -3486,12 +3486,13 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
         "; save workgroup_id_x\n"
         "s_mov_b32 s30, s0 ; DBG save kernarg lo\n"
         "s_mov_b32 s31, s1 ; DBG save kernarg hi\n");
+      // Test: load from offset 0x0 (first user arg, definitely valid)
       replaceAll(translated_asm,
         "s_load_dword s1, s[8:9], 0xc",
-        "s_load_dword s1, s[30:31], 0x3c ; DBG load via saved kernarg");
+        "s_load_dword s1, s[30:31], 0x0 ; DBG load offset 0");
       replaceAll(translated_asm,
         "s_load_dword s0, s[8:9], 0xc",
-        "s_load_dword s0, s[30:31], 0x3c ; DBG load via saved kernarg");
+        "s_load_dword s0, s[30:31], 0x0 ; DBG load offset 0");
     }
     // v_bitop2_b32/v_bitop3_b32 → s_nop 0 (GFX12-only, no simple GFX9 equivalent)
     // Replace entire lines containing v_bitop[23]_b32
