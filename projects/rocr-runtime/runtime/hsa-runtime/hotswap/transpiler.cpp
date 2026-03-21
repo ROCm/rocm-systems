@@ -3528,6 +3528,21 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
           "s_load_dword s0, " + ka_pair + ", 0x3c ; use saved kernarg ptr");
       }
     }
+    // Debug: HSA_HOTSWAP_NOP_GLOBAL=1 replaces all global_store/global_load with NOPs
+    if (std::getenv("HSA_HOTSWAP_NOP_GLOBAL")) {
+      std::string tmp;
+      std::istringstream ng_iss(translated_asm);
+      std::string ng_line;
+      while (std::getline(ng_iss, ng_line)) {
+        if (ng_line.find("global_store") != std::string::npos)
+          tmp += "s_nop 0 ; NOP'd " + ng_line + "\n";
+        else if (ng_line.find("global_load") != std::string::npos)
+          tmp += "s_nop 0 ; NOP'd " + ng_line + "\n";
+        else
+          tmp += ng_line + "\n";
+      }
+      translated_asm = tmp;
+    }
     // v_bitop2_b32/v_bitop3_b32 → s_nop 0 (GFX12-only, no simple GFX9 equivalent)
     // Replace entire lines containing v_bitop[23]_b32
     std::istringstream iss(translated_asm);
