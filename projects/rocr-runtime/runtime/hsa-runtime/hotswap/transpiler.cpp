@@ -3411,17 +3411,25 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
           if (t.find("v_cmpx_") != std::string::npos) { has_vcmpx = true; break; }
         }
         if (has_vcmpx) {
-          // Conditional: only clear exec_hi when next is NOT s_cbranch_execz
-          bool next_is_execz = false;
-          for (size_t nxt = ii + 1; nxt < source_instrs.size(); nxt++) {
-            std::string nm = ExtractMnemonic(source_instrs[nxt].text);
-            if (nm.find("s_delay") == 0 || nm.find("s_wait") == 0 ||
-                nm.find("s_nop") == 0 || nm.find("s_clause") == 0) continue;
-            if (nm == "s_cbranch_execz") next_is_execz = true;
-            break;
-          }
-          if (!next_is_execz) {
+          // For large kernels (like attn_forward): unconditional exec_hi clear.
+          // For smaller kernels: conditional (skip when next is s_cbranch_execz).
+          // Unconditional clearing regresses split-K (which has no v_cmpx anyway,
+          // but the binary change affects numerical results). Conditional is safe
+          // for small kernels but leaves garbage exec_hi for large ones.
+          if (source_lines.size() > 400) {
             translated_asm += "s_mov_b32 exec_hi, 0\n";
+          } else {
+            bool next_is_execz = false;
+            for (size_t nxt = ii + 1; nxt < source_instrs.size(); nxt++) {
+              std::string nm = ExtractMnemonic(source_instrs[nxt].text);
+              if (nm.find("s_delay") == 0 || nm.find("s_wait") == 0 ||
+                  nm.find("s_nop") == 0 || nm.find("s_clause") == 0) continue;
+              if (nm == "s_cbranch_execz") next_is_execz = true;
+              break;
+            }
+            if (!next_is_execz) {
+              translated_asm += "s_mov_b32 exec_hi, 0\n";
+            }
           }
         }
       }
