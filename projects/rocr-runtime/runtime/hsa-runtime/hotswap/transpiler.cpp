@@ -3444,25 +3444,10 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
         pos += to.size();
       }
     };
-    // Wave32→wave64 VCC_hi fix: widen s_cbranch_vccz/vccnz to use full 64-bit VCC.
-    // Insert s_and_b64 vcc, vcc, exec before the branch to zero out VCC_hi
-    // (since exec_hi=0, this clears VCC_hi while preserving VCC_lo).
-    {
-      std::string tmp;
-      std::istringstream vhi_iss(translated_asm);
-      std::string vhi_line;
-      while (std::getline(vhi_iss, vhi_line)) {
-        if (vhi_line.find("s_cbranch_vccz") != std::string::npos ||
-            vhi_line.find("s_cbranch_vccnz") != std::string::npos) {
-          // Use s_and_b64 vcc, vcc, exec to mask VCC with exec.
-          // Since exec_hi=0 (cleared after v_cmpx), this zeros VCC_hi
-          // while preserving VCC_lo for the active lanes.
-          tmp += "s_and_b64 vcc, vcc, exec\n";
-        }
-        tmp += vhi_line + "\n";
-      }
-      translated_asm = tmp;
-    }
+    // Note: VCC_hi is NOT cleared here. The s_cbranch_vccz/vccnz branches
+    // check full 64-bit VCC on wave64. VCC_hi garbage from v_cmp can cause
+    // wrong branch decisions. TODO: find correct fix (s_and_b64 clobbers SCC,
+    // s_mov vcc_hi doesn't fix it, SCC conversion doesn't fix it either).
     // v_add_nc_u32 → v_add_u32_e32 (may appear without _e32 from VOP3 encoding)
     replaceAll(translated_asm, "v_add_nc_u32 ", "v_add_u32_e32 ");
     replaceAll(translated_asm, "v_sub_nc_u32 ", "v_sub_u32_e32 ");
