@@ -3463,6 +3463,23 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
         pos += to.size();
       }
     };
+    // Debug: HSA_HOTSWAP_FORCE_REMAINDER=1 forces the remainder loop to always
+    // execute by replacing "s_mov_b32 s15, s10" (remainder count) with "s_mov_b32 s15, 1"
+    if (std::getenv("HSA_HOTSWAP_FORCE_REMAINDER") && stats->total_instructions > 400) {
+      auto replaceAll = [](std::string& s, const std::string& from, const std::string& to) {
+        size_t pos = 0;
+        while ((pos = s.find(from, pos)) != std::string::npos) {
+          s.replace(pos, from.size(), to);
+          pos += to.size();
+        }
+      };
+      // Force s10 to -1 (remainder flag = true) so the guard branch is never taken
+      replaceAll(translated_asm,
+        "s_cselect_b32 s10, -1, 0\n"
+        "s_ashr_i32 s7",
+        "s_mov_b32 s10, -1 ; FORCE remainder\n"
+        "s_ashr_i32 s7");
+    }
     // Note: VCC_hi is NOT cleared here. The s_cbranch_vccz/vccnz branches
     // check full 64-bit VCC on wave64. VCC_hi garbage from v_cmp can cause
     // wrong branch decisions. TODO: find correct fix (s_and_b64 clobbers SCC,
