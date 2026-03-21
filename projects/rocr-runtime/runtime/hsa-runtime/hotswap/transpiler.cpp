@@ -3463,6 +3463,48 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
         pos += to.size();
       }
     };
+    // Replace v_lshl_add_u64 v[X:Y], s[2:3], 0, v[X:Y] (shift=0, dst==src2)
+    // with explicit v_add_co_u32 + v_addc_co_u32 to avoid potential
+    // read-write-same-register hazard on GFX942.
+    if (stats->total_instructions > 400) {
+      std::string tmp;
+      std::istringstream la_iss(translated_asm);
+      std::string la_line;
+      while (std::getline(la_iss, la_line)) {
+        // Match: v_lshl_add_u64 v[X:Y], s[2:3], 0, v[X:Y]
+        // (dst pair == src2 pair, shift=0 → just 64-bit add)
+        if (la_line.find("v_lshl_add_u64") != std::string::npos &&
+            la_line.find(", 0, ") != std::string::npos) {
+          // Extract dst pair and src2 pair
+          size_t dst_start = la_line.find("v[");
+          size_t dst_end = la_line.find("]", dst_start) + 1;
+          std::string dst = la_line.substr(dst_start, dst_end - dst_start);
+          size_t src2_pos = la_line.rfind("v[");
+          size_t src2_end = la_line.find("]", src2_pos) + 1;
+          std::string src2 = la_line.substr(src2_pos, src2_end - src2_pos);
+          if (dst == src2) {
+            // Self-referencing: replace with v_add_co_u32 + v_addc_co_u32
+            int lo = std::stoi(dst.substr(2, dst.find(':') - 2));
+            int hi = lo + 1;
+            // Extract src0 (the SGPR pair between first , and , 0)
+            size_t s0_start = la_line.find(", ") + 2;
+            size_t s0_end = la_line.find(",", s0_start);
+            std::string src0 = la_line.substr(s0_start, s0_end - s0_start);
+            while (!src0.empty() && src0.back() == ' ') src0.pop_back();
+            // src0 is like "s[2:3]" — extract lo/hi
+            int slo = std::stoi(src0.substr(2, src0.find(':') - 2));
+            int shi = slo + 1;
+            tmp += "v_add_co_u32_e32 v" + std::to_string(lo) + ", s" +
+                   std::to_string(slo) + ", v" + std::to_string(lo) + "\n";
+            tmp += "v_addc_co_u32_e32 v" + std::to_string(hi) + ", vcc, s" +
+                   std::to_string(shi) + ", v" + std::to_string(hi) + ", vcc\n";
+            continue;
+          }
+        }
+        tmp += la_line + "\n";
+      }
+      translated_asm = tmp;
+    }
     // Debug: NOP flat-address global_loads (v[pair], off) in large kernels
     // to check if the flat addressing form is the crash cause.
     if (std::getenv("HSA_HOTSWAP_NOP_FLAT") && stats->total_instructions > 400) {
