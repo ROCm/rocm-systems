@@ -3468,22 +3468,33 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
       }
       translated_asm = tmp;
     }
-    // Debug: HSA_HOTSWAP_NOP_SLOAD=1 replaces s_load_dword sN, s[8:9], 0xc with
-    // direct load from s[0:1] at offset 0x3c (kernarg+60, same effective address).
-    // Tests whether the issue is s[8:9] being wrong vs kernarg+60 being invalid.
+    // Debug: HSA_HOTSWAP_NOP_SLOAD=1 — save kernarg+48 to v27:v28 after
+    // computation, reload before s_load from s[8:9] to test corruption.
     if (std::getenv("HSA_HOTSWAP_NOP_SLOAD")) {
-      auto replaceLoad = [](std::string& s, const std::string& from, const std::string& to) {
+      auto replaceAll = [](std::string& s, const std::string& from, const std::string& to) {
         size_t pos = 0;
         while ((pos = s.find(from, pos)) != std::string::npos) {
           s.replace(pos, from.size(), to);
           pos += to.size();
         }
       };
-      // Test: replace offset 0xc with 0x0 to check if s[8:9] base is valid
-      replaceLoad(translated_asm, "s_load_dword s1, s[8:9], 0xc",
-                                   "s_load_dword s1, s[8:9], 0x0");
-      replaceLoad(translated_asm, "s_load_dword s0, s[8:9], 0xc",
-                                   "s_load_dword s0, s[8:9], 0x0");
+      // After s_addc_u32 s9, s1, 0 → save to VGPRs
+      replaceAll(translated_asm,
+        "s_addc_u32 s9, s1, 0\n",
+        "s_addc_u32 s9, s1, 0\n"
+        "v_mov_b32_e32 v27, s8 ; DBG save kernarg+48 lo\n"
+        "v_mov_b32_e32 v28, s9 ; DBG save kernarg+48 hi\n");
+      // Before s_load from s[8:9] → reload from VGPRs
+      replaceAll(translated_asm,
+        "s_load_dword s1, s[8:9], 0xc",
+        "v_readfirstlane_b32 s8, v27 ; DBG reload\n"
+        "v_readfirstlane_b32 s9, v28\n"
+        "s_load_dword s1, s[8:9], 0xc");
+      replaceAll(translated_asm,
+        "s_load_dword s0, s[8:9], 0xc",
+        "v_readfirstlane_b32 s8, v27 ; DBG reload\n"
+        "v_readfirstlane_b32 s9, v28\n"
+        "s_load_dword s0, s[8:9], 0xc");
     }
     // v_bitop2_b32/v_bitop3_b32 → s_nop 0 (GFX12-only, no simple GFX9 equivalent)
     // Replace entire lines containing v_bitop[23]_b32
