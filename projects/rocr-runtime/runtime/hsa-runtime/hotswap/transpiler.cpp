@@ -3456,6 +3456,7 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
         if (vhi_line.find("s_cbranch_vccz") != std::string::npos ||
             vhi_line.find("s_cbranch_vccnz") != std::string::npos) {
           tmp += "s_mov_b32 vcc_hi, 0\n";
+          tmp += "s_nop 1\n";  // hazard: VCC write → VCC branch needs delay
         }
         tmp += vhi_line + "\n";
       }
