@@ -475,7 +475,11 @@ uint32_t Monitor::getTempSensorIndex(rsmi_temperature_type_t type) {
 }
 
 rsmi_temperature_type_t Monitor::getTempSensorEnum(uint64_t ind) {
-  return index_temp_type_map_.at(ind);
+  auto it = index_temp_type_map_.find(ind);
+  if (it == index_temp_type_map_.end()) {
+    return RSMI_TEMP_TYPE_INVALID;
+  }
+  return it->second;
 }
 
 uint32_t Monitor::getVoltSensorIndex(rsmi_voltage_type_t type) {
@@ -483,7 +487,11 @@ uint32_t Monitor::getVoltSensorIndex(rsmi_voltage_type_t type) {
 }
 
 rsmi_voltage_type_t Monitor::getVoltSensorEnum(uint64_t ind) {
-  return index_volt_type_map_.at(ind);
+  auto it = index_volt_type_map_.find(ind);
+  if (it == index_volt_type_map_.end()) {
+    return RSMI_VOLT_TYPE_INVALID;
+  }
+  return it->second;
 }
 
 static std::vector<uint64_t> get_intersection(std::vector<uint64_t>* v1,
@@ -622,11 +630,19 @@ void Monitor::fillSupportedFuncs(SupportedFuncMap* supported_funcs) {
           } else if (m_type == eTempMonitor) {
             // Temp sensor file names are 1-based
             assert(supported_monitor > 0);
-            supported_monitor |= static_cast<uint64_t>(getTempSensorEnum(supported_monitor))
+            auto t_enum = getTempSensorEnum(supported_monitor);
+            if (t_enum == RSMI_TEMP_TYPE_INVALID) {
+              continue;
+            }
+            supported_monitor |= static_cast<uint64_t>(t_enum)
                                  << MONITOR_TYPE_BIT_POSITION;
           } else if (m_type == eVoltMonitor) {
             // Voltage sensor file names are 0-based
-            supported_monitor |= static_cast<uint64_t>(getVoltSensorEnum(supported_monitor))
+            auto v_enum = getVoltSensorEnum(supported_monitor);
+            if (v_enum == RSMI_VOLT_TYPE_INVALID) {
+              continue;
+            }
+            supported_monitor |= static_cast<uint64_t>(v_enum)
                                  << MONITOR_TYPE_BIT_POSITION;
           } else {
             assert(false);  // Unexpected monitor type

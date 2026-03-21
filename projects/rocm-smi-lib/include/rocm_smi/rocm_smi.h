@@ -520,8 +520,9 @@ typedef enum {
   RSMI_VOLT_TYPE_FIRST = 0,
 
   RSMI_VOLT_TYPE_VDDGFX = RSMI_VOLT_TYPE_FIRST,  //!< Vddgfx GPU voltage
-  RSMI_VOLT_TYPE_VDDNB,                          //!< Vddnb iGPU
-  RSMI_VOLT_TYPE_VDDBOARD,                       //!< Voltage for VDDBOARD
+  RSMI_VOLT_TYPE_VDDNB = 1,                      //!< Vddnb northbridge voltage
+                                                 //!< (iGPU, exposed via in1_label)
+  RSMI_VOLT_TYPE_VDDBOARD = 2,                   //!< Voltage for VDDBOARD
 
   RSMI_VOLT_TYPE_LAST = RSMI_VOLT_TYPE_VDDBOARD,
   RSMI_VOLT_TYPE_INVALID = 0xFFFFFFFF  //!< Invalid type
