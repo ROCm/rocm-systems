@@ -3478,22 +3478,22 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
           pos += to.size();
         }
       };
-      // After s_addc_u32 s9, s1, 0 → save to VGPRs
+      // After s_addc_u32 s9, s1, 0 → save to v27 (last valid VGPR) + s29 (spare SGPR)
       replaceAll(translated_asm,
         "s_addc_u32 s9, s1, 0\n",
         "s_addc_u32 s9, s1, 0\n"
         "v_mov_b32_e32 v27, s8 ; DBG save kernarg+48 lo\n"
-        "v_mov_b32_e32 v28, s9 ; DBG save kernarg+48 hi\n");
-      // Before s_load from s[8:9] → reload from VGPRs
+        "s_mov_b32 s29, s9 ; DBG save kernarg+48 hi\n");
+      // Before s_load from s[8:9] → reload
       replaceAll(translated_asm,
         "s_load_dword s1, s[8:9], 0xc",
-        "v_readfirstlane_b32 s8, v27 ; DBG reload\n"
-        "v_readfirstlane_b32 s9, v28\n"
+        "v_readfirstlane_b32 s8, v27 ; DBG reload lo\n"
+        "s_mov_b32 s9, s29 ; DBG reload hi\n"
         "s_load_dword s1, s[8:9], 0xc");
       replaceAll(translated_asm,
         "s_load_dword s0, s[8:9], 0xc",
-        "v_readfirstlane_b32 s8, v27 ; DBG reload\n"
-        "v_readfirstlane_b32 s9, v28\n"
+        "v_readfirstlane_b32 s8, v27 ; DBG reload lo\n"
+        "s_mov_b32 s9, s29 ; DBG reload hi\n"
         "s_load_dword s0, s[8:9], 0xc");
     }
     // v_bitop2_b32/v_bitop3_b32 → s_nop 0 (GFX12-only, no simple GFX9 equivalent)
