@@ -289,6 +289,14 @@ def write_metadata(meta, run_dir):
 # Runner
 # ---------------------------------------------------------------------------
 
+def _mpi_env_flags():
+    """Return mpirun -x flags to forward library path to child processes."""
+    flags = []
+    if os.environ.get("LD_LIBRARY_PATH"):
+        flags += ["-x", "LD_LIBRARY_PATH"]
+    return flags
+
+
 def build_rocprofv3_cmd(args, test, dtype, output_dir):
     perf_binary = os.path.join(os.path.abspath(args.build_dir), f"{test}_perf")
     perf_args_list = shlex.split(args.perf_args)
@@ -301,6 +309,7 @@ def build_rocprofv3_cmd(args, test, dtype, output_dir):
         "--",
         args.mpirun,
         "-np", str(args.np),
+    ] + _mpi_env_flags() + [
         "-x", "RCCL_TESTS_ROCTX=1",
         perf_binary,
     ] + perf_args_list + [
@@ -317,6 +326,7 @@ def build_baseline_cmd(args, test, dtype, csv_path):
     cmd = [
         args.mpirun,
         "-np", str(args.np),
+    ] + _mpi_env_flags() + [
         perf_binary,
     ] + perf_args_list + [
         "-d", dtype,

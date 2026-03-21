@@ -42,6 +42,12 @@ testResult_t AlltoAllInitData(struct threadArgs* args, ncclDataType_t type, nccl
   return testSuccess;
 }
 
+testResult_t AlltoAllGetAlgoProtoChannels(ncclComm_t comm, size_t count, ncclDataType_t type, int* algo, int* proto, int* nchannels) {
+  if(rcclTestsGetAlgoInfo == NULL) return testInternalError;
+  NCCLCHECK(rcclTestsGetAlgoInfo(comm, ncclFuncAllToAllPivot, count, type, 0, 0, 1, algo, proto, nchannels));
+  return testSuccess;
+}
+
 void AlltoAllGetBw(size_t count, int typesize, double sec, double* algBw, double* busBw, int nranks) {
   double baseBw = (double)(count * nranks * typesize) / 1.0E9 / sec;
 
@@ -402,7 +408,7 @@ struct testColl alltoAllTest = {
   AlltoAllInitData,
   AlltoAllGetBw,
   AlltoAllRunColl,
-  NULL,
+  AlltoAllGetAlgoProtoChannels,
   NULL
 };
 
