@@ -3413,10 +3413,17 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
           if (t.find("v_cmpx_") != std::string::npos) { has_vcmpx = true; break; }
         }
         if (has_vcmpx) {
-          // Insert exec_hi=0 BEFORE the s_cbranch_execz (which is the NEXT
-          // source instruction's translation). The clear goes right after the
-          // v_cmpx translation (including VCC restore).
-          translated_asm += "s_mov_b32 exec_hi, 0\n";
+          bool next_is_execz = false;
+          for (size_t nxt = ii + 1; nxt < source_instrs.size(); nxt++) {
+            std::string nm = ExtractMnemonic(source_instrs[nxt].text);
+            if (nm.find("s_delay") == 0 || nm.find("s_wait") == 0 ||
+                nm.find("s_nop") == 0 || nm.find("s_clause") == 0) continue;
+            if (nm == "s_cbranch_execz") next_is_execz = true;
+            break;
+          }
+          if (!next_is_execz) {
+            translated_asm += "s_mov_b32 exec_hi, 0\n";
+          }
         }
       }
 
