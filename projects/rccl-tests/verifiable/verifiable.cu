@@ -1373,11 +1373,12 @@ hipError_t ncclVerifiableVerify(
   }
   #endif
 
-  // On gfx950, RCCL uses f16 intermediate for fp8_e5m2 (bfloat8) reductions
-  // while RCCL-Tests verification uses f32 intermediate
-  // allow 1 ULP rounding difference to handle validation errors
+  // RCCL may use lower-precision intermediates (e.g., f16 on gfx950) for
+  // fp8_e5m2 (bfloat8) reductions, while RCCL-Tests verification uses f32.
+  // Allow 1 ULP rounding difference. On GPUs where intermediates match (e.g.,
+  // gfx942 using f32), the actual delta will be 0 so this has no effect.
   #if HAVE_ncclfp8_DEVICE || HAVE_ncclfp8_HOST
-  if (elt_ty == ncclFloat8e5m2) {
+  if (elt_ty == ncclFloat8e5m2 && rank_n > 1) {
     tolerance = std::max(tolerance, 1u);
   }
   #endif
