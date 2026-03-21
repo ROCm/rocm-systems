@@ -3475,10 +3475,10 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
       while (std::getline(vfix_iss, vfix_line)) {
         if (vfix_line.find("s_cbranch_vccz") != std::string::npos ||
             vfix_line.find("s_cbranch_vccnz") != std::string::npos) {
-          // Use s_and_b64 to zero VCC_hi (exec_hi is 0)
+          // FORCE exec_hi=0 right here (in case it drifted from a missing clear)
+          tmp += "s_mov_b32 exec_hi, 0\n";
+          // Then mask VCC with exec to zero VCC_hi
           tmp += "s_and_b64 vcc, vcc, exec\n";
-          tmp += "s_nop 7\n";
-          tmp += "s_nop 7\n";
         }
         tmp += vfix_line + "\n";
       }
