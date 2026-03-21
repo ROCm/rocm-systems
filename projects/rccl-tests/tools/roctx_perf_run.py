@@ -3,8 +3,9 @@
 
 Automates the workflow:
   for each test x dtype x repeat:
-    rocprofv3 --marker-trace --kernel-trace -f csv -d <dir> -- \
-      mpirun -np <N> -x RCCL_TESTS_ROCTX=1 build/<test>_perf <perf-args> -d <dtype>
+    mpirun -np <N> -x RCCL_TESTS_ROCTX=1 -x LD_LIBRARY_PATH \
+      rocprofv3 --marker-trace --kernel-trace -f csv -d <dir>_rank_%rank% -- \
+        build/<test>_perf <perf-args> -d <dtype>
 
 Artifacts are saved under a timestamped output directory with a metadata.json
 capturing environment, versions, git state, and per-run exit codes.
@@ -297,44 +298,33 @@ def _mpi_env_flags():
     return flags
 
 
-def build_rocprofv3_cmd(args, test, dtype, output_dir):
+def build_mpicmd(args):
+    mpicmd = [ args.mpirun, "-np", str(args.np) ] + _mpi_env_flags() + [
+        "-x", "RCCL_TESTS_ROCTX=1" ]
+    return mpicmd
+
+def build_perfcmd(args, test):
     perf_binary = os.path.join(os.path.abspath(args.build_dir), f"{test}_perf")
     perf_args_list = shlex.split(args.perf_args)
+    return [perf_binary] + perf_args_list
 
-    cmd = [
+def build_rocprofv3_cmd(args, test, dtype, output_dir):
+    mpicmd = build_mpicmd(args)
+    rocpcmd = [
         args.rocprofv3,
         "--marker-trace", "--kernel-trace",
         "-f", "csv",
-        "-d", output_dir,
-        "--",
-        args.mpirun,
-        "-np", str(args.np),
-    ] + _mpi_env_flags() + [
-        "-x", "RCCL_TESTS_ROCTX=1",
-        perf_binary,
-    ] + perf_args_list + [
-        "-d", dtype,
-    ]
+        "-d", output_dir,       # e.g.  results_rank_%rank%
+        "--" ]
+    perfcmd = build_perfcmd(args, test) + [ "-d", dtype ]
+    cmd = mpicmd + rocpcmd + perfcmd
     return cmd
-
 
 def build_baseline_cmd(args, test, dtype, csv_path):
     """Build command for an uninstrumented baseline run (no rocprofv3)."""
-    perf_binary = os.path.join(os.path.abspath(args.build_dir), f"{test}_perf")
-    perf_args_list = shlex.split(args.perf_args)
-
-    cmd = [
-        args.mpirun,
-        "-np", str(args.np),
-    ] + _mpi_env_flags() + [
-        perf_binary,
-    ] + perf_args_list + [
-        "-d", dtype,
-        "-Z", "csv",
-        "-X", csv_path,
-    ]
+    cmd = build_mpicmd(args) + build_perfcmd(args, test) + [
+      "-d",  dtype, "-Z", "csv", "-X", csv_path]
     return cmd
-
 
 def run_one(cmd, log_path, dry_run=False, cwd=None):
     cmd_str = " ".join(shlex.quote(str(c)) for c in cmd)
@@ -363,7 +353,7 @@ def run_matrix(args, meta, run_dir):
             # --- instrumented (profiled) runs ---
             for rep in range(1, args.repeats + 1):
                 tag = f"{test}/{dtype}/rep{rep}"
-                prof_dir = os.path.join(run_dir, f"{test}_{dtype}_rep{rep}")
+                prof_dir = os.path.join(run_dir, f"{test}_{dtype}_rep{rep}_%rank%")
                 log_path = os.path.join(run_dir, f"{test}_{dtype}_rep{rep}.log")
                 os.makedirs(prof_dir, exist_ok=True)
 
