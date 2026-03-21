@@ -3444,33 +3444,20 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
         pos += to.size();
       }
     };
-    // Wave32→wave64 VCC_hi fix: on GFX9 wave64, s_cbranch_vccz/vccnz checks
-    // the full 64-bit VCC. But wave32 code only writes VCC_lo via
-    // s_and_b32 vcc_lo / s_andn2_b32 vcc_lo etc. VCC_hi retains garbage from
-    // previous v_cmp/v_cmpx. Insert vcc_hi=0 before every VCC-based branch.
+    // Wave32→wave64 VCC_hi fix: widen s_cbranch_vccz/vccnz to use full 64-bit VCC.
+    // Insert s_and_b64 vcc, vcc, exec before the branch to zero out VCC_hi
+    // (since exec_hi=0, this clears VCC_hi while preserving VCC_lo).
     {
       std::string tmp;
       std::istringstream vhi_iss(translated_asm);
       std::string vhi_line;
       while (std::getline(vhi_iss, vhi_line)) {
-        // Convert VCC branches to SCC branches: the preceding SALU that writes
-        // VCC_lo also sets SCC (result != 0). Use SCC instead of VCC to avoid
-        // the VCC_hi garbage issue on wave64.
-        if (vhi_line.find("s_cbranch_vccz") != std::string::npos) {
-          size_t lbl_pos = vhi_line.find(".L_");
-          if (lbl_pos != std::string::npos) {
-            std::string target = vhi_line.substr(lbl_pos);
-            tmp += "s_cbranch_scc0 " + target + "\n";
-            continue;
-          }
-        }
-        if (vhi_line.find("s_cbranch_vccnz") != std::string::npos) {
-          size_t lbl_pos = vhi_line.find(".L_");
-          if (lbl_pos != std::string::npos) {
-            std::string target = vhi_line.substr(lbl_pos);
-            tmp += "s_cbranch_scc1 " + target + "\n";
-            continue;
-          }
+        if (vhi_line.find("s_cbranch_vccz") != std::string::npos ||
+            vhi_line.find("s_cbranch_vccnz") != std::string::npos) {
+          // Use s_and_b64 vcc, vcc, exec to mask VCC with exec.
+          // Since exec_hi=0 (cleared after v_cmpx), this zeros VCC_hi
+          // while preserving VCC_lo for the active lanes.
+          tmp += "s_and_b64 vcc, vcc, exec\n";
         }
         tmp += vhi_line + "\n";
       }
