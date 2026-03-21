@@ -3486,13 +3486,21 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
         "; save workgroup_id_x\n"
         "s_mov_b32 s30, s0 ; DBG save kernarg lo\n"
         "s_mov_b32 s31, s1 ; DBG save kernarg hi\n");
-      // Test: load from offset 0x0 (first user arg, definitely valid)
+      // Fix: add extra s_waitcnt + nops before s_add_u32 s8, s0, 48 to ensure
+      // the s_load_dwordx4 s[8:11] has FULLY completed before we overwrite s8.
+      // Also replace the crashing s_loads with saved kernarg pointer.
+      replaceAll(translated_asm,
+        "s_add_u32 s8, s0, 48\n",
+        "s_waitcnt lgkmcnt(0) ; DBG ensure s_load_dwordx4 complete\n"
+        "s_nop 7\n"
+        "s_add_u32 s8, s0, 48\n");
+      // Also fix: use s[30:31] for the hidden arg loads as backup
       replaceAll(translated_asm,
         "s_load_dword s1, s[8:9], 0xc",
-        "s_load_dword s1, s[30:31], 0x0 ; DBG load offset 0");
+        "s_load_dword s1, s[30:31], 0x3c ; FIX use saved kernarg");
       replaceAll(translated_asm,
         "s_load_dword s0, s[8:9], 0xc",
-        "s_load_dword s0, s[30:31], 0x0 ; DBG load offset 0");
+        "s_load_dword s0, s[30:31], 0x3c ; FIX use saved kernarg");
     }
     // v_bitop2_b32/v_bitop3_b32 → s_nop 0 (GFX12-only, no simple GFX9 equivalent)
     // Replace entire lines containing v_bitop[23]_b32
