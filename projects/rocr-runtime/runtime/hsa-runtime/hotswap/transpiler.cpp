@@ -3585,13 +3585,22 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
           size_t pos = s.find(from);
           if (pos != std::string::npos) s.replace(pos, from.size(), to);
         };
-        replaceFirst(translated_asm,
-          "s_branch .L_br4\n",
-          "s_mov_b32 s3, 1 ; FIX: restore thread-0 mask for .L_br9 store\n"
-          "v_cvt_f32_u32_e32 v1, s6 ; FIX: v1 = float(D)\n"
-          "v_sqrt_f32_e32 v1, v1    ; v1 = sqrt(D)\n"
-          "v_rcp_f32_e32 v1, v1     ; v1 = 1/sqrt(D)\n"
-          "s_branch .L_br4\n");
+        {
+          std::string target = "s_branch .L_br4\n";
+          size_t pos = translated_asm.find(target);
+          if (pos != std::string::npos) {
+            std::string fix =
+              "s_mov_b32 s3, 1 ; FIX: restore thread-0 mask\n"
+              "v_cvt_f32_u32_e32 v1, s6 ; FIX: v1 = float(D)\n"
+              "v_sqrt_f32_e32 v1, v1    ; v1 = sqrt(D)\n"
+              "v_rcp_f32_e32 v1, v1     ; v1 = 1/sqrt(D)\n"
+              "s_branch .L_br4\n";
+            translated_asm.replace(pos, target.size(), fix);
+            std::cerr << "hotswap: transpile: APPLIED s3+v1 fix at offset " << pos << "\n";
+          } else {
+            std::cerr << "hotswap: transpile: WARNING: s_branch .L_br4 NOT FOUND\n";
+          }
+        }
       }
       // Minimal dump: just LDS[0] and LDS[4] (the two dot products) at .L_br3 entry.
       // Writes to dO[0] and dO[4]. Only 10 instructions = ~40 bytes.
