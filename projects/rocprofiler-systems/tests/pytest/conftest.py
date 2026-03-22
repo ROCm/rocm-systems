@@ -883,6 +883,19 @@ def _ctest_generate_tests(
         "",
     ]
 
+    # Ensure that the configuration header can be generated
+    lines.append(
+        'add_test("RocprofilerSystems_pytest_config" "${_ROCPROFSYS_EXE}"'
+        ' "${_ROCPROFSYS_EXE_ARGS}"'
+        ' "${_ROCPROFSYS_NODEID_PFX}" "--show-config-only")'
+    )
+    lines.append('set_tests_properties("RocprofilerSystems_pytest_config" PROPERTIES')
+    lines.append('    FIXTURES_SETUP "rocprofsys-global-tmp-files"')
+    lines.append('    LABELS "prerequisite;global"')
+    lines.append("    TIMEOUT 30")
+    lines.append(")")
+    lines.append("")
+
     for item in items:
         test_id = item.stash.get(_original_nodeid_key, item.nodeid)
         test_name = item.name
