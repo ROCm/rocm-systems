@@ -3582,10 +3582,19 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
         "v_mov_b32_e32 v1, s10\n");
       // Fix tree reduction stride: v3 is computed as v1/2 which gives
       // per-thread values (tid*2) for "in range" threads. The tree
-      // reduction needs a COMMON stride = N/2. Replace the computation.
-      replaceAll(translated_asm,
-        "v_lshrrev_b32_e32 v3, 1, v1\n",
-        "v_lshrrev_b32_e32 v3, 1, s5 ; FIX: use N/2 for tree reduction stride\n");
+      // reduction needs a COMMON stride = N/2.
+      // Only fix the FIRST occurrence (the find-max stride, not the sum reduction).
+      // Use s_lshr to compute N/2 into s_temp, then v_mov to v3.
+      {
+        std::string target = "v_lshrrev_b32_e32 v3, 1, v1\n";
+        size_t pos = translated_asm.find(target);
+        if (pos != std::string::npos) {
+          std::string fix =
+            "s_lshr_b32 s27, s5, 1 ; FIX: compute N/2\n"
+            "v_mov_b32_e32 v3, s27 ; FIX: tree reduction stride = N/2\n";
+          translated_asm.replace(pos, target.size(), fix);
+        }
+      }
     }
     // Debug: NOP flat-address global_loads (v[pair], off) in large kernels
     // to check if the flat addressing form is the crash cause.
