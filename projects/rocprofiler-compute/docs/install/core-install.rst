@@ -198,7 +198,8 @@ for execution of ROCm Compute Profiler as follows.
 
       $ rocprof-compute --version
       ----------------------------------------
-      rocprofiler-compute version: {{ config.version }}
+      rocprofiler-compute version: {{ config.version }} (release)
+      Git revision:     abc1234
       ----------------------------------------
 
 .. tip::

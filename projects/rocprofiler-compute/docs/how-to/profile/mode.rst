@@ -27,11 +27,7 @@ Profiling with ROCm Compute Profiler provides the following benefits:
 * :ref:`Profiling output format <profiling-output-format>`: ROCm Compute Profiler can adjust the
   output format of underlying rocprofiler-sdk which changes the output format of raw performance
   counter data in the workload folder created during profiling. Supported output formats are
-  ``csv`` and ``rocpd``. The default output format is ``csv``.
-
-.. note::
-
-   The default output format will be changed to ``rocpd`` in a future release of ROCm Compute Profiler.
+  ``csv`` and ``rocpd``. The default output format is ``rocpd``.
 
 * :ref:`Filtering <filtering>`: Apply runtime filters to speed up the profiling
   process.
@@ -224,8 +220,7 @@ an Instinct MI210 vs an Instinct MI250.
 .. code-block:: shell-session
 
    $ ls workloads/vcopy/MI325X/
-   total 5164
-   -rw-r--r-- 1 auser agroup 4851128 Mar 21 23:49 empirRoof_gpu-0_FP32.html
+   total 408
    -rw-r--r-- 1 auser agroup   55771 Mar 21 23:49 log.txt
    drwxr-xr-x 1 auser agroup    4096 Mar 21 23:47 perfmon
    -rw-r--r-- 1 auser agroup  348790 Mar 21 23:48 pmc_perf.csv
