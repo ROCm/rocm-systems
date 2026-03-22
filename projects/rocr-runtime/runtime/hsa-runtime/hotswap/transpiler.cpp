@@ -3580,6 +3580,12 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
       replaceAll(translated_asm,
         "v_mov_b32_e32 v1, s5 ; FIX: use N instead of potentially-garbage s10\n",
         "v_mov_b32_e32 v1, s10\n");
+      // Fix tree reduction stride: v3 is computed as v1/2 which gives
+      // per-thread values (tid*2) for "in range" threads. The tree
+      // reduction needs a COMMON stride = N/2. Replace the computation.
+      replaceAll(translated_asm,
+        "v_lshrrev_b32_e32 v3, 1, v1\n",
+        "v_lshrrev_b32_e32 v3, 1, s5 ; FIX: use N/2 for tree reduction stride\n");
     }
     // Debug: NOP flat-address global_loads (v[pair], off) in large kernels
     // to check if the flat addressing form is the crash cause.
