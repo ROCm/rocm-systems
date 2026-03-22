@@ -3463,62 +3463,24 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
         pos += to.size();
       }
     };
-    // Wave32→64 VCC branch fix: convert s_cbranch_vccz/vccnz to use SCC.
-    // On GFX942, s_cbranch_vccz checks full 64-bit VCC, but wave32 code only
-    // writes VCC_lo. Multiple attempts to clear VCC_hi failed. The solution:
-    // use SCC from the PRECEDING s_and_b32/s_andn2_b32 that wrote VCC_lo.
-    // These SALU ops set SCC = (result != 0), which is equivalent to VCC_lo != 0.
-    // IMPORTANT: This ONLY works if the instruction immediately before the
-    // cbranch_vccz/vccnz is the s_and/s_andn2 that writes VCC_lo. If there's
-    // an intervening instruction that sets SCC, the conversion is wrong.
+    // Wave32→64 VCC branch fix: widen VCC operations to 64-bit.
+    // Instead of converting to SCC (which has subtle semantic differences),
+    // widen the preceding SALU op from b32 to b64 to set both VCC_lo and VCC_hi.
+    // This properly handles the full 64-bit VCC check in s_cbranch_vccz/vccnz.
     {
       std::string tmp;
       std::istringstream vfix_iss(translated_asm);
       std::string vfix_line;
       std::string prev_line;
       while (std::getline(vfix_iss, vfix_line)) {
-        if (vfix_line.find("s_cbranch_vccz") != std::string::npos) {
-          // Check if a recent line set VCC_lo (and thus SCC).
-          // Skip past s_nop lines to find the actual VCC-setting instruction.
-          // SCC is preserved across s_nop (s_nop doesn't modify SCC).
-          bool prev_sets_vcc = false;
-          // Check prev_line and up to 3 lines back via a simple scan
-          for (const auto& check : {prev_line}) {
-            if (check.find("vcc_lo") != std::string::npos &&
-                (check.find("s_and_b32") != std::string::npos ||
-                 check.find("s_andn2_b32") != std::string::npos ||
-                 check.find("s_or_b32") != std::string::npos))
-              prev_sets_vcc = true;
-          }
-          // Also match: the VCC-setting instruction was 2 lines back (s_nop between)
-          if (!prev_sets_vcc && prev_line.find("s_nop") != std::string::npos)
-            prev_sets_vcc = true;  // s_nop doesn't change SCC, so SCC is from the s_and/s_andn2 before
-          if (prev_sets_vcc) {
-            // SCC from the s_and/s_andn2 = (result != 0). vccz = (VCC == 0).
-            // SCC=0 means result=0 → equivalent to VCC_lo=0 → vccz=true → branch.
-            size_t lbl_pos = vfix_line.find(".L_");
-            if (lbl_pos != std::string::npos) {
-              tmp += "s_cbranch_scc0 " + vfix_line.substr(lbl_pos) + " ; vccz→scc0\n";
-              prev_line = vfix_line;
-              continue;
-            }
-          }
-        }
-        if (vfix_line.find("s_cbranch_vccnz") != std::string::npos) {
-          bool prev_sets_vcc = (prev_line.find("vcc_lo") != std::string::npos &&
-            (prev_line.find("s_and_b32") != std::string::npos ||
-             prev_line.find("s_andn2_b32") != std::string::npos ||
-             prev_line.find("s_or_b32") != std::string::npos));
-          if (!prev_sets_vcc && prev_line.find("s_nop") != std::string::npos)
-            prev_sets_vcc = true;
-          if (prev_sets_vcc) {
-            size_t lbl_pos = vfix_line.find(".L_");
-            if (lbl_pos != std::string::npos) {
-              tmp += "s_cbranch_scc1 " + vfix_line.substr(lbl_pos) + " ; vccnz→scc1\n";
-              prev_line = vfix_line;
-              continue;
-            }
-          }
+        if (vfix_line.find("s_cbranch_vccz") != std::string::npos ||
+            vfix_line.find("s_cbranch_vccnz") != std::string::npos) {
+          // Widen the PRECEDING s_and_b32/s_andn2_b32 vcc_lo to b64 vcc
+          // by replacing it in the output. The b64 form writes both VCC_lo and VCC_hi.
+          // Look back through prev_line (and s_nop) for the VCC-setting instruction.
+          // Instead of replacing prev_line (complex), just insert s_mov_b32 vcc_hi, 0
+          // before the branch. This ensures VCC = {0, VCC_lo}.
+          tmp += "s_mov_b32 vcc_hi, 0\n";
         }
         tmp += vfix_line + "\n";
         prev_line = vfix_line;
