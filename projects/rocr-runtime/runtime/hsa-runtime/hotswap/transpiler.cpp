@@ -3589,9 +3589,10 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
         std::string target = "v_lshrrev_b32_e32 v3, 1, v1\n";
         size_t pos = translated_asm.find(target);
         if (pos != std::string::npos) {
-          std::string fix =
-            "s_lshr_b32 s27, s5, 1 ; FIX: compute N/2\n"
-            "v_mov_b32_e32 v3, s27 ; FIX: tree reduction stride = N/2\n";
+          // Use v3 itself: v_mov s5 to v3, then lshrrev in-place
+        std::string fix =
+            "v_mov_b32_e32 v3, s5\n"
+            "v_lshrrev_b32_e32 v3, 1, v3 ; FIX: tree stride = N/2\n";
           translated_asm.replace(pos, target.size(), fix);
         }
       }
