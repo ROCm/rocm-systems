@@ -3545,33 +3545,9 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
         ".L_br28:\n"
         "s_cmp_eq_u32 s8, 0\n"
         "s_cbranch_scc1 .L_br25 ; redundant remainder guard\n");
-      // Fix: when D >= N, the "out of range" block that sets s10=blockSize
-      // is skipped. The find-max and softmax reduction use s10 as stride.
-      // Fix: load s10 = blockSize at .L_br11 (the merge point), which runs
-      // regardless of which exec path was taken.
-      {
-        std::string ka_pair = "s[30:31]";
-        size_t ka_pos = translated_asm.find("; save kernarg ptr lo");
-        if (ka_pos != std::string::npos) {
-          size_t s_pos = translated_asm.rfind("s_mov_b32 s", ka_pos);
-          if (s_pos != std::string::npos) {
-            size_t n_start = s_pos + 11;
-            size_t n_end = translated_asm.find(',', n_start);
-            int lo = std::stoi(translated_asm.substr(n_start, n_end - n_start));
-            ka_pair = "s[" + std::to_string(lo) + ":" + std::to_string(lo+1) + "]";
-          }
-        }
-        replaceAll(translated_asm,
-          ".L_br11:\n",
-          ".L_br11:\n"
-          "s_load_dword s10, " + ka_pair + ", 0x3c ; ensure s10=blockSize\n"
-          "s_waitcnt lgkmcnt(0)\n"
-          "s_and_b32 s10, s10, 0xffff\n");
-      }
-      // TODO: fix tree reduction stride for find-max
-      // The FIRST v_lshrrev v3, 1, v1 gives per-thread stride when D>=N.
-      // Need v3 = min(N, blockSize)/2 but can't use replaceAll (breaks multihead).
-      // Needs kernel-specific targeting.
+      // TODO: fix s10 (blockSize) and tree reduction stride for find-max.
+      // These are needed for correct softmax in the output section but
+      // require kernel-specific targeting (multihead has different layout).
     }
     // Debug: NOP flat-address global_loads (v[pair], off) in large kernels
     // to check if the flat addressing form is the crash cause.
