@@ -9,6 +9,7 @@ Use this tree for **consistent AI-assisted changes** across tools (Cursor, Copil
 ├── README.md                 # This file — start here
 ├── rules/                    # Global constraints
 │   ├── core.md
+│   ├── security.md           # Prompt injection / tools / MCP risk
 │   ├── anti_patterns.md
 │   └── profiling_infra.md
 ├── standards/                # Coding + build references
@@ -29,7 +30,12 @@ Use this tree for **consistent AI-assisted changes** across tools (Cursor, Copil
 ├── review/
 │   └── checklist.md          # AI-aware code review
 └── harness/
-    └── README.md             # Harness design + how to extend
+    ├── README.md             # Harness design + validation
+    ├── multi_model.md        # Four layers for every AI product
+    ├── skill_taxonomy.md     # Category IDs + skill mapping
+    ├── capabilities.md       # Skill tree (diagram)
+    ├── future.md             # Reserved: DAG, MCP, subagents
+    └── tools-policy.md       # Bash / git / build (shared)
 scripts/
 └── ai_dev_harness.py         # Layout / skill template checks
 docs/
@@ -41,6 +47,13 @@ AGENTS.md                     # Codex, OpenCode, other agents → points here
 CLAUDE.md                     # Claude Code; OpenCode fallback → points here
 .cursor/rules/
 └── rocprofiler-compute-ai.mdc # Cursor → points here
+.claude/                        # Claude Code: hooks + rule stub (shared docs in .ai/harness/)
+├── README.md
+├── settings.json
+├── capabilities.md           # stub → .ai/harness/capabilities.md
+├── tools-policy.md           # stub → .ai/harness/tools-policy.md
+├── rules/claude-harness.md
+└── hooks/bash_guard.py
 ```
 
 ## How to use
@@ -53,8 +66,8 @@ CLAUDE.md                     # Claude Code; OpenCode fallback → points here
 | [prompts/](prompts/) | Pasteable prompt prefix |
 | [review/](review/) | PR / review checklist |
 
-**Workflow:** read `rules/core.md` → paste or follow `prompts/default.md` → open the skill from `skills/index.md` → before PR use `review/checklist.md`.
+**Workflow:** read `rules/core.md` → paste or follow `prompts/default.md` → open the skill from `skills/index.md` (see `harness/capabilities.md`) → before PR use `review/checklist.md`.
 
-**Harness:** [harness/README.md](harness/README.md) — validates layout and skill structure (`python3 scripts/ai_dev_harness.py`); also runs via pre-commit.
+**Harness:** [harness/multi_model.md](harness/multi_model.md) (all models) · [harness/README.md](harness/README.md) (validation via `python3 scripts/ai_dev_harness.py`, pre-commit).
 
 **Humans:** [docs/AI_GUIDE.md](../docs/AI_GUIDE.md) · [CONTRIBUTING.md](../CONTRIBUTING.md)

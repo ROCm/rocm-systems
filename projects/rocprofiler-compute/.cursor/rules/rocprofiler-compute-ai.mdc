@@ -1,18 +1,24 @@
 ---
-description: rocprofiler-compute — follow .ai rules, standards, and skills for all AI edits
+description: rocprofiler-compute — follow .ai harness for all AI edits (any model)
 alwaysApply: true
 ---
 
 # rocprofiler-compute (AI)
 
-This project is **rocprofiler-compute** under `projects/rocprofiler-compute` in rocm-systems.
+This project is **rocprofiler-compute** under `projects/rocprofiler-compute` in rocm-systems. The harness is **multi-model**; see [`.ai/harness/multi_model.md`](../../.ai/harness/multi_model.md).
+
+## Four layers (same as Codex / Claude / Copilot)
+
+1. **Context** — [`.ai/rules/core.md`](../../.ai/rules/core.md) + optional [`AGENTS.md`](../../AGENTS.md) / [`CLAUDE.md`](../../CLAUDE.md).
+2. **Skills** — One playbook from [`.ai/skills/index.md`](../../.ai/skills/index.md); navigate with [`.ai/harness/capabilities.md`](../../.ai/harness/capabilities.md).
+3. **Tools** — [`.ai/harness/tools-policy.md`](../../.ai/harness/tools-policy.md) for bash, git, pytest, CMake.
+4. **Hooks** — Run pre-commit / `python3 scripts/ai_dev_harness.py` before push when possible.
 
 ## Required
 
-1. **Rules** — Read and follow `.ai/rules/core.md`. Also `.ai/rules/anti_patterns.md` and, for traces/metrics/roofline, `.ai/rules/profiling_infra.md`.
-2. **Task playbook** — Choose **one** skill from `.ai/skills/index.md` and follow that file.
-3. **Standards** — Apply `.ai/standards/python.md`, `cpp.md`, or `cmake.md` for touched languages.
-4. **Scope** — Small, single-purpose diffs; no new dependencies unless explicitly requested and approved.
+- **Rules** — `.ai/rules/core.md`, `.ai/rules/security.md`, `.ai/rules/anti_patterns.md`, and `.ai/rules/profiling_infra.md` when touching traces/metrics/roofline.
+- **Standards** — `.ai/standards/python.md`, `cpp.md`, or `cmake.md` for touched languages.
+- **Scope** — Small, single-purpose diffs; no new dependencies unless explicitly requested and approved.
 
 ## Verify
 
@@ -21,6 +27,6 @@ This project is **rocprofiler-compute** under `projects/rocprofiler-compute` in 
 
 ## If unclear
 
-Ask instead of guessing (ROCm APIs, trace formats, counter names). Use `.ai/prompts/default.md` as the user-facing prefix when helpful.
+Ask instead of guessing (ROCm APIs, trace formats, counter names). Use `.ai/prompts/default.md` when helpful.
 
 Full map: `.ai/README.md` and `docs/AI_GUIDE.md`.

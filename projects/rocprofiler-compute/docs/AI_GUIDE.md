@@ -6,7 +6,7 @@ This project uses shared **rules, standards, skills, and review checklists** so 
 
 | Location | Contents |
 |----------|----------|
-| [`.ai/`](../.ai/README.md) | Rules, standards, skills, prompts, review checklist (canonical) |
+| [`.ai/`](../.ai/README.md) | Rules (incl. [security](../.ai/rules/security.md)), standards, skills, prompts, review checklist (canonical) |
 | [`CONTRIBUTING.md`](../CONTRIBUTING.md) | Human workflow, experimental CLI, pre-commit |
 | [`pyproject.toml`](../pyproject.toml) | Ruff and pytest configuration |
 
@@ -21,14 +21,28 @@ This project uses shared **rules, standards, skills, and review checklists** so 
 | OpenCode | [`AGENTS.md`](../AGENTS.md) first; [`CLAUDE.md`](../CLAUDE.md) if you rely on Claude-style discovery (see [OpenCode rules](https://open-code.ai/docs/en/rules)) |
 | Other agents | [`AGENTS.md`](../AGENTS.md) |
 
+### Multi-model harness (Context → Skills → Tools → Hooks)
+
+All products share the same **four layers**. **Canonical** skills tree and tools policy: **`.ai/harness/`** (not Claude-only).
+
+| Layer | Shared (every model) | Claude-only extra |
+|-------|----------------------|-------------------|
+| Context | Tool’s brain file (table above) + [`.ai/rules/core.md`](../.ai/rules/core.md) + [`.ai/rules/security.md`](../.ai/rules/security.md) | [`CLAUDE.md`](../CLAUDE.md) |
+| Skills | [`.ai/skills/`](../.ai/skills/), [`.ai/harness/capabilities.md`](../.ai/harness/capabilities.md) | — |
+| Tools | [`.ai/harness/tools-policy.md`](../.ai/harness/tools-policy.md) | — |
+| Hooks | pre-commit + [`scripts/ai_dev_harness.py`](../scripts/ai_dev_harness.py) | [`.claude/settings.json`](../.claude/settings.json), [`bash_guard.py`](../.claude/hooks/bash_guard.py) |
+
+**Map (which file each tool reads):** [`.ai/harness/multi_model.md`](../.ai/harness/multi_model.md). Claude wiring: [`.claude/README.md`](../.claude/README.md). Skill ecosystem: arXiv [2603.02176](https://arxiv.org/abs/2603.02176) (AgentSkillOS).
+
 OpenCode can also set extra paths via **`opencode.json`** (`instructions` / project config); optional if `AGENTS.md` is enough.
 
 ## Quick start
 
-1. Open [`.ai/rules/core.md`](../.ai/rules/core.md).
-2. Paste or attach [`.ai/prompts/default.md`](../.ai/prompts/default.md) (or summarize it) in your assistant.
-3. Choose a skill from [`.ai/skills/index.md`](../.ai/skills/index.md).
-4. Before opening a PR, skim [`.ai/review/checklist.md`](../.ai/review/checklist.md) and fill the AI section in the PR template.
+1. Skim [`.ai/harness/multi_model.md`](../.ai/harness/multi_model.md) once to see how your tool maps to the four layers.
+2. Open [`.ai/rules/core.md`](../.ai/rules/core.md) and [`.ai/rules/security.md`](../.ai/rules/security.md).
+3. Paste or attach [`.ai/prompts/default.md`](../.ai/prompts/default.md) (or summarize it) in your assistant.
+4. Choose a skill from [`.ai/skills/index.md`](../.ai/skills/index.md) (use [`.ai/harness/skill_taxonomy.md`](../.ai/harness/skill_taxonomy.md) or [`.ai/harness/capabilities.md`](../.ai/harness/capabilities.md) if needed). Planned **DAG / MCP / subagent** work is sketched in [`.ai/harness/future.md`](../.ai/harness/future.md).
+5. Before opening a PR, skim [`.ai/review/checklist.md`](../.ai/review/checklist.md) and fill the AI section in the PR template.
 
 ## Validation
 

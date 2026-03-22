@@ -1,6 +1,6 @@
 # Skill index
 
-Pick **one** primary skill per task. Read `rules/core.md` first.
+Pick **one** primary skill per task. Read `rules/core.md` first. **Taxonomy (category IDs):** [`.ai/harness/skill_taxonomy.md`](../harness/skill_taxonomy.md).
 
 | Intent | Skill |
 |--------|--------|
@@ -10,4 +10,8 @@ Pick **one** primary skill per task. Read `rules/core.md` first.
 | New CLI behind experimental | [add_experimental_cli.md](add_experimental_cli.md) |
 | SoC / counters / YAML | [update_soc_or_counters.md](update_soc_or_counters.md) |
 | Analyze / roofline paths | [analyze_or_roofline.md](analyze_or_roofline.md) |
+| Execution graph / trace / CSV semantics | [execution_graph_trace.md](execution_graph_trace.md) |
+| Performance (hot path, memory) | [optimize_performance.md](optimize_performance.md) |
 | C++ tool or CMake | [native_or_cmake.md](native_or_cmake.md) |
+
+**Advanced (not implemented):** DAG orchestration, MCP standardization, subagent roles — templates in [`.ai/harness/future.md`](../harness/future.md).

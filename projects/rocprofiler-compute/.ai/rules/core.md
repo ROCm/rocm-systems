@@ -6,3 +6,4 @@
 4. **Verify** — Changes must be verifiable locally: `ruff check` / `ruff format` (see `pyproject.toml`), and `pytest` for Python; CMake build for native changes.
 5. **Truth** — Do not invent APIs, file paths, or ROCm/GPU behavior. If unsure, ask or leave a TODO with what to confirm.
 6. **Monorepo paths** — This project lives under `projects/rocprofiler-compute` in rocm-systems. Pre-commit hooks may assume the super-repo root; do not “fix” hook paths without understanding CONTRIBUTING setup.
+7. **Security** — Follow [`.ai/rules/security.md`](security.md): no blind shell execution, validate external/untrusted input, keep file and MCP scope minimal.

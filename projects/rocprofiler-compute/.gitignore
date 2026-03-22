@@ -2,6 +2,9 @@
 __pycache__
 .cline_storage
 
+# Claude Code local overrides (project settings are committed under .claude/)
+.claude/settings.local.json
+
 # edit files
 *~
 
