@@ -3565,6 +3565,84 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
           "v_mov_b32_e32 v1, s10 ; FIX: v1=blockSize for exp/norm loops\n");
       }
     }
+    // Debug: HSA_HOTSWAP_LDS_DUMP=1 injects LDS→global memory dumps at key points.
+    // Thread 0 reads LDS values and writes them to the output buffer (s[2:3] = dO).
+    // The output buffer will contain debug values instead of actual attention results.
+    // Dump layout: dO[0..3] = LDS[0..3] after outer loop (scaled dot products)
+    //              dO[4..7] = LDS[0..3] after find-max + exp (exp values)
+    //              dO[8]    = max value from find-max
+    //              dO[9..12] = LDS[0..3] after normalize (softmax weights)
+    if (std::getenv("HSA_HOTSWAP_LDS_DUMP") && stats->total_instructions > 400 &&
+        stats->total_instructions < 560 &&
+        translated_asm.find(".L_br28:") != std::string::npos) {
+      // Helper: generate code for thread 0 to dump N LDS dwords to global memory
+      // Uses v26 as temp. s[2:3] = dO pointer (loaded at .L_br3).
+      // global_offset = byte offset into dO.
+      auto makeDump = [](int n_dwords, int global_byte_offset) -> std::string {
+        std::string code;
+        code += "s_mov_b32 exec_lo, 1 ; only thread 0\n";
+        code += "s_mov_b32 exec_hi, 0\n";
+        for (int i = 0; i < n_dwords; i++) {
+          code += "v_mov_b32_e32 v26, " + std::to_string(i * 4) + "\n";
+          code += "ds_read_b32 v26, v26\n";
+          code += "s_waitcnt lgkmcnt(0)\n";
+          code += "v_mov_b32_e32 v27, " + std::to_string(global_byte_offset + i * 4) + "\n";
+          code += "global_store_dword v27, v26, s[2:3]\n";
+        }
+        code += "s_waitcnt vmcnt(0)\n";
+        // Restore exec (will be restored properly by subsequent code)
+        return code;
+      };
+
+      // Dump 1: after outer loop, at .L_br3 entry (before find-max)
+      // The s_load at .L_br3 loads s[2:3] = dO. Wait for it, then dump.
+      {
+        // Insert after "s_waitcnt vmcnt(0) lgkmcnt(0) expcnt(0)" that follows .L_br3's s_load
+        std::string target = ".L_br3:\ns_load_dwordx2 s[2:3], s[0:1], 0x0\n"
+                             "s_waitcnt vmcnt(0) lgkmcnt(0) expcnt(0)\n";
+        size_t pos = translated_asm.find(target);
+        if (pos != std::string::npos) {
+          size_t insert_pos = pos + target.size();
+          std::string dump = "; === LDS DUMP 1: dot products ===\n"
+            "s_mov_b32 s27, exec_lo ; save exec\n"
+            + makeDump(4, 0)  // dump LDS[0..15] to dO[0..15]
+            + "s_mov_b32 exec_lo, s27 ; restore exec\n"
+            "s_mov_b32 exec_hi, 0\n"
+            "; === END DUMP 1 ===\n";
+          translated_asm.insert(insert_pos, dump);
+        }
+      }
+
+      // Dump 2: after exp (.L_br17 entry - after exp loop, before sum write)
+      {
+        std::string target = ".L_br17:\n";
+        size_t pos = translated_asm.find(target);
+        if (pos != std::string::npos) {
+          std::string dump = "; === LDS DUMP 2: exp values ===\n"
+            "s_mov_b32 s27, exec_lo\n"
+            + makeDump(4, 16)  // dump to dO[16..31]
+            + "s_mov_b32 exec_lo, s27\n"
+            "s_mov_b32 exec_hi, 0\n"
+            "; === END DUMP 2 ===\n";
+          translated_asm.insert(pos + target.size(), dump);
+        }
+      }
+
+      // Dump 3: after normalize (.L_br22 entry)
+      {
+        std::string target = ".L_br22:\n";
+        size_t pos = translated_asm.find(target);
+        if (pos != std::string::npos) {
+          std::string dump = "; === LDS DUMP 3: softmax weights ===\n"
+            "s_mov_b32 s27, exec_lo\n"
+            + makeDump(4, 32)  // dump to dO[32..47]
+            + "s_mov_b32 exec_lo, s27\n"
+            "s_mov_b32 exec_hi, 0\n"
+            "; === END DUMP 3 ===\n";
+          translated_asm.insert(pos + target.size(), dump);
+        }
+      }
+    }
     // Debug: NOP flat-address global_loads (v[pair], off) in large kernels
     // to check if the flat addressing form is the crash cause.
     if (std::getenv("HSA_HOTSWAP_NOP_FLAT") && stats->total_instructions > 400) {
