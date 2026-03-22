@@ -3581,6 +3581,35 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
           translated_asm.replace(pos, target.size(), fix);
         }
       }
+      // Fix 5: widen exec to N threads for the softmax computation.
+      // The v_cmpx_gt_i32 s6, v0 masks exec to D threads (0..D-1).
+      // But the softmax needs to process ALL N dot products in LDS[0..N-1].
+      // When D < N: threads D..N-1 are masked → their LDS values stay as raw
+      // dot products (not exp values) → wrong sum → zeros.
+      // Fix: after v_cmpx, widen exec using s5 (= N at this point).
+      // s0 = pre-v_cmpx exec (all threads). v_cmpx set exec to D threads.
+      // Insert v_cmp_gt_u32 to get N-thread mask, OR into exec.
+      // Then before inner product (.L_br24): the code already has its own exec management.
+      if (stats->total_instructions < 560) {
+        // Find the v_cmpx in the output section (after .L_br22)
+        size_t cmpx_pos = translated_asm.find("v_cmpx_gt_i32 s6, v0\n");
+        if (cmpx_pos != std::string::npos) {
+          // Find the exec_hi clear that follows
+          std::string after_cmpx = "s_mov_b32 exec_hi, 0\n";
+          size_t hi_pos = translated_asm.find(after_cmpx, cmpx_pos);
+          if (hi_pos != std::string::npos) {
+            size_t insert_pos = hi_pos + after_cmpx.size();
+            // Widen exec to include threads 0..N-1
+            // Use v_cmp to compute N-thread mask, then OR into exec
+            std::string fix =
+              "; FIX5: widen exec for softmax (need N threads, not just D)\n"
+              "v_cmp_gt_u32_e64 s[0:1], s5, v0 ; s0 = threads where N > tid\n"
+              "s_or_b32 exec_lo, exec_lo, s0   ; exec |= N-thread mask\n"
+              "s_mov_b32 exec_hi, 0\n";
+            translated_asm.insert(insert_pos, fix);
+          }
+        }
+      }
     }
     // Debug: HSA_HOTSWAP_LDS_DUMP=1 injects LDS→global memory dumps at key points.
     // Thread 0 reads LDS values and writes them to the output buffer (s[2:3] = dO).
