@@ -3545,9 +3545,35 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
         ".L_br28:\n"
         "s_cmp_eq_u32 s8, 0\n"
         "s_cbranch_scc1 .L_br25 ; redundant remainder guard\n");
-      // TODO: fix s10 (blockSize) and tree reduction stride for find-max.
-      // These are needed for correct softmax in the output section but
-      // require kernel-specific targeting (multihead has different layout).
+      // Fix: hoist hidden arg load (s10 = blockSize) before the exec-masked
+      // output section. On GFX12, the "out of range" block always runs (SALU
+      // ignores exec). On GFX9 wave64, the s_cbranch_execz skips the entire
+      // block when D >= N (all threads are "in range"). Hoisting the load
+      // ensures s10 is set regardless of the branch.
+      // Target: insert before "s_cbranch_execz .L_br11" in the output section.
+      // Use the unique pattern "s_xor_b32 s0, exec_lo, s1\ns_cbranch_execz .L_br11"
+      {
+        std::string ka_pair = "s[30:31]";
+        size_t ka_pos = translated_asm.find("; save kernarg ptr lo");
+        if (ka_pos != std::string::npos) {
+          size_t s_pos = translated_asm.rfind("s_mov_b32 s", ka_pos);
+          if (s_pos != std::string::npos) {
+            size_t n_start = s_pos + 11;
+            size_t n_end = translated_asm.find(',', n_start);
+            int lo = std::stoi(translated_asm.substr(n_start, n_end - n_start));
+            ka_pair = "s[" + std::to_string(lo) + ":" + std::to_string(lo+1) + "]";
+          }
+        }
+        std::string target = "s_xor_b32 s0, exec_lo, s1\n";
+        size_t xor_pos = translated_asm.find(target);
+        if (xor_pos != std::string::npos) {
+          std::string hoist =
+            "s_load_dword s10, " + ka_pair + ", 0x3c\n"
+            "s_waitcnt lgkmcnt(0)\n"
+            "s_and_b32 s10, s10, 0xffff ; hoist: s10 = blockSize\n";
+          translated_asm.insert(xor_pos, hoist);
+        }
+      }
     }
     // Debug: NOP flat-address global_loads (v[pair], off) in large kernels
     // to check if the flat addressing form is the crash cause.
