@@ -3597,6 +3597,21 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
           translated_asm.insert(xor_pos, hoist);
         }
       }
+      // Fix 3: set v1 = s10 (blockSize) before the exp loop (.L_br14) and
+      // normalize loop (.L_br23). v1 is used as the iteration stride but has
+      // per-thread value (tid*4) for "in range" threads. For thread 0: v1=0
+      // → infinite loop. Setting v1=blockSize gives correct stride for ALL threads.
+      // Insert at .L_br14 (before exp loop) and before .L_br23 (normalize loop).
+      {
+        auto replaceFirst = [](std::string& s, const std::string& from, const std::string& to) {
+          size_t pos = s.find(from);
+          if (pos != std::string::npos) s.replace(pos, from.size(), to);
+        };
+        replaceFirst(translated_asm,
+          ".L_br14:\n",
+          ".L_br14:\n"
+          "v_mov_b32_e32 v1, s10 ; FIX: v1=blockSize for exp/norm loops\n");
+      }
     }
     // Debug: NOP flat-address global_loads (v[pair], off) in large kernels
     // to check if the flat addressing form is the crash cause.
