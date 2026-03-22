@@ -1158,23 +1158,19 @@ Panel Config:
     L2 Back Pressure Indicator: >-
       Percentage of L2 busy time the input buffer was stalled.
       A rate >= 10% indicates L2 is backpressuring L1 (GL1/GL2 potential bottleneck).
-      Reference: mi300_gpu_bandwidth.pdf back pressure threshold guidance.
       Equation: (SUM(TCC_IB_STALL_sum) / SUM(TCC_BUSY_sum)) * 100
     L2 Memory BW Bound - Read Credit Pressure: >-
       Percentage of L2 busy time read requests were stalled due to HBM credit exhaustion.
       High values (>10%) combined with high memory utilization indicate memory read bandwidth bound.
-      Reference: mi300_gpu_bandwidth.pdf TCC_TAG_STALL breakdown.
       Equation: (SUM(TCC_EA0_RDREQ_DRAM_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum)) * 100
     L2 Memory BW Bound - Write Credit Pressure: >-
       Percentage of L2 busy time write requests were stalled due to HBM credit exhaustion.
       High values (>10%) combined with high memory utilization indicate memory write bandwidth bound.
-      Reference: mi300_gpu_bandwidth.pdf TCC_TAG_STALL breakdown.
       Equation: (SUM(TCC_EA0_WRREQ_DRAM_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum)) * 100
     L2 Memory BW Bound - Combined Credit Pressure: >-
       Combined HBM read and write credit stall percentage.
       This is the primary memory bandwidth bound indicator. High values (>10%) with
       high memory utilization (>80%) strongly indicate memory bandwidth is the bottleneck.
-      Reference: mi300_gpu_bandwidth.pdf - High BW + High TCC_TAG_STALL = memory BW bound.
       Equation: (SUM(TCC_EA0_RDREQ_DRAM_CREDIT_STALL_sum + TCC_EA0_WRREQ_DRAM_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum)) * 100
     L2 Internal Resource Pressure - Latency FIFO: >-
       Percentage of L2 busy time the latency FIFO was full.
