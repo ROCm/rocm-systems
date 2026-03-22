@@ -3543,14 +3543,43 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
         ".L_br28:\n"
         "s_cmp_eq_u32 s8, 0\n"
         "s_cbranch_scc1 .L_br25 ; redundant remainder guard\n");
-      // Fix find-max stride: when D >= N, the "out of range" block that sets
-      // s10 = blockSize is skipped, leaving s10 as garbage. The find-max
-      // uses v1 (= s10) as the column count for stride computation.
-      // Fix: after "v_mov_b32_e32 v1, s10" at .L_br11, insert
-      // "v_min_u32 v1, s5, v1" to cap v1 at N (s5 = N at this point).
+      // Fix: when D >= N, the "out of range" block that sets s10 = blockSize
+      // (from hidden arg) is skipped because exec has no out-of-range threads.
+      // s10 retains garbage. The find-max iterative loop (.L_br13) uses s10 as
+      // the LDS stride, causing reads from wrong locations.
+      // Fix: load s10 BEFORE the exec-masked block. Insert the hidden arg load
+      // right after the v_cmpx (which masks exec to D threads) but BEFORE the
+      // in-range/out-of-range split.
+      // The load: s_load_dword sN, s[saved_kernarg]+0x3c → s_and sN, sN, 0xffff → s10 = blockSize
+      // Since s10 will be overwritten by the "out of range" block if it runs,
+      // the unconditional load only matters when the block is skipped.
+      {
+        size_t split_pos = translated_asm.find("s_cbranch_execz .L_br11");
+        if (split_pos != std::string::npos) {
+          // Find the kernarg save pair from earlier
+          std::string ka_pair = "s[30:31]";
+          size_t ka_pos = translated_asm.find("; save kernarg ptr lo");
+          if (ka_pos != std::string::npos) {
+            size_t s_pos = translated_asm.rfind("s_mov_b32 s", ka_pos);
+            if (s_pos != std::string::npos) {
+              size_t n_start = s_pos + 11;
+              size_t n_end = translated_asm.find(',', n_start);
+              int lo = std::stoi(translated_asm.substr(n_start, n_end - n_start));
+              ka_pair = "s[" + std::to_string(lo) + ":" + std::to_string(lo+1) + "]";
+            }
+          }
+          // Insert unconditional hidden arg load before the split
+          std::string fix =
+            "s_load_dword s10, " + ka_pair + ", 0x3c ; unconditional blockSize load\n"
+            "s_waitcnt lgkmcnt(0)\n"
+            "s_and_b32 s10, s10, 0xffff\n";
+          translated_asm.insert(split_pos, fix);
+        }
+      }
+      // Revert v1 fix (was wrong - v1 has dual purpose)
       replaceAll(translated_asm,
-        "v_mov_b32_e32 v1, s10\n",
-        "v_mov_b32_e32 v1, s5 ; FIX: use N instead of potentially-garbage s10\n");
+        "v_mov_b32_e32 v1, s5 ; FIX: use N instead of potentially-garbage s10\n",
+        "v_mov_b32_e32 v1, s10\n");
     }
     // Debug: NOP flat-address global_loads (v[pair], off) in large kernels
     // to check if the flat addressing form is the crash cause.
