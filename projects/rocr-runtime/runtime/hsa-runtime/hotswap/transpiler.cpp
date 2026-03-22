@@ -3575,7 +3575,21 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
     if (std::getenv("HSA_HOTSWAP_LDS_DUMP") && stats->total_instructions > 400 &&
         stats->total_instructions < 560 &&
         translated_asm.find(".L_br28:") != std::string::npos) {
-      // (v1 dump removed — s[2:3] not valid during outer loop)
+      // Fix: s3 is overwritten by v_readfirstlane (float(D)) during sqrt computation.
+      // The .L_br9 store uses s3 as the thread-0 exec mask. With s3 = float(D),
+      // s_and exec, exec, s3 produces exec=0 → store is SKIPPED → dot products
+      // never written to LDS[0..N-1].
+      // Fix: insert s_mov_b32 s3, 1 (thread-0 mask) right before the outer loop.
+      {
+        auto replaceFirst = [](std::string& s, const std::string& from, const std::string& to) {
+          size_t pos = s.find(from);
+          if (pos != std::string::npos) s.replace(pos, from.size(), to);
+        };
+        replaceFirst(translated_asm,
+          "s_branch .L_br4\n",
+          "s_mov_b32 s3, 1 ; FIX: restore thread-0 mask for .L_br9 store\n"
+          "s_branch .L_br4\n");
+      }
       // Minimal dump: just LDS[0] and LDS[4] (the two dot products) at .L_br3 entry.
       // Writes to dO[0] and dO[4]. Only 10 instructions = ~40 bytes.
       {
