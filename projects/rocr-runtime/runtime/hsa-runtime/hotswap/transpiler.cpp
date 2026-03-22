@@ -3559,10 +3559,28 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
           size_t pos = s.find(from);
           if (pos != std::string::npos) s.replace(pos, from.size(), to);
         };
-        replaceFirst(translated_asm,
-          ".L_br14:\n",
-          ".L_br14:\n"
-          "v_mov_b32_e32 v1, s10 ; FIX: v1=blockSize for exp/norm loops\n");
+        // s10 is clobbered by the find-max tree (saves exec to s10).
+        // Reload s10 from the hidden arg, then set v1.
+        {
+          std::string ka_pair = "s[30:31]";
+          size_t ka_pos = translated_asm.find("; save kernarg ptr lo");
+          if (ka_pos != std::string::npos) {
+            size_t s_pos = translated_asm.rfind("s_mov_b32 s", ka_pos);
+            if (s_pos != std::string::npos) {
+              size_t n_start = s_pos + 11;
+              size_t n_end = translated_asm.find(',', n_start);
+              int lo = std::stoi(translated_asm.substr(n_start, n_end - n_start));
+              ka_pair = "s[" + std::to_string(lo) + ":" + std::to_string(lo+1) + "]";
+            }
+          }
+          replaceFirst(translated_asm,
+            ".L_br14:\n",
+            ".L_br14:\n"
+            "s_load_dword s10, " + ka_pair + ", 0x3c ; reload blockSize (clobbered by tree)\n"
+            "s_waitcnt lgkmcnt(0)\n"
+            "s_and_b32 s10, s10, 0xffff\n"
+            "v_mov_b32_e32 v1, s10 ; FIX: v1=blockSize for exp/norm/store loops\n");
+        }
       }
       // Fix 4: s3 (thread-0 mask) and v1 (1/sqrt(D) scale factor).
       // s3 is overwritten by v_readfirstlane (float(D)) during sqrt computation.
