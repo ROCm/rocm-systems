@@ -3543,6 +3543,14 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
         ".L_br28:\n"
         "s_cmp_eq_u32 s8, 0\n"
         "s_cbranch_scc1 .L_br25 ; redundant remainder guard\n");
+      // Fix find-max stride: when D >= N, the "out of range" block that sets
+      // s10 = blockSize is skipped, leaving s10 as garbage. The find-max
+      // uses v1 (= s10) as the column count for stride computation.
+      // Fix: after "v_mov_b32_e32 v1, s10" at .L_br11, insert
+      // "v_min_u32 v1, s5, v1" to cap v1 at N (s5 = N at this point).
+      replaceAll(translated_asm,
+        "v_mov_b32_e32 v1, s10\n",
+        "v_mov_b32_e32 v1, s5 ; FIX: use N instead of potentially-garbage s10\n");
     }
     // Debug: NOP flat-address global_loads (v[pair], off) in large kernels
     // to check if the flat addressing form is the crash cause.
