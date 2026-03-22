@@ -3545,7 +3545,28 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
         ".L_br28:\n"
         "s_cmp_eq_u32 s8, 0\n"
         "s_cbranch_scc1 .L_br25 ; redundant remainder guard\n");
-      // Fix: hoist hidden arg load (s10 = blockSize) before the exec-masked
+      // Fix 1: tree reduction stride. v_lshrrev v3, 1, v1 computes tree
+      // stride from v1 (per-thread LDS offset for "in range" threads).
+      // Need v3 = min(N, blockSize) / 2 (common value for all threads).
+      // Only replace the FIRST occurrence (find-max, after .L_br12 merge).
+      {
+        // Find .L_br12 label and the v_lshrrev after it
+        size_t br12_pos = translated_asm.find(".L_br12:\n");
+        if (br12_pos != std::string::npos) {
+          std::string target = "v_lshrrev_b32_e32 v3, 1, v1\n";
+          size_t lshr_pos = translated_asm.find(target, br12_pos);
+          if (lshr_pos != std::string::npos && lshr_pos - br12_pos < 200) {
+            // Replace with: v3 = min(s5, s10) / 2
+            // s5 = N, s10 = blockSize (both set by this point)
+            std::string fix =
+              "v_mov_b32_e32 v3, s5\n"
+              "v_min_u32 v3, s10, v3\n"
+              "v_lshrrev_b32_e32 v3, 1, v3 ; tree stride = min(N,blockSize)/2\n";
+            translated_asm.replace(lshr_pos, target.size(), fix);
+          }
+        }
+      }
+      // Fix 2: hoist hidden arg load (s10 = blockSize) before the exec-masked
       // output section. On GFX12, the "out of range" block always runs (SALU
       // ignores exec). On GFX9 wave64, the s_cbranch_execz skips the entire
       // block when D >= N (all threads are "in range"). Hoisting the load
