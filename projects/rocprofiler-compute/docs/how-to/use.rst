@@ -19,7 +19,7 @@ The command line profiler launches the target application, calls the
 ROCprofiler-SDK API via the ``rocprofiler-sdk`` library, and collects profile results for
 the specified kernels, dispatches, and hardware components. If not
 specified, ROCm Compute Profiler defaults to collecting all available counters for all
-kernels and dispatches launched by the your executable.
+kernels and dispatches launched by your executable.
 
 To collect the default set of data for all kernels in the target
 application, launch, for example:
