@@ -223,6 +223,8 @@ if(BUILD_TESTS)
       ProxyTests.cpp
       RcclWrapTests.cpp
       TransportTests.cpp
+      graph/RingsTests.cpp
+      graph/TreesTests.cpp
       graph/XmlTests.cpp
       common/main_fixtures.cpp
       common/EnvVars.cpp
