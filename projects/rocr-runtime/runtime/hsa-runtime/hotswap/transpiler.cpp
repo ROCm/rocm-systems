@@ -3575,6 +3575,24 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
     if (std::getenv("HSA_HOTSWAP_LDS_DUMP") && stats->total_instructions > 400 &&
         stats->total_instructions < 560 &&
         translated_asm.find(".L_br28:") != std::string::npos) {
+      // Debug: dump v1 (scale factor) by writing it to dO before .L_br9's multiply
+      // Uses the .L_br9 pattern: v_mul_f32_e32 v3, v1, v3
+      {
+        auto replaceFirst = [](std::string& s, const std::string& from, const std::string& to) {
+          size_t pos = s.find(from);
+          if (pos != std::string::npos) s.replace(pos, from.size(), to);
+        };
+        // Add v1 dump: thread 0 writes v1 to dO[8] (byte offset 8)
+        replaceFirst(translated_asm,
+          "v_mul_f32_e32 v3, v1, v3\n"
+          "ds_write_b32 v4, v3\n",
+          // Write v1 to global memory for debugging, then continue normally
+          "v_mov_b32_e32 v28, 8\n"
+          "global_store_dword v28, v1, s[2:3] ; DBG: dump v1 to dO[8]\n"
+          "s_waitcnt vmcnt(0)\n"
+          "v_mul_f32_e32 v3, v1, v3\n"
+          "ds_write_b32 v4, v3\n");
+      }
       // Minimal dump: just LDS[0] and LDS[4] (the two dot products) at .L_br3 entry.
       // Writes to dO[0] and dO[4]. Only 10 instructions = ~40 bytes.
       {
