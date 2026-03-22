@@ -113,6 +113,12 @@ Examples:
             default='',
             help="Select system-specific MPI args profile from config (e.g. 'ainic', 'thor2')"
         )
+        self.parser.add_argument(
+            '--mpich',
+            action='store_true',
+            default=False,
+            help="Use MPICH syntax (-env) instead of OpenMPI (-x) for passing env vars to mpirun"
+        )
 
     def parse_arguments(self):
         """Parse command-line arguments"""
@@ -144,6 +150,7 @@ Examples:
             print(f"Skip MPI check:    {args.skip_mpi_check}")
             print(f"Stop on rerun fail: {args.stop_on_rerun_failure}")
             print(f"System profile:    {args.system if args.system else 'none (use default MPI args)'}")
+            print(f"MPI implementation: {'mpich' if args.mpich else 'openmpi (default)'}")
             print("="*80)
             print()
 

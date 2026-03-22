@@ -8,7 +8,6 @@ A simple C++ testing framework for multi-process RCCL tests using MPI (Message P
 - [Overview](#overview)
 - [Why Use MPI Testing?](#why-use-mpi-testing)
 - [Quick Start](#quick-start)
-- [System-Specific Configuration (`--system`)](#system-specific-configuration---system)
 - [Core Concepts](#core-concepts)
 - [Per-Rank Logging](#per-rank-logging)
 - [API Reference](#api-reference)
@@ -233,6 +232,18 @@ python3 test_runner.py -c config.json --system <profile_name>
 - When `--system <name>` is passed, `mpi_args[name]` is used for MPI launch args and `system_env_variables[name]` is merged on top of the global `env_variables`.
 - Without `--system`, the runner falls back to a default set of MCA parameters.
 - All three fields are optional. Configs that omit them continue to work unchanged.
+
+### MPICH Support (`--mpich`)
+
+By default the test runner uses OpenMPI syntax (`-x KEY=VALUE`) to pass environment variables to `mpirun`. Pass `--mpich` to switch to MPICH syntax (`-env KEY VALUE`).
+
+```bash
+# OpenMPI (default)
+python3 test_runner.py -c config.json --system <profile_name>
+
+# MPICH
+python3 test_runner.py -c config.json --system <profile_name> --mpich
+```
 
 **Important: Node Validation**
 

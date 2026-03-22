@@ -20,13 +20,19 @@
   "system_env_variables": {
     "alola": {
       "HSA_NO_SCRATCH_RECLAIM": "1",
-      "NCCL_SOCKET_IFNAME": "eth0,eth1"
+      "NCCL_SOCKET_IFNAME": "eth0,eth1",
+      "NCCL_IB_HCA": "mlx_5_5,mlx_5_7,mlx5_2,mlx_5_1,mlx_5_7",
+      "NCCL_NET_FORCE_MERGE": "mlx5_0,mlx5_1;mlx5_5,mlx5_6"
     },
     "ainic": {
-      "NCCL_SOCKET_IFNAME": "eno0"
+      "NCCL_SOCKET_IFNAME": "eno0",
+      "NCCL_IB_HCA": "rdma0,rdma1,rdma2,rdma3",
+      "NCCL_NET_FORCE_MERGE": "rdma0,rdma1;rdma2,rdma3"
     },
     "thor2": {
-      "NCCL_SOCKET_IFNAME": "eno8303"
+      "NCCL_SOCKET_IFNAME": "eno8303",
+      "NCCL_IB_HCA": "bnxt_re0,bnxt_re1,bnxt_re5,bnxt_re6",
+      "NCCL_NET_FORCE_MERGE": "bnxt_re0,bnxt_re1;bnxt_re5,bnxt_re6"
     }
   },
   "build_configuration": {
@@ -50,6 +56,7 @@
       "num_gpus": 1,
       "env_variables": {
         "NCCL_IB_MERGE_NICS": "1",
+        "NCCL_IB_MERGE_VFS": "1",
         "NCCL_DMABUF_ENABLE": "1"
       }
     },
