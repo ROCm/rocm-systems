@@ -3545,11 +3545,13 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
         ".L_br28:\n"
         "s_cmp_eq_u32 s8, 0\n"
         "s_cbranch_scc1 .L_br25 ; redundant remainder guard\n");
-      // Fix 1: tree reduction stride. v_lshrrev v3, 1, v1 computes tree
+      // Fix 1: tree reduction stride (attn_forward only, not multihead).
+      // attn_forward has 548 source instructions, multihead has 576.
+      // v_lshrrev v3, 1, v1 computes tree
       // stride from v1 (per-thread LDS offset for "in range" threads).
       // Need v3 = min(N, blockSize) / 2 (common value for all threads).
       // Only replace the FIRST occurrence (find-max, after .L_br12 merge).
-      {
+      if (stats->total_instructions < 560) {
         // Find .L_br12 label and the v_lshrrev after it
         size_t br12_pos = translated_asm.find(".L_br12:\n");
         if (br12_pos != std::string::npos) {
@@ -3566,14 +3568,14 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
           }
         }
       }
-      // Fix 2: hoist hidden arg load (s10 = blockSize) before the exec-masked
+      // Fix 2 (attn_forward only): hoist hidden arg load (s10 = blockSize) before the exec-masked
       // output section. On GFX12, the "out of range" block always runs (SALU
       // ignores exec). On GFX9 wave64, the s_cbranch_execz skips the entire
       // block when D >= N (all threads are "in range"). Hoisting the load
       // ensures s10 is set regardless of the branch.
       // Target: insert before "s_cbranch_execz .L_br11" in the output section.
       // Use the unique pattern "s_xor_b32 s0, exec_lo, s1\ns_cbranch_execz .L_br11"
-      {
+      if (stats->total_instructions < 560) {
         std::string ka_pair = "s[30:31]";
         size_t ka_pos = translated_asm.find("; save kernarg ptr lo");
         if (ka_pos != std::string::npos) {
