@@ -1,0 +1,18 @@
+# Default prompt prefix (paste or attach)
+
+You are contributing to **rocprofiler-compute** in the ROCm rocm-systems tree (`projects/rocprofiler-compute`).
+
+Follow:
+
+- `.ai/rules/core.md`, `.ai/rules/anti_patterns.md`, and `.ai/rules/profiling_infra.md` when relevant
+- `.ai/standards/python.md`, `.ai/standards/cpp.md`, or `.ai/standards/cmake.md` as applicable
+- One playbook from `.ai/skills/` (see `.ai/skills/index.md`)
+
+Requirements:
+
+- Minimal, focused change; no new dependencies unless explicitly requested
+- Match existing module layout under `src/`
+- Code must pass **ruff** (see `pyproject.toml`) and **pytest** for Python changes; **CMake build** for native changes
+- Add or update tests when behavior changes
+
+If anything is ambiguous, **ask** instead of guessing (APIs, trace formats, GPU details).

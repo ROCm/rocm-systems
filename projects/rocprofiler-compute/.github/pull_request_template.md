@@ -15,8 +15,30 @@
 - [ ] Refactor
 - [ ] Other (please specify)
 
+## What
+<!-- Short summary of the change for reviewers. -->
+
+## Why
+<!-- Motivation: bug, feature request, perf, maintainability, etc. -->
+
 ## Technical Details
-<!-- Please explain the changes. -->
+<!-- Implementation notes, alternatives considered if helpful. -->
+
+## How tested
+<!-- Commands run, manual steps, hardware/SKU if relevant. -->
+
+## Risks
+<!-- User-visible impact, trace/metric/CLI changes, rollout notes. -->
+
+## AI usage (optional)
+
+- [ ] Not AI-assisted
+- [ ] AI-assisted (mixed)
+- [ ] Primarily AI-generated
+
+**Skill / playbook** (if any, e.g. from `.ai/skills/`): <!-- name or link -->
+
+**Prompt / rules version** (if tracked): <!-- e.g. commit or “default.md” -->
 
 ## Have you added or updated tests to validate functionality?
 

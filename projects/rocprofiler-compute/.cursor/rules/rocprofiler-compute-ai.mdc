@@ -1,0 +1,26 @@
+---
+description: rocprofiler-compute — follow .ai rules, standards, and skills for all AI edits
+alwaysApply: true
+---
+
+# rocprofiler-compute (AI)
+
+This project is **rocprofiler-compute** under `projects/rocprofiler-compute` in rocm-systems.
+
+## Required
+
+1. **Rules** — Read and follow `.ai/rules/core.md`. Also `.ai/rules/anti_patterns.md` and, for traces/metrics/roofline, `.ai/rules/profiling_infra.md`.
+2. **Task playbook** — Choose **one** skill from `.ai/skills/index.md` and follow that file.
+3. **Standards** — Apply `.ai/standards/python.md`, `cpp.md`, or `cmake.md` for touched languages.
+4. **Scope** — Small, single-purpose diffs; no new dependencies unless explicitly requested and approved.
+
+## Verify
+
+- Python: `ruff check`, `ruff format` per `pyproject.toml`; `pytest` for behavior changes.
+- C++/CMake: out-of-source configure/build for `src/lib/` targets.
+
+## If unclear
+
+Ask instead of guessing (ROCm APIs, trace formats, counter names). Use `.ai/prompts/default.md` as the user-facing prefix when helpful.
+
+Full map: `.ai/README.md` and `docs/AI_GUIDE.md`.

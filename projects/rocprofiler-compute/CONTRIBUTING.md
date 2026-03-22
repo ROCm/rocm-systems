@@ -4,6 +4,10 @@
 
 ROCm Compute Profiler lives under `projects/rocprofiler-compute` in the [ROCm Systems super-repo](https://github.com/ROCm/rocm-systems). To set up your local environment, follow the [clone and setup instructions](https://github.com/ROCm/rocm-systems/blob/develop/CONTRIBUTING.md#getting-started) in the rocm-systems CONTRIBUTING.md. Sparse checkout is recommended for most contributors.
 
+## AI-assisted development
+
+For shared rules, standards, and task skills when using AI coding tools, see [docs/AI_GUIDE.md](docs/AI_GUIDE.md).
+
 ## Reporting Issues and Bugs
 
 - Search [existing issues](https://github.com/ROCm/rocm-systems/issues) before filing a new one — your bug may already be tracked.
