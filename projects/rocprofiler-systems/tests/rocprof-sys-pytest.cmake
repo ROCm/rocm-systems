@@ -47,9 +47,13 @@ execute_process(
     COMMAND "${PYTEST_EXECUTABLE}" --version
     OUTPUT_VARIABLE _version
     ERROR_VARIABLE _version
+    RESULT_VARIABLE _command_result
     OUTPUT_STRIP_TRAILING_WHITESPACE
 )
-if(_version MATCHES "pytest (version )?([0-9]+\\.[0-9]+\\.[0-9]+)")
+if(
+    _command_result EQUAL 0
+    AND _version MATCHES "pytest (version )?([0-9]+\\.[0-9]+\\.[0-9]+)"
+)
     set(PYTEST_VERSION "${CMAKE_MATCH_2}")
     rocprofiler_systems_message(STATUS "Found pytest ${PYTEST_VERSION} at: ${PYTEST_EXECUTABLE}")
 else()

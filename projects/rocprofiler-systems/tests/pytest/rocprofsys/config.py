@@ -301,7 +301,7 @@ class RocprofsysConfig:
         }
 
 
-def _find_rocm_path() -> Optional[Path]:
+def _find_rocm_path() -> Path:
     """Find ROCm installation path."""
     for candidate in [
         os.environ.get("ROCM_PATH"),
@@ -310,7 +310,10 @@ def _find_rocm_path() -> Optional[Path]:
     ]:
         if candidate and Path(candidate).exists():
             return Path(candidate).resolve()
-    return None
+    # We require ROCm
+    raise FileNotFoundError(
+        "Could not find ROCm installation. Set ROCM_PATH " "environment variable."
+    )
 
 
 def _get_rocm_version() -> Optional[tuple[int, int, int]]:
@@ -320,8 +323,6 @@ def _get_rocm_version() -> Optional[tuple[int, int, int]]:
         Tuple of (major, minor, patch) or None if ROCm not found or version undetectable.
     """
     rocm_path = _find_rocm_path()
-    if not rocm_path:
-        return None
 
     # Check .info/version file
     version_file = rocm_path / ".info" / "version"

@@ -25,8 +25,8 @@ class SystemCapabilities:
     rocprofsys_tests_dir: Path
     rocprofsys_examples_dir: Path
     rocprofsys_avail: Path
+    rocm_path: Path
     rocprofsys_site_packages: Optional[Path]
-    rocm_path: Optional[Path] = None
     _python_versions_hint: Optional[list[str]] = field(default=None, repr=False)
     _python_root_dirs_hint: Optional[list[Path]] = field(default=None, repr=False)
 
@@ -424,7 +424,7 @@ def _find_python_in_dirs(version: str, root_dirs: list[Path]) -> Optional[Path]:
                 candidate = root_dir / name
             if candidate.exists() and candidate.is_file():
                 detected = _get_python_version(candidate)
-                if detected and detected.startswith(version):
+                if detected and detected == version:
                     return candidate
     return None
 

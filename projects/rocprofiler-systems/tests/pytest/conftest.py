@@ -69,6 +69,7 @@ ROCPROFSYS_RUNNER_NAMES = [
     "binary_rewrite",
     "runtime_instrument",
     "sys_run",
+    "causal",
     "python",
 ]
 
@@ -253,7 +254,7 @@ def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line(
         "markers",
         "depends_on(*names): declare CTest dependency on the named tests"
-        " (used for FIXTURES_REQUIRED)",
+        " (used for CTest DEPENDS)",
     )
     config.addinivalue_line(
         "markers",
@@ -896,6 +897,8 @@ def _ctest_generate_tests(
     lines.append(")")
     lines.append("")
 
+    seen_names: dict[str, str] = {}  # escaped_name -> original nodeid
+
     for item in items:
         test_id = item.stash.get(_original_nodeid_key, item.nodeid)
         test_name = item.name
@@ -947,6 +950,17 @@ def _ctest_generate_tests(
 
         escaped_name = _cmake_escape(test_name)
         escaped_nodeid = _cmake_escape(test_nodeid)
+
+        if escaped_name in seen_names:
+            pytest.exit(
+                f"\nDuplicate CTest name '{escaped_name}' generated from:\n"
+                f"  1) {seen_names[escaped_name]}\n"
+                f"  2) {test_id}\n"
+                f"(Due to _standardize_test_name or parametrization)\n"
+                f"Rework test name or parametrization to produce unique names.",
+                returncode=1,
+            )
+        seen_names[escaped_name] = test_id
 
         # Check if this test requires a specific Python version
         py_ver = None
@@ -1479,7 +1493,7 @@ def cleanup_module_temp_files(request: pytest.FixtureRequest):
 
     import glob
 
-    if not request.config.getoption("--ctest-mode", default=False) == "run":
+    if not request.config.getoption("--ctest-mode", default="off") == "run":
         for pattern in ["/tmp/buffered_storage*.bin", "/tmp/metadata*.json"]:
             for filepath in glob.glob(pattern):
                 _safe_remove(Path(filepath))

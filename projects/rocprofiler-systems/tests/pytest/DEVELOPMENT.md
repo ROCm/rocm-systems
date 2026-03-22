@@ -212,7 +212,7 @@ class Test<NAME>(RocprofsysTest):
         result = self.run_test(
             # mode,
             # target,
-            # env =-<test>_env,
+            # env =<test>_env,
             # ...
         )
 
