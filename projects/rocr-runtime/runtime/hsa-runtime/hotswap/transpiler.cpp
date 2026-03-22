@@ -3564,6 +3564,23 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
           ".L_br14:\n"
           "v_mov_b32_e32 v1, s10 ; FIX: v1=blockSize for exp/norm loops\n");
       }
+      // Fix 4: s3 (thread-0 mask) and v1 (1/sqrt(D) scale factor).
+      // s3 is overwritten by v_readfirstlane (float(D)) during sqrt computation.
+      // v1 (the sqrt chain result) is 0 on GFX9 (chain produces wrong value).
+      // Fix: recompute both before the outer loop.
+      if (stats->total_instructions < 560) {
+        std::string target = "s_branch .L_br4\n";
+        size_t pos = translated_asm.find(target);
+        if (pos != std::string::npos) {
+          std::string fix =
+            "s_mov_b32 s3, 1 ; FIX: restore thread-0 mask for .L_br9\n"
+            "v_cvt_f32_u32_e32 v1, s6 ; FIX: v1 = float(D)\n"
+            "v_sqrt_f32_e32 v1, v1    ; v1 = sqrt(D)\n"
+            "v_rcp_f32_e32 v1, v1     ; v1 = 1/sqrt(D)\n"
+            "s_branch .L_br4\n";
+          translated_asm.replace(pos, target.size(), fix);
+        }
+      }
     }
     // Debug: HSA_HOTSWAP_LDS_DUMP=1 injects LDS→global memory dumps at key points.
     // Thread 0 reads LDS values and writes them to the output buffer (s[2:3] = dO).
@@ -3575,33 +3592,7 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
     if (std::getenv("HSA_HOTSWAP_LDS_DUMP") && stats->total_instructions > 400 &&
         stats->total_instructions < 560 &&
         translated_asm.find(".L_br28:") != std::string::npos) {
-      // Fix: s3 is overwritten by v_readfirstlane (float(D)) during sqrt computation.
-      // The .L_br9 store uses s3 as the thread-0 exec mask. With s3 = float(D),
-      // s_and exec, exec, s3 produces exec=0 → store is SKIPPED → dot products
-      // never written to LDS[0..N-1].
-      // Fix: insert s_mov_b32 s3, 1 (thread-0 mask) right before the outer loop.
-      {
-        auto replaceFirst = [](std::string& s, const std::string& from, const std::string& to) {
-          size_t pos = s.find(from);
-          if (pos != std::string::npos) s.replace(pos, from.size(), to);
-        };
-        {
-          std::string target = "s_branch .L_br4\n";
-          size_t pos = translated_asm.find(target);
-          if (pos != std::string::npos) {
-            std::string fix =
-              "s_mov_b32 s3, 1 ; FIX: restore thread-0 mask\n"
-              "v_cvt_f32_u32_e32 v1, s6 ; FIX: v1 = float(D)\n"
-              "v_sqrt_f32_e32 v1, v1    ; v1 = sqrt(D)\n"
-              "v_rcp_f32_e32 v1, v1     ; v1 = 1/sqrt(D)\n"
-              "s_branch .L_br4\n";
-            translated_asm.replace(pos, target.size(), fix);
-            std::cerr << "hotswap: transpile: APPLIED s3+v1 fix at offset " << pos << "\n";
-          } else {
-            std::cerr << "hotswap: transpile: WARNING: s_branch .L_br4 NOT FOUND\n";
-          }
-        }
-      }
+      // (s3+v1 fix moved to main fix block above)
       // Minimal dump: just LDS[0] and LDS[4] (the two dot products) at .L_br3 entry.
       // Writes to dO[0] and dO[4]. Only 10 instructions = ~40 bytes.
       {
