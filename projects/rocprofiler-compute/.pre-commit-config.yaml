@@ -27,3 +27,9 @@ repos:
         language: system
         pass_filenames: false
         stages: [pre-commit]
+      - id: ai-dev-harness
+        name: AI dev framework harness
+        entry: bash -lc 'cd projects/rocprofiler-compute && python3 scripts/ai_dev_harness.py'
+        language: system
+        pass_filenames: false
+        stages: [pre-commit]

@@ -26,8 +26,12 @@ Use this tree for **consistent AI-assisted changes** across tools (Cursor, Copil
 │   └── native_or_cmake.md
 ├── prompts/
 │   └── default.md            # Shared prompt prefix
-└── review/
-    └── checklist.md          # AI-aware code review
+├── review/
+│   └── checklist.md          # AI-aware code review
+└── harness/
+    └── README.md             # Harness design + how to extend
+scripts/
+└── ai_dev_harness.py         # Layout / skill template checks
 docs/
 └── AI_GUIDE.md               # Contributor entry (links here)
 .github/
@@ -50,5 +54,7 @@ CLAUDE.md                     # Claude Code; OpenCode fallback → points here
 | [review/](review/) | PR / review checklist |
 
 **Workflow:** read `rules/core.md` → paste or follow `prompts/default.md` → open the skill from `skills/index.md` → before PR use `review/checklist.md`.
+
+**Harness:** [harness/README.md](harness/README.md) — validates layout and skill structure (`python3 scripts/ai_dev_harness.py`); also runs via pre-commit.
 
 **Humans:** [docs/AI_GUIDE.md](../docs/AI_GUIDE.md) · [CONTRIBUTING.md](../CONTRIBUTING.md)

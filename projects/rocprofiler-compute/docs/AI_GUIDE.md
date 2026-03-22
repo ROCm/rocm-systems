@@ -35,5 +35,6 @@ OpenCode can also set extra paths via **`opencode.json`** (`instructions` / proj
 - Python: `ruff check`, `ruff format`, `pytest` (see `pyproject.toml`).
 - Native: out-of-source CMake build for targets under `src/lib/`.
 - Hooks: pre-commit setup is described in `CONTRIBUTING.md`.
+- **AI framework:** from the project root, run `python3 scripts/ai_dev_harness.py` (see [`.ai/harness/README.md`](../.ai/harness/README.md)); included in pre-commit as **AI dev framework harness**.
 
 For repository-wide contribution rules, see the [rocm-systems CONTRIBUTING](https://github.com/ROCm/rocm-systems/blob/develop/CONTRIBUTING.md) guide.
