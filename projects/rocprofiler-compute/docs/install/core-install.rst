@@ -197,9 +197,9 @@ for execution of ROCm Compute Profiler as follows.
       /opt/apps/rocprofiler-compute/{{ config.version }}/bin/rocprof-compute
 
       $ rocprof-compute --version
-      ROC Profiler:   /opt/rocm-5.1.0/bin/rocprof
-
-      rocprofiler-compute (v{{ config.version }})
+      ----------------------------------------
+      rocprofiler-compute version: {{ config.version }}
+      ----------------------------------------
 
 .. tip::
 

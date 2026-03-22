@@ -74,7 +74,7 @@ using the supplied modulefile.
 The examples in this section use a compiled version of the ``vcopy`` workload to
 demonstrate the use of ROCm Compute Profiler in MI accelerator performance analysis. Unless
 otherwise noted, the performance analysis is done on the
-:ref:`MI200 platform <def-soc>`.
+:ref:`MI325X platform <def-soc>`.
 
 Workload compilation
 ^^^^^^^^^^^^^^^^^^^^
@@ -112,89 +112,83 @@ The following sample command profiles the ``vcopy`` workload.
    |_|  \___/ \___| .__/|_|  \___/|_|        \___\___/|_| |_| |_| .__/ \__,_|\__\___|
                   |_|                                           |_|
 
-   rocprofiler-compute version: 2.0.0
-   Profiler choice: rocprofv1
-   Path: /home/auser/repos/rocprofiler-compute/sample/workloads/vcopy/MI200
-   Target: MI200
-   Command: ./vcopy -n 1048576 -b 256
-   Kernel Selection: None
-   Dispatch Selection: None
-   Hardware Blocks: All
-
-   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-   Collecting Performance Counters
-   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-   [profiling] Current input file: /home/auser/repos/rocprofiler-compute/sample/workloads/vcopy/MI200/perfmon/SQ_IFETCH_LEVEL.txt
-      |-> [rocprof] RPL: on '240312_174329' from '/opt/rocm-5.2.1' in '/home/auser/repos/rocprofiler-compute/src/rocprof-compute'
-      |-> [rocprof] RPL: profiling '""./vcopy -n 1048576 -b 256""'
-      |-> [rocprof] RPL: input file '/home/auser/repos/rocprofiler-compute/sample/workloads/vcopy/MI200/perfmon/SQ_IFETCH_LEVEL.txt'
-      |-> [rocprof] RPL: output dir '/tmp/rpl_data_240312_174329_692890'
-      |-> [rocprof] RPL: result dir '/tmp/rpl_data_240312_174329_692890/input0_results_240312_174329'
-      |-> [rocprof] ROCProfiler: input from "/tmp/rpl_data_240312_174329_692890/input0.xml"
-      |-> [rocprof] gpu_index =
-      |-> [rocprof] kernel =
-      |-> [rocprof] range =
-      |-> [rocprof] 6 metrics
-      |-> [rocprof] GRBM_COUNT, GRBM_GUI_ACTIVE, SQ_WAVES, SQ_IFETCH, SQ_IFETCH_LEVEL, SQ_ACCUM_PREV_HIRES
-      |-> [rocprof] vcopy testing on GCD 0
-      |-> [rocprof] Finished allocating vectors on the CPU
-      |-> [rocprof] Finished allocating vectors on the GPU
-      |-> [rocprof] Finished copying vectors to the GPU
-      |-> [rocprof] sw thinks it moved 1.000000 KB per wave
-      |-> [rocprof] Total threads: 1048576, Grid Size: 4096 block Size:256, Wavefronts:16384:
-      |-> [rocprof] Launching the  kernel on the GPU
-      |-> [rocprof] Finished executing kernel
-      |-> [rocprof] Finished copying the output vector from the GPU to the CPU
-      |-> [rocprof] Releasing GPU memory
-      |-> [rocprof] Releasing CPU memory
-      |-> [rocprof]
-     |-> [rocprof] ROCPRofiler: 1 contexts collected, output directory /tmp/rpl_data_240312_174329_692890/input0_results_240312_174329
-       |-> [rocprof] File '/home/auser/repos/rocprofiler-compute/sample/workloads/vcopy/MI200/SQ_IFETCH_LEVEL.csv' is generating
-      |-> [rocprof]
-   [profiling] Current input file: /home/auser/repos/rocprofiler-compute/sample/workloads/vcopy/MI200/perfmon/SQ_INST_LEVEL_LDS.txt
+   INFO Rocprofiler-Compute version: 3.5.0
+   INFO Profiler choice: rocprofiler-sdk
+   INFO Path: /home/auser/rocprofiler-compute/workloads/vcopy/MI325X
+   INFO Target: MI325X
+   INFO Command: ./sample/vcopy -n 1048576 -b 256
+   INFO Kernel Selection: None
+   INFO Dispatch Selection: None
+   INFO Filtered sections: All
+   INFO
+   INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   INFO Collecting Performance Counters
+   INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   INFO
+   INFO Using native counter collection tool: /tmp/rocprofiler-compute-tool-xxxxx/librocprofiler-compute-tool.so
+   INFO [profiling] Iteration multiplexing: Disabled
+   INFO [Run 1/13][Approximate profiling time left: pending first measurement...]
+   INFO [profiling] Current input file: /home/auser/rocprofiler-compute/workloads/vcopy/MI325X/perfmon/SQC_DCACHE_INFLIGHT_LEVEL.txt
+   INFO    |-> [rocprofiler-sdk] [rocprofiler-compute] [rocprofiler_configure] (priority=1) is using rocprofiler-sdk v1.1.0 (1.1.0)
+   INFO    |-> [rocprofiler-sdk] W20260322 00:13:35.494286 140228330987264 simple_timer.cpp:55] [rocprofv3] tool initialization ::     0.449236 sec
+   INFO    |-> [rocprofiler-sdk] [rocprofiler-compute] In tool init
+   INFO    |-> [rocprofiler-sdk] W20260322 00:13:35.494577 140228330987264 simple_timer.cpp:55] [rocprofv3] './sample/vcopy -n 1048576 -b 256' ::     0.000000 sec
+   INFO    |-> [rocprofiler-sdk] W20260322 00:13:35.795217 140228330987264 tool.cpp:2422] HSA version 8.21.0 initialized (instance=0)
+   INFO    |-> [rocprofiler-sdk] W20260322 00:13:35.909222 140228330987264 simple_timer.cpp:55] [rocprofv3] './sample/vcopy -n 1048576 -b 256' ::     0.414645 sec
+   INFO    |-> [rocprofiler-sdk] W20260322 00:13:35.932016 140228330987264 generateRocpd.cpp:582] writing SQL database for process 3328994 on node 1574819130
+   INFO    |-> [rocprofiler-sdk] E20260322 00:13:35.932678 140228330987264 generateRocpd.cpp:605] Opened result file: /home/auser/rocprofiler-compute/workloads/vcopy/MI325X/out/pmc_1/hostname/3328994_results.db (UUID=00000773-bf9b-7f9b-94fa-b89b01ffc52e)
+   INFO    |-> [rocprofiler-sdk] W20260322 00:13:35.972892 140228330987264 simple_timer.cpp:55] SQLite3 generation :: rocpd_string             ::     0.011922 sec
+   INFO    |-> [rocprofiler-sdk] W20260322 00:13:35.973407 140228330987264 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_node          ::     0.000498 sec
+   INFO    |-> [rocprofiler-sdk] W20260322 00:13:35.974453 140228330987264 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_process       ::     0.001040 sec
+   INFO    |-> [rocprofiler-sdk] W20260322 00:13:35.992219 140228330987264 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_agent         ::     0.017048 sec
+   INFO    |-> [rocprofiler-sdk] W20260322 00:13:38.531269 140228330987264 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_pmc           ::     2.539034 sec
+   INFO    |-> [rocprofiler-sdk] W20260322 00:13:38.532401 140228330987264 simple_timer.cpp:55] SQLite3 generation :: rocpd kernel info        ::     0.001099 sec
+   INFO    |-> [rocprofiler-sdk] W20260322 00:13:38.532409 140228330987264 simple_timer.cpp:55] SQLite3 generation :: rocpd_region             ::     0.000002 sec
+   INFO    |-> [rocprofiler-sdk] W20260322 00:13:38.537790 140228330987264 simple_timer.cpp:55] SQLite3 generation :: rocpd_kernel_dispatch    ::     0.005378 sec
+   INFO    |-> [rocprofiler-sdk] W20260322 00:13:38.537802 140228330987264 simple_timer.cpp:55] SQLite3 generation :: rocpd_pmc_event          ::     0.000000 sec
+   INFO    |-> [rocprofiler-sdk] W20260322 00:13:38.537804 140228330987264 simple_timer.cpp:55] SQLite3 generation :: rocpd_memory_copy        ::     0.000000 sec
+   INFO    |-> [rocprofiler-sdk] W20260322 00:13:38.537807 140228330987264 simple_timer.cpp:55] SQLite3 generation :: rocpd_memory_allocate    ::     0.000001 sec
+   INFO    |-> [rocprofiler-sdk] W20260322 00:13:38.537895 140228330987264 simple_timer.cpp:55] SQLite3 generation :: SQL indexing             ::     0.000087 sec
+   INFO    |-> [rocprofiler-sdk] W20260322 00:13:38.538263 140228330987264 simple_timer.cpp:55] SQLite3 generation :: total                    ::     2.606247 sec
+   INFO    |-> [rocprofiler-sdk] W20260322 00:13:38.539802 140228330987264 simple_timer.cpp:55] [rocprofv3] output generation ::     2.627237 sec
+   INFO    |-> [rocprofiler-sdk] W20260322 00:13:38.539961 140228330987264 simple_timer.cpp:55] [rocprofv3] tool finalization ::     2.630707 sec
+   INFO    |-> [rocprofiler-sdk] [rocprofiler-compute] In tool fini
+   INFO    |-> [rocprofiler-sdk] [rocprofiler-compute] [generate_output] Counter collection data has been written to: /home/auser/rocprofiler-compute/workloads/vcopy/MI325X/out/pmc_1/3328994_native_counter_collection.csv
+   INFO    |-> [rocprofiler-sdk] vcopy testing on GCD 0
+   INFO    |-> [rocprofiler-sdk] Finished allocating vectors on the CPU
+   INFO    |-> [rocprofiler-sdk] Finished allocating vectors on the GPU
+   INFO    |-> [rocprofiler-sdk] Finished copying vectors to the GPU
+   INFO    |-> [rocprofiler-sdk] sw thinks it moved 1.000000 KB per wave
+   INFO [Run 2/13][Approximate profiling time left: 55 seconds]...
+   INFO [profiling] Current input file: /home/auser/rocprofiler-compute/workloads/vcopy/MI325X/perfmon/SQC_ICACHE_INFLIGHT_LEVEL.txt
 
    ...
 
-   [roofline] Checking for roofline.csv in /home/auser/repos/rocprofiler-compute/sample/workloads/vcopy/MI200
-   [roofline] No roofline data found. Generating...
-   Empirical Roofline Calculation
-   Copyright © 2022  Advanced Micro Devices, Inc. All rights reserved.
-   Total detected GPU devices: 4
-   GPU Device 0: Profiling...
-    99% [||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| ]
-  HBM BW, GPU ID: 0, workgroupSize:256, workgroups:2097152, experiments:100, traffic:8589934592 bytes, duration:6.2 ms, mean:1388.0 GB/sec, stdev=3.1 GB/sec
-     99% [||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| ]
-  L2 BW, GPU ID: 0, workgroupSize:256, workgroups:8192, experiments:100, traffic:687194767360 bytes, duration:136.5 ms, mean:5020.8 GB/sec, stdev=16.5 GB/sec
-     99% [||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| ]
-  L1 BW, GPU ID: 0, workgroupSize:256, workgroups:16384, experiments:100, traffic:26843545600 bytes, duration:2.9 ms, mean:9229.5 GB/sec, stdev=2.9 GB/sec
-     99% [||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| ]
-   LDS BW, GPU ID: 0, workgroupSize:256, workgroups:16384, experiments:100, traffic:33554432000 bytes, duration:1.9 ms, mean:17645.6 GB/sec, stdev=20.1 GB/sec
-    99% [||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| ]
-   Peak FLOPs (FP32), GPU ID: 0, workgroupSize:256, workgroups:16384, experiments:100, FLOP:274877906944, duration:13.078 ms, mean:20986.9 GFLOPS, stdev=310.8 GFLOPS
-    99% [||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| ]
-   Peak FLOPs (FP64), GPU ID: 0, workgroupSize:256, workgroups:16384, experiments:100, FLOP:137438953472, duration:6.7 ms, mean:20408.029297.1 GFLOPS, stdev=2.7 GFLOPS
-    99% [||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| ]
-   Peak MFMA FLOPs (BF16), GPU ID: 0, workgroupSize:256, workgroups:16384, experiments:100, FLOP:2147483648000, duration:12.6 ms, mean:170280.0 GFLOPS, stdev=22.3 GFLOPS
-    99% [||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| ]
-   Peak MFMA FLOPs (F16), GPU ID: 0, workgroupSize:256, workgroups:16384, experiments:100, FLOP:2147483648000, duration:13.0 ms, mean:164733.6 GFLOPS, stdev=24.3 GFLOPS
-    99% [||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| ]
-   Peak MFMA FLOPs (F32), GPU ID: 0, workgroupSize:256, workgroups:16384, experiments:100, FLOP:536870912000, duration:13.0 ms, mean:41399.6 GFLOPS, stdev=4.1 GFLOPS
-    99% [||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| ]
-   Peak MFMA FLOPs (F64), GPU ID: 0, workgroupSize:256, workgroups:16384, experiments:100, FLOP:268435456000, duration:6.5 ms, mean:41379.2 GFLOPS, stdev=4.4 GFLOPS
-    99% [||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| ]
-   Peak MFMA IOPs (I8), GPU ID: 0, workgroupSize:256, workgroups:16384, experiments:100, IOP:2147483648000, duration:12.9 ms, mean:166281.9 GOPS, stdev=2495.9 GOPS
-   GPU Device 1: Profiling...
-   ...
-   GPU Device 2: Profiling...
-   ...
-   GPU Device 3: Profiling...
-   ...
+   INFO [roofline] Checking for roofline.csv in /home/auser/rocprofiler-compute/workloads/vcopy/MI325X
+   GPU Device 0 (gfx942) with 304 CUs: Profiling...
+   HBM BW, GPU ID: 0, workgroupSize:256, workgroups:6225920, experiments:100, traffic:25501368320 bytes, duration:5.4 ms, mean:4689.1 GB/sec, stdev:16.3 GB/sec
+   L2 BW, GPU ID: 0, workgroupSize:256, workgroups:38912, experiments:100, traffic:1632087572480 bytes, duration:57.4 ms, mean:28429.3 GB/sec, stdev:34.055164 GB/sec
+   L1 BW, GPU ID: 0, workgroupSize:256, workgroups:38912, experiments:100, traffic:127506841600 bytes, duration:3.4 ms, mean:37839.6 GB/sec, stdev:630.807679 GB/sec
+   LDS BW, GPU ID: 0, workgroupSize:256, workgroups:38912, experiments:100, traffic:79691776000 bytes, duration:1.0 ms, mean:76182.6 GB/sec, stdev:793.594152 GB/sec
+   Peak VALU FLOPs (FP16), GPU ID: 0, workgroupSize:256, workgroups:38912, experiments:100, FLOP:5222680231936, duration:33.1 ms, mean:157868.0 GFLOPS, stdev=173.3 GFLOPS
+   Peak VALU FLOPs (FP32), GPU ID: 0, workgroupSize:256, workgroups:38912, experiments:100, FLOP:5222680231936, duration:34.3 ms, mean:152104.8 GFLOPS, stdev=1073.6 GFLOPS
+   Peak VALU FLOPs (FP64), GPU ID: 0, workgroupSize:256, workgroups:38912, experiments:100, FLOP:2611340115968, duration:33.4 ms, mean:78139.4 GFLOPS, stdev=375.4 GFLOPS
+   Peak VALU IOPs (INT8), GPU ID: 0, workgroupSize:256, workgroups:38912, experiments:100, IOP:2611340115968, duration:39.7 ms, mean:65694.3 GOPS, stdev=139.4 GFLOPS
+   Peak VALU IOPs (INT32), GPU ID: 0, workgroupSize:256, workgroups:38912, experiments:100, IOP:2611340115968, duration:35.5 ms, mean:73480.1 GOPS, stdev=966.2 GFLOPS
+   Peak VALU IOPs (INT64), GPU ID: 0, workgroupSize:256, workgroups:38912, experiments:100, IOP:1305670057984, duration:52.0 ms, mean:25094.8 GOPS, stdev=379.2 GFLOPS
+   Peak MFMA FLOPs (F8), GPU ID: 0, workgroupSize:256, workgroups:38912, experiments:100, FLOP:10200547328000, duration:4.69 ms, mean:2173233.1 GFLOPS, stdev:40442.7 GFLOPS
+   Peak MFMA FLOPs (F16), GPU ID: 0, workgroupSize:256, workgroups:38912, experiments:100, FLOP:5100273664000, duration:4.80 ms, mean:1062377.5 GFLOPS, stdev:38988.4 GFLOPS
+   Peak MFMA FLOPs (BF16), GPU ID: 0, workgroupSize:256, workgroups:38912, experiments:100, FLOP:5100273664000, duration:4.36 ms, mean:1169793.8 GFLOPS, stdev:20656.5 GFLOPS
+   Peak MFMA FLOPs (F32), GPU ID: 0, workgroupSize:256, workgroups:38912, experiments:100, FLOP:1275068416000, duration:8.24 ms, mean:154648.3 GFLOPS, stdev:1547.9 GFLOPS
+   Peak MFMA FLOPs (F64), GPU ID: 0, workgroupSize:256, workgroups:38912, experiments:100, FLOP:637534208000, duration:4.09 ms, mean:155742.2 GFLOPS, stdev:2345.2 GFLOPS
+   Peak MFMA IOPs (I8), GPU ID: 0, workgroupSize:256, workgroups:38912, experiments:100, IOP:10200547328000, duration:4.51 ms, mean:2260258.3 GOPS, stdev:42988.1 GFLOPS
+   WARNING [roofline] Deprecation warning: Standalone Roofline Analysis plot output ``empirRoof_gpu-<device ID><datatypes><kernels>.html`` will be auto-generated in analyze mode instead of profile mode in a future release.
+   INFO [roofline] Empirical Roofline HTML file saved!
 
 .. tip::
 
    To reduce verbosity of profiling output try the ``--quiet`` flag. This hides
-   ``rocprof`` output and activates a progress bar.
+   ``rocprofiler-sdk`` output and activates a progress bar.
 
 .. _profiling-routine:
 
@@ -229,20 +223,15 @@ an Instinct MI210 vs an Instinct MI250.
 
 .. code-block:: shell-session
 
-   $ ls workloads/vcopy/MI200/
-   total 112
-   total 60
-   -rw-r--r-- 1 auser agroup 27937 Mar  1 15:15 log.txt
-   drwxr-xr-x 1 auser agroup     0 Mar  1 15:15 perfmon
-   -rw-r--r-- 1 auser agroup 26175 Mar  1 15:15 pmc_perf.csv
-   -rw-r--r-- 1 auser agroup  1708 Mar  1 15:17 roofline.csv
-   -rw-r--r-- 1 auser agroup   519 Mar  1 15:15 SQ_IFETCH_LEVEL.csv
-   -rw-r--r-- 1 auser agroup   456 Mar  1 15:15 SQ_INST_LEVEL_LDS.csv
-   -rw-r--r-- 1 auser agroup   474 Mar  1 15:15 SQ_INST_LEVEL_SMEM.csv
-   -rw-r--r-- 1 auser agroup   474 Mar  1 15:15 SQ_INST_LEVEL_VMEM.csv
-   -rw-r--r-- 1 auser agroup   599 Mar  1 15:15 SQ_LEVEL_WAVES.csv
-   -rw-r--r-- 1 auser agroup   650 Mar  1 15:15 sysinfo.csv
-   -rw-r--r-- 1 auser agroup   399 Mar  1 15:15 timestamps.csv
+   $ ls workloads/vcopy/MI325X/
+   total 5164
+   -rw-r--r-- 1 auser agroup 4851128 Mar 21 23:49 empirRoof_gpu-0_FP32.html
+   -rw-r--r-- 1 auser agroup   55771 Mar 21 23:49 log.txt
+   drwxr-xr-x 1 auser agroup    4096 Mar 21 23:47 perfmon
+   -rw-r--r-- 1 auser agroup  348790 Mar 21 23:48 pmc_perf.csv
+   -rw-r--r-- 1 auser agroup    1119 Mar 21 23:47 profiling_config.yaml
+   -rw-r--r-- 1 auser agroup    1684 Mar 21 23:49 roofline.csv
+   -rw-r--r-- 1 auser agroup     899 Mar 21 23:47 sysinfo.csv
 
 Output directory configuration
 ------------------------------
@@ -283,7 +272,7 @@ Examples:
 
    $ tree workloads/vcopy
 
-   └── MI200
+   └── MI325X
     ├── empirRoof_gpu-0_FP32.html
     ├── log.txt
     ├── perfmon
@@ -325,7 +314,7 @@ Examples:
 
    $ tree /tmp/profiles/amd-ryzen/0
 
-   └── MI200
+   └── MI325X
     ├── empirRoof_gpu-0_FP32.html
     ├── log.txt
     ├── perfmon
@@ -447,19 +436,18 @@ for ``Compute Unit - Instruction Mix`` (block 10) and ``Wavefront Launch Statist
    |_|  \___/ \___| .__/|_|  \___/|_|        \___\___/|_| |_| |_| .__/ \__,_|\__\___|
                   |_|                                           |_|
 
-   rocprofiler-compute version: 2.0.0
-   Profiler choice: rocprofv1
-   Path: /home/auser/repos/rocprofiler-compute/sample/workloads/vcopy/MI200
-   Target: MI200
-   Command: ./vcopy -n 1048576 -b 256
-   Kernel Selection: None
-   Dispatch Selection: None
-   Hardware Blocks: []
-   Report Sections: ['10', '7']
-
-   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-   Collecting Performance Counters
-   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   INFO Rocprofiler-Compute version: 3.5.0
+   INFO Profiler choice: rocprofiler-sdk
+   INFO Path: /home/auser/rocprofiler-compute/workloads/vcopy/MI325X
+   INFO Target: MI325X
+   INFO Command: ./vcopy -n 1048576 -b 256
+   INFO Kernel Selection: None
+   INFO Dispatch Selection: None
+   INFO Filtered sections: ['10', '7']
+   INFO
+   INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   INFO Collecting Performance Counters
+   INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
    ...
 
 
@@ -477,19 +465,18 @@ The following example only collects the counters required to calculate ``Total V
    |_|  \___/ \___| .__/|_|  \___/|_|        \___\___/|_| |_| |_| .__/ \__,_|\__\___|
                   |_|                                           |_|
 
-   rocprofiler-compute version: 2.0.0
-   Profiler choice: rocprofv1
-   Path: /home/auser/repos/rocprofiler-compute/sample/workloads/vcopy/MI200
-   Target: MI200
-   Command: ./vcopy -n 1048576 -b 256
-   Kernel Selection: None
-   Dispatch Selection: None
-   Hardware Blocks: []
-   Report Sections: ['11.1.0', '12.1.0']
-
-   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-   Collecting Performance Counters
-   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   INFO Rocprofiler-Compute version: 3.5.0
+   INFO Profiler choice: rocprofiler-sdk
+   INFO Path: /home/auser/rocprofiler-compute/workloads/vcopy/MI325X
+   INFO Target: MI325X
+   INFO Command: ./vcopy -n 1048576 -b 256
+   INFO Kernel Selection: None
+   INFO Dispatch Selection: None
+   INFO Filtered sections: ['11.1.1', '12.1.1']
+   INFO
+   INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   INFO Collecting Performance Counters
+   INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
    ...
 
 
@@ -554,18 +541,18 @@ substring ``vecCopy``.
    |_|  \___/ \___| .__/|_|  \___/|_|        \___\___/|_| |_| |_| .__/ \__,_|\__\___|
                   |_|                                           |_|
 
-   rocprofiler-compute version: 2.0.0
-   Profiler choice: rocprofv1
-   Path: /home/auser/repos/rocprofiler-compute/sample/workloads/vcopy/MI200
-   Target: MI200
-   Command: ./vcopy -n 1048576 -b 256
-   Kernel Selection: ['vecCopy']
-   Dispatch Selection: None
-   Hardware Blocks: All
-
-   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-   Collecting Performance Counters
-   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   INFO Rocprofiler-Compute version: 3.5.0
+   INFO Profiler choice: rocprofiler-sdk
+   INFO Path: /home/auser/rocprofiler-compute/workloads/vcopy/MI325X
+   INFO Target: MI325X
+   INFO Command: ./vcopy -n 1048576 -b 256
+   INFO Kernel Selection: ['vecCopy']
+   INFO Dispatch Selection: None
+   INFO Filtered sections: All
+   INFO
+   INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   INFO Collecting Performance Counters
+   INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
    ...
 
 .. _profiling-dispatch-filtering:
@@ -589,18 +576,18 @@ of the application (zero-based indexing).
    |_|  \___/ \___| .__/|_|  \___/|_|        \___\___/|_| |_| |_| .__/ \__,_|\__\___|
                   |_|                                           |_|
 
-   rocprofiler-compute version: 2.0.0
-   Profiler choice: rocprofv1
-   Path: /home/auser/repos/rocprofiler-compute/sample/workloads/vcopy/MI200
-   Target: MI200
-   Command: ./vcopy -n 1048576 -b 256
-   Kernel Selection: None
-   Dispatch Selection: ['0']
-   Hardware Blocks: All
-
-   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-   Collecting Performance Counters
-   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   INFO Rocprofiler-Compute version: 3.5.0
+   INFO Profiler choice: rocprofiler-sdk
+   INFO Path: /home/auser/rocprofiler-compute/workloads/vcopy/MI325X
+   INFO Target: MI325X
+   INFO Command: ./vcopy -n 1048576 -b 256
+   INFO Kernel Selection: None
+   INFO Dispatch Selection: ['0']
+   INFO Filtered sections: All
+   INFO
+   INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   INFO Collecting Performance Counters
+   INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
    ...
 
 .. _profiling-metric-sets:
@@ -623,19 +610,18 @@ This option cannot be used with ``--roof-only`` and ``--block``.
    |_|  \___/ \___| .__/|_|  \___/|_|        \___\___/|_| |_| |_| .__/ \__,_|\__\___|
                   |_|                                           |_|
 
-   rocprofiler-compute version: 2.0.0
-   Profiler choice: rocprofv1
-   Path: /home/auser/repos/rocprofiler-compute/sample/workloads/vcopy/MI200
-   Target: MI200
-   Command: ./vcopy -n 1048576 -b 256
-   Kernel Selection: None
-   Dispatch Selection: ['0']
-   Set Selection: compute_thruput_util
-   Report Sections: ['11.2.3', '11.2.4', '11.2.6', '11.2.7', '11.2.9']
-
-   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-   Collecting Performance Counters
-   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   INFO Rocprofiler-Compute version: 3.5.0
+   INFO Profiler choice: rocprofiler-sdk
+   INFO Path: /home/auser/rocprofiler-compute/workloads/vcopy/MI325X
+   INFO Target: MI325X
+   INFO Command: ./vcopy -n 1048576 -b 256
+   INFO Kernel Selection: None
+   INFO Dispatch Selection: None
+   INFO Filtered sections: ['11.2.2', '11.2.3', '11.2.4', '11.2.5']
+   INFO
+   INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   INFO Collecting Performance Counters
+   INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
    ...
 
 
@@ -735,17 +721,17 @@ The following example demonstrates profiling roofline data only:
 
    $ rocprof-compute profile --name occupancy --roof-only -- ./tests/occupancy -n 1048576 -b 256
                                     __                                       _
-   _ __ ___   ___ _ __  _ __ ___  / _|       ___ ___  _ __ ___  _ __  _   _| |_ ___
+    _ __ ___   ___ _ __  _ __ ___  / _|       ___ ___  _ __ ___  _ __  _   _| |_ ___
    | '__/ _ \ / __| '_ \| '__/ _ \| |_ _____ / __/ _ \| '_ ` _ \| '_ \| | | | __/ _ \
    | | | (_) | (__| |_) | | | (_) |  _|_____| (_| (_) | | | | | | |_) | |_| | ||  __/
    |_|  \___/ \___| .__/|_|  \___/|_|        \___\___/|_| |_| |_| .__/ \__,_|\__\___|
                   |_|                                           |_|
    ...
    INFO [roofline] Generating pmc_perf.csv (roofline counters only).
-   INFO Rocprofiler-Compute version: 3.3.0
+   INFO Rocprofiler-Compute version: 3.5.0
    INFO Profiler choice: rocprofiler-sdk
-   INFO Path: /app/projects/rocprofiler-compute/workloads/occupancy/MI300X_A1
-   INFO Target: MI300X_A1
+   INFO Path: /home/auser/rocprofiler-compute/workloads/occupancy/MI325X
+   INFO Target: MI325X
    INFO Command: ./tests/occupancy -n 1048576 -b 256
    INFO Kernel Selection: None
    INFO Dispatch Selection: None
@@ -756,12 +742,12 @@ The following example demonstrates profiling roofline data only:
    INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
    INFO
    INFO [Run 1/3][Approximate profiling time left: pending first measurement...]
-   INFO [profiling] Current input file: /app/projects/rocprofiler-compute/workloads/occupancy/MI300X_A1/perfmon/pmc_perf_0.txt
+   INFO [profiling] Current input file: /home/auser/rocprofiler-compute/workloads/occupancy/MI325X/perfmon/pmc_perf_0.txt
    ...
-   INFO [roofline] Checking for roofline.csv in /app/projects/rocprofiler-compute/workloads/occupancy/MI300X_A1
+   INFO [roofline] Checking for roofline.csv in /home/auser/rocprofiler-compute/workloads/occupancy/MI325X
    INFO [roofline] No roofline data found. Generating...
    Empirical Roofline Calculation
-   Copyright © 2025  Advanced Micro Devices, Inc. All rights reserved.
+   Copyright © 2026  Advanced Micro Devices, Inc. All rights reserved.
    Total detected GPU devices: 8
    GPU Device 0 (gfx942) with 304 CUs: Profiling...
    99% [||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| ]
@@ -777,14 +763,14 @@ successfully.
 
 .. code-block:: shell-session
 
-   $ ls workloads/occupancy/MI300X_A1
+   $ ls workloads/occupancy/MI325X
    total 48
-   -rw-r--r-- 1 auser agroup 13331 Oct 29 10:33 empirRoof_gpu-0_FP32.html
-   drwxr-xr-x 1 auser agroup     0 Oct 29 10:33 perfmon
-   -rw-r--r-- 1 auser agroup  1101 Oct 29 10:33 pmc_perf.csv
-   -rw-r--r-- 1 auser agroup  1715 Oct 29 10:33 roofline.csv
-   -rw-r--r-- 1 auser agroup   650 Oct 29 10:33 sysinfo.csv
-   -rw-r--r-- 1 auser agroup   399 Oct 29 10:33 timestamps.csv
+   -rw-r--r-- 1 auser agroup 13331 Mar 21 23:49 empirRoof_gpu-0_FP32.html
+   drwxr-xr-x 1 auser agroup     0 Mar 21 23:49 perfmon
+   -rw-r--r-- 1 auser agroup  1101 Mar 21 23:49 pmc_perf.csv
+   -rw-r--r-- 1 auser agroup  1715 Mar 21 23:49 roofline.csv
+   -rw-r--r-- 1 auser agroup   650 Mar 21 23:49 sysinfo.csv
+   -rw-r--r-- 1 auser agroup   399 Mar 21 23:49 timestamps.csv
 
 .. note::
 
@@ -851,19 +837,19 @@ option when profiling a PyTorch workload:
    |_|  \___/ \___| .__/|_|  \___/|_|        \___\___/|_| |_| |_| .__/ \__,_|\__\___|
                   |_|                                           |_|
 
-   rocprofiler-compute version: 3.4.0
-   Profiler choice: rocprofiler-sdk
-   Path: /home/auser/workloads/mnist_torch/MI300X_A1
-   Target: MI300X_A1
-   Command: python train.py
-   Torch Trace: Enabled
-   Kernel Selection: None
-   Dispatch Selection: None
-   Hardware Blocks: All
-
-   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-   Collecting Performance Counters
-   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   INFO Rocprofiler-Compute version: 3.5.0
+   INFO Profiler choice: rocprofiler-sdk
+   INFO Path: /home/auser/workloads/mnist_torch/MI325X
+   INFO Target: MI325X
+   INFO Command: python train.py
+   INFO Torch Trace: Enabled
+   INFO Kernel Selection: None
+   INFO Dispatch Selection: None
+   INFO Hardware Blocks: All
+   INFO
+   INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   INFO Collecting Performance Counters
+   INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
    ...
 
 Output
@@ -1092,50 +1078,36 @@ The following example demonstrates how to use iteration multiplexing with the
 
    $ rocprof-compute profile --name vcopy --iteration-multiplexing kernel -- ./vcopy -i 20 -n 1048576 -b 256
 
-   ...
-   [INFO] Rocprofiler-Compute version: 3.3.1
-   [INFO] Profiler choice: rocprofiler-sdk
-   [INFO] Path: /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200
-   [INFO] Target: MI200
-   [INFO] Command: ./vcopy -i 20 -n 1048576 -b 256
-   [INFO] Kernel Selection: None
-   [INFO] Dispatch Selection: None
-   [INFO] Filtered sections: All
-   [INFO]
-   [INFO] ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-   [INFO] Collecting Performance Counters
-   [INFO] ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-   [INFO]
-   [INFO] Using native counter collection tool: /tmp/rocprofiler-compute-tool-hlz4fagh/librocprofiler-compute-tool.so
-   [INFO] Iteration multiplexing: kernel
-   [INFO] [profiling] Current input files: /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/SQC_DCACHE_INFLIGHT_LEVEL.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/SQC_ICACHE_INFLIGHT_LEVEL.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/SQ_IFETCH_LEVEL.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/SQ_INST_LEVEL_LDS.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/SQ_INST_LEVEL_SMEM.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/SQ_INST_LEVEL_VMEM.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/SQ_LEVEL_WAVES.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/pmc_perf_0.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/pmc_perf_1.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/pmc_perf_10.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/pmc_perf_11.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/pmc_perf_12.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/pmc_perf_2.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/pmc_perf_3.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/pmc_perf_4.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/pmc_perf_5.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/pmc_perf_6.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/pmc_perf_7.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/pmc_perf_8.txt, /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/perfmon/pmc_perf_9.txt
-   [INFO]   |-> [rocprofiler-sdk] [rocprofiler-compute] [rocprofiler_configure] (priority=1) is using rocprofiler-sdk v1.0.0 (1.0.0)
-   [INFO]   |-> [rocprofiler-sdk] [rocprofiler-compute] [create_tool_data] Logging counter collection to: /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/out/pmc_1/counter_collection_dc877c12.csv
-   [INFO]   |-> [rocprofiler-sdk] W20251106 22:30:29.205097 139710715580160 simple_timer.cpp:55] [rocprofv3] tool initialization ::     0.393942 sec
-   [INFO]   |-> [rocprofiler-sdk] [rocprofiler-compute] In tool init
-   [INFO]   |-> [rocprofiler-sdk] W20251106 22:30:29.205260 139710715580160 simple_timer.cpp:55] [rocprofv3] './vcopy -i 20 -n 1048576 -b 256' ::     0.000000 sec
-   [INFO]   |-> [rocprofiler-sdk] W20251106 22:30:29.320658 139710715580160 tool.cpp:2420] HSA version 8.20.0 initialized (instance=0)
-   [INFO]   |-> [rocprofiler-sdk] W20251106 22:30:29.541811 139710715580160 simple_timer.cpp:55] [rocprofv3] './vcopy -i 20 -n 1048576 -b 256' ::     0.336552 sec
-   [INFO]   |-> [rocprofiler-sdk] W20251106 22:30:29.551750 139710715580160 generateRocpd.cpp:582] writing SQL database for process 2606306 on node 1574819130
-   [INFO]   |-> [rocprofiler-sdk] E20251106 22:30:29.552127 139710715580160 generateRocpd.cpp:605] Opened result file: /home/rocm-systems/projects/rocprofiler-compute/sample/workloads/vcopy_kernel/MI200/out/pmc_1/MI200-1/2606306_results.db (UUID=ab2345e4-7f3e-4f7c-8f6d-1c9e4f5b6c7d)
-   [INFO]   |-> [rocprofiler-sdk] W20251106 22:30:29.584905 139710715580160 simple_timer.cpp:55] SQLite3 generation :: rocpd_string             ::     0.016552 sec
-   [INFO]   |-> [rocprofiler-sdk] W20251106 22:30:29.585113 139710715580160 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_node          ::     0.000200 sec
-   [INFO]   |-> [rocprofiler-sdk] W20251106 22:30:29.586186 139710715580160 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_process       ::     0.001069 sec
-   [INFO]   |-> [rocprofiler-sdk] W20251106 22:30:29.592977 139710715580160 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_agent         ::     0.006506 sec
-   [INFO]   |-> [rocprofiler-sdk] W20251106 22:30:31.791895 139710715580160 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_pmc           ::     2.198912 sec
-   [INFO]   |-> [rocprofiler-sdk] W20251106 22:30:31.792565 139710715580160 simple_timer.cpp:55] SQLite3 generation :: rocpd kernel info        ::     0.000645 sec
-   [INFO]   |-> [rocprofiler-sdk] W20251106 22:30:31.792572 139710715580160 simple_timer.cpp:55] SQLite3 generation :: rocpd_region             ::     0.000002 sec
-   [INFO]   |-> [rocprofiler-sdk] W20251106 22:30:31.795306 139710715580160 simple_timer.cpp:55] SQLite3 generation :: rocpd_kernel_dispatch    ::     0.002731 sec
-   [INFO]   |-> [rocprofiler-sdk] W20251106 22:30:31.795311 139710715580160 simple_timer.cpp:55] SQLite3 generation :: rocpd_pmc_event          ::     0.000000 sec
-   [INFO]   |-> [rocprofiler-sdk] W20251106 22:30:31.795313 139710715580160 simple_timer.cpp:55] SQLite3 generation :: rocpd_memory_copy        ::     0.000000 sec
-   [INFO]   |-> [rocprofiler-sdk] W20251106 22:30:31.795315 139710715580160 simple_timer.cpp:55] SQLite3 generation :: rocpd_memory_allocate    ::     0.000001 sec
-   [INFO]   |-> [rocprofiler-sdk] W20251106 22:30:31.795405 139710715580160 simple_timer.cpp:55] SQLite3 generation :: SQL indexing             ::     0.000089 sec
-   [INFO]   |-> [rocprofiler-sdk] W20251106 22:30:31.796398 139710715580160 simple_timer.cpp:55] SQLite3 generation :: total                    ::     2.244648 sec
-   [INFO]   |-> [rocprofiler-sdk] W20251106 22:30:31.797844 139710715580160 simple_timer.cpp:55] [rocprofv3] output generation ::     2.254739 sec
-   [INFO]   |-> [rocprofiler-sdk] W20251106 22:30:31.800089 139710715580160 simple_timer.cpp:55] [rocprofv3] tool finalization ::     2.258250 sec
-   [INFO]   |-> [rocprofiler-sdk] [rocprofiler-compute] In tool fini
-   [INFO]   |-> [rocprofiler-sdk] vcopy testing on GCD 0
-   [INFO]   |-> [rocprofiler-sdk] Finished allocating vectors on the CPU
+                                    __                                       _
+    _ __ ___   ___ _ __  _ __ ___  / _|       ___ ___  _ __ ___  _ __  _   _| |_ ___
+   | '__/ _ \ / __| '_ \| '__/ _ \| |_ _____ / __/ _ \| '_ ` _ \| '_ \| | | | __/ _ \
+   | | | (_) | (__| |_) | | | (_) |  _|_____| (_| (_) | | | | | | |_) | |_| | ||  __/
+   |_|  \___/ \___| .__/|_|  \___/|_|        \___\___/|_| |_| |_| .__/ \__,_|\__\___|
+                  |_|                                           |_|
+
+   INFO Rocprofiler-Compute version: 3.5.0
+   INFO Profiler choice: rocprofiler-sdk
+   INFO Path: /home/auser/rocprofiler-compute/workloads/vcopy_kernel/MI325X
+   INFO Target: MI325X
+   INFO Command: ./vcopy -i 20 -n 1048576 -b 256
+   INFO Kernel Selection: None
+   INFO Dispatch Selection: None
+   INFO Filtered sections: All
+   INFO
+   INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   INFO Collecting Performance Counters
+   INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   INFO
+   INFO Using native counter collection tool: /tmp/rocprofiler-compute-tool-xxxxx/librocprofiler-compute-tool.so
+   INFO [profiling] Iteration multiplexing: kernel
+   INFO [profiling] Current input files: .../perfmon/SQC_DCACHE_INFLIGHT_LEVEL.txt, .../perfmon/pmc_perf_0.txt, ...
+   INFO    |-> [rocprofiler-sdk] [rocprofiler-compute] [rocprofiler_configure] (priority=1) is using rocprofiler-sdk v1.1.0 (1.1.0)
+   INFO    |-> [rocprofiler-sdk] [rocprofiler-compute] In tool init
+   INFO    |-> [rocprofiler-sdk] vcopy testing on GCD 0
+   INFO    |-> [rocprofiler-sdk] Finished allocating vectors on the CPU
+   INFO    |-> [rocprofiler-sdk] Finished allocating vectors on the GPU
+   INFO    |-> [rocprofiler-sdk] ...
+   INFO    |-> [rocprofiler-sdk] [rocprofiler-compute] In tool fini
    ...
 
 
@@ -1166,9 +1138,9 @@ subdirectory named by its rank to avoid output collisions.
 Example usage
 -------------
 
-Some examples of using multi-rank profiling are: 
+Some examples of using multi-rank profiling are:
 
-* **With** ``--output-directory`` **option:** 
+* **With** ``--output-directory`` **option:**
 
 .. code-block:: shell-session
 
@@ -1183,7 +1155,7 @@ The example above produces:
 
    $ tree /tmp/mpi_profile/0
 
-   └── MI200
+   └── MI325X
     ├── empirRoof_gpu-0_FP32.html
     ├── log.txt
     ├── perfmon
@@ -1232,7 +1204,7 @@ The example above produces:
 
    $ tree ./workloads/laplace_eqn/0
 
-   └── MI200
+   └── MI325X
     ├── empirRoof_gpu-0_FP32.html
     ├── log.txt
     ├── perfmon
@@ -1279,7 +1251,7 @@ to your output directory. The following example is run on the host ``amd-ryzen``
 
    $ tree /tmp/mpi_profile/amd-ryzen/0
 
-   └── MI200
+   └── MI325X
     ├── empirRoof_gpu-0_FP32.html
     ├── log.txt
     ├── perfmon
