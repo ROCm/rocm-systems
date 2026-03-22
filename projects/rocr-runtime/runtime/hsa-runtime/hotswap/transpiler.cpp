@@ -3529,7 +3529,9 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
     // The VCC-based guard (s_cbranch_vccz .L_br25) should prevent entry to .L_br28
     // when remainder=0, but it fails on GFX942. This adds a belt-and-suspenders
     // SCC-based check right at .L_br28 entry.
-    if (stats->total_instructions > 400) {
+    // Only apply these fixes to kernels with .L_br28 (attn_forward-specific pattern)
+    if (stats->total_instructions > 400 &&
+        translated_asm.find(".L_br28:") != std::string::npos) {
       auto replaceAll = [](std::string& s, const std::string& from, const std::string& to) {
         size_t pos = 0;
         while ((pos = s.find(from, pos)) != std::string::npos) {
