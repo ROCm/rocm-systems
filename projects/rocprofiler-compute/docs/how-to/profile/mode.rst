@@ -380,7 +380,7 @@ Filtering
 
 To reduce profiling time and the counters collected, you should use profiling
 filters. Profiling filters and their functionality depend on the underlying
-profiler being used. While ROCm Compute Profiler is profiler-agnostic, this following is a
+profiler being used. While ROCm Compute Profiler is profiler-agnostic, the following is a
 detailed description of profiling filters available when using ROCm Compute Profiler with
 :doc:`ROCprofiler-SDK <rocprofiler-sdk:index>`.
 
