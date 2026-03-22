@@ -3566,6 +3566,23 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
           "s_waitcnt lgkmcnt(0)\n"
           "s_and_b32 s10, s10, 0xffff\n");
       }
+      // Fix tree reduction stride: the FIRST v_lshrrev_b32 v3, 1, v1 computes
+      // the find-max tree stride from v1. For "in range" threads: v1=tid*4 →
+      // v3=tid*2 (per-thread, WRONG). For "out of range": v1=blockSize →
+      // v3=blockSize/2 (common, correct). When D>=N, all threads are "in range"
+      // and v3 is per-thread. Fix: replace FIRST occurrence with v3 = min(N, blockSize)/2.
+      // Since s5=N and s10=blockSize at this point, use s_min then mov to v3.
+      {
+        std::string target = "v_lshrrev_b32_e32 v3, 1, v1\n";
+        size_t pos = translated_asm.find(target);
+        if (pos != std::string::npos) {
+          std::string fix =
+            "v_mov_b32_e32 v3, s5\n"
+            "v_min_u32 v3, s10, v3\n"
+            "v_lshrrev_b32_e32 v3, 1, v3 ; FIX: tree stride = min(N,blockSize)/2\n";
+          translated_asm.replace(pos, target.size(), fix);
+        }
+      }
     }
     // Debug: NOP flat-address global_loads (v[pair], off) in large kernels
     // to check if the flat addressing form is the crash cause.
