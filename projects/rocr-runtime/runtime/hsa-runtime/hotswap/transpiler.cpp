@@ -3545,73 +3545,23 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
         ".L_br28:\n"
         "s_cmp_eq_u32 s8, 0\n"
         "s_cbranch_scc1 .L_br25 ; redundant remainder guard\n");
-      // Fix 1: tree reduction stride (attn_forward only, not multihead).
-      // attn_forward has 548 source instructions, multihead has 576.
-      // v_lshrrev v3, 1, v1 computes tree
-      // stride from v1 (per-thread LDS offset for "in range" threads).
-      // Need v3 = min(N, blockSize) / 2 (common value for all threads).
-      // Only replace the FIRST occurrence (find-max, after .L_br12 merge).
-      if (stats->total_instructions < 560) {
-        // Find .L_br12 label and the v_lshrrev after it
-        size_t br12_pos = translated_asm.find(".L_br12:\n");
-        if (br12_pos != std::string::npos) {
-          std::string target = "v_lshrrev_b32_e32 v3, 1, v1\n";
-          size_t lshr_pos = translated_asm.find(target, br12_pos);
-          if (lshr_pos != std::string::npos && lshr_pos - br12_pos < 200) {
-            // Replace with: v3 = min(s5, s10) / 2
-            // s5 = N, s10 = blockSize (both set by this point)
-            std::string fix =
-              "v_mov_b32_e32 v3, s5\n"
-              "v_min_u32 v3, s10, v3\n"
-              "v_lshrrev_b32_e32 v3, 1, v3 ; tree stride = min(N,blockSize)/2\n";
-            translated_asm.replace(lshr_pos, target.size(), fix);
-          }
-        }
-      }
-      // Fix 2 (attn_forward only): hoist hidden arg load (s10 = blockSize) before the exec-masked
+      // DISABLED: tree stride and s10 hoist fixes to check if hard-max is from base code
+      #if 0
+      // Fix 1: tree reduction stride
+      if (stats->total_instructions < 560) { /* ... */ }
+      #endif
+      // DISABLED: Fix 2 (attn_forward only): hoist hidden arg load (s10 = blockSize) before the exec-masked
       // output section. On GFX12, the "out of range" block always runs (SALU
       // ignores exec). On GFX9 wave64, the s_cbranch_execz skips the entire
       // block when D >= N (all threads are "in range"). Hoisting the load
       // ensures s10 is set regardless of the branch.
       // Target: insert before "s_cbranch_execz .L_br11" in the output section.
       // Use the unique pattern "s_xor_b32 s0, exec_lo, s1\ns_cbranch_execz .L_br11"
-      if (stats->total_instructions < 560) {
-        std::string ka_pair = "s[30:31]";
-        size_t ka_pos = translated_asm.find("; save kernarg ptr lo");
-        if (ka_pos != std::string::npos) {
-          size_t s_pos = translated_asm.rfind("s_mov_b32 s", ka_pos);
-          if (s_pos != std::string::npos) {
-            size_t n_start = s_pos + 11;
-            size_t n_end = translated_asm.find(',', n_start);
-            int lo = std::stoi(translated_asm.substr(n_start, n_end - n_start));
-            ka_pair = "s[" + std::to_string(lo) + ":" + std::to_string(lo+1) + "]";
-          }
-        }
-        std::string target = "s_xor_b32 s0, exec_lo, s1\n";
-        size_t xor_pos = translated_asm.find(target);
-        if (xor_pos != std::string::npos) {
-          std::string hoist =
-            "s_load_dword s10, " + ka_pair + ", 0x3c\n"
-            "s_waitcnt lgkmcnt(0)\n"
-            "s_and_b32 s10, s10, 0xffff ; hoist: s10 = blockSize\n";
-          translated_asm.insert(xor_pos, hoist);
-        }
-      }
-      // Fix 3: set v1 = s10 (blockSize) before the exp loop (.L_br14) and
-      // normalize loop (.L_br23). v1 is used as the iteration stride but has
-      // per-thread value (tid*4) for "in range" threads. For thread 0: v1=0
-      // → infinite loop. Setting v1=blockSize gives correct stride for ALL threads.
-      // Insert at .L_br14 (before exp loop) and before .L_br23 (normalize loop).
-      {
-        auto replaceFirst = [](std::string& s, const std::string& from, const std::string& to) {
-          size_t pos = s.find(from);
-          if (pos != std::string::npos) s.replace(pos, from.size(), to);
-        };
-        replaceFirst(translated_asm,
-          ".L_br14:\n",
-          ".L_br14:\n"
-          "v_mov_b32_e32 v1, s10 ; FIX: v1=blockSize for exp/norm loops\n");
-      }
+      #if 0  // DISABLED: s10 hoist and v1 fix
+      if (stats->total_instructions < 560) { /* s10 hoist */ }
+      // Fix 3: v1 = blockSize
+      // v1 fix also disabled
+      #endif
     }
     // Debug: NOP flat-address global_loads (v[pair], off) in large kernels
     // to check if the flat addressing form is the crash cause.
