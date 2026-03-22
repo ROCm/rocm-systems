@@ -3575,24 +3575,7 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
     if (std::getenv("HSA_HOTSWAP_LDS_DUMP") && stats->total_instructions > 400 &&
         stats->total_instructions < 560 &&
         translated_asm.find(".L_br28:") != std::string::npos) {
-      // Debug: dump v1 (scale factor) by writing it to dO before .L_br9's multiply
-      // Uses the .L_br9 pattern: v_mul_f32_e32 v3, v1, v3
-      {
-        auto replaceFirst = [](std::string& s, const std::string& from, const std::string& to) {
-          size_t pos = s.find(from);
-          if (pos != std::string::npos) s.replace(pos, from.size(), to);
-        };
-        // Add v1 dump: thread 0 writes v1 to dO[8] (byte offset 8)
-        replaceFirst(translated_asm,
-          "v_mul_f32_e32 v3, v1, v3\n"
-          "ds_write_b32 v4, v3\n",
-          // Write v1 to global memory for debugging, then continue normally
-          "v_mov_b32_e32 v28, 8\n"
-          "global_store_dword v28, v1, s[2:3] ; DBG: dump v1 to dO[8]\n"
-          "s_waitcnt vmcnt(0)\n"
-          "v_mul_f32_e32 v3, v1, v3\n"
-          "ds_write_b32 v4, v3\n");
-      }
+      // (v1 dump removed — s[2:3] not valid during outer loop)
       // Minimal dump: just LDS[0] and LDS[4] (the two dot products) at .L_br3 entry.
       // Writes to dO[0] and dO[4]. Only 10 instructions = ~40 bytes.
       {
@@ -3601,9 +3584,9 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
         size_t pos = translated_asm.find(target);
         if (pos != std::string::npos) {
           size_t insert_pos = pos + target.size();
-          // Read LDS[0] and LDS[4], store to dO[0] and dO[4]
+          // Read LDS[0], LDS[4], and v1 (scale factor)
           std::string dump =
-            "; === LDS DUMP: dot products ===\n"
+            "; === LDS DUMP: dot products + v1 ===\n"
             "v_mov_b32_e32 v26, 0\n"
             "ds_read_b32 v26, v26\n"          // v26 = LDS[0]
             "v_mov_b32_e32 v27, 4\n"
@@ -3613,6 +3596,8 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
             "global_store_dword v28, v26, s[2:3]\n"  // dO[0] = LDS[0]
             "v_mov_b32_e32 v28, 4\n"
             "global_store_dword v28, v27, s[2:3]\n"  // dO[4] = LDS[4]
+            "v_mov_b32_e32 v28, 8\n"
+            "global_store_dword v28, v1, s[2:3]\n"   // dO[8] = v1 (scale factor)
             "s_waitcnt vmcnt(0)\n"
             "; === END DUMP ===\n";
           translated_asm.insert(insert_pos, dump);
