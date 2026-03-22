@@ -3588,6 +3588,7 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
         replaceFirst(translated_asm,
           "s_branch .L_br4\n",
           "s_mov_b32 s3, 1 ; FIX: restore thread-0 mask for .L_br9 store\n"
+          "v_mov_b32_e32 v1, 0x3e800000 ; FIX: hardcode 1/sqrt(16) = 0.25\n"
           "s_branch .L_br4\n");
       }
       // Minimal dump: just LDS[0] and LDS[4] (the two dot products) at .L_br3 entry.
