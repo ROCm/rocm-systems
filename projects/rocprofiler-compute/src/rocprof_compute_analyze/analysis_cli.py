@@ -32,7 +32,6 @@ import pandas as pd
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from roofline import Roofline
 from utils import file_io, parser, schema, tty
-from utils.kernel_name_shortener import kernel_name_shortener
 from utils.logger import console_error, console_log, console_warning, demarcate
 from utils.roofline_calc import calc_ai_analyze, validate_roofline_csv
 from utils.utils import (
@@ -121,14 +120,17 @@ class cli_analysis(OmniAnalyze_Base):
                 if consolidated_df.empty:
                     tty.list_torch_operators(path_info[0], {})
                     sys.exit(0)
-                kernel_top_df = pd.read_csv(Path(path_info[0]) / "pmc_kernel_top.csv")
+
                 write_torch_trace_consolidated_csv(consolidated_df, torch_trace_path)
                 call_trees = build_call_trees_with_kernel_ids(
-                    consolidated_df,
+                    consolidated_df=consolidated_df,
                     kernel_top_df=kernel_top_df,
                 )
                 tty.list_torch_operators(path_info[0], call_trees)
                 sys.exit(0)
+
+            if getattr(args, "torch_operator", None) is not None:
+                self.apply_torch_operator_filter(args, workload, path_info[0])
 
             # create the loaded table
             parser.load_table_data(

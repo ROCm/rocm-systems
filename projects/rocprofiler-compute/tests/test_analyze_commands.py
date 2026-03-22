@@ -1818,7 +1818,7 @@ def test_create_df_kernel_top_stats_returns_valid_dataframes(
             "Sum(ns)",
             "Mean(ns)",
             "Median(ns)",
-            "Pct",
+            "Percent",
         ]
         for col in expected_columns:
             assert col in kernel_top_df.columns, f"Missing column: {col}"
@@ -1832,7 +1832,7 @@ def test_create_df_kernel_top_stats_returns_valid_dataframes(
         assert kernel_top_df.index[0] == 0
 
         # Test percentage sum is approximately 100%
-        assert abs(kernel_top_df["Pct"].sum() - 100.0) < 0.01
+        assert abs(kernel_top_df["Percent"].sum() - 100.0) < 0.01
 
 
 @pytest.mark.misc
