@@ -61,8 +61,6 @@ subtrees:
         title: AMD SMI examples (GitHub)
       - url: https://rocm.blogs.amd.com/software-tools-optimization/amd-smi-overview/README.html
         title: amd-smi CLI walkthrough
-      - url: https://instinct.docs.amd.com/projects/amdgpu-docs/en/latest/gpu-partitioning/mi300x/quick-start-guide.html
-        title: GPU partitioning (MI300X)
 
   - caption: About
     entries:

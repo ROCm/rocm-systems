@@ -150,7 +150,7 @@ returns an error.
 - `amdsmi_set_gpu_perf_determinism_mode()` -- Enable performance determinism
   with a GFXCLK SoftMax (in MHz).
 
-See [Clock, Power, and Performance Control](/doxygen/docBin/html/group__tagClkPowerPerfControl)
+See [Clock, Power, and Performance Control](/reference/amdsmi-cpp-api/functions.md#tagClkPowerPerfControl)
 for the full API reference.
 ::::
 

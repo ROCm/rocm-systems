@@ -106,3 +106,5 @@ def generate_doxyfile():
 
 
 generate_doxyfile()
+
+external_projects_remote_repository=""

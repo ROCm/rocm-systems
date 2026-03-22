@@ -73,32 +73,29 @@ For up-to-date installation instructions, see the [AMD GPU Driver (amdgpu)
 documentation](https://instinct.docs.amd.com/projects/amdgpu-docs/en/latest/install/detailed-install/prerequisites.html).
 
 (install_amdgpu_rocm)=
-## Install AMD SMI with ROCm
+## Install AMD SMI
 
 AMD SMI is included as a core package in the ROCm software stack as part of the
 `rocm-developer-tools` meta package. See [ROCm runtime
 packages](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/package-manager-integration.html#id3)
 for more information.
 
+::::{tab-set}
+:::{tab-item} With ROCm
+For up-to-date installation instructions using your Linux distribution's
+package manager, see {doc}`ROCm installation for Linux
+<rocm-install-on-linux:install/prerequisites>`.
+
 ```{note}
 The `amdgpu-install` script is no longer the recommended way to install ROCm.
 Install using your supported Linux distribution's package manager instead.
 ```
+:::
 
-For up-to-date installation instructions via package manager, see {doc}`ROCm
-installation for Linux <rocm-install-on-linux:install/prerequisites>`.
-
-After installing the `amdgpu` driver and ROCm, verify your AMD SMI installation:
-
-```shell
-amd-smi
-```
-
-(install_without_rocm)=
-## Install AMD SMI without ROCm
-
-The following are example steps to install the AMD SMI libraries and CLI tool on
-Ubuntu 22.04.
+:::{tab-item} Without ROCm
+Community-maintained AMD SMI packages might be available for your Linux
+distribution. The following are example steps to install the AMD SMI libraries
+and CLI tool on Ubuntu 22.04.
 
 1. Install the library.
 
@@ -112,22 +109,13 @@ Ubuntu 22.04.
    ```shell
    export PATH="${PATH:+${PATH}:}~/opt/rocm/bin"
    ```
+:::
+::::
 
-3. Verify your installation.
-
-   ```shell
-   amd-smi --help
-   ```
-
-## Optionally enable CLI autocompletion
-
-The `amd-smi` CLI application supports autocompletion. If `argcomplete` is not
-installed and enabled already, do so using the following commands.
+After installing the `amdgpu` driver and ROCm, verify your AMD SMI installation:
 
 ```shell
-python3 -m pip install argcomplete
-activate-global-python-argcomplete --user
-# restart shell to enable
+amd-smi
 ```
 
 (install-manual-py-lib)=

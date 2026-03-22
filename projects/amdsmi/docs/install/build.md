@@ -104,6 +104,33 @@ Once the tests are [built](#build_tests), you can run them by executing the
 (build_docs)=
 ## Build the docs
 
-To build the documentation, follow the instructions at [Building
+The [C/C++ API reference](../reference/amdsmi-cpp-api/index.md) is generated
+with [Doxygen 1.9.8](https://www.doxygen.nl/manual/changelog.html#log_1_9_8).
+
+1. Create a Python virtual environment and install documentation dependencies.
+
+   ```bash
+   # From rocm-systems/projects/amdsmi
+   python -m venv .venv
+   source .venv/bin/activate
+   pip install -r docs/sphinx/requirements.txt
+   ```
+
+2. Use the following command to build the documentation using
+   [Sphinx](https://www.sphinx-doc.org/en/master/).
+
+   ```bash
+   python -m sphinx docs docs/_build -j auto -E -v
+   ```
+
+3. Open `docs/_build/index.html` in your web browser to view the
+   documentation. To serve the site locally instead, run:
+
+   ```bash
+   python -m http.server -d docs/_build
+   # Go to http://localhost:8000 in your browser
+   ```
+
+For related information, see [Building
 documentation](https://rocm.docs.amd.com/en/latest/contribute/building.html).
 

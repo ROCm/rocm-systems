@@ -7,23 +7,34 @@ myst:
 
 # AMD SMI CLI tool usage
 
-This tool is a command line interface (CLI) for manipulating and monitoring the
+`amd-smi` is a command line interface  for manipulating and monitoring the
 `amdgpu` kernel; it is intended to replace and deprecate the existing `rocm_smi`
-CLI tool and `gpuv-smi` tool. The AMD SMI CLI tool uses Ctypes to call the
+CLI tool and `gpuv-smi` tool. The `amd-smi` CLI tool uses Ctypes to call the
 `amd_smi_lib` API.
 
 When using the CLI tool, you should have at least one AMD GPU and the driver
 installed.
 
 ```{admonition} Disclaimer
-The AMD SMI CLI tool is provided as an example code to aid the development of
+The `amd-smi` CLI tool is provided as an example code to aid the development of
 telemetry tools. The [Python](./amdsmi-py-lib) or [C++
 library](./amdsmi-cpp-lib) is recommended as a robust data source.
 ```
 
-## Install the CLI Tool and Python library
+## Install the CLI tool and Python library
 
 Refer to the [installation instructions](../install/install.md).
+
+### Optionally enable CLI autocompletion
+
+The `amd-smi` CLI application supports autocompletion. If `argcomplete` is not
+installed and enabled already, do so using the following commands.
+
+```shell
+python3 -m pip install argcomplete
+activate-global-python-argcomplete --user
+# restart shell to enable
+```
 
 ## Get started
 

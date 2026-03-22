@@ -52,7 +52,6 @@ documentation](https://instinct.docs.amd.com/projects/amd-smi-virt/en/latest/).
 :::{grid-item-card} Tutorials
 * [AMD SMI examples (GitHub)](https://github.com/ROCm/rocm-systems/tree/develop/projects/amdsmi/example)
 * [amd-smi CLI walkthrough](https://rocm.blogs.amd.com/software-tools-optimization/amd-smi-overview/README.html)
-* [GPU partitioning (MI300X)](https://instinct.docs.amd.com/projects/amdgpu-docs/en/latest/gpu-partitioning/mi300x/quick-start-guide.html)
 :::
 ::::
 

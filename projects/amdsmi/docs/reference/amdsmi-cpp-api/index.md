@@ -16,3 +16,5 @@ functionalities and how to implement them in your applications.
 - [Constants](./constants.md)
 
 - [Data structures](./structs.md)
+
+- [Typedefs](./typedefs.md)

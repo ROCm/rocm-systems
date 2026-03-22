@@ -2838,26 +2838,35 @@ typedef struct {
  */
 
 /**
- *  @brief Initialize the AMD SMI library
+ *  @brief Initialize the AMD SMI library and allocate internal resources
  *
  *  @ingroup tagInitShutdown
  *
  *  @platform{gpu_bm_linux} @platform{host} @platform{cpu_bm} @platform{guest_1vf}
  *  @platform{guest_mvf} @platform{guest_windows}
  *
- *  @details This function initializes the library and the internal data structures,
- *  including those corresponding to sources of information that SMI provides.
- *  Singleton Design, requires the same number of inits as shutdowns.
+ *  @details Must be called before any other AMD SMI functions. Initializes
+ *  internal data structures and discovers the processors specified by
+ *  @p init_flags. AMD SMI uses a singleton pattern: each call to
+ *  ::amdsmi_init() must be paired with a corresponding call to
+ *  ::amdsmi_shut_down().
  *
- *  The @p init_flags decides which type of processor
- *  can be discovered by ::amdsmi_get_socket_handles(). AMDSMI_INIT_AMD_GPUS returns
- *  sockets with AMD GPUS, and AMDSMI_INIT_AMD_GPUS | AMDSMI_INIT_AMD_CPUS returns
- *  sockets with either AMD GPUS or CPUS.
- *  Both AMDSMI_INIT_AMD_GPUS and AMDSMI_INIT_AMD_CPUS flags are supported.
+ *  The @p init_flags parameter controls which processor types are discovered
+ *  and made available via ::amdsmi_get_socket_handles(). One or more
+ *  ::amdsmi_init_flags_t values may be OR'd together:
  *
- *  @param[in] init_flags Bit flags that tell SMI how to initialze. Values of
- *  ::amdsmi_init_flags_t may be OR'd together and passed through @p init_flags
- *  to modify how AMDSMI initializes.
+ *  | Flag                          | Processors discovered       |
+ *  |-------------------------------|-----------------------------|
+ *  | ::AMDSMI_INIT_AMD_GPUS        | AMD GPUs                    |
+ *  | ::AMDSMI_INIT_AMD_CPUS        | AMD CPUs                    |
+ *  | ::AMDSMI_INIT_AMD_APUS        | AMD CPUs and GPUs (default) |
+ *  | ::AMDSMI_INIT_NON_AMD_GPUS    | Non-AMD GPUs                |
+ *  | ::AMDSMI_INIT_NON_AMD_CPUS    | Non-AMD CPUs                |
+ *  | ::AMDSMI_INIT_AMD_NICS        | AMD NICs                    |
+ *  | ::AMDSMI_INIT_ALL_PROCESSORS  | All supported processors    |
+ *
+ *  @param[in] init_flags One or more ::amdsmi_init_flags_t values OR'd
+ *  together to specify which processor types to discover.
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
