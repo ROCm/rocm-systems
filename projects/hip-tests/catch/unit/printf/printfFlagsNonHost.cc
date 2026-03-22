@@ -29,7 +29,7 @@
  * - HIP_VERSION >= 5.7
  */
 
-TEST_CASE(Unit_Buffered_Printf_Flags) {
+HIP_TEST_CASE(Unit_Buffered_Printf_Flags) {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
@@ -43,9 +43,9 @@ TEST_CASE(Unit_Buffered_Printf_Flags) {
 +0000042
 -42
 +0000042
-xyzzy   
+xyzzy
 -42
-00000042        
+00000042
         00000042
 )here");
 

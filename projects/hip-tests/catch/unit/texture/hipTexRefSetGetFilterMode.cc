@@ -8,7 +8,7 @@
 #if defined(__HIP_PLATFORM_AMD__) || CUDA_VERSION < CUDA_12000
 texture<float, 2, hipReadModeElementType> tex;
 // Test for hipTexRefSetFilterMode and hipTexRefGetFilterMode, including error handling
-TEST_CASE(Unit_hipTexRefSetGetFilterMode) {
+HIP_TEST_CASE(Unit_hipTexRefSetGetFilterMode) {
   CHECK_IMAGE_SUPPORT;
 
   // Retrieve the texture reference for our symbol

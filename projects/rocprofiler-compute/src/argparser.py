@@ -548,7 +548,7 @@ Examples:
         ),
     )
 
-    ## Roofline Command Line Options
+    ## Roofline Command Line Options (profile: microbenchmark only)
     roofline_group.add_argument(
         "--roof-only",
         required=False,
@@ -560,36 +560,6 @@ Examples:
         ),
     )
     roofline_group.add_argument(
-        "--sort",
-        required=False,
-        metavar="",
-        type=str,
-        default="kernels",
-        choices=["kernels", "dispatches"],
-        help=(
-            "\t\t\tOverlay top kernels or top dispatches: (DEFAULT: kernels)\n"
-            "\t\t\t   kernels\n"
-            "\t\t\t   dispatches"
-        ),
-    )
-    roofline_group.add_argument(
-        "-m",
-        "--mem-level",
-        required=False,
-        choices=["HBM", "L2", "vL1D", "LDS"],
-        metavar="",
-        nargs="+",
-        type=str,
-        default="ALL",
-        help=(
-            "\t\t\tFilter by memory level: (DEFAULT: ALL)\n"
-            "\t\t\t   HBM\n"
-            "\t\t\t   L2\n"
-            "\t\t\t   vL1D\n"
-            "\t\t\t   LDS"
-        ),
-    )
-    roofline_group.add_argument(
         "--device",
         metavar="",
         required=False,
@@ -597,62 +567,6 @@ Examples:
         type=int,
         help="\t\t\tTarget GPU device ID. (DEFAULT: 0)",
     )
-    roofline_group.add_argument(
-        "-R",
-        "--roofline-data-type",
-        required=False,
-        choices=[
-            "FP4",
-            "FP6",
-            "FP8",
-            "FP16",
-            "BF16",
-            "FP32",
-            "FP64",
-            "I8",
-            "I32",
-            "I64",
-        ],
-        metavar="",
-        nargs="+",
-        type=str,
-        default=["FP32"],
-        help=(
-            "\t\t\tChoose datatypes to view roofline HTMLs for: (DEFAULT: FP32)\n"
-            "\t\t\t   FP4\n"
-            "\t\t\t   FP6\n"
-            "\t\t\t   FP8\n"
-            "\t\t\t   FP16\n"
-            "\t\t\t   BF16\n"
-            "\t\t\t   FP32\n"
-            "\t\t\t   FP64\n"
-            "\t\t\t   I8\n"
-            "\t\t\t   I32\n"
-            "\t\t\t   I64\n"
-            "\t\t\t "
-        ),
-    )
-
-    # roofline_group.add_argument(
-    #     '-w', '--workgroups', required=False, default=-1, type=int,
-    #     help="\t\t\tNumber of kernel workgroups (DEFAULT: 1024)"
-    # )
-    # roofline_group.add_argument(
-    #     '--wsize', required=False, default=-1, type=int,
-    #     help="\t\t\tWorkgroup size (DEFAULT: 256)"
-    # )
-    # roofline_group.add_argument(
-    #     '--dataset', required=False, default=-1, type=int,
-    #     help="\t\t\tDataset size (DEFAULT: 536M)"
-    # )
-    # roofline_group.add_argument(
-    #     '-e', '--experiments', required=False, default=-1, type=int,
-    #     help="\t\t\tNumber of experiments (DEFAULT: 100)"
-    # )
-    # roofline_group.add_argument(
-    #     '--iter', required=False, default=-1, type=int,
-    #     help="\t\t\tNumber of iterations (DEFAULT: 10)"
-    # )
 
     ## ----------------------------
     # Experimental Features
@@ -860,6 +774,49 @@ Examples:
         "interact with rocprofiler-compute metrics.",
     )
     analyze_group.add_argument(
+        "--pc-sampling-sorting-type",
+        required=False,
+        metavar="",
+        dest="pc_sampling_sorting_type",
+        default="offset",
+        type=str,
+        help="\t\tSet the sorting type of pc sampling: "
+        "offset or count (DEFAULT: offset).",
+    )
+
+    ## Roofline Command Line Options (analyze: visualization)
+    roofline_group_analyze = analyze_parser.add_argument_group("Roofline Options")
+    roofline_group_analyze.add_argument(
+        "--sort",
+        required=False,
+        metavar="",
+        type=str,
+        default="kernels",
+        choices=["kernels", "dispatches"],
+        help=(
+            "\t\tOverlay top kernels or top dispatches: (DEFAULT: kernels)\n"
+            "\t\t   kernels\n"
+            "\t\t   dispatches"
+        ),
+    )
+    roofline_group_analyze.add_argument(
+        "-m",
+        "--mem-level",
+        required=False,
+        choices=["HBM", "L2", "vL1D", "LDS"],
+        metavar="",
+        nargs="+",
+        type=str,
+        default="ALL",
+        help=(
+            "\t\tFilter by memory level: (DEFAULT: ALL)\n"
+            "\t\t   HBM\n"
+            "\t\t   L2\n"
+            "\t\t   vL1D\n"
+            "\t\t   LDS"
+        ),
+    )
+    roofline_group_analyze.add_argument(
         "-R",
         "--roofline-data-type",
         required=False,
@@ -881,27 +838,17 @@ Examples:
         default=["FP32"],
         help=(
             "\t\tChoose datatypes to view roofline HTMLs for: (DEFAULT: FP32)\n"
-            "\t\t\t   FP4\n"
-            "\t\t\t   FP6\n"
-            "\t\t\t   FP8\n"
-            "\t\t\t   FP16\n"
-            "\t\t\t   BF16\n"
-            "\t\t\t   FP32\n"
-            "\t\t\t   FP64\n"
-            "\t\t\t   I8\n"
-            "\t\t\t   I32\n"
-            "\t\t\t   I64\n\t\t\t "
+            "\t\t   FP4\n"
+            "\t\t   FP6\n"
+            "\t\t   FP8\n"
+            "\t\t   FP16\n"
+            "\t\t   BF16\n"
+            "\t\t   FP32\n"
+            "\t\t   FP64\n"
+            "\t\t   I8\n"
+            "\t\t   I32\n"
+            "\t\t   I64\n"
         ),
-    )
-    analyze_group.add_argument(
-        "--pc-sampling-sorting-type",
-        required=False,
-        metavar="",
-        dest="pc_sampling_sorting_type",
-        default="offset",
-        type=str,
-        help="\t\tSet the sorting type of pc sampling: "
-        "offset or count (DEFAULT: offset).",
     )
 
     analyze_advanced_group.add_argument(

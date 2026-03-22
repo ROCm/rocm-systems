@@ -77,7 +77,7 @@ void findAPITestCaseInFileByDoxygen(HipAPI& hip_api, std::string test_module_fil
 
   std::string add_group_definition{"@addtogroup"};
   std::string ref_test_case{"@ref"};
-  std::string test_case_definition{"TEST_CASE("};
+  std::string test_case_definition{"HIP_TEST_CASE("};
   std::string current_api_name{"None"};
   std::string test_case{"None"};
 
@@ -102,8 +102,8 @@ void findAPITestCaseInFileByDoxygen(HipAPI& hip_api, std::string test_module_fil
     }
 
     if (line.find(test_case_definition) != std::string::npos) {
-      test_case = line.substr(line.find("\"") + 1);
-      test_case = test_case.substr(0, test_case.find("\""));
+      test_case = line.substr(line.find(test_case_definition) + test_case_definition.length());
+      test_case = test_case.substr(0, test_case.find(")"));
       hip_api.addTestCase(TestCaseOccurrence{test_case, test_module_file, line_number});
     }
   }
@@ -122,7 +122,7 @@ void findAPITestCaseInFileByAPIName(HipAPI& hip_api, std::string test_module_fil
   int line_number{0};
   std::string line;
 
-  std::string test_case_definition{"TEST_CASE("};
+  std::string test_case_definition{"HIP_TEST_CASE("};
   std::string test_def_macro{"_TEST_DEF("};
   std::string test_def_impl_macro{"_TEST_DEF_IMPL("};
   std::string test_case{"None"};
@@ -131,8 +131,8 @@ void findAPITestCaseInFileByAPIName(HipAPI& hip_api, std::string test_module_fil
     ++line_number;
 
     if (line.find(test_case_definition) != std::string::npos) {
-      test_case = line.substr(line.find("\"") + 1);
-      test_case = test_case.substr(0, test_case.find("\""));
+      test_case = line.substr(line.find(test_case_definition) + test_case_definition.length());
+      test_case = test_case.substr(0, test_case.find(")"));
       if (test_case.find("_" + hip_api.getName() + "_") != std::string::npos) {
         hip_api.addTestCase(TestCaseOccurrence{test_case, test_module_file, line_number});
       }

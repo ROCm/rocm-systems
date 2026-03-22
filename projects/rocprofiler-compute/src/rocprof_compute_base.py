@@ -555,7 +555,6 @@ class RocProfCompute:
 
         post_duration = int(time_end_post - time_end_prof)
         console_debug(f'time taken for "post_processing" was {post_duration} seconds')
-        self.__soc[self.__mspec.gpu_arch].post_profiling()
 
     @demarcate
     def run_analysis(self) -> None:
