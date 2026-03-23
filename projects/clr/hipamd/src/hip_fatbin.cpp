@@ -125,7 +125,6 @@ FatBinaryInfo::~FatBinaryInfo() {
     }
   }
   for (auto itemData : toDelete) {
-    LogPrintfInfo("~FatBinaryInfo(%p) will delete binary_image_ %p", this, itemData);
     delete[] reinterpret_cast<const char*>(itemData);
   }
   if (!HIP_USE_RUNTIME_UNBUNDLER) {
@@ -394,15 +393,11 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
       get_spirv_data_res = true;
     };
 
-    LogPrintfInfo("Searching for code objects, HIP_FORCE_SPIRV_CODEOBJECT: %d",
-                  HIP_FORCE_SPIRV_CODEOBJECT);
-
     for (auto device : devices) {
       std::string device_name = device->devices()[0]->isa().isaName();
       auto dev_it = unique_isa_names.find(device_name);
       // If the size is not 0, that means we found the native isa code object
       if (dev_it->second.first != 0 && !HIP_FORCE_SPIRV_CODEOBJECT) {
-        LogPrintfInfo("Using Native code object: %s", device->devices()[0]->isa().targetId());
         guarantee(unique_isa_names.cend() != dev_it,
                   "Cannot find the device name in the unique device name");
         hip_status = AddDevProgram(
@@ -423,7 +418,6 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
           // We have already compiled for it, lets reuse the code object
           char* co = new char[code_iter->second.second];
           std::memcpy(co, code_iter->second.first, code_iter->second.second);
-          LogPrintfInfo("reusing code object for: %s", target_id.c_str());
           hip_status = AddDevProgram(device, co, code_iter->second.second, 0);
           if (hip_status != hipSuccess) {
             break;
@@ -431,7 +425,6 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
           continue;
         }
 
-        LogPrintfInfo("Creating ISA for: %s from spirv", target_id.c_str());
         comgr_helper::ComgrActionInfoUniqueHandle reloc_action;
         std::string isa = "amdgcn-amd-amdhsa--" + target_id;
         if (comgr_status = reloc_action.Create(); comgr_status != AMD_COMGR_STATUS_SUCCESS) {

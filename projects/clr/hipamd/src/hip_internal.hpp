@@ -151,6 +151,17 @@ const char* ihipGetErrorName(hipError_t hip_error);
 #define HIP_INIT_API_NO_RETURN(cid, ...)                                                           \
   HIP_INIT_API_INTERNAL(1, cid, __VA_ARGS__)
 
+// Version without logging for internal __hip* functions (high frequency, low value logs)
+#define HIP_INIT_API_NOLOG(cid, ...)                                                               \
+  if (amd::Device::IsGPUInError()) {                                                              \
+    HIP_RETURN(ConvertCLErrorIntoHIPError(amd::Device::GetGPUError()));                            \
+  }                                                                                                \
+  HIP_INIT(0)                                                                                      \
+  HIP_CB_SPAWNER_OBJECT(cid);                                                                      \
+  if (hip::g_devices.empty()) {                                                                    \
+    HIP_RETURN(hipErrorNoDevice);                                                                  \
+  }
+
 #define HIP_RETURN_DURATION(ret, ...)                                                              \
   hip::tls.last_command_error_ = ret;                                                              \
   if (amd::Device::IsGPUInError()) {                                                               \
@@ -181,6 +192,21 @@ const char* ihipGetErrorName(hipError_t hip_error);
     }                                                                                              \
   }                                                                                                \
   HIP_ERROR_PRINT(hip::tls.last_command_error_, __VA_ARGS__)                                       \
+  return hip::tls.last_command_error_;
+
+// Version without logging for internal __hip* functions
+#define HIP_RETURN_NOLOG(ret)                                                                      \
+  hip::tls.last_command_error_ = ret;                                                              \
+  if (amd::Device::IsGPUInError()) {                                                               \
+    hipError_t hip_error = ConvertCLErrorIntoHIPError(amd::Device::GetGPUError());                 \
+    hip::tls.last_error_ = hip_error;                                                              \
+    hip::tls.last_command_error_ = hip_error;                                                      \
+  } else {                                                                                         \
+    if (hip::tls.last_command_error_ != hipSuccess &&                                              \
+           hip::tls.last_command_error_ != hipErrorNotReady) {                                     \
+      hip::tls.last_error_ = hip::tls.last_command_error_;                                         \
+    }                                                                                              \
+  }                                                                                                \
   return hip::tls.last_command_error_;
 
 #define HIP_RETURN_ONFAIL(func)          \

@@ -237,7 +237,7 @@ hipError_t hipConfigureCall(dim3 gridDim, dim3 blockDim, size_t sharedMem,
 
 hipError_t __hipPushCallConfiguration(dim3 gridDim, dim3 blockDim, size_t sharedMem,
                                                  hipStream_t stream) {
-  HIP_INIT_API(__hipPushCallConfiguration, gridDim, blockDim, sharedMem, stream);
+  HIP_INIT_API_NOLOG(__hipPushCallConfiguration, gridDim, blockDim, sharedMem, stream);
 
   PlatformState::instance().configureCall(gridDim, blockDim, sharedMem, stream);
 
@@ -246,7 +246,7 @@ hipError_t __hipPushCallConfiguration(dim3 gridDim, dim3 blockDim, size_t shared
 
 hipError_t __hipPopCallConfiguration(dim3* gridDim, dim3* blockDim, size_t* sharedMem,
                                                 hipStream_t* stream) {
-  HIP_INIT_API(__hipPopCallConfiguration, gridDim, blockDim, sharedMem, stream);
+  HIP_INIT_API_NOLOG(__hipPopCallConfiguration, gridDim, blockDim, sharedMem, stream);
 
   ihipExec_t exec;
   PlatformState::instance().popExec(exec);
@@ -255,7 +255,7 @@ hipError_t __hipPopCallConfiguration(dim3* gridDim, dim3* blockDim, size_t* shar
   *sharedMem = exec.sharedMem_;
   *stream = exec.hStream_;
 
-  HIP_RETURN(hipSuccess);
+  HIP_RETURN_NOLOG(hipSuccess);
 }
 
 hipError_t hipSetupArgument(const void* arg, size_t size, size_t offset) {
