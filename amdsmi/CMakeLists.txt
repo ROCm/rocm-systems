@@ -72,8 +72,6 @@ set(${AMD_SMI_LIBS_TARGET}_VERSION_STRING
 
 set(DEFAULT_VERSION "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}")
 update_version_in_file("include/amd_smi/amdsmi.h" ${DEFAULT_VERSION} "#define AMDSMI_LIB_VERSION_" " *" " ")
-update_version_in_file("rust-interface/src/amdsmi_wrapper.rs" ${DEFAULT_VERSION} "AMDSMI_LIB_VERSION_" " *: *u32 *= *"
-                       ": u32 = ")
 
 # Make proper version for appending
 #Prepare final version for the CPACK use
@@ -293,14 +291,8 @@ if(BUILD_SHARED_LIBS)
     if(BUILD_CLI)
         add_subdirectory("amdsmi_cli")
     endif()
-    if(BUILD_RUST_WRAPPER)
-        add_subdirectory("rust-interface")
-    endif()
 endif()
 
-if(BUILD_EXAMPLES)
-    add_subdirectory("example")
-endif()
 
 include(CMakePackageConfigHelpers)
 
@@ -354,19 +346,7 @@ install(
     FILES ${CMAKE_CURRENT_SOURCE_DIR}/README.md
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/doc/${CPACK_PACKAGE_NAME}
     COMPONENT dev)
-install(
-    DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/example
-    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${AMD_SMI}
-    COMPONENT dev
-    FILES_MATCHING
-    PATTERN "*.h"
-    PATTERN "*.cc"
-    PATTERN "*.txt"
-    PATTERN "build*" EXCLUDE
-    PATTERN ".cache*" EXCLUDE)
 
-# Make for goamdsmi_shim library
-add_subdirectory(goamdsmi_shim)
 
 #Debian package specific variables
 # some distros like Debian10 don't ship libdrm-amdgpu-dev, keep as recommends
@@ -488,13 +468,6 @@ endif()
 # https://bugzilla.redhat.com/show_bug.cgi?id=1811358
 # set(CPACK_RPM_PACKAGE_SUGGESTS "sudo, libdrm-devel")
 
-## Process the Rpm install/remove scripts to update the CPACK variables
-configure_file("${CMAKE_CURRENT_SOURCE_DIR}/RPM/post.in" RPM/post @ONLY)
-configure_file("${CMAKE_CURRENT_SOURCE_DIR}/RPM/preun.in" RPM/preun @ONLY)
-configure_file("${CMAKE_CURRENT_SOURCE_DIR}/RPM/postun.in" RPM/postun @ONLY)
-set(CPACK_RPM_POST_INSTALL_SCRIPT_FILE "${CMAKE_CURRENT_BINARY_DIR}/RPM/post")
-set(CPACK_RPM_PRE_UNINSTALL_SCRIPT_FILE "${CMAKE_CURRENT_BINARY_DIR}/RPM/preun")
-set(CPACK_RPM_POST_UNINSTALL_SCRIPT_FILE "${CMAKE_CURRENT_BINARY_DIR}/RPM/postun")
 
 #Set the names now using CPACK utility
 set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
