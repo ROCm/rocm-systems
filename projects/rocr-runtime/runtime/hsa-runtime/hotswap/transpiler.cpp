@@ -3863,6 +3863,7 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
         size_t pos = s.find(from);
         if (pos != std::string::npos) s.replace(pos, from.size(), to);
       };
+      // Multihead/attn: s25 + s_cbranch_vccz
       replaceFirst(translated_asm,
         "s_andn2_b32 vcc_lo, exec_lo, s25\n",
         "s_mov_b32 vcc_lo, 0 ; FIX: force tree entry (s25 clobbered by SCC)\n");
