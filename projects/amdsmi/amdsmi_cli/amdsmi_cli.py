@@ -47,7 +47,7 @@ gpu_metrics_cache_ms = os.environ.setdefault("AMDSMI_GPU_METRICS_CACHE_MS", "100
 logging.debug("AMDSMI_GPU_METRICS_CACHE_MS = %sms", gpu_metrics_cache_ms)
 
 # Set the environment variable for ASIC cache duration
-asic_info_cache_ms = os.environ.setdefault("AMDSMI_ASIC_INFO_CACHE_MS", "10000") # 10 seconds
+asic_info_cache_ms = os.environ.setdefault("AMDSMI_ASIC_INFO_CACHE_MS", "10000")  # 10 seconds
 logging.debug("AMDSMI_ASIC_INFO_CACHE_MS = %sms", asic_info_cache_ms)
 
 try:
@@ -73,14 +73,16 @@ except ImportError:
         print(f"Unable to import amdsmi_cli files. Check {cli_files_path} if they are present.")
         sys.exit(1)
 
+
 def _print_error(e, destination):
-    if destination in ['stdout', 'json', 'csv']:
+    if destination in ["stdout", "json", "csv"]:
         print(e)
     else:
         f = open(destination, "w", encoding="utf-8")
         f.write(e)
         f.close()
         print("Error occurred. Result written to " + str(destination) + " file")
+
 
 def configure_logging_and_execute(args, amd_smi_commands):
     """
@@ -104,17 +106,20 @@ def configure_logging_and_execute(args, amd_smi_commands):
     # log string with the following format:
     # loglevel | YYYY-MM-DD HH:MM:SS.ms | filename:line | message
     logging_dict = {
-        'DEBUG': logging.DEBUG,
-        'INFO': logging.INFO,
-        'WARNING': logging.WARNING,
-        'ERROR': logging.ERROR,
-        'CRITICAL': logging.CRITICAL
+        "DEBUG": logging.DEBUG,
+        "INFO": logging.INFO,
+        "WARNING": logging.WARNING,
+        "ERROR": logging.ERROR,
+        "CRITICAL": logging.CRITICAL,
     }
 
-    time = '%(asctime)s.%(msecs)03d'
-    datefmt = '%Y-%m-%d %H:%M:%S'
-    logging.basicConfig(format='%(levelname)s | ' + time + ' | %(filename)s:%(lineno)d | %(message)s',
-                        level=logging_dict[args.loglevel], datefmt=datefmt)
+    time = "%(asctime)s.%(msecs)03d"
+    datefmt = "%Y-%m-%d %H:%M:%S"
+    logging.basicConfig(
+        format="%(levelname)s | " + time + " | %(filename)s:%(lineno)d | %(message)s",
+        level=logging_dict[args.loglevel],
+        datefmt=datefmt,
+    )
 
     # Disable traceback for non-debug log levels
     if args.loglevel == "DEBUG":
@@ -125,18 +130,12 @@ def configure_logging_and_execute(args, amd_smi_commands):
     logging.debug(args)
 
     # Check if --rocm-smi flag is set (top-level flag, not a subcommand)
-    if hasattr(args, 'rocm_smi') and args.rocm_smi:
+    if hasattr(args, "rocm_smi") and args.rocm_smi:
         amd_smi_commands.rocm_smi(args)
         return
 
     # Execute subcommands
-    try:
-        args.func(args)
-    except amdsmi_cli_exceptions.AmdSmiException as e:
-        _print_error(str(e), amd_smi_commands.logger.destination)
-    except amdsmi_exception.AmdSmiLibraryException as e:
-        exc = amdsmi_cli_exceptions.AmdSmiLibraryErrorException(amd_smi_commands.logger.format, e.get_error_code())
-        _print_error(str(exc), amd_smi_commands.logger.destination)
+    args.func(args)
 
 
 if __name__ == "__main__":
@@ -149,27 +148,29 @@ if __name__ == "__main__":
 
     amd_smi_helpers = AMDSMIHelpers()
     amd_smi_commands = AMDSMICommands(helpers=amd_smi_helpers)
-    amd_smi_parser = AMDSMIParser(amd_smi_commands.version,
-                                    amd_smi_commands.list,
-                                    amd_smi_commands.static,
-                                    amd_smi_commands.firmware,
-                                    amd_smi_commands.bad_pages,
-                                    amd_smi_commands.metric,
-                                    amd_smi_commands.process,
-                                    amd_smi_commands.profile,
-                                    amd_smi_commands.event,
-                                    amd_smi_commands.topology,
-                                    amd_smi_commands.set_value,
-                                    amd_smi_commands.reset,
-                                    amd_smi_commands.monitor,
-                                    amd_smi_commands.xgmi,
-                                    amd_smi_commands.partition,
-                                    amd_smi_commands.ras,
-                                    amd_smi_commands.node,
-                                    amd_smi_commands.rocm_smi,
-                                    amd_smi_commands.default,
-                                    sys_argv=sys.argv,
-                                    helpers=amd_smi_helpers)
+    amd_smi_parser = AMDSMIParser(
+        amd_smi_commands.version,
+        amd_smi_commands.list,
+        amd_smi_commands.static,
+        amd_smi_commands.firmware,
+        amd_smi_commands.bad_pages,
+        amd_smi_commands.metric,
+        amd_smi_commands.process,
+        amd_smi_commands.profile,
+        amd_smi_commands.event,
+        amd_smi_commands.topology,
+        amd_smi_commands.set_value,
+        amd_smi_commands.reset,
+        amd_smi_commands.monitor,
+        amd_smi_commands.xgmi,
+        amd_smi_commands.partition,
+        amd_smi_commands.ras,
+        amd_smi_commands.node,
+        amd_smi_commands.rocm_smi,
+        amd_smi_commands.default,
+        sys_argv=sys.argv,
+        helpers=amd_smi_helpers,
+    )
     try:
         argcomplete.autocomplete(amd_smi_parser)
     except NameError:
@@ -177,13 +178,29 @@ if __name__ == "__main__":
 
     # Store possible subcommands & aliases for later errors
     valid_commands = amd_smi_parser.possible_commands
-    valid_commands += ['--help', '-h', '--rocm-smi']
+    valid_commands += ["--help", "-h", "--rocm-smi"]
 
     # Convert arguments to lowercase, but preserve case for folder path values
     processed_argv = []
     # Arguments that should preserve case
-    case_sensitive_args = ['--folder', '--file', '--gpu', '--cpu', '--core', '--profile', '--cper-file']
-    case_sensitive_prefixes = ['--folder=', '--file=', '--gpu=', '--cpu=', '--core=', '--profile=', '--cper-file=']
+    case_sensitive_args = [
+        "--folder",
+        "--file",
+        "--gpu",
+        "--cpu",
+        "--core",
+        "--profile",
+        "--cper-file",
+    ]
+    case_sensitive_prefixes = [
+        "--folder=",
+        "--file=",
+        "--gpu=",
+        "--cpu=",
+        "--core=",
+        "--profile=",
+        "--cper-file=",
+    ]
 
     preserve_case_for_next = False
     for i, arg in enumerate(sys.argv):
@@ -199,11 +216,11 @@ if __name__ == "__main__":
             # Handle --arg=value format, preserve case for the value part
             for prefix in case_sensitive_prefixes:
                 if arg.startswith(prefix):
-                    flag = prefix.rstrip('=')
-                    value = arg[len(prefix):]
-                    processed_argv.append(flag.lower() + '=' + value)
+                    flag = prefix.rstrip("=")
+                    value = arg[len(prefix) :]
+                    processed_argv.append(flag.lower() + "=" + value)
                     break
-        elif arg.startswith('--') or not arg.startswith('-'):
+        elif arg.startswith("--") or not arg.startswith("-"):
             # Convert other long options and positional arguments to lowercase
             processed_argv.append(arg.lower())
         else:
@@ -211,21 +228,29 @@ if __name__ == "__main__":
             processed_argv.append(arg)
     sys.argv = processed_argv
 
-    if len(sys.argv) == 1:
-        args = amd_smi_parser.parse_args(args=['default'])
-    elif sys.tracebacklimit == 10 and (sys.argv[1] == '--loglevel'):
-        args = amd_smi_parser.parse_args(args=['default', '--loglevel'] + sys.argv[2:])
-    elif sys.argv[1] in valid_commands:
-        args = amd_smi_parser.parse_args(args=None)
-    else:
-        raise amdsmi_cli_exceptions.AmdSmiInvalidSubcommandException(sys.argv[1],amd_smi_commands.logger.destination)
+    try:
+        if len(sys.argv) == 1:
+            args = amd_smi_parser.parse_args(args=['default'])
+        elif sys.tracebacklimit == 10 and (sys.argv[1] == '--loglevel'):
+            args = amd_smi_parser.parse_args(args=['default', '--loglevel'] + sys.argv[2:])
+        elif sys.argv[1] in valid_commands:
+            args = amd_smi_parser.parse_args(args=None)
+        else:
+            raise amdsmi_cli_exceptions.AmdSmiInvalidSubcommandException(sys.argv[1],amd_smi_commands.logger.destination)
 
-    # Handle command modifiers before subcommand execution
-    # human readable is the default output format
-    if hasattr(args, 'json') and args.json:
-        amd_smi_commands.logger.format = amd_smi_commands.logger.LoggerFormat.json.value
-    if hasattr(args, 'csv') and args.csv:
-        amd_smi_commands.logger.format = amd_smi_commands.logger.LoggerFormat.csv.value
-    if hasattr(args, 'file') and args.file:
-        amd_smi_commands.logger.destination = args.file
-    configure_logging_and_execute(args, amd_smi_commands)
+        # Handle command modifiers before subcommand execution
+        # human readable is the default output format
+        if hasattr(args, 'json') and args.json:
+            amd_smi_commands.logger.format = amd_smi_commands.logger.LoggerFormat.json.value
+        if hasattr(args, 'csv') and args.csv:
+            amd_smi_commands.logger.format = amd_smi_commands.logger.LoggerFormat.csv.value
+        if hasattr(args, 'file') and args.file:
+            amd_smi_commands.logger.destination = args.file
+        configure_logging_and_execute(args, amd_smi_commands)
+    except amdsmi_cli_exceptions.AmdSmiException as e:
+        _print_error(f"{type(e).__module__}.{type(e).__name__}: {str(e)}", amd_smi_commands.logger.destination)
+        sys.exit(abs(e.value))
+    except amdsmi_exception.AmdSmiLibraryException as e:
+        exc = amdsmi_cli_exceptions.AmdSmiLibraryErrorException(amd_smi_commands.logger.format, e.get_error_code())
+        _print_error(f"{type(exc).__module__}.{type(exc).__name__}: {str(exc)}", amd_smi_commands.logger.destination)
+        sys.exit(abs(exc.value))

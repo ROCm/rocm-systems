@@ -19,19 +19,20 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+#include "hw_topology_read.h"
+
+#include <gtest/gtest.h>
 
 #include <cinttypes>
 #include <cstdint>
 #include <cstdio>
-
 #include <iomanip>
 #include <iostream>
 #include <string>
 #include <vector>
 
-#include <gtest/gtest.h>
+#include "../test_common.h"
 #include "amd_smi/amdsmi.h"
-#include "hw_topology_read.h"
 
 typedef struct {
   std::string type;
@@ -43,12 +44,10 @@ typedef struct {
 
 TestHWTopologyRead::TestHWTopologyRead() : TestBase() {
   set_title("AMDSMI Hardware Topology Read Test");
-  set_description(
-      "This test verifies that Hardware Topology can be read properly.");
+  set_description("This test verifies that Hardware Topology can be read properly.");
 }
 
-TestHWTopologyRead::~TestHWTopologyRead(void) {
-}
+TestHWTopologyRead::~TestHWTopologyRead(void) {}
 
 void TestHWTopologyRead::SetUp(void) {
   TestBase::SetUp();
@@ -56,9 +55,7 @@ void TestHWTopologyRead::SetUp(void) {
   return;
 }
 
-void TestHWTopologyRead::DisplayTestInfo(void) {
-  TestBase::DisplayTestInfo();
-}
+void TestHWTopologyRead::DisplayTestInfo(void) { TestBase::DisplayTestInfo(); }
 
 void TestHWTopologyRead::DisplayResults(void) const {
   TestBase::DisplayResults();
@@ -76,32 +73,28 @@ void TestHWTopologyRead::Run(void) {
   uint32_t i, j;
 
   TestBase::Run();
+  PRINT_VERBOSITY();
   if (setup_failed_) {
-    IF_VERB(STANDARD) {
-      std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl;
-    }
+    IF_VERB(STANDARD) { std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl; }
     return;
   }
 
   uint32_t num_devices = num_monitor_devs();
 
   // gpu_link_t gpu_links[num_devices][num_devices];
-  std::vector<std::vector<gpu_link_t>> gpu_links(num_devices,
-                                        std::vector<gpu_link_t>(num_devices));
+  std::vector<std::vector<gpu_link_t>> gpu_links(num_devices, std::vector<gpu_link_t>(num_devices));
   // uint32_t numa_numbers[num_devices];
   std::vector<uint32_t> numa_numbers(num_devices);
 
   for (uint32_t dv_ind = 0; dv_ind < num_devices; ++dv_ind) {
     amdsmi_processor_handle dev_handle = processor_handles_[dv_ind];
+    DISPLAY_AMDSMI_API("amdsmi_topo_get_numa_node_number", "gpu=" + std::to_string(dv_ind),
+                       VERB(STANDARD));
     err = amdsmi_topo_get_numa_node_number(dev_handle, &numa_numbers[dv_ind]);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
     if (err != AMDSMI_STATUS_SUCCESS) {
       if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
-        IF_VERB(STANDARD) {
-          std::cout <<
-           "\t**Numa Node Number. read: Not supported on this machine" <<
-                                                                    std::endl;
-          return;
-        }
+        return;
       } else {
         CHK_ERR_ASRT(err)
       }
@@ -115,21 +108,20 @@ void TestHWTopologyRead::Run(void) {
         gpu_links[dv_ind_src][dv_ind_dst].hops = 0;
         gpu_links[dv_ind_src][dv_ind_dst].weight = 0;
         gpu_links[dv_ind_src][dv_ind_dst].accessible = true;
-        gpu_links[dv_ind_src][dv_ind_dst].cap =
-          {UINT8_MAX, UINT8_MAX, UINT8_MAX, UINT8_MAX, UINT8_MAX};
+        gpu_links[dv_ind_src][dv_ind_dst].cap = {UINT8_MAX, UINT8_MAX, UINT8_MAX, UINT8_MAX,
+                                                 UINT8_MAX};
       } else {
         amdsmi_link_type_t type;
+        DISPLAY_AMDSMI_API("amdsmi_topo_get_link_type",
+                           "gpu=" + std::to_string(dv_ind_src) + "," + std::to_string(dv_ind_dst),
+                           VERB(STANDARD));
         err = amdsmi_topo_get_link_type(processor_handles_[dv_ind_src],
-                processor_handles_[dv_ind_dst],
-                &gpu_links[dv_ind_src][dv_ind_dst].hops, &type);
+                                        processor_handles_[dv_ind_dst],
+                                        &gpu_links[dv_ind_src][dv_ind_dst].hops, &type);
+        DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
         if (err != AMDSMI_STATUS_SUCCESS) {
           if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
-            IF_VERB(STANDARD) {
-              std::cout <<
-                  "\t**Link Type. read: Not supported on this machine"
-                                                                 << std::endl;
-              return;
-            }
+            return;
           } else {
             CHK_ERR_ASRT(err)
           }
@@ -150,17 +142,16 @@ void TestHWTopologyRead::Run(void) {
               }
           }
         }
+        DISPLAY_AMDSMI_API("amdsmi_topo_get_p2p_status",
+                           "gpu=" + std::to_string(dv_ind_src) + "," + std::to_string(dv_ind_dst),
+                           VERB(STANDARD));
         err = amdsmi_topo_get_p2p_status(processor_handles_[dv_ind_src],
-                processor_handles_[dv_ind_dst],
-                &type, &gpu_links[dv_ind_src][dv_ind_dst].cap);
+                                         processor_handles_[dv_ind_dst], &type,
+                                         &gpu_links[dv_ind_src][dv_ind_dst].cap);
+        DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
         if (err != AMDSMI_STATUS_SUCCESS) {
           if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
-            IF_VERB(STANDARD) {
-              std::cout <<
-                  "\t**Link Type. read: Not supported on this machine"
-                                                                 << std::endl;
-              return;
-            }
+            return;
           } else {
             CHK_ERR_ASRT(err)
           }
@@ -177,32 +168,30 @@ void TestHWTopologyRead::Run(void) {
               }
           }
         }
+        DISPLAY_AMDSMI_API("amdsmi_topo_get_link_weight",
+                           "gpu=" + std::to_string(dv_ind_src) + "," + std::to_string(dv_ind_dst),
+                           VERB(STANDARD));
         err = amdsmi_topo_get_link_weight(processor_handles_[dv_ind_src],
-                    processor_handles_[dv_ind_dst],
-                                   &gpu_links[dv_ind_src][dv_ind_dst].weight);
+                                          processor_handles_[dv_ind_dst],
+                                          &gpu_links[dv_ind_src][dv_ind_dst].weight);
+        DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
         if (err != AMDSMI_STATUS_SUCCESS) {
           if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
-            IF_VERB(STANDARD) {
-              std::cout <<
-                      "\t**Link Weight. read: Not supported on this machine"
-                                                                 << std::endl;
-              return;
-            }
+            return;
           } else {
             CHK_ERR_ASRT(err)
           }
         }
-        err = amdsmi_is_P2P_accessible(processor_handles_[dv_ind_src],
-                    processor_handles_[dv_ind_dst],
-                    &gpu_links[dv_ind_src][dv_ind_dst].accessible);
+        DISPLAY_AMDSMI_API("amdsmi_is_P2P_accessible",
+                           "gpu=" + std::to_string(dv_ind_src) + "," + std::to_string(dv_ind_dst),
+                           VERB(STANDARD));
+        err =
+            amdsmi_is_P2P_accessible(processor_handles_[dv_ind_src], processor_handles_[dv_ind_dst],
+                                     &gpu_links[dv_ind_src][dv_ind_dst].accessible);
+        DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
         if (err != AMDSMI_STATUS_SUCCESS) {
           if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
-            IF_VERB(STANDARD) {
-              std::cout <<
-                      "\t**P2P Access. check: Not supported on this machine"
-                                                                 << std::endl;
-              return;
-            }
+            return;
           } else {
             CHK_ERR_ASRT(err)
           }
@@ -211,13 +200,11 @@ void TestHWTopologyRead::Run(void) {
     }
   }
 
-  IF_NVERB(STANDARD) {
-    return;
-  }
+  IF_NVERB(STANDARD) { return; }
 
   std::cout << "**NUMA node number of GPUs**" << std::endl;
-  std::cout << std::setw(12) << std::left <<"GPU#";
-  std::cout <<"NUMA node number";
+  std::cout << std::setw(12) << std::left << "GPU#";
+  std::cout << "NUMA node number";
   std::cout << std::endl;
   for (i = 0; i < num_devices; ++i) {
     std::cout << std::setw(12) << std::left << i;
@@ -434,32 +421,30 @@ void TestHWTopologyRead::Run(void) {
   std::cout << std::endl;
 
   std::string topology_link_type_str[] = {
-      "AMDSMI_LINK_TYPE_INTERNAL",
-      "AMDSMI_LINK_TYPE_XGMI",
-      "AMDSMI_LINK_TYPE_PCIE",
-      "AMDSMI_LINK_TYPE_NOT_APPLICABLE",
-      "AMDSMI_LINK_TYPE_UNKNOWN",
+      "AMDSMI_LINK_TYPE_INTERNAL",       "AMDSMI_LINK_TYPE_XGMI",    "AMDSMI_LINK_TYPE_PCIE",
+      "AMDSMI_LINK_TYPE_NOT_APPLICABLE", "AMDSMI_LINK_TYPE_UNKNOWN",
   };
 
   auto ret(amdsmi_status_t::AMDSMI_STATUS_SUCCESS);
   for (uint32_t dv_ind_src = 0; dv_ind_src < num_devices; dv_ind_src++) {
-    std::cout <<"** Nearest GPUs for GPU" << dv_ind_src << " **" << "\n";
-    for (uint32_t topo_link_type = AMDSMI_LINK_TYPE_INTERNAL; topo_link_type <= AMDSMI_LINK_TYPE_UNKNOWN; topo_link_type++) {
-
-
+    std::cout << "** Nearest GPUs for GPU" << dv_ind_src << " **"
+              << "\n";
+    for (uint32_t topo_link_type = AMDSMI_LINK_TYPE_INTERNAL;
+         topo_link_type <= AMDSMI_LINK_TYPE_UNKNOWN; topo_link_type++) {
       /*
-       *  Note:   We should get AMDSMI_STATUS_INVAL for the first call with amdsmi_topology_nearest_t = nullptr
+       *  Note:   We should get AMDSMI_STATUS_INVAL for the first call with
+       * amdsmi_topology_nearest_t = nullptr
        */
-      ret = amdsmi_get_link_topology_nearest(processor_handles_[dv_ind_src],
-                                             static_cast<amdsmi_link_type_t>(topo_link_type),
-                                             nullptr);
+      DISPLAY_AMDSMI_API("amdsmi_get_link_topology_nearest", "", VERB(STANDARD));
+      ret = amdsmi_get_link_topology_nearest(
+          processor_handles_[dv_ind_src], static_cast<amdsmi_link_type_t>(topo_link_type), nullptr);
       ASSERT_EQ(ret, amdsmi_status_t::AMDSMI_STATUS_INVAL);
-
 
       /*
        *
        */
       auto topology_nearest_info = amdsmi_topology_nearest_t();
+      DISPLAY_AMDSMI_API("amdsmi_get_link_topology_nearest", "", VERB(STANDARD));
       ret = amdsmi_get_link_topology_nearest(processor_handles_[dv_ind_src],
                                              static_cast<amdsmi_link_type_t>(topo_link_type),
                                              &topology_nearest_info);
@@ -467,24 +452,25 @@ void TestHWTopologyRead::Run(void) {
         continue;
       }
 
-      std::cout <<"Nearest GPUs found for Link Type: " << topology_link_type_str[topo_link_type] << "\n";
+      std::cout << "Nearest GPUs found for Link Type: " << topology_link_type_str[topo_link_type]
+                << "\n";
       if (topology_nearest_info.count > 0) {
         for (uint32_t k = 0; k < topology_nearest_info.count; k++) {
           amdsmi_bdf_t bdf = {};
+          DISPLAY_AMDSMI_API("amdsmi_get_gpu_device_bdf", "", VERB(STANDARD));
           ret = amdsmi_get_gpu_device_bdf(topology_nearest_info.processor_list[k], &bdf);
           if (ret != AMDSMI_STATUS_SUCCESS) {
             continue;
           }
 
           printf("\tGPU BDF %04" PRIx64 ":%02" PRIx32 ":%02" PRIx32 ".%" PRIu32 "\n",
-            static_cast<uint64_t>(bdf.domain_number),
-            static_cast<uint32_t>(bdf.bus_number),
-            static_cast<uint32_t>(bdf.device_number),
-            static_cast<uint32_t>(bdf.function_number));
+                 static_cast<uint64_t>(bdf.domain_number), static_cast<uint32_t>(bdf.bus_number),
+                 static_cast<uint32_t>(bdf.device_number),
+                 static_cast<uint32_t>(bdf.function_number));
         }
-      }
-      else {
-        std::cout << "\tNot found" << "\n";
+      } else {
+        std::cout << "\tNot found"
+                  << "\n";
       }
     }
     std::cout << "\n";

@@ -1,3 +1,7 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
 # Common Tests - Test independent of all platforms
 set(TEST_SRC
     saxpy.cc
@@ -17,6 +21,7 @@ set(AMD_TEST_SRC
     shfl.cc
     shfl_sync.cc
     rtc_reduce.cc
+    rtc_coop.cc
     stdheaders.cc
     hiprtc_MathConstants_HeaderTst.cc
     hiprtc_VectorTypes_HeaderTst.cc

@@ -49,7 +49,7 @@
 
 class TestComputePartitionReadWrite : public TestBase {
  public:
-    TestComputePartitionReadWrite();
+  TestComputePartitionReadWrite();
 
   // @Brief: Destructor for test case of TestComputePartitionReadWrite
   virtual ~TestComputePartitionReadWrite();
