@@ -17,11 +17,9 @@ find_program(
     HIPCC_EXECUTABLE
     NAMES hipcc
     HINTS ${ROCmVersion_DIR} ${ROCM_PATH}
+    PATHS /opt/rocm
+    PATH_SUFFIXES bin
     ENV ROCM_PATH
-    /opt/rocm
-    PATHS ${ROCmVersion_DIR} ${ROCM_PATH}
-    ENV ROCM_PATH
-    /opt/rocm
     NO_CACHE
 )
 mark_as_advanced(HIPCC_EXECUTABLE)
@@ -43,7 +41,7 @@ endif()
 if(
     (
         NOT CMAKE_CXX_COMPILER_IS_HIPCC
-         OR (NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND NOT hip_FOUND)
+        OR (NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND NOT hip_FOUND)
     )
     AND (NOT COMMAND rocprofiler_systems_custom_compilation AND NOT HIPCC_EXECUTABLE)
 )
@@ -52,51 +50,10 @@ if(
 endif()
 
 # Find the roctx library
-<<<<<<< HEAD
 find_library(
     ROCTX_LIBRARY
     NAMES rocprofiler-sdk-roctx
     PATHS ${ROCM_PATH}/lib ${ROCM_PATH}/lib64 /opt/rocm/lib
-    REQUIRED
-)
-
-add_executable(roctx roctx.cpp)
-target_link_libraries(roctx PRIVATE Threads::Threads ${ROCTX_LIBRARY})
-
-add_executable(region_filter region_filter.cpp)
-target_link_libraries(region_filter PRIVATE Threads::Threads)
-
-if(
-    CMAKE_CXX_COMPILER_ID MATCHES "Clang"
-    AND NOT CMAKE_CXX_COMPILER_IS_HIPCC
-    AND NOT HIPCC_EXECUTABLE
-)
-    target_link_libraries(
-        roctx
-        PRIVATE
-        $<TARGET_NAME_IF_EXISTS:rocprofiler-systems::rocprofiler-systems-compile-options>
-        $<TARGET_NAME_IF_EXISTS:hip::host>
-        $<TARGET_NAME_IF_EXISTS:hip::device>
-    )
-    target_link_libraries(
-        region_filter
-        PRIVATE
-        $<TARGET_NAME_IF_EXISTS:rocprofiler-systems::rocprofiler-systems-compile-options>
-        $<TARGET_NAME_IF_EXISTS:hip::host>
-        $<TARGET_NAME_IF_EXISTS:hip::device>
-    )
-else()
-    target_compile_options(roctx PRIVATE -W -Wall)
-    target_compile_options(region_filter PRIVATE -W -Wall)
-endif()
-
-# Find the library
-=======
->>>>>>> c6289c00e6 (Add examples for selective tracing and pause resume)
-find_library(
-    ROCTX_LIBRARY
-    NAMES rocprofiler-sdk-roctx
-    PATHS ${ROCM_PATH}/lib ${ROCM_PATH}/lib64
     REQUIRED
 )
 
@@ -164,27 +121,3 @@ foreach(_target IN LISTS ROCTX_EXAMPLE_TARGETS)
         )
     endif()
 endforeach()
-<<<<<<< HEAD
-
-if(NOT CMAKE_CXX_COMPILER_IS_HIPCC AND HIPCC_EXECUTABLE)
-    rocprofiler_systems_custom_compilation(COMPILER ${HIPCC_EXECUTABLE} TARGET roctx)
-    rocprofiler_systems_custom_compilation(COMPILER ${HIPCC_EXECUTABLE} TARGET region_filter)
-endif()
-
-if(ROCPROFSYS_INSTALL_EXAMPLES AND TARGET roctx)
-    install(
-        TARGETS roctx
-        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples
-        COMPONENT rocprofiler-systems-examples
-    )
-endif()
-
-if(ROCPROFSYS_INSTALL_EXAMPLES AND TARGET region_filter)
-    install(
-        TARGETS region_filter
-        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples
-        COMPONENT rocprofiler-systems-examples
-    )
-endif()
-=======
->>>>>>> c6289c00e6 (Add examples for selective tracing and pause resume)
