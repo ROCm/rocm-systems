@@ -19,24 +19,25 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+#include "mem_page_info_read.h"
+
+#include <gtest/gtest.h>
 
 #include <cstdint>
-
 #include <iostream>
 #include <string>
 
-#include <gtest/gtest.h>
+#include "../test_common.h"
 #include "amd_smi/amdsmi.h"
-#include "mem_page_info_read.h"
 
 TestMemPageInfoRead::TestMemPageInfoRead() : TestBase() {
   set_title("AMDSMI Memory Page Info Test");
-  set_description("The Memory Page Info. test verifies that we can read "
+  set_description(
+      "The Memory Page Info. test verifies that we can read "
       "memory page information, and then displays the information read");
 }
 
-TestMemPageInfoRead::~TestMemPageInfoRead(void) {
-}
+TestMemPageInfoRead::~TestMemPageInfoRead(void) {}
 
 void TestMemPageInfoRead::SetUp(void) {
   TestBase::SetUp();
@@ -44,9 +45,7 @@ void TestMemPageInfoRead::SetUp(void) {
   return;
 }
 
-void TestMemPageInfoRead::DisplayTestInfo(void) {
-  TestBase::DisplayTestInfo();
-}
+void TestMemPageInfoRead::DisplayTestInfo(void) { TestBase::DisplayTestInfo(); }
 
 void TestMemPageInfoRead::DisplayResults(void) const {
   TestBase::DisplayResults();
@@ -61,10 +60,11 @@ void TestMemPageInfoRead::Close() {
 
 void TestMemPageInfoRead::Run(void) {
   amdsmi_status_t err;
-  amdsmi_retired_page_record_t *records;
+  amdsmi_retired_page_record_t* records;
   uint32_t num_pages;
 
   TestBase::Run();
+  PRINT_VERBOSITY();
   if (setup_failed_) {
     std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl;
     return;
@@ -73,26 +73,29 @@ void TestMemPageInfoRead::Run(void) {
   for (uint32_t i = 0; i < num_monitor_devs(); ++i) {
     PrintDeviceHeader(processor_handles_[i]);
 
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_memory_reserved_pages", "gpu=" + std::to_string(i),
+                       VERB(STANDARD));
     err = amdsmi_get_gpu_memory_reserved_pages(processor_handles_[i], &num_pages, nullptr);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
 
     if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
-      std::cout <<
-          "\t**Memory page information is not supported for this device"
-                                                                 << std::endl;
-
       // Verify api support checking functionality is working
+      DISPLAY_AMDSMI_API("amdsmi_get_gpu_memory_reserved_pages", "gpu=" + std::to_string(i),
+                         VERB(STANDARD));
       err = amdsmi_get_gpu_memory_reserved_pages(processor_handles_[i], nullptr, nullptr);
+      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
       ASSERT_EQ(err, AMDSMI_STATUS_NOT_SUPPORTED);
-
       continue;
     } else {
       CHK_ERR_ASRT(err)
       IF_VERB(STANDARD) {
-        std::cout << "\tNumber of memory page records: " << num_pages <<
-                                                                    std::endl;
+        std::cout << "\tNumber of memory page records: " << num_pages << std::endl;
       }
       // Verify api support checking functionality is working
+      DISPLAY_AMDSMI_API("amdsmi_get_gpu_memory_reserved_pages", "gpu=" + std::to_string(i),
+                         VERB(STANDARD));
       err = amdsmi_get_gpu_memory_reserved_pages(processor_handles_[i], nullptr, nullptr);
+      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
       ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
     }
 
@@ -101,13 +104,14 @@ void TestMemPageInfoRead::Run(void) {
 
       assert(records != nullptr);
 
+      DISPLAY_AMDSMI_API("amdsmi_get_gpu_memory_reserved_pages", "gpu=" + std::to_string(i),
+                         VERB(STANDARD));
       err = amdsmi_get_gpu_memory_reserved_pages(processor_handles_[i], &num_pages, records);
+      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
       if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
-        std::cout << "\t**Getting Memory Page Retirement Status not "
-                                     "supported for this device" << std::endl;
         continue;
       } else {
-          CHK_ERR_ASRT(err)
+        CHK_ERR_ASRT(err)
       }
 
       IF_VERB(STANDARD) {
@@ -138,7 +142,7 @@ void TestMemPageInfoRead::Run(void) {
         }
         std::cout.setf(std::ios::dec, std::ios::basefield);
       }
-      delete []records;
+      delete[] records;
     } else {
       continue;
     }

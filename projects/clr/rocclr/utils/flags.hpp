@@ -265,7 +265,9 @@ release(uint, HIP_SKIP_ABORT_ON_GPU_ERROR, true,                              \
 release(bool, HIP_FORCE_SPIRV_CODEOBJECT, false,                              \
         "Force use of SPIRV instead of device specific code object.")         \
 release(uint, DEBUG_CLR_BATCH_CPU_SYNC_SIZE, 8,                               \
-        "Forces the minimum batch size for CPU sync")  // clang-format on
+        "Forces the minimum batch size for CPU sync")                         \
+release(bool, DEBUG_CLR_DISABLE_IMAGE, false,                               \
+        "1 = Disable Image support for ROC path")  // clang-format on
 
 namespace amd {
 

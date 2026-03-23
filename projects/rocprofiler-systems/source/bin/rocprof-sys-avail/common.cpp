@@ -35,22 +35,10 @@
 
 using settings = ::tim::settings;
 
-std::string       global_delim        = std::string{ "|" };
 bool              csv                 = false;
 bool              markdown            = false;
-bool              alphabetical        = false;
-bool              available_only      = false;
-bool              all_info            = false;
-bool              force_brief         = false;
 bool              case_insensitive    = false;
 bool              regex_hl            = false;
-bool              expand_keys         = false;
-bool              force_config        = false;
-bool              print_advanced      = false;
-int32_t           max_width           = 0;
-int32_t           num_cols            = 0;
-int32_t           min_width           = 40;
-int32_t           padding             = 4;
 str_vec_t         regex_keys          = {};
 str_vec_t         category_regex_keys = {};
 str_set_t         category_view       = {};

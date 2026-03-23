@@ -38,17 +38,15 @@ target_sources(
     PRIVATE ${library_sources} ${library_headers}
 )
 
-if(ROCPROFSYS_USE_ROCM)
-    target_sources(
-        rocprofiler-systems-object-library
-        PRIVATE
-            ${CMAKE_CURRENT_LIST_DIR}/rocm.cpp
-            ${CMAKE_CURRENT_LIST_DIR}/rocprofiler-sdk.cpp
-            ${CMAKE_CURRENT_LIST_DIR}/amd_smi.cpp
-            ${CMAKE_CURRENT_LIST_DIR}/amd_smi_ainic.cpp
-    )
-    add_subdirectory(rocprofiler-sdk)
-endif()
+target_sources(
+    rocprofiler-systems-object-library
+    PRIVATE
+        ${CMAKE_CURRENT_LIST_DIR}/rocm.cpp
+        ${CMAKE_CURRENT_LIST_DIR}/rocprofiler-sdk.cpp
+        ${CMAKE_CURRENT_LIST_DIR}/amd_smi.cpp
+        ${CMAKE_CURRENT_LIST_DIR}/amd_smi_ainic.cpp
+)
+add_subdirectory(rocprofiler-sdk)
 
 add_subdirectory(causal)
 add_subdirectory(components)

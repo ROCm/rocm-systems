@@ -1,29 +1,13 @@
 /*
-Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip_test_common.hh>
 
 
-TEST_CASE("Unit_hip_library_load_co") {
+HIP_TEST_CASE(Unit_hip_library_load_co) {
   constexpr size_t size = 32;
   constexpr size_t num_kernels = 3;
   std::vector<float> input1, input2;
@@ -46,7 +30,7 @@ TEST_CASE("Unit_hip_library_load_co") {
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
   std::string lib_co = "library_code_load.code";
-  
+
   auto host_verify = [](const std::vector<float>& x, const std::vector<float>&y, const std::vector<float>& expected, int op) {
     for (size_t i = 0; i < size; i++) {
       float tmp;
@@ -102,7 +86,7 @@ TEST_CASE("Unit_hip_library_load_co") {
     HIP_CHECK(
         hipLibraryLoadFromFile(&library, lib_co.data(), nullptr, nullptr, 0, nullptr, nullptr, 0));
     HIP_CHECK(hipLibraryGetKernel(&function, library, "sub_kernel"));
-    
+
     hipLibrary_t new_library;
     HIP_CHECK(hipKernelGetLibrary(&new_library, function));
     REQUIRE(new_library == library);
@@ -137,7 +121,7 @@ TEST_CASE("Unit_hip_library_load_co") {
     HIP_CHECK(
         hipLibraryLoadFromFile(&library, lib_co.data(), nullptr, nullptr, 0, nullptr, nullptr, 0));
     HIP_CHECK(hipLibraryGetKernel(&function, library, "mul_kernel"));
-    
+
     hipLibrary_t new_library;
     HIP_CHECK(hipKernelGetLibrary(&new_library, function));
     REQUIRE(new_library == library);
@@ -171,7 +155,7 @@ TEST_CASE("Unit_hip_library_load_co") {
 
     HIP_CHECK(
       hipLibraryLoadFromFile(&library, lib_co.data(), nullptr, nullptr, 0, nullptr, nullptr, 0));
-    
+
     HIP_CHECK(hipLibraryEnumerateKernels(functions, num_kernels, library));
 
     void* args[] = {&d_out, &d_in1, &d_in2};
@@ -188,7 +172,7 @@ TEST_CASE("Unit_hip_library_load_co") {
       return -1;
     };
 
-    
+
     std::vector<float> out(size, 0);
     size_t offset, paramsize;
     for (int k = 0; k < num_kernels; k++) {
@@ -213,7 +197,7 @@ TEST_CASE("Unit_hip_library_load_co") {
   HIP_CHECK(hipFree(d_out));
 }
 
-TEST_CASE("Unit_hipKernelGetParamInfo_Negative") {
+HIP_TEST_CASE(Unit_hipKernelGetParamInfo_Negative) {
   size_t offset, paramsize;
 
   SECTION("Kernel as nullptr") {

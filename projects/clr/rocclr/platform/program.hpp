@@ -72,7 +72,7 @@ class Program : public RuntimeObject {
   typedef std::set<Device const*> devicelist_t;
   typedef std::unordered_map<Device const*, binary_t> devicebinary_t;
   typedef std::unordered_map<Device const*, device::Program*> deviceprograms_t;
-  typedef std::unordered_map<std::string, Symbol> symbols_t;
+  typedef std::unordered_map<std::string_view, Symbol> symbols_t;
 
   enum Language { Binary = 0, OpenCL_C, SPIRV, Assembly, HIP };
 
@@ -100,7 +100,7 @@ class Program : public RuntimeObject {
 
   std::string programLog_;  //!< Log for parsing options, etc.
 
-  Monitor programLock_;  //!< Lock to protect program data structure
+  std::recursive_mutex programLock_;  //!< Lock to protect program data structure
 
  protected:
   //! Destroy this program.
@@ -117,8 +117,7 @@ class Program : public RuntimeObject {
         sourceCode_(sourceCode),
         language_(language),
         symbolTable_(NULL),
-        programLog_(),
-        programLock_(true) /* Program lock */ {
+        programLog_() {
     for (auto i = 0; i != numHeaders; ++i) {
       headers_.emplace_back(headers[i]);
       headerNames_.emplace_back(headerNames[i]);
@@ -127,10 +126,7 @@ class Program : public RuntimeObject {
 
   //! Construct a new program associated with a context.
   Program(Context& context, Language language = Binary)
-      : context_(context),
-        language_(language),
-        symbolTable_(NULL),
-        programLock_(true) /* Program lock */ {}
+      : context_(context), language_(language), symbolTable_(NULL) {}
 
   //! Returns context, associated with the current program.
   const Context& context() const { return context_(); }

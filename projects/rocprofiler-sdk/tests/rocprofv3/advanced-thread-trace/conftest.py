@@ -61,6 +61,11 @@ def pytest_addoption(parser):
         action="store",
         help="Path to Output directory.",
     )
+    parser.addoption(
+        "--att-shaderdata-out-dir",
+        action="store",
+        help="Path to Output directory.",
+    )
 
 
 @pytest.fixture
@@ -98,4 +103,12 @@ def att_other_simd_out_dir_path(request):
     output_dir_path = request.config.getoption("--att-other-simd-out-dir")
     if not output_dir_path:
         pytest.skip("--att-other-simd-out-dir not provided")
+    return output_dir_path
+
+
+@pytest.fixture
+def att_shaderdata_out_dir_path(request):
+    output_dir_path = request.config.getoption("--att-shaderdata-out-dir")
+    if not output_dir_path:
+        pytest.skip("--att-shaderdata-out-dir not provided")
     return output_dir_path

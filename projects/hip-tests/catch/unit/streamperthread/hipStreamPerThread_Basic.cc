@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-IMPLIED, INNCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANNY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip_test_common.hh>
 
@@ -30,7 +17,7 @@ __global__ void copy_kernl(int* devPtr) {
   }
 }
 
-TEST_CASE("Unit_hipStreamPerThread_Basic") {
+HIP_TEST_CASE(Unit_hipStreamPerThread_Basic) {
   constexpr int size = sizeof(int) * MEM_SIZE;
   int* hostMem = nullptr;
   int* devMem = nullptr;
@@ -65,7 +52,7 @@ TEST_CASE("Unit_hipStreamPerThread_Basic") {
   HIP_CHECK(hipFree(devMem));
 }
 
-TEST_CASE("Unit_hipStreamPerThread_StreamQuery") {
+HIP_TEST_CASE(Unit_hipStreamPerThread_StreamQuery) {
   std::vector<std::thread> threads(MAX_THREAD_CNT);
 
   for (auto& th : threads) {
@@ -78,7 +65,7 @@ TEST_CASE("Unit_hipStreamPerThread_StreamQuery") {
   REQUIRE(true);
 }
 
-TEST_CASE("Unit_hipStreamPerThread_StreamSynchronize") {
+HIP_TEST_CASE(Unit_hipStreamPerThread_StreamSynchronize) {
   constexpr unsigned int MAX_THREAD_CNT = 10;
   std::vector<std::thread> threads(MAX_THREAD_CNT);
 
@@ -92,22 +79,22 @@ TEST_CASE("Unit_hipStreamPerThread_StreamSynchronize") {
   REQUIRE(true);
 }
 
-TEST_CASE("Unit_hipStreamPerThread_StreamGetPriority") {
+HIP_TEST_CASE(Unit_hipStreamPerThread_StreamGetPriority) {
   int priority = 0;
   HIP_CHECK(hipStreamGetPriority(hipStreamPerThread, &priority));
 }
 
-TEST_CASE("Unit_hipStreamPerThread_StreamGetFlags") {
+HIP_TEST_CASE(Unit_hipStreamPerThread_StreamGetFlags) {
   unsigned int flags = 0;
   HIP_CHECK(hipStreamGetFlags(hipStreamPerThread, &flags));
 }
 
-TEST_CASE("Unit_hipStreamPerThread_StreamDestroy") {
+HIP_TEST_CASE(Unit_hipStreamPerThread_StreamDestroy) {
   hipError_t status = hipStreamDestroy(hipStreamPerThread);
   REQUIRE(status != hipSuccess);
 }
 
-TEST_CASE("Unit_hipStreamPerThread_MemcpyAsync") {
+HIP_TEST_CASE(Unit_hipStreamPerThread_MemcpyAsync) {
   unsigned int ele_size = (16 * 1024);  // 16KB
   int* A_h = nullptr;
   int* A_d = nullptr;

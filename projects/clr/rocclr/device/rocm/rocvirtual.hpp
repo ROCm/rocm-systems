@@ -103,7 +103,7 @@ class Timestamp : public amd::ReferenceCountedObject {
   amd::Command* parsedCommand_;            //!< Command down the list, considering command_ as head
   std::vector<ProfilingSignal*> signals_;  //!< The list of all signals, associated with the TS
   hsa_signal_t callback_signal_;  //!< Signal associated with a callback for possible later update
-  amd::Monitor lock_;             //!< Serialize timestamp update
+  std::recursive_mutex lock_;     //!< Serialize timestamp update
   bool accum_ena_ = false;        //!< If TRUE then the accumulation of execution times has started
   bool hasHwProfiling_ = false;   //!< If TRUE then HwProfiling is enabled for the command
   bool blocking_ = true;          //!< If TRUE callback is blocking
@@ -123,8 +123,7 @@ class Timestamp : public amd::ReferenceCountedObject {
         gpu_(gpu),
         command_(command),
         parsedCommand_(nullptr),
-        callback_signal_(hsa_signal_t{}),
-        lock_(true) /* Timestamp lock */ {}
+        callback_signal_(hsa_signal_t{}) {}
 
   ~Timestamp() {}
 
@@ -481,6 +480,22 @@ class VirtualGPU : public device::VirtualDevice {
   }
 
  private:
+  //! OpenCL-specific version of processMemObjects.
+  //! Detects memory dependency for HSA kernels and uses appropriate AQL header
+  bool processOpenCLMemObjects(
+      const amd::Kernel& kernel,                        //!< AMD kernel object for execution
+      const_address params,                             //!< Pointer to the param's store
+      size_t& ldsAddress,                               //!< LDS usage
+      bool cooperativeGroups,                           //!< Dispatch with cooperative groups
+      bool& imageBufferWrtBack,                         //!< Image buffer write back is required
+      std::vector<device::Memory*>& wrtBackImageBuffer  //!< Images for writeback
+  );
+  //! HIP-specific version of processMemObjects.
+  //! Does nothing except logging
+  bool processHIPMemObjects(const amd::Kernel& kernel,  //!< AMD kernel object for execution
+                            const_address params        //!< Pointer to the param's store
+  );
+
   //! Dispatches a barrier with blocking HSA signals
   void dispatchBlockingWait();
 

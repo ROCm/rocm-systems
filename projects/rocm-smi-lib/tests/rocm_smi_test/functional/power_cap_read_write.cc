@@ -43,29 +43,29 @@
  *
  */
 
-#include <stdint.h>
-#include <stddef.h>
+#include "rocm_smi_test/functional/power_cap_read_write.h"
 
-#include <iostream>
-#include <bitset>
-#include <string>
+#include <stddef.h>
+#include <stdint.h>
+
 #include <algorithm>
+#include <bitset>
+#include <iostream>
+#include <string>
 
 #include "gtest/gtest.h"
 #include "rocm_smi/rocm_smi.h"
-#include "rocm_smi_test/functional/power_cap_read_write.h"
 #include "rocm_smi/rocm_smi_utils.h"
 #include "rocm_smi_test/test_common.h"
 
-
 TestPowerCapReadWrite::TestPowerCapReadWrite() : TestBase() {
   set_title("RSMI Power Cap Read/Write Test");
-  set_description("The Power Cap tests verify that the power profile "
-                             "settings can be read and written properly.");
+  set_description(
+      "The Power Cap tests verify that the power profile "
+      "settings can be read and written properly.");
 }
 
-TestPowerCapReadWrite::~TestPowerCapReadWrite(void) {
-}
+TestPowerCapReadWrite::~TestPowerCapReadWrite(void) {}
 
 void TestPowerCapReadWrite::SetUp(void) {
   TestBase::SetUp();
@@ -73,9 +73,7 @@ void TestPowerCapReadWrite::SetUp(void) {
   return;
 }
 
-void TestPowerCapReadWrite::DisplayTestInfo(void) {
-  TestBase::DisplayTestInfo();
-}
+void TestPowerCapReadWrite::DisplayTestInfo(void) { TestBase::DisplayTestInfo(); }
 
 void TestPowerCapReadWrite::DisplayResults(void) const {
   TestBase::DisplayResults();
@@ -129,17 +127,16 @@ void TestPowerCapReadWrite::Run(void) {
     }
 
     if (amd::smi::is_vm_guest()) {
-      std::cout << "VM guest is not supported for power cap test. Skipping test for "
-                << dv_ind << std::endl;
+      std::cout << "VM guest is not supported for power cap test. Skipping test for " << dv_ind
+                << std::endl;
       continue;
     }
 
-    new_cap = (max + min)/2;
+    new_cap = (max + min) / 2;
 
     IF_VERB(STANDARD) {
       std::cout << "Original Power Cap: " << orig << " uW" << std::endl;
-      std::cout << "Power Cap Range: " << max << " uW to " << min <<
-                                                             " uW" << std::endl;
+      std::cout << "Power Cap Range: " << max << " uW to " << min << " uW" << std::endl;
       std::cout << "Setting new cap to " << new_cap << "..." << std::endl;
     }
     start = clock();
@@ -166,8 +163,6 @@ void TestPowerCapReadWrite::Run(void) {
     ret = rsmi_dev_power_cap_get(dv_ind, 0, &new_cap);
     CHK_ERR_ASRT(ret)
 
-    IF_VERB(STANDARD) {
-      std::cout << "Current Power Cap: " << new_cap << " uW" << std::endl;
-    }
+    IF_VERB(STANDARD) { std::cout << "Current Power Cap: " << new_cap << " uW" << std::endl; }
   }
 }

@@ -245,7 +245,7 @@ class HostQueue : public CommandQueue {
 
   //! Get the current batch size
   size_t GetSubmissionBatchSize() const {
-    ScopedLock sl(vdev()->execution());
+    std::scoped_lock sl(vdev()->execution());
     return size_;
   }
 
@@ -296,7 +296,7 @@ class HostQueue : public CommandQueue {
   void SetQueueStatus() { isActive_ = true; }
 
   //! Get queue status
-  bool GetQueueStatus() { return isActive_; }
+  bool GetQueueStatus() const { return isActive_; }
 
   //! Set the force destory to terminate queue without checking last command
   void SetForceDestroy(bool forceDestroy) { forceDestroy_ = forceDestroy; }

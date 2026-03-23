@@ -144,7 +144,10 @@ SDMAFillDataPacket::SDMAFillDataPacket(unsigned int familyId, void *dst, unsigne
             pSDMA->HEADER_UNION.fillsize = 0; /* Byte Fill */
 
         pSDMA->COUNT_UNION.count = SDMA_COUNT(copy_size);
-
+        // In GFX12, for DW fill, the total data size is 4 bytes more than the count, so we need to subtract 3 from the count-1 which SDMA_COUNT returns
+        if (2 == pSDMA->HEADER_UNION.fillsize && m_FamilyId >= FAMILY_GFX12) 
+            pSDMA->COUNT_UNION.count = pSDMA->COUNT_UNION.count - 3;
+        
         SplitU64(reinterpret_cast<HSAuint64>(dst),
             pSDMA->DST_ADDR_LO_UNION.DW_1_DATA, /*dst_addr_31_0*/
             pSDMA->DST_ADDR_HI_UNION.DW_2_DATA); /*dst_addr_63_32*/

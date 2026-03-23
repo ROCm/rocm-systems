@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /**
 Testcase Scenarios of hipGraphAddMemcpyNodeFromSymbol API:
@@ -69,7 +56,7 @@ __global__ void MemcpyFromSymbolKernel(int* B_d) {
 
 /* This testcase verifies negative scenarios of
    hipGraphAddMemcpyNodeFromSymbol API */
-TEST_CASE("Unit_hipGraphAddMemcpyNodeFromSymbol_Negative") {
+HIP_TEST_CASE(Unit_hipGraphAddMemcpyNodeFromSymbol_Negative) {
   constexpr size_t Nbytes = SIZE * sizeof(int);
   int *A_d{nullptr}, *B_d{nullptr};
   int *A_h{nullptr}, *B_h{nullptr};
@@ -235,7 +222,7 @@ This testcase verifies allocating global symbol memory,
 add the MemcpyNodeFromSymbol node to the graph and
 erifying the result
 */
-TEST_CASE("Unit_hipGraphAddMemcpyNodeFromSymbol_GlobalMemory") {
+HIP_TEST_CASE(Unit_hipGraphAddMemcpyNodeFromSymbol_GlobalMemory) {
   hipGraphAddMemcpyNodeFromSymbol_GlobalMemory(false, false);
 }
 
@@ -245,7 +232,7 @@ add the MemcpyNodeFromSymbol node to the graph and
 verifying the result
 */
 
-TEST_CASE("Unit_hipGraphAddMemcpyNodeFromSymbol_GlobalConstMemory") {
+HIP_TEST_CASE(Unit_hipGraphAddMemcpyNodeFromSymbol_GlobalConstMemory) {
   hipGraphAddMemcpyNodeFromSymbol_GlobalMemory(false, true);
 }
 
@@ -255,8 +242,7 @@ in GPU-0 and add the MemcpyNodeFromSymbol node to the graph and
 verifying the result in GPU-1
 */
 #if HT_NVIDIA
-TEST_CASE("Unit_hipGraphAddMemcpyNodeFromSymbol_GlobalMemoryPeerDevice",
-          "[multigpu]") {
+HIP_TEST_CASE(Unit_hipGraphAddMemcpyNodeFromSymbol_GlobalMemoryPeerDevice) {
   int numDevices = 0;
   int canAccessPeer = 0;
   if (numDevices > 1) {
@@ -277,8 +263,7 @@ in GPU-0 and add the MemcpyNodeFromSymbol node to the graph and
 verifying the result in GPU-1
 */
 
-TEST_CASE("Unit_hipGraphAddMemcpyNodeFromSymbol_GlobalConstMemoryPeerDevice",
-          "[multigpu]") {
+HIP_TEST_CASE(Unit_hipGraphAddMemcpyNodeFromSymbol_GlobalConstMemoryPeerDevice) {
   int numDevices = 0;
   int canAccessPeer = 0;
   if (numDevices > 1) {
@@ -298,7 +283,7 @@ This testcaser verifies allocating global memory,
 Add MemcpyFromSymbolNode,KernelNode and memcpynode and validating
 the behaviour
 */
-TEST_CASE("Unit_hipGraphAddMemcpyNodeFromSymbol_GlobalMemoryWithKernel") {
+HIP_TEST_CASE(Unit_hipGraphAddMemcpyNodeFromSymbol_GlobalMemoryWithKernel) {
   constexpr size_t Nbytes = SIZE * sizeof(int);
   constexpr auto blocksPerCU = 6;  // to hide latency
   constexpr auto threadsPerBlock = 256;

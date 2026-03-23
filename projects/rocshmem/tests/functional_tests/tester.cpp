@@ -26,6 +26,7 @@
 
 #include <hip/hip_runtime.h>
 
+#include <cstdlib>
 #include <functional>
 #include <iostream>
 #include <rocshmem/rocshmem.hpp>
@@ -66,6 +67,7 @@
 #include "flood_tester.hpp"
 #include "flood_amo_tester.hpp"
 #include "hipmodule_init_tester.hpp"
+#include "device_bitcode_tester.hpp"
 
 #include "backend_bc.hpp"
 extern Backend* backend;
@@ -635,6 +637,10 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       if (rank == 0) std::cout << "Flood WaitAdd (multidirectional) ###" << std::endl;
       testers.push_back(new FloodAmoTester(args));
       return testers;
+    case DeviceBitcodeTestType:
+      if (rank == 0) std::cout << "Device Bitcode Test ###" << std::endl;
+      testers.push_back(new DeviceBitcodeTester(args));
+      return testers;
     default:
       if (rank == 0) std::cout << "Empty Test ###" << std::endl;
       return testers;
@@ -761,6 +767,7 @@ bool Tester::peLaunchesKernel() {
     case FloodAddTestType:
     case FloodFAddTestType:
     case FloodWaitAmoTestType:
+    case DeviceBitcodeTestType:
       is_launcher = true;
       break;
     default:

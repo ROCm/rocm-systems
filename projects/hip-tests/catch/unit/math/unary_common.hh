@@ -1,23 +1,8 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #pragma once
 
@@ -147,7 +132,7 @@ void UnarySinglePrecisionRangeTest(kernel_sig<T, float> kernel, ref_sig<RT, RTAr
   const auto reduction_factor = GetTestReductionFactor();
   const auto max_batch_size = GetMaxAllowedDeviceMemoryUsage() / (sizeof(float) + sizeof(T));
   LinearAllocGuard<float> values{LinearAllocs::hipHostMalloc, max_batch_size * sizeof(float)};
-  
+
   MathTest math_test(kernel, max_batch_size);
 
   const auto run = [&, gs = grid_size, bs = block_size](size_t inserted) {
@@ -235,13 +220,13 @@ void UnaryDoublePrecisionTest(kernel_sig<T, double> kernel, ref_sig<RT, RTArg> r
 #define MATH_UNARY_WITHIN_ULP_TEST_DEF(kern_name, ref_func, sp_ulp, dp_ulp)                        \
   MATH_UNARY_KERNEL_DEF(kern_name)                                                                 \
                                                                                                    \
-  TEST_CASE("Unit_Device_" #kern_name "_Accuracy_Positive - float") {                              \
+  HIP_TEST_CASE(Unit_Device_##kern_name##_Accuracy_Positive_float) {                               \
     double (*ref)(double) = ref_func;                                                              \
     UnarySinglePrecisionTest(kern_name##_kernel<float>, ref,                                       \
                              ULPValidatorBuilderFactory<float>(sp_ulp));                           \
   }                                                                                                \
                                                                                                    \
-  TEST_CASE("Unit_Device_" #kern_name "_Accuracy_Positive - double") {                             \
+  HIP_TEST_CASE(Unit_Device_##kern_name##_Accuracy_Positive_double) {                              \
     long double (*ref)(long double) = ref_func;                                                    \
     UnaryDoublePrecisionTest(kern_name##_kernel<double>, ref,                                      \
                              ULPValidatorBuilderFactory<double>(dp_ulp));                          \

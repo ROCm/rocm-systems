@@ -12,6 +12,10 @@
 * Added `ROCSHMEM_TEAM_WORLD` for the device code
 * Added new Enviroment variable:
   * `OVERRIDE_NIC_FIRMWARE_CHECK`
+* Added VMM POSIX memory allocator (`USE_HEAP_DEVICE_VMM_POSIX`)
+   * Uses HIP Virtual Memory Management (VMM) APIs for fine-grained memory control
+   * Requires ROCm 7.0+ and Linux kernel 5.6+
+   * Not compatible with MPI-based initialization (use `ROCSHMEM_INIT_WITH_UNIQUEID` instead)
 ### Changed
 * Use CQ collapsing for the Mellanox MLX5 GDA conduit
 
