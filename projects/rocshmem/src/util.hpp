@@ -474,26 +474,29 @@ template <typename... Args>
   dst_bytes = dst_def;
   src_bytes = src_def;
 
-  // constexpr int BW = 128;
-  // while (size >= BW) {
-  //   cpy_size = size / BW;
-  //   for (int i{thread_id}; i < cpy_size; i += block_size) {
-  //     dst_bytes = dst_def;
-  //     src_bytes = src_def;
+  constexpr int DATA_SIZE = 16; // size of each element: 4 uint (4 bytes) = 16 bytes (128 bits)
+  constexpr int DATA_COUNT = 8; // number of elements
+  constexpr int CHUNK_BYTES = DATA_SIZE * DATA_COUNT; // 128 bytes -> bus bandwidth (B/s)
+  
+  if (size >= CHUNK_BYTES) {
+    cpy_size = size / CHUNK_BYTES;
+    for (int i{thread_id * DATA_SIZE}; i < cpy_size; i += block_size * CHUNK_BYTES) {
+      dst_bytes = dst_def;
+      src_bytes = src_def;
       
-  //     src_bytes += i * BW;
-  //     dst_bytes += i * BW;
+      src_bytes += i;
+      dst_bytes += i;
       
-  //     // gpu_dprintf("WG (%u, %u, %u) TH (%u, %u, %u), flat_id = %d, size = %3d, " 
-  //     //   "j = %3d, cpy_size = %3d, src_bytes=%u, dst_bytes=%u\n", get_flat_id(), 
-  //     //   size, BW, cpy_size, src_bytes, dst_bytes);
+      // gpu_dprintf("WG (%u, %u, %u) TH (%u, %u, %u), flat_id = %d, size = %3d, " 
+      //   "j = %3d, cpy_size = %3d, src_bytes=%u, dst_bytes=%u\n", get_flat_id(), 
+      //   size, CHUNK_BYTES, cpy_size, src_bytes, dst_bytes);
         
-  //     store_asm(src_bytes, dst_bytes, BW);
-  //   }
-  //   size -= cpy_size * BW;
-  //   dst_def += cpy_size * BW;
-  //   src_def += cpy_size * BW;
-  // }
+      store_asm(src_bytes, dst_bytes, CHUNK_BYTES);
+    }
+    size -= cpy_size * CHUNK_BYTES;
+    dst_def += cpy_size * CHUNK_BYTES;
+    src_def += cpy_size * CHUNK_BYTES;
+  }
 
   for (int j{16}; j > 1; j >>= 1) {
   
