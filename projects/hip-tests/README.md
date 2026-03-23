@@ -68,8 +68,7 @@ HIP Catch2 supports building standalone tests, for example,
 - `cmake .. -DCMAKE_BUILD_TYPE=Release`
 - `make -j8`
 
-Install step, you might need to have superuser permission to be able to install globally.
-The default install location for linux is `/usr/local/`.
+During installation, you may need superuser privileges to perform a global install. On Linux systems, the default installation path is `/usr/local/`.
 
 - `make install`
 
