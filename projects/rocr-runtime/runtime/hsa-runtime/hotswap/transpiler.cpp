@@ -1255,10 +1255,16 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
       bool is_sub = mnemonic.find("sub") != std::string::npos;
       std::string op = is_sub ? "s_sub_u32" : "s_add_u32";
       std::string opc = is_sub ? "s_subb_u32" : "s_addc_u32";
+      // GFX12 s_add_nc_u64 does NOT write SCC.  GFX9 s_add_u32+s_addc_u32
+      // both write SCC.  Save and restore SCC so the expansion is transparent.
+      // Use cmpx_temp_sgpr+1 as a scratch register for SCC save.
+      std::string scc_tmp = "s" + std::to_string(cmpx_temp_sgpr + 1);
+      result.push_back("s_cselect_b32 " + scc_tmp + ", 1, 0 ; save SCC (nc_u64)");
       result.push_back(op + " s" + std::to_string(d0) +
                         ", s" + std::to_string(a0) + ", " + src_lo);
       result.push_back(opc + " s" + std::to_string(d1) +
                         ", s" + std::to_string(a1) + ", " + src_hi);
+      result.push_back("s_cmp_lg_u32 " + scc_tmp + ", 0 ; restore SCC (nc_u64)");
       return result;
     }
     result.push_back("s_nop 0 ; UNSUPPORTED: " + line);
@@ -3181,6 +3187,16 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
     std::cerr << "hotswap: transpile: kernel " << ki << ": disassembled "
               << source_lines.size() << " instructions\n";
 
+    // Debug: dump original GFX12 disassembly
+    if (std::getenv("HSA_HOTSWAP_DUMP")) {
+      std::cerr << "hotswap: transpile: === ORIGINAL GFX12 DISASSEMBLY ===\n";
+      for (size_t i = 0; i < source_instrs.size(); ++i) {
+        std::cerr << "  [" << i << "] pc=0x" << std::hex << source_instrs[i].pc_offset
+                  << std::dec << " " << source_instrs[i].text << "\n";
+      }
+      std::cerr << "hotswap: transpile: === END ORIGINAL ===\n";
+    }
+
     // ── Branch label resolution using ACTUAL byte offsets ──
     // Use the real PC offsets and sizes from the disassembler (not estimates).
     std::map<uint64_t, std::string> branch_labels;
@@ -3960,6 +3976,8 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
     translated_asm = cleaned;
   }
 
+  // (count-down conversion removed — did not fix the split-K issue)
+
   // Debug: dump translated assembly
   if (std::getenv("HSA_HOTSWAP_DUMP")) {
     std::cerr << "hotswap: transpile: === TRANSLATED ASSEMBLY ===\n"
@@ -4303,9 +4321,9 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
             num_vgprs += 4u;  // room for save registers
             uint32_t gfx9_vgpr = (num_vgprs / 4u) - 1u;
             if (gfx9_vgpr > 62u) gfx9_vgpr = 62u;
-            // Match native gfx942: field = ACCUM (all arch, no accum group).
-            // Native uses ACCUM=field (e.g., ACCUM=4, field=4 for .num_vgpr=20).
-            uint32_t rsrc1_vgpr_field = gfx9_vgpr;
+            // Hardware requires ACCUM_OFFSET < RSRC1 VGPR field.
+            // Add one extra group so ACCUM_OFFSET < field (strictly).
+            uint32_t rsrc1_vgpr_field = gfx9_vgpr + 1u;
             if (rsrc1_vgpr_field > 63u) rsrc1_vgpr_field = 63u;
             // Clear bits [11:0] and set GFX9 SGPR[5:0] and VGPR[11:6]
             rsrc1 &= ~0xFFFu;
