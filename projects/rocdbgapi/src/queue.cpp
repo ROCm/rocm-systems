@@ -604,10 +604,13 @@ aql_queue_t::get_os_queue_packet_id (
      processor's read_id and write_id.  */
   if (os_queue_packet_id < *m_read_packet_id
       || os_queue_packet_id >= *m_write_packet_id)
-    fatal_error ("os_queue_packet_id %#" PRIx64 " is not within "
-                 "[%#" PRIx64 "..%#" PRIx64 "[ in %s",
-                 os_queue_packet_id, *m_read_packet_id, *m_write_packet_id,
-                 to_cstring (id ()));
+    {
+      warning ("os_queue_packet_id %#" PRIx64 " is not within "
+               "[%#" PRIx64 "..%#" PRIx64 "[ in %s",
+               os_queue_packet_id, *m_read_packet_id, *m_write_packet_id,
+               to_cstring (id ()));
+      return {};
+    }
 
   return os_queue_packet_id;
 }
