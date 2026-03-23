@@ -783,6 +783,19 @@ ncclResult_t IbCastMakeVDeviceInternal(int* d, ncclNetVDeviceProps_t* props) {
     }
   }
 
+  // CTS Offload and CTS Inline are not yet compatible with NIC Fusion
+  // (NCCL_IB_MERGE_NICS). Disable them when a multi-NIC vNIC is created.
+  if (props->ndevs > 1) {
+      if (rcclCtsInlineData) {
+        INFO(NCCL_INIT|NCCL_NET, "NET/IB : NIC Fusion (ndevs=%d) - disabling CTS Inline Data (not yet supported with merge)", props->ndevs);
+        rcclCtsInlineData = false;
+      }
+    if (rcclCtsOffloadEnabled) {
+      INFO(NCCL_INIT|NCCL_NET, "NET/IB : NIC Fusion (ndevs=%d) - disabling CTS Offload (not yet supported with merge)", props->ndevs);
+      rcclCtsOffloadEnabled = false;
+    }
+  }
+
   *d = ncclNMergedIbDevs++;
   INFO(NCCL_NET, "NET/IB : Made virtual device [%d] name=%s speed=%d ndevs=%d", *d, mDev->devName, mDev->speed, mDev->vProps.ndevs);
   return ncclSuccess;
@@ -1262,19 +1275,25 @@ ncclResult_t IbCastInit(void** ctx, uint64_t commId, ncclNetCommConfig_t* config
       rcclCtsInlineData = ((rcclParamIbCastCtsInlineData() == 0) ? false : true);
       rcclCtsOffloadEnabled = ((rcclParamIbCastCtsOffloadEnabled() == 0) ? false : true);
 
-      // CTS Offload and CTS Inline are not yet compatible with NIC Fusion and CAST
-      // (NCCL_IB_MERGE_NICS). Temporarily disable them when merge is enabled.
-      if (ncclParamIbCastMergeNics() || rcclParamIbCastQpSchedEnable()) {
+      // CTS Offload and CTS Inline are mutually dependent — both must be
+      // enabled for either to function. Disable both if either is missing.
+      if (!rcclCtsOffloadEnabled || !rcclCtsInlineData) {
         if (rcclCtsInlineData) {
-          INFO(NCCL_INIT|NCCL_NET, "NET/IB : NIC Fusion or CAST enabled - disabling CTS Inline Data (not yet supported)");
-          rcclCtsInlineData = false;
+          INFO(NCCL_INIT|NCCL_NET, "NET/IB : CTS Inline disabled - disabling CTS Offload (requires CTS Inline)");
         }
         if (rcclCtsOffloadEnabled) {
-          INFO(NCCL_INIT|NCCL_NET, "NET/IB : NIC Fusion or CAST enabled - disabling CTS Offload (not yet supported)");
-          rcclCtsOffloadEnabled = false;
+          INFO(NCCL_INIT|NCCL_NET, "NET/IB : CTS Offload disabled - disabling CTS Inline (requires CTS Offload)");
         }
+        rcclCtsOffloadEnabled = false;
+        rcclCtsInlineData = false;
+      } else if (rcclParamIbCastQpSchedEnable()) {
+        INFO(NCCL_INIT|NCCL_NET, "NET/IB : CAST enabled - disabling CTS Inline Data and CTS Offload (not yet supported with CAST)");
+        rcclCtsInlineData = false;
+        rcclCtsOffloadEnabled = false;
       }
+      // for AINIC IbUseInline is enabled by default always
       ncclIbUseInline = true;
+      // for AINIC GDR flush is disabled by default
       ncclIbGdrFlushDisable = 1;
   
       INFO(NCCL_INIT|NCCL_NET, "NET/IB : AINIC RoCEv2 optimizations enabled: CTS Inline Data: %s; CTS Offload: %s; "
