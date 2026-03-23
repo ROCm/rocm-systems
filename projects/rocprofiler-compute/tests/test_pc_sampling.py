@@ -98,7 +98,7 @@ def test_pc_sampling_host_trap(binary_handler_profile_rocprof_compute):
         app_name="app_mat_mul_max",
     )
 
-    file_dict = test_utils.check_csv_files(workload_dir, num_devices, 1)
+    file_dict = test_utils.check_non_pmc_files(workload_dir, num_devices, 1)
     assert sorted(list(file_dict.keys())) == sorted(PC_SAMPLING_HOST_TRAP_FILES)
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -132,7 +132,7 @@ def test_pc_sampling_stochastic(binary_handler_profile_rocprof_compute):
         app_name="app_mat_mul_max",
     )
 
-    file_dict = test_utils.check_csv_files(workload_dir, num_devices, 1)
+    file_dict = test_utils.check_non_pmc_files(workload_dir, num_devices, 1)
     assert sorted(list(file_dict.keys())) == sorted(PC_SAMPLING_STOCHASTIC_FILES)
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
