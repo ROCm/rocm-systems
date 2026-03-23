@@ -115,7 +115,7 @@ template <typename T> bool runTest() {
   return testResult;
 }
 
-TEST_CASE(Unit_hipTextureFetch_vector) {
+HIP_TEST_CASE(Unit_hipTextureFetch_vector) {
   CHECK_IMAGE_SUPPORT
 
   // test for char

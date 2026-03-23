@@ -12,7 +12,7 @@
 #include <resource_guards.hh>
 #include <utils.hh>
 
-TEST_CASE(Unit_hipDrvMemcpy3DAsync_Positive_Basic) {
+HIP_TEST_CASE(Unit_hipDrvMemcpy3DAsync_Positive_Basic) {
   CHECK_IMAGE_SUPPORT
 
   constexpr bool async = true;
@@ -41,7 +41,7 @@ TEST_CASE(Unit_hipDrvMemcpy3DAsync_Positive_Basic) {
 #endif
 }
 
-TEST_CASE(Unit_hipDrvMemcpy3DAsync_Positive_Synchronization_Behavior) {
+HIP_TEST_CASE(Unit_hipDrvMemcpy3DAsync_Positive_Synchronization_Behavior) {
   CHECK_IMAGE_SUPPORT
 
   constexpr bool async = true;
@@ -69,7 +69,7 @@ TEST_CASE(Unit_hipDrvMemcpy3DAsync_Positive_Synchronization_Behavior) {
 #endif
 }
 
-TEST_CASE(Unit_hipDrvMemcpy3DAsync_Positive_Parameters) {
+HIP_TEST_CASE(Unit_hipDrvMemcpy3DAsync_Positive_Parameters) {
   CHECK_IMAGE_SUPPORT
 
   constexpr bool async = true;
@@ -77,7 +77,7 @@ TEST_CASE(Unit_hipDrvMemcpy3DAsync_Positive_Parameters) {
 }
 
 // Disabled on AMD due to defect - EXSWHTEC-238
-TEST_CASE(Unit_hipDrvMemcpy3DAsync_Positive_Array) {
+HIP_TEST_CASE(Unit_hipDrvMemcpy3DAsync_Positive_Array) {
   CHECK_IMAGE_SUPPORT
 
   constexpr bool async = true;
@@ -85,7 +85,7 @@ TEST_CASE(Unit_hipDrvMemcpy3DAsync_Positive_Array) {
   SECTION("Array from/to Device") { DrvMemcpy3DArrayDeviceShell<async>(DrvMemcpy3DWrapper<async>); }
 }
 
-TEST_CASE(Unit_hipDrvMemcpy3DAsync_Negative_Parameters) {
+HIP_TEST_CASE(Unit_hipDrvMemcpy3DAsync_Negative_Parameters) {
   CHECK_IMAGE_SUPPORT
 
   constexpr bool async = true;
@@ -237,7 +237,7 @@ TEST_CASE(Unit_hipDrvMemcpy3DAsync_Negative_Parameters) {
   }
 }
 
-TEST_CASE(Unit_hipDrvMemcpy3DAsync_Capture) {
+HIP_TEST_CASE(Unit_hipDrvMemcpy3DAsync_Capture) {
   CHECK_IMAGE_SUPPORT
 
   constexpr hipExtent kExtent{128 * sizeof(int), 128, 8};

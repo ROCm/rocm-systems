@@ -600,14 +600,21 @@ aql_queue_t::get_os_queue_packet_id (
       && (*m_read_packet_id % ring_size) >= (*m_write_packet_id % ring_size))
     os_queue_packet_id += ring_size;
 
-  /* Check that the dispatch_id is between the command
-     processor's read_id and write_id.  */
+  /* Check that the dispatch_id is between the command processor's read_id and
+     write_id.  Note that if the command processor advances the read_id as soon
+     as the packet is processed (this is allowed by the AQL specification
+     although AMD's implementation does not do it), then it is possible for the
+     write_id to wrap around and the following test would incorrectly succeed.
+     In that case the waves will be associated with the wrong dispatch.  */
   if (os_queue_packet_id < *m_read_packet_id
       || os_queue_packet_id >= *m_write_packet_id)
-    fatal_error ("os_queue_packet_id %#" PRIx64 " is not within "
-                 "[%#" PRIx64 "..%#" PRIx64 "[ in %s",
-                 os_queue_packet_id, *m_read_packet_id, *m_write_packet_id,
-                 to_cstring (id ()));
+    {
+      warning ("os_queue_packet_id %#" PRIx64 " is not within "
+               "[%#" PRIx64 "..%#" PRIx64 "[ in %s",
+               os_queue_packet_id, *m_read_packet_id, *m_write_packet_id,
+               to_cstring (id ()));
+      return {};
+    }
 
   return os_queue_packet_id;
 }

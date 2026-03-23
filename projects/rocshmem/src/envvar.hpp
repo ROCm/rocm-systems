@@ -35,7 +35,6 @@
 #include <list>
 #include <mutex>
 #include <ostream>
-#include <source_location>
 #include <sstream>
 #include <string>
 #include <type_traits>
@@ -150,7 +149,9 @@ namespace envvar {
         template <> struct _is_narrow_character<char>          : std::true_type  { };
         template <> struct _is_narrow_character<signed char>   : std::true_type  { };
         template <> struct _is_narrow_character<unsigned char> : std::true_type  { };
+#if defined(__cpp_char8_t) || (defined(__cplusplus) && __cplusplus >= 202002L)
         template <> struct _is_narrow_character<char8_t>       : std::true_type  { };
+#endif  // char8_t narrow character specialization
 
         template <typename T>
         struct is_narrow_character
@@ -325,7 +326,7 @@ namespace envvar {
           std::istringstream iss{std::string(env_value)};
           std::invoke(parse, iss, value);
           if (iss.fail()) {
-            std::cerr << std::source_location::current().function_name() << ": invalid argument "
+            std::cerr << __PRETTY_FUNCTION__ << ": invalid argument "
                       << name << "='" << env_value << "'" << std::endl;
             value = default_value;
           } else {

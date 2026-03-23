@@ -274,10 +274,10 @@ __device__ static inline long long __mul64hi(long long int x, long long int y) {
   return x1 * y1 + z2 + (z1 >> 32);
 }
 
-__device__ static inline int __mulhi(int x, int y) { return __ockl_mul_hi_i32(x, y); }
+__device__ static inline int __mulhi(int x, int y) { return (int)(((long)x * (long)y) >> 32); }
 
 __device__ static inline int __rhadd(int x, int y) {
-  return ((long long)x + (long long)y + 1) >> 1;
+  return ((__hip_int64_t)x + (__hip_int64_t)y + 1) >> 1;
 }
 
 __device__ static inline unsigned int __sad(int x, int y, unsigned int z) {
@@ -307,7 +307,7 @@ __device__ static inline unsigned long long __umul64hi(unsigned long long int x,
 }
 
 __device__ static inline unsigned int __umulhi(unsigned int x, unsigned int y) {
-  return __ockl_mul_hi_u32(x, y);
+  return (unsigned int)(((__hip_uint64_t)x * (__hip_uint64_t)y) >> 32);
 }
 
 __device__ static inline unsigned int __urhadd(unsigned int x, unsigned int y) {

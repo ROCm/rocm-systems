@@ -30,9 +30,11 @@ from pathlib import Path
 import pandas as pd
 
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
+from roofline import Roofline
 from utils import file_io, parser, schema, tty
 from utils.kernel_name_shortener import kernel_name_shortener
 from utils.logger import console_error, console_log, console_warning, demarcate
+from utils.roofline_calc import calc_ai_analyze, validate_roofline_csv
 from utils.utils import (
     build_call_trees,
     build_call_trees_with_kernel_ids,
@@ -169,21 +171,72 @@ class cli_analysis(OmniAnalyze_Base):
             # Generate roofline plot for single-path, compatible architectures
             if (len(args.path)) == 1:
                 if gpu_arch in ["gfx90a", "gfx940", "gfx941", "gfx942", "gfx950"]:
+                    is_roofline_valid, roofline_error_msg = validate_roofline_csv(
+                        Path(workload_path)
+                    )
                     soc = self.get_socs()
-                    if soc and gpu_arch in soc:
-                        roof_obj = soc[gpu_arch].roofline_obj
+                    if not soc or gpu_arch not in soc:
+                        console_warning(
+                            "roofline",
+                            "Skipping roofline charting: "
+                            f"gpu arch {gpu_arch} not in soc {soc}",
+                        )
+                    if is_roofline_valid:
+                        soc_obj = soc[gpu_arch]
+                        # Normalize user-facing "vL1D" to CSV column name "L1"
+                        mem_level = (
+                            args.mem_level
+                            if isinstance(args.mem_level, list)
+                            else [args.mem_level]
+                        )
+                        mem_level = [("L1" if m == "vL1D" else m) for m in mem_level]
 
-                        if roof_obj:
-                            # store path in workload for calc_ai_analyze
-                            workload.path = workload_path
+                        roof_obj = Roofline(
+                            args=soc_obj.get_args(),
+                            mspec=soc_obj._mspec,
+                            run_parameters={
+                                "workload_dir": workload_path,
+                                "device_id": 0,
+                                "sort_type": str(args.sort),
+                                "mem_level": mem_level,
+                                "is_standalone": True,
+                                "roofline_data_type": args.roofline_data_type,
+                                "kernel_filter": bool(args.gpu_kernel),
+                                "iteration_multiplexing": self._profiling_config.get(
+                                    "iteration_multiplexing"
+                                ),
+                            },
+                        )
+                        workload.path = workload_path
 
-                            # NOTE: using default data type
-                            roof_plot = roof_obj.cli_generate_plot(
-                                dtype=roof_obj.get_dtype()[0],
-                                workload=workload,
-                                config=self._profiling_config,
-                                arch_config=arch_config,
-                            )
+                        pmc_df = parser.apply_filters(
+                            workload, workload_path, is_gui=False, debug=args.debug
+                        )
+                        ai_data = calc_ai_analyze(
+                            workload=workload,
+                            pmc_df=pmc_df,
+                            mspec=soc_obj._mspec,
+                            sort_type=str(args.sort),
+                            config=self._profiling_config,
+                            arch_config=arch_config,
+                        )
+
+                        # NOTE: using default data type
+                        roof_plot = roof_obj.cli_generate_plot(
+                            dtype=roof_obj.get_dtype()[0],
+                            ai_data=ai_data,
+                        )
+
+                        ops_fig, flops_fig, ops_dt, flops_dt = (
+                            roof_obj.construct_plotly_figures(ai_data=ai_data)
+                        )
+                        roof_obj.save_html_files(ops_fig, flops_fig, ops_dt, flops_dt)
+                    else:
+                        console_warning(
+                            "roofline",
+                            "Skipping roofline charting: "
+                            f"Invalid roofline.csv: {roofline_error_msg}",
+                        )
 
             tty.show_all(
                 args,

@@ -126,7 +126,7 @@ void TernaryFloatingPointTest(kernel_sig<T, TArg, TArg, TArg> kernel,
 #define MATH_TERNARY_WITHIN_ULP_TEST_DEF(kern_name, ref_func, sp_ulp, dp_ulp)                      \
   MATH_TERNARY_KERNEL_DEF(kern_name)                                                               \
                                                                                                    \
-  TEMPLATE_TEST_CASE(Unit_Device_##kern_name##_Accuracy_Positive, float, double) {                 \
+  HIP_TEMPLATE_TEST_CASE(Unit_Device_##kern_name##_Accuracy_Positive, float, double) {             \
     using RT = RefType_t<TestType>;                                                                \
     RT (*ref)(RT, RT, RT) = ref_func;                                                              \
     const auto ulp = std::is_same_v<float, TestType> ? sp_ulp : dp_ulp;                            \

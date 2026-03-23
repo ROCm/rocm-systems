@@ -34,7 +34,7 @@ const int value = 120;
  * ------------------------
  * - catch/unit/memory/hipDrvGraphExecMemsetNodeSetParams.cc
  */
-TEST_CASE(Unit_hipDrvGraphExecMemsetNodeSetParams_BasicPositive) {
+HIP_TEST_CASE(Unit_hipDrvGraphExecMemsetNodeSetParams_BasicPositive) {
   CHECK_IMAGE_SUPPORT
 
   HIP_CHECK(hipInit(0));
@@ -143,7 +143,7 @@ TEST_CASE(Unit_hipDrvGraphExecMemsetNodeSetParams_BasicPositive) {
  * ------------------------
  * - catch/unit/memory/hipDrvGraphExecMemsetNodeSetParams.cc
  */
-TEST_CASE(Unit_hipDrvGraphExecMemsetNodeSetParams_Negative) {
+HIP_TEST_CASE(Unit_hipDrvGraphExecMemsetNodeSetParams_Negative) {
   CHECK_IMAGE_SUPPORT
 
   HIP_CHECK(hipInit(0));

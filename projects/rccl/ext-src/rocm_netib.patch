@@ -601,7 +601,7 @@ diff --git a/src/transport/net_ib.cc b/src/transport/net_ib.cc
      memset(reqs, 0, NCCL_NET_IB_MAX_RECVS*sizeof(struct ncclIbRequest*));
      comm->fifoHead++;
      TIME_STOP(0);
-@@ -2561,30 +2750,60 @@ fail:
+@@ -2561,30 +2750,62 @@ fail:
  
  ncclResult_t ncclIbPostFifo(struct ncclIbRecvComm* comm, int n, void** data, size_t* sizes, int* tags, void** mhandles, struct ncclIbRequest* req) {
    struct ibv_send_wr wr;
@@ -610,6 +610,8 @@ diff --git a/src/transport/net_ib.cc b/src/transport/net_ib.cc
 +  uint64_t localElemRef;
 +  int qpIndex = 0;
 +  ncclIbQp* ctsQp = NULL;
++  const int nRecvQps = rcclAinicRoce ?
++      (ncclParamIbSplitDataOnQps() ? comm->base.nqps : comm->base.nDataQps) : 0;
    memset(&wr, 0, sizeof(wr));
  
    int slot = comm->remFifo.fifoTail%MAX_REQUESTS;
@@ -676,7 +678,7 @@ diff --git a/src/transport/net_ib.cc b/src/transport/net_ib.cc
    }
    wr.wr.rdma.remote_addr = comm->remFifo.addr + slot*NCCL_NET_IB_MAX_RECVS*sizeof(struct ncclIbSendFifo);
  
-@@ -2592,8 +2811,12 @@ ncclResult_t ncclIbPostFifo(struct ncclI
+@@ -2592,8 +2813,12 @@ ncclResult_t ncclIbPostFifo(struct ncclI
    wr.wr.rdma.rkey = comm->base.remDevs[ctsQp->remDevIdx].fifoRkey;
  
    // Set the correct sge properties
@@ -691,13 +693,14 @@ diff --git a/src/transport/net_ib.cc b/src/transport/net_ib.cc
    wr.sg_list = &comm->devs[ctsQp->devIndex].fifoSge;
    wr.num_sge = 1;
  
-@@ -2623,7 +2846,13 @@ ncclResult_t ncclIbPostFifo(struct ncclI
+@@ -2623,7 +2848,14 @@ ncclResult_t ncclIbPostFifo(struct ncclI
    //
    // slot == devIndex - When writing to fifo slot N, and this QP lives on device index N, it should send signalled.
    // This works out that each fifo posting QP gets drained
 -  if (slot == ctsQp->devIndex) {
 +  if (rcclAinicRoce) {
-+    if (slot == ctsQp->ctsQpSlot) {
++    int ctsOrder = comm->base.qpIndex / nRecvQps;
++    if (slot == ctsOrder) {
 +      wr.send_flags |= IBV_SEND_SIGNALED;
 +      wr.wr_id = req - comm->base.reqs;
 +      ncclIbAddEvent(req, ctsQp->devIndex, &comm->devs[ctsQp->devIndex].base);
@@ -706,13 +709,13 @@ diff --git a/src/transport/net_ib.cc b/src/transport/net_ib.cc
      wr.send_flags |= IBV_SEND_SIGNALED;
      wr.wr_id = req - comm->base.reqs;
      ncclIbAddEvent(req, ctsQp->devIndex, &comm->devs[ctsQp->devIndex].base);
-@@ -2644,10 +2873,16 @@ ncclResult_t ncclIbPostFifo(struct ncclI
+@@ -2644,10 +2876,16 @@ ncclResult_t ncclIbPostFifo(struct ncclI
  
    comm->remFifo.fifoTail++;
  
 +  if (rcclAinicRoce) {
-+    // Select the next qpIndex
-+    comm->base.qpIndex = (comm->base.qpIndex+1) % comm->base.nqps;
++    // Advance qpIndex by the number of QPs used for data to stay in sync with the sender
++    comm->base.qpIndex = (comm->base.qpIndex + nRecvQps) % comm->base.nqps;
 +  }
    return ncclSuccess;
  }
@@ -723,7 +726,7 @@ diff --git a/src/transport/net_ib.cc b/src/transport/net_ib.cc
    struct ncclIbRecvComm* comm = (struct ncclIbRecvComm*)recvComm;
    ncclResult_t ret = ncclSuccess;
    struct ncclIbRequest* req = NULL;
-@@ -2663,6 +2898,11 @@ ncclResult_t ncclIbIrecv(void* recvComm,
+@@ -2663,6 +2901,11 @@ ncclResult_t ncclIbIrecv(void* recvComm,
    if (n > NCCL_NET_IB_MAX_RECVS) return ncclInternalError;
    NCCLCHECKGOTO(ncclIbStatsCheckFatalCount(&comm->base.stats,__func__), ret, fail);
  
@@ -735,7 +738,7 @@ diff --git a/src/transport/net_ib.cc b/src/transport/net_ib.cc
    NCCLCHECKGOTO(ncclIbGetRequest(&comm->base, &req), ret, fail);
    req->type = NCCL_NET_IB_REQ_RECV;
    req->sock = &comm->base.sock;
-@@ -2675,40 +2915,50 @@ ncclResult_t ncclIbIrecv(void* recvComm,
+@@ -2675,40 +2918,50 @@ ncclResult_t ncclIbIrecv(void* recvComm,
      req->devBases[i] = &comm->devs[i].base;
    }
  
@@ -816,7 +819,7 @@ diff --git a/src/transport/net_ib.cc b/src/transport/net_ib.cc
  
    // Post to FIFO to notify sender
    TIME_START(2);
-@@ -2832,6 +3082,8 @@ static int getReqQpIndex(struct ncclIbRe
+@@ -2832,6 +3085,8 @@ static int getReqQpIndex(struct ncclIbRe
  }
  #endif
  
@@ -825,7 +828,7 @@ diff --git a/src/transport/net_ib.cc b/src/transport/net_ib.cc
  ncclResult_t ncclIbTest(void* request, int* done, int* sizes) {
    struct ncclIbRequest *r = (struct ncclIbRequest*)request;
    ncclResult_t ret = ncclSuccess;
-@@ -2875,13 +3127,17 @@ ncclResult_t ncclIbTest(void* request, i
+@@ -2875,13 +3130,17 @@ ncclResult_t ncclIbTest(void* request, i
  
      int totalWrDone = 0;
      int wrDone = 0;
@@ -845,7 +848,7 @@ diff --git a/src/transport/net_ib.cc b/src/transport/net_ib.cc
          if (ret != ncclSuccess) {
            failDevIdx = i;
            goto fail;
-@@ -3058,7 +3314,7 @@ ncclResult_t rcclNetP2pPolicy(void* hand
+@@ -3058,7 +3317,7 @@ ncclResult_t rcclNetP2pPolicy(void* hand
  }
  
  ncclNet_t ncclNetIb = {
