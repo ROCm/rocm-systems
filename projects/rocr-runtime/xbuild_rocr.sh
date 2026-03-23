@@ -1,3 +1,4 @@
+
 #!/bin/bash
 
 full=${full:-0}
@@ -9,8 +10,8 @@ pushd build
 
 if [[ ${full} -eq 1 ]]; then
   rm -rf *
-  cmake .. -DCMAKE_BUILD_TYPE=Release -DCLR_BUILD_HIP=ON -DHIP_COMMON_DIR=$HIP_DIR -D__HIP_ENABLE_PCH=OFF
+  cmake -DCMAKE_INSTALL_PREFIX=/tf/rocr-runtime-install  -DCMAKE_BUILD_TYPE=Release ..
 fi
 
-make -j
+make install -j
 popd
