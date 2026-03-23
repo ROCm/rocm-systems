@@ -565,11 +565,24 @@ class TestExecutor:
                 config_mpi_args = test_config.get("mpi_args", "")
                 mca_params = config_mpi_args if config_mpi_args else default_mca
 
+            MPI_ARGS = {
+                "openmpi": "--mca pml ucx --mca btl ^vader,openib",
+                "mpich": "",
+            }
+            BIND_ARGS = {
+                "openmpi": "--bind-to none",
+                "mpich": "-bind-to none",
+            }
+
+            mca_params = MPI_ARGS.get(self.mpi_impl, "")
+            bind_params = BIND_ARGS.get(self.mpi_impl, "")
+
             mpi_args = (
                 f"-np {num_ranks} "
                 f"{host_arg}"
                 f"{map_by_arg}"
-                f"{mca_params}"
+                f"{mca_params} "
+                f"{bind_params} "
             )
 
             # Add environment variables for MPI (quote values to handle shell metacharacters like ;)
