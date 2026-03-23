@@ -426,9 +426,11 @@ static std::string TranslateWaitInstruction(const std::string& line) {
     return "s_waitcnt vmcnt(" + std::to_string(count) +
            ") lgkmcnt(" + std::to_string(count) + ")";
   }
-  // s_wait_xcnt → expcnt (GFX12 export-ready counter ≈ GFX9 expcnt)
+  // s_wait_xcnt: GFX12 "transaction count" — waits for global store completion.
+  // On GFX9, global stores use vmcnt (NOT expcnt).  Map xcnt → vmcnt so that
+  // global_store completions are properly waited on.
   if (mnemonic == "s_wait_xcnt") {
-    return "s_waitcnt expcnt(" + std::to_string(count) + ")";
+    return "s_waitcnt vmcnt(" + std::to_string(count) + ")";
   }
   // s_wait_asynccnt, s_wait_tensorcnt — no GFX9 equivalent.
   // Emit a full barrier as conservative fallback.
@@ -4172,8 +4174,7 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
           lines[i+5].find("s_cmp_ge_i32") != std::string::npos &&
           lines[i+8].find("v_fmac_f32") != std::string::npos &&
           lines[i+9].find("s_cbranch_scc0") != std::string::npos) {
-        // Serialize loads: wait immediately after issue, before any address updates.
-        // This tests whether the bug is a race between address updates and loads.
+        // Wait for both loads first, then do address updates and loop control.
         fixed += "s_waitcnt vmcnt(0) lgkmcnt(0)\n"; // wait for BOTH loads first
         fixed += lines[i] + "\n";                  // v_add_u32_e32 vN, sM, vN
         fixed += lines[i+1] + "\n";               // s_add_i32 sK, sK, 1
@@ -4192,6 +4193,8 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
   }
 
   // (GLC/sc0 additions removed — cache coherency is not the root cause)
+
+  // (xcnt→vmcnt fix is now in TranslateWaitInstruction)
 
   // Debug: dump translated assembly
   if (std::getenv("HSA_HOTSWAP_DUMP")) {
