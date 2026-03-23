@@ -1053,7 +1053,7 @@ bool Device::IpcCreate(void* dev_ptr, size_t* mem_size, char* handle, size_t* me
   // VMM allocations must use hipMemExportToShareableHandle for IPC.
   if (amd_mem_obj->getMemFlags() & CL_MEM_VA_RANGE_AMD) {
     ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
-             "IPC is not supported for VMM allocations (dev_ptr: 0x%x)", dev_ptr);
+             "IPC is not supported for VMM allocations (dev_ptr: %p)", dev_ptr);
     return false;
   }
 
