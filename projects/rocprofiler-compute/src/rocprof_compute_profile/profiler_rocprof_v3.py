@@ -29,7 +29,6 @@ import shlex
 from rocprof_compute_profile.profiler_base import RocProfCompute_Base
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils.logger import console_error, console_log, demarcate
-from utils.utils import is_only_pc_sampling
 
 
 class rocprof_v3_profiler(RocProfCompute_Base):
