@@ -3507,6 +3507,22 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
         ".L_br28:\n"
         "s_cmp_eq_u32 s8, 0\n"
         "s_cbranch_scc1 .L_br25 ; redundant remainder guard\n");
+      // Fix: force ALL inner product to use the remainder path (.L_br26/.L_br29).
+      // The unrolled path (.L_br27) produces zeros on GFX9.
+      // Set s9=0 so the .L_br24 branch to .L_br26 is always taken.
+      // Set s5=0 and s8=N (original) so the remainder processes all N elements.
+      if (stats->total_instructions < 560) {
+        auto replaceFirst = [](std::string& s, const std::string& from, const std::string& to) {
+          size_t pos = s.find(from);
+          if (pos != std::string::npos) s.replace(pos, from.size(), to);
+        };
+        // Before s_and s5: save N to s8 BEFORE masking, force s5=0 and s9=0
+        replaceFirst(translated_asm,
+          "s_and_b32 s5, s5, 0x7ffffff8\n",
+          "s_mov_b32 s8, s5 ; FIX: s8 = N (full remainder count)\n"
+          "s_mov_b32 s5, 0  ; FIX: force s5=0 (skip unrolled loop)\n"
+          "s_mov_b32 s9, 0  ; FIX: force s9=0 (go to remainder path)\n");
+      }
       // Fix 1: tree reduction stride (attn_forward only, not multihead).
       if (stats->total_instructions < 560) {
         size_t br12_pos = translated_asm.find(".L_br12:\n");
