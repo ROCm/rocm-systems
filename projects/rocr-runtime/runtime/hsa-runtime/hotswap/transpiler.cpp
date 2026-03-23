@@ -3798,30 +3798,50 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
         }
       };
       // Check if the pattern exists before doing replacements.
-      // Extract the kernarg save register pair from the prologue comment.
-      if (translated_asm.find("s_load_dword s1, s[8:9], 0xc") != std::string::npos ||
-          translated_asm.find("s_load_dword s0, s[8:9], 0xc") != std::string::npos) {
-        // Use the computed kernarg save pair (cmpx_temp_sgpr+2/+3).
-        // This avoids collision with cmpx VCC save which uses cmpx_temp_sgpr.
+      // GFX12 kernels load hidden args via dispatch pointer or computed base:
+      // - attn_forward: s_load_dword sN, s[8:9], 0xc (dispatch pointer)
+      // - multihead:    s_load_dword sN, s[16:17], 0xc (kernarg+48, but s[16:17]
+      //                 gets overwritten with Q pointer for N>0 path!)
+      // Replace both patterns with kernarg save pair + 0x3c.
+      {
         std::string ka_pair = "s[" + std::to_string(kernarg_save_lo) + ":"
                               + std::to_string(kernarg_save_hi) + "]";
-        size_t ka_pos = translated_asm.find("; save kernarg ptr lo");
-        if (ka_pos == std::string::npos) {
-          // No save emitted yet — emit it now using computed registers
-          size_t insert_pos = translated_asm.find("; save workgroup_id_y\n");
-          if (insert_pos != std::string::npos) {
-            insert_pos = translated_asm.find('\n', insert_pos) + 1;
-            translated_asm.insert(insert_pos,
-              "s_mov_b32 " + ka_lo + ", s0 ; save kernarg ptr lo\n"
-              "s_mov_b32 " + ka_hi + ", s1 ; save kernarg ptr hi\n");
+        bool need_replace = false;
+        // Check for s[8:9]+0xc (attn_forward pattern)
+        if (translated_asm.find("s_load_dword s1, s[8:9], 0xc") != std::string::npos ||
+            translated_asm.find("s_load_dword s0, s[8:9], 0xc") != std::string::npos)
+          need_replace = true;
+        // Check for s[16:17]+0xc (multihead pattern — dispatch base was in s[16:17])
+        if (translated_asm.find("s_load_dword s1, s[16:17], 0xc") != std::string::npos ||
+            translated_asm.find("s_load_dword s0, s[16:17], 0xc") != std::string::npos)
+          need_replace = true;
+        if (need_replace) {
+          size_t ka_pos = translated_asm.find("; save kernarg ptr lo");
+          if (ka_pos == std::string::npos) {
+            // No save emitted yet — emit it now using computed registers
+            size_t insert_pos = translated_asm.find("; save workgroup_id_y\n");
+            if (insert_pos != std::string::npos) {
+              insert_pos = translated_asm.find('\n', insert_pos) + 1;
+              translated_asm.insert(insert_pos,
+                "s_mov_b32 " + ka_lo + ", s0 ; save kernarg ptr lo\n"
+                "s_mov_b32 " + ka_hi + ", s1 ; save kernarg ptr hi\n");
+            }
           }
+          // Replace s[8:9]+0xc pattern (attn_forward)
+          replaceAll(translated_asm,
+            "s_load_dword s1, s[8:9], 0xc",
+            "s_load_dword s1, " + ka_pair + ", 0x3c ; use saved kernarg ptr");
+          replaceAll(translated_asm,
+            "s_load_dword s0, s[8:9], 0xc",
+            "s_load_dword s0, " + ka_pair + ", 0x3c ; use saved kernarg ptr");
+          // Replace s[16:17]+0xc pattern (multihead — dispatch base in s[16:17])
+          replaceAll(translated_asm,
+            "s_load_dword s1, s[16:17], 0xc",
+            "s_load_dword s1, " + ka_pair + ", 0x3c ; use saved kernarg ptr");
+          replaceAll(translated_asm,
+            "s_load_dword s0, s[16:17], 0xc",
+            "s_load_dword s0, " + ka_pair + ", 0x3c ; use saved kernarg ptr");
         }
-        replaceAll(translated_asm,
-          "s_load_dword s1, s[8:9], 0xc",
-          "s_load_dword s1, " + ka_pair + ", 0x3c ; use saved kernarg ptr");
-        replaceAll(translated_asm,
-          "s_load_dword s0, s[8:9], 0xc",
-          "s_load_dword s0, " + ka_pair + ", 0x3c ; use saved kernarg ptr");
       }
     }
     // Debug: HSA_HOTSWAP_NOP_GLOBAL=1 caps outer loop to 2 iterations
