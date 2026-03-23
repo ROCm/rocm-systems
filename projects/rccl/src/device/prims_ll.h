@@ -540,13 +540,6 @@ private:
       nelem -= eltPerTrip;
       offset += nthreads;
     }
-    #ifdef __gfx950__ 
-    if constexpr (isMsccl(Metadata) && DST){
-      // Wait for pending vector loads and stores
-      __builtin_amdgcn_s_waitcnt((15 << 8) | (7 << 4)); // s_waitcnt vmcnt(0)
-    }
-    #endif
-
 #if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_PRIM_COLLECT_DATA_PROCESS_TIME)
     if (tid == 0) {
       npKitDataProcessExitTime = NPKIT_GET_GPU_TIMESTAMP();
@@ -573,82 +566,6 @@ private:
         incSend(i, offset);
       incSend(0, offset);
     }
-  }
-
-  template <int REDUCE, int COPY, int MULTISRCS, int MULTIDSTS>
-  __device__ __forceinline__ void mscclGenericOp(T** srcs, int nsrcs, T** dsts, int ndsts, int nelem) {
-#if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_MSCCL_GENERIC_OP_ENTRY)
-    if (tid == 0) {
-      NpKit::CollectGpuEvent(NPKIT_EVENT_MSCCL_GENERIC_OP_ENTRY, nelem*sizeof(T), 0, NPKIT_GET_GPU_TIMESTAMP(),
-          ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
-    }
-#endif
-
-    nelem = nelem < 0 ? 0 : nelem;
-    T *srcElts = srcs[0];
-    T *dstElts = dsts[0];
-    nelem -= tid*EltPerLine;
-    srcElts += tid*EltPerLine;
-    dstElts += tid*EltPerLine;
-    if (MULTISRCS){
-      for (int i = 1; i < nsrcs; i++){
-        srcs[i] += tid*EltPerLine;
-      }
-    }
-    if (MULTIDSTS){
-      for (int i = 1; i < ndsts; i++){
-        dsts[i] += tid*EltPerLine;
-      }
-    }
-    int eltPerTrip = nthreads*EltPerLine;
-    while (nelem > 0) {
-      int eltInLine = EltPerLine < nelem ? EltPerLine : nelem;
-
-      DataLoader dl;
-      uint64_t data;
-      dl.loadBegin(srcElts, eltInLine);
-      srcElts += eltPerTrip;
-      data = dl.loadFinish();
-      if (REDUCE) {
-        uint64_t dataD;
-        dl.loadBegin(dstElts, eltInLine);
-        dataD = dl.loadFinish();
-        dataD = applyReduce(redOp, dataD, data);
-        if (MULTISRCS){
-          for (int i = 1; i < nsrcs; i++){
-            dl.loadBegin(srcs[i], eltInLine);
-            srcs[i] += eltPerTrip;
-            data = dl.loadFinish();
-            dataD = applyReduce(redOp, dataD, data);
-          }
-        }
-        storeData(dstElts, dataD, eltInLine);
-        dstElts += eltPerTrip;
-      }
-      if (COPY){
-        storeData(dstElts, data, eltInLine);
-        dstElts += eltPerTrip;
-        if (MULTIDSTS){
-          for (int i = 1; i < ndsts; i++){
-            dl.loadBegin(srcs[i], eltInLine);
-            srcs[i] += eltPerTrip;
-            data = dl.loadFinish();
-            storeData(dsts[i], data, eltInLine);
-            dsts[i] += eltPerTrip;
-          }
-        }
-      }
-      nelem -= eltPerTrip;
-    }
-
-#if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_MSCCL_GENERIC_OP_EXIT)
-    if (tid == 0) {
-      NpKit::CollectGpuEvent(NPKIT_EVENT_MSCCL_GENERIC_OP_EXIT, nelem*sizeof(T), 0, NPKIT_GET_GPU_TIMESTAMP(),
-          ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
-    }
-#endif
-
-    barrier();
   }
 
   __device__ __forceinline__ void loadRecvConn(struct ncclConnInfo* conn, int i) {
@@ -688,7 +605,7 @@ public:
     tid(tid), nthreads(nthreads), wid(tid%WARP_SIZE), group(group), threadsPerBlock(blockDim.x),
     stepLines(ncclShmem.comm.buffSizes[NCCL_PROTO_LL]/NCCL_STEPS/sizeof(ncclLLFifoLine)) {
 #ifdef ENABLE_WARP_SPEED
-    auto *channel = isMsccl(Metadata) ? &ncclShmem.channel : &ncclShmem.warpChannel[threadIdx.x / WARP_SIZE];
+    auto *channel = &ncclShmem.warpChannel[threadIdx.x / WARP_SIZE];
 #else
     auto *channel = &ncclShmem.channel;
 #endif
@@ -868,15 +785,5 @@ public:
   }
   __device__ void recvSend(int eltN) {
     return LLGenericOp<1, 1, -1, -1>(-1, -1, eltN, false);
-  }
-
-  // MSCCL primitives
-  __device__ void sendWithBarrier(intptr_t inpIx, int eltN) {
-    send(inpIx, eltN);
-    // This is the only primitive.instruction where there is no barrier at the end, add it
-    barrier();
-  }
-  __device__ void localCopy(T* srcs, T* dsts, int eltN) {
-    return mscclGenericOp<0,1,0,0>(&srcs, 1, &dsts, 1, eltN);
   }
 };

@@ -609,11 +609,6 @@ static ncclResult_t SaveProxy(struct ncclComm* comm, struct ncclChannel* channel
   return ncclSuccess;
 }
 
-ncclResult_t mscclSaveProxy(struct ncclComm* comm, struct ncclChannel* channel, int type, int peer, struct ncclProxyOp* op, int connIndex) {
-  NCCLCHECK(SaveProxy(comm, channel, type, peer, op, connIndex, nullptr));
-  return ncclSuccess;
-}
-
 // justInquire != nullptr means don't actually do anything, just assertain need of
 // ncclProxySaveOp for this op.
 ncclResult_t ncclProxySaveOp(struct ncclComm* comm, struct ncclProxyOp* op, bool* justInquire) {
