@@ -71,4 +71,14 @@ jobs:
         -DTHEROCK_ENABLE_SYSDEPS_AMD_MESA=ON
         -DTHEROCK_ENABLE_ROCDECODE=ON
         -DTHEROCK_ENABLE_ROCJPEG=ON
-      projects_to_test: ""
+      projects_to_test: "rocdecode,rocjpeg"
+
+  therock-test-linux:
+    name: "Test Media Libs"
+    needs: [therock-ci-linux]
+    uses: ./.github/workflows/therock-test-packages.yml
+    with:
+      projects_to_test: "rocdecode,rocjpeg"
+      amdgpu_families: "gfx94X-dcgpu"
+      test_runs_on: "linux-mi325-1gpu-ossci-rocm"
+      platform: "linux"
