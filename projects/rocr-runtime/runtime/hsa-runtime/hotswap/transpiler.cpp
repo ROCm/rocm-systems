@@ -2979,6 +2979,10 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
   std::string translated_asm;
   translated_asm += ".text\n";
 
+  // Saved across kernel loop for post-processing fix blocks.
+  uint32_t kernarg_save_lo = 0, kernarg_save_hi = 0;
+  std::string ka_lo, ka_hi;
+
   for (size_t ki = 0; ki < kernels.size(); ++ki) {
     auto& kern = kernels[ki];
 
@@ -3257,10 +3261,10 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
     // Save kernarg pointer s[0:1] to dedicated SGPRs for later use.
     // Only needed for kernels that access hidden args (s_load from s[8:9]+0xc).
     // Place at cmpx_temp_sgpr+2 and +3 (above kernel's own SGPRs).
-    uint32_t kernarg_save_lo = cmpx_temp_sgpr + 2;
-    uint32_t kernarg_save_hi = cmpx_temp_sgpr + 3;
-    std::string ka_lo = "s" + std::to_string(kernarg_save_lo);
-    std::string ka_hi = "s" + std::to_string(kernarg_save_hi);
+    kernarg_save_lo = cmpx_temp_sgpr + 2;
+    kernarg_save_hi = cmpx_temp_sgpr + 3;
+    ka_lo = "s" + std::to_string(kernarg_save_lo);
+    ka_hi = "s" + std::to_string(kernarg_save_hi);
     // Note: kernarg save is deferred — only emitted in post-processing
     // if the kernel has s_load from s[8:9]+0xc patterns.
 
@@ -3494,6 +3498,19 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
     // Only apply these fixes to kernels with .L_br28 (attn_forward-specific pattern)
     if (stats->total_instructions > 400 &&
         translated_asm.find(".L_br28:") != std::string::npos) {
+      // Ensure kernarg pointer is saved for Fix 2/3 loads.
+      // If the s[8:9]+0xc replacement already emitted a save, this is a no-op.
+      if (translated_asm.find("; save kernarg ptr lo") == std::string::npos) {
+        std::string ka_pair_str = "s[" + std::to_string(kernarg_save_lo) + ":"
+                                  + std::to_string(kernarg_save_hi) + "]";
+        size_t insert_pos = translated_asm.find("; save workgroup_id_y\n");
+        if (insert_pos != std::string::npos) {
+          insert_pos = translated_asm.find('\n', insert_pos) + 1;
+          translated_asm.insert(insert_pos,
+            "s_mov_b32 " + ka_lo + ", s0 ; save kernarg ptr lo\n"
+            "s_mov_b32 " + ka_hi + ", s1 ; save kernarg ptr hi\n");
+        }
+      }
       auto replaceAll = [](std::string& s, const std::string& from, const std::string& to) {
         size_t pos = 0;
         while ((pos = s.find(from, pos)) != std::string::npos) {
@@ -3517,10 +3534,18 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
           if (pos != std::string::npos) s.replace(pos, from.size(), to);
         };
         // Before s_and s5: save N to s8 BEFORE masking, force s5=0 and s9=0
+        // attn_forward uses: s_and_b32 s5, s5, 0x7ffffff8
+        // attn_multihead uses: s_and_b32 s10, s5, 0x7ffffff8
         replaceFirst(translated_asm,
           "s_and_b32 s5, s5, 0x7ffffff8\n",
           "s_mov_b32 s8, s5 ; FIX: s8 = N (full remainder count)\n"
           "s_mov_b32 s5, 0  ; FIX: force s5=0 (skip unrolled loop)\n"
+          "s_mov_b32 s9, 0  ; FIX: force s9=0 (go to remainder path)\n");
+        // multihead variant: s10 holds the unroll count instead of s5
+        replaceFirst(translated_asm,
+          "s_and_b32 s10, s5, 0x7ffffff8\n",
+          "s_mov_b32 s8, s5 ; FIX: s8 = N (full remainder count)\n"
+          "s_mov_b32 s10, 0 ; FIX: force s10=0 (no unrolled iterations)\n"
           "s_mov_b32 s9, 0  ; FIX: force s9=0 (go to remainder path)\n");
       }
       // Fix 1: tree reduction stride (attn_forward only, not multihead).
@@ -3547,17 +3572,9 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
       // Use the unique pattern "s_xor_b32 s0, exec_lo, s1\ns_cbranch_execz .L_br11"
       // Fix 2: s10 hoist
       if (stats->total_instructions < 600) {
-        std::string ka_pair = "s[30:31]";
-        size_t ka_pos = translated_asm.find("; save kernarg ptr lo");
-        if (ka_pos != std::string::npos) {
-          size_t s_pos = translated_asm.rfind("s_mov_b32 s", ka_pos);
-          if (s_pos != std::string::npos) {
-            size_t n_start = s_pos + 11;
-            size_t n_end = translated_asm.find(',', n_start);
-            int lo = std::stoi(translated_asm.substr(n_start, n_end - n_start));
-            ka_pair = "s[" + std::to_string(lo) + ":" + std::to_string(lo+1) + "]";
-          }
-        }
+        // Use computed kernarg save pair (avoids collision with cmpx VCC save)
+        std::string ka_pair = "s[" + std::to_string(kernarg_save_lo) + ":"
+                              + std::to_string(kernarg_save_hi) + "]";
         std::string target = "s_xor_b32 s0, exec_lo, s1\n";
         size_t xor_pos = translated_asm.find(target);
         if (xor_pos != std::string::npos) {
@@ -3578,17 +3595,9 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
         // s10 is clobbered by the find-max tree (saves exec to s10).
         // Reload s10 from the hidden arg, then set v1.
         {
-          std::string ka_pair = "s[30:31]";
-          size_t ka_pos = translated_asm.find("; save kernarg ptr lo");
-          if (ka_pos != std::string::npos) {
-            size_t s_pos = translated_asm.rfind("s_mov_b32 s", ka_pos);
-            if (s_pos != std::string::npos) {
-              size_t n_start = s_pos + 11;
-              size_t n_end = translated_asm.find(',', n_start);
-              int lo = std::stoi(translated_asm.substr(n_start, n_end - n_start));
-              ka_pair = "s[" + std::to_string(lo) + ":" + std::to_string(lo+1) + "]";
-            }
-          }
+          // Use computed kernarg save pair (avoids collision with cmpx VCC save)
+          std::string ka_pair = "s[" + std::to_string(kernarg_save_lo) + ":"
+                                + std::to_string(kernarg_save_hi) + "]";
           replaceFirst(translated_asm,
             ".L_br14:\n",
             ".L_br14:\n"
@@ -3599,21 +3608,24 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
         }
       }
       // Fix 4: s3 (thread-0 mask) and v1 (1/sqrt(D) scale factor).
-      // s3 is overwritten by v_readfirstlane (float(D)) during sqrt computation.
-      // v1 (the sqrt chain result) is 0 on GFX9 (chain produces wrong value).
-      // Fix: recompute both before the outer loop.
+      // s3 is overwritten by v_readfirstlane (float(D)) during sqrt computation,
+      // and also by inner product address computation (s_addc_u32 s3, s3, s13).
+      // v1 (the sqrt chain result) is 0 on GFX9 (chain produces wrong value),
+      // and v1 is reused for other purposes in the loop body.
+      // Fix: insert at .L_br4 (outer loop HEAD) so it runs every iteration,
+      // not just once before the first iteration.
       if (stats->total_instructions < 600) {
-        std::string target = "s_branch .L_br4\n";
-        size_t pos = translated_asm.find(target);
-        if (pos != std::string::npos) {
-          std::string fix =
-            "s_mov_b32 s3, 1 ; FIX: restore thread-0 mask for .L_br9\n"
-            "v_cvt_f32_u32_e32 v1, s6 ; FIX: v1 = float(D)\n"
-            "v_sqrt_f32_e32 v1, v1    ; v1 = sqrt(D)\n"
-            "v_rcp_f32_e32 v1, v1     ; v1 = 1/sqrt(D)\n"
-            "s_branch .L_br4\n";
-          translated_asm.replace(pos, target.size(), fix);
-        }
+        auto replaceFirst = [](std::string& s, const std::string& from, const std::string& to) {
+          size_t pos = s.find(from);
+          if (pos != std::string::npos) s.replace(pos, from.size(), to);
+        };
+        replaceFirst(translated_asm,
+          ".L_br4:\n",
+          ".L_br4:\n"
+          "s_mov_b32 s3, 1 ; FIX4: restore thread-0 mask (clobbered each iter)\n"
+          "v_cvt_f32_u32_e32 v1, s6 ; FIX4: v1 = float(D)\n"
+          "v_sqrt_f32_e32 v1, v1    ; v1 = sqrt(D)\n"
+          "v_rcp_f32_e32 v1, v1     ; v1 = 1/sqrt(D)\n");
       }
       // Fix 5: widen exec to N threads for the softmax computation.
       // The v_cmpx_gt_i32 s6, v0 masks exec to D threads (0..D-1).
@@ -3770,26 +3782,19 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
       // Extract the kernarg save register pair from the prologue comment.
       if (translated_asm.find("s_load_dword s1, s[8:9], 0xc") != std::string::npos ||
           translated_asm.find("s_load_dword s0, s[8:9], 0xc") != std::string::npos) {
-        // Find the kernarg save registers from prologue
-        std::string ka_pair = "s[30:31]";  // fallback
+        // Use the computed kernarg save pair (cmpx_temp_sgpr+2/+3).
+        // This avoids collision with cmpx VCC save which uses cmpx_temp_sgpr.
+        std::string ka_pair = "s[" + std::to_string(kernarg_save_lo) + ":"
+                              + std::to_string(kernarg_save_hi) + "]";
         size_t ka_pos = translated_asm.find("; save kernarg ptr lo");
-        if (ka_pos != std::string::npos) {
-          size_t s_pos = translated_asm.rfind("s_mov_b32 s", ka_pos);
-          if (s_pos != std::string::npos) {
-            size_t n_start = s_pos + 11;
-            size_t n_end = translated_asm.find(',', n_start);
-            int lo = std::stoi(translated_asm.substr(n_start, n_end - n_start));
-            ka_pair = "s[" + std::to_string(lo) + ":" + std::to_string(lo + 1) + "]";
-          }
-        } else {
-          // No save emitted yet — emit it now
+        if (ka_pos == std::string::npos) {
+          // No save emitted yet — emit it now using computed registers
           size_t insert_pos = translated_asm.find("; save workgroup_id_y\n");
           if (insert_pos != std::string::npos) {
             insert_pos = translated_asm.find('\n', insert_pos) + 1;
-            // Use s28+2=s30 and s29+2=s31 as safe default (large kernels)
             translated_asm.insert(insert_pos,
-              "s_mov_b32 s30, s0 ; save kernarg ptr lo\n"
-              "s_mov_b32 s31, s1 ; save kernarg ptr hi\n");
+              "s_mov_b32 " + ka_lo + ", s0 ; save kernarg ptr lo\n"
+              "s_mov_b32 " + ka_hi + ", s1 ; save kernarg ptr hi\n");
           }
         }
         replaceAll(translated_asm,
