@@ -40,6 +40,17 @@ class TestExecutor:
     Executes tests and manages build/test workflows
     """
 
+    MPI_IMPL_CONFIG = {
+        "openmpi": {
+            "env_format": "-x {key}='{value}'",
+            "default_args": "--mca btl ^vader,openib --mca pml ucx --bind-to none",
+        },
+        "mpich": {
+            "env_format": "-env {key} '{value}'",
+            "default_args": "-bind-to none",
+        },
+    }
+
     def __init__(self, config_processor, args):
         """
         Initialize TestExecutor
@@ -74,6 +85,7 @@ class TestExecutor:
 
         # MPI implementation: openmpi (default) or mpich (via --mpich flag)
         self.mpi_impl = "mpich" if getattr(args, 'mpich', False) else "openmpi"
+        self.mpi_config = self.MPI_IMPL_CONFIG[self.mpi_impl]
 
         # Detect MPI hosts: auto-detect from SLURM if "auto_detect_hosts" is true in config, otherwise use hostfile
         self.mpi_hosts = self._detect_mpi_hosts()
@@ -549,13 +561,8 @@ class TestExecutor:
                 host_arg = ""
                 map_by_arg = ""
 
-            # Default MCA params per MPI implementation
-            if self.mpi_impl == "mpich":
-                default_mca = "-bind-to none"
-            else:
-                default_mca = "--mca btl ^vader,openib --mca pml ucx --bind-to none"
-
             # MCA params priority: --system profile lookup > test-level "mpi_args" string > default
+            default_mca = self.mpi_config["default_args"]
             system = getattr(self.args, 'system', '') or ''
             mpi_args_config = self.config_processor.config.get("mpi_args", {})
 
@@ -578,17 +585,12 @@ class TestExecutor:
             )
 
             # Add environment variables for MPI (quote values to handle shell metacharacters like ;)
+            env_fmt = self.mpi_config["env_format"]
             for key, value in merged_env.items():
-                if self.mpi_impl == "mpich":
-                    mpi_args += f" -env {key} '{value}'"
-                else:
-                    mpi_args += f" -x {key}='{value}'"
+                mpi_args += " " + env_fmt.format(key=key, value=value)
 
-            # Pass the LD_LIBRARY_PATH
-            if self.mpi_impl == "mpich":
-                mpi_args += f" -env LD_LIBRARY_PATH {env['LD_LIBRARY_PATH']}"
-            else:
-                mpi_args += f" -x LD_LIBRARY_PATH={env['LD_LIBRARY_PATH']}"
+            mpi_args += " " + env_fmt.format(key="LD_LIBRARY_PATH", value=env['LD_LIBRARY_PATH'])
+            mpi_args += " " + env_fmt.format(key="LLVM_PROFILE_FILE", value="rccl_tests_%p_%m.profraw")
 
             # Forward LD_PRELOAD so UCX core libraries are preloaded with
             # global visibility on remote ranks (required for UCX PML)
