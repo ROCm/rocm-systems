@@ -60,15 +60,6 @@ PC_SAMPLING_STOCHASTIC_FILES = sorted([
     "sysinfo.csv",
 ])
 
-PC_SAMPLING_HOST_TRAP_WITH_COUNTERS_FILES = sorted([
-    "pmc_perf.csv",
-    "ps_file_agent_info.csv",
-    "ps_file_kernel_trace.csv",
-    "ps_file_pc_sampling_host_trap.csv",
-    "ps_file_results.json",
-    "sysinfo.csv",
-])
-
 
 def test_pc_sampling_host_trap(binary_handler_profile_rocprof_compute):
     """
@@ -230,9 +221,7 @@ def test_pc_sampling_with_sol_block(binary_handler_profile_rocprof_compute):
     )
 
     file_dict = test_utils.check_csv_files(workload_dir, num_devices, 1)
-    assert sorted(list(file_dict.keys())) == sorted(
-        PC_SAMPLING_HOST_TRAP_WITH_COUNTERS_FILES
-    )
+    assert sorted(list(file_dict.keys())) == sorted(PC_SAMPLING_HOST_TRAP_FILES)
 
     assert test_utils.check_file_pattern(
         "- '21'", f"{workload_dir}/profiling_config.yaml"
