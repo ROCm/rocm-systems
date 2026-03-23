@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <limits>
 #include "DriverContext.hh"
@@ -48,7 +35,7 @@ void testInvalidDescription(HIP_ARRAY3D_DESCRIPTOR desc) {
 }
 }  // namespace
 
-TEMPLATE_TEST_CASE("Unit_hipArray3DCreate_happy", "", char, uchar2, uint2, int4, short4, float,
+HIP_TEMPLATE_TEST_CASE(Unit_hipArray3DCreate_happy, char, uchar2, uint2, int4, short4, float,
                    float2, float4) {
   CHECK_IMAGE_SUPPORT
 
@@ -88,7 +75,7 @@ TEMPLATE_TEST_CASE("Unit_hipArray3DCreate_happy", "", char, uchar2, uint2, int4,
   }
 }
 
-TEMPLATE_TEST_CASE("Unit_hipArray3DCreate_MaxTexture", "", int, uint4, short, ushort2,
+HIP_TEMPLATE_TEST_CASE(Unit_hipArray3DCreate_MaxTexture, int, uint4, short, ushort2,
                    unsigned char, float, float4) {
   CHECK_IMAGE_SUPPORT
 
@@ -210,7 +197,7 @@ constexpr HIP_ARRAY3D_DESCRIPTOR defaultDescriptor(unsigned int flags, size_t si
 }
 
 // Providing the array pointer as nullptr should return an error
-TEST_CASE("Unit_hipArray3DCreate_Negative_NullArrayPtr") {
+HIP_TEST_CASE(Unit_hipArray3DCreate_Negative_NullArrayPtr) {
   CHECK_IMAGE_SUPPORT
 
   auto desc = defaultDescriptor(0, 64);
@@ -220,7 +207,7 @@ TEST_CASE("Unit_hipArray3DCreate_Negative_NullArrayPtr") {
 }
 
 // Providing the description pointer as nullptr should return an error
-TEST_CASE("Unit_hipArray3DCreate_Negative_NullDescPtr") {
+HIP_TEST_CASE(Unit_hipArray3DCreate_Negative_NullDescPtr) {
   CHECK_IMAGE_SUPPORT
 
   DriverContext ctx;
@@ -230,7 +217,7 @@ TEST_CASE("Unit_hipArray3DCreate_Negative_NullDescPtr") {
 
 
 // Zero width arrays are not allowed
-TEST_CASE("Unit_hipArray3DCreate_Negative_ZeroWidth") {
+HIP_TEST_CASE(Unit_hipArray3DCreate_Negative_ZeroWidth) {
   CHECK_IMAGE_SUPPORT
 
   DriverContext ctx;
@@ -244,7 +231,7 @@ TEST_CASE("Unit_hipArray3DCreate_Negative_ZeroWidth") {
 }
 
 // Zero height arrays are only allowed for 1D arrays and layered arrays
-TEST_CASE("Unit_hipArray3DCreate_Negative_ZeroHeight") {
+HIP_TEST_CASE(Unit_hipArray3DCreate_Negative_ZeroHeight) {
   CHECK_IMAGE_SUPPORT
 
   DriverContext ctx;
@@ -266,7 +253,7 @@ TEST_CASE("Unit_hipArray3DCreate_Negative_ZeroHeight") {
 }
 
 // Arrays must be created with a valid data format
-TEST_CASE("Unit_hipArray3DCreate_Negative_InvalidFormat") {
+HIP_TEST_CASE(Unit_hipArray3DCreate_Negative_InvalidFormat) {
   CHECK_IMAGE_SUPPORT
 
   DriverContext ctx;
@@ -282,7 +269,7 @@ TEST_CASE("Unit_hipArray3DCreate_Negative_InvalidFormat") {
 }
 
 // An array must have either 1,2, or 4 channels
-TEST_CASE("Unit_hipArray3DCreate_Negative_NumChannels") {
+HIP_TEST_CASE(Unit_hipArray3DCreate_Negative_NumChannels) {
   CHECK_IMAGE_SUPPORT
 
   DriverContext ctx;
@@ -294,7 +281,7 @@ TEST_CASE("Unit_hipArray3DCreate_Negative_NumChannels") {
 }
 
 // Using invalid flags should result in an error
-TEST_CASE("Unit_hipArray3DCreate_Negative_InvalidFlags") {
+HIP_TEST_CASE(Unit_hipArray3DCreate_Negative_InvalidFlags) {
   CHECK_IMAGE_SUPPORT
 
   DriverContext ctx;
@@ -321,7 +308,7 @@ TEST_CASE("Unit_hipArray3DCreate_Negative_InvalidFlags") {
 
 
 // hipArray3DCreate should handle the max numeric value gracefully.
-TEST_CASE("Unit_hipArray3DCreate_Negative_NumericLimit") {
+HIP_TEST_CASE(Unit_hipArray3DCreate_Negative_NumericLimit) {
   CHECK_IMAGE_SUPPORT
 
   DriverContext ctx;
@@ -333,7 +320,7 @@ TEST_CASE("Unit_hipArray3DCreate_Negative_NumericLimit") {
 }
 
 // texture gather arrays may only be 2D
-TEMPLATE_TEST_CASE("Unit_hipArray3DCreate_Negative_Non2DTextureGather", "", char, uint2, int4,
+HIP_TEMPLATE_TEST_CASE(Unit_hipArray3DCreate_Negative_Non2DTextureGather, char, uint2, int4,
                    float2, float4) {
   CHECK_IMAGE_SUPPORT
 

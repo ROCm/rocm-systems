@@ -22,42 +22,45 @@
  * SOFTWARE.
  */
 
-#include <assert.h>
-#include <dirent.h>
-#include <sstream>
-#include <cstring>
-#include <iostream>
-#include <regex>  // NOLINT
-#include <map>
-
-#include "rocm_smi/rocm_smi_common.h"
-#include "rocm_smi/rocm_smi_main.h"
-#include "rocm_smi/rocm_smi_device.h"
-#include "rocm_smi/rocm_smi_utils.h"
-#include "rocm_smi/rocm_smi_exception.h"
-#include "rocm_smi/rocm_smi_counters.h"
-#include "rocm_smi/rocm_smi_kfd.h"
-#include "rocm_smi/rocm_smi.h"
-
-#include "oam/oam_mapi.h"
 #include "oam/amd_oam.h"
 
-static const std::map<int, const char *> err_map = {
-  { AMDOAM_STATUS_INVALID_ARGS, "Invalid arguments" },
-  { AMDOAM_STATUS_NOT_SUPPORTED, "Feature not supported" },
-  { AMDOAM_STATUS_FILE_ERROR, "Problem accessing a file" },
-  { AMDOAM_STATUS_PERMISSION, "Permission denied" },
-  { AMDOAM_STATUS_OUT_OF_RESOURCES, "Not enough memory or other resource" },
-  { AMDOAM_STATUS_INTERNAL_EXCEPTION, "An internal exception was caught" },
-  { AMDOAM_STATUS_INPUT_OUT_OF_BOUNDS,
-                  "The provided input is out of allowable or safe range" },
-  { AMDOAM_STATUS_INIT_ERROR, "AMDOAM is not initialized or init failed" },
-  { AMDOAM_STATUS_ERROR, "Generic error" },
-  { AMDOAM_STATUS_NOT_FOUND, "An item was searched for but not found" }
-};
+#include <assert.h>
+#include <dirent.h>
+
+#include <cstring>
+#include <iostream>
+#include <map>
+#include <regex>  // NOLINT
+#include <sstream>
+
+#include "oam/oam_mapi.h"
+#include "rocm_smi/rocm_smi.h"
+#include "rocm_smi/rocm_smi_common.h"
+#include "rocm_smi/rocm_smi_counters.h"
+#include "rocm_smi/rocm_smi_device.h"
+#include "rocm_smi/rocm_smi_exception.h"
+#include "rocm_smi/rocm_smi_kfd.h"
+#include "rocm_smi/rocm_smi_main.h"
+#include "rocm_smi/rocm_smi_utils.h"
+
+static const std::map<int, const char*> err_map = {
+    {AMDOAM_STATUS_INVALID_ARGS, "Invalid arguments"},
+    {AMDOAM_STATUS_NOT_SUPPORTED, "Feature not supported"},
+    {AMDOAM_STATUS_FILE_ERROR, "Problem accessing a file"},
+    {AMDOAM_STATUS_PERMISSION, "Permission denied"},
+    {AMDOAM_STATUS_OUT_OF_RESOURCES, "Not enough memory or other resource"},
+    {AMDOAM_STATUS_INTERNAL_EXCEPTION, "An internal exception was caught"},
+    {AMDOAM_STATUS_INPUT_OUT_OF_BOUNDS, "The provided input is out of allowable or safe range"},
+    {AMDOAM_STATUS_INIT_ERROR, "AMDOAM is not initialized or init failed"},
+    {AMDOAM_STATUS_ERROR, "Generic error"},
+    {AMDOAM_STATUS_NOT_FOUND, "An item was searched for but not found"}};
 
 #define TRY try {
-#define CATCH } catch (...) {return handleRSMIException();}
+#define CATCH                     \
+  }                               \
+  catch (...) {                   \
+    return handleRSMIException(); \
+  }
 
 static bool rsmi_initialized;
 
@@ -73,13 +76,11 @@ static int handleRSMIException() {
   return rsmi_status_to_amdoam_errorcode(ret);
 }
 
-int amdoam_get_error_description(int code, const char **description) {
-  if (description == nullptr)
-    return -AMDOAM_STATUS_INVALID_ARGS;
+int amdoam_get_error_description(int code, const char** description) {
+  if (description == nullptr) return -AMDOAM_STATUS_INVALID_ARGS;
 
   auto search = err_map.find(code);
-  if (search == err_map.end())
-    return -AMDOAM_STATUS_NOT_FOUND;
+  if (search == err_map.end()) return -AMDOAM_STATUS_NOT_FOUND;
 
   *description = search->second;
   return AMDOAM_STATUS_SUCCESS;
@@ -88,10 +89,9 @@ int amdoam_get_error_description(int code, const char **description) {
 int amdoam_init(void) {
   TRY
 
-  rsmi_status_t status = rsmi_init(0);
+      rsmi_status_t status = rsmi_init(0);
 
-  if (status != RSMI_STATUS_SUCCESS)
-    return rsmi_status_to_amdoam_errorcode(status);
+  if (status != RSMI_STATUS_SUCCESS) return rsmi_status_to_amdoam_errorcode(status);
 
   rsmi_initialized = true;
   return AMDOAM_STATUS_SUCCESS;
@@ -102,37 +102,31 @@ int amdoam_init(void) {
 int amdoam_free(void) {
   rsmi_status_t status = rsmi_shut_down();
 
-  if (status != RSMI_STATUS_SUCCESS)
-    return rsmi_status_to_amdoam_errorcode(status);
+  if (status != RSMI_STATUS_SUCCESS) return rsmi_status_to_amdoam_errorcode(status);
 
   return AMDOAM_STATUS_SUCCESS;
 }
 
-int amdoam_discover_devices(uint32_t *device_count) {
+int amdoam_discover_devices(uint32_t* device_count) {
   rsmi_status_t status;
 
   if (device_count == nullptr) {
     return -AMDOAM_STATUS_INVALID_ARGS;
   }
 
-  status =  rsmi_num_monitor_devices(device_count);
-  if (status != RSMI_STATUS_SUCCESS)
-    return rsmi_status_to_amdoam_errorcode(status);
+  status = rsmi_num_monitor_devices(device_count);
+  if (status != RSMI_STATUS_SUCCESS) return rsmi_status_to_amdoam_errorcode(status);
 
   return AMDOAM_STATUS_SUCCESS;
 }
 
-int amdoam_get_pci_properties(uint32_t device_id, oam_pci_info_t *pci_info) {
+int amdoam_get_pci_properties(uint32_t device_id, oam_pci_info_t* pci_info) {
   uint64_t bdfid;
 
-  TRY
-  if (pci_info == nullptr) {
-    return -AMDOAM_STATUS_INVALID_ARGS;
-  }
+  TRY if (pci_info == nullptr) { return -AMDOAM_STATUS_INVALID_ARGS; }
 
   rsmi_status_t status = rsmi_dev_pci_id_get(device_id, &bdfid);
-  if (status != RSMI_STATUS_SUCCESS)
-    return rsmi_status_to_amdoam_errorcode(status);
+  if (status != RSMI_STATUS_SUCCESS) return rsmi_status_to_amdoam_errorcode(status);
 
   pci_info->domain = (uint16_t)(bdfid >> 32) & 0xffff;
   pci_info->bus = (bdfid >> 8) & 0xff;
@@ -140,21 +134,17 @@ int amdoam_get_pci_properties(uint32_t device_id, oam_pci_info_t *pci_info) {
   pci_info->function = bdfid & 0x7;
   CATCH
 
-  return  AMDOAM_STATUS_SUCCESS;
+  return AMDOAM_STATUS_SUCCESS;
 }
 
-int amdoam_get_dev_properties(uint32_t num_devices,
-                              oam_dev_properties_t *devices) {
+int amdoam_get_dev_properties(uint32_t num_devices, oam_dev_properties_t* devices) {
   const size_t buf_size = 32;
   char buf[buf_size] = "";
   uint32_t dev_inx;
-  oam_dev_properties_t *dev = devices;
+  oam_dev_properties_t* dev = devices;
 
-TRY
-  if (devices == nullptr)
-    return -AMDOAM_STATUS_INVALID_ARGS;
-  if (!rsmi_initialized)
-    return -AMDOAM_STATUS_INIT_ERROR;
+  TRY if (devices == nullptr) return -AMDOAM_STATUS_INVALID_ARGS;
+  if (!rsmi_initialized) return -AMDOAM_STATUS_INIT_ERROR;
 
   for (dev_inx = 0; dev_inx < num_devices; dev_inx++) {
     dev->device_id = dev_inx;
@@ -172,17 +162,15 @@ TRY
       std::strncpy(dev->board_name, buf, 12);
 #pragma GCC diagnostic pop
     }
-    rsmi_dev_serial_number_get(dev_inx, dev->board_serial_number,
-                             BOARD_SERIAL_NUM_LEN);
+    rsmi_dev_serial_number_get(dev_inx, dev->board_serial_number, BOARD_SERIAL_NUM_LEN);
     ++dev;
   }
-CATCH
+  CATCH
 
   return AMDOAM_STATUS_SUCCESS;
 }
 
-static uint32_t
-get_num_sensors(std::string hwmon_path, std::string fn_reg) {
+static uint32_t get_num_sensors(std::string hwmon_path, std::string fn_reg) {
   uint32_t sensor_max = 0;
   std::string fn_reg_ex = "\\b" + fn_reg + "([0-9]+)([^ ]*)";
   std::string fn;
@@ -196,18 +184,14 @@ get_num_sensors(std::string hwmon_path, std::string fn_reg) {
   while (dentry != nullptr) {
     fn = dentry->d_name;
     if (std::regex_search(fn, m, re)) {
-      std::string output = std::regex_replace(
-        fn,
-        std::regex("[^0-9]*([0-9]+).*"),
-        std::string("$1"));
+      std::string output =
+          std::regex_replace(fn, std::regex("[^0-9]*([0-9]+).*"), std::string("$1"));
       temp = stoi(output);
 
       assert(temp >= 0);
 
-      if (s1.compare(fn_reg) == 0)
-        ++temp;
-      if (static_cast<uint32_t>(temp) > sensor_max)
-        sensor_max = static_cast<uint32_t>(temp);
+      if (s1.compare(fn_reg) == 0) ++temp;
+      if (static_cast<uint32_t>(temp) > sensor_max) sensor_max = static_cast<uint32_t>(temp);
     }
     dentry = readdir(hwmon_dir);
   }
@@ -216,14 +200,10 @@ get_num_sensors(std::string hwmon_path, std::string fn_reg) {
   return sensor_max;
 }
 
-
-int amdoam_get_sensors_count(uint32_t device_id,
-                             oam_sensor_count_t *sensor_count) {
+int amdoam_get_sensors_count(uint32_t device_id, oam_sensor_count_t* sensor_count) {
   uint32_t dv_ind = device_id;
 
-  TRY
-  if (sensor_count == nullptr)
-    return -AMDOAM_STATUS_INVALID_ARGS;
+  TRY if (sensor_count == nullptr) return -AMDOAM_STATUS_INVALID_ARGS;
   GET_DEV_FROM_INDX
   assert(dev->monitor() != nullptr);
   std::string hwmon_path = dev->monitor()->path();
@@ -237,64 +217,54 @@ int amdoam_get_sensors_count(uint32_t device_id,
   return AMDOAM_STATUS_SUCCESS;
 }
 
-int amdoam_get_sensors_info(uint32_t device_id, oam_sensor_type_t type,
-                 uint32_t num_sensors, oam_sensor_info_t sensor_info[]) {
+int amdoam_get_sensors_info(uint32_t device_id, oam_sensor_type_t type, uint32_t num_sensors,
+                            oam_sensor_info_t sensor_info[]) {
   uint32_t dv_ind = device_id;
   std::string val_str;
   uint32_t i;
   rsmi_status_t status;
 
-  TRY
-  if ((sensor_info == nullptr) || (type >= OAM_SENSOR_TYPE_UNKNOWN))
-    return -AMDOAM_STATUS_INVALID_ARGS;
+  TRY if ((sensor_info == nullptr) ||
+          (type >= OAM_SENSOR_TYPE_UNKNOWN)) return -AMDOAM_STATUS_INVALID_ARGS;
   GET_DEV_FROM_INDX
   assert(dev->monitor() != nullptr);
   switch (type) {
     case OAM_SENSOR_TYPE_POWER:
       for (i = 0; i < num_sensors; i++) {
-        snprintf(sensor_info[i].sensor_name, OAM_SENSOR_NAME_MAX,
-                                 "POWER_SENSOR_%u", i+1);
+        snprintf(sensor_info[i].sensor_name, OAM_SENSOR_NAME_MAX, "POWER_SENSOR_%u", i + 1);
         sensor_info[i].sensor_type = type;
         status = rsmi_dev_power_ave_get(device_id, i,
-                            reinterpret_cast<uint64_t*>(&sensor_info[i].value));
-        if (status != RSMI_STATUS_SUCCESS)
-          return rsmi_status_to_amdoam_errorcode(status);
+                                        reinterpret_cast<uint64_t*>(&sensor_info[i].value));
+        if (status != RSMI_STATUS_SUCCESS) return rsmi_status_to_amdoam_errorcode(status);
       }
       break;
 
     case OAM_SENSOR_TYPE_VOLTAGE:
       for (i = 0; i < num_sensors; i++) {
-        snprintf(sensor_info[i].sensor_name, OAM_SENSOR_NAME_MAX,
-                                  "VOLTAGE_SENSOR_%u", i);
+        snprintf(sensor_info[i].sensor_name, OAM_SENSOR_NAME_MAX, "VOLTAGE_SENSOR_%u", i);
         sensor_info[i].sensor_type = type;
-        status = rsmi_dev_volt_metric_get(device_id, RSMI_VOLT_TYPE_VDDGFX,
-                          RSMI_VOLT_CURRENT, &sensor_info[i].value);
-        if (status != RSMI_STATUS_SUCCESS)
-          return rsmi_status_to_amdoam_errorcode(status);
+        status = rsmi_dev_volt_metric_get(device_id, RSMI_VOLT_TYPE_VDDGFX, RSMI_VOLT_CURRENT,
+                                          &sensor_info[i].value);
+        if (status != RSMI_STATUS_SUCCESS) return rsmi_status_to_amdoam_errorcode(status);
       }
       break;
 
     case OAM_SENSOR_TYPE_TEMP:
       for (i = 0; i < num_sensors; i++) {
-        snprintf(sensor_info[i].sensor_name, OAM_SENSOR_NAME_MAX,
-                                   "TEMP_SENSOR_%u", i+1);
+        snprintf(sensor_info[i].sensor_name, OAM_SENSOR_NAME_MAX, "TEMP_SENSOR_%u", i + 1);
         sensor_info[i].sensor_type = type;
-        status = rsmi_dev_temp_metric_get(device_id, i, RSMI_TEMP_CURRENT,
-                                         &sensor_info[i].value);
-        if (status != RSMI_STATUS_SUCCESS)
-          return rsmi_status_to_amdoam_errorcode(status);
+        status = rsmi_dev_temp_metric_get(device_id, i, RSMI_TEMP_CURRENT, &sensor_info[i].value);
+        if (status != RSMI_STATUS_SUCCESS) return rsmi_status_to_amdoam_errorcode(status);
       }
       break;
 
     case OAM_SENSOR_TYPE_FAN_SPEED:
       for (i = 0; i < num_sensors; i++) {
-        snprintf(sensor_info[i].sensor_name, OAM_SENSOR_NAME_MAX,
-                                   "FAN_SENSOR_%u", i+1);
+        snprintf(sensor_info[i].sensor_name, OAM_SENSOR_NAME_MAX, "FAN_SENSOR_%u", i + 1);
         sensor_info[i].sensor_type = type;
         status = rsmi_dev_fan_speed_get(device_id, i, &sensor_info[i].value);
-        if (status != RSMI_STATUS_SUCCESS)
-          return rsmi_status_to_amdoam_errorcode(status);
-        }
+        if (status != RSMI_STATUS_SUCCESS) return rsmi_status_to_amdoam_errorcode(status);
+      }
       break;
 
     default:
@@ -309,17 +279,15 @@ int amdoam_get_sensors_info(uint32_t device_id, oam_sensor_type_t type,
 // of rsmi_dev_ecc_count_get(), which has similar functionality.
 // The purpose here is just to drive refactoring; e.g., making macros
 // available and previously static functions global.
-int
-get_device_error_count(oam_dev_handle_t *handle,
-                                          oam_dev_error_count_t *count) {
+int get_device_error_count(oam_dev_handle_t* handle, oam_dev_error_count_t* count) {
   std::vector<std::string> val_vec;
   rsmi_status_t ret;
 
   TRY
-  // TODO(x): replace with final code...
-  // Below, we are just returning errors for RSMI_GPU_BLOCK_GFX as a
-  // placeholder
-  (void)handle;  // Just ignore for now
+      // TODO(x): replace with final code...
+      // Below, we are just returning errors for RSMI_GPU_BLOCK_GFX as a
+      // placeholder
+      (void) handle;  // Just ignore for now
 
   rsmi_gpu_block_t block = RSMI_GPU_BLOCK_GFX;
 

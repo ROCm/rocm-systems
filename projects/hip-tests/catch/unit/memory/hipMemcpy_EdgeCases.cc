@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2021 - present Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /*
 This testcase verifies following scenarios
@@ -372,7 +359,7 @@ Initializes device variables
 Launches kernel and performs the sum of device variables
 copies the result to host variable and validates the result.
 */
-TEMPLATE_TEST_CASE("Unit_hipMemcpy_KernelLaunch", "", int, float, double) {
+HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpy_KernelLaunch, int, float, double) {
   size_t Nbytes = NUM_ELM * sizeof(TestType);
 
   TestType *A_d{nullptr}, *B_d{nullptr}, *C_d{nullptr};
@@ -404,8 +391,7 @@ This testcase verifies the following scenarios
 4. Device context change
 5. H2D-D2D-D2H peer GPU
 */
-TEMPLATE_TEST_CASE("Unit_hipMemcpy_H2H_H2D_D2H_H2PinMem", "[multigpu]", int,
-                   float, double) {
+HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpy_H2H_H2D_D2H_H2PinMem, int, float, double) {
   TestType *A_d{nullptr}, *B_d{nullptr};
   TestType *A_h{nullptr}, *B_h{nullptr};
   TestType *A_Ph{nullptr}, *B_Ph{nullptr};
@@ -485,7 +471,7 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpy_H2H_H2D_D2H_H2PinMem", "[multigpu]", int,
 /*
 This testcase verifies the multi thread scenario
 */
-TEST_CASE("Unit_hipMemcpy_MultiThreadWithSerialization") {
+HIP_TEST_CASE(Unit_hipMemcpy_MultiThreadWithSerialization) {
   HIP_CHECK(hipDeviceReset());
 
   // Simplest cases: serialize the threads, and also used pinned memory:
@@ -501,7 +487,7 @@ This testcase verifies hipMemcpy API with pinnedMemory and hostRegister
 along with kernel launches
 */
 
-TEMPLATE_TEST_CASE("Unit_hipMemcpy_PinnedRegMemWithKernelLaunch", "[multigpu]",
+HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpy_PinnedRegMemWithKernelLaunch,
                    int, float, double) {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));

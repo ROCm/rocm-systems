@@ -36,10 +36,8 @@
 #include "library/amd_smi_ainic.hpp"
 #include "library/thread_data.hpp"
 
-#if ROCPROFSYS_USE_ROCM > 0
-#    include "core/amd_smi.hpp"
-#    include <amd_smi/amdsmi.h>
-#endif
+#include "core/amd_smi.hpp"
+#include <amd_smi/amdsmi.h>
 
 #include <chrono>
 #include <cstdint>
@@ -131,13 +129,8 @@ struct data
     mem_usage_t                m_mem_usage   = 0;
     uint32_t                   m_sdma_usage  = 0;  // SDMA utilization percentage (0-100)
     std::vector<gpu_metrics_t> m_gpu_metrics = {};
-#if ROCPROFSYS_USE_ROCM > 0
-    amdsmi_engine_usage_t m_busy_perc = {};
-    amdsmi_power_info_t   m_power     = {};
-#else
-    std::vector<busy_perc_t> m_busy_perc = {};
-    std::vector<power_t>     m_power     = {};
-#endif
+    amdsmi_engine_usage_t      m_busy_perc   = {};
+    amdsmi_power_info_t        m_power       = {};
 
     friend std::ostream& operator<<(std::ostream& _os, const data& _v)
     {
@@ -162,51 +155,15 @@ private:
     static bool                          shutdown();
 };
 
-#if !defined(ROCPROFSYS_USE_ROCM) || ROCPROFSYS_USE_ROCM == 0
-
-inline void
-setup()
-{}
-
-inline void
-config()
-{}
-
-inline void
-sample()
-{}
-
-inline void
-shutdown()
-{}
-
-inline void
-post_process()
-{}
-
-inline void
-set_state(State)
-{}
-
-inline void
-postfork_child_cleanup()
-{}
-
-inline void
-postfork_parent_reinit()
-{}
-
-#endif
 }  // namespace amd_smi
 }  // namespace rocprofsys
 
-#if defined(ROCPROFSYS_USE_ROCM) && ROCPROFSYS_USE_ROCM > 0
-#    if !defined(ROCPROFSYS_EXTERN_COMPONENTS) ||                                        \
-        (defined(ROCPROFSYS_EXTERN_COMPONENTS) && ROCPROFSYS_EXTERN_COMPONENTS > 0)
+#if !defined(ROCPROFSYS_EXTERN_COMPONENTS) ||                                            \
+    (defined(ROCPROFSYS_EXTERN_COMPONENTS) && ROCPROFSYS_EXTERN_COMPONENTS > 0)
 
-#        include <timemory/components/base.hpp>
-#        include <timemory/components/data_tracker/components.hpp>
-#        include <timemory/operations.hpp>
+#    include <timemory/components/base.hpp>
+#    include <timemory/components/data_tracker/components.hpp>
+#    include <timemory/operations.hpp>
 
 ROCPROFSYS_DECLARE_EXTERN_COMPONENT(
     TIMEMORY_ESC(data_tracker<double, rocprofsys::component::backtrace_gpu_busy_gfx>),
@@ -240,5 +197,4 @@ ROCPROFSYS_DECLARE_EXTERN_COMPONENT(
     TIMEMORY_ESC(data_tracker<double, rocprofsys::component::backtrace_gpu_jpeg>), true,
     double)
 
-#    endif
 #endif

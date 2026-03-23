@@ -50,7 +50,6 @@ if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU})
 endif()
 
 rocprofiler_systems_add_test(
-    SKIP_RUNTIME
     NAME roctx-api
     TARGET roctx
     GPU ON

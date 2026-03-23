@@ -177,15 +177,15 @@ struct LinkArguments {
 class RTCProgram {
  protected:
   // Lock and control variables
-  static amd::Monitor lock_;
+  static std::recursive_mutex lock_;
   static std::once_flag initialized_;
 
-  RTCProgram(std::string name);
+  RTCProgram(const std::string &name);
   ~RTCProgram() {}
 
   // Member Functions
   bool findIsa();
-  static void AppendOptions(std::string app_env_var, std::vector<std::string>* options);
+  static void AppendOptions(const std::string &app_env_var, std::vector<std::string>* options);
 
   // Data Members
   std::string name_;
@@ -217,19 +217,19 @@ class LinkProgram : public RTCProgram {
   static std::unordered_set<LinkProgram*> linker_set_;
 
   bool AddLinkerDataImpl(std::vector<char>& link_data, hipJitInputType input_type,
-                         std::string& link_file_name);
+                         const std::string& link_file_name);
 
  public:
-  LinkProgram(std::string name);
+  LinkProgram(const std::string &name);
   ~LinkProgram() {
-    amd::ScopedLock lock(lock_);
+    std::scoped_lock lock(lock_);
     linker_set_.erase(this);
   }
   // Public Member Functions
   bool AddLinkerOptions(unsigned int num_options, hipJitOption* options_ptr,
                         void** options_vals_ptr);
-  bool AddLinkerFile(std::string file_path, hipJitInputType input_type);
-  bool AddLinkerData(void* image_ptr, size_t image_size, std::string link_file_name,
+  bool AddLinkerFile(const std::string &file_path, hipJitInputType input_type);
+  bool AddLinkerData(void* image_ptr, size_t image_size, const std::string &link_file_name,
                      hipJitInputType input_type);
   bool LinkComplete(void** bin_out, size_t* size_out);
   void AppendLinkerOptions() { AppendOptions(HIPRTC_LINK_OPTIONS_APPEND, &link_options_); }

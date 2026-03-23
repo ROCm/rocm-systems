@@ -513,6 +513,8 @@ class Runtime {
   bool VirtualMemApiSupported() const { return virtual_mem_api_supported_; }
   bool XnackEnabled() const { return xnack_enabled_; }
   void XnackEnabled(bool enable) { xnack_enabled_ = enable; }
+  bool AqlProfileAvailable() const { return (aqlprofile_lib_ != nullptr); }
+  os::LibHandle AqlProfileLib() const { return aqlprofile_lib_; }
 
   Driver &AgentDriver(DriverType drv_type) {
     auto is_drv_type = [&](const std::unique_ptr<Driver> &d) {
@@ -552,7 +554,6 @@ class Runtime {
           size_requested(0),
           alloc_flags(core::MemoryRegion::AllocateNoFlags),
           user_ptr(nullptr),
-          ldrm_bo(nullptr),
           thunk_bo(nullptr) {}
     AllocationRegion(const MemoryRegion* region_arg, size_t size_arg, size_t size_requested,
                      MemoryRegion::AllocateFlags alloc_flags)
@@ -561,7 +562,6 @@ class Runtime {
           size_requested(size_requested),
           alloc_flags(alloc_flags),
           user_ptr(nullptr),
-          ldrm_bo(nullptr),
           thunk_bo(nullptr) {}
 
     struct notifier_t {
@@ -576,7 +576,6 @@ class Runtime {
     MemoryRegion::AllocateFlags alloc_flags;
     void* user_ptr;
     std::unique_ptr<std::vector<notifier_t>> notifiers;
-    amdgpu_bo_handle ldrm_bo;
     HsaMemoryObjectHandle thunk_bo;
   };
 
@@ -927,6 +926,8 @@ class Runtime {
 
   bool virtual_mem_api_supported_;
   bool xnack_enabled_;
+
+  os::LibHandle aqlprofile_lib_;
 
   typedef void* ThunkHandle;
 

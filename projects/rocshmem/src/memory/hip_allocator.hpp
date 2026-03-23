@@ -35,10 +35,17 @@
 #include "memory_allocator.hpp"
 
 #include <hip/hip_runtime_api.h>
+#include <hip/hip_version.h>
+#include <hsa/hsa_ext_amd.h>
 
 #include <cstdlib>
+#include <cstring>
+#include <cerrno>
 #include <limits>
+#include <map>
 #include <vector>
+#include <unistd.h>
+#include <sys/syscall.h>
 
 namespace rocshmem {
 
@@ -56,6 +63,14 @@ enum HIPAllocatorType {
   AllocatorTypeVMM,
   AllocatorTypeLast
 };
+
+#if HIP_VERSION >= 70000000
+struct hipIpcMemHandlePosix_t {
+  uint64_t fd;
+  uint32_t pid;
+  size_t size;
+};
+#endif
 
 class HIPIpcHandleVec {
 public:
@@ -81,6 +96,24 @@ protected:
 
 };
 
+#if HIP_VERSION >= 70000000
+class HIPIpcHandlePosixVec : public HIPIpcHandleVec {
+public:
+  friend class HIPAllocatorVMMPosixFd;
+
+  HIPIpcHandleType GetIpcHandleType() { return HandleTypePosix; }
+
+  void* GetHandleVecElem(int elem)
+  {
+    return reinterpret_cast<void*> (&this->handle[elem]);
+  }
+
+protected:
+  std::vector<hipIpcMemHandlePosix_t> handle;
+
+};
+#endif
+
 class HIPAllocator : public MemoryAllocator {
  public:
 
@@ -96,32 +129,54 @@ class HIPAllocator : public MemoryAllocator {
 
   HIPAllocatorType type = AllocatorTypeCoarsegrained;
 
-  hipError_t GetIpcHandle(void *dev_ptr, void *handle)
+  virtual hipError_t GetIpcHandle(void *dev_ptr, void *handle)
   {
     return hipIpcGetMemHandle(reinterpret_cast<hipIpcMemHandle_t *>(handle), dev_ptr);
   }
 
-  hipError_t OpenIpcHandle(void **dev_ptr, void *handle)
+  virtual hipError_t OpenIpcHandle(void **dev_ptr, void *handle)
   {
     return hipIpcOpenMemHandle(dev_ptr, *(reinterpret_cast<hipIpcMemHandle_t *>(handle)),
                                hipIpcMemLazyEnablePeerAccess);
   }
 
-  hipError_t CloseIpcHandle(void *dev_ptr)
+  virtual hipError_t CloseIpcHandle(void *dev_ptr)
   {
     return hipIpcCloseMemHandle(dev_ptr);
   }
 
-  size_t GetIpcHandleSize()
+  virtual size_t GetIpcHandleSize()
   {
     return sizeof(hipIpcMemHandle_t);
   }
 
-  HIPIpcHandleVec* AllocateIpcHandleVec(int num_elems)
+  virtual HIPIpcHandleVec* AllocateIpcHandleVec(int num_elems)
   {
     HIPIpcHandleLegacyVec* vec = new HIPIpcHandleLegacyVec();
     vec->handle.resize(num_elems);
     return vec;
+  }
+
+  virtual hipError_t GetDmabufHandle(void *dev_ptr, size_t size, int *dmabuf_fd, uint64_t *dmabuf_offset)
+  {
+    if (dev_ptr == nullptr || dmabuf_fd == nullptr || dmabuf_offset == nullptr) {
+      return hipErrorInvalidValue;
+    }
+
+    // Use HSA API to export dmabuf from device pointer
+    uint64_t offset = 0;
+    int fd = -1;
+    hsa_status_t status = hsa_amd_portable_export_dmabuf(dev_ptr, size, &fd, &offset);
+
+    if (status != HSA_STATUS_SUCCESS) {
+      *dmabuf_fd = -1;
+      *dmabuf_offset = 0;
+      return hipErrorInvalidValue;
+    }
+
+    *dmabuf_fd = fd;
+    *dmabuf_offset = offset;
+    return hipSuccess;
   }
 };
 
@@ -144,6 +199,32 @@ class HIPAllocatorUncached : public HIPAllocator {
                      hipDeviceMallocUncached) {
     type = AllocatorTypeUncached;
   }
+};
+#endif
+
+#if HIP_VERSION >= 70000000
+class HIPAllocatorVMMPosixFd : public HIPAllocator {
+ private:
+  struct VMMAllocationInfo {
+    hipMemGenericAllocationHandle_t handle;
+    size_t size;
+    int exported_fd;  // File descriptor exported for IPC, -1 if not exported
+  };
+  static std::map<void*, VMMAllocationInfo> allocations_;
+  static std::map<void*, VMMAllocationInfo> imported_allocations_;
+
+  static hipError_t VMMAlloc(void** ptr, size_t size);
+  static hipError_t VMMFree(void* ptr);
+
+ public:
+  HIPAllocatorVMMPosixFd();
+
+  hipError_t GetIpcHandle(void *dev_ptr, void *handle) override;
+  hipError_t OpenIpcHandle(void **dev_ptr, void *handle) override;
+  hipError_t CloseIpcHandle(void *dev_ptr) override;
+  size_t GetIpcHandleSize() override;
+  HIPIpcHandleVec* AllocateIpcHandleVec(int num_elems) override;
+  hipError_t GetDmabufHandle(void *dev_ptr, size_t size, int *dmabuf_fd, uint64_t *dmabuf_offset) override;
 };
 #endif
 

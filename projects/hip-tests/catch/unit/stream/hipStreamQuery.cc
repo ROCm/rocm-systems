@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-IMPLIED, INNCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANNY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip_test_common.hh>
 #include "streamCommon.hh"
@@ -24,7 +11,7 @@ THE SOFTWARE.
  * @brief Check that querying a stream with no work returns hipSuccess
  *
  **/
-TEST_CASE("Unit_hipStreamQuery_WithNoWork") {
+HIP_TEST_CASE(Unit_hipStreamQuery_WithNoWork) {
   hipStream_t stream{nullptr};
 
   SECTION("Null Stream") { HIP_CHECK(hipStreamQuery(stream)); }
@@ -40,7 +27,7 @@ TEST_CASE("Unit_hipStreamQuery_WithNoWork") {
  * @brief Check that querying a stream with finished work returns hipSuccess
  *
  **/
-TEST_CASE("Unit_hipStreamQuery_WithFinishedWork") {
+HIP_TEST_CASE(Unit_hipStreamQuery_WithFinishedWork) {
   hipStream_t stream{nullptr};
 
   SECTION("Null Stream") {
@@ -67,7 +54,7 @@ TEST_CASE("Unit_hipStreamQuery_WithFinishedWork") {
  * hipErrorNotReady
  *
  */
-TEST_CASE("Unit_hipStreamQuery_SubmitWorkOnStreamAndQueryNullStream") {
+HIP_TEST_CASE(Unit_hipStreamQuery_SubmitWorkOnStreamAndQueryNullStream) {
   {
     hipStream_t stream;
     HIP_CHECK(hipStreamCreate(&stream));
@@ -86,7 +73,7 @@ TEST_CASE("Unit_hipStreamQuery_SubmitWorkOnStreamAndQueryNullStream") {
  * hipErrorNotReady.
  *
  */
-TEST_CASE("Unit_hipStreamQuery_NullStreamQuery") {
+HIP_TEST_CASE(Unit_hipStreamQuery_NullStreamQuery) {
   HIP_CHECK(hipStreamQuery(hip::nullStream));
   LaunchDelayKernel(std::chrono::milliseconds(500), hip::nullStream);
   HIP_CHECK_ERROR(hipStreamQuery(hip::nullStream), hipErrorNotReady);
@@ -98,7 +85,7 @@ TEST_CASE("Unit_hipStreamQuery_NullStreamQuery") {
  * @brief Check that querying a stream with pending work returns hipErrorNotReady
  *
  **/
-TEST_CASE("Unit_hipStreamQuery_WithPendingWork") {
+HIP_TEST_CASE(Unit_hipStreamQuery_WithPendingWork) {
   hipStream_t waitingStream{nullptr};
   HIP_CHECK(hipStreamCreate(&waitingStream));
 

@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2021 - present Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip_test_common.hh>
 #include <hip_test_kernels.hh>
@@ -34,7 +21,7 @@ static constexpr auto NUM_ELM{1024 * 1024};
 
 /*This testcase verifies the negative scenarios of hipMemcpy APIs
  */
-TEST_CASE("Unit_hipMemcpy_Negative") {
+HIP_TEST_CASE(Unit_hipMemcpy_Negative) {
   // Initialization of variables
   float *A_d{nullptr}, *B_d{nullptr}, *C_d{nullptr};
   float *A_h{nullptr}, *B_h{nullptr}, *C_h{nullptr};
@@ -107,7 +94,7 @@ TEST_CASE("Unit_hipMemcpy_Negative") {
 /*
 This testcase verifies the Nullcheck for all the 8 Memcpy APIs
 */
-TEST_CASE("Unit_hipMemcpy_NullCheck") {
+HIP_TEST_CASE(Unit_hipMemcpy_NullCheck) {
   // Initialization of variables
   float *A_d{nullptr}, *B_d{nullptr}, *C_d{nullptr};
   float *A_h{nullptr}, *B_h{nullptr}, *C_h{nullptr};
@@ -170,7 +157,7 @@ TEST_CASE("Unit_hipMemcpy_NullCheck") {
 This testcase verifies all the hipMemcpy APIs by
 copying half the memory.
 */
-TEST_CASE("Unit_hipMemcpy_HalfMemCopy") {
+HIP_TEST_CASE(Unit_hipMemcpy_HalfMemCopy) {
   // Initialization of variables
   float *A_d{nullptr}, *B_d{nullptr}, *C_d{nullptr};
   float *A_h{nullptr}, *B_h{nullptr}, *C_h{nullptr};

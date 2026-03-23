@@ -65,7 +65,7 @@ jobs:
       matrix: ${{ steps.generate_matrix.outputs.matrix }}
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           sparse-checkout: projects/rocprofiler-systems/.github
 
@@ -106,7 +106,7 @@ jobs:
         --cap-add CAP_SYS_ADMIN
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           sparse-checkout: projects/rocprofiler-systems/
 
@@ -188,7 +188,6 @@ jobs:
             -DROCPROFSYS_BUILD_CI=ON \
             -DROCPROFSYS_BUILD_TESTING=ON \
             -DROCPROFSYS_USE_PYTHON=ON \
-            -DROCPROFSYS_USE_ROCM=ON \
             -DROCPROFSYS_MAX_THREADS=64 \
             -- \
             -L "rocm" \
