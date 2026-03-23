@@ -24,6 +24,7 @@
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "functional/api_support_read.h"
 #include "functional/computepartition_read_write.h"
+#include "functional/cross_process_serialization.h"
 #include "functional/err_cnt_read.h"
 #include "functional/evt_notif_read_write.h"
 #include "functional/fan_read.h"
@@ -41,6 +42,7 @@
 #include "functional/memory_read_write.h"
 #include "functional/memorypartition_read_write.h"
 #include "functional/metrics_counter_read.h"
+#include "functional/mutual_exclusion.h"
 #include "functional/overdrive_read.h"
 #include "functional/overdrive_read_write.h"
 #include "functional/pci_read_write.h"
@@ -250,16 +252,25 @@ TEST(amdsmitstReadOnly, TestAPISupportRead) {
   TestAPISupportRead tst;
   RunGenericTest(&tst);
 }
-/*
+
 TEST(amdsmitstReadOnly, TestMutualExclusion) {
   TestMutualExclusion tst;
+  SetFlags(&tst);
+  tst.DisplayTestInfo();
+  tst.SetUp();
+  PRINT_VERBOSITY();
+  tst.Run();
+  RunCustomTestEpilog(&tst);
+}
+
+TEST(amdsmitstReadOnly, TestCrossProcessSerialization) {
+  TestCrossProcessSerialization tst;
   SetFlags(&tst);
   tst.DisplayTestInfo();
   tst.SetUp();
   tst.Run();
   RunCustomTestEpilog(&tst);
 }
-*/
 
 TEST(amdsmitstReadWrite, TestComputePartitionReadWrite) {
   if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
@@ -317,5 +328,6 @@ int main(int argc, char** argv) {
   }
 
   sRSMIGlvalues = &settings;
+  SetTestVerbosity(settings.verbosity);
   return RUN_ALL_TESTS();
 }
