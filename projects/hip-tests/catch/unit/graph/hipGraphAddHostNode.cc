@@ -1,23 +1,8 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /**
 Test Case Scenarios of hipGraphAddHostNode API:
@@ -77,7 +62,7 @@ static void vectorsquare_callback(void* ptr) {
 This test case verifies the negative scenarios of
 hipGraphAddHostNode API
 */
-TEST_CASE("Unit_hipGraphAddHostNode_Negative") {
+HIP_TEST_CASE(Unit_hipGraphAddHostNode_Negative) {
   constexpr size_t N = 1024;
   hipGraph_t graph;
   int *A_d{nullptr}, *C_d{nullptr};
@@ -127,7 +112,7 @@ This test case verifies hipGraphAddHostNode API in cloned graph
 Creates graph, Add graph nodes and clone the graph
 Add HostNode to the cloned graph and validate the result
 */
-TEST_CASE("Unit_hipGraphAddHostNode_ClonedGraphWithHostNode") {
+HIP_TEST_CASE(Unit_hipGraphAddHostNode_ClonedGraphWithHostNode) {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   hipGraph_t graph;
@@ -190,7 +175,7 @@ This test case verifies the square of number by
 creating graph, Add kernel node which does the square
 of number and the result is validated by hipGraphAddHostNode API
 */
-TEST_CASE("Unit_hipGraphAddHostNode_VectorSquare") {
+HIP_TEST_CASE(Unit_hipGraphAddHostNode_VectorSquare) {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   hipGraph_t graph;
@@ -248,7 +233,7 @@ Create graph, calls the host function and updates
 the parameters in the callback function and
 validates it.
 */
-TEST_CASE("Unit_hipGraphAddHostNode_BasicFunc") {
+HIP_TEST_CASE(Unit_hipGraphAddHostNode_BasicFunc) {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   hipGraph_t graph;

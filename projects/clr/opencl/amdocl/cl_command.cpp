@@ -1,22 +1,8 @@
-/* Copyright (c) 2008 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "cl_common.hpp"
 
@@ -101,6 +87,8 @@ RUNTIME_ENTRY_RET(cl_command_queue, clCreateCommandQueueWithProperties,
   uint queueSize = amdDevice.info().queueOnDevicePreferredSize_;
   uint queueRTCUs = amd::CommandQueue::RealTimeDisabled;
   amd::CommandQueue::Priority priority = amd::CommandQueue::Priority::Normal;
+  int32_t queueonDeviceProperty = amdDevice.info().queueOnDeviceProperties_;
+  int32_t queueProperty = amdDevice.info().queueProperties_;
   if (p != NULL)
     while (p->name != 0) {
       switch (p->name) {
@@ -108,7 +96,12 @@ RUNTIME_ENTRY_RET(cl_command_queue, clCreateCommandQueueWithProperties,
           // FIXME_lmoriche: See comment above.
           // properties = p->value.properties;
           properties = static_cast<cl_command_queue_properties>(p->value.raw);
-          if (properties == CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE) {
+          if ((int32_t) properties < 0) {
+            *not_null(errcode_ret) = CL_INVALID_VALUE;
+            return (cl_command_queue)0;
+          }
+          else if ((properties == CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE) &&
+            !(properties & queueProperty)) { 
             *not_null(errcode_ret) = CL_INVALID_QUEUE_PROPERTIES;
             return (cl_command_queue)0;
           }
@@ -127,8 +120,15 @@ RUNTIME_ENTRY_RET(cl_command_queue, clCreateCommandQueueWithProperties,
             queueRTCUs = p->value.size;
           }
           break;
+        case CL_QUEUE_ON_DEVICE:
+          if((properties == CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE) &&
+            !(properties & queueonDeviceProperty)) {
+            *not_null(errcode_ret) = CL_INVALID_QUEUE_PROPERTIES;
+            return (cl_command_queue)0;
+          }
+          break;
         default:
-          *not_null(errcode_ret) = CL_INVALID_QUEUE_PROPERTIES;
+          *not_null(errcode_ret) = CL_INVALID_VALUE;
           LogWarning("invalid property name");
           return (cl_command_queue)0;
       }

@@ -102,13 +102,7 @@ class MemoryAllocator {
    */
   void deallocate(void* ptr);
 
-  /**
-   * @brief Returns is memory is managed
-   *
-   * @return returns whether this memory is managed
-   */
-  bool is_managed();
-
+ public:
  protected:
   /**
    * @brief is this memory allocated using managed memory

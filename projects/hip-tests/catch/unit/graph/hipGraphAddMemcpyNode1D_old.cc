@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2023 - 2024 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /**
 Testcase Scenarios :
@@ -115,7 +102,7 @@ static void validateMemcpyNode1DArray(bool peerAccess,
  * For Peer device test: Memory allocations happen on device(0) and memcpy operations
  * are performed from device(1).
  */
-TEST_CASE("Unit_hipGraphAddMemcpyNode1D_Functional", "[multigpu]") {
+HIP_TEST_CASE(Unit_hipGraphAddMemcpyNode1D_Functional) {
   SECTION("Memcpy with 1D array on default device") { validateMemcpyNode1DArray(false); }
   SECTION("Memcpy with 1D array using DeviceToDeviceNoCU") {
     validateMemcpyNode1DArray(false, hipMemcpyDeviceToDeviceNoCU);
@@ -139,7 +126,7 @@ TEST_CASE("Unit_hipGraphAddMemcpyNode1D_Functional", "[multigpu]") {
 /**
  * Negative Test for API hipGraphAddMemcpyNode1D
  */
-TEST_CASE("Unit_hipGraphAddMemcpyNode1D_Negative") {
+HIP_TEST_CASE(Unit_hipGraphAddMemcpyNode1D_Negative) {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   int *A_d, *A_h;
@@ -205,7 +192,7 @@ TEST_CASE("Unit_hipGraphAddMemcpyNode1D_Negative") {
  * hipGraphAddMemcpyNode1D with data transfer kind hipMemcpyHostToHost.
  * Validate the output.
  */
-TEST_CASE("Unit_hipGraphAddMemcpyNode1D_HostToHost") {
+HIP_TEST_CASE(Unit_hipGraphAddMemcpyNode1D_HostToHost) {
   constexpr size_t size = 1024;
   size_t numBytes{size * sizeof(int)};
 

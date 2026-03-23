@@ -450,6 +450,18 @@ class Runtime {
 
   amd::hsa::code::AmdHsaCodeManager* code_manager() { return &code_manager_; }
 
+  // Helper to iterate over allocation_map_ and add code object allocations 
+  // to lightweight coredump filter
+  void IterateCodeObjectAllocations(std::function<void(uint64_t start, size_t size)> cb) {
+    std::lock_guard<std::shared_mutex> lock(memory_lock_);
+    for(auto& alloc: allocation_map_) {
+      if (alloc.second.alloc_flags & core::MemoryRegion::AllocateCodeObject) {
+        // add this address range to MemoryRegionFilter map
+        cb(reinterpret_cast<uint64_t>(alloc.first), alloc.second.size);
+      }
+    }
+  }
+
   std::function<void*(size_t size, size_t align, MemoryRegion::AllocateFlags flags, int agent_node_id)>&
   system_allocator() {
     return system_allocator_;
@@ -501,6 +513,8 @@ class Runtime {
   bool VirtualMemApiSupported() const { return virtual_mem_api_supported_; }
   bool XnackEnabled() const { return xnack_enabled_; }
   void XnackEnabled(bool enable) { xnack_enabled_ = enable; }
+  bool AqlProfileAvailable() const { return (aqlprofile_lib_ != nullptr); }
+  os::LibHandle AqlProfileLib() const { return aqlprofile_lib_; }
 
   Driver &AgentDriver(DriverType drv_type) {
     auto is_drv_type = [&](const std::unique_ptr<Driver> &d) {
@@ -540,7 +554,6 @@ class Runtime {
           size_requested(0),
           alloc_flags(core::MemoryRegion::AllocateNoFlags),
           user_ptr(nullptr),
-          ldrm_bo(nullptr),
           thunk_bo(nullptr) {}
     AllocationRegion(const MemoryRegion* region_arg, size_t size_arg, size_t size_requested,
                      MemoryRegion::AllocateFlags alloc_flags)
@@ -549,7 +562,6 @@ class Runtime {
           size_requested(size_requested),
           alloc_flags(alloc_flags),
           user_ptr(nullptr),
-          ldrm_bo(nullptr),
           thunk_bo(nullptr) {}
 
     struct notifier_t {
@@ -564,7 +576,6 @@ class Runtime {
     MemoryRegion::AllocateFlags alloc_flags;
     void* user_ptr;
     std::unique_ptr<std::vector<notifier_t>> notifiers;
-    amdgpu_bo_handle ldrm_bo;
     HsaMemoryObjectHandle thunk_bo;
   };
 
@@ -904,7 +915,7 @@ class Runtime {
 
   // IPC DMA buf unix domain socket server dmabuf FD passing
   int ipc_sock_server_fd_;
-  std::map<uint64_t, int> ipc_sock_server_conns_;
+  std::map<uint64_t, size_t> ipc_sock_server_conns_;
   std::mutex ipc_sock_server_lock_;
   os::Thread ipc_sock_server_thread_;
 
@@ -912,11 +923,11 @@ class Runtime {
   lazy_ptr<AsyncEventsInfo> asyncExceptions_;
  private:
   void CheckVirtualMemApiSupport();
-  int GetAmdgpuDeviceArgs(Agent *agent, ShareableHandle handle, int *drm_fd,
-                          uint64_t *cpu_addr);
 
   bool virtual_mem_api_supported_;
   bool xnack_enabled_;
+
+  os::LibHandle aqlprofile_lib_;
 
   typedef void* ThunkHandle;
 
@@ -984,8 +995,6 @@ class Runtime {
     MappedHandle(MemoryHandle* mem_handle, AddressHandle* address_handle, void* va,
                  uint64_t offset, size_t size, int drm_fd, void *drm_cpu_addr,
                  hsa_access_permission_t perm, ShareableHandle shareable_handle);
-
-    MappedHandle() {}
 
     __forceinline core::Agent* agentOwner() const { return mem_handle->region->owner(); }
 

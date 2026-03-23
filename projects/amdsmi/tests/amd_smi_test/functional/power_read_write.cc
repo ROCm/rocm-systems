@@ -19,25 +19,25 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+#include "power_read_write.h"
+
+#include <gtest/gtest.h>
 
 #include <cstdint>
-
 #include <iostream>
 #include <string>
 
-#include <gtest/gtest.h>
+#include "../test_common.h"
 #include "amd_smi/amdsmi.h"
-#include "power_read_write.h"
-
 
 TestPowerReadWrite::TestPowerReadWrite() : TestBase() {
   set_title("AMDSMI Power Profiles Read/Write Test");
-  set_description("The Power Profiles tests verify that the power profile "
-                             "settings can be read and controlled properly.");
+  set_description(
+      "The Power Profiles tests verify that the power profile "
+      "settings can be read and controlled properly.");
 }
 
-TestPowerReadWrite::~TestPowerReadWrite(void) {
-}
+TestPowerReadWrite::~TestPowerReadWrite(void) {}
 
 void TestPowerReadWrite::SetUp(void) {
   TestBase::SetUp();
@@ -45,9 +45,7 @@ void TestPowerReadWrite::SetUp(void) {
   return;
 }
 
-void TestPowerReadWrite::DisplayTestInfo(void) {
-  TestBase::DisplayTestInfo();
-}
+void TestPowerReadWrite::DisplayTestInfo(void) { TestBase::DisplayTestInfo(); }
 
 void TestPowerReadWrite::DisplayResults(void) const {
   TestBase::DisplayResults();
@@ -60,8 +58,7 @@ void TestPowerReadWrite::Close() {
   TestBase::Close();
 }
 
-static const char *
-power_profile_string(amdsmi_power_profile_preset_masks_t profile) {
+static const char* power_profile_string(amdsmi_power_profile_preset_masks_t profile) {
   switch (profile) {
     case AMDSMI_PWR_PROF_PRST_CUSTOM_MASK:
       return "CUSTOM";
@@ -87,6 +84,7 @@ void TestPowerReadWrite::Run(void) {
   amdsmi_power_profile_status_t status;
 
   TestBase::Run();
+  PRINT_VERBOSITY();
   if (setup_failed_) {
     std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl;
     return;
@@ -95,20 +93,26 @@ void TestPowerReadWrite::Run(void) {
   for (uint32_t dv_ind = 0; dv_ind < num_monitor_devs(); ++dv_ind) {
     PrintDeviceHeader(processor_handles_[dv_ind]);
 
-    ret =  amdsmi_get_gpu_power_profile_presets(processor_handles_[dv_ind], 0, &status);
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_power_profile_presets", "gpu=" + std::to_string(dv_ind),
+                       VERB(STANDARD));
+    ret = amdsmi_get_gpu_power_profile_presets(processor_handles_[dv_ind], 0, &status);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
     if (ret == AMDSMI_STATUS_NOT_SUPPORTED) {
-      std::cout << "The power profile presets settings is not supported. "
-                << std::endl;
-
       // Verify api support checking functionality is working
+      DISPLAY_AMDSMI_API("amdsmi_get_gpu_power_profile_presets", "gpu=" + std::to_string(dv_ind),
+                         VERB(STANDARD));
       ret = amdsmi_get_gpu_power_profile_presets(processor_handles_[dv_ind], 0, nullptr);
+      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_INVAL);
       ASSERT_EQ(ret, AMDSMI_STATUS_NOT_SUPPORTED);
       continue;
     }
     CHK_ERR_ASRT(ret)
 
     // Verify api support checking functionality is working
-    ret =  amdsmi_get_gpu_power_profile_presets(processor_handles_[dv_ind], 0, nullptr);
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_power_profile_presets", "gpu=" + std::to_string(dv_ind),
+                       VERB(STANDARD));
+    ret = amdsmi_get_gpu_power_profile_presets(processor_handles_[dv_ind], 0, nullptr);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_INVAL);
     ASSERT_EQ(ret, AMDSMI_STATUS_INVAL);
 
     IF_VERB(STANDARD) {
@@ -116,14 +120,13 @@ void TestPowerReadWrite::Run(void) {
       uint64_t tmp = 1;
       while (tmp <= AMDSMI_PWR_PROF_PRST_LAST) {
         if ((tmp & status.available_profiles) == tmp) {
-          std::cout << "\t" <<
-              power_profile_string((amdsmi_power_profile_preset_masks_t)tmp) <<
-                                                                      std::endl;
+          std::cout << "\t" << power_profile_string((amdsmi_power_profile_preset_masks_t)tmp)
+                    << std::endl;
         }
         tmp = tmp << 1;
       }
-      std::cout << "The current power profile is: " <<
-                              power_profile_string(status.current) << std::endl;
+      std::cout << "The current power profile is: " << power_profile_string(status.current)
+                << std::endl;
     }
 
     amdsmi_power_profile_preset_masks_t orig_profile = status.current;
@@ -144,29 +147,43 @@ void TestPowerReadWrite::Run(void) {
     } else if (diff_profiles & AMDSMI_PWR_PROF_PRST_3D_FULL_SCR_MASK) {
       new_prof = AMDSMI_PWR_PROF_PRST_3D_FULL_SCR_MASK;
     } else {
-      std::cout <<
-        "No other non-custom power profiles to set to. Exiting." << std::endl;
+      std::cout << "No other non-custom power profiles to set to. Exiting." << std::endl;
       return;
     }
 
-    ret =  amdsmi_set_gpu_power_profile(processor_handles_[dv_ind], 0, new_prof);
+    DISPLAY_AMDSMI_API("amdsmi_set_gpu_power_profile", "gpu=" + std::to_string(dv_ind),
+                       VERB(STANDARD));
+    ret = amdsmi_set_gpu_power_profile(processor_handles_[dv_ind], 0, new_prof);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
     CHK_ERR_ASRT(ret)
 
     amdsmi_dev_perf_level_t pfl;
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_perf_level", "gpu=" + std::to_string(dv_ind),
+                       VERB(STANDARD));
     ret = amdsmi_get_gpu_perf_level(processor_handles_[dv_ind], &pfl);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
     CHK_ERR_ASRT(ret)
     ASSERT_EQ(pfl, AMDSMI_DEV_PERF_LEVEL_MANUAL);
 
-    ret =  amdsmi_get_gpu_power_profile_presets(processor_handles_[dv_ind], 0, &status);
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_power_profile_presets", "gpu=" + std::to_string(dv_ind),
+                       VERB(STANDARD));
+    ret = amdsmi_get_gpu_power_profile_presets(processor_handles_[dv_ind], 0, &status);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
     CHK_ERR_ASRT(ret)
 
     ASSERT_EQ(status.current, new_prof);
 
     // Reset the state of perf level and power profile after testing
-    ret =  amdsmi_set_gpu_perf_level(processor_handles_[dv_ind], AMDSMI_DEV_PERF_LEVEL_AUTO);
+    DISPLAY_AMDSMI_API("amdsmi_set_gpu_perf_level", "gpu=" + std::to_string(dv_ind),
+                       VERB(STANDARD));
+    ret = amdsmi_set_gpu_perf_level(processor_handles_[dv_ind], AMDSMI_DEV_PERF_LEVEL_AUTO);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
     CHK_ERR_ASRT(ret);
 
-    ret =  amdsmi_set_gpu_power_profile(processor_handles_[dv_ind], 0, orig_profile);
+    DISPLAY_AMDSMI_API("amdsmi_set_gpu_power_profile", "gpu=" + std::to_string(dv_ind),
+                       VERB(STANDARD));
+    ret = amdsmi_set_gpu_power_profile(processor_handles_[dv_ind], 0, orig_profile);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
     CHK_ERR_ASRT(ret);
   }
 }

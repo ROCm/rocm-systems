@@ -4,187 +4,312 @@ module:
     <<: *level_2
     # Rock_Window_Failures_on_gfx1151
     disabled: [amd_windows]
+    tags: [launch]
   Unit_hipModuleLaunchCooperativeKernel_Positive_Parameters:
     <<: *level_2
     # Rock_Window_Failures_on_gfx1151
     disabled: [amd_windows]
+    tags: [launch]
   Unit_hipModuleLaunchCooperativeKernel_Negative_Parameters:
     <<: *level_2
     # Rock_Window_Failures_on_gfx1151
     disabled: [amd_windows]
-  Unit_hipModuleLaunchCooperativeKernel_Verify_Capture: *level_2
+    tags: [launch]
+  Unit_hipModuleLaunchCooperativeKernel_Verify_Capture:
+    <<: *level_2
+    tags: [launch]
   Unit_hipModuleLaunchKernel_Positive_Basic:
     <<: *level_2
     # Rock_Window_Failures_on_gfx1151
     disabled: [amd_windows]
+    tags: [launch]
   Unit_hipModuleLaunchKernel_Positive_Parameters:
     <<: *level_2
     # Rock_Window_Failures_on_gfx1151
     disabled: [amd_windows]
+    tags: [launch]
   Unit_hipModuleLaunchKernel_Negative_Parameters:
     <<: *level_2
     # Below tests are failing PSDB
     disabled: [amd_windows]
-  Unit_hipModuleLaunchKernel_Fntl: *level_2
+    tags: [launch, multigpu]
+  Unit_hipModuleLaunchKernel_Fntl:
+    <<: *level_2
+    tags: [launch]
   Unit_hipModuleLaunchKernel_Verify_Capture:
     <<: *level_2
     # Rock_Window_Failures_on_gfx1151
     disabled: [amd_windows]
-  Unit_hipExtLaunchKernelGGL_Functional: *level_2
+    tags: [launch]
+  Unit_hipExtLaunchKernelGGL_Functional:
+    <<: *level_2
+    tags: [launch]
   Unit_hipModuleLoadDataEx_Positive_Basic:
     <<: *level_2
     # Below tests tests fail in PSDB
     disabled: [nvidia_windows]
+    tags: [load]
   Unit_hipModuleLoadDataEx_Negative_Parameters:
     <<: *level_2
     # Below tests tests fail in PSDB
     disabled: [nvidia_windows]
+    tags: [load]
   Unit_hipModuleLoadDataEx_Negative_Image_Is_An_Empty_String:
     <<: *level_2
     # Note: Following two tests disabled due to defect - EXSWHTEC-153
     disabled: [amd_windows]
-  Unit_hipGetFuncBySymbol_PositiveTest: *level_2
-  Unit_hipGetFuncBySymbol_NegativeTests: *level_2
-  Unit_hipGetFuncBySymbol_InChildProcess: *level_2
-  Unit_hipGetFuncBySymbol_MultiDev: *level_2
-  Unit_hipGetFuncBySymbol_MultiDevMultiThread: *level_2
-  Unit_hipModuleGetFunction_Positive_Basic: *level_2
-  Unit_hipModuleGetFunction_Negative_Parameters: *level_2
-  Unit_hipModuleGetFunction_DiffDevice: *level_2
-  Unit_KerArgOptimization_Saxpy: *level_2
-  Unit_hipGetProcAddress_ModuleApis: *level_2
-  Unit_hipGetProcAddress_ModuleApisLoadData: *level_2
-  Unit_hipGetProcAddress_ModuleApisCooperativeKernels: *level_2
-  Unit_hipGetProcAddress_ModuleApisOccupancy: *level_2
-  Unit_hipFuncGetAttribute_Positive_Basic: *level_2
-  Unit_hipFuncGetAttribute_Negative_Parameters: *level_2
-  Unit_hipHccModuleLaunchKernel_basic: *level_2
-  Unit_hipHccModuleLaunchKernel_NegTst: *level_2
-  Unit_hipModuleLoadFatBinary_NegativeTsts: *level_2
-  Unit_hipModuleLoadFatBinary_PosiiveTsts: *level_2
-  Unit_hipDrvLaunchKernelEx_NegTsts: *level_2
-  Unit_hipDrvLaunchKernelEx_Functional: *level_2
-  Unit_hipDrvLaunchKernelEx_With_Different_Kernels: *level_2
+    tags: [load]
+  Unit_hipGetFuncBySymbol_PositiveTest:
+    <<: *level_2
+    tags: [function]
+  Unit_hipGetFuncBySymbol_NegativeTests:
+    <<: *level_2
+    tags: [function]
+  Unit_hipGetFuncBySymbol_InChildProcess:
+    <<: *level_2
+    tags: [function]
+  Unit_hipGetFuncBySymbol_MultiDev:
+    <<: *level_2
+    tags: [function, multigpu]
+  Unit_hipGetFuncBySymbol_MultiDevMultiThread:
+    <<: *level_2
+    tags: [function, multigpu]
+  Unit_hipModuleGetFunction_Positive_Basic:
+    <<: *level_2
+    tags: [function]
+  Unit_hipModuleGetFunction_Negative_Parameters:
+    <<: *level_2
+    tags: [function]
+  Unit_hipModuleGetFunction_DiffDevice:
+    <<: *level_2
+    tags: [function, multigpu]
+  Unit_KerArgOptimization_Saxpy:
+    <<: *level_2
+    tags: [function]
+  Unit_hipGetProcAddress_ModuleApis:
+    <<: *level_2
+    tags: [resource]
+  Unit_hipGetProcAddress_ModuleApisLoadData:
+    <<: *level_2
+    tags: [resource]
+  Unit_hipGetProcAddress_ModuleApisCooperativeKernels:
+    <<: *level_2
+    tags: [multigpu, resource]
+  Unit_hipGetProcAddress_ModuleApisOccupancy:
+    <<: *level_2
+    tags: [resource]
+  Unit_hipFuncGetAttribute_Positive_Basic:
+    <<: *level_2
+    tags: [function]
+  Unit_hipFuncGetAttribute_Negative_Parameters:
+    <<: *level_2
+    tags: [function]
+  Unit_hipHccModuleLaunchKernel_basic:
+    <<: *level_2
+    tags: [launch]
+  Unit_hipHccModuleLaunchKernel_NegTst:
+    <<: *level_2
+    tags: [launch]
+  Unit_hipModuleLoadFatBinary_NegativeTsts:
+    <<: *level_2
+    tags: [load]
+  Unit_hipModuleLoadFatBinary_PosiiveTsts:
+    <<: *level_2
+    tags: [load]
+  Unit_hipDrvLaunchKernelEx_NegTsts:
+    <<: *level_2
+    tags: [launch]
+  Unit_hipDrvLaunchKernelEx_Functional:
+    <<: *level_2
+    tags: [launch]
+  Unit_hipDrvLaunchKernelEx_With_Different_Kernels:
+    <<: *level_2
+    tags: [launch]
   Unit_hipDrvLaunchKernelEx_With_CooperativeKernelWithArgs:
     <<: *level_2
     # Rock_Linux_Failures_on_gfx94X
     disabled: [amd_linux]
-  Unit_hipDrvLaunchKernelEx_With_MaxBlockDims: *level_2
-  Unit_hipExtLaunchMultiKernelMultiDevice_Functional: *level_2
+    tags: [launch]
+  Unit_hipDrvLaunchKernelEx_With_MaxBlockDims:
+    <<: *level_2
+    tags: [launch]
+  Unit_hipExtLaunchMultiKernelMultiDevice_Functional:
+    <<: *level_2
+    tags: [launch, multigpu]
   Unit_hipModuleLoadData_Positive_Basic:
     <<: *level_2
     # Below tests tests fail in PSDB
     disabled: [nvidia_windows]
+    tags: [load]
   Unit_hipModuleLoadData_Negative_Parameters:
     <<: *level_2
     # Below tests tests fail in PSDB
     disabled: [nvidia_windows]
+    tags: [load]
   Unit_hipModuleLoadData_Negative_Image_Is_An_Empty_String:
     <<: *level_2
     # Note: Following two tests disabled due to defect - EXSWHTEC-153
     disabled: [amd_windows]
-  Unit_hipModuleLoadData_Functional: *level_2
+    tags: [load]
+  Unit_hipModuleLoadData_Functional:
+    <<: *level_2
+    tags: [load]
   Unit_hipModuleLoad_Positive_Basic:
     <<: *level_2
     # Below tests tests fail in PSDB
     disabled: [nvidia_windows]
-  Unit_hipModuleLoad_Negative_Parameters: *level_2
+    tags: [load]
+  Unit_hipModuleLoad_Negative_Parameters:
+    <<: *level_2
+    tags: [load]
   Unit_hipModuleLoad_Negative_Load_From_A_File_That_Is_Not_A_Module:
     <<: *level_2
     # Below tests tests fail in PSDB
     disabled: [nvidia_windows]
-  Unit_hipFuncSetSharedMemConfig_functional: *level_2
+    tags: [load]
+  Unit_hipFuncSetSharedMemConfig_functional:
+    <<: *level_2
+    tags: [function]
   Unit_hipModuleUnload_Negative_Module_Is_Nullptr:
     <<: *level_2
     # Note: Test disabled due to defect - EXSWHTEC-152
     disabled: [amd_windows]
+    tags: [load]
   Unit_hipModuleUnload_Negative_Double_Unload:
     <<: *level_2
     # Below test fails in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/215
     disabled: [nvidia_linux, nvidia_windows]
-  Unit_hipModuleLoad_basic: *level_2
+    tags: [load]
+  Unit_hipModuleUnload_basic:
+    <<: *level_2
+    tags: [load]
   Unit_hipModuleGetFunctionCount_Functional:
     <<: *level_2
     # (amd_linux) Rock_Linux_Failures_on_gfx94X
     # (amd_windows) Rock_Window_Failures_on_gfx1151
     disabled: [amd_linux, amd_windows]
-  Unit_hipModuleGetFunctionCount_NegativeTsts: *level_2
-  Unit_hipModuleGetGlobal_Functional: *level_2
-  Unit_hipModuleLoad_MultProcess_MultGPU: *level_2
+    tags: [function]
+  Unit_hipModuleGetFunctionCount_NegativeTsts:
+    <<: *level_2
+    tags: [function]
+  Unit_hipModuleGetGlobal_Functional:
+    <<: *level_2
+    tags: [function, multigpu]
+  Unit_hipModuleLoad_MultProcess_MultGPU:
+    <<: *level_2
+    tags: [load, multigpu]
   Unit_hip_linker_spirv_input:
     <<: *level_2
     # Rock_Window_Failures_on_gfx1151
     disabled: [amd_windows]
-  Unit_hipLinkCreate_Negative: *level_2
-  Unit_hipLinkCreate_AddLinker_CUDA_only_options: *level_2
-  Unit_hipLinkAddFile_Negative: *level_2
+    tags: [resource]
+  Unit_hipLinkCreate_Negative:
+    <<: *level_2
+    tags: [resource]
+  Unit_hipLinkCreate_AddLinker_CUDA_only_options:
+    <<: *level_2
+    tags: [resource]
+  Unit_hipLinkAddFile_Negative:
+    <<: *level_2
+    tags: [resource]
   Unit_hipModuleLaunchCooperativeKernelMultiDevice_Positive_Basic:
     <<: *level_2
     # Rock_Window_Failures_on_gfx1151
     disabled: [amd_windows]
+    tags: [launch, multigpu]
   Unit_hipModuleLaunchCooperativeKernelMultiDevice_Negative_Parameters:
     <<: *level_2
     # Rock_Window_Failures_on_gfx1151
     disabled: [amd_windows]
+    tags: [launch, multigpu]
   Unit_hipModuleLaunchCooperativeKernelMultiDevice_Negative_MultiKernelSameDevice:
     <<: *level_2
     tags: [multigpu]
     # Rock_Window_Failures_on_gfx1151
     disabled: [amd_windows]
-  Unit_hipModuleGetGlobal_Positive_Basic: *level_2
-  Unit_hipModuleGetGlobal_Positive_Parameters: *level_2
-  Unit_hipModuleGetGlobal_Negative_Parameters: *level_2
+  Unit_hipModuleGetGlobal_Positive_Basic:
+    <<: *level_2
+    tags: [resource]
+  Unit_hipModuleGetGlobal_Positive_Parameters:
+    <<: *level_2
+    tags: [resource]
+  Unit_hipModuleGetGlobal_Negative_Parameters:
+    <<: *level_2
+    tags: [resource]
   Unit_hipModuleGetGlobal_Negative_Hmod_Is_Nullptr:
     <<: *level_2
     # Note: Test disabled due to defect - EXSWHTEC-163
     disabled: [amd_windows]
+    tags: [resource]
   Unit_hipModuleGetGlobal_Negative_Name_Is_Empty_String:
     <<: *level_2
     # Note: Test disabled due to defect - EXSWHTEC-164
     disabled: [amd_windows]
+    tags: [resource]
   Unit_hipModuleGetGlobal_Negative_Dptr_And_Bytes_Are_Nullptr:
     <<: *level_2
     # Note: Test disabled due to defect - EXSWHTEC-165
     disabled: [amd_windows]
-  Unit_hipModuleGetGlobal_DiffDevice: *level_2
-  Unit_hipModule_Functional: *level_2
+    tags: [resource]
+  Unit_hipModuleGetGlobal_DiffDevice:
+    <<: *level_2
+    tags: [multigpu, resource]
+  Unit_hipModule_Functional:
+    <<: *level_2
+    tags: [load]
   Unit_hipModuleGetTexRef_Positive_Basic:
     <<: *level_2
     # (amd_windows) Below tests are failing PSDB
     # (nvidia_windows) Disabling tests which no longer behave the same on nvidia platform
     disabled: [amd_windows, nvidia_windows]
+    tags: [resource]
   Unit_hipModuleGetTexRef_Negative_Parameters:
     <<: *level_2
     # Rock_Window_Failures_on_gfx1151
     disabled: [amd_windows]
+    tags: [resource]
   Unit_hipModuleGetTexRef_Negative_Hmod_Is_Nullptr:
     <<: *level_2
     # Note: Test disabled due to defect - EXSWHTEC-166
     disabled: [amd_windows]
+    tags: [resource]
   Unit_hipModuleGetTexRef_Negative_Name_Is_Empty_String:
     <<: *level_2
     # Note: Test disabled due to defect - EXSWHTEC-167
     disabled: [amd_windows]
-  Unit_hipFuncSetAttribute_Basic: *level_2
-  Unit_hipExtModuleLaunchKernel_CheckCodeObjAttr: *level_2
+    tags: [resource]
+  Unit_hipFuncSetAttribute_Basic:
+    <<: *level_2
+    tags: [function]
+  Unit_hipExtModuleLaunchKernel_CheckCodeObjAttr:
+    <<: *level_2
+    tags: [launch]
   Unit_hipExtModuleLaunchKernel_NonUniformWorkGroup:
     <<: *level_2
     # Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/96
     disabled: [amd_windows, amd_wsl]
-  Unit_hipExtModuleLaunchKernel_UniformWorkGroup: *level_2
+    tags: [launch]
+  Unit_hipExtModuleLaunchKernel_UniformWorkGroup:
+    <<: *level_2
+    tags: [launch]
   Unit_hipExtModuleLaunchKernel_Positive_Parameters:
     <<: *level_2
     # Rock_Window_Failures_on_gfx1151
     disabled: [amd_windows]
+    tags: [launch]
   Unit_hipExtModuleLaunchKernel_Negative_Parameters:
     <<: *level_2
     # Below tests are failing PSDB
     disabled: [amd_windows]
+    tags: [launch, multigpu]
   Unit_hipExtModuleLaunchKernel_Functional:
     <<: *level_2
     # SWDEV-438524: Below tests causing TDR & machine down in stress test on 15/12/23
     disabled: [amd_windows, amd_wsl]
-  Unit_hipFuncGetAttributes_basic: *level_2
+    tags: [launch]
+  Unit_hipFuncGetAttributes_basic:
+    <<: *level_2
+    tags: [function]
   Unit_hipModuleGetLoadingMode_DefaultModeCheck: *level_2
   Unit_hipModuleGetLoadingMode_EagerModeCheck: *level_2
   Unit_hipModuleGetLoadingMode_EagerModeKernel: *level_2

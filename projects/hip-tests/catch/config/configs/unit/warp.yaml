@@ -1,39 +1,82 @@
 ---
 warp:
-  Unit_Warp_Ballot_Positive_Basic: *level_2
-  Unit_Warp_Vote_Any_Positive_Basic: *level_2
-  Unit_Warp_Vote_All_Positive_Basic: *level_2
-  Unit_hipMatchSync_All: *level_2
-  Unit_hipMatchSync_Any: *level_2
-  Unit_hipShflSync_Down: *level_2
-  Unit_hipShflSync_Up: *level_2
-  Unit_hipShflSync_Xor: *level_2
-  Unit_hipShflSync: *level_2
-  Unit_hipVoteSync_Any: *level_2
-  Unit_hipVoteSync_All: *level_2
-  Unit_hipVoteSync_Ballot: *level_2
+  Unit_Warp_Ballot_Positive_Basic:
+    <<: *level_2
+    tags: [deviceLib, vote]
+  Unit_Warp_Vote_Any_Positive_Basic:
+    <<: *level_2
+    tags: [deviceLib, vote]
+  Unit_Warp_Vote_All_Positive_Basic:
+    <<: *level_2
+    tags: [deviceLib, vote]
+  Unit_hipMatchSync_All:
+    <<: *level_2
+    tags: [deviceLib, vote]
+  Unit_hipMatchSync_Any:
+    <<: *level_2
+    tags: [deviceLib, vote]
+  Unit_hipShflSync_Down:
+    <<: *level_2
+    tags: [deviceLib, intrinsic, shuffle]
+  Unit_hipShflSync_Up:
+    <<: *level_2
+    tags: [deviceLib, intrinsic, shuffle]
+  Unit_hipShflSync_Xor:
+    <<: *level_2
+    tags: [deviceLib, intrinsic, shuffle]
+  Unit_hipShflSync:
+    <<: *level_2
+    tags: [deviceLib, intrinsic, shuffle]
+  Unit_hipVoteSync_Any:
+    <<: *level_2
+    tags: [deviceLib, vote]
+  Unit_hipVoteSync_All:
+    <<: *level_2
+    tags: [deviceLib, vote]
+  Unit_hipVoteSync_Ballot:
+    <<: *level_2
+    tags: [deviceLib, vote]
   Unit_Warp_Shfl_Positive_Basic:
     <<: *level_2
     # SWDEV-434171: Below tests took long time to complete in stress test on 17/11/23
     disabled: [amd_linux, amd_windows, amd_wsl]
+    tags: [deviceLib, intrinsic, shuffle]
   Unit_Warp_Shfl_XOR_Positive_Basic:
     <<: *level_2
     # SWDEV-434171: Below tests took long time to complete in stress test on 17/11/23
     disabled: [amd_linux, amd_windows, amd_wsl]
+    tags: [deviceLib, intrinsic, shuffle]
   Unit_Warp_Shfl_Up_Positive_Basic:
     <<: *level_2
     # SWDEV-443630 : Below test failed in stress test on 19/01/24
     disabled: [gfx90a, gfx942, gfx950]
+    tags: [deviceLib, intrinsic, shuffle]
   Unit_Warp_Shfl_Down_Positive_Basic:
     <<: *level_2
     # SWDEV-443630 : Below test failed in stress test on 19/01/24
     disabled: [gfx90a, gfx942, gfx950]
-  Unit_hipReduceSingleMasks: *level_2
-  Unit_hipReduceMultipleMasks: *level_2
-  Unit_hipReduceRandom: *level_2
-  Unit_runTestShfl_up: *level_2
-  Unit_runTestShfl_Down: *level_2
-  Unit_runTestShfl_Xor: *level_2
-  Unit_hipShflTests: *level_2
-  Unit_hipShflUndefArgs: *level_2
-
+    tags: [deviceLib, intrinsic, shuffle]
+  Unit_hipReduceSingleMasks:
+    <<: *level_2
+    tags: [deviceLib, reduce]
+  Unit_hipReduceMultipleMasks:
+    <<: *level_2
+    tags: [deviceLib, reduce]
+  Unit_hipReduceRandom:
+    <<: *level_2
+    tags: [deviceLib, reduce]
+  Unit_runTestShfl_up:
+    <<: *level_2
+    tags: [deviceLib, intrinsic, shuffle]
+  Unit_runTestShfl_Down:
+    <<: *level_2
+    tags: [deviceLib, intrinsic, shuffle]
+  Unit_runTestShfl_Xor:
+    <<: *level_2
+    tags: [deviceLib, intrinsic, shuffle]
+  Unit_hipShflTests:
+    <<: *level_2
+    tags: [deviceLib, intrinsic, shuffle]
+  Unit_hipShflUndefArgs:
+    <<: *level_2
+    tags: [deviceLib, intrinsic, shuffle]

@@ -29,7 +29,7 @@ using namespace rocshmem;
 //=============================================================================
 
 TEST_F(DegenerateTiledFine, ptr_check) {
-    ASSERT_NE(heap_mem_.get_ptr(), nullptr);
+    ASSERT_NE(heap_mem_->get_ptr(), nullptr);
 }
 
 TEST_F(DegenerateTiledFine, MPI_num_pes) {

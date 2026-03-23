@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #ifndef HIP_GLOBAL_HPP
 #define HIP_GLOBAL_HPP
@@ -40,13 +24,13 @@ class CodeObject;
 // Device Structures
 class DeviceVar {
  public:
-  DeviceVar(std::string name, hipModule_t hmod, int deviceId);
+  DeviceVar(const std::string &name, hipModule_t hmod, int deviceId);
   ~DeviceVar();
 
   // Accessors for device ptr and size, populated during constructor.
   hipDeviceptr_t device_ptr() const { return device_ptr_; }
   size_t size() const { return size_; }
-  std::string name() const { return name_; }
+  const std::string& name() const { return name_; }
   void* shadowVptr;
 
  private:
@@ -58,10 +42,10 @@ class DeviceVar {
 
 class DeviceFunc {
  public:
-  DeviceFunc(std::string name, hipModule_t hmod);
+  DeviceFunc(const std::string &name, hipModule_t hmod);
   ~DeviceFunc();
 
-  amd::Monitor dflock_;
+  std::recursive_mutex dflock_;
 
   // Converts DeviceFunc to hipFunction_t(used by app) and vice versa.
   hipFunction_t asHipFunction() { return reinterpret_cast<hipFunction_t>(this); }
@@ -69,11 +53,10 @@ class DeviceFunc {
   static DeviceFunc* asFunction(hipKernel_t k) { return reinterpret_cast<DeviceFunc*>(k); }
 
   // Accessor for kernel_ and name_ populated during constructor.
-  std::string name() const { return name_; }
+  const std::string &name() const { return kernel_->name(); }
   amd::Kernel* kernel() const { return kernel_; }
 
  private:
-  std::string name_;     // name of the func(not unique identifier)
   amd::Kernel* kernel_;  // Kernel ptr referencing to ROCclr Symbol
 };
 
@@ -130,7 +113,7 @@ class Var {
   DeviceVarKind getVarKind() const { return dVarKind_; }
   size_t getSize() const { return size_; }
   size_t getAlignment() const { return align_; }
-  std::string getName() const { return name_; }
+  const std::string& getName() const { return name_; }
 
   void* getManagedVarPtr() const { return managedVarPtr_; }
   void setManagedVarInfo(void* pointer, size_t size) {

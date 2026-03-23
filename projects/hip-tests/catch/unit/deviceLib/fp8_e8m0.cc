@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip_test_common.hh>
 #include <hip/hip_fp8.h>
@@ -60,7 +44,7 @@ void device_cvt_bfloat16raw_to_e8m0(const std::vector<__hip_bfloat16>& in,
       hipMemcpy(out.data(), out_d, sizeof(unsigned char) * out.size(), hipMemcpyDeviceToHost));
 }
 
-TEST_CASE("Unit__hip_cvt_bfloat16raw_to_e8m0") {
+HIP_TEST_CASE(Unit__hip_cvt_bfloat16raw_to_e8m0) {
   bool run_on_host = GENERATE(true, false);
   __hip_saturation_t saturation = GENERATE(__HIP_NOSAT, __HIP_SATFINITE);
   hipRoundMode rounding = GENERATE(hipRoundZero, hipRoundPosInf);
@@ -146,7 +130,7 @@ void device_cvt_float_to_e8m0(const std::vector<float>& in, std::vector<unsigned
       hipMemcpy(out.data(), out_d, sizeof(unsigned char) * out.size(), hipMemcpyDeviceToHost));
 }
 
-TEST_CASE("Unit__hip_cvt_float_to_e8m0") {
+HIP_TEST_CASE(Unit__hip_cvt_float_to_e8m0) {
   bool run_on_host = GENERATE(true, false);
   __hip_saturation_t saturation = GENERATE(__HIP_NOSAT, __HIP_SATFINITE);
   hipRoundMode rounding = GENERATE(hipRoundZero, hipRoundPosInf);
@@ -233,7 +217,7 @@ void device_cvt_double_to_e8m0(const std::vector<double>& in, std::vector<unsign
 }
 
 
-TEST_CASE("Unit__hip_cvt_double_to_e8m0") {
+HIP_TEST_CASE(Unit__hip_cvt_double_to_e8m0) {
   bool run_on_host = GENERATE(true, false);
   __hip_saturation_t saturation = GENERATE(__HIP_NOSAT, __HIP_SATFINITE);
   hipRoundMode rounding = GENERATE(hipRoundZero, hipRoundPosInf);
@@ -337,7 +321,7 @@ void device_cvt_e8m0_to_bf16raw(const std::vector<unsigned char>& in, std::vecto
   HIP_CHECK(hipMemcpy(out.data(), out_d, sizeof(float) * out.size(), hipMemcpyDeviceToHost));
 }
 
-TEST_CASE("Unit__hip_cvt_e8m0_to_bf16raw") {
+HIP_TEST_CASE(Unit__hip_cvt_e8m0_to_bf16raw) {
   bool run_on_host = GENERATE(true, false);
 
   std::vector<unsigned char> in = {0x00u, 0x7EU, 0x81U, 0x82U, 0xFF};
@@ -361,4 +345,3 @@ TEST_CASE("Unit__hip_cvt_e8m0_to_bf16raw") {
     }
   }
 }
-

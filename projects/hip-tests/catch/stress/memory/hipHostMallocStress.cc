@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip_test_common.hh>
 #include <hip_test_helper.hh>
@@ -26,7 +13,7 @@ THE SOFTWARE.
 // Try to allocate as much memory as possible
 // But since max allocation can fail, we need to try the next value
 
-TEST_CASE("Stress_hipHostMalloc_MaxAllocation") {
+HIP_TEST_CASE(Stress_hipHostMalloc_MaxAllocation) {
   size_t devMemAvail{0}, devMemFree{0};
   HIP_CHECK(hipMemGetInfo(&devMemFree, &devMemAvail));
   auto hostMemFree = HipTest::getAvailableSystemMemoryInMB() * 1024 * 1024;  // In bytes
@@ -56,7 +43,7 @@ TEST_CASE("Stress_hipHostMalloc_MaxAllocation") {
 // Allocate more memory than total GPU memory in each available GPU.
 // hipHostMalloc should return hipSuccess.
 
-TEST_CASE("Stress_hipHostMalloc_MaxAllocation_AllGpu") {
+HIP_TEST_CASE(Stress_hipHostMalloc_MaxAllocation_AllGpu) {
   char* A = nullptr;
   size_t maxGpuMem = 0, availableMem = 0;
   int count = 0;

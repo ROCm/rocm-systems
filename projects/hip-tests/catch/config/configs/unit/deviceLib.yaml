@@ -1,272 +1,593 @@
 ---
 deviceLib:
-  Unit_deviceFunctions_CompileTest: *level_2
-  Unit_AnyAll_CompileTest: *level_2
-  Unit_ballot: *level_2
-  Unit_clz: *level_2
-  Unit_ffs: *level_2
-  Unit_funnelshift: *level_2
-  Unit_brev: *level_2
-  Unit_popc: *level_2
-  Unit_ldg: *level_2
+  Unit_deviceFunctions_CompileTest:
+    <<: *level_2
+    tags: [math]
+  Unit_AnyAll_CompileTest:
+    <<: *level_2
+    tags: [warp]
+  Unit_ballot:
+    <<: *level_2
+    tags: [warp]
+  Unit_clz:
+    <<: *level_2
+    tags: [bitops]
+  Unit_ffs:
+    <<: *level_2
+    tags: [bitops]
+  Unit_funnelshift:
+    <<: *level_2
+    tags: [math]
+  Unit_brev:
+    <<: *level_2
+    tags: [bitops]
+  Unit_popc:
+    <<: *level_2
+    tags: [bitops]
+  Unit_ldg:
+    <<: *level_2
+    tags: [bitops]
   Unit_threadfence_system:
     <<: *level_2
     tags: [multigpu]
-  Unit_syncthreads_and: *level_2
-  Unit_syncthreads_count: *level_2
-  Unit_syncthreads_or: *level_2
+  Unit_syncthreads_and:
+    <<: *level_2
+    tags: [synchronization]
+  Unit_syncthreads_count:
+    <<: *level_2
+    tags: [synchronization]
+  Unit_syncthreads_or:
+    <<: *level_2
+    tags: [synchronization]
   Unit_deviceAllocation_Malloc_PerThread_PrimitiveDataType:
     <<: *level_2
     # Note: devicelib hangs and failures
     disabled: [amd_windows, amd_wsl]
+    tags: [memory]
   Unit_deviceAllocation_New_PerThread_PrimitiveDataType:
     <<: *level_2
     # Note: devicelib hangs and failures
     disabled: [amd_windows, amd_wsl]
+    tags: [memory]
   Unit_deviceAllocation_Malloc_PerThread_StructDataType:
     <<: *level_2
     # Note: devicelib hangs and failures
     disabled: [amd_windows, amd_wsl]
+    tags: [memory]
   Unit_deviceAllocation_New_PerThread_StructDataType:
     <<: *level_2
     # Note: devicelib hangs and failures
     disabled: [amd_windows, amd_wsl]
+    tags: [memory]
   Unit_deviceAllocation_InOneThread_AccessInAllThreads:
     <<: *level_2
     # (amd_windows) Note: this tests were disabled because some seemed to hang the machine on Windows with Navi32;
     # (amd_windows) all the ones calling TestMemoryAcrossMulKernels()/TestMemoryAcrossMulKernelsUsingGraph() were disabled
     # (amd_wsl) SWDEV-427101:Below test fails randomly in PSDB
     disabled: [amd_windows, amd_wsl]
+    tags: [memory]
   Unit_deviceAllocation_Malloc_AcrossKernels:
     <<: *level_2
     # Note: this tests were disabled because some seemed to hang the machine on Windows with Navi32;
     # all the ones calling TestMemoryAcrossMulKernels()/TestMemoryAcrossMulKernelsUsingGraph() were disabled
     disabled: [amd_windows, amd_wsl]
+    tags: [memory]
   Unit_deviceAllocation_New_AcrossKernels:
     <<: *level_2
     # Note: this tests were disabled because some seemed to hang the machine on Windows with Navi32;
     # all the ones calling TestMemoryAcrossMulKernels()/TestMemoryAcrossMulKernelsUsingGraph() were disabled
     disabled: [amd_windows, amd_wsl]
+    tags: [memory]
   Unit_deviceAllocation_Malloc_ComplexDataType:
     <<: *level_2
     # Note: this tests were disabled because some seemed to hang the machine on Windows with Navi32;
     # all the ones calling TestMemoryAcrossMulKernels()/TestMemoryAcrossMulKernelsUsingGraph() were disabled
     disabled: [amd_windows]
+    tags: [memory]
   Unit_deviceAllocation_New_ComplexDataType:
     <<: *level_2
     # Note: this tests were disabled because some seemed to hang the machine on Windows with Navi32;
     # all the ones calling TestMemoryAcrossMulKernels()/TestMemoryAcrossMulKernelsUsingGraph() were disabled
     disabled: [amd_windows, amd_wsl]
+    tags: [memory]
   Unit_deviceAllocation_Malloc_UnionType:
     <<: *level_2
     # Note: this tests were disabled because some seemed to hang the machine on Windows with Navi32;
     # all the ones calling TestMemoryAcrossMulKernels()/TestMemoryAcrossMulKernelsUsingGraph() were disabled
     disabled: [amd_windows, amd_wsl]
+    tags: [memory]
   Unit_deviceAllocation_New_UnionType:
     <<: *level_2
     # Note: this tests were disabled because some seemed to hang the machine on Windows with Navi32;
     # all the ones calling TestMemoryAcrossMulKernels()/TestMemoryAcrossMulKernelsUsingGraph() were disabled
     disabled: [amd_windows, amd_wsl]
+    tags: [memory]
   Unit_deviceAllocation_Malloc_SingleCodeObj:
     <<: *level_2
     # Note: this tests were disabled because some seemed to hang the machine on Windows with Navi32;
     # all the ones calling TestMemoryAcrossMulKernels()/TestMemoryAcrossMulKernelsUsingGraph() were disabled
     disabled: [amd_windows, amd_wsl]
+    tags: [memory]
   Unit_deviceAllocation_New_SingleCodeObj:
     <<: *level_2
     # Note: this tests were disabled because some seemed to hang the machine on Windows with Navi32;
     # all the ones calling TestMemoryAcrossMulKernels()/TestMemoryAcrossMulKernelsUsingGraph() were disabled
     disabled: [amd_windows, amd_wsl]
-  Unit_deviceAllocation_Malloc_PerThread_MultKerMultStrm: *level_2
-  Unit_deviceAllocation_New_PerThread_MultKerMultStrm: *level_2
+    tags: [memory]
+  Unit_deviceAllocation_Malloc_PerThread_MultKerMultStrm:
+    <<: *level_2
+    tags: [memory]
+  Unit_deviceAllocation_New_PerThread_MultKerMultStrm:
+    <<: *level_2
+    tags: [memory]
   Unit_deviceAllocation_Malloc_PerThread_Graph:
     <<: *level_2
     # Note: this tests were disabled because some seemed to hang the machine on Windows with Navi32;
     # all the ones calling TestMemoryAcrossMulKernels()/TestMemoryAcrossMulKernelsUsingGraph() were disabled
     disabled: [amd_windows, amd_wsl]
+    tags: [memory]
   Unit_deviceAllocation_New_PerThread_Graph:
     <<: *level_2
     # Note: this tests were disabled because some seemed to hang the machine on Windows with Navi32;
     # all the ones calling TestMemoryAcrossMulKernels()/TestMemoryAcrossMulKernelsUsingGraph() were disabled
     disabled: [amd_windows, amd_wsl]
+    tags: [memory]
   Unit_deviceAllocation_Malloc_DeviceFunc:
     <<: *level_2
     # Note: devicelib hangs and failures
     disabled: [amd_windows, amd_wsl]
+    tags: [memory]
   Unit_deviceAllocation_New_DeviceFunc:
     <<: *level_2
     # Note: devicelib hangs and failures
     disabled: [amd_windows, amd_wsl]
+    tags: [memory]
   Unit_deviceAllocation_VirtualFunction:
     <<: *level_2
     # Note: devicelib hangs and failures
     disabled: [amd_windows, amd_wsl]
+    tags: [memory]
   Unit_deviceAllocation_Malloc_MulKernels_MulThreads:
     <<: *level_2
     # Note: devicelib hangs and failures
     disabled: [amd_windows, amd_wsl]
+    tags: [memory]
   Unit_deviceAllocation_New_MulKernels_MulThreads:
     <<: *level_2
     # Note: devicelib hangs and failures
     disabled: [amd_windows, amd_wsl]
-  Unit_deviceAllocation_Malloc_SingKernels_MulThreads: *level_2
-  Unit_deviceAllocation_New_SingKernels_MulThreads: *level_2
+    tags: [memory]
+  Unit_deviceAllocation_Malloc_SingKernels_MulThreads:
+    <<: *level_2
+    tags: [memory]
+  Unit_deviceAllocation_New_SingKernels_MulThreads:
+    <<: *level_2
+    tags: [memory]
   Unit_deviceAllocation_Malloc_MulCodeObj:
     <<: *level_2
     # Note: devicelib hangs and failures
     disabled: [amd_windows, amd_wsl]
+    tags: [memory]
   Unit_deviceAllocation_New_MulCodeObj:
     <<: *level_2
     # Note: devicelib hangs and failures
     disabled: [amd_windows, amd_wsl]
-  Unit_AtomicFunctions_Inc: *level_2
-  Unit_AtomicFunctions_Dec: *level_2
-  Unit_DoublePrecisionIntrinsics: *level_2
-  Unit_DoublePrecisionMathDevice: *level_2
-  Unit_DoublePrecisionMathHost: *level_2
-  Unit_FloatMathPrecise: *level_2
-  Unit_IntegerIntrinsics: *level_2
-  Unit_SinglePrecisionIntrinsics: *level_2
-  Unit_SinglePrecisionMathDevice: *level_2
-  Unit_SinglePrecisionMathHost: *level_2
-  Unit_SimpleAtomicsTest: *level_2
-  Unit_hipTestAtomicAdd: *level_2
-  Unit_StdComplex: *level_2
-  Unit_hipTestClock: *level_2
-  Unit_kernel_trigger: *level_2
-  Unit_ToAndFroMemCpyToDevice: *level_2
-  Unit_TestIncludeMathPreciseFloat: *level_2
-  Unit_hipTestDotFunctions: *level_2
-  Unit_hipMemcpyToSymbolAsync_ToNFrom: *level_2
-  Unit_hipGetSymbolAddressAndSize_Validation: *level_2
-  Unit_hipGetSymbolAddress_Negative: *level_2
-  Unit_hipGetSymbolSize_Negative: *level_2
-  Unit_hipTest_DeviceNewOperator: *level_2
-  Unit_hipThreadFence: *level_2
-  Unit_hipDeviceTrigFunc_Float: *level_2
-  Unit_hipTestDeviceLimit_Basic: *level_2
-  Unit_hipTrigDeviceFunc_Double: *level_2
-  Unit_TestDevice_DoublePrecisionMathFunc: *level_2
-  Unit_hadd_int_varaint: *level_2
-  Unit_rhadd_int_varaint: *level_2
-  Unit_uhadd_int_varaint: *level_2
-  Unit_urhadd_int_varaint: *level_2
-  Unit_unsafeAtomicAdd: *level_2
-  Unit_mbcnt: *level_2
-  Unit_bitExtract: *level_2
-  Unit_bitInsert: *level_2
-  Unit_floatTM: *level_2
-  Unit_abs_int64_Verification: *level_2
-  Unit_pown_Verification: *level_2
-  Unit_hmax_hmin_Tsts: *level_2
-  Unit_hmax_hmin_Tsts_Negative: *level_2
-  Unit_hmax_hmin_Tsts_With_Array: *level_2
-  Unit_hipBfloat16: *level_2
-  Unit_hipVectorTypes_test_on_host: *level_2
+    tags: [memory]
+  Unit_deviceAllocationFollowedByDeviceReset:
+    <<: *level_2
+    tags: [memory]
+  Unit_AtomicFunctions_Inc:
+    <<: *level_2
+    tags: [atomics]
+  Unit_AtomicFunctions_Dec:
+    <<: *level_2
+    tags: [atomics]
+  Unit_DoublePrecisionIntrinsics:
+    <<: *level_2
+    tags: [math]
+  Unit_DoublePrecisionMathDevice:
+    <<: *level_2
+    tags: [math]
+  Unit_DoublePrecisionMathHost:
+    <<: *level_2
+    tags: [math]
+  Unit_IntegerIntrinsics:
+    <<: *level_2
+    tags: [math]
+  Unit_SinglePrecisionIntrinsics:
+    <<: *level_2
+    tags: [math]
+  Unit_SinglePrecisionMathDevice:
+    <<: *level_2
+    tags: [math]
+  Unit_SinglePrecisionMathHost:
+    <<: *level_2
+    tags: [math]
+  Unit_SimpleAtomicsTest:
+    <<: *level_2
+    tags: [atomics]
+  Unit_hipTestAtomicAdd:
+    <<: *level_2
+    tags: [atomics]
+  Unit_StdComplex:
+    <<: *level_2
+    tags: [types]
+  Unit_hipTestClock:
+    <<: *level_2
+    tags: [misc]
+  Unit_kernel_trigger:
+    <<: *level_2
+    tags: [math]
+  Unit_ToAndFroMemCpyToDevice:
+    <<: *level_2
+    tags: [memory]
+  Unit_TestIncludeMathPreciseFloat:
+    <<: *level_2
+    tags: [math]
+  Unit_hipTestDotFunctions:
+    <<: *level_2
+    tags: [math]
+  Unit_hipMemcpyToSymbolAsync_ToNFrom:
+    <<: *level_2
+    tags: [misc]
+  Unit_hipGetSymbolAddressAndSize_Validation:
+    <<: *level_2
+    tags: [misc]
+  Unit_hipGetSymbolAddress_Negative:
+    <<: *level_2
+    tags: [misc]
+  Unit_hipGetSymbolSize_Negative:
+    <<: *level_2
+    tags: [misc]
+  Unit_hipTest_DeviceNewOperator:
+    <<: *level_2
+    tags: [misc]
+  Unit_hipThreadFence:
+    <<: *level_2
+    tags: [synchronization]
+  Unit_hipDeviceTrigFunc_Float:
+    <<: *level_2
+    tags: [misc]
+  Unit_hipTestDeviceLimit_Basic:
+    <<: *level_2
+    tags: [misc]
+  Unit_hipTrigDeviceFunc_Double:
+    <<: *level_2
+    tags: [misc]
+  Unit_TestDevice_DoublePrecisionMathFunc:
+    <<: *level_2
+    tags: [misc]
+  Unit_hadd_int_varaint:
+    <<: *level_2
+    tags: [math]
+  Unit_rhadd_int_varaint:
+    <<: *level_2
+    tags: [math]
+  Unit_uhadd_int_varaint:
+    <<: *level_2
+    tags: [math]
+  Unit_urhadd_int_varaint:
+    <<: *level_2
+    tags: [math]
+  Unit_unsafeAtomicAdd:
+    <<: *level_2
+    tags: [atomics]
+  Unit_mbcnt:
+    <<: *level_2
+    tags: [bitops]
+  Unit_bitExtract:
+    <<: *level_2
+    tags: [bitops]
+  Unit_bitInsert:
+    <<: *level_2
+    tags: [bitops]
+  Unit_floatTM:
+    <<: *level_2
+    tags: [math]
+  Unit_abs_int64_Verification:
+    <<: *level_2
+    tags: [math]
+  Unit_pown_Verification:
+    <<: *level_2
+    tags: [math]
+  Unit_hmax_hmin_Tsts:
+    <<: *level_2
+    tags: [types]
+  Unit_hmax_hmin_Tsts_Negative:
+    <<: *level_2
+    tags: [types]
+  Unit_hmax_hmin_Tsts_With_Array:
+    <<: *level_2
+    tags: [types]
+  Unit_hipBfloat16:
+    <<: *level_2
+    tags: [types]
+  Unit_hipVectorTypes_test_on_host:
+    <<: *level_2
+    tags: [types]
   Unit_hipVectorTypes_test_on_device:
     <<: *level_2
     # SWDEV-444987 - Below tests fail in stress testing on 25/01/2023
     disabled: [amd_windows, amd_wsl]
-  Unit_hipTestHalf: *level_2
-  Unit_TestMathFuncComplex: *level_2
-  Unit_hipTestFMA: *level_2
-  Unit_hipTestNativeHalf: *level_2
+    tags: [types]
+  Unit_hipTestHalf:
+    <<: *level_2
+    tags: [types]
+  Unit_TestMathFuncComplex:
+    <<: *level_2
+    tags: [types]
+  Unit_hipTestFMA:
+    <<: *level_2
+    tags: [math]
+  Unit_hipTestNativeHalf:
+    <<: *level_2
+    tags: [types]
   Unit_Test_makechar_functionality:
     <<: *level_2
     # Rock_Linux_Failures_on_gfx94X
     disabled: [amd_linux]
-  Unit_bf16_basic: *level_2
-  Unit_bf16_conversion_to_integral_type: *level_2
-  Unit_bf162_basic: *level_2
-  Unit_bf16_operators_host: *level_2
-  Unit_bf162_operators_host: *level_2
-  Unit_bf16_bf162_convert_tests: *level_2
-  Unit_bf16_shfl: *level_2
-  Unit_bf162_shfl: *level_2
-  Unit_bf16_value_ops: *level_2
-  Unit_bf16_floor_ceil: *level_2
-  Unit_bf162_floor_ceil: *level_2
-  Unit_AtomicsWithRandomActiveLanesInWavefront_UniformInteger: *level_2
-  Unit_AtomicsWithRandomActiveLanesInWavefront_UniformFloat: *level_2
-  Unit_AtomicsWithRandomActiveLanesInWavefront_DivergentInteger: *level_2
-  Unit_AtomicsWithRandomActiveLanesInWavefront_DivergentFloat: *level_2
-  Unit_fp16_arith: *level_2
-  Unit_fp162_arith: *level_2
-  Unit_fp16_host_operations: *level_2
-  Unit_half_isnan_host: *level_2
-  Unit_half_abs_host: *level_2
-  Unit_half_min_max_host: *level_2
-  Unit_fp8_ocp_bool_host: *level_2
-  Unit_all_fp8_ocp_vector_cvt: *level_2
-  Unit_fp8_ocp_correctness: *level_2
-  Unit_fp8_ocp_vector_basic_conversions: *level_2
-  Unit_fp8_fnuz_bool_host: *level_2
-  Unit_all_fp8_fnuz_vector_cvt: *level_2
-  Unit_fp8_fnuz_correctness: *level_2
-  Unit_fp8_fnuz_vector_basic_conversions: *level_2
-  Unit__hip_cvt_bfloat16raw_to_e8m0: *level_2
-  Unit__hip_cvt_float_to_e8m0: *level_2
-  Unit__hip_cvt_double_to_e8m0: *level_2
-  Unit__hip_cvt_e8m0_to_bf16raw: *level_2
-  Unit_all_fp6_ocp_vector_cvt_interger_data: *level_2
-  Unit_all_fp6_ocp_vector_cvt_unsigned_interger_data: *level_2
-  Unit_all_fp6_ocp_vector_cvt_unsigned_integer_device: *level_2
-  Unit_all_fp6_ocp_vector_cvt_interger_data_device: *level_2
-  Unit_all_fp4_from_double: *level_2
-  Unit_all_fp4_from_double_device: *level_2
-  Unit_all_fp4_from_interger_data: *level_2
-  Unit_all_fp4_from__unsigned_integer_data: *level_2
-  Unit_all_fp4_from_integer_data_device: *level_2
-  Unit_all_fp4_from__unsigned_integer_data_device: *level_2
-  Unit_ocp_fp4_from_double_full_range_host: *level_2
-  Unit_ocp_fp4_from_double_full_range_device: *level_2
-  Unit_AtomicAdd_CoherentwithUnsafeflag: *level_2
-  Unit_AtomicAdd_Coherentwithoutflag: *level_2
-  Unit_AtomicAdd_Coherentwithnounsafeflag: *level_2
-  Unit_AtomicAdd_NonCoherentwithoutflag: *level_2
-  Unit_AtomicAdd_NonCoherentwithnounsafeflag: *level_2
-  Unit_AtomicAdd_NonCoherentwithUnsafeflag: *level_2
-  Unit_BuiltinAtomics_fmaxCoherentGlobalMem: *level_2
-  Unit_BuiltinAtomics_fmaxNonCoherentGlobalFlatMem: *level_2
-  Unit_BuiltinAtomicsRTC_fmaxCoherentGlobalMem: *level_2
-  Unit_BuiltinAtomicsRTC_fmaxNonCoherentGlobalFlatMem: *level_2
-  Unit_BuiltinAtomics_fminCoherentGlobalMem: *level_2
-  Unit_BuiltinAtomics_fminNonCoherentGlobalFlatMem: *level_2
-  Unit_BuiltinAtomicsRTC__fminCoherentGlobalMem: *level_2
-  Unit_BuiltinAtomicsRTC_fminNonCoherentGlobalFlatMem: *level_2
-  Unit_BuiltInAtomicAdd_CoherentGlobalMem: *level_2
-  Unit_BuiltInAtomicAdd_NonCoherentGlobalMem: *level_2
-  Unit_BuiltInAtomicAdd_CoherentGlobalMemWithRtc: *level_2
-  Unit_BuiltInAtomicAdd_NonCoherentGlobalMemWithRtc:
+    tags: [types]
+  Unit_bf16_basic:
     <<: *level_2
-    # Rock_Linux_Failures_on_gfx94X
-    disabled: [amd_linux]
-  Unit_unsafeAtomicAdd_CoherentRTCnounsafeatomicflag: *level_2
-  Unit_unsafeAtomicAdd_CoherentRTCunsafeatomicflag: *level_2
-  Unit_unsafeAtomicAdd_CoherentRTCwithoutflag: *level_2
-  Unit_unsafeAtomicAdd_NonCoherentRTCnounsafeatomicflag: *level_2
-  Unit_unsafeAtomicAdd_NonCoherentRTCunsafeatomicflag: *level_2
-  Unit_unsafeAtomicAdd_NonCoherentRTC: *level_2
-  Unit_unsafeAtomicAdd_CoherentwithUnsafeflag: *level_2
-  Unit_unsafeAtomicAdd_Coherentwithoutflag: *level_2
-  Unit_unsafeAtomicAdd_CoherentwithnoUnsafeflag: *level_2
-  Unit_unsafeAtomicAdd_NonCoherentwithoutflag: *level_2
-  Unit_unsafeAtomicAdd_NonCoherentnounsafeatomicsflag: *level_2
-  Unit_unsafeAtomicAdd_NonCoherentwithunsafeatomicsflag: *level_2
-  Unit_fp8_fnuz_compare_host_device: *level_2
-  Unit_fp8x2_fnuz_compare_host_device: *level_2
-  Unit_fp8x2_fnuz_split_compare: *level_2
-  Unit_fp8x4_fnuz_split_compare: *level_2
-  Unit_fp8_fnuz_bool_device: *level_2
-  Unit_all_fp8_fnuz_cvt: *level_2
-  Unit_fp8_fnuz_correctness_device: *level_2
-  Dynamic_Alloca: *level_2
-  Unit_fp8_ocp_compare_host_device: *level_2
-  Unit_fp8x2_ocp_compare_host_device: *level_2
-  Unit_fp8x2_ocp_split_compare: *level_2
-  Unit_fp8x4_ocp_split_compare: *level_2
-  Unit_fp8_ocp_bool_device: *level_2
-  Unit_all_fp8_ocp_cvt: *level_2
-  Unit_fp8_ocp_correctness_device: *level_2
-  Unit_hipTestHalfConstexpr_HostConstexpr: *level_2
-  Unit_hipTestHalfConstexpr_DeviceConstexpr: *level_2
+    tags: [types]
+  Unit_bf16_conversion_to_integral_type:
+    <<: *level_2
+    tags: [types]
+  Unit_bf162_basic:
+    <<: *level_2
+    tags: [types]
+  Unit_bf16_operators_host:
+    <<: *level_2
+    tags: [types]
+  Unit_bf162_operators_host:
+    <<: *level_2
+    tags: [types]
+  Unit_bf16_bf162_convert_tests:
+    <<: *level_2
+    tags: [types]
+  Unit_bf16_shfl:
+    <<: *level_2
+    tags: [types]
+  Unit_bf162_shfl:
+    <<: *level_2
+    tags: [types]
+  Unit_bf16_value_ops:
+    <<: *level_2
+    tags: [types]
+  Unit_bf16_floor_ceil:
+    <<: *level_2
+    tags: [types]
+  Unit_bf162_floor_ceil:
+    <<: *level_2
+    tags: [types]
+  Unit_AtomicsWithRandomActiveLanesInWavefront_UniformInteger:
+    <<: *level_2
+    tags: [atomics]
+  Unit_AtomicsWithRandomActiveLanesInWavefront_UniformFloat:
+    <<: *level_2
+    tags: [atomics]
+  Unit_AtomicsWithRandomActiveLanesInWavefront_DivergentInteger:
+    <<: *level_2
+    tags: [atomics]
+  Unit_AtomicsWithRandomActiveLanesInWavefront_DivergentFloat:
+    <<: *level_2
+    tags: [atomics]
+  Unit_fp16_arith:
+    <<: *level_2
+    tags: [types]
+  Unit_fp162_arith:
+    <<: *level_2
+    tags: [types]
+  Unit_fp16_host_operations:
+    <<: *level_2
+    tags: [types]
+  Unit_half_isnan_host:
+    <<: *level_2
+    tags: [types]
+  Unit_half_abs_host:
+    <<: *level_2
+    tags: [types]
+  Unit_half_min_max_host:
+    <<: *level_2
+    tags: [types]
+  Unit_fp8_ocp_bool_host:
+    <<: *level_2
+    tags: [types]
+  Unit_all_fp8_ocp_vector_cvt:
+    <<: *level_2
+    tags: [types]
+  Unit_fp8_ocp_correctness:
+    <<: *level_2
+    tags: [types]
+  Unit_fp8_ocp_vector_basic_conversions:
+    <<: *level_2
+    tags: [types]
+  Unit_fp8_fnuz_bool_host:
+    <<: *level_2
+    tags: [types]
+  Unit_all_fp8_fnuz_vector_cvt:
+    <<: *level_2
+    tags: [types]
+  Unit_fp8_fnuz_correctness:
+    <<: *level_2
+    tags: [types]
+  Unit_fp8_fnuz_vector_basic_conversions:
+    <<: *level_2
+    tags: [types]
+  Unit__hip_cvt_bfloat16raw_to_e8m0:
+    <<: *level_2
+    tags: [types]
+  Unit__hip_cvt_float_to_e8m0:
+    <<: *level_2
+    tags: [types]
+  Unit__hip_cvt_double_to_e8m0:
+    <<: *level_2
+    tags: [types]
+  Unit__hip_cvt_e8m0_to_bf16raw:
+    <<: *level_2
+    tags: [types]
+  Unit_all_fp6_ocp_vector_cvt_interger_data:
+    <<: *level_2
+    tags: [types]
+  Unit_all_fp6_ocp_vector_cvt_unsigned_interger_data:
+    <<: *level_2
+    tags: [types]
+  Unit_all_fp6_ocp_vector_cvt_unsigned_integer_device:
+    <<: *level_2
+    tags: [types]
+  Unit_all_fp6_ocp_vector_cvt_interger_data_device:
+    <<: *level_2
+    tags: [types]
+  Unit_all_fp4_from_double:
+    <<: *level_2
+    tags: [types]
+  Unit_all_fp4_from_double_device:
+    <<: *level_2
+    tags: [types]
+  Unit_all_fp4_from_interger_data:
+    <<: *level_2
+    tags: [types]
+  Unit_all_fp4_from__unsigned_integer_data:
+    <<: *level_2
+    tags: [types]
+  Unit_all_fp4_from_integer_data_device:
+    <<: *level_2
+    tags: [types]
+  Unit_all_fp4_from__unsigned_integer_data_device:
+    <<: *level_2
+    tags: [types]
+  Unit_ocp_fp4_from_double_full_range_host:
+    <<: *level_2
+    tags: [types]
+  Unit_ocp_fp4_from_double_full_range_device:
+    <<: *level_2
+    tags: [types]
+  Unit_AtomicAdd_CoherentwithUnsafeflag:
+    <<: *level_2
+    tags: [atomics]
+  Unit_AtomicAdd_Coherentwithoutflag:
+    <<: *level_2
+    tags: [atomics]
+  Unit_AtomicAdd_Coherentwithnounsafeflag:
+    <<: *level_2
+    tags: [atomics]
+  Unit_AtomicAdd_NonCoherentwithoutflag:
+    <<: *level_2
+    tags: [atomics]
+  Unit_AtomicAdd_NonCoherentwithnounsafeflag:
+    <<: *level_2
+    tags: [atomics]
+  Unit_AtomicAdd_NonCoherentwithUnsafeflag:
+    <<: *level_2
+    tags: [atomics]
+  Unit_BuiltinAtomics_fmaxCoherentGlobalMem:
+    <<: *level_2
+    tags: [math]
+  Unit_BuiltinAtomics_fmaxNonCoherentGlobalFlatMem:
+    <<: *level_2
+    tags: [math]
+  Unit_BuiltinAtomicsRTC_fmaxCoherentGlobalMem:
+    <<: *level_2
+    tags: [math]
+  Unit_BuiltinAtomicsRTC_fmaxNonCoherentGlobalFlatMem:
+    <<: *level_2
+    tags: [math]
+  Unit_BuiltinAtomics_fminCoherentGlobalMem:
+    <<: *level_2
+    tags: [math]
+  Unit_BuiltinAtomics_fminNonCoherentGlobalFlatMem:
+    <<: *level_2
+    tags: [math]
+  Unit_BuiltinAtomicsRTC__fminCoherentGlobalMem:
+    <<: *level_2
+    tags: [math]
+  Unit_BuiltinAtomicsRTC_fminNonCoherentGlobalFlatMem:
+    <<: *level_2
+    tags: [math]
+  Unit_unsafeAtomicAdd_CoherentRTCnounsafeatomicflag:
+    <<: *level_2
+    tags: [atomics]
+  Unit_unsafeAtomicAdd_CoherentRTCunsafeatomicflag:
+    <<: *level_2
+    tags: [atomics]
+  Unit_unsafeAtomicAdd_CoherentRTCwithoutflag:
+    <<: *level_2
+    tags: [atomics]
+  Unit_unsafeAtomicAdd_NonCoherentRTCnounsafeatomicflag:
+    <<: *level_2
+    tags: [atomics]
+  Unit_unsafeAtomicAdd_NonCoherentRTCunsafeatomicflag:
+    <<: *level_2
+    tags: [atomics]
+  Unit_unsafeAtomicAdd_NonCoherentRTC:
+    <<: *level_2
+    tags: [atomics]
+  Unit_unsafeAtomicAdd_CoherentwithUnsafeflag:
+    <<: *level_2
+    tags: [atomics]
+  Unit_unsafeAtomicAdd_Coherentwithoutflag:
+    <<: *level_2
+    tags: [atomics]
+  Unit_unsafeAtomicAdd_CoherentwithnoUnsafeflag:
+    <<: *level_2
+    tags: [atomics]
+  Unit_unsafeAtomicAdd_NonCoherentwithoutflag:
+    <<: *level_2
+    tags: [atomics]
+  Unit_unsafeAtomicAdd_NonCoherentnounsafeatomicsflag:
+    <<: *level_2
+    tags: [atomics]
+  Unit_unsafeAtomicAdd_NonCoherentwithunsafeatomicsflag:
+    <<: *level_2
+    tags: [atomics]
+  Unit_fp8_fnuz_compare_host_device:
+    <<: *level_2
+    tags: [types]
+  Unit_fp8x2_fnuz_compare_host_device:
+    <<: *level_2
+    tags: [types]
+  Unit_fp8x2_fnuz_split_compare:
+    <<: *level_2
+    tags: [types]
+  Unit_fp8x4_fnuz_split_compare:
+    <<: *level_2
+    tags: [types]
+  Unit_fp8_fnuz_bool_device:
+    <<: *level_2
+    tags: [types]
+  Unit_all_fp8_fnuz_cvt:
+    <<: *level_2
+    tags: [types]
+  Unit_fp8_fnuz_correctness_device:
+    <<: *level_2
+    tags: [types]
+  Dynamic_Alloca:
+    <<: *level_2
+    tags: [memory]
+  Unit_fp8_ocp_compare_host_device:
+    <<: *level_2
+    tags: [types]
+  Unit_fp8x2_ocp_compare_host_device:
+    <<: *level_2
+    tags: [types]
+  Unit_fp8x2_ocp_split_compare:
+    <<: *level_2
+    tags: [types]
+  Unit_fp8x4_ocp_split_compare:
+    <<: *level_2
+    tags: [types]
+  Unit_fp8_ocp_bool_device:
+    <<: *level_2
+    tags: [types]
+  Unit_all_fp8_ocp_cvt:
+    <<: *level_2
+    tags: [types]
+  Unit_fp8_ocp_correctness_device:
+    <<: *level_2
+    tags: [types]
+  Unit_hipTestHalfConstexpr_HostConstexpr:
+    <<: *level_2
+    tags: [types]
+  Unit_hipTestHalfConstexpr_DeviceConstexpr:
+    <<: *level_2
+    tags: [types]

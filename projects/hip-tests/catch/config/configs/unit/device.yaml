@@ -1,102 +1,181 @@
 ---
 device:
-  Unit_hipChooseDevice_ValidateDevId: *level_2
-  Unit_hipChooseDevice_NegTst: *level_2
-  Unit_hipDeviceComputeCapability_Negative: *level_2
-  Unit_hipDeviceComputeCapability_ValidateVersion: *level_2
-  Unit_hipDeviceGetByPCIBusId_Functional: *level_2
-  Unit_hipDeviceGetByPCIBusId_NegativeNullChk: *level_2
-  Unit_hipDeviceGetByPCIBusId_NegativeInputString: *level_2
-  Unit_hipDeviceGetByPCIBusId_WrongBusID: *level_2
-  Unit_hipDeviceGetLimit_NegTst: *level_2
-  Unit_hipDeviceGetLimit_CheckValidityOfOutputVal: *level_2
-  Unit_hipDeviceGetName_NegTst: *level_2
-  Unit_hipDeviceGetName_CheckPropName: *level_2
-  Unit_hipDeviceGetName_PartialFill: *level_2
+  Unit_hipChooseDevice_ValidateDevId:
+    <<: *level_2
+    tags: [query]
+  Unit_hipChooseDevice_NegTst:
+    <<: *level_2
+    tags: [query]
+  Unit_hipDeviceComputeCapability_Negative:
+    <<: *level_2
+    tags: [query]
+  Unit_hipDeviceComputeCapability_ValidateVersion:
+    <<: *level_2
+    tags: [query]
+  Unit_hipDeviceGetByPCIBusId_Functional:
+    <<: *level_2
+    tags: [query]
+  Unit_hipDeviceGetByPCIBusId_NegativeNullChk:
+    <<: *level_2
+    tags: [query]
+  Unit_hipDeviceGetByPCIBusId_NegativeInputString:
+    <<: *level_2
+    tags: [query]
+  Unit_hipDeviceGetByPCIBusId_WrongBusID:
+    <<: *level_2
+    tags: [query]
+  Unit_hipDeviceGetName_NegTst:
+    <<: *level_2
+    tags: [query]
+  Unit_hipDeviceGetName_CheckPropName:
+    <<: *level_2
+    tags: [query]
+  Unit_hipDeviceGetName_PartialFill:
+    <<: *level_2
+    tags: [query]
   Unit_hipDeviceName_gcnArchName_And_rocm_agent_enumerator:
     <<: *level_2
-    tags: [multigpu]
-  Unit_hipDeviceGetPCIBusId_Check_PciBusID_WithAttr: *level_2
+    tags: [multigpu, query]
+  Unit_hipDeviceGetPCIBusId_Check_PciBusID_WithAttr:
+    <<: *level_2
+    tags: [query]
   Unit_hipDeviceGetPCIBusId_Negative_PartialFill:
     <<: *level_2
     # (amd_windows) SWDEV-347670 - blocking tests have TDR, causing hangs
     disabled: [amd_windows, amd_wsl]
-  Unit_hipDeviceGetPCIBusId_NegTst: *level_2
-  Unit_hipDeviceSetCacheConfig_Positive_Basic: *level_2
-  Unit_hipDeviceGetCacheConfig_Positive_Default: *level_2
-  Unit_hipDeviceSynchronize_Positive_Empty_Streams: *level_2
+    tags: [query]
+  Unit_hipDeviceGetPCIBusId_NegTst:
+    <<: *level_2
+    tags: [query]
+  Unit_hipDeviceSetCacheConfig_Positive_Basic:
+    <<: *level_2
+    tags: [config]
+  Unit_hipDeviceGetCacheConfig_Positive_Default:
+    <<: *level_2
+    tags: [config]
+  Unit_hipDeviceSynchronize_Positive_Empty_Streams:
+    <<: *level_2
+    tags: [synchronization]
   Unit_hipDeviceSynchronize_Positive_Nullstream:
     <<: *level_2
     # Disabling tests which no longer behave the same on nvidia platform
     disabled: [nvidia_windows]
+    tags: [synchronization]
   Unit_hipDeviceSynchronize_Functional:
     <<: *level_2
     # Disabling tests which no longer behave the same on nvidia platform
     disabled: [nvidia_windows]
-  Unit_hipDeviceTotalMem_NegTst: *level_2
-  Unit_hipDeviceTotalMem_ValidateTotalMem: *level_2
+    tags: [synchronization]
+  Unit_hipDeviceTotalMem_NegTst:
+    <<: *level_2
+    tags: [query]
+  Unit_hipDeviceTotalMem_ValidateTotalMem:
+    <<: *level_2
+    tags: [query]
   Unit_hipDeviceTotalMem_NonSelectedDevice:
     <<: *level_2
-    tags: [multigpu]
-  Unit_hipGetDeviceAttribute_CheckAttrValues: *level_2
-  Unit_hipDeviceGetAttribute_NegTst: *level_2
+    tags: [multigpu, query]
+  Unit_hipGetDeviceAttribute_CheckAttrValues:
+    <<: *level_2
+    tags: [query]
+  Unit_hipDeviceGetAttribute_NegTst:
+    <<: *level_2
+    tags: [query]
   Print_Out_Attributes: *level_2
-  Unit_hipGetDeviceAttribute_hipDevAttrHostRegisterSupported: *level_2
-  Unit_hipGetDeviceCount_NegTst: *level_2
-  Unit_hipGetDeviceCount_HideDevices: *level_2
+  Unit_hipGetDeviceAttribute_hipDevAttrHostRegisterSupported:
+    <<: *level_2
+    tags: [query]
+  Unit_hipGetDeviceCount_NegTst:
+    <<: *level_2
+    tags: [query]
+  Unit_hipGetDeviceCount_HideDevices:
+    <<: *level_2
+    tags: [query]
   Print_Out_Device_Count: *level_2
   Unit_hipGetDeviceProperties_ArchPropertiesTst:
     <<: *level_2
-    tags: [multigpu]
-  Unit_hipGetDeviceProperties_NegTst: *level_2
+    tags: [multigpu, query]
+  Unit_hipGetDeviceProperties_NegTst:
+    <<: *level_2
+    tags: [query]
   Print_Out_Properties: *level_2
   Print_Out_Properties_6_0: *level_2
-  Unit_hipRuntimeGetVersion_Positive: *level_2
-  Unit_hipRuntimeGetVersion_Negative: *level_2
-  Unit_hipGetSetDeviceFlags_NullptrFlag: *level_2
-  Unit_hipGetSetDeviceFlags_ValidFlag: *level_2
-  Unit_hipGetSetDeviceFlags_SetThenGet: *level_2
-  Unit_hipGetSetDeviceFlags_Threaded: *level_2
+  Unit_hipRuntimeGetVersion_Positive:
+    <<: *level_2
+    tags: [init]
+  Unit_hipRuntimeGetVersion_Negative:
+    <<: *level_2
+    tags: [init]
+  Unit_hipGetSetDeviceFlags_NullptrFlag:
+    <<: *level_2
+    tags: [config]
+  Unit_hipGetSetDeviceFlags_ValidFlag:
+    <<: *level_2
+    tags: [config]
+  Unit_hipGetSetDeviceFlags_SetThenGet:
+    <<: *level_2
+    tags: [config]
+  Unit_hipGetSetDeviceFlags_Threaded:
+    <<: *level_2
+    tags: [config]
   Unit_hipGetDeviceFlags_Positive_Context:
     <<: *level_2
     # (amd_windows) SWDEV-347670 - blocking tests have TDR, causing hangs
     # (amd_wsl) Note: Windows disabled
     disabled: [amd_windows, amd_wsl]
-  Unit_hipGetSetDeviceFlags_InvalidFlag: *level_2
+    tags: [config]
+  Unit_hipGetSetDeviceFlags_InvalidFlag:
+    <<: *level_2
+    tags: [config]
   Unit_hipSetDevice_BasicSetGet:
     <<: *level_2
-    tags: [multigpu]
+    tags: [multigpu, query]
   Unit_hipGetSetDevice_MultiThreaded:
     <<: *level_2
-    tags: [multigpu]
+    tags: [multigpu, query]
   Unit_hipSetGetDevice_Positive_Threaded_Basic:
     <<: *level_2
-    tags: [multigpu]
-  Unit_hipSetGetDevice_Negative: *level_2
-  Unit_hipDeviceGet_Negative: *level_2
+    tags: [multigpu, query]
+  Unit_hipSetGetDevice_Negative:
+    <<: *level_2
+    tags: [query]
+  Unit_hipDeviceGet_Negative:
+    <<: *level_2
+    tags: [query]
   Unit_hipDeviceGetUuid_Positive:
     <<: *level_2
     # (amd_windows) Note: UUID returned empty on some windows nodes
     # (amd_wsl) Note: UUID returned empty on some windows nodes
     disabled: [amd_windows, amd_wsl]
-  Unit_hipDeviceGetUuid_Negative: *level_2
+    tags: [query]
+  Unit_hipDeviceGetUuid_Negative:
+    <<: *level_2
+    tags: [query]
   Unit_hipDeviceGetUuid_From_RocmInfo:
     <<: *level_2
-    tags: [multigpu]
+    tags: [multigpu, query]
   Unit_hipDeviceGetUuid_VerifyUuidFrm_hipGetDeviceProperties:
     <<: *level_2
-    tags: [multigpu]
+    tags: [multigpu, query]
   Unit_Uuid_FntlTstsFor_SetEnv_HIP_VISIBLE_DEVICES:
     <<: *level_2
     # Rock_Window_Failures_on_gfx1151
     disabled: [amd_windows]
+    tags: [query]
   Unit_UUID_setEnv_Thread:
     <<: *level_2
     # Rock_Window_Failures_on_gfx1151
     disabled: [amd_windows]
-  Unit_hipDeviceAPUCheck: *level_2
-  Unit_hipDeviceGetDefaultMemPool_Positive_Basic: *level_2
-  Unit_hipDeviceGetDefaultMemPool_Negative_Parameters: *level_2
+    tags: [query]
+  Unit_hipDeviceAPUCheck:
+    <<: *level_2
+    tags: [query]
+  Unit_hipDeviceGetDefaultMemPool_Positive_Basic:
+    <<: *level_2
+    tags: [query]
+  Unit_hipDeviceGetDefaultMemPool_Negative_Parameters:
+    <<: *level_2
+    tags: [query]
   Unit_hipDeviceCanAccessPeer_positive: *level_2
   Unit_hipDeviceCanAccessPeer_negative: *level_2
   Unit_hipDeviceEnableDisablePeerAccess_positive:
@@ -108,82 +187,154 @@ device:
   Unit_hipDeviceDisablePeerAccess_negative:
     <<: *level_2
     tags: [multigpu]
-  Unit_hipExtGetLinkTypeAndHopCount_Positive_Basic: *level_2
-  Unit_hipExtGetLinkTypeAndHopCount_Negative_Parameters: *level_2
-  Unit_hipDeviceSetLimit_SetGet:
+  Unit_hipExtGetLinkTypeAndHopCount_Positive_Basic:
     <<: *level_2
-    tags: [multigpu]
-  Unit_hipDeviceSetLimit_Positive_StackSize: *level_2
-  Unit_hipDeviceSetLimit_Positive_PrintfFifoSize: *level_2
-  Unit_hipDeviceSetLimit_Negative_PrintfFifoSize: *level_2
-  Unit_hipDeviceSetLimit_Positive_MallocHeapSize: *level_2
-  Unit_hipDeviceSetLimit_Negative_MallocHeapSize: *level_2
+    tags: [query]
+  Unit_hipExtGetLinkTypeAndHopCount_Negative_Parameters:
+    <<: *level_2
+    tags: [query]
+  Unit_hipDeviceSetLimit_Positive_StackSize:
+    <<: *level_2
+    tags: [config]
+  Unit_hipDeviceSetLimit_Positive_PrintfFifoSize:
+    <<: *level_2
+    tags: [config]
+  Unit_hipDeviceSetLimit_Negative_PrintfFifoSize:
+    <<: *level_2
+    tags: [config]
+  Unit_hipDeviceSetLimit_Positive_MallocHeapSize:
+    <<: *level_2
+    tags: [config]
+  Unit_hipDeviceSetLimit_Negative_MallocHeapSize:
+    <<: *level_2
+    tags: [config]
   Unit_hipDeviceSetLimit_Negative_Parameters:
     <<: *level_2
     # Below 2 tests are disabled due to defect EXSWHTEC-342
     disabled: [nvidia_windows]
+    tags: [config]
   Unit_hipDeviceGetLimit_Negative_Parameters:
     <<: *level_2
     # Below 2 tests are disabled due to defect EXSWHTEC-342
     disabled: [nvidia_windows]
-  Unit_hipDeviceGetSetLimit_Scratch_Negative: *level_2
-  Unit_hipDeviceGetSetLimit_Scratch_SetMinAndMaxAsCurrent: *level_2
-  Unit_hipDeviceGetSetLimit_Scratch_DecreaseIncrease: *level_2
-  Unit_hipDeviceGetSetLimit_Scratch_SetBeforeKernelLaunch: *level_2
+    tags: [config]
+  Unit_hipDeviceGetSetLimit_Scratch_Negative:
+    <<: *level_2
+    tags: [config]
+  Unit_hipDeviceGetSetLimit_Scratch_SetMinAndMaxAsCurrent:
+    <<: *level_2
+    tags: [config]
+  Unit_hipDeviceGetSetLimit_Scratch_DecreaseIncrease:
+    <<: *level_2
+    tags: [config]
+  Unit_hipDeviceGetSetLimit_Scratch_SetBeforeKernelLaunch:
+    <<: *level_2
+    tags: [config]
   Unit_hipDeviceGetSetLimit_Scratch_MultiDevice:
     <<: *level_2
-    tags: [multigpu]
-  Unit_hipDeviceGetSetLimit_Scratch_InThread: *level_2
-  Unit_hipDeviceGetSetLimit_Scratch_InChildProcess: *level_2
-  Unit_hipDeviceGetSetLimit_Scratch_SetGetThreads: *level_2
-  Unit_hipDeviceSetSharedMemConfig_Positive_Basic: *level_2
-  Unit_hipDeviceSetSharedMemConfig_Negative_Parameters: *level_2
-  Unit_hipDeviceGetSharedMemConfig_Positive_Default: *level_2
+    tags: [config, multigpu]
+  Unit_hipDeviceGetSetLimit_Scratch_InThread:
+    <<: *level_2
+    tags: [config]
+  Unit_hipDeviceGetSetLimit_Scratch_InChildProcess:
+    <<: *level_2
+    tags: [config]
+  Unit_hipDeviceGetSetLimit_Scratch_SetGetThreads:
+    <<: *level_2
+    tags: [config]
+  Unit_hipDeviceSetSharedMemConfig_Positive_Basic:
+    <<: *level_2
+    tags: [config]
+  Unit_hipDeviceSetSharedMemConfig_Negative_Parameters:
+    <<: *level_2
+    tags: [config]
+  Unit_hipDeviceGetSharedMemConfig_Positive_Default:
+    <<: *level_2
+    tags: [config]
   Unit_hipDeviceGetSharedMemConfig_Positive_Basic:
     <<: *level_2
     # (amd_windows) SWDEV-347670 - blocking tests have TDR, causing hangs
     # (amd_wsl) Note: Linux disabled
     disabled: [amd_windows, amd_wsl]
+    tags: [config]
   Unit_hipDeviceGetSharedMemConfig_Positive_Threaded:
     <<: *level_2
     # (amd_windows) SWDEV-347670 - blocking tests have TDR, causing hangs
     # (amd_wsl) Note: Linux disabled
     disabled: [amd_windows, amd_wsl]
-  Unit_hipDeviceGetSharedMemConfig_Negative_Parameters: *level_2
+    tags: [config]
+  Unit_hipDeviceGetSharedMemConfig_Negative_Parameters:
+    <<: *level_2
+    tags: [config]
   Unit_hipDeviceReset_Positive_Basic:
     <<: *level_2
     # (amd_wsl) Note: Windows disabled
     # (nvidia_windows) Disabling tests which no longer behave the same on nvidia platform
     disabled: [amd_wsl, nvidia_windows]
+    tags: [synchronization]
   Unit_hipDeviceReset_Positive_Threaded:
     <<: *level_2
     # (amd_wsl) Note: Windows disabled
     # (nvidia_windows) Disabling tests which no longer behave the same on nvidia platform
     disabled: [amd_wsl, nvidia_windows]
-  Unit_hipDeviceSetMemPool_Positive_Basic: *level_2
-  Unit_hipDeviceSetMemPool_Negative_Parameters: *level_2
-  Unit_hipDeviceGetMemPool_Positive_Default: *level_2
-  Unit_hipDeviceGetMemPool_Positive_Basic: *level_2
-  Unit_hipDeviceGetMemPool_Positive_Threaded: *level_2
-  Unit_hipDeviceGetMemPool_Negative_Parameters: *level_2
-  Unit_hipInit_Positive: *level_2
+    tags: [synchronization]
+  Unit_hipDeviceSetMemPool_Positive_Basic:
+    <<: *level_2
+    tags: [config]
+  Unit_hipDeviceSetMemPool_Negative_Parameters:
+    <<: *level_2
+    tags: [config]
+  Unit_hipDeviceGetMemPool_Positive_Default:
+    <<: *level_2
+    tags: [config]
+  Unit_hipDeviceGetMemPool_Positive_Basic:
+    <<: *level_2
+    tags: [config]
+  Unit_hipDeviceGetMemPool_Positive_Threaded:
+    <<: *level_2
+    tags: [config]
+  Unit_hipDeviceGetMemPool_Negative_Parameters:
+    <<: *level_2
+    tags: [config]
+  Unit_hipInit_Positive:
+    <<: *level_2
+    tags: [init]
   Unit_hipInit_Negative:
     <<: *level_2
     # (amd_windows) SWDEV-347670 - blocking tests have TDR, causing hangs
     # (amd_wsl) Note: Windows disabled
     disabled: [amd_windows, amd_wsl]
-  Unit_hipDriverGetVersion_Positive: *level_2
-  Unit_hipDriverGetVersion_Negative: *level_2
-  Unit_hipSetValidDevices_Negative: *level_2
-  Unit_hipSetValidDevices_Negative_Length_Lessthan_DeviceArrSize: *level_2
+    tags: [init]
+  Unit_hipDriverGetVersion_Positive:
+    <<: *level_2
+    tags: [init]
+  Unit_hipDriverGetVersion_Negative:
+    <<: *level_2
+    tags: [init]
+  Unit_hipSetValidDevices_Negative:
+    <<: *level_2
+    tags: [config]
+  Unit_hipSetValidDevices_Negative_Length_Lessthan_DeviceArrSize:
+    <<: *level_2
+    tags: [config]
   Unit_hipSetValidDevices_Positive_Basic:
     <<: *level_2
-    tags: [multigpu]
-  Unit_hipSetValidDevices_WithAllDevicesInSystem: *level_2
-  Unit_hipSetValidDevices_Positive_Cases: *level_2
-  Unit_hipSetValidDevices_MultiProcess: *level_2
-  Unit_hipSetValidDevices_MultiThread: *level_2
-  Unit_hipSetValidDevices_with_hipMemcpyPeer: *level_2
+    tags: [config, multigpu]
+  Unit_hipSetValidDevices_WithAllDevicesInSystem:
+    <<: *level_2
+    tags: [config]
+  Unit_hipSetValidDevices_Positive_Cases:
+    <<: *level_2
+    tags: [config]
+  Unit_hipSetValidDevices_MultiProcess:
+    <<: *level_2
+    tags: [config]
+  Unit_hipSetValidDevices_MultiThread:
+    <<: *level_2
+    tags: [config]
+  Unit_hipSetValidDevices_with_hipMemcpyPeer:
+    <<: *level_2
+    tags: [config]
   Unit_hipGetProcAddress_ValidateDeviceApis: *level_2
   Unit_hipGetProcAddress_PeerDeviceAccessAPIs:
     <<: *level_2

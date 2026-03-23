@@ -43,31 +43,31 @@
  *
  */
 
-#include <stdint.h>
+#include "rocm_smi_test/functional/mutual_exclusion.h"
+
 #include <stddef.h>
+#include <stdint.h>
 
 #include <iostream>
-#include <string>
 #include <map>
+#include <string>
 
 #include "gtest/gtest.h"
 #include "rocm_smi/rocm_smi.h"
-#include "rocm_smi_test/functional/mutual_exclusion.h"
 #include "rocm_smi_test/test_common.h"
-
 
 TestMutualExclusion::TestMutualExclusion() : TestBase() {
   set_title("Mutual Exclusion Test");
-  set_description("Verify that RSMI only allows 1 process at a time"
-    " to access RSMI resources (primarily sysfs files). This test has one "
-    "process that obtains the mutex that ensures only 1 process accesses a "
+  set_description(
+      "Verify that RSMI only allows 1 process at a time"
+      " to access RSMI resources (primarily sysfs files). This test has one "
+      "process that obtains the mutex that ensures only 1 process accesses a "
       "device's sysfs files at a time, and another process that attempts "
       "to access the device's sysfs files. The second process should fail "
       "in these attempts.");
 }
 
-TestMutualExclusion::~TestMutualExclusion(void) {
-}
+TestMutualExclusion::~TestMutualExclusion(void) {}
 
 extern rsmi_status_t rsmi_test_sleep(uint32_t dv_ind, uint32_t seconds);
 
@@ -99,7 +99,7 @@ void TestMutualExclusion::SetUp(void) {
     sleep(2);  // Let both processes get through rsmi_init
   } else {
     sleep(1);  // Let the sleeper process get through rsmi_init() before
-              // this one goes, so it doesn't fail.
+               // this one goes, so it doesn't fail.
     ret = rsmi_init(RSMI_INIT_FLAG_RESRV_TEST1);
     if (ret != RSMI_STATUS_SUCCESS) {
       setup_failed_ = true;
@@ -125,15 +125,11 @@ void TestMutualExclusion::SetUp(void) {
 }
 
 void TestMutualExclusion::DisplayTestInfo(void) {
-  IF_VERB(STANDARD) {
-    TestBase::DisplayTestInfo();
-  }
+  IF_VERB(STANDARD) { TestBase::DisplayTestInfo(); }
 }
 
 void TestMutualExclusion::DisplayResults(void) const {
-  IF_VERB(STANDARD) {
-    TestBase::DisplayResults();
-  }
+  IF_VERB(STANDARD) { TestBase::DisplayResults(); }
   return;
 }
 
@@ -143,8 +139,7 @@ void TestMutualExclusion::Close() {
   TestBase::Close();
 }
 
-extern rsmi_status_t
-rsmi_test_sleep(uint32_t dv_ind, uint32_t seconds);
+extern rsmi_status_t rsmi_test_sleep(uint32_t dv_ind, uint32_t seconds);
 
 void TestMutualExclusion::Run(void) {
   rsmi_status_t ret;
@@ -156,14 +151,11 @@ void TestMutualExclusion::Run(void) {
 
   if (sleeper_process_) {
     IF_VERB(STANDARD) {
-      std::cout << "MUTEX_HOLDER process: started sleeping for 10 seconds..." <<
-                                                                     std::endl;
+      std::cout << "MUTEX_HOLDER process: started sleeping for 10 seconds..." << std::endl;
     }
     ret = rsmi_test_sleep(0, 10);
     ASSERT_EQ(ret, RSMI_STATUS_SUCCESS);
-    IF_VERB(STANDARD) {
-      std::cout << "MUTEX_HOLDER process: Sleep process woke up." << std::endl;
-    }
+    IF_VERB(STANDARD) { std::cout << "MUTEX_HOLDER process: Sleep process woke up." << std::endl; }
     pid_t cpid = wait(nullptr);
     ASSERT_EQ(cpid, child_);
   } else {
@@ -173,8 +165,9 @@ void TestMutualExclusion::Run(void) {
     TestBase::Run();
     IF_VERB(STANDARD) {
       std::cout << "TESTER process: verifing that all rsmi_dev_* functions "
-                    "return RSMI_STATUS_BUSY because MUTEX_HOLDER process "
-                                               "holds the mutex" << std::endl;
+                   "return RSMI_STATUS_BUSY because MUTEX_HOLDER process "
+                   "holds the mutex"
+                << std::endl;
     }
     // Try all the device related rsmi calls. They should all fail with
     // RSMI_STATUS_BUSY
@@ -193,13 +186,13 @@ void TestMutualExclusion::Run(void) {
     rsmi_ras_err_state_t dmy_ras_err_st;
 
     // This can be replaced with ASSERT_EQ() once env. stabilizes
-#define CHECK_RET(A, B) { \
-  if ((A) != (B)) { \
-    std::cout << "Expected return value of " << B << \
-                               " but got " << A << std::endl; \
-    std::cout << "at " << __FILE__ << ":" << __LINE__ << std::endl; \
-  } \
-}
+#define CHECK_RET(A, B)                                                               \
+  {                                                                                   \
+    if ((A) != (B)) {                                                                 \
+      std::cout << "Expected return value of " << B << " but got " << A << std::endl; \
+      std::cout << "at " << __FILE__ << ":" << __LINE__ << std::endl;                 \
+    }                                                                                 \
+  }
     ret = rsmi_dev_id_get(0, &dmy_ui16);
     CHECK_RET(ret, RSMI_STATUS_BUSY);
     ret = rsmi_dev_vendor_id_get(0, &dmy_ui16);
@@ -317,7 +310,8 @@ void TestMutualExclusion::Run(void) {
 
     IF_VERB(STANDARD) {
       std::cout << "TESTER process: Finished verifying that all "
-                "rsmi_dev_* functions returned RSMI_STATUS_BUSY" << std::endl;
+                   "rsmi_dev_* functions returned RSMI_STATUS_BUSY"
+                << std::endl;
     }
     exit(0);
   }

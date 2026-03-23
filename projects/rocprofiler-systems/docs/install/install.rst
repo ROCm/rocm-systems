@@ -144,7 +144,6 @@ Optional third-party packages
    :header: "Third-Party Library", "CMake Enable Option"
    :widths: 15, 45
 
-   "ROCm", "``ROCPROFSYS_USE_ROCM`` (default: ON)"
    "PAPI", "``ROCPROFSYS_USE_PAPI`` (default: ON)"
    "MPI", "``ROCPROFSYS_USE_MPI`` (default: OFF)"
    "MPI (header-only)", "``ROCPROFSYS_USE_MPI_HEADERS`` (default: ON)"
@@ -195,9 +194,9 @@ Building and installing ROCm Systems Profiler
 ---------------------------------------------
 
 ROCm Systems Profiler has CMake configuration options for MPI support (``ROCPROFSYS_USE_MPI`` or
-``ROCPROFSYS_USE_MPI_HEADERS``), ROCm tracing and sampling (``ROCPROFSYS_USE_ROCM``),
-OpenMP-Tools (``ROCPROFSYS_USE_OMPT``), hardware counters via PAPI (``ROCPROFSYS_USE_PAPI``),
-among other features.
+``ROCPROFSYS_USE_MPI_HEADERS``), OpenMP-Tools (``ROCPROFSYS_USE_OMPT``),
+hardware counters via PAPI (``ROCPROFSYS_USE_PAPI``), among other features.
+ROCm support is always enabled.
 Various additional features can be enabled via the
 ``TIMEMORY_USE_*`` `CMake options <https://timemory.readthedocs.io/en/develop/installation.html#cmake-options>`_.
 Any ``ROCPROFSYS_USE_<VAL>`` option which has a corresponding ``TIMEMORY_USE_<VAL>``
@@ -213,7 +212,6 @@ in `the Perfetto UI <https://ui.perfetto.dev>`_.
    cmake                                                 \
        -B rocprof-sys-build                              \
        -D CMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems  \
-       -D ROCPROFSYS_USE_ROCM=ON                         \
        -D ROCPROFSYS_USE_PYTHON=ON                       \
        -D ROCPROFSYS_USE_OMPT=ON                         \
        -D ROCPROFSYS_USE_MPI_HEADERS=ON                  \
@@ -303,23 +301,9 @@ and ``ROCPROFSYS_PYTHON_ROOT_DIRS`` lists must
 be the same size.
 
 .. code-block:: shell
-   
+
    cmake --preset release -D ROCPROFSYS_PYTHON_ROOT_DIRS="/usr/bin;/usr/bin" -D ROCPROFSYS_PYTHON_VERSIONS="3.10;3.12"
 
-
-ROCm Systems Profiler without ROCm
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-To build ROCm Systems Profiler for use on systems without a GPU or the ROCm runtime, disable ROCm
-support using the CMake configuration option ``ROCPROFSYS_USE_ROCM=OFF``. See :ref:`cmake-options`
-for more information.
-
-Alternatively, use the provided build script with the appropriate options. See :ref:`build-script`.
-For example, to build without ROCm support and create a STGZ installer, use the following command:
-
-.. code-block:: shell
-
-   ./scripts/build-release.sh --core +python --generators STGZ
 
 .. _post-installation-steps:
 

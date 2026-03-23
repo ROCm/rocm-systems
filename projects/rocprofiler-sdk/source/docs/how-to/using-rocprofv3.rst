@@ -170,7 +170,7 @@ The following table lists the commonly used ``rocprofv3`` command-line options c
    * - Display
      - | ``-L`` [BOOL] \| ``--list-avail`` [BOOL] |br| |br|
        | ``--group-by-queue`` [BOOL]
-     - | Lists the PC sampling configurations and metrics available in the counter_defs.yaml file for counter collection. In earlier ``rocprof`` versions, this was known as ``--list-basic``, ``--list-derived``, and ``--list-counters``. |br| |br|
+     - | Lists the PC sampling configurations and metrics available in the config.yaml file for counter collection. In earlier ``rocprof`` versions, this was known as ``--list-basic``, ``--list-derived``, and ``--list-counters``. |br| |br|
        | For displaying the HSA Queues that kernels and memory copy operations are submitted to rather than the default grouping of HIP Streams for perfetto.
 
    * - Other
@@ -981,7 +981,7 @@ Here is a sample input.json file for specifying counters for collection along wi
             "pmc": ["SQ_WAVES", "GRBM_COUNT", "GRBM_GUI_ACTIVE"]
          },
          {
-            "pmc": ["FETCH_SIZE", "WRITE_SIZE"],
+            "pmc": ["FETCH_SIZE", "SQ_WAVE_CYCLES"],
             "kernel_include_regex": ".*_kernel",
             "kernel_exclude_regex": "multiply",
             "kernel_iteration_range": "[1-2],[3-4]",
@@ -1001,7 +1001,7 @@ Here is a sample input.yaml file for counter collection:
 
   jobs:
     - pmc: ["SQ_WAVES", "GRBM_COUNT", "GRBM_GUI_ACTIVE"]
-    - pmc: ["FETCH_SIZE", "WRITE_SIZE"]
+    - pmc: ["SQ_WAVE_CYCLES", "WRITE_SIZE"]
       kernel_include_regex: ".*_kernel"
       kernel_exclude_regex: "multiply"
       kernel_iteration_range: "[1-2],[3-4]"
@@ -1044,11 +1044,11 @@ You can specify multiple ``--pmc`` flags to define different counter groups. Eac
 
 .. code-block:: shell
 
-   rocprofv3 --pmc SQ_WAVES FETCH_SIZE --pmc GRBM_COUNT GRBM_GUI_ACTIVE -- <application_path>
+   rocprofv3 --pmc SQ_WAVES SQ_WAVE_CYCLES --pmc GRBM_COUNT GRBM_GUI_ACTIVE -- <application_path>
 
 This command creates two profiling passes:
 
-- Pass 1: Collects ``SQ_WAVES`` and ``FETCH_SIZE``
+- Pass 1: Collects ``SQ_WAVES`` and ``SQ_WAVE_CYCLES``
 - Pass 2: Collects ``GRBM_COUNT`` and ``GRBM_GUI_ACTIVE``
 
 **Combining CLI and input file**
@@ -1063,14 +1063,14 @@ If ``input.txt`` contains:
 
 .. code-block:: text
 
-   pmc: FETCH_SIZE WRITE_SIZE
+   pmc: FETCH_SIZE SQ_WAVES
    pmc: GRBM_GUI_ACTIVE
 
 This creates four profiling passes:
 
 - Pass 1: ``GRBM_COUNT`` (from CLI)
 - Pass 2: ``SQ_WAVES`` (from CLI)
-- Pass 3: ``FETCH_SIZE WRITE_SIZE`` (from input file)
+- Pass 3: ``FETCH_SIZE SQ_WAVE_CYCLES`` (from input file)
 - Pass 4: ``GRBM_GUI_ACTIVE`` (from input file)
 
 **Output organization**
@@ -1871,14 +1871,6 @@ While typically used from command line, it can be scripted:
     # Combine with custom ROCm root
     rocprofv3 --rocm-root /opt/rocm-6.0 --sdk-version 2.2.0 --sys-trace -- ./app
 
-**Environment integration:**
-
-.. code-block:: bash
-
-    # Use environment variable for version
-    export ROCPROF_SDK_VERSION="2.1.3"
-    rocprofv3 --sdk-version "$ROCPROF_SDK_VERSION" --kernel-trace -- ./app
-
 Agent index
 ++++++++++++++
 
@@ -2125,7 +2117,7 @@ Output prefix keys are useful in multiple use cases but are most helpful when de
    * - ``%nid%``
      - ``%rank%`` if possible, otherwise ``%pid%``
    * - ``%launch_time%``
-     - Launch date and/or time according to ``ROCPROF_TIME_FORMAT``
+     - Launch date and/or time
    * - ``%env{NAME}%``
      - Value of ``NAME`` environment variable (``getenv(NAME)``)
    * - ``$env{NAME}``

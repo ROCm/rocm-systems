@@ -1,20 +1,7 @@
 /*
-   Copyright (c) 2021 - 2022 Advanced Micro Devices, Inc. All rights reserved.
-   Permission is hereby granted, free of charge, to any person obtaining a copy
-   of this software and associated documentation files (the "Software"), to deal
-   in the Software without restriction, including without limitation the rights
-   to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-   copies of the Software, and to permit persons to whom the Software is
-   furnished to do so, subject to the following conditions:
-   The above copyright notice and this permission notice shall be included in
-   all copies or substantial portions of the Software.
-   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-   AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-   THE SOFTWARE.
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
  */
 
 /* Test Case Description:
@@ -101,7 +88,7 @@ bool static TstCoherency(int* Ptr, bool HmmMem) {
    behavior is observed or not with memory allocated using malloc()*/
 // The following test is failing on Nvidia platform hence disabled it for now
 #if HT_AMD
-TEST_CASE("Unit_malloc_CoherentTst") {
+HIP_TEST_CASE(Unit_malloc_CoherentTst) {
   CHECK_PCIE_ATOMIC_SUPPORT
   hipDeviceProp_t prop;
   HIPCHECK(hipGetDeviceProperties(&prop, 0));
@@ -132,7 +119,7 @@ TEST_CASE("Unit_malloc_CoherentTst") {
    behavior is observed or not with memory allocated using malloc()*/
 // The following test is failing on Nvidia platform hence disabling it for now
 #if HT_AMD
-TEST_CASE("Unit_malloc_CoherentTstWthAdvise") {
+HIP_TEST_CASE(Unit_malloc_CoherentTstWthAdvise) {
   hipDeviceProp_t prop;
   HIPCHECK(hipGetDeviceProperties(&prop, 0));
   char* p = NULL;
@@ -164,7 +151,7 @@ TEST_CASE("Unit_malloc_CoherentTstWthAdvise") {
    behavior is observed or not with memory allocated using mmap()*/
 // The following test is failing on Nvidia platform hence disabling it for now
 #if HT_AMD
-TEST_CASE("Unit_mmap_CoherentTst") {
+HIP_TEST_CASE(Unit_mmap_CoherentTst) {
   CHECK_PCIE_ATOMIC_SUPPORT
   hipDeviceProp_t prop;
   HIPCHECK(hipGetDeviceProperties(&prop, 0));
@@ -198,7 +185,7 @@ TEST_CASE("Unit_mmap_CoherentTst") {
    behavior is observed or not with memory allocated using mmap()*/
 // The following test is failing on Nvidia platform hence disabling it for now
 #if HT_AMD
-TEST_CASE("Unit_mmap_CoherentTstWthAdvise") {
+HIP_TEST_CASE(Unit_mmap_CoherentTstWthAdvise) {
   hipDeviceProp_t prop;
   HIPCHECK(hipGetDeviceProperties(&prop, 0));
   char* p = NULL;
@@ -242,7 +229,7 @@ TEST_CASE("Unit_mmap_CoherentTstWthAdvise") {
    accessible when HIP_HOST_COHERENT is set to 0*/
 // The following test is AMD specific test hence skipping for Nvidia
 #if HT_AMD
-TEST_CASE("Unit_hipHostMalloc_WthEnv0Flg1") {
+HIP_TEST_CASE(Unit_hipHostMalloc_WthEnv0Flg1) {
   if ((setenv("HIP_HOST_COHERENT", "0", 1)) != 0) {
     WARN("Unable to turn on HIP_HOST_COHERENT, hence terminating the Test case!");
     REQUIRE(false);
@@ -282,7 +269,7 @@ TEST_CASE("Unit_hipHostMalloc_WthEnv0Flg1") {
    accessible when HIP_HOST_COHERENT is set to 0*/
 // The following test is AMD specific test hence skipping for Nvidia
 #if HT_AMD
-TEST_CASE("Unit_hipHostMalloc_WthEnv0Flg2") {
+HIP_TEST_CASE(Unit_hipHostMalloc_WthEnv0Flg2) {
   if ((setenv("HIP_HOST_COHERENT", "0", 1)) != 0) {
     WARN("Unable to turn on HIP_HOST_COHERENT, hence terminating the Test case!");
     REQUIRE(false);
@@ -322,7 +309,7 @@ TEST_CASE("Unit_hipHostMalloc_WthEnv0Flg2") {
    accessible when HIP_HOST_COHERENT is set to 0*/
 // The following test is AMD specific test hence skipping for Nvidia
 #if HT_AMD
-TEST_CASE("Unit_hipHostMalloc_WthEnv0Flg3") {
+HIP_TEST_CASE(Unit_hipHostMalloc_WthEnv0Flg3) {
   if ((setenv("HIP_HOST_COHERENT", "0", 1)) != 0) {
     WARN("Unable to turn on HIP_HOST_COHERENT, hence terminating the Test case!");
     REQUIRE(false);
@@ -362,7 +349,7 @@ TEST_CASE("Unit_hipHostMalloc_WthEnv0Flg3") {
    accessible when HIP_HOST_COHERENT is set to 0*/
 // The following test is AMD specific test hence skipping for Nvidia
 #if HT_AMD
-TEST_CASE("Unit_hipHostMalloc_WthEnv0Flg4") {
+HIP_TEST_CASE(Unit_hipHostMalloc_WthEnv0Flg4) {
   if ((setenv("HIP_HOST_COHERENT", "0", 1)) != 0) {
     WARN("Unable to turn on HIP_HOST_COHERENT, hence terminating the Test case!");
     REQUIRE(false);
@@ -403,7 +390,7 @@ TEST_CASE("Unit_hipHostMalloc_WthEnv0Flg4") {
    fine grain behavior when HIP_HOST_COHERENT is set to 1*/
 // The following test is AMD specific test hence skipping for Nvidia
 #if HT_AMD
-TEST_CASE("Unit_hipHostMalloc_WthEnv1") {
+HIP_TEST_CASE(Unit_hipHostMalloc_WthEnv1) {
   if ((setenv("HIP_HOST_COHERENT", "1", 1)) != 0) {
     WARN("Unable to turn on HIP_HOST_COHERENT, hence terminating the Test case!");
     REQUIRE(false);
@@ -432,7 +419,7 @@ TEST_CASE("Unit_hipHostMalloc_WthEnv1") {
    fine grain behavior when HIP_HOST_COHERENT is set to 1*/
 // The following test is AMD specific test hence skipping for Nvidia
 #if HT_AMD
-TEST_CASE("Unit_hipHostMalloc_WthEnv1Flg1") {
+HIP_TEST_CASE(Unit_hipHostMalloc_WthEnv1Flg1) {
   if ((setenv("HIP_HOST_COHERENT", "1", 1)) != 0) {
     WARN("Unable to turn on HIP_HOST_COHERENT, hence terminating the Test case!");
     REQUIRE(false);
@@ -460,7 +447,7 @@ TEST_CASE("Unit_hipHostMalloc_WthEnv1Flg1") {
    fine grain behavior when HIP_HOST_COHERENT is set to 1*/
 // The following test is AMD specific test hence skipping for Nvidia
 #if HT_AMD
-TEST_CASE("Unit_hipHostMalloc_WthEnv1Flg2") {
+HIP_TEST_CASE(Unit_hipHostMalloc_WthEnv1Flg2) {
   if ((setenv("HIP_HOST_COHERENT", "1", 1)) != 0) {
     WARN("Unable to turn on HIP_HOST_COHERENT, hence terminating the Test case!");
     REQUIRE(false);
@@ -488,7 +475,7 @@ TEST_CASE("Unit_hipHostMalloc_WthEnv1Flg2") {
    fine grain behavior when HIP_HOST_COHERENT is set to 1*/
 // The following test is AMD specific test hence skipping for Nvidia
 #if HT_AMD
-TEST_CASE("Unit_hipHostMalloc_WthEnv1Flg3") {
+HIP_TEST_CASE(Unit_hipHostMalloc_WthEnv1Flg3) {
   if ((setenv("HIP_HOST_COHERENT", "1", 1)) != 0) {
     WARN("Unable to turn on HIP_HOST_COHERENT, hence terminating the Test case!");
     REQUIRE(false);

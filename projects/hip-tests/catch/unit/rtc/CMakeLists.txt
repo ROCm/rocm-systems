@@ -1,3 +1,7 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
 # Common Tests - Test independent of all platforms
 set(TEST_SRC
     saxpy.cc
@@ -17,6 +21,7 @@ set(AMD_TEST_SRC
     shfl.cc
     shfl_sync.cc
     rtc_reduce.cc
+    rtc_coop.cc
     stdheaders.cc
     hiprtc_MathConstants_HeaderTst.cc
     hiprtc_VectorTypes_HeaderTst.cc
@@ -37,12 +42,18 @@ add_custom_target(copyRtcHeaders ALL
   ${CMAKE_CURRENT_SOURCE_DIR}/headers
   ${CMAKE_CURRENT_BINARY_DIR}/headers)
 
+add_custom_target(copyTstJson ALL
+  COMMAND ${CMAKE_COMMAND} -E copy
+  ${CMAKE_CURRENT_SOURCE_DIR}/RtcConfig.json
+  ${CMAKE_CURRENT_BINARY_DIR}/RtcConfig.json)
+
 file(GLOB INSTALL_HEADER_FILES "./headers/*")
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_HEADER_FILES ${INSTALL_HEADER_FILES})
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/saxpy.h)
+set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/RtcConfig.json)
 
 if(UNIX)
-   set(AMD_TEST_SRC ${AMD_TEST_SRC}
+  set(AMD_TEST_SRC ${AMD_TEST_SRC}
        RtcFunctions.cpp
        RtcUtility.cpp
        hiprtcComplrOptnTesting.cc)
@@ -61,9 +72,9 @@ elseif(HIP_PLATFORM MATCHES "amd")
                       LINKER_LIBS hiprtc::hiprtc)
 endif()
 
-set_source_files_properties(ChkPtrdiff_t_Exe.cc PROPERTIES LANGUAGE HIP)
+set_source_files_properties(ChkPtrdiff_t_Exe.cc PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
 add_executable(ChkPtrdiff_t_Exe EXCLUDE_FROM_ALL ChkPtrdiff_t_Exe.cc)
-set_target_properties(ChkPtrdiff_t_Exe PROPERTIES LINKER_LANGUAGE HIP)
+target_link_libraries(ChkPtrdiff_t_Exe ${GPGPU_LINKER_LIBRARIES})
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS ChkPtrdiff_t_Exe)
 
 if(HIP_PLATFORM MATCHES "nvidia")
@@ -72,4 +83,4 @@ elseif(HIP_PLATFORM MATCHES "amd")
   target_link_libraries(ChkPtrdiff_t_Exe hiprtc::hiprtc hip::host hip::device)
 endif()
 
-add_dependencies(RTC copyRtcHeaders ChkPtrdiff_t_Exe)
+add_dependencies(RTC copyRtcHeaders copyTstJson ChkPtrdiff_t_Exe)

@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2021-2023 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /**
  * @addtogroup hipMemcpy3D hipMemcpy3D
@@ -514,62 +501,6 @@ template <typename T> void Memcpy3D<T>::simple_Memcpy3D() {
   DeAllocateMemory();
 }
 
-/**
- * Test Description
- * ------------------------
- *  - This testcase performs hipMemcpy3D API validation for
-      different datatypes and different sizes
- * Test source
- * ------------------------
- *  - unit/memory/hipMemcpy3D_old.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 5.2
- */
-
-TEMPLATE_TEST_CASE("Unit_hipMemcpy3D_Basic", "[hipMemcpy3D]", int, unsigned int, float) {
-  CHECK_IMAGE_SUPPORT
-  int device = -1;
-  HIP_CHECK(hipGetDevice(&device));
-  hipDeviceProp_t prop;
-  HIP_CHECK(hipGetDeviceProperties(&prop, device));
-  auto i = GENERATE_COPY(10, 100, 1024, prop.maxTexture3D[0]);
-  auto j = GENERATE(10, 100);
-  int numDevices = 0;
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
-  if (numDevices > 1) {
-    if (std::is_same<TestType, float>::value) {
-      Memcpy3D<TestType> memcpy3d_obj(i, j, j, hipChannelFormatKindFloat);
-      memcpy3d_obj.simple_Memcpy3D();
-    } else if (std::is_same<TestType, unsigned int>::value) {
-      Memcpy3D<TestType> memcpy3d_obj(i, j, j, hipChannelFormatKindUnsigned);
-      memcpy3d_obj.simple_Memcpy3D();
-    } else if (std::is_same<TestType, int>::value) {
-      Memcpy3D<TestType> memcpy3d_obj(i, j, j, hipChannelFormatKindSigned);
-      memcpy3d_obj.simple_Memcpy3D();
-    }
-  } else {
-    SUCCEED("skipping the testcases as numDevices < 2");
-  }
-}
-
-/**
- * Test Description
- * ------------------------
- *  - This testcase performs the extent validation scenarios of hipMemcpy3D API
- * Test source
- * ------------------------
- *  - unit/memory/hipMemcpy3D_old.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 5.2
- */
-
-TEST_CASE("Unit_hipMemcpy3D_ExtentValidation") {
-  CHECK_IMAGE_SUPPORT
-  Memcpy3D<int> memcpy3d(width, height, depth, hipChannelFormatKindSigned);
-  memcpy3d.Extent_Validation();
-}
 
 /**
  * Test Description
@@ -583,7 +514,7 @@ TEST_CASE("Unit_hipMemcpy3D_ExtentValidation") {
  *  - HIP_VERSION >= 5.2
  */
 
-TEST_CASE("Unit_hipMemcpy3D_multiDevice_Negative") {
+HIP_TEST_CASE(Unit_hipMemcpy3D_multiDevice_Negative) {
   CHECK_IMAGE_SUPPORT
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
@@ -592,84 +523,6 @@ TEST_CASE("Unit_hipMemcpy3D_multiDevice_Negative") {
     memcpy3d.NegativeTests();
   } else {
     SUCCEED("skipping the testcases as numDevices < 2");
-  }
-}
-
-/**
- * Test Description
- * ------------------------
- *  - This testcase performs the D2H,H2D and D2D on peer GPU device
-      1. Verify with D2H & H2D On DiffDevice
-      2. Verify with D2D On DiffDevice
- * Test source
- * ------------------------
- *  - unit/memory/hipMemcpy3D_old.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 5.2
- */
-
-TEST_CASE("Unit_hipMemcpy3D_multiDevice_OnPeerDevice", "[multigpu]") {
-  CHECK_IMAGE_SUPPORT
-  int numDevices = 0;
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
-  if (numDevices > 1) {
-    SECTION("D2H & H2D On DiffDevice") {
-      Memcpy3D<float> memcpy3d_d2h_obj(width, height, depth, hipChannelFormatKindFloat);
-      memcpy3d_d2h_obj.D2H_H2D_DeviceMem_OnDiffDevice();
-    }
-
-    SECTION("D2D On DiffDevice") {
-      Memcpy3D<float> memcpy3d_d2d_obj(width, height, depth, hipChannelFormatKindFloat);
-      memcpy3d_d2d_obj.D2D_DeviceMem_OnDiffDevice();
-    }
-  } else {
-    SUCCEED("skipping the testcases as numDevices < 2");
-  }
-}
-
-/**
- * Test Description
- * ------------------------
- *  - This testcase performs multidevice size check on hipMemcpy3D API
-      1. Verify with 128 for all height, width & depth value
-      2. Verify with 256 for height and 128 for width & depth value
-      3. Verify with 256 for width and 128 for height & depth value
-      4. Verify with 256 for depth and 128 for height & width value
- * Test source
- * ------------------------
- *  - unit/memory/hipMemcpy3D_old.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 6.0
- */
-
-TEST_CASE("Unit_hipMemcpy3D_multiDevice_Basic_Size_Test", "[multigpu]") {
-  CHECK_IMAGE_SUPPORT
-  constexpr int size_128b = 128, size_256b = 256;
-  int numDevices = 0;
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
-
-  for (int i = 0; i < numDevices; i++) {
-    HIP_CHECK(hipSetDevice(i));
-
-    SECTION("Verify with 128 for all height, width & depth value") {
-      Memcpy3D<int> memcpy3d_obj1(size_128b, size_128b, size_128b, hipChannelFormatKindUnsigned);
-      memcpy3d_obj1.simple_Memcpy3D();
-    }
-    SECTION("Verify with 256 for height and 128 for width & depth value") {
-      Memcpy3D<int> memcpy3d_obj2(size_256b, size_128b, size_128b, hipChannelFormatKindUnsigned);
-      memcpy3d_obj2.simple_Memcpy3D();
-    }
-    SECTION("Verify with 256 for width and 128 for height & depth value") {
-      Memcpy3D<float> memcpy3d_obj3(size_128b, size_256b, size_128b, hipChannelFormatKindFloat);
-      memcpy3d_obj3.simple_Memcpy3D();
-    }
-    SECTION("Verify with 256 for depth and 128 for height & width value") {
-      Memcpy3D<unsigned int> memcpy3d_obj4(size_128b, size_128b, size_256b,
-                                           hipChannelFormatKindUnsigned);
-      memcpy3d_obj4.simple_Memcpy3D();
-    }
   }
 }
 

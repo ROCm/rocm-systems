@@ -29,17 +29,17 @@
 #include "hsakmt/linux/kfd_ioctl.h"
 #include "hsakmt/hsakmt.h"
 #include "kfdcontext.h"
-#include "hsakmtctx.h"
+#include "hsakmt/hsakmtctx.h"
 #include <pthread.h>
 #include <stdint.h>
 #include <limits.h>
+#include <stdio.h>
 
 extern int hsakmt_udmabuf_dev_fd;
 extern unsigned long hsakmt_kfd_open_count;
 extern bool hsakmt_forked;
 extern pthread_mutex_t hsakmt_mutex;
 extern bool hsakmt_is_dgpu;
-extern bool hsakmt_is_svm_api_supported;
 extern int hsakmt_zfb_support;
 
 extern HsaVersionInfo hsakmt_kfd_version_info;
@@ -193,6 +193,7 @@ HSAKMT_STATUS hsakmt_gpuid_to_nodeid(HsaKFDContext *ctx, uint32_t gpu_id, uint32
 uint32_t hsakmt_get_gfxv_by_node_id(HsaKFDContext *ctx, HSAuint32 node_id);
 bool hsakmt_prefer_ats(HsaKFDContext *ctx, HSAuint32 node_id);
 uint16_t hsakmt_get_device_id_by_node_id(HsaKFDContext *ctx, HSAuint32 node_id);
+HSAuint8 hsakmt_device_is_apu_by_node_id(HsaKFDContext *ctx, HSAuint32 node_id);
 uint16_t hsakmt_get_device_id_by_gpu_id(HsaKFDContext *ctx, HSAuint32 gpu_id);
 uint32_t hsakmt_get_direct_link_cpu(HsaKFDContext *ctx, uint32_t gpu_node);
 int get_drm_render_fd_by_gpu_id(HSAuint32 gpu_id);

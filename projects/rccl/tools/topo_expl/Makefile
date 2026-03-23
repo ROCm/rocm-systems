@@ -56,9 +56,11 @@ $(EXE): $(files)
 
 hipify:
 	rm -rf hipify_rccl
-	mkdir -p hipify_rccl/src/device/include hipify_rccl/include/network/unpack include
+	mkdir -p hipify_rccl/src/device/include hipify_rccl/include/network/unpack include/rccl
 	# Copy nccl.h.in from rccl source to always get latest API definitions
 	cp -a ../../src/nccl.h.in include/nccl.h
+	# Also copy to rccl/rccl.h for files that use #include <rccl/rccl.h>
+	cp -a ../../src/nccl.h.in include/rccl/rccl.h
 	cp -a ../../src/include/ hipify_rccl/
 	cp -a ../../src/graph/ hipify_rccl/
 	cp -a ../../src/device/*.h hipify_rccl/src/device/include
@@ -75,6 +77,7 @@ hipify:
 	hipify-perl -inplace -quiet-warnings hipify_rccl/src/device/include/*.h
 	# PATCH 1: Fix device includes - remove "device/" prefix since files are in same directory
 	sed -i 's|#include "device/|#include "|g' hipify_rccl/src/device/include/*.h
+	sed -i 's|#include "device/|#include "|g' hipify_rccl/include/*.h
 	# PATCH 2: Use NVTX stubs - topo_expl doesn't need full NVTX implementation
 	cp hipify_rccl/include/nvtx_stub.h hipify_rccl/include/nvtx.h
 	bash ../../cmake/scripts/add_unroll.sh "hipify_rccl/src/device/include/common.h"

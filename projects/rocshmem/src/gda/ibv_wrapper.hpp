@@ -26,6 +26,7 @@
 #define LIBRARY_SRC_GDA_IBV_WRAPPER_HPP_
 
 #include "ibv_core.hpp"
+#include "memory/hip_allocator.hpp"
 #include <sys/types.h>
 #include <map>
 
@@ -63,7 +64,7 @@ class IBVWrapper {
                                        struct ibv_parent_domain_init_attr *attr);
     int dealloc_pd(struct ibv_pd *pd);
 
-    struct ibv_mr* reg_mr(struct ibv_pd *pd, void *addr, size_t length, int access);
+    struct ibv_mr* reg_mr(struct ibv_pd *pd, void *addr, size_t length, int access, HIPAllocator *allocator = nullptr);
     int dereg_mr(struct ibv_mr *mr);
 
     struct ibv_cq_ex* create_cq_ex(struct ibv_context *context,
