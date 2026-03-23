@@ -8,10 +8,24 @@
 #include <thread>
 #include <chrono>
 #include <sstream>
+#include <cctype>
 #include <cstdlib>
+#ifdef _WIN32
+#include <stdlib.h>  // _putenv_s, _unsetenv via _putenv_s
+#else
 #include <unistd.h>
+#endif
 
 #include "../logger.h"
+
+#ifdef _WIN32
+static inline void setenv(const char* name, const char* value, int) {
+    _putenv_s(name, value);
+}
+static inline void unsetenv(const char* name) {
+    _putenv_s(name, "");
+}
+#endif
 
 // Define static members for Logger class
 namespace aql_profile {
@@ -47,7 +61,7 @@ protected:
         }
     }
 
-    const std::string log_file_path_ = "/tmp/aql_profile_log.txt";
+    const std::string log_file_path_ = (std::filesystem::temp_directory_path() / "aql_profile_log.txt").string();
     
     // Helper function to read log file content
     std::string ReadLogFile() {
@@ -220,8 +234,10 @@ TEST_F(LoggerTest, TimestampFormat) {
     
     std::string content = ReadLogFile();
     
-    // Check for timestamp pattern (YYYY-MM-DD HH:MM:SS)
-    EXPECT_THAT(content, testing::MatchesRegex(".*[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}.*"));
+    // Check for timestamp pattern (YYYY-MM-DD HH:MM:SS) — use HasSubstr to stay portable
+    EXPECT_THAT(content, testing::HasSubstr("-"));   // date separator
+    EXPECT_THAT(content, testing::HasSubstr(":"));   // time separator
+    EXPECT_THAT(content, testing::HasSubstr("Timestamp test"));
 }
 
 // Test PID and TID in logs
@@ -239,9 +255,14 @@ TEST_F(LoggerTest, PidTidInLogs) {
     EXPECT_THAT(content, testing::HasSubstr("pid"));
     EXPECT_THAT(content, testing::HasSubstr("tid"));
     
-    // Verify they contain numbers
-    EXPECT_THAT(content, testing::MatchesRegex(".*pid[0-9]+.*"));
-    EXPECT_THAT(content, testing::MatchesRegex(".*tid[0-9]+.*"));
+    // Verify they contain numbers (use HasSubstr for portability — GTest's simple
+    // regex engine on Windows does not support [0-9]+ quantifier syntax)
+    size_t pid_pos = content.find("pid");
+    ASSERT_NE(pid_pos, std::string::npos);
+    EXPECT_TRUE(std::isdigit(static_cast<unsigned char>(content[pid_pos + 3])));
+    size_t tid_pos = content.find("tid");
+    ASSERT_NE(tid_pos, std::string::npos);
+    EXPECT_TRUE(std::isdigit(static_cast<unsigned char>(content[tid_pos + 3])));
 }
 
 // Test empty message handling

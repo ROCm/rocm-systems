@@ -35,6 +35,8 @@ target_include_directories ( ${TARGET_LIB}
           ${LIB_DIR}/core/include
 )
 if ( WIN32 )
+  # Link the module-definition file so the linker exports all public symbols
+  target_sources ( ${TARGET_LIB} PRIVATE ${LIB_DIR}/hsa-amd-aqlprofile64.def )
   # Locate the pre-built HIP import library (re-exports all HSA runtime symbols)
   find_library ( AMDHIP64_LIB
     NAMES amdhip64

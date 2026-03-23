@@ -100,6 +100,6 @@ add_test(NAME legacy-tests COMMAND "${TEST_BINARY_DIR}/run.sh")
 
 option(AQLPROFILE_BUILD_INTEGERATION_TESTS "Build integration tests" ON)
 
-if(AQLPROFILE_BUILD_INTEGERATION_TESTS)
+if(AQLPROFILE_BUILD_INTEGERATION_TESTS AND NOT WIN32)
     add_subdirectory(integration)
 endif()

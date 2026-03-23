@@ -104,7 +104,16 @@ class Logger {
   Logger() : file_(NULL), dirty_(false), streaming_(false), messaging_(false) {
     const char* path = getenv("HSA_VEN_AMD_AQLPROFILE_LOG");
     if (path != NULL) {
+#ifdef _WIN32
+      char tmp_path[MAX_PATH];
+      DWORD tmp_len = GetTempPathA(MAX_PATH, tmp_path);
+      std::string log_path = (tmp_len > 0)
+          ? std::string(tmp_path) + "aql_profile_log.txt"
+          : std::string("aql_profile_log.txt");
+      file_ = fopen(log_path.c_str(), "a");
+#else
       file_ = fopen("/tmp/aql_profile_log.txt", "a");
+#endif
     }
     ResetStreaming();
   }
