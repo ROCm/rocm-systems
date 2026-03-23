@@ -529,6 +529,20 @@ class RocProfCompute_Base:
         start_time = time.time()
         # No native tool for pc sampling
         options = self.get_profiler_options()
+
+        if (
+            is_only_pc_sampling(args.filter_blocks)
+            and self.__profiler == "rocprofiler-sdk"
+            and (rocprof_output_path := getattr(options, "ROCPROF_OUTPUT_PATH", None))
+            is not None
+        ):
+            rocprof_output_path = Path(rocprof_output_path)
+            if rocprof_output_path.exists():
+                shutil.rmtree(rocprof_output_path, ignore_errors=True)
+                console_debug(
+                    f"Removed existing ROCProf output path: {rocprof_output_path}"
+                )
+
         pc_sampling_prof(
             profiler_options=options,
             method=args.pc_sampling_method,
