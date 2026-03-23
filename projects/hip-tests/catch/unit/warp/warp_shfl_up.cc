@@ -40,7 +40,7 @@ template <typename T> class WarpShflUp : public WarpShflTest<WarpShflUp<T>, T> {
     LinearAllocGuard<unsigned int> deltas_dev(LinearAllocs::hipMalloc, alloc_size);
     deltas_.resize(width_);
     std::generate(deltas_.begin(), deltas_.end(),
-                  [this] { return GenerateRandomInteger(0u, static_cast<unsigned int>(width_)); });
+                  [this] { return GenRandomInteger(0u, static_cast<unsigned int>(width_)); });
     HIP_CHECK(hipMemcpy(deltas_dev.ptr(), deltas_.data(), alloc_size, hipMemcpyHostToDevice));
     shfl_up<<<this->grid_.grid_dim_, this->grid_.block_dim_>>>(arr_dev, input_dev, active_masks,
                                                                deltas_dev.ptr(), width_);

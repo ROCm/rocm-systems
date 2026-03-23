@@ -157,6 +157,7 @@ void Device::Reset() {
 void Device::WaitActiveStreams(hip::Stream* blocking_stream, bool wait_null_stream) {
   amd::Command::EventWaitList eventWaitList(0);
   bool submitMarker = false;
+  std::vector<amd::CommandQueue*> activeQueues;
 
   auto waitForStream = [&submitMarker, &eventWaitList](hip::Stream* stream) {
     if (amd::Command* command = stream->getLastQueuedCommand(true)) {
@@ -183,7 +184,7 @@ void Device::WaitActiveStreams(hip::Stream* blocking_stream, bool wait_null_stre
       waitForStream(null_stream_);
     }
   } else {
-    const auto activeQueues = blocking_stream->device().getActiveQueues();
+    activeQueues = blocking_stream->device().getActiveQueues();
     for (const auto& queue : activeQueues) {
       auto* active_stream = static_cast<hip::Stream*>(queue);
       // Only wait on blocking (non-nonblocking) streams other than the current one
@@ -192,7 +193,6 @@ void Device::WaitActiveStreams(hip::Stream* blocking_stream, bool wait_null_stre
         ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_WAIT, "Waiting on active stream %p", active_stream);
         waitForStream(active_stream);
       }
-      queue->release();
     }
   }
 
@@ -205,6 +205,12 @@ void Device::WaitActiveStreams(hip::Stream* blocking_stream, bool wait_null_stre
   // Release all active commands; safe after the marker was enqueued
   for (const auto& cmd : eventWaitList) {
     cmd->release();
+  }
+
+  // Release active queue references now that the marker has been fully enqueued
+  // and no longer needs to access the queues via eventWaitList commands
+  for (const auto& q : activeQueues) {
+    q->release();
   }
 }
 
@@ -801,8 +807,8 @@ hipError_t hipGetProcAddress_common(const char* symbol, void** pfn, int hipVersi
   }
   std::string symbolString = symbol;
 
-  if (flags != HIP_GET_PROC_ADDRESS_DEFAULT && flags != HIP_GET_PROC_ADDRESS_LEGACY_STREAM
-      && flags != HIP_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM) {
+  if (flags != HIP_GET_PROC_ADDRESS_DEFAULT && flags != HIP_GET_PROC_ADDRESS_LEGACY_STREAM &&
+      flags != HIP_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM) {
     return hipErrorInvalidValue;
   }
 
@@ -869,9 +875,10 @@ hipError_t hipGetProcAddress(const char* symbol, void** pfn, int hipVersion, uin
 
 // ================================================================================================
 hipError_t hipGetProcAddress_spt(const char* symbol, void** pfn, int hipVersion, uint64_t flags,
-                             hipDriverProcAddressQueryResult* symbolStatus) {
+                                 hipDriverProcAddressQueryResult* symbolStatus) {
   HIP_INIT_API(hipGetProcAddress, symbol, pfn, hipVersion, flags, symbolStatus);
-  flags = (flags == HIP_GET_PROC_ADDRESS_DEFAULT) ? HIP_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM : flags;
+  flags = (flags == HIP_GET_PROC_ADDRESS_DEFAULT) ? HIP_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM
+                                                  : flags;
   HIP_RETURN(hipGetProcAddress_common(symbol, pfn, hipVersion, flags, symbolStatus));
 }
 
