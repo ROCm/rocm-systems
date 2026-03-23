@@ -102,6 +102,7 @@ namespace {
   ncclResult_t fabricInitResult = ncclSuccess;
   ncclResult_t amdSmiInitResult = ncclSuccess;
   std::atomic<bool> amdSmiInitCalled{false};  // Track if amd_smi_init has been called
+  std::mutex amdsmiInitLock;
 }
 
 /*************************************************************************
@@ -148,68 +149,72 @@ static bool amd_smi_FabricFunctionsLoaded() {
  ************************************************************************/
 
 ncclResult_t amd_smi_init() {
-  // Ensure we only initialize once
-  if (amdSmiInitCalled.exchange(true)) return amdSmiInitResult;
-
-  if (__atomic_load_n(&is_wsl2, __ATOMIC_ACQUIRE) == -1)
-    __atomic_store_n(&is_wsl2, (access("/dev/dxg", F_OK) == -1) ? 0 : 1, __ATOMIC_RELEASE);
-  if (__atomic_load_n(&is_wsl2, __ATOMIC_ACQUIRE)) {
-    INFO(NCCL_INIT, "Not using amdsmi_lib due to WSL2 environment detected.");
-    return ncclSuccess;
-  }
-
-  if (rcclParamUseAmdSmiLib()) {
-    if (pfn_amdsmi_init == nullptr) {
-      static void *libhandle = dlopen("libamd_smi.so", RTLD_NOW);
-      if (libhandle == nullptr) {
-        WARN("Failed to open libamd_smi.so");
-        amdSmiInitResult = ncclInternalError;
-        return ncclInternalError;
+  // Ensure we only initialize once and avoid grabbing the mutex for every call
+  if (!amdSmiInitCalled.load(std::memory_order_acquire)) {
+    std::lock_guard<std::mutex> lock(amdsmiInitLock);
+    if (!amdSmiInitCalled.load(std::memory_order_relaxed)) {
+      if (__atomic_load_n(&is_wsl2, __ATOMIC_ACQUIRE) == -1)
+        __atomic_store_n(&is_wsl2, (access("/dev/dxg", F_OK) == -1) ? 0 : 1, __ATOMIC_RELEASE);
+      if (__atomic_load_n(&is_wsl2, __ATOMIC_ACQUIRE)) {
+        INFO(NCCL_INIT, "Not using amdsmi_lib due to WSL2 environment detected.");
+        return ncclSuccess;
       }
 
-      struct Symbol { void **ppfn; char const *name; };
-      std::initializer_list<Symbol> symbols = {
-        {(void**)&pfn_amdsmi_init, "amdsmi_init"},
-        {(void**)&pfn_amdsmi_shut_down, "amdsmi_shut_down"},
-        {(void**)&pfn_amdsmi_status_code_to_string, "amdsmi_status_code_to_string"},
-        {(void**)&pfn_amdsmi_get_lib_version, "amdsmi_get_lib_version"},
-        {(void**)&pfn_amdsmi_get_socket_handles, "amdsmi_get_socket_handles"},
-        {(void**)&pfn_amdsmi_get_processor_handles, "amdsmi_get_processor_handles"},
-        {(void**)&pfn_amdsmi_get_processor_type, "amdsmi_get_processor_type"},
-        {(void**)&pfn_amdsmi_get_processor_handle_from_bdf, "amdsmi_get_processor_handle_from_bdf"},
-        {(void**)&pfn_amdsmi_get_gpu_enumeration_info, "amdsmi_get_gpu_enumeration_info"},
-        {(void**)&pfn_amdsmi_get_gpu_bdf_id, "amdsmi_get_gpu_bdf_id"},
-        {(void**)&pfn_amdsmi_topo_get_link_type, "amdsmi_topo_get_link_type"},
-        {(void**)&pfn_amdsmi_topo_get_link_weight, "amdsmi_topo_get_link_weight"},
-        {(void**)&pfn_amdsmi_get_minmax_bandwidth_between_processors, "amdsmi_get_minmax_bandwidth_between_processors"},
-        // UALoE support
-        {(void**)&pfn_amdsmi_get_gpu_fabric_info, "amdsmi_get_gpu_fabric_info"},
-        {(void**)&pfn_amdsmi_fabric_telem_id_to_string, "amdsmi_fabric_telem_id_to_string"},
-        // UALoE Telemetry support
-        {(void**)&pfn_amdsmi_alloc_fabric_telemetry, "amdsmi_alloc_fabric_telemetry"},
-        {(void**)&pfn_amdsmi_get_fabric_telemetry_data, "amdsmi_get_fabric_telemetry_data"},
-        {(void**)&pfn_amdsmi_free_fabric_telemetry, "amdsmi_free_fabric_telemetry"},
-        {(void**)&pfn_amdsmi_get_fw_info, "amdsmi_get_fw_info"},
-      };
-      for(Symbol sym: symbols) {
-        *sym.ppfn = dlsym(libhandle, sym.name);
+      if (rcclParamUseAmdSmiLib()) {
+        if (pfn_amdsmi_init == nullptr) {
+          static void *libhandle = dlopen("libamd_smi.so", RTLD_NOW);
+          if (libhandle == nullptr) {
+            WARN("Failed to open libamd_smi.so");
+            amdSmiInitResult = ncclInternalError;
+            return ncclInternalError;
+          }
+
+          struct Symbol { void **ppfn; char const *name; };
+          std::initializer_list<Symbol> symbols = {
+            {(void**)&pfn_amdsmi_init, "amdsmi_init"},
+            {(void**)&pfn_amdsmi_shut_down, "amdsmi_shut_down"},
+            {(void**)&pfn_amdsmi_status_code_to_string, "amdsmi_status_code_to_string"},
+            {(void**)&pfn_amdsmi_get_lib_version, "amdsmi_get_lib_version"},
+            {(void**)&pfn_amdsmi_get_socket_handles, "amdsmi_get_socket_handles"},
+            {(void**)&pfn_amdsmi_get_processor_handles, "amdsmi_get_processor_handles"},
+            {(void**)&pfn_amdsmi_get_processor_type, "amdsmi_get_processor_type"},
+            {(void**)&pfn_amdsmi_get_processor_handle_from_bdf, "amdsmi_get_processor_handle_from_bdf"},
+            {(void**)&pfn_amdsmi_get_gpu_enumeration_info, "amdsmi_get_gpu_enumeration_info"},
+            {(void**)&pfn_amdsmi_get_gpu_bdf_id, "amdsmi_get_gpu_bdf_id"},
+            {(void**)&pfn_amdsmi_topo_get_link_type, "amdsmi_topo_get_link_type"},
+            {(void**)&pfn_amdsmi_topo_get_link_weight, "amdsmi_topo_get_link_weight"},
+            {(void**)&pfn_amdsmi_get_minmax_bandwidth_between_processors, "amdsmi_get_minmax_bandwidth_between_processors"},
+            // UALoE support
+            {(void**)&pfn_amdsmi_get_gpu_fabric_info, "amdsmi_get_gpu_fabric_info"},
+            {(void**)&pfn_amdsmi_fabric_telem_id_to_string, "amdsmi_fabric_telem_id_to_string"},
+            // UALoE Telemetry support
+            {(void**)&pfn_amdsmi_alloc_fabric_telemetry, "amdsmi_alloc_fabric_telemetry"},
+            {(void**)&pfn_amdsmi_get_fabric_telemetry_data, "amdsmi_get_fabric_telemetry_data"},
+            {(void**)&pfn_amdsmi_free_fabric_telemetry, "amdsmi_free_fabric_telemetry"},
+            {(void**)&pfn_amdsmi_get_fw_info, "amdsmi_get_fw_info"},
+          };
+          for(Symbol sym: symbols) {
+            *sym.ppfn = dlsym(libhandle, sym.name);
+          }
+        }
+
+        // initialize amd-smi for AMD GPUs
+        AMDSMITRY(amdsmi_init, AMDSMI_INIT_AMD_GPUS);
+
+        // get amd-smi version
+        amdsmi_version_t version;
+        AMDSMITRY(amdsmi_get_lib_version, &version);
+        INFO(NCCL_INIT, "amdsmi_lib: version %d.%d.%d.%s", version.major, version.minor, version.release, version.build);
+      } else {
+    #ifdef HIP_FABRIC_API
+        WARN("RCCL_USE_AMD_SMI_LIB not set, but HIP_FABRIC_API is defined. Fabric support is only available through AMD SMI. Rerun with RCCL_USE_AMD_SMI_LIB=1 to enable AMD SMI and UALoE fabric support.");
+    #endif
+        // initialize alternate rsmi
+        ARSMICHECK(ARSMI_init());
+        INFO(NCCL_INIT, "initialized internal alternative rsmi functionality");
       }
+      amdSmiInitCalled.store(true, std::memory_order_release);
     }
-
-    // initialize amd-smi for AMD GPUs
-    AMDSMITRY(amdsmi_init, AMDSMI_INIT_AMD_GPUS);
-
-    // get amd-smi version
-    amdsmi_version_t version;
-    AMDSMITRY(amdsmi_get_lib_version, &version);
-    INFO(NCCL_INIT, "amdsmi_lib: version %d.%d.%d.%s", version.major, version.minor, version.release, version.build);
-  } else {
-#ifdef HIP_FABRIC_API
-    WARN("RCCL_USE_AMD_SMI_LIB not set, but HIP_FABRIC_API is defined. Fabric support is only available through AMD SMI. Rerun with RCCL_USE_AMD_SMI_LIB=1 to enable AMD SMI and UALoE fabric support.");
-#endif
-    // initialize alternate rsmi
-    ARSMICHECK(ARSMI_init());
-    INFO(NCCL_INIT, "initialized internal alternative rsmi functionality");
   }
   return ncclSuccess;
 }
