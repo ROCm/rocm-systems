@@ -24,7 +24,3 @@ THE SOFTWARE.
 /* Metadata template parameter for device primitives (reserved for future use). */
 
 #define RCCL_METADATA_EMPTY 0
-
-constexpr bool isMsccl(int /*metadata*/) {
-    return false;
-}
