@@ -84,7 +84,7 @@ amdclang++                                                                      
   -L /usr/local/lib -lCatch2 -lCatch2Main                                            \
   -x hip <path_to_test>
 ```
-The command above builds hip without the `main` from hip-tests, if the purpose is just to run the test with as simple commands as possible, go with this.
+The command above builds HIP without the `main` provided by hip-tests. If your goal is simply to run the tests using the most straightforward commands, this is the option to go with.
 
 If you want to use `main` provided by hip-tests, use the following command:
 
