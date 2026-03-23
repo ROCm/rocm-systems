@@ -10,6 +10,7 @@
 #include "ResourceGuards.hpp"
 #include "TestChecks.hpp"
 #include "DeviceBufferHelpers.hpp"
+#include "HostBufferHelpers.hpp"
 #include "nccl.h"
 #include "net.h"
 #include <vector>
@@ -292,6 +293,22 @@ protected:
             [pattern](size_t i) {
                 return static_cast<uint8_t>((pattern + i) % kBytePatternModulo);
             }
+        );
+    }
+
+    // Helper: Fill host buffer with pattern using HostBufferHelpers
+    void FillHostBuffer(void* buffer, size_t size, int seed) {
+        fillHostBufferWithPattern<uint8_t>(
+            buffer, size,
+            [seed](size_t i) { return static_cast<uint8_t>((seed + i) % kBytePatternModulo); }
+        );
+    }
+
+    // Helper: Verify host buffer pattern using HostBufferHelpers
+    bool VerifyHostBuffer(const void* buffer, size_t size, int seed) {
+        return verifyHostBufferData<uint8_t>(
+            buffer, size,
+            [seed](size_t i) { return static_cast<uint8_t>((seed + i) % kBytePatternModulo); }
         );
     }
 
@@ -673,11 +690,8 @@ TEST_F(NetIbMPITest, SimpleSendRecv) {
         ASSERT_EQ(PostRecv(pair.recvComm, 1, recvBuffers, recvSizes, recvTags,
                           recvHandles, &request), ncclSuccess);
     } else {
-        // Sender - initialize host buffer directly
-        uint8_t* hostBuffer = static_cast<uint8_t*>(buffer);
-        for (size_t i = 0; i < bufferSize; i++) {
-            hostBuffer[i] = static_cast<uint8_t>((rank + i) % kBytePatternModulo);
-        }
+        // Sender
+        FillHostBuffer(buffer, bufferSize, rank);
 
         PostSendWithRetry(pair.sendComm, buffer, bufferSize, tag, mhandle, &request);
     }
@@ -693,16 +707,8 @@ TEST_F(NetIbMPITest, SimpleSendRecv) {
         EXPECT_EQ(sizes[0], bufferSize) << "Received size mismatch";
 
         // Verify received data
-        uint8_t* hostBuffer = static_cast<uint8_t*>(buffer);
-        bool dataValid = true;
         int senderRank = 1;  // Data was sent by rank 1
-        for (size_t i = 0; i < bufferSize && dataValid; i++) {
-            uint8_t expected = static_cast<uint8_t>((senderRank + i) % kBytePatternModulo);
-            if (hostBuffer[i] != expected) {
-                dataValid = false;
-            }
-        }
-        EXPECT_TRUE(dataValid) << "Data validation failed";
+        EXPECT_TRUE(VerifyHostBuffer(buffer, bufferSize, senderRank)) << "Data validation failed";
     }
 
     // NetMHandleGuard will automatically deregister memory when test scope ends
@@ -768,11 +774,7 @@ TEST_F(NetIbMPITest, SendRecvMultipleSizes) {
                               recvHandles, &request), ncclSuccess);
             ASSERT_NE(request, nullptr) << "Recv request should never be NULL";
         } else {
-            // Initialize host buffer directly (not using InitializeBuffer which expects device memory)
-            uint8_t* hostBuffer = static_cast<uint8_t*>(buffer);
-            for (size_t i = 0; i < size; i++) {
-                hostBuffer[i] = static_cast<uint8_t>((seed + i) % kBytePatternModulo);
-            }
+            FillHostBuffer(buffer, size, seed);
 
             PostSendWithRetry(pair.sendComm, buffer, size, tag, mhandle, &request);
         }
@@ -792,16 +794,7 @@ TEST_F(NetIbMPITest, SendRecvMultipleSizes) {
         if (rank == 0) {
             EXPECT_EQ(sizes[0], size) << "Size mismatch for transfer of " << size << " bytes";
 
-            // Validate received data matches expected pattern (host buffer verification)
-            uint8_t* hostBuffer = static_cast<uint8_t*>(buffer);
-            bool dataValid = true;
-            for (size_t j = 0; j < size && dataValid; j++) {
-                uint8_t expected = static_cast<uint8_t>((seed + j) % kBytePatternModulo);
-                if (hostBuffer[j] != expected) {
-                    dataValid = false;
-                }
-            }
-            EXPECT_TRUE(dataValid) << "Data validation failed for size " << size;
+            EXPECT_TRUE(VerifyHostBuffer(buffer, size, seed)) << "Data validation failed for size " << size;
         }
 
         // NetMHandleGuard will automatically deregister at end of loop iteration
@@ -935,16 +928,7 @@ TEST_F(NetIbMPITest, FlushAfterRecv) {
                           recvHandles, &request), ncclSuccess);
     } else {
         // Sender
-        void* hostBuffer = malloc(bufferSize);
-        ASSERT_NE(hostBuffer, nullptr);
-        auto hostBufferGuard = makeHostBufferAutoGuard(hostBuffer);
-
-        // Initialize host buffer directly (not using InitializeBuffer which expects device memory)
-        uint8_t* hostBuf = static_cast<uint8_t*>(hostBuffer);
-        for (size_t i = 0; i < bufferSize; i++) {
-            hostBuf[i] = static_cast<uint8_t>((rank + i) % kBytePatternModulo);
-        }
-        HIP_TEST_CHECK_GTEST_FAIL(hipMemcpy(buffer, hostBuffer, bufferSize, hipMemcpyHostToDevice));
+        ASSERT_EQ(InitializeBuffer(buffer, bufferSize, rank), hipSuccess);
 
         PostSendWithRetry(pair.sendComm, buffer, bufferSize, tag, mhandle, &request);
     }
@@ -1119,11 +1103,7 @@ TEST_F(NetIbMPITest, MultipleSequentialTransfers) {
                               recvHandles, &request), ncclSuccess);
             ASSERT_NE(request, nullptr) << "Recv request should never be NULL";
         } else {
-            // Initialize host buffer directly (not using InitializeBuffer which expects device memory)
-            uint8_t* hostBuffer = static_cast<uint8_t*>(sendBuffer);
-            for (size_t j = 0; j < bufferSize; j++) {
-                hostBuffer[j] = static_cast<uint8_t>((seed + j) % kBytePatternModulo);
-            }
+            FillHostBuffer(sendBuffer, bufferSize, seed);
 
             PostSendWithRetry(pair.sendComm, sendBuffer, bufferSize, tag, mhandle, &request);
         }
@@ -1143,27 +1123,7 @@ TEST_F(NetIbMPITest, MultipleSequentialTransfers) {
         if (rank == 0) {
             EXPECT_EQ(sizes[0], bufferSize) << "Transfer " << i << " size mismatch";
 
-            // Validate received data matches expected pattern (host buffer verification)
-            uint8_t* hostBuffer = static_cast<uint8_t*>(recvBuffer);
-            bool dataValid = true;
-            for (size_t j = 0; j < bufferSize && dataValid; j++) {
-                uint8_t expected = static_cast<uint8_t>((seed + j) % kBytePatternModulo);
-                if (hostBuffer[j] != expected) {
-                    dataValid = false;
-                }
-            }
-            EXPECT_TRUE(dataValid) << "Transfer " << i << " data validation failed (seed=" << seed << ")";
-
-            if (!dataValid) {
-                // Print first few mismatched values for debugging
-                TEST_WARN("Rank %d: Transfer %d data mismatch. First %d values:", rank, i, kNumDebugSamples);
-                for (size_t j = 0; j < kNumDebugSamples && j < bufferSize; j++) {
-                    uint8_t expected = static_cast<uint8_t>((seed + j) % kBytePatternModulo);
-                    TEST_WARN("  [%zu] expected=%u, got=%u %s",
-                           j, expected, hostBuffer[j],
-                           (hostBuffer[j] == expected) ? "PASS" : "FAIL");
-                }
-            }
+            EXPECT_TRUE(VerifyHostBuffer(recvBuffer, bufferSize, seed)) << "Transfer " << i << " data validation failed (seed=" << seed << ")";
 
             // NOTE: Flush is NOT called for host memory transfers
             // Flush (iflush) is only needed for GPU Direct RDMA to ensure data visibility on GPU.
@@ -1226,11 +1186,8 @@ TEST_F(NetIbMPITest, LargeTransfer) {
         ASSERT_EQ(PostRecv(pair.recvComm, 1, recvBuffers, recvSizes, recvTags,
                           recvHandles, &request), ncclSuccess);
     } else {
-        // Sender - Initialize host buffer directly (not using InitializeBuffer which expects device memory)
-        uint8_t* hostBuffer = static_cast<uint8_t*>(buffer);
-        for (size_t i = 0; i < bufferSize; i++) {
-            hostBuffer[i] = static_cast<uint8_t>((rank + i) % kBytePatternModulo);
-        }
+        // Sender
+        FillHostBuffer(buffer, bufferSize, rank);
 
         PostSendWithRetry(pair.sendComm, buffer, bufferSize, tag, mhandle, &request);
     }
@@ -1246,29 +1203,8 @@ TEST_F(NetIbMPITest, LargeTransfer) {
         EXPECT_EQ(sizes[0], bufferSize) << "Large transfer size mismatch";
 
         // Verify received data
-        uint8_t* hostBuffer = static_cast<uint8_t*>(buffer);
-        bool dataValid = true;
         int senderRank = 1;  // Data was sent by rank 1
-        size_t errorsFound = 0;
-        const size_t maxErrorsToReport = 10;
-
-        for (size_t i = 0; i < bufferSize && errorsFound < maxErrorsToReport; i++) {
-            uint8_t expected = static_cast<uint8_t>((senderRank + i) % kBytePatternModulo);
-            if (hostBuffer[i] != expected) {
-                if (errorsFound == 0) {
-                    TEST_WARN("Rank %d: Data validation errors found in large transfer:", rank);
-                }
-                TEST_WARN("  Index %zu: expected=%u, got=%u", i, expected, hostBuffer[i]);
-                dataValid = false;
-                errorsFound++;
-            }
-        }
-
-        if (!dataValid && errorsFound >= maxErrorsToReport) {
-            TEST_WARN("  ... (showing first %zu errors only)", maxErrorsToReport);
-        }
-
-        EXPECT_TRUE(dataValid) << "Large transfer data validation failed";
+        EXPECT_TRUE(VerifyHostBuffer(buffer, bufferSize, senderRank)) << "Large transfer data validation failed";
     }
 
     // NetMHandleGuard will automatically deregister at scope end
@@ -1368,10 +1304,7 @@ TEST_F(NetIbMPITest, ConnectAndTransfer_VNic) {
         ASSERT_EQ(PostRecv(pair.recvComm, 1, recvBuffers, recvSizes, recvTags,
                           recvHandles, &request), ncclSuccess);
     } else {
-        uint8_t* hostBuffer = static_cast<uint8_t*>(buffer);
-        for (size_t i = 0; i < bufferSize; i++) {
-            hostBuffer[i] = static_cast<uint8_t>((seed + i) % kBytePatternModulo);
-        }
+        FillHostBuffer(buffer, bufferSize, seed);
 
         PostSendWithRetry(pair.sendComm, buffer, bufferSize, tag, mhandle, &request);
     }
@@ -1385,17 +1318,7 @@ TEST_F(NetIbMPITest, ConnectAndTransfer_VNic) {
     if (rank == 0) {
         EXPECT_EQ(sizes[0], bufferSize) << "Received size mismatch";
 
-        uint8_t* hostBuffer = static_cast<uint8_t*>(buffer);
-        bool dataValid = true;
-        for (size_t i = 0; i < bufferSize && dataValid; i++) {
-            uint8_t expected = static_cast<uint8_t>((seed + i) % kBytePatternModulo);
-            if (hostBuffer[i] != expected) {
-                dataValid = false;
-                TEST_WARN("Rank %d: Data mismatch at index %zu: expected=%u, got=%u",
-                         rank, i, expected, hostBuffer[i]);
-            }
-        }
-        EXPECT_TRUE(dataValid) << "Data validation failed on vNIC transfer";
+        EXPECT_TRUE(VerifyHostBuffer(buffer, bufferSize, seed)) << "Data validation failed on vNIC transfer";
     }
 
 }
@@ -1495,10 +1418,7 @@ TEST_F(NetIbMPITest, AsymmetricMerge_VNic) {
         ASSERT_EQ(PostRecv(pair.recvComm, 1, recvBuffers, recvSizes, recvTags,
                           recvHandles, &request), ncclSuccess);
     } else {
-        uint8_t* hostBuffer = static_cast<uint8_t*>(buffer);
-        for (size_t i = 0; i < bufferSize; i++) {
-            hostBuffer[i] = static_cast<uint8_t>((seed + i) % kBytePatternModulo);
-        }
+        FillHostBuffer(buffer, bufferSize, seed);
 
         PostSendWithRetry(pair.sendComm, buffer, bufferSize, tag, mhandle, &request);
     }
@@ -1512,17 +1432,7 @@ TEST_F(NetIbMPITest, AsymmetricMerge_VNic) {
     if (rank == 0) {
         EXPECT_EQ(sizes[0], bufferSize) << "Received size mismatch";
 
-        uint8_t* hostBuffer = static_cast<uint8_t*>(buffer);
-        bool dataValid = true;
-        for (size_t i = 0; i < bufferSize && dataValid; i++) {
-            uint8_t expected = static_cast<uint8_t>((seed + i) % kBytePatternModulo);
-            if (hostBuffer[i] != expected) {
-                dataValid = false;
-                TEST_WARN("Rank %d: Data mismatch at index %zu: expected=%u, got=%u",
-                         rank, i, expected, hostBuffer[i]);
-            }
-        }
-        EXPECT_TRUE(dataValid) << "Data validation failed on asymmetric vNIC transfer";
+        EXPECT_TRUE(VerifyHostBuffer(buffer, bufferSize, seed)) << "Data validation failed on asymmetric vNIC transfer";
     }
 }
 
@@ -1611,10 +1521,7 @@ TEST_F(NetIbMPITest, CloseWithoutTransfer_VNic) {
         ASSERT_EQ(PostRecv(pair2.recvComm, 1, recvBuffers, recvSizes, recvTags,
                           recvHandles, &request), ncclSuccess);
     } else {
-        uint8_t* hostBuffer = static_cast<uint8_t*>(buffer);
-        for (size_t i = 0; i < bufferSize; i++) {
-            hostBuffer[i] = static_cast<uint8_t>((seed + i) % kBytePatternModulo);
-        }
+        FillHostBuffer(buffer, bufferSize, seed);
 
         PostSendWithRetry(pair2.sendComm, buffer, bufferSize, tag, mhandle, &request);
     }
@@ -1628,17 +1535,7 @@ TEST_F(NetIbMPITest, CloseWithoutTransfer_VNic) {
     if (rank == 0) {
         EXPECT_EQ(sizes[0], bufferSize) << "Received size mismatch";
 
-        uint8_t* hostBuffer = static_cast<uint8_t*>(buffer);
-        bool dataValid = true;
-        for (size_t i = 0; i < bufferSize && dataValid; i++) {
-            uint8_t expected = static_cast<uint8_t>((seed + i) % kBytePatternModulo);
-            if (hostBuffer[i] != expected) {
-                dataValid = false;
-                TEST_WARN("Rank %d: Data mismatch at index %zu: expected=%u, got=%u",
-                         rank, i, expected, hostBuffer[i]);
-            }
-        }
-        EXPECT_TRUE(dataValid) << "Data validation failed after no-transfer teardown reconnect";
+        EXPECT_TRUE(VerifyHostBuffer(buffer, bufferSize, seed)) << "Data validation failed after no-transfer teardown reconnect";
     }
 }
 
@@ -1722,10 +1619,7 @@ TEST_F(NetIbMPITest, RegDeregCycling_VNic) {
         ASSERT_EQ(PostRecv(pair.recvComm, 1, recvBuffers, recvSizes, recvTags,
                           recvHandles, &request), ncclSuccess);
     } else {
-        uint8_t* hostBuffer = static_cast<uint8_t*>(buffer);
-        for (size_t i = 0; i < bufferSize; i++) {
-            hostBuffer[i] = static_cast<uint8_t>((seed + i) % kBytePatternModulo);
-        }
+        FillHostBuffer(buffer, bufferSize, seed);
 
         PostSendWithRetry(pair.sendComm, buffer, bufferSize, tag, mhandle, &request);
     }
@@ -1739,17 +1633,7 @@ TEST_F(NetIbMPITest, RegDeregCycling_VNic) {
     if (rank == 0) {
         EXPECT_EQ(sizes[0], bufferSize) << "Received size mismatch";
 
-        uint8_t* hostBuffer = static_cast<uint8_t*>(buffer);
-        bool dataValid = true;
-        for (size_t i = 0; i < bufferSize && dataValid; i++) {
-            uint8_t expected = static_cast<uint8_t>((seed + i) % kBytePatternModulo);
-            if (hostBuffer[i] != expected) {
-                dataValid = false;
-                TEST_WARN("Rank %d: Data mismatch at index %zu: expected=%u, got=%u",
-                         rank, i, expected, hostBuffer[i]);
-            }
-        }
-        EXPECT_TRUE(dataValid) << "Data validation failed after reg/dereg cycling";
+        EXPECT_TRUE(VerifyHostBuffer(buffer, bufferSize, seed)) << "Data validation failed after reg/dereg cycling";
     }
 }
 
@@ -1819,10 +1703,7 @@ TEST_F(NetIbMPITest, LargeTransfer_VNic) {
         ASSERT_EQ(PostRecv(pair.recvComm, 1, recvBuffers, recvSizes, recvTags,
                           recvHandles, &request), ncclSuccess);
     } else {
-        uint8_t* hostBuffer = static_cast<uint8_t*>(buffer);
-        for (size_t i = 0; i < bufferSize; i++) {
-            hostBuffer[i] = static_cast<uint8_t>((seed + i) % kBytePatternModulo);
-        }
+        FillHostBuffer(buffer, bufferSize, seed);
 
         PostSendWithRetry(pair.sendComm, buffer, bufferSize, tag, mhandle, &request);
     }
@@ -1838,28 +1719,7 @@ TEST_F(NetIbMPITest, LargeTransfer_VNic) {
     if (rank == 0) {
         EXPECT_EQ(sizes[0], bufferSize) << "Large transfer size mismatch";
 
-        uint8_t* hostBuffer = static_cast<uint8_t*>(buffer);
-        bool dataValid = true;
-        size_t errorsFound = 0;
-        const size_t maxErrorsToReport = 10;
-
-        for (size_t i = 0; i < bufferSize && errorsFound < maxErrorsToReport; i++) {
-            uint8_t expected = static_cast<uint8_t>((seed + i) % kBytePatternModulo);
-            if (hostBuffer[i] != expected) {
-                if (errorsFound == 0) {
-                    TEST_WARN("Rank %d: Data validation errors in large vNIC transfer:", rank);
-                }
-                TEST_WARN("  Index %zu: expected=%u, got=%u", i, expected, hostBuffer[i]);
-                dataValid = false;
-                errorsFound++;
-            }
-        }
-
-        if (!dataValid && errorsFound >= maxErrorsToReport) {
-            TEST_WARN("  ... (showing first %zu errors only)", maxErrorsToReport);
-        }
-
-        EXPECT_TRUE(dataValid) << "Large vNIC transfer data validation failed";
+        EXPECT_TRUE(VerifyHostBuffer(buffer, bufferSize, seed)) << "Large vNIC transfer data validation failed";
     }
 }
 
@@ -1938,10 +1798,7 @@ TEST_F(NetIbMPITest, MixedSizes_VNic) {
             ASSERT_EQ(PostRecv(pair.recvComm, 1, recvBuffers, recvSizes, recvTags,
                               recvHandles, &request), ncclSuccess);
         } else {
-            uint8_t* hostBuffer = static_cast<uint8_t*>(buffer);
-            for (size_t i = 0; i < size; i++) {
-                hostBuffer[i] = static_cast<uint8_t>((seed + i) % kBytePatternModulo);
-            }
+            FillHostBuffer(buffer, size, seed);
 
             PostSendWithRetry(pair.sendComm, buffer, size, tag, mhandle, &request);
         }
@@ -1958,17 +1815,7 @@ TEST_F(NetIbMPITest, MixedSizes_VNic) {
         if (rank == 0) {
             EXPECT_EQ(sizes[0], size) << "Size mismatch for transfer of " << size << " bytes";
 
-            uint8_t* hostBuffer = static_cast<uint8_t*>(buffer);
-            bool dataValid = true;
-            for (size_t j = 0; j < size && dataValid; j++) {
-                uint8_t expected = static_cast<uint8_t>((seed + j) % kBytePatternModulo);
-                if (hostBuffer[j] != expected) {
-                    dataValid = false;
-                    TEST_WARN("Rank %d: Mismatch at index %zu for size %zu: expected=%u, got=%u",
-                             rank, j, size, expected, hostBuffer[j]);
-                }
-            }
-            EXPECT_TRUE(dataValid) << "Data validation failed for size " << size;
+            EXPECT_TRUE(VerifyHostBuffer(buffer, size, seed)) << "Data validation failed for size " << size;
         }
     }
 }
@@ -2047,10 +1894,7 @@ TEST_F(NetIbMPITest, UnalignedSizeTransfer_VNic) {
             ASSERT_EQ(PostRecv(pair.recvComm, 1, recvBuffers, recvSizes, recvTags,
                               recvHandles, &request), ncclSuccess);
         } else {
-            uint8_t* hostBuffer = static_cast<uint8_t*>(buffer);
-            for (size_t i = 0; i < size; i++) {
-                hostBuffer[i] = static_cast<uint8_t>((seed + i) % kBytePatternModulo);
-            }
+            FillHostBuffer(buffer, size, seed);
 
             PostSendWithRetry(pair.sendComm, buffer, size, tag, mhandle, &request);
         }
@@ -2067,17 +1911,7 @@ TEST_F(NetIbMPITest, UnalignedSizeTransfer_VNic) {
         if (rank == 0) {
             EXPECT_EQ(sizes[0], size) << "Size mismatch for transfer of " << size << " bytes";
 
-            uint8_t* hostBuffer = static_cast<uint8_t*>(buffer);
-            bool dataValid = true;
-            for (size_t j = 0; j < size && dataValid; j++) {
-                uint8_t expected = static_cast<uint8_t>((seed + j) % kBytePatternModulo);
-                if (hostBuffer[j] != expected) {
-                    dataValid = false;
-                    TEST_WARN("Rank %d: Mismatch at index %zu for size %zu: expected=%u, got=%u",
-                             rank, j, size, expected, hostBuffer[j]);
-                }
-            }
-            EXPECT_TRUE(dataValid) << "Data validation failed for size " << size;
+            EXPECT_TRUE(VerifyHostBuffer(buffer, size, seed)) << "Data validation failed for size " << size;
         }
     }
 }
@@ -2193,10 +2027,7 @@ TEST_F(NetIbMPITest, Bidirectional_VNic) {
     const int sendSeed = 5700 + rank;
 
     // Fill send buffer with rank-specific pattern.
-    uint8_t* hostSendBuf = static_cast<uint8_t*>(sendBuf);
-    for (size_t i = 0; i < bufferSize; i++) {
-        hostSendBuf[i] = static_cast<uint8_t>((sendSeed + i) % kBytePatternModulo);
-    }
+    FillHostBuffer(sendBuf, bufferSize, sendSeed);
 
     // Post recv and send simultaneously on both connections.
     void* recvRequest = nullptr;
@@ -2227,17 +2058,7 @@ TEST_F(NetIbMPITest, Bidirectional_VNic) {
     int peerSeed = 5700 + peerRank;
     EXPECT_EQ(recvSizesOut[0], bufferSize) << "Received size mismatch";
 
-    uint8_t* hostRecvBuf = static_cast<uint8_t*>(recvBuf);
-    bool dataValid = true;
-    for (size_t i = 0; i < bufferSize && dataValid; i++) {
-        uint8_t expected = static_cast<uint8_t>((peerSeed + i) % kBytePatternModulo);
-        if (hostRecvBuf[i] != expected) {
-            dataValid = false;
-            TEST_WARN("Rank %d: Bidirectional mismatch at index %zu: expected=%u, got=%u",
-                     rank, i, expected, hostRecvBuf[i]);
-        }
-    }
-    EXPECT_TRUE(dataValid) << "Bidirectional vNIC transfer data validation failed";
+    EXPECT_TRUE(VerifyHostBuffer(recvBuf, bufferSize, peerSeed)) << "Bidirectional vNIC transfer data validation failed";
 }
 
 TEST_F(NetIbMPITest, FlushRepeated_VNic) {
@@ -2299,22 +2120,13 @@ TEST_F(NetIbMPITest, FlushRepeated_VNic) {
     ASSERT_EQ(RegisterMemory(comm, gpuBuffer, bufferSize, NCCL_PTR_CUDA, &mhandle), ncclSuccess);
     NetMHandleGuard mhandleGuard(mhandle, NetMHandleDeleter(net_, comm));
 
-    // Host staging buffer for fill and verify.
-    void* hostBuf = malloc(bufferSize);
-    ASSERT_NE(hostBuf, nullptr);
-    auto hostGuard = makeHostBufferAutoGuard(hostBuf);
-
     for (int iter = 0; iter < numIterations; iter++) {
         const int seed = 6000 + iter;
         void* request = nullptr;
 
         if (rank == 1) {
-            // Fill host staging buffer, copy to GPU, then send.
-            uint8_t* h = static_cast<uint8_t*>(hostBuf);
-            for (size_t i = 0; i < bufferSize; i++) {
-                h[i] = static_cast<uint8_t>((seed + i) % kBytePatternModulo);
-            }
-            HIP_TEST_CHECK_GTEST_FAIL(hipMemcpy(gpuBuffer, hostBuf, bufferSize, hipMemcpyHostToDevice));
+            // Fill GPU buffer via DeviceBufferHelpers (host vector → hipMemcpy in one call).
+            ASSERT_EQ(InitializeBuffer(gpuBuffer, bufferSize, seed), hipSuccess);
 
             PostSendWithRetry(pair.sendComm, gpuBuffer, bufferSize, tag, mhandle, &request);
         } else {
@@ -2348,21 +2160,9 @@ TEST_F(NetIbMPITest, FlushRepeated_VNic) {
                 ASSERT_EQ(WaitForCompletion(flushRequest, nullptr), ncclSuccess);
             }
 
-            // Copy GPU buffer to host and verify data.
-            memset(hostBuf, 0, bufferSize);
-            HIP_TEST_CHECK_GTEST_FAIL(hipMemcpy(hostBuf, gpuBuffer, bufferSize, hipMemcpyDeviceToHost));
-
-            uint8_t* h = static_cast<uint8_t*>(hostBuf);
-            bool dataValid = true;
-            for (size_t i = 0; i < bufferSize && dataValid; i++) {
-                uint8_t expected = static_cast<uint8_t>((seed + i) % kBytePatternModulo);
-                if (h[i] != expected) {
-                    dataValid = false;
-                    TEST_WARN("Iter %d: flush mismatch at index %zu: expected=%u, got=%u",
-                             iter, i, expected, h[i]);
-                }
-            }
-            ASSERT_TRUE(dataValid) << "Iter " << iter << ": data verification failed after flush";
+            // Verify GPU buffer via DeviceBufferHelpers (hipMemcpy + compare in one call).
+            ASSERT_TRUE(VerifyBuffer(gpuBuffer, bufferSize, seed))
+                << "Iter " << iter << ": data verification failed after flush";
         }
 
         MPI_Barrier(MPI_COMM_WORLD);
@@ -2429,10 +2229,7 @@ TEST_F(NetIbMPITest, SequentialTransfers_VNic) {
 
         if (rank == 1) {
             // Fill buffer with per-iteration pattern.
-            uint8_t* h = static_cast<uint8_t*>(buffer);
-            for (size_t i = 0; i < bufferSize; i++) {
-                h[i] = static_cast<uint8_t>((seed + i) % kBytePatternModulo);
-            }
+            FillHostBuffer(buffer, bufferSize, seed);
 
             PostSendWithRetry(pair.sendComm, buffer, bufferSize, tag, mhandle, &request);
         } else {
@@ -2458,17 +2255,7 @@ TEST_F(NetIbMPITest, SequentialTransfers_VNic) {
         if (rank == 0) {
             ASSERT_EQ(sizes[0], bufferSize) << "Iter " << iter << ": received size mismatch";
 
-            uint8_t* h = static_cast<uint8_t*>(buffer);
-            bool dataValid = true;
-            for (size_t i = 0; i < bufferSize && dataValid; i++) {
-                uint8_t expected = static_cast<uint8_t>((seed + i) % kBytePatternModulo);
-                if (h[i] != expected) {
-                    dataValid = false;
-                    TEST_WARN("Iter %d: mismatch at index %zu: expected=%u, got=%u",
-                             iter, i, expected, h[i]);
-                }
-            }
-            ASSERT_TRUE(dataValid) << "Iter " << iter << ": data verification failed";
+            ASSERT_TRUE(VerifyHostBuffer(buffer, bufferSize, seed)) << "Iter " << iter << ": data verification failed";
         }
 
         // Sync before next iteration to prevent request reuse races.
@@ -2528,10 +2315,7 @@ TEST_F(NetIbMPITest, Reconnect_VNic) {
 
         if (rank == 1) {
             // Fill with cycle-specific pattern.
-            uint8_t* h = static_cast<uint8_t*>(buffer);
-            for (size_t i = 0; i < bufferSize; i++) {
-                h[i] = static_cast<uint8_t>((seed + i) % kBytePatternModulo);
-            }
+            FillHostBuffer(buffer, bufferSize, seed);
 
             PostSendWithRetry(pair.sendComm, buffer, bufferSize, tag, mhandle, &request);
         } else {
@@ -2555,17 +2339,7 @@ TEST_F(NetIbMPITest, Reconnect_VNic) {
         if (rank == 0) {
             ASSERT_EQ(sizes[0], bufferSize) << "Cycle " << cycle << ": received size mismatch";
 
-            uint8_t* h = static_cast<uint8_t*>(buffer);
-            bool dataValid = true;
-            for (size_t i = 0; i < bufferSize && dataValid; i++) {
-                uint8_t expected = static_cast<uint8_t>((seed + i) % kBytePatternModulo);
-                if (h[i] != expected) {
-                    dataValid = false;
-                    TEST_WARN("Cycle %d: mismatch at index %zu: expected=%u, got=%u",
-                             cycle, i, expected, h[i]);
-                }
-            }
-            ASSERT_TRUE(dataValid) << "Cycle " << cycle << ": data verification failed";
+            ASSERT_TRUE(VerifyHostBuffer(buffer, bufferSize, seed)) << "Cycle " << cycle << ": data verification failed";
         }
 
         MPI_Barrier(MPI_COMM_WORLD);

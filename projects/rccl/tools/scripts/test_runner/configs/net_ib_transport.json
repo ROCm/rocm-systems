@@ -10,7 +10,7 @@
   },
   "auto_detect_hosts": true,
   "mpi_args": {
-    "alola": "--mca oob_tcp_if_include eth1 --mca btl_tcp_if_include eth1 --mca btl ^vader,openib --bind-to none",
+    "mellanox": "--mca oob_tcp_if_include eth1 --mca btl_tcp_if_include eth1 --mca btl ^vader,openib --bind-to none",
     "ainic": "--mca oob_tcp_if_include eno0 --mca btl_tcp_if_include eno0 --mca btl ^vader,openib --bind-to none",
     "thor2": "--oversubscribe --mca plm_rsh_agent srun --mca oob_tcp_if_include eno8303 --mca btl_tcp_if_include eno8303 --mca btl ^openib --bind-to none"
   },
@@ -18,7 +18,7 @@
     "NCCL_DEBUG": "INFO"
   },
   "system_env_variables": {
-    "alola": {
+    "mellanox": {
       "HSA_NO_SCRATCH_RECLAIM": "1",
       "NCCL_SOCKET_IFNAME": "eth0,eth1",
       "NCCL_IB_HCA": "mlx_5_5,mlx_5_7,mlx5_2,mlx_5_1,mlx_5_7",
