@@ -1,4 +1,4 @@
-#include "hsa/hsa_ext_amd.h"
+#include "hsa_includes.h"
 #include "include/aqlprofile-sdk/aql_profile_v2.h"
 #include "include/spm_common.hpp"
 #include "memorymanager.hpp"
@@ -14,9 +14,6 @@
 #include <array>
 #include <shared_mutex>
 #include <filesystem>
-
-#define PUBLIC_API __attribute__((visibility("default")))
-
 
 static void producer(std::shared_ptr<class spm_state_t> s);
 static void consumer(std::shared_ptr<class spm_state_t> s, aqlprofile_spm_data_callback_t callback, void* userdata);

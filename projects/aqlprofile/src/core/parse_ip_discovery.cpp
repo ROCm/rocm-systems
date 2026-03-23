@@ -253,7 +253,7 @@ discovery_table_t parse_ip_discovery(uint32_t domain, uint32_t bdf) {
     // subfolders in "/sys/bus/pci/devices/{domain_bdf_str}/ip_discovery/die/{die_num}"
     for (const auto& ip_entry : fs::directory_iterator(die_entry_path)) {
       if (!ip_entry.is_directory()) continue;
-      const std::string filename = ip_entry.path().filename();
+      const std::string filename = ip_entry.path().filename().string();
       if (std::isalpha(filename[0])) {
         const auto instances = parse_ip_instances(die_num, die_entry.path(), filename);
         table.insert(table.end(), instances.begin(), instances.end());

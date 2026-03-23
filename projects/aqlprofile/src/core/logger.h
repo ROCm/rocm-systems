@@ -26,11 +26,18 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <time.h>
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#else
 #include <sys/file.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
-#include <time.h>
 #include <unistd.h>
+#endif
 
 #include <exception>
 #include <fstream>
@@ -86,8 +93,13 @@ class Logger {
   }
 
  private:
+#ifdef _WIN32
+  static uint32_t GetPid() { return static_cast<uint32_t>(GetCurrentProcessId()); }
+  static uint32_t GetTid() { return static_cast<uint32_t>(GetCurrentThreadId()); }
+#else
   static uint32_t GetPid() { return syscall(__NR_getpid); }
   static uint32_t GetTid() { return syscall(__NR_gettid); }
+#endif
 
   Logger() : file_(NULL), dirty_(false), streaming_(false), messaging_(false) {
     const char* path = getenv("HSA_VEN_AMD_AQLPROFILE_LOG");
@@ -120,17 +132,25 @@ class Logger {
     }
     if (file_ != NULL) {
       dirty_ = true;
+#ifndef _WIN32
       flock(fileno(file_), LOCK_EX);
+#endif
       fprintf(file_, "%s", m.c_str());
       fflush(file_);
+#ifndef _WIN32
       flock(fileno(file_), LOCK_UN);
+#endif
     }
   }
 
   void Log(const std::string& m) {
     const time_t rawtime = time(NULL);
     tm tm_info;
+#ifdef _WIN32
+    localtime_s(&tm_info, &rawtime);
+#else
     localtime_r(&rawtime, &tm_info);
+#endif
     char tm_str[26];
     strftime(tm_str, 26, "%Y-%m-%d %H:%M:%S", &tm_info);
     std::ostringstream oss;

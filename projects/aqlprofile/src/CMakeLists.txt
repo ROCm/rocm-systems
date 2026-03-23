@@ -34,10 +34,21 @@ target_include_directories ( ${TARGET_LIB}
           ${API_PATH}
           ${LIB_DIR}/core/include
 )
+if ( WIN32 )
+  # Locate the pre-built HIP import library (re-exports all HSA runtime symbols)
+  find_library ( AMDHIP64_LIB
+    NAMES amdhip64
+    HINTS "${AMDHIP64_LIB_DIR}"
+    NO_DEFAULT_PATH
+  )
+  message ( "---AMDHIP64_LIB: ${AMDHIP64_LIB}" )
+endif ()
+
 target_link_libraries( ${TARGET_LIB}
   PRIVATE
-    pthread
-    hsa-runtime64::hsa-runtime64
+    $<$<NOT:$<BOOL:${WIN32}>>:pthread>
+    $<$<NOT:$<BOOL:${WIN32}>>:hsa-runtime64::hsa-runtime64>
+    $<$<BOOL:${WIN32}>:${AMDHIP64_LIB}>
   PUBLIC
     aqlprofile::headers
 )

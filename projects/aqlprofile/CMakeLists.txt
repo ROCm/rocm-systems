@@ -52,10 +52,12 @@ include ( ${LIB_DIR}/CMakeLists.txt )
 
 ## Set the VERSION and SOVERSION values
 set_property ( TARGET ${TARGET_NAME} PROPERTY VERSION "${LIB_VERSION_STRING}" )
-set_property ( TARGET ${TARGET_NAME} PROPERTY SOVERSION "${LIB_VERSION_MAJOR}" )
+if ( NOT WIN32 )
+  set_property ( TARGET ${TARGET_NAME} PROPERTY SOVERSION "${LIB_VERSION_MAJOR}" )
+endif ()
 
-## If the library is a release, strip the target library
-if ( "${CMAKE_BUILD_TYPE}" STREQUAL release )
+## If the library is a release, strip the target library (Linux only)
+if ( NOT WIN32 AND "${CMAKE_BUILD_TYPE}" STREQUAL release )
   add_custom_command ( TARGET ${AQLPROFILE_TARGET} POST_BUILD COMMAND ${CMAKE_STRIP} *aqlprofile*.so )
 endif ()
 

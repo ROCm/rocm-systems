@@ -23,7 +23,7 @@
 #ifndef SRC_CORE_AQL_PROFILE_H_
 #define SRC_CORE_AQL_PROFILE_H_
 
-#include <hsa/hsa_ven_amd_aqlprofile.h>
+#include "hsa_includes.h"
 
 #include <iostream>
 #include <string>
@@ -31,7 +31,11 @@
 
 #include "core/aql_profile_exception.h"
 
+#ifdef _WIN32
+#define PUBLIC_API
+#else
 #define PUBLIC_API __attribute__((visibility("default")))
+#endif
 
 namespace pm4_builder {
 class CmdBuilder;
