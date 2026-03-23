@@ -13,10 +13,10 @@ Network performance profiling
 
 .. _event-based-profiling:
 
-Event-based profiling via PAPI counters
-=========================================
+Sampling conventional NIC metric using PAPI
+============================================
 
-This method profiles standard network events. You can sample the events based on standard network interface counters. Follow the steps to list all the network events, sample them using configuration parameters, instrument and run the generated binary, and visualize the Perfetto trace.
+Network performance profiling for conventional network interfaces that support TCP/IP is done using Performance Application Programming Interface (PAPI). This method profiles standard network events. You can sample the events based on standard network interface counters. Follow the steps to list all the network events, sample them using configuration parameters, instrument and run the generated binary, and visualize the Perfetto trace.
 
 List available network events
 -------------------------------
@@ -136,7 +136,7 @@ This command generates an instrumented binary ``foo.inst``.
 
 .. code-block:: shell
 
-  rocprof-sys-run -- ./foo.inst
+  rocprof-sys-sample -- ./foo.inst
 
 
 Visualize the event-based profiling results
@@ -154,7 +154,7 @@ To view the generated ``.proto`` file in the browser, follow the steps:
 
 .. _AINIC-metric-collection:
 
-AI NIC metrics collection using amd-smi
+Sampling AI NIC metrics using amd-smi
 =========================================
 
 On a host system that has AI network interface cards, ROCm Systems Profiler can track the following metrics:
@@ -168,7 +168,7 @@ On a host system that has AI network interface cards, ROCm Systems Profiler can 
 
 AI NIC support in ROCm Systems Profiler
 ---------------------------------------
-By default, AI NIC support is enabled in ROCm Systems Profiler. However, you can disable it by setting:
+AI NIC interfaces support the Remote Direct Memory Access (RDMA) standard. RDMA enables one computer to access another computer’s memory directly, without operating-system involvement. This capability provides high-throughput, low‑latency data transfer, which is needed for large-scale clusters and high-performance networking. You can measure AI NIC network performance by using ``amd-smi``. By default, AI NIC support is enabled in ROCm Systems Profiler. However, you can disable it by setting:
 
 .. code-block:: shell
 
