@@ -28,7 +28,7 @@ static int is_wsl2 = -1;
   }                                  \
 } while(false)
 
-RCCL_PARAM(UseAmdSmiLib, "USE_AMD_SMI_LIB", 0); // Opt-in environment variable for enabling using amd_smi_lib instead of internal code
+RCCL_PARAM(UseAmdSmiLib, "USE_AMD_SMI_LIB", 1); // Opt-in environment variable for enabling using amd_smi_lib instead of internal code
 
 ncclResult_t amd_smi_init() {
   if (__atomic_load_n(&is_wsl2, __ATOMIC_ACQUIRE) == -1)
@@ -201,7 +201,7 @@ ncclResult_t amd_smi_getDeviceIndexByPciBusId(const char* pciBusId, uint32_t* de
       bdf.domain_number = busid >> 20;
 
       AMDSMICHECK(amdsmi_get_processor_handle_from_bdf(bdf, &processor_handle));
-      
+
       processor_type_t type;
       AMDSMICHECK(amdsmi_get_processor_type(processor_handle, &type));
       if(type == AMDSMI_PROCESSOR_TYPE_AMD_GPU) {
@@ -210,7 +210,7 @@ ncclResult_t amd_smi_getDeviceIndexByPciBusId(const char* pciBusId, uint32_t* de
         *deviceIndex = info.hip_id;
         return ncclSuccess;
       }
-      
+
       ERROR("amdsmi_lib: %s device index not found", pciBusId);
     } else {
       uint32_t i, num_devs = 0;
