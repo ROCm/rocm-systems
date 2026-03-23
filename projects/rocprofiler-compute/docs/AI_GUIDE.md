@@ -38,7 +38,7 @@ OpenCode can also set extra paths via **`opencode.json`** (`instructions` / proj
 
 ## Quick start
 
-1. Skim [`.ai/harness/multi_model.md`](../.ai/harness/multi_model.md) once to see how your tool maps to the four layers.
+1. Skim [`.ai/harness/multi_model.md`](../.ai/harness/multi_model.md) once to see how your tool maps to the four layers; follow [`.ai/harness/execution_flow.md`](../.ai/harness/execution_flow.md) for the step-by-step loop.
 2. Open [`.ai/rules/core.md`](../.ai/rules/core.md) and [`.ai/rules/security.md`](../.ai/rules/security.md).
 3. Paste or attach [`.ai/prompts/default.md`](../.ai/prompts/default.md) (or summarize it) in your assistant.
 4. Choose a skill from [`.ai/skills/index.md`](../.ai/skills/index.md) (use [`.ai/harness/skill_taxonomy.md`](../.ai/harness/skill_taxonomy.md) or [`.ai/harness/capabilities.md`](../.ai/harness/capabilities.md) if needed). Planned **DAG / MCP / subagent** work is sketched in [`.ai/harness/future.md`](../.ai/harness/future.md).

@@ -20,3 +20,5 @@ Add behavior with minimal surface area.
 ## Output
 
 - Patch-sized code change, tests or justification if not applicable, and how you ran ruff/pytest (or CMake for native).
+
+**Output format (strict):** [`.ai/harness/skill_output_contract.md`](../harness/skill_output_contract.md).

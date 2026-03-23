@@ -2,7 +2,7 @@
 
 Lightweight checks that the **`.ai/`** tree and tool entry points stay complete and skills stay structured.
 
-**Multi-model spec:** [multi_model.md](multi_model.md) (Context → Skills → Tools → Hooks for Claude, Codex, Cursor, Copilot, OpenCode, etc.). **Skill taxonomy (tree):** [skill_taxonomy.md](skill_taxonomy.md) · **Capability diagram:** [capabilities.md](capabilities.md) · **Tools policy:** [tools-policy.md](tools-policy.md). **Advanced (reserved templates):** [future.md](future.md).
+**Multi-model spec:** [multi_model.md](multi_model.md) (Context → Skills → Tools → Hooks for Claude, Codex, Cursor, Copilot, OpenCode, etc.). **Execution loop:** [execution_flow.md](execution_flow.md). **Skill outputs (strict):** [skill_output_contract.md](skill_output_contract.md). **Skill taxonomy (tree):** [skill_taxonomy.md](skill_taxonomy.md) · **Capability diagram:** [capabilities.md](capabilities.md) · **Tools policy:** [tools-policy.md](tools-policy.md). **Advanced (reserved templates):** [future.md](future.md).
 
 ## Layers
 

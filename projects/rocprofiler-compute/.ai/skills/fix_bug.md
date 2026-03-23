@@ -19,3 +19,5 @@ Correct behavior without scope creep.
 ## Output
 
 - Minimal fix, test proving the bug (before/after when useful), and validation commands run.
+
+**Output format (strict):** [`.ai/harness/skill_output_contract.md`](../harness/skill_output_contract.md).

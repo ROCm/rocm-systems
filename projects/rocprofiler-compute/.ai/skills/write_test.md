@@ -19,3 +19,5 @@ Increase coverage or lock behavior with deterministic tests.
 ## Output
 
 - New or updated tests, fixture notes if any, and `pytest` invocation used.
+
+**Output format (strict):** [`.ai/harness/skill_output_contract.md`](../harness/skill_output_contract.md).

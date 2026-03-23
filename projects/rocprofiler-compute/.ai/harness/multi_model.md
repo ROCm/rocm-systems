@@ -21,7 +21,7 @@ The same **four-layer** pattern applies to **any** coding agent (Claude, GPT / C
 | **GitHub Copilot** | [`.github/copilot-instructions.md`](../../.github/copilot-instructions.md) | Points at `.ai/` | pre-commit + `ai_dev_harness.py` |
 | **Humans** | [docs/AI_GUIDE.md](../../docs/AI_GUIDE.md) | [`.ai/README.md`](../README.md) | CI + pre-commit |
 
-**Single source of truth** for rules, standards, skills, prompts: **`.ai/`** (especially [`.ai/rules/`](../rules/), [`.ai/skills/`](../skills/), [`.ai/prompts/default.md`](../prompts/default.md)). **Skill taxonomy (tree):** [skill_taxonomy.md](skill_taxonomy.md). **Reserved advanced templates (DAG / MCP / subagents):** [future.md](future.md).
+**Single source of truth** for rules, standards, skills, prompts: **`.ai/`** (especially [`.ai/rules/`](../rules/), [`.ai/skills/`](../skills/), [`.ai/prompts/default.md`](../prompts/default.md), [`.ai/prompts/run_session.md`](../prompts/run_session.md)). **Execution loop:** [execution_flow.md](execution_flow.md). **Skill deliverables:** [skill_output_contract.md](skill_output_contract.md). **Skill taxonomy (tree):** [skill_taxonomy.md](skill_taxonomy.md). **Reserved advanced templates (DAG / MCP / subagents):** [future.md](future.md).
 
 ## AgentSkillOS (optional theory)
 

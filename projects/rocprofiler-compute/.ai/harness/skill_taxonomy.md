@@ -8,7 +8,7 @@ Formal **classification** for `.ai/skills/*.md`. The diagram mirrors the [capabi
 | `D` | **Domain / GPU & metrics** | SoC classes, counter YAML, hardware-specific defs | `update_soc_or_counters` |
 | `A` | **Analysis** | Roofline, stats, CLI/Web analysis paths | `analyze_or_roofline` |
 | `G` | **Execution graph & trace** | Kernels, markers, CSV/trace shape, dispatch narrative | `execution_graph_trace` |
-| `N` | **Native / build** | C++ tool, CMake, rocprofiler-sdk | `native_or_cmake` |
+| `N` | **Native / build** | C++ tool, CMake, rocprofiler-sdk, **broken configure/build** | `native_or_cmake`, `fix_build_failure` |
 | `Q` | **Quality** | Bugs, tests, regressions | `fix_bug`, `write_test` |
 | `Perf` | **Performance engineering** | Hot paths, complexity, allocations (no behavior change unless agreed) | `optimize_performance` |
 
@@ -16,7 +16,8 @@ Formal **classification** for `.ai/skills/*.md`. The diagram mirrors the [capabi
 
 1. Pick the **deepest matching category** (e.g. trace column semantics → `G` before `A`).
 2. If two categories apply, choose **primary user outcome** (correctness → `Q`; speed → `Perf`).
-3. Use [`.ai/skills/index.md`](../skills/index.md) for a flat intent → file map.
+3. **CMake/build failure** → `fix_build_failure` before `native_or_cmake` unless the task is new native **feature** work.
+4. Use [`.ai/skills/index.md`](../skills/index.md) for a flat intent → file map.
 
 ## Relation to composition
 

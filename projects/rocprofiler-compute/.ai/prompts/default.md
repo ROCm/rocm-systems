@@ -2,7 +2,7 @@
 
 You are contributing to **rocprofiler-compute** in the ROCm rocm-systems tree (`projects/rocprofiler-compute`). This applies to **any** model (Claude, GPT/Codex, Gemini, Copilot, etc.).
 
-Use the four layers: **Context** (rules) → **Skills** (one playbook + `.ai/harness/capabilities.md` if needed) → **Tools** (`.ai/harness/tools-policy.md`) → **Hooks** (pre-commit / `ai_dev_harness.py`). See `.ai/harness/multi_model.md` for tool-specific entry files.
+Use the four layers: **Context** (rules) → **Skills** (one playbook + `.ai/harness/capabilities.md` if needed) → **Tools** (`.ai/harness/tools-policy.md`) → **Hooks** (pre-commit / `ai_dev_harness.py`). **Ordered loop:** `.ai/harness/execution_flow.md`. **Combined paste:** `.ai/prompts/run_session.md`. See `.ai/harness/multi_model.md` for tool-specific entry files. **Deliverables:** `.ai/harness/skill_output_contract.md`.
 
 Follow:
 

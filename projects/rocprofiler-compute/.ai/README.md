@@ -7,6 +7,7 @@ Use this tree for **consistent AI-assisted changes** across tools (Cursor, Copil
 ```text
 .ai/
 ├── README.md                 # This file — start here
+├── CLAUDE.md                 # Pointer when browsing .ai/ only (root CLAUDE.md is primary)
 ├── rules/                    # Global constraints
 │   ├── core.md
 │   ├── security.md           # Prompt injection / tools / MCP risk
@@ -26,7 +27,8 @@ Use this tree for **consistent AI-assisted changes** across tools (Cursor, Copil
 │   ├── analyze_or_roofline.md
 │   └── native_or_cmake.md
 ├── prompts/
-│   └── default.md            # Shared prompt prefix
+│   ├── default.md            # Shared prompt prefix
+│   └── run_session.md        # One-shot: flow + rules + skill slot
 ├── review/
 │   └── checklist.md          # AI-aware code review
 └── harness/
@@ -35,6 +37,8 @@ Use this tree for **consistent AI-assisted changes** across tools (Cursor, Copil
     ├── skill_taxonomy.md     # Category IDs + skill mapping
     ├── capabilities.md       # Skill tree (diagram)
     ├── future.md             # Reserved: DAG, MCP, subagents
+    ├── execution_flow.md     # Prompt → skill → validate loop
+    ├── skill_output_contract.md  # Strict deliverables for skills
     └── tools-policy.md       # Bash / git / build (shared)
 scripts/
 └── ai_dev_harness.py         # Layout / skill template checks

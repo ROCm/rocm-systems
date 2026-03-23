@@ -14,7 +14,8 @@ rocprofiler-compute
 ├── execution graph & trace [G]
 │   └── execution_graph_trace.md   # kernels, markers, CSV/trace shape
 ├── platform / native      [N]
-│   └── native_or_cmake.md
+│   ├── native_or_cmake.md
+│   └── fix_build_failure.md   # CMake/link/ROCm configure failures
 ├── quality                [Q]
 │   ├── fix_bug.md
 │   └── write_test.md
@@ -34,5 +35,6 @@ Multi-step tasks should chain **existing** skills without new architecture (auto
 | Trace / column / parser change | `execution_graph_trace` → `write_test` |
 | Speedups after correctness | `fix_bug` → `optimize_performance` (or `optimize_performance` alone if behavior frozen) |
 | Native change | `native_or_cmake` → integration smoke (manual or CI) |
+| Build broken | `fix_build_failure` → `native_or_cmake` if larger feature fix needed |
 
 Always apply [`.ai/rules/core.md`](../rules/core.md) and relevant **standards** before specializing.

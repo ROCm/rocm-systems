@@ -1,6 +1,6 @@
 # Claude Code — project brain (rocprofiler-compute)
 
-This file is the **context layer** for Claude Code. **Skills** and shared harness docs are **tool-agnostic**: capability tree [`.ai/harness/capabilities.md`](.ai/harness/capabilities.md), tools policy [`.ai/harness/tools-policy.md`](.ai/harness/tools-policy.md), multi-model map [`.ai/harness/multi_model.md`](.ai/harness/multi_model.md). **Claude-only hooks** live in `.claude/settings.json` + `.claude/hooks/`.
+This file is the **context layer** for Claude Code. **Skills** and shared harness docs are **tool-agnostic**: capability tree [`.ai/harness/capabilities.md`](.ai/harness/capabilities.md), tools policy [`.ai/harness/tools-policy.md`](.ai/harness/tools-policy.md), multi-model map [`.ai/harness/multi_model.md`](.ai/harness/multi_model.md), **execution loop** [`.ai/harness/execution_flow.md`](.ai/harness/execution_flow.md). Browsing only `.ai/`? Start [`.ai/CLAUDE.md`](.ai/CLAUDE.md). **Claude-only hooks** live in `.claude/settings.json` + `.claude/hooks/`.
 
 OpenCode may also read this file; **Codex** should use [`AGENTS.md`](AGENTS.md) instead.
 
@@ -39,6 +39,7 @@ For **hierarchical skill organization** and **composition** at scale, see *Organ
 ## Prompts and review
 
 - Default user prefix: [`.ai/prompts/default.md`](.ai/prompts/default.md)
+- Combined session block: [`.ai/prompts/run_session.md`](.ai/prompts/run_session.md)
 - Before PR: [`.ai/review/checklist.md`](.ai/review/checklist.md)
 
 ## Claude-specific rule file
