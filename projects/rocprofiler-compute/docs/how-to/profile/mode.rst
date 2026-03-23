@@ -100,86 +100,101 @@ The following sample command profiles the ``vcopy`` workload.
 .. code-block:: shell-session
 
    $ rocprof-compute profile --name vcopy -- ./vcopy -n 1048576 -b 256
+      INFO 6a57288d55
 
                                     __                                       _
-    _ __ ___   ___ _ __  _ __ ___  / _|       ___ ___  _ __ ___  _ __  _   _| |_ ___
+   _ __ ___   ___ _ __  _ __ ___  / _|       ___ ___  _ __ ___  _ __  _   _| |_ ___
    | '__/ _ \ / __| '_ \| '__/ _ \| |_ _____ / __/ _ \| '_ ` _ \| '_ \| | | | __/ _ \
    | | | (_) | (__| |_) | | | (_) |  _|_____| (_| (_) | | | | | | |_) | |_| | ||  __/
    |_|  \___/ \___| .__/|_|  \___/|_|        \___\___/|_| |_| |_| .__/ \__,_|\__\___|
                   |_|                                           |_|
 
-   INFO Rocprofiler-Compute version: 3.5.0
-   INFO Profiler choice: rocprofiler-sdk
-   INFO Path: /home/auser/rocprofiler-compute/workloads/vcopy/MI325X
-   INFO Target: MI325X
-   INFO Command: ./sample/vcopy -n 1048576 -b 256
-   INFO Kernel Selection: None
-   INFO Dispatch Selection: None
-   INFO Filtered sections: All
-   INFO
-   INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-   INFO Collecting Performance Counters
-   INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-   INFO
-   INFO Using native counter collection tool: /tmp/rocprofiler-compute-tool-xxxxx/librocprofiler-compute-tool.so
-   INFO [profiling] Iteration multiplexing: Disabled
-   INFO [Run 1/13][Approximate profiling time left: pending first measurement...]
-   INFO [profiling] Current input file: /home/auser/rocprofiler-compute/workloads/vcopy/MI325X/perfmon/SQC_DCACHE_INFLIGHT_LEVEL.txt
-   INFO    |-> [rocprofiler-sdk] [rocprofiler-compute] [rocprofiler_configure] (priority=1) is using rocprofiler-sdk v1.1.0 (1.1.0)
-   INFO    |-> [rocprofiler-sdk] W20260322 00:13:35.494286 140228330987264 simple_timer.cpp:55] [rocprofv3] tool initialization ::     0.449236 sec
-   INFO    |-> [rocprofiler-sdk] [rocprofiler-compute] In tool init
-   INFO    |-> [rocprofiler-sdk] W20260322 00:13:35.494577 140228330987264 simple_timer.cpp:55] [rocprofv3] './sample/vcopy -n 1048576 -b 256' ::     0.000000 sec
-   INFO    |-> [rocprofiler-sdk] W20260322 00:13:35.795217 140228330987264 tool.cpp:2422] HSA version 8.21.0 initialized (instance=0)
-   INFO    |-> [rocprofiler-sdk] W20260322 00:13:35.909222 140228330987264 simple_timer.cpp:55] [rocprofv3] './sample/vcopy -n 1048576 -b 256' ::     0.414645 sec
-   INFO    |-> [rocprofiler-sdk] W20260322 00:13:35.932016 140228330987264 generateRocpd.cpp:582] writing SQL database for process 3328994 on node 1574819130
-   INFO    |-> [rocprofiler-sdk] E20260322 00:13:35.932678 140228330987264 generateRocpd.cpp:605] Opened result file: /home/auser/rocprofiler-compute/workloads/vcopy/MI325X/out/pmc_1/hostname/3328994_results.db (UUID=00000773-bf9b-7f9b-94fa-b89b01ffc52e)
-   INFO    |-> [rocprofiler-sdk] W20260322 00:13:35.972892 140228330987264 simple_timer.cpp:55] SQLite3 generation :: rocpd_string             ::     0.011922 sec
-   INFO    |-> [rocprofiler-sdk] W20260322 00:13:35.973407 140228330987264 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_node          ::     0.000498 sec
-   INFO    |-> [rocprofiler-sdk] W20260322 00:13:35.974453 140228330987264 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_process       ::     0.001040 sec
-   INFO    |-> [rocprofiler-sdk] W20260322 00:13:35.992219 140228330987264 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_agent         ::     0.017048 sec
-   INFO    |-> [rocprofiler-sdk] W20260322 00:13:38.531269 140228330987264 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_pmc           ::     2.539034 sec
-   INFO    |-> [rocprofiler-sdk] W20260322 00:13:38.532401 140228330987264 simple_timer.cpp:55] SQLite3 generation :: rocpd kernel info        ::     0.001099 sec
-   INFO    |-> [rocprofiler-sdk] W20260322 00:13:38.532409 140228330987264 simple_timer.cpp:55] SQLite3 generation :: rocpd_region             ::     0.000002 sec
-   INFO    |-> [rocprofiler-sdk] W20260322 00:13:38.537790 140228330987264 simple_timer.cpp:55] SQLite3 generation :: rocpd_kernel_dispatch    ::     0.005378 sec
-   INFO    |-> [rocprofiler-sdk] W20260322 00:13:38.537802 140228330987264 simple_timer.cpp:55] SQLite3 generation :: rocpd_pmc_event          ::     0.000000 sec
-   INFO    |-> [rocprofiler-sdk] W20260322 00:13:38.537804 140228330987264 simple_timer.cpp:55] SQLite3 generation :: rocpd_memory_copy        ::     0.000000 sec
-   INFO    |-> [rocprofiler-sdk] W20260322 00:13:38.537807 140228330987264 simple_timer.cpp:55] SQLite3 generation :: rocpd_memory_allocate    ::     0.000001 sec
-   INFO    |-> [rocprofiler-sdk] W20260322 00:13:38.537895 140228330987264 simple_timer.cpp:55] SQLite3 generation :: SQL indexing             ::     0.000087 sec
-   INFO    |-> [rocprofiler-sdk] W20260322 00:13:38.538263 140228330987264 simple_timer.cpp:55] SQLite3 generation :: total                    ::     2.606247 sec
-   INFO    |-> [rocprofiler-sdk] W20260322 00:13:38.539802 140228330987264 simple_timer.cpp:55] [rocprofv3] output generation ::     2.627237 sec
-   INFO    |-> [rocprofiler-sdk] W20260322 00:13:38.539961 140228330987264 simple_timer.cpp:55] [rocprofv3] tool finalization ::     2.630707 sec
-   INFO    |-> [rocprofiler-sdk] [rocprofiler-compute] In tool fini
-   INFO    |-> [rocprofiler-sdk] [rocprofiler-compute] [generate_output] Counter collection data has been written to: /home/auser/rocprofiler-compute/workloads/vcopy/MI325X/out/pmc_1/3328994_native_counter_collection.csv
-   INFO    |-> [rocprofiler-sdk] vcopy testing on GCD 0
-   INFO    |-> [rocprofiler-sdk] Finished allocating vectors on the CPU
-   INFO    |-> [rocprofiler-sdk] Finished allocating vectors on the GPU
-   INFO    |-> [rocprofiler-sdk] Finished copying vectors to the GPU
-   INFO    |-> [rocprofiler-sdk] sw thinks it moved 1.000000 KB per wave
-   INFO [Run 2/13][Approximate profiling time left: 55 seconds]...
-   INFO [profiling] Current input file: /home/auser/rocprofiler-compute/workloads/vcopy/MI325X/perfmon/SQC_ICACHE_INFLIGHT_LEVEL.txt
+      INFO Rocprofiler-Compute version: 3.5.0
+      INFO Profiler choice: rocprofiler-sdk
+      INFO Path: /home/auser/rocm-systems/projects/rocprofiler-compute/workloads/vcopy/MI325X
+      INFO Target: MI325X
+      INFO Command: ./sample/vcopy -n 1048576 -b 256
+      INFO Kernel Selection: None
+      INFO Dispatch Selection: None
+      INFO Filtered sections: All
+      INFO
+      INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+      INFO Collecting Performance Counters
+      INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+      INFO
+      INFO Using native counter collection tool: /tmp/rocprofiler-compute-tool-xxxxx/librocprofiler-compute-tool.so
+      INFO [profiling] Iteration multiplexing: Disabled
+      INFO [Run 1/13][Approximate profiling time left: pending first measurement...]
+      INFO [profiling] Current input file: /home/auser/rocm-systems/projects/rocprofiler-compute/workloads/vcopy/MI325X/perfmon/SQC_DCACHE_INFLIGHT_LEVEL.txt
+      INFO    |-> [rocprofiler-sdk] [rocprofiler-compute] [rocprofiler_configure] (priority=1) is using rocprofiler-sdk v1.1.0 (1.1.0)
+      INFO    |-> [rocprofiler-sdk] W20260323 16:43:44.337323 139842239868672 simple_timer.cpp:55] [rocprofv3] tool initialization ::     0.250706 sec
+      INFO    |-> [rocprofiler-sdk] [rocprofiler-compute] In tool init
+      INFO    |-> [rocprofiler-sdk] W20260323 16:43:44.337534 139842239868672 simple_timer.cpp:55] [rocprofv3] './sample/vcopy -n 1048576 -b 256' ::     0.000000 sec
+      INFO    |-> [rocprofiler-sdk] W20260323 16:43:44.511316 139842239868672 tool.cpp:2422] HSA version 8.21.0 initialized (instance=0)
+      INFO    |-> [rocprofiler-sdk] W20260323 16:43:44.611214 139842239868672 simple_timer.cpp:55] [rocprofv3] './sample/vcopy -n 1048576 -b 256' ::     0.273680 sec
+      INFO    |-> [rocprofiler-sdk] W20260323 16:43:44.626377 139842239868672 generateRocpd.cpp:582] writing SQL database for process 113640 on node 1574819130
+      INFO    |-> [rocprofiler-sdk] E20260323 16:43:44.626821 139842239868672 generateRocpd.cpp:605] Opened result file: /home/auser/rocm-systems/projects/rocprofiler-compute/workloads/vcopy/MI325X/out/pmc_1/banff-ccs-aus-g05-05/113640_results.db (UUID=0000001e-7561-7561-8a76-754447167346)
+      INFO    |-> [rocprofiler-sdk] W20260323 16:43:44.662283 139842239868672 simple_timer.cpp:55] SQLite3 generation :: rocpd_string             ::     0.008452 sec
+      INFO    |-> [rocprofiler-sdk] W20260323 16:43:44.662683 139842239868672 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_node          ::     0.000389 sec
+      INFO    |-> [rocprofiler-sdk] W20260323 16:43:44.663665 139842239868672 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_process       ::     0.000977 sec
 
    ...
 
-   INFO [roofline] Checking for roofline.csv in /home/auser/rocprofiler-compute/workloads/vcopy/MI325X
+      INFO    |-> [rocprofiler-sdk] Finished executing kernel
+      INFO    |-> [rocprofiler-sdk] Finished copying the output vector from the GPU to the CPU
+      INFO    |-> [rocprofiler-sdk] Releasing GPU memory
+      INFO    |-> [rocprofiler-sdk] Releasing CPU memory
+      INFO [Run 13/13][Approximate profiling time left: 0 seconds]...
+      INFO [profiling] Current input file: /home/auser/rocm-systems/projects/rocprofiler-compute/workloads/vcopy/MI325X/perfmon/pmc_perf_5.txt
+      INFO    |-> [rocprofiler-sdk] [rocprofiler-compute] [rocprofiler_configure] (priority=1) is using rocprofiler-sdk v1.1.0 (1.1.0)
+      INFO    |-> [rocprofiler-sdk] W20260323 16:44:43.871622 140315166887680 simple_timer.cpp:55] [rocprofv3] tool initialization ::     0.224905 sec
+      INFO    |-> [rocprofiler-sdk] [rocprofiler-compute] In tool init
+      INFO    |-> [rocprofiler-sdk] W20260323 16:44:43.871808 140315166887680 simple_timer.cpp:55] [rocprofv3] './sample/vcopy -n 1048576 -b 256' ::     0.000000 sec
+      INFO    |-> [rocprofiler-sdk] W20260323 16:44:44.049909 140315166887680 tool.cpp:2422] HSA version 8.21.0 initialized (instance=0)
+      INFO    |-> [rocprofiler-sdk] W20260323 16:44:44.147303 140315166887680 simple_timer.cpp:55] [rocprofv3] './sample/vcopy -n 1048576 -b 256' ::     0.275496 sec
+      INFO    |-> [rocprofiler-sdk] W20260323 16:44:44.162131 140315166887680 generateRocpd.cpp:582] writing SQL database for process 116379 on node 1574819130
+      INFO    |-> [rocprofiler-sdk] E20260323 16:44:44.162543 140315166887680 generateRocpd.cpp:605] Opened result file: /home/auser/rocm-systems/projects/rocprofiler-compute/workloads/vcopy/MI325X/out/pmc_1/banff-ccs-aus-g05-05/116379_results.db (UUID=0000001f-5e13-7e13-9cab-4e867beb6f39)
+      INFO    |-> [rocprofiler-sdk] W20260323 16:44:44.195657 140315166887680 simple_timer.cpp:55] SQLite3 generation :: rocpd_string             ::     0.006754 sec
+      INFO    |-> [rocprofiler-sdk] W20260323 16:44:44.196516 140315166887680 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_node          ::     0.000842 sec
+      INFO    |-> [rocprofiler-sdk] W20260323 16:44:44.197639 140315166887680 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_process       ::     0.001077 sec
+      INFO    |-> [rocprofiler-sdk] W20260323 16:44:44.214007 140315166887680 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_agent         ::     0.015730 sec
+      INFO    |-> [rocprofiler-sdk] W20260323 16:44:44.248623 140315166887680 simple_timer.cpp:55] SQLite3 generation :: rocpd_info_pmc           ::     0.034606 sec
+      INFO    |-> [rocprofiler-sdk] W20260323 16:44:44.249465 140315166887680 simple_timer.cpp:55] SQLite3 generation :: rocpd kernel info        ::     0.000832 sec
+      INFO    |-> [rocprofiler-sdk] W20260323 16:44:44.249471 140315166887680 simple_timer.cpp:55] SQLite3 generation :: rocpd_region             ::     0.000002 sec
+      INFO    |-> [rocprofiler-sdk] W20260323 16:44:44.255495 140315166887680 simple_timer.cpp:55] SQLite3 generation :: rocpd_kernel_dispatch    ::     0.006021 sec
+      INFO    |-> [rocprofiler-sdk] W20260323 16:44:44.255503 140315166887680 simple_timer.cpp:55] SQLite3 generation :: rocpd_pmc_event          ::     0.000000 sec
+      INFO    |-> [rocprofiler-sdk] W20260323 16:44:44.255505 140315166887680 simple_timer.cpp:55] SQLite3 generation :: rocpd_memory_copy        ::     0.000000 sec
+      INFO    |-> [rocprofiler-sdk] W20260323 16:44:44.255507 140315166887680 simple_timer.cpp:55] SQLite3 generation :: rocpd_memory_allocate    ::     0.000001 sec
+      INFO    |-> [rocprofiler-sdk] W20260323 16:44:44.255584 140315166887680 simple_timer.cpp:55] SQLite3 generation :: SQL indexing             ::     0.000076 sec
+      INFO    |-> [rocprofiler-sdk] W20260323 16:44:44.255888 140315166887680 simple_timer.cpp:55] SQLite3 generation :: total                    ::     0.093758 sec
+      INFO    |-> [rocprofiler-sdk] W20260323 16:44:44.257594 140315166887680 simple_timer.cpp:55] [rocprofv3] output generation ::     0.106959 sec
+      INFO    |-> [rocprofiler-sdk] W20260323 16:44:44.257624 140315166887680 simple_timer.cpp:55] [rocprofv3] tool finalization ::     0.110297 sec
+      INFO    |-> [rocprofiler-sdk] [rocprofiler-compute] In tool fini
+      INFO    |-> [rocprofiler-sdk] [rocprofiler-compute] [generate_output] Counter collection data has been written to: /home/auser/rocm-systems/projects/rocprofiler-compute/workloads/vcopy/MI325X/out/pmc_1/116379_native_counter_collection.csv
+      INFO    |-> [rocprofiler-sdk] vcopy testing on GCD 0
+      INFO    |-> [rocprofiler-sdk] Finished allocating vectors on the CPU
+   WARNING PC sampling data collection skipped as block 21 is not specified.
+      INFO [roofline] Checking for roofline.csv in /home/auser/rocm-systems/projects/rocprofiler-compute/workloads/vcopy/MI325X
    GPU Device 0 (gfx942) with 304 CUs: Profiling...
-   HBM BW, GPU ID: 0, workgroupSize:256, workgroups:6225920, experiments:100, traffic:25501368320 bytes, duration:5.4 ms, mean:4689.1 GB/sec, stdev:16.3 GB/sec
-   L2 BW, GPU ID: 0, workgroupSize:256, workgroups:38912, experiments:100, traffic:1632087572480 bytes, duration:57.4 ms, mean:28429.3 GB/sec, stdev:34.055164 GB/sec
-   L1 BW, GPU ID: 0, workgroupSize:256, workgroups:38912, experiments:100, traffic:127506841600 bytes, duration:3.4 ms, mean:37839.6 GB/sec, stdev:630.807679 GB/sec
-   LDS BW, GPU ID: 0, workgroupSize:256, workgroups:38912, experiments:100, traffic:79691776000 bytes, duration:1.0 ms, mean:76182.6 GB/sec, stdev:793.594152 GB/sec
-   Peak VALU FLOPs (FP16), GPU ID: 0, workgroupSize:256, workgroups:38912, experiments:100, FLOP:5222680231936, duration:33.1 ms, mean:157868.0 GFLOPS, stdev=173.3 GFLOPS
-   Peak VALU FLOPs (FP32), GPU ID: 0, workgroupSize:256, workgroups:38912, experiments:100, FLOP:5222680231936, duration:34.3 ms, mean:152104.8 GFLOPS, stdev=1073.6 GFLOPS
-   Peak VALU FLOPs (FP64), GPU ID: 0, workgroupSize:256, workgroups:38912, experiments:100, FLOP:2611340115968, duration:33.4 ms, mean:78139.4 GFLOPS, stdev=375.4 GFLOPS
-   Peak VALU IOPs (INT8), GPU ID: 0, workgroupSize:256, workgroups:38912, experiments:100, IOP:2611340115968, duration:39.7 ms, mean:65694.3 GOPS, stdev=139.4 GFLOPS
-   Peak VALU IOPs (INT32), GPU ID: 0, workgroupSize:256, workgroups:38912, experiments:100, IOP:2611340115968, duration:35.5 ms, mean:73480.1 GOPS, stdev=966.2 GFLOPS
-   Peak VALU IOPs (INT64), GPU ID: 0, workgroupSize:256, workgroups:38912, experiments:100, IOP:1305670057984, duration:52.0 ms, mean:25094.8 GOPS, stdev=379.2 GFLOPS
-   Peak MFMA FLOPs (F8), GPU ID: 0, workgroupSize:256, workgroups:38912, experiments:100, FLOP:10200547328000, duration:4.69 ms, mean:2173233.1 GFLOPS, stdev:40442.7 GFLOPS
-   Peak MFMA FLOPs (F16), GPU ID: 0, workgroupSize:256, workgroups:38912, experiments:100, FLOP:5100273664000, duration:4.80 ms, mean:1062377.5 GFLOPS, stdev:38988.4 GFLOPS
-   Peak MFMA FLOPs (BF16), GPU ID: 0, workgroupSize:256, workgroups:38912, experiments:100, FLOP:5100273664000, duration:4.36 ms, mean:1169793.8 GFLOPS, stdev:20656.5 GFLOPS
-   Peak MFMA FLOPs (F32), GPU ID: 0, workgroupSize:256, workgroups:38912, experiments:100, FLOP:1275068416000, duration:8.24 ms, mean:154648.3 GFLOPS, stdev:1547.9 GFLOPS
-   Peak MFMA FLOPs (F64), GPU ID: 0, workgroupSize:256, workgroups:38912, experiments:100, FLOP:637534208000, duration:4.09 ms, mean:155742.2 GFLOPS, stdev:2345.2 GFLOPS
-   Peak MFMA IOPs (I8), GPU ID: 0, workgroupSize:256, workgroups:38912, experiments:100, IOP:10200547328000, duration:4.51 ms, mean:2260258.3 GOPS, stdev:42988.1 GFLOPS
-   WARNING [roofline] Deprecation warning: Standalone Roofline Analysis plot output ``empirRoof_gpu-<device ID><datatypes><kernels>.html`` will be auto-generated in analyze mode instead of profile mode in a future release.
-   INFO [roofline] Empirical Roofline HTML file saved!
+   100% [||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||]
+   HBM BW, GPU ID: 0, workgroupSize:256, workgroups:6225920, experiments:100, traffic:25501368320 bytes, duration:5.4 ms, mean:4705.4 GB/sec, stdev:22.1 GB/sec
+   100% [||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||]
+   MALL BW, GPU ID: 0, workgroupSize:256, workgroups:38912, experiments:100, traffic:2611340115968 bytes, duration:403.9 ms, mean:6466.1 GB/sec, stdev:26.892396 GB/sec
+   100% [||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||]
+   L2 BW, GPU ID: 0, workgroupSize:256, workgroups:38912, experiments:100, traffic:1632087572480 bytes, duration:57.3 ms, mean:28505.3 GB/sec, stdev:27.182463 GB/sec
+   100% [||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||]
+   L1 BW, GPU ID: 0, workgroupSize:256, workgroups:38912, experiments:100, traffic:127506841600 bytes, duration:3.4 ms, mean:37782.9 GB/sec, stdev:688.291117 GB/sec
+
+   ...
+
+   100% [||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||]
+   Peak MFMA FLOPs (F32), GPU ID: 0, workgroupSize:256, workgroups:38912, experiments:100, FLOP:1275068416000, duration:8.23 ms, mean:154854.6 GFLOPS, stdev:1782.6 GFLOPS
+   100% [||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||]
+   Peak MFMA FLOPs (F64), GPU ID: 0, workgroupSize:256, workgroups:38912, experiments:100, FLOP:637534208000, duration:4.09 ms, mean:155983.3 GFLOPS, stdev:1811.2 GFLOPS
+   100% [||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||]
+   Peak MFMA IOPs (I8), GPU ID: 0, workgroupSize:256, workgroups:38912, experiments:100, IOP:10200547328000, duration:4.52 ms, mean:2258954.1 GOPS, stdev:41800.0 GFLOPS
+      INFO [roofline] Roofline data saved to /home/auser/rocm-systems/projects/rocprofiler-compute/workloads/vcopy/MI325X/roofline.csv
+   Run 'rocprof-compute analyze -p /home/auser/rocm-systems/projects/rocprofiler-compute/workloads/vcopy/MI325X' for charts
 
 .. tip::
 
