@@ -19,7 +19,7 @@ __global__ static void set(uint32_t* ptr, uint8_t val) {
   memset(ptr + tx, val, sizeof(uint32_t));
 }
 
-TEST_CASE(Unit_ToAndFroMemCpyToDevice) {
+HIP_TEST_CASE(Unit_ToAndFroMemCpyToDevice) {
   uint32_t *A, *Ad, *B, *Bd;
   A = new uint32_t[LEN];
   B = new uint32_t[LEN];

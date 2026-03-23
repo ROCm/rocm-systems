@@ -70,7 +70,7 @@ static void RunBenchmark(size_t width, size_t height, hipMemcpyKind kind,
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Performance_hipMemcpy2DFromArrayAsync_DeviceToHost) {
+HIP_TEST_CASE(Performance_hipMemcpy2DFromArrayAsync_DeviceToHost) {
   CHECK_IMAGE_SUPPORT
 
   const auto width = GENERATE(4_KB, 8_KB, 16_KB);
@@ -92,7 +92,7 @@ TEST_CASE(Performance_hipMemcpy2DFromArrayAsync_DeviceToHost) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Performance_hipMemcpy2DFromArrayAsync_DeviceToDevice_DisablePeerAccess) {
+HIP_TEST_CASE(Performance_hipMemcpy2DFromArrayAsync_DeviceToDevice_DisablePeerAccess) {
   CHECK_IMAGE_SUPPORT
 
   const auto width = GENERATE(4_KB, 8_KB, 16_KB);
@@ -116,7 +116,7 @@ TEST_CASE(Performance_hipMemcpy2DFromArrayAsync_DeviceToDevice_DisablePeerAccess
  *  - Device supports Peer-to-Peer access
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Performance_hipMemcpy2DFromArrayAsync_DeviceToDevice_EnablePeerAccess) {
+HIP_TEST_CASE(Performance_hipMemcpy2DFromArrayAsync_DeviceToDevice_EnablePeerAccess) {
   CHECK_IMAGE_SUPPORT
 
   if (HipTest::getDeviceCount() < 2) {

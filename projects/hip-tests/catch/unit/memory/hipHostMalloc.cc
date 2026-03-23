@@ -30,13 +30,6 @@ std::vector<std::string> syncMsg = {"event", "stream", "device"};
 static constexpr int numElements{1024 * 16};
 static constexpr size_t sizeBytes{numElements * sizeof(int)};
 
-#if HT_AMD
-static __global__ void kerTestMemAccess(char* buf) {
-  size_t myId = threadIdx.x + blockDim.x * blockIdx.x;
-  buf[myId] = VALUE;
-}
-#endif
-
 void CheckHostPointer(int numElements, int* ptr, unsigned eventFlags, int syncMethod,
                       std::string msg) {
   std::cerr << "test: CheckHostPointer " << msg << " eventFlags = " << std::hex << eventFlags
@@ -93,7 +86,7 @@ Allocates the memory using hipHostMalloc API
 Launches the kernel and performs vector addition.
 validates thes result.
 */
-TEST_CASE(Unit_hipHostMalloc_Basic) {
+HIP_TEST_CASE(Unit_hipHostMalloc_Basic) {
   static constexpr auto LEN{1024 * 1024};
   static constexpr auto SIZE{LEN * sizeof(float)};
 
@@ -147,7 +140,7 @@ TEST_CASE(Unit_hipHostMalloc_Basic) {
 This testcase verifies the hipHostMalloc API by passing nullptr
 to the pointer variable
 */
-TEST_CASE(Unit_hipHostMalloc_Negative) {
+HIP_TEST_CASE(Unit_hipHostMalloc_Negative) {
 #if HT_AMD
   {
     // Stimulate error condition:
@@ -166,7 +159,7 @@ This testcase verifies the hipHostMalloc API by
    techniquies
 3. validates the result.
 */
-TEST_CASE(Unit_hipHostMalloc_NonCoherent) {
+HIP_TEST_CASE(Unit_hipHostMalloc_NonCoherent) {
   int* A = nullptr;
   HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&A), sizeBytes, hipHostMallocNonCoherent));
   const char* ptrType = "non-coherent";
@@ -184,7 +177,7 @@ This testcase verifies the hipHostMalloc API by
    techniquies
 3. validates the result.
 */
-TEST_CASE(Unit_hipHostMalloc_Coherent) {
+HIP_TEST_CASE(Unit_hipHostMalloc_Coherent) {
   int* A = nullptr;
   if (hipHostMalloc(reinterpret_cast<void**>(&A), sizeBytes, hipHostMallocCoherent) == hipSuccess) {
     const char* ptrType = "coherent";
@@ -210,7 +203,7 @@ This testcase verifies the hipHostMalloc API by
    techniquies
 3. validates the result.
 */
-TEST_CASE(Unit_hipHostMalloc_Default) {
+HIP_TEST_CASE(Unit_hipHostMalloc_Default) {
   int* A = nullptr;
   HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&A), sizeBytes));
   const char* ptrType = "default";
@@ -224,7 +217,7 @@ TEST_CASE(Unit_hipHostMalloc_Default) {
 This testcase verifies the hipHostMalloc API by
 1. Allocating more memory than total system RAM. Should return hipErrorOutOfMemory.
 */
-TEST_CASE(Unit_hipHostMalloc_AllocateMoreThanTotalSystemMemory) {
+HIP_TEST_CASE(Unit_hipHostMalloc_AllocateMoreThanTotalSystemMemory) {
   char* host_ptr = nullptr;
   const size_t total_ram_mb = HipTest::getTotalSystemMemoryInMB();
   if (total_ram_mb == 0) {
@@ -239,7 +232,7 @@ TEST_CASE(Unit_hipHostMalloc_AllocateMoreThanTotalSystemMemory) {
   REQUIRE(host_ptr == nullptr);
 }
 
-TEST_CASE(Unit_hipHostMalloc_Capture) {
+HIP_TEST_CASE(Unit_hipHostMalloc_Capture) {
   int* host_ptr = nullptr;
   hipError_t capture_error = hipSuccess;
 

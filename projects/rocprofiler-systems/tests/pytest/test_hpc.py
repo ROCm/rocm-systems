@@ -86,6 +86,7 @@ class TestJacobi(RocprofsysTest):
             "kfd_event_page_fault,kfd_event_page_migrate,"
             "kfd_event_queue,kfd_event_unmap_from_gpu,kfd_event_dropped_events"
         )
+        env["ROCPROFSYS_TRACE_LEGACY"] = "ON"
         env["HSA_XNACK"] = "1"
         if "apu" not in gpu_info.categories:
             # Forces zero-copy behavior on non-APU GPUs
@@ -101,21 +102,21 @@ class TestJacobi(RocprofsysTest):
         )
 
         if "apu" in gpu_info.categories:
-            # We expect no ompt_target_data_op_emi (CPU and GPU share the same memory)
+            # We expect no omp_target_data_op_emi (CPU and GPU share the same memory)
             self.assert_regex(
                 result,
                 subtest_name="USM Zero-Copy Validation (APU)",
-                fail_regex=["ompt_target_data_op_emi"],
+                fail_regex=["omp_target_data_op_emi"],
             )
 
             self.assert_perfetto(
                 result,
                 subtest_name="Perfetto USM Zero-Copy Validation (APU)",
-                fail_regex=["ompt_target_data_op_emi"],
+                fail_regex=["omp_target_data_op_emi"],
             )
 
         else:
-            # We expect to see only one ompt_target_data_op_emi
+            # We expect to see only one omp_target_data_op_emi
             # Corresponds to the Fortran array descriptor being transferred
             #   at the start of the program
             self.assert_regex(
@@ -128,7 +129,7 @@ class TestJacobi(RocprofsysTest):
                 result,
                 subtest_name="Perfetto USM Zero-Copy validation (Non-APU)",
                 categories=["rocm_ompt_api"],
-                labels=["ompt_target_data_op_emi"],
+                labels=["omp_target_data_op_emi"],
                 counts=[1],
                 depths=[1],
             )

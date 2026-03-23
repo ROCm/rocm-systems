@@ -21,7 +21,7 @@ Testcase Scenarios :
  * Scenario to verify hipExtStreamGetCUMask api returning default CU Mask or global CU Mask.
  * Scenario to verify hipExtStreamGetCUMask api returns custom mask set.
  */
-TEST_CASE(Unit_hipExtStreamGetCUMask_verifyDefaultAndCustomMask) {
+HIP_TEST_CASE(Unit_hipExtStreamGetCUMask_verifyDefaultAndCustomMask) {
   constexpr unsigned maxCUPerValue = 32;
   hipDeviceProp_t props;
   std::stringstream ss;
@@ -157,7 +157,7 @@ TEST_CASE(Unit_hipExtStreamGetCUMask_verifyDefaultAndCustomMask) {
 /**
  * Negative tests for hipExtStreamGetCUMask.
  */
-TEST_CASE(Unit_hipExtStreamGetCUMask_Negative) {
+HIP_TEST_CASE(Unit_hipExtStreamGetCUMask_Negative) {
   hipError_t ret;
   constexpr int maxNum = 6;
   std::vector<uint32_t> cuMask(maxNum);

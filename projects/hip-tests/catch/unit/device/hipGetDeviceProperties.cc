@@ -132,7 +132,7 @@ static void validateDeviceMacro(int* archProp_h, hipDeviceProp_t* prop) {
  *  - Platform specific (AMD)
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipGetDeviceProperties_ArchPropertiesTst) {
+HIP_TEST_CASE(Unit_hipGetDeviceProperties_ArchPropertiesTst) {
   int *archProp_h, *archProp_d;
   archProp_h = new int[NUM_OF_ARCHPROP];
   hipDeviceProp_t prop;
@@ -179,7 +179,7 @@ TEST_CASE(Unit_hipGetDeviceProperties_ArchPropertiesTst) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipGetDeviceProperties_NegTst) {
+HIP_TEST_CASE(Unit_hipGetDeviceProperties_NegTst) {
   hipDeviceProp_t prop;
 
   SECTION("props is nullptr") {

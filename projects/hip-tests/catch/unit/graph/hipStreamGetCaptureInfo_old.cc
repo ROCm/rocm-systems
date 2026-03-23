@@ -60,7 +60,6 @@ constexpr unsigned threadsPerBlock = 256;
     constexpr int blocks =
         (N % threadsPerBlock == 0) ? (N / threadsPerBlock) : ((N / threadsPerBlock) + 1);
 size_t Nbytes = N * sizeof(float);
-constexpr int LAUNCH_ITERS = 1;
 
 /*
  * Create 2 streams s1 and s2. Start capturing s1. Record event e1 on s1 and
@@ -71,7 +70,7 @@ constexpr int LAUNCH_ITERS = 1;
  * capture info (status and id) of both s1 and s2 are identical.
  * The above scenario using hipStreamGetCaptureInfo_v2 API
  */
-TEST_CASE(Unit_hipStreamGetCaptureInfo_ParentAndForkedStrm_CaptureStatus) {
+HIP_TEST_CASE(Unit_hipStreamGetCaptureInfo_ParentAndForkedStrm_CaptureStatus) {
   hipStream_t stream1{nullptr}, stream2{nullptr};
   hipEvent_t event2{nullptr}, forkStreamEvent{nullptr};
   hipGraph_t graph{nullptr};
@@ -203,7 +202,7 @@ static void thread_func(hipStream_t stream, unsigned long long capSequenceID1,  
  * thread is same as capture id in main function. Exit the thread and end the capture
  * The above scenario using hipStreamGetCaptureInfo_v2 API
  */
-TEST_CASE(Unit_hipStreamGetCaptureInfo_CaptureStatus_InThread) {
+HIP_TEST_CASE(Unit_hipStreamGetCaptureInfo_CaptureStatus_InThread) {
   hipStream_t stream{nullptr};
   hipGraph_t graph{nullptr};
 
@@ -233,7 +232,7 @@ TEST_CASE(Unit_hipStreamGetCaptureInfo_CaptureStatus_InThread) {
  * capture info. Verify that all the capture info are identical.
  * The above scenario using hipStreamGetCaptureInfo_v2 API
  */
-TEST_CASE(Unit_hipStreamGetCaptureInfo_CaptureStatus_Througout_Capture) {
+HIP_TEST_CASE(Unit_hipStreamGetCaptureInfo_CaptureStatus_Througout_Capture) {
   hipStream_t stream{nullptr};
   hipGraph_t graph{nullptr};
   float *A_d, *B_d, *C_d, *D_d;
@@ -327,7 +326,7 @@ TEST_CASE(Unit_hipStreamGetCaptureInfo_CaptureStatus_Througout_Capture) {
  * graph and verify the output from the operations.
  * The above scenario using hipStreamGetCaptureInfo_v2 API
  */
-TEST_CASE(Unit_hipStreamGetCaptureInfo_Nullstream_CaptureInfo) {
+HIP_TEST_CASE(Unit_hipStreamGetCaptureInfo_Nullstream_CaptureInfo) {
   hipStream_t stream{nullptr}, streamForGraph{nullptr};
   hipGraph_t graph{nullptr};
   hipError_t ret;

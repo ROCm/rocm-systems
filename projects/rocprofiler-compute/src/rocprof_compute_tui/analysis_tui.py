@@ -55,6 +55,9 @@ class tui_analysis(OmniAnalyze_Base):
         self._profiling_config = file_io.load_profiling_config(self.path)
         self._runs = self.initalize_runs()
 
+        # Join pmc_perf_*.csv or results_*.csv files if needed (Phase 2)
+        self.join_workload_csvs(Path(self.path))
+
         if self.args.random_port:
             console_error("--gui flag is required to enable --random-port")
 

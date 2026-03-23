@@ -38,7 +38,7 @@ from utils.rocpd_data import (
 from utils.utils import (
     build_call_trees_with_kernel_ids,
     process_torch_trace_output,
-    write_torch_trace_operator_csvs,
+    write_torch_trace_consolidated_csv,
 )
 
 GUID = "abc-1234-def"
@@ -363,7 +363,7 @@ def write_csv_layout(workload_dir, fbase="run0", pid="12345"):
     counter_df.to_csv(counter_path, index=False)
 
 
-def read_operator_csvs(torch_trace_dir):
+def read_torch_trace_csvs(torch_trace_dir):
     """Return a dict mapping filename -> sorted DataFrame for comparison."""
     result = {}
 
@@ -401,8 +401,8 @@ def test_torch_trace_output_same_for_rocpd_and_csv():
     rocpd_df, rocpd_trace_path = rocpd_output
     csv_df, csv_trace_path = csv_output
 
-    write_torch_trace_operator_csvs(rocpd_df, rocpd_trace_path)
-    write_torch_trace_operator_csvs(csv_df, csv_trace_path)
+    write_torch_trace_consolidated_csv(rocpd_df, rocpd_trace_path)
+    write_torch_trace_consolidated_csv(csv_df, csv_trace_path)
     rocpd_trees = build_call_trees_with_kernel_ids(rocpd_df, kernel_top_df)
     csv_trees = build_call_trees_with_kernel_ids(csv_df, kernel_top_df)
 
@@ -424,11 +424,11 @@ def test_torch_trace_output_same_for_rocpd_and_csv():
         assert "kernel_mm" in mm_node.kernels
         assert mm_node.kernels["kernel_mm"].launches == 1
 
-    rocpd_results = read_operator_csvs(Path(rocpd_dir) / "torch_trace")
-    csv_results = read_operator_csvs(Path(csv_dir) / "torch_trace")
+    rocpd_results = read_torch_trace_csvs(Path(rocpd_dir) / "torch_trace")
+    csv_results = read_torch_trace_csvs(Path(csv_dir) / "torch_trace")
 
     assert rocpd_results.keys() == csv_results.keys(), (
-        f"Operator files differ: rocpd={sorted(rocpd_results.keys())} "
+        f"Torch trace CSV files differ: rocpd={sorted(rocpd_results.keys())} "
         f"csv={sorted(csv_results.keys())}"
     )
 
