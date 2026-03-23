@@ -565,7 +565,7 @@ __device__ void llvm_amdgcn_raw_buffer_store_b128(__uint128_t vdata, i32x4 srsrc
   buffer_resource br_dst = make_buffer_resource(dst, size);
 
   for (int j{16}; j > 1; j >>= 1) {
-    
+  
     cpy_size = size / j;
     for (int i{thread_id}; i < cpy_size; i += block_size) {
       dst_bytes = dst_def;
@@ -574,15 +574,15 @@ __device__ void llvm_amdgcn_raw_buffer_store_b128(__uint128_t vdata, i32x4 srsrc
       src_bytes += i * j;
       dst_bytes += i * j;
       
-      gpu_dprintf("WG (%u, %u, %u) TH (%u, %u, %u), flat_id = %d, size = %3d, " 
-        "j = %3d, cpy_size = %3d, src_bytes=%u, dst_bytes=%u\n", get_flat_id(), 
-        size, j, cpy_size, src_bytes, dst_bytes);
-      
+      // gpu_dprintf("WG (%u, %u, %u) TH (%u, %u, %u), flat_id = %d, size = %3d, " 
+      //   "j = %3d, cpy_size = %3d, src_bytes=%u, dst_bytes=%u\n", get_flat_id(), 
+      //   size, j, cpy_size, src_bytes, dst_bytes);
+        
       if (16 != j) {
         store_asm(src_bytes, dst_bytes, j);
-      } else {
-        br_src = move_buffer_resource(br_src, i*j);
-        br_dst = move_buffer_resource(br_dst, i*j);
+      } else {    
+        br_src.ptr = reinterpret_cast<uint64_t>(src_bytes);
+        br_dst.ptr = reinterpret_cast<uint64_t>(dst_bytes);
         store_asm(reinterpret_cast<uint8_t*>(&br_src),
           reinterpret_cast<uint8_t*>(&br_dst), j); 
       }

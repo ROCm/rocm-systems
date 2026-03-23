@@ -241,11 +241,11 @@ __device__ __forceinline__ buffer_resource make_buffer_resource(T* ptr, uint32_t
   return {as_u64, buffer_size, config};
 }
 
-__device__ __forceinline__ buffer_resource& move_buffer_resource(buffer_resource& br, size_t size) {
-  br.ptr += static_cast<uint64_t>(size);
-  br.range -= static_cast<uint32_t>(size);
-  return br;
-}
+// __device__ __forceinline__ buffer_resource& move_buffer_resource(buffer_resource& br, size_t size) {
+//   br.ptr += static_cast<uint64_t>(size);
+//   // br.range -= static_cast<uint32_t>(size);
+//   return br;
+// }
 
 #if defined(__gfx942__) || defined(__gfx950__)
 
@@ -320,6 +320,24 @@ __device__ __forceinline__ void store_asm(uint8_t* val, uint8_t* dst,
 #endif
       break;
     }
+//     case 16: {
+//       int64_t val64{*(reinterpret_cast<int64_t*>(val))};
+// #if defined(__gfx906__)
+// #endif
+// #if defined(__gfx908__)
+// #endif
+// #if defined(__gfx90a__) || defined(__gfx1100__)
+//       asm volatile("flat_store_dwordx2 %0 %1 glc slc" : : "v"(dst), "v"(val64));
+// #endif
+// #if defined(__gfx942__) || defined(__gfx950__)
+//       asm volatile("flat_store_dwordx4 %0 %1 sc0 sc1" : : "v"(dst), "v"(val64));
+// #endif
+// #if defined(__gfx1201__)
+//       asm volatile("flat_store_b64 %0 %1 scope:SCOPE_SYS" : : "v"(dst), "v"(val64));
+// #endif
+//       break;
+//     }
+    
     case 16: {
       // 16-byte (128-bit) transfer
 #if defined(__gfx906__)
@@ -354,7 +372,7 @@ __device__ __forceinline__ void store_asm(uint8_t* val, uint8_t* dst,
               *reinterpret_cast<i32x4*>(br_dst_ptr),
               static_cast<uint32_t>(i) * 16u, 0u, 0b10001u);
         }
-        __builtin_amdgcn_s_waitcnt(0xF70);
+        // __builtin_amdgcn_s_waitcnt(0xF70);
       }
 #endif
 #if defined(__gfx1201__)
