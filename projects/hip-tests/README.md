@@ -147,7 +147,7 @@ amdclang++                                                                      
   -x hip <test_file.cc>
 ```
 
-You might need to set `LD_LIBRARY_PATH` to be Catch2 location.
+You may need to set `LD_LIBRARY_PATH` to point to Catch2 location.
 
 ```bash
 $ hipcc $HIP_TESTS_DIR/catch/unit/memory/hipPointerGetAttributes.cc -I ./catch/include ./catch/hipTestMain/standalone_main.cc -I ./catch/external/Catch2 -o hipPointerGetAttributes
