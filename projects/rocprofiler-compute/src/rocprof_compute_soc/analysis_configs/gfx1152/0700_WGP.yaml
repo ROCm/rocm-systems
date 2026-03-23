@@ -128,42 +128,42 @@ Panel Config:
           avg: AVG(SQ_INSTS_ALL_sum / $denom)
           min: MIN(SQ_INSTS_ALL_sum / $denom)
           max: MAX(SQ_INSTS_ALL_sum / $denom)
-          unit: Count + $normUnit
+          unit: (Count + $normUnit)
         Instructions - Internal:
           avg: AVG(SQ_INSTS_INTERNAL_sum / $denom)
           min: MIN(SQ_INSTS_INTERNAL_sum / $denom)
           max: MAX(SQ_INSTS_INTERNAL_sum / $denom)
-          unit: Count + $normUnit
+          unit: (Count + $normUnit)
         Instructions - VALU:
           avg: AVG(SQ_INSTS_VALU_sum / $denom)
           min: MIN(SQ_INSTS_VALU_sum / $denom)
           max: MAX(SQ_INSTS_VALU_sum / $denom)
-          unit: Count + $normUnit
+          unit: (Count + $normUnit)
         Instructions - SALU:
           avg: AVG(SQ_INSTS_SALU_sum / $denom)
           min: MIN(SQ_INSTS_SALU_sum / $denom)
           max: MAX(SQ_INSTS_SALU_sum / $denom)
-          unit: Count + $normUnit
+          unit: (Count + $normUnit)
         Instructions - SMEM:
           avg: AVG(SQ_INSTS_SMEM_sum / $denom)
           min: MIN(SQ_INSTS_SMEM_sum / $denom)
           max: MAX(SQ_INSTS_SMEM_sum / $denom)
-          unit: Count + $normUnit
+          unit: (Count + $normUnit)
         Instructions - Transcendental:
           avg: AVG(SQ_INSTS_VALU_TRANS_sum / $denom)
           min: MIN(SQ_INSTS_VALU_TRANS_sum / $denom)
           max: MAX(SQ_INSTS_VALU_TRANS_sum / $denom)
-          unit: Count + $normUnit
+          unit: (Count + $normUnit)
         Instructions - VMEM:
           avg: AVG(SQ_INSTS_TEX_sum / $denom)
           min: MIN(SQ_INSTS_TEX_sum / $denom)
           max: MAX(SQ_INSTS_TEX_sum / $denom)
-          unit: Count + $normUnit
+          unit: (Count + $normUnit)
         Instructions - LDS:
           avg: AVG(SQ_INSTS_LDS_sum / $denom)
           min: MIN(SQ_INSTS_LDS_sum / $denom)
           max: MAX(SQ_INSTS_LDS_sum / $denom)
-          unit: Count + $normUnit
+          unit: (Count + $normUnit)
 
   # =========================================================================
   # VMEM Instruction Mix
@@ -182,27 +182,27 @@ Panel Config:
           avg: AVG(SQ_INSTS_FLAT_sum / $denom)
           min: MIN(SQ_INSTS_FLAT_sum / $denom)
           max: MAX(SQ_INSTS_FLAT_sum / $denom)
-          unit: Count + $normUnit
+          unit: (Count + $normUnit)
         Instructions - VMEM Load:
           avg: AVG(SQ_INSTS_TEX_LOAD_sum / $denom)
           min: MIN(SQ_INSTS_TEX_LOAD_sum / $denom)
           max: MAX(SQ_INSTS_TEX_LOAD_sum / $denom)
-          unit: Count + $normUnit
+          unit: (Count + $normUnit)
         Instructions - VMEM Store:
           avg: AVG(SQ_INSTS_TEX_STORE_sum / $denom)
           min: MIN(SQ_INSTS_TEX_STORE_sum / $denom)
           max: MAX(SQ_INSTS_TEX_STORE_sum / $denom)
-          unit: Count + $normUnit
+          unit: (Count + $normUnit)
         Instructions - Flat Load:
           avg: AVG(SQ_INSTS_FLAT_LOAD_sum / $denom)
           min: MIN(SQ_INSTS_FLAT_LOAD_sum / $denom)
           max: MAX(SQ_INSTS_FLAT_LOAD_sum / $denom)
-          unit: Count + $normUnit
+          unit: (Count + $normUnit)
         Instructions - Flat Store:
           avg: AVG(SQ_INSTS_FLAT_STORE_sum / $denom)
           min: MIN(SQ_INSTS_FLAT_STORE_sum / $denom)
           max: MAX(SQ_INSTS_FLAT_STORE_sum / $denom)
-          unit: Count + $normUnit
+          unit: (Count + $normUnit)
 
   # =========================================================================
   # LDS Instruction Mix
@@ -221,7 +221,7 @@ Panel Config:
           avg: AVG(SQ_INSTS_LDS_sum / $denom)
           min: MIN(SQ_INSTS_LDS_sum / $denom)
           max: MAX(SQ_INSTS_LDS_sum / $denom)
-          unit: Count + $normUnit
+          unit: (Count + $normUnit)
 
   # =========================================================================
   # VALU Instruction Mix
@@ -240,12 +240,12 @@ Panel Config:
           avg: AVG(SQ_INSTS_VALU_sum / $denom)
           min: MIN(SQ_INSTS_VALU_sum / $denom)
           max: MAX(SQ_INSTS_VALU_sum / $denom)
-          unit: Count + $normUnit
+          unit: (Count + $normUnit)
         VALU Instructions - Trans:
           avg: AVG(SQ_INSTS_VALU_TRANS_sum / $denom)
           min: MIN(SQ_INSTS_VALU_TRANS_sum / $denom)
           max: MAX(SQ_INSTS_VALU_TRANS_sum / $denom)
-          unit: Count + $normUnit
+          unit: (Count + $normUnit)
 
   # =========================================================================
   # Wait State Analysis

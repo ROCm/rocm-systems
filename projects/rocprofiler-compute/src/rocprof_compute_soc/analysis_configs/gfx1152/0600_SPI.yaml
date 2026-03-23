@@ -44,7 +44,7 @@ Panel Config:
           avg: AVG(SPI_CSN_WAVE_sum / $denom)
           min: MIN(SPI_CSN_WAVE_sum / $denom)
           max: MAX(SPI_CSN_WAVE_sum / $denom)
-          unit: Count + $normUnit
+          unit: (Count + $normUnit)
         Wave Dispatch Rate:
           avg: AVG((SPI_CSN_WAVE_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
           min: MIN((SPI_CSN_WAVE_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
@@ -69,27 +69,27 @@ Panel Config:
   #         avg: AVG(SPI_CSN_STALL_VGPR_sum / $denom)
   #         min: MIN(SPI_CSN_STALL_VGPR_sum / $denom)
   #         max: MAX(SPI_CSN_STALL_VGPR_sum / $denom)
-  #         unit: Cycles + $normUnit
+  #         unit: (Cycles + $normUnit)
   #       SGPR Stall:
   #         avg: AVG(SPI_CSN_STALL_SGPR_sum / $denom)
   #         min: MIN(SPI_CSN_STALL_SGPR_sum / $denom)
   #         max: MAX(SPI_CSN_STALL_SGPR_sum / $denom)
-  #         unit: Cycles + $normUnit
+  #         unit: (Cycles + $normUnit)
   #       LDS Stall:
   #         avg: AVG(SPI_CSN_STALL_LDS_sum / $denom)
   #         min: MIN(SPI_CSN_STALL_LDS_sum / $denom)
   #         max: MAX(SPI_CSN_STALL_LDS_sum / $denom)
-  #         unit: Cycles + $normUnit
+  #         unit: (Cycles + $normUnit)
   #       Wave Slot Stall:
   #         avg: AVG(SPI_CSN_STALL_WAVE_sum / $denom)
   #         min: MIN(SPI_CSN_STALL_WAVE_sum / $denom)
   #         max: MAX(SPI_CSN_STALL_WAVE_sum / $denom)
-  #         unit: Cycles + $normUnit
+  #         unit: (Cycles + $normUnit)
   #       Barrier Stall:
   #         avg: AVG(SPI_CSN_STALL_BARRIER_sum / $denom)
   #         min: MIN(SPI_CSN_STALL_BARRIER_sum / $denom)
   #         max: MAX(SPI_CSN_STALL_BARRIER_sum / $denom)
-  #         unit: Cycles + $normUnit
+  #         unit: (Cycles + $normUnit)
 
   metrics_description:
     SPI Busy: |-

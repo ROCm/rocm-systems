@@ -83,22 +83,22 @@ Panel Config:
           avg: AVG(CPC_ME1_STALL_WAIT_ON_RCIU_READY_sum / $denom)
           min: MIN(CPC_ME1_STALL_WAIT_ON_RCIU_READY_sum / $denom)
           max: MAX(CPC_ME1_STALL_WAIT_ON_RCIU_READY_sum / $denom)
-          unit: Cycles + $normUnit
+          unit: (Cycles + $normUnit)
         ME1 Stall on Memory Read:
           avg: AVG(CPC_ME1_STALL_WAIT_ON_MEM_READ_sum / $denom)
           min: MIN(CPC_ME1_STALL_WAIT_ON_MEM_READ_sum / $denom)
           max: MAX(CPC_ME1_STALL_WAIT_ON_MEM_READ_sum / $denom)
-          unit: Cycles + $normUnit
+          unit: (Cycles + $normUnit)
         ME1 Stall on Memory Write:
           avg: AVG(CPC_ME1_STALL_WAIT_ON_MEM_WRITE_sum / $denom)
           min: MIN(CPC_ME1_STALL_WAIT_ON_MEM_WRITE_sum / $denom)
           max: MAX(CPC_ME1_STALL_WAIT_ON_MEM_WRITE_sum / $denom)
-          unit: Cycles + $normUnit
+          unit: (Cycles + $normUnit)
         ME1 Stall on ROQ Data:
           avg: AVG(CPC_ME1_STALL_ON_DATA_FROM_ROQ_sum / $denom)
           min: MIN(CPC_ME1_STALL_ON_DATA_FROM_ROQ_sum / $denom)
           max: MAX(CPC_ME1_STALL_ON_DATA_FROM_ROQ_sum / $denom)
-          unit: Cycles + $normUnit
+          unit: (Cycles + $normUnit)
 
   # =========================================================================
   # CPC Memory Requests
@@ -117,22 +117,22 @@ Panel Config:
           avg: AVG(CPC_TCIU_READ_REQUEST_SENT_sum / $denom)
           min: MIN(CPC_TCIU_READ_REQUEST_SENT_sum / $denom)
           max: MAX(CPC_TCIU_READ_REQUEST_SENT_sum / $denom)
-          unit: Count + $normUnit
+          unit: (Count + $normUnit)
         TCIU Write Requests:
           avg: AVG(CPC_TCIU_WRITE_REQUEST_SENT_sum / $denom)
           min: MIN(CPC_TCIU_WRITE_REQUEST_SENT_sum / $denom)
           max: MAX(CPC_TCIU_WRITE_REQUEST_SENT_sum / $denom)
-          unit: Count + $normUnit
+          unit: (Count + $normUnit)
         GUS Read Requests:
           avg: AVG(CPC_GUS_READ_REQUEST_SENT_sum / $denom)
           min: MIN(CPC_GUS_READ_REQUEST_SENT_sum / $denom)
           max: MAX(CPC_GUS_READ_REQUEST_SENT_sum / $denom)
-          unit: Count + $normUnit
+          unit: (Count + $normUnit)
         GUS Write Requests:
           avg: AVG(CPC_GUS_WRITE_REQUEST_SENT_sum / $denom)
           min: MIN(CPC_GUS_WRITE_REQUEST_SENT_sum / $denom)
           max: MAX(CPC_GUS_WRITE_REQUEST_SENT_sum / $denom)
-          unit: Count + $normUnit
+          unit: (Count + $normUnit)
 
   # =========================================================================
   # MEC Instruction Cache
@@ -151,12 +151,12 @@ Panel Config:
           avg: AVG(CPC_MEC_INSTR_CACHE_HIT_sum / $denom)
           min: MIN(CPC_MEC_INSTR_CACHE_HIT_sum / $denom)
           max: MAX(CPC_MEC_INSTR_CACHE_HIT_sum / $denom)
-          unit: Count + $normUnit
+          unit: (Count + $normUnit)
         Instruction Cache Misses:
           avg: AVG(CPC_MEC_INSTR_CACHE_MISS_sum / $denom)
           min: MIN(CPC_MEC_INSTR_CACHE_MISS_sum / $denom)
           max: MAX(CPC_MEC_INSTR_CACHE_MISS_sum / $denom)
-          unit: Count + $normUnit
+          unit: (Count + $normUnit)
         Instruction Cache Hit Rate:
           avg: AVG((100 * CPC_MEC_INSTR_CACHE_HIT_sum / (CPC_MEC_INSTR_CACHE_HIT_sum + CPC_MEC_INSTR_CACHE_MISS_sum)) if ((CPC_MEC_INSTR_CACHE_HIT_sum + CPC_MEC_INSTR_CACHE_MISS_sum) != 0) else None)
           min: MIN((100 * CPC_MEC_INSTR_CACHE_HIT_sum / (CPC_MEC_INSTR_CACHE_HIT_sum + CPC_MEC_INSTR_CACHE_MISS_sum)) if ((CPC_MEC_INSTR_CACHE_HIT_sum + CPC_MEC_INSTR_CACHE_MISS_sum) != 0) else None)

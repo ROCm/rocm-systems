@@ -39,7 +39,7 @@ Panel Config:
       metric:
         ICache Requests:
           value: AVG(SQC_ICACHE_REQ_sum / $denom)
-          unit: Requests + $normUnit
+          unit: (Requests + $normUnit)
         ICache Utilization:
           value: AVG((100 * SQC_ICACHE_BUSY_CYCLES_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
           unit: Percent
@@ -72,7 +72,7 @@ Panel Config:
       metric:
         Dcache Requests:
           value: AVG(SQC_DCACHE_REQ_sum / $denom)
-          unit: Requests + $normUnit
+          unit: (Requests + $normUnit)
         Dcache Utilization:
           value: AVG((100 * SQC_DCACHE_BUSY_CYCLES_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
           unit: Percent
@@ -102,20 +102,20 @@ Panel Config:
       metric:
         TCP Total Requests:
           value: AVG(TCP_REQ_sum / $denom)
-          unit: Requests + $normUnit
+          unit: (Requests + $normUnit)
         TCP Read Requests:
           value: AVG(TCP_REQ_READ_sum / $denom)
-          unit: Requests + $normUnit
+          unit: (Requests + $normUnit)
         TCP Write Requests:
           value: AVG(TCP_REQ_WRITE_sum / $denom)
-          unit: Requests + $normUnit
+          unit: (Requests + $normUnit)
         # Counter not available
         # TCP Atomic Requests:
         #   value: AVG(TCP_REQ_ATOMIC_sum / $denom)
-        #   unit: Requests + $normUnit
+        #   unit: (Requests + $normUnit)
         TCP Miss Requests:
           value: AVG(TCP_REQ_MISS_sum / $denom)
-          unit: Requests + $normUnit
+          unit: (Requests + $normUnit)
         TCP Hit Rate:
           value: AVG((100 * (TCP_REQ_sum - TCP_REQ_MISS_sum) / TCP_REQ_sum) if (TCP_REQ_sum != 0) else None)
           unit: Percent
@@ -139,23 +139,23 @@ Panel Config:
       metric:
         LDS Instructions:
           value: AVG(SQ_INSTS_LDS_sum / $denom)
-          unit: Instructions + $normUnit
+          unit: (Instructions + $normUnit)
         # Counters not available: SQ_LDS_DIRECT_RD, SQ_LDS_DIRECT_WR
         # LDS Read Instructions:
         #   value: AVG(SQ_LDS_DIRECT_RD_sum / $denom)
-        #   unit: Instructions + $normUnit
+        #   unit: (Instructions + $normUnit)
         # LDS Write Instructions:
         #   value: AVG(SQ_LDS_DIRECT_WR_sum / $denom)
-        #   unit: Instructions + $normUnit
+        #   unit: (Instructions + $normUnit)
         LDS Atomic Instructions:
           value: AVG(SQ_LDS_ATOMIC_RETURN_sum / $denom)
-          unit: Instructions + $normUnit
+          unit: (Instructions + $normUnit)
         LDS Instruction Cycles:
           value: AVG(SQ_INST_CYCLES_LDS_sum / $denom)
-          unit: Cycles + $normUnit
+          unit: (Cycles + $normUnit)
         LDS Wait Cycles:
           value: AVG(SQ_WAIT_INST_LDS_sum / $denom)
-          unit: Cycles + $normUnit
+          unit: (Cycles + $normUnit)
         LDS Bank Conflict Rate:
           value: AVG((100 * SQC_LDS_BANK_CONFLICT_sum / SQC_LDS_IDX_ACTIVE_sum) if (SQC_LDS_IDX_ACTIVE_sum != 0) else None)
           unit: Percent
@@ -179,10 +179,10 @@ Panel Config:
       metric:
         TCP-GL1 Read Requests:
           value: AVG(TCP_GL1_REQ_READ_sum / $denom)
-          unit: Requests + $normUnit
+          unit: (Requests + $normUnit)
         TCP-GL1 Write Requests:
           value: AVG(TCP_GL1_REQ_WRITE_sum / $denom)
-          unit: Requests + $normUnit
+          unit: (Requests + $normUnit)
         TCP-GL1 Read Bandwidth:
           value: AVG((TCP_GL1_REQ_READ_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9))
           unit: Bytes/s
@@ -209,16 +209,16 @@ Panel Config:
           unit: Percent
         GL1C Total Requests:
           value: AVG(GL1C_REQ_sum / $denom)
-          unit: Requests + $normUnit
+          unit: (Requests + $normUnit)
         GL1C Read Requests:
           value: AVG(GL1C_REQ_READ_sum / $denom)
-          unit: Requests + $normUnit
+          unit: (Requests + $normUnit)
         GL1C Write Requests:
           value: AVG(GL1C_REQ_WRITE_sum / $denom)
-          unit: Requests + $normUnit
+          unit: (Requests + $normUnit)
         GL1C Miss Requests:
           value: AVG(GL1C_REQ_MISS_sum / $denom)
-          unit: Requests + $normUnit
+          unit: (Requests + $normUnit)
         GL1C Hit Rate:
           value: AVG((100 * (GL1C_REQ_sum - GL1C_REQ_MISS_sum) / GL1C_REQ_sum) if (GL1C_REQ_sum != 0) else None)
           unit: Percent
@@ -245,10 +245,10 @@ Panel Config:
       metric:
         GL1-GL2 Read Requests:
           value: AVG(GL1C_GL2_REQ_READ_sum / $denom)
-          unit: Requests + $normUnit
+          unit: (Requests + $normUnit)
         GL1-GL2 Write Requests:
           value: AVG(GL1C_GL2_REQ_WRITE_sum / $denom)
-          unit: Requests + $normUnit
+          unit: (Requests + $normUnit)
         GL1-GL2 Read Bandwidth:
           value: AVG((GL1C_GL2_REQ_READ_32B_sum*32 + GL1C_GL2_REQ_READ_64B_sum*64 + GL1C_GL2_REQ_READ_128B_sum*128) / ((End_Timestamp - Start_Timestamp) / 1e9))
           unit: Bytes/s
@@ -281,16 +281,16 @@ Panel Config:
           unit: Percent
         GL2C Total Requests:
           value: AVG(GL2C_REQ_sum / $denom)
-          unit: Requests + $normUnit
+          unit: (Requests + $normUnit)
         GL2C Read Requests:
           value: AVG(GL2C_READ_sum / $denom)
-          unit: Requests + $normUnit
+          unit: (Requests + $normUnit)
         GL2C Write Requests:
           value: AVG(GL2C_WRITE_sum / $denom)
-          unit: Requests + $normUnit
+          unit: (Requests + $normUnit)
         GL2C Atomic Requests:
           value: AVG(GL2C_ATOMIC_sum / $denom)
-          unit: Requests + $normUnit
+          unit: (Requests + $normUnit)
         GL2C Hit Rate:
           value: AVG((100 * GL2C_HIT_sum / (GL2C_HIT_sum + GL2C_MISS_sum)) if ((GL2C_HIT_sum + GL2C_MISS_sum) != 0) else None)
           unit: Percent
@@ -325,10 +325,10 @@ Panel Config:
           unit: Percent
         DRAM Read Requests:
           value: AVG(GCEA_RDRAM_REQ_PER_CLIGRP_sum / $denom)
-          unit: Requests + $normUnit
+          unit: (Requests + $normUnit)
         DRAM Write Requests:
           value: AVG(GCEA_WDRAM_REQ_PER_CLIGRP_sum / $denom)
-          unit: Requests + $normUnit
+          unit: (Requests + $normUnit)
         DRAM Read Bandwidth:
           value: AVG((GCEA_RDRAM_SIZE_REQ_sum * 32) / ((End_Timestamp - Start_Timestamp) / 1e9))
           unit: Bytes/s
@@ -337,10 +337,10 @@ Panel Config:
           unit: Bytes/s
         Read Returns:
           value: AVG(GCEA_RRET_VLD_sum / $denom)
-          unit: Count + $normUnit
+          unit: (Count + $normUnit)
         Write Returns:
           value: AVG(GCEA_WRET_VLD_sum / $denom)
-          unit: Count + $normUnit
+          unit: (Count + $normUnit)
 
   metrics_description:
     ICache Utilization: |-

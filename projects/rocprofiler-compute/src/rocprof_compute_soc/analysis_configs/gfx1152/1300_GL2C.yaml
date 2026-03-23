@@ -31,12 +31,12 @@ Panel Config:
           avg: AVG(GL2C_HIT_sum / $denom)
           min: MIN(GL2C_HIT_sum / $denom)
           max: MAX(GL2C_HIT_sum / $denom)
-          unit: Count + $normUnit
+          unit: (Count + $normUnit)
         GL2C Misses:
           avg: AVG(GL2C_MISS_sum / $denom)
           min: MIN(GL2C_MISS_sum / $denom)
           max: MAX(GL2C_MISS_sum / $denom)
-          unit: Count + $normUnit
+          unit: (Count + $normUnit)
 
   # =========================================================================
   # GL2C Request Statistics
@@ -55,17 +55,17 @@ Panel Config:
           avg: AVG(GL2C_REQ_sum / $denom)
           min: MIN(GL2C_REQ_sum / $denom)
           max: MAX(GL2C_REQ_sum / $denom)
-          unit: Count + $normUnit
+          unit: (Count + $normUnit)
         Read Requests:
           avg: AVG(GL2C_READ_sum / $denom)
           min: MIN(GL2C_READ_sum / $denom)
           max: MAX(GL2C_READ_sum / $denom)
-          unit: Count + $normUnit
+          unit: (Count + $normUnit)
         Write Requests:
           avg: AVG(GL2C_WRITE_sum / $denom)
           min: MIN(GL2C_WRITE_sum / $denom)
           max: MAX(GL2C_WRITE_sum / $denom)
-          unit: Count + $normUnit
+          unit: (Count + $normUnit)
 
   # =========================================================================
   # GL2C Bandwidth

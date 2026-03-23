@@ -45,22 +45,22 @@ Panel Config:
           avg: AVG(TCP_REQ_sum / $denom)
           min: MIN(TCP_REQ_sum / $denom)
           max: MAX(TCP_REQ_sum / $denom)
-          unit: Count + $normUnit
+          unit: (Count + $normUnit)
         Read Requests:
           avg: AVG(TCP_REQ_READ_sum / $denom)
           min: MIN(TCP_REQ_READ_sum / $denom)
           max: MAX(TCP_REQ_READ_sum / $denom)
-          unit: Count + $normUnit
+          unit: (Count + $normUnit)
         Write Requests:
           avg: AVG(TCP_REQ_WRITE_sum / $denom)
           min: MIN(TCP_REQ_WRITE_sum / $denom)
           max: MAX(TCP_REQ_WRITE_sum / $denom)
-          unit: Count + $normUnit
+          unit: (Count + $normUnit)
         Miss Requests:
           avg: AVG(TCP_REQ_MISS_sum / $denom)
           min: MIN(TCP_REQ_MISS_sum / $denom)
           max: MAX(TCP_REQ_MISS_sum / $denom)
-          unit: Count + $normUnit
+          unit: (Count + $normUnit)
 
   # =========================================================================
   # TCP Cache Performance
@@ -104,17 +104,17 @@ Panel Config:
           avg: AVG(TCP_GL1_REQ_READ_sum / $denom)
           min: MIN(TCP_GL1_REQ_READ_sum / $denom)
           max: MAX(TCP_GL1_REQ_READ_sum / $denom)
-          unit: Count + $normUnit
+          unit: (Count + $normUnit)
         GL1 Read 128B Requests:
           avg: AVG(TCP_GL1_REQ_READ_128B_sum / $denom)
           min: MIN(TCP_GL1_REQ_READ_128B_sum / $denom)
           max: MAX(TCP_GL1_REQ_READ_128B_sum / $denom)
-          unit: Count + $normUnit
+          unit: (Count + $normUnit)
         GL1 Write Requests:
           avg: AVG(TCP_GL1_REQ_WRITE_sum / $denom)
           min: MIN(TCP_GL1_REQ_WRITE_sum / $denom)
           max: MAX(TCP_GL1_REQ_WRITE_sum / $denom)
-          unit: Count + $normUnit
+          unit: (Count + $normUnit)
 
   # =========================================================================
   # TCP Stalls
@@ -133,17 +133,17 @@ Panel Config:
           avg: AVG(TCP_TCP_TA_REQ_STALL_sum / $denom)
           min: MIN(TCP_TCP_TA_REQ_STALL_sum / $denom)
           max: MAX(TCP_TCP_TA_REQ_STALL_sum / $denom)
-          unit: Cycles + $normUnit
+          unit: (Cycles + $normUnit)
         GL1 Back Pressure:
           avg: AVG(TCP_GL1_TCP_BACK_PRESSURE_sum / $denom)
           min: MIN(TCP_GL1_TCP_BACK_PRESSURE_sum / $denom)
           max: MAX(TCP_GL1_TCP_BACK_PRESSURE_sum / $denom)
-          unit: Cycles + $normUnit
+          unit: (Cycles + $normUnit)
         Data FIFO Stall:
           avg: AVG(TCP_DATA_FIFO_STALL_sum / $denom)
           min: MIN(TCP_DATA_FIFO_STALL_sum / $denom)
           max: MAX(TCP_DATA_FIFO_STALL_sum / $denom)
-          unit: Cycles + $normUnit
+          unit: (Cycles + $normUnit)
 
   metrics_description:
     TCP Busy: |-
