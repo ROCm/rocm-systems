@@ -43,6 +43,21 @@ static int is_wsl2 = -1;
   }                                          \
 } while(0)
 
+#define AMDSMITRYSET(name, result, ...) do { \
+  if (!AMDSMI_DIRECT && pfn_##name == nullptr) { \
+    result = ncclInternalError; \
+    return ncclInternalError; /* missing symbol is not a warned error */ \
+  } \
+  amdsmi_status_t ret = pfn_##name(__VA_ARGS__); \
+  if( ret != AMDSMI_STATUS_SUCCESS ) {       \
+    const char *err;                         \
+    pfn_amdsmi_status_code_to_string(ret, &err); \
+    ERROR("AMD SMI failure: %s at line: %d in file: %s", err, __LINE__, __FILE__);    \
+    result = ncclInternalError; \
+    return ncclInternalError;                \
+  }                                          \
+} while(0)
+
 // By default, enable use of amd_smi_lib for ROCm 7.0 and above, and disable for older versions where it doesn't seem necessary as amdsmi is only needed for UALoE scale-up support
 // which is less likely to be backported to older ROCm versions;
 #if ROCM_VERSION >= 70000
@@ -199,11 +214,11 @@ ncclResult_t amd_smi_init() {
         }
 
         // initialize amd-smi for AMD GPUs
-        AMDSMITRY(amdsmi_init, AMDSMI_INIT_AMD_GPUS);
+        AMDSMITRYSET(amdsmi_init, amdSmiInitResult, AMDSMI_INIT_AMD_GPUS);
 
         // get amd-smi version
         amdsmi_version_t version;
-        AMDSMITRY(amdsmi_get_lib_version, &version);
+        AMDSMITRYSET(amdsmi_get_lib_version, amdSmiInitResult, &version);
         INFO(NCCL_INIT, "amdsmi_lib: version %d.%d.%d.%s", version.major, version.minor, version.release, version.build);
       } else {
     #ifdef HIP_FABRIC_API
@@ -216,7 +231,7 @@ ncclResult_t amd_smi_init() {
       amdSmiInitCalled.store(true, std::memory_order_release);
     }
   }
-  return ncclSuccess;
+  return amdSmiInitResult;
 }
 
 ncclResult_t amd_smi_shutdown() {
