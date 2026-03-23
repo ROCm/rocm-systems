@@ -3461,7 +3461,6 @@ hsa_status_t Runtime::MappedHandleAllowedAgent::RemoveAccess() {
       if (mapped_ptr != va)
         return HSA_STATUS_ERROR;
     }
-  }
     return HSA_STATUS_SUCCESS;
   } else {
     return targetAgent->driver().Unmap(
