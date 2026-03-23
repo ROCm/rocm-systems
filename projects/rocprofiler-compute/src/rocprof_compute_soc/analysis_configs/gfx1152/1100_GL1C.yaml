@@ -23,14 +23,14 @@ Panel Config:
         unit: Unit
       metric:
         GL1C Busy:
-          avg: AVG((100 * GL1C_BUSY_sum / GL1C_CYCLE_sum) if (GL1C_CYCLE_sum != 0) else None)
-          min: MIN((100 * GL1C_BUSY_sum / GL1C_CYCLE_sum) if (GL1C_CYCLE_sum != 0) else None)
-          max: MAX((100 * GL1C_BUSY_sum / GL1C_CYCLE_sum) if (GL1C_CYCLE_sum != 0) else None)
+          avg: AVG((100 * GL1C_BUSY / GL1C_CYCLE) if (GL1C_CYCLE != 0) else None)
+          min: MIN((100 * GL1C_BUSY / GL1C_CYCLE) if (GL1C_CYCLE != 0) else None)
+          max: MAX((100 * GL1C_BUSY / GL1C_CYCLE) if (GL1C_CYCLE != 0) else None)
           unit: Percent
         GL1C Starve:
-          avg: AVG((100 * GL1C_STARVE_sum / GL1C_CYCLE_sum) if (GL1C_CYCLE_sum != 0) else None)
-          min: MIN((100 * GL1C_STARVE_sum / GL1C_CYCLE_sum) if (GL1C_CYCLE_sum != 0) else None)
-          max: MAX((100 * GL1C_STARVE_sum / GL1C_CYCLE_sum) if (GL1C_CYCLE_sum != 0) else None)
+          avg: AVG((100 * GL1C_STARVE / GL1C_CYCLE) if (GL1C_CYCLE != 0) else None)
+          min: MIN((100 * GL1C_STARVE / GL1C_CYCLE) if (GL1C_CYCLE != 0) else None)
+          max: MAX((100 * GL1C_STARVE / GL1C_CYCLE) if (GL1C_CYCLE != 0) else None)
           unit: Percent
 
   # =========================================================================
@@ -143,8 +143,10 @@ Panel Config:
     GL1C Busy: |-
       Percentage of cycles where the GL1C cache was busy processing requests.
       GL1C is the shared L1 cache within each Shader Engine.
+      Per sample: 100 * GL1C_BUSY / GL1C_CYCLE (when GL1C_CYCLE != 0).
     GL1C Starve: |-
       Percentage of cycles where GL1C had no pending requests from TCP.
+      Per sample: 100 * GL1C_STARVE / GL1C_CYCLE (when GL1C_CYCLE != 0).
     Total Requests: |-
       Total number of requests to the GL1C cache from TCP.
     Read Requests: |-
