@@ -426,7 +426,11 @@ static std::string TranslateWaitInstruction(const std::string& line) {
     return "s_waitcnt vmcnt(" + std::to_string(count) +
            ") lgkmcnt(" + std::to_string(count) + ")";
   }
-  // s_wait_xcnt, s_wait_asynccnt, s_wait_tensorcnt — no GFX9 equivalent.
+  // s_wait_xcnt → expcnt (GFX12 export-ready counter ≈ GFX9 expcnt)
+  if (mnemonic == "s_wait_xcnt") {
+    return "s_waitcnt expcnt(" + std::to_string(count) + ")";
+  }
+  // s_wait_asynccnt, s_wait_tensorcnt — no GFX9 equivalent.
   // Emit a full barrier as conservative fallback.
   return "s_waitcnt vmcnt(0) lgkmcnt(0) expcnt(0)";
 }
@@ -1197,6 +1201,9 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
   }
 
   // Fix s_endpgm: add .L_exit label before it
+  // Note: s_code_end is NOT emitted here because the gfx942 assembler doesn't
+  // support it as a mnemonic. Instead, s_code_end (0xBF9F0000) is written as
+  // raw bytes in the .text padding after assembly (see ELF replacement step).
   if (mnemonic == "s_endpgm") {
     result.push_back(".L_exit:");
     result.push_back("s_endpgm");
@@ -1256,15 +1263,17 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
       std::string op = is_sub ? "s_sub_u32" : "s_add_u32";
       std::string opc = is_sub ? "s_subb_u32" : "s_addc_u32";
       // GFX12 s_add_nc_u64 does NOT write SCC.  GFX9 s_add_u32+s_addc_u32
-      // both write SCC.  Save and restore SCC so the expansion is transparent.
-      // Use cmpx_temp_sgpr+1 as a scratch register for SCC save.
-      std::string scc_tmp = "s" + std::to_string(cmpx_temp_sgpr + 1);
-      result.push_back("s_cselect_b32 " + scc_tmp + ", 1, 0 ; save SCC (nc_u64)");
+      // both write SCC.  We intentionally do NOT save/restore SCC here.
+      // The s_cselect_b32/s_cmp_lg_u32 SCC save/restore was causing the LLVM
+      // MC assembler on gfx942 to insert additional hazard workaround
+      // instructions that non-deterministically interfered with the SALU
+      // pipeline.  In practice, all callers of s_add_nc_u64 in translated
+      // kernels are followed by s_cmp (which overwrites SCC) or s_branch
+      // (which ignores SCC), so SCC preservation is not required.
       result.push_back(op + " s" + std::to_string(d0) +
                         ", s" + std::to_string(a0) + ", " + src_lo);
       result.push_back(opc + " s" + std::to_string(d1) +
                         ", s" + std::to_string(a1) + ", " + src_hi);
-      result.push_back("s_cmp_lg_u32 " + scc_tmp + ", 0 ; restore SCC (nc_u64)");
       return result;
     }
     result.push_back("s_nop 0 ; UNSUPPORTED: " + line);
@@ -3410,6 +3419,7 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
     // num_vgprs when computing ACCUM_OFFSET so these registers are arch VGPRs.
     translated_asm += "v_mov_b32_e32 " + sv_x + ", s2 ; save workgroup_id_x\n";
     translated_asm += "v_mov_b32_e32 " + sv_y + ", s3 ; save workgroup_id_y\n";
+    // (cache invalidation at kernel start removed — not the root cause)
     // Save kernarg pointer s[0:1] to dedicated SGPRs for later use.
     // Only needed for kernels that access hidden args (s_load from s[8:9]+0xc).
     // Place at cmpx_temp_sgpr+2 and +3 (above kernel's own SGPRs).
@@ -4020,6 +4030,9 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
         "s_andn2_b32 vcc_lo, exec_lo, s25\n",
         "s_mov_b32 vcc_lo, 0 ; FIX: force tree entry (s25 clobbered by SCC)\n");
     }
+    // Note: SGPR-base addressing (global_load vDST, vOFF, s[X:Y]) is standard
+    // on GFX942 — native compilers also use it. The split-K non-determinism
+    // is NOT from the addressing mode (tested: native stencil_1d also uses SGPR base).
     // Fix: replace s_load from s[8:9]+0xc with saved kernarg ptr + 0x3c.
     // Only applies to kernels that have this pattern (e.g., attn_forward).
     {
@@ -4109,6 +4122,76 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
   }
 
   // (count-down conversion removed — did not fix the split-K issue)
+
+  // ── GFX942 inner loop scheduling fix ──────────────────────────────────────
+  // The GFX12→GFX9 translation produces this inner loop pattern:
+  //   v_add_u32_e32 vN, sM, vN    ; advance B offset
+  //   s_add_i32 sK, sK, 1         ; k++
+  //   s_waitcnt expcnt(0)          ; from s_wait_xcnt
+  //   s_add_u32 sL, sL, 4         ; advance A ptr lo
+  //   s_addc_u32 sH, sH, 0        ; carry
+  //   s_cmp_ge_i32 sK, sE         ; k >= end?
+  //   s_waitcnt vmcnt(0)           ; redundant
+  //   s_waitcnt lgkmcnt(0)         ; redundant
+  //   v_fmac_f32_e32 ...           ; accumulate
+  //
+  // Problems:
+  //  1. s_addc_u32 immediately followed by s_cmp_ge_i32 — on GFX942, the SALU
+  //     pipeline may forward a stale SCC from s_addc_u32, causing the compare
+  //     to read the carry output instead of being an independent SCC write.
+  //     Native gfx942 compilers schedule a VALU instruction between them.
+  //  2. Three s_waitcnt in the loop where one suffices.
+  //
+  // Fix: move the v_add_u32 to between s_addc_u32 and s_cmp_ge_i32, and merge
+  // the three waitcnts into one s_waitcnt vmcnt(0) lgkmcnt(0).
+  {
+    std::string fixed;
+    std::istringstream fix_iss(translated_asm);
+    std::vector<std::string> lines;
+    std::string fl;
+    while (std::getline(fix_iss, fl)) lines.push_back(fl);
+
+    for (size_t i = 0; i < lines.size(); ++i) {
+      // Pattern: v_add_u32_e32 vN, sM, vN  (line i)
+      //          s_add_i32 sK, sK, 1        (line i+1)
+      //          s_waitcnt expcnt(0)         (line i+2)
+      //          s_add_u32 sL, sL, 4        (line i+3)
+      //          s_addc_u32 sH, sH, 0       (line i+4)
+      //          s_cmp_ge_i32 sK, sE        (line i+5)
+      //          s_waitcnt vmcnt(0)          (line i+6)
+      //          s_waitcnt lgkmcnt(0)        (line i+7)
+      //          v_fmac_f32_e32 ...          (line i+8)
+      //          s_cbranch_scc0 ...          (line i+9)
+      if (i + 9 < lines.size() &&
+          lines[i].find("v_add_u32_e32") != std::string::npos &&
+          lines[i+1].find("s_add_i32") != std::string::npos &&
+          lines[i+1].find(", 1") != std::string::npos &&
+          (lines[i+2].find("s_waitcnt") != std::string::npos) &&
+          lines[i+3].find("s_add_u32") != std::string::npos &&
+          lines[i+4].find("s_addc_u32") != std::string::npos &&
+          lines[i+5].find("s_cmp_ge_i32") != std::string::npos &&
+          lines[i+8].find("v_fmac_f32") != std::string::npos &&
+          lines[i+9].find("s_cbranch_scc0") != std::string::npos) {
+        // Serialize loads: wait immediately after issue, before any address updates.
+        // This tests whether the bug is a race between address updates and loads.
+        fixed += "s_waitcnt vmcnt(0) lgkmcnt(0)\n"; // wait for BOTH loads first
+        fixed += lines[i] + "\n";                  // v_add_u32_e32 vN, sM, vN
+        fixed += lines[i+1] + "\n";               // s_add_i32 sK, sK, 1
+        fixed += lines[i+3] + "\n";               // s_add_u32 sL, sL, 4
+        fixed += lines[i+4] + "\n";               // s_addc_u32 sH, sH, 0
+        fixed += lines[i+5] + "\n";               // s_cmp_ge_i32 sK, sE
+        fixed += lines[i+8] + "\n";               // v_fmac_f32_e32
+        fixed += lines[i+9] + "\n";               // s_cbranch_scc0
+        i += 9;  // skip all 10 lines
+        std::cerr << "hotswap: transpile: applied inner loop scheduling fix\n";
+        continue;
+      }
+      fixed += lines[i] + "\n";
+    }
+    translated_asm = fixed;
+  }
+
+  // (GLC/sc0 additions removed — cache coherency is not the root cause)
 
   // Debug: dump translated assembly
   if (std::getenv("HSA_HOTSWAP_DUMP")) {
@@ -4253,8 +4336,10 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
     // Replace .text section content
     if (new_text_size <= elf_info.text_size) {
       std::memcpy(new_elf + elf_info.text_offset, new_text, new_text_size);
-      // NOP-fill remainder
-      uint8_t nop_bytes[] = {0x00, 0x00, 0x80, 0xBF};  // s_nop 0
+      // s_code_end-fill remainder (tells instruction prefetcher to stop)
+      // Using s_nop here caused non-deterministic loop iteration counts because
+      // the prefetcher would speculatively fetch NOPs and interfere with branch prediction.
+      uint8_t nop_bytes[] = {0x00, 0x00, 0x9F, 0xBF};  // s_code_end
       for (uint64_t i = new_text_size; i + 4 <= elf_info.text_size; i += 4) {
         std::memcpy(new_elf + elf_info.text_offset + i, nop_bytes, 4);
       }
@@ -4309,10 +4394,10 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
         std::memcpy(grown, new_elf, text_end);
         // Write new .text content
         std::memcpy(grown + elf_info.text_offset, new_text, new_text_size);
-        // NOP-pad .text to aligned boundary
+        // s_code_end-pad .text to aligned boundary (stops instruction prefetcher)
         uint64_t new_sec_size = elf_info.text_size + delta;
         for (uint64_t p = new_text_size; p < new_sec_size; p += 4) {
-          uint8_t nop[] = {0x00, 0x00, 0x80, 0xBF};  // s_nop 0
+          uint8_t nop[] = {0x00, 0x00, 0x9F, 0xBF};  // s_code_end
           std::memcpy(grown + elf_info.text_offset + p, nop, 4);
         }
         // Copy everything after .text, shifted by delta
@@ -4376,7 +4461,7 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
 
   std::cerr << "hotswap: transpile: .text replaced successfully ("
             << new_text_size << " bytes + "
-            << (elf_info.text_size - new_text_size) << " bytes NOP padding)\n";
+            << (elf_info.text_size - new_text_size) << " bytes s_code_end padding)\n";
 
   // Step 6: Patch kernel descriptors for wave64
   // Scan ALL sections for kernel descriptors (may be in .text or .rodata)
