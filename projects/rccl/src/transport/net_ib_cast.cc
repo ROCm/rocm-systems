@@ -831,16 +831,18 @@ static ncclProfilerCallback_t ncclProfilerFunction;
 #define QP_SCHED_SPLIT_DATA_MIN_DEF     (64 * 1024)
 #define QP_SCHED_LOG_DEF                NSEC_PER_SEC
 
-// CAST
-RCCL_PARAM(IbCastQpSchedEnable, "IB_QP_SCHED_ENABLE", QP_SCHED_ENABLE_DEF);
-RCCL_PARAM(IbQpSchedWrrEnable, "IB_QP_SCHED_WRR_ENABLE", QP_SCHED_WRR_ENABLE_DEF);
-RCCL_PARAM(IbQpSchedResetInterval, "IB_QP_SCHED_RESET_INTERVAL", -1);
-RCCL_PARAM(IbQpSchedUpdateInterval, "IB_QP_SCHED_UPDATE_INTERVAL", -1);
-RCCL_PARAM(IbQpSchedSplitDataMin, "IB_QP_SCHED_SPLIT_DATA_MIN", -1);
-RCCL_PARAM(IbQpSchedLogInterval, "IB_QP_SCHED_LOG_INTERVAL", -1);
+// CAST – each variable is accessible as RCCL_IB_QP_SCHED_* or NCCL_IB_QP_SCHED_*
+RCCL_PARAM_NCCL_ALIAS(IbCastQpSchedEnable, "IB_QP_SCHED_ENABLE", QP_SCHED_ENABLE_DEF);
+RCCL_PARAM_NCCL_ALIAS(IbQpSchedWrrEnable, "IB_QP_SCHED_WRR_ENABLE", QP_SCHED_WRR_ENABLE_DEF);
+RCCL_PARAM_NCCL_ALIAS(IbQpSchedResetInterval, "IB_QP_SCHED_RESET_INTERVAL", -1);
+RCCL_PARAM_NCCL_ALIAS(IbQpSchedUpdateInterval, "IB_QP_SCHED_UPDATE_INTERVAL", -1);
+RCCL_PARAM_NCCL_ALIAS(IbQpSchedSplitDataMin, "IB_QP_SCHED_SPLIT_DATA_MIN", -1);
+RCCL_PARAM_NCCL_ALIAS(IbQpSchedLogInterval, "IB_QP_SCHED_LOG_INTERVAL", -1);
 
-#define QP_SCHED_WEIGHT_ENV_VAR         "RCCL_IB_QP_SCHED_WEIGHT"
-#define QP_SCHED_LOG_PATH_ENV_VAR       "RCCL_IB_QP_SCHED_LOG_PATH"
+#define QP_SCHED_WEIGHT_ENV_VAR           "RCCL_IB_QP_SCHED_WEIGHT"
+#define QP_SCHED_WEIGHT_ENV_VAR_ALIAS     "NCCL_IB_QP_SCHED_WEIGHT"
+#define QP_SCHED_LOG_PATH_ENV_VAR         "RCCL_IB_QP_SCHED_LOG_PATH"
+#define QP_SCHED_LOG_PATH_ENV_VAR_ALIAS   "NCCL_IB_QP_SCHED_LOG_PATH"
 
 #define QP_SCHED_LOG_FILE_NAME_PREFIX	"cast_log_"
 #define NCCL_NET_IB_REMAP_UNUSED 0
@@ -1007,6 +1009,8 @@ getUpdateParm:
   }
 
   str = getenv(QP_SCHED_WEIGHT_ENV_VAR);
+  if (!str)
+    str = getenv(QP_SCHED_WEIGHT_ENV_VAR_ALIAS);
   if (str) {
     weight = atof(str);
     if (weight != QP_SCHED_WEIGHT_NONE) {
@@ -1024,6 +1028,8 @@ getUpdateParm:
   }
 
   str = getenv(QP_SCHED_LOG_PATH_ENV_VAR);
+  if (!str)
+    str = getenv(QP_SCHED_LOG_PATH_ENV_VAR_ALIAS);
   if (str != NULL) {
     char hostName[HOST_NAME_MAX + 1], pid[32];
     size_t fileNameLen;
