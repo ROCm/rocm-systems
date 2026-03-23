@@ -5,6 +5,11 @@ cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
 
 project(rocprofiler-systems-videodecode-example LANGUAGES CXX)
 
+# Support standalone builds
+if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
+    include(${CMAKE_CURRENT_LIST_DIR}/../cmake/standalone-helpers.cmake OPTIONAL)
+endif()
+
 # This example requires hip and rocdecode.
 find_package(HIP QUIET)
 
@@ -29,17 +34,6 @@ list(APPEND CMAKE_MODULE_PATH ${ROCmVersion_DIR}/share/rocdecode/cmake)
 
 set(CMAKE_BUILD_TYPE "RelWithDebInfo")
 string(REPLACE " " ";" _FLAGS "${CMAKE_CXX_FLAGS_DEBUG}")
-
-if(ROCPROFSYS_DISABLE_EXAMPLES)
-    get_filename_component(_DIR ${CMAKE_CURRENT_LIST_DIR} NAME)
-
-    if(
-        ${PROJECT_NAME} IN_LIST ROCPROFSYS_DISABLE_EXAMPLES
-        OR ${_DIR} IN_LIST ROCPROFSYS_DISABLE_EXAMPLES
-    )
-        return()
-    endif()
-endif()
 
 function(videodecode_message _MSG_TYPE)
     if(
@@ -104,17 +98,17 @@ else()
 endif()
 
 # Copy video files to build directory
-if(EXISTS "${ROCmVersion_DIR}/share/rocdecode/video")
+if(EXISTS "${rocdecode_ROOT_DIR}/share/rocdecode/video")
     if(NOT EXISTS "${CMAKE_BINARY_DIR}/videos")
         file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/videos")
     endif()
 
-    file(GLOB_RECURSE video_files "${ROCmVersion_DIR}/share/rocdecode/video/*H26*.mp4")
+    file(GLOB_RECURSE video_files "${rocdecode_ROOT_DIR}/share/rocdecode/video/*H26*.mp4")
     file(COPY ${video_files} DESTINATION ${CMAKE_BINARY_DIR}/videos)
 else()
     videodecode_message(
         AUTHOR_WARNING
-        "Source directory ${ROCmVersion_DIR}/share/rocdecode/video does not exist"
+        "Source directory ${rocdecode_ROOT_DIR}/share/rocdecode/video does not exist"
     )
 endif()
 

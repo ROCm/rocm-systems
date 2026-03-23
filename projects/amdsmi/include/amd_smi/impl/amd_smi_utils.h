@@ -24,6 +24,7 @@
 #define AMD_SMI_INCLUDE_AMD_SMI_UTILS_H_
 
 #include <dirent.h>
+#include <pthread.h>
 
 #include <limits>
 #include <string>
@@ -31,13 +32,6 @@
 
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_gpu_device.h"
-
-#define SMIGPUDEVICE_MUTEX(MUTEX)           \
-  amd::smi::pthread_wrap _pw(*(MUTEX));     \
-  amd::smi::ScopedPthread _lock(_pw, true); \
-  if (_lock.mutex_not_acquired()) {         \
-    return AMDSMI_STATUS_BUSY;              \
-  }
 
 extern "C" {
 void amdsmi_free_name_value_pairs(void* p);

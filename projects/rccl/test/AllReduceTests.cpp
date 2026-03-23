@@ -273,8 +273,6 @@ namespace RcclUnitTesting
   }
 
 #ifdef RCCL_ALLREDUCE_WITH_BIAS
-  // Note: All bias tests require:
-  // nRanks >= 2 (bias NOT supported for single rank)
 
   // Named constants for bias test configuration
   namespace BiasTestConstants
@@ -331,9 +329,6 @@ namespace RcclUnitTesting
 
       for(int totalRanks : testBed.ev.GetNumGpusList())
       {
-          if(totalRanks < 2)
-              continue;
-
           int const               numProcesses     = totalRanks;
           bool const              isMultiProcess   = true;
           const std::vector<int>& gpuPriorityOrder = testBed.ev.GetGpuPriorityOrder();
