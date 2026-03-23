@@ -167,7 +167,7 @@ NCCL_PARAM(IbCastFifoTc, "IB_FIFO_TC", -1);
 NCCL_PARAM(IbCastAsyncEvents,"IB_RETURN_ASYNC_EVENTS",1);
 NCCL_PARAM(IbCastEceEnable,"IB_ECE_ENABLE",1);
 NCCL_PARAM(IbCastDataDirect,"IB_DATA_DIRECT",1);
-NCCL_PARAM(IbCastQpsPerConn, "IB_QPS_PER_CONNECTION", 1);
+NCCL_PARAM(IbCastQpsPerConn, "IB_QPS_PER_CONNECTION", 2);
 RCCL_PARAM(IbCastQpsPerP2p, "IB_QPS_PER_P2P", 0);
 NCCL_PARAM(IbCastGdrFlushDisable, "GDR_FLUSH_DISABLE", 0);
 // AMD AINIC
@@ -1080,6 +1080,8 @@ getUpdateParm:
       }
     }
   }
+
+  INFO(NCCL_NET|NCCL_ENV, "(IB-CAST) NCCL_IB_QPS_PER_CONNECTION set to %d", ncclParamIbCastQpsPerConn());
 
 exit:
   free(logFileName);
