@@ -12,5 +12,5 @@ mpirun -n 2 -mca pml ucx -mca osc ucx -x ROCSHMEM_MAX_NUM_CONTEXTS=1 \
   --rocm-hip-runtime-api-operations-annotate-backtrace hipLaunchKernel hipMemcpy hipMemcpyAsync \
   hipMalloc hipFree hipStreamSynchronize --config "./rocprof-sys.cfg" -- \
  ./build/tests/functional_tests/rocshmem_functional_tests.inst -a 26 -w 1 -z 64 \
- -s 4 2>&1 | tee ./tests-results/logs-heatmap-after/wgput_n2_w1_z64_4B.log
+ -s 4 -n 2 -nskip 1 2>&1 | tee ./tests-results/logs-heatmap-after/wgput_n2_w1_z64_4B.log
 #  -s 1048576 2>&1 | tee ./tests-results/logs-heatmap-after/wgput_n2_w1_z64_1048576B.log
