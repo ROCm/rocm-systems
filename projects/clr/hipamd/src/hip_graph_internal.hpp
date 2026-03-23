@@ -1214,7 +1214,6 @@ class GraphKernelNode : public GraphNode {
       return;
     }
     for (auto& command : commands_) {
-      hipFunction_t func = getFunc(kernelParams_, dev_id_);
       command->enqueue();
       command->release();
     }
