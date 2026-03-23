@@ -22,9 +22,9 @@ Panel Config:
         unit: Unit
       metric:
         SPI Busy:
-          avg: AVG((100 * SPI_BUSY_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
-          min: MIN((100 * SPI_BUSY_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
-          max: MAX((100 * SPI_BUSY_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
+          avg: AVG((100 * SPI_BUSY / GRBM_GUI_ACTIVE) if (GRBM_GUI_ACTIVE != 0) else None)
+          min: MIN((100 * SPI_BUSY / GRBM_GUI_ACTIVE) if (GRBM_GUI_ACTIVE != 0) else None)
+          max: MAX((100 * SPI_BUSY / GRBM_GUI_ACTIVE) if (GRBM_GUI_ACTIVE != 0) else None)
           unit: Percent
 
   # =========================================================================
@@ -41,14 +41,14 @@ Panel Config:
         unit: Unit
       metric:
         Compute Wave Dispatches:
-          avg: AVG(SPI_CSN_WAVE_sum / $denom)
-          min: MIN(SPI_CSN_WAVE_sum / $denom)
-          max: MAX(SPI_CSN_WAVE_sum / $denom)
+          avg: AVG(SPI_CSN_WAVE / $denom)
+          min: MIN(SPI_CSN_WAVE / $denom)
+          max: MAX(SPI_CSN_WAVE / $denom)
           unit: (Count + $normUnit)
         Wave Dispatch Rate:
-          avg: AVG((SPI_CSN_WAVE_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
-          min: MIN((SPI_CSN_WAVE_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
-          max: MAX((SPI_CSN_WAVE_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
+          avg: AVG((SPI_CSN_WAVE / GRBM_GUI_ACTIVE) if (GRBM_GUI_ACTIVE != 0) else None)
+          min: MIN((SPI_CSN_WAVE / GRBM_GUI_ACTIVE) if (GRBM_GUI_ACTIVE != 0) else None)
+          max: MAX((SPI_CSN_WAVE / GRBM_GUI_ACTIVE) if (GRBM_GUI_ACTIVE != 0) else None)
           unit: Waves/cycle
 
   # =========================================================================
@@ -93,12 +93,14 @@ Panel Config:
 
   metrics_description:
     SPI Busy: |-
-      Percentage of cycles where the SPI (Shader Processor Input) was busy.
-      SPI handles wave scheduling and resource allocation.
+      Percentage of GPU active (GUI) cycles where the SPI (Shader Processor Input)
+      was busy. Computed as 100 * SPI_BUSY / GRBM_GUI_ACTIVE. SPI handles wave
+      scheduling and resource allocation.
     Compute Wave Dispatches: |-
-      Number of compute shader waves dispatched by SPI.
+      Number of compute shader waves dispatched by SPI (SPI_CSN_WAVE).
     Wave Dispatch Rate: |-
-      Average number of waves dispatched per cycle.
+      Average number of waves dispatched per GPU active cycle. Computed as
+      SPI_CSN_WAVE / GRBM_GUI_ACTIVE.
     # Fixme: SPI_CSN_STALL_* counters not available - commenting out descriptions
     # VGPR Stall: |-
     #   Cycles SPI was stalled due to insufficient VGPRs.
