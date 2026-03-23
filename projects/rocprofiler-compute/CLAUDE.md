@@ -41,6 +41,7 @@ OpenCode may read this file; **Codex** → [`AGENTS.md`](AGENTS.md).
 - [`.ai/prompts/default.md`](.ai/prompts/default.md) · [`.ai/prompts/run_session.md`](.ai/prompts/run_session.md)
 - Deliverables: [`.ai/standards/agent_output.md`](.ai/standards/agent_output.md)
 - PR: [`.ai/review/checklist.md`](.ai/review/checklist.md)
+- **Code review skill (all agents):** [`.ai/skills/code_review.md`](.ai/skills/code_review.md) · **Claude slash skill:** [`.claude/skills/code-reviewer/SKILL.md`](.claude/skills/code-reviewer/SKILL.md)
 
 ## Claude rule injection
 

@@ -1,5 +1,7 @@
 # AI-aware code review checklist
 
+**Structured review playbook (priorities, comment types, domains):** [`.ai/skills/code_review.md`](../skills/code_review.md).
+
 ## Correctness
 
 - [ ] Behavior matches description; edge cases considered for CLI, parsers, and numeric paths

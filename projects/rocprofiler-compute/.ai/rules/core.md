@@ -7,3 +7,4 @@
 5. **Truth** — Do not invent APIs, file paths, or ROCm/GPU behavior. If unsure, ask or leave a TODO with what to confirm.
 6. **Monorepo paths** — This project lives under `projects/rocprofiler-compute` in rocm-systems. Pre-commit hooks may assume the super-repo root; do not “fix” hook paths without understanding CONTRIBUTING setup.
 7. **Security** — Follow [`.ai/rules/security.md`](security.md): no blind shell execution, validate external/untrusted input, keep file and MCP scope minimal.
+8. **Layering** — Keep profiler capture / base orchestration from growing hard dependencies on analysis UI packages (`rocprof_compute_analyze`, TUI, WebUI, etc.). Follow existing lazy-import patterns (e.g. in `rocprof_compute_base`) unless maintainers explicitly want otherwise.

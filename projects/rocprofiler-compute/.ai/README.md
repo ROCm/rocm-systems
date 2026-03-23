@@ -23,7 +23,7 @@ Consistent **AI-assisted** changes across Claude, Copilot, Cursor, Codex, OpenCo
 │   ├── cpp.md
 │   ├── cmake.md
 │   └── agent_output.md    # Strict skill deliverables
-├── skills/                # Task playbooks (see index.md)
+├── skills/                # Task playbooks (see index.md); code_review.md = shared review playbook
 ├── prompts/
 │   ├── default.md
 │   └── run_session.md
@@ -34,7 +34,7 @@ scripts/
 docs/
 └── AI_GUIDE.md
 AGENTS.md · CLAUDE.md · .cursor/rules/*.mdc · .github/copilot-instructions.md
-.claude/                   # Claude hooks + stubs → .ai/guide, .ai/rules
+.claude/                   # Hooks, rules, skills (e.g. code-reviewer → .ai/skills/code_review.md)
 ```
 
 ## Workflow (short)

@@ -43,7 +43,7 @@ OpenCode can also set extra paths via **`opencode.json`** (`instructions` / proj
 2. Open [`.ai/rules/core.md`](../.ai/rules/core.md) and [`.ai/rules/security.md`](../.ai/rules/security.md).
 3. Paste or attach [`.ai/prompts/default.md`](../.ai/prompts/default.md) (or summarize it) in your assistant.
 4. Choose a skill from [`.ai/skills/index.md`](../.ai/skills/index.md) (use [`.ai/guide/taxonomy.md`](../.ai/guide/taxonomy.md) if needed). Planned **DAG / MCP / subagent** work is in [`.ai/ROADMAP.md`](../.ai/ROADMAP.md).
-5. Before opening a PR, skim [`.ai/review/checklist.md`](../.ai/review/checklist.md) and fill the AI section in the PR template.
+5. Before opening a PR, skim [`.ai/review/checklist.md`](../.ai/review/checklist.md) and fill the AI section in the PR template. **Reviewing** someone else’s change: use [`.ai/skills/code_review.md`](../.ai/skills/code_review.md) (Claude: [`.claude/skills/code-reviewer/SKILL.md`](../.claude/skills/code-reviewer/SKILL.md)).
 
 ## Validation
 

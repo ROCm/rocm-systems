@@ -12,3 +12,7 @@ Follow the **`.ai/`** tree and the **multi-model guide** (Context → Skills →
 | Validation (everyone) | pre-commit, `python3 scripts/ai_dev_guide.py` |
 
 Validate edits with **ruff** + **pytest** (Python) or **CMake** out-of-source build (native). See `pyproject.toml` and `CONTRIBUTING.md`.
+
+## Code review
+
+Use [`.ai/skills/code_review.md`](../.ai/skills/code_review.md) for structured PR/diff review (priorities: correctness, security, performance, style via Ruff config, layering, tests). Checklist: [`.ai/review/checklist.md`](../.ai/review/checklist.md). PR template: [`.github/pull_request_template.md`](pull_request_template.md). **Do not** paste full Ruff rule tables — point authors to `pyproject.toml` and [`.ai/standards/python.md`](../.ai/standards/python.md).

@@ -16,6 +16,7 @@ Pick **one** primary skill per task. Read `rules/core.md` first.
 | slow, hot path, memory, optimize | [optimize_performance.md](optimize_performance.md) |
 | CMake error, link error, build failed, native compile | [fix_build_failure.md](fix_build_failure.md) |
 | C++ feature in lib, CMakeLists change (not only “fix failure”) | [native_or_cmake.md](native_or_cmake.md) |
+| review PR, code review, audit diff | [code_review.md](code_review.md) |
 
 **Taxonomy (category IDs):** [`.ai/guide/taxonomy.md`](../guide/taxonomy.md).
 
@@ -31,5 +32,6 @@ Pick **one** primary skill per task. Read `rules/core.md` first.
 | Performance (hot path, memory) | [optimize_performance.md](optimize_performance.md) |
 | CMake or compile failure | [fix_build_failure.md](fix_build_failure.md) |
 | C++ tool or CMake (feature work) | [native_or_cmake.md](native_or_cmake.md) |
+| Code review / PR review | [code_review.md](code_review.md) |
 
 **Advanced (not implemented):** DAG orchestration, MCP standardization, subagent roles — see [`.ai/ROADMAP.md`](../ROADMAP.md).

@@ -25,6 +25,10 @@ This project is **rocprofiler-compute** under `projects/rocprofiler-compute` in 
 - Python: `ruff check`, `ruff format` per `pyproject.toml`; `pytest` for behavior changes.
 - C++/CMake: out-of-source configure/build for `src/lib/` targets.
 
+## Code review
+
+For PR/diff review, follow [`.ai/skills/code_review.md`](../../.ai/skills/code_review.md) and [`.ai/review/checklist.md`](../../.ai/review/checklist.md). Do not duplicate `pyproject.toml` Ruff lists — use [`.ai/standards/python.md`](../../.ai/standards/python.md).
+
 ## If unclear
 
 Ask instead of guessing (ROCm APIs, trace formats, counter names). Use `.ai/prompts/default.md` when helpful.

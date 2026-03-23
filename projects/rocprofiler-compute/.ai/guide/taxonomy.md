@@ -20,7 +20,8 @@ rocprofiler-compute
 │   └── fix_build_failure.md
 ├── quality                [Q]
 │   ├── fix_bug.md
-│   └── write_test.md
+│   ├── write_test.md
+│   └── code_review.md
 └── performance            [Perf]
     └── optimize_performance.md
 ```
@@ -34,7 +35,7 @@ rocprofiler-compute
 | `A` | Analysis | roofline, stats, analyze paths | `analyze_or_roofline` |
 | `G` | Execution graph & trace | kernels, markers, CSV shape | `execution_graph_trace` |
 | `N` | Native / build | C++, CMake, rocprofiler-sdk, **broken build** | `native_or_cmake`, `fix_build_failure` |
-| `Q` | Quality | bugs, tests | `fix_bug`, `write_test` |
+| `Q` | Quality | bugs, tests, review | `fix_bug`, `write_test`, `code_review` |
 | `Perf` | Performance | hot paths, allocations | `optimize_performance` |
 
 ## Navigation rules
@@ -57,5 +58,6 @@ Chain skills without an automated runner (see [`.ai/ROADMAP.md`](../ROADMAP.md) 
 | Speedups | `fix_bug` → `optimize_performance` or `optimize_performance` alone |
 | Native feature | `native_or_cmake` → smoke |
 | Build broken | `fix_build_failure` → `native_or_cmake` if needed |
+| PR / diff review | `code_review` (then author applies fixes; add `write_test` if coverage gaps) |
 
 Always apply [`.ai/rules/core.md`](../rules/core.md) and relevant standards first.

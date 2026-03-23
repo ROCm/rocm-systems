@@ -13,6 +13,7 @@
 | Tools (bash / git / MCP) | [`rules/tools_policy.md`](rules/tools_policy.md) |
 | Skill deliverables (strict) | [`standards/agent_output.md`](standards/agent_output.md) |
 | Skills | [`skills/index.md`](skills/index.md) |
+| Code review (shared) | [`skills/code_review.md`](skills/code_review.md) · checklist [`review/checklist.md`](review/checklist.md) |
 | Future (DAG / MCP / subagents) | [`.ai/ROADMAP.md`](ROADMAP.md) |
 | One-shot prompt | [`prompts/run_session.md`](prompts/run_session.md) |
 

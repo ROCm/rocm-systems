@@ -65,6 +65,8 @@ REQUIRED_PATHS: tuple[str, ...] = (
     ".ai/skills/optimize_performance.md",
     ".ai/skills/native_or_cmake.md",
     ".ai/skills/fix_build_failure.md",
+    ".ai/skills/code_review.md",
+    ".claude/skills/code-reviewer/SKILL.md",
     "AGENTS.md",
     "CLAUDE.md",
     ".cursor/rules/rocprofiler-compute-ai.mdc",

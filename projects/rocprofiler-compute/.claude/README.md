@@ -21,6 +21,7 @@
 |------|---------|
 | [settings.json](settings.json) | `PreToolUse` → `bash_guard.py` |
 | [rules/claude-guide.md](rules/claude-guide.md) | Claude rule injection (points at shared `.ai/` paths) |
+| [skills/code-reviewer/SKILL.md](skills/code-reviewer/SKILL.md) | Claude **skill** wrapper → canonical [`.ai/skills/code_review.md`](../.ai/skills/code_review.md) |
 | [capabilities.md](capabilities.md) | Stub → `.ai/guide/taxonomy.md` |
 | [tools-policy.md](tools-policy.md) | Stub → `.ai/rules/tools_policy.md` |
 | [hooks/bash_guard.py](hooks/bash_guard.py) | Destructive-pattern guard for `Bash` tool |

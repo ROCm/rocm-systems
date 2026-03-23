@@ -11,4 +11,4 @@ Hard constraints: read [`.ai/rules/core.md`](../../.ai/rules/core.md), [`.ai/rul
 
 Standards: [`.ai/standards/python.md`](../../.ai/standards/python.md), [`cpp.md`](../../.ai/standards/cpp.md), [`cmake.md`](../../.ai/standards/cmake.md) as applicable.
 
-Before merge-oriented work, skim [`.ai/review/checklist.md`](../../.ai/review/checklist.md).
+Before merge-oriented work, skim [`.ai/review/checklist.md`](../../.ai/review/checklist.md). For **code review**, follow [`.ai/skills/code_review.md`](../../.ai/skills/code_review.md) (or the `code-reviewer` skill under `.claude/skills/`).
