@@ -917,12 +917,50 @@
        Allreduce(args, &iterWrong1, /*sum*/4);
        iterWrong = iterWrong1;
  
-       if (iterWrong) {
-         wrongElts = iterWrong;
-         PRINT("\nNCCL_TESTS_VALIDATE_EACH_ITER: errors at iteration %d/%d (%lld wrong). Aborting.\n",
-               iter + 1, iters, (long long)iterWrong);
-         break;
-       }
+      if (iterWrong) {
+        wrongElts = iterWrong;
+        PRINT("\nNCCL_TESTS_VALIDATE_EACH_ITER: errors at iteration %d/%d (%lld wrong).\n",
+              iter + 1, iters, (long long)iterWrong);
+
+        // ---- Determinism check: re-run to see if error is reproducible ----
+        static int detRetries = -1;
+        if (detRetries == -1) {
+          const char* drEnv = getenv("NCCL_TESTS_DETERMINISM_RETRIES");
+          detRetries = (drEnv && atoi(drEnv) > 0) ? atoi(drEnv) : 3;
+        }
+        int sameCount = 0, diffCount = 0, passCount = 0;
+        PRINT("  Determinism check: re-running %d times...\n", detRetries);
+        for (int retry = 0; retry < detRetries; retry++) {
+          rep_v++;
+          TESTCHECK(args->collTest->initData(args, type, op, root, rep_v, in_place));
+          TESTCHECK(startColl(args, type, op, root, in_place, 0));
+          TESTCHECK(completeColl(args));
+          int64_t retryWrong = 0;
+          TESTCHECK(CheckData(args, type, op, root, in_place, &retryWrong));
+          long long retryWrong1 = retryWrong;
+          Allreduce(args, &retryWrong1, /*sum*/4);
+          retryWrong = retryWrong1;
+
+          if (retryWrong == 0)
+            passCount++;
+          else if (retryWrong == iterWrong)
+            sameCount++;
+          else
+            diffCount++;
+          PRINT("    retry %d/%d: %lld wrong\n", retry + 1, detRetries, (long long)retryWrong);
+        }
+        if (passCount == detRetries)
+          PRINT("  Verdict: TRANSIENT — error did not reproduce\n");
+        else if (sameCount == detRetries)
+          PRINT("  Verdict: DETERMINISTIC — same error count every time (systematic bug)\n");
+        else if (diffCount > 0 || (passCount > 0 && sameCount > 0))
+          PRINT("  Verdict: INTERMITTENT — varying error counts (likely race condition)\n");
+        else
+          PRINT("  Verdict: REPRODUCIBLE — errors persist (same=%d, diff=%d, pass=%d)\n",
+                sameCount, diffCount, passCount);
+
+        break;
+      }
      }
      cputimeSec = completedIters > 0 ? tim.elapsed() / completedIters : 0;
      deltaSec = cputimeSec;
