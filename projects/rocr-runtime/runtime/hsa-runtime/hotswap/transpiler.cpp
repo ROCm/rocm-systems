@@ -3854,6 +3854,19 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
       }
       translated_asm = tmp;
     }
+    // Fix: force tree reduction entry for kernels with known SCC clobber.
+    // s_andn2_b32 vcc_lo, exec_lo, s25 is the tree gate in multihead/attn kernels.
+    // s25 should be -1 (from s_cselect) but SCC gets clobbered by s_addc carry-out.
+    // Safe: tree self-terminates at stride=0.
+    {
+      auto replaceFirst = [](std::string& s, const std::string& from, const std::string& to) {
+        size_t pos = s.find(from);
+        if (pos != std::string::npos) s.replace(pos, from.size(), to);
+      };
+      replaceFirst(translated_asm,
+        "s_andn2_b32 vcc_lo, exec_lo, s25\n",
+        "s_mov_b32 vcc_lo, 0 ; FIX: force tree entry (s25 clobbered by SCC)\n");
+    }
     // Fix: replace s_load from s[8:9]+0xc with saved kernarg ptr + 0x3c.
     // Only applies to kernels that have this pattern (e.g., attn_forward).
     {
