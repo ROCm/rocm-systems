@@ -19,7 +19,6 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-
 #include "gpu_cache_read.h"
 
 #include <gtest/gtest.h>
@@ -87,6 +86,7 @@ void TestGPUCacheRead::Run() {
   amdsmi_status_t err;
 
   TestBase::Run();
+  PRINT_VERBOSITY();
   if (setup_failed_) {
     std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl;
     return;
@@ -101,10 +101,9 @@ void TestGPUCacheRead::Run() {
       std::cout << "\t**GPU CACHE INFO: Using static struct (Backwards Compatibility):\n";
     }
     amdsmi_gpu_cache_info_t res = {};
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_cache_info", "gpu=" + std::to_string(i), VERB(STANDARD));
     err = amdsmi_get_gpu_cache_info(processor_handles_[i], &res);
-    const char* status_string;
-    amdsmi_status_code_to_string(err, &status_string);
-    std::cout << "\t\t** amdsmi_get_gpu_cache_info(): " << status_string << "\n";
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
     CHK_ERR_ASRT(err);
     std::cout << "\t\tnum_cache_types: " << res.num_cache_types << "\n";
     for (unsigned int j = 0; j < res.num_cache_types; j++) {

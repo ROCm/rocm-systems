@@ -213,8 +213,15 @@ include(CTest)
 option(ENABLE_COVERAGE "Enable code coverage" OFF)
 set(COV_OPTION "")
 if(${ENABLE_COVERAGE})
+    # Set coverage source path based on test mode
+    if(TEST_FROM_INSTALL)
+        set(COV_SRC ".")
+    else()
+        set(COV_SRC "src")
+    endif()
+
     set(COV_OPTION
-        "--cov=src"
+        "--cov=${COV_SRC}"
         "--cov-append"
         "--cov-report=term-missing"
         "--cov-report=lcov:tests/coverage.info"
@@ -268,9 +275,14 @@ if(TEST_FROM_INSTALL)
     set(COVERAGE_XML_PATH
         "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBEXECDIR}/${PACKAGE_NAME}/coverage.xml"
     )
+    set(COVERAGE_DATA_PATH
+        "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBEXECDIR}/${PACKAGE_NAME}/.coverage"
+    )
 else()
-    # When testing from build, write coverage to build directory
+    # When testing from build, write coverage XML to build directory
+    # and coverage data to source directory
     set(COVERAGE_XML_PATH "${CMAKE_BINARY_DIR}/coverage.xml")
+    set(COVERAGE_DATA_PATH "${PROJECT_SOURCE_DIR}/.coverage")
 endif()
 
 set(STANDALONEBINARY_EXTRACT_DIR
@@ -629,7 +641,7 @@ if(${ENABLE_COVERAGE})
         PROPERTIES
             DEPENDS "${ALL_TESTS_STRING}"
             LABELS "coverage"
-            ENVIRONMENT "COVERAGE_FILE=${PROJECT_SOURCE_DIR}/.coverage"
+            ENVIRONMENT "COVERAGE_FILE=${COVERAGE_DATA_PATH}"
             TIMEOUT 600
     )
 endif()

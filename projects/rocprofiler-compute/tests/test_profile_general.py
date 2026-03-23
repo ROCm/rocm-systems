@@ -65,7 +65,6 @@ config["app_mpi_aware_laplace_eqn"] = ["./tests/mpi_aware_laplace_eqn", "-i", "5
 config["rocflop"] = ["./tests/rocflop", "--device", "0", "--fp16"]
 config["torch_test_app"] = ["python3", "./tests/simple_net.py"]
 config["cleanup"] = True
-config["COUNTER_LOGGING"] = False
 config["METRIC_COMPARE"] = False
 config["METRIC_LOGGING"] = False
 
@@ -81,18 +80,15 @@ DEFAULT_REL_DIFF = 50
 MAX_REOCCURING_COUNT = 28
 
 CSVS = sorted([
-    "pmc_perf.csv",
     "sysinfo.csv",
 ])
 
 ROOF_ONLY_FILES = sorted([
-    "pmc_perf.csv",
     "roofline.csv",
     "sysinfo.csv",
 ])
 
 PC_SAMPLING_HOST_TRAP_FILES = sorted([
-    "pmc_perf.csv",
     "ps_file_agent_info.csv",
     "ps_file_kernel_trace.csv",
     "ps_file_pc_sampling_host_trap.csv",
@@ -101,7 +97,6 @@ PC_SAMPLING_HOST_TRAP_FILES = sorted([
 ])
 
 PC_SAMPLING_STOCHASTIC_FILES = sorted([
-    "pmc_perf.csv",
     "ps_file_agent_info.csv",
     "ps_file_kernel_trace.csv",
     "ps_file_pc_sampling_stochastic.csv",
@@ -266,39 +261,6 @@ os.environ["ROCPROF"] = "rocprofiler-sdk"
 Baseline_dir = str(Path("tests/workloads/vcopy/" + soc).resolve())
 
 
-def log_counter(file_dict, test_name):
-    for file in file_dict.keys():
-        if file == "pmc_perf.csv" or "SQ" in file:
-            # read file in Baseline
-            df_1 = pd.read_csv(Baseline_dir + "/" + file, index_col=0)
-            # get corresponding file from current test run
-            df_2 = file_dict[file]
-
-            errors = counter_compare(test_name, pd.DataFrame(), df_1, df_2, 5)
-            if not errors.empty:
-                if Path(
-                    Baseline_dir + "/" + file.split(".")[0] + "_error_log.csv"
-                ).exists():
-                    error_log = pd.read_csv(
-                        Baseline_dir + "/" + file.split(".")[0] + "_error_log.csv",
-                        index_col=0,
-                    )
-                    new_error_log = pd.concat([error_log, errors])
-                    new_error_log = new_error_log.reindex(
-                        sorted(new_error_log.columns), axis=1
-                    )
-                    new_error_log = new_error_log.sort_values(
-                        by=["test_name", "kernel_name", "gpu-id"]
-                    )
-                    new_error_log.to_csv(
-                        Baseline_dir + "/" + file.split(".")[0] + "_error_log.csv"
-                    )
-                else:
-                    errors.to_csv(
-                        Baseline_dir + "/" + file.split(".")[0] + "_error_log.csv"
-                    )
-
-
 def baseline_compare_metric(test_name, workload_dir, args=[]):
     t = subprocess.Popen(
         [
@@ -432,9 +394,6 @@ def baseline_compare_metric(test_name, workload_dir, args=[]):
 
 
 def validate(test_name, workload_dir, file_dict, args=[]):
-    if config["COUNTER_LOGGING"]:
-        log_counter(file_dict, test_name)
-
     if config["METRIC_COMPARE"]:
         baseline_compare_metric(test_name, workload_dir, args)
 
@@ -679,11 +638,7 @@ def test_path_rocflop(binary_handler_profile_rocprof_compute):
         roof=False,
         app_name="rocflop",
     )
-    pmc_perf_df = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)[
-        "pmc_perf.csv"
-    ]
-    # Ensure non zero length of df
-    assert len(pmc_perf_df) > 0
+    test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
@@ -720,14 +675,18 @@ def test_path_rocpd(
     options = ["--format-rocprof-output", "rocpd"]
     binary_handler_profile_rocprof_compute(config, workload_dir, options)
 
-    assert (Path(workload_dir) / "pmc_perf.csv").exists()
+    # Validate profile outputs (results_*.csv for rocpd format)
+    test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
     assert test_utils.check_file_pattern(
         "format_rocprof_output: rocpd", f"{workload_dir}/profiling_config.yaml"
     )
-    assert test_utils.check_file_pattern("Counter_Name", f"{workload_dir}/pmc_perf.csv")
 
+    # Run analyze to create merged pmc_perf.csv
     code = binary_handler_analyze_rocprof_compute(["analyze", "--path", workload_dir])
     assert code == 0
+
+    # Validate merged pmc_perf.csv content
+    assert test_utils.check_file_pattern("Counter_Name", f"{workload_dir}/pmc_perf.csv")
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -747,14 +706,6 @@ def test_path_csv(
         "SQ_IFETCH_LEVEL.csv",
         "SQ_INST_LEVEL_LDS.csv",
         "SQ_LEVEL_WAVES.csv",
-        "pmc_perf.csv",
-        "pmc_perf_0.csv",
-        "pmc_perf_1.csv",
-        "pmc_perf_2.csv",
-        "pmc_perf_3.csv",
-        "pmc_perf_4.csv",
-        "pmc_perf_5.csv",
-        "pmc_perf_6.csv",
         "sysinfo.csv",
     ])
     all_csvs_mi200 = sorted([
@@ -765,13 +716,6 @@ def test_path_csv(
         "SQ_INST_LEVEL_SMEM.csv",
         "SQ_INST_LEVEL_VMEM.csv",
         "SQ_LEVEL_WAVES.csv",
-        "pmc_perf.csv",
-        "pmc_perf_0.csv",
-        "pmc_perf_1.csv",
-        "pmc_perf_2.csv",
-        "pmc_perf_3.csv",
-        "pmc_perf_4.csv",
-        "pmc_perf_5.csv",
         "sysinfo.csv",
     ])
     all_csvs_mi300 = sorted([
@@ -782,13 +726,6 @@ def test_path_csv(
         "SQ_INST_LEVEL_SMEM.csv",
         "SQ_INST_LEVEL_VMEM.csv",
         "SQ_LEVEL_WAVES.csv",
-        "pmc_perf.csv",
-        "pmc_perf_0.csv",
-        "pmc_perf_1.csv",
-        "pmc_perf_2.csv",
-        "pmc_perf_3.csv",
-        "pmc_perf_4.csv",
-        "pmc_perf_5.csv",
         "sysinfo.csv",
     ])
     all_csvs_mi350 = sorted([
@@ -799,20 +736,6 @@ def test_path_csv(
         "SQ_INST_LEVEL_SMEM.csv",
         "SQ_INST_LEVEL_VMEM.csv",
         "SQ_LEVEL_WAVES.csv",
-        "pmc_perf.csv",
-        "pmc_perf_0.csv",
-        "pmc_perf_1.csv",
-        "pmc_perf_2.csv",
-        "pmc_perf_3.csv",
-        "pmc_perf_4.csv",
-        "pmc_perf_5.csv",
-        "pmc_perf_6.csv",
-        "pmc_perf_7.csv",
-        "pmc_perf_8.csv",
-        "pmc_perf_9.csv",
-        "pmc_perf_10.csv",
-        "pmc_perf_11.csv",
-        "pmc_perf_12.csv",
         "sysinfo.csv",
     ])
 
@@ -1191,8 +1114,6 @@ def test_roof_file_validation(binary_handler_profile_rocprof_compute):
         )
 
         if returncode == 0:
-            assert os.path.exists(f"{workload_dir}/pmc_perf.csv")
-
             roofline_csv = f"{workload_dir}/roofline.csv"
             if os.path.exists(roofline_csv):
                 import pandas as pd
@@ -1205,7 +1126,10 @@ def test_roof_file_validation(binary_handler_profile_rocprof_compute):
 
 
 @pytest.mark.roofline_1
-def test_roof_rocpd(binary_handler_profile_rocprof_compute):
+def test_roof_rocpd(
+    binary_handler_profile_rocprof_compute,
+    binary_handler_analyze_rocprof_compute,
+):
     if soc == "MI100":
         pytest.skip("Roofline not supported on MI100")
         return
@@ -1214,11 +1138,18 @@ def test_roof_rocpd(binary_handler_profile_rocprof_compute):
     options = ["--device", "0", "--roof-only", "--format-rocprof-output", "rocpd"]
     binary_handler_profile_rocprof_compute(config, workload_dir, options, roof=True)
 
-    assert (Path(workload_dir) / "pmc_perf.csv").exists()
+    # Validate profile outputs
+    test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
     assert (Path(workload_dir) / "roofline.csv").exists()
     assert test_utils.check_file_pattern(
         "format_rocprof_output: rocpd", f"{workload_dir}/profiling_config.yaml"
     )
+
+    # Run analyze to create merged pmc_perf.csv
+    code = binary_handler_analyze_rocprof_compute(["analyze", "--path", workload_dir])
+    assert code == 0
+
+    # Validate merged pmc_perf.csv content
     assert test_utils.check_file_pattern("Counter_Name", f"{workload_dir}/pmc_perf.csv")
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -1476,10 +1407,6 @@ def test_roof_error_handling(binary_handler_profile_rocprof_compute):
 
     options = ["--device", "0", "--roof-only"]
     workload_dir = test_utils.get_output_dir()
-
-    pmc_perf_path = os.path.join(workload_dir, "pmc_perf.csv")
-    if os.path.exists(pmc_perf_path):
-        os.remove(pmc_perf_path)
 
     returncode = binary_handler_profile_rocprof_compute(  # noqa: F841
         config, workload_dir, options, check_success=False, roof=True
@@ -1998,7 +1925,10 @@ def test_lds_section(binary_handler_profile_rocprof_compute):
     assert test_utils.check_file_pattern(
         "- '12'", f"{workload_dir}/profiling_config.yaml"
     )
-    assert test_utils.check_file_pattern("SQ_INSTS_LDS", f"{workload_dir}/pmc_perf.csv")
+    results_files = Path(workload_dir).glob("results_*.csv")
+    assert any(
+        test_utils.check_file_pattern("SQ_INSTS_LDS", str(f)) for f in results_files
+    )
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
@@ -2023,11 +1953,15 @@ def test_instmix_memchart_section(binary_handler_profile_rocprof_compute):
     assert test_utils.check_file_pattern(
         "- '3'", f"{workload_dir}/profiling_config.yaml"
     )
-    assert test_utils.check_file_pattern(
-        "TA_FLAT_WAVEFRONTS", f"{workload_dir}/pmc_perf.csv"
+    results_files = Path(workload_dir).glob("results_*.csv")
+    assert any(
+        test_utils.check_file_pattern("TA_FLAT_WAVEFRONTS", str(f))
+        for f in results_files
     )
-    assert test_utils.check_file_pattern(
-        "SQC_TC_DATA_READ_REQ", f"{workload_dir}/pmc_perf.csv"
+    results_files = Path(workload_dir).glob("results_*.csv")
+    assert any(
+        test_utils.check_file_pattern("SQC_TC_DATA_READ_REQ", str(f))
+        for f in results_files
     )
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -2050,8 +1984,10 @@ def test_lds_sol_section(binary_handler_profile_rocprof_compute):
     assert test_utils.check_file_pattern(
         "- '12.1'", f"{workload_dir}/profiling_config.yaml"
     )
-    assert test_utils.check_file_pattern(
-        "SQ_ACTIVE_INST_LDS", f"{workload_dir}/pmc_perf.csv"
+    results_files = Path(workload_dir).glob("results_*.csv")
+    assert any(
+        test_utils.check_file_pattern("SQ_ACTIVE_INST_LDS", str(f))
+        for f in results_files
     )
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -2082,12 +2018,18 @@ def test_instmix_section_global_write_kernel(binary_handler_profile_rocprof_comp
     assert test_utils.check_file_pattern(
         "- global_write", f"{workload_dir}/profiling_config.yaml"
     )
-    assert test_utils.check_file_pattern(
-        "TA_FLAT_WAVEFRONTS", f"{workload_dir}/pmc_perf.csv"
+    results_files = Path(workload_dir).glob("results_*.csv")
+    assert any(
+        test_utils.check_file_pattern("TA_FLAT_WAVEFRONTS", str(f))
+        for f in results_files
     )
-    assert test_utils.check_file_pattern("global_write", f"{workload_dir}/pmc_perf.csv")
-    assert not test_utils.check_file_pattern(
-        "global_read", f"{workload_dir}/pmc_perf.csv"
+    results_files = Path(workload_dir).glob("results_*.csv")
+    assert any(
+        test_utils.check_file_pattern("global_write", str(f)) for f in results_files
+    )
+    results_files = Path(workload_dir).glob("results_*.csv")
+    assert not any(
+        test_utils.check_file_pattern("global_read", str(f)) for f in results_files
     )
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -2668,9 +2610,9 @@ def test_iteration_multiplexing_deterministic_counter_accuracy(
         roof=False,
         app_name="app_laplace_eqn",
     )
-    counters_no_multiplexing = test_utils.check_csv_files(
-        workload_dir, num_devices, num_kernels
-    )["pmc_perf.csv"]
+    test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
+    binary_handler_analyze_rocprof_compute(["analyze", "--path", workload_dir])
+    counters_no_multiplexing = pd.read_csv(Path(workload_dir) / "pmc_perf.csv")
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
     options = [
@@ -2692,9 +2634,9 @@ def test_iteration_multiplexing_deterministic_counter_accuracy(
         roof=False,
         app_name="app_laplace_eqn_iter",
     )
-    counters_kernel = test_utils.check_csv_files(
-        workload_dir, num_devices, num_kernels
-    )["pmc_perf.csv"]
+    test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
+    binary_handler_analyze_rocprof_compute(["analyze", "--path", workload_dir])
+    counters_kernel = pd.read_csv(Path(workload_dir) / "pmc_perf.csv")
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
     options = [
@@ -2716,9 +2658,9 @@ def test_iteration_multiplexing_deterministic_counter_accuracy(
         roof=True,
         app_name="app_laplace_eqn_iter",
     )
-    counters_kernel_launch_params = test_utils.check_csv_files(
-        workload_dir_klp, num_devices, num_kernels
-    )["pmc_perf.csv"]
+    test_utils.check_csv_files(workload_dir_klp, num_devices, num_kernels)
+    binary_handler_analyze_rocprof_compute(["analyze", "--path", workload_dir_klp])
+    counters_kernel_launch_params = pd.read_csv(Path(workload_dir_klp) / "pmc_perf.csv")
 
     assert are_deterministic_counters_equal(
         [counters_kernel, counters_kernel_launch_params], counters_no_multiplexing
@@ -2729,13 +2671,6 @@ def test_iteration_multiplexing_deterministic_counter_accuracy(
         assert os.path.exists(f"{workload_dir_klp}/roofline.csv")
         roofline_df = pd.read_csv(f"{workload_dir_klp}/roofline.csv")
         assert len(roofline_df) >= num_devices
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir_klp,
-    ])
-    assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir_klp)
 
@@ -2757,9 +2692,9 @@ def test_iteration_multiplexing_stochastic_counter_accuracy(
         roof=False,
         app_name="app_laplace_eqn",
     )
-    counters_no_multiplexing = test_utils.check_csv_files(
-        workload_dir, num_devices, num_kernels
-    )["pmc_perf.csv"]
+    test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
+    binary_handler_analyze_rocprof_compute(["analyze", "--path", workload_dir])
+    counters_no_multiplexing = pd.read_csv(Path(workload_dir) / "pmc_perf.csv")
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
     options = [
@@ -2779,9 +2714,9 @@ def test_iteration_multiplexing_stochastic_counter_accuracy(
         roof=False,
         app_name="app_laplace_eqn_iter",
     )
-    counters_kernel = test_utils.check_csv_files(
-        workload_dir, num_devices, num_kernels
-    )["pmc_perf.csv"]
+    test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
+    binary_handler_analyze_rocprof_compute(["analyze", "--path", workload_dir])
+    counters_kernel = pd.read_csv(Path(workload_dir) / "pmc_perf.csv")
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
     options = [
@@ -2801,9 +2736,9 @@ def test_iteration_multiplexing_stochastic_counter_accuracy(
         roof=True,
         app_name="app_laplace_eqn_iter",
     )
-    counters_kernel_launch_params = test_utils.check_csv_files(
-        workload_dir_klp, num_devices, num_kernels
-    )["pmc_perf.csv"]
+    test_utils.check_csv_files(workload_dir_klp, num_devices, num_kernels)
+    binary_handler_analyze_rocprof_compute(["analyze", "--path", workload_dir_klp])
+    counters_kernel_launch_params = pd.read_csv(Path(workload_dir_klp) / "pmc_perf.csv")
 
     assert are_stochastic_counters_similar(
         [counters_kernel, counters_kernel_launch_params], counters_no_multiplexing
@@ -2815,19 +2750,13 @@ def test_iteration_multiplexing_stochastic_counter_accuracy(
         roofline_df = pd.read_csv(f"{workload_dir_klp}/roofline.csv")
         assert len(roofline_df) >= num_devices
 
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir_klp,
-    ])
-    assert code == 0
-
     test_utils.clean_output_dir(config["cleanup"], workload_dir_klp)
 
 
 # Not part of automated test runs since testing all counters is expensive
 def test_iteration_multiplexing_all_counter_accuracy(
     binary_handler_profile_rocprof_compute,
+    binary_handler_analyze_rocprof_compute,
 ):
     workload_dir = test_utils.get_output_dir(param_id="no_iter_mplx")
     _ = binary_handler_profile_rocprof_compute(
@@ -2837,9 +2766,9 @@ def test_iteration_multiplexing_all_counter_accuracy(
         roof=False,
         app_name="app_laplace_eqn",
     )
-    counters_no_multiplexing = test_utils.check_csv_files(
-        workload_dir, num_devices, num_kernels
-    )["pmc_perf.csv"]
+    test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
+    binary_handler_analyze_rocprof_compute(["analyze", "--path", workload_dir])
+    counters_no_multiplexing = pd.read_csv(Path(workload_dir) / "pmc_perf.csv")
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
     options = ["--iteration-multiplexing", "kernel"]
@@ -2852,9 +2781,9 @@ def test_iteration_multiplexing_all_counter_accuracy(
         roof=False,
         app_name="app_laplace_eqn_iter",
     )
-    counters_kernel = test_utils.check_csv_files(
-        workload_dir, num_devices, num_kernels
-    )["pmc_perf.csv"]
+    test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
+    binary_handler_analyze_rocprof_compute(["analyze", "--path", workload_dir])
+    counters_kernel = pd.read_csv(Path(workload_dir) / "pmc_perf.csv")
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
     options = ["--iteration-multiplexing", "kernel_launch_params"]
@@ -2867,9 +2796,9 @@ def test_iteration_multiplexing_all_counter_accuracy(
         roof=False,
         app_name="app_laplace_eqn_iter",
     )
-    counters_kernel_launch_params = test_utils.check_csv_files(
-        workload_dir, num_devices, num_kernels
-    )["pmc_perf.csv"]
+    test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
+    binary_handler_analyze_rocprof_compute(["analyze", "--path", workload_dir])
+    counters_kernel_launch_params = pd.read_csv(Path(workload_dir) / "pmc_perf.csv")
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
     assert are_deterministic_counters_equal(
@@ -2901,11 +2830,6 @@ def test_iteration_multiplexing_insufficient_dispatches(
         check_success=True,
         roof=False,
         app_name="app_laplace_eqn_insufficient",
-    )
-
-    assert test_utils.check_file_pattern(
-        "kernels_with_missing_counters",
-        f"{workload_dir}/profiling_config.yaml",
     )
 
     code = binary_handler_analyze_rocprof_compute([
@@ -3023,10 +2947,9 @@ def test_torch_trace_profile(
     # 1. Profiling completed successfully
     assert returncode == 0, "Profiling the torch application failed"
 
-    # 2. pmc_perf.csv generated
+    # 2. Validate profile outputs (PMC data validated by check_csv_files)
     num_devices = config.get("num_devices", 1)
-    file_dict = test_utils.check_csv_files(workload_dir, num_devices, 1)
-    assert "pmc_perf.csv" in file_dict, "pmc_perf.csv not generated"
+    test_utils.check_csv_files(workload_dir, num_devices, 1)
 
     # 3. Marker/counter CSV pairs exist and counts match
     marker_api_trace_files = list(Path(workload_dir).glob("**/*marker_api_trace.csv"))
@@ -3344,7 +3267,10 @@ def test_torch_trace_overhead(binary_handler_profile_rocprof_compute):
     assert returncode_baseline == 0, "Baseline profiling failed"
 
     # Read baseline timestamps
-    baseline_df = pd.read_csv(f"{workload_dir_baseline}/pmc_perf.csv")
+    baseline_results_files = list(Path(workload_dir_baseline).glob("results_*.csv"))
+    baseline_df = pd.concat(
+        [pd.read_csv(f) for f in baseline_results_files], ignore_index=True
+    )
     baseline_kernel_duration_total = (
         baseline_df["End_Timestamp"].max() - baseline_df["Start_Timestamp"].min()
     )
@@ -3363,7 +3289,10 @@ def test_torch_trace_overhead(binary_handler_profile_rocprof_compute):
     with_flag_time = time.time() - start_with_flag
     assert returncode_with_flag == 0, "Profiling with torch-trace failed"
     # Read with-flag timestamps
-    with_flag_df = pd.read_csv(f"{workload_dir_with_flag}/pmc_perf.csv")
+    with_flag_results_files = list(Path(workload_dir_with_flag).glob("results_*.csv"))
+    with_flag_df = pd.concat(
+        [pd.read_csv(f) for f in with_flag_results_files], ignore_index=True
+    )
     with_flag_kernel_duration_total = (
         with_flag_df["End_Timestamp"].max() - with_flag_df["Start_Timestamp"].min()
     )
