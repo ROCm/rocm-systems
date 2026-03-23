@@ -14,7 +14,7 @@
 #include <vector>
 
 #include "logger/debug.hpp"
-#include "spdlog/fmt/bundled/ranges.h"
+#include <spdlog/fmt/ranges.h>
 
 namespace rocprofsys
 {
