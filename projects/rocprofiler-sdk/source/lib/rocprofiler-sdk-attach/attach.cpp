@@ -23,6 +23,7 @@
 #include "attach.h"
 #include "code_object_registration.hpp"
 #include "lib/common/defines.hpp"
+#include "lib/common/static_object.hpp"
 #include "lib/common/utility.hpp"
 #include "queue_registration.hpp"
 #include "table.hpp"
@@ -32,11 +33,12 @@
 #include <rocprofiler-register/rocprofiler-register.h>
 #include <rocprofiler-sdk/version.h>
 
+#include <signal.h>
+#include <unistd.h>
+
 #include <condition_variable>
 #include <mutex>
-#include <signal.h>
 #include <thread>
-#include <unistd.h>
 
 #define ROCPROFILER_ATTACH_VERSION_MAJOR ROCPROFILER_VERSION_MAJOR
 #define ROCPROFILER_ATTACH_VERSION_MINOR ROCPROFILER_VERSION_MINOR
@@ -51,6 +53,14 @@ using rocprofiler_register_library_api_table_func_t =
 
 namespace
 {
+// Dedicated idle background thread used as a safe ptrace injection target during
+// attach/detach. Previously, ptrace-based code injection targeted the main
+// application thread, which could deadlock if that thread held internal mutexes.
+//
+// This thread names itself "rocp-bg-attach" via pthread_setname_np so the attacher
+// can locate it by scanning /proc/<pid>/task/*/comm. It blocks all signals, holds
+// no application-owned locks, and waits on a condition variable indefinitely until
+// shutdown.
 struct BackgroundThread
 {
     std::thread             thread;
@@ -66,6 +76,8 @@ struct BackgroundThread
         thread = std::thread([this]() {
             pthread_setname_np(pthread_self(), "rocp-bg-attach");
 
+            // Prevent signals from interrupting this thread -- it exists solely as a
+            // safe ptrace injection target and must never run application signal handlers.
             sigset_t all_signals;
             sigfillset(&all_signals);
             pthread_sigmask(SIG_BLOCK, &all_signals, nullptr);
@@ -90,6 +102,13 @@ struct BackgroundThread
         if(thread.joinable()) thread.join();
     }
 };
+
+BackgroundThread*
+get_background_thread()
+{
+    static auto*& _v = rocprofiler::common::static_object<BackgroundThread>::construct();
+    return _v;
+}
 }  // namespace
 
 ROCPROFILER_EXTERN_C_INIT
@@ -113,8 +132,7 @@ rocprofiler_attach_set_api_table(const char*                                   n
 {
     rocprofiler::common::init_logging("ROCPROFILER_ATTACH");
 
-    static BackgroundThread bg_thread;
-    bg_thread.start();
+    get_background_thread()->start();
 
     ROCP_TRACE << "rocprofiler_attach_set_api_table called for api " << name;
     (void) lib_version;   // unused
