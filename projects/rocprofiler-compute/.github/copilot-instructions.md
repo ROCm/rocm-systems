@@ -1,14 +1,14 @@
 # GitHub Copilot — rocprofiler-compute
 
-Follow the **`.ai/`** tree and the **multi-model harness** (Context → Skills → Tools → Hooks). Map for all products: [`.ai/harness/multi_model.md`](../.ai/harness/multi_model.md).
+Follow the **`.ai/`** tree and the **multi-model guide** (Context → Skills → Tools → Hooks). Map for all products: [`.ai/guide/workflow.md`](../.ai/guide/workflow.md).
 
 | Layer | Path |
 |-------|------|
 | Context + hard constraints | `.ai/rules/core.md`, `.ai/rules/security.md`, `.ai/rules/anti_patterns.md`, `.ai/rules/profiling_infra.md` |
-| Skills + capability tree | `.ai/skills/index.md` → one skill; `.ai/harness/capabilities.md` to pick |
-| Tools (bash / git / build) | `.ai/harness/tools-policy.md` |
+| Skills + taxonomy | `.ai/skills/index.md` → one skill; `.ai/guide/taxonomy.md` to pick |
+| Tools (bash / git / build) | `.ai/rules/tools_policy.md` |
 | Style | `.ai/standards/python.md`, `.ai/standards/cpp.md`, `.ai/standards/cmake.md` |
 | Opening prompt | `.ai/prompts/default.md` |
-| Validation (everyone) | pre-commit, `python3 scripts/ai_dev_harness.py` |
+| Validation (everyone) | pre-commit, `python3 scripts/ai_dev_guide.py` |
 
 Validate edits with **ruff** + **pytest** (Python) or **CMake** out-of-source build (native). See `pyproject.toml` and `CONTRIBUTING.md`.

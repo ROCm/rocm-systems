@@ -22,4 +22,4 @@ Change or extend how **execution-related** data is interpreted, joined, or prese
 
 - Code + tests; explicit note of **schema/column** or **ordering** changes; commands run (`pytest`, `ruff`).
 
-**Output format (strict):** [`.ai/harness/skill_output_contract.md`](../harness/skill_output_contract.md).
+**Output format (strict):** [`.ai/standards/agent_output.md`](../standards/agent_output.md).

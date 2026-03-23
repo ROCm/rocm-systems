@@ -20,4 +20,4 @@ Change the C++ tool or build system.
 
 - Native/CMake diff, build commands used (out-of-source), and integration impact if visible to CLI/Python.
 
-**Output format (strict):** [`.ai/harness/skill_output_contract.md`](../harness/skill_output_contract.md).
+**Output format (strict):** [`.ai/standards/agent_output.md`](../standards/agent_output.md).

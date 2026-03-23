@@ -21,4 +21,4 @@ Add a gated CLI flag per project CONTRIBUTING.
 
 - Parser changes, implementation behind the flag, tests for help/behavior, and ruff/pytest commands run.
 
-**Output format (strict):** [`.ai/harness/skill_output_contract.md`](../harness/skill_output_contract.md).
+**Output format (strict):** [`.ai/standards/agent_output.md`](../standards/agent_output.md).

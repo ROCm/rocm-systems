@@ -1,18 +1,18 @@
 ---
-description: rocprofiler-compute — follow .ai harness for all AI edits (any model)
+description: rocprofiler-compute — follow .ai guide for all AI edits (any model)
 alwaysApply: true
 ---
 
 # rocprofiler-compute (AI)
 
-This project is **rocprofiler-compute** under `projects/rocprofiler-compute` in rocm-systems. The harness is **multi-model**; see [`.ai/harness/multi_model.md`](../../.ai/harness/multi_model.md).
+This project is **rocprofiler-compute** under `projects/rocprofiler-compute` in rocm-systems. The **multi-model guide** lives under `.ai/guide/`; see [`.ai/guide/workflow.md`](../../.ai/guide/workflow.md).
 
 ## Four layers (same as Codex / Claude / Copilot)
 
 1. **Context** — [`.ai/rules/core.md`](../../.ai/rules/core.md) + optional [`AGENTS.md`](../../AGENTS.md) / [`CLAUDE.md`](../../CLAUDE.md).
-2. **Skills** — One playbook from [`.ai/skills/index.md`](../../.ai/skills/index.md); navigate with [`.ai/harness/capabilities.md`](../../.ai/harness/capabilities.md).
-3. **Tools** — [`.ai/harness/tools-policy.md`](../../.ai/harness/tools-policy.md) for bash, git, pytest, CMake.
-4. **Hooks** — Run pre-commit / `python3 scripts/ai_dev_harness.py` before push when possible.
+2. **Skills** — One playbook from [`.ai/skills/index.md`](../../.ai/skills/index.md); navigate with [`.ai/guide/taxonomy.md`](../../.ai/guide/taxonomy.md).
+3. **Tools** — [`.ai/rules/tools_policy.md`](../../.ai/rules/tools_policy.md) for bash, git, pytest, CMake.
+4. **Hooks** — Run pre-commit / `python3 scripts/ai_dev_guide.py` before push when possible.
 
 ## Required
 

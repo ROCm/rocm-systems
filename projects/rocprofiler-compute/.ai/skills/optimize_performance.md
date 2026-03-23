@@ -23,4 +23,4 @@ Improve time or memory for an **existing** code path without changing **observab
 
 - Patch, before/after note (expected gain or complexity class), tests run, and any **# PERF** summary: time complexity, memory impact, risk of numerical drift.
 
-**Output format (strict):** [`.ai/harness/skill_output_contract.md`](../harness/skill_output_contract.md).
+**Output format (strict):** [`.ai/standards/agent_output.md`](../standards/agent_output.md).

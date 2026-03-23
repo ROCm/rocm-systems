@@ -20,4 +20,4 @@ Increase coverage or lock behavior with deterministic tests.
 
 - New or updated tests, fixture notes if any, and `pytest` invocation used.
 
-**Output format (strict):** [`.ai/harness/skill_output_contract.md`](../harness/skill_output_contract.md).
+**Output format (strict):** [`.ai/standards/agent_output.md`](../standards/agent_output.md).

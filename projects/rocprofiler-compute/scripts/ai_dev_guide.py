@@ -23,7 +23,7 @@
 # THE SOFTWARE.
 
 ##############################################################################
-"""Validate AI dev framework layout for rocprofiler-compute."""
+"""Validate .ai/ layout, guide docs, and skills for rocprofiler-compute."""
 
 from __future__ import annotations
 
@@ -36,23 +36,21 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 REQUIRED_PATHS: tuple[str, ...] = (
+    "scripts/ai_dev_guide.py",
     ".ai/README.md",
-    ".ai/harness/README.md",
-    ".ai/harness/multi_model.md",
-    ".ai/harness/capabilities.md",
-    ".ai/harness/skill_taxonomy.md",
-    ".ai/harness/future.md",
-    ".ai/harness/execution_flow.md",
-    ".ai/harness/skill_output_contract.md",
-    ".ai/harness/tools-policy.md",
     ".ai/CLAUDE.md",
+    ".ai/ROADMAP.md",
+    ".ai/guide/workflow.md",
+    ".ai/guide/taxonomy.md",
     ".ai/rules/core.md",
     ".ai/rules/anti_patterns.md",
     ".ai/rules/profiling_infra.md",
     ".ai/rules/security.md",
+    ".ai/rules/tools_policy.md",
     ".ai/standards/python.md",
     ".ai/standards/cpp.md",
     ".ai/standards/cmake.md",
+    ".ai/standards/agent_output.md",
     ".ai/prompts/default.md",
     ".ai/prompts/run_session.md",
     ".ai/review/checklist.md",
@@ -76,7 +74,7 @@ REQUIRED_PATHS: tuple[str, ...] = (
     ".claude/settings.json",
     ".claude/capabilities.md",
     ".claude/tools-policy.md",
-    ".claude/rules/claude-harness.md",
+    ".claude/rules/claude-guide.md",
     ".claude/hooks/bash_guard.py",
 )
 
@@ -138,7 +136,7 @@ def check_skill_templates(verbose: bool) -> list[str]:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Validate .ai/ dev framework layout.")
+    parser = argparse.ArgumentParser(description="Validate .ai/ guide layout.")
     parser.add_argument("-v", "--verbose", action="store_true", help="Print checked paths.")
     args = parser.parse_args()
 
@@ -152,13 +150,13 @@ def main() -> int:
     all_errors.extend(check_skill_templates(args.verbose))
 
     if all_errors:
-        print("ai_dev_harness: failed", file=sys.stderr)
+        print("ai_dev_guide: failed", file=sys.stderr)
         for line in all_errors:
             print(f"  {line}", file=sys.stderr)
         return 1
 
     if args.verbose:
-        print("ai_dev_harness: OK")
+        print("ai_dev_guide: OK")
     return 0
 
 

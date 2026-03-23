@@ -1,28 +1,30 @@
 # `.ai/` entry (navigation)
 
-**Claude Code’s primary project brain is the repo-root [`CLAUDE.md`](../CLAUDE.md)** (standard discovery path). This file exists so anyone browsing **`.ai/`** still sees how the tree fits together.
+**Claude Code’s primary project brain is the repo-root [`CLAUDE.md`](../CLAUDE.md).** This file maps the **`.ai/`** tree.
 
 ## Quick map
 
 | Need | Path |
 |------|------|
-| Full context + four-layer harness | [`../CLAUDE.md`](../CLAUDE.md) |
-| All agents (Codex, Cursor, Copilot, …) | [`.ai/harness/multi_model.md`](harness/multi_model.md) |
-| Execution loop (step order) | [`.ai/harness/execution_flow.md`](harness/execution_flow.md) |
+| Layers + execution loop | [`.ai/guide/workflow.md`](guide/workflow.md) |
+| Skill tree + category IDs | [`.ai/guide/taxonomy.md`](guide/taxonomy.md) |
+| All agents (tool table) | Same as `workflow.md` (§ tool → entry points) |
 | Rules | [`rules/core.md`](rules/core.md), [`rules/security.md`](rules/security.md) |
+| Tools (bash / git / MCP) | [`rules/tools_policy.md`](rules/tools_policy.md) |
+| Skill deliverables (strict) | [`standards/agent_output.md`](standards/agent_output.md) |
 | Skills | [`skills/index.md`](skills/index.md) |
-| Strict deliverables for skills | [`harness/skill_output_contract.md`](harness/skill_output_contract.md) |
-| One-shot combined prompt | [`prompts/run_session.md`](prompts/run_session.md) |
+| Future (DAG / MCP / subagents) | [`.ai/ROADMAP.md`](ROADMAP.md) |
+| One-shot prompt | [`prompts/run_session.md`](prompts/run_session.md) |
 
 ## Build (this subproject)
 
-Out-of-source CMake from **`projects/rocprofiler-compute`** (see root `CMakeLists.txt` / `CONTRIBUTING.md`). Typical pattern:
+Out-of-source CMake from **`projects/rocprofiler-compute`** (`CMakeLists.txt`, `CONTRIBUTING.md`):
 
 ```bash
 cmake -S . -B build
 cmake --build build
 ```
 
-Set `ROCM_PATH` as needed. Do **not** use in-source builds (root `CMakeLists.txt` forbids it).
+Set `ROCM_PATH` as needed. No in-source builds.
 
-Do not add new dependencies or break default configure without maintainer alignment ([`rules/core.md`](rules/core.md)).
+Do not add dependencies or break configure without maintainer alignment ([`rules/core.md`](rules/core.md)).

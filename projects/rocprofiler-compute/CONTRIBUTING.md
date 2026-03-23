@@ -6,7 +6,7 @@ ROCm Compute Profiler lives under `projects/rocprofiler-compute` in the [ROCm Sy
 
 ## AI-assisted development
 
-For shared rules, standards, task skills, and the **multi-model harness** (same four layers for Claude, Copilot, Cursor, Codex, OpenCode, etc.), see [docs/AI_GUIDE.md](docs/AI_GUIDE.md) and [`.ai/harness/multi_model.md`](.ai/harness/multi_model.md).
+For shared rules, standards, task skills, and the **multi-model guide** (same four layers for Claude, Copilot, Cursor, Codex, OpenCode, etc.), see [docs/AI_GUIDE.md](docs/AI_GUIDE.md) and [`.ai/guide/workflow.md`](.ai/guide/workflow.md).
 
 ## Reporting Issues and Bugs
 

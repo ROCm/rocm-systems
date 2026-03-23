@@ -20,4 +20,4 @@ Change GPU SoC logic or counter definitions safely.
 
 - YAML/Python edits, tests covering selection or parsing, and validation commands run.
 
-**Output format (strict):** [`.ai/harness/skill_output_contract.md`](../harness/skill_output_contract.md).
+**Output format (strict):** [`.ai/standards/agent_output.md`](../standards/agent_output.md).

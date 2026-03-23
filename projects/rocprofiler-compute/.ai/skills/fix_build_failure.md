@@ -31,4 +31,4 @@ Restore a **failing** CMake configure or build with the **smallest** change. Typ
 - **Patch** — files touched; unified diff or file list.
 - **Build confirmation** — `cmake`/`cmake --build` lines run and **pass** (or blocked-with-reason).
 
-**Output format (strict):** [`.ai/harness/skill_output_contract.md`](../harness/skill_output_contract.md).
+**Output format (strict):** [`.ai/standards/agent_output.md`](../standards/agent_output.md).

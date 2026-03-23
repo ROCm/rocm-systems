@@ -53,7 +53,7 @@
 
 **Prompt / rules version** (if tracked): <!-- e.g. `run_session.md`, commit hash -->
 
-**Harness / validation** (if AI-assisted): <!-- e.g. `python3 scripts/ai_dev_harness.py`, pre-commit -->
+**Guide / validation** (if AI-assisted): <!-- e.g. `python3 scripts/ai_dev_guide.py`, pre-commit -->
 
 ## Have you added or updated tests to validate functionality?
 

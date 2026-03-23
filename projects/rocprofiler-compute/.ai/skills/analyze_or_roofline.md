@@ -20,4 +20,4 @@ Change analysis, roofline, or related utilities.
 
 - Code change, tests for output or edge cases, and brief note if metrics/units changed.
 
-**Output format (strict):** [`.ai/harness/skill_output_contract.md`](../harness/skill_output_contract.md).
+**Output format (strict):** [`.ai/standards/agent_output.md`](../standards/agent_output.md).

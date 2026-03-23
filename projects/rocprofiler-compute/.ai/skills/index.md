@@ -17,7 +17,7 @@ Pick **one** primary skill per task. Read `rules/core.md` first.
 | CMake error, link error, build failed, native compile | [fix_build_failure.md](fix_build_failure.md) |
 | C++ feature in lib, CMakeLists change (not only “fix failure”) | [native_or_cmake.md](native_or_cmake.md) |
 
-**Taxonomy (category IDs):** [`.ai/harness/skill_taxonomy.md`](../harness/skill_taxonomy.md).
+**Taxonomy (category IDs):** [`.ai/guide/taxonomy.md`](../guide/taxonomy.md).
 
 | Intent | Skill |
 |--------|--------|
@@ -32,4 +32,4 @@ Pick **one** primary skill per task. Read `rules/core.md` first.
 | CMake or compile failure | [fix_build_failure.md](fix_build_failure.md) |
 | C++ tool or CMake (feature work) | [native_or_cmake.md](native_or_cmake.md) |
 
-**Advanced (not implemented):** DAG orchestration, MCP standardization, subagent roles — templates in [`.ai/harness/future.md`](../harness/future.md).
+**Advanced (not implemented):** DAG orchestration, MCP standardization, subagent roles — see [`.ai/ROADMAP.md`](../ROADMAP.md).

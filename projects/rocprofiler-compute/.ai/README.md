@@ -1,77 +1,80 @@
 # AI development assets (rocprofiler-compute)
 
-Use this tree for **consistent AI-assisted changes** across tools (Cursor, Copilot, Claude Code, Codex, OpenCode, etc.). **Codex** and **OpenCode** pick up **[`AGENTS.md`](../AGENTS.md)** at the repo root; it forwards here.
+Consistent **AI-assisted** changes across Claude, Copilot, Cursor, Codex, OpenCode, etc. **Codex / OpenCode:** root [`AGENTS.md`](../AGENTS.md). **Claude:** root [`CLAUDE.md`](../CLAUDE.md).
 
 ## Layout
 
 ```text
 .ai/
-├── README.md                 # This file — start here
-├── CLAUDE.md                 # Pointer when browsing .ai/ only (root CLAUDE.md is primary)
-├── rules/                    # Global constraints
+├── README.md              # This file
+├── CLAUDE.md              # Quick map when browsing .ai/ only
+├── ROADMAP.md             # Reserved: DAG, MCP, subagents
+├── guide/                 # How the system runs (workflow + skill discovery)
+│   ├── workflow.md        # Four layers + tool table + execution loop
+│   └── taxonomy.md        # Capability tree + category IDs + composition
+├── rules/
 │   ├── core.md
-│   ├── security.md           # Prompt injection / tools / MCP risk
+│   ├── security.md
+│   ├── tools_policy.md    # Bash / git / build / MCP
 │   ├── anti_patterns.md
 │   └── profiling_infra.md
-├── standards/                # Coding + build references
+├── standards/
 │   ├── python.md
 │   ├── cpp.md
-│   └── cmake.md
-├── skills/                   # Task playbooks (pick one per change)
-│   ├── index.md
-│   ├── add_feature.md
-│   ├── fix_bug.md
-│   ├── write_test.md
-│   ├── add_experimental_cli.md
-│   ├── update_soc_or_counters.md
-│   ├── analyze_or_roofline.md
-│   └── native_or_cmake.md
+│   ├── cmake.md
+│   └── agent_output.md    # Strict skill deliverables
+├── skills/                # Task playbooks (see index.md)
 ├── prompts/
-│   ├── default.md            # Shared prompt prefix
-│   └── run_session.md        # One-shot: flow + rules + skill slot
-├── review/
-│   └── checklist.md          # AI-aware code review
-└── harness/
-    ├── README.md             # Harness design + validation
-    ├── multi_model.md        # Four layers for every AI product
-    ├── skill_taxonomy.md     # Category IDs + skill mapping
-    ├── capabilities.md       # Skill tree (diagram)
-    ├── future.md             # Reserved: DAG, MCP, subagents
-    ├── execution_flow.md     # Prompt → skill → validate loop
-    ├── skill_output_contract.md  # Strict deliverables for skills
-    └── tools-policy.md       # Bash / git / build (shared)
+│   ├── default.md
+│   └── run_session.md
+└── review/
+    └── checklist.md
 scripts/
-└── ai_dev_harness.py         # Layout / skill template checks
+└── ai_dev_guide.py      # Validates .ai/ + entry files (pre-commit + CI)
 docs/
-└── AI_GUIDE.md               # Contributor entry (links here)
-.github/
-├── copilot-instructions.md   # GitHub Copilot → points here
-└── pull_request_template.md  # Includes AI usage section
-AGENTS.md                     # Codex, OpenCode, other agents → points here
-CLAUDE.md                     # Claude Code; OpenCode fallback → points here
-.cursor/rules/
-└── rocprofiler-compute-ai.mdc # Cursor → points here
-.claude/                        # Claude Code: hooks + rule stub (shared docs in .ai/harness/)
-├── README.md
-├── settings.json
-├── capabilities.md           # stub → .ai/harness/capabilities.md
-├── tools-policy.md           # stub → .ai/harness/tools-policy.md
-├── rules/claude-harness.md
-└── hooks/bash_guard.py
+└── AI_GUIDE.md
+AGENTS.md · CLAUDE.md · .cursor/rules/*.mdc · .github/copilot-instructions.md
+.claude/                   # Claude hooks + stubs → .ai/guide, .ai/rules
 ```
 
-## How to use
+## Workflow (short)
 
-| Path | Purpose |
-|------|---------|
-| [rules/](rules/) | Hard constraints — always follow |
-| [standards/](standards/) | Style and project conventions |
-| [skills/](skills/) | Task playbooks — pick one per change |
-| [prompts/](prompts/) | Pasteable prompt prefix |
-| [review/](review/) | PR / review checklist |
+1. [`.ai/guide/workflow.md`](guide/workflow.md) — layers + ordered loop.
+2. [`.ai/rules/core.md`](rules/core.md) + [`security.md`](rules/security.md).
+3. [`.ai/skills/index.md`](skills/index.md) + [`.ai/guide/taxonomy.md`](guide/taxonomy.md) to pick a skill.
+4. Deliverables: [`.ai/standards/agent_output.md`](standards/agent_output.md).
+5. Before merge: [`.ai/review/checklist.md`](review/checklist.md).
 
-**Workflow:** read `rules/core.md` → paste or follow `prompts/default.md` → open the skill from `skills/index.md` (see `harness/capabilities.md`) → before PR use `review/checklist.md`.
+## Validation (source of truth)
 
-**Harness:** [harness/multi_model.md](harness/multi_model.md) (all models) · [harness/README.md](harness/README.md) (validation via `python3 scripts/ai_dev_harness.py`, pre-commit).
+`scripts/ai_dev_guide.py` **`REQUIRED_PATHS`** + [`.ai/skills/index.md`](skills/index.md) define what must exist. **Run:**
+
+```bash
+python3 scripts/ai_dev_guide.py        # from projects/rocprofiler-compute
+python3 scripts/ai_dev_guide.py -v     # verbose
+```
+
+Also runs via **pre-commit** (**AI guide / layout validator** hook).
+
+### CI (rocm-systems monorepo)
+
+GitHub only loads workflows from the **repository root** `.github/workflows/`, not from `projects/rocprofiler-compute/.github/workflows/`. To run `ai_dev_guide.py` in CI, add a job at the **super-repo root** (paths and working directory adjusted as needed):
+
+```yaml
+jobs:
+  rocprofiler-compute-ai-guide:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: projects/rocprofiler-compute
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python3 scripts/ai_dev_guide.py
+```
+
+**Extend:** add paths to `REQUIRED_PATHS`; new skills need `index.md` links + `Goal`/`Steps`/`Constraints`/`Output` headings.
 
 **Humans:** [docs/AI_GUIDE.md](../docs/AI_GUIDE.md) · [CONTRIBUTING.md](../CONTRIBUTING.md)
