@@ -3563,16 +3563,18 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
           }
         }
       }
-      // Fix 2 (attn_forward only): hoist hidden arg load (s10 = blockSize) before the exec-masked
-      // output section. On GFX12, the "out of range" block always runs (SALU
-      // ignores exec). On GFX9 wave64, the s_cbranch_execz skips the entire
-      // block when D >= N (all threads are "in range"). Hoisting the load
-      // ensures s10 is set regardless of the branch.
-      // Target: insert before "s_cbranch_execz .L_br11" in the output section.
-      // Use the unique pattern "s_xor_b32 s0, exec_lo, s1\ns_cbranch_execz .L_br11"
-      // Fix 2: s10 hoist
-      if (stats->total_instructions < 600) {
-        // Use computed kernarg save pair (avoids collision with cmpx VCC save)
+      // Fix 2: hoist blockSize before the exec-masked block.
+      // On GFX12, the "out of range" block always runs (SALU ignores exec).
+      // On GFX9, the block may be skipped. Hoisting ensures blockSize is set.
+      //
+      // IMPORTANT: attn_forward uses s10 for blockSize (original code does too).
+      // attn_multihead uses s23 for blockSize (set in prologue, never clobbered).
+      // Writing to s10 in multihead corrupts the head offset needed for O address.
+      //
+      // Detect multihead by checking for its prologue pattern: s_and_b32 s23, s24, 0xffff
+      bool has_s23_blocksize = translated_asm.find("s_and_b32 s23, s24, 0xffff") != std::string::npos;
+      if (stats->total_instructions < 600 && !has_s23_blocksize) {
+        // attn_forward path: hoist s10 = blockSize
         std::string ka_pair = "s[" + std::to_string(kernarg_save_lo) + ":"
                               + std::to_string(kernarg_save_hi) + "]";
         std::string target = "s_xor_b32 s0, exec_lo, s1\n";
@@ -3585,17 +3587,20 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
           translated_asm.insert(xor_pos, hoist);
         }
       }
-      // Fix 3: v1 = blockSize
       // Fix 3: v1 = blockSize for exp/normalize loops
       {
         auto replaceFirst = [](std::string& s, const std::string& from, const std::string& to) {
           size_t pos = s.find(from);
           if (pos != std::string::npos) s.replace(pos, from.size(), to);
         };
-        // s10 is clobbered by the find-max tree (saves exec to s10).
-        // Reload s10 from the hidden arg, then set v1.
-        {
-          // Use computed kernarg save pair (avoids collision with cmpx VCC save)
+        if (has_s23_blocksize) {
+          // multihead: blockSize is in s23 (prologue), never clobbered
+          replaceFirst(translated_asm,
+            ".L_br14:\n",
+            ".L_br14:\n"
+            "v_mov_b32_e32 v1, s23 ; FIX3: v1=blockSize (from prologue s23)\n");
+        } else {
+          // attn_forward: reload s10 from hidden arg (clobbered by find-max tree)
           std::string ka_pair = "s[" + std::to_string(kernarg_save_lo) + ":"
                                 + std::to_string(kernarg_save_hi) + "]";
           replaceFirst(translated_asm,
@@ -3604,7 +3609,7 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
             "s_load_dword s10, " + ka_pair + ", 0x3c ; reload blockSize (clobbered by tree)\n"
             "s_waitcnt lgkmcnt(0)\n"
             "s_and_b32 s10, s10, 0xffff\n"
-            "v_mov_b32_e32 v1, s10 ; FIX: v1=blockSize for exp/norm/store loops\n");
+            "v_mov_b32_e32 v1, s10 ; FIX3: v1=blockSize for exp/norm/store loops\n");
         }
       }
       // Fix 4: s3 (thread-0 mask) and v1 (1/sqrt(D) scale factor).
