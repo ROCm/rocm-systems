@@ -320,70 +320,70 @@ __device__ __forceinline__ void store_asm(uint8_t* val, uint8_t* dst,
 #endif
       break;
     }
-//     case 16: {
-//       __uint128_t val128{*(reinterpret_cast<__uint128_t*>(val))};
-// #if defined(__gfx906__)
-// #endif
-// #if defined(__gfx908__)
-// #endif
-// #if defined(__gfx90a__) || defined(__gfx1100__)
-//       asm volatile("flat_store_dwordx4 %0 %1 glc slc" : : "v"(dst), "v"(val128));
-// #endif
-// #if defined(__gfx942__) || defined(__gfx950__)
-//       asm volatile("flat_store_dwordx4 %0 %1 sc0 sc1" : : "v"(dst), "v"(val128));
-// #endif
-// #if defined(__gfx1201__)
-//       asm volatile("flat_store_b128 %0 %1 scope:SCOPE_SYS" : : "v"(dst), "v"(val128));
-// #endif
-//       break;
-//     }
-
     case 16: {
-      // 128-byte transfer: 8 x 16-byte iterations
+      __uint128_t val128{*(reinterpret_cast<__uint128_t*>(val))};
 #if defined(__gfx906__)
 #endif
 #if defined(__gfx908__)
 #endif
 #if defined(__gfx90a__) || defined(__gfx1100__)
-      #pragma unroll
-      for (int i = 0; i < 1; i++) {
-        __uint128_t chunk = *(reinterpret_cast<__uint128_t*>(val) + i);
-        uint8_t* dst_i = dst + i * sizeof(__uint128_t);
-        asm volatile("flat_store_dwordx4 %0 %1 glc slc" : : "v"(dst_i), "v"(chunk));
-      }
+      asm volatile("flat_store_dwordx4 %0 %1 glc slc" : : "v"(dst), "v"(val128));
 #endif
 #if defined(__gfx942__) || defined(__gfx950__)
-      {
-        constexpr int NUM_REG = 1;
-        __uint128_t regs[NUM_REG];
-        buffer_resource br_val = make_buffer_resource(val, size);
-        buffer_resource br_dst = make_buffer_resource(dst, size);
-
-        #pragma unroll
-        for (int i = 0; i < NUM_REG; i++) {
-          regs[i] = llvm_amdgcn_raw_buffer_load_b128(
-              *reinterpret_cast<i32x4*>(&br_val),
-              static_cast<uint32_t>(i) * 16u, 0u, 0b10001u);
-        }
-        #pragma unroll
-        for (int i = 0; i < NUM_REG; i++) {
-          llvm_amdgcn_raw_buffer_store_b128(
-              regs[i],
-              *reinterpret_cast<i32x4*>(&br_dst),
-              static_cast<uint32_t>(i) * 16u, 0u, 0b10001u);
-        }
-      }
+      asm volatile("flat_store_dwordx4 %0 %1 sc0 sc1" : : "v"(dst), "v"(val128));
 #endif
 #if defined(__gfx1201__)
-      #pragma unroll
-      for (int i = 0; i < 1; i++) {
-        __uint128_t chunk = *(reinterpret_cast<__uint128_t*>(val) + i);
-        uint8_t* dst_i = dst + i * sizeof(__uint128_t);
-        asm volatile("flat_store_b128 %0 %1 scope:SCOPE_SYS" : : "v"(dst_i), "v"(chunk));
-      }
+      asm volatile("flat_store_b128 %0 %1 scope:SCOPE_SYS" : : "v"(dst), "v"(val128));
 #endif
       break;
     }
+
+//     case 16: {
+//       // 128-byte transfer: 8 x 16-byte iterations
+// #if defined(__gfx906__)
+// #endif
+// #if defined(__gfx908__)
+// #endif
+// #if defined(__gfx90a__) || defined(__gfx1100__)
+//       #pragma unroll
+//       for (int i = 0; i < 1; i++) {
+//         __uint128_t chunk = *(reinterpret_cast<__uint128_t*>(val) + i);
+//         uint8_t* dst_i = dst + i * sizeof(__uint128_t);
+//         asm volatile("flat_store_dwordx4 %0 %1 glc slc" : : "v"(dst_i), "v"(chunk));
+//       }
+// #endif
+// #if defined(__gfx942__) || defined(__gfx950__)
+//       {
+//         constexpr int NUM_REG = 1;
+//         __uint128_t regs[NUM_REG];
+//         buffer_resource br_val = make_buffer_resource(val, size);
+//         buffer_resource br_dst = make_buffer_resource(dst, size);
+
+//         #pragma unroll
+//         for (int i = 0; i < NUM_REG; i++) {
+//           regs[i] = llvm_amdgcn_raw_buffer_load_b128(
+//               *reinterpret_cast<i32x4*>(&br_val),
+//               static_cast<uint32_t>(i) * 16u, 0u, 0b10001u);
+//         }
+//         #pragma unroll
+//         for (int i = 0; i < NUM_REG; i++) {
+//           llvm_amdgcn_raw_buffer_store_b128(
+//               regs[i],
+//               *reinterpret_cast<i32x4*>(&br_dst),
+//               static_cast<uint32_t>(i) * 16u, 0u, 0b10001u);
+//         }
+//       }
+// #endif
+// #if defined(__gfx1201__)
+//       #pragma unroll
+//       for (int i = 0; i < 1; i++) {
+//         __uint128_t chunk = *(reinterpret_cast<__uint128_t*>(val) + i);
+//         uint8_t* dst_i = dst + i * sizeof(__uint128_t);
+//         asm volatile("flat_store_b128 %0 %1 scope:SCOPE_SYS" : : "v"(dst_i), "v"(chunk));
+//       }
+// #endif
+//       break;
+//     }
     default:
       break;
   }
