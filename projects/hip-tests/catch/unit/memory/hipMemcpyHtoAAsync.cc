@@ -191,7 +191,7 @@ HIP_TEST_CASE(Unit_hipMemcpyHtoAAsync_MultiDevice) {
 #endif
 }
 
-HIP_TEST_CASE(UnitHipMemcpyHtoAAsync_Capture) {
+HIP_TEST_CASE(Unit_HipMemcpyHtoAAsync_Capture) {
   CHECK_IMAGE_SUPPORT
 
   auto host_src = std::make_unique<std::vector<int>>(N);

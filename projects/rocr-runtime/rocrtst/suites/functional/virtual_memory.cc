@@ -1485,12 +1485,13 @@ void VirtMemoryTestInterProcess::Run(void) {
 
   TestBase::Run();
 
-  // Note: Close() (and hsa_shut_down()) will be called from main()
-  // processOne is true for parent process, false for child process
+  // Note: Close() (and hsa_shut_down()) will be called from main() for parent.
+  // Child process must shut down HSA runtime before exiting.
   if (parentProcess_) {
     ParentProcessImpl();
   } else {
     ChildProcessImpl();
+    hsa_shut_down();
     exit(0);
   }
 }

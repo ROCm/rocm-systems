@@ -186,6 +186,18 @@ if (NOT BUILD_TESTS_ONLY)
   set(THREADS_PREFER_PTHREAD_FLAG TRUE)
   find_package(Threads REQUIRED)
 
+  # Check if std::filesystem requires linking stdc++fs
+  include(CheckCXXSourceCompiles)
+  set(CMAKE_REQUIRED_QUIET TRUE)
+  check_cxx_source_compiles("
+    #include <filesystem>
+    int main() {
+      auto p = std::filesystem::current_path();
+      return 0;
+    }
+  " FILESYSTEM_NO_LINK_NEEDED)
+  set(CMAKE_REQUIRED_QUIET FALSE)
+
   if(${ROCM_MAJOR_VERSION} GREATER_EQUAL 6 )
     set(HAVE_DEVICE_MALLOC_UNCACHED ON)
   elseif (${ROCM_MAJOR_VERSION} EQUAL 5 AND ${ROCM_MINOR_VERSION} GREATER_EQUAL 5)
@@ -225,6 +237,7 @@ if (NOT BUILD_TESTS_ONLY)
       dl
       hsa-runtime64::hsa-runtime64
       -fgpu-rdc
+      $<$<NOT:$<BOOL:${FILESYSTEM_NO_LINK_NEEDED}>>:stdc++fs>
   )
 
   if(${ROCM_MAJOR_VERSION} LESS 7)
