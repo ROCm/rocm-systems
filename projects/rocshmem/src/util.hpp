@@ -459,92 +459,6 @@ template <typename... Args>
   }
 }
 
-/*
-#if defined(__gfx942__) || defined(__gfx950__)
-
-using i32x4 = int32_t __attribute__((ext_vector_type(4)));
-struct buffer_resource {
-    uint64_t ptr;
-    uint32_t range;
-    uint32_t config;
-};
-
-template <class To, class From>
-__device__ To bit_cast_fallback(const From& src) noexcept
-{
-    To dst;
-    memcpy(&dst, &src, sizeof(To)); // Safe byte-wise copy
-    return dst;
-}
-
-template <typename T>
-__device__ inline buffer_resource make_buffer_resource(T *ptr, uint32_t buffer_size) {
-    // ref: https://github.com/HazyResearch/HipKittens
-    constexpr uint32_t config = 0x00020000;
-    uintptr_t as_int = reinterpret_cast<uintptr_t>(ptr); // width = sizeof(void *)
-    uint64_t as_u64 = reinterpret_cast<uint64_t>(as_int); // widen if host is 32-bit
-    return {as_u64, buffer_size, config};
-}
-
-using i32x4 = int32_t __attribute__((ext_vector_type(4)));
-
-__device__ __uint128_t llvm_amdgcn_raw_buffer_load_b128(i32x4 srsrc, uint32_t voffset, uint32_t soffset, uint32_t coherency)
-    __asm("llvm.amdgcn.raw.buffer.load.i128");
-
-
-__device__ void llvm_amdgcn_raw_buffer_store_b128(__uint128_t vdata, i32x4 srsrc, uint32_t voffset, uint32_t soffset, uint32_t coherency)
-    __asm("llvm.amdgcn.raw.buffer.store.i128");
-
-[[maybe_unused]] __device__ __forceinline__ void memcpy_wg(void* dst, void* src, size_t size) {
-    constexpr int NUM_REG = 8;
-    int BLOCK_NUM = get_grid_num_blocks();
-    int BLOCK_SIZE = get_flat_block_size();
-    using reg_type = uint4;
-    reg_type x[NUM_REG] = {};
-
-    int tid = threadIdx.x;
-    int bid = blockIdx.x;
-
-    const uint32_t SIZE_PER_BLOCK = size / BLOCK_NUM;
-    uint32_t STRIDE = BLOCK_SIZE * NUM_REG * sizeof(reg_type);
-    uint32_t SMALL_STRIDE = BLOCK_SIZE * sizeof(reg_type);
-
-    char *block_src = reinterpret_cast<char*>(src) + bid * SIZE_PER_BLOCK;
-    char *block_dst = reinterpret_cast<char*>(dst) + bid * SIZE_PER_BLOCK;
-
-    buffer_resource br_src = make_buffer_resource(block_src, SIZE_PER_BLOCK);
-    buffer_resource br_dst = make_buffer_resource(block_dst, SIZE_PER_BLOCK);
-    
-    uint32_t idx = tid * sizeof(reg_type);
-    for(; idx < SIZE_PER_BLOCK; idx += STRIDE) {
-        #pragma unroll
-        for (int i = 0; i < NUM_REG; ++i) {
-            x[i] = bit_cast_fallback<reg_type>(llvm_amdgcn_raw_buffer_load_b128(
-                *reinterpret_cast<i32x4 *>(&br_src),
-                idx + i * SMALL_STRIDE,
-                0, 0b10001
-//                0, 0b10011
-//                0, 0b00011
-//                0, 0b0
-                ));
-        }
-        for (int i = 0; i < NUM_REG; ++i) {
-            llvm_amdgcn_raw_buffer_store_b128(
-                *reinterpret_cast<__uint128_t *>(&x[i]),
-                *reinterpret_cast<i32x4 *>(&br_dst),
-                idx + i * SMALL_STRIDE,
-                0, 0b10001
-//                0, 0b10011
-//                0, 0b00011
-//                0, 0b0
-            );
-        }
-    }
-    __builtin_amdgcn_s_waitcnt(0xF70);
-}
-
-#else
-*/
 [[maybe_unused]] __device__ __forceinline__ void memcpy_wg(void* dst, void* src, size_t size) {
   int thread_id{get_flat_block_id()};
   int block_size{get_flat_block_size()};
@@ -560,9 +474,26 @@ __device__ void llvm_amdgcn_raw_buffer_store_b128(__uint128_t vdata, i32x4 srsrc
   dst_bytes = dst_def;
   src_bytes = src_def;
 
-  // For case 16
-  buffer_resource br_src = make_buffer_resource(src, size);
-  buffer_resource br_dst = make_buffer_resource(dst, size);
+  // constexpr int BW = 128;
+  // while (size >= BW) {
+  //   cpy_size = size / BW;
+  //   for (int i{thread_id}; i < cpy_size; i += block_size) {
+  //     dst_bytes = dst_def;
+  //     src_bytes = src_def;
+      
+  //     src_bytes += i * BW;
+  //     dst_bytes += i * BW;
+      
+  //     // gpu_dprintf("WG (%u, %u, %u) TH (%u, %u, %u), flat_id = %d, size = %3d, " 
+  //     //   "j = %3d, cpy_size = %3d, src_bytes=%u, dst_bytes=%u\n", get_flat_id(), 
+  //     //   size, BW, cpy_size, src_bytes, dst_bytes);
+        
+  //     store_asm(src_bytes, dst_bytes, BW);
+  //   }
+  //   size -= cpy_size * BW;
+  //   dst_def += cpy_size * BW;
+  //   src_def += cpy_size * BW;
+  // }
 
   for (int j{16}; j > 1; j >>= 1) {
   
@@ -578,14 +509,7 @@ __device__ void llvm_amdgcn_raw_buffer_store_b128(__uint128_t vdata, i32x4 srsrc
       //   "j = %3d, cpy_size = %3d, src_bytes=%u, dst_bytes=%u\n", get_flat_id(), 
       //   size, j, cpy_size, src_bytes, dst_bytes);
         
-      if (16 != j) {
-        store_asm(src_bytes, dst_bytes, j);
-      } else {    
-        br_src.ptr = reinterpret_cast<uint64_t>(src_bytes);
-        br_dst.ptr = reinterpret_cast<uint64_t>(dst_bytes);
-        store_asm(reinterpret_cast<uint8_t*>(&br_src),
-          reinterpret_cast<uint8_t*>(&br_dst), j); 
-      }
+      store_asm(src_bytes, dst_bytes, j);
     }
     size -= cpy_size * j;
     dst_def += cpy_size * j;
@@ -598,7 +522,6 @@ __device__ void llvm_amdgcn_raw_buffer_store_b128(__uint128_t vdata, i32x4 srsrc
     }
   }
 }
-// #endif
 
 [[maybe_unused]] __device__ __forceinline__ void memcpy_wave(void* dst, void* src, size_t size) {
   int wave_tid = get_flat_block_id() % WF_SIZE;
@@ -615,7 +538,6 @@ __device__ void llvm_amdgcn_raw_buffer_store_b128(__uint128_t vdata, i32x4 srsrc
   dst_bytes = dst_def;
   src_bytes = src_def;
 
-  #pragma unroll 
   for (int j{8}; j > 1; j >>= 1) {
     cpy_size = size / j;
     for (int i{wave_tid}; i < cpy_size; i += wave_size) {
