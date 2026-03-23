@@ -51,13 +51,10 @@ HIP catch tests are built under the folder `$HIP_TESTS_DIR/build`.
 
 ### Build HIP Catch2 standalone test
 
-`standalone_main.cc` is now removed, and we use the main shipped with Catch2 to build standalone tests.
-The test suite has moved to Catch2v3 (v3.8.1 to be exact).
-Moving from v2 to v3 came with some fundamental changes in how Catch2 interacts with hip-tests.
-Starting with, it is no longer a single header, it is now a library, which needs to be linked to the test exe.
+`standalone_main.cc`, which was previously used, has been removed. We now rely on the main function provided by Catch2 to build standalone tests. The test suite has been upgraded to Catch2 v3 (specifically v3.8.1). This transition from v2 to v3 introduced several significant changes in how Catch2 integrates with hip-tests. Most importantly, Catch2 is no longer a single-header library; it is now a compiled library that must be linked into the test executable.
 
-If you are on your personal machine, it is highly recommended to install Catch2v3 (v3.8.1) locally on your system.
-This helps skip the download/build part in hip-tests and results in faster builds overall.
+For developers working on personal machines, installing Catch2 v3 (v3.8.1) system-wide is strongly recommended. This avoids the download and build steps within hip-tests and leads to noticeably faster build times.
+
 HIP Catch2 supports building standalone tests, for example,
 
 ### Steps to install Catch2v3 locally
