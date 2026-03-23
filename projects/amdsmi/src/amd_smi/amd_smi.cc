@@ -4173,9 +4173,35 @@ amdsmi_status_t amdsmi_get_clk_freq(amdsmi_processor_handle processor_handle,
     return (f->num_supported > 0) ? AMDSMI_STATUS_SUCCESS : AMDSMI_STATUS_NOT_SUPPORTED;
   }
 
-  return rsmi_wrapper(rsmi_dev_gpu_clk_freq_get, processor_handle, 0,
+  amdsmi_status_t status = rsmi_wrapper(rsmi_dev_gpu_clk_freq_get, processor_handle, 0,
                       static_cast<rsmi_clk_type_t>(clk_type),
                       reinterpret_cast<rsmi_frequencies_t*>(f));
+
+  // The actual memory clock can sit between the discrete DPM levels listed in
+  // pp_dpm_mclk. When this happens the kernel driver omits the '*' marker from
+  // every entry, causing rsmi_dev_gpu_clk_freq_get to return UNEXPECTED_DATA.
+  if (status == AMDSMI_STATUS_UNEXPECTED_DATA && f != nullptr && f->num_supported > 0) {
+    amdsmi_clk_info_t clk_info = {};
+    if (amdsmi_get_clock_info(processor_handle, clk_type, &clk_info) == AMDSMI_STATUS_SUCCESS
+        && clk_info.clk != UINT32_MAX) {
+      uint64_t actual_clk_hz = static_cast<uint64_t>(clk_info.clk) * 1000000ULL;
+      uint32_t closest_idx = 0;
+      uint64_t min_diff = UINT64_MAX;
+      for (uint32_t i = 0; i < f->num_supported; i++) {
+        uint64_t diff = (f->frequency[i] > actual_clk_hz)
+                            ? f->frequency[i] - actual_clk_hz
+                            : actual_clk_hz - f->frequency[i];
+        if (diff < min_diff) {
+          min_diff = diff;
+          closest_idx = i;
+        }
+      }
+      f->current = closest_idx;
+      status = AMDSMI_STATUS_SUCCESS;
+    }
+  }
+
+  return status;
 }
 
 amdsmi_status_t amdsmi_set_clk_freq(amdsmi_processor_handle processor_handle,
