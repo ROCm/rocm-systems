@@ -15,6 +15,9 @@
 #define NCCL_CE_SYNC_OPS_PER_RANK_MC 2
 #define NCCL_CE_SYNC_OPS_PER_RANK_UC 3
 
+// Number of copy streams for multi-stream CE
+#define NCCL_CE_NUM_COPY_STREAMS 8
+
 struct ncclCeColl {
   uint8_t* baseUCSymReadyPtr;
   uint8_t* baseUCSymComplPtr;
@@ -25,9 +28,15 @@ struct ncclCeColl {
   uint32_t intraBatchSyncFreq;
   uint64_t intraBatchSyncMsgThreshold;
   struct ncclDevrWindow* ceSyncWin;
+<<<<<<< Updated upstream
   bool useBatchMemcpy;
   int numStreams;
   cudaStream_t* streams;
+=======
+  int nCopyStreams;
+  cudaStream_t copyStreams[NCCL_CE_NUM_COPY_STREAMS];
+  cudaEvent_t copyEvents[NCCL_CE_NUM_COPY_STREAMS];
+>>>>>>> Stashed changes
 };
 
 struct ncclCeInitTask {

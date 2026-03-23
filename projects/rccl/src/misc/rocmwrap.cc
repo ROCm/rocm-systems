@@ -38,6 +38,7 @@ static ncclResult_t initResult;
 // This env var (NCCL_CUMEM_ENABLE) toggles cuMem API usage
 NCCL_PARAM(CuMemEnable, "CUMEM_ENABLE", 0);
 NCCL_PARAM(CuMemHostEnable, "CUMEM_HOST_ENABLE", -1);
+NCCL_PARAM(ForceCuMem, "FORCE_CUMEM", 0);
 // Handle type used for cuMemCreate()
 CUmemAllocationHandleType ncclCuMemHandleType = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
 
@@ -58,6 +59,7 @@ static int ncclGetKernelVersionCode() {
 
 // Determine whether CUMEM & VMM RDMA is supported on this platform
 int ncclIsCuMemSupported() {
+  if (ncclParamForceCuMem()) return 1;
   CUdevice currentDev;
   int cudaDev;
   int cudaDriverVersion;
@@ -90,6 +92,7 @@ error:
 }
 
 int ncclCuMemEnable() {
+  if (ncclParamForceCuMem()) return 1;
   int param = ncclParamCuMemEnable();
   return param >= 0 ? param : (param == -2 && ncclCuMemSupported);
 }

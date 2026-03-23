@@ -739,6 +739,9 @@ endif()
 if(LL128_ENABLED)
   target_compile_definitions(rccl PRIVATE ENABLE_LL128)
 endif()
+# Enable batch memcpy support for CE collectives
+target_compile_definitions(rccl PRIVATE RCCL_ENABLE_BATCH_MEMCPY)
+message(STATUS "RCCL batch memcpy support enabled")
 
 ## Set RCCL compile options
 if (HAVE_PARALLEL_JOBS)

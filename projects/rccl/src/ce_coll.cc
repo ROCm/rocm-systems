@@ -60,6 +60,7 @@ ncclResult_t ncclCeInit(struct ncclComm* comm) {
   comm->ceColl.intraBatchSyncFreq = CE_COLL_INTRA_BATCH_SYNC_FREQ;
   comm->ceColl.intraBatchSyncMsgThreshold = CE_COLL_INTRA_BATCH_SYNC_MSG_THRESHOLD;
 
+<<<<<<< Updated upstream
   comm->ceColl.useBatchMemcpy = (rcclParamCeBatchMemcpy() == 1);
 
   // Initialize multi-stream support for non-batch path
@@ -81,6 +82,16 @@ ncclResult_t ncclCeInit(struct ncclComm* comm) {
   ncclCudaDriverVersion(&ceDriverVersion);
   INFO(NCCL_INIT, "Init CE, rank %d CUDART_VERSION=%d driverVersion=%d useBatchMemcpy=%d numStreams=%d",
        comm->rank, CUDART_VERSION, ceDriverVersion, comm->ceColl.useBatchMemcpy, comm->ceColl.numStreams);
+=======
+  comm->ceColl.nCopyStreams = NCCL_CE_NUM_COPY_STREAMS;
+  for (int i = 0; i < comm->ceColl.nCopyStreams; i++) {
+    CUDACHECKGOTO(cudaStreamCreateWithFlags(&comm->ceColl.copyStreams[i], cudaStreamNonBlocking), ret, fail);
+    CUDACHECKGOTO(cudaEventCreateWithFlags(&comm->ceColl.copyEvents[i], cudaEventDisableTiming), ret, fail);
+  }
+
+  INFO(NCCL_INIT, "Init CE, rank %d baseUCSymReadyPtr %p, baseUCSymComplPtr %p, seq num %d, nCopyStreams %d",
+       comm->rank, comm->ceColl.baseUCSymReadyPtr, comm->ceColl.baseUCSymComplPtr, comm->ceColl.ceSeqNum, comm->ceColl.nCopyStreams);
+>>>>>>> Stashed changes
 
 exit:
   return ret;
@@ -97,6 +108,7 @@ ncclResult_t ncclCeFinalize(struct ncclComm* comm) {
     free(task);
   }
   
+<<<<<<< Updated upstream
   // Clean up CE streams
   if (comm->ceColl.streams != nullptr) {
     for (int i = 0; i < comm->ceColl.numStreams; i++) {
@@ -106,6 +118,15 @@ ncclResult_t ncclCeFinalize(struct ncclComm* comm) {
     comm->ceColl.streams = nullptr;
   }
   
+=======
+  // Clean up copy streams and events
+  for (int i = 0; i < comm->ceColl.nCopyStreams; i++) {
+    CUDACHECKIGNORE(cudaEventDestroy(comm->ceColl.copyEvents[i]));
+    CUDACHECKIGNORE(cudaStreamDestroy(comm->ceColl.copyStreams[i]));
+  }
+  comm->ceColl.nCopyStreams = 0;
+
+>>>>>>> Stashed changes
   // Clean up CE resources
   if (comm->ceColl.baseUCSymReadyPtr != NULL) {
     if (comm->ceColl.ceSyncWin && comm->ceColl.ceSyncWin->vidmem) {
@@ -325,8 +346,16 @@ ncclResult_t ncclCeLaunchBatchOps(struct ncclComm* comm, struct ncclCeBatchOpsPa
 
   // Check if we are in a CUDA graph capture
   bool capturing = ncclCudaGraphValid(comm->planner.capturingGraph);
+<<<<<<< Updated upstream
   int driverVersion;
   size_t totalBytes = 0;
+=======
+  int driverVersion = 0;
+#ifdef RCCL_ENABLE_BATCH_MEMCPY
+  // Check if batch memcpy is requested
+  bool useBatchMemcpy = (rcclParamCeBatchMemcpy() == 1);
+#endif
+>>>>>>> Stashed changes
 
   NCCLCHECKGOTO(ncclCudaDriverVersion(&driverVersion), ret, fail);
 
@@ -338,8 +367,13 @@ ncclResult_t ncclCeLaunchBatchOps(struct ncclComm* comm, struct ncclCeBatchOpsPa
   //--------------Graph capture--------------
   // cudaMemcpyBatchAsync is not supported during CUDA graph capture
   if (capturing) {
+<<<<<<< Updated upstream
     INFO(NCCL_COLL, "CE LaunchBatchOps: rank %d -> graph-capture path (cudaMemcpyAsync), numOps=%d", comm->rank, params->numOps);
     for (int i =0; i < params->numOps; i++) {
+=======
+    INFO(NCCL_COLL, "CE LaunchBatchOps: rank %d using graph-capture path (cudaMemcpyAsync), numOps=%lu", comm->rank, params->numOps);
+    for (int i =0; i < (int)params->numOps; i++) {
+>>>>>>> Stashed changes
       CUDACHECKGOTO(cudaMemcpyAsync(
         (void*)params->dsts[i],
         (void*)params->srcs[i],
@@ -347,11 +381,12 @@ ncclResult_t ncclCeLaunchBatchOps(struct ncclComm* comm, struct ncclCeBatchOpsPa
         cudaMemcpyDeviceToDevice,
         stream), ret, fail);
 
-      if (params->intraBatchSync && ((i+1) % comm->ceColl.intraBatchSyncFreq == 0) && ((i+1) < params->numOps)) {
+      if (params->intraBatchSync && ((i+1) % comm->ceColl.intraBatchSyncFreq == 0) && ((i+1) < (int)params->numOps)) {
         NCCLCHECKGOTO(ncclMemOpSync(comm, stream), ret, fail);
       }
     }
   }
+<<<<<<< Updated upstream
   //--------------No graph capture--------------
 #ifdef RCCL_ENABLE_BATCH_MEMCPY
   else if (comm->ceColl.useBatchMemcpy) {
@@ -406,6 +441,42 @@ ncclResult_t ncclCeLaunchBatchOps(struct ncclComm* comm, struct ncclCeBatchOpsPa
     } else {
       // Single-stream fallback
       INFO(NCCL_COLL, "CE LaunchBatchOps: rank %d -> NON-BATCH SINGLE-STREAM path (cudaMemcpyAsync), numOps=%d totalBytes=%zu", comm->rank, (int)params->numOps, totalBytes);
+=======
+  //--------------Batch memcpy path--------------
+#ifdef RCCL_ENABLE_BATCH_MEMCPY
+  else if (useBatchMemcpy && driverVersion >= 12080) {
+    INFO(NCCL_COLL, "CE LaunchBatchOps: rank %d using BATCH memcpy path (hipMemcpyBatchAsync), numOps=%lu", comm->rank, params->numOps);
+    
+    // Use hipMemcpyBatchAsync for better performance
+    const size_t maxBatchSize = 1024;
+    for (size_t batchStart = 0; batchStart < params->numOps; batchStart += maxBatchSize) {
+      size_t currentBatchSize = (batchStart + maxBatchSize > params->numOps) ? 
+                                (params->numOps - batchStart) : maxBatchSize;
+      
+      CUDACHECKGOTO(hipMemcpyBatchAsync(
+        (void**)&params->dsts[batchStart],
+        (void**)&params->srcs[batchStart],
+        &params->sizes[batchStart],
+        currentBatchSize,
+        nullptr,        // attrs (nullptr for default D2D)
+        nullptr,        // attrsIdxs
+        0,              // numAttrs
+        nullptr,        // failIdx
+        stream), ret, fail);
+      
+      if (params->intraBatchSync && ((batchStart + currentBatchSize) % comm->ceColl.intraBatchSyncFreq == 0) && 
+          ((batchStart + currentBatchSize) < params->numOps)) {
+        NCCLCHECKGOTO(ncclMemOpSync(comm, stream), ret, fail);
+      }
+    }
+  }
+#endif
+  //--------------No graph capture: multi-stream parallel copies--------------
+  else {
+    int nStreams = comm->ceColl.nCopyStreams;
+    if (nStreams <= 0 || (int)params->numOps <= 1) {
+      INFO(NCCL_COLL, "CE LaunchBatchOps: rank %d using single-stream cudaMemcpyAsync, numOps=%lu", comm->rank, params->numOps);
+>>>>>>> Stashed changes
       for (int i = 0; i < (int)params->numOps; i++) {
         CUDACHECKGOTO(cudaMemcpyAsync(
           (void*)params->dsts[i],
@@ -413,10 +484,38 @@ ncclResult_t ncclCeLaunchBatchOps(struct ncclComm* comm, struct ncclCeBatchOpsPa
           params->sizes[i],
           cudaMemcpyDeviceToDevice,
           stream), ret, fail);
+      }
+    } else {
+      int activeStreams = ((int)params->numOps < nStreams) ? (int)params->numOps : nStreams;
+      INFO(NCCL_COLL, "CE LaunchBatchOps: rank %d using MULTI-STREAM cudaMemcpyAsync, numOps=%lu, nStreams=%d", comm->rank, params->numOps, activeStreams);
 
+      // Make copy streams wait on the main stream
+      for (int s = 0; s < activeStreams; s++) {
+        CUDACHECKGOTO(cudaEventRecord(comm->ceColl.copyEvents[s], stream), ret, fail);
+        CUDACHECKGOTO(cudaStreamWaitEvent(comm->ceColl.copyStreams[s], comm->ceColl.copyEvents[s], 0), ret, fail);
+      }
+
+      // Distribute copies round-robin across streams
+      for (int i = 0; i < (int)params->numOps; i++) {
+        int s = i % activeStreams;
+        CUDACHECKGOTO(cudaMemcpyAsync(
+          (void*)params->dsts[i],
+          (void*)params->srcs[i],
+          params->sizes[i],
+          cudaMemcpyDeviceToDevice,
+          comm->ceColl.copyStreams[s]), ret, fail);
+      }
+
+<<<<<<< Updated upstream
         if (params->intraBatchSync && ((i+1) % comm->ceColl.intraBatchSyncFreq == 0) && ((i+1) < (int)params->numOps)) {
           NCCLCHECKGOTO(ncclMemOpSync(comm, stream), ret, fail);
         }
+=======
+      // Make main stream wait on all copy streams
+      for (int s = 0; s < activeStreams; s++) {
+        CUDACHECKGOTO(cudaEventRecord(comm->ceColl.copyEvents[s], comm->ceColl.copyStreams[s]), ret, fail);
+        CUDACHECKGOTO(cudaStreamWaitEvent(stream, comm->ceColl.copyEvents[s], 0), ret, fail);
+>>>>>>> Stashed changes
       }
     }
   }
