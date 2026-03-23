@@ -2365,6 +2365,10 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
     std::string stemp = "s" + std::to_string(cmpx_temp_sgpr);
     result.push_back("s_mov_b32 " + stemp + ", vcc_lo");
     result.push_back(base_mnem + " " + ops);
+    // Clear exec_hi: on GFX9 wave64, v_cmpx compares ALL 64 lanes including
+    // 32-63 which have uninitialized VGPRs (wave32 workgroup in wave64 HW).
+    // Ghost lanes could pass the comparison and execute stores to garbage addrs.
+    result.push_back("s_mov_b32 exec_hi, 0");
     result.push_back("s_mov_b32 vcc_lo, " + stemp);
     return result;
   }
