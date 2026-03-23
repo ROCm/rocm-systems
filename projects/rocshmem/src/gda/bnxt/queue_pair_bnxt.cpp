@@ -278,7 +278,7 @@ __device__ void QueuePair::bnxt_write_rma_wqe(uintptr_t raddr, uintptr_t laddr, 
   bnxt_re_incr_tail(&bnxt_sq, GDA_BNXT_WQE_SLOT_COUNT);
 }
 
-__device__ void QueuePair::bnxt_post_wqe_rma([[maybe_unused]] int pe, int32_t length, uintptr_t laddr, uintptr_t raddr, uint8_t opcode) {
+__device__ void QueuePair::bnxt_post_wqe_rma(int32_t length, uintptr_t laddr, uintptr_t raddr, uint8_t opcode) {
   uint64_t active_lane_mask;
   uint8_t active_lane_count;
   uint8_t active_lane_id;

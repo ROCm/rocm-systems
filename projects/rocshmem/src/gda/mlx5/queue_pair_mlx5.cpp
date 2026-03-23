@@ -271,7 +271,7 @@ __device__ void QueuePair::mlx5_quiet_single() {
 }
 
 // can be called with all active lanes using any number of different QPs, don't assume anything
-__device__ void QueuePair::mlx5_post_wqe_rma([[maybe_unused]] int pe, int32_t length, uintptr_t laddr, uintptr_t raddr, uint8_t opcode) {
+__device__ void QueuePair::mlx5_post_wqe_rma(int32_t length, uintptr_t laddr, uintptr_t raddr, uint8_t opcode) {
   uint64_t qp_lane_mask;
   uint8_t qp_lane_count;
   uint8_t qp_lane_id;
@@ -317,7 +317,7 @@ __device__ void QueuePair::mlx5_post_wqe_rma([[maybe_unused]] int pe, int32_t le
 }
 
 // called with all active lanes using different QPs
-__device__ void QueuePair::mlx5_post_wqe_rma_single([[maybe_unused]] int pe, int32_t length, uintptr_t laddr,
+__device__ void QueuePair::mlx5_post_wqe_rma_single(int32_t length, uintptr_t laddr,
                                                     uintptr_t raddr, uint8_t opcode, bool ring_db) {
   // get SQ lock
   acquire_lock(&mlx5_sq.lock);

@@ -282,7 +282,7 @@ __device__ void QueuePair::ionic_quiet_single() {
   ionic_quiet_internal_ccqe_single(sq_prod);
 }
 
-__device__ void QueuePair::ionic_post_wqe_rma([[maybe_unused]] int pe, int32_t size, uintptr_t laddr, uintptr_t raddr, uint8_t opcode, Collectivity cy) {
+__device__ void QueuePair::ionic_post_wqe_rma(int32_t size, uintptr_t laddr, uintptr_t raddr, uint8_t opcode, Collectivity cy) {
   uint64_t activemask = get_same_qp_lane_mask();
   uint32_t my_logical_lane_id = get_active_lane_num(activemask);
   uint32_t num_wqes = 1;
@@ -347,7 +347,7 @@ __device__ void QueuePair::ionic_post_wqe_rma([[maybe_unused]] int pe, int32_t s
   commit_sq(activemask, my_sq_prod, my_sq_pos, num_wqes);
 }
 
-__device__ void QueuePair::ionic_post_wqe_rma_single([[maybe_unused]] int pe, int32_t size, uintptr_t laddr, uintptr_t raddr, uint8_t opcode, [[maybe_unused]] Collectivity cy) {
+__device__ void QueuePair::ionic_post_wqe_rma_single(int32_t size, uintptr_t laddr, uintptr_t raddr, uint8_t opcode, [[maybe_unused]] Collectivity cy) {
   uint32_t num_wqes = 1;
   uint32_t my_sq_prod = reserve_sq_single(num_wqes);
   uint32_t my_sq_pos = my_sq_prod;
