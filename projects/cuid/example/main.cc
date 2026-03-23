@@ -164,9 +164,16 @@ int main() {
             return 1;
         }
 
-        // handle itself is also the derived CUID, so we can print it directly
+        amdcuid_id_t derived_id = {};
+        uint32_t derived_id_size = sizeof(derived_id);
+        err = amdcuid_query_device_property(device_handle, AMDCUID_QUERY_DERIVED_CUID, &derived_id, &derived_id_size);
+        if (err != AMDCUID_STATUS_SUCCESS) {
+            std::cerr << "Failed to get derived CUID for device at path " << example_device_path
+                      << ". Error code: " << err << " (" << amdcuid_status_to_string(err) << ")" << std::endl;
+            return 1;
+        }
         std::cout << "Device at path " << example_device_path
-                  << " has derived CUID: " << amdcuid_id_to_string(device_handle) << std::endl;
+                  << " has derived CUID: " << amdcuid_id_to_string(derived_id) << std::endl;
         
         std::string example_bdf;
         uint32_t bdf_length = 13; // typical length of BDF string "0000:00:00.0" + null terminator
@@ -189,8 +196,16 @@ int main() {
             return 1;
         }
 
+        amdcuid_id_t derived_id2 = {};
+        uint32_t derived_id_size2 = sizeof(derived_id2);
+        err = amdcuid_query_device_property(bdf_device_handle, AMDCUID_QUERY_DERIVED_CUID, &derived_id2, &derived_id_size2);
+        if (err != AMDCUID_STATUS_SUCCESS) {
+            std::cerr << "Failed to get derived CUID for device at BDF " << example_bdf
+                      << ". Error code: " << err << " (" << amdcuid_status_to_string(err) << ")" << std::endl;
+            return 1;
+        }
         std::cout << "Device at BDF " << example_bdf
-                  << " has derived CUID: " << amdcuid_id_to_string(bdf_device_handle) << std::endl;
+                  << " has derived CUID: " << amdcuid_id_to_string(derived_id2) << std::endl;
 
     } else {
         std::cout << "No GPU devices found; skipping GPU path/BDF lookup examples." << std::endl;
