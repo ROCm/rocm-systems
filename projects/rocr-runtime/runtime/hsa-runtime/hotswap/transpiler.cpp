@@ -3548,16 +3548,23 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
           "s_mov_b32 s10, 0 ; FIX: force s10=0 (no unrolled iterations)\n"
           "s_mov_b32 s9, 0  ; FIX: force s9=0 (go to remainder path)\n");
       }
-      // Fix 1: tree reduction stride (attn_forward only, not multihead).
+      // Detect multihead by checking for its prologue pattern: s_and_b32 s23, s24, 0xffff.
+      // attn_forward uses s10 for blockSize, multihead uses s23.
+      bool has_s23_blocksize = translated_asm.find("s_and_b32 s23, s24, 0xffff") != std::string::npos;
+      // Fix 1: tree reduction stride.
+      // Original: v_lshrrev v3, 1, v1 computes stride = v1/2 where v1 = blockSize.
+      // But on GFX9, v1 = 1/sqrt(D) from Fix 4 (not blockSize). Fix: use the
+      // blockSize SGPR directly: s10 for attn_forward, s23 for multihead.
       if (stats->total_instructions < 600) {
         size_t br12_pos = translated_asm.find(".L_br12:\n");
         if (br12_pos != std::string::npos) {
           std::string target = "v_lshrrev_b32_e32 v3, 1, v1\n";
           size_t lshr_pos = translated_asm.find(target, br12_pos);
           if (lshr_pos != std::string::npos && lshr_pos - br12_pos < 200) {
+            std::string bs_reg = has_s23_blocksize ? "s23" : "s10";
             std::string fix =
               "v_mov_b32_e32 v3, s5\n"
-              "v_min_u32 v3, s10, v3\n"
+              "v_min_u32 v3, " + bs_reg + ", v3\n"
               "v_lshrrev_b32_e32 v3, 1, v3 ; tree stride = min(N,blockSize)/2\n";
             translated_asm.replace(lshr_pos, target.size(), fix);
           }
@@ -3571,8 +3578,6 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
       // attn_multihead uses s23 for blockSize (set in prologue, never clobbered).
       // Writing to s10 in multihead corrupts the head offset needed for O address.
       //
-      // Detect multihead by checking for its prologue pattern: s_and_b32 s23, s24, 0xffff
-      bool has_s23_blocksize = translated_asm.find("s_and_b32 s23, s24, 0xffff") != std::string::npos;
       if (stats->total_instructions < 600 && !has_s23_blocksize) {
         // attn_forward path: hoist s10 = blockSize
         std::string ka_pair = "s[" + std::to_string(kernarg_save_lo) + ":"
@@ -3632,28 +3637,37 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
           "v_sqrt_f32_e32 v1, v1    ; v1 = sqrt(D)\n"
           "v_rcp_f32_e32 v1, v1     ; v1 = 1/sqrt(D)\n");
       }
-      // Fix 5: widen exec to N threads for the softmax computation.
-      // The v_cmpx_gt_i32 s6, v0 masks exec to D threads (0..D-1).
-      // But the softmax needs to process ALL N dot products in LDS[0..N-1].
-      // When D < N: threads D..N-1 are masked → their LDS values stay as raw
-      // dot products (not exp values) → wrong sum → zeros.
-      // Fix: after v_cmpx, widen exec using s5 (= N at this point).
-      // s0 = pre-v_cmpx exec (all threads). v_cmpx set exec to D threads.
-      // Insert v_cmp_gt_u32 to get N-thread mask, OR into exec.
-      // Then before inner product (.L_br24): the code already has its own exec management.
+      // Fix 5a: save v0 (tid) at .L_br3 before softmax section corrupts it.
+      // The exp loop advances v0 by blockSize, making v0 = tid + blockSize.
+      // The normalize, sum tree, and inner product entry all need v0 = tid.
+      // Only needed for multihead (attn_forward's exp loop doesn't clobber v0).
+      if (stats->total_instructions < 600 && has_s23_blocksize) {
+        auto replaceFirst = [](std::string& s, const std::string& from, const std::string& to) {
+          size_t pos = s.find(from);
+          if (pos != std::string::npos) s.replace(pos, from.size(), to);
+        };
+        replaceFirst(translated_asm,
+          ".L_br3:\n",
+          ".L_br3:\n"
+          "v_mov_b32_e32 v27, v0 ; FIX5a: save tid (exp loop will clobber v0)\n");
+      }
+      // Fix 5b: restore v0 = tid (multihead only) and widen exec (both).
       if (stats->total_instructions < 600) {
-        // Find the v_cmpx in the output section (after .L_br22)
         size_t cmpx_pos = translated_asm.find("v_cmpx_gt_i32 s6, v0\n");
         if (cmpx_pos != std::string::npos) {
+          // Multihead: restore v0 = tid before v_cmpx (exp loop corrupted it)
+          if (has_s23_blocksize) {
+            translated_asm.insert(cmpx_pos,
+              "v_mov_b32_e32 v0, v27 ; FIX5b: restore tid (corrupted by exp loop)\n");
+            cmpx_pos = translated_asm.find("v_cmpx_gt_i32 s6, v0\n");
+          }
           // Find the exec_hi clear that follows
           std::string after_cmpx = "s_mov_b32 exec_hi, 0\n";
           size_t hi_pos = translated_asm.find(after_cmpx, cmpx_pos);
           if (hi_pos != std::string::npos) {
             size_t insert_pos = hi_pos + after_cmpx.size();
-            // Widen exec to include threads 0..N-1
-            // Use v_cmp to compute N-thread mask, then OR into exec
             std::string fix =
-              "; FIX5: widen exec for softmax (need N threads, not just D)\n"
+              "; FIX5b: widen exec for softmax (need N threads, not just D)\n"
               "v_cmp_gt_u32_e64 s[0:1], s5, v0 ; s0 = threads where N > tid\n"
               "s_or_b32 exec_lo, exec_lo, s0   ; exec |= N-thread mask\n"
               "s_mov_b32 exec_hi, 0\n";
