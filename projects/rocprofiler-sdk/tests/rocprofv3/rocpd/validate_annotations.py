@@ -26,10 +26,16 @@ import sys
 import pytest
 
 
-def test_arg_annotations(pftrace_reader):
+def test_arg_annotations_exist(pftrace_reader):
     import rocprofiler_sdk.tests.rocprofv3 as rocprofv3
 
     rocprofv3.test_perfetto_arg_annotations(pftrace_reader)
+
+
+def test_event_id_annotations(pftrace_reader):
+    import rocprofiler_sdk.tests.rocprofv3 as rocprofv3
+
+    rocprofv3.test_perfetto_event_id_annotations(pftrace_reader)
 
 
 if __name__ == "__main__":
