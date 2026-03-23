@@ -437,7 +437,7 @@ TEST_F(JsonConfigTest, SafeStoiHandlesInvalidInput)
     EXPECT_EQ(safe_stoi("-1"), -1);
     EXPECT_FALSE(safe_stoi("abc").has_value());
     EXPECT_FALSE(safe_stoi("").has_value());
-    // Partial parses are rejected — "12.5" is not a valid integer
+    // Partial parses are rejected -"12.5" is not a valid integer
     EXPECT_FALSE(safe_stoi("12.5").has_value());
 }
 

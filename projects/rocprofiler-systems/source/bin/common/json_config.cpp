@@ -538,7 +538,7 @@ safe_stod(const std::string& s)
     if(result.ec != std::errc{} || result.ptr != s.data() + s.size()) return std::nullopt;
 #else
     // Fallback for older compilers (GCC <11, Clang <16).
-    // Note: std::stod is locale-sensitive — assumes C/POSIX locale.
+    // Note: std::stod is locale-sensitive -assumes C/POSIX locale.
     try
     {
         std::size_t pos = 0;

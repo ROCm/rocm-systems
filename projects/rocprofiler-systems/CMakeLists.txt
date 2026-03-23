@@ -531,6 +531,17 @@ install(
 )
 
 file(GLOB _preset_files "${PROJECT_SOURCE_DIR}/share/rocprofiler-systems/presets/*.json")
+
+# Copy presets to build tree so they are discoverable without install
+foreach(_preset_file ${_preset_files})
+    get_filename_component(_preset_name "${_preset_file}" NAME)
+    configure_file(
+        ${_preset_file}
+        ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/presets/${_preset_name}
+        COPYONLY
+    )
+endforeach()
+
 install(
     FILES ${_preset_files}
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/presets

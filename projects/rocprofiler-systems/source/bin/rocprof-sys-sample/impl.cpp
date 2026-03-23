@@ -218,8 +218,7 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
             std::cerr << std::flush;
         }
 
-        p.print_help();
-        exit(_pec);
+        rocprofsys::common_utils::dispatch_help(p, "sample", _pec);
     };
 
     auto _dl_libpath = path::realpath(path::get_internal_libpath("librocprof-sys-dl.so"));
@@ -297,7 +296,7 @@ PROFILING WORKFLOW:
     %{INDENT}%- ring_buffer : new data overwrites oldest data)";
 
     parser.set_use_color(true);
-    parser.enable_help();
+    parser.enable_help().count(-1).min_count(0).max_count(1).dtype("topic");
     parser.enable_version("rocprof-sys-sample", ROCPROFSYS_ARGPARSE_VERSION_INFO);
 
     auto _cols = std::get<0>(tim::utility::console::get_columns());

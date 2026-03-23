@@ -7,7 +7,9 @@
 
 #include <nlohmann/json.hpp>
 
+#include <iostream>
 #include <map>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <unordered_set>
@@ -177,6 +179,121 @@ void
 run_post_parse_validation(std::string_view tool_name, std::string_view preset_name,
                           bool gpu_enabled, bool rocm_enabled, bool cpu_enabled,
                           bool parallel_enabled, int verbose_level);
+
+// ============================================================================
+// Topic-based help system
+// ============================================================================
+
+using HelpGroupNames = std::vector<std::string>;
+using HelpTopicMap   = std::map<std::string, HelpGroupNames>;
+
+struct DomainHelpEntry
+{
+    std::string              description;
+    std::vector<std::string> flag_patterns;  // e.g. "--gpu", "--gpus", "-G"
+};
+
+using DomainHelpMap = std::map<std::string, DomainHelpEntry>;
+
+/**
+ * Returns the topic-to-group-name map for group-based help filtering.
+ */
+const HelpTopicMap&
+get_help_topic_map();
+
+/**
+ * Returns the domain-to-flags map for domain-based help filtering.
+ */
+const DomainHelpMap&
+get_domain_help_map();
+
+/**
+ * Print the compact help summary for bare --help.
+ */
+void
+print_compact_help(std::string_view tool_name, std::ostream& os = std::cout);
+
+/**
+ * Extract and print sections matching a group-based topic from captured help text.
+ * @return true if the topic was valid (even if no sections matched this tool)
+ */
+bool
+print_help_for_topic(const std::string& captured_help, std::string_view topic,
+                     std::string_view tool_name, std::ostream& os = std::cout);
+
+/**
+ * Extract and print argument lines matching a domain topic from captured help text.
+ * @return true if the domain was valid
+ */
+bool
+print_help_for_domain(const std::string& captured_help, std::string_view domain,
+                      std::string_view tool_name, std::ostream& os = std::cout);
+
+/**
+ * Capture full help text from the parser into a string.
+ */
+template <typename ParserT>
+std::string
+capture_help_text(ParserT& parser)
+{
+    std::ostringstream ss;
+    auto*              old = parser.set_ostream(&ss);
+    parser.print_help();
+    parser.set_ostream(old);
+    return ss.str();
+}
+
+/**
+ * Shared help dispatch: handles --help (compact), --help=<topic>, --help=all.
+ */
+template <typename ParserT>
+void
+dispatch_help(ParserT& parser, std::string_view tool_name, int exit_code)
+{
+    std::string topic;
+    if(parser.exists("help"))
+    {
+        try
+        {
+            topic = parser.template get<std::string>("help");
+        } catch(...)
+        {
+            // no value provided -bare --help
+        }
+    }
+
+    if(topic.empty())
+    {
+        print_compact_help(tool_name);
+    }
+    else if(topic == "all")
+    {
+        parser.print_help();
+    }
+    else
+    {
+        auto captured = capture_help_text(parser);
+
+        // Try domain-based first, then group-based
+        if(!print_help_for_domain(captured, topic, tool_name) &&
+           !print_help_for_topic(captured, topic, tool_name))
+        {
+            std::cerr << "[rocprof-sys] Unknown help topic '" << topic << "'.\n\n"
+                      << "Available topics (use --help=<topic>):\n";
+
+            std::cerr << "\n  Group topics:\n";
+            for(const auto& [t, _] : get_help_topic_map())
+                std::cerr << "    " << t << "\n";
+
+            std::cerr << "\n  Domain topics:\n";
+            for(const auto& [d, info] : get_domain_help_map())
+                std::cerr << "    " << d << "  - " << info.description << "\n";
+
+            std::cerr << "\n  --help=all  Show all options\n";
+        }
+    }
+    exit(exit_code);
+}
 
 }  // namespace common_utils
 }  // namespace rocprofsys

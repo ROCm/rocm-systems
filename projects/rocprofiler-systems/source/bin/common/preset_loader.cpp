@@ -143,7 +143,7 @@ load_preset_or_file(const std::string& name_or_path)
 {
     // If it looks like a path (contains '/' or ends with '.json'), load it directly as a
     // user-specified file. This intentionally allows loading arbitrary JSON config files
-    // from any location — it is a feature for custom configurations. Path traversal
+    // from any location -it is a feature for custom configurations. Path traversal
     // protection in load_preset() only applies to bare preset names resolved against the
     // preset directory.
     if(name_or_path.find('/') != std::string::npos ||

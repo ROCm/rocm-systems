@@ -1,7 +1,13 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-add_library(bin-common-tests OBJECT test_preset_loader.cpp test_json_config.cpp)
+add_library(
+    bin-common-tests
+    OBJECT
+    test_preset_loader.cpp
+    test_json_config.cpp
+    test_help_system.cpp
+)
 
 target_include_directories(bin-common-tests PRIVATE ${CMAKE_CURRENT_LIST_DIR}/../..)
 
