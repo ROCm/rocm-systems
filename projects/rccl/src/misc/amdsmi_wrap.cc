@@ -16,9 +16,13 @@ static int is_wsl2 = -1;
 #define AMDSMICHECK(cmd) do {                \
   amdsmi_status_t ret = cmd;                 \
   if( ret != AMDSMI_STATUS_SUCCESS ) {       \
-    const char *err;                         \
-    pfn_amdsmi_status_code_to_string(ret, &err);         \
-    ERROR("AMD SMI failure: %s at line: %d in file: %s", err, __LINE__, __FILE__);    \
+    if (pfn_amdsmi_status_code_to_string) {  \
+      const char *err;                       \
+      pfn_amdsmi_status_code_to_string(ret, &err); \
+      ERROR("AMD SMI failure: %s at line: %d in file: %s", err, __LINE__, __FILE__); \
+    } else {                                 \
+      ERROR("AMD SMI failure: status %d at line: %d in file: %s", (int)ret, __LINE__, __FILE__); \
+    }                                        \
     return ncclInternalError;                \
   }                                          \
 } while(false)
@@ -36,9 +40,13 @@ static int is_wsl2 = -1;
     return ncclInternalError; /* missing symbol is not a warned error */ \
   amdsmi_status_t ret = pfn_##name(__VA_ARGS__); \
   if( ret != AMDSMI_STATUS_SUCCESS ) {       \
-    const char *err;                         \
-    pfn_amdsmi_status_code_to_string(ret, &err); \
-    ERROR("AMD SMI failure: %s at line: %d in file: %s", err, __LINE__, __FILE__);    \
+    if (pfn_amdsmi_status_code_to_string) {  \
+      const char *err;                       \
+      pfn_amdsmi_status_code_to_string(ret, &err); \
+      ERROR("AMD SMI failure: %s at line: %d in file: %s", err, __LINE__, __FILE__); \
+    } else {                                 \
+      ERROR("AMD SMI failure: status %d at line: %d in file: %s", (int)ret, __LINE__, __FILE__); \
+    }                                        \
     return ncclInternalError;                \
   }                                          \
 } while(0)
@@ -50,9 +58,13 @@ static int is_wsl2 = -1;
   } \
   amdsmi_status_t ret = pfn_##name(__VA_ARGS__); \
   if( ret != AMDSMI_STATUS_SUCCESS ) {       \
-    const char *err;                         \
-    pfn_amdsmi_status_code_to_string(ret, &err); \
-    ERROR("AMD SMI failure: %s at line: %d in file: %s", err, __LINE__, __FILE__);    \
+    if (pfn_amdsmi_status_code_to_string) {  \
+      const char *err;                       \
+      pfn_amdsmi_status_code_to_string(ret, &err); \
+      ERROR("AMD SMI failure: %s at line: %d in file: %s", err, __LINE__, __FILE__); \
+    } else {                                 \
+      ERROR("AMD SMI failure: status %d at line: %d in file: %s", (int)ret, __LINE__, __FILE__); \
+    }                                        \
     result = ncclInternalError; \
     return ncclInternalError;                \
   }                                          \
