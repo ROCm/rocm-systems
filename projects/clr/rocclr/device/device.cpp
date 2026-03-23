@@ -697,8 +697,14 @@ bool Device::init() {
       }
       GPU_ENABLE_PAL = 1;
     } else {
-      // ROC initialization was successful, force direct dispatch
-      AMD_DIRECT_DISPATCH = true;
+      // ROC initialization successful, enable direct dispatch
+      if (flagIsDefault(AMD_DIRECT_DISPATCH)) {
+#if defined(__clang__) && __has_feature(address_sanitizer)
+        AMD_DIRECT_DISPATCH = false;
+#else
+        AMD_DIRECT_DISPATCH = true;
+#endif
+      }
       // Disable PAL path
       GPU_ENABLE_PAL = 0;
     }
