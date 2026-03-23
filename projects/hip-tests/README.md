@@ -115,7 +115,7 @@ make -j$(nproc) Catch2
 export DEPS_PATH=$PWD/_deps
 ```
 
-We now use the Catch2 we just build to link to the tests.
+We now use the Catch2 library we just built to link against the tests.
 
 For standalone tests:
 
