@@ -623,7 +623,7 @@ template <typename T> void Memcpy3DAsync<T>::simple_Memcpy3DAsync() {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE(Unit_hipMemcpy3DAsync_multiDevice_Negative) {
+HIP_TEST_CASE(Unit_hipMemcpy3DAsync_multiDevice_Negative) {
   CHECK_IMAGE_SUPPORT
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
@@ -648,7 +648,7 @@ TEST_CASE(Unit_hipMemcpy3DAsync_multiDevice_Negative) {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE(Unit_hipMemcpy3DAsync_multiDevice_DiffStream) {
+HIP_TEST_CASE(Unit_hipMemcpy3DAsync_multiDevice_DiffStream) {
   CHECK_IMAGE_SUPPORT
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));

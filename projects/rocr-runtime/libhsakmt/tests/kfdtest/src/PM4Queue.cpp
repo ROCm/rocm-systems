@@ -78,7 +78,7 @@ void PM4Queue::Wait4PacketConsumption(HsaEvent *event, unsigned int timeOut) {
                     event->EventId,
                     true));
 
-        EXPECT_SUCCESS(hsaKmtWaitOnEvent(event, timeOut));
+        EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtWaitOnEvent, m_KFDContext, event, timeOut));
     } else {
         BaseQueue::Wait4PacketConsumption(NULL, timeOut);
     }

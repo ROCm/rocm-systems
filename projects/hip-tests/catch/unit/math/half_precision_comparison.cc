@@ -24,7 +24,7 @@
     }                                                                                              \
   }                                                                                                \
                                                                                                    \
-  TEST_CASE(Unit_Device_##func_name##_Accuracy_Positive) {                                      \
+  HIP_TEST_CASE(Unit_Device_##func_name##_Accuracy_Positive) {                                     \
     UnaryHalfPrecisionTest(func_name##_kernel, ref_func, EqValidatorBuilderFactory<bool>());       \
   }
 
@@ -109,7 +109,7 @@ MATH_UNARY_HP_TEST_DEF_IMPL(__hisnan2, __hisnan2_ref, EqValidatorBuilderFactory<
     }                                                                                              \
   }                                                                                                \
                                                                                                    \
-  TEST_CASE(Unit_Device_##func_name##_Accuracy_Positive) {                                      \
+  HIP_TEST_CASE(Unit_Device_##func_name##_Accuracy_Positive) {                                     \
     BinaryFloatingPointTest(func_name##_kernel, ref_func<nan_value, RT>,                           \
                             EqValidatorBuilderFactory<RT>());                                      \
   }

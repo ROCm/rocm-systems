@@ -49,6 +49,7 @@ option(USE_WF_COAL "Enable wavefront message coalescing" OFF)
 option(USE_HEAP_DEVICE_FINEGRAIN "Heap uses GPU memory in finegrain mode" ON)
 option(USE_HEAP_DEVICE_UNCACHED "Heap uses GPU memory in uncached mode" OFF)
 option(USE_HEAP_DEVICE_COARSEGRAIN "Heap uses GPU memory in coarsegrain mode" OFF)
+option(USE_HEAP_DEVICE_VMM_POSIX "Heap uses GPU memory with VMM and POSIX FD IPC (requires ROCm 7.0+)" OFF)
 option(USE_FUNC_CALL "Force compiler to use function calls on library API" OFF)
 option(USE_SHARED_CTX "Request support for shared ctx between WG" OFF)
 option(USE_SINGLE_NODE "Enable single node support only." OFF)
@@ -94,6 +95,14 @@ include(ROCMCheckTargetIds)
 
 rocm_setup_version(VERSION ${VERSION_STRING})
 
+#############################################################################
+# VALIDATE VMM POSIX ALLOCATOR OPTION
+#############################################################################
+if(USE_HEAP_DEVICE_VMM_POSIX)
+  if(${ROCM_MAJOR_VERSION} LESS 7)
+    message(FATAL_ERROR "USE_HEAP_DEVICE_VMM_POSIX requires ROCm 7.0 or newer. Current ROCm version: ${ROCM_MAJOR_VERSION}.${ROCM_MINOR_VERSION}")
+  endif()
+endif()
 
 #############################################################################
 # SET GPU ARCHITECTURES
@@ -177,6 +186,18 @@ if (NOT BUILD_TESTS_ONLY)
   set(THREADS_PREFER_PTHREAD_FLAG TRUE)
   find_package(Threads REQUIRED)
 
+  # Check if std::filesystem requires linking stdc++fs
+  include(CheckCXXSourceCompiles)
+  set(CMAKE_REQUIRED_QUIET TRUE)
+  check_cxx_source_compiles("
+    #include <filesystem>
+    int main() {
+      auto p = std::filesystem::current_path();
+      return 0;
+    }
+  " FILESYSTEM_NO_LINK_NEEDED)
+  set(CMAKE_REQUIRED_QUIET FALSE)
+
   if(${ROCM_MAJOR_VERSION} GREATER_EQUAL 6 )
     set(HAVE_DEVICE_MALLOC_UNCACHED ON)
   elseif (${ROCM_MAJOR_VERSION} EQUAL 5 AND ${ROCM_MINOR_VERSION} GREATER_EQUAL 5)
@@ -216,6 +237,7 @@ if (NOT BUILD_TESTS_ONLY)
       dl
       hsa-runtime64::hsa-runtime64
       -fgpu-rdc
+      $<$<NOT:$<BOOL:${FILESYSTEM_NO_LINK_NEEDED}>>:stdc++fs>
   )
 
   if(${ROCM_MAJOR_VERSION} LESS 7)

@@ -44,7 +44,7 @@ static constexpr auto ROWS{6};
  *  - HIP_VERSION >= 6.1
  */
 
-TEMPLATE_TEST_CASE(Unit_hipMemcpy2DAsync_Host_N_PinnedMem, int, float, double) {
+HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpy2DAsync_Host_N_PinnedMem, int, float, double) {
   CHECK_IMAGE_SUPPORT
   // 1 refers to pinned host memory
   auto mem_type = GENERATE(0, 1);
@@ -120,8 +120,7 @@ TEMPLATE_TEST_CASE(Unit_hipMemcpy2DAsync_Host_N_PinnedMem, int, float, double) {
   HIP_CHECK(hipStreamDestroy(stream));
 }
 
-TEMPLATE_TEST_CASE("Unit_hipMemcpy2DAsync_multiDevice_StreamOnDiffDevice",
-                   "[multigpu]", int, float, double) {
+HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpy2DAsync_multiDevice_StreamOnDiffDevice, int, float, double) {
   CHECK_IMAGE_SUPPORT
   auto mem_type = GENERATE(0, 1);
   int numDevices = 0;
@@ -253,7 +252,7 @@ static void hipMemcpy2DAsync_Basic_Size_Test(size_t inc) {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE(Unit_hipMemcpy2DAsync_multiDevice_Basic_Size_Test) {
+HIP_TEST_CASE(Unit_hipMemcpy2DAsync_multiDevice_Basic_Size_Test) {
   CHECK_IMAGE_SUPPORT
   size_t input = 1 << 20;
   int numDevices = 0;

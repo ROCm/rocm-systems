@@ -101,9 +101,9 @@ void KFDLocalMemoryTest::BasicTest(int gpuNode) {
 
     ASSERT_SUCCESS_GPU(m_pAsm->RunAssembleBuf(CopyDwordIsa, isaBuffer.As<char*>()), gpuNode);
 
-    ASSERT_SUCCESS_GPU(hsaKmtMapMemoryToGPUNodes(srcLocalBuffer.As<void*>(), srcLocalBuffer.Size(), &AlternateVAGPU,
+    ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes, m_hsakmt_current_ctx, srcLocalBuffer.As<void*>(), srcLocalBuffer.Size(), &AlternateVAGPU,
                        mapFlags, 1, reinterpret_cast<HSAuint32 *>(&gpuNode)), gpuNode);
-    ASSERT_SUCCESS_GPU(hsaKmtMapMemoryToGPUNodes(dstLocalBuffer.As<void*>(), dstLocalBuffer.Size(), &AlternateVAGPU,
+    ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes, m_hsakmt_current_ctx, dstLocalBuffer.As<void*>(), dstLocalBuffer.Size(), &AlternateVAGPU,
                        mapFlags, 1, reinterpret_cast<HSAuint32 *>(&gpuNode)), gpuNode);
 
     ASSERT_SUCCESS_GPU(queue.Create(gpuNode), gpuNode);
@@ -125,8 +125,8 @@ void KFDLocalMemoryTest::BasicTest(int gpuNode) {
 
     EXPECT_SUCCESS_GPU(queue.Destroy(), gpuNode);
 
-    ASSERT_SUCCESS_GPU(hsaKmtUnmapMemoryToGPU(srcLocalBuffer.As<void*>()), gpuNode);
-    ASSERT_SUCCESS_GPU(hsaKmtUnmapMemoryToGPU(dstLocalBuffer.As<void*>()), gpuNode);
+    ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, m_hsakmt_current_ctx, srcLocalBuffer.As<void*>()), gpuNode);
+    ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, m_hsakmt_current_ctx, dstLocalBuffer.As<void*>()), gpuNode);
     EXPECT_EQ_GPU(destSysBuffer.As<unsigned int*>()[0], 0x01010101, gpuNode);
 
 }
@@ -166,7 +166,7 @@ void KFDLocalMemoryTest::VerifyContentsAfterUnmapAndMap(int gpuNode)
     queue.SetSkipWaitConsump(0);
 
     if (!hsakmt_is_dgpu())
-        ASSERT_SUCCESS_GPU(hsaKmtMapMemoryToGPUNodes(LocalBuffer.As<void*>(), LocalBuffer.Size(), &AlternateVAGPU,
+        ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes, m_hsakmt_current_ctx, LocalBuffer.As<void*>(), LocalBuffer.Size(), &AlternateVAGPU,
                            mapFlags, 1, reinterpret_cast<HSAuint32 *>(&gpuNode)), gpuNode);
 
     Dispatch dispatch(isaBuffer);
@@ -175,8 +175,8 @@ void KFDLocalMemoryTest::VerifyContentsAfterUnmapAndMap(int gpuNode)
     dispatch.Submit(queue);
     dispatch.Sync(g_TestTimeOut);
 
-    EXPECT_SUCCESS_GPU(hsaKmtUnmapMemoryToGPU(LocalBuffer.As<void*>()), gpuNode);
-    EXPECT_SUCCESS_GPU(hsaKmtMapMemoryToGPUNodes(LocalBuffer.As<void*>(), LocalBuffer.Size(), &AlternateVAGPU,
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, m_hsakmt_current_ctx, LocalBuffer.As<void*>()), gpuNode);
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes, m_hsakmt_current_ctx, LocalBuffer.As<void*>(), LocalBuffer.Size(), &AlternateVAGPU,
                        mapFlags, 1, reinterpret_cast<HSAuint32 *>(&gpuNode)), gpuNode);
 
     dispatch.SetArgs(LocalBuffer.As<void*>(), SysBufferB.As<void*>());
@@ -186,7 +186,7 @@ void KFDLocalMemoryTest::VerifyContentsAfterUnmapAndMap(int gpuNode)
     EXPECT_SUCCESS_GPU(queue.Destroy(), gpuNode);
     EXPECT_EQ_GPU(SysBufferB.As<unsigned int*>()[0], 0x01010101, gpuNode);
     if (!hsakmt_is_dgpu())
-        EXPECT_SUCCESS_GPU(hsaKmtUnmapMemoryToGPU(LocalBuffer.As<void*>()), gpuNode);
+        EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, m_hsakmt_current_ctx, LocalBuffer.As<void*>()), gpuNode);
 }
 
 TEST_F(KFDLocalMemoryTest, VerifyContentsAfterUnmapAndMap) {
@@ -355,7 +355,7 @@ void KFDLocalMemoryTest::Fragmentation(int gpuNode){
         LOG() << std::dec << "Trying to allocate " << pages[order].nPages
               << " order " << order << " blocks " << std::endl;
         for (p = 0; p < pages[order].nPages; p++) {
-            status = hsaKmtAllocMemory(gpuNode, size,
+            status = HSAKMT_CALL(hsaKmtAllocMemory, m_hsakmt_current_ctx, gpuNode, size,
                                        memFlags, &pages[order].pointers[p]);
             if (status != HSAKMT_STATUS_SUCCESS) {
                 EXPECT_EQ_GPU(HSAKMT_STATUS_NO_MEMORY, status, gpuNode);
@@ -367,10 +367,10 @@ void KFDLocalMemoryTest::Fragmentation(int gpuNode){
                                        + size - sizeof(unsigned));
             sysBuffer.As<unsigned *>()[0] = ++value;
 
-            status = hsaKmtMapMemoryToGPUNodes(pages[order].pointers[p], size, NULL,
+            status = HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes, m_hsakmt_current_ctx, pages[order].pointers[p], size, NULL,
                                mapFlags, 1, reinterpret_cast<HSAuint32 *>(&gpuNode));
             if (status != HSAKMT_STATUS_SUCCESS) {
-                ASSERT_SUCCESS_GPU(hsaKmtFreeMemory(pages[order].pointers[p],
+                ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtFreeMemory, m_hsakmt_current_ctx, pages[order].pointers[p],
                                                 size), gpuNode);
                 pages[order].nPages = p;
                 break;
@@ -392,7 +392,7 @@ void KFDLocalMemoryTest::Fragmentation(int gpuNode){
             dispatch3.Sync(g_TestTimeOut);
             EXPECT_EQ_GPU(value, sysBuffer.As<unsigned *>()[1], gpuNode);
 
-            EXPECT_SUCCESS_GPU(hsaKmtUnmapMemoryToGPU(pages[order].pointers[p]), gpuNode);
+            EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, m_hsakmt_current_ctx, pages[order].pointers[p]), gpuNode);
         }
         LOG() << "  Got " << pages[order].nPages
               << ", end of last block addr: "
@@ -408,7 +408,7 @@ void KFDLocalMemoryTest::Fragmentation(int gpuNode){
                   << o << " block starting with " << offset << std::endl;
             for (p = offset; p < pages[o].nPages; p += step) {
                 ASSERT_NE_GPU((void **)NULL, pages[o].pointers[p], gpuNode);
-                EXPECT_SUCCESS_GPU(hsaKmtFreeMemory(pages[o].pointers[p], size), gpuNode);
+                EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtFreeMemory, m_hsakmt_current_ctx, pages[o].pointers[p], size), gpuNode);
                 pages[o].pointers[p] = NULL;
             }
         }
@@ -422,7 +422,7 @@ void KFDLocalMemoryTest::Fragmentation(int gpuNode){
         size = (HSAuint64)(1 << order) * pageSize;
         for (p = 0; p < pages[order].nPages; p++)
             if (pages[order].pointers[p] != NULL)
-                EXPECT_SUCCESS_GPU(hsaKmtFreeMemory(pages[order].pointers[p], size), gpuNode);
+                EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtFreeMemory, m_hsakmt_current_ctx, pages[order].pointers[p], size), gpuNode);
 
         delete[] pages[order].pointers;
     }
@@ -557,32 +557,32 @@ TEST_F(KFDLocalMemoryTest, MapVramToGPUNodesTest) {
 
     HsaMemMapFlags mapFlags = {0};
 
-    EXPECT_SUCCESS(hsaKmtAllocMemory(nodes[1], PAGE_SIZE, memFlags, &shared_addr));
-    EXPECT_SUCCESS(hsaKmtMapMemoryToGPUNodes(shared_addr, PAGE_SIZE, NULL, mapFlags, 2, nodes));
-    EXPECT_SUCCESS(hsaKmtQueryPointerInfo(shared_addr, &info));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtAllocMemory, g_baseTest->m_hsakmt_current_ctx, nodes[1], PAGE_SIZE, memFlags, &shared_addr));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes, g_baseTest->m_hsakmt_current_ctx, shared_addr, PAGE_SIZE, NULL, mapFlags, 2, nodes));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtQueryPointerInfo, g_baseTest->m_hsakmt_current_ctx, shared_addr, &info));
     EXPECT_EQ(info.NMappedNodes, 2);
 
-    EXPECT_SUCCESS(hsaKmtMapMemoryToGPUNodes(shared_addr, PAGE_SIZE, NULL, mapFlags, 1, &nodes[0]));
-    EXPECT_SUCCESS(hsaKmtQueryPointerInfo(shared_addr, &info));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes, g_baseTest->m_hsakmt_current_ctx, shared_addr, PAGE_SIZE, NULL, mapFlags, 1, &nodes[0]));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtQueryPointerInfo, g_baseTest->m_hsakmt_current_ctx, shared_addr, &info));
     EXPECT_EQ(info.NMappedNodes, 1);
     EXPECT_EQ(info.MappedNodes[0], nodes[0]);
 
-    EXPECT_SUCCESS(hsaKmtMapMemoryToGPUNodes(shared_addr, PAGE_SIZE, NULL, mapFlags, 1, &nodes[1]));
-    EXPECT_SUCCESS(hsaKmtQueryPointerInfo(shared_addr, &info));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes, g_baseTest->m_hsakmt_current_ctx, shared_addr, PAGE_SIZE, NULL, mapFlags, 1, &nodes[1]));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtQueryPointerInfo, g_baseTest->m_hsakmt_current_ctx, shared_addr, &info));
     EXPECT_EQ(info.NMappedNodes, 1);
     EXPECT_EQ(info.MappedNodes[0], nodes[1]);
 
-    EXPECT_SUCCESS(hsaKmtUnmapMemoryToGPU(shared_addr));
-    EXPECT_SUCCESS(hsaKmtQueryPointerInfo(shared_addr, &info));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, g_baseTest->m_hsakmt_current_ctx, shared_addr));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtQueryPointerInfo, g_baseTest->m_hsakmt_current_ctx, shared_addr, &info));
     EXPECT_EQ(info.NMappedNodes, 0);
 
-    EXPECT_SUCCESS(hsaKmtMapMemoryToGPUNodes(shared_addr, PAGE_SIZE, NULL, mapFlags, 1, &nodes[0]));
-    EXPECT_SUCCESS(hsaKmtQueryPointerInfo(shared_addr, &info));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes, g_baseTest->m_hsakmt_current_ctx, shared_addr, PAGE_SIZE, NULL, mapFlags, 1, &nodes[0]));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtQueryPointerInfo, g_baseTest->m_hsakmt_current_ctx, shared_addr, &info));
     EXPECT_EQ(info.NMappedNodes, 1);
     EXPECT_EQ(info.MappedNodes[0], nodes[0]);
 
-    EXPECT_SUCCESS(hsaKmtUnmapMemoryToGPU(shared_addr));
-    EXPECT_SUCCESS(hsaKmtFreeMemory(shared_addr, PAGE_SIZE));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, g_baseTest->m_hsakmt_current_ctx, shared_addr));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtFreeMemory, g_baseTest->m_hsakmt_current_ctx, shared_addr, PAGE_SIZE));
 
     TEST_END
 }

@@ -55,7 +55,6 @@ import yaml
 
 import config
 from utils import rocpd_data
-from utils.kernel_name_shortener import kernel_name_shortener
 from utils.logger import (
     console_debug,
     console_error,
@@ -1550,40 +1549,29 @@ def build_call_trees(
     return call_trees
 
 
-def write_torch_trace_operator_csvs(
+def write_torch_trace_consolidated_csv(
     consolidated_df: pd.DataFrame,
     torch_trace_path: Path,
 ) -> None:
-    """Write one consolidated torch trace CSV per operator."""
-    grouped = consolidated_df.groupby("Operator_Name")
-    for operator_name, group in grouped:
-        last_operator = operator_name.split("/")[-1]
-        sanitized_operator_name = last_operator.replace("torch.", "").replace(".", "_")
-        output_file = f"{torch_trace_path}/{sanitized_operator_name}.csv"
-        if Path(output_file).is_file():
-            group.to_csv(output_file, mode="a", header=False, index=False)
-            console_log(f"Appended trace to existing file {output_file}")
-        else:
-            group.to_csv(output_file, index=False)
-            console_log(f"Saved consolidated trace to {output_file}")
+    """Write the consolidated torch trace DataFrame to ``consolidated.csv``."""
+    output_file = torch_trace_path / "consolidated.csv"
+    consolidated_df.sort_values("Operator_Name", ignore_index=True).to_csv(
+        output_file, index=False
+    )
+    console_log(f"Saved consolidated trace to {output_file}")
 
 
 def build_call_trees_with_kernel_ids(
     consolidated_df: pd.DataFrame,
     kernel_top_df: pd.DataFrame,
-    kernel_verbose: int = 0,
 ) -> dict[str, CallTreeNode]:
     """Attach Kernel_ID values and build call trees from consolidated trace rows."""
     kernel_name_to_id = {
         str(row["Kernel_Name"]).strip(): idx for idx, row in kernel_top_df.iterrows()
     }
-    shortened = kernel_name_shortener(
-        pd.DataFrame({"Kernel_Name": consolidated_df["Kernel_Name"]}),
-        kernel_verbose,
-    )
     consolidated_with_ids = consolidated_df.copy()
     consolidated_with_ids["Kernel_ID"] = (
-        shortened["Kernel_Name"].str.strip().map(kernel_name_to_id)
+        consolidated_with_ids["Kernel_Name"].str.strip().map(kernel_name_to_id)
     )
     return build_call_trees(consolidated_with_ids)
 
@@ -1621,10 +1609,7 @@ def process_torch_trace_output(
             "No marker files with corresponding counter files found. "
             "Ensure profiling was done with '--torch-trace'."
         )
-        raise ValueError(
-            "No marker files with corresponding counter files found. "
-            "Ensure profiling was done with '--torch-trace'."
-        )
+        return pd.DataFrame(), Path(f"{workload_dir}/torch_trace")
 
     torch_trace_path = Path(f"{workload_dir}/torch_trace")
     if torch_trace_path.exists():
@@ -1767,7 +1752,7 @@ def gen_sysinfo(
     df["workload_name"] = workload_name
 
     blocks = ["SQ", "LDS", "SQC", "TA", "TD", "TCP", "TCC", "SPI", "CPC", "CPF"]
-    if hasattr(soc, "roofline_obj") and (not skip_roof):
+    if not skip_roof:
         blocks.append("roofline")
     df["ip_blocks"] = "|".join(blocks)
 
@@ -1794,17 +1779,30 @@ def get_submodules(package_name: str) -> list[str]:
 
 def is_workload_empty(path: str) -> None:
     """Peek workload directory to verify valid profiling output"""
-    pmc_perf_path = Path(path) / "pmc_perf.csv"
+    workload_dir = Path(path)
+    pmc_perf_path = workload_dir / "pmc_perf.csv"
+
+    # Find PMC data files (merged or separate)
     if pmc_perf_path.is_file():
-        temp_df = pd.read_csv(pmc_perf_path)
+        files_to_check = [pmc_perf_path]
+    else:
+        pmc_files = list(workload_dir.glob("pmc_perf_*.csv"))
+        results_files = list(workload_dir.glob("results_*.csv"))
+        files_to_check = pmc_files if pmc_files else results_files
+
+    if not files_to_check:
+        console_error("analysis", "No profiling data found.")
+        return
+
+    # Validate files are not empty
+    for file_path in files_to_check:
+        temp_df = pd.read_csv(file_path)
         if temp_df.dropna().empty:
             console_error(
                 "profiling",
-                f"Found empty cells in {pmc_perf_path}.\n"
-                "Profiling data could be corrupt.",
+                f"Found empty cells in {file_path}.\nProfiling data could be corrupt.",
             )
-    else:
-        console_error("analysis", "No profiling data found.")
+            break
 
 
 def print_status(msg: str) -> None:

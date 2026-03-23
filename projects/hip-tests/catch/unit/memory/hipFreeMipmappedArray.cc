@@ -20,7 +20,7 @@
  * 4. Call hipFreeMipmappedArray twice on the same pointer and check that the implementation handles
  * the second call correctly.
  */
-TEMPLATE_TEST_CASE(Unit_hipFreeMipmappedArrayImplicitSyncArray, char, float) {
+HIP_TEMPLATE_TEST_CASE(Unit_hipFreeMipmappedArrayImplicitSyncArray, char, float) {
   hipMipmappedArray_t arrayPtr{};
   hipExtent extent{};
   hipChannelFormatDesc desc = hipCreateChannelDesc<TestType>();
@@ -68,7 +68,7 @@ TEMPLATE_TEST_CASE(Unit_hipFreeMipmappedArrayImplicitSyncArray, char, float) {
   }
 }
 
-TEST_CASE(Unit_hipFreeMipmappedArray_Negative_Nullptr) {
+HIP_TEST_CASE(Unit_hipFreeMipmappedArray_Negative_Nullptr) {
 #if HT_AMD
   HIP_CHECK_ERROR(hipFreeMipmappedArray(nullptr), hipErrorInvalidValue);
 #else
@@ -76,7 +76,7 @@ TEST_CASE(Unit_hipFreeMipmappedArray_Negative_Nullptr) {
 #endif
 }
 
-TEMPLATE_TEST_CASE(Unit_hipFreeMipmappedArrayMultiTArray, char, int) {
+HIP_TEMPLATE_TEST_CASE(Unit_hipFreeMipmappedArrayMultiTArray, char, int) {
   constexpr size_t numAllocs = 10;
   std::vector<std::thread> threads;
   std::vector<hipMipmappedArray_t> ptrs(numAllocs);

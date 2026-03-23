@@ -340,7 +340,7 @@ void hipPerfMemset::run3D(unsigned int test, T memsetval, enum MemsetType type, 
  *  - HIP_VERSION >= 5.6
  */
 
-TEST_CASE(Perf_hipPerfMemset_test) {
+HIP_TEST_CASE(Perf_hipPerfMemset_test) {
   hipPerfMemset hipPerfMemset;
 
   int deviceId = 0;
