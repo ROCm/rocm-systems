@@ -646,6 +646,38 @@
             free(hist);
           }
 
+          // ---- Buffer dump on error (NCCL_TESTS_DUMP_DIR) ----
+          static const char* dumpDir = nullptr;
+          static int dumpDirChecked = 0;
+          if (!dumpDirChecked) {
+            dumpDir = getenv("NCCL_TESTS_DUMP_DIR");
+            dumpDirChecked = 1;
+          }
+          if (dumpDir) {
+            char path[2048];
+            FILE* fp;
+            snprintf(path, sizeof(path), "%s/allgather_recv_rank%d.bin", dumpDir, rank);
+            fp = fopen(path, "wb");
+            if (fp) { fwrite(dataHost, 1, args->expectedBytes, fp); fclose(fp); }
+            snprintf(path, sizeof(path), "%s/allgather_expected_rank%d.bin", dumpDir, rank);
+            fp = fopen(path, "wb");
+            if (fp) { fwrite(expectedHost, 1, args->expectedBytes, fp); fclose(fp); }
+
+            float *sendHost = (float*)malloc(args->sendBytes);
+            if (sendHost) {
+              void* srcBuf = in_place
+                  ? ((char*)args->recvbuffs[i] + rank * args->sendBytes)
+                  : args->sendbuffs[i];
+              cudaMemcpy(sendHost, srcBuf, args->sendBytes, cudaMemcpyDeviceToHost);
+              snprintf(path, sizeof(path), "%s/allgather_send_rank%d.bin", dumpDir, rank);
+              fp = fopen(path, "wb");
+              if (fp) { fwrite(sendHost, 1, args->sendBytes, fp); fclose(fp); }
+              free(sendHost);
+            }
+            printf("  Buffer dumps written to %s/allgather_{send,recv,expected}_rank%d.bin\n",
+                   dumpDir, rank);
+          }
+
         } else {
           printf("  ERROR: malloc failed, cannot report details\n");
         }
