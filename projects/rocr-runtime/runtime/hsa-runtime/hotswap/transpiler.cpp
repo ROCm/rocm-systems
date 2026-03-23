@@ -3675,40 +3675,107 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
           }
         }
       }
+      // Fix 6: force dot-product tree entry in multihead kernel.
+      // Root cause: s25 (tree gate) is set by s_cselect_b32 s25, -1, 0 based on SCC.
+      // In attn_forward, SCC at that point comes from s_bfe_u32 (blockSize/2 > 0 → SCC=1
+      // → s25=-1 → tree always entered). In multihead, six s_add_u32/s_addc_u32
+      // address computations follow the s_bfe and clobber SCC with carry-out=0, so
+      // s25=0, making s_andn2_b32 vcc_lo,exec_lo,s25 = exec_lo (nonzero) → s_cbranch_vccz
+      // falls through to .L_br9 (direct store, SKIPPING the tree reduction entirely).
+      // Fix: replace the s_andn2 with s_mov_b32 vcc_lo, 0 to unconditionally enter the
+      // tree. The tree self-terminates when stride=0, so this is safe for any N.
+      if (has_s23_blocksize) {
+        auto replaceFirst = [](std::string& s, const std::string& from, const std::string& to) {
+          size_t pos = s.find(from);
+          if (pos != std::string::npos) s.replace(pos, from.size(), to);
+        };
+        replaceFirst(translated_asm,
+          "s_andn2_b32 vcc_lo, exec_lo, s25\n",
+          "s_mov_b32 vcc_lo, 0 ; FIX6: force tree entry (s25 clobbered by s_addc SCC)\n");
+      }
     }
     // Debug: HSA_HOTSWAP_LDS_DUMP=1 injects LDS→global memory dumps at key points.
     // Thread 0 reads LDS values and writes them to the output buffer (s[2:3] = dO).
     // The output buffer will contain debug values instead of actual attention results.
-    // Dump layout: dO[0..3] = LDS[0..3] after outer loop (scaled dot products)
-    //              dO[4..7] = LDS[0..3] after find-max + exp (exp values)
-    //              dO[8]    = max value from find-max
-    //              dO[9..12] = LDS[0..3] after normalize (softmax weights)
+    // Dump layout (multihead): dO[0..N-1] = S[0..N-1] scaled dot products at .L_br3.
+    //   The dot products are stored at LDS[0..N*4-1] by the tree's .L_br9 store path
+    //   (LDS[i*4] = scaled Q·K_i). Thread 0 reads and writes all N values.
+    //   s[2:3] is loaded from kernarg+0x18 (dO pointer) at .L_br3; this is available
+    //   after the s_waitcnt. s5 = N (number of keys), used for the loop bound.
+    //   Clobbers: v28/v29 (temp VGPRs above kernel range), s34/s35 (scratch SGPRs).
     if (std::getenv("HSA_HOTSWAP_LDS_DUMP") && stats->total_instructions > 400 &&
         stats->total_instructions < 600 &&
         translated_asm.find(".L_br28:") != std::string::npos) {
-      // (s3+v1 fix moved to main fix block above)
-      // Minimal dump: just LDS[0] and LDS[4] (the two dot products) at .L_br3 entry.
-      // Writes to dO[0] and dO[4]. Only 10 instructions = ~40 bytes.
-      {
+      // For multihead: Fix 5a inserts "v_mov_b32_e32 v27, v0" at .L_br3 before the
+      // s_load_dwordx2 instructions. Match the updated pattern.
+      // The multihead kernel loads two pointers: s[14:15] and s[2:3].
+      // s[2:3] = dO output buffer (from kernarg+0x18).
+      // The dump runs after s_waitcnt so both loads have completed.
+      // Only thread 0 performs the dump (exec masked to bit 0).
+      // s5 = N (number of keys) — use it to dump N values from LDS[0..N*4-1].
+      // Redeclare has_s23_blocksize (defined in prior fix block, now out of scope).
+      const bool has_s23_blocksize_dump =
+        translated_asm.find("s_and_b32 s23, s24, 0xffff") != std::string::npos;
+      if (has_s23_blocksize_dump) {
+        // Multihead pattern (after Fix 5a inserted v_mov_b32_e32 v27, v0 at .L_br3)
+        // The s_load_dwordx2 s[2:3], s[0:1], 0x18 loads the dO output pointer.
+        // After s_waitcnt, s[2:3] = dO base address and s5 = N (keys count).
+        // We dump LDS[0..N*4-1] = S[0..N-1] scaled dot products.
+        // LDS layout: LDS[i*4] = S[i] (stored by .L_br9 thread-0 store path).
+        // Strategy: restrict exec to thread 0, loop N times, read+write, then s_endpgm.
+        // Scratch SGPRs: s34 (loop counter i), s35 (byte offset = i*4).
+        // Scratch VGPRs: v28 (LDS addr and dO offset), v29 (value read from LDS).
+        std::string target =
+          "s_load_dwordx2 s[2:3], s[0:1], 0x18\n"
+          "s_waitcnt vmcnt(0) lgkmcnt(0) expcnt(0)\n";
+        size_t pos = translated_asm.find(target);
+        if (pos != std::string::npos) {
+          size_t insert_pos = pos + target.size();
+          // Use s34/s35 as scratch SGPRs (above all kernel registers s0..s30 and
+          // kernarg save pair s[32:33]). Use v28/v29 as scratch VGPRs (above the
+          // transpiler save regs: v24=wg_id_x, v25=wg_id_y used by prologue, and
+          // v27 used by Fix 5a for tid save).
+          std::string dump =
+            "; === LDS DUMP: S[0..N-1] scaled dot products ===\n"
+            "s_mov_b32 exec_lo, 1  ; restrict to thread 0 only\n"
+            "s_mov_b32 exec_hi, 0\n"
+            "s_mov_b32 s34, 0      ; loop counter i = 0 (s34 is above all kernel regs)\n"
+            ".L_lds_dump_loop:\n"
+            "s_cmp_lt_u32 s34, s5  ; i < N?\n"
+            "s_cbranch_scc0 .L_lds_dump_end\n"
+            "s_lshl_b32 s35, s34, 2  ; byte_offset = i * 4\n"
+            "v_mov_b32_e32 v28, s35  ; LDS read addr (v28 is above all kernel VGPRs)\n"
+            "ds_read_b32 v29, v28\n"
+            "s_waitcnt lgkmcnt(0)\n"
+            "global_store_dword v28, v29, s[2:3]\n"
+            "s_add_u32 s34, s34, 1  ; i++\n"
+            "s_branch .L_lds_dump_loop\n"
+            ".L_lds_dump_end:\n"
+            "s_waitcnt vmcnt(0)\n"
+            "s_endpgm ; terminate after dump (output is LDS values, not attention)\n"
+            "; === END DUMP ===\n";
+          translated_asm.insert(insert_pos, dump);
+        }
+      } else {
+        // attn_forward pattern (unchanged from before)
         std::string target = ".L_br3:\ns_load_dwordx2 s[2:3], s[0:1], 0x0\n"
                              "s_waitcnt vmcnt(0) lgkmcnt(0) expcnt(0)\n";
         size_t pos = translated_asm.find(target);
         if (pos != std::string::npos) {
           size_t insert_pos = pos + target.size();
-          // Read LDS[0], LDS[4], and v1 (scale factor)
           std::string dump =
             "; === LDS DUMP: dot products + v1 ===\n"
             "v_mov_b32_e32 v26, 0\n"
-            "ds_read_b32 v26, v26\n"          // v26 = LDS[0]
+            "ds_read_b32 v26, v26\n"
             "v_mov_b32_e32 v27, 4\n"
-            "ds_read_b32 v27, v27\n"          // v27 = LDS[4]
+            "ds_read_b32 v27, v27\n"
             "s_waitcnt lgkmcnt(0)\n"
             "v_mov_b32_e32 v28, 0\n"
-            "global_store_dword v28, v26, s[2:3]\n"  // dO[0] = LDS[0]
+            "global_store_dword v28, v26, s[2:3]\n"
             "v_mov_b32_e32 v28, 4\n"
-            "global_store_dword v28, v27, s[2:3]\n"  // dO[4] = LDS[4]
+            "global_store_dword v28, v27, s[2:3]\n"
             "v_mov_b32_e32 v28, 8\n"
-            "global_store_dword v28, v1, s[2:3]\n"   // dO[8] = v1 (scale factor)
+            "global_store_dword v28, v1, s[2:3]\n"
             "s_waitcnt vmcnt(0)\n"
             "; === END DUMP ===\n";
           translated_asm.insert(insert_pos, dump);
