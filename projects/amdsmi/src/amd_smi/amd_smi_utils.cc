@@ -20,23 +20,24 @@
  * THE SOFTWARE.
  */
 
-#include <climits>
-#include <sys/ioctl.h>
+#include "amd_smi/impl/amd_smi_utils.h"
+
+#include <dirent.h>
+#include <fcntl.h>
 #include <libdrm/amdgpu.h>
 #include <libdrm/drm.h>
-#include <fcntl.h>
+#include <sys/ioctl.h>
+#include <sys/mman.h>
+#include <sys/types.h>
+#include <unistd.h>
+
+#include <algorithm>
+#include <climits>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <sys/mman.h>
 #include <ctime>
-#include <unistd.h>
-#include <dirent.h>
-#include <sys/types.h>
-
-#include <algorithm>
-#include <cstdio>
 #include <fstream>
 #include <iostream>
 #include <iterator>
@@ -44,35 +45,35 @@
 #include <regex>
 #include <sstream>
 
-#include "config/amd_smi_config.h"
-#include "amd_smi/impl/amd_smi_utils.h"
-#include "amd_smi/impl/scoped_fd.h"
+#include "amd_smi/impl/amd_smi_gpu_mutex.h"
 #include "amd_smi/impl/amd_smi_system.h"
+#include "amd_smi/impl/scoped_fd.h"
+#include "config/amd_smi_config.h"
 #include "rocm_smi/rocm_smi_logger.h"
 #include "rocm_smi/rocm_smi_utils.h"
 
-std::string leftTrim(const std::string &s) {
+std::string leftTrim(const std::string& s) {
   if (!s.empty()) {
     return std::regex_replace(s, std::regex("^\\s+"), "");
   }
   return s;
 }
 
-std::string rightTrim(const std::string &s) {
+std::string rightTrim(const std::string& s) {
   if (!s.empty()) {
     return std::regex_replace(s, std::regex("\\s+$"), "");
   }
   return s;
 }
 
-std::string removeNewLines(const std::string &s) {
+std::string removeNewLines(const std::string& s) {
   if (!s.empty()) {
     return std::regex_replace(s, std::regex("\n+"), "");
   }
   return s;
 }
 
-std::string trim(const std::string &s) {
+std::string trim(const std::string& s) {
   if (!s.empty()) {
     // remove new lines -> trim white space at ends
     std::string noNewLines = removeNewLines(s);
@@ -83,12 +84,10 @@ std::string trim(const std::string &s) {
 
 // Given original string and string to remove (removeMe)
 // Return will provide the resulting modified string with the removed string(s)
-std::string removeString(const std::string origStr,
-                         const std::string &removeMe) {
+std::string removeString(const std::string origStr, const std::string& removeMe) {
   std::string modifiedStr = origStr;
   std::string::size_type l = removeMe.length();
-  for (std::string::size_type i = modifiedStr.find(removeMe);
-       i != std::string::npos;
+  for (std::string::size_type i = modifiedStr.find(removeMe); i != std::string::npos;
        i = modifiedStr.find(removeMe)) {
     modifiedStr.erase(i, l);
   }
@@ -96,681 +95,666 @@ std::string removeString(const std::string origStr,
 }
 
 amdsmi_status_t smi_clear_char_and_reinitialize(char buffer[], uint32_t len,
-                                                    std::string newString) {
-    char *begin = &buffer[0];
-    char *end = &buffer[len];
-    std::fill(begin, end, 0);
+                                                std::string newString) {
+  char* begin = &buffer[0];
+  char* end = &buffer[len];
+  std::fill(begin, end, 0);
 
-    // Safer approach - copy directly with length limit
-    size_t copy_len = std::min(static_cast<size_t>(len - 1), newString.length());
-    if (copy_len > 0) {
-        std::memcpy(buffer, newString.c_str(), copy_len);
-    }
-    buffer[copy_len] = '\0';
-    return AMDSMI_STATUS_SUCCESS;
+  // Safer approach - copy directly with length limit
+  size_t copy_len = std::min(static_cast<size_t>(len - 1), newString.length());
+  if (copy_len > 0) {
+    std::memcpy(buffer, newString.c_str(), copy_len);
+  }
+  buffer[copy_len] = '\0';
+  return AMDSMI_STATUS_SUCCESS;
 }
 
-int openFileAndModifyBuffer(std::string path, char *buff, size_t sizeOfBuff,
+int openFileAndModifyBuffer(std::string path, char* buff, size_t sizeOfBuff,
                             bool trim_whitespace = true) {
-    bool errorDiscovered = false;
-    std::ifstream file(path, std::ifstream::in);
-    std::string contents = {std::istreambuf_iterator<char>{file}, std::istreambuf_iterator<char>{}};
-    smi_clear_char_and_reinitialize(buff, static_cast<uint32_t>(sizeOfBuff), contents);
-    if (!file.is_open()) {
-        errorDiscovered = true;
-    } else {
-        if (trim_whitespace) {
-            contents = amd::smi::trimAllWhiteSpace(contents);
-        }
-        // remove all new lines
-        contents.erase(std::remove(contents.begin(), contents.end(), '\n'), contents.cend());
+  bool errorDiscovered = false;
+  std::ifstream file(path, std::ifstream::in);
+  std::string contents = {std::istreambuf_iterator<char>{file}, std::istreambuf_iterator<char>{}};
+  smi_clear_char_and_reinitialize(buff, static_cast<uint32_t>(sizeOfBuff), contents);
+  if (!file.is_open()) {
+    errorDiscovered = true;
+  } else {
+    if (trim_whitespace) {
+      contents = amd::smi::trimAllWhiteSpace(contents);
     }
+    // remove all new lines
+    contents.erase(std::remove(contents.begin(), contents.end(), '\n'), contents.cend());
+  }
 
-    file.close();
-    if (!errorDiscovered && file.good() && !file.bad() && !file.fail() && !file.eof()
-        && !contents.empty()) {
-        std::strncpy(buff, contents.c_str(), sizeOfBuff-1);
-        buff[sizeOfBuff-1] = '\0';
-        return 0;
-    } else {
-        return -1;
-    }
+  file.close();
+  if (!errorDiscovered && file.good() && !file.bad() && !file.fail() && !file.eof() &&
+      !contents.empty()) {
+    std::strncpy(buff, contents.c_str(), sizeOfBuff - 1);
+    buff[sizeOfBuff - 1] = '\0';
+    return 0;
+  } else {
+    return -1;
+  }
 }
 
 static const uint32_t kAmdGpuId = 0x1002;
 
 static bool isAMDGPU(std::string dev_path) {
-    std::string vend_path = dev_path + "/device/vendor";
+  std::string vend_path = dev_path + "/device/vendor";
 
-    if (!amd::smi::FileExists(vend_path.c_str())) {
-        return false;
-    }
-
-    std::ifstream fs;
-    fs.open(vend_path);
-
-    if (!fs.is_open()) {
-        return false;
-    }
-
-    uint32_t vendor_id;
-
-    fs >> std::hex >> vendor_id;
-
-    fs.close();
-
-    if (vendor_id == kAmdGpuId) {
-        return true;
-    }
+  if (!amd::smi::FileExists(vend_path.c_str())) {
     return false;
+  }
+
+  std::ifstream fs;
+  fs.open(vend_path);
+
+  if (!fs.is_open()) {
+    return false;
+  }
+
+  uint32_t vendor_id;
+
+  fs >> std::hex >> vendor_id;
+
+  fs.close();
+
+  if (vendor_id == kAmdGpuId) {
+    return true;
+  }
+  return false;
 }
 
-amdsmi_status_t smi_amdgpu_find_hwmon_dir(amd::smi::AMDSmiGPUDevice *device, std::string* full_path)
-{
-    if (full_path == nullptr) {
-        return AMDSMI_STATUS_API_FAILED;
-    }
-    SMIGPUDEVICE_MUTEX(device->get_mutex())
-        DIR *dh;
-    struct dirent * contents;
-    std::string device_path = "/sys/class/drm/" + device->get_gpu_path();
-    std::string directory_path = device_path + "/device/hwmon/";
+amdsmi_status_t smi_amdgpu_find_hwmon_dir(amd::smi::AMDSmiGPUDevice* device,
+                                          std::string* full_path) {
+  if (full_path == nullptr) {
+    return AMDSMI_STATUS_API_FAILED;
+  }
+  SMIGPUDEVICE_MUTEX(device->get_mutex())
+  DIR* dh;
+  struct dirent* contents;
+  std::string device_path = "/sys/class/drm/" + device->get_gpu_path();
+  std::string directory_path = device_path + "/device/hwmon/";
 
-    if (!isAMDGPU(device_path)) {
-        return AMDSMI_STATUS_NOT_SUPPORTED;
-    }
+  if (!isAMDGPU(device_path)) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
 
-    dh = opendir(directory_path.c_str());
-    if (!dh) {
-        return AMDSMI_STATUS_NOT_SUPPORTED;
-    }
+  dh = opendir(directory_path.c_str());
+  if (!dh) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
 
-    /*
-       First directory is '.', second directory is '..' and third directory is
-       valid directory for reading sysfs node
-       */
-    while ((contents = readdir(dh)) != NULL) {
-        std::string name = contents->d_name;
-        if (name.find("hwmon", 0) != std::string::npos)
-            *full_path = directory_path + name;
-    }
+  /*
+     First directory is '.', second directory is '..' and third directory is
+     valid directory for reading sysfs node
+     */
+  while ((contents = readdir(dh)) != NULL) {
+    std::string name = contents->d_name;
+    if (name.find("hwmon", 0) != std::string::npos) *full_path = directory_path + name;
+  }
 
-    closedir(dh);
+  closedir(dh);
 
-    return AMDSMI_STATUS_SUCCESS;
+  return AMDSMI_STATUS_SUCCESS;
 }
 
+amdsmi_status_t smi_amdgpu_get_board_info(amd::smi::AMDSmiGPUDevice* device,
+                                          amdsmi_board_info_t* info) {
+  SMIGPUDEVICE_MUTEX(device->get_mutex())
+  std::string model_number_path =
+      "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/product_number");
+  std::string product_serial_path =
+      "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/serial_number");
+  std::string fru_id_path =
+      "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/fru_id");
+  std::string manufacturer_name_path =
+      "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/manufacturer");
+  std::string product_name_path =
+      "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/product_name");
 
-amdsmi_status_t smi_amdgpu_get_board_info(amd::smi::AMDSmiGPUDevice* device, amdsmi_board_info_t *info) {
-    SMIGPUDEVICE_MUTEX(device->get_mutex())
-    std::string model_number_path = "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/product_number");
-    std::string product_serial_path = "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/serial_number");
-    std::string fru_id_path = "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/fru_id");
-    std::string manufacturer_name_path = "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/manufacturer");
-    std::string product_name_path = "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/product_name");
+  auto ret_mod =
+      openFileAndModifyBuffer(model_number_path, info->model_number, AMDSMI_MAX_STRING_LENGTH);
+  auto ret_ser =
+      openFileAndModifyBuffer(product_serial_path, info->product_serial, AMDSMI_MAX_STRING_LENGTH);
+  auto ret_fru = openFileAndModifyBuffer(fru_id_path, info->fru_id, AMDSMI_MAX_STRING_LENGTH);
+  auto ret_man = openFileAndModifyBuffer(manufacturer_name_path, info->manufacturer_name,
+                                         AMDSMI_MAX_STRING_LENGTH);
+  auto ret_prod = openFileAndModifyBuffer(product_name_path, info->product_name,
+                                          AMDSMI_MAX_STRING_LENGTH, false);
 
-    auto ret_mod = openFileAndModifyBuffer(model_number_path, info->model_number,
-                                           AMDSMI_MAX_STRING_LENGTH);
-    auto ret_ser = openFileAndModifyBuffer(product_serial_path, info->product_serial,
-                                           AMDSMI_MAX_STRING_LENGTH);
-    auto ret_fru = openFileAndModifyBuffer(fru_id_path, info->fru_id, AMDSMI_MAX_STRING_LENGTH);
-    auto ret_man = openFileAndModifyBuffer(manufacturer_name_path, info->manufacturer_name,
-                                           AMDSMI_MAX_STRING_LENGTH);
-    auto ret_prod = openFileAndModifyBuffer(product_name_path, info->product_name,
-                                            AMDSMI_MAX_STRING_LENGTH, false);
+  std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << "[Before correction] "
+     << "Returning status = AMDSMI_STATUS_SUCCESS"
+     << " | model_number_path = |" << model_number_path << "|\n"
+     << "; info->model_number: |" << info->model_number << "|\n"
+     << "; ret_mod = " << ret_mod << "|\n"
+     << "\n product_serial_path = |" << product_serial_path << "|\n"
+     << "; info->product_serial: |" << info->product_serial << "|\n"
+     << "; ret_ser = " << ret_ser << "|\n"
+     << "\n fru_id_path = |" << fru_id_path << "|\n"
+     << "; info->fru_id: |" << info->fru_id << "|\n"
+     << "; ret_fru = " << ret_fru << "|\n"
+     << "\n manufacturer_name_path = |" << manufacturer_name_path << "|\n"
+     << "; info->manufacturer_name: |" << info->manufacturer_name << "|\n"
+     << "; ret_man = " << ret_man << "|\n"
+     << "\n product_name_path = |" << product_name_path << "|\n"
+     << "; info->product_name: |" << info->product_name << "|"
+     << "; ret_prod = " << ret_prod << "|\n";
+  LOG_INFO(ss);
 
-    std::ostringstream ss;
-    ss << __PRETTY_FUNCTION__ << "[Before correction] "
-       << "Returning status = AMDSMI_STATUS_SUCCESS"
-       << " | model_number_path = |" << model_number_path << "|\n"
-       << "; info->model_number: |" << info->model_number << "|\n"
-       << "; ret_mod = " << ret_mod << "|\n"
-       << "\n product_serial_path = |" << product_serial_path << "|\n"
-       << "; info->product_serial: |" << info->product_serial << "|\n"
-       << "; ret_ser = " << ret_ser << "|\n"
-       << "\n fru_id_path = |" << fru_id_path << "|\n"
-       << "; info->fru_id: |" << info->fru_id << "|\n"
-       << "; ret_fru = " << ret_fru << "|\n"
-       << "\n manufacturer_name_path = |" << manufacturer_name_path << "|\n"
-       << "; info->manufacturer_name: |" << info->manufacturer_name << "|\n"
-       << "; ret_man = " << ret_man << "|\n"
-       << "\n product_name_path = |" << product_name_path << "|\n"
-       << "; info->product_name: |" << info->product_name << "|"
-       << "; ret_prod = " << ret_prod << "|\n";
-    LOG_INFO(ss);
-
-    return AMDSMI_STATUS_SUCCESS;
+  return AMDSMI_STATUS_SUCCESS;
 }
 
-amdsmi_status_t smi_amdgpu_get_power_cap(amd::smi::AMDSmiGPUDevice* device, uint32_t sensor_ind, int *cap)
-{
-    constexpr int DATA_SIZE = 16;
-    char val[DATA_SIZE];
-    std::string fullpath;
-    amdsmi_status_t ret = AMDSMI_STATUS_SUCCESS;
+amdsmi_status_t smi_amdgpu_get_power_cap(amd::smi::AMDSmiGPUDevice* device, uint32_t sensor_ind,
+                                         int* cap) {
+  constexpr int DATA_SIZE = 16;
+  char val[DATA_SIZE];
+  std::string fullpath;
+  amdsmi_status_t ret = AMDSMI_STATUS_SUCCESS;
 
-    ret = smi_amdgpu_find_hwmon_dir(device, &fullpath);
+  ret = smi_amdgpu_find_hwmon_dir(device, &fullpath);
 
-    SMIGPUDEVICE_MUTEX(device->get_mutex())
+  SMIGPUDEVICE_MUTEX(device->get_mutex())
 
-    if (ret)
-        return ret;
+  if (ret) return ret;
 
-    fullpath += "/power" + std::to_string(sensor_ind + 1) + "_cap";
-    std::ifstream file(fullpath.c_str(), std::ifstream::in);
-    if (!file.is_open()) {
-        return AMDSMI_STATUS_NOT_SUPPORTED;
-    }
+  fullpath += "/power" + std::to_string(sensor_ind + 1) + "_cap";
+  std::ifstream file(fullpath.c_str(), std::ifstream::in);
+  if (!file.is_open()) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
 
-    file.getline(val, DATA_SIZE);
+  file.getline(val, DATA_SIZE);
 
-    if (sscanf(val, "%d", cap) < 0) {
-        return AMDSMI_STATUS_API_FAILED;
-    }
+  if (sscanf(val, "%d", cap) < 0) {
+    return AMDSMI_STATUS_API_FAILED;
+  }
 
-
-    return AMDSMI_STATUS_SUCCESS;
+  return AMDSMI_STATUS_SUCCESS;
 }
 
 amdsmi_status_t smi_amdgpu_get_ranges(amd::smi::AMDSmiGPUDevice* device, amdsmi_clk_type_t domain,
-        int *max_freq, int *min_freq, int *num_dpm, int *sleep_state_freq)
-{
-    SMIGPUDEVICE_MUTEX(device->get_mutex())
-    std::string fullpath = "/sys/class/drm/" + device->get_gpu_path() + "/device";
-    std::string smclk_min_max_fullpath = "";
+                                      int* max_freq, int* min_freq, int* num_dpm,
+                                      int* sleep_state_freq) {
+  SMIGPUDEVICE_MUTEX(device->get_mutex())
+  std::string fullpath = "/sys/class/drm/" + device->get_gpu_path() + "/device";
+  std::string smclk_min_max_fullpath = "";
 
-    bool sclk = false;
-    bool mclk = false;
-    switch (domain) {
-        case AMDSMI_CLK_TYPE_GFX:
-            smclk_min_max_fullpath = fullpath + "/pp_od_clk_voltage";
-            fullpath += "/pp_dpm_sclk";
-            sclk = true;
-            break;
-        case AMDSMI_CLK_TYPE_MEM:
-            smclk_min_max_fullpath = fullpath + "/pp_od_clk_voltage";
-            fullpath += "/pp_dpm_mclk";
-            mclk = true;
-            break;
-        case AMDSMI_CLK_TYPE_VCLK0:
-            fullpath += "/pp_dpm_vclk";
-            break;
-        case AMDSMI_CLK_TYPE_VCLK1:
-            fullpath += "/pp_dpm_vclk1";
-            break;
-        case AMDSMI_CLK_TYPE_DCLK0:
-            fullpath += "/pp_dpm_dclk";
-            break;
-        case AMDSMI_CLK_TYPE_DCLK1:
-            fullpath += "/pp_dpm_dclk1";
-            break;
-        case AMDSMI_CLK_TYPE_SOC:
-            fullpath += "/pp_dpm_socclk";
-            break;
-        case AMDSMI_CLK_TYPE_DF:
-            fullpath += "/pp_dpm_fclk";
-            break;
-        default:
-            return AMDSMI_STATUS_INVAL;
-    }
+  bool sclk = false;
+  bool mclk = false;
+  switch (domain) {
+    case AMDSMI_CLK_TYPE_GFX:
+      smclk_min_max_fullpath = fullpath + "/pp_od_clk_voltage";
+      fullpath += "/pp_dpm_sclk";
+      sclk = true;
+      break;
+    case AMDSMI_CLK_TYPE_MEM:
+      smclk_min_max_fullpath = fullpath + "/pp_od_clk_voltage";
+      fullpath += "/pp_dpm_mclk";
+      mclk = true;
+      break;
+    case AMDSMI_CLK_TYPE_VCLK0:
+      fullpath += "/pp_dpm_vclk";
+      break;
+    case AMDSMI_CLK_TYPE_VCLK1:
+      fullpath += "/pp_dpm_vclk1";
+      break;
+    case AMDSMI_CLK_TYPE_DCLK0:
+      fullpath += "/pp_dpm_dclk";
+      break;
+    case AMDSMI_CLK_TYPE_DCLK1:
+      fullpath += "/pp_dpm_dclk1";
+      break;
+    case AMDSMI_CLK_TYPE_SOC:
+      fullpath += "/pp_dpm_socclk";
+      break;
+    case AMDSMI_CLK_TYPE_DF:
+      fullpath += "/pp_dpm_fclk";
+      break;
+    default:
+      return AMDSMI_STATUS_INVAL;
+  }
 
-    std::ifstream ranges(fullpath.c_str());
+  std::ifstream ranges(fullpath.c_str());
 
-    if (ranges.fail()) {
-        return AMDSMI_STATUS_NOT_SUPPORTED;
-    }
+  if (ranges.fail()) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
 
-    unsigned int max, min, dpm, sleep_freq, current_freq;
-    char str[10];
-    char single_char;
-    max = 0;
-    min = UINT_MAX;
-    dpm = 0;
-    sleep_freq = UINT_MAX;
-    current_freq = 0;
+  unsigned int max, min, dpm, sleep_freq, current_freq;
+  char str[10];
+  char single_char;
+  max = 0;
+  min = UINT_MAX;
+  dpm = 0;
+  sleep_freq = UINT_MAX;
+  current_freq = 0;
 
-    // if getting sclk or mclk info, read pp_od_clk_voltage for min and max info
-    if (sclk || mclk) {
-        std::ifstream smclk_ranges(smclk_min_max_fullpath.c_str());
-        unsigned int smax = 0;
-        unsigned int mmax = 0;
-        unsigned int smin = UINT_MAX;
-        unsigned int mmin = UINT_MAX;
+  // if getting sclk or mclk info, read pp_od_clk_voltage for min and max info
+  if (sclk || mclk) {
+    std::ifstream smclk_ranges(smclk_min_max_fullpath.c_str());
+    unsigned int smax = 0;
+    unsigned int mmax = 0;
+    unsigned int smin = UINT_MAX;
+    unsigned int mmin = UINT_MAX;
 
-        // if pp_od_clk_voltage is not found, then go back to using the original pp_dpm files
-        if (!smclk_ranges.is_open()) {
-            sclk = false;
-            mclk = false;
+    // if pp_od_clk_voltage is not found, then go back to using the original pp_dpm files
+    if (!smclk_ranges.is_open()) {
+      sclk = false;
+      mclk = false;
+    } else {
+      // using bool to switch between recording for s or mclk. true will be sclk, false will be mclk
+      bool s_or_m = true;
+      unsigned int dpm_level, freq;
+      for (std::string line; getline(smclk_ranges, line);) {
+        if (line.compare("GFXCLK:") == 0 || line.compare("OD_SCLK:") == 0) {
+          s_or_m = true;
+          continue;
+        } else if (line.compare("MCLK:") == 0 || line.compare("OD_MCLK:") == 0) {
+          s_or_m = false;
+          continue;
         }
-        else{
-            // using bool to switch between recording for s or mclk. true will be sclk, false will be mclk
-            bool s_or_m = true;
-            unsigned int dpm_level, freq;
-            for (std::string line; getline(smclk_ranges, line);)
-            {
-                if (line.compare("GFXCLK:") == 0 || line.compare("OD_SCLK:") == 0)
-                {
-                    s_or_m = true;
-                    continue;
-                }
-                else if (line.compare("MCLK:") == 0 || line.compare("OD_MCLK:") == 0)
-                {
-                    s_or_m = false;
-                    continue;
-                }
-                if (sscanf(line.c_str(), "%u: %d%s", &dpm_level, &freq, str) <= 2) {
-                    // skip lines that don't conform to the format
-                    continue;
-                }
-                if (s_or_m)
-                {
-                    if (freq > smax)
-                        smax = freq;
-                    if (freq < smin)
-                        smin = freq;
-                }
-                else
-                {
-                    if (freq > mmax)
-                        mmax = freq;
-                    if (freq < mmin)
-                        mmin = freq;
-                }
-            }
-
-            if (sclk)
-            {
-                max = smax;
-                min = smin;
-            }
-            else if (mclk)
-            {
-                max = mmax;
-                min = mmin;
-            }
-
-            smclk_ranges.close();
+        if (sscanf(line.c_str(), "%u: %d%s", &dpm_level, &freq, str) <= 2) {
+          // skip lines that don't conform to the format
+          continue;
         }
-    }
-    // obtain rest of info from regular pp_dpm_* files.
-    for (std::string line; getline(ranges, line);) {
-        unsigned int dpm_level, freq;
-
-        char firstChar = line[0];
-        if (firstChar == 'S') {
-            if (sscanf(line.c_str(), "%c: %d%s", &single_char, &sleep_freq, str) <= 2) {
-                ranges.close();
-                return AMDSMI_STATUS_NO_DATA;
-            }
+        if (s_or_m) {
+          if (freq > smax) smax = freq;
+          if (freq < smin) smin = freq;
         } else {
-            /**
-             * if the first line contains '*', then
-             * we are saving that value as current_freq then checking
-             * for other dpm levels if none are found then we
-             * set min and max to current_freq as per Driver
-             * We then skip to the next line to avoid getting
-             * incorrect min value.
-             */
-
-            if (sscanf(line.c_str(), "%u: %d%c", &dpm_level, &freq, str) <= 2){
-                ranges.close();
-                return AMDSMI_STATUS_IO;
-            }
-
-            char lastChar = line.back();
-            if (lastChar == '*'){
-                current_freq = freq;
-            }
-
-            // not * was detected so check for the min max if not s or mclk, which are user defined
-            if (!sclk && !mclk){
-                max = freq > max ? freq : max;
-                min = freq < min ? freq : min;
-            }
-            dpm = dpm_level > dpm ? dpm_level : dpm;
+          if (freq > mmax) mmax = freq;
+          if (freq < mmin) mmin = freq;
         }
-    }
-    if (dpm == 0 && current_freq > 0) {
-        // if the dpm level is 0, then the current frequency is the min/max frequency
-        max = current_freq;
-        min = current_freq;
-    }
-    if (num_dpm)
-        *num_dpm = dpm;
-    if (max_freq)
-        *max_freq = max;
-    if (min_freq)
-        *min_freq = min;
-    if (sleep_state_freq)
-        *sleep_state_freq = sleep_freq;
+      }
 
-    ranges.close();
-    return AMDSMI_STATUS_SUCCESS;
+      if (sclk) {
+        max = smax;
+        min = smin;
+      } else if (mclk) {
+        max = mmax;
+        min = mmin;
+      }
+
+      smclk_ranges.close();
+    }
+  }
+  // obtain rest of info from regular pp_dpm_* files.
+  for (std::string line; getline(ranges, line);) {
+    unsigned int dpm_level, freq;
+
+    char firstChar = line[0];
+    if (firstChar == 'S') {
+      if (sscanf(line.c_str(), "%c: %d%s", &single_char, &sleep_freq, str) <= 2) {
+        ranges.close();
+        return AMDSMI_STATUS_NO_DATA;
+      }
+    } else {
+      /**
+       * if the first line contains '*', then
+       * we are saving that value as current_freq then checking
+       * for other dpm levels if none are found then we
+       * set min and max to current_freq as per Driver
+       * We then skip to the next line to avoid getting
+       * incorrect min value.
+       */
+
+      if (sscanf(line.c_str(), "%u: %d%c", &dpm_level, &freq, str) <= 2) {
+        ranges.close();
+        return AMDSMI_STATUS_IO;
+      }
+
+      char lastChar = line.back();
+      if (lastChar == '*') {
+        current_freq = freq;
+      }
+
+      // not * was detected so check for the min max if not s or mclk, which are user defined
+      if (!sclk && !mclk) {
+        max = freq > max ? freq : max;
+        min = freq < min ? freq : min;
+      }
+      dpm = dpm_level > dpm ? dpm_level : dpm;
+    }
+  }
+  if (dpm == 0 && current_freq > 0) {
+    // if the dpm level is 0, then the current frequency is the min/max frequency
+    max = current_freq;
+    min = current_freq;
+  }
+  if (num_dpm) *num_dpm = dpm;
+  if (max_freq) *max_freq = max;
+  if (min_freq) *min_freq = min;
+  if (sleep_state_freq) *sleep_state_freq = sleep_freq;
+
+  ranges.close();
+  return AMDSMI_STATUS_SUCCESS;
 }
 
-amdsmi_status_t smi_amdgpu_get_enabled_blocks(amd::smi::AMDSmiGPUDevice* device, uint64_t *enabled_blocks) {
-    SMIGPUDEVICE_MUTEX(device->get_mutex())
-    std::string fullpath = "/sys/class/drm/" + device->get_gpu_path() + "/device/ras/features";
-    std::ifstream f(fullpath.c_str());
-    std::string tmp_str;
+amdsmi_status_t smi_amdgpu_get_enabled_blocks(amd::smi::AMDSmiGPUDevice* device,
+                                              uint64_t* enabled_blocks) {
+  SMIGPUDEVICE_MUTEX(device->get_mutex())
+  std::string fullpath = "/sys/class/drm/" + device->get_gpu_path() + "/device/ras/features";
+  std::ifstream f(fullpath.c_str());
+  std::string tmp_str;
 
-    if (f.fail()) {
-        return AMDSMI_STATUS_NOT_SUPPORTED;
-    }
+  if (f.fail()) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
 
-    std::string line;
-    getline(f, line);
+  std::string line;
+  getline(f, line);
 
-    std::istringstream f1(line);
+  std::istringstream f1(line);
 
-    f1 >> tmp_str;  // ignore
-    f1 >> tmp_str;  // ignore
-    f1 >> tmp_str;
+  f1 >> tmp_str;  // ignore
+  f1 >> tmp_str;  // ignore
+  f1 >> tmp_str;
 
-    *enabled_blocks = strtoul(tmp_str.c_str(), nullptr, 16);
-    f.close();
+  *enabled_blocks = strtoul(tmp_str.c_str(), nullptr, 16);
+  f.close();
 
-    if (*enabled_blocks == 0 || *enabled_blocks == ULONG_MAX) {
+  if (*enabled_blocks == 0 || *enabled_blocks == ULONG_MAX) {
+    return AMDSMI_STATUS_API_FAILED;
+  }
+
+  return AMDSMI_STATUS_SUCCESS;
+}
+
+amdsmi_status_t smi_amdgpu_get_bad_page_info(amd::smi::AMDSmiGPUDevice* device, uint32_t* num_pages,
+                                             amdsmi_retired_page_record_t* info) {
+  SMIGPUDEVICE_MUTEX(device->get_mutex())
+  std::string line;
+  std::vector<std::string> badPagesVec;
+
+  std::string fullpath =
+      "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/ras/gpu_vram_bad_pages");
+  std::ifstream fs(fullpath.c_str());
+
+  if (fs.fail()) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+
+  while (std::getline(fs, line)) {
+    badPagesVec.push_back(line);
+  }
+
+  if (badPagesVec.size() == 0) {
+    num_pages = 0;
+    return AMDSMI_STATUS_SUCCESS;
+  }
+  // Remove any *trailing* empty (whitespace) lines
+  while (badPagesVec.size() != 0 &&
+         badPagesVec.back().find_first_not_of(" \t\n\v\f\r") == std::string::npos) {
+    badPagesVec.pop_back();
+  }
+
+  *num_pages = static_cast<uint32_t>(badPagesVec.size());
+
+  if (info == nullptr) {
+    return AMDSMI_STATUS_SUCCESS;
+  }
+
+  char status_code;
+  amdsmi_memory_page_status_t tmp_stat;
+  std::string junk;
+
+  for (uint32_t i = 0; i < *num_pages; ++i) {
+    std::istringstream fs1(badPagesVec[i]);
+
+    fs1 >> std::hex >> info[i].page_address;
+    fs1 >> junk;
+    fs1 >> std::hex >> info[i].page_size;
+    fs1 >> junk;
+    fs1 >> status_code;
+
+    switch (status_code) {
+      case 'P':
+        tmp_stat = AMDSMI_MEM_PAGE_STATUS_PENDING;
+        break;
+      case 'F':
+        tmp_stat = AMDSMI_MEM_PAGE_STATUS_UNRESERVABLE;
+        break;
+      case 'R':
+        tmp_stat = AMDSMI_MEM_PAGE_STATUS_RESERVED;
+        break;
+      default:
         return AMDSMI_STATUS_API_FAILED;
     }
+    info[i].status = tmp_stat;
+  }
 
-    return AMDSMI_STATUS_SUCCESS;
-}
-
-amdsmi_status_t smi_amdgpu_get_bad_page_info(amd::smi::AMDSmiGPUDevice* device,
-        uint32_t *num_pages, amdsmi_retired_page_record_t *info) {
-    SMIGPUDEVICE_MUTEX(device->get_mutex())
-        std::string line;
-    std::vector<std::string> badPagesVec;
-
-    std::string fullpath = "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/ras/gpu_vram_bad_pages");
-    std::ifstream fs(fullpath.c_str());
-
-    if (fs.fail()) {
-        return AMDSMI_STATUS_NOT_SUPPORTED;
-    }
-
-    while (std::getline(fs, line)) {
-        badPagesVec.push_back(line);
-    }
-
-    if (badPagesVec.size() == 0) {
-        num_pages = 0;
-        return AMDSMI_STATUS_SUCCESS;
-    }
-    // Remove any *trailing* empty (whitespace) lines
-    while (badPagesVec.size() != 0 &&
-      badPagesVec.back().find_first_not_of(" \t\n\v\f\r") == std::string::npos) {
-      badPagesVec.pop_back();
-    }
-
-    *num_pages = static_cast<uint32_t>(badPagesVec.size());
-
-    if (info == nullptr) {
-        return AMDSMI_STATUS_SUCCESS;
-    }
-
-    char status_code;
-    amdsmi_memory_page_status_t tmp_stat;
-    std::string junk;
-
-    for (uint32_t i = 0; i < *num_pages; ++i) {
-        std::istringstream fs1(badPagesVec[i]);
-
-        fs1 >> std::hex >> info[i].page_address;
-        fs1 >> junk;
-        fs1 >> std::hex >> info[i].page_size;
-        fs1 >> junk;
-        fs1 >> status_code;
-
-        switch (status_code) {
-            case 'P':
-                tmp_stat = AMDSMI_MEM_PAGE_STATUS_PENDING;
-                break;
-            case 'F':
-                tmp_stat = AMDSMI_MEM_PAGE_STATUS_UNRESERVABLE;
-                break;
-            case 'R':
-                tmp_stat = AMDSMI_MEM_PAGE_STATUS_RESERVED;
-                break;
-            default:
-                return AMDSMI_STATUS_API_FAILED;
-        }
-        info[i].status = tmp_stat;
-    }
-
-    return AMDSMI_STATUS_SUCCESS;
+  return AMDSMI_STATUS_SUCCESS;
 }
 
 amdsmi_status_t smi_amdgpu_get_bad_page_threshold(amd::smi::AMDSmiGPUDevice* device,
-        uint32_t *threshold) {
-    SMIGPUDEVICE_MUTEX(device->get_mutex())
+                                                  uint32_t* threshold) {
+  SMIGPUDEVICE_MUTEX(device->get_mutex())
 
-    //TODO: Accessing the node requires root privileges, and its interface may need to be exposed in another path
-    uint32_t index = device->get_card_id();
-    std::string fullpath = "/sys/kernel/debug/dri/" + std::to_string(index) + std::string("/ras/bad_page_cnt_threshold");
-    std::ifstream fs(fullpath.c_str());
+  // TODO: Accessing the node requires root privileges, and its interface may need to be exposed in
+  // another path
+  uint32_t index = device->get_card_id();
+  std::string fullpath =
+      "/sys/kernel/debug/dri/" + std::to_string(index) + std::string("/ras/bad_page_cnt_threshold");
+  std::ifstream fs(fullpath.c_str());
 
-    if (fs.fail()) {
-        return AMDSMI_STATUS_NOT_SUPPORTED;
-    }
+  if (fs.fail()) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
 
-    std::string line;
-    getline(fs, line);
-    if (sscanf(line.c_str(), "%d", threshold) < 0) {
-        return AMDSMI_STATUS_API_FAILED;
-    }
+  std::string line;
+  getline(fs, line);
+  if (sscanf(line.c_str(), "%d", threshold) < 0) {
+    return AMDSMI_STATUS_API_FAILED;
+  }
 
-    fs.close();
+  fs.close();
 
-    return AMDSMI_STATUS_SUCCESS;
+  return AMDSMI_STATUS_SUCCESS;
 }
 
 amdsmi_status_t smi_amdgpu_validate_ras_eeprom(amd::smi::AMDSmiGPUDevice* device) {
-    SMIGPUDEVICE_MUTEX(device->get_mutex())
+  SMIGPUDEVICE_MUTEX(device->get_mutex())
 
-    //TODO: need to expose the corresponding interface to validate the checksum of ras eeprom table.
-    //verify fail: return AMDSMI_STATUS_CORRUPTED_EEPROM
-    return AMDSMI_STATUS_NOT_SUPPORTED;
+  // TODO: need to expose the corresponding interface to validate the checksum of ras eeprom table.
+  // verify fail: return AMDSMI_STATUS_CORRUPTED_EEPROM
+  return AMDSMI_STATUS_NOT_SUPPORTED;
 }
 
-amdsmi_status_t smi_amdgpu_get_ecc_error_count(amd::smi::AMDSmiGPUDevice* device, amdsmi_error_count_t *err_cnt) {
-    SMIGPUDEVICE_MUTEX(device->get_mutex())
-        char str[10];
+amdsmi_status_t smi_amdgpu_get_ecc_error_count(amd::smi::AMDSmiGPUDevice* device,
+                                               amdsmi_error_count_t* err_cnt) {
+  SMIGPUDEVICE_MUTEX(device->get_mutex())
+  char str[10];
 
-    std::string fullpath = "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/ras/umc_err_count");
-    std::ifstream f(fullpath.c_str());
+  std::string fullpath =
+      "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/ras/umc_err_count");
+  std::ifstream f(fullpath.c_str());
 
+  if (f.fail()) {
+    // fall back to aca file
+    fullpath = "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/ras/aca_umc");
+    f.open(fullpath.c_str());
     if (f.fail()) {
-        //fall back to aca file
-        fullpath = "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/ras/aca_umc");
-        f.open(fullpath.c_str());
-        if (f.fail()) {
-            return AMDSMI_STATUS_NOT_SUPPORTED;
-        }
+      return AMDSMI_STATUS_NOT_SUPPORTED;
     }
+  }
 
-    std::string line;
-    getline(f, line);
-    sscanf(line.c_str(), "%s%ld", str, &(err_cnt->uncorrectable_count));
+  std::string line;
+  getline(f, line);
+  sscanf(line.c_str(), "%s%ld", str, &(err_cnt->uncorrectable_count));
 
-    getline(f, line);
-    sscanf(line.c_str(), "%s%ld", str, &(err_cnt->correctable_count));
+  getline(f, line);
+  sscanf(line.c_str(), "%s%ld", str, &(err_cnt->correctable_count));
 
-    f.close();
+  f.close();
 
-    return AMDSMI_STATUS_SUCCESS;
+  return AMDSMI_STATUS_SUCCESS;
 }
-amdsmi_status_t smi_amdgpu_get_driver_version(amd::smi::AMDSmiGPUDevice* device, int *length, char *version) {
-    SMIGPUDEVICE_MUTEX(device->get_mutex())
-    amdsmi_status_t status = AMDSMI_STATUS_SUCCESS;
-    size_t len;
-    if (*length <= 0 || version == nullptr) {
-        return AMDSMI_STATUS_INVAL;
-    } else {
-        len = static_cast<size_t>(*length);
-    }
+amdsmi_status_t smi_amdgpu_get_driver_version(amd::smi::AMDSmiGPUDevice* device, int* length,
+                                              char* version) {
+  SMIGPUDEVICE_MUTEX(device->get_mutex())
+  amdsmi_status_t status = AMDSMI_STATUS_SUCCESS;
+  size_t len;
+  if (*length <= 0 || version == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  } else {
+    len = static_cast<size_t>(*length);
+  }
 
-    std::string empty = "";
-    std::strncpy(version, empty.c_str(), len-1);
-    openFileAndModifyBuffer("/sys/module/amdgpu/version",
-                                      version, static_cast<size_t>(len));
-    if (version[0] == '\0')
-        return AMDSMI_STATUS_DIRECTORY_NOT_FOUND;
+  std::string empty = "";
+  std::strncpy(version, empty.c_str(), len - 1);
+  openFileAndModifyBuffer("/sys/module/amdgpu/version", version, static_cast<size_t>(len));
+  if (version[0] == '\0') return AMDSMI_STATUS_DIRECTORY_NOT_FOUND;
 
-    return status;
+  return status;
 }
 
-amdsmi_status_t smi_amdgpu_get_pcie_speed_from_pcie_type(uint16_t pcie_type, uint32_t *pcie_speed)
-{
-    switch (pcie_type) {
-        case 1:
-            *pcie_speed = 2500;
-            break;
-        case 2:
-            *pcie_speed = 5000;
-            break;
-        case 3:
-            *pcie_speed = 8000;
-            break;
-        case 4:
-            *pcie_speed = 16000;
-            break;
-        case 5:
-            *pcie_speed = 32000;
-            break;
-        case 6:
-            *pcie_speed = 64000;
-            break;
-        default:
-            return AMDSMI_STATUS_API_FAILED;
-    }
-    return AMDSMI_STATUS_SUCCESS;
+amdsmi_status_t smi_amdgpu_get_pcie_speed_from_pcie_type(uint16_t pcie_type, uint32_t* pcie_speed) {
+  switch (pcie_type) {
+    case 1:
+      *pcie_speed = 2500;
+      break;
+    case 2:
+      *pcie_speed = 5000;
+      break;
+    case 3:
+      *pcie_speed = 8000;
+      break;
+    case 4:
+      *pcie_speed = 16000;
+      break;
+    case 5:
+      *pcie_speed = 32000;
+      break;
+    case 6:
+      *pcie_speed = 64000;
+      break;
+    default:
+      return AMDSMI_STATUS_API_FAILED;
+  }
+  return AMDSMI_STATUS_SUCCESS;
 }
 
 amdsmi_status_t smi_amdgpu_get_market_name_from_dev_id(amd::smi::AMDSmiGPUDevice* device,
-                                                        char *market_name) {
-    SMIGPUDEVICE_MUTEX(device->get_mutex())
-    if (market_name == nullptr || device == nullptr) {
-        return AMDSMI_STATUS_ARG_PTR_NULL;
-    }
-    // initialize the market_name to empty string
-    std::string empty = "";
-    std::strncpy(market_name, empty.c_str(), AMDSMI_MAX_STRING_LENGTH - 1);
+                                                       char* market_name) {
+  SMIGPUDEVICE_MUTEX(device->get_mutex())
+  if (market_name == nullptr || device == nullptr) {
+    return AMDSMI_STATUS_ARG_PTR_NULL;
+  }
+  // initialize the market_name to empty string
+  std::string empty = "";
+  std::strncpy(market_name, empty.c_str(), AMDSMI_MAX_STRING_LENGTH - 1);
 
-    std::ostringstream ss;
-    std::string render_name = device->get_gpu_path();
-    std::string path = "/dev/dri/" + render_name;
-    if (render_name.empty()) {
-        return AMDSMI_STATUS_NOT_SUPPORTED;
-    }
+  std::ostringstream ss;
+  std::string render_name = device->get_gpu_path();
+  std::string path = "/dev/dri/" + render_name;
+  if (render_name.empty()) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
 
-    ScopedFD fd(path.c_str(), O_RDWR | O_CLOEXEC);
-    if (!fd.valid()) {
-        ss << __PRETTY_FUNCTION__ << " | Render Name: "
-           << render_name << "; path: " << path << "; fd: "
-           << (fd < 0 ? "less than 0" : std::to_string(fd)) << "\n"
-           << "; Returning: "
-           << smi_amdgpu_get_status_string(AMDSMI_STATUS_FILE_ERROR, false) << "\n";
-        LOG_INFO(ss);
-        return AMDSMI_STATUS_FILE_ERROR;
-    }
+  ScopedFD fd(path.c_str(), O_RDWR | O_CLOEXEC);
+  if (!fd.valid()) {
+    ss << __PRETTY_FUNCTION__ << " | Render Name: " << render_name << "; path: " << path
+       << "; fd: " << (fd < 0 ? "less than 0" : std::to_string(fd)) << "\n"
+       << "; Returning: " << smi_amdgpu_get_status_string(AMDSMI_STATUS_FILE_ERROR, false) << "\n";
+    LOG_INFO(ss);
+    return AMDSMI_STATUS_FILE_ERROR;
+  }
 
-    amd::smi::AMDSmiLibraryLoader libdrm_amdgpu_;
-    amdsmi_status_t status = libdrm_amdgpu_.load(LIBDRM_AMDGPU_SONAME);
-    if (status != AMDSMI_STATUS_SUCCESS) {
-      libdrm_amdgpu_.unload();
-      return status;
-    }
+  amd::smi::AMDSmiLibraryLoader libdrm_amdgpu_;
+  amdsmi_status_t status = libdrm_amdgpu_.load(LIBDRM_AMDGPU_SONAME);
+  if (status != AMDSMI_STATUS_SUCCESS) {
+    libdrm_amdgpu_.unload();
+    return status;
+  }
 
-    // Function pointer typedefs
-    typedef int (*amdgpu_device_initialize_t)(int fd, uint32_t *major_version,
-                                              uint32_t *minor_version,
-                                              amdgpu_device_handle *device_handle);
-    typedef int (*amdgpu_device_deinitialize_t)(amdgpu_device_handle device_handle);
-    typedef const char* (*amdgpu_get_marketing_name_t)(amdgpu_device_handle device_handle);
-    amdgpu_device_initialize_t amdgpu_device_initialize = nullptr;
-    amdgpu_device_deinitialize_t amdgpu_device_deinitialize = nullptr;
-    amdgpu_get_marketing_name_t amdgpu_get_marketing_name = nullptr;
+  // Function pointer typedefs
+  typedef int (*amdgpu_device_initialize_t)(int fd, uint32_t* major_version,
+                                            uint32_t* minor_version,
+                                            amdgpu_device_handle* device_handle);
+  typedef int (*amdgpu_device_deinitialize_t)(amdgpu_device_handle device_handle);
+  typedef const char* (*amdgpu_get_marketing_name_t)(amdgpu_device_handle device_handle);
+  amdgpu_device_initialize_t amdgpu_device_initialize = nullptr;
+  amdgpu_device_deinitialize_t amdgpu_device_deinitialize = nullptr;
+  amdgpu_get_marketing_name_t amdgpu_get_marketing_name = nullptr;
 
-    status = libdrm_amdgpu_.load_symbol(reinterpret_cast<void**>(&amdgpu_device_deinitialize),
-                                        "amdgpu_device_deinitialize");
-    if (status != AMDSMI_STATUS_SUCCESS) {
-      libdrm_amdgpu_.unload();
-      return status;
-    }
+  status = libdrm_amdgpu_.load_symbol(reinterpret_cast<void**>(&amdgpu_device_deinitialize),
+                                      "amdgpu_device_deinitialize");
+  if (status != AMDSMI_STATUS_SUCCESS) {
+    libdrm_amdgpu_.unload();
+    return status;
+  }
 
-    status = libdrm_amdgpu_.load_symbol(reinterpret_cast<void**>(&amdgpu_device_initialize),
-                                        "amdgpu_device_initialize");
-    if (status != AMDSMI_STATUS_SUCCESS) {
-      libdrm_amdgpu_.unload();
-      return status;
-    }
+  status = libdrm_amdgpu_.load_symbol(reinterpret_cast<void**>(&amdgpu_device_initialize),
+                                      "amdgpu_device_initialize");
+  if (status != AMDSMI_STATUS_SUCCESS) {
+    libdrm_amdgpu_.unload();
+    return status;
+  }
 
-    amdgpu_device_handle device_handle = nullptr;
-    uint32_t major_version, minor_version;
-    int ret = amdgpu_device_initialize(fd, &major_version, &minor_version, &device_handle);
-    if (ret != 0) {
-      amdgpu_device_deinitialize(device_handle);
-      libdrm_amdgpu_.unload();
-      return AMDSMI_STATUS_DRM_ERROR;
-    }
-
-    status = libdrm_amdgpu_.load_symbol(reinterpret_cast<void**>(&amdgpu_get_marketing_name),
-                                        "amdgpu_get_marketing_name");
-    if (status != AMDSMI_STATUS_SUCCESS) {
-      amdgpu_device_deinitialize(device_handle);
-      libdrm_amdgpu_.unload();
-      return status;
-    }
-
-    // Get the marketing name using libdrm's API
-    const char *name = amdgpu_get_marketing_name(device_handle);
-    if (name != nullptr) {
-        std::strncpy(market_name, name, AMDSMI_MAX_STRING_LENGTH - 1);
-        market_name[AMDSMI_MAX_STRING_LENGTH - 1] = '\0';
-        amdgpu_device_deinitialize(device_handle);
-        libdrm_amdgpu_.unload();
-        return AMDSMI_STATUS_SUCCESS;
-    }
-
+  amdgpu_device_handle device_handle = nullptr;
+  uint32_t major_version, minor_version;
+  int ret = amdgpu_device_initialize(fd, &major_version, &minor_version, &device_handle);
+  if (ret != 0) {
     amdgpu_device_deinitialize(device_handle);
     libdrm_amdgpu_.unload();
-    ss << __PRETTY_FUNCTION__ << " | path: " << path << "\n"
-       << " | fd: "<< std::dec << fd << "\n"
-       << " | Marketing Name: " << market_name << "\n"
-       << " | Returning: "
-       << smi_amdgpu_get_status_string(AMDSMI_STATUS_DRM_ERROR, false) << "\n";
-    LOG_INFO(ss);
     return AMDSMI_STATUS_DRM_ERROR;
+  }
+
+  status = libdrm_amdgpu_.load_symbol(reinterpret_cast<void**>(&amdgpu_get_marketing_name),
+                                      "amdgpu_get_marketing_name");
+  if (status != AMDSMI_STATUS_SUCCESS) {
+    amdgpu_device_deinitialize(device_handle);
+    libdrm_amdgpu_.unload();
+    return status;
+  }
+
+  // Get the marketing name using libdrm's API
+  const char* name = amdgpu_get_marketing_name(device_handle);
+  if (name != nullptr) {
+    std::strncpy(market_name, name, AMDSMI_MAX_STRING_LENGTH - 1);
+    market_name[AMDSMI_MAX_STRING_LENGTH - 1] = '\0';
+    amdgpu_device_deinitialize(device_handle);
+    libdrm_amdgpu_.unload();
+    return AMDSMI_STATUS_SUCCESS;
+  }
+
+  amdgpu_device_deinitialize(device_handle);
+  libdrm_amdgpu_.unload();
+  ss << __PRETTY_FUNCTION__ << " | path: " << path << "\n"
+     << " | fd: " << std::dec << fd << "\n"
+     << " | Marketing Name: " << market_name << "\n"
+     << " | Returning: " << smi_amdgpu_get_status_string(AMDSMI_STATUS_DRM_ERROR, false) << "\n";
+  LOG_INFO(ss);
+  return AMDSMI_STATUS_DRM_ERROR;
 }
 
 amdsmi_status_t smi_amdgpu_is_gpu_power_management_enabled(amd::smi::AMDSmiGPUDevice* device,
-        bool *enabled) {
-    if (enabled == nullptr) {
-        return AMDSMI_STATUS_API_FAILED;
-    }
+                                                           bool* enabled) {
+  if (enabled == nullptr) {
+    return AMDSMI_STATUS_API_FAILED;
+  }
 
-    SMIGPUDEVICE_MUTEX(device->get_mutex())
-    std::string fullpath = "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/pp_features");
-    std::ifstream fs(fullpath.c_str());
+  SMIGPUDEVICE_MUTEX(device->get_mutex())
+  std::string fullpath =
+      "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/pp_features");
+  std::ifstream fs(fullpath.c_str());
 
-    if (fs.fail()) {
-        return AMDSMI_STATUS_NOT_SUPPORTED;
-    }
+  if (fs.fail()) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
 
-    // ANY line must end with "enabled" and have space before it
-    const std::regex regex(R"(.*\senabled$)");
-    std::string line;
-    while (std::getline(fs, line)) {
-        // match the whole line against regex, not just substrings
-        if (std::regex_match(line, regex)) {
-            *enabled = true;
-            return AMDSMI_STATUS_SUCCESS;
-        }
+  // ANY line must end with "enabled" and have space before it
+  const std::regex regex(R"(.*\senabled$)");
+  std::string line;
+  while (std::getline(fs, line)) {
+    // match the whole line against regex, not just substrings
+    if (std::regex_match(line, regex)) {
+      *enabled = true;
+      return AMDSMI_STATUS_SUCCESS;
     }
-    *enabled = false;
-    return AMDSMI_STATUS_SUCCESS;
+  }
+  *enabled = false;
+  return AMDSMI_STATUS_SUCCESS;
 }
 
 std::string smi_amdgpu_split_string(std::string str, char delim) {
@@ -797,11 +781,11 @@ std::vector<std::string> split_string(const std::string& line, char delim) {
   while (start < line.size()) {
     auto pos = line.find(delim, start);
     if (pos == std::string::npos) {
-        pos = line.size();
+      pos = line.size();
     }
     std::string token = trim(line.substr(start, pos - start));
     if (!token.empty()) {
-        out.push_back(token);
+      out.push_back(token);
     }
     start = pos + 1;
   }
@@ -817,7 +801,7 @@ std::vector<std::string> split_string(const std::string& line, char delim) {
 // string - if fullStatus == false, returns a minimalized return value
 //      ex. 'RSMI_STATUS_SUCCESS'
 std::string smi_amdgpu_get_status_string(amdsmi_status_t ret, bool fullStatus = true) {
-  const char *err_str;
+  const char* err_str;
   amdsmi_status_code_to_string(ret, &err_str);
   if (!fullStatus) {
     return smi_amdgpu_split_string(std::string(err_str), ':');
@@ -825,14 +809,12 @@ std::string smi_amdgpu_get_status_string(amdsmi_status_t ret, bool fullStatus = 
   return std::string(err_str);
 }
 
-uint32_t smi_brcm_get_value_u32(const std::string &folder, const std::string &file_name) {
-
+uint32_t smi_brcm_get_value_u32(const std::string& folder, const std::string& file_name) {
   std::string file_path = folder + "/" + file_name;
   std::ifstream file(file_path.c_str(), std::ifstream::in);
   if (!file.is_open()) {
     return 0xFFFF;
-  }
-  else {
+  } else {
     std::string line;
     getline(file, line);
     return static_cast<uint32_t>(stoi(line));
@@ -841,15 +823,13 @@ uint32_t smi_brcm_get_value_u32(const std::string &folder, const std::string &fi
   return 0;
 }
 
-std::string smi_brcm_get_value_string(const std::string &folder, const std::string &file_name) {
-  
+std::string smi_brcm_get_value_string(const std::string& folder, const std::string& file_name) {
   std::stringstream temp;
   std::string file_path = folder + "/" + file_name;
   std::ifstream file(file_path.c_str(), std::ifstream::in);
   if (!file.is_open()) {
     return "N/A";
-  }
-  else {
+  } else {
     std::string line;
     while (std::getline(file, line)) {
       if (line.empty()) {
@@ -862,7 +842,7 @@ std::string smi_brcm_get_value_string(const std::string &folder, const std::stri
   return temp.str();
 }
 
-amdsmi_status_t smi_brcm_execute_cmd_get_data(const std::string &command, std::string *data) {
+amdsmi_status_t smi_brcm_execute_cmd_get_data(const std::string& command, std::string* data) {
   std::string result;
   char buffer[128];
 
@@ -883,7 +863,7 @@ amdsmi_status_t smi_brcm_execute_cmd_get_data(const std::string &command, std::s
 
 // TODO(amdsmi_team): Do we want to include these functions in header?
 amdsmi_status_t smi_amdgpu_get_device_index(amdsmi_processor_handle processor_handle,
-                                            uint32_t *device_index) {
+                                            uint32_t* device_index) {
   uint32_t socket_count;
   std::vector<amdsmi_socket_handle> sockets;
   std::ostringstream ss;
@@ -928,8 +908,7 @@ amdsmi_status_t smi_amdgpu_get_device_index(amdsmi_processor_handle processor_ha
         *device_index = current_device_index;
         ss << __PRETTY_FUNCTION__ << " | AMDSMI_STATUS_SUCCESS "
            << "Returning device_index: " << *device_index << "\nSocket #: " << i
-           << "; Device #: " << j << "; current_device_index #: " << current_device_index
-           << "\n";
+           << "; Device #: " << j << "; current_device_index #: " << current_device_index << "\n";
         LOG_DEBUG(ss);
         return AMDSMI_STATUS_SUCCESS;
       }
@@ -943,7 +922,7 @@ amdsmi_status_t smi_amdgpu_get_device_index(amdsmi_processor_handle processor_ha
 }
 
 // TODO(amdsmi_team): Do we want to include these functions in header?
-amdsmi_status_t smi_amdgpu_get_device_count(uint32_t *total_num_devices) {
+amdsmi_status_t smi_amdgpu_get_device_count(uint32_t* total_num_devices) {
   uint32_t socket_count;
   std::vector<amdsmi_socket_handle> sockets;
   std::ostringstream ss;
@@ -996,29 +975,26 @@ amdsmi_status_t smi_amdgpu_get_device_count(uint32_t *total_num_devices) {
 }
 
 amdsmi_status_t smi_amdgpu_get_ainic_processor_handle_by_index(
-    uint32_t device_index,
-    amdsmi_processor_handle *processor_handle) {
-
-    if(!processor_handle) {
-        return AMDSMI_STATUS_INVAL;
+    uint32_t device_index, amdsmi_processor_handle* processor_handle) {
+  if (!processor_handle) {
+    return AMDSMI_STATUS_INVAL;
+  }
+  for (const auto& socket : amd::smi::AMDSmiSystem::getInstance().get_sockets()) {
+    uint32_t idx = 0;
+    for (const auto& processor : socket->get_processors(AMDSMI_PROCESSOR_TYPE_AMD_NIC)) {
+      if (device_index == idx) {
+        *processor_handle = processor;
+        return AMDSMI_STATUS_SUCCESS;
+      }
+      idx++;
     }
-    for(const auto &socket: amd::smi::AMDSmiSystem::getInstance().get_sockets()) {
-        uint32_t idx = 0;
-        for(const auto &processor: socket->get_processors(AMDSMI_PROCESSOR_TYPE_AMD_NIC)) {
-            if (device_index == idx) {
-                *processor_handle = processor;
-                return AMDSMI_STATUS_SUCCESS;
-            }
-            idx++;
-        }
-    }
-    return AMDSMI_STATUS_API_FAILED;
+  }
+  return AMDSMI_STATUS_API_FAILED;
 }
 
 // TODO(amdsmi_team): Do we want to include these functions in header?
 amdsmi_status_t smi_amdgpu_get_processor_handle_by_index(
-                                        uint32_t device_index,
-                                        amdsmi_processor_handle *processor_handle) {
+    uint32_t device_index, amdsmi_processor_handle* processor_handle) {
   uint32_t socket_count;
   std::vector<amdsmi_socket_handle> sockets;
   std::ostringstream ss;
@@ -1065,8 +1041,7 @@ amdsmi_status_t smi_amdgpu_get_processor_handle_by_index(
            << "\nSocket #: " << i << "; Device #: " << j
            << "; current_device_index #: " << current_device_index
            << "; processor_handle: " << *processor_handle
-           << "; processor_handles[j]: " << processor_handles[j]
-           << "\n";
+           << "; processor_handles[j]: " << processor_handles[j] << "\n";
         LOG_DEBUG(ss);
         return AMDSMI_STATUS_SUCCESS;
       }
@@ -1080,64 +1055,61 @@ amdsmi_status_t smi_amdgpu_get_processor_handle_by_index(
 }
 
 int read_env_ms(const char* name, int def) {
-    if (const char* s = std::getenv(name)) {
-        try {
-            return std::max(0, std::stoi(s));
-        } catch (...) {
-            // Ignore error, fallback to passed in def
-        }
+  if (const char* s = std::getenv(name)) {
+    try {
+      return std::max(0, std::stoi(s));
+    } catch (...) {
+      // Ignore error, fallback to passed in def
     }
-    return def;
+  }
+  return def;
 }
 
 struct CperFileCtx {
-    amdsmi_status_t status = AMDSMI_STATUS_FILE_ERROR;
-    std::unique_ptr<char[]> buffer;
-    long file_size = 0;
+  amdsmi_status_t status = AMDSMI_STATUS_FILE_ERROR;
+  std::unique_ptr<char[]> buffer;
+  long file_size = 0;
 };
 
-
 uint64_t get_product_serial_number(amdsmi_processor_handle processor_handle) {
-    uint64_t serial_number = 0;
-    amdsmi_board_info_t board_info = {};
-    amdsmi_status_t status = amdsmi_get_gpu_board_info(processor_handle, &board_info);
-    if (status != AMDSMI_STATUS_SUCCESS) {
-        std::ostringstream ss;
-        ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ <<
-            "Failed to retrieve product serial number! error: " <<
-            static_cast<int>(status);
-        LOG_DEBUG(ss);
-        return serial_number;
-    }
-    if (!*board_info.product_serial) {
-        std::ostringstream ss;
-        ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ <<
-            " Product serial string is empty.";
-        LOG_DEBUG(ss);
-        return serial_number;
-    }
-    try {
-        serial_number = std::stoull(board_info.product_serial, nullptr, 10);
-    } catch (const std::invalid_argument& e) {
-        std::ostringstream ss;
-        ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ <<
-            " Invalid product serial string. Exception: " << e.what();
-        LOG_DEBUG(ss);
-        serial_number = 0;
-    } catch (const std::out_of_range& e) {
-        std::ostringstream ss;
-        ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ <<
-            " Product serial out of range, Exception: " << e.what();
-        LOG_DEBUG(ss);
-        serial_number = 0;
-    }
+  uint64_t serial_number = 0;
+  amdsmi_board_info_t board_info = {};
+  amdsmi_status_t status = amdsmi_get_gpu_board_info(processor_handle, &board_info);
+  if (status != AMDSMI_STATUS_SUCCESS) {
+    std::ostringstream ss;
+    ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__
+       << "Failed to retrieve product serial number! error: " << static_cast<int>(status);
+    LOG_DEBUG(ss);
     return serial_number;
+  }
+  if (!*board_info.product_serial) {
+    std::ostringstream ss;
+    ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << " Product serial string is empty.";
+    LOG_DEBUG(ss);
+    return serial_number;
+  }
+  try {
+    serial_number = std::stoull(board_info.product_serial, nullptr, 10);
+  } catch (const std::invalid_argument& e) {
+    std::ostringstream ss;
+    ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__
+       << " Invalid product serial string. Exception: " << e.what();
+    LOG_DEBUG(ss);
+    serial_number = 0;
+  } catch (const std::out_of_range& e) {
+    std::ostringstream ss;
+    ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__
+       << " Product serial out of range, Exception: " << e.what();
+    LOG_DEBUG(ss);
+    serial_number = 0;
+  }
+  return serial_number;
 }
 
-std::tuple<uint64_t,uint64_t,uint64_t,uint64_t> parse_bdfid(uint64_t bdfid) {
-    uint64_t domain = (bdfid >> 32) & 0xffffffff;
-    uint64_t bus = (bdfid >> 8) & 0xff;
-    uint64_t device_id = (bdfid >> 3) & 0x1f;
-    uint64_t function = bdfid & 0x7;
-    return std::tuple<uint64_t,uint64_t,uint64_t,uint64_t>(domain, bus, device_id, function);
+std::tuple<uint64_t, uint64_t, uint64_t, uint64_t> parse_bdfid(uint64_t bdfid) {
+  uint64_t domain = (bdfid >> 32) & 0xffffffff;
+  uint64_t bus = (bdfid >> 8) & 0xff;
+  uint64_t device_id = (bdfid >> 3) & 0x1f;
+  uint64_t function = bdfid & 0x7;
+  return std::tuple<uint64_t, uint64_t, uint64_t, uint64_t>(domain, bus, device_id, function);
 }
