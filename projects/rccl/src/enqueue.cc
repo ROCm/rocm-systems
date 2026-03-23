@@ -92,7 +92,7 @@ constexpr int rcclShmemDynamicSize(int cudaArch = NCCL_CUDA_ARCH, int WarpSize =
 }
 
 NCCL_PARAM(L1SharedMemoryCarveout, "L1_SHARED_MEMORY_CARVEOUT", 0);
-
+NCCL_PARAM(RootedCollBuffSize, "ROOTED_COLL_BUFFSIZE", 2097152);
 // Returns maximum kernel stack size of all CUDA kernels
 ncclResult_t ncclInitKernelsForDevice(int cudaArch, int maxSharedMem, size_t* maxStackSize) {
   constexpr int KernelCount = sizeof(ncclKerns)/sizeof(ncclKerns[0]);
@@ -2429,6 +2429,17 @@ static ncclResult_t calcCollChunking(
   int nstepsPerLoop, nchunksPerLoop;
   size_t loopOffset = 0;
   int stepSize   = comm->buffSizes[info->protocol]/NCCL_STEPS;
+  if ((info->func == ncclFuncBroadcast || info->func == ncclFuncReduce) && info->protocol == NCCL_PROTO_SIMPLE) {
+    int rootedCollBuffSize = rcclParamRootedCollBuffSize();
+    if (rootedCollBuffSize > 0) {
+      if (rootedCollBuffSize >= NCCL_STEPS) {
+        stepSize = rootedCollBuffSize / NCCL_STEPS;
+      } else {
+        WARN("RCCL_ROOTED_COLL_BUFFSIZE=%d is too small (must be >= %d bytes); ignoring override",
+          rootedCollBuffSize, NCCL_STEPS);
+      }
+    }
+  }
   int chunkSteps = (info->protocol == NCCL_PROTO_SIMPLE && info->algorithm == NCCL_ALGO_RING) ? info->chunkSteps : 1;
   int sliceSteps = (info->protocol == NCCL_PROTO_SIMPLE && info->algorithm == NCCL_ALGO_RING) ? info->sliceSteps : 1;
   int chunkSize = stepSize*chunkSteps;
