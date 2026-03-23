@@ -2887,6 +2887,138 @@ static void PatchElfMetadata(uint8_t* elf, size_t elf_size,
       }
     }
   }
+
+  // 4. Patch MSGPACK .vgpr_count and .sgpr_count to match the transpiled KD.
+  // The kernel descriptors were already patched for GFX9 (step 6 in TranspileCodeObject).
+  // Re-read RSRC1 from the first valid kernel descriptor to derive actual counts.
+  // This ensures the runtime's dispatch setup matches the actual register usage.
+  {
+    // Parse ELF section headers to find kernel descriptors in .rodata or .text.
+    uint64_t e_shoff = 0;
+    uint16_t e_shentsize = 0, e_shnum = 0, e_shstrndx = 0;
+    std::memcpy(&e_shoff,    elf + 40, 8);
+    std::memcpy(&e_shentsize, elf + 58, 2);
+    std::memcpy(&e_shnum,    elf + 60, 2);
+    std::memcpy(&e_shstrndx, elf + 62, 2);
+
+    // Locate section name string table (.shstrtab).
+    const char* shstrtab = nullptr;
+    uint64_t shstrtab_size = 0;
+    if (e_shstrndx < e_shnum && e_shoff + (uint64_t)(e_shstrndx + 1) * e_shentsize <= elf_size) {
+      const uint8_t* sh = elf + e_shoff + e_shstrndx * e_shentsize;
+      uint64_t off, sz;
+      std::memcpy(&off, sh + 24, 8);
+      std::memcpy(&sz,  sh + 32, 8);
+      if (off + sz <= elf_size) {
+        shstrtab = reinterpret_cast<const char*>(elf + off);
+        shstrtab_size = sz;
+      }
+    }
+
+    // Walk sections to find the first valid kernel descriptor.
+    // Prefer .rodata (where compiler-generated KDs live) over .text to avoid
+    // false-positives from code bytes when scanning .text at 256-byte steps.
+    uint32_t kd_vgpr_count = 0, kd_sgpr_count = 0;
+    bool found_kd = false;
+
+    // Build a list of candidate sections ordered: .rodata first, .text second.
+    struct SecCandidate { uint64_t off; uint64_t size; bool is_text; };
+    std::vector<SecCandidate> candidates;
+    for (uint16_t si = 0; si < e_shnum; ++si) {
+      if (e_shoff + (uint64_t)(si + 1) * e_shentsize > elf_size) break;
+      const uint8_t* sh = elf + e_shoff + si * e_shentsize;
+      uint32_t name_idx;
+      uint64_t sec_off, sec_size;
+      std::memcpy(&name_idx, sh,      4);
+      std::memcpy(&sec_off,  sh + 24, 8);
+      std::memcpy(&sec_size, sh + 32, 8);
+      if (sec_off + sec_size > elf_size) continue;
+      const char* sec_name = (shstrtab && name_idx < shstrtab_size)
+                             ? shstrtab + name_idx : "";
+      if (std::strcmp(sec_name, ".rodata") == 0)
+        candidates.insert(candidates.begin(), {sec_off, sec_size, false});
+      else if (std::strcmp(sec_name, ".text") == 0)
+        candidates.push_back({sec_off, sec_size, true});
+    }
+
+    for (const auto& cand : candidates) {
+      if (found_kd) break;
+      // Kernel descriptors are at 64-byte aligned offsets in .rodata, or 256-byte in .text.
+      uint64_t step = cand.is_text ? 256u : 64u;
+      for (uint64_t off = 0; off + 64 <= cand.size; off += step) {
+        uint64_t entry;
+        std::memcpy(&entry, elf + cand.off + off + 16, 8);
+        if (entry == 0 || entry > 1000000u) continue;  // not a valid kernel descriptor
+
+        // Read the already-patched GFX9 RSRC1 (written by PatchKernelDescriptorsForWave64).
+        // GFX9 RSRC1: bits [5:0] = SGPR field (gran=8), bits [11:6] = VGPR field (gran=4).
+        uint32_t rsrc1;
+        std::memcpy(&rsrc1, elf + cand.off + off + 48, 4);
+        uint32_t vgpr_field = (rsrc1 >> 6) & 0x3Fu;
+        uint32_t sgpr_field = rsrc1 & 0x3Fu;
+        kd_vgpr_count = (vgpr_field + 1u) * 4u;   // GFX9 wave64 VGPR granularity = 4
+        kd_sgpr_count = (sgpr_field + 1u) * 8u;   // GFX9 SGPR granularity = 8
+        std::cerr << "hotswap: transpile: KD-derived vgpr_count=" << kd_vgpr_count
+                  << " sgpr_count=" << kd_sgpr_count << " (from patched RSRC1=0x"
+                  << std::hex << rsrc1 << std::dec << ")\n";
+        found_kd = true;
+        break;
+      }
+    }
+
+    if (found_kd) {
+      // Patch a MSGPACK integer field in-place.
+      // MSGPACK encoding for the value byte(s) immediately following the key string:
+      //   0x00-0x7F : positive fixint (single byte, value 0-127)
+      //   0xCC, val : uint8  (two bytes, value 0-255)
+      //   0xCD, hi, lo : uint16 big-endian (three bytes, value 0-65535)
+      // We patch in-place; if the new value needs more bytes than the original encoding,
+      // we log a warning and skip (cannot safely expand the binary blob).
+      auto patch_msgpack_key = [&](const char* key, size_t key_len, uint32_t new_val,
+                                   const char* key_name) {
+        for (size_t i = 0; i + key_len + 1 <= elf_size; ++i) {
+          if (std::memcmp(elf + i, key, key_len) != 0) continue;
+          uint8_t* vp = elf + i + key_len;
+          uint8_t enc = *vp;
+          if (enc <= 0x7Fu) {
+            // Original is positive fixint.
+            if (new_val <= 0x7Fu) {
+              std::cerr << "hotswap: transpile: patched MSGPACK " << key_name
+                        << " " << (uint32_t)enc << " → " << new_val << "\n";
+              *vp = static_cast<uint8_t>(new_val);
+            } else {
+              std::cerr << "hotswap: transpile: WARNING: cannot patch MSGPACK " << key_name
+                        << " in-place (new_val=" << new_val << " > 127, orig fixint "
+                        << (uint32_t)enc << ")\n";
+            }
+          } else if (enc == 0xCCu && i + key_len + 2 <= elf_size) {
+            // uint8 format: [0xCC, val].
+            if (new_val <= 0xFFu) {
+              std::cerr << "hotswap: transpile: patched MSGPACK " << key_name
+                        << " " << (uint32_t)vp[1] << " → " << new_val << "\n";
+              vp[1] = static_cast<uint8_t>(new_val);
+            } else {
+              std::cerr << "hotswap: transpile: WARNING: cannot patch MSGPACK " << key_name
+                        << " in-place (new_val=" << new_val << " > 255, orig uint8)\n";
+            }
+          } else if (enc == 0xCDu && i + key_len + 3 <= elf_size) {
+            // uint16 big-endian format: [0xCD, hi, lo].
+            if (new_val <= 0xFFFFu) {
+              std::cerr << "hotswap: transpile: patched MSGPACK " << key_name
+                        << " " << (uint32_t)((vp[1] << 8) | vp[2]) << " → " << new_val << "\n";
+              vp[1] = static_cast<uint8_t>((new_val >> 8) & 0xFF);
+              vp[2] = static_cast<uint8_t>(new_val & 0xFF);
+            }
+          }
+          // Patch all occurrences (one per kernel in multi-kernel ELFs).
+          // Continue scanning so all kernels' metadata gets updated.
+        }
+      };
+
+      patch_msgpack_key(".vgpr_count", 11, kd_vgpr_count, ".vgpr_count");
+      patch_msgpack_key(".sgpr_count", 11, kd_sgpr_count, ".sgpr_count");
+    }
+  }
 }
 
 }  // anonymous namespace
