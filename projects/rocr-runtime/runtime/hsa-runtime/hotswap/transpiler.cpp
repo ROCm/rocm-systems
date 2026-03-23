@@ -3511,7 +3511,7 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
       // The unrolled path (.L_br27) produces zeros on GFX9.
       // Set s9=0 so the .L_br24 branch to .L_br26 is always taken.
       // Set s5=0 and s8=N (original) so the remainder processes all N elements.
-      if (stats->total_instructions < 560) {
+      if (stats->total_instructions < 600) {
         auto replaceFirst = [](std::string& s, const std::string& from, const std::string& to) {
           size_t pos = s.find(from);
           if (pos != std::string::npos) s.replace(pos, from.size(), to);
@@ -3524,7 +3524,7 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
           "s_mov_b32 s9, 0  ; FIX: force s9=0 (go to remainder path)\n");
       }
       // Fix 1: tree reduction stride (attn_forward only, not multihead).
-      if (stats->total_instructions < 560) {
+      if (stats->total_instructions < 600) {
         size_t br12_pos = translated_asm.find(".L_br12:\n");
         if (br12_pos != std::string::npos) {
           std::string target = "v_lshrrev_b32_e32 v3, 1, v1\n";
@@ -3546,7 +3546,7 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
       // Target: insert before "s_cbranch_execz .L_br11" in the output section.
       // Use the unique pattern "s_xor_b32 s0, exec_lo, s1\ns_cbranch_execz .L_br11"
       // Fix 2: s10 hoist
-      if (stats->total_instructions < 560) {
+      if (stats->total_instructions < 600) {
         std::string ka_pair = "s[30:31]";
         size_t ka_pos = translated_asm.find("; save kernarg ptr lo");
         if (ka_pos != std::string::npos) {
@@ -3602,7 +3602,7 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
       // s3 is overwritten by v_readfirstlane (float(D)) during sqrt computation.
       // v1 (the sqrt chain result) is 0 on GFX9 (chain produces wrong value).
       // Fix: recompute both before the outer loop.
-      if (stats->total_instructions < 560) {
+      if (stats->total_instructions < 600) {
         std::string target = "s_branch .L_br4\n";
         size_t pos = translated_asm.find(target);
         if (pos != std::string::npos) {
@@ -3624,7 +3624,7 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
       // s0 = pre-v_cmpx exec (all threads). v_cmpx set exec to D threads.
       // Insert v_cmp_gt_u32 to get N-thread mask, OR into exec.
       // Then before inner product (.L_br24): the code already has its own exec management.
-      if (stats->total_instructions < 560) {
+      if (stats->total_instructions < 600) {
         // Find the v_cmpx in the output section (after .L_br22)
         size_t cmpx_pos = translated_asm.find("v_cmpx_gt_i32 s6, v0\n");
         if (cmpx_pos != std::string::npos) {
@@ -3653,7 +3653,7 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
     //              dO[8]    = max value from find-max
     //              dO[9..12] = LDS[0..3] after normalize (softmax weights)
     if (std::getenv("HSA_HOTSWAP_LDS_DUMP") && stats->total_instructions > 400 &&
-        stats->total_instructions < 560 &&
+        stats->total_instructions < 600 &&
         translated_asm.find(".L_br28:") != std::string::npos) {
       // (s3+v1 fix moved to main fix block above)
       // Minimal dump: just LDS[0] and LDS[4] (the two dot products) at .L_br3 entry.
