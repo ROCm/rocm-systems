@@ -6,25 +6,6 @@
 #
 include_guard(GLOBAL)
 
-set(_capchk_dir ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests)
-set(_capchk_exe ${_capchk_dir}/rocprof-sys-capchk)
-file(MAKE_DIRECTORY ${_capchk_dir})
-execute_process(
-    COMMAND
-        ${CMAKE_CXX_COMPILER} -O2 -g -std=c++17
-        ${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-capchk.cpp -o rocprof-sys-capchk
-    WORKING_DIRECTORY ${_capchk_dir}
-    OUTPUT_QUIET
-    ERROR_QUIET
-    RESULT_VARIABLE _capchk_result
-)
-if(NOT _capchk_result EQUAL 0)
-    message(
-        WARNING
-        "rocprof-sys-capchk build failed (result ${_capchk_result}); install of capability checker will be skipped."
-    )
-endif()
-
 # TODO: Remove this once TheRock is switched to CTests
 if(ROCPROFSYS_BUILD_FOR_THEROCK)
     # Required to maintain compatibility with TheRock until it can be switched to CTests
@@ -54,6 +35,21 @@ set(ROCPROFSYS_TEST_SCRIPTS
     ${CMAKE_CURRENT_LIST_DIR}/generate_papi_nic_events.sh
 )
 
+set(_capchk_dir ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests)
+add_executable(
+    rocprof-sys-capchk
+    EXCLUDE_FROM_ALL
+    ${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-capchk.cpp
+)
+set_target_properties(
+    rocprof-sys-capchk
+    PROPERTIES
+        CXX_STANDARD 17
+        CXX_STANDARD_REQUIRED ON
+        CXX_EXTENSIONS OFF
+        RUNTIME_OUTPUT_DIRECTORY "${_capchk_dir}"
+)
+
 add_custom_target(
     copy-test-files
     ALL
@@ -74,6 +70,7 @@ add_custom_target(
         ${CMAKE_COMMAND} -E copy_if_different ${ROCPROFSYS_TEST_SCRIPTS}
         ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests
 )
+add_dependencies(copy-test-files rocprof-sys-capchk)
 
 # ------------------------------------------------------------------------------#
 #
@@ -100,11 +97,10 @@ if(ROCPROFSYS_INSTALL_TESTING)
         COMPONENT rocprofiler-systems-tests
     )
     # Capability check binary
-    if(EXISTS "${_capchk_exe}")
-        install(
-            PROGRAMS ${_capchk_exe}
+    install(
+        TARGETS rocprof-sys-capchk
+        RUNTIME
             DESTINATION share/rocprofiler-systems/tests
             COMPONENT rocprofiler-systems-tests
-        )
-    endif()
+    )
 endif()

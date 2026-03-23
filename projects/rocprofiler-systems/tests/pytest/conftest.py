@@ -10,7 +10,7 @@ This module provides shared fixtures and configuration for all test modules.
 from __future__ import annotations
 from pathlib import Path
 from functools import lru_cache
-from typing import Callable, Generator, Literal, Optional
+from typing import Callable, Generator, Optional
 
 import re
 import os
@@ -1752,7 +1752,7 @@ def run_test(
         env: Optional[dict[str, str]] = None,
         run_args: Optional[list[str]] = None,
         pre_run_args: Optional[list[str]] = None,
-        launcher: Optional[Literal["mpi", "shmem"]] = None,
+        launcher: Optional[BaselineRunner.Launcher | str] = None,
         num_procs: int = 0,
         working_directory: Optional[Path] = None,
         check_target_arch: bool = False,

@@ -15,11 +15,12 @@ Provides classes for running tests with:
 from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from enum import Enum
 import os
 from pathlib import Path
 import shutil
 import subprocess
-from typing import Literal, Optional
+from typing import Optional
 from .config import RocprofsysConfig
 
 
@@ -157,6 +158,22 @@ class TestResult:
 class BaseRunner(ABC):
     """Abstract base class for test runners."""
 
+    class Launcher(str, Enum):
+        """Supported launcher types for multi-process test execution."""
+
+        MPI = "mpi"
+        SHMEM = "shmem"
+
+        def get_executable(self, capabilities) -> Optional[Path]:
+            return {
+                type(self).MPI: capabilities.mpiexec_exec,
+                type(self).SHMEM: capabilities.oshrun_exec,
+            }[self]
+
+        @property
+        def supports_oversubscribe_probe(self) -> bool:
+            return self is type(self).MPI
+
     def __init__(
         self,
         config: RocprofsysConfig,
@@ -167,8 +184,7 @@ class BaseRunner(ABC):
         pre_run_args: Optional[list[str]] = None,
         env: Optional[dict[str, str]] = None,
         timeout: int = 300,
-        # Launchers for binaries (e.g., mpi -> mpirun, shmem -> oshrun)
-        launcher: Optional[Literal["mpi", "shmem"]] = None,
+        launcher: Optional[BaseRunner.Launcher | str] = None,
         num_procs: int = 0,
         working_directory: Optional[Path] = None,
         no_base_env: bool = False,
@@ -180,7 +196,13 @@ class BaseRunner(ABC):
         self.run_args = run_args or []
         self.pre_run_args = pre_run_args or []
         self.timeout = timeout
-        self.launcher = launcher
+        try:
+            self.launcher = None if launcher is None else self.Launcher(launcher)
+        except ValueError as exc:
+            valid_launchers = ", ".join(_launcher.value for _launcher in self.Launcher)
+            raise ValueError(
+                f"Unknown launcher: {launcher!r}. Expected one of: {valid_launchers}"
+            ) from exc
         self.num_procs = num_procs
         self.working_directory = working_directory or config.rocprofsys_build_dir
         self.env = config.get_fundamental_environment()
@@ -213,12 +235,7 @@ class BaseRunner(ABC):
         if self.launcher is None or self.num_procs == 0:
             return command
 
-        if self.launcher == "mpi":
-            launcher_exec = self.config.capabilities.mpiexec_exec
-        elif self.launcher == "shmem":
-            launcher_exec = self.config.capabilities.oshrun_exec
-        else:
-            raise ValueError(f"Unknown launcher: {self.launcher!r}")
+        launcher_exec = self.launcher.get_executable(self.config.capabilities)
 
         if launcher_exec is None:
             return command
@@ -229,7 +246,7 @@ class BaseRunner(ABC):
             str(self.num_procs),
         ]
 
-        if self.launcher == "mpi":
+        if self.launcher.supports_oversubscribe_probe:
             try:
                 result = subprocess.run(
                     [str(launcher_exec), "--oversubscribe", "-n", "1", "true"],

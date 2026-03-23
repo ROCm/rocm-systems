@@ -127,9 +127,16 @@ endif()
 # Dependencies
 # ---------------------------------------------------------------------------
 
-# Pytest config has a hard dependency on the base executables
-set(PYTEST_DEPENDENCIES
+# Pytest config needs the copied pytest tree as an input to generation
+set(PYTEST_GENERATE_DEPENDENCIES
     copy-pytest-files
+    ${ROCPROFSYS_PYTEST_PACKAGE_FILES}
+    ${ROCPROFSYS_PYTEST_FILES}
+)
+
+# The pytest CTest generation must wait for the base executables to exist,
+# but relinking them should not invalidate the generated CTest file.
+set(PYTEST_TARGET_DEPENDENCIES
     rocprofiler-systems-instrument
     rocprofiler-systems-sample
     rocprofiler-systems-run
@@ -138,7 +145,7 @@ set(PYTEST_DEPENDENCIES
 )
 # Versioned python tests require a matching version of libpyrocprofsys
 if(TARGET libpyrocprofsys)
-    list(APPEND PYTEST_DEPENDENCIES libpyrocprofsys)
+    list(APPEND PYTEST_TARGET_DEPENDENCIES libpyrocprofsys)
 endif()
 
 # ---------------------------------------------------------------------------
@@ -187,19 +194,25 @@ endif()
 # ---------------------------------------------------------------------------
 # Generate CTestTestfile.cmake
 # ---------------------------------------------------------------------------
+
+# Use a stamp file as the tracked output to avoid colliding with the
+# CTestTestfile.cmake that CMake auto-generates at configure time.
+# Deleted on configure so the first build after reconfigure always regenerates
+set(_PYTEST_CTEST_STAMP "${CMAKE_BINARY_DIR}/tests/.pytest_ctest_stamp")
+file(REMOVE "${_PYTEST_CTEST_STAMP}")
+
 add_custom_command(
-    OUTPUT "${ROCPROFSYS_PYTEST_CTEST_FILE}"
+    OUTPUT "${_PYTEST_CTEST_STAMP}"
     COMMAND ${CMAKE_COMMAND} -E env PYTHONDONTWRITEBYTECODE=1 ${_generate_args}
-    DEPENDS
-        ${PYTEST_DEPENDENCIES}
-        ${ROCPROFSYS_PYTEST_PACKAGE_FILES}
-        ${ROCPROFSYS_PYTEST_FILES}
+    COMMAND ${CMAKE_COMMAND} -E touch "${_PYTEST_CTEST_STAMP}"
+    DEPENDS ${PYTEST_GENERATE_DEPENDENCIES}
     WORKING_DIRECTORY "${ROCPROFSYS_PYTEST_BUILD_DIR}"
     COMMENT "Generating CTest definitions from pytest suite"
     VERBATIM
 )
 
-add_custom_target(generate-pytest-ctests ALL DEPENDS "${ROCPROFSYS_PYTEST_CTEST_FILE}")
+add_custom_target(generate-pytest-ctests ALL DEPENDS "${_PYTEST_CTEST_STAMP}")
+add_dependencies(generate-pytest-ctests ${PYTEST_TARGET_DEPENDENCIES})
 
 if(ROCPROFSYS_INSTALL_TESTING)
     install(
