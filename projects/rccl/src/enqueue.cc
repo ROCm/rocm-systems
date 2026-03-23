@@ -3092,7 +3092,7 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
     NCCLCHECK(hostToDevRedOp(&opDev, info->op, info->datatype, comm));
 
     if (comm->nRanks == 1) {
-      NCCLCHECK(ncclLaunchOneRank(info->recvbuff, info->sendbuff, info->count, opDev, info->datatype, info->stream));
+      NCCLCHECK(ncclLaunchOneRank(info->recvbuff, info->sendbuff, info->count, opDev, info->datatype, info->stream, info->acc));
       return ncclSuccess;
     } else {
       struct ncclDevrWindow* sendWin;
