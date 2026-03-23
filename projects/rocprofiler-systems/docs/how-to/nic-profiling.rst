@@ -13,7 +13,7 @@ Network performance profiling
 
 .. _event-based-profiling:
 
-Sampling conventional NIC metric using PAPI
+Sampling conventional NIC metrics using PAPI
 ============================================
 
 Network performance profiling for conventional network interfaces that support TCP/IP is done using Performance Application Programming Interface (PAPI). This method profiles standard network events. You can sample the events based on standard network interface counters. Follow the steps to list all the network events, sample them using configuration parameters, instrument and run the generated binary, and visualize the Perfetto trace.
