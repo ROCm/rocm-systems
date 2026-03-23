@@ -590,9 +590,10 @@
           else
             printf("  Total errors printed: %d\n", errCount);
 
-          // ---- Error histogram by (source_rank, channel) ----
+          // ---- Error histogram + classification by (source_rank, channel) ----
           int histSize = nranks * nCh;
           int64_t* hist = (int64_t*)calloc(histSize, sizeof(int64_t));
+          int64_t errNaN = 0, errWrongRank = 0, errWrongCh = 0, errCorrupt = 0;
           if (hist) {
             for (size_t j = 0; j < totalFloats; j++) {
               uint32_t gb, eb;
@@ -605,8 +606,32 @@
                 if (sr >= nranks) sr = nranks - 1;
                 if (ch >= nCh) ch = nCh - 1;
                 hist[sr * nCh + ch]++;
+
+                float gv = dataHost[j];
+                if (gv != gv) {
+                  errNaN++;
+                } else {
+                  int gr, gc;
+                  decodePerChannelValue(gv, nCh, nranks, fillModeEnv, &gr, &gc);
+                  if (gr < 0 || gr >= nranks || gc < 0 || gc >= nCh) {
+                    errCorrupt++;
+                  } else if (gr != sr) {
+                    errWrongRank++;
+                  } else if (gc != ch) {
+                    errWrongCh++;
+                  } else {
+                    errCorrupt++;
+                  }
+                }
               }
             }
+
+            printf("\n  Error classification:\n");
+            printf("    NaN (unwritten) : %lld\n", (long long)errNaN);
+            printf("    Wrong rank      : %lld\n", (long long)errWrongRank);
+            printf("    Wrong channel   : %lld\n", (long long)errWrongCh);
+            printf("    Corrupt/other   : %lld\n", (long long)errCorrupt);
+
             printf("\n  Error histogram by (src_rank, channel):\n");
             for (int sr = 0; sr < nranks; sr++) {
               for (int ch = 0; ch < nCh; ch++) {
