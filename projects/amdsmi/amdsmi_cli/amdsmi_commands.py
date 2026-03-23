@@ -7498,14 +7498,12 @@ class AMDSMICommands:
                 else:
                     boost_limit = int(boost_limit)
 
-                if boost_limit < args.core_boost_limit[0][0]:
-                    static_dict["set_core_boost_limit"]["Response"] = (
-                        f"Max allowed boostlimit is {boost_limit} MHz"
-                    )
+                if boost_limit < args.core_boost_limit[0][0]: 
+                    print(f"Max allowed boostlimit is {boost_limit} MHz")
+                    sys.exit(0)
                 elif boost_limit > args.core_boost_limit[0][0]:
-                    static_dict["set_core_boost_limit"]["Response"] = (
-                        f"Min allowed boostlimit is {boost_limit} MHz"
-                    )
+                    print(f"Min allowed boostlimit is {boost_limit} MHz")
+                    sys.exit(0)
                 else:
                     static_dict["set_core_boost_limit"]["Response"] = f"{boost_limit} MHz"
             except amdsmi_exception.AmdSmiLibraryException as e:
@@ -7767,6 +7765,7 @@ class AMDSMICommands:
                 amdsmi_interface.amdsmi_set_cpu_socket_power_cap(args.cpu, args.cpu_pwr_limit[0][0])
                 if args.cpu_pwr_limit[0][0] > max_power:
                     args.cpu_pwr_limit[0][0] = max_power
+                    print(f"maximum allowed power limit is {max_power}")  
                 static_dict["set_pwr_limit"]["Response"] = (
                     f"{args.cpu_pwr_limit[0][0] / 1000:.3f} mW"
                 )
@@ -7817,6 +7816,7 @@ class AMDSMICommands:
 
         if args.cpu_pwr_eff_mode:
             static_dict["pwr_eff_mode"] = {}
+            print(f"Mode values between 0 to 5")
             try:
                 mode = args.cpu_pwr_eff_mode[0][0]
                 util = (
