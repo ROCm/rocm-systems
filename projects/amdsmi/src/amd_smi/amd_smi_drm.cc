@@ -137,7 +137,7 @@ amdsmi_status_t AMDSmiDrm::init() {
         vendor_id = device->deviceinfo.pci->vendor_id;
         drm_free_device(&device);
       } else {
-        drm_free_device(&device);
+        //drm_free_device(&device);
       }
       drm_free_version(version);
     }
