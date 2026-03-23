@@ -222,7 +222,7 @@ void TeamBroadcastTester<T1>::verifyResults(size_t size) {
    */
   for (unsigned int wg_id = 0; wg_id < args.num_wgs; wg_id++) {
     for (int i = 0; i < num_elems; i++) {
-      idx = wg_id * num_elems + static_cast<int>(i);
+      idx = wg_id * num_elems + i;
       if constexpr (std::is_same<T1, char>::value ||
                     std::is_same<T1, signed char>::value ||
                     std::is_same<T1, unsigned char>::value) {
