@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /*
 hipMalloc3D API test scenarios
@@ -67,7 +54,7 @@ static void Malloc3DThreadFunc(int gpu) { MemoryAlloc3DDiffSizes(gpu); }
  * allocation whose combined size goes over PalSettings::subAllocationChunkSize_;
  * hipMemGetInfo() should indicate the memory went down after we hipFree() all of them
  */
-TEST_CASE("Unit_hipMalloc3D_Basic") {
+HIP_TEST_CASE(Unit_hipMalloc3D_Basic) {
   CHECK_IMAGE_SUPPORT
 
   static constexpr int ChunkSize = 64;  // (in megabytes)
@@ -116,7 +103,7 @@ TEST_CASE("Unit_hipMalloc3D_Basic") {
 This testcase verifies the hipMalloc3D API by allocating
 smaller and big chunk data.
 */
-TEST_CASE("Unit_hipMalloc3D_SmallandBigChunks") {
+HIP_TEST_CASE(Unit_hipMalloc3D_SmallandBigChunks) {
   CHECK_IMAGE_SUPPORT
 
   MemoryAlloc3DDiffSizes(0);
@@ -127,7 +114,7 @@ This testcase verifies the hipMalloc3D API in multithreaded
 scenario by launching threads in parallel on multiple GPUs
 and verifies the hipMalloc3D API with small and big chunks data
 */
-TEST_CASE("Unit_hipMalloc3D_MultiThread", "[multigpu]") {
+HIP_TEST_CASE(Unit_hipMalloc3D_MultiThread) {
   CHECK_IMAGE_SUPPORT
 
   std::vector<std::thread> threadlist;

@@ -22,11 +22,9 @@
 #include <stdexcept>
 #include <string>
 
-#if ROCPROFSYS_USE_ROCM > 0
-#    include "library/rocprofiler-sdk/fwd.hpp"
-#    include <rocprofiler-sdk/context.h>
-#    include <rocprofiler-sdk/version.h>
-#endif
+#include "library/rocprofiler-sdk/fwd.hpp"
+#include <rocprofiler-sdk/context.h>
+#include <rocprofiler-sdk/version.h>
 
 namespace rocprofsys
 {
@@ -35,20 +33,17 @@ namespace trace_cache
 namespace
 {
 
-#if ROCPROFSYS_USE_ROCM > 0
 auto
 get_handle_from_code_object(
     const rocprofiler_callback_tracing_code_object_load_data_t& code_object)
 {
-#    if(ROCPROFILER_VERSION >= 600)
+#if(ROCPROFILER_VERSION >= 600)
     return code_object.agent_id.handle;
-#    else
+#else
     return code_object.rocp_agent.handle;
-#    endif
-}
 #endif
+}
 
-#if ROCPROFSYS_USE_ROCM > 0
 using memory_operation = std::string;
 using memory_type      = std::string;
 std::pair<memory_operation, memory_type>
@@ -77,13 +72,11 @@ parse_memory_operation_name(std::string_view memory_operation_name)
 
     return item->second;
 }
-#endif
 }  // namespace
 
 void
-rocpd_processor_t::handle([[maybe_unused]] const kernel_dispatch_sample& _kds)
+rocpd_processor_t::handle(const kernel_dispatch_sample& _kds)
 {
-#if ROCPROFSYS_USE_ROCM > 0
     auto& n_info  = node_info::get_instance();
     auto  process = m_metadata->get_process_info();
     auto  agent_primary_key =
@@ -119,13 +112,11 @@ rocpd_processor_t::handle([[maybe_unused]] const kernel_dispatch_sample& _kds)
         _kds.workgroup_size_x, _kds.workgroup_size_y, _kds.workgroup_size_z,
         _kds.grid_size_x, _kds.grid_size_y, _kds.grid_size_z, region_name_primary_key,
         event_id);
-#endif
 }
 
 void
-rocpd_processor_t::handle([[maybe_unused]] const scratch_memory_sample& _sms)
+rocpd_processor_t::handle(const scratch_memory_sample& _sms)
 {
-#if ROCPROFSYS_USE_ROCM > 0
     auto& n_info  = node_info::get_instance();
     auto  process = m_metadata->get_process_info();
 
@@ -159,13 +150,11 @@ rocpd_processor_t::handle([[maybe_unused]] const scratch_memory_sample& _sms)
         memory_operation.c_str(), memory_type.c_str(), _sms.start_timestamp,
         _sms.end_timestamp, address_value, _sms.allocation_size, _sms.queue_id_handle,
         _sms.stream_handle, event_primary_key, extdata_json_str.c_str());
-#endif
 }
 
 void
-rocpd_processor_t::handle([[maybe_unused]] const memory_copy_sample& _mcs)
+rocpd_processor_t::handle(const memory_copy_sample& _mcs)
 {
-#if ROCPROFSYS_USE_ROCM > 0
     auto& n_info  = node_info::get_instance();
     auto  process = m_metadata->get_process_info();
 
@@ -198,13 +187,12 @@ rocpd_processor_t::handle([[maybe_unused]] const memory_copy_sample& _mcs)
         _mcs.end_timestamp, name_primary_key, dst_agent_primary_key,
         _mcs.dst_address_value, src_agent_primary_key, _mcs.src_address_value, _mcs.bytes,
         queue_id, _mcs.stream_handle, name_primary_key, event_primary_key);
-#endif
 }
 
 void
 rocpd_processor_t::handle([[maybe_unused]] const memory_allocate_sample& _mas)
 {
-#if ROCPROFSYS_USE_ROCM > 0 && (ROCPROFILER_VERSION >= 600)
+#if(ROCPROFILER_VERSION >= 600)
     auto& n_info  = node_info::get_instance();
     auto  process = m_metadata->get_process_info();
     auto  thread_primary_key =
@@ -245,9 +233,8 @@ rocpd_processor_t::handle([[maybe_unused]] const memory_allocate_sample& _mas)
 }
 
 void
-rocpd_processor_t::handle([[maybe_unused]] const region_sample& _rs)
+rocpd_processor_t::handle(const region_sample& _rs)
 {
-#if ROCPROFSYS_USE_ROCM > 0
     auto& n_info  = node_info::get_instance();
     auto  process = m_metadata->get_process_info();
     auto  thread_primary_key =
@@ -275,13 +262,11 @@ rocpd_processor_t::handle([[maybe_unused]] const region_sample& _rs)
     m_data_processor->insert_region(n_info.id, process.pid, thread_primary_key,
                                     _rs.start_timestamp, _rs.end_timestamp,
                                     name_primary_key, event_primary_key);
-#endif
 }
 
 void
-rocpd_processor_t::handle([[maybe_unused]] const backtrace_region_sample& _bts)
+rocpd_processor_t::handle(const backtrace_region_sample& _bts)
 {
-#if ROCPROFSYS_USE_ROCM > 0
     auto& n_info  = node_info::get_instance();
     auto  process = m_metadata->get_process_info();
     auto  thread_primary_key =
@@ -298,13 +283,11 @@ rocpd_processor_t::handle([[maybe_unused]] const backtrace_region_sample& _bts)
                                     name_primary_key, event_primary_key);
     m_data_processor->insert_sample(_bts.track_name.c_str(), _bts.start_timestamp,
                                     event_primary_key);
-#endif
 }
 
 void
-rocpd_processor_t::handle([[maybe_unused]] const in_time_sample& _its)
+rocpd_processor_t::handle(const in_time_sample& _its)
 {
-#if ROCPROFSYS_USE_ROCM > 0
     auto track_primary_key = m_data_processor->insert_string(_its.track_name.c_str());
 
     auto event_id = m_data_processor->insert_event(
@@ -312,13 +295,11 @@ rocpd_processor_t::handle([[maybe_unused]] const in_time_sample& _its)
         _its.call_stack.c_str(), _its.line_info.c_str(), _its.event_metadata.c_str());
     m_data_processor->insert_sample(_its.track_name.c_str(), _its.timestamp_ns, event_id,
                                     "{}");
-#endif
 }
 
 void
-rocpd_processor_t::handle([[maybe_unused]] const pmc_event_with_sample& _pmc)
+rocpd_processor_t::handle(const pmc_event_with_sample& _pmc)
 {
-#if ROCPROFSYS_USE_ROCM > 0
     auto track_primary_key = m_data_processor->insert_string(_pmc.track_name.c_str());
 
     auto agent_primary_key =
@@ -336,14 +317,11 @@ rocpd_processor_t::handle([[maybe_unused]] const pmc_event_with_sample& _pmc)
     m_data_processor->insert_pmc_event(event_id, agent_primary_key,
                                        _pmc.pmc_info_name.c_str(), _pmc.value,
                                        _pmc.event_metadata.c_str());
-#endif
 }
 
 void
-rocpd_processor_t::handle([[maybe_unused]] const amd_smi_sample& _amd_smi)
+rocpd_processor_t::handle(const amd_smi_sample& _amd_smi)
 {
-#if ROCPROFSYS_USE_ROCM > 0
-
     const auto* _name            = trait::name<category::amd_smi>::value;
     auto        name_primary_key = m_data_processor->insert_string(_name);
     auto        event_id = m_data_processor->insert_event(name_primary_key, 0, 0, 0);
@@ -360,16 +338,17 @@ rocpd_processor_t::handle([[maybe_unused]] const amd_smi_sample& _amd_smi)
     };
 
     using pos = trace_cache::amd_smi_sample::settings_positions;
-    std::bitset<8> settings_bits(_amd_smi.settings);
-    bool           is_busy_enabled  = settings_bits.test(static_cast<int>(pos::busy));
-    bool           is_temp_enabled  = settings_bits.test(static_cast<int>(pos::temp));
-    bool           is_power_enabled = settings_bits.test(static_cast<int>(pos::power));
+    std::bitset<16> settings_bits(_amd_smi.settings);
+    bool            is_busy_enabled  = settings_bits.test(static_cast<int>(pos::busy));
+    bool            is_temp_enabled  = settings_bits.test(static_cast<int>(pos::temp));
+    bool            is_power_enabled = settings_bits.test(static_cast<int>(pos::power));
     bool is_mem_usage_enabled = settings_bits.test(static_cast<int>(pos::mem_usage));
 
     bool is_vcn_enabled  = settings_bits.test(static_cast<int>(pos::vcn_activity));
     bool is_jpeg_enabled = settings_bits.test(static_cast<int>(pos::jpeg_activity));
     bool is_xgmi_enabled = settings_bits.test(static_cast<int>(pos::xgmi));
     bool is_pcie_enabled = settings_bits.test(static_cast<int>(pos::pcie));
+    bool is_sdma_enabled = settings_bits.test(static_cast<int>(pos::sdma_usage));
 
     insert_event_and_sample(
         is_busy_enabled, trait::name<category::amd_smi_gfx_busy>::value,
@@ -403,6 +382,13 @@ rocpd_processor_t::handle([[maybe_unused]] const amd_smi_sample& _amd_smi)
         info::annotate_with_device_id<category::amd_smi_memory_usage>(_amd_smi.device_id)
             .c_str(),
         mem_usage_mb);
+
+    // Insert SDMA usage metric (doesn't require gpu_metrics deserialization)
+    insert_event_and_sample(
+        is_sdma_enabled, trait::name<category::amd_smi_sdma_usage>::value,
+        info::annotate_with_device_id<category::amd_smi_sdma_usage>(_amd_smi.device_id)
+            .c_str(),
+        static_cast<double>(_amd_smi.sdma_usage));
 
     if(!is_vcn_enabled && !is_jpeg_enabled && !is_xgmi_enabled && !is_pcie_enabled)
         return;
@@ -540,13 +526,11 @@ rocpd_processor_t::handle([[maybe_unused]] const amd_smi_sample& _amd_smi)
             _amd_smi.device_id)
             .c_str(),
         static_cast<double>(gpu_metrics.pcie_bandwidth_inst));
-#endif
 }
 
 void
-rocpd_processor_t::handle([[maybe_unused]] const cpu_freq_sample& _cpu_freq_sample)
+rocpd_processor_t::handle(const cpu_freq_sample& _cpu_freq_sample)
 {
-#if ROCPROFSYS_USE_ROCM > 0
     struct core_freq_sample
     {
         size_t id;
@@ -584,19 +568,24 @@ rocpd_processor_t::handle([[maybe_unused]] const cpu_freq_sample& _cpu_freq_samp
     };
 
     insert_event_and_sample(trait::name<category::process_page>::value,
-                            _cpu_freq_sample.page_rss);
+                            static_cast<double>(_cpu_freq_sample.page_rss) /
+                                units::megabyte);
     insert_event_and_sample(trait::name<category::process_virt>::value,
-                            _cpu_freq_sample.virt_mem_usage);
+                            static_cast<double>(_cpu_freq_sample.virt_mem_usage) /
+                                units::megabyte);
     insert_event_and_sample(trait::name<category::process_peak>::value,
-                            _cpu_freq_sample.peak_rss);
+                            static_cast<double>(_cpu_freq_sample.peak_rss) /
+                                units::megabyte);
     insert_event_and_sample(trait::name<category::process_context_switch>::value,
                             _cpu_freq_sample.context_switch_count);
     insert_event_and_sample(trait::name<category::process_page_fault>::value,
                             _cpu_freq_sample.page_faults);
     insert_event_and_sample(trait::name<category::process_user_mode_time>::value,
-                            _cpu_freq_sample.user_mode_time);
+                            static_cast<double>(_cpu_freq_sample.user_mode_time) /
+                                units::sec);
     insert_event_and_sample(trait::name<category::process_kernel_mode_time>::value,
-                            _cpu_freq_sample.kernel_mode_time);
+                            static_cast<double>(_cpu_freq_sample.kernel_mode_time) /
+                                units::sec);
 
     auto get_track_name = [](const auto& cpu_id) {
         return std::string(trait::name<category::cpu_freq>::value) + " [" +
@@ -608,7 +597,62 @@ rocpd_processor_t::handle([[maybe_unused]] const cpu_freq_sample& _cpu_freq_samp
     {
         insert_event_and_sample(get_track_name(core.id).c_str(), core.value);
     }
-#endif
+}
+
+void
+rocpd_processor_t::handle(const ainic_sample& _ainic)
+{
+    const auto* _category_name   = trait::name<category::amd_smi_nic>::value;
+    auto        name_primary_key = m_data_processor->insert_string(_category_name);
+    auto        event_id = m_data_processor->insert_event(name_primary_key, 0, 0, 0);
+
+    const auto& nic_agent =
+        m_agent_manager->get_agent_by_id(_ainic.nic_index, agent_type::NIC);
+
+    const auto  base_id  = nic_agent.base_id;
+    const char* nic_name = nic_agent.name.c_str();
+
+    auto insert_event_and_sample = [&](const char* pmc_descriptor, const char* track_name,
+                                       double value) {
+        m_data_processor->insert_pmc_event(event_id, base_id, pmc_descriptor, value);
+        m_data_processor->insert_sample(track_name, _ainic.timestamp, event_id);
+    };
+
+    insert_event_and_sample(trait::name<category::amd_smi_nic_rx_cnp_pkts>::value,
+                            info::annotate_with_nic<category::amd_smi_nic_rx_cnp_pkts>(
+                                nic_name, _ainic.nic_index)
+                                .c_str(),
+                            _ainic.rx_rdma_cnp_pkts);
+
+    insert_event_and_sample(trait::name<category::amd_smi_nic_tx_cnp_pkts>::value,
+                            info::annotate_with_nic<category::amd_smi_nic_tx_cnp_pkts>(
+                                nic_name, _ainic.nic_index)
+                                .c_str(),
+                            _ainic.tx_rdma_cnp_pkts);
+
+    insert_event_and_sample(trait::name<category::amd_smi_nic_rx_ucast_bytes>::value,
+                            info::annotate_with_nic<category::amd_smi_nic_rx_ucast_bytes>(
+                                nic_name, _ainic.nic_index)
+                                .c_str(),
+                            _ainic.rx_ucast_bytes);
+
+    insert_event_and_sample(trait::name<category::amd_smi_nic_tx_ucast_bytes>::value,
+                            info::annotate_with_nic<category::amd_smi_nic_tx_ucast_bytes>(
+                                nic_name, _ainic.nic_index)
+                                .c_str(),
+                            _ainic.tx_ucast_bytes);
+
+    insert_event_and_sample(trait::name<category::amd_smi_nic_rx_ucast_pkts>::value,
+                            info::annotate_with_nic<category::amd_smi_nic_rx_ucast_pkts>(
+                                nic_name, _ainic.nic_index)
+                                .c_str(),
+                            _ainic.rx_ucast_pkts);
+
+    insert_event_and_sample(trait::name<category::amd_smi_nic_tx_ucast_pkts>::value,
+                            info::annotate_with_nic<category::amd_smi_nic_tx_ucast_pkts>(
+                                nic_name, _ainic.nic_index)
+                                .c_str(),
+                            _ainic.tx_ucast_pkts);
 }
 
 rocpd_processor_t::rocpd_processor_t(const std::shared_ptr<metadata_registry>& md,
@@ -640,7 +684,6 @@ rocpd_processor_t::finalize_processing()
 void
 rocpd_processor_t::post_process_metadata()
 {
-#if ROCPROFSYS_USE_ROCM > 0
     if(!get_use_rocpd())
     {
         LOG_TRACE("Rocpd not enabled, skipping metadata post-processing");
@@ -655,17 +698,31 @@ rocpd_processor_t::post_process_metadata()
         n_info.machine.c_str(), n_info.domain_name.c_str());
 
     auto process_info = m_metadata->get_process_info();
-    m_data_processor->insert_process_info(n_info.id, process_info.ppid, process_info.pid,
-                                          0, 0, process_info.start, process_info.end,
-                                          process_info.command.c_str(), "{}");
+    m_data_processor->insert_process_info(
+        n_info.id, process_info.ppid, process_info.pid, 0, 0, process_info.start,
+        process_info.end, process_info.command.c_str(), process_info.environment.c_str(),
+        process_info.extdata.c_str());
 
     const auto& agents  = m_agent_manager->get_agents();
     int         counter = 0;
+
+    const auto type_to_string = [](agent_type type) -> std::optional<std::string> {
+        switch(type)
+        {
+            case agent_type::GPU: return "GPU";
+            case agent_type::CPU: return "CPU";
+            default: return std::nullopt;
+        }
+    };
+
     for(const auto& rocpd_agent : agents)
     {
+        const auto& agent_type_opt = type_to_string(rocpd_agent->type);
+        const char* agent_type =
+            agent_type_opt.has_value() ? agent_type_opt.value().c_str() : nullptr;
+
         auto _base_id = m_data_processor->insert_agent(
-            n_info.id, process_info.pid,
-            ((rocpd_agent->type == agent_type::GPU) ? "GPU" : "CPU"), counter++,
+            n_info.id, process_info.pid, agent_type, counter++,
             rocpd_agent->logical_node_id, rocpd_agent->logical_node_type_id,
             rocpd_agent->device_id, rocpd_agent->name.c_str(),
             rocpd_agent->model_name.c_str(), rocpd_agent->vendor_name.c_str(),
@@ -771,20 +828,44 @@ rocpd_processor_t::post_process_metadata()
     auto pmc_info_list = m_metadata->get_pmc_info_list();
     for(const auto& pmc_info : pmc_info_list)
     {
-        const auto agent_primary_key =
-            m_agent_manager
-                ->get_agent_by_type_index(pmc_info.agent_type_index, pmc_info.type)
-                .base_id;
+        constexpr std::array<agent_type, 2> agent_types = {
+            agent_type::GPU,
+            agent_type::CPU,
+        };
+
+        size_t agent_primary_key;
+
+        const bool is_cpu_gpu_agent = std::find(agent_types.begin(), agent_types.end(),
+                                                pmc_info.type) != agent_types.end();
+
+        if(is_cpu_gpu_agent)
+        {
+            agent_primary_key =
+                m_agent_manager
+                    ->get_agent_by_type_index(pmc_info.agent_type_index, pmc_info.type)
+                    .base_id;
+        }
+        else
+        {
+            agent_primary_key =
+                m_agent_manager->get_agent_by_id(pmc_info.agent_type_index, pmc_info.type)
+                    .base_id;
+        }
+
+        const auto* target_arch = pmc_info.target_arch.c_str();
+        if(!is_cpu_gpu_agent)
+        {
+            target_arch = nullptr;
+        }
 
         m_data_processor->insert_pmc_description(
-            n_info.id, process_info.pid, agent_primary_key, pmc_info.target_arch.c_str(),
+            n_info.id, process_info.pid, agent_primary_key, target_arch,
             pmc_info.event_code, pmc_info.instance_id, pmc_info.name.c_str(),
             pmc_info.symbol.c_str(), pmc_info.description.c_str(),
             pmc_info.long_description.c_str(), pmc_info.component.c_str(),
             pmc_info.units.c_str(), pmc_info.value_type.c_str(), pmc_info.block.c_str(),
             pmc_info.expression.c_str(), pmc_info.is_constant, pmc_info.is_derived);
     }
-#endif
 }
 
 inline void

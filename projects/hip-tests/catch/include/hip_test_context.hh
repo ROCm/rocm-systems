@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #pragma once
 #include <hip/hip_runtime.h>
@@ -56,8 +40,8 @@ THE SOFTWARE.
 
 typedef struct Config_ {
   std::vector<std::string> json_files;  // Json files
-  std::string platform;   // amd/nvidia
-  std::string os;         // windows/linux
+  std::string platform;                 // amd/nvidia
+  std::string os;                       // windows/linux
 } Config;
 
 // Store Multi threaded results
@@ -117,22 +101,22 @@ class TestContext {
     return instance;
   }
 
-  static std::string getEnvVar(std::string var) {
-    #if defined(_WIN32)
-    constexpr rsize_t MAX_LEN = 4096;
-    char dstBuf[MAX_LEN];
-    size_t dstSize;
-    if (!::getenv_s(&dstSize, dstBuf, MAX_LEN, var.c_str())) {
-      return std::string(dstBuf);
+  static std::string getEnvVar(const std::string& var) {
+#if defined(_WIN32)
+    char* val = nullptr;
+    size_t len = 0;
+    if (_dupenv_s(&val, &len, var.c_str()) == 0 && val != nullptr) {
+      std::string result(val);
+      free(val);
+      return result;
     }
-    #elif defined(__linux__)
-    char* val = std::getenv(var.c_str());
-    if (val != NULL) {
+#elif defined(__linux__)
+    if (const char* val = std::getenv(var.c_str())) {
       return std::string(val);
     }
-    #else
-    #error "OS not recognized"
-    #endif
+#else
+#error "OS not recognized"
+#endif
     return std::string("");
   }
 
@@ -188,10 +172,10 @@ class TestContext {
 static bool _log_enable = (!TestContext::getEnvVar("HT_LOG_ENABLE").empty() ? true : false);
 
 // printing logs
-#define LogPrintf(format, ...)                                                                   \
-{                                                                                                \
-  if(_log_enable) {                                                                              \
-    printf(format, __VA_ARGS__);                                                                 \
-    printf("%c", '\n');                                                                          \
-  }                                                                                              \
-}
+#define LogPrintf(format, ...)                                                                     \
+  {                                                                                                \
+    if (_log_enable) {                                                                             \
+      printf(format, __VA_ARGS__);                                                                 \
+      printf("%c", '\n');                                                                          \
+    }                                                                                              \
+  }

@@ -35,11 +35,18 @@ namespace rdc {
 RdcGroupSettingsImpl::RdcGroupSettingsImpl(const RdcPartitionPtr& partition)
     : partition_(partition) {
   // Add the default job stats fields
-  rdc_field_t job_fields[] = {RDC_FI_GPU_MEMORY_USAGE, RDC_FI_POWER_USAGE, RDC_FI_GPU_CLOCK,
-                              RDC_FI_GPU_UTIL,         RDC_FI_PCIE_TX,     RDC_FI_PCIE_RX,
-                              RDC_FI_PCIE_BANDWIDTH,   RDC_FI_PCIE_LC_PERF_OTHER_END_RECOVERY,  
-                              RDC_FI_PCIE_NAK_RCVD_COUNT_ACC, RDC_FI_PCIE_NAK_SENT_COUNT_ACC, 
-                              RDC_FI_MEM_CLOCK,        RDC_FI_GPU_TEMP};
+  rdc_field_t job_fields[] = {RDC_FI_GPU_MEMORY_USAGE,
+                              RDC_FI_POWER_USAGE,
+                              RDC_FI_GPU_CLOCK,
+                              RDC_FI_GPU_UTIL,
+                              RDC_FI_PCIE_TX,
+                              RDC_FI_PCIE_RX,
+                              RDC_FI_PCIE_BANDWIDTH,
+                              RDC_FI_PCIE_LC_PERF_OTHER_END_RECOVERY,
+                              RDC_FI_PCIE_NAK_RCVD_COUNT_ACC,
+                              RDC_FI_PCIE_NAK_SENT_COUNT_ACC,
+                              RDC_FI_MEM_CLOCK,
+                              RDC_FI_GPU_TEMP};
   char job_field_group[] = "JobStatsFields";
   rdc_field_grp_t fgid = JOB_FIELD_ID;
 
@@ -184,6 +191,34 @@ rdc_status_t RdcGroupSettingsImpl::rdc_group_field_create(uint32_t num_field_ids
   field_group_.emplace(cur_field_group_id_, finfo);
   *rdc_field_group_id = cur_field_group_id_;
   cur_field_group_id_++;
+
+  return RDC_ST_OK;
+}
+
+rdc_status_t RdcGroupSettingsImpl::rdc_group_field_add_field(rdc_field_grp_t rdc_field_group_id,
+                                                             rdc_field_t field_id) {
+  std::lock_guard<std::mutex> guard(field_group_mutex_);
+
+  auto ite = field_group_.find(rdc_field_group_id);
+  if (ite == field_group_.end()) {
+    return RDC_ST_FLDGROUP_NOT_FOUND;
+  }
+
+  // Check if field already exists in the group
+  for (uint32_t i = 0; i < ite->second.count; i++) {
+    if (ite->second.field_ids[i] == field_id) {
+      return RDC_ST_BAD_PARAMETER;
+    }
+  }
+
+  // Check if we have room for another field
+  if (ite->second.count >= RDC_MAX_FIELD_IDS_PER_FIELD_GROUP) {
+    return RDC_ST_MAX_LIMIT;
+  }
+
+  // Add the field to the group
+  ite->second.field_ids[ite->second.count] = field_id;
+  ite->second.count++;
 
   return RDC_ST_OK;
 }

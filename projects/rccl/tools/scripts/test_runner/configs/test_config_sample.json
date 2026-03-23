@@ -17,15 +17,12 @@
   },
 
   "build_configuration": {
-    "cmake_options": {
-      "CMAKE_BUILD_TYPE": "Release",
-      "BUILD_TESTS": "ON"
-    },
+    "install_flags": ["-t", "--no_clean"],
+    "cmake_options": "",
     "env_variables": {
       "HIPCC_COMPILE_FLAGS_APPEND": "-O2"
     },
-    "parallel_jobs": 64,
-    "generator": "Unix Makefiles"
+    "parallel_jobs": 64
   },
 
   "test_configurations": {

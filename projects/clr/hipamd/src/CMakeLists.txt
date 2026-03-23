@@ -1,22 +1,6 @@
-# Copyright (c) 2020 - 2022 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 #
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 
 include(GNUInstallDirs)
 
@@ -58,8 +42,6 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-error=deprecated-declarations")
 endif()
 
-option(DISABLE_DIRECT_DISPATCH "Disable Direct Dispatch" OFF)
-
 option(BUILD_SHARED_LIBS "Build the shared library" ON)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
@@ -78,7 +60,6 @@ else()
 endif()
 
 set_target_properties(amdhip64 PROPERTIES
-  CXX_STANDARD 17
   CXX_STANDARD_REQUIRED ON
   CXX_EXTENSIONS OFF
   POSITION_INDEPENDENT_CODE ON
@@ -86,6 +67,12 @@ set_target_properties(amdhip64 PROPERTIES
   # having hardcoded references to build/lib/libamdhip64.so
   LIBRARY_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib
   ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)
+
+if(WIN32)
+  set_target_properties(amdhip64 PROPERTIES CXX_STANDARD 20)
+else()
+  set_target_properties(amdhip64 PROPERTIES CXX_STANDARD 17)
+endif()
 
 if(CMAKE_SIZEOF_VOID_P EQUAL 8)
   set_target_properties(amdhip64 PROPERTIES OUTPUT_NAME "amdhip64")
@@ -183,10 +170,6 @@ if(BUILD_SHARED_LIBS)
 else()
   target_compile_definitions(amdhip64 PRIVATE $<TARGET_PROPERTY:rocclr,COMPILE_DEFINITIONS>)
   target_include_directories(amdhip64 PRIVATE $<TARGET_PROPERTY:rocclr,INCLUDE_DIRECTORIES>)
-endif()
-
-if(DISABLE_DIRECT_DISPATCH)
-  target_compile_definitions(amdhip64 PRIVATE DISABLE_DIRECT_DISPATCH)
 endif()
 
 # Optional rocm-kpack support for kpack split artifacts

@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip_test_common.hh>
 #include <hip_test_helper.hh>
@@ -37,7 +24,7 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_GraphAPIs_StreamCapture") {
+HIP_TEST_CASE(Unit_hipGetProcAddress_GraphAPIs_StreamCapture) {
   void* hipStreamBeginCapture_ptr = nullptr;
   void* hipStreamIsCapturing_ptr = nullptr;
   void* hipStreamEndCapture_ptr = nullptr;
@@ -161,7 +148,7 @@ TEST_CASE("Unit_hipGetProcAddress_GraphAPIs_StreamCapture") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_GraphAPIs_AddMemcpy1DKernelNodes") {
+HIP_TEST_CASE(Unit_hipGetProcAddress_GraphAPIs_AddMemcpy1DKernelNodes) {
   void* hipGraphAddMemcpyNode1D_ptr = nullptr;
   void* hipGraphAddKernelNode_ptr = nullptr;
 
@@ -257,7 +244,7 @@ TEST_CASE("Unit_hipGetProcAddress_GraphAPIs_AddMemcpy1DKernelNodes") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_GraphAPIs_AddMemsetMemcpyNodes") {
+HIP_TEST_CASE(Unit_hipGetProcAddress_GraphAPIs_AddMemsetMemcpyNodes) {
   CHECK_IMAGE_SUPPORT
 
   void* hipGraphAddMemsetNode_ptr = nullptr;
@@ -353,7 +340,7 @@ TEST_CASE("Unit_hipGetProcAddress_GraphAPIs_AddMemsetMemcpyNodes") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_GraphAPIs_SetGetParamsMemsetMemcpy") {
+HIP_TEST_CASE(Unit_hipGetProcAddress_GraphAPIs_SetGetParamsMemsetMemcpy) {
   CHECK_IMAGE_SUPPORT
 
   void* hipGraphMemsetNodeSetParams_ptr = nullptr;
@@ -561,7 +548,7 @@ TEST_CASE("Unit_hipGetProcAddress_GraphAPIs_SetGetParamsMemsetMemcpy") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_GraphAPIs_KernelNodeSetGetParams") {
+HIP_TEST_CASE(Unit_hipGetProcAddress_GraphAPIs_KernelNodeSetGetParams) {
   void* hipGraphKernelNodeGetParams_ptr = nullptr;
   void* hipGraphKernelNodeSetParams_ptr = nullptr;
 
@@ -703,7 +690,7 @@ TEST_CASE("Unit_hipGetProcAddress_GraphAPIs_KernelNodeSetGetParams") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_GraphAPIs_KernelNodeSetGetAttribute") {
+HIP_TEST_CASE(Unit_hipGetProcAddress_GraphAPIs_KernelNodeSetGetAttribute) {
   void* hipGraphKernelNodeSetAttribute_ptr = nullptr;
   void* hipGraphKernelNodeGetAttribute_ptr = nullptr;
 
@@ -777,7 +764,7 @@ TEST_CASE("Unit_hipGetProcAddress_GraphAPIs_KernelNodeSetGetAttribute") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_GraphAPIs_HostNode") {
+HIP_TEST_CASE(Unit_hipGetProcAddress_GraphAPIs_HostNode) {
   void* hipGraphAddHostNode_ptr = nullptr;
   void* hipGraphHostNodeGetParams_ptr = nullptr;
   void* hipGraphHostNodeSetParams_ptr = nullptr;
@@ -927,7 +914,7 @@ TEST_CASE("Unit_hipGetProcAddress_GraphAPIs_HostNode") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_GraphAPIs_ExecUpdate") {
+HIP_TEST_CASE(Unit_hipGetProcAddress_GraphAPIs_ExecUpdate) {
   void* hipGraphExecUpdate_ptr = nullptr;
 
   int currentHipVersion = 0;
@@ -1001,7 +988,7 @@ TEST_CASE("Unit_hipGetProcAddress_GraphAPIs_ExecUpdate") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_GraphAPIs_Memcpy1DSetParams") {
+HIP_TEST_CASE(Unit_hipGetProcAddress_GraphAPIs_Memcpy1DSetParams) {
   void* hipGraphMemcpyNodeSetParams1D_ptr = nullptr;
   void* hipGraphExecMemcpyNodeSetParams1D_ptr = nullptr;
 
@@ -1122,7 +1109,7 @@ TEST_CASE("Unit_hipGetProcAddress_GraphAPIs_Memcpy1DSetParams") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_GraphAPIs_MemAllocAndFree") {
+HIP_TEST_CASE(Unit_hipGetProcAddress_GraphAPIs_MemAllocAndFree) {
   void* hipGraphAddMemAllocNode_ptr = nullptr;
   void* hipGraphAddMemFreeNode_ptr = nullptr;
   void* hipGraphMemAllocNodeGetParams_ptr = nullptr;
@@ -1270,7 +1257,7 @@ TEST_CASE("Unit_hipGetProcAddress_GraphAPIs_MemAllocAndFree") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_GraphAPIs_ExecMemsetMemcpySetParams") {
+HIP_TEST_CASE(Unit_hipGetProcAddress_GraphAPIs_ExecMemsetMemcpySetParams) {
   CHECK_IMAGE_SUPPORT
 
   void* hipGraphExecMemsetNodeSetParams_ptr = nullptr;

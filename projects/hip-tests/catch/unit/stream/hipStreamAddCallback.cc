@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2021 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-IMPLIED, INNCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANNY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /**
 Testcase Scenarios :
@@ -39,7 +26,7 @@ Testcase Scenarios :
 #endif
 
 namespace hipStreaAddCallbackTest {
-size_t NSize = 4 * 1024 * 1024;
+constexpr size_t NSize = 4 * 1024 * 1024;
 float *A_h, *C_h;
 bool gcbDone = false;
 bool gPassed = true;
@@ -83,8 +70,9 @@ bool testStreamCallbackFunctionality(bool isDefault) {
   if (isDefault) {
     HIP_CHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyHostToDevice, 0));
 
-    const unsigned blocks = 512;
-    const unsigned threadsPerBlock = 256;
+    const unsigned threadsPerBlock = 1024;
+    const int blocks = (NSize % threadsPerBlock == 0) ? (NSize / threadsPerBlock)
+                                                      : ((NSize / threadsPerBlock) + 1);
     hipLaunchKernelGGL((HipTest::vector_square), dim3(blocks), dim3(threadsPerBlock), 0, 0, A_d,
                        C_d, NSize);
     HIP_CHECK(hipGetLastError());
@@ -98,8 +86,9 @@ bool testStreamCallbackFunctionality(bool isDefault) {
 
     HIP_CHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyHostToDevice, mystream));
 
-    const unsigned blocks = 512;
-    const unsigned threadsPerBlock = 256;
+    const unsigned threadsPerBlock = 1024;
+    const int blocks = (NSize % threadsPerBlock == 0) ? (NSize / threadsPerBlock)
+                                                      : ((NSize / threadsPerBlock) + 1);
     hipLaunchKernelGGL((HipTest::vector_square), dim3(blocks), dim3(threadsPerBlock), 0, mystream,
                        A_d, C_d, NSize);
     HIP_CHECK(hipGetLastError());
@@ -159,7 +148,7 @@ using hipStreaAddCallbackTest::testStreamCallbackFunctionality;
 /*
  * Validates parameter list of hipStreamAddCallback.
  */
-TEST_CASE("Unit_hipStreamAddCallback_ParamTst_Positive") {
+HIP_TEST_CASE(Unit_hipStreamAddCallback_ParamTst_Positive) {
   hipStream_t mystream;
   HIP_CHECK(hipStreamCreate(&mystream));
 
@@ -192,7 +181,7 @@ TEST_CASE("Unit_hipStreamAddCallback_ParamTst_Positive") {
 /*
  * Negative tests for validation of hipStreamAddCallback parameter list.
  */
-TEST_CASE("Unit_hipStreamAddCallback_ParamTst_Negative") {
+HIP_TEST_CASE(Unit_hipStreamAddCallback_ParamTst_Negative) {
   hipStream_t mystream;
   HIP_CHECK(hipStreamCreate(&mystream));
 
@@ -218,7 +207,7 @@ TEST_CASE("Unit_hipStreamAddCallback_ParamTst_Negative") {
 /*
  * Validates hipStreamAddCallback functionality with default stream.
  */
-TEST_CASE("Unit_hipStreamAddCallback_WithDefaultStream") {
+HIP_TEST_CASE(Unit_hipStreamAddCallback_WithDefaultStream) {
   bool TestPassed = true;
   TestPassed = testStreamCallbackFunctionality(true);
   REQUIRE(TestPassed);
@@ -227,7 +216,7 @@ TEST_CASE("Unit_hipStreamAddCallback_WithDefaultStream") {
 /*
  * Validates hipStreamAddCallback functionality with defined stream.
  */
-TEST_CASE("Unit_hipStreamAddCallback_WithCreatedStream") {
+HIP_TEST_CASE(Unit_hipStreamAddCallback_WithCreatedStream) {
   bool TestPassed = true;
   TestPassed = testStreamCallbackFunctionality(false);
   REQUIRE(TestPassed);

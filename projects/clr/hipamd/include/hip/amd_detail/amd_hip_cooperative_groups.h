@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2015 - 2023 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /**
  *  @file  amd_detail/amd_hip_cooperative_groups.h
@@ -1230,7 +1214,7 @@ template <unsigned int size> struct tiled_partition_internal<size, thread_block>
 template <unsigned int size, unsigned int ParentSize, class GrandParentCGTy>
 struct tiled_partition_internal<size, thread_block_tile<ParentSize, GrandParentCGTy> >
     : public thread_block_tile<size, thread_block_tile<ParentSize, GrandParentCGTy> > {
-  static_assert(size <= ParentSize, "Sub tile size must be <= parent tile size in tiled_partition");
+  static_assert(size < ParentSize, "Sub tile size must be < parent tile size in tiled_partition");
 
   __CG_QUALIFIER__ tiled_partition_internal(const thread_block_tile<ParentSize, GrandParentCGTy>& g)
       : thread_block_tile<size, thread_block_tile<ParentSize, GrandParentCGTy> >(g) {}
@@ -1299,6 +1283,54 @@ __CG_QUALIFIER__ coalesced_group binary_partition(const thread_block_tile<size, 
     return coalesced_group(tgrp.build_mask() ^ mask);
   }
 }
+
+template <class T>
+struct plus {
+  __CG_QUALIFIER__ T operator()(T lhs, T rhs) const
+  {
+    return lhs + rhs;
+  }
+};
+
+template <class T>
+struct less {
+  __CG_QUALIFIER__ T operator()(T lhs, T rhs) const
+  {
+    return lhs < rhs? lhs : rhs;
+  }
+};
+
+template <class T>
+struct greater {
+  __CG_QUALIFIER__ T operator()(T lhs, T rhs) const
+  {
+    return lhs < rhs? rhs : lhs;
+  }
+};
+
+template <class T>
+struct bit_and {
+  __CG_QUALIFIER__ T operator()(T lhs, T rhs) const
+  {
+    return lhs & rhs;
+  }
+};
+
+template <class T>
+struct bit_xor {
+  __CG_QUALIFIER__ T operator()(T lhs, T rhs) const
+  {
+    return lhs ^ rhs;
+  }
+};
+
+template <class T>
+struct bit_or {
+  __CG_QUALIFIER__ T operator()(T lhs, T rhs) const
+  {
+    return lhs | rhs;
+  }
+};
 #endif
 }  // namespace cooperative_groups
 

@@ -365,49 +365,49 @@ static inline void groupLocalResetJobState() {
   return;
 }
 
+/* Reclaim planner state after ncclGroupSimulateEnd or on group failure.
+ * Runs collCleanupQueue (buffer unregister), reclaims planQueue, resets planner. */
+static void reclaimPlannerState(struct ncclComm* comm) {
+  while (!ncclIntruQueueEmpty(&comm->planner.collCleanupQueue)) {
+    struct ncclCommCallback* cb = ncclIntruQueueDequeue(&comm->planner.collCleanupQueue);
+    (void)cb->fn(comm, cb);
+  }
+  comm->preconnectNext = reinterpret_cast<struct ncclComm*>(0x1);
+  for (int i = 0; i < comm->nRanks; i++) {
+    for (int j = 0; j < MAXCHANNELS/64; j++) {
+      comm->connectSend[i].masks[j] = 0UL;
+      comm->connectRecv[i].masks[j] = 0UL;
+    }
+  }
+  while (!ncclIntruQueueEmpty(&comm->planner.planQueue)) {
+    struct ncclKernelPlan* plan = ncclIntruQueueDequeue(&comm->planner.planQueue);
+    if (!plan->persistent) {
+      while (!ncclIntruQueueEmpty(&plan->proxyOpQueue)) {
+        struct ncclProxyOp* pxop = ncclIntruQueueDequeue(&plan->proxyOpQueue);
+        ncclMemoryPoolFree(&comm->memPool_ncclProxyOp, pxop);
+      }
+      ncclMemoryPoolFree(&comm->memPool_ncclKernelPlan, plan);
+    }
+  }
+  {
+    ncclKernelPlanner::Peer* tmp = comm->planner.peers;
+    memset(&comm->planner, 0, sizeof(comm->planner));
+    comm->planner.peers = tmp;
+    if (comm->planner.peers != NULL) memset(comm->planner.peers, 0, comm->nRanks * sizeof(comm->planner.peers[0]));
+  }
+}
+
 static void groupCleanup(struct ncclComm** groupCommHeadPtr, struct ncclIntruQueue<struct ncclAsyncJob, &ncclAsyncJob::next>* asyncJobsPtr, ncclResult_t error) {
   struct ncclComm* comm;
   for (int type = 0; type < ncclGroupTaskTypeNum; ++type) {
     comm = groupCommHeadPtr[type];
-    // reset groupCommHeadPtr[type]
     groupCommHeadPtr[type] = nullptr;
     while (comm != nullptr) {
       struct ncclComm* next = comm->groupNext[type];
-      (void)ncclGroupCommLeave(comm, type); // overwrites comm->groupNext
-      // We don't know if preconnect succeeded or happened at all, so clear
-      // the flags that let `taskAppend()` skip over checking if preconnect
-      // is needed.
+      (void)ncclGroupCommLeave(comm, type);
       if (type == ncclGroupTaskTypeCollective) {
-        comm->preconnectNext = reinterpret_cast<struct ncclComm*>(0x1);
-        for (int i = 0; i < comm->nRanks; i++) {
-          for (int j = 0; j < MAXCHANNELS/64; j++) {
-            comm->connectSend[i].masks[j] = 0UL;
-            comm->connectRecv[i].masks[j] = 0UL;
-          }
-        }
-        // Reclaim abandoned kernel plan memory. Note ncclWork structs were already
-        // reclaimed by a `ncclMemoryStackPop(&comm->memScoped)` during `ncclGroupCommLeave()`.
-        while (!ncclIntruQueueEmpty(&comm->planner.planQueue)) {
-          struct ncclKernelPlan* plan = ncclIntruQueueDequeue(&comm->planner.planQueue);
-          // Persistent plans will be reclaimed via the callbackQueue when the
-          // graph drops its UserObject reference.
-          if (!plan->persistent) {
-            while (!ncclIntruQueueEmpty(&plan->proxyOpQueue)) {
-              struct ncclProxyOp* pxop = ncclIntruQueueDequeue(&plan->proxyOpQueue);
-              ncclMemoryPoolFree(&comm->memPool_ncclProxyOp, pxop);
-            }
-            ncclMemoryPoolFree(&comm->memPool_ncclKernelPlan, plan);
-          }
-        }
-
-        { // Reset comm->planner to empty.
-          ncclKernelPlanner::Peer* tmp = comm->planner.peers;
-          memset(&comm->planner, 0, sizeof(comm->planner));
-          comm->planner.peers = tmp;
-          if (comm->planner.peers != NULL) memset(comm->planner.peers, 0, comm->nRanks * sizeof(comm->planner.peers[0]));
-        }
+        reclaimPlannerState(comm);
       }
-
       if (!comm->config.blocking)
         (void)ncclCommSetAsyncError(comm, error);
       comm = next;
@@ -655,6 +655,9 @@ static ncclResult_t groupLaunch(struct ncclAsyncJob *job_, ncclSimInfo_t* simInf
         comm->reclaimSteps++;
       }
       (void)ncclGroupCommLeave(comm, type);
+      if (simInfo && type == ncclGroupTaskTypeCollective) {
+        reclaimPlannerState(comm);
+      }
       if (!comm->config.blocking) {
         (void)ncclCommSetAsyncError(comm, ret);
       }
@@ -723,18 +726,19 @@ ncclResult_t ncclGroupEndInternal(ncclSimInfo_t* simInfo) {
     }
   }
 
-  NCCLCHECKGOTO(ncclCalloc(&groupJob, 1), ret, fail);
-  ncclIntruQueueConstruct(&groupJob->asyncJobs);
-  groupJob->groupRefCount = 0;
-  groupJob->nonBlockingInit = false;
-  memcpy(groupJob->groupCommHead, ncclGroupCommHead, sizeof(ncclGroupCommHead));
-  groupJob->groupCommPreconnectHead = ncclGroupCommPreconnectHead;
-  groupJob->groupError = ncclSuccess;
-  groupJob->abortFlag = false;
-  groupJob->joined = false;
-  ncclIntruQueueTransfer(&groupJob->asyncJobs, &ncclAsyncJobs);
+  /* Only allocate groupJob if there is work to do */
+  if (hasCommHead || !ncclIntruQueueEmpty(&ncclAsyncJobs) || ncclGroupCommPreconnectHead != nullptr) {
+    NCCLCHECKGOTO(ncclCalloc(&groupJob, 1), ret, fail);
+    ncclIntruQueueConstruct(&groupJob->asyncJobs);
+    groupJob->groupRefCount = 0;
+    groupJob->nonBlockingInit = false;
+    memcpy(groupJob->groupCommHead, ncclGroupCommHead, sizeof(ncclGroupCommHead));
+    groupJob->groupCommPreconnectHead = ncclGroupCommPreconnectHead;
+    groupJob->groupError = ncclSuccess;
+    groupJob->abortFlag = false;
+    groupJob->joined = false;
+    ncclIntruQueueTransfer(&groupJob->asyncJobs, &ncclAsyncJobs);
 
-  if (hasCommHead || !ncclIntruQueueEmpty(&groupJob->asyncJobs) || ncclGroupCommPreconnectHead != nullptr) {
     /* make sure ncclGroupBlocking has been set. */
     assert(ncclGroupBlocking == 0 || ncclGroupBlocking == 1);
     if (ncclGroupBlocking == 0 && (ncclGroupCommPreconnectHead != nullptr || !ncclIntruQueueEmpty(&ncclAsyncJobs))) {
