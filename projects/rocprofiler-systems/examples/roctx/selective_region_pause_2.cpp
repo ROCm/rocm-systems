@@ -46,7 +46,7 @@ main()
 
     LAUNCH_KERNEL(CodeBlock_Z, d);
 
-    roctx_range_id_t region1_id = roctxRangeStartA("Region 1");
+    roctx_range_id_t region1_id = roctxRangeStartA("Region1");
 
     LAUNCH_KERNEL(CodeBlock_A, d);
 

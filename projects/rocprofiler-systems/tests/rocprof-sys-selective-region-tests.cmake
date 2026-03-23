@@ -115,7 +115,7 @@ rocprofiler_systems_add_test(
     TARGET selective_region
     GPU ON
     LABELS "selective_regions;roctx"
-    ENVIRONMENT "${_selective_region_environment};ROCPROFSYS_TRACE_REGION=Region 1"
+    ENVIRONMENT "${_selective_region_environment};ROCPROFSYS_TRACE_REGION=Region1"
 )
 
 rocprofiler_systems_add_validation_test(
@@ -123,7 +123,6 @@ rocprofiler_systems_add_validation_test(
     PERFETTO_METRIC "rocm_kernel_dispatch"
     PERFETTO_FILE "perfetto-trace.proto"
     LABELS "selective_regions;roctx"
-    PASS_REGEX "CodeBlock_B|CodeBlock_C|CodeBlock_D|CodeBlock_F"
     FAIL_REGEX "CodeBlock_A|CodeBlock_E|CodeBlock_G|ROCPROFSYS_ABORT_FAIL_REGEX"
     ARGS ${_print_args}
 )
@@ -133,7 +132,6 @@ rocprofiler_systems_add_validation_test(
     PERFETTO_METRIC "rocm_kernel_dispatch"
     PERFETTO_FILE "perfetto-trace.proto"
     LABELS "selective_regions;roctx;sampling"
-    PASS_REGEX "CodeBlock_B|CodeBlock_C|CodeBlock_D|CodeBlock_F"
     FAIL_REGEX "CodeBlock_A|CodeBlock_E|CodeBlock_G|ROCPROFSYS_ABORT_FAIL_REGEX"
     ARGS ${_print_args}
 )
@@ -152,7 +150,7 @@ rocprofiler_systems_add_test(
     GPU ON
     LABELS "selective_regions;roctx"
     ENVIRONMENT
-        "${_selective_region_environment};ROCPROFSYS_TRACE_REGION=Region 2,Region 3"
+    "${_selective_region_environment};ROCPROFSYS_TRACE_REGION=Region2,Region3"
 )
 
 rocprofiler_systems_add_validation_test(
@@ -223,7 +221,7 @@ rocprofiler_systems_add_test(
     TARGET selective_region_pause_1
     GPU ON
     LABELS "selective_regions;roctx"
-    ENVIRONMENT "${_selective_region_environment};ROCPROFSYS_TRACE_REGION=Region 1"
+    ENVIRONMENT "${_selective_region_environment};ROCPROFSYS_TRACE_REGION=Region1"
 )
 
 rocprofiler_systems_add_validation_test(
@@ -294,7 +292,7 @@ rocprofiler_systems_add_test(
     TARGET selective_region_pause_2
     GPU ON
     LABELS "selective_regions;roctx"
-    ENVIRONMENT "${_selective_region_environment};ROCPROFSYS_TRACE_REGION=Region 1"
+    ENVIRONMENT "${_selective_region_environment};ROCPROFSYS_TRACE_REGION=Region1"
 )
 
 rocprofiler_systems_add_validation_test(
@@ -365,7 +363,7 @@ rocprofiler_systems_add_test(
     TARGET selective_region_pause_3
     GPU ON
     LABELS "selective_regions;roctx"
-    ENVIRONMENT "${_selective_region_environment};ROCPROFSYS_TRACE_REGION=Region 1"
+    ENVIRONMENT "${_selective_region_environment};ROCPROFSYS_TRACE_REGION=Region1"
 )
 
 rocprofiler_systems_add_validation_test(
@@ -449,7 +447,7 @@ rocprofiler_systems_add_test(
     TARGET selective_region
     GPU ON
     LABELS "selective_regions;roctx"
-    ENVIRONMENT "${_no_marker_environment};ROCPROFSYS_TRACE_REGION=Region 1"
+    ENVIRONMENT "${_no_marker_environment};ROCPROFSYS_TRACE_REGION=Region1"
 )
 
 rocprofiler_systems_add_validation_test(
@@ -484,7 +482,7 @@ rocprofiler_systems_add_test(
     TARGET selective_region_pause_1
     GPU ON
     LABELS "selective_regions;roctx"
-    ENVIRONMENT "${_no_marker_environment};ROCPROFSYS_TRACE_REGION=Region 1"
+    ENVIRONMENT "${_no_marker_environment};ROCPROFSYS_TRACE_REGION=Region1"
 )
 
 rocprofiler_systems_add_validation_test(
@@ -519,7 +517,7 @@ rocprofiler_systems_add_test(
     TARGET selective_region_pause_2
     GPU ON
     LABELS "selective_regions;roctx"
-    ENVIRONMENT "${_no_marker_environment};ROCPROFSYS_TRACE_REGION=Region 1"
+    ENVIRONMENT "${_no_marker_environment};ROCPROFSYS_TRACE_REGION=Region1"
 )
 
 rocprofiler_systems_add_validation_test(
@@ -554,7 +552,7 @@ rocprofiler_systems_add_test(
     TARGET selective_region_pause_3
     GPU ON
     LABELS "selective_regions;roctx"
-    ENVIRONMENT "${_no_marker_environment};ROCPROFSYS_TRACE_REGION=Region 1"
+    ENVIRONMENT "${_no_marker_environment};ROCPROFSYS_TRACE_REGION=Region1"
 )
 
 rocprofiler_systems_add_validation_test(

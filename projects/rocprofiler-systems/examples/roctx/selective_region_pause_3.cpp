@@ -37,7 +37,7 @@ main()
     roctx_thread_id_t roctx_tid{};
     roctxGetThreadId(&roctx_tid);
 
-    roctx_range_id_t region1_id = roctxRangeStartA("Region 1");
+    roctx_range_id_t region1_id = roctxRangeStartA("Region1");
 
     LAUNCH_KERNEL(CodeBlock_A, d);
 

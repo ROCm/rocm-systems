@@ -71,13 +71,13 @@ run(int tid, hipStream_t stream, float* d)
     LAUNCH_BLOCK(CodeBlock_A, stream, d);
 
     barrier.wait();
-    if(tid == 0) region1_id = roctxRangeStartA("Region 1");
+    if(tid == 0) region1_id = roctxRangeStartA("Region1");
     barrier.wait();
 
     LAUNCH_BLOCK(CodeBlock_B, stream, d);
 
     barrier.wait();
-    if(tid == 0) region2_id = roctxRangeStartA("Region 2");
+    if(tid == 0) region2_id = roctxRangeStartA("Region2");
     barrier.wait();
 
     LAUNCH_BLOCK(CodeBlock_C, stream, d);
@@ -93,7 +93,7 @@ run(int tid, hipStream_t stream, float* d)
     barrier.wait();
 
     barrier.wait();
-    if(tid == 0) region3_id = roctxRangeStartA("Region 3");
+    if(tid == 0) region3_id = roctxRangeStartA("Region3");
     barrier.wait();
 
     LAUNCH_BLOCK(CodeBlock_E, stream, d);
@@ -103,7 +103,7 @@ run(int tid, hipStream_t stream, float* d)
     barrier.wait();
 
     barrier.wait();
-    if(tid == 0) region1b_id = roctxRangeStartA("Region 1");
+    if(tid == 0) region1b_id = roctxRangeStartA("Region1");
     barrier.wait();
 
     LAUNCH_BLOCK(CodeBlock_F, stream, d);
