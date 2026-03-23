@@ -247,24 +247,24 @@ Panel Config:
         unit: Unit
       metric:
         Wait for Any:
-          avg: AVG((100 * SQ_WAIT_ANY_sum / SQ_WAVE_CYCLES_sum) if (SQ_WAVE_CYCLES_sum != 0) else None)
-          min: MIN((100 * SQ_WAIT_ANY_sum / SQ_WAVE_CYCLES_sum) if (SQ_WAVE_CYCLES_sum != 0) else None)
-          max: MAX((100 * SQ_WAIT_ANY_sum / SQ_WAVE_CYCLES_sum) if (SQ_WAVE_CYCLES_sum != 0) else None)
+          avg: AVG((100 * SQ_WAIT_ANY / SQ_WAVE_CYCLES) if (SQ_WAVE_CYCLES != 0) else None)
+          min: MIN((100 * SQ_WAIT_ANY / SQ_WAVE_CYCLES) if (SQ_WAVE_CYCLES != 0) else None)
+          max: MAX((100 * SQ_WAIT_ANY / SQ_WAVE_CYCLES) if (SQ_WAVE_CYCLES != 0) else None)
           unit: Percent
         Wait for Instruction Fetch:
-          avg: AVG((100 * SQ_WAIT_IFETCH_sum / SQ_WAVE_CYCLES_sum) if (SQ_WAVE_CYCLES_sum != 0) else None)
-          min: MIN((100 * SQ_WAIT_IFETCH_sum / SQ_WAVE_CYCLES_sum) if (SQ_WAVE_CYCLES_sum != 0) else None)
-          max: MAX((100 * SQ_WAIT_IFETCH_sum / SQ_WAVE_CYCLES_sum) if (SQ_WAVE_CYCLES_sum != 0) else None)
+          avg: AVG((100 * SQ_WAIT_IFETCH / SQ_WAVE_CYCLES) if (SQ_WAVE_CYCLES != 0) else None)
+          min: MIN((100 * SQ_WAIT_IFETCH / SQ_WAVE_CYCLES) if (SQ_WAVE_CYCLES != 0) else None)
+          max: MAX((100 * SQ_WAIT_IFETCH / SQ_WAVE_CYCLES) if (SQ_WAVE_CYCLES != 0) else None)
           unit: Percent
         Wait for Barrier:
-          avg: AVG((100 * SQ_WAIT_BARRIER_sum / SQ_WAVE_CYCLES_sum) if (SQ_WAVE_CYCLES_sum != 0) else None)
-          min: MIN((100 * SQ_WAIT_BARRIER_sum / SQ_WAVE_CYCLES_sum) if (SQ_WAVE_CYCLES_sum != 0) else None)
-          max: MAX((100 * SQ_WAIT_BARRIER_sum / SQ_WAVE_CYCLES_sum) if (SQ_WAVE_CYCLES_sum != 0) else None)
+          avg: AVG((100 * SQ_WAIT_BARRIER / SQ_WAVE_CYCLES) if (SQ_WAVE_CYCLES != 0) else None)
+          min: MIN((100 * SQ_WAIT_BARRIER / SQ_WAVE_CYCLES) if (SQ_WAVE_CYCLES != 0) else None)
+          max: MAX((100 * SQ_WAIT_BARRIER / SQ_WAVE_CYCLES) if (SQ_WAVE_CYCLES != 0) else None)
           unit: Percent
         Wait for Counter:
-          avg: AVG((100 * SQ_WAIT_CNT_ANY_sum / SQ_WAVE_CYCLES_sum) if (SQ_WAVE_CYCLES_sum != 0) else None)
-          min: MIN((100 * SQ_WAIT_CNT_ANY_sum / SQ_WAVE_CYCLES_sum) if (SQ_WAVE_CYCLES_sum != 0) else None)
-          max: MAX((100 * SQ_WAIT_CNT_ANY_sum / SQ_WAVE_CYCLES_sum) if (SQ_WAVE_CYCLES_sum != 0) else None)
+          avg: AVG((100 * SQ_WAIT_CNT_ANY / SQ_WAVE_CYCLES) if (SQ_WAVE_CYCLES != 0) else None)
+          min: MIN((100 * SQ_WAIT_CNT_ANY / SQ_WAVE_CYCLES) if (SQ_WAVE_CYCLES != 0) else None)
+          max: MAX((100 * SQ_WAIT_CNT_ANY / SQ_WAVE_CYCLES) if (SQ_WAVE_CYCLES != 0) else None)
           unit: Percent
 
   # =========================================================================
@@ -341,15 +341,19 @@ Panel Config:
       LDS parameter load instructions under wave32 execution (SQ_INSTS_WAVE32_LDS_PARAM_LOAD).
     Wait for Any: |-
       Percentage of wave lifetime spent waiting for any reason including
-      memory, barriers, or instruction fetch.
+      memory, barriers, or instruction fetch. Computed as 100 * SQ_WAIT_ANY /
+      SQ_WAVE_CYCLES.
     Wait for Instruction Fetch: |-
       Percentage of wave lifetime spent waiting for instructions to arrive
-      from the instruction cache.
+      from the instruction cache. Computed as 100 * SQ_WAIT_IFETCH /
+      SQ_WAVE_CYCLES.
     Wait for Barrier: |-
-      Percentage of wave lifetime spent waiting at barrier synchronization points.
+      Percentage of wave lifetime spent waiting at barrier synchronization
+      points. Computed as 100 * SQ_WAIT_BARRIER / SQ_WAVE_CYCLES.
     Wait for Counter: |-
       Percentage of wave lifetime spent waiting for waitcnt counters (VMCNT,
-      LGKMCNT, etc.) to reach target values.
+      LGKMCNT, etc.) to reach target values. Computed as 100 * SQ_WAIT_CNT_ANY /
+      SQ_WAVE_CYCLES.
     Icache Hit Rate: |-
       Percentage of instruction cache requests that hit in the cache.
     Dcache Hit Rate: |-
