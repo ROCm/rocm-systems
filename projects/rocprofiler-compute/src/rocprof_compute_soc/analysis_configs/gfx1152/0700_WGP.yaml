@@ -205,7 +205,7 @@ Panel Config:
           unit: (Count + $normUnit)
 
   # =========================================================================
-  # LDS Instruction Mix
+  # LDS Instruction Mix (breakdown; total LDS = "Instructions - LDS" in Wave Mix)
   # =========================================================================
   - metric_table:
       id: 707
@@ -217,34 +217,20 @@ Panel Config:
         max: Max
         unit: Unit
       metric:
-        Total LDS Instructions:
-          avg: AVG(SQ_INSTS_LDS_sum / $denom)
-          min: MIN(SQ_INSTS_LDS_sum / $denom)
-          max: MAX(SQ_INSTS_LDS_sum / $denom)
+        LDS Direct Load Instructions:
+          avg: AVG(SQ_INSTS_LDS_DIRECT_LOAD_sum / $denom)
+          min: MIN(SQ_INSTS_LDS_DIRECT_LOAD_sum / $denom)
+          max: MAX(SQ_INSTS_LDS_DIRECT_LOAD_sum / $denom)
           unit: (Count + $normUnit)
-
-  # =========================================================================
-  # VALU Instruction Mix
-  # =========================================================================
-  - metric_table:
-      id: 708
-      title: "VALU Instruction Mix"
-      header:
-        metric: Metric
-        avg: Avg
-        min: Min
-        max: Max
-        unit: Unit
-      metric:
-        Total VALU Instructions:
-          avg: AVG(SQ_INSTS_VALU_sum / $denom)
-          min: MIN(SQ_INSTS_VALU_sum / $denom)
-          max: MAX(SQ_INSTS_VALU_sum / $denom)
+        LDS Parameter Load Instructions:
+          avg: AVG(SQ_INSTS_LDS_PARAM_LOAD_sum / $denom)
+          min: MIN(SQ_INSTS_LDS_PARAM_LOAD_sum / $denom)
+          max: MAX(SQ_INSTS_LDS_PARAM_LOAD_sum / $denom)
           unit: (Count + $normUnit)
-        VALU Instructions - Trans:
-          avg: AVG(SQ_INSTS_VALU_TRANS_sum / $denom)
-          min: MIN(SQ_INSTS_VALU_TRANS_sum / $denom)
-          max: MAX(SQ_INSTS_VALU_TRANS_sum / $denom)
+        WAVE32 LDS Parameter Load Instructions:
+          avg: AVG(SQ_INSTS_WAVE32_LDS_PARAM_LOAD_sum / $denom)
+          min: MIN(SQ_INSTS_WAVE32_LDS_PARAM_LOAD_sum / $denom)
+          max: MAX(SQ_INSTS_WAVE32_LDS_PARAM_LOAD_sum / $denom)
           unit: (Count + $normUnit)
 
   # =========================================================================
@@ -329,8 +315,10 @@ Panel Config:
     Total Instructions: |-
       Total number of instructions executed across all waves.
     Instructions - VALU: |-
-      Number of Vector ALU instructions executed. VALU handles all vector
-      arithmetic and logic operations.
+      Number of Vector ALU instructions executed (SQ_INSTS_VALU). VALU handles all
+      vector arithmetic and logic operations. Transcendental VALU ops are
+      reported separately as "Instructions - Transcendental" in the same
+      Wave Instruction Mix table.
     Instructions - SALU: |-
       Number of Scalar ALU instructions executed. SALU handles scalar operations
       that are uniform across the wave.
@@ -341,8 +329,16 @@ Panel Config:
       Number of Vector Memory instructions executed. Includes global, buffer,
       and texture memory operations.
     Instructions - LDS: |-
-      Number of Local Data Share instructions executed. LDS provides fast
-      shared memory within a workgroup.
+      Total Local Data Share instructions (SQ_INSTS_LDS). LDS provides fast
+      shared memory within a workgroup. For LDS sub-categories (direct/param/
+      wave32 param loads), see the "LDS Instruction Mix" table.
+    LDS Direct Load Instructions: |-
+      LDS direct load instructions issued (SQ_INSTS_LDS_DIRECT_LOAD). Subset of
+      total LDS; not required to sum with other LDS mix rows to equal total.
+    LDS Parameter Load Instructions: |-
+      LDS parameter load instructions issued (SQ_INSTS_LDS_PARAM_LOAD).
+    WAVE32 LDS Parameter Load Instructions: |-
+      LDS parameter load instructions under wave32 execution (SQ_INSTS_WAVE32_LDS_PARAM_LOAD).
     Wait for Any: |-
       Percentage of wave lifetime spent waiting for any reason including
       memory, barriers, or instruction fetch.
