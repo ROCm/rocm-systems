@@ -43,7 +43,7 @@ static int is_wsl2 = -1;
   }                                          \
 } while(0)
 
-RCCL_PARAM(UseAmdSmiLib, "USE_AMD_SMI_LIB", 1); // Opt-in environment variable for enabling using amd_smi_lib instead of internal code
+RCCL_PARAM(UseAmdSmiLib, "USE_AMD_SMI_LIB", 1); // Enable use of amd_smi_lib instead of internal ARSMI code by default; set USE_AMD_SMI_LIB=0 to disable amd_smi_lib and use the internal path
 
 
 #include <dlfcn.h>
