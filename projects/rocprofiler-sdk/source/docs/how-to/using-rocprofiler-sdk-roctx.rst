@@ -250,6 +250,10 @@ This command will collect HIP API traces and kernel traces **only** within the r
 
 You can instrument your code with multiple ``roctxProfilerResume()``/``roctxProfilerPause()`` pairs throughout the application. The ``--selected-regions`` option will respect all of them, collecting data in each region where profiling is resumed. There is no need to provide a list of regions—all regions enclosed by the API calls will be profiled automatically.
 
+**Nested pause/resume pairs:**
+
+By default, each ``roctxProfilerResume()`` and ``roctxProfilerPause()`` call directly toggles profiling on or off. If you have nested pairs (e.g., a function with profiling control called from within another profiled region), the innermost call will affect the profiling state. To handle nested pairs with reference counting, use the ``--selected-regions-ref-count`` option, which will ignore nested pause/resume pairs and only toggle profiling when the outermost pair is called.
+
 **Thread-specific control:**
 
 For more fine-grained control, you can use thread-specific pause/resume:
