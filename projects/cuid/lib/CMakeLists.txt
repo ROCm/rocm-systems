@@ -86,14 +86,8 @@ target_include_directories(amdcuid_shared
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
-if(WIN32)
-    set(CONFIG_INSTALL_DIR "CONFIG")  # Relative to prefix
-else()
-    set(CONFIG_INSTALL_DIR "${CMAKE_INSTALL_DATADIR}/${AMDCUID}/config")
-endif()
-
 # Pass the version-independent shared config directory to the library at compile
-# time.  All installed versions of the library must agree on this path so that
+# time. All installed versions of the library must agree on this path so that
 # the HMAC key is shared and CUIDs remain stable across version upgrades.
 target_compile_definitions(amdcuid_static PRIVATE
     AMDCUID_CONFIG_DIR="${AMDCUID_SHARED_CONFIG_DIR}")

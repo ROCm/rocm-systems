@@ -5,7 +5,7 @@ After=network.target local-fs.target
 
 [Service]
 Type=simple
-ExecStart=@CMAKE_INSTALL_PREFIX@/bin/amdcuid_daemon
+ExecStart=@CMAKE_INSTALL_FULL_BINDIR@/amdcuid_daemon
 Restart=on-failure
 RestartSec=5
 

@@ -120,10 +120,13 @@ The below instructions allow the building of the CUID project and also the insta
 ```sh
 mkdir build
 cd build
-cmake ..
+# Set CMAKE_INSTALL_PREFIX as needed (default is typically /opt/rocm/core)
+cmake -DCMAKE_INSTALL_PREFIX=/opt/rocm ..
 make
-make install
-sudo /opt/rocm/core/share/amdcuid/amdcuid_postinst.sh
+# Use sudo if installing to a system prefix like /opt
+sudo make install
+# Replace <install-prefix> with the value used for CMAKE_INSTALL_PREFIX above
+sudo <install-prefix>/share/amdcuid/amdcuid_postinst.sh
 ```
 
 if needed, users can also create a portable install package using Cpack:
@@ -131,10 +134,12 @@ if needed, users can also create a portable install package using Cpack:
 ```sh
 mkdir build
 cd build
-cmake ..
+# Set CMAKE_INSTALL_PREFIX as needed (default is typically /opt/rocm/core)
+cmake -DCMAKE_INSTALL_PREFIX=/opt/rocm ..
 make
 cpack -G <Package type>
 ```
+Currently supported package types include .deb, .rpm, .tgz, 
 
 Both static and shared libraries are built.
 

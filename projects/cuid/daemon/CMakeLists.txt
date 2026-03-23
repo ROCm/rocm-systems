@@ -107,9 +107,10 @@ if(UNIX AND NOT APPLE)
 endif()
 
 # Post-installation script for udev rules / service registration.
-# The choice between udev (daemonize=true) and systemd service (daemonize=false)
-# is made at install time by reading the deployed config file, so it correctly
-# reflects any user edits made after the build.
+# The choice between install udev rules + systemd service (daemonize=true)
+# or simple cron job (daemonize=false) is made at install time by
+# reading the deployed config file, so it correctly reflects any
+# user edits made after the build.
 if(UNIX AND NOT APPLE)
     # Generate the post-install shell script from a template, substituting the
     # install prefix and config directory baked-in at cmake configure time.

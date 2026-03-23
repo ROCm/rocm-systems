@@ -38,6 +38,11 @@ message("")
 
 # Find required packages
 find_package(GTest CONFIG QUIET)
+# fallback to CMake module if GTest is not found via config
+if(NOT GTest_FOUND)
+    find_package(GTest MODULE QUIET)
+endif()
+# If GTest is still not found, we'll fetch it from source in the next step.
 if (NOT GTest_FOUND)
     # Download and compile googletest to ensure it's available
     message("GTest not found on system. Fetching from source...")

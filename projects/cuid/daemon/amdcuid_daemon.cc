@@ -207,6 +207,14 @@ int main() {
     // if no HMAC key exists, generate and store it
     int fd = open(daemon_hmac.key_file_path.c_str(), O_RDONLY);
     if (fd < 0) {
+        // ensure that the config directory exists and writable before trying to create the key file
+        std::string config_dir = daemon_hmac.key_file_path.substr(0, daemon_hmac.key_file_path.find_last_of('/'));
+        struct stat st;
+        if (stat(config_dir.c_str(), &st) != 0 || !S_ISDIR(st.st_mode) || access(config_dir.c_str(), W_OK) != 0) {
+            std::cerr << "Error: Config directory " << config_dir << " does not exist or is not writable. Cannot create HMAC key file. Exiting." << std::endl;
+            return 1;
+        }
+
         uint8_t key[32];
         amdcuid_status_t key_status = amdcuid_generate_hash_key(key);
         if (key_status != AMDCUID_STATUS_SUCCESS) {
@@ -220,8 +228,17 @@ int main() {
         }
     }
     else {
-        // The key file exists so no need to make any changes.
+        // The key file exists. Verify size matches the expected key length before proceeding, to avoid using a corrupt key file.
+        struct stat key_stat;
+        bool stat_ok = (fstat(fd, &key_stat) == 0);
         close(fd);
+        if (!stat_ok || key_stat.st_size != key_length) {
+            log_err() << "Error: HMAC key file has unexpected size ("
+                      << (stat_ok ? key_stat.st_size : -1)
+                      << " bytes, expected " << key_length << "). Key file may be corrupt; "
+                      << "remove it to allow regeneration." << std::endl;
+            return 1;
+        }
     }
 
     // read config file first get logging options and whether to run as a daemon or only on boot

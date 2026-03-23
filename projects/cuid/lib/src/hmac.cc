@@ -29,6 +29,10 @@
 #include <sys/stat.h>
 #include "hmac.h"
 
+ #ifndef AMDCUID_CONFIG_DIR
+ #error "AMDCUID_CONFIG_DIR is not defined. Please define it to the CUID configuration directory path."
+ #endif
+
 cuid_hmac::cuid_hmac()
     : ctx(nullptr), mac(nullptr), key(nullptr), key_len(0), valid(false),
       key_file_path(std::string(AMDCUID_CONFIG_DIR) + "/hmac_key.bin")
