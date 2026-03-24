@@ -38,6 +38,31 @@ ROCPROFILER_EXTERN_C_INIT
  * @defgroup BUFFER_TRACING_SERVICE Asynchronous Tracing Service
  * @brief Receive callbacks for batches of records from an internal (background) thread
  *
+ * @par Buffer Record Dispatch Contract
+ * The SDK guarantees that the buffer flush callback will **only** receive records whose
+ * `kind` field corresponds to a tracing category that was explicitly registered for the
+ * associated tool context via ::rocprofiler_configure_buffer_tracing_service.  Records
+ * originating from internally-captured categories (e.g., HSA_CORE_API, SCRATCH_MEMORY)
+ * that were **not** registered by the tool context must never appear in that context's
+ * buffer.
+ *
+ * @par Initialization Ordering Requirement
+ * Tools **must** call ::rocprofiler_configure (which in turn calls
+ * ::rocprofiler_configure_buffer_tracing_service) **before** any call to @c hipInit or
+ * any other runtime initializer.  If a runtime initializer runs first, the SDK may
+ * register internal callbacks for all buffer tracing categories before the tool context
+ * is established, causing cross-contamination: records with unexpected `kind` values
+ * (and uninitialized `operation` fields from the SDK's internal ring buffer) may be
+ * flushed into tool-owned buffers.
+ *
+ * @par Defensive Validation in Buffer Flush Callbacks
+ * Despite the above guarantee, tool-side buffer flush callbacks **should** defensively
+ * validate the `kind` field of every received ::rocprofiler_record_header_t against the
+ * set of categories the tool explicitly registered, and skip (or log) any record whose
+ * `kind` is not in that set rather than blindly casting to a specific record type such
+ * as ::rocprofiler_buffer_tracing_hip_api_record_t.  This guards against unexpected
+ * records that can arise from initialization ordering races described above.
+ *
  * @{
  */
 
@@ -585,6 +610,23 @@ typedef int (*rocprofiler_buffer_tracing_kind_operation_cb_t)(
 /**
  * @brief Configure Buffer Tracing Service.
  *
+ * Registers a buffer tracing category (@p kind) for the given tool context.  After
+ * successful registration, the SDK guarantees that the buffer flush callback associated
+ * with @p buffer_id will **only** receive records whose `kind` matches one of the
+ * categories explicitly registered via this function for @p context_id.  Records from
+ * SDK-internal categories that were not registered (e.g., HSA_CORE_API,
+ * SCRATCH_MEMORY) will never be dispatched into the tool's buffer.
+ *
+ * @warning This function **must** be called from within the ::rocprofiler_configure
+ * initialization callback, before any HIP or HSA runtime initializer (such as
+ * @c hipInit) executes.  Calling a runtime initializer before
+ * ::rocprofiler_configure completes can trigger an initialization ordering race:
+ * the SDK registers internal callbacks for all 33 buffer tracing categories prior to
+ * the tool context being established, which may cause unexpected records (with
+ * uninitialized `operation` fields) to appear in tool-owned buffers.  Ensure that
+ * the tool shared library is loaded—and ::rocprofiler_configure is invoked—before
+ * any call that implicitly or explicitly initializes the HIP/HSA runtime.
+ *
  * @param [in] context_id Associated context to control activation of service
  * @param [in] kind Buffer tracing category
  * @param [in] operations Array of specific operations (if desired)
@@ -741,3 +783,4 @@ rocprofiler_iterate_buffer_tracing_record_args(
 /** @} */
 
 ROCPROFILER_EXTERN_C_FINI
+```

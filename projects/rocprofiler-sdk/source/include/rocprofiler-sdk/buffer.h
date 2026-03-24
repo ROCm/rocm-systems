@@ -42,6 +42,16 @@ ROCPROFILER_EXTERN_C_INIT
 /**
  * @brief  Async callback function.
  *
+ * The SDK guarantees that only records whose kind was explicitly configured for
+ * the associated context are forwarded to this callback.  Records arriving
+ * through the internal ring buffer with a kind that is not present in the
+ * context's configured set (e.g. because hipInit raced with
+ * rocprofiler_configure and caused the SDK to register callbacks for all 33
+ * buffer tracing categories before the tool context was fully established) are
+ * filtered out by the dispatch path and never delivered here.  Callers
+ * therefore do not need to defend against blind struct reinterpretation of
+ * records with uninitialized operation fields.
+ *
  * @code{.cpp}
  *  for(size_t i = 0; i < num_headers; ++i)
  *  {
@@ -60,6 +70,28 @@ typedef void (*rocprofiler_buffer_tracing_cb_t)(rocprofiler_context_id_t      co
                                                 size_t                        num_headers,
                                                 void*                         data,
                                                 uint64_t                      drop_count);
+
+/**
+ * @brief Query whether a buffer tracing kind is among the categories configured
+ *        for the given context.
+ *
+ * This is the predicate used by the internal buffer-flush dispatch path to
+ * implement the kind-filter guard (ROCM-8888).  It is exposed here so that
+ * higher-level wrappers and test harnesses can replicate the same check without
+ * duplicating the context-lookup logic.
+ *
+ * @param [in]  context  Context whose configured-kind set is queried.
+ * @param [in]  kind     Buffer tracing kind to test.
+ * @param [out] result   Set to non-zero when @p kind is configured, zero otherwise.
+ * @return ::rocprofiler_status_t
+ *   - ::ROCPROFILER_STATUS_SUCCESS        — query completed (check @p result).
+ *   - ::ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND — @p context is not valid.
+ */
+rocprofiler_status_t
+rocprofiler_query_buffer_tracing_kind_configured(rocprofiler_context_id_t        context,
+                                                 rocprofiler_buffer_tracing_kind_t kind,
+                                                 int*                            result) ROCPROFILER_API
+    ROCPROFILER_NONNULL(3);
 
 /**
  * @brief Create buffer.
