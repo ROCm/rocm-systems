@@ -16,7 +16,11 @@
 #include "bootstrap.h"
 #include "ce_coll.h"
 #include "profiler.h"
+#ifndef NVTX_NO_IMPL
 #include "nvtx.h"
+#else
+#include "nvtx_stub.h"
+#endif
 
 #include "msccl/msccl_lifecycle.h"
 

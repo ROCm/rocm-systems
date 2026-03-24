@@ -7,7 +7,11 @@
 #include "comm.h"
 #include "transport.h"
 #include "group.h"
+#ifndef NVTX_NO_IMPL
 #include "nvtx.h"
+#else
+#include "nvtx_stub.h"
+#endif
 
 NCCL_API(ncclResult_t, ncclMemAlloc, void **ptr, size_t size);
 ncclResult_t  ncclMemAlloc_impl(void **ptr, size_t size) {

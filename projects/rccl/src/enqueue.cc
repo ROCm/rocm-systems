@@ -23,7 +23,11 @@
 #include "transport.h"
 #include "register_inline.h"
 #include "ce_coll.h"
+#ifndef NVTX_NO_IMPL
 #include "nvtx.h"
+#else
+#include "nvtx_stub.h"
+#endif
 #include "scheduler.h"
 #include "common.h"
 #include "api_trace.h"

@@ -20,4 +20,6 @@ struct nccl_domain{static constexpr char const* name{"NCCL"};};
 
 #define NVTX_PAYLOAD_ENTRY_NCCL_REDOP 11
 
+#define NCCL_NVTX3_FUNC_RANGE
+
 #endif

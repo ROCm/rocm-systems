@@ -47,7 +47,11 @@
 #include "utils.h"
 #include <mutex>
 #include "ce_coll.h"
+#ifndef NVTX_NO_IMPL
 #include "nvtx.h"
+#else
+#include "nvtx_stub.h"
+#endif
 
 // [RCCL]
 #include "git_version.h"
