@@ -69,10 +69,10 @@ is already installed.
 Build requirements
 -----------------------------------
 
-* GCC compiler v7+
+* GCC compiler v10.0+
 
-  * Older GCC compilers may be supported but are not tested
-  * Clang compilers are generally supported for ROCm Systems Profiler but not Dyninst
+  * Older GCC compilers (v7-v9) may work for ROCm Systems Profiler itself but will fail when building Dyninst
+  * Clang compilers are generally supported for ROCm Systems Profiler but may not work for building Dyninst
 
 * `CMake <https://cmake.org/>`_ v3.21 or later
 
