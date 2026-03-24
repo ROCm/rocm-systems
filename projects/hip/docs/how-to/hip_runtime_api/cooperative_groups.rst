@@ -498,8 +498,9 @@ Performs a reduction operation on the specified group, contributing the value ``
 
 Note that it is legal for some threads of the cooperative group to not participate.
 
-On AMD, although all types ``T`` fulfilling the description above can be used with the functors in the cooperative_groups namespace, only some of them will receive hardware acceleration in the form of DPP instructions. Essentially only the types supported by reduce_sync operations would potentially receive acceleration :ref:`Warp reduction functions` The macro HIP_ENABLE_EXTRA_WARP_SYNC_TYPES might be needed to enable the hardware acceleration on some types.
+On AMD, although all types ``T`` fulfilling the description above can be used with the functors in the cooperative_groups namespace, only some of them will receive hardware acceleration in the form of DPP instructions. Essentially only the types supported by reduce_sync operations would potentially receive acceleration :ref:`hip_cpp_language_extensions:Warp reduction functions` The macro HIP_ENABLE_EXTRA_WARP_SYNC_TYPES might be needed to enable the hardware acceleration on some types.
 For arithmetic reduces (``plus``, ``less`` and ``greater``):
+
 * On Nvidia platform: there is hardware acceleration for ``int`` or ``unsigned int``
 
 * On AMD platform:
