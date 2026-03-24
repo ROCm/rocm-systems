@@ -22,7 +22,7 @@
 #include <gtest/gtest.h>
 
 
-#include "rocm_smi/rocm_smi_utils.h"
+#include "amd_smi/impl/amd_smi_utils.h"
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "test_common.h"
 #include "test_base.h"

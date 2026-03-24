@@ -26,6 +26,8 @@
 #include <dirent.h>
 #include <limits>
 #include <type_traits>
+#include <iterator>
+#include <ostream>
 #include <string>
 
 #include "amd_smi/amdsmi.h"
@@ -146,4 +148,68 @@ amdsmi_status_t smi_amdgpu_get_device_index(amdsmi_processor_handle processor_ha
 amdsmi_status_t smi_amdgpu_get_device_count(uint32_t *total_num_devices);
 amdsmi_status_t smi_amdgpu_get_processor_handle_by_index(uint32_t device_index,
                                         amdsmi_processor_handle *processor_handle);
+
+namespace amd::smi {
+
+template<typename DelimiterType, typename CharType = char,
+         typename TraitsType = std::char_traits<CharType>>
+class ostream_joiner {
+ public:
+  using Char_t = CharType;
+  using Traits_t = TraitsType;
+  using Ostream_t = std::basic_ostream<Char_t, Traits_t>;
+  using iterator_category = std::output_iterator_tag;
+  using value_type = void;
+  using difference_type = void;
+  using pointer = void;
+  using reference = void;
+
+  ostream_joiner(Ostream_t* outstream,
+                const DelimiterType& delimiter) noexcept
+      (std::is_nothrow_copy_constructible_v<DelimiterType>)
+        : m_outstream(outstream), m_delimiter(delimiter) {}
+
+  ostream_joiner(Ostream_t* outstream, DelimiterType&& delimiter) noexcept
+      (std::is_nothrow_move_constructible_v<DelimiterType>)
+      : m_outstream(outstream), m_delimiter(std::move(delimiter)) {}
+
+  template<typename ValueType> ostream_joiner& operator=(const ValueType& value) {
+    if (!m_is_first) {
+      *m_outstream << m_delimiter;
+    }
+    this->m_is_first = false;
+    this->m_value_count++;
+    if ((m_value_count % kMAX_VALUES_PER_LINE) == 0) {
+      *m_outstream << "\n" << value;
+      this->m_value_count = 0;
+    } else {
+      *m_outstream << value;
+    }
+    return *this;
+  }
+
+  ostream_joiner& operator*() noexcept { return *this; }
+  ostream_joiner& operator++() noexcept { return *this; }
+  ostream_joiner& operator++(int) noexcept { return *this; }
+
+ private:
+  Ostream_t* m_outstream;
+  DelimiterType m_delimiter;
+  bool m_is_first = true;
+  uint32_t m_value_count = 0;
+  const uint32_t kMAX_VALUES_PER_LINE = 9;
+};
+
+template<typename CharType, typename TraitsType, typename DelimiterType>
+inline ostream_joiner<std::decay_t<DelimiterType>, CharType, TraitsType>
+make_ostream_joiner(std::basic_ostream<CharType, TraitsType>* outstream,
+                    DelimiterType&& delimiter) {
+  return { outstream, std::forward<DelimiterType>(delimiter) };
+}
+
+bool is_vm_guest();
+bool is_sudo_user();
+
+} // namespace amd::smi
+
 #endif  // AMD_SMI_INCLUDE_AMD_SMI_UTILS_H_

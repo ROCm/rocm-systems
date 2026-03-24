@@ -34,7 +34,7 @@
 #include <gtest/gtest.h>
 #include "../test_base.h"
 #include "amd_smi/amdsmi.h"
-#include "rocm_smi/rocm_smi_utils.h"
+#include "amd_smi/impl/amd_smi_utils.h"
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "computepartition_read_write.h"
 

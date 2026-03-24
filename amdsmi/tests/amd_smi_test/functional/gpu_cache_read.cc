@@ -37,7 +37,7 @@
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "gpu_metrics_read.h"
-#include "rocm_smi/rocm_smi_utils.h"
+#include "amd_smi/impl/amd_smi_utils.h"
 
 TestGPUCacheRead::TestGPUCacheRead() : TestBase() {
   set_title("GPU Cache Read Test");

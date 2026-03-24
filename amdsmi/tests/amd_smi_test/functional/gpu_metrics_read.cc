@@ -32,7 +32,7 @@
 #include "amd_smi/amdsmi.h"
 #include "gpu_metrics_read.h"
 #include "../test_common.h"
-#include "rocm_smi/rocm_smi_utils.h"
+#include "amd_smi/impl/amd_smi_utils.h"
 #include "amd_smi/impl/amd_smi_utils.h"
 
 

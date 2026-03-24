@@ -33,7 +33,7 @@
 #include "../test_common.h"
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_utils.h"
-#include "rocm_smi/rocm_smi_utils.h"
+#include "amd_smi/impl/amd_smi_utils.h"
 #include "memorypartition_read_write.h"
 
 const uint32_t MAX_UNSUPPORTED_PARTITIONS = 0;

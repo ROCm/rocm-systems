@@ -63,7 +63,7 @@ aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR} tstSources)
 # Header file include path
 include_directories(${TEST} 
 ${CMAKE_CURRENT_SOURCE_DIR}/.. 
-${ROCM_INC_DIR}/.. 
+${PROJECT_SOURCE_DIR}/include 
 )
 
 # Build rules
