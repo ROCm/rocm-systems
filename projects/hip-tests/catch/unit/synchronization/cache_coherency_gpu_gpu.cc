@@ -272,7 +272,7 @@ static bool gpu_to_gpu_coherency() {
  *    - Test to be run only on AMD.
  */
 
-TEST_CASE(Unit_cache_coherency_gpu_gpu) {
+HIP_TEST_CASE(Unit_cache_coherency_gpu_gpu) {
   bool passed = true;
   // Coherency between GPUs accessing local or remote FB.
   REQUIRE(passed == gpu_to_gpu_coherency());

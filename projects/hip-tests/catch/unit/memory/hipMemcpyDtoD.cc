@@ -25,7 +25,7 @@ This testcase verifies hipMemcpyDtoD API
 6.Kernel Launch
 7.DtoH copy and validating the result
 */
-TEMPLATE_TEST_CASE(Unit_hipMemcpyDtoD_Basic, int, float,
+HIP_TEMPLATE_TEST_CASE(Unit_hipMemcpyDtoD_Basic, int, float,
                    double) {
   size_t Nbytes = NUM_ELM * sizeof(TestType);
   int numDevices = 0;

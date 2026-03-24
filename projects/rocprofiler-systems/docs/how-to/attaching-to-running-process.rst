@@ -8,31 +8,30 @@ Attaching to a running process
 
 `ROCm Systems Profiler <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems>`_ can attach
 to and profile an already running process using the ``rocprof-sys-attach`` executable.
-This is useful for profiling long-running applications, daemons, or processes
+This capability is useful for profiling long-running applications, daemons, or processes
 that are difficult to restart with instrumentation.
 
-.. important::
+Prerequisites
+======================
 
-   **The target process must be started with the ``ROCP_TOOL_ATTACH=1`` environment
-   variable set** to enable attachment support. Without this, attachment will fail.
+Before starting with process attachment, you should ensure:
 
-   .. code-block:: shell
+* Attachment support is enabled by configuring the ``ROCP_TOOL_ATTACH=1`` environment variable. Without this variable, attachment will fail.
 
-      # Start your application with attachment support enabled
-      ROCP_TOOL_ATTACH=1 ./my_application
+  .. code-block:: shell
 
-   Alternatively, if using a version of ``rocprofiler-register`` built with
-   ``ROCPROFILER_REGISTER_BUILD_DEFAULT_ATTACHMENT=ON``, this is not required.
+     # Start your application with attachment support enabled
+     ROCP_TOOL_ATTACH=1 ./my_application
 
-.. note::
+  This is not required if a version of ``rocprofiler-register`` built with ``ROCPROFILER_REGISTER_BUILD_DEFAULT_ATTACHMENT=ON`` is used.
 
-   The target process should be compiled with debug symbols or frame pointers
-   for meaningful profiling results. Additionally, the process must be running
-   with appropriate permissions for attachment (see ``ptrace`` requirements).
+* The target process is compiled with debug symbols or frame pointers for meaningful profiling results.
 
-.. admonition:: Current limitation: no reattach
+* The process is running with the appropriate permissions for attachment (see ``ptrace`` requirements).
 
-   Once you detach from a process, you **cannot reattach** to the same process.
+.. admonition:: Current limitation: Process reattach unavailable
+
+   Once you detach from a process, you cannot reattach to the same process.
    A second attach to the same PID will result in an error. Support for
    reattaching to a previously detached process is planned for a future release.
 
@@ -41,15 +40,15 @@ When to use rocprof-sys-attach
 
 Use ``rocprof-sys-attach`` when:
 
-* The application is already running and cannot be easily restarted
-* You want to profile a specific phase of a long-running application
-* The application is started by an external system (e.g., job scheduler)
-* You need to attach profiling dynamically based on runtime conditions
+* The application is already running and cannot be easily restarted.
+* You want to profile a specific phase within a long‑running application.
+* The application is started by an external system (For example, job scheduler).
+* You need to attach profiling dynamically based on runtime conditions.
 
 The rocprof-sys-attach executable
 ========================================
 
-View the help menu of ``rocprof-sys-attach`` with the ``-h`` / ``--help`` option:
+View the help menu of ``rocprof-sys-attach`` using the ``-h`` or ``--help`` option:
 
 .. code-block:: shell
 
@@ -81,39 +80,41 @@ Command-line options
    using tools like ``ps``, ``pgrep``, or ``top``.
 
 ``-o, --output PATH``
-   Specifies the output directory for profiling results. If not specified,
+   Specifies the output directory for profiling the results. If not specified,
    results are written to the default location (``rocprof-sys-output/``).
 
 ``-F, --format FORMAT[,FORMAT,...]``
-   Specifies the output format(s) for profiling data. Multiple formats can be
-   specified as a comma-separated list. Available formats:
+   Specifies the output format(s) for the profiling data. Multiple formats can be
+   provided as a comma-separated list. Available formats are:
 
    * ``perfetto`` - Generates a Perfetto trace file (``.proto``) that can be
-     visualized in the `Perfetto UI <https://ui.perfetto.dev>`_
+     visualized in the `Perfetto UI <https://ui.perfetto.dev>`_.
    * ``rocpd`` - Generates a RocPD SQLite database file (``.db``) for
-     programmatic analysis
+     programmatic analysis.
 
 Basic usage
 ========================================
 
-1. **Find the process ID** of the running application:
+1. Find the process ID of the running application:
 
    .. code-block:: shell
 
       $ pgrep -f my_application
       12345
 
-2. **Attach to the process** with basic profiling:
+2. Attach to the process with basic profiling:
 
    .. code-block:: shell
 
       $ rocprof-sys-attach -p 12345
 
-3. **Wait for the profiling period** you want to capture, then press ENTER to
+3. Wait for the desired profiling period you want to capture, then press ENTER to
    detach and finalize the profiling data.
 
 Examples
 ========================================
+
+Some examples of process attachment are:
 
 Attach with Perfetto trace output
 ----------------------------------------
@@ -196,6 +197,8 @@ Here is a complete workflow for attaching to a running GPU application:
 Troubleshooting
 ========================================
 
+Troubleshooting examples for some common issues are:
+
 Attachment fails immediately
 ----------------------------------------
 
@@ -210,9 +213,9 @@ Without ``ROCP_TOOL_ATTACH=1``, the target process does not initialize the
 attachment infrastructure and cannot be profiled dynamically.
 
 Permission denied
-----------------------------------------
+-------------------------------
 
-If you receive a permission error when attaching, ensure:
+If you receive a permission error when attaching, ensure the following:
 
 1. You have appropriate permissions to attach to the process (same user or root)
 2. The ``ptrace`` scope allows attachment:
@@ -230,24 +233,24 @@ Process not found
 
 If the process cannot be found:
 
-1. Verify the PID is correct: ``ps -p <pid>``
-2. Ensure the process is still running
-3. Check if the process is in a different namespace (containers)
+1. Verify the PID is correct: ``ps -p <pid>``.
+2. Ensure the process is still running.
+3. Check if the process is in a different namespace (containers).
 
 Reattach fails
 ----------------------------------------
 
-If you previously detached from a process and try to attach again to the same
+If you detach from a process and attempt to reattach to the same
 PID, the attach will fail. This is a current limitation; reattach support is
-planned for a future release. To profile the same application again, restart
+planned for a future release. As a workaround, to profile the same application again, restart
 the application and attach to the new process.
 
 See also
 ========================================
 
 * :doc:`Sampling the call stack <./sampling-call-stack>` - Alternative profiling method
-  using ``rocprof-sys-sample``
+  using ``rocprof-sys-sample``.
 * :doc:`Understanding the output <./understanding-rocprof-sys-output>` - How to
-  interpret profiling results
+  interpret profiling results.
 * :doc:`Configuring runtime options <./configuring-runtime-options>` - Environment
-  variables for fine-tuning profiling behavior
+  variables for fine-tuning profiling behavior.

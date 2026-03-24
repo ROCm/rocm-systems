@@ -9,12 +9,14 @@ import sys
 from pathlib import Path
 import pytest
 
-sys.path.insert(0, os.fspath(Path(__file__).parent.parent))
-from github_actions_api import get_visible_gpu_count
-
 THEROCK_BIN_DIR = os.getenv("THEROCK_BIN_DIR")
 SCRIPT_DIR = Path(__file__).resolve().parent
-THEROCK_DIR = SCRIPT_DIR.parent.parent.parent
+THEROCK_DIR = Path(
+    os.environ.get("THEROCK_DIR") or SCRIPT_DIR.parent.parent.parent
+).resolve()
+sys.path.insert(0, str(THEROCK_DIR / "build_tools" / "github_actions"))
+from github_actions_api import get_visible_gpu_count
+
 logging.basicConfig(level=logging.INFO)
 
 

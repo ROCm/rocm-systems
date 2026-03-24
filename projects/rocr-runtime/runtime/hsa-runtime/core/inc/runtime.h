@@ -514,6 +514,7 @@ class Runtime {
   bool XnackEnabled() const { return xnack_enabled_; }
   void XnackEnabled(bool enable) { xnack_enabled_ = enable; }
   bool AqlProfileAvailable() const { return (aqlprofile_lib_ != nullptr); }
+  os::LibHandle AqlProfileLib() const { return aqlprofile_lib_; }
 
   Driver &AgentDriver(DriverType drv_type) {
     auto is_drv_type = [&](const std::unique_ptr<Driver> &d) {

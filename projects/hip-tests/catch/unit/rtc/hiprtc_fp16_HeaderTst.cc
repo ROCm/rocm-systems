@@ -276,7 +276,7 @@ __global__ void fp16(float *res) {
  *  - HIP_VERSION >= 5.7
  */
 
-TEST_CASE(Unit_Rtc_fp16_header) {
+HIP_TEST_CASE(Unit_Rtc_fp16_header) {
   std::string kernel_name = "fp16";
   const char* kername = kernel_name.c_str();
   float* result_h;

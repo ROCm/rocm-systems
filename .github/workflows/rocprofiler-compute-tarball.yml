@@ -59,6 +59,11 @@ jobs:
         with:
           sparse-checkout: projects/rocprofiler-compute
           ref: ${{ steps.sha-mode.sha }}
+          set-safe-directory: true
+
+      - name: Configure git safe directory
+        run: git config --global --add safe.directory '*'
+
       - name: Install ROCm Dependencies
         shell: bash
         run: |

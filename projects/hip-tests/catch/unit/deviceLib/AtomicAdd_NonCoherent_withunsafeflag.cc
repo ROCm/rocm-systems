@@ -30,7 +30,7 @@ Output: atomicAdd API would work and the 0/P is 15
         global_atomic_add_float/double instruction is generated
         or not */
 
-TEMPLATE_TEST_CASE(Unit_AtomicAdd_NonCoherentwithUnsafeflag, float, double) {
+HIP_TEMPLATE_TEST_CASE(Unit_AtomicAdd_NonCoherentwithUnsafeflag, float, double) {
   hipDeviceProp_t prop;
   int device;
   HIP_CHECK(hipGetDevice(&device));

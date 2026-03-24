@@ -34,7 +34,7 @@ __global__ void checkStaticConstVarAddress(float* addr, bool* out) {
   *out = (statConstVar == addr);
 }
 
-TEST_CASE(Unit_hipMemcpyToSymbolAsync_ToNFrom) {
+HIP_TEST_CASE(Unit_hipMemcpyToSymbolAsync_ToNFrom) {
   int *A{nullptr}, *Am{nullptr}, *B{nullptr}, *Ad{nullptr}, *C{nullptr}, *Cm{nullptr};
   A = new int[NUM];
   B = new int[NUM];
@@ -152,7 +152,7 @@ TEST_CASE(Unit_hipMemcpyToSymbolAsync_ToNFrom) {
 /*
  1) Validate get symbol address/size for static const variable.
 */
-TEST_CASE(Unit_hipGetSymbolAddressAndSize_Validation) {
+HIP_TEST_CASE(Unit_hipGetSymbolAddressAndSize_Validation) {
   bool* checkOkD{nullptr};
   bool checkOk = false;
   size_t symbolSize{};
@@ -173,7 +173,7 @@ TEST_CASE(Unit_hipGetSymbolAddressAndSize_Validation) {
   }
 }
 
-TEST_CASE(Unit_hipGetSymbolAddress_Negative) {
+HIP_TEST_CASE(Unit_hipGetSymbolAddress_Negative) {
   SECTION("Invalid symbol") {
     int notADeviceSymbol{0};
     int* addr{nullptr};
@@ -189,7 +189,7 @@ TEST_CASE(Unit_hipGetSymbolAddress_Negative) {
   }
 }
 
-TEST_CASE(Unit_hipGetSymbolSize_Negative) {
+HIP_TEST_CASE(Unit_hipGetSymbolSize_Negative) {
   SECTION("Invalid symbol") {
     int notADeviceSymbol{0};
     size_t dsize{0};
@@ -200,4 +200,67 @@ TEST_CASE(Unit_hipGetSymbolSize_Negative) {
     size_t size{0};
     HIP_CHECK_ERROR(hipGetSymbolSize(&size, nullptr), hipErrorInvalidSymbol);
   }
+}
+
+static __device__ int d_symbol{};
+static __global__ void simple_kernel(float* data, int n) {
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx < n) {
+    data[idx] += 1.0f;
+  }
+}
+
+HIP_TEST_CASE(Unit_MemcpyToSymbolInParallelWithStreamLaunch) {
+  std::atomic_bool thread_errored{false};
+  std::atomic<bool> g_running{true};
+
+  // Simple thread function where we run MemcpyToSymbol in parallel
+  // While we create stream, enqueue work and destroy it
+  // This pattern is seen in rocDecode, where we found this issue.
+  // Creating this test so that we do not break this again.
+  auto thread_func = [&](int thread_id) {
+    int val = thread_id;
+    // We run it until we notify it or the previous threads have errored
+    while (g_running.load(std::memory_order_relaxed) &&
+           !thread_errored.load(std::memory_order_relaxed)) {
+      hipError_t err =
+          hipMemcpyToSymbol(HIP_SYMBOL(d_symbol), &val, sizeof(int), 0, hipMemcpyHostToDevice);
+      if (err != hipSuccess) {
+        thread_errored = true;
+      }
+    }
+  };
+
+  constexpr int N = 256;
+  constexpr int kNumWorkers = 4;
+  constexpr int kIterations = 50000;
+
+  float* d_data{nullptr};
+  HIP_CHECK(hipMalloc(&d_data, N * sizeof(float)));
+
+  std::vector<std::thread> workers;
+  workers.reserve(kNumWorkers);
+  for (int i = 0; i < kNumWorkers; ++i) {
+    workers.emplace_back(thread_func, i);
+  }
+
+  // Main thread: rapid stream create -> kernel launch -> destroy cycle.
+  for (int i = 0; i < kIterations; ++i) {
+    hipStream_t stream;
+    HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamDefault));
+    simple_kernel<<<1, N, 0, stream>>>(d_data, N);
+    // Intentionally skip hipStreamSynchronize
+    HIP_CHECK(hipStreamDestroy(stream));
+  }
+
+  g_running.store(false, std::memory_order_relaxed);
+
+  for (auto& w : workers) {
+    w.join();
+  }
+
+  HIP_CHECK(hipFree(d_data));
+
+  INFO("Checking if threads have errored.");
+  REQUIRE(!thread_errored);
 }

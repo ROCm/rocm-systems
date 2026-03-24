@@ -72,7 +72,7 @@ void GraphMemcpyToSymbolShell(const void* symbol, size_t offset, const std::vect
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipGraphAddMemcpyNodeToSymbol_Positive_Basic) {
+HIP_TEST_CASE(Unit_hipGraphAddMemcpyNodeToSymbol_Positive_Basic) {
   SECTION("char") {
     HIP_GRAPH_ADD_MEMCPY_NODE_TO_FROM_SYMBOL_TEST(GraphMemcpyToSymbolShell, 10, char);
   }
@@ -114,7 +114,7 @@ TEST_CASE(Unit_hipGraphAddMemcpyNodeToSymbol_Positive_Basic) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipGraphAddMemcpyNodeToSymbol_Negative_Parameters) {
+HIP_TEST_CASE(Unit_hipGraphAddMemcpyNodeToSymbol_Negative_Parameters) {
   using namespace std::placeholders;
   hipGraph_t graph = nullptr;
   HIP_CHECK(hipGraphCreate(&graph, 0));
