@@ -1719,11 +1719,20 @@ amdsmi_status_t  amdsmi_set_gpu_overdrive_level(
             amdsmi_processor_handle /*processor_handle*/, uint32_t /*od*/) {
     return AMDSMI_STATUS_NOT_SUPPORTED;
 }
+
 amdsmi_status_t  amdsmi_get_gpu_pci_replay_counter(
-            amdsmi_processor_handle /*processor_handle*/, uint64_t *counter) {
+            amdsmi_processor_handle processor_handle, uint64_t *counter) {
+    AMDSMI_CHECK_INIT();
     if (counter == nullptr) { return AMDSMI_STATUS_INVAL; }
-    return AMDSMI_STATUS_NOT_SUPPORTED;
+    auto *device = reinterpret_cast<Device *>(processor_handle);
+    if (device == nullptr) return AMDSMI_STATUS_INVAL;
+    wsl::thunk::PCIeInfo pi = {};
+    auto code = device->QueryPCIeInfo(&pi);
+    if (code != ErrorCode::Success) return translateCodeToSmiStatus(code);
+    *counter = pi.pcie_replay_count;
+    return AMDSMI_STATUS_SUCCESS;
 }
+
 amdsmi_status_t amdsmi_get_gpu_pci_throughput(
         amdsmi_processor_handle /*processor_handle*/,
         uint64_t *sent, uint64_t *received, uint64_t *max_pkt_sz) {
