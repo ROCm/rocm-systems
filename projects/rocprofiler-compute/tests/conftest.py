@@ -43,20 +43,7 @@ try:
         "rocprof-compute", "src/rocprof-compute"
     ).load_module()
     rocprof_compute_script_path = "src/rocprof-compute"
-except Exception as e:
-    import traceback
-
-    sys.stderr.write("\n" + "=" * 80 + "\n")
-    sys.stderr.write("[CONFTEST DEBUG] Failed to load 'src/rocprof-compute'\n")
-    sys.stderr.write(f"[CONFTEST DEBUG] Exception type: {type(e).__name__}\n")
-    sys.stderr.write(f"[CONFTEST DEBUG] Exception message: {e}\n")
-    sys.stderr.write("[CONFTEST DEBUG] Full traceback:\n")
-    traceback.print_exc(file=sys.stderr)
-    sys.stderr.write(f"[CONFTEST DEBUG] sys.path: {sys.path}\n")
-    sys.stderr.write(f"[CONFTEST DEBUG] SRC directory: {SRC}\n")
-    sys.stderr.write("[CONFTEST DEBUG] Attempting fallback to 'rocprof-compute'...\n")
-    sys.stderr.write("=" * 80 + "\n\n")
-    sys.stderr.flush()
+except Exception:
     rocprof_compute = SourceFileLoader(
         "rocprof-compute", "rocprof-compute"
     ).load_module()
