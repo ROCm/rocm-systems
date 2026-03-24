@@ -80,5 +80,5 @@ jobs:
     uses: ./.github/workflows/therock-media-test-packages.yml
     with:
       amdgpu_families: "gfx94X-dcgpu"
-      test_runs_on: "linux-mi325-1gpu-ossci-rocm"
+      test_runs_on: "linux-gfx942-1gpu-ossci-rocm"
       platform: "linux"
