@@ -136,18 +136,6 @@ bool glDissociate(Device* device, void* GLplatformContext, void* GLdeviceContext
 }
 
 // ================================================================================================
-bool glBeginInterop(void* GLplatformContext) {
-  if (!wglBeginCLInteropAMD) return false;
-  return wglBeginCLInteropAMD(static_cast<HGLRC>(GLplatformContext), 0) != FALSE;
-}
-
-// ================================================================================================
-bool glEndInterop(void* GLplatformContext) {
-  if (!wglEndCLInteropAMD) return false;
-  return wglEndCLInteropAMD(static_cast<HGLRC>(GLplatformContext), 0) != FALSE;
-}
-
-// ================================================================================================
 bool Export(amd::Memory* mem, GLenum targetType, int miplevel, hsa_handle_t* handle, int* offset) {
   assert(mem->getInteropObj() != nullptr);
   assert(mem->getInteropObj()->asGLObject() != nullptr);

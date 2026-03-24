@@ -1811,16 +1811,6 @@ bool Device::unbindExternalDevice(uint flags, void* const gfxDevice[], void* gfx
   return true;
 }
 
-// ================================================================================================
-bool Device::beginGLInterop(void* pContext) const {
-  return GlInterop::glBeginInterop(pContext);
-}
-
-// ================================================================================================
-bool Device::endGLInterop(void* pContext) const {
-  return GlInterop::glEndInterop(pContext);
-}
-
 amd::Memory* Device::findMapTarget(size_t size) const {
   // Must be serialised for access
   std::scoped_lock lk(*mapCacheOps_);

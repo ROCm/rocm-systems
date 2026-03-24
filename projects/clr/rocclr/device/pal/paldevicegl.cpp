@@ -805,26 +805,6 @@ bool Device::glDissociate(void* GLplatformContext, void* GLdeviceContext) const 
   return true;
 }
 
-bool Device::beginGLInterop(void* GLplatformContext) const {
-#ifdef ATI_OS_LINUX
-  GLXContext ctx = (GLXContext)GLplatformContext;
-  return (glXBeginCLInteropAMD != nullptr) && (glXBeginCLInteropAMD(ctx, 0));
-#else
-  HGLRC hRC = (HGLRC)GLplatformContext;
-  return (wglBeginCLInteropAMD != nullptr) && (wglBeginCLInteropAMD(hRC, 0));
-#endif
-}
-
-bool Device::endGLInterop(void* GLplatformContext) const {
-#ifdef ATI_OS_LINUX
-  GLXContext ctx = (GLXContext)GLplatformContext;
-  return (glXEndCLInteropAMD != nullptr) && (glXEndCLInteropAMD(ctx, 0));
-#else
-  HGLRC hRC = (HGLRC)GLplatformContext;
-  return (wglEndCLInteropAMD != nullptr) && (wglEndCLInteropAMD(hRC, 0));
-#endif
-}
-
 bool Device::resGLAssociate(void* GLContext, uint name, uint type, Pal::OsExternalHandle* handle,
                             void** mbResHandle, size_t* offset, cl_image_format& newClFormat
 #ifdef ATI_OS_WIN

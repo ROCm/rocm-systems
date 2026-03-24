@@ -163,6 +163,8 @@ typedef HDC(APICALL* PFN_wglGetCurrentDC)(void);
 typedef BOOL(APICALL* PFN_wglDeleteContext)(HGLRC hglrc);
 typedef BOOL(APICALL* PFN_wglMakeCurrent)(HDC hdc, HGLRC hglrc);
 typedef BOOL(APICALL* PFN_wglShareLists)(HGLRC hglrc1, HGLRC hglrc2);
+typedef BOOL(APICALL* PFN_wglBeginCLInteropAMD)(HGLRC hRC, GLuint flags);
+typedef BOOL(APICALL* PFN_wglEndCLInteropAMD)(HGLRC hRC, GLuint flags);
 #else            //!_WIN32
 #define APICALL  // __stdcall   //??? todo odintsov
 #define API_GETPROCADDR "glXGetProcAddress"
@@ -185,6 +187,8 @@ typedef GLXContext (*PFNglXCreateContext)(Display* dpy, XVisualInfo* vis, GLXCon
                                           Bool direct);
 typedef void (*PFNglXDestroyContext)(Display* dpy, GLXContext ctx);
 typedef Bool (*PFNglXMakeCurrent)(Display* dpy, GLXDrawable drawable, GLXContext ctx);
+typedef Bool (*PFN_glXBeginCLInteropAMD)(GLXContext ctx, GLuint flags);
+typedef Bool (*PFN_glXEndCLInteropAMD)(GLXContext ctx, GLuint flags);
 typedef void* HMODULE;
 #endif  //!_WIN32
 
@@ -252,6 +256,8 @@ class GLFunctions {
   PFN_wglDeleteContext wglDeleteContext_;
   PFN_wglMakeCurrent wglMakeCurrent_;
   PFN_wglShareLists wglShareLists_;
+  PFN_wglBeginCLInteropAMD wglBeginCLInteropAMD_ = nullptr;
+  PFN_wglEndCLInteropAMD wglEndCLInteropAMD_ = nullptr;
 #else
  public:
   Display* Dpy_;
@@ -277,6 +283,8 @@ class GLFunctions {
   PFNglXCreateContext glXCreateContext_;
   PFNglXDestroyContext glXDestroyContext_;
   PFNglXMakeCurrent glXMakeCurrent_;
+  PFN_glXBeginCLInteropAMD glXBeginCLInteropAMD_ = nullptr;
+  PFN_glXEndCLInteropAMD glXEndCLInteropAMD_ = nullptr;
 #endif
  public:
   GLFunctions(HMODULE h, bool isEGL);
@@ -333,6 +341,11 @@ class GLFunctions {
   // Return true if successful, false - if error occurred
   bool setIntEnv();
   bool restoreEnv();
+
+  //! Begin/End CL-GL interop (wglBeginCLInteropAMD / glXBeginCLInteropAMD).
+  //! Lazy-loads the function pointers on first call via GetProcAddress_.
+  bool beginCLInterop(void* glContext);
+  bool endCLInterop(void* glContext);
 
   amd::Monitor& getLock() { return lock_; }
 
