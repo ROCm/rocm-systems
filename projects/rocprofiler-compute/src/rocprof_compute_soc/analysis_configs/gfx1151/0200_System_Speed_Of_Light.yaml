@@ -16,7 +16,7 @@
 # instance count × clock); not itemized in public RDNA 3 tables — % of peak is
 # indicative only.
 #
-# Cache: TCP (L0) -> GL1C (L1) -> GL2C (L2). L2–fabric (EA) BW; MC write stall: peak N/A (no sysinfo BW).
+# Cache: TCP (L0) -> GL1C (L1) -> GL2C (L2). L2–fabric (EA) BW; peak N/A (no sysinfo BW).
 # Memory hierarchy reference: gfx1151/0300_Memory_Chart.yaml.
 # =============================================================================
 
@@ -55,7 +55,7 @@ Panel Config:
           unit: Wavefronts
           peak: ($max_waves_per_cu * $cu_per_gpu)
           pop: (100 * AVG(((SQ_WAVE_CYCLES_sum / (GRBM_GUI_ACTIVE_sum * $cu_per_gpu)) / ($max_waves_per_cu * $cu_per_gpu))))
-        # --- L2 / fabric (EA); MC write stall uses GL2C_MC_WRREQ_STALL ---
+        # --- L2 / fabric (EA) ---
         L2 Cache Hit Rate:
           value: AVG((100 * GL2C_HIT_sum / (GL2C_HIT_sum + GL2C_MISS_sum)) if ((GL2C_HIT_sum + GL2C_MISS_sum) != 0) else None)
           unit: Percent
@@ -74,11 +74,6 @@ Panel Config:
           unit: Bytes/s
           peak: None
           pop: None
-        MC Write Stall:
-          value: AVG((100 * GL2C_MC_WRREQ_STALL / (GRBM_GUI_ACTIVE * $total_l2_chan)))
-          unit: Percent
-          peak: 100
-          pop: AVG((100 * GL2C_MC_WRREQ_STALL / (GRBM_GUI_ACTIVE * $total_l2_chan)))
         # --- LDS ---
         LDS Bank Conflicts:
           value: AVG(SQC_LDS_BANK_CONFLICT)
@@ -90,11 +85,6 @@ Panel Config:
           unit: Percent
           peak: 100
           pop: AVG((100 * TA_BUSY_avr / GRBM_GUI_ACTIVE) if (GRBM_GUI_ACTIVE != 0) else None)
-        Write Unit Stalled:
-          value: AVG((100 * GL2C_WRREQ_STALL_max / GRBM_GUI_ACTIVE))
-          unit: Percent
-          peak: 100
-          pop: AVG((100 * GL2C_WRREQ_STALL_max / GRBM_GUI_ACTIVE))
         Wave Dependency Wait:
           value: AVG(((100 * SQ_WAIT_ANY / SQ_WAVE_CYCLES) if (SQ_WAVE_CYCLES != 0) else 0))
           unit: Percent
@@ -188,16 +178,12 @@ Panel Config:
       GL2C/EA write bandwidth: GL2C_MC_WRREQ_sum is the EA write transaction count (32 B or 64 B per txn; SPG names this
       path MC_WRREQ). Bandwidth = 32·(GL2C_MC_WRREQ_sum − GL2C_EA_WRREQ_64B_sum) + 64·GL2C_EA_WRREQ_64B_sum, over time.
       Peak / % of peak are N/A (no sysinfo memory BW).
-    MC Write Stall: |-
-      Percent of cycles the memory controller write path was stalled (averaged across L2 channels).
     LDS Bank Conflicts: |-
       Number of LDS bank conflicts. Peak / % of Peak are N/A for raw counts.
     TA Busy Util Rate: |-
       Texture Addresser (TA) utilization vs GPU-active time: mean TA busy cycles
       (TA_BUSY_avr — average of TA_TA_BUSY over TA instances) as a percent of
       GRBM_GUI_ACTIVE. Peak / % of peak use 100% (TA fully busy whenever the GPU is active).
-    Write Unit Stalled: |-
-      Percent of time the write unit was stalled (max across L2 channels).
     Wave Dependency Wait: |-
       Percent of wave lifetime spent waiting for data dependencies (e.g. VMEM/LDS results).
     Wave Issue Wait: |-
