@@ -45,12 +45,7 @@
 
 #include "config/amd_smi_config.h"
 #include "amd_smi/amdsmi.h"
-#include "amd_smi/impl/scoped_fd.h"
 #include "amd_smi/impl/amd_smi_common.h"
-#include "amd_smi/impl/amd_smi_cper.h"
-#include "amd_smi/impl/amd_smi_system.h"
-#include "amd_smi/impl/amd_smi_socket.h"
-#include "amd_smi/impl/amd_smi_gpu_device.h"
 #include "amd_smi/impl/nic/amd_smi_ainic_device.h"
 #include "amdsmi_unified/interface/smi_nic_interface.h"
 
@@ -60,13 +55,7 @@
 #include "amd_smi/impl/nic/amd_smi_lspci_commands.h"
 #endif//BRCM_NIC
 #include "amd_smi/impl/amd_smi_uuid.h"
-#include "amd_smi/impl/xf86drm.h"
 #include "amd_smi/impl/amd_smi_utils.h"
-#include "amd_smi/impl/amd_smi_processor.h"
-#include "rocm_smi/rocm_smi.h"
-#include "rocm_smi/rocm_smi_logger.h"
-#include "rocm_smi/rocm_smi_utils.h"
-#include "rocm_smi/rocm_smi_kfd.h"
 
 #include "dxcore_loader.h"
 #include "platform.h"
@@ -301,16 +290,6 @@ amdsmi_status_code_to_string(amdsmi_status_t status, const char **status_string)
             *status_string = "AMDSMI_STATUS_UNKNOWN_ERROR: An unknown error occurred.";
             break;
         default:
-            // The case above didn't have a match, so look up the amdsmi status in the rsmi
-            // status map
-            // If found, get the rsmi status string.  If not, return unknown error string
-            for (auto& iter : amd::smi::rsmi_status_map) {
-                if (iter.second == status) {
-                    rsmi_status_string(iter.first, status_string);
-                    return AMDSMI_STATUS_SUCCESS;
-                }
-            }
-            // Not found
             *status_string = "An unknown error occurred";
             return AMDSMI_STATUS_UNKNOWN_ERROR;
     }
