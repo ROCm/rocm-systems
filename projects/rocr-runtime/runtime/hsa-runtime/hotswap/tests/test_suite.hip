@@ -1416,6 +1416,128 @@ int run_test_log_rcp(const char* co) {
   return ok == N ? 0 : 1;
 }
 
+// ── bitmanip_ops test ────────────────────────────────────────────────────
+
+int run_test_bitmanip_ops(const char* co) {
+  int N = 256, bs = 32, nb = N / bs;
+  unsigned *h_in = (unsigned*)malloc(N*4);
+  int *h_o = (int*)calloc(N, 4);
+  for (int i = 0; i < N; i++) h_in[i] = (unsigned)(i + 1);  // 1..256, avoid 0
+  unsigned *d_in; int *d_o;
+  CHECK(hipMalloc(&d_in, N*4)); CHECK(hipMalloc(&d_o, N*4));
+  CHECK(hipMemcpy(d_in, h_in, N*4, hipMemcpyHostToDevice));
+  hipModule_t m; hipFunction_t f;
+  CHECK(hipModuleLoad(&m, co));
+  CHECK(hipModuleGetFunction(&f, m, "bitmanip_ops"));
+  int n=N; void* args[] = {&d_o, &d_in, &n};
+  CHECK(hipModuleLaunchKernel(f, nb,1,1, bs,1,1, 0,0, args, NULL));
+  CHECK(hipDeviceSynchronize());
+  CHECK(hipMemcpy(h_o, d_o, N*4, hipMemcpyDeviceToHost));
+  int ok = 0;
+  for (int i = 0; i < N; i++) {
+    unsigned v = h_in[i];
+    int clz = __builtin_clz(v);
+    int ffs_val = __builtin_ffs(v);
+    int popc = __builtin_popcount(v);
+    int exp = clz + ffs_val * 100 + popc * 10000;
+    if (h_o[i] == exp) ok++;
+  }
+  printf("  bitmanip_ops:     %d/%d %s\n", ok, N, ok==N?"PASS":"FAIL");
+  hipFree(d_in); hipFree(d_o); hipModuleUnload(m);
+  free(h_in); free(h_o);
+  return ok == N ? 0 : 1;
+}
+
+// ── f64_math test ───────────────────────────────────────────────────────
+
+int run_test_f64_math(const char* co) {
+  int N = 256, bs = 32, nb = N / bs;
+  double *h_in = (double*)malloc(N*8), *h_o = (double*)calloc(N, 8);
+  for (int i = 0; i < N; i++) h_in[i] = (double)(i + 1) * 0.5;  // 0.5..128.0
+  double *d_in, *d_o;
+  CHECK(hipMalloc(&d_in, N*8)); CHECK(hipMalloc(&d_o, N*8));
+  CHECK(hipMemcpy(d_in, h_in, N*8, hipMemcpyHostToDevice));
+  hipModule_t m; hipFunction_t f;
+  CHECK(hipModuleLoad(&m, co));
+  CHECK(hipModuleGetFunction(&f, m, "f64_math"));
+  int n=N; void* args[] = {&d_o, &d_in, &n};
+  CHECK(hipModuleLaunchKernel(f, nb,1,1, bs,1,1, 0,0, args, NULL));
+  CHECK(hipDeviceSynchronize());
+  CHECK(hipMemcpy(h_o, d_o, N*8, hipMemcpyDeviceToHost));
+  int ok = 0;
+  for (int i = 0; i < N; i++) {
+    double x = h_in[i];
+    double exp_val = sqrt(x) + 1.0 / x;
+    if (fabs(h_o[i] - exp_val) <= 1e-10 * fabs(exp_val) + 1e-14) ok++;
+  }
+  printf("  f64_math:         %d/%d %s\n", ok, N, ok==N?"PASS":"FAIL");
+  hipFree(d_in); hipFree(d_o); hipModuleUnload(m);
+  free(h_in); free(h_o);
+  return ok == N ? 0 : 1;
+}
+
+// ── layernorm test ──────────────────────────────────────────────────────
+
+int run_test_layernorm(const char* co) {
+  int Nf = 32;  // feature dimension (must be <= blockDim.x)
+  int batch = 8;
+  int bs = 32;  // blockDim.x
+  float eps = 1e-5f;
+  size_t sz_in = (size_t)batch * Nf * 4;
+  size_t sz_param = (size_t)Nf * 4;
+  float *h_in = (float*)malloc(sz_in), *h_o = (float*)calloc(batch * Nf, 4);
+  float *h_gamma = (float*)malloc(sz_param), *h_beta = (float*)malloc(sz_param);
+  float *h_ref = (float*)malloc(sz_in);
+  srand(999);
+  for (int i = 0; i < batch * Nf; i++) h_in[i] = (float)(rand() % 200 - 100) / 50.0f;
+  for (int i = 0; i < Nf; i++) {
+    h_gamma[i] = 1.0f + (float)(rand() % 10) / 50.0f;
+    h_beta[i] = (float)(rand() % 10 - 5) / 50.0f;
+  }
+  // Reference
+  for (int b = 0; b < batch; b++) {
+    float sum = 0.0f;
+    for (int j = 0; j < Nf; j++) sum += h_in[b * Nf + j];
+    float mean = sum / (float)Nf;
+    float var_sum = 0.0f;
+    for (int j = 0; j < Nf; j++) {
+      float diff = h_in[b * Nf + j] - mean;
+      var_sum += diff * diff;
+    }
+    float inv_std = 1.0f / sqrtf(var_sum / (float)Nf + eps);
+    for (int j = 0; j < Nf; j++) {
+      float diff = h_in[b * Nf + j] - mean;
+      h_ref[b * Nf + j] = diff * inv_std * h_gamma[j] + h_beta[j];
+    }
+  }
+  float *d_in, *d_o, *d_gamma, *d_beta;
+  CHECK(hipMalloc(&d_in, sz_in)); CHECK(hipMalloc(&d_o, sz_in));
+  CHECK(hipMalloc(&d_gamma, sz_param)); CHECK(hipMalloc(&d_beta, sz_param));
+  CHECK(hipMemcpy(d_in, h_in, sz_in, hipMemcpyHostToDevice));
+  CHECK(hipMemcpy(d_gamma, h_gamma, sz_param, hipMemcpyHostToDevice));
+  CHECK(hipMemcpy(d_beta, h_beta, sz_param, hipMemcpyHostToDevice));
+  CHECK(hipMemset(d_o, 0, sz_in));
+  hipModule_t m; hipFunction_t f;
+  CHECK(hipModuleLoad(&m, co));
+  CHECK(hipModuleGetFunction(&f, m, "layernorm"));
+  int n = Nf;
+  void* args[] = {&d_o, &d_in, &d_gamma, &d_beta, &n, &eps};
+  size_t shmem = bs * 4;
+  CHECK(hipModuleLaunchKernel(f, batch,1,1, bs,1,1, shmem,0, args, NULL));
+  CHECK(hipDeviceSynchronize());
+  CHECK(hipMemcpy(h_o, d_o, sz_in, hipMemcpyDeviceToHost));
+  int ok = 0;
+  for (int i = 0; i < batch * Nf; i++) {
+    if (fabsf(h_o[i] - h_ref[i]) <= 1e-3f * fabsf(h_ref[i]) + 1e-4f) ok++;
+  }
+  int total = batch * Nf;
+  printf("  layernorm:        %d/%d %s\n", ok, total, ok==total?"PASS":"FAIL");
+  hipFree(d_in); hipFree(d_o); hipFree(d_gamma); hipFree(d_beta);
+  hipModuleUnload(m);
+  free(h_in); free(h_o); free(h_gamma); free(h_beta); free(h_ref);
+  return ok == total ? 0 : 1;
+}
+
 // ── packed_f16 test ──────────────────────────────────────────────────────────
 
 int run_test_packed_f16(const char* co) {
@@ -1572,7 +1694,11 @@ int main() {
   fails += run_test_packed_f16("/tmp/packed_f16_gfx1250.elf");
   fails += run_test_dot_product_f16("/tmp/dot_product_f16_gfx1250.elf");
   fails += run_test_warp_shuffle("/tmp/warp_shuffle_gfx1250.elf");
-  int total = 31;
+  // Instruction gap coverage tests (bitmanip, f64, layernorm)
+  fails += run_test_bitmanip_ops("/tmp/bitmanip_ops_gfx1250.elf");
+  fails += run_test_f64_math("/tmp/f64_math_gfx1250.elf");
+  fails += run_test_layernorm("/tmp/layernorm_gfx1250.elf");
+  int total = 34;
   printf("\n%s: %d/%d tests passed\n", fails?"SOME FAILED":"ALL PASSED", total-fails, total);
   return fails;
 }

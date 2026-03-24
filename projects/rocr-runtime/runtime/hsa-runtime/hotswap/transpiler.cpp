@@ -231,6 +231,8 @@ static const MnemonicMapping kScalarALURenames[] = {
     {"s_and_not1_b64", "s_andn2_b64"},
     {"s_or_not1_b32", "s_orn2_b32"},
     {"s_or_not1_b64", "s_orn2_b64"},
+    {"s_ctz_i32_b32", "s_ff1_i32_b32"},
+    {"s_ctz_i32_b64", "s_ff1_i32_b64"},
 };
 
 // VALU renames (GFX12 uses IEEE-explicit names)
@@ -255,6 +257,10 @@ static const MnemonicMapping kVALURenames[] = {
     {"v_pk_max_num_f16", "v_pk_max_f16"},
     {"v_pk_min_num_f16", "v_pk_min_f16"},
     {"v_pk_fma_num_f16", "v_pk_fma_f16"},
+    {"v_clz_i32_u32", "v_ffbh_u32"},
+    {"v_ctz_i32_b32", "v_ffbl_b32"},
+    {"v_add_co_ci_u32", "v_addc_co_u32"},
+    {"v_sub_co_ci_u32", "v_subb_co_u32"},
 };
 
 // Global atomic renames (GFX12 adds _u32/_i32/_b32 suffix)
@@ -1966,6 +1972,28 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
       }
     }
 
+    // v_s_rsq_f32 sdst, ssrc → VALU reciprocal sqrt + readfirstlane
+    // GFX12 VALU→SGPR reciprocal square root; GFX9 must go through VGPR.
+    if (mnemonic == "v_s_rsq_f32") {
+      std::string ops = line.substr(line.find(mnemonic) + mnemonic.size());
+      size_t op_start = ops.find_first_not_of(" \t");
+      if (op_start != std::string::npos) ops = ops.substr(op_start);
+      std::vector<std::string> operands;
+      std::istringstream oss(ops);
+      std::string tok;
+      while (std::getline(oss, tok, ',')) {
+        size_t s = tok.find_first_not_of(" \t");
+        size_t e = tok.find_last_not_of(" \t");
+        if (s != std::string::npos)
+          operands.push_back(tok.substr(s, e - s + 1));
+      }
+      if (operands.size() >= 2) {
+        result.push_back("v_rsq_f32_e32 v6, " + operands[1]);
+        result.push_back("v_readfirstlane_b32 " + operands[0] + ", v6");
+        return result;
+      }
+    }
+
     // s_cmp_*_f32 → VALU float compare setting SCC via VCC bridge.
     // GFX12 has SALU float compares (set SCC); GFX9 doesn't.
     // Emulate: v_mov_b32 v6, literal; v_cmp_*_f32_e32 sA, v6; s_cmp_lg_u32 vcc_lo, 0
@@ -2375,14 +2403,21 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
     }
   }
 
-  // ─── v_div_scale_f32 null sdst → vcc ───
+  // ─── VOP3B null sdst → vcc ───
   // GFX12 allows "null" as a write-discard SGPR destination in VOP3B.
-  // GFX9 has no null register — use vcc (the natural sdst for div_scale).
-  if (mnemonic == "v_div_scale_f32") {
+  // GFX9 has no null register — use vcc (the natural sdst for these ops).
+  // Applies to: v_div_scale_f32, v_div_scale_f64, v_add_co_ci_u32, v_sub_co_ci_u32
+  if (mnemonic == "v_div_scale_f32" || mnemonic == "v_div_scale_f64" ||
+      mnemonic == "v_add_co_ci_u32" || mnemonic == "v_sub_co_ci_u32") {
     // Find ", null," and replace with ", vcc,"
     size_t null_pos = line.find(", null,");
     if (null_pos != std::string::npos) {
       line.replace(null_pos, 7, ", vcc,");
+    }
+    // Also handle "null" at end of line (no trailing comma)
+    null_pos = line.rfind(", null");
+    if (null_pos != std::string::npos && null_pos + 6 == line.size()) {
+      line.replace(null_pos, 6, ", vcc");
     }
   }
 
