@@ -6627,6 +6627,7 @@ rocprofiler-sdk:
       - gfx942
       - gfx950
       - gfx1151
+      - gfx1152
       expression: reduce(TA_TA_BUSY,sum)
   - name: TA_TOTAL_WAVEFRONTS
     description: Total number of wavefronts processed by TA.
@@ -10651,6 +10652,11 @@ rocprofiler-sdk:
       - gfx950
       block: TD
       event: 1
+    - architectures:
+      - gfx1151
+      - gfx1152
+      block: TD
+      event: 1
   - name: TD_TD_BUSY_sum
     description: TD is processing or waiting for data. Perf_Windowing not supported for this counter. Sum over TD instances.
     properties: []
@@ -10662,6 +10668,8 @@ rocprofiler-sdk:
       - gfx941
       - gfx942
       - gfx950
+      - gfx1151
+      - gfx1152
       expression: reduce(TD_TD_BUSY,sum)
   - name: TD_WRITE_ACKT_WAVEFRONT
     description: Count write acknowledgments, sent to SQ and not to SP.
