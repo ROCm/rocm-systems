@@ -254,6 +254,44 @@ __device__ void llvm_amdgcn_raw_buffer_store_b128(__int128_t vdata, i32x4 srsrc,
 
 #endif  // __gfx942__ || __gfx950__
 
+__device__ __forceinline__ void load_store_asm(buffer_resource* src, buffer_resource* dst,
+                                          size_t stride, size_t thread_idx, 
+                                          size_t size){
+  
+#if defined(__gfx906__)
+#endif
+#if defined(__gfx908__)
+#endif
+#if defined(__gfx90a__) || defined(__gfx1100__)
+    //! needs to be implemented
+#endif
+#if defined(__gfx942__) || defined(__gfx950__)
+    
+    constexpr int NUM_REG = 16;
+    __int128_t regs[NUM_REG];
+
+    #pragma unroll
+    for (int i = 0; i < NUM_REG; i++) {
+      regs[i] = llvm_amdgcn_raw_buffer_load_b128(
+          *reinterpret_cast<i32x4*>(src),
+          thread_idx + i * stride, 0u, 0b10011u);
+    }
+    #pragma unroll
+    for (int i = 0; i < NUM_REG; i++) {
+      llvm_amdgcn_raw_buffer_store_b128(
+          regs[i],
+          *reinterpret_cast<i32x4*>(dst),
+          thread_idx + i * stride, 0u, 0b10011u);
+    }
+    __builtin_amdgcn_s_setprio(0);
+    __builtin_amdgcn_s_barrier();
+  
+#endif
+#if defined(__gfx1201__)
+    //! needs to be implemented
+#endif
+}
+
 __device__ __forceinline__ void store_asm(uint8_t* val, uint8_t* dst,
                                           int size) {
   switch (size) {
@@ -328,48 +366,6 @@ __device__ __forceinline__ void store_asm(uint8_t* val, uint8_t* dst,
 #endif
 #if defined(__gfx1201__)
       asm volatile("flat_store_b128 %0 %1 scope:SCOPE_SYS" : : "v"(dst), "v"(val128));
-#endif
-      break;
-    }
-    case 256: {
-#if defined(__gfx906__)
-#endif
-#if defined(__gfx908__)
-#endif
-#if defined(__gfx90a__) || defined(__gfx1100__)
-      //! needs to be implemented
-#endif
-#if defined(__gfx942__) || defined(__gfx950__)
-      {
-        constexpr int NUM_REG = 16;
-        size_t block_size = hipBlockDim_x * hipBlockDim_y * hipBlockDim_z;
-        size_t stride = block_size * sizeof(uint4);
-        size_t thread = (hipThreadIdx_x + hipThreadIdx_y * hipBlockDim_x +
-                       hipThreadIdx_z * hipBlockDim_x * hipBlockDim_y) * sizeof(uint4);
-
-        __int128_t regs[NUM_REG];
-        buffer_resource br_src = make_buffer_resource(val, size * block_size);
-        buffer_resource br_dst = make_buffer_resource(dst, size * block_size);
-
-        #pragma unroll
-        for (int i = 0; i < NUM_REG; i++) {
-          regs[i] = llvm_amdgcn_raw_buffer_load_b128(
-              *reinterpret_cast<i32x4*>(&br_src),
-              thread + i * stride, 0u, 0b10011u);
-        }
-        #pragma unroll
-        for (int i = 0; i < NUM_REG; i++) {
-          llvm_amdgcn_raw_buffer_store_b128(
-              regs[i],
-              *reinterpret_cast<i32x4*>(&br_dst),
-              thread + i * stride, 0u, 0b10011u);
-        }
-        __builtin_amdgcn_s_setprio(0);
-        __builtin_amdgcn_s_barrier();
-      }
-#endif
-#if defined(__gfx1201__)
-      //! needs to be implemented
 #endif
       break;
     }

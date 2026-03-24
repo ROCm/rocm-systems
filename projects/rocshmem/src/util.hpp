@@ -475,21 +475,27 @@ template <typename... Args>
   src_bytes = src_def;
 
   // size of each element: 4 uint (4 bytes) = 16 bytes (128 bits)
-  constexpr int DATA_SIZE{16}; 
+  constexpr size_t DATA_SIZE{16}; 
   // number of elements to be handled by each thread
-  constexpr int DATA_COUNT{16}; 
-  constexpr int CHUNK_BYTES = DATA_SIZE * DATA_COUNT;
-  int block_bytes = CHUNK_BYTES * block_size;
-
+  constexpr size_t DATA_COUNT{16}; 
+  constexpr size_t CHUNK_BYTES = DATA_SIZE * DATA_COUNT;
+  size_t block_bytes = CHUNK_BYTES * block_size;
+  
   if (size >= block_bytes) {
     cpy_size = size / block_bytes;
-    dst_bytes = dst_def;
-    src_bytes = src_def;
+    
+    size_t stride = block_size * sizeof(uint4);
+    size_t thread_idx = thread_id * sizeof(uint4);
 
+    buffer_resource br_src = make_buffer_resource(src_def, block_bytes);
+    buffer_resource br_dst = make_buffer_resource(dst_def, block_bytes);
+    
     for (int i = 0; i < cpy_size; i++) {        
-      store_asm(src_bytes, dst_bytes, CHUNK_BYTES);
-      src_bytes += block_bytes;
-      dst_bytes += block_bytes;
+      
+      load_store_asm(&br_src, &br_dst, stride, thread_idx, size);
+
+      br_src.ptr += block_bytes;
+      br_dst.ptr += block_bytes;
     }
     size -= cpy_size * block_bytes;
     dst_def += cpy_size * block_bytes;
@@ -536,21 +542,27 @@ template <typename... Args>
   src_bytes = src_def;
 
   // size of each element: 4 uint (4 bytes) = 16 bytes (128 bits)
-  constexpr int DATA_SIZE{16}; 
+  constexpr size_t DATA_SIZE{16}; 
   // number of elements to be handled by each thread
-  constexpr int DATA_COUNT{16}; 
-  constexpr int CHUNK_BYTES = DATA_SIZE * DATA_COUNT;
-  int block_bytes = CHUNK_BYTES * wave_size;
-
+  constexpr size_t DATA_COUNT{16}; 
+  constexpr size_t CHUNK_BYTES = DATA_SIZE * DATA_COUNT;
+  size_t block_bytes = CHUNK_BYTES * wave_size;
+  
   if (size >= block_bytes) {
     cpy_size = size / block_bytes;
-    dst_bytes = dst_def;
-    src_bytes = src_def;
-
+    
+    size_t stride = wave_size * sizeof(uint4);
+    size_t thread_idx = wave_tid * sizeof(uint4);
+    
+    buffer_resource br_src = make_buffer_resource(src_def, block_bytes);
+    buffer_resource br_dst = make_buffer_resource(dst_def, block_bytes);
+    
     for (int i = 0; i < cpy_size; i++) {        
-      store_asm(src_bytes, dst_bytes, CHUNK_BYTES);
-      src_bytes += block_bytes;
-      dst_bytes += block_bytes;
+      
+      load_store_asm(&br_src, &br_dst, stride, thread_idx, size);
+
+      br_src.ptr += block_bytes;
+      br_dst.ptr += block_bytes;
     }
     size -= cpy_size * block_bytes;
     dst_def += cpy_size * block_bytes;
