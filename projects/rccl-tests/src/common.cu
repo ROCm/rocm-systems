@@ -26,6 +26,7 @@
  //#define DEBUG_PRINT
  
  #include "verifiable.h"
+ #include "util.h"
  #include "git_version.h"
  
  #define DIVUP(x, y) \
@@ -111,28 +112,29 @@
  thread_local int is_main_thread = 0;
  
  // Command line parameter defaults
- static int nThreads = 1;
- static int nGpus = 1;
- static size_t minBytes = 32*1024*1024;
- static size_t maxBytes = 32*1024*1024;
- static size_t stepBytes = 1*1024*1024;
- static size_t stepFactor = 1;
- static int datacheck = 1;
- static int warmup_iters = 5;
- static int iters = 20;
- static int agg_iters = 1;
+ int nThreads = 1;
+ int nGpus = 1;
+ size_t minBytes = 32*1024*1024;
+ size_t maxBytes = 32*1024*1024;
+ size_t stepBytes = 1*1024*1024;
+ size_t stepFactor = 1;
+ int datacheck = 1;
+ int warmup_iters = 5;
+ int iters = 20;
+ int agg_iters = 1;
  static int run_cycles = 1;
  static int ncclop = ncclSum;
  static int nccltype = ncclFloat;
  static int ncclroot = 0;
- static int parallel_init = 0;
- static int blocking_coll = 0;
+ int parallel_init = 0;
+ int blocking_coll = 0;
  static int output_algo_proto_channels = 0;
  static int memorytype = 0;
  static uint32_t cumask[4];
  static int streamnull = 0;
  static int timeout = 0;
- static int cudaGraphLaunches = 0;
+ int cudaGraphLaunches = 0;
+ int deviceCtaCount = 16;
  std::string output_file;
  std::string output_format;
  static int report_cputime = 0;
@@ -846,10 +848,10 @@
        hipLaunchKernelGGL(flush_icache, dim3(gpu_block3), dim3(64), 0, args->streams[i]);
      }
  
-     TESTCHECK(args->collTest->runColl(
-           (void*)(in_place ? recvBuff + args->sendInplaceOffset*rank : sendBuff),
-           (void*)(in_place ? recvBuff + args->recvInplaceOffset*rank : recvBuff),
-         count, type, op, root, args->comms[i], args->streams[i], bias));
+    TESTCHECK(args->collTest->runColl(
+          (void*)(in_place ? recvBuff : sendBuff), in_place ? args->sendInplaceOffset*rank : 0,
+          (void*)recvBuff, in_place ? args->recvInplaceOffset*rank : 0,
+          count, type, op, root, args->comms[i], args->streams[i], 0, bias));
  
      #if NCCL_VERSION_CODE >= NCCL_VERSION(2,11,0)
      if(opIndex >= ncclNumOps) {
@@ -949,15 +951,16 @@
             diffCount++;
           PRINT("    retry %d/%d: %lld wrong\n", retry + 1, detRetries, (long long)retryWrong);
         }
-        if (passCount == detRetries)
+        if (passCount == detRetries) {
           PRINT("  Verdict: TRANSIENT — error did not reproduce\n");
-        else if (sameCount == detRetries)
+        } else if (sameCount == detRetries) {
           PRINT("  Verdict: DETERMINISTIC — same error count every time (systematic bug)\n");
-        else if (diffCount > 0 || (passCount > 0 && sameCount > 0))
+        } else if (diffCount > 0 || (passCount > 0 && sameCount > 0)) {
           PRINT("  Verdict: INTERMITTENT — varying error counts (likely race condition)\n");
-        else
+        } else {
           PRINT("  Verdict: REPRODUCIBLE — errors persist (same=%d, diff=%d, pass=%d)\n",
                 sameCount, diffCount, passCount);
+        }
 
         break;
       }

@@ -398,6 +398,20 @@ static int ncclstringtomtype (char *str) {
 extern int is_main_proc;
 extern thread_local int is_main_thread;
 
+extern int nThreads;
+extern int nGpus;
+extern size_t minBytes;
+extern size_t maxBytes;
+extern size_t stepBytes;
+extern size_t stepFactor;
+extern int datacheck;
+extern int warmup_iters;
+extern int iters;
+extern int agg_iters;
+extern int parallel_init;
+extern int blocking_coll;
+extern int cudaGraphLaunches;
+
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
 template <typename F>
 testResult_t testLaunchDeviceKernel(F kernel, void* sendbuff, size_t sendoffset, void* recvbuff, size_t recvoffset, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream) {
