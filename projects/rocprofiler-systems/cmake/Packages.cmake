@@ -21,9 +21,6 @@ rocprofiler_systems_add_interface_library(
     rocprofiler-systems-dyninst
     "Provides flags and libraries for Dyninst (dynamic instrumentation)"
 )
-rocprofiler_systems_add_interface_library(rocprofiler-systems-boost
-    "Boost interface library (for Dyninst)"
-)
 rocprofiler_systems_add_interface_library(rocprofiler-systems-elfutils
     "ElfUtils interface library (for Dyninst)"
 )

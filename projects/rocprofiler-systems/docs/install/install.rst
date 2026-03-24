@@ -117,7 +117,6 @@ while Dyninst requires TBB), and the CMake option to build the package alongside
    "TBB", "2018.6", "Dyninst", "``ROCPROFSYS_BUILD_TBB`` (default: OFF)"
    "ElfUtils", "0.178", "Dyninst", "``ROCPROFSYS_BUILD_ELFUTILS`` (default: OFF)"
    "LibIberty",  "", "Dyninst", "``ROCPROFSYS_BUILD_LIBIBERTY`` (default: OFF)"
-   "Boost",  "1.67.0", "Dyninst", "``ROCPROFSYS_BUILD_BOOST`` (default: OFF)"
    "OpenMP", "4.x", "Dyninst", ""
 
 Optional third-party packages
@@ -170,8 +169,8 @@ via ``ROCPROFSYS_BUILD_<DEP>=ON``, as follows:
          -DROCPROFSYS_BUILD_{TBB,ELFUTILS,BOOST,LIBIBERTY}=ON \
          -S rocm-systems/projects/rocprofiler-systems
 
-where ``-DROCPROFSYS_BUILD_{TBB,BOOST,ELFUTILS,LIBIBERTY}=ON`` is expanded by
-the shell to ``-DROCPROFSYS_BUILD_TBB=ON -DROCPROFSYS_BUILD_BOOST=ON ...``
+where ``-DROCPROFSYS_BUILD_{TBB,ELFUTILS,LIBIBERTY}=ON`` is expanded by
+the shell to ``-DROCPROFSYS_BUILD_TBB=ON -DROCPROFSYS_BUILD_ELFUTILS=ON ...``
 
 Installing Dyninst via Spack
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -219,7 +218,6 @@ in `the Perfetto UI <https://ui.perfetto.dev>`_.
        -D ROCPROFSYS_BUILD_LIBUNWIND=ON                  \
        -D ROCPROFSYS_BUILD_DYNINST=ON                    \
        -D ROCPROFSYS_BUILD_TBB=ON                        \
-       -D ROCPROFSYS_BUILD_BOOST=ON                      \
        -D ROCPROFSYS_BUILD_ELFUTILS=ON                   \
        -D ROCPROFSYS_BUILD_LIBIBERTY=ON                  \
        -S rocm-systems/projects/rocprofiler-systems
