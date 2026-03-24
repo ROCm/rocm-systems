@@ -134,6 +134,7 @@ def test_pc_sampling_stochastic(binary_handler_profile_rocprof_compute):
 
     output = f"{stdout}\n{stderr}"
     if is_pc_sampling_not_supported(output):
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
         pytest.skip("PC sampling is not supported")
 
     assert code == 0
