@@ -477,25 +477,24 @@ template <typename... Args>
   constexpr int DATA_SIZE = 16; // size of each element: 4 uint (4 bytes) = 16 bytes (128 bits)
   constexpr int DATA_COUNT = 8; // number of elements
   constexpr int CHUNK_BYTES = DATA_SIZE * DATA_COUNT; // 128 bytes -> bus bandwidth (B/s)
-  
-  if (size >= CHUNK_BYTES) {
-    cpy_size = size / CHUNK_BYTES;
-    for (int i{thread_id * DATA_SIZE}; i < cpy_size; i += block_size * CHUNK_BYTES) {
-      dst_bytes = dst_def;
-      src_bytes = src_def;
-      
-      src_bytes += i;
-      dst_bytes += i;
-      
-      // gpu_dprintf("WG (%u, %u, %u) TH (%u, %u, %u), flat_id = %d, size = %3d, " 
-      //   "j = %3d, cpy_size = %3d, src_bytes=%u, dst_bytes=%u\n", get_flat_id(), 
-      //   size, CHUNK_BYTES, cpy_size, src_bytes, dst_bytes);
+  int block_bytes = CHUNK_BYTES * block_size;
+
+  if (size >= block_bytes) {
+    cpy_size = size / block_bytes;
+    dst_bytes = dst_def;
+    src_bytes = src_def;
+    for (int i = 0; i < cpy_size; i++) {
+      gpu_dprintf("WG (%u, %u, %u) TH (%u, %u, %u), flat_id = %d, size = %3d, " 
+        "j = %3d, cpy_size = %3d, src_bytes=%u, dst_bytes=%u\n", get_flat_id(), 
+        size, CHUNK_BYTES, cpy_size, src_bytes - src_def, dst_bytes - dst_def);
         
       store_asm(src_bytes, dst_bytes, CHUNK_BYTES);
+      src_bytes += block_bytes;
+      dst_bytes += block_bytes;
     }
-    size -= cpy_size * CHUNK_BYTES;
-    dst_def += cpy_size * CHUNK_BYTES;
-    src_def += cpy_size * CHUNK_BYTES;
+    size -= cpy_size * block_bytes;
+    dst_def += cpy_size * block_bytes;
+    src_def += cpy_size * block_bytes;
   }
 
   for (int j{16}; j > 1; j >>= 1) {
@@ -508,9 +507,9 @@ template <typename... Args>
       src_bytes += i * j;
       dst_bytes += i * j;
       
-      // gpu_dprintf("WG (%u, %u, %u) TH (%u, %u, %u), flat_id = %d, size = %3d, " 
-      //   "j = %3d, cpy_size = %3d, src_bytes=%u, dst_bytes=%u\n", get_flat_id(), 
-      //   size, j, cpy_size, src_bytes, dst_bytes);
+      gpu_dprintf("WG (%u, %u, %u) TH (%u, %u, %u), flat_id = %d, size = %3d, " 
+        "j = %3d, cpy_size = %3d, src_bytes=%u, dst_bytes=%u\n", get_flat_id(), 
+        size, j, cpy_size, src_bytes, dst_bytes);
         
       store_asm(src_bytes, dst_bytes, j);
     }

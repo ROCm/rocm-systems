@@ -385,23 +385,28 @@ __device__ __forceinline__ void store_asm(uint8_t* val, uint8_t* dst,
 #endif
 #if defined(__gfx942__) || defined(__gfx950__)
       {
-        constexpr int NUM_REG = 1;
+        constexpr int NUM_REG = 8;
+        size_t block_size = hipBlockDim_x * hipBlockDim_y * hipBlockDim_z;
+        size_t stride = block_size * sizeof(uint4);
+        size_t thread = (hipThreadIdx_x + hipThreadIdx_y * hipBlockDim_x +
+                       hipThreadIdx_z * hipBlockDim_x * hipBlockDim_y) * sizeof(uint4);
+
         __uint128_t regs[NUM_REG];
-        buffer_resource br_val = make_buffer_resource(val, size);
-        buffer_resource br_dst = make_buffer_resource(dst, size);
+        buffer_resource br_src = make_buffer_resource(val, size * block_size);
+        buffer_resource br_dst = make_buffer_resource(dst, size * block_size);
 
         #pragma unroll
         for (int i = 0; i < NUM_REG; i++) {
           regs[i] = llvm_amdgcn_raw_buffer_load_b128(
-              *reinterpret_cast<i32x4*>(&br_val),
-              static_cast<uint32_t>(i) * 16u, 0u, 0b10001u);
+              *reinterpret_cast<i32x4*>(&br_src),
+              thread + i * stride, 0u, 0b10001u);
         }
         #pragma unroll
         for (int i = 0; i < NUM_REG; i++) {
           llvm_amdgcn_raw_buffer_store_b128(
               regs[i],
               *reinterpret_cast<i32x4*>(&br_dst),
-              static_cast<uint32_t>(i) * 16u, 0u, 0b10001u);
+              thread + i * stride, 0u, 0b10001u);
         }
       }
 #endif
