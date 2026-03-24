@@ -14,7 +14,13 @@ class validation_rule:
     """Class to represent a validation rule as defined in JSON file"""
 
     def __init__(
-        self, description, query, expected_result, comparison, error_message, requires=None
+        self,
+        description,
+        query,
+        expected_result,
+        comparison,
+        error_message,
+        requires=None,
     ):
         self.description = description
         self.query = query
@@ -386,10 +392,34 @@ if __name__ == "__main__":
     available_metrics = None
     try:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-        from check_amd_smi_metrics import get_available_metrics_set
+        from check_amd_smi_metrics import get_available_metrics
 
-        available_metrics = get_available_metrics_set()
-        print(f"Detected available metrics: {', '.join(sorted(available_metrics))}")
+        gpus = get_available_metrics()
+        available_metrics = set()
+        from check_amd_smi_metrics import _collect_metric_names
+
+        print("\n--- Platform GPU Metric Availability ---")
+        for gpu in gpus:
+            gpu_metrics = _collect_metric_names(gpu)
+            available_metrics |= gpu_metrics
+            print(f"GPU {gpu.gpu_id}:")
+            print(
+                f"  Activity:    gfx={gpu.gfx_activity}  umc={gpu.umc_activity}  mm={gpu.mm_activity}"
+            )
+            print(
+                f"  Temperature: hotspot={gpu.hotspot_temperature}  edge={gpu.edge_temperature}"
+            )
+            print(f"  Power:       socket={gpu.current_socket_power}")
+            print(
+                f"  VCN/JPEG:    vcn_activity={gpu.vcn_activity}  vcn_busy={gpu.vcn_busy}  jpeg_activity={gpu.jpeg_activity}  jpeg_busy={gpu.jpeg_busy}"
+            )
+            print(
+                f"  Other:       mem_usage={gpu.mem_usage}  xgmi={gpu.xgmi}  pcie={gpu.pcie}"
+            )
+        print(
+            f"Detected available metrics (union): {', '.join(sorted(available_metrics))}"
+        )
+        print("---\n")
     except Exception as e:
         print(f"Warning: Could not detect GPU metrics ({e}), running all queries")
 
