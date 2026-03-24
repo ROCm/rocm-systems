@@ -1267,8 +1267,6 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   int *topParentLocalRanks = NULL;
   int p2pLevel = -1;
 
-  bool needsProxy = false;
-
   timers[TIMER_INIT_ALLGATHER] = clockNano();
   // AllGather1 - begin
   NCCLCHECKGOTO(ncclCalloc(&comm->peerInfo, nranks+1), ret, fail); // Extra rank to represent CollNet root

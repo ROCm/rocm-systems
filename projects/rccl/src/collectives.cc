@@ -192,7 +192,6 @@ ncclResult_t ncclAlltoAllv_impl(const void *sendbuff, const size_t sendcounts[],
   NCCLCHECK(Recorder::instance().record(rrAllToAllv, sendbuff, recvbuff, 0, datatype, comm, stream, -1, sendcounts, sdispls, recvcounts, rdispls));
 
   int nRanks, rank;
-  ncclResult_t ret = ncclSuccess;
   NCCLCHECK(ncclCommCount(comm, &nRanks));
   NCCLCHECK(ncclCommUserRank(comm, &rank));
 
@@ -237,7 +236,7 @@ ncclResult_t ncclAlltoAllv_impl(const void *sendbuff, const size_t sendcounts[],
         info.sizes = sizes.data();
 #endif
 
-        ret = ncclEnqueueCheck(&info);
+        ncclResult_t ret = ncclEnqueueCheck(&info);
 
         if (ret == ncclSuccess && ((count * ncclTypeSize(datatype)) > 131072)) {
 	    void *src = (char*)comm->destRshmem + comm->symId * comm->bufThreshold;
