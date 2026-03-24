@@ -50,6 +50,11 @@ message("")
 
 # Other source directories
 aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR}/functional functionalSources)
+list(REMOVE_ITEM functionalSources
+    "${CMAKE_CURRENT_SOURCE_DIR}/functional/mutual_exclusion.cc"
+    "${CMAKE_CURRENT_SOURCE_DIR}/functional/dynamic_metrics_test.cc"
+    "${CMAKE_CURRENT_SOURCE_DIR}/functional/init_shutdown_refcount.cc"
+)
 
 set(TEST "amdsmitst")
 

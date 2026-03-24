@@ -21,13 +21,13 @@
  */
 
 #include <cassert>
+#include <fstream>
 
 #include <iomanip>
 
 #include <gtest/gtest.h>
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_utils.h"
-#include "rocm_smi/rocm_smi_utils.h"
 #include "test_base.h"
 
 static const int kOutputLineLength = 80;
@@ -42,11 +42,11 @@ static const char kResultsLabel[] = "TEST RESULTS";
 const char kSetupLabel[] = "TEST SETUP";
 
 static bool CheckModule(const std::string &fileName, const std::string &cond) {
+  std::ifstream fs(fileName);
+  if (!fs.is_open()) return false;
   std::string state;
-  int rc = amd::smi::ReadSysfsStr(fileName, &state);
-  if (!rc && !state.compare(cond))
-      return (true);
-  return (false);
+  std::getline(fs, state);
+  return (state.find(cond) != std::string::npos);
 }
 
 TestBase::TestBase() : setup_failed_(false) {

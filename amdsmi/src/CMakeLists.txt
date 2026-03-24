@@ -96,7 +96,6 @@ target_link_directories(${AMD_SMI} PRIVATE
 target_include_directories(${AMD_SMI} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/../
-    ${PROJECT_SOURCE_DIR}/rocm_smi/include
     ${PROJECT_SOURCE_DIR}/common/shared_mutex
     ${RAS_DECODE_INC_DIR}
     ${PROJECT_SOURCE_DIR}/../include

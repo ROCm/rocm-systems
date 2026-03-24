@@ -345,3 +345,28 @@ amdsmi_status_t smi_amdgpu_get_processor_handle_by_index(uint32_t device_index,
     }
     return AMDSMI_STATUS_API_FAILED;
 }
+
+namespace amd::smi {
+
+bool is_vm_guest() {
+  const std::string hypervisor = "hypervisor";
+  std::string line;
+  std::ifstream infile("/proc/cpuinfo");
+  if (infile.fail()) {
+    return false;
+  }
+  while (std::getline(infile, line)) {
+    if (line.find(hypervisor) != std::string::npos) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool is_sudo_user() {
+  auto myUID = getuid();
+  auto myPrivledges = geteuid();
+  return (myUID == myPrivledges) && (myPrivledges == 0);
+}
+
+} // namespace amd::smi

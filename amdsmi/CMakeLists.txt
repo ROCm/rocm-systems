@@ -162,9 +162,6 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wformat=2 -fno-common -Wstrict-overflow
 # Intentionally leave out -Wsign-promo. It causes spurious warnings.
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Woverloaded-virtual -Wreorder")
 
-set(ROCM_SRC_DIR "${PROJECT_SOURCE_DIR}/rocm_smi/src")
-set(ROCM_INC_DIR "${PROJECT_SOURCE_DIR}/rocm_smi/include/rocm_smi")
-set(SHR_MUTEX_DIR "${PROJECT_SOURCE_DIR}/third_party/shared_mutex")
 if(ENABLE_ESMI_LIB)
     # Supported esmi library version tag
     set(current_esmi_tag "esmi_pkg_ver-4.2")
@@ -228,24 +225,7 @@ include_directories(
     ${LIBDRM_AMDGPU_INCLUDES}
 )
 
-set(CMN_SRC_LIST
-    "${ROCM_SRC_DIR}/rocm_smi_device.cc"
-    "${ROCM_SRC_DIR}/rocm_smi_main.cc"
-    "${ROCM_SRC_DIR}/rocm_smi_monitor.cc"
-    "${ROCM_SRC_DIR}/rocm_smi_power_mon.cc"
-    "${ROCM_SRC_DIR}/rocm_smi_utils.cc"
-    "${ROCM_SRC_DIR}/rocm_smi_counters.cc"
-    "${ROCM_SRC_DIR}/rocm_smi_kfd.cc"
-    "${ROCM_SRC_DIR}/rocm_smi_kfd_data_manager.cc"
-    "${ROCM_SRC_DIR}/rocm_smi_io_link.cc"
-    "${ROCM_SRC_DIR}/rocm_smi_gpu_metrics.cc"
-    "${ROCM_SRC_DIR}/rocm_smi_dyn_gpu_metrics.cc"
-    "${ROCM_SRC_DIR}/rocm_smi.cc"
-    "${ROCM_SRC_DIR}/rocm_smi_logger.cc"
-    "${SHR_MUTEX_DIR}/shared_mutex.cc"
-    "${ROCM_SRC_DIR}/rocm_smi_binary_parser.cc"
-    "${ROCM_SRC_DIR}/rocm_smi_board_temp.cc"
-    "${ROCM_SRC_DIR}/rocm_smi_npm.cc")
+set(CMN_SRC_LIST)
 
 if(ENABLE_ESMI_LIB)
     list(APPEND CMN_SRC_LIST ${ESMI_SRC_DIR}/e_smi.c)
@@ -254,28 +234,8 @@ if(ENABLE_ESMI_LIB)
     list(APPEND CMN_SRC_LIST ${ESMI_SRC_DIR}/e_smi_utils.c)
 endif()
 
-set(CMN_INC_LIST
-    "${ROCM_INC_DIR}/rocm_smi_device.h"
-    "${ROCM_INC_DIR}/rocm_smi_main.h"
-    "${ROCM_INC_DIR}/rocm_smi_monitor.h"
-    "${ROCM_INC_DIR}/rocm_smi_power_mon.h"
-    "${ROCM_INC_DIR}/rocm_smi_utils.h"
-    "${ROCM_INC_DIR}/rocm_smi_common.h"
-    "${ROCM_INC_DIR}/rocm_smi_exception.h"
-    "${ROCM_INC_DIR}/rocm_smi_counters.h"
-    "${ROCM_INC_DIR}/rocm_smi_kfd.h"
-    "${ROCM_INC_DIR}/rocm_smi_kfd_data_manager.h"
-    "${ROCM_INC_DIR}/rocm_smi_io_link.h"
-    "${ROCM_INC_DIR}/rocm_smi_gpu_metrics.h"
-    "${ROCM_INC_DIR}/rocm_smi_dyn_gpu_metrics.h"
-    "${ROCM_INC_DIR}/rocm_smi.h"
-    "${ROCM_INC_DIR}/rocm_smi_logger.h"
-    "${SHR_MUTEX_DIR}/shared_mutex.h"
-    "${ROCM_INC_DIR}/rocm_smi_binary_parser.h"
-    "${ROCM_INC_DIR}/rocm_smi_board_temp.h"
-    "${ROCM_INC_DIR}/rocm_smi_npm.h")
+set(CMN_INC_LIST)
 
-add_subdirectory("rocm_smi")
 add_subdirectory("src")
 
 if(BUILD_TESTS)
