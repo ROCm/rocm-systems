@@ -104,9 +104,6 @@ template <typename T> struct ContextOverride {
 };
 #endif
 
-class HipFileInit {
-    HipFileInit();
-    friend struct Context<HipFileInit>;
-};
+void hipFileInit();
 
 }
