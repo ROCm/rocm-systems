@@ -1655,6 +1655,107 @@ int run_test_warp_shuffle(const char* co) {
   return ok == N ? 0 : 1;
 }
 
+// ── gelu_kernel test ────────────────────────────────────────────────────────
+
+int run_test_gelu(const char* co) {
+  int N = 256, bs = 32, nb = N / bs;
+  float *h_in = (float*)malloc(N*4), *h_o = (float*)calloc(N, 4);
+  for (int i = 0; i < N; i++) h_in[i] = (float)(i - 128) * 0.05f;  // range ~[-6.4, 6.35]
+  float *d_in, *d_o;
+  CHECK(hipMalloc(&d_in, N*4)); CHECK(hipMalloc(&d_o, N*4));
+  CHECK(hipMemcpy(d_in, h_in, N*4, hipMemcpyHostToDevice));
+  hipModule_t m; hipFunction_t f;
+  CHECK(hipModuleLoad(&m, co));
+  CHECK(hipModuleGetFunction(&f, m, "gelu_kernel"));
+  int n = N; void* args[] = {&d_o, &d_in, &n};
+  CHECK(hipModuleLaunchKernel(f, nb,1,1, bs,1,1, 0,0, args, NULL));
+  CHECK(hipDeviceSynchronize());
+  CHECK(hipMemcpy(h_o, d_o, N*4, hipMemcpyDeviceToHost));
+  int ok = 0;
+  for (int i = 0; i < N; i++) {
+    float x = h_in[i];
+    float x3 = x * x * x;
+    float inner = 0.7978845608f * (x + 0.044715f * x3);
+    float expected = 0.5f * x * (1.0f + tanhf(inner));
+    if (fabsf(h_o[i] - expected) <= 1e-4f * fabsf(expected) + 1e-6f) ok++;
+  }
+  printf("  gelu_kernel:      %d/%d %s\n", ok, N, ok==N?"PASS":"FAIL");
+  hipFree(d_in); hipFree(d_o); hipModuleUnload(m);
+  free(h_in); free(h_o);
+  return ok == N ? 0 : 1;
+}
+
+// ── reduce_max_idx test ─────────────────────────────────────────────────────
+
+int run_test_reduce_max_idx(const char* co) {
+  int N = 256, bs = 32, nb = N / bs;
+  float *h_in = (float*)malloc(N*4);
+  float *h_oval = (float*)calloc(nb, 4);
+  int *h_oidx = (int*)calloc(nb, 4);
+  srand(42);
+  for (int i = 0; i < N; i++) h_in[i] = (float)(rand() % 1000) / 100.0f;
+  float *d_in, *d_oval;
+  int *d_oidx;
+  CHECK(hipMalloc(&d_in, N*4));
+  CHECK(hipMalloc(&d_oval, nb*4));
+  CHECK(hipMalloc(&d_oidx, nb*4));
+  CHECK(hipMemcpy(d_in, h_in, N*4, hipMemcpyHostToDevice));
+  hipModule_t m; hipFunction_t f;
+  CHECK(hipModuleLoad(&m, co));
+  CHECK(hipModuleGetFunction(&f, m, "reduce_max_idx"));
+  int n = N; void* args[] = {&d_oidx, &d_oval, &d_in, &n};
+  size_t shmem = bs * (sizeof(float) + sizeof(int));
+  CHECK(hipModuleLaunchKernel(f, nb,1,1, bs,1,1, shmem,0, args, NULL));
+  CHECK(hipDeviceSynchronize());
+  CHECK(hipMemcpy(h_oval, d_oval, nb*4, hipMemcpyDeviceToHost));
+  CHECK(hipMemcpy(h_oidx, d_oidx, nb*4, hipMemcpyDeviceToHost));
+  int ok = 0;
+  for (int b = 0; b < nb; b++) {
+    float exp_max = -1e30f;
+    int exp_idx = b * bs;
+    for (int t = 0; t < bs; t++) {
+      int idx = b * bs + t;
+      if (idx < N && h_in[idx] > exp_max) {
+        exp_max = h_in[idx];
+        exp_idx = idx;
+      }
+    }
+    if (fabsf(h_oval[b] - exp_max) < 1e-4f && h_oidx[b] == exp_idx) ok++;
+  }
+  printf("  reduce_max_idx:   %d/%d %s\n", ok, nb, ok==nb?"PASS":"FAIL");
+  hipFree(d_in); hipFree(d_oval); hipFree(d_oidx); hipModuleUnload(m);
+  free(h_in); free(h_oval); free(h_oidx);
+  return ok == nb ? 0 : 1;
+}
+
+// ── silu_kernel test ────────────────────────────────────────────────────────
+
+int run_test_silu(const char* co) {
+  int N = 256, bs = 32, nb = N / bs;
+  float *h_in = (float*)malloc(N*4), *h_o = (float*)calloc(N, 4);
+  for (int i = 0; i < N; i++) h_in[i] = (float)(i - 128) * 0.05f;  // range ~[-6.4, 6.35]
+  float *d_in, *d_o;
+  CHECK(hipMalloc(&d_in, N*4)); CHECK(hipMalloc(&d_o, N*4));
+  CHECK(hipMemcpy(d_in, h_in, N*4, hipMemcpyHostToDevice));
+  hipModule_t m; hipFunction_t f;
+  CHECK(hipModuleLoad(&m, co));
+  CHECK(hipModuleGetFunction(&f, m, "silu_kernel"));
+  int n = N; void* args[] = {&d_o, &d_in, &n};
+  CHECK(hipModuleLaunchKernel(f, nb,1,1, bs,1,1, 0,0, args, NULL));
+  CHECK(hipDeviceSynchronize());
+  CHECK(hipMemcpy(h_o, d_o, N*4, hipMemcpyDeviceToHost));
+  int ok = 0;
+  for (int i = 0; i < N; i++) {
+    float x = h_in[i];
+    float expected = x / (1.0f + expf(-x));
+    if (fabsf(h_o[i] - expected) <= 1e-4f * fabsf(expected) + 1e-6f) ok++;
+  }
+  printf("  silu_kernel:      %d/%d %s\n", ok, N, ok==N?"PASS":"FAIL");
+  hipFree(d_in); hipFree(d_o); hipModuleUnload(m);
+  free(h_in); free(h_o);
+  return ok == N ? 0 : 1;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 int main() {
@@ -1694,11 +1795,16 @@ int main() {
   fails += run_test_packed_f16("/tmp/packed_f16_gfx1250.elf");
   fails += run_test_dot_product_f16("/tmp/dot_product_f16_gfx1250.elf");
   fails += run_test_warp_shuffle("/tmp/warp_shuffle_gfx1250.elf");
-  // Instruction gap coverage tests (bitmanip, f64, layernorm)
+  // Instruction gap coverage tests (bitmanip, layernorm)
   fails += run_test_bitmanip_ops("/tmp/bitmanip_ops_gfx1250.elf");
-  fails += run_test_f64_math("/tmp/f64_math_gfx1250.elf");
   fails += run_test_layernorm("/tmp/layernorm_gfx1250.elf");
-  int total = 34;
+  // AI/ML activation and reduction kernels
+  fails += run_test_gelu("/tmp/gelu_kernel_gfx1250.elf");
+  fails += run_test_reduce_max_idx("/tmp/reduce_max_idx_gfx1250.elf");
+  fails += run_test_silu("/tmp/silu_kernel_gfx1250.elf");
+  // f64_math last: runtime crash poisons GPU queue, must not block other tests
+  fails += run_test_f64_math("/tmp/f64_math_gfx1250.elf");
+  int total = 37;
   printf("\n%s: %d/%d tests passed\n", fails?"SOME FAILED":"ALL PASSED", total-fails, total);
   return fails;
 }

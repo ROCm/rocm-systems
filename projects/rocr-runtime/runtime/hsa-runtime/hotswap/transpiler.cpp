@@ -1111,17 +1111,27 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
   }
 
   // ─── VOP3-only 64-bit ops: strip _e32 suffix ───
-  // GFX12 may emit v_lshlrev_b64_e32 etc. but GFX9 only has VOP3 encoding
-  // (no VOP2/_e32 form) for 64-bit shift/logic ops. Strip _e32.
-  if ((mnemonic == "v_lshlrev_b64_e32" || mnemonic == "v_lshrrev_b64_e32" ||
-       mnemonic == "v_ashrrev_i64_e32" || mnemonic == "v_lshlrev_b64" ||
-       mnemonic == "v_lshrrev_b64" || mnemonic == "v_ashrrev_i64")) {
-    // Ensure no _e32 suffix — GFX9 only supports VOP3 encoding for these
-    std::string base_mnem = mnemonic;
-    size_t e32_pos = base_mnem.find("_e32");
-    if (e32_pos != std::string::npos) base_mnem.erase(e32_pos);
-    line = ReplaceMnemonic(line, mnemonic, base_mnem);
-    mnemonic = base_mnem;
+  // GFX12 may emit v_lshlrev_b64_e32, v_mul_f64_e32, etc. but GFX9 only has
+  // VOP3 encoding (no VOP2/VOP1/_e32 form) for 64-bit shift/logic ops AND
+  // for all f64 VOP instructions. Strip _e32.
+  {
+    bool is_vop3_only_64bit = false;
+    // 64-bit shift/logic
+    if (mnemonic == "v_lshlrev_b64_e32" || mnemonic == "v_lshrrev_b64_e32" ||
+        mnemonic == "v_ashrrev_i64_e32" || mnemonic == "v_lshlrev_b64" ||
+        mnemonic == "v_lshrrev_b64" || mnemonic == "v_ashrrev_i64")
+      is_vop3_only_64bit = true;
+    // f64 VOP1/VOP2/VOP3 instructions: GFX9 has no _e32 encoding for these
+    if (mnemonic.find("_f64") != std::string::npos &&
+        mnemonic.find("_e32") != std::string::npos && mnemonic[0] == 'v')
+      is_vop3_only_64bit = true;
+    if (is_vop3_only_64bit) {
+      std::string base_mnem = mnemonic;
+      size_t e32_pos = base_mnem.find("_e32");
+      if (e32_pos != std::string::npos) base_mnem.erase(e32_pos);
+      line = ReplaceMnemonic(line, mnemonic, base_mnem);
+      mnemonic = base_mnem;
+    }
   }
 
   // ─── s_load_b96 → split into s_load_dwordx2 + s_load_dword ───
@@ -2259,20 +2269,37 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
     }
   }
 
-  // ─── VOP3 with 32-bit literal in source → v_mov_b32 + replace with v6 ───
+  // ─── VOP3 with 32-bit literal in source → v_mov_b32 + replace with VGPR ───
   // GFX9 VOP3 does not support literal constants in source operand positions.
-  // GFX12 compilers freely emit e.g. v_fma_f32 vdst, 0x3fb8aa3b, vsrc1, vsrc2.
-  // Fix: emit v_mov_b32_e32 v6, <literal>, then use v6 in the instruction.
-  // Applies to v_fma_f32/f16/f64 and any VOP3 instruction not already handled.
+  // GFX12 compilers freely emit e.g. v_fma_f32 vdst, 0x3fb8aa3b, vsrc1, vsrc2
+  // or even v_mad_u32_u24 vdst, 0x64, vsrc, 0x64 (two literals).
+  // Fix: emit v_mov_b32_e32 to load each literal into a temp VGPR (v6, v8),
+  // then use the VGPR in the instruction.
+  // Applies generically to ANY VOP3 instruction (3+ source operands, 4+ total).
   {
-    // VOP3 instructions are recognizable as having 3+ source operands (4+ total)
-    // We check a set of known VOP3 mnemonics that may have literals.
-    bool is_vop3_candidate =
-        mnemonic == "v_fma_f32" || mnemonic == "v_fma_f16" ||
-        mnemonic == "v_fma_f64" || mnemonic == "v_ldexp_f32" ||
-        mnemonic == "v_div_fmas_f32" || mnemonic == "v_div_fixup_f32" ||
-        mnemonic == "v_med3_f32" || mnemonic == "v_med3_i32" ||
-        mnemonic == "v_bfi_b32" || mnemonic == "v_alignbit_b32";
+    // Any v_ instruction with 4+ operands is a VOP3 candidate.
+    // Also catch VOP2 instructions that are VOP3-only on GFX9 (e.g., v_mad_u32_u24).
+    // EXCLUDE v_cmp_* and v_cmpx_* — they have dedicated handlers below that also
+    // handle SGPR dest widening, VCC clobber save/restore, and f64 literal pairs.
+    bool is_vop3_candidate = false;
+    if (mnemonic[0] == 'v' && mnemonic[1] == '_' &&
+        mnemonic.find("v_cmp") != 0) {
+      size_t ops_start = line.find(mnemonic) + mnemonic.size();
+      std::string ops = line.substr(ops_start);
+      // Quick comma count to determine operand count
+      int comma_count = 0;
+      for (char c : ops) if (c == ',') comma_count++;
+      // 3+ commas means 4+ operands (1 dst + 3 src) — VOP3
+      // Also catch any instruction with at least 2 commas that has a hex literal
+      // (some VOP2 instructions can appear with literals that aren't inline-encodable)
+      if (comma_count >= 3) is_vop3_candidate = true;
+      // For 2-comma instructions (3 operands), check if it's a known VOP3-only op
+      // or has _e64 suffix
+      if (comma_count == 2 && (mnemonic.find("_e64") != std::string::npos ||
+                                mnemonic == "v_ldexp_f32" || mnemonic == "v_ldexp_f64" ||
+                                mnemonic == "v_ldexp_f16"))
+        is_vop3_candidate = true;
+    }
     if (is_vop3_candidate) {
       size_t ops_start = line.find(mnemonic) + mnemonic.size();
       std::string ops = line.substr(ops_start);
@@ -2284,22 +2311,44 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
         size_t e = tok.find_last_not_of(" \t");
         if (s != std::string::npos) operands.push_back(tok.substr(s, e - s + 1));
       }
-      // Check sources (operands[1..n]) for large hex literals
+      // Check sources (operands[1..n]) for large literals (hex or large decimal)
+      auto is_non_inline_literal = [](const std::string& raw) -> bool {
+        std::string s = raw;
+        // Strip negation/abs modifiers
+        if (!s.empty() && s[0] == '-') s = s.substr(1);
+        if (s.empty()) return false;
+        // Hex literal (0x...) — always non-inline unless very small
+        if (s.size() > 2 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) return true;
+        // Large decimal literal (> 64 or < -16)
+        if (std::isdigit((unsigned char)s[0])) {
+          try {
+            long val = std::stol(s);
+            if (val > 64) return true;
+          } catch (...) {}
+        }
+        return false;
+      };
       if (operands.size() >= 3) {
-        for (size_t i = 1; i < operands.size(); ++i) {
+        // Collect all literal positions and use v6, v8 as temps
+        int temp_vgprs[] = {6, 8};
+        int temp_idx = 0;
+        bool any_fixed = false;
+        for (size_t i = 1; i < operands.size() && temp_idx < 2; ++i) {
           std::string op = operands[i];
-          // Strip negation modifier to check the base value
           bool neg = !op.empty() && op[0] == '-';
-          if (neg) op = op.substr(1);
-          // Detect large literal (hex form 0x..., won't be inline-encodable)
-          if (op.size() > 2 && op[0] == '0' && (op[1] == 'x' || op[1] == 'X')) {
-            result.push_back("v_mov_b32_e32 v6, " + op);
-            operands[i] = (neg ? "-" : "") + std::string("v6");
-            std::string fixed = mnemonic + " " + operands[0];
-            for (size_t j = 1; j < operands.size(); ++j) fixed += ", " + operands[j];
-            result.push_back(fixed);
-            return result;
+          std::string bare = neg ? op.substr(1) : op;
+          if (is_non_inline_literal(bare)) {
+            int vgpr = temp_vgprs[temp_idx++];
+            result.push_back("v_mov_b32_e32 v" + std::to_string(vgpr) + ", " + bare);
+            operands[i] = std::string(neg ? "-" : "") + "v" + std::to_string(vgpr);
+            any_fixed = true;
           }
+        }
+        if (any_fixed) {
+          std::string fixed = mnemonic + " " + operands[0];
+          for (size_t j = 1; j < operands.size(); ++j) fixed += ", " + operands[j];
+          result.push_back(fixed);
+          return result;
         }
       }
     }
@@ -2842,10 +2891,21 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
           std::string base_mnem = mnemonic.substr(0, mnemonic.size() - 4) + "_e32";
           bool src0_lit = is_large_literal(srcs[0]);
           bool src1_lit = is_large_literal(srcs[1]);
+          bool is_f64_cmp = mnemonic.find("_f64") != std::string::npos;
+          bool is_class_cmp = mnemonic.find("_class_") != std::string::npos;
           if (src1_lit && !src0_lit) {
-            // VOPC src1 must be VGPR — load literal into v6 first
-            result.push_back("v_mov_b32_e32 v6, " + srcs[1]);
-            result.push_back(base_mnem + " " + srcs[0] + ", v6");
+            // VOPC src1 must be VGPR — load literal into VGPR first.
+            // For f64 data sources, use VGPR pair. But v_cmp_class src1 is
+            // always 32-bit class mask even for _f64 variant.
+            bool src1_needs_pair = is_f64_cmp && !is_class_cmp;
+            if (src1_needs_pair) {
+              result.push_back("v_mov_b32_e32 v6, " + srcs[1]);
+              result.push_back("v_mov_b32_e32 v7, 0");
+              result.push_back(base_mnem + " " + srcs[0] + ", v[6:7]");
+            } else {
+              result.push_back("v_mov_b32_e32 v6, " + srcs[1]);
+              result.push_back(base_mnem + " " + srcs[0] + ", v6");
+            }
             return result;
           } else if (src0_lit) {
             // src0 can be literal in VOPC — direct conversion
@@ -2992,14 +3052,33 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
                 for (size_t ci = 1; ci < cmp_operands.size(); ci++) {
                   if (is_ll(cmp_operands[ci])) {
                     std::string lit_val = cmp_operands[ci];
-                    cmp_operands[ci] = "v6";
-                    result.insert(result.begin() + ri, "v_mov_b32_e32 v6, " + lit_val);
-                    // Rebuild the v_cmp line
-                    std::string rebuilt = result[ri + 1].substr(0, mend2);
-                    for (size_t cj = 0; cj < cmp_operands.size(); cj++) {
-                      rebuilt += (cj == 0 ? " " : ", ") + cmp_operands[cj];
+                    // For f64 instructions, some source operands need 64-bit VGPR pairs.
+                    // v_cmp_*_f64 (non-class): both src0 and src1 are f64 → need pair.
+                    // v_cmp_class_*_f64: src0 is f64 (ci==1), src1 is i32 class mask (ci==2).
+                    bool is_f64_mnem = mnemonic.find("_f64") != std::string::npos;
+                    bool is_class = mnemonic.find("_class_") != std::string::npos;
+                    bool needs_pair = is_f64_mnem && !(is_class && ci >= 2);
+                    if (needs_pair) {
+                      // Use v[8:9] for f64 pair to avoid colliding with save_reg (v7)
+                      cmp_operands[ci] = "v[8:9]";
+                      result.insert(result.begin() + ri, "v_mov_b32_e32 v9, 0");
+                      result.insert(result.begin() + ri, "v_mov_b32_e32 v8, " + lit_val);
+                      // Rebuild the v_cmp line (now at ri + 2)
+                      std::string rebuilt = result[ri + 2].substr(0, mend2);
+                      for (size_t cj = 0; cj < cmp_operands.size(); cj++) {
+                        rebuilt += (cj == 0 ? " " : ", ") + cmp_operands[cj];
+                      }
+                      result[ri + 2] = rebuilt;
+                    } else {
+                      cmp_operands[ci] = "v6";
+                      result.insert(result.begin() + ri, "v_mov_b32_e32 v6, " + lit_val);
+                      // Rebuild the v_cmp line (now at ri + 1)
+                      std::string rebuilt = result[ri + 1].substr(0, mend2);
+                      for (size_t cj = 0; cj < cmp_operands.size(); cj++) {
+                        rebuilt += (cj == 0 ? " " : ", ") + cmp_operands[cj];
+                      }
+                      result[ri + 1] = rebuilt;
                     }
-                    result[ri + 1] = rebuilt;
                     break;  // one literal fix per instruction is enough
                   }
                 }
@@ -3034,10 +3113,20 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
         if (as != std::string::npos) all_operands.push_back(atok.substr(as, ae - as + 1));
       }
       // Check sources (indices 1+) for large literals
+      bool is_f64_mnem = mnemonic.find("_f64") != std::string::npos;
+      bool is_class_mnem = mnemonic.find("_class_") != std::string::npos;
       for (size_t ai = 1; ai < all_operands.size(); ai++) {
         if (is_large_literal(all_operands[ai])) {
-          result.push_back("v_mov_b32_e32 v6, " + all_operands[ai]);
-          all_operands[ai] = "v6";
+          // f64 data sources need 64-bit VGPR pair; class mask (src1) is 32-bit
+          bool needs_pair = is_f64_mnem && !(is_class_mnem && ai >= 2);
+          if (needs_pair) {
+            result.push_back("v_mov_b32_e32 v6, " + all_operands[ai]);
+            result.push_back("v_mov_b32_e32 v7, 0");
+            all_operands[ai] = "v[6:7]";
+          } else {
+            result.push_back("v_mov_b32_e32 v6, " + all_operands[ai]);
+            all_operands[ai] = "v6";
+          }
           // Rebuild line
           std::string rebuilt = mnemonic;
           for (size_t aj = 0; aj < all_operands.size(); aj++) {
