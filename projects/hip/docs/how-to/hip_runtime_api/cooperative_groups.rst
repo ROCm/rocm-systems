@@ -479,10 +479,9 @@ With each group type, the synchronization requires using the correct cooperative
 Operations
 ==========
 
-.. tab-set::
-  .. tab-item:: reduce
-    :sync: reduce
-    auto reduce(const TyGroup& group, T&& val, Operation&& op)
+.. code-block:: cpp
+
+  auto reduce(const TyGroup& group, T&& val, Operation&& op)
 
 Defined in cooperative_groups/hip_reduce.h. Performs a reduction operation on the specified group, contributing the value ``val``
 
