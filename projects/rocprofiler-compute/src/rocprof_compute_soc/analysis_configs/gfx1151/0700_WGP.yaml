@@ -183,12 +183,12 @@ Panel Config:
           min: MIN(SQ_INSTS_FLAT_sum / $denom)
           max: MAX(SQ_INSTS_FLAT_sum / $denom)
           unit: (Count + $normUnit)
-        Instructions - VMEM Load:
+        Instructions - TEX Load:
           avg: AVG(SQ_INSTS_TEX_LOAD_sum / $denom)
           min: MIN(SQ_INSTS_TEX_LOAD_sum / $denom)
           max: MAX(SQ_INSTS_TEX_LOAD_sum / $denom)
           unit: (Count + $normUnit)
-        Instructions - VMEM Store:
+        Instructions - TEX Store:
           avg: AVG(SQ_INSTS_TEX_STORE_sum / $denom)
           min: MIN(SQ_INSTS_TEX_STORE_sum / $denom)
           max: MAX(SQ_INSTS_TEX_STORE_sum / $denom)
