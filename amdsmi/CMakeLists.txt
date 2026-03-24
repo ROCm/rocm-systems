@@ -142,9 +142,6 @@ generic_package()
 find_package(Threads REQUIRED)
 
 
-# libdrm not used; thunk_proxy provides DRM access
-set(LIBDRM_AMDGPU_SONAME "")
-set(LIBDRM_AMDGPU_INCLUDES "")
 configure_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/include/config/amd_smi_config.h.in"
     "${CMAKE_CURRENT_BINARY_DIR}/include/config/amd_smi_config.h"
@@ -222,7 +219,6 @@ include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/shared_mutex
     ${CMAKE_CURRENT_SOURCE_DIR}/include/amd_smi
     ${ESMI_INC_DIR}
-    ${LIBDRM_AMDGPU_INCLUDES}
 )
 
 set(CMN_SRC_LIST)
@@ -309,11 +305,10 @@ install(
 
 
 #Debian package specific variables
-# some distros like Debian10 don't ship libdrm-amdgpu-dev, keep as recommends
-set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "python3-argcomplete, libdrm-amdgpu-dev")
+set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "python3-argcomplete")
 set(CPACK_DEBIAN_ASAN_PACKAGE_RECOMMENDS ${CPACK_DEBIAN_PACKAGE_RECOMMENDS})
 set(CPACK_DEBIAN_DEV_PACKAGE_RECOMMENDS ${CPACK_DEBIAN_PACKAGE_RECOMMENDS})
-set(CPACK_DEBIAN_PACKAGE_DEPENDS "libdrm-dev, sudo, libc6, python3 (>= 3.6.8), python3-pip, python3-setuptools, python3-wheel")
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "sudo, libc6, python3 (>= 3.6.8), python3-pip, python3-setuptools, python3-wheel")
 set(CPACK_DEBIAN_ASAN_PACKAGE_DEPENDS ${CPACK_DEBIAN_PACKAGE_DEPENDS})
 set(CPACK_DEBIAN_DEV_PACKAGE_DEPENDS ${CPACK_DEBIAN_PACKAGE_DEPENDS})
 
@@ -382,13 +377,12 @@ if(CPACK_RPM_PACKAGE_RELEASE)
     set(CPACK_RPM_PACKAGE_RELEASE_DIST ON)
 endif()
 # NOTE: RPM SUGGESTS DO NOT WORK! https://bugzilla.redhat.com/show_bug.cgi?id=1811358
-# some distros like AzureLinux don't ship libdrm-amdgpu-devel, keep as suggests
-set(CPACK_RPM_PACKAGE_SUGGESTS "python3-argcomplete, libdrm-amdgpu-devel")
+set(CPACK_RPM_PACKAGE_SUGGESTS "python3-argcomplete")
 set(CPACK_RPM_DEV_PACKAGE_SUGGESTS ${CPACK_RPM_PACKAGE_SUGGESTS})
 set(CPACK_RPM_ASAN_PACKAGE_SUGGESTS ${CPACK_RPM_PACKAGE_SUGGESTS})
 # python version gated by rhel8 :(
 # note that RPM based systems have "devel" suffix instead of "dev" in debian based systems
-set(CPACK_RPM_PACKAGE_REQUIRES "libdrm-devel, sudo, python3 >= 3.6.8, python3-pip, python3-wheel, python3-setuptools")
+set(CPACK_RPM_PACKAGE_REQUIRES "sudo, python3 >= 3.6.8, python3-pip, python3-wheel, python3-setuptools")
 set(CPACK_RPM_DEV_PACKAGE_REQUIRES ${CPACK_RPM_PACKAGE_REQUIRES})
 set(CPACK_RPM_ASAN_PACKAGE_REQUIRES ${CPACK_RPM_PACKAGE_REQUIRES})
 
@@ -426,7 +420,6 @@ endif()
 
 # The line below doesn't currently work; it may be this issue:
 # https://bugzilla.redhat.com/show_bug.cgi?id=1811358
-# set(CPACK_RPM_PACKAGE_SUGGESTS "sudo, libdrm-devel")
 
 
 #Set the names now using CPACK utility

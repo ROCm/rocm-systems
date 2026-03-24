@@ -22,8 +22,6 @@
 
 #include <climits>
 #include <sys/ioctl.h>
-#include <libdrm/amdgpu.h>
-#include <libdrm/drm.h>
 #include <fcntl.h>
 #include <cstdint>
 #include <cstdio>

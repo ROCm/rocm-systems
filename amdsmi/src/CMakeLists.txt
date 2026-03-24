@@ -99,8 +99,6 @@ target_include_directories(${AMD_SMI} PRIVATE
     ${PROJECT_SOURCE_DIR}/common/shared_mutex
     ${RAS_DECODE_INC_DIR}
     ${PROJECT_SOURCE_DIR}/../include
-    ${DRM_INCLUDE_DIRS}
-    ${DRM_AMDGPU_INCLUDE_DIRS}
     ${NIC_INCLUDE_DIRS}
     ${WIN_SDK}
 )
