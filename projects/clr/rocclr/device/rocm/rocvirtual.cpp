@@ -1520,6 +1520,15 @@ bool VirtualGPU::dispatchAqlPacketBatch(const std::vector<uint8_t*>& packets,
       reinterpret_cast<const std::vector<hsa_kernel_dispatch_packet_t*>&>(packets);
   bool result = dispatchGenericAqlPacketBatch(aqlPackets, false, attach_signal, &kernelNames);
 
+  // When a profiling tracer is active, synchronously wait for all batch dispatch
+  // signals and extract per-kernel timing data. Without this, the async signal
+  // handlers may not fire before ReportActivity reads tsList_, causing missing
+  // kernel dispatch records in profiling output.
+  if (timestamp_ != nullptr && amd::activity_prof::IsEnabled(OP_ID_DISPATCH)) {
+    Barriers().WaitCurrent();
+    timestamp_->checkGpuTime();
+  }
+
   profilingEnd();
 
   return result;
