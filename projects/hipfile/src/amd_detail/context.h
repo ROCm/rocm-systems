@@ -6,6 +6,7 @@
 #pragma once
 
 #include "hipfile-warnings.h"
+
 #include <stdexcept>
 #ifdef AIS_TESTING
 #include <mutex>
@@ -15,7 +16,13 @@ namespace hipFile {
 
 template <typename T> struct ContextOverride;
 
+template <typename T> struct ContextDefaultImpl {
+    using type = T;
+};
+
 template <typename T> struct Context {
+    using DefaultImpl = typename ContextDefaultImpl<T>::type;
+    static_assert(std::is_base_of_v<T, DefaultImpl>, "ContextDefaultImpl<T>::type must derive from T");
     Context()                           = delete;
     Context(const Context &)            = delete;
     Context(Context &&)                 = delete;
@@ -32,7 +39,7 @@ template <typename T> struct Context {
     {
         std::lock_guard<std::mutex> lock{m};
         HIPFILE_WARN_NO_EXIT_DTOR_OFF
-        static T standard{};
+        static DefaultImpl standard{};
         HIPFILE_WARN_NO_EXIT_DTOR_ON
         if (replacement)
             return replacement;
@@ -67,7 +74,7 @@ private:
     static T *get()
     {
         HIPFILE_WARN_NO_EXIT_DTOR_OFF
-        static T context{};
+        static DefaultImpl context{};
         HIPFILE_WARN_NO_EXIT_DTOR_ON
         return &context;
     }
