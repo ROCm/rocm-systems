@@ -474,20 +474,19 @@ template <typename... Args>
   dst_bytes = dst_def;
   src_bytes = src_def;
 
-  constexpr int DATA_SIZE = 16; // size of each element: 4 uint (4 bytes) = 16 bytes (128 bits)
-  constexpr int DATA_COUNT = 16; // number of elements
-  constexpr int CHUNK_BYTES = DATA_SIZE * DATA_COUNT; // 128 bytes -> bus bandwidth (B/s)
+  // size of each element: 4 uint (4 bytes) = 16 bytes (128 bits)
+  constexpr int DATA_SIZE{16}; 
+  // number of elements to be handled by each thread
+  constexpr int DATA_COUNT{16}; 
+  constexpr int CHUNK_BYTES = DATA_SIZE * DATA_COUNT;
   int block_bytes = CHUNK_BYTES * block_size;
 
   if (size >= block_bytes) {
     cpy_size = size / block_bytes;
     dst_bytes = dst_def;
     src_bytes = src_def;
-    for (int i = 0; i < cpy_size; i++) {
-      // gpu_dprintf("WG (%u, %u, %u) TH (%u, %u, %u), flat_id = %d, size = %3d, " 
-      //   "j = %3d, cpy_size = %3d, src_bytes=%u, dst_bytes=%u\n", get_flat_id(), 
-      //   size, CHUNK_BYTES, cpy_size, src_bytes - src_def, dst_bytes - dst_def);
-        
+
+    for (int i = 0; i < cpy_size; i++) {        
       store_asm(src_bytes, dst_bytes, CHUNK_BYTES);
       src_bytes += block_bytes;
       dst_bytes += block_bytes;
@@ -506,11 +505,7 @@ template <typename... Args>
       
       src_bytes += i * j;
       dst_bytes += i * j;
-      
-      // gpu_dprintf("WG (%u, %u, %u) TH (%u, %u, %u), flat_id = %d, size = %3d, " 
-      //   "j = %3d, cpy_size = %3d, src_bytes=%u, dst_bytes=%u\n", get_flat_id(), 
-      //   size, j, cpy_size, src_bytes, dst_bytes);
-        
+
       store_asm(src_bytes, dst_bytes, j);
     }
     size -= cpy_size * j;
@@ -540,7 +535,29 @@ template <typename... Args>
   dst_bytes = dst_def;
   src_bytes = src_def;
 
-  for (int j{8}; j > 1; j >>= 1) {
+  // size of each element: 4 uint (4 bytes) = 16 bytes (128 bits)
+  constexpr int DATA_SIZE{16}; 
+  // number of elements to be handled by each thread
+  constexpr int DATA_COUNT{16}; 
+  constexpr int CHUNK_BYTES = DATA_SIZE * DATA_COUNT;
+  int block_bytes = CHUNK_BYTES * wave_size;
+
+  if (size >= block_bytes) {
+    cpy_size = size / block_bytes;
+    dst_bytes = dst_def;
+    src_bytes = src_def;
+
+    for (int i = 0; i < cpy_size; i++) {        
+      store_asm(src_bytes, dst_bytes, CHUNK_BYTES);
+      src_bytes += block_bytes;
+      dst_bytes += block_bytes;
+    }
+    size -= cpy_size * block_bytes;
+    dst_def += cpy_size * block_bytes;
+    src_def += cpy_size * block_bytes;
+  }
+
+  for (int j{16}; j > 1; j >>= 1) {
     cpy_size = size / j;
     for (int i{wave_tid}; i < cpy_size; i += wave_size) {
       dst_bytes = dst_def;
