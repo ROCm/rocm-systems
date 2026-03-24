@@ -149,7 +149,7 @@ bool Event::setStatus(int32_t status, uint64_t timeStamp) {
       releaseResources();
     }
 
-    if (profilingInfo().enabled_ && amd::activity_prof::IsEnabled(OP_ID_DISPATCH)) {
+    if (profilingInfo().enabled_) {
       amd::activity_prof::ReportActivity(command());
     }
 
@@ -297,10 +297,20 @@ bool Event::notifyCmdQueue(bool cpu_wait) {
 
 const Event::EventWaitList Event::nullWaitList(0);
 
+// Returns true if activity profiling is enabled for the given command type, and
+// increments the pending record counter to commit to delivering a record later.
+static bool IsActivityEnabledAndCommit(cl_command_type type) {
+  if (amd::activity_prof::IsEnabled(amd::activity_prof::OperationId(type))) {
+    amd::activity_prof::RecordPending();
+    return true;
+  }
+  return false;
+}
+
 // ================================================================================================
 Command::Command(HostQueue& queue, cl_command_type type, const EventWaitList& eventWaitList,
                  uint32_t commandWaitBits, const Event* waitingEvent)
-    : Event(queue, amd::activity_prof::IsEnabled(amd::activity_prof::OperationId(type)) ||
+    : Event(queue, IsActivityEnabledAndCommit(type) ||
                        queue.properties().test(CL_QUEUE_PROFILING_ENABLE) ||
                        Agent::shouldPostEventEvents()),
       queue_(&queue),
@@ -380,22 +390,22 @@ void Command::enqueue() {
     ScopedLock sl(queue_->vdev()->execution());
     queue_->FormSubmissionBatch(this);
 
-    // Enqueue flushes, except profiling markers to avoid frequent expensive callbacks
+    // Enqueue flushes, except profiling markers to avoid frequent expensive callbacks.
+    // Also flush unconditionally when the batch exceeds the size threshold.
     if (((type() == 0) && profilingInfo().batch_flush_) || (type() == CL_COMMAND_MARKER) ||
-        (type() == CL_COMMAND_TASK)) {
+        (type() == CL_COMMAND_TASK) || queue_->ShouldFlushBatch()) {
       // The current HSA signal tracking logic requires profiling enabled for the markers
       EnableProfiling();
-      // Update batch head for the current marker. Hence the status of all commands can be
-      // updated upon the marker completion
+      // Update batch head for the current command. Hence the status of all commands can be
+      // updated upon the completion
       SetBatchHead(queue_->GetSubmissionBatch());
 
       submit(*queue_->vdev());
 
-      // The batch will be tracked with the marker now
+      // The batch will be tracked with the current command now
       queue_->ResetSubmissionBatch();
     } else {
       submit(*queue_->vdev());
-      queue_->FlushSubmissionBatch(this);
     }
   } else {
     queue_->append(*this);

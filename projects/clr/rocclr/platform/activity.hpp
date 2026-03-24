@@ -76,6 +76,11 @@ constexpr OpId OperationId(cl_command_type commandType) {
 bool IsEnabled(OpId operation_id);
 void ReportActivity(const amd::Command& command);
 
+// Explicit counter for in-flight activity records. CLR increments when it commits
+// to producing a record, decrements after delivery via ReportActivity.
+void RecordPending();
+void RecordDelivered();
+int64_t GetPendingRecordCount();
 
 const char* getOclCommandKindString(cl_command_type kind);
 }  // namespace amd::activity_prof

@@ -384,11 +384,11 @@ int TracerCallback(activity_domain_t domain, uint32_t operation_id, void* data) 
                                   static_cast<HIP_ApiTracer::TraceData*>(data));
 
     case ACTIVITY_DOMAIN_HIP_OPS:
-      if (auto pool = hip_ops_activity_table.Get(operation_id)) {
-        if (auto record = static_cast<activity_record_t*>(data)) {
-          // If the record is for a kernel dispatch, write the kernel name in the pool's data,
-          // and make the record point to it. Older HIP runtimes do not provide a kernel
-          // name, so record.kernel_name might be null.
+      if (data != nullptr) {
+        // Record delivery — use GetForDrain to bypass IsStopped so in-flight records
+        // committed before stop can still be written to the pool.
+        auto record = static_cast<activity_record_t*>(data);
+        if (auto pool = hip_ops_activity_table.GetForDrain(operation_id)) {
           if (operation_id == HIP_OP_ID_DISPATCH && record->kernel_name != nullptr)
             (*pool)->Write(*record, record->kernel_name, strlen(record->kernel_name) + 1,
                            [](auto& record, const void* data) {
@@ -397,6 +397,10 @@ int TracerCallback(activity_domain_t domain, uint32_t operation_id, void* data) 
           else
             (*pool)->Write(*record);
         }
+        return 0;
+      }
+      // IsEnabled query (data == nullptr)
+      if (auto pool = hip_ops_activity_table.Get(operation_id)) {
         return 0;
       }
       break;
@@ -839,8 +843,20 @@ ROCTRACER_API void roctracer_start() {
 
 // Stop API
 ROCTRACER_API void roctracer_stop() {
-  if (!stopped_status.exchange(true, std::memory_order_relaxed) && roctracer_stop_cb)
-    roctracer_stop_cb();
+  if (!stopped_status.exchange(true, std::memory_order_relaxed)) {
+    // Drain in-flight activity records that were committed before stop.
+    // All GPU work should already be complete (e.g. after hipDeviceSynchronize),
+    // so the async handlers just need time to fire and deliver records.
+    if (HipLoader::Instance().IsEnabled()) {
+      constexpr int kDrainTimeoutMs = 100;
+      for (int waited = 0;
+           HipLoader::Instance().GetPendingActivityCount() > 0 && waited < kDrainTimeoutMs;
+           waited++) {
+        usleep(1000);
+      }
+    }
+    if (roctracer_stop_cb) roctracer_stop_cb();
+  }
 }
 
 ROCTRACER_API roctracer_status_t roctracer_get_timestamp(roctracer_timestamp_t* timestamp) {

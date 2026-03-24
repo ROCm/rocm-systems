@@ -99,6 +99,7 @@ __attribute__((weak)) const char* hipApiName(uint32_t id) { return nullptr; }
 __attribute__((weak)) void hipRegisterTracerCallback(int (*function)(activity_domain_t domain,
                                                                      uint32_t operation_id,
                                                                      void* data)) {}
+__attribute__((weak)) int64_t hipGetPendingActivityCount() { return 0; }
 
 class HipLoader {
  private:
@@ -123,6 +124,8 @@ class HipLoader {
                                               void* data)) const {
     return hipRegisterTracerCallback(callback);
   }
+
+  int64_t GetPendingActivityCount() const { return hipGetPendingActivityCount(); }
 
   static inline HipLoader& Instance() {
     static HipLoader instance;
@@ -167,6 +170,11 @@ class HipLoader : public BaseLoader<HipLoader> {
     static auto function = GetFun<void (*)(int (*callback)(
         activity_domain_t domain, uint32_t operation_id, void* data))>("hipRegisterTracerCallback");
     return function(callback);
+  }
+
+  int64_t GetPendingActivityCount() const {
+    static auto function = GetFun<int64_t (*)()>("hipGetPendingActivityCount");
+    return function ? function() : 0;
   }
 };
 #endif
