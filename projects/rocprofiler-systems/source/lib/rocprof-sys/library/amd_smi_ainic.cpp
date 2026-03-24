@@ -199,6 +199,30 @@ metadata_initialize_ainic_smi_pmc(uint32_t nic_index)
           trait::name<category::amd_smi_nic_tx_ucast_pkts>::description, LONG_DESCRIPTION,
           COMPONENT, trace_cache::ABSOLUTE, rocprofsys::trace_cache::ABSOLUTE, BLOCK,
           EXPRESSION, 0, 0, "{}" });
+    trace_cache::get_metadata_registry().add_pmc_info(
+        { agent_type::NIC, nic_index, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+          trait::name<category::amd_smi_nic_tx_rdma_ack_timeout>::value, "AI NIC TX RDMA ACK TIMEOUT",
+          trait::name<category::amd_smi_nic_tx_rdma_ack_timeout>::description, LONG_DESCRIPTION,
+          COMPONENT, trace_cache::ABSOLUTE, rocprofsys::trace_cache::ABSOLUTE, BLOCK,
+          EXPRESSION, 0, 0, "{}" });
+    trace_cache::get_metadata_registry().add_pmc_info(
+        { agent_type::NIC, nic_index, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+          trait::name<category::amd_smi_nic_resp_tx_pkt_seq_err>::value, "AI NIC TX PKT SEQ ERR",
+          trait::name<category::amd_smi_nic_resp_tx_pkt_seq_err>::description, LONG_DESCRIPTION,
+          COMPONENT, trace_cache::ABSOLUTE, rocprofsys::trace_cache::ABSOLUTE, BLOCK,
+          EXPRESSION, 0, 0, "{}" });
+    trace_cache::get_metadata_registry().add_pmc_info(
+        { agent_type::NIC, nic_index, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+          trait::name<category::amd_smi_nic_req_rx_pkt_seq_err>::value, "AI NIC REQ RX PKT SEQ ERR",
+          trait::name<category::amd_smi_nic_req_rx_pkt_seq_err>::description, LONG_DESCRIPTION,
+          COMPONENT, trace_cache::ABSOLUTE, rocprofsys::trace_cache::ABSOLUTE, BLOCK,
+          EXPRESSION, 0, 0, "{}" });
+    trace_cache::get_metadata_registry().add_pmc_info(
+        { agent_type::NIC, nic_index, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+          trait::name<category::amd_smi_nic_req_rx_impl_nak_seq_err>::value, "AI NIC RX IMPL NAK SEQ ERR",
+          trait::name<category::amd_smi_nic_req_rx_impl_nak_seq_err>::description, LONG_DESCRIPTION,
+          COMPONENT, trace_cache::ABSOLUTE, rocprofsys::trace_cache::ABSOLUTE, BLOCK,
+          EXPRESSION, 0, 0, "{}" });
 }
 
 void
@@ -272,6 +296,10 @@ nic_data::post_process(size_t nic_index)
         counter_track::emplace(nic_index, addendum("TX UCAST BYTES"), "bytes");
         counter_track::emplace(nic_index, addendum("RX UCAST PKTS"), "packets");
         counter_track::emplace(nic_index, addendum("TX UCAST PKTS"), "packets");
+        counter_track::emplace(nic_index, addendum("TX RDMA ACK TIMEOUT"), "count");
+        counter_track::emplace(nic_index, addendum("TX RESP PKT SEQ ERR"), "count");
+        counter_track::emplace(nic_index, addendum("RX REQ PKT SEQ ERR"), "count");
+        counter_track::emplace(nic_index, addendum("RX REQ RX IMPL NAK SEQ ERR"), "count");
 
         size_t track_index = 0;
 
