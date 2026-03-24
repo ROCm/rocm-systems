@@ -41,7 +41,7 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
-from utils.utils import normalize_filter_to_str_list
+from utils.utils_common import normalize_filter_to_str_list
 
 # TODO: use pandas chunksize or dask to read really large csv file
 # from dask import dataframe as dd

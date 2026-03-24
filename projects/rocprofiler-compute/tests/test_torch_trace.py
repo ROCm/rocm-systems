@@ -35,7 +35,7 @@ from utils.rocpd_data import (
     MARKER_API_TRACE_QUERY,
     convert_dbs_to_csv,
 )
-from utils.utils import (
+from utils.utils_analysis import (
     build_call_trees_with_kernel_ids,
     process_torch_trace_output,
     write_torch_trace_consolidated_csv,
