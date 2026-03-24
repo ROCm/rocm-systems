@@ -418,8 +418,6 @@ def create_mem_chart_diagram(
 
     tcp_read_req = get_metric(metric_dict, "TCP Read Requests")
     tcp_write_req = get_metric(metric_dict, "TCP Write Requests")
-    # Not in gfx1151 Memory Chart YAML (counter unavailable); optional for older JSON.
-    tcp_atomic_req = get_metric(metric_dict, "TCP Atomic Requests")
     tcp_hit = get_metric(metric_dict, "TCP Hit Rate")
     tcp_bw = get_metric(metric_dict, "TCP Request Bandwidth")
 
@@ -538,8 +536,10 @@ def create_mem_chart_diagram(
         f"[{COLORS['read']}]{kernel_arrow_left}[/{COLORS['read']}]",
         f"[{COLORS['write']}]{fmt_edge('Write', tcp_write_req)}[/{COLORS['write']}]",
         f"[{COLORS['write']}]{kernel_arrow_right}[/{COLORS['write']}]",
-        f"[{COLORS['atomic']}]{fmt_edge('Atomic', tcp_atomic_req)}[/{COLORS['atomic']}]",
-        f"[{COLORS['atomic']}]{kernel_arrow_both}[/{COLORS['atomic']}]",
+        "",
+        "",
+        "",
+        "",
         "",
         "",
         "",  # 2 more empty lines before SQC edges
