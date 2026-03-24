@@ -169,7 +169,7 @@ chained_notify_new_code_object(hsa_executable_t executable, void* data)
     {
         get_prev_notify_callback()(executable, data);
     }
-   executable_freeze_internal(executable);
+    executable_freeze_internal(executable);
 }
 
 void
