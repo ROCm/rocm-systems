@@ -676,8 +676,6 @@ rocpd_processor_t::handle(const ainic_sample& _ainic)
             nic_name, _ainic.nic_index)
             .c_str(),
         _ainic.req_rx_impl_nak_seq_err);
-
-
 }
 
 rocpd_processor_t::rocpd_processor_t(const std::shared_ptr<metadata_registry>& md,
