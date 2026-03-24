@@ -25,7 +25,7 @@ Profiling with ROCm Compute Profiler provides the following benefits:
   of your profiling via pre-configured input files.
 
 * :ref:`Profiling output format <profiling-output-format>`: ROCm Compute Profiler can adjust the
-  output format of underlying rocprofiler-sdk which changes the output format of raw performance
+  output format of underlying ROCprofiler-SDK which changes the output format of raw performance
   counter data in the workload folder created during profiling. Supported output formats are
   ``csv`` and ``rocpd``. The default output format is ``rocpd``.
 
@@ -283,7 +283,6 @@ Examples:
    $ tree workloads/vcopy
 
    └── MI325X
-    ├── empirRoof_gpu-0_FP32.html
     ├── log.txt
     ├── perfmon
     │   ├── pmc_perf_0.txt
@@ -327,7 +326,6 @@ Examples:
    $ tree /tmp/profiles/amd-ryzen/0
 
    └── MI325X
-    ├── empirRoof_gpu-0_FP32.html
     ├── log.txt
     ├── perfmon
     │   ├── pmc_perf_0.txt
@@ -371,12 +369,12 @@ Use the ``--format-rocprof-output <format>`` profile mode option to specify the 
 of the underlying ``rocprofiler-sdk``. The following formats are supported:
 
 * ``csv`` format:
-   * Ask underlying rocprofiler-sdk to dump raw performance counter data in csv format.
+   * Ask underlying ROCprofiler-SDK to dump raw performance counter data in csv format.
    * The generated csv files across multiple runs are processed and dumped into the workload directory as csv files.
    * Multiple csv files are merged into single pmc_perf.csv file in workload directory.
 
 * ``rocpd`` format:
-   * Ask underlying rocprofiler-sdk to dump raw performance counter data in rocpd format.
+   * Ask underlying ROCprofiler-SDK to dump raw performance counter data in rocpd format.
    * Multiple ``rocpd`` database files containing counter collection data are merged into a single csv under the workload folder.
      After merging, the database files are removed.
    * Use ``--retain-rocpd-output`` profile mode option to preserve the ``rocpd`` database(s) in the workload folder.
@@ -763,7 +761,6 @@ successfully.
 
    $ ls workloads/occupancy/MI325X
    total 48
-   -rw-r--r-- 1 auser agroup 13331 Mar 21 23:49 empirRoof_gpu-0_FP32.html
    drwxr-xr-x 1 auser agroup     0 Mar 21 23:49 perfmon
    -rw-r--r-- 1 auser agroup  1101 Mar 21 23:49 pmc_perf.csv
    -rw-r--r-- 1 auser agroup  1715 Mar 21 23:49 roofline.csv
@@ -1038,7 +1035,7 @@ By default, if no policy is specified, ROCm Compute Profiler uses the ``kernel_l
 
 .. note::
 
-   * Iteration multiplexing requires rocprofiler-sdk from ROCm 7.0.0 or later.
+   * Iteration multiplexing requires ROCprofiler-SDK from ROCm 7.0.0 or later.
 
    * Do not use ``--no-native-tool`` with ``--iteration-multiplexing``.
      Iteration multiplexing is only supported when using ROCm Compute Profiler with
@@ -1144,7 +1141,6 @@ The example above produces:
    $ tree /tmp/mpi_profile/0
 
    └── MI325X
-    ├── empirRoof_gpu-0_FP32.html
     ├── log.txt
     ├── perfmon
     │   ├── pmc_perf_0.txt
@@ -1195,7 +1191,6 @@ The example above produces:
    $ tree ./workloads/laplace_eqn/0
 
    └── MI325X
-    ├── empirRoof_gpu-0_FP32.html
     ├── log.txt
     ├── perfmon
     │   ├── pmc_perf_0.txt
@@ -1244,7 +1239,6 @@ to your output directory. The following example is run on the host ``amd-ryzen``
    $ tree /tmp/mpi_profile/amd-ryzen/0
 
    └── MI325X
-    ├── empirRoof_gpu-0_FP32.html
     ├── log.txt
     ├── perfmon
     │   ├── pmc_perf_0.txt

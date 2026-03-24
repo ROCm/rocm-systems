@@ -90,7 +90,7 @@ follows.
       - Specifies an optional path for separate ROCm Compute Profiler modulefile installation.
 
     * - ``rocprofiler-sdk_DIR``
-      - Specifies the path to the rocprofiler-sdk CMake package configuration directory used to build the rocprofiler-compute counter collection tool.
+      - Specifies the path to the ROCprofiler-SDK CMake package configuration directory used to build the rocprofiler-compute counter collection tool.
         This directory should contain ``rocprofiler-sdkConfig.cmake`` (for example, ``<rocprofiler-sdk-install-path>/lib/cmake/rocprofiler-sdk``).
 
     * - ``STANDALONEBINARY_EXTRACT_DIR``
@@ -229,4 +229,4 @@ Configuring the environment for ROCprofiler-SDK
 -----------------------------------------------
 
 ROCm Compute Profiler profiling process relies on :doc:`ROCprofiler-SDK <rocprofiler-sdk:index>`'s ``rocprofiler-sdk`` library.
-Optionally, a ``rocprofv3`` binary can be used in substitution of rocprofiler-sdk library when ``ROCPROF`` environment variable is set to ``rocprofv3`` or to the path of ``rocprofv3`` binary.
+Optionally, a ``rocprofv3`` binary can be used in substitution of ROCprofiler-SDK library when ``ROCPROF`` environment variable is set to ``rocprofv3`` or to the path of ``rocprofv3`` binary.
