@@ -93,8 +93,7 @@ static bool IsKfdPidNamespaced() {
 
 // Enumerate container-local PIDs that have /dev/kfd open by scanning /proc.
 // Used as a fallback when KFD sysfs PIDs are not visible in this namespace.
-static int ScanProcForKfdPids(rsmi_process_info_t* procs,
-                              uint32_t num_allocated,
+static int ScanProcForKfdPids(rsmi_process_info_t* procs, uint32_t num_allocated,
                               uint32_t* num_found) {
   *num_found = 0;
 
@@ -694,7 +693,7 @@ int GetProcessGPUs(uint32_t pid, std::unordered_set<uint64_t>* gpu_set) {
         std::string host_proc = std::string(kKFDProcPathRoot) + "/" + entry;
         DIR* pd = opendir(host_proc.c_str());
         if (pd) {
-          struct dirent *pe;
+          struct dirent* pe;
           while ((pe = readdir(pd)) != nullptr) {
             std::string fname = pe->d_name;
             if (fname.rfind("vram_", 0) == 0) {
