@@ -1,0 +1,52 @@
+
+name: rocr-runtime Code Restrictions
+permissions:
+    contents: read
+
+# This workflow ensures that certain code restrictions are applied.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'projects/rocr-runtime/runtime/**'
+      - '!**/*.md'
+      - '!**/*.rtf'
+      - '!**/*.rst'
+      - '!**/*.txt'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+
+# rocr-runtime cannot use std::filesystem because of C++ ABI issues when
+# loaded into applications that ship their own C++ standard library (e.g.
+# DaVinci Resolve). See https://github.com/ROCm/rocm-systems/pull/2586 
+# for details.
+
+  no-std-filesystem:
+    runs-on: ubuntu-22.04
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        sparse-checkout: 'projects/rocr-runtime'
+
+    - name: Apply restriction
+      run: |
+        GREP="$(grep -R -n \
+          --include='*.cpp' \
+          --include='*.hpp' \
+          --include='*.h' \
+          --include='*.cc' \
+          -E 'std::filesystem|<filesystem>' \
+          projects/rocr-runtime/runtime || true)"
+        if [ "${GREP}" != "" ]; then
+          echo -e "\nError! std::filesystem detected in rocr-runtime library sources."
+          echo -e "This is not permitted due to C++ ABI compatibility issues (https://github.com/ROCm/rocm-systems/pull/2586).\n"
+          echo -e "Results:\n"
+          echo "${GREP}"
+          exit 1
+        fi

@@ -870,6 +870,13 @@ def parse_text(text_file: str) -> list[str]:
         ]
 
 
+def is_only_pc_sampling(filter_blocks: list[str]) -> bool:
+    """Return True if all requested blocks are PC sampling (block 21)."""
+    return bool(filter_blocks) and all(
+        block in ["21", "pc_sampling"] for block in filter_blocks
+    )
+
+
 def run_prof(
     fnames: Union[list[str], str],
     profiler_options: Union[list[str], dict[str, Union[str, list[str]]]],

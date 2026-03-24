@@ -33,7 +33,7 @@ jobs:
       packages: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           sparse-checkout: projects/rocprofiler-systems/
       - name: Generate generic installer script
