@@ -36,49 +36,46 @@ itoa_safe(int val, char* out)
     return n;
 }
 
-// async-signal-safe print: "[name] pid = X, ppid = Y\n" to stderr
+// async-signal-safe write helper
+void
+safe_write_str(const char* s, size_t n)
+{
+    auto _rc = write(STDERR_FILENO, s, n);
+    (void) _rc;
+}
+
+// async-signal-safe print: "[name] pid = X, ppid = Y\n" to stderr.
+// Uses multiple write() calls to avoid fixed-size buffer overflow
 void
 print_info(const char* name)
 {
-    char buf[256];
-    int  pos = 0;
+    char numbuf[20];
+    int  len;
 
-    buf[pos++] = '[';
-    int nlen   = strlen(name);
-    memcpy(buf + pos, name, nlen);
-    pos += nlen;
-    const char s1[] = "] pid = ";
-    memcpy(buf + pos, s1, sizeof(s1) - 1);
-    pos += sizeof(s1) - 1;
-    pos += itoa_safe(getpid(), buf + pos);
-    const char s2[] = ", ppid = ";
-    memcpy(buf + pos, s2, sizeof(s2) - 1);
-    pos += sizeof(s2) - 1;
-    pos += itoa_safe(getppid(), buf + pos);
-    buf[pos++] = '\n';
-    auto _rc   = write(STDERR_FILENO, buf, pos);
-    (void) _rc;
+    safe_write_str("[", 1);
+    safe_write_str(name, strlen(name));
+    safe_write_str("] pid = ", 8);
+    len = itoa_safe(getpid(), numbuf);
+    safe_write_str(numbuf, len);
+    safe_write_str(", ppid = ", 9);
+    len = itoa_safe(getppid(), numbuf);
+    safe_write_str(numbuf, len);
+    safe_write_str("\n", 1);
 }
 
 // async-signal-safe print: "[pid X] msg\n" to stderr
 void
 safe_write(const char* msg)
 {
-    char       buf[64];
-    int        pos  = 0;
-    const char s1[] = "[pid ";
-    memcpy(buf + pos, s1, sizeof(s1) - 1);
-    pos += sizeof(s1) - 1;
-    pos += itoa_safe(getpid(), buf + pos);
-    const char s2[] = "] ";
-    memcpy(buf + pos, s2, sizeof(s2) - 1);
-    pos += sizeof(s2) - 1;
-    int mlen = strlen(msg);
-    memcpy(buf + pos, msg, mlen);
-    pos += mlen;
-    buf[pos++] = '\n';
-    auto _rc   = write(STDERR_FILENO, buf, pos);
-    (void) _rc;
+    char numbuf[20];
+    int  len;
+
+    safe_write_str("[pid ", 5);
+    len = itoa_safe(getpid(), numbuf);
+    safe_write_str(numbuf, len);
+    safe_write_str("] ", 2);
+    safe_write_str(msg, strlen(msg));
+    safe_write_str("\n", 1);
 }
 
 int
