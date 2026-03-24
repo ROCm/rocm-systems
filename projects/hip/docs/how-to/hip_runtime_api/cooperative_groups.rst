@@ -476,17 +476,19 @@ With each group type, the synchronization requires using the correct cooperative
       multi_grid_group multi_grid = this_multi_grid();
       multi_grid.sync();
 
-**Operations**
+Operations
+==========
+
 .. tab-set::
   .. tab-item:: reduce
     :sync: reduce
     auto reduce(const TyGroup& group, T&& val, Operation&& op)
 
-Defined in cooperative_groups/hip_reduce.h
-Performs a reduction operation on the specified group, contributing the value ``val``
+Defined in cooperative_groups/hip_reduce.h. Performs a reduction operation on the specified group, contributing the value ``val``
 
-``group`` is either a coalesced_group or a thread_block_tile
-``val`` needs to be a type ``T`` that is trivially copyable and up to 32 bytes in size.
+* ``group`` is either a coalesced_group or a thread_block_tile
+
+* ``val`` needs to be a type ``T`` that is trivially copyable and up to 32 bytes in size.
 
 ``Operation`` must be a function object, which includes lambdas or functors which define ``operator()``. The following predefined functors in the cooperative_groups namespace:
 * cooperative_groups::plus (addition)
@@ -497,6 +499,8 @@ Performs a reduction operation on the specified group, contributing the value ``
 * cooperative_groups::bit_xor (bitwise xor)
 
 Note that it is legal for some threads of the cooperative group to not participate.
+
+**Performance**
 
 On AMD, although all types ``T`` fulfilling the description above can be used with the functors in the cooperative_groups namespace, only some of them will receive hardware acceleration in the form of DPP instructions. Essentially only the types supported by reduce_sync operations would potentially receive acceleration :ref:`hip_cpp_language_extensions:Warp reduction functions` The macro HIP_ENABLE_EXTRA_WARP_SYNC_TYPES might be needed to enable the hardware acceleration on some types.
 For arithmetic reduces (``plus``, ``less`` and ``greater``):
