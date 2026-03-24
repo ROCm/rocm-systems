@@ -14,29 +14,10 @@ set(SO_VERSION_GIT_TAG_PREFIX "amdsmi_so_ver")
 set(SRC_DIR "amd_smi")
 set(INC_DIR "${PROJECT_SOURCE_DIR}/include/amd_smi")
 
-option(BRCM_NIC "Build brcm-nic" OFF)
-if(BRCM_NIC)
-    add_compile_definitions(BRCM_NIC)
-    set(NIC_SOURCES
-        "${PROJECT_SOURCE_DIR}/src/nic/brcm-nic/amd_smi_lspci_commands.cc"
-        "${PROJECT_SOURCE_DIR}/src/nic/brcm-nic/amd_smi_nic_device.cc"
-        "${PROJECT_SOURCE_DIR}/src/nic/brcm-nic/amd_smi_no_drm_nic.cc"
-        "${PROJECT_SOURCE_DIR}/src/nic/brcm-nic/amd_smi_no_drm_switch.cc"
-        "${PROJECT_SOURCE_DIR}/src/nic/brcm-nic/amd_smi_switch_device.cc"
-    )
-    set(NIC_INCLUDES
-        ${INC_DIR}/impl/nic/amd_smi_lspci_commands.h
-        ${INC_DIR}/impl/nic/amd_smi_nic_device.h
-        ${INC_DIR}/impl/nic/amd_smi_no_drm_nic.h
-        ${INC_DIR}/impl/nic/amd_smi_no_drm_switch.h
-        ${INC_DIR}/impl/nic/amd_smi_switch_device.h
-    )
-endif()
-
-set(NIC_SOURCES ${NIC_SOURCES}
+set(NIC_SOURCES
     "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amd_smi_ainic_device.cc"
 )
-set(NIC_INCLUDES ${NIC_INCLUDES}
+set(NIC_INCLUDES
     ${INC_DIR}/impl/nic/amd_smi_ainic_device.h
 )
 set(NIC_INCLUDE_DIRS
@@ -45,17 +26,9 @@ set(NIC_INCLUDE_DIRS
 
 set(SRC_LIST
     "${SRC_DIR}/amd_smi.cc"
-    "${SRC_DIR}/amd_smi_cper.cc"
     "${SRC_DIR}/amd_smi_common.cc"
-    "${SRC_DIR}/amd_smi_drm.cc"
-    "${SRC_DIR}/amd_smi_gpu_device.cc"
-    "${SRC_DIR}/amd_smi_lib_loader.cc"
-    "${SRC_DIR}/amd_smi_socket.cc"
-    "${SRC_DIR}/amd_smi_system.cc"
     "${SRC_DIR}/amd_smi_utils.cc"
     "${SRC_DIR}/amd_smi_uuid.cc"
-    "${SRC_DIR}/scoped_fd.cc"
-    "${SRC_DIR}/fdinfo.cc"
     "${CMN_SRC_LIST}"
     "${NIC_SOURCES}"
 )
