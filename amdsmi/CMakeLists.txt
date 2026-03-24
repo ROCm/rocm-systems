@@ -208,7 +208,8 @@ install(
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${AMD_SMI}
     COMPONENT dev)
 
-# Create cmake target
+# Create cmake target (shared library only)
+if(BUILD_SHARED_LIBS)
 # Add all targets to the build-tree export set
 export(TARGETS ${AMD_SMI} FILE "${PROJECT_BINARY_DIR}/amd_smi_target.cmake")
 
@@ -220,6 +221,7 @@ install(
     EXPORT amd_smiTargets
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${AMD_SMI}
     COMPONENT dev)
+endif()
 
 set(CPACK_RPM_PACKAGE_LICENSE "MIT")
 if(ENABLE_ASAN_PACKAGING)

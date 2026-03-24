@@ -71,10 +71,12 @@ if("${CMAKE_BUILD_TYPE}" STREQUAL Release)
 endif()
 
 ## Add the install directives for the runtime library.
+if(BUILD_SHARED_LIBS)
 install(
     TARGETS ${AMD_SMI}
     EXPORT amd_smiTargets
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT dev)
+endif()
 
 install(
     TARGETS ${AMD_SMI}
