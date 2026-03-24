@@ -20,6 +20,7 @@ static const uint32_t CE_COLL_INTRA_BATCH_SYNC_FREQ = 8;
 // Message threshold for intra-batch synchronization
 static const uint64_t CE_COLL_INTRA_BATCH_SYNC_MSG_THRESHOLD = 512*1024*1024;
 
+#if ROCM_VERSION >= 60400
 ncclResult_t ncclCeInit(struct ncclComm* comm) {
   ncclResult_t ret = ncclSuccess;
 
@@ -186,7 +187,6 @@ exit:
 fail:
   goto exit;
 }
-
 
 ncclResult_t ncclMemOpSync(struct ncclComm* comm, cudaStream_t stream) {
   ncclResult_t ret = ncclSuccess;
@@ -613,3 +613,36 @@ exit:
 fail:
   goto exit;
 }
+#else
+// Stubs for ROCm 6.2 compatibility
+bool ncclCeImplemented(ncclFunc_t coll, int/*ncclDevRedOp_t*/ red, ncclDataType_t ty) {
+  return false;
+}
+// init.cc calls this during commFree without first checking ncclCeImplemented result,
+// so need to return success to avoid failure
+ncclResult_t ncclCeFinalize(struct ncclComm* comm) {
+  return ncclSuccess;
+}
+// The remaining functions should not be called when ncclCeImplemented is false
+ncclResult_t ncclCeInit(struct ncclComm* comm) {
+  return ncclInternalError;
+}
+ncclResult_t ncclMemOpSync(struct ncclComm* comm, cudaStream_t stream) {
+  return ncclInternalError;
+}
+ncclResult_t ncclLaunchCeColl(struct ncclComm* comm, struct ncclKernelPlan* plan) {
+  return ncclInternalError;
+}
+ncclResult_t ncclCeAllGather(struct ncclComm* comm, struct ncclCeCollArgs* args, cudaStream_t stream) {
+  return ncclInternalError;
+}
+ncclResult_t ncclCeScatter(struct ncclComm* comm, struct ncclCeCollArgs* args, cudaStream_t stream) {
+  return ncclInternalError;
+}
+ncclResult_t ncclCeGather(struct ncclComm* comm, struct ncclCeCollArgs* args, cudaStream_t stream) {
+  return ncclInternalError;
+}
+ncclResult_t ncclCeAlltoAll(struct ncclComm* comm, struct ncclCeCollArgs* args, cudaStream_t stream) {
+  return ncclInternalError;
+}
+#endif
