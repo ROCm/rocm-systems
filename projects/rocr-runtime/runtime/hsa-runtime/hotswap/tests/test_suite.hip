@@ -1053,6 +1053,371 @@ int run_test_attn_multihead(const char* co) {
   return pass == nshapes ? 0 : 1;
 }
 
+// ── new instruction coverage kernels ─────────────────────────────────────────
+
+// Tests: global_atomic_add_u32, ds_add_u32 (LDS atomic), v_cndmask_b32
+// Histogram: each thread reads a value, atomics-adds into bins (LDS then global)
+extern "C" __global__ void atomic_histogram(int* global_hist, const int* data,
+                                             int n, int num_bins) {
+  extern __shared__ int shared_hist[];
+  int tid = threadIdx.x;
+  // Clear shared histogram
+  for (int b = tid; b < num_bins; b += blockDim.x) shared_hist[b] = 0;
+  __syncthreads();
+  // Accumulate into shared hist via LDS atomics (ds_add_u32)
+  int i = blockIdx.x * blockDim.x + tid;
+  if (i < n) {
+    int bin = data[i] % num_bins;
+    if (bin < 0) bin += num_bins;
+    atomicAdd(&shared_hist[bin], 1);
+  }
+  __syncthreads();
+  // Write back to global via global atomics (global_atomic_add_u32)
+  for (int b = tid; b < num_bins; b += blockDim.x)
+    atomicAdd(&global_hist[b], shared_hist[b]);
+}
+
+// Tests: global_atomic_add_f32 (floating-point atomic)
+// Each thread atomics-adds its value to one of several bins
+extern "C" __global__ void atomic_fadd(float* bins, const float* vals,
+                                        const int* bin_ids, int n, int num_bins) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < n) atomicAdd(&bins[bin_ids[i]], vals[i]);
+}
+
+// Tests: v_cndmask_b32_e32, v_cndmask_b32_e64 (branchless ternary select)
+// Exercises the three v_cndmask handlers in the transpiler
+extern "C" __global__ void cndmask_select(float* out, const float* a, const float* b,
+                                           const int* mask, int n) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < n) {
+    // Simple ternary → v_cndmask_b32
+    float sel = mask[i] ? a[i] : b[i];
+    // Chained ternary → multiple v_cndmask
+    float sel2 = (mask[i] > 0) ? a[i] * 2.0f : b[i] * 0.5f;
+    out[i] = sel + sel2;
+  }
+}
+
+// Tests: v_cvt_f32_f16_e32, v_cvt_f16_f32_e32, s_cvt_f32_f16 (half precision conversion)
+extern "C" __global__ void f16_convert(float* out, const unsigned short* in_f16, int n) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < n) {
+    // Load f16 bits, convert to f32, compute, convert back to f32 output
+    // The cast through __half exercises v_cvt_f32_f16
+    _Float16 h = *reinterpret_cast<const _Float16*>(&in_f16[i]);
+    float f = (float)h;
+    out[i] = f * 2.0f + 1.0f;
+  }
+}
+
+// Tests: v_med3_f32 (median of 3 values — common in image processing)
+extern "C" __global__ void median3_kernel(float* out, const float* a, const float* b,
+                                           const float* c, int n) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < n) {
+    float x = a[i], y = b[i], z = c[i];
+    // Compiler should emit v_med3_f32 for: max(min(x,y), min(max(x,y),z))
+    out[i] = fmaxf(fminf(x, y), fminf(fmaxf(x, y), z));
+  }
+}
+
+// Tests: bitfield extract/insert patterns (v_bfe_u32, v_bfi_b32, v_alignbit_b32)
+extern "C" __global__ void bitfield_ops(unsigned* out, const unsigned* in, int n) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < n) {
+    unsigned v = in[i];
+    // Extract bits [15:8] (v_bfe_u32 pattern)
+    unsigned byte1 = (v >> 8) & 0xFF;
+    // Extract bits [23:16]
+    unsigned byte2 = (v >> 16) & 0xFF;
+    // Swap byte1 and byte2, keep the rest (v_bfi_b32 pattern)
+    unsigned result = (v & 0xFF0000FFu) | (byte1 << 16) | (byte2 << 8);
+    out[i] = result;
+  }
+}
+
+// Tests: v_min_i32, v_max_i32, v_abs_i32, signed integer ops
+extern "C" __global__ void int_minmax(int* out, const int* a, const int* b, int n) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < n) {
+    int x = a[i], y = b[i];
+    int mn = min(x, y);     // v_min_i32
+    int mx = max(x, y);     // v_max_i32
+    int d = abs(x - y);     // v_sub + v_abs? or v_sub + v_max with negation
+    out[i] = mn + mx - d;   // = min + max - |diff| = 2*min for x != y
+  }
+}
+
+// Tests: v_log_f32 (transcendental), v_rcp_f32 chain, combined with v_mul_f32
+extern "C" __global__ void log_rcp_kernel(float* out, const float* in, int n) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < n) {
+    float x = in[i];
+    float lg = log2f(x);      // v_log_f32
+    float rc = 1.0f / x;      // v_rcp_f32 + Newton-Raphson
+    out[i] = lg * rc;          // v_mul_f32
+  }
+}
+
+// ── test harnesses for new kernels ──────────────────────────────────────────
+
+int run_test_atomic_histogram(const char* co) {
+  int N = 1024, bs = 32, nb = N / bs, num_bins = 16;
+  int *h_data = (int*)malloc(N*4), *h_hist = (int*)calloc(num_bins, 4);
+  int *h_ref = (int*)calloc(num_bins, 4);
+  srand(42);
+  for (int i = 0; i < N; i++) {
+    h_data[i] = rand() % num_bins;
+    h_ref[h_data[i]]++;
+  }
+  int *d_data, *d_hist;
+  CHECK(hipMalloc(&d_data, N*4)); CHECK(hipMalloc(&d_hist, num_bins*4));
+  CHECK(hipMemcpy(d_data, h_data, N*4, hipMemcpyHostToDevice));
+  CHECK(hipMemset(d_hist, 0, num_bins*4));
+  hipModule_t m; hipFunction_t f;
+  CHECK(hipModuleLoad(&m, co));
+  CHECK(hipModuleGetFunction(&f, m, "atomic_histogram"));
+  int n=N, nb_arg=num_bins;
+  void* args[] = {&d_hist, &d_data, &n, &nb_arg};
+  CHECK(hipModuleLaunchKernel(f, nb,1,1, bs,1,1, num_bins*4,0, args, NULL));
+  CHECK(hipDeviceSynchronize());
+  CHECK(hipMemcpy(h_hist, d_hist, num_bins*4, hipMemcpyDeviceToHost));
+  int ok = 0;
+  for (int b = 0; b < num_bins; b++) if (h_hist[b] == h_ref[b]) ok++;
+  printf("  atomic_histogram: %d/%d %s\n", ok, num_bins, ok==num_bins?"PASS":"FAIL");
+  hipFree(d_data); hipFree(d_hist); hipModuleUnload(m);
+  free(h_data); free(h_hist); free(h_ref);
+  return ok == num_bins ? 0 : 1;
+}
+
+int run_test_atomic_fadd(const char* co) {
+  int N = 256, bs = 32, nb = N / bs, num_bins = 8;
+  float *h_vals = (float*)malloc(N*4), *h_bins = (float*)calloc(num_bins, 4);
+  int *h_ids = (int*)malloc(N*4);
+  float *h_ref = (float*)calloc(num_bins, 4);
+  srand(123);
+  for (int i = 0; i < N; i++) {
+    h_vals[i] = (float)(rand() % 100) / 10.0f;
+    h_ids[i] = rand() % num_bins;
+    h_ref[h_ids[i]] += h_vals[i];
+  }
+  float *d_bins, *d_vals; int *d_ids;
+  CHECK(hipMalloc(&d_bins, num_bins*4)); CHECK(hipMalloc(&d_vals, N*4));
+  CHECK(hipMalloc(&d_ids, N*4));
+  CHECK(hipMemset(d_bins, 0, num_bins*4));
+  CHECK(hipMemcpy(d_vals, h_vals, N*4, hipMemcpyHostToDevice));
+  CHECK(hipMemcpy(d_ids, h_ids, N*4, hipMemcpyHostToDevice));
+  hipModule_t m; hipFunction_t f;
+  CHECK(hipModuleLoad(&m, co));
+  CHECK(hipModuleGetFunction(&f, m, "atomic_fadd"));
+  int n=N, nbin=num_bins;
+  void* args[] = {&d_bins, &d_vals, &d_ids, &n, &nbin};
+  CHECK(hipModuleLaunchKernel(f, nb,1,1, bs,1,1, 0,0, args, NULL));
+  CHECK(hipDeviceSynchronize());
+  CHECK(hipMemcpy(h_bins, d_bins, num_bins*4, hipMemcpyDeviceToHost));
+  int ok = 0;
+  for (int b = 0; b < num_bins; b++)
+    if (fabsf(h_bins[b] - h_ref[b]) <= 0.01f * fabsf(h_ref[b]) + 0.1f) ok++;
+  printf("  atomic_fadd:      %d/%d %s\n", ok, num_bins, ok==num_bins?"PASS":"FAIL");
+  hipFree(d_bins); hipFree(d_vals); hipFree(d_ids); hipModuleUnload(m);
+  free(h_vals); free(h_bins); free(h_ids); free(h_ref);
+  return ok == num_bins ? 0 : 1;
+}
+
+int run_test_cndmask_select(const char* co) {
+  int N = 256, bs = 32, nb = N / bs;
+  float *h_a = (float*)malloc(N*4), *h_b = (float*)malloc(N*4);
+  float *h_o = (float*)calloc(N, 4);
+  int *h_mask = (int*)malloc(N*4);
+  for (int i = 0; i < N; i++) {
+    h_a[i] = (float)(i + 1);
+    h_b[i] = (float)(-(i + 1));
+    h_mask[i] = (i % 3 == 0) ? 1 : 0;  // every 3rd element
+  }
+  float *d_a, *d_b, *d_o; int *d_mask;
+  CHECK(hipMalloc(&d_a, N*4)); CHECK(hipMalloc(&d_b, N*4));
+  CHECK(hipMalloc(&d_o, N*4)); CHECK(hipMalloc(&d_mask, N*4));
+  CHECK(hipMemcpy(d_a, h_a, N*4, hipMemcpyHostToDevice));
+  CHECK(hipMemcpy(d_b, h_b, N*4, hipMemcpyHostToDevice));
+  CHECK(hipMemcpy(d_mask, h_mask, N*4, hipMemcpyHostToDevice));
+  hipModule_t m; hipFunction_t f;
+  CHECK(hipModuleLoad(&m, co));
+  CHECK(hipModuleGetFunction(&f, m, "cndmask_select"));
+  int n=N; void* args[] = {&d_o, &d_a, &d_b, &d_mask, &n};
+  CHECK(hipModuleLaunchKernel(f, nb,1,1, bs,1,1, 0,0, args, NULL));
+  CHECK(hipDeviceSynchronize());
+  CHECK(hipMemcpy(h_o, d_o, N*4, hipMemcpyDeviceToHost));
+  int ok = 0;
+  for (int i = 0; i < N; i++) {
+    float sel = h_mask[i] ? h_a[i] : h_b[i];
+    float sel2 = (h_mask[i] > 0) ? h_a[i] * 2.0f : h_b[i] * 0.5f;
+    float exp = sel + sel2;
+    if (fabsf(h_o[i] - exp) < 1e-4f) ok++;
+  }
+  printf("  cndmask_select:   %d/%d %s\n", ok, N, ok==N?"PASS":"FAIL");
+  hipFree(d_a); hipFree(d_b); hipFree(d_o); hipFree(d_mask);
+  hipModuleUnload(m); free(h_a); free(h_b); free(h_o); free(h_mask);
+  return ok == N ? 0 : 1;
+}
+
+int run_test_f16_convert(const char* co) {
+  int N = 256, bs = 32, nb = N / bs;
+  // Create f16 values as unsigned short bit patterns
+  unsigned short *h_in = (unsigned short*)malloc(N*2);
+  float *h_o = (float*)calloc(N, 4);
+  for (int i = 0; i < N; i++) {
+    // Simple f16: small positive floats. f16 format: sign(1) exp(5) mant(10)
+    // 1.0 = 0x3C00, 2.0 = 0x4000, 0.5 = 0x3800
+    float f = (float)(i + 1) * 0.1f;
+    // Use memcpy to create _Float16 bits
+    _Float16 h = (_Float16)f;
+    memcpy(&h_in[i], &h, 2);
+  }
+  unsigned short *d_in; float *d_o;
+  CHECK(hipMalloc(&d_in, N*2)); CHECK(hipMalloc(&d_o, N*4));
+  CHECK(hipMemcpy(d_in, h_in, N*2, hipMemcpyHostToDevice));
+  hipModule_t m; hipFunction_t f_fn;
+  CHECK(hipModuleLoad(&m, co));
+  CHECK(hipModuleGetFunction(&f_fn, m, "f16_convert"));
+  int n=N; void* args[] = {&d_o, &d_in, &n};
+  CHECK(hipModuleLaunchKernel(f_fn, nb,1,1, bs,1,1, 0,0, args, NULL));
+  CHECK(hipDeviceSynchronize());
+  CHECK(hipMemcpy(h_o, d_o, N*4, hipMemcpyDeviceToHost));
+  int ok = 0;
+  for (int i = 0; i < N; i++) {
+    _Float16 h; memcpy(&h, &h_in[i], 2);
+    float expected = (float)h * 2.0f + 1.0f;
+    if (fabsf(h_o[i] - expected) <= 0.01f * fabsf(expected) + 0.01f) ok++;
+  }
+  printf("  f16_convert:      %d/%d %s\n", ok, N, ok==N?"PASS":"FAIL");
+  hipFree(d_in); hipFree(d_o); hipModuleUnload(m);
+  free(h_in); free(h_o);
+  return ok == N ? 0 : 1;
+}
+
+int run_test_median3(const char* co) {
+  int N = 256, bs = 32, nb = N / bs;
+  float *h_a=(float*)malloc(N*4), *h_b=(float*)malloc(N*4);
+  float *h_c=(float*)malloc(N*4), *h_o=(float*)calloc(N,4);
+  srand(77);
+  for (int i = 0; i < N; i++) {
+    h_a[i] = (float)(rand()%200 - 100) / 10.0f;
+    h_b[i] = (float)(rand()%200 - 100) / 10.0f;
+    h_c[i] = (float)(rand()%200 - 100) / 10.0f;
+  }
+  float *d_a, *d_b, *d_c, *d_o;
+  CHECK(hipMalloc(&d_a,N*4)); CHECK(hipMalloc(&d_b,N*4));
+  CHECK(hipMalloc(&d_c,N*4)); CHECK(hipMalloc(&d_o,N*4));
+  CHECK(hipMemcpy(d_a,h_a,N*4,hipMemcpyHostToDevice));
+  CHECK(hipMemcpy(d_b,h_b,N*4,hipMemcpyHostToDevice));
+  CHECK(hipMemcpy(d_c,h_c,N*4,hipMemcpyHostToDevice));
+  hipModule_t m; hipFunction_t f;
+  CHECK(hipModuleLoad(&m, co));
+  CHECK(hipModuleGetFunction(&f, m, "median3_kernel"));
+  int n=N; void* args[] = {&d_o, &d_a, &d_b, &d_c, &n};
+  CHECK(hipModuleLaunchKernel(f, nb,1,1, bs,1,1, 0,0, args, NULL));
+  CHECK(hipDeviceSynchronize());
+  CHECK(hipMemcpy(h_o, d_o, N*4, hipMemcpyDeviceToHost));
+  int ok = 0;
+  for (int i = 0; i < N; i++) {
+    float x=h_a[i], y=h_b[i], z=h_c[i];
+    float med = fmaxf(fminf(x,y), fminf(fmaxf(x,y), z));
+    if (fabsf(h_o[i] - med) < 1e-5f) ok++;
+  }
+  printf("  median3:          %d/%d %s\n", ok, N, ok==N?"PASS":"FAIL");
+  hipFree(d_a); hipFree(d_b); hipFree(d_c); hipFree(d_o);
+  hipModuleUnload(m); free(h_a); free(h_b); free(h_c); free(h_o);
+  return ok == N ? 0 : 1;
+}
+
+int run_test_bitfield_ops(const char* co) {
+  int N = 256, bs = 32, nb = N / bs;
+  unsigned *h_in = (unsigned*)malloc(N*4), *h_o = (unsigned*)calloc(N, 4);
+  for (int i = 0; i < N; i++) h_in[i] = (unsigned)(i * 0x01010101u + 0xDEAD0000u);
+  unsigned *d_in, *d_o;
+  CHECK(hipMalloc(&d_in, N*4)); CHECK(hipMalloc(&d_o, N*4));
+  CHECK(hipMemcpy(d_in, h_in, N*4, hipMemcpyHostToDevice));
+  hipModule_t m; hipFunction_t f;
+  CHECK(hipModuleLoad(&m, co));
+  CHECK(hipModuleGetFunction(&f, m, "bitfield_ops"));
+  int n=N; void* args[] = {&d_o, &d_in, &n};
+  CHECK(hipModuleLaunchKernel(f, nb,1,1, bs,1,1, 0,0, args, NULL));
+  CHECK(hipDeviceSynchronize());
+  CHECK(hipMemcpy(h_o, d_o, N*4, hipMemcpyDeviceToHost));
+  int ok = 0;
+  for (int i = 0; i < N; i++) {
+    unsigned v = h_in[i];
+    unsigned byte1 = (v >> 8) & 0xFF;
+    unsigned byte2 = (v >> 16) & 0xFF;
+    unsigned exp = (v & 0xFF0000FFu) | (byte1 << 16) | (byte2 << 8);
+    if (h_o[i] == exp) ok++;
+  }
+  printf("  bitfield_ops:     %d/%d %s\n", ok, N, ok==N?"PASS":"FAIL");
+  hipFree(d_in); hipFree(d_o); hipModuleUnload(m);
+  free(h_in); free(h_o);
+  return ok == N ? 0 : 1;
+}
+
+int run_test_int_minmax(const char* co) {
+  int N = 256, bs = 32, nb = N / bs;
+  int *h_a=(int*)malloc(N*4), *h_b=(int*)malloc(N*4), *h_o=(int*)calloc(N,4);
+  for (int i = 0; i < N; i++) {
+    h_a[i] = i * 3 - 200;  // range: -200..+568 (some negative)
+    h_b[i] = 100 - i * 2;  // range: -410..+100 (some negative)
+  }
+  int *d_a, *d_b, *d_o;
+  CHECK(hipMalloc(&d_a,N*4)); CHECK(hipMalloc(&d_b,N*4)); CHECK(hipMalloc(&d_o,N*4));
+  CHECK(hipMemcpy(d_a,h_a,N*4,hipMemcpyHostToDevice));
+  CHECK(hipMemcpy(d_b,h_b,N*4,hipMemcpyHostToDevice));
+  hipModule_t m; hipFunction_t f;
+  CHECK(hipModuleLoad(&m, co));
+  CHECK(hipModuleGetFunction(&f, m, "int_minmax"));
+  int n=N; void* args[] = {&d_o, &d_a, &d_b, &n};
+  CHECK(hipModuleLaunchKernel(f, nb,1,1, bs,1,1, 0,0, args, NULL));
+  CHECK(hipDeviceSynchronize());
+  CHECK(hipMemcpy(h_o, d_o, N*4, hipMemcpyDeviceToHost));
+  int ok = 0;
+  for (int i = 0; i < N; i++) {
+    int x=h_a[i], y=h_b[i];
+    int mn = x<y?x:y, mx = x>y?x:y, d = abs(x-y);
+    int exp = mn + mx - d;
+    if (h_o[i] == exp) ok++;
+  }
+  printf("  int_minmax:       %d/%d %s\n", ok, N, ok==N?"PASS":"FAIL");
+  hipFree(d_a); hipFree(d_b); hipFree(d_o); hipModuleUnload(m);
+  free(h_a); free(h_b); free(h_o);
+  return ok == N ? 0 : 1;
+}
+
+int run_test_log_rcp(const char* co) {
+  int N = 256, bs = 32, nb = N / bs;
+  float *h_in=(float*)malloc(N*4), *h_o=(float*)calloc(N,4);
+  for (int i = 0; i < N; i++) h_in[i] = (float)(i + 1) * 0.5f;  // 0.5..128.0
+  float *d_in, *d_o;
+  CHECK(hipMalloc(&d_in,N*4)); CHECK(hipMalloc(&d_o,N*4));
+  CHECK(hipMemcpy(d_in,h_in,N*4,hipMemcpyHostToDevice));
+  hipModule_t m; hipFunction_t f;
+  CHECK(hipModuleLoad(&m, co));
+  CHECK(hipModuleGetFunction(&f, m, "log_rcp_kernel"));
+  int n=N; void* args[] = {&d_o, &d_in, &n};
+  CHECK(hipModuleLaunchKernel(f, nb,1,1, bs,1,1, 0,0, args, NULL));
+  CHECK(hipDeviceSynchronize());
+  CHECK(hipMemcpy(h_o, d_o, N*4, hipMemcpyDeviceToHost));
+  int ok = 0;
+  for (int i = 0; i < N; i++) {
+    float x = h_in[i];
+    float exp = log2f(x) * (1.0f / x);
+    if (fabsf(h_o[i] - exp) <= 0.01f * fabsf(exp) + 1e-5f) ok++;
+  }
+  printf("  log_rcp:          %d/%d %s\n", ok, N, ok==N?"PASS":"FAIL");
+  hipFree(d_in); hipFree(d_o); hipModuleUnload(m);
+  free(h_in); free(h_o);
+  return ok == N ? 0 : 1;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 int main() {
   printf("=== gfx1250 → gfx942 Transpiler Test Suite ===\n\n");
   int fails = 0;
@@ -1077,7 +1442,16 @@ int main() {
   fails += run_test_softmax_row("/tmp/softmax_row_gfx1250.elf");
   fails += run_test_attn_forward("/tmp/attn_forward_gfx1250.elf");
   fails += run_test_attn_multihead("/tmp/attn_multihead_gfx1250.elf");
-  int total = 20;
+  // New instruction coverage tests
+  fails += run_test_atomic_histogram("/tmp/atomic_histogram_gfx1250.elf");
+  fails += run_test_atomic_fadd("/tmp/atomic_fadd_gfx1250.elf");
+  fails += run_test_cndmask_select("/tmp/cndmask_select_gfx1250.elf");
+  fails += run_test_f16_convert("/tmp/f16_convert_gfx1250.elf");
+  fails += run_test_median3("/tmp/median3_kernel_gfx1250.elf");
+  fails += run_test_bitfield_ops("/tmp/bitfield_ops_gfx1250.elf");
+  fails += run_test_int_minmax("/tmp/int_minmax_gfx1250.elf");
+  fails += run_test_log_rcp("/tmp/log_rcp_kernel_gfx1250.elf");
+  int total = 28;
   printf("\n%s: %d/%d tests passed\n", fails?"SOME FAILED":"ALL PASSED", total-fails, total);
   return fails;
 }
