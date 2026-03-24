@@ -94,7 +94,7 @@ Panel Config:
           unit: Percent
   - metric_table:
       id: 1802
-      title: L2 Cache Hit Rate (pct)
+      title: L2 Cache Hit Rate (Percent)
       header:
         metric: Channel
         expr: Expression

@@ -1,3 +1,7 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
 if(NOT RTC_TESTING)
   set(TEST_SRC
         Set.cpp

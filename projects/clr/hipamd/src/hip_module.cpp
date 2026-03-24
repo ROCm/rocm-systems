@@ -1,22 +1,8 @@
-/* Copyright (c) 2015 - 2024 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip/hip_runtime.h>
 #include <fstream>
@@ -413,34 +399,9 @@ hipError_t ihipLaunchKernelCommand(amd::Command*& command, hipFunction_t f,
     }
   }
 
-  if (DEBUG_HIP_KERNARG_COPY_OPT) {
-    if (CL_SUCCESS !=
-        kernelCommand->captureHIPArgsAndValidate(kernelParams, kernargs, kernargs_size)) {
-      kernelCommand->release();
-      return hipErrorOutOfMemory;
-    }
-
-  } else {
-    for (size_t i = 0; i < kernel->signature().numParameters(); ++i) {
-      const amd::KernelParameterDescriptor& desc = kernel->signature().at(i);
-      if (kernelParams == nullptr) {
-        assert(kernargs != nullptr);
-        // only copy if this parameter lies fully inside the passed buffer
-        if (desc.offset_ + desc.size_ <= kernargs_size) {
-          kernel->parameters().set(i, desc.size_, kernargs + desc.offset_,
-                                   desc.type_ == T_POINTER /*svmBound*/);
-        }
-      } else {
-        kernel->parameters().set(i, desc.size_, kernelParams[i],
-                                 desc.type_ == T_POINTER /*svmBound*/);
-      }
-    }
-
-    // Capture the kernel arguments
-    if (CL_SUCCESS != kernelCommand->captureOpenCLArgsAndValidate()) {
-      kernelCommand->release();
-      return hipErrorOutOfMemory;
-    }
+  if (CL_SUCCESS != kernelCommand->captureHIPArgsAndValidate(kernelParams, kernargs, kernargs_size)) {
+    kernelCommand->release();
+    return hipErrorOutOfMemory;
   }
 
   command = kernelCommand;
@@ -468,12 +429,7 @@ hipError_t ihipModuleLaunchKernel(hipFunction_t f, amd::LaunchParams& launch_par
     LogPrintfError("%s", "Function passed is null");
     return hipErrorInvalidResourceHandle;
   }
-  hip::DeviceFunc* function = hip::DeviceFunc::asFunction(f);
-  amd::Kernel* kernel = function->kernel();
-  std::optional<std::scoped_lock<std::recursive_mutex>> lock;
-  if (!DEBUG_HIP_KERNARG_COPY_OPT) {
-    lock.emplace(function->dflock_);
-  }
+  amd::Kernel* kernel = hip::DeviceFunc::asFunction(f)->kernel();
 
   hipError_t status =
       ihipLaunchKernel_validate(f, launch_params, kernelParams, extra, deviceId, params);

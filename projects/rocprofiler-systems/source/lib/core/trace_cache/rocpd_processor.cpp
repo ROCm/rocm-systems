@@ -568,19 +568,24 @@ rocpd_processor_t::handle(const cpu_freq_sample& _cpu_freq_sample)
     };
 
     insert_event_and_sample(trait::name<category::process_page>::value,
-                            _cpu_freq_sample.page_rss);
+                            static_cast<double>(_cpu_freq_sample.page_rss) /
+                                units::megabyte);
     insert_event_and_sample(trait::name<category::process_virt>::value,
-                            _cpu_freq_sample.virt_mem_usage);
+                            static_cast<double>(_cpu_freq_sample.virt_mem_usage) /
+                                units::megabyte);
     insert_event_and_sample(trait::name<category::process_peak>::value,
-                            _cpu_freq_sample.peak_rss);
+                            static_cast<double>(_cpu_freq_sample.peak_rss) /
+                                units::megabyte);
     insert_event_and_sample(trait::name<category::process_context_switch>::value,
                             _cpu_freq_sample.context_switch_count);
     insert_event_and_sample(trait::name<category::process_page_fault>::value,
                             _cpu_freq_sample.page_faults);
     insert_event_and_sample(trait::name<category::process_user_mode_time>::value,
-                            _cpu_freq_sample.user_mode_time);
+                            static_cast<double>(_cpu_freq_sample.user_mode_time) /
+                                units::sec);
     insert_event_and_sample(trait::name<category::process_kernel_mode_time>::value,
-                            _cpu_freq_sample.kernel_mode_time);
+                            static_cast<double>(_cpu_freq_sample.kernel_mode_time) /
+                                units::sec);
 
     auto get_track_name = [](const auto& cpu_id) {
         return std::string(trait::name<category::cpu_freq>::value) + " [" +
