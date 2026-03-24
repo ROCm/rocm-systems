@@ -506,10 +506,10 @@ class db_analysis(OmniAnalyze_Base):
 
             # eval_result can be None if expression has None explicitly specified
             # Do not give warning for this case and simply return None
-            if eval_result is None or "None" in value:
+            if eval_result is None:
                 return None
 
-            # Only return None for scalar NA values
+            # Only return None for scalar NA values (NaN, pd.NA)
             # For vectors/Series, return as-is to preserve shape for downstream
             # operations. Note: pd.NA is not detected as scalar by np.isscalar()
             is_scalar_na = eval_result is pd.NA or (
@@ -517,10 +517,13 @@ class db_analysis(OmniAnalyze_Base):
             )
 
             if is_scalar_na:
-                console_warning(
-                    f"Could not evaluate expression for {name}: {value} - "
-                    "likely due to missing counter data."
-                )
+                # Only warn if expression doesn't have "None" as an explicit fallback
+                # Expressions with .where(..., None) are expected to return NA
+                if "None" not in value:
+                    console_warning(
+                        f"Could not evaluate expression for {name}: {value} - "
+                        "likely due to missing counter data."
+                    )
                 return None
             else:
                 return eval_result
