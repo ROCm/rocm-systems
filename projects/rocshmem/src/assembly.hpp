@@ -241,12 +241,6 @@ __device__ __forceinline__ buffer_resource make_buffer_resource(T* ptr, uint32_t
   return {as_u64, buffer_size, config};
 }
 
-// __device__ __forceinline__ buffer_resource& move_buffer_resource(buffer_resource& br, size_t size) {
-//   br.ptr += static_cast<uint64_t>(size);
-//   // br.range -= static_cast<uint32_t>(size);
-//   return br;
-// }
-
 #if defined(__gfx942__) || defined(__gfx950__)
 
 __device__ __int128_t llvm_amdgcn_raw_buffer_load_b128(i32x4 srsrc, uint32_t voffset,
@@ -337,19 +331,13 @@ __device__ __forceinline__ void store_asm(uint8_t* val, uint8_t* dst,
 #endif
       break;
     }
-
     case 256: {
 #if defined(__gfx906__)
 #endif
 #if defined(__gfx908__)
 #endif
 #if defined(__gfx90a__) || defined(__gfx1100__)
-      #pragma unroll
-      for (int i = 0; i < 8; i++) {
-        __int128_t val128{*(reinterpret_cast<__int128_t*>(val) + i)};
-        uint8_t* dst_i = dst + i * sizeof(__int128_t);
-        asm volatile("flat_store_dwordx4 %0 %1 glc slc" : : "v"(dst_i), "v"(val128));
-      }
+      //! needs to be implemented
 #endif
 #if defined(__gfx942__) || defined(__gfx950__)
       {
@@ -381,12 +369,7 @@ __device__ __forceinline__ void store_asm(uint8_t* val, uint8_t* dst,
       }
 #endif
 #if defined(__gfx1201__)
-      #pragma unroll
-      for (int i = 0; i < 8; i++) {
-        __int128_t val128{*(reinterpret_cast<__int128_t*>(val) + i)};
-        uint8_t* dst_i = dst + i * sizeof(__int128_t);
-        asm volatile("flat_store_b128 %0 %1 scope:SCOPE_SYS" : : "v"(dst_i), "v"(val128));
-      }
+      //! needs to be implemented
 #endif
       break;
     }
