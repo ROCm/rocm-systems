@@ -510,6 +510,15 @@ class TestPlotMemChart:
 class TestDefaultSampleMetrics:
     """Tests for DEFAULT_SAMPLE_METRICS constant."""
 
+    def test_keys_match_mem_chart_panel_yaml(self):
+        """Keys match gfx1152 ``0300_Memory_Chart.yaml`` metric names (MEM_CHART_PANEL_METRIC_KEYS)."""
+        assert set(mem_chart_gfx11.DEFAULT_SAMPLE_METRICS) == set(
+            mem_chart_gfx11.MEM_CHART_PANEL_METRIC_KEYS
+        )
+        assert len(mem_chart_gfx11.DEFAULT_SAMPLE_METRICS) == len(
+            mem_chart_gfx11.MEM_CHART_PANEL_METRIC_KEYS
+        )
+
     def test_all_bandwidth_values_positive(self):
         """Test that all bandwidth values are positive."""
         for key, value in mem_chart_gfx11.DEFAULT_SAMPLE_METRICS.items():

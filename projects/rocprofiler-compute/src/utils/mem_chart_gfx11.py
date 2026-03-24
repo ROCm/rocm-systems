@@ -24,7 +24,7 @@
 ##############################################################################
 
 """
-RDNA3.5 (gfx1152) Memory Architecture Diagram - CLI Visualization
+RDNA3.5 Memory Architecture Diagram - CLI Visualization
 =============================================================================
 
 USAGE:
@@ -32,6 +32,15 @@ USAGE:
 
 API:
     plot_mem_chart(arch, normal_unit, metric_dict) -> str
+
+Metric dict keys must match the Memory Chart panel YAML for RDNA3.5:
+
+    src/rocprof_compute_soc/analysis_configs/gfx1152/0300_Memory_Chart.yaml
+
+Use ``MEM_CHART_PANEL_METRIC_KEYS`` for the authoritative ordered list.
+(If a future gfx target adds ``0300_memory_chart.yaml``, keep keys aligned there.)
+
+Bandwidth values are **Bytes/s**, matching the YAML ``unit: Bytes/s`` rows.
 
 RDNA3.5 MEMORY HIERARCHY:
    Kernel -> TCP (L0 Vector Cache) -> GL1C (L1) -> GL2C (L2) -> GCEA -> System Memory
@@ -46,12 +55,86 @@ os.environ["COLUMNS"] = "200"
 import argparse
 import json
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, List, Tuple, Union
 
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
+
+# Keys = ``metric:`` names under each ``metric_table`` in
+# ``analysis_configs/gfx1152/0300_Memory_Chart.yaml`` (tables 301–309), in panel order.
+# Commented-out YAML metrics (e.g. TCP Atomic, LDS direct read/write) are omitted.
+_MEM_CHART_DEFAULT_ROWS: Tuple[Tuple[str, Union[int, float]], ...] = (
+    # Table 301: Instruction Cache
+    ("ICache Requests", 450),
+    ("ICache Utilization", 45.2),
+    ("ICache Hit Rate", 98.5),
+    ("ICache Miss Rate", 1.5),
+    ("ICache Request Stall Rate", 2.1),
+    ("ICache-GL1 Read Bandwidth", 57.6e9),
+    # Table 302: Scalar Data Cache
+    ("Dcache Requests", 225),
+    ("Dcache Utilization", 38.7),
+    ("Dcache Hit Rate", 95.3),
+    ("Dcache Request Stall Rate", 1.8),
+    ("Dcache-GL1 Read Bandwidth", 28.8e9),
+    # Table 303: TCP Cache (Vector L0)
+    ("TCP Total Requests", 1_250_000),
+    ("TCP Read Requests", 875_000),
+    ("TCP Write Requests", 375_000),
+    ("TCP Miss Requests", 150_000),
+    ("TCP Hit Rate", 88.0),
+    ("TCP Request Bandwidth", 80e9),
+    # Table 304: LDS
+    ("LDS Instructions", 125_000),
+    ("LDS Atomic Instructions", 10_000),
+    ("LDS Instruction Cycles", 250_000),
+    ("LDS Wait Cycles", 12_500),
+    ("LDS Bank Conflict Rate", 4.0),
+    ("LDS Estimated Bandwidth", 256e9),
+    # Table 305: TCP-GL1 Interface
+    ("TCP-GL1 Read Requests", 150_000),
+    ("TCP-GL1 Write Requests", 50_000),
+    ("TCP-GL1 Read Bandwidth", 96e9),
+    ("TCP-GL1 Write Bandwidth", 32e9),
+    # Table 306: GL1C Cache (L1)
+    ("GL1C Utilization", 65.2),
+    ("GL1C Total Requests", 200_000),
+    ("GL1C Read Requests", 150_000),
+    ("GL1C Write Requests", 50_000),
+    ("GL1C Miss Requests", 30_000),
+    ("GL1C Hit Rate", 85.0),
+    ("GL1C Starve Rate", 5.2),
+    ("GL1C Stall GL2 Backpressure", 8.5),
+    # Table 307: GL1C-GL2 Interface
+    ("GL1-GL2 Read Requests", 30_000),
+    ("GL1-GL2 Write Requests", 10_000),
+    ("GL1-GL2 Read Bandwidth", 48e9),
+    ("GL1-GL2 Write Bandwidth", 16e9),
+    ("GL1-GL2 Read Latency", 85.2),
+    ("GL1-GL2 Write Latency", 62.4),
+    # Table 308: GL2C Cache (L2)
+    ("GL2C Utilization", 74.2),
+    ("GL2C Total Requests", 40_000),
+    ("GL2C Read Requests", 30_000),
+    ("GL2C Write Requests", 10_000),
+    ("GL2C Atomic Requests", 1_000),
+    ("GL2C Hit Rate", 82.5),
+    ("GL2C Read Bandwidth", 64e9),
+    ("GL2C Write Bandwidth", 24e9),
+    # Table 309: GCEA to System Memory
+    ("SARB Utilization", 52.3),
+    ("SARB Stall Rate", 12.4),
+    ("DRAM Read Requests", 25_000),
+    ("DRAM Write Requests", 8_000),
+    ("DRAM Read Bandwidth", 100e9),
+    ("DRAM Write Bandwidth", 60e9),
+    ("Read Returns", 25_000),
+    ("Write Returns", 8_000),
+)
+
+MEM_CHART_PANEL_METRIC_KEYS: Tuple[str, ...] = tuple(k for k, _ in _MEM_CHART_DEFAULT_ROWS)
 
 COLORS = {
     "kernel": "green",
@@ -324,13 +407,13 @@ def create_mem_chart_diagram(
 
     tcp_read_req = get_metric(metric_dict, "TCP Read Requests")
     tcp_write_req = get_metric(metric_dict, "TCP Write Requests")
+    # Not in gfx1152 Memory Chart YAML (counter unavailable); optional for older JSON.
     tcp_atomic_req = get_metric(metric_dict, "TCP Atomic Requests")
     tcp_hit = get_metric(metric_dict, "TCP Hit Rate")
     tcp_bw = get_metric(metric_dict, "TCP Request Bandwidth")
 
     lds_insts = get_metric(metric_dict, "LDS Instructions")
-    lds_read_insts = get_metric(metric_dict, "LDS Read Instructions")
-    lds_write_insts = get_metric(metric_dict, "LDS Write Instructions")
+    lds_inst_cycles = get_metric(metric_dict, "LDS Instruction Cycles")
     lds_atomic_insts = get_metric(metric_dict, "LDS Atomic Instructions")
     lds_bw = get_metric(metric_dict, "LDS Estimated Bandwidth")
     lds_bank_conflict = get_metric(metric_dict, "LDS Bank Conflict Rate")
@@ -445,9 +528,9 @@ def create_mem_chart_diagram(
         "",
         "     [white]Request[/white]",  # Label between Kernel and LDS (5 spaces)
         "",
-        f"[{COLORS['read']}]{fmt_edge('Read', lds_read_insts)}[/{COLORS['read']}]",
+        f"[{COLORS['read']}]{fmt_edge('Instr', lds_insts)}[/{COLORS['read']}]",
         f"[{COLORS['read']}]{kernel_arrow_left}[/{COLORS['read']}]",
-        f"[{COLORS['write']}]{fmt_edge('Write', lds_write_insts)}[/{COLORS['write']}]",
+        f"[{COLORS['write']}]{fmt_edge('InstCy', lds_inst_cycles)}[/{COLORS['write']}]",
         f"[{COLORS['write']}]{kernel_arrow_right}[/{COLORS['write']}]",
         f"[{COLORS['atomic']}]{fmt_edge('Atomic', lds_atomic_insts)}[/{COLORS['atomic']}]",
         f"[{COLORS['atomic']}]{kernel_arrow_both}[/{COLORS['atomic']}]",
@@ -475,7 +558,7 @@ def create_mem_chart_diagram(
     # Create stacked TCP/LDS/SQC panels - each height=10, total=30
     tcp_panel = Panel(
         f"{metric_line('Hit Rate', tcp_hit, '%', COLORS['hit'])}\n"
-        f"{metric_line('BW', tcp_bw, 'GB/s', COLORS['bw']) if tcp_bw else ''}",
+        f"{metric_line('BW', tcp_bw, 'Bytes/s', COLORS['bw']) if tcp_bw else ''}",
         title=f"[bold {COLORS['block']}]TCP (L0)[/bold {COLORS['block']}]",
         border_style=COLORS["block"],
         width=20,
@@ -483,7 +566,7 @@ def create_mem_chart_diagram(
     )
 
     lds_panel = Panel(
-        f"{metric_line('BW', lds_bw, 'GB/s', COLORS['bw']) if lds_bw else ''}\n"
+        f"{metric_line('BW', lds_bw, 'Bytes/s', COLORS['bw']) if lds_bw else ''}\n"
         f"{metric_line('Bank Conflict', lds_bank_conflict, '%', COLORS['stall']) if lds_bank_conflict else ''}",
         title=f"[bold {COLORS['block']}]LDS[/bold {COLORS['block']}]",
         border_style=COLORS["block"],
@@ -700,7 +783,11 @@ def create_mem_chart_diagram(
 
 
 def plot_mem_chart(arch: str, normal_unit: str, metric_dict: Dict[str, Any]) -> str:
-    """Plot the memory chart and return as string."""
+    """Plot the memory chart and return as string.
+
+    ``metric_dict`` keys should match ``0300_Memory_Chart.yaml`` (gfx1152), i.e.
+    ``MEM_CHART_PANEL_METRIC_KEYS``. Values for bandwidth metrics are in **Bytes/s**.
+    """
 
     class FakeFile:
         def __init__(self):
@@ -726,69 +813,7 @@ def plot_mem_chart(arch: str, normal_unit: str, metric_dict: Dict[str, Any]) -> 
     return fake_file.getvalue()
 
 
-# Default sample metrics (all bandwidth values are now in Bytes/s)
-DEFAULT_SAMPLE_METRICS = {
-    "ICache Requests": 450,
-    "ICache Utilization": 45.2,
-    "ICache Hit Rate": 98.5,
-    "ICache Miss Rate": 1.5,
-    "ICache Request Stall Rate": 2.1,
-    "ICache-GL1 Read Bandwidth": 57.6e9,  # 57.6 GB/s in Bytes/s
-    "Dcache Requests": 225,
-    "Dcache Utilization": 38.7,
-    "Dcache Hit Rate": 95.3,
-    "Dcache Request Stall Rate": 1.8,
-    "Dcache-GL1 Read Bandwidth": 28.8e9,  # 28.8 GB/s in Bytes/s
-    "TCP Total Requests": 1250000,
-    "TCP Read Requests": 875000,
-    "TCP Write Requests": 375000,
-    "TCP Atomic Requests": 25000,
-    "TCP Miss Requests": 150000,
-    "TCP Hit Rate": 88.0,
-    "TCP Request Bandwidth": 80e9,  # 80 GB/s in Bytes/s
-    "LDS Instructions": 125000,
-    "LDS Read Instructions": 65000,
-    "LDS Write Instructions": 50000,
-    "LDS Atomic Instructions": 10000,
-    "LDS Instruction Cycles": 250000,
-    "LDS Wait Cycles": 12500,
-    "LDS Bank Conflict Rate": 4.0,
-    "LDS Estimated Bandwidth": 256e9,  # 256 GB/s in Bytes/s
-    "TCP-GL1 Read Requests": 150000,
-    "TCP-GL1 Write Requests": 50000,
-    "TCP-GL1 Read Bandwidth": 96e9,  # 96 GB/s in Bytes/s
-    "TCP-GL1 Write Bandwidth": 32e9,  # 32 GB/s in Bytes/s
-    "GL1C Utilization": 65.2,
-    "GL1C Total Requests": 200000,
-    "GL1C Read Requests": 150000,
-    "GL1C Write Requests": 50000,
-    "GL1C Miss Requests": 30000,
-    "GL1C Hit Rate": 85.0,
-    "GL1C Starve Rate": 5.2,
-    "GL1C Stall GL2 Backpressure": 8.5,
-    "GL1-GL2 Read Requests": 30000,
-    "GL1-GL2 Write Requests": 10000,
-    "GL1-GL2 Read Bandwidth": 48e9,  # 48 GB/s in Bytes/s
-    "GL1-GL2 Write Bandwidth": 16e9,  # 16 GB/s in Bytes/s
-    "GL1-GL2 Read Latency": 85.2,
-    "GL1-GL2 Write Latency": 62.4,
-    "GL2C Utilization": 74.2,
-    "GL2C Total Requests": 40000,
-    "GL2C Read Requests": 30000,
-    "GL2C Write Requests": 10000,
-    "GL2C Atomic Requests": 1000,
-    "GL2C Hit Rate": 82.5,
-    "GL2C Read Bandwidth": 64e9,  # 64 GB/s in Bytes/s
-    "GL2C Write Bandwidth": 24e9,  # 24 GB/s in Bytes/s
-    "SARB Utilization": 52.3,
-    "SARB Stall Rate": 12.4,
-    "DRAM Read Requests": 25000,
-    "DRAM Write Requests": 8000,
-    "DRAM Read Bandwidth": 100e9,  # 100 GB/s in Bytes/s
-    "DRAM Write Bandwidth": 60e9,  # 60 GB/s in Bytes/s
-    "Read Returns": 25000,
-    "Write Returns": 8000,
-}
+DEFAULT_SAMPLE_METRICS: Dict[str, Union[int, float]] = dict(_MEM_CHART_DEFAULT_ROWS)
 
 
 def get_sample_metrics() -> Dict[str, Any]:
