@@ -5,12 +5,33 @@
 
 ---
 
+## Line Length
+
+**Hard limit: 88 characters per line.** This is enforced by ruff (`line-length = 88` in `pyproject.toml`).
+
+- Do not generate lines that exceed 88 characters.
+- Break long function arguments, chained calls, or comments across multiple lines.
+- Use implicit string concatenation or backslash continuation for long strings.
+
+```python
+# Correct — argument list broken across lines
+result = some_function(
+    argument_one,
+    argument_two,
+    argument_three,
+)
+
+# Flagged by Ruff (E501)
+result = some_function(argument_one, argument_two, argument_three, argument_four_long_name)
+```
+
 ## Enforced Ruff Rules
 
 The following rules are enforced on all files in `src/` (see `pyproject.toml` for full config):
 
 | Rule Set | Code | Requirement |
 |----------|------|-------------|
+| Line length | E501 | Maximum 88 characters per line |
 | Type annotations | ANN | All function arguments and return values must have type hints (except `self`, `cls`, `_` args) |
 | Modern syntax | UP | Use f-strings, not `.format()` or `%` |
 | Path handling | PTH | Use `pathlib.Path`, not `os.path` |

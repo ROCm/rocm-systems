@@ -27,11 +27,14 @@
 
 ## Helper Function Extraction
 
-- Extract when: logic is repeated, an expression benefits from a name, or a block mixes abstraction
-  levels.
-- Prefer combining existing helpers in new ways over modifying them (open-closed principle).
-- Do NOT extract when: the function name adds no information over reading the code directly, or the
-  operation is a single standard-library call.
+**These are strict requirements, not suggestions.**
+
+- **Always extract** when: logic is repeated, an expression benefits from a name, or a block mixes
+  abstraction levels.
+- **Always prefer** combining existing helpers in new ways over modifying them (open-closed
+  principle).
+- **Never extract** when: the function name adds no information over reading the code directly, or
+  the operation is a single standard-library call.
 
 ## Nesting
 
