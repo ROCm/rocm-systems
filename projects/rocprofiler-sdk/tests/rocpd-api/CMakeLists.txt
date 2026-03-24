@@ -30,7 +30,7 @@ rocprofiler_add_integration_execute_test(
 # Optional: pytest-based schema validation (same API via Python rocpd module)
 ################################################################################
 set(rocpd-api-rocpd-pythonpath
-    "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
+    "${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
     )
 set(rocpd-api-pythonpath-list
     "${ROCPROFILER_SDK_TESTS_BINARY_DIR}/pytest-packages"

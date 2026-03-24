@@ -36,7 +36,8 @@
 #include <string>
 #include <vector>
 
-/** Extract schema_version from rocpd_metadata INSERT in tables schema (e.g. ("schema_version", "3")). */
+/** Extract schema_version from rocpd_metadata INSERT in tables schema (e.g. ("schema_version", "3")). 
+    However, in new schema, the INSERT moved to the METADATA file.*/
 static std::string
 parse_schema_version(const char* content)
 {
@@ -54,13 +55,13 @@ parse_schema_version(const char* content)
     return s.substr(pos, end - pos);
 }
 
-/** Parse object names from SQL content for a given DDL keyword (e.g. "CREATE TABLE" or "CREATE VIEW"). */
+/** Parse object names from SQL content for a given keyword (e.g. "CREATE TABLE" or "CREATE VIEW"). */
 static void
-parse_ddl_names(const char* content, const char* ddl_keyword, std::vector<std::string>& out_names)
+parse_sql_names(const char* content, const char* sql_keyword, std::vector<std::string>& out_names)
 {
     if(content == nullptr) return;
     std::string s(content);
-    const std::string key(ddl_keyword);
+    const std::string key(sql_keyword);
     for(size_t pos = 0; (pos = s.find(key, pos)) != std::string::npos; pos += key.size())
     {
         pos += key.size();
@@ -76,9 +77,9 @@ parse_ddl_names(const char* content, const char* ddl_keyword, std::vector<std::s
     }
 }
 
-struct tables_callback_data
+struct _callback_data
 {
-    std::vector<std::string>* table_names;
+    std::vector<std::string>* names;
     std::string*              schema_version;
 };
 
@@ -86,34 +87,40 @@ static void
 tables_callback(rocpd_sql_engine_t                        /*engine*/,
                 rocpd_sql_schema_kind_t                   /*kind*/,
                 rocpd_sql_options_t                       /*options*/,
+                rocpd_version_triplet_t                   /*schema_version_triplet*/,
                 const rocpd_sql_schema_jinja_variables_t* /*variables*/,
                 const char*                               /*schema_path*/,
                 const char*                               schema_content,
-                void*                                    user_data)
+                void*                                     user_data)
 {
-    auto* data = static_cast<tables_callback_data*>(user_data);
-    if(schema_content == nullptr || data == nullptr || data->table_names == nullptr) return;
+    auto* data = static_cast<_callback_data*>(user_data);
+    if(schema_content == nullptr || data == nullptr || data->names == nullptr) return;
     std::string content(schema_content);
     if(content.find("CREATE TABLE") == std::string::npos ||
        content.find("rocpd_metadata") == std::string::npos)
         return;
-    parse_ddl_names(schema_content, "CREATE TABLE", *data->table_names);
+    parse_sql_names(schema_content, "CREATE TABLE", *data->names);
     if(data->schema_version != nullptr)
         *data->schema_version = parse_schema_version(schema_content);
 }
 
 static void
 views_callback(rocpd_sql_engine_t                        /*engine*/,
-               rocpd_sql_schema_kind_t                   /*kind*/,
+               rocpd_sql_schema_kind_t                   kind,
                rocpd_sql_options_t                       /*options*/,
+               rocpd_version_triplet_t                   /*schema_version_triplet*/,
                const rocpd_sql_schema_jinja_variables_t* /*variables*/,
                const char*                               /*schema_path*/,
                const char*                               schema_content,
-               void*                                    user_data)
+               void*                                     user_data)
 {
-    auto* view_names = static_cast<std::vector<std::string>*>(user_data);
-    if(schema_content == nullptr || view_names == nullptr) return;
-    parse_ddl_names(schema_content, "CREATE VIEW", *view_names);
+    auto* data = static_cast<_callback_data*>(user_data);
+    if(schema_content == nullptr || data == nullptr || data->names == nullptr) return;
+    parse_sql_names(schema_content, "CREATE VIEW", *data->names);
+    if(kind == ROCPD_SQL_SCHEMA_ROCPD_METADATA && data->schema_version != nullptr && data->schema_version->empty())
+    {
+        *data->schema_version = parse_schema_version(schema_content);
+    }
 }
 
 int
@@ -137,10 +144,12 @@ main()
 
     std::vector<std::string> table_names;
     std::string             schema_version;
-    tables_callback_data    tables_data{&table_names, &schema_version};
+    rocpd_version_triplet_t schema_version_triplet = {0, 0, 0};
+    _callback_data tables_data{&table_names, &schema_version};
     status = rocpd_sql_load_schema(ROCPD_SQL_ENGINE_SQLITE3,
                                    ROCPD_SQL_SCHEMA_ROCPD_TABLES,
                                    ROCPD_SQL_OPTIONS_SQLITE3_PRAGMA_FOREIGN_KEYS,
+                                   schema_version_triplet,
                                    &variables,
                                    tables_callback,
                                    nullptr,
@@ -166,18 +175,20 @@ main()
         ROCPD_SQL_SCHEMA_ROCPD_VIEWS,
         ROCPD_SQL_SCHEMA_ROCPD_DATA_VIEWS,
         ROCPD_SQL_SCHEMA_ROCPD_SUMMARY_VIEWS,
-        ROCPD_SQL_SCHEMA_ROCPD_MARKER_VIEWS,
+        ROCPD_SQL_SCHEMA_ROCPD_METADATA,
     };
+    _callback_data views_data{&view_names, &schema_version};
     for(rocpd_sql_schema_kind_t kind : view_kinds)
     {
         status = rocpd_sql_load_schema(ROCPD_SQL_ENGINE_SQLITE3,
                                       kind,
                                       ROCPD_SQL_OPTIONS_NONE,
+                                      schema_version_triplet,
                                       &variables,
                                       views_callback,
                                       nullptr,
                                       0,
-                                      &view_names);
+                                      &views_data);
         if(status != ROCPD_STATUS_SUCCESS)
         {
             std::cerr << "rocpd-api-test: rocpd_sql_load_schema(views) failed: "
@@ -193,7 +204,7 @@ main()
     std::cout << "  Tables:";
     for(const auto& name : table_names)
         std::cout << " " << name;
-    std::cout << "\n";
+    std::cout << "\n\n";
     std::cout << "  Number of views: " << view_names.size() << "\n";
     std::cout << "  Views:";
     for(const auto& name : view_names)
