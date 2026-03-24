@@ -430,7 +430,6 @@ def pc_sampling_prof(
 
 @demarcate
 def gen_sysinfo(
-    workload_name: str,
     workload_dir: str,
     app_cmd: str,
     skip_roof: bool,
@@ -441,7 +440,7 @@ def gen_sysinfo(
 
     # Append workload information to machine specs
     df["command"] = app_cmd
-    df["workload_name"] = workload_name
+    df["workload_path"] = workload_dir
 
     blocks = ["SQ", "LDS", "SQC", "TA", "TD", "TCP", "TCC", "SPI", "CPC", "CPF"]
     if not skip_roof:
