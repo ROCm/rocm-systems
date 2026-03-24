@@ -8365,6 +8365,7 @@ class AMDSMICommands:
                     if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                         raise PermissionError("Command requires elevation") from e
                     result = f"[{e.get_error_info(detailed=False)}] Unable to set fan speed to {hw_value} RPM ({fan_percentage}%)"
+                    result += "\nNote: For Navi3x GPUs, you need to load the amdgpu driver with \"sudo modprobe amdgpu ppfeaturemask=0xfff7ffff\""
                     self.logger.store_output(args.gpu, "fan", result)
                     self.logger.print_output()
                     self.logger.clear_multiple_devices_output()
