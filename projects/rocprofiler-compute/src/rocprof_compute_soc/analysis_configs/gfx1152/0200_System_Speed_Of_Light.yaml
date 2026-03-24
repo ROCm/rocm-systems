@@ -4,7 +4,7 @@
 # then core/memory, then cache hierarchy). RDNA3.5: standard VALU FLOPs (no MFMA).
 # VALU peaks: Navi3-class — 128 FP32 FMAs/CU/cycle, 256 FP16 ops/CU/cycle (wave64).
 # Cache: TCP (L0) -> GL1C (L1) -> GL2C (L2). Fabric/MC BW: no Peak / % of peak (no sysinfo BW var on gfx1152).
-# Memory hierarchy bandwidth (L2 client read BW vs GCEA/DRAM): use 0300_Memory_Chart.yaml, not duplicate KB totals here.
+# Memory hierarchy bandwidth (L2 client vs GCEA/DRAM): see gfx1152/0300_Memory_Chart.yaml (RDNA3.5 Memory Chart).
 # =============================================================================
 
 Panel Config:
