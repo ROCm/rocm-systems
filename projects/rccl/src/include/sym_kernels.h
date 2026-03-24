@@ -24,7 +24,7 @@
 #define NCCL_SYM_KERNEL_CELL_SIZE 1024 // no less than 16 bytes minimal cell size
 
 constexpr int ncclSymkMaxBlocks = 64;
-constexpr int ncclSymkMaxThreads = 512;
+constexpr int ncclSymkMaxThreads = 256;
 constexpr int ncclSymkLLMaxEltSize = 8;
 
 constexpr __host__ __device__ int ncclSymkLLMaxSlots(int eltSize = ncclSymkLLMaxEltSize) {

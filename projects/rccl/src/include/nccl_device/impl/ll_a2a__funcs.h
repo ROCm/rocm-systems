@@ -9,6 +9,41 @@
 #include "ll_a2a__types.h"
 #include "comm__types.h"
 #include "../utility.h"
+#include "device/rccl_ptr.h"
+
+#if __CUDACC__
+NCCL_DEVICE_INLINE void ncclLLA2aStoreLineAmd(uint32_t* dst, uint32_t a0, uint32_t a1, uint32_t a2, uint32_t a3) {
+#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+  union { v4u v; uint32_t w[4]; } u;
+  u.w[0] = a0;
+  u.w[1] = a1;
+  u.w[2] = a2;
+  u.w[3] = a3;
+  __builtin_amdgcn_global_store_b128((v4u_gptr)dst, u.v, RCCL_SYSTEM_SYNCSCOPE);
+#else
+  __builtin_nontemporal_store(a0, (u32_gptr)dst + 0);
+  __builtin_nontemporal_store(a1, (u32_gptr)dst + 1);
+  __builtin_nontemporal_store(a2, (u32_gptr)dst + 2);
+  __builtin_nontemporal_store(a3, (u32_gptr)dst + 3);
+#endif
+}
+
+NCCL_DEVICE_INLINE void ncclLLA2aLoadLineAmd(const uint32_t* src, uint32_t& o0, uint32_t& o1, uint32_t& o2, uint32_t& o3) {
+#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+  union { v4u v; uint32_t w[4]; } u;
+  u.v = __builtin_amdgcn_global_load_b128((v4u_gptr)src, RCCL_SYSTEM_SYNCSCOPE);
+  o0 = u.w[0];
+  o1 = u.w[1];
+  o2 = u.w[2];
+  o3 = u.w[3];
+#else
+  o0 = __builtin_nontemporal_load((u32_gptr)src + 0);
+  o1 = __builtin_nontemporal_load((u32_gptr)src + 1);
+  o2 = __builtin_nontemporal_load((u32_gptr)src + 2);
+  o3 = __builtin_nontemporal_load((u32_gptr)src + 3);
+#endif
+}
+#endif
 
 #if __CUDACC__
 template<typename Coop>
@@ -51,11 +86,7 @@ NCCL_DEVICE_INLINE void ncclLLA2ASession<Coop>::send(int peer, int elt, T data) 
   for (int u=0; u < divUp(sizeof(T), 8); u++) {
 #if __HIP_PLATFORM_AMD__
     uint32_t* dst = reinterpret_cast<uint32_t*>(buf + u * this->pitch);
-
-    __builtin_nontemporal_store(u32[u][0], dst + 0);
-    __builtin_nontemporal_store((uint32_t)this->epoch, dst + 1);
-    __builtin_nontemporal_store(u32[u][1], dst + 2);
-    __builtin_nontemporal_store((uint32_t)this->epoch, dst + 3);
+    ncclLLA2aStoreLineAmd(dst, u32[u][0], (uint32_t)this->epoch, u32[u][1], (uint32_t)this->epoch);
 #else
     asm volatile("st.volatile.v4.u32 [%0],{%1,%3,%2,%3};" ::
       "l"(buf + u*this->pitch),
@@ -80,11 +111,7 @@ NCCL_DEVICE_INLINE void ncclLLA2ASession<Coop>::bcast(int elt, T data) {
     for (int u=0; u < divUp(sizeof(T), 8); u++) {
 #if __HIP_PLATFORM_AMD__
       uint32_t* dst = reinterpret_cast<uint32_t*>(bufmc + this->pitch*u);
-
-      __builtin_nontemporal_store(u32[u][0], dst + 0);
-      __builtin_nontemporal_store((uint32_t)this->epoch, dst + 1);
-      __builtin_nontemporal_store(u32[u][1], dst + 2);
-      __builtin_nontemporal_store((uint32_t)this->epoch, dst + 3);
+      ncclLLA2aStoreLineAmd(dst, u32[u][0], (uint32_t)this->epoch, u32[u][1], (uint32_t)this->epoch);
 #else
       asm volatile("st.volatile.v4.u32 [%0],{%1,%3,%2,%3};" ::
         "l"(bufmc + this->pitch*u),
@@ -107,11 +134,7 @@ NCCL_DEVICE_INLINE void ncclLLA2ASession<Coop>::bcast(int elt, T data) {
         for (int u=0; u < divUp(sizeof(T),8); u++) {
 #if __HIP_PLATFORM_AMD__
           uint32_t* dst = reinterpret_cast<uint32_t*>(buf + u*this->pitch);
-
-          __builtin_nontemporal_store(u32[u][0], dst + 0);
-          __builtin_nontemporal_store((uint32_t)this->epoch, dst + 1);
-          __builtin_nontemporal_store(u32[u][1], dst + 2);
-          __builtin_nontemporal_store((uint32_t)this->epoch, dst + 3);
+          ncclLLA2aStoreLineAmd(dst, u32[u][0], (uint32_t)this->epoch, u32[u][1], (uint32_t)this->epoch);
 #else
           asm volatile("st.volatile.v4.u32 [%0],{%1,%3,%2,%3};" ::
             "l"(buf + u*this->pitch),
@@ -132,11 +155,7 @@ NCCL_DEVICE_INLINE void ncclLLA2ASession<Coop>::bcast(int elt, T data) {
       for (int u=0; u < divUp(sizeof(T),8); u++) {
 #if __HIP_PLATFORM_AMD__
         uint32_t* dst = reinterpret_cast<uint32_t*>(buf + u*this->pitch);
-
-        __builtin_nontemporal_store(u32[u][0], dst + 0);
-        __builtin_nontemporal_store((uint32_t)this->epoch, dst + 1);
-        __builtin_nontemporal_store(u32[u][1], dst + 2);
-        __builtin_nontemporal_store((uint32_t)this->epoch, dst + 3);
+        ncclLLA2aStoreLineAmd(dst, u32[u][0], (uint32_t)this->epoch, u32[u][1], (uint32_t)this->epoch);
 #else
         asm volatile("st.volatile.v4.u32 [%0],{%1,%3,%2,%3};" ::
           "l"(buf + u*this->pitch),
@@ -179,12 +198,8 @@ NCCL_DEVICE_INLINE void ncclLLA2ASession<Coop>::recvUnrolled(int eltStart, int e
         for (int v=0; v < divUp(sizeof(T), 8); v++) {
 #if __HIP_PLATFORM_AMD__
           const uint32_t* src = reinterpret_cast<const uint32_t*>(buf + u*eltStride + v*this->pitch);
-
           uint4 t;
-          t.x = __builtin_nontemporal_load(src + 0);
-          t.y = __builtin_nontemporal_load(src + 1);
-          t.z = __builtin_nontemporal_load(src + 2);
-          t.w = __builtin_nontemporal_load(src + 3);
+          ncclLLA2aLoadLineAmd(src, t.x, t.y, t.z, t.w);
           tmp[u][v] = t;
 #else
           asm volatile("ld.volatile.v4.u32 {%0,%1,%2,%3},[%4];"
@@ -264,7 +279,11 @@ NCCL_DEVICE_INLINE void ncclLLA2ASession<Coop>::endEpoch(Coop) {
     buf += this->slotsOffset;
     #pragma unroll 4
     for (int i=this->coop.thread_rank(); i < this->handle.nSlots; i += this->coop.size()) {
+#if __HIP_PLATFORM_AMD__
+      ncclLLA2aStoreLineAmd(reinterpret_cast<uint32_t*>(buf + i), 0, 0, 0, 0);
+#else
       buf[i] = uint4{0, 0, 0, 0};
+#endif
     }
   }
   this->coop.sync();
