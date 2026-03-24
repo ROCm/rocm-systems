@@ -1745,54 +1745,29 @@ void GraphExec::UpdateStreams(hip::Stream* launch_stream) {
   int devId = launch_stream->vdev()->device().index();
   // Clear any previous stream assignments
   streams_.clear();
-  const auto parallel_it = parallel_streams_.find(devId);
-  if (parallel_it == parallel_streams_.end()) {
+  // Current stream is the default in the assignment
+  streams_.push_back(launch_stream);
+  if (parallel_streams_.find(devId) == parallel_streams_.end()) {
     LogPrintfError("UpdateStreams failed for device id:%d", devId);
     return;
   }
-  const auto& parallel_streams = parallel_it->second;
-
-  // Reserve room for the streams.
-  size_t streams_upper_bound =
-      std::min(1 + parallel_streams.size(), static_cast<size_t>(max_streams_));
-  streams_.reserve(streams_upper_bound);
-
-  // Track unique stream IDs to prioritize non-colliding streams first.
-  std::set<int> unique_stream_ids;
-
-  // Current stream is the default in the assignment
-  streams_.push_back(launch_stream);
-  unique_stream_ids.insert(launch_stream->getQueueID());
-
-  // Track streams that collide with the launch stream for potential later assignment if we have
-  // capacity.
+  auto parallel_streams = parallel_streams_[devId];
+  std::unordered_map<int, int> unique_stream_ids;
+  unique_stream_ids[launch_stream->getQueueID()] = 1;
   std::vector<hip::Stream*> collided_streams;
-
-  // Assign streams that are unique in parallel_streams and dont collide with the launch stream.
-  // To reduce the amount of reallocations in collided_streams, we stop adding new streams once we
-  // have enough to fill the remaining capacity after unique streams are added. We also stop
-  // iterating through parallel_streams once we reach streams_upper_bound, since additional streams
-  // (even if unique) cannot be used beyond the configured capacity.
-  for (hip::Stream* stream : parallel_streams) {
-    bool has_unseen_queue = unique_stream_ids.insert(stream->getQueueID()).second;
-    if (has_unseen_queue) {
-      streams_.push_back(stream);
-    } else if (collided_streams.size() < (streams_upper_bound - streams_.size())) {
-      collided_streams.push_back(stream);
+  // Assign streams that are unique in parallel_streams and doesnt collide with launch stream
+  for (uint32_t i = 0; i < parallel_streams.size(); i++) {
+    auto qid = parallel_streams[i]->getQueueID();
+    if (unique_stream_ids[qid] == 0) {
+      streams_.push_back(parallel_streams[i]);
+    } else {
+      collided_streams.push_back(parallel_streams[i]);
     }
-
-    // If we've reached our stream capacity, stop assigning more streams even if there are more
-    // unique streams available, since we cannot use them.
-    if (streams_.size() >= streams_upper_bound) {
-      break;
-    }
+    unique_stream_ids[qid]++;
   }
-
-  if (streams_.size() < streams_upper_bound) {
-    // Assign the remaining streams for execution.
-    size_t remaining_slots = streams_upper_bound - streams_.size();
-    streams_.insert(streams_.end(), collided_streams.begin(),
-                    collided_streams.begin() + remaining_slots);
+  // Assign the remaining streams for execution.
+  for (int i = streams_.size(), j = 0; i < max_streams_ && j < collided_streams.size(); i++, j++) {
+    streams_.push_back(collided_streams[j]);
   }
 }
 
