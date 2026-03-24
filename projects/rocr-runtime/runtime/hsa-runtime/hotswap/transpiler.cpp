@@ -233,6 +233,10 @@ static const MnemonicMapping kScalarALURenames[] = {
     {"s_or_not1_b64", "s_orn2_b64"},
     {"s_ctz_i32_b32", "s_ff1_i32_b32"},
     {"s_ctz_i32_b64", "s_ff1_i32_b64"},
+    // GFX12 PC-relative call/return mnemonics → GFX9 equivalents
+    {"s_get_pc_i64", "s_getpc_b64"},
+    {"s_swap_pc_i64", "s_swappc_b64"},
+    {"s_set_pc_i64", "s_setpc_b64"},
 };
 
 // VALU renames (GFX12 uses IEEE-explicit names)
@@ -1045,9 +1049,14 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
   // own VGPR allocation (save_vgpr_y + 1), so these never collide with live
   // registers used by the kernel.  Previously hardcoded as v5/v6/v7/v8 which
   // clobbered live data in device-library-heavy kernels (gelu, layernorm, f64).
-  std::string vt0 = "v" + std::to_string(scale_temp_vgpr);      // primary temp
-  std::string vt1 = "v" + std::to_string(scale_temp_vgpr + 1);  // secondary temp
-  std::string vt2 = "v" + std::to_string(scale_temp_vgpr + 2);  // tertiary temp
+  //
+  // IMPORTANT: scale_temp_vgpr must be even-aligned so that f64 VGPR pairs
+  // (vt0:vt1, vt2:vt3) start on even boundaries as required by GFX9.
+  // The caller ensures this by rounding up if necessary.
+  std::string vt0 = "v" + std::to_string(scale_temp_vgpr);      // primary temp (even)
+  std::string vt1 = "v" + std::to_string(scale_temp_vgpr + 1);  // secondary temp (odd)
+  std::string vt2 = "v" + std::to_string(scale_temp_vgpr + 2);  // tertiary temp (even)
+  std::string vt3 = "v" + std::to_string(scale_temp_vgpr + 3);  // quaternary temp (odd)
 
   std::string line = asm_line;
 
@@ -1108,6 +1117,18 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
   if (IsWaitInstruction(mnemonic)) {
     result.push_back(TranslateWaitInstruction(line));
     return result;
+  }
+
+  // ─── GFX12 src_flat_scratch_base → flat_scratch (register rename) ───
+  // GFX12 uses src_flat_scratch_base_lo as a 64-bit register alias for the
+  // flat scratch base (containing both lo and hi halves).
+  // GFX9 uses flat_scratch (SGPR hardware register pair).
+  {
+    size_t fpos;
+    while ((fpos = line.find("src_flat_scratch_base_lo")) != std::string::npos)
+      line.replace(fpos, 24, "flat_scratch");
+    while ((fpos = line.find("src_flat_scratch_base_hi")) != std::string::npos)
+      line.replace(fpos, 24, "flat_scratch_hi");
   }
 
   // ─── GFX12 scheduling/clause hints → SKIP (no GFX9 equivalent) ───
@@ -2099,6 +2120,72 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
     }
   }
 
+  // ─── v_add_nc_u64 → v_add_co_u32 + v_addc_co_u32 ───
+  // GFX12 has v_add_nc_u64 for 64-bit integer add. GFX9 doesn't.
+  // Emulate: vdst[0:1] = vsrc0[0:1] + vsrc1[0:1] using carry chain.
+  if (mnemonic == "v_add_nc_u64" || mnemonic == "v_add_nc_u64_e64" ||
+      mnemonic == "v_add_u64" || mnemonic == "v_add_u64_e64") {
+    std::string ops = line.substr(line.find(mnemonic) + mnemonic.size());
+    size_t op_start = ops.find_first_not_of(" \t");
+    if (op_start != std::string::npos) ops = ops.substr(op_start);
+
+    std::vector<std::string> operands;
+    std::istringstream oss(ops);
+    std::string tok;
+    while (std::getline(oss, tok, ',')) {
+      size_t s = tok.find_first_not_of(" \t");
+      size_t e = tok.find_last_not_of(" \t");
+      if (s != std::string::npos)
+        operands.push_back(tok.substr(s, e - s + 1));
+    }
+    if (operands.size() >= 3) {
+      // Parse register pairs: v[lo:hi]
+      auto parse_pair = [](const std::string& r, std::string& lo, std::string& hi) {
+        if (r.find('[') != std::string::npos) {
+          size_t lb = r.find('['), colon = r.find(':'), rb = r.find(']');
+          if (lb != std::string::npos && colon != std::string::npos && rb != std::string::npos) {
+            std::string prefix = r.substr(0, lb);  // "v" or "s"
+            lo = prefix + r.substr(lb + 1, colon - lb - 1);
+            hi = prefix + r.substr(colon + 1, rb - colon - 1);
+            return true;
+          }
+        }
+        return false;
+      };
+      std::string dst_lo, dst_hi, src0_lo, src0_hi, src1_lo, src1_hi;
+      bool dst_ok = parse_pair(operands[0], dst_lo, dst_hi);
+      bool src0_ok = parse_pair(operands[1], src0_lo, src0_hi);
+      bool src1_ok = parse_pair(operands[2], src1_lo, src1_hi);
+      if (dst_ok && src0_ok && src1_ok) {
+        // GFX9 constant bus: v_addc_co_u32_e64 has vcc as carry-in (src2),
+        // which counts as a constant bus source. If either src0_hi or src1_hi
+        // is SGPR, that would be 2 constant bus sources. Move SGPRs to VGPRs.
+        bool s0_sgpr = !src0_lo.empty() && (src0_lo[0] == 's' || src0_lo.find("flat_") == 0);
+        bool s1_sgpr = !src1_lo.empty() && (src1_lo[0] == 's' || src1_lo.find("flat_") == 0);
+        // Always move at least one SGPR source to temp VGPRs for the addc
+        if (s0_sgpr || s1_sgpr) {
+          // Move src1 to temp VGPRs (always safe — no constant bus conflict)
+          result.push_back("v_mov_b32_e32 " + vt0 + ", " + src1_lo);
+          result.push_back("v_mov_b32_e32 " + vt1 + ", " + src1_hi);
+          if (s0_sgpr && s1_sgpr) {
+            // Both SGPRs: also move src0 for the add (constant bus)
+            result.push_back("v_mov_b32_e32 " + vt2 + ", " + src0_lo);
+            result.push_back("v_mov_b32_e32 " + vt3 + ", " + src0_hi);
+            result.push_back("v_add_co_u32_e64 " + dst_lo + ", vcc, " + vt2 + ", " + vt0);
+            result.push_back("v_addc_co_u32_e64 " + dst_hi + ", vcc, " + vt3 + ", " + vt1 + ", vcc");
+          } else {
+            result.push_back("v_add_co_u32_e64 " + dst_lo + ", vcc, " + src0_lo + ", " + vt0);
+            result.push_back("v_addc_co_u32_e64 " + dst_hi + ", vcc, " + src0_hi + ", " + vt1 + ", vcc");
+          }
+        } else {
+          result.push_back("v_add_co_u32_e64 " + dst_lo + ", vcc, " + src0_lo + ", " + src1_lo);
+          result.push_back("v_addc_co_u32_e64 " + dst_hi + ", vcc, " + src0_hi + ", " + src1_hi + ", vcc");
+        }
+        return result;
+      }
+    }
+  }
+
   // ─── v_cndmask_b32_e64: bare SGPR mask widening + constant bus fix ───
   // GFX12 wave32: cmp results are 32-bit (single SGPR sN as mask).
   // GFX9 wave64: mask must be a 64-bit SGPR pair s[N:N+1].
@@ -2798,6 +2885,101 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
     mnemonic = fixed_mnem;
   }
 
+  // ─── v_add_u64 (post _nc_ strip) → v_add_co_u32 + v_addc_co_u32 ───
+  // Catches v_add_nc_u64 after _nc_ stripping converts it to v_add_u64.
+  if (mnemonic == "v_add_u64" || mnemonic == "v_add_u64_e64") {
+    std::string ops = line.substr(line.find(mnemonic) + mnemonic.size());
+    size_t op_start = ops.find_first_not_of(" \t");
+    if (op_start != std::string::npos) ops = ops.substr(op_start);
+    std::vector<std::string> operands;
+    std::istringstream u64_oss(ops);
+    std::string u64_tok;
+    while (std::getline(u64_oss, u64_tok, ',')) {
+      size_t s = u64_tok.find_first_not_of(" \t");
+      size_t e = u64_tok.find_last_not_of(" \t");
+      if (s != std::string::npos)
+        operands.push_back(u64_tok.substr(s, e - s + 1));
+    }
+    if (operands.size() >= 3) {
+      auto parse_pair = [](const std::string& r, std::string& lo, std::string& hi) {
+        size_t lb = r.find('['), colon = r.find(':'), rb = r.find(']');
+        if (lb != std::string::npos && colon != std::string::npos && rb != std::string::npos) {
+          std::string prefix = r.substr(0, lb);
+          lo = prefix + r.substr(lb + 1, colon - lb - 1);
+          hi = prefix + r.substr(colon + 1, rb - colon - 1);
+          return true;
+        }
+        return false;
+      };
+      std::string dst_lo, dst_hi, src0_lo, src0_hi, src1_lo, src1_hi;
+      if (parse_pair(operands[0], dst_lo, dst_hi) &&
+          parse_pair(operands[1], src0_lo, src0_hi) &&
+          parse_pair(operands[2], src1_lo, src1_hi)) {
+        bool s0_sgpr = !src0_lo.empty() && (src0_lo[0] == 's' || src0_lo.find("flat_") == 0);
+        bool s1_sgpr = !src1_lo.empty() && (src1_lo[0] == 's' || src1_lo.find("flat_") == 0);
+        if (s0_sgpr || s1_sgpr) {
+          result.push_back("v_mov_b32_e32 " + vt0 + ", " + src1_lo);
+          result.push_back("v_mov_b32_e32 " + vt1 + ", " + src1_hi);
+          if (s0_sgpr && s1_sgpr) {
+            result.push_back("v_mov_b32_e32 " + vt2 + ", " + src0_lo);
+            result.push_back("v_mov_b32_e32 " + vt3 + ", " + src0_hi);
+            result.push_back("v_add_co_u32_e64 " + dst_lo + ", vcc, " + vt2 + ", " + vt0);
+            result.push_back("v_addc_co_u32_e64 " + dst_hi + ", vcc, " + vt3 + ", " + vt1 + ", vcc");
+          } else {
+            result.push_back("v_add_co_u32_e64 " + dst_lo + ", vcc, " + src0_lo + ", " + vt0);
+            result.push_back("v_addc_co_u32_e64 " + dst_hi + ", vcc, " + src0_hi + ", " + vt1 + ", vcc");
+          }
+        } else {
+          result.push_back("v_add_co_u32_e64 " + dst_lo + ", vcc, " + src0_lo + ", " + src1_lo);
+          result.push_back("v_addc_co_u32_e64 " + dst_hi + ", vcc, " + src0_hi + ", " + src1_hi + ", vcc");
+        }
+        return result;
+      }
+    }
+  }
+
+  // ─── v_mov_b64 → two v_mov_b32 ───
+  // GFX12 has v_mov_b64_e32 but GFX9 doesn't.
+  if (mnemonic == "v_mov_b64" || mnemonic == "v_mov_b64_e32") {
+    std::string ops = line.substr(line.find(mnemonic) + mnemonic.size());
+    size_t op_start = ops.find_first_not_of(" \t");
+    if (op_start != std::string::npos) ops = ops.substr(op_start);
+    std::vector<std::string> operands;
+    std::istringstream b64_oss(ops);
+    std::string b64_tok;
+    while (std::getline(b64_oss, b64_tok, ',')) {
+      size_t s = b64_tok.find_first_not_of(" \t");
+      size_t e = b64_tok.find_last_not_of(" \t");
+      if (s != std::string::npos)
+        operands.push_back(b64_tok.substr(s, e - s + 1));
+    }
+    if (operands.size() >= 2) {
+      auto parse_pair = [](const std::string& r, std::string& lo, std::string& hi) {
+        size_t lb = r.find('['), colon = r.find(':'), rb = r.find(']');
+        if (lb != std::string::npos && colon != std::string::npos && rb != std::string::npos) {
+          std::string prefix = r.substr(0, lb);
+          lo = prefix + r.substr(lb + 1, colon - lb - 1);
+          hi = prefix + r.substr(colon + 1, rb - colon - 1);
+          return true;
+        }
+        return false;
+      };
+      std::string dst_lo, dst_hi, src_lo, src_hi;
+      bool dst_ok = parse_pair(operands[0], dst_lo, dst_hi);
+      bool src_ok = parse_pair(operands[1], src_lo, src_hi);
+      if (dst_ok && src_ok) {
+        result.push_back("v_mov_b32_e32 " + dst_lo + ", " + src_lo);
+        result.push_back("v_mov_b32_e32 " + dst_hi + ", " + src_hi);
+        return result;
+      } else if (dst_ok && !src_ok) {
+        // Source is immediate (e.g., 0)
+        result.push_back("v_mov_b32_e32 " + dst_lo + ", " + operands[1]);
+        result.push_back("v_mov_b32_e32 " + dst_hi + ", 0");
+        return result;
+      }
+    }
+  }
+
   // ─── Unsupported instructions → NOP with diagnostic ───
   if (IsUnsupportedOnGFX9(mnemonic)) {
     result.push_back("s_nop 0 ; UNSUPPORTED: " + mnemonic);
@@ -3069,12 +3251,14 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
                     bool is_class = mnemonic.find("_class_") != std::string::npos;
                     bool needs_pair = is_f64_mnem && !(is_class && ci >= 2);
                     if (needs_pair) {
-                      // Use vt1:vt2 for f64 pair (vt0 is used by save_reg)
-                      std::string f64_pair = "v[" + std::to_string(scale_temp_vgpr + 1) + ":" +
-                                             std::to_string(scale_temp_vgpr + 2) + "]";
+                      // Use vt2:vt3 for f64 pair (vt0 is used by save_reg).
+                      // vt2 is even-aligned (scale_temp_vgpr+2) so the pair
+                      // satisfies GFX9's 64-bit alignment requirement.
+                      std::string f64_pair = "v[" + std::to_string(scale_temp_vgpr + 2) + ":" +
+                                             std::to_string(scale_temp_vgpr + 3) + "]";
                       cmp_operands[ci] = f64_pair;
-                      result.insert(result.begin() + ri, "v_mov_b32_e32 " + vt2 + ", 0");
-                      result.insert(result.begin() + ri, "v_mov_b32_e32 " + vt1 + ", " + lit_val);
+                      result.insert(result.begin() + ri, "v_mov_b32_e32 " + vt3 + ", 0");
+                      result.insert(result.begin() + ri, "v_mov_b32_e32 " + vt2 + ", " + lit_val);
                       // Rebuild the v_cmp line (now at ri + 2)
                       std::string rebuilt = result[ri + 2].substr(0, mend2);
                       for (size_t cj = 0; cj < cmp_operands.size(); cj++) {
@@ -3396,7 +3580,7 @@ static void PatchKernelDescriptorsForWave64(uint8_t* elf, size_t elf_size,
     // RSRC1 VGPR field encodes ceil(VGPRs/gran)-1.
     uint32_t num_vgprs = (vgpr_field12 + 1u) * 12u;
     if (num_vgprs < 8u) num_vgprs = 8u;
-    num_vgprs += 8u;  // room for sv_x, sv_y + 3 temp VGPRs (vt0, vt1, vt2) + padding
+    num_vgprs += 8u;  // room for sv_x, sv_y + 4 temp VGPRs (vt0-vt3) + even-align pad
     // ACCUM_OFFSET: on GFX942, arch VGPRs = (ACCUM_OFFSET+1)*4.  Set ACCUM_OFFSET
     // so ALL allocated VGPRs (kernel's + save regs + temps) are arch VGPRs (VALU accessible).
     // Hardware requires ACCUM_OFFSET < RSRC1 VGPR field, so add one extra accum group.
@@ -3889,7 +4073,7 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
       }
     }
     // Save registers right above the kernel's actual VGPR usage.
-    // The KD allocates .num_vgpr + 8 arch VGPRs (2 save + 3 temp + padding).
+    // The KD allocates .num_vgpr + 8 arch VGPRs (2 save + 4 temp + even-align pad).
     uint32_t save_vgpr_x = num_vgprs12;       // first free VGPR index
     uint32_t save_vgpr_y = num_vgprs12 + 1u;  // second free VGPR index
     uint32_t cmpx_temp_sgpr = num_sgprs12;    // first free SGPR pair for v_cmpx temp
@@ -3951,6 +4135,23 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
 
       pos += inst_size;
       ++stats->total_instructions;
+
+      // Stop at s_endpgm + s_code_end padding: everything after is dead
+      // device library code that may use unsupported GFX12 features
+      // (flat_scratch, v_add_nc_u64, etc.). The kernel's actual code ends
+      // at s_endpgm.
+      if (!asm_text.empty() && asm_text.find("s_endpgm") == 0) {
+        // Check if next bytes are s_code_end (0xBF9F0000) or padding
+        if (pos + 4 <= code_end) {
+          uint32_t next_word;
+          std::memcpy(&next_word, text + pos, 4);
+          if (next_word == 0xBF9F0000u) {
+            // s_code_end follows — this is the end of kernel code.
+            // Skip the rest of .text (device library dead code).
+            break;
+          }
+        }
+      }
     }
 
     std::cerr << "hotswap: transpile: kernel " << ki << ": disassembled "
@@ -4109,13 +4310,16 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
         }
       }
 
-      // scale_temp_vgpr: use num_vgprs12+2 (above save registers sv_x, sv_y)
+      // scale_temp_vgpr: use num_vgprs12+2 (above save registers sv_x, sv_y),
+      // rounded up to even alignment for f64 VGPR pair requirements on GFX9.
       // cmpx_temp_sgpr: use num_sgprs12 (above kernel's SGPR allocation)
       // compact_mode: skip redundant exec_hi clear after AND saveexec
       // (exec_hi is already 0). Helps save space without affecting correctness.
       // Note: even-dest v_cmp save/restore and v_cmpx VCC save are ALWAYS
+      uint32_t temp_vgpr_base = save_vgpr_y + 1;
+      if (temp_vgpr_base & 1u) temp_vgpr_base++;  // ensure even alignment for f64 pairs
       auto translated_lines = TranslateInstruction(line, src_cpu, tgt_cpu,
-                                                    save_vgpr_y + 1, cmpx_temp_sgpr,
+                                                    temp_vgpr_base, cmpx_temp_sgpr,
                                                     false);
 
       // Post-process: replace branch offsets with labels (using actual PC offsets)
@@ -5061,13 +5265,22 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
     std::memcpy(new_elf, elf, size);
 
     // Replace .text section content
-    if (new_text_size <= elf_info.text_size) {
-      std::memcpy(new_elf + elf_info.text_offset, new_text, new_text_size);
-      // s_code_end-fill remainder (tells instruction prefetcher to stop)
-      // Using s_nop here caused non-deterministic loop iteration counts because
-      // the prefetcher would speculatively fetch NOPs and interfere with branch prediction.
+    // For ELFs with device library code before the kernel, only replace
+    // from the kernel's code offset onward, preserving preceding code.
+    uint64_t kernel_text_offset = 0;
+    if (!kernels.empty())
+      kernel_text_offset = kernels[0].code_offset;
+    uint64_t kernel_region_size = elf_info.text_size - kernel_text_offset;
+
+    if (new_text_size <= kernel_region_size) {
+      // Preserve device library code before kernel (bytes 0..kernel_text_offset-1)
+      // Copy transpiled kernel code at the kernel's starting offset
+      std::memcpy(new_elf + elf_info.text_offset + kernel_text_offset,
+                  new_text, new_text_size);
+      // s_code_end-fill remainder after kernel (tells instruction prefetcher to stop)
       uint8_t nop_bytes[] = {0x00, 0x00, 0x9F, 0xBF};  // s_code_end
-      for (uint64_t i = new_text_size; i + 4 <= elf_info.text_size; i += 4) {
+      for (uint64_t i = kernel_text_offset + new_text_size;
+           i + 4 <= elf_info.text_size; i += 4) {
         std::memcpy(new_elf + elf_info.text_offset + i, nop_bytes, 4);
       }
     } else {
@@ -5256,8 +5469,8 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
             // GFX9 RSRC1: bits [5:0] = SGPR field, bits [11:6] = VGPR field
             // GFX12 RSRC1: bits [5:0] = VGPR field, bits [11:6] = SGPR field
             // Convert VGPR: GFX12 granularity 8 → GFX9 granularity 4.
-            // Add 8 extra VGPRs for save registers (sv_x, sv_y) and 3 temp
-            // VGPRs (vt0, vt1, vt2) used by instruction expansion + padding.
+            // Add 8 extra VGPRs for save registers (sv_x, sv_y) and 4 temp
+            // VGPRs (vt0-vt3) used by instruction expansion + even-align pad.
             uint32_t vgpr_field12 = rsrc1 & 0x3Fu;
             uint32_t sgpr_field12_rd = (rsrc1 >> 6) & 0x3Fu;  // save before clear
             uint32_t num_vgprs = (vgpr_field12 + 1u) * 12u;  // GFX12 wave32 gran=12
