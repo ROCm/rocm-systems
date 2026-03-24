@@ -484,9 +484,9 @@ template <typename... Args>
     dst_bytes = dst_def;
     src_bytes = src_def;
     for (int i = 0; i < cpy_size; i++) {
-      gpu_dprintf("WG (%u, %u, %u) TH (%u, %u, %u), flat_id = %d, size = %3d, " 
-        "j = %3d, cpy_size = %3d, src_bytes=%u, dst_bytes=%u\n", get_flat_id(), 
-        size, CHUNK_BYTES, cpy_size, src_bytes - src_def, dst_bytes - dst_def);
+      // gpu_dprintf("WG (%u, %u, %u) TH (%u, %u, %u), flat_id = %d, size = %3d, " 
+      //   "j = %3d, cpy_size = %3d, src_bytes=%u, dst_bytes=%u\n", get_flat_id(), 
+      //   size, CHUNK_BYTES, cpy_size, src_bytes - src_def, dst_bytes - dst_def);
         
       store_asm(src_bytes, dst_bytes, CHUNK_BYTES);
       src_bytes += block_bytes;
@@ -507,9 +507,9 @@ template <typename... Args>
       src_bytes += i * j;
       dst_bytes += i * j;
       
-      gpu_dprintf("WG (%u, %u, %u) TH (%u, %u, %u), flat_id = %d, size = %3d, " 
-        "j = %3d, cpy_size = %3d, src_bytes=%u, dst_bytes=%u\n", get_flat_id(), 
-        size, j, cpy_size, src_bytes, dst_bytes);
+      // gpu_dprintf("WG (%u, %u, %u) TH (%u, %u, %u), flat_id = %d, size = %3d, " 
+      //   "j = %3d, cpy_size = %3d, src_bytes=%u, dst_bytes=%u\n", get_flat_id(), 
+      //   size, j, cpy_size, src_bytes, dst_bytes);
         
       store_asm(src_bytes, dst_bytes, j);
     }
