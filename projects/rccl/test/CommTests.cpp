@@ -171,9 +171,8 @@ TEST_F(TrafficClassMPITest, ConfiguredTrafficClass)
     log.close();
     unlink(logfile.c_str());
 
-    // Verify trafficClass appears in logs
-    ASSERT_MPI_NE(buf.str().find("Traffic class set to 46"), std::string::npos)
-        << "Traffic class log not found. Set NCCL_DEBUG=INFO.";
+    // Verify trafficClass appears in logs (requires NCCL_DEBUG=INFO)
+    ASSERT_MPI_NE(buf.str().find("Traffic class set to 46"), std::string::npos);
 }
 
 #endif // MPI_TESTS_ENABLED
