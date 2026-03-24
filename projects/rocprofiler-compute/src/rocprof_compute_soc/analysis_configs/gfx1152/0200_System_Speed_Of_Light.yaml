@@ -58,12 +58,10 @@ Panel Config:
           pop: AVG((100 * GRBM_GUI_ACTIVE / GRBM_COUNT) if (GRBM_COUNT != 0) else None)
         # --- L2 / fabric / memory controller ---
         L2 Cache Hit Rate:
-          value: AVG((((100 * GL2C_HIT) / (GL2C_HIT + GL2C_MISS)) if
-            ((GL2C_HIT + GL2C_MISS) != 0) else None))
+          value: AVG((100 * GL2C_HIT_sum / (GL2C_HIT_sum + GL2C_MISS_sum)) if ((GL2C_HIT_sum + GL2C_MISS_sum) != 0) else None)
           unit: Percent
           peak: 100
-          pop: AVG((((100 * GL2C_HIT) / (GL2C_HIT + GL2C_MISS)) if
-            ((GL2C_HIT + GL2C_MISS) != 0) else None))
+          pop: AVG((100 * GL2C_HIT_sum / (GL2C_HIT_sum + GL2C_MISS_sum)) if ((GL2C_HIT_sum + GL2C_MISS_sum) != 0) else None)
         L2-Fabric Read BW:
           value: AVG(((GL2C_EA_RDREQ_32B * 32 + GL2C_EA_RDREQ_64B * 64
             + GL2C_EA_RDREQ_96B * 96 + GL2C_EA_RDREQ_128B * 128)
@@ -144,50 +142,45 @@ Panel Config:
           pop: AVG(((100 * SQ_WAIT_INST_ANY / SQ_WAVE_CYCLES) if (SQ_WAVE_CYCLES != 0) else 0))
         # --- Cache hierarchy: TCP (L0) -> GL1C (L1) -> GL2C client / SQC ---
         TCP Cache Hit Rate:
-          value: ROUND((AVG((((TCP_REQ_sum - TCP_REQ_MISS_sum) / TCP_REQ_sum) if (TCP_REQ_sum != 0) else None)) * 100), 0)
-          unit: Pct
+          value: AVG((100 * (TCP_REQ_sum - TCP_REQ_MISS_sum) / TCP_REQ_sum) if (TCP_REQ_sum != 0) else None)
+          unit: Percent
           peak: 100
-          pop: ROUND((AVG((((TCP_REQ_sum - TCP_REQ_MISS_sum) / TCP_REQ_sum) if (TCP_REQ_sum != 0) else None)) * 100), 0)
+          pop: AVG((100 * (TCP_REQ_sum - TCP_REQ_MISS_sum) / TCP_REQ_sum) if (TCP_REQ_sum != 0) else None)
         TCP Cache BW:
-          value: AVG((TCP_TA_REQ_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9))
+          value: AVG((TCP_REQ_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9))
           unit: Bytes/s
           peak: ((($max_sclk / 1000) * 256) * $cu_per_gpu * 1e9)
-          pop: ((100 * AVG((TCP_TA_REQ_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9))) / ((($max_sclk / 1000) * 256) * $cu_per_gpu * 1e9))
+          pop: ((100 * AVG((TCP_REQ_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9))) / ((($max_sclk / 1000) * 256) * $cu_per_gpu * 1e9))
         GL1C Hit Rate:
-          value: ROUND((AVG((((GL1C_REQ_sum - GL1C_REQ_MISS_sum) / GL1C_REQ_sum) if (GL1C_REQ_sum != 0) else None)) * 100), 0)
-          unit: Pct
+          value: AVG((100 * (GL1C_REQ_sum - GL1C_REQ_MISS_sum) / GL1C_REQ_sum) if (GL1C_REQ_sum != 0) else None)
+          unit: Percent
           peak: 100
-          pop: ROUND((AVG((((GL1C_REQ_sum - GL1C_REQ_MISS_sum) / GL1C_REQ_sum) if (GL1C_REQ_sum != 0) else None)) * 100), 0)
+          pop: AVG((100 * (GL1C_REQ_sum - GL1C_REQ_MISS_sum) / GL1C_REQ_sum) if (GL1C_REQ_sum != 0) else None)
         GL1C Read BW:
           value: AVG((GL1C_REQ_READ_32B_sum*32 + GL1C_REQ_READ_64B_sum*64 + GL1C_REQ_READ_128B_sum*128) / ((End_Timestamp - Start_Timestamp) / 1e9))
           unit: Bytes/s
           peak: ((($max_sclk / 1000) * 128) * $se_per_gpu * 1e9)
           pop: ((100 * AVG((GL1C_REQ_READ_32B_sum*32 + GL1C_REQ_READ_64B_sum*64 + GL1C_REQ_READ_128B_sum*128) / ((End_Timestamp - Start_Timestamp) / 1e9))) / ((($max_sclk / 1000) * 128) * $se_per_gpu * 1e9))
-        GL2C Hit Rate:
-          value: AVG((((100 * GL2C_HIT_sum) / (GL2C_HIT_sum + GL2C_MISS_sum)) if ((GL2C_HIT_sum + GL2C_MISS_sum) != 0) else None))
-          unit: pct
-          peak: 100
-          pop: AVG((((100 * GL2C_HIT_sum) / (GL2C_HIT_sum + GL2C_MISS_sum)) if ((GL2C_HIT_sum + GL2C_MISS_sum) != 0) else None))
         GL2C Cache BW:
           value: AVG((GL2C_READ_32_REQ_sum*32 + GL2C_READ_64_REQ_sum*64 + GL2C_READ_128_REQ_sum*128 + GL2C_COMPRESSED_READ_96_REQ_sum*96) / ((End_Timestamp - Start_Timestamp) / 1e9))
           unit: Bytes/s
           peak: ((($max_sclk / 1000) * 128) * TO_INT_sum($total_l2_chan) * 1e9)
           pop: ((100 * AVG((GL2C_READ_32_REQ_sum*32 + GL2C_READ_64_REQ_sum*64 + GL2C_READ_128_REQ_sum*128 + GL2C_COMPRESSED_READ_96_REQ_sum*96) / ((End_Timestamp - Start_Timestamp) / 1e9))) / ((($max_sclk / 1000) * 128) * TO_INT_sum($total_l2_chan) * 1e9))
         Scalar Data Cache Hit Rate:
-          value: AVG((((100 * SQC_DCACHE_HITS_sum) / (SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum)) if ((SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum) != 0) else None))
-          unit: pct
+          value: AVG((100 * SQC_DCACHE_HITS_sum / SQC_DCACHE_REQ_sum) if (SQC_DCACHE_REQ_sum != 0) else None)
+          unit: Percent
           peak: 100
-          pop: AVG((((100 * SQC_DCACHE_HITS_sum) / (SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum)) if ((SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum) != 0) else None))
+          pop: AVG((100 * SQC_DCACHE_HITS_sum / SQC_DCACHE_REQ_sum) if (SQC_DCACHE_REQ_sum != 0) else None)
         Scalar Data Cache BW:
           value: AVG((SQC_DCACHE_REQ_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9))
           unit: Bytes/s
           peak: ((($max_sclk / 1000) * 64) * $sqc_per_gpu * 1e9)
           pop: ((100 * AVG((SQC_DCACHE_REQ_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9))) / ((($max_sclk / 1000) * 64) * $sqc_per_gpu * 1e9))
         Instruction Cache Hit Rate:
-          value: AVG(((100 * SQC_ICACHE_HITS_sum) / (SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum)))
-          unit: pct
+          value: AVG((100 * SQC_ICACHE_HITS_sum / SQC_ICACHE_REQ_sum) if (SQC_ICACHE_REQ_sum != 0) else None)
+          unit: Percent
           peak: 100
-          pop: AVG(((100 * SQC_ICACHE_HITS_sum) / (SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum)))
+          pop: AVG((100 * SQC_ICACHE_HITS_sum / SQC_ICACHE_REQ_sum) if (SQC_ICACHE_REQ_sum != 0) else None)
         Instruction Cache BW:
           value: AVG((SQC_ICACHE_REQ_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9))
           unit: Bytes/s
@@ -221,7 +214,8 @@ Panel Config:
     GPU Utilization: |-
       Percent of time the GPU was active.
     L2 Cache Hit Rate: |-
-      Ratio of L2 cache hits to total L2 accesses (GL2C_HIT / (GL2C_HIT + GL2C_MISS)).
+      GL2C last-level cache hit rate (same as Memory Chart / GL2C panel).
+      Formula: 100 * GL2C_HIT_sum / (GL2C_HIT_sum + GL2C_MISS_sum) when the denominator is non-zero.
     L2-Fabric Read BW: |-
       Read bandwidth from L2 to memory fabric (EA read sizes include 96 B on RDNA3).
       Peak uses $hbmBandwidth × 1e9 B/s from sysinfo (max_mclk × 32 B × channels).
@@ -264,22 +258,23 @@ Panel Config:
       Percent of wave lifetime spent waiting for any instruction to be ready to issue.
     TCP Cache Hit Rate: |-
       Texture Cache Per-pipe (TCP) hit rate. TCP is the L0 vector cache in RDNA3.5.
-      Calculated as (Requests - Misses) / Requests.
+      Same as Memory Chart TCP Hit Rate: 100 * (TCP_REQ_sum - TCP_REQ_MISS_sum) / TCP_REQ_sum.
     TCP Cache BW: |-
-      Achieved bandwidth at the TCP (L0 cache) level between shader cores and TCP.
+      TCP request bandwidth (Memory Chart “TCP Request Bandwidth”): TCP_REQ_sum * 64 B divided by kernel wall time.
     GL1C Hit Rate: |-
-      GL1 Cache hit rate. GL1C is shared L1 among WGPs within a Shader Engine.
+      GL1 Cache hit rate (same as Memory Chart / GL1C panel).
+      Formula: 100 * (GL1C_REQ_sum - GL1C_REQ_MISS_sum) / GL1C_REQ_sum when GL1C_REQ_sum != 0.
     GL1C Read BW: |-
       Achieved read bandwidth at GL1C (32/64/128 B request bins).
-    GL2C Hit Rate: |-
-      GL2 last-level cache hit rate before system memory.
     GL2C Cache BW: |-
       Achieved bandwidth at GL2C from client read size counters (32/64/128 B) plus 96 B compressed reads.
     Scalar Data Cache Hit Rate: |-
-      Percent of scalar data cache requests that hit (SMEM path).
+      Same as Memory Chart Dcache Hit Rate: 100 * SQC_DCACHE_HITS_sum / SQC_DCACHE_REQ_sum
+      when SQC_DCACHE_REQ_sum != 0.
     Scalar Data Cache BW: |-
       Bandwidth on the scalar data cache path.
     Instruction Cache Hit Rate: |-
-      Percent of instruction cache requests that hit.
+      Same as Memory Chart Icache Hit Rate: 100 * SQC_ICACHE_HITS_sum / SQC_ICACHE_REQ_sum
+      when SQC_ICACHE_REQ_sum != 0.
     Instruction Cache BW: |-
       Bandwidth on the instruction cache path.
