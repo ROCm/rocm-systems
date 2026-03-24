@@ -665,11 +665,16 @@ rocpd_processor_t::handle(const kfd_sample& _kfd)
     size_t parent_stack_id = 0;
     size_t correlation_id  = 0;
 
-    auto extdata_json = args_to_extdata_json(_kfd.args_str);
+    auto event_primary_key = m_data_processor->insert_event(
+        category_primary_key, stack_id, parent_stack_id, correlation_id);
 
-    auto event_primary_key =
-        m_data_processor->insert_event(category_primary_key, stack_id, parent_stack_id,
-                                       correlation_id, "", "", extdata_json.c_str());
+    auto args = process_arguments_string(_kfd.args_str);
+    for(const auto& arg : args)
+    {
+        m_data_processor->insert_args(event_primary_key, arg.arg_number,
+                                      arg.arg_type.c_str(), arg.arg_name.c_str(),
+                                      arg.arg_value.c_str());
+    }
 
     m_data_processor->insert_region(n_info.id, process.pid, thread_primary_key,
                                     _kfd.start_timestamp, _kfd.end_timestamp,
