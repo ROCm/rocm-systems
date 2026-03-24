@@ -28,6 +28,8 @@ import numpy as np
 import pandas as pd
 import re
 
+from collections import defaultdict
+
 
 def unique(lst):
     return list(set(lst))
@@ -69,6 +71,7 @@ def validate_json(json_data, counter_name, check_dispatch):
     data = json_data["rocprofiler-sdk-tool"]
     counter_collection_data = data["callback_records"]["counter_collection"]
     dispatch_ids = []
+    queue_dispatch_ids = defaultdict(list)
     # at present, AQLProfile has bugs when reporting the counters for below architectures
     skip_gfx = ("gfx1101", "gfx1102", "gfx1150", "gfx1151", "gfx1152", "gfx1153")
 
@@ -101,6 +104,10 @@ def validate_json(json_data, counter_name, check_dispatch):
         assert len(kernel_name) > 0
 
         dispatch_ids.append(dispatch_data["dispatch_id"])
+
+        qid = dispatch_data["queue_id"]["handle"]
+        queue_dispatch_ids[qid].append(dispatch_data["dispatch_id"])
+
         if not re.search(r"__amd_rocclr_.*", kernel_name):
             values = []
             for record in counter["records"]:
@@ -117,10 +124,18 @@ def validate_json(json_data, counter_name, check_dispatch):
                 assert sum(values) > 0, f"{counter_name} value is not > 0"
 
     if check_dispatch:
-        di_uniq = list(set(sorted(dispatch_ids)))
-        # make sure the dispatch ids are unique and ordered
-        di_expect = [idx + 1 for idx in range(len(dispatch_ids))]
-        assert di_expect == di_uniq
+        assert len(set(dispatch_ids)) == len(
+            dispatch_ids
+        ), f"duplicate dispatch ids: {len(dispatch_ids)} total vs {len(set(dispatch_ids))} unique"
+
+        assert all(d > 0 for d in dispatch_ids), "dispatch ids must be positive"
+
+        for qid, dids in queue_dispatch_ids.items():
+            for i in range(1, len(dids)):
+                assert dids[i] > dids[i - 1], (
+                    f"dispatch ids not ascending in queue {qid}: "
+                    f"{dids[i]} at index {i} <= {dids[i - 1]} at index {i - 1}"
+                )
 
 
 def test_validate_counter_collection_csv_pass1(input_csv_pass1: pd.DataFrame):
