@@ -71,6 +71,16 @@ Panel Config:
           min: MIN(GL2C_ATOMIC_sum / $denom)
           max: MAX(GL2C_ATOMIC_sum / $denom)
           unit: (Count + $normUnit)
+        EA Read Requests (DRAM):
+          avg: AVG(GL2C_EA_RDREQ_DRAM_sum / $denom)
+          min: MIN(GL2C_EA_RDREQ_DRAM_sum / $denom)
+          max: MAX(GL2C_EA_RDREQ_DRAM_sum / $denom)
+          unit: (Count + $normUnit)
+        EA Write Requests (DRAM):
+          avg: AVG(GL2C_EA_WRREQ_DRAM_sum / $denom)
+          min: MIN(GL2C_EA_WRREQ_DRAM_sum / $denom)
+          max: MAX(GL2C_EA_WRREQ_DRAM_sum / $denom)
+          unit: (Count + $normUnit)
 
   # =========================================================================
   # GL2C Bandwidth
@@ -117,6 +127,12 @@ Panel Config:
       Number of write requests to the GL2C cache (GL2C_WRITE).
     Atomic Requests: |-
       Number of atomic requests at the GL2C cache (GL2C_ATOMIC).
+    EA Read Requests (DRAM): |-
+      Number of GL2C/EA read requests destined for DRAM (memory controller), per SPG
+      GL2C_PERF_SEL_EA_RDREQ_DRAM (GL2C_EA_RDREQ_DRAM), summed over GL2C instances.
+    EA Write Requests (DRAM): |-
+      Number of GL2C/EA write requests destined for DRAM (memory controller), per SPG
+      GL2C_PERF_SEL_EA_WRREQ_DRAM (GL2C_EA_WRREQ_DRAM), summed over GL2C instances.
     GL2C Read BW: |-
       Read bandwidth from GL2C_READ_{32,64,128}_REQ byte accounting plus
       GL2C_COMPRESSED_READ_96_REQ (96 B compressed reads). EA 96 B reads use GL2C_EA_RDREQ_96B.
