@@ -1416,6 +1416,123 @@ int run_test_log_rcp(const char* co) {
   return ok == N ? 0 : 1;
 }
 
+// ── packed_f16 test ──────────────────────────────────────────────────────────
+
+int run_test_packed_f16(const char* co) {
+  int N = 256;  // number of f16 elements
+  int out_n = N / 2;  // number of float output elements
+  int bs = 32, nb = (out_n + bs - 1) / bs;
+  // Allocate f16 inputs and float output
+  __fp16 *h_a = (__fp16*)malloc(N * sizeof(__fp16));
+  __fp16 *h_b = (__fp16*)malloc(N * sizeof(__fp16));
+  float *h_o = (float*)calloc(out_n, sizeof(float));
+  for (int i = 0; i < N; i++) {
+    h_a[i] = (__fp16)(i * 0.1f);
+    h_b[i] = (__fp16)(i * 0.2f + 1.0f);
+  }
+  void *d_a, *d_b;
+  float *d_o;
+  CHECK(hipMalloc(&d_a, N * sizeof(__fp16)));
+  CHECK(hipMalloc(&d_b, N * sizeof(__fp16)));
+  CHECK(hipMalloc(&d_o, out_n * sizeof(float)));
+  CHECK(hipMemcpy(d_a, h_a, N * sizeof(__fp16), hipMemcpyHostToDevice));
+  CHECK(hipMemcpy(d_b, h_b, N * sizeof(__fp16), hipMemcpyHostToDevice));
+  hipModule_t m; hipFunction_t f;
+  CHECK(hipModuleLoad(&m, co));
+  CHECK(hipModuleGetFunction(&f, m, "packed_f16"));
+  int n = N; void* args[] = {&d_o, &d_a, &d_b, &n};
+  CHECK(hipModuleLaunchKernel(f, nb,1,1, bs,1,1, 0,0, args, NULL));
+  CHECK(hipDeviceSynchronize());
+  CHECK(hipMemcpy(h_o, d_o, out_n * sizeof(float), hipMemcpyDeviceToHost));
+  int ok = 0;
+  for (int i = 0; i < out_n; i++) {
+    float a0 = (float)h_a[i*2], a1 = (float)h_a[i*2+1];
+    float b0 = (float)h_b[i*2], b1 = (float)h_b[i*2+1];
+    float r0 = a0 + b0;
+    float r1 = a1 * b1;
+    float expected = r0 + r1;
+    if (fabsf(h_o[i] - expected) < 0.5f) ok++;  // f16 precision tolerance
+  }
+  printf("  packed_f16:       %d/%d %s\n", ok, out_n, ok==out_n?"PASS":"FAIL");
+  hipFree(d_a); hipFree(d_b); hipFree(d_o); hipModuleUnload(m);
+  free(h_a); free(h_b); free(h_o);
+  return ok == out_n ? 0 : 1;
+}
+
+// ── dot_product_f16 test ────────────────────────────────────────────────────
+
+int run_test_dot_product_f16(const char* co) {
+  int N = 256;  // number of f16 elements
+  int out_n = N / 2;
+  int bs = 32, nb = (out_n + bs - 1) / bs;
+  __fp16 *h_a = (__fp16*)malloc(N * sizeof(__fp16));
+  __fp16 *h_b = (__fp16*)malloc(N * sizeof(__fp16));
+  float *h_o = (float*)calloc(out_n, sizeof(float));
+  for (int i = 0; i < N; i++) {
+    h_a[i] = (__fp16)(1.0f + i * 0.01f);
+    h_b[i] = (__fp16)(2.0f - i * 0.005f);
+  }
+  void *d_a, *d_b;
+  float *d_o;
+  CHECK(hipMalloc(&d_a, N * sizeof(__fp16)));
+  CHECK(hipMalloc(&d_b, N * sizeof(__fp16)));
+  CHECK(hipMalloc(&d_o, out_n * sizeof(float)));
+  CHECK(hipMemcpy(d_a, h_a, N * sizeof(__fp16), hipMemcpyHostToDevice));
+  CHECK(hipMemcpy(d_b, h_b, N * sizeof(__fp16), hipMemcpyHostToDevice));
+  hipModule_t m; hipFunction_t f;
+  CHECK(hipModuleLoad(&m, co));
+  CHECK(hipModuleGetFunction(&f, m, "dot_product_f16"));
+  int n = N; void* args[] = {&d_o, &d_a, &d_b, &n};
+  CHECK(hipModuleLaunchKernel(f, nb,1,1, bs,1,1, 0,0, args, NULL));
+  CHECK(hipDeviceSynchronize());
+  CHECK(hipMemcpy(h_o, d_o, out_n * sizeof(float), hipMemcpyDeviceToHost));
+  int ok = 0;
+  for (int i = 0; i < out_n; i++) {
+    float expected = (float)h_a[i*2] * (float)h_b[i*2] +
+                     (float)h_a[i*2+1] * (float)h_b[i*2+1];
+    if (fabsf(h_o[i] - expected) < 0.05f) ok++;
+  }
+  printf("  dot_product_f16:  %d/%d %s\n", ok, out_n, ok==out_n?"PASS":"FAIL");
+  hipFree(d_a); hipFree(d_b); hipFree(d_o); hipModuleUnload(m);
+  free(h_a); free(h_b); free(h_o);
+  return ok == out_n ? 0 : 1;
+}
+
+// ── warp_shuffle test ───────────────────────────────────────────────────────
+
+int run_test_warp_shuffle(const char* co) {
+  int N = 256, bs = 32, nb = N / bs;
+  int *h_in = (int*)malloc(N * sizeof(int));
+  int *h_o = (int*)calloc(N, sizeof(int));
+  for (int i = 0; i < N; i++) h_in[i] = i + 1;
+  int *d_in, *d_o;
+  CHECK(hipMalloc(&d_in, N * sizeof(int)));
+  CHECK(hipMalloc(&d_o, N * sizeof(int)));
+  CHECK(hipMemcpy(d_in, h_in, N * sizeof(int), hipMemcpyHostToDevice));
+  hipModule_t m; hipFunction_t f;
+  CHECK(hipModuleLoad(&m, co));
+  CHECK(hipModuleGetFunction(&f, m, "warp_shuffle"));
+  int n = N; void* args[] = {&d_o, &d_in, &n};
+  CHECK(hipModuleLaunchKernel(f, nb,1,1, bs,1,1, 0,0, args, NULL));
+  CHECK(hipDeviceSynchronize());
+  CHECK(hipMemcpy(h_o, d_o, N * sizeof(int), hipMemcpyDeviceToHost));
+  int ok = 0;
+  for (int i = 0; i < N; i++) {
+    // Lane 0 of each wavefront broadcasts its value to all lanes.
+    // Each block has bs threads. On wave32, wavefront is 32 threads.
+    // On wave64 (transpiled), wavefront is 64 threads but we run 32 active.
+    // Lane 0 of wavefront j has in[j*32] = j*32+1. All lanes add their own val.
+    int wf = i / 32;
+    int lane0_val = h_in[wf * 32];  // value of lane 0 in this wavefront
+    int expected = h_in[i] + lane0_val;
+    if (h_o[i] == expected) ok++;
+  }
+  printf("  warp_shuffle:     %d/%d %s\n", ok, N, ok==N?"PASS":"FAIL");
+  hipFree(d_in); hipFree(d_o); hipModuleUnload(m);
+  free(h_in); free(h_o);
+  return ok == N ? 0 : 1;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 int main() {
@@ -1451,7 +1568,11 @@ int main() {
   fails += run_test_bitfield_ops("/tmp/bitfield_ops_gfx1250.elf");
   fails += run_test_int_minmax("/tmp/int_minmax_gfx1250.elf");
   fails += run_test_log_rcp("/tmp/log_rcp_kernel_gfx1250.elf");
-  int total = 28;
+  // New ISA coverage tests (packed f16, dot product f16, warp shuffle)
+  fails += run_test_packed_f16("/tmp/packed_f16_gfx1250.elf");
+  fails += run_test_dot_product_f16("/tmp/dot_product_f16_gfx1250.elf");
+  fails += run_test_warp_shuffle("/tmp/warp_shuffle_gfx1250.elf");
+  int total = 31;
   printf("\n%s: %d/%d tests passed\n", fails?"SOME FAILED":"ALL PASSED", total-fails, total);
   return fails;
 }

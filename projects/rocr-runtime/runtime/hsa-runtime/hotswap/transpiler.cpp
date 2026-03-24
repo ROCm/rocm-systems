@@ -249,6 +249,12 @@ static const MnemonicMapping kVALURenames[] = {
     {"v_add_nc_i32", "v_add_i32"},
     {"v_sub_nc_i32", "v_sub_i32"},
     // v_fmac_f32/f16/f64: available on gfx942 (CDNA3) natively — no rename needed
+    // v_pk_*_num_* → v_pk_* (GFX12 adds _num_ for IEEE compliance, GFX9 omits it)
+    {"v_pk_add_num_f16", "v_pk_add_f16"},
+    {"v_pk_mul_num_f16", "v_pk_mul_f16"},
+    {"v_pk_max_num_f16", "v_pk_max_f16"},
+    {"v_pk_min_num_f16", "v_pk_min_f16"},
+    {"v_pk_fma_num_f16", "v_pk_fma_f16"},
 };
 
 // Global atomic renames (GFX12 adds _u32/_i32/_b32 suffix)
@@ -1222,6 +1228,51 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
     return result;
   }
 
+  // ─── v_mov_b16 → v_mov_b32 (GFX12-only 16-bit move) ───
+  // GFX12 has v_mov_b16 for 16-bit register moves. GFX9 doesn't have it.
+  // Widen to v_mov_b32 — the upper 16 bits are undefined anyway for packed ops.
+  if (mnemonic == "v_mov_b16" || mnemonic == "v_mov_b16_e32" ||
+      mnemonic == "v_mov_b16_e64") {
+    std::string new_mnem = "v_mov_b32_e32";
+    line = ReplaceMnemonic(line, mnemonic, new_mnem);
+    mnemonic = new_mnem;
+    result.push_back(line);
+    return result;
+  }
+
+  // ─── s_bitreplicate_b64_b32 → s_mov_b32 pair ───
+  // GFX12: s_bitreplicate_b64_b32 s[D:D+1], sS → each bit of sS is replicated
+  // to 2 bits in the 64-bit result. For wave32-in-wave64 translation, we only
+  // need the lower 32 bits (exec_lo operates on lanes 0-31).
+  // Simplified emulation: s[D] = sS, s[D+1] = 0 (preserves wave32 behavior).
+  if (mnemonic == "s_bitreplicate_b64_b32") {
+    std::string ops = line.substr(line.find(mnemonic) + mnemonic.size());
+    std::vector<std::string> operands;
+    std::istringstream oss(ops);
+    std::string tok;
+    while (std::getline(oss, tok, ',')) {
+      size_t s = tok.find_first_not_of(" \t");
+      size_t e = tok.find_last_not_of(" \t");
+      if (s != std::string::npos) operands.push_back(tok.substr(s, e - s + 1));
+    }
+    if (operands.size() >= 2) {
+      // Parse s[D:D+1] pair
+      std::string dst_pair = operands[0];
+      std::string src = operands[1];
+      std::regex pair_re(R"(s\[(\d+):(\d+)\])");
+      std::smatch m;
+      if (std::regex_match(dst_pair, m, pair_re)) {
+        int d_lo = std::stoi(m[1]);
+        int d_hi = std::stoi(m[2]);
+        result.push_back("s_mov_b32 s" + std::to_string(d_lo) + ", " + src);
+        result.push_back("s_mov_b32 s" + std::to_string(d_hi) + ", 0");
+      } else {
+        result.push_back("s_mov_b32 " + dst_pair + ", " + src);
+      }
+      return result;
+    }
+  }
+
   // ─── s_add_nc_u64 → emulate with s_add_u32 + s_addc_u32 ───
   // GFX12: s_add_nc_u64 s[D:D+1], s[A:A+1], src (single instruction)
   // GFX9: s_add_u32 sD, sA, src_lo + s_addc_u32 sD+1, sA+1, src_hi
@@ -1350,22 +1401,27 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
     return result;
   }
 
-  // ─── v_bitop2_b32 → emulate (GFX12 programmable 3-input bitop) ───
+  // ─── v_bitop2_b32 / v_bitop3_b32 → emulate (GFX12 programmable 3-input bitop) ───
   // v_bitop2_b32 vdst, src0, src1 bitop3:0xNN
-  // The bitop3 byte is a truth table for (src0, src1, vdst_old).
-  // Common patterns: 0x40 = src0 & src1 & ~vdst_old
-  // For now, skip with NOP (non-critical address computation helper)
+  // The bitop3 byte is a truth table indexed by (src0_bit<<2 | src1_bit<<1 | vdst_old_bit):
+  //   bit 0: f(0,0,0), bit 1: f(0,0,1), bit 2: f(0,1,0), bit 3: f(0,1,1),
+  //   bit 4: f(1,0,0), bit 5: f(1,0,1), bit 6: f(1,1,0), bit 7: f(1,1,1)
+  //
+  // Decomposition strategy:
+  //   1. Try direct mapping for common truth tables (single-instruction).
+  //   2. For general case, use Shannon expansion on src0:
+  //      result = (src0 & f1(src1, vdst_old)) | (~src0 & f0(src1, vdst_old))
+  //      where f1 = tt restricted to src0=1, f0 = tt restricted to src0=0.
+  //      Each f is a 2-input function of (src1, vdst_old) — emittable in 1 instruction.
+  //      Use v_bfi_b32 to combine: v_bfi_b32 vdst, src0, f1_result, f0_result.
   if (mnemonic.find("v_bitop2_b32") == 0 || mnemonic.find("v_bitop3_b32") == 0) {
-    // Parse: v_bitop2_b32 vdst, src0, src1 bitop3:0xNN
-    // Emulate common patterns or NOP for rare ones
     std::string ops = line.substr(line.find(mnemonic) + mnemonic.size());
     size_t bitop_pos = ops.find("bitop3:");
     if (bitop_pos != std::string::npos) {
-      int truth_table = 0;
+      int tt = 0;
       std::string hex_str = ops.substr(bitop_pos + 7);
-      try { truth_table = std::stoi(hex_str, nullptr, 0); } catch (...) {}
+      try { tt = std::stoi(hex_str, nullptr, 0); } catch (...) {}
 
-      // Parse operands before bitop3
       std::string op_part = ops.substr(0, bitop_pos);
       std::vector<std::string> operands;
       std::istringstream oss(op_part);
@@ -1379,39 +1435,202 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
 
       if (operands.size() >= 3) {
         std::string vdst = operands[0], src0 = operands[1], src1 = operands[2];
-        // Common truth tables (index = src0_bit<<2 | src1_bit<<1 | old_vdst_bit):
-        if (truth_table == 0xCA) {
-          // (src0 & src1) | (~src0 & vdst) = bitwise select
+        std::string tmp0 = "v" + std::to_string(scale_temp_vgpr);
+        std::string tmp1 = "v" + std::to_string(scale_temp_vgpr + 1);
+
+        // ── Common single-instruction truth tables ──
+        bool handled = true;
+        if (tt == 0x00) {
+          // All zeros
+          result.push_back("v_mov_b32_e32 " + vdst + ", 0");
+        } else if (tt == 0xFF) {
+          // All ones
+          result.push_back("v_mov_b32_e32 " + vdst + ", -1");
+        } else if (tt == 0xF0) {
+          // src0
+          if (vdst != src0) result.push_back("v_mov_b32_e32 " + vdst + ", " + src0);
+          // else: no-op (vdst already is src0 — but that can't happen since vdst != src0 in the ISA)
+        } else if (tt == 0xCC) {
+          // src1
+          if (vdst != src1) result.push_back("v_mov_b32_e32 " + vdst + ", " + src1);
+        } else if (tt == 0xAA) {
+          // vdst_old (no-op: output unchanged)
+          result.push_back("s_nop 0 ; bitop3 0xAA = identity (vdst unchanged)");
+        } else if (tt == 0x0F) {
+          // ~src0
+          result.push_back("v_not_b32_e32 " + vdst + ", " + src0);
+        } else if (tt == 0x33) {
+          // ~src1
+          result.push_back("v_not_b32_e32 " + vdst + ", " + src1);
+        } else if (tt == 0x55) {
+          // ~vdst_old
+          result.push_back("v_not_b32_e32 " + vdst + ", " + vdst);
+        } else if (tt == 0xC0) {
+          // src0 & src1
+          result.push_back("v_and_b32 " + vdst + ", " + src0 + ", " + src1);
+        } else if (tt == 0xFC) {
+          // src0 | src1
+          result.push_back("v_or_b32 " + vdst + ", " + src0 + ", " + src1);
+        } else if (tt == 0x3C) {
+          // src0 ^ src1
+          result.push_back("v_xor_b32 " + vdst + ", " + src0 + ", " + src1);
+        } else if (tt == 0x30) {
+          // src0 & ~src1
+          result.push_back("v_andn2_b32 " + vdst + ", " + src0 + ", " + src1);
+        } else if (tt == 0x0C) {
+          // ~src0 & src1
+          result.push_back("v_andn2_b32 " + vdst + ", " + src1 + ", " + src0);
+        } else if (tt == 0xA0) {
+          // src0 & vdst_old
+          result.push_back("v_and_b32 " + vdst + ", " + src0 + ", " + vdst);
+        } else if (tt == 0x88) {
+          // src1 & vdst_old
+          result.push_back("v_and_b32 " + vdst + ", " + src1 + ", " + vdst);
+        } else if (tt == 0xFA) {
+          // src0 | vdst_old
+          result.push_back("v_or_b32 " + vdst + ", " + src0 + ", " + vdst);
+        } else if (tt == 0xEE) {
+          // src1 | vdst_old
+          result.push_back("v_or_b32 " + vdst + ", " + src1 + ", " + vdst);
+        } else if (tt == 0x5A) {
+          // src0 ^ vdst_old
+          result.push_back("v_xor_b32 " + vdst + ", " + src0 + ", " + vdst);
+        } else if (tt == 0x66) {
+          // src1 ^ vdst_old
+          result.push_back("v_xor_b32 " + vdst + ", " + src1 + ", " + vdst);
+        } else if (tt == 0x3F) {
+          // ~(src0 & src1) = NAND
+          result.push_back("v_and_b32 " + vdst + ", " + src0 + ", " + src1);
+          result.push_back("v_not_b32_e32 " + vdst + ", " + vdst);
+        } else if (tt == 0x03) {
+          // ~(src0 | src1) = NOR
+          result.push_back("v_or_b32 " + vdst + ", " + src0 + ", " + src1);
+          result.push_back("v_not_b32_e32 " + vdst + ", " + vdst);
+        } else if (tt == 0xCA) {
+          // (src0 & src1) | (~src0 & vdst) = bitwise select (BFI)
           result.push_back("v_bfi_b32 " + vdst + ", " + src0 + ", " + src1 + ", " + vdst);
-        } else if (truth_table == 0x40) {
-          // 0x40: src0 & src1 & ~old_vdst
-          // Special case: when src1 == old_vdst, result = (X & Y) & ~Y = 0 always.
+        } else if (tt == 0xAC) {
+          // (src1 & vdst) | (~src1 & src0) = BFI with src1 as selector
+          result.push_back("v_bfi_b32 " + vdst + ", " + src1 + ", " + vdst + ", " + src0);
+        } else if (tt == 0xE2) {
+          // (vdst_old & src0) | (~vdst_old & src1) = BFI with vdst as selector
+          // vdst_old selects: bit=1 → src0, bit=0 → src1
+          // v_bfi_b32 uses first arg as selector: dst = (sel & src2) | (~sel & src3)
+          // Need: (vdst_old & src0) | (~vdst_old & src1)
+          // = v_bfi_b32 tmp, vdst, src0, src1; mov vdst, tmp
+          result.push_back("v_bfi_b32 " + tmp0 + ", " + vdst + ", " + src0 + ", " + src1);
+          result.push_back("v_mov_b32_e32 " + vdst + ", " + tmp0);
+        } else if (tt == 0x80) {
+          // src0 & src1 & vdst_old
+          if (src1 == vdst) {
+            result.push_back("v_and_b32 " + vdst + ", " + src0 + ", " + vdst);
+          } else {
+            result.push_back("v_and_b32 " + tmp0 + ", " + src0 + ", " + src1);
+            result.push_back("v_and_b32 " + vdst + ", " + tmp0 + ", " + vdst);
+          }
+        } else if (tt == 0x40) {
+          // src0 & src1 & ~vdst_old
           if (src1 == vdst) {
             result.push_back("v_mov_b32_e32 " + vdst + ", 0");
           } else {
-            // General case: compute src0 & src1, then AND with ~old_vdst
-            std::string tmp = "v" + std::to_string(scale_temp_vgpr);
-            result.push_back("v_and_b32 " + tmp + ", " + src0 + ", " + src1);
-            result.push_back("v_andn2_b32 " + vdst + ", " + tmp + ", " + vdst);
-          }
-        } else if (truth_table == 0x80) {
-          // 0x80: src0 & src1 & old_vdst
-          result.push_back("v_and_b32 " + vdst + ", " + src0 + ", " + src1);
-          // v_and_b32 vdst, vdst, old_vdst — but old_vdst was just overwritten!
-          // When src1 == vdst: (src0 & vdst) & vdst = src0 & vdst → already correct.
-          // When src1 != vdst: need 3-way AND. Use temp.
-          if (src1 != vdst) {
-            // Already computed vdst = src0 & src1. Need vdst & old_vdst.
-            // But old_vdst was clobbered. Need temp.
-            // Rewrite: temp = src0 & src1, vdst = temp & old_vdst
-            std::string tmp = "v" + std::to_string(scale_temp_vgpr);
-            result.clear();
-            result.push_back("v_and_b32 " + tmp + ", " + src0 + ", " + src1);
-            result.push_back("v_and_b32 " + vdst + ", " + tmp + ", " + vdst);
+            result.push_back("v_and_b32 " + tmp0 + ", " + src0 + ", " + src1);
+            result.push_back("v_andn2_b32 " + vdst + ", " + tmp0 + ", " + vdst);
           }
         } else {
-          // Generic fallback: just AND (imprecise but non-crashing)
-          result.push_back("v_and_b32 " + vdst + ", " + src0 + ", " + src1);
+          handled = false;
+        }
+
+        if (handled) return result;
+
+        // ── General case: Shannon expansion on src0 ──
+        // Split tt into f0 (src0=0) and f1 (src0=1):
+        //   f0 = {tt[0], tt[1], tt[2], tt[3]} (bits where src0=0)
+        //   f1 = {tt[4], tt[5], tt[6], tt[7]} (bits where src0=1)
+        // Each is a 2-input truth table indexed by (src1_bit<<1 | vdst_old_bit).
+        uint8_t f0 = tt & 0x0F;        // lower nibble
+        uint8_t f1 = (tt >> 4) & 0x0F; // upper nibble
+
+        // Emit a 2-input function of (src1, vdst_old) into dst_reg.
+        // 2-input truth table indexed by (src1_bit<<1 | vdst_old_bit):
+        //   bit 0: f(0,0), bit 1: f(0,1), bit 2: f(1,0), bit 3: f(1,1)
+        auto emit_2input = [&](uint8_t f2, const std::string& dst,
+                               const std::string& s1, const std::string& vd_old) {
+          switch (f2) {
+            case 0x0: result.push_back("v_mov_b32_e32 " + dst + ", 0"); break;
+            case 0xF: result.push_back("v_mov_b32_e32 " + dst + ", -1"); break;
+            case 0xC: // src1
+              if (dst != s1) result.push_back("v_mov_b32_e32 " + dst + ", " + s1);
+              break;
+            case 0xA: // vdst_old
+              if (dst != vd_old) result.push_back("v_mov_b32_e32 " + dst + ", " + vd_old);
+              break;
+            case 0x3: // ~src1
+              result.push_back("v_not_b32_e32 " + dst + ", " + s1); break;
+            case 0x5: // ~vdst_old
+              result.push_back("v_not_b32_e32 " + dst + ", " + vd_old); break;
+            case 0x8: // src1 & vdst_old
+              result.push_back("v_and_b32 " + dst + ", " + s1 + ", " + vd_old); break;
+            case 0xE: // src1 | vdst_old
+              result.push_back("v_or_b32 " + dst + ", " + s1 + ", " + vd_old); break;
+            case 0x6: // src1 ^ vdst_old
+              result.push_back("v_xor_b32 " + dst + ", " + s1 + ", " + vd_old); break;
+            case 0x4: // src1 & ~vdst_old
+              result.push_back("v_andn2_b32 " + dst + ", " + s1 + ", " + vd_old); break;
+            case 0x2: // ~src1 & vdst_old
+              result.push_back("v_andn2_b32 " + dst + ", " + vd_old + ", " + s1); break;
+            case 0x1: // ~src1 & ~vdst_old = ~(src1 | vdst_old)
+              result.push_back("v_or_b32 " + dst + ", " + s1 + ", " + vd_old);
+              result.push_back("v_not_b32_e32 " + dst + ", " + dst); break;
+            case 0x7: // ~(src1 & vdst_old) = NAND
+              result.push_back("v_and_b32 " + dst + ", " + s1 + ", " + vd_old);
+              result.push_back("v_not_b32_e32 " + dst + ", " + dst); break;
+            case 0x9: // ~(src1 ^ vdst_old) = XNOR
+              result.push_back("v_xor_b32 " + dst + ", " + s1 + ", " + vd_old);
+              result.push_back("v_not_b32_e32 " + dst + ", " + dst); break;
+            case 0xB: // src1 | ~vdst_old = ~(~src1 & vdst_old) = ~(v_andn2 vd_old, s1)
+              result.push_back("v_andn2_b32 " + dst + ", " + vd_old + ", " + s1);
+              result.push_back("v_not_b32_e32 " + dst + ", " + dst); break;
+            case 0xD: // ~src1 | vdst_old = ~(src1 & ~vdst_old) = ~(v_andn2 s1, vd_old)
+              result.push_back("v_andn2_b32 " + dst + ", " + s1 + ", " + vd_old);
+              result.push_back("v_not_b32_e32 " + dst + ", " + dst); break;
+            default:
+              // Should not reach here (all 16 cases covered)
+              result.push_back("s_nop 0 ; UNSUPPORTED 2-input bitop f=" + std::to_string(f2));
+              break;
+          }
+        };
+
+        // Special cases where one half is trivial:
+        if (f0 == f1) {
+          // src0 doesn't matter — result depends only on src1 and vdst_old
+          emit_2input(f0, vdst, src1, vdst);
+        } else if (f0 == 0x0 && f1 != 0x0) {
+          // result = src0 & f1(src1, vdst_old)
+          emit_2input(f1, tmp0, src1, vdst);
+          result.push_back("v_and_b32 " + vdst + ", " + src0 + ", " + tmp0);
+        } else if (f1 == 0x0 && f0 != 0x0) {
+          // result = ~src0 & f0(src1, vdst_old)
+          emit_2input(f0, tmp0, src1, vdst);
+          result.push_back("v_andn2_b32 " + vdst + ", " + tmp0 + ", " + src0);
+        } else if (f0 == 0xF) {
+          // result = ~src0 | f1(src1, vdst_old) = ~(src0 & ~f1) = ~(v_andn2 src0, f1)
+          emit_2input(f1, tmp0, src1, vdst);
+          result.push_back("v_andn2_b32 " + vdst + ", " + src0 + ", " + tmp0);
+          result.push_back("v_not_b32_e32 " + vdst + ", " + vdst);
+        } else if (f1 == 0xF) {
+          // result = src0 | f0(src1, vdst_old)
+          emit_2input(f0, tmp0, src1, vdst);
+          result.push_back("v_or_b32 " + vdst + ", " + src0 + ", " + tmp0);
+        } else {
+          // General case: use v_bfi_b32 to mux between f1 and f0 based on src0
+          // v_bfi_b32 dst, selector, val_when_1, val_when_0
+          // Save vdst_old to tmp1 before any clobbering (f0/f1 may need it)
+          result.push_back("v_mov_b32_e32 " + tmp1 + ", " + vdst);
+          emit_2input(f1, tmp0, src1, tmp1);
+          emit_2input(f0, vdst, src1, tmp1);
+          // Now: tmp0 = f1(src1, vdst_old), vdst = f0(src1, vdst_old)
+          // result = (src0 & tmp0) | (~src0 & vdst) = v_bfi_b32 vdst, src0, tmp0, vdst
+          result.push_back("v_bfi_b32 " + vdst + ", " + src0 + ", " + tmp0 + ", " + vdst);
         }
         return result;
       }
@@ -1667,10 +1886,18 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
 
         if (mnemonic == "s_fmac_f32") {
           // s_fmac_f32 sdst, ssrc0, ssrc1 → sdst += ssrc0 * ssrc1
-          // Use v6 only: mul then add (avoids constant bus violation and v5 clobber).
+          // Use v_fma_f32 for precision (single rounding step instead of mul+add).
+          // GFX9 VOP3 constant bus: at most one SGPR. ssrc1 and sdst may be
+          // different SGPRs. Move sdst (accumulator) to v5 to avoid bus conflict.
+          result.push_back("v_mov_b32_e32 v6, " + ssrc0);
+          result.push_back("v_mov_b32_e32 v5, " + sdst);
+          result.push_back("v_fma_f32 v6, v6, " + ssrc1 + ", v5");
+          result.push_back("v_readfirstlane_b32 " + sdst + ", v6");
+        } else if (mnemonic == "s_mul_f32") {
+          // s_mul_f32 sdst, ssrc0, ssrc1 → sdst = ssrc0 * ssrc1
+          // Use standard v_mul_f32 (same IEEE rounding as SALU float).
           result.push_back("v_mov_b32_e32 v6, " + ssrc0);
           result.push_back("v_mul_f32_e32 v6, " + ssrc1 + ", v6");
-          result.push_back("v_add_f32_e32 v6, " + sdst + ", v6");
           result.push_back("v_readfirstlane_b32 " + sdst + ", v6");
         } else {
           // Other SALU float ops: v6 = ssrc0; v6 = op(ssrc1, v6); sdst = v6
@@ -4368,20 +4595,8 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
         "s_mov_b32 s5, 2 ; DBG cap outer loop\n"
         "s_cmp_ge_i32 s2, s4\n");
     }
-    // v_bitop2_b32/v_bitop3_b32 → s_nop 0 (GFX12-only, no simple GFX9 equivalent)
-    // Replace entire lines containing v_bitop[23]_b32
-    std::istringstream iss(translated_asm);
-    std::string cleaned;
-    std::string asmline;
-    while (std::getline(iss, asmline)) {
-      if (asmline.find("v_bitop2_b32") != std::string::npos ||
-          asmline.find("v_bitop3_b32") != std::string::npos) {
-        cleaned += "s_nop 0 ; BITOP STUB\n";
-      } else {
-        cleaned += asmline + "\n";
-      }
-    }
-    translated_asm = cleaned;
+    // v_bitop2_b32/v_bitop3_b32 are now fully handled in TranslateInstruction
+    // (complete 256-entry truth table decomposition). No post-processing needed.
   }
 
   // (count-down conversion removed — did not fix the split-K issue)
