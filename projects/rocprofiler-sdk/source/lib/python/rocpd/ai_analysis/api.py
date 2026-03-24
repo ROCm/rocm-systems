@@ -518,6 +518,7 @@ def analyze_database(
     output_format: OutputFormat = OutputFormat.PYTHON_OBJECT,
     verbose: bool = False,
     top_kernels: int = 10,
+    att_dir: Optional[str] = None,
 ) -> AnalysisResult:
     """
     Analyze a rocpd database file and return AI-powered insights.
@@ -565,6 +566,8 @@ def analyze_database(
         if custom_prompt:
             print(f"[Analysis] Custom prompt: {custom_prompt}")
 
+    att_analysis: dict = {}  # populated inside try block if att_dir is provided
+
     # Perform local analysis by calling individual analysis functions directly.
     # NOTE: We do NOT call analyze_performance() — it returns a formatted str,
     # not a dict. We need raw data to build the AnalysisResult dataclass.
@@ -589,6 +592,15 @@ def analyze_database(
         )
         short_kernels_data = analyze_short_kernels(connection)
 
+        # Tier 3: ATT (optional)
+        att_analysis: dict = {}
+        if att_dir:
+            from ..analyze import analyze_thread_trace
+
+            att_analysis = analyze_thread_trace(att_dir)
+            if verbose and not att_analysis.get("has_att_data"):
+                print(f"[ATT] {att_analysis.get('reason', 'No ATT data')}")
+
         recommendations = generate_recommendations(
             time_breakdown,
             hotspots,
@@ -597,6 +609,7 @@ def analyze_database(
             already_collected,
             short_kernels=short_kernels_data,
             interval_timeline=interval_timeline,
+            att_analysis=att_analysis if att_dir else None,
         )
 
         if verbose:
@@ -624,6 +637,8 @@ def analyze_database(
     result._raw["interval_timeline"] = interval_timeline
     result._raw["kernel_categories"] = kernel_categories
     result._raw["short_kernels"] = short_kernels_data
+    if att_dir and att_analysis.get("has_att_data"):
+        result._raw["att_trace"] = att_analysis
 
     # Optional LLM enhancement
     if enable_llm and llm_provider:

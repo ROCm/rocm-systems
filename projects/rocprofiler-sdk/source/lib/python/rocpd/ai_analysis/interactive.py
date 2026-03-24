@@ -3312,12 +3312,24 @@ class WorkflowSession:
         try:
             from rocpd.ai_analysis.api import analyze_database  # type: ignore[import]
 
+            # Auto-detect ATT stats_*.csv files in the same directory as the db.
+            # Present when user ran rocprofv3 --att (decoder writes CSVs alongside .db).
+            _db_dir = str(pathlib.Path(db_path).parent)
+            _att_csvs = list(pathlib.Path(_db_dir).glob("stats_*.csv"))
+            _att_dir = _db_dir if _att_csvs else None
+
             result = analyze_database(
                 pathlib.Path(db_path),
                 enable_llm=bool(self._llm_provider),
                 llm_provider=self._llm_provider or None,
                 llm_api_key=self._llm_api_key or None,
+                att_dir=_att_dir,
             )
+            if _att_dir:
+                _print(
+                    f"  [ATT] Found {len(_att_csvs)} stats_*.csv file(s) — Tier 3 ATT analysis active",
+                    style="cyan",
+                )
 
             eb = result.execution_breakdown
             if eb:
@@ -3601,7 +3613,11 @@ class WorkflowSession:
                     )
                     _print()
                     _print(
-                        "  [d]  Go deeper: collect PC sampling data (Tier 3)",
+                        "  [d]  Go deeper: collect PC sampling data (Tier 3 — stochastic)",
+                        style="cyan",
+                    )
+                    _print(
+                        "  [t]  Go deeper: collect ATT trace (Tier 3 — instruction stall analysis)",
                         style="cyan",
                     )
                 else:
@@ -3665,6 +3681,30 @@ class WorkflowSession:
                     style="dim",
                 )
                 _print("  Select [3] at the next prompt to run it.", style="dim")
+                return None
+            if choice == "t" and all_info and already_reprofiled and has_real_data:
+                # Build ATT command and route it to Phase 7 as option [3].
+                # Phase 4 auto-detects stats_*.csv in the output dir and runs ATT analysis.
+                run_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+                new_dir = f"{self._trace_dir}/run_{run_id}"
+                att_cmd = (
+                    f"rocprofv3 --att --att-target-cu 0 --att-simd-select 0x0"
+                    f" -d {new_dir} -o results -- {self._state.app_command}"
+                )
+                snap.ai_recommended_command = att_cmd
+                _print()
+                _print(
+                    "  ATT trace command ready. Proceeding to re-profiling.",
+                    style="dim",
+                )
+                _print(
+                    "  Select [3] at the next prompt to run it.",
+                    style="dim",
+                )
+                _print(
+                    "  Note: requires rocprof-trace-decoder installed (/opt/rocm/lib).",
+                    style="dim",
+                )
                 return None
             if choice == "r" and all_info and not already_reprofiled:
                 # Advance to re-profiling phase; AI-recommended command will be option [3].
