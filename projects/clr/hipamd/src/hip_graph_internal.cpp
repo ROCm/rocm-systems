@@ -160,7 +160,12 @@ size_t Graph::GetLeafNodeCount() const {
 }
 
 std::vector<std::pair<Node, Node>> Graph::GetEdges() const {
+  size_t edgeCount = 0;
+  for (const auto& node : vertices_) {
+    edgeCount += node->GetOutDegree();
+  }
   std::vector<std::pair<Node, Node>> edges;
+  edges.reserve(edgeCount);
   for (const auto& i : vertices_) {
     for (const auto& j : i->GetEdges()) {
       edges.push_back(std::make_pair(i, j));
@@ -174,14 +179,14 @@ void Graph::ScheduleOneNode(Node start, int stream_id) {
   if (!start) return;
 
   // stack of pending nodes for DFS
-  std::vector<Node> pending;
-  pending.push_back(start);
+  std::stack<Node> pending;
+  pending.push(start);
 
   int sid = stream_id;
 
   while (!pending.empty()) {
-    Node cur = pending.back();
-    pending.pop_back();
+    Node cur = pending.top();
+    pending.pop();
 
     // Skip if already scheduled
     if (cur->stream_id_ != -1) {
@@ -212,7 +217,7 @@ void Graph::ScheduleOneNode(Node start, int stream_id) {
     for (int i = static_cast<int>(edges.size()) - 1; i >= 0; --i) {
       Node e = edges[static_cast<size_t>(i)];
       if (e->stream_id_ != -1) continue;
-      pending.push_back(e);
+      pending.push(e);
       end_of_branch = false;
     }
 
@@ -502,12 +507,12 @@ void Graph::FindPathsDFS(Node start, std::vector<Node>& current_path,
   if (!start) return;
 
   // Stack of nodes to process.
-  std::vector<Node> st;
-  st.push_back(start);
+  std::stack<Node> st;
+  st.push(start);
 
   while (!st.empty()) {
-    Node node = st.back();
-    st.pop_back();
+    Node node = st.top();
+    st.pop();
     if (!node) continue;
 
     // Check if already visited
@@ -578,7 +583,7 @@ void Graph::FindPathsDFS(Node start, std::vector<Node>& current_path,
       current_path.clear();
       const auto& edges = node->GetEdges();
       for (int i = static_cast<int>(edges.size()) - 1; i >= 0; --i) {
-        st.push_back(edges[static_cast<size_t>(i)]);
+        st.push(edges[static_cast<size_t>(i)]);
       }
 
       continue;
@@ -629,11 +634,11 @@ void Graph::FindPathsDFS(Node start, std::vector<Node>& current_path,
 
       // Traverse each branch until it hits a join
       for (int i = static_cast<int>(edges.size()) - 1; i >= 0; --i) {
-        st.push_back(edges[static_cast<size_t>(i)]);
+        st.push(edges[static_cast<size_t>(i)]);
       }
     } else if (edges.size() == 1) {
       // Single edge - continue on same path
-      st.push_back(edges[0]);
+      st.push(edges[0]);
     }
 
     // Save any remaining path (handles leaf nodes and leaf join nodes)
@@ -694,6 +699,10 @@ void Graph::CreateSegmentsFromPaths(const hip::Graph::GraphExecutionPaths& exec_
 
 // ================================================================================================
 bool Graph::TopologicalOrder(std::vector<Node>& TopoOrder) {
+  // Prepare output vector.
+  TopoOrder.clear();
+  TopoOrder.reserve(GetNodeCount());
+
   std::queue<Node> q;
   std::unordered_map<Node, int> inDegree;
   for (auto entry : vertices_) {
@@ -737,23 +746,23 @@ void Graph::clone(Graph* newGraph, bool cloneNodes) const {
     newGraph->clonedNodes_[entry] = node;
   }
 
-  std::vector<Node> clonedEdges;
-  std::vector<Node> clonedDependencies;
   for (auto node : vertices_) {
     const std::vector<Node>& edges = node->GetEdges();
-    clonedEdges.clear();
+    std::vector<Node> clonedEdges;
+    clonedEdges.reserve(edges.size());
     for (auto edge : edges) {
       clonedEdges.push_back(newGraph->clonedNodes_[edge]);
     }
-    newGraph->clonedNodes_[node]->SetEdges(clonedEdges);
+    newGraph->clonedNodes_[node]->SetEdges(std::move(clonedEdges));
   }
   for (auto node : vertices_) {
     const std::vector<Node>& dependencies = node->GetDependencies();
-    clonedDependencies.clear();
+    std::vector<Node> clonedDependencies;
+    clonedDependencies.reserve(dependencies.size());
     for (auto dep : dependencies) {
       clonedDependencies.push_back(newGraph->clonedNodes_[dep]);
     }
-    newGraph->clonedNodes_[node]->SetDependencies(clonedDependencies);
+    newGraph->clonedNodes_[node]->SetDependencies(std::move(clonedDependencies));
   }
   for (auto& userObj : graphUserObj_) {
     userObj.first->retain();
@@ -1736,29 +1745,54 @@ void GraphExec::UpdateStreams(hip::Stream* launch_stream) {
   int devId = launch_stream->vdev()->device().index();
   // Clear any previous stream assignments
   streams_.clear();
-  // Current stream is the default in the assignment
-  streams_.push_back(launch_stream);
-  if (parallel_streams_.find(devId) == parallel_streams_.end()) {
+  const auto parallel_it = parallel_streams_.find(devId);
+  if (parallel_it == parallel_streams_.end()) {
     LogPrintfError("UpdateStreams failed for device id:%d", devId);
     return;
   }
-  auto parallel_streams = parallel_streams_[devId];
-  std::unordered_map<int, int> unique_stream_ids;
-  unique_stream_ids[launch_stream->getQueueID()] = 1;
+  const auto& parallel_streams = parallel_it->second;
+
+  // Reserve room for the streams.
+  size_t streams_upper_bound =
+      std::min(1 + parallel_streams.size(), static_cast<size_t>(max_streams_));
+  streams_.reserve(streams_upper_bound);
+
+  // Track unique stream IDs to prioritize non-colliding streams first.
+  std::set<int> unique_stream_ids;
+
+  // Current stream is the default in the assignment
+  streams_.push_back(launch_stream);
+  unique_stream_ids.insert(launch_stream->getQueueID());
+
+  // Track streams that collide with the launch stream for potential later assignment if we have
+  // capacity.
   std::vector<hip::Stream*> collided_streams;
-  // Assign streams that are unique in parallel_streams and doesnt collide with launch stream
-  for (uint32_t i = 0; i < parallel_streams.size(); i++) {
-    auto qid = parallel_streams[i]->getQueueID();
-    if (unique_stream_ids[qid] == 0) {
-      streams_.push_back(parallel_streams[i]);
-    } else {
-      collided_streams.push_back(parallel_streams[i]);
+
+  // Assign streams that are unique in parallel_streams and dont collide with the launch stream.
+  // To reduce the amount of reallocations in collided_streams, we stop adding new streams once we
+  // have enough to fill the remaining capacity after unique streams are added. We also stop
+  // iterating through parallel_streams once we reach streams_upper_bound, since additional streams
+  // (even if unique) cannot be used beyond the configured capacity.
+  for (hip::Stream* stream : parallel_streams) {
+    bool has_unseen_queue = unique_stream_ids.insert(stream->getQueueID()).second;
+    if (has_unseen_queue) {
+      streams_.push_back(stream);
+    } else if (collided_streams.size() < (streams_upper_bound - streams_.size())) {
+      collided_streams.push_back(stream);
     }
-    unique_stream_ids[qid]++;
+
+    // If we've reached our stream capacity, stop assigning more streams even if there are more
+    // unique streams available, since we cannot use them.
+    if (streams_.size() >= streams_upper_bound) {
+      break;
+    }
   }
-  // Assign the remaining streams for execution.
-  for (int i = streams_.size(), j = 0; i < max_streams_ && j < collided_streams.size(); i++, j++) {
-    streams_.push_back(collided_streams[j]);
+
+  if (streams_.size() < streams_upper_bound) {
+    // Assign the remaining streams for execution.
+    size_t remaining_slots = streams_upper_bound - streams_.size();
+    streams_.insert(streams_.end(), collided_streams.begin(),
+                    collided_streams.begin() + remaining_slots);
   }
 }
 
