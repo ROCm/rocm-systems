@@ -38,8 +38,6 @@ set(INC_LIST
     "${IMPL_HEADERS}"
     "${INC_DIR}/amdsmi.h"
     "${PROJECT_SOURCE_DIR}"
-    "${PROJECT_SOURCE_DIR}/rocm_smi/include/rocm_smi/rocm_smi.h"
-    "${PROJECT_SOURCE_DIR}/rocm_smi/include/rocm_smi/rocm_smi_utils.h"
     "${NIC_INCLUDES}"
 )
 
@@ -183,12 +181,3 @@ install(
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/e_smi/
     COMPONENT dev)
 
-install(
-    FILES "${PROJECT_SOURCE_DIR}/rocm_smi/include/rocm_smi/rocm_smi_logger.h"
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rocm_smi/
-    COMPONENT dev)
-
-install(
-    FILES "${PROJECT_SOURCE_DIR}/rocm_smi/include/rocm_smi/rocm_smi_logger.h"
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rocm_smi/
-    COMPONENT dev)

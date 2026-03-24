@@ -27,20 +27,6 @@
 
 namespace amd::smi {
 
-amdsmi_status_t rsmi_to_amdsmi_status(rsmi_status_t status) {
-    amdsmi_status_t amdsmi_status = AMDSMI_STATUS_MAP_ERROR;
-
-    // Look for it in the map
-    // If found: use the mapped value
-    // If not found: return the map error established above
-    auto search = amd::smi::rsmi_status_map.find(status);
-    if (search != amd::smi::rsmi_status_map.end()) {
-        amdsmi_status = search->second;
-    }
-
-    return amdsmi_status;
-}
-
 amdsmi_vram_type_t vram_type_value(unsigned type) {
     amdsmi_vram_type_t value = AMDSMI_VRAM_TYPE_UNKNOWN;
 
