@@ -22,6 +22,7 @@ THE SOFTWARE.
 #ifndef RCCL_COMMON_H_
 #define RCCL_COMMON_H_
 #include "nccl_common.h"
+#include "nccl_tuner.h"
 #include "nccl.h"
 #include "param.h"
 #include "core.h"
