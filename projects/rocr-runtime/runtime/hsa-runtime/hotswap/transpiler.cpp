@@ -241,10 +241,9 @@ static const MnemonicMapping kVALURenames[] = {
     {"v_min_num_f16", "v_min_f16"},
     {"v_max_num_f64", "v_max_f64"},
     {"v_min_num_f64", "v_min_f64"},
-    {"v_maxmin_num_f32", "v_maxmin_f32"},
-    {"v_minmax_num_f32", "v_minmax_f32"},
-    {"v_maxmin_num_f16", "v_maxmin_f16"},
-    {"v_minmax_num_f16", "v_minmax_f16"},
+    // v_maxmin_num_f32/v_minmax_num_f32 removed from rename table —
+    // they are decomposed into v_max+v_min pairs by the handler above
+    // (neither v_maxmin_f32 nor v_maxmin_num_f32 exist on GFX9)
     {"v_add_nc_u32", "v_add_u32"},
     {"v_sub_nc_u32", "v_sub_u32"},
     {"v_add_nc_i32", "v_add_i32"},
@@ -1082,28 +1081,8 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
   }
 
   // GFX12 v_bitop2_b32/v_bitop3_b32 → emulate as v_and_b32 (early, before handlers)
-  if (mnemonic.find("v_bitop") == 0) {
-    // Parse: v_bitop[23]_b32 vdst, src0, src1 bitop3:0xNN
-    std::string ops = line.substr(line.find(mnemonic) + mnemonic.size());
-    size_t bitop_pos = ops.find("bitop3:");
-    std::string op_part = (bitop_pos != std::string::npos) ? ops.substr(0, bitop_pos) : ops;
-    std::vector<std::string> operands;
-    std::istringstream oss(op_part);
-    std::string tok;
-    while (std::getline(oss, tok, ',')) {
-      size_t s = tok.find_first_not_of(" \t");
-      size_t e = tok.find_last_not_of(" \t");
-      if (s != std::string::npos)
-        operands.push_back(tok.substr(s, e - s + 1));
-    }
-    if (operands.size() >= 3) {
-      result.push_back("v_and_b32_e32 " + operands[0] + ", " +
-                        operands[1] + ", " + operands[2]);
-    } else {
-      result.push_back("s_nop 0 ; UNSUPPORTED: " + line);
-    }
-    return result;
-  }
+  // v_bitop2/v_bitop3 is handled by the detailed handler below (with truth table)
+  // — do NOT catch it here with a simple v_and_b32 approximation.
 
   // ─── Wait counter translation ───
   if (IsWaitInstruction(mnemonic)) {
@@ -1117,6 +1096,20 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
       mnemonic == "s_clause" || mnemonic == "s_set_inst_prefetch_distance") {
     // Return empty — skip entirely (saves space for scale_offset shifts)
     return result;
+  }
+
+  // ─── VOP3-only 64-bit ops: strip _e32 suffix ───
+  // GFX12 may emit v_lshlrev_b64_e32 etc. but GFX9 only has VOP3 encoding
+  // (no VOP2/_e32 form) for 64-bit shift/logic ops. Strip _e32.
+  if ((mnemonic == "v_lshlrev_b64_e32" || mnemonic == "v_lshrrev_b64_e32" ||
+       mnemonic == "v_ashrrev_i64_e32" || mnemonic == "v_lshlrev_b64" ||
+       mnemonic == "v_lshrrev_b64" || mnemonic == "v_ashrrev_i64")) {
+    // Ensure no _e32 suffix — GFX9 only supports VOP3 encoding for these
+    std::string base_mnem = mnemonic;
+    size_t e32_pos = base_mnem.find("_e32");
+    if (e32_pos != std::string::npos) base_mnem.erase(e32_pos);
+    line = ReplaceMnemonic(line, mnemonic, base_mnem);
+    mnemonic = base_mnem;
   }
 
   // ─── s_load_b96 → split into s_load_dwordx2 + s_load_dword ───
@@ -1386,14 +1379,36 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
 
       if (operands.size() >= 3) {
         std::string vdst = operands[0], src0 = operands[1], src1 = operands[2];
-        // Common truth tables:
+        // Common truth tables (index = src0_bit<<2 | src1_bit<<1 | old_vdst_bit):
         if (truth_table == 0xCA) {
           // (src0 & src1) | (~src0 & vdst) = bitwise select
           result.push_back("v_bfi_b32 " + vdst + ", " + src0 + ", " + src1 + ", " + vdst);
-        } else if (truth_table == 0x80 || truth_table == 0x40) {
-          // 0x80: src0 & src1 & vdst; 0x40: src0 & src1 & ~vdst
-          // Approximate: src0 & src1 (lose vdst dependency)
+        } else if (truth_table == 0x40) {
+          // 0x40: src0 & src1 & ~old_vdst
+          // Special case: when src1 == old_vdst, result = (X & Y) & ~Y = 0 always.
+          if (src1 == vdst) {
+            result.push_back("v_mov_b32_e32 " + vdst + ", 0");
+          } else {
+            // General case: compute src0 & src1, then AND with ~old_vdst
+            std::string tmp = "v" + std::to_string(scale_temp_vgpr);
+            result.push_back("v_and_b32 " + tmp + ", " + src0 + ", " + src1);
+            result.push_back("v_andn2_b32 " + vdst + ", " + tmp + ", " + vdst);
+          }
+        } else if (truth_table == 0x80) {
+          // 0x80: src0 & src1 & old_vdst
           result.push_back("v_and_b32 " + vdst + ", " + src0 + ", " + src1);
+          // v_and_b32 vdst, vdst, old_vdst — but old_vdst was just overwritten!
+          // When src1 == vdst: (src0 & vdst) & vdst = src0 & vdst → already correct.
+          // When src1 != vdst: need 3-way AND. Use temp.
+          if (src1 != vdst) {
+            // Already computed vdst = src0 & src1. Need vdst & old_vdst.
+            // But old_vdst was clobbered. Need temp.
+            // Rewrite: temp = src0 & src1, vdst = temp & old_vdst
+            std::string tmp = "v" + std::to_string(scale_temp_vgpr);
+            result.clear();
+            result.push_back("v_and_b32 " + tmp + ", " + src0 + ", " + src1);
+            result.push_back("v_and_b32 " + vdst + ", " + tmp + ", " + vdst);
+          }
         } else {
           // Generic fallback: just AND (imprecise but non-crashing)
           result.push_back("v_and_b32 " + vdst + ", " + src0 + ", " + src1);
@@ -1491,12 +1506,82 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
       if (second_half.find("v_dual_") == 0)
         second_half = "v_" + second_half.substr(7);
 
-      // Recursively translate each half so mnemonic renames and other
-      // fixups (constant bus, vcc widening, etc.) apply to both halves.
-      auto r1 = TranslateInstruction(first_half, source_cpu, target_cpu, scale_temp_vgpr, cmpx_temp_sgpr, compact_mode);
-      auto r2 = TranslateInstruction(second_half, source_cpu, target_cpu, scale_temp_vgpr, cmpx_temp_sgpr, compact_mode);
-      result.insert(result.end(), r1.begin(), r1.end());
-      result.insert(result.end(), r2.begin(), r2.end());
+      // VOPD executes both halves in parallel: all sources are read before
+      // any destinations are written. If the first half writes a register that
+      // the second half reads, we must save it before the first half executes.
+      //
+      // Detect: extract dest of first half, check if second half reads it.
+      auto extractDest = [](const std::string& instr) -> std::string {
+        size_t mend = instr.find_first_of(" \t");
+        if (mend == std::string::npos) return "";
+        size_t ostart = instr.find_first_not_of(" \t", mend);
+        if (ostart == std::string::npos) return "";
+        size_t oend = instr.find_first_of(" \t,", ostart);
+        return instr.substr(ostart, oend != std::string::npos ? oend - ostart : std::string::npos);
+      };
+      std::string first_dst = extractDest(first_half);
+      // Check if second_half operands (after the dest) reference first_dst
+      bool conflict = false;
+      if (!first_dst.empty() && first_dst[0] == 'v') {
+        // Look for first_dst as a source operand in second_half
+        std::string sh_ops = second_half;
+        size_t mend2 = sh_ops.find_first_of(" \t");
+        if (mend2 != std::string::npos) {
+          // Skip past dest (first operand) — look only at source operands
+          size_t comma_pos = sh_ops.find(',', mend2);
+          if (comma_pos != std::string::npos) {
+            std::string src_part = sh_ops.substr(comma_pos);
+            // Check if first_dst appears as a word boundary match in sources
+            size_t pos = 0;
+            while ((pos = src_part.find(first_dst, pos)) != std::string::npos) {
+              size_t end = pos + first_dst.size();
+              // Check it's a complete register name (not a prefix of a longer name)
+              bool start_ok = (pos == 0 || !std::isalnum(src_part[pos-1]));
+              bool end_ok = (end >= src_part.size() || !std::isalnum(src_part[end]));
+              if (start_ok && end_ok) { conflict = true; break; }
+              pos = end;
+            }
+          }
+        }
+      }
+
+      if (conflict) {
+        // Save first_dst to temp VGPR before first half modifies it.
+        std::string tmp = "v" + std::to_string(scale_temp_vgpr);
+        result.push_back("v_mov_b32_e32 " + tmp + ", " + first_dst);
+        // Translate first half normally
+        auto r1 = TranslateInstruction(first_half, source_cpu, target_cpu, scale_temp_vgpr, cmpx_temp_sgpr, compact_mode);
+        result.insert(result.end(), r1.begin(), r1.end());
+        // In second half, replace references to first_dst with temp
+        std::string modified_second = second_half;
+        // Replace as source operand only (skip the dest)
+        size_t skip_dest = modified_second.find(',');
+        if (skip_dest != std::string::npos) {
+          std::string before = modified_second.substr(0, skip_dest);
+          std::string after = modified_second.substr(skip_dest);
+          size_t rpos = 0;
+          while ((rpos = after.find(first_dst, rpos)) != std::string::npos) {
+            size_t rend = rpos + first_dst.size();
+            bool rs = (rpos == 0 || !std::isalnum(after[rpos-1]));
+            bool re = (rend >= after.size() || !std::isalnum(after[rend]));
+            if (rs && re) {
+              after.replace(rpos, first_dst.size(), tmp);
+              rpos += tmp.size();
+            } else {
+              rpos = rend;
+            }
+          }
+          modified_second = before + after;
+        }
+        auto r2 = TranslateInstruction(modified_second, source_cpu, target_cpu, scale_temp_vgpr, cmpx_temp_sgpr, compact_mode);
+        result.insert(result.end(), r2.begin(), r2.end());
+      } else {
+        // No conflict — safe to run sequentially.
+        auto r1 = TranslateInstruction(first_half, source_cpu, target_cpu, scale_temp_vgpr, cmpx_temp_sgpr, compact_mode);
+        auto r2 = TranslateInstruction(second_half, source_cpu, target_cpu, scale_temp_vgpr, cmpx_temp_sgpr, compact_mode);
+        result.insert(result.end(), r1.begin(), r1.end());
+        result.insert(result.end(), r2.begin(), r2.end());
+      }
       return result;
     }
   }
@@ -1771,14 +1856,33 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
         int even = n & ~1;
         mask = "s[" + std::to_string(even) + ":" + std::to_string(even + 1) + "]";
       }
-      // Constant bus: if src1 AND mask are both SGPR, move src1 to v6
-      std::string& src1 = operands[2];
-      bool src1_sgpr = !src1.empty() && src1[0] == 's';
+      // Constant bus fix: GFX9 VOP3 can read at most one SGPR from the constant bus.
+      // The mask (operands[3]) uses one SGPR slot. If src0 or src1 is a different SGPR
+      // (or a literal not inline-encodable), move it to a VGPR.
+      auto is_sgpr = [](const std::string& s) -> bool {
+        return !s.empty() && s[0] == 's' && s.size() > 1 &&
+               (std::isdigit((unsigned char)s[1]) || s[1] == '[');
+      };
+      auto is_literal = [](const std::string& s) -> bool {
+        if (s.empty()) return false;
+        std::string t = s;
+        if (t[0] == '-') t = t.substr(1);
+        return t.size() > 2 && t[0] == '0' && (t[1] == 'x' || t[1] == 'X');
+      };
       bool mask_sgpr = !mask.empty() && (mask[0] == 's' ||
                        mask.substr(0, 3) == "vcc" || mask.substr(0, 4) == "exec");
-      if (src1_sgpr && mask_sgpr) {
-        result.push_back("v_mov_b32_e32 v6, " + src1);
-        src1 = "v6";
+      std::string& src0 = operands[1];
+      std::string& src1 = operands[2];
+      // If src0 is SGPR (different from mask's SGPR) or a literal, move to v6
+      if ((is_sgpr(src0) || is_literal(src0)) && mask_sgpr) {
+        result.push_back("v_mov_b32_e32 v6, " + src0);
+        src0 = "v6";
+      }
+      // If src1 is also SGPR/literal, move to v7 (v6 may already be used for src0)
+      if ((is_sgpr(src1) || is_literal(src1)) && mask_sgpr) {
+        std::string tmp = (src0 == "v6") ? "v7" : "v6";
+        result.push_back("v_mov_b32_e32 " + tmp + ", " + src1);
+        src1 = tmp;
       }
       std::string fixed = mnemonic + " " + operands[0];
       for (size_t i = 1; i < operands.size(); ++i) fixed += ", " + operands[i];
@@ -1811,8 +1915,11 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
       bool src0_lit = src0.size() > 2 && src0[0] == '0' &&
                       (src0[1] == 'x' || src0[1] == 'X');
       if (src0_sgpr || src0_lit) {
-        result.push_back("v_mov_b32_e32 v6, " + src0);
-        src0 = "v6";
+        // Use scale_temp_vgpr (above kernel's own VGPRs) to avoid clobbering
+        // live VGPRs like v6/v7 which may hold kernel-computed values.
+        std::string tmp = "v" + std::to_string(scale_temp_vgpr);
+        result.push_back("v_mov_b32_e32 " + tmp + ", " + src0);
+        src0 = tmp;
         std::string fixed = mnemonic + " " + operands[0];
         for (size_t i = 1; i < operands.size(); ++i) fixed += ", " + operands[i];
         // Explicit vcc_lo (if present) is stripped by the post-processing pass.
@@ -1940,6 +2047,104 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
           }
         }
       }
+    }
+  }
+
+  // ─── v_fma_mix_f32/f16: constant bus fix for multiple SGPRs ───
+  // GFX9 VOP3 can read at most one SGPR. v_fma_mix_f32 with two different
+  // SGPR source operands violates this. Move one to v6.
+  if (mnemonic == "v_fma_mix_f32" || mnemonic == "v_fma_mix_f16" ||
+      mnemonic == "v_fma_mixlo_f16" || mnemonic == "v_fma_mixhi_f16") {
+    size_t ops_start = line.find(mnemonic) + mnemonic.size();
+    // Split the operand part (before any modifiers like op_sel_hi)
+    std::string ops = line.substr(ops_start);
+    // Extract the main operands (up to but not including op_sel/clamp modifiers)
+    size_t mod_pos = ops.find("op_sel");
+    if (mod_pos == std::string::npos) mod_pos = ops.find("clamp");
+    std::string main_ops = (mod_pos != std::string::npos) ? ops.substr(0, mod_pos) : ops;
+    std::string modifiers = (mod_pos != std::string::npos) ? ops.substr(mod_pos) : "";
+    std::vector<std::string> operands;
+    std::istringstream oss(main_ops);
+    std::string tok;
+    while (std::getline(oss, tok, ',')) {
+      size_t s = tok.find_first_not_of(" \t");
+      size_t e = tok.find_last_not_of(" \t");
+      if (s != std::string::npos) operands.push_back(tok.substr(s, e - s + 1));
+    }
+    if (operands.size() >= 4) {
+      auto is_sgpr = [](const std::string& s) -> bool {
+        return !s.empty() && s[0] == 's' && s.size() > 1 &&
+               (std::isdigit((unsigned char)s[1]) || s[1] == '[');
+      };
+      // Count distinct SGPRs used as sources
+      int sgpr_count = 0;
+      int first_sgpr_idx = -1;
+      for (int i = 1; i <= 3 && i < (int)operands.size(); i++) {
+        if (is_sgpr(operands[i])) {
+          sgpr_count++;
+          if (first_sgpr_idx < 0) first_sgpr_idx = i;
+        }
+      }
+      // If more than one SGPR source, move all but one to VGPRs
+      if (sgpr_count > 1) {
+        int vgpr_tmp = 6;
+        bool first = true;
+        for (int i = 1; i <= 3 && i < (int)operands.size(); i++) {
+          if (is_sgpr(operands[i])) {
+            if (first) { first = false; continue; }  // keep one SGPR
+            std::string tmp = "v" + std::to_string(vgpr_tmp++);
+            result.push_back("v_mov_b32_e32 " + tmp + ", " + operands[i]);
+            operands[i] = tmp;
+          }
+        }
+      }
+      std::string fixed = mnemonic + " " + operands[0];
+      for (size_t i = 1; i < operands.size(); ++i) fixed += ", " + operands[i];
+      if (!modifiers.empty()) fixed += " " + modifiers;
+      result.push_back(fixed);
+      return result;
+    }
+  }
+
+  // ─── v_maxmin_f32/v_minmax_f32 → decompose to v_max + v_min pair ───
+  // These 3-input VOP3 instructions don't exist on GFX9. Decompose:
+  //   v_maxmin_f32 vd, s0, s1, s2 → vd = min(max(s0, s1), s2)
+  //   v_minmax_f32 vd, s0, s1, s2 → vd = max(min(s0, s1), s2)
+  // Also handle the GFX12 _num_ variant (before mnemonic rename strips it).
+  if (mnemonic == "v_maxmin_f32" || mnemonic == "v_minmax_f32" ||
+      mnemonic == "v_maxmin_f16" || mnemonic == "v_minmax_f16" ||
+      mnemonic == "v_maxmin_num_f32" || mnemonic == "v_minmax_num_f32" ||
+      mnemonic == "v_maxmin_num_f16" || mnemonic == "v_minmax_num_f16") {
+    size_t ops_start = line.find(mnemonic) + mnemonic.size();
+    std::string ops = line.substr(ops_start);
+    std::vector<std::string> operands;
+    std::istringstream oss(ops);
+    std::string tok;
+    while (std::getline(oss, tok, ',')) {
+      size_t s = tok.find_first_not_of(" \t");
+      size_t e = tok.find_last_not_of(" \t");
+      if (s != std::string::npos) operands.push_back(tok.substr(s, e - s + 1));
+    }
+    if (operands.size() >= 4) {
+      bool is_maxmin = (mnemonic.find("v_maxmin") == 0);
+      std::string suffix = (mnemonic.find("_f16") != std::string::npos) ? "_f16" : "_f32";
+      // v_maxmin_f32 vd, a, b, c → vd = min(max(a, b), c)
+      // v_minmax_f32 vd, a, b, c → vd = max(min(a, b), c)
+      std::string first_op = is_maxmin ? "v_max" : "v_min";
+      std::string second_op = is_maxmin ? "v_min" : "v_max";
+      // If vdst == src2, the first instruction clobbers src2 before the
+      // second instruction can read it. Save src2 to a temp VGPR first.
+      std::string src2 = operands[3];
+      if (operands[0] == operands[3]) {
+        std::string tmp = "v" + std::to_string(scale_temp_vgpr);
+        result.push_back("v_mov_b32_e32 " + tmp + ", " + operands[3]);
+        src2 = tmp;
+      }
+      result.push_back(first_op + suffix + " " + operands[0] + ", " +
+                        operands[1] + ", " + operands[2]);
+      result.push_back(second_op + suffix + " " + operands[0] + ", " +
+                        operands[0] + ", " + src2);
+      return result;
     }
   }
 
@@ -2182,36 +2387,63 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
   if (line.find("scale_offset") != std::string::npos) {
     int shift = 0;
     if (mnemonic.find("_b32") != std::string::npos ||
+        mnemonic.find("_u32") != std::string::npos ||
+        mnemonic.find("_i32") != std::string::npos ||
+        mnemonic.find("_f32") != std::string::npos ||
         mnemonic.find("_dword") != std::string::npos) shift = 2;
     else if (mnemonic.find("_b64") != std::string::npos ||
+             mnemonic.find("_u64") != std::string::npos ||
+             mnemonic.find("_i64") != std::string::npos ||
+             mnemonic.find("_f64") != std::string::npos ||
              mnemonic.find("_dwordx2") != std::string::npos) shift = 3;
     else if (mnemonic.find("_b128") != std::string::npos ||
              mnemonic.find("_dwordx4") != std::string::npos) shift = 4;
-    else if (mnemonic.find("_b16") != std::string::npos) shift = 1;
+    else if (mnemonic.find("_b16") != std::string::npos ||
+             mnemonic.find("_u16") != std::string::npos ||
+             mnemonic.find("_i16") != std::string::npos ||
+             mnemonic.find("_f16") != std::string::npos) shift = 1;
 
     if (shift > 0) {
-      // Determine vaddr position in operands
+      // Determine vaddr position in operands.
+      // Layout differs by instruction type:
+      //   Load:              vdst, vaddr, saddr
+      //   Store:             vaddr, vdata, saddr
+      //   Atomic (no rtn):   vaddr, vdata, saddr
+      //   Atomic (with rtn): vdst, vaddr, vdata, saddr
+      // "vaddr is first operand" for stores and atomics-without-return.
       size_t mnem_end = line.find(mnemonic) + mnemonic.size();
       std::string ops = line.substr(mnem_end);
       bool is_store = mnemonic.find("store") != std::string::npos;
+      bool is_atomic = mnemonic.find("atomic") != std::string::npos;
+      // Atomics without TH_ATOMIC_RETURN have vaddr as first operand (like stores).
+      // If TH_ATOMIC_RETURN was present (translated to "sc0"), vaddr is second operand.
+      bool atomic_no_return = is_atomic && line.find("sc0") == std::string::npos &&
+                              line.find("TH_ATOMIC_RETURN") == std::string::npos;
+      bool vaddr_is_first = is_store || atomic_no_return;
 
       std::string vaddr;
-      if (is_store) {
+      size_t vaddr_abs_pos = std::string::npos;  // absolute position in `line`
+      if (vaddr_is_first) {
         size_t s = ops.find_first_not_of(" \t");
         size_t e = ops.find_first_of(" \t,", s);
-        if (s != std::string::npos)
+        if (s != std::string::npos) {
           vaddr = ops.substr(s, e != std::string::npos ? e - s : std::string::npos);
+          vaddr_abs_pos = mnem_end + s;
+        }
       } else {
+        // vaddr is second operand (after first comma)
         size_t comma1 = ops.find(',');
         if (comma1 != std::string::npos) {
-          size_t s = ops.find_first_not_of(" \t,", comma1 + 1);
+          size_t s = ops.find_first_not_of(" \t", comma1 + 1);
           size_t e = ops.find_first_of(" \t,", s);
-          if (s != std::string::npos)
+          if (s != std::string::npos) {
             vaddr = ops.substr(s, e != std::string::npos ? e - s : std::string::npos);
+            vaddr_abs_pos = mnem_end + s;
+          }
         }
       }
 
-      if (!vaddr.empty()) {
+      if (!vaddr.empty() && vaddr_abs_pos != std::string::npos) {
         // Use a temp VGPR for the byte offset, above the kernel's own VGPRs.
         // scale_temp_vgpr is passed from the translation loop and set to
         // num_vgprs12+2 (above save registers).  vaddr stays as element index
@@ -2219,11 +2451,10 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
         const std::string kScaleTemp = "v" + std::to_string(scale_temp_vgpr);
         result.push_back("v_lshlrev_b32_e32 " + kScaleTemp + ", " +
                           std::to_string(shift) + ", " + vaddr);
-        // Replace vaddr in the instruction with the byte-offset temp register
+        // Replace vaddr at its EXACT position in the instruction (avoids
+        // confusion when dest register has the same name as vaddr).
         std::string modified = line;
-        size_t vaddr_pos = modified.find(vaddr, mnem_end);
-        if (vaddr_pos != std::string::npos)
-          modified.replace(vaddr_pos, vaddr.size(), kScaleTemp);
+        modified.replace(vaddr_abs_pos, vaddr.size(), kScaleTemp);
         // Strip scale_offset modifier
         size_t so_pos = modified.find("scale_offset");
         if (so_pos != std::string::npos) {
@@ -2465,9 +2696,9 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
             result.push_back("s_mov_b32 " + s_orig + ", " + s_even);
             result.push_back("v_readfirstlane_b32 " + s_even + ", " + save_reg);
           }
-          // Handle large literal in last operand (GFX9 VOP3 no literal support).
-          // Check the v_cmp line that was already emitted in result, and if its
-          // last operand is a large literal, prepend a v_mov to load it to v6.
+          // Handle large literals in ANY source operand (GFX9 VOP3 no literal support).
+          // Check the v_cmp line that was already emitted in result, and if any
+          // source operand is a large literal, prepend a v_mov to load it to v6.
           {
             auto is_ll = [](const std::string& s) -> bool {
               if (s.empty()) return false;
@@ -2478,21 +2709,36 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
               } catch (...) {}
               return false;
             };
-            // Find the v_cmp line in result (it's the 2nd or 3rd element)
+            // Find the v_cmp line in result
             for (size_t ri = 0; ri < result.size(); ri++) {
               if (result[ri].find("v_cmp_") != std::string::npos) {
-                size_t lc = result[ri].rfind(',');
-                if (lc != std::string::npos) {
-                  std::string lo = result[ri].substr(lc + 1);
-                  size_t ls = lo.find_first_not_of(" \t");
-                  size_t le = lo.find_last_not_of(" \t");
-                  if (ls != std::string::npos) {
-                    std::string lt = lo.substr(ls, le - ls + 1);
-                    if (is_ll(lt)) {
-                      // Insert v_mov before the v_cmp, replace literal with v6
-                      result.insert(result.begin() + ri, "v_mov_b32_e32 v6, " + lt);
-                      result[ri + 1] = result[ri + 1].substr(0, lc + 1) + " v6";
+                // Parse all comma-separated tokens after the mnemonic
+                size_t mstart = result[ri].find("v_cmp_");
+                size_t mend2 = result[ri].find(' ', mstart);
+                if (mend2 == std::string::npos) break;
+                std::string cmp_ops = result[ri].substr(mend2);
+                std::vector<std::string> cmp_operands;
+                std::istringstream css(cmp_ops);
+                std::string ctok;
+                while (std::getline(css, ctok, ',')) {
+                  size_t cs = ctok.find_first_not_of(" \t");
+                  size_t ce = ctok.find_last_not_of(" \t");
+                  if (cs != std::string::npos)
+                    cmp_operands.push_back(ctok.substr(cs, ce - cs + 1));
+                }
+                // Check src operands (skip dest at index 0 = s[N:N+1])
+                for (size_t ci = 1; ci < cmp_operands.size(); ci++) {
+                  if (is_ll(cmp_operands[ci])) {
+                    std::string lit_val = cmp_operands[ci];
+                    cmp_operands[ci] = "v6";
+                    result.insert(result.begin() + ri, "v_mov_b32_e32 v6, " + lit_val);
+                    // Rebuild the v_cmp line
+                    std::string rebuilt = result[ri + 1].substr(0, mend2);
+                    for (size_t cj = 0; cj < cmp_operands.size(); cj++) {
+                      rebuilt += (cj == 0 ? " " : ", ") + cmp_operands[cj];
                     }
+                    result[ri + 1] = rebuilt;
+                    break;  // one literal fix per instruction is enough
                   }
                 }
                 break;
@@ -2503,25 +2749,40 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
         }
       }
     }
-    // Check for large literal in last operand (GFX9 VOP3 doesn't allow literals)
+    // Check for large literal in ANY source operand (GFX9 VOP3 doesn't allow literals)
     auto is_large_literal = [](const std::string& s) -> bool {
       if (s.empty()) return false;
       if (s.size() > 2 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) return true;
-      if (std::isdigit((unsigned char)s[0]) && std::stol(s) > 64) return true;
-      if (s[0] == '-' && s.size() > 1 && std::stol(s) < -16) return true;
+      try {
+        if (std::isdigit((unsigned char)s[0]) && std::stol(s) > 64) return true;
+        if (s[0] == '-' && s.size() > 1 && std::stol(s) < -16) return true;
+      } catch (...) {}
       return false;
     };
-    // Find last comma-separated operand
-    size_t last_comma = line.rfind(',');
-    if (last_comma != std::string::npos) {
-      std::string last_op = line.substr(last_comma + 1);
-      size_t ls = last_op.find_first_not_of(" \t");
-      size_t le = last_op.find_last_not_of(" \t");
-      if (ls != std::string::npos) {
-        std::string last_trimmed = last_op.substr(ls, le - ls + 1);
-        if (is_large_literal(last_trimmed)) {
-          result.push_back("v_mov_b32_e32 v6, " + last_trimmed);
-          line = line.substr(0, last_comma + 1) + " v6";
+    // Parse all comma-separated operands and check sources (skip dest at index 0)
+    {
+      size_t mnem_end2 = line.find(mnemonic) + mnemonic.size();
+      std::string all_ops = line.substr(mnem_end2);
+      std::vector<std::string> all_operands;
+      std::istringstream aoss(all_ops);
+      std::string atok;
+      while (std::getline(aoss, atok, ',')) {
+        size_t as = atok.find_first_not_of(" \t");
+        size_t ae = atok.find_last_not_of(" \t");
+        if (as != std::string::npos) all_operands.push_back(atok.substr(as, ae - as + 1));
+      }
+      // Check sources (indices 1+) for large literals
+      for (size_t ai = 1; ai < all_operands.size(); ai++) {
+        if (is_large_literal(all_operands[ai])) {
+          result.push_back("v_mov_b32_e32 v6, " + all_operands[ai]);
+          all_operands[ai] = "v6";
+          // Rebuild line
+          std::string rebuilt = mnemonic;
+          for (size_t aj = 0; aj < all_operands.size(); aj++) {
+            rebuilt += (aj == 0 ? " " : ", ") + all_operands[aj];
+          }
+          line = rebuilt;
+          break;  // one literal per instruction is enough
         }
       }
     }
