@@ -2415,6 +2415,10 @@ ncclResult_t ncclIbMultiSend(struct ncclIbSendComm* comm, int slot) {
   // Multi-QP: make sure IB writes are multiples of 128B so that LL and LL128 protocols still work
   const int align = 128;
   int nqps = ncclParamIbSplitDataOnQps() ? comm->base.nqps : comm->base.nDataQps;
+
+  // For small messages (< splitDataThreshold) with multiple QPs, avoid splitting:
+  // send the entire payload through one QP selected via round-robin, post zero-length WRs on the rest.
+  int smallMsgActiveQp = slot % nqps;
   int64_t splitDataThreshold = rcclParamIbSplitDataThreshold();
 
   for (int i = 0; i < nqps; i++) {
@@ -2428,8 +2432,12 @@ ncclResult_t ncclIbMultiSend(struct ncclIbSendComm* comm, int slot) {
       // Select proper rkey (needed even for 0-size send)
       comm->wrs[r].wr.rdma.rkey = slots[r].rkeys[qp->remDevIdx];
 
-      int dataQps = (reqs[r]->send.size >= splitDataThreshold) ? nqps : 1;
-      int chunkSize = DIVUP(DIVUP(reqs[r]->send.size, dataQps), align) * align;
+      int chunkSize;
+      if (reqs[r]->send.size < splitDataThreshold) {
+        chunkSize = (i == smallMsgActiveQp) ? reqs[r]->send.size : 0;
+      } else {
+        chunkSize = DIVUP(DIVUP(reqs[r]->send.size, nqps), align) * align;
+      }
       int length = std::min(reqs[r]->send.size-reqs[r]->send.offset, chunkSize);
       if (length <= 0) {
         comm->wrs[r].sg_list = NULL;
@@ -2480,8 +2488,12 @@ ncclResult_t ncclIbMultiSend(struct ncclIbSendComm* comm, int slot) {
     }
 
     for (int r=0; r<nreqs; r++) {
-      int dataQps = (reqs[r]->send.size >= splitDataThreshold) ? nqps : 1;
-      int chunkSize = DIVUP(DIVUP(reqs[r]->send.size, dataQps), align) * align;
+      int chunkSize;
+      if (reqs[r]->send.size < splitDataThreshold) {
+        chunkSize = (i == smallMsgActiveQp) ? reqs[r]->send.size : 0;
+      } else {
+        chunkSize = DIVUP(DIVUP(reqs[r]->send.size, nqps), align) * align;
+      }
       reqs[r]->send.offset += chunkSize;
       comm->sges[r].addr += chunkSize;
       comm->wrs[r].wr.rdma.remote_addr += chunkSize;
