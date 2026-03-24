@@ -544,6 +544,9 @@ queue_controller_fini()
 {
     if(get_queue_controller())
         get_queue_controller()->iterate_queues([](const Queue* _queue) { _queue->sync(); });
+
+    // finalize queue data (e.g. clean up signal pool)
+    queue_fini();
 }
 
 void

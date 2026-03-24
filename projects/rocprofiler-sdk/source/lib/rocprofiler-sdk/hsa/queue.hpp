@@ -202,5 +202,8 @@ Queue::lock_queue(FuncT&& func)
     std::unique_lock<std::mutex> lock(_lock_queue);
     func();
 }
+
+void
+queue_fini();
 }  // namespace hsa
 }  // namespace rocprofiler

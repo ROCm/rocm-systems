@@ -51,36 +51,11 @@ namespace container
 template <typename Tp>
 struct pool
 {
-    using size_type = size_t;
-
-    // template <typename... Args>
-    // explicit pool(Args&&... args)
-    // : m_pool{std::forward<Args>(args)...}
-    // {}
+    using size_type       = size_t;
+    using pool_array_type = stable_vector<pool_object<Tp>, 32>;
 
     template <typename FuncT, typename... Args>
-    explicit pool(std::piecewise_construct_t, size_type count, FuncT&& ctor, Args&&... args)
-    : m_count{count}
-    {
-        m_function = [this,
-                      _ctor       = std::forward<FuncT>(ctor),
-                      _args_tuple = std::make_tuple(std::forward<Args>(args)...)]() {
-            for(size_type i = 0; i < m_count; ++i)
-            {
-                auto idx = m_pool.size();
-                m_pool.emplace_back(idx, false, this);
-                std::apply(
-                    [&](auto&&... unpacked_args) {
-                        _ctor(m_pool[idx].get(),
-                              std::forward<decltype(unpacked_args)>(unpacked_args)...);
-                    },
-                    _args_tuple);
-                m_available.push(idx);
-            }
-        };
-
-        m_function();
-    }
+    explicit pool(std::piecewise_construct_t, size_type count, FuncT&& ctor, Args&&... args);
 
     pool()                = default;
     ~pool()               = default;
@@ -97,28 +72,45 @@ struct pool
     template <typename FuncT, typename... Args>
     pool_object<Tp>& acquire(FuncT&& ctor, Args&&... args);
 
-    void report_reuse()
-    {
-        ROCP_WARNING << fmt::format("Pool of type {}: Total pool size: {}. Reused objects: {}. "
-                                    "Released objects: {}. New batches: {}.",
-                                    cxx_demangle(typeid(Tp).name()),
-                                    m_pool.size(),
-                                    m_reused.load(),
-                                    m_released.load(),
-                                    m_new_batch.load());
-    }
+    template <typename FuncT = void (*)(Tp&)>
+    void clear(FuncT&& func = [](Tp&) {});
+
+    std::string get_usage_report() const;
 
 private:
-    size_type                          m_count         = 256;
-    std::function<void()>              m_function      = nullptr;
-    mutable std::shared_mutex          m_pool_mtx      = {};
-    stable_vector<pool_object<Tp>, 32> m_pool          = {};
-    mutable std::shared_mutex          m_available_mtx = {};
-    std::queue<size_type>              m_available     = {};
-    std::atomic<size_type>             m_released      = 0;
-    std::atomic<size_type>             m_reused        = 0;
-    std::atomic<size_type>             m_new_batch     = 0;
+    size_type                 m_count         = 256;
+    std::function<void()>     m_function      = nullptr;
+    mutable std::shared_mutex m_pool_mtx      = {};
+    pool_array_type           m_pool          = {};
+    mutable std::shared_mutex m_available_mtx = {};
+    std::queue<size_type>     m_available     = {};
+    std::atomic<size_type>    m_released      = 0;
+    std::atomic<size_type>    m_reused        = 0;
+    std::atomic<size_type>    m_new_batch     = 0;
 };
+
+template <typename Tp>
+template <typename FuncT, typename... Args>
+pool<Tp>::pool(std::piecewise_construct_t, size_type count, FuncT&& ctor, Args&&... args)
+: m_count{count}
+, m_function{[this,
+              _ctor       = std::forward<FuncT>(ctor),
+              _args_tuple = std::make_tuple(std::forward<Args>(args)...)]() {
+    for(size_type i = 0; i < m_count; ++i)
+    {
+        auto idx = m_pool.size();
+        m_pool.emplace_back(idx, false, this);
+        std::apply(
+            [&](auto&&... unpacked_args) {
+                _ctor(m_pool[idx].get(), std::forward<decltype(unpacked_args)>(unpacked_args)...);
+            },
+            _args_tuple);
+        m_available.push(idx);
+    }
+}}
+{
+    m_function();
+}
 
 template <typename Tp>
 pool_object<Tp>&
@@ -131,19 +123,21 @@ pool<Tp>::acquire()
         {
             _read_lk.unlock();
             auto _write_lk = std::unique_lock<std::shared_mutex>{m_available_mtx};
-            _idx           = m_available.front();
-            m_available.pop();
-            if(m_released > 0)
+            if(!m_available.empty())
             {
-                m_reused++;
-                m_released--;
+                _idx = m_available.front();
+                m_available.pop();
+                if(m_released > 0)
+                {
+                    m_reused++;
+                }
             }
         }
     }
 
     if(_idx.has_value())
     {
-        auto  _read_lk = std::shared_lock<std::shared_mutex>{m_available_mtx};
+        auto  _read_lk = std::shared_lock<std::shared_mutex>{m_pool_mtx};
         auto& _obj     = m_pool.at(_idx.value());
         ROCP_FATAL_IF(!_obj.acquire()) << fmt::format(
             "Pool object at index {} was expected to be available but was not", _idx.value());
@@ -154,22 +148,19 @@ pool<Tp>::acquire()
     {
         auto _write_pool_lk  = std::unique_lock<std::shared_mutex>{m_pool_mtx};
         auto _write_avail_lk = std::unique_lock<std::shared_mutex>{m_available_mtx};
-        ROCP_WARNING << fmt::format(
-            "Pool of type {} exhausted. Creating new batch of {} objects. New pool size: {}",
-            cxx_demangle(typeid(Tp).name()),
-            m_count,
-            m_pool.size() + m_count);
-        m_new_batch++;
-        m_function();
+        if(m_available.empty())
+        {
+            ROCP_INFO << fmt::format(
+                "Pool of type {} exhausted. Creating new batch of {} objects. New pool size: {}",
+                cxx_demangle(typeid(Tp).name()),
+                m_count,
+                m_pool.size() + m_count);
+            m_new_batch++;
+            m_function();
+        }
     }
 
     return acquire();
-    // auto _idx_v = m_pool.size();
-    // auto& _ref           = m_pool.emplace_back(_idx_v, true, this);
-    // ROCP_INFO << fmt::format("Pool of type {} exhausted. Creating new object. New pool size: {}",
-    //                           typeid(Tp).name(),
-    //                           m_pool.size());
-    // return _ref;
 }
 
 template <typename Tp>
@@ -181,8 +172,6 @@ pool<Tp>::release(size_type idx)
         auto _write_lk = std::unique_lock<std::shared_mutex>{m_available_mtx};
         ROCP_FATAL_IF(m_pool.at(idx).in_use())
             << fmt::format("Pool object at index {} was expected to be not in use", idx);
-        // ROCP_WARNING << fmt::format(
-        //     "Releasing object at index {} back to pool of type {}", idx, typeid(Tp).name());
         m_available.push(idx);
         m_released++;
     }
@@ -198,6 +187,47 @@ pool<Tp>::acquire(FuncT&& ctor, Args&&... args)
     auto& _ref = acquire();
     ctor(_ref.get(), std::forward<Args>(args)...);
     return _ref;
+}
+
+template <typename Tp>
+template <typename FuncT>
+void
+pool<Tp>::clear(FuncT&& func)
+{
+    auto _write_pool_lk  = std::unique_lock<std::shared_mutex>{m_pool_mtx};
+    auto _write_avail_lk = std::unique_lock<std::shared_mutex>{m_available_mtx};
+
+    for(auto& itr : m_pool)
+    {
+        ROCP_WARNING_IF(itr.in_use()) << fmt::format(
+            "Pool object at index {} is still in use during pool clear", itr.index());
+        itr.release();
+        // run cleanup lambda
+        std::forward<FuncT>(func)(itr);
+    }
+
+    while(!m_available.empty())
+        m_available.pop();
+    m_pool = pool_array_type{};
+    m_released.store(0);
+    m_reused.store(0);
+    m_new_batch.store(0);
+}
+
+template <typename Tp>
+std::string
+pool<Tp>::get_usage_report() const
+{
+    auto _read_pool_lk  = std::shared_lock<std::shared_mutex>{m_pool_mtx};
+    auto _read_avail_lk = std::shared_lock<std::shared_mutex>{m_available_mtx};
+    return fmt::format("Usage report for pool (type='{}') :: size={}, available={}, reused={}, "
+                       "released={}, batches={}",
+                       cxx_demangle(typeid(Tp).name()),
+                       m_pool.size(),
+                       m_available.size(),
+                       m_reused.load(),
+                       m_released.load(),
+                       m_new_batch.load());
 }
 }  // namespace container
 }  // namespace common
