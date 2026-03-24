@@ -79,12 +79,11 @@ list(GET VERSION_LIST 0 HIP_VERSION_MAJOR)
 list(GET VERSION_LIST 1 HIP_VERSION_MINOR)
 list(GET VERSION_LIST 2 HIP_VERSION_PATCH)
 
-if(HIP_VERSION_PATCH EQUAL 0 AND GIT_FOUND AND UNIX)
+if(HIP_VERSION_PATCH EQUAL 0 AND GIT_FOUND)
   execute_process(
     COMMAND ${GIT_EXECUTABLE} fetch --tags origin
     WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
-    OUTPUT_QUIET
-    ERROR_QUIET)
+  )
 
   execute_process(
     COMMAND ${GIT_EXECUTABLE} describe --tags --match "hip-version_*" --abbrev=0 HEAD
@@ -92,7 +91,9 @@ if(HIP_VERSION_PATCH EQUAL 0 AND GIT_FOUND AND UNIX)
     RESULT_VARIABLE _git_tag_result
     OUTPUT_VARIABLE _git_tag_string
     OUTPUT_STRIP_TRAILING_WHITESPACE
-    ERROR_QUIET)
+  )
+
+  message(STATUS "_git_tag_result=${_git_tag_result}, _git_tag_string=${_git_tag_string}")
 
   if(_git_tag_result EQUAL 0 AND _git_tag_string)
     string(REGEX MATCH "hip-version_([0-9]+)\\.([0-9]+)\\.([0-9]+)" _version_matched "${_git_tag_string}")
