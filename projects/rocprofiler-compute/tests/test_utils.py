@@ -219,8 +219,6 @@ def check_csv_files(output_dir, num_devices, num_kernels):
         dict: dictionary housing file contents as pandas dataframe
               (excludes PMC files - those are validated internally)
     """
-
-    file_dict = {}
     files_in_workload = os.listdir(output_dir)
 
     # Validate PMC data exists (profile creates pmc_perf_*.csv or results_*.csv)
@@ -246,7 +244,26 @@ def check_csv_files(output_dir, num_devices, num_kernels):
             )
             assert len(df.index) >= num_kernels, err_msg
 
-    # Load non-PMC CSV files into return dict
+    # Check and return non-PMC files
+    return check_non_pmc_files(output_dir, num_devices, num_kernels)
+
+
+def check_non_pmc_files(output_dir, num_devices, num_kernels):
+    """
+    Check profiling output non-PMC files and return them as a dictionary.
+
+    Args:
+        output_dir (string): output directory containing non-PMC files
+        num_devices (int): number of devices expected to have been profiled
+        num_kernels (int): number of kernels expected to have been profiled
+
+    Returns:
+        dict: dictionary housing file contents as pandas dataframe
+    """
+    file_dict = {}
+    files_in_workload = os.listdir(output_dir)
+
+    # Load non-PMC files into return dict
     for file in files_in_workload:
         if file.endswith(".csv"):
             # Skip PMC files (already validated above)
