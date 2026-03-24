@@ -512,7 +512,7 @@ int GetKfdGpuIdsForPid(long pid, std::unordered_set<uint64_t>* out) {
   DIR* d = opendir(pdir.c_str());
 
   if (!d) {
-    /*
+  /*
    * Return success with empty set so 'GetProcessGPUs()' can use 'vram_*'
    * fallback.
    */
