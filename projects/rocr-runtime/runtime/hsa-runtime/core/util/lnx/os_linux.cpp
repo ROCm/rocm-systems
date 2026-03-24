@@ -995,7 +995,8 @@ IPCSocket AcceptIPCConnection(IPCSocket server) {
   return FdToIPCSock(fd);
 }
 
-IPCSocket ConnectToIPCServer(const char* name, uint32_t timeoutMs, uint32_t timeoutIntervalMs) {
+IPCSocket ConnectToIPCServer(const char* name, std::chrono::milliseconds timeout,
+                             std::chrono::milliseconds retryInterval) {
   int fd = socket(AF_UNIX, SOCK_STREAM, 0);
   if (fd == -1) return INVALID_SOCKET_VALUE;
 
@@ -1005,21 +1006,20 @@ IPCSocket ConnectToIPCServer(const char* name, uint32_t timeoutMs, uint32_t time
   strncpy(address.sun_path, name, sizeof(address.sun_path) - 1);
   address.sun_path[0] = 0;  // abstract namespace
 
-  uint32_t elapsed = 0;
-  while (elapsed < timeoutMs) {
+  auto deadline = std::chrono::steady_clock::now() + timeout;
+  while (std::chrono::steady_clock::now() < deadline) {
     if (connect(fd, (struct sockaddr*)&address, sizeof(address)) == 0)
       return FdToIPCSock(fd);
-    elapsed += timeoutIntervalMs;
-    usleep(timeoutIntervalMs * 1000);
+    usleep(static_cast<useconds_t>(retryInterval.count()) * 1000);
   }
 
   close(fd);
   return INVALID_SOCKET_VALUE;
 }
 
-void SetIPCSocketRecvTimeout(IPCSocket sock, uint32_t timeoutSec) {
+void SetIPCSocketRecvTimeout(IPCSocket sock, std::chrono::seconds timeout) {
   struct timeval tv;
-  tv.tv_sec = timeoutSec;
+  tv.tv_sec = static_cast<time_t>(timeout.count());
   tv.tv_usec = 0;
   setsockopt(IPCSockToFd(sock), SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 }

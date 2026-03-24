@@ -577,10 +577,11 @@ IPCSocket AcceptIPCConnection(IPCSocket server) {
   return reinterpret_cast<IPCSocket>(connInfo);
 }
 
-IPCSocket ConnectToIPCServer(const char* name, uint32_t timeoutMs, uint32_t timeoutIntervalMs) {
+IPCSocket ConnectToIPCServer(const char* name, std::chrono::milliseconds timeout,
+                             std::chrono::milliseconds retryInterval) {
   std::string pipeName = PipeName(name);
-  uint32_t elapsed = 0;
-  while (elapsed < timeoutMs) {
+  auto deadline = std::chrono::steady_clock::now() + timeout;
+  while (std::chrono::steady_clock::now() < deadline) {
     HANDLE pipe = CreateFile(
         pipeName.c_str(), GENERIC_READ | GENERIC_WRITE,
         0, NULL, OPEN_EXISTING, 0, NULL);
@@ -592,15 +593,15 @@ IPCSocket ConnectToIPCServer(const char* name, uint32_t timeoutMs, uint32_t time
     if (err != ERROR_PIPE_BUSY && err != ERROR_FILE_NOT_FOUND) {
       return INVALID_SOCKET_VALUE;
     }
-    ::Sleep(timeoutIntervalMs);
-    elapsed += timeoutIntervalMs;
+    ::Sleep(static_cast<DWORD>(retryInterval.count()));
   }
   return INVALID_SOCKET_VALUE;
 }
 
-void SetIPCSocketRecvTimeout(IPCSocket sock, uint32_t timeoutSec) {
+void SetIPCSocketRecvTimeout(IPCSocket sock, std::chrono::seconds timeout) {
   auto* info = reinterpret_cast<IPCPipeInfo*>(sock);
-  info->recvTimeoutMs = timeoutSec * 1000;
+  info->recvTimeoutMs = static_cast<DWORD>(
+      std::chrono::duration_cast<std::chrono::milliseconds>(timeout).count());
 }
 
 int IPCSocketRead(IPCSocket conn, void* buf, size_t len) {

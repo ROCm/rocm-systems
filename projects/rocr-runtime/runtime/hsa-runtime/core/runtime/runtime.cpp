@@ -1445,13 +1445,15 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle,
                              uint32_t shared_handle) {
     char socketName[IPC_SOCK_SERVER_NAME_LENGTH];
     snprintf(socketName, IPC_SOCK_SERVER_NAME_LENGTH, "xhsa%i", conn_handle);
-
-    uint32_t timeoutLimitMs = 10000, timeoutIntervalMs = 1;
-    os::IPCSocket socket_fd = os::ConnectToIPCServer(socketName, timeoutLimitMs, timeoutIntervalMs);
+    std::chrono::milliseconds timeout(10000);
+    std::chrono::milliseconds retryInterval(1);
+    os::IPCSocket socket_fd = os::ConnectToIPCServer(
+        socketName, timeout, retryInterval);
     assert(socket_fd != os::INVALID_SOCKET_VALUE && "Connection to export DMA buffer not made!");
     if (socket_fd == os::INVALID_SOCKET_VALUE) return -1;
-
-    os::SetIPCSocketRecvTimeout(socket_fd, 10);
+    
+    std::chrono::seconds rcvtimeout(10);
+    os::SetIPCSocketRecvTimeout(socket_fd, rcvtimeout);
 
     MAKE_SCOPE_GUARD([&]() { os::CloseIPCSocket(socket_fd); });
 

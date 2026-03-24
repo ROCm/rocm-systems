@@ -45,6 +45,7 @@
 #ifndef HSA_RUNTIME_CORE_UTIL_OS_H_
 #define HSA_RUNTIME_CORE_UTIL_OS_H_
 
+#include <chrono>
 #include <string>
 #include <vector>
 #include "utils.h"
@@ -385,15 +386,16 @@ IPCSocket AcceptIPCConnection(IPCSocket server);
 
 /// @brief Connect to a named IPC server with retry/timeout.
 /// @param name Abstract socket name matching the server.
-/// @param timeoutMs Total timeout in milliseconds.
-/// @param timeoutIntervalMs Sleep interval between retries in milliseconds.
+/// @param timeout Total timeout.
+/// @param retryInterval Sleep interval between retries.
 /// @return Connected IPCSocket handle, or nullptr on failure/timeout.
-IPCSocket ConnectToIPCServer(const char* name, uint32_t timeoutMs, uint32_t timeoutIntervalMs);
+IPCSocket ConnectToIPCServer(const char* name, std::chrono::milliseconds timeout,
+                             std::chrono::milliseconds retryInterval);
 
 /// @brief Set the receive timeout on an IPC socket.
 /// @param sock IPCSocket connection handle.
-/// @param timeoutSec Timeout in seconds.
-void SetIPCSocketRecvTimeout(IPCSocket sock, uint32_t timeoutSec);
+/// @param timeout Receive timeout.
+void SetIPCSocketRecvTimeout(IPCSocket sock, std::chrono::seconds timeout);
 
 /// @brief Read data from an IPC socket.
 /// @param conn IPCSocket connection handle.
