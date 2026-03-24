@@ -2545,7 +2545,7 @@ rsmi_status_t rsmi_dev_pci_bandwidth_set(uint32_t dv_ind, uint64_t bw_bitmask) {
   // NOTE:  kDevPCIEClk sysfs file maybe not exist for all cases.
   //        If it doesn't exist (pp_dpm_pcie), it shouldn't be an error
   //        and will get translated to RSMI_STATUS_NOT_SUPPORTED.
-  //        On some devices (e.g. gfx90a), writing to pp_dpm_pcie may fail
+  //        On some devices, writing to pp_dpm_pcie may fail
   //        with an unmapped errno, resulting in RSMI_STATUS_UNKNOWN_ERROR.
   //        Treat any write failure as NOT_SUPPORTED since the device does
   //        not support PCIe bandwidth control.
