@@ -23,8 +23,8 @@
 #pragma once
 
 #include "lib/common/static_object.hpp"
-#include "lib/rocprofiler-sdk/pc_sampling/defines.hpp"
 #include "lib/rocprofiler-sdk-attach/table.h"
+#include "lib/rocprofiler-sdk/pc_sampling/defines.hpp"
 
 #include <hsa/hsa_api_trace.h>
 #include <rocprofiler-sdk/callback_tracing.h>
