@@ -589,7 +589,7 @@ hsaKmtGetNodeWallclockFrequency(HSAuint32 NodeId, uint64_t* Frequency) {
   HsaNodeProperties *NodeProperties = &(dxg_topology->g_props[NodeId].node);
   *Frequency = NodeProperties->WallClockKHz * 1000ull;
 
-  return HSAKMT_STATUS_NOT_IMPLEMENTED;
+  return HSAKMT_STATUS_SUCCESS;
 }
 
 uint16_t get_device_id_by_node_id(HSAuint32 node_id) {
@@ -813,7 +813,7 @@ HSAKMT_STATUS topology_sysfs_get_node_props(uint32_t node_id, HsaNodeProperties&
     assert(props.EngineId.ui32.Major && "HSA_OVERRIDE_GFX_VERSION may be needed");
   }
 
-  props.WallClockKHz =  device->GPUCounterFrequency() / 1000ull;
+  props.WallClockKHz = device->GPUCounterFrequency() / 1000ull;
 
   return HSAKMT_STATUS_SUCCESS;
 }
