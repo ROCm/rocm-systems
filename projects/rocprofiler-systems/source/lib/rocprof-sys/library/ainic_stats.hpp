@@ -42,10 +42,10 @@ struct nic_stats
     static constexpr const char* RX_RDMA_CNP_PKTS    = "rx_rdma_cnp_pkts";
     static constexpr const char* TX_RDMA_CNP_PKTS    = "tx_rdma_cnp_pkts";
 
-    static constexpr const char* REQ_TX_RDMA_ACK_TIMEOUT  = "tx_rdma_ack_timeout";
-    static constexpr const char* RESP_TX_PKT_SEQ_ERR      = "resp_tx_pkt_seq_err";
-    static constexpr const char* REQ_TX_PKT_SEQ_ERR       = "req_rx_pkt_seq_err";
-    static constexpr const char* REQ_RX_IMPL_NAK_SEQ_ERR  = "req_rx_impl_nak_seq_err";
+    static constexpr const char* REQ_TX_RDMA_ACK_TIMEOUT = "tx_rdma_ack_timeout";
+    static constexpr const char* RESP_TX_PKT_SEQ_ERR     = "resp_tx_pkt_seq_err";
+    static constexpr const char* REQ_TX_PKT_SEQ_ERR      = "req_rx_pkt_seq_err";
+    static constexpr const char* REQ_RX_IMPL_NAK_SEQ_ERR = "req_rx_impl_nak_seq_err";
 };
 
 class ai_nic_stats_collector
