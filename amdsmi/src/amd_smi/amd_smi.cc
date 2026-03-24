@@ -117,68 +117,6 @@ char proc_id[SIZE] = "\0";
 	} \
 } while (0)
 
-static amdsmi_status_t get_gpu_device_from_handle(amdsmi_processor_handle processor_handle,
-            amd::smi::AMDSmiGPUDevice** gpudevice) {
-    AMDSMI_CHECK_INIT();
-    std::ostringstream ss;
-
-    if (processor_handle == nullptr || gpudevice == nullptr) {
-        ss << __PRETTY_FUNCTION__
-        << " | processor_handle is NULL; returning: AMDSMI_STATUS_INVAL";
-        LOG_ERROR(ss);
-        return AMDSMI_STATUS_INVAL;
-    }
-
-    amd::smi::AMDSmiProcessor* device = nullptr;
-    amdsmi_status_t r = amd::smi::AMDSmiSystem::getInstance()
-                    .handle_to_processor(processor_handle, &device);
-    if (r != AMDSMI_STATUS_SUCCESS) return r;
-
-    if (device->get_processor_type() == AMDSMI_PROCESSOR_TYPE_AMD_GPU) {
-        *gpudevice = static_cast<amd::smi::AMDSmiGPUDevice*>(device);
-        return AMDSMI_STATUS_SUCCESS;
-    }
-
-    ss << __PRETTY_FUNCTION__
-    << " | returning AMDSMI_STATUS_NOT_SUPPORTED";
-    LOG_ERROR(ss);
-    return AMDSMI_STATUS_NOT_SUPPORTED;
-}
-template <typename F, typename ...Args>
-amdsmi_status_t rsmi_wrapper(F && f,
-    amdsmi_processor_handle processor_handle, uint32_t increment_gpu_id, Args &&... args) {
-
-    AMDSMI_CHECK_INIT();
-
-    std::ostringstream ss;
-    amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
-    amdsmi_status_t r = get_gpu_device_from_handle(processor_handle, &gpu_device);
-    ss << __PRETTY_FUNCTION__ << " | get_gpu_device_from_handle status = "
-       << smi_amdgpu_get_status_string(r, false);
-    LOG_INFO(ss);
-    if (r != AMDSMI_STATUS_SUCCESS) return r;
-
-
-    uint32_t total_num_gpu_processors = 0;
-    rsmi_num_monitor_devices(&total_num_gpu_processors);
-    uint32_t gpu_index = gpu_device->get_gpu_id() + increment_gpu_id;
-    ss << __PRETTY_FUNCTION__ << " | total_num_gpu_processors: " << total_num_gpu_processors
-    << "; gpu_index: " << gpu_index;
-    LOG_DEBUG(ss);
-    if ((gpu_index + 1) > total_num_gpu_processors) {
-        ss << __PRETTY_FUNCTION__ << " | returning status = AMDSMI_STATUS_NOT_FOUND";
-        LOG_INFO(ss);
-        return AMDSMI_STATUS_NOT_FOUND;
-    }
-
-    auto rstatus = std::forward<F>(f)(gpu_index,
-                    std::forward<Args>(args)...);
-    r = amd::smi::rsmi_to_amdsmi_status(rstatus);
-    std::string status_string = smi_amdgpu_get_status_string(r, false);
-    ss << __PRETTY_FUNCTION__ << " | returning status = " << status_string;
-    LOG_INFO(ss);
-    return r;
-}
 
 
 amdsmi_status_t
@@ -1465,43 +1403,27 @@ void amdsmi_free_name_value_pairs(void *p) {
 
 amdsmi_status_t
 amdsmi_get_power_cap_info(amdsmi_processor_handle processor_handle,
-                          uint32_t sensor_ind,
+                          uint32_t /*sensor_ind*/,
                           amdsmi_power_cap_info_t *info) {
     AMDSMI_CHECK_INIT();
 
     if (info == nullptr)
         return AMDSMI_STATUS_INVAL;
 
-    amd::smi::AMDSmiGPUDevice* gpudevice = nullptr;
-    amdsmi_status_t r = get_gpu_device_from_handle(processor_handle, &gpudevice);
-    if (r != AMDSMI_STATUS_SUCCESS)
-        return r;
+    auto *device = reinterpret_cast<Device *>(processor_handle);
+    if (device == nullptr)
+        return AMDSMI_STATUS_INVAL;
 
-    amdsmi_status_t status;
-
-    status = get_gpu_device_from_handle(processor_handle, &gpudevice);
-    if (status != AMDSMI_STATUS_SUCCESS) {
-        return status;
-    }
-    // Ignore errors to get as much as possible info.
     memset(info, 0, sizeof(amdsmi_power_cap_info_t));
 
-    int dpm = 0;
-    auto smi_power_cap_status = rsmi_wrapper(rsmi_dev_power_cap_get, processor_handle, 0,
-                sensor_ind, &(info->power_cap));
+    wsl::thunk::PowerInfo pi = {};
+    auto code = device->QueryPowerInfo(&pi);
+    if (code != ErrorCode::Success)
+        return translateCodeToSmiStatus(code);
 
-    status = smi_amdgpu_get_ranges(gpudevice, AMDSMI_CLK_TYPE_GFX,
-            NULL, NULL, &dpm, NULL);
-    info->dpm_cap = dpm;
-
-    // Get other information from rocm-smi
-    status = rsmi_wrapper(rsmi_dev_power_cap_default_get, processor_handle, 0,
-                          sensor_ind, &(info->default_power_cap));
-
-    status = rsmi_wrapper(rsmi_dev_power_cap_range_get, processor_handle, 0,
-                          sensor_ind, &(info->max_power_cap), &(info->min_power_cap));
-
-    return smi_power_cap_status;
+    info->power_cap     = pi.power_limit;
+    info->max_power_cap = pi.power_limit;
+    return AMDSMI_STATUS_SUCCESS;
 }
 
 amdsmi_status_t
