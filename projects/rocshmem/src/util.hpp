@@ -475,7 +475,7 @@ template <typename... Args>
   src_bytes = src_def;
 
   constexpr int DATA_SIZE = 16; // size of each element: 4 uint (4 bytes) = 16 bytes (128 bits)
-  constexpr int DATA_COUNT = 8; // number of elements
+  constexpr int DATA_COUNT = 16; // number of elements
   constexpr int CHUNK_BYTES = DATA_SIZE * DATA_COUNT; // 128 bytes -> bus bandwidth (B/s)
   int block_bytes = CHUNK_BYTES * block_size;
 

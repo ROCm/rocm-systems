@@ -369,7 +369,7 @@ __device__ __forceinline__ void store_asm(uint8_t* val, uint8_t* dst,
 // #endif
 //       break;
 //     }
-    case 128: {
+    case 256: {
       // 128-byte transfer: 8 x 16-byte iterations
 #if defined(__gfx906__)
 #endif
@@ -385,7 +385,7 @@ __device__ __forceinline__ void store_asm(uint8_t* val, uint8_t* dst,
 #endif
 #if defined(__gfx942__) || defined(__gfx950__)
       {
-        constexpr int NUM_REG = 8;
+        constexpr int NUM_REG = 16;
         size_t block_size = hipBlockDim_x * hipBlockDim_y * hipBlockDim_z;
         size_t stride = block_size * sizeof(uint4);
         size_t thread = (hipThreadIdx_x + hipThreadIdx_y * hipBlockDim_x +
@@ -399,15 +399,17 @@ __device__ __forceinline__ void store_asm(uint8_t* val, uint8_t* dst,
         for (int i = 0; i < NUM_REG; i++) {
           regs[i] = llvm_amdgcn_raw_buffer_load_b128(
               *reinterpret_cast<i32x4*>(&br_src),
-              thread + i * stride, 0u, 0b10001u);
+              thread + i * stride, 0u, 0b10011u);
         }
         #pragma unroll
         for (int i = 0; i < NUM_REG; i++) {
           llvm_amdgcn_raw_buffer_store_b128(
               regs[i],
               *reinterpret_cast<i32x4*>(&br_dst),
-              thread + i * stride, 0u, 0b10001u);
+              thread + i * stride, 0u, 0b10011u);
         }
+        __builtin_amdgcn_s_setprio(0);
+        __builtin_amdgcn_s_barrier();
       }
 #endif
 #if defined(__gfx1201__)
