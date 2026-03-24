@@ -55,7 +55,7 @@ void test_vgprs_value() {
   REQUIRE(true);
 }
 
-TEST_CASE(Unit_Device__hip_check_VGPRs) {
+HIP_TEST_CASE(Unit_Device__hip_check_VGPRs) {
   hipDeviceProp_t props;
   hipFuncAttributes attr;
   int maxAvailableVgprsPerThread = 0;

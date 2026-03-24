@@ -26,9 +26,8 @@
 from pathlib import Path
 from typing import Any, Optional
 
-import yaml
-
 from utils.logger import console_debug, console_error, console_warning
+from vendored import yaml
 
 # ----------------------------
 # Data Class handling to preserve the hierarchical gpu information

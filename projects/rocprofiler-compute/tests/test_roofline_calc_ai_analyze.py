@@ -63,10 +63,7 @@ def run_calc_ai_analyze_with_values(monkeypatch, metric_values):
     arch_config.dfs_type = {401: "metric_table", 402: "metric_table"}
 
     pmc_data = pd.DataFrame({"Kernel_Name": [kernel_name]})
-    filtered_pmc = pd.concat({"pmc_perf": pmc_data}, axis=1)
-    monkeypatch.setattr(
-        "utils.roofline_calc.apply_filters", lambda *a, **kw: filtered_pmc
-    )
+    pmc_df = pd.concat({"pmc_perf": pmc_data}, axis=1)
 
     def mock_eval_metric(
         dfs, dfs_type, sys_info_row, roofline_peaks, pmc_data, debug, config
@@ -96,6 +93,7 @@ def run_calc_ai_analyze_with_values(monkeypatch, metric_values):
 
     return calc_ai_analyze(
         workload=workload,
+        pmc_df=pmc_df,
         mspec=mock.MagicMock(),
         sort_type="kernels",
         config={},
