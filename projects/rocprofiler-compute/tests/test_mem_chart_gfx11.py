@@ -450,12 +450,14 @@ class TestPlotMemChart:
         # Should contain GB/s units since sample data uses GB/s range
         assert "GB/s" in result
 
-    def test_contains_normalization_unit(self):
-        """Test that output contains the normalization unit."""
-        metrics = mem_chart_gfx11.get_sample_metrics()
-        result = mem_chart_gfx11.plot_mem_chart("gfx1151", "per_kernel", metrics)
-
-        assert "per_kernel" in result
+    def test_normalize_mem_chart_metrics_flat_ordered(self):
+        """Metrics are flattened to panel YAML order; extras dropped; missing None."""
+        raw = {"TCP Hit Rate": 1.0, "noise_key": 99}
+        norm = mem_chart_gfx11.normalize_mem_chart_metrics(raw)
+        assert list(norm.keys()) == list(mem_chart_gfx11.MEM_CHART_PANEL_METRIC_KEYS)
+        assert norm["TCP Hit Rate"] == 1.0
+        assert "noise_key" not in norm
+        assert norm["ICache Requests"] is None
 
     def test_empty_metrics(self):
         """Test with empty metrics dictionary."""

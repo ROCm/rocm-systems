@@ -706,6 +706,18 @@ def process_table_data(
     return result_df
 
 
+def _panel_is_mem_chart_only(panel: dict[str, Any]) -> bool:
+    """True when every table in the panel is ``cli_style: mem_chart`` (one merged chart)."""
+    sources = panel.get("data source") or []
+    if not sources:
+        return False
+    for ds in sources:
+        for _ttype, tcfg in ds.items():
+            if tcfg.get("cli_style") != "mem_chart":
+                return False
+    return True
+
+
 def flatten_mem_chart_tables(
     args: argparse.Namespace,
     runs: dict[str, Any],
@@ -814,7 +826,17 @@ def format_table_output(
         console_log(f"Not showing table with empty column(s): {table_id_str} {title}")
         return content
 
-    if "title" in table_config and table_config["title"]:
+    # mem_chart diagram mode: one merged chart, no per-table titles (3.1, 3.2, …).
+    # With --view table, keep titles so tabular output stays navigable.
+    skip_mem_chart_title = (
+        table_config.get("cli_style") == "mem_chart"
+        and not _tty_view_is_table(args)
+    )
+    if (
+        "title" in table_config
+        and table_config["title"]
+        and not skip_mem_chart_title
+    ):
         content += f"{table_id_str} {table_config['title']}\n"
 
     if args.output_format == "csv" and csv_dir and csv_dir.is_dir():
@@ -888,7 +910,7 @@ def format_table_output(
                 hidden_cols,
             )
             if should_skip:
-                pass  # Already included in first table
+                return ""  # Already merged into the first mem_chart table's output
             elif chart_content:
                 content += chart_content
             else:
@@ -1089,9 +1111,12 @@ def show_all(
         if panel_content and (
             table_config["id"] not in [401, 402] or _tty_view_is_table(args)
         ):
-            print(f"\n{'-' * 80}", file=output)
-            print(f"{panel_id // 100}. {panel['title']}", file=output)
-            print(panel_content, file=output)
+            if _panel_is_mem_chart_only(panel) and not _tty_view_is_table(args):
+                print(panel_content, file=output)
+            else:
+                print(f"\n{'-' * 80}", file=output)
+                print(f"{panel_id // 100}. {panel['title']}", file=output)
+                print(panel_content, file=output)
 
 
 def show_roof_plot(roof_plot: str) -> None:

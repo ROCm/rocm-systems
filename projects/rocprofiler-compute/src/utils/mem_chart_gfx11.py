@@ -31,6 +31,7 @@ USAGE:
     python mem_chart_gfx11.py [--data metrics.json] [--debug] [--txt file.txt] [--svg file.svg]
 
 API:
+    normalize_mem_chart_metrics(metric_dict) -> flat ordered dict for UIs
     plot_mem_chart(arch, normal_unit, metric_dict) -> str
 
 Metric dict keys must match the Memory Chart panel YAML for RDNA3.5:
@@ -135,6 +136,16 @@ _MEM_CHART_DEFAULT_ROWS: Tuple[Tuple[str, Union[int, float]], ...] = (
 )
 
 MEM_CHART_PANEL_METRIC_KEYS: Tuple[str, ...] = tuple(k for k, _ in _MEM_CHART_DEFAULT_ROWS)
+
+
+def normalize_mem_chart_metrics(metric_dict: Dict[str, Any]) -> Dict[str, Any]:
+    """Return a single flat map: YAML metric name -> value, panel order.
+
+    All keys in ``MEM_CHART_PANEL_METRIC_KEYS`` are present; unknown input keys
+    are dropped. Use before rendering or serializing for front-ends.
+    """
+    return {k: metric_dict.get(k) for k in MEM_CHART_PANEL_METRIC_KEYS}
+
 
 COLORS = {
     "kernel": "green",
@@ -458,22 +469,7 @@ def create_mem_chart_diagram(
 
     total_bw = (dram_read_bw or 0) + (dram_write_bw or 0)
 
-    # Print header
-    console.print()
-    console.print(
-        f"[bold]RDNA3.5 Memory Chart[/bold] [dim](Normalization: {normal_unit})[/dim]"
-    )
-    console.print(
-        "|"
-        + "-" * 62
-        + " [dim]GPU[/dim] "
-        + "-" * 62
-        + "|"
-        + "-" * 4
-        + " [dim]System Memory[/dim] "
-        + "-" * 4
-        + "|"
-    )
+    # Single diagram only (no panel/table titles; callers add section headers if needed)
     console.print()
 
     # Arrow constants
@@ -528,9 +524,9 @@ def create_mem_chart_diagram(
         "",
         "     [white]Request[/white]",  # Label between Kernel and LDS (5 spaces)
         "",
-        f"[{COLORS['read']}]{fmt_edge('Instr', lds_insts)}[/{COLORS['read']}]",
+        f"[{COLORS['read']}]{fmt_edge('Read', lds_insts)}[/{COLORS['read']}]",
         f"[{COLORS['read']}]{kernel_arrow_left}[/{COLORS['read']}]",
-        f"[{COLORS['write']}]{fmt_edge('InstCy', lds_inst_cycles)}[/{COLORS['write']}]",
+        f"[{COLORS['write']}]{fmt_edge('Write', lds_inst_cycles)}[/{COLORS['write']}]",
         f"[{COLORS['write']}]{kernel_arrow_right}[/{COLORS['write']}]",
         f"[{COLORS['atomic']}]{fmt_edge('Atomic', lds_atomic_insts)}[/{COLORS['atomic']}]",
         f"[{COLORS['atomic']}]{kernel_arrow_both}[/{COLORS['atomic']}]",
@@ -704,7 +700,7 @@ def create_mem_chart_diagram(
 
     # GCEA panel - height=30 to match
     gcea_panel = Panel(
-        f"{metric_line('SARB Util', sarb_util, '%', COLORS['util'])}\n"
+        f"{metric_line('SysArb Util', sarb_util, '%', COLORS['util'])}\n"
         f"[dim]{bar(sarb_util)}[/dim]\n"
         "\n"
         f"{metric_line('Stall', sarb_stall, '%', COLORS['stall'])}",
@@ -787,6 +783,7 @@ def plot_mem_chart(arch: str, normal_unit: str, metric_dict: Dict[str, Any]) -> 
 
     ``metric_dict`` keys should match ``0300_Memory_Chart.yaml`` (gfx1151), i.e.
     ``MEM_CHART_PANEL_METRIC_KEYS``. Values for bandwidth metrics are in **Bytes/s**.
+    Input is normalized to a flat ordered dict before rendering.
     """
 
     class FakeFile:
@@ -805,10 +802,11 @@ def plot_mem_chart(arch: str, normal_unit: str, metric_dict: Dict[str, Any]) -> 
         def getvalue(self):
             return "".join(self.data)
 
+    flat = normalize_mem_chart_metrics(metric_dict)
     fake_file = FakeFile()
     console = Console(file=fake_file, force_terminal=True, width=200, height=80)
     create_mem_chart_diagram(
-        arch, normal_unit, metric_dict, console, show_debug=False, compact=False
+        arch, normal_unit, flat, console, show_debug=False, compact=False
     )
     return fake_file.getvalue()
 
@@ -817,8 +815,8 @@ DEFAULT_SAMPLE_METRICS: Dict[str, Union[int, float]] = dict(_MEM_CHART_DEFAULT_R
 
 
 def get_sample_metrics() -> Dict[str, Any]:
-    """Return sample metrics data for testing"""
-    return DEFAULT_SAMPLE_METRICS.copy()
+    """Return sample metrics (flat panel order) for testing or demos."""
+    return normalize_mem_chart_metrics(DEFAULT_SAMPLE_METRICS.copy())
 
 
 def main():
@@ -837,9 +835,9 @@ def main():
     # Load or use default data
     if args.data:
         with open(args.data) as f:
-            metric_dict = json.load(f)
+            metric_dict = normalize_mem_chart_metrics(json.load(f))
     else:
-        metric_dict = DEFAULT_SAMPLE_METRICS.copy()
+        metric_dict = normalize_mem_chart_metrics(DEFAULT_SAMPLE_METRICS.copy())
 
     # Create console
     class FakeFile:
@@ -882,7 +880,7 @@ def main():
         create_mem_chart_diagram(
             args.arch, args.norm, metric_dict, svg_console, args.debug, args.compact
         )
-        svg_output = svg_console.export_svg(title="RDNA3.5 Memory Chart")
+        svg_output = svg_console.export_svg(title="")
         with open(args.svg, "w") as f:
             f.write(svg_output)
         print(f"SVG saved to {args.svg}")
