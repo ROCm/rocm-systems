@@ -1024,7 +1024,8 @@ void GDABackend::open_ib_device() {
 
   if (gda_provider == GDAProvider::MLX5) {
     /* Explicitly request DevX context */
-    struct mlx5dv_context_attr context_attr{ .flags = MLX5DV_CONTEXT_FLAGS_DEVX };
+    struct mlx5dv_context_attr context_attr = {};
+    context_attr.flags = MLX5DV_CONTEXT_FLAGS_DEVX;
     context = mlx5dv.open_device(device, &context_attr);
   } else {
     context = ibv.open_device(device);
