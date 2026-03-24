@@ -249,11 +249,11 @@ __device__ __forceinline__ buffer_resource make_buffer_resource(T* ptr, uint32_t
 
 #if defined(__gfx942__) || defined(__gfx950__)
 
-__device__ __uint128_t llvm_amdgcn_raw_buffer_load_b128(i32x4 srsrc, uint32_t voffset,
+__device__ __int128_t llvm_amdgcn_raw_buffer_load_b128(i32x4 srsrc, uint32_t voffset,
                                                          uint32_t soffset, uint32_t coherency)
     __asm("llvm.amdgcn.raw.buffer.load.i128");
 
-__device__ void llvm_amdgcn_raw_buffer_store_b128(__uint128_t vdata, i32x4 srsrc,
+__device__ void llvm_amdgcn_raw_buffer_store_b128(__int128_t vdata, i32x4 srsrc,
                                                    uint32_t voffset, uint32_t soffset,
                                                    uint32_t coherency)
     __asm("llvm.amdgcn.raw.buffer.store.i128");
@@ -321,7 +321,7 @@ __device__ __forceinline__ void store_asm(uint8_t* val, uint8_t* dst,
       break;
     }
     case 16: {
-      __uint128_t val128{*(reinterpret_cast<__uint128_t*>(val))};
+      __int128_t val128{*(reinterpret_cast<__int128_t*>(val))};
 #if defined(__gfx906__)
 #endif
 #if defined(__gfx908__)
@@ -338,39 +338,7 @@ __device__ __forceinline__ void store_asm(uint8_t* val, uint8_t* dst,
       break;
     }
 
-//     case 128: {
-// #if defined(__gfx906__)
-// #endif
-// #if defined(__gfx908__)
-// #endif
-// #if defined(__gfx90a__) || defined(__gfx1100__)
-//       #pragma unroll
-//       for (int i = 0; i < 8; i++) {
-//         __uint128_t val128{*(reinterpret_cast<__uint128_t*>(val) + i)};
-//         uint8_t* dst_i = dst + i * sizeof(__uint128_t);
-//         asm volatile("flat_store_dwordx4 %0 %1 glc slc" : : "v"(dst_i), "v"(val128));
-//       }
-// #endif
-// #if defined(__gfx942__) || defined(__gfx950__)
-//       #pragma unroll
-//       for (int i = 0; i < 8; i++) {
-//         __uint128_t val128{*(reinterpret_cast<__uint128_t*>(val) + i)};
-//         uint8_t* dst_i = dst + i * sizeof(__uint128_t);
-//         asm volatile("flat_store_dwordx4 %0 %1 sc0 sc1" : : "v"(dst_i), "v"(val128));
-//       }
-// #endif
-// #if defined(__gfx1201__)
-//       #pragma unroll
-//       for (int i = 0; i < 8; i++) {
-//         __uint128_t val128{*(reinterpret_cast<__uint128_t*>(val) + i)};
-//         uint8_t* dst_i = dst + i * sizeof(__uint128_t);
-//         asm volatile("flat_store_b128 %0 %1 scope:SCOPE_SYS" : : "v"(dst_i), "v"(val128));
-//       }
-// #endif
-//       break;
-//     }
     case 256: {
-      // 128-byte transfer: 8 x 16-byte iterations
 #if defined(__gfx906__)
 #endif
 #if defined(__gfx908__)
@@ -378,8 +346,8 @@ __device__ __forceinline__ void store_asm(uint8_t* val, uint8_t* dst,
 #if defined(__gfx90a__) || defined(__gfx1100__)
       #pragma unroll
       for (int i = 0; i < 8; i++) {
-        __uint128_t val128{*(reinterpret_cast<__uint128_t*>(val) + i)};
-        uint8_t* dst_i = dst + i * sizeof(__uint128_t);
+        __int128_t val128{*(reinterpret_cast<__int128_t*>(val) + i)};
+        uint8_t* dst_i = dst + i * sizeof(__int128_t);
         asm volatile("flat_store_dwordx4 %0 %1 glc slc" : : "v"(dst_i), "v"(val128));
       }
 #endif
@@ -391,7 +359,7 @@ __device__ __forceinline__ void store_asm(uint8_t* val, uint8_t* dst,
         size_t thread = (hipThreadIdx_x + hipThreadIdx_y * hipBlockDim_x +
                        hipThreadIdx_z * hipBlockDim_x * hipBlockDim_y) * sizeof(uint4);
 
-        __uint128_t regs[NUM_REG];
+        __int128_t regs[NUM_REG];
         buffer_resource br_src = make_buffer_resource(val, size * block_size);
         buffer_resource br_dst = make_buffer_resource(dst, size * block_size);
 
@@ -415,8 +383,8 @@ __device__ __forceinline__ void store_asm(uint8_t* val, uint8_t* dst,
 #if defined(__gfx1201__)
       #pragma unroll
       for (int i = 0; i < 8; i++) {
-        __uint128_t val128{*(reinterpret_cast<__uint128_t*>(val) + i)};
-        uint8_t* dst_i = dst + i * sizeof(__uint128_t);
+        __int128_t val128{*(reinterpret_cast<__int128_t*>(val) + i)};
+        uint8_t* dst_i = dst + i * sizeof(__int128_t);
         asm volatile("flat_store_b128 %0 %1 scope:SCOPE_SYS" : : "v"(dst_i), "v"(val128));
       }
 #endif
