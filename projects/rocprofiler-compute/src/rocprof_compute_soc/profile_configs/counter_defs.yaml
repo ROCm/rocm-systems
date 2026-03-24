@@ -10671,6 +10671,22 @@ rocprofiler-sdk:
       - gfx1151
       - gfx1152
       expression: reduce(TD_TD_BUSY,sum)
+  - name: TD_TD_BUSY_avr
+    description: TD is processing or waiting for data. Average over TD instances.
+    properties: []
+    definitions:
+    - architectures:
+      - gfx90a
+      - gfx908
+      - gfx940
+      - gfx941
+      - gfx942
+      - gfx950
+      expression: reduce(TD_TD_BUSY,avr)
+    - architectures:
+      - gfx1151
+      - gfx1152
+      expression: reduce(TD_TD_BUSY,avr)
   - name: TD_WRITE_ACKT_WAVEFRONT
     description: Count write acknowledgments, sent to SQ and not to SP.
     properties: []
