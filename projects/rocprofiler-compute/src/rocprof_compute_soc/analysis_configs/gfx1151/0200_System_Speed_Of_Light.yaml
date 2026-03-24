@@ -105,11 +105,6 @@ Panel Config:
           unit: Percent
           peak: 100
           pop: AVG((100 * GL2C_WRREQ_STALL_max / GRBM_GUI_ACTIVE))
-        VMEM Issue Cycles per Wave:
-          value: AVG(((4 * SQ_INST_CYCLES_VMEM / SQ_WAVES) if (SQ_WAVES != 0) else 0))
-          unit: Cycles/Wave
-          peak: None
-          pop: None
         Wave Dependency Wait:
           value: AVG(((100 * SQ_WAIT_ANY / SQ_WAVE_CYCLES) if (SQ_WAVE_CYCLES != 0) else 0))
           unit: Percent
@@ -216,9 +211,6 @@ Panel Config:
       GRBM_GUI_ACTIVE. Peak / % of peak use 100% (TA fully busy whenever the GPU is active).
     Write Unit Stalled: |-
       Percent of time the write unit was stalled (max across L2 channels).
-    VMEM Issue Cycles per Wave: |-
-      Average number of cycles (wall time) spent issuing VMEM address/data per wavefront.
-      Peak / % of Peak are N/A.
     Wave Dependency Wait: |-
       Percent of wave lifetime spent waiting for data dependencies (e.g. VMEM/LDS results).
     Wave Issue Wait: |-
