@@ -301,7 +301,7 @@ nic_data::post_process(size_t nic_index)
         counter_track::emplace(nic_index, addendum("TX RESP PKT SEQ ERR"), "count");
         counter_track::emplace(nic_index, addendum("RX REQ PKT SEQ ERR"), "count");
         counter_track::emplace(nic_index, addendum("RX REQ RX IMPL NAK SEQ ERR"),
-            "count");
+                               "count");
 
         size_t track_index = 0;
 
