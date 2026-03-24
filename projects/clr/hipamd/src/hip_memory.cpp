@@ -3621,7 +3621,6 @@ hipError_t hipPointerGetAttributes(hipPointerAttribute_t* attributes, const void
     if (attributes->isManaged) {
       attributes->type = hipMemoryTypeManaged;
     }
-    HIP_RETURN(hipSuccess);
   } else {
     attributes->type = hipMemoryTypeUnregistered;
     attributes->devicePointer = nullptr;
@@ -3632,7 +3631,6 @@ hipError_t hipPointerGetAttributes(hipPointerAttribute_t* attributes, const void
     if (ptr != nullptr) {
       LogPrintfError("Cannot get amd_mem_obj for ptr: %p", ptr);
     }
-    HIP_RETURN(hipErrorInvalidValue);
   }
   HIP_RETURN(hipSuccess);
 }

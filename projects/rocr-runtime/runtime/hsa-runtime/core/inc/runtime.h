@@ -53,6 +53,7 @@
 #include <thread>
 #include <shared_mutex>
 #include <random>
+#include <cinttypes>
 #if defined(__linux__)
 #include <sys/un.h>
 #include <xf86drm.h>
@@ -916,7 +917,7 @@ class Runtime {
 
   // IPC DMA buf socket server for dmabuf FD passing
   os::IPCSocket ipc_sock_server_fd_;
-  std::map<uint64_t, int> ipc_sock_server_conns_;
+  std::map<uint64_t, size_t> ipc_sock_server_conns_;
   std::mutex ipc_sock_server_lock_;
   os::Thread ipc_sock_server_thread_;
 

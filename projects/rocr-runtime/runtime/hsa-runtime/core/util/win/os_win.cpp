@@ -505,14 +505,14 @@ struct IPCPipeInfo {
   HANDLE pipe;
   std::string pipeName;  // non-empty only for server sockets
   bool serverSide;       // true for server and accepted-connection sockets
-  int recvTimeoutMs;     // 0 = no timeout (blocking reads)
+  uint32_t recvTimeoutMs;     // 0 = no timeout (blocking reads)
 };
 
 // Poll the pipe with PeekNamedPipe until data is available or timeout
 // expires.  Returns true if data is ready, false on timeout or pipe error.
-static bool WaitForPipeData(HANDLE pipe, int timeoutMs) {
+static bool WaitForPipeData(HANDLE pipe, uint32_t timeoutMs) {
   if (timeoutMs <= 0) return true;
-  int elapsed = 0;
+  uint32_t elapsed = 0;
   DWORD sleepMs = 1; // init with 1ms
   const DWORD maxSleep = 500; // max at 500ms
   while (elapsed < timeoutMs) {
@@ -521,7 +521,8 @@ static bool WaitForPipeData(HANDLE pipe, int timeoutMs) {
       return false;
     if (available > 0) return true;
     ::Sleep(sleepMs);
-    elapsed += std::min(sleepMs * 2, maxSleep);
+    elapsed += static_cast<uint32_t>(sleepMs);
+    sleepMs = std::min(sleepMs * 2, maxSleep);
   }
   return false;
 }
@@ -541,6 +542,7 @@ static HANDLE CreatePipeInstance(const char* fullName) {
 
 IPCSocket CreateIPCServer(const char* name, int backlog) {
   std::string pipeName = PipeName(name);
+  (void)backlog;
   HANDLE pipe = CreateNamedPipe(
       pipeName.c_str(),
       PIPE_ACCESS_DUPLEX | FILE_FLAG_FIRST_PIPE_INSTANCE,
@@ -566,7 +568,7 @@ IPCSocket AcceptIPCConnection(IPCSocket server) {
   HANDLE newPipe = CreatePipeInstance(serverInfo->pipeName.c_str());
   if (newPipe == INVALID_HANDLE_VALUE) {
     DisconnectNamedPipe(connPipe);
-    assert("!CreatePipeInstance failed.");
+    assert(false && "!CreatePipeInstance failed.");
     return INVALID_SOCKET_VALUE;
   }
   serverInfo->pipe = newPipe;
@@ -575,9 +577,9 @@ IPCSocket AcceptIPCConnection(IPCSocket server) {
   return reinterpret_cast<IPCSocket>(connInfo);
 }
 
-IPCSocket ConnectToIPCServer(const char* name, int timeoutMs, int timeoutIntervalMs) {
+IPCSocket ConnectToIPCServer(const char* name, uint32_t timeoutMs, uint32_t timeoutIntervalMs) {
   std::string pipeName = PipeName(name);
-  int elapsed = 0;
+  uint32_t elapsed = 0;
   while (elapsed < timeoutMs) {
     HANDLE pipe = CreateFile(
         pipeName.c_str(), GENERIC_READ | GENERIC_WRITE,
@@ -596,7 +598,7 @@ IPCSocket ConnectToIPCServer(const char* name, int timeoutMs, int timeoutInterva
   return INVALID_SOCKET_VALUE;
 }
 
-void SetIPCSocketRecvTimeout(IPCSocket sock, int timeoutSec) {
+void SetIPCSocketRecvTimeout(IPCSocket sock, uint32_t timeoutSec) {
   auto* info = reinterpret_cast<IPCPipeInfo*>(sock);
   info->recvTimeoutMs = timeoutSec * 1000;
 }

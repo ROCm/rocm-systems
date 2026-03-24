@@ -1267,7 +1267,7 @@ void Runtime::AsyncIPCSockServerConnLoop(void*) {
    char buf[IPC_SOCK_SERVER_DMABUF_FD_HANDLE_LENGTH];
    while (1) {
      os::IPCSocket conn = os::AcceptIPCConnection(ipc_sock_server_fd_);
-     if (!conn) continue;
+     if (conn == os::INVALID_SOCKET_VALUE) continue;
      MAKE_SCOPE_GUARD([&]() { os::CloseIPCSocket(conn); });
      if (os::IPCSocketRead(conn, buf, sizeof(buf)) == -1)
        continue;
@@ -1381,9 +1381,9 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
   if (agent->device_type() == Agent::kAmdGpuDevice) {
     AMD::GpuAgent* agent_ = reinterpret_cast<AMD::GpuAgent*>(agent);
 
-    unsigned seed = std::chrono::high_resolution_clock::now().time_since_epoch().count();
+    auto seed = std::chrono::high_resolution_clock::now().time_since_epoch().count();
     std::mt19937 gen(seed);
-    std::uniform_int_distribution<int> distr(1, 1<<15);
+    std::uniform_int_distribution<uint32_t> distr(1, 1<<15);
     handle->handle[7] = distr(gen);
 
     HsaExternalHandleDesc desc;
@@ -1419,7 +1419,8 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
     snprintf(socketName, IPC_SOCK_SERVER_NAME_LENGTH, "xhsa%i", handle->handle[2]);
 
     ipc_sock_server_fd_ = os::CreateIPCServer(socketName, 1);
-    assert(ipc_sock_server_fd_ && "DMA buffer could not be exported for IPC!");
+    assert(ipc_sock_server_fd_ != os::INVALID_SOCKET_VALUE && "DMA buffer could not"
+      "be exported for IPC!");
     if (ipc_sock_server_fd_ == os::INVALID_SOCKET_VALUE) return HSA_STATUS_ERROR;
 
     ipc_sock_server_thread_ = os::CreateThread(AsyncIPCSockServerConnLoop, NULL);
@@ -1445,9 +1446,9 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle,
     char socketName[IPC_SOCK_SERVER_NAME_LENGTH];
     snprintf(socketName, IPC_SOCK_SERVER_NAME_LENGTH, "xhsa%i", conn_handle);
 
-    int timeoutLimitMs = 10000, timeoutIntervalMs = 1;
+    uint32_t timeoutLimitMs = 10000, timeoutIntervalMs = 1;
     os::IPCSocket socket_fd = os::ConnectToIPCServer(socketName, timeoutLimitMs, timeoutIntervalMs);
-    assert(socket_fd && "Connection to export DMA buffer not made!");
+    assert(socket_fd != os::INVALID_SOCKET_VALUE && "Connection to export DMA buffer not made!");
     if (socket_fd == os::INVALID_SOCKET_VALUE) return -1;
 
     os::SetIPCSocketRecvTimeout(socket_fd, 10);
@@ -1500,11 +1501,14 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle,
       // Store the buffer object handle in allocation map for later use
       if (status == HSAKMT_STATUS_SUCCESS) {
         std::lock_guard<std::shared_mutex> lock(memory_lock_);
-        if (allocation_map_.find(*importAddress) == allocation_map_.end()) {
-          allocation_map_[*importAddress] =
-              AllocationRegion(nullptr, *importSize, *importSize, core::MemoryRegion::AllocateNoFlags);
+        auto allocation_map_it = allocation_map_.find(*importAddress);
+        if (allocation_map_it == allocation_map_.end()) {
+          allocation_map_it =
+              allocation_map_.emplace(*importAddress,
+                  AllocationRegion(nullptr, *importSize, *importSize,
+                  core::MemoryRegion::AllocateNoFlags)).first;
         }
-        allocation_map_[*importAddress].thunk_bo = res.buf_handle;
+        allocation_map_it->second.thunk_bo = res.buf_handle;
       }
       runtime_singleton_->DmaBufClose(static_cast<int>(dmabuf_fd));
     }
@@ -3438,7 +3442,7 @@ hsa_status_t Runtime::DmaBufExport(const void* ptr, size_t size, int* dmabuf, ui
 
 hsa_status_t Runtime::DmaBufClose(int dmabuf) {
 #ifdef __linux__
-  int err;
+  int err = 0;
   if (dmabuf >= 0) {
     err = close(dmabuf);
   }
@@ -3721,7 +3725,7 @@ Runtime::MappedHandleAllowedAgent::MappedHandleAllowedAgent(
       targetAgent->driver().ImportDMABuf(dmabuf_fd, *targetAgent, &shareable_handle, reuse_handle);
   assert(status == HSA_STATUS_SUCCESS);
   status = core::Runtime::runtime_singleton_->DmaBufClose(dmabuf_fd);
-  if (status != HSA_STATUS_SUCCESS)
+if (status != HSA_STATUS_SUCCESS)
     return;
 }
 

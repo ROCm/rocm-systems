@@ -995,7 +995,7 @@ IPCSocket AcceptIPCConnection(IPCSocket server) {
   return FdToIPCSock(fd);
 }
 
-IPCSocket ConnectToIPCServer(const char* name, int timeoutMs, int timeoutIntervalMs) {
+IPCSocket ConnectToIPCServer(const char* name, uint32_t timeoutMs, uint32_t timeoutIntervalMs) {
   int fd = socket(AF_UNIX, SOCK_STREAM, 0);
   if (fd == -1) return INVALID_SOCKET_VALUE;
 
@@ -1005,7 +1005,7 @@ IPCSocket ConnectToIPCServer(const char* name, int timeoutMs, int timeoutInterva
   strncpy(address.sun_path, name, sizeof(address.sun_path) - 1);
   address.sun_path[0] = 0;  // abstract namespace
 
-  int elapsed = 0;
+  uint32_t elapsed = 0;
   while (elapsed < timeoutMs) {
     if (connect(fd, (struct sockaddr*)&address, sizeof(address)) == 0)
       return FdToIPCSock(fd);
@@ -1017,7 +1017,7 @@ IPCSocket ConnectToIPCServer(const char* name, int timeoutMs, int timeoutInterva
   return INVALID_SOCKET_VALUE;
 }
 
-void SetIPCSocketRecvTimeout(IPCSocket sock, int timeoutSec) {
+void SetIPCSocketRecvTimeout(IPCSocket sock, uint32_t timeoutSec) {
   struct timeval tv;
   tv.tv_sec = timeoutSec;
   tv.tv_usec = 0;

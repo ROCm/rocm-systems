@@ -380,7 +380,7 @@ IPCSocket CreateIPCServer(const char* name, int backlog);
 
 /// @brief Accept a connection on an IPC server socket (blocking).
 /// @param server Server socket returned by CreateIPCServer.
-/// @return Connected IPCSocket handle, or nullptr on failure.
+/// @return Connected IPCSocket handle, or invalid handle (-1) on failure.
 IPCSocket AcceptIPCConnection(IPCSocket server);
 
 /// @brief Connect to a named IPC server with retry/timeout.
@@ -388,12 +388,12 @@ IPCSocket AcceptIPCConnection(IPCSocket server);
 /// @param timeoutMs Total timeout in milliseconds.
 /// @param timeoutIntervalMs Sleep interval between retries in milliseconds.
 /// @return Connected IPCSocket handle, or nullptr on failure/timeout.
-IPCSocket ConnectToIPCServer(const char* name, int timeoutMs, int timeoutIntervalMs);
+IPCSocket ConnectToIPCServer(const char* name, uint32_t timeoutMs, uint32_t timeoutIntervalMs);
 
 /// @brief Set the receive timeout on an IPC socket.
 /// @param sock IPCSocket connection handle.
 /// @param timeoutSec Timeout in seconds.
-void SetIPCSocketRecvTimeout(IPCSocket sock, int timeoutSec);
+void SetIPCSocketRecvTimeout(IPCSocket sock, uint32_t timeoutSec);
 
 /// @brief Read data from an IPC socket.
 /// @param conn IPCSocket connection handle.
