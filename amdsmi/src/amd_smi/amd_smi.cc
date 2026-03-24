@@ -955,10 +955,21 @@ amdsmi_status_t amdsmi_get_gpu_subsystem_id(amdsmi_processor_handle processor_ha
 }
 
 amdsmi_status_t amdsmi_get_gpu_subsystem_name(
-                                amdsmi_processor_handle /*processor_handle*/,
+                                amdsmi_processor_handle processor_handle,
                                 char *name, size_t len) {
-    if (name == nullptr || len == 0) { return AMDSMI_STATUS_INVAL; }
-    return AMDSMI_STATUS_NOT_SUPPORTED;
+    AMDSMI_CHECK_INIT();
+    if (name == nullptr || len == 0)
+        return AMDSMI_STATUS_INVAL;
+    auto *device = reinterpret_cast<Device *>(processor_handle);
+    if (device == nullptr)
+        return AMDSMI_STATUS_INVAL;
+    wsl::thunk::AsicInfo ai = {};
+    auto code = device->QueryAsicInfo(&ai);
+    if (code != ErrorCode::Success)
+        return translateCodeToSmiStatus(code);
+    strncpy(name, ai.market_name, len - 1);
+    name[len - 1] = '\0';
+    return AMDSMI_STATUS_SUCCESS;
 }
 
 amdsmi_status_t amdsmi_get_gpu_vendor_name(
