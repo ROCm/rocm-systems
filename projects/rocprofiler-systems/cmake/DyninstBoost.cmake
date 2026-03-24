@@ -458,9 +458,16 @@ rocprofiler_systems_message(STATUS "Boost library dirs: ${Boost_LIBRARY_DIRS}")
 rocprofiler_systems_message(STATUS "Boost thread library: ${Boost_THREAD_LIBRARY}")
 rocprofiler_systems_message(STATUS "Boost libraries: ${Boost_LIBRARIES}")
 
-# Create Dyninst::Boost and Dyninst::Boost_headers targets
-# These targets are checked by Dyninst's own cmake configuration
-# If they exist, Dyninst will skip trying to find Boost
+# --------------------------------------------------------------------------------------#
+# Create Dyninst::Boost targets
+# --------------------------------------------------------------------------------------#
+# Dyninst uses Boost variables (${Boost_LIBRARIES}) rather than namespaced targets for
+# both system and bundled builds, so we always create Dyninst::Boost targets to provide
+# a consistent interface. When these targets exist, Dyninst skips find_package(Boost).
+#
+# Note: Unlike TBB/ElfUtils, we create these for BOTH bundled and system builds because
+# Dyninst's CMake doesn't use standard Boost::* targets - it expects Dyninst::Boost.
+
 if(NOT TARGET Dyninst::Boost)
     add_library(Dyninst::Boost INTERFACE IMPORTED)
     target_link_libraries(Dyninst::Boost INTERFACE ${Boost_LIBRARIES})
@@ -471,7 +478,6 @@ if(NOT TARGET Dyninst::Boost)
     )
 endif()
 
-# Just the headers (effectively a simplified Boost::headers target)
 if(NOT TARGET Dyninst::Boost_headers)
     add_library(Dyninst::Boost_headers INTERFACE IMPORTED)
     target_include_directories(
