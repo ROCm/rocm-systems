@@ -145,10 +145,14 @@ void TestFrequenciesRead::Run(void) {
       err = amdsmi_get_gpu_pci_bandwidth(processor_handles_[i], &b);
       if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
         ASSERT_EQ(err, AMDSMI_STATUS_NOT_SUPPORTED);
-        std::cout << "\t**Get PCIE Bandwidth: Not supported on this machine" << std::endl;
+        IF_VERB(STANDARD) {
+          std::cout << "\t**Get PCIE Bandwidth: Not supported on this machine" << std::endl;
+        }
       } else if (err == AMDSMI_STATUS_NOT_YET_IMPLEMENTED) {
         ASSERT_EQ(err, AMDSMI_STATUS_NOT_YET_IMPLEMENTED);
-        std::cout << "\t**Get PCIE Bandwidth: Not implemented on this machine" << std::endl;
+        IF_VERB(STANDARD) {
+          std::cout << "\t**Get PCIE Bandwidth: Not implemented on this machine" << std::endl;
+        }
       } else {
         CHK_ERR_ASRT(err)
         IF_VERB(STANDARD) {
