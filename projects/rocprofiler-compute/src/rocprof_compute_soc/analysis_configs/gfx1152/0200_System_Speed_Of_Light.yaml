@@ -2,9 +2,22 @@
 # RDNA3.5 (gfx1152) — System Speed-of-Light
 # Layout aligned with gfx950/0200_system_speed_of_light.yaml (throughput first,
 # then core/memory, then cache hierarchy). RDNA3.5: standard VALU FLOPs (no MFMA).
-# VALU peaks: Navi3-class — 128 FP32 FMAs/CU/cycle, 256 FP16 ops/CU/cycle (wave64).
-# Cache: TCP (L0) -> GL1C (L1) -> GL2C (L2). Fabric/MC BW: no Peak / % of peak (no sysinfo BW var on gfx1152).
-# Memory hierarchy bandwidth (L2 client vs GCEA/DRAM): see gfx1152/0300_Memory_Chart.yaml (RDNA3.5 Memory Chart).
+#
+# Public RDNA 3 context: dual-CU Work Group Processors (WGPs) and dual-issue VALU
+# (e.g. Wikipedia "RDNA 3", AMD public architecture materials). Chip-level FP16
+# peak is ~2× FP32 in public spec summaries; this panel uses a per-CU theoretical
+# model: 128 FP32 ops/CU/cycle and 256 FP16 ops/CU/cycle (wave64) for GFLOP/s peaks.
+#
+# $cu_per_gpu = total Compute Unit count from sysinfo (NOT WGP count). On RDNA 3,
+# one WGP contains two CUs — CU count ≈ 2 × WGP count. Peaks scale with CUs.
+# $max_sclk = shader/engine clock in MHz (rocprofiler system specs).
+#
+# TCP / GL1C / GL2C / SQC bandwidth peaks: heuristic ceilings (assumed B/cycle ×
+# instance count × clock); not itemized in public RDNA 3 tables — % of peak is
+# indicative only.
+#
+# Cache: TCP (L0) -> GL1C (L1) -> GL2C (L2). Fabric/MC: peak N/A (no sysinfo BW).
+# Memory hierarchy reference: gfx1152/0300_Memory_Chart.yaml.
 # =============================================================================
 
 Panel Config:
@@ -128,6 +141,7 @@ Panel Config:
           peak: 100
           pop: AVG(((100 * SQ_WAIT_INST_ANY / SQ_WAVE_CYCLES) if (SQ_WAVE_CYCLES != 0) else 0))
         # --- Cache hierarchy: TCP (L0) -> GL1C (L1) -> GL2C client / SQC ---
+        # Peak/pop for TCP/GL1C/GL2C/SQC BW: heuristic (not from public RDNA3 tables).
         TCP Cache Hit Rate:
           value: AVG((100 * (TCP_REQ_sum - TCP_REQ_MISS_sum) / TCP_REQ_sum) if (TCP_REQ_sum != 0) else None)
           unit: Percent
@@ -176,14 +190,18 @@ Panel Config:
 
   metrics_description:
     VALU FLOPs (FP16): |-
-      The number of 16-bit floating point VALU operations executed per second on
-      RDNA3.5 (RDNA3.5). RDNA3.5 WGPs contain 2 CUs with 2 SIMD32 units each.
-      Theoretical FP16 peak is 2× the FP32 FMA peak (packed half precision).
-      Peak calculation: max_sclk × CU_count × 256 ops/cycle (Navi3 / RDNA3-class).
+      Sixteen-bit VALU throughput (GFLOP/s) from SQ_INSTS_VALU × 64 / kernel time.
+      Theoretical peak uses packed FP16 at 2× the FP32 per-CU rate:
+      max_sclk (MHz) × $cu_per_gpu × 256 / 1000 GFLOP/s.
+      Public RDNA 3 summaries (e.g. Wikipedia "RDNA 3") cite dual-CU WGPs, dual-issue
+      VALU, and chip FP16 peak ~2× FP32; this formula is the same 2× relationship at
+      the per-CU model used here. $cu_per_gpu is total CU count, not WGP (1 WGP = 2 CUs on RDNA 3).
     VALU FLOPs (FP32): |-
-      The number of 32-bit floating point VALU operations executed per second.
-      Navi3-class (RDNA3) CUs sustain up to 128 V_FMA_F32 ops per cycle per CU
-      in wave64 mode (dual-issue VALU). Peak: max_sclk × CU_count × 128 ops/cycle.
+      Thirty-two-bit VALU throughput (GFLOP/s) from SQ_INSTS_VALU × 64 / kernel time.
+      Theoretical peak: max_sclk (MHz) × $cu_per_gpu × 128 / 1000 GFLOP/s
+      (wave64 / dual-issue VALU class used for Navi3-style parts).
+      $cu_per_gpu is the total number of Compute Units from system info, not WGP count
+      (on RDNA 3, one WGP pairs two CUs).
     IPC: |-
       Instructions Per Cycle — ratio of instructions executed over busy cycles.
       Calculated as (Total Instructions - Internal Instructions) / Busy Cycles.
@@ -240,20 +258,25 @@ Panel Config:
       Same as Memory Chart TCP Hit Rate: 100 * (TCP_REQ_sum - TCP_REQ_MISS_sum) / TCP_REQ_sum.
     TCP Cache BW: |-
       TCP request bandwidth (Memory Chart “TCP Request Bandwidth”): TCP_REQ_sum * 64 B divided by kernel wall time.
+      Peak / % of peak use a heuristic B/s ceiling (shader clock × CU × assumed B/cycle); not from public RDNA 3 tables.
     GL1C Hit Rate: |-
       GL1 Cache hit rate (same as Memory Chart / GL1C panel).
       Formula: 100 * (GL1C_REQ_sum - GL1C_REQ_MISS_sum) / GL1C_REQ_sum when GL1C_REQ_sum != 0.
     GL1C Read BW: |-
       Achieved read bandwidth at GL1C (32/64/128 B request bins).
+      Peak / % of peak: heuristic (shader clock × shader engine × assumed B/cycle); indicative only vs public specs.
     GL2C Cache BW: |-
       Achieved bandwidth at GL2C from client read size counters (32/64/128 B) plus 96 B compressed reads.
+      Peak / % of peak: heuristic per L2 channel; indicative only vs public specs.
     Scalar Data Cache Hit Rate: |-
       Same as Memory Chart Dcache Hit Rate: 100 * SQC_DCACHE_HITS_sum / SQC_DCACHE_REQ_sum
       when SQC_DCACHE_REQ_sum != 0.
     Scalar Data Cache BW: |-
-      Bandwidth on the scalar data cache path.
+      Bandwidth on the scalar data cache path (64 B line model × request rate).
+      Peak / % of peak: heuristic (shader clock × SQC instance count × 64 B/cycle); indicative only.
     Instruction Cache Hit Rate: |-
       Same as Memory Chart Icache Hit Rate: 100 * SQC_ICACHE_HITS_sum / SQC_ICACHE_REQ_sum
       when SQC_ICACHE_REQ_sum != 0.
     Instruction Cache BW: |-
-      Bandwidth on the instruction cache path.
+      Bandwidth on the instruction cache path (64 B line model × request rate).
+      Peak / % of peak: heuristic (shader clock × SQC instance count × 64 B/cycle); indicative only.
