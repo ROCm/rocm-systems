@@ -4,13 +4,14 @@
 cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
 project(rocprofiler-systems-hpc-examples LANGUAGES C CXX)
 
-if(ROCPROFSYS_DISABLE_EXAMPLES)
-    if("hpc" IN_LIST ROCPROFSYS_DISABLE_EXAMPLES)
-        return()
-    endif()
+# Support standalone builds
+if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
+    include(${CMAKE_CURRENT_LIST_DIR}/../cmake/standalone-helpers.cmake OPTIONAL)
 endif()
 
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
+if(CMAKE_PROJECT_NAME STREQUAL "rocprofiler-systems")
+    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
+endif()
 
 include(${CMAKE_CURRENT_LIST_DIR}/hpc-helper.cmake)
 
