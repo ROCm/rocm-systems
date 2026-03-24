@@ -10639,6 +10639,17 @@ rocprofiler-sdk:
     - architectures:
       - gfx950
       expression: reduce(TD_TC_TD_FIFO_FULL,sum)
+  # rocprofiler-sdk list-avail exports this as TD_BUSY on GFX11.x; querying TD_TD_BUSY
+  # hits AQL "improper dimensions". Map hardware here; TD_TD_BUSY aliases below.
+  - name: TD_BUSY
+    description: TD is processing or waiting for data (SDK metric name on gfx1151/gfx1152). Perf_Windowing not supported.
+    properties: []
+    definitions:
+    - architectures:
+      - gfx1151
+      - gfx1152
+      block: TD
+      event: 1
   - name: TD_TD_BUSY
     description: TD is processing or waiting for data. Perf_Windowing not supported for this counter.
     properties: []
@@ -10655,8 +10666,7 @@ rocprofiler-sdk:
     - architectures:
       - gfx1151
       - gfx1152
-      block: TD
-      event: 1
+      expression: TD_BUSY
   - name: TD_TD_BUSY_sum
     description: TD is processing or waiting for data. Perf_Windowing not supported for this counter. Sum over TD instances.
     properties: []
