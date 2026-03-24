@@ -707,9 +707,9 @@ struct ainic_sample : cacheable_t
     ainic_sample(size_t _timestamp, uint32_t _nic_index, uint64_t _rx_rdma_cnp_pkts,
                  uint64_t _tx_rdma_cnp_pkts, uint64_t _rx_ucast_bytes,
                  uint64_t _tx_ucast_bytes, uint64_t _rx_ucast_pkts,
-                 uint64_t _tx_ucast_pkts,
-                 uint64_t _tx_rdma_ack_timeout, uint64_t _resp_tx_pkt_seq_err,
-                 uint64_t _req_rx_pkt_seq_err, uint64_t _req_rx_impl_nak_seq_err)
+                 uint64_t _tx_ucast_pkts, uint64_t _tx_rdma_ack_timeout,
+                 uint64_t _resp_tx_pkt_seq_err, uint64_t _req_rx_pkt_seq_err,
+                 uint64_t _req_rx_impl_nak_seq_err)
     : timestamp(_timestamp)
     , nic_index(_nic_index)
     , rx_rdma_cnp_pkts(_rx_rdma_cnp_pkts)

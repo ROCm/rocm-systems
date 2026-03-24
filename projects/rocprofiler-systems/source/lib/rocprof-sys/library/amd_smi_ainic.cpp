@@ -70,15 +70,15 @@ nic_data::sample()
 {
     nic_stats stats;
     nic_data::nic_stats_collector.get_data(_nic, stats);
-    _rx_rdma_cnp_pkts = stats._rx_rdma_cnp_pkts;
-    _tx_rdma_cnp_pkts = stats._tx_rdma_cnp_pkts;
-    _rx_ucast_bytes   = stats._rx_rdma_ucast_bytes;
-    _tx_ucast_bytes   = stats._tx_rdma_ucast_bytes;
-    _rx_ucast_pkts    = stats._rx_rdma_ucast_pkts;
-    _tx_ucast_pkts    = stats._tx_rdma_ucast_pkts;
-    _tx_rdma_ack_timeout = stats._tx_rdma_ack_timeout;
-    _resp_tx_pkt_seq_err = stats._resp_tx_pkt_seq_err;
-    _req_rx_pkt_seq_err = stats._req_rx_pkt_seq_err;
+    _rx_rdma_cnp_pkts        = stats._rx_rdma_cnp_pkts;
+    _tx_rdma_cnp_pkts        = stats._tx_rdma_cnp_pkts;
+    _rx_ucast_bytes          = stats._rx_rdma_ucast_bytes;
+    _tx_ucast_bytes          = stats._tx_rdma_ucast_bytes;
+    _rx_ucast_pkts           = stats._rx_rdma_ucast_pkts;
+    _tx_ucast_pkts           = stats._tx_rdma_ucast_pkts;
+    _tx_rdma_ack_timeout     = stats._tx_rdma_ack_timeout;
+    _resp_tx_pkt_seq_err     = stats._resp_tx_pkt_seq_err;
+    _req_rx_pkt_seq_err      = stats._req_rx_pkt_seq_err;
     _req_rx_impl_nak_seq_err = stats._req_rx_impl_nak_seq_err;
 
     auto _timestamp = tim::get_clock_real_now<size_t, std::nano>();
@@ -87,9 +87,8 @@ nic_data::sample()
 
     trace_cache::get_buffer_storage().store(trace_cache::ainic_sample{
         _timestamp, _nic_index, _rx_rdma_cnp_pkts, _tx_rdma_cnp_pkts, _rx_ucast_bytes,
-        _tx_ucast_bytes, _rx_ucast_pkts, _tx_ucast_pkts,
-        _tx_rdma_ack_timeout, _resp_tx_pkt_seq_err, _req_rx_pkt_seq_err,
-        _req_rx_impl_nak_seq_err });
+        _tx_ucast_bytes, _rx_ucast_pkts, _tx_ucast_pkts, _tx_rdma_ack_timeout,
+        _resp_tx_pkt_seq_err, _req_rx_pkt_seq_err, _req_rx_impl_nak_seq_err });
 }
 
 bool
@@ -143,10 +142,9 @@ metadata_initialize_ainic_smi_tracks(uint32_t nic_index)
               nic, nic_index),
           thread_id, "{}" });
     trace_cache::get_metadata_registry().add_track(
-        { trace_cache::info::annotate_with_nic<category::amd_smi_nic_req_rx_impl_nak_seq_err>(
-              nic, nic_index),
+        { trace_cache::info::annotate_with_nic<
+              category::amd_smi_nic_req_rx_impl_nak_seq_err>(nic, nic_index),
           thread_id, "{}" });
-
 }
 
 void
@@ -201,28 +199,32 @@ metadata_initialize_ainic_smi_pmc(uint32_t nic_index)
           EXPRESSION, 0, 0, "{}" });
     trace_cache::get_metadata_registry().add_pmc_info(
         { agent_type::NIC, nic_index, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-          trait::name<category::amd_smi_nic_tx_rdma_ack_timeout>::value, "AI NIC TX RDMA ACK TIMEOUT",
-          trait::name<category::amd_smi_nic_tx_rdma_ack_timeout>::description, LONG_DESCRIPTION,
-          COMPONENT, trace_cache::ABSOLUTE, rocprofsys::trace_cache::ABSOLUTE, BLOCK,
-          EXPRESSION, 0, 0, "{}" });
+          trait::name<category::amd_smi_nic_tx_rdma_ack_timeout>::value,
+          "AI NIC TX RDMA ACK TIMEOUT",
+          trait::name<category::amd_smi_nic_tx_rdma_ack_timeout>::description,
+          LONG_DESCRIPTION, COMPONENT, trace_cache::ABSOLUTE,
+          rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0, "{}" });
     trace_cache::get_metadata_registry().add_pmc_info(
         { agent_type::NIC, nic_index, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-          trait::name<category::amd_smi_nic_resp_tx_pkt_seq_err>::value, "AI NIC TX PKT SEQ ERR",
-          trait::name<category::amd_smi_nic_resp_tx_pkt_seq_err>::description, LONG_DESCRIPTION,
-          COMPONENT, trace_cache::ABSOLUTE, rocprofsys::trace_cache::ABSOLUTE, BLOCK,
-          EXPRESSION, 0, 0, "{}" });
+          trait::name<category::amd_smi_nic_resp_tx_pkt_seq_err>::value,
+          "AI NIC TX PKT SEQ ERR",
+          trait::name<category::amd_smi_nic_resp_tx_pkt_seq_err>::description,
+          LONG_DESCRIPTION, COMPONENT, trace_cache::ABSOLUTE,
+          rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0, "{}" });
     trace_cache::get_metadata_registry().add_pmc_info(
         { agent_type::NIC, nic_index, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-          trait::name<category::amd_smi_nic_req_rx_pkt_seq_err>::value, "AI NIC REQ RX PKT SEQ ERR",
-          trait::name<category::amd_smi_nic_req_rx_pkt_seq_err>::description, LONG_DESCRIPTION,
-          COMPONENT, trace_cache::ABSOLUTE, rocprofsys::trace_cache::ABSOLUTE, BLOCK,
-          EXPRESSION, 0, 0, "{}" });
+          trait::name<category::amd_smi_nic_req_rx_pkt_seq_err>::value,
+          "AI NIC REQ RX PKT SEQ ERR",
+          trait::name<category::amd_smi_nic_req_rx_pkt_seq_err>::description,
+          LONG_DESCRIPTION, COMPONENT, trace_cache::ABSOLUTE,
+          rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0, "{}" });
     trace_cache::get_metadata_registry().add_pmc_info(
         { agent_type::NIC, nic_index, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-          trait::name<category::amd_smi_nic_req_rx_impl_nak_seq_err>::value, "AI NIC RX IMPL NAK SEQ ERR",
-          trait::name<category::amd_smi_nic_req_rx_impl_nak_seq_err>::description, LONG_DESCRIPTION,
-          COMPONENT, trace_cache::ABSOLUTE, rocprofsys::trace_cache::ABSOLUTE, BLOCK,
-          EXPRESSION, 0, 0, "{}" });
+          trait::name<category::amd_smi_nic_req_rx_impl_nak_seq_err>::value,
+          "AI NIC RX IMPL NAK SEQ ERR",
+          trait::name<category::amd_smi_nic_req_rx_impl_nak_seq_err>::description,
+          LONG_DESCRIPTION, COMPONENT, trace_cache::ABSOLUTE,
+          rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0, "{}" });
 }
 
 void
@@ -284,11 +286,10 @@ nic_data::post_process(size_t nic_index)
         uint64_t _tx_ucast_bytes          = itr._tx_ucast_bytes;
         uint64_t _rx_ucast_pkts           = itr._rx_ucast_pkts;
         uint64_t _tx_ucast_pkts           = itr._tx_ucast_pkts;
-        uint64_t _tx_rdma_ack_timeout      = itr._tx_rdma_ack_timeout;
+        uint64_t _tx_rdma_ack_timeout     = itr._tx_rdma_ack_timeout;
         uint64_t _resp_tx_pkt_seq_err     = itr._resp_tx_pkt_seq_err;
         uint64_t _req_rx_pkt_seq_err      = itr._req_rx_pkt_seq_err;
         uint64_t _req_rx_impl_nak_seq_err = itr._req_rx_impl_nak_seq_err;
-
 
         counter_track::emplace(nic_index, addendum("RX CNP PKTS"), "packets");
         counter_track::emplace(nic_index, addendum("TX CNP PKTS"), "packets");
@@ -299,7 +300,8 @@ nic_data::post_process(size_t nic_index)
         counter_track::emplace(nic_index, addendum("TX RDMA ACK TIMEOUT"), "count");
         counter_track::emplace(nic_index, addendum("TX RESP PKT SEQ ERR"), "count");
         counter_track::emplace(nic_index, addendum("RX REQ PKT SEQ ERR"), "count");
-        counter_track::emplace(nic_index, addendum("RX REQ RX IMPL NAK SEQ ERR"), "count");
+        counter_track::emplace(nic_index, addendum("RX REQ RX IMPL NAK SEQ ERR"),
+            "count");
 
         size_t track_index = 0;
 
@@ -315,14 +317,18 @@ nic_data::post_process(size_t nic_index)
                       _ts, _rx_ucast_pkts);
         TRACE_COUNTER("nic_tx_ucast_pkts", counter_track::at(nic_index, track_index++),
                       _ts, _tx_ucast_pkts);
-        TRACE_COUNTER("nic_tx_rdma_ack_timeout", counter_track::at(nic_index, track_index++),
-                      _ts, _tx_rdma_ack_timeout);
-        TRACE_COUNTER("nic_resp_tx_pkt_seq_err", counter_track::at(nic_index, track_index++),
-                      _ts, _resp_tx_pkt_seq_err);
-        TRACE_COUNTER("nic_req_rx_pkt_seq_err", counter_track::at(nic_index, track_index++),
-                      _ts, _req_rx_pkt_seq_err);
-        TRACE_COUNTER("nic_req_rx_impl_nak_seq_err", counter_track::at(nic_index, track_index++),
-                      _ts, _req_rx_impl_nak_seq_err);
+        TRACE_COUNTER("nic_tx_rdma_ack_timeout",
+                      counter_track::at(nic_index, track_index++), _ts,
+                      _tx_rdma_ack_timeout);
+        TRACE_COUNTER("nic_resp_tx_pkt_seq_err",
+                      counter_track::at(nic_index, track_index++), _ts,
+                      _resp_tx_pkt_seq_err);
+        TRACE_COUNTER("nic_req_rx_pkt_seq_err",
+                      counter_track::at(nic_index, track_index++), _ts,
+                      _req_rx_pkt_seq_err);
+        TRACE_COUNTER("nic_req_rx_impl_nak_seq_err",
+                      counter_track::at(nic_index, track_index++), _ts,
+                      _req_rx_impl_nak_seq_err);
     }
 }
 

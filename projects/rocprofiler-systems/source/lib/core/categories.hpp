@@ -207,10 +207,10 @@ using name = perfetto_category<Tp...>;
         ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_nic_tx_ucast_bytes),              \
         ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_nic_rx_ucast_pkts),               \
         ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_nic_tx_ucast_pkts),               \
-        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_nic_tx_rdma_ack_timeout),          \
-        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_nic_resp_tx_pkt_seq_err),          \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_nic_tx_rdma_ack_timeout),         \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_nic_resp_tx_pkt_seq_err),         \
         ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_nic_req_rx_pkt_seq_err),          \
-        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_nic_req_rx_impl_nak_seq_err),          \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_nic_req_rx_impl_nak_seq_err),     \
         ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_gfx_busy),                        \
         ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_umc_busy),                        \
         ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_mm_busy),                         \

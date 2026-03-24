@@ -21,8 +21,7 @@ nic_stats::to_string() const
                        _name, _netdev, _rx_rdma_ucast_bytes, _rx_rdma_ucast_pkts,
                        _tx_rdma_ucast_bytes, _tx_rdma_ucast_pkts, _rx_rdma_cnp_pkts,
                        _tx_rdma_cnp_pkts, _tx_rdma_ack_timeout, _resp_tx_pkt_seq_err,
-                       _req_rx_pkt_seq_err, _req_rx_impl_nak_seq_err
-                    );
+                       _req_rx_pkt_seq_err, _req_rx_impl_nak_seq_err);
 }
 
 ai_nic_stats_collector::ai_nic_stats_collector() = default;
@@ -196,7 +195,7 @@ ai_nic_stats_collector::update_data_for_one_handle(
                                      std::function<void(nic_stats&, uint64_t)>>
                 stat_handlers = {
                     { nic_stats::RX_RDMA_UCAST_BYTES,
-                      [](nic_stats& d, uint64_t v) { d._rx_rdma_ucast_bytes = v; } },
+                      [](nic_stats& d, uint64_t v) { d._rx_rdma_ucast_bytes     = v; } },
                     { nic_stats::RX_RDMA_UCAST_PKTS,
                       [](nic_stats& d, uint64_t v) { d._rx_rdma_ucast_pkts = v; } },
                     { nic_stats::TX_RDMA_UCAST_BYTES,
@@ -241,13 +240,13 @@ ai_nic_stats_collector::update_data_for_one_handle(
                 new_delta._rx_rdma_ucast_pkts  = 0;
                 new_delta._tx_rdma_ucast_pkts  = 0;
 
-                new_delta._rx_rdma_cnp_pkts     = 0;
-                new_delta._tx_rdma_cnp_pkts     = 0;
+                new_delta._rx_rdma_cnp_pkts = 0;
+                new_delta._tx_rdma_cnp_pkts = 0;
 
-                new_delta._tx_rdma_ack_timeout          = 0;
-                new_delta._resp_tx_pkt_seq_err         = 0;
-                new_delta._req_rx_pkt_seq_err          = 0;
-                new_delta._req_rx_impl_nak_seq_err     = 0;
+                new_delta._tx_rdma_ack_timeout     = 0;
+                new_delta._resp_tx_pkt_seq_err     = 0;
+                new_delta._req_rx_pkt_seq_err      = 0;
+                new_delta._req_rx_impl_nak_seq_err = 0;
 
                 _nic_params[data._netdev]       = data;
                 _nic_delta_params[data._netdev] = new_delta;
@@ -307,7 +306,7 @@ ai_nic_stats_collector::get_data(const std::string& nic, nic_stats& data) const
         data._rx_rdma_cnp_pkts = 0;
         data._tx_rdma_cnp_pkts = 0;
 
-        data._tx_rdma_ack_timeout      = 0;
+        data._tx_rdma_ack_timeout     = 0;
         data._resp_tx_pkt_seq_err     = 0;
         data._req_rx_pkt_seq_err      = 0;
         data._req_rx_impl_nak_seq_err = 0;
