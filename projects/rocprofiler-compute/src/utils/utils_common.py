@@ -41,7 +41,7 @@ import uuid
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 import yaml
 
@@ -640,7 +640,7 @@ def get_uuid(length: int = 8) -> str:
 
 
 def format_scientific_notation_if_needed(
-    value: int | float,
+    value: Union[int, float],
     align: str = ">",
     width_align: int = 6,
     precision: int = 2,
