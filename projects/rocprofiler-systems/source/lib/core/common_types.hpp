@@ -26,6 +26,8 @@
 #include <string>
 #include <vector>
 
+#include <nlohmann/json.hpp>
+
 namespace rocprofsys
 {
 /**
@@ -95,6 +97,77 @@ process_arguments_string(const std::string& arg_str)
     }
 
     return args;
+}
+
+/**
+ * @brief Converts a ;;-delimited argument string to a JSON object string
+ *        suitable for the extdata column in rocpd tables.
+ *
+ * Numeric types (int, uint64_t, etc.) are stored as unquoted decimal values
+ * to match the SDK's extdata format. Hex-prefixed values (0x...) are
+ * converted to decimal. String types are stored as quoted JSON strings.
+ */
+inline std::string
+args_to_extdata_json(const std::string& arg_str)
+{
+    if(arg_str.empty()) return "{}";
+
+    auto args = process_arguments_string(arg_str);
+    if(args.empty()) return "{}";
+
+    nlohmann::json json;
+    for(const auto& arg : args)
+    {
+        const auto& type = arg.arg_type;
+        const auto& name = arg.arg_name;
+        const auto& val  = arg.arg_value;
+
+        if(type == "uint64_t" || type == "uint32_t" || type == "size_t")
+        {
+            try
+            {
+                json[name] = std::stoull(val, nullptr, 0);
+            } catch(...)
+            {
+                json[name] = val;
+            }
+        }
+        else if(type == "int" || type == "int32_t" || type == "int64_t")
+        {
+            try
+            {
+                json[name] = std::stoll(val, nullptr, 0);
+            } catch(...)
+            {
+                json[name] = val;
+            }
+        }
+        else if(type == "double")
+        {
+            try
+            {
+                json[name] = std::stod(val);
+            } catch(...)
+            {
+                json[name] = val;
+            }
+        }
+        else if(type == "float")
+        {
+            try
+            {
+                json[name] = std::stof(val);
+            } catch(...)
+            {
+                json[name] = val;
+            }
+        }
+        else
+        {
+            json[name] = val;
+        }
+    }
+    return json.dump();
 }
 
 }  // namespace rocprofsys
