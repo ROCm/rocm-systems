@@ -14,23 +14,12 @@ set(SO_VERSION_GIT_TAG_PREFIX "amdsmi_so_ver")
 set(SRC_DIR "amd_smi")
 set(INC_DIR "${PROJECT_SOURCE_DIR}/include/amd_smi")
 
-set(NIC_SOURCES
-    "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amd_smi_ainic_device.cc"
-)
-set(NIC_INCLUDES
-    ${INC_DIR}/impl/nic/amd_smi_ainic_device.h
-)
-set(NIC_INCLUDE_DIRS
-    "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/"
-)
-
 set(SRC_LIST
     "${SRC_DIR}/amd_smi.cc"
     "${SRC_DIR}/amd_smi_common.cc"
     "${SRC_DIR}/amd_smi_utils.cc"
     "${SRC_DIR}/amd_smi_uuid.cc"
     "${CMN_SRC_LIST}"
-    "${NIC_SOURCES}"
 )
 
 file(GLOB IMPL_HEADERS "${INC_DIR}/impl/*.h")
@@ -38,7 +27,6 @@ set(INC_LIST
     "${IMPL_HEADERS}"
     "${INC_DIR}/amdsmi.h"
     "${PROJECT_SOURCE_DIR}"
-    "${NIC_INCLUDES}"
 )
 
 set(RAS_DECODE "ras-decode")
@@ -80,18 +68,13 @@ message("Package version: ${PKG_VERSION_STR}")
 set(SO_VERSION_STRING "${MAJOR}.${MINOR}.${RELEASE}")
 message("SOVERSION: ${SO_VERSION_STRING}")
 
-add_subdirectory(nic/ai-nic/amdsmi_unified)
 add_library(${AMD_SMI} ${SRC_LIST} ${INC_LIST})
 target_link_libraries(${AMD_SMI} PRIVATE
     -Wl,--whole-archive thunk_proxy dxg_shared -Wl,--no-whole-archive
     rt
     Threads::Threads
     ${CMAKE_DL_LIBS}
-    amdsminic
     ${FILESYSTEM_LIB}
-)
-target_link_directories(${AMD_SMI} PRIVATE
-    ${CMAKE_CURRENT_BINARY_DIR}/nic/ai-nic/amdsmi_unified/build/
 )
 target_include_directories(${AMD_SMI} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
@@ -99,7 +82,6 @@ target_include_directories(${AMD_SMI} PRIVATE
     ${PROJECT_SOURCE_DIR}/common/shared_mutex
     ${RAS_DECODE_INC_DIR}
     ${PROJECT_SOURCE_DIR}/../include
-    ${NIC_INCLUDE_DIRS}
     ${WIN_SDK}
 )
 if(WIN_SDK)
@@ -109,7 +91,6 @@ endif()
 # use the target_include_directories() command to specify the include directories for the target
 target_include_directories(${AMD_SMI} PUBLIC 
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
-    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/nic/ai-nic/amdsmi_unified/interface>"
                                              "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
 
 ## Set the VERSION and SOVERSION values
@@ -141,35 +122,6 @@ install(
 install(
     FILES ${IMPL_HEADERS} 
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amd_smi/impl/
-    COMPONENT dev)
-
-install(
-    FILES ${NIC_INCLUDES}
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amd_smi/impl/nic/
-    COMPONENT dev)
-
-set(UNIFIED_NIC_INCLUDES
-    ${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/interface/smi_nic_interface.h
-)
-install(
-    FILES ${UNIFIED_NIC_INCLUDES}
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amd_smi/impl/nic/
-    COMPONENT dev)
-install(
-    FILES ${UNIFIED_NIC_INCLUDES}
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amd_smi/impl/nic/amdsmi_unified/interface
-    COMPONENT dev)
-set(UNIFIED_NIC_INCLUDES
-    "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/inc/smi_devlink_netlink.h"
-    "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/inc/smi_ethtool_ioctl.h"
-    "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/inc/smi_nic.h"
-    "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/inc/smi_nic_subsystem.h"
-    "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/inc/smi_nic_system.h"
-    "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/inc/smi_sysfs.h"
-)
-install(
-    FILES ${UNIFIED_NIC_INCLUDES}
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amd_smi/impl/nic/amdsmi_unified/inc/
     COMPONENT dev)
 
 file(GLOB ESMI_HEADERS "${PROJECT_SOURCE_DIR}/esmi_ib_library/include/e_smi/*.h")

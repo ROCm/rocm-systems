@@ -67,4 +67,4 @@ class AMDSmiAINICDevice: public AMDSmiProcessor {
 }  // namespace amd::smi
 
 amdsmi_status_t
-amdsmi_get_ainic_info(amdsmi_processor_handle processor_handle, amd::smi::AMDSmiAINICDevice::AINICInfo *info);
+amdsmi_get_ainic_info(amdsmi_processor_handle processor_handle, void *info);

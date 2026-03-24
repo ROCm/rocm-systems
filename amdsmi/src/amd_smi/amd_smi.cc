@@ -47,8 +47,6 @@
 #include "config/amd_smi_config.h"
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_common.h"
-#include "amd_smi/impl/nic/amd_smi_ainic_device.h"
-#include "amdsmi_unified/interface/smi_nic_interface.h"
 
 #ifdef BRCM_NIC
 #include "amd_smi/impl/nic/amd_smi_nic_device.h"
@@ -475,7 +473,7 @@ amdsmi_get_gpu_device_bdf(amdsmi_processor_handle processor_handle, amdsmi_bdf_t
 
 amdsmi_status_t
 amdsmi_get_ainic_info(amdsmi_processor_handle /*processor_handle*/,
-                      amd::smi::AMDSmiAINICDevice::AINICInfo *info) {
+                      void *info) {
     if (info == nullptr) { return AMDSMI_STATUS_INVAL; }
     return AMDSMI_STATUS_NOT_SUPPORTED;
 }
