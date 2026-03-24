@@ -115,11 +115,6 @@ Panel Config:
           unit: Percent
           peak: 100
           pop: AVG((100 * TA_BUSY_avr / GRBM_GUI_ACTIVE) if (GRBM_GUI_ACTIVE != 0) else None)
-        TD Busy Util Rate:
-          value: AVG((100 * TD_TD_BUSY_avr / GRBM_GUI_ACTIVE) if (GRBM_GUI_ACTIVE != 0) else None)
-          unit: Percent
-          peak: 100
-          pop: AVG((100 * TD_TD_BUSY_avr / GRBM_GUI_ACTIVE) if (GRBM_GUI_ACTIVE != 0) else None)
         Write Unit Stalled:
           value: AVG((100 * GL2C_WRREQ_STALL_max / GRBM_GUI_ACTIVE))
           unit: Percent
@@ -240,10 +235,6 @@ Panel Config:
       Texture Addresser (TA) utilization vs GPU-active time: mean TA busy cycles
       (TA_BUSY_avr — average of TA_TA_BUSY over TA instances) as a percent of
       GRBM_GUI_ACTIVE. Peak / % of peak use 100% (TA fully busy whenever the GPU is active).
-    TD Busy Util Rate: |-
-      Texture Data (TD) utilization vs GPU-active time: mean TD busy cycles
-      (TD_TD_BUSY_avr — average of TD_TD_BUSY over TD instances; TD_PERF_SEL_td_busy)
-      as a percent of GRBM_GUI_ACTIVE. Complements TA Busy Util Rate (address vs data/sampler path).
     Write Unit Stalled: |-
       Percent of time the write unit was stalled (max across L2 channels).
     VMEM Issue Cycles per Wave: |-
