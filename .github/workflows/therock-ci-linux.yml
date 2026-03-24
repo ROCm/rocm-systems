@@ -7,6 +7,9 @@ on:
         type: string
       projects_to_test:
         type: string
+      test_runs_on:
+        type: string
+        default: "linux-gfx942-1gpu-ossci-rocm"
 
 
 permissions:
@@ -122,5 +125,5 @@ jobs:
     with:
       projects_to_test: ${{ inputs.projects_to_test }}
       amdgpu_families: "gfx94X-dcgpu"
-      test_runs_on: "linux-gfx942-1gpu-ossci-rocm"
+      test_runs_on: ${{ inputs.test_runs_on }}
       platform: "linux"
