@@ -38,6 +38,9 @@ else()
 
   project ( ${HSAKMT_TARGET} VERSION 1.9.0)
 
+  ## Option to enable DRM AMDGPU SVM support
+  option(USE_DRM_AMDGPU_SVM "Enable DRM AMDGPU SVM (Shared Virtual Memory) support" OFF)
+
   # Optionally, build HSAKMT with ccache.
   set(ROCM_CCACHE_BUILD OFF CACHE BOOL "Set to ON for a ccache enabled build")
   if (ROCM_CCACHE_BUILD)
@@ -191,6 +194,9 @@ else()
     if (CMAKE_SYSTEM_NAME MATCHES "Linux")
       list(APPEND HSAKMT_SRC "src/perfctr.c" "src/pmc_table.c")
     endif()
+     if(USE_DRM_AMDGPU_SVM)
+       list(APPEND HSAKMT_SRC "src/amdgpu_svm.c")
+     endif()
   endif()
 
   ## Declare the library target name
@@ -357,6 +363,12 @@ else()
     set(HSAKMT_INSTALL_LIBDIR "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}")
     target_compile_definitions(${HSAKMT_TARGET} PRIVATE
       "HSAKMT_INSTALL_LIBDIR=\"${HSAKMT_INSTALL_LIBDIR}\"")
+    if(USE_DRM_AMDGPU_SVM)
+      target_compile_definitions(${HSAKMT_TARGET} PRIVATE -DUSE_DRM_AMDGPU_SVM=1)
+      message(STATUS "DRM AMDGPU SVM support: ENABLED")
+    else()
+      message(STATUS "DRM AMDGPU SVM support: DISABLED")
+    endif()
   else()
     ## Link Windows Kernel Mode Interface
     if (LIB_SRC_BUILD)
