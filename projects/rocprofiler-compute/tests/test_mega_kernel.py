@@ -159,6 +159,12 @@ def load_kernel_source(kernel_path: str) -> str:
         return f.read()
 
 
+def _is_strix_rdna35(arch: str) -> bool:
+    """gfx1150/gfx1151/gfx1152 — same gate as mega_kernel/main.cpp g_arch_type == 7."""
+    base = arch.split(":", 1)[0]
+    return base in ("gfx1150", "gfx1151", "gfx1152")
+
+
 def compile_mega_kernel(kernel_source: str, arch: str) -> tuple:
     """
     Compile the mega kernel using hipRTC for the target architecture
@@ -382,75 +388,116 @@ def run_mega_kernel_test(
     hip.hipMemcpyHtoD(d_tdm_src, byref(zeros_tdm), batch_size * sizeof(c_int))
     hip.hipMemcpyHtoD(d_tdm_dst, byref(zeros_tdm), batch_size * sizeof(c_int))
 
-    # Texture/surface objects for Strix (gfx1150/1151/1152) TEX load/store tests;
-    # 0 when not used. Python/hipRTC path does not create them, so pass 0 (bypass).
-    tex_obj = c_ulonglong(0)
-    surf_obj = c_ulonglong(0)
+    tex_id = 0
+    surf_id = 0
+    d_surf_buffer = None
+    try:
+        # Texture/surface for Strix (gfx1150/1151/1152): mirror mega_kernel/main.cpp so
+        # tex1Dfetch / surf1Dwrite run and SQ_INSTS_TEX_LOAD / TEX_STORE increment under rocprof.
+        if _is_strix_rdna35(arch):
+            lin_bytes = batch_size * sizeof(c_float)
+            res_tex = hip.HIPResourceDesc()
+            res_tex.resType = hip.HIP_RESOURCE_TYPE_LINEAR
+            res_tex.res.linear.devPtr = d_input_buffer.ptr
+            res_tex.res.linear.desc = hip.HIPChannelFormatDesc(
+                32, 0, 0, 0, hip.HIP_CHANNEL_FORMAT_KIND_FLOAT
+            )
+            res_tex.res.linear.sizeInBytes = lin_bytes
 
-    # Prepare kernel arguments (must match _mega_kernel signature in mega_kernel.hip)
-    args = [
-        d_results,
-        d_global_float,
-        d_global_double,
-        d_global_int,
-        d_input_buffer,
-        d_output_buffer,
-        d_async_lds_src,
-        d_async_lds_dst,
-        c_int(batch_size),
-        c_int(mfma_mode),
-        tex_obj,
-        surf_obj,
-    ]
+            tex_desc = hip.HIPTextureDesc()
+            tex_desc.normalizedCoords = 0
+            tex_desc.filterMode = hip.HIP_FILTER_MODE_POINT
+            tex_desc.addressMode[0] = hip.HIP_ADDRESS_MODE_CLAMP
 
-    # Convert arguments to void pointers
-    args_converted = []
-    for arg in args:
-        if isinstance(arg, int):
-            args_converted.append(c_int(arg))
-        elif isinstance(arg, hip.HIPDeviceMemory):
-            args_converted.append(arg.ptr)
-        else:
-            args_converted.append(arg)
+            tex_id = hip.hipCreateTextureObject(res_tex, tex_desc)
 
-    normalized = [cast(byref(arg), c_void_p) for arg in args_converted]
-    args_ptr = (c_void_p * len(args))(*normalized)
+            d_surf_buffer = hip.hipMalloc(lin_bytes)
+            hip.hipMemset(d_surf_buffer, 0, lin_bytes)
 
-    # Launch kernel
-    print("\nRunning GPU Mega Kernel...")
+            res_surf = hip.HIPResourceDesc()
+            res_surf.resType = hip.HIP_RESOURCE_TYPE_LINEAR
+            res_surf.res.linear.devPtr = d_surf_buffer.ptr
+            res_surf.res.linear.desc = hip.HIPChannelFormatDesc(
+                32, 0, 0, 0, hip.HIP_CHANNEL_FORMAT_KIND_FLOAT
+            )
+            res_surf.res.linear.sizeInBytes = lin_bytes
 
-    event_start = hip.hipEventCreate()
-    event_stop = hip.hipEventCreate()
+            surf_id = hip.hipCreateSurfaceObject(res_surf)
 
-    hip.hipEventRecord(event_start)
+        tex_obj = c_ulonglong(tex_id)
+        surf_obj = c_ulonglong(surf_id)
 
-    hip.hipModuleLaunchKernel(
-        func,
-        grid_size,
-        1,
-        1,  # grid dimensions
-        block_size,
-        1,
-        1,  # block dimensions
-        shared_mem_size,  # dynamic shared memory size
-        None,  # stream
-        args_ptr,
-        None,  # extra
-    )
+        # Prepare kernel arguments (must match _mega_kernel signature in mega_kernel.hip)
+        args = [
+            d_results,
+            d_global_float,
+            d_global_double,
+            d_global_int,
+            d_input_buffer,
+            d_output_buffer,
+            d_async_lds_src,
+            d_async_lds_dst,
+            c_int(batch_size),
+            c_int(mfma_mode),
+            tex_obj,
+            surf_obj,
+        ]
 
-    hip.hipEventRecord(event_stop)
-    hip.hipDeviceSynchronize()
+        # Convert arguments to void pointers
+        args_converted = []
+        for arg in args:
+            if isinstance(arg, int):
+                args_converted.append(c_int(arg))
+            elif isinstance(arg, hip.HIPDeviceMemory):
+                args_converted.append(arg.ptr)
+            else:
+                args_converted.append(arg)
 
-    # Get execution time
-    exec_time_ms = hip.hipEventElapsedTime(event_start, event_stop)
+        normalized = [cast(byref(arg), c_void_p) for arg in args_converted]
+        args_ptr = (c_void_p * len(args))(*normalized)
 
-    # Copy results back to host
-    h_results = TestResults()
-    hip.hipMemcpyDtoH(byref(h_results), d_results, sizeof(TestResults))
+        # Launch kernel
+        print("\nRunning GPU Mega Kernel...")
 
-    print(f"✓ Kernel execution completed in {exec_time_ms:.3f} ms")
+        event_start = hip.hipEventCreate()
+        event_stop = hip.hipEventCreate()
 
-    return h_results
+        hip.hipEventRecord(event_start)
+
+        hip.hipModuleLaunchKernel(
+            func,
+            grid_size,
+            1,
+            1,  # grid dimensions
+            block_size,
+            1,
+            1,  # block dimensions
+            shared_mem_size,  # dynamic shared memory size
+            None,  # stream
+            args_ptr,
+            None,  # extra
+        )
+
+        hip.hipEventRecord(event_stop)
+        hip.hipDeviceSynchronize()
+
+        # Get execution time
+        exec_time_ms = hip.hipEventElapsedTime(event_start, event_stop)
+
+        # Copy results back to host
+        h_results = TestResults()
+        hip.hipMemcpyDtoH(byref(h_results), d_results, sizeof(TestResults))
+
+        print(f"✓ Kernel execution completed in {exec_time_ms:.3f} ms")
+
+        return h_results
+    finally:
+        if tex_id:
+            hip.hipDestroyTextureObject(tex_id)
+        if surf_id:
+            hip.hipDestroySurfaceObject(surf_id)
+        if d_surf_buffer is not None:
+            hip.hipFree(d_surf_buffer)
 
 
 def print_test_results(results: TestResults, arch: str):
@@ -762,11 +809,8 @@ def test_mega_kernel_gfx1150():
     assert results.warp_shuffle_passed > 0, "Warp shuffle test failed"
     assert results.fp32_arith_passed > 0, "FP32 arithmetic test failed"
     assert results.wmma_f16_passed > 0, "WMMA FP16 test failed"
-    # vmem_tex_load_passed / vmem_tex_store_passed: >0 when run from standalone
-    # binary (with texture/surface); 0 when run from Python. For INSTS_TEX_LOAD
-    # and INSTS_TEX_STORE verification run the standalone mega_kernel binary on Strix.
-    assert results.vmem_tex_load_passed >= 0, "Texture load test error"
-    assert results.vmem_tex_store_passed >= 0, "Texture store test error"
+    assert results.vmem_tex_load_passed > 0, "Texture load (tex1Dfetch / SQ_INSTS_TEX_LOAD) test failed"
+    assert results.vmem_tex_store_passed > 0, "Texture store (surf1Dwrite / SQ_INSTS_TEX_STORE) test failed"
 
 
 def test_mega_kernel_current_device():
