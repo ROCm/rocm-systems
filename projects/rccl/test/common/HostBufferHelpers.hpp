@@ -4,7 +4,8 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-#pragma once
+#ifndef HOST_BUFFER_HELPERS_HPP
+#define HOST_BUFFER_HELPERS_HPP
 
 #include <cmath>
 #include <cstddef>
@@ -146,3 +147,5 @@ bool verifyHostBufferData(const void* buffer,
 }
 
 } // namespace RCCLTestHelpers
+
+#endif // HOST_BUFFER_HELPERS_HPP

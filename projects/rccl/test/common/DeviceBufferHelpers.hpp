@@ -6,6 +6,8 @@
 
 #ifndef DEVICE_BUFFER_HELPERS_HPP
 #define DEVICE_BUFFER_HELPERS_HPP
+#ifndef DEVICE_BUFFER_HELPERS_HPP
+#define DEVICE_BUFFER_HELPERS_HPP
 
 #include "nccl.h"
 #include <cmath>
@@ -401,4 +403,3 @@ std::pair<hipError_t, std::vector<T>> downloadBuffer(const void* device_buffer, 
 } // namespace RCCLTestHelpers
 
 #endif // DEVICE_BUFFER_HELPERS_HPP
-
