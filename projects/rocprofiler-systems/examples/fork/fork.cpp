@@ -15,67 +15,14 @@
 #include <unistd.h>
 #include <vector>
 
-// async-signal-safe integer to decimal string
-int
-itoa_safe(int val, char* out)
-{
-    if(val == 0)
-    {
-        out[0] = '0';
-        return 1;
-    }
-    char tmp[12];
-    int  n = 0;
-    while(val > 0)
-    {
-        tmp[n++] = '0' + (val % 10);
-        val /= 10;
-    }
-    for(int i = 0; i < n; i++)
-        out[i] = tmp[n - 1 - i];
-    return n;
-}
-
-// async-signal-safe write helper
 void
-safe_write_str(const char* s, size_t n)
+print_info(const char* _name)
 {
-    auto _rc = write(STDERR_FILENO, s, n);
-    (void) _rc;
-}
-
-// async-signal-safe print: "[name] pid = X, ppid = Y\n" to stderr.
-// Uses multiple write() calls to avoid fixed-size buffer overflow
-void
-print_info(const char* name)
-{
-    char numbuf[20];
-    int  len;
-
-    safe_write_str("[", 1);
-    safe_write_str(name, strlen(name));
-    safe_write_str("] pid = ", 8);
-    len = itoa_safe(getpid(), numbuf);
-    safe_write_str(numbuf, len);
-    safe_write_str(", ppid = ", 9);
-    len = itoa_safe(getppid(), numbuf);
-    safe_write_str(numbuf, len);
-    safe_write_str("\n", 1);
-}
-
-// async-signal-safe print: "[pid X] msg\n" to stderr
-void
-safe_write(const char* msg)
-{
-    char numbuf[20];
-    int  len;
-
-    safe_write_str("[pid ", 5);
-    len = itoa_safe(getpid(), numbuf);
-    safe_write_str(numbuf, len);
-    safe_write_str("] ", 2);
-    safe_write_str(msg, strlen(msg));
-    safe_write_str("\n", 1);
+    fflush(stdout);
+    fflush(stderr);
+    printf("[%s] pid = %i, ppid = %i\n", _name, getpid(), getppid());
+    fflush(stdout);
+    fflush(stderr);
 }
 
 int
@@ -95,12 +42,13 @@ run(const char* _name, int nchildren)
             if(_children.at(i) == 0)
             {
                 // child code
-                // must be async-signal-safe (see signal-safety(7))
                 print_info(_name);
-                safe_write("child job starting");
-                sleep(_nsec);
-                safe_write("child job complete");
-                _exit(EXIT_SUCCESS);
+                printf("[%s][%i] child job starting...\n", _name, getpid());
+                rocprofsys_user_push_region("child_process");
+                std::this_thread::sleep_for(std::chrono::seconds{ _nsec });
+                rocprofsys_user_push_region("child_process");
+                printf("[%s][%i] child job complete\n", _name, getpid());
+                exit(EXIT_SUCCESS);
             }
             else
             {

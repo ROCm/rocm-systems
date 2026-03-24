@@ -88,10 +88,14 @@ postfork_child()
 {
     if(postfork_child_lock) return;
 
+    // Even if the program is single-threaded and calls fork(), the profiler
+    // spawns threads to help profile BEFORE fork() is called.
     // After fork() in a multi-threaded process, only async-signal-safe functions
     // may be called (mutexes are NOT async-signal-safe).
     // Do NOT call any shutdown or logging functions as
     // they all use mutexes internally and will sporadically deadlock.
+
+    // no exit handler can be used. on_exit() is not async-signal-safe.
 
     if(!is_child_process())
     {
@@ -119,19 +123,6 @@ fork_gotcha::configure()
     fork_gotcha_t::get_initializer() = []() {
         TIMEMORY_C_GOTCHA(fork_gotcha_t, 0, fork);
     };
-
-    // Register exit handler in the parent
-    // Terminates immediately without acquiring any locks.
-    static bool _exit_handler_registered = false;
-    if(!_exit_handler_registered)
-    {
-        _exit_handler_registered = true;
-        on_exit(
-            [](int ec, void*) {
-                if(is_child_process()) _exit(ec);
-            },
-            nullptr);
-    }
 
     // registering the pthread_atfork and gotcha means that we might execute twice
     // handlers twice, hence the locks
