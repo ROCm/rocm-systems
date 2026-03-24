@@ -45,3 +45,29 @@
 #if defined(ROCPROFILER_DEFINED_AMD_INTERNAL_BUILD) && ROCPROFILER_DEFINED_AMD_INTERNAL_BUILD > 0
 #    undef AMD_INTERNAL_BUILD
 #endif
+
+// ROCM-15967: Cross-XCC timestamp synchronization for MI300X RAW GPU timestamps.
+//
+// On MI300X, a kernel dispatched as a single wavefront may execute on a non-Master XCC while
+// the Master XCC handles AQL signal completion and FW timestamp recording. If the Master XCC is
+// delayed exiting CGCG idle (e.g., blocked on RLC while servicing PMFW messages), the executing
+// wave can start and finish before the Master XCC records the start timestamp, producing an
+// invalid (negative or zero) dispatch duration.
+//
+// Two complementary strategies are enabled by this flag in the HSA kernel dispatch intercept path:
+//
+//   (1) Pre-dispatch XCC synchronization barrier: before the Master XCC records the start
+//       timestamp, a barrier is issued across all XCCs to ensure every XCC has exited CGCG idle.
+//       This prevents the Master XCC from timestamping before slower XCCs are ready.
+//
+//   (2) Per-XCC timestamp aggregation: the dispatch record finalizer reads per-XCC start/end
+//       timestamp slots from amd_signal_t and computes:
+//           dispatch_start = min(xcc[i].start)  over all XCCs
+//           dispatch_end   = max(xcc[i].end)    over all XCCs
+//       to correctly bound the actual execution window regardless of which XCC ran the work.
+//
+// Set to 0 to revert to single-Master-XCC timestamp behavior (may produce incorrect results
+// on MI300X with small single-wavefront kernels).
+#ifndef ROCPROFILER_HSA_DISPATCH_XCC_TIMESTAMP_SYNC
+#    define ROCPROFILER_HSA_DISPATCH_XCC_TIMESTAMP_SYNC 1
+#endif
