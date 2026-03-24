@@ -65,7 +65,9 @@
 #include <atomic>
 #include <future>
 #include <mutex>
+#include <string>
 #include <utility>
+#include <vector>
 
 namespace py = ::pybind11;
 
@@ -405,6 +407,36 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                                                       &_contents));
                     return _contents;
                 });
+
+    pyrocpd.def(
+        "list_schema_versions",
+        [](rocpd_sql_engine_t engine, py::object hints_opt) -> py::list {
+            std::vector<std::string> storage;
+            std::vector<const char*> hints;
+            if(!hints_opt.is_none())
+            {
+                auto seq = hints_opt.cast<py::sequence>();
+                const auto n = seq.size();
+                for(size_t i = 0; i < n; ++i)
+                {
+                    storage.push_back(py::cast<std::string>(seq[i]));
+                    hints.push_back(storage.back().c_str());
+                }
+            }
+
+            auto list = rocpd_sql_schema_versions_list_t{};
+            ROCPD_CHECK(rocpd_sql_list_schema_versions(
+                engine, hints.empty() ? nullptr : hints.data(), hints.size(), &list));
+
+            py::list out{};
+            for(uint64_t i = 0; i < list.count; ++i)
+                out.append(py::cast(list.versions[i]));
+            rocpd_sql_free_schema_versions_list(&list);
+            return out;
+        },
+        py::arg("engine")            = ROCPD_SQL_ENGINE_SQLITE3,
+        py::arg("schema_path_hints") = py::none(),
+        "Return supported rocpd SQL schema versions (from versions.yml) as schema_version objects.");
 
     // NOLINTBEGIN(performance-unnecessary-value-param)
 

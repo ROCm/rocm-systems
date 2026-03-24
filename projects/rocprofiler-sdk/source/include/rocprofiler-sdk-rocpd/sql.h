@@ -149,6 +149,43 @@ rocpd_sql_load_schema(rocpd_sql_engine_t                        engine,
                       uint64_t                                  num_schema_path_hints,
                       void* user_data) ROCPD_API ROCPD_NONNULL(6);
 
+/**
+ * @brief (experimental) Result of ::rocpd_sql_list_schema_versions. The @p versions array is
+ * heap-allocated by the library and must be released with ::rocpd_sql_free_schema_versions_list.
+ */
+typedef struct ROCPD_EXPERIMENTAL rocpd_sql_schema_versions_list_t
+{
+    rocpd_version_triplet_t* versions;  ///< Array of length @p count (may be nullptr when count is 0)
+    uint64_t                 count;     ///< Number of entries in @p versions
+} rocpd_sql_schema_versions_list_t;
+
+/**
+ * @brief (experimental) List distinct SQL schema versions declared in `versions.yml` for the
+ * resolved schema search path (same resolution rules as ::rocpd_sql_load_schema).
+ *
+ * @param [in] engine Must be ::ROCPD_SQL_ENGINE_SQLITE3 (reserved for future engines)
+ * @param [in] schema_path_hints Optional `:`-joined search path prefixes (same as load_schema)
+ * @param [in] num_schema_path_hints Length of @p schema_path_hints
+ * @param [out] out_list Populated on success; call ::rocpd_sql_free_schema_versions_list when done
+ * @return ::rocpd_status_t
+ * @retval ROCPD_STATUS_SUCCESS List written (possibly empty if no `versions.yml` or no entries)
+ * @retval ROCPD_STATUS_ERROR_INVALID_ARGUMENT @p out_list is nullptr
+ * @retval ROCPD_STATUS_ERROR_SQL_INVALID_ENGINE Unsupported @p engine
+ * @retval ROCPD_STATUS_ERROR Allocation failure
+ */
+ROCPD_EXPERIMENTAL rocpd_status_t
+rocpd_sql_list_schema_versions(rocpd_sql_engine_t                    engine,
+                               const char**                          schema_path_hints,
+                               uint64_t                              num_schema_path_hints,
+                               rocpd_sql_schema_versions_list_t*     out_list) ROCPD_API;
+
+/**
+ * @brief (experimental) Release memory returned in ::rocpd_sql_schema_versions_list_t::versions.
+ * Safe to call with a zero-initialized list or after a failed ::rocpd_sql_list_schema_versions.
+ */
+ROCPD_EXPERIMENTAL void
+rocpd_sql_free_schema_versions_list(rocpd_sql_schema_versions_list_t* list) ROCPD_API;
+
 /** @} */
 
 ROCPD_EXTERN_C_FINI

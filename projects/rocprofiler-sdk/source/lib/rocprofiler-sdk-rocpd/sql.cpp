@@ -130,6 +130,82 @@ get_version_triplet(std::string_view version_str)
 
     return version;
 }
+
+using kind_filename_map_t = std::unordered_map<rocpd_sql_schema_kind_t, std::string>;
+using version_file_map_t  = std::unordered_map<std::string, kind_filename_map_t>;
+
+const std::unordered_map<std::string_view, rocpd_sql_schema_kind_t>&
+yaml_kind_keys()
+{
+    static const auto m = std::unordered_map<std::string_view, rocpd_sql_schema_kind_t>{
+        {"rocpd_tables", ROCPD_SQL_SCHEMA_ROCPD_TABLES},
+        {"rocpd_indexes", ROCPD_SQL_SCHEMA_ROCPD_INDEXES},
+        {"rocpd_views", ROCPD_SQL_SCHEMA_ROCPD_VIEWS},
+        {"rocpd_data_views", ROCPD_SQL_SCHEMA_ROCPD_DATA_VIEWS},
+        {"rocpd_summary_views", ROCPD_SQL_SCHEMA_ROCPD_SUMMARY_VIEWS},
+        {"rocpd_metadata", ROCPD_SQL_SCHEMA_ROCPD_METADATA},
+    };
+    return m;
+}
+
+std::string
+build_schema_paths_string(const char** schema_path_hints, uint64_t num_schema_path_hints)
+{
+    const auto _lib_schema_path = get_install_path();
+    const auto _env_schema_path = rocprofiler::common::get_env("ROCPD_SCHEMA_PATH", "");
+    const auto _usr_schema_path =
+        (schema_path_hints)
+            ? fmt::format(
+                  "{}",
+                  fmt::join(schema_path_hints, schema_path_hints + num_schema_path_hints, ":"))
+            : std::string{};
+    return fmt::format("{}:{}:{}", _usr_schema_path, _env_schema_path, _lib_schema_path);
+}
+
+void
+load_version_file_map(const std::string&    _schema_paths,
+                      version_file_map_t&   version_file_map,
+                      rocpd_version_triplet_t& latest_version)
+{
+    namespace fs = ::rocpd::sql::fs;
+
+    auto _schema_versions_file = std::optional<std::string>{};
+    for(const auto& itr : rocprofiler::sdk::parse::tokenize(_schema_paths, ":"))
+    {
+        auto _fpath = fs::path{itr} / "versions.yml";
+        ROCP_TRACE << fmt::format("[rocprofiler-sdk-rocpd] Loading versions.yml: '{}'",
+                                  _fpath.string());
+        if(fs::exists(_fpath))
+        {
+            ROCP_INFO << fmt::format("[rocprofiler-sdk-rocpd] Found schema versions file: '{}'",
+                                     _fpath.string());
+            _schema_versions_file = _fpath;
+            break;
+        }
+    }
+
+    latest_version = rocpd_version_triplet_t{0, 0, 0};
+    if(!_schema_versions_file) return;
+
+    auto versioning_contents = std::stringstream{};
+    ROCP_INFO << "Loading Schema Config: " << *_schema_versions_file;
+    auto ifs = std::ifstream{*_schema_versions_file};
+    versioning_contents << ifs.rdbuf();
+    auto yaml = YAML::Load(versioning_contents.str());
+    for(auto itr : yaml["rocprofiler-sdk-rocpd"]["rocpd_schemas"])
+    {
+        auto version = itr["version"].as<std::string>();
+        for(const auto& fitr : yaml_kind_keys())
+        {
+            if(itr[fitr.first])
+            {
+                version_file_map[version][fitr.second] = itr[fitr.first].as<std::string>();
+
+                latest_version = std::max(latest_version, get_version_triplet(version));
+            }
+        }
+    }
+}
 }  // namespace
 }  // namespace sql
 }  // namespace rocpd
@@ -173,69 +249,12 @@ rocpd_sql_load_schema(rocpd_sql_engine_t                        engine,
         }
     }
 
-    const auto yaml_kind_keys = std::unordered_map<std::string_view, rocpd_sql_schema_kind_t>{
-        {"rocpd_tables", ROCPD_SQL_SCHEMA_ROCPD_TABLES},
-        {"rocpd_indexes", ROCPD_SQL_SCHEMA_ROCPD_INDEXES},
-        {"rocpd_views", ROCPD_SQL_SCHEMA_ROCPD_VIEWS},
-        {"rocpd_data_views", ROCPD_SQL_SCHEMA_ROCPD_DATA_VIEWS},
-        {"rocpd_summary_views", ROCPD_SQL_SCHEMA_ROCPD_SUMMARY_VIEWS},
-        {"rocpd_metadata", ROCPD_SQL_SCHEMA_ROCPD_METADATA},
-    };
-
-    using kind_filename_map_t = std::unordered_map<rocpd_sql_schema_kind_t, std::string>;
-    using version_file_map_t  = std::unordered_map<std::string, kind_filename_map_t>;
-
-    auto version_file_map = version_file_map_t{};
-
-    const auto _lib_schema_path = rocpd::sql::get_install_path();
-    const auto _env_schema_path = rocprofiler::common::get_env("ROCPD_SCHEMA_PATH", "");
-    const auto _usr_schema_path =
-        (schema_path_hints)
-            ? fmt::format(
-                  "{}",
-                  fmt::join(schema_path_hints, schema_path_hints + num_schema_path_hints, ":"))
-            : std::string{};
+    auto version_file_map = rocpd::sql::version_file_map_t{};
     const auto _schema_paths =
-        fmt::format("{}:{}:{}", _usr_schema_path, _env_schema_path, _lib_schema_path);
-
-    auto _schema_versions_file = std::optional<std::string>{};
-    for(const auto& itr : rocprofiler::sdk::parse::tokenize(_schema_paths, ":"))
-    {
-        auto _fpath = fs::path{itr} / "versions.yml";
-        ROCP_TRACE << fmt::format("[rocprofiler-sdk-rocpd] Loading versions.yml: '{}'",
-                                  _fpath.string());
-        if(fs::exists(_fpath))
-        {
-            ROCP_INFO << fmt::format("[rocprofiler-sdk-rocpd] Found schema versions file: '{}'",
-                                     _fpath.string());
-            _schema_versions_file = _fpath;
-            break;
-        }
-    }
+        rocpd::sql::build_schema_paths_string(schema_path_hints, num_schema_path_hints);
 
     auto latest_version = rocpd_version_triplet_t{0, 0, 0};
-    if(_schema_versions_file)
-    {
-        auto versioning_contents = std::stringstream{};
-        ROCP_INFO << "Loading Schema Config: " << *_schema_versions_file;
-        auto ifs = std::ifstream{*_schema_versions_file};
-        versioning_contents << ifs.rdbuf();
-        auto yaml = YAML::Load(versioning_contents.str());
-        for(auto itr : yaml["rocprofiler-sdk-rocpd"]["rocpd_schemas"])
-        {
-            auto version = itr["version"].as<std::string>();
-            for(auto fitr : yaml_kind_keys)
-            {
-                if(itr[fitr.first])
-                {
-                    version_file_map[version][fitr.second] = itr[fitr.first].as<std::string>();
-
-                    latest_version =
-                        std::max(latest_version, rocpd::sql::get_version_triplet(version));
-                }
-            }
-        }
-    }
+    rocpd::sql::load_version_file_map(_schema_paths, version_file_map, latest_version);
 
     if(schema_version == rocpd_version_triplet_t{0, 0, 0}) schema_version = latest_version;
 
@@ -344,5 +363,66 @@ rocpd_sql_load_schema(rocpd_sql_engine_t                        engine,
              user_data);
 
     return ROCPD_STATUS_SUCCESS;
+}
+
+rocpd_status_t
+rocpd_sql_list_schema_versions(rocpd_sql_engine_t                   engine,
+                               const char**                         schema_path_hints,
+                               uint64_t                             num_schema_path_hints,
+                               rocpd_sql_schema_versions_list_t* out_list)
+{
+    if(out_list == nullptr) return ROCPD_STATUS_ERROR_INVALID_ARGUMENT;
+
+    out_list->versions = nullptr;
+    out_list->count    = 0;
+
+    switch(engine)
+    {
+        case ROCPD_SQL_ENGINE_SQLITE3:
+            break;
+        case ROCPD_SQL_ENGINE_NONE:
+        case ROCPD_SQL_ENGINE_LAST:
+            return ROCPD_STATUS_ERROR_SQL_INVALID_ENGINE;
+    }
+
+    auto version_file_map = rocpd::sql::version_file_map_t{};
+    const auto _schema_paths =
+        rocpd::sql::build_schema_paths_string(schema_path_hints, num_schema_path_hints);
+
+    auto latest_version = rocpd_version_triplet_t{0, 0, 0};
+    rocpd::sql::load_version_file_map(_schema_paths, version_file_map, latest_version);
+    (void) latest_version;
+
+    if(version_file_map.empty()) return ROCPD_STATUS_SUCCESS;
+
+    auto sorted_versions = std::vector<std::string>{};
+    sorted_versions.reserve(version_file_map.size());
+    for(const auto& kv : version_file_map)
+        sorted_versions.emplace_back(kv.first);
+
+    std::sort(sorted_versions.begin(), sorted_versions.end(), [](const std::string& a, const std::string& b) {
+        return rocpd::sql::get_version_triplet(a) < rocpd::sql::get_version_triplet(b);
+    });
+
+    const auto num_versions = sorted_versions.size();
+    auto* versions    = static_cast<rocpd_version_triplet_t*>(
+        std::malloc(num_versions * sizeof(rocpd_version_triplet_t)));  // NOLINT
+    if(!versions) return ROCPD_STATUS_ERROR;
+
+    for(size_t i = 0; i < num_versions; ++i)
+        versions[i] = rocpd::sql::get_version_triplet(sorted_versions[i]);
+
+    out_list->versions = versions;
+    out_list->count    = static_cast<uint64_t>(num_versions);
+    return ROCPD_STATUS_SUCCESS;
+}
+
+void
+rocpd_sql_free_schema_versions_list(rocpd_sql_schema_versions_list_t* list)
+{
+    if(list == nullptr) return;
+    std::free(list->versions);  // NOLINT
+    list->versions = nullptr;
+    list->count    = 0;
 }
 }
