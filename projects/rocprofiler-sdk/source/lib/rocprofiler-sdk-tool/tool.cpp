@@ -3256,6 +3256,9 @@ get_sigaction_function()
 
 bool signal_handler_exit =
     rocprofiler::tool::get_env("ROCPROF_INTERNAL_TEST_SIGNAL_HANDLER_VIA_EXIT", false);
+
+// prevent re-entry into singal handler when we're already handling a signal
+std::atomic<bool> handling_signals{};
 }  // namespace
 
 #define ROCPROFV3_INTERNAL_API __attribute__((visibility("internal")));
@@ -3418,6 +3421,18 @@ rocprofv3_error_signal_handler(int signo, siginfo_t* info, void* ucontext)
     auto this_tid  = common::get_tid();
     auto this_func = std::string_view{__FUNCTION__};
 
+    if(handling_signals.exchange(true))
+    {
+        ROCP_WARNING << fmt::format("[PPID={}][PID={}][TID={}][{}] re-entry when handling signal "
+                                    "{}, skipping chained handlers ...",
+                                    this_ppid,
+                                    this_pid,
+                                    this_tid,
+                                    this_func,
+                                    signo);
+        return;
+    }
+
     ROCP_WARNING << fmt::format("[PPID={}][PID={}][TID={}][{}] rocprofv3 caught signal {}...",
                                 this_ppid,
                                 this_pid,
@@ -3543,6 +3558,11 @@ rocprofv3_error_signal_handler(int signo, siginfo_t* info, void* ucontext)
 
     // below is for testing purposes. re-raising the signal causes CTest to ignore WILL_FAIL ON
     if(signal_handler_exit) ::quick_exit(signo);
+
+    struct sigaction _sa = {};
+    _sa.sa_handler       = SIG_DFL;
+    get_sigaction_function()(signo, &_sa, nullptr);
+
     ::raise(signo);
 }
 
@@ -3663,7 +3683,8 @@ rocprofv3_signal(int signum, sighandler_t handler)
     std::call_once(_once,
                    []() { get_signal_function() = (signal_func_t) dlsym(RTLD_NEXT, "signal"); });
 
-    if(!is_handled_signal(signum) || !tool::get_config().enable_signal_handlers)
+    if(!is_handled_signal(signum) || !tool::get_config().enable_signal_handlers ||
+       handling_signals.load())
         return CHECK_NOTNULL(get_signal_function())(signum, handler);
 
     get_chained_signals().at(signum) = chained_siginfo{signum, handler, std::nullopt};
@@ -3682,7 +3703,8 @@ rocprofv3_sigaction(int signum,
         get_sigaction_function() = (sigaction_func_t) dlsym(RTLD_NEXT, "sigaction");
     });
 
-    if(!is_handled_signal(signum) || !act || !tool::get_config().enable_signal_handlers)
+    if(!is_handled_signal(signum) || !act || !tool::get_config().enable_signal_handlers ||
+       handling_signals.load())
         return CHECK_NOTNULL(get_sigaction_function())(signum, act, oldact);
 
     // make sure rocprofv3_error_signal_handler doesn't call itself
