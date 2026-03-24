@@ -49,12 +49,8 @@ class PlatformState {
 
   // Singleton instance
   static PlatformState& Instance() {
-    if (platform_ == nullptr) {
-      // __hipRegisterFatBinary() will call this when app starts, thus
-      // there is no multiple entry issue here.
-      platform_ = new PlatformState();
-    }
-    return *platform_;
+    static PlatformState instance{};
+    return instance;
   }
 
   // Load hip dynamic library
@@ -104,10 +100,14 @@ class PlatformState {
   PlatformState() : statCO_(*this), log_level_(0), log_size_(0), log_mask_(0) {}
   ~PlatformState() {}
 
+  PlatformState(const PlatformState&) = delete;
+  PlatformState& operator=(const PlatformState&) = delete;
+  PlatformState(PlatformState&&) = delete;
+  PlatformState& operator=(PlatformState&&) = delete;
+
   std::recursive_mutex lock_;       //!< Guards PlatformState globals
   std::recursive_mutex ufd_lock_;   //!< Unique FD Store Lock
   std::recursive_mutex lg_lock_;    //!< Lock for logging operations
-  static PlatformState* platform_;  //!< Singleton instance
 
   //! Dynamic Code Object map, keyin module to get the corresponding object
   std::unordered_map<hipModule_t, hip::DynCO*> dynCO_map_;

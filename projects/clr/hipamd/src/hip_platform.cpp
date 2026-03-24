@@ -107,9 +107,6 @@ hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
 namespace hip {
 constexpr unsigned __hipFatMAGIC2 = 0x48495046;  // "HIPF"
 
-// Static member definition
-PlatformState* PlatformState::platform_ = nullptr;
-
 struct __CudaFatBinaryWrapper {
   unsigned int magic;
   unsigned int version;
