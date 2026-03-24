@@ -1859,9 +1859,19 @@ amdsmi_status_t amdsmi_get_energy_count(amdsmi_processor_handle /*processor_hand
 }
 
 amdsmi_status_t amdsmi_get_gpu_bdf_id(
-        amdsmi_processor_handle /*processor_handle*/, uint64_t *bdfid) {
+        amdsmi_processor_handle processor_handle, uint64_t *bdfid) {
+    AMDSMI_CHECK_INIT();
     if (bdfid == nullptr) { return AMDSMI_STATUS_INVAL; }
-    return AMDSMI_STATUS_NOT_SUPPORTED;
+    auto *device = reinterpret_cast<Device *>(processor_handle);
+    if (device == nullptr) return AMDSMI_STATUS_INVAL;
+    wsl::thunk::BdfInfo bi = {};
+    auto code = device->QueryBdfInfo(&bi);
+    if (code != ErrorCode::Success) return translateCodeToSmiStatus(code);
+    *bdfid = ((uint64_t)(bi.domain_number & 0xFFFFFFFFU) << 32)
+           | ((uint64_t)(bi.bus_number    & 0xFF) << 8)
+           | ((uint64_t)(bi.device_number & 0x1F) << 3)
+           | ((uint64_t)(bi.function_number & 0x7));
+    return AMDSMI_STATUS_SUCCESS;
 }
 
 amdsmi_status_t amdsmi_get_gpu_topo_numa_affinity(
