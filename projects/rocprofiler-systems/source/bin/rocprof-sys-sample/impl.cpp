@@ -9,7 +9,6 @@
 #include "common/environment.hpp"
 #include "common/json_config.hpp"
 #include "common/path.hpp"
-#include "common/preset_loader.hpp"
 
 #include <timemory/environment.hpp>
 #include <timemory/log/color.hpp>
@@ -76,16 +75,6 @@ auto clock_id_choices = []() {
 
     return std::make_pair(_choices, _aliases);
 }();
-
-bool
-apply_preset_from_json(std::string_view preset_name)
-{
-    return rocprofsys::common_utils::apply_preset_from_json(
-        preset_name, [](const std::string& key, const std::string& val) {
-            updated_envs.emplace(key);
-            setenv(key.c_str(), val.c_str(), 1);  // Override to match run behavior
-        });
-}
 
 }  // namespace
 
@@ -362,18 +351,16 @@ PROFILING WORKFLOW:
         });
 
     // Track preset and domain flag state for validation and export
-    rocprofsys::common_utils::DomainFlagState domain_state;
+    rocprofsys::common_utils::domain_flag_state domain_state;
 
     // Register shared preset and domain arguments
     rocprofsys::common_utils::register_preset_and_domain_arguments(
-        parser, "sample", domain_state,
-        [&](std::string_view key, std::string_view val) {
+        parser, "sample", domain_state, [&](std::string_view key, std::string_view val) {
             updated_envs.emplace(key);
             rocprofsys::common::update_env(_env, std::string{ key }, std::string{ val },
                                            update_mode::REPLACE, ":", updated_envs,
                                            original_envs);
-        },
-        [&](std::string_view preset) { return apply_preset_from_json(preset); });
+        });
 
     parser.start_group("GENERAL OPTIONS",
                        "These are options which are ubiquitously applied");
@@ -977,7 +964,7 @@ PROFILING WORKFLOW:
     rocprofsys::common_utils::run_post_parse_validation(
         "sample", domain_state.active_preset_name, domain_state.gpu_domain_enabled,
         domain_state.rocm_domain_enabled, domain_state.cpu_domain_enabled,
-        domain_state.parallel_domain_enabled, verbose);
+        domain_state.parallel_domain_enabled, verbose, domain_state.registry);
 
     return _outv;
 }

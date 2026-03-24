@@ -6,6 +6,7 @@
 #include "common/common_utils.hpp"
 #include "common/env_vars.hpp"
 #include "common/json_config.hpp"
+#include "common/preset_registry.hpp"
 
 #include <string>
 #include <string_view>
@@ -20,15 +21,16 @@ namespace common_utils
  * Used to track which options were specified on the command line
  * for validation and export purposes.
  */
-struct DomainFlagState
+struct domain_flag_state
 {
-    std::string active_preset_name;
-    bool        export_config_requested = false;
-    std::string export_config_file;
-    bool        gpu_domain_enabled      = false;
-    bool        rocm_domain_enabled     = false;
-    bool        cpu_domain_enabled      = false;
-    bool        parallel_domain_enabled = false;
+    preset_registry registry;
+    std::string     active_preset_name;
+    bool            export_config_requested = false;
+    std::string     export_config_file;
+    bool            gpu_domain_enabled      = false;
+    bool            rocm_domain_enabled     = false;
+    bool            cpu_domain_enabled      = false;
+    bool            parallel_domain_enabled = false;
 };
 
 /**
@@ -44,26 +46,21 @@ struct DomainFlagState
  * @tparam ParserT The argument parser type (tim::argparse::argument_parser)
  * @tparam EnvUpdater Callable with signature void(std::string_view key, std::string_view
  * val)
- * @tparam PresetApplier Callable with signature bool(std::string_view preset_name)
  *
  * @param parser The argument parser to register arguments on
  * @param tool_name The name of the tool ("run" or "sample") for help messages
- * @param state DomainFlagState struct to track which options were specified
+ * @param state domain_flag_state struct to track which options were specified
  * @param update_env Callback to update environment variable
- * @param apply_preset Callback to apply a preset by name
  */
-template <typename ParserT, typename EnvUpdater, typename PresetApplier>
+template <typename ParserT, typename EnvUpdater>
 void
 register_preset_and_domain_arguments(ParserT& parser, std::string_view tool_name,
-                                     DomainFlagState& state, EnvUpdater&& update_env,
-                                     PresetApplier&& apply_preset)
+                                     domain_flag_state& state, EnvUpdater&& update_env)
 {
     namespace env = rocprofsys::env_vars;
 
-    // Capture callables once to avoid multiple std::forward (use-after-move).
-    // These are used by multiple lambda captures below.
-    auto env_updater    = std::forward<EnvUpdater>(update_env);
-    auto preset_applier = std::forward<PresetApplier>(apply_preset);
+    // Capture callable once to avoid multiple std::forward (use-after-move).
+    auto env_updater = std::forward<EnvUpdater>(update_env);
 
     parser.start_group("PRESET OPTIONS",
                        "Load a profiling preset by name or from a JSON file");
@@ -77,11 +74,11 @@ register_preset_and_domain_arguments(ParserT& parser, std::string_view tool_name
             "For custom configs, provide a path containing '/' or ending with '.json'")
         .max_count(1)
         .dtype("string")
-        .action([&state, preset_applier](ParserT& p) mutable {
+        .action([&state, env_updater](ParserT& p) mutable {
             auto preset = p.template get<std::string>("preset");
             if(preset.empty()) return;
             state.active_preset_name = preset;
-            if(!preset_applier(preset))
+            if(!state.registry.apply(preset, env_updater))
             {
                 std::cerr << "[rocprof-sys] WARNING: Could not load preset '" << preset
                           << "'. Check preset name or file path.\n";
@@ -92,8 +89,8 @@ register_preset_and_domain_arguments(ParserT& parser, std::string_view tool_name
         .add_argument({ "--list-presets" },
                       "List all available presets with descriptions and exit")
         .max_count(0)
-        .action([tool_name](ParserT&) {
-            rocprofsys::common_utils::list_presets(tool_name);
+        .action([&state, tool_name](ParserT&) {
+            state.registry.list(tool_name);
             exit(EXIT_SUCCESS);
         });
 
@@ -102,14 +99,14 @@ register_preset_and_domain_arguments(ParserT& parser, std::string_view tool_name
                       "Show detailed information about a preset and exit")
         .max_count(1)
         .dtype("string")
-        .action([tool_name](ParserT& p) {
+        .action([&state, tool_name](ParserT& p) {
             auto preset_name = p.template get<std::string>("explain");
             if(preset_name.empty())
             {
                 std::cerr << "[rocprof-sys] --explain requires a preset name\n";
                 exit(EXIT_FAILURE);
             }
-            if(!rocprofsys::common_utils::explain_preset(preset_name, tool_name))
+            if(!state.registry.explain(preset_name, tool_name))
             {
                 exit(EXIT_FAILURE);
             }
@@ -190,7 +187,6 @@ register_preset_and_domain_arguments(ParserT& parser, std::string_view tool_name
                 auto input = p.template get<std::string>("cpu");
                 if(!input.empty())
                 {
-                    // Validate that frequency is a valid number
                     if(auto parsed = rocprofsys::json_config::safe_stoi(input))
                         freq = input;
                     else

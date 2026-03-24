@@ -10,7 +10,6 @@
 #include "common/environment.hpp"
 #include "common/json_config.hpp"
 #include "common/path.hpp"
-#include "common/preset_loader.hpp"
 #include "core/argparse.hpp"
 #include "core/timemory.hpp"
 
@@ -68,17 +67,6 @@ get_verbose(parser_data_t& _data)
                             get_env<bool>(std::string{ env::DEBUG }, false, false));
     if(_debug) verbose += 8;
     return verbose;
-}
-
-bool
-apply_preset_from_json(std::string_view preset_name, parser_data_t& _parser_data)
-{
-    return rocprofsys::common_utils::apply_preset_from_json(
-        preset_name, [&](const std::string& key, const std::string& val) {
-            rocprofsys::common::update_env(_parser_data.current, key, val,
-                                           update_mode::REPLACE, ":",
-                                           _parser_data.updated, original_envs);
-        });
 }
 
 // Export configuration to JSON file or stdout
@@ -350,18 +338,14 @@ INSTRUMENTATION WORKFLOW:
     rocprofsys::argparse::add_extended_arguments(parser, _parser_data);
 
     // Track preset and domain flag state for validation and export
-    rocprofsys::common_utils::DomainFlagState domain_state;
+    rocprofsys::common_utils::domain_flag_state domain_state;
 
     // Register shared preset and domain arguments
     rocprofsys::common_utils::register_preset_and_domain_arguments(
-        parser, "run", domain_state,
-        [&](std::string_view key, std::string_view val) {
+        parser, "run", domain_state, [&](std::string_view key, std::string_view val) {
             rocprofsys::common::update_env(_parser_data.current, std::string{ key },
                                            std::string{ val }, update_mode::REPLACE, ":",
                                            _parser_data.updated, original_envs);
-        },
-        [&](std::string_view preset) {
-            return apply_preset_from_json(preset, _parser_data);
         });
 
     parser.start_group("EXECUTION OPTIONS", "");
@@ -413,7 +397,8 @@ INSTRUMENTATION WORKFLOW:
     rocprofsys::common_utils::run_post_parse_validation(
         "run", domain_state.active_preset_name, domain_state.gpu_domain_enabled,
         domain_state.rocm_domain_enabled, domain_state.cpu_domain_enabled,
-        domain_state.parallel_domain_enabled, _parser_data.verbose);
+        domain_state.parallel_domain_enabled, _parser_data.verbose,
+        domain_state.registry);
 
     return _parser_data;
 }

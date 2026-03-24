@@ -4,7 +4,7 @@
 add_library(
     bin-common-tests
     OBJECT
-    test_preset_loader.cpp
+    test_preset_registry.cpp
     test_json_config.cpp
     test_help_system.cpp
 )

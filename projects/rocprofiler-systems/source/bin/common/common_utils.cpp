@@ -53,180 +53,9 @@ check_directory_writable(const std::string& dir)
     return (access(parent.c_str(), W_OK) == 0);
 }
 
-std::string
-generate_preset_description(const nlohmann::json& j)
-{
-    // Extract description from metadata
-    auto meta        = rocprofsys::json_config::get_config_metadata(j);
-    auto description = meta ? meta->description : "";
-
-    // Build tree lines from JSON sections
-    std::vector<std::string> lines;
-
-    // Tracing
-    if(j.contains("tracing"))
-    {
-        const auto& t     = j["tracing"];
-        bool        on    = t.value("enabled", false);
-        std::string entry = std::string("Tracing:         ") + (on ? "ON" : "OFF");
-        if(on && t.contains("buffer_size_kb"))
-        {
-            auto kb = t["buffer_size_kb"].value("value", 0);
-            if(kb >= 1024000)
-                entry += " (buffer: " + std::to_string(kb / 1024000) + " GB)";
-            else if(kb > 0)
-                entry += " (buffer: " + std::to_string(kb) + " KB)";
-        }
-        lines.push_back(entry);
-    }
-
-    // Profiling
-    if(j.contains("profiling"))
-    {
-        const auto& p     = j["profiling"];
-        bool        on    = p.value("enabled", false);
-        std::string entry = std::string("Profiling:       ") + (on ? "ON" : "OFF");
-        if(on && p.contains("flat_profile") && p["flat_profile"].value("enabled", false))
-            entry += " (flat profile)";
-        lines.push_back(entry);
-    }
-
-    // Sampling
-    if(j.contains("sampling"))
-    {
-        const auto& s     = j["sampling"];
-        bool        on    = s.value("enabled", false);
-        std::string entry = std::string("CPU Sampling:    ") + (on ? "ON" : "OFF");
-        if(on && s.contains("frequency_hz"))
-        {
-            auto freq = s["frequency_hz"].value("value", 0);
-            if(freq > 0) entry += " @ " + std::to_string(freq) + " Hz";
-        }
-        if(s.contains("cpus") && s["cpus"].value("value", "") == "none")
-        {
-            entry = "CPU Sampling:    Disabled (none)";
-        }
-        lines.push_back(entry);
-    }
-
-    // Domains: GPU
-    if(j.contains("domains") && j["domains"].contains("gpu"))
-    {
-        const auto& gpu = j["domains"]["gpu"];
-        if(gpu.value("enabled", false))
-        {
-            std::string entry = "GPU Metrics:     ON";
-            if(gpu.contains("metrics"))
-            {
-                std::vector<std::string> names;
-                for(const auto& [name, m] : gpu["metrics"].items())
-                {
-                    if(m.value("enabled", false)) names.push_back(name);
-                }
-                if(!names.empty())
-                {
-                    entry += " (";
-                    for(size_t i = 0; i < names.size(); ++i)
-                    {
-                        if(i > 0) entry += ", ";
-                        entry += names[i];
-                    }
-                    entry += ")";
-                }
-            }
-            lines.push_back(entry);
-        }
-    }
-
-    // Domains: ROCm
-    if(j.contains("domains") && j["domains"].contains("rocm"))
-    {
-        const auto& rocm = j["domains"]["rocm"];
-        if(rocm.value("enabled", false) && rocm.contains("api_domains"))
-        {
-            std::vector<std::string> apis;
-            for(const auto& [name, api] : rocm["api_domains"].items())
-            {
-                if(api.value("enabled", false)) apis.push_back(name);
-            }
-            if(!apis.empty())
-            {
-                std::string entry = "ROCm Domains:    ";
-                for(size_t i = 0; i < apis.size(); ++i)
-                {
-                    if(i > 0) entry += ", ";
-                    entry += apis[i];
-                }
-                lines.push_back(entry);
-            }
-        }
-    }
-
-    // Domains: Parallel runtimes
-    if(j.contains("domains") && j["domains"].contains("parallel"))
-    {
-        const auto& par = j["domains"]["parallel"];
-        if(par.contains("runtimes"))
-        {
-            std::vector<std::string> runtimes;
-            for(const auto& [name, rt] : par["runtimes"].items())
-            {
-                if(rt.value("enabled", false)) runtimes.push_back(name);
-            }
-            if(!runtimes.empty())
-            {
-                std::string entry = "Parallel:        ";
-                for(size_t i = 0; i < runtimes.size(); ++i)
-                {
-                    if(i > 0) entry += ", ";
-                    entry += runtimes[i];
-                }
-                lines.push_back(entry);
-            }
-        }
-    }
-
-    // Hardware counters
-    if(j.contains("hardware_counters") && j["hardware_counters"].value("enabled", false))
-    {
-        const auto& hw = j["hardware_counters"];
-        if(hw.contains("papi_events"))
-        {
-            auto val =
-                rocprofsys::json_config::json_value_to_string(hw["papi_events"]["value"]);
-            lines.push_back("PAPI Events:     " + val);
-        }
-        if(hw.contains("rocm_events"))
-        {
-            auto val =
-                rocprofsys::json_config::json_value_to_string(hw["rocm_events"]["value"]);
-            lines.push_back("ROCm Events:     " + val);
-        }
-    }
-
-    // Output: rocPD
-    if(j.contains("output") && j["output"].contains("rocpd_output") &&
-       j["output"]["rocpd_output"].value("enabled", false))
-    {
-        lines.emplace_back("rocPD Output:    ON");
-    }
-
-    if(lines.empty()) return description;
-
-    // Format with tree characters
-    std::ostringstream oss;
-    oss << description << "\n";
-    for(size_t i = 0; i < lines.size(); ++i)
-    {
-        bool is_last = (i + 1 == lines.size());
-        oss << "  " << (is_last ? "\u2514\u2500 " : "\u251c\u2500 ") << lines[i];
-        if(!is_last) oss << "\n";
-    }
-    return oss.str();
-}
-
 void
-print_pre_execution_info(std::string_view tool_name, std::string_view preset_mode)
+print_pre_execution_info(std::string_view tool_name, std::string_view preset_mode,
+                         preset_registry& registry)
 {
     auto output_dir = get_output_directory();
 
@@ -237,23 +66,9 @@ print_pre_execution_info(std::string_view tool_name, std::string_view preset_mod
 
     if(!preset_mode.empty() && !tool_name.empty())
     {
-        auto normalized = strip_flag_prefix(preset_mode);
-        auto preset_dir = rocprofsys::preset_loader::find_preset_directory();
-        if(!preset_dir.empty())
-        {
-            auto          filepath = preset_dir + "/" + normalized + ".json";
-            std::ifstream ifs{ filepath };
-            if(ifs.is_open())
-            {
-                try
-                {
-                    preset_json = nlohmann::json::parse(ifs);
-                } catch(const nlohmann::json::exception&)
-                {
-                    // fall through with empty JSON
-                }
-            }
-        }
+        auto        normalized  = strip_flag_prefix(preset_mode);
+        const auto* cached_json = registry.raw_json(normalized);
+        if(cached_json) preset_json = *cached_json;
 
         if(!preset_json.is_null())
         {
@@ -287,7 +102,7 @@ print_pre_execution_info(std::string_view tool_name, std::string_view preset_mod
 
         if(!preset_json.is_null())
         {
-            auto description = generate_preset_description(preset_json);
+            auto description = registry.describe(normalized);
             if(!description.empty())
             {
                 std::cerr << "\n" << description << "\n";
@@ -385,76 +200,6 @@ validate_configuration()
                   << "' is not writable!\n"
                   << "  Try: export ROCPROFSYS_TMPDIR=/tmp\n";
     }
-}
-
-void
-list_presets(std::string_view tool_name)
-{
-    auto presets = rocprofsys::preset_loader::load_all_presets();
-    if(presets.empty())
-    {
-        std::cerr << "[rocprof-sys] No presets found. Check ROCPROFSYS_PRESET_DIR "
-                     "or installation.\n";
-        return;
-    }
-
-    std::cout << "\nAvailable Presets:\n";
-    std::cout << std::string(60, '=') << "\n\n";
-
-    // Group presets by category
-    std::map<std::string, std::vector<const rocprofsys::preset_loader::preset_info*>>
-        by_category;
-    for(const auto& [name, info] : presets)
-    {
-        auto cat = info.category.empty() ? "General" : info.category;
-        by_category[cat].push_back(&info);
-    }
-
-    for(const auto& [category, preset_list] : by_category)
-    {
-        std::cout << category << ":\n";
-        for(const auto* info : preset_list)
-        {
-            std::cout << "  " << info->name;
-            if(!info->description.empty()) std::cout << " - " << info->description;
-            std::cout << "\n";
-        }
-        std::cout << "\n";
-    }
-
-    std::cout << "Usage: rocprof-sys-" << tool_name << " --preset=<name> -- ./app\n";
-    std::cout << "       rocprof-sys-" << tool_name
-              << " --explain=<name>  # Show preset details\n";
-}
-
-bool
-explain_preset(std::string_view preset_name, std::string_view tool_name)
-{
-    auto info =
-        rocprofsys::preset_loader::load_preset_or_file(std::string{ preset_name });
-    if(!info)
-    {
-        std::cerr << "[rocprof-sys] Preset '" << preset_name
-                  << "' not found. Use --list-presets to see available presets.\n";
-        return false;
-    }
-
-    std::cout << "\nPreset: " << info->name << "\n";
-    std::cout << std::string(40, '-') << "\n";
-    if(!info->description.empty())
-        std::cout << "Description: " << info->description << "\n";
-    if(!info->use_case.empty()) std::cout << "Use case:    " << info->use_case << "\n";
-    if(!info->category.empty()) std::cout << "Category:    " << info->category << "\n";
-
-    std::cout << "\nEnvironment Variables:\n";
-    for(const auto& [key, val] : info->settings)
-    {
-        std::cout << "  " << key << " = " << val << "\n";
-    }
-
-    std::cout << "\nUsage: rocprof-sys-" << tool_name << " --preset=" << preset_name
-              << " -- ./app\n";
-    return true;
 }
 
 void
@@ -574,7 +319,8 @@ export_config(const std::vector<char*>&              current_env,
 void
 run_post_parse_validation(std::string_view tool_name, std::string_view preset_name,
                           bool gpu_enabled, bool rocm_enabled, bool cpu_enabled,
-                          bool parallel_enabled, int verbose_level)
+                          bool parallel_enabled, int verbose_level,
+                          preset_registry& registry)
 {
     // Check ROCm availability once for all relevant conditions
     bool rocm_needed = gpu_enabled || rocm_enabled;
@@ -597,7 +343,7 @@ run_post_parse_validation(std::string_view tool_name, std::string_view preset_na
 
     if(!preset_name.empty() && verbose_level >= 1)
     {
-        print_pre_execution_info(tool_name, preset_name);
+        print_pre_execution_info(tool_name, preset_name, registry);
     }
 
     warn_if_output_not_writable(tool_name);
@@ -669,10 +415,10 @@ line_contains_flag(const std::string& line, const std::string& flag)
 }
 }  // namespace
 
-const HelpTopicMap&
+const help_topic_map&
 get_help_topic_map()
 {
-    static const HelpTopicMap map = {
+    static const help_topic_map map = {
         { "preset", { "[PRESET OPTIONS]", "[DOMAIN OPTIONS]", "[EXPORT OPTIONS]" } },
         { "general", { "[GENERAL OPTIONS]" } },
         { "tracing", { "[TRACING OPTIONS]" } },
@@ -690,10 +436,10 @@ get_help_topic_map()
     return map;
 }
 
-const DomainHelpMap&
+const domain_help_map&
 get_domain_help_map()
 {
-    static const DomainHelpMap map = {
+    static const domain_help_map map = {
         { "gpu",
           { "GPU metrics, device sampling, GPU counters",
             { "--gpu", "-D", "--device", "--gpus", "--process-freq", "--process-wait",

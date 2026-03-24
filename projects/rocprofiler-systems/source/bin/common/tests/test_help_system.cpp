@@ -10,7 +10,7 @@
 
 using namespace rocprofsys::common_utils;
 
-class HelpSystemTest : public ::testing::Test
+class help_system_test : public ::testing::Test
 {};
 
 // Synthetic help output that mimics print_help() format (no ANSI codes).
@@ -89,7 +89,7 @@ static const std::string ansi_help =
 // Topic map tests
 // ============================================================================
 
-TEST_F(HelpSystemTest, TopicMapIsNonEmpty)
+TEST_F(help_system_test, topic_map_is_not_empty)
 {
     const auto& map = get_help_topic_map();
     EXPECT_FALSE(map.empty());
@@ -101,7 +101,7 @@ TEST_F(HelpSystemTest, TopicMapIsNonEmpty)
     EXPECT_NE(map.count("counters"), 0u);
 }
 
-TEST_F(HelpSystemTest, DomainMapIsNonEmpty)
+TEST_F(help_system_test, domain_map_is_not_empty)
 {
     const auto& map = get_domain_help_map();
     EXPECT_FALSE(map.empty());
@@ -111,7 +111,7 @@ TEST_F(HelpSystemTest, DomainMapIsNonEmpty)
     EXPECT_NE(map.count("parallel"), 0u);
 }
 
-TEST_F(HelpSystemTest, DomainEntriesHaveFlags)
+TEST_F(help_system_test, domain_entries_have_flags)
 {
     const auto& map = get_domain_help_map();
     for(const auto& [name, entry] : map)
@@ -126,7 +126,7 @@ TEST_F(HelpSystemTest, DomainEntriesHaveFlags)
 // Compact help tests
 // ============================================================================
 
-TEST_F(HelpSystemTest, CompactHelpContainsEssentials)
+TEST_F(help_system_test, compact_help_contains_essential_info)
 {
     std::ostringstream oss;
     print_compact_help("run", oss);
@@ -143,7 +143,7 @@ TEST_F(HelpSystemTest, CompactHelpContainsEssentials)
     EXPECT_NE(output.find("rocprof-sys-run"), std::string::npos);
 }
 
-TEST_F(HelpSystemTest, CompactHelpUsesToolName)
+TEST_F(help_system_test, compact_help_uses_tool_name)
 {
     std::ostringstream oss_run, oss_sample;
     print_compact_help("run", oss_run);
@@ -157,7 +157,7 @@ TEST_F(HelpSystemTest, CompactHelpUsesToolName)
 // Topic-based help extraction tests
 // ============================================================================
 
-TEST_F(HelpSystemTest, TopicFilterExtractsMatchingSection)
+TEST_F(help_system_test, topic_filter_extracts_matching_section)
 {
     std::ostringstream oss;
     bool result = print_help_for_topic(synthetic_help, "tracing", "run", oss);
@@ -171,7 +171,7 @@ TEST_F(HelpSystemTest, TopicFilterExtractsMatchingSection)
     EXPECT_EQ(output.find("--preset"), std::string::npos);
 }
 
-TEST_F(HelpSystemTest, TopicFilterExtractsMultipleGroups)
+TEST_F(help_system_test, topic_filter_extracts_multiple_groups)
 {
     std::ostringstream oss;
     bool result = print_help_for_topic(synthetic_help, "preset", "run", oss);
@@ -188,7 +188,7 @@ TEST_F(HelpSystemTest, TopicFilterExtractsMultipleGroups)
     EXPECT_EQ(output.find("--trace-file"), std::string::npos);
 }
 
-TEST_F(HelpSystemTest, TopicFilterSamplingExtractsTimerOptions)
+TEST_F(help_system_test, topic_filter_sampling_extracts_timer_options)
 {
     std::ostringstream oss;
     bool result = print_help_for_topic(synthetic_help, "sampling", "run", oss);
@@ -200,14 +200,14 @@ TEST_F(HelpSystemTest, TopicFilterSamplingExtractsTimerOptions)
     EXPECT_NE(output.find("--sample-realtime"), std::string::npos);
 }
 
-TEST_F(HelpSystemTest, TopicFilterReturnsFalseForUnknownTopic)
+TEST_F(help_system_test, topic_filter_returns_false_for_unknown_topic)
 {
     std::ostringstream oss;
     bool result = print_help_for_topic(synthetic_help, "nonexistent", "run", oss);
     EXPECT_FALSE(result);
 }
 
-TEST_F(HelpSystemTest, TopicFilterDebugSection)
+TEST_F(help_system_test, topic_filter_debug_section)
 {
     std::ostringstream oss;
     bool               result = print_help_for_topic(synthetic_help, "debug", "run", oss);
@@ -224,7 +224,7 @@ TEST_F(HelpSystemTest, TopicFilterDebugSection)
 // Domain-based help extraction tests
 // ============================================================================
 
-TEST_F(HelpSystemTest, DomainGpuExtractsRelatedOptions)
+TEST_F(help_system_test, domain_gpu_extracts_related_options)
 {
     std::ostringstream oss;
     bool               result = print_help_for_domain(synthetic_help, "gpu", "run", oss);
@@ -243,7 +243,7 @@ TEST_F(HelpSystemTest, DomainGpuExtractsRelatedOptions)
     EXPECT_EQ(output.find("--sampling-freq"), std::string::npos);
 }
 
-TEST_F(HelpSystemTest, DomainCpuExtractsRelatedOptions)
+TEST_F(help_system_test, domain_cpu_extracts_related_options)
 {
     std::ostringstream oss;
     bool               result = print_help_for_domain(synthetic_help, "cpu", "run", oss);
@@ -259,7 +259,7 @@ TEST_F(HelpSystemTest, DomainCpuExtractsRelatedOptions)
     EXPECT_NE(output.find("--sample"), std::string::npos);
 }
 
-TEST_F(HelpSystemTest, DomainCpuIncludesContinuationLines)
+TEST_F(help_system_test, domain_cpu_include_continuation_lines)
 {
     std::ostringstream oss;
     print_help_for_domain(synthetic_help, "cpu", "run", oss);
@@ -269,14 +269,14 @@ TEST_F(HelpSystemTest, DomainCpuIncludesContinuationLines)
     EXPECT_NE(output.find("Accepts zero or more arguments"), std::string::npos);
 }
 
-TEST_F(HelpSystemTest, DomainReturnsFalseForUnknownDomain)
+TEST_F(help_system_test, domain_return_false_for_unknown_domain)
 {
     std::ostringstream oss;
     bool result = print_help_for_domain(synthetic_help, "nonexistent", "run", oss);
     EXPECT_FALSE(result);
 }
 
-TEST_F(HelpSystemTest, DomainRocmExtractsRelatedOptions)
+TEST_F(help_system_test, domain_rocm_extracts_related_options)
 {
     std::ostringstream oss;
     bool               result = print_help_for_domain(synthetic_help, "rocm", "run", oss);
@@ -292,7 +292,7 @@ TEST_F(HelpSystemTest, DomainRocmExtractsRelatedOptions)
 // ANSI escape code handling
 // ============================================================================
 
-TEST_F(HelpSystemTest, TopicFilterWorksWithAnsiCodes)
+TEST_F(help_system_test, topic_filter_works_with_ansi_codes)
 {
     std::ostringstream oss;
     bool               result = print_help_for_topic(ansi_help, "debug", "run", oss);
@@ -305,7 +305,7 @@ TEST_F(HelpSystemTest, TopicFilterWorksWithAnsiCodes)
     EXPECT_EQ(output.find("--trace-file"), std::string::npos);
 }
 
-TEST_F(HelpSystemTest, TopicFilterAnsiTracingSection)
+TEST_F(help_system_test, topic_filter_ansi_tracing_section)
 {
     std::ostringstream oss;
     bool               result = print_help_for_topic(ansi_help, "tracing", "run", oss);

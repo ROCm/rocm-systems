@@ -11,11 +11,10 @@
 
 using namespace rocprofsys::json_config;
 
-class JsonConfigTest : public ::testing::Test
+class json_config_test : public ::testing::Test
 {};
 
-// Test new schema format - tracing section
-TEST_F(JsonConfigTest, ResolvesTracingSection)
+TEST_F(json_config_test, resolves_tracing_section)
 {
     auto j = nlohmann::json::parse(R"({
         "tracing": {
@@ -32,8 +31,7 @@ TEST_F(JsonConfigTest, ResolvesTracingSection)
     EXPECT_EQ(result.at("ROCPROFSYS_PERFETTO_FILL_POLICY"), "ring_buffer");
 }
 
-// Test new schema format - profiling section
-TEST_F(JsonConfigTest, ResolvesProfilingSection)
+TEST_F(json_config_test, resolves_profiling_section)
 {
     auto j = nlohmann::json::parse(R"({
         "profiling": {
@@ -48,8 +46,7 @@ TEST_F(JsonConfigTest, ResolvesProfilingSection)
     EXPECT_EQ(result.at("ROCPROFSYS_FLAT_PROFILE"), "true");
 }
 
-// Test new schema format - sampling section
-TEST_F(JsonConfigTest, ResolvesSamplingSection)
+TEST_F(json_config_test, resolves_sampling_section)
 {
     auto j = nlohmann::json::parse(R"({
         "sampling": {
@@ -71,7 +68,7 @@ TEST_F(JsonConfigTest, ResolvesSamplingSection)
 }
 
 // Test new schema format - domains.gpu section
-TEST_F(JsonConfigTest, ResolvesGpuDomain)
+TEST_F(json_config_test, resolves_gpu_domain)
 {
     auto j = nlohmann::json::parse(R"({
         "domains": {
@@ -100,7 +97,7 @@ TEST_F(JsonConfigTest, ResolvesGpuDomain)
 }
 
 // Test new schema format - domains.rocm section
-TEST_F(JsonConfigTest, ResolvesRocmDomain)
+TEST_F(json_config_test, resolves_rocm_domain)
 {
     auto j = nlohmann::json::parse(R"({
         "domains": {
@@ -123,7 +120,7 @@ TEST_F(JsonConfigTest, ResolvesRocmDomain)
 }
 
 // Test new schema format - domains.parallel section
-TEST_F(JsonConfigTest, ResolvesParallelDomain)
+TEST_F(json_config_test, resolves_parallel_domain)
 {
     auto j = nlohmann::json::parse(R"({
         "domains": {
@@ -145,7 +142,7 @@ TEST_F(JsonConfigTest, ResolvesParallelDomain)
 }
 
 // Test new schema format - output section
-TEST_F(JsonConfigTest, ResolvesOutputSection)
+TEST_F(json_config_test, resolves_output_section)
 {
     auto j = nlohmann::json::parse(R"({
         "output": {
@@ -164,7 +161,7 @@ TEST_F(JsonConfigTest, ResolvesOutputSection)
 }
 
 // Test new schema format - hardware_counters section
-TEST_F(JsonConfigTest, ResolvesHardwareCountersSection)
+TEST_F(json_config_test, rasolves_hw_counters_section)
 {
     auto j = nlohmann::json::parse(R"({
         "hardware_counters": {
@@ -181,7 +178,7 @@ TEST_F(JsonConfigTest, ResolvesHardwareCountersSection)
 }
 
 // Test new schema format - causal section
-TEST_F(JsonConfigTest, ResolvesCausalSection)
+TEST_F(json_config_test, resolves_causal_section)
 {
     auto j = nlohmann::json::parse(R"({
         "causal": {
@@ -201,7 +198,7 @@ TEST_F(JsonConfigTest, ResolvesCausalSection)
 }
 
 // Test new schema format - advanced section
-TEST_F(JsonConfigTest, ResolvesAdvancedSection)
+TEST_F(json_config_test, resolves_advanced_configuration_section)
 {
     auto j = nlohmann::json::parse(R"({
         "advanced": {
@@ -222,7 +219,7 @@ TEST_F(JsonConfigTest, ResolvesAdvancedSection)
 }
 
 // Test combined sections
-TEST_F(JsonConfigTest, CombinesMultipleSections)
+TEST_F(json_config_test, combines_multiple_sections)
 {
     auto j = nlohmann::json::parse(R"({
         "metadata": {"name": "test-config"},
@@ -244,7 +241,7 @@ TEST_F(JsonConfigTest, CombinesMultipleSections)
 }
 
 // Test empty JSON returns empty map
-TEST_F(JsonConfigTest, EmptyJsonReturnsEmptyMap)
+TEST_F(json_config_test, empty_json_returns_empty_map)
 {
     auto j      = nlohmann::json::parse("{}");
     auto result = resolve_config(j);
@@ -253,7 +250,7 @@ TEST_F(JsonConfigTest, EmptyJsonReturnsEmptyMap)
 }
 
 // Test load_and_resolve for schema format file
-TEST_F(JsonConfigTest, LoadAndResolveSchemaFormat)
+TEST_F(json_config_test, load_and_resolve_schema_format)
 {
     auto content = R"({
         "metadata": {"name": "test-preset"},
@@ -280,14 +277,14 @@ TEST_F(JsonConfigTest, LoadAndResolveSchemaFormat)
 }
 
 // Test load_and_resolve returns nullopt for missing file
-TEST_F(JsonConfigTest, LoadAndResolveReturnsNulloptForMissing)
+TEST_F(json_config_test, load_and_resolve_nullopt_when_missing_file)
 {
     auto result = load_and_resolve("/nonexistent/config.json");
     EXPECT_FALSE(result.has_value());
 }
 
 // Test load_and_resolve returns nullopt for invalid JSON
-TEST_F(JsonConfigTest, LoadAndResolveReturnsNulloptForInvalidJson)
+TEST_F(json_config_test, load_and_resolve_nullopt_when_invalid_json)
 {
     char tmpl[]   = "/tmp/config_test_XXXXXX";
     auto tmpdir   = std::string{ ::mkdtemp(tmpl) };
@@ -306,7 +303,7 @@ TEST_F(JsonConfigTest, LoadAndResolveReturnsNulloptForInvalidJson)
 }
 
 // Test get_config_metadata extraction
-TEST_F(JsonConfigTest, ExtractsConfigMetadata)
+TEST_F(json_config_test, extract_configuration_metadata)
 {
     auto j = nlohmann::json::parse(R"({
         "metadata": {
@@ -329,7 +326,7 @@ TEST_F(JsonConfigTest, ExtractsConfigMetadata)
 }
 
 // Test json_value_to_string helper
-TEST_F(JsonConfigTest, JsonValueToStringHandlesTypes)
+TEST_F(json_config_test, json_values_to_sting_types)
 {
     EXPECT_EQ(json_value_to_string(nlohmann::json("hello")), "hello");
     EXPECT_EQ(json_value_to_string(nlohmann::json(true)), "true");
@@ -341,7 +338,7 @@ TEST_F(JsonConfigTest, JsonValueToStringHandlesTypes)
 }
 
 // Test extract_setting_value helper
-TEST_F(JsonConfigTest, ExtractSettingValueHandlesFormats)
+TEST_F(json_config_test, handle_format_in_extract_setting_value)
 {
     auto val_obj = nlohmann::json::parse(R"({"value": 100})");
     EXPECT_EQ(extract_setting_value(val_obj), "100");
@@ -357,7 +354,7 @@ TEST_F(JsonConfigTest, ExtractSettingValueHandlesFormats)
 }
 
 // Test output.rocpd_output resolution
-TEST_F(JsonConfigTest, ResolvesRocpdOutput)
+TEST_F(json_config_test, resolves_rocpd_output)
 {
     auto j = nlohmann::json::parse(R"({
         "output": {
@@ -371,7 +368,7 @@ TEST_F(JsonConfigTest, ResolvesRocpdOutput)
 }
 
 // Test advanced.network_interface resolution
-TEST_F(JsonConfigTest, ResolvesNetworkInterface)
+TEST_F(json_config_test, resolves_network_interface)
 {
     auto j = nlohmann::json::parse(R"({
         "advanced": {
@@ -385,7 +382,7 @@ TEST_F(JsonConfigTest, ResolvesNetworkInterface)
 }
 
 // Test advanced.trace_periods resolution
-TEST_F(JsonConfigTest, ResolvesTracePeriods)
+TEST_F(json_config_test, resolves_trace_periods)
 {
     auto j = nlohmann::json::parse(R"({
         "advanced": {
@@ -399,7 +396,7 @@ TEST_F(JsonConfigTest, ResolvesTracePeriods)
 }
 
 // Test hardware_counters.papi_multiplexing resolution
-TEST_F(JsonConfigTest, ResolvesPapiMultiplexing)
+TEST_F(json_config_test, resolves_papi_multiplexing)
 {
     auto j = nlohmann::json::parse(R"({
         "hardware_counters": {
@@ -414,7 +411,7 @@ TEST_F(JsonConfigTest, ResolvesPapiMultiplexing)
 }
 
 // Test domains.rocm.enabled top-level flag
-TEST_F(JsonConfigTest, ResolvesRocmEnabledFlag)
+TEST_F(json_config_test, resolves_rocm_enabled_flag)
 {
     auto j = nlohmann::json::parse(R"({
         "domains": {
@@ -430,7 +427,7 @@ TEST_F(JsonConfigTest, ResolvesRocmEnabledFlag)
 }
 
 // Test safe_stoi with valid and invalid inputs
-TEST_F(JsonConfigTest, SafeStoiHandlesInvalidInput)
+TEST_F(json_config_test, stoi_handles_invalid_input)
 {
     EXPECT_EQ(safe_stoi("42"), 42);
     EXPECT_EQ(safe_stoi("0"), 0);
@@ -442,7 +439,7 @@ TEST_F(JsonConfigTest, SafeStoiHandlesInvalidInput)
 }
 
 // Test safe_stod with valid and invalid inputs
-TEST_F(JsonConfigTest, SafeStodHandlesInvalidInput)
+TEST_F(json_config_test, stod_handles_invalid_input)
 {
     EXPECT_DOUBLE_EQ(*safe_stod("3.14"), 3.14);
     EXPECT_DOUBLE_EQ(*safe_stod("0"), 0.0);
@@ -452,7 +449,7 @@ TEST_F(JsonConfigTest, SafeStodHandlesInvalidInput)
 }
 
 // Test env_vars_to_json_schema with non-numeric env var values
-TEST_F(JsonConfigTest, EnvVarsToJsonSchemaHandlesNonNumericValues)
+TEST_F(json_config_test, handling_non_numeric_values_for_json_schema)
 {
     std::map<std::string, std::string> env_vars = {
         { "ROCPROFSYS_PERFETTO_BUFFER_SIZE_KB", "not_a_number" },
@@ -473,7 +470,7 @@ TEST_F(JsonConfigTest, EnvVarsToJsonSchemaHandlesNonNumericValues)
 }
 
 // Test env_vars_to_json_schema round-trip for new fields
-TEST_F(JsonConfigTest, EnvVarsToJsonSchemaRoundTripsNewFields)
+TEST_F(json_config_test, handling_round_trip_for_new_values_in_json_schema)
 {
     std::map<std::string, std::string> env_vars = {
         { "ROCPROFSYS_USE_ROCPD", "true" },
@@ -491,7 +488,7 @@ TEST_F(JsonConfigTest, EnvVarsToJsonSchemaRoundTripsNewFields)
 }
 
 // Test resolve_enabled and resolve_value helpers with edge cases
-TEST_F(JsonConfigTest, ResolveHelpersHandleEdgeCases)
+TEST_F(json_config_test, handle_edge_cases_in_resolve_helper)
 {
     std::map<std::string, std::string> result;
 
@@ -519,7 +516,7 @@ TEST_F(JsonConfigTest, ResolveHelpersHandleEdgeCases)
 }
 
 // Test env_vars constants match expected string values
-TEST_F(JsonConfigTest, EnvVarsConstantsMatchExpectedValues)
+TEST_F(json_config_test, validate_env_var_constants)
 {
     EXPECT_EQ(rocprofsys::env_vars::TRACE, "ROCPROFSYS_TRACE");
     EXPECT_EQ(rocprofsys::env_vars::PROFILE, "ROCPROFSYS_PROFILE");

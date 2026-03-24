@@ -13,7 +13,7 @@ add_library(
     rocprofiler-systems-bin-common
     STATIC
     json_config.cpp
-    preset_loader.cpp
+    preset_registry.cpp
     common_utils.cpp
 )
 

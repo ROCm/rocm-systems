@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "common/preset_loader.hpp"
+#include "common/preset_registry.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -37,22 +37,17 @@ bool
 check_directory_writable(const std::string& dir);
 
 // ============================================================================
-// Preset description and display
+// Pre-execution info
 // ============================================================================
-
-/**
- * Generates a tree-formatted description of a preset from its parsed JSON data.
- * This avoids hardcoding descriptions that can diverge from the actual preset config.
- */
-std::string
-generate_preset_description(const nlohmann::json& preset_json);
 
 /**
  * Prints pre-execution information including preset details and output location.
  * All output goes to stderr to keep stdout clean for structured output (--export-config).
+ * Uses the registry from domain_flag_state to avoid re-reading JSON files.
  */
 void
-print_pre_execution_info(std::string_view tool_name, std::string_view preset_mode = "");
+print_pre_execution_info(std::string_view tool_name, std::string_view preset_mode,
+                         preset_registry& registry);
 
 // ============================================================================
 // Utility functions
@@ -98,26 +93,6 @@ warn_if_output_not_writable(std::string_view tool_name);
 void
 validate_configuration();
 
-// ============================================================================
-// Preset listing and explanation
-// ============================================================================
-
-/**
- * Print a list of all available presets grouped by category.
- * @param tool_name The name of the tool (e.g., "run", "sample") for usage message
- */
-void
-list_presets(std::string_view tool_name);
-
-/**
- * Print detailed information about a specific preset.
- * @param preset_name The name of the preset to explain
- * @param tool_name The name of the tool (e.g., "run", "sample") for usage message
- * @return true if preset was found and printed, false otherwise
- */
-bool
-explain_preset(std::string_view preset_name, std::string_view tool_name);
-
 /**
  * Validate domain flag combinations and print warnings for potential conflicts.
  * @param gpu_enabled Whether --gpu flag was used
@@ -153,58 +128,40 @@ export_config(const std::vector<char*>&              current_env,
               const std::string& output_file = "");
 
 /**
- * Apply a preset's settings using a caller-provided env update function.
- * The callback signature is: void(const std::string& key, const std::string& val)
- */
-template <typename EnvUpdaterFn>
-bool
-apply_preset_from_json(std::string_view preset_name, EnvUpdaterFn&& update_fn)
-{
-    auto info =
-        rocprofsys::preset_loader::load_preset_or_file(std::string{ preset_name });
-    if(!info) return false;
-
-    for(const auto& [key, val] : info->settings)
-    {
-        update_fn(key, val);
-    }
-    return true;
-}
-
-/**
  * Run the shared post-parse validation sequence.
  * Called by both run and sample after argument parsing.
  */
 void
 run_post_parse_validation(std::string_view tool_name, std::string_view preset_name,
                           bool gpu_enabled, bool rocm_enabled, bool cpu_enabled,
-                          bool parallel_enabled, int verbose_level);
+                          bool parallel_enabled, int verbose_level,
+                          preset_registry& registry);
 
 // ============================================================================
 // Topic-based help system
 // ============================================================================
 
-using HelpGroupNames = std::vector<std::string>;
-using HelpTopicMap   = std::map<std::string, HelpGroupNames>;
+using help_group_names = std::vector<std::string>;
+using help_topic_map   = std::map<std::string, help_group_names>;
 
-struct DomainHelpEntry
+struct domain_help_entry
 {
     std::string              description;
     std::vector<std::string> flag_patterns;  // e.g. "--gpu", "--gpus", "-G"
 };
 
-using DomainHelpMap = std::map<std::string, DomainHelpEntry>;
+using domain_help_map = std::map<std::string, domain_help_entry>;
 
 /**
  * Returns the topic-to-group-name map for group-based help filtering.
  */
-const HelpTopicMap&
+const help_topic_map&
 get_help_topic_map();
 
 /**
  * Returns the domain-to-flags map for domain-based help filtering.
  */
-const DomainHelpMap&
+const domain_help_map&
 get_domain_help_map();
 
 /**
