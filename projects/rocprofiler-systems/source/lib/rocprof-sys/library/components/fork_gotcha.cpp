@@ -53,15 +53,6 @@ bool prefork_lock         = false;
 bool postfork_parent_lock = false;
 bool postfork_child_lock  = false;
 
-// this does a quick exit (no cleanup) on child processes
-// because perfetto has a tendency to access memory it
-// shouldn't during cleanup
-void
-child_exit(int _ec, void*)
-{
-    std::quick_exit(_ec);
-}
-
 void
 prefork_setup()
 {
@@ -116,30 +107,24 @@ postfork_child()
 {
     if(postfork_child_lock) return;
 
+    // After fork() in a multi-threaded process, only async-signal-safe functions
+    // may be called (mutexes are NOT async-signal-safe).
+    // Do NOT call any shutdown or logging functions as
+    // they all use mutexes internally and will sporadically deadlock.
+
     if(!is_child_process())
     {
-        LOG_ERROR("Child process {} believes it is the root process {}",
-                  process::get_id(), get_root_process_id());
-        std::exit(1);
+        const char msg[] = "Child process believes it is the root process\n";
+        auto       _rc   = write(STDERR_FILENO, msg, sizeof(msg) - 1);
+        (void) _rc;
+        _exit(1);
     }
 
     set_state(State::Finalized);
-
-    // Clean up AMD SMI in child process before other shutdowns
-    if(config::get_use_sampling()) sampling::postfork_child_cleanup();
-
     settings::enabled() = false;
     settings::verbose() = -127;
     settings::debug()   = false;
-    rocprofsys::sampling::shutdown();
-    rocprofsys::categories::shutdown();
     set_thread_state(::rocprofsys::ThreadState::Disabled);
-
-    rocprofsys::get_perfetto_session(process::get_parent_id()).release();
-
-    // register these exit handlers to avoid cleaning up resources
-    on_exit(&child_exit, nullptr);
-    std::atexit([]() { child_exit(EXIT_SUCCESS, nullptr); });
 
     // prevent re-entry until prefork has been called
     postfork_child_lock = true;
@@ -153,6 +138,19 @@ fork_gotcha::configure()
     fork_gotcha_t::get_initializer() = []() {
         TIMEMORY_C_GOTCHA(fork_gotcha_t, 0, fork);
     };
+
+    // Register exit handler in the parent
+    // Terminates immediately without acquiring any locks.
+    static bool _exit_handler_registered = false;
+    if(!_exit_handler_registered)
+    {
+        _exit_handler_registered = true;
+        on_exit(
+            [](int ec, void*) {
+                if(is_child_process()) _exit(ec);
+            },
+            nullptr);
+    }
 
     // registering the pthread_atfork and gotcha means that we might execute twice
     // handlers twice, hence the locks
@@ -177,7 +175,9 @@ fork_gotcha::operator()(const gotcha_data_t&, pid_t (*_real_fork)()) const
         postfork_child();
     }
 
-    if(!settings::use_output_suffix())
+    // Only log in parent (LOG_DEBUG uses the logging mutex which may be
+    // permanently locked in the child after a multi-threaded fork)
+    if(_pid != 0 && !settings::use_output_suffix())
     {
         LOG_DEBUG("Application which make calls to fork() should enable using an process "
                   "identifier output suffix (i.e. set ROCPROFSYS_USE_PID=ON)");

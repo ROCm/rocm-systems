@@ -15,14 +15,70 @@
 #include <unistd.h>
 #include <vector>
 
-void
-print_info(const char* _name)
+// async-signal-safe integer to decimal string
+int
+itoa_safe(int val, char* out)
 {
-    fflush(stdout);
-    fflush(stderr);
-    printf("[%s] pid = %i, ppid = %i\n", _name, getpid(), getppid());
-    fflush(stdout);
-    fflush(stderr);
+    if(val == 0)
+    {
+        out[0] = '0';
+        return 1;
+    }
+    char tmp[12];
+    int  n = 0;
+    while(val > 0)
+    {
+        tmp[n++] = '0' + (val % 10);
+        val /= 10;
+    }
+    for(int i = 0; i < n; i++)
+        out[i] = tmp[n - 1 - i];
+    return n;
+}
+
+// async-signal-safe print: "[name] pid = X, ppid = Y\n" to stderr
+void
+print_info(const char* name)
+{
+    char buf[256];
+    int  pos = 0;
+
+    buf[pos++] = '[';
+    int nlen   = strlen(name);
+    memcpy(buf + pos, name, nlen);
+    pos += nlen;
+    const char s1[] = "] pid = ";
+    memcpy(buf + pos, s1, sizeof(s1) - 1);
+    pos += sizeof(s1) - 1;
+    pos += itoa_safe(getpid(), buf + pos);
+    const char s2[] = ", ppid = ";
+    memcpy(buf + pos, s2, sizeof(s2) - 1);
+    pos += sizeof(s2) - 1;
+    pos += itoa_safe(getppid(), buf + pos);
+    buf[pos++] = '\n';
+    auto _rc   = write(STDERR_FILENO, buf, pos);
+    (void) _rc;
+}
+
+// async-signal-safe print: "[pid X] msg\n" to stderr
+void
+safe_write(const char* msg)
+{
+    char       buf[64];
+    int        pos  = 0;
+    const char s1[] = "[pid ";
+    memcpy(buf + pos, s1, sizeof(s1) - 1);
+    pos += sizeof(s1) - 1;
+    pos += itoa_safe(getpid(), buf + pos);
+    const char s2[] = "] ";
+    memcpy(buf + pos, s2, sizeof(s2) - 1);
+    pos += sizeof(s2) - 1;
+    int mlen = strlen(msg);
+    memcpy(buf + pos, msg, mlen);
+    pos += mlen;
+    buf[pos++] = '\n';
+    auto _rc   = write(STDERR_FILENO, buf, pos);
+    (void) _rc;
 }
 
 int
@@ -42,18 +98,12 @@ run(const char* _name, int nchildren)
             if(_children.at(i) == 0)
             {
                 // child code
+                // must be async-signal-safe (see signal-safety(7))
                 print_info(_name);
-                printf("[%s][%i] child job starting...\n", _name, getpid());
-                auto _sleep = [=]() {
-                    rocprofsys_user_push_region("child_process_child_thread");
-                    std::this_thread::sleep_for(std::chrono::seconds{ _nsec });
-                    rocprofsys_user_pop_region("child_process_child_thread");
-                };
-                rocprofsys_user_push_region("child_process");
-                std::thread{ _sleep }.join();
-                rocprofsys_user_push_region("child_process");
-                printf("[%s][%i] child job complete\n", _name, getpid());
-                exit(EXIT_SUCCESS);
+                safe_write("child job starting");
+                sleep(_nsec);
+                safe_write("child job complete");
+                _exit(EXIT_SUCCESS);
             }
             else
             {
