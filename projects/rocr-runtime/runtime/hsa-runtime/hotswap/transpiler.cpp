@@ -1041,6 +1041,14 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
                                                bool compact_mode = false) {
   std::vector<std::string> result;
 
+  // Temp VGPR names: scale_temp_vgpr is guaranteed to be above the kernel's
+  // own VGPR allocation (save_vgpr_y + 1), so these never collide with live
+  // registers used by the kernel.  Previously hardcoded as v5/v6/v7/v8 which
+  // clobbered live data in device-library-heavy kernels (gelu, layernorm, f64).
+  std::string vt0 = "v" + std::to_string(scale_temp_vgpr);      // primary temp
+  std::string vt1 = "v" + std::to_string(scale_temp_vgpr + 1);  // secondary temp
+  std::string vt2 = "v" + std::to_string(scale_temp_vgpr + 2);  // tertiary temp
+
   std::string line = asm_line;
 
   // Trim leading/trailing whitespace
@@ -1699,15 +1707,15 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
       if (s != std::string::npos) operands.push_back(tok.substr(s, e - s + 1));
     }
     if (operands.size() >= 4) {
-      // Load the embedded literal into v6, then emit v_fma_f32
+      // Load the embedded literal into temp VGPR, then emit v_fma_f32
       const std::string& literal = (mnemonic == "v_fmamk_f32") ? operands[2] : operands[3];
-      result.push_back("v_mov_b32_e32 v6, " + literal);
+      result.push_back("v_mov_b32_e32 " + vt0 + ", " + literal);
       if (mnemonic == "v_fmamk_f32") {
-        // vdst = src0 * imm + vsrc2 → v_fma_f32 vdst, src0, v6, vsrc2
-        result.push_back("v_fma_f32 " + operands[0] + ", " + operands[1] + ", v6, " + operands[3]);
+        // vdst = src0 * imm + vsrc2 → v_fma_f32 vdst, src0, vt0, vsrc2
+        result.push_back("v_fma_f32 " + operands[0] + ", " + operands[1] + ", " + vt0 + ", " + operands[3]);
       } else {
-        // vdst = src0 * vsrc1 + imm → v_fma_f32 vdst, src0, vsrc1, v6
-        result.push_back("v_fma_f32 " + operands[0] + ", " + operands[1] + ", " + operands[2] + ", v6");
+        // vdst = src0 * vsrc1 + imm → v_fma_f32 vdst, src0, vsrc1, vt0
+        result.push_back("v_fma_f32 " + operands[0] + ", " + operands[1] + ", " + operands[2] + ", " + vt0);
       }
       return result;
     }
@@ -1857,9 +1865,9 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
   // ─── SALU float → VALU emulation ───
   // GFX1250 has scalar float instructions; GFX9 doesn't.
   // Emulate: s_op_f32 sdst, ssrc0, ssrc1 →
-  //   v_mov_b32 v6, ssrc0
-  //   v_op_f32 v6, ssrc1, v6   (ssrc1 as inline constant or SGPR)
-  //   v_readfirstlane_b32 sdst, v6
+  //   v_mov_b32 vt0, ssrc0
+  //   v_op_f32 vt0, ssrc1, vt0   (ssrc1 as inline constant or SGPR)
+  //   v_readfirstlane_b32 sdst, vt0
   {
     static const std::unordered_map<std::string, std::string> kSaluFloatMap = {
         {"s_add_f32", "v_add_f32_e32"},
@@ -1904,22 +1912,22 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
           // s_fmac_f32 sdst, ssrc0, ssrc1 → sdst += ssrc0 * ssrc1
           // Use v_fma_f32 for precision (single rounding step instead of mul+add).
           // GFX9 VOP3 constant bus: at most one SGPR. ssrc1 and sdst may be
-          // different SGPRs. Move sdst (accumulator) to v5 to avoid bus conflict.
-          result.push_back("v_mov_b32_e32 v6, " + ssrc0);
-          result.push_back("v_mov_b32_e32 v5, " + sdst);
-          result.push_back("v_fma_f32 v6, v6, " + ssrc1 + ", v5");
-          result.push_back("v_readfirstlane_b32 " + sdst + ", v6");
+          // different SGPRs. Move sdst (accumulator) to vt1 to avoid bus conflict.
+          result.push_back("v_mov_b32_e32 " + vt0 + ", " + ssrc0);
+          result.push_back("v_mov_b32_e32 " + vt1 + ", " + sdst);
+          result.push_back("v_fma_f32 " + vt0 + ", " + vt0 + ", " + ssrc1 + ", " + vt1);
+          result.push_back("v_readfirstlane_b32 " + sdst + ", " + vt0);
         } else if (mnemonic == "s_mul_f32") {
           // s_mul_f32 sdst, ssrc0, ssrc1 → sdst = ssrc0 * ssrc1
           // Use standard v_mul_f32 (same IEEE rounding as SALU float).
-          result.push_back("v_mov_b32_e32 v6, " + ssrc0);
-          result.push_back("v_mul_f32_e32 v6, " + ssrc1 + ", v6");
-          result.push_back("v_readfirstlane_b32 " + sdst + ", v6");
+          result.push_back("v_mov_b32_e32 " + vt0 + ", " + ssrc0);
+          result.push_back("v_mul_f32_e32 " + vt0 + ", " + ssrc1 + ", " + vt0);
+          result.push_back("v_readfirstlane_b32 " + sdst + ", " + vt0);
         } else {
-          // Other SALU float ops: v6 = ssrc0; v6 = op(ssrc1, v6); sdst = v6
-          result.push_back("v_mov_b32_e32 v6, " + ssrc0);
-          result.push_back(valu_op + " v6, " + ssrc1 + ", v6");
-          result.push_back("v_readfirstlane_b32 " + sdst + ", v6");
+          // Other SALU float ops: vt0 = ssrc0; vt0 = op(ssrc1, vt0); sdst = vt0
+          result.push_back("v_mov_b32_e32 " + vt0 + ", " + ssrc0);
+          result.push_back(valu_op + " " + vt0 + ", " + ssrc1 + ", " + vt0);
+          result.push_back("v_readfirstlane_b32 " + sdst + ", " + vt0);
         }
         return result;
       }
@@ -1954,8 +1962,8 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
         else if (mnemonic == "s_cvt_i32_f32") valu_mnem = "v_cvt_i32_f32_e32";
         else valu_mnem = "v_cvt_pkrtz_f16_f32";
 
-        result.push_back(valu_mnem + " v6, " + operands[1]);
-        result.push_back("v_readfirstlane_b32 " + operands[0] + ", v6");
+        result.push_back(valu_mnem + " " + vt0 + ", " + operands[1]);
+        result.push_back("v_readfirstlane_b32 " + operands[0] + ", " + vt0);
         return result;
       }
     }
@@ -1976,8 +1984,8 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
           operands.push_back(tok.substr(s, e - s + 1));
       }
       if (operands.size() >= 2) {
-        result.push_back("v_sqrt_f32_e32 v6, " + operands[1]);
-        result.push_back("v_readfirstlane_b32 " + operands[0] + ", v6");
+        result.push_back("v_sqrt_f32_e32 " + vt0 + ", " + operands[1]);
+        result.push_back("v_readfirstlane_b32 " + operands[0] + ", " + vt0);
         return result;
       }
     }
@@ -1998,15 +2006,15 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
           operands.push_back(tok.substr(s, e - s + 1));
       }
       if (operands.size() >= 2) {
-        result.push_back("v_rsq_f32_e32 v6, " + operands[1]);
-        result.push_back("v_readfirstlane_b32 " + operands[0] + ", v6");
+        result.push_back("v_rsq_f32_e32 " + vt0 + ", " + operands[1]);
+        result.push_back("v_readfirstlane_b32 " + operands[0] + ", " + vt0);
         return result;
       }
     }
 
     // s_cmp_*_f32 → VALU float compare setting SCC via VCC bridge.
     // GFX12 has SALU float compares (set SCC); GFX9 doesn't.
-    // Emulate: v_mov_b32 v6, literal; v_cmp_*_f32_e32 sA, v6; s_cmp_lg_u32 vcc_lo, 0
+    // Emulate: v_mov_b32 vt0, literal; v_cmp_*_f32_e32 sA, vt0; s_cmp_lg_u32 vcc_lo, 0
     // This sets SCC = (comparison result), preserving branch semantics.
     {
       static const std::unordered_map<std::string, std::string> kScmpFloatMap = {
@@ -2032,10 +2040,10 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
             operands.push_back(tok.substr(s, e - s + 1));
         }
         if (operands.size() >= 2) {
-          // Load second operand to v6 (could be literal or SGPR)
-          result.push_back("v_mov_b32_e32 v6, " + operands[1]);
-          // VOPC: v_cmp_*_f32_e32 src0, vsrc1 → src0=sA (SGPR), vsrc1=v6
-          result.push_back(cmp_it->second + " " + operands[0] + ", v6");
+          // Load second operand to temp VGPR (could be literal or SGPR)
+          result.push_back("v_mov_b32_e32 " + vt0 + ", " + operands[1]);
+          // VOPC: v_cmp_*_f32_e32 src0, vsrc1 → src0=sA (SGPR), vsrc1=vt0
+          result.push_back(cmp_it->second + " " + operands[0] + ", " + vt0);
           // Transfer VCC to SCC: SCC = (vcc_lo != 0)
           result.push_back("s_cmp_lg_u32 vcc_lo, 0");
           return result;
@@ -2070,22 +2078,22 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
       std::string src2 = operands[3];
       // v_mad_u32 vdst, src0, src1, src2 → vdst = src0 * src1 + src2
       // GFX9 constant bus restriction: at most one SGPR source per instruction.
-      // If both src0 and src1 are SGPRs we must move one to v6 first.
-      // When vdst == src2: also use v6 as temp to avoid read-before-write.
+      // If both src0 and src1 are SGPRs we must move one to temp VGPR first.
+      // When vdst == src2: also use temp VGPR to avoid read-before-write.
       bool src0_sgpr = !src0.empty() && src0[0] == 's';
       bool src1_sgpr = !src1.empty() && src1[0] == 's';
       if (vdst != src2) {
         if (src0_sgpr && src1_sgpr) {
-          result.push_back("v_mov_b32_e32 v6, " + src0);
-          result.push_back("v_mul_lo_u32 " + vdst + ", v6, " + src1);
+          result.push_back("v_mov_b32_e32 " + vt0 + ", " + src0);
+          result.push_back("v_mul_lo_u32 " + vdst + ", " + vt0 + ", " + src1);
         } else {
           result.push_back("v_mul_lo_u32 " + vdst + ", " + src0 + ", " + src1);
         }
         result.push_back("v_add_u32_e32 " + vdst + ", " + vdst + ", " + src2);
       } else {
-        result.push_back("v_mov_b32_e32 v6, " + src0);
-        result.push_back("v_mul_lo_u32 v6, v6, " + src1);
-        result.push_back("v_add_u32_e32 " + vdst + ", v6, " + src2);
+        result.push_back("v_mov_b32_e32 " + vt0 + ", " + src0);
+        result.push_back("v_mul_lo_u32 " + vt0 + ", " + vt0 + ", " + src1);
+        result.push_back("v_add_u32_e32 " + vdst + ", " + vt0 + ", " + src2);
       }
       return result;
     }
@@ -2094,7 +2102,7 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
   // ─── v_cndmask_b32_e64: bare SGPR mask widening + constant bus fix ───
   // GFX12 wave32: cmp results are 32-bit (single SGPR sN as mask).
   // GFX9 wave64: mask must be a 64-bit SGPR pair s[N:N+1].
-  // Also: if src1 is SGPR and mask is SGPR, move src1 to v6 (constant bus).
+  // Also: if src1 is SGPR and mask is SGPR, move src1 to temp VGPR (constant bus).
   if (mnemonic == "v_cndmask_b32_e64") {
     size_t ops_start = line.find(mnemonic) + mnemonic.size();
     std::string ops = line.substr(ops_start);
@@ -2138,14 +2146,14 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
                        mask.substr(0, 3) == "vcc" || mask.substr(0, 4) == "exec");
       std::string& src0 = operands[1];
       std::string& src1 = operands[2];
-      // If src0 is SGPR (different from mask's SGPR) or a literal, move to v6
+      // If src0 is SGPR (different from mask's SGPR) or a literal, move to vt0
       if ((is_sgpr(src0) || is_literal(src0)) && mask_sgpr) {
-        result.push_back("v_mov_b32_e32 v6, " + src0);
-        src0 = "v6";
+        result.push_back("v_mov_b32_e32 " + vt0 + ", " + src0);
+        src0 = vt0;
       }
-      // If src1 is also SGPR/literal, move to v7 (v6 may already be used for src0)
+      // If src1 is also SGPR/literal, move to vt1 (vt0 may already be used for src0)
       if ((is_sgpr(src1) || is_literal(src1)) && mask_sgpr) {
-        std::string tmp = (src0 == "v6") ? "v7" : "v6";
+        std::string tmp = (src0 == vt0) ? vt1 : vt0;
         result.push_back("v_mov_b32_e32 " + tmp + ", " + src1);
         src1 = tmp;
       }
@@ -2156,10 +2164,10 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
     }
   }
 
-  // ─── v_cndmask_b32_e32 SGPR src0 → move to v6 (constant bus fix) ───
+  // ─── v_cndmask_b32_e32 SGPR src0 → move to temp VGPR (constant bus fix) ───
   // GFX12 (wave32) VOP2 form may have an SGPR src0.  On GFX9 (wave64) the
   // implicit VCC mask already occupies the constant bus, so src0 cannot also
-  // be SGPR.  Move src0 to v6.  The explicit vcc_lo operand (from GFX12
+  // be SGPR.  Move src0 to temp VGPR.  The explicit vcc_lo operand (from GFX12
   // MCInstPrinter) is stripped by the post-processing pass.
   if (mnemonic == "v_cndmask_b32_e32") {
     size_t ops_start = line.find(mnemonic) + mnemonic.size();
@@ -2181,7 +2189,7 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
                       (src0[1] == 'x' || src0[1] == 'X');
       if (src0_sgpr || src0_lit) {
         // Use scale_temp_vgpr (above kernel's own VGPRs) to avoid clobbering
-        // live VGPRs like v6/v7 which may hold kernel-computed values.
+        // live VGPRs which may hold kernel-computed values.
         std::string tmp = "v" + std::to_string(scale_temp_vgpr);
         result.push_back("v_mov_b32_e32 " + tmp + ", " + src0);
         src0 = tmp;
@@ -2273,7 +2281,7 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
   // GFX9 VOP3 does not support literal constants in source operand positions.
   // GFX12 compilers freely emit e.g. v_fma_f32 vdst, 0x3fb8aa3b, vsrc1, vsrc2
   // or even v_mad_u32_u24 vdst, 0x64, vsrc, 0x64 (two literals).
-  // Fix: emit v_mov_b32_e32 to load each literal into a temp VGPR (v6, v8),
+  // Fix: emit v_mov_b32_e32 to load each literal into a temp VGPR (vt0, vt1),
   // then use the VGPR in the instruction.
   // Applies generically to ANY VOP3 instruction (3+ source operands, 4+ total).
   {
@@ -2329,8 +2337,8 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
         return false;
       };
       if (operands.size() >= 3) {
-        // Collect all literal positions and use v6, v8 as temps
-        int temp_vgprs[] = {6, 8};
+        // Collect all literal positions and use temp VGPRs (above kernel allocation)
+        int temp_vgprs[] = {scale_temp_vgpr, scale_temp_vgpr + 1};
         int temp_idx = 0;
         bool any_fixed = false;
         for (size_t i = 1; i < operands.size() && temp_idx < 2; ++i) {
@@ -2356,7 +2364,7 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
 
   // ─── v_fma_mix_f32/f16: constant bus fix for multiple SGPRs ───
   // GFX9 VOP3 can read at most one SGPR. v_fma_mix_f32 with two different
-  // SGPR source operands violates this. Move one to v6.
+  // SGPR source operands violates this. Move one to a temp VGPR.
   if (mnemonic == "v_fma_mix_f32" || mnemonic == "v_fma_mix_f16" ||
       mnemonic == "v_fma_mixlo_f16" || mnemonic == "v_fma_mixhi_f16") {
     size_t ops_start = line.find(mnemonic) + mnemonic.size();
@@ -2391,7 +2399,7 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
       }
       // If more than one SGPR source, move all but one to VGPRs
       if (sgpr_count > 1) {
-        int vgpr_tmp = 6;
+        int vgpr_tmp = scale_temp_vgpr;
         bool first = true;
         for (int i = 1; i <= 3 && i < (int)operands.size(); i++) {
           if (is_sgpr(operands[i])) {
@@ -2856,7 +2864,7 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
   // ─── v_cmp_*_e64 with vcc dest + large literal → VOPC _e32 ───
   // GFX9 VOP3 does not support literal constants in source positions.
   // VOPC _e32 supports literals only in src0 (not src1, which must be VGPR).
-  // If src0 is VGPR and src1 is a large literal: load src1 into v6, use VOPC.
+  // If src0 is VGPR and src1 is a large literal: load src1 into temp VGPR, use VOPC.
   // If src0 is a large literal and src1 is VGPR: directly use VOPC.
   if (mnemonic.find("v_cmp_") == 0 && mnemonic.find("_e64") != std::string::npos) {
     size_t op_start = line.find(mnemonic) + mnemonic.size();
@@ -2899,12 +2907,14 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
             // always 32-bit class mask even for _f64 variant.
             bool src1_needs_pair = is_f64_cmp && !is_class_cmp;
             if (src1_needs_pair) {
-              result.push_back("v_mov_b32_e32 v6, " + srcs[1]);
-              result.push_back("v_mov_b32_e32 v7, 0");
-              result.push_back(base_mnem + " " + srcs[0] + ", v[6:7]");
+              result.push_back("v_mov_b32_e32 " + vt0 + ", " + srcs[1]);
+              result.push_back("v_mov_b32_e32 " + vt1 + ", 0");
+              std::string pair = "v[" + std::to_string(scale_temp_vgpr) + ":" +
+                                 std::to_string(scale_temp_vgpr + 1) + "]";
+              result.push_back(base_mnem + " " + srcs[0] + ", " + pair);
             } else {
-              result.push_back("v_mov_b32_e32 v6, " + srcs[1]);
-              result.push_back(base_mnem + " " + srcs[0] + ", v6");
+              result.push_back("v_mov_b32_e32 " + vt0 + ", " + srcs[1]);
+              result.push_back(base_mnem + " " + srcs[0] + ", " + vt0);
             }
             return result;
           } else if (src0_lit) {
@@ -2963,7 +2973,7 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
   // GFX12 wave32: v_cmp_*_e64 s0, src0, src1 (32-bit result)
   // GFX9 wave64: v_cmp_*_e64 s[0:1], src0, src1 (64-bit result)
   // Also handle large literals: GFX9 VOP3 doesn't support literal constants,
-  // so load them into v6 first (e.g., v_cmp_class_f32_e64 sN, s8, 0x260).
+  // so load them into temp VGPR first (e.g., v_cmp_class_f32_e64 sN, s8, 0x260).
   if (mnemonic.find("v_cmp_") == 0 && mnemonic.find("_e64") != std::string::npos) {
     size_t op_start = line.find(mnemonic) + mnemonic.size();
     std::string ops = line.substr(op_start);
@@ -3020,7 +3030,7 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
           }
           // Handle large literals in ANY source operand (GFX9 VOP3 no literal support).
           // Check the v_cmp line that was already emitted in result, and if any
-          // source operand is a large literal, prepend a v_mov to load it to v6.
+          // source operand is a large literal, prepend a v_mov to load it to temp VGPR.
           {
             auto is_ll = [](const std::string& s) -> bool {
               if (s.empty()) return false;
@@ -3059,10 +3069,12 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
                     bool is_class = mnemonic.find("_class_") != std::string::npos;
                     bool needs_pair = is_f64_mnem && !(is_class && ci >= 2);
                     if (needs_pair) {
-                      // Use v[8:9] for f64 pair to avoid colliding with save_reg (v7)
-                      cmp_operands[ci] = "v[8:9]";
-                      result.insert(result.begin() + ri, "v_mov_b32_e32 v9, 0");
-                      result.insert(result.begin() + ri, "v_mov_b32_e32 v8, " + lit_val);
+                      // Use vt1:vt2 for f64 pair (vt0 is used by save_reg)
+                      std::string f64_pair = "v[" + std::to_string(scale_temp_vgpr + 1) + ":" +
+                                             std::to_string(scale_temp_vgpr + 2) + "]";
+                      cmp_operands[ci] = f64_pair;
+                      result.insert(result.begin() + ri, "v_mov_b32_e32 " + vt2 + ", 0");
+                      result.insert(result.begin() + ri, "v_mov_b32_e32 " + vt1 + ", " + lit_val);
                       // Rebuild the v_cmp line (now at ri + 2)
                       std::string rebuilt = result[ri + 2].substr(0, mend2);
                       for (size_t cj = 0; cj < cmp_operands.size(); cj++) {
@@ -3070,8 +3082,8 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
                       }
                       result[ri + 2] = rebuilt;
                     } else {
-                      cmp_operands[ci] = "v6";
-                      result.insert(result.begin() + ri, "v_mov_b32_e32 v6, " + lit_val);
+                      cmp_operands[ci] = vt1;
+                      result.insert(result.begin() + ri, "v_mov_b32_e32 " + vt1 + ", " + lit_val);
                       // Rebuild the v_cmp line (now at ri + 1)
                       std::string rebuilt = result[ri + 1].substr(0, mend2);
                       for (size_t cj = 0; cj < cmp_operands.size(); cj++) {
@@ -3120,12 +3132,14 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
           // f64 data sources need 64-bit VGPR pair; class mask (src1) is 32-bit
           bool needs_pair = is_f64_mnem && !(is_class_mnem && ai >= 2);
           if (needs_pair) {
-            result.push_back("v_mov_b32_e32 v6, " + all_operands[ai]);
-            result.push_back("v_mov_b32_e32 v7, 0");
-            all_operands[ai] = "v[6:7]";
+            result.push_back("v_mov_b32_e32 " + vt0 + ", " + all_operands[ai]);
+            result.push_back("v_mov_b32_e32 " + vt1 + ", 0");
+            std::string f64_pair = "v[" + std::to_string(scale_temp_vgpr) + ":" +
+                                   std::to_string(scale_temp_vgpr + 1) + "]";
+            all_operands[ai] = f64_pair;
           } else {
-            result.push_back("v_mov_b32_e32 v6, " + all_operands[ai]);
-            all_operands[ai] = "v6";
+            result.push_back("v_mov_b32_e32 " + vt0 + ", " + all_operands[ai]);
+            all_operands[ai] = vt0;
           }
           // Rebuild line
           std::string rebuilt = mnemonic;
@@ -3374,17 +3388,17 @@ static void PatchKernelDescriptorsForWave64(uint8_t* elf, size_t elf_size,
     // GFX12 RSRC1 layout: bits [5:0] = VGPR field, bits [11:6] = SGPR field
     // GFX9  RSRC1 layout: bits [5:0] = SGPR field, bits [11:6] = VGPR field
     // Convert VGPR count: GFX12 granularity 8 (wave32) → GFX9 granularity 4 (wave64).
-    // Add 4 extra VGPRs to accommodate the two save registers (sv_x, sv_y) that
-    // the translation inserts above the kernel's native VGPR allocation.
+    // Add 8 extra VGPRs: 2 save registers (sv_x, sv_y) + 3 temp VGPRs (vt0, vt1,
+    // vt2) used by instruction expansion handlers + padding to align to granularity.
     uint32_t vgpr_field12 = rsrc1 & 0x3Fu;
     uint32_t sgpr_field12_kd = (rsrc1 >> 6) & 0x3Fu;  // save before clear
     // GFX12 (RDNA4) wave32 VGPR granularity is 12 (GFX10=8, GFX11+=12).
     // RSRC1 VGPR field encodes ceil(VGPRs/gran)-1.
     uint32_t num_vgprs = (vgpr_field12 + 1u) * 12u;
     if (num_vgprs < 8u) num_vgprs = 8u;
-    num_vgprs += 4u;  // room for sv_x, sv_y
+    num_vgprs += 8u;  // room for sv_x, sv_y + 3 temp VGPRs (vt0, vt1, vt2) + padding
     // ACCUM_OFFSET: on GFX942, arch VGPRs = (ACCUM_OFFSET+1)*4.  Set ACCUM_OFFSET
-    // so ALL allocated VGPRs (kernel's + save regs) are arch VGPRs (accessible by VALU).
+    // so ALL allocated VGPRs (kernel's + save regs + temps) are arch VGPRs (VALU accessible).
     // Hardware requires ACCUM_OFFSET < RSRC1 VGPR field, so add one extra accum group.
     uint32_t gfx9_vgpr = (num_vgprs / 4u) - 1u;  // ACCUM_OFFSET = all-arch
     if (gfx9_vgpr > 62u) gfx9_vgpr = 62u;
@@ -3769,7 +3783,7 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
     // Determine save-register indices for workgroup IDs.
     // Use VGPRs above the kernel's native GFX12 allocation so they don't collide
     // with the kernel's own register usage.  PatchKernelDescriptorsForWave64 will
-    // add 4 to num_vgprs when computing gfx9_vgpr/ACCUM_OFFSET, ensuring these
+    // add 8 to num_vgprs when computing gfx9_vgpr/ACCUM_OFFSET, ensuring these
     // extra registers are allocated as arch (non-accum) VGPRs.
     // Read GFX12 VGPR count from kernel descriptor to place save registers above.
     // Try embedded descriptor in .text first, then fall back to .rodata.
@@ -3875,7 +3889,7 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
       }
     }
     // Save registers right above the kernel's actual VGPR usage.
-    // The KD allocates .num_vgpr + 4 arch VGPRs, matching native gfx942 pattern.
+    // The KD allocates .num_vgpr + 8 arch VGPRs (2 save + 3 temp + padding).
     uint32_t save_vgpr_x = num_vgprs12;       // first free VGPR index
     uint32_t save_vgpr_y = num_vgprs12 + 1u;  // second free VGPR index
     uint32_t cmpx_temp_sgpr = num_sgprs12;    // first free SGPR pair for v_cmpx temp
@@ -4029,7 +4043,7 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
     // Save wg IDs to sv_x/sv_y — VGPRs above the kernel's own allocation
     // (computed from GFX12 RSRC1 VGPR field) — so they never conflict with
     // the kernel's own register usage (e.g. B-array loads using v4, K_chunk
-    // integer division using v8+).  PatchKernelDescriptorsForWave64 adds 4 to
+    // integer division using v8+).  PatchKernelDescriptorsForWave64 adds 8 to
     // num_vgprs when computing ACCUM_OFFSET so these registers are arch VGPRs.
     translated_asm += "v_mov_b32_e32 " + sv_x + ", s2 ; save workgroup_id_x\n";
     translated_asm += "v_mov_b32_e32 " + sv_y + ", s3 ; save workgroup_id_y\n";
@@ -5242,13 +5256,13 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
             // GFX9 RSRC1: bits [5:0] = SGPR field, bits [11:6] = VGPR field
             // GFX12 RSRC1: bits [5:0] = VGPR field, bits [11:6] = SGPR field
             // Convert VGPR: GFX12 granularity 8 → GFX9 granularity 4.
-            // Add 4 extra VGPRs for the two save registers (sv_x, sv_y) the
-            // translation inserts above the kernel's native VGPR allocation.
+            // Add 8 extra VGPRs for save registers (sv_x, sv_y) and 3 temp
+            // VGPRs (vt0, vt1, vt2) used by instruction expansion + padding.
             uint32_t vgpr_field12 = rsrc1 & 0x3Fu;
             uint32_t sgpr_field12_rd = (rsrc1 >> 6) & 0x3Fu;  // save before clear
             uint32_t num_vgprs = (vgpr_field12 + 1u) * 12u;  // GFX12 wave32 gran=12
             if (num_vgprs < 8u) num_vgprs = 8u;
-            num_vgprs += 4u;  // room for save registers
+            num_vgprs += 8u;  // room for save registers + temp VGPRs
             uint32_t gfx9_vgpr = (num_vgprs / 4u) - 1u;
             if (gfx9_vgpr > 62u) gfx9_vgpr = 62u;
             // Hardware requires ACCUM_OFFSET < RSRC1 VGPR field.

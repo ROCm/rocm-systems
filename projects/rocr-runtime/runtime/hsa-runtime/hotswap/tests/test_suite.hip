@@ -1756,6 +1756,61 @@ int run_test_silu(const char* co) {
   return ok == N ? 0 : 1;
 }
 
+// ── tanh_kernel test ─────────────────────────────────────────────────────────
+
+int run_test_tanh(const char* co) {
+  int N = 256, bs = 32, nb = N / bs;
+  float *h_in = (float*)malloc(N*4), *h_o = (float*)calloc(N, 4);
+  for (int i = 0; i < N; i++) h_in[i] = (float)(i - 128) * 0.05f;  // range ~[-6.4, 6.35]
+  float *d_in, *d_o;
+  CHECK(hipMalloc(&d_in, N*4)); CHECK(hipMalloc(&d_o, N*4));
+  CHECK(hipMemcpy(d_in, h_in, N*4, hipMemcpyHostToDevice));
+  hipModule_t m; hipFunction_t f;
+  CHECK(hipModuleLoad(&m, co));
+  CHECK(hipModuleGetFunction(&f, m, "tanh_kernel"));
+  int n = N; void* args[] = {&d_o, &d_in, &n};
+  CHECK(hipModuleLaunchKernel(f, nb,1,1, bs,1,1, 0,0, args, NULL));
+  CHECK(hipDeviceSynchronize());
+  CHECK(hipMemcpy(h_o, d_o, N*4, hipMemcpyDeviceToHost));
+  int ok = 0;
+  for (int i = 0; i < N; i++) {
+    float expected = tanhf(h_in[i]);
+    if (fabsf(h_o[i] - expected) <= 1e-4f * fabsf(expected) + 1e-6f) ok++;
+  }
+  printf("  tanh_kernel:      %d/%d %s\n", ok, N, ok==N?"PASS":"FAIL");
+  hipFree(d_in); hipFree(d_o); hipModuleUnload(m);
+  free(h_in); free(h_o);
+  return ok == N ? 0 : 1;
+}
+
+// ── sigmoid_kernel test ──────────────────────────────────────────────────────
+
+int run_test_sigmoid(const char* co) {
+  int N = 256, bs = 32, nb = N / bs;
+  float *h_in = (float*)malloc(N*4), *h_o = (float*)calloc(N, 4);
+  for (int i = 0; i < N; i++) h_in[i] = (float)(i - 128) * 0.05f;  // range ~[-6.4, 6.35]
+  float *d_in, *d_o;
+  CHECK(hipMalloc(&d_in, N*4)); CHECK(hipMalloc(&d_o, N*4));
+  CHECK(hipMemcpy(d_in, h_in, N*4, hipMemcpyHostToDevice));
+  hipModule_t m; hipFunction_t f;
+  CHECK(hipModuleLoad(&m, co));
+  CHECK(hipModuleGetFunction(&f, m, "sigmoid_kernel"));
+  int n = N; void* args[] = {&d_o, &d_in, &n};
+  CHECK(hipModuleLaunchKernel(f, nb,1,1, bs,1,1, 0,0, args, NULL));
+  CHECK(hipDeviceSynchronize());
+  CHECK(hipMemcpy(h_o, d_o, N*4, hipMemcpyDeviceToHost));
+  int ok = 0;
+  for (int i = 0; i < N; i++) {
+    float x = h_in[i];
+    float expected = 1.0f / (1.0f + expf(-x));
+    if (fabsf(h_o[i] - expected) <= 1e-4f * fabsf(expected) + 1e-6f) ok++;
+  }
+  printf("  sigmoid_kernel:   %d/%d %s\n", ok, N, ok==N?"PASS":"FAIL");
+  hipFree(d_in); hipFree(d_o); hipModuleUnload(m);
+  free(h_in); free(h_o);
+  return ok == N ? 0 : 1;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 int main() {
@@ -1802,9 +1857,12 @@ int main() {
   fails += run_test_gelu("/tmp/gelu_kernel_gfx1250.elf");
   fails += run_test_reduce_max_idx("/tmp/reduce_max_idx_gfx1250.elf");
   fails += run_test_silu("/tmp/silu_kernel_gfx1250.elf");
+  // Temp VGPR collision regression tests (device library heavy kernels)
+  fails += run_test_tanh("/tmp/tanh_kernel_gfx1250.elf");
+  fails += run_test_sigmoid("/tmp/sigmoid_kernel_gfx1250.elf");
   // f64_math last: runtime crash poisons GPU queue, must not block other tests
   fails += run_test_f64_math("/tmp/f64_math_gfx1250.elf");
-  int total = 37;
+  int total = 39;
   printf("\n%s: %d/%d tests passed\n", fails?"SOME FAILED":"ALL PASSED", total-fails, total);
   return fails;
 }
