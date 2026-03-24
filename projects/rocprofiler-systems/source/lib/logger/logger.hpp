@@ -155,12 +155,12 @@ public:
     // Required for async-signal-safe contexts like postfork_child
     static inline bool __attribute__((always_inline)) is_suppressed()
     {
-        return __builtin_expect(get_suppressed().load(std::memory_order_relaxed), false);
+        return __builtin_expect(s_suppressed.load(std::memory_order_relaxed), false);
     }
 
-    static void suppress() { get_suppressed().store(true, std::memory_order_relaxed); }
+    static void suppress() { s_suppressed.store(true, std::memory_order_relaxed); }
 
-    static void unsuppress() { get_suppressed().store(false, std::memory_order_relaxed); }
+    static void unsuppress() { s_suppressed.store(false, std::memory_order_relaxed); }
 
     static spdlog::logger& instance()
     {
@@ -221,13 +221,8 @@ private:
         return log;
     }
 
-    static constexpr const char* s_logger_name = "rocprofiler-systems";
-
-    static std::atomic<bool>& get_suppressed()
-    {
-        static std::atomic<bool> _v{ false };
-        return _v;
-    }
+    static constexpr const char*    s_logger_name = "rocprofiler-systems";
+    static inline std::atomic<bool> s_suppressed{ false };
 };
 
 }  // namespace rocprofsys

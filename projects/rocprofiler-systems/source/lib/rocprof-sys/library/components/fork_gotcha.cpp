@@ -166,7 +166,7 @@ fork_gotcha::operator()(const gotcha_data_t&, pid_t (*_real_fork)()) const
     // permanently locked in the child after a multi-threaded fork)
     if(_pid != 0 && !settings::use_output_suffix())
     {
-        LOG_DEBUG("Application which make calls to fork() should enable using an process "
+        LOG_DEBUG("Application that makes calls to fork() should enable using a process "
                   "identifier output suffix (i.e. set ROCPROFSYS_USE_PID=ON)");
     }
 
