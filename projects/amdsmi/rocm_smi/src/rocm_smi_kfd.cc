@@ -513,7 +513,7 @@ int GetKfdGpuIdsForPid(long pid, std::unordered_set<uint64_t>* out) {
 
   if (!d) {
     
-    //Return success with empty set so 'GetProcessGPUs()' can use 'vram_*' fallback.
+    // Return success with empty set so 'GetProcessGPUs()' can use 'vram_*' fallback.
     if (IsKfdPidNamespaced()) {
       return 0;
     }
