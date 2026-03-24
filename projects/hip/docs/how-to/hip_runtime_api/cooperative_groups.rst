@@ -490,13 +490,19 @@ Defined in cooperative_groups/hip_reduce.h. Performs a reduction operation on th
 
 * ``val`` needs to be a type ``T`` that is trivially copyable and up to 32 bytes in size.
 
-``Operation`` must be a function object, which includes lambdas or functors which define ``operator()``. The following predefined functors in the cooperative_groups namespace:
-* cooperative_groups::plus (addition)
-* cooperative_groups::less (minimum)
-* cooperative_groups::greater (maximum)
-* cooperative_groups::bit_and (bitwise and)
-* cooperative_groups::bit_or (bitwise or)
-* cooperative_groups::bit_xor (bitwise xor)
+* ``Operation`` must be a function object, which includes lambdas or functors which define ``operator()``. The following predefined functors in the cooperative_groups namespace:
+
+  + cooperative_groups::plus (addition)
+
+  + cooperative_groups::less (minimum)
+
+  + cooperative_groups::greater (maximum)
+
+  + cooperative_groups::bit_and (bitwise and)
+
+  + cooperative_groups::bit_or (bitwise or)
+
+  + cooperative_groups::bit_xor (bitwise xor)
 
 Note that it is legal for some threads of the cooperative group to not participate.
 
