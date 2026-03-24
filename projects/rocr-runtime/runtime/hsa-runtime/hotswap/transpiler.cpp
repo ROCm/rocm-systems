@@ -4175,14 +4175,18 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
           lines[i+8].find("v_fmac_f32") != std::string::npos &&
           lines[i+9].find("s_cbranch_scc0") != std::string::npos) {
         // Wait for both loads first, then do address updates and loop control.
+        // CRITICAL: v_fmac must be BEFORE s_cmp_ge_i32, not after it.
+        // On GFX942, a VALU instruction between s_cmp (SCC write) and
+        // s_cbranch_scc0 (SCC read) can corrupt SCC forwarding.
+        // The branch must IMMEDIATELY follow the compare with no VALU gap.
         fixed += "s_waitcnt vmcnt(0) lgkmcnt(0)\n"; // wait for BOTH loads first
+        fixed += lines[i+8] + "\n";               // v_fmac_f32_e32 (BEFORE compare!)
         fixed += lines[i] + "\n";                  // v_add_u32_e32 vN, sM, vN
         fixed += lines[i+1] + "\n";               // s_add_i32 sK, sK, 1
         fixed += lines[i+3] + "\n";               // s_add_u32 sL, sL, 4
         fixed += lines[i+4] + "\n";               // s_addc_u32 sH, sH, 0
         fixed += lines[i+5] + "\n";               // s_cmp_ge_i32 sK, sE
-        fixed += lines[i+8] + "\n";               // v_fmac_f32_e32
-        fixed += lines[i+9] + "\n";               // s_cbranch_scc0
+        fixed += lines[i+9] + "\n";               // s_cbranch_scc0 (IMMEDIATELY after cmp)
         i += 9;  // skip all 10 lines
         std::cerr << "hotswap: transpile: applied inner loop scheduling fix\n";
         continue;
@@ -4195,6 +4199,112 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
   // (GLC/sc0 additions removed — cache coherency is not the root cause)
 
   // (xcnt→vmcnt fix is now in TranslateWaitInstruction)
+
+  // ── HSA_HOTSWAP_SPLITK_NOWAIT: isolate s_waitcnt as root cause ───────────
+  // Hypothesis: the s_waitcnt vmcnt(0) lgkmcnt(0) inside the split-K inner
+  // loop causes a GFX942 SALU pipeline hazard that makes s_cbranch_scc0 read
+  // a stale SCC from the implicit serialization fence, not from s_cmp_ge_i32.
+  //
+  // This pass rewrites the entire inner loop body (from .L_br3: to the back-
+  // branch) by:
+  //   - Stripping all global_load_dword / s_load_dword inside the loop
+  //   - Stripping s_waitcnt lines inside the loop
+  //   - Replacing v_fmac_f32_e32 with v_add_f32_e32 v2, 1.0, v2
+  //   - Keeping all SALU loop-control instructions intact
+  //
+  // Expected outcome: v2 == float(K) after the loop if SALU control is correct.
+  // If loop runs correctly → waitcnt is the root cause of non-determinism.
+  // If loop still fails → root cause is in SALU pipeline independent of waitcnt.
+  //
+  // Target loop structure (after inner-loop scheduling fix):
+  //   .L_br3:
+  //   [global_load_dword ...]   ; load A[k] -- STRIPPED
+  //   [s_load_dword ...]        ; load B[k] -- STRIPPED
+  //   s_waitcnt vmcnt(0) lgkmcnt(0)          -- STRIPPED
+  //   v_add_u32_e32 vN, sM, vN              ; advance B ptr
+  //   s_add_i32 sK, sK, 1                   ; k++
+  //   s_add_u32 sL, sL, 4                   ; advance A ptr lo
+  //   s_addc_u32 sH, sH, 0                  ; carry
+  //   s_cmp_ge_i32 sK, sE                   ; k >= end_k?
+  //   v_fmac_f32_e32 ...        -- REPLACED by v_add_f32_e32 v2, 1.0, v2
+  //   s_cbranch_scc0 .L_br3                 ; loop back
+  //
+  // Gated on env var; only runs on split-K compute kernel
+  // (identified by instruction count 200–400, which excludes the attn kernels
+  // at 400+ instructions).
+  if (std::getenv("HSA_HOTSWAP_SPLITK_NOWAIT") && stats &&
+      stats->total_instructions > 200 && stats->total_instructions < 400) {
+    std::string nowait_fixed;
+    std::istringstream nw_iss(translated_asm);
+    std::vector<std::string> nw_lines;
+    std::string nw_line;
+    while (std::getline(nw_iss, nw_line)) nw_lines.push_back(nw_line);
+
+    // Find .L_br3: label to anchor the loop body.
+    size_t loop_start = std::string::npos;
+    for (size_t i = 0; i < nw_lines.size(); ++i) {
+      if (nw_lines[i] == ".L_br3:") { loop_start = i; break; }
+    }
+
+    if (loop_start == std::string::npos) {
+      std::cerr << "hotswap: transpile: SPLITK_NOWAIT: .L_br3: label not found\n";
+    } else {
+      // Find the s_cbranch_scc0 .L_br3 back-branch that closes the loop.
+      size_t loop_end = std::string::npos;
+      for (size_t i = loop_start + 1; i < nw_lines.size(); ++i) {
+        if (nw_lines[i].find("s_cbranch_scc0") != std::string::npos &&
+            nw_lines[i].find(".L_br3") != std::string::npos) {
+          loop_end = i;
+          break;
+        }
+      }
+
+      if (loop_end == std::string::npos) {
+        std::cerr << "hotswap: transpile: SPLITK_NOWAIT: s_cbranch_scc0 .L_br3 not found\n";
+      } else {
+        std::cerr << "hotswap: transpile: SPLITK_NOWAIT: rewriting loop body ["
+                  << loop_start << "–" << loop_end << "]\n";
+
+        // Emit lines before the loop label unchanged.
+        for (size_t i = 0; i < loop_start; ++i)
+          nowait_fixed += nw_lines[i] + "\n";
+
+        // Emit the loop label itself.
+        nowait_fixed += nw_lines[loop_start] + "\n";  // .L_br3:
+
+        // Emit loop body with loads, waitcnt, and v_fmac stripped/replaced.
+        for (size_t i = loop_start + 1; i <= loop_end; ++i) {
+          const std::string& ln = nw_lines[i];
+
+          // Strip memory loads (no outstanding requests → no need for waitcnt).
+          if (ln.find("global_load_dword") != std::string::npos ||
+              ln.find("s_load_dword") != std::string::npos) {
+            nowait_fixed += "s_nop 0 ; NOWAIT: stripped load: " + ln + "\n";
+            continue;
+          }
+          // Strip waitcnt — this is the key change being tested.
+          if (ln.find("s_waitcnt") != std::string::npos) {
+            nowait_fixed += "; NOWAIT: stripped: " + ln + "\n";
+            continue;
+          }
+          // Replace accumulate with constant add so v2 == float(K) after loop.
+          if (ln.find("v_fmac_f32") != std::string::npos) {
+            nowait_fixed += "v_add_f32_e32 v2, 1.0, v2 ; NOWAIT: const accumulate (was: " + ln + ")\n";
+            continue;
+          }
+          // Keep everything else (SALU control, address advances, back-branch).
+          nowait_fixed += ln + "\n";
+        }
+
+        // Emit lines after the loop unchanged.
+        for (size_t i = loop_end + 1; i < nw_lines.size(); ++i)
+          nowait_fixed += nw_lines[i] + "\n";
+
+        translated_asm = nowait_fixed;
+        std::cerr << "hotswap: transpile: SPLITK_NOWAIT pass complete\n";
+      }
+    }
+  }
 
   // Debug: dump translated assembly
   if (std::getenv("HSA_HOTSWAP_DUMP")) {
