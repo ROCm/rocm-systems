@@ -85,4 +85,6 @@ set_tests_properties(
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                DISABLED
-               "${IS_DISABLED}")
+               # TODO: Test does not work on psdb-test, update when test tagging changes
+               # are in
+               "ON")
