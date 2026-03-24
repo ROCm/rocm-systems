@@ -4,6 +4,7 @@
 # then core/memory, then cache hierarchy). RDNA3.5: standard VALU FLOPs (no MFMA).
 # VALU peaks: Navi3-class — 128 FP32 FMAs/CU/cycle, 256 FP16 ops/CU/cycle (wave64).
 # Cache: TCP (L0) -> GL1C (L1) -> GL2C (L2). Fabric/MC BW: no Peak / % of peak (no sysinfo BW var on gfx1152).
+# Memory hierarchy bandwidth (L2 client read BW vs GCEA/DRAM): use 0300_Memory_Chart.yaml, not duplicate KB totals here.
 # =============================================================================
 
 Panel Config:
@@ -94,17 +95,6 @@ Panel Config:
         LDS Bank Conflicts:
           value: AVG(SQC_LDS_BANK_CONFLICT)
           unit: Conflicts
-          peak: None
-          pop: None
-        Fetch Size:
-          value: AVG(((GL2C_EA_RDREQ_32B * 32 + GL2C_EA_RDREQ_64B * 64
-            + GL2C_EA_RDREQ_96B * 96 + GL2C_EA_RDREQ_128B * 128) / 1024))
-          unit: KB
-          peak: None
-          pop: None
-        Write Size:
-          value: AVG((((GL2C_MC_WRREQ - GL2C_EA_WRREQ_64B) * 32 + GL2C_EA_WRREQ_64B * 64) / 1024))
-          unit: KB
           peak: None
           pop: None
         TA Busy Util Rate:
@@ -217,8 +207,7 @@ Panel Config:
       Read bandwidth from L2 to memory fabric (EA read sizes include 96 B on RDNA3).
       Peak / % of peak are N/A (gfx1152 has no sysinfo memory bandwidth variable).
     L2-Fabric Write BW: |-
-      Write bandwidth from L2 toward memory (same byte reconstruction as Write Size
-      and counter_defs GL2C write sizing): 32 B per (GL2C_MC_WRREQ − GL2C_EA_WRREQ_64B)
+      Write bandwidth from L2 toward memory (counter_defs GL2C write sizing): 32 B per (GL2C_MC_WRREQ − GL2C_EA_WRREQ_64B)
       transaction plus 64 B per GL2C_EA_WRREQ_64B (64 B writes / CMPSWAP). Divided by
       kernel wall time for B/s. Peak / % of peak are N/A (no sysinfo memory bandwidth).
     Memory Controller Read BW: |-
@@ -229,12 +218,6 @@ Panel Config:
       Percent of cycles the memory controller write path was stalled (averaged across L2 channels).
     LDS Bank Conflicts: |-
       Number of LDS bank conflicts. Peak / % of Peak are N/A for raw counts.
-    Fetch Size: |-
-      Total kilobytes fetched from video memory (all L2-fabric read requests).
-      Peak / % of Peak are N/A (kernel-dependent total, not a rate).
-    Write Size: |-
-      Total kilobytes written to video memory (MC write + fabric write requests).
-      Peak / % of Peak are N/A (kernel-dependent total, not a rate).
     TA Busy Util Rate: |-
       Texture Addresser (TA) utilization vs GPU-active time: mean TA busy cycles
       (TA_BUSY_avr — average of TA_TA_BUSY over TA instances) as a percent of

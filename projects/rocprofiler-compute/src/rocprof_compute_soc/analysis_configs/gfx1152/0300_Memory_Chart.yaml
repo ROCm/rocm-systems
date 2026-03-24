@@ -17,9 +17,14 @@ Panel Config:
   id: 300
   title: RDNA3.5 Memory Chart
   description: |-
-    Detailed memory hierarchy metrics for RDNA3.5 (RDNA3.5), showing request counts, 
+    Detailed memory hierarchy metrics for RDNA3.5 (RDNA3.5), showing request counts,
     bandwidth, hit rates, and utilization at each cache level.
-    Memory hierarchy: LDS/TCP (L0) -> GL1C (L1) -> GL2C (L2) -> System Memory
+    Memory hierarchy: LDS/TCP (L0) -> GL1C (L1) -> GL2C (L2) -> System Memory (GCEA).
+
+    Use this panel as the reference for **where** bandwidth is measured: GL2C Read/Write
+    Bandwidth use **client-side** GL2 counters; GCEA tables use **DRAM interface** counters.
+    System Speed-of-Light lists separate **L2→fabric (EA)** and **memory controller** rates;
+    those are kernel-summary views and are not the same rows as GL2C client read BW here.
 
   data source:
 
