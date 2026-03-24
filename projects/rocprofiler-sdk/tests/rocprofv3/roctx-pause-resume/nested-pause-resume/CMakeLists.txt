@@ -62,8 +62,8 @@ rocprofiler_add_integration_validate_test(
     FIXTURES_REQUIRED rocprofv3-test-roctx-pause-resume-nested-tracing
     FAIL_REGULAR_EXPRESSION "AssertionError")
 
-# Test --selected-regions with --kernel-trace WITHOUT --marker-trace
-# This verifies that marker control callbacks are registered even without --marker-trace
+# Test --selected-regions with --kernel-trace WITHOUT --marker-trace This verifies that
+# marker control callbacks are registered even without --marker-trace
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-selected-regions-kernel-only
     COMMAND
