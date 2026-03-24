@@ -24,7 +24,6 @@
 ##############################################################################
 
 import argparse
-import csv
 import shlex
 import shutil
 import sys
@@ -33,9 +32,6 @@ import time
 from abc import abstractmethod
 from pathlib import Path
 from typing import Any, Optional, Union
-
-import pandas as pd
-import yaml
 
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils.logger import (
@@ -50,10 +46,12 @@ from utils.utils import (
     format_time,
     gen_sysinfo,
     get_rank,
+    is_only_pc_sampling,
     pc_sampling_prof,
     print_status,
     run_prof,
 )
+from vendored import yaml
 
 
 class RocProfCompute_Base:
@@ -187,273 +185,6 @@ class RocProfCompute_Base:
                 "./vcopy -n 1048576 -b 256"
             )
 
-    def detect_missing_counters(self, df: pd.DataFrame) -> None:
-        """Detect missing counter values in joined dataframe"""
-        args = self.get_args()
-        group_labels = ["Kernel_Name"]
-        if args.join_type == "grid":
-            group_labels.append("Grid_Size")
-
-        num_files = len(list(Path(args.path).glob("perfmon/*.txt")))
-        kernels_with_missing_counters = []
-        for _, groups in df.groupby(group_labels):
-            if groups["Dispatch_ID"].nunique() < num_files:
-                kernel_name = groups.iloc[0]["Kernel_Name"]
-                kernels_with_missing_counters.append(kernel_name)
-
-        if kernels_with_missing_counters:
-            kernels_with_missing_counters = list(set(kernels_with_missing_counters))
-            console_warning(
-                "join_prof",
-                (
-                    f"Insufficient number of kernel calls for kernels: "
-                    f"{', '.join(kernels_with_missing_counters)} "
-                    f"to collect all counters using iteration multiplexing. "
-                    f"Please use kernel filtering and exclude the above kernels "
-                    f"or turn off iteration multiplexing."
-                ),
-            )
-            with open(f"{args.path}/profiling_config.yaml", "a") as f:
-                yaml.dump(
-                    {"kernels_with_missing_counters": kernels_with_missing_counters}, f
-                )
-
-    @demarcate
-    def join_prof(self, out: Optional[str] = None) -> Optional[pd.DataFrame]:
-        """Manually join separated rocprof runs"""
-        args = self.get_args()
-        output_file = out or f"{args.path}/pmc_perf.csv"
-
-        # handle rocpd format
-        if args.format_rocprof_output == "rocpd":
-            # Vertically concat (by rows) results_*.csv into pmc_perf.csv
-            result_files = list(Path(args.path).glob("results_*.csv"))
-
-            with open(output_file, "w", newline="") as outfile:
-                writer = None
-                for file in result_files:
-                    with open(file, newline="") as infile:
-                        reader = csv.reader(infile)
-                        header = next(reader)
-                        # Write header only once
-                        if writer is None:
-                            writer = csv.writer(outfile)
-                            writer.writerow(header)
-                        for row in reader:
-                            writer.writerow(row)
-
-            console_debug(f"Created file: {output_file}")
-
-            if args.iteration_multiplexing is not None:
-                df = pd.read_csv(output_file)
-                self.detect_missing_counters(df)
-
-            # Delete results_*.csv files
-            for file in result_files:
-                Path(file).unlink()
-                console_debug(f"Deleted file: {file}")
-            return None
-
-        # Collect files to process - normalize to Path objects
-        files: list[Path] = []
-
-        # Set default output directory if not specified
-        if isinstance(args.path, str):
-            csv_patterns = ["pmc_perf_*.csv", "SQ_*.csv", "SQC_*.csv"]
-            files = [
-                file
-                for pattern in csv_patterns
-                for file in Path(args.path).glob(pattern)
-            ]
-
-            if args.kokkos_trace:
-                # remove marker api trace outputs from this list
-                files = [
-                    f for f in files if not f.name.endswith("_marker_api_trace.csv")
-                ]
-        elif isinstance(args.path, list):
-            files = [Path(path) for path in args.path]
-        else:
-            console_error(f"Invalid workload directory. Cannot resolve {args.path}")
-
-        # Process files and create joined dataframe
-        df = None
-        for i, file in enumerate(files):
-            current_df = pd.read_csv(file)
-
-            if current_df.empty:
-                console_warning("join_prof", f"Empty dataframe from {file}")
-                continue
-
-            if args.join_type == "kernel":
-                key = current_df.groupby("Kernel_Name").cumcount()
-                current_df["key"] = current_df.Kernel_Name + " - " + key.astype(str)
-            elif args.join_type == "grid":
-                key = current_df.groupby(["Kernel_Name", "Grid_Size"]).cumcount()
-                current_df["key"] = (
-                    current_df["Kernel_Name"].astype(str)
-                    + " - "
-                    + current_df["Grid_Size"].astype(str)
-                    + " - "
-                    + key.astype(str)
-                )
-            else:
-                console_error(
-                    "join_prof",
-                    f"{args.join_type} is an unrecognized option for --join-type",
-                )
-
-            if df is None:
-                df = current_df
-            else:
-                # join by unique index of kernel
-                df = pd.merge(
-                    df, current_df, how="inner", on="key", suffixes=("", f"_{i}")
-                )
-
-        if df is None or df.empty:
-            console_warning("join_prof", "No data available after processing all files")
-            return None
-
-        # TODO: check for any mismatch in joins
-        duplicate_cols = {
-            "GPU_ID": [col for col in df.columns if col.startswith("GPU_ID")],
-            "Grid_Size": [col for col in df.columns if col.startswith("Grid_Size")],
-            "Workgroup_Size": [
-                col for col in df.columns if col.startswith("Workgroup_Size")
-            ],
-            "LDS_Per_Workgroup": [
-                col for col in df.columns if col.startswith("LDS_Per_Workgroup")
-            ],
-            "Scratch_Per_Workitem": [
-                col for col in df.columns if col.startswith("Scratch_Per_Workitem")
-            ],
-            "SGPR": [col for col in df.columns if col.startswith("SGPR")],
-        }
-
-        # Check for vgpr counter in ROCm < 5.3
-        if "vgpr" in df.columns:
-            duplicate_cols["vgpr"] = [
-                col for col in df.columns if col.startswith("vgpr")
-            ]
-        # Check for vgpr counter in ROCm >= 5.3
-        else:
-            duplicate_cols["Arch_VGPR"] = [
-                col for col in df.columns if col.startswith("Arch_VGPR")
-            ]
-            duplicate_cols["Accum_VGPR"] = [
-                col for col in df.columns if col.startswith("Accum_VGPR")
-            ]
-
-        for key, cols in duplicate_cols.items():
-            current_df = df[cols]
-            if not test_df_column_equality(current_df):
-                console_warning(
-                    "join_prof",
-                    f"Detected differing {key} values while joining pmc_perf.csv",
-                )
-            else:
-                console_debug("join_prof", f"Successfully joined {key} in pmc_perf.csv")
-
-        # now, we can:
-        #   A) throw away any of the "boring" duplicates
-        columns_to_remove = [
-            # rocprofv2 headers
-            "GPU_ID_",
-            "Grid_Size_",
-            "Workgroup_Size_",
-            "LDS_Per_Workgroup_",
-            "Scratch_Per_Workitem_",
-            "vgpr_",
-            "Arch_VGPR_",
-            "Accum_VGPR_",
-            "SGPR_",
-            "Dispatch_ID_",
-            "Queue_ID",
-            "Queue_Index",
-            "PID",
-            "TID",
-            "SIG",
-            "OBJ",
-            "Correlation_ID_",
-            "Wave_Size_",
-            # rocscope specific merged counters, keep original
-            "dispatch_",
-            # extras
-            "sig",
-            "queue-id",
-            "queue-index",
-            "pid",
-            "tid",
-            "fbar",
-        ]
-
-        df = df[
-            [
-                col
-                for col in df.columns
-                if not any(col.startswith(prefix) for prefix in columns_to_remove)
-            ]
-        ]
-
-        #   B) any timestamps that are _not_ the duration,
-        #      which is the one we care about
-        timestamp_patterns = ["DispatchNs", "CompleteNs", "HostDuration"]
-
-        df = df[
-            [
-                col
-                for col in df.columns
-                if not any(pattern in col for pattern in timestamp_patterns)
-            ]
-        ]
-
-        #   C) sanity check the name and key
-        name_cols = [col for col in df.columns if "Kernel_Name" in col]
-        if not name_cols:
-            return df
-
-        for col in name_cols[1:]:
-            assert (df[name_cols[0]] == df[col]).all()
-
-        df = df.drop(columns=name_cols[1:])
-
-        # now take the median of the durations
-        start_cols = [col for col in df.columns if "Start_Timestamp" in col]
-        end_cols = [col for col in df.columns if "End_Timestamp" in col]
-
-        # compute mean mean timestamps
-        if start_cols and end_cols:
-            mean_start = df[start_cols].mean(axis=1)
-            mean_end = df[end_cols].mean(axis=1)
-
-            # Replace with consolidated timestamps
-            df = df.drop(columns=start_cols + end_cols)
-            df["Start_Timestamp"] = mean_start
-            df["End_Timestamp"] = mean_end
-
-        # finally, join the drop key
-        if "key" in df.columns:
-            df = df.drop(columns=["key"])
-
-        console_debug("join_prof", "Checking for missing counter values...")
-
-        if args.iteration_multiplexing is not None:
-            self.detect_missing_counters(df)
-
-        # save to file and delete old file(s)
-        # skip if we're being called outside of rocprof-compute
-        if isinstance(args.path, str):
-            df.to_csv(output_file, index=False)
-            if not args.verbose:
-                for file in files:
-                    # Do not remove accumulate counter files
-                    if "SQ_" not in file.name or "SQC_" not in file.name:
-                        file.unlink()
-            return None
-        else:
-            return df
-
     # ----------------------------------------------------
     # Required methods to be implemented by child classes
     # ----------------------------------------------------
@@ -572,6 +303,16 @@ class RocProfCompute_Base:
         else:
             console_log("Filtered sections: All")
 
+        # Run profiling on each input file
+        input_files = sorted(Path(args.path).glob("perfmon/*.txt"))
+        total_runs = len(input_files)
+
+        if total_runs == 0 and is_only_pc_sampling(args.filter_blocks):
+            console_log(
+                "profiling",
+                "No performance counters to collect -- PC sampling only mode",
+            )
+
         msg = "Collecting Performance Counters"
         status_msg = f"{msg} (Roofline Only)" if self.__args.roof_only else msg
         print_status(status_msg)
@@ -657,15 +398,9 @@ class RocProfCompute_Base:
         else:
             options = self.get_profiler_options()
 
-        # Run profiling on each input file
-        input_files = sorted(Path(args.path).glob("perfmon/*.txt"))
-        total_runs = len(input_files)
-
         # Compute total workload runs including PC sampling for warning check
         total_workload_runs = total_runs
-        if any(
-            block == "21" or block.startswith("21.") for block in args.filter_blocks
-        ):
+        if any(block in ["21", "pc_sampling"] for block in args.filter_blocks):
             total_workload_runs += 1
 
         # Warn about multi-rank profiling when multiple workload runs are needed
@@ -680,21 +415,6 @@ class RocProfCompute_Base:
                 "(running the workload multiple times) may fail to collect "
                 "data for workloads with MPI communication. "
                 "Consider using single-pass modes:\n"
-                "  --iteration-multiplexing  : Collect all counters in a "
-                "single application run\n"
-                "  --set <name>              : Profile a predefined counter set\n"
-                "See documentation for more information."
-            )
-
-        # Warn if PC sampling is requested (block "21") with multi-rank
-        if get_rank() is not None and any(
-            block == "21" or block.startswith("21.") for block in args.filter_blocks
-        ):
-            console_warning(
-                "Multi-rank application detected with PC sampling enabled. "
-                "PC sampling may fail to collect data for workloads with "
-                "MPI communication. "
-                "Consider using single-pass modes without PC sampling:\n"
                 "  --iteration-multiplexing  : Collect all counters in a "
                 "single application run\n"
                 "  --set <name>              : Profile a predefined counter set\n"
@@ -808,6 +528,20 @@ class RocProfCompute_Base:
         start_time = time.time()
         # No native tool for pc sampling
         options = self.get_profiler_options()
+
+        if (
+            is_only_pc_sampling(args.filter_blocks)
+            and self.__profiler == "rocprofiler-sdk"
+            and (rocprof_output_path := getattr(options, "ROCPROF_OUTPUT_PATH", None))
+            is not None
+        ):
+            rocprof_output_path = Path(rocprof_output_path)
+            if rocprof_output_path.exists():
+                shutil.rmtree(rocprof_output_path, ignore_errors=True)
+                console_debug(
+                    f"Removed existing ROCProf output path: {rocprof_output_path}"
+                )
+
         pc_sampling_prof(
             profiler_options=options,
             method=args.pc_sampling_method,
@@ -830,7 +564,3 @@ class RocProfCompute_Base:
             "profiling", f"performing post-processing using {self.__profiler} profiler"
         )
         self._soc.post_profiling()
-
-
-def test_df_column_equality(df: pd.DataFrame) -> bool:
-    return df.eq(df.iloc[:, 0], axis=0).all(1).all()
