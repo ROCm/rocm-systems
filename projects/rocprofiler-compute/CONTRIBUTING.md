@@ -251,3 +251,13 @@ If your PR modifies **metric configurations** — panel YAMLs under `src/rocprof
 3. Verify that hashes are updated and CI tests pass.
 
 For full details, see the [metric config management README](./tools/config_management/README.md).
+
+## Vendoring External Dependencies
+
+rocprofiler-compute vendors certain Python dependencies (via git submodules) to eliminate external dependencies in profile mode. This improves portability and reliability on HPC systems.
+
+**We vendor:**
+- Pure Python packages used in profile code path
+- Stable packages with permissive licenses
+
+For detailed vendoring workflow (adding/updating packages), see [`src/vendored/README.md`](./src/vendored/README.md).

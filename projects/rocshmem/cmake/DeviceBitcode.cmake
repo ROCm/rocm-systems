@@ -47,7 +47,7 @@ set(BITCODE_GPU_ARCHS "${_BITCODE_DEFAULT_ARCHS}" CACHE STRING "GPU architecture
 set(BITCODE_COMPILE_FLAGS_BASE
     -x hip
     --cuda-device-only
-    -std=c++20
+    -std=c++17
     -emit-llvm
     -fvisibility=default
     -I${CMAKE_CURRENT_SOURCE_DIR}/include/rocshmem
@@ -56,6 +56,11 @@ set(BITCODE_COMPILE_FLAGS_BASE
     -I${CMAKE_BINARY_DIR}/include
     -I${CMAKE_BINARY_DIR}/include/rocshmem
 )
+
+if(${ROCM_MAJOR_VERSION} LESS 7)
+  # ROCm 6.x requires us to explicitly enable warp sync builtins
+  list(APPEND BITCODE_COMPILE_FLAGS_BASE -DHIP_ENABLE_WARP_SYNC_BUILTINS=1)
+endif()
 
 # Add MPI include directories — rocshmem_config.h defines HAVE_EXTERNAL_MPI
 # when MPI is found, causing rocshmem_mpi.hpp to #include <mpi.h> transitively.
