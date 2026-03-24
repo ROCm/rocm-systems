@@ -24,7 +24,6 @@ struct allGatherInfo {
   int nc;
   bool pivotA2AEnabled;
   bool ll128Enabled;
-  bool mscclEnabled;
 };
 
 void initCollNet();
