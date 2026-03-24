@@ -14,6 +14,7 @@ build_local_gpu_only=false
 build_amdgpu_targets=""
 build_package=false
 build_release=true
+debug_fast=false
 build_static=false
 build_tests=false
 build_verbose=false
@@ -26,12 +27,13 @@ install_dependencies=false
 install_library=false
 install_prefix="${ROCM_PATH}"
 log_trace=false
-msccl_kernel_enabled=true
+msccl_kernel_enabled=false
 mscclpp_enabled=false
 enable_mscclpp_clip=false
 num_parallel_jobs=$(nproc)
 npkit_enabled=false
 openmp_test_enabled=false
+enable_mpi_tests=false
 kernel_resource_use=false
 roctx_enabled=true
 run_tests=false
@@ -39,7 +41,10 @@ run_tests_all=false
 time_trace=false
 force_reduce_pipeline=false
 generate_sym_kernels=false
+warp_speed_enabled=true # note that this flag will be overridden to false for non MI350/MI300 platforms
 quiet_warnings=false
+build_rocshmem_support=false
+custom_cmake_options=""
 
 # #################################################
 # helper functions
@@ -52,9 +57,10 @@ function display_help()
     echo "    -c|--enable-code-coverage  Enable code coverage"
     echo "    -d|--dependencies          Install RCCL dependencies"
     echo "       --debug                 Build debug library"
+    echo "       --debug-fast            Build debug library with lto optimization disabled (fast build times)"
     echo "       --enable_backtrace      Build with custom backtrace support"
     echo "       --disable-colltrace     Build without collective trace"
-    echo "       --disable-msccl-kernel  Build without MSCCL kernels"
+    echo "       --enable-msccl-kernel   Build with MSCCL kernels"
     echo "       --dump-asm              Disassemble code and dump assembly with inline code"
     echo "       --enable-mscclpp        Build with MSCCL++ support"
     echo "       --enable-mscclpp-clip   Build MSCCL++ with clip wrapper on bfloat16 and half addition routines"
@@ -69,6 +75,7 @@ function display_help()
     echo "       --no_clean              Don't delete files if they already exist"
     echo "       --npkit-enable          Compile with npkit enabled"
     echo "       --log-trace             Build with log trace enabled (i.e. NCCL_DEBUG=TRACE)"
+    echo "       --enable-mpi-tests      Enable MPI-based tests (requires --debug and MPI installation; set MPI_PATH if not in /opt/ompi)"
     echo "       --openmp-test-enable    Enable OpenMP in rccl unit tests"
     echo "    -p|--package_build         Build RCCL package"
     echo "       --prefix                Specify custom directory to install RCCL to (default: \`/opt/rocm\`)"
@@ -81,6 +88,31 @@ function display_help()
     echo "       --force-reduce-pipeline Force reduce_copy sw pipeline to be used for every reduce-based collectives and datatypes"
     echo "       --generate-sym-kernels  Generate symmetric memory kernels"
     echo "    -q|--quiet-warnings        Suppress majority of compiler warnings (not recommended)"
+    echo "       --rocshmem              Build with rocSHMEM support"
+    echo "       --cmake-options         Pass additional CMake options (e.g. --cmake-options \"-DFOO=BAR -DBAZ=ON\")"
+    echo ""
+    echo "  Available RCCL-specific CMake options for --cmake-options:"
+    echo "    -DBUILD_EXT_EXAMPLES=ON               Build ext-{net,tuner,profiler} example plugins (default: OFF)"
+    echo "    -DENABLE_MSCCLPP_EXECUTOR=ON          Enable MSCCL++ Executor (default: OFF)"
+    echo "    -DENABLE_MSCCLPP_FORMAT_CHECKS=ON     Enable formatting checks in MSCCL++ (default: OFF)"
+    echo "    -DMSCCLPP_APPLY_PATCHES=OFF           Disable source code patches for MSCCL++ (default: ON)"
+    echo "    -DENABLE_IFC=ON                       Enable indirect function call (default: OFF)"
+    echo "    -DPROFILE=ON                          Enable profiling (default: OFF)"
+    echo "    -DTIMETRACE=ON                        Enable time-trace during compilation (default: OFF)"
+    echo "    -DFAULT_INJECTION=OFF                 Disable fault injection (default: ON)"
+    echo "    -DDWORDX4_INTRINSICS=OFF              Disable dwordx4 intrinsics (default: ON)"
+    echo "    -DENABLE_COMPRESS=OFF                 Disable GPU code compression (default: ON)"
+    echo "    -DRCCL_ROCPROFILER_REGISTER=OFF       Disable rocprofiler-register support (default: ON)"
+    echo ""
+    echo "  Environment variables:"
+    echo "    ONLY_FUNCS                 Build only specified collective functions (debug builds only)."
+    echo "                               Restricts GPU kernel generation to the listed collectives, significantly"
+    echo "                               reducing build time during development. Use '|' to separate multiple functions."
+    echo "                               Example: ONLY_FUNCS=\"AllReduce|SendRecv\" ./install.sh --debug -t"
+    echo "                               Available: AllReduce, Broadcast, Reduce, AllGather, ReduceScatter,"
+    echo "                                          AlltoAllPivot, SendRecv, AlltoAllGda, AlltoAllvGda"
+    echo "                               Advanced: Specify algo, protocol, redop, and type per collective."
+    echo "                                 ONLY_FUNCS=\"AllReduce RING SIMPLE Sum f32|SendRecv\""
 }
 
 # #################################################
@@ -90,7 +122,7 @@ function display_help()
 # check if we have a modern version of getopt that can handle whitespace and long parameters
 getopt -T
 if [[ "$?" -eq 4 ]]; then
-    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtq --longoptions address-sanitizer,dependencies,debug,dump-asm,enable-code-coverage,enable_backtrace,disable-colltrace,disable-msccl-kernel,enable-mscclpp,fast,help,install,jobs:,kernel-resource-use,local_gpu_only,amdgpu_targets:,no_clean,npkit-enable,log-trace,openmp-test-enable,roctx-enable,package_build,prefix:,rm-legacy-include-dir,run_tests_all,run_tests_quick,static,tests_build,time-trace,force-reduce-pipeline,generate-sym-kernels,quiet-warnings,verbose -- "$@")
+    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtq --longoptions address-sanitizer,dependencies,debug,debug-fast,dump-asm,enable-code-coverage,enable_backtrace,disable-colltrace,disable-msccl-kernel,enable-mscclpp,enable-mpi-tests,fast,help,install,jobs:,kernel-resource-use,local_gpu_only,amdgpu_targets:,no_clean,npkit-enable,log-trace,openmp-test-enable,roctx-enable,package_build,prefix:,rm-legacy-include-dir,run_tests_all,run_tests_quick,static,tests_build,time-trace,force-reduce-pipeline,generate-sym-kernels,quiet-warnings,disable-warp-speed,verbose,rocshmem,cmake-options: -- "$@")
 else
     echo "Need a new version of getopt"
     exit 1
@@ -109,12 +141,14 @@ while true; do
     -c | --enable-code-coverage)     enable_code_coverage=true;                                                                        shift ;;
     -d | --dependencies)             install_dependencies=true;                                                                        shift ;;
          --debug)                    build_release=false;                                                                              shift ;;
+         --debug-fast)		     build_release=false; debug_fast=true;							       shift ;;
          --enable_backtrace)         build_bfd=true;                                                                                   shift ;;
          --disable-colltrace)        collective_trace=false;                                                                           shift ;;
          --disable-msccl-kernel)     msccl_kernel_enabled=false;                                                                       shift ;;
          --dump-asm)                 dump_asm=true;                                                                                    shift ;;
          --enable-mscclpp)           mscclpp_enabled=true;                                                                             shift ;;
          --enable-mscclpp-clip)      enable_mscclpp_clip=true;                                                                         shift ;;
+         --enable-mpi-tests)         enable_mpi_tests=true;                                                                            shift ;;
          --disable-roctx)            roctx_enabled=false;                                                                              shift ;;
     -f | --fast)                     build_local_gpu_only=true; collective_trace=false; msccl_kernel_enabled=false;                    shift ;;
     -h | --help)                     display_help;                                                                                     exit 0 ;;
@@ -137,7 +171,10 @@ while true; do
          --verbose)                  build_verbose=true;                                                                               shift ;;
          --force-reduce-pipeline)    force_reduce_pipeline=true;                                                                       shift ;;
          --generate-sym-kernels)     generate_sym_kernels=true;                                                                        shift ;;
+         --disable-warp-speed)       warp_speed_enabled=false;                                                                         shift ;;
     -q | --quiet-warnings)           quiet_warnings=true;                                                                              shift ;;
+         --rocshmem)                 build_rocshmem_support=true;                                                                      shift ;;
+         --cmake-options)            custom_cmake_options=${2};                                                                         shift 2 ;;
     --) shift ; break ;;
     *)  echo "Unexpected command line parameter received; aborting";
         exit 1
@@ -216,7 +253,11 @@ fi
 if [[ "${build_release}" == true ]]; then
     cmake_common_options="${cmake_common_options} -DCMAKE_BUILD_TYPE=Release"
 else
-    cmake_common_options="${cmake_common_options} -DCMAKE_BUILD_TYPE=Debug"
+    if [[ "${debug_fast}" == true ]]; then
+	cmake_common_options="${cmake_common_options} -DCMAKE_BUILD_TYPE=Debug -DCMAKE_BUILD_SUBTYPE=DebugFast"
+    else
+	cmake_common_options="${cmake_common_options} -DCMAKE_BUILD_TYPE=Debug"
+    fi
 fi
 
 # Address sanitizer
@@ -301,6 +342,15 @@ if [[ "${openmp_test_enabled}" == true ]]; then
     cmake_common_options="${cmake_common_options} -DOPENMP_TESTS_ENABLED=ON"
 fi
 
+# Enable MPI tests (debug only)
+if [[ "${enable_mpi_tests}" == true ]]; then
+    if [[ "${build_release}" == true ]]; then
+        echo "ERROR: --enable-mpi-tests requires --debug. Please re-run with --debug."
+        exit 1
+    fi
+    cmake_common_options="${cmake_common_options} -DENABLE_MPI_TESTS=ON"
+fi
+
 # Force Reduce pipeline
 if [[ "${force_reduce_pipeline}" == true ]]; then
     cmake_common_options="${cmake_common_options} -DFORCE_REDUCE_PIPELINING=ON"
@@ -316,11 +366,24 @@ if [[ "${npkit_enabled}" == true ]]; then
     cmake_common_options="${cmake_common_options} -DENABLE_NPKIT=ON"
 fi
 
+# Enable WARP_SPEED only on MI350/MI300 platforms
+if [[ "${warp_speed_enabled}" == true ]]; then
+    cmake_common_options="${cmake_common_options} -DENABLE_WARP_SPEED=ON"
+fi
+
 # Suppress Warnings
 if [[ "${quiet_warnings}" == true ]]; then
     cmake_common_options="${cmake_common_options} -DQUIET_WARNINGS=ON"
 fi
 
+
+# Enable rocSHMEM support
+if [[ "${build_rocshmem_support}" == true ]]; then
+    cmake_common_options="${cmake_common_options} -DENABLE_ROCSHMEM=ON"
+    cmake_common_options="${cmake_common_options} -DROCSHMEM_INSTALL_DIR=${ROCSHMEM_INSTALL_DIR}"
+else
+    cmake_common_options="${cmake_common_options} -DENABLE_ROCSHMEM=OFF"
+fi
 
 check_exit_code "$?"
 
@@ -347,6 +410,11 @@ fi
 
 # Add build directory to RPATH for packaging dependency resolution
 cmake_common_options="${cmake_common_options} -DCMAKE_EXE_LINKER_FLAGS=\"-Wl,-rpath,${PWD}\""
+
+# Append any custom CMake options passed via --cmake-options
+if [[ ! -z "${custom_cmake_options}" ]]; then
+    cmake_common_options="${cmake_common_options} ${custom_cmake_options}"
+fi
 
 # Initiate RCCL CMake
 # Passing ONLY_FUNCS separately (not as part of ${cmake_common_options}) as
@@ -379,16 +447,19 @@ if [[ "${run_tests}" == true ]]; then
         echo "RCCL-UnitTests have not been built yet; Please re-run script with \"-t\" to build the binary."
         exit 1
     fi
-    if [[ "${build_release}" == false && ! -x "./test/rccl-UnitTestsFixtures" ]]; then
-        echo "RCCL-UnitTestsFixtures have not been built yet; Please re-run script with \"-t\" to build the binary."
+    if [[ "${build_release}" == false && ! -x "./test/rccl-UnitTestsFixturesDebug" ]]; then
+        echo "RCCL-UnitTestsFixturesDebug have not been built yet; Please re-run script with \"-t\" to build the binary."
         exit 1
     fi
     if [[ "${run_tests_all}" == true ]]; then
         if [[ -x "./test/rccl-UnitTests" ]]; then
             ./test/rccl-UnitTests
         fi
-        if [[ "${build_release}" == false && -x "./test/rccl-UnitTestsFixtures" ]]; then
+        if [[ -x "./test/rccl-UnitTestsFixtures" ]]; then
             ./test/rccl-UnitTestsFixtures
+        fi
+        if [[ "${build_release}" == false && -x "./test/rccl-UnitTestsFixturesDebug" ]]; then
+            ./test/rccl-UnitTestsFixturesDebug
         fi
     else
         if [[ -x "./test/rccl-UnitTests" ]]; then

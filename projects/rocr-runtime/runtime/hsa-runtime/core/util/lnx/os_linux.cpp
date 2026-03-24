@@ -313,6 +313,13 @@ bool CloseLib(LibHandle lib) { return (dlclose(*(void**)&lib) == 0) ? true : fal
  * shared objects.
  */
 
+// Disable ASAN: dl_iterate_phdr pointers may reside outside ASAN's shadow
+// mapped range as ASLR makes this non-deterministic across nodes/runs
+#if defined(__has_attribute)
+#if __has_attribute(no_sanitize)
+__attribute__((no_sanitize("address")))
+#endif
+#endif
 static int callback(struct dl_phdr_info* info, size_t size, void* data) {
   std::vector<std::string>* loadedToolsLib = (std::vector<std::string>*)data;
   assert(loadedToolsLib != nullptr);
@@ -325,7 +332,7 @@ static int callback(struct dl_phdr_info* info, size_t size, void* data) {
    * will have a specific segment or section. Hence its skipped.
    */
 
-  if ((info) && (info->dlpi_name[0] != '\0')) {
+  if ((info) && (info->dlpi_name) && (info->dlpi_name[0] != '\0')) {
     if (std::string(info->dlpi_name).find("vdso.so") != std::string::npos) return 0;
 
     /*
@@ -897,7 +904,7 @@ void* ReserveMemory(void* start, size_t size, size_t alignment, MemProt prot) {
   if (size >= kLargePageSize) {
     int status = madvise(aligned, size, MADV_HUGEPAGE);
     if (status) {
-      LogPrint(HSA_AMD_LOG_FLAG_INFO,
+      fprintf(stderr,
               "madvise with advice MADV_HUGEPAGE"
               " starting at address %p and page size 0x%zx, returned %d, errno: %s",
               aligned, size, status, strerror(errno));
@@ -928,6 +935,10 @@ bool UncommitMemory(void* addr, size_t size) {
 
   return ::mmap(addr, size, PROT_NONE, MAP_PRIVATE | MAP_FIXED | MAP_NORESERVE | MAP_ANONYMOUS, -1,
                 0) != MAP_FAILED;
+}
+
+bool ProtectMemory(void* va, size_t size, MemProt perms) {
+  return ::mprotect(va, size, MemProtToOsProt(perms)) == 0;
 }
 
 uint64_t HostTotalPhysicalMemory() {

@@ -39,6 +39,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Set Artifact Metadata
+        if: github.event_name == 'pull_request'
+        run: |
+          # Set PR number and date for artifact naming
+          echo "PR_NUMBER=PR${{ github.event.pull_request.number }}" >> $GITHUB_ENV
+          # Set date in MMDDYY-HHMM format (UTC time)
+          echo "BUILD_DATE=$(date -u +%m%d%y-%H%M)" >> $GITHUB_ENV
+
       - name: Set Project Directory
         run: |
           # Find the directory containing the main CMakeLists.txt for AMDSMI
@@ -100,6 +108,15 @@ jobs:
             fi
           done
           echo "Build completed on ${{ matrix.os }}"
+
+      - name: Upload Debian Package Artifacts
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: amd-smi-lib-deb-${{ matrix.os }}-${{ env.PR_NUMBER }}-${{ env.BUILD_DATE }}
+          path: ${{ env.PROJECT_DIR }}/build/amd-smi-lib*99999-local_amd64.deb
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Install AMDSMI
         run: |
@@ -282,11 +299,13 @@ jobs:
           echo 'Running AMDSMI tests'
           cd /opt/rocm/share/amd_smi/tests
           source amdsmitst.exclude
+          source detect_asic_filter.sh
+          echo "GTEST_EXCLUDE=${GTEST_EXCLUDE}"
 
           AMDSMI_RETRIES=3
           for attempt in $(seq 1 $AMDSMI_RETRIES); do
             echo "AMDSMI test attempt $attempt for ${{ matrix.os }}..."
-            if ./amdsmitst --gtest_filter="-$(echo ${BLACKLIST_ALL_ASICS})" > /tmp/test-results-${{ matrix.os }}/amdsmi_tests.log 2>&1; then
+            if ./amdsmitst --gtest_filter="-${GTEST_EXCLUDE}" > /tmp/test-results-${{ matrix.os }}/amdsmi_tests.log 2>&1; then
               echo "AMDSMI tests passed on attempt $attempt"
               echo "=============== TEST OUTPUT ==============="
               cat /tmp/test-results-${{ matrix.os }}/amdsmi_tests.log | grep -E "\[==========\]|\[  PASSED  \]|\[  SKIPPED \]|\[  FAILED  \]"
@@ -401,6 +420,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Set Artifact Metadata
+        if: github.event_name == 'pull_request'
+        run: |
+          # Set PR number and date for artifact naming
+          echo "PR_NUMBER=PR${{ github.event.pull_request.number }}" >> $GITHUB_ENV
+          # Set date in MMDDYY-HHMM format (UTC time)
+          echo "BUILD_DATE=$(date -u +%m%d%y-%H%M)" >> $GITHUB_ENV
+
       - name: Set Project Directory
         run: |
           TARGET_DIR=$(find $GITHUB_WORKSPACE -path "*/projects/amdsmi/CMakeLists.txt" -exec dirname {} \;)
@@ -461,6 +488,15 @@ jobs:
           done
           echo "Build completed on ${{ matrix.os }}"
 
+      - name: Upload RPM Package Artifacts (RHEL10 & AlmaLinux8)
+        if: github.event_name == 'pull_request' && (matrix.os == 'RHEL10' || matrix.os == 'AlmaLinux8')
+        uses: actions/upload-artifact@v4
+        with:
+          name: amd-smi-lib-rpm-${{ matrix.os }}-${{ env.PR_NUMBER }}-${{ env.BUILD_DATE }}
+          path: ${{ env.PROJECT_DIR }}/build/amd-smi-lib-*99999-local*.rpm
+          if-no-files-found: warn
+          retention-days: 7
+
       - name: Build AMDSMI
         if: matrix.os != 'RHEL10' && matrix.os != 'AlmaLinux8'
         run: |
@@ -500,11 +536,20 @@ jobs:
           done
           echo "Build completed on ${{ matrix.os }}"
 
+      - name: Upload RPM Package Artifacts
+        if: github.event_name == 'pull_request' && matrix.os != 'RHEL10' && matrix.os != 'AlmaLinux8'
+        uses: actions/upload-artifact@v4
+        with:
+          name: amd-smi-lib-rpm-${{ matrix.os }}-${{ env.PR_NUMBER }}-${{ env.BUILD_DATE }}
+          path: ${{ env.PROJECT_DIR }}/build/amd-smi-lib-*99999-local*.rpm
+          if-no-files-found: warn
+          retention-days: 7
+
       - name: Install AMDSMI(RHEL10 & AlmaLinux8)
         if: matrix.os == 'RHEL10' || matrix.os == 'AlmaLinux8'
         run: |
           cd ${{ env.PROJECT_DIR }}/build
-          dnf install python3-setuptools python3-wheel -y
+          dnf install --setopt=skip_if_unavailable=True python3-setuptools python3-wheel -y
 
           RETRIES=3
           for i in $(seq 1 $RETRIES); do
@@ -539,7 +584,7 @@ jobs:
               timeout 10m zypper --no-refresh --no-gpg-checks install -y ./amd-smi-lib-*99999-local*.rpm
               ;;
             dnf)
-              dnf install python3-setuptools python3-wheel -y
+              dnf install --setopt=skip_if_unavailable=True python3-setuptools python3-wheel -y
               RETRIES=3
               for i in $(seq 1 $RETRIES); do
                 echo "Attempt $i: Installing AMDSMI package..."
@@ -671,7 +716,7 @@ jobs:
           done
 
           echo 'Installing for test on RHEL10/AlmaLinux8'
-          dnf install python3-setuptools python3-wheel -y
+          dnf install --setopt=skip_if_unavailable=True python3-setuptools python3-wheel -y
 
           for i in $(seq 1 $RETRIES); do
             echo "RHEL10/AlmaLinux8: Installation attempt $i for test..."
@@ -709,7 +754,7 @@ jobs:
               timeout 10m zypper --no-refresh --no-gpg-checks install -y $BUILD_FOLDER/amd-smi-lib-*99999-local*.rpm
               ;;
             dnf)
-              dnf install python3-setuptools python3-wheel -y
+              dnf install --setopt=skip_if_unavailable=True python3-setuptools python3-wheel -y
               RETRIES=3
               for i in $(seq 1 $RETRIES); do
                 echo "Attempt $i: Installing..."
@@ -781,11 +826,13 @@ jobs:
           echo 'Running AMDSMI tests'
           cd /opt/rocm/share/amd_smi/tests
           source amdsmitst.exclude
+          source detect_asic_filter.sh
+          echo "GTEST_EXCLUDE=${GTEST_EXCLUDE}"
 
           AMDSMI_RETRIES=3
           for attempt in $(seq 1 $AMDSMI_RETRIES); do
             echo "AMDSMI test attempt $attempt for ${{ matrix.os }}..."
-            if ./amdsmitst --gtest_filter="-$(echo ${BLACKLIST_ALL_ASICS})" > /tmp/test-results-${{ matrix.os }}/amdsmi_tests.log 2>&1; then
+            if ./amdsmitst --gtest_filter="-${GTEST_EXCLUDE}" > /tmp/test-results-${{ matrix.os }}/amdsmi_tests.log 2>&1; then
               echo "AMDSMI tests passed on attempt $attempt"
               echo "=============== TEST OUTPUT ==============="
               cat /tmp/test-results-${{ matrix.os }}/amdsmi_tests.log | grep -E "\[==========\]|\[  PASSED  \]|\[  SKIPPED \]|\[  FAILED  \]"

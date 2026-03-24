@@ -45,9 +45,11 @@ import traceback
 import uuid
 from collections.abc import Generator
 from contextlib import contextmanager
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional, Union, cast
 
+import numpy as np
 import pandas as pd
 import yaml
 
@@ -62,9 +64,98 @@ from utils.logger import (
 )
 
 METRIC_ID_RE = re.compile(pattern=r"^\d{1,2}(?:\.\d{1,2}){0,2}$")
+NS_TO_MS = 1.0 / 1_000_000.0
 
 rocprof_cmd = ""
 rocprof_args = ""
+
+
+@dataclass
+class KernelStats:
+    """Aggregated kernel launch stats for one kernel name."""
+
+    launches: int = 0
+    total_duration_ns: float = 0.0
+    kernel_id: Optional[int] = None
+
+
+@dataclass
+class CallTreeNode:
+    """A node in the operator call tree.
+
+    Children are ordered operator sub-calls; kernels maps each kernel name to
+    a ``KernelStats`` record. ``kernel_launches``
+    and ``total_duration_ms`` are inclusive (rolled up from all descendants).
+    """
+
+    name: str
+    children: dict[str, "CallTreeNode"] = field(default_factory=dict)
+    kernels: dict[str, KernelStats] = field(default_factory=dict)
+    kernel_launches: int = 0
+    total_duration_ms: float = 0.0
+
+
+def version_to_numeric(version_parts: list[int], max_len: int) -> int:
+    """Convert version tuple to numeric value using base-1000 positional system."""
+    version_numeric = 0
+    for i, part in enumerate(version_parts):
+        version_numeric += part * (1000 ** (max_len - i - 1))
+    return version_numeric
+
+
+def resolve_rocm_library_path(library_path: Optional[str]) -> Optional[str]:
+    """
+    Resolve ROCm library path with automatic version fallback.
+    Tries exact path first, then falls back to versioned variants
+    (e.g., .so.1, .so.1.2.3).
+    """
+    if not library_path:
+        return library_path
+
+    path = Path(library_path)
+
+    # Try exact path first (handles both unversioned and explicit versioned paths)
+    if path.exists():
+        console_debug(f"Resolved library (exact match): {path}")
+        return str(path)
+
+    # Escape the input path so any glob metacharacters are treated literally.
+    matches = glob.glob(f"{glob.escape(library_path)}.*")
+
+    # First pass: filter to numeric versions and collect version tuples
+    version_tuples: list[tuple[list[int], str]] = []
+    for candidate in matches:
+        # Compute the suffix relative to the requested library path.
+        if not candidate.startswith(library_path):
+            continue
+        suffix = candidate[len(library_path) :]
+        # Expect a suffix like ".1" or ".1.2.3"
+        if not suffix.startswith("."):
+            continue
+        parts = suffix.split(".")[1:]  # drop leading empty element
+        if not parts:
+            continue
+        if not all(part.isdigit() for part in parts):
+            continue
+        version_tuples.append(([int(p) for p in parts], candidate))
+
+    # Find max version length to normalize all versions
+    if not version_tuples:
+        console_debug(f"ROCm library .so file not found: {library_path}")
+        return library_path
+
+    # Second pass: convert to numeric values with normalized length
+    max_version_len = max(len(vt[0]) for vt in version_tuples)
+    versioned_candidates: list[tuple[int, str]] = []
+    for version_parts, candidate in version_tuples:
+        version_numeric = version_to_numeric(version_parts, max_version_len)
+        versioned_candidates.append((version_numeric, candidate))
+
+    # Select the candidate with the highest numeric version.
+    versioned_candidates.sort(key=lambda item: item[0], reverse=True)
+    resolved = versioned_candidates[0][1]
+    console_debug(f"Resolved library (versioned): {library_path} -> {resolved}")
+    return resolved
 
 
 def is_tcc_channel_counter(counter: str) -> bool:
@@ -233,6 +324,101 @@ def detect_rocprof(args: argparse.Namespace) -> str:
         console_debug(f"rocprof_cmd is {str(rocprof_cmd)}")
         console_debug(f"ROC Profiler: {rocprof_path}")
     return rocprof_cmd
+
+
+def perform_attach_detach(new_env: dict[str, str], options: dict[str, Any]) -> None:
+    @contextmanager
+    def temporary_env(env_vars: dict[str, str]) -> Generator[None, None, None]:
+        """
+        Temporarily change the environment variable of this application.
+        """
+        original_env = os.environ.copy()
+        os.environ.update({k: str(v) for k, v in env_vars.items()})
+        try:
+            yield
+        finally:
+            os.environ.clear()
+            os.environ.update(original_env)
+
+    with temporary_env(new_env):
+        libname = options["ROCPROF_ATTACH_LIBRARY"]
+
+        try:
+            c_lib = ctypes.CDLL(libname)
+            if c_lib is None:
+                console_error(f"Error opening {libname}")
+        except Exception as e:
+            console_error(f"Error loading {libname}: {e}")
+
+        # Set argument and return types for attach/detach functions
+        try:
+            # old attach/detach API
+            c_lib.attach.argtypes = [ctypes.c_uint]
+        except Exception as e:
+            console_debug(
+                "Error setting old attach/detach API argument "
+                f"types: {e}, trying new API"
+            )
+            try:
+                # new attach/detach API
+                c_lib.rocattach_attach.restype = ctypes.c_int
+                c_lib.rocattach_attach.argtypes = [ctypes.c_int]
+                c_lib.rocattach_detach.restype = ctypes.c_int
+                c_lib.rocattach_detach.argtypes = [ctypes.c_int]
+            except Exception as e:
+                console_error(
+                    f"Error setting attach/detach function argument types: {e}"
+                )
+
+        pid = options["ROCPROF_ATTACH_PID"]
+        if pid is None:
+            console_error("Mode of attach/detach must have setup for process ID")
+
+        try:
+            # old attach/detach API
+            c_lib.attach(int(pid))
+        except Exception as e:
+            console_debug(f"Error attaching with old API: {e}, trying new API")
+            try:
+                # new attach/detach API
+                attach_status = c_lib.rocattach_attach(int(pid))
+                if attach_status != 0:
+                    console_error(
+                        f"Error attaching to process {pid}, "
+                        f"rocattach_attach returned {attach_status}"
+                    )
+            except Exception as e:
+                console_error(f"Error attaching to process {pid}: {e}")
+
+        duration = os.environ.get("ROCPROF_ATTACH_DURATION", None)
+        if duration is None:
+            console_log(
+                f"\033[93mAttach to process with ID {pid} is successful, "
+                "Press Enter to detach...\033[0m"
+            )
+            input()
+        else:
+            console_log(
+                f"\033[93mAttach to process with ID {pid} is successful, "
+                f"detach will happen in {duration} milliseconds...\033[0m"
+            )
+            time.sleep(int(duration) / 1000)
+
+        try:
+            # old attach/detach API
+            c_lib.detach(int(pid))
+        except Exception as e:
+            console_debug(f"Error detaching with old API: {e}, trying new API")
+            try:
+                # new attach/detach API
+                detach_status = c_lib.rocattach_detach(int(pid))
+                if detach_status != 0:
+                    console_error(
+                        f"Error detaching from process {pid}, "
+                        f"rocattach_detach returned {detach_status}"
+                    )
+            except Exception as e:
+                console_error(f"Error detaching from process {pid}: {e}")
 
 
 def capture_subprocess_output(
@@ -684,6 +870,13 @@ def parse_text(text_file: str) -> list[str]:
         ]
 
 
+def is_only_pc_sampling(filter_blocks: list[str]) -> bool:
+    """Return True if all requested blocks are PC sampling (block 21)."""
+    return bool(filter_blocks) and all(
+        block in ["21", "pc_sampling"] for block in filter_blocks
+    )
+
+
 def run_prof(
     fnames: Union[list[str], str],
     profiler_options: Union[list[str], dict[str, Union[str, list[str]]]],
@@ -691,6 +884,7 @@ def run_prof(
     mspec: Any,  # noqa: ANN401
     loglevel: int,
     format_rocprof_output: str,
+    torch_trace_enabled: bool = False,
     retain_rocpd_output: bool = False,
 ) -> None:
     multiple_files = isinstance(fnames, list)
@@ -788,49 +982,7 @@ def run_prof(
         console_debug(f"rocprof sdk env vars: {new_env}")
 
         if is_mode_live_attach:
-
-            @contextmanager
-            def temporary_env(env_vars: dict[str, str]) -> Generator[None, None, None]:
-                """
-                Temporarily change the environment variable of this application.
-                """
-                original_env = os.environ.copy()
-                os.environ.update({k: str(v) for k, v in env_vars.items()})
-                try:
-                    yield
-                finally:
-                    os.environ.clear()
-                    os.environ.update(original_env)
-
-            with temporary_env(new_env):
-                libname = options["ROCPROF_ATTACH_TOOL_LIBRARY"]
-                c_lib = ctypes.CDLL(libname)
-                if c_lib is None:
-                    console_error(f"Error opening {libname}")
-                c_lib.attach.argtypes = [ctypes.c_uint]
-
-                pid = options["ROCPROF_ATTACH_PID"]
-                if pid is None:
-                    console_error(
-                        "Mode of attach/detach must have setup for process ID"
-                    )
-
-                c_lib.attach(int(pid))
-                duration = os.environ.get("ROCPROF_ATTACH_DURATION", None)
-                if duration is None:
-                    console_log(
-                        f"\033[93mAttach to process with ID {pid} is successful, "
-                        "Press Enter to detach...\033[0m"
-                    )
-                    input()
-                else:
-                    console_log(
-                        f"\033[93mAttach to process with ID {pid} is successful, "
-                        f"detach will happen in {duration} milliseconds...\033[0m"
-                    )
-                    time.sleep(int(duration) / 1000)
-                c_lib.detach()
-
+            perform_attach_detach(new_env, options)
         else:
             if app_cmd is None:
                 console_error(
@@ -886,9 +1038,12 @@ def run_prof(
         # Write results_fbase.csv
         rocpd_data.convert_dbs_to_csv(
             glob.glob(workload_dir + "/out/pmc_1/*/*.db"),
-            workload_dir + f"/results_{fbase}.csv",
+            workload_dir + f"/out/pmc_1/{fbase}_counter_collection.csv",
+            workload_dir + f"/out/pmc_1/{fbase}_marker_api_trace.csv",
         )
-        combined_df = pd.read_csv(workload_dir + f"/results_{fbase}.csv")
+        combined_df = pd.read_csv(
+            workload_dir + f"/out/pmc_1/{fbase}_counter_collection.csv"
+        )
         # Reset Dispatch_ID based on PID, Kernel_Name, Grid_Size,
         # Workgroup_Size, LDS_Per_Workgroup, Start_Timestamp, End_Timestamp
         combined_df["Dispatch_ID"] = combined_df.groupby(
@@ -911,8 +1066,13 @@ def run_prof(
         ).ngroup()
         # Drop PID since its not required
         combined_df = combined_df.drop(columns=["PID"])
+        combined_df.to_csv(
+            workload_dir + f"/out/pmc_1/{fbase}_counter_collection.csv", index=False
+        )
         combined_df.to_csv(workload_dir + f"/results_{fbase}.csv", index=False)
-
+        if torch_trace_enabled:
+            # move counter collection and marker trace to workload dir
+            save_torch_trace_inputs(workload_dir, fbase, format_rocprof_output)
         if retain_rocpd_output:
             for db_path in glob.glob(workload_dir + "/out/pmc_1/*/*.db"):
                 pid = Path(db_path).stem.split("_")[0]
@@ -937,8 +1097,6 @@ def run_prof(
             )
             # TODO: as rocprofv3 --kokkos-trace feature improves,
             # rocprof-compute should make updates accordingly
-            if "ROCPROF_HIP_RUNTIME_API_TRACE" in options:
-                process_hip_trace_output(workload_dir, fbase)
         else:
             # rocprofv3 requires additional processing for each process
             # rocprofv3 cannot use native tool
@@ -949,9 +1107,10 @@ def run_prof(
                 # TODO: as rocprofv3 --kokkos-trace feature improves,
                 # rocprof-compute should make updates accordingly
                 process_kokkos_trace_output(workload_dir, fbase)
-            elif "--hip-trace" in options:
-                process_hip_trace_output(workload_dir, fbase)
-
+        # Add torch operator trace processing
+        if torch_trace_enabled:
+            # move counter collection and marker trace to workload dir
+            save_torch_trace_inputs(workload_dir, fbase, format_rocprof_output)
         # Combine results into single CSV file
         if results_files:
             combined_results = pd.concat(
@@ -1122,7 +1281,7 @@ def convert_native_counter_collection_csv(workload_dir: str) -> None:
         )
 
         rocprofv3_counter_data = pd.DataFrame({
-            "Correlation_Id": merged_data["dispatch_id"],
+            "Correlation_Id": merged_data["Correlation_Id"],
             "Dispatch_Id": merged_data["dispatch_id"],
             "Agent_Id": merged_data["Agent_Id"],
             "Queue_Id": merged_data["Queue_Id"],
@@ -1210,6 +1369,356 @@ def process_rocprofv3_output(workload_dir: str, using_native_tool: bool) -> list
 
 
 @demarcate
+def save_torch_trace_inputs(
+    workload_dir: str,
+    fbase: str,
+    output_format: str = "rocpd",
+) -> None:
+    """
+    Move counter_collection and marker_api_trace data to workload_dir,
+    for creation of PyTorch operator trace in Analyze mode.
+    """
+    src_dir = Path(workload_dir) / "out" / "pmc_1"
+    if output_format == "rocpd":
+        # Only one pair expected
+        src_counter = src_dir / f"{fbase}_counter_collection.csv"
+        src_marker = src_dir / f"{fbase}_marker_api_trace.csv"
+        dst_counter = Path(workload_dir) / f"torch_trace_{fbase}_counter_collection.csv"
+        dst_marker = Path(workload_dir) / f"torch_trace_{fbase}_marker_api_trace.csv"
+        # These files are expected to exist
+        # Letting shutil.copyfile raise error if files not found
+        shutil.copyfile(src_counter, dst_counter)
+        shutil.copyfile(src_marker, dst_marker)
+        console_log(
+            "torch trace",
+            "Moved counter collection and marker trace files "
+            "to workload dir for PyTorch trace creation.",
+        )
+        console_log("Counter Collection: ", str(dst_counter))
+        console_log("Marker API Trace: ", str(dst_marker))
+    elif output_format == "csv":
+        # Multiple pairs possible (one per PID/process)
+        counter_files = glob.glob(str(src_dir / "*/*_counter_collection.csv"))
+        marker_files = glob.glob(str(src_dir / "*/*_marker_api_trace.csv"))
+        (Path(workload_dir) / f"{fbase}").mkdir(parents=True, exist_ok=True)
+        # Expecting the files to be present
+        # Letting shutil.copyfile raise error if files not found
+        # Path: workload_dir/fbase/torch_trace_<src_basename> (discovered by
+        # process_torch_trace_output via glob **/torch_trace*_marker_api_trace.csv)
+        for src_counter in counter_files:
+            dst_counter = str(
+                Path(workload_dir)
+                / f"{fbase}"
+                / ("torch_trace_" + Path(src_counter).name)
+            )
+            shutil.copyfile(src_counter, dst_counter)
+            console_log("torch trace", f"Copied Counter Collection: {dst_counter}")
+        for src_marker in marker_files:
+            dst_marker = str(
+                Path(workload_dir)
+                / f"{fbase}"
+                / ("torch_trace_" + Path(src_marker).name)
+            )
+            shutil.copyfile(src_marker, dst_marker)
+            console_log("torch trace", f"Copied Marker API Trace: {dst_marker}")
+    else:
+        console_warning(
+            "torch trace",
+            f"Unknown output_format: {output_format} in save_torch_trace_inputs",
+        )
+
+
+def simplify_kernel_name(full_kernel_name: str) -> str:
+    """Simplify a kernel name for display by stripping templates and namespaces.
+
+    Strips ``void`` prefix, template parameters, and namespace qualifiers so
+    that e.g. ``void at::native::vectorized_elementwise_kernel<4, ...>``
+    becomes ``vectorized_elementwise_kernel``.
+    """
+    name = full_kernel_name.strip()
+    if name.startswith("void "):
+        name = name[5:]
+
+    if "<" in name:
+        main_part = name.split("<")[0]
+    elif "(" in name:
+        main_part = name.split("(")[0]
+    else:
+        main_part = name
+
+    if "::" in main_part:
+        function_name = main_part.split("::")[-1].strip()
+        return function_name if function_name else name.strip()
+
+    return main_part.strip()
+
+
+def parse_top_level_location(context_id: object) -> str:
+    """Extract 'file:line' from the first entry of a Context_Id string.
+
+    Context_Id format: ``10@main.py:60/#10@main.py:21/...``
+    Returns ``main.py:60`` or ``unknown:0`` on failure.
+    """
+    if pd.isna(context_id) or not str(context_id).strip():
+        return "unknown:0"
+    first_entry = str(context_id).split("/")[0]
+    if "@" not in first_entry:
+        return "unknown:0"
+    _, location = first_entry.split("@", 1)
+    return location if ":" in location else "unknown:0"
+
+
+def rollup_node_stats(node: CallTreeNode) -> tuple[int, float]:
+    """Bottom-up rollup: set kernel_launches and total_duration_ms inclusive."""
+    launches = sum(stats.launches for stats in node.kernels.values())
+    duration_ns = sum(stats.total_duration_ns for stats in node.kernels.values())
+
+    for child in node.children.values():
+        child_launches, child_duration_ns = rollup_node_stats(child)
+        launches += child_launches
+        duration_ns += child_duration_ns
+
+    node.kernel_launches = launches
+    node.total_duration_ms = duration_ns * NS_TO_MS
+    return launches, duration_ns
+
+
+def build_call_trees(
+    df: pd.DataFrame,
+) -> dict[str, CallTreeNode]:
+    """Build per-source-location call trees from a consolidated torch trace DataFrame.
+
+    Returns a dict mapping ``file:line`` to a CallTreeNode root whose
+    children form the full operator/kernel hierarchy.
+
+    Each kernel entry is stored as a ``KernelStats`` record.
+    Full kernel names are used; shortening is left to the display layer.
+    """
+    required = {"Operator_Name", "Kernel_Name"}
+    if df.empty or not required.issubset(df.columns):
+        return {}
+
+    has_kernel_timestamps = (
+        "Start_Timestamp_kernel" in df.columns and "End_Timestamp_kernel" in df.columns
+    )
+    has_context_id = "Context_Id" in df.columns
+    has_kernel_id = "Kernel_ID" in df.columns
+
+    deduplication_columns = ["Operator_Name", "Kernel_Name"]
+    if has_kernel_timestamps:
+        deduplication_columns.append("Start_Timestamp_kernel")
+    if has_context_id:
+        deduplication_columns.append("Context_Id")
+    dispatches = df.drop_duplicates(subset=deduplication_columns)
+
+    call_trees: dict[str, CallTreeNode] = {}
+
+    for row in dispatches.itertuples(index=False):
+        op_path = str(row.Operator_Name).strip()
+        kernel_name = str(row.Kernel_Name).strip()
+        if not op_path or not kernel_name:
+            continue
+
+        context_id = getattr(row, "Context_Id", None) if has_context_id else None
+        location = parse_top_level_location(context_id)
+
+        duration_ns = 0.0
+        if has_kernel_timestamps:
+            try:
+                duration_ns = float(row.End_Timestamp_kernel) - float(
+                    row.Start_Timestamp_kernel
+                )
+            except (ValueError, TypeError):
+                pass
+
+        if location not in call_trees:
+            call_trees[location] = CallTreeNode(name=location)
+        location_root = call_trees[location]
+
+        current_node = location_root
+        for path_segment in op_path.split("/"):
+            if path_segment not in current_node.children:
+                current_node.children[path_segment] = CallTreeNode(name=path_segment)
+            current_node = current_node.children[path_segment]
+
+        if kernel_name not in current_node.kernels:
+            kernel_id = None
+            kernel_id_value = getattr(row, "Kernel_ID", None) if has_kernel_id else None
+            if pd.notna(kernel_id_value):
+                kernel_id = int(kernel_id_value)
+            current_node.kernels[kernel_name] = KernelStats(kernel_id=kernel_id)
+        current_node.kernels[kernel_name].launches += 1
+        current_node.kernels[kernel_name].total_duration_ns += duration_ns
+
+    for location_root in call_trees.values():
+        rollup_node_stats(location_root)
+
+    return call_trees
+
+
+def write_torch_trace_consolidated_csv(
+    consolidated_df: pd.DataFrame,
+    torch_trace_path: Path,
+) -> None:
+    """Write the consolidated torch trace DataFrame to ``consolidated.csv``."""
+    output_file = torch_trace_path / "consolidated.csv"
+    consolidated_df.sort_values("Operator_Name", ignore_index=True).to_csv(
+        output_file, index=False
+    )
+    console_log(f"Saved consolidated trace to {output_file}")
+
+
+def build_call_trees_with_kernel_ids(
+    consolidated_df: pd.DataFrame,
+    kernel_top_df: pd.DataFrame,
+) -> dict[str, CallTreeNode]:
+    """Attach Kernel_ID values and build call trees from consolidated trace rows."""
+    kernel_name_to_id = {
+        str(row["Kernel_Name"]).strip(): idx for idx, row in kernel_top_df.iterrows()
+    }
+    consolidated_with_ids = consolidated_df.copy()
+    consolidated_with_ids["Kernel_ID"] = (
+        consolidated_with_ids["Kernel_Name"].str.strip().map(kernel_name_to_id)
+    )
+    return build_call_trees(consolidated_with_ids)
+
+
+@demarcate
+def process_torch_trace_output(
+    workload_dir: str,
+) -> tuple[pd.DataFrame, Path]:
+    """
+    Build consolidated torch trace rows and prepare output directory.
+
+    - Performs inner join on Correlation_ID, filtering out unmatched entries
+    - Consolidates data across passes and normalizes required columns
+    - Prepares a clean workload_dir/torch_trace/ directory for output files
+
+    Returns (consolidated_df, torch_trace_path) on success.
+    """
+    console_log(f"Looking for marker and counter csv files in {workload_dir}")
+    marker_api_trace_csvs = list(
+        Path(workload_dir).glob("**/torch_trace*_marker_api_trace.csv")
+    )
+    counter_collection_csvs = [
+        markers_file.parent
+        / markers_file.name.replace("_marker_api_trace.", "_counter_collection.")
+        for markers_file in marker_api_trace_csvs
+    ]
+    existing_csv_files = [
+        [marker_api_trace_csvs[i], counter_collection_csvs[i]]
+        for i in range(len(marker_api_trace_csvs))
+        if counter_collection_csvs[i].is_file() and marker_api_trace_csvs[i].is_file()
+    ]
+
+    if not existing_csv_files:
+        console_warning(
+            "No marker files with corresponding counter files found. "
+            "Ensure profiling was done with '--torch-trace'."
+        )
+        return pd.DataFrame(), Path(f"{workload_dir}/torch_trace")
+
+    torch_trace_path = Path(f"{workload_dir}/torch_trace")
+    if torch_trace_path.exists():
+        shutil.rmtree(torch_trace_path)
+        console_log(f"Removed previous torch_trace directory: {torch_trace_path}")
+    torch_trace_path.mkdir(parents=True, exist_ok=True)
+
+    # Join marker and counter data
+    def _merge_pair(
+        marker_path: Path,
+        counter_path: Path,
+        join_keys: tuple[str, ...] = ("Correlation_ID",),
+    ) -> pd.DataFrame:
+        """Merge a pair of marker and counter csv files on specified keys,
+        return the merged dataframe.
+        """
+        marker_df = pd.read_csv(marker_path)
+        counter_df = pd.read_csv(counter_path)
+        # Normalize column names to handle case inconsistencies
+        marker_df.columns = marker_df.columns.str.replace(
+            "Correlation_Id", "Correlation_ID"
+        )
+        counter_df.columns = counter_df.columns.str.replace(
+            "Correlation_Id", "Correlation_ID"
+        )
+
+        return pd.merge(
+            marker_df,
+            counter_df,
+            on=join_keys,
+            how="inner",
+            suffixes=("_function", "_kernel"),
+        )
+
+    # If rocpd format, pairs are present in workload_dir, one pair per fbase
+    # If csv format, pairs are present in workload/{fbase}/ one pair per process
+    # Extracting the output_format used in profiling from the path of a marker file
+    if Path(workload_dir).resolve() == existing_csv_files[0][0].parent.resolve():
+        join_keys = ("Correlation_ID", "GUID")  # output_format "rocpd"
+    else:
+        join_keys = ("Correlation_ID",)  # output_format "csv"
+    consolidated_df = pd.concat(
+        [_merge_pair(f[0], f[1], join_keys) for f in existing_csv_files],
+        ignore_index=True,
+    )
+    required_columns = [
+        "Function",
+        "Kernel_Name",
+        "Counter_Name",
+        "Counter_Value",
+        "Start_Timestamp_function",
+        "End_Timestamp_function",
+        "Start_Timestamp_kernel",
+        "End_Timestamp_kernel",
+    ]
+    missing_columns = [
+        col for col in required_columns if col not in consolidated_df.columns
+    ]
+    if missing_columns:
+        console_error(
+            f"Consolidated torch trace is missing required columns {missing_columns}"
+        )
+        raise ValueError(
+            f"Consolidated torch trace is missing required columns {missing_columns}"
+        )
+    consolidated_df = consolidated_df[required_columns]
+    if consolidated_df.isnull().values.any():
+        console_warning("Consolidated torch trace contains missing values")
+        raise ValueError("Consolidated torch trace contains missing values")
+    consolidated_df = consolidated_df.sort_values(by=["Function", "Counter_Name"])
+    split_columns = consolidated_df["Function"].str.split(":#", expand=True)
+    consolidated_df["Operator_Name"] = (
+        split_columns[0] if len(split_columns.columns) > 0 else None
+    )
+    consolidated_df["Context_Id"] = (
+        split_columns[1] if len(split_columns.columns) > 1 else None
+    )
+    consolidated_df.drop(columns=["Function"], inplace=True)
+    consolidated_df = consolidated_df[
+        [
+            "Operator_Name",
+            "Context_Id",
+            "Kernel_Name",
+            "Counter_Name",
+            "Counter_Value",
+            "Start_Timestamp_function",
+            "End_Timestamp_function",
+            "Start_Timestamp_kernel",
+            "End_Timestamp_kernel",
+        ]
+    ]
+    if consolidated_df.isnull().values.any():
+        console_error(
+            "Missing values in consolidated torch trace after splitting ",
+            "the Function name.",
+        )
+        raise ValueError("Missing values in consolidated torch trace after splitting")
+
+    return consolidated_df, torch_trace_path
+
+
+@demarcate
 def process_kokkos_trace_output(workload_dir: str, fbase: str) -> None:
     # marker api trace csv files are generated for each process
     marker_api_trace_csvs = glob.glob(
@@ -1235,29 +1744,6 @@ def process_kokkos_trace_output(workload_dir: str, fbase: str) -> None:
 
 
 @demarcate
-def process_hip_trace_output(workload_dir: str, fbase: str) -> None:
-    # hip api trace csv files are generated for each process
-    hip_api_trace_csvs = glob.glob(f"{workload_dir}/out/pmc_1/*/*_hip_api_trace.csv")
-    existing_hip_files_csv = [f for f in hip_api_trace_csvs if Path(f).is_file()]
-
-    # concate and output hip api trace info
-    combined_results = pd.concat(
-        [pd.read_csv(f) for f in existing_hip_files_csv], ignore_index=True
-    )
-
-    combined_results.to_csv(
-        f"{workload_dir}/out/pmc_1/results_{fbase}_hip_api_trace.csv",
-        index=False,
-    )
-
-    if Path(f"{workload_dir}/out").exists():
-        shutil.copyfile(
-            f"{workload_dir}/out/pmc_1/results_{fbase}_hip_api_trace.csv",
-            f"{workload_dir}/{fbase}_hip_api_trace.csv",
-        )
-
-
-@demarcate
 def gen_sysinfo(
     workload_name: str,
     workload_dir: str,
@@ -1273,7 +1759,7 @@ def gen_sysinfo(
     df["workload_name"] = workload_name
 
     blocks = ["SQ", "LDS", "SQC", "TA", "TD", "TCP", "TCC", "SPI", "CPC", "CPF"]
-    if hasattr(soc, "roofline_obj") and (not skip_roof):
+    if not skip_roof:
         blocks.append("roofline")
     df["ip_blocks"] = "|".join(blocks)
 
@@ -1300,17 +1786,30 @@ def get_submodules(package_name: str) -> list[str]:
 
 def is_workload_empty(path: str) -> None:
     """Peek workload directory to verify valid profiling output"""
-    pmc_perf_path = Path(path) / "pmc_perf.csv"
+    workload_dir = Path(path)
+    pmc_perf_path = workload_dir / "pmc_perf.csv"
+
+    # Find PMC data files (merged or separate)
     if pmc_perf_path.is_file():
-        temp_df = pd.read_csv(pmc_perf_path)
+        files_to_check = [pmc_perf_path]
+    else:
+        pmc_files = list(workload_dir.glob("pmc_perf_*.csv"))
+        results_files = list(workload_dir.glob("results_*.csv"))
+        files_to_check = pmc_files if pmc_files else results_files
+
+    if not files_to_check:
+        console_error("analysis", "No profiling data found.")
+        return
+
+    # Validate files are not empty
+    for file_path in files_to_check:
+        temp_df = pd.read_csv(file_path)
         if temp_df.dropna().empty:
             console_error(
                 "profiling",
-                f"Found empty cells in {pmc_perf_path}.\n"
-                "Profiling data could be corrupt.",
+                f"Found empty cells in {file_path}.\nProfiling data could be corrupt.",
             )
-    else:
-        console_error("analysis", "No profiling data found.")
+            break
 
 
 def print_status(msg: str) -> None:
@@ -1373,13 +1872,12 @@ def reverse_multi_index_df_pmc(
     return dfs, coll_levels
 
 
-def merge_counters_iteration_multiplex(
+def impute_counters_iteration_multiplex(
     df_multi_index: pd.DataFrame,
     policy: str,
 ) -> pd.DataFrame:
     """
-    For iteration multiplexing, this merges counter values for the kernel collected
-    over multiple iterations.
+    Perform data imputation for missing counter values due to iteration multiplexing.
     """
     non_counter_column_index = [
         "Dispatch_ID",
@@ -1396,25 +1894,17 @@ def merge_counters_iteration_multiplex(
         "End_Timestamp",
         "Kernel_ID",
     ]
-
     result_dfs: list[pd.DataFrame] = []
-
-    # TODO: will need to optimize to avoid this conversion to single index format
-    # and do merge directly on multi-index dataframe
     dfs, coll_levels = reverse_multi_index_df_pmc(df_multi_index)
 
     for df in dfs:
-        kernel_name_column_name = "Kernel_Name"
-        if "Kernel_Name" not in df and "Name" in df:
-            kernel_name_column_name = "Name"
-
-        # Find the values in Kernel_Name that occur more than once
+        # Group by unique kernel configurations
         unique_occurences = (
-            df.groupby(kernel_name_column_name)
+            df.groupby("Kernel_Name")
             if policy == "kernel"
             else df.groupby(
                 [
-                    kernel_name_column_name,
+                    "Kernel_Name",
                     "Grid_Size",
                     "Workgroup_Size",
                     "LDS_Per_Workgroup",
@@ -1423,64 +1913,60 @@ def merge_counters_iteration_multiplex(
             )
         )
 
-        # Define a list to store the merged rows
-        result_data: list[dict[str, Any]] = []
+        counter_columns = [
+            col for col in df.columns if col not in non_counter_column_index
+        ]
+        # Collect imputed groups as dataframes
+        group_dfs = []
 
-        pd.set_option("display.max_columns", None)
+        # Log imputation task summary before processing
+        console_debug(
+            f"Performing data imputation on {len(df)} dispatches "
+            f"across {unique_occurences.ngroups} unique kernel configurations"
+        )
 
-        # Reset Dispatch_ID
-        dispatch_id_counter = 0
+        for _, group in unique_occurences:
+            # Identify counter buckets
+            counter_groups: set[frozenset[str]] = set()
+            for _, row in group.iterrows():
+                # Set of counter column names with non empty values
+                cols_frozenset = frozenset(row[counter_columns].dropna().index)
+                # If no counters found for this dispatch, continue
+                if not cols_frozenset:
+                    continue
+                # Since counter buckets are repeated in round robin fashion,
+                # we can stop once we see a repeated bucket
+                if cols_frozenset in counter_groups:
+                    break
+                counter_groups.add(cols_frozenset)
 
-        for name, group in unique_occurences:
-            # Create a dictionary to store the merged row for the current group
-            merged_row: dict[str, Any] = {}
+            # If no counters found for this group, continue
+            if not counter_groups:
+                continue
 
-            # Process non-counter columns
-            for col in non_counter_column_index:
-                if col == "End_Timestamp":
-                    # For End_Timestamp, calculate the median delta time
-                    delta_time = group[col] - group["Start_Timestamp"]
-                    merged_row[col] = group["Start_Timestamp"] + delta_time.median()
-                if col == "Dispatch_ID":
-                    # Assign new Dispatch_ID
-                    merged_row[col] = dispatch_id_counter
-                    dispatch_id_counter += 1
-                elif pd.api.types.is_numeric_dtype(group[col]):
-                    # For other non-counter numeric columns, take the median value
-                    merged_row[col] = group[col].median()
-                    if pd.api.types.is_integer_dtype(group[col]):
-                        merged_row[col] = merged_row[col].astype(int)
-                else:
-                    # For other non-counter non-numeric columns,
-                    # take the first occurrence (0th row)
-                    # Only Kernel_Name should be non-numeric here
-                    merged_row[col] = group.iloc[0][col]
+            # Iterate over subgroups of dispatches containing
+            # all counters and impute missing values
+            # Create subgroup_id column for groupby: 0,0,0,...,1,1,1,...,2,2,2,...
+            # Use numpy for vectorized operation
+            group_copy = group.copy()
+            group_copy["__subgroup_id"] = np.arange(len(group_copy)) // len(
+                counter_groups
+            )
+            # groupby().bfill() automatically excludes the grouping column from result
+            group_copy[counter_columns] = (
+                group_copy[[*counter_columns, "__subgroup_id"]]
+                .groupby("__subgroup_id", group_keys=False)
+                .bfill()  # Propagate first valid value backward to start of subgroup
+                .ffill()  # Propagate forward to end of subgroup
+            )
+            group_dfs.append(group_copy)
 
-            # Process counter columns (assumed to be all columns not in
-            # non_counter_column_index)
-            counter_columns = [
-                col for col in group.columns if col not in non_counter_column_index
-            ]
-            for counter_col in counter_columns:
-                # For counter columns, calculate median only across non-NaN values
-                # Preserve original data type
-                valid_values = group[counter_col].dropna()
-                if not valid_values.empty:
-                    median_value = valid_values.median()
-                    # Preserve original data type - check if all
-                    # non-null values are integers
-                    if (valid_values == valid_values.astype(int)).all():
-                        merged_row[counter_col] = int(median_value)
-                    else:
-                        merged_row[counter_col] = median_value
-                else:
-                    merged_row[counter_col] = None
-
-            # Append the merged row to the result list
-            result_data.append(merged_row)
-
-        # Create a new DataFrame from the merged rows
-        result_dfs.append(pd.DataFrame(result_data))
+        # Create a new dataframe by concatenating all groups
+        result_dfs.append(
+            pd.concat(group_dfs, ignore_index=True)
+            if group_dfs
+            else pd.DataFrame(df.columns)
+        )
 
     final_df = pd.concat(result_dfs, keys=coll_levels, axis=1, copy=False)
     return final_df
@@ -1687,17 +2173,17 @@ def format_scientific_notation_if_needed(
     width_align: int = 6,
     precision: int = 2,
     fmt_type_align: str = "f",
-    max_length: int = 6,
+    max_length: int = 6,  # Deprecated: kept for backward compatibility
     sci_lower_bound: float = 1e-2,
     sci_upper_bound: float = 1e6,
 ) -> str:
     """
     Format a numeric value as normal or scientific notation string.
 
-    Uses scientific notation if:
+    Uses scientific notation only if it results in a shorter string than
+    normal notation, or if the value falls outside the bounds:
     - abs(value) < sci_lower_bound (but not zero)
     - abs(value) >= sci_upper_bound
-    - formatted normal string length exceeds max_length
 
     Parameters:
     - value: numeric value to format
@@ -1705,13 +2191,14 @@ def format_scientific_notation_if_needed(
     - width_align: total width of formatted output
     - precision: number of digits after decimal point
     - fmt_type_align: format type, e.g., 'f', 'e', 'g'
-    - max_length: max allowed length for normal format string (excluding padding)
+    - max_length: deprecated, no longer used
     - sci_lower_bound: lower bound for scientific notation usage
     - sci_upper_bound: upper bound for scientific notation usage
 
     Returns:
     - formatted string according to the criteria, respecting alignment
     """
+    del max_length  # Unused, kept for backward compatibility
 
     abs_val = abs(value)
     use_sci = False
@@ -1735,10 +2222,8 @@ def format_scientific_notation_if_needed(
                 sci_str_strip = sci_str.strip()
 
                 # Decide based on length of stripped strings (ignore padding)
-                if (
-                    len(normal_str_strip) > len(sci_str_strip)
-                    or len(normal_str_strip) > max_length
-                ):
+                # Only use scientific notation if it's actually shorter
+                if len(sci_str_strip) < len(normal_str_strip):
                     use_sci = True
             except Exception:
                 # Fallback to scientific if formatting fails
@@ -1769,3 +2254,56 @@ def get_panel_alias() -> dict[str, str]:
     return {
         panel["panel_alias"]: str(panel["panel_id"]) for panel in panel_yaml["panels"]
     }
+
+
+def get_rank() -> Optional[str]:
+    rank_env_vars = [
+        "SLURM_PROCID",
+        "FLUX_TASK_RANK",
+        "PMI_RANK",
+        "PMIX_RANK",
+        "PALS_RANKID",
+        "OMPI_COMM_WORLD_RANK",
+        "MV2_COMM_WORLD_RANK",
+        "MPI_RANKID",
+        "MPI_LOCALRANKID",
+        "MPI_RANK",
+    ]
+    for env_var in rank_env_vars:
+        value = os.environ.get(env_var)
+        if value is not None:
+            return value
+
+    return None
+
+
+def replace_rank(name: str) -> str:
+    def rank(match: re.Match[str]) -> str:
+        value = get_rank()
+        if value is not None:
+            return value + match.group(1)  # preserve trailing slash
+        else:
+            return ""  # Ignore %rank% and trailing slash
+
+    # Replace %rank% (and optional trailing slash) with MPI process rank
+    pattern = re.compile(r"%rank%(/?)")
+
+    return pattern.sub(rank, name)
+
+
+def replace_env(name: str) -> str:
+    def env(match: re.Match[str]) -> str:
+        var_name = match.group(1)
+        return os.environ.get(var_name, "")  # Default to empty string if not found
+
+    # Replace %env{VAR}% with environment variable values
+    pattern = re.compile(r"%env{([^}]+)}%")
+
+    return pattern.sub(env, name)
+
+
+def normalize_filter_to_str_list(value: Any) -> list[str]:  # noqa: ANN401
+    """Normalize a filter value (scalar or list) to a list of strings."""
+    if isinstance(value, (list, tuple)):
+        return [str(v) for v in value]
+    return [str(value)]

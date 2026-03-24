@@ -33,6 +33,7 @@
 #include <rocprofiler-sdk/marker/api_id.h>
 
 #include <fmt/format.h>
+#include <fmt/ranges.h>
 
 #include <unistd.h>
 #include <cstdint>
@@ -183,6 +184,14 @@ generate_stats(const output_config& /*cfg*/,
     }
 
     return get_stats(memory_allocation_stats);
+}
+
+stats_entry_t
+generate_stats(const output_config& /*cfg*/,
+               const metadata& /*tool_metadata*/,
+               const generator<tool_buffer_tracing_kfd_record_t>& /*data*/)
+{
+    return stats_entry_t{};
 }
 
 stats_entry_t

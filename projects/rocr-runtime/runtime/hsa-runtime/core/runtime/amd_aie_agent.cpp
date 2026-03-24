@@ -53,6 +53,7 @@
 #include "core/inc/amd_xdna_driver.h"
 #include "core/inc/driver.h"
 #include "core/inc/runtime.h"
+#include "core/util/os.h"
 
 namespace rocr {
 namespace AMD {
@@ -106,6 +107,10 @@ hsa_status_t AieAgent::IterateSupportedIsas(
     if (err != HSA_STATUS_SUCCESS) return err;
   }
   return HSA_STATUS_SUCCESS;
+}
+
+void AieAgent::InitDerivedCuid() {
+  // AIE devices do not have a derived CUID.
 }
 
 hsa_status_t AieAgent::GetInfo(hsa_agent_info_t attribute, void *value) const {
@@ -293,11 +298,8 @@ hsa_status_t AieAgent::QueueCreate(size_t size, hsa_queue_type32_t queue_type, u
 }
 
 void AieAgent::InitRegionList() {
-  /// TODO: Find a way to set the other memory properties in a reasonable way.
-  ///       This should be easier once the ROCt source is incorporated into the
-  ///       ROCr source. Since the AIE itself currently has no memory regions of
-  ///       its own all memory is just the system DRAM.
-  const uint64_t total_system_memory = XdnaDriver::GetSystemMemoryByteSize();
+  /// AIE itself currently has no memory regions of its own, all memory is just the system DRAM.
+  const uint64_t total_system_memory = os::HostTotalPhysicalMemory();
 
   /// For allocating kernel arguments or other objects that only need
   /// system memory.

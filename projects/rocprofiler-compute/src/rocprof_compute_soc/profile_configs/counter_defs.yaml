@@ -587,8 +587,10 @@ rocprofiler-sdk:
       - gfx940
       - gfx941
       - gfx942
-      - gfx950
       expression: (TCC_BUBBLE_sum*128 + (TCC_EA0_RDREQ_sum-TCC_BUBBLE_sum-TCC_EA0_RDREQ_32B_sum)*64 + TCC_EA0_RDREQ_32B_sum*32)/1024
+    - architectures:
+      - gfx950
+      expression: (TCC_EA0_RDREQ_128B_sum*128+TCC_EA0_RDREQ_64B_sum*64+TCC_EA0_RDREQ_32B_sum*32)/1024
     - architectures:
       - gfx10
       - gfx1010
@@ -612,12 +614,16 @@ rocprofiler-sdk:
     - architectures:
       - gfx90a
       expression: 1024*(WRITE_SIZE+FETCH_SIZE)/reduce(GRBM_GUI_ACTIVE,max)
+    # Approximation which excludes TCC_EA0_RDREQ_32B due to the hardware limitation on the number of counters that can be collected.
     - architectures:
       - gfx940
       - gfx941
       - gfx942
+      expression: (WRITE_SIZE*1024+TCC_BUBBLE_sum*128+(TCC_EA0_RDREQ_sum-TCC_BUBBLE_sum)*64)/reduce(GRBM_GUI_ACTIVE,max)
+    # Approximation which excludes TCC_EA0_RDREQ_32B due to the hardware limitation on the number of counters that can be collected.
+    - architectures:
       - gfx950
-      expression: (WRITE_SIZE*1024+TCC_BUBBLE_sum*128+(TCC_BUBBLE_sum-TCC_EA0_RDREQ_sum)*64)/reduce(GRBM_GUI_ACTIVE,max)
+      expression: (WRITE_SIZE*1024+TCC_EA0_RDREQ_128B_sum*128+TCC_EA0_RDREQ_64B_sum*64)/reduce(GRBM_GUI_ACTIVE,max)
   - name: FetchSize
     description: The total kilobytes fetched from the video memory. This is measured with all extra fetches and any cache
       or memory effects taken into account.
@@ -5624,6 +5630,20 @@ rocprofiler-sdk:
       - gfx942
       - gfx950
       expression: reduce(TA_ADDR_STALLED_BY_TD_CYCLES,sum)
+  - name: TA_ADDRESSER_STALLED_CYCLES
+    description: Total cycles the TA addresser is stalled.
+    properties: []
+    definitions:
+    - architectures:
+      - gfx950
+      block: TA
+  - name: TA_ADDRESSER_STALLED_CYCLES_sum
+    description: Total cycles the TA addresser is stalled. Sum over TA instances.
+    properties: []
+    definitions:
+    - architectures:
+      - gfx950
+      expression: reduce(TA_ADDRESSER_STALLED_CYCLES,sum)
   - name: TA_BUFFER_ATOMIC_WAVEFRONTS
     description: Number of buffer atomic wavefronts processed by TA.
     properties: []
@@ -9617,6 +9637,20 @@ rocprofiler-sdk:
       - gfx942
       - gfx950
       expression: reduce(TCP_UTCL1_TRANSLATION_MISS,sum)
+  - name: TCP_UTCL1_UTCL2_INFLIGHT
+    description: The sum of inflight UTCL1 to UTCL2 requests per cycle.
+    properties: []
+    definitions:
+    - architectures:
+      - gfx950
+      block: TCP
+  - name: TCP_UTCL1_UTCL2_INFLIGHT_sum
+    description: The sum of inflight UTCL1 to UTCL2 requests per cycle. Sum over TCP instances.
+    properties: []
+    definitions:
+    - architectures:
+      - gfx950
+      expression: reduce(TCP_UTCL1_UTCL2_INFLIGHT,sum)
   - name: TCP_VOLATILE
     description: Total number of L1 volatile pixels/buffers from TA
     properties: []
@@ -10072,6 +10106,20 @@ rocprofiler-sdk:
       - gfx942
       - gfx950
       expression: reduce(TD_LOAD_WAVEFRONT,sum)
+  - name: TD_OUTPUT_FIFO_FULL
+    description: TD output FIFO is full.
+    properties: []
+    definitions:
+    - architectures:
+      - gfx950
+      block: TD
+  - name: TD_OUTPUT_FIFO_FULL_sum
+    description: TD output FIFO is full. Sum over TD instances.
+    properties: []
+    definitions:
+    - architectures:
+      - gfx950
+      expression: reduce(TD_OUTPUT_FIFO_FULL,sum)
   - name: TD_SPI_STALL
     description: TD is stalled SPI vinit
     properties: []
@@ -10154,6 +10202,20 @@ rocprofiler-sdk:
       - gfx942
       - gfx950
       expression: reduce(TD_TC_STALL,sum)
+  - name: TD_TC_TD_FIFO_FULL
+    description: TD input FIFO from TCP is full.
+    properties: []
+    definitions:
+    - architectures:
+      - gfx950
+      block: TD
+  - name: TD_TC_TD_FIFO_FULL_sum
+    description: TD input FIFO from TCP is full. Sum over TD instances.
+    properties: []
+    definitions:
+    - architectures:
+      - gfx950
+      expression: reduce(TD_TC_TD_FIFO_FULL,sum)
   - name: TD_TD_BUSY
     description: TD is processing or waiting for data. Perf_Windowing not supported for this counter.
     properties: []

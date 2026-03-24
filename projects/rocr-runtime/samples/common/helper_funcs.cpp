@@ -26,10 +26,10 @@ THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND 
  * Prints full array if length is less than 256.
  * Prints Array name followed by elements.
  */
-template<typename T> 
+template<typename T>
 void printArray(
-    const std::string header, 
-    const T * data, 
+    const std::string header,
+    const T * data,
     const int width,
     const int height)
 {
@@ -45,9 +45,9 @@ void printArray(
     std::cout<<"\n";
 }
 
-template<typename T> 
+template<typename T>
 int fillRandom(
-         T * arrayPtr, 
+         T * arrayPtr,
          const int width,
          const int height,
          const T rangeMin,
@@ -64,22 +64,22 @@ int fillRandom(
         seed = (unsigned int)time(NULL);
 
     srand(seed);
-    double range = double(rangeMax - rangeMin) + 1.0; 
+    double range = double(rangeMax - rangeMin) + 1.0;
 
     /* random initialisation of input */
     for(int i = 0; i < height; i++)
         for(int j = 0; j < width; j++)
         {
             int index = i*width + j;
-            arrayPtr[index] = rangeMin + T(range*rand()/(RAND_MAX + 1.0)); 
+            arrayPtr[index] = rangeMin + T(range*rand()/(RAND_MAX + 1.0));
         }
 
     return HSA_SDK_SUCCESS;
 }
 
-template<typename T> 
+template<typename T>
 int fillPos(
-         T * arrayPtr, 
+         T * arrayPtr,
          const int width,
          const int height)
 {
@@ -100,9 +100,9 @@ int fillPos(
     return HSA_SDK_SUCCESS;
 }
 
-template<typename T> 
+template<typename T>
 int fillConstant(
-         T * arrayPtr, 
+         T * arrayPtr,
          const int width,
          const int height,
          const T val)
@@ -131,7 +131,7 @@ T roundToPowerOf2(T val)
 
     val--;
     for(int i = 0; i < bytes; i++)
-        val |= val >> (1<<i);  
+        val |= val >> (1<<i);
     val++;
 
     return val;
@@ -151,8 +151,8 @@ int isPowerOf2(T val)
 
 template<typename T>
 bool checkVal(
-    T input, 
-    T reference, 
+    T input,
+    T reference,
     std::string message,
     bool isAPIerror)
 {
@@ -162,7 +162,7 @@ bool checkVal(
     }
     else
     {
-        error(message);   
+        error(message);
         return false;
     }
 }
@@ -178,13 +178,13 @@ std::string toString(T t, std::ios_base &(*r)(std::ios_base&))
 
 
 bool
-compare(const float *refData, const float *data, 
+compare(const float *refData, const float *data,
                         const int length, const float epsilon)
 {
     float error = 0.0f;
     float ref = 0.0f;
 
-    for(int i = 1; i < length; ++i) 
+    for(int i = 1; i < length; ++i)
     {
         float diff = refData[i] - data[i];
         error += diff * diff;
@@ -202,13 +202,13 @@ compare(const float *refData, const float *data,
 }
 
 bool
-compare(const double *refData, const double *data, 
+compare(const double *refData, const double *data,
                         const int length, const double epsilon)
 {
     double error = 0.0;
     double ref = 0.0;
 
-    for(int i = 1; i < length; ++i) 
+    for(int i = 1; i < length; ++i)
     {
         double diff = refData[i] - data[i];
         error += diff * diff;
@@ -225,25 +225,25 @@ compare(const double *refData, const double *data,
     return error < epsilon;
 }
 
-void 
+void
 error(const char* errorMsg)
 {
     std::cout<<"Error: "<<errorMsg<<std::endl;
 }
 
-void 
+void
 error(std::string errorMsg)
 {
     std::cout<<"Error: "<<errorMsg<<std::endl;
 }
 
-void 
+void
 expectedError(const char* errorMsg)
 {
     std::cout<<"Expected Error: "<<errorMsg<<std::endl;
 }
 
-void 
+void
 expectedError(std::string errorMsg)
 {
     std::cout<<"Expected Error: "<<errorMsg<<std::endl;
@@ -251,62 +251,62 @@ expectedError(std::string errorMsg)
 
 
 /////////////////////////////////////////////////////////////////
-// Template Instantiations 
+// Template Instantiations
 /////////////////////////////////////////////////////////////////
-template 
-void printArray<short>(const std::string, 
+template
+void printArray<short>(const std::string,
         const short*, int, int);
-template 
-void printArray<unsigned char>(const std::string, 
+template
+void printArray<unsigned char>(const std::string,
         const unsigned char *, int, int);
-template 
-void printArray<unsigned int>(const std::string, 
+template
+void printArray<unsigned int>(const std::string,
         const unsigned int *, int, int);
-template 
-void printArray<int>(const std::string, 
+template
+void printArray<int>(const std::string,
         const int *, int, int);
-template 
-void printArray<long>(const std::string, 
+template
+void printArray<long>(const std::string,
         const long*, int, int);
-template 
-void printArray<float>(const std::string, 
+template
+void printArray<float>(const std::string,
         const float*, int, int);
-template 
-void printArray<double>(const std::string, 
+template
+void printArray<double>(const std::string,
         const double*, int, int);
 
-template 
-int fillRandom<unsigned char>(unsigned char* arrayPtr, 
-        const int width, const int height, 
-        unsigned char rangeMin, unsigned char rangeMax, unsigned int seed);	
-template 
-int fillRandom<unsigned int>(unsigned int* arrayPtr, 
-        const int width, const int height, 
-        unsigned int rangeMin, unsigned int rangeMax, unsigned int seed);	
-template 
-int fillRandom<int>(int* arrayPtr, 
-        const int width, const int height, 
-        int rangeMin, int rangeMax, unsigned int seed);	
-template 
-int fillRandom<long>(long* arrayPtr, 
-        const int width, const int height, 
-        long rangeMin, long rangeMax, unsigned int seed);	
-template 
-int fillRandom<float>(float* arrayPtr, 
-        const int width, const int height, 
-        float rangeMin, float rangeMax, unsigned int seed);	
-template 
-int fillRandom<double>(double* arrayPtr, 
-        const int width, const int height, 
-        double rangeMin, double rangeMax, unsigned int seed);	
+template
+int fillRandom<unsigned char>(unsigned char* arrayPtr,
+        const int width, const int height,
+        unsigned char rangeMin, unsigned char rangeMax, unsigned int seed);
+template
+int fillRandom<unsigned int>(unsigned int* arrayPtr,
+        const int width, const int height,
+        unsigned int rangeMin, unsigned int rangeMax, unsigned int seed);
+template
+int fillRandom<int>(int* arrayPtr,
+        const int width, const int height,
+        int rangeMin, int rangeMax, unsigned int seed);
+template
+int fillRandom<long>(long* arrayPtr,
+        const int width, const int height,
+        long rangeMin, long rangeMax, unsigned int seed);
+template
+int fillRandom<float>(float* arrayPtr,
+        const int width, const int height,
+        float rangeMin, float rangeMax, unsigned int seed);
+template
+int fillRandom<double>(double* arrayPtr,
+        const int width, const int height,
+        double rangeMin, double rangeMax, unsigned int seed);
 
-template 
+template
 short roundToPowerOf2<short>(short val);
-template 
+template
 unsigned int roundToPowerOf2<unsigned int>(unsigned int val);
-template 
+template
 int roundToPowerOf2<int>(int val);
-template 
+template
 long roundToPowerOf2<long>(long val);
 
 template
@@ -318,38 +318,38 @@ int isPowerOf2<int>(int val);
 template
 int isPowerOf2<long>(long val);
 
-template<> 
+template<>
 int fillPos<short>(short * arrayPtr, const int width, const int height);
-template<> 
+template<>
 int fillPos<unsigned int>(unsigned int * arrayPtr, const int width, const int height);
-template<> 
+template<>
 int fillPos<int>(int * arrayPtr, const int width, const int height);
-template<> 
+template<>
 int fillPos<long>(long * arrayPtr, const int width, const int height);
 
-template<> 
-int fillConstant<short>(short * arrayPtr, 
-        const int width, const int height, 
+template<>
+int fillConstant<short>(short * arrayPtr,
+        const int width, const int height,
         const short val);
-template<> 
-int fillConstant(unsigned int * arrayPtr, 
-        const int width, const int height, 
+template<>
+int fillConstant(unsigned int * arrayPtr,
+        const int width, const int height,
         const unsigned int val);
-template<> 
-int fillConstant(int * arrayPtr, 
-        const int width, const int height, 
+template<>
+int fillConstant(int * arrayPtr,
+        const int width, const int height,
         const int val);
-template<> 
-int fillConstant(long * arrayPtr, 
-        const int width, const int height, 
+template<>
+int fillConstant(long * arrayPtr,
+        const int width, const int height,
         const long val);
-template<> 
-int fillConstant(long * arrayPtr, 
-        const int width, const int height, 
+template<>
+int fillConstant(long * arrayPtr,
+        const int width, const int height,
         const long val);
-template<> 
-int fillConstant(long * arrayPtr, 
-        const int width, const int height, 
+template<>
+int fillConstant(long * arrayPtr,
+        const int width, const int height,
         const long val);
 
 

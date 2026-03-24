@@ -45,6 +45,7 @@ public:
     void finalize_processing();
 
     void handle(const kernel_dispatch_sample& sample);
+    void handle(const scratch_memory_sample& sample);
     void handle(const memory_copy_sample& sample);
     void handle(const memory_allocate_sample& sample);
     void handle(const region_sample& sample);
@@ -53,6 +54,7 @@ public:
     void handle(const amd_smi_sample& sample);
     void handle(const cpu_freq_sample& sample);
     void handle(const backtrace_region_sample& sample);
+    void handle(const ainic_sample& sample);
 
 private:
     using primary_key = size_t;

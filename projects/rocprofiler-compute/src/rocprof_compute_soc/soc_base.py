@@ -32,10 +32,7 @@ from abc import abstractmethod
 from pathlib import Path
 from typing import Any, Optional
 
-import yaml
-
 import config
-from roofline import Roofline
 from utils.amdsmi_interface import amdsmi_ctx, get_gpu_model, get_mem_max_clock
 from utils.logger import (
     console_debug,
@@ -53,9 +50,12 @@ from utils.utils import (
     add_counter_extra_config_input_yaml,
     convert_metric_id_to_panel_info,
     get_panel_alias,
+    is_only_pc_sampling,
     is_tcc_channel_counter,
     parse_sets_yaml,
+    resolve_rocm_library_path,
 )
+from vendored import yaml
 
 
 class OmniSoC_Base:
@@ -69,9 +69,6 @@ class OmniSoC_Base:
         self.__perfmon_config: dict[str, int] = {}
         self.__compatible_profilers: list[str] = []  # Store SoC compatible profilers
         self.populate_mspec()
-        # Create roofline object if mode is provided; skip for --specs
-        if hasattr(self.__args, "mode") and self.__args.mode:
-            self.roofline_obj = Roofline(args, self._mspec)
 
     def __hash__(self) -> int:
         return hash(self.__arch)
@@ -259,8 +256,16 @@ class OmniSoC_Base:
 
         texts: list[str] = []
         if not filter_blocks:
+            # Do not profile block 30 unless explicitly requested
+            exclude_file_ids: set[str] = set()
+            if not args.membw_analysis:
+                exclude_file_ids.add("3000")
+
             # Select all sections by default
-            for filename in config_filename_dict.values():
+            for file_id, filename in config_filename_dict.items():
+                if file_id in exclude_file_ids:
+                    continue
+
                 with open(filename) as stream:
                     texts.append(stream.read())
 
@@ -343,6 +348,13 @@ class OmniSoC_Base:
     def perfmon_filter(self) -> list[str]:
         """Filter default performance counter set based on user arguments"""
         counters, filter_blocks = self.detect_counters()
+
+        if is_only_pc_sampling(filter_blocks):
+            console_log(
+                "profiling",
+                "PC sampling only mode -- skipping counter collection setup",
+            )
+            return filter_blocks
 
         # SQ_ACCUM_PREV_HIRES will be injected for level counters later on
         counters = counters - {"SQ_ACCUM_PREV_HIRES"}
@@ -433,8 +445,11 @@ class OmniSoC_Base:
             except ImportError:
                 console_error("Failed to import rocprofiler-sdk avail module.")
 
-        avail.loadLibrary.libname = str(
-            Path(args.rocprofiler_sdk_tool_path).parent / "librocprofv3-list-avail.so"
+        avail.loadLibrary.libname = resolve_rocm_library_path(
+            str(
+                Path(args.rocprofiler_sdk_tool_path).parent
+                / "librocprofv3-list-avail.so"
+            )
         )
         counters = avail.get_counters()
         rocprof_counters = {
@@ -668,14 +683,6 @@ class OmniSoC_Base:
             # Dynamic import to isolate hip dependency during profile time only
             from utils import benchmark
 
-            pmc_path = Path(self.get_args().path) / "pmc_perf.csv"
-            if not pmc_path.is_file():
-                console_error(
-                    "roofline",
-                    "Incomplete or missing profiling data. Skipping roofline.",
-                    exit=False,
-                )
-                return
             console_log(
                 "roofline", f"Checking for roofline.csv in {self.get_args().path}"
             )
@@ -691,25 +698,20 @@ class OmniSoC_Base:
                     )
                     return
 
-            # Validate roofline.csv before post-processing
             is_valid, error_msg = validate_roofline_csv(self.get_args().path)
             if not is_valid:
                 console_error(
                     "roofline",
-                    f"Roofline post-processing skipped: {error_msg}",
+                    f"Invalid roofline.csv: {error_msg}",
                     exit=False,
                 )
                 return
 
-            self.roofline_obj.post_processing()
-
-    @abstractmethod
-    def analysis_setup(self, roofline_parameters: Optional[dict[str, Any]]) -> None:
-        """Perform any SoC-specific setup prior to analysis."""
-        console_debug("analysis", f"perform SoC analysis setup for {self.__arch}")
-        if roofline_parameters:
-            self.roofline_obj = Roofline(
-                self.get_args(), self._mspec, roofline_parameters
+            console_log(
+                "roofline",
+                f"Roofline data saved to {self.get_args().path}/roofline.csv\n"
+                f"  Run 'rocprof-compute analyze -p {self.get_args().path}' "
+                f"for charts",
             )
 
 

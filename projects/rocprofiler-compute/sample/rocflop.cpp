@@ -112,8 +112,8 @@ __global__ void matmul_fp32_throughput(float* inputs, vec4<float>* outputs, int 
 }
 #endif // !defined(__gfx906__)
 
-// SMFMAC (Sparse MFMA) instructions are only available on gfx90a and later (not on gfx906 or gfx908)
-#if !defined(__gfx906__) && !defined(__gfx908__)
+// SMFMAC (Sparse MFMA) instructions are only available on gfx940 and later (not on gfx906, gfx908, or gfx90a)
+#if !defined(__gfx906__) && !defined(__gfx908__) && !defined(__gfx90a__)
 __global__ void sparse_matmul_fp16_throughput(vec4<float16>* input0, vec8<float16>* input1, vec4<float>* outputs, int count)
 {
     int grid_size = gridDim.x * blockDim.x;
@@ -149,11 +149,16 @@ __global__ void sparse_matmul_fp16_throughput(vec4<float16>* input0, vec8<float1
 
     outputs[tid] = accum0 + accum1 + accum2 + accum3;
 }
-#endif // !defined(__gfx906__) && !defined(__gfx908__)
+#endif // !defined(__gfx906__) && !defined(__gfx908__) && !defined(__gfx90a__)
+
+int g_current_device = -1;
 
 void HIP_CALL(hipError_t err)
 {
     if(err != hipSuccess) {
+        if(g_current_device >= 0) {
+            std::cout << "[GPU " << g_current_device << "] ";
+        }
         std::cout << "HIP Error: " << (int)err << " " << hipGetErrorString(err) << std::endl;
         exit(1);
     }
@@ -322,7 +327,7 @@ template<typename matT, typename accumT> double matmul_throughput_test(int devic
 }
 #endif // !defined(__gfx906__)
 
-#if !defined(__gfx906__) && !defined(__gfx908__)
+#if !defined(__gfx906__) && !defined(__gfx908__) && !defined(__gfx90a__)
 template<typename matT, typename accumT> double sparse_matmul_throughput_test(int device, int count, int runs = 1)
 {
     const int wave_size = 64;
@@ -376,7 +381,7 @@ template<typename matT, typename accumT> double sparse_matmul_throughput_test(in
 
     return flops;
 }
-#endif // !defined(__gfx906__) && !defined(__gfx908__)
+#endif // !defined(__gfx906__) && !defined(__gfx908__) && !defined(__gfx90a__)
 
 struct Result {
     int device = -1;
@@ -421,12 +426,13 @@ void print_result(const Result& res, uint32_t mask)
 
 Result run_tests(int device, int runs, uint32_t mask)
 {
+    g_current_device = device;
     int device_count;
 
     HIP_CALL(hipGetDeviceCount(&device_count));
 
     if(device >= device_count) {
-        std::cout << "Device " << device << " does not exist. Skipping..." << std::endl;
+        std::cout << "[GPU " << device << "] Device does not exist. Skipping..." << std::endl;
         exit(1);
     }
 
@@ -480,17 +486,17 @@ Result run_tests(int device, int runs, uint32_t mask)
     }
 #endif
 
-#if !defined(__gfx906__) && !defined(__gfx908__)
+#if !defined(__gfx906__) && !defined(__gfx908__) && !defined(__gfx90a__)
     if(mask & SMATRIX_FP16) {
-        // SMFMAC only available on gfx90a (MI200) and later, not on gfx906 or gfx908
-        if(arch.major == 0x9 && (arch.minor > 0x4 || (arch.minor == 0 && arch.rev >= 0xa))) {
+        // SMFMAC only available on gfx940 (MI300) and later, not on gfx906, gfx908, or gfx90a
+        if(arch.major == 0x9 && arch.minor >= 0x4) {
             res.smfmac_fp16 = sparse_matmul_throughput_test<float16, float>(device, 4096, runs);
         } else {
             res.smfmac_fp16 = 0;
         }
     }
 #else
-    // SMFMAC not available when compiling for gfx906 or gfx908
+    // SMFMAC not available when compiling for gfx906, gfx908, or gfx90a
     if(mask & SMATRIX_FP16) {
         res.smfmac_fp16 = 0;
     }
@@ -525,8 +531,37 @@ pid_t fork_process(int device, int runs, uint32_t mask, int fd)
     };
 
     execv("/proc/self/exe", args);
-    std::cout << "execv() failed: " << std::strerror(errno) << std::endl;
+    std::cout << "[GPU " << device << "] execv() failed: " << std::strerror(errno) << std::endl;
     exit(1);
+}
+
+std::vector<Result> read_records_from_pipe(int fd[2], size_t expected_count)
+{
+    int flags = fcntl(fd[0], F_GETFL, 0);
+    fcntl(fd[0], F_SETFL, flags | O_NONBLOCK);
+
+    std::vector<Result> results(expected_count);
+    ssize_t bytes_read = read(fd[0], results.data(), results.size() * sizeof(Result));
+
+    if(bytes_read < 0) {
+        std::cout << "Error reading results from child process(es): "
+                  << std::strerror(errno) << std::endl;
+        return {};
+    }
+
+    if(bytes_read == 0) {
+        std::cout << "No results received from child process(es)." << std::endl;
+        return {};
+    }
+
+    if(bytes_read % sizeof(Result) != 0) {
+        std::cout << "Warning: Incomplete result data received from child process(es); "
+                  << "some data may be ignored." << std::endl;
+    }
+
+    int count = static_cast<int>(bytes_read / sizeof(Result));
+    results.resize(count);
+    return results;
 }
 
 void run(std::vector<int>& devices, int runs, uint32_t mask)
@@ -549,24 +584,31 @@ void run(std::vector<int>& devices, int runs, uint32_t mask)
     }
 
     // Wait for all processes to finish
-    for(auto pid : pids) {
+    int failed = 0;
+    for(size_t i = 0; i < pids.size(); i++) {
         int status;
-        waitpid(pid, &status, 0);
+        waitpid(pids[i], &status, 0);
+        if(WIFEXITED(status) && WEXITSTATUS(status) != 0) {
+            std::cout << "Child process for device " << devices[i]
+                      << " exited with error (code " << WEXITSTATUS(status) << ")." << std::endl;
+            failed++;
+        } else if(WIFSIGNALED(status)) {
+            std::cout << "Child process for device " << devices[i]
+                      << " killed by signal " << WTERMSIG(status) << "." << std::endl;
+            failed++;
+        }
     }
 
-    // Set the read to non-blocking
-    int flags = fcntl(fd[0], F_GETFL, 0);
-    fcntl(fd[0], F_SETFL, flags | O_NONBLOCK);
+    if(failed == (int)pids.size()) {
+        std::cout << "All " << pids.size() << " child process(es) failed. No results to report." << std::endl;
+        exit(1);
+    }
 
-    // Read records from pipe
-    std::vector<Result> results(pids.size());
-    int count = read(fd[0], results.data(), results.size() * sizeof(Result)) / sizeof(Result);
-
-    results.resize(count);
+    std::vector<Result> results = read_records_from_pipe(fd, pids.size());
 
     // Sort results by GPU id
     std::sort(results.begin(), results.end());
- 
+
     // Print results
     for(auto r : results) {
         std::cout << std::endl << "GPU " << r.device << std::endl;
@@ -585,6 +627,12 @@ void run(std::vector<int>& devices, int runs, uint32_t mask)
     }
     std::cout << std::endl << "System total" << std::endl;
     print_result(total, mask);
+
+    if(failed > 0) {
+        std::cout << std::endl << failed << " of " << pids.size()
+                  << " child process(es) failed." << std::endl;
+        exit(1);
+    }
 }
 
 

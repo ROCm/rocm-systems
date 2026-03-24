@@ -1,26 +1,8 @@
 /*
-Copyright © Advanced Micro Devices, Inc., or its affiliates.
-
-SPDX-License-Identifier: MIT
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #pragma once
 
@@ -75,7 +57,7 @@ static const float ieee754_nan = std::numeric_limits<float>::quiet_NaN();
 static const float ieee754_inf = std::numeric_limits<float>::infinity();
 
 __OCP_FP_HOST_DEVICE_STATIC__ uint32_t U32(float f) {
-  static_assert(sizeof(uint32_t) == sizeof(float));
+  static_assert(sizeof(uint32_t) == sizeof(float), "");
   union {
     float f32;
     uint32_t ui32;
@@ -84,7 +66,7 @@ __OCP_FP_HOST_DEVICE_STATIC__ uint32_t U32(float f) {
 }
 
 __OCP_FP_HOST_DEVICE_STATIC__ float F32(uint32_t u32) {
-  static_assert(sizeof(uint32_t) == sizeof(float));
+  static_assert(sizeof(uint32_t) == sizeof(float), "");
   union {
     uint32_t ui32;
     float f32;
@@ -464,7 +446,7 @@ template <typename T> __OCP_FP_HOST_DEVICE_STATIC__ T makezero(Encoding E, uint3
 template <typename T, Encoding E, bool sat>
 __OCP_FP_HOST_DEVICE_STATIC__ T to_float(uint32_t u32, int8_t scale_exp) {
   // We do not support bf16/fp16 <-> float
-  static_assert(E != Encoding::IEEE754 && E != Encoding::E5M10 && E != Encoding::E8M7);
+  static_assert(E != Encoding::IEEE754 && E != Encoding::E5M10 && E != Encoding::E8M7, "");
 
   const auto& enc = encodings[(size_t)E];
   const auto dstE = []() -> Encoding {
@@ -560,9 +542,9 @@ __OCP_FP_HOST_DEVICE_STATIC__ T to_float(uint32_t u32, int8_t scale_exp) {
 template <typename T, Encoding E, bool sat>
 __OCP_FP_HOST_DEVICE_STATIC__ uint32_t from_float_sr(T f, uint32_t seed, int8_t scale_exp) {
   // We do not support bf16/fp16 <-> float
-  static_assert(E != Encoding::IEEE754 && E != Encoding::E5M10 && E != Encoding::E8M7);
-  static_assert(sizeof(__amd_fp16_storage_t[2]) == sizeof(float));
-  static_assert(sizeof(__amd_bf16_storage_t[2]) == sizeof(float));
+  static_assert(E != Encoding::IEEE754 && E != Encoding::E5M10 && E != Encoding::E8M7, "");
+  static_assert(sizeof(__amd_fp16_storage_t[2]) == sizeof(float), "");
+  static_assert(sizeof(__amd_bf16_storage_t[2]) == sizeof(float), "");
   union {
     float f32;
     __amd_fp16_storage_t fp16[2];
@@ -674,9 +656,9 @@ __OCP_FP_HOST_DEVICE_STATIC__ uint32_t from_float_sr(T f, uint32_t seed, int8_t 
 template <typename T, Encoding E, bool sat>
 __OCP_FP_HOST_DEVICE_STATIC__ uint32_t from_float(T f, int8_t scale_exp) {
   // We do not support bf16/fp16 <-> float
-  static_assert(E != Encoding::IEEE754 && E != Encoding::E5M10 && E != Encoding::E8M7);
-  static_assert(sizeof(__amd_fp16_storage_t[2]) == sizeof(float));
-  static_assert(sizeof(__amd_bf16_storage_t[2]) == sizeof(float));
+  static_assert(E != Encoding::IEEE754 && E != Encoding::E5M10 && E != Encoding::E8M7, "");
+  static_assert(sizeof(__amd_fp16_storage_t[2]) == sizeof(float), "");
+  static_assert(sizeof(__amd_bf16_storage_t[2]) == sizeof(float), "");
   union {
     float f32;
     __amd_fp16_storage_t fp16[2];
@@ -836,7 +818,7 @@ __OCP_FP_HOST_DEVICE_STATIC__ OutType fp6_cvt_packedx32(InType in, int8_t scale 
     unsigned long long padded;
   } __attribute__((packed));
 
-  static_assert(sizeof(other_type) == sizeof(fp6x32_packed));
+  static_assert(sizeof(other_type) == sizeof(fp6x32_packed), "");
   union {
     other_type o;
     fp6x32_packed fp6;

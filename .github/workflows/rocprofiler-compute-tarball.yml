@@ -7,14 +7,26 @@ on:
     paths:
       - '.github/workflows/rocprofiler-compute-tarball.yml'
       - 'projects/rocprofiler-compute/**'
-      - '!projects/rocprofiler-compute/*.md'
+      - '!**/*.md'
+      - '!**/*.rtf'
+      - '!**/*.rst'
+      - '!**/.markdownlint-ci2.yaml'
+      - '!**/.readthedocs.yaml'
+      - '!**/.spellcheck.local.yaml'
+      - '!**/.wordlist.txt'
       - '!projects/rocprofiler-compute/docs/**'
       - '!projects/rocprofiler-compute/docker/**'
   pull_request:
     paths:
       - '.github/workflows/rocprofiler-compute-tarball.yml'
       - 'projects/rocprofiler-compute/**'
-      - '!projects/rocprofiler-compute/*.md'
+      - '!**/*.md'
+      - '!**/*.rtf'
+      - '!**/*.rst'
+      - '!**/.markdownlint-ci2.yaml'
+      - '!**/.readthedocs.yaml'
+      - '!**/.spellcheck.local.yaml'
+      - '!**/.wordlist.txt'
       - '!projects/rocprofiler-compute/docs/**'
       - '!projects/rocprofiler-compute/docker/**'
 
@@ -47,6 +59,11 @@ jobs:
         with:
           sparse-checkout: projects/rocprofiler-compute
           ref: ${{ steps.sha-mode.sha }}
+          set-safe-directory: true
+
+      - name: Configure git safe directory
+        run: git config --global --add safe.directory '*'
+
       - name: Install ROCm Dependencies
         shell: bash
         run: |

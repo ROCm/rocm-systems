@@ -93,8 +93,36 @@ if(NOT LibElf_FOUND)
   find_package(LibElf REQUIRED)
 endif()
 
+## Find AMD CUID library.
+set(AMDCUID_ROOT "/opt/amdcuid" CACHE PATH "Path to AMDCUID installation")
+find_library(AMDCUID_LIB
+  NAMES amdcuid_shared
+  PATHS ${AMDCUID_ROOT}/lib
+  NO_DEFAULT_PATH
+)
+find_path(AMDCUID_INCLUDE_DIR
+  NAMES amd_cuid.h
+  PATHS ${AMDCUID_ROOT}/include
+  NO_DEFAULT_PATH
+)
+if (AMDCUID_LIB AND AMDCUID_INCLUDE_DIR) 
+  message(STATUS "Found AMDCUID lib: ${AMDCUID_LIB}")
+  message(STATUS "Found AMDCUID header: ${AMDCUID_INCLUDE_DIR}")
+  set(AMDCUID_FOUND TRUE)
+else()
+  message(WARNING "AMDCUID Library not found")
+  set(AMDCUID_FOUND FALSE)
+endif()
+
 ## Create the rocr target.
 add_library( ${CORE_RUNTIME_TARGET} "" )
+
+## Enable parallel compilation on MSVC.
+if(MSVC)
+  if(DEFINED ENV{CMAKE_BUILD_PARALLEL_LEVEL})
+    target_compile_options(${CORE_RUNTIME_TARGET} PRIVATE /MP$ENV{CMAKE_BUILD_PARALLEL_LEVEL})
+  endif()
+endif()
 
 if (UNIX)
   pkg_check_modules(drm REQUIRED IMPORTED_TARGET libdrm)
@@ -217,6 +245,7 @@ set ( SRCS core/driver/driver.cpp
            core/runtime/cache.cpp
            core/runtime/svm_profiler.cpp
            core/runtime/thunk_loader.cpp
+           core/runtime/counted_queue_manager.cpp
            core/common/hsa_table_interface.cpp
            loader/executable.cpp
            libamdhsacode/amd_elf_image.cpp
@@ -260,6 +289,16 @@ if (${PC_SAMPLING_SUPPORT})
   set( PCS_SRCS pcs/hsa_ven_amd_pc_sampling.cpp pcs/pcs_runtime.cpp )
 
   target_sources( ${CORE_RUNTIME_TARGET} PRIVATE ${PCS_SRCS} )
+endif()
+
+if (${AMDCUID_FOUND})
+  find_package(OpenSSL REQUIRED) # Required by CUID library
+  target_include_directories(${CORE_RUNTIME_TARGET} PRIVATE ${AMDCUID_INCLUDE_DIR})
+  target_link_libraries(${CORE_RUNTIME_TARGET} PRIVATE ${AMDCUID_LIB} OpenSSL::Crypto)
+  set_target_properties(${CORE_RUNTIME_TARGET} PROPERTIES
+              BUILD_RPATH "${AMDCUID_ROOT}/lib"
+              INSTALL_RPATH "${AMDCUID_ROOT}/lib")
+  target_compile_definitions(${CORE_RUNTIME_TARGET} PRIVATE HSA_ENABLE_AMDCUID_SUPPORT)
 endif()
 
 if (NOT DEFINED IMAGE_SUPPORT AND CMAKE_SYSTEM_PROCESSOR MATCHES "i?86|x86_64|amd64|AMD64|loongarch64")
@@ -388,8 +427,13 @@ if( NOT ${BUILD_SHARED_LIBS} )
 
   ## Bind to source build target interface but not its link requirements.
   target_include_directories( ${CORE_RUNTIME_NAME} INTERFACE $<TARGET_PROPERTY:${CORE_RUNTIME_NAME}::${CORE_RUNTIME_TARGET},INTERFACE_INCLUDE_DIRECTORIES> )
-  target_link_libraries ( ${CORE_RUNTIME_NAME} INTERFACE -Wl,$<INSTALL_PREFIX>/${CMAKE_INSTALL_LIBDIR}/cmake/${CORE_RUNTIME_NAME}/${LNKSCR}
-    -Wl,--whole-archive $<TARGET_FILE:${CORE_RUNTIME_NAME}::${CORE_RUNTIME_TARGET}> -Wl,--no-whole-archive)
+  if (UNIX)
+    target_link_libraries ( ${CORE_RUNTIME_NAME} INTERFACE -Wl,$<INSTALL_PREFIX>/${CMAKE_INSTALL_LIBDIR}/cmake/${CORE_RUNTIME_NAME}/${LNKSCR}
+      -Wl,--whole-archive $<TARGET_FILE:${CORE_RUNTIME_NAME}::${CORE_RUNTIME_TARGET}> -Wl,--no-whole-archive)
+  else()
+    # Windows: Link the static library directly without linker script
+    target_link_libraries ( ${CORE_RUNTIME_NAME} INTERFACE ${CORE_RUNTIME_TARGET})
+  endif()
   add_dependencies( ${CORE_RUNTIME_NAME} ${CORE_RUNTIME_TARGET} )
 
   ## Add external link requirements.
@@ -397,7 +441,7 @@ if( NOT ${BUILD_SHARED_LIBS} )
   if (UNIX)
     target_link_libraries ( ${CORE_RUNTIME_NAME} INTERFACE elf::elf dl pthread rt )
   else()
-    target_link_libraries ( ${CORE_RUNTIME_NAME} INTERFACE rt )
+    target_link_libraries ( ${CORE_RUNTIME_NAME} INTERFACE Ws2_32 )
   endif()
   install ( TARGETS ${CORE_RUNTIME_NAME} EXPORT ${CORE_RUNTIME_NAME}Targets )
 endif()
@@ -456,9 +500,9 @@ if( NOT ${BUILD_SHARED_LIBS} )
     install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules/FindLibElf.cmake ${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules/COPYING-CMAKE-SCRIPTS
       DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${CORE_RUNTIME_NAME}
       COMPONENT dev)
+    # Linker script (defines function aliases)
+    install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/${LNKSCR}
+      DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${CORE_RUNTIME_NAME}
+      COMPONENT dev)
   endif()
-  # Linker script (defines function aliases)
-  install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/${LNKSCR}
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${CORE_RUNTIME_NAME}
-    COMPONENT dev)
 endif()

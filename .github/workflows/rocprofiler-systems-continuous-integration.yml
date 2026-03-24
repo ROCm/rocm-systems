@@ -19,30 +19,44 @@ on:
     paths:
       - '.github/workflows/rocprofiler-systems-continuous-integration.yml'
       - 'projects/rocprofiler-systems/**'
-      - '!projects/rocprofiler-systems/*.md'
+      - '!**/*.md'
+      - '!**/*.rtf'
+      - '!**/*.rst'
+      - '!**/.markdownlint-ci2.yaml'
+      - '!**/.readthedocs.yaml'
+      - '!**/.spellcheck.local.yaml'
+      - '!**/.wordlist.txt'
       - '!projects/rocprofiler-systems/docs/**'
       - '!projects/rocprofiler-systems/source/docs/**'
       - '!projects/rocprofiler-systems/source/python/gui/**'
       - '!projects/rocprofiler-systems/docker/**'
-      - '!projects/rocprofiler-systems/.wordlist.txt'
       - '!projects/rocprofiler-systems/CMakePresets.json'
   pull_request:
     paths:
       - '.github/workflows/rocprofiler-systems-continuous-integration.yml'
       - 'projects/rocprofiler-systems/**'
-      - '!projects/rocprofiler-systems/*.md'
+      - '!**/*.md'
+      - '!**/*.rtf'
+      - '!**/*.rst'
+      - '!**/.markdownlint-ci2.yaml'
+      - '!**/.readthedocs.yaml'
+      - '!**/.spellcheck.local.yaml'
+      - '!**/.wordlist.txt'
       - '!projects/rocprofiler-systems/docs/**'
       - '!projects/rocprofiler-systems/source/docs/**'
       - '!projects/rocprofiler-systems/source/python/gui/**'
       - '!projects/rocprofiler-systems/docker/**'
-      - '!projects/rocprofiler-systems/.wordlist.txt'
       - '!projects/rocprofiler-systems/CMakePresets.json'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   ROCPROFSYS_CI: ON
   ROCPROFSYS_TMPDIR: "%env{PWD}%/testing-tmp"
   ROCM_PATH: "/opt/rocm"
-  ROCM_VERSION: "7.1.0"
+  ROCM_VERSION: "7.2.0"
 
 jobs:
   prepare_matrix:
@@ -51,7 +65,7 @@ jobs:
       matrix: ${{ steps.generate_matrix.outputs.matrix }}
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           sparse-checkout: projects/rocprofiler-systems/.github
 
@@ -83,6 +97,7 @@ jobs:
       packages: read
     container:
       image: ghcr.io/rocm/rocprofiler-ubuntu:${{ matrix.system.os-release }}-systems-ci-${{ matrix.system.arch }}
+      # --env-file /etc/podinfo/gha-gpu-isolation-settings - Required for GPU isolation on OSSCI MIXXX runners
       options:
         --privileged
         --ipc host
@@ -90,9 +105,10 @@ jobs:
         --device /dev/kfd
         --device /dev/dri
         --cap-add CAP_SYS_ADMIN
+        --env-file /etc/podinfo/gha-gpu-isolation-settings
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           sparse-checkout: projects/rocprofiler-systems/
 
@@ -174,7 +190,6 @@ jobs:
             -DROCPROFSYS_BUILD_CI=ON \
             -DROCPROFSYS_BUILD_TESTING=ON \
             -DROCPROFSYS_USE_PYTHON=ON \
-            -DROCPROFSYS_USE_ROCM=ON \
             -DROCPROFSYS_MAX_THREADS=64 \
             -- \
             -L "rocm" \

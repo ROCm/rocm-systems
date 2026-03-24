@@ -40,13 +40,9 @@ struct ncclComm;
 #define CHANNEL_MASK_OFFSET(nranks, connIndex) (nranks * (connIndex == NCCL_CONN_IDX_P2P_NET ? NCCL_CONN_IDX_P2P_NET : 0))
 
 #define CONNECT_SIZE 256
-#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-#define NCCL_MAX_PAGE_SIZE (512L * 1024L)
-#define NCCL_REC_PAGE_SIZE (4L * 1024L)
-#else
 #define NCCL_MAX_PAGE_SIZE (512L * 1024L * 1024L)
 #define NCCL_REC_PAGE_SIZE (2L * 1024L * 1024L)
-#endif
+
 struct ncclConnect {
   char data[CONNECT_SIZE];
 };
@@ -152,13 +148,9 @@ ncclResult_t ncclRegisterCollBuffers(struct ncclComm* comm, struct ncclTaskColl*
 ncclResult_t ncclRegisterCollNvlsBuffers(struct ncclComm* comm, struct ncclTaskColl* info, void* outRegBufSend[NCCL_MAX_LOCAL_RANKS], void* outRegBufRecv[NCCL_MAX_LOCAL_RANKS], struct ncclIntruQueue<struct ncclCommCallback, &ncclCommCallback::next>* cleanupQueue, bool* regNeedConnect);
 ncclResult_t ncclNvlsRegResourcesQuery(struct ncclComm* comm, struct ncclTaskColl* info, int* recChannels);
 
-ncclResult_t ncclIpcSymmetricInit(struct ncclComm* comm);
-ncclResult_t ncclIpcSymmetricMap(struct ncclComm* comm, size_t offset, size_t size, CUmemGenericAllocationHandle memHandle, void** symPtr);
-ncclResult_t ncclIpcSymmetricFree(struct ncclComm* comm, size_t size, void* symPtr);
-ncclResult_t ncclIpcSymmetricFinalize(struct ncclComm* comm);
-ncclResult_t ncclNvlsSymmetricInit(struct ncclComm* comm);
-ncclResult_t ncclNvlsSymmetricMap(struct ncclComm* comm, size_t offset, size_t ucsize, void* ucaddr);
-ncclResult_t ncclNvlsSymmetricFree(struct ncclComm* comm, size_t ucsize, void* ucaddr);
-ncclResult_t ncclNvlsSymmetricFinalize(struct ncclComm* comm);
+#if CUDART_VERSION >= 12010
+ncclResult_t ncclNvlsGroupCreate(struct ncclComm *comm, CUmulticastObjectProp *prop, int rank, unsigned int nranks, CUmemGenericAllocationHandle *mcHandle, char *shareableHandle);
+ncclResult_t ncclNvlsGroupConnect(struct ncclComm *comm, char *shareableHandle, int rank, CUmemGenericAllocationHandle *mcHandle);
+#endif
 
 #endif

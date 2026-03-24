@@ -128,7 +128,7 @@ InterceptQueue::InterceptQueue(std::unique_ptr<Queue> queue)
   amd_queue_.hsa_queue.base_address = reinterpret_cast<void*>(&buffer_[0]);
 
   // Pre-allocate staging buffer with queue size
-  staging_buffer_.resize(256);
+  staging_buffer_.resize(wrapped->amd_queue_.hsa_queue.size);
 
   // Fill the ring buffer with invalid packet headers.
   // Leave packet content uninitialized to help trigger application errors.
@@ -438,7 +438,9 @@ void InterceptQueue::StoreRelaxed(hsa_signal_value_t value) {
 hsa_status_t InterceptQueue::GetInfo(hsa_queue_info_attribute_t attribute, void* value) {
   switch (attribute) {
     case HSA_AMD_QUEUE_INFO_AGENT:
-    case HSA_AMD_QUEUE_INFO_DOORBELL_ID: {
+    case HSA_AMD_QUEUE_INFO_DOORBELL_ID: 
+    case HSA_QUEUE_INFO_USE_COUNT:
+    case HSA_QUEUE_INFO_HW_ID: {
       if (!AMD::AqlQueue::IsType(wrapped.get())) return HSA_STATUS_ERROR_INVALID_QUEUE;
 
       AMD::AqlQueue* aqlQueue = static_cast<AMD::AqlQueue*>(wrapped.get());

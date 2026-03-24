@@ -22,7 +22,6 @@
 
 #include "library/rocm.hpp"
 #include "core/config.hpp"
-#include "core/debug.hpp"
 #include "core/dynamic_library.hpp"
 #include "core/gpu.hpp"
 #include "library/amd_smi.hpp"
@@ -42,9 +41,7 @@
 #include <mutex>
 #include <tuple>
 
-#if defined(ROCPROFSYS_USE_ROCM) && ROCPROFSYS_USE_ROCM > 0
-#    include <rocprofiler-sdk/rocprofiler.h>
-#endif
+#include <rocprofiler-sdk/rocprofiler.h>
 
 namespace rocprofsys
 {

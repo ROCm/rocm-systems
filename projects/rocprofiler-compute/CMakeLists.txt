@@ -83,7 +83,8 @@ endif()
 message(STATUS "Installation path: ${CMAKE_INSTALL_PREFIX}")
 
 option(CHECK_PYTHON_DEPS "Verify necessary python dependencies" ON)
-if(CHECK_PYTHON_DEPS)
+option(STANDALONEBINARY "Whether to build standalone binary" OFF)
+if(CHECK_PYTHON_DEPS AND NOT STANDALONEBINARY)
     # Python 3 is required
     message(STATUS "Detecting Python interpreter...")
     find_package(Python3 3.9 COMPONENTS Interpreter REQUIRED)
@@ -190,7 +191,7 @@ if(LOCALHOST MATCHES "TheraS01|.*\.thera\.amd\.com|thera-hn")
     file(READ ${PROJECT_SOURCE_DIR}/cmake/modfile.thera.mod mod_additions)
     file(
         APPEND
-            ${PROJECT_BINARY_DIR}/${MOD_INSTALL_PATH}/${ROCPROFCOMPUTE_FULL_VERSION}.lua
+        ${PROJECT_BINARY_DIR}/${MOD_INSTALL_PATH}/${ROCPROFCOMPUTE_FULL_VERSION}.lua
         ${mod_additions}
     )
     list(POP_BACK CMAKE_MESSAGE_INDENT)
@@ -212,21 +213,21 @@ include(CTest)
 option(ENABLE_COVERAGE "Enable code coverage" OFF)
 set(COV_OPTION "")
 if(${ENABLE_COVERAGE})
+    # Set coverage source path based on test mode
+    if(TEST_FROM_INSTALL)
+        set(COV_SRC ".")
+    else()
+        set(COV_SRC "src")
+    endif()
+
     set(COV_OPTION
-        "--cov=src"
+        "--cov=${COV_SRC}"
         "--cov-append"
         "--cov-report=term-missing"
         "--cov-report=lcov:tests/coverage.info"
     )
 
     set(CTEST_COVERAGE_COMMAND "python3")
-    set(CTEST_COVERAGE_EXTRA_FLAGS
-        "-m"
-        "coverage"
-        "xml"
-        "-o"
-        "${CMAKE_BINARY_DIR}/coverage.xml"
-    )
 endif()
 message(STATUS "Code coverage: ${ENABLE_COVERAGE}")
 
@@ -250,16 +251,57 @@ message(STATUS "Pytest CPU threadcount: ${PYTEST_NUMPROCS_ANALYSIS}")
 # add tests
 # ---------------------------
 
+find_package(MPI COMPONENTS CXX)
+if(MPI_CXX_COMPILER)
+    message(STATUS "MPI CXX compiler found: ${MPI_CXX_COMPILER}")
+else()
+    message(WARNING "MPI CXX compiler not found. MPI tests will be skipped.")
+endif()
+
 option(
     TEST_FROM_INSTALL
     "Test from install directory rather than from source directory"
     OFF
 )
-if(TEST_FROM_INSTALL)
+
+if(TEST_FROM_INSTALL OR STANDALONEBINARY)
     set(WORKING_DIR_OPTION "")
 else()
     set(WORKING_DIR_OPTION WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 endif()
+
+if(TEST_FROM_INSTALL)
+    # When testing from install, write coverage to install directory
+    set(COVERAGE_XML_PATH
+        "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBEXECDIR}/${PACKAGE_NAME}/coverage.xml"
+    )
+    set(COVERAGE_DATA_PATH
+        "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBEXECDIR}/${PACKAGE_NAME}/.coverage"
+    )
+else()
+    # When testing from build, write coverage XML to build directory
+    # and coverage data to source directory
+    set(COVERAGE_XML_PATH "${CMAKE_BINARY_DIR}/coverage.xml")
+    set(COVERAGE_DATA_PATH "${PROJECT_SOURCE_DIR}/.coverage")
+endif()
+
+set(STANDALONEBINARY_EXTRACT_DIR
+    "/tmp"
+    CACHE PATH
+    "Absolute path to where the standalone binary will extract its contents"
+)
+
+if(STANDALONEBINARY)
+    set(STANDALONEBINARY_TEST_OPTION "--call-binary")
+else()
+    set(STANDALONEBINARY_TEST_OPTION "")
+endif()
+
+option(
+    SKIP_NATIVE_TOOL_BUILD
+    "Skip building native counter collection tool library (for runtime compilation)"
+    OFF
+)
 
 # ---------------------------
 # profile mode tests
@@ -268,58 +310,55 @@ endif()
 add_test(
     NAME test_profile_kernel_execution
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest -m kernel_execution
-        --junitxml=tests/test_profile_kernel_execution.xml ${COV_OPTION}
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -m
+        kernel_execution --junitxml=tests/test_profile_kernel_execution.xml ${COV_OPTION}
         tests/test_profile_general.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
     NAME test_profile_dispatch
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest -m dispatch
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -m dispatch
         --junitxml=tests/test_profile_dispatch.xml ${COV_OPTION}
         tests/test_profile_general.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
-    NAME test_profile_mem
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest -m mem --junitxml=tests/test_profile_mem.xml
-        ${COV_OPTION} tests/test_profile_general.py ${WORKING_DIR_OPTION}
-)
-
-add_test(
     NAME test_profile_join
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest -m join --junitxml=tests/test_profile_join.xml
-        ${COV_OPTION} tests/test_profile_general.py ${WORKING_DIR_OPTION}
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -m join
+        --junitxml=tests/test_profile_join.xml ${COV_OPTION} tests/test_profile_general.py
+        ${WORKING_DIR_OPTION}
 )
 
 add_test(
     NAME test_profile_sort
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest -m sort --junitxml=tests/test_profile_sort.xml
-        ${COV_OPTION} tests/test_profile_general.py ${WORKING_DIR_OPTION}
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -m sort
+        --junitxml=tests/test_profile_sort.xml ${COV_OPTION} tests/test_profile_general.py
+        ${WORKING_DIR_OPTION}
 )
 
 add_test(
     NAME test_profile_misc
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest -m misc --junitxml=tests/test_profile_misc.xml
-        ${COV_OPTION} tests/test_profile_general.py ${WORKING_DIR_OPTION}
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -m misc
+        --junitxml=tests/test_profile_misc.xml ${COV_OPTION} tests/test_profile_general.py
+        ${WORKING_DIR_OPTION}
 )
 
 add_test(
     NAME test_profile_path
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest -m path --junitxml=tests/test_profile_path.xml
-        ${COV_OPTION} tests/test_profile_general.py ${WORKING_DIR_OPTION}
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -m path
+        --junitxml=tests/test_profile_path.xml ${COV_OPTION} tests/test_profile_general.py
+        ${WORKING_DIR_OPTION}
 )
 
 add_test(
     NAME test_profile_roofline_1
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest -m roofline_1
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -m roofline_1
         --junitxml=tests/test_profile_roofline_1.xml ${COV_OPTION}
         tests/test_profile_general.py ${WORKING_DIR_OPTION}
 )
@@ -327,7 +366,7 @@ add_test(
 add_test(
     NAME test_profile_roofline_2
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest -m roofline_2
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -m roofline_2
         --junitxml=tests/test_profile_roofline_2.xml ${COV_OPTION}
         tests/test_profile_general.py ${WORKING_DIR_OPTION}
 )
@@ -335,23 +374,15 @@ add_test(
 add_test(
     NAME test_profile_section
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest -m section
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -m section
         --junitxml=tests/test_profile_section.xml ${COV_OPTION}
-        tests/test_profile_general.py ${WORKING_DIR_OPTION}
-)
-
-add_test(
-    NAME test_profile_pc_sampling
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest -s -m pc_sampling
-        --junitxml=tests/test_profile_pc_sampling.xml ${COV_OPTION}
         tests/test_profile_general.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
     NAME test_profile_sets_func
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest -m sets_func
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -m sets_func
         --junitxml=tests/test_profile_sets_func.xml ${COV_OPTION}
         tests/test_profile_general.py ${WORKING_DIR_OPTION}
 )
@@ -359,15 +390,20 @@ add_test(
 add_test(
     NAME test_profile_live_attach_detach
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest -s -m live_attach_detach
-        --junitxml=tests/test_profile_live_attach_detach.xml ${COV_OPTION}
-        tests/test_profile_general.py ${WORKING_DIR_OPTION}
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -s -m
+        live_attach_detach --junitxml=tests/test_profile_live_attach_detach.xml
+        ${COV_OPTION} tests/test_profile_general.py ${WORKING_DIR_OPTION}
+)
+set_tests_properties(
+    test_profile_live_attach_detach
+    PROPERTIES TIMEOUT 300 LABELS "profile" RESOURCE_GROUPS gpus:1
 )
 
 add_test(
     NAME test_profile_iteration_multiplexing_1
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest -s -m iteration_multiplexing_1
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -s -m
+        iteration_multiplexing_1
         --junitxml=tests/test_profile_iteration_multiplexing_1.xml ${COV_OPTION}
         tests/test_profile_general.py ${WORKING_DIR_OPTION}
 )
@@ -375,7 +411,8 @@ add_test(
 add_test(
     NAME test_profile_iteration_multiplexing_2
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest -s -m iteration_multiplexing_2
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -s -m
+        iteration_multiplexing_2
         --junitxml=tests/test_profile_iteration_multiplexing_2.xml ${COV_OPTION}
         tests/test_profile_general.py ${WORKING_DIR_OPTION}
 )
@@ -383,15 +420,37 @@ add_test(
 add_test(
     NAME test_profile_iteration_multiplexing_stochastic
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest -s -m iteration_multiplexing_stochastic
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -s -m
+        iteration_multiplexing_stochastic
         --junitxml=tests/test_profile_iteration_multiplexing_stochastic.xml ${COV_OPTION}
         tests/test_profile_general.py ${WORKING_DIR_OPTION}
+)
+
+if(MPI_CXX_COMPILER)
+    add_test(
+        NAME test_profile_multi_rank
+        COMMAND
+            ${PYTHON_TEST_COMMAND} -m pytest -s -m multi_rank
+            --junitxml=tests/test_profile_multi_rank.xml ${COV_OPTION}
+            tests/test_profile_general.py ${WORKING_DIR_OPTION}
+    )
+    set_tests_properties(
+        test_profile_multi_rank
+        PROPERTIES LABELS "profile" RESOURCE_GROUPS gpus:2 TIMEOUT 1800
+    )
+endif()
+
+add_test(
+    NAME test_metric_validation
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_metric_validation.xml ${COV_OPTION}
+        tests/test_metric_validation.py ${WORKING_DIR_OPTION}
 )
 
 set_tests_properties(
     test_profile_kernel_execution
     test_profile_dispatch
-    test_profile_mem
     test_profile_join
     test_profile_sort
     test_profile_misc
@@ -399,9 +458,7 @@ set_tests_properties(
     test_profile_roofline_1
     test_profile_roofline_2
     test_profile_section
-    test_profile_pc_sampling
     test_profile_sets_func
-    test_profile_live_attach_detach
     test_profile_iteration_multiplexing_1
     test_profile_iteration_multiplexing_2
     test_profile_iteration_multiplexing_stochastic
@@ -415,9 +472,9 @@ set_tests_properties(
 add_test(
     NAME test_analyze_commands
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest -n ${PYTEST_NUMPROCS_ANALYSIS} --verbose
-        --junitxml=tests/test_analyze_commands.xml ${COV_OPTION}
-        tests/test_analyze_commands.py ${WORKING_DIR_OPTION}
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -n
+        ${PYTEST_NUMPROCS_ANALYSIS} --verbose --junitxml=tests/test_analyze_commands.xml
+        ${COV_OPTION} tests/test_analyze_commands.py ${WORKING_DIR_OPTION}
 )
 
 # ---------------------------
@@ -427,8 +484,8 @@ add_test(
 add_test(
     NAME test_analyze_workloads
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest -n ${PYTEST_NUMPROCS}
-        --junitxml=tests/test_analyze_workloads.xml ${COV_OPTION}
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -n
+        ${PYTEST_NUMPROCS} --junitxml=tests/test_analyze_workloads.xml ${COV_OPTION}
         tests/test_analyze_workloads.py ${WORKING_DIR_OPTION}
 )
 
@@ -439,7 +496,7 @@ add_test(
 add_test(
     NAME test_L1_cache_counters
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest -m L1_cache
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -m L1_cache
         --junitxml=tests/test_L1_cache_counters.xml ${COV_OPTION}
         tests/test_TCP_counters.py ${WORKING_DIR_OPTION}
 )
@@ -451,16 +508,16 @@ add_test(
 add_test(
     NAME test_num_xcds_spec_class
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest -m num_xcds_spec_class
-        --junitxml=tests/test_num_xcds_spec_class.xml ${COV_OPTION}
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -m
+        num_xcds_spec_class --junitxml=tests/test_num_xcds_spec_class.xml ${COV_OPTION}
         tests/test_gpu_specs.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
     NAME test_num_xcds_cli_output
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest -m num_xcds_cli_output
-        --junitxml=tests/test_num_xcds_cli_output.xml ${COV_OPTION}
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -m
+        num_xcds_cli_output --junitxml=tests/test_num_xcds_cli_output.xml ${COV_OPTION}
         tests/test_gpu_specs.py ${WORKING_DIR_OPTION}
 )
 
@@ -471,8 +528,29 @@ add_test(
 add_test(
     NAME test_utils
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_utils.xml ${COV_OPTION}
-        tests/test_utils.py ${WORKING_DIR_OPTION}
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_utils.xml ${COV_OPTION} tests/test_utils.py
+        ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_roofline_calc_ai_analyze
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_roofline_calc_ai_analyze.xml ${COV_OPTION}
+        tests/test_roofline_calc_ai_analyze.py ${WORKING_DIR_OPTION}
+)
+
+# -----------------------------------
+# Data imputation tests
+# -----------------------------------
+
+add_test(
+    NAME test_data_imputation
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_data_imputation.xml ${COV_OPTION}
+        tests/test_data_imputation.py ${WORKING_DIR_OPTION}
 )
 
 # -----------------------------------
@@ -482,8 +560,50 @@ add_test(
 add_test(
     NAME test_autogen_config
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_autogen_config.xml
-        ${COV_OPTION} tests/test_autogen_config.py ${WORKING_DIR_OPTION}
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_autogen_config.xml ${COV_OPTION}
+        tests/test_autogen_config.py ${WORKING_DIR_OPTION}
+)
+
+# ---------------------------
+# PC sampling tests
+# ---------------------------
+
+add_test(
+    NAME test_pc_sampling
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -s
+        --junitxml=tests/test_pc_sampling.xml ${COV_OPTION} tests/test_pc_sampling.py
+        ${WORKING_DIR_OPTION}
+)
+
+set_tests_properties(
+    test_pc_sampling
+    PROPERTIES TIMEOUT 300 LABELS "profile" RESOURCE_GROUPS gpus:1
+)
+
+# -----------------------------------
+# TUI component tests
+# -----------------------------------
+
+add_test(
+    NAME test_tui_components
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_tui_components.xml ${COV_OPTION} -m tui
+        tests/test_tui_components.py ${WORKING_DIR_OPTION}
+)
+
+# -----------------------------------
+# Torch trace tests
+# -----------------------------------
+
+add_test(
+    NAME test_torch_trace
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_torch_trace.xml ${COV_OPTION} tests/test_torch_trace.py
+        ${WORKING_DIR_OPTION}
 )
 
 # -----------------------------------
@@ -494,7 +614,6 @@ if(${ENABLE_COVERAGE})
     set(ALL_TEST_NAMES
         test_profile_kernel_execution
         test_profile_dispatch
-        test_profile_mem
         test_profile_join
         test_profile_sort
         test_profile_misc
@@ -503,13 +622,18 @@ if(${ENABLE_COVERAGE})
         test_profile_roofline_2
         test_profile_section
         test_profile_sets_func
+        test_pc_sampling
         test_analyze_commands
         test_analyze_workloads
         test_L1_cache_counters
         test_num_xcds_spec_class
         test_num_xcds_cli_output
         test_utils
+        test_roofline_calc_ai_analyze
+        test_data_imputation
         test_autogen_config
+        test_tui_components
+        test_torch_trace
     )
 
     string(REPLACE ";" ";" ALL_TESTS_STRING "${ALL_TEST_NAMES}")
@@ -517,7 +641,7 @@ if(${ENABLE_COVERAGE})
     add_test(
         NAME generate_coverage_report
         COMMAND
-            ${PYTHON_TEST_COMMAND} -m coverage xml -o ${CMAKE_BINARY_DIR}/coverage.xml
+            ${PYTHON_TEST_COMMAND} -m coverage xml -o ${COVERAGE_XML_PATH}
             ${WORKING_DIR_OPTION}
     )
 
@@ -526,7 +650,7 @@ if(${ENABLE_COVERAGE})
         PROPERTIES
             DEPENDS "${ALL_TESTS_STRING}"
             LABELS "coverage"
-            ENVIRONMENT "COVERAGE_FILE=${PROJECT_SOURCE_DIR}/.coverage"
+            ENVIRONMENT "COVERAGE_FILE=${COVERAGE_DATA_PATH}"
             TIMEOUT 600
     )
 endif()
@@ -534,7 +658,9 @@ endif()
 # -------------------
 # Setup tool library
 # -------------------
-add_subdirectory(src/lib)
+if(NOT SKIP_NATIVE_TOOL_BUILD)
+    add_subdirectory(src/lib)
+endif()
 
 # ---------
 # Install
@@ -559,7 +685,8 @@ install(
         src/config.py
         src/rocprof_compute_base.py
         src/roofline.py
-        VERSION VERSION.sha
+        VERSION
+        VERSION.sha
     DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
     COMPONENT main
 )
@@ -617,6 +744,52 @@ install(
     COMPONENT main
     PATTERN "__pycache__" EXCLUDE
 )
+
+# ==============================================================================
+# Vendored Dependencies Installation
+# ==============================================================================
+# Vendored packages are included as git submodules and installed as pure Python.
+# Each package has: conditional submodule init + unconditional install.
+# See src/vendored/README.md and CONTRIBUTING.md for vendoring guidelines.
+
+find_package(Git QUIET)
+
+# Vendored package wrapper
+install(
+    FILES src/vendored/__init__.py
+    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/vendored
+    COMPONENT main
+)
+
+# PyYAML
+if(NOT EXISTS "${PROJECT_SOURCE_DIR}/src/vendored/pyyaml/lib/yaml")
+    if(Git_FOUND)
+        message(STATUS "Initializing vendored/pyyaml submodule...")
+        execute_process(
+            COMMAND
+                ${GIT_EXECUTABLE} submodule update --init --recursive src/vendored/pyyaml
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+            RESULT_VARIABLE GIT_SUBMOD_RESULT
+        )
+        if(NOT GIT_SUBMOD_RESULT EQUAL "0")
+            message(FATAL_ERROR "git submodule update failed for src/vendored/pyyaml")
+        endif()
+    else()
+        message(FATAL_ERROR "vendored/pyyaml not found and git not available")
+    endif()
+else()
+    message(STATUS "Vendored/pyyaml: OK")
+endif()
+install(
+    DIRECTORY src/vendored/pyyaml/lib/yaml
+    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/vendored/pyyaml/lib
+    COMPONENT main
+    FILES_MATCHING
+    PATTERN "*.py"
+    PATTERN "__pycache__" EXCLUDE
+    PATTERN "*.pyc" EXCLUDE
+)
+
 # samples
 install(
     DIRECTORY sample
@@ -626,6 +799,7 @@ install(
     PATTERN "*.hip"
     PATTERN "*.h"
     PATTERN "*.cpp"
+    PATTERN "*.py"
     PATTERN "workloads" EXCLUDE
 )
 # modulefile
@@ -635,11 +809,20 @@ install(
     COMPONENT main
 )
 
-# install librocprofiler-compute-tool.so
-install(
-    TARGETS rocprofiler-compute-tool
-    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/rocprofiler-compute COMPONENT main
-)
+# install librocprofiler-compute-tool.so or source files
+if(NOT SKIP_NATIVE_TOOL_BUILD)
+    install(
+        TARGETS rocprofiler-compute-tool
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/rocprofiler-compute COMPONENT main
+    )
+else()
+    # Install source files for runtime compilation
+    install(
+        FILES src/lib/rocprofiler_compute_tool.cpp src/lib/helper.cpp src/lib/helper.hpp
+        DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/lib
+        COMPONENT main
+    )
+endif()
 
 # top-level symlink for bin/rocprof-compute
 install(
@@ -663,55 +846,6 @@ add_custom_target(
         ${PROJECT_SOURCE_DIR}/tools/update_license.py --source ${PROJECT_SOURCE_DIR}
         --license ${PROJECT_SOURCE_DIR}/LICENSE.md --file
         "src/${PACKAGE_NAME},cmake/Dockerfile,cmake/rocm_install.sh,docker/docker-entrypoint.sh,src/rocprof_compute_analyze/convertor/mongodb/convert"
-)
-
-set(STANDALONEBINARY_EXTRACT_DIR
-    "/tmp"
-    CACHE PATH
-    "Prefix path for standalone binary extraction"
-)
-
-# Standalone binary creation
-add_custom_target(
-    standalonebinary
-    # Change working directory to src
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
-    # Install nuitka
-    COMMAND ${Python3_EXECUTABLE} -m pip install nuitka
-    # Install patchelf
-    COMMAND ${Python3_EXECUTABLE} -m pip install patchelf
-    # Check nuitka
-    COMMAND ${Python3_EXECUTABLE} -m pip list | grep -i nuitka > /dev/null 2>&1
-    # Check patchelf
-    COMMAND ${Python3_EXECUTABLE} -m pip list | grep -i patchelf > /dev/null 2>&1
-    # Create VERSION.sha file
-    COMMAND git rev-parse HEAD > VERSION.sha
-    # Build standalone binary
-    # NOTE: --no-deployment-flag=self-execution is used to avoid self-execution
-    # and fork bombs as explained in
-    # https://nuitka.net/user-documentation/common-issue-solutions.html#fork-bombs-self-execution
-    COMMAND
-        ${Python3_EXECUTABLE} -m nuitka --mode=onefile --no-deployment-flag=self-execution
-        --product-name=${STANDALONEBINARY_EXTRACT_DIR}
-        --onefile-tempdir-spec=/{PRODUCT}/rocprof_compute_standalonebinary_{PID}
-        --include-data-files=${PROJECT_SOURCE_DIR}/VERSION*=./ --enable-plugin=no-qt
-        --include-data-files=src/lib/rocprofiler_compute_tool.cpp=lib/rocprofiler_compute_tool.cpp
-        --include-data-files=src/lib/helper.cpp=lib/helper.cpp
-        --include-data-files=src/lib/helper.hpp=lib/helper.hpp --include-package=dash_svg
-        --include-package-data=dash_svg --include-package=dash_bootstrap_components
-        --include-package-data=dash_bootstrap_components --include-package=plotly
-        --include-package-data=plotly --include-package=rocprof_compute_analyze
-        --include-package-data=rocprof_compute_analyze
-        --include-package=rocprof_compute_profile
-        --include-package-data=rocprof_compute_profile
-        --include-package=rocprof_compute_tui --include-package-data=rocprof_compute_tui
-        --include-package=rocprof_compute_soc --include-package-data=rocprof_compute_soc
-        --include-package=utils --include-package-data=utils --include-package=hip
-        --include-package-data=hip src/rocprof-compute
-    # Remove library rpath from executable
-    COMMAND patchelf --remove-rpath rocprof-compute.bin
-    # Move to build directory
-    COMMAND mv rocprof-compute.bin ${CMAKE_BINARY_DIR}
 )
 
 install(
@@ -748,11 +882,19 @@ if(INSTALL_TESTS)
             tests/laplace_eqn
             tests/mat_mul_max
             tests/rocflop
+            tests/memcopy
         DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/tests
         COMPONENT tests
     )
+    if(MPI_CXX_COMPILER)
+        install(
+            PROGRAMS tests/mpi_aware_laplace_eqn
+            DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/tests
+            COMPONENT tests
+        )
+    endif()
     install(
-        FILES requirements-test.txt
+        FILES requirements-test.txt pyproject.toml
         DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
         COMPONENT tests
     )
@@ -763,6 +905,112 @@ if(INSTALL_TESTS)
     )
 endif()
 message(STATUS "Install tests: ${INSTALL_TESTS}")
+
+# Standalone binary creation during install
+if(STANDALONEBINARY)
+    # We use Nuitka 2.6 which requires exactly Python 3.11.x (any patch version)
+    find_package(Python3 3.11 COMPONENTS Interpreter REQUIRED)
+
+    # Verify exactly 3.11.x (not 3.10.x or 3.12.x)
+    if(NOT (Python3_VERSION_MAJOR EQUAL 3 AND Python3_VERSION_MINOR EQUAL 11))
+        message(
+            FATAL_ERROR
+            "Standalone binary requires exactly Python 3.11.x (any patch version). "
+            "Found: Python ${Python3_VERSION}"
+        )
+    endif()
+
+    install(
+        CODE
+            "
+            message(STATUS \"Building standalone binary...\")
+            # Note: Variables defined here use \${VAR} escaping so they're evaluated at install time
+            # rather than configure time. Variables from configure time like ${PROJECT_BINARY_DIR}
+            # are expanded when CMake processes this file.
+            set(VENV_DIR \"${PROJECT_BINARY_DIR}/nuitka-build-venv\")
+            # Create virtual environment
+            message(STATUS \"Creating virtual environment at \${VENV_DIR}\")
+            execute_process(COMMAND ${Python3_EXECUTABLE} -m venv \${VENV_DIR} RESULT_VARIABLE VENV_RESULT)
+            if(NOT VENV_RESULT EQUAL 0)
+                message(FATAL_ERROR \"Failed to create virtual environment\")
+            endif()
+            set(VENV_PYTHON \"\${VENV_DIR}/bin/python\")
+            # Install requirements
+            message(STATUS \"Installing requirements.txt\")
+            execute_process(COMMAND \${VENV_PYTHON} -m pip install -r ${PROJECT_SOURCE_DIR}/requirements.txt RESULT_VARIABLE REQUIREMENTS_RESULT)
+            if(NOT REQUIREMENTS_RESULT EQUAL 0)
+                file(REMOVE_RECURSE \${VENV_DIR})
+                message(FATAL_ERROR \"Failed to install requirements.txt\")
+            endif()
+            # Install nuitka (Note that Nuitka 2.6 will require Python 3.11 interpreter)
+            message(STATUS \"Installing nuitka\")
+            execute_process(COMMAND \${VENV_PYTHON} -m pip install nuitka==2.6 RESULT_VARIABLE NUITKA_INSTALL_RESULT)
+            if(NOT NUITKA_INSTALL_RESULT EQUAL 0)
+                file(REMOVE_RECURSE \${VENV_DIR})
+                message(FATAL_ERROR \"Failed to install nuitka\")
+            endif()
+            # Install patchelf 0.17.2.4
+            message(STATUS \"Installing patchelf\")
+            execute_process(COMMAND \${VENV_PYTHON} -m pip install patchelf==0.17.2.4 RESULT_VARIABLE PATCHELF_INSTALL_RESULT)
+            if(NOT PATCHELF_INSTALL_RESULT EQUAL 0)
+                file(REMOVE_RECURSE \${VENV_DIR})
+                message(FATAL_ERROR \"Failed to install patchelf\")
+            endif()
+            # Build standalone binary
+            message(STATUS \"Building standalone binary with nuitka\")
+            execute_process(
+                COMMAND \${CMAKE_COMMAND} -E env PATH=\${VENV_DIR}/bin:\$ENV{PATH}
+                    \${VENV_PYTHON} -m nuitka --mode=onefile --no-deployment-flag=self-execution
+                    --product-name=${STANDALONEBINARY_EXTRACT_DIR}
+                    --onefile-tempdir-spec=/{PRODUCT}/rocprof_compute_standalonebinary_{PID}
+                    --include-data-files=${PROJECT_SOURCE_DIR}/VERSION*=./ --enable-plugin=no-qt
+                    --include-data-files=src/lib/rocprofiler_compute_tool.cpp=lib/rocprofiler_compute_tool.cpp
+                    --include-data-files=src/lib/helper.cpp=lib/helper.cpp
+                    --include-data-files=src/lib/helper.hpp=lib/helper.hpp --include-package=dash_svg
+                    --include-package-data=dash_svg --include-package=dash_bootstrap_components
+                    --include-package-data=dash_bootstrap_components --include-package=plotly
+                    --include-package-data=plotly --include-package=rocprof_compute_analyze
+                    --include-package-data=rocprof_compute_analyze
+                    --include-package=rocprof_compute_profile
+                    --include-package-data=rocprof_compute_profile
+                    --include-package=rocprof_compute_tui --include-package-data=rocprof_compute_tui
+                    --include-package=rocprof_compute_soc --include-package-data=rocprof_compute_soc
+                    --include-package=utils --include-package-data=utils --include-package=hip
+                    --include-package-data=hip --include-package=dateutil
+                    --include-package-data=dateutil --include-package=rich
+                    --include-package-data=rich src/${EXECUTABLE_NAME}
+                WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+                RESULT_VARIABLE NUITKA_RESULT
+            )
+            if(NOT NUITKA_RESULT EQUAL 0)
+                file(REMOVE_RECURSE \${VENV_DIR})
+                message(FATAL_ERROR \"Nuitka build failed\")
+            endif()
+            # Remove library rpath from executable
+            message(STATUS \"Removing rpath from binary\")
+            execute_process(COMMAND \${VENV_DIR}/bin/patchelf --remove-rpath ${EXECUTABLE_NAME}.bin WORKING_DIRECTORY ${PROJECT_SOURCE_DIR} RESULT_VARIABLE PATCHELF_RESULT)
+            if(NOT PATCHELF_RESULT EQUAL 0)
+                file(REMOVE_RECURSE \${VENV_DIR})
+                message(FATAL_ERROR \"patchelf failed to remove rpath\")
+            endif()
+            # Clean up virtual environment
+            message(STATUS \"Cleaning up virtual environment\")
+            file(REMOVE_RECURSE \${VENV_DIR})
+            # Install to destination
+            file(INSTALL ${PROJECT_SOURCE_DIR}/${EXECUTABLE_NAME}.bin DESTINATION \$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME})
+            # Explicitly set executable permission (required for volume-mounted filesystems)
+            execute_process(COMMAND chmod +x \$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/${EXECUTABLE_NAME}.bin)
+            # Clean up Nuitka build artifacts from source directory
+            message(STATUS \"Cleaning up Nuitka build artifacts\")
+            file(REMOVE ${PROJECT_SOURCE_DIR}/${EXECUTABLE_NAME}.bin)
+            file(REMOVE_RECURSE ${PROJECT_SOURCE_DIR}/${EXECUTABLE_NAME}.build)
+            file(REMOVE_RECURSE ${PROJECT_SOURCE_DIR}/${EXECUTABLE_NAME}.dist)
+            file(REMOVE_RECURSE ${PROJECT_SOURCE_DIR}/${EXECUTABLE_NAME}.onefile-build)
+            message(STATUS \"Standalone binary installed to \${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/${EXECUTABLE_NAME}.bin\")
+        "
+        COMPONENT main
+    )
+endif()
 
 # ----------
 # Packaging
@@ -874,6 +1122,6 @@ set(CPACK_SOURCE_IGNORE_FILES
     /build
 )
 
-configure_pkg( ${PACKAGE_NAME} ${COMP_TYPE} ${CPACK_PACKAGE_VERSION} ${PKG_MAINTAINER_NM} ${PKG_MAINTAINER_EMAIL})
+configure_pkg(${PACKAGE_NAME} ${COMP_TYPE} ${CPACK_PACKAGE_VERSION} ${PKG_MAINTAINER_NM} ${PKG_MAINTAINER_EMAIL})
 
 include(CPack)

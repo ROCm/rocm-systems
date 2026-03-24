@@ -9,6 +9,16 @@ import sys
 import sqlite3
 from pathlib import Path
 
+# Add script directory to Python path for local module imports
+script_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, script_dir)
+
+# Import AMD-SMI data collection functions
+from amd_smi_data_parse import (
+    collect_supported_metrics,
+    is_metric_supported,
+)
+
 
 class validation_rule:
     """Class to represent a validation rule as defined in JSON file"""
@@ -75,8 +85,7 @@ class required_table:
 
 def print_help():
     """Print out the help message"""
-    print(
-        f"""
+    print(f"""
     ROCPD Database Validation Tool
 
     DESCRIPTION:
@@ -115,8 +124,7 @@ def print_help():
         64 - Invalid command line arguments (EX_USAGE)
         65 - Validation failures detected (EX_DATAERR)
         1  - General error (database connection, file not found, etc.)
-    """
-    )
+    """)
 
 
 def validate_table(cursor, rule, tables) -> bool:
@@ -292,6 +300,11 @@ def load_validation_rules(validation_rules) -> list:
                 )
                 return []
 
+            # Check if this rules file is amd-smi-rules.json
+            is_amd_smi_rules_file = "amd-smi-rules.json" in str(rules_file)
+            metrics_list = None
+            if is_amd_smi_rules_file:
+                metrics_list = collect_supported_metrics()
             with open(rules_path, "r") as f:
                 rules_data = json.load(f)
                 rules = []
@@ -299,6 +312,20 @@ def load_validation_rules(validation_rules) -> list:
                 for table_data in rules_data["required_tables"]:
                     validation_queries = []
                     for vq in table_data.get("validation_queries", []):
+                        # Check if metric is supported (for amd-smi-rules.json)
+                        if is_amd_smi_rules_file:
+                            supported, metric_name = is_metric_supported(
+                                vq["query"], metrics_list
+                            )
+                            if metric_name is not None and not supported:
+                                print(
+                                    f"Skipping validation for unsupported metric: '{metric_name}'"
+                                )
+                                continue
+                            elif metric_name is not None:
+                                print(
+                                    f"Adding validation for supported metric: '{metric_name}'"
+                                )
                         validation_query_obj = validation_rule(
                             description=vq["description"],
                             query=vq["query"],

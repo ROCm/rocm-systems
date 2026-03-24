@@ -51,6 +51,7 @@ typedef struct {
   size_t nRanks;
   size_t nNodes;
   ncclDebugLogger_t logFunction;
+  ncclNvlDomainInfo_v5_t nvlDomainInfo;
 } TunerContext;
 
 // Parse collective type from string
@@ -289,7 +290,24 @@ static ncclResult_t loadConfig(TunerContext* ctx, const char* filename) {
   return ncclSuccess;
 }
 
-__hidden ncclResult_t pluginInit(size_t nRanks, size_t nNodes, ncclDebugLogger_t logFunction, void **context) {
+__hidden ncclResult_t pluginInit(void** context, uint64_t commId, size_t nRanks, size_t nNodes, ncclDebugLogger_t logFunction,
+                                 ncclNvlDomainInfo_v5_t* nvlDomainInfo, ncclTunerConstants_v5_t* constants) {
+
+  if (NULL != constants) {
+    // NCCL constants tuning
+    // Tune NCCL's internal tuning model to improve base algo/proto selection.
+    // Note: Example numbers are for reference only.
+    //       Actual numbers may vary depending on the hardware and network topology.
+    //       These numbers are not guaranteed to be optimal for all cases.
+
+    // Limit the Ring/Simple bandwidth ratio to 70% for <=2 nodes
+    constants->bwRatio[0][NCCL_ALGO_RING][NCCL_PROTO_SIMPLE] = 0.70;
+    // Limit the Tree/Simple bandwidth ratio to 65% for >2 nodes
+    constants->bwRatio[1][NCCL_ALGO_TREE][NCCL_PROTO_SIMPLE] = 0.65;
+    // Set Ring/Simple base network latency to 280
+    constants->hwLatencies[NCCL_HW_NET][NCCL_ALGO_RING][NCCL_PROTO_SIMPLE] = 280.0;
+  }
+  
   TunerContext* ctx = (TunerContext*)malloc(sizeof(TunerContext));
   if (!ctx) return ncclSystemError;
 
@@ -299,10 +317,16 @@ __hidden ncclResult_t pluginInit(size_t nRanks, size_t nNodes, ncclDebugLogger_t
   ctx->nRanks = nRanks;
   ctx->nNodes = nNodes;
   ctx->logFunction = logFunction;
+  if (nvlDomainInfo) {
+    ctx->nvlDomainInfo = *nvlDomainInfo;
+  } else {
+    memset(&ctx->nvlDomainInfo, 0, sizeof(ncclNvlDomainInfo_v5_t));
+  }
 
   if (logFunction) {
     logFunction(NCCL_LOG_INFO, NCCL_TUNING, __FILE__, __LINE__,
-                "TUNER/ExamplePlugin: Initializing tuner for %zu nodes, %zu ranks", nNodes, nRanks);
+                "TUNER/ExamplePlugin: Initializing tuner for %zu nodes, %zu ranks, %d NVL domains",
+                nNodes, nRanks, ctx->nvlDomainInfo.nNvlDomains);
   }
 
   // Try to load config file from environment variable or default location
@@ -435,7 +459,7 @@ __hidden ncclResult_t pluginGetCollInfo(void* context, ncclFunc_t collType, size
   return ncclSuccess;
 }
 
-__hidden ncclResult_t pluginDestroy(void* context) {
+__hidden ncclResult_t pluginFinalize(void* context) {
   if (context) {
     TunerContext* ctx = (TunerContext*)context;
     if (ctx->configs) {
@@ -446,11 +470,12 @@ __hidden ncclResult_t pluginDestroy(void* context) {
   return ncclSuccess;
 }
 
+
 #define PLUGIN_NAME "Example"
 
-const ncclTuner_v4_t ncclTunerPlugin_v4 = {
+const ncclTuner_v5_t ncclTunerPlugin_v5 = {
   .name = PLUGIN_NAME,
   .init = pluginInit,
   .getCollInfo = pluginGetCollInfo,
-  .destroy = pluginDestroy
+  .finalize = pluginFinalize
 };

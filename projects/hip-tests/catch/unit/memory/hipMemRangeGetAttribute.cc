@@ -1,31 +1,15 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
 #include <resource_guards.hh>
 #include <utils.hh>
 
-TEST_CASE("Unit_hipMemRangeGetAttribute_Positive_ReadMostly_Basic") {
+HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_Positive_ReadMostly_Basic) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeManagedMemory)) {
     HipTest::HIP_SKIP_TEST("Managed memory not supported");
     return;
@@ -46,7 +30,7 @@ TEST_CASE("Unit_hipMemRangeGetAttribute_Positive_ReadMostly_Basic") {
   REQUIRE(data == 1);
 }
 
-TEST_CASE("Unit_hipMemRangeGetAttribute_Positive_ReadMostly_Partial_Range") {
+HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_Positive_ReadMostly_Partial_Range) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeManagedMemory)) {
     HipTest::HIP_SKIP_TEST("Managed memory not supported");
     return;
@@ -68,7 +52,7 @@ TEST_CASE("Unit_hipMemRangeGetAttribute_Positive_ReadMostly_Partial_Range") {
   REQUIRE(data == 1);
 }
 
-TEST_CASE("Unit_hipMemRangeGetAttribute_Positive_PreferredLocation_Basic") {
+HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_Positive_PreferredLocation_Basic) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeManagedMemory)) {
     HipTest::HIP_SKIP_TEST("Managed memory not supported");
     return;
@@ -89,7 +73,7 @@ TEST_CASE("Unit_hipMemRangeGetAttribute_Positive_PreferredLocation_Basic") {
   REQUIRE(data == 0);
 }
 
-TEST_CASE("Unit_hipMemRangeGetAttribute_Positive_PreferredLocation_CPU") {
+HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_Positive_PreferredLocation_CPU) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeManagedMemory)) {
     HipTest::HIP_SKIP_TEST("Managed memory not supported");
     return;
@@ -107,7 +91,7 @@ TEST_CASE("Unit_hipMemRangeGetAttribute_Positive_PreferredLocation_CPU") {
   REQUIRE(data == hipCpuDeviceId);
 }
 
-TEST_CASE("Unit_hipMemRangeGetAttribute_Positive_PreferredLocation_Partial_Range") {
+HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_Positive_PreferredLocation_Partial_Range) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeManagedMemory)) {
     HipTest::HIP_SKIP_TEST("Managed memory not supported");
     return;
@@ -129,7 +113,7 @@ TEST_CASE("Unit_hipMemRangeGetAttribute_Positive_PreferredLocation_Partial_Range
   REQUIRE(data == 0);
 }
 
-TEST_CASE("Unit_hipMemRangeGetAttribute_Positive_LastPrefetchLocation_Basic") {
+HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_Positive_LastPrefetchLocation_Basic) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeManagedMemory)) {
     HipTest::HIP_SKIP_TEST("Managed memory not supported");
     return;
@@ -150,7 +134,7 @@ TEST_CASE("Unit_hipMemRangeGetAttribute_Positive_LastPrefetchLocation_Basic") {
   REQUIRE(data == 0);
 }
 
-TEST_CASE("Unit_hipMemRangeGetAttribute_Positive_LastPrefetchLocation_CPU") {
+HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_Positive_LastPrefetchLocation_CPU) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeManagedMemory)) {
     HipTest::HIP_SKIP_TEST("Managed memory not supported");
     return;
@@ -167,7 +151,7 @@ TEST_CASE("Unit_hipMemRangeGetAttribute_Positive_LastPrefetchLocation_CPU") {
   REQUIRE(data == hipCpuDeviceId);
 }
 
-TEST_CASE("Unit_hipMemRangeGetAttribute_Positive_LastPrefetchLocation_Partial_Range") {
+HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_Positive_LastPrefetchLocation_Partial_Range) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeManagedMemory)) {
     HipTest::HIP_SKIP_TEST("Managed memory not supported");
     return;
@@ -189,7 +173,7 @@ TEST_CASE("Unit_hipMemRangeGetAttribute_Positive_LastPrefetchLocation_Partial_Ra
   REQUIRE(data == 0);
 }
 
-TEST_CASE("Unit_hipMemRangeGetAttribute_Positive_AccessedBy_Basic") {
+HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_Positive_AccessedBy_Basic) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeManagedMemory)) {
     HipTest::HIP_SKIP_TEST("Managed memory not supported");
     return;
@@ -220,7 +204,7 @@ TEST_CASE("Unit_hipMemRangeGetAttribute_Positive_AccessedBy_Basic") {
   }
 }
 
-TEST_CASE("Unit_hipMemRangeGetAttribute_Positive_AccessedBy_Partial_Range") {
+HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_Positive_AccessedBy_Partial_Range) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeManagedMemory)) {
     HipTest::HIP_SKIP_TEST("Managed memory not supported");
     return;
@@ -252,7 +236,7 @@ TEST_CASE("Unit_hipMemRangeGetAttribute_Positive_AccessedBy_Partial_Range") {
   }
 }
 
-TEST_CASE("Unit_hipMemRangeGetAttribute_Positive_AccessedBy_MultiDevice") {
+HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_Positive_AccessedBy_MultiDevice) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeManagedMemory)) {
     HipTest::HIP_SKIP_TEST("Managed memory not supported");
     return;
@@ -287,7 +271,7 @@ TEST_CASE("Unit_hipMemRangeGetAttribute_Positive_AccessedBy_MultiDevice") {
   }
 }
 
-TEST_CASE("Unit_hipMemRangeGetAttribute_Negative_Parameters") {
+HIP_TEST_CASE(Unit_hipMemRangeGetAttribute_Negative_Parameters) {
   if (!DeviceAttributesSupport(0, hipDeviceAttributeManagedMemory)) {
     HipTest::HIP_SKIP_TEST("Managed memory not supported");
     return;
@@ -348,6 +332,13 @@ TEST_CASE("Unit_hipMemRangeGetAttribute_Negative_Parameters") {
     LinearAllocGuard<void> non_managed(LinearAllocs::hipMalloc, kPageSize);
     HIP_CHECK_ERROR(hipMemRangeGetAttribute(&data, 4, hipMemRangeAttributeReadMostly,
                                             non_managed.ptr(), kPageSize),
+                    hipErrorInvalidValue);
+  }
+
+  SECTION("dev_ptr is host pinned memory") {
+    LinearAllocGuard<void> host_pinned(LinearAllocs::hipHostMalloc, kPageSize);
+    HIP_CHECK_ERROR(hipMemRangeGetAttribute(&data, 4, hipMemRangeAttributeReadMostly,
+                                            host_pinned.ptr(), kPageSize),
                     hipErrorInvalidValue);
   }
 

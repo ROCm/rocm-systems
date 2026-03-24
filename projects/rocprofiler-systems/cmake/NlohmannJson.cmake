@@ -3,17 +3,13 @@ include_guard(GLOBAL)
 if(ROCPROFSYS_BUILD_NLOHMANN_JSON)
     message(STATUS "Building nlohmann/json from source")
     include(FetchContent)
-    FetchContent_Declare(
-        nlohmann_json
-        GIT_REPOSITORY https://github.com/nlohmann/json.git
-        GIT_TAG v3.11.3
-        SOURCE_DIR
-        ${PROJECT_BINARY_DIR}/external/nlohmann/src
-        BINARY_DIR
-        ${PROJECT_BINARY_DIR}/external/nlohmann/lib
-        SUBBUILD_DIR
-        ${PROJECT_BINARY_DIR}/external/nlohmann/subdir
+
+    rocprofiler_systems_checkout_git_submodule(
+        RELATIVE_PATH external/json
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+        TEST_FILE CMakeLists.txt
     )
+    FetchContent_Declare(nlohmann_json SOURCE_DIR ${PROJECT_SOURCE_DIR}/external/json)
     FetchContent_MakeAvailable(nlohmann_json)
 
     target_include_directories(

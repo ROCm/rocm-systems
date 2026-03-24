@@ -54,6 +54,7 @@
 #endif
 
 #include <atomic>
+#include <cassert>
 #include <cstring>
 
 #include "core/inc/amd_xdna_driver.h"
@@ -67,24 +68,22 @@ namespace AMD {
 
 AieAqlQueue::AieAqlQueue(core::SharedQueue* shared_queue, AieAgent* agent, size_t req_size_pkts,
                          uint32_t node_id, uint64_t flags)
-    : Queue(shared_queue, flags),
+    : Queue(shared_queue, flags, agent),
       LocalSignal(0, false),
       DoorbellSignal(signal()),
       agent_(*agent),
       active_(false) {
   if (agent_.device_type() != core::Agent::DeviceType::kAmdAieDevice) {
-    throw AMD::hsa_exception(
-        HSA_STATUS_ERROR_INVALID_AGENT,
-        "Attempting to create an AIE queue on a non-AIE agent.");
+    throw hsa_exception(HSA_STATUS_ERROR_INVALID_AGENT,
+                        "Attempting to create an AIE queue on a non-AIE agent.");
   }
   queue_size_bytes_ = req_size_pkts * sizeof(core::AqlPacket);
   ring_buf_ = agent_.system_allocator()(queue_size_bytes_, 4096,
                                         core::MemoryRegion::AllocateNoFlags);
 
   if (!ring_buf_) {
-    throw AMD::hsa_exception(
-        HSA_STATUS_ERROR_INVALID_QUEUE_CREATION,
-        "Could not allocate a ring buffer for an AIE queue.");
+    throw hsa_exception(HSA_STATUS_ERROR_INVALID_QUEUE_CREATION,
+                        "Could not allocate a ring buffer for an AIE queue.");
   }
 
   // Populate hsa_queue_t fields.
@@ -104,10 +103,10 @@ AieAqlQueue::AieAqlQueue(core::SharedQueue* shared_queue, AieAgent* agent, size_
 
   HsaQueueResource queue_resource = {};
   hsa_status_t status =
-      agent_.driver().CreateQueue(node_id, HSA_QUEUE_COMPUTE_AQL, 0, HSA_QUEUE_PRIORITY_NORMAL, 0,
+      agent_.driver().CreateQueue(node_id, HSA_QUEUE_COMPUTE_AQL, 0, rocr::HSA::HSA_AMD_QUEUE_PRIORITY_NORMAL, 0,
                                   nullptr, queue_size_bytes_, nullptr, queue_resource);
   if (status != HSA_STATUS_SUCCESS) {
-    throw AMD::hsa_exception(status, "Failed to create a hardware context for an AIE queue.");
+    throw hsa_exception(status, "Failed to create a hardware context for an AIE queue.");
   }
 
   queue_id_ = queue_resource.QueueId;
@@ -135,7 +134,7 @@ hsa_status_t AieAqlQueue::Inactivate() {
   return status;
 }
 
-hsa_status_t AieAqlQueue::SetPriority(HSA_QUEUE_PRIORITY priority) {
+hsa_status_t AieAqlQueue::SetPriority(HSA::hsa_amd_queue_priority_internal_t priority) {
   return HSA_STATUS_SUCCESS;
 }
 
@@ -217,16 +216,19 @@ void AieAqlQueue::SubmitPackets() {
 
   auto& driver = static_cast<XdnaDriver&>(agent_.driver());
   void* queue_base = amd_queue_.hsa_queue.base_address;
+  const uint32_t queue_size = amd_queue_.hsa_queue.size;
 
   uint64_t cur_id = LoadReadIndexRelaxed();
   const uint64_t end = LoadWriteIndexAcquire();
   while (cur_id < end) {
-    auto* pkt = static_cast<hsa_amd_aie_ert_packet_t*>(queue_base) + cur_id;
+    // Use modulo to properly index into the ring buffer
+    const uint64_t pkt_idx = cur_id % queue_size;
+    auto* pkt = static_cast<hsa_amd_aie_ert_packet_t*>(queue_base) + pkt_idx;
 
     // Get the packet header information
     if (pkt->header.header != HSA_PACKET_TYPE_VENDOR_SPECIFIC ||
         pkt->header.AmdFormat != HSA_AMD_PACKET_TYPE_AIE_ERT) {
-      assert(false && "Invalid packet header");
+      throw hsa_exception(HSA_STATUS_ERROR_INVALID_PACKET_FORMAT, "Invalid packet header");
     }
 
     // Get the payload information
@@ -236,7 +238,8 @@ void AieAqlQueue::SubmitPackets() {
         // packets there are. All can be combined into a single chain.
         uint64_t num_cont_start_cu_pkts = 1;
         for (uint64_t peak_pkt_id = cur_id + 1; peak_pkt_id < end; peak_pkt_id++) {
-          auto* peak_pkt = static_cast<hsa_amd_aie_ert_packet_t*>(queue_base) + peak_pkt_id;
+          const uint64_t peak_pkt_idx = peak_pkt_id % queue_size;
+          auto* peak_pkt = static_cast<hsa_amd_aie_ert_packet_t*>(queue_base) + peak_pkt_idx;
           if (peak_pkt->opcode != HSA_AMD_AIE_ERT_START_CU) {
             break;
           }
@@ -248,7 +251,7 @@ void AieAqlQueue::SubmitPackets() {
         hsa_status_t status = driver.SubmitCmdChain(pkt, num_cont_start_cu_pkts, queue_id_,
                                                     agent_.properties().NumNeuralCores);
         if (status != HSA_STATUS_SUCCESS) {
-          assert(false && "Could not submit packets");
+          throw hsa_exception(status, "Could not submit packets");
         }
 
         cur_id += num_cont_start_cu_pkts;
@@ -276,6 +279,13 @@ hsa_status_t AieAqlQueue::GetInfo(hsa_queue_info_attribute_t attribute,
     case HSA_AMD_QUEUE_INFO_DOORBELL_ID:
       // Hardware doorbell supports AQL semantics.
       *static_cast<uint64_t*>(value) = reinterpret_cast<uint64_t>(signal_.hardware_doorbell_ptr);
+      break;
+    case HSA_QUEUE_INFO_USE_COUNT:
+      // AIE queues do not support counted queue features
+      *static_cast<uint32_t*>(value) = static_cast<uint32_t>(-1);
+      break;
+    case HSA_QUEUE_INFO_HW_ID:
+      *static_cast<uint32_t*>(value) = public_handle()->id;
       break;
     default:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;

@@ -222,7 +222,7 @@ panels:
     title: Aggregate Stats (All channels)
   - type: metric_table
     id: 2
-    title: L2 Cache Hit Rate (pct)
+    title: L2 Cache Hit Rate (Percent)
   - type: metric_table
     id: 3
     title: L2 Requests (per normUnit)
@@ -258,3 +258,17 @@ panels:
   - type: pc_sampling_table
     id: 1
     title: PC Sampling
+- file: mem_bw.yaml
+  panel_id: 30
+  panel_title: Memory Bandwidth Analysis
+  panel_alias: membw_analysis
+  data_sources:
+  - type: metric_table
+    id: 1
+    title: L1 Cache
+  - type: metric_table
+    id: 2
+    title: L1 traffic
+  - type: metric_table
+    id: 3
+    title: Raw Counter Value

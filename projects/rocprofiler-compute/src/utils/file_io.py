@@ -34,7 +34,14 @@ import yaml
 import config
 from utils import rocpd_data, schema
 from utils.kernel_name_shortener import kernel_name_shortener
-from utils.logger import console_debug, console_error, console_log, demarcate
+from utils.logger import (
+    console_debug,
+    console_error,
+    console_log,
+    console_warning,
+    demarcate,
+)
+from utils.utils import normalize_filter_to_str_list
 
 # TODO: use pandas chunksize or dask to read really large csv file
 # from dask import dataframe as dd
@@ -110,10 +117,14 @@ def create_df_kernel_top_stats(
     # which can be merged together if need it.
 
     if filter_nodes:
-        df = df.loc[df["Node"].astype(str).isin([filter_nodes])]
+        df = df.loc[
+            df["Node"].astype(str).isin(normalize_filter_to_str_list(filter_nodes))
+        ]
 
     if filter_gpu_ids:
-        df = df.loc[df["GPU_ID"].astype(str).isin([filter_gpu_ids])]
+        df = df.loc[
+            df["GPU_ID"].astype(str).isin(normalize_filter_to_str_list(filter_gpu_ids))
+        ]
 
     if filter_dispatch_ids:
         # NB: support ignoring the 1st n dispatched execution by '> n'
@@ -206,9 +217,9 @@ def create_df_kernel_top_stats(
     if "Dispatch_ID" in df.columns:
         grouped = grouped.reset_index()
 
-    # Calculate percentage
+    # Calculate percent
     sum_column = f"Sum{time_unit_suffix}"
-    grouped["Pct"] = grouped[sum_column] / grouped[sum_column].sum() * 100
+    grouped["Percent"] = grouped[sum_column] / grouped[sum_column].sum() * 100
 
     #   Sort by total time as default.
     if sortby == "sum":
@@ -251,7 +262,9 @@ def create_df_pmc(
                     tmp_df = rocpd_data.process_rocpd_csv(tmp_df)
 
                 # Demangle original KernelNames
-                kernel_name_shortener(tmp_df, kernel_verbose)
+                # Skip for Standalone Roofline with -1 to keep full kernel names
+                if kernel_verbose >= 0:
+                    kernel_name_shortener(tmp_df, kernel_verbose)
 
                 # NB:
                 #   Idealy, the Node column should be added out of
@@ -374,7 +387,9 @@ def is_single_panel_config(
     elif arch_count == len(arch_names):
         return False
     else:
-        console_error("Found multiple panel config sets but incomplete for all archs.")
+        console_warning(
+            "Found multiple panel config sets but incomplete for all archs."
+        )
 
 
 def find_1st_sub_dir(directory: str) -> Optional[str]:
@@ -390,3 +405,15 @@ def find_1st_sub_dir(directory: str) -> Optional[str]:
         return None
     except FileNotFoundError:
         console_error(f'The directory "{directory}" does not exist.', exit=False)
+
+
+def get_valid_nodes(directory: str) -> list[str]:
+    """Return subdirectory names that contain sysinfo.csv"""
+    dir_path = Path(directory)
+    if not dir_path.is_dir():
+        return []
+    return [
+        entry.name
+        for entry in dir_path.iterdir()
+        if entry.is_dir() and (entry / "sysinfo.csv").exists()
+    ]

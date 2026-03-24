@@ -25,6 +25,7 @@
 
 import argparse
 import copy
+import shutil
 import textwrap
 from pathlib import Path
 from typing import Any, Optional, TextIO
@@ -34,14 +35,26 @@ from tabulate import tabulate
 
 import config
 from utils import mem_chart, parser, schema
-from utils.kernel_name_shortener import kernel_name_shortener
+from utils.kernel_name_shortener import (
+    kernel_name_shortener,
+)
 from utils.logger import console_error, console_log, console_warning
 from utils.utils import (
     METRIC_ID_RE,
+    NS_TO_MS,
+    CallTreeNode,
     convert_metric_id_to_panel_info,
     get_panel_alias,
     get_uuid,
+    simplify_kernel_name,
 )
+
+KERNEL_NAME_WRAP_WIDTH = 40
+
+
+def wrap_kernel_name(name: str) -> str:
+    """Wrap a kernel name at KERNEL_NAME_WRAP_WIDTH for table display."""
+    return textwrap.fill(str(name), width=KERNEL_NAME_WRAP_WIDTH)
 
 
 def string_multiple_lines(source: str, width: int, max_rows: int) -> str:
@@ -66,17 +79,18 @@ def get_table_string(
     """
     Convert DataFrame to a formatted table string, wrapping specified columns.
     """
-    df_to_show = df.transpose() if transpose else df
+    df_to_show = df.transpose().copy() if transpose else df.copy()
 
-    wrap_columns = ["Description"]
-    wrap_width = 40
-    for col in wrap_columns:
-        if col in df_to_show.columns:
-            df_to_show[col] = (
-                df_to_show[col]
-                .astype(str)
-                .apply(lambda x: textwrap.fill(x, width=wrap_width))
-            )
+    if "Description" in df_to_show.columns:
+        df_to_show["Description"] = (
+            df_to_show["Description"]
+            .astype(str)
+            .apply(lambda x: textwrap.fill(x, width=40))
+        )
+    if "Kernel_Name" in df_to_show.columns:
+        df_to_show["Kernel_Name"] = (
+            df_to_show["Kernel_Name"].astype(str).apply(wrap_kernel_name)
+        )
     df_with_index = df_to_show.reset_index()
     return tabulate(
         df_with_index.values,
@@ -185,19 +199,18 @@ def is_roofline_shown(
                 if not kernel_top_df.empty and kernel_id in kernel_top_df.index:
                     kernel_name = kernel_top_df.loc[kernel_id, "Kernel_Name"]
                     kernel_pct = (
-                        kernel_top_df.loc[kernel_id, "Pct"]
-                        if "Pct" in kernel_top_df.columns
+                        kernel_top_df.loc[kernel_id, "Percent"]
+                        if "Percent" in kernel_top_df.columns
                         else 0
                     )
                 else:
                     kernel_name = metrics.get("name", f"Kernel {kernel_id}")
                     kernel_pct = 0
 
-                display_name = (
-                    kernel_name[:80] + "..." if len(kernel_name) > 80 else kernel_name
-                )
                 print(
-                    f"\nKernel {kernel_id}: {display_name} ({kernel_pct:.1f}%)",
+                    f"\nKernel {kernel_id}: "
+                    f"{wrap_kernel_name(kernel_name)}"
+                    f" ({kernel_pct:.1f}%)",
                     file=output,
                 )
 
@@ -243,6 +256,189 @@ def is_roofline_shown(
     return True
 
 
+def list_torch_operators(
+    workload_path: str,
+    call_trees: dict[str, CallTreeNode],
+) -> None:
+    """Display PyTorch operators as a unified call tree grouped by source location."""
+    if not call_trees:
+        print(f"\nPyTorch Operators in: {workload_path}")
+        print("Total: 0 operators")
+        return
+
+    print(f"\n{'=' * 80}")
+    print(f"PyTorch Operator Call Tree: {workload_path}")
+    print("Grouped by source location, sorted by total GPU kernel duration.")
+    print(f"{'=' * 80}")
+    show_call_tree(call_trees)
+    print(f"\n{'=' * 80}")
+
+
+def format_stats(launches: int, duration_ms: float) -> str:
+    """Format launch count and duration as an inline parenthesized string."""
+    if duration_ms < 0.01:
+        formatted_duration = f"{duration_ms * 1000:.2f} us"
+    else:
+        formatted_duration = f"{duration_ms:.2f} ms"
+    return f"(kernel_launches: {launches}, total_duration: {formatted_duration})"
+
+
+def get_tree_wrap_width(min_width: int = 72, max_width: int = 120) -> int:
+    """Pick wrap width based on terminal size to avoid terminal hard-wrap artifacts."""
+    terminal_cols = shutil.get_terminal_size((max_width, 20)).columns
+    safe_width = max(terminal_cols - 2, min_width)
+    return min(safe_width, max_width)
+
+
+def print_wrapped_tree_line(
+    prefix: str,
+    body: str,
+    width: Optional[int] = None,
+    break_long_words: bool = False,
+) -> None:
+    """Print a tree line and wrap continuation lines to preserve indentation."""
+    effective_width = get_tree_wrap_width() if width is None else width
+    print(
+        textwrap.fill(
+            body,
+            width=effective_width,
+            initial_indent=prefix,
+            subsequent_indent=" " * len(prefix),
+            break_long_words=break_long_words,
+            break_on_hyphens=False,
+        )
+    )
+
+
+def print_wrapped_kernel_line(
+    prefix: str,
+    kernel_name: str,
+    suffix: str,
+    width: Optional[int] = None,
+    continuation_prefix: str = "",
+) -> None:
+    """Wrap long kernel names while keeping suffix attached to final name chunk."""
+    effective_width = get_tree_wrap_width() if width is None else width
+    content_width = max(effective_width - len(prefix), 20)
+
+    inline = f"{kernel_name} {suffix}"
+    if len(inline) <= content_width:
+        print(f"{prefix}{inline}")
+        return
+
+    # Reserve room so suffix is never detached on its own line.
+    name_width = max(content_width - len(suffix) - 1, 8)
+    wrapped_name = textwrap.wrap(
+        kernel_name,
+        width=name_width,
+        break_long_words=True,
+        break_on_hyphens=False,
+    )
+    if not wrapped_name:
+        print(f"{prefix}{suffix}")
+        return
+
+    # Build continuation with vertical pipes from parent levels
+    # Preserve parent pipes but replace branch character with spaces
+    if len(continuation_prefix) > 0:
+        # continuation_prefix has pipes, add spaces for branch chars
+        spaces_needed = len(prefix) - len(continuation_prefix)
+        continuation = continuation_prefix + " " * spaces_needed
+    else:
+        # No parent pipes, just use spaces matching the prefix
+        continuation = " " * len(prefix)
+
+    for i, chunk in enumerate(wrapped_name):
+        if i == 0:
+            if len(wrapped_name) == 1:
+                print(f"{prefix}{chunk} {suffix}")
+            else:
+                print(f"{prefix}{chunk}")
+        elif i == len(wrapped_name) - 1:
+            print(f"{continuation}{chunk} {suffix}")
+        else:
+            print(f"{continuation}{chunk}")
+
+
+def show_call_tree(call_trees: dict[str, CallTreeNode]) -> None:
+    """Print the unified call tree grouped by source location."""
+    sorted_locations = sorted(
+        call_trees.items(), key=lambda kv: kv[1].total_duration_ms, reverse=True
+    )
+    for i, (location, root) in enumerate(sorted_locations):
+        if i > 0:
+            print(f"\n{'- ' * 40}")
+        stats = format_stats(root.kernel_launches, root.total_duration_ms)
+        print(f"\n{location} {stats}")
+        for child in sorted(
+            root.children.values(),
+            key=lambda c: c.total_duration_ms,
+            reverse=True,
+        ):
+            print_operator_node(child)
+
+
+def print_operator_node(
+    node: CallTreeNode, is_last: bool = True, parent_pipes: str = ""
+) -> None:
+    # Build indent with vertical pipes for parent levels
+    indent = parent_pipes
+    is_branching = len(node.children) + len(node.kernels) > 1
+
+    # Use ├─ for non-last items, └─ for last items
+    branch_char = "└─ " if is_last else "├─ "
+    node_prefix = f"{indent}{branch_char}"
+
+    if is_branching:
+        stats = format_stats(node.kernel_launches, node.total_duration_ms)
+        print_wrapped_tree_line(node_prefix, f"{node.name} {stats}")
+    else:
+        print_wrapped_tree_line(node_prefix, node.name)
+
+    # Build new parent_pipes for children
+    if is_last:
+        new_parent_pipes = parent_pipes + "   "  # 3 spaces
+    else:
+        new_parent_pipes = parent_pipes + "|  "  # pipe + 2 spaces
+
+    # Process child nodes
+    children = sorted(
+        node.children.values(), key=lambda c: c.total_duration_ms, reverse=True
+    )
+    for i, child in enumerate(children):
+        # A child is last if it's the final child AND there are no kernels after it
+        child_is_last = (i == len(children) - 1) and (len(node.kernels) == 0)
+        print_operator_node(child, is_last=child_is_last, parent_pipes=new_parent_pipes)
+
+    # Process kernels
+    for i, (kernel_name, kernel_stats) in enumerate(
+        sorted(
+            node.kernels.items(),
+            key=lambda kv: kv[1].total_duration_ns,
+            reverse=True,
+        )
+    ):
+        launches = kernel_stats.launches
+        duration_ns = kernel_stats.total_duration_ns
+        kernel_id = kernel_stats.kernel_id
+        id_suffix = f" (id {kernel_id})" if kernel_id is not None else ""
+        display_name = simplify_kernel_name(kernel_name)
+        total_ms = duration_ns * NS_TO_MS
+        stats = format_stats(launches, total_ms)
+
+        # Last kernel gets └─, others get ├─
+        kernel_is_last = i == len(node.kernels) - 1
+        kernel_branch_char = "└─ " if kernel_is_last else "├─ "
+        kernel_prefix = f"{new_parent_pipes}{kernel_branch_char}"
+
+        print_wrapped_kernel_line(
+            kernel_prefix,
+            display_name,
+            f"{id_suffix} {stats}".strip(),
+            continuation_prefix=new_parent_pipes,
+        )
+
+
 def process_table_data(
     args: argparse.Namespace,
     runs: dict[str, Any],
@@ -280,16 +476,7 @@ def process_table_data(
                 in ["pmc_kernel_top.csv", "pmc_dispatch_info.csv"]
                 and header == "Kernel_Name"
             ):
-                # NB: the width of kernel name might depend
-                # on the header of the table.
-                width = 40 if table_config["source"] == "pmc_kernel_top.csv" else 80
-                max_rows = 3 if table_config["source"] == "pmc_kernel_top.csv" else 4
-
-                adjusted_names = base_df["Kernel_Name"].apply(
-                    lambda x: string_multiple_lines(x, width, max_rows)
-                )
-                result_df = pd.concat([result_df, adjusted_names], axis=1)
-
+                result_df = pd.concat([result_df, base_df["Kernel_Name"]], axis=1)
             elif table_type == "raw_csv_table" and header == "Info":
                 for run_data in runs.values():
                     cur_df = run_data.dfs[table_config["id"]]
@@ -308,7 +495,7 @@ def process_table_data(
                     table_type == "metric_table" and header not in hidden_cols
                 ):
                     if run_name != base_run:
-                        # Calculate percentage difference between current and
+                        # Calculate percent difference between current and
                         # base dataframe.
                         base_series = pd.to_numeric(
                             base_df[header], errors="coerce"
@@ -317,20 +504,20 @@ def process_table_data(
                             cur_df[header], errors="coerce"
                         ).fillna(0.0)
 
-                        # Calculate absolute and percentage differences
+                        # Calculate absolute and percent differences
                         absolute_diff = (cur_series - base_series).round(args.decimal)
-                        percentage_diff = (
+                        percent_diff = (
                             absolute_diff / base_series.replace(0, 1) * 100
                         ).round(args.decimal)
 
                         if args.verbose >= 2:
-                            console_log("---------", header, percentage_diff)
+                            console_log("---------", header, percent_diff)
 
-                        # Format as "value (percentage%)"
+                        # Format as "value (percent%)"
                         formatted_diff = (
                             cur_series.round(args.decimal).astype(str)
                             + " ("
-                            + percentage_diff.astype(str)
+                            + percent_diff.astype(str)
                             + "%)"
                         )
 
@@ -341,13 +528,13 @@ def process_table_data(
                         #       requirement
                         if (
                             header in ["Value", "Count", "Avg"]
-                            and percentage_diff.abs().gt(args.report_diff).any()
+                            and percent_diff.abs().gt(args.report_diff).any()
                         ):
                             result_df["Abs Diff"] = absolute_diff
 
                             if args.report_diff:
-                                violation_idx = percentage_diff.index[
-                                    percentage_diff.abs() > args.report_diff
+                                violation_idx = percent_diff.index[
+                                    percent_diff.abs() > args.report_diff
                                 ]
                                 console_warning(
                                     f"Dataframe diff exceeds {args.report_diff}% "
@@ -410,6 +597,7 @@ def format_table_output(
         "pmc_dispatch_info.csv",
     ]:
         df = df.head(args.max_stat_num)
+
     # NB:
     # "columnwise: True" is a special attr of a table/df
     # For raw_csv_table, such as system_info, we transpose the
@@ -510,21 +698,25 @@ def show_all(
     )
 
     for panel_id, panel in arch_configs.panel_configs.items():
+        # NOTE: Experimental Feature Toggle
+        # HARD GATE: Block 30 (panel 3000) requires membw_analysis flag
+        if panel_id == 3000 and not args.membw_analysis:
+            continue
+
         # Skip panels that don't support baseline comparison
         if len(args.path) > 1 and panel_id in config.HIDDEN_SECTIONS:
             continue
 
-        # Handle roofline panel (400) with custom display logic, then skip normal
-        # table processing to prevent duplicate printing.
+        # Handle roofline panel (400) with custom display logic
         if panel_id == 400:
-            if is_roofline_shown(args, runs, output, panel, roof_plot, hidden_cols):
-                continue
+            _ = is_roofline_shown(args, runs, output, panel, roof_plot, hidden_cols)
 
         panel_content = ""  # store content of all data_source from one panel
 
         for data_source in panel["data source"]:
             for table_type, table_config in data_source.items():
-                # Skip roofline tables (401, 402) if roofline data is invalid
+                # Emit warnings for roofline tables (401, 402)
+                # if roofline data is invalid
                 if table_config["id"] in [401, 402] and not has_valid_roofline:
                     if not roofline_warning_shown and roofline_in_filter:
                         console_warning(
@@ -532,7 +724,6 @@ def show_all(
                             "Not showing roofline table due to invalid roofline data",
                         )
                         roofline_warning_shown = True
-                    continue
 
                 # Block-filter logic:
                 # - If analysis used --filter-metrics, ignore profiling block filters
@@ -598,7 +789,8 @@ def show_all(
                         args, table_config, processed_df, table_type, runs, csv_dir
                     )
 
-        if panel_content:
+        # Roofline printing is handled separately above in is_roofline_shown
+        if panel_content and table_config["id"] not in [401, 402]:
             print(f"\n{'-' * 80}", file=output)
             print(f"{panel_id // 100}. {panel['title']}", file=output)
             print(panel_content, file=output)
@@ -606,9 +798,7 @@ def show_all(
 
 def show_roof_plot(roof_plot: str) -> None:
     # TODO: short term solution to display roofline plot
-    print(f"\n{'-' * 80}")
-    print("4. Roofline")
-    print("4.3 Roofline Plot")
+    print("4.3 Roofline Plot:")
 
     if roof_plot:
         print(roof_plot)

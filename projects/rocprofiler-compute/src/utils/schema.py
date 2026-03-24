@@ -68,6 +68,7 @@ class Workload:
     roofline_metrics: dict[int, dict[str, Any]] = field(default_factory=dict)
     path: str = field(default_factory=str)
     filter_top_n: str = field(default_factory=str)
+    matched_torch_trace_df: pd.DataFrame = field(default_factory=pd.DataFrame)
 
 
 # Metrics will be calculated ONLY when the header(key) is in below list
@@ -85,7 +86,7 @@ SUPPORTED_FIELD = [
     "Peak (Empirical)",
     "Count",
     "Mean",
-    "Pct",
+    "Percent",
     "Std Dev",
     "Q1",
     "Q3",
