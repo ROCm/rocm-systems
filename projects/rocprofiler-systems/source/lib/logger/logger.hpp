@@ -152,6 +152,16 @@ protected:
 class logger_t
 {
 public:
+    // Required for async-signal-safe contexts like postfork_child
+    static inline bool __attribute__((always_inline)) is_suppressed()
+    {
+        return __builtin_expect(get_suppressed().load(std::memory_order_relaxed), false);
+    }
+
+    static void suppress() { get_suppressed().store(true, std::memory_order_relaxed); }
+
+    static void unsuppress() { get_suppressed().store(false, std::memory_order_relaxed); }
+
     static spdlog::logger& instance()
     {
         static std::shared_ptr<spdlog::logger> _instance;
@@ -212,6 +222,12 @@ private:
     }
 
     static constexpr const char* s_logger_name = "rocprofiler-systems";
+
+    static std::atomic<bool>& get_suppressed()
+    {
+        static std::atomic<bool> _v{ false };
+        return _v;
+    }
 };
 
 }  // namespace rocprofsys
