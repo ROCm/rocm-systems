@@ -78,17 +78,17 @@ __device__ __forceinline__ void refresh_volatile_sbyte([[maybe_unused]] volatile
 #endif
 #if defined(__gfx90a__) || defined(__gfx1100__)
   asm volatile(
-    "global_load_sbyte %0 %1 off glc slc\n "
-    "s_waitcnt vmcnt(0)"
-    : "=v"(*assigned_value)
-    : "v"(read_value));
+      "global_load_sbyte %0 %1 off glc slc\n "
+      "s_waitcnt vmcnt(0)"
+      : "=v"(*assigned_value)
+      : "v"(read_value));
 #endif
 #if defined(__gfx942__) || defined(__gfx950__)
   asm volatile(
-    "global_load_sbyte %0 %1 off sc0 sc1\n "
-    "s_waitcnt vmcnt(0)"
-    : "=v"(*assigned_value)
-    : "v"(read_value));
+      "global_load_sbyte %0 %1 off sc0 sc1\n "
+      "s_waitcnt vmcnt(0)"
+      : "=v"(*assigned_value)
+      : "v"(read_value));
 #endif
 #if defined(__gfx1201__)
   asm volatile(
@@ -107,19 +107,19 @@ __device__ __forceinline__ void refresh_volatile_dwordx2([[maybe_unused]] volati
 #endif
 #if defined(__gfx90a__) || defined(__gfx1100__)
   asm volatile(
-    "global_load_dwordx2 %0 %1 off glc slc\n "
-    "s_waitcnt vmcnt(0)"
-    : "=v"(*assigned_value)
-    : "v"(read_value));
+      "global_load_dwordx2 %0 %1 off glc slc\n "
+      "s_waitcnt vmcnt(0)"
+      : "=v"(*assigned_value)
+      : "v"(read_value));
 #endif
 #if defined(__gfx942__) || defined(__gfx950__)
   asm volatile(
-    "global_load_dwordx2 %0 %1 off sc0 sc1\n "
-    "s_waitcnt vmcnt(0)"
-    : "=v"(*assigned_value)
-    : "v"(read_value));
+      "global_load_dwordx2 %0 %1 off sc0 sc1\n "
+      "s_waitcnt vmcnt(0)"
+      : "=v"(*assigned_value)
+      : "v"(read_value));
 #endif
- #if defined(__gfx1201__)
+#if defined(__gfx1201__)
   asm volatile(
       "global_load_b64 %0 %1 off scope:SCOPE_SYS \n"
       "s_wait_loadcnt 0x0"
@@ -202,22 +202,21 @@ NOWARN(-Wdeprecated-volatile,
 
 __device__ __forceinline__ void __roc_flush() {
 #if not defined USE_HDP_FLUSH
-#if defined(__gfx906__)
-#endif
-#if defined(__gfx908__) || defined(__gfx1100__)
-#endif
-#if defined(__gfx90a__)
-//  asm volatile("s_dcache_wb;");
-//  asm volatile("buffer_wbl2;");
-#endif
-#if defined(__gfx942__) || defined(__gfx950__)
-//  asm volatile("s_dcache_wb;");
-//  asm volatile("buffer_wbl2;");
-#endif
+  #if defined(__gfx906__)
+  #endif
+  #if defined(__gfx908__) || defined(__gfx1100__)
+  #endif
+  #if defined(__gfx90a__)
+  //  asm volatile("s_dcache_wb;");
+  //  asm volatile("buffer_wbl2;");
+  #endif
+  #if defined(__gfx942__) || defined(__gfx950__)
+  //  asm volatile("s_dcache_wb;");
+  //  asm volatile("buffer_wbl2;");
+  #endif
 #endif
 }
 
-// 128-bit (16-byte) vector type for use with flat_store_dwordx4 and buffer intrinsics
 using i32x4 = int32_t __attribute__((ext_vector_type(4)));
 
 struct buffer_resource {
@@ -234,8 +233,8 @@ __device__ To bit_cast_fallback(const From& src) noexcept {
 }
 
 template <typename T>
-__device__ __forceinline__ buffer_resource make_buffer_resource(T* ptr, uint32_t buffer_size) {
-  // ref: https://github.com/HazyResearch/HipKittens
+__device__ __forceinline__ buffer_resource
+make_buffer_resource(T* ptr, uint32_t buffer_size) {
   constexpr uint32_t config = 0x00020000;
   uint64_t as_u64 = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(ptr));
   return {as_u64, buffer_size, config};
@@ -243,21 +242,20 @@ __device__ __forceinline__ buffer_resource make_buffer_resource(T* ptr, uint32_t
 
 #if defined(__gfx942__) || defined(__gfx950__)
 
-__device__ __int128_t llvm_amdgcn_raw_buffer_load_b128(i32x4 srsrc, uint32_t voffset,
-                                                         uint32_t soffset, uint32_t coherency)
-    __asm("llvm.amdgcn.raw.buffer.load.i128");
+__device__ __int128_t llvm_amdgcn_raw_buffer_load_b128(
+    i32x4 srsrc, uint32_t voffset, uint32_t soffset,
+    uint32_t coherency) __asm("llvm.amdgcn.raw.buffer.load.i128");
 
-__device__ void llvm_amdgcn_raw_buffer_store_b128(__int128_t vdata, i32x4 srsrc,
-                                                   uint32_t voffset, uint32_t soffset,
-                                                   uint32_t coherency)
-    __asm("llvm.amdgcn.raw.buffer.store.i128");
+__device__ void llvm_amdgcn_raw_buffer_store_b128(
+    __int128_t vdata, i32x4 srsrc, uint32_t voffset, uint32_t soffset,
+    uint32_t coherency) __asm("llvm.amdgcn.raw.buffer.store.i128");
 
 #endif  // __gfx942__ || __gfx950__
 
-__device__ __forceinline__ void load_store_asm(buffer_resource* src, buffer_resource* dst,
-                                          size_t stride, size_t thread_idx, 
-                                          size_t size){
-  
+__device__ __forceinline__ void load_store_asm(buffer_resource* src,
+                                               buffer_resource* dst,
+                                               size_t stride, size_t thread_idx,
+                                               size_t size) {
 #if defined(__gfx906__)
 #endif
 #if defined(__gfx908__)
@@ -266,26 +264,23 @@ __device__ __forceinline__ void load_store_asm(buffer_resource* src, buffer_reso
     //! needs to be implemented
 #endif
 #if defined(__gfx942__) || defined(__gfx950__)
-    
-    constexpr int NUM_REG = 16;
-    __int128_t regs[NUM_REG];
 
-    #pragma unroll
-    for (int i = 0; i < NUM_REG; i++) {
-      regs[i] = llvm_amdgcn_raw_buffer_load_b128(
-          *reinterpret_cast<i32x4*>(src),
-          thread_idx + i * stride, 0u, 0b10011u);
-    }
-    #pragma unroll
-    for (int i = 0; i < NUM_REG; i++) {
-      llvm_amdgcn_raw_buffer_store_b128(
-          regs[i],
-          *reinterpret_cast<i32x4*>(dst),
-          thread_idx + i * stride, 0u, 0b10011u);
-    }
-    __builtin_amdgcn_s_setprio(0);
-    __builtin_amdgcn_s_barrier();
-  
+  constexpr int NUM_REG = 16;
+  __int128_t regs[NUM_REG];
+
+  #pragma unroll
+  for (int i = 0; i < NUM_REG; i++) {
+    regs[i] = llvm_amdgcn_raw_buffer_load_b128(
+        *reinterpret_cast<i32x4*>(src), thread_idx + i * stride, 0u, 0b10011u);
+  }
+  #pragma unroll
+  for (int i = 0; i < NUM_REG; i++) {
+    llvm_amdgcn_raw_buffer_store_b128(regs[i], *reinterpret_cast<i32x4*>(dst),
+                                      thread_idx + i * stride, 0u, 0b10011u);
+  }
+  __builtin_amdgcn_s_setprio(0);
+  __builtin_amdgcn_s_barrier();
+
 #endif
 #if defined(__gfx1201__)
     //! needs to be implemented
