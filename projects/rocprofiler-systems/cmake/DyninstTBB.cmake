@@ -342,4 +342,15 @@ if(NOT TARGET TBB::tbb)
 
     # Set TBB_ROOT for Dyninst to find
     set(TBB_ROOT "${TBB_ROOT_DIR}" CACHE PATH "TBB root directory for Dyninst" FORCE)
+
+    # Create Dyninst::TBB target if building from source
+    # This prevents Dyninst from trying to find_package(TBB) which would fail
+    if(TARGET rocprofiler-systems-tbb-build AND NOT TARGET Dyninst::TBB)
+        add_library(Dyninst::TBB INTERFACE IMPORTED)
+        target_link_libraries(Dyninst::TBB INTERFACE ${TBB_LIBRARIES})
+        target_include_directories(Dyninst::TBB SYSTEM INTERFACE ${TBB_INCLUDE_DIRS})
+        if(TBB_LIBRARY_DIRS)
+            target_link_directories(Dyninst::TBB INTERFACE ${TBB_LIBRARY_DIRS})
+        endif()
+    endif()
 endif()

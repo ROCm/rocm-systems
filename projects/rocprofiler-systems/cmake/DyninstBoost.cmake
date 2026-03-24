@@ -458,6 +458,19 @@ rocprofiler_systems_message(STATUS "Boost library dirs: ${Boost_LIBRARY_DIRS}")
 rocprofiler_systems_message(STATUS "Boost thread library: ${Boost_THREAD_LIBRARY}")
 rocprofiler_systems_message(STATUS "Boost libraries: ${Boost_LIBRARIES}")
 
+# Create Dyninst::Boost and Dyninst::Boost_headers targets
+# These targets are checked by Dyninst's own cmake configuration
+# If they exist, Dyninst will skip trying to find Boost
+if(NOT TARGET Dyninst::Boost)
+    add_library(Dyninst::Boost INTERFACE IMPORTED)
+    target_link_libraries(Dyninst::Boost INTERFACE ${Boost_LIBRARIES})
+    target_include_directories(Dyninst::Boost SYSTEM INTERFACE ${Boost_INCLUDE_DIRS})
+    target_compile_definitions(
+        Dyninst::Boost
+        INTERFACE BOOST_MULTI_INDEX_DISABLE_SERIALIZATION
+    )
+endif()
+
 # Just the headers (effectively a simplified Boost::headers target)
 if(NOT TARGET Dyninst::Boost_headers)
     add_library(Dyninst::Boost_headers INTERFACE IMPORTED)
@@ -465,5 +478,9 @@ if(NOT TARGET Dyninst::Boost_headers)
         Dyninst::Boost_headers
         SYSTEM
         INTERFACE ${Boost_INCLUDE_DIRS}
+    )
+    target_compile_definitions(
+        Dyninst::Boost_headers
+        INTERFACE BOOST_MULTI_INDEX_DISABLE_SERIALIZATION
     )
 endif()

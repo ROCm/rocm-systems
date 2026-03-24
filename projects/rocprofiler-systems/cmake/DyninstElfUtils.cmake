@@ -303,4 +303,15 @@ if(NOT TARGET Elfutils::Elfutils)
         "ElfUtils root directory for Dyninst"
         FORCE
     )
+
+    # Create Dyninst::ElfUtils target if building from source
+    # This prevents Dyninst from trying to find_package(Elfutils) which would fail
+    if(TARGET rocprofiler-systems-elfutils-build AND NOT TARGET Dyninst::ElfUtils)
+        add_library(Dyninst::ElfUtils INTERFACE IMPORTED)
+        target_link_libraries(Dyninst::ElfUtils INTERFACE ${_eu_libs})
+        target_include_directories(Dyninst::ElfUtils SYSTEM INTERFACE ${_eu_inc_dirs})
+        if(_eu_lib_dirs)
+            target_link_directories(Dyninst::ElfUtils INTERFACE ${_eu_lib_dirs})
+        endif()
+    endif()
 endif()

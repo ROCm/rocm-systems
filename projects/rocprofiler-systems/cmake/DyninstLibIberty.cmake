@@ -150,3 +150,18 @@ set(IBERTY_LIBRARIES ${LibIberty_LIBRARIES})
 rocprofiler_systems_message(STATUS "LibIberty include dirs: ${LibIberty_INCLUDE_DIRS}")
 rocprofiler_systems_message(STATUS "LibIberty library dirs: ${LibIberty_LIBRARY_DIRS}")
 rocprofiler_systems_message(STATUS "LibIberty libraries: ${LibIberty_LIBRARIES}")
+
+# Create Dyninst::LibIberty target if building from source
+# This prevents Dyninst from trying to find_package(LibIberty) which would fail
+if(TARGET rocprofiler-systems-libiberty-build AND NOT TARGET Dyninst::LibIberty)
+    add_library(Dyninst::LibIberty INTERFACE IMPORTED)
+    target_link_libraries(Dyninst::LibIberty INTERFACE ${LibIberty_LIBRARIES})
+    target_include_directories(
+        Dyninst::LibIberty
+        SYSTEM
+        INTERFACE ${LibIberty_INCLUDE_DIRS}
+    )
+    if(LibIberty_LIBRARY_DIRS)
+        target_link_directories(Dyninst::LibIberty INTERFACE ${LibIberty_LIBRARY_DIRS})
+    endif()
+endif()
