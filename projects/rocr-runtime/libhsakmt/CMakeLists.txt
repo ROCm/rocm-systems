@@ -38,6 +38,9 @@ else()
 
   project ( ${HSAKMT_TARGET} VERSION 1.9.0)
 
+  ## Option to enable DRM AMDGPU SVM support
+  option(USE_DRM_AMDGPU_SVM "Enable DRM AMDGPU SVM (Shared Virtual Memory) support" OFF)
+
   # Optionally, build HSAKMT with ccache.
   set(ROCM_CCACHE_BUILD OFF CACHE BOOL "Set to ON for a ccache enabled build")
   if (ROCM_CCACHE_BUILD)
@@ -184,6 +187,9 @@ else()
                      "src/ais.c"
                      "src/kfdcontext.c"
                      "src/extsem.c")
+    if(USE_DRM_AMDGPU_SVM)
+      list(APPEND HSAKMT_SRC "src/amdgpu_svm.c")
+    endif()
   endif()
 
   ## Declare the library target name
@@ -272,6 +278,13 @@ else()
     check_function_exists(memfd_create HAVE_MEMFD_CREATE)
     if(HAVE_MEMFD_CREATE)
       target_compile_definitions(${HSAKMT_TARGET} PRIVATE -DHAVE_MEMFD_CREATE=1)
+    endif()
+
+    if(USE_DRM_AMDGPU_SVM)
+      target_compile_definitions(${HSAKMT_TARGET} PRIVATE -DUSE_DRM_AMDGPU_SVM=1)
+      message(STATUS "DRM AMDGPU SVM support: ENABLED")
+    else()
+      message(STATUS "DRM AMDGPU SVM support: DISABLED")
     endif()
   else()
     ## Link Windows Kernel Mode Interface

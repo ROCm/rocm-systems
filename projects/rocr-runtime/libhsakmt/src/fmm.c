@@ -48,6 +48,10 @@
 #include <sys/stat.h>
 #include "hsakmt/linux/udmabuf.h"
 
+#ifdef USE_DRM_AMDGPU_SVM
+#include "hsakmt/drm/amdgpu_svm.h"
+#endif
+
 #ifndef MPOL_F_STATIC_NODES
 /* Bug in numaif.h, this should be defined in there. Definition copied
  * from linux/mempolicy.h.
@@ -1109,6 +1113,118 @@ static HsaMemFlags fmm_translate_ioc_to_hsa_flags(uint32_t ioc_flags)
 	return mflags;
 }
 
+#ifdef USE_DRM_AMDGPU_SVM
+static HSAKMT_STATUS fmm_register_mem_svm_api_drm(HsaKFDContext *ctx,
+				      void *address,
+				      uint64_t size, HsaMemFlags flags)
+{
+	HSAuint32 page_offset = (HSAuint64)address & (PAGE_SIZE-1);
+	HSAuint64 aligned_addr = (HSAuint64)address - page_offset;
+	HSAuint64 aligned_size = PAGE_ALIGN_UP(page_offset + size);
+	uint32_t i;
+	HsaAMDGPUDeviceHandle deviceHandle;
+	int ret;
+	struct drm_amdgpu_svm_attribute attrs[2];
+
+	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
+
+	if (!fmm_ctx->first_gpu_mem)
+		return HSAKMT_STATUS_ERROR;
+
+	pr_debug("Registering to SVM [%p-%p]-0x%lx for all GPU nodes using AMDGPU DRM\n",
+		 (void*)aligned_addr, (void*)(aligned_addr + aligned_size), aligned_size);
+
+	for (i = 0; i < fmm_ctx->gpu_mem_count; i++) {
+		if (fmm_ctx->gpu_mem[i].gpu_id == NON_VALID_GPU_ID)
+			continue;
+
+		ret = hsaKmtGetAMDGPUDeviceHandleCtx(ctx, fmm_ctx->gpu_mem[i].node_id, &deviceHandle);
+		if(ret != HSAKMT_STATUS_SUCCESS) {
+			pr_debug("GPU Node %d: Failed to get AMDGPU device handle, skipping\n", i);
+			continue;
+		}
+
+		attrs[0].type = AMDGPU_SVM_ATTR_COHERENT;
+		attrs[0].value = flags.ui32.CoarseGrain ? 0 : 1;
+
+		attrs[1].type = AMDGPU_SVM_ATTR_EXT_COHERENT;
+		attrs[1].value = flags.ui32.ExtendedCoherent ? 1 : 0;
+
+		ret = amdgpu_svm_set_attr(deviceHandle, aligned_addr, aligned_size, 2, attrs);
+		if (ret < 0) {
+			pr_debug("GPU Node %d: DRM_IOCTL_AMDGPU_GEM_SVM failed: %s (errno=%d)\n",
+			       i, strerror(errno), errno);
+			continue;
+		} else {
+			pr_debug("GPU Node %d: Successfully set SVM attributes via DRM ioctl\n", i);
+		}
+	}
+
+	return HSAKMT_STATUS_SUCCESS;
+}
+
+static HSAKMT_STATUS fmm_map_mem_svm_api_drm(HsaKFDContext *ctx,
+					      void *address,
+					      uint64_t size,
+					      uint32_t *nodes_to_map,
+					      uint32_t nodes_array_size)
+{
+	uint32_t i;
+	int ret;
+	int32_t gpu_mem_id;
+	uint32_t gpu_id;
+	uint32_t node_id;
+	struct drm_amdgpu_svm_attribute attr;
+	HsaAMDGPUDeviceHandle deviceHandle;
+
+	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
+	if (!fmm_ctx->first_gpu_mem)
+		return HSAKMT_STATUS_ERROR;
+
+	if (!nodes_to_map || nodes_array_size == 0)
+		return HSAKMT_STATUS_INVALID_PARAMETER;
+
+	pr_debug("Mapping SVM memory [%p-%p]-0x%lx to %d nodes using AMDGPU DRM\n",
+		 address, (void *)((uintptr_t)address + size), size, nodes_array_size);
+
+	for (i = 0; i < nodes_array_size; i++) {
+		gpu_id = nodes_to_map[i];
+
+		if (gpu_id == NON_VALID_GPU_ID) {
+			pr_warn("GPU %d: Invalid GPU ID, skipping\n", gpu_id);
+			continue;
+		}
+
+		gpu_mem_id = gpu_mem_find_by_gpu_id(fmm_ctx, gpu_id);
+		if (gpu_mem_id < 0) {
+			pr_warn("GPU %d: Not found in gpu_mem array, skipping\n", gpu_id);
+			continue;
+		}
+
+		node_id = fmm_ctx->gpu_mem[gpu_mem_id].node_id;
+		ret = hsaKmtGetAMDGPUDeviceHandleCtx(ctx, node_id, &deviceHandle);
+		if(ret != HSAKMT_STATUS_SUCCESS) {
+			pr_debug("GPU Node %d: Failed to get AMDGPU device handle, skipping\n", node_id);
+			continue;
+		}
+
+		attr.type = AMDGPU_SVM_ATTR_ACCESS;
+		attr.value = AMDGPU_SVM_ACCESS_IN_PLACE;
+
+		ret = amdgpu_svm_set_attr(deviceHandle, (uint64_t)address, size, 1, &attr);
+		if (ret < 0) {
+			pr_debug("GPU %d: DRM_IOCTL_AMDGPU_GEM_SVM failed: %s (errno=%d)\n",
+			       gpu_id, strerror(errno), errno);
+			continue;
+		} else {
+			pr_debug("GPU %d: Successfully mapped SVM memory via DRM ioctl\n",
+				gpu_id);
+		}
+	}
+
+	return HSAKMT_STATUS_SUCCESS;
+}
+#else
 static HSAKMT_STATUS fmm_register_mem_svm_api(HsaKFDContext *ctx,
 						  void *address,
 					      uint64_t size, HsaMemFlags flags)
@@ -1180,6 +1296,7 @@ static HSAKMT_STATUS fmm_map_mem_svm_api(HsaKFDContext *ctx,
 
 	return HSAKMT_STATUS_SUCCESS;
 }
+#endif
 
 /* After allocating the memory, return the vm_object created for this memory.
  * Return NULL if any failure.
@@ -2766,6 +2883,18 @@ HSAKMT_STATUS hsakmt_fmm_get_amdgpu_device_handle(HsaKFDContext *ctx,
 	return HSAKMT_STATUS_SUCCESS;
 }
 
+HSAKMT_STATUS hsakmt_fmm_get_default_amdgpu_device_handle(HsaKFDContext *ctx,
+						HsaAMDGPUDeviceHandle *DeviceHandle)
+{
+	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
+
+	if (!fmm_ctx->first_gpu_mem)
+		return HSAKMT_STATUS_INVALID_NODE_UNIT;
+
+	return hsakmt_fmm_get_amdgpu_device_handle(ctx,
+			fmm_ctx->first_gpu_mem->node_id, DeviceHandle);
+}
+
 static bool two_apertures_overlap(void *start_1, void *limit_1, void *start_2, void *limit_2)
 {
     return (start_1 >= start_2 && start_1 <= limit_2) || (start_2 >= start_1 && start_2 <= limit_1);
@@ -3517,11 +3646,17 @@ static HSAKMT_STATUS _fmm_map_to_gpu_userptr(HsaKFDContext *ctx,
 		}
 		pr_debug("%s Mapping Address %p size aligned: %ld offset: %x\n",
 			__func__, svm_addr, PAGE_ALIGN_UP(page_offset + size), page_offset);
+		#ifdef USE_DRM_AMDGPU_SVM
+		ret = fmm_map_mem_svm_api_drm(ctx, svm_addr,
+					     PAGE_ALIGN_UP(page_offset + size),
+					     nodes_to_map,
+					     nodes_array_size / sizeof(uint32_t));
+		#else
 		ret = fmm_map_mem_svm_api(ctx, svm_addr,
 						  PAGE_ALIGN_UP(page_offset + size),
 						  nodes_to_map,
 						  nodes_array_size / sizeof(uint32_t));
-
+		#endif
 	} else if (object) {
 		svm_addr = object->start;
 		ret = _fmm_map_to_gpu(ctx, aperture, svm_addr, object->size, object, NULL, 0);
@@ -3947,7 +4082,11 @@ HSAKMT_STATUS hsakmt_fmm_register_memory(HsaKFDContext *ctx,
 
 		/* Register a new user ptr */
 		if (ctx->hsakmt_is_svm_api_supported) {
+#ifdef USE_DRM_AMDGPU_SVM
+			ret = fmm_register_mem_svm_api_drm(ctx, address, size_in_bytes, flags);
+#else
 			ret = fmm_register_mem_svm_api(ctx, address, size_in_bytes, flags);
+#endif
 			if (ret == HSAKMT_STATUS_SUCCESS)
 				return ret;
 			pr_debug("SVM failed, falling back to old registration\n");

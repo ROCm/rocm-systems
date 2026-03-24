@@ -47,6 +47,8 @@ typedef struct {
 
 HSAKMT_STATUS hsakmt_fmm_get_amdgpu_device_handle(HsaKFDContext *ctx,
 						uint32_t node_id,  HsaAMDGPUDeviceHandle *DeviceHandle);
+HSAKMT_STATUS hsakmt_fmm_get_default_amdgpu_device_handle(HsaKFDContext *ctx,
+						HsaAMDGPUDeviceHandle *DeviceHandle);
 HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx, unsigned int NumNodes);
 void hsakmt_fmm_destroy_process_apertures(HsaKFDContext *ctx);
 
