@@ -439,9 +439,6 @@ class Device : public NullDevice {
       void* gfxContext          //!< HGLRC/GLXContext handle
   ) override;
 
-  bool beginGLInterop(void* pContext) const override;
-  bool endGLInterop(void* pContext) const override;
-
   //! Gets free memory on a GPU device
   virtual bool globalFreeMemory(size_t* freeMemory) const override;
   virtual void* hostAlloc(size_t size, size_t alignment,

@@ -416,9 +416,6 @@ class Device : public NullDevice {
   //! Attempt to unbind with external graphics API's device/context
   virtual bool unbindExternalDevice(uint flags, void* const pDevice[], void* pContext);
 
-  bool beginGLInterop(void* pContext) const override;
-  bool endGLInterop(void* pContext) const override;
-
   //! Free resource cache on device if OCL context was destroyed.
   //! @note: Backend device doesn't track resources per context and releases all resources,
   //! regardless the number of still active contexts

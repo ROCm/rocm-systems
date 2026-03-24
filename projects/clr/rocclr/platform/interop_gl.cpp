@@ -420,6 +420,44 @@ bool amd::GLFunctions::setIntEnv() {
   return true;
 }
 
+bool amd::GLFunctions::beginCLInterop(void* glContext) {
+  if (isEGL_) return true;
+#ifdef _WIN32
+  if (!wglBeginCLInteropAMD_) {
+    wglBeginCLInteropAMD_ = reinterpret_cast<PFN_wglBeginCLInteropAMD>(
+        GetProcAddress_(reinterpret_cast<FCN_STR_TYPE>("wglBeginCLInteroperabilityAMD")));
+    if (!wglBeginCLInteropAMD_) return false;
+  }
+  return wglBeginCLInteropAMD_(static_cast<HGLRC>(glContext), 0) != FALSE;
+#else
+  if (!glXBeginCLInteropAMD_) {
+    glXBeginCLInteropAMD_ = reinterpret_cast<PFN_glXBeginCLInteropAMD>(
+        GetProcAddress_(reinterpret_cast<FCN_STR_TYPE>("glXBeginCLInteroperabilityAMD")));
+    if (!glXBeginCLInteropAMD_) return false;
+  }
+  return glXBeginCLInteropAMD_(static_cast<GLXContext>(glContext), 0);
+#endif
+}
+
+bool amd::GLFunctions::endCLInterop(void* glContext) {
+  if (isEGL_) return true;
+#ifdef _WIN32
+  if (!wglEndCLInteropAMD_) {
+    wglEndCLInteropAMD_ = reinterpret_cast<PFN_wglEndCLInteropAMD>(
+        GetProcAddress_(reinterpret_cast<FCN_STR_TYPE>("wglEndCLInteroperabilityAMD")));
+    if (!wglEndCLInteropAMD_) return false;
+  }
+  return wglEndCLInteropAMD_(static_cast<HGLRC>(glContext), 0) != FALSE;
+#else
+  if (!glXEndCLInteropAMD_) {
+    glXEndCLInteropAMD_ = reinterpret_cast<PFN_glXEndCLInteropAMD>(
+        GetProcAddress_(reinterpret_cast<FCN_STR_TYPE>("glXEndCLInteroperabilityAMD")));
+    if (!glXEndCLInteropAMD_) return false;
+  }
+  return glXEndCLInteropAMD_(static_cast<GLXContext>(glContext), 0);
+#endif
+}
+
 bool amd::GLFunctions::restoreEnv() {
   if (isEGL_) {
     // eglMakeCurrent( );

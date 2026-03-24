@@ -1886,10 +1886,6 @@ class Device : public RuntimeObject {
       void* pContext          //!< HGLRC/GLXContext handle
       ) = 0;
 
-  //! Begin/End GL interop (calls wglBeginCLInteropAMD/wglEndCLInteropAMD once per HGLRC)
-  virtual bool beginGLInterop(void* pContext) const { return true; }
-  virtual bool endGLInterop(void* pContext) const { return true; }
-
   //! resolves GL depth/msaa buffer
   virtual bool resolveGLMemory(device::Memory*) const { return true; }
 

@@ -300,9 +300,9 @@ bool Context::beginGLInterop() {
     endGLInterop();
   }
 
-  if (devices_.empty() || info_.hCtx_ == nullptr) return false;
+  if (glenv_ == nullptr || info_.hCtx_ == nullptr) return false;
 
-  if (!devices_[0]->beginGLInterop(info_.hCtx_)) {
+  if (!glenv_->beginCLInterop(info_.hCtx_)) {
     return false;
   }
   glInteropBound_ = true;
@@ -312,9 +312,9 @@ bool Context::beginGLInterop() {
 
 bool Context::endGLInterop() {
   if (!glInteropBound_) return true;
-  if (devices_.empty() || glInteropCtx_ == nullptr) return false;
+  if (glenv_ == nullptr || glInteropCtx_ == nullptr) return false;
 
-  if (!devices_[0]->endGLInterop(glInteropCtx_)) {
+  if (!glenv_->endCLInterop(glInteropCtx_)) {
     return false;
   }
   glInteropBound_ = false;
