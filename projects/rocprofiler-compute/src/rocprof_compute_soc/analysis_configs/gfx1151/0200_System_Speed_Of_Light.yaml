@@ -1,5 +1,5 @@
 # =============================================================================
-# RDNA3.5 (gfx1152) — System Speed-of-Light
+# RDNA3.5 (gfx1151) — System Speed-of-Light
 # Layout aligned with gfx950/0200_system_speed_of_light.yaml (throughput first,
 # then core/memory, then cache hierarchy). RDNA3.5: standard VALU FLOPs (no MFMA).
 #
@@ -17,7 +17,7 @@
 # indicative only.
 #
 # Cache: TCP (L0) -> GL1C (L1) -> GL2C (L2). Fabric/MC: peak N/A (no sysinfo BW).
-# Memory hierarchy reference: gfx1152/0300_Memory_Chart.yaml.
+# Memory hierarchy reference: gfx1151/0300_Memory_Chart.yaml.
 # =============================================================================
 
 Panel Config:
@@ -218,7 +218,7 @@ Panel Config:
       Formula: 100 * GL2C_HIT_sum / (GL2C_HIT_sum + GL2C_MISS_sum) when the denominator is non-zero.
     L2-Fabric Read BW: |-
       Read bandwidth from L2 to memory fabric (EA read sizes include 96 B on RDNA3).
-      Peak / % of peak are N/A (gfx1152 has no sysinfo memory bandwidth variable).
+      Peak / % of peak are N/A (gfx1151 has no sysinfo memory bandwidth variable).
     L2-Fabric Write BW: |-
       Write bandwidth from L2 toward memory (counter_defs GL2C write sizing): 32 B per (GL2C_MC_WRREQ − GL2C_EA_WRREQ_64B)
       transaction plus 64 B per GL2C_EA_WRREQ_64B (64 B writes / CMPSWAP). Divided by

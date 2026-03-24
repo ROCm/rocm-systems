@@ -425,7 +425,7 @@ class TestPlotMemChart:
     def test_returns_string(self):
         """Test that plot_mem_chart returns a string."""
         metrics = mem_chart_gfx11.get_sample_metrics()
-        result = mem_chart_gfx11.plot_mem_chart("gfx1152", "per_kernel", metrics)
+        result = mem_chart_gfx11.plot_mem_chart("gfx1151", "per_kernel", metrics)
 
         assert isinstance(result, str)
         assert len(result) > 0
@@ -433,7 +433,7 @@ class TestPlotMemChart:
     def test_contains_architecture_elements(self):
         """Test that output contains RDNA3.5 architecture elements."""
         metrics = mem_chart_gfx11.get_sample_metrics()
-        result = mem_chart_gfx11.plot_mem_chart("gfx1152", "per_kernel", metrics)
+        result = mem_chart_gfx11.plot_mem_chart("gfx1151", "per_kernel", metrics)
 
         # Check for key components
         assert "TCP" in result or "L0" in result  # L0 cache
@@ -445,7 +445,7 @@ class TestPlotMemChart:
     def test_contains_bandwidth_values(self):
         """Test that output contains formatted bandwidth values."""
         metrics = mem_chart_gfx11.get_sample_metrics()
-        result = mem_chart_gfx11.plot_mem_chart("gfx1152", "per_kernel", metrics)
+        result = mem_chart_gfx11.plot_mem_chart("gfx1151", "per_kernel", metrics)
 
         # Should contain GB/s units since sample data uses GB/s range
         assert "GB/s" in result
@@ -453,13 +453,13 @@ class TestPlotMemChart:
     def test_contains_normalization_unit(self):
         """Test that output contains the normalization unit."""
         metrics = mem_chart_gfx11.get_sample_metrics()
-        result = mem_chart_gfx11.plot_mem_chart("gfx1152", "per_kernel", metrics)
+        result = mem_chart_gfx11.plot_mem_chart("gfx1151", "per_kernel", metrics)
 
         assert "per_kernel" in result
 
     def test_empty_metrics(self):
         """Test with empty metrics dictionary."""
-        result = mem_chart_gfx11.plot_mem_chart("gfx1152", "per_kernel", {})
+        result = mem_chart_gfx11.plot_mem_chart("gfx1151", "per_kernel", {})
 
         # Should still produce output (with N/A values)
         assert isinstance(result, str)
@@ -473,7 +473,7 @@ class TestPlotMemChart:
             # Missing many other metrics
         }
         result = mem_chart_gfx11.plot_mem_chart(
-            "gfx1152", "per_kernel", partial_metrics
+            "gfx1151", "per_kernel", partial_metrics
         )
 
         assert isinstance(result, str)
@@ -486,7 +486,7 @@ class TestPlotMemChart:
             "DRAM Write Bandwidth": 5e12,  # 5 TB/s
         }
         result = mem_chart_gfx11.plot_mem_chart(
-            "gfx1152", "per_kernel", extreme_metrics
+            "gfx1151", "per_kernel", extreme_metrics
         )
 
         assert "TB/s" in result
@@ -497,7 +497,7 @@ class TestPlotMemChart:
             "DRAM Read Bandwidth": 0,
             "DRAM Write Bandwidth": 0,
         }
-        result = mem_chart_gfx11.plot_mem_chart("gfx1152", "per_kernel", zero_metrics)
+        result = mem_chart_gfx11.plot_mem_chart("gfx1151", "per_kernel", zero_metrics)
 
         assert "B/s" in result  # Zero formats as "0.0 B/s"
 
@@ -511,7 +511,7 @@ class TestDefaultSampleMetrics:
     """Tests for DEFAULT_SAMPLE_METRICS constant."""
 
     def test_keys_match_mem_chart_panel_yaml(self):
-        """Keys match gfx1152 ``0300_Memory_Chart.yaml`` metric names (MEM_CHART_PANEL_METRIC_KEYS)."""
+        """Keys match gfx1151 ``0300_Memory_Chart.yaml`` metric names (MEM_CHART_PANEL_METRIC_KEYS)."""
         assert set(mem_chart_gfx11.DEFAULT_SAMPLE_METRICS) == set(
             mem_chart_gfx11.MEM_CHART_PANEL_METRIC_KEYS
         )
@@ -565,7 +565,7 @@ class TestIntegration:
         metrics = mem_chart_gfx11.get_sample_metrics()
 
         # Generate chart
-        chart = mem_chart_gfx11.plot_mem_chart("gfx1152", "per_dispatch", metrics)
+        chart = mem_chart_gfx11.plot_mem_chart("gfx1151", "per_dispatch", metrics)
 
         # Verify chart contains expected elements
         assert isinstance(chart, str)
@@ -585,7 +585,7 @@ class TestIntegration:
             "DRAM Write Bandwidth": 100e9,  # 100 GB/s
         }
 
-        chart = mem_chart_gfx11.plot_mem_chart("gfx1152", "per_kernel", metrics)
+        chart = mem_chart_gfx11.plot_mem_chart("gfx1151", "per_kernel", metrics)
 
         # All values should show in GB/s since they're in that range
         assert chart.count("GB/s") >= 6
@@ -599,7 +599,7 @@ class TestIntegration:
             "TCP-GL1 Read Bandwidth": 50e3,  # 50 KB/s
         }
 
-        chart = mem_chart_gfx11.plot_mem_chart("gfx1152", "per_kernel", metrics)
+        chart = mem_chart_gfx11.plot_mem_chart("gfx1151", "per_kernel", metrics)
 
         # Should contain multiple unit types
         assert "TB/s" in chart

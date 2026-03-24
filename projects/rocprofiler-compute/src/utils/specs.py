@@ -62,6 +62,15 @@ from utils.utils import get_version
 
 T = TypeVar("T")
 
+def canonical_gpu_arch(gpu_arch: Optional[str]) -> Optional[str]:
+    """Map LLVM GPU targets that share one SoC and analysis config tree."""
+    if gpu_arch is None:
+        return None
+    if gpu_arch == "gfx1152":
+        return "gfx1151"
+    return gpu_arch
+
+
 VERSION_LOC: list[str] = [
     "version",
     "version-dev",
@@ -85,8 +94,9 @@ def detect_arch(rocminfo_lines: list[str]) -> Optional[tuple[str, int]]:
         if not gpu_arch:
             continue
 
-        if gpu_arch in supported_gpu_arch:
-            return (gpu_arch, idx1)
+        arch_for_support = canonical_gpu_arch(gpu_arch)
+        if arch_for_support in supported_gpu_arch:
+            return (arch_for_support, idx1)
 
         if gpu_arch not in unsupported_gpu_arch:
             unsupported_gpu_arch.add(gpu_arch)
@@ -149,7 +159,11 @@ def generate_machine_specs(
                     "You need to reprofile to update data."
                 )
 
-            return MachineSpecs(**sysinfo)
+            sysinfo_norm = dict(sysinfo)
+            ga = sysinfo_norm.get("gpu_arch")
+            if ga == "gfx1152":
+                sysinfo_norm["gpu_arch"] = "gfx1151"
+            return MachineSpecs(**sysinfo_norm)
         except KeyError:
             console_error(
                 "Detected mismatch in sysinfo versioning. You need to reprofile "

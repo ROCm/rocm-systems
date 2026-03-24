@@ -35,7 +35,7 @@ API:
 
 Metric dict keys must match the Memory Chart panel YAML for RDNA3.5:
 
-    src/rocprof_compute_soc/analysis_configs/gfx1152/0300_Memory_Chart.yaml
+    src/rocprof_compute_soc/analysis_configs/gfx1151/0300_Memory_Chart.yaml
 
 Use ``MEM_CHART_PANEL_METRIC_KEYS`` for the authoritative ordered list.
 (If a future gfx target adds ``0300_memory_chart.yaml``, keep keys aligned there.)
@@ -63,7 +63,7 @@ from rich.table import Table
 from rich.text import Text
 
 # Keys = ``metric:`` names under each ``metric_table`` in
-# ``analysis_configs/gfx1152/0300_Memory_Chart.yaml`` (tables 301–309), in panel order.
+# ``analysis_configs/gfx1151/0300_Memory_Chart.yaml`` (tables 301–309), in panel order.
 # Commented-out YAML metrics (e.g. TCP Atomic, LDS direct read/write) are omitted.
 _MEM_CHART_DEFAULT_ROWS: Tuple[Tuple[str, Union[int, float]], ...] = (
     # Table 301: Instruction Cache
@@ -407,7 +407,7 @@ def create_mem_chart_diagram(
 
     tcp_read_req = get_metric(metric_dict, "TCP Read Requests")
     tcp_write_req = get_metric(metric_dict, "TCP Write Requests")
-    # Not in gfx1152 Memory Chart YAML (counter unavailable); optional for older JSON.
+    # Not in gfx1151 Memory Chart YAML (counter unavailable); optional for older JSON.
     tcp_atomic_req = get_metric(metric_dict, "TCP Atomic Requests")
     tcp_hit = get_metric(metric_dict, "TCP Hit Rate")
     tcp_bw = get_metric(metric_dict, "TCP Request Bandwidth")
@@ -785,7 +785,7 @@ def create_mem_chart_diagram(
 def plot_mem_chart(arch: str, normal_unit: str, metric_dict: Dict[str, Any]) -> str:
     """Plot the memory chart and return as string.
 
-    ``metric_dict`` keys should match ``0300_Memory_Chart.yaml`` (gfx1152), i.e.
+    ``metric_dict`` keys should match ``0300_Memory_Chart.yaml`` (gfx1151), i.e.
     ``MEM_CHART_PANEL_METRIC_KEYS``. Values for bandwidth metrics are in **Bytes/s**.
     """
 
@@ -827,7 +827,7 @@ def main():
     )
     parser.add_argument("--data", "-d", help="JSON file with metrics data")
     parser.add_argument("--debug", action="store_true", help="Show debug info")
-    parser.add_argument("--arch", default="gfx1152", help="Architecture name")
+    parser.add_argument("--arch", default="gfx1151", help="Architecture name")
     parser.add_argument("--norm", default="per_kernel", help="Normalization unit")
     parser.add_argument("--txt", "-t", help="Output to plain text file")
     parser.add_argument("--svg", help="Output to SVG file")
