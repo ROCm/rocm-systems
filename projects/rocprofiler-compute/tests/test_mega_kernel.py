@@ -30,6 +30,9 @@ that exercises most GPU instructions and features across different AMD GPU
 architectures (CDNA >= MI200, RDNA 3.5 Strix/Strix Halo gfx1150/gfx1151,
 and RDNA4 RX 9070 XT).
 
+Not registered in CTest (see CMakeLists.txt under "Utils tests"): run manually, e.g.
+``pytest tests/test_mega_kernel.py``, when HIP/hipRTC and a matching GPU are available.
+
 """
 
 import os

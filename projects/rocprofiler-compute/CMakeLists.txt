@@ -524,6 +524,8 @@ add_test(
 # ---------------------------
 # Utils tests
 # ---------------------------
+# Not in CTest: tests/test_mega_kernel.py (hipRTC compile + GPU-heavy; run manually:
+#   pytest tests/test_mega_kernel.py)
 
 add_test(
     NAME test_utils
@@ -531,6 +533,15 @@ add_test(
         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
         --junitxml=tests/test_utils.xml ${COV_OPTION} tests/test_utils.py
         ${WORKING_DIR_OPTION}
+)
+
+# RDNA3.5 memory chart CLI (Rich) — no GPU required
+add_test(
+    NAME test_mem_chart_gfx11
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_mem_chart_gfx11.xml ${COV_OPTION}
+        tests/test_mem_chart_gfx11.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
@@ -629,6 +640,7 @@ if(${ENABLE_COVERAGE})
         test_num_xcds_spec_class
         test_num_xcds_cli_output
         test_utils
+        test_mem_chart_gfx11
         test_roofline_calc_ai_analyze
         test_data_imputation
         test_autogen_config
