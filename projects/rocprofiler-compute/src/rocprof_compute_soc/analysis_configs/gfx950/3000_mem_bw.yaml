@@ -94,8 +94,11 @@ Panel Config:
         L1 utilization:
           value: SUM((TCP_GATE_EN2_sum * 100)) / SUM(TCP_GATE_EN1_sum)
           unit: Percent
-        L1 latency:
+        L1 average latency:
           value: SUM(TCP_TCP_LATENCY_sum) / SUM(TCP_TOTAL_ACCESSES_sum)
+          unit: Cycles per Request
+        L1 latency:
+          value: AVG(TCP_TCP_LATENCY_sum) / AVG(TCP_TOTAL_ACCESSES_sum)
           unit: Cycles per Request
         L1-L2 throughput (reads + writes):
           value: SUM((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum)) / SUM(TCP_GATE_EN2_sum)
@@ -103,17 +106,29 @@ Panel Config:
         L1-L2 throughput (total):
           value: SUM((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / SUM(TCP_GATE_EN2_sum)
           unit: Requests per Cycle
-        L2 read latency:
+        L2 read average latency:
           value: SUM(TCP_TCC_READ_REQ_LATENCY_sum) / SUM(TCP_TCC_READ_REQ_sum)
           unit: Cycles per Request
-        L2 write latency:
+        L2 read latency:
+          value: AVG(TCP_TCC_READ_REQ_LATENCY_sum) / AVG(TCP_TCC_READ_REQ_sum)
+          unit: Cycles per Request
+        L2 write average latency:
           value: SUM(TCP_TCC_WRITE_REQ_LATENCY_sum) / SUM(TCP_TCC_WRITE_REQ_sum)
           unit: Cycles per Request
-        UTCL1 latency:
+        L2 write latency:
+          value: AVG(TCP_TCC_WRITE_REQ_LATENCY_sum) / AVG(TCP_TCC_WRITE_REQ_sum)
+          unit: Cycles per Request
+        UTCL1 average latency:
           value: SUM(TCP_CLIENT_UTCL1_INFLIGHT_sum) / SUM(TCP_UTCL1_REQUEST_sum)
           unit: Cycles per Request
-        UTCL1 to UTCL2 latency:
+        UTCL1 latency:
+          value: AVG(TCP_CLIENT_UTCL1_INFLIGHT_sum) / AVG(TCP_UTCL1_REQUEST_sum)
+          unit: Cycles per Request
+        UTCL1 to UTCL2 average latency:
           value: SUM(TCP_UTCL1_UTCL2_INFLIGHT_sum) / SUM(TCP_UTCL1_TRANSLATION_MISS_sum)
+          unit: Cycles per Request
+        UTCL1 to UTCL2 latency:
+          value: AVG(TCP_UTCL1_UTCL2_INFLIGHT_sum) / AVG(TCP_UTCL1_TRANSLATION_MISS_sum)
           unit: Cycles per Request
   - metric_table:
       id: 3003
@@ -460,14 +475,23 @@ Panel Config:
         L2 total request rate:
           value: SUM(TCC_REQ_sum) / SUM(TCC_BUSY_sum)
           unit: Requests per Cycle
-        L2 to EA read latency:
+        L2 to EA read average latency:
           value: SUM(TCC_EA0_RDREQ_LEVEL_sum) / SUM(TCC_EA0_RDREQ_sum)
           unit: Cycles per Request
-        L2 to EA write latency:
+        L2 to EA read latency:
+          value: AVG(TCC_EA0_RDREQ_LEVEL_sum) / AVG(TCC_EA0_RDREQ_sum)
+          unit: Cycles per Request
+        L2 to EA write average latency:
           value: SUM(TCC_EA0_WRREQ_LEVEL_sum) / SUM(TCC_EA0_WRREQ_sum)
           unit: Cycles per Request
-        L2 to EA atomic latency:
+        L2 to EA write latency:
+          value: AVG(TCC_EA0_WRREQ_LEVEL_sum) / AVG(TCC_EA0_WRREQ_sum)
+          unit: Cycles per Request
+        L2 to EA atomic average latency:
           value: SUM(TCC_EA0_ATOMIC_LEVEL_sum) / SUM(TCC_EA0_ATOMIC_sum)
+          unit: Cycles per Request
+        L2 to EA atomic latency:
+          value: AVG(TCC_EA0_ATOMIC_LEVEL_sum) / AVG(TCC_EA0_ATOMIC_sum)
           unit: Cycles per Request
         L2 writeback rate:
           value: ((SUM(TCC_WRITEBACK_sum) / SUM(TCC_REQ_sum)) * 100)
@@ -814,30 +838,58 @@ Panel Config:
     L1 utilization: >-
       Percentage of time TCP is actively processing requests (busy cycles / free-running cycles).
       Equation: SUM((TCP_GATE_EN2_sum * 100)) / SUM(TCP_GATE_EN1_sum)
-    L1 latency: >-
-      Average cycles to complete memory access, from wave entering to wave leaving TCP.
+    L1 average latency: >-
+      Average latency to complete memory access, from wave entering to wave leaving TCP.
+      Weighted average across all CUs (SUM/SUM gives more weight to CUs with more accesses).
       Equation: SUM(TCP_TCP_LATENCY_sum) / SUM(TCP_TOTAL_ACCESSES_sum)
+    L1 latency: >-
+      Latency to complete memory access, from wave entering to wave leaving TCP.
+      Ratio of averages across CUs (AVG/AVG gives equal weight to each CU).
+      Equation: AVG(TCP_TCP_LATENCY_sum) / AVG(TCP_TOTAL_ACCESSES_sum)
     L1-L2 throughput (reads + writes): >-
       L1 to L2 request throughput for reads and writes per TCP busy cycle.
       Equation: SUM((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum)) / SUM(TCP_GATE_EN2_sum)
     L1-L2 throughput (total): >-
       Total L1 to L2 request throughput including reads, writes, and atomics per TCP busy cycle.
       Equation: SUM((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / SUM(TCP_GATE_EN2_sum)
-    L2 read latency: >-
-      Average cycles to get a read response from L2 (TCC), including reads and atomics with return.
+    L2 read average latency: >-
+      Average latency to get a read response from L2 (TCC), including reads and atomics with return.
+      Weighted average across all CUs (SUM/SUM gives more weight to CUs with more accesses).
       Equation: SUM(TCP_TCC_READ_REQ_LATENCY_sum) / SUM(TCP_TCC_READ_REQ_sum)
-    L2 write latency: >-
-      Average cycles to get a write acknowledgment from L2 (TCC), including writes and atomics without return.
+    L2 read latency: >-
+      Latency to get a read response from L2 (TCC), including reads and atomics with return.
+      Ratio of averages across CUs (AVG/AVG gives equal weight to each CU).
+      Equation: AVG(TCP_TCC_READ_REQ_LATENCY_sum) / AVG(TCP_TCC_READ_REQ_sum)
+    L2 write average latency: >-
+      Average latency to get a write acknowledgment from L2 (TCC), including writes and atomics without return.
+      Weighted average across all CUs (SUM/SUM gives more weight to CUs with more accesses).
       Equation: SUM(TCP_TCC_WRITE_REQ_LATENCY_sum) / SUM(TCP_TCC_WRITE_REQ_sum)
-    UTCL1 latency: >-
-      Average cycles for UTCL1 (L1 TLB) address translation, from request to completion.
+    L2 write latency: >-
+      Latency to get a write acknowledgment from L2 (TCC), including writes and atomics without return.
+      Ratio of averages across CUs (AVG/AVG gives equal weight to each CU).
+      Equation: AVG(TCP_TCC_WRITE_REQ_LATENCY_sum) / AVG(TCP_TCC_WRITE_REQ_sum)
+    UTCL1 average latency: >-
+      Average latency for UTCL1 (L1 TLB) address translation, from request to completion.
       Includes both hits and misses. High latency indicates TLB pressure or UTCL2 miss penalty.
       MI350 restored this counter (removed in MI300 for power savings).
+      Weighted average across all CUs (SUM/SUM gives more weight to CUs with more accesses).
       Equation: SUM(TCP_CLIENT_UTCL1_INFLIGHT_sum) / SUM(TCP_UTCL1_REQUEST_sum)
-    UTCL1 to UTCL2 latency: >-
-      Average cycles for UTCL1 misses to be resolved by UTCL2 (L2 TLB).
+    UTCL1 latency: >-
+      Latency for UTCL1 (L1 TLB) address translation, from request to completion.
+      Includes both hits and misses. High latency indicates TLB pressure or UTCL2 miss penalty.
+      MI350 restored this counter (removed in MI300 for power savings).
+      Ratio of averages across CUs (AVG/AVG gives equal weight to each CU).
+      Equation: AVG(TCP_CLIENT_UTCL1_INFLIGHT_sum) / AVG(TCP_UTCL1_REQUEST_sum)
+    UTCL1 to UTCL2 average latency: >-
+      Average latency for UTCL1 misses to be resolved by UTCL2 (L2 TLB).
       Only counts requests that missed UTCL1 and went to UTCL2. High latency indicates page table walk overhead.
+      Weighted average across all CUs (SUM/SUM gives more weight to CUs with more accesses).
       Equation: SUM(TCP_UTCL1_UTCL2_INFLIGHT_sum) / SUM(TCP_UTCL1_TRANSLATION_MISS_sum)
+    UTCL1 to UTCL2 latency: >-
+      Latency for UTCL1 misses to be resolved by UTCL2 (L2 TLB).
+      Only counts requests that missed UTCL1 and went to UTCL2. High latency indicates page table walk overhead.
+      Ratio of averages across CUs (AVG/AVG gives equal weight to each CU).
+      Equation: AVG(TCP_UTCL1_UTCL2_INFLIGHT_sum) / AVG(TCP_UTCL1_TRANSLATION_MISS_sum)
     # Table 3003: TD Return Path
     TD - stalled by TCP: >-
       Percentage of TD busy time spent waiting for TCP (L1 cache) data. A high rate indicates L1 data return bottleneck.
@@ -1014,16 +1066,30 @@ Panel Config:
     L2 total request rate: >-
       The total number of L2 requests per active L2 cycle, across all L2 channels.
       Equation: SUM(TCC_REQ_sum) / SUM(TCC_BUSY_sum)
-    L2 to EA read latency: >-
+    L2 to EA read average latency: >-
       The average number of cycles an EA read request was in flight, from the L2 side.
-      Calculated as the sum of in-flight read requests divided by total read requests.
+      Weighted average across all L2 channels (SUM/SUM gives more weight to channels with more requests).
       Equation: SUM(TCC_EA0_RDREQ_LEVEL_sum) / SUM(TCC_EA0_RDREQ_sum)
-    L2 to EA write latency: >-
+    L2 to EA read latency: >-
+      The number of cycles an EA read request was in flight, from the L2 side.
+      Ratio of averages across L2 channels (AVG/AVG gives equal weight to each channel).
+      Equation: AVG(TCC_EA0_RDREQ_LEVEL_sum) / AVG(TCC_EA0_RDREQ_sum)
+    L2 to EA write average latency: >-
       The average number of cycles an EA write request was in flight, from the L2 side.
+      Weighted average across all L2 channels (SUM/SUM gives more weight to channels with more requests).
       Equation: SUM(TCC_EA0_WRREQ_LEVEL_sum) / SUM(TCC_EA0_WRREQ_sum)
-    L2 to EA atomic latency: >-
+    L2 to EA write latency: >-
+      The number of cycles an EA write request was in flight, from the L2 side.
+      Ratio of averages across L2 channels (AVG/AVG gives equal weight to each channel).
+      Equation: AVG(TCC_EA0_WRREQ_LEVEL_sum) / AVG(TCC_EA0_WRREQ_sum)
+    L2 to EA atomic average latency: >-
       The average number of cycles an EA atomic request was in flight, from the L2 side.
+      Weighted average across all L2 channels (SUM/SUM gives more weight to channels with more requests).
       Equation: SUM(TCC_EA0_ATOMIC_LEVEL_sum) / SUM(TCC_EA0_ATOMIC_sum)
+    L2 to EA atomic latency: >-
+      The number of cycles an EA atomic request was in flight, from the L2 side.
+      Ratio of averages across L2 channels (AVG/AVG gives equal weight to each channel).
+      Equation: AVG(TCC_EA0_ATOMIC_LEVEL_sum) / AVG(TCC_EA0_ATOMIC_sum)
     L2 writeback rate: >-
       The percentage of L2 requests that result in dirty cache line writebacks to memory.
       Equation: (SUM(TCC_WRITEBACK_sum) / SUM(TCC_REQ_sum)) * 100
