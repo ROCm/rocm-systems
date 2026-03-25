@@ -47,11 +47,10 @@ from utils.logger import (
 )
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.specs import MachineSpecs, generate_machine_specs
-from utils.utils import (
+from utils.utils_common import (
     detect_rocprof,
     get_panel_alias,
     get_rank,
-    get_submodules,
     get_version,
     get_version_display,
     parse_sets_yaml,
@@ -60,6 +59,7 @@ from utils.utils import (
     resolve_rocm_library_path,
     set_locale_encoding,
 )
+from utils.utils_profile import get_submodules
 
 
 class RocProfCompute:
