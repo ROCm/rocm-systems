@@ -731,8 +731,8 @@ class InteractiveSession:
             for cmd in rec.get("commands", []):
                 fc = cmd.get("full_command", "")
                 label = (
-                    f"[{rec.get('priority','INFO')}] {rec.get('category','')} — "
-                    f"{cmd.get('tool','')}: {cmd.get('description','')}"
+                    f"[{rec.get('priority', 'INFO')}] {rec.get('category', '')} — "
+                    f"{cmd.get('tool', '')}: {cmd.get('description', '')}"
                 )
                 _add(label, fc)
 
@@ -894,10 +894,10 @@ class InteractiveSession:
             lines.append(f"Previous analyses ({len(self._ctx.analyses)} run(s)):")
             for i, a in enumerate(self._ctx.analyses, 1):
                 lines.append(
-                    f"  Run {i}: db={a.get('db','')}  "
+                    f"  Run {i}: db={a.get('db', '')}  "
                     f"kernel={a.get('kernel_pct', 0):.1f}%  "
                     f"idle={a.get('idle_pct', 0):.1f}%  "
-                    f"top_issue={a.get('top_issue','')} [{a.get('top_priority','')}]"
+                    f"top_issue={a.get('top_issue', '')} [{a.get('top_priority', '')}]"
                 )
 
         if self._ctx.suggestions_given:
@@ -908,7 +908,7 @@ class InteractiveSession:
         if self._ctx.commands_run:
             lines.append(f"Commands run ({len(self._ctx.commands_run)}):")
             for c in self._ctx.commands_run:
-                lines.append(f"  $ {c.get('cmd','')}  (exit {c.get('exit_code', '?')})")
+                lines.append(f"  $ {c.get('cmd', '')}  (exit {c.get('exit_code', '?')})")
 
         return "\n".join(lines)
 
@@ -2396,8 +2396,8 @@ class WorkflowSession:
     def _phase6_apply_direct(self, snap: _AnalysisSnapshot) -> None:
         """Phase 6: AI edits source files in-place (.bak backup); waits for recompile."""
         suggestions = "\n\n".join(
-            f"[{r.get('priority','')}] {r.get('issue','')}:\n"
-            f"{r.get('suggestion','')}\n"
+            f"[{r.get('priority', '')}] {r.get('issue', '')}:\n"
+            f"{r.get('suggestion', '')}\n"
             + "\n".join(f"  • {a}" for a in r.get("actions", []))
             for r in snap.recommendations
         )
@@ -2492,8 +2492,8 @@ class WorkflowSession:
     def _phase6_apply_diff(self, snap: _AnalysisSnapshot) -> None:
         """Phase 6 alt: Save suggestions to a patch file."""
         suggestions = "\n\n".join(
-            f"[{r.get('priority','')}] {r.get('issue','')}:\n"
-            f"  Suggestion: {r.get('suggestion','')}\n"
+            f"[{r.get('priority', '')}] {r.get('issue', '')}:\n"
+            f"  Suggestion: {r.get('suggestion', '')}\n"
             + "\n".join(f"  • {a}" for a in r.get("actions", []))
             for r in snap.recommendations
         )

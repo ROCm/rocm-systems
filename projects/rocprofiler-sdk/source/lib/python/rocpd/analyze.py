@@ -1079,7 +1079,7 @@ def generate_recommendations(
                     {
                         "priority": "MEDIUM",
                         "category": "Launch Overhead",
-                        "issue": f"Many small kernels detected: {total_calls} launches, avg {avg_duration/1000:.1f} μs each",
+                        "issue": f"Many small kernels detected: {total_calls} launches, avg {avg_duration / 1000:.1f} μs each",
                         "suggestion": "Fuse kernels or batch work to amortize per-launch overhead (~5-10 μs each)",
                         "actions": [
                             "Combine sequential element-wise kernels (e.g., add + multiply) into a single fused kernel",
@@ -1118,10 +1118,10 @@ def generate_recommendations(
                 {
                     "priority": "MEDIUM",
                     "category": "Memory Bandwidth",
-                    "issue": f"{direction} copies achieving only {bandwidth_gbps:.2f} GB/s (avg transfer: {avg_bytes/1024:.1f} KB)",
+                    "issue": f"{direction} copies achieving only {bandwidth_gbps:.2f} GB/s (avg transfer: {avg_bytes / 1024:.1f} KB)",
                     "suggestion": "Increase transfer size per operation to reach PCIe or HBM saturation bandwidth",
                     "actions": [
-                        f"Consolidate many {avg_bytes/1024:.1f} KB transfers into fewer large transfers (>1 MB each)",
+                        f"Consolidate many {avg_bytes / 1024:.1f} KB transfers into fewer large transfers (>1 MB each)",
                         "Use hipHostMalloc with hipHostMallocPinned flag to enable DMA engine transfers",
                         "Consider hipMemcpyAsync with stream to overlap with compute",
                         "For multi-GPU: evaluate hipMemcpyPeer for direct device-to-device transfers",
@@ -1582,8 +1582,8 @@ def _format_as_markdown(
                 name = name[:37] + "..."
             lines.append(
                 f"| {i} | `{name}` | {k.get('calls', 0)} "
-                f"| {k.get('total_duration', 0)/1e6:,.2f} "
-                f"| {k.get('avg_duration', 0)/1e3:,.1f} "
+                f"| {k.get('total_duration', 0) / 1e6:,.2f} "
+                f"| {k.get('avg_duration', 0) / 1e3:,.1f} "
                 f"| {k.get('percent_of_total', 0):.1f}% |"
             )
         lines.append("")
@@ -1600,17 +1600,17 @@ def _format_as_markdown(
         for direction, s in memory_analysis.items():
             tb = s.get("total_bytes", 0)
             if tb >= 1e9:
-                size_str = f"{tb/1e9:.1f} GB"
+                size_str = f"{tb / 1e9:.1f} GB"
             elif tb >= 1e6:
-                size_str = f"{tb/1e6:.1f} MB"
+                size_str = f"{tb / 1e6:.1f} MB"
             elif tb >= 1e3:
-                size_str = f"{tb/1e3:.1f} KB"
+                size_str = f"{tb / 1e3:.1f} KB"
             else:
                 size_str = f"{tb:.0f} B"
             bw = s.get("bandwidth_bytes_per_sec", 0) / 1e9
             lines.append(
                 f"| {direction} | {s.get('count', 0)} | {size_str} "
-                f"| {s.get('total_duration', 0)/1e6:,.2f} | {bw:.2f} |"
+                f"| {s.get('total_duration', 0) / 1e6:,.2f} | {bw:.2f} |"
             )
         lines.append("")
 
@@ -1917,10 +1917,10 @@ def _format_as_webview(
             f"<tr{hot}>"
             f"<td>{i + 1}</td>"
             f'<td class="kname" title="{_h(name)}"><code>{_h(name)}</code></td>'
-            f'<td data-v="{k.get("calls",0)}">{int(k.get("calls",0)):,}</td>'
-            f'<td data-v="{k.get("total_duration",0)}">{_fmt_ns(k.get("total_duration",0))}</td>'
-            f'<td data-v="{k.get("avg_duration",0)}">{_fmt_ns(k.get("avg_duration",0))}</td>'
-            f'<td data-v="{k.get("min_duration",0)}">{_fmt_ns(k.get("min_duration",0))}</td>'
+            f'<td data-v="{k.get("calls", 0)}">{int(k.get("calls", 0)):,}</td>'
+            f'<td data-v="{k.get("total_duration", 0)}">{_fmt_ns(k.get("total_duration", 0))}</td>'
+            f'<td data-v="{k.get("avg_duration", 0)}">{_fmt_ns(k.get("avg_duration", 0))}</td>'
+            f'<td data-v="{k.get("min_duration", 0)}">{_fmt_ns(k.get("min_duration", 0))}</td>'
             f'<td data-v="{pct}">'
             f'<div class="pbar"><div class="pfill" style="width:{bar:.1f}%"></div>'
             f"<span>{pct:.1f}%</span></div>"
@@ -2942,8 +2942,8 @@ def _format_tier0_text(tier0_result: Any) -> str:
     if tier0_result.detected_kernels:
         for k in tier0_result.detected_kernels[:20]:
             lines.append(
-                f"  • {k['name']}  ({k.get('launch_type','')})  "
-                f"{k.get('file','').split('/')[-1]}:{k.get('line','')}"
+                f"  • {k['name']}  ({k.get('launch_type', '')})  "
+                f"{k.get('file', '').split('/')[-1]}:{k.get('line', '')}"
             )
         if len(tier0_result.detected_kernels) > 20:
             lines.append(f"  ... and {len(tier0_result.detected_kernels) - 20} more")
@@ -3108,7 +3108,7 @@ def _format_tier0_markdown(tier0_result: Any) -> str:
         for k in tier0_result.detected_kernels[:20]:
             fname = k.get("file", "").split("/")[-1]
             lines.append(
-                f"| `{k['name']}` | {k.get('launch_type','')} | {fname} | {k.get('line','')} |"
+                f"| `{k['name']}` | {k.get('launch_type', '')} | {fname} | {k.get('line', '')} |"
             )
         if len(tier0_result.detected_kernels) > 20:
             lines.append(
@@ -3126,7 +3126,7 @@ def _format_tier0_markdown(tier0_result: Any) -> str:
         for p in tier0_result.detected_patterns:
             sev = p.get("severity", "info")
             lines.append(
-                f"| **{sev.upper()}** | {p.get('category','')} | {p.get('description','')} | {p.get('count',0)} |"
+                f"| **{sev.upper()}** | {p.get('category', '')} | {p.get('description', '')} | {p.get('count', 0)} |"
             )
     else:
         lines.append("*No significant patterns detected.*")
@@ -3342,10 +3342,10 @@ def _format_tier0_webview(tier0_result: Any) -> str:
         kernel_rows.append(
             f"<tr>"
             f"<td>{i + 1}</td>"
-            f'<td class="kname" title="{_h(k.get("name",""))}"><code>{_h(k.get("name",""))}</code></td>'
-            f'<td>{_h(k.get("launch_type",""))}</td>'
+            f'<td class="kname" title="{_h(k.get("name", ""))}"><code>{_h(k.get("name", ""))}</code></td>'
+            f'<td>{_h(k.get("launch_type", ""))}</td>'
             f"<td>{fname}</td>"
-            f'<td data-v="{k.get("line",0)}">{_h(str(k.get("line","")))}</td>'
+            f'<td data-v="{k.get("line", 0)}">{_h(str(k.get("line", "")))}</td>'
             f"</tr>"
         )
     if kernel_rows:
@@ -3388,9 +3388,9 @@ def _format_tier0_webview(tier0_result: Any) -> str:
             f'<td><span style="display:inline-block;padding:.14em .55em;border-radius:4px;'
             f"font-size:.69rem;font-weight:800;letter-spacing:.06em;"
             f'background:{sbg};color:{sfg}">{_h(sev.upper())}</span></td>'
-            f'<td>{_h(pat.get("category",""))}</td>'
-            f'<td>{_h(pat.get("description",""))}</td>'
-            f'<td data-v="{pat.get("count",0)}">{pat.get("count",0)}</td>'
+            f'<td>{_h(pat.get("category", ""))}</td>'
+            f'<td>{_h(pat.get("description", ""))}</td>'
+            f'<td data-v="{pat.get("count", 0)}">{pat.get("count", 0)}</td>'
             f"</tr>"
         )
     if pattern_rows:
@@ -4133,11 +4133,11 @@ def format_analysis_output(
 
             # Format size
             if total_bytes >= 1e9:
-                size_str = f"{total_bytes/1e9:.1f} GB"
+                size_str = f"{total_bytes / 1e9:.1f} GB"
             elif total_bytes >= 1e6:
-                size_str = f"{total_bytes/1e6:.1f} MB"
+                size_str = f"{total_bytes / 1e6:.1f} MB"
             elif total_bytes >= 1e3:
-                size_str = f"{total_bytes/1e3:.1f} KB"
+                size_str = f"{total_bytes / 1e3:.1f} KB"
             else:
                 size_str = f"{total_bytes:.0f} B"
 
