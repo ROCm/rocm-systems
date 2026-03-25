@@ -12,7 +12,8 @@ from pathlib import Path
 
 def print_help():
     """Print the help message"""
-    print(f"""
+    print(
+        f"""
     Unified Memory Output Validation Tool
 
     DESCRIPTION:
@@ -50,7 +51,8 @@ def print_help():
         0  - All validations passed successfully
         1  - File not found or general error
         65 - Validation failures detected (EX_DATAERR)
-    """)
+    """
+    )
 
 
 def validate_text_output(filepath):
@@ -78,7 +80,7 @@ def validate_text_output(filepath):
         "Count",
         "Avg Size",
         "Total Size",
-        "Bandwidth"
+        "Bandwidth",
     ]
 
     missing = []
@@ -90,11 +92,7 @@ def validate_text_output(filepath):
         print(f"Error: Missing required headers in text output: {missing}")
         return False
 
-    migration_directions = [
-        "Host To Device",
-        "Device To Host",
-        "Device To Device"
-    ]
+    migration_directions = ["Host To Device", "Device To Host", "Device To Device"]
 
     has_migration = any(direction in content for direction in migration_directions)
 
@@ -139,7 +137,11 @@ def validate_json_output(filepath):
         return False
 
     summary = data["summary"]
-    required_summary_fields = ["xnack_enabled", "total_cpu_page_faults", "total_gpu_page_faults"]
+    required_summary_fields = [
+        "xnack_enabled",
+        "total_cpu_page_faults",
+        "total_gpu_page_faults",
+    ]
     missing_fields = [field for field in required_summary_fields if field not in summary]
 
     if missing_fields:
@@ -172,9 +174,13 @@ def validate_json_output(filepath):
 
             stats = migrations[direction]
             required_stats = [
-                "count", "total_size_bytes", "min_size_bytes",
-                "max_size_bytes", "avg_size_bytes", "total_time_ns",
-                "bandwidth_gbps"
+                "count",
+                "total_size_bytes",
+                "min_size_bytes",
+                "max_size_bytes",
+                "avg_size_bytes",
+                "total_time_ns",
+                "bandwidth_gbps",
             ]
             missing_stats = [field for field in required_stats if field not in stats]
 
@@ -235,19 +241,19 @@ if __name__ == "__main__":
         "--output-dir",
         type=Path,
         help="Directory containing unified_memory.txt and unified_memory.json",
-        default=None
+        default=None,
     )
 
     parser.add_argument(
         "--txt-file",
         type=Path,
-        help="Explicit path to unified_memory.txt (overrides --output-dir)"
+        help="Explicit path to unified_memory.txt (overrides --output-dir)",
     )
 
     parser.add_argument(
         "--json-file",
         type=Path,
-        help="Explicit path to unified_memory.json (overrides --output-dir)"
+        help="Explicit path to unified_memory.json (overrides --output-dir)",
     )
 
     parser.add_argument(
@@ -266,7 +272,9 @@ if __name__ == "__main__":
     elif args.output_dir:
         txt_file, json_file = find_output_files(args.output_dir)
     else:
-        print("Error: Either --output-dir or both --txt-file and --json-file must be provided")
+        print(
+            "Error: Either --output-dir or both --txt-file and --json-file must be provided"
+        )
         print_help()
         sys.exit(os.EX_USAGE)
 
@@ -278,7 +286,9 @@ if __name__ == "__main__":
         print("Error: Could not find unified_memory.json")
         sys.exit(1)
 
-    print(f"Validating unified memory output. Output directory: {args.output_dir or 'N/A'}")
+    print(
+        f"Validating unified memory output. Output directory: {args.output_dir or 'N/A'}"
+    )
     print(f"Found unified memory outputs:")
     print(f"  Text:  {txt_file}")
     print(f"  JSON:  {json_file}")
