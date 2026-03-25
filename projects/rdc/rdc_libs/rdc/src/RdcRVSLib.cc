@@ -91,7 +91,8 @@ rdc_status_t RdcRVSLib::rdc_diag_test_cases_query(rdc_diag_test_cases_t test_cas
 rdc_status_t RdcRVSLib::rdc_test_case_run(rdc_diag_test_cases_t test_case,
                                           uint32_t gpu_index[RDC_MAX_NUM_DEVICES],
                                           uint32_t gpu_count, const char* config,
-                                          size_t config_size, rdc_diag_test_result_t* result, rdc_diag_callback_t* callback) {
+                                          size_t config_size, rdc_diag_test_result_t* result,
+                                          rdc_diag_callback_t* callback) {
   if (result == nullptr) {
     return RDC_ST_BAD_PARAMETER;
   }
@@ -108,7 +109,8 @@ rdc_status_t RdcRVSLib::rdc_test_case_run(rdc_diag_test_cases_t test_case,
 
 rdc_status_t RdcRVSLib::rdc_diagnostic_run(const rdc_group_info_t& gpus, rdc_diag_level_t level,
                                            const char* config, size_t config_size,
-                                           rdc_diag_response_t* response, rdc_diag_callback_t* callback) {
+                                           rdc_diag_response_t* response,
+                                           rdc_diag_callback_t* callback) {
   (void)gpus;
   (void)level;
   (void)config;

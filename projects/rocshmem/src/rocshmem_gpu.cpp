@@ -46,6 +46,7 @@
 #include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
 #include "rocshmem/rocshmem.hpp"
 #include "backend_bc.hpp"
+#include "constmem.hpp"
 #include "context_incl.hpp"
 #include "team.hpp"
 #include "templates.hpp"
@@ -73,11 +74,19 @@
 
 namespace rocshmem {
 
-__device__  rocshmem_ctx_t __attribute__((visibility("default"))) ROCSHMEM_CTX_DEFAULT{};
+__device__  rocshmem_ctx_t
+__attribute__((visibility("default"))) ROCSHMEM_CTX_DEFAULT{};
 
 __constant__ Backend *device_backend_proxy;
 
+__constant__ constmem_t constmem;
+
 __constant__ rocshmem_ctx_t ROCSHMEM_CTX_INVALID = {nullptr, nullptr};
+
+namespace device {
+    extern "C" __constant__ rocshmem_team_t
+    __attribute__((visibility("default"))) ROCSHMEM_TEAM_WORLD = nullptr;
+}
 
 #if defined(ENABLE_IPC_BITCODE)
   typedef IPCContext ContextTy;
@@ -125,67 +134,72 @@ __host__ void * rocshmem_get_device_ctx() {
   return ctx.ctx_opaque;
 }
 
+/**
+ * Copies a device symbol from rocSHMEM to the user's HIP module
+ * via device-to-device memcpy (graph-capture compatible).
+ * Returns 0 on success, ROCSHMEM_ERROR on failure.
+ */
+template <typename Symbol>
+static int copy_device_symbol_to_module(Symbol &builtin_symbol,
+    const char *module_symbol_name, size_t expected_size, hipModule_t module,
+    hipStream_t stream, const char *label) {
+  void *source {nullptr};
+  hipError_t err = hipGetSymbolAddress(&source, HIP_SYMBOL(builtin_symbol));
+  if (err != hipSuccess) {
+    fprintf(stderr,
+            "[rocSHMEM] Error: Failed to get address of built-in %s: %s\n",
+            label, hipGetErrorString(err));
+    return ROCSHMEM_ERROR;
+  }
+  if (source == nullptr) {
+    fprintf(stderr, "[rocSHMEM] Error: Built-in %s has null address\n", label);
+    return ROCSHMEM_ERROR;
+  }
+
+  void *target {nullptr};
+  size_t symbol_size {0};
+  err = hipModuleGetGlobal(&target, &symbol_size, module, module_symbol_name);
+  if (err != hipSuccess) {
+    fprintf(stderr,
+            "[rocSHMEM] Error: Failed to get %s symbol from module: %s\n",
+            label, hipGetErrorString(err));
+    return ROCSHMEM_ERROR;
+  }
+  if (symbol_size != expected_size) {
+    fprintf(stderr,
+            "[rocSHMEM] Error: Symbol size mismatch for %s. Expected %zu, "
+            "got %zu\n",
+            label, expected_size, symbol_size);
+    return ROCSHMEM_ERROR;
+  }
+
+  err = hipMemcpyAsync(target, source, expected_size,
+                       hipMemcpyDeviceToDevice, stream);
+  if (err != hipSuccess) {
+    fprintf(stderr, "[rocSHMEM] Error: Failed to copy %s to device: %s\n",
+            label, hipGetErrorString(err));
+    return ROCSHMEM_ERROR;
+  }
+  return ROCSHMEM_SUCCESS;
+}
+
 __host__ int rocshmem_hipmodule_init(hipModule_t module, hipStream_t stream) {
-  // Step 1: Get device address of rocSHMEM's built-in ROCSHMEM_CTX_DEFAULT symbol
-  // Use hipGetSymbolAddress for graph-capture compatibility (device-to-device path)
-  void *source_ctx_device = nullptr;
-  hipError_t err = hipGetSymbolAddress(&source_ctx_device, HIP_SYMBOL(ROCSHMEM_CTX_DEFAULT));
-
-  if (err != hipSuccess) {
-    fprintf(stderr, "[rocSHMEM] Error: Failed to get address of built-in ROCSHMEM_CTX_DEFAULT: %s\n",
-            hipGetErrorString(err));
-    return ROCSHMEM_ERROR;
-  }
-
-  if (source_ctx_device == nullptr) {
-    fprintf(stderr, "[rocSHMEM] Error: Built-in ROCSHMEM_CTX_DEFAULT has null address\n");
-    return ROCSHMEM_ERROR;
-  }
-
-  // Step 2: Query the device symbol address from the user's HIP module
-  void *target_ctx_device = nullptr;
-  size_t symbol_size = 0;
-
-  err = hipModuleGetGlobal(
-      &target_ctx_device,
-      &symbol_size,
-      module,
-      "ROCSHMEM_CTX_DEFAULT"
-  );
-
-  if (err != hipSuccess) {
-    fprintf(stderr, "[rocSHMEM] Error: Failed to get ROCSHMEM_CTX_DEFAULT symbol from module: %s\n",
-            hipGetErrorString(err));
-    return ROCSHMEM_ERROR;
-  }
-
-  if (symbol_size != sizeof(rocshmem_ctx_t)) {
-    fprintf(stderr, "[rocSHMEM] Error: Symbol size mismatch. Expected %zu, got %zu\n",
-            sizeof(rocshmem_ctx_t), symbol_size);
-    return ROCSHMEM_ERROR;
-  }
-
-  // Step 3: Device-to-device copy using stream-ordered memcpy
-  // This is fully graph-capture compatible since both source and target are device memory
   if (stream == nullptr) {
     stream = hipStreamPerThread;
   }
 
-  err = hipMemcpyAsync(
-      target_ctx_device,
-      source_ctx_device,
-      sizeof(rocshmem_ctx_t),
-      hipMemcpyDeviceToDevice,  // Device-to-device copy for graph capture compatibility
-      stream
-  );
-
-  if (err != hipSuccess) {
-    fprintf(stderr, "[rocSHMEM] Error: Failed to copy context to device: %s\n",
-            hipGetErrorString(err));
+  if (copy_device_symbol_to_module(ROCSHMEM_CTX_DEFAULT, "ROCSHMEM_CTX_DEFAULT",
+                                   sizeof(rocshmem_ctx_t), module, stream,
+                                   "ROCSHMEM_CTX_DEFAULT") != ROCSHMEM_SUCCESS) {
     return ROCSHMEM_ERROR;
   }
-
-  return 0;
+  if (copy_device_symbol_to_module(device::ROCSHMEM_TEAM_WORLD,
+                                   "ROCSHMEM_TEAM_WORLD",
+                                   sizeof(rocshmem_team_t), module, stream,
+                                   "ROCSHMEM_TEAM_WORLD") != ROCSHMEM_SUCCESS) {
+    return ROCSHMEM_ERROR;
+  }
+  return ROCSHMEM_SUCCESS;
 }
 
 /******************************************************************************
@@ -335,6 +349,18 @@ __device__ void rocshmem_atomic_xor(T *dest, T value, int pe) {
   rocshmem_atomic_xor(ROCSHMEM_CTX_DEFAULT, dest, value, pe);
 }
 
+__device__ void rocshmem_barrier() {
+  rocshmem_ctx_barrier(ROCSHMEM_CTX_DEFAULT, device::ROCSHMEM_TEAM_WORLD);
+}
+
+__device__ void rocshmem_barrier_wave() {
+  rocshmem_ctx_barrier_wave(ROCSHMEM_CTX_DEFAULT, device::ROCSHMEM_TEAM_WORLD);
+}
+
+__device__ void rocshmem_barrier_wg() {
+  rocshmem_ctx_barrier_wg(ROCSHMEM_CTX_DEFAULT, device::ROCSHMEM_TEAM_WORLD);
+}
+
 #define ROCSHMEM_PUTMEM_SIGNAL_DEF(SUFFIX)                                                      \
   __device__ void rocshmem_putmem_signal##SUFFIX(void *dest, const void *source, size_t nelems, \
                                                   uint64_t *sig_addr, uint64_t signal,           \
@@ -376,6 +402,12 @@ __device__ int translate_pe(rocshmem_ctx_t ctx, int pe) {
 __host__ void set_internal_ctx(rocshmem_ctx_t *ctx) {
   CHECK_HIP(hipMemcpyToSymbol(HIP_SYMBOL(ROCSHMEM_CTX_DEFAULT), ctx,
                               sizeof(rocshmem_ctx_t), 0,
+                              hipMemcpyHostToDevice));
+}
+
+__host__ void set_team_world_device(rocshmem_team_t team_world) {
+  CHECK_HIP(hipMemcpyToSymbol(HIP_SYMBOL(device::ROCSHMEM_TEAM_WORLD), &team_world,
+                              sizeof(rocshmem_team_t), 0,
                               hipMemcpyHostToDevice));
 }
 

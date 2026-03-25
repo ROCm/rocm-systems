@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2021 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-IMPLIED, INNCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANNY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 /**
 Testcase Scenarios :
@@ -122,7 +109,7 @@ using hipExtStreamCreateWithCUMaskTest::N;
 /**
  * Scenario: Validates functionality of hipStreamAddCallback with created stream.
  */
-TEST_CASE("Unit_hipExtStreamCreateWithCUMask_ValidateCallbackFunc") {
+HIP_TEST_CASE(Unit_hipExtStreamCreateWithCUMask_ValidateCallbackFunc) {
   float *A_d, *C_d;
   size_t Nbytes = N * sizeof(float);
   cbDone = false;
@@ -169,7 +156,7 @@ TEST_CASE("Unit_hipExtStreamCreateWithCUMask_ValidateCallbackFunc") {
 /**
  * Scenario: Validates functionality of stream with cu mask.
  */
-TEST_CASE("Unit_hipExtStreamCreateWithCUMask_Functionality") {
+HIP_TEST_CASE(Unit_hipExtStreamCreateWithCUMask_Functionality) {
   const int KNumPartition = NUM_CU_PARTITIONS;
   float *dA[KNumPartition], *dC[KNumPartition];
   float *hA, *hC;
@@ -301,7 +288,7 @@ TEST_CASE("Unit_hipExtStreamCreateWithCUMask_Functionality") {
  * Scenario: Create a stream with all CU masks disabled (0x00000000).
  * Verify that default CU mask is set for the stream.
  */
-TEST_CASE("Unit_hipExtStreamCreateWithCUMask_AllCUsMasked") {
+HIP_TEST_CASE(Unit_hipExtStreamCreateWithCUMask_AllCUsMasked) {
   HIP_CHECK(hipSetDevice(0));
   hipDeviceProp_t props;
   HIP_CHECK(hipGetDeviceProperties(&props, 0));
@@ -325,7 +312,7 @@ TEST_CASE("Unit_hipExtStreamCreateWithCUMask_AllCUsMasked") {
 /**
  * Scenario: Negative Testing of hipExtStreamCreateWithCUMask.
  */
-TEST_CASE("Unit_hipExtStreamCreateWithCUMask_NegTst") {
+HIP_TEST_CASE(Unit_hipExtStreamCreateWithCUMask_NegTst) {
   std::vector<uint32_t> defaultCUMask;
   REQUIRE(hipSuccess == hipSetDevice(0));
   hipDeviceProp_t props;

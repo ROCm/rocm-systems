@@ -58,7 +58,7 @@ jobs:
         build-type: ['Release']
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
         sparse-checkout: projects/rocprofiler-systems/
 
@@ -106,7 +106,6 @@ jobs:
           -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems
           -DROCPROFSYS_BUILD_TESTING=ON
           -DROCPROFSYS_USE_MPI=OFF
-          -DROCPROFSYS_USE_ROCM=OFF
           -DROCPROFSYS_USE_OMPT=OFF
           -DROCPROFSYS_USE_PYTHON=ON
           -DROCPROFSYS_BUILD_DYNINST=ON
@@ -162,7 +161,7 @@ jobs:
     - name: CTest Artifacts
       if: failure()
       continue-on-error: True
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: ctest-${{ github.job }}-${{ strategy.job-index }}-log
         path: |
@@ -171,7 +170,7 @@ jobs:
     - name: Data Artifacts
       if: failure()
       continue-on-error: True
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: data-${{ github.job }}-${{ strategy.job-index }}-files
         path: |

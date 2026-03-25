@@ -2,12 +2,26 @@
 
 Full documentation for rocDecode is available at [https://rocm.docs.amd.com/projects/rocDecode/en/latest/](https://rocm.docs.amd.com/projects/rocDecode/en/latest/)
 
-## rocDecode 1.6.0 for ROCm 7.2.0
+## (Unreleased) rocDecode 1.7.1
+
+### Added
+
+* Logging improvement: Added function entry and exit logs (at Info log level).
+
+## rocDecode 1.7.0 for ROCm 7.2.1
 
 ### Changed
+
+* The rocDecode GitHub repository has moved to [https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode](https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode).
+
+## rocDecode 1.5.0 for ROCm 7.2.0
+
+### Changed
+
 * Updated libdrm path configuration and libva version requirements for ROCm and TheRock platforms
 
 ### Added
+
 * Logging control. Message output from the core components is now controlled by the logging level threshold, which can be set by an environment variable or other methods.
 * rocdecode-host package - rocdecode-host library and samples
 

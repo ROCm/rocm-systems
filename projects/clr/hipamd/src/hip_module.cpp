@@ -1,25 +1,12 @@
-/* Copyright (c) 2015 - 2024 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip/hip_runtime.h>
 #include <fstream>
+#include <optional>
 
 #include "hip_internal.hpp"
 #include "platform/ndrange.hpp"
@@ -46,30 +33,30 @@ hipError_t hipModuleUnload(hipModule_t hmod) {
     HIP_RETURN(hipErrorInvalidResourceHandle);
   }
   CHECK_STREAM_CAPTURE_SUPPORTED();
-  HIP_RETURN(PlatformState::instance().unloadModule(hmod));
+  HIP_RETURN(PlatformState::Instance().UnloadModule(hmod));
 }
 hipError_t hipModuleLoadFatBinary(hipModule_t* module, const void* fatbin) {
   HIP_INIT_API(hipModuleLoadFatBinary, module, fatbin);
-  HIP_RETURN(PlatformState::instance().loadModule(module, 0, fatbin));
+  HIP_RETURN(PlatformState::Instance().LoadModule(module, 0, fatbin));
   HIP_RETURN(hipSuccess);
 }
 
 hipError_t hipModuleLoad(hipModule_t* module, const char* fname) {
   HIP_INIT_API(hipModuleLoad, module, fname);
 
-  HIP_RETURN(PlatformState::instance().loadModule(module, fname));
+  HIP_RETURN(PlatformState::Instance().LoadModule(module, fname));
 }
 
 hipError_t hipModuleLoadData(hipModule_t* module, const void* image) {
   HIP_INIT_API(hipModuleLoadData, module, image);
-  HIP_RETURN(PlatformState::instance().loadModule(module, 0, image));
+  HIP_RETURN(PlatformState::Instance().LoadModule(module, 0, image));
 }
 
 hipError_t hipModuleLoadDataEx(hipModule_t* module, const void* image, unsigned int numOptions,
                                hipJitOption* options, void** optionsValues) {
   /* TODO: Pass options to Program */
   HIP_INIT_API(hipModuleLoadDataEx, module, image);
-  HIP_RETURN(PlatformState::instance().loadModule(module, 0, image));
+  HIP_RETURN(PlatformState::Instance().LoadModule(module, 0, image));
 }
 
 extern hipError_t __hipExtractCodeObjectFromFatBinary(
@@ -86,7 +73,7 @@ hipError_t hipModuleGetFunction(hipFunction_t* hfunc, hipModule_t hmod, const ch
     HIP_RETURN(hipErrorInvalidResourceHandle);
   }
 
-  if (hipSuccess != PlatformState::instance().getDynFunc(hfunc, hmod, name)) {
+  if (hipSuccess != PlatformState::Instance().GetDynFunc(hfunc, hmod, name)) {
     LogPrintfError("Cannot find the function: %s for module: 0x%x", name, hmod);
     HIP_RETURN(hipErrorNotFound);
   }
@@ -100,7 +87,7 @@ hipError_t hipModuleGetFunctionCount(unsigned int* count, hipModule_t mod) {
   if (mod == nullptr) {
     HIP_RETURN(hipErrorInvalidResourceHandle);
   }
-  HIP_RETURN(PlatformState::instance().getFuncCount(count, mod););
+  HIP_RETURN(PlatformState::Instance().GetFuncCount(count, mod));
 }
 
 hipError_t hipModuleGetGlobal(hipDeviceptr_t* dptr, size_t* bytes, hipModule_t hmod,
@@ -114,7 +101,7 @@ hipError_t hipModuleGetGlobal(hipDeviceptr_t* dptr, size_t* bytes, hipModule_t h
     HIP_RETURN(hipErrorInvalidResourceHandle);
   }
   /* Get address and size for the global symbol */
-  if (hipSuccess != PlatformState::instance().getDynGlobalVar(name, hmod, dptr, bytes)) {
+  if (hipSuccess != PlatformState::Instance().GetDynGlobalVar(name, hmod, dptr, bytes)) {
     LogPrintfError("Cannot find global Var: %s for module: 0x%x at device: %d", name, hmod,
                    ihipGetDevice());
     HIP_RETURN(hipErrorNotFound);
@@ -186,7 +173,14 @@ hipError_t hipFuncGetAttribute(int* value, hipFunction_attribute attrib, hipFunc
 hipError_t hipFuncGetAttributes(hipFuncAttributes* attr, const void* func) {
   HIP_INIT_API(hipFuncGetAttributes, attr, func);
 
-  HIP_RETURN_ONFAIL(PlatformState::instance().getStatFuncAttr(attr, func, ihipGetDevice()));
+  if (attr == nullptr) {
+    return hipErrorInvalidValue;
+  }
+  if (func == nullptr) {
+    return hipErrorInvalidDeviceFunction;
+  }
+
+  HIP_RETURN_ONFAIL(PlatformState::Instance().StatCO().GetFuncAttr(attr, func, ihipGetDevice()));
 
   HIP_RETURN(hipSuccess);
 }
@@ -204,9 +198,9 @@ hipError_t hipFuncSetAttribute(const void* func, hipFuncAttribute attr, int valu
   hipFunction_t h_func = nullptr;
   const hip::DeviceFunc* function = nullptr;
 
-  hipError_t err = PlatformState::instance().getStatFunc(&h_func, func, ihipGetDevice());
+  hipError_t err = PlatformState::Instance().StatCO().GetFunc(&h_func, func, ihipGetDevice());
   if (h_func == nullptr) {
-    if (PlatformState::instance().isValidDynFunc((func))) {
+    if (PlatformState::Instance().IsValidDynFunc((func))) {
       function = reinterpret_cast<const hip::DeviceFunc*>(func);
     } else {
       HIP_RETURN(hipErrorInvalidDeviceFunction);
@@ -405,34 +399,9 @@ hipError_t ihipLaunchKernelCommand(amd::Command*& command, hipFunction_t f,
     }
   }
 
-  if (DEBUG_HIP_KERNARG_COPY_OPT) {
-    if (CL_SUCCESS !=
-        kernelCommand->AllocCaptureSetValidate(kernelParams, kernargs, kernargs_size)) {
-      kernelCommand->release();
-      return hipErrorOutOfMemory;
-    }
-
-  } else {
-    for (size_t i = 0; i < kernel->signature().numParameters(); ++i) {
-      const amd::KernelParameterDescriptor& desc = kernel->signature().at(i);
-      if (kernelParams == nullptr) {
-        assert(kernargs != nullptr);
-        // only copy if this parameter lies fully inside the passed buffer
-        if (desc.offset_ + desc.size_ <= kernargs_size) {
-          kernel->parameters().set(i, desc.size_, kernargs + desc.offset_,
-                                   desc.type_ == T_POINTER /*svmBound*/);
-        }
-      } else {
-        kernel->parameters().set(i, desc.size_, kernelParams[i],
-                                 desc.type_ == T_POINTER /*svmBound*/);
-      }
-    }
-
-    // Capture the kernel arguments
-    if (CL_SUCCESS != kernelCommand->captureAndValidate()) {
-      kernelCommand->release();
-      return hipErrorOutOfMemory;
-    }
+  if (CL_SUCCESS != kernelCommand->captureHIPArgsAndValidate(kernelParams, kernargs, kernargs_size)) {
+    kernelCommand->release();
+    return hipErrorOutOfMemory;
   }
 
   command = kernelCommand;
@@ -454,15 +423,13 @@ hipError_t ihipModuleLaunchKernel(hipFunction_t f, amd::LaunchParams& launch_par
   if (deviceId != targetDevice) {
     return hipErrorInvalidResourceHandle;
   }
-  HIP_RETURN_ONFAIL(PlatformState::instance().initStatManagedVarDevicePtr(deviceId));
+  HIP_RETURN_ONFAIL(PlatformState::Instance().StatCO().InitManagedVarDevicePtr(deviceId));
 
   if (f == nullptr) {
     LogPrintfError("%s", "Function passed is null");
     return hipErrorInvalidResourceHandle;
   }
-  hip::DeviceFunc* function = hip::DeviceFunc::asFunction(f);
-  amd::Kernel* kernel = function->kernel();
-  amd::ScopedLock lock(DEBUG_HIP_KERNARG_COPY_OPT ? nullptr : &function->dflock_);
+  amd::Kernel* kernel = hip::DeviceFunc::asFunction(f)->kernel();
 
   hipError_t status =
       ihipLaunchKernel_validate(f, launch_params, kernelParams, extra, deviceId, params);
@@ -805,7 +772,7 @@ hipError_t hipGetFuncBySymbol(hipFunction_t* functionPtr, const void* symbolPtr)
   HIP_INIT_API(hipGetFuncBySymbol, functionPtr, symbolPtr);
 
   hipError_t hip_error =
-      PlatformState::instance().getStatFunc(functionPtr, symbolPtr, ihipGetDevice());
+      PlatformState::Instance().StatCO().GetFunc(functionPtr, symbolPtr, ihipGetDevice());
 
   if ((hip_error != hipSuccess) || (functionPtr == nullptr)) {
     HIP_RETURN(hipErrorInvalidDeviceFunction);
@@ -874,7 +841,7 @@ hipError_t hipLaunchCooperativeKernel_common(const void* f, dim3 gridDim, dim3 b
 
   hipFunction_t func = nullptr;
   int deviceId = hip::Stream::DeviceId(hStream);
-  hipError_t getStatFuncError = PlatformState::instance().getStatFunc(&func, f, deviceId);
+  hipError_t getStatFuncError = PlatformState::Instance().StatCO().GetFunc(&func, f, deviceId);
   if (getStatFuncError != hipSuccess) {
     return getStatFuncError;
   }
@@ -956,7 +923,7 @@ hipError_t ihipLaunchCooperativeKernelMultiDevice(hipLaunchParams* launchParamsL
     for (size_t dev = 0; dev < g_devices.size(); ++dev) {
       // Find the matching device and request the kernel function
       if (&hip_stream->vdev()->device() == g_devices[dev]->devices()[0]) {
-        IHIP_RETURN_ONFAIL(PlatformState::instance().getStatFunc(&func, launch.func, dev));
+        IHIP_RETURN_ONFAIL(PlatformState::Instance().StatCO().GetFunc(&func, launch.func, dev));
         break;
       }
     }
@@ -1021,7 +988,7 @@ hipError_t hipModuleGetTexRef(textureReference** texRef, hipModule_t hmod, const
   }
 
   /* Get address and size for the global symbol */
-  if (hipSuccess != PlatformState::instance().getDynTexRef(name, hmod, texRef)) {
+  if (hipSuccess != PlatformState::Instance().GetDynTexRef(name, hmod, texRef)) {
     LogPrintfError("Cannot get texRef for name: %s at module:0x%x", name, hmod);
     HIP_RETURN(hipErrorNotFound);
   }
@@ -1034,7 +1001,7 @@ hipError_t hipModuleGetTexRef(textureReference** texRef, hipModule_t hmod, const
   (*texRef)->format = HIP_AD_FORMAT_FLOAT;
   (*texRef)->numChannels = 1;
 
-  hipError_t err = PlatformState::instance().registerTexRef(*texRef, hmod, std::string(name));
+  hipError_t err = PlatformState::Instance().RegisterTexRef(*texRef, hmod, std::string(name));
 
   HIP_RETURN(err);
 }

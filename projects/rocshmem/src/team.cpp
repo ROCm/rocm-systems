@@ -33,7 +33,9 @@
 
 namespace rocshmem {
 
-rocshmem_team_t ROCSHMEM_TEAM_WORLD;
+namespace host {
+    rocshmem_team_t ROCSHMEM_TEAM_WORLD = nullptr;
+}
 
 __host__ __device__ Team* get_internal_team(rocshmem_team_t team) {
   return reinterpret_cast<Team*>(team);

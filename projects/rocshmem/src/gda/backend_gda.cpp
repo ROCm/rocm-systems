@@ -76,6 +76,9 @@ void GDABackend::init() {
 
   type = BackendType::GDA_BACKEND;
 
+  // Initialize QP allocator to finegrained allocator
+  qp_allocator_ = new HIPAllocatorFinegrained();
+
   select_nic();
 
   // Determine number of QPs to create per PE
@@ -132,6 +135,12 @@ GDABackend::~GDABackend() {
   cleanup_ibv();
 
   close_dv_libs();
+
+  // Cleanup QP allocator
+  if (qp_allocator_ != nullptr) {
+    delete qp_allocator_;
+    qp_allocator_ = nullptr;
+  }
 }
 
 void GDABackend::select_nic() {
@@ -229,7 +238,8 @@ void GDABackend::setup_team_world() {
   /**
    * Copy the address to ROCSHMEM_TEAM_WORLD.
    */
-  ROCSHMEM_TEAM_WORLD = reinterpret_cast<rocshmem_team_t>(team_world);
+  host::ROCSHMEM_TEAM_WORLD = reinterpret_cast<rocshmem_team_t>(team_world);
+  set_team_world_device(host::ROCSHMEM_TEAM_WORLD);
 }
 
 void GDABackend::team_destroy(rocshmem_team_t team) {
@@ -738,8 +748,8 @@ void GDABackend::cleanup_ibv() {
       err = bnxt_re_dv.umem_dereg(bnxt_qps[i].attr.sq_umem_handle);
       CHECK_ZERO(err, "bnxt_re_dv_umem_dereg (SQ)");
 
-      CHECK_HIP(hipFree(bnxt_qps[i].sq_buf));
-      CHECK_HIP(hipFree(bnxt_qps[i].rq_buf));
+      qp_allocator_->deallocate(bnxt_qps[i].sq_buf);
+      qp_allocator_->deallocate(bnxt_qps[i].rq_buf);
 
       close(bnxt_qps[i].sq_dmabuf_fd);
       close(bnxt_qps[i].rq_dmabuf_fd);
@@ -759,9 +769,20 @@ void GDABackend::cleanup_ibv() {
       close(bnxt_scqs[i].dmabuf_fd);
       close(bnxt_rcqs[i].dmabuf_fd);
 
-      CHECK_HIP(hipFree(bnxt_scqs[i].buf));
-      CHECK_HIP(hipFree(bnxt_rcqs[i].buf));
+      qp_allocator_->deallocate(bnxt_scqs[i].buf);
+      qp_allocator_->deallocate(bnxt_rcqs[i].buf);
     }
+  } else if (gda_provider == GDAProvider::MLX5) {
+    for (size_t i = 0; i < mlx5_qps.size(); i++) {
+      err = mlx5_qps[i].destroy(mlx5dv);
+      CHECK_ZERO(err, "mlx5_devx_qp::destroy");
+
+      err = ibv.destroy_cq(cqs[i]);
+      CHECK_ZERO(err, "ibv_destroy_cqs");
+    }
+
+    err = ibv.dealloc_pd(pd_parent);
+    CHECK_ZERO(err, "ibv_dealloc_pd (pd_parent)");
   } else {
     for (int i = 0; i < qps.size(); i++) {
       err = ibv.destroy_qp(qps[i]);
@@ -859,7 +880,11 @@ void GDABackend::close_dv_libs() {
 void GDABackend::exchange_qp_dest_info() {
   for (int i = 0; i < qps.size(); i++) {
     dest_info[i].lid = portinfo.lid;
-    dest_info[i].qpn = qps[i]->qp_num;
+    if (gda_provider == GDAProvider::MLX5) {
+      dest_info[i].qpn = mlx5_qps[i].qpn;
+    } else {
+      dest_info[i].qpn = qps[i]->qp_num;
+    }
     dest_info[i].psn = 0;
     dest_info[i].gid = gid;
   }
@@ -977,7 +1002,13 @@ void GDABackend::open_ib_device() {
     exit(1);
   }
 
-  context = ibv.open_device(device);
+  if (gda_provider == GDAProvider::MLX5) {
+    /* Explicitly request DevX context */
+    struct mlx5dv_context_attr context_attr{ .flags = MLX5DV_CONTEXT_FLAGS_DEVX };
+    context = mlx5dv.open_device(device, &context_attr);
+  } else {
+    context = ibv.open_device(device);
+  }
   CHECK_NNULL(context, "ib open device");
   dump_ibv_context(context);
   dump_ibv_device(context->device);
@@ -1023,18 +1054,23 @@ void GDABackend::validate_ib_device() {
     const char min_supported_bnxt_fw_ver[12] = "233.2.104.0";
 
     if (device_attr.vendor_id != GDA_BNXT_VENDOR_ID) {
-      printf("%s GDAProvider::BNXT requested but an invalid device is selected\n", debug_str.c_str());
+      fprintf(stderr, "%s GDAProvider::BNXT requested but an invalid device is selected\n", debug_str.c_str());
       exit(1);
     }
 
     if (supported_bnxt_part_ids.find(device_attr.vendor_part_id) == supported_bnxt_part_ids.end()) {
-      printf("%s Unsupported Broadcom Part: %x\n", debug_str.c_str(), device_attr.vendor_part_id);
+      fprintf(stderr, "%s Unsupported Broadcom Part: %x\n", debug_str.c_str(), device_attr.vendor_part_id);
       exit(1);
     }
 
     if (strverscmp(min_supported_bnxt_fw_ver, device_attr.fw_ver) > 0) {
-      printf("%s Unsupported firmware version: %s\n", debug_str.c_str(), device_attr.fw_ver);
-      exit(1);
+      fprintf(stderr, "%s Unsupported firmware version: %s\n", debug_str.c_str(), device_attr.fw_ver);
+
+      if (envvar::gda::override_nic_firmware_check == false) {
+        exit(1);
+      }
+
+      fprintf(stderr, "[WARNING] BNXT NIC Firmware check is disabled\n");
     }
   }
 }
@@ -1062,6 +1098,8 @@ void GDABackend::modify_qps_reset_to_init() {
   for (int i =0; i < qps.size() ; i++) {
     if (gda_provider == GDAProvider::BNXT) {
       err = bnxt_re_dv.modify_qp(qps[i], &attr, attr_mask, 0, 0);
+    } else if (gda_provider == GDAProvider::MLX5) {
+      err = mlx5_qps[i].modify(mlx5dv, &attr, attr_mask, gid_type);
     } else {
       err = ibv.modify_qp(qps[i], &attr, attr_mask);
     }
@@ -1114,6 +1152,8 @@ void GDABackend::modify_qps_init_to_rtr() {
 
     if (gda_provider == GDAProvider::BNXT) {
       err = bnxt_re_dv.modify_qp(qps[i], &attr, attr_mask, 0, 0);
+    } else if (gda_provider == GDAProvider::MLX5) {
+      err = mlx5_qps[i].modify(mlx5dv, &attr, attr_mask, gid_type);
     } else {
       err = ibv.modify_qp(qps[i], &attr, attr_mask);
     }
@@ -1150,6 +1190,8 @@ void GDABackend::modify_qps_rtr_to_rts() {
 
     if (gda_provider == GDAProvider::BNXT) {
       err = bnxt_re_dv.modify_qp(qps[i], &attr, attr_mask, 0, 0);
+    } else if (gda_provider == GDAProvider::MLX5) {
+      err = mlx5_qps[i].modify(mlx5dv, &attr, attr_mask, gid_type);
     } else {
       err = ibv.modify_qp(qps[i], &attr, attr_mask);
     }
@@ -1174,12 +1216,17 @@ void GDABackend::create_queues() {
   bnxt_rcqs.resize(num_qps);
   bnxt_qps.resize(num_qps);
 
+  mlx5_qps.resize(num_qps);
+
   if (gda_provider == GDAProvider::BNXT) {
     bnxt_create_cqs(ncqes);
     bnxt_create_qps(envvar::sq_size);
   } else if (gda_provider == GDAProvider::IONIC) {
     ionic_create_cqs(ncqes);
     create_qps(envvar::sq_size);
+  } else if (gda_provider == GDAProvider::MLX5) {
+    create_cqs(ncqes);
+    mlx5_create_qps(envvar::sq_size);
   } else {
     create_cqs(ncqes);
     create_qps(envvar::sq_size);
@@ -1232,6 +1279,7 @@ void GDABackend::alternate_qp_ports() {
           std::swap(bnxt_scqs[cur_qp_idx], bnxt_scqs[new_qp_idx]);
           std::swap(bnxt_rcqs[cur_qp_idx], bnxt_rcqs[new_qp_idx]);
           std::swap(bnxt_qps[cur_qp_idx],  bnxt_qps[new_qp_idx]);
+          std::swap(mlx5_qps[cur_qp_idx],  mlx5_qps[new_qp_idx]);
         }
       }
     }
@@ -1297,6 +1345,19 @@ void GDABackend::create_cqs(int cqe) {
   cq_attr.comp_mask     = IBV_CQ_INIT_ATTR_MASK_PD;
   cq_attr.parent_domain = pd_parent;
 
+  /* enable mlx5 CQ collapsing by setting CQ length to 1 and enabling CQ overrun ignore:
+   *  - mlx5 driver sets mlx5_ifc_cqc_bits::oi bit when IBV_CREATE_CQ_ATTR_IGNORE_OVERRUN is set
+   *    this has the hardware ignore CQ overruns; CQ consumer counter doorbells should not be rung
+   *  - see Mellanox Adapters Programmer’s Reference Manual Rev 0.40, §7.12.8, Tables 75-76
+   *    and linux/include/linux/mlx5/mlx5_ifc.h for Completion Queue Context definition
+   *  - see also rdma-core/libibverbs/cmd_cq.c and linux/drivers/infiniband/hw/mlx5/cq.c
+   *    for how this flag sets the bit */
+  if (gda_provider == GDAProvider::MLX5) {
+    cq_attr.cqe         = 1;
+    cq_attr.comp_mask  |= IBV_CQ_INIT_ATTR_MASK_FLAGS;
+    cq_attr.flags      |= IBV_CREATE_CQ_ATTR_IGNORE_OVERRUN;
+  }
+
   for (int i = 0; i < qps.size(); i++) {
     cq_ex = ibv.create_cq_ex(context, &cq_attr);
     CHECK_NNULL(cq_ex, "ibv_create_cq_ex");
@@ -1355,7 +1416,7 @@ void GDABackend::select_gid_index() {
   struct ibv_gid_entry *gid_entry;
   union ibv_gid current_gid;
   union ibv_gid selected_gid;
-  uint32_t gid_type;
+  uint32_t current_gid_type;
   int err;
 
   const uint8_t local_gid_prefix[2] = {0xFE, 0x80};
@@ -1375,14 +1436,16 @@ void GDABackend::select_gid_index() {
   }
 
   for (int i = 0; i < gid_tbl_entries; i++) {
-    gid_type = gid_entries[i].gid_type;
+    current_gid_type = gid_entries[i].gid_type;
+    current_gid      = gid_entries[i].gid;
 
     /* rocSHMEM does not use GIDs for IB mode */
-    if (gid_type == IBV_GID_TYPE_IB) {
+    if (current_gid_type == IBV_GID_TYPE_IB) {
+      selected_gid_index = i;
+      selected_gid_type  = current_gid_type;
+      selected_gid       = current_gid;
       break;
     }
-
-    current_gid = gid_entries[i].gid;
 
     err = ibv.query_gid(context, port, i, &current_gid);
     CHECK_ZERO(err, "ibv_query_gid");
@@ -1395,18 +1458,19 @@ void GDABackend::select_gid_index() {
     /* Initialize using first available GID */
     if (selected_gid_index == -1) {
       selected_gid_index = i;
-      selected_gid_type  = gid_type;
+      selected_gid_type  = current_gid_type;
       selected_gid       = current_gid;
     }
     /* Choose RoCEv2 over RoCEv1 */
-    else  if (gid_type > selected_gid_type) {
+    else if (current_gid_type > selected_gid_type) {
       selected_gid_index = i;
-      selected_gid_type  = gid_type;
+      selected_gid_type  = current_gid_type;
       selected_gid       = current_gid;
     }
   }
 
   gid_index = selected_gid_index;
+  gid_type  = selected_gid_type;
   gid       = selected_gid;
 
   free(gid_entries);

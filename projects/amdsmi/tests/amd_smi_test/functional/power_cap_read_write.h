@@ -23,14 +23,16 @@
 #ifndef TESTS_AMD_SMI_TEST_FUNCTIONAL_POWER_CAP_READ_WRITE_H_
 #define TESTS_AMD_SMI_TEST_FUNCTIONAL_POWER_CAP_READ_WRITE_H_
 
+#include <string>
+
 #include "../test_base.h"
 
 class TestPowerCapReadWrite : public TestBase {
  public:
-    TestPowerCapReadWrite();
+  TestPowerCapReadWrite();
 
-    void SetCheckPowerCap(std::string msg, uint32_t dv_ind, uint32_t sensor_ind, uint64_t &curr_cap,
-                          uint64_t &new_cap, amdsmi_status_t &ret);
+  void SetCheckPowerCap(std::string msg, uint32_t dv_ind, uint32_t sensor_ind, uint64_t& curr_cap,
+                        uint64_t& new_cap, amdsmi_status_t& ret);
 
   // @Brief: Destructor for test case of TestPowerCapReadWrite
   virtual ~TestPowerCapReadWrite();

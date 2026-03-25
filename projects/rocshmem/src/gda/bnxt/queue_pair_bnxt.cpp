@@ -180,9 +180,9 @@ __device__ void QueuePair::bnxt_poll_cq_until(uint32_t requested_available_slots
   do {
     cqe = (struct bnxt_re_req_cqe *) bnxt_cq.buf;
 
-//#ifdef DEBUG
+#ifdef DEBUG
     bnxt_check_cqe_error(cqe);
-//#endif
+#endif
 
     /* Update the SQ head
      * This param provides us the wqe_idx but we need to convert to the slot idx.
@@ -198,6 +198,7 @@ __device__ void QueuePair::bnxt_poll_cq_until(uint32_t requested_available_slots
 }
 
 __device__ void QueuePair::bnxt_quiet(ActiveWFInfo &wf_info) {
+  // is this redundant, since the quiet is already called from only the PE group leader with the wavefront
   if (0 == wf_info.pe_group_logical_lane_id) {
     bnxt_poll_cq_until(bnxt_sq.depth);
   }

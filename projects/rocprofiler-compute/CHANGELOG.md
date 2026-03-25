@@ -8,11 +8,24 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Changed
 
+* Standalone roofline (`--roof-only` option) in profile mode now creates `roofline.csv` only. HTML roofline charts are generated via `rocprof-compute analyze`. The `calc_ai_profile()` function has been removed; `calc_ai_analyze()` is the single source of truth for arithmetic intensity calculation.
+  * Roofline visualization options (`--sort`, `--mem-level`, `--roofline-data-type`) have moved from profile mode to analyze mode.
+
+* Standardized unit naming in analysis configs and Python utilities: `pct`/`Pct` → `Percent`, `instr` → `Instructions`.
+
+* Profile mode output format:
+  * Profile mode now creates separate counter collection files for each application replay (pmc_perf_*.csv or results_*.csv).
+  * Analyze mode automatically merges these files into a unified pmc_perf.csv containing information from all application replays during pre-processing.
+
 ### Removed
+
+* Removed HIP API tracing since it's out-of-scope for ROCm Compute Profiler and the trace files were not being analyzed.
 
 ### Optimized
 
 ### Resolved issues
+
+* Fixed roofline benchmark MFMA FP16/BF16/INT8 peaks for MI 350
 
 ### Upcoming changes
 

@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-IMPLIED, INNCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANNY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip_test_common.hh>
 #include "streamCommon.hh"
@@ -26,7 +13,7 @@ namespace hipStreamSynchronizeTest {
  * @brief Check that hipStreamSynchronize handles empty streams properly.
  *
  */
-TEST_CASE("Unit_hipStreamSynchronize_EmptyStream") {
+HIP_TEST_CASE(Unit_hipStreamSynchronize_EmptyStream) {
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
   HIP_CHECK(hipStreamSynchronize(stream));
@@ -40,7 +27,7 @@ TEST_CASE("Unit_hipStreamSynchronize_EmptyStream") {
  * hipStreamSynchronize.
  *
  */
-TEST_CASE("Unit_hipStreamSynchronize_FinishWork") {
+HIP_TEST_CASE(Unit_hipStreamSynchronize_FinishWork) {
   const hipStream_t explicitStream = reinterpret_cast<hipStream_t>(-1);
   hipStream_t stream = GENERATE_COPY(explicitStream, hip::nullStream, hip::streamPerThread);
 
@@ -61,7 +48,7 @@ TEST_CASE("Unit_hipStreamSynchronize_FinishWork") {
 /**
  * @brief Check that synchronizing the nullStream implicitly synchronizes all executing streams.
  */
-TEST_CASE("Unit_hipStreamSynchronize_NullStreamSynchronization") {
+HIP_TEST_CASE(Unit_hipStreamSynchronize_NullStreamSynchronization) {
   int totalStreams = 10;
 
   std::vector<hipStream_t> streams{};
@@ -99,7 +86,7 @@ TEST_CASE("Unit_hipStreamSynchronize_NullStreamSynchronization") {
  *        Check that submiting work to the nullStream does not affect synchronization of other
  * streams. Check that querying the nullStream does not affect synchronization of other streams.
  */
-TEST_CASE("Unit_hipStreamSynchronize_SynchronizeStreamAndQueryNullStream") {
+HIP_TEST_CASE(Unit_hipStreamSynchronize_SynchronizeStreamAndQueryNullStream) {
 #if HT_AMD
   HipTest::HIP_SKIP_TEST("EXSWCPHIPT-22");
 #else
@@ -143,7 +130,7 @@ TEST_CASE("Unit_hipStreamSynchronize_SynchronizeStreamAndQueryNullStream") {
  * special stream.
  *
  */
-TEST_CASE("Unit_hipStreamSynchronize_NullStreamAndStreamPerThread") {
+HIP_TEST_CASE(Unit_hipStreamSynchronize_NullStreamAndStreamPerThread) {
   LaunchDelayKernel(std::chrono::milliseconds(500), hip::streamPerThread);
   HIP_CHECK_ERROR(hipStreamQuery(hip::nullStream), hipErrorNotReady);
   HIP_CHECK_ERROR(hipStreamQuery(hip::streamPerThread), hipErrorNotReady);

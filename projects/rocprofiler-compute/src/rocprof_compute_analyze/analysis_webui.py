@@ -37,10 +37,12 @@ from dash.dependencies import Input, Output, State
 
 from config import HIDDEN_COLUMNS, PROJECT_NAME
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
+from roofline import Roofline
 from utils import file_io, parser, schema
 from utils.gui import build_bar_chart, build_table_chart
 from utils.gui_components.memchart import get_memchart
 from utils.logger import console_debug, console_error, console_warning, demarcate
+from utils.roofline_calc import calc_ai_analyze, validate_roofline_csv
 
 
 class webui_analysis(OmniAnalyze_Base):
@@ -146,7 +148,7 @@ class webui_analysis(OmniAnalyze_Base):
                     base_data[base_run].raw_pmc
                 )
 
-            if self._profiling_config["iteration_multiplexing"] is not None:
+            if self._profiling_config.get("iteration_multiplexing") is not None:
                 base_data[base_run].raw_pmc = self.iteration_multiplex_impute_counters(
                     base_data[base_run].raw_pmc,
                     policy=self._profiling_config["iteration_multiplexing"],
@@ -215,36 +217,70 @@ class webui_analysis(OmniAnalyze_Base):
                 get_memchart(panel_configs[300]["data source"], base_data[base_run])
             ]
 
-            has_roofline = (Path(self.dest_dir) / "roofline.csv").is_file()
+            is_roofline_valid, roofline_error_msg = validate_roofline_csv(
+                Path(self.dest_dir)
+            )
             soc = self.get_socs()
             if soc and self.arch in soc:
-                if has_roofline and hasattr(soc[self.arch], "roofline_obj"):
-                    # update roofline for visualization in GUI
-                    soc[self.arch].analysis_setup(
-                        roofline_parameters={
+                if is_roofline_valid:
+                    # Normalize user-facing "vL1D" to CSV column name "L1"
+                    mem_level = (
+                        args.mem_level
+                        if isinstance(args.mem_level, list)
+                        else [args.mem_level]
+                    )
+                    mem_level = [("L1" if m == "vL1D" else m) for m in mem_level]
+
+                    roof_obj = Roofline(
+                        args=soc[self.arch].get_args(),
+                        mspec=soc[self.arch]._mspec,
+                        run_parameters={
                             "workload_dir": self.dest_dir,
                             "device_id": 0,
-                            "sort_type": "kernels",
-                            "mem_level": "ALL",
+                            "sort_type": str(args.sort),
+                            "mem_level": mem_level,
                             "include_kernel_names": True,
                             "is_standalone": False,
                             "roofline_data_type": self.__roofline_data_type,
+                            # WebUI handles kernel filtering
+                            # client-side via Dash/Plotly
                             "kernel_filter": False,
                             "iteration_multiplexing": self._profiling_config[
                                 "iteration_multiplexing"
                             ],
-                        }
+                        },
                     )
-                    roof_obj = soc[self.arch].roofline_obj
-                    div_children.append(
-                        roof_obj.empirical_roofline(
-                            ret_df=parser.apply_filters(
-                                workload=base_data[base_run],
-                                dir_path=self.dest_dir,
-                                is_gui=True,
-                                debug=args.debug,
-                            )
-                        )
+
+                    workload = base_data[base_run]
+                    workload.path = self.dest_dir
+
+                    pmc_df = parser.apply_filters(
+                        workload, self.dest_dir, is_gui=True, debug=False
+                    )
+
+                    ai_data = calc_ai_analyze(
+                        workload=workload,
+                        pmc_df=pmc_df,
+                        mspec=soc[self.arch]._mspec,
+                        sort_type=str(args.sort),
+                        config=self._profiling_config,
+                        arch_config=arch_configs,
+                    )
+
+                    ops_fig, flops_fig, _, _ = roof_obj.construct_plotly_figures(
+                        ai_data=ai_data,
+                    )
+                    roofline_section = roof_obj.generate_html_section(
+                        ops_fig,
+                        flops_fig,
+                    )
+                    if roofline_section is not None:
+                        div_children.append(roofline_section)
+                else:
+                    console_warning(
+                        "roofline",
+                        "Skipping roofline charting: ",
+                        f"Invalid roofline.csv: {roofline_error_msg}",
                     )
 
             # Iterate over each section as defined in panel configs

@@ -354,6 +354,29 @@ typedef union rocprofiler_rccl_api_args_t
         ncclWindow_t win;
     } ncclCommWindowDeregister;
 #endif
+#if RCCL_API_TRACE_VERSION_PATCH >= 3
+    struct
+    {
+        const void*    sendbuff;
+        void*          recvbuff;
+        size_t         count;
+        ncclDataType_t datatype;
+        ncclComm_t     comm;
+        hipStream_t    stream;
+    } ncclAlltoAll;
+    struct
+    {
+        const void*    sendbuff;
+        const size_t*  sendcounts;
+        const size_t*  sdispls;
+        void*          recvbuff;
+        const size_t*  recvcounts;
+        const size_t*  rdispls;
+        ncclDataType_t datatype;
+        ncclComm_t     comm;
+        hipStream_t    stream;
+    } ncclAlltoAllv;
+#endif
 } rocprofiler_rccl_api_args_t;
 
 ROCPROFILER_EXTERN_C_FINI

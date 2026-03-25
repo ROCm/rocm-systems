@@ -1,29 +1,13 @@
 /*
-Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include <hip_test_common.hh>
 #include <utils.hh>
 
-TEST_CASE("Unit_hipKernelGetAttribute_Positive_Basic") {
+HIP_TEST_CASE(Unit_hipKernelGetAttribute_Positive_Basic) {
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
   std::string lib_co = "reverse_kernel.code";
@@ -66,12 +50,14 @@ TEST_CASE("Unit_hipKernelGetAttribute_Positive_Basic") {
     REQUIRE(pi > 0);
   }
 
+#if !defined(ENABLE_ADDRESS_SANITIZER)
   SECTION("sharedSizeBytes") {
     hipKernel_t kernel;
     HIP_CHECK(hipLibraryGetKernel(&kernel, library, "reverse"));
     HIP_CHECK(hipKernelGetAttribute(&pi, HIP_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES, kernel, device_id));
     REQUIRE(pi == 256);
   }
+#endif
 
   SECTION("dynamicSharedSizeBytes") {
     hipKernel_t addKernel;
@@ -91,7 +77,7 @@ TEST_CASE("Unit_hipKernelGetAttribute_Positive_Basic") {
   HIP_CHECK(hipStreamDestroy(stream));
 }
 
-TEST_CASE("Unit_hipKernelGetAttribute_Negative_Parameters") {
+HIP_TEST_CASE(Unit_hipKernelGetAttribute_Negative_Parameters) {
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
   std::string lib_co = "library_code_load.code";

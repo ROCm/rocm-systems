@@ -227,7 +227,7 @@ void launch_kernels_and_verify(std::vector<hipStream_t>& streams, unsigned int n
 *  - Fine grain access and atomics supported on devices and host
 *  - HIP_VERSION >= 5.7
 */
-TEST_CASE("test_svm_fine_grain_memory_consistency", "[multigpu]") {
+HIP_TEST_CASE(test_svm_fine_grain_memory_consistency) {
   int num_devices = 0;
   HIP_CHECK(hipGetDeviceCount(&num_devices));
 

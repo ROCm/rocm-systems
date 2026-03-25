@@ -87,7 +87,7 @@ void KFDQMTest::SubmitNopCpQueue(int gpuNode) {
 
     queue.Wait4PacketConsumption(event);
 
-    hsaKmtDestroyEvent(event);
+    HSAKMT_CALL(hsaKmtDestroyEvent, m_hsakmt_current_ctx, event);
     EXPECT_SUCCESS_GPU(queue.Destroy(), gpuNode);
 
 }
@@ -119,7 +119,7 @@ void KFDQMTest::SubmitPacketCpQueue(int gpuNode) {
 
     EXPECT_TRUE_GPU(WaitOnValue(destBuf.As<unsigned int*>(), 0), gpuNode);
 
-    hsaKmtDestroyEvent(event);
+    HSAKMT_CALL(hsaKmtDestroyEvent, m_hsakmt_current_ctx, event);
     EXPECT_SUCCESS_GPU(queue.Destroy(), gpuNode);
 }
 
@@ -559,7 +559,7 @@ void KFDQMTest::DisableCpQueueByUpdateWithNullAddress(int gpuNode) {
 
     WaitOnValue(destBuf.As<unsigned int*>(), 1);
 
-    hsaKmtDestroyEvent(event);
+    HSAKMT_CALL(hsaKmtDestroyEvent, m_hsakmt_current_ctx, event);
     EXPECT_SUCCESS_GPU(queue.Destroy(), gpuNode);
 
 }
@@ -658,7 +658,7 @@ void KFDQMTest::DisableCpQueueByUpdateWithZeroPercentage(int gpuNode) {
     queue.Wait4PacketConsumption(event);
 
     WaitOnValue(destBuf.As<unsigned int*>(), 1);
-    hsaKmtDestroyEvent(event);
+    HSAKMT_CALL(hsaKmtDestroyEvent, m_hsakmt_current_ctx, event);
 
     EXPECT_SUCCESS_GPU(queue.Destroy(), gpuNode);
 
@@ -1664,7 +1664,7 @@ void KFDQMTest::testQueuePriority(int gpuNode, bool isSamePipe)
         dispatch[i].Submit(queue[i]);
 
     while (activeTaskBitmap > 0) {
-        hsaKmtWaitOnMultipleEvents(pHsaEvent, numEvent, false, g_TestTimeOut);
+        HSAKMT_CALL(hsaKmtWaitOnMultipleEvents, m_hsakmt_current_ctx, pHsaEvent, numEvent, false, g_TestTimeOut);
         for (i = 0; i < 2; i++) {
             if ((activeTaskBitmap & (1 << i)) && (syncBuffer[i] == pHsaEvent[i]->EventId)) {
                 endTime[i] = GetSystemTickCountInMicroSec();
@@ -1949,7 +1949,7 @@ void KFDQMTest::CpuWriteCoherence(int gpuNode) {
 
     WaitOnValue(destBuf.As<unsigned int*>(), 0x42);
 
-    hsaKmtDestroyEvent(event);
+    HSAKMT_CALL(hsaKmtDestroyEvent, m_hsakmt_current_ctx, event);
 }
 
 TEST_F(KFDQMTest, CpuWriteCoherence) {
@@ -1966,7 +1966,7 @@ void KFDQMTest::CreateAqlCpQueue(int gpuNode) {
 
     AqlQueue queue;
 
-    HsaMemoryBuffer pointers(PAGE_SIZE, gpuNode, /*zero*/true, /*local*/false, /*exec*/false, /*isScratch */false, /* isReadOnly */false, /* isUncached */false, /* NonPaged */g_baseTest->NeedNonPagedWptr(gpuNode));
+    HsaMemoryBuffer pointers(PAGE_SIZE, gpuNode, /*zero*/true, /*local*/false, /*exec*/false, /*isScratch */false, /* isReadOnly */false, /* isUncached */false, /* NonPaged */NeedNonPagedWptr(gpuNode));
 
     ASSERT_SUCCESS_GPU(queue.Create(gpuNode, PAGE_SIZE, pointers.As<HSAuint64 *>()), gpuNode);
 
@@ -2071,7 +2071,7 @@ void KFDQMTest::QueueLatency(int gpuNode) {
     queue.SubmitPacket();
     queue.Wait4PacketConsumption(event);
 
-    hsaKmtDestroyEvent(event);
+    HSAKMT_CALL(hsaKmtDestroyEvent, m_hsakmt_current_ctx, event);
     /* qts[i] records the timestamp of the end of packet[i] which is
      * approximate that of the beginging of packet[i+1].
      * The workload total is [0, skip], [skip+1, slots-1].
@@ -2146,7 +2146,7 @@ void KFDQMTest::CpQueueWraparound(int gpuNode) {
         WaitOnValue(destBuf.As<unsigned int*>(), pktIdx);
     }
 
-    hsaKmtDestroyEvent(event);
+    HSAKMT_CALL(hsaKmtDestroyEvent, m_hsakmt_current_ctx, event);
     EXPECT_SUCCESS_GPU(queue.Destroy(), gpuNode);
 
 }
@@ -2247,7 +2247,7 @@ void KFDQMTest::Atomics(int gpuNode) {
     dispatch.SetArgs(destBuf.As<void*>(), NULL);
     dispatch.SetDim(1024, 1, 1);
 
-    hsaKmtSetMemoryPolicy(gpuNode, HSA_CACHING_CACHED, HSA_CACHING_CACHED, NULL, 0);
+    HSAKMT_CALL(hsaKmtSetMemoryPolicy, m_hsakmt_current_ctx, gpuNode, HSA_CACHING_CACHED, HSA_CACHING_CACHED, NULL, 0);
 
     ASSERT_SUCCESS_GPU(queue.Create(gpuNode), gpuNode);
 
@@ -2338,7 +2338,7 @@ sdma_copy(HSAuint32 node, void *src, void *const dst[], int n, HSAuint64 size) {
     sdmaQueue.PlaceAndSubmitPacket(SDMACopyDataPacket(sdmaQueue.GetFamilyId(), dst, src, n, size));
     sdmaQueue.Wait4PacketConsumption(event);
     EXPECT_SUCCESS(sdmaQueue.Destroy());
-    hsaKmtDestroyEvent(event);
+    HSAKMT_CALL(hsaKmtDestroyEvent, g_baseTest->m_hsakmt_current_ctx, event);
 }
 
 static void
@@ -2350,7 +2350,7 @@ sdma_fill(HSAint32 node, void *dst, unsigned int data, HSAuint64 size) {
     sdmaQueue.PlaceAndSubmitPacket(SDMAFillDataPacket(sdmaQueue.GetFamilyId(), dst, data, size));
     sdmaQueue.Wait4PacketConsumption(event);
     EXPECT_SUCCESS(sdmaQueue.Destroy());
-    hsaKmtDestroyEvent(event);
+    HSAKMT_CALL(hsaKmtDestroyEvent, g_baseTest->m_hsakmt_current_ctx, event);
 }
 
 TEST_F(KFDQMTest, P2PTest) {
@@ -2415,17 +2415,17 @@ TEST_F(KFDQMTest, P2PTest) {
     unsigned int end = size / sizeof(HSAuint32) - 1;
 
     /* 1. Allocate a system buffer and allow the access to GPUs */
-    EXPECT_SUCCESS(hsaKmtAllocMemory(0, size, m_MemoryFlags,
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtAllocMemory, g_baseTest->m_hsakmt_current_ctx, 0, size, m_MemoryFlags,
                                      reinterpret_cast<void **>(&sysBuf)));
-    EXPECT_SUCCESS(hsaKmtMapMemoryToGPUNodes(sysBuf, size, NULL,
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes, g_baseTest->m_hsakmt_current_ctx, sysBuf, size, NULL,
                                              mapFlags, nodes.size(), (HSAuint32 *)&nodes[0]));
 #define MAGIC_NUM 0xdeadbeaf
 
     /* First GPU fills mem with MAGIC_NUM */
     void *src, *dst;
     HSAuint32 cur = nodes[0], next;
-    ASSERT_SUCCESS(hsaKmtAllocMemory(cur, size, memFlags, reinterpret_cast<void**>(&src)));
-    ASSERT_SUCCESS(hsaKmtMapMemoryToGPU(src, size, NULL));
+    ASSERT_SUCCESS(HSAKMT_CALL(hsaKmtAllocMemory, g_baseTest->m_hsakmt_current_ctx, cur, size, memFlags, reinterpret_cast<void**>(&src)));
+    ASSERT_SUCCESS(HSAKMT_CALL(hsaKmtMapMemoryToGPU, g_baseTest->m_hsakmt_current_ctx, src, size, NULL));
     sdma_fill(cur, src, MAGIC_NUM, size);
 
     for (unsigned i = 1; i <= nodes.size(); i++) {
@@ -2445,8 +2445,8 @@ TEST_F(KFDQMTest, P2PTest) {
             if (!m_NodeInfo.IsPeerAccessibleByNode(next, cur))
                 continue;
 
-            ASSERT_SUCCESS(hsaKmtAllocMemory(next, size, memFlags, reinterpret_cast<void**>(&dst)));
-            ASSERT_SUCCESS(hsaKmtMapMemoryToGPU(dst, size, NULL));
+            ASSERT_SUCCESS(HSAKMT_CALL(hsaKmtAllocMemory, g_baseTest->m_hsakmt_current_ctx, next, size, memFlags, reinterpret_cast<void**>(&dst)));
+            ASSERT_SUCCESS(HSAKMT_CALL(hsaKmtMapMemoryToGPU, g_baseTest->m_hsakmt_current_ctx, dst, size, NULL));
         }
 
         LOG() << "Test " << cur << " -> " << next << std::endl;
@@ -2460,15 +2460,15 @@ TEST_F(KFDQMTest, P2PTest) {
 
         LOG() << "PASS " << cur << " -> " << next << std::endl;
 
-        EXPECT_SUCCESS(hsaKmtUnmapMemoryToGPU(src));
-        EXPECT_SUCCESS(hsaKmtFreeMemory(src, size));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, g_baseTest->m_hsakmt_current_ctx, src));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtFreeMemory, g_baseTest->m_hsakmt_current_ctx, src, size));
 
         cur = next;
         src = dst;
     }
 
-    EXPECT_SUCCESS(hsaKmtUnmapMemoryToGPU(sysBuf));
-    EXPECT_SUCCESS(hsaKmtFreeMemory(sysBuf, size));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, g_baseTest->m_hsakmt_current_ctx, sysBuf));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtFreeMemory, g_baseTest->m_hsakmt_current_ctx, sysBuf, size));
 
     TEST_END
 }
@@ -2519,7 +2519,7 @@ void KFDQMTest::PM4EventInterrupt(int gpuNode) {
             queue[i].SubmitPacket();
 
         for (int i = 0; i < numPM4Queue; i++) {
-            EXPECT_SUCCESS_GPU(hsaKmtWaitOnEvent(event[i], g_TestTimeOut), gpuNode);
+            EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtWaitOnEvent, m_hsakmt_current_ctx, event[i], g_TestTimeOut), gpuNode);
             EXPECT_EQ_GPU(buf[i][0], 0xdeadbeaf, gpuNode);
             EXPECT_EQ_GPU(buf[i][packetCount - 1], 0xdeadbeaf, gpuNode);
             memset(buf[i], 0, bufSize);
@@ -2527,7 +2527,7 @@ void KFDQMTest::PM4EventInterrupt(int gpuNode) {
 
         for (int i = 0; i < numPM4Queue; i++) {
             EXPECT_SUCCESS_GPU(queue[i].Destroy(), gpuNode);
-            EXPECT_SUCCESS_GPU(hsaKmtDestroyEvent(event[i]), gpuNode);
+            EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtDestroyEvent, m_hsakmt_current_ctx, event[i]), gpuNode);
         }
     }
 
@@ -2603,7 +2603,7 @@ void KFDQMTest::SdmaEventInterrupt(int gpuNode) {
 
             for (int i = 0; i < testSDMAQueue; i++) {
                 TimeStamp *ts = tsbuf + i * 32;
-                HSAKMT_STATUS ret = hsaKmtWaitOnEvent(event[i], g_TestTimeOut);
+                HSAKMT_STATUS ret = HSAKMT_CALL(hsaKmtWaitOnEvent, m_hsakmt_current_ctx, event[i], g_TestTimeOut);
 
                 if (dst[i][0] != src[0])
                     WARN() << "SDMACopyData FAIL! " << std::dec
@@ -2620,7 +2620,7 @@ void KFDQMTest::SdmaEventInterrupt(int gpuNode) {
 
                     queue[i].SubmitPacket();
 
-                    if (hsaKmtWaitOnEvent(event[i], g_TestTimeOut) == HSAKMT_STATUS_SUCCESS)
+                    if (HSAKMT_CALL(hsaKmtWaitOnEvent, m_hsakmt_current_ctx, event[i], g_TestTimeOut) == HSAKMT_STATUS_SUCCESS)
                         WARN() << "The timeout event is signaled!" << std::endl;
                     else
                         WARN() << "The timeout event is lost after resubmit!" << std::endl;
@@ -2636,7 +2636,7 @@ void KFDQMTest::SdmaEventInterrupt(int gpuNode) {
 
             for (int i = 0; i < testSDMAQueue; i++) {
                 EXPECT_SUCCESS_GPU(queue[i].Destroy(), gpuNode);
-                EXPECT_SUCCESS_GPU(hsaKmtDestroyEvent(event[i]), gpuNode);
+                EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtDestroyEvent, m_hsakmt_current_ctx, event[i]), gpuNode);
             }
         }
 
@@ -2765,7 +2765,8 @@ TEST_F(KFDQMTest, UserQueueBufValidation) {
     // System memory mapping on GPU
     QueueBuf = new HsaMemoryBuffer(PAGE_SIZE, defaultGPUNode);
 
-    EXPECT_SUCCESS(hsaKmtCreateQueue(defaultGPUNode,
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtCreateQueue, g_baseTest->m_hsakmt_current_ctx,
+                               defaultGPUNode,
                                HSA_QUEUE_COMPUTE,
                                100,
                                HSA_QUEUE_PRIORITY_NORMAL,
@@ -2773,10 +2774,11 @@ TEST_F(KFDQMTest, UserQueueBufValidation) {
                                PAGE_SIZE,
                                NULL,
                                &QueueResources));
-    EXPECT_SUCCESS(hsaKmtDestroyQueue(QueueResources.QueueId));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtDestroyQueue, g_baseTest->m_hsakmt_current_ctx, QueueResources.QueueId));
 
     // CP Queue creation should fail using wrong ring buffer size
-    EXPECT_SUCCESS(!hsaKmtCreateQueue(defaultGPUNode,
+    EXPECT_SUCCESS(!HSAKMT_CALL(hsaKmtCreateQueue, g_baseTest->m_hsakmt_current_ctx,
+                               defaultGPUNode,
                                HSA_QUEUE_COMPUTE,
                                100,
                                HSA_QUEUE_PRIORITY_NORMAL,
@@ -2786,7 +2788,8 @@ TEST_F(KFDQMTest, UserQueueBufValidation) {
                                &QueueResources));
 
     // SDMA queue create should fail using wrong ring buffer size
-    EXPECT_SUCCESS(!hsaKmtCreateQueue(defaultGPUNode,
+    EXPECT_SUCCESS(!HSAKMT_CALL(hsaKmtCreateQueue, g_baseTest->m_hsakmt_current_ctx,
+                               defaultGPUNode,
                                HSA_QUEUE_SDMA,
                                100,
                                HSA_QUEUE_PRIORITY_NORMAL,
@@ -2796,7 +2799,8 @@ TEST_F(KFDQMTest, UserQueueBufValidation) {
                                &QueueResources));
 
     // CP queue create should fail using NULL ring buffer
-    EXPECT_SUCCESS(!hsaKmtCreateQueue(defaultGPUNode,
+    EXPECT_SUCCESS(!HSAKMT_CALL(hsaKmtCreateQueue, g_baseTest->m_hsakmt_current_ctx,
+                               defaultGPUNode,
                                HSA_QUEUE_COMPUTE,
                                100,
                                HSA_QUEUE_PRIORITY_NORMAL,
@@ -2806,7 +2810,8 @@ TEST_F(KFDQMTest, UserQueueBufValidation) {
                                &QueueResources));
 
     // SDMA queue create should fail using NULL ring buffer
-    EXPECT_SUCCESS(!hsaKmtCreateQueue(defaultGPUNode,
+    EXPECT_SUCCESS(!HSAKMT_CALL(hsaKmtCreateQueue, g_baseTest->m_hsakmt_current_ctx,
+                               defaultGPUNode,
                                HSA_QUEUE_SDMA,
                                100,
                                HSA_QUEUE_PRIORITY_NORMAL,
@@ -2815,8 +2820,8 @@ TEST_F(KFDQMTest, UserQueueBufValidation) {
                                NULL,
                                &QueueResources));
 
-    EXPECT_SUCCESS(hsaKmtUnmapMemoryToGPU(QueueBuf->As<unsigned int*>()));
-    EXPECT_SUCCESS(hsaKmtFreeMemory(QueueBuf->As<unsigned int*>(), PAGE_SIZE));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, g_baseTest->m_hsakmt_current_ctx, QueueBuf->As<unsigned int*>()));
+    EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtFreeMemory, g_baseTest->m_hsakmt_current_ctx, QueueBuf->As<unsigned int*>(), PAGE_SIZE));
 
     //
     // This following negative test will evict user queues, must execute in child process,
@@ -2835,7 +2840,8 @@ TEST_F(KFDQMTest, UserQueueBufValidation) {
         QueueBuf = new HsaMemoryBuffer(PAGE_SIZE, defaultGPUNode);
         memset(&QueueResources, 0, sizeof(QueueResources));
 
-        status = hsaKmtCreateQueue(defaultGPUNode,
+        status = HSAKMT_CALL(hsaKmtCreateQueue, g_baseTest->m_hsakmt_current_ctx,
+                               defaultGPUNode,
                                HSA_QUEUE_COMPUTE,
                                100,
                                HSA_QUEUE_PRIORITY_NORMAL,
@@ -2849,7 +2855,7 @@ TEST_F(KFDQMTest, UserQueueBufValidation) {
         }
 
         // Update queue percentage 0 to set queue inactive in order to get queue info CWSR area
-        status = hsaKmtUpdateQueue(QueueResources.QueueId, 0, HSA_QUEUE_PRIORITY_NORMAL,
+        status = HSAKMT_CALL(hsaKmtUpdateQueue, g_baseTest->m_hsakmt_current_ctx, QueueResources.QueueId, 0, HSA_QUEUE_PRIORITY_NORMAL,
                                      QueueBuf->As<unsigned int*>(), PAGE_SIZE, NULL);
         if (status != HSAKMT_STATUS_SUCCESS) {
             LOG() << "update queue failed." << std::endl;
@@ -2857,7 +2863,7 @@ TEST_F(KFDQMTest, UserQueueBufValidation) {
         }
 
         HsaQueueInfo QueueInfo;
-        status = hsaKmtGetQueueInfo(QueueResources.QueueId, &QueueInfo);
+        status = HSAKMT_CALL(hsaKmtGetQueueInfo, g_baseTest->m_hsakmt_current_ctx, QueueResources.QueueId, &QueueInfo);
         if (status != HSAKMT_STATUS_SUCCESS) {
             LOG() << "get queue info failed." << std::endl;
             goto err_exit;
@@ -2868,13 +2874,13 @@ TEST_F(KFDQMTest, UserQueueBufValidation) {
         munmap(cwsr_addr, PAGE_SIZE);
 
         // unmap and free queue ring buffer should fail before the queue is destroyed
-        status = hsaKmtFreeMemory(QueueBuf->As<unsigned int*>(), PAGE_SIZE);
+        status = HSAKMT_CALL(hsaKmtFreeMemory, g_baseTest->m_hsakmt_current_ctx, QueueBuf->As<unsigned int*>(), PAGE_SIZE);
         if (status == HSAKMT_STATUS_SUCCESS) {
             LOG() << "free queue buf should fail." << std::endl;
             goto err_exit;
         }
 
-        status = hsaKmtUnmapMemoryToGPU(QueueBuf->As<unsigned int*>());
+        status = HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, g_baseTest->m_hsakmt_current_ctx, QueueBuf->As<unsigned int*>());
         if (status == HSAKMT_STATUS_SUCCESS) {
             LOG() << "unmap queue buf should fail." << std::endl;
             goto err_exit;
@@ -2883,19 +2889,19 @@ TEST_F(KFDQMTest, UserQueueBufValidation) {
         exit_code = 0;
 
 err_exit:
-        status = hsaKmtDestroyQueue(QueueResources.QueueId);
+        status = HSAKMT_CALL(hsaKmtDestroyQueue, g_baseTest->m_hsakmt_current_ctx, QueueResources.QueueId);
         if (status != HSAKMT_STATUS_SUCCESS) {
             LOG() << "destroy queue failed." << std::endl;
             exit_code = 1;
         }
 free_exit:
-        status = hsaKmtUnmapMemoryToGPU(QueueBuf->As<unsigned int*>());
+        status = HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, g_baseTest->m_hsakmt_current_ctx, QueueBuf->As<unsigned int*>());
         if (status != HSAKMT_STATUS_SUCCESS) {
             LOG() << "unmap queue buf failed." << std::endl;
             exit_code = 1;
         }
 
-        status = hsaKmtFreeMemory(QueueBuf->As<unsigned int*>(), PAGE_SIZE);
+        status = HSAKMT_CALL(hsaKmtFreeMemory, g_baseTest->m_hsakmt_current_ctx, QueueBuf->As<unsigned int*>(), PAGE_SIZE);
         if (status != HSAKMT_STATUS_SUCCESS) {
             LOG() << "free queue buf failed." << std::endl;
             exit_code = 1;

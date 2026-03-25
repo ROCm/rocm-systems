@@ -164,6 +164,7 @@ class BaseRunner(ABC):
         target: str,
         output_dir: Path,
         run_args: Optional[list[str]] = None,
+        pre_run_args: Optional[list[str]] = None,
         env: Optional[dict[str, str]] = None,
         timeout: int = 300,
         mpi_ranks: int = 0,
@@ -174,6 +175,7 @@ class BaseRunner(ABC):
         self.target_exe = config.get_target_executable(target)
         self.output_dir = Path(output_dir)
         self.run_args = run_args or []
+        self.pre_run_args = pre_run_args or []
         self.timeout = timeout
         self.mpi_ranks = mpi_ranks
         self.working_directory = working_directory or config.rocprofsys_build_dir
@@ -326,8 +328,8 @@ class BaselineRunner(BaseRunner):
 
     def build_command(self) -> list[str]:
         if self.command:
-            return self.command + self.run_args
-        return [str(self.target_exe)] + self.run_args
+            return self.pre_run_args + self.command + self.run_args
+        return self.pre_run_args + [str(self.target_exe)] + self.run_args
 
 
 class SamplingRunner(BaseRunner):
@@ -358,7 +360,9 @@ class SamplingRunner(BaseRunner):
         return (
             [str(self.config.rocprofsys_sample)]
             + self.sample_args
-            + ["--", str(self.target_exe)]
+            + ["--"]
+            + self.pre_run_args
+            + [str(self.target_exe)]
             + self.run_args
         )
 
@@ -457,11 +461,13 @@ class BinaryRewriteRunner(BaseRunner):
 
     def build_command(self) -> list[str]:
         """Build command to run the instrumented binary."""
-        return [
-            str(self.config.rocprofsys_run),
-            "--",
-            str(self.instrumented_exe),
-        ] + self.run_args
+        return (
+            [str(self.config.rocprofsys_run)]
+            + ["--"]
+            + self.pre_run_args
+            + [str(self.instrumented_exe)]
+            + self.run_args
+        )
 
     def run(self) -> TestResult:
         """Execute full rewrite + run sequence.
@@ -551,7 +557,9 @@ class RuntimeInstrumentRunner(BaseRunner):
             [str(self.config.rocprofsys_instrument)]
             + self.runtime_args
             + ["--print-instrumented", "functions"]
-            + ["--", str(self.target_exe)]
+            + ["--"]
+            + self.pre_run_args
+            + [str(self.target_exe)]
             + self.run_args
         )
 
@@ -584,7 +592,9 @@ class SysRunRunner(BaseRunner):
         return (
             [str(self.config.rocprofsys_run)]
             + self.sysrun_args
-            + ["--", str(self.target_exe)]
+            + ["--"]
+            + self.pre_run_args
+            + [str(self.target_exe)]
             + self.run_args
         )
 
@@ -621,7 +631,9 @@ class CausalRunner(BaseRunner):
             [str(self.config.rocprofsys_causal)]
             + ["--reset", "-m", str(self.causal_mode)]
             + self.causal_args
-            + ["--", str(self.target_exe)]
+            + ["--"]
+            + self.pre_run_args
+            + [str(self.target_exe)]
             + self.run_args
         )
 
@@ -659,5 +671,5 @@ class PythonRunner(BaseRunner):
             if self.annotated:
                 command.extend(["--annotate-trace"])
             command.extend(["--"])
-        command.extend([str(self.target_exe), *self.run_args])
+        command.extend(self.pre_run_args + [str(self.target_exe)] + self.run_args)
         return command

@@ -47,7 +47,7 @@
 #include "util/utils.h"
 #include "impl/wddm/types.h"
 #include "impl/wddm/thunks.h"
-#include "wkmi/wkmi.h"
+#include "wkmi.h"
 
 namespace wsl {
 namespace thunk {
@@ -231,10 +231,8 @@ public:
 
   ErrorCode ExportPhysicalHandle(int* dmabuf_fd, uint32_t flags = SHARED_ALLOCATION_ALL_ACCESS);
   ErrorCode ImportPhysicalFD(const GpuMemoryCreateInfo& create_info, gpusize* gpu_addr = nullptr);
-  ErrorCode ImportPhysicalKMTHandle(const GpuMemoryCreateInfo& create_info,
-                                    gpusize* gpu_addr = nullptr);
-  ErrorCode ImportPhysicalNTHandle(const GpuMemoryCreateInfo& create_info,
-                                   gpusize* gpu_addr = nullptr);
+  ErrorCode ImportPhysicalAllocHandle(const GpuMemoryCreateInfo& create_info,
+                                      gpusize* gpu_addr = nullptr);
   ErrorCode ImportPhysicalHandle(const GpuMemoryCreateInfo& create_info,
                                  gpusize* gpu_addr = nullptr);
   WinAllocationHandle KmtHandle() const { return alloc_handle_; }

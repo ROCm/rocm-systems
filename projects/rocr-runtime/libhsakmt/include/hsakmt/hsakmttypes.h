@@ -1550,6 +1550,7 @@ typedef struct _HsaExternalHandleDesc {
     HsaAMDGPUDeviceHandle device_handle; // GPU device handle (used for import only)
     HSAint32 fd; // dmabuf fd
     HsaExternalHandleType type; // handle type
+    void *mem; // existing buffer address (for windows and WSL only)
     HSAuint32 metadata; // Used for IPC handles
 } HsaExternalHandleDesc;
 
@@ -1571,6 +1572,12 @@ typedef struct _HsaHandleImportFlags {
         unsigned int Reserved       : 29;
     } ui32;
 } HsaHandleImportFlags;
+
+typedef struct _HsaStructureSizes {
+  HSAuint16 StructureSizes;           // sizeof(HsaStructureSizes) used for check overflow
+  HSAuint16 SizeOfHsaNodeProperties;  // sizeof(HsaNodeProperties)
+  HSAuint16 Reserved[6];
+} HsaStructureSizes;
 
 #ifdef __cplusplus
 }   //extern "C"

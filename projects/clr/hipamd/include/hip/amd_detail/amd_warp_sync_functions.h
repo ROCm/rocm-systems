@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #pragma once
 
@@ -321,8 +305,14 @@ __device__ inline T __shfl_xor_sync(MaskT mask, MAYBE_UNDEF T var, int laneMask,
 
 template <typename MaskT, typename T, typename BinaryOp, typename WfReduce>
 __device__ inline T __reduce_op_sync(MaskT mask, T val, BinaryOp op, WfReduce wfReduce) {
+  static constexpr bool isPrimitiveType = !__hip_internal::is_same<WfReduce, decltype(nullptr)>::value;
   using permuteType =
-      typename __hip_internal::conditional<sizeof(T) == 4 || sizeof(T) == 2, T, unsigned int>::type;
+      typename __hip_internal::conditional<isPrimitiveType && (sizeof(T) == 4 || sizeof(T) == 2), T, unsigned int>::type;
+
+  // the number of backward permutes will be: size(T) / 4 rounded up
+  static constexpr int kNumOfPermutes = (sizeof(T) < 4)?
+                                        1 :
+                                        (sizeof(T) + sizeof(unsigned int) - 1) / sizeof(unsigned int);
   static constexpr auto kMaskNumBits = sizeof(MaskT) * 8;
   static_assert(__hip_internal::is_integral<MaskT>::value && sizeof(MaskT) == 8,
                 "The mask must be a 64-bit integer. "
@@ -340,16 +330,16 @@ __device__ inline T __reduce_op_sync(MaskT mask, T val, BinaryOp op, WfReduce wf
   int lastLane = kMaskNumBits - leadingZeroes - 1;
   int maskNumBits;
   int numIterations;
-  // unsigned int[2] is used when T is 64-bit wide
-  typename __hip_internal::conditional<sizeof(T) == 4 || sizeof(T) == 2, permuteType,
-                                       permuteType[2]>::type result,
-      permuteResult;
-  auto backwardPermute = [](int index, permuteType val) {
-    if constexpr (__hip_internal::is_integral<T>::value ||
-                  __hip_internal::is_same<T, double>::value)
-      return __hip_ds_bpermute(index, val);
-    else
-      return __hip_ds_bpermutef(index, val);
+  // unsigned int[N] is used in some cases, e.g. when T is wider than 32-bit
+  typename __hip_internal::conditional<isPrimitiveType && (sizeof(T) == 4 || sizeof(T) == 2), permuteType,
+                                       permuteType[kNumOfPermutes]>::type result, permuteResult;
+  auto backwardPermute = [](int index, permuteType arg) {
+    if constexpr (__hip_internal::is_floating_point<T>::value &&
+                  sizeof(T) <= 4) {
+      return __hip_ds_bpermutef(index, arg);
+    } else {
+      return __hip_ds_bpermute(index, arg);
+    }
   };
 
   __hip_check_mask(mask);
@@ -357,10 +347,12 @@ __device__ inline T __reduce_op_sync(MaskT mask, T val, BinaryOp op, WfReduce wf
 
 #ifdef __OPTIMIZE__  // at the time of this writing the ockl wfred functions do not compile when
                      // using -O0
-  if (maskNumBits == lastLane + 1)
-    // this means the mask "does not have holes", and starts from 0; we can use a specific intrinsic
-    // to calculate the aggregated result
-    return wfReduce(val);
+  if constexpr (!__hip_internal::is_same<WfReduce, decltype(nullptr)>::value){
+    if (maskNumBits == lastLane + 1)
+      // this means the mask "does not have holes", and starts from 0; we can use a specific intrinsic
+      // to calculate the aggregated result
+      return wfReduce(val);
+  }
 #endif
 
   firstLane = __builtin_ctzll(mask);
@@ -377,10 +369,11 @@ __device__ inline T __reduce_op_sync(MaskT mask, T val, BinaryOp op, WfReduce wf
   mask >>= laneId;
   mask >>= 1ul;
 
-  if constexpr (sizeof(T) == 4 || sizeof(T) == 2)
+  if constexpr (isPrimitiveType && (sizeof(T) == 2 || sizeof(T) == 4)) { 
     result = val;
-  else
-    __builtin_memcpy(&result, &val, sizeof(T));
+  } else {
+    __builtin_memcpy(result, &val, sizeof(result));
+  }
 
   // add the values from the lanes using a reduction tree (first the threads with even-numbered
   // lanes, then multiples of 4, then 8, ...
@@ -402,7 +395,11 @@ __device__ inline T __reduce_op_sync(MaskT mask, T val, BinaryOp op, WfReduce wf
       }
     }
 
-    if constexpr (sizeof(T) == 2) {
+    if constexpr (!isPrimitiveType) {
+      for (int i = 0; i < kNumOfPermutes; i++) {
+        permuteResult[i] = backwardPermute(nextBit << 2, result[i]);
+      }
+    } else if constexpr (sizeof(T) == 2) {
       union {
         int i;
         T f;
@@ -411,26 +408,31 @@ __device__ inline T __reduce_op_sync(MaskT mask, T val, BinaryOp op, WfReduce wf
       tmp.f = result;
       tmp.i = __hip_ds_bpermute(nextBit << 2, tmp.i);
       permuteResult = tmp.f;
-    } else if constexpr (sizeof(T) == 4)
-      permuteResult = backwardPermute(nextBit << 2, result);
-    else {
-      // ds_bpermute only deals with 32-bit sizes, so for 64-bit types
-      // we need to call the permute twice for each half
+    } else if constexpr (sizeof(T) == 4) {
+      auto bPermuteResult = backwardPermute(nextBit << 2, result);
+      __builtin_memcpy(&permuteResult, &bPermuteResult, sizeof(result));
+    } else {
+      // ds_bpermute only deals with 32-bit sizes, so for other sizes
+      // we need to call the permute multiple times
       permuteResult[0] = backwardPermute(nextBit << 2, result[0]);
       permuteResult[1] = backwardPermute(nextBit << 2, result[1]);
     }
 
     if (insideLanes) {
-      if constexpr (sizeof(T) == 4 || sizeof(T) == 2)
+      if constexpr (__hip_internal::is_same<WfReduce, decltype(nullptr)>::value) {
+        T toReturn;
+        toReturn = op(*reinterpret_cast<T*>(result), *reinterpret_cast<T*>(permuteResult));
+        __builtin_memcpy(result, &toReturn, sizeof(T));
+      } else if constexpr (sizeof(T) == 4 || sizeof(T) == 2)
         result = op(result, permuteResult);
-      else {
+      else if constexpr (sizeof(T) == 8) {
         T tmp;
         unsigned long long rhs =
             (static_cast<unsigned long long>(permuteResult[1]) << 32) | permuteResult[0];
 
-        __builtin_memcpy(&tmp, &result, sizeof(T));
+        __builtin_memcpy(&tmp, result, sizeof(result));
         tmp = op(tmp, *reinterpret_cast<T*>(&rhs));
-        __builtin_memcpy(&result, &tmp, sizeof(T));
+        __builtin_memcpy(result, &tmp, sizeof(result));
       }
     }
 
@@ -438,7 +440,15 @@ __device__ inline T __reduce_op_sync(MaskT mask, T val, BinaryOp op, WfReduce wf
     numIterations--;
   }
 
-  if constexpr (sizeof(T) == 2) {
+  // get result from the first active lane
+  if constexpr (!isPrimitiveType) {
+    // user defined types
+    for (int i = 0; i < kNumOfPermutes; i++) {
+      permuteResult[i] = backwardPermute(firstLane << 2, result[i]);
+    }
+
+    return *reinterpret_cast<T*>(permuteResult);
+  } else if constexpr (sizeof(T) == 2) {
     union {
       int i;
       T f;
@@ -446,9 +456,9 @@ __device__ inline T __reduce_op_sync(MaskT mask, T val, BinaryOp op, WfReduce wf
     tmp.f = result;
     tmp.i = __hip_ds_bpermute(firstLane << 2, tmp.i);
     return tmp.f;
-  } else if constexpr (sizeof(T) == 4)
+  } else if constexpr (sizeof(T) == 4) {
     return backwardPermute(firstLane << 2, result);
-  else {
+  } else {
     auto tmp = (static_cast<unsigned long long>(backwardPermute(firstLane << 2, result[1])) << 32) |
                static_cast<unsigned int>(backwardPermute(firstLane << 2, result[0]));
     return *reinterpret_cast<T*>(&tmp);
@@ -457,7 +467,7 @@ __device__ inline T __reduce_op_sync(MaskT mask, T val, BinaryOp op, WfReduce wf
 
 template <typename MaskT> __device__ inline int __reduce_add_sync(MaskT mask, int val) {
   // although C++ has std::plus and other functors, we do not use them because
-  // they are in the header <functional> and they were causing problem with hipRTC
+  // they are in the header <functional> and they were causing problems with hipRTC
   // at this time
   auto op = [](decltype(val)& a, decltype(val)& b) { return a + b; };
   auto wfReduce = [](decltype(val) v) { return __ockl_wfred_add_i32(v); };

@@ -1257,7 +1257,7 @@ static HSAKMT_STATUS topology_sysfs_get_node_props(HsaKFDContext *ctx,
 			gfxv = (uint32_t)prop_val;
 	}
 
-	if (!hsakmt_is_svm_api_supported)
+	if (!ctx->hsakmt_is_svm_api_supported)
 		props->Capability.ui32.SVMAPISupported = 0;
 
 	/* Bail out early, if a CPU node */
@@ -2278,7 +2278,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtAcquireSystemPropertiesCtx(HsaKFDContext *ctx,
 
 	*SystemProperties = *topology_ctx->system_props;
 
-	for (int node = 0; node < topology_ctx->system_props->NumNodes; node++) {
+	for (unsigned int node = 0; node < topology_ctx->system_props->NumNodes; node++) {
 		if (hsakmt_get_gfxv_by_node_id(ctx, node) == GFX_VERSION_GFX1151 &&
 		    hsakmt_kfd_version_info.KernelInterfaceMajorVersion == 1 &&
 		    hsakmt_kfd_version_info.KernelInterfaceMinorVersion < 20)
@@ -2556,6 +2556,18 @@ uint16_t hsakmt_get_device_id_by_node_id(HsaKFDContext *ctx, HSAuint32 node_id)
 	return topology_ctx->node_props[node_id].node.DeviceId;
 }
 
+HSAuint8 hsakmt_device_is_apu_by_node_id(HsaKFDContext *ctx, HSAuint32 node_id)
+{
+	struct hsa_kfd_topology_context *topology_ctx = hsakmt_kfdcontext_get_topology_context(ctx);
+
+	/* if no node prop available treat is as dGPU */
+	if (!topology_ctx->node_props || !topology_ctx->system_props ||
+		topology_ctx->system_props->NumNodes <= node_id)
+		return 0;
+
+	return topology_ctx->node_props[node_id].node.Integrated;
+}
+
 bool hsakmt_prefer_ats(HsaKFDContext *ctx, HSAuint32 node_id)
 {
 	struct hsa_kfd_topology_context *topology_ctx = hsakmt_kfdcontext_get_topology_context(ctx);
@@ -2655,7 +2667,7 @@ hsaKmtGetNodeWallclockFrequency(HSAuint32 NodeId, uint64_t* Frequency)
 
 	*Frequency = NodeProperties->WallClockKHz * 1000ull;
 
-	return HSAKMT_STATUS_NOT_IMPLEMENTED;
+	return HSAKMT_STATUS_SUCCESS;
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtGetNodeMemoryProperties(HSAuint32 NodeId,

@@ -36,7 +36,6 @@ from textual.widgets import TextArea
 
 import config
 from utils import schema
-from utils.utils import convert_metric_id_to_panel_info
 
 
 class LogLevel(str, Enum):
@@ -124,9 +123,17 @@ class Logger:
         self.log(message, "ERROR", update_ui)
 
 
-def get_top_kernels_and_dispatch_ids(
+def get_top_kernels(
     runs: dict[str, Any],
 ) -> Optional[list[dict[Hashable, Any]]]:
+    """
+    Get top kernels with aggregated stats (one row per kernel).
+
+    Returns a list of records sorted by percent of total time,
+    each containing kernel name, call count, total time, and percent.
+    Returns None if runs is empty or workload has no dfs.
+    Returns empty list if the top kernel dataframe is empty.
+    """
     if not runs:
         return None
 
@@ -135,69 +142,34 @@ def get_top_kernels_and_dispatch_ids(
         return None
 
     top_kernel_df = base_run.dfs.get(1)
-    dispatch_id_df = base_run.dfs.get(2)
-
-    if top_kernel_df is None or dispatch_id_df is None:
+    if top_kernel_df is None:
         return None
 
-    merged_df = pd.merge(
-        top_kernel_df, dispatch_id_df, on="Kernel_Name", how="outer"
-    ).sort_values("Pct", ascending=False)
+    if top_kernel_df.empty:
+        return []
 
-    merged_df = merged_df.drop(columns=["Count", "GPU_ID"])
-    return merged_df.to_dict("records")
+    # top_kernel_df already contains aggregated per-kernel stats
+    # (Kernel_Name, Count, Total_Time, Percent, etc.)
+    if "Percent" not in top_kernel_df.columns:
+        # If Percent column is missing, return unsorted records
+        return top_kernel_df.to_dict("records")
+
+    result_df = top_kernel_df.sort_values("Percent", ascending=False)
+
+    return result_df.to_dict("records")
 
 
 def process_panels_to_dataframes(
     args: argparse.Namespace,
     kernel_df: dict[int, pd.DataFrame],
     arch_configs: schema.ArchConfig,
-    profiling_config: dict[str, Any],
-    roof_plot: Optional[str] = None,
+    _profiling_config: dict[str, Any],  # Reserved for future filter_blocks logic
+    _roof_plot: Optional[str] = None,  # Reserved for future roofline support
 ) -> dict[str, dict[str, dict[str, Any]]]:
-    """
-    Process panel data into pandas DataFrames.
-    Returns a nested dictionary structure with DataFrames and tui_style information.
-
-    Returns:
-        Dict[str, Dict[str, Dict[str, Any]]]: Nested structure {
-            "section_name": {
-                "subsection_name": {
-                    "df": DataFrame,
-                    "tui_style": dict or None
-                }
-            }
-        }
-    """
-
-    # TODO: add individual kernel roofline logic
-    # TODO: implement args logic:
-    #       args.filter_metrics
-    #       args.cols
-    #       args.max_stat_num
-    #       dfs file dir
-
     result_structure = {}
     decimal_precision = getattr(args, "decimal", 2) if args else 2
 
-    raw_filter_panel_ids = profiling_config.get("filter_blocks", [])
-
-    if isinstance(raw_filter_panel_ids, dict):
-        # For backward compatibility
-        raw_filter_panel_ids = [
-            name
-            for name, table_type in raw_filter_panel_ids.items()
-            if table_type == "metric_id"
-        ]
-
-    filter_panel_ids = set()
-    for bid in raw_filter_panel_ids:
-        file_id, _, _ = convert_metric_id_to_panel_info(str(bid))
-        if file_id is not None:
-            filter_panel_ids.add(int(file_id))
-
     for panel_id, panel in arch_configs.panel_configs.items():
-        # HARD GATE: Block 30 (panel 3000) requires membw_analysis flag
         if panel_id == 3000 and not args.membw_analysis:
             continue
 

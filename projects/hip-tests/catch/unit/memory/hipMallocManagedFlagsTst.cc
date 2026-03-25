@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #include "hipMallocManagedCommon.hh"
 #include <atomic>
@@ -31,7 +15,7 @@ __global__ void MallcMangdFlgTst(int n, float* x, float* y) {
 }
 
 // The following section tests working of hipMallocManaged with flag parameters
-TEST_CASE("Unit_hipMallocManaged_FlgParam", "[multigpu]") {
+HIP_TEST_CASE(Unit_hipMallocManaged_FlgParam) {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
     HipTest::HIP_SKIP_TEST("GPU doesn't support managed memory so skipping test.");
@@ -119,7 +103,7 @@ TEST_CASE("Unit_hipMallocManaged_FlgParam", "[multigpu]") {
 
 // The following function tests Memory access allocated using hipMallocManaged
 // in multiple streams
-TEST_CASE("Unit_hipMallocManaged_AccessMultiStream", "[multigpu]") {
+HIP_TEST_CASE(Unit_hipMallocManaged_AccessMultiStream) {
   auto managed = HmmAttrPrint();
   if (managed != 1) {
     HipTest::HIP_SKIP_TEST("GPU doesn't support managed memory so skipping test.");

@@ -91,6 +91,9 @@ print_settings(
     std::function<bool(const std::string_view&, const std::set<std::string>&)>&& _filter);
 
 void
+print_settings_json(std::ostream& _output_stream);
+
+void
 print_settings(bool include_env = true);
 
 std::string&
@@ -203,9 +206,6 @@ get_use_timemory() ROCPROFSYS_HOT;
 
 bool&
 get_use_causal() ROCPROFSYS_HOT;
-
-bool
-get_use_rocm() ROCPROFSYS_HOT;
 
 bool
 get_use_amd_smi() ROCPROFSYS_HOT;
