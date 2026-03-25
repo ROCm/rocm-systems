@@ -840,7 +840,7 @@ tool_code_object_callback(rocprofiler_callback_tracing_record_t record,
                 tool_data->kernel_symbol_records.wlock(
                     [ts, &record, &data_v](auto& _data) {
                         _data.emplace_back(
-                            new kernel_symbol_callback_record_t{ ts, record, data_v });
+                            kernel_symbol_callback_record_t{ ts, record, data_v });
                     });
                 trace_cache::get_metadata_registry().add_kernel_symbol(data_v);
             }
