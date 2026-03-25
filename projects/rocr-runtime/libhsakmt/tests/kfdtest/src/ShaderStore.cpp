@@ -1246,7 +1246,11 @@ const char *TrapHandlerIsa =
     "v_mov_b32 v2, s2\n"\
     "v_mov_b32 v3, s3\n"\
     "flat_load_dword v4, v[2:3]\n"\
+    ".if (.amdgcn.gfx_generation_number >= 12)\n"\
+    "s_wait_loadcnt 0\n"\
+    ".else\n"\
     "s_waitcnt vmcnt(0) & lgkmcnt(0)\n"\
+    ".endif\n"\
     "v_mov_b32 v5, 0\n"\
     "v_mov_b32 v6, 0\n"
 
@@ -1256,8 +1260,13 @@ const char *TrapHandlerIsa =
     "V_CMP_EQ_U32 v6, 0\n"\
     "s_cbranch_vccnz LOOP\n"\
     "V_ADD_CO_U32 v6, v6, v5\n"\
+    ".if (.amdgcn.gfx_generation_number >= 12)\n"\
+    "flat_store_dword v[2:3], v6 scope:SCOPE_SYS\n"\
+    "s_wait_storecnt 0\n"\
+    ".else\n"\
     "flat_store_dword v[2:3], v6\n"\
     "s_waitcnt vmcnt(0) & lgkmcnt(0)\n"\
+    ".endif\n"\
     "s_endpgm\n"
 
 const char *WatchReadIsa =

@@ -66,7 +66,7 @@ static void RunBenchmark(LinearAllocs dst_allocation_type, LinearAllocs src_allo
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Performance_hipMemcpyWithStream_DeviceToHost) {
+HIP_TEST_CASE(Performance_hipMemcpyWithStream_DeviceToHost) {
   const auto allocation_size = GENERATE(4_KB, 4_MB, 16_MB);
   const auto src_allocation_type = LinearAllocs::hipMalloc;
   const auto dst_allocation_type = GENERATE(LinearAllocs::malloc, LinearAllocs::hipHostMalloc);
@@ -91,7 +91,7 @@ TEST_CASE(Performance_hipMemcpyWithStream_DeviceToHost) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Performance_hipMemcpyWithStream_HostToDevice) {
+HIP_TEST_CASE(Performance_hipMemcpyWithStream_HostToDevice) {
   const auto allocation_size = GENERATE(4_KB, 4_MB, 16_MB);
   const auto src_allocation_type = GENERATE(LinearAllocs::malloc, LinearAllocs::hipHostMalloc);
   const auto dst_allocation_type = LinearAllocs::hipMalloc;
@@ -116,7 +116,7 @@ TEST_CASE(Performance_hipMemcpyWithStream_HostToDevice) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Performance_hipMemcpyWithStream_HostToHost) {
+HIP_TEST_CASE(Performance_hipMemcpyWithStream_HostToHost) {
   const auto allocation_size = GENERATE(4_KB, 4_MB, 16_MB);
   const auto src_allocation_type = GENERATE(LinearAllocs::malloc, LinearAllocs::hipHostMalloc);
   const auto dst_allocation_type = GENERATE(LinearAllocs::malloc, LinearAllocs::hipHostMalloc);
@@ -141,7 +141,7 @@ TEST_CASE(Performance_hipMemcpyWithStream_HostToHost) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Performance_hipMemcpyWithStream_DeviceToDevice_DisablePeerAccess) {
+HIP_TEST_CASE(Performance_hipMemcpyWithStream_DeviceToDevice_DisablePeerAccess) {
   const auto allocation_size = GENERATE(4_KB, 4_MB, 16_MB);
   const auto src_allocation_type = LinearAllocs::hipMalloc;
   const auto dst_allocation_type = LinearAllocs::hipMalloc;
@@ -168,7 +168,7 @@ TEST_CASE(Performance_hipMemcpyWithStream_DeviceToDevice_DisablePeerAccess) {
  *  - Device supports Peer-to-Peer access
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Performance_hipMemcpyWithStream_DeviceToDevice_EnablePeerAccess) {
+HIP_TEST_CASE(Performance_hipMemcpyWithStream_DeviceToDevice_EnablePeerAccess) {
   if (HipTest::getDeviceCount() < 2) {
     HipTest::HIP_SKIP_TEST("This test requires 2 GPUs. Skipping.");
     return;

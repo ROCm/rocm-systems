@@ -137,7 +137,15 @@ hsa_status_t MemoryTest::TestAllocate(hsa_amd_memory_pool_t pool, size_t sz) {
   err = hsa_amd_memory_pool_allocate(pool, sz, 0, &ptr);
 
   if (err == HSA_STATUS_SUCCESS) {
+#ifdef ROCRTST_ASAN
+    // Under ASAN, hsa_amd_memory_pool_allocate returns base+PAGE_SIZE (ASAN header offset).
+    // hsa_memory_free is not intercepted by the ASAN runtime, so it receives the offset pointer
+    // and fails to find it in allocation_map_. Use hsa_amd_memory_pool_free which IS intercepted
+    // and correctly strips the PAGE_SIZE offset before calling into ROCr.
+    err = hsa_amd_memory_pool_free(ptr);
+#else
     err = hsa_memory_free(ptr);
+#endif
   }
 
   return err;

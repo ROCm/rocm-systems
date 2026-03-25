@@ -124,7 +124,7 @@ static uint64_t get_active_mask(unsigned int test_case, size_t warp_size) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_Coalesced_Group_Getters_Positive_Basic) {
+HIP_TEST_CASE(Unit_Coalesced_Group_Getters_Positive_Basic) {
   const int warp_size = getWarpSize();
 
   const auto blocks = GenerateBlockDimensionsForShuffle();
@@ -207,7 +207,7 @@ TEST_CASE(Unit_Coalesced_Group_Getters_Positive_Basic) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_Coalesced_Group_Getters_Via_Base_Type_Positive_Basic) {
+HIP_TEST_CASE(Unit_Coalesced_Group_Getters_Via_Base_Type_Positive_Basic) {
   const int warp_size = getWarpSize();
 
   const auto blocks = GenerateBlockDimensionsForShuffle();
@@ -291,7 +291,7 @@ TEST_CASE(Unit_Coalesced_Group_Getters_Via_Base_Type_Positive_Basic) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_Coalesced_Group_Getters_Via_Non_Member_Functions_Positive_Basic) {
+HIP_TEST_CASE(Unit_Coalesced_Group_Getters_Via_Non_Member_Functions_Positive_Basic) {
   const int warp_size = getWarpSize();
 
   const auto blocks = GenerateBlockDimensionsForShuffle();
@@ -441,7 +441,7 @@ template <typename T> void CoalescedGroupShflUpTestImpl() {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE(Unit_Coalesced_Group_Shfl_Up_Positive_Basic, int, unsigned int, long,
+HIP_TEMPLATE_TEST_CASE(Unit_Coalesced_Group_Shfl_Up_Positive_Basic, int, unsigned int, long,
                    unsigned long, long long, unsigned long long, float, double) {
   CoalescedGroupShflUpTestImpl<TestType>();
 }
@@ -535,7 +535,7 @@ template <typename T> void CoalescedGroupShflDownTest() {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE(Unit_Coalesced_Group_Shfl_Down_Positive_Basic, int, unsigned int, long,
+HIP_TEMPLATE_TEST_CASE(Unit_Coalesced_Group_Shfl_Down_Positive_Basic, int, unsigned int, long,
                    unsigned long, long long, unsigned long long, float, double) {
   CoalescedGroupShflDownTest<TestType>();
 }
@@ -634,7 +634,7 @@ template <typename T> void CoalescedGroupShflTest() {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE(Unit_Coalesced_Group_Shfl_Positive_Basic, int, unsigned int, long,
+HIP_TEMPLATE_TEST_CASE(Unit_Coalesced_Group_Shfl_Positive_Basic, int, unsigned int, long,
                    unsigned long, long long, unsigned long long, float, double) {
   CoalescedGroupShflTest<TestType>();
 }
@@ -779,7 +779,7 @@ template <bool global_memory, typename T> void CoalescedGroupSyncTest() {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE(Unit_Coalesced_Group_Sync_Positive_Basic, uint8_t, uint16_t, uint32_t) {
+HIP_TEMPLATE_TEST_CASE(Unit_Coalesced_Group_Sync_Positive_Basic, uint8_t, uint16_t, uint32_t) {
   SECTION("Global memory") { CoalescedGroupSyncTest<true, TestType>(); }
   SECTION("Shared memory") { CoalescedGroupSyncTest<false, TestType>(); }
 }

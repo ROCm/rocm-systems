@@ -1,37 +1,87 @@
 ---
 kernel:
-  Unit_hipMemFaultStackAllocation_Check: *level_2
-  Unit_hipLaunchBounds_With_maxThreadsPerBlock_Check: *level_2
-  Unit_hipLaunchBounds_With_maxThreadsPerBlock_blocksPerCU_Check: *level_2
+  Unit_hipMemFaultStackAllocation_Check:
+    <<: *level_2
+    tags: [memory]
+  Unit_hipLaunchBounds_With_maxThreadsPerBlock_Check:
+    <<: *level_2
+    tags: [attributes]
+  Unit_hipLaunchBounds_With_maxThreadsPerBlock_blocksPerCU_Check:
+    <<: *level_2
+    tags: [attributes]
   Unit_hipDynamicShared:
     <<: *level_2
     # Below tests are failing PSDB
     disabled: [amd_windows]
-  Unit_hipDynamicShared2: *level_2
-  Unit_hipEmptyKernel: *level_2
-  Unit_hipGridLaunch: *level_2
-  Unit_hipLanguageExtensions: *level_2
-  Unit_hipLaunchParm: *level_2
-  Unit_hipLaunchParmFunctor: *level_2
-  Unit_kernel_chkConstantViaKernel: *level_2
-  Unit_kernel_chkGlobalArrAndGlobalVaribleViaKernelFn: *level_2
-  Unit_kernel_MemoryOperationsViaKernels: *level_2
-  Unit_kernel_LaunchBounds_Functional: *level_2
-  Unit_kernel_Assign_threadIdx_to_auto: *level_2
-  Unit_hipLaunchKernelExC_NegetiveTsts: *level_2
-  Unit_hipLaunchKernelEx_NegetiveTsts: *level_2
-  Unit_hipLaunchKernelEx_Functional: *level_2
-  Unit_hipLaunchKernelEx_With_Different_Kernels: *level_2
-  Unit_hipLaunchKernelEx_With_CooperativeKernelWithArgs: *level_2
-  Unit_hipLaunchKernelEx_With_MaxBlockDims: *level_2
+    tags: [memory]
+  Unit_hipDynamicShared2:
+    <<: *level_2
+    tags: [memory]
+  Unit_hipEmptyKernel:
+    <<: *level_2
+    tags: [language]
+  Unit_hipGridLaunch:
+    <<: *level_2
+    tags: [launch]
+  Unit_hipLanguageExtensions:
+    <<: *level_2
+    tags: [language]
+  Unit_hipLaunchParm:
+    <<: *level_2
+    tags: [launch]
+  Unit_hipLaunchParmFunctor:
+    <<: *level_2
+    tags: [launch]
+  Unit_kernel_chkConstantViaKernel:
+    <<: *level_2
+    tags: [memory]
+  Unit_kernel_chkGlobalArrAndGlobalVaribleViaKernelFn:
+    <<: *level_2
+    tags: [memory]
+  Unit_kernel_MemoryOperationsViaKernels:
+    <<: *level_2
+    tags: [memory]
+  Unit_kernel_LaunchBounds_Functional:
+    <<: *level_2
+    tags: [attributes]
+  Unit_kernel_Assign_threadIdx_to_auto:
+    <<: *level_2
+    tags: [language]
+  Unit_hipLaunchKernelExC_NegetiveTsts:
+    <<: *level_2
+    tags: [launch]
+  Unit_hipLaunchKernelEx_NegetiveTsts:
+    <<: *level_2
+    tags: [launch]
+  Unit_hipLaunchKernelEx_Functional:
+    <<: *level_2
+    tags: [launch]
+  Unit_hipLaunchKernelEx_With_Different_Kernels:
+    <<: *level_2
+    tags: [launch]
+  Unit_hipLaunchKernelEx_With_CooperativeKernelWithArgs:
+    <<: *level_2
+    tags: [launch]
+  Unit_hipLaunchKernelEx_With_MaxBlockDims:
+    <<: *level_2
+    tags: [launch]
   Unit_kernel_ChkPrintf:
     <<: *level_2
-    tags: [multigpu]
+    tags: [language, multigpu]
   Unit_hipExtLaunchKernelGGL:
     <<: *level_2
     # SWDEV-438524: Below tests causing TDR & machine down in stress test on 15/12/23
     disabled: [amd_windows, amd_wsl]
-  Unit_hipSetupArgument_Simple: *level_2
-  Unit_hipSetupArgument_Execute_Kernel_And_Check_Result: *level_2
-  Unit_ConfigureCall: *level_2
-  Unit_ConfigureCall_CheckParams: *level_2
+    tags: [launch]
+  Unit_hipSetupArgument_Simple:
+    <<: *level_2
+    tags: [launch]
+  Unit_hipSetupArgument_Execute_Kernel_And_Check_Result:
+    <<: *level_2
+    tags: [launch]
+  Unit_ConfigureCall:
+    <<: *level_2
+    tags: [launch]
+  Unit_ConfigureCall_CheckParams:
+    <<: *level_2
+    tags: [launch]

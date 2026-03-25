@@ -32,7 +32,7 @@ from textual.widgets import Label, RadioButton, RadioSet
 
 from config import rocprof_compute_home
 from rocprof_compute_tui.widgets.collapsibles import build_all_sections
-from utils.utils import format_scientific_notation_if_needed
+from utils.utils_common import format_scientific_notation_if_needed
 
 
 class KernelView(Container):

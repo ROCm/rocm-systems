@@ -24,7 +24,7 @@
   }
 
 #define MATH_UNARY_HP_TEST_DEF_IMPL(func_name, ref_func, validator_builder)                        \
-  TEST_CASE(Unit_Device_##func_name##_Accuracy_Positive) {                                      \
+  HIP_TEST_CASE(Unit_Device_##func_name##_Accuracy_Positive) {                                     \
     UnaryHalfPrecisionTest(func_name##_kernel, ref_func, validator_builder);                       \
   }
 
@@ -49,7 +49,7 @@
   }
 
 #define MATH_BINARY_HP_TEST_DEF_IMPL(func_name, ref_func, validator_builder)                       \
-  TEST_CASE(Unit_Device_##func_name##_Accuracy_Positive) {                                      \
+  HIP_TEST_CASE(Unit_Device_##func_name##_Accuracy_Positive) {                                     \
     BinaryFloatingPointTest(func_name##_kernel, ref_func, validator_builder);                      \
   }
 
@@ -75,7 +75,7 @@
   }
 
 #define MATH_TERNARY_HP_TEST_DEF_IMPL(func_name, ref_func, validator_builder)                      \
-  TEST_CASE(Unit_Device_##func_name##_Accuracy_Positive) {                                      \
+  HIP_TEST_CASE(Unit_Device_##func_name##_Accuracy_Positive) {                                     \
     TernaryFloatingPointTest(func_name##_kernel, ref_func, validator_builder);                     \
   }
 

@@ -42,7 +42,7 @@ __global__ void test_kernel_width() {
  * ------------------------
  * - HIP_VERSION >= 6.2
  */
-TEST_CASE(Unit_Printf_PrintfWidthPrecision) {
+HIP_TEST_CASE(Unit_Printf_PrintfWidthPrecision) {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
