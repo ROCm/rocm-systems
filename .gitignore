@@ -13,3 +13,4 @@ __pycache__/
 
 # Analysis output generated during testing
 rocpd-output-data/
+CLAUDE.md
