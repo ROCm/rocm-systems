@@ -28,12 +28,6 @@ import sys
 from pathlib import Path
 
 import pandas as pd
-from utils.utils_analysis import (
-    build_call_trees,
-    build_call_trees_with_kernel_ids,
-    process_torch_trace_output,
-    write_torch_trace_consolidated_csv,
-)
 
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from roofline import Roofline
