@@ -19,6 +19,7 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 #include "volt_read.h"
 
 #include <gtest/gtest.h>
@@ -63,7 +64,6 @@ void TestVoltRead::Run(void) {
   int64_t val_i64;
 
   TestBase::Run();
-  PRINT_VERBOSITY();
   if (setup_failed_) {
     std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl;
     return;
@@ -75,26 +75,25 @@ void TestVoltRead::Run(void) {
     PrintDeviceHeader(processor_handles_[i]);
 
     auto print_volt_metric = [&](amdsmi_voltage_metric_t met, std::string label) {
-      // Verify api support checking functionality is working
-      DISPLAY_AMDSMI_API("amdsmi_get_gpu_volt_metric(nullptr check)", "gpu=" + std::to_string(i),
-                         VERB(STANDARD));
-      err = amdsmi_get_gpu_volt_metric(processor_handles_[i], type, met, nullptr);
-      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
-      ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
-
-      DISPLAY_AMDSMI_API("amdsmi_get_gpu_volt_metric(label: " + label + ")",
-                         "gpu=" + std::to_string(i), VERB(STANDARD));
       err = amdsmi_get_gpu_volt_metric(processor_handles_[i], type, met, &val_i64);
-      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
 
       if (err != AMDSMI_STATUS_SUCCESS) {
         if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
-          ASSERT_EQ(err, AMDSMI_STATUS_NOT_SUPPORTED);
-          return;
+          IF_VERB(STANDARD) {
+            std::cout << "\t**" << label << ": " << "Not supported on this machine" << std::endl;
+
+            // Verify api support checking functionality is working
+            err = amdsmi_get_gpu_volt_metric(processor_handles_[i], type, met, nullptr);
+            ASSERT_EQ(err, AMDSMI_STATUS_NOT_SUPPORTED);
+            return;
+          }
         } else {
           CHK_ERR_ASRT(err)
         }
       }
+      // Verify api support checking functionality is working
+      err = amdsmi_get_gpu_volt_metric(processor_handles_[i], type, met, nullptr);
+      ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
 
       IF_VERB(STANDARD) { std::cout << "\t**" << label << ": " << val_i64 << "mV" << std::endl; }
     };
