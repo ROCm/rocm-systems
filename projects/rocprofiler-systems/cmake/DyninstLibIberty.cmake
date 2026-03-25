@@ -7,7 +7,7 @@
 #
 # Directly exports the following CMake variables
 #
-# LibIberty_ROOT_DIR       - Computed base directory the of LibIberty installation
+# LibIberty_ROOT_DIR       - Computed base directory of the LibIberty installation
 # LibIberty_LIBRARY_DIRS   - Link directories for LibIberty libraries LibIberty_LIBRARIES
 # - LibIberty library files LibIberty_INCLUDE - LibIberty include files
 #
@@ -27,8 +27,8 @@ endif()
 
 # -------------- PATHS --------------------------------------------------------
 
-# Base directory the of LibIberty installation
-set(LibIberty_ROOT_DIR "/usr" CACHE PATH "Base directory the of LibIberty installation")
+# Base directory of the LibIberty installation
+set(LibIberty_ROOT_DIR "/usr" CACHE PATH "Base directory of the LibIberty installation")
 
 # Hint directory that contains the LibIberty library files
 set(LibIberty_LIBRARYDIR
@@ -132,7 +132,7 @@ target_link_libraries(rocprofiler-systems-libiberty INTERFACE ${_li_libs})
 set(LibIberty_ROOT_DIR
     ${_li_root}
     CACHE PATH
-    "Base directory the of LibIberty installation"
+    "Base directory of the LibIberty installation"
     FORCE
 )
 set(LibIberty_INCLUDE_DIRS

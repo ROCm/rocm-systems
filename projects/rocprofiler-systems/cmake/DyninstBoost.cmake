@@ -115,7 +115,7 @@ if(NOT PATH_BOOST AND NOT Boost_ROOT_DIR)
 endif()
 
 # Set the default location to look for Boost
-set(Boost_ROOT_DIR ${PATH_BOOST} CACHE PATH "Base directory the of Boost installation")
+set(Boost_ROOT_DIR ${PATH_BOOST} CACHE PATH "Base directory of the Boost installation")
 
 # In FindBoost, Boost_ROOT_DIR is spelled BOOST_ROOT
 set(BOOST_ROOT ${Boost_ROOT_DIR})
@@ -187,7 +187,7 @@ if(Boost_FOUND AND NOT ROCPROFSYS_BUILD_BOOST)
         set(Boost_ROOT_DIR
             "${_boost_root}"
             CACHE PATH
-            "Base directory the of Boost installation"
+            "Base directory of the Boost installation"
             FORCE
         )
     elseif(Boost_INCLUDE_DIRS)
@@ -196,7 +196,7 @@ if(Boost_FOUND AND NOT ROCPROFSYS_BUILD_BOOST)
         set(Boost_ROOT_DIR
             "${_boost_root}"
             CACHE PATH
-            "Base directory the of Boost installation"
+            "Base directory of the Boost installation"
             FORCE
         )
     endif()
@@ -250,7 +250,7 @@ else()
     set(Boost_ROOT_DIR
         ${TPL_STAGING_PREFIX}/boost
         CACHE PATH
-        "Base directory the of Boost installation"
+        "Base directory of the Boost installation"
         FORCE
     )
 

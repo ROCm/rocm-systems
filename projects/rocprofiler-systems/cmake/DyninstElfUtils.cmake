@@ -7,14 +7,14 @@
 #
 # Accepts the following CMake variables
 #
-# ElfUtils_ROOT_DIR       - Base directory the of elfutils installation
+# ElfUtils_ROOT_DIR       - Base directory of the elfutils installation
 # ElfUtils_INCLUDEDIR     - Hint directory that contains the elfutils headers files
 # ElfUtils_LIBRARYDIR     - Hint directory that contains the elfutils library files
 # ElfUtils_MIN_VERSION    - Minimum acceptable version of elfutils
 #
 # Directly exports the following CMake variables
 #
-# ElfUtils_ROOT_DIR       - Computed base directory the of elfutils installation
+# ElfUtils_ROOT_DIR       - Computed base directory of the elfutils installation
 # ElfUtils_INCLUDE_DIRS   - elfutils include directories ElfUtils_LIBRARY_DIRS - Link
 # directories for elfutils libraries ElfUtils_LIBRARIES      - elfutils library files
 #
@@ -58,8 +58,8 @@ endif()
 
 # -------------- PATHS --------------------------------------------------------
 
-# Base directory the of elfutils installation
-set(ElfUtils_ROOT_DIR "/usr" CACHE PATH "Base directory the of elfutils installation")
+# Base directory of the elfutils installation
+set(ElfUtils_ROOT_DIR "/usr" CACHE PATH "Base directory of the elfutils installation")
 
 # Hint directory that contains the elfutils headers files
 set(ElfUtils_INCLUDEDIR
@@ -216,7 +216,7 @@ endif()
 set(ElfUtils_ROOT_DIR
     ${_eu_root}
     CACHE PATH
-    "Base directory the of elfutils installation"
+    "Base directory of the elfutils installation"
     FORCE
 )
 set(ElfUtils_INCLUDE_DIRS ${_eu_inc_dirs} CACHE PATH "elfutils include directory" FORCE)
