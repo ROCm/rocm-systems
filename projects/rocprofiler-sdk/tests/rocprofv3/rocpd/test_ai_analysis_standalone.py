@@ -32,6 +32,7 @@ import pytest
 # Helpers: build a minimal AnalysisResult without touching a real DB
 # ---------------------------------------------------------------------------
 
+
 def _make_minimal_result():
     """Build an AnalysisResult with empty/zero payloads for serialization tests."""
     from rocpd.ai_analysis.api import (
@@ -71,11 +72,20 @@ def _make_minimal_result():
     return result
 
 
-def _attach_raw(result, *, time_breakdown=None, hotspots=None, memory_analysis=None,
-                recommendations_raw=None, hardware_counters=None, database_path="test.db"):
+def _attach_raw(
+    result,
+    *,
+    time_breakdown=None,
+    hotspots=None,
+    memory_analysis=None,
+    recommendations_raw=None,
+    hardware_counters=None,
+    database_path="test.db",
+):
     """Attach a _raw dict to an AnalysisResult for to_json()/to_webview() tests."""
     result._raw = {
-        "time_breakdown": time_breakdown or {
+        "time_breakdown": time_breakdown
+        or {
             "total_kernel_time": 800_000,
             "total_memcpy_time": 0,
             "total_runtime": 1_000_000,
@@ -83,7 +93,8 @@ def _attach_raw(result, *, time_breakdown=None, hotspots=None, memory_analysis=N
             "memcpy_percent": 0.0,
             "overhead_percent": 20.0,
         },
-        "hotspots": hotspots or [
+        "hotspots": hotspots
+        or [
             {
                 "name": "test_kernel",
                 "calls": 10,
@@ -106,30 +117,37 @@ def _attach_raw(result, *, time_breakdown=None, hotspots=None, memory_analysis=N
 # Tests: OutputFormat enum (AIA-003)
 # ===========================================================================
 
+
 class TestOutputFormat:
     def test_has_python_object(self):
         from rocpd.ai_analysis.api import OutputFormat
+
         assert OutputFormat.PYTHON_OBJECT.value == "python_object"
 
     def test_has_json(self):
         from rocpd.ai_analysis.api import OutputFormat
+
         assert OutputFormat.JSON.value == "json"
 
     def test_has_text(self):
         from rocpd.ai_analysis.api import OutputFormat
+
         assert OutputFormat.TEXT.value == "text"
 
     def test_has_markdown(self):
         from rocpd.ai_analysis.api import OutputFormat
+
         assert OutputFormat.MARKDOWN.value == "markdown"
 
     def test_has_webview(self):
         """AIA-003: WEBVIEW must be present in OutputFormat."""
         from rocpd.ai_analysis.api import OutputFormat
+
         assert OutputFormat.WEBVIEW.value == "webview"
 
     def test_five_members(self):
         from rocpd.ai_analysis.api import OutputFormat
+
         assert len(list(OutputFormat)) == 5
 
 
@@ -137,10 +155,12 @@ class TestOutputFormat:
 # Tests: Exceptions (AIA-008, AIA-010, AIA-011)
 # ===========================================================================
 
+
 class TestExceptions:
     def test_missing_data_error_optional_list(self):
         """AIA-010: missing_tables should be Optional[List[str]]."""
         from rocpd.ai_analysis.exceptions import MissingDataError
+
         # Both None and a list should work
         err_no_list = MissingDataError("msg")
         assert err_no_list.missing_tables == []
@@ -150,6 +170,7 @@ class TestExceptions:
     def test_unsupported_gpu_error_optional_str(self):
         """AIA-010: gpu_arch should be Optional[str]."""
         from rocpd.ai_analysis.exceptions import UnsupportedGPUError
+
         err_no_arch = UnsupportedGPUError("msg")
         assert err_no_arch.gpu_arch is None
         err_with_arch = UnsupportedGPUError("msg", "gfx906")
@@ -158,6 +179,7 @@ class TestExceptions:
     def test_reference_guide_not_found_shows_all_paths(self):
         """AIA-008: ReferenceGuideNotFoundError must list all attempted paths."""
         from rocpd.ai_analysis.exceptions import ReferenceGuideNotFoundError
+
         paths = ["/path/one/guide.md", "/path/two/guide.md", "/path/three/guide.md"]
         err = ReferenceGuideNotFoundError(paths)
         msg = str(err)
@@ -168,15 +190,22 @@ class TestExceptions:
     def test_reference_guide_exported_from_init(self):
         """AIA-011: ReferenceGuideNotFoundError must be importable from rocpd.ai_analysis."""
         from rocpd.ai_analysis import ReferenceGuideNotFoundError
+
         assert ReferenceGuideNotFoundError is not None
 
     def test_all_exceptions_exported(self):
         """Verify all documented exceptions are accessible from the public API."""
         import rocpd.ai_analysis as m
+
         for name in [
-            "AnalysisError", "DatabaseNotFoundError", "DatabaseCorruptedError",
-            "MissingDataError", "UnsupportedGPUError", "LLMAuthenticationError",
-            "LLMRateLimitError", "ReferenceGuideNotFoundError",
+            "AnalysisError",
+            "DatabaseNotFoundError",
+            "DatabaseCorruptedError",
+            "MissingDataError",
+            "UnsupportedGPUError",
+            "LLMAuthenticationError",
+            "LLMRateLimitError",
+            "ReferenceGuideNotFoundError",
         ]:
             assert hasattr(m, name), f"{name} not exported from rocpd.ai_analysis"
 
@@ -185,10 +214,12 @@ class TestExceptions:
 # Tests: validate_database (AIA-013)
 # ===========================================================================
 
+
 class TestValidateDatabase:
     def test_raises_for_missing_file(self):
         """validate_database() must raise DatabaseNotFoundError for missing file."""
         from rocpd.ai_analysis import validate_database, DatabaseNotFoundError
+
         with pytest.raises(DatabaseNotFoundError):
             validate_database(Path("/nonexistent/path/to/trace.db"))
 
@@ -196,6 +227,7 @@ class TestValidateDatabase:
 # ===========================================================================
 # Tests: AnalysisResult serialization (AIA-004)
 # ===========================================================================
+
 
 class TestAnalysisResultSerialization:
     def test_to_dict_returns_dict(self):
@@ -241,14 +273,24 @@ class TestAnalysisResultSerialization:
 # Tests: _convert_result_to_llm_format (AIA-006)
 # ===========================================================================
 
+
 class TestConvertResultToLlmFormat:
     def test_returns_real_kernel_data(self):
         """AIA-006: kernels list must not be empty when hotspots are present."""
         from rocpd.ai_analysis.api import _convert_result_to_llm_format
-        result = _attach_raw(_make_minimal_result(), hotspots=[
-            {"name": "conv2d", "calls": 5, "total_duration": 500_000,
-             "avg_duration": 100_000, "percent_of_total": 50.0}
-        ])
+
+        result = _attach_raw(
+            _make_minimal_result(),
+            hotspots=[
+                {
+                    "name": "conv2d",
+                    "calls": 5,
+                    "total_duration": 500_000,
+                    "avg_duration": 100_000,
+                    "percent_of_total": 50.0,
+                }
+            ],
+        )
         llm_data = _convert_result_to_llm_format(result)
         assert len(llm_data["kernels"]) == 1
         assert llm_data["kernels"][0]["name"] == "conv2d"
@@ -256,12 +298,14 @@ class TestConvertResultToLlmFormat:
     def test_returns_empty_kernels_without_raw(self):
         """Without _raw, kernels defaults to empty list (graceful degradation)."""
         from rocpd.ai_analysis.api import _convert_result_to_llm_format
+
         result = _make_minimal_result()
         llm_data = _convert_result_to_llm_format(result)
         assert llm_data["kernels"] == []
 
     def test_has_execution_breakdown(self):
         from rocpd.ai_analysis.api import _convert_result_to_llm_format
+
         result = _make_minimal_result()
         llm_data = _convert_result_to_llm_format(result)
         assert "execution_breakdown" in llm_data
@@ -271,6 +315,7 @@ class TestConvertResultToLlmFormat:
 # ===========================================================================
 # Tests: _build_analysis_result key mapping (AIA-002)
 # ===========================================================================
+
 
 class TestBuildAnalysisResultKeyMapping:
     """Verify that recommendation keys from generate_recommendations() are mapped correctly."""
@@ -288,10 +333,16 @@ class TestBuildAnalysisResultKeyMapping:
 
     def test_high_priority_bucketing(self):
         from rocpd.ai_analysis.api import _build_analysis_result
+
         result = _build_analysis_result(
-            time_breakdown={"total_kernel_time": 0, "total_memcpy_time": 0,
-                            "total_runtime": 0, "kernel_percent": 0.0,
-                            "memcpy_percent": 0.0, "overhead_percent": 0.0},
+            time_breakdown={
+                "total_kernel_time": 0,
+                "total_memcpy_time": 0,
+                "total_runtime": 0,
+                "kernel_percent": 0.0,
+                "memcpy_percent": 0.0,
+                "overhead_percent": 0.0,
+            },
             hotspots=[],
             memory_analysis={},
             recommendations=[self._make_raw_rec("HIGH")],
@@ -309,10 +360,16 @@ class TestBuildAnalysisResultKeyMapping:
 
     def test_medium_priority_bucketing(self):
         from rocpd.ai_analysis.api import _build_analysis_result
+
         result = _build_analysis_result(
-            time_breakdown={"total_kernel_time": 0, "total_memcpy_time": 0,
-                            "total_runtime": 0, "kernel_percent": 0.0,
-                            "memcpy_percent": 0.0, "overhead_percent": 0.0},
+            time_breakdown={
+                "total_kernel_time": 0,
+                "total_memcpy_time": 0,
+                "total_runtime": 0,
+                "kernel_percent": 0.0,
+                "memcpy_percent": 0.0,
+                "overhead_percent": 0.0,
+            },
             hotspots=[],
             memory_analysis={},
             recommendations=[self._make_raw_rec("MEDIUM")],
@@ -325,10 +382,16 @@ class TestBuildAnalysisResultKeyMapping:
     def test_info_bucketed_as_medium(self):
         """INFO priority should be placed in medium_priority bucket."""
         from rocpd.ai_analysis.api import _build_analysis_result
+
         result = _build_analysis_result(
-            time_breakdown={"total_kernel_time": 0, "total_memcpy_time": 0,
-                            "total_runtime": 0, "kernel_percent": 0.0,
-                            "memcpy_percent": 0.0, "overhead_percent": 0.0},
+            time_breakdown={
+                "total_kernel_time": 0,
+                "total_memcpy_time": 0,
+                "total_runtime": 0,
+                "kernel_percent": 0.0,
+                "memcpy_percent": 0.0,
+                "overhead_percent": 0.0,
+            },
             hotspots=[],
             memory_analysis={},
             recommendations=[self._make_raw_rec("INFO")],
