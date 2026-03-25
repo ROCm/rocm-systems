@@ -4,14 +4,14 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
+import re
+import sys
+import traceback
 import warnings
+from pathlib import Path
 
 # Suppress pandas FutureWarning about chained assignment
 warnings.filterwarnings("ignore", category=FutureWarning)
-
-import re  # noqa: E402
-import sys  # noqa: E402
-from pathlib import Path  # noqa: E402
 
 try:
     from importlib import metadata
@@ -33,9 +33,16 @@ except ImportError as e:
         from importlib import metadata
 
         from rocprof_compute_base import RocProfCompute
-        from utils.utils import console_error
+        from utils.logger import console_error
     except ImportError:
-        pass
+        print(
+            "\n[ERROR] Could not import rocprofiler-compute modules. "
+            "Please check your installation."
+        )
+        script_path = Path(__file__).resolve().parent
+        print(f"Searched: {script_path}, {additional_path.resolve()}")
+        traceback.print_exc()
+        sys.exit(1)
 
 
 def check_version(local_ver: str, desired_ver: str, operator: str) -> bool:

@@ -4,7 +4,7 @@
 import pandas as pd
 import pytest
 
-import utils.utils as utils
+import utils.utils_analysis as utils
 
 
 def make_multilevel_df(data: dict) -> "pd.DataFrame":
