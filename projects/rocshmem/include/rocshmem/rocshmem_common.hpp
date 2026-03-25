@@ -133,6 +133,8 @@ extern "C" __device__  rocshmem_ctx_t __attribute__((visibility("default"))) ROC
  * valid context.
  */
 extern __constant__ rocshmem_ctx_t ROCSHMEM_CTX_INVALID;
+
+extern __constant__  rocshmem_ctx_t *rocshmem_ctx_array;
 /**
  * Used internally to set default context.
  */
@@ -180,7 +182,7 @@ const rocshmem_team_t ROCSHMEM_TEAM_INVALID = nullptr;
 using rocshmem_uniqueid_t = std::array<uint8_t, ROCSHMEM_UNIQUE_ID_BYTES>;
 
 /**
- * @brief Data structure used for attribute based 
+ * @brief Data structure used for attribute based
  *        initialization
  */
 struct rocshmem_init_attr_t  {

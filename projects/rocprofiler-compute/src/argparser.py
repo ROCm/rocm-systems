@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Optional
 
 from utils.logger import console_warning
-from utils.utils import METRIC_ID_RE, resolve_rocm_library_path
+from utils.utils_common import METRIC_ID_RE, resolve_rocm_library_path
 
 
 class ExperimentalAction(argparse.Action):
