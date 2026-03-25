@@ -38,11 +38,10 @@ from ..analyze import (
     format_analysis_output,
     _detect_already_collected,
 )
-from .llm_analyzer import LLMAnalyzer, get_reference_guide_path
+from .llm_analyzer import LLMAnalyzer
 from .exceptions import (
     DatabaseNotFoundError,
     DatabaseCorruptedError,
-    MissingDataError,
     LLMAuthenticationError,
     LLMRateLimitError,
 )
@@ -401,7 +400,6 @@ def analyze_database(
     enable_llm: bool = False,
     llm_provider: Optional[str] = None,
     llm_api_key: Optional[str] = None,
-    output_format: OutputFormat = OutputFormat.PYTHON_OBJECT,
     verbose: bool = False,
     top_kernels: int = 10,
 ) -> AnalysisResult:
@@ -417,7 +415,6 @@ def analyze_database(
         enable_llm: Enable LLM-powered natural language enhancement
         llm_provider: LLM provider ("anthropic", "openai")
         llm_api_key: API key for LLM provider (or set env var)
-        output_format: Desired output format
         verbose: Enable verbose logging
         top_kernels: Number of top kernels to analyze
 
@@ -427,7 +424,6 @@ def analyze_database(
     Raises:
         DatabaseNotFoundError: Database file doesn't exist
         DatabaseCorruptedError: Database schema is invalid
-        MissingDataError: Required tables are missing
 
     Example:
         >>> from rocpd.ai_analysis import analyze_database
@@ -453,6 +449,7 @@ def analyze_database(
     # not a dict. We need raw data to build the AnalysisResult dataclass.
     try:
         from ..importer import RocpdImportData
+
         # RocpdImportData's internal sanitize_input_list() iterates over its
         # argument. Passing a plain str would iterate over characters. Pass a
         # list with the single path string to ensure correct behavior.
@@ -521,11 +518,13 @@ def analyze_database(
         except Exception as e:
             # Other LLM errors are non-critical: add a warning and continue
             # with local-only results.
-            result.warnings.append(AnalysisWarning(
-                severity="warning",
-                message=f"LLM enhancement failed: {e}",
-                recommendation="Analysis continues with local-only results",
-            ))
+            result.warnings.append(
+                AnalysisWarning(
+                    severity="warning",
+                    message=f"LLM enhancement failed: {e}",
+                    recommendation="Analysis continues with local-only results",
+                )
+            )
 
             if verbose:
                 print(f"[Analysis] LLM enhancement failed: {e}")
@@ -552,10 +551,18 @@ def _build_analysis_result(
       rec["priority"]         → "HIGH"/"MEDIUM"/"INFO" (uppercase) → normalized to lowercase
     """
     from datetime import datetime
+    import importlib.metadata as _importlib_metadata
+
+    # Derive rocpd package version; fall back to a named constant if unavailable
+    _ROCPD_VERSION_FALLBACK = "6.3.0"
+    try:
+        _rocpd_version = _importlib_metadata.version("rocpd")
+    except _importlib_metadata.PackageNotFoundError:
+        _rocpd_version = _ROCPD_VERSION_FALLBACK
 
     # Build metadata
     metadata = AnalysisMetadata(
-        rocpd_version="6.3.0",
+        rocpd_version=_rocpd_version,
         analysis_version="0.1.0",
         database_file=str(database_path),
         analysis_timestamp=datetime.now().isoformat(),
@@ -564,9 +571,7 @@ def _build_analysis_result(
 
     # Build profiling info
     has_counters = hardware_counters.get("has_counters", False)
-    profiling_mode = (
-        "sys_trace_with_counters" if has_counters else "sys_trace_only"
-    )
+    profiling_mode = "sys_trace_with_counters" if has_counters else "sys_trace_only"
     analysis_tier = 2 if has_counters else 1
 
     profiling_info = ProfilingInfo(
@@ -618,8 +623,11 @@ def _build_analysis_result(
     rec_set = RecommendationSet()
     for i, rec in enumerate(recommendations, 1):
         priority_upper = rec.get("priority", "MEDIUM").upper()
+        _cat_slug = (
+            rec.get("category", "general").upper().replace(" ", "_").replace("-", "_")
+        )
         recommendation = Recommendation(
-            id=f"rec_{i:03d}",
+            id=f"ROCPD-{_cat_slug}-{i:03d}",
             priority=priority_upper.lower(),
             category=rec.get("category", "general"),
             title=rec.get("issue", "Optimization opportunity"),
@@ -693,9 +701,9 @@ def _convert_result_to_llm_format(result: AnalysisResult) -> Dict[str, Any]:
             {
                 "name": k.get("name"),
                 "calls": k.get("calls"),
-                "total_duration_ns": k.get("total_duration"),
-                "avg_duration_ns": k.get("avg_duration"),
-                "percent_of_total": k.get("percent_of_total"),
+                "total_duration_ns": k.get("total_duration_ns"),
+                "avg_duration_ns": k.get("avg_duration_ns"),
+                "percent_of_total": k.get("pct_of_total"),
             }
             for k in hotspots
         ],

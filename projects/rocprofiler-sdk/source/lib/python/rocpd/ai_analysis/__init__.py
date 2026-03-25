@@ -59,11 +59,9 @@ __all__ = [
     "get_kernel_analysis",
     "get_recommendations",
     "validate_database",
-
     # Data classes
     "AnalysisResult",
     "OutputFormat",
-
     # Exceptions
     "AnalysisError",
     "DatabaseNotFoundError",

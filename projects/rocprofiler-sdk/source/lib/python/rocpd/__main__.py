@@ -139,7 +139,7 @@ Example usage:
     Analyze top 20 kernels instead of default 10
     $ rocpd analyze -i db{0..3}.db --top-kernels 20
 
-    Analyze with custom prompt (for future LLM integration)
+    Analyze with a custom LLM prompt for targeted insights
     $ rocpd analyze -i db0.db --prompt "Why is my application slow?"
 
 """

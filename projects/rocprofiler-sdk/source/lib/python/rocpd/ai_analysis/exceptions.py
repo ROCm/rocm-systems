@@ -14,16 +14,19 @@ from typing import List, Optional
 
 class AnalysisError(Exception):
     """Base exception for AI analysis errors"""
+
     pass
 
 
 class DatabaseNotFoundError(AnalysisError):
     """Database file not found"""
+
     pass
 
 
 class DatabaseCorruptedError(AnalysisError):
     """Database schema invalid or corrupted"""
+
     pass
 
 
@@ -45,16 +48,19 @@ class UnsupportedGPUError(AnalysisError):
 
 class LLMAuthenticationError(AnalysisError):
     """LLM API authentication failed"""
+
     pass
 
 
 class LLMRateLimitError(AnalysisError):
     """LLM API rate limit exceeded"""
+
     pass
 
 
 class AnalysisTimeoutError(AnalysisError):
     """Analysis took too long"""
+
     pass
 
 

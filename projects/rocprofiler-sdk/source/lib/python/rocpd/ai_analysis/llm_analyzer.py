@@ -25,9 +25,15 @@ No code changes required - the guide is loaded dynamically.
 
 import os
 import re
-import json
 from pathlib import Path
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any
+
+from .exceptions import (
+    AnalysisError,
+    LLMAuthenticationError,
+    LLMRateLimitError,
+    ReferenceGuideNotFoundError,
+)
 
 # Regex to match Unix and Windows file paths that may appear in profiling data
 _PATH_PATTERN = re.compile(
@@ -39,11 +45,6 @@ _PATH_PATTERN = re.compile(
 def _redact_paths(value: str) -> str:
     """Replace file system paths in a string with [REDACTED]."""
     return _PATH_PATTERN.sub("[REDACTED]", value)
-from .exceptions import (
-    LLMAuthenticationError,
-    LLMRateLimitError,
-    ReferenceGuideNotFoundError,
-)
 
 
 # Default location for the reference guide (relative to package installation)
@@ -173,7 +174,7 @@ class LLMAnalyzer:
             ReferenceGuideNotFoundError: If guide file doesn't exist
         """
         if not self.reference_guide_path.exists():
-            raise ReferenceGuideNotFoundError(str(self.reference_guide_path))
+            raise ReferenceGuideNotFoundError([str(self.reference_guide_path)])
 
         return self.reference_guide_path.read_text()
 
@@ -345,9 +346,7 @@ Follow the reference guide strictly for analysis methodology and output format."
             lines.append(
                 f"- Memory Copy Time: {breakdown.get('memcpy_time_pct', 0):.1f}%"
             )
-            lines.append(
-                f"- API Overhead: {breakdown.get('api_overhead_pct', 0):.1f}%"
-            )
+            lines.append(f"- API Overhead: {breakdown.get('api_overhead_pct', 0):.1f}%")
             lines.append("")
 
         # Top kernels
@@ -355,12 +354,8 @@ Follow the reference guide strictly for analysis methodology and output format."
             lines.append("## Top Kernels")
             for kernel in data["kernels"][:5]:  # Top 5
                 lines.append(f"- {kernel.get('kernel_id', 'Unknown')}")
-                lines.append(
-                    f"  - Time: {kernel.get('pct_total_time', 0):.1f}% of total"
-                )
-                lines.append(
-                    f"  - Dispatches: {kernel.get('dispatch_count', 'N/A')}"
-                )
+                lines.append(f"  - Time: {kernel.get('pct_total_time', 0):.1f}% of total")
+                lines.append(f"  - Dispatches: {kernel.get('dispatch_count', 'N/A')}")
 
                 if "vgpr_count" in kernel:
                     lines.append(f"  - VGPR Usage: {kernel.get('vgpr_count')}")
@@ -401,9 +396,7 @@ Follow the reference guide strictly for analysis methodology and output format."
         if data.get("has_counters"):
             lines.append("✅ Hardware counters available (Tier 2 analysis possible)")
         else:
-            lines.append(
-                "⚠️  No hardware counters (Tier 1 trace analysis only)"
-            )
+            lines.append("⚠️  No hardware counters (Tier 1 trace analysis only)")
 
         if data.get("has_pc_sampling"):
             lines.append("✅ PC sampling data available (Tier 3 analysis possible)")
@@ -523,6 +516,3 @@ Follow the reference guide strictly for analysis methodology and output format."
             raise LLMRateLimitError(f"OpenAI rate limit exceeded: {e}")
         except Exception as e:
             raise AnalysisError(f"OpenAI API error: {e}")
-
-
-from .exceptions import AnalysisError  # Needed for _call methods

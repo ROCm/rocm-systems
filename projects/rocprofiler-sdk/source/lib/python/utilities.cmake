@@ -190,19 +190,21 @@ function(rocprofiler_rocpd_python_bindings _VERSION)
             COMPONENT rocpd)
     endforeach()
 
-    # Copy ai_analysis directory and its contents (including subdirectories).
-    # Includes *.py modules, *.md docs, and *.json schema files (e.g.
+    # Copy ai_analysis directory and its contents (including subdirectories). Includes
+    # *.py modules, *.md docs, and *.json schema files (e.g.
     # ai_analysis/docs/analysis-output.schema.json).
-    file(GLOB_RECURSE rocpd_AI_ANALYSIS_FILES
-         "${CMAKE_CURRENT_LIST_DIR}/ai_analysis/*.py"
-         "${CMAKE_CURRENT_LIST_DIR}/ai_analysis/*.md"
-         "${CMAKE_CURRENT_LIST_DIR}/ai_analysis/*.json")
+    file(
+        GLOB_RECURSE
+        rocpd_AI_ANALYSIS_FILES
+        CONFIGURE_DEPENDS
+        "${CMAKE_CURRENT_LIST_DIR}/ai_analysis/*.py"
+        "${CMAKE_CURRENT_LIST_DIR}/ai_analysis/*.md"
+        "${CMAKE_CURRENT_LIST_DIR}/ai_analysis/*.json")
 
     foreach(_AI_FILE ${rocpd_AI_ANALYSIS_FILES})
         file(RELATIVE_PATH _REL_PATH "${CMAKE_CURRENT_LIST_DIR}" "${_AI_FILE}")
         get_filename_component(_REL_DIR "${_REL_PATH}" DIRECTORY)
-        configure_file(${_AI_FILE}
-                       ${rocpd_PYTHON_OUTPUT_DIRECTORY}/${_REL_PATH} COPYONLY)
+        configure_file(${_AI_FILE} ${rocpd_PYTHON_OUTPUT_DIRECTORY}/${_REL_PATH} COPYONLY)
         install(
             FILES ${rocpd_PYTHON_OUTPUT_DIRECTORY}/${_REL_PATH}
             DESTINATION ${rocpd_PYTHON_INSTALL_DIRECTORY}/${_REL_DIR}

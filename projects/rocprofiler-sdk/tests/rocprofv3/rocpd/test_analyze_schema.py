@@ -268,7 +268,7 @@ def test_json_output_command_structure():
             assert isinstance(cmd["full_command"], str), (
                 f"{loc} full_command must be a string"
             )
-            assert cmd["tool"] in cmd["full_command"], (
+            assert cmd["full_command"].startswith(cmd["tool"]), (
                 f"{loc} full_command must start with tool name"
             )
 
