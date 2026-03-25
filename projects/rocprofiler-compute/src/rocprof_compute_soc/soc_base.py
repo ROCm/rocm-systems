@@ -45,7 +45,7 @@ from utils.mi_gpu_spec import mi_gpu_specs
 from utils.parser import BUILD_IN_VARS, SUPPORTED_DENOM
 from utils.roofline_calc import validate_roofline_csv
 from utils.specs import MachineSpecs
-from utils.utils import (
+from utils.utils_common import (
     METRIC_ID_RE,
     add_counter_extra_config_input_yaml,
     convert_metric_id_to_panel_info,

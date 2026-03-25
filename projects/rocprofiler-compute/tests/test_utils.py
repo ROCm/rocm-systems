@@ -40,13 +40,15 @@ from unittest import mock
 import pandas as pd
 import pytest
 
-import utils.utils as utils
+import utils.utils_analysis as utils_analysis
+import utils.utils_common as utils_common
+import utils.utils_profile as utils_profile
 from utils.tty import (
     format_stats,
     print_operator_node,
     show_call_tree,
 )
-from utils.utils import (
+from utils.utils_analysis import (
     CallTreeNode,
     KernelStats,
     build_call_trees,
@@ -340,14 +342,14 @@ def test_get_version_finds_version_in_home(tmp_path, monkeypatch):
     version_file = tmp_path / "VERSION"
     version_file.write_text(version_content)
     monkeypatch.setattr(
-        utils, "capture_subprocess_output", lambda *a, **k: (True, "abc123")
+        utils_common, "capture_subprocess_output", lambda *a, **k: (True, "abc123")
     )
     monkeypatch.setattr(
-        utils,
+        utils_common,
         "console_error",
         lambda *a, **k: pytest.fail("console_error should not be called"),
     )
-    result = utils.get_version(tmp_path)
+    result = utils_common.get_version(tmp_path)
     assert result["version"] == version_content
     assert result["sha"] == "abc123"
     assert result["mode"] == "dev"
@@ -372,16 +374,16 @@ def test_get_version_finds_version_in_parent(tmp_path, monkeypatch):
     version_file = parent / "VERSION"
     version_file.write_text(version_content)
     monkeypatch.setattr(
-        utils, "capture_subprocess_output", lambda *a, **k: (True, "def456")
+        utils_common, "capture_subprocess_output", lambda *a, **k: (True, "def456")
     )
     monkeypatch.setattr(
-        utils,
+        utils_common,
         "console_error",
         lambda *a, **k: pytest.fail("console_error should not be called"),
     )
     child = parent / "child"
     child.mkdir()
-    result = utils.get_version(child)
+    result = utils_common.get_version(child)
     assert result["version"] == version_content
     assert result["sha"] == "def456"
     assert result["mode"] == "dev"
@@ -408,10 +410,12 @@ def test_get_version_console_error_when_no_version(monkeypatch):
         called["msg"] = msg
         raise RuntimeError("console_error called")
 
-    monkeypatch.setattr(utils, "console_error", fake_console_error)
-    monkeypatch.setattr(utils, "capture_subprocess_output", lambda *a, **k: (False, ""))
+    monkeypatch.setattr(utils_common, "console_error", fake_console_error)
+    monkeypatch.setattr(
+        utils_common, "capture_subprocess_output", lambda *a, **k: (False, "")
+    )
     with pytest.raises(RuntimeError, match="console_error called"):
-        utils.get_version(fake_path)
+        utils_common.get_version(fake_path)
     assert "Cannot find VERSION file" in called["msg"]
 
 
@@ -430,13 +434,13 @@ def test_get_version_git_success(tmp_path, monkeypatch):
     version_file = tmp_path / "VERSION"
     version_file.write_text(version_content)
     monkeypatch.setattr(
-        "utils.utils.capture_subprocess_output", lambda *a, **k: (True, "abc123")
+        "utils.utils_common.capture_subprocess_output", lambda *a, **k: (True, "abc123")
     )
     monkeypatch.setattr(
-        "utils.utils.console_error",
+        "utils.logger.console_error",
         lambda *a, **k: pytest.fail("console_error should not be called"),
     )
-    result = utils.get_version(tmp_path)
+    result = utils_common.get_version(tmp_path)
     assert result["version"] == version_content
     assert result["sha"] == "abc123"
     assert result["mode"] == "dev"
@@ -463,12 +467,12 @@ def test_get_version_git_fails_sha_file(tmp_path, monkeypatch):
     def fail_git(*a, **k):
         return (False, "git error")
 
-    monkeypatch.setattr("utils.utils.capture_subprocess_output", fail_git)
+    monkeypatch.setattr("utils.utils_common.capture_subprocess_output", fail_git)
     monkeypatch.setattr(
-        "utils.utils.console_error",
+        "utils.logger.console_error",
         lambda *a, **k: pytest.fail("console_error should not be called"),
     )
-    result = utils.get_version(tmp_path)
+    result = utils_common.get_version(tmp_path)
     assert result["version"] == version_content
     assert result["sha"] == sha_content
     assert result["mode"] == "release"
@@ -492,13 +496,13 @@ def test_get_version_git_and_sha_fail(tmp_path, monkeypatch):
     def fail_git(*a, **k):
         return (False, "git error")
 
-    monkeypatch.setattr("utils.utils.capture_subprocess_output", fail_git)
+    monkeypatch.setattr("utils.utils_common.capture_subprocess_output", fail_git)
     monkeypatch.setattr(
-        "utils.utils.console_error",
+        "utils.logger.console_error",
         lambda *a, **k: pytest.fail("console_error should not be called"),
     )
 
-    result = utils.get_version(tmp_path)
+    result = utils_common.get_version(tmp_path)
     assert result["version"] == version_content
     assert result["sha"] == "unknown"
     assert result["mode"] == "unknown"
@@ -527,17 +531,17 @@ def test_detect_rocprof_env_rocprof_not_found(monkeypatch):
     warnings = []
     errors = []
     monkeypatch.setattr(
-        "utils.utils.console_warning", lambda msg, *a, **k: warnings.append(msg)
+        "utils.utils_common.console_warning", lambda msg, *a, **k: warnings.append(msg)
     )
 
     def fake_console_error(msg, *a, **k):
         errors.append(msg)
         raise RuntimeError("console_error called")
 
-    monkeypatch.setattr("utils.utils.console_error", fake_console_error)
+    monkeypatch.setattr("utils.utils_common.console_error", fake_console_error)
 
     with pytest.raises(RuntimeError, match="console_error called"):
-        utils.detect_rocprof(DummyArgs())
+        utils_common.detect_rocprof(DummyArgs())
     assert any(
         "Please verify installation or set ROCPROF environment variable" in e
         for e in errors
@@ -563,10 +567,10 @@ def test_detect_rocprof_env_rocprof_found(monkeypatch):
     # Track debug logs
     logs = []
     monkeypatch.setattr(
-        "utils.utils.console_debug", lambda msg, *a, **k: logs.append(str(msg))
+        "utils.utils_common.console_debug", lambda msg, *a, **k: logs.append(str(msg))
     )
 
-    result = utils.detect_rocprof(DummyArgs())
+    result = utils_common.detect_rocprof(DummyArgs())
     assert result == "rocprof"
     assert any(
         "ROC Profiler: /usr/bin/rocprof" in log_entry
@@ -588,10 +592,10 @@ def test_detect_rocprof_env_not_set(monkeypatch):
     monkeypatch.setattr("pathlib.Path.exists", lambda _: True)
     logs = []
     monkeypatch.setattr(
-        "utils.utils.console_debug", lambda msg, *a, **k: logs.append(str(msg))
+        "utils.utils_common.console_debug", lambda msg, *a, **k: logs.append(str(msg))
     )
 
-    result = utils.detect_rocprof(DummyArgs())
+    result = utils_common.detect_rocprof(DummyArgs())
     assert result == "rocprofiler-sdk"
     assert any(
         "rocprofiler_sdk_path is /fake/path" in log_entry
@@ -614,10 +618,10 @@ def test_detect_rocprof_sdk(monkeypatch):
     monkeypatch.setattr("pathlib.Path.exists", lambda self: True)
     logs = []
     monkeypatch.setattr(
-        "utils.utils.console_debug", lambda msg, *a, **k: logs.append(str(msg))
+        "utils.utils_common.console_debug", lambda msg, *a, **k: logs.append(str(msg))
     )
 
-    result = utils.detect_rocprof(DummyArgs())
+    result = utils_common.detect_rocprof(DummyArgs())
     assert result == "rocprofiler-sdk"
     assert any("rocprof_cmd is rocprofiler-sdk" in log_entry for log_entry in logs)
 
@@ -664,11 +668,11 @@ def test_capture_subprocess_output_with_new_env(monkeypatch):
             pass
 
     monkeypatch.setattr("selectors.DefaultSelector", DummySelector)
-    monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
-    monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
+    monkeypatch.setattr("utils.utils_common.console_log", lambda *a, **k: None)
+    monkeypatch.setattr("utils.logger.console_debug", lambda *a, **k: None)
 
     custom_env = {"CUSTOM_VAR": "test_value"}
-    utils.capture_subprocess_output(["echo", "test"], new_env=custom_env)
+    utils_common.capture_subprocess_output(["echo", "test"], new_env=custom_env)
 
     # Verify that custom environment was passed
     assert len(popen_calls) == 1
@@ -706,10 +710,10 @@ def test_capture_subprocess_output_profile_mode(monkeypatch):
             pass
 
     monkeypatch.setattr("selectors.DefaultSelector", DummySelector)
-    monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
-    monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
+    monkeypatch.setattr("utils.utils_common.console_log", lambda *a, **k: None)
+    monkeypatch.setattr("utils.logger.console_debug", lambda *a, **k: None)
 
-    success, output = utils.capture_subprocess_output(
+    success, output = utils_common.capture_subprocess_output(
         ["echo", "test"], profileMode=True, enable_logging=False
     )
 
@@ -782,10 +786,10 @@ def test_capture_subprocess_output_failure(monkeypatch):
             pass
 
     monkeypatch.setattr("selectors.DefaultSelector", DummySelector)
-    monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
-    monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
+    monkeypatch.setattr("utils.utils_common.console_log", lambda *a, **k: None)
+    monkeypatch.setattr("utils.logger.console_debug", lambda *a, **k: None)
 
-    success, output = utils.capture_subprocess_output(["fail", "test"])
+    success, output = utils_common.capture_subprocess_output(["fail", "test"])
     assert success is False
     assert "fail" in output
 
@@ -852,10 +856,10 @@ def test_capture_subprocess_output_unicode_decode(monkeypatch):
             pass
 
     monkeypatch.setattr("selectors.DefaultSelector", DummySelector)
-    monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
-    monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
+    monkeypatch.setattr("utils.utils_common.console_log", lambda *a, **k: None)
+    monkeypatch.setattr("utils.logger.console_debug", lambda *a, **k: None)
 
-    success, output = utils.capture_subprocess_output(["echo", "test"])
+    success, output = utils_common.capture_subprocess_output(["echo", "test"])
     assert success is True
     assert output == ""
 
@@ -880,7 +884,7 @@ def test_get_agent_dict_basic():
         ]
     }
 
-    result = utils.get_agent_dict(data)
+    result = utils_common.get_agent_dict(data)
 
     # Verify correct mapping
     assert len(result) == 2
@@ -896,7 +900,7 @@ def test_get_agent_dict_empty_agents():
     """
     data = {"rocprofiler-sdk-tool": [{"agents": []}]}
 
-    result = utils.get_agent_dict(data)
+    result = utils_common.get_agent_dict(data)
 
     assert result == {}
 
@@ -909,19 +913,19 @@ def test_get_agent_dict_missing_keys(monkeypatch):
     data1 = {"rocprofiler-sdk-tool": [{}]}
 
     with pytest.raises(KeyError):
-        utils.get_agent_dict(data1)
+        utils_common.get_agent_dict(data1)
 
     # Case 2: Missing 'rocprofiler-sdk-tool' key
     data2 = {}
 
     with pytest.raises(KeyError):
-        utils.get_agent_dict(data2)
+        utils_common.get_agent_dict(data2)
 
     # Case 3: Empty 'rocprofiler-sdk-tool' list
     data3 = {"rocprofiler-sdk-tool": []}
 
     with pytest.raises(IndexError):
-        utils.get_agent_dict(data3)
+        utils_common.get_agent_dict(data3)
 
 
 def test_get_agent_dict_duplicate_agent_ids():
@@ -940,7 +944,7 @@ def test_get_agent_dict_duplicate_agent_ids():
         ]
     }
 
-    result = utils.get_agent_dict(data)
+    result = utils_common.get_agent_dict(data)
 
     assert len(result) == 1
     assert result[1]["node_id"] == 200
@@ -962,7 +966,7 @@ def test_get_agent_dict_non_integer_handles():
         ]
     }
 
-    result = utils.get_agent_dict(data)
+    result = utils_common.get_agent_dict(data)
 
     assert len(result) == 2
     assert result["agent_1"]["node_id"] == 100
@@ -994,7 +998,7 @@ def test_get_gpuid_dict_basic():
 
     expected = {101: 0, 100: 1, 102: 2}
 
-    result = utils.get_gpuid_dict(data)
+    result = utils_common.get_gpuid_dict(data)
     assert result == expected
 
 
@@ -1019,7 +1023,7 @@ def test_get_gpuid_dict_no_gpu_agents():
         ]
     }
 
-    result = utils.get_gpuid_dict(data)
+    result = utils_common.get_gpuid_dict(data)
     assert result == {}
 
 
@@ -1048,7 +1052,7 @@ def test_get_gpuid_dict_mixed_agents():
     # Expected mapping after sorting by node_id and filtering by type 2: 100->0, 102->1
     expected = {100: 0, 102: 1}
 
-    result = utils.get_gpuid_dict(data)
+    result = utils_common.get_gpuid_dict(data)
     assert result == expected
 
 
@@ -1076,7 +1080,7 @@ def test_get_gpuid_dict_sorting():
 
     expected = {103: 0, 101: 1, 102: 2, 100: 3}
 
-    result = utils.get_gpuid_dict(data)
+    result = utils_common.get_gpuid_dict(data)
     assert result == expected
 
 
@@ -1091,7 +1095,7 @@ def test_get_gpuid_dict_empty_agents():
     # Sample data with empty agents list
     data = {"rocprofiler-sdk-tool": [{"agents": []}]}
 
-    result = utils.get_gpuid_dict(data)
+    result = utils_common.get_gpuid_dict(data)
     assert result == {}
 
 
@@ -1129,7 +1133,7 @@ def test_v3_json_get_counters_normal_case():
         ]
     }
 
-    counter_map = utils.v3_json_get_counters(data)
+    counter_map = utils_profile.v3_json_get_counters(data)
 
     assert len(counter_map) == 3
     assert counter_map[(100, 1)]["name"] == "counter1"
@@ -1145,7 +1149,7 @@ def test_v3_json_get_counters_empty_counters():
     """
     data = {"rocprofiler-sdk-tool": [{"counters": []}]}
 
-    counter_map = utils.v3_json_get_counters(data)
+    counter_map = utils_profile.v3_json_get_counters(data)
 
     assert len(counter_map) == 0
     assert counter_map == {}
@@ -1179,7 +1183,7 @@ def test_v3_json_get_counters_duplicate_keys():
         ]
     }
 
-    counter_map = utils.v3_json_get_counters(data)
+    counter_map = utils_profile.v3_json_get_counters(data)
 
     assert len(counter_map) == 1
     assert counter_map[(100, 1)]["name"] == "counter2"
@@ -1215,7 +1219,7 @@ def test_v3_json_get_counters_various_value_types():
         ]
     }
 
-    counter_map = utils.v3_json_get_counters(data)
+    counter_map = utils_profile.v3_json_get_counters(data)
 
     assert len(counter_map) == 3
     assert counter_map[(100, 1)]["name"] == "counter1"
@@ -1238,7 +1242,7 @@ def test_v3_json_get_counters_missing_key():
     }
 
     with pytest.raises(KeyError):
-        utils.v3_json_get_counters(data)
+        utils_profile.v3_json_get_counters(data)
 
 
 def test_v3_json_get_counters_missing_nested_key():
@@ -1255,7 +1259,7 @@ def test_v3_json_get_counters_missing_nested_key():
     }
 
     with pytest.raises(KeyError):
-        utils.v3_json_get_counters(data)
+        utils_profile.v3_json_get_counters(data)
 
 
 def test_v3_json_get_counters_data_structure():
@@ -1277,7 +1281,7 @@ def test_v3_json_get_counters_data_structure():
 
     data = {"rocprofiler-sdk-tool": [{"counters": [counter_object]}]}
 
-    counter_map = utils.v3_json_get_counters(data)
+    counter_map = utils_profile.v3_json_get_counters(data)
 
     assert len(counter_map) == 1
     assert counter_map[(100, 1)] == counter_object
@@ -1324,7 +1328,7 @@ def test_v3_json_get_dispatches_normal_case():
         ]
     }
 
-    result = utils.v3_json_get_dispatches(data)
+    result = utils_profile.v3_json_get_dispatches(data)
 
     assert len(result) == 3
     assert result["id1"]["start_timestamp"] == 100
@@ -1345,7 +1349,7 @@ def test_v3_json_get_dispatches_empty_case():
     """
     data = {"rocprofiler-sdk-tool": [{"buffer_records": {"kernel_dispatch": []}}]}
 
-    result = utils.v3_json_get_dispatches(data)
+    result = utils_profile.v3_json_get_dispatches(data)
 
     assert len(result) == 0
     assert isinstance(result, dict)
@@ -1364,7 +1368,7 @@ def test_v3_json_get_dispatches_missing_fields():
     data = {"rocprofiler-sdk-tool": [{"buffer_records": {}}]}
 
     with pytest.raises(KeyError):
-        utils.v3_json_get_dispatches(data)
+        utils_profile.v3_json_get_dispatches(data)
 
     data = {
         "rocprofiler-sdk-tool": [
@@ -1373,7 +1377,7 @@ def test_v3_json_get_dispatches_missing_fields():
     }
 
     with pytest.raises(KeyError):
-        utils.v3_json_get_dispatches(data)
+        utils_profile.v3_json_get_dispatches(data)
 
 
 def test_v3_json_get_dispatches_duplicate_ids():
@@ -1413,7 +1417,7 @@ def test_v3_json_get_dispatches_duplicate_ids():
         ]
     }
 
-    result = utils.v3_json_get_dispatches(data)
+    result = utils_profile.v3_json_get_dispatches(data)
 
     assert len(result) == 2
     assert result["id1"]["start_timestamp"] == 300
@@ -1505,7 +1509,7 @@ def test_v3_json_to_csv_basic_functionality(tmp_path, monkeypatch):
     csv_path = tmp_path / "output.csv"
 
     monkeypatch.setattr(
-        utils,
+        utils_profile,
         "v3_json_get_dispatches",
         lambda data: {
             "corr1": valid_json["rocprofiler-sdk-tool"][0]["buffer_records"][
@@ -1514,16 +1518,18 @@ def test_v3_json_to_csv_basic_functionality(tmp_path, monkeypatch):
         },
     )
     monkeypatch.setattr(
-        utils,
+        utils_common,
         "get_agent_dict",
         lambda data: {1: valid_json["rocprofiler-sdk-tool"][0]["agents"][0]},
     )
-    monkeypatch.setattr(utils, "get_gpuid_dict", lambda data: {1: 0})
+    monkeypatch.setattr(utils_common, "get_gpuid_dict", lambda data: {1: 0})
     monkeypatch.setattr(
-        utils, "v3_json_get_counters", lambda data: {(1, 101): {"name": "COUNTER1"}}
+        utils_profile,
+        "v3_json_get_counters",
+        lambda data: {(1, 101): {"name": "COUNTER1"}},
     )
 
-    utils.v3_json_to_csv(json_path, csv_path)
+    utils_profile.v3_json_to_csv(json_path, csv_path)
 
     assert csv_path.exists()
     df = pd.read_csv(csv_path)
@@ -1575,16 +1581,16 @@ def test_v3_json_to_csv_no_dispatches(tmp_path, monkeypatch):
         json.dump(empty_json, f)
     csv_path = tmp_path / "empty_output.csv"
 
-    monkeypatch.setattr(utils, "v3_json_get_dispatches", lambda data: {})
+    monkeypatch.setattr(utils_profile, "v3_json_get_dispatches", lambda data: {})
     monkeypatch.setattr(
-        utils,
+        utils_common,
         "get_agent_dict",
         lambda data: {1: empty_json["rocprofiler-sdk-tool"][0]["agents"][0]},
     )
-    monkeypatch.setattr(utils, "get_gpuid_dict", lambda data: {1: 0})
-    monkeypatch.setattr(utils, "v3_json_get_counters", lambda data: {})
+    monkeypatch.setattr(utils_common, "get_gpuid_dict", lambda data: {1: 0})
+    monkeypatch.setattr(utils_profile, "v3_json_get_counters", lambda data: {})
 
-    utils.v3_json_to_csv(json_path, csv_path)
+    utils_profile.v3_json_to_csv(json_path, csv_path)
 
     assert csv_path.exists()
     df = pd.read_csv(csv_path)
@@ -1675,7 +1681,7 @@ def test_v3_json_to_csv_accumulated_counters(tmp_path, monkeypatch):
     csv_path = tmp_path / "accum_output.csv"
 
     monkeypatch.setattr(
-        utils,
+        utils_profile,
         "v3_json_get_dispatches",
         lambda data: {
             "corr1": json_data["rocprofiler-sdk-tool"][0]["buffer_records"][
@@ -1684,18 +1690,18 @@ def test_v3_json_to_csv_accumulated_counters(tmp_path, monkeypatch):
         },
     )
     monkeypatch.setattr(
-        utils,
+        utils_common,
         "get_agent_dict",
         lambda data: {1: json_data["rocprofiler-sdk-tool"][0]["agents"][0]},
     )
-    monkeypatch.setattr(utils, "get_gpuid_dict", lambda data: {1: 0})
+    monkeypatch.setattr(utils_common, "get_gpuid_dict", lambda data: {1: 0})
     monkeypatch.setattr(
-        utils,
+        utils_profile,
         "v3_json_get_counters",
         lambda data: {(1, 101): {"name": "COUNTER_ACCUM"}},
     )
 
-    utils.v3_json_to_csv(json_path, csv_path)
+    utils_profile.v3_json_to_csv(json_path, csv_path)
 
     assert csv_path.exists()
     df = pd.read_csv(csv_path)
@@ -1793,7 +1799,7 @@ def test_v3_json_to_csv_duplicate_counters(tmp_path, monkeypatch):
     csv_path = tmp_path / "duplicate_output.csv"
 
     monkeypatch.setattr(
-        utils,
+        utils_profile,
         "v3_json_get_dispatches",
         lambda data: {
             "corr1": json_data["rocprofiler-sdk-tool"][0]["buffer_records"][
@@ -1802,18 +1808,18 @@ def test_v3_json_to_csv_duplicate_counters(tmp_path, monkeypatch):
         },
     )
     monkeypatch.setattr(
-        utils,
+        utils_common,
         "get_agent_dict",
         lambda data: {1: json_data["rocprofiler-sdk-tool"][0]["agents"][0]},
     )
-    monkeypatch.setattr(utils, "get_gpuid_dict", lambda data: {1: 0})
+    monkeypatch.setattr(utils_common, "get_gpuid_dict", lambda data: {1: 0})
     monkeypatch.setattr(
-        utils,
+        utils_profile,
         "v3_json_get_counters",
         lambda data: {(1, 101): {"name": "COUNTER1"}, (1, 102): {"name": "COUNTER1"}},
     )
 
-    utils.v3_json_to_csv(json_path, csv_path)
+    utils_profile.v3_json_to_csv(json_path, csv_path)
 
     assert csv_path.exists()
     df = pd.read_csv(csv_path)
@@ -1830,7 +1836,7 @@ def test_v3_json_to_csv_file_not_found(monkeypatch):
         monkeypatch (pytest.MonkeyPatch): Pytest fixture for modifying behavior
     """
     with pytest.raises(FileNotFoundError):
-        utils.v3_json_to_csv("/nonexistent/path.json", "output.csv")
+        utils_profile.v3_json_to_csv("/nonexistent/path.json", "output.csv")
 
 
 def test_v3_json_to_csv_invalid_json(tmp_path):
@@ -1848,7 +1854,7 @@ def test_v3_json_to_csv_invalid_json(tmp_path):
     csv_path = tmp_path / "invalid_output.csv"
 
     with pytest.raises(json.JSONDecodeError):
-        utils.v3_json_to_csv(json_path, csv_path)
+        utils_profile.v3_json_to_csv(json_path, csv_path)
 
 
 def test_v3_json_to_csv_missing_required_keys(tmp_path):
@@ -1876,7 +1882,7 @@ def test_v3_json_to_csv_missing_required_keys(tmp_path):
     csv_path = tmp_path / "missing_keys_output.csv"
 
     with pytest.raises(KeyError):
-        utils.v3_json_to_csv(json_path, csv_path)
+        utils_profile.v3_json_to_csv(json_path, csv_path)
 
 
 def test_v3_json_to_csv_complex_dispatch(tmp_path, monkeypatch):
@@ -2006,7 +2012,7 @@ def test_v3_json_to_csv_complex_dispatch(tmp_path, monkeypatch):
     csv_path = tmp_path / "complex_output.csv"
 
     monkeypatch.setattr(
-        utils,
+        utils_profile,
         "v3_json_get_dispatches",
         lambda data: {
             "corr1": complex_json["rocprofiler-sdk-tool"][0]["buffer_records"][
@@ -2018,21 +2024,21 @@ def test_v3_json_to_csv_complex_dispatch(tmp_path, monkeypatch):
         },
     )
     monkeypatch.setattr(
-        utils,
+        utils_common,
         "get_agent_dict",
         lambda data: {
             1: complex_json["rocprofiler-sdk-tool"][0]["agents"][0],
             2: complex_json["rocprofiler-sdk-tool"][0]["agents"][1],
         },
     )
-    monkeypatch.setattr(utils, "get_gpuid_dict", lambda data: {1: 0, 2: 1})
+    monkeypatch.setattr(utils_common, "get_gpuid_dict", lambda data: {1: 0, 2: 1})
     monkeypatch.setattr(
-        utils,
+        utils_profile,
         "v3_json_get_counters",
         lambda data: {(1, 101): {"name": "COUNTER1"}, (1, 102): {"name": "COUNTER2"}},
     )
 
-    utils.v3_json_to_csv(json_path, csv_path)
+    utils_profile.v3_json_to_csv(json_path, csv_path)
 
     assert csv_path.exists()
     df = pd.read_csv(csv_path)
@@ -2177,7 +2183,7 @@ def test_v3_json_to_csv_missing_counters_handling(tmp_path, monkeypatch):
     csv_path = tmp_path / "missing_counters_output.csv"
 
     monkeypatch.setattr(
-        utils,
+        utils_profile,
         "v3_json_get_dispatches",
         lambda data: {
             "corr1": json_data["rocprofiler-sdk-tool"][0]["buffer_records"][
@@ -2189,19 +2195,19 @@ def test_v3_json_to_csv_missing_counters_handling(tmp_path, monkeypatch):
         },
     )
     monkeypatch.setattr(
-        utils,
+        utils_common,
         "get_agent_dict",
         lambda data: {1: json_data["rocprofiler-sdk-tool"][0]["agents"][0]},
     )
-    monkeypatch.setattr(utils, "get_gpuid_dict", lambda data: {1: 0})
+    monkeypatch.setattr(utils_common, "get_gpuid_dict", lambda data: {1: 0})
     monkeypatch.setattr(
-        utils,
+        utils_profile,
         "v3_json_get_counters",
         lambda data: {(1, 101): {"name": "COUNTER1"}, (1, 102): {"name": "COUNTER2"}},
     )
 
     try:
-        utils.v3_json_to_csv(json_path, csv_path)
+        utils_profile.v3_json_to_csv(json_path, csv_path)
 
         assert csv_path.exists()
         df = pd.read_csv(csv_path)
@@ -2357,7 +2363,7 @@ def test_parse_text_basic(tmp_path):
     test_file = tmp_path / "test_counters.txt"
     test_file.write_text("pmc: counter1 counter2 counter3")
 
-    result = utils.parse_text(str(test_file))
+    result = utils_common.parse_text(str(test_file))
     assert result == ["counter1", "counter2", "counter3"]
 
 
@@ -2373,7 +2379,7 @@ def test_parse_text_empty_file(tmp_path):
     test_file = tmp_path / "empty.txt"
     test_file.write_text("")
 
-    result = utils.parse_text(str(test_file))
+    result = utils_common.parse_text(str(test_file))
     assert result == []
 
 
@@ -2389,7 +2395,7 @@ def test_parse_text_no_pmc_entries(tmp_path):
     test_file = tmp_path / "no_pmc.txt"
     test_file.write_text("line1\nline2\nline3")
 
-    result = utils.parse_text(str(test_file))
+    result = utils_common.parse_text(str(test_file))
     assert result == []
 
 
@@ -2405,7 +2411,7 @@ def test_parse_text_with_comments(tmp_path):
     test_file = tmp_path / "comments.txt"
     test_file.write_text("pmc: counter1 counter2 # This is a comment")
 
-    result = utils.parse_text(str(test_file))
+    result = utils_common.parse_text(str(test_file))
     assert result == ["counter1", "counter2"]
 
 
@@ -2421,7 +2427,7 @@ def test_parse_text_multiple_lines(tmp_path):
     test_file = tmp_path / "multiple_lines.txt"
     test_file.write_text("pmc: counter1 counter2\npmc: counter3 counter4")
 
-    result = utils.parse_text(str(test_file))
+    result = utils_common.parse_text(str(test_file))
     assert result == ["counter1", "counter2", "counter3", "counter4"]
 
 
@@ -2439,7 +2445,7 @@ def test_parse_text_mixed_lines(tmp_path):
         "line1\npmc: counter1 counter2\nline3\npmc: counter3 counter4\nline5"
     )
 
-    result = utils.parse_text(str(test_file))
+    result = utils_common.parse_text(str(test_file))
     assert result == ["counter1", "counter2", "counter3", "counter4"]
 
 
@@ -2455,7 +2461,7 @@ def test_parse_text_whitespace_handling(tmp_path):
     test_file = tmp_path / "whitespace.txt"
     test_file.write_text("pmc:    counter1\t\tcounter2   counter3")
 
-    result = utils.parse_text(str(test_file))
+    result = utils_common.parse_text(str(test_file))
 
     result = [item for item in result if item.strip()]
 
@@ -2463,7 +2469,7 @@ def test_parse_text_whitespace_handling(tmp_path):
     assert result == expected
 
     test_file.write_text("pmc: counter1 counter2\npmc: counter3 counter4")
-    result = utils.parse_text(str(test_file))
+    result = utils_common.parse_text(str(test_file))
     result = [item for item in result if item.strip()]
     expected = ["counter1", "counter2", "counter3", "counter4"]
     assert result == expected
@@ -2481,7 +2487,7 @@ def test_parse_text_edge_cases(tmp_path):
     test_file = tmp_path / "edge_cases.txt"
     test_file.write_text("pmc:\npmc: \npmc: counter1")
 
-    result = utils.parse_text(str(test_file))
+    result = utils_common.parse_text(str(test_file))
     result = [item for item in result if item.strip()]
     assert result == ["counter1"]
 
@@ -2493,7 +2499,7 @@ def test_parse_text_file_not_found():
         None: Asserts that FileNotFoundError is raised for nonexistent files.
     """
     with pytest.raises(FileNotFoundError):
-        utils.parse_text("nonexistent_file.txt")
+        utils_common.parse_text("nonexistent_file.txt")
 
 
 # =============================================================================
@@ -2536,17 +2542,20 @@ def test_run_prof_success_v3(tmp_path, monkeypatch):
 
     mspec = MockSpec()
 
-    monkeypatch.setattr("utils.utils.rocprof_cmd", "rocprofv3")
+    monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofv3")
     monkeypatch.setattr(
-        "utils.utils.capture_subprocess_output", lambda *a, **k: (True, "success")
+        "utils.utils_profile.capture_subprocess_output",
+        lambda *a, **k: (True, "success"),
     )
-    monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
-    monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
+    monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
+    monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
     monkeypatch.setattr(
         "glob.glob", lambda pattern: [workload_dir + "/out/pmc_1/results_0.csv"]
     )
 
-    utils.run_prof(str(fname), ["--arg"], workload_dir, mspec, logging.INFO, "csv")
+    utils_profile.run_prof(
+        str(fname), ["--arg"], workload_dir, mspec, logging.INFO, "csv"
+    )
 
     assert Path(workload_dir + "/test.csv").exists()
 
@@ -2578,14 +2587,15 @@ def test_run_prof_success_v3_csv(tmp_path, monkeypatch):
 
     csv_files = [workload_dir + "/out/pmc_1/converted.csv"]
 
-    monkeypatch.setattr("utils.utils.rocprof_cmd", "rocprofv3")
+    monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofv3")
     monkeypatch.setattr(
-        "utils.utils.capture_subprocess_output", lambda *a, **k: (True, "success")
+        "utils.utils_profile.capture_subprocess_output",
+        lambda *a, **k: (True, "success"),
     )
-    monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
-    monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
+    monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
+    monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
     monkeypatch.setattr(
-        "utils.utils.process_rocprofv3_output", lambda *a, **k: csv_files
+        "utils.utils_profile.process_rocprofv3_output", lambda *a, **k: csv_files
     )
 
     mock_df = pd.DataFrame({
@@ -2599,7 +2609,9 @@ def test_run_prof_success_v3_csv(tmp_path, monkeypatch):
     monkeypatch.setattr("pandas.read_csv", lambda *a, **k: mock_df)
     monkeypatch.setattr("pandas.concat", lambda *a, **k: mock_df)
 
-    utils.run_prof(str(fname), ["--arg"], workload_dir, mspec, logging.INFO, "csv")
+    utils_profile.run_prof(
+        str(fname), ["--arg"], workload_dir, mspec, logging.INFO, "csv"
+    )
 
 
 def test_run_prof_success_rocprofiler_sdk(tmp_path, monkeypatch):
@@ -2634,17 +2646,20 @@ def test_run_prof_success_rocprofiler_sdk(tmp_path, monkeypatch):
         "librocprofiler-sdk-tool.so",
     }
 
-    monkeypatch.setattr("utils.utils.rocprof_cmd", "rocprofiler-sdk")
+    monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofiler-sdk")
     monkeypatch.setattr(
-        "utils.utils.capture_subprocess_output", lambda *a, **k: (True, "success")
+        "utils.utils_profile.capture_subprocess_output",
+        lambda *a, **k: (True, "success"),
     )
-    monkeypatch.setattr("utils.utils.parse_text", lambda f: ["SQ_WAVES"])
-    monkeypatch.setattr("utils.utils.process_rocprofv3_output", lambda *a, **k: [])
-    monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
-    monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
-    monkeypatch.setattr("utils.utils.console_warning", lambda *a, **k: None)
+    monkeypatch.setattr("utils.utils_common.parse_text", lambda f: ["SQ_WAVES"])
+    monkeypatch.setattr(
+        "utils.utils_profile.process_rocprofv3_output", lambda *a, **k: []
+    )
+    monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
+    monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
+    monkeypatch.setattr("utils.utils_profile.console_warning", lambda *a, **k: None)
 
-    utils.run_prof(
+    utils_profile.run_prof(
         str(fname), profiler_options, workload_dir, mspec, logging.INFO, "csv"
     )
 
@@ -2675,19 +2690,24 @@ def test_run_prof_with_yaml_config(tmp_path, monkeypatch):
 
     mspec = MockSpec()
 
-    monkeypatch.setattr("utils.utils.rocprof_cmd", "rocprofv3")
+    monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofv3")
     monkeypatch.setattr(
-        "utils.utils.capture_subprocess_output", lambda *a, **k: (True, "success")
+        "utils.utils_profile.capture_subprocess_output",
+        lambda *a, **k: (True, "success"),
     )
-    monkeypatch.setattr("utils.utils.process_rocprofv3_output", lambda *a, **k: [])
-    monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
-    monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
-    monkeypatch.setattr("utils.utils.console_warning", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "utils.utils_profile.process_rocprofv3_output", lambda *a, **k: []
+    )
+    monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
+    monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
+    monkeypatch.setattr("utils.utils_profile.console_warning", lambda *a, **k: None)
     monkeypatch.setattr(
         "yaml.safe_load", lambda _: {"rocprofiler-sdk": {"counters": ["counter"]}}
     )
 
-    utils.run_prof(str(fname), ["--arg"], workload_dir, mspec, logging.INFO, "csv")
+    utils_profile.run_prof(
+        str(fname), ["--arg"], workload_dir, mspec, logging.INFO, "csv"
+    )
 
 
 def test_run_prof_failure_subprocess(tmp_path, monkeypatch):
@@ -2714,21 +2734,24 @@ def test_run_prof_failure_subprocess(tmp_path, monkeypatch):
 
     mspec = MockSpec()
 
-    monkeypatch.setattr("utils.utils.rocprof_cmd", "rocprofv3")
+    monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofv3")
     monkeypatch.setattr(
-        "utils.utils.capture_subprocess_output", lambda *a, **k: (False, "error output")
+        "utils.utils_profile.capture_subprocess_output",
+        lambda *a, **k: (False, "error output"),
     )
-    monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
-    monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
+    monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
+    monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
 
     def mock_console_error(msg, exit=True):
         if exit:
             raise RuntimeError("console_error called")
 
-    monkeypatch.setattr("utils.utils.console_error", mock_console_error)
+    monkeypatch.setattr("utils.utils_profile.console_error", mock_console_error)
 
     with pytest.raises(RuntimeError, match="console_error called"):
-        utils.run_prof(str(fname), ["--arg"], workload_dir, mspec, logging.INFO, "csv")
+        utils_profile.run_prof(
+            str(fname), ["--arg"], workload_dir, mspec, logging.INFO, "csv"
+        )
 
 
 def test_run_prof_mi300_environment_setup(tmp_path, monkeypatch):
@@ -2762,16 +2785,20 @@ def test_run_prof_mi300_environment_setup(tmp_path, monkeypatch):
             captured_env.update(new_env)
         return (True, "success")
 
-    monkeypatch.setattr("utils.utils.rocprof_cmd", "rocprofv3")
+    monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofv3")
     monkeypatch.setattr(
-        "utils.utils.capture_subprocess_output", mock_capture_subprocess_output
+        "utils.utils_profile.capture_subprocess_output", mock_capture_subprocess_output
     )
-    monkeypatch.setattr("utils.utils.process_rocprofv3_output", lambda *a, **k: [])
-    monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
-    monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
-    monkeypatch.setattr("utils.utils.console_warning", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "utils.utils_profile.process_rocprofv3_output", lambda *a, **k: []
+    )
+    monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
+    monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
+    monkeypatch.setattr("utils.utils_profile.console_warning", lambda *a, **k: None)
 
-    utils.run_prof(str(fname), ["--arg"], workload_dir, mspec, logging.INFO, "csv")
+    utils_profile.run_prof(
+        str(fname), ["--arg"], workload_dir, mspec, logging.INFO, "csv"
+    )
 
 
 def test_run_prof_timestamps_special_case(tmp_path, monkeypatch):
@@ -2812,16 +2839,17 @@ def test_run_prof_timestamps_special_case(tmp_path, monkeypatch):
 
     csv_files = [workload_dir + "/kernel_trace.csv"]
 
-    monkeypatch.setattr("utils.utils.rocprof_cmd", "rocprofv3")
+    monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofv3")
     monkeypatch.setattr(
-        "utils.utils.capture_subprocess_output", lambda *a, **k: (True, "success")
+        "utils.utils_profile.capture_subprocess_output",
+        lambda *a, **k: (True, "success"),
     )
     monkeypatch.setattr(
-        "utils.utils.process_rocprofv3_output", lambda *a, **k: csv_files
+        "utils.utils_profile.process_rocprofv3_output", lambda *a, **k: csv_files
     )
-    monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
-    monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
-    monkeypatch.setattr("utils.utils.console_warning", lambda *a, **k: None)
+    monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
+    monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
+    monkeypatch.setattr("utils.utils_profile.console_warning", lambda *a, **k: None)
 
     mock_df = pd.DataFrame({
         "Dispatch_ID": [0],
@@ -2835,7 +2863,9 @@ def test_run_prof_timestamps_special_case(tmp_path, monkeypatch):
     monkeypatch.setattr("pandas.read_csv", lambda *a, **k: mock_df)
     monkeypatch.setattr("pandas.concat", lambda *a, **k: mock_df)
 
-    utils.run_prof(str(fname), ["--arg"], workload_dir, mspec, logging.INFO, "csv")
+    utils_profile.run_prof(
+        str(fname), ["--arg"], workload_dir, mspec, logging.INFO, "csv"
+    )
 
 
 def test_run_prof_no_results_files(tmp_path, monkeypatch):
@@ -2862,15 +2892,18 @@ def test_run_prof_no_results_files(tmp_path, monkeypatch):
 
     mspec = MockSpec()
 
-    monkeypatch.setattr("utils.utils.rocprof_cmd", "rocprofv2")
+    monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofv2")
     monkeypatch.setattr(
-        "utils.utils.capture_subprocess_output", lambda *a, **k: (True, "success")
+        "utils.utils_profile.capture_subprocess_output",
+        lambda *a, **k: (True, "success"),
     )
     monkeypatch.setattr("glob.glob", lambda pattern: [])  # No files found
-    monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
-    monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
+    monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
+    monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
 
-    utils.run_prof(str(fname), ["--arg"], workload_dir, mspec, logging.INFO, "csv")
+    utils_profile.run_prof(
+        str(fname), ["--arg"], workload_dir, mspec, logging.INFO, "csv"
+    )
 
 
 def test_run_prof_header_standardization(tmp_path, monkeypatch):
@@ -2909,15 +2942,16 @@ def test_run_prof_header_standardization(tmp_path, monkeypatch):
     with open(workload_dir + "/out/pmc_1/results_test.csv", "w") as f:
         f.write(csv_content)
 
-    monkeypatch.setattr("utils.utils.rocprof_cmd", "rocprofv3")
+    monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofv3")
     monkeypatch.setattr(
-        "utils.utils.capture_subprocess_output", lambda *a, **k: (True, "success")
+        "utils.utils_profile.capture_subprocess_output",
+        lambda *a, **k: (True, "success"),
     )
     monkeypatch.setattr(
         "glob.glob", lambda pattern: [workload_dir + "/out/pmc_1/results_test.csv"]
     )
-    monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
-    monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
+    monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
+    monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
 
     write_calls = []
 
@@ -2926,7 +2960,9 @@ def test_run_prof_header_standardization(tmp_path, monkeypatch):
 
     monkeypatch.setattr("pandas.DataFrame.to_csv", mock_to_csv)
 
-    utils.run_prof(str(fname), ["--arg"], workload_dir, mspec, logging.INFO, "csv")
+    utils_profile.run_prof(
+        str(fname), ["--arg"], workload_dir, mspec, logging.INFO, "csv"
+    )
 
     final_headers = write_calls[-1][1] if write_calls else []
     assert "Kernel_Name" in final_headers
@@ -2961,16 +2997,17 @@ def test_run_prof_tcc_flattening_mi300(tmp_path, monkeypatch):
     mspec = MockSpec()
 
     # Mock functions
-    monkeypatch.setattr("utils.utils.rocprof_cmd", "rocprofv3")
+    monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofv3")
     monkeypatch.setattr(
-        "utils.utils.capture_subprocess_output", lambda *a, **k: (True, "success")
+        "utils.utils_profile.capture_subprocess_output",
+        lambda *a, **k: (True, "success"),
     )
     monkeypatch.setattr("utils.mi_gpu_spec.mi_gpu_specs.get_num_xcds", lambda *a: 2)
     monkeypatch.setattr(
         "glob.glob", lambda pattern: [workload_dir + "/results_test.csv"]
     )
-    monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
-    monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
+    monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
+    monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
 
     # Mock pandas
     mock_df = pd.DataFrame({"Dispatch_ID": [0], "TCC_HIT[0]": [100]})
@@ -2979,7 +3016,9 @@ def test_run_prof_tcc_flattening_mi300(tmp_path, monkeypatch):
     monkeypatch.setattr("pandas.DataFrame.to_csv", lambda self, *a, **k: None)
 
     # Execute function
-    utils.run_prof(str(fname), ["--arg"], workload_dir, mspec, logging.INFO, "csv")
+    utils_profile.run_prof(
+        str(fname), ["--arg"], workload_dir, mspec, logging.INFO, "csv"
+    )
 
 
 def test_run_prof_sdk_creates_new_env_copy(tmp_path, monkeypatch):
@@ -2992,8 +3031,10 @@ def test_run_prof_sdk_creates_new_env_copy(tmp_path, monkeypatch):
     Path(fname_str).touch()
     workload_dir_str = str(tmp_path)
 
-    monkeypatch.setattr("utils.utils.rocprof_cmd", "rocprofiler-sdk")
-    monkeypatch.setattr("utils.utils.process_rocprofv3_output", lambda *a, **k: [])
+    monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofiler-sdk")
+    monkeypatch.setattr(
+        "utils.utils_profile.process_rocprofv3_output", lambda *a, **k: []
+    )
 
     capture_subprocess_called_with_env = None
 
@@ -3003,16 +3044,16 @@ def test_run_prof_sdk_creates_new_env_copy(tmp_path, monkeypatch):
         return (True, "Success")
 
     monkeypatch.setattr(
-        "utils.utils.capture_subprocess_output", mock_capture_subprocess
+        "utils.utils_profile.capture_subprocess_output", mock_capture_subprocess
     )
 
     def mock_console_error_no_exit(msg, exit=True):
         print(f"Mocked console_error: {msg}, exit={exit}")
 
-    monkeypatch.setattr("utils.utils.console_error", mock_console_error_no_exit)
-    monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
+    monkeypatch.setattr("utils.utils_profile.console_error", mock_console_error_no_exit)
+    monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
     monkeypatch.setattr(
-        "utils.utils.parse_text", lambda *a, **k: ["COUNTER1", "COUNTER2"]
+        "utils.utils_profile.parse_text", lambda *a, **k: ["COUNTER1", "COUNTER2"]
     )
 
     mock_fname_path_obj = mock.MagicMock(spec=Path)
@@ -3045,7 +3086,7 @@ def test_run_prof_sdk_creates_new_env_copy(tmp_path, monkeypatch):
             return mock_fname_path_obj
         return mock_fname_path_obj
 
-    monkeypatch.setattr("utils.utils.Path", path_side_effect)
+    monkeypatch.setattr("utils.utils_profile.Path", path_side_effect)
 
     mspec = MockMSpec(gpu_model="mi250")
     loglevel = logging.DEBUG
@@ -3058,7 +3099,7 @@ def test_run_prof_sdk_creates_new_env_copy(tmp_path, monkeypatch):
     monkeypatch.setattr("shutil.rmtree", lambda *a, **k: None)
     monkeypatch.setattr("tempfile.mkdtemp", lambda *a, **k: None)
     monkeypatch.setattr("yaml.dump", lambda *a, **k: None)
-    monkeypatch.setattr("utils.utils.console_warning", lambda *a, **k: None)
+    monkeypatch.setattr("utils.utils_profile.console_warning", lambda *a, **k: None)
     monkeypatch.setattr("builtins.open", lambda *a, **k: io.StringIO(""))
 
     from rocprof_compute_profile.profiler_rocprofiler_sdk import (
@@ -3093,7 +3134,7 @@ def test_run_prof_sdk_creates_new_env_copy(tmp_path, monkeypatch):
         monkeypatch.setenv("LD_PRELOAD", original_env_var)
         profiler_options = profiler.get_profiler_options(native_tool_path="native_tool")
 
-        utils.run_prof(
+        utils_profile.run_prof(
             fname_str,
             profiler_options,
             workload_dir_str,
@@ -3138,7 +3179,7 @@ def test_run_prof_sdk_creates_new_env_copy(tmp_path, monkeypatch):
         # Intentionally not setting LD_PRELOAD to test the unset case
         profiler_options = profiler.get_profiler_options(native_tool_path="native_tool")
 
-        utils.run_prof(
+        utils_profile.run_prof(
             fname_str,
             profiler_options,
             workload_dir_str,
@@ -3184,10 +3225,11 @@ def test_run_prof_v3_cli_calls_kokkos_trace_processing(tmp_path, monkeypatch):
     (tmp_path / "out" / "pmc_1").mkdir(parents=True, exist_ok=True)
 
     monkeypatch.setattr(
-        "utils.utils.capture_subprocess_output", lambda *a, **k: (True, "Success")
+        "utils.utils_profile.capture_subprocess_output",
+        lambda *a, **k: (True, "Success"),
     )
     monkeypatch.setattr(
-        "utils.utils.process_rocprofv3_output",
+        "utils.utils_profile.process_rocprofv3_output",
         lambda *a, **k: [str(tmp_path) + "/results1.csv"],
     )
 
@@ -3197,11 +3239,13 @@ def test_run_prof_v3_cli_calls_kokkos_trace_processing(tmp_path, monkeypatch):
         nonlocal kokkos_trace_called_with
         kokkos_trace_called_with = (wd, fb)
 
-    monkeypatch.setattr("utils.utils.process_kokkos_trace_output", mock_kokkos_trace)
+    monkeypatch.setattr(
+        "utils.utils_profile.process_kokkos_trace_output", mock_kokkos_trace
+    )
 
-    monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
-    monkeypatch.setattr("utils.utils.console_warning", lambda *a, **k: None)
-    monkeypatch.setattr("utils.utils.parse_text", lambda *a, **k: ["C1"])
+    monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
+    monkeypatch.setattr("utils.utils_profile.console_warning", lambda *a, **k: None)
+    monkeypatch.setattr("utils.utils_common.parse_text", lambda *a, **k: ["C1"])
 
     mock_fname_path_obj = mock.MagicMock(spec=Path)
     mock_fname_path_obj.stem = fbase_str
@@ -3227,7 +3271,7 @@ def test_run_prof_v3_cli_calls_kokkos_trace_processing(tmp_path, monkeypatch):
             return mock_fname_path_obj
         return mock_fname_path_obj
 
-    monkeypatch.setattr("utils.utils.Path", path_side_effect)
+    monkeypatch.setattr("utils.utils_profile.Path", path_side_effect)
 
     dummy_df = pd.DataFrame({
         "Dispatch_ID": [0],
@@ -3248,12 +3292,12 @@ def test_run_prof_v3_cli_calls_kokkos_trace_processing(tmp_path, monkeypatch):
     loglevel = logging.INFO
     format_rocprof_output = "csv"
 
-    monkeypatch.setattr("utils.utils.rocprof_cmd", "rocprof_cli_v3")
+    monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprof_cli_v3")
 
     profiler_options_cli_kokkos = ["--kokkos-trace", "--other-opt"]
     kokkos_trace_called_with = None
 
-    utils.run_prof(
+    utils_profile.run_prof(
         fname_str,
         profiler_options_cli_kokkos,
         workload_dir_str,
@@ -3304,10 +3348,10 @@ def test_process_rocprofv3_output_csv_format_with_counter_files(tmp_path, monkey
         Path(output_path).write_text("converted,data\ntest,value")
 
     monkeypatch.setattr(
-        "utils.utils.v3_counter_csv_to_v2_csv", mock_v3_counter_csv_to_v2_csv
+        "utils.utils_profile.v3_counter_csv_to_v2_csv", mock_v3_counter_csv_to_v2_csv
     )
 
-    result = utils.process_rocprofv3_output(workload_dir, False)
+    result = utils_profile.process_rocprofv3_output(workload_dir, False)
 
     assert len(result) == 1
     assert str(converted_file) in result
@@ -3345,13 +3389,15 @@ def test_process_rocprofv3_output_csv_format_conversion_error(tmp_path, monkeypa
         raise ValueError("Conversion failed")
 
     monkeypatch.setattr(
-        "utils.utils.v3_counter_csv_to_v2_csv", mock_v3_counter_csv_to_v2_csv
+        "utils.utils_profile.v3_counter_csv_to_v2_csv", mock_v3_counter_csv_to_v2_csv
     )
 
     warnings = []
-    monkeypatch.setattr("utils.utils.console_warning", lambda msg: warnings.append(msg))
+    monkeypatch.setattr(
+        "utils.utils_profile.console_warning", lambda msg: warnings.append(msg)
+    )
 
-    result = utils.process_rocprofv3_output(workload_dir, False)
+    result = utils_profile.process_rocprofv3_output(workload_dir, False)
 
     assert result == []
     assert len(warnings) == 1
@@ -3384,7 +3430,7 @@ def test_process_rocprofv3_output_csv_format_missing_agent_file(tmp_path, monkey
     monkeypatch.setattr("glob.glob", mock_glob)
 
     with pytest.raises(ValueError, match='has no corresponding "agent info" file'):
-        utils.process_rocprofv3_output(workload_dir, False)
+        utils_profile.process_rocprofv3_output(workload_dir, False)
 
 
 def test_process_rocprofv3_output_csv_format_no_files_non_timestamps(
@@ -3405,7 +3451,7 @@ def test_process_rocprofv3_output_csv_format_no_files_non_timestamps(
 
     monkeypatch.setattr("glob.glob", lambda pattern: [])
 
-    result = utils.process_rocprofv3_output(workload_dir, False)
+    result = utils_profile.process_rocprofv3_output(workload_dir, False)
 
     assert result == []
 
@@ -3453,10 +3499,10 @@ def test_process_rocprofv3_output_csv_format_multiple_counter_files(
         Path(output_path).write_text(f"converted,data\n{Path(counter_path).stem},value")
 
     monkeypatch.setattr(
-        "utils.utils.v3_counter_csv_to_v2_csv", mock_v3_counter_csv_to_v2_csv
+        "utils.utils_profile.v3_counter_csv_to_v2_csv", mock_v3_counter_csv_to_v2_csv
     )
 
-    result = utils.process_rocprofv3_output(workload_dir, False)
+    result = utils_profile.process_rocprofv3_output(workload_dir, False)
 
     assert len(result) == 2
     assert str(converted_file1) in result
@@ -3486,11 +3532,11 @@ def test_capture_subprocess_output_with_logging_disabled(monkeypatch):
 
     log_calls = []
     monkeypatch.setattr(
-        "utils.utils.console_log", lambda *a, **k: log_calls.append((a, k))
+        "utils.utils_common.console_log", lambda *a, **k: log_calls.append((a, k))
     )
-    monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
+    monkeypatch.setattr("utils.logger.console_debug", lambda *a, **k: None)
 
-    success, output = utils.capture_subprocess_output(
+    success, output = utils_common.capture_subprocess_output(
         ["echo", "test"], enable_logging=False
     )
 
@@ -3515,8 +3561,8 @@ def test_process_kokkos_trace_output_single_file(tmp_path, monkeypatch):
         None: Asserts that single file is processed correctly
         and output files are created.
     """
-    monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
-    monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
+    monkeypatch.setattr("utils.logger.console_debug", lambda *a, **k: None)
+    monkeypatch.setattr("utils.utils_common.console_log", lambda *a, **k: None)
 
     workload_dir = str(tmp_path)
     out_dir = tmp_path / "out" / "pmc_1"
@@ -3532,7 +3578,7 @@ def test_process_kokkos_trace_output_single_file(tmp_path, monkeypatch):
 
     fbase = "single_test"
 
-    utils.process_kokkos_trace_output(workload_dir, fbase)
+    utils_profile.process_kokkos_trace_output(workload_dir, fbase)
 
     # Check output file in pmc_1 directory
     output_file = out_dir / f"results_{fbase}_marker_api_trace.csv"
@@ -3552,9 +3598,9 @@ def test_process_kokkos_trace_output_multiple_files(tmp_path, monkeypatch):
     Test process_kokkos_trace_output with multiple valid CSV files.
     Should concatenate all files and save the result.
     """
-    monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
-    monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
-    monkeypatch.setattr("utils.utils.console_warning", lambda *a, **k: None)
+    monkeypatch.setattr("utils.logger.console_debug", lambda *a, **k: None)
+    monkeypatch.setattr("utils.utils_common.console_log", lambda *a, **k: None)
+    monkeypatch.setattr("utils.utils_common.console_warning", lambda *a, **k: None)
 
     workload_dir = str(tmp_path)
     out_dir = tmp_path / "out" / "pmc_1"
@@ -3576,7 +3622,7 @@ def test_process_kokkos_trace_output_multiple_files(tmp_path, monkeypatch):
 
     fbase = "test_workload"
 
-    utils.process_kokkos_trace_output(workload_dir, fbase)
+    utils_profile.process_kokkos_trace_output(workload_dir, fbase)
 
     output_file = out_dir / f"results_{fbase}_marker_api_trace.csv"
     assert output_file.exists(), "The primary output file was not created."
@@ -3602,8 +3648,8 @@ def test_process_kokkos_trace_output_no_files_found(tmp_path, monkeypatch):
     Returns:
         None: Asserts that function handles empty file list without crashing.
     """
-    monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
-    monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
+    monkeypatch.setattr("utils.logger.console_debug", lambda *a, **k: None)
+    monkeypatch.setattr("utils.utils_common.console_log", lambda *a, **k: None)
 
     workload_dir = str(tmp_path)
     out_dir = tmp_path / "out" / "pmc_1"
@@ -3626,7 +3672,7 @@ def test_process_kokkos_trace_output_no_files_found(tmp_path, monkeypatch):
     monkeypatch.setattr("pandas.DataFrame.to_csv", mock_to_csv)
 
     try:
-        utils.process_kokkos_trace_output(workload_dir, fbase)
+        utils_profile.process_kokkos_trace_output(workload_dir, fbase)
 
         output_file = out_dir / f"results_{fbase}_marker_api_trace.csv"
         assert output_file.exists()
@@ -3650,7 +3696,7 @@ def test_process_kokkos_trace_output_mixed_file_states(tmp_path, monkeypatch):
         None: Asserts that valid files are processed while invalid
         ones are handled gracefully.
     """
-    monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
+    monkeypatch.setattr("utils.logger.console_debug", lambda *a, **k: None)
 
     workload_dir = str(tmp_path)
     out_dir = tmp_path / "out" / "pmc_1"
@@ -3685,7 +3731,7 @@ def test_process_kokkos_trace_output_mixed_file_states(tmp_path, monkeypatch):
 
     monkeypatch.setattr("pandas.read_csv", mock_read_csv)
 
-    utils.process_kokkos_trace_output(workload_dir, fbase)
+    utils_profile.process_kokkos_trace_output(workload_dir, fbase)
 
     output_file = out_dir / f"results_{fbase}_marker_api_trace.csv"
     assert output_file.exists()
@@ -3707,7 +3753,7 @@ def test_process_kokkos_trace_output_no_out_directory(tmp_path, monkeypatch):
         None: Asserts that function handles missing
         output directory gracefully.
     """
-    monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
+    monkeypatch.setattr("utils.utils_common.console_debug", lambda *a, **k: None)
 
     workload_dir = str(tmp_path)
 
@@ -3729,7 +3775,7 @@ def test_process_kokkos_trace_output_no_out_directory(tmp_path, monkeypatch):
 
     monkeypatch.setattr("pandas.DataFrame.to_csv", mock_to_csv)
 
-    original_path = utils.Path
+    from pathlib import Path as original_path
 
     def mock_path_exists(path_str):
         if path_str == workload_dir + "/out":
@@ -3739,10 +3785,10 @@ def test_process_kokkos_trace_output_no_out_directory(tmp_path, monkeypatch):
         else:
             return original_path(path_str)
 
-    monkeypatch.setattr("utils.utils.Path", mock_path_exists)
+    monkeypatch.setattr("utils.utils_profile.Path", mock_path_exists)
 
     try:
-        utils.process_kokkos_trace_output(workload_dir, fbase)
+        utils_profile.process_kokkos_trace_output(workload_dir, fbase)
 
         # Should not copy file to workload directory since /out doesn't exist
         copied_file = tmp_path / f"{fbase}_marker_api_trace.csv"
@@ -3767,7 +3813,7 @@ def test_process_kokkos_trace_output_csv_with_only_headers(tmp_path, monkeypatch
     Returns:
         None: Asserts that header-only files result in empty DataFrame.
     """
-    monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
+    monkeypatch.setattr("utils.utils_common.console_debug", lambda *a, **k: None)
 
     workload_dir = str(tmp_path)
     out_dir = tmp_path / "out" / "pmc_1"
@@ -3781,7 +3827,7 @@ def test_process_kokkos_trace_output_csv_with_only_headers(tmp_path, monkeypatch
 
     fbase = "headers_only"
 
-    utils.process_kokkos_trace_output(workload_dir, fbase)
+    utils_profile.process_kokkos_trace_output(workload_dir, fbase)
 
     output_file = out_dir / f"results_{fbase}_marker_api_trace.csv"
     assert output_file.exists()
@@ -3802,7 +3848,7 @@ def test_process_kokkos_trace_output_large_files(tmp_path, monkeypatch):
     Returns:
         None: Asserts that large files are processed correctly.
     """
-    monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
+    monkeypatch.setattr("utils.utils_common.console_debug", lambda *a, **k: None)
 
     workload_dir = str(tmp_path)
     out_dir = tmp_path / "out" / "pmc_1"
@@ -3829,7 +3875,7 @@ def test_process_kokkos_trace_output_large_files(tmp_path, monkeypatch):
 
     fbase = "large_test"
 
-    utils.process_kokkos_trace_output(workload_dir, fbase)
+    utils_profile.process_kokkos_trace_output(workload_dir, fbase)
 
     output_file = out_dir / f"results_{fbase}_marker_api_trace.csv"
     assert output_file.exists()
@@ -3851,7 +3897,7 @@ def test_process_kokkos_trace_output_unicode_content(tmp_path, monkeypatch):
     Returns:
         None: Asserts that unicode content is handled properly.
     """
-    monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
+    monkeypatch.setattr("utils.utils_common.console_debug", lambda *a, **k: None)
 
     workload_dir = str(tmp_path)
     out_dir = tmp_path / "out" / "pmc_1"
@@ -3868,7 +3914,7 @@ def test_process_kokkos_trace_output_unicode_content(tmp_path, monkeypatch):
 
     fbase = "unicode_test"
 
-    utils.process_kokkos_trace_output(workload_dir, fbase)
+    utils_profile.process_kokkos_trace_output(workload_dir, fbase)
 
     output_file = out_dir / f"results_{fbase}_marker_api_trace.csv"
     assert output_file.exists()
@@ -3890,7 +3936,7 @@ def test_process_kokkos_trace_output_different_schemas(tmp_path, monkeypatch):
     Returns:
         None: Asserts that files with different schemas are concatenated properly.
     """
-    monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
+    monkeypatch.setattr("utils.utils_common.console_debug", lambda *a, **k: None)
 
     workload_dir = str(tmp_path)
     out_dir = tmp_path / "out" / "pmc_1"
@@ -3914,7 +3960,7 @@ def test_process_kokkos_trace_output_different_schemas(tmp_path, monkeypatch):
 
     fbase = "schema_test"
 
-    utils.process_kokkos_trace_output(workload_dir, fbase)
+    utils_profile.process_kokkos_trace_output(workload_dir, fbase)
 
     output_file = out_dir / f"results_{fbase}_marker_api_trace.csv"
     assert output_file.exists()
@@ -3944,7 +3990,7 @@ def test_process_kokkos_trace_output_permission_error(tmp_path, monkeypatch):
     Returns:
         None: Asserts that permission errors are handled gracefully.
     """
-    monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
+    monkeypatch.setattr("utils.utils_common.console_debug", lambda *a, **k: None)
 
     workload_dir = str(tmp_path)
     out_dir = tmp_path / "out" / "pmc_1"
@@ -3964,7 +4010,7 @@ def test_process_kokkos_trace_output_permission_error(tmp_path, monkeypatch):
     monkeypatch.setattr("pandas.DataFrame.to_csv", mock_to_csv_permission_error)
 
     with pytest.raises(PermissionError):
-        utils.process_kokkos_trace_output(workload_dir, fbase)
+        utils_profile.process_kokkos_trace_output(workload_dir, fbase)
 
 
 # =============================================================================
@@ -4021,7 +4067,7 @@ def test_get_submodules_basic_functionality(mock_walk, mock_import):
         None: Asserts function correctly lists submodules from a real package.
     """
 
-    result = utils.get_submodules("test_package")
+    result = utils_profile.get_submodules("test_package")
 
     assert isinstance(result, list)
     assert len(result) == 3
@@ -4043,7 +4089,7 @@ def test_get_submodules_empty_package():
 
     with patch("importlib.import_module", return_value=mock_package):
         with patch("pkgutil.walk_packages", return_value=[]):
-            result = utils.get_submodules("empty_package")
+            result = utils_profile.get_submodules("empty_package")
 
             assert isinstance(result, list)
             assert len(result) == 0
@@ -4058,7 +4104,7 @@ def test_get_submodules_package_not_found():
     """
 
     with pytest.raises(ModuleNotFoundError):
-        utils.get_submodules("nonexistent_package_12345")
+        utils_profile.get_submodules("nonexistent_package_12345")
 
 
 mock_package_single = mock.MagicMock()
@@ -4080,7 +4126,7 @@ def test_get_submodules_name_processing_single_underscore(mock_walk, mock_import
         None: Asserts correct name processing for submodules with single underscore.
     """
 
-    result = utils.get_submodules("test_package")
+    result = utils_profile.get_submodules("test_package")
     expected = ["parser", "request", "error"]
     assert result == expected
 
@@ -4104,7 +4150,7 @@ def test_get_submodules_name_processing_multiple_underscores(mock_walk, mock_imp
         None: Asserts correct name processing for complex underscore patterns.
     """
 
-    result = utils.get_submodules("test_package")
+    result = utils_profile.get_submodules("test_package")
     expected = ["somecomplexname", "anothertestcase", "simple"]
     assert result == expected
 
@@ -4128,7 +4174,7 @@ def test_get_submodules_base_module_filtered(mock_walk, mock_import):
         None: Asserts 'base' submodules are excluded from results.
     """
 
-    result = utils.get_submodules("test_package")
+    result = utils_profile.get_submodules("test_package")
     expected = ["parser", "handler"]
     assert result == expected
     assert "base" not in result
@@ -4153,7 +4199,7 @@ def test_get_submodules_no_underscore_in_name(mock_walk, mock_import):
     """
 
     with pytest.raises(IndexError):
-        utils.get_submodules("test_package")
+        utils_profile.get_submodules("test_package")
 
 
 mock_package_empty_parts = mock.MagicMock()
@@ -4176,7 +4222,7 @@ def test_get_submodules_empty_name_parts(mock_walk, mock_import):
     """
 
     try:
-        result = utils.get_submodules("test_package")
+        result = utils_profile.get_submodules("test_package")
         expected = ["", "", "double"]  # noqa - Empty strings for edge cases
         assert len(result) == 3
     except IndexError:
@@ -4197,7 +4243,7 @@ def test_get_submodules_package_without_path_attribute():
 
     with patch("importlib.import_module", return_value=mock_package):
         with pytest.raises(AttributeError):
-            utils.get_submodules("test_package")
+            utils_profile.get_submodules("test_package")
 
 
 mock_package_exception = mock.MagicMock()
@@ -4215,7 +4261,7 @@ def test_get_submodules_pkgutil_walk_packages_exception(mock_walk, mock_import):
     """
 
     with pytest.raises(ImportError):
-        utils.get_submodules("test_package")
+        utils_profile.get_submodules("test_package")
 
 
 mock_package_mixed = mock.MagicMock()
@@ -4239,7 +4285,7 @@ def test_get_submodules_mixed_module_types(mock_walk, mock_import):
         None: Asserts function correctly processes various submodule patterns.
     """
 
-    result = utils.get_submodules("test_package")
+    result = utils_profile.get_submodules("test_package")
     expected = ["parser", "testcase", "simple", "anotherbase"]
     assert result == expected
     assert "base" not in result
@@ -4265,7 +4311,7 @@ def test_get_submodules_large_number_of_submodules(mock_walk, mock_import):
         None: Asserts function handles large numbers of submodules correctly.
     """
 
-    result = utils.get_submodules("test_package")
+    result = utils_profile.get_submodules("test_package")
     assert len(result) == 100
     assert result == expected_results_large
 
@@ -4280,13 +4326,13 @@ def test_get_submodules_string_input_validation():
     """
 
     with pytest.raises((TypeError, AttributeError)):
-        utils.get_submodules(None)
+        utils_profile.get_submodules(None)
 
     with pytest.raises((TypeError, AttributeError)):
-        utils.get_submodules(123)
+        utils_profile.get_submodules(123)
 
     with pytest.raises((TypeError, AttributeError)):
-        utils.get_submodules(["list", "input"])
+        utils_profile.get_submodules(["list", "input"])
 
 
 def test_get_submodules_return_type_consistency():
@@ -4303,14 +4349,14 @@ def test_get_submodules_return_type_consistency():
 
     with patch("importlib.import_module", return_value=mock_package):
         with patch("pkgutil.walk_packages", return_value=[]):
-            result = utils.get_submodules("test_package")
+            result = utils_profile.get_submodules("test_package")
             assert isinstance(result, list)
             assert len(result) == 0
 
     mock_submodules = [(None, "module_base", False)]
     with patch("importlib.import_module", return_value=mock_package):
         with patch("pkgutil.walk_packages", return_value=mock_submodules):
-            result = utils.get_submodules("test_package")
+            result = utils_profile.get_submodules("test_package")
             assert isinstance(result, list)
             assert len(result) == 0
 
@@ -4334,7 +4380,7 @@ def test_get_submodules_special_characters_in_names(mock_walk, mock_import):
         None: Asserts function processes special characters in names correctly.
     """
 
-    result = utils.get_submodules("test_package")
+    result = utils_profile.get_submodules("test_package")
     expected = ["test-case", "test.case", "test123"]
     assert result == expected
 
@@ -4358,7 +4404,7 @@ def test_get_submodules_imports_isolation(mock_walk, mock_import):
     original_importlib = sys.modules.get("importlib")
     original_pkgutil = sys.modules.get("pkgutil")
 
-    result = utils.get_submodules("test_package")
+    result = utils_profile.get_submodules("test_package")
 
     assert sys.modules.get("importlib") == original_importlib
     assert sys.modules.get("pkgutil") == original_pkgutil
@@ -4385,7 +4431,7 @@ def test_get_submodules_unicode_names(mock_walk, mock_import):
         None: Asserts function handles Unicode characters appropriately.
     """
 
-    result = utils.get_submodules("test_package")
+    result = utils_profile.get_submodules("test_package")
     expected = ["tëst", "测试", "тест"]
     assert result == expected
 
@@ -4408,10 +4454,13 @@ def test_get_submodules_docstring_verification(mock_walk, mock_import):
         None: Asserts function behavior aligns with documented purpose.
     """
 
-    assert utils.get_submodules.__doc__ is not None
-    assert "List all submodules for a target package" in utils.get_submodules.__doc__  # noqa
+    assert utils_profile.get_submodules.__doc__ is not None
+    assert (
+        "List all submodules for a target package"
+        in utils_profile.get_submodules.__doc__
+    )  # noqa
 
-    result = utils.get_submodules("test_package")
+    result = utils_profile.get_submodules("test_package")
 
     assert isinstance(result, list)
     assert "submodule1" in result
@@ -4482,8 +4531,8 @@ kernel3,0,120,220"""
     def mock_console_error(*args, **kwargs):
         console_error_calls.append((args, kwargs))
 
-    with patch("utils.utils.console_error", side_effect=mock_console_error):
-        utils.is_workload_empty(str(workload_dir))
+    with patch("utils.utils_analysis.console_error", side_effect=mock_console_error):
+        utils_analysis.is_workload_empty(str(workload_dir))
 
     assert len(console_error_calls) == 0
 
@@ -4515,8 +4564,8 @@ NaN,,,"""
     def mock_console_error(*args, **kwargs):
         console_error_calls.append((args, kwargs))
 
-    with patch("utils.utils.console_error", side_effect=mock_console_error):
-        utils.is_workload_empty(str(workload_dir))
+    with patch("utils.utils_analysis.console_error", side_effect=mock_console_error):
+        utils_analysis.is_workload_empty(str(workload_dir))
 
     assert len(console_error_calls) == 1
     error_args = console_error_calls[0][0]
@@ -4549,9 +4598,9 @@ def test_is_workload_empty_completely_empty_csv(tmp_path):
     def mock_console_error(*args, **kwargs):
         console_error_calls.append((args, kwargs))
 
-    with patch("utils.utils.console_error", side_effect=mock_console_error):
+    with patch("utils.utils_analysis.console_error", side_effect=mock_console_error):
         try:
-            utils.is_workload_empty(str(workload_dir))
+            utils_analysis.is_workload_empty(str(workload_dir))
         except Exception:
             pass
 
@@ -4580,8 +4629,8 @@ def test_is_workload_empty_headers_only_csv(tmp_path):
     def mock_console_error(*args, **kwargs):
         console_error_calls.append((args, kwargs))
 
-    with patch("utils.utils.console_error", side_effect=mock_console_error):
-        utils.is_workload_empty(str(workload_dir))
+    with patch("utils.utils_analysis.console_error", side_effect=mock_console_error):
+        utils_analysis.is_workload_empty(str(workload_dir))
 
     assert len(console_error_calls) == 1
     error_args = console_error_calls[0][0]
@@ -4609,8 +4658,8 @@ def test_is_workload_empty_no_pmc_perf_file(tmp_path):
     def mock_console_error(*args, **kwargs):
         console_error_calls.append((args, kwargs))
 
-    with patch("utils.utils.console_error", side_effect=mock_console_error):
-        utils.is_workload_empty(str(workload_dir))
+    with patch("utils.utils_analysis.console_error", side_effect=mock_console_error):
+        utils_analysis.is_workload_empty(str(workload_dir))
 
     assert len(console_error_calls) == 1
     error_args = console_error_calls[0][0]
@@ -4632,8 +4681,8 @@ def test_is_workload_empty_nonexistent_directory():
     def mock_console_error(*args, **kwargs):
         console_error_calls.append((args, kwargs))
 
-    with patch("utils.utils.console_error", side_effect=mock_console_error):
-        utils.is_workload_empty("/nonexistent/path")
+    with patch("utils.utils_analysis.console_error", side_effect=mock_console_error):
+        utils_analysis.is_workload_empty("/nonexistent/path")
 
     assert len(console_error_calls) == 1
     error_args = console_error_calls[0][0]
@@ -4668,9 +4717,9 @@ incomplete_row"""
     def mock_console_error(*args, **kwargs):
         console_error_calls.append((args, kwargs))
 
-    with patch("utils.utils.console_error", side_effect=mock_console_error):
+    with patch("utils.utils_analysis.console_error", side_effect=mock_console_error):
         try:
-            utils.is_workload_empty(str(workload_dir))
+            utils_analysis.is_workload_empty(str(workload_dir))
         except Exception:
             pass
 
@@ -4703,8 +4752,8 @@ kernel3,1,120,
     def mock_console_error(*args, **kwargs):
         console_error_calls.append((args, kwargs))
 
-    with patch("utils.utils.console_error", side_effect=mock_console_error):
-        utils.is_workload_empty(str(workload_dir))
+    with patch("utils.utils_analysis.console_error", side_effect=mock_console_error):
+        utils_analysis.is_workload_empty(str(workload_dir))
 
     assert len(console_error_calls) == 0
 
@@ -4737,8 +4786,8 @@ def test_is_workload_empty_large_dataset_with_nans(tmp_path):
     def mock_console_error(*args, **kwargs):
         console_error_calls.append((args, kwargs))
 
-    with patch("utils.utils.console_error", side_effect=mock_console_error):
-        utils.is_workload_empty(str(workload_dir))
+    with patch("utils.utils_analysis.console_error", side_effect=mock_console_error):
+        utils_analysis.is_workload_empty(str(workload_dir))
 
     assert len(console_error_calls) == 1
     error_args = console_error_calls[0][0]
@@ -4773,8 +4822,8 @@ kernel_tëst,0,120,220"""
     def mock_console_error(*args, **kwargs):
         console_error_calls.append((args, kwargs))
 
-    with patch("utils.utils.console_error", side_effect=mock_console_error):
-        utils.is_workload_empty(str(workload_dir))
+    with patch("utils.utils_analysis.console_error", side_effect=mock_console_error):
+        utils_analysis.is_workload_empty(str(workload_dir))
 
     assert len(console_error_calls) == 0
 
@@ -4804,8 +4853,8 @@ kernel1,0,100,200"""
     def mock_console_error(*args, **kwargs):
         console_error_calls.append((args, kwargs))
 
-    with patch("utils.utils.console_error", side_effect=mock_console_error):
-        utils.is_workload_empty(str(workload_dir))
+    with patch("utils.utils_analysis.console_error", side_effect=mock_console_error):
+        utils_analysis.is_workload_empty(str(workload_dir))
 
     assert len(console_error_calls) == 0
 
@@ -4839,8 +4888,10 @@ def test_is_workload_empty_csv_read_permission_error(tmp_path):
         console_error_calls.append((args, kwargs))
 
     try:
-        with patch("utils.utils.console_error", side_effect=mock_console_error):
-            utils.is_workload_empty(str(workload_dir))
+        with patch(
+            "utils.utils_analysis.console_error", side_effect=mock_console_error
+        ):
+            utils_analysis.is_workload_empty(str(workload_dir))
     except PermissionError:
         pass
     finally:
@@ -4861,8 +4912,8 @@ def test_is_workload_empty_string_path_input():
     def mock_console_error(*args, **kwargs):
         console_error_calls.append((args, kwargs))
 
-    with patch("utils.utils.console_error", side_effect=mock_console_error):
-        utils.is_workload_empty("/nonexistent/string/path")
+    with patch("utils.utils_analysis.console_error", side_effect=mock_console_error):
+        utils_analysis.is_workload_empty("/nonexistent/string/path")
 
     assert len(console_error_calls) == 1
     error_args = console_error_calls[0][0]
@@ -4893,8 +4944,8 @@ def test_is_workload_empty_console_error_string_formatting(tmp_path):
     def mock_console_error(*args, **kwargs):
         console_error_calls.append((args, kwargs))
 
-    with patch("utils.utils.console_error", side_effect=mock_console_error):
-        utils.is_workload_empty(str(workload_dir))
+    with patch("utils.utils_analysis.console_error", side_effect=mock_console_error):
+        utils_analysis.is_workload_empty(str(workload_dir))
 
     assert len(console_error_calls) == 1
     error_args = console_error_calls[0][0]
@@ -4923,16 +4974,16 @@ def test_is_workload_empty_function_return_value(tmp_path):
     pmc_perf_file = workload_dir / "pmc_perf.csv"
     pmc_perf_file.write_text("Kernel_Name,GPU_ID\nkernel1,0")
 
-    with patch("utils.utils.console_error"):
-        result = utils.is_workload_empty(str(workload_dir))
+    with patch("utils.utils_analysis.console_error"):
+        result = utils_analysis.is_workload_empty(str(workload_dir))
 
     assert result is None
 
     workload_dir2 = tmp_path / "workload2"
     workload_dir2.mkdir()
 
-    with patch("utils.utils.console_error"):
-        result2 = utils.is_workload_empty(str(workload_dir2))
+    with patch("utils.utils_analysis.console_error"):
+        result2 = utils_analysis.is_workload_empty(str(workload_dir2))
 
     assert result2 is None
 
@@ -4952,10 +5003,10 @@ def test_is_workload_empty_pandas_import_dependency():
     mock_pandas.read_csv.return_value = mock_df
 
     with patch.dict("sys.modules", {"pandas": mock_pandas}):
-        with patch("utils.utils.pd", mock_pandas):
-            with patch("utils.utils.console_error"):
+        with patch("utils.utils_analysis.pd", mock_pandas):
+            with patch("utils.utils_analysis.console_error"):
                 with patch("pathlib.Path.is_file", return_value=True):
-                    utils.is_workload_empty("/test/path")
+                    utils_analysis.is_workload_empty("/test/path")
 
     mock_pandas.read_csv.assert_called_once()
     mock_df.dropna.assert_called_once()
@@ -5013,10 +5064,10 @@ def test_set_locale_encoding_successful_c_utf8():
         console_error_calls.append((args, kwargs))
 
     with patch("locale.setlocale") as mock_setlocale:
-        with patch("utils.utils.console_error", side_effect=mock_console_error):
+        with patch("utils.utils_common.console_error", side_effect=mock_console_error):
             mock_setlocale.return_value = None
 
-            utils.set_locale_encoding()
+            utils_common.set_locale_encoding()
 
             mock_setlocale.assert_called_once_with(locale.LC_ALL, "C.UTF-8")
             assert len(console_error_calls) == 0
@@ -5039,14 +5090,16 @@ def test_set_locale_encoding_c_utf8_fails_fallback_to_current_utf8():
 
     with patch("locale.setlocale") as mock_setlocale:
         with patch("locale.getdefaultlocale") as mock_getdefaultlocale:
-            with patch("utils.utils.console_error", side_effect=mock_console_error):
+            with patch(
+                "utils.utils_common.console_error", side_effect=mock_console_error
+            ):
                 mock_setlocale.side_effect = [
                     locale.Error("C.UTF-8 not available"),
                     None,
                 ]
                 mock_getdefaultlocale.return_value = ("en_US", "UTF-8")
 
-                utils.set_locale_encoding()
+                utils_common.set_locale_encoding()
 
                 assert mock_setlocale.call_count == 2
                 mock_setlocale.assert_any_call(locale.LC_ALL, "C.UTF-8")
@@ -5071,7 +5124,9 @@ def test_set_locale_encoding_c_utf8_fails_fallback_also_fails():
 
     with patch("locale.setlocale") as mock_setlocale:
         with patch("locale.getdefaultlocale") as mock_getdefaultlocale:
-            with patch("utils.utils.console_error", side_effect=mock_console_error):
+            with patch(
+                "utils.utils_common.console_error", side_effect=mock_console_error
+            ):
                 fallback_error = locale.Error("Fallback locale failed")
                 mock_setlocale.side_effect = [
                     locale.Error("C.UTF-8 not available"),
@@ -5079,7 +5134,7 @@ def test_set_locale_encoding_c_utf8_fails_fallback_also_fails():
                 ]
                 mock_getdefaultlocale.return_value = ("en_US", "UTF-8")
 
-                utils.set_locale_encoding()
+                utils_common.set_locale_encoding()
 
                 assert len(console_error_calls) == 1
                 assert (
@@ -5106,11 +5161,13 @@ def test_set_locale_encoding_no_utf8_locale_available():
 
     with patch("locale.setlocale") as mock_setlocale:
         with patch("locale.getdefaultlocale") as mock_getdefaultlocale:
-            with patch("utils.utils.console_error", side_effect=mock_console_error):
+            with patch(
+                "utils.utils_common.console_error", side_effect=mock_console_error
+            ):
                 mock_setlocale.side_effect = locale.Error("C.UTF-8 not available")
                 mock_getdefaultlocale.return_value = ("en_US", "ISO-8859-1")
 
-                utils.set_locale_encoding()
+                utils_common.set_locale_encoding()
 
                 assert len(console_error_calls) == 1
                 assert (
@@ -5139,11 +5196,13 @@ def test_set_locale_encoding_getdefaultlocale_returns_none():
 
     with patch("locale.setlocale") as mock_setlocale:
         with patch("locale.getdefaultlocale") as mock_getdefaultlocale:
-            with patch("utils.utils.console_error", side_effect=mock_console_error):
+            with patch(
+                "utils.utils_common.console_error", side_effect=mock_console_error
+            ):
                 mock_setlocale.side_effect = locale.Error("C.UTF-8 not available")
                 mock_getdefaultlocale.return_value = None
 
-                utils.set_locale_encoding()
+                utils_common.set_locale_encoding()
 
                 assert len(console_error_calls) == 1
                 assert (
@@ -5169,13 +5228,15 @@ def test_set_locale_encoding_getdefaultlocale_partial_none():
 
     with patch("locale.setlocale") as mock_setlocale:
         with patch("locale.getdefaultlocale") as mock_getdefaultlocale:
-            with patch("utils.utils.console_error", side_effect=mock_console_error):
+            with patch(
+                "utils.utils_common.console_error", side_effect=mock_console_error
+            ):
                 mock_setlocale.side_effect = locale.Error("C.UTF-8 not available")
 
                 mock_getdefaultlocale.return_value = ("en_US", None)
 
                 try:
-                    utils.set_locale_encoding()
+                    utils_common.set_locale_encoding()
                 except TypeError as e:
                     if "argument of type 'NoneType' is not iterable" in str(e):
                         pytest.skip(
@@ -5212,14 +5273,16 @@ def test_set_locale_encoding_utf8_case_variations():
 
         with patch("locale.setlocale") as mock_setlocale:
             with patch("locale.getdefaultlocale") as mock_getdefaultlocale:
-                with patch("utils.utils.console_error", side_effect=mock_console_error):
+                with patch(
+                    "utils.utils_common.console_error", side_effect=mock_console_error
+                ):
                     mock_setlocale.side_effect = [
                         locale.Error("C.UTF-8 not available"),
                         None,
                     ]
                     mock_getdefaultlocale.return_value = ("en_US", utf8_variant)
 
-                    utils.set_locale_encoding()
+                    utils_common.set_locale_encoding()
 
                     if "UTF-8" in utf8_variant:
                         assert len(console_error_calls) == 0
@@ -5245,11 +5308,13 @@ def test_set_locale_encoding_empty_encoding():
 
     with patch("locale.setlocale") as mock_setlocale:
         with patch("locale.getdefaultlocale") as mock_getdefaultlocale:
-            with patch("utils.utils.console_error", side_effect=mock_console_error):
+            with patch(
+                "utils.utils_common.console_error", side_effect=mock_console_error
+            ):
                 mock_setlocale.side_effect = locale.Error("C.UTF-8 not available")
                 mock_getdefaultlocale.return_value = ("en_US", "")
 
-                utils.set_locale_encoding()
+                utils_common.set_locale_encoding()
 
                 assert len(console_error_calls) == 1
                 assert (
@@ -5275,7 +5340,9 @@ def test_set_locale_encoding_locale_with_utf8_substring():
 
     with patch("locale.setlocale") as mock_setlocale:
         with patch("locale.getdefaultlocale") as mock_getdefaultlocale:
-            with patch("utils.utils.console_error", side_effect=mock_console_error):
+            with patch(
+                "utils.utils_common.console_error", side_effect=mock_console_error
+            ):
                 mock_setlocale.side_effect = [
                     locale.Error("C.UTF-8 not available"),
                     None,
@@ -5285,7 +5352,7 @@ def test_set_locale_encoding_locale_with_utf8_substring():
                     "ISO-8859-1.UTF-8.EXTENDED",
                 )
 
-                utils.set_locale_encoding()
+                utils_common.set_locale_encoding()
 
                 assert len(console_error_calls) == 0
                 assert mock_setlocale.call_count == 2
@@ -5316,7 +5383,9 @@ def test_set_locale_encoding_different_locale_error_types():
 
         with patch("locale.setlocale") as mock_setlocale:
             with patch("locale.getdefaultlocale") as mock_getdefaultlocale:
-                with patch("utils.utils.console_error", side_effect=mock_console_error):
+                with patch(
+                    "utils.utils_common.console_error", side_effect=mock_console_error
+                ):
                     fallback_error = locale.Error(error_msg)
                     mock_setlocale.side_effect = [
                         locale.Error("C.UTF-8 not available"),
@@ -5324,7 +5393,7 @@ def test_set_locale_encoding_different_locale_error_types():
                     ]
                     mock_getdefaultlocale.return_value = ("en_US", "UTF-8")
 
-                    utils.set_locale_encoding()
+                    utils_common.set_locale_encoding()
 
                     assert len(console_error_calls) == 1
                     assert str(fallback_error) in console_error_calls[0][0][0]
@@ -5356,14 +5425,16 @@ def test_set_locale_encoding_unusual_locale_names():
 
         with patch("locale.setlocale") as mock_setlocale:
             with patch("locale.getdefaultlocale") as mock_getdefaultlocale:
-                with patch("utils.utils.console_error", side_effect=mock_console_error):
+                with patch(
+                    "utils.utils_common.console_error", side_effect=mock_console_error
+                ):
                     mock_setlocale.side_effect = [
                         locale.Error("C.UTF-8 not available"),
                         None,
                     ]
                     mock_getdefaultlocale.return_value = (locale_name, encoding)
 
-                    utils.set_locale_encoding()
+                    utils_common.set_locale_encoding()
 
                     assert len(console_error_calls) == 0
                     assert mock_setlocale.call_count == 2
@@ -5387,12 +5458,14 @@ def test_set_locale_encoding_getdefaultlocale_exception():
 
     with patch("locale.setlocale") as mock_setlocale:
         with patch("locale.getdefaultlocale") as mock_getdefaultlocale:
-            with patch("utils.utils.console_error", side_effect=mock_console_error):
+            with patch(
+                "utils.utils_common.console_error", side_effect=mock_console_error
+            ):
                 mock_setlocale.side_effect = locale.Error("C.UTF-8 not available")
                 mock_getdefaultlocale.side_effect = Exception("getdefaultlocale failed")
 
                 try:
-                    utils.set_locale_encoding()
+                    utils_common.set_locale_encoding()
                 except Exception:
                     pass
 
@@ -5414,11 +5487,13 @@ def test_set_locale_encoding_console_error_parameters():
 
     with patch("locale.setlocale") as mock_setlocale:
         with patch("locale.getdefaultlocale") as mock_getdefaultlocale:
-            with patch("utils.utils.console_error", side_effect=mock_console_error):
+            with patch(
+                "utils.utils_common.console_error", side_effect=mock_console_error
+            ):
                 mock_setlocale.side_effect = locale.Error("C.UTF-8 not available")
                 mock_getdefaultlocale.return_value = ("en_US", "ISO-8859-1")
 
-                utils.set_locale_encoding()
+                utils_common.set_locale_encoding()
 
                 assert len(console_error_calls) == 1
                 args, kwargs = console_error_calls[0]
@@ -5438,19 +5513,19 @@ def test_set_locale_encoding_return_value():
     from unittest.mock import patch
 
     with patch("locale.setlocale") as mock_setlocale:
-        with patch("utils.utils.console_error"):
+        with patch("utils.utils_common.console_error"):
             mock_setlocale.return_value = None
 
-            result = utils.set_locale_encoding()
+            result = utils_common.set_locale_encoding()
             assert result is None
 
     with patch("locale.setlocale") as mock_setlocale:
         with patch("locale.getdefaultlocale") as mock_getdefaultlocale:
-            with patch("utils.utils.console_error"):
+            with patch("utils.utils_common.console_error"):
                 mock_setlocale.side_effect = locale.Error("C.UTF-8 not available")
                 mock_getdefaultlocale.return_value = ("en_US", "ISO-8859-1")
 
-                result = utils.set_locale_encoding()
+                result = utils_common.set_locale_encoding()
                 assert result is None
 
 
@@ -5482,8 +5557,10 @@ def test_set_locale_encoding_locale_module_import():
 
     with patch("locale.setlocale", side_effect=mock_setlocale):
         with patch("locale.getdefaultlocale", side_effect=mock_getdefaultlocale):
-            with patch("utils.utils.console_error", side_effect=mock_console_error):
-                utils.set_locale_encoding()
+            with patch(
+                "utils.utils_common.console_error", side_effect=mock_console_error
+            ):
+                utils_common.set_locale_encoding()
 
     assert len(setlocale_calls) == 1
     assert setlocale_calls[0] == (locale.LC_ALL, "C.UTF-8")
@@ -5502,8 +5579,10 @@ def test_set_locale_encoding_locale_module_import():
 
     with patch("locale.setlocale", side_effect=mock_setlocale_with_error):
         with patch("locale.getdefaultlocale", side_effect=mock_getdefaultlocale):
-            with patch("utils.utils.console_error", side_effect=mock_console_error):
-                utils.set_locale_encoding()
+            with patch(
+                "utils.utils_common.console_error", side_effect=mock_console_error
+            ):
+                utils_common.set_locale_encoding()
 
     assert len(setlocale_calls) == 2
     assert setlocale_calls[0] == (locale.LC_ALL, "C.UTF-8")
@@ -5527,12 +5606,12 @@ def test_set_locale_encoding_multiple_calls():
         console_error_calls.append((args, kwargs))
 
     with patch("locale.setlocale") as mock_setlocale:
-        with patch("utils.utils.console_error", side_effect=mock_console_error):
+        with patch("utils.utils_common.console_error", side_effect=mock_console_error):
             mock_setlocale.return_value = None
 
-            utils.set_locale_encoding()
-            utils.set_locale_encoding()
-            utils.set_locale_encoding()
+            utils_common.set_locale_encoding()
+            utils_common.set_locale_encoding()
+            utils_common.set_locale_encoding()
 
             assert mock_setlocale.call_count == 3
             assert len(console_error_calls) == 0
@@ -5564,10 +5643,12 @@ def test_set_locale_encoding_thread_safety_simulation():
 
     with patch("locale.setlocale", side_effect=side_effect_setlocale):
         with patch("locale.getdefaultlocale") as mock_getdefaultlocale:
-            with patch("utils.utils.console_error", side_effect=mock_console_error):
+            with patch(
+                "utils.utils_common.console_error", side_effect=mock_console_error
+            ):
                 mock_getdefaultlocale.return_value = ("en_US", "UTF-8")
 
-                utils.set_locale_encoding()
+                utils_common.set_locale_encoding()
 
                 assert call_count == 2
                 assert len(console_error_calls) == 0
@@ -5623,13 +5704,15 @@ def test_set_locale_encoding_comprehensive_error_handling():
 
         with patch("locale.setlocale") as mock_setlocale:
             with patch("locale.getdefaultlocale") as mock_getdefaultlocale:
-                with patch("utils.utils.console_error", side_effect=mock_console_error):
+                with patch(
+                    "utils.utils_common.console_error", side_effect=mock_console_error
+                ):
                     mock_setlocale.side_effect = scenario["setlocale_side_effect"]
                     mock_getdefaultlocale.return_value = scenario[
                         "getdefaultlocale_return"
                     ]
 
-                    utils.set_locale_encoding()
+                    utils_common.set_locale_encoding()
 
                     assert len(console_error_calls) == scenario["expected_errors"], (
                         f"Failed scenario: {scenario['name']}"
@@ -5695,7 +5778,7 @@ def test_reverse_multi_index_df_pmc_basic_functionality():
     df = pd.DataFrame(data)
     df.columns = pd.MultiIndex.from_tuples(df.columns)
 
-    dfs, coll_levels = utils.reverse_multi_index_df_pmc(df)
+    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
 
     assert len(dfs) == 2
     assert len(coll_levels) == 2
@@ -5723,7 +5806,7 @@ def test_reverse_multi_index_df_pmc_empty_dataframe():
     columns = pd.MultiIndex.from_tuples([("file1", "col1"), ("file1", "col2")])
     df = pd.DataFrame(columns=columns)
 
-    dfs, coll_levels = utils.reverse_multi_index_df_pmc(df)
+    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
 
     assert len(dfs) == 1
     assert len(coll_levels) == 1
@@ -5749,7 +5832,7 @@ def test_reverse_multi_index_df_pmc_single_column_per_level():
     df = pd.DataFrame(data)
     df.columns = pd.MultiIndex.from_tuples(df.columns)
 
-    dfs, coll_levels = utils.reverse_multi_index_df_pmc(df)
+    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
 
     assert len(dfs) == 3
     assert len(coll_levels) == 3
@@ -5781,7 +5864,7 @@ def test_reverse_multi_index_df_pmc_uneven_column_distribution():
     df = pd.DataFrame(data)
     df.columns = pd.MultiIndex.from_tuples(df.columns)
 
-    dfs, coll_levels = utils.reverse_multi_index_df_pmc(df)
+    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
 
     assert len(dfs) == 3
     assert len(coll_levels) == 3
@@ -5815,7 +5898,7 @@ def test_reverse_multi_index_df_pmc_duplicate_level_names():
     df = pd.DataFrame(data)
     df.columns = pd.MultiIndex.from_tuples(df.columns)
 
-    dfs, coll_levels = utils.reverse_multi_index_df_pmc(df)
+    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
 
     assert len(dfs) == 1
     assert len(coll_levels) == 1
@@ -5843,7 +5926,7 @@ def test_reverse_multi_index_df_pmc_mixed_data_types():
     df = pd.DataFrame(data)
     df.columns = pd.MultiIndex.from_tuples(df.columns)
 
-    dfs, coll_levels = utils.reverse_multi_index_df_pmc(df)
+    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
 
     assert len(dfs) == 2
     assert len(coll_levels) == 2
@@ -5876,7 +5959,7 @@ def test_reverse_multi_index_df_pmc_nan_values():
     df = pd.DataFrame(data)
     df.columns = pd.MultiIndex.from_tuples(df.columns)
 
-    dfs, coll_levels = utils.reverse_multi_index_df_pmc(df)
+    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
 
     assert len(dfs) == 2
 
@@ -5906,7 +5989,7 @@ def test_reverse_multi_index_df_pmc_special_column_names():
     df = pd.DataFrame(data)
     df.columns = pd.MultiIndex.from_tuples(df.columns)
 
-    dfs, coll_levels = utils.reverse_multi_index_df_pmc(df)
+    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
 
     assert len(dfs) == 2
     assert "file-1" in coll_levels
@@ -5939,7 +6022,7 @@ def test_reverse_multi_index_df_pmc_numeric_level_names():
     df = pd.DataFrame(data)
     df.columns = pd.MultiIndex.from_tuples(df.columns)
 
-    dfs, coll_levels = utils.reverse_multi_index_df_pmc(df)
+    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
 
     assert len(dfs) == 3
     assert set(coll_levels) == {1, 2, 3.5}
@@ -5972,7 +6055,7 @@ def test_reverse_multi_index_df_pmc_large_dataframe():
     df = pd.DataFrame(data)
     df.columns = pd.MultiIndex.from_tuples(df.columns)
 
-    dfs, coll_levels = utils.reverse_multi_index_df_pmc(df)
+    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
 
     assert len(dfs) == num_levels
     assert len(coll_levels) == num_levels
@@ -6000,7 +6083,7 @@ def test_reverse_multi_index_df_pmc_three_level_index():
     df = pd.DataFrame(data)
     df.columns = pd.MultiIndex.from_tuples(df.columns)
 
-    dfs, coll_levels = utils.reverse_multi_index_df_pmc(df)
+    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
 
     assert len(dfs) == 2
     assert set(coll_levels) == {"file1", "file2"}
@@ -6025,7 +6108,7 @@ def test_reverse_multi_index_df_pmc_return_type_validation():
     df = pd.DataFrame(data)
     df.columns = pd.MultiIndex.from_tuples(df.columns)
 
-    dfs, coll_levels = utils.reverse_multi_index_df_pmc(df)
+    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
 
     assert isinstance(dfs, list)
     assert isinstance(coll_levels, list)
@@ -6052,7 +6135,7 @@ def test_reverse_multi_index_df_pmc_column_order_preservation():
     df = pd.DataFrame(data)
     df.columns = pd.MultiIndex.from_tuples(df.columns)
 
-    dfs, coll_levels = utils.reverse_multi_index_df_pmc(df)
+    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
 
     file1_df = next(df for i, df in enumerate(dfs) if coll_levels[i] == "file1")
     assert list(file1_df.columns) == ["z_col", "a_col", "m_col"]
@@ -6078,7 +6161,7 @@ def test_reverse_multi_index_df_pmc_index_preservation():
     df = pd.DataFrame(data, index=["row_a", "row_b", "row_c"])
     df.columns = pd.MultiIndex.from_tuples(df.columns)
 
-    dfs, coll_levels = utils.reverse_multi_index_df_pmc(df)
+    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
 
     for df_result in dfs:
         assert list(df_result.index) == ["row_a", "row_b", "row_c"]
@@ -6102,7 +6185,7 @@ def test_reverse_multi_index_df_pmc_memory_efficiency():
 
     original_memory = df.memory_usage(deep=True).sum()
 
-    dfs, coll_levels = utils.reverse_multi_index_df_pmc(df)
+    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
 
     total_result_memory = sum(df.memory_usage(deep=True).sum() for df in dfs)
 
@@ -6126,7 +6209,7 @@ def test_reverse_multi_index_df_pmc_edge_case_single_row():
     df = pd.DataFrame(data)
     df.columns = pd.MultiIndex.from_tuples(df.columns)
 
-    dfs, coll_levels = utils.reverse_multi_index_df_pmc(df)
+    dfs, coll_levels = utils_analysis.reverse_multi_index_df_pmc(df)
 
     assert len(dfs) == 2
     assert len(coll_levels) == 2
@@ -6193,7 +6276,7 @@ def test_merge_counters_spatial_multiplex_basic_functionality():
     df = pd.DataFrame(data)
     df.columns = pd.MultiIndex.from_tuples(df.columns)
 
-    result = utils.merge_counters_spatial_multiplex(df)
+    result = utils_analysis.merge_counters_spatial_multiplex(df)
 
     assert isinstance(result, pd.DataFrame)
     assert isinstance(result.columns, pd.MultiIndex)
@@ -6233,7 +6316,7 @@ def test_merge_counters_spatial_multiplex_kernel_name_fallback():
     # The function currently has a bug where it doesn't properly check for 'Kernel_Name'
     # existence before accessing it, even though it has fallback logic for 'Name'
     try:
-        result = utils.merge_counters_spatial_multiplex(df)
+        result = utils_analysis.merge_counters_spatial_multiplex(df)
 
         assert isinstance(result, pd.DataFrame)
         assert len(result) > 0
@@ -6279,7 +6362,7 @@ def test_merge_counters_spatial_multiplex_single_kernel_occurrence():
     df = pd.DataFrame(data)
     df.columns = pd.MultiIndex.from_tuples(df.columns)
 
-    result = utils.merge_counters_spatial_multiplex(df)
+    result = utils_analysis.merge_counters_spatial_multiplex(df)
 
     assert isinstance(result, pd.DataFrame)
     assert len(result) == 3
@@ -6322,7 +6405,7 @@ def test_merge_counters_spatial_multiplex_multiple_duplicate_kernels():
     df = pd.DataFrame(data)
     df.columns = pd.MultiIndex.from_tuples(df.columns)
 
-    result = utils.merge_counters_spatial_multiplex(df)
+    result = utils_analysis.merge_counters_spatial_multiplex(df)
 
     assert isinstance(result, pd.DataFrame)
     assert len(result) == 3
@@ -6358,7 +6441,7 @@ def test_merge_counters_spatial_multiplex_timestamp_median_calculation():
     df = pd.DataFrame(data)
     df.columns = pd.MultiIndex.from_tuples(df.columns)
 
-    result = utils.merge_counters_spatial_multiplex(df)
+    result = utils_analysis.merge_counters_spatial_multiplex(df)
 
     assert isinstance(result, pd.DataFrame)
     assert len(result) == 1
@@ -6377,10 +6460,10 @@ def test_convert_metric_id_to_panel_info_zero_values():
     Returns:
         None: Asserts that zero values are handled correctly in metric IDs.
     """
-    assert utils.convert_metric_id_to_panel_info("0") == ("0000", None, None)
-    assert utils.convert_metric_id_to_panel_info("0.0") == ("0000", 0, None)
-    assert utils.convert_metric_id_to_panel_info("5.0") == ("0500", 500, None)
-    assert utils.convert_metric_id_to_panel_info("0.5") == ("0000", 5, None)
+    assert utils_common.convert_metric_id_to_panel_info("0") == ("0000", None, None)
+    assert utils_common.convert_metric_id_to_panel_info("0.0") == ("0000", 0, None)
+    assert utils_common.convert_metric_id_to_panel_info("5.0") == ("0500", 500, None)
+    assert utils_common.convert_metric_id_to_panel_info("0.5") == ("0000", 5, None)
 
 
 def test_convert_metric_id_to_panel_info_leading_zeros():
@@ -6391,9 +6474,9 @@ def test_convert_metric_id_to_panel_info_leading_zeros():
     Returns:
         None: Asserts that leading zeros are handled correctly.
     """
-    assert utils.convert_metric_id_to_panel_info("04") == ("0400", None, None)
-    assert utils.convert_metric_id_to_panel_info("4.02") == ("0400", 402, None)
-    assert utils.convert_metric_id_to_panel_info("01.05") == ("0100", 105, None)
+    assert utils_common.convert_metric_id_to_panel_info("04") == ("0400", None, None)
+    assert utils_common.convert_metric_id_to_panel_info("4.02") == ("0400", 402, None)
+    assert utils_common.convert_metric_id_to_panel_info("01.05") == ("0100", 105, None)
 
 
 def test_convert_metric_id_to_panel_info_invalid_empty_string():
@@ -6405,7 +6488,7 @@ def test_convert_metric_id_to_panel_info_invalid_empty_string():
         None: Asserts that empty string raises ValueError.
     """
     with pytest.raises(ValueError):
-        utils.convert_metric_id_to_panel_info("")
+        utils_common.convert_metric_id_to_panel_info("")
 
 
 def test_convert_metric_id_to_panel_info_invalid_too_many_parts():
@@ -6417,13 +6500,13 @@ def test_convert_metric_id_to_panel_info_invalid_too_many_parts():
         None: Asserts that metric IDs with more than two parts raise Exception.
     """
     with pytest.raises(Exception, match="Invalid metric id"):
-        utils.convert_metric_id_to_panel_info("4.02.1.5")
+        utils_common.convert_metric_id_to_panel_info("4.02.1.5")
 
     with pytest.raises(Exception, match="Invalid metric id"):
-        utils.convert_metric_id_to_panel_info("1.2.3.4")
+        utils_common.convert_metric_id_to_panel_info("1.2.3.4")
 
     with pytest.raises(Exception, match="Invalid metric id"):
-        utils.convert_metric_id_to_panel_info("4.02.1.5")
+        utils_common.convert_metric_id_to_panel_info("4.02.1.5")
 
 
 def test_convert_metric_id_to_panel_info_invalid_non_numeric():
@@ -6435,16 +6518,16 @@ def test_convert_metric_id_to_panel_info_invalid_non_numeric():
         None: Asserts that non-numeric metric IDs raise ValueError.
     """
     with pytest.raises(ValueError):
-        utils.convert_metric_id_to_panel_info("abc")
+        utils_common.convert_metric_id_to_panel_info("abc")
 
     with pytest.raises(ValueError):
-        utils.convert_metric_id_to_panel_info("4.abc")
+        utils_common.convert_metric_id_to_panel_info("4.abc")
 
     with pytest.raises(ValueError):
-        utils.convert_metric_id_to_panel_info("abc.02")
+        utils_common.convert_metric_id_to_panel_info("abc.02")
 
     with pytest.raises(ValueError):
-        utils.convert_metric_id_to_panel_info("4.02abc")
+        utils_common.convert_metric_id_to_panel_info("4.02abc")
 
 
 def test_convert_metric_id_to_panel_info_three_floating_point():
@@ -6456,9 +6539,9 @@ def test_convert_metric_id_to_panel_info_three_floating_point():
     Returns:
         None: Asserts behavior with floating point representations.
     """
-    assert utils.convert_metric_id_to_panel_info("4.0.2") == ("0400", 400, 2)
-    assert utils.convert_metric_id_to_panel_info("4.2.0") == ("0400", 402, 0)
-    assert utils.convert_metric_id_to_panel_info("4.0.3") == ("0400", 400, 3)
+    assert utils_common.convert_metric_id_to_panel_info("4.0.2") == ("0400", 400, 2)
+    assert utils_common.convert_metric_id_to_panel_info("4.2.0") == ("0400", 402, 0)
+    assert utils_common.convert_metric_id_to_panel_info("4.0.3") == ("0400", 400, 3)
 
 
 def test_convert_metric_id_to_panel_info_edge_case_whitespace():
@@ -6469,9 +6552,9 @@ def test_convert_metric_id_to_panel_info_edge_case_whitespace():
     Returns:
         None: Asserts that whitespace is handled (int() strips whitespace).
     """
-    assert utils.convert_metric_id_to_panel_info(" 4") == ("0400", None, None)
-    assert utils.convert_metric_id_to_panel_info("4 ") == ("0400", None, None)
-    assert utils.convert_metric_id_to_panel_info("4 . 02") == ("0400", 402, None)
+    assert utils_common.convert_metric_id_to_panel_info(" 4") == ("0400", None, None)
+    assert utils_common.convert_metric_id_to_panel_info("4 ") == ("0400", None, None)
+    assert utils_common.convert_metric_id_to_panel_info("4 . 02") == ("0400", 402, None)
 
 
 def test_convert_metric_id_to_panel_info_edge_case_dot_only():
@@ -6483,16 +6566,16 @@ def test_convert_metric_id_to_panel_info_edge_case_dot_only():
         None: Asserts that metric ID with only dot raises Exception.
     """
     with pytest.raises(ValueError):
-        utils.convert_metric_id_to_panel_info("..")
+        utils_common.convert_metric_id_to_panel_info("..")
 
     with pytest.raises(ValueError):
-        utils.convert_metric_id_to_panel_info(".")
+        utils_common.convert_metric_id_to_panel_info(".")
 
     with pytest.raises(ValueError):
-        utils.convert_metric_id_to_panel_info("4.")
+        utils_common.convert_metric_id_to_panel_info("4.")
 
     with pytest.raises(ValueError):
-        utils.convert_metric_id_to_panel_info(".02")
+        utils_common.convert_metric_id_to_panel_info(".02")
 
 
 # =============================================================================
@@ -6507,7 +6590,7 @@ def test_add_counter_invalid_architectures_type():
     """
     data = {}
     with pytest.raises(TypeError, match="'architectures' must be a list, got str"):
-        utils.add_counter_extra_config_input_yaml(
+        utils_common.add_counter_extra_config_input_yaml(
             data=data,
             counter_name="test_counter",
             description="A test counter",
@@ -6516,7 +6599,7 @@ def test_add_counter_invalid_architectures_type():
             properties=["prop1"],
         )
     with pytest.raises(TypeError, match="'architectures' must be a list, got int"):
-        utils.add_counter_extra_config_input_yaml(
+        utils_common.add_counter_extra_config_input_yaml(
             data=data,
             counter_name="test_counter_2",
             description="A test counter 2",
@@ -6533,7 +6616,7 @@ def test_add_counter_invalid_properties_type():
     """
     data = {}
     with pytest.raises(TypeError, match="'properties' must be a list, got str"):
-        utils.add_counter_extra_config_input_yaml(
+        utils_common.add_counter_extra_config_input_yaml(
             data=data,
             counter_name="test_counter",
             description="A test counter",
@@ -6542,7 +6625,7 @@ def test_add_counter_invalid_properties_type():
             properties="not_a_list",  # Invalid type
         )
     with pytest.raises(TypeError, match="'properties' must be a list, got dict"):
-        utils.add_counter_extra_config_input_yaml(
+        utils_common.add_counter_extra_config_input_yaml(
             data=data,
             counter_name="test_counter_2",
             description="A test counter 2",
@@ -6565,7 +6648,7 @@ def test_add_counter_overwrite_existing():
     initial_properties = ["P_INIT"]
 
     # Add the counter for the first time
-    data = utils.add_counter_extra_config_input_yaml(
+    data = utils_common.add_counter_extra_config_input_yaml(
         data=data,
         counter_name=counter_name,
         description=initial_description,
@@ -6594,8 +6677,8 @@ def test_add_counter_overwrite_existing():
 
 
 @mock.patch.dict(os.environ, {"ROCPROF": "rocprofiler-sdk"}, clear=True)
-@mock.patch("utils.utils.console_error")
-@mock.patch("utils.utils.Path")
+@mock.patch("utils.utils_common.console_error")
+@mock.patch("utils.utils_common.Path")
 def test_detect_rocprof_calls_console_error_if_sdk_path_invalid(
     mock_path_constructor, mock_console_error_func
 ):
@@ -6611,8 +6694,8 @@ def test_detect_rocprof_calls_console_error_if_sdk_path_invalid(
     fake_library_path = "/some/invalid/path/to/librocprofiler_sdk.so"
     args = MockArgs(rocprofiler_sdk_tool_path=fake_library_path)
 
-    with mock.patch("utils.utils.console_debug") as mock_console_debug:  # noqa
-        utils.detect_rocprof(args)
+    with mock.patch("utils.utils_common.console_debug") as mock_console_debug:  # noqa
+        utils_common.detect_rocprof(args)
 
     expected_error_message = (
         "Could not find rocprofiler-sdk tool at " + fake_library_path
@@ -6632,8 +6715,8 @@ def create_csv_string(data_dict):
     return pd.DataFrame(data_dict).to_csv(index=False)
 
 
-@mock.patch("utils.utils.console_error")
-@mock.patch("utils.utils.console_debug")
+@mock.patch("utils.utils_profile.console_error")
+@mock.patch("utils.utils_profile.console_debug")
 def test_v3_to_v2_agent_id_parsing_success_and_error(
     mock_console_debug, mock_console_error, tmp_path
 ):
@@ -6673,7 +6756,7 @@ def test_v3_to_v2_agent_id_parsing_success_and_error(
     counter_filepath_success = tmp_path / "counter_success.csv"
     counter_filepath_success.write_text(counter_content_success)
 
-    utils.v3_counter_csv_to_v2_csv(
+    utils_profile.v3_counter_csv_to_v2_csv(
         str(counter_filepath_success),
         str(agent_info_filepath),
         str(converted_csv_filepath),
@@ -6712,7 +6795,7 @@ def test_v3_to_v2_agent_id_parsing_success_and_error(
     counter_filepath_error.write_text(counter_content_error)
 
     try:
-        utils.v3_counter_csv_to_v2_csv(
+        utils_profile.v3_counter_csv_to_v2_csv(
             str(counter_filepath_error),
             str(agent_info_filepath),
             str(converted_csv_filepath),
@@ -6730,7 +6813,7 @@ def test_v3_to_v2_agent_id_parsing_success_and_error(
     )
 
 
-@mock.patch("utils.utils.console_debug")  # To suppress debug output
+@mock.patch("utils.utils_profile.console_debug")  # To suppress debug output
 def test_v3_to_v2_accum_column_rename(mock_console_debug, tmp_path):
     """
     Tests Line 3: Renaming of a column ending with '_ACCUM' to 'SQ_ACCUM_PREV_HIRES'.
@@ -6770,7 +6853,7 @@ def test_v3_to_v2_accum_column_rename(mock_console_debug, tmp_path):
     counter_filepath = tmp_path / "counter_accum.csv"
     counter_filepath.write_text(counter_content)
 
-    utils.v3_counter_csv_to_v2_csv(
+    utils_profile.v3_counter_csv_to_v2_csv(
         str(counter_filepath), str(agent_info_filepath), str(converted_csv_filepath)
     )
 
@@ -6782,7 +6865,7 @@ def test_v3_to_v2_accum_column_rename(mock_console_debug, tmp_path):
     assert result_df["CYCLES"].iloc[0] == 5000
 
 
-@mock.patch("utils.utils.console_debug")
+@mock.patch("utils.utils_profile.console_debug")
 def test_v3_to_v2_default_accum_vgpr_count(mock_console_debug, tmp_path):
     """
     Tests Line 4: 'Accum_VGPR_Count' is added and set to 0 if not present in input.
@@ -6819,7 +6902,7 @@ def test_v3_to_v2_default_accum_vgpr_count(mock_console_debug, tmp_path):
     counter_filepath = tmp_path / "counter_no_accum_vgpr.csv"
     counter_filepath.write_text(counter_content)
 
-    utils.v3_counter_csv_to_v2_csv(
+    utils_profile.v3_counter_csv_to_v2_csv(
         str(counter_filepath), str(agent_info_filepath), str(converted_csv_filepath)
     )
 
@@ -6834,9 +6917,9 @@ def test_v3_to_v2_default_accum_vgpr_count(mock_console_debug, tmp_path):
 # ===================================================================
 
 
-@mock.patch("utils.utils.capture_subprocess_output")
-@mock.patch("utils.utils.console_error")
-@mock.patch("utils.utils.console_debug")
+@mock.patch("utils.utils_profile.capture_subprocess_output")
+@mock.patch("utils.utils_profile.console_error")
+@mock.patch("utils.utils_profile.console_debug")
 def test_pc_sampling_prof_sdk_path_nonexistent_librocprofiler_sdk_tool(
     mock_console_debug, mock_console_error, mock_capture_subprocess, tmp_path
 ):
@@ -6847,7 +6930,7 @@ def test_pc_sampling_prof_sdk_path_nonexistent_librocprofiler_sdk_tool(
     file existence before `capture_subprocess_output` is not in the provided snippet,
     but we test the path construction.
     """
-    with mock.patch("utils.utils.rocprof_cmd", "rocprofiler-sdk"):
+    with mock.patch("utils.utils_common._rocprof_cmd", "rocprofiler-sdk"):
         method = "host_trap"
         interval = 1000
         workload_dir = str(tmp_path)
@@ -6866,7 +6949,7 @@ def test_pc_sampling_prof_sdk_path_nonexistent_librocprofiler_sdk_tool(
 
         mock_capture_subprocess.return_value = (True, "Success output")
 
-        utils.pc_sampling_prof(options, method, interval, workload_dir)
+        utils_profile.pc_sampling_prof(options, method, interval, workload_dir)
 
         assert mock_capture_subprocess.called
         call_args = mock_capture_subprocess.call_args
@@ -6878,9 +6961,9 @@ def test_pc_sampling_prof_sdk_path_nonexistent_librocprofiler_sdk_tool(
         mock_console_error.assert_not_called()
 
 
-@mock.patch("utils.utils.capture_subprocess_output")
-@mock.patch("utils.utils.console_error")
-@mock.patch("utils.utils.console_debug")
+@mock.patch("utils.utils_profile.capture_subprocess_output")
+@mock.patch("utils.utils_profile.console_error")
+@mock.patch("utils.utils_profile.console_debug")
 def test_pc_sampling_prof_subprocess_fails(
     mock_console_debug, mock_console_error, mock_capture_subprocess, tmp_path
 ):
@@ -6888,7 +6971,7 @@ def test_pc_sampling_prof_subprocess_fails(
     Edge Case: The capture_subprocess_output returns success=False.
     This should trigger the console_error("PC sampling failed.").
     """
-    with mock.patch("utils.utils.rocprof_cmd", "rocprof_cli_tool"):
+    with mock.patch("utils.utils_common._rocprof_cmd", "rocprof_cli_tool"):
         method = "stochastic"
         interval = 5000
         workload_dir = str(tmp_path)
@@ -6897,14 +6980,14 @@ def test_pc_sampling_prof_subprocess_fails(
 
         mock_capture_subprocess.return_value = (False, "Error output from subprocess")
 
-        utils.pc_sampling_prof(options, method, interval, workload_dir)
+        utils_profile.pc_sampling_prof(options, method, interval, workload_dir)
 
         mock_capture_subprocess.assert_called_once()
         mock_console_error.assert_called_once_with("PC sampling failed.")
 
     mock_capture_subprocess.reset_mock()
     mock_console_error.reset_mock()
-    with mock.patch("utils.utils.rocprof_cmd", "rocprofiler-sdk"):
+    with mock.patch("utils.utils_common._rocprof_cmd", "rocprofiler-sdk"):
         options = {"APP_CMD": "another_app"}
         sdk_lib_dir = tmp_path / "rocm_sdk_fail" / "lib"
         sdk_lib_dir.mkdir(parents=True, exist_ok=True)
@@ -6920,15 +7003,15 @@ def test_pc_sampling_prof_subprocess_fails(
             "Error output from SDK subprocess",
         )
 
-        utils.pc_sampling_prof(options, method, interval, workload_dir)
+        utils_profile.pc_sampling_prof(options, method, interval, workload_dir)
 
         mock_capture_subprocess.assert_called_once()
         mock_console_error.assert_called_once_with("PC sampling failed.")
 
 
-@mock.patch("utils.utils.capture_subprocess_output")
-@mock.patch("utils.utils.console_error")
-@mock.patch("utils.utils.console_debug")
+@mock.patch("utils.utils_profile.capture_subprocess_output")
+@mock.patch("utils.utils_profile.console_error")
+@mock.patch("utils.utils_profile.console_debug")
 def test_pc_sampling_prof_empty_appcmd(
     mock_console_debug, mock_console_error, mock_capture_subprocess, tmp_path
 ):
@@ -6937,7 +7020,7 @@ def test_pc_sampling_prof_empty_appcmd(
     The function should still attempt to run it. The behavior of
     capture_subprocess_output with an empty command is external to this function.
     """
-    with mock.patch("utils.utils.rocprof_cmd", "rocprof_cli_tool"):
+    with mock.patch("utils.utils_common._rocprof_cmd", "rocprof_cli_tool"):
         method = "host_trap"
         interval = 100
         workload_dir = str(tmp_path)
@@ -6946,7 +7029,7 @@ def test_pc_sampling_prof_empty_appcmd(
 
         mock_capture_subprocess.return_value = (True, "Output with empty appcmd")
 
-        utils.pc_sampling_prof(options, method, interval, workload_dir)
+        utils_profile.pc_sampling_prof(options, method, interval, workload_dir)
 
         assert mock_capture_subprocess.called
         options_list = mock_capture_subprocess.call_args[0][0]
@@ -6955,7 +7038,7 @@ def test_pc_sampling_prof_empty_appcmd(
 
     mock_capture_subprocess.reset_mock()
     mock_console_error.reset_mock()
-    with mock.patch("utils.utils.rocprof_cmd", "rocprofiler-sdk"):
+    with mock.patch("utils.utils_common._rocprof_cmd", "rocprofiler-sdk"):
         sdk_lib_dir = tmp_path / "rocm_sdk_empty" / "lib"
         sdk_lib_dir.mkdir(parents=True, exist_ok=True)
         rocprofiler_sdk_tool_path_sdk = str(sdk_lib_dir / "librocprofiler_sdk.so")
@@ -6967,7 +7050,7 @@ def test_pc_sampling_prof_empty_appcmd(
         mock_capture_subprocess.return_value = (True, "Output with empty appcmd SDK")
         options = {"APP_CMD": ""}
 
-        utils.pc_sampling_prof(options, method, interval, workload_dir)
+        utils_profile.pc_sampling_prof(options, method, interval, workload_dir)
 
         assert mock_capture_subprocess.called
         assert mock_capture_subprocess.call_args[0][0] == ""
@@ -6975,7 +7058,7 @@ def test_pc_sampling_prof_empty_appcmd(
 
 
 def test_set_parser():
-    from utils.utils import parse_sets_yaml
+    from utils.utils_common import parse_sets_yaml
 
     result = parse_sets_yaml("gfx90a")
 
@@ -6986,56 +7069,56 @@ def test_set_parser():
 @pytest.mark.sci_notion
 def test_scientific_notation_trigger_below_lower_bound():
     value = 0.0001
-    result = utils.format_scientific_notation_if_needed(value)
+    result = utils_common.format_scientific_notation_if_needed(value)
     assert pytest.approx(float(result.strip()), rel=1e-9) == value
 
 
 @pytest.mark.sci_notion
 def test_scientific_notation_trigger_at_lower_bound():
     value = 0.01
-    result = utils.format_scientific_notation_if_needed(value)
+    result = utils_common.format_scientific_notation_if_needed(value)
     assert pytest.approx(float(result.strip()), rel=1e-9) == value
 
 
 @pytest.mark.sci_notion
 def test_scientific_notation_trigger_just_below_upper_bound():
     value = 999999
-    result = utils.format_scientific_notation_if_needed(value, precision=6)
+    result = utils_common.format_scientific_notation_if_needed(value, precision=6)
     assert pytest.approx(float(result.strip()), rel=1e-6) == value
 
 
 @pytest.mark.sci_notion
 def test_scientific_notation_trigger_zero():
     value = 0
-    result = utils.format_scientific_notation_if_needed(value)
+    result = utils_common.format_scientific_notation_if_needed(value)
     assert float(result.strip()) == value  # Exact match for zero
 
 
 @pytest.mark.sci_notion
 def test_scientific_notation_trigger_slightly_below_lower_bound():
     value = 0.009
-    result = utils.format_scientific_notation_if_needed(value)
+    result = utils_common.format_scientific_notation_if_needed(value)
     assert pytest.approx(float(result.strip()), rel=1e-9) == value
 
 
 @pytest.mark.sci_notion
 def test_scientific_notation_trigger_well_below_lower_bound():
     value = 1e-5
-    result = utils.format_scientific_notation_if_needed(value)
+    result = utils_common.format_scientific_notation_if_needed(value)
     assert pytest.approx(float(result.strip()), rel=1e-9) == value
 
 
 @pytest.mark.sci_notion
 def test_scientific_notation_trigger_well_above_upper_bound():
     value = 1e10
-    result = utils.format_scientific_notation_if_needed(value)
+    result = utils_common.format_scientific_notation_if_needed(value)
     assert pytest.approx(float(result.strip()), rel=1e-9) == value
 
 
 @pytest.mark.sci_notion
 def test_alignment_and_width():
     value = 1e10
-    result = utils.format_scientific_notation_if_needed(
+    result = utils_common.format_scientific_notation_if_needed(
         value,
         align=">",
         width_align=12,
@@ -7266,7 +7349,7 @@ def test_impute_counters_iteration_multiplex():
     df.columns = pd.MultiIndex.from_tuples(df.columns)
 
     # For "kernel" policy
-    result = utils.impute_counters_iteration_multiplex(df, "kernel")
+    result = utils_analysis.impute_counters_iteration_multiplex(df, "kernel")
     # Sort by Dispatch_ID to ensure consistent order
     result = result.sort_values(by=("file1", "Dispatch_ID"))
     assert isinstance(result, pd.DataFrame)
@@ -7276,7 +7359,9 @@ def test_impute_counters_iteration_multiplex():
     assert result[("file1", "Counter1")].iloc[1] == 100
 
     # For "kernel_launch_params" policy
-    result = utils.impute_counters_iteration_multiplex(df, "kernel_launch_params")
+    result = utils_analysis.impute_counters_iteration_multiplex(
+        df, "kernel_launch_params"
+    )
     # Sort by Dispatch_ID to ensure consistent order
     result = result.sort_values(by=("file1", "Dispatch_ID"))
     # Assert Counter1 and Counter2 imputed for first and last dispatches
@@ -7307,7 +7392,9 @@ def test_impute_counters_iteration_multiplex():
     df = pd.DataFrame(data)
     df.columns = pd.MultiIndex.from_tuples(df.columns)
 
-    result = utils.impute_counters_iteration_multiplex(df, "kernel_launch_params")
+    result = utils_analysis.impute_counters_iteration_multiplex(
+        df, "kernel_launch_params"
+    )
     # Sort by Dispatch_ID to ensure consistent order
     result = result.sort_values(by=("file1", "Dispatch_ID"))
 
@@ -7341,7 +7428,7 @@ def test_impute_counters_iteration_multiplex():
     df.columns = pd.MultiIndex.from_tuples(df.columns)
 
     # For "kernel" policy
-    result = utils.impute_counters_iteration_multiplex(df, "kernel")
+    result = utils_analysis.impute_counters_iteration_multiplex(df, "kernel")
     # Sort by Dispatch_ID to ensure consistent order
     result = result.sort_values(by=("file1", "Dispatch_ID"))
     # Assert Counter1 and Counter2 imputed for first and last dispatches
@@ -7373,7 +7460,9 @@ def test_impute_counters_iteration_multiplex():
     df = pd.DataFrame(data)
     df.columns = pd.MultiIndex.from_tuples(df.columns)
 
-    result = utils.impute_counters_iteration_multiplex(df, "kernel_launch_params")
+    result = utils_analysis.impute_counters_iteration_multiplex(
+        df, "kernel_launch_params"
+    )
     # Sort by Dispatch_ID to ensure consistent order
     result = result.sort_values(by=("file1", "Dispatch_ID"))
 
@@ -7409,7 +7498,9 @@ def test_impute_counters_iteration_multiplex():
 
     df = pd.DataFrame(data)
     df.columns = pd.MultiIndex.from_tuples(df.columns)
-    result = utils.impute_counters_iteration_multiplex(df, "kernel_launch_params")
+    result = utils_analysis.impute_counters_iteration_multiplex(
+        df, "kernel_launch_params"
+    )
     result = result.sort_values(by=("file1", "Dispatch_ID"))
 
     # Verify complete subgroups: all rows should have all counters
@@ -7824,7 +7915,7 @@ def test_experimental_action_help_suppression():
 @pytest.mark.misc
 def test_version_to_numeric():
     """Test version_to_numeric helper function."""
-    from utils.utils import version_to_numeric
+    from utils.utils_common import version_to_numeric
 
     # Test normalized to max_len=3
     max_len = 3
@@ -7853,7 +7944,7 @@ def test_version_to_numeric():
 @pytest.mark.misc
 def test_resolve_rocm_library_path(tmp_path):
     """Test resolve_rocm_library_path with various scenarios."""
-    from utils.utils import resolve_rocm_library_path
+    from utils.utils_common import resolve_rocm_library_path
 
     # Test case 1: Empty path returns as-is
     assert resolve_rocm_library_path("") == ""
