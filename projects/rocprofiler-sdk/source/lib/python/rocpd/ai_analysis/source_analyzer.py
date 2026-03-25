@@ -33,7 +33,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-
 # ---------------------------------------------------------------------------
 # Source file extensions to scan
 # ---------------------------------------------------------------------------

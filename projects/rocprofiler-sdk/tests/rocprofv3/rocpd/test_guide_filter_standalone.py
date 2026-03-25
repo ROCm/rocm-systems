@@ -18,7 +18,6 @@ from pathlib import Path
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Group A: AnalysisContext defaults and construction (5 tests)
 # ---------------------------------------------------------------------------
