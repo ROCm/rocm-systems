@@ -36,7 +36,8 @@ static pthread_once_t initOnceControl = PTHREAD_ONCE_INIT;
 static ncclResult_t initResult;
 
 // This env var (NCCL_CUMEM_ENABLE) toggles cuMem API usage
-NCCL_PARAM(CuMemEnable, "CUMEM_ENABLE", 0);
+NCCL_PARAM(CuMemEnable, "CUMEM_ENABLE", 1);
+RCCL_PARAM(ForceCuMem, "FORCE_CUMEM", 0);
 NCCL_PARAM(CuMemHostEnable, "CUMEM_HOST_ENABLE", -1);
 // Handle type used for cuMemCreate()
 CUmemAllocationHandleType ncclCuMemHandleType = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
@@ -66,6 +67,10 @@ error:
 int ncclCuMemEnable() {
   int param = ncclParamCuMemEnable();
   if (param > 0 && !ncclCuMemSupported) {
+    if (rcclParamForceCuMem()) {
+      WARN("cuMem support not detected but force-enabled via RCCL_FORCE_CUMEM=1");
+      return param;
+    }
     WARN("cuMem support requires HIP_VERSION >= 71260540");
     return 0;
   }

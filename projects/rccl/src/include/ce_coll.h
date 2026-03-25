@@ -15,6 +15,8 @@
 #define NCCL_CE_SYNC_OPS_PER_RANK_MC 2
 #define NCCL_CE_SYNC_OPS_PER_RANK_UC 3
 
+#define NCCL_CE_NUM_COPY_STREAMS 8
+
 struct ncclCeColl {
   uint8_t* baseUCSymReadyPtr;
   uint8_t* baseUCSymComplPtr;
@@ -25,6 +27,9 @@ struct ncclCeColl {
   uint32_t intraBatchSyncFreq;
   uint64_t intraBatchSyncMsgThreshold;
   struct ncclDevrWindow* ceSyncWin;
+  int nCopyStreams;
+  cudaStream_t copyStreams[NCCL_CE_NUM_COPY_STREAMS];
+  cudaEvent_t copyEvents[NCCL_CE_NUM_COPY_STREAMS];
 };
 
 struct ncclCeInitTask {
@@ -49,8 +54,8 @@ struct ncclCeBatchOpsParams {
   size_t* sizes;
   size_t numOps;
   bool intraBatchSync;
-#if CUDART_VERSION >= 12080
-  cudaMemcpyAttributes* attrs;
+#ifdef RCCL_ENABLE_BATCH_MEMCPY
+  hipMemcpyAttributes* attrs;
   size_t* attrIdxs;
   size_t numAttrs;
 #endif
