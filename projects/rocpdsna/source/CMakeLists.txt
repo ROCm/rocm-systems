@@ -30,15 +30,18 @@ set(rocpdsna_sources
     ${CMAKE_CURRENT_LIST_DIR}/storage.cpp
     ${CMAKE_CURRENT_LIST_DIR}/storage_impl.cpp
 )
-target_sources(rocpdsna PRIVATE ${rocpdsna_sources})
+target_sources(rocpdsna-objects PRIVATE ${rocpdsna_sources})
 
 # ------------------------------------------------------------ #
 # Common headers
 # ------------------------------------------------------------ #
-target_include_directories(rocpdsna PRIVATE ${CMAKE_CURRENT_LIST_DIR}/common)
+target_include_directories(
+    rocpdsna-objects
+    PRIVATE ${CMAKE_CURRENT_LIST_DIR}/common
+)
 
 add_subdirectory(queries)
 add_subdirectory(data_storage)
 
-# Link queries library to rocpdsna
-target_link_libraries(rocpdsna PRIVATE rocpdsna_queries)
+# Link queries library to rocpdsna-objects (for compile-time includes)
+target_link_libraries(rocpdsna-objects PRIVATE rocpdsna_queries)
