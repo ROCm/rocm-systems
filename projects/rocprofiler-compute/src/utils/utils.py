@@ -870,6 +870,13 @@ def parse_text(text_file: str) -> list[str]:
         ]
 
 
+def is_only_pc_sampling(filter_blocks: list[str]) -> bool:
+    """Return True if all requested blocks are PC sampling (block 21)."""
+    return bool(filter_blocks) and all(
+        block in ["21", "pc_sampling"] for block in filter_blocks
+    )
+
+
 def run_prof(
     fnames: Union[list[str], str],
     profiler_options: Union[list[str], dict[str, Union[str, list[str]]]],
@@ -1779,17 +1786,30 @@ def get_submodules(package_name: str) -> list[str]:
 
 def is_workload_empty(path: str) -> None:
     """Peek workload directory to verify valid profiling output"""
-    pmc_perf_path = Path(path) / "pmc_perf.csv"
+    workload_dir = Path(path)
+    pmc_perf_path = workload_dir / "pmc_perf.csv"
+
+    # Find PMC data files (merged or separate)
     if pmc_perf_path.is_file():
-        temp_df = pd.read_csv(pmc_perf_path)
+        files_to_check = [pmc_perf_path]
+    else:
+        pmc_files = list(workload_dir.glob("pmc_perf_*.csv"))
+        results_files = list(workload_dir.glob("results_*.csv"))
+        files_to_check = pmc_files if pmc_files else results_files
+
+    if not files_to_check:
+        console_error("analysis", "No profiling data found.")
+        return
+
+    # Validate files are not empty
+    for file_path in files_to_check:
+        temp_df = pd.read_csv(file_path)
         if temp_df.dropna().empty:
             console_error(
                 "profiling",
-                f"Found empty cells in {pmc_perf_path}.\n"
-                "Profiling data could be corrupt.",
+                f"Found empty cells in {file_path}.\nProfiling data could be corrupt.",
             )
-    else:
-        console_error("analysis", "No profiling data found.")
+            break
 
 
 def print_status(msg: str) -> None:
