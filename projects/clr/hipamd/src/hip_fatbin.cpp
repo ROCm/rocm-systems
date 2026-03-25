@@ -492,70 +492,73 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
               elf_bytes, elf_bytes + elf_size));
           uint8_t* patched = s_bare_elf_bufs.back()->data();
 
-          // Patch e_flags
+          // Patch e_flags to target ISA so the ROCR loader's early ISA check
+          // resolves a valid handle (it handles unknown source ISAs via the
+          // hotswap override fallback path).
           e_flags = (e_flags & ~0xFFu) | target_mach;
           memcpy(patched + 48, &e_flags, 4);
 
-          // Patch .note ISA string
-          uint64_t shoff = 0; uint16_t shentsz = 0, shnum = 0;
-          memcpy(&shoff, patched + 40, 8);
-          memcpy(&shentsz, patched + 58, 2);
-          memcpy(&shnum, patched + 60, 2);
-          for (uint16_t si = 0; si < shnum && shoff + (si+1)*shentsz <= elf_size; ++si) {
-            uint8_t* sh = patched + shoff + si * shentsz;
-            uint32_t shtype = 0; memcpy(&shtype, sh + 4, 4);
-            if (shtype != 7) continue;
-            uint64_t nofs = 0, nsize = 0;
-            memcpy(&nofs, sh + 24, 8); memcpy(&nsize, sh + 32, 8);
-            uint64_t pos = nofs;
-            while (pos + 12 <= nofs + nsize && pos + 12 <= elf_size) {
-              uint32_t namesz, descsz, ntype;
-              memcpy(&namesz, patched + pos, 4);
-              memcpy(&descsz, patched + pos + 4, 4);
-              memcpy(&ntype, patched + pos + 8, 4);
-              uint32_t na = (namesz + 3) & ~3u, da = (descsz + 3) & ~3u;
-              if ((ntype == 27 || ntype == 32) && pos + 12 + na + da <= elf_size) {
-                // Patch gfx string in both NT_AMDGPU_ISA (27) and
-                // NT_AMDGPU_METADATA (32, MSGPACK) notes
-                uint8_t* desc = patched + pos + 12 + na;
-                // Scan for all "gfx" occurrences and patch each one
-                for (uint32_t off = 0; off + 6 < descsz; ++off) {
-                  if (desc[off] == 'g' && desc[off+1] == 'f' && desc[off+2] == 'x') {
-                    // Found "gfx" — extract the full gfx token
-                    uint32_t end = off + 3;
-                    while (end < descsz && desc[end] >= '0' && desc[end] <= '9') ++end;
-                    // Also include 'a' for gfx90a
-                    while (end < descsz && desc[end] >= 'a' && desc[end] <= 'z') ++end;
-                    uint32_t gfx_len = end - off;
-                    std::string orig(reinterpret_cast<char*>(desc + off), gfx_len);
-                    if (orig != target_gfx && target_gfx.size() == gfx_len) {
-                      memcpy(desc + off, target_gfx.c_str(), target_gfx.size());
+          if (!is_cross_family) {
+            // Same-family: patch .note ISA string so the ROCR same-family
+            // retarget path can apply hotswap rules.
+            uint64_t shoff = 0; uint16_t shentsz = 0, shnum = 0;
+            memcpy(&shoff, patched + 40, 8);
+            memcpy(&shentsz, patched + 58, 2);
+            memcpy(&shnum, patched + 60, 2);
+            for (uint16_t si = 0; si < shnum && shoff + (si+1)*shentsz <= elf_size; ++si) {
+              uint8_t* sh = patched + shoff + si * shentsz;
+              uint32_t shtype = 0; memcpy(&shtype, sh + 4, 4);
+              if (shtype != 7) continue;
+              uint64_t nofs = 0, nsize = 0;
+              memcpy(&nofs, sh + 24, 8); memcpy(&nsize, sh + 32, 8);
+              uint64_t pos = nofs;
+              while (pos + 12 <= nofs + nsize && pos + 12 <= elf_size) {
+                uint32_t namesz, descsz, ntype;
+                memcpy(&namesz, patched + pos, 4);
+                memcpy(&descsz, patched + pos + 4, 4);
+                memcpy(&ntype, patched + pos + 8, 4);
+                uint32_t na = (namesz + 3) & ~3u, da = (descsz + 3) & ~3u;
+                if ((ntype == 27 || ntype == 32) && pos + 12 + na + da <= elf_size) {
+                  uint8_t* desc = patched + pos + 12 + na;
+                  for (uint32_t off = 0; off + 6 < descsz; ++off) {
+                    if (desc[off] == 'g' && desc[off+1] == 'f' && desc[off+2] == 'x') {
+                      uint32_t end = off + 3;
+                      while (end < descsz && desc[end] >= '0' && desc[end] <= '9') ++end;
+                      while (end < descsz && desc[end] >= 'a' && desc[end] <= 'z') ++end;
+                      uint32_t gfx_len = end - off;
+                      std::string orig(reinterpret_cast<char*>(desc + off), gfx_len);
+                      if (orig != target_gfx && target_gfx.size() == gfx_len) {
+                        memcpy(desc + off, target_gfx.c_str(), target_gfx.size());
+                      }
                     }
                   }
+                  if (ntype == 27) break;
                 }
-                if (ntype == 27) break; // Only one ISA note, but MSGPACK may have multiple
+                pos += 12 + na + da;
               }
-              pos += 12 + na + da;
+            }
+
+            // Apply same-family hotswap rules if available
+            typedef int (*RetargetFn)(void*, size_t, const char*, const char*);
+            static RetargetFn retarget_fn = nullptr;
+            static bool tried = false;
+            if (!tried || !retarget_fn) {
+              tried = true;
+              retarget_fn = reinterpret_cast<RetargetFn>(
+                  dlsym(RTLD_DEFAULT, "rocr_hotswap_retarget"));
+            }
+            if (retarget_fn && getenv("HSA_HOTSWAP_RULES")) {
+              std::string src_isa = "amdgcn-amd-amdhsa--" + std::string(
+                  mach == 0x4f ? "gfx950" : mach == 0x4c ? "gfx942" : "unknown");
+              std::string dst_isa = "amdgcn-amd-amdhsa--" + target_gfx;
+              int matched = retarget_fn(patched, elf_size,
+                                        src_isa.c_str(), dst_isa.c_str());
+              LogPrintfInfo("HotSwap: bare ELF retargeted %d instructions", matched);
             }
           }
-
-          // Call retarget
-          typedef int (*RetargetFn)(void*, size_t, const char*, const char*);
-          static RetargetFn retarget_fn = nullptr;
-          static bool tried = false;
-          if (!tried || !retarget_fn) {
-            tried = true;
-            retarget_fn = reinterpret_cast<RetargetFn>(
-                dlsym(RTLD_DEFAULT, "rocr_hotswap_retarget"));
-          }
-          if (retarget_fn && getenv("HSA_HOTSWAP_RULES")) {
-            std::string src_isa = "amdgcn-amd-amdhsa--" + std::string(
-                mach == 0x4f ? "gfx950" : mach == 0x4c ? "gfx942" : "unknown");
-            std::string dst_isa = "amdgcn-amd-amdhsa--" + target_gfx;
-            int matched = retarget_fn(patched, elf_size,
-                                      src_isa.c_str(), dst_isa.c_str());
-            LogPrintfInfo("HotSwap: bare ELF retargeted %d instructions", matched);
-          }
+          // For cross-family: leave .note as-is (retains original gfx1250 ISA
+          // string) so the ROCR transpiler detects the cross-family mismatch
+          // and invokes TranspileCodeObject.
 
           // Load the patched copy
           for (size_t i = 0; i < devices.size(); i++) {

@@ -529,7 +529,9 @@ static std::string WidenVccReferences(const std::string& line) {
 // b32 operation on exec_lo and clear exec_hi separately. This preserves the
 // original computation on the lower 32 bits.
 
-static std::vector<std::string> WidenExecOperation(const std::string& line, bool compact_mode = false) {
+static std::vector<std::string> WidenExecOperation(const std::string& line,
+                                                    bool compact_mode = false,
+                                                    int cmpx_temp_sgpr = 16) {
   std::vector<std::string> result;
 
   // Handle saveexec_b32 → saveexec_b64 (b32 form doesn't exist on GFX9)
@@ -574,17 +576,47 @@ static std::vector<std::string> WidenExecOperation(const std::string& line, bool
         // Use manual save+and instead.
         if (dst[0] == 's' && std::isdigit(dst[1])) {
           int reg_num = std::stoi(dst.substr(1));
+          (void)reg_num;
           // ALWAYS use manual b32 sequence for saveexec.
           std::string src32 = src;
           if (src32 == "vcc") src32 = "vcc_lo";
-          result.push_back("s_mov_b32 " + dst + ", exec_lo");
           bool is_or = (b64_mnem.find("s_or_saveexec") == 0);
-          if (is_or) {
-            result.push_back("s_or_b32 exec_lo, exec_lo, " + src32);
-          } else if (b64_mnem.find("andn2") != std::string::npos) {
-            result.push_back("s_andn2_b32 exec_lo, exec_lo, " + src32);
+          bool is_andn2 = b64_mnem.find("andn2") != std::string::npos;
+
+          if (is_andn2 && dst == src32) {
+            // s_and_not1_saveexec_b32 sN, sN (dst == src, same register).
+            //
+            // GFX12 semantics of s_and_not1_saveexec_b32 (AMD "NOT1" = NOT exec):
+            //   SDST = EXEC   (save old exec to destination)
+            //   EXEC = SSRC & ~EXEC  (NOT of operand 1 = NOT EXEC, NOT NOT SSRC!)
+            //
+            // So exec_new = old_sN & ~old_exec_lo.
+            //
+            // We cannot do this in-place atomically on GFX9 because sN == exec_lo source.
+            // Use cmpx_temp_sgpr as a scratch register:
+            //   s_mov_b32 cmpx_temp, sN      ← save old sN (= source mask) before overwriting
+            //   s_mov_b32 sN, exec_lo         ← sN = old exec_lo (destination)
+            //   s_andn2_b32 exec_lo, cmpx_temp, sN  ← exec = cmpx_temp & ~sN
+            //                                         = old_sN & ~old_exec ✓
+            std::string stemp = "s" + std::to_string(cmpx_temp_sgpr);
+            result.push_back("s_mov_b32 " + stemp + ", " + src32 +
+                              " ; save src mask (dst==src conflict for not1_saveexec)");
+            result.push_back("s_mov_b32 " + dst + ", exec_lo");
+            result.push_back("s_andn2_b32 exec_lo, " + stemp + ", " + dst +
+                              " ; exec = old_src & ~old_exec");
           } else {
-            result.push_back("s_and_b32 exec_lo, exec_lo, " + src32);
+            result.push_back("s_mov_b32 " + dst + ", exec_lo");
+            if (is_or) {
+              result.push_back("s_or_b32 exec_lo, exec_lo, " + src32);
+            } else if (is_andn2) {
+              // s_and_not1_saveexec_b32 sN, sM (dst != src):
+              // Semantics: sN = exec; exec = sM & ~exec
+              // After s_mov sN=exec, sN holds old exec:
+              result.push_back("s_andn2_b32 exec_lo, " + src32 + ", " + dst +
+                                " ; exec = src & ~old_exec");
+            } else {
+              result.push_back("s_and_b32 exec_lo, exec_lo, " + src32);
+            }
           }
           // exec_hi is already 0 (cleared at kernel start and after every
           // exec modification). Only OR saveexec can make exec_hi non-zero
@@ -1131,12 +1163,26 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
       line.replace(fpos, 24, "flat_scratch_hi");
   }
 
-  // ─── GFX12 scheduling/clause hints → SKIP (no GFX9 equivalent) ───
-  // Don't emit NOPs for these — they waste space and the kernel runs fine without them.
-  if (mnemonic == "s_wait_alu" || mnemonic == "s_delay_alu" ||
-      mnemonic == "s_clause" || mnemonic == "s_set_inst_prefetch_distance") {
-    // Return empty — skip entirely (saves space for scale_offset shifts)
+  // ─── GFX12 scheduling/clause hints ───
+  // s_delay_alu / s_wait_alu: GFX12 dependency-tracking hints.
+  // GFX9 has no equivalent instruction, but the hazards they describe are REAL:
+  // - VALU_DEP_N: a VGPR written by a recent VALU instruction is being read.
+  //   On GFX9, v_readfirstlane_b32 and SALU ops that read VGPRs need at least
+  //   1 wait cycle after the producing VALU instruction.
+  // - TRANS32_DEP_N: transcendental instruction (v_rcp, v_rsq, etc.) producing
+  //   a VGPR that is immediately consumed. On GFX9 transcendentals have ~4
+  //   cycle latency visible to dependent instructions.
+  // - SALU_CYCLE_N: SALU result used immediately; SALU→SALU or SALU→VALU
+  //   forwarding requires at least 1 cycle on GFX9.
+  // Emit s_nop 0 as a conservative 1-cycle stall for all delay variants.
+  // s_clause / s_set_inst_prefetch_distance: prefetch grouping hints with no
+  // GFX9 equivalent and no associated hazard — safe to skip entirely.
+  if (mnemonic == "s_wait_alu" || mnemonic == "s_delay_alu") {
+    result.push_back("s_nop 0 ; hazard delay from " + mnemonic);
     return result;
+  }
+  if (mnemonic == "s_clause" || mnemonic == "s_set_inst_prefetch_distance") {
+    return result;  // no GFX9 equivalent, no hazard
   }
 
   // ─── VOP3-only 64-bit ops: strip _e32 suffix ───
@@ -1424,10 +1470,14 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
       if (a.prefix == 'v' || a.prefix == 's') {
         src0_pair = fmtPair(a.prefix, a.lo, a.hi);
       } else {
-        // Immediate: move to temp VGPRs (rare case)
-        result.push_back("v_mov_b32_e32 v252, " + a.imm);
-        result.push_back("v_mov_b32_e32 v253, 0");
-        src0_pair = "v[252:253]";
+        // Immediate: move to temp VGPRs (scale_temp_vgpr and scale_temp_vgpr+1).
+        // Must use the dynamic temp, NOT hardcoded v252/v253 which are out-of-bounds.
+        std::string tmp_lo = "v" + std::to_string(scale_temp_vgpr);
+        std::string tmp_hi = "v" + std::to_string(scale_temp_vgpr + 1);
+        result.push_back("v_mov_b32_e32 " + tmp_lo + ", " + a.imm);
+        result.push_back("v_mov_b32_e32 " + tmp_hi + ", 0");
+        src0_pair = "v[" + std::to_string(scale_temp_vgpr) + ":" +
+                    std::to_string(scale_temp_vgpr + 1) + "]";
       }
 
       // src1 can be SGPR pair, VGPR pair, or immediate
@@ -1937,17 +1987,20 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
           result.push_back("v_mov_b32_e32 " + vt0 + ", " + ssrc0);
           result.push_back("v_mov_b32_e32 " + vt1 + ", " + sdst);
           result.push_back("v_fma_f32 " + vt0 + ", " + vt0 + ", " + ssrc1 + ", " + vt1);
+          result.push_back("s_nop 0 ; VGPR hazard: readfirstlane after VALU");
           result.push_back("v_readfirstlane_b32 " + sdst + ", " + vt0);
         } else if (mnemonic == "s_mul_f32") {
           // s_mul_f32 sdst, ssrc0, ssrc1 → sdst = ssrc0 * ssrc1
           // Use standard v_mul_f32 (same IEEE rounding as SALU float).
           result.push_back("v_mov_b32_e32 " + vt0 + ", " + ssrc0);
           result.push_back("v_mul_f32_e32 " + vt0 + ", " + ssrc1 + ", " + vt0);
+          result.push_back("s_nop 0 ; VGPR hazard: readfirstlane after VALU");
           result.push_back("v_readfirstlane_b32 " + sdst + ", " + vt0);
         } else {
           // Other SALU float ops: vt0 = ssrc0; vt0 = op(ssrc1, vt0); sdst = vt0
           result.push_back("v_mov_b32_e32 " + vt0 + ", " + ssrc0);
           result.push_back(valu_op + " " + vt0 + ", " + ssrc1 + ", " + vt0);
+          result.push_back("s_nop 0 ; VGPR hazard: readfirstlane after VALU");
           result.push_back("v_readfirstlane_b32 " + sdst + ", " + vt0);
         }
         return result;
@@ -1984,6 +2037,7 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
         else valu_mnem = "v_cvt_pkrtz_f16_f32";
 
         result.push_back(valu_mnem + " " + vt0 + ", " + operands[1]);
+        result.push_back("s_nop 0 ; VGPR hazard: readfirstlane after VALU");
         result.push_back("v_readfirstlane_b32 " + operands[0] + ", " + vt0);
         return result;
       }
@@ -2006,6 +2060,7 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
       }
       if (operands.size() >= 2) {
         result.push_back("v_sqrt_f32_e32 " + vt0 + ", " + operands[1]);
+        result.push_back("s_nop 0 ; VGPR hazard: readfirstlane after VALU");
         result.push_back("v_readfirstlane_b32 " + operands[0] + ", " + vt0);
         return result;
       }
@@ -2028,6 +2083,7 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
       }
       if (operands.size() >= 2) {
         result.push_back("v_rsq_f32_e32 " + vt0 + ", " + operands[1]);
+        result.push_back("s_nop 0 ; VGPR hazard: readfirstlane after VALU");
         result.push_back("v_readfirstlane_b32 " + operands[0] + ", " + vt0);
         return result;
       }
@@ -3365,7 +3421,7 @@ std::vector<std::string> TranslateInstruction(const std::string& asm_line,
   }
 
   // ─── EXEC width adaptation (wave32 → wave64) ───
-  auto exec_result = WidenExecOperation(line, compact_mode);
+  auto exec_result = WidenExecOperation(line, compact_mode, cmpx_temp_sgpr);
   for (auto& l : exec_result) {
     result.push_back(std::move(l));
   }
@@ -4381,8 +4437,7 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
       }
       ++emitted_count;
       // Debug early exit: insert s_endpgm after N source instructions
-      if (early_exit_after > 0 && emitted_count >= early_exit_after && !early_exit_done
-          && source_lines.size() > 400) {  // only for large kernels (attn_forward=548)
+      if (early_exit_after > 0 && emitted_count >= early_exit_after && !early_exit_done) {
         // Emit all remaining branch target labels pointing to the exit, then s_endpgm.
         // This prevents assembly errors from unresolved forward references.
         for (size_t jj = ii + 1; jj < source_instrs.size(); jj++) {
@@ -4390,7 +4445,7 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
           if (lbl != branch_labels.end())
             translated_asm += lbl->second + ":\n";
         }
-        translated_asm += ".L_exit:\n";
+        translated_asm += ".L_early_exit:\n";
         translated_asm += "s_waitcnt vmcnt(0) lgkmcnt(0) expcnt(0)\n";
         translated_asm += "s_endpgm ; EARLY EXIT after " + std::to_string(emitted_count) + " instrs\n";
         early_exit_done = true;
@@ -4485,6 +4540,61 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
       }
       translated_asm = tmp;
     }
+    // Misplaced s_endpgm fix: when the compiler places s_endpgm in the middle
+    // of .text (with reachable code after it via forward branches), the GFX9
+    // assembler silently includes it but the hardware terminates the wavefront
+    // at s_endpgm — making all subsequent instructions dead.  Fix: if s_endpgm
+    // is not the last non-empty instruction, replace it with a branch to a new
+    // .L_real_exit label and append the real s_endpgm at the end.
+    {
+      // Find the line containing just "s_endpgm" (no suffix).
+      // We look for a line that is exactly "s_endpgm" after trimming.
+      std::istringstream ep_iss(translated_asm);
+      std::string ep_line;
+      std::vector<std::string> ep_lines;
+      while (std::getline(ep_iss, ep_line)) ep_lines.push_back(ep_line);
+
+      // Find the index of the s_endpgm line.
+      int endpgm_idx = -1;
+      for (int i = 0; i < (int)ep_lines.size(); ++i) {
+        std::string trimmed = ep_lines[i];
+        size_t start = trimmed.find_first_not_of(" \t");
+        if (start != std::string::npos) trimmed = trimmed.substr(start);
+        if (trimmed == "s_endpgm") {
+          endpgm_idx = i;
+          break;
+        }
+      }
+
+      if (endpgm_idx >= 0) {
+        // Check if there are non-empty, non-label, non-comment lines after it.
+        bool has_code_after = false;
+        for (int i = endpgm_idx + 1; i < (int)ep_lines.size(); ++i) {
+          std::string t = ep_lines[i];
+          size_t s = t.find_first_not_of(" \t");
+          if (s == std::string::npos) continue;
+          t = t.substr(s);
+          if (t.empty() || t[0] == ';') continue;
+          if (t[0] == '.' && t.find(':') != std::string::npos) continue; // label
+          // Found a real instruction after s_endpgm
+          has_code_after = true;
+          break;
+        }
+
+        if (has_code_after) {
+          // Replace s_endpgm with a branch to the real exit.
+          ep_lines[endpgm_idx] = "s_branch .L_real_exit ; hoisted s_endpgm to end";
+          // Reconstruct translated_asm and append the real exit.
+          std::string fixed;
+          for (const auto& l : ep_lines) fixed += l + "\n";
+          fixed += ".L_real_exit:\n";
+          fixed += "s_endpgm\n";
+          translated_asm = fixed;
+          if (std::getenv("HSA_HOTSWAP_DUMP"))
+            std::cerr << "hotswap: transpile: hoisted mid-kernel s_endpgm to end\n";
+        }
+      }
+    }
     // Redundant remainder guard: add s8==0 check at .L_br28 entry.
     // The VCC-based guard (s_cbranch_vccz .L_br25) should prevent entry to .L_br28
     // when remainder=0, but it fails on GFX942. This adds a belt-and-suspenders
@@ -4555,11 +4665,24 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
           std::string target = "v_lshrrev_b32_e32 v3, 1, v1\n";
           size_t lshr_pos = translated_asm.find(target, br12_pos);
           if (lshr_pos != std::string::npos && lshr_pos - br12_pos < 200) {
-            std::string bs_reg = has_s23_blocksize ? "s23" : "s10";
-            std::string fix =
-              "v_mov_b32_e32 v3, s5\n"
-              "v_min_u32 v3, " + bs_reg + ", v3\n"
-              "v_lshrrev_b32_e32 v3, 1, v3 ; tree stride = min(N,blockSize)/2\n";
+            std::string fix;
+            if (has_s23_blocksize) {
+              // attn_multihead: blockSize is in s23 (prologue), never clobbered.
+              // v1 may not hold blockDim here, so use s23 directly.
+              fix =
+                "v_mov_b32_e32 v3, s5\n"
+                "v_min_u32 v3, s23, v3\n"
+                "v_lshrrev_b32_e32 v3, 1, v3 ; tree stride = min(N,blockSize)/2\n";
+            } else {
+              // attn_forward: at .L_br12, v1 = blockDim.x (set by v_mov_b32 v1,s8
+              // just before ds_write_b32 that stores per-thread max). s10 has been
+              // clobbered by the per-thread max loop (s10 = blockDim*4 = byte
+              // stride). Use v1 which correctly holds blockDim at this point.
+              fix =
+                "v_mov_b32_e32 v3, s5\n"
+                "v_min_u32 v3, v1, v3\n"
+                "v_lshrrev_b32_e32 v3, 1, v3 ; tree stride = min(N,blockDim)/2\n";
+            }
             translated_asm.replace(lshr_pos, target.size(), fix);
           }
         }
@@ -4573,7 +4696,12 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
       // Writing to s10 in multihead corrupts the head offset needed for O address.
       //
       if (stats->total_instructions < 600 && !has_s23_blocksize) {
-        // attn_forward path: hoist s10 = blockSize
+        // attn_forward path: hoist s10 = blockSize before the exec-masked block.
+        // On GFX12, the "out of range" block always runs (SALU ignores exec).
+        // On GFX9, cbranch_execz may skip the block if exec=0. Hoisting ensures
+        // s10 (blockSize) is always set before the softmax section begins.
+        // Read blockDim.x from hidden_group_size_x = kernarg[explicit_rounded+0xC]
+        // which on GFX9/GFX12 both live at the same logical kernarg offset.
         std::string ka_pair = "s[" + std::to_string(kernarg_save_lo) + ":"
                               + std::to_string(kernarg_save_hi) + "]";
         std::string target = "s_xor_b32 s0, exec_lo, s1\n";
@@ -4582,7 +4710,7 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
           std::string hoist =
             "s_load_dword s10, " + ka_pair + ", 0x3c\n"
             "s_waitcnt lgkmcnt(0)\n"
-            "s_and_b32 s10, s10, 0xffff ; hoist: s10 = blockSize\n";
+            "s_and_b32 s10, s10, 0xffff ; FIX2: hoist s10 = blockDim.x\n";
           translated_asm.insert(xor_pos, hoist);
         }
       }
@@ -4599,15 +4727,16 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
             ".L_br14:\n"
             "v_mov_b32_e32 v1, s23 ; FIX3: v1=blockSize (from prologue s23)\n");
         } else {
-          // attn_forward: reload s10 from hidden arg (clobbered by find-max tree)
-          std::string ka_pair = "s[" + std::to_string(kernarg_save_lo) + ":"
-                                + std::to_string(kernarg_save_hi) + "]";
+          // attn_forward: reload s10 = blockDim.x at .L_br14 (clobbered by find-max tree).
+          // Read from hidden_group_size_x at kernarg[explicit_rounded+0xC] (same on GFX9/GFX12).
+          std::string ka_pair3 = "s[" + std::to_string(kernarg_save_lo) + ":"
+                                 + std::to_string(kernarg_save_hi) + "]";
           replaceFirst(translated_asm,
             ".L_br14:\n",
             ".L_br14:\n"
-            "s_load_dword s10, " + ka_pair + ", 0x3c ; reload blockSize (clobbered by tree)\n"
+            "s_load_dword s10, " + ka_pair3 + ", 0x3c\n"
             "s_waitcnt lgkmcnt(0)\n"
-            "s_and_b32 s10, s10, 0xffff\n"
+            "s_and_b32 s10, s10, 0xffff ; FIX3: reload s10 = blockDim.x\n"
             "v_mov_b32_e32 v1, s10 ; FIX3: v1=blockSize for exp/norm/store loops\n");
         }
       }
@@ -4645,28 +4774,20 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
           ".L_br3:\n"
           "v_mov_b32_e32 v27, v0 ; FIX5a: save tid (exp loop will clobber v0)\n");
       }
-      // Fix 5b: restore v0 = tid (multihead only) and widen exec (both).
-      if (stats->total_instructions < 600) {
+      // Fix 5b: restore v0 = tid before v_cmpx_gt_i32 (multihead only).
+      // The exp loop in the multihead kernel advances v0 by blockSize, so
+      // v0 = tid + blockSize after the loop.  v_cmpx_gt_i32 s6, v0 uses v0
+      // as the thread index and must see v0 = tid, not tid + blockSize.
+      // attn_forward's exp loop does not clobber v0, so no restore needed.
+      // NOTE: Do NOT widen exec after v_cmpx_gt_i32 s6, v0.  That instruction
+      // correctly narrows exec to D threads for the output-write section.
+      // Widening exec here (exec |= N-thread mask) causes threads D..blockDim-1
+      // to write garbage to O[m*D + tid], corrupting adjacent rows' output.
+      if (stats->total_instructions < 600 && has_s23_blocksize) {
         size_t cmpx_pos = translated_asm.find("v_cmpx_gt_i32 s6, v0\n");
         if (cmpx_pos != std::string::npos) {
-          // Multihead: restore v0 = tid before v_cmpx (exp loop corrupted it)
-          if (has_s23_blocksize) {
-            translated_asm.insert(cmpx_pos,
-              "v_mov_b32_e32 v0, v27 ; FIX5b: restore tid (corrupted by exp loop)\n");
-            cmpx_pos = translated_asm.find("v_cmpx_gt_i32 s6, v0\n");
-          }
-          // Find the exec_hi clear that follows
-          std::string after_cmpx = "s_mov_b32 exec_hi, 0\n";
-          size_t hi_pos = translated_asm.find(after_cmpx, cmpx_pos);
-          if (hi_pos != std::string::npos) {
-            size_t insert_pos = hi_pos + after_cmpx.size();
-            std::string fix =
-              "; FIX5b: widen exec for softmax (need N threads, not just D)\n"
-              "v_cmp_gt_u32_e64 s[0:1], s5, v0 ; s0 = threads where N > tid\n"
-              "s_or_b32 exec_lo, exec_lo, s0   ; exec |= N-thread mask\n"
-              "s_mov_b32 exec_hi, 0\n";
-            translated_asm.insert(insert_pos, fix);
-          }
+          translated_asm.insert(cmpx_pos,
+            "v_mov_b32_e32 v0, v27 ; FIX5b: restore tid (exp loop clobbered v0)\n");
         }
       }
       // Fix 6: force dot-product tree entry in multihead kernel.
@@ -4862,66 +4983,12 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
         "s_andn2_b32 vcc_lo, exec_lo, s25\n",
         "s_mov_b32 vcc_lo, 0 ; FIX: force tree entry (s25 clobbered by SCC)\n");
     }
-    // Note: SGPR-base addressing (global_load vDST, vOFF, s[X:Y]) is standard
-    // on GFX942 — native compilers also use it. The split-K non-determinism
-    // is NOT from the addressing mode (tested: native stencil_1d also uses SGPR base).
-    // Fix: replace s_load from s[8:9]+0xc with saved kernarg ptr + 0x3c.
-    // Only applies to kernels that have this pattern (e.g., attn_forward).
-    {
-      auto replaceAll = [](std::string& s, const std::string& from, const std::string& to) {
-        size_t pos = 0;
-        while ((pos = s.find(from, pos)) != std::string::npos) {
-          s.replace(pos, from.size(), to);
-          pos += to.size();
-        }
-      };
-      // Check if the pattern exists before doing replacements.
-      // GFX12 kernels load hidden args via dispatch pointer or computed base:
-      // - attn_forward: s_load_dword sN, s[8:9], 0xc (dispatch pointer)
-      // - multihead:    s_load_dword sN, s[16:17], 0xc (kernarg+48, but s[16:17]
-      //                 gets overwritten with Q pointer for N>0 path!)
-      // Replace both patterns with kernarg save pair + 0x3c.
-      {
-        std::string ka_pair = "s[" + std::to_string(kernarg_save_lo) + ":"
-                              + std::to_string(kernarg_save_hi) + "]";
-        bool need_replace = false;
-        // Check for s[8:9]+0xc (attn_forward pattern)
-        if (translated_asm.find("s_load_dword s1, s[8:9], 0xc") != std::string::npos ||
-            translated_asm.find("s_load_dword s0, s[8:9], 0xc") != std::string::npos)
-          need_replace = true;
-        // Check for s[16:17]+0xc (multihead pattern — dispatch base was in s[16:17])
-        if (translated_asm.find("s_load_dword s1, s[16:17], 0xc") != std::string::npos ||
-            translated_asm.find("s_load_dword s0, s[16:17], 0xc") != std::string::npos)
-          need_replace = true;
-        if (need_replace) {
-          size_t ka_pos = translated_asm.find("; save kernarg ptr lo");
-          if (ka_pos == std::string::npos) {
-            // No save emitted yet — emit it now using computed registers
-            size_t insert_pos = translated_asm.find("; save workgroup_id_y\n");
-            if (insert_pos != std::string::npos) {
-              insert_pos = translated_asm.find('\n', insert_pos) + 1;
-              translated_asm.insert(insert_pos,
-                "s_mov_b32 " + ka_lo + ", s0 ; save kernarg ptr lo\n"
-                "s_mov_b32 " + ka_hi + ", s1 ; save kernarg ptr hi\n");
-            }
-          }
-          // Replace s[8:9]+0xc pattern (attn_forward)
-          replaceAll(translated_asm,
-            "s_load_dword s1, s[8:9], 0xc",
-            "s_load_dword s1, " + ka_pair + ", 0x3c ; use saved kernarg ptr");
-          replaceAll(translated_asm,
-            "s_load_dword s0, s[8:9], 0xc",
-            "s_load_dword s0, " + ka_pair + ", 0x3c ; use saved kernarg ptr");
-          // Replace s[16:17]+0xc pattern (multihead — dispatch base in s[16:17])
-          replaceAll(translated_asm,
-            "s_load_dword s1, s[16:17], 0xc",
-            "s_load_dword s1, " + ka_pair + ", 0x3c ; use saved kernarg ptr");
-          replaceAll(translated_asm,
-            "s_load_dword s0, s[16:17], 0xc",
-            "s_load_dword s0, " + ka_pair + ", 0x3c ; use saved kernarg ptr");
-        }
-      }
-    }
+    // NOTE: The kernarg[explicit_rounded + 0xC] hidden arg (hidden_group_size_x on GFX9,
+    // workgroup_size_x on GFX12) is at the SAME logical kernarg offset on both architectures.
+    // GFX1250 kernels read blockDim.x from computed addresses like s[8:9]+0xc or s[0:1]+0x3c,
+    // which are derived from the kernarg pointer.  These translated reads work correctly on
+    // GFX942 because both GFX9 and GFX12 place blockDim.x at kernarg[explicit_rounded + 0xC].
+    // No replacement of these patterns is needed.
     // Debug: HSA_HOTSWAP_NOP_GLOBAL=1 caps outer loop to 2 iterations
     if (std::getenv("HSA_HOTSWAP_NOP_GLOBAL") && stats->total_instructions > 400) {
       auto replaceAll = [](std::string& s, const std::string& from, const std::string& to) {
@@ -5121,6 +5188,97 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
         translated_asm = nowait_fixed;
         std::cerr << "hotswap: transpile: SPLITK_NOWAIT pass complete\n";
       }
+    }
+  }
+
+  // Post-processing: fix VALU → v_readfirstlane_b32 data hazards.
+  // GFX9 requires at least 1 cycle between any VALU writing a VGPR and
+  // v_readfirstlane_b32 reading that VGPR. On GFX12, s_delay_alu annotations
+  // cover this, but some cases slip through (e.g. the s_delay_alu annotates
+  // an instruction pair and only ONE s_nop was inserted). This pass catches
+  // all adjacent VALU→readfirstlane pairs in the final assembly.
+  {
+    // Helper: extract the first destination operand from an instruction line.
+    // Returns the register name (e.g. "v14") or empty string on failure.
+    auto extractFirstDest = [](const std::string& ln) -> std::string {
+      size_t s = ln.find_first_not_of(" \t");
+      if (s == std::string::npos || ln[s] == ';' || ln[s] == '.') return "";
+      // Skip mnemonic
+      size_t e = ln.find_first_of(" \t", s);
+      if (e == std::string::npos) return "";
+      size_t op_start = ln.find_first_not_of(" \t", e);
+      if (op_start == std::string::npos) return "";
+      size_t op_end = ln.find_first_of(" \t,;", op_start);
+      if (op_end == std::string::npos) op_end = ln.size();
+      return ln.substr(op_start, op_end - op_start);
+    };
+    // Helper: is this line a "blocking" instruction (not s_nop, not label, not comment)?
+    auto isEffective = [](const std::string& ln) -> bool {
+      size_t s = ln.find_first_not_of(" \t");
+      if (s == std::string::npos) return false;
+      if (ln[s] == ';') return false;                       // comment
+      if (ln[s] == '.') return false;                       // label
+      const std::string t = ln.substr(s);
+      if (t.find("s_nop") == 0) return false;               // s_nop doesn't count
+      return true;
+    };
+    // Helper: is this line a VALU instruction (writes to a VGPR)?
+    auto isVALU = [](const std::string& ln) -> bool {
+      size_t s = ln.find_first_not_of(" \t");
+      if (s == std::string::npos) return false;
+      // Check for v_ prefix (VALU), excluding v_readfirstlane which is SALU
+      const std::string t = ln.substr(s);
+      if (t.find("v_") != 0) return false;
+      if (t.find("v_readfirstlane") == 0) return false;
+      return true;
+    };
+
+    std::istringstream rfln_iss(translated_asm);
+    std::string rfln_line;
+    std::vector<std::string> rfln_lines;
+    while (std::getline(rfln_iss, rfln_line)) rfln_lines.push_back(rfln_line);
+
+    bool any_inserted = false;
+    // Rebuild translated_asm with insertions
+    std::string rfln_fixed;
+    // Track the last effective instruction and its index in output.
+    std::string last_effective;
+    std::string last_effective_dest;
+    for (size_t i = 0; i < rfln_lines.size(); ++i) {
+      const auto& ln = rfln_lines[i];
+      size_t ls = ln.find_first_not_of(" \t");
+      if (ls != std::string::npos && ln.find("v_readfirstlane_b32", ls) == ls) {
+        // Extract the VGPR source of this readfirstlane
+        size_t op_s = ln.find_first_of(" \t", ls + 19);
+        if (op_s != std::string::npos) {
+          op_s = ln.find_first_not_of(" \t", op_s);
+          if (op_s != std::string::npos) {
+            size_t comma = ln.find(',', op_s);
+            if (comma != std::string::npos) {
+              size_t src_s = ln.find_first_not_of(" \t", comma + 1);
+              if (src_s != std::string::npos) {
+                size_t src_e = ln.find_first_of(" \t;", src_s);
+                if (src_e == std::string::npos) src_e = ln.size();
+                std::string src_reg = ln.substr(src_s, src_e - src_s);
+                // If the previous effective instruction wrote this VGPR AND was VALU
+                if (!last_effective.empty() && isVALU(last_effective) &&
+                    last_effective_dest == src_reg) {
+                  rfln_fixed += "s_nop 0 ; GFX9 hazard: VALU→readfirstlane on " + src_reg + "\n";
+                  any_inserted = true;
+                }
+              }
+            }
+          }
+        }
+      }
+      rfln_fixed += ln + "\n";
+      if (isEffective(ln)) {
+        last_effective = ln;
+        last_effective_dest = extractFirstDest(ln);
+      }
+    }
+    if (any_inserted) {
+      translated_asm = rfln_fixed;
     }
   }
 
@@ -5575,14 +5733,23 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
   std::cerr << "hotswap: transpile: complete (" << src_cpu << " → " << tgt_cpu
             << ")\n";
 
-  // Debug: dump patched ELF if HSA_HOTSWAP_DUMP_ELF is set
+  // Debug: dump patched ELF if HSA_HOTSWAP_DUMP_ELF is set.
+  // If HSA_HOTSWAP_DUMP_KERNEL is also set, only dump if that kernel name appears in the ELF.
   if (auto* dump_path = std::getenv("HSA_HOTSWAP_DUMP_ELF")) {
-    FILE* fp = fopen(dump_path, "wb");
-    if (fp) {
-      fwrite(elf, 1, size, fp);
-      fclose(fp);
-      std::cerr << "hotswap: transpile: dumped patched ELF to " << dump_path
-                << " (" << size << " bytes)\n";
+    bool do_dump = true;
+    if (auto* filter_name = std::getenv("HSA_HOTSWAP_DUMP_KERNEL")) {
+      // Check if the kernel name appears anywhere in the ELF binary data.
+      std::string_view elf_view(reinterpret_cast<const char*>(elf), size);
+      do_dump = elf_view.find(filter_name) != std::string_view::npos;
+    }
+    if (do_dump) {
+      FILE* fp = fopen(dump_path, "wb");
+      if (fp) {
+        fwrite(elf, 1, size, fp);
+        fclose(fp);
+        std::cerr << "hotswap: transpile: dumped patched ELF to " << dump_path
+                  << " (" << size << " bytes)\n";
+      }
     }
   }
 
