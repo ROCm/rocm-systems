@@ -380,14 +380,6 @@ add_test(
 )
 
 add_test(
-    NAME test_profile_pc_sampling
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -s -m pc_sampling
-        --junitxml=tests/test_profile_pc_sampling.xml ${COV_OPTION}
-        tests/test_profile_general.py ${WORKING_DIR_OPTION}
-)
-
-add_test(
     NAME test_profile_sets_func
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -m sets_func
@@ -466,7 +458,6 @@ set_tests_properties(
     test_profile_roofline_1
     test_profile_roofline_2
     test_profile_section
-    test_profile_pc_sampling
     test_profile_sets_func
     test_profile_iteration_multiplexing_1
     test_profile_iteration_multiplexing_2
@@ -574,6 +565,23 @@ add_test(
         tests/test_autogen_config.py ${WORKING_DIR_OPTION}
 )
 
+# ---------------------------
+# PC sampling tests
+# ---------------------------
+
+add_test(
+    NAME test_pc_sampling
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -s
+        --junitxml=tests/test_pc_sampling.xml ${COV_OPTION} tests/test_pc_sampling.py
+        ${WORKING_DIR_OPTION}
+)
+
+set_tests_properties(
+    test_pc_sampling
+    PROPERTIES TIMEOUT 300 LABELS "profile" RESOURCE_GROUPS gpus:1
+)
+
 # -----------------------------------
 # TUI component tests
 # -----------------------------------
@@ -614,6 +622,7 @@ if(${ENABLE_COVERAGE})
         test_profile_roofline_2
         test_profile_section
         test_profile_sets_func
+        test_pc_sampling
         test_analyze_commands
         test_analyze_workloads
         test_L1_cache_counters
@@ -735,6 +744,52 @@ install(
     COMPONENT main
     PATTERN "__pycache__" EXCLUDE
 )
+
+# ==============================================================================
+# Vendored Dependencies Installation
+# ==============================================================================
+# Vendored packages are included as git submodules and installed as pure Python.
+# Each package has: conditional submodule init + unconditional install.
+# See src/vendored/README.md and CONTRIBUTING.md for vendoring guidelines.
+
+find_package(Git QUIET)
+
+# Vendored package wrapper
+install(
+    FILES src/vendored/__init__.py
+    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/vendored
+    COMPONENT main
+)
+
+# PyYAML
+if(NOT EXISTS "${PROJECT_SOURCE_DIR}/src/vendored/pyyaml/lib/yaml")
+    if(Git_FOUND)
+        message(STATUS "Initializing vendored/pyyaml submodule...")
+        execute_process(
+            COMMAND
+                ${GIT_EXECUTABLE} submodule update --init --recursive src/vendored/pyyaml
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+            RESULT_VARIABLE GIT_SUBMOD_RESULT
+        )
+        if(NOT GIT_SUBMOD_RESULT EQUAL "0")
+            message(FATAL_ERROR "git submodule update failed for src/vendored/pyyaml")
+        endif()
+    else()
+        message(FATAL_ERROR "vendored/pyyaml not found and git not available")
+    endif()
+else()
+    message(STATUS "Vendored/pyyaml: OK")
+endif()
+install(
+    DIRECTORY src/vendored/pyyaml/lib/yaml
+    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/vendored/pyyaml/lib
+    COMPONENT main
+    FILES_MATCHING
+    PATTERN "*.py"
+    PATTERN "__pycache__" EXCLUDE
+    PATTERN "*.pyc" EXCLUDE
+)
+
 # samples
 install(
     DIRECTORY sample

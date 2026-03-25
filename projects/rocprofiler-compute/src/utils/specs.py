@@ -58,7 +58,7 @@ from utils.logger import (
 )
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.tty import get_table_string
-from utils.utils import get_version
+from utils.utils_common import get_version
 
 T = TypeVar("T")
 

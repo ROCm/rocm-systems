@@ -149,7 +149,9 @@ namespace envvar {
         template <> struct _is_narrow_character<char>          : std::true_type  { };
         template <> struct _is_narrow_character<signed char>   : std::true_type  { };
         template <> struct _is_narrow_character<unsigned char> : std::true_type  { };
+#if defined(__cpp_char8_t) || (defined(__cplusplus) && __cplusplus >= 202002L)
         template <> struct _is_narrow_character<char8_t>       : std::true_type  { };
+#endif  // char8_t narrow character specialization
 
         template <typename T>
         struct is_narrow_character

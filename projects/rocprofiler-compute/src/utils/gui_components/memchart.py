@@ -30,7 +30,7 @@ from dash_svg import G, Path, Rect, Svg, Text
 
 from utils import schema
 from utils.logger import console_error
-from utils.utils import format_scientific_notation_if_needed
+from utils.utils_common import format_scientific_notation_if_needed
 
 # Constants for display formatting
 DEFAULT_MAX_LENGTH = 6
