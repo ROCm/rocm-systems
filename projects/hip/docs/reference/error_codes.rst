@@ -425,7 +425,7 @@ Kernel and Launch Errors
      - Value
      - Description
 
-   * - :term:`hipErrorInvalidValue``
+   * - :term:`hipErrorInvalidValue`
      - ``1``
      - Invalid input value
 
