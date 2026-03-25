@@ -16,6 +16,8 @@ namespace GlInterop {
 
 // ================================================================================================
 bool glCanInterop(Device* device, void* GLplatformContext, void* GLdeviceContext) {
+  if (!amd::GLFunctions::wglGetContextGPUInfoAMD_s) return false;
+
   bool canInteroperate = false;
 
   LUID glAdapterLuid = {0, 0};
