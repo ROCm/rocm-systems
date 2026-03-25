@@ -25,6 +25,7 @@ set(ROCPROFSYS_ROCPDSNA_SOURCE_DIR
 )
 
 option(ROCPROFSYS_ROCPDSNA_ENABLE_LOGGING "Enable rocpdsna logging" OFF)
+option(ROCPROFSYS_ROCPDSNA_LINK_STATIC "Link rocpdsna statically" OFF)
 
 # ------------------------------------------------------------------------------
 # Configuration
@@ -34,34 +35,7 @@ if(ROCPROFSYS_USE_EXTERNAL_ROCPDSNA)
     find_package(rocpdsna REQUIRED)
     message(STATUS "[rocpdsna] Using external installation: ${rocpdsna_DIR}")
 
-    set(_ROCPDSNA_TARGET rocpdsna::rocpdsna)
     set(_ROCPDSNA_IS_EXTERNAL TRUE)
-elseif(ROCPROFSYS_ROCPDSNA_GIT_REPOSITORY)
-    include(FetchContent)
-
-    set(ROCPDSNA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-    set(ROCPDSNA_BUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)
-    set(ROCPDSNA_ENABLE_LOGGING ${ROCPROFSYS_ROCPDSNA_ENABLE_LOGGING} CACHE BOOL "" FORCE)
-
-    message(
-        STATUS
-        "[rocpdsna] Fetching from Git: ${ROCPROFSYS_ROCPDSNA_GIT_REPOSITORY} (${ROCPROFSYS_ROCPDSNA_GIT_TAG})"
-    )
-    FetchContent_Declare(
-        rocpdsna
-        GIT_REPOSITORY ${ROCPROFSYS_ROCPDSNA_GIT_REPOSITORY}
-        GIT_TAG ${ROCPROFSYS_ROCPDSNA_GIT_TAG}
-        SOURCE_DIR
-        ${PROJECT_BINARY_DIR}/external/rocpdsna/src
-        BINARY_DIR
-        ${PROJECT_BINARY_DIR}/external/rocpdsna/build
-        SUBBUILD_DIR
-        ${PROJECT_BINARY_DIR}/external/rocpdsna/subbuild
-    )
-    FetchContent_MakeAvailable(rocpdsna)
-
-    set(_ROCPDSNA_TARGET rocpdsna)
-    set(_ROCPDSNA_IS_EXTERNAL FALSE)
 else()
     include(FetchContent)
 
@@ -69,11 +43,27 @@ else()
     set(ROCPDSNA_BUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)
     set(ROCPDSNA_ENABLE_LOGGING ${ROCPROFSYS_ROCPDSNA_ENABLE_LOGGING} CACHE BOOL "" FORCE)
 
-    message(STATUS "[rocpdsna] Using local source: ${ROCPROFSYS_ROCPDSNA_SOURCE_DIR}")
+    if(ROCPROFSYS_ROCPDSNA_GIT_REPOSITORY)
+        message(
+            STATUS
+            "[rocpdsna] Fetching from Git: ${ROCPROFSYS_ROCPDSNA_GIT_REPOSITORY} (${ROCPROFSYS_ROCPDSNA_GIT_TAG})"
+        )
+        set(_ROCPDSNA_SOURCE_ARGS
+            GIT_REPOSITORY
+            ${ROCPROFSYS_ROCPDSNA_GIT_REPOSITORY}
+            GIT_TAG
+            ${ROCPROFSYS_ROCPDSNA_GIT_TAG}
+            SOURCE_DIR
+            ${PROJECT_BINARY_DIR}/external/rocpdsna/src
+        )
+    else()
+        message(STATUS "[rocpdsna] Using local source: ${ROCPROFSYS_ROCPDSNA_SOURCE_DIR}")
+        set(_ROCPDSNA_SOURCE_ARGS SOURCE_DIR ${ROCPROFSYS_ROCPDSNA_SOURCE_DIR})
+    endif()
+
     FetchContent_Declare(
         rocpdsna
-        SOURCE_DIR
-        ${ROCPROFSYS_ROCPDSNA_SOURCE_DIR}
+        ${_ROCPDSNA_SOURCE_ARGS}
         BINARY_DIR
         ${PROJECT_BINARY_DIR}/external/rocpdsna/build
         SUBBUILD_DIR
@@ -81,8 +71,20 @@ else()
     )
     FetchContent_MakeAvailable(rocpdsna)
 
-    set(_ROCPDSNA_TARGET rocpdsna)
     set(_ROCPDSNA_IS_EXTERNAL FALSE)
+endif()
+
+if(ROCPROFSYS_ROCPDSNA_LINK_STATIC)
+    set(_ROCPDSNA_SUFFIX "-static")
+    message(STATUS "[rocpdsna] Linking statically")
+else()
+    set(_ROCPDSNA_SUFFIX "")
+endif()
+
+if(_ROCPDSNA_IS_EXTERNAL)
+    set(_ROCPDSNA_TARGET rocpdsna::rocpdsna${_ROCPDSNA_SUFFIX})
+else()
+    set(_ROCPDSNA_TARGET rocpdsna${_ROCPDSNA_SUFFIX})
 endif()
 
 # ------------------------------------------------------------------------------

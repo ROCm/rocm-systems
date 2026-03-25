@@ -30,6 +30,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 
 # ------------------------------------------------------------ #
 # Build Options
@@ -56,13 +57,14 @@ set(rocpdsna_VERSION
 )
 
 # ------------------------------------------------------------ #
-# Library
+# Object Library (compiled once, used by both shared and static)
 # ------------------------------------------------------------ #
 
-add_library(rocpdsna SHARED)
+add_library(rocpdsna-objects OBJECT)
+set_target_properties(rocpdsna-objects PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 target_compile_definitions(
-    rocpdsna
+    rocpdsna-objects
     PRIVATE
         $<$<COMPILE_LANGUAGE:CXX>:ROCPDSNA_VERSION_MAJOR=${rocpdsna_VERSION_MAJOR}>
     PRIVATE
@@ -72,7 +74,7 @@ target_compile_definitions(
 )
 
 target_compile_options(
-    rocpdsna
+    rocpdsna-objects
     PRIVATE
         $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:
         -Wall
@@ -123,10 +125,8 @@ foreach(HEADER_FILE ${rocpdsna_public_headers})
 endforeach()
 
 target_include_directories(
-    rocpdsna
-    PUBLIC
-        $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>
-        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+    rocpdsna-objects
+    PUBLIC $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>
 )
 
 # ------------------------------------------------------------ #
@@ -142,7 +142,7 @@ set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR}/cmake ${CMAKE_MODULE_PATH})
 include(coverage)
 
 if(ROCPDSNA_ENABLE_COVERAGE)
-    rocpdsna_add_coverage_flags(rocpdsna)
+    rocpdsna_add_coverage_flags(rocpdsna-objects)
 endif()
 
 # ------------------------------------------------------------ #
@@ -150,24 +150,21 @@ endif()
 # ------------------------------------------------------------ #
 
 include(sqlite3)
-target_link_libraries(rocpdsna PRIVATE $<BUILD_INTERFACE:rocpdsna-sqlite3>)
+target_link_libraries(rocpdsna-objects PRIVATE rocpdsna-sqlite3)
 
 # ------------------------------------------------------------ #
 # spdlog
 # ------------------------------------------------------------ #
 
 include(spdlog)
-target_link_libraries(rocpdsna PRIVATE $<BUILD_INTERFACE:spdlog::spdlog>)
+target_link_libraries(rocpdsna-objects PRIVATE spdlog::spdlog)
 
 # ------------------------------------------------------------ #
 # nlohmann_json
 # ------------------------------------------------------------ #
 
 include(nlohmann_json)
-target_link_libraries(
-    rocpdsna
-    PRIVATE $<BUILD_INTERFACE:nlohmann_json::nlohmann_json>
-)
+target_link_libraries(rocpdsna-objects PRIVATE nlohmann_json::nlohmann_json)
 
 # ------------------------------------------------------------ #
 # Schema from rocprofiler-sdk-rocpd
@@ -181,20 +178,23 @@ include(rocprofiler-sdk-rocpd)
 
 if(USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD)
     target_link_libraries(
-        rocpdsna
+        rocpdsna-objects
         PRIVATE rocprofiler-sdk-rocpd::rocprofiler-sdk-rocpd
     )
 
     target_compile_definitions(
-        rocpdsna
+        rocpdsna-objects
         PRIVATE
             $<$<COMPILE_LANGUAGE:CXX>:USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD=1>
     )
 else()
-    target_include_directories(rocpdsna PRIVATE ${SQL_SCHEMA_BINARY_DIR})
+    target_include_directories(
+        rocpdsna-objects
+        PRIVATE ${SQL_SCHEMA_BINARY_DIR}
+    )
 
     target_compile_definitions(
-        rocpdsna
+        rocpdsna-objects
         PRIVATE
             $<$<COMPILE_LANGUAGE:CXX>:USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD=0>
     )
@@ -206,15 +206,53 @@ endif()
 
 if(ROCPDSNA_ENABLE_LOGGING)
     target_compile_definitions(
-        rocpdsna
+        rocpdsna-objects
         PRIVATE $<$<COMPILE_LANGUAGE:CXX>:ROCPDSNA_ENABLE_LOGGING=1>
     )
 else()
     target_compile_definitions(
-        rocpdsna
+        rocpdsna-objects
         PRIVATE $<$<COMPILE_LANGUAGE:CXX>:ROCPDSNA_ENABLE_LOGGING=0>
     )
 endif()
+
+# ------------------------------------------------------------ #
+# Shared and Static Libraries
+# ------------------------------------------------------------ #
+
+add_library(rocpdsna SHARED $<TARGET_OBJECTS:rocpdsna-objects>)
+add_library(rocpdsna-static STATIC $<TARGET_OBJECTS:rocpdsna-objects>)
+set_target_properties(rocpdsna-static PROPERTIES OUTPUT_NAME rocpdsna)
+
+foreach(_target rocpdsna rocpdsna-static)
+    target_include_directories(
+        ${_target}
+        PUBLIC
+            $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>
+            $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+    )
+
+    target_link_libraries(
+        ${_target}
+        PRIVATE
+            $<BUILD_INTERFACE:rocpdsna_queries>
+            $<BUILD_INTERFACE:rocpdsna-sqlite3>
+            $<BUILD_INTERFACE:spdlog::spdlog>
+            $<BUILD_INTERFACE:nlohmann_json::nlohmann_json>
+    )
+
+    if(USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD)
+        target_link_libraries(
+            ${_target}
+            PRIVATE
+                $<BUILD_INTERFACE:rocprofiler-sdk-rocpd::rocprofiler-sdk-rocpd>
+        )
+    endif()
+
+    if(ROCPDSNA_ENABLE_COVERAGE)
+        target_link_options(${_target} PRIVATE ${ROCPDSNA_COVERAGE_LINK_FLAGS})
+    endif()
+endforeach()
 
 # ------------------------------------------------------------ #
 # Install package support
@@ -233,6 +271,11 @@ install(
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
     PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_INCLUDEDIR} COMPONENT rocpdsna
+)
+
+install(
+    TARGETS ${PACKAGE_NAME}-static
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT rocpdsna
 )
 
 install(

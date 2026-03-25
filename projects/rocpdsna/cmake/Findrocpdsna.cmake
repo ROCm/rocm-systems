@@ -48,9 +48,13 @@ Result Variables
 if(TARGET rocpdsna)
     set(rocpdsna_FOUND TRUE)
 
-    # Create namespaced alias if it doesn't exist
+    # Create namespaced aliases if they don't exist
     if(NOT TARGET rocpdsna::rocpdsna)
         add_library(rocpdsna::rocpdsna ALIAS rocpdsna)
+    endif()
+
+    if(TARGET rocpdsna-static AND NOT TARGET rocpdsna::rocpdsna-static)
+        add_library(rocpdsna::rocpdsna-static ALIAS rocpdsna-static)
     endif()
 
     # Get properties from existing target
@@ -104,6 +108,24 @@ if(rocpdsna_FOUND)
                 INTERFACE_INCLUDE_DIRECTORIES "${rocpdsna_INCLUDE_DIR}"
         )
     endif()
+
+    # Also look for the static library
+    find_library(
+        rocpdsna_STATIC_LIBRARY
+        NAMES librocpdsna.a rocpdsna
+        HINTS ${rocpdsna_ROOT} $ENV{rocpdsna_ROOT} ${CMAKE_BINARY_DIR}
+        PATH_SUFFIXES lib lib64
+    )
+
+    if(rocpdsna_STATIC_LIBRARY AND NOT TARGET rocpdsna::rocpdsna-static)
+        add_library(rocpdsna::rocpdsna-static STATIC IMPORTED)
+        set_target_properties(
+            rocpdsna::rocpdsna-static
+            PROPERTIES
+                IMPORTED_LOCATION "${rocpdsna_STATIC_LIBRARY}"
+                INTERFACE_INCLUDE_DIRECTORIES "${rocpdsna_INCLUDE_DIR}"
+        )
+    endif()
 endif()
 
-mark_as_advanced(rocpdsna_INCLUDE_DIR rocpdsna_LIBRARY)
+mark_as_advanced(rocpdsna_INCLUDE_DIR rocpdsna_LIBRARY rocpdsna_STATIC_LIBRARY)
