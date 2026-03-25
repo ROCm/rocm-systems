@@ -459,34 +459,33 @@ rocprofiler_systems_message(STATUS "Boost thread library: ${Boost_THREAD_LIBRARY
 rocprofiler_systems_message(STATUS "Boost libraries: ${Boost_LIBRARIES}")
 
 # --------------------------------------------------------------------------------------#
-# Create Dyninst::Boost targets
+# Create Dyninst::Boost target if building from source
 # --------------------------------------------------------------------------------------#
-# Dyninst uses Boost variables (${Boost_LIBRARIES}) rather than namespaced targets for
-# both system and bundled builds, so we always create Dyninst::Boost targets to provide
-# a consistent interface. When these targets exist, Dyninst skips find_package(Boost).
-#
-# Note: Unlike TBB/ElfUtils, we create these for BOTH bundled and system builds because
-# Dyninst's CMake doesn't use standard Boost::* targets - it expects Dyninst::Boost.
+# When Boost is built from source, Dyninst's find_package(Boost) would fail
+# because the bundled Boost isn't installed in standard locations. Creating this
+# target causes Dyninst to skip find_package(Boost) and use the bundled dependency.
 
-if(NOT TARGET Dyninst::Boost)
-    add_library(Dyninst::Boost INTERFACE IMPORTED)
-    target_link_libraries(Dyninst::Boost INTERFACE ${Boost_LIBRARIES})
-    target_include_directories(Dyninst::Boost SYSTEM INTERFACE ${Boost_INCLUDE_DIRS})
-    target_compile_definitions(
-        Dyninst::Boost
-        INTERFACE BOOST_MULTI_INDEX_DISABLE_SERIALIZATION
-    )
-endif()
+if(ROCPROFSYS_BUILD_BOOST)
+    if(NOT TARGET Dyninst::Boost)
+        add_library(Dyninst::Boost INTERFACE IMPORTED)
+        target_link_libraries(Dyninst::Boost INTERFACE ${Boost_LIBRARIES})
+        target_include_directories(Dyninst::Boost SYSTEM INTERFACE ${Boost_INCLUDE_DIRS})
+        target_compile_definitions(
+            Dyninst::Boost
+            INTERFACE BOOST_MULTI_INDEX_DISABLE_SERIALIZATION
+        )
+    endif()
 
-if(NOT TARGET Dyninst::Boost_headers)
-    add_library(Dyninst::Boost_headers INTERFACE IMPORTED)
-    target_include_directories(
-        Dyninst::Boost_headers
-        SYSTEM
-        INTERFACE ${Boost_INCLUDE_DIRS}
-    )
-    target_compile_definitions(
-        Dyninst::Boost_headers
-        INTERFACE BOOST_MULTI_INDEX_DISABLE_SERIALIZATION
-    )
+    if(NOT TARGET Dyninst::Boost_headers)
+        add_library(Dyninst::Boost_headers INTERFACE IMPORTED)
+        target_include_directories(
+            Dyninst::Boost_headers
+            SYSTEM
+            INTERFACE ${Boost_INCLUDE_DIRS}
+        )
+        target_compile_definitions(
+            Dyninst::Boost_headers
+            INTERFACE BOOST_MULTI_INDEX_DISABLE_SERIALIZATION
+        )
+    endif()
 endif()
