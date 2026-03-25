@@ -49,7 +49,7 @@ class GpuMetricAvailability:
     # Fine-grained power (from amd-smi metric -p --json)
     current_socket_power: bool = False  # current_socket_power
 
-    # MI300 per-XCP VCN/JPEG (from amd-smi metric -u --json)
+    # Instinct per-XCP VCN/JPEG (from amd-smi metric -u --json)
     vcn_busy: bool = False  # xcp_stats[].vcn_busy[]
     jpeg_busy: bool = False  # xcp_stats[].jpeg_busy[]
 
@@ -208,7 +208,7 @@ def detect_usage_metrics(gpus: list[GpuMetricAvailability]) -> None:
         gpu.umc_activity = _is_available(usage.get("umc_activity"))
         gpu.mm_activity = _is_available(usage.get("mm_activity"))
 
-        # Per-XCP VCN/JPEG busy (MI300) - check all XCP slots
+        # Per-XCP VCN/JPEG busy (Instinct) - check all XCP slots
         vcn_busy_data = usage.get("vcn_busy", {})
         if isinstance(vcn_busy_data, dict):
             gpu.vcn_busy = any(
@@ -394,7 +394,7 @@ _FINE_GRAINED_NAMES = (
 
 # Note: vcn_activity and jpeg_activity are handled separately in
 # _collect_metric_names() because they can be sourced from two C++ paths
-# (device-level Radeon vs per-XCP MI300).
+# (device-level for Radeon vs per-XCP for Instict).
 _COARSE_NAMES = (
     "busy",
     "temp",
@@ -444,7 +444,7 @@ def _collect_metric_names(gpu: GpuMetricAvailability) -> set[str]:
             metrics.add(name)
 
     # vcn_activity and jpeg_activity are kept separate from vcn_busy/jpeg_busy.
-    # The Radeon (device-level) and MI300 (per-XCP) paths use different data
+    # The Radeon (device-level) and Instinct (per-XCP) paths use different data
     # sources and workloads may not produce nonzero values on both paths.
     if gpu.vcn_activity:
         metrics.add("vcn_activity")
