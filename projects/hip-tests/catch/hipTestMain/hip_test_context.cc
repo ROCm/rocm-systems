@@ -42,28 +42,43 @@ std::string TestContext::substringFound(std::vector<std::string> list, std::stri
 }
 
 std::string TestContext::getCurrentArch() {
-#if HT_AMD
-  int deviceCount = 0;
-  hipError_t err = hipGetDeviceCount(&deviceCount);
-  if (err != hipSuccess || deviceCount == 0) {
-    return "";
+#if HT_LINUX
+  // Derive the rocm path from the test location instead
+  // of relying on the ROCM_PATH env var or hardcoding /opt/rocm.
+  // test exe path is <prefix>/share/hip/catch_tests/.
+  std::filesystem::path rocm_path = std::filesystem::path(exe_path)
+      .parent_path()
+      .parent_path()
+      .parent_path()
+      .parent_path();
+  std::string command =
+      (rocm_path / "bin" / "rocm_agent_enumerator").string();
+
+  if (!std::filesystem::exists(command)) {
+    // use ROCM_PATH env var only in scenarios where test exe is not in expected location
+    if (const char* env_rocm_path = std::getenv("ROCM_PATH")) {
+      command = (std::filesystem::path(env_rocm_path) / "bin" /
+                 "rocm_agent_enumerator").string();
+    }
+    if (!std::filesystem::exists(command)) {
+      return "";
+    }
   }
 
-  // Query arch from each device via hipGetDeviceProperties
-  std::vector<std::string> archs;
-  for (int i = 0; i < deviceCount; i++) {
-    hipDeviceProp_t props{};
-    err = hipGetDeviceProperties(&props, i);
-    if (err != hipSuccess) {
-      continue;
-    }
-    std::string arch(props.gcnArchName);
-    // Strip target features after ':' (e.g., gfx942:sramecc+:xnack- becomes gfx942)
-    auto colon_pos = arch.find(':');
-    if (colon_pos != std::string::npos) {
-      arch = arch.substr(0, colon_pos);
-    }
-    archs.push_back(arch);
+  command += " | awk '$0 != "
+             "\"gfx000\"' | xargs | sed -e 's/ /;/g' | "
+             "tr -d '\n'";
+
+  std::array<char, 1024> buffer;
+  std::string result;
+  std::unique_ptr<FILE, decltype(&pclose)> pipe(popen(command.c_str(), "r"), pclose);
+  if (!pipe) {
+    printf("popen() failed!");
+    return "";
+  }
+  while (fgets(buffer.data(), buffer.size(), pipe.get()) != nullptr) {
+    std::string res = buffer.data();
+    result = res;
   }
 
   std::string s_visible_devices = TestContext::getEnvVar("HIP_VISIBLE_DEVICES");
@@ -83,19 +98,20 @@ std::string TestContext::getCurrentArch() {
     return ret;
   };
 
+  std::vector<std::string> archs = parser(result, ';');
   std::vector<std::string> v_visible_devices = parser(s_visible_devices, ',');
   std::vector<int> visible_devices;
   std::for_each(v_visible_devices.begin(), v_visible_devices.end(),
                 [&](const std::string& in) { visible_devices.push_back(std::stoi(in)); });
 
   if (archs.size() == 0) {
-    return "";
+    return "";  // rocm_agent_enum gave us garbage
   }
 
   auto first_arch = archs[0];
   if (!std::all_of(archs.begin(), archs.end(),
                    [&](const std::string& in) { return in == first_arch; })) {
-    // We have multiple archs
+    // We have multiple archs in rocm_agent_enum
     // Check if they are same or not by applying HIP_VISIBLE_DEVICES filter
     std::vector<std::string> filtered_archs;
     if (visible_devices.size() > 0) {
