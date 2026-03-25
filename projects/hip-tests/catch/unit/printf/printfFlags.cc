@@ -42,10 +42,10 @@ HIP_TEST_CASE(Unit_Printf_flags_Sanity_Positive) {
 +0000042
 -42
 +0000042
-xyzzy
+xyzzy   
 -42
  42
-00000042
+00000042        
         00000042
 052
 0x2a
