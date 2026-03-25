@@ -263,7 +263,9 @@ Added in `analyze.py`. Generates a self-contained single-file HTML report:
 - After computing `ai_rec_cmd`, the PMC counters in the suggestion are compared against the last `trace_history` command. If all suggested counters are already present, `ai_rec_cmd` is cleared to prevent an infinite `[r] → re-profile → same INFO → [r]` loop.
 - `_phase5_rec_menu` detects `already_reprofiled` (all INFO + iteration > 0 + no fresh `ai_rec_cmd`) and shows deeper-tier options:
   - `[d]` → PC sampling command (stochastic, Tier 3)
-  - `[t]` → ATT trace command (`rocprofv3 --att --att-library-path /opt/rocm/lib --att-target-cu 0`); Phase 4 auto-detects `stats_*.csv` in the same directory and runs Tier 3 ATT analysis automatically. **Do NOT use `--att-simd-select 0x0`** — that bitmask disables all SIMDs → empty CSVs
+  - `[t]` → ATT trace command (`rocprofv3 --att --att-library-path /opt/rocm/lib --att-target-cu 0`); **hidden once ATT has already been run** (`_att_already_run = any("--att" in tr.command for tr in trace_history)`); Phase 4 auto-detects `stats_*.csv` in the same directory and runs Tier 3 ATT analysis automatically. **Do NOT use `--att-simd-select 0x0`** — that bitmask disables all SIMDs → empty CSVs
+- `rocprofv3 --att` produces an **empty kernel-dispatch DB** by design — trace data lives in `stats_*.csv`. The "No GPU kernel activity" zero-runtime warning is **suppressed** when `_att_dir` is set in Phase 4 to avoid misleading the user.
+- When ATT data is present but no stalls exceed threshold (`stall_ratio < 0.40` or `hitcount < 6400`), `generate_recommendations()` emits an INFO rec `"ATT analysis complete: N kernel(s) traced — no significant stalls detected"` instead of the generic "collect more data" INFO. Users see confirmation that ATT ran and kernels look clean.
 - Two invalid flags are stripped from AI-recommended commands: `--hip-api-trace` (not a valid rocprofv3 flag; correct flag is `--hip-trace`) and `--kernel-names <value>` (value-taking flag that rocprofv3 does not accept). The root cause was `analyze.py` generating `--hip-api-trace` in the API overhead recommendation command — now fixed to use `--hip-trace`.
 - `_phase6_apply_direct` retries `_llm_rewrite_file` on failure (timeout, rate-limit, etc.) instead of silently falling through to Phase 7. Prompts `Retry LLM rewrite? [y/N]`.
 
@@ -333,8 +335,9 @@ New in `analyze.py`:
 **Constants**: `_ATT_MIN_HITCOUNT = 6400` (100 wavefronts × 64 threads), `_ATT_STALL_CATEGORY_MAP` in `analyze.py`
 
 ### Verification Status
-✅ **Production Ready - Tier 1, Tier 2, Tier 3 ATT, and Webview Functional**
+✅ **Production Ready - Tier 1, Tier 2, Tier 3 ATT, Webview, and Interactive ATT Functional**
 - Tier 1: Tested with real GPU trace (reproducible_dispatch_count, 1000 dispatches)
 - Tier 2: Tested with hardware counters (48,000 counter samples, 3 counters)
 - Tier 3 ATT: Tested with real `stats_*.csv` from `rocprofv3 --att --att-library-path`; full pipeline verified
 - Webview: Generates valid HTML with ATT section in correct position inside `.wrap`; verified with real att data
+- Interactive ATT: End-to-end tested — `[t]` → Phase 7 → ATT collection → Phase 4 auto-detect → Tier 3 report; all 89 unit tests pass
