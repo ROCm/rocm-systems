@@ -33,8 +33,6 @@ from abc import abstractmethod
 from pathlib import Path
 from typing import Any, Optional, Union
 
-import yaml
-
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils.logger import (
     console_debug,
@@ -43,15 +41,15 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
-from utils.utils import (
+from utils.utils_common import (
     capture_subprocess_output,
     format_time,
-    gen_sysinfo,
     get_rank,
-    pc_sampling_prof,
+    is_only_pc_sampling,
     print_status,
-    run_prof,
 )
+from utils.utils_profile import gen_sysinfo, pc_sampling_prof, run_prof
+from vendored import yaml
 
 
 class RocProfCompute_Base:
@@ -303,6 +301,16 @@ class RocProfCompute_Base:
         else:
             console_log("Filtered sections: All")
 
+        # Run profiling on each input file
+        input_files = sorted(Path(args.path).glob("perfmon/*.txt"))
+        total_runs = len(input_files)
+
+        if total_runs == 0 and is_only_pc_sampling(args.filter_blocks):
+            console_log(
+                "profiling",
+                "No performance counters to collect -- PC sampling only mode",
+            )
+
         msg = "Collecting Performance Counters"
         status_msg = f"{msg} (Roofline Only)" if self.__args.roof_only else msg
         print_status(status_msg)
@@ -388,15 +396,9 @@ class RocProfCompute_Base:
         else:
             options = self.get_profiler_options()
 
-        # Run profiling on each input file
-        input_files = sorted(Path(args.path).glob("perfmon/*.txt"))
-        total_runs = len(input_files)
-
         # Compute total workload runs including PC sampling for warning check
         total_workload_runs = total_runs
-        if any(
-            block == "21" or block.startswith("21.") for block in args.filter_blocks
-        ):
+        if any(block in ["21", "pc_sampling"] for block in args.filter_blocks):
             total_workload_runs += 1
 
         # Warn about multi-rank profiling when multiple workload runs are needed
@@ -411,21 +413,6 @@ class RocProfCompute_Base:
                 "(running the workload multiple times) may fail to collect "
                 "data for workloads with MPI communication. "
                 "Consider using single-pass modes:\n"
-                "  --iteration-multiplexing  : Collect all counters in a "
-                "single application run\n"
-                "  --set <name>              : Profile a predefined counter set\n"
-                "See documentation for more information."
-            )
-
-        # Warn if PC sampling is requested (block "21") with multi-rank
-        if get_rank() is not None and any(
-            block == "21" or block.startswith("21.") for block in args.filter_blocks
-        ):
-            console_warning(
-                "Multi-rank application detected with PC sampling enabled. "
-                "PC sampling may fail to collect data for workloads with "
-                "MPI communication. "
-                "Consider using single-pass modes without PC sampling:\n"
                 "  --iteration-multiplexing  : Collect all counters in a "
                 "single application run\n"
                 "  --set <name>              : Profile a predefined counter set\n"
@@ -539,6 +526,20 @@ class RocProfCompute_Base:
         start_time = time.time()
         # No native tool for pc sampling
         options = self.get_profiler_options()
+
+        if (
+            is_only_pc_sampling(args.filter_blocks)
+            and self.__profiler == "rocprofiler-sdk"
+            and (rocprof_output_path := getattr(options, "ROCPROF_OUTPUT_PATH", None))
+            is not None
+        ):
+            rocprof_output_path = Path(rocprof_output_path)
+            if rocprof_output_path.exists():
+                shutil.rmtree(rocprof_output_path, ignore_errors=True)
+                console_debug(
+                    f"Removed existing ROCProf output path: {rocprof_output_path}"
+                )
+
         pc_sampling_prof(
             profiler_options=options,
             method=args.pc_sampling_method,

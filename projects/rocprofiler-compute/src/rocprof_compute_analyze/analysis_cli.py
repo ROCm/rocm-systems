@@ -40,6 +40,12 @@ from roofline import Roofline
 from utils import file_io, parser, schema, tty
 from utils.logger import console_error, console_log, console_warning, demarcate
 from utils.roofline_calc import calc_ai_analyze, validate_roofline_csv
+from utils.utils_analysis import (
+    build_call_trees,
+    build_call_trees_with_kernel_ids,
+    process_torch_trace_output,
+    write_torch_trace_consolidated_csv,
+)
 
 
 def parse_torch_operator_patterns(args: argparse.Namespace) -> list[str]:

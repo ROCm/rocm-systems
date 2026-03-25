@@ -61,7 +61,7 @@ from utils.roofline_calc import (
     PEAK_OPS_DATATYPES,
     SUPPORTED_DATATYPES,
 )
-from utils.utils import get_uuid, get_version
+from utils.utils_common import get_uuid, get_version
 
 
 class db_analysis(OmniAnalyze_Base):
