@@ -99,7 +99,7 @@ python3 -c "from rocpd.ai_analysis.llm_analyzer import get_reference_guide_path;
 ### The Flow:
 
 ```
-User runs: rocpd analyze --ai output.db --llm anthropic
+User runs: rocpd analyze -i output.db --llm anthropic
 
 ↓
 
