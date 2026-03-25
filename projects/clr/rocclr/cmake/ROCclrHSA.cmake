@@ -55,14 +55,7 @@ if (AMD_COMPUTE_WIN)
   target_compile_definitions(rocclr PUBLIC ROCR_STATIC_OPEN)
 else()
   if(UNIX)
-    find_package(hsa-runtime64 1.11 REQUIRED CONFIG
-      PATHS
-        /opt/rocm/
-        ${ROCM_INSTALL_PATH}
-      PATH_SUFFIXES
-        cmake/hsa-runtime64
-        lib/cmake/hsa-runtime64
-        lib64/cmake/hsa-runtime64)
+    find_package(hsa-runtime64 1.11 REQUIRED CONFIG)
   else()
     find_package(hsa-runtime64 1.11 REQUIRED CONFIG
       PATHS

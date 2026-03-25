@@ -18,22 +18,25 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-find_package(amd_comgr 2.9 CONFIG
-  PATHS
-    /opt/rocm/
-    ${ROCM_INSTALL_PATH}
-  PATH_SUFFIXES
-    cmake/amd_comgr
-    lib/cmake/amd_comgr)
+# Prefer the active package graph (for example, a super-project provided
+# package) and refuse to build against the amd_comgr stub package, which
+# injects headers from a potentially unrelated ROCm install.
+if(DEFINED amd_comgr_DIR)
+  get_filename_component(_amd_comgr_dir_name "${amd_comgr_DIR}" NAME)
+  if(_amd_comgr_dir_name STREQUAL "amd_comgr_stub")
+    unset(amd_comgr_DIR CACHE)
+    unset(amd_comgr_DIR)
+  endif()
+endif()
 
-if (NOT amd_comgr_FOUND)
-  find_package(amd_comgr 3.0 REQUIRED CONFIG
-    PATHS
-      /opt/rocm/
-      ${ROCM_INSTALL_PATH}
-    PATH_SUFFIXES
-      cmake/amd_comgr
-      lib/cmake/amd_comgr)
+find_package(amd_comgr 3.0 REQUIRED CONFIG)
+
+get_filename_component(_amd_comgr_dir_name "${amd_comgr_DIR}" NAME)
+if(_amd_comgr_dir_name STREQUAL "amd_comgr_stub")
+  message(FATAL_ERROR
+    "rocclr requires the real amd_comgr package, but CMake resolved the "
+    "amd_comgr stub package at '${amd_comgr_DIR}'. Configure with a real "
+    "amd_comgr package on CMAKE_PREFIX_PATH or amd_comgr_DIR.")
 endif()
 
 get_target_property(_amd_comgr_lib_type amd_comgr TYPE)

@@ -47,6 +47,13 @@ else()
 
 endif()
 
+if(NOT WIN32)
+  set(_hip_dependency_hints "${PACKAGE_PREFIX_DIR}")
+  if(DEFINED ROCM_PATH)
+    list(APPEND _hip_dependency_hints "${ROCM_PATH}")
+  endif()
+endif()
+
 if(WIN32)
   # Using SDK folder
   file(TO_CMAKE_PATH "${HIP_PATH}" HIP_CLANG_ROOT)
@@ -63,7 +70,7 @@ if(NOT HIP_CXX_COMPILER)
 endif()
 
 if(NOT WIN32)
-  find_dependency(AMDDeviceLibs HINTS ${ROCM_PATH} PATHS "/opt/rocm")
+  find_dependency(AMDDeviceLibs HINTS ${_hip_dependency_hints} PATHS "/opt/rocm")
 endif()
 
 if(DEFINED AMDGPU_TARGETS AND NOT DEFINED GPU_TARGETS)
@@ -122,7 +129,21 @@ endif()
 
 set(GPU_BUILD_TARGETS "${GPU_TARGETS}" CACHE STRING "GPU targets to compile for")
 if(NOT WIN32)
-  find_dependency(amd_comgr HINTS ${ROCM_PATH} PATHS "/opt/rocm")
+  if(DEFINED amd_comgr_DIR)
+    get_filename_component(_amd_comgr_dir_name "${amd_comgr_DIR}" NAME)
+    if(_amd_comgr_dir_name STREQUAL "amd_comgr_stub")
+      unset(amd_comgr_DIR CACHE)
+      unset(amd_comgr_DIR)
+    endif()
+  endif()
+  find_dependency(amd_comgr HINTS ${_hip_dependency_hints} PATHS "/opt/rocm")
+  get_filename_component(_amd_comgr_dir_name "${amd_comgr_DIR}" NAME)
+  if(_amd_comgr_dir_name STREQUAL "amd_comgr_stub")
+    message(FATAL_ERROR
+      "HIP requires the real amd_comgr package, but CMake resolved the "
+      "amd_comgr stub package at '${amd_comgr_DIR}'. Configure with a real "
+      "amd_comgr package on CMAKE_PREFIX_PATH or amd_comgr_DIR.")
+  endif()
 endif()
 
 include( "${CMAKE_CURRENT_LIST_DIR}/hip-targets.cmake" )
@@ -131,7 +152,7 @@ include( "${CMAKE_CURRENT_LIST_DIR}/hip-targets.cmake" )
 #This makes the cmake generated file xxxx-targets to supply the linker libraries
 # without worrying other transitive dependencies
 if(NOT WIN32)
-  find_dependency(hsa-runtime64 HINTS ${ROCM_PATH} PATHS "/opt/rocm")
+  find_dependency(hsa-runtime64 HINTS ${_hip_dependency_hints} PATHS "/opt/rocm")
   find_dependency(Threads)
 endif()
 
