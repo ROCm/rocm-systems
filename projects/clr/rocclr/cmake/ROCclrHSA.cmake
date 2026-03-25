@@ -55,7 +55,25 @@ if (AMD_COMPUTE_WIN)
   target_compile_definitions(rocclr PUBLIC ROCR_STATIC_OPEN)
 else()
   if(UNIX)
-    find_package(hsa-runtime64 1.11 REQUIRED CONFIG)
+    if(THEROCK_USE_SAFE_DEPENDENCY_PROVIDER AND DEFINED THEROCK_PACKAGE_DIR_hsa-runtime64)
+      set(hsa-runtime64_DIR "${THEROCK_PACKAGE_DIR_hsa-runtime64}" CACHE PATH
+        "TheRock-provided hsa-runtime64 package directory" FORCE)
+    endif()
+    if(THEROCK_USE_SAFE_DEPENDENCY_PROVIDER AND DEFINED THEROCK_PACKAGE_DIR_hsa-runtime64)
+      include("${THEROCK_PACKAGE_DIR_hsa-runtime64}/hsa-runtime64-config.cmake")
+      set(hsa-runtime64_FOUND TRUE)
+    elseif(THEROCK_USE_SAFE_DEPENDENCY_PROVIDER)
+      find_package(hsa-runtime64 1.11 REQUIRED CONFIG)
+    else()
+      find_package(hsa-runtime64 1.11 REQUIRED CONFIG
+        PATHS
+          /opt/rocm/
+          ${ROCM_INSTALL_PATH}
+        PATH_SUFFIXES
+          cmake/hsa-runtime64
+          lib/cmake/hsa-runtime64
+          lib64/cmake/hsa-runtime64)
+    endif()
   else()
     find_package(hsa-runtime64 1.11 REQUIRED CONFIG
       PATHS

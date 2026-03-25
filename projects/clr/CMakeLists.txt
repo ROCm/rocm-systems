@@ -19,7 +19,23 @@
 # THE SOFTWARE.
 
 cmake_minimum_required(VERSION 3.16.8)
-project(clr)
+
+# clr does not enable the HIP language, but a pre-seeded CMAKE_HIP_ARCHITECTURES
+# cache entry can still cause CMake to probe the system HIP SDK during
+# compiler detection. Preserve the user value and restore it after project().
+if(DEFINED CMAKE_HIP_ARCHITECTURES)
+    set(_clr_saved_cmake_hip_architectures "${CMAKE_HIP_ARCHITECTURES}")
+    unset(CMAKE_HIP_ARCHITECTURES CACHE)
+    unset(CMAKE_HIP_ARCHITECTURES)
+endif()
+
+project(clr LANGUAGES C CXX)
+
+if(DEFINED _clr_saved_cmake_hip_architectures)
+    set(CMAKE_HIP_ARCHITECTURES "${_clr_saved_cmake_hip_architectures}" CACHE STRING
+        "Preserved HIP architectures" FORCE)
+    unset(_clr_saved_cmake_hip_architectures)
+endif()
 
 ##########
 # Defaults
@@ -56,6 +72,19 @@ endif()
 
 option(CLR_BUILD_HIP "Build HIP" OFF)
 option(CLR_BUILD_OCL "Build OCL" OFF)
+
+# Honor super-project provided package roots before any find_package() calls.
+# Standalone builds continue to use the normal package search logic.
+if(THEROCK_USE_SAFE_DEPENDENCY_PROVIDER)
+    if(DEFINED THEROCK_PACKAGE_DIR_amd_comgr)
+        set(amd_comgr_DIR "${THEROCK_PACKAGE_DIR_amd_comgr}" CACHE PATH
+            "TheRock-provided amd_comgr package directory" FORCE)
+    endif()
+    if(DEFINED THEROCK_PACKAGE_DIR_hsa-runtime64)
+        set(hsa-runtime64_DIR "${THEROCK_PACKAGE_DIR_hsa-runtime64}" CACHE PATH
+            "TheRock-provided hsa-runtime64 package directory" FORCE)
+    endif()
+endif()
 
 # Set default build type
 if(NOT CMAKE_BUILD_TYPE)
