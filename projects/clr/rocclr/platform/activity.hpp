@@ -76,6 +76,10 @@ constexpr OpId OperationId(cl_command_type commandType) {
 bool IsEnabled(OpId operation_id);
 void ReportActivity(const amd::Command& command);
 
+// Signals roctracer that CLR commits to delivering one activity record for
+// this operation. Must be called exactly once per command that will produce
+// a record.
+void CommitRecord(OpId operation_id);
 
 const char* getOclCommandKindString(cl_command_type kind);
 }  // namespace amd::activity_prof
