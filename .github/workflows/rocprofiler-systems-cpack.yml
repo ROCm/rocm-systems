@@ -106,7 +106,7 @@ jobs:
             large-packages: false
             swap-storage: false
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           sparse-checkout: |
             projects/rocprofiler-systems
@@ -145,7 +145,7 @@ jobs:
 
       - name: STGZ Artifacts
         timeout-minutes: 10
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: rocprofiler-systems-stgz-${{ matrix.os-distro }}-${{ matrix.os-version }}-rocm-${{ matrix.rocm-version }}-installer
           path: |

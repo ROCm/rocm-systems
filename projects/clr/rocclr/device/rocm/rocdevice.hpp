@@ -565,7 +565,7 @@ class Device : public NullDevice {
   //! Initialize memory in AMD HMM on the current device or keeps it in the host memory
   bool SvmAllocInit(void* memory, size_t size) const;
 
-  void getGlobalCUMask(std::string cuMaskStr);
+  void getGlobalCUMask(std::string_view cuMaskStr);
 
   static hsa_status_t BackendErrorCallBackHandler(const hsa_amd_event_t* event, void* data);
 
@@ -588,8 +588,8 @@ class Device : public NullDevice {
 
   //! SDMA engine allocation for per-stream affinity
   uint32_t AllocateSdmaEngine(VirtualGPU* vgpu, HwQueueEngine engine_type,
-                              hsa_agent_t dstAgent, hsa_agent_t srcAgent) const {
-    return sdma_engine_allocator_.AllocateEngine(vgpu, engine_type, dstAgent, srcAgent);
+                              hsa_agent_t peerAgent, hsa_agent_t copyAgent) const {
+    return sdma_engine_allocator_.AllocateEngine(vgpu, engine_type, peerAgent, copyAgent);
   }
   void ReleaseSdmaEngine(VirtualGPU* vgpu) const {
     sdma_engine_allocator_.ReleaseEngine(vgpu);
@@ -743,7 +743,7 @@ class Device : public NullDevice {
     //! Queries HSA for engine status and preferred engines, then allocates
     //! For inter-GPU copies, strongly prefers recommended engines even if already allocated
     uint32_t AllocateEngine(VirtualGPU* vgpu, HwQueueEngine engine_type,
-                           hsa_agent_t dstAgent, hsa_agent_t srcAgent);
+                           hsa_agent_t peerAgent, hsa_agent_t copyAgent);
 
     //! Release engine allocation for a VirtualGPU
     void ReleaseEngine(VirtualGPU* vgpu);
