@@ -314,6 +314,9 @@ class Agent : public Checked<0xF6BC25EB17E6F917> {
   virtual hsa_status_t GetInfo(hsa_agent_info_t attribute,
                                void* value) const = 0;
 
+  // @brief Initialize secondary CUID for this agent.
+  virtual void InitDerivedCuid() = 0;
+
   // @brief Returns an array of regions owned by the agent.
   virtual const std::vector<std::shared_ptr<const core::MemoryRegion>>& regions() const = 0;
 
