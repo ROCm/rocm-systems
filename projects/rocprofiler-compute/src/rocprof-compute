@@ -1,38 +1,17 @@
 #!/usr/bin/env python3
 """Main entry point for rocprof-compute"""
 
-##############################################################################bl
-# MIT License
-#
-# Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-##############################################################################el
-
-import warnings
-
-# Suppress pandas FutureWarning about chained assignment
-warnings.filterwarnings("ignore", category=FutureWarning)
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
 import re
 import sys
+import traceback
+import warnings
 from pathlib import Path
+
+# Suppress pandas FutureWarning about chained assignment
+warnings.filterwarnings("ignore", category=FutureWarning)
 
 try:
     from importlib import metadata
@@ -40,7 +19,7 @@ try:
     from rocprof_compute_base import RocProfCompute
     from utils.logger import console_error
 except ImportError as e:
-    print (f"{e}")
+    print(f"{e}")
     # In wheel package, softlink is not supported.
     # rocprof-compute will get installed in bin and libexec/rocprofiler-compute.
     # When invoked from bin folder, the extra paths are required to import the
@@ -54,12 +33,19 @@ except ImportError as e:
         from importlib import metadata
 
         from rocprof_compute_base import RocProfCompute
-        from utils.utils import console_error
+        from utils.logger import console_error
     except ImportError:
-        pass
+        print(
+            "\n[ERROR] Could not import rocprofiler-compute modules. "
+            "Please check your installation."
+        )
+        script_path = Path(__file__).resolve().parent
+        print(f"Searched: {script_path}, {additional_path.resolve()}")
+        traceback.print_exc()
+        sys.exit(1)
 
 
-def check_version(local_ver, desired_ver, operator) -> bool:
+def check_version(local_ver: str, desired_ver: str, operator: str) -> bool:
     """Check package version strings with simple operators used in companion
     requirements.txt file"""
     ops = {
@@ -79,7 +65,7 @@ def verify_deps() -> None:
     dependencies are not available."""
 
     # Check which version of python is being used
-    if sys.version_info < (3, 8):
+    if sys.version_info < (3, 8):  # noqa: UP036
         print(
             f"[ERROR] Python 3.8 or higher is required to run rocprofiler-compute. "
             f"The current version is {sys.version_info[0]}.{sys.version_info[1]}."

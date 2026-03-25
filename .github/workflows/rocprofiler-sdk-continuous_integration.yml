@@ -91,7 +91,7 @@ jobs:
           # TEMPORARILY DISABLED: navi3/navi4 jobs pending CI stabilization
           # - { gpu: 'navi4', runner: 'rocprofiler-navi4-dind', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', ci-flags: '--linter clang-tidy', gpu-target: 'gfx120X' }
           # - { gpu: 'navi3', runner: 'rocprofiler-navi3-dind', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', ci-flags: '--linter clang-tidy', gpu-target: 'gfx110X' }
-          - { gpu: 'mi325', runner: 'linux-mi325-1gpu-ossci-rocm', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', ci-flags: '--linter clang-tidy', gpu-target: 'gfx94X' }
+          - { gpu: 'mi325', runner: 'linux-gfx942-1gpu-ossci-rocm', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', ci-flags: '--linter clang-tidy', gpu-target: 'gfx94X' }
     runs-on: ${{ matrix.system.runner }}
     container:
       image: docker.io/rocm/rocprofiler-private:${{ matrix.system.os }}-${{ matrix.system.gpu-target }}-latest
@@ -100,7 +100,10 @@ jobs:
         password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
       env:
         DEBIAN_FRONTEND: noninteractive
-      options: --privileged
+      # --env-file /etc/podinfo/gha-gpu-isolation-settings - Required for GPU isolation on OSSCI MIXXX runners
+      options:
+        --privileged
+        --env-file /etc/podinfo/gha-gpu-isolation-settings
     env:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
       CORE_EXT_RUNNER: mi325
@@ -439,16 +442,19 @@ jobs:
       fail-fast: false
       matrix:
         system:
-          - { os: 'rhel-8.8', runner: 'linux-mi325-1gpu-ossci-rocm', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo', ci-flags: '' }
-          - { os: 'rhel-9.5', runner: 'linux-mi325-1gpu-ossci-rocm', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo', ci-flags: '' }
-          - { os: 'sles-15.6', runner: 'linux-mi325-1gpu-ossci-rocm', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo', ci-flags: '' }
+          - { os: 'rhel-8.8', runner: 'linux-gfx942-1gpu-ossci-rocm', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo', ci-flags: '' }
+          - { os: 'rhel-9.5', runner: 'linux-gfx942-1gpu-ossci-rocm', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo', ci-flags: '' }
+          - { os: 'sles-15.6', runner: 'linux-gfx942-1gpu-ossci-rocm', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo', ci-flags: '' }
     runs-on: ${{ matrix.system.runner }}
     container:
       image: docker.io/rocm/rocprofiler-private:${{ matrix.system.os }}-${{ matrix.system.gpu-target }}-latest
       credentials:
         username: ${{ secrets.ROCPROFILER_AZURE_CI_USER }}
         password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
-      options: --privileged
+      # --env-file /etc/podinfo/gha-gpu-isolation-settings - Required for GPU isolation on OSSCI MIXXX runners
+      options:
+        --privileged
+        --env-file /etc/podinfo/gha-gpu-isolation-settings
     env:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
       OS_TYPE: ${{ matrix.system.os }}
@@ -690,7 +696,12 @@ jobs:
         password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
       env:
         DEBIAN_FRONTEND: noninteractive
-      options: --privileged --cap-add=SYS_PTRACE --security-opt seccomp=unconfined
+      # --env-file /etc/podinfo/gha-gpu-isolation-settings - Required for GPU isolation on OSSCI MIXXX runners
+      options:
+        --privileged
+        --cap-add SYS_PTRACE
+        --security-opt seccomp=unconfined
+        --env-file /etc/podinfo/gha-gpu-isolation-settings
 
     # define this for containers
     env:
