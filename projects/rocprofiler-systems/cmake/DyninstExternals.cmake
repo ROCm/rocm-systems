@@ -15,9 +15,6 @@
 # - Creates build targets with serialized dependency chains
 # - Creates external-prebuild and external-deps-complete targets for coordination
 #
-# The configuration of Dyninst::* targets happens in ConfigureDyninstTargets.cmake,
-# which must be included in Packages.cmake before add_subdirectory(external/dyninst).
-#
 # ========================================================================================
 
 include(MacroUtilities)
@@ -101,6 +98,3 @@ add_custom_target(external-deps-complete)
 if(TARGET external-prebuild)
     add_dependencies(external-deps-complete external-prebuild)
 endif()
-
-# Note: Configuration of Dyninst::* targets happens in ConfigureDyninstTargets.cmake,
-# which is included in Packages.cmake just before add_subdirectory(external/dyninst).

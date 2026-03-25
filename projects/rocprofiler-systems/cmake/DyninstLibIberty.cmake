@@ -157,10 +157,6 @@ rocprofiler_systems_message(STATUS "LibIberty libraries: ${LibIberty_LIBRARIES}"
 # When LibIberty is built from source, Dyninst's find_package(LibIberty) would fail
 # because the bundled LibIberty isn't installed in standard locations. Creating this
 # target causes Dyninst to skip find_package(LibIberty) and use the bundled dependency.
-#
-# For system packages, FindLibIberty.cmake already creates LibIberty::LibIberty which
-# Dyninst's find_package discovers naturally.
-
 if(ROCPROFSYS_BUILD_LIBIBERTY AND NOT TARGET Dyninst::LibIberty)
     add_library(Dyninst::LibIberty INTERFACE IMPORTED)
     target_link_libraries(Dyninst::LibIberty INTERFACE ${LibIberty_LIBRARIES})

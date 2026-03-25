@@ -295,6 +295,7 @@ if(NOT TARGET Elfutils::Elfutils AND NOT ROCPROFSYS_BUILD_ELFUTILS)
     endif()
 endif()
 
+# --------------------------------------------------------------------------------------#
 # Create Dyninst::ElfUtils target if building from source
 # --------------------------------------------------------------------------------------#
 # When ElfUtils is built from source, Dyninst's find_package(Elfutils) would fail because

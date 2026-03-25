@@ -260,9 +260,7 @@ rocprofiler_systems_message(STATUS "TBB definitions: ${TBB_DEFINITIONS}.")
 # Create standard TBB::* targets for system packages only
 # --------------------------------------------------------------------------------------#
 # When using system packages, create standard targets that Dyninst's find_package(TBB)
-# can discover. For bundled builds, we skip this - PTL's FindTBB.cmake will create
-# TBB::tbb targets, and Dyninst will use Dyninst::TBB (created below) instead.
-
+# can discover.
 if(NOT TARGET TBB::tbb AND NOT ROCPROFSYS_BUILD_TBB)
     # System package - create imported targets from found libraries
     rocprofiler_systems_message(
