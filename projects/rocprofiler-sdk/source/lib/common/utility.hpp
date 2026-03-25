@@ -57,6 +57,13 @@ uint64_t
 get_clock_period_ns_impl(clockid_t _clk_id);
 
 inline uint64_t
+get_pid()
+{
+    static uint64_t _v = ::syscall(__NR_getpid);
+    return _v;
+}
+
+inline uint64_t
 get_tid()
 {
     // system calls are expensive so store this in a thread-local

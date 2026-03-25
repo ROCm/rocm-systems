@@ -19,6 +19,9 @@ namespace aql_profile
 class LoggerTest : public ::testing::Test
 {
 protected:
+    const std::string log_file_path_ =
+        fmt::format("/tmp/aql_profile_log_{}_{}.txt", getppid(), getpid());
+
     void SetUp() override
     {
         // Clean up any existing instance
@@ -31,14 +34,14 @@ protected:
         }
 
         // Clear environment variable
-        unsetenv("HSA_VEN_AMD_AQLPROFILE_LOG");
+        unsetenv("ROCPROFILER_AQLPROFILE_LOGFILE");
     }
 
     void TearDown() override
     {
         // Clean up after each test
         Logger::Destroy();
-        unsetenv("HSA_VEN_AMD_AQLPROFILE_LOG");
+        unsetenv("ROCPROFILER_AQLPROFILE_LOGFILE");
 
         // Remove test log file
         if(std::filesystem::exists(log_file_path_))
@@ -46,8 +49,6 @@ protected:
             std::filesystem::remove(log_file_path_);
         }
     }
-
-    const std::string log_file_path_ = "/tmp/aql_profile_log.txt";
 
     // Helper function to read log file content
     std::string ReadLogFile()
@@ -61,7 +62,7 @@ protected:
     }
 
     // Helper function to enable file logging
-    void EnableFileLogging() { setenv("HSA_VEN_AMD_AQLPROFILE_LOG", "1", 1); }
+    void EnableFileLogging() { setenv("ROCPROFILER_AQLPROFILE_LOGFILE", "1", 1); }
 };
 
 // Test singleton pattern

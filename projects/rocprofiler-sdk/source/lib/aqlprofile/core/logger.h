@@ -40,6 +40,10 @@
 #include <sstream>
 #include <string>
 
+#include <fmt/format.h>
+
+#include "lib/common/utility.hpp"
+
 namespace aql_profile
 {
 class Logger
@@ -76,7 +80,7 @@ public:
     {
         Logger&                  logger = Instance();
         std::lock_guard<mutex_t> lck(mutex_);
-        return logger.message_[GetTid()];
+        return logger.message_[rocprofiler::common::get_tid()];
     }
 
     static Logger& Instance()
@@ -94,15 +98,14 @@ public:
     }
 
 private:
-    static uint32_t GetPid() { return syscall(__NR_getpid); }
-    static uint32_t GetTid() { return syscall(__NR_gettid); }
-
     Logger()
     {
-        const char* path = getenv("HSA_VEN_AMD_AQLPROFILE_LOG");
+        const char* path = getenv("ROCPROFILER_AQLPROFILE_LOGFILE");
         if(path != nullptr)
         {
-            file_ = fopen("/tmp/aql_profile_log.txt", "a");
+            auto log_path = fmt::format(
+                "/tmp/aql_profile_log_{}_{}.txt", getppid(), rocprofiler::common::get_pid());
+            file_ = fopen(log_path.c_str(), "a");
         }
         ResetStreaming();
     }
@@ -121,7 +124,7 @@ private:
         std::lock_guard<mutex_t> lck(mutex_);
         if(messaging_)
         {
-            message_[GetTid()] = "";
+            message_[rocprofiler::common::get_tid()] = "";
         }
         messaging_ = false;
         streaming_ = false;
@@ -132,7 +135,7 @@ private:
         std::lock_guard<mutex_t> lck(mutex_);
         if(messaging_)
         {
-            message_[GetTid()] += m;
+            message_[rocprofiler::common::get_tid()] += m;
         }
         if(file_ != nullptr)
         {
@@ -152,7 +155,8 @@ private:
         char tm_str[26];
         strftime(tm_str, 26, "%Y-%m-%d %H:%M:%S", &tm_info);
         std::ostringstream oss;
-        oss << "\n<" << tm_str << std::dec << " pid" << GetPid() << " tid" << GetTid() << "> " << m;
+        oss << "\n<" << tm_str << std::dec << " pid" << rocprofiler::common::get_pid() << " tid"
+            << rocprofiler::common::get_tid() << "> " << m;
         Put(oss.str());
     }
 
@@ -160,7 +164,7 @@ private:
     bool                            streaming_ = false;
     bool                            messaging_ = false;
     FILE*                           file_      = nullptr;
-    std::map<uint32_t, std::string> message_   = {};
+    std::map<uint64_t, std::string> message_   = {};
 
     static mutex_t mutex_;
     static Logger* instance_;
