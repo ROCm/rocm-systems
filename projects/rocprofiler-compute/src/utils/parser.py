@@ -39,7 +39,7 @@ from utils import schema
 from utils.logger import console_debug, console_error, console_warning, demarcate
 from utils.pattern_matching import PatternMatcherEngine
 from utils.specs import MachineSpecs
-from utils.utils import normalize_filter_to_str_list
+from utils.utils_common import normalize_filter_to_str_list
 
 # ------------------------------------------------------------------------------
 # Internal global definitions

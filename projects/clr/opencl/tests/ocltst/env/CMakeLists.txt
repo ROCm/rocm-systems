@@ -38,14 +38,7 @@ target_include_directories(ocltst
     PRIVATE
         $<TARGET_PROPERTY:Common,INTERFACE_INCLUDE_DIRECTORIES>)
 
-if(TARGET OpenCL)
-  target_link_libraries(ocltst PRIVATE OpenCL)
-else()
-  list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../../cmake")
-  find_package(AMD_ICD)
-  find_library(AMD_ICD_LIBRARY OpenCL HINTS "${AMD_ICD_LIBRARY_DIR}")
-  target_link_libraries(ocltst PRIVATE ${AMD_ICD_LIBRARY})
-endif()
+target_link_libraries(ocltst PRIVATE ${OPENCL_ICD_LIB})
 
 if (NOT WIN32)
   set(THREADS_PREFER_PTHREAD_FLAG ON)
@@ -60,4 +53,3 @@ endif()
 set_target_properties(ocltst PROPERTIES INSTALL_RPATH "$ORIGIN")
 
 INSTALL(TARGETS ocltst DESTINATION ${OCLTST_INSTALL_DIR} COMPONENT ocltst)
-
