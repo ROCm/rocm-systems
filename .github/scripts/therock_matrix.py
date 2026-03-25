@@ -21,7 +21,6 @@ subtree_to_project_map = {
     "projects/rocprofiler-register": "profiler",
     "projects/rocprofiler-sdk": "profiler",
     "projects/rocprofiler-systems": "profiler",
-    "projects/rocprofiler": "profiler",
     "projects/rocr-debug-agent": "debug_tools",
     "projects/rocr-runtime": "runtimes",
     "projects/rocshmem": "rocshmem",
@@ -49,7 +48,7 @@ project_map = {
     # },
     "profiler": {
         "cmake_options": "-DTHEROCK_ENABLE_ALL=ON",
-        "projects_to_test": "aqlprofile, rocprofiler-compute, rocprofiler-systems",
+        "projects_to_test": "aqlprofile, rocprofiler-sdk, rocprofiler-compute, rocprofiler-systems",
     },
     "rocshmem": {
         "cmake_options": "-DTHEROCK_ENABLE_ROCSHMEM=ON -DTHEROCK_ENABLE_ALL=OFF",
@@ -61,7 +60,7 @@ project_map = {
     },
     "all": {
         "cmake_options": "-DTHEROCK_ENABLE_ALL=ON",
-        "projects_to_test": "hip-tests, rocrtst, aqlprofile, rocprofiler-compute, rocprofiler-systems, rocr-debug-agent, rocgdb",
+        "projects_to_test": "hip-tests, rocrtst, aqlprofile, rocprofiler-sdk, rocprofiler-compute, rocprofiler-systems, rocr-debug-agent, rocgdb",
     },
 }
 
