@@ -700,10 +700,10 @@ def _convert_result_to_llm_format(result: AnalysisResult) -> Dict[str, Any]:
         "kernels": [
             {
                 "name": k.get("name"),
-                "calls": k.get("calls"),
+                "dispatch_count": k.get("calls"),
                 "total_duration_ns": k.get("total_duration_ns"),
                 "avg_duration_ns": k.get("avg_duration_ns"),
-                "percent_of_total": k.get("pct_of_total"),
+                "pct_total_time": k.get("pct_of_total"),
             }
             for k in hotspots
         ],
