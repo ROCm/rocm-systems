@@ -4184,7 +4184,8 @@ amdsmi_status_t amdsmi_get_clk_freq(amdsmi_processor_handle processor_handle,
     amdsmi_clk_info_t clk_info = {};
     if (amdsmi_get_clock_info(processor_handle, clk_type, &clk_info) == AMDSMI_STATUS_SUCCESS &&
         clk_info.clk != UINT32_MAX) {
-      uint64_t actual_clk_hz = static_cast<uint64_t>(clk_info.clk) * get_multiplier_from_char('M');
+      uint64_t actual_clk_hz =
+          static_cast<uint64_t>(clk_info.clk) * amd::smi::get_multiplier_from_char('M');
       uint32_t closest_idx = 0;
       uint64_t min_diff = UINT64_MAX;
       for (uint32_t i = 0; i < f->num_supported; i++) {
