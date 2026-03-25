@@ -43,7 +43,7 @@ class GPUInfo:
         """Get appropriate ROCm events for testing based on architecture."""
         mi300_or_later = self._is_mi300_or_later
         if mi300_or_later:
-            return "GRBM_COUNT,SQ_WAVES,SQ_INSTS_VALU,TA_TA_BUSY:device=0"
+            return "GRBM_COUNT,SQ_WAVES,SQ_INSTS_VALU,TA_TA_BUSY"
         return "SQ_WAVES"
 
     @property

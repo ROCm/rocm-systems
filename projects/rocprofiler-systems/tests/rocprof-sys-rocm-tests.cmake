@@ -97,14 +97,12 @@ if(NAVI_DETECTED)
     set(ROCPROFSYS_FILE_CHECKS "rocprof-device-0-SQ_WAVES.txt")
     set(ROCPROFSYS_COUNTER_NAMES_ARG "SQ_WAVES")
 else()
-    set(ROCPROFSYS_ROCM_EVENTS_TEST
-        "GRBM_COUNT,SQ_WAVES,SQ_INSTS_VALU,TA_TA_BUSY:device=0"
-    )
+    set(ROCPROFSYS_ROCM_EVENTS_TEST "GRBM_COUNT,SQ_WAVES,SQ_INSTS_VALU,TA_TA_BUSY")
     set(ROCPROFSYS_FILE_CHECKS
-        "rocprof-device-0-GRBM_COUNT.txt"
-        "rocprof-device-0-SQ_WAVES.txt"
-        "rocprof-device-0-SQ_INSTS_VALU.txt"
-        "rocprof-device-0-TA_TA_BUSY.txt"
+        "rocprof-device-3-GRBM_COUNT.txt"
+        "rocprof-device-3-SQ_WAVES.txt"
+        "rocprof-device-3-SQ_INSTS_VALU.txt"
+        "rocprof-device-3-TA_TA_BUSY.txt"
     )
     set(ROCPROFSYS_COUNTER_NAMES_ARG "GRBM_COUNT" "SQ_WAVES" "SQ_INSTS_VALU" "TA_TA_BUSY")
 endif()

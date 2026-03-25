@@ -81,7 +81,7 @@ def generate_custom(args, cmake_args, ctest_args):
 
         set(CTEST_OUTPUT_ON_FAILURE TRUE)
         set(CTEST_USE_LAUNCHERS TRUE)
-        set(CMAKE_CTEST_ARGUMENTS --output-on-failure {CTEST_ARGS})
+        set(CMAKE_CTEST_ARGUMENTS -VV {CTEST_ARGS})
 
         set(CTEST_CUSTOM_MAXIMUM_NUMBER_OF_ERRORS "100")
         set(CTEST_CUSTOM_MAXIMUM_NUMBER_OF_WARNINGS "100")
@@ -330,7 +330,7 @@ if __name__ == "__main__":
     cmd = (
         [CTEST_CMD]
         + dashboard_args
-        + ["-S", script_path, "--output-on-failure", "-V"]
+        + ["-S", script_path, "-VV"]
         + ctest_args
     )
 
