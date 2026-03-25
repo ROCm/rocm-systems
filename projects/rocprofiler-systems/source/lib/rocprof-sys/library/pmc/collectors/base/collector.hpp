@@ -103,6 +103,7 @@ struct collector
     void config()
     {
         CacheApi::initialize_category_metadata();
+        CacheApi::initialize_tracks_metadata();
 
         for(const auto& entry : m_device_entries)
         {
@@ -111,7 +112,6 @@ struct collector
                 Traits::template setup_counter_tracks<PerfettoApi>(entry.device,
                                                                    m_enabled_metrics);
             }
-            CacheApi::initialize_tracks_metadata();
             Traits::template init_pmc_metadata<CacheApi>(entry.device);
         }
     }
