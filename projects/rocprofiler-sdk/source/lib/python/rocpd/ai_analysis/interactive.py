@@ -3688,7 +3688,8 @@ class WorkflowSession:
                 run_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
                 new_dir = f"{self._trace_dir}/run_{run_id}"
                 att_cmd = (
-                    f"rocprofv3 --att --att-target-cu 0 --att-simd-select 0x0"
+                    f"rocprofv3 --att --att-library-path /opt/rocm/lib"
+                    f" --att-target-cu 0"
                     f" -d {new_dir} -o results -- {self._state.app_command}"
                 )
                 snap.ai_recommended_command = att_cmd
