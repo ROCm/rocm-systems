@@ -410,7 +410,7 @@ Example usage:
                 "at least one of -i/--input, --source-dir, or --interactive is required.\n"
                 "  Use -i output.db for trace analysis (Tier 1/2).\n"
                 "  Use --source-dir ./src for source code analysis (Tier 0).\n"
-                "  Use --interactive \"./my_app\" for the 7-phase workflow.\n"
+                '  Use --interactive "./my_app" for the 7-phase workflow.\n'
                 "  Use both -i and --source-dir for combined analysis."
             )
 

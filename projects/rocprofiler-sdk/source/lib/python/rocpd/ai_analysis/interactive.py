@@ -1,11 +1,11 @@
 """Interactive session for rocpd analyze --interactive."""
+
 from __future__ import annotations
 
 import json
 import os
 import pathlib
 import re
-import shlex
 import subprocess
 import tempfile
 import warnings
@@ -16,20 +16,22 @@ from typing import Any, Dict, List, Optional, Union
 
 # ── Session data ─────────────────────────────────────────────────────────────
 
+
 @dataclass
 class PersistentMenuItem:
     """A recommendation promoted to the main menu from a previous analysis."""
+
     id: str
     title: str
-    priority: str               # "HIGH" | "MEDIUM" | "LOW"
-    source: str                 # "profiling_analysis" | "code_change_analysis"
-    added_at: str               # ISO-8601
+    priority: str  # "HIGH" | "MEDIUM" | "LOW"
+    source: str  # "profiling_analysis" | "code_change_analysis"
+    added_at: str  # ISO-8601
     detail: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class HistoryEntry:
-    type: str                   # "profiling_run" | "code_change"
+    type: str  # "profiling_run" | "code_change"
     timestamp: str
     db_path: str = ""
     files_modified: List[str] = field(default_factory=list)
@@ -39,6 +41,7 @@ class HistoryEntry:
 @dataclass
 class SessionContext:
     """Compact facts accumulated during a session; injected into LLM prompts."""
+
     iteration: int = 0
     analyses: List[Dict[str, Any]] = field(default_factory=list)
     # Each entry: {db, kernel_pct, memcpy_pct, idle_pct, top_issue, top_priority}
@@ -59,7 +62,7 @@ class SessionData:
     last_updated: str
     history: List[HistoryEntry] = field(default_factory=list)
     persistent_menu_items: List[PersistentMenuItem] = field(default_factory=list)
-    context: Optional[Dict[str, Any]] = None          # NEW field
+    context: Optional[Dict[str, Any]] = None  # NEW field
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -75,7 +78,7 @@ class SessionData:
             last_updated=d["last_updated"],
             history=history,
             persistent_menu_items=items,
-            context=d.get("context"),               # None if key absent (backward compat)
+            context=d.get("context"),  # None if key absent (backward compat)
         )
 
 
@@ -127,11 +130,13 @@ class SessionStore:
                     results.append(SessionData.from_dict(raw))
             except Exception:
                 pass
+
         def _safe_dt(s):
             try:
                 return datetime.fromisoformat(s.created_at)
             except Exception:
                 return datetime.min.replace(tzinfo=timezone.utc)
+
         return sorted(results, key=_safe_dt, reverse=True)
 
     @staticmethod
@@ -146,7 +151,7 @@ class SessionStore:
 try:
     from rich.console import Console
     from rich.panel import Panel
-    from rich.status import Status as _RichStatus
+
     _RICH = True
 except ImportError:
     _RICH = False
@@ -191,6 +196,7 @@ class _Spinner:
 
 # ── AMD ROCm logo banner ──────────────────────────────────────────────────────
 
+
 def _render_logo_halfblock(width: int = 66, threshold: int = 70) -> Optional[str]:
     """Convert the AMD ROCm logo PNG to half-block ANSI art (2 px per char row).
 
@@ -216,12 +222,12 @@ def _render_logo_halfblock(width: int = 66, threshold: int = 70) -> Optional[str
             height_px += 1
         img = img.resize((width, height_px), Image.LANCZOS)
 
-        RED   = "\033[31m"
+        RED = "\033[31m"
         RESET = "\033[0m"
         lines: List[str] = []
 
         for y_char in range(height_px // 2):
-            row = "  "   # leading indent
+            row = "  "  # leading indent
             for x in range(width):
                 top_a = img.getpixel((x, y_char * 2))[3]
                 bot_a = img.getpixel((x, y_char * 2 + 1))[3]
@@ -248,6 +254,7 @@ def _replace_output_dir(cmd: str, new_dir: str) -> str:
     """Replace the -d <dir> argument in a rocprofv3 command with new_dir."""
     import shlex as _shlex
     import re as _re
+
     # Replace -d <value> token pair
     try:
         parts = _shlex.split(cmd)
@@ -285,6 +292,7 @@ def _print_startup_banner() -> None:
 
 
 # ── InteractiveSession ────────────────────────────────────────────────────────
+
 
 class InteractiveSession:
     """Top-level interactive menu for rocpd analyze --interactive."""
@@ -349,15 +357,19 @@ class InteractiveSession:
 
     def _prompt_resume(self, existing: List[SessionData]) -> Optional[SessionData]:
         _print()
-        _print(f"Found {len(existing)} previous session(s) for {self._source_dir}:",
-               style="cyan")
+        _print(
+            f"Found {len(existing)} previous session(s) for {self._source_dir}:",
+            style="cyan",
+        )
         for i, s in enumerate(existing, 1):
-            n_runs   = sum(1 for h in s.history if h.type == "profiling_run")
+            n_runs = sum(1 for h in s.history if h.type == "profiling_run")
             n_change = sum(1 for h in s.history if h.type == "code_change")
-            n_items  = len(s.persistent_menu_items)
-            _print(f"  [{i}]  {s.session_id}  "
-                   f"({n_runs} profiling run(s), {n_change} code change(s), "
-                   f"{n_items} saved recommendation(s))")
+            n_items = len(s.persistent_menu_items)
+            _print(
+                f"  [{i}]  {s.session_id}  "
+                f"({n_runs} profiling run(s), {n_change} code change(s), "
+                f"{n_items} saved recommendation(s))"
+            )
         _print("  [n]  Start new session  (or press Enter)")
         _print()
         choice = _input("  > ").strip().lower()
@@ -365,37 +377,48 @@ class InteractiveSession:
             idx = int(choice) - 1
             if 0 <= idx < len(existing):
                 return existing[idx]
-            _print(f"  Invalid selection — starting new session.", style="dim")
+            _print("  Invalid selection — starting new session.", style="dim")
         elif choice not in ("n", ""):
-            _print(f"  Unrecognized input — starting new session.", style="dim")
+            _print("  Unrecognized input — starting new session.", style="dim")
         return None
 
     def _render_main_menu(self) -> None:
-        src_label = pathlib.Path(self._source_dir).name if self._source_dir else "(no source)"
+        src_label = (
+            pathlib.Path(self._source_dir).name if self._source_dir else "(no source)"
+        )
         n_runs = sum(1 for h in self._session.history if h.type == "profiling_run")
         db_label = f"  db: {pathlib.Path(self._db_path).name}" if self._db_path else ""
         runs_label = f"  runs: {n_runs}" if n_runs else ""
-        status_line = (f"[dim]{db_label}{runs_label}  \\[s] save  \\[q] quit[/dim]"
-                       if _RICH else f"{db_label}{runs_label}  [s] save  [q] quit")
+        status_line = (
+            f"[dim]{db_label}{runs_label}  \\[s] save  \\[q] quit[/dim]"
+            if _RICH
+            else f"{db_label}{runs_label}  [s] save  [q] quit"
+        )
         if _RICH and _console:
-            _console.print(Panel(
-                f"[bold]Source:[/bold] {src_label}   "
-                f"[bold]Session:[/bold] {self._session.session_id}   "
-                + status_line,
-                title="[bold cyan]rocpd Interactive Analysis[/bold cyan]",
-                border_style="blue",
-            ))
+            _console.print(
+                Panel(
+                    f"[bold]Source:[/bold] {src_label}   "
+                    f"[bold]Session:[/bold] {self._session.session_id}   " + status_line,
+                    title="[bold cyan]rocpd Interactive Analysis[/bold cyan]",
+                    border_style="blue",
+                )
+            )
         else:
             w = 70
             print("=" * w)
             print(f"  rocpd Interactive Analysis | {src_label}")
-            print(f"  Session: {self._session.session_id}"
-                  f"  {db_label}  [s] save  [q] quit")
+            print(
+                f"  Session: {self._session.session_id}"
+                f"  {db_label}  [s] save  [q] quit"
+            )
             print("=" * w)
 
         _print()
         _print("  [p]  Profile app  — run rocprofv3, collect .db", style="white")
-        _print("  [a]  Analyze .db  — load existing trace and find bottlenecks", style="white")
+        _print(
+            "  [a]  Analyze .db  — load existing trace and find bottlenecks",
+            style="white",
+        )
         _print("  [o]  Optimize     — AI code optimization suggestions", style="white")
 
         if self._session.persistent_menu_items:
@@ -404,7 +427,9 @@ class InteractiveSession:
             for i, item in enumerate(self._session.persistent_menu_items, 1):
                 pri = item.priority.upper()
                 pri_style = _PRI_STYLE.get(pri, "white")
-                src_tag = "  [code change]" if item.source == "code_change_analysis" else ""
+                src_tag = (
+                    "  [code change]" if item.source == "code_change_analysis" else ""
+                )
                 if _RICH and _console:
                     _console.print(
                         f"  [cyan bold]\\[{i}][/cyan bold]  "
@@ -420,7 +445,10 @@ class InteractiveSession:
         _print()
         if self._db_path:
             _print(f"  Current .db: {self._db_path}", style="dim")
-            _print("  Enter a .db path to analyze, or press Enter to re-analyze current:", style="cyan")
+            _print(
+                "  Enter a .db path to analyze, or press Enter to re-analyze current:",
+                style="cyan",
+            )
         else:
             _print("  Enter path to a .db trace file:", style="cyan")
         try:
@@ -444,9 +472,9 @@ class InteractiveSession:
         added = self._ingest_recommendations(new_recs)
         self._update_ctx_analysis(new_recs, breakdown)
         now = datetime.now(timezone.utc).isoformat()
-        self._session.history.append(HistoryEntry(
-            type="profiling_run", timestamp=now, db_path=str(db_path)
-        ))
+        self._session.history.append(
+            HistoryEntry(type="profiling_run", timestamp=now, db_path=str(db_path))
+        )
         _print(f"  ✓ {added} new finding(s) added to menu.", style="green")
 
     def _show_analysis_summary(self, recs: List[Dict[str, Any]]) -> None:
@@ -455,7 +483,7 @@ class InteractiveSession:
             _print("  No significant bottlenecks found.", style="green")
             return
         high = [r for r in recs if r.get("priority", "").upper() == "HIGH"]
-        med  = [r for r in recs if r.get("priority", "").upper() == "MEDIUM"]
+        med = [r for r in recs if r.get("priority", "").upper() == "MEDIUM"]
         _print()
         _print("  ── Analysis Summary ────────────────────────────────────", style="cyan")
         for r in high:
@@ -479,7 +507,7 @@ class InteractiveSession:
                 self._save_and_quit()
                 break
             elif choice == "s":
-                self._session.context = asdict(self._ctx)   # flush context before save
+                self._session.context = asdict(self._ctx)  # flush context before save
                 self._store.save(self._session)
                 _print("  Session saved.", style="green")
             elif choice == "p":
@@ -491,15 +519,13 @@ class InteractiveSession:
             elif choice.isdigit():
                 idx = int(choice) - 1
                 if 0 <= idx < len(self._session.persistent_menu_items):
-                    self._pursue_recommendation(
-                        self._session.persistent_menu_items[idx]
-                    )
+                    self._pursue_recommendation(self._session.persistent_menu_items[idx])
             else:
                 _print("  Unknown choice. Enter p, a, o, s, q, or a number.", style="dim")
 
     def _save_and_quit(self) -> None:
         self._session.last_updated = datetime.now(timezone.utc).isoformat()
-        self._session.context = asdict(self._ctx)     # flush context before save
+        self._session.context = asdict(self._ctx)  # flush context before save
         self._store.save(self._session)
         _print("  Session saved. Goodbye.", style="cyan")
 
@@ -513,14 +539,16 @@ class InteractiveSession:
         for rec in new_recs:
             rid = rec.get("id", rec.get("category", ""))
             if rid and rid not in existing_ids:
-                self._session.persistent_menu_items.append(PersistentMenuItem(
-                    id=rid,
-                    title=rec.get("issue", rec.get("category", rid)),
-                    priority=rec.get("priority", "INFO"),
-                    source=source,
-                    added_at=now,
-                    detail=rec,
-                ))
+                self._session.persistent_menu_items.append(
+                    PersistentMenuItem(
+                        id=rid,
+                        title=rec.get("issue", rec.get("category", rid)),
+                        priority=rec.get("priority", "INFO"),
+                        source=source,
+                        added_at=now,
+                        detail=rec,
+                    )
+                )
                 existing_ids.add(rid)
                 added += 1
         return added
@@ -567,7 +595,10 @@ class InteractiveSession:
             auto_app = auto.split("-- ", 1)[1] if "-- " in auto else ""
             hint = f" (default: {auto_app})" if auto_app and auto_app != "./app" else ""
             _print(f"  Enter application to profile{hint}:", style="cyan")
-            _print("  (e.g.  ./my_app --arg1 val1   or press Enter to use default)", style="dim")
+            _print(
+                "  (e.g.  ./my_app --arg1 val1   or press Enter to use default)",
+                style="dim",
+            )
             try:
                 app_input = _input("  > ").strip()
             except EOFError:
@@ -583,6 +614,7 @@ class InteractiveSession:
         _print()
 
         import subprocess
+
         proc = subprocess.run(selected_cmd, shell=True)
         self._update_ctx_command(selected_cmd, proc.returncode)
         _print()
@@ -594,7 +626,9 @@ class InteractiveSession:
         if db_path:
             _print(f"  Found output: {db_path}", style="green")
         else:
-            _print("  Enter path to the output .db file (or Enter to skip):", style="cyan")
+            _print(
+                "  Enter path to the output .db file (or Enter to skip):", style="cyan"
+            )
             try:
                 db_input = _input("  > ").strip()
             except EOFError:
@@ -613,11 +647,13 @@ class InteractiveSession:
         added = self._ingest_recommendations(new_recs, source=_source)
         self._update_ctx_analysis(new_recs, breakdown)
         now = datetime.now(timezone.utc).isoformat()
-        self._session.history.append(HistoryEntry(
-            type="profiling_run",
-            timestamp=now,
-            db_path=str(db_path),
-        ))
+        self._session.history.append(
+            HistoryEntry(
+                type="profiling_run",
+                timestamp=now,
+                db_path=str(db_path),
+            )
+        )
         self._db_path = str(db_path)
         _print(f"  ✓ {added} finding(s) added to menu.", style="green")
 
@@ -628,17 +664,20 @@ class InteractiveSession:
         # Look for any executable in source_dir (non-script, non-dot files)
         base = pathlib.Path(self._source_dir)
         for candidate in sorted(base.iterdir()):
-            if (candidate.is_file()
-                    and os.access(str(candidate), os.X_OK)
-                    and not candidate.name.startswith(".")
-                    and candidate.suffix not in {".sh", ".py", ".md", ".txt", ".cpp",
-                                                  ".hip", ".cu", ".h", ".hpp"}):
+            if (
+                candidate.is_file()
+                and os.access(str(candidate), os.X_OK)
+                and not candidate.name.startswith(".")
+                and candidate.suffix
+                not in {".sh", ".py", ".md", ".txt", ".cpp", ".hip", ".cu", ".h", ".hpp"}
+            ):
                 return cmd.replace("-- ./app", f"-- {candidate}")
         return cmd  # leave as-is if nothing found
 
     def _find_output_db(self, cmd: str) -> Optional[pathlib.Path]:
         """Parse -d <dir> -o <base> from a rocprofv3 command and find the resulting .db."""
         import shlex
+
         try:
             parts = shlex.split(cmd)
         except ValueError:
@@ -665,6 +704,7 @@ class InteractiveSession:
                 return c
         # Glob fallback
         import glob
+
         matches = sorted(glob.glob(str(pathlib.Path(out_dir) / f"{out_base}*.db")))
         if matches:
             return pathlib.Path(matches[0])
@@ -686,12 +726,15 @@ class InteractiveSession:
                 _add("Start Here — suggested first profiling command", fc)
 
         priority_order = {"HIGH": 0, "MEDIUM": 1, "LOW": 2, "INFO": 3}
-        for rec in sorted(self._recs,
-                          key=lambda r: priority_order.get(r.get("priority", "INFO"), 4)):
+        for rec in sorted(
+            self._recs, key=lambda r: priority_order.get(r.get("priority", "INFO"), 4)
+        ):
             for cmd in rec.get("commands", []):
                 fc = cmd.get("full_command", "")
-                label = (f"[{rec.get('priority','INFO')}] {rec.get('category','')} — "
-                         f"{cmd.get('tool','')}: {cmd.get('description','')}")
+                label = (
+                    f"[{rec.get('priority','INFO')}] {rec.get('category','')} — "
+                    f"{cmd.get('tool','')}: {cmd.get('description','')}"
+                )
                 _add(label, fc)
 
         return cmds
@@ -700,35 +743,58 @@ class InteractiveSession:
         """Send tier0 metadata (NOT source text) to online LLM for annotation."""
         try:
             from rocpd.ai_analysis.llm_analyzer import LLMAnalyzer
+
             # Use self._tier0 directly — SourceAnalysisResult has the fields we need
             plan = self._tier0
             if plan is None:
                 return cmds
             patterns = getattr(plan, "detected_patterns", [])
             metadata = {
-                "programming_model":  getattr(plan, "programming_model", "HIP"),
-                "kernel_count":       getattr(plan, "kernel_count", 0),
+                "programming_model": getattr(plan, "programming_model", "HIP"),
+                "kernel_count": getattr(plan, "kernel_count", 0),
                 "suggested_counters": getattr(plan, "suggested_counters", []),
-                "risk_areas":         getattr(plan, "risk_areas", []),
-                "detected_patterns":  [
-                    {"id":          (p.get("pattern_id") if isinstance(p, dict) else getattr(p, "pattern_id", "")),
-                     "severity":    (p.get("severity")   if isinstance(p, dict) else getattr(p, "severity",   "")),
-                     "description": (p.get("description") if isinstance(p, dict) else getattr(p, "description", ""))}
+                "risk_areas": getattr(plan, "risk_areas", []),
+                "detected_patterns": [
+                    {
+                        "id": (
+                            p.get("pattern_id")
+                            if isinstance(p, dict)
+                            else getattr(p, "pattern_id", "")
+                        ),
+                        "severity": (
+                            p.get("severity")
+                            if isinstance(p, dict)
+                            else getattr(p, "severity", "")
+                        ),
+                        "description": (
+                            p.get("description")
+                            if isinstance(p, dict)
+                            else getattr(p, "description", "")
+                        ),
+                    }
                     for p in patterns
                 ],
                 "suggested_commands": [cmd for _, cmd in cmds],
             }
-            model = self._llm_local_model if self._llm_provider == "local" else self._llm_model
+            model = (
+                self._llm_local_model
+                if self._llm_provider == "local"
+                else self._llm_model
+            )
             analyzer = LLMAnalyzer(
                 provider=self._llm_provider,
                 api_key=self._llm_api_key,
                 model=model,
             )
-            with _Spinner(f"  Contacting {self._llm_provider} LLM for profiling advice..."):
+            with _Spinner(
+                f"  Contacting {self._llm_provider} LLM for profiling advice..."
+            ):
                 note = analyzer.annotate_profiling_plan(metadata)
             if note:
                 _print()
-                _print("  ── LLM Profiling Advice ────────────────────────────", style="cyan")
+                _print(
+                    "  ── LLM Profiling Advice ────────────────────────────", style="cyan"
+                )
                 _print(note)
                 _print()
         except Exception as exc:
@@ -744,6 +810,7 @@ class InteractiveSession:
         """
         try:
             from rocpd.ai_analysis.api import analyze_database
+
             result = analyze_database(pathlib.Path(db_path))
             recs: List[Dict[str, Any]] = []
             for r in (
@@ -751,23 +818,25 @@ class InteractiveSession:
                 + result.recommendations.medium_priority
                 + result.recommendations.low_priority
             ):
-                recs.append({
-                    "id": r.id,
-                    "priority": r.priority,
-                    "category": r.category,
-                    "issue": r.title,
-                    "suggestion": r.description,
-                    "actions": r.next_steps,
-                    "commands": [],
-                })
+                recs.append(
+                    {
+                        "id": r.id,
+                        "priority": r.priority,
+                        "category": r.category,
+                        "issue": r.title,
+                        "suggestion": r.description,
+                        "actions": r.next_steps,
+                        "commands": [],
+                    }
+                )
             breakdown: Optional[Dict[str, Any]] = None
             eb = result.execution_breakdown
             if eb is not None:
                 breakdown = {
-                    "kernel_time_pct":  eb.kernel_time_pct,
-                    "memcpy_time_pct":  eb.memcpy_time_pct,
+                    "kernel_time_pct": eb.kernel_time_pct,
+                    "memcpy_time_pct": eb.memcpy_time_pct,
                     "api_overhead_pct": eb.api_overhead_pct,
-                    "idle_time_pct":    eb.idle_time_pct,
+                    "idle_time_pct": eb.idle_time_pct,
                     "total_runtime_ns": result.profiling_info.total_duration_ns,
                 }
             return recs, breakdown
@@ -783,11 +852,11 @@ class InteractiveSession:
         """Append a compact analysis snapshot to _ctx.analyses (capped at 5)."""
         bd = breakdown or {}
         entry = {
-            "db":           pathlib.Path(self._db_path).name if self._db_path else "",
-            "kernel_pct":   bd.get("kernel_time_pct", 0.0),
-            "memcpy_pct":   bd.get("memcpy_time_pct", 0.0),
-            "idle_pct":     bd.get("idle_time_pct", 0.0),
-            "top_issue":    recs[0]["issue"] if recs else "",
+            "db": pathlib.Path(self._db_path).name if self._db_path else "",
+            "kernel_pct": bd.get("kernel_time_pct", 0.0),
+            "memcpy_pct": bd.get("memcpy_time_pct", 0.0),
+            "idle_pct": bd.get("idle_time_pct", 0.0),
+            "top_issue": recs[0]["issue"] if recs else "",
             "top_priority": recs[0]["priority"] if recs else "INFO",
         }
         self._ctx.analyses.append(entry)
@@ -813,9 +882,11 @@ class InteractiveSession:
         Returns "" when _ctx has no accumulated data yet (first LLM call).
         Output is ≤~1300 chars regardless of cap sizes.
         """
-        if (not self._ctx.analyses
-                and not self._ctx.suggestions_given
-                and not self._ctx.commands_run):
+        if (
+            not self._ctx.analyses
+            and not self._ctx.suggestions_given
+            and not self._ctx.commands_run
+        ):
             return ""
 
         lines = [f"### Session Context (iteration {self._ctx.iteration})"]
@@ -838,15 +909,11 @@ class InteractiveSession:
         if self._ctx.commands_run:
             lines.append(f"Commands run ({len(self._ctx.commands_run)}):")
             for c in self._ctx.commands_run:
-                lines.append(
-                    f"  $ {c.get('cmd','')}  (exit {c.get('exit_code', '?')})"
-                )
+                lines.append(f"  $ {c.get('cmd','')}  (exit {c.get('exit_code', '?')})")
 
         return "\n".join(lines)
 
-    def _extract_ai_commands(
-        self, text: str, structured_cmds: List[str]
-    ) -> List[str]:
+    def _extract_ai_commands(self, text: str, structured_cmds: List[str]) -> List[str]:
         """Extract rocprofv3 commands from LLM text + structured recommendation list.
 
         Free-form matches come first; deduplicates; returns at most 5.
@@ -870,8 +937,9 @@ class InteractiveSession:
         if not commands:
             return
         _print()
-        _print("  ── AI-suggested profiling commands ───────────────────────",
-               style="cyan")
+        _print(
+            "  ── AI-suggested profiling commands ───────────────────────", style="cyan"
+        )
         for i, cmd in enumerate(commands, 1):
             _print(f"  [{i}]  $ {cmd}", style="dim")
         _print()
@@ -907,8 +975,9 @@ class InteractiveSession:
 
         db_path = self._find_output_db(cmd)
         if not db_path:
-            _print("  Enter path to the output .db file (or Enter to skip):",
-                   style="cyan")
+            _print(
+                "  Enter path to the output .db file (or Enter to skip):", style="cyan"
+            )
             try:
                 db_input = _input("  > ").strip()
             except EOFError:
@@ -928,9 +997,9 @@ class InteractiveSession:
             self._show_analysis_summary(new_recs)
         added = self._ingest_recommendations(new_recs)
         now = datetime.now(timezone.utc).isoformat()
-        self._session.history.append(HistoryEntry(
-            type="profiling_run", timestamp=now, db_path=str(db_path)
-        ))
+        self._session.history.append(
+            HistoryEntry(type="profiling_run", timestamp=now, db_path=str(db_path))
+        )
         self._session.last_updated = now
         self._session.context = asdict(self._ctx)
         self._store.save(self._session)
@@ -940,10 +1009,19 @@ class InteractiveSession:
 
     # Subdirectory names that look like backup/archive copies — skip them so
     # we don't send the same source file twice (e.g. original_code/).
-    _SKIP_SUBDIRS = frozenset({
-        "original_code", "original", "backup", "bak", "old", "archive",
-        "reference", "orig", "before",
-    })
+    _SKIP_SUBDIRS = frozenset(
+        {
+            "original_code",
+            "original",
+            "backup",
+            "bak",
+            "old",
+            "archive",
+            "reference",
+            "orig",
+            "before",
+        }
+    )
 
     def _select_hot_files(self, budget: int = _TOKEN_BUDGET) -> List[tuple]:
         """Return [(abs_path, content)] for files with detected kernels, within budget.
@@ -1001,9 +1079,11 @@ class InteractiveSession:
             llm_provider = self._autodetect_llm()
 
         if not llm_provider:
-            _print("  No LLM configured. Add --llm anthropic or --llm openai to get "
-                   "AI-generated code suggestions. Showing rule-based hints instead:",
-                   style="yellow")
+            _print(
+                "  No LLM configured. Add --llm anthropic or --llm openai to get "
+                "AI-generated code suggestions. Showing rule-based hints instead:",
+                style="yellow",
+            )
             _print()
             self._show_rulebased_suggestions()
             return
@@ -1017,8 +1097,11 @@ class InteractiveSession:
         # was not given, so tier0 was never run)
         hot_files = self._select_hot_files()
         if not hot_files:
-            _print("  No kernel-containing files detected. "
-                   "Run with --source-dir pointing at your source.", style="yellow")
+            _print(
+                "  No kernel-containing files detected. "
+                "Run with --source-dir pointing at your source.",
+                style="yellow",
+            )
             return
 
         _print()
@@ -1039,7 +1122,9 @@ class InteractiveSession:
         first_text = next(iter(raw.values()), "")
         if first_text:
             _print()
-            _print("  ── Optimization Suggestions ─────────────────────────", style="cyan")
+            _print(
+                "  ── Optimization Suggestions ─────────────────────────", style="cyan"
+            )
             _print(first_text[:3000] + ("…" if len(first_text) > 3000 else ""))
             _print()
 
@@ -1073,12 +1158,14 @@ class InteractiveSession:
 
         if modified:
             now = datetime.now(timezone.utc).isoformat()
-            self._session.history.append(HistoryEntry(
-                type="code_change",
-                timestamp=now,
-                files_modified=modified,
-                summary=f"Optimized {len(modified)} file(s) via LLM suggestions",
-            ))
+            self._session.history.append(
+                HistoryEntry(
+                    type="code_change",
+                    timestamp=now,
+                    files_modified=modified,
+                    summary=f"Optimized {len(modified)} file(s) via LLM suggestions",
+                )
+            )
             _print(f"  ✓ Modified: {', '.join(modified)}", style="green")
             _print()
             try:
@@ -1091,8 +1178,10 @@ class InteractiveSession:
     def _optimize_via_tier0(self, llm_provider: str) -> None:
         """Fast optimization path: send compact tier0 metadata to LLM (not raw source)."""
         _print()
-        _print("  Requesting optimization suggestions (based on detected patterns)...",
-               style="dim")
+        _print(
+            "  Requesting optimization suggestions (based on detected patterns)...",
+            style="dim",
+        )
         try:
             from rocpd.ai_analysis.llm_analyzer import LLMAnalyzer
             import json as _json
@@ -1100,30 +1189,44 @@ class InteractiveSession:
             # Build compact metadata from tier0 — same approach as annotate_profiling_plan
             plan = self._tier0
             patterns = getattr(plan, "detected_patterns", [])
-            kernels  = getattr(plan, "detected_kernels", [])[:5]
+            kernels = getattr(plan, "detected_kernels", [])[:5]
             metadata = {
                 "programming_model": getattr(plan, "programming_model", "HIP"),
-                "kernel_count":      getattr(plan, "kernel_count", 0),
-                "risk_areas":        getattr(plan, "risk_areas", []),
+                "kernel_count": getattr(plan, "kernel_count", 0),
+                "risk_areas": getattr(plan, "risk_areas", []),
                 "detected_patterns": [
                     {
-                        "id":          (p.get("pattern_id") if isinstance(p, dict)
-                                        else getattr(p, "pattern_id", "")),
-                        "severity":    (p.get("severity")   if isinstance(p, dict)
-                                        else getattr(p, "severity",   "")),
-                        "description": (p.get("description") if isinstance(p, dict)
-                                        else getattr(p, "description", "")),
-                        "count":       (p.get("count", 1)   if isinstance(p, dict)
-                                        else getattr(p, "count", 1)),
+                        "id": (
+                            p.get("pattern_id")
+                            if isinstance(p, dict)
+                            else getattr(p, "pattern_id", "")
+                        ),
+                        "severity": (
+                            p.get("severity")
+                            if isinstance(p, dict)
+                            else getattr(p, "severity", "")
+                        ),
+                        "description": (
+                            p.get("description")
+                            if isinstance(p, dict)
+                            else getattr(p, "description", "")
+                        ),
+                        "count": (
+                            p.get("count", 1)
+                            if isinstance(p, dict)
+                            else getattr(p, "count", 1)
+                        ),
                     }
                     for p in patterns
                 ],
                 "detected_kernels": [
                     {
-                        "name":        ("[KERNEL]" if isinstance(k, dict)
-                                        else "[KERNEL]"),
-                        "launch_type": (k.get("launch_type", "") if isinstance(k, dict)
-                                        else getattr(k, "launch_type", "")),
+                        "name": ("[KERNEL]" if isinstance(k, dict) else "[KERNEL]"),
+                        "launch_type": (
+                            k.get("launch_type", "")
+                            if isinstance(k, dict)
+                            else getattr(k, "launch_type", "")
+                        ),
                     }
                     for k in kernels
                 ],
@@ -1146,23 +1249,29 @@ class InteractiveSession:
             )
             ctx_block = self._format_context_block()
             user = (
-                (ctx_block + "\n\n" if ctx_block else "")
-                + "Based on these detected GPU source patterns, provide concrete "
-                  "optimization recommendations:\n\n"
-                + _json.dumps(metadata, indent=2)
+                ctx_block + "\n\n" if ctx_block else ""
+            ) + "Based on these detected GPU source patterns, provide concrete " "optimization recommendations:\n\n" + _json.dumps(
+                metadata, indent=2
             )
 
             with _Spinner(f"  Contacting {llm_provider} LLM..."):
-                note = analyzer._call_openai(system, user, max_tokens=2000) \
-                       if llm_provider == "openai" \
-                       else (analyzer._call_anthropic(system, user)
-                             if llm_provider == "anthropic"
-                             else analyzer._call_local(system, user))
+                note = (
+                    analyzer._call_openai(system, user, max_tokens=2000)
+                    if llm_provider == "openai"
+                    else (
+                        analyzer._call_anthropic(system, user)
+                        if llm_provider == "anthropic"
+                        else analyzer._call_local(system, user)
+                    )
+                )
 
             if note:
                 self._update_ctx_suggestion(note)
                 _print()
-                _print("  ── AI Optimization Suggestions ──────────────────────", style="cyan")
+                _print(
+                    "  ── AI Optimization Suggestions ──────────────────────",
+                    style="cyan",
+                )
                 _print(note)
                 _print()
                 self._offer_apply_suggestions(note, llm_provider)
@@ -1181,7 +1290,9 @@ class InteractiveSession:
         except Exception as exc:
             _print(f"  (LLM optimization failed: {exc})", style="red")
 
-    def _offer_apply_suggestions(self, suggestions: str, llm_provider: Optional[str] = None) -> None:
+    def _offer_apply_suggestions(
+        self, suggestions: str, llm_provider: Optional[str] = None
+    ) -> None:
         """Ask user whether to save the suggestions or let the LLM edit source code directly."""
         _print("  Apply these suggestions to your source files?", style="cyan")
         _print("    [s] Save suggestions to a file", style="dim")
@@ -1211,7 +1322,8 @@ class InteractiveSession:
         src_files: List[pathlib.Path] = []
         try:
             src_files = [
-                p for p in sorted(pathlib.Path(self._source_dir).rglob("*"))
+                p
+                for p in sorted(pathlib.Path(self._source_dir).rglob("*"))
                 if p.suffix in exts and p.is_file()
             ]
         except OSError:
@@ -1242,7 +1354,9 @@ class InteractiveSession:
             return None
         return src_files[idx]
 
-    def _apply_suggestions_via_llm(self, suggestions: str, llm_provider: Optional[str]) -> None:
+    def _apply_suggestions_via_llm(
+        self, suggestions: str, llm_provider: Optional[str]
+    ) -> None:
         """Use the LLM to rewrite a source file applying the optimization suggestions.
 
         Workflow:
@@ -1258,7 +1372,11 @@ class InteractiveSession:
         if llm_provider == "local" and not self._llm_local:
             detected = self._autodetect_llm()
             if not detected:
-                fallback = self._llm_provider if self._llm_provider and self._llm_provider != "local" else None
+                fallback = (
+                    self._llm_provider
+                    if self._llm_provider and self._llm_provider != "local"
+                    else None
+                )
                 if fallback:
                     _print(
                         f"  Local LLM not detected — falling back to {fallback} for code edit.",
@@ -1269,12 +1387,17 @@ class InteractiveSession:
                     _print("  No LLM available for code editing.", style="yellow")
                     _print("  Options:", style="dim")
                     _print("    • Start a local model:  ollama run llama3", style="dim")
-                    _print("    • Or pass --llm anthropic / --llm openai when launching rocpd.", style="dim")
+                    _print(
+                        "    • Or pass --llm anthropic / --llm openai when launching rocpd.",
+                        style="dim",
+                    )
                     return
 
         if not llm_provider:
-            _print("  No LLM configured. Pass --llm local/anthropic/openai to enable AI code edits.",
-                   style="yellow")
+            _print(
+                "  No LLM configured. Pass --llm local/anthropic/openai to enable AI code edits.",
+                style="yellow",
+            )
             return
 
         chosen = self._pick_source_file()
@@ -1304,6 +1427,7 @@ class InteractiveSession:
 
         _print()
         from rocpd.ai_analysis.llm_analyzer import LLMAnalyzer
+
         model = self._llm_local_model if llm_provider == "local" else self._llm_model
         analyzer = LLMAnalyzer(
             provider=llm_provider,
@@ -1329,18 +1453,21 @@ class InteractiveSession:
 
         # Show unified diff
         import difflib
-        diff_lines = list(difflib.unified_diff(
-            original.splitlines(keepends=True),
-            rewritten.splitlines(keepends=True),
-            fromfile=f"{chosen.name} (original)",
-            tofile=f"{chosen.name} (AI-edited)",
-            n=3,
-        ))
+
+        diff_lines = list(
+            difflib.unified_diff(
+                original.splitlines(keepends=True),
+                rewritten.splitlines(keepends=True),
+                fromfile=f"{chosen.name} (original)",
+                tofile=f"{chosen.name} (AI-edited)",
+                n=3,
+            )
+        )
 
         _print()
         _print("  ── Proposed changes ─────────────────────────────────", style="cyan")
         if diff_lines:
-            for line in diff_lines[:120]:          # cap at 120 diff lines for readability
+            for line in diff_lines[:120]:  # cap at 120 diff lines for readability
                 line = line.rstrip("\n")
                 if line.startswith("+"):
                     _print(line, style="green")
@@ -1349,9 +1476,14 @@ class InteractiveSession:
                 else:
                     _print(line, style="dim")
             if len(diff_lines) > 120:
-                _print(f"  ... ({len(diff_lines) - 120} more diff lines omitted)", style="dim")
+                _print(
+                    f"  ... ({len(diff_lines) - 120} more diff lines omitted)",
+                    style="dim",
+                )
         else:
-            _print("  (No changes — rewritten file is identical to original)", style="yellow")
+            _print(
+                "  (No changes — rewritten file is identical to original)", style="yellow"
+            )
             return
 
         _print()
@@ -1378,6 +1510,7 @@ class InteractiveSession:
         """Try to detect a running local LLM (ollama). Returns provider name or None."""
         try:
             import urllib.request
+
             url = os.environ.get("ROCPD_LLM_LOCAL_URL", "http://localhost:11434")
             req = urllib.request.urlopen(f"{url}/api/tags", timeout=1)
             if req.status == 200:
@@ -1396,11 +1529,27 @@ class InteractiveSession:
             return
         shown = 0
         for rec in recs:
-            pri = rec.get("priority", "INFO") if isinstance(rec, dict) else getattr(rec, "priority", "INFO")
+            pri = (
+                rec.get("priority", "INFO")
+                if isinstance(rec, dict)
+                else getattr(rec, "priority", "INFO")
+            )
             if pri in ("HIGH", "MEDIUM"):
-                issue    = rec.get("issue", rec.get("category", "")) if isinstance(rec, dict) else getattr(rec, "issue", "")
-                suggest  = rec.get("suggestion", "") if isinstance(rec, dict) else getattr(rec, "suggestion", "")
-                actions  = rec.get("actions", []) if isinstance(rec, dict) else getattr(rec, "actions", [])
+                issue = (
+                    rec.get("issue", rec.get("category", ""))
+                    if isinstance(rec, dict)
+                    else getattr(rec, "issue", "")
+                )
+                suggest = (
+                    rec.get("suggestion", "")
+                    if isinstance(rec, dict)
+                    else getattr(rec, "suggestion", "")
+                )
+                actions = (
+                    rec.get("actions", [])
+                    if isinstance(rec, dict)
+                    else getattr(rec, "actions", [])
+                )
                 _print(f"  [{pri}] {issue}", style="yellow" if pri == "MEDIUM" else "red")
                 if suggest:
                     _print(f"    → {suggest}", style="dim")
@@ -1410,7 +1559,10 @@ class InteractiveSession:
                 shown += 1
         if shown == 0:
             _print("  No HIGH/MEDIUM priority suggestions found.", style="dim")
-        _print("  To apply AI-generated code patches: re-run with --llm anthropic or --llm openai.", style="dim")
+        _print(
+            "  To apply AI-generated code patches: re-run with --llm anthropic or --llm openai.",
+            style="dim",
+        )
 
     def _request_optimization_suggestions(
         self, summaries: List[tuple], llm_provider: Optional[str] = None
@@ -1419,6 +1571,7 @@ class InteractiveSession:
         provider = llm_provider or self._llm_provider
         try:
             from rocpd.ai_analysis.llm_analyzer import LLMAnalyzer
+
             analyzer = LLMAnalyzer(
                 provider=provider,
                 api_key=self._llm_api_key,
@@ -1427,11 +1580,12 @@ class InteractiveSession:
             file_list = ", ".join(name for name, _ in summaries)
             ctx_block = self._format_context_block()
             custom_prompt = (
-                (ctx_block + "\n\n" if ctx_block else "")
-                + f"Analyze and optimize these AMD GPU source files: {file_list}."
-            )
+                ctx_block + "\n\n" if ctx_block else ""
+            ) + f"Analyze and optimize these AMD GPU source files: {file_list}."
             with _Spinner(f"  Contacting {provider} LLM for optimization suggestions..."):
-                raw = analyzer.suggest_optimizations(summaries, custom_prompt=custom_prompt)
+                raw = analyzer.suggest_optimizations(
+                    summaries, custom_prompt=custom_prompt
+                )
             if raw:
                 self._update_ctx_suggestion(raw)
 
@@ -1455,7 +1609,10 @@ class InteractiveSession:
 
             return result
         except Exception as exc:
-            _print(f"  [DEBUG] exception in LLM call: {type(exc).__name__}: {exc}", style="red")
+            _print(
+                f"  [DEBUG] exception in LLM call: {type(exc).__name__}: {exc}",
+                style="red",
+            )
             return {}
 
     def _present_and_apply(
@@ -1464,33 +1621,51 @@ class InteractiveSession:
         """Show suggestion, optionally show diff, ask for confirmation. Return new content or None."""
         name = pathlib.Path(path).name
         _print()
-        _print(f"  ── Suggestions for {name} ──────────────────────────────", style="cyan")
+        _print(
+            f"  ── Suggestions for {name} ──────────────────────────────", style="cyan"
+        )
         _print(suggestion[:2000] + ("…" if len(suggestion) > 2000 else ""))
         _print()
         try:
-            ans = _input(f"  Append LLM suggestions as comments to {name}? [y/N/diff]  ").strip().lower()
+            ans = (
+                _input(f"  Append LLM suggestions as comments to {name}? [y/N/diff]  ")
+                .strip()
+                .lower()
+            )
         except EOFError:
             return None
         if ans == "diff":
-            _print("  (Diff view: LLM suggestions are advisory — showing suggestion text)",
-                   style="dim")
+            _print(
+                "  (Diff view: LLM suggestions are advisory — showing suggestion text)",
+                style="dim",
+            )
             _print(suggestion, style="dim")
             try:
-                ans = _input(f"  Append LLM suggestions as comments to {name}? [y/N]  ").strip().lower()
+                ans = (
+                    _input(f"  Append LLM suggestions as comments to {name}? [y/N]  ")
+                    .strip()
+                    .lower()
+                )
             except EOFError:
                 return None
         if ans == "y":
             separator = "\n" + "=" * 72 + "\n"
-            return (original + separator +
-                    "// LLM OPTIMIZATION SUGGESTIONS:\n// " +
-                    "\n// ".join(suggestion.splitlines()) + "\n")
+            return (
+                original
+                + separator
+                + "// LLM OPTIMIZATION SUGGESTIONS:\n// "
+                + "\n// ".join(suggestion.splitlines())
+                + "\n"
+            )
         return None
 
     def _pursue_recommendation(self, item: PersistentMenuItem) -> None:
         """Show full recommendation and sub-menu: [r] run command, [m] back to main menu."""
         _print()
-        _print(f"  ── {item.title} [{item.priority}] ──────────────────────────────",
-               style="cyan")
+        _print(
+            f"  ── {item.title} [{item.priority}] ──────────────────────────────",
+            style="cyan",
+        )
         detail = item.detail
         if detail.get("issue"):
             _print(f"  Issue:  {detail['issue']}")
@@ -1505,8 +1680,11 @@ class InteractiveSession:
             for act in actions:
                 _print(f"    • {act}", style="dim")
 
-        cmds = [c.get("full_command", "") for c in detail.get("commands", [])
-                if c.get("full_command")]
+        cmds = [
+            c.get("full_command", "")
+            for c in detail.get("commands", [])
+            if c.get("full_command")
+        ]
         if cmds:
             _print()
             _print("  Suggested commands:", style="cyan")
@@ -1572,9 +1750,11 @@ class InteractiveSession:
                 added = self._ingest_recommendations(new_recs)
                 self._update_ctx_analysis(new_recs, breakdown)
                 now = datetime.now(timezone.utc).isoformat()
-                self._session.history.append(HistoryEntry(
-                    type="profiling_run", timestamp=now, db_path=str(db_path)
-                ))
+                self._session.history.append(
+                    HistoryEntry(
+                        type="profiling_run", timestamp=now, db_path=str(db_path)
+                    )
+                )
                 _print(f"  ✓ {added} new recommendation(s) added.", style="green")
         # [m] or any other input → return to main menu (item stays in list)
 
@@ -1585,6 +1765,7 @@ class InteractiveSession:
 @dataclass
 class _TraceRun:
     """Record of a single profiling run."""
+
     timestamp: str
     command: str
     db_path: str
@@ -1594,6 +1775,7 @@ class _TraceRun:
 @dataclass
 class _AnalysisSnapshot:
     """Snapshot of one analysis iteration."""
+
     timestamp: str
     iteration: int
     recommendations: List[Dict[str, Any]] = field(default_factory=list)
@@ -1605,6 +1787,7 @@ class _AnalysisSnapshot:
 @dataclass
 class _EditRecord:
     """Record of an AI-applied edit."""
+
     timestamp: str
     file_path: str
     backup_path: str
@@ -1613,6 +1796,7 @@ class _EditRecord:
 @dataclass
 class WorkflowState:
     """Persistent state for the 7-phase interactive workflow session."""
+
     app_command: str
     source_paths: List[str] = field(default_factory=list)
     profiling_command: str = ""
@@ -1666,14 +1850,14 @@ class WorkflowSession:
         width = max(66, len(cmd) + 8)
         border = "─" * (width - 2)
         _print(f"╭{border}╮", style="cyan")
-        _print(f"│  Profiling Command" + " " * (width - 21) + "│", style="cyan")
-        _print(f"│" + " " * (width - 2) + "│", style="cyan")
+        _print("│  Profiling Command" + " " * (width - 21) + "│", style="cyan")
+        _print("│" + " " * (width - 2) + "│", style="cyan")
         indent = "│  "
-        tail   = "  │"
-        avail  = width - len(indent) - len(tail)
+        tail = "  │"
+        avail = width - len(indent) - len(tail)
         # Word-wrap command
         words = cmd.split()
-        line  = ""
+        line = ""
         for word in words:
             if line and len(line) + 1 + len(word) > avail:
                 _print(f"{indent}{line:<{avail}}{tail}", style="cyan")
@@ -1682,11 +1866,17 @@ class WorkflowSession:
                 line = f"{line} {word}".lstrip()
         if line:
             _print(f"{indent}{line:<{avail}}{tail}", style="cyan")
-        _print(f"│" + " " * (width - 2) + "│", style="cyan")
+        _print("│" + " " * (width - 2) + "│", style="cyan")
         _print(f"╰{border}╯", style="cyan")
         _print()
         try:
-            ans = _input("  Would you like the interactive tool to run this command? [Y/n]  ").strip().lower()
+            ans = (
+                _input(
+                    "  Would you like the interactive tool to run this command? [Y/n]  "
+                )
+                .strip()
+                .lower()
+            )
         except EOFError:
             return False
         if ans in ("n", "no"):
@@ -1702,6 +1892,7 @@ class WorkflowSession:
         """Parse -d <dir> from cmd; return .db/.csv/.json files found there."""
         import glob as _glob
         import shlex as _shlex
+
         try:
             parts = _shlex.split(cmd)
         except ValueError:
@@ -1743,42 +1934,54 @@ class WorkflowSession:
 
                 class _FakeProc:
                     returncode = 127
+
                 proc = _FakeProc()  # type: ignore[assignment]
 
             _print()
             if proc.returncode == 0:
                 trace_files = self._find_trace_files(cmd)
                 if trace_files:
-                    _print(f"  ✓ Trace collected: {len(trace_files)} file(s)", style="green")
+                    _print(
+                        f"  ✓ Trace collected: {len(trace_files)} file(s)", style="green"
+                    )
                     for tf in trace_files[:5]:
                         _print(f"    · {tf}", style="dim")
                     db_path = next(
                         (f for f in trace_files if f.endswith(".db")), trace_files[0]
                     )
-                    self._state.trace_history.append(_TraceRun(
-                        timestamp=datetime.now(timezone.utc).isoformat(),
-                        command=cmd,
-                        db_path=db_path,
-                        trace_files=trace_files,
-                    ))
+                    self._state.trace_history.append(
+                        _TraceRun(
+                            timestamp=datetime.now(timezone.utc).isoformat(),
+                            command=cmd,
+                            db_path=db_path,
+                            trace_files=trace_files,
+                        )
+                    )
                     return True
                 # Ran OK but no files found — ask user for path
                 _print("  Profiler completed but no trace files found.", style="yellow")
                 try:
-                    db_input = _input("  Enter path to .db file (or Enter to abort): ").strip()
+                    db_input = _input(
+                        "  Enter path to .db file (or Enter to abort): "
+                    ).strip()
                 except EOFError:
                     return False
                 if db_input and pathlib.Path(db_input).exists():
-                    self._state.trace_history.append(_TraceRun(
-                        timestamp=datetime.now(timezone.utc).isoformat(),
-                        command=cmd,
-                        db_path=db_input,
-                        trace_files=[db_input],
-                    ))
+                    self._state.trace_history.append(
+                        _TraceRun(
+                            timestamp=datetime.now(timezone.utc).isoformat(),
+                            command=cmd,
+                            db_path=db_input,
+                            trace_files=[db_input],
+                        )
+                    )
                     return True
                 return False
             else:
-                _print(f"  Profiling command failed (exit code {proc.returncode}).", style="red")
+                _print(
+                    f"  Profiling command failed (exit code {proc.returncode}).",
+                    style="red",
+                )
                 _print("    [r]  Retry same command", style="dim")
                 _print("    [e]  Edit the command and retry", style="dim")
                 _print("    [a]  Abort", style="dim")
@@ -1830,28 +2033,32 @@ class WorkflowSession:
         pb = prev.execution_breakdown or {}
         nb = new_breakdown or {}
         prev_s = pb.get("total_runtime_ns", 0) / 1e9
-        new_s  = nb.get("total_runtime_ns",  0) / 1e9
+        new_s = nb.get("total_runtime_ns", 0) / 1e9
         if prev_s == 0:
             return
-        pct   = (new_s - prev_s) / prev_s * 100
+        pct = (new_s - prev_s) / prev_s * 100
         arrow = "▼" if pct < 0 else "▲"
         _print()
         _print("  ── Performance Comparison ──────────────────────────────", style="cyan")
         _print(f"  {'Metric':<28}  {'Before':>8}  {'After':>8}  Change", style="bold")
-        _print(f"  {'Total GPU time':<28}  {prev_s:>7.2f}s  {new_s:>7.2f}s  "
-               f"{arrow} {abs(pct):.0f}%",
-               style="green" if pct < 0 else "yellow")
+        _print(
+            f"  {'Total GPU time':<28}  {prev_s:>7.2f}s  {new_s:>7.2f}s  "
+            f"{arrow} {abs(pct):.0f}%",
+            style="green" if pct < 0 else "yellow",
+        )
         for key, label in [
-            ("kernel_time_pct",  "Kernel %"),
-            ("memcpy_time_pct",  "MemCopy %"),
+            ("kernel_time_pct", "Kernel %"),
+            ("memcpy_time_pct", "MemCopy %"),
             ("api_overhead_pct", "API overhead %"),
         ]:
             pv = pb.get(key, 0)
             nv = nb.get(key, 0)
             diff = nv - pv
-            _print(f"  {label:<28}  {pv:>7.1f}%  {nv:>7.1f}%  "
-                   f"{'▼' if diff < 0 else '▲'} {abs(diff):.1f}pp",
-                   style="green" if diff < 0 else "yellow")
+            _print(
+                f"  {label:<28}  {pv:>7.1f}%  {nv:>7.1f}%  "
+                f"{'▼' if diff < 0 else '▲'} {abs(diff):.1f}pp",
+                style="green" if diff < 0 else "yellow",
+            )
         _print()
 
     def _phase4_analyze(self, db_path: str) -> _AnalysisSnapshot:
@@ -1866,6 +2073,7 @@ class WorkflowSession:
 
         try:
             from rocpd.ai_analysis.api import analyze_database  # type: ignore[import]
+
             result = analyze_database(
                 pathlib.Path(db_path),
                 enable_llm=bool(self._llm_provider),
@@ -1876,18 +2084,21 @@ class WorkflowSession:
             eb = result.execution_breakdown
             if eb:
                 breakdown = {
-                    "kernel_time_pct":  eb.kernel_time_pct,
-                    "memcpy_time_pct":  eb.memcpy_time_pct,
+                    "kernel_time_pct": eb.kernel_time_pct,
+                    "memcpy_time_pct": eb.memcpy_time_pct,
                     "api_overhead_pct": eb.api_overhead_pct,
-                    "idle_time_pct":    eb.idle_time_pct,
+                    "idle_time_pct": eb.idle_time_pct,
                     "total_runtime_ns": result.profiling_info.total_duration_ns,
                 }
                 total_s = result.profiling_info.total_duration_ns / 1e9
                 _print("  Summary:", style="white")
                 _print(f"    Total GPU active time : {total_s:.3f}s", style="dim")
-                _print(f"    Kernel  {eb.kernel_time_pct:.1f}%  "
-                       f"MemCopy {eb.memcpy_time_pct:.1f}%  "
-                       f"Overhead {eb.api_overhead_pct:.1f}%", style="dim")
+                _print(
+                    f"    Kernel  {eb.kernel_time_pct:.1f}%  "
+                    f"MemCopy {eb.memcpy_time_pct:.1f}%  "
+                    f"Overhead {eb.api_overhead_pct:.1f}%",
+                    style="dim",
+                )
                 _print()
 
             all_recs = (
@@ -1906,16 +2117,18 @@ class WorkflowSession:
 
             for idx, r in enumerate(all_recs):
                 raw_rec = raw_recs[idx] if idx < len(raw_recs) else {}
-                recs.append({
-                    "id":               r.id,
-                    "priority":         r.priority,
-                    "category":         r.category,
-                    "issue":            r.title,
-                    "suggestion":       r.description,
-                    "estimated_impact": r.estimated_impact,
-                    "actions":          r.next_steps,
-                    "commands":         raw_rec.get("commands", []),
-                })
+                recs.append(
+                    {
+                        "id": r.id,
+                        "priority": r.priority,
+                        "category": r.category,
+                        "issue": r.title,
+                        "suggestion": r.description,
+                        "estimated_impact": r.estimated_impact,
+                        "actions": r.next_steps,
+                        "commands": raw_rec.get("commands", []),
+                    }
+                )
 
         except Exception as exc:
             _print(f"  (Analysis failed: {exc})", style="red")
@@ -1923,14 +2136,16 @@ class WorkflowSession:
 
         # Source correlation note
         if self._state.source_paths:
-            _print(f"  (Source paths provided: "
-                   f"{', '.join(pathlib.Path(p).name for p in self._state.source_paths[:3])})",
-                   style="dim")
+            _print(
+                f"  (Source paths provided: "
+                f"{', '.join(pathlib.Path(p).name for p in self._state.source_paths[:3])})",
+                style="dim",
+            )
             _print()
 
         # Print each finding; show recommended commands beneath each issue
         for i, rec in enumerate(recs, 1):
-            pri   = rec.get("priority", "INFO")
+            pri = rec.get("priority", "INFO")
             style = _PRI_STYLE.get(pri, "white")
             _print(f"  ─── Issue #{i}: {rec.get('issue', '')[:70]} ───", style="cyan")
             _print(f"  Severity   : {pri}", style=style)
@@ -1942,7 +2157,7 @@ class WorkflowSession:
                 _print(f"    • {act}", style="dim")
             cmds = rec.get("commands", [])
             if cmds:
-                _print(f"  Suggested next commands:", style="dim")
+                _print("  Suggested next commands:", style="dim")
                 for cmd_obj in cmds[:3]:
                     fc = cmd_obj.get("full_command", "")
                     desc = cmd_obj.get("description", "")
@@ -1980,14 +2195,13 @@ class WorkflowSession:
             if ai_rec_cmd:
                 break
 
-        return self._record_analysis(recs, breakdown, hotspots,
-                                     ai_recommended_command=ai_rec_cmd)
+        return self._record_analysis(
+            recs, breakdown, hotspots, ai_recommended_command=ai_rec_cmd
+        )
 
     # ── Phase 5: Recommendations menu ─────────────────────────────────────────
 
-    def _phase5_rec_menu(
-        self, snap: _AnalysisSnapshot
-    ) -> Optional[tuple]:
+    def _phase5_rec_menu(self, snap: _AnalysisSnapshot) -> Optional[tuple]:
         """Show recommendations as a numbered menu.
 
         Returns (mode, selected_recs) where mode='direct'|'diff', or None if skipped.
@@ -2005,9 +2219,12 @@ class WorkflowSession:
 
         while True:
             _print()
-            _print("  ── Recommendations ─────────────────────────────────────", style="bold cyan")
+            _print(
+                "  ── Recommendations ─────────────────────────────────────",
+                style="bold cyan",
+            )
             for i, rec in enumerate(recs, 1):
-                pri   = rec.get("priority", "INFO")
+                pri = rec.get("priority", "INFO")
                 style = _PRI_STYLE.get(pri, "white")
                 issue = rec.get("issue", "")[:70]
                 _print(f"  [{i}]  [{pri}]  {issue}", style=style)
@@ -2035,8 +2252,10 @@ class WorkflowSession:
             if choice == "r" and all_info:
                 # Advance to re-profiling phase; AI-recommended command will be option [3].
                 _print()
-                _print("  Advancing to re-profiling. Select [3] to use the suggested command.",
-                       style="dim")
+                _print(
+                    "  Advancing to re-profiling. Select [3] to use the suggested command.",
+                    style="dim",
+                )
                 return None
             if choice == "a" and not all_info:
                 selected = recs
@@ -2046,13 +2265,20 @@ class WorkflowSession:
                 # If the selected rec is INFO-level profiling guidance, direct to re-profiling.
                 if r.get("priority", "INFO").upper() == "INFO":
                     _print()
-                    _print("  This recommendation requires re-profiling with different flags,",
-                           style="dim")
-                    _print("  not source code changes. Proceeding to re-profiling step.",
-                           style="dim")
+                    _print(
+                        "  This recommendation requires re-profiling with different flags,",
+                        style="dim",
+                    )
+                    _print(
+                        "  not source code changes. Proceeding to re-profiling step.",
+                        style="dim",
+                    )
                     return None
                 _print()
-                _print(f"  ─── {r.get('issue', '')[:60]} [{r.get('priority', '')}] ───", style="cyan")
+                _print(
+                    f"  ─── {r.get('issue', '')[:60]} [{r.get('priority', '')}] ───",
+                    style="cyan",
+                )
                 if r.get("suggestion"):
                     _print(f"  Root Cause : {r['suggestion']}", style="dim")
                 if r.get("estimated_impact"):
@@ -2065,8 +2291,14 @@ class WorkflowSession:
                 continue
 
             _print("  How would you like the optimization applied?", style="cyan")
-            _print("    [1]  Edit files directly (AI modifies source files in-place)", style="dim")
-            _print("    [2]  Provide a diff/patch file (you review and apply manually)", style="dim")
+            _print(
+                "    [1]  Edit files directly (AI modifies source files in-place)",
+                style="dim",
+            )
+            _print(
+                "    [2]  Provide a diff/patch file (you review and apply manually)",
+                style="dim",
+            )
             _print("    [n]  Back to recommendations menu", style="dim")
             _print()
             try:
@@ -2083,7 +2315,7 @@ class WorkflowSession:
 
     def _pick_file_from_source_paths(self) -> Optional[pathlib.Path]:
         """Present numbered list of source files; return chosen."""
-        exts   = {".hip", ".cpp", ".cu", ".cl", ".h", ".hpp", ".py"}
+        exts = {".hip", ".cpp", ".cu", ".cl", ".h", ".hpp", ".py"}
         files: List[pathlib.Path] = []
         for sp in self._state.source_paths:
             try:
@@ -2126,6 +2358,7 @@ class WorkflowSession:
             return None
         try:
             from rocpd.ai_analysis.llm_analyzer import LLMAnalyzer  # type: ignore[import]
+
             analyzer = LLMAnalyzer(
                 provider=self._llm_provider,
                 api_key=self._llm_api_key,
@@ -2137,13 +2370,18 @@ class WorkflowSession:
                 "Return ONLY the complete rewritten file — no explanation, no markdown. "
                 "Add a short inline comment on each changed line explaining why."
             )
-            user = f"=== SUGGESTIONS ===\n{suggestions}\n\n=== SOURCE FILE ===\n{original}"
+            user = (
+                f"=== SUGGESTIONS ===\n{suggestions}\n\n=== SOURCE FILE ===\n{original}"
+            )
             with _Spinner(f"  {self._llm_provider} LLM rewriting {file_path.name}..."):
                 if self._llm_provider == "openai":
                     try:
                         result = analyzer._call_openai(system, user, max_tokens=16384)
                     except Exception as exc:
-                        if "too large" in str(exc).lower() or "max_tokens" in str(exc).lower():
+                        if (
+                            "too large" in str(exc).lower()
+                            or "max_tokens" in str(exc).lower()
+                        ):
                             result = analyzer._call_openai(system, user)
                         else:
                             raise
@@ -2172,14 +2410,17 @@ class WorkflowSession:
             return
 
         import difflib
-        original  = chosen.read_text()
-        diff_lines = list(difflib.unified_diff(
-            original.splitlines(keepends=True),
-            rewritten.splitlines(keepends=True),
-            fromfile=f"{chosen.name} (original)",
-            tofile=f"{chosen.name} (AI-edited)",
-            n=3,
-        ))
+
+        original = chosen.read_text()
+        diff_lines = list(
+            difflib.unified_diff(
+                original.splitlines(keepends=True),
+                rewritten.splitlines(keepends=True),
+                fromfile=f"{chosen.name} (original)",
+                tofile=f"{chosen.name} (AI-edited)",
+                n=3,
+            )
+        )
         _print()
         _print("  ── Proposed changes ─────────────────────────────────", style="cyan")
         for line in diff_lines[:120]:
@@ -2193,7 +2434,9 @@ class WorkflowSession:
         if len(diff_lines) > 120:
             _print(f"  ... ({len(diff_lines) - 120} more lines omitted)", style="dim")
         if not diff_lines:
-            _print("  (No changes — rewritten file is identical to original)", style="yellow")
+            _print(
+                "  (No changes — rewritten file is identical to original)", style="yellow"
+            )
             return
         _print()
         try:
@@ -2210,11 +2453,13 @@ class WorkflowSession:
             chosen.write_text(rewritten)
             _print(f"  Backup : {bak}", style="dim")
             _print(f"  Updated: {chosen}", style="green")
-            self._state.edit_history.append(_EditRecord(
-                timestamp=datetime.now(timezone.utc).isoformat(),
-                file_path=str(chosen),
-                backup_path=str(bak),
-            ))
+            self._state.edit_history.append(
+                _EditRecord(
+                    timestamp=datetime.now(timezone.utc).isoformat(),
+                    file_path=str(chosen),
+                    backup_path=str(bak),
+                )
+            )
         except OSError as exc:
             _print(f"  (Write failed: {exc})", style="red")
             return
@@ -2222,7 +2467,10 @@ class WorkflowSession:
         # Wait for recompile
         _print()
         _print("  Changes applied. Please recompile your application.", style="cyan")
-        _print("  Type 'done' when compiled, 'abort' to exit, or describe errors.", style="dim")
+        _print(
+            "  Type 'done' when compiled, 'abort' to exit, or describe errors.",
+            style="dim",
+        )
         while True:
             try:
                 resp = _input("  > ").strip().lower()
@@ -2235,8 +2483,11 @@ class WorkflowSession:
                 _print("  Aborting. Backup preserved at: " + str(bak), style="dim")
                 break
             # Treat as compilation error description
-            _print(f"  Compilation error noted. Common causes: missing include, "
-                   f"incorrect __launch_bounds__ syntax.", style="yellow")
+            _print(
+                "  Compilation error noted. Common causes: missing include, "
+                "incorrect __launch_bounds__ syntax.",
+                style="yellow",
+            )
             _print("  After fixing, type 'done'.", style="dim")
 
     def _phase6_apply_diff(self, snap: _AnalysisSnapshot) -> None:
@@ -2266,8 +2517,10 @@ class WorkflowSession:
             ai_cmd = self._state.analysis_history[-1].ai_recommended_command
 
         _print()
-        _print("  Ready to re-profile. Which command would you like to run?", style="cyan")
-        _print(f"    [1]  Same command as before:", style="dim")
+        _print(
+            "  Ready to re-profile. Which command would you like to run?", style="cyan"
+        )
+        _print("    [1]  Same command as before:", style="dim")
         _print(f"         {current}", style="dim")
         _print("    [2]  Let me edit the command first", style="dim")
         if ai_cmd:
@@ -2283,7 +2536,9 @@ class WorkflowSession:
             return current
         elif choice == "2":
             try:
-                new_cmd = _input(f"  Edit command (Enter to keep):\n  {current}\n  > ").strip()
+                new_cmd = _input(
+                    f"  Edit command (Enter to keep):\n  {current}\n  > "
+                ).strip()
                 return new_cmd or current
             except EOFError:
                 return current
@@ -2303,23 +2558,28 @@ class WorkflowSession:
 
         if len(self._state.analysis_history) >= 2:
             first_bd = self._state.analysis_history[0].execution_breakdown or {}
-            last_bd  = self._state.analysis_history[-1].execution_breakdown or {}
+            last_bd = self._state.analysis_history[-1].execution_breakdown or {}
             t0 = first_bd.get("total_runtime_ns", 0) / 1e9
-            t1 = last_bd.get("total_runtime_ns",  0) / 1e9
+            t1 = last_bd.get("total_runtime_ns", 0) / 1e9
             if t0 > 0:
-                pct   = (t1 - t0) / t0 * 100
+                pct = (t1 - t0) / t0 * 100
                 arrow = "▼" if pct < 0 else "▲"
-                _print(f"  GPU time   : {t0:.2f}s → {t1:.2f}s  "
-                       f"({arrow} {abs(pct):.0f}%)", style="white")
+                _print(
+                    f"  GPU time   : {t0:.2f}s → {t1:.2f}s  "
+                    f"({arrow} {abs(pct):.0f}%)",
+                    style="white",
+                )
 
         if self._state.edit_history:
             files = [pathlib.Path(e.file_path).name for e in self._state.edit_history]
-            baks  = [pathlib.Path(e.backup_path).name for e in self._state.edit_history]
+            baks = [pathlib.Path(e.backup_path).name for e in self._state.edit_history]
             _print(f"  Modified   : {', '.join(files)}", style="white")
             _print(f"  Backups    : {', '.join(baks)}", style="dim")
 
         if self._state.trace_history:
-            runs = [pathlib.Path(t.db_path).parent.name for t in self._state.trace_history]
+            runs = [
+                pathlib.Path(t.db_path).parent.name for t in self._state.trace_history
+            ]
             _print(f"  Trace runs : {', '.join(runs)}", style="dim")
 
         _print("  ══════════════════════════════════════════", style="bold cyan")

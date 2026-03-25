@@ -61,6 +61,7 @@ from .llm_analyzer import LLMAnalyzer, AnalysisContext
 
 def _get_interactive():
     from .interactive import InteractiveSession, SessionStore, SessionData
+
     return InteractiveSession, SessionStore, SessionData
 
 
@@ -69,12 +70,14 @@ def __getattr__(name):
         InteractiveSession, SessionStore, SessionData = _get_interactive()
         # Cache in module globals to avoid repeated import on subsequent accesses
         import sys
+
         mod = sys.modules[__name__]
         mod.InteractiveSession = InteractiveSession
         mod.SessionStore = SessionStore
         mod.SessionData = SessionData
         return getattr(mod, name)
     raise AttributeError(f"module 'rocpd.ai_analysis' has no attribute {name!r}")
+
 
 __all__ = [
     # Main API functions
@@ -99,12 +102,10 @@ __all__ = [
     "ReferenceGuideNotFoundError",
     "SourceDirectoryNotFoundError",
     "SourceAnalysisError",
-
     # Interactive session
     "InteractiveSession",
     "SessionStore",
     "SessionData",
-
     # LLM integration
     "LLMAnalyzer",
     "AnalysisContext",

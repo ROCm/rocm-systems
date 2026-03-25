@@ -30,7 +30,16 @@ class TestSessionContext(unittest.TestCase):
     def test_round_trip_serialization(self):
         ctx = SessionContext(
             iteration=2,
-            analyses=[{"db": "foo.db", "kernel_pct": 5.0, "top_issue": "IDLE", "top_priority": "HIGH", "memcpy_pct": 0.1, "idle_pct": 90.0}],
+            analyses=[
+                {
+                    "db": "foo.db",
+                    "kernel_pct": 5.0,
+                    "top_issue": "IDLE",
+                    "top_priority": "HIGH",
+                    "memcpy_pct": 0.1,
+                    "idle_pct": 90.0,
+                }
+            ],
             suggestions_given=["Increase parallelism"],
             commands_run=[{"cmd": "rocprofv3 --sys-trace -- ./app", "exit_code": 0}],
         )
@@ -53,7 +62,19 @@ class TestSessionContext(unittest.TestCase):
         self.assertIsNone(sd.context)
 
     def test_session_data_context_field_round_trip(self):
-        ctx = SessionContext(iteration=1, analyses=[{"db": "x.db", "kernel_pct": 10.0, "memcpy_pct": 0.0, "idle_pct": 80.0, "top_issue": "GPU IDLE", "top_priority": "HIGH"}])
+        ctx = SessionContext(
+            iteration=1,
+            analyses=[
+                {
+                    "db": "x.db",
+                    "kernel_pct": 10.0,
+                    "memcpy_pct": 0.0,
+                    "idle_pct": 80.0,
+                    "top_issue": "GPU IDLE",
+                    "top_priority": "HIGH",
+                }
+            ],
+        )
         sd = SessionData(
             session_id="test-id",
             source_dir="/src",
@@ -105,7 +126,9 @@ class TestRunTier1AnalysisRefactor(unittest.TestCase):
         s = InteractiveSession.__new__(InteractiveSession)
         s._db_path = "/tmp/test.db"
 
-        with patch("rocpd.ai_analysis.api.analyze_database", side_effect=RuntimeError("db error")):
+        with patch(
+            "rocpd.ai_analysis.api.analyze_database", side_effect=RuntimeError("db error")
+        ):
             recs, breakdown = InteractiveSession._run_tier1_analysis(s, "/tmp/bad.db")
 
         self.assertEqual(recs, [])
@@ -117,6 +140,7 @@ class TestContextUpdateMethods(unittest.TestCase):
 
     def _make_session_with_ctx(self):
         from rocpd.ai_analysis.interactive import InteractiveSession, SessionContext
+
         s = InteractiveSession.__new__(InteractiveSession)
         s._db_path = "/tmp/test.db"
         s._ctx = SessionContext()
@@ -124,9 +148,16 @@ class TestContextUpdateMethods(unittest.TestCase):
 
     def test_update_ctx_analysis_appends(self):
         from rocpd.ai_analysis.interactive import InteractiveSession
+
         s = self._make_session_with_ctx()
         recs = [{"issue": "GPU IDLE", "priority": "HIGH"}]
-        breakdown = {"kernel_time_pct": 6.6, "memcpy_time_pct": 0.1, "idle_time_pct": 93.0, "api_overhead_pct": 0.3, "total_runtime_ns": 1_000_000}
+        breakdown = {
+            "kernel_time_pct": 6.6,
+            "memcpy_time_pct": 0.1,
+            "idle_time_pct": 93.0,
+            "api_overhead_pct": 0.3,
+            "total_runtime_ns": 1_000_000,
+        }
         s._update_ctx_analysis(recs, breakdown)
         self.assertEqual(s._ctx.iteration, 1)
         self.assertEqual(len(s._ctx.analyses), 1)
@@ -135,11 +166,18 @@ class TestContextUpdateMethods(unittest.TestCase):
 
     def test_update_ctx_analysis_capped_at_5(self):
         from rocpd.ai_analysis.interactive import InteractiveSession
+
         s = self._make_session_with_ctx()
         for i in range(7):
             s._update_ctx_analysis(
                 [{"issue": f"ISSUE_{i}", "priority": "HIGH"}],
-                {"kernel_time_pct": float(i), "memcpy_time_pct": 0.0, "idle_time_pct": 0.0, "api_overhead_pct": 0.0, "total_runtime_ns": 1},
+                {
+                    "kernel_time_pct": float(i),
+                    "memcpy_time_pct": 0.0,
+                    "idle_time_pct": 0.0,
+                    "api_overhead_pct": 0.0,
+                    "total_runtime_ns": 1,
+                },
             )
         self.assertEqual(len(s._ctx.analyses), 5)
         issues = [a["top_issue"] for a in s._ctx.analyses]
@@ -148,12 +186,14 @@ class TestContextUpdateMethods(unittest.TestCase):
 
     def test_update_ctx_analysis_none_breakdown(self):
         from rocpd.ai_analysis.interactive import InteractiveSession
+
         s = self._make_session_with_ctx()
         s._update_ctx_analysis([], None)
         self.assertEqual(s._ctx.analyses[0]["kernel_pct"], 0.0)
 
     def test_update_ctx_suggestion_capped_at_3(self):
         from rocpd.ai_analysis.interactive import InteractiveSession
+
         s = self._make_session_with_ctx()
         for i in range(5):
             s._update_ctx_suggestion(f"suggestion {i} " + "x" * 200)
@@ -162,12 +202,14 @@ class TestContextUpdateMethods(unittest.TestCase):
 
     def test_update_ctx_suggestion_truncates_at_120(self):
         from rocpd.ai_analysis.interactive import InteractiveSession
+
         s = self._make_session_with_ctx()
         s._update_ctx_suggestion("A" * 300)
         self.assertEqual(len(s._ctx.suggestions_given[0]), 120)
 
     def test_update_ctx_command_appends(self):
         from rocpd.ai_analysis.interactive import InteractiveSession
+
         s = self._make_session_with_ctx()
         s._update_ctx_command("rocprofv3 --sys-trace -- ./app", 0)
         self.assertEqual(len(s._ctx.commands_run), 1)
@@ -175,6 +217,7 @@ class TestContextUpdateMethods(unittest.TestCase):
 
     def test_update_ctx_command_capped_at_5(self):
         from rocpd.ai_analysis.interactive import InteractiveSession
+
         s = self._make_session_with_ctx()
         for i in range(7):
             s._update_ctx_command(f"cmd_{i}", i)
@@ -189,21 +232,33 @@ class TestFormatContextBlock(unittest.TestCase):
 
     def _make_session_with_ctx(self, ctx=None):
         from rocpd.ai_analysis.interactive import InteractiveSession, SessionContext
+
         s = InteractiveSession.__new__(InteractiveSession)
         s._ctx = ctx or SessionContext()
         return s
 
     def test_empty_context_returns_empty_string(self):
         from rocpd.ai_analysis.interactive import InteractiveSession, SessionContext
+
         s = self._make_session_with_ctx()
         result = s._format_context_block()
         self.assertEqual(result, "")
 
     def test_with_one_analysis(self):
         from rocpd.ai_analysis.interactive import InteractiveSession, SessionContext
+
         ctx = SessionContext(
             iteration=1,
-            analyses=[{"db": "foo.db", "kernel_pct": 5.0, "memcpy_pct": 0.1, "idle_pct": 93.0, "top_issue": "GPU IDLE TIME", "top_priority": "HIGH"}],
+            analyses=[
+                {
+                    "db": "foo.db",
+                    "kernel_pct": 5.0,
+                    "memcpy_pct": 0.1,
+                    "idle_pct": 93.0,
+                    "top_issue": "GPU IDLE TIME",
+                    "top_priority": "HIGH",
+                }
+            ],
         )
         s = self._make_session_with_ctx(ctx)
         block = s._format_context_block()
@@ -214,6 +269,7 @@ class TestFormatContextBlock(unittest.TestCase):
 
     def test_with_suggestion(self):
         from rocpd.ai_analysis.interactive import InteractiveSession, SessionContext
+
         ctx = SessionContext(
             iteration=1,
             suggestions_given=["Increase wave occupancy by reducing register pressure."],
@@ -224,6 +280,7 @@ class TestFormatContextBlock(unittest.TestCase):
 
     def test_with_command(self):
         from rocpd.ai_analysis.interactive import InteractiveSession, SessionContext
+
         ctx = SessionContext(
             iteration=1,
             commands_run=[{"cmd": "rocprofv3 --pmc SQ_WAVES -- ./app", "exit_code": 0}],
@@ -235,11 +292,25 @@ class TestFormatContextBlock(unittest.TestCase):
 
     def test_full_context_under_1500_chars(self):
         from rocpd.ai_analysis.interactive import InteractiveSession, SessionContext
+
         ctx = SessionContext(
             iteration=5,
-            analyses=[{"db": f"run{i}.db", "kernel_pct": float(i), "memcpy_pct": 0.0, "idle_pct": float(90-i), "top_issue": f"ISSUE_{i}", "top_priority": "HIGH"} for i in range(5)],
+            analyses=[
+                {
+                    "db": f"run{i}.db",
+                    "kernel_pct": float(i),
+                    "memcpy_pct": 0.0,
+                    "idle_pct": float(90 - i),
+                    "top_issue": f"ISSUE_{i}",
+                    "top_priority": "HIGH",
+                }
+                for i in range(5)
+            ],
             suggestions_given=["A" * 120, "B" * 120, "C" * 120],
-            commands_run=[{"cmd": f"rocprofv3 --pmc CTR_{i} -- ./app", "exit_code": 0} for i in range(5)],
+            commands_run=[
+                {"cmd": f"rocprofv3 --pmc CTR_{i} -- ./app", "exit_code": 0}
+                for i in range(5)
+            ],
         )
         s = self._make_session_with_ctx(ctx)
         block = s._format_context_block()
@@ -251,12 +322,14 @@ class TestExtractAiCommands(unittest.TestCase):
 
     def _make_session(self):
         from rocpd.ai_analysis.interactive import InteractiveSession, SessionContext
+
         s = InteractiveSession.__new__(InteractiveSession)
         s._ctx = SessionContext()
         return s
 
     def test_extracts_rocprofv3_from_text(self):
         from rocpd.ai_analysis.interactive import InteractiveSession
+
         s = self._make_session()
         text = (
             "You should run:\n"
@@ -270,6 +343,7 @@ class TestExtractAiCommands(unittest.TestCase):
 
     def test_includes_structured_commands(self):
         from rocpd.ai_analysis.interactive import InteractiveSession
+
         s = self._make_session()
         structured = ["rocprofv3 --pmc FETCH_SIZE -- ./app"]
         result = s._extract_ai_commands("no commands here", structured)
@@ -277,6 +351,7 @@ class TestExtractAiCommands(unittest.TestCase):
 
     def test_deduplicates(self):
         from rocpd.ai_analysis.interactive import InteractiveSession
+
         s = self._make_session()
         text = "rocprofv3 --pmc SQ_WAVES -- ./app"
         structured = ["rocprofv3 --pmc SQ_WAVES -- ./app"]
@@ -285,6 +360,7 @@ class TestExtractAiCommands(unittest.TestCase):
 
     def test_free_form_comes_first(self):
         from rocpd.ai_analysis.interactive import InteractiveSession
+
         s = self._make_session()
         text = "rocprofv3 --pmc SQ_WAVES -- ./app"
         structured = ["rocprofv3 --sys-trace -- ./app"]
@@ -293,6 +369,7 @@ class TestExtractAiCommands(unittest.TestCase):
 
     def test_capped_at_5(self):
         from rocpd.ai_analysis.interactive import InteractiveSession
+
         s = self._make_session()
         text = "\n".join(f"rocprofv3 --pmc CTR_{i} -- ./app" for i in range(10))
         result = s._extract_ai_commands(text, [])
@@ -300,6 +377,7 @@ class TestExtractAiCommands(unittest.TestCase):
 
     def test_empty_text_and_empty_structured(self):
         from rocpd.ai_analysis.interactive import InteractiveSession
+
         s = self._make_session()
         result = s._extract_ai_commands("no commands here", [])
         self.assertEqual(result, [])
@@ -310,15 +388,28 @@ class TestPersistence(unittest.TestCase):
 
     def test_ctx_round_trip_via_session_store(self):
         from rocpd.ai_analysis.interactive import (
-            InteractiveSession, SessionContext, SessionStore, SessionData
+            InteractiveSession,
+            SessionContext,
+            SessionStore,
+            SessionData,
         )
+
         with tempfile.TemporaryDirectory() as tmpdir:
             store = SessionStore(sessions_dir=tmpdir)
 
             # Build a session with context
             ctx = SessionContext(
                 iteration=3,
-                analyses=[{"db": "a.db", "kernel_pct": 5.0, "memcpy_pct": 0.0, "idle_pct": 90.0, "top_issue": "GPU IDLE", "top_priority": "HIGH"}],
+                analyses=[
+                    {
+                        "db": "a.db",
+                        "kernel_pct": 5.0,
+                        "memcpy_pct": 0.0,
+                        "idle_pct": 90.0,
+                        "top_issue": "GPU IDLE",
+                        "top_priority": "HIGH",
+                    }
+                ],
                 suggestions_given=["Reduce launch overhead"],
                 commands_run=[{"cmd": "rocprofv3 --sys-trace -- ./app", "exit_code": 0}],
             )
@@ -347,6 +438,7 @@ class TestPersistence(unittest.TestCase):
     def test_old_session_file_without_context_key(self):
         """Backward compat: session files without 'context' key load cleanly."""
         from rocpd.ai_analysis.interactive import SessionData, SessionContext
+
         old_data = {
             "session_id": "old",
             "source_dir": "/src",
@@ -379,7 +471,13 @@ class TestContextInjectionIntegration(unittest.TestCase):
         # Simulate a prior analysis having run (as if [a] was pressed)
         s._update_ctx_analysis(
             [{"issue": "LOW OCCUPANCY", "priority": "HIGH"}],
-            {"kernel_time_pct": 15.0, "memcpy_time_pct": 0.5, "idle_time_pct": 80.0, "api_overhead_pct": 4.5, "total_runtime_ns": 1_000_000_000},
+            {
+                "kernel_time_pct": 15.0,
+                "memcpy_time_pct": 0.5,
+                "idle_time_pct": 80.0,
+                "api_overhead_pct": 4.5,
+                "total_runtime_ns": 1_000_000_000,
+            },
         )
 
         # Verify context block now has content

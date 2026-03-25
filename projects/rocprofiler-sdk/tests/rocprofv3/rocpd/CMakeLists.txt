@@ -583,7 +583,8 @@ configure_file(${CMAKE_CURRENT_SOURCE_DIR}/test_guide_filter_standalone.py
 # Guide filtering unit tests — no GPU trace fixture required; no LLM API calls made.
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-rocpd-guide-filter-unit-tests
-    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/test_guide_filter_standalone.py
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_BINARY_DIR}/test_guide_filter_standalone.py
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 120
     LABELS "integration-tests;rocpd;pytest"

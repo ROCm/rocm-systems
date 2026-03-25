@@ -6,6 +6,7 @@ Run with system rocpd first in PYTHONPATH:
     ROCPD_SRC=<repo>/source/lib/python
     PYTHONPATH="${ROCPD_SYS}:${ROCPD_SRC}" pytest --noconftest test_workflow.py -v
 """
+
 import sys
 import importlib
 

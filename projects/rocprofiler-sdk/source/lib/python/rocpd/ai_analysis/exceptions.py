@@ -79,9 +79,11 @@ class ReferenceGuideNotFoundError(AnalysisError):
 
 class SourceDirectoryNotFoundError(AnalysisError):
     """Source code directory not found or not a directory"""
+
     pass
 
 
 class SourceAnalysisError(AnalysisError):
     """Error during source code analysis"""
+
     pass
