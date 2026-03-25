@@ -65,7 +65,7 @@
         },
         "custom_prompt": {
           "type": ["string", "null"],
-          "description": "User-supplied question or focus area passed via --prompt. Null when not provided."
+          "description": "User-supplied question or focus area passed via --prompt. May be omitted or null when not provided."
         }
       }
     },
@@ -355,7 +355,7 @@
           "bandwidth_gbps": {
             "type": "number",
             "minimum": 0.0,
-            "description": "Achieved memory bandwidth in GB/s (total_bytes / total_duration_ns * 1e9 / 1e9)."
+            "description": "Achieved memory bandwidth in gigabytes per second (GB/s). Computed as total_bytes / total_duration_ns, which has units of bytes/ns and is numerically equal to GB/s. Note: the field name suffix '_gbps' is an abbreviation for 'gigabytes per second', not gigabits per second (Gbps)."
           }
         }
       }

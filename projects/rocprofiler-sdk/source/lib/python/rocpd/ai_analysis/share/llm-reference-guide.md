@@ -18,7 +18,7 @@
 - `rocprofv3` is built on ROCprofiler-SDK — the current generation, context-based profiling API
 - `rocprof` / `rocprofv2` are deprecated; only critical bug fixes, EOL after ROCm 6.5
 
-**Documentation References**:
+**Documentation References** *(for your internal knowledge only — do NOT include URLs or links in analysis output)*:
 - rocprofv3: https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/
 - rocprof-compute: https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/
 - rocprof-sys (rocsys): https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/

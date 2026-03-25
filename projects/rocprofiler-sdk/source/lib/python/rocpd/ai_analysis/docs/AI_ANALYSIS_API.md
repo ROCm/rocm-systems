@@ -351,11 +351,21 @@ class AnalysisResult:
     profiling_info: ProfilingInfo
     summary: AnalysisSummary
     execution_breakdown: ExecutionBreakdown
+    hotspots: List[Dict[str, Any]]          # Top-N kernels by total duration
+    memory_analysis: Dict[str, Any]         # Per-direction transfer stats (H2D/D2H/D2D)
+    hardware_counters: Optional[Dict[str, Any]]  # Tier 2 only; None when --pmc not used
     recommendations: RecommendationSet
     warnings: List[AnalysisWarning]
     errors: List[str]
     llm_enhanced_explanation: Optional[str]  # Only if enable_llm=True
 ```
+
+> **Python vs JSON representation**: `hotspots`, `memory_analysis`, and `hardware_counters`
+> are exposed as raw dicts on the Python dataclass for flexibility. The JSON output (via
+> `to_json()`) serializes them under the same top-level keys using the schema-defined
+> structure (see `docs/analysis-output.schema.json`). `recommendations` is a flat array
+> in JSON (ordered HIGH → MEDIUM → LOW) while the Python dataclass uses a `RecommendationSet`
+> with `high_priority`/`medium_priority`/`low_priority` sub-lists for typed access.
 
 **Methods:**
 
@@ -389,26 +399,33 @@ Single optimization recommendation.
 ```python
 @dataclass
 class Recommendation:
-    id: str
-    priority: str  # "high", "medium", "low"
-    category: str  # "memory", "compute", "occupancy", etc.
-    title: str
-    description: str
-    estimated_impact: str
-    next_steps: List[str]
+    id: str           # Stable ID, e.g. "ROCPD-OCCUPANCY-001"
+    priority: str     # "HIGH" | "MEDIUM" | "LOW" | "INFO"
+    category: str     # e.g. "Memory Transfer", "Compute Bottleneck", "API Overhead"
+    issue: str        # Short description of the detected problem
+    suggestion: str   # Concise recommended action
+    actions: List[str]         # Ordered concrete steps to apply the suggestion
+    estimated_impact: str      # Expected improvement if addressed
+    commands: List[Dict]       # Structured rocprofv3/rocprof-compute commands to run
 ```
+
+> **Priority values are uppercase** (`HIGH`, `MEDIUM`, `LOW`, `INFO`) in both the Python
+> dataclass and the JSON schema. The fields `issue`/`suggestion`/`actions` map to the
+> schema's `issue`/`suggestion`/`actions` fields respectively.
 
 **Example:**
 
 ```python
 for rec in result.recommendations.high_priority:
-    print(f"ID: {rec.id}")
-    print(f"Title: {rec.title}")
-    print(f"Category: {rec.category}")
+    print(f"[{rec.priority}] {rec.id} — {rec.category}")
+    print(f"Issue: {rec.issue}")
+    print(f"Suggestion: {rec.suggestion}")
     print(f"Impact: {rec.estimated_impact}")
-    print("Next steps:")
-    for step in rec.next_steps:
-        print(f"  - {step}")
+    print("Actions:")
+    for action in rec.actions:
+        print(f"  - {action}")
+    for cmd in rec.commands:
+        print(f"  $ {cmd['full_command']}")
 ```
 
 ---
