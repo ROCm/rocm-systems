@@ -225,8 +225,37 @@ configuration.
 
 .. _core-install-rocprof-var:
 
-Configuring the environment for ROCprofiler-SDK
------------------------------------------------
+Configuring the environment for profiling
+------------------------------------------
 
-ROCm Compute Profiler profiling process relies on :doc:`ROCprofiler-SDK <rocprofiler-sdk:index>`'s ``rocprofiler-sdk`` library.
-Optionally, a ``rocprofv3`` binary can be used in substitution of ROCprofiler-SDK library when ``ROCPROF`` environment variable is set to ``rocprofv3`` or to the path of ``rocprofv3`` binary.
+ROCm Compute Profiler supports two profiling backends, selectable via the ``ROCPROF`` environment variable.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 40 40
+
+   * - Backend
+     - How it is selected
+     - How it works
+   * - ``rocprofiler-sdk`` (**default**)
+     - ``ROCPROF`` unset, or ``ROCPROF=rocprofiler-sdk``
+     - Injects ``librocprofiler-sdk-tool.so`` into the target application process via ``LD_PRELOAD``. The application runs directly; profiling is configured through environment variables.
+   * - ``rocprofv3``
+     - ``ROCPROF=rocprofv3`` or ``ROCPROF=<path-to-rocprofv3>``
+     - Launches the ``rocprofv3`` binary as a wrapper process around the target application. Profiling is configured via ``rocprofv3`` command-line arguments.
+
+Both backends build on the same underlying ROCprofiler-SDK infrastructure. The ``rocprofiler-sdk`` backend is recommended because it supports the full feature set, including :ref:`iteration multiplexing <iteration-multiplexing>`.
+
+.. _core-install-native-tool:
+
+Native counter collection tool
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+When using the ``rocprofiler-sdk`` backend on ROCm 7.0 or later, ROCm Compute Profiler also injects a native counter collection tool (``librocprofiler-compute-tool.so``) alongside the SDK tool via ``LD_PRELOAD``. This tool is a shared library built as part of ROCm Compute Profiler that directly uses the ROCprofiler-SDK public C API to collect hardware performance counter data per kernel dispatch.
+
+The division of responsibility between the two injected libraries is:
+
+* **Native tool** (``librocprofiler-compute-tool.so``): collects hardware performance counters per dispatch.
+* **SDK tool** (``librocprofiler-sdk-tool.so``): handles kernel tracing and output database generation.
+
+The native tool is required for :ref:`iteration multiplexing <iteration-multiplexing>`. Use ``--no-native-tool`` to disable it, but note that doing so also disables iteration multiplexing. The native tool is not used in :doc:`dynamic process attachment mode <../how-to/live_attach_detach>` or with the ``rocprofv3`` backend.

@@ -24,9 +24,9 @@ Profiling with ROCm Compute Profiler provides the following benefits:
 * :ref:`Automate counter collection <profiling-routine>`: ROCm Compute Profiler handles all
   of your profiling via pre-configured input files.
 
-* :ref:`Profiling output format <profiling-output-format>`: ROCm Compute Profiler can adjust the
-  output format of underlying ROCprofiler-SDK which changes the output format of raw performance
-  counter data in the workload folder created during profiling. Supported output formats are
+* :ref:`Profiling output format <profiling-output-format>`: ROCm Compute Profiler can control
+  the output format of raw performance counter data produced by the underlying
+  :doc:`ROCprofiler-SDK <rocprofiler-sdk:index>` backend. Supported output formats are
   ``csv`` and ``rocpd``. The default output format is ``rocpd``.
 
 * :ref:`Filtering <filtering>`: Apply runtime filters to speed up the profiling
@@ -366,19 +366,17 @@ Profiling output format
 -----------------------
 
 Use the ``--format-rocprof-output <format>`` profile mode option to specify the output format
-of the underlying ``rocprofiler-sdk``. The following formats are supported:
+of raw performance counter data produced by the underlying
+:doc:`ROCprofiler-SDK <rocprofiler-sdk:index>` backend. The following formats are supported:
 
 * ``csv`` format:
-   * Ask underlying ROCprofiler-SDK to dump raw performance counter data in csv format.
-   * The generated csv files across multiple runs are processed and dumped into the workload directory as csv files.
-   * Multiple csv files are merged into single pmc_perf.csv file in workload directory.
+   * Instructs ROCprofiler-SDK to write raw performance counter data in CSV format.
+   * The generated CSV files across multiple runs are processed and merged into a single ``pmc_perf.csv`` file in the workload directory.
 
 * ``rocpd`` format:
-   * Ask underlying ROCprofiler-SDK to dump raw performance counter data in rocpd format.
-   * Multiple ``rocpd`` database files containing counter collection data are merged into a single csv under the workload folder.
-     After merging, the database files are removed.
-   * Use ``--retain-rocpd-output`` profile mode option to preserve the ``rocpd`` database(s) in the workload folder.
-     This is useful for custom analysis of profiling data.
+   * Instructs ROCprofiler-SDK to write raw performance counter data in rocpd (SQLite) format.
+   * Multiple ``rocpd`` database files are merged into a single CSV under the workload folder, after which the database files are removed.
+   * Use ``--retain-rocpd-output`` to preserve the ``rocpd`` database(s) in the workload folder for custom analysis.
 
 
 .. _filtering:
@@ -386,11 +384,9 @@ of the underlying ``rocprofiler-sdk``. The following formats are supported:
 Filtering
 =========
 
-To reduce profiling time and the counters collected, you should use profiling
-filters. Profiling filters and their functionality depend on the underlying
-profiler being used. While ROCm Compute Profiler is profiler-agnostic, the following is a
-detailed description of profiling filters available when using ROCm Compute Profiler with
-:doc:`ROCprofiler-SDK <rocprofiler-sdk:index>`.
+To reduce profiling time and the counters collected, use profiling filters.
+The filters described below apply to the default ``rocprofiler-sdk`` backend.
+See :ref:`core-install-rocprof-var` for details on backend selection.
 
 Filtering options
 -----------------
@@ -401,12 +397,10 @@ Filtering options
    Note that this option cannot be used with ``--roof-only`` or ``--set``.
 
 ``-k``, ``--kernel <kernel-substr>``
-   Allows for kernel filtering. Usage is equivalent with the current ``rocprofiler-sdk``
-   utility. See :ref:`profiling-kernel-filtering`.
+   Allows for kernel filtering. See :ref:`profiling-kernel-filtering`.
 
 ``-d``, ``--dispatch <dispatch-id>``
-   Allows for dispatch iteration filtering. Usage is equivalent with the current
-   ``rocprofiler-sdk`` utility. See :ref:`profiling-dispatch-filtering`.
+   Allows for dispatch iteration filtering. See :ref:`profiling-dispatch-filtering`.
 
 ``--set <metric-set>``
    Allows for single pass counter collection of sets of metrics with minimized profiling overhead.
@@ -704,8 +698,7 @@ Roofline options (profile)
    running a roofline benchmark on your system.
 
 ``-k``, ``--kernel <kernel-substr>``
-   Allows for kernel filtering. Usage is equivalent with the current ``rocprofiler-sdk``
-   utility. See :ref:`profiling-kernel-filtering`.
+   Allows for kernel filtering. See :ref:`profiling-kernel-filtering`.
 
 .. note::
 
@@ -1035,11 +1028,12 @@ By default, if no policy is specified, ROCm Compute Profiler uses the ``kernel_l
 
 .. note::
 
-   * Iteration multiplexing requires ROCprofiler-SDK from ROCm 7.0.0 or later.
+   * Iteration multiplexing requires ROCprofiler-SDK from ROCm 7.0.0 or later and is only
+     supported with the ``rocprofiler-sdk`` backend.
 
-   * Do not use ``--no-native-tool`` with ``--iteration-multiplexing``.
-     Iteration multiplexing is only supported when using ROCm Compute Profiler with
-     the native counter collection tool. Ensure that ``--no-native-tool`` is not used in your profiling command.
+   * Iteration multiplexing depends on the :ref:`native counter collection tool
+     <core-install-native-tool>`. Do not use ``--no-native-tool`` with
+     ``--iteration-multiplexing``.
 
    * Do not use ``--attach-pid`` with ``--iteration-multiplexing``. Ensure that ``--attach-pid`` is not used in your profiling command.
 
