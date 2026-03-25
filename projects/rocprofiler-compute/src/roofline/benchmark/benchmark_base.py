@@ -806,6 +806,7 @@ class Bench_base(ABC):
         for d in devices:
             metrics[d] = self.run_benchmark(int(d))
 
+        print("GPU Benchmarking completed")
         return metrics
 
     def dump_csv(self, metrics: dict[dict[PerfMetrics]], file_path: str) -> None:
