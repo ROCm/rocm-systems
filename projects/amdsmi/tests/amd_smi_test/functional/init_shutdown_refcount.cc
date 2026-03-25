@@ -30,7 +30,6 @@
 #include <random>
 #include <thread>  // NOLINT
 
-#include "../test_common.h"
 #include "amd_smi/amdsmi.h"
 
 extern int32_t rsmi_test_refcount(uint64_t refcnt_type);
@@ -118,7 +117,6 @@ void TestConcurrentInit::Close() {
 // Compare required profile for this test case with what we're actually
 // running on
 void TestConcurrentInit::Run(void) {
-  PRINT_VERBOSITY();
   if (setup_failed_) {
     IF_VERB(STANDARD) { std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl; }
     return;
@@ -143,15 +141,11 @@ void TestConcurrentInit::Run(void) {
   // Invoke hsa_shut_down and verify that all the hsa_init's were counted.
   // HSA should be exactly closed after NumOfThreads calls.
   for (int Id = 0; Id < NumOfThreads; ++Id) {
-    DISPLAY_AMDSMI_API("amdsmi_shut_down", "id=" + std::to_string(Id), VERB(STANDARD));
     amdsmi_status_t err = amdsmi_shut_down();
-    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
     ASSERT_EQ(AMDSMI_STATUS_SUCCESS, err) << "An amdsmi_init was missed.";
   }
 
-  DISPLAY_AMDSMI_API("amdsmi_shut_down", "", VERB(STANDARD));
   amdsmi_status_t err = amdsmi_shut_down();
-  DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
   ASSERT_EQ(AMDSMI_STATUS_INIT_ERROR, err) << "amdsmi_init reference count was too high.";
 
   int32_t refcnt = rsmi_test_refcount(0);
@@ -164,9 +158,7 @@ void TestConcurrentInit::Run(void) {
   // Invoke hsa_shut_down and verify that all the hsa_init's were counted.
   // HSA should be exactly closed after NumOfThreads calls.
   for (int Id = 0; Id < NumOfThreads; ++Id) {
-    DISPLAY_AMDSMI_API("amdsmi_init", "id=" + std::to_string(Id), VERB(STANDARD));
     amdsmi_status_t err = amdsmi_init(AMDSMI_INIT_AMD_GPUS);
-    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
     ASSERT_EQ(AMDSMI_STATUS_SUCCESS, err);
   }
 

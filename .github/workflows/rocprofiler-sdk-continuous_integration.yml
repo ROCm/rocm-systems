@@ -100,7 +100,10 @@ jobs:
         password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
       env:
         DEBIAN_FRONTEND: noninteractive
-      options: --privileged
+      # --env-file /etc/podinfo/gha-gpu-isolation-settings - Required for GPU isolation on OSSCI MIXXX runners
+      options:
+        --privileged
+        --env-file /etc/podinfo/gha-gpu-isolation-settings
     env:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
       CORE_EXT_RUNNER: mi325
@@ -448,7 +451,10 @@ jobs:
       credentials:
         username: ${{ secrets.ROCPROFILER_AZURE_CI_USER }}
         password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
-      options: --privileged
+      # --env-file /etc/podinfo/gha-gpu-isolation-settings - Required for GPU isolation on OSSCI MIXXX runners
+      options:
+        --privileged
+        --env-file /etc/podinfo/gha-gpu-isolation-settings
     env:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
       OS_TYPE: ${{ matrix.system.os }}
@@ -690,7 +696,12 @@ jobs:
         password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
       env:
         DEBIAN_FRONTEND: noninteractive
-      options: --privileged --cap-add=SYS_PTRACE --security-opt seccomp=unconfined
+      # --env-file /etc/podinfo/gha-gpu-isolation-settings - Required for GPU isolation on OSSCI MIXXX runners
+      options:
+        --privileged
+        --cap-add SYS_PTRACE
+        --security-opt seccomp=unconfined
+        --env-file /etc/podinfo/gha-gpu-isolation-settings
 
     # define this for containers
     env:

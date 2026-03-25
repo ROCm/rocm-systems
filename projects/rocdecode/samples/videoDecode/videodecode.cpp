@@ -364,7 +364,7 @@ int main(int argc, char **argv) {
                 std::cerr << "Error: Failed to get Output Surface Info!" << std::endl;
                 break;
             }
-            for (int i = 0; i < n_frame_returned; i++) {
+            for (int i = 0; i < n_frame_returned && (!num_decoded_frames || n_frame < num_decoded_frames); i++) {
                 pframe = viddec->GetFrame(&pts);
                 if (b_generate_md5 && pframe) {
                     md5_generator->UpdateMd5ForFrame(pframe, surf_info);
@@ -374,11 +374,11 @@ int main(int argc, char **argv) {
                 }
                 // release frame
                 viddec->ReleaseFrame(pts);
+                n_frame++;
             }
             auto end_time = std::chrono::high_resolution_clock::now();
             auto time_per_decode = std::chrono::duration<double, std::milli>(end_time - start_time).count();
             total_dec_time += time_per_decode;
-            n_frame += n_frame_returned;
             n_pic_decoded += decoded_pics;
             if (num_decoded_frames && num_decoded_frames <= n_frame) {
                 break;
