@@ -4804,187 +4804,20 @@ int gpu_smu_enable_features(struct WddmLiteDevice *dev)
             pr_info("gpu_smu: SetToolsDramAddr OK (tools addr=0)\n");
     }
 
-    /* PPTable and feature initialization.
+    /* === MINIMAL TINYGRAD APPROACH ===
      *
-     * Match the Linux driver's full smu_smc_hw_setup() sequence:
-     *   DramLogSetDramAddr → UseDefaultPPTable → TransferTable round-trip →
-     *   RunDcBtc → SetAllowedFeaturesMask → EnableAllSmuFeatures */
-    {
-        pr_info("gpu_smu: === PPTable initialization ===\n");
-        int ret;
-
-        /* DramLogSetDramAddr — the Linux driver (smu_notify_memory_pool_location)
-         * sends this to set up a DRAM logging buffer. Place it at VRAM+10MB. */
-        {
-            ULONG fb_base_reg = mmhub_rreg(dev, regMMMC_VM_FB_LOCATION_BASE);
-            ULONGLONG vram_mc_base = (ULONGLONG)fb_base_reg << 24;
-            ULONGLONG log_addr = vram_mc_base + 0xA00000;  /* 10MB offset */
-            ULONG log_hi = (ULONG)(log_addr >> 32);
-            ULONG log_lo = (ULONG)(log_addr & 0xFFFFFFFF);
-            pr_info("gpu_smu: DramLogSetDramAddr = 0x%08x_%08x\n", log_hi, log_lo);
-            gpu_smu_send_msg(dev, 0x21, log_hi);  /* DramLogSetDramAddrHigh */
-            gpu_smu_send_msg(dev, 0x22, log_lo);  /* DramLogSetDramAddrLow */
-            gpu_smu_send_msg(dev, 0x23, 0x4000);  /* DramLogSetDramSize = 16KB */
-        }
-
-        /* Load the REAL pptable extracted from a native Linux amdgpu init.
-         * The file pp_table_rx9070xt.bin (4095 bytes) was dumped from
-         * /sys/class/drm/card1/device/pp_table in a Linux VM where amdgpu
-         * initialized the same GPU successfully. This is the exact PPTable_t
-         * that the Linux driver wrote via TransferTableDram2Smu(TABLE_PPTABLE=0).
-         *
-         * Sequence: load file → write to VRAM buffer → HDP flush → Dram2Smu */
-        {
-            PVOID buf_handle = NULL;
-            UCHAR *buf_cpu = (UCHAR *)psp_ring_map_vram(dev,
-                0x100000, 0x4000, &buf_handle);  /* 16KB at VRAM+1MB */
-
-            if (buf_cpu) {
-                /* Zero the buffer */
-                memset(buf_cpu, 0, 0x4000);
-
-                /* Load pptable from file */
-                char pp_path[MAX_PATH];
-                char fw_dir_buf[MAX_PATH] = {};
-                GetEnvironmentVariableA("HSAKMT_FW_DIR", fw_dir_buf, sizeof(fw_dir_buf));
-                _snprintf(pp_path, sizeof(pp_path), "%s\\pp_table_rx9070xt.bin",
-                          fw_dir_buf[0] ? fw_dir_buf : "C:\\dev\\firmware");
-
-                ULONG pp_len = 0;
-                UCHAR *pp_data = find_and_read_fw("", pp_path, &pp_len);
-                if (!pp_data) {
-                    /* Try with fw_dir prefix */
-                    pp_data = find_and_read_fw(fw_dir_buf, "pp_table_rx9070xt.bin", &pp_len);
-                }
-
-                if (pp_data && pp_len > 0) {
-                    pr_info("gpu_smu: loaded pp_table_rx9070xt.bin (%u bytes)\n", pp_len);
-                    /* Copy to VRAM buffer */
-                    ULONG copy_len = (pp_len < 0x4000) ? pp_len : 0x4000;
-                    memcpy(buf_cpu, pp_data, copy_len);
-                    free(pp_data);
-
-                    /* Hex dump first 32 bytes for verification */
-                    pr_info("gpu_smu: pptable first 32 bytes: "
-                            "%02x%02x %02x%02x %02x%02x %02x%02x "
-                            "%02x%02x %02x%02x %02x%02x %02x%02x\n",
-                            buf_cpu[0], buf_cpu[1], buf_cpu[2], buf_cpu[3],
-                            buf_cpu[4], buf_cpu[5], buf_cpu[6], buf_cpu[7],
-                            buf_cpu[8], buf_cpu[9], buf_cpu[10], buf_cpu[11],
-                            buf_cpu[12], buf_cpu[13], buf_cpu[14], buf_cpu[15]);
-
-                    /* HDP flush to make CPU-written data visible to SMU DMA */
-                    gpu_hdp_flush(dev);
-                    Sleep(10);
-
-                    /* TransferTableDram2Smu — load the pptable into SMU */
-                    pr_info("gpu_smu: TransferTableDram2Smu(0) with native pptable...\n");
-                    ret = gpu_smu_send_msg(dev, PPSMC_MSG_TransferTableDram2Smu, 0);
-                    if (ret == 0)
-                        pr_info("gpu_smu: *** Dram2Smu(0) SUCCEEDED with native pptable! ***\n");
-                    else
-                        pr_warn("gpu_smu: Dram2Smu(0) failed with native pptable too\n");
-                } else {
-                    pr_warn("gpu_smu: pp_table_rx9070xt.bin not found in %s\n", pp_path);
-                }
-
-                psp_ring_unmap(dev, buf_cpu, buf_handle);
-            } else {
-                pr_warn("gpu_smu: failed to map VRAM buffer\n");
-            }
-        }
-
-        /* RunDcBtc */
-        ret = gpu_smu_send_msg(dev, PPSMC_MSG_RunDcBtc, 0);
-        pr_info("gpu_smu: RunDcBtc %s\n", ret == 0 ? "OK" : "failed");
-    }
-
-    /* Now try DisallowGfxOff (0x29) with pptable in place.
-     * Previously this returned 0xff (Fail_FitNotSupported) because the pptable
-     * was missing — the SMU couldn't look up the GFXOFF feature entry. */
-    {
-        ULONG cur66 = mp1_rreg(dev, regMP1_SMN_C2PMSG_66);
-        if (cur66 == PPSMC_MSG_DisallowGfxOff) {
-            mp1_wreg(dev, regMP1_SMN_C2PMSG_66, 0);
-            Sleep(1);
-        }
-        mp1_wreg(dev, regMP1_SMN_C2PMSG_90, 0);
-        mp1_wreg(dev, regMP1_SMN_C2PMSG_82, 0);
-        mp1_wreg(dev, regMP1_SMN_C2PMSG_66, PPSMC_MSG_DisallowGfxOff);
-        for (int i = 0; i < 300; i++) {  /* 3s timeout */
-            ULONG resp = mp1_rreg(dev, regMP1_SMN_C2PMSG_90);
-            if (resp != 0) {
-                pr_info("gpu_smu: DisallowGfxOff (post-pptable): resp=0x%x at %d ms%s\n",
-                        resp, i * 10, (resp == 1) ? " (OK)" : " (error)");
-                break;
-            }
-            Sleep(10);
-        }
-        if (dev->hw.ip.gc_base1 != 0) {
-            ULONG cpc_dgfx = gpu_smn_rreg(dev, dev->hw.ip.gc_base1 + 0x5c11);
-            pr_info("gpu_smu: CPC_PSP_DEBUG after DisallowGfxOff (post-pptable) = 0x%08x%s\n",
-                    cpc_dgfx, (cpc_dgfx != 0xffffffff) ? " (GFX UP!)" : "");
-            if (cpc_dgfx != 0xffffffff) {
-                dev->hw.gfxoff_disabled = TRUE;
-                return 0;
-            }
-        }
-    }
-
-    /* Set allowed feature mask before EnableAllSmuFeatures.
-     * Only allow FEATURE_DPM_GFX (bit 2 = 0x00000004).  Wider masks caused
-     * resp=0xfd=PPSMC_Result_Failed — firmware rejects feature bits that don't
-     * have corresponding pptable entries.  With UseDefaultPPTable above, the
-     * default pptable may enable more bits, but start minimal. */
-    {
-        /* Linux driver sets ALL features allowed (smu_v14_0_2_init_allowed_features
-         * calls smu_feature_list_set_all). Match that. */
-        const ULONG low_mask  = 0xFFFFFFFF;
-        const ULONG high_mask = 0xFFFFFFFF;
-        pr_info("gpu_smu: SetAllowedFeaturesMaskLow = 0x%08x, High = 0x%08x\n",
-                low_mask, high_mask);
-        int ret = gpu_smu_send_msg(dev, PPSMC_MSG_SetAllowedFeaturesMaskLow, low_mask);
-        if (ret != 0)
-            pr_warn("gpu_smu: SetAllowedFeaturesMaskLow failed\n");
-        else
-            pr_info("gpu_smu: SetAllowedFeaturesMaskLow OK\n");
-        ret = gpu_smu_send_msg(dev, PPSMC_MSG_SetAllowedFeaturesMaskHigh, high_mask);
-        if (ret != 0)
-            pr_warn("gpu_smu: SetAllowedFeaturesMaskHigh failed\n");
-        else
-            pr_info("gpu_smu: SetAllowedFeaturesMaskHigh OK\n");
-    }
-
-    /* Query currently running SMU features for diagnostics.
-     * CORRECTED: use GetRunningSmuFeaturesLow/High (0x0C/0x0D).
-     * Old code used 0x09/0x0A which were EnableSmuFeaturesHigh/DisableSmuFeaturesLow! */
-    {
-        int ret;
-        ULONG features_lo = 0, features_hi = 0;
-
-        ret = gpu_smu_send_msg(dev, PPSMC_MSG_GetRunningSmuFeaturesLow, 0);
-        if (ret == 0) {
-            features_lo = mp1_rreg(dev, regMP1_SMN_C2PMSG_82);
-            pr_info("gpu_smu: running features LOW  = 0x%08x\n", features_lo);
-        } else {
-            pr_warn("gpu_smu: GetRunningSmuFeaturesLow failed\n");
-        }
-
-        ret = gpu_smu_send_msg(dev, PPSMC_MSG_GetRunningSmuFeaturesHigh, 0);
-        if (ret == 0) {
-            features_hi = mp1_rreg(dev, regMP1_SMN_C2PMSG_82);
-            pr_info("gpu_smu: running features HIGH = 0x%08x\n", features_hi);
-        } else {
-            pr_warn("gpu_smu: GetRunningSmuFeaturesHigh failed\n");
-        }
-
-        if (features_lo != 0 || features_hi != 0) {
-            pr_info("gpu_smu: SMU features already running (0x%08x_%08x)\n",
-                    features_hi, features_lo);
-        } else {
-            pr_info("gpu_smu: no SMU features running — EnableAllSmuFeatures needed\n");
-        }
-    }
+     * Tinygrad does ONLY: SetDriverDramAddr + EnableAllSmuFeatures(0).
+     * No pptable round-trip, no SetAllowedFeaturesMask, no RunDcBtc,
+     * no DramLogSetDramAddr, no DisallowGfxOff. The SMU uses its
+     * internal default PPTable from the firmware .bin file.
+     *
+     * All previous attempts with intermediate steps (UseDefaultPPTable,
+     * TransferTableDram2Smu, SetAllowedFeaturesMask) failed. Let's try
+     * the absolute minimum that works on bare metal. */
+    pr_info("gpu_smu: === MINIMAL INIT: SetDriverDramAddr + EnableAllSmuFeatures(0) ===\n");
+    /* Go directly to EnableAllSmuFeatures — skip all intermediate steps.
+     * tinygrad proves: only SetDriverDramAddr + EnableAllSmuFeatures(0)
+     * are needed. The SMU uses its internal default PPTable. */
 
 try_enable_smu_features:
     /* Check if EnableAllSmuFeatures should be skipped.
@@ -5030,58 +4863,8 @@ try_enable_smu_features:
      *
      * Previous attempts used param=FEATURE_PWR_GFX(4) which only enables GFX.
      * The Linux driver enables ALL features at once. */
-    pr_info("gpu_smu: sending EnableAllSmuFeatures(param=0, ALL features) "
-            "(timeout=120s)...\n");
+    pr_info("gpu_smu: EnableAllSmuFeatures(param=0) — minimal tinygrad path...\n");
     {
-        /* First try EnableSmuFeaturesLow/High for individual feature groups.
-         * This avoids the all-or-nothing hang of EnableAllSmuFeatures.
-         * Try each feature bit individually (0-31 low, 0-31 high) with
-         * a short timeout — features that need PMIC will fail quickly. */
-        pr_info("gpu_smu: === Trying individual EnableSmuFeatures ===\n");
-        {
-            ULONG enabled_lo = 0, enabled_hi = 0;
-            for (int bit = 0; bit < 32; bit++) {
-                ULONG mask = 1U << bit;
-                int r = gpu_smu_send_msg(dev, PPSMC_MSG_EnableSmuFeaturesLow, mask);
-                if (r == 0) {
-                    enabled_lo |= mask;
-                }
-            }
-            for (int bit = 0; bit < 32; bit++) {
-                ULONG mask = 1U << bit;
-                int r = gpu_smu_send_msg(dev, PPSMC_MSG_EnableSmuFeaturesHigh, mask);
-                if (r == 0) {
-                    enabled_hi |= mask;
-                }
-            }
-            pr_info("gpu_smu: individual features enabled: LOW=0x%08x HIGH=0x%08x\n",
-                    enabled_lo, enabled_hi);
-
-            /* Check what's actually running now */
-            gpu_smu_send_msg(dev, PPSMC_MSG_GetRunningSmuFeaturesLow, 0);
-            ULONG run_lo = mp1_rreg(dev, regMP1_SMN_C2PMSG_82);
-            gpu_smu_send_msg(dev, PPSMC_MSG_GetRunningSmuFeaturesHigh, 0);
-            ULONG run_hi = mp1_rreg(dev, regMP1_SMN_C2PMSG_82);
-            pr_info("gpu_smu: running features after individual enable: "
-                    "LOW=0x%08x HIGH=0x%08x\n", run_lo, run_hi);
-
-            /* Check CPC_PSP_DEBUG — did GFX power up? */
-            if (dev->hw.ip.gc_base1 != 0) {
-                ULONG cpc = gpu_smn_rreg(dev, dev->hw.ip.gc_base1 + 0x5c11);
-                pr_info("gpu_smu: CPC_PSP_DEBUG after individual features = 0x%08x%s\n",
-                        cpc, (cpc != 0xffffffff) ? " (GFX POWERED UP!)" : " (still off)");
-                if (cpc != 0xffffffff) {
-                    pr_info("gpu_smu: GFX powered up via individual features!\n");
-                    dev->hw.gfxoff_disabled = TRUE;
-                    /* Skip EnableAllSmuFeatures — already working */
-                    goto skip_enable_all;
-                }
-            }
-        }
-
-        /* Fallback: EnableAllSmuFeatures(param=0) with 120s timeout */
-        pr_info("gpu_smu: individual features didn't power GFX — "
-                "trying EnableAllSmuFeatures(param=0)...\n");
         {
             ULONG cur = mp1_rreg(dev, regMP1_SMN_C2PMSG_66);
             if (cur == PPSMC_MSG_EnableAllSmuFeatures) {

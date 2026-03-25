@@ -410,8 +410,10 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void)
                  * SMU hw_init enables GFX features → GFX hw_init triggers
                  * AUTOLOAD_RLC. We follow the same order here. */
                 BOOLEAN fw_staged = FALSE;
+                char skip_fw[32] = {};
+                GetEnvironmentVariableA("HSAKMT_SKIP_FW_LOAD",
+                    skip_fw, sizeof(skip_fw));
                 if (g_wddm_lite_dev.hw.psp_sos_alive) {
-                    char skip_fw[32] = {};
                     GetEnvironmentVariableA("HSAKMT_SKIP_FW_LOAD",
                         skip_fw, sizeof(skip_fw));
                     if (skip_fw[0] == '1') {
@@ -439,8 +441,10 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void)
                  * respond (resp stays 0). GC SMN access is temporarily
                  * blocked during the GFX power transition (~80-120s).
                  * DO NOT read GC registers immediately after this call. */
-                if (g_wddm_lite_dev.hw.psp_sos_alive) {
+                if (g_wddm_lite_dev.hw.psp_sos_alive && skip_fw[0] != '1') {
                     gpu_smu_enable_features(&g_wddm_lite_dev);
+                } else if (skip_fw[0] == '1') {
+                    pr_info("wddm_lite: SMU enable_features skipped (SKIP_FW_LOAD)\n");
                 }
 
                 /* Step 6b: Trigger AUTOLOAD now that GFX power is up.
