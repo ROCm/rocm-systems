@@ -41,16 +41,14 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
-from utils.utils import (
+from utils.utils_common import (
     capture_subprocess_output,
     format_time,
-    gen_sysinfo,
     get_rank,
     is_only_pc_sampling,
-    pc_sampling_prof,
     print_status,
-    run_prof,
 )
+from utils.utils_profile import gen_sysinfo, pc_sampling_prof, run_prof
 from vendored import yaml
 
 
