@@ -498,30 +498,37 @@ template <typename... Args>
   src_bytes = src_def;
 
   // size of each element: 4 uint (4 bytes) = 16 bytes (128 bits)
-  constexpr size_t DATA_SIZE{16};
-  // number of elements to be handled by each thread
-  constexpr size_t DATA_COUNT{16};
-  constexpr size_t CHUNK_BYTES = DATA_SIZE * DATA_COUNT;
-  size_t block_bytes = CHUNK_BYTES * block_size;
+  constexpr size_t ELEMENT_SIZE{16};
+  
+  for (size_t work_per_thread{16}; work_per_thread > 1; work_per_thread >>= 1 ){
+    // number of elements to be handled by each thread
+    size_t thread_bytes = ELEMENT_SIZE * work_per_thread;
+    size_t block_bytes = thread_bytes * block_size;
+    if (block_bytes <= size) {
+      cpy_size = size / block_bytes;
 
-  if (size >= block_bytes) {
-    cpy_size = size / block_bytes;
+      size_t stride = block_size * sizeof(uint4);
+      size_t thread_idx = thread_id * sizeof(uint4);
 
-    size_t stride = block_size * sizeof(uint4);
-    size_t thread_idx = thread_id * sizeof(uint4);
+      buffer_resource br_src = make_buffer_resource(src_def, block_bytes);
+      buffer_resource br_dst = make_buffer_resource(dst_def, block_bytes);
 
-    buffer_resource br_src = make_buffer_resource(src_def, block_bytes);
-    buffer_resource br_dst = make_buffer_resource(dst_def, block_bytes);
+      // if (get_flat_id() == 0) {
+      //   printf("memcpy_wg: grid_size = %d, block_size = %d, " 
+      //     "flat_id = %d, size = %3ld, cpy_size = %3d\n", 
+      //     get_grid_num_blocks(), get_flat_block_size(), get_flat_id(), size, cpy_size);
+      // }
 
-    for (int i = 0; i < cpy_size; i++) {
-      load_store_asm(&br_src, &br_dst, stride, thread_idx, size);
+      for (int i = 0; i < cpy_size; i++) {
+        load_store_asm(&br_src, &br_dst, stride, thread_idx, size, work_per_thread);
 
-      br_src.ptr += block_bytes;
-      br_dst.ptr += block_bytes;
+        br_src.ptr += block_bytes;
+        br_dst.ptr += block_bytes;
+      }
+      size -= cpy_size * block_bytes;
+      dst_def += cpy_size * block_bytes;
+      src_def += cpy_size * block_bytes;
     }
-    size -= cpy_size * block_bytes;
-    dst_def += cpy_size * block_bytes;
-    src_def += cpy_size * block_bytes;
   }
 
   for (int j{16}; j > 1; j >>= 1) {
@@ -565,30 +572,38 @@ template <typename... Args>
   src_bytes = src_def;
 
   // size of each element: 4 uint (4 bytes) = 16 bytes (128 bits)
-  constexpr size_t DATA_SIZE{16};
+  constexpr size_t ELEMENT_SIZE{16};
   // number of elements to be handled by each thread
-  constexpr size_t DATA_COUNT{16};
-  constexpr size_t CHUNK_BYTES = DATA_SIZE * DATA_COUNT;
-  size_t block_bytes = CHUNK_BYTES * wave_size;
 
-  if (size >= block_bytes) {
-    cpy_size = size / block_bytes;
+  for (size_t work_per_thread{16}; work_per_thread > 1; work_per_thread >>= 1 ){
+    // number of elements to be handled by each thread
+    size_t thread_bytes = ELEMENT_SIZE * work_per_thread;
+    size_t block_bytes = thread_bytes * wave_size;
+    if (size >= block_bytes) {
+      cpy_size = size / block_bytes;
 
-    size_t stride = wave_size * sizeof(uint4);
-    size_t thread_idx = wave_tid * sizeof(uint4);
+      size_t stride = wave_size * sizeof(uint4);
+      size_t thread_idx = wave_tid * sizeof(uint4);
 
-    buffer_resource br_src = make_buffer_resource(src_def, block_bytes);
-    buffer_resource br_dst = make_buffer_resource(dst_def, block_bytes);
+      buffer_resource br_src = make_buffer_resource(src_def, block_bytes);
+      buffer_resource br_dst = make_buffer_resource(dst_def, block_bytes);
 
-    for (int i = 0; i < cpy_size; i++) {
-      load_store_asm(&br_src, &br_dst, stride, thread_idx, size);
+      // if (get_flat_id() == 0) {
+      //   printf("memcpy_wave: grid_size = %d, block_size = %d, " 
+      //     "flat_id = %d, size = %3ld, cpy_size = %3d\n", 
+      //     get_grid_num_blocks(), get_flat_block_size(), get_flat_id(), size, cpy_size);
+      // }
 
-      br_src.ptr += block_bytes;
-      br_dst.ptr += block_bytes;
+      for (int i = 0; i < cpy_size; i++) {
+        load_store_asm(&br_src, &br_dst, stride, thread_idx, size, work_per_thread);
+
+        br_src.ptr += block_bytes;
+        br_dst.ptr += block_bytes;
+      }
+      size -= cpy_size * block_bytes;
+      dst_def += cpy_size * block_bytes;
+      src_def += cpy_size * block_bytes;
     }
-    size -= cpy_size * block_bytes;
-    dst_def += cpy_size * block_bytes;
-    src_def += cpy_size * block_bytes;
   }
 
   for (int j{16}; j > 1; j >>= 1) {
