@@ -13,7 +13,7 @@
 #           |-- gpu model
 #           |-- chip_ids: chip id is specific to the environment the gpu is being used on
 #               | -- physical
-#               | -- virtual
+#               | -- virtual # The pattern is physical + 16
 #           |-- partition_mode
 #               | -- compute partition mode
 #               | -- memory partition mode
@@ -356,5 +356,4 @@ mi_gpu_spec:
                   cpx: 4
             chip_ids:
               physical: 30120
-              # Add +16 to physical
               virtual: 30136
