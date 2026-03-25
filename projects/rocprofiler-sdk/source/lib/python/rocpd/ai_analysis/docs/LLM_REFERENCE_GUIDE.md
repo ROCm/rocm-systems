@@ -172,7 +172,7 @@ User runs: rocpd analyze -i output.db --llm anthropic
 
 4. **Done!** Next analysis will use the updated specs:
    ```bash
-   rocpd analyze --ai mi400_trace.db --llm anthropic
+   rocpd analyze -i mi400_trace.db --llm anthropic
    ```
 
 **No code changes, no recompilation required.**
@@ -449,7 +449,7 @@ User runs: rocpd analyze -i output.db --llm anthropic
 export ROCPD_LLM_REFERENCE_GUIDE=/path/to/my/custom-guide.md
 
 # Run analysis with verbose mode
-rocpd analyze --ai output.db --llm anthropic --verbose
+rocpd analyze -i output.db --llm anthropic --verbose
 
 # Check which guide was loaded
 ```
@@ -531,11 +531,11 @@ ReferenceGuideNotFoundError: LLM reference guide not found at: /opt/rocm/share/r
 ```bash
 # HPC team
 export ROCPD_LLM_REFERENCE_GUIDE=/opt/rocm/share/rocprofiler-sdk/llm-reference-guide-hpc.md
-rocpd analyze --ai hpc_trace.db --llm anthropic
+rocpd analyze -i hpc_trace.db --llm anthropic
 
 # ML team
 export ROCPD_LLM_REFERENCE_GUIDE=/opt/rocm/share/rocprofiler-sdk/llm-reference-guide-ml.md
-rocpd analyze --ai ml_trace.db --llm anthropic
+rocpd analyze -i ml_trace.db --llm anthropic
 ```
 
 **Benefit:** Each team gets analysis tailored to their domain.

@@ -73,9 +73,12 @@ ai_analysis/
 
 The LLM reference guide ("fence") is a **user-modifiable markdown file** that controls LLM behavior:
 
-**Location:**
-- `/opt/rocm/lib/python3.12/site-packages/rocpd/ai_analysis/share/llm-reference-guide.md` (default)
-- Can be overridden with `ROCPD_LLM_REFERENCE_GUIDE` environment variable
+**Reference guide search/override order:**
+1. `ROCPD_LLM_REFERENCE_GUIDE` environment variable (explicit override — highest priority)
+2. Module-relative `ai_analysis/share/llm-reference-guide.md` (i.e. inside the installed package at `/opt/rocm/lib/python3.12/site-packages/rocpd/ai_analysis/share/`)
+3. System-wide fallback: `/opt/rocm/share/rocprofiler-sdk/llm-reference-guide.md`
+
+In the common case, edit the file at path 2 (inside the site-packages install). Use the env var override to point to a custom guide without modifying the package.
 
 **What's in the guide:**
 - **ROCm Profiling Tools** - Correct tool names and commands (rocprofv3, rocprof-compute, rocprof-sys)
@@ -404,9 +407,10 @@ export ROCPD_LLM_REFERENCE_GUIDE=/path/to/custom-guide.md
 
 ## Documentation
 
-- **[AI Analysis API Documentation](../../../docs/AI_ANALYSIS_API.md)** - Complete API reference
-- **[LLM Reference Guide Documentation](../../../docs/LLM_REFERENCE_GUIDE.md)** - How to customize LLM behavior
-- **[rocpd README](../README.md)** - Main rocpd documentation
+- **[AI Analysis API Documentation](docs/AI_ANALYSIS_API.md)** - Complete API reference
+- **[LLM Reference Guide Documentation](docs/LLM_REFERENCE_GUIDE.md)** - How to customize LLM behavior
+- **[JSON Output Schema](docs/analysis-output.schema.json)** - Stable JSON contract (v0.1.0)
+- **[Schema Changelog](docs/SCHEMA_CHANGELOG.md)** - Schema version history
 
 ## Development
 

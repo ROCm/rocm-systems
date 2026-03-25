@@ -310,11 +310,21 @@ class AnalysisResult:
     profiling_info: ProfilingInfo
     summary: AnalysisSummary
     execution_breakdown: ExecutionBreakdown
+    hotspots: List[Dict[str, Any]]          # Top-N kernels by total duration
+    memory_analysis: Dict[str, Any]         # Per-direction transfer stats (H2D/D2H/D2D)
+    hardware_counters: Optional[Dict[str, Any]]  # Tier 2 only; None when --pmc not used
     recommendations: RecommendationSet
     warnings: List[AnalysisWarning]
     errors: List[str]
     llm_enhanced_explanation: Optional[str]  # Only if enable_llm=True
 ```
+
+> **Python vs JSON representation**: `hotspots`, `memory_analysis`, and `hardware_counters`
+> are exposed as raw dicts on the Python dataclass for flexibility. The JSON output (via
+> `to_json()`) serializes them under the same top-level keys using the schema-defined
+> structure (see `docs/analysis-output.schema.json`). `recommendations` is a flat array
+> in JSON (ordered HIGH → MEDIUM → LOW) while the Python dataclass uses a `RecommendationSet`
+> with `high_priority`/`medium_priority`/`low_priority` sub-lists for typed access.
 
 **Methods:**
 
@@ -347,26 +357,33 @@ Single optimization recommendation.
 ```python
 @dataclass
 class Recommendation:
-    id: str
-    priority: str  # "high", "medium", "low"
-    category: str  # "memory", "compute", "occupancy", etc.
-    title: str
-    description: str
-    estimated_impact: str
-    next_steps: List[str]
+    id: str           # Stable ID, e.g. "ROCPD-OCCUPANCY-001"
+    priority: str     # "HIGH" | "MEDIUM" | "LOW" | "INFO"
+    category: str     # e.g. "Memory Transfer", "Compute Bottleneck", "API Overhead"
+    issue: str        # Short description of the detected problem
+    suggestion: str   # Concise recommended action
+    actions: List[str]         # Ordered concrete steps to apply the suggestion
+    estimated_impact: str      # Expected improvement if addressed
+    commands: List[Dict]       # Structured rocprofv3/rocprof-compute commands to run
 ```
+
+> **Priority values are uppercase** (`HIGH`, `MEDIUM`, `LOW`, `INFO`) in both the Python
+> dataclass and the JSON schema. The fields `issue`/`suggestion`/`actions` map to the
+> schema's `issue`/`suggestion`/`actions` fields respectively.
 
 **Example:**
 
 ```python
 for rec in result.recommendations.high_priority:
-    print(f"ID: {rec.id}")
-    print(f"Title: {rec.title}")
-    print(f"Category: {rec.category}")
+    print(f"[{rec.priority}] {rec.id} — {rec.category}")
+    print(f"Issue: {rec.issue}")
+    print(f"Suggestion: {rec.suggestion}")
     print(f"Impact: {rec.estimated_impact}")
-    print("Next steps:")
-    for step in rec.next_steps:
-        print(f"  - {step}")
+    print("Actions:")
+    for action in rec.actions:
+        print(f"  - {action}")
+    for cmd in rec.commands:
+        print(f"  $ {cmd['full_command']}")
 ```
 
 ---
@@ -414,11 +431,13 @@ json_str = result.to_json(indent=2)
 
 ```json
 {
+  "schema_version": "0.1.0",
   "metadata": {
     "rocpd_version": "6.3.0",
-    "analysis_version": "1.0.0",
+    "analysis_version": "0.1.0",
     "database_file": "/path/to/output.db",
     "analysis_timestamp": "2026-02-07T14:30:00Z",
+    "analysis_duration_ms": 142,
     "custom_prompt": null
   },
   "profiling_info": {
@@ -428,24 +447,50 @@ json_str = result.to_json(indent=2)
   },
   "summary": {
     "overall_assessment": "...",
-    "primary_bottleneck": "memory_bound",
+    "primary_bottleneck": "memory_transfer",
     "confidence": 0.85,
-    "key_findings": [...]
+    "key_findings": ["Memory copies consume 55% of wall time", "GPU idle 5%"]
   },
   "execution_breakdown": {
     "kernel_time_pct": 40.0,
     "memcpy_time_pct": 55.0,
-    "api_overhead_pct": 5.0
+    "api_overhead_pct": 5.0,
+    "idle_time_pct": 0.0,
+    "total_duration_ns": 5000000000
   },
-  "recommendations": {
-    "high_priority": [...],
-    "medium_priority": [...],
-    "low_priority": [...]
+  "hotspots": [
+    {"rank": 1, "name": "gemm_kernel", "total_duration_ns": 1800000000,
+     "call_count": 100, "avg_duration_ns": 18000000, "pct_of_total": 36.0}
+  ],
+  "memory_analysis": {
+    "directions": [
+      {"direction": "H2D", "total_bytes": 1073741824,
+       "total_duration_ns": 2000000000, "bandwidth_gbps": 0.537,
+       "call_count": 10, "avg_duration_ns": 200000000}
+    ]
   },
-  "warnings": [...],
-  "llm_enhanced_explanation": "..." // if enable_llm=True
+  "hardware_counters": null,
+  "recommendations": [
+    {
+      "id": "ROCPD-MEMCPY-001",
+      "priority": "HIGH",
+      "category": "Memory Transfer",
+      "issue": "Memory copies consume 55% of execution time",
+      "suggestion": "Overlap transfers with computation using async streams",
+      "actions": ["Use hipMemcpyAsync with a dedicated stream", "..."],
+      "estimated_impact": "Up to 40% end-to-end speedup",
+      "commands": []
+    }
+  ],
+  "warnings": [],
+  "errors": [],
+  "llm_enhanced_explanation": null
 }
 ```
+
+> **Note**: `recommendations` is a flat array in JSON, ordered HIGH → MEDIUM → LOW → INFO.
+> The Python `AnalysisResult.recommendations` dataclass splits these into typed sub-lists
+> (`high_priority`, `medium_priority`, `low_priority`) for convenient access.
 
 ### Text
 

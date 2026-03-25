@@ -57,7 +57,7 @@ rocpd/ai_analysis/docs/
 ├── analysis-output.schema.json   ← current (v0.1.0)
 ├── SCHEMA_CHANGELOG.md           ← this file
 ├── AI_ANALYSIS_API.md            ← Python API documentation
-└── LLM_REFERENCE_GUIDE.md       ← copy of share/llm-reference-guide.md (for reference)
+└── LLM_REFERENCE_GUIDE.md       ← guide for customizing the LLM "fence" in share/
 ```
 
 The current schema can always be located programmatically:

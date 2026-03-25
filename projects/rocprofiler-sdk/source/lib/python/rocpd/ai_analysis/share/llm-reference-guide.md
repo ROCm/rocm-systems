@@ -16,7 +16,7 @@
 **Tool Name Aliases**:
 - `rocprof-sys` = `rocsys` (same tool, different names in documentation)
 
-**Documentation References**:
+**Documentation References** *(for your internal knowledge only — do NOT include URLs or links in analysis output)*:
 - rocprofv3: https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/
 - rocprof-compute: https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/
 - rocprof-sys (rocsys): https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/
@@ -319,9 +319,9 @@ You have access to the following data from the rocpd database:
 ### MI300X (gfx942)
 - **Architecture**: CDNA 3
 - **Compute Units**: 304
-- **Peak FP64**: 163.4 TFLOPS
+- **Peak FP64**: 81.7 TFLOPS
 - **Peak FP32**: 163.4 TFLOPS
-- **Peak FP16**: 653.7 TFLOPS
+- **Peak FP16**: 653.7 TFLOPS (FP16/BF16 with sparsity: 1307.4 TFLOPS)
 - **Memory**: 192 GB HBM3
 - **Memory Bandwidth**: 5.3 TB/s
 - **L2 Cache**: 256 MB
@@ -372,9 +372,10 @@ You have access to the following data from the rocpd database:
 Ridge Point = Peak FLOPS / Peak Bandwidth
 ```
 
-**Example for MI300X**:
+**Example for MI300X** (FP32):
 ```
-Ridge Point = 163.4 TFLOPS / 5.3 TB/s ≈ 31 FLOP/Byte
+Ridge Point = 163.4 TFLOPS / 5.3 TB/s ≈ 31 FLOP/Byte  (FP32)
+Ridge Point =  81.7 TFLOPS / 5.3 TB/s ≈ 15 FLOP/Byte  (FP64)
 ```
 
 ### 2. Speed-of-Light (SOL) Analysis
