@@ -32,8 +32,6 @@ from abc import abstractmethod
 from pathlib import Path
 from typing import Any, Optional
 
-import yaml
-
 import config
 from utils.amdsmi_interface import amdsmi_ctx, get_gpu_model, get_mem_max_clock
 from utils.logger import (
@@ -52,10 +50,12 @@ from utils.utils import (
     add_counter_extra_config_input_yaml,
     convert_metric_id_to_panel_info,
     get_panel_alias,
+    is_only_pc_sampling,
     is_tcc_channel_counter,
     parse_sets_yaml,
     resolve_rocm_library_path,
 )
+from vendored import yaml
 
 
 class OmniSoC_Base:
@@ -348,6 +348,13 @@ class OmniSoC_Base:
     def perfmon_filter(self) -> list[str]:
         """Filter default performance counter set based on user arguments"""
         counters, filter_blocks = self.detect_counters()
+
+        if is_only_pc_sampling(filter_blocks):
+            console_log(
+                "profiling",
+                "PC sampling only mode -- skipping counter collection setup",
+            )
+            return filter_blocks
 
         # SQ_ACCUM_PREV_HIRES will be injected for level counters later on
         counters = counters - {"SQ_ACCUM_PREV_HIRES"}
