@@ -479,35 +479,35 @@ With each group type, the synchronization requires using the correct cooperative
 Operations
 ==========
 
+HIP has one group-wide operation: ``reduce()``. Participation of all the threads belonging to the group is expected, with each thread contributing the same value.
+
 .. code-block:: cpp
 
   auto reduce(const TyGroup& group, T&& val, Operation&& op)
 
-Defined in cooperative_groups/hip_reduce.h. Performs a reduction operation on the specified group, contributing the value ``val``
+Defined in cooperative_groups/hip_reduce.h. Performs a reduction operation ``op`` on the specified group, contributing the value ``val``
 
-* ``group`` is either a coalesced_group or a thread_block_tile
+* ``group`` is either a ``coalesced_group`` or a ``thread_block_tile``
 
 * ``val`` needs to be a type ``T`` that is trivially copyable and up to 32 bytes in size.
 
-* ``Operation`` must be a function object, which includes lambdas or functors which define ``operator()``. The following predefined functors in the cooperative_groups namespace:
+* ``op`` must be a function object, which includes lambdas or functors which define ``operator()``. The following predefined functors in the ``cooperative_groups`` namespace:
 
-  + cooperative_groups::plus (addition)
+  + ``cooperative_groups::plus`` (addition)
 
-  + cooperative_groups::less (minimum)
+  + ``cooperative_groups::less`` (minimum)
 
-  + cooperative_groups::greater (maximum)
+  + ``cooperative_groups::greater`` (maximum)
 
-  + cooperative_groups::bit_and (bitwise and)
+  + ``cooperative_groups::bit_and`` (bitwise and)
 
-  + cooperative_groups::bit_or (bitwise or)
+  + ``cooperative_groups::bit_or`` (bitwise or)
 
-  + cooperative_groups::bit_xor (bitwise xor)
-
-Note that it is legal for some threads of the cooperative group to not participate.
+  + ``cooperative_groups::bit_xor`` (bitwise xor)
 
 **Performance**
 
-On AMD, although all types ``T`` fulfilling the description above can be used with the functors in the cooperative_groups namespace, only some of them will receive hardware acceleration in the form of DPP instructions. Essentially only the types supported by reduce_sync operations would potentially receive acceleration :ref:`hip_cpp_language_extensions:Warp reduction functions` The macro HIP_ENABLE_EXTRA_WARP_SYNC_TYPES might be needed to enable the hardware acceleration on some types.
+On AMD, although all types ``T`` fulfilling the description above can be used with the functors in the ``cooperative_groups`` namespace, only some of them will receive hardware acceleration in the form of DPP instructions. Essentially only the types supported by ``__reduce_*_sync`` operations would potentially receive acceleration :ref:`hip_cpp_language_extensions:Warp reduction functions` The macro ``HIP_ENABLE_EXTRA_WARP_SYNC_TYPES`` might be needed to enable the hardware acceleration on some types.
 For arithmetic reduces (``plus``, ``less`` and ``greater``):
 
 * On Nvidia platform: there is hardware acceleration for ``int`` or ``unsigned int``
@@ -520,7 +520,7 @@ For bitwise-reduces: (``bit_and``, ``bit_or``, ``bit_xor``)
 
 * On Nvidia platform: ``unsigned int``
 
-* On AMD platform: ``unsigned int``, and if the user defines the macro ``HIP_ENABLE_EXTRA_WARP_SYNC_TYPES``, then ``int``, ``unsigned long long`` or ``long long`` are also hardware-accelarated support
+* On AMD platform: ``unsigned int``, and if the user defines the macro ``HIP_ENABLE_EXTRA_WARP_SYNC_TYPES``, then ``int``, ``unsigned long long`` or ``long long`` are also hardware-accelerated.
 
 Unsupported NVIDIA CUDA features
 ================================
