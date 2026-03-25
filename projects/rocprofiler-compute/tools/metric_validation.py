@@ -44,7 +44,7 @@ from argparser import omniarg_parser  # noqa: E402
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base  # noqa: E402
 from utils import file_io, parser  # noqa: E402
 from utils.mi_gpu_spec import mi_gpu_specs  # noqa: E402
-from utils.utils import merge_counters_iteration_multiplex  # noqa: E402
+from utils.utils_analysis import impute_counters_iteration_multiplex  # noqa: E402
 
 
 class Colors:
@@ -150,7 +150,7 @@ class Analyzer(OmniAnalyze_Base):
 
                 # Handle iteration multiplexing if specified
                 if policy := self._profiling_config.get("iteration_multiplexing"):
-                    raw_pmc = merge_counters_iteration_multiplex(raw_pmc, policy)
+                    raw_pmc = impute_counters_iteration_multiplex(raw_pmc, policy)
 
                 base_workload = self._runs[path_info[0]]
                 # Make a copy of the dataframe to process
