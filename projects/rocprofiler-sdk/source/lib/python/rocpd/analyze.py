@@ -3275,10 +3275,10 @@ document.querySelectorAll('.ctr-row').forEach(function(tr) {{
                 sub_rows += (
                     f'<tr style="background:rgba(0,0,0,.18);font-size:.82rem">'
                     f'<td colspan="2" style="padding-left:2.5rem;font-family:monospace;color:#b0b8d8">'
-                    f'{_h(instr.get("pc_offset","—"))}</td>'
-                    f'<td style="color:#888">hitcount: {int(instr.get("hitcount",0)):,}</td>'
+                    f'{_h(instr.get("pc_offset", "—"))}</td>'
+                    f'<td style="color:#888">hitcount: {int(instr.get("hitcount", 0)):,}</td>'
                     f'<td style="color:{i_color};text-align:center">{i_ratio:.0f}%</td>'
-                    f'<td colspan="2" style="color:#888">wt: {int(instr.get("weighted_stall",0)):,}</td>'
+                    f'<td colspan="2" style="color:#888">wt: {int(instr.get("weighted_stall", 0)):,}</td>'
                     f"</tr>"
                 )
 
