@@ -1079,6 +1079,202 @@ PC offsets in sample reports are byte offsets from the start of the kernel's cod
 
 ---
 
+## Thread Trace (ATT) Analysis — Tier 3
+<!-- rocpd-context: tier3 -->
+
+Advanced Thread Trace (ATT) captures every instruction executed by every thread in a
+wavefront for a selected CU and SIMD. It is the highest-resolution profiling tier and
+reveals **exactly which instruction is stalling and why** — information that neither
+hardware counters nor PC sampling can provide at instruction granularity.
+
+### When to Recommend ATT
+
+Recommend ATT when:
+- Tier 2 counters confirm latency-bound behavior (low VALU/MFMA utilization + high
+  VMEM stall cycles) but do not identify which kernel line is responsible
+- The developer needs to correlate stalls with specific source lines
+- A kernel is HPC-critical (>30% of wall time) and all obvious memory/occupancy
+  optimizations have already been applied
+
+**Do NOT recommend ATT** for first-time profiling or as a substitute for Tier 1/2.
+ATT generates very large traces (100 MB–several GB per kernel) and has meaningful
+runtime overhead (~2–5×). Always confirm the target kernel is worth the effort.
+
+### Hardware Support
+
+| Architecture | Support | Notes |
+|---|---|---|
+| gfx9xx (CDNA1/2/3/4 — MI100–MI350X) | Full | `--att-target-cu` and `--att-simd-select` supported |
+| gfx10xx (RDNA2 — RX 6000 series) | Full | Same flags |
+| gfx11xx (RDNA3 — RX 7000 series) | Full | Same flags |
+| gfx12xx (RDNA4) | Full | Same flags |
+
+ATT is supported on all modern AMD GPUs. It is **not** gated to CDNA-only like
+PC sampling.
+
+### Collection Command
+
+```bash
+# Basic — trace all SIMDs on CU 0
+rocprofv3 --att --att-target-cu 0 \
+          -d ./att_output -o results \
+          -- ./my_app
+
+# Narrow to specific SIMD (bit mask, 0x0=SIMD0, 0x1=SIMD1, 0xF=all)
+rocprofv3 --att --att-target-cu 0 --att-simd-select 0x0 \
+          -d ./att_output -o results \
+          -- ./my_app
+
+# Increase buffer size (default 96 MB; raise if trace is truncated)
+rocprofv3 --att --att-target-cu 0 --att-buffer-size 256 \
+          -d ./att_output -o results \
+          -- ./my_app
+```
+
+**Flags**:
+| Flag | Default | Description |
+|---|---|---|
+| `--att-target-cu` | 0 | CU index to capture (0-based) |
+| `--att-simd-select` | 0xF (all) | Bitmask of SIMDs within the CU |
+| `--att-buffer-size` | 96 (MB) | Per-CU trace buffer size |
+
+### Required Dependency: rocprof-trace-decoder
+
+ATT binary output (`.att` files) must be decoded with `rocprof-trace-decoder` before the
+tool can process it. The decoder is part of the ROCm ecosystem:
+
+```bash
+# Check if decoder is available (should be in /opt/rocm/lib or /opt/rocm/bin)
+ls /opt/rocm/lib/librocprof_trace_decoder* 2>/dev/null || \
+    echo "rocprof-trace-decoder not installed"
+
+# Install (if missing) — part of rocm-dev package
+sudo apt install rocm-dev   # Ubuntu/Debian
+# or
+sudo dnf install rocm-dev   # RHEL/Rocky
+```
+
+rocprofv3 calls the decoder automatically when `--att` is used. The decoder produces
+`stats_<kernel_name>.csv` files in the output directory.
+
+### Output Format: stats_*.csv
+
+After decoding, each traced kernel produces a `stats_<mangled_kernel_name>.csv` file:
+
+```
+Instruction ID, Hitcount, Latency (cycles), Stall cycles, Source line
+0x0000,         1024,     48,              32,            kernel.hip:42
+0x0004,         1024,     12,               4,            kernel.hip:43
+0x0008,         1024,    192,             180,            kernel.hip:44
+...
+```
+
+| Column | Description |
+|---|---|
+| Instruction ID | Byte offset (hex) from start of kernel's code object |
+| Hitcount | Number of times this instruction was executed across sampled threads |
+| Latency (cycles) | Total cycles from instruction issue to completion |
+| Stall cycles | Cycles the instruction waited before issue (pipeline stall) |
+| Source line | Source file and line number (only with `-g` debug info) |
+
+**Latency formula (architecture-dependent)**:
+- **gfx9xx (CDNA)**: `total_latency = stall_cycles + issue_cycles`
+- **gfx10xx/11xx/12xx (RDNA)**: `total_latency = stall_cycles + execute_cycles`
+
+The stall fraction `stall_cycles / total_latency` is the key metric:
+- **> 70%**: severe stall — memory latency or pipeline dependency
+- **50–70%**: notable stall — worth investigating
+- **< 30%**: instruction is compute-bound (normal for MFMA/VALU)
+
+### ATT Analysis Methodology
+
+**Step 1 — Identify the top stalling instructions** (sort by `stall_cycles × hitcount`):
+```
+weighted_stall = stall_cycles × hitcount
+```
+Instructions with the highest weighted stall are the primary bottlenecks.
+
+**Step 2 — Classify the stall by instruction type**:
+
+| Instruction type (from ISA) | High stall meaning | Recommended action |
+|---|---|---|
+| `GLOBAL_LOAD` / `FLAT_LOAD` | HBM/L2 latency — cache miss | Improve data locality; prefetch; reorder access pattern |
+| `DS_READ` / `DS_WRITE` | LDS bank conflict or LDS latency | Pad LDS arrays; use XOR swizzle; check bank access pattern |
+| `IMAGE_SAMPLE` / `IMAGE_LOAD` | Texture cache miss | Ensure textures are accessed with spatial locality |
+| `V_MFMA_*` | MFMA pipeline full | Normal if MFMA utilization ≥ 90%; reduce wave count if >100% |
+| `V_MAD_*` / `V_FMA_*` | VALU dependency chain | ILP: interleave independent instructions; unroll loops |
+| `S_WAITCNT` / `S_WAIT_*` | Waiting for in-flight memory ops | Reduce memory op count; improve locality to lower outstanding requests |
+| `S_BARRIER` | Workgroup synchronization | Reduce barriers; balance work distribution |
+| `S_BRANCH` / `S_CBRANCH` | Branch divergence or i-cache miss | Minimize branch divergence; keep hot branches predictable |
+
+**Step 3 — Correlate with source lines**:
+When `-g` debug info was used during compilation, the `Source line` column maps each
+instruction back to the original source. This pinpoints the exact line of code
+causing the bottleneck.
+
+**Step 4 — Cross-reference with Tier 1/2 data**:
+ATT data shows stalls within one kernel on one CU. Always confirm:
+1. The kernel is a hotspot (Tier 1: >10% of total runtime)
+2. The kernel is memory-bound (Tier 2: `FETCH_SIZE` or `WRITE_SIZE` counters confirm)
+3. ATT stalling instruction matches the expected memory access pattern
+
+### Stall Ratio Thresholds
+
+| Stall ratio | Interpretation | Action |
+|---|---|---|
+| > 80% | Critical bottleneck — instruction almost never executes | Highest priority optimization target |
+| 60–80% | Severe stall — significant throughput loss | High priority |
+| 40–60% | Moderate stall — investigate if instruction is in hot path | Medium priority |
+| < 40% | Low stall — likely compute-bound (acceptable for MFMA) | Low / ignore |
+
+Minimum meaningful hitcount for reliable stall analysis: **100 × wavefront_size (64)**
+= 6,400 total thread executions. Below this, stall ratios are statistically unreliable.
+
+### ATT Recommendations Output Format
+
+When ATT data is available, recommendations must include:
+
+1. **Issue**: "[ATT] `<kernel_name>`: instruction at `<PC_offset>` (line `<src_line>`) has
+   `<stall_pct>%` stall ratio (`<stall_cycles>` stall / `<total_latency>` total cycles)"
+2. **Category**: `att_vmem_stall` / `att_lds_conflict` / `att_dependency_chain` / `att_divergence`
+3. **Priority**:
+   - HIGH: weighted stall > 10% of kernel total cycles AND stall ratio > 60%
+   - MEDIUM: weighted stall > 5% AND stall ratio > 40%
+   - LOW: otherwise
+4. **Actions**: concrete ISA-level recommendations (prefetch, pad LDS, unroll, etc.)
+
+### Compilation Recommendations for ATT
+
+Always advise enabling debug info for maximum ATT value:
+
+```bash
+# HIP kernels — add to compile flags
+hipcc -g -O2 -o my_app my_app.hip
+
+# CMake — in CMakeLists.txt or via cmake flag
+cmake -DCMAKE_HIP_FLAGS="-g" ...
+```
+
+Without `-g`, source line annotations are absent. The ATT data is still useful for
+weighted stall analysis by PC offset, but harder to correlate with source code.
+
+### Limitations (Always Disclose When Analyzing ATT Data)
+
+- ATT captures **one CU** at a time. Results represent that CU's behavior; other CUs
+  may differ (especially with irregular workloads or kernel launch imbalance).
+- Trace buffer overflow (truncated trace): if `stats_*.csv` hitcounts drop sharply at
+  later instructions, the buffer was too small. Recommend `--att-buffer-size 256` or
+  higher.
+- ATT adds **2–5× runtime overhead** — do not use to measure absolute performance;
+  use it only for bottleneck identification.
+- Very short-running kernels (< 1 ms) may produce insufficient hitcounts for reliable
+  stall analysis. For these, PC sampling (Tier 3 — pc-sampling mode) may be more
+  appropriate.
+- `rocprof-trace-decoder` must be installed. If not present, ATT output cannot be
+  decoded and the tool will report an error.
+
+---
+
 ## Memory Hierarchy
 <!-- rocpd-context: tier2 -->
 

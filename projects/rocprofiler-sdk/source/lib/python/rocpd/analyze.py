@@ -384,6 +384,221 @@ def analyze_hardware_counters(connection: RocpdImportData) -> Dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Tier 3: Advanced Thread Trace (ATT) analysis
+# ---------------------------------------------------------------------------
+
+_ATT_STALL_CATEGORY_MAP: Dict[str, str] = {
+    # VMEM instructions → HBM/cache latency
+    "GLOBAL_LOAD": "att_vmem_latency",
+    "GLOBAL_STORE": "att_vmem_latency",
+    "FLAT_LOAD": "att_vmem_latency",
+    "FLAT_STORE": "att_vmem_latency",
+    "BUFFER_LOAD": "att_vmem_latency",
+    "BUFFER_STORE": "att_vmem_latency",
+    # LDS instructions → LDS bank conflict or throughput
+    "DS_READ": "att_lds_conflict",
+    "DS_WRITE": "att_lds_conflict",
+    "DS_BPERMUTE": "att_lds_conflict",
+    # Wait instructions → in-flight memory dependency
+    "S_WAITCNT": "att_dependency_chain",
+    "S_WAIT_": "att_dependency_chain",
+    # Branch instructions → divergence
+    "S_BRANCH": "att_divergence",
+    "S_CBRANCH": "att_divergence",
+    "V_CMP": "att_divergence",
+}
+
+_ATT_MIN_HITCOUNT = 6400  # 100 wavefronts × 64 threads — below this, stall ratio is noise
+
+
+def _att_stall_category(instruction_id: str) -> str:
+    """Classify ATT instruction stall by PC offset prefix / ISA mnemonic hint."""
+    prefix = instruction_id.upper()
+    for key, cat in _ATT_STALL_CATEGORY_MAP.items():
+        if prefix.startswith(key):
+            return cat
+    return "att_vmem_latency"  # default: assume memory latency
+
+
+def analyze_thread_trace(att_dir: str) -> Dict[str, Any]:
+    """
+    Tier 3: Parse Advanced Thread Trace (ATT) CSV output from rocprofv3 --att.
+
+    Reads ``stats_<kernel_name>.csv`` files produced by rocprof-trace-decoder in
+    ``att_dir``.  Returns stall analysis: top stalling instructions per kernel,
+    stall ratios, and bottleneck classification.
+
+    Args:
+        att_dir: Path to directory containing ``stats_*.csv`` files.
+
+    Returns:
+        Dict with keys:
+        - ``has_att_data`` (bool)
+        - ``kernels`` (list of per-kernel dicts)
+        - ``summary`` (aggregated stats)
+        - ``reason`` (error string when has_att_data=False)
+    """
+    import csv as _csv
+    from pathlib import Path as _AttPath
+
+    att_dir_path = _AttPath(att_dir)
+    if not att_dir_path.is_dir():
+        return {
+            "has_att_data": False,
+            "kernels": [],
+            "summary": {},
+            "reason": f"ATT directory not found: {att_dir}",
+        }
+
+    csv_files = sorted(att_dir_path.glob("stats_*.csv"))
+    if not csv_files:
+        # Also search one level deep (rocprofv3 may create a sub-directory)
+        csv_files = sorted(att_dir_path.glob("*/stats_*.csv"))
+
+    if not csv_files:
+        return {
+            "has_att_data": False,
+            "kernels": [],
+            "summary": {},
+            "reason": (
+                f"No stats_*.csv files found in {att_dir}. "
+                "Ensure rocprofv3 --att was used and rocprof-trace-decoder is installed."
+            ),
+        }
+
+    kernels_data: List[Dict[str, Any]] = []
+    high_stall_count = 0
+
+    for csv_path in csv_files:
+        # Fallback name from filename; overridden below by the kernel comment row
+        kernel_name = csv_path.stem[len("stats_"):]
+        instructions: List[Dict[str, Any]] = []
+
+        try:
+            with open(csv_path, newline="") as fh:
+                # Skip comment/header lines starting with '#'
+                lines = [ln for ln in fh if not ln.lstrip().startswith("#")]
+            reader = _csv.DictReader(lines)
+
+            # Normalise header names (strip whitespace + surrounding quotes, lowercase)
+            for row in reader:
+                row_lower = {
+                    k.strip().strip('"').lower(): v.strip().strip('"')
+                    for k, v in row.items()
+                }
+
+                def _col(*candidates: str) -> str:
+                    for c in candidates:
+                        if c in row_lower:
+                            return row_lower[c]
+                    return ""
+
+                # Real rocprofv3 --att CSV: "CodeObj","Vaddr","Instruction",
+                # "Hitcount","Latency","Stall","Idle","Source"
+                instr_name = _col("instruction", "instruction id", "pc_offset", "pc offset", "offset")
+                hitcount_s = _col("hitcount", "hit count", "count")
+                latency_s = _col("latency (cycles)", "latency", "total latency")
+                stall_s = _col("stall cycles", "stall", "stalls")
+                source_line = _col("source line", "source", "file:line")
+
+                try:
+                    hitcount = int(hitcount_s) if hitcount_s else 0
+                    total_latency = int(latency_s) if latency_s else 0
+                    stall_cycles = int(stall_s) if stall_s else 0
+                except ValueError:
+                    continue
+
+                # Comment rows (Hitcount=0, Latency=0) embed the demangled kernel
+                # name in the Source column: "; _Zmangled...", Source="demangled()"
+                if hitcount == 0 and total_latency == 0:
+                    demangled = source_line  # e.g. "heavy_elementwise_kernel(float*, int)"
+                    if demangled:
+                        # Use just the function name without arguments
+                        kernel_name = demangled.split("(")[0].strip()
+                    continue
+
+                stall_ratio = stall_cycles / total_latency if total_latency > 0 else 0.0
+                weighted_stall = stall_cycles * hitcount
+
+                instructions.append(
+                    {
+                        "pc_offset": instr_name,
+                        "hitcount": hitcount,
+                        "total_latency_cycles": total_latency,
+                        "stall_cycles": stall_cycles,
+                        "stall_ratio": round(stall_ratio, 4),
+                        "weighted_stall": weighted_stall,
+                        "source_line": source_line,
+                    }
+                )
+        except Exception as exc:
+            # Malformed CSV — skip this kernel but continue
+            kernels_data.append(
+                {
+                    "name": kernel_name,
+                    "csv_file": str(csv_path),
+                    "error": str(exc),
+                    "top_stalling_instructions": [],
+                    "avg_stall_ratio": 0.0,
+                    "stall_category": "unknown",
+                    "total_weighted_stall": 0,
+                }
+            )
+            continue
+
+        if not instructions:
+            continue
+
+        # Sort by weighted stall descending; take top 10
+        instructions.sort(key=lambda x: x["weighted_stall"], reverse=True)
+        top_stalling = instructions[:10]
+
+        total_weighted = sum(i["weighted_stall"] for i in instructions)
+        avg_stall = (
+            sum(i["stall_ratio"] for i in instructions) / len(instructions)
+            if instructions
+            else 0.0
+        )
+
+        # Classify bottleneck from the top stalling instruction's PC prefix
+        top_pc = top_stalling[0]["pc_offset"] if top_stalling else ""
+        stall_category = _att_stall_category(top_pc)
+
+        is_high_stall = (
+            top_stalling
+            and top_stalling[0]["stall_ratio"] >= 0.60
+            and top_stalling[0]["hitcount"] >= _ATT_MIN_HITCOUNT
+        )
+        if is_high_stall:
+            high_stall_count += 1
+
+        kernels_data.append(
+            {
+                "name": kernel_name,
+                "csv_file": str(csv_path),
+                "instruction_count": len(instructions),
+                "top_stalling_instructions": top_stalling,
+                "avg_stall_ratio": round(avg_stall, 4),
+                "stall_category": stall_category,
+                "total_weighted_stall": total_weighted,
+            }
+        )
+
+    # Sort kernels by total weighted stall descending (worst first)
+    kernels_data.sort(key=lambda k: k.get("total_weighted_stall", 0), reverse=True)
+
+    return {
+        "has_att_data": bool(kernels_data),
+        "kernels": kernels_data,
+        "summary": {
+            "kernel_count": len(kernels_data),
+            "high_stall_kernels": high_stall_count,
+        },
+        "reason": "" if kernels_data else "No valid ATT data could be parsed from CSV files",
+    }
+
+
+# ---------------------------------------------------------------------------
 # Collection-context detection
 # ---------------------------------------------------------------------------
 
@@ -816,8 +1031,9 @@ def generate_recommendations(
     memory_analysis: Dict[str, Dict[str, Any]],
     hardware_counters: Optional[Dict[str, Any]] = None,
     already_collected: Optional[frozenset] = None,
-    short_kernels: Optional[Dict[str, Any]] = None,  # NEW (TraceLens)
-    interval_timeline: Optional[Dict[str, Any]] = None,  # NEW (TraceLens)
+    short_kernels: Optional[Dict[str, Any]] = None,  # TraceLens
+    interval_timeline: Optional[Dict[str, Any]] = None,  # TraceLens
+    att_analysis: Optional[Dict[str, Any]] = None,  # Tier 3 ATT
 ) -> List[Dict[str, Any]]:
     """
     Generate performance recommendations based on analysis results.
@@ -923,6 +1139,133 @@ def generate_recommendations(
                             "full_command": "rocprof-sys --trace -- ./app",
                         },
                     ],
+                }
+            )
+
+    # Tier 3: ATT (Advanced Thread Trace) recommendations
+    if att_analysis and att_analysis.get("has_att_data"):
+        _pre_att_rec_count = len(recommendations)
+        _CATEGORY_LABELS: Dict[str, str] = {
+            "att_vmem_latency": "VMEM Latency",
+            "att_lds_conflict": "LDS Bank Conflict",
+            "att_dependency_chain": "Dependency Chain",
+            "att_divergence": "Branch Divergence",
+        }
+        _CATEGORY_ACTIONS: Dict[str, List[str]] = {
+            "att_vmem_latency": [
+                "Improve data locality to increase L1/L2 cache hit rate",
+                "Reorder memory access pattern for better coalescing (consecutive threads access consecutive addresses)",
+                "Prefetch data into LDS before the compute loop",
+                "Reduce working-set size to fit in L2 cache if possible",
+            ],
+            "att_lds_conflict": [
+                "Pad LDS arrays by 1 element per row to eliminate 32-way bank conflicts",
+                "Use XOR swizzle pattern for b128 LDS reads (avoids bank conflicts in 2D tiles)",
+                "Reduce LDS usage per workgroup to allow more waves per CU",
+                "Replace DS_READ with GLOBAL_LOAD when per-thread access is non-conflicting",
+            ],
+            "att_dependency_chain": [
+                "Interleave independent instructions to break dependency chains (ILP)",
+                "Unroll loops to expose independent iterations for out-of-order issue",
+                "Reduce the number of outstanding S_WAITCNT points by batching loads",
+                "Move S_WAITCNT as late as possible (just before the dependent instruction)",
+            ],
+            "att_divergence": [
+                "Minimize branch divergence: reorganize data so threads in a wavefront take the same branch",
+                "Replace conditional branches with branchless select (V_CNDMASK_B32 or ternary)",
+                "Ensure frequently-taken branches are aligned to avoid i-cache pressure",
+                "Check for high-frequency V_CMP → EXEC mask changes that serialize execution",
+            ],
+        }
+
+        for kernel in att_analysis.get("kernels", []):
+            top_instrs = kernel.get("top_stalling_instructions", [])
+            if not top_instrs:
+                continue
+            top = top_instrs[0]
+            stall_ratio = top.get("stall_ratio", 0.0)
+            hitcount = top.get("hitcount", 0)
+            stall_cycles = top.get("stall_cycles", 0)
+            total_latency = top.get("total_latency_cycles", 1)
+            pc_offset = top.get("pc_offset", "?")
+            src_line = top.get("source_line", "")
+            kernel_name = kernel.get("name", "unknown")
+            category = kernel.get("stall_category", "att_vmem_latency")
+
+            # Only report if statistically meaningful
+            if hitcount < _ATT_MIN_HITCOUNT:
+                continue
+
+            stall_pct = stall_ratio * 100.0
+            if stall_ratio >= 0.60:
+                priority = "HIGH"
+            elif stall_ratio >= 0.40:
+                priority = "MEDIUM"
+            else:
+                continue  # Low stall ratio — not worth reporting
+
+            src_part = f" (line {src_line})" if src_line else ""
+            issue = (
+                f"[ATT] Kernel '{kernel_name}': instruction at {pc_offset}{src_part} "
+                f"has {stall_pct:.0f}% stall ratio "
+                f"({stall_cycles} stall / {total_latency} total cycles)"
+            )
+            label = _CATEGORY_LABELS.get(category, "Stall")
+            weighted = kernel.get("total_weighted_stall", 0)
+            impact = (
+                f"Weighted stall: {weighted:,} cycles × threads. "
+                f"Addressing this could reduce kernel latency by up to {stall_pct:.0f}%."
+            )
+
+            recommendations.append(
+                {
+                    "priority": priority,
+                    "category": f"ATT {label}",
+                    "issue": issue,
+                    "suggestion": f"Reduce {label.lower()} stalls in kernel '{kernel_name}'",
+                    "actions": _CATEGORY_ACTIONS.get(category, []),
+                    "estimated_impact": impact,
+                    "commands": [
+                        {
+                            "tool": "rocprofv3",
+                            "description": "Re-collect ATT trace with larger buffer to capture full trace",
+                            "flags": ["--att"],
+                            "args": [
+                                {"name": "--att-library-path", "value": "/opt/rocm/lib"},
+                                {"name": "--att-target-cu", "value": "0"},
+                                {"name": "--att-buffer-size", "value": "256"},
+                                {"name": "-d", "value": "./att_output"},
+                                {"name": "-o", "value": "results"},
+                            ],
+                            "full_command": (
+                                "rocprofv3 --att --att-library-path /opt/rocm/lib "
+                                "--att-target-cu 0 "
+                                "--att-buffer-size 256 -d ./att_output -o results -- ./app"
+                            ),
+                        },
+                    ],
+                }
+            )
+
+        # If ATT data was present but no HIGH/MEDIUM stalls found, emit an informational rec
+        # so the user knows ATT ran successfully and kernels look clean at instruction level.
+        if len(recommendations) == _pre_att_rec_count:
+            k_count = att_analysis.get("summary", {}).get("kernel_count", 0)
+            recommendations.append(
+                {
+                    "priority": "INFO",
+                    "category": "ATT Analysis",
+                    "issue": (
+                        f"ATT analysis complete: {k_count} kernel(s) traced — "
+                        "no significant instruction-level stalls detected (stall ratio < 40%)"
+                    ),
+                    "suggestion": "GPU kernels appear well-optimized at the instruction level",
+                    "actions": [
+                        "Consider profiling with hardware counters (--pmc) to check memory bandwidth utilization",
+                        "Use rocprof-compute for full roofline model and micro-architecture metrics",
+                    ],
+                    "estimated_impact": "N/A — no significant stalls found",
+                    "commands": [],
                 }
             )
 
@@ -1263,6 +1606,8 @@ def _format_as_json(
     interval_timeline=None,
     kernel_categories=None,
     short_kernels=None,
+    att_analysis: Optional[Dict[str, Any]] = None,
+    custom_prompt: Optional[str] = None,
 ) -> str:
     """Serialize analysis results to JSON conforming to the current schema version (v0.3.0 when TraceLens fields are present, v0.1.0 otherwise).
 
@@ -1370,10 +1715,17 @@ def _format_as_json(
         doc["kernel_categories"] = kernel_categories
     if short_kernels:
         doc["short_kernels"] = short_kernels
+    if att_analysis and att_analysis.get("has_att_data"):
+        doc["att_trace"] = att_analysis
 
     # Bump schema version when new fields are present
     if interval_timeline or kernel_categories or short_kernels:
         doc["schema_version"] = "0.3.0"
+        doc["metadata"]["analysis_version"] = "0.3.0"
+    if att_analysis and att_analysis.get("has_att_data"):
+        doc["schema_version"] = "0.4.0"
+        doc["metadata"]["analysis_version"] = "0.4.0"
+        doc["profiling_info"]["analysis_tier"] = 3
 
     return _json.dumps(doc, indent=2)
 
@@ -1739,6 +2091,7 @@ def _format_as_webview(
     interval_timeline=None,
     kernel_categories=None,
     short_kernels=None,
+    att_analysis: Optional[Dict[str, Any]] = None,
 ) -> str:
     """
     Generate a self-contained interactive HTML report.
@@ -2664,6 +3017,23 @@ footer p {{ color:var(--dim); font-size:.77rem; text-align:center; }}
   </div>
 </section>
 
+{hotspots_html}
+{mem_html}
+
+<!-- ── Hardware Counters (Tier 2) ─────────────────────────────────── -->
+<section class="scard">
+  <div class="shdr">
+    <span class="shdr-icon">&#128300;</span>
+    <h2>Hardware Counters</h2>
+    {_hw_badge_html}
+  </div>
+  <div class="sbody">
+    {hw_inner}
+  </div>
+</section>
+
+<!-- ATT_SECTION_PLACEHOLDER -->
+
 <!-- ── Recommendations ────────────────────────────────────────────── -->
 <section class="scard">
   <div class="shdr">
@@ -2673,21 +3043,6 @@ footer p {{ color:var(--dim); font-size:.77rem; text-align:center; }}
   </div>
   <div class="sbody">
     {recs_html}
-  </div>
-</section>
-
-{hotspots_html}
-{mem_html}
-
-<!-- ── Hardware Counters ──────────────────────────────────────────── -->
-<section class="scard">
-  <div class="shdr">
-    <span class="shdr-icon">&#128300;</span>
-    <h2>Hardware Counters</h2>
-    {_hw_badge_html}
-  </div>
-  <div class="sbody">
-    {hw_inner}
   </div>
 </section>
 
@@ -2827,6 +3182,141 @@ document.querySelectorAll('.ctr-row').forEach(function(tr) {{
 </script>
 </body>
 </html>"""
+
+    # --- ATT (Tier 3) section ---
+    if att_analysis and att_analysis.get("has_att_data"):
+        _CAT_LABELS = {
+            "att_vmem_latency": "VMEM Latency",
+            "att_lds_conflict": "LDS Conflict",
+            "att_dependency_chain": "Dependency Chain",
+            "att_divergence": "Branch Divergence",
+        }
+        _CAT_TIPS = {
+            "att_vmem_latency": (
+                "<strong>VMEM Latency</strong>Instructions stalling on global memory (HBM/L2/L1) round-trip. "
+                "The GPU issued a load/store but had to wait many cycles for data to arrive. "
+                "<em>Fix: improve data locality, coalesce access patterns, prefetch into LDS.</em>"
+            ),
+            "att_lds_conflict": (
+                "<strong>LDS Conflict</strong>Instructions stalling on LDS (shared memory) bank conflicts. "
+                "Multiple threads in a wavefront accessed the same LDS bank simultaneously. "
+                "<em>Fix: pad LDS arrays by 1 element per row, or reorganize access patterns.</em>"
+            ),
+            "att_dependency_chain": (
+                "<strong>Dependency Chain</strong>S_WAITCNT and similar instructions stalling while waiting for "
+                "in-flight loads or LDS ops to complete before proceeding. "
+                "<em>Fix: reorder instructions to hide latency, reduce synchronization barriers.</em>"
+            ),
+            "att_divergence": (
+                "<strong>Branch Divergence</strong>Branch instructions causing threads in a wavefront to take "
+                "different paths, serializing execution. "
+                "<em>Fix: eliminate data-dependent branches, use predication, or restructure conditionals.</em>"
+            ),
+        }
+        att_kernels = att_analysis.get("kernels", [])
+        att_summary = att_analysis.get("summary", {})
+        n_traced = att_summary.get("kernel_count", len(att_kernels))
+        n_high = att_summary.get("high_stall_kernels", 0)
+        high_color = "#e84040" if n_high > 0 else "#44dd66"
+        kpi_class = "kpi-warn" if n_high > 0 else "kpi-ok"
+
+        att_kpi = (
+            f'<div class="kpi-grid" style="margin-bottom:1.4rem">'
+            f'<div class="kpi kpi-info" data-tip=\'<strong>Kernels Traced</strong>Number of unique kernels with ATT instruction-level data captured.\'>'
+            f'<div class="kpi-head"><span class="kpi-icon">&#129535;</span></div>'
+            f'<div class="kpi-label">Kernels Traced</div>'
+            f'<div class="kpi-value">{n_traced}</div></div>'
+            f'<div class="kpi {kpi_class}" data-tip=\'<strong>High-Stall Kernels</strong>Kernels where the top instruction stall ratio &ge; 60% and hitcount &ge; 6400 threads. These are the primary ATT optimization targets.\'>'
+            f'<div class="kpi-head"><span class="kpi-icon">&#9888;</span></div>'
+            f'<div class="kpi-label">High-Stall Kernels</div>'
+            f'<div class="kpi-value" style="color:{high_color}">{n_high}</div></div>'
+            f'</div>'
+        )
+
+        att_rows = []
+        for k in att_kernels:
+            kname = k.get("name", "unknown")
+            avg_ratio = float(k.get("avg_stall_ratio", 0)) * 100
+            category = k.get("stall_category", "unknown")
+            cat_label = _CAT_LABELS.get(category, category)
+            cat_tip = _CAT_TIPS.get(category, f"<strong>{_h(cat_label)}</strong>")
+            top = (k.get("top_stalling_instructions") or [{}])[0]
+            top_instr = _h(top.get("pc_offset", "—"))
+            top_ratio = float(top.get("stall_ratio", 0)) * 100
+            weighted = int(k.get("total_weighted_stall", 0))
+            # color by avg stall ratio
+            ratio_color = "#e84040" if avg_ratio >= 60 else ("#ff8800" if avg_ratio >= 40 else "#44dd66")
+            top_color = "#e84040" if top_ratio >= 60 else ("#ff8800" if top_ratio >= 40 else "#44dd66")
+            bar_w = min(100, avg_ratio)
+
+            # expand sub-instructions
+            sub_rows = ""
+            for instr in (k.get("top_stalling_instructions") or [])[:5]:
+                i_ratio = float(instr.get("stall_ratio", 0)) * 100
+                i_color = "#e84040" if i_ratio >= 60 else ("#ff8800" if i_ratio >= 40 else "#44dd66")
+                sub_rows += (
+                    f'<tr style="background:rgba(0,0,0,.18);font-size:.82rem">'
+                    f'<td colspan="2" style="padding-left:2.5rem;font-family:monospace;color:#b0b8d8">'
+                    f'{_h(instr.get("pc_offset","—"))}</td>'
+                    f'<td style="color:#888">hitcount: {int(instr.get("hitcount",0)):,}</td>'
+                    f'<td style="color:{i_color};text-align:center">{i_ratio:.0f}%</td>'
+                    f'<td colspan="2" style="color:#888">wt: {int(instr.get("weighted_stall",0)):,}</td>'
+                    f'</tr>'
+                )
+
+            att_rows.append(
+                f'<tr>'
+                f'<td><code style="font-size:.88rem">{_h(kname)}</code></td>'
+                f'<td>'
+                f'<div style="display:flex;align-items:center;gap:.5rem">'
+                f'<div style="width:80px;height:8px;background:#1a1a2e;border-radius:4px;overflow:hidden">'
+                f'<div style="width:{bar_w:.1f}%;height:100%;background:{ratio_color};border-radius:4px"></div>'
+                f'</div>'
+                f'<span style="color:{ratio_color};font-weight:600">{avg_ratio:.1f}%</span>'
+                f'</div></td>'
+                f'<td><span data-tip=\'{cat_tip}\' style="cursor:help;border-bottom:1px dotted #555">'
+                f'{_h(cat_label)}</span></td>'
+                f'<td><code style="font-size:.82rem;color:#b0b8d8">{top_instr}</code></td>'
+                f'<td style="color:{top_color};font-weight:600;text-align:center">{top_ratio:.0f}%</td>'
+                f'<td style="color:#888;font-size:.85rem">{weighted:,}</td>'
+                f'</tr>'
+                + sub_rows
+            )
+
+        att_table = (
+            '<div class="tbl-wrap">'
+            '<table class="dtable" style="margin-top:.5rem">'
+            "<thead><tr>"
+            "<th data-tip='Demangled GPU kernel name from the ATT CSV comment row.'>Kernel</th>"
+            "<th data-tip='Average stall ratio across all instructions: stall cycles / total latency. &ge;60% = HIGH, &ge;40% = MEDIUM.'>Avg Stall %</th>"
+            "<th data-tip='Primary stall category from the highest-stall instruction in this kernel.'>Category</th>"
+            "<th data-tip='ISA mnemonic of the instruction with the highest weighted stall (stall &times; hitcount).'>Top Stalling Instr</th>"
+            "<th data-tip='Stall ratio of the top stalling instruction.'>Top Stall %</th>"
+            "<th data-tip='Total weighted stall = sum of (stall_cycles &times; hitcount) across all instructions. Primary sorting metric.'>Weighted Stall</th>"
+            "</tr></thead>"
+            "<tbody>" + "".join(att_rows) + "</tbody>"
+            "</table></div>"
+        )
+
+        att_section = (
+            '\n<section class="scard">'
+            '\n<div class="shdr">'
+            '\n<span class="shdr-icon">&#129535;</span>'
+            '\n<h2>Thread Trace Analysis</h2>'
+            '\n<span class="shdr-badge sbadge-info">Tier 3 &mdash; ATT</span>'
+            '\n</div>'
+            '\n<div class="sbody">'
+            f"\n{att_kpi}"
+            f"\n{att_table}"
+            '\n<p class="dim" style="margin-top:1rem;font-size:.82rem">'
+            'Sub-rows show the top 5 stalling instructions per kernel (indented). '
+            'Weighted stall = stall_cycles &times; hitcount &mdash; the primary ranking metric.'
+            '</p>'
+            '\n</div>\n</section>'
+        )
+        html = html.replace("<!-- ATT_SECTION_PLACEHOLDER -->", att_section)
+    else:
+        html = html.replace("<!-- ATT_SECTION_PLACEHOLDER -->", "")
 
     # --- Kernel category breakdown card (TraceLens) ---
     if kernel_categories:
@@ -3943,11 +4433,11 @@ def format_analysis_output(
     output_format: str = "text",
     tier0_result: Optional[Any] = None,
     source_only: bool = False,
-    interval_timeline: Optional[
-        Dict[str, Any]
-    ] = None,  # NEW (TraceLens) — logic in Task 4
-    kernel_categories: Optional[List[Any]] = None,  # NEW (TraceLens) — logic in Task 4
-    short_kernels: Optional[Dict[str, Any]] = None,  # NEW (TraceLens) — logic in Task 4
+    interval_timeline: Optional[Dict[str, Any]] = None,
+    kernel_categories: Optional[List[Any]] = None,
+    short_kernels: Optional[Dict[str, Any]] = None,
+    att_analysis: Optional[Dict[str, Any]] = None,  # Tier 3 ATT
+    custom_prompt: Optional[str] = None,
 ) -> str:
     """
     Format analysis results for display.
@@ -3986,6 +4476,8 @@ def format_analysis_output(
             interval_timeline=interval_timeline,
             kernel_categories=kernel_categories,
             short_kernels=short_kernels,
+            att_analysis=att_analysis,
+            custom_prompt=custom_prompt,
         )
         # Combined mode: embed tier0 into JSON document
         if tier0_result is not None:
@@ -4027,6 +4519,7 @@ def format_analysis_output(
             interval_timeline=interval_timeline,
             kernel_categories=kernel_categories,
             short_kernels=short_kernels,
+            att_analysis=att_analysis,
         )
 
     # Default: text
@@ -4291,6 +4784,45 @@ def format_analysis_output(
             lines.append("")
         lines.append("")
 
+    # ATT Thread Trace section (Tier 3)
+    if att_analysis and att_analysis.get("has_att_data"):
+        lines.append("━" * width)
+        lines.append("TIER 3: ADVANCED THREAD TRACE (ATT)".center(width))
+        lines.append("━" * width)
+        lines.append("")
+        att_kernels = att_analysis.get("kernels", [])
+        att_summary = att_analysis.get("summary", {})
+        lines.append(
+            f"  Kernels traced: {att_summary.get('kernel_count', len(att_kernels))}"
+            f"   High-stall kernels: {att_summary.get('high_stall_kernels', 0)}"
+        )
+        lines.append("")
+        for k in att_kernels[:5]:  # Top 5 worst kernels
+            kname = k.get("name", "?")
+            avg_stall = k.get("avg_stall_ratio", 0.0) * 100.0
+            category = k.get("stall_category", "").replace("att_", "").replace("_", " ")
+            lines.append(f"  Kernel: {kname}")
+            lines.append(
+                f"    Avg stall ratio: {avg_stall:.1f}%   Category: {category or 'unknown'}"
+            )
+            top_instrs = k.get("top_stalling_instructions", [])[:3]
+            for instr in top_instrs:
+                pc = instr.get("pc_offset", "?")
+                stall_pct = instr.get("stall_ratio", 0.0) * 100.0
+                src = instr.get("source_line", "")
+                src_part = f"  {src}" if src else ""
+                weighted = instr.get("weighted_stall", 0)
+                lines.append(
+                    f"    {pc}: stall {stall_pct:.0f}%  weighted={weighted:,}{src_part}"
+                )
+            lines.append("")
+    elif att_analysis and not att_analysis.get("has_att_data") and att_analysis.get("reason"):
+        lines.append("━" * width)
+        lines.append("TIER 3: ATT".center(width))
+        lines.append("━" * width)
+        lines.append(f"  Note: {att_analysis['reason']}")
+        lines.append("")
+
     # Footer
     lines.append("=" * width)
     lines.append("Analysis complete.".center(width))
@@ -4395,6 +4927,7 @@ def analyze_performance(
     llm_thinking: Optional[int] = None,
     verbose: bool = False,
     source_dir: Optional[str] = None,
+    att_dir: Optional[str] = None,
     _collect_result: Optional[Dict[str, Any]] = None,
     **kwargs: Any,
 ) -> str:
@@ -4442,6 +4975,15 @@ def analyze_performance(
         memory_analysis = analyze_memory_copies(connection)
         hardware_counters = analyze_hardware_counters(connection)  # Tier 2
         already_collected = _detect_already_collected(connection)
+        # Tier 3: ATT thread trace (optional — only when --att-dir is provided)
+        att_analysis: Dict[str, Any] = {}
+        if att_dir:
+            att_analysis = analyze_thread_trace(att_dir)
+            if verbose and not att_analysis.get("has_att_data"):
+                print(
+                    f"[ATT] {att_analysis.get('reason', 'No ATT data')}",
+                    file=sys.stderr,
+                )
         # TraceLens-derived analysis (Phase 1)
         interval_timeline = compute_interval_timeline(connection)
         kernel_categories = analyze_kernels_by_category(
@@ -4455,8 +4997,9 @@ def analyze_performance(
             memory_analysis,
             hardware_counters,
             already_collected=already_collected,
-            short_kernels=short_kernels_data,  # NEW
-            interval_timeline=interval_timeline,  # NEW
+            short_kernels=short_kernels_data,
+            interval_timeline=interval_timeline,
+            att_analysis=att_analysis if att_dir else None,
         )
     else:
         time_breakdown = {}
@@ -4464,6 +5007,7 @@ def analyze_performance(
         memory_analysis = {}
         hardware_counters = {}
         already_collected = frozenset()
+        att_analysis = {}
         interval_timeline = {}
         kernel_categories = []
         short_kernels_data = {}
@@ -4480,9 +5024,11 @@ def analyze_performance(
         output_format=output_format,
         tier0_result=tier0_result,
         source_only=source_only,
-        interval_timeline=interval_timeline,  # NEW (TraceLens)
-        kernel_categories=kernel_categories,  # NEW (TraceLens)
-        short_kernels=short_kernels_data,  # NEW (TraceLens)
+        interval_timeline=interval_timeline,
+        kernel_categories=kernel_categories,
+        short_kernels=short_kernels_data,
+        att_analysis=att_analysis if att_analysis else None,
+        custom_prompt=prompt,
     )
 
     # Expose structured results to caller (used by interactive mode)
@@ -4490,6 +5036,7 @@ def analyze_performance(
         _collect_result["recommendations"] = recommendations
         _collect_result["tier0_result"] = tier0_result
         _collect_result["database_path"] = database_path
+        _collect_result["att_analysis"] = att_analysis
 
     # LLM enhancement (if enabled) — only for Tier 1/2; Tier 0 LLM runs in analyze_source_code()
     if llm and not source_only:
@@ -5158,6 +5705,20 @@ def add_args(parser: argparse.ArgumentParser):
     )
 
     analysis_options.add_argument(
+        "--att-dir",
+        type=str,
+        default=None,
+        dest="att_dir",
+        help=(
+            "Path to directory containing ATT stats_*.csv files from rocprofv3 --att. "
+            "Enables Tier 3 Advanced Thread Trace analysis: per-instruction stall ratios "
+            "and bottleneck classification (VMEM latency, LDS bank conflict, dependency chains, "
+            "branch divergence). Requires rocprof-trace-decoder to be installed. "
+            "Example: --att-dir ./att_output"
+        ),
+    )
+
+    analysis_options.add_argument(
         "--interactive",
         "-I",
         metavar="RUN_COMMAND",
@@ -5229,6 +5790,7 @@ def add_args(parser: argparse.ArgumentParser):
         """Process and return valid arguments as dictionary."""
         valid_args = [
             "source_dir",
+            "att_dir",
             "prompt",
             "top_kernels",
             "format",

@@ -1185,6 +1185,322 @@ def test_filter_pmc_rocprof_compute_always_kept():
 
 
 # ---------------------------------------------------------------------------
+# Tier 3 ATT: analyze_thread_trace + generate_recommendations ATT rules
+# ---------------------------------------------------------------------------
+
+
+def _att_csv_content(rows):
+    """Build CSV text for a stats_*.csv file given a list of row dicts."""
+    header = "Instruction ID,Hitcount,Latency (cycles),Stall cycles,Source line"
+    lines = [header]
+    for r in rows:
+        lines.append(
+            f"{r['pc']},{r['hitcount']},{r['latency']},{r['stall']},{r.get('src', '')}"
+        )
+    return "\n".join(lines) + "\n"
+
+
+def test_att_missing_directory():
+    """analyze_thread_trace returns has_att_data=False when directory is missing."""
+    from rocpd.analyze import analyze_thread_trace
+
+    result = analyze_thread_trace("/nonexistent_dir_xyzzy")
+    assert result["has_att_data"] is False
+    assert "not found" in result["reason"].lower()
+    assert result["kernels"] == []
+
+
+def test_att_empty_directory():
+    """analyze_thread_trace returns has_att_data=False when no CSVs are present."""
+    import tempfile
+
+    from rocpd.analyze import analyze_thread_trace
+
+    with tempfile.TemporaryDirectory() as d:
+        result = analyze_thread_trace(d)
+    assert result["has_att_data"] is False
+    assert "stats_*.csv" in result["reason"]
+
+
+def test_att_single_kernel_high_stall():
+    """analyze_thread_trace parses a CSV and identifies high VMEM stall."""
+    import pathlib
+    import tempfile
+
+    from rocpd.analyze import analyze_thread_trace
+
+    rows = [
+        {"pc": "0x0000", "hitcount": 8192, "latency": 200, "stall": 180, "src": "k.hip:10"},
+        {"pc": "0x0004", "hitcount": 8192, "latency": 40, "stall": 5, "src": "k.hip:11"},
+    ]
+    with tempfile.TemporaryDirectory() as d:
+        csv_path = pathlib.Path(d) / "stats_my_kernel.csv"
+        csv_path.write_text(_att_csv_content(rows))
+        result = analyze_thread_trace(d)
+
+    assert result["has_att_data"] is True
+    assert len(result["kernels"]) == 1
+    k = result["kernels"][0]
+    assert k["name"] == "my_kernel"
+    assert k["stall_category"] == "att_vmem_latency"  # 0x0000 → VMEM by default
+    assert k["avg_stall_ratio"] > 0.0
+    # Top instruction is the worst (180/200 = 0.90)
+    top = k["top_stalling_instructions"][0]
+    assert top["pc_offset"] == "0x0000"
+    assert abs(top["stall_ratio"] - 0.90) < 0.01
+    assert top["weighted_stall"] == 180 * 8192
+
+
+def test_att_stall_ratio_threshold_for_recommendations():
+    """generate_recommendations emits HIGH rec when stall_ratio >= 0.60 and hitcount >= 6400."""
+    import pathlib
+    import tempfile
+
+    from rocpd.analyze import analyze_thread_trace, generate_recommendations
+
+    rows = [
+        # stall_ratio = 160/200 = 0.80 → HIGH; hitcount = 8192 > 6400
+        {"pc": "0x0000", "hitcount": 8192, "latency": 200, "stall": 160, "src": "k.hip:5"},
+    ]
+    with tempfile.TemporaryDirectory() as d:
+        (pathlib.Path(d) / "stats_hot_kernel.csv").write_text(_att_csv_content(rows))
+        att = analyze_thread_trace(d)
+
+    recs = generate_recommendations(
+        _empty_breakdown(kernel_percent=80),
+        [],
+        {},
+        att_analysis=att,
+    )
+    att_recs = [r for r in recs if "ATT" in r["category"]]
+    assert len(att_recs) == 1
+    assert att_recs[0]["priority"] == "HIGH"
+    assert "hot_kernel" in att_recs[0]["issue"]
+    assert "0x0000" in att_recs[0]["issue"]
+    assert "k.hip:5" in att_recs[0]["issue"]
+    # Recommendation must include an ATT re-collection command
+    cmds = att_recs[0]["commands"]
+    assert any(c.get("tool") == "rocprofv3" for c in cmds)
+
+
+def test_att_stall_ratio_medium_threshold():
+    """generate_recommendations emits MEDIUM rec when 0.40 <= stall_ratio < 0.60."""
+    import pathlib
+    import tempfile
+
+    from rocpd.analyze import analyze_thread_trace, generate_recommendations
+
+    rows = [
+        # stall_ratio = 100/200 = 0.50 → MEDIUM
+        {"pc": "0x0000", "hitcount": 8192, "latency": 200, "stall": 100},
+    ]
+    with tempfile.TemporaryDirectory() as d:
+        (pathlib.Path(d) / "stats_medium_kernel.csv").write_text(_att_csv_content(rows))
+        att = analyze_thread_trace(d)
+
+    recs = generate_recommendations(
+        _empty_breakdown(kernel_percent=80),
+        [],
+        {},
+        att_analysis=att,
+    )
+    att_recs = [r for r in recs if "ATT" in r["category"]]
+    assert len(att_recs) == 1
+    assert att_recs[0]["priority"] == "MEDIUM"
+
+
+def test_att_below_hitcount_threshold_no_rec():
+    """generate_recommendations does NOT emit rec when hitcount < 6400 (statistically unreliable)."""
+    import pathlib
+    import tempfile
+
+    from rocpd.analyze import analyze_thread_trace, generate_recommendations
+
+    rows = [
+        # hitcount = 64 < _ATT_MIN_HITCOUNT (6400); stall_ratio = 0.95 → would be HIGH otherwise
+        {"pc": "0x0000", "hitcount": 64, "latency": 100, "stall": 95},
+    ]
+    with tempfile.TemporaryDirectory() as d:
+        (pathlib.Path(d) / "stats_tiny_kernel.csv").write_text(_att_csv_content(rows))
+        att = analyze_thread_trace(d)
+
+    recs = generate_recommendations(
+        _empty_breakdown(kernel_percent=80),
+        [],
+        {},
+        att_analysis=att,
+    )
+    att_recs = [r for r in recs if "ATT" in r["category"]]
+    # Below hitcount threshold: no HIGH/MEDIUM rec, but an INFO rec is emitted
+    # confirming ATT ran and found no significant stalls.
+    assert len(att_recs) == 1
+    assert att_recs[0]["priority"] == "INFO"
+
+
+def test_att_below_stall_ratio_threshold_no_rec():
+    """generate_recommendations does NOT emit rec when stall_ratio < 0.40."""
+    import pathlib
+    import tempfile
+
+    from rocpd.analyze import analyze_thread_trace, generate_recommendations
+
+    rows = [
+        # stall_ratio = 30/200 = 0.15 → below threshold
+        {"pc": "0x0000", "hitcount": 8192, "latency": 200, "stall": 30},
+    ]
+    with tempfile.TemporaryDirectory() as d:
+        (pathlib.Path(d) / "stats_compute_kernel.csv").write_text(_att_csv_content(rows))
+        att = analyze_thread_trace(d)
+
+    recs = generate_recommendations(
+        _empty_breakdown(kernel_percent=80),
+        [],
+        {},
+        att_analysis=att,
+    )
+    att_recs = [r for r in recs if "ATT" in r["category"]]
+    # Below stall_ratio threshold: no HIGH/MEDIUM rec, but an INFO rec is emitted
+    # confirming ATT ran and found no significant stalls.
+    assert len(att_recs) == 1
+    assert att_recs[0]["priority"] == "INFO"
+
+
+def test_att_multiple_kernels_sorted_by_weighted_stall():
+    """analyze_thread_trace sorts kernels by total_weighted_stall descending."""
+    import pathlib
+    import tempfile
+
+    from rocpd.analyze import analyze_thread_trace
+
+    with tempfile.TemporaryDirectory() as d:
+        # Kernel A: small weighted stall
+        (pathlib.Path(d) / "stats_kernel_a.csv").write_text(
+            _att_csv_content([{"pc": "0x0000", "hitcount": 1000, "latency": 100, "stall": 50}])
+        )
+        # Kernel B: large weighted stall
+        (pathlib.Path(d) / "stats_kernel_b.csv").write_text(
+            _att_csv_content([{"pc": "0x0000", "hitcount": 100000, "latency": 200, "stall": 190}])
+        )
+        result = analyze_thread_trace(d)
+
+    assert result["has_att_data"] is True
+    assert len(result["kernels"]) == 2
+    # Kernel B should be first (larger weighted stall)
+    assert result["kernels"][0]["name"] == "kernel_b"
+    assert result["kernels"][1]["name"] == "kernel_a"
+
+
+def test_att_summary_counts():
+    """analyze_thread_trace summary counts high-stall kernels correctly."""
+    import pathlib
+    import tempfile
+
+    from rocpd.analyze import analyze_thread_trace
+
+    with tempfile.TemporaryDirectory() as d:
+        # High stall (stall_ratio=0.90, hitcount=8192)
+        (pathlib.Path(d) / "stats_kernel_high.csv").write_text(
+            _att_csv_content([{"pc": "0x0000", "hitcount": 8192, "latency": 100, "stall": 90}])
+        )
+        # Low stall (stall_ratio=0.10, hitcount=8192)
+        (pathlib.Path(d) / "stats_kernel_low.csv").write_text(
+            _att_csv_content([{"pc": "0x0000", "hitcount": 8192, "latency": 100, "stall": 10}])
+        )
+        result = analyze_thread_trace(d)
+
+    assert result["summary"]["kernel_count"] == 2
+    assert result["summary"]["high_stall_kernels"] == 1
+
+
+def test_att_json_output_includes_att_trace_field():
+    """_format_as_json includes att_trace key and bumps schema_version to 0.4.0."""
+    import json
+    import pathlib
+    import tempfile
+
+    from rocpd.analyze import _format_as_json, analyze_thread_trace
+
+    with tempfile.TemporaryDirectory() as d:
+        (pathlib.Path(d) / "stats_k.csv").write_text(
+            _att_csv_content([{"pc": "0x0000", "hitcount": 8192, "latency": 100, "stall": 80}])
+        )
+        att = analyze_thread_trace(d)
+
+    output = _format_as_json(
+        _empty_breakdown(),
+        [],
+        {},
+        [],
+        att_analysis=att,
+    )
+    doc = json.loads(output)
+    assert "att_trace" in doc, "att_trace key should appear in JSON when ATT data is present"
+    assert doc["schema_version"] == "0.4.0"
+    assert doc["profiling_info"]["analysis_tier"] == 3
+
+
+def test_att_json_output_no_att_trace_without_data():
+    """_format_as_json does NOT include att_trace when att_analysis is None."""
+    import json
+
+    from rocpd.analyze import _format_as_json
+
+    output = _format_as_json(_empty_breakdown(), [], {}, [], att_analysis=None)
+    doc = json.loads(output)
+    assert "att_trace" not in doc
+    assert doc["schema_version"] == "0.1.0"
+
+
+def test_att_text_output_shows_att_section():
+    """format_analysis_output text format shows the ATT section when ATT data present."""
+    import pathlib
+    import tempfile
+
+    from rocpd.analyze import analyze_thread_trace, format_analysis_output
+
+    with tempfile.TemporaryDirectory() as d:
+        (pathlib.Path(d) / "stats_stall_kernel.csv").write_text(
+            _att_csv_content([
+                {"pc": "0x0000", "hitcount": 8192, "latency": 200, "stall": 180, "src": "my.hip:42"}
+            ])
+        )
+        att = analyze_thread_trace(d)
+
+    output = format_analysis_output(
+        _empty_breakdown(kernel_percent=90),
+        [],
+        {},
+        [],
+        att_analysis=att,
+    )
+    assert "TIER 3" in output
+    assert "ATT" in output
+    assert "stall_kernel" in output
+
+
+def test_att_malformed_csv_skipped_gracefully():
+    """analyze_thread_trace skips malformed CSVs without crashing."""
+    import pathlib
+    import tempfile
+
+    from rocpd.analyze import analyze_thread_trace
+
+    with tempfile.TemporaryDirectory() as d:
+        # Completely invalid CSV content
+        (pathlib.Path(d) / "stats_bad_kernel.csv").write_text("not,valid,csv\nfoo,bar")
+        # Valid CSV alongside it
+        (pathlib.Path(d) / "stats_good_kernel.csv").write_text(
+            _att_csv_content([{"pc": "0x0000", "hitcount": 8192, "latency": 100, "stall": 80}])
+        )
+        result = analyze_thread_trace(d)
+
+    assert result["has_att_data"] is True
+    # Only the good kernel should appear (bad one has no parseable rows after header)
+    kernel_names = [k["name"] for k in result["kernels"]]
+    assert "good_kernel" in kernel_names
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
