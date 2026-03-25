@@ -341,14 +341,15 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMallocManaged_DeviceContextChange,
     return;
   }
 
-  std::atomic<unsigned int> DataMismatch;
-  TestType *Ah1 = new TestType[N], *Ah2 = new TestType[N], *Ad = nullptr, *Hmm = nullptr;
   int NumDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&NumDevices));
   if (NumDevices < 2) {
     HipTest::HIP_SKIP_TEST("Skipping test because more than one device was not found.");
     return;
   }
+
+  std::atomic<unsigned int> DataMismatch;
+  TestType *Ah1 = new TestType[N], *Ah2 = new TestType[N], *Ad = nullptr, *Hmm = nullptr;
 
   for (size_t i = 0; i < N; ++i) {
     Ah1[i] = INIT_VAL;

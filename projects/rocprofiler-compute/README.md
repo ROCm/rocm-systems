@@ -33,8 +33,14 @@ git sparse-checkout set projects/rocprofiler-compute
 git checkout develop
 
 cd projects/rocprofiler-compute
+
+# Initialize vendored dependencies
+git submodule update --init --recursive -- src/vendored/
+
 python3 -m pip install -r requirements.txt
 ```
+
+**Note**: When working from source, vendored dependencies (like PyYAML) are included as git submodules. If you see import errors about missing vendored modules, run `git submodule update --init --recursive -- src/vendored/`.
 
 ## Testing
 

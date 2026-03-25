@@ -234,7 +234,9 @@ an Instinct MI210 vs an Instinct MI250.
    total 60
    -rw-r--r-- 1 auser agroup 27937 Mar  1 15:15 log.txt
    drwxr-xr-x 1 auser agroup     0 Mar  1 15:15 perfmon
-   -rw-r--r-- 1 auser agroup 26175 Mar  1 15:15 pmc_perf.csv
+   -rw-r--r-- 1 auser agroup  8725 Mar  1 15:15 pmc_perf_0.csv
+   -rw-r--r-- 1 auser agroup  8850 Mar  1 15:15 pmc_perf_1.csv
+   -rw-r--r-- 1 auser agroup  8600 Mar  1 15:15 pmc_perf_2.csv
    -rw-r--r-- 1 auser agroup  1708 Mar  1 15:17 roofline.csv
    -rw-r--r-- 1 auser agroup   519 Mar  1 15:15 SQ_IFETCH_LEVEL.csv
    -rw-r--r-- 1 auser agroup   456 Mar  1 15:15 SQ_INST_LEVEL_LDS.csv
@@ -311,7 +313,9 @@ Examples:
     │   ├── SQ_INST_LEVEL_VMEM.yaml
     │   ├── SQ_LEVEL_WAVES.txt
     │   └── SQ_LEVEL_WAVES.yaml
-    ├── pmc_perf.csv
+    ├── pmc_perf_0.csv
+    ├── pmc_perf_1.csv
+    ├── pmc_perf_2.csv
     ├── profiling_config.yaml
     ├── roofline.csv
     └── sysinfo.csv
@@ -352,7 +356,9 @@ Examples:
     │   ├── SQ_INST_LEVEL_VMEM.yaml
     │   ├── SQ_LEVEL_WAVES.txt
     │   └── SQ_LEVEL_WAVES.yaml
-    ├── pmc_perf.csv
+    ├── pmc_perf_0.csv
+    ├── pmc_perf_1.csv
+    ├── pmc_perf_2.csv
     ├── profiling_config.yaml
     ├── roofline.csv
     └── sysinfo.csv
@@ -367,13 +373,11 @@ of the underlying ``rocprof`` tool. The following formats are supported:
 
 * ``csv`` format:
    * Ask underlying rocprof tool to dump raw performance counter data in csv format.
-   * The generated csv files across multiple runs of rocprof are processed and dumped into the workload directory as csv files.
-   * Multiple csv files are merged into single pmc_perf.csv file in workload directory.
+   * The generated csv files across multiple runs of ROCProfiler-SDK are processed and dumped into the workload directory as separate csv files (pmc_perf_0.csv, pmc_perf_1.csv, etc.).
 
 * ``rocpd`` format:
    * Ask underlying rocprof tool to dump raw performance counter data in rocpd format.
-   * Multiple ``rocpd`` database files containing counter collection data are merged into a single csv under the workload folder.
-     After merging, the database files are removed.
+   * Multiple ``rocpd`` database files containing counter collection data are processed into separate csv files (results_0.csv, results_1.csv, etc.) under the workload folder.
    * Use ``--retain-rocpd-output`` profile mode option to preserve the ``rocpd`` database(s) in the workload folder.
      This is useful for custom analysis of profiling data.
 
@@ -730,7 +734,7 @@ successfully.
    $ ls workloads/occupancy/MI300X_A1
    total 48
    drwxr-xr-x 1 auser agroup     0 Oct 29 10:33 perfmon
-   -rw-r--r-- 1 auser agroup  1101 Oct 29 10:33 pmc_perf.csv
+   -rw-r--r-- 1 auser agroup  1101 Oct 29 10:33 pmc_perf_0.csv
    -rw-r--r-- 1 auser agroup  1715 Oct 29 10:33 roofline.csv
    -rw-r--r-- 1 auser agroup   650 Oct 29 10:33 sysinfo.csv
    -rw-r--r-- 1 auser agroup   399 Oct 29 10:33 timestamps.csv
@@ -1105,9 +1109,9 @@ subdirectory named by its rank to avoid output collisions.
 Example usage
 -------------
 
-Some examples of using multi-rank profiling are: 
+Some examples of using multi-rank profiling are:
 
-* **With** ``--output-directory`` **option:** 
+* **With** ``--output-directory`` **option:**
 
 .. code-block:: shell-session
 
@@ -1150,7 +1154,9 @@ The example above produces:
     │   ├── SQ_INST_LEVEL_VMEM.yaml
     │   ├── SQ_LEVEL_WAVES.txt
     │   └── SQ_LEVEL_WAVES.yaml
-    ├── pmc_perf.csv
+    ├── pmc_perf_0.csv
+    ├── pmc_perf_1.csv
+    ├── pmc_perf_2.csv
     ├── profiling_config.yaml
     ├── roofline.csv
     └── sysinfo.csv
@@ -1198,7 +1204,9 @@ The example above produces:
     │   ├── SQ_INST_LEVEL_VMEM.yaml
     │   ├── SQ_LEVEL_WAVES.txt
     │   └── SQ_LEVEL_WAVES.yaml
-    ├── pmc_perf.csv
+    ├── pmc_perf_0.csv
+    ├── pmc_perf_1.csv
+    ├── pmc_perf_2.csv
     ├── profiling_config.yaml
     ├── roofline.csv
     └── sysinfo.csv
@@ -1244,7 +1252,9 @@ to your output directory. The following example is run on the host ``amd-ryzen``
     │   ├── SQ_INST_LEVEL_VMEM.yaml
     │   ├── SQ_LEVEL_WAVES.txt
     │   └── SQ_LEVEL_WAVES.yaml
-    ├── pmc_perf.csv
+    ├── pmc_perf_0.csv
+    ├── pmc_perf_1.csv
+    ├── pmc_perf_2.csv
     ├── profiling_config.yaml
     ├── roofline.csv
     └── sysinfo.csv
