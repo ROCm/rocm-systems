@@ -239,6 +239,7 @@ class TestAnalysisResultSerialization:
     def test_to_json_without_raw_raises_runtime_error(self):
         """to_json() without _raw must raise RuntimeError (not silently produce non-schema JSON)."""
         import pytest
+
         result = _make_minimal_result()
         # No _raw attached → must raise so callers know output would be non-schema-conformant
         with pytest.raises(RuntimeError, match="Raw analysis data not available"):
@@ -405,6 +406,7 @@ class TestBuildAnalysisResultKeyMapping:
 # Tests: Bug-fix regression tests (Tasks 1-4)
 # ===========================================================================
 
+
 class TestBugFixes:
     """
     Regression tests covering security, correctness, and LLM-layer bug fixes
@@ -442,8 +444,7 @@ class TestBugFixes:
 
         quoted_name = shlex.quote(dangerous_name)
         rocprofv3_cmds = [
-            cmd for cmd in compute_recs[0]["commands"]
-            if cmd.get("tool") == "rocprofv3"
+            cmd for cmd in compute_recs[0]["commands"] if cmd.get("tool") == "rocprofv3"
         ]
         assert rocprofv3_cmds, "Expected at least one rocprofv3 command"
         for cmd in rocprofv3_cmds:
@@ -454,9 +455,9 @@ class TestBugFixes:
                 f"in full_command, got: {full}"
             )
             # The raw (unquoted) name must not appear verbatim (i.e., not word-split)
-            assert f" {dangerous_name} " not in full and not full.endswith(f" {dangerous_name}"), (
-                f"Raw unquoted kernel name found in full_command: {full}"
-            )
+            assert f" {dangerous_name} " not in full and not full.endswith(
+                f" {dangerous_name}"
+            ), f"Raw unquoted kernel name found in full_command: {full}"
 
     # ------------------------------------------------------------------
     # C-6: overhead_percent clamped at zero
@@ -475,9 +476,9 @@ class TestBugFixes:
             mock_exec.return_value.fetchone.return_value = mock_result
             result = compute_time_breakdown(mock_conn)
 
-        assert result["overhead_percent"] == 0.0, (
-            f"Expected 0.0, got {result['overhead_percent']}"
-        )
+        assert (
+            result["overhead_percent"] == 0.0
+        ), f"Expected 0.0, got {result['overhead_percent']}"
         assert result["kernel_percent"] == 90.0
         assert result["memcpy_percent"] == 20.0
 
@@ -511,9 +512,9 @@ class TestBugFixes:
 
         html = _format_tier0_webview(result)
         # The unescaped </script><script>alert(1) sequence must not appear in the HTML
-        assert "</script><script>alert(1)" not in html, (
-            "XSS vulnerability: </script> not escaped in tier0 webview payload"
-        )
+        assert (
+            "</script><script>alert(1)" not in html
+        ), "XSS vulnerability: </script> not escaped in tier0 webview payload"
 
     # ------------------------------------------------------------------
     # I-1: Bottleneck classification not mislead by has_counters alone
@@ -545,9 +546,9 @@ class TestBugFixes:
             custom_prompt=None,
         )
 
-        assert result.summary.primary_bottleneck == "mixed", (
-            f"Expected 'mixed' bottleneck, got {result.summary.primary_bottleneck!r}"
-        )
+        assert (
+            result.summary.primary_bottleneck == "mixed"
+        ), f"Expected 'mixed' bottleneck, got {result.summary.primary_bottleneck!r}"
 
     # ------------------------------------------------------------------
     # I-3: AnalysisContext(tier=0) passed to LLM in analyze_source()
@@ -566,11 +567,13 @@ class TestBugFixes:
         mock_analyzer.analyze_source_with_llm.return_value = "LLM result"
 
         with patch("rocpd.ai_analysis.api.LLMAnalyzer", return_value=mock_analyzer):
-            analyze_source(tmp_path, enable_llm=True, llm_provider="anthropic", llm_api_key="fake")
+            analyze_source(
+                tmp_path, enable_llm=True, llm_provider="anthropic", llm_api_key="fake"
+            )
 
-        assert mock_analyzer.analyze_source_with_llm.called, (
-            "analyze_source_with_llm was not called"
-        )
+        assert (
+            mock_analyzer.analyze_source_with_llm.called
+        ), "analyze_source_with_llm was not called"
         call_kwargs = mock_analyzer.analyze_source_with_llm.call_args
         # Accept both positional and keyword arg style
         kwargs = call_kwargs[1] if call_kwargs[1] else {}
@@ -582,10 +585,12 @@ class TestBugFixes:
                     context = arg
                     break
 
-        assert context is not None, "context= argument not passed to analyze_source_with_llm"
-        assert isinstance(context, AnalysisContext), (
-            f"Expected AnalysisContext, got {type(context)}"
-        )
+        assert (
+            context is not None
+        ), "context= argument not passed to analyze_source_with_llm"
+        assert isinstance(
+            context, AnalysisContext
+        ), f"Expected AnalysisContext, got {type(context)}"
         assert context.tier == 0, f"Expected tier=0, got {context.tier}"
 
     # ------------------------------------------------------------------
@@ -619,7 +624,9 @@ class TestBugFixes:
         from rocpd.ai_analysis.llm_analyzer import LLMAnalyzer
 
         custom_model = "claude-haiku-4-5-20251001"
-        analyzer = LLMAnalyzer(provider="anthropic", api_key="sk-test", model=custom_model)
+        analyzer = LLMAnalyzer(
+            provider="anthropic", api_key="sk-test", model=custom_model
+        )
 
         mock_client = MagicMock()
         mock_client.messages.create.return_value = MagicMock(
@@ -631,9 +638,9 @@ class TestBugFixes:
 
         assert mock_client.messages.create.called, "messages.create was not called"
         used_model = mock_client.messages.create.call_args[1].get("model")
-        assert used_model == custom_model, (
-            f"Expected model {custom_model!r}, got {used_model!r}"
-        )
+        assert (
+            used_model == custom_model
+        ), f"Expected model {custom_model!r}, got {used_model!r}"
 
     # ------------------------------------------------------------------
     # P-2: Timeout added to LLM calls
@@ -655,12 +662,12 @@ class TestBugFixes:
             analyzer._call_anthropic("sys", "user")
 
         call_kwargs = mock_client.messages.create.call_args[1]
-        assert "timeout" in call_kwargs, (
-            "timeout parameter missing from Anthropic API call"
-        )
-        assert call_kwargs["timeout"] == 120, (
-            f"Expected timeout=120, got {call_kwargs['timeout']}"
-        )
+        assert (
+            "timeout" in call_kwargs
+        ), "timeout parameter missing from Anthropic API call"
+        assert (
+            call_kwargs["timeout"] == 120
+        ), f"Expected timeout=120, got {call_kwargs['timeout']}"
 
     # ------------------------------------------------------------------
     # I-12: analyze_source_code raises on missing source_dir
@@ -690,16 +697,16 @@ class TestBugFixes:
         msg = str(err)
 
         # Both paths should appear intact in the error message
-        assert "/opt/rocm/share/llm-reference-guide.md" in msg, (
-            f"First path missing from error message: {msg}"
-        )
-        assert "/home/user/.config/guide.md" in msg, (
-            f"Second path missing from error message: {msg}"
-        )
+        assert (
+            "/opt/rocm/share/llm-reference-guide.md" in msg
+        ), f"First path missing from error message: {msg}"
+        assert (
+            "/home/user/.config/guide.md" in msg
+        ), f"Second path missing from error message: {msg}"
         # Guard against the old bug where a bare string was iterated char-by-char
-        assert "o\n  - p" not in msg, (
-            "Characters are being joined — bare string was passed instead of list"
-        )
+        assert (
+            "o\n  - p" not in msg
+        ), "Characters are being joined — bare string was passed instead of list"
 
     # ------------------------------------------------------------------
     # M-8: Source scanner truncation warning
@@ -711,25 +718,23 @@ class TestBugFixes:
 
         # Create more files than _MAX_FILES (use .hip extension so they are scanned)
         for i in range(_MAX_FILES + 5):
-            (tmp_path / f"kernel_{i}.hip").write_text(
-                f"__global__ void k{i}() {{}}"
-            )
+            (tmp_path / f"kernel_{i}.hip").write_text(f"__global__ void k{i}() {{}}")
 
         scanner = SourceAnalyzer(tmp_path)
         plan = scanner.analyze()
 
         truncation_warnings = [
-            r for r in plan.risk_areas
-            if "truncat" in r.lower() or "limit" in r.lower()
+            r for r in plan.risk_areas if "truncat" in r.lower() or "limit" in r.lower()
         ]
-        assert truncation_warnings, (
-            f"Expected a truncation warning in risk_areas, got: {plan.risk_areas}"
-        )
+        assert (
+            truncation_warnings
+        ), f"Expected a truncation warning in risk_areas, got: {plan.risk_areas}"
 
 
 # ===========================================================================
 # Tests: Extended thinking / --llm-thinking flag (Task 22)
 # ===========================================================================
+
 
 class TestLLMThinking:
     """Tests for extended thinking support via thinking_budget_tokens."""
@@ -739,9 +744,9 @@ class TestLLMThinking:
         from rocpd.ai_analysis.llm_analyzer import LLMAnalyzer
 
         analyzer = LLMAnalyzer(provider="anthropic", thinking_budget_tokens=8000)
-        assert analyzer.thinking_budget_tokens == 8000, (
-            f"Expected thinking_budget_tokens=8000, got {analyzer.thinking_budget_tokens!r}"
-        )
+        assert (
+            analyzer.thinking_budget_tokens == 8000
+        ), f"Expected thinking_budget_tokens=8000, got {analyzer.thinking_budget_tokens!r}"
 
     def test_llm_thinking_defaults_to_none(self):
         """When thinking_budget_tokens is not supplied, the attribute must be None."""
@@ -754,9 +759,9 @@ class TestLLMThinking:
             os.environ.pop("ROCPD_LLM_THINKING", None)
             analyzer = LLMAnalyzer(provider="anthropic")
 
-        assert analyzer.thinking_budget_tokens is None, (
-            f"Expected thinking_budget_tokens=None, got {analyzer.thinking_budget_tokens!r}"
-        )
+        assert (
+            analyzer.thinking_budget_tokens is None
+        ), f"Expected thinking_budget_tokens=None, got {analyzer.thinking_budget_tokens!r}"
 
     def test_llm_thinking_openai_raises(self):
         """analyze_with_llm() must raise ValueError when provider=openai and thinking is set."""
@@ -770,7 +775,10 @@ class TestLLMThinking:
         )
 
         # analyze_with_llm() should raise before any API call is made
-        with pytest.raises(ValueError, match="Extended thinking is only supported with the Anthropic provider"):
+        with pytest.raises(
+            ValueError,
+            match="Extended thinking is only supported with the Anthropic provider",
+        ):
             # Patch openai to avoid ImportError; the ValueError should fire before the actual call
             with patch.dict("sys.modules", {"openai": MagicMock()}):
                 analyzer.analyze_with_llm(
