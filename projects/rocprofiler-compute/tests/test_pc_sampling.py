@@ -61,6 +61,14 @@ PC_SAMPLING_STOCHASTIC_FILES = sorted([
 ])
 
 
+def is_pc_sampling_not_supported(output):
+    """
+    To be called with the stdout + stderr after profiling.
+    Check whether profiling output said PC sampling is not supported on the machine
+    """
+    return "Given PC sampling configuration is not supported" in output
+
+
 def test_pc_sampling_host_trap(binary_handler_profile_rocprof_compute):
     """
     Test that PC sampling works with --block 21 and --pc-sampling-method host_trap.
@@ -114,15 +122,22 @@ def test_pc_sampling_stochastic(binary_handler_profile_rocprof_compute):
 
     workload_dir = test_utils.get_output_dir()
 
-    _ = binary_handler_profile_rocprof_compute(
+    code, stdout, stderr = binary_handler_profile_rocprof_compute(
         config,
         workload_dir,
         options,
-        check_success=True,
+        check_success=False,
+        capture_output=True,
         roof=False,
         app_name="app_mat_mul_max",
     )
 
+    output = f"{stdout}\n{stderr}"
+    if is_pc_sampling_not_supported(output):
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        pytest.skip("PC sampling is not supported")
+
+    assert code == 0
     file_dict = test_utils.check_non_pmc_files(workload_dir, num_devices, 1)
     assert sorted(list(file_dict.keys())) == sorted(PC_SAMPLING_STOCHASTIC_FILES)
 
