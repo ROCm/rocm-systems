@@ -45,13 +45,9 @@ run(const char* _name, int nchildren)
                 print_info(_name);
                 printf("[%s][%i] child job starting...\n", _name, getpid());
                 auto _sleep = [=]() {
-                    rocprofsys_user_push_region("child_process_child_thread");
                     std::this_thread::sleep_for(std::chrono::seconds{ _nsec });
-                    rocprofsys_user_pop_region("child_process_child_thread");
                 };
-                rocprofsys_user_push_region("child_process");
                 std::thread{ _sleep }.join();
-                rocprofsys_user_push_region("child_process");
                 printf("[%s][%i] child job complete\n", _name, getpid());
                 exit(EXIT_SUCCESS);
             }
