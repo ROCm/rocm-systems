@@ -1,5 +1,6 @@
 # ai_analysis/tests/test_llm_conversation.py
 """Tests for LLMConversation persistent streaming session."""
+
 from __future__ import annotations
 import json
 import pathlib
@@ -10,11 +11,12 @@ from unittest.mock import MagicMock, patch
 
 from rocpd.ai_analysis.llm_conversation import LLMConversation
 
-
 # ── Helpers ──────────────────────────────────────────────────────────────────
+
 
 class _MockAnthropicStream:
     """Simulates anthropic.messages.stream() context manager."""
+
     def __init__(self, chunks):
         self._chunks = chunks
 
@@ -77,6 +79,7 @@ class _MockOpenAIClient:
 
 # ── TestLLMConversation ───────────────────────────────────────────────────────
 
+
 class TestLLMConversation(unittest.TestCase):
     """Core behavior: initialize, send, message growth, turn_count."""
 
@@ -107,7 +110,9 @@ class TestLLMConversation(unittest.TestCase):
         self.assertEqual(result, "Hello world")
         self.assertEqual(len(conv.messages), 2)
         self.assertEqual(conv.messages[0], {"role": "user", "content": "Hi there"})
-        self.assertEqual(conv.messages[1], {"role": "assistant", "content": "Hello world"})
+        self.assertEqual(
+            conv.messages[1], {"role": "assistant", "content": "Hello world"}
+        )
         self.assertEqual(conv.turn_count, 1)
 
     def test_send_multiple_turns_accumulates(self):
@@ -132,6 +137,7 @@ class TestLLMConversation(unittest.TestCase):
 
 
 # ── TestStreaming ─────────────────────────────────────────────────────────────
+
 
 class TestStreaming(unittest.TestCase):
     """on_token callback and silent collection."""
@@ -175,11 +181,13 @@ class TestStreaming(unittest.TestCase):
 
 # ── TestOpenAIFallback ────────────────────────────────────────────────────────
 
+
 class TestOpenAIFallback(unittest.TestCase):
     """max_completion_tokens → max_tokens on BadRequestError."""
 
     def test_fallback_on_bad_request(self):
         import openai
+
         conv = LLMConversation(provider="openai", api_key="k")
         conv.initialize("sys")
         bad_error = openai.BadRequestError(
@@ -196,12 +204,16 @@ class TestOpenAIFallback(unittest.TestCase):
 
 # ── TestCompaction ────────────────────────────────────────────────────────────
 
+
 class TestCompaction(unittest.TestCase):
     """Compaction trigger, turn_count not incremented, summary block placement."""
 
-    def _make_conv_with_mock(self, provider="anthropic", compact_every=2, keep_recent_turns=1):
+    def _make_conv_with_mock(
+        self, provider="anthropic", compact_every=2, keep_recent_turns=1
+    ):
         conv = LLMConversation(
-            provider=provider, api_key="k",
+            provider=provider,
+            api_key="k",
             compact_every=compact_every,
             keep_recent_turns=keep_recent_turns,
         )
@@ -214,6 +226,7 @@ class TestCompaction(unittest.TestCase):
         compact_called = []
 
         original_compact = conv._compact
+
         def mock_compact():
             compact_called.append(True)
             original_compact()
@@ -244,7 +257,10 @@ class TestCompaction(unittest.TestCase):
             {"role": "assistant", "content": "a1"},
             {"role": "user", "content": "q2"},
             {"role": "assistant", "content": "a2"},
-            {"role": "user", "content": "q3"},  # recent (keep_recent_turns=1 → keep 2 msgs)
+            {
+                "role": "user",
+                "content": "q3",
+            },  # recent (keep_recent_turns=1 → keep 2 msgs)
             {"role": "assistant", "content": "a3"},
         ]
         conv._turn_count = 3
@@ -272,10 +288,13 @@ class TestCompaction(unittest.TestCase):
         ]
         conv._turn_count = 2
         import warnings
+
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
+
             def _fail(**kw):
                 raise RuntimeError("API down")
+
             conv._call_non_streaming = _fail
             conv._compact()
         # Messages unchanged
@@ -284,6 +303,7 @@ class TestCompaction(unittest.TestCase):
 
 # ── TestDiskArchive ───────────────────────────────────────────────────────────
 
+
 class TestDiskArchive(unittest.TestCase):
     """JSONL archive written only when history_path is set."""
 
@@ -291,8 +311,10 @@ class TestDiskArchive(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             hp = pathlib.Path(td) / "history.jsonl"
             conv = LLMConversation(
-                provider="anthropic", api_key="k",
-                compact_every=4, keep_recent_turns=1,
+                provider="anthropic",
+                api_key="k",
+                compact_every=4,
+                keep_recent_turns=1,
                 history_path=hp,
             )
             conv.initialize("sys")
@@ -319,8 +341,10 @@ class TestDiskArchive(unittest.TestCase):
 
     def test_no_archive_when_history_path_none(self):
         conv = LLMConversation(
-            provider="anthropic", api_key="k",
-            compact_every=4, keep_recent_turns=1,
+            provider="anthropic",
+            api_key="k",
+            compact_every=4,
+            keep_recent_turns=1,
             history_path=None,
         )
         conv.initialize("sys")
@@ -340,6 +364,7 @@ class TestDiskArchive(unittest.TestCase):
 
 # ── TestPersistence ───────────────────────────────────────────────────────────
 
+
 class TestPersistence(unittest.TestCase):
     """to_dict / from_dict round-trip."""
 
@@ -347,7 +372,8 @@ class TestPersistence(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             hp = pathlib.Path(td) / "hist.jsonl"
             conv = LLMConversation(
-                provider="anthropic", api_key="orig-key",
+                provider="anthropic",
+                api_key="orig-key",
                 model="claude-opus-4-6",
                 compact_every=5,
                 keep_recent_turns=3,
@@ -396,6 +422,7 @@ class TestPersistence(unittest.TestCase):
 
 # ── TestInteractiveIntegration ────────────────────────────────────────────────
 
+
 class TestInteractiveIntegration(unittest.TestCase):
     """Integration tests: LLMConversation wired into InteractiveSession."""
 
@@ -403,13 +430,14 @@ class TestInteractiveIntegration(unittest.TestCase):
         """Build an InteractiveSession with a mocked _conv and a temp session store."""
         from rocpd.ai_analysis.interactive import InteractiveSession, SessionStore
         import tempfile, os
+
         store_dir = tempfile.mkdtemp()
         session = InteractiveSession(
             source_dir="/tmp/fake_src",
             tier0_result=None,
             recommendations=[],
             database_path="",
-            llm_provider=None,   # no real LLM; we inject mock directly
+            llm_provider=None,  # no real LLM; we inject mock directly
             llm_api_key=None,
             llm_model=None,
             session_store=SessionStore(store_dir),
@@ -425,6 +453,7 @@ class TestInteractiveIntegration(unittest.TestCase):
 
         # Provide minimal tier0 result
         import types
+
         plan = types.SimpleNamespace(
             programming_model="HIP",
             kernel_count=2,
@@ -452,6 +481,7 @@ class TestInteractiveIntegration(unittest.TestCase):
         session._extract_ai_commands = MagicMock(return_value=[])
 
         import types
+
         plan = types.SimpleNamespace(
             source_files=[],
             detected_patterns=[],
@@ -510,8 +540,8 @@ class TestInteractiveIntegration(unittest.TestCase):
         )
         mock_conv.send.assert_called_once()
         msg = mock_conv.send.call_args[0][0]
-        self.assertNotIn("// foo", msg)   # already in conversation
-        self.assertIn("// bar", msg)      # new file — must be sent
+        self.assertNotIn("// foo", msg)  # already in conversation
+        self.assertIn("// bar", msg)  # new file — must be sent
 
     def test_post_rewrite_summary_appended_to_conv(self):
         """_apply_suggestions_via_llm notifies _conv after writing a file."""
@@ -548,7 +578,10 @@ class TestInteractiveIntegration(unittest.TestCase):
         mock_analyzer._call_anthropic.return_value = "// rewritten by LLM"
 
         import rocpd.ai_analysis.interactive as imod
-        with patch("rocpd.ai_analysis.llm_analyzer.LLMAnalyzer", return_value=mock_analyzer):
+
+        with patch(
+            "rocpd.ai_analysis.llm_analyzer.LLMAnalyzer", return_value=mock_analyzer
+        ):
             with patch.object(imod, "_input", return_value="y"):
                 session._apply_suggestions_via_llm(
                     "use LDS tiling for better cache reuse", "anthropic"
@@ -556,8 +589,7 @@ class TestInteractiveIntegration(unittest.TestCase):
 
         # _conv.send must have been called with the post-rewrite notification
         rewrite_calls = [
-            call for call in mock_conv.send.call_args_list
-            if "rewritten" in str(call)
+            call for call in mock_conv.send.call_args_list if "rewritten" in str(call)
         ]
         self.assertTrue(
             len(rewrite_calls) >= 1,
@@ -567,6 +599,7 @@ class TestInteractiveIntegration(unittest.TestCase):
     def test_session_context_not_referenced(self):
         """SessionContext must not exist in the interactive module."""
         import rocpd.ai_analysis.interactive as imod
+
         self.assertFalse(
             hasattr(imod, "SessionContext"),
             "SessionContext should have been removed from interactive.py",
@@ -575,6 +608,7 @@ class TestInteractiveIntegration(unittest.TestCase):
     def test_workflow_session_has_no_conv(self):
         """WorkflowSession must not own a _conv attribute."""
         from rocpd.ai_analysis.interactive import WorkflowSession
+
         ws = WorkflowSession(app_command="./app")
         self.assertFalse(
             hasattr(ws, "_conv"),
