@@ -347,6 +347,13 @@ TEST(rocrtstFunc, Time_Stamp) {
   RunCustomTestEpilog(&ts);
 }
 
+TEST(rocrtstFunc, BarrierPkt_TimeStamp) {
+    TimeStamp ts;
+    RunCustomTestProlog(&ts);
+    ts.BarrierPacketTimestampValidationTest();
+    RunCustomTestEpilog(&ts);
+}
+
 TEST(rocrtstFunc, GpuCoreDump_DefaultPattern) {
     GpuCoreDumpTest gcd;
     if (!RunCustomTestProlog(&gcd)) return;
