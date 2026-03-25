@@ -594,3 +594,9 @@ deviceLib:
   Unit_MemcpyToSymbolInParallelWithStreamLaunch:
     <<: *level_3
     tags: [misc]
+  Unit_ocp_cxx_fp8x2_host_conv:
+    <<: *level_3
+    tags: [types]
+  Unit_ocp_cxx_fp8_host_conv:
+    <<: *level_3
+    tags: [types]

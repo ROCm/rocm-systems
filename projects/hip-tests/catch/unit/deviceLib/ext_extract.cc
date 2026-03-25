@@ -92,7 +92,6 @@ TEST_CASE("Unit_amd_ocp_extract_tests") {
     REQUIRE(__amd_cvt_fp8_to_float(__amd_extract_fp8(fp8x2, 1), interpret) == 10.0f);
   }
 
-#if __AVX__
   SECTION("fp8x8 host") {
     constexpr auto interpret = __AMD_OCP_E4M3;
     __amd_floatx8_storage_t in{1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f};
@@ -114,7 +113,6 @@ TEST_CASE("Unit_amd_ocp_extract_tests") {
     REQUIRE(__amd_cvt_fp8_to_float(__amd_extract_fp8(__amd_extract_fp8x2(fp8x8, 3), 1),
                                    interpret) == 8.0f);
   }
-#endif
 
   SECTION("fp8x2 device") {
     auto l = [] __device__(float a, float b, float* o_a, float* o_b) {
@@ -127,12 +125,15 @@ TEST_CASE("Unit_amd_ocp_extract_tests") {
 
     float a = -10.0f, b = 10.0f, *res_a, *res_b;
 
-    HIP_CHECK(hipMallocManaged(&res_a, sizeof(float)));
-    HIP_CHECK(hipMallocManaged(&res_b, sizeof(float)));
+    HIP_CHECK(hipMalloc(&res_a, sizeof(float)));
+    HIP_CHECK(hipMalloc(&res_b, sizeof(float)));
     t_lambda_launch<<<1, 32>>>(l, a, b, res_a, res_b);
     HIP_CHECK(hipDeviceSynchronize());
-    REQUIRE(*res_a == a);
-    REQUIRE(*res_b == b);
+    float hres_a{}, hres_b{};
+    HIP_CHECK(hipMemcpy(&hres_a, res_a, sizeof(float), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(&hres_b, res_b, sizeof(float), hipMemcpyDeviceToHost));
+    REQUIRE(hres_a == a);
+    REQUIRE(hres_b == b);
 
     HIP_CHECK(hipFree(res_a));
     HIP_CHECK(hipFree(res_b));
@@ -161,18 +162,21 @@ TEST_CASE("Unit_amd_ocp_extract_tests") {
           __amd_cvt_fp8_to_float(__amd_extract_fp8(__amd_extract_fp8x2(fp8x8, 3), 1), interpret);
     };
 
-    float* res;
+    float* d_res;
+    constexpr size_t size = 8;
 
-    HIP_CHECK(hipMallocManaged(&res, sizeof(float) * 8));
-    t_lambda_launch<<<1, 32>>>(l, res);
+    HIP_CHECK(hipMalloc(&d_res, sizeof(float) * size));
+    t_lambda_launch<<<1, 32>>>(l, d_res);
     HIP_CHECK(hipDeviceSynchronize());
 
-    for (size_t i = 0; i < 8; i++) {
+    std::vector<float> res(size, 0.0f);
+    HIP_CHECK(hipMemcpy(res.data(), d_res, sizeof(float) * size, hipMemcpyDeviceToHost));
+    for (size_t i = 0; i < size; i++) {
       INFO("Index: " << i << " res: " << res[i]);
       REQUIRE(res[i] == static_cast<float>(i + 1));
     }
 
-    HIP_CHECK(hipFree(res));
+    HIP_CHECK(hipFree(d_res));
   }
 
   SECTION("fp4x2 host") {
@@ -204,13 +208,14 @@ TEST_CASE("Unit_amd_ocp_extract_tests") {
       *res = __amd_cvt_floatx2_to_fp4x2_scale(in, interpret, 0 /* scale*/);
     };
 
-    __amd_fp4x2_storage_t* fp4x2;
-    HIP_CHECK(hipMallocManaged(&fp4x2, sizeof(__amd_fp4x2_storage_t)));
+    __amd_fp4x2_storage_t *fp4x2, res;
+    HIP_CHECK(hipMalloc(&fp4x2, sizeof(__amd_fp4x2_storage_t)));
     t_lambda_launch<<<1, 32>>>(l, fp4x2);
     HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipMemcpy(&res, fp4x2, sizeof(__amd_fp4x2_storage_t), hipMemcpyDeviceToHost));
 
-    REQUIRE((__amd_extract_fp4(*fp4x2, 0) & 0b1000) != 0);
-    REQUIRE((__amd_extract_fp4(*fp4x2, 1) & 0b1000) == 0);
+    REQUIRE((__amd_extract_fp4(res, 0) & 0b1000) != 0);
+    REQUIRE((__amd_extract_fp4(res, 1) & 0b1000) == 0);
     HIP_CHECK(hipFree(fp4x2));
   }
 
@@ -223,14 +228,16 @@ TEST_CASE("Unit_amd_ocp_extract_tests") {
       }
     };
 
-    __amd_fp4x2_storage_t* fp4x2;
-    HIP_CHECK(hipMallocManaged(&fp4x2, sizeof(__amd_fp4x2_storage_t) * 4));
+    constexpr size_t size = 4;
+    __amd_fp4x2_storage_t *fp4x2, res[size];
+    HIP_CHECK(hipMalloc(&fp4x2, sizeof(__amd_fp4x2_storage_t) * size));
     t_lambda_launch<<<1, 32>>>(l, fp4x2);
     HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipMemcpy(res, fp4x2, sizeof(__amd_fp4x2_storage_t) * size, hipMemcpyDeviceToHost));
 
     __amd_floatx8_storage_t in{0, 1, 1, 0, 1, 0, 0, 1};
     for (size_t i = 0; i < 4; i++) {
-      auto r1 = __amd_cvt_fp4x2_to_floatx2_scale(fp4x2[i], __AMD_OCP_E2M1, 0);
+      auto r1 = __amd_cvt_fp4x2_to_floatx2_scale(res[i], __AMD_OCP_E2M1, 0);
       INFO("Index: " << i << " vals: " << in[i * 2] << ", " << in[i * 2 + 1]);
       CHECK(r1[0] == in[i * 2]);
       CHECK(r1[1] == in[i * 2 + 1]);

@@ -1749,23 +1749,6 @@ __global__ void fp4x2_sr_scale_convert(__amd_floatx2_storage_t* in, __amd_floatx
 }
 
 TEST_CASE("Unit_ocp_host_fp8_device_compare") {
-  hipDeviceProp_t prop;
-  HIP_CHECK(hipGetDeviceProperties(&prop, 0));
-  bool found = false;
-
-  for (const auto& device : ocp_capeable_hw) {
-    if (std::string(prop.gcnArchName).find(device) != std::string::npos) {
-      found = true;
-      break;
-    }
-  }
-
-  if (!found) {
-    std::string skip_string = "Need OCP HW to run this test: " + std::string(prop.name);
-    HipTest::HIP_SKIP_TEST(skip_string.c_str());
-    return;
-  }
-
   SECTION("e4m3") {
     constexpr size_t size = 447 * 2 + 1;
     constexpr __amd_fp8_interpretation_t interpret = __AMD_OCP_E4M3;

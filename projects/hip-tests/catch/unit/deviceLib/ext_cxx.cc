@@ -80,194 +80,163 @@ __global__ void cxx_fp8x2_e5m2_device_cvt(__amd_floatx2_storage_t* in, __amd_flo
   }
 }
 
-TEST_CASE("Unit_ocp_cxx_fp8_host_conv") {
+HIP_TEST_CASE(Unit_ocp_cxx_fp8_host_conv) {
+  float *d_in, *d_out;
+  std::vector<float> in;
+  std::vector<float> gpu_res, cpu_res;
+  size_t size = 2000;
+  HIP_CHECK(hipMalloc(&d_in, sizeof(float) * size));
+  HIP_CHECK(hipMalloc(&d_out, sizeof(float) * size));
+
   SECTION("e4m3") {
-    constexpr size_t size = 449 * 2 + 1;
-    std::vector<float> in;
+    size = 449 * 2 + 1;
+    in.clear();
     in.reserve(size);
     for (int i = -449; i <= 449; i++) {
       in.push_back(static_cast<float>(i));
     }
     REQUIRE(in.size() == size);
-    float *d_in, *d_out;
-    HIP_CHECK(hipMalloc(&d_in, sizeof(float) * size));
-    HIP_CHECK(hipMalloc(&d_out, sizeof(float) * size));
     HIP_CHECK(hipMemcpy(d_in, in.data(), sizeof(float) * size, hipMemcpyHostToDevice));
     cxx_fp8_e4m3_device_cvt<<<1, size>>>(d_in, d_out, size);
     // CPU calc
-    std::vector<float> cpu_res(size, 0.0f);
+    cpu_res.resize(size);
     for (size_t i = 0; i < size; i++) {
       __hipext_ocp_fp8_e4m3 tmp(in[i]);
       cpu_res[i] = tmp;
     }
-    std::vector<float> gpu_res(size, 0.0f);
-    HIP_CHECK(hipMemcpy(gpu_res.data(), d_out, sizeof(float) * size, hipMemcpyDeviceToHost));
-    for (size_t i = 0; i < size; i++) {
-      INFO("Index: " << i << " in: " << in[i] << " cpu: " << cpu_res[i] << " gpu: " << gpu_res[i]);
-      REQUIRE(cpu_res[i] == gpu_res[i]);
-    }
-    HIP_CHECK(hipFree(d_in));
-    HIP_CHECK(hipFree(d_out));
+    gpu_res.resize(size);
   }
 
   SECTION("e4m3-sr") {
-    constexpr size_t size = 449 * 2 + 1;
+    size = 449 * 2 + 1;
     constexpr unsigned int seed = 10;
-    std::vector<float> in;
+    in.clear();
     in.reserve(size);
     for (int i = -449; i <= 449; i++) {
       in.push_back(static_cast<float>(i));
     }
     REQUIRE(in.size() == size);
-    float *d_in, *d_out;
-    HIP_CHECK(hipMalloc(&d_in, sizeof(float) * size));
-    HIP_CHECK(hipMalloc(&d_out, sizeof(float) * size));
     HIP_CHECK(hipMemcpy(d_in, in.data(), sizeof(float) * size, hipMemcpyHostToDevice));
     cxx_fp8_sr_e4m3_device_cvt<<<1, size>>>(d_in, d_out, seed, size);
     // CPU calc
-    std::vector<float> cpu_res(size, 0.0f);
+    cpu_res.resize(size);
     for (size_t i = 0; i < size; i++) {
       __hipext_ocp_fp8_e4m3 tmp(in[i], seed);
       cpu_res[i] = tmp;
     }
-    std::vector<float> gpu_res(size, 0.0f);
-    HIP_CHECK(hipMemcpy(gpu_res.data(), d_out, sizeof(float) * size, hipMemcpyDeviceToHost));
-    for (size_t i = 0; i < size; i++) {
-      INFO("Index: " << i << " in: " << in[i] << " cpu: " << cpu_res[i] << " gpu: " << gpu_res[i]);
-      REQUIRE(cpu_res[i] == gpu_res[i]);
-    }
-    HIP_CHECK(hipFree(d_in));
-    HIP_CHECK(hipFree(d_out));
+    gpu_res.resize(size);
   }
 
   SECTION("e5m2") {
-    constexpr size_t size = 511 * 2 + 1;
-    std::vector<float> in;
+    size = 511 * 2 + 1;
+    in.clear();
     in.reserve(size);
     for (int i = -511; i <= 511; i++) {
       in.push_back(static_cast<float>(i));
     }
     REQUIRE(in.size() == size);
-    float *d_in, *d_out;
-    HIP_CHECK(hipMalloc(&d_in, sizeof(float) * size));
-    HIP_CHECK(hipMalloc(&d_out, sizeof(float) * size));
     HIP_CHECK(hipMemcpy(d_in, in.data(), sizeof(float) * size, hipMemcpyHostToDevice));
     cxx_fp8_e5m2_device_cvt<<<1, size>>>(d_in, d_out, size);
     // CPU calc
-    std::vector<float> cpu_res(size, 0.0f);
+    cpu_res.resize(size);
     for (size_t i = 0; i < size; i++) {
       __hipext_ocp_fp8_e5m2 tmp(in[i]);
       cpu_res[i] = tmp;
     }
-    std::vector<float> gpu_res(size, 0.0f);
-    HIP_CHECK(hipMemcpy(gpu_res.data(), d_out, sizeof(float) * size, hipMemcpyDeviceToHost));
-    for (size_t i = 0; i < size; i++) {
-      INFO("Index: " << i << " in: " << in[i] << " cpu: " << cpu_res[i] << " gpu: " << gpu_res[i]);
-      CHECK(cpu_res[i] == gpu_res[i]);
-    }
-    HIP_CHECK(hipFree(d_in));
-    HIP_CHECK(hipFree(d_out));
+    gpu_res.resize(size);
   }
 
   SECTION("e5m2-sr") {
-    constexpr size_t size = 511 * 2 + 1;
+    size = 511 * 2 + 1;
     constexpr unsigned int seed = 10;
-    std::vector<float> in;
+    in.clear();
     in.reserve(size);
     for (int i = -511; i <= 511; i++) {
       in.push_back(static_cast<float>(i));
     }
     REQUIRE(in.size() == size);
-    float *d_in, *d_out;
-    HIP_CHECK(hipMalloc(&d_in, sizeof(float) * size));
-    HIP_CHECK(hipMalloc(&d_out, sizeof(float) * size));
     HIP_CHECK(hipMemcpy(d_in, in.data(), sizeof(float) * size, hipMemcpyHostToDevice));
     cxx_fp8_sr_e5m2_device_cvt<<<1, size>>>(d_in, d_out, seed, size);
     // CPU calc
-    std::vector<float> cpu_res(size, 0.0f);
+    cpu_res.resize(size);
     for (size_t i = 0; i < size; i++) {
       __hipext_ocp_fp8_e5m2 tmp(in[i], seed);
       cpu_res[i] = tmp;
     }
-    std::vector<float> gpu_res(size, 0.0f);
-    HIP_CHECK(hipMemcpy(gpu_res.data(), d_out, sizeof(float) * size, hipMemcpyDeviceToHost));
-    for (size_t i = 0; i < size; i++) {
-      INFO("Index: " << i << " in: " << in[i] << " cpu: " << cpu_res[i] << " gpu: " << gpu_res[i]);
-      CHECK(cpu_res[i] == gpu_res[i]);
-    }
-    HIP_CHECK(hipFree(d_in));
-    HIP_CHECK(hipFree(d_out));
+    gpu_res.resize(size);
   }
+  HIP_CHECK(hipMemcpy(gpu_res.data(), d_out, sizeof(float) * size, hipMemcpyDeviceToHost));
+  for (size_t i = 0; i < size; i++) {
+    INFO("Index: " << i << " in: " << in[i] << " cpu: " << cpu_res[i] << " gpu: " << gpu_res[i]);
+    REQUIRE(cpu_res[i] == gpu_res[i]);
+  }
+  HIP_CHECK(hipFree(d_in));
+  HIP_CHECK(hipFree(d_out));
+}
+
+HIP_TEST_CASE(Unit_ocp_cxx_fp8x2_host_conv) {
+  std::vector<__amd_floatx2_storage_t> in;
+  std::vector<__amd_floatx2_storage_t> gpu_res, cpu_res;
+  __amd_floatx2_storage_t *d_in, *d_out;
+  size_t size = 2000; // Section will set it up, but this is a safe limit
+  HIP_CHECK(hipMalloc(&d_in, sizeof(__amd_floatx2_storage_t) * size));
+  HIP_CHECK(hipMalloc(&d_out, sizeof(__amd_floatx2_storage_t) * size));
 
   SECTION("e4m3x2") {
-    constexpr size_t size = 448 * 2 + 1;
-    std::vector<__amd_floatx2_storage_t> in;
+    size = 448 * 2 + 1;
+    in.clear();
     in.reserve(size);
     for (int i = -448, j = 448; i <= 448; i++, j--) {
       __amd_floatx2_storage_t tmp{static_cast<float>(i), static_cast<float>(j)};
       in.push_back(tmp);
     }
+
     REQUIRE(in.size() == size);
-    __amd_floatx2_storage_t *d_in, *d_out;
-    HIP_CHECK(hipMalloc(&d_in, sizeof(__amd_floatx2_storage_t) * size));
-    HIP_CHECK(hipMalloc(&d_out, sizeof(__amd_floatx2_storage_t) * size));
     HIP_CHECK(
         hipMemcpy(d_in, in.data(), sizeof(__amd_floatx2_storage_t) * size, hipMemcpyHostToDevice));
+
     cxx_fp8x2_e4m3_device_cvt<<<1, size>>>(d_in, d_out, size);
     // CPU calc
-    std::vector<__amd_floatx2_storage_t> cpu_res(size, 0.0f);
+    cpu_res = gpu_res = std::vector<__amd_floatx2_storage_t>(size, 0.0f);
     for (size_t i = 0; i < size; i++) {
       __hipext_ocp_fp8x2_e4m3 tmp(in[i]);
       cpu_res[i] = tmp;
     }
-    std::vector<__amd_floatx2_storage_t> gpu_res(size, 0.0f);
     HIP_CHECK(hipMemcpy(gpu_res.data(), d_out, sizeof(__amd_floatx2_storage_t) * size,
                         hipMemcpyDeviceToHost));
-    for (size_t i = 0; i < size; i++) {
-      INFO("Index: " << i << "\n\tin:  a: " << in[i][0] << " b: " << in[i][1]
-                     << "\n\tcpu: a: " << cpu_res[i][0] << " b: " << cpu_res[i][1]
-                     << "\n\tgpu: a: " << gpu_res[i][0] << " b: " << gpu_res[i][1]);
-      REQUIRE(cpu_res[i][0] == gpu_res[i][0]);
-      REQUIRE(cpu_res[i][1] == gpu_res[i][1]);
-    }
-    HIP_CHECK(hipFree(d_in));
-    HIP_CHECK(hipFree(d_out));
   }
 
   SECTION("e5m2x2") {
-    constexpr size_t size = 511 * 2 + 1;
-    std::vector<__amd_floatx2_storage_t> in;
+    size = 511 * 2 + 1;
+    in.clear();
     in.reserve(size);
     for (int i = -511, j = 511; i <= 511; i++, j--) {
       __amd_floatx2_storage_t tmp{static_cast<float>(i), static_cast<float>(j)};
       in.push_back(tmp);
     }
     REQUIRE(in.size() == size);
-    __amd_floatx2_storage_t *d_in, *d_out;
-    HIP_CHECK(hipMalloc(&d_in, sizeof(__amd_floatx2_storage_t) * size));
-    HIP_CHECK(hipMalloc(&d_out, sizeof(__amd_floatx2_storage_t) * size));
     HIP_CHECK(
         hipMemcpy(d_in, in.data(), sizeof(__amd_floatx2_storage_t) * size, hipMemcpyHostToDevice));
     cxx_fp8x2_e5m2_device_cvt<<<1, size>>>(d_in, d_out, size);
     // CPU calc
-    std::vector<__amd_floatx2_storage_t> cpu_res(size, 0.0f);
+    cpu_res = gpu_res = std::vector<__amd_floatx2_storage_t>(size, 0.0f);
     for (size_t i = 0; i < size; i++) {
       __hipext_ocp_fp8x2_e5m2 tmp(in[i]);
       cpu_res[i] = tmp;
     }
-    std::vector<__amd_floatx2_storage_t> gpu_res(size, 0.0f);
     HIP_CHECK(hipMemcpy(gpu_res.data(), d_out, sizeof(__amd_floatx2_storage_t) * size,
                         hipMemcpyDeviceToHost));
-    for (size_t i = 0; i < size; i++) {
-      INFO("Index: " << i << "\n\tin:  a: " << in[i][0] << " b: " << in[i][1]
-                     << "\n\tcpu: a: " << cpu_res[i][0] << " b: " << cpu_res[i][1]
-                     << "\n\tgpu: a: " << gpu_res[i][0] << " b: " << gpu_res[i][1]);
-      REQUIRE(cpu_res[i][0] == gpu_res[i][0]);
-      REQUIRE(cpu_res[i][1] == gpu_res[i][1]);
-    }
-    HIP_CHECK(hipFree(d_in));
-    HIP_CHECK(hipFree(d_out));
   }
+
+  for (size_t i = 0; i < size; i++) {
+    INFO("Index: " << i << "\n\tin:  a: " << in[i][0] << " b: " << in[i][1]
+                   << "\n\tcpu: a: " << cpu_res[i][0] << " b: " << cpu_res[i][1]
+                   << "\n\tgpu: a: " << gpu_res[i][0] << " b: " << gpu_res[i][1]);
+    REQUIRE(cpu_res[i][0] == gpu_res[i][0]);
+    REQUIRE(cpu_res[i][1] == gpu_res[i][1]);
+  }
+  HIP_CHECK(hipFree(d_in));
+  HIP_CHECK(hipFree(d_out));
 }
 
 __global__ void fp8x2_e4m3_cxx_convert_fp32(__amd_floatx2_storage_t* in,
@@ -345,22 +314,20 @@ TEST_CASE("Unit_ocp_fp8x2_host_device") {
     REQUIRE(float(out[1]) == float(cpu_out[1]));
   }
 
-  // SECTION("bf16x2 to e4m3") {
-  //   __amd_bf16x2_storage_t in{-10.0f, 10.0f}, *d_in, *d_out, out{0.0f, 0.0f};
-  //   HIP_CHECK(hipMalloc(&d_in, sizeof(__amd_bf16x2_storage_t)));
-  //   HIP_CHECK(hipMalloc(&d_out, sizeof(__amd_bf16x2_storage_t)));
-  //   HIP_CHECK(hipMemcpy(d_in, &in, sizeof(__amd_bf16x2_storage_t),
-  //                       hipMemcpyHostToDevice));
-  //   fp8x2_e4m3_cxx_convert_bf16<<<1, 32>>>(d_in, d_out, 1);
-  //   HIP_CHECK(hipMemcpy(&out, d_out, sizeof(__amd_bf16x2_storage_t),
-  //                       hipMemcpyDeviceToHost));
-  //   HIP_CHECK(hipFree(d_in));
-  //   HIP_CHECK(hipFree(d_out));
-  //   __hipext_ocp_fp8x2_e4m3 tmp(in, 0);
-  //   __amd_bf16x2_storage_t cpu_out = tmp.get_scaled_bf16x2(0);
-  //   REQUIRE(out[0] == cpu_out[0]);
-  //   REQUIRE(out[1] == cpu_out[1]);
-  // }
+  SECTION("bf16x2 to e4m3") {
+    __amd_bf16x2_storage_t in{-10.0f, 10.0f}, *d_in, *d_out, out{0.0f, 0.0f};
+    HIP_CHECK(hipMalloc(&d_in, sizeof(__amd_bf16x2_storage_t)));
+    HIP_CHECK(hipMalloc(&d_out, sizeof(__amd_bf16x2_storage_t)));
+    HIP_CHECK(hipMemcpy(d_in, &in, sizeof(__amd_bf16x2_storage_t), hipMemcpyHostToDevice));
+    fp8x2_e4m3_cxx_convert_bf16<<<1, 32>>>(d_in, d_out, 1);
+    HIP_CHECK(hipMemcpy(&out, d_out, sizeof(__amd_bf16x2_storage_t), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipFree(d_in));
+    HIP_CHECK(hipFree(d_out));
+    __hipext_ocp_fp8x2_e4m3 tmp(in, 0);
+    __amd_bf16x2_storage_t cpu_out = tmp.get_scaled_bf16x2(0);
+    REQUIRE(float(out[0]) == float(cpu_out[0]));
+    REQUIRE(float(out[1]) == float(cpu_out[1]));
+  }
 }
 
 
@@ -897,6 +864,8 @@ TEST_CASE("Unit_ocp_cxx_fp8x2") {
 }
 
 namespace cxx_ocp {
+// The tests below are guarded with AVX512, due to the builtin types and their host implementation,
+// the return value vector size is so big, we need the extension to support it.
 #if __AVX512F__
 __host__ __device__ __amd_floatx32_storage_t
 fp6x32_e3m2_to_float_scale(const __amd_floatx32_storage_t in, __amd_scale_t scale) {
