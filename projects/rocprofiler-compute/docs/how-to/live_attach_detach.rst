@@ -15,9 +15,8 @@ Detachment can be achieved in two ways:
 a) By setting the ``--attach-duration-msec`` parameter to a specific duration (in milliseconds). In this case, the detachment occurs automatically after the specified time has elapsed since the profiling session started.
 b) By pressing the Enter key after a successful attach within the same profiling terminal session. Upon a successful attach, a confirmation message is displayed in the terminal log of the workload process.
 
----------------------
 Profiling options
----------------------
+=================
 For using profiling options for PC sampling the configuration needed are:
 
 * ``--attach-pid``: Should be the process ID of the process of workload's application.
@@ -35,9 +34,8 @@ For using profiling options for PC sampling the configuration needed are:
 
    $ rocprof-compute profile -n try_live_attach_detach --set launch_stats --no-roof -VVV --attach-pid <process id of workload> --attach-duration-msec <time before detach>
 
------------------------
 Analysis options
------------------------
+================
 
 The analyze options for Dynamic process attachment are completely compatible with other non-Dynamic process attachment options.
 

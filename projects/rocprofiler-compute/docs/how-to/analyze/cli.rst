@@ -646,21 +646,21 @@ Analysis database example
 
 
 PyTorch Operator Analysis
---------------------------
+=========================
 
 .. warning::
-   
-   PyTorch operator analysis is currently available only in CLI mode. GUI and TUI 
+
+   PyTorch operator analysis is currently available only in CLI mode. GUI and TUI
    will provide different interfaces for operator selection and visualization.
 
-   These options require ``--experimental``. After profiling with 
-   ``--experimental --torch-trace`` (see :ref:`torch-operator-profiling`), 
-   use ``rocprof-compute --experimental analyze ...`` with 
+   These options require ``--experimental``. After profiling with
+   ``--experimental --torch-trace`` (see :ref:`torch-operator-profiling`),
+   use ``rocprof-compute --experimental analyze ...`` with
    ``--list-torch-operators`` or ``--torch-operator`` as needed.
-   
+
 
 Listing All Operators
-^^^^^^^^^^^^^^^^^^^^^^
+---------------------
 
 Display all PyTorch operators captured during profiling:
 
@@ -686,7 +686,7 @@ hierarchy (``/``-separated) and kernel stats. A consolidated CSV
 see :ref:`torch-operator-profiling` for details.
 
 Filtering by Operator
-^^^^^^^^^^^^^^^^^^^^^^
+---------------------
 
 ``--torch-operator`` uses PurePosixPath glob patterns to select operators.
 Operator hierarchies are ``/``-separated (e.g.

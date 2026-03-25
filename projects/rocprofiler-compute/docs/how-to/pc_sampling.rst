@@ -15,9 +15,8 @@ AMD Instinct MI300 series and later accelerators. Stochastic PC sampling provide
 for not issuing the instruction (stall reason). This type of information is
 particularly useful for understanding stalls during the kernel execution. The PC sampling can be used with profiling and analysis options.
 
----------------------
 Profiling options
----------------------
+=================
 For using profiling options for PC sampling the configuration needed are:
 
 * ``--pc-sampling-method``: Should be either ``stochastic`` or ``host_trap``, (DEFAULT: stochastic)
@@ -29,9 +28,8 @@ For using profiling options for PC sampling the configuration needed are:
 
    $ rocprof-compute profile -n pc_test -b 21 --no-roof --pc-sampling-method stochastic --pc-sampling-interval 1048576 -VVV -- target_app
 
------------------------
 Analysis options
------------------------
+================
 For using analysis options for PC sampling the configuration needed are:
 
 * ``--pc-sampling-sorting-type``: ``offset`` or ``count``. The default option is ``offset``. ``offset`` is an assembly instruction offset in the code object.

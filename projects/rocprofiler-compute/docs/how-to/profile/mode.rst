@@ -683,7 +683,9 @@ a) If found, skips microbenchmark execution;
 
 b) Otherwise, profile mode runs microbenchmarks and collects roofline performance counters.
 
-Note that ``--roof-only`` cannot be used with ``--block`` or ``--set`` options.
+.. note::
+
+  ``--roof-only`` cannot be used with ``--block`` or ``--set`` options.
 
 Profile mode generates ``roofline.csv`` containing microbenchmark data. To generate
 roofline HTML plots, use ``rocprof-compute analyze`` on the profiling output directory
@@ -902,7 +904,7 @@ Sample rows from ``torch_trace/consolidated.csv`` (from profiling an mnist model
      - 6789281079934204
 
 Performance counter data file
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+-----------------------------
 
 The ``pmc_perf.csv`` file contains the standard performance counter data (same as non-torch profiling). This data enables analysis such as:
 
