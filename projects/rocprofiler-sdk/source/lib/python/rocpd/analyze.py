@@ -471,7 +471,7 @@ def analyze_thread_trace(att_dir: str) -> Dict[str, Any]:
 
     for csv_path in csv_files:
         # Fallback name from filename; overridden below by the kernel comment row
-        kernel_name = csv_path.stem[len("stats_"):]
+        kernel_name = csv_path.stem[len("stats_") :]
         instructions: List[Dict[str, Any]] = []
 
         try:
@@ -495,7 +495,9 @@ def analyze_thread_trace(att_dir: str) -> Dict[str, Any]:
 
                 # Real rocprofv3 --att CSV: "CodeObj","Vaddr","Instruction",
                 # "Hitcount","Latency","Stall","Idle","Source"
-                instr_name = _col("instruction", "instruction id", "pc_offset", "pc offset", "offset")
+                instr_name = _col(
+                    "instruction", "instruction id", "pc_offset", "pc offset", "offset"
+                )
                 hitcount_s = _col("hitcount", "hit count", "count")
                 latency_s = _col("latency (cycles)", "latency", "total latency")
                 stall_s = _col("stall cycles", "stall", "stalls")
@@ -511,7 +513,9 @@ def analyze_thread_trace(att_dir: str) -> Dict[str, Any]:
                 # Comment rows (Hitcount=0, Latency=0) embed the demangled kernel
                 # name in the Source column: "; _Zmangled...", Source="demangled()"
                 if hitcount == 0 and total_latency == 0:
-                    demangled = source_line  # e.g. "heavy_elementwise_kernel(float*, int)"
+                    demangled = (
+                        source_line  # e.g. "heavy_elementwise_kernel(float*, int)"
+                    )
                     if demangled:
                         # Use just the function name without arguments
                         kernel_name = demangled.split("(")[0].strip()
@@ -594,7 +598,9 @@ def analyze_thread_trace(att_dir: str) -> Dict[str, Any]:
             "kernel_count": len(kernels_data),
             "high_stall_kernels": high_stall_count,
         },
-        "reason": "" if kernels_data else "No valid ATT data could be parsed from CSV files",
+        "reason": (
+            "" if kernels_data else "No valid ATT data could be parsed from CSV files"
+        ),
     }
 
 
@@ -3222,15 +3228,15 @@ document.querySelectorAll('.ctr-row').forEach(function(tr) {{
 
         att_kpi = (
             f'<div class="kpi-grid" style="margin-bottom:1.4rem">'
-            f'<div class="kpi kpi-info" data-tip=\'<strong>Kernels Traced</strong>Number of unique kernels with ATT instruction-level data captured.\'>'
+            f"<div class=\"kpi kpi-info\" data-tip='<strong>Kernels Traced</strong>Number of unique kernels with ATT instruction-level data captured.'>"
             f'<div class="kpi-head"><span class="kpi-icon">&#129535;</span></div>'
             f'<div class="kpi-label">Kernels Traced</div>'
             f'<div class="kpi-value">{n_traced}</div></div>'
-            f'<div class="kpi {kpi_class}" data-tip=\'<strong>High-Stall Kernels</strong>Kernels where the top instruction stall ratio &ge; 60% and hitcount &ge; 6400 threads. These are the primary ATT optimization targets.\'>'
+            f"<div class=\"kpi {kpi_class}\" data-tip='<strong>High-Stall Kernels</strong>Kernels where the top instruction stall ratio &ge; 60% and hitcount &ge; 6400 threads. These are the primary ATT optimization targets.'>"
             f'<div class="kpi-head"><span class="kpi-icon">&#9888;</span></div>'
             f'<div class="kpi-label">High-Stall Kernels</div>'
             f'<div class="kpi-value" style="color:{high_color}">{n_high}</div></div>'
-            f'</div>'
+            f"</div>"
         )
 
         att_rows = []
@@ -3245,15 +3251,27 @@ document.querySelectorAll('.ctr-row').forEach(function(tr) {{
             top_ratio = float(top.get("stall_ratio", 0)) * 100
             weighted = int(k.get("total_weighted_stall", 0))
             # color by avg stall ratio
-            ratio_color = "#e84040" if avg_ratio >= 60 else ("#ff8800" if avg_ratio >= 40 else "#44dd66")
-            top_color = "#e84040" if top_ratio >= 60 else ("#ff8800" if top_ratio >= 40 else "#44dd66")
+            ratio_color = (
+                "#e84040"
+                if avg_ratio >= 60
+                else ("#ff8800" if avg_ratio >= 40 else "#44dd66")
+            )
+            top_color = (
+                "#e84040"
+                if top_ratio >= 60
+                else ("#ff8800" if top_ratio >= 40 else "#44dd66")
+            )
             bar_w = min(100, avg_ratio)
 
             # expand sub-instructions
             sub_rows = ""
             for instr in (k.get("top_stalling_instructions") or [])[:5]:
                 i_ratio = float(instr.get("stall_ratio", 0)) * 100
-                i_color = "#e84040" if i_ratio >= 60 else ("#ff8800" if i_ratio >= 40 else "#44dd66")
+                i_color = (
+                    "#e84040"
+                    if i_ratio >= 60
+                    else ("#ff8800" if i_ratio >= 40 else "#44dd66")
+                )
                 sub_rows += (
                     f'<tr style="background:rgba(0,0,0,.18);font-size:.82rem">'
                     f'<td colspan="2" style="padding-left:2.5rem;font-family:monospace;color:#b0b8d8">'
@@ -3261,26 +3279,25 @@ document.querySelectorAll('.ctr-row').forEach(function(tr) {{
                     f'<td style="color:#888">hitcount: {int(instr.get("hitcount",0)):,}</td>'
                     f'<td style="color:{i_color};text-align:center">{i_ratio:.0f}%</td>'
                     f'<td colspan="2" style="color:#888">wt: {int(instr.get("weighted_stall",0)):,}</td>'
-                    f'</tr>'
+                    f"</tr>"
                 )
 
             att_rows.append(
-                f'<tr>'
+                f"<tr>"
                 f'<td><code style="font-size:.88rem">{_h(kname)}</code></td>'
-                f'<td>'
+                f"<td>"
                 f'<div style="display:flex;align-items:center;gap:.5rem">'
                 f'<div style="width:80px;height:8px;background:#1a1a2e;border-radius:4px;overflow:hidden">'
                 f'<div style="width:{bar_w:.1f}%;height:100%;background:{ratio_color};border-radius:4px"></div>'
-                f'</div>'
+                f"</div>"
                 f'<span style="color:{ratio_color};font-weight:600">{avg_ratio:.1f}%</span>'
-                f'</div></td>'
-                f'<td><span data-tip=\'{cat_tip}\' style="cursor:help;border-bottom:1px dotted #555">'
-                f'{_h(cat_label)}</span></td>'
+                f"</div></td>"
+                f"<td><span data-tip='{cat_tip}' style=\"cursor:help;border-bottom:1px dotted #555\">"
+                f"{_h(cat_label)}</span></td>"
                 f'<td><code style="font-size:.82rem;color:#b0b8d8">{top_instr}</code></td>'
                 f'<td style="color:{top_color};font-weight:600;text-align:center">{top_ratio:.0f}%</td>'
                 f'<td style="color:#888;font-size:.85rem">{weighted:,}</td>'
-                f'</tr>'
-                + sub_rows
+                f"</tr>" + sub_rows
             )
 
         att_table = (
@@ -3302,17 +3319,17 @@ document.querySelectorAll('.ctr-row').forEach(function(tr) {{
             '\n<section class="scard">'
             '\n<div class="shdr">'
             '\n<span class="shdr-icon">&#129535;</span>'
-            '\n<h2>Thread Trace Analysis</h2>'
+            "\n<h2>Thread Trace Analysis</h2>"
             '\n<span class="shdr-badge sbadge-info">Tier 3 &mdash; ATT</span>'
-            '\n</div>'
+            "\n</div>"
             '\n<div class="sbody">'
             f"\n{att_kpi}"
             f"\n{att_table}"
             '\n<p class="dim" style="margin-top:1rem;font-size:.82rem">'
-            'Sub-rows show the top 5 stalling instructions per kernel (indented). '
-            'Weighted stall = stall_cycles &times; hitcount &mdash; the primary ranking metric.'
-            '</p>'
-            '\n</div>\n</section>'
+            "Sub-rows show the top 5 stalling instructions per kernel (indented). "
+            "Weighted stall = stall_cycles &times; hitcount &mdash; the primary ranking metric."
+            "</p>"
+            "\n</div>\n</section>"
         )
         html = html.replace("<!-- ATT_SECTION_PLACEHOLDER -->", att_section)
     else:
@@ -4816,7 +4833,11 @@ def format_analysis_output(
                     f"    {pc}: stall {stall_pct:.0f}%  weighted={weighted:,}{src_part}"
                 )
             lines.append("")
-    elif att_analysis and not att_analysis.get("has_att_data") and att_analysis.get("reason"):
+    elif (
+        att_analysis
+        and not att_analysis.get("has_att_data")
+        and att_analysis.get("reason")
+    ):
         lines.append("━" * width)
         lines.append("TIER 3: ATT".center(width))
         lines.append("━" * width)

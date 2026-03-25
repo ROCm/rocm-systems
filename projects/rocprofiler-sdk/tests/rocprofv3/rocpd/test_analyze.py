@@ -1230,7 +1230,13 @@ def test_att_single_kernel_high_stall():
     from rocpd.analyze import analyze_thread_trace
 
     rows = [
-        {"pc": "0x0000", "hitcount": 8192, "latency": 200, "stall": 180, "src": "k.hip:10"},
+        {
+            "pc": "0x0000",
+            "hitcount": 8192,
+            "latency": 200,
+            "stall": 180,
+            "src": "k.hip:10",
+        },
         {"pc": "0x0004", "hitcount": 8192, "latency": 40, "stall": 5, "src": "k.hip:11"},
     ]
     with tempfile.TemporaryDirectory() as d:
@@ -1260,7 +1266,13 @@ def test_att_stall_ratio_threshold_for_recommendations():
 
     rows = [
         # stall_ratio = 160/200 = 0.80 → HIGH; hitcount = 8192 > 6400
-        {"pc": "0x0000", "hitcount": 8192, "latency": 200, "stall": 160, "src": "k.hip:5"},
+        {
+            "pc": "0x0000",
+            "hitcount": 8192,
+            "latency": 200,
+            "stall": 160,
+            "src": "k.hip:5",
+        },
     ]
     with tempfile.TemporaryDirectory() as d:
         (pathlib.Path(d) / "stats_hot_kernel.csv").write_text(_att_csv_content(rows))
@@ -1375,11 +1387,15 @@ def test_att_multiple_kernels_sorted_by_weighted_stall():
     with tempfile.TemporaryDirectory() as d:
         # Kernel A: small weighted stall
         (pathlib.Path(d) / "stats_kernel_a.csv").write_text(
-            _att_csv_content([{"pc": "0x0000", "hitcount": 1000, "latency": 100, "stall": 50}])
+            _att_csv_content(
+                [{"pc": "0x0000", "hitcount": 1000, "latency": 100, "stall": 50}]
+            )
         )
         # Kernel B: large weighted stall
         (pathlib.Path(d) / "stats_kernel_b.csv").write_text(
-            _att_csv_content([{"pc": "0x0000", "hitcount": 100000, "latency": 200, "stall": 190}])
+            _att_csv_content(
+                [{"pc": "0x0000", "hitcount": 100000, "latency": 200, "stall": 190}]
+            )
         )
         result = analyze_thread_trace(d)
 
@@ -1400,11 +1416,15 @@ def test_att_summary_counts():
     with tempfile.TemporaryDirectory() as d:
         # High stall (stall_ratio=0.90, hitcount=8192)
         (pathlib.Path(d) / "stats_kernel_high.csv").write_text(
-            _att_csv_content([{"pc": "0x0000", "hitcount": 8192, "latency": 100, "stall": 90}])
+            _att_csv_content(
+                [{"pc": "0x0000", "hitcount": 8192, "latency": 100, "stall": 90}]
+            )
         )
         # Low stall (stall_ratio=0.10, hitcount=8192)
         (pathlib.Path(d) / "stats_kernel_low.csv").write_text(
-            _att_csv_content([{"pc": "0x0000", "hitcount": 8192, "latency": 100, "stall": 10}])
+            _att_csv_content(
+                [{"pc": "0x0000", "hitcount": 8192, "latency": 100, "stall": 10}]
+            )
         )
         result = analyze_thread_trace(d)
 
@@ -1422,7 +1442,9 @@ def test_att_json_output_includes_att_trace_field():
 
     with tempfile.TemporaryDirectory() as d:
         (pathlib.Path(d) / "stats_k.csv").write_text(
-            _att_csv_content([{"pc": "0x0000", "hitcount": 8192, "latency": 100, "stall": 80}])
+            _att_csv_content(
+                [{"pc": "0x0000", "hitcount": 8192, "latency": 100, "stall": 80}]
+            )
         )
         att = analyze_thread_trace(d)
 
@@ -1434,7 +1456,9 @@ def test_att_json_output_includes_att_trace_field():
         att_analysis=att,
     )
     doc = json.loads(output)
-    assert "att_trace" in doc, "att_trace key should appear in JSON when ATT data is present"
+    assert (
+        "att_trace" in doc
+    ), "att_trace key should appear in JSON when ATT data is present"
     assert doc["schema_version"] == "0.4.0"
     assert doc["profiling_info"]["analysis_tier"] == 3
 
@@ -1460,9 +1484,17 @@ def test_att_text_output_shows_att_section():
 
     with tempfile.TemporaryDirectory() as d:
         (pathlib.Path(d) / "stats_stall_kernel.csv").write_text(
-            _att_csv_content([
-                {"pc": "0x0000", "hitcount": 8192, "latency": 200, "stall": 180, "src": "my.hip:42"}
-            ])
+            _att_csv_content(
+                [
+                    {
+                        "pc": "0x0000",
+                        "hitcount": 8192,
+                        "latency": 200,
+                        "stall": 180,
+                        "src": "my.hip:42",
+                    }
+                ]
+            )
         )
         att = analyze_thread_trace(d)
 
@@ -1490,7 +1522,9 @@ def test_att_malformed_csv_skipped_gracefully():
         (pathlib.Path(d) / "stats_bad_kernel.csv").write_text("not,valid,csv\nfoo,bar")
         # Valid CSV alongside it
         (pathlib.Path(d) / "stats_good_kernel.csv").write_text(
-            _att_csv_content([{"pc": "0x0000", "hitcount": 8192, "latency": 100, "stall": 80}])
+            _att_csv_content(
+                [{"pc": "0x0000", "hitcount": 8192, "latency": 100, "stall": 80}]
+            )
         )
         result = analyze_thread_trace(d)
 

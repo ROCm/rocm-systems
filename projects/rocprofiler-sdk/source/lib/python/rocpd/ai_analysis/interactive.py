@@ -3693,7 +3693,13 @@ class WorkflowSession:
                 )
                 _print("  Select [3] at the next prompt to run it.", style="dim")
                 return None
-            if choice == "t" and all_info and already_reprofiled and has_real_data and not _att_already_run:
+            if (
+                choice == "t"
+                and all_info
+                and already_reprofiled
+                and has_real_data
+                and not _att_already_run
+            ):
                 # Build ATT command and route it to Phase 7 as option [3].
                 # Phase 4 auto-detects stats_*.csv in the output dir and runs ATT analysis.
                 run_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
