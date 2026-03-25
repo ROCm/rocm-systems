@@ -152,7 +152,7 @@ bool hsakmtRuntime::ReserveLocalHeapSpace() {
         if (device->IsDgpu())
           total_local_size = wsl::Max(device->LocalHeapSize(), total_local_size);
         else
-          total_local_size = wsl::Max(device->LocalHeapSize(), device->NonLocalHeapSize(), total_local_size);
+          total_local_size = wsl::Max(device->LocalHeapSize() + device->NonLocalHeapSize(), total_local_size);
     }
 
     total_local_size = wsl::AlignUp(total_local_size, align) * 4;
