@@ -7,7 +7,9 @@ import argparse
 import os
 import sys
 import sqlite3
+from collections.abc import Sequence
 from pathlib import Path
+from typing import Any, Optional
 
 
 class validation_rule:
@@ -15,13 +17,13 @@ class validation_rule:
 
     def __init__(
         self,
-        description,
-        query,
-        expected_result,
-        comparison,
-        error_message,
-        requires=None,
-    ):
+        description: str,
+        query: str,
+        expected_result: Any,
+        comparison: str,
+        error_message: str,
+        requires: Optional[str] = None,
+    ) -> None:
         self.description = description
         self.query = query
         self.expected_result = expected_result
@@ -32,7 +34,7 @@ class validation_rule:
     def __repr__(self):
         return f"validation_rule(description={self.description}, query={self.query})"
 
-    def validate_query(self, result):
+    def validate_query(self, result: Any) -> bool:
         """
         Validate the actual result against expected using the specified comparison
         defined in validation_queries in rules definition.
@@ -58,8 +60,13 @@ class required_table:
     """Class to represent a required table as defined in JSON rules file"""
 
     def __init__(
-        self, name, name_prefix, required_columns, min_rows=1, validation_queries=None
-    ):
+        self,
+        name: Optional[str],
+        name_prefix: Optional[str],
+        required_columns: list[str],
+        min_rows: int = 1,
+        validation_queries: Optional[list[validation_rule]] = None,
+    ) -> None:
         if name is None and name_prefix is None:
             raise ValueError("Either 'name' or 'name_prefix' must be specified")
         if name is not None and name_prefix is not None:
@@ -77,7 +84,7 @@ class required_table:
         )
         return f"required_table({identifier}, required_columns={self.required_columns})"
 
-    def get_table_identifier(self):
+    def get_table_identifier(self) -> str:
         """Returns the table identifier (name or prefix) for display purposes"""
         return self.name if self.name else f"{self.name_prefix}*"
 
@@ -98,7 +105,7 @@ def print_help():
         -db, --database PATH        Path to the ROCPD database file (.db) to validate
 
     OPTIONAL ARGUMENTS:
-        -r, --validation_rules PATH [PATH ...]  One or more JSON rules files (default: default_rules.json)
+        -r, --validation-rules PATH [PATH ...]  One or more JSON rules files (default: default-rules.json)
         -h, --help                  Show this help message and exit
 
     EXAMPLES:
@@ -126,21 +133,32 @@ def print_help():
     """)
 
 
-def validate_table(cursor, rule, tables, available_metrics=None) -> bool:
+def validate_table(
+    cursor: sqlite3.Cursor,
+    rule: required_table,
+    tables: Sequence[sqlite3.Row],
+    available_metrics: Optional[set[str]] = None,
+) -> bool:
     """
-    Validates a database table against a set of rules.
-    This function checks if a table specified by `rule` exists in the provided `tables` list,
-    verifies that all required columns are present, ensures the table meets a minimum row count,
-    and executes custom validation queries defined in the rule.
+    Validate database table(s) against a single required-table rule.
+
+    Looks up matching table(s) by exact name or name prefix, checks required columns
+    and minimum row count, then runs each validation query on the rule (skipping
+    queries whose metric is listed in ``requires`` when that metric is absent from
+    ``available_metrics``).
 
     Args:
-        cursor: Database cursor used to execute SQL queries.
-        rule: An object containing validation rules for the table.
-        bool: True if the table passes all validation checks, False otherwise.
+        cursor: SQLite cursor used to execute queries.
+        rule: ``required_table`` describing which table(s) to match and how to validate them.
+        tables: Rows from ``sqlite_master`` (or similar) with a ``name`` column listing
+            tables/views in the database.
+        available_metrics: If set, metric names available on the current platform; queries
+            with ``validation_query.requires`` not in this set are skipped. If ``None``,
+            no queries are skipped for that reason.
 
     Returns:
-        bool: True if table is found in the database and if all validation queries pass,
-              False if any validation fails or matching table not found in database.
+        True if every matching table passes column, row-count, and validation-query checks;
+        False if no matching table is found or any check fails.
     """
 
     matching_tables = []
@@ -256,19 +274,27 @@ def validate_table(cursor, rule, tables, available_metrics=None) -> bool:
     return all_tables_passed
 
 
-def validate_rocpd(cursor, rules, tables, available_metrics=None) -> bool:
+def validate_rocpd(
+    cursor: sqlite3.Cursor,
+    rules: Sequence[required_table],
+    tables: Sequence[sqlite3.Row],
+    available_metrics: Optional[set[str]] = None,
+) -> bool:
     """
-    Validation of a ROCPD database by applying a set of validation rules to specified tables.
-    It iterates through each rule, validates the corresponding table, and provides feedback on the validation status.
+    Run all loaded rules against a ROCPD database.
+
+    For each ``required_table`` rule, finds matching table(s) in the database and
+    validates them (see ``validate_table``).
 
     Args:
-        cursor: Database cursor object for executing SQL queries
-        rules: List of validation rule objects containing validation criteria for a specific table
-        tables: Collection of table definitions or table objects to validate against
+        cursor: SQLite cursor for executing queries.
+        rules: ``required_table`` instances loaded from JSON (one rule per table spec).
+        tables: Rows listing table/view names (e.g. from ``SELECT name FROM sqlite_master``).
+        available_metrics: Optional set of GPU metric names; passed through to
+            ``validate_table`` to skip queries when a metric is unavailable.
 
     Returns:
-        bool: True if all validation checks pass for all tables,
-              False if any validation fails.
+        True if every rule passes; False if any rule fails.
     """
 
     print("Starting ROCPD database validation...")
@@ -287,16 +313,24 @@ def validate_rocpd(cursor, rules, tables, available_metrics=None) -> bool:
     return db_valid
 
 
-def load_validation_rules(validation_rules) -> list:
+def load_validation_rules(
+    validation_rules: Sequence[Path | str],
+) -> list[required_table]:
     """
-    Load validation rules from a JSON file and convert them to validation objects.
+    Load validation rules from one or more JSON files, producing ``required_table`` objects.
+
+    Each file must define a top-level ``required_tables`` array (see the JSON schema
+    used by ``default-rules.json``). Rules from all files are concatenated in order.
 
     Args:
-        rules_file: Path to the JSON rules file containing validation configuration.
+        validation_rules: Paths to JSON rules files (``str`` or ``Path``). If any path
+            does not exist, loading stops and an empty list is returned. If a file cannot
+            be read or parsed, ``load_validation_rules`` returns an empty list and prints
+            an error.
 
     Returns:
-        list: A list of required_table objects.
-              Returns empty list if any file doesn't exist or on error.
+        A list of ``required_table`` instances, or an empty list on missing path,
+        read error, or parse error.
     """
     import json
 
