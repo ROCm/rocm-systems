@@ -244,7 +244,7 @@ hsa_ven_amd_aqlprofile_validate_event(hsa_agent_t                           agen
         if(pm4_factory->GetBlockInfo(event) != nullptr) *result = true;
     } catch(aql_profile::event_exception& e)
     {
-        INFO_LOGGING << e.what();
+        ROCP_INFO << "aqlprofile::" << __FUNCTION__ << "(): " << e.what();
     } catch(std::exception& e)
     {
         ERR_LOGGING << e.what();
@@ -830,7 +830,8 @@ hsa_ven_amd_aqlprofile_iterate_data(const hsa_ven_amd_aqlprofile_profile_t* prof
                     }
                     else if(control_ptr[se_index].status & sqttbuilder->GetBufferFullMask())
                     {
-                        ERR2_LOGGING << "SQTT data buffer full, SE(" << se_index << ")";
+                        ROCP_ERROR << "aqlprofile::" << __FUNCTION__
+                                   << "(): SQTT data buffer full, SE(" << se_index << ")";
                         if(status == HSA_STATUS_SUCCESS) status = HSA_STATUS_ERROR_OUT_OF_RESOURCES;
                     }
                 }
