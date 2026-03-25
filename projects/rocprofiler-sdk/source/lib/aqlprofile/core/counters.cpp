@@ -24,7 +24,7 @@
 #include "lib/aqlprofile/core/aql_profile.hpp"
 #include "lib/aqlprofile/core/commandbuffermgr.hpp"
 #include "lib/aqlprofile/core/counter_dimensions.hpp"
-#include "lib/aqlprofile/core/logger.h"
+#include "lib/aqlprofile/core/logger.hpp"
 #include "lib/aqlprofile/core/memorymanager.hpp"
 #include "lib/aqlprofile/core/pm4_factory.h"
 #include "lib/aqlprofile/pm4/cmd_builder.h"
@@ -322,7 +322,7 @@ aqlprofile_pmc_create_packets(aqlprofile_handle_t*                 handle,
             handle, packets, profile, alloc_cb, dealloc_cb, memcpy_cb, userdata);
     } catch(hsa_status_t err)
     {
-        ERR_LOGGING << err;
+        ERR_LOGGING << fmt::format("hsa_status_t: {}", static_cast<int>(err));
         return err;
     } catch(std::exception& e)
     {
@@ -359,7 +359,7 @@ aqlprofile_pmc_iterate_data(aqlprofile_handle_t            handle,
         return aql_profile_v2::_internal_aqlprofile_pmc_iterate_data(handle, callback, userdata);
     } catch(hsa_status_t err)
     {
-        ERR_LOGGING << err;
+        ERR_LOGGING << fmt::format("hsa_status_t: {}", static_cast<int>(err));
         return err;
     } catch(std::exception& e)
     {
@@ -386,7 +386,7 @@ aqlprofile_iterate_event_ids(aqlprofile_eventname_callback_t callback, void* use
         }
     } catch(hsa_status_t err)
     {
-        ERR_LOGGING << err;
+        ERR_LOGGING << fmt::format("hsa_status_t: {}", static_cast<int>(err));
         return err;
     } catch(...)
     {
@@ -409,7 +409,7 @@ aqlprofile_iterate_event_coord(aqlprofile_agent_handle_t        agent,
         if(attrib.get_num() == 0u) return HSA_STATUS_ERROR;
 
         std::array<uint8_t, 32> coord;
-        ROCP_FATAL_IF(attrib.get_num() >= coord.size()) << "attrib num exceeds coordinates size";
+        AQL_FATAL_IF(attrib.get_num() >= coord.size()) << "attrib num exceeds coordinates size";
         attrib.get_coordinates(coord.data(), counter_id);
 
         for(size_t i = 0; i < attrib.get_num(); i++)
@@ -419,7 +419,7 @@ aqlprofile_iterate_event_coord(aqlprofile_agent_handle_t        agent,
         }
     } catch(hsa_status_t err)
     {
-        ERR_LOGGING << err;
+        ERR_LOGGING << fmt::format("hsa_status_t: {}", static_cast<int>(err));
         return err;
     } catch(...)
     {
@@ -472,7 +472,7 @@ aqlprofile_register_agent_info(aqlprofile_agent_handle_t* agent_id,
         }
     } catch(hsa_status_t err)
     {
-        ERR_LOGGING << err;
+        ERR_LOGGING << fmt::format("hsa_status_t: {}", static_cast<int>(err));
         return err;
     } catch(...)
     {
@@ -497,7 +497,7 @@ aqlprofile_validate_pmc_event(aqlprofile_agent_handle_t     agent,
         if(pm4_factory->GetBlockInfo(event) != nullptr) *result = true;
     } catch(hsa_status_t err)
     {
-        ERR_LOGGING << err;
+        ERR_LOGGING << fmt::format("hsa_status_t: {}", static_cast<int>(err));
         return err;
     } catch(...)
     {
@@ -547,7 +547,7 @@ aqlprofile_get_pmc_info(const aqlprofile_pmc_profile_t* profile,
 
     } catch(hsa_status_t err)
     {
-        ERR_LOGGING << err;
+        ERR_LOGGING << fmt::format("hsa_status_t: {}", static_cast<int>(err));
         return err;
     } catch(...)
     {

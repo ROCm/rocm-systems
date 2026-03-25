@@ -21,11 +21,11 @@
 // THE SOFTWARE.
 
 #include "lib/aqlprofile/core/gfx9_factory.h"
+#include "lib/aqlprofile/core/logger.hpp"
 #include "lib/aqlprofile/def/gfx908_def.h"
 #include "lib/aqlprofile/pm4/gfx9_cmd_builder.h"
 #include "lib/aqlprofile/pm4/pmc_builder.h"
 #include "lib/aqlprofile/pm4/sqtt_builder.h"
-#include "lib/common/logging.hpp"
 
 namespace aql_profile
 {
@@ -105,8 +105,8 @@ Mi100Factory::Mi100Factory(const AgentInfo* agent_info, bool is_base)
             case SqCounterBlockId: block_info->event_id_max = 303; break;
             case TcpCounterBlockId:
                 block_info->event_id_max = 87;
-                ROCP_FATAL_IF(!is_base && agent_info->se_per_xcc() * block_info->instance_count !=
-                                              cu_block_delay_table_size)
+                AQL_FATAL_IF(!is_base && agent_info->se_per_xcc() * block_info->instance_count !=
+                                             cu_block_delay_table_size)
                     << fmt::format("Mismatch in CU block delay table size. Expected {}, got {}. "
                                    "agent devid: {}. agent SE/XCC: {}, block instances: {}",
                                    agent_info->se_per_xcc() * block_info->instance_count,

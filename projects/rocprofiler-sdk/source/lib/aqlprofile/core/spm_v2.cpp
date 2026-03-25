@@ -4,7 +4,7 @@
 
 #include "lib/aqlprofile/aql_profile_v2.h"
 #include "lib/aqlprofile/core/commandbuffermgr.hpp"
-#include "lib/aqlprofile/core/logger.h"
+#include "lib/aqlprofile/core/logger.hpp"
 #include "lib/aqlprofile/core/memorymanager.hpp"
 #include "lib/aqlprofile/core/pm4_factory.h"
 #include "lib/aqlprofile/core/spm_common.hpp"

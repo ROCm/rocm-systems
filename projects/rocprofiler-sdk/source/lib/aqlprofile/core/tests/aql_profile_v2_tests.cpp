@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "lib/aqlprofile/aql_profile_v2.h"
-#include "lib/aqlprofile/core/logger.h"
+#include "lib/aqlprofile/core/logger.hpp"
 #include "lib/aqlprofile/core/pm4_factory.h"
 
 #include <gmock/gmock.h>
