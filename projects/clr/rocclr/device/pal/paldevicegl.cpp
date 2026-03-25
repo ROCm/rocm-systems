@@ -631,6 +631,8 @@ bool Device::glCanInterop(void* GLplatformContext, void* GLdeviceContext) const 
   bool canInteroperate = false;
 
 #ifdef ATI_OS_WIN
+  if (!amd::GLFunctions::wglGetContextGPUInfoAMD_s) return false;
+
   LUID glAdapterLuid = {0, 0};
   UINT glChainBitMask = 0;
   HGLRC hRC = (HGLRC)GLplatformContext;
@@ -649,7 +651,9 @@ bool Device::glCanInterop(void* GLplatformContext, void* GLdeviceContext) const 
   Display* disp = static_cast<Display*>(GLdeviceContext);
 
 
-  if (amd::GLFunctions::glXGetContextMVPUInfoAMD_s(ctx, &glDeviceId, &glChainMask)) {
+  if (amd::GLFunctions::glXGetContextMVPUInfoAMD_s &&
+      amd::GLFunctions::pfnMesaGLInteropGLXQueryDeviceInfo_s &&
+      amd::GLFunctions::glXGetContextMVPUInfoAMD_s(ctx, &glDeviceId, &glChainMask)) {
     mesa_glinterop_device_info info = {};
     if (amd::GLFunctions::pfnMesaGLInteropGLXQueryDeviceInfo_s(disp, ctx, &info) == 0) {
       // match the adapter

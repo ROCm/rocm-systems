@@ -201,14 +201,11 @@ int Context::create(const intptr_t* properties) {
     if (info_.flags_ & GLDeviceKhr) {
       // Init context for GL interop
       if (glenv_ == NULL) {
-        HMODULE h = (HMODULE)Os::loadLibrary(
-#ifdef _WIN32
-            "OpenGL32.dll"
-#else   //!_WIN32
-            "libGL.so.1"
-#endif  //!_WIN32
-        );
-        if (h && (glenv_ = new GLFunctions(h, (info_.flags_ & Flags::EGLDeviceKhr) != 0))) {
+        glenv_ = new GLFunctions((info_.flags_ & Flags::EGLDeviceKhr) != 0);
+        if (!glenv_->isValid()) {
+          delete glenv_;
+          glenv_ = NULL;
+        } else {
 #ifdef _WIN32
           info_.hCtx_ = (void*)glenv_->wglGetCurrentContext_();
           info_.hDev_[GLDeviceKhrIdx] = (void*)glenv_->wglGetCurrentDC_();
@@ -216,7 +213,6 @@ int Context::create(const intptr_t* properties) {
           info_.hCtx_ = (void*)glenv_->glXGetCurrentContext_();
           info_.hDev_[GLDeviceKhrIdx] = (void*)glenv_->glXGetCurrentDisplay_();
 #endif
-          GLFunctions::initAMDInterop(info_.hDev_[GLDeviceKhrIdx]);
         }
       }
 
@@ -236,6 +232,15 @@ int Context::create(const intptr_t* properties) {
         }
         p++;
       }
+    }
+  }
+
+  // Ensure GLFunctions is created for GL paths (covers explicit-context case)
+  if ((info_.flags_ & GLDeviceKhr) && glenv_ == NULL) {
+    glenv_ = new GLFunctions((info_.flags_ & Flags::EGLDeviceKhr) != 0);
+    if (!glenv_->isValid()) {
+      delete glenv_;
+      glenv_ = NULL;
     }
   }
 
@@ -269,19 +274,7 @@ int Context::create(const intptr_t* properties) {
       // return CL_INVALID_DX9_MEDIA_ADAPTER_KHR;
     }
   } else {
-    if (info_.flags_ & GLDeviceKhr) {
-      if (glenv_ == NULL) {
-        HMODULE h = (HMODULE)Os::loadLibrary(
-#ifdef _WIN32
-            "OpenGL32.dll"
-#else   //!_WIN32
-            "libGL.so.1"
-#endif  //!_WIN32
-        );
-        if (!h || !(glenv_ = new GLFunctions(h, (info_.flags_ & Flags::EGLDeviceKhr) != 0))) {
-          return CL_INVALID_GL_SHAREGROUP_REFERENCE_KHR;
-        }
-      }
+    if ((info_.flags_ & GLDeviceKhr) && glenv_) {
       if (!glenv_->init(reinterpret_cast<intptr_t>(info_.hDev_[GLDeviceKhrIdx]),
                         reinterpret_cast<intptr_t>(info_.hCtx_))) {
         delete glenv_;

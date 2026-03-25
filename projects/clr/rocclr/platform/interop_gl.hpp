@@ -290,8 +290,10 @@ class GLFunctions {
   PFNglXMakeCurrent glXMakeCurrent_;
 #endif
  public:
-  GLFunctions(HMODULE h, bool isEGL);
+  GLFunctions(bool isEGL);
   ~GLFunctions();
+
+  bool isValid() const { return libHandle_ != nullptr; }
 
   bool update(intptr_t hglrc);
   bool IsCurrentGlContext(const amd::Context::Info& info) const {
@@ -357,11 +359,6 @@ class GLFunctions {
 #define GLPREFIX(rtype, fcn, dclargs) PFN_##fcn fcn##_;
 // Declare pointers to GL functions
 #include "gl_functions.hpp"
-
-  //! Load AMD GL interop extension function pointers (process-wide, once).
-  //! @param glDeviceContext HDC on Windows, Display* on Linux — used if a
-  //!        temporary GL context must be created for wglGetProcAddress.
-  static bool initAMDInterop(void* glDeviceContext);
 
 #ifdef _WIN32
   static PFN_wglGetCurrentContext wglGetCurrentContext_s;
