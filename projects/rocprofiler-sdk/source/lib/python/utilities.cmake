@@ -191,9 +191,9 @@ function(rocprofiler_rocpd_python_bindings _VERSION)
             COMPONENT rocpd)
     endforeach()
 
-    # Copy ai_analysis directory and its contents (including subdirectories).
-    # Includes *.py modules, *.md docs, *.json schema files, and *.png assets
-    # (e.g. ai_analysis/share/amd_rocm_logo.png used by interactive.py banner).
+    # Copy ai_analysis directory and its contents (including subdirectories). Includes
+    # *.py modules, *.md docs, *.json schema files, and *.png assets (e.g.
+    # ai_analysis/share/amd_rocm_logo.png used by interactive.py banner).
     file(
         GLOB_RECURSE
         rocpd_AI_ANALYSIS_FILES
@@ -207,8 +207,7 @@ function(rocprofiler_rocpd_python_bindings _VERSION)
         file(RELATIVE_PATH _REL_PATH "${CMAKE_CURRENT_LIST_DIR}" "${_AI_FILE}")
         get_filename_component(_REL_DIR "${_REL_PATH}" DIRECTORY)
         file(MAKE_DIRECTORY ${rocpd_PYTHON_OUTPUT_DIRECTORY}/${_REL_DIR})
-        configure_file(${_AI_FILE}
-                       ${rocpd_PYTHON_OUTPUT_DIRECTORY}/${_REL_PATH} COPYONLY)
+        configure_file(${_AI_FILE} ${rocpd_PYTHON_OUTPUT_DIRECTORY}/${_REL_PATH} COPYONLY)
         install(
             FILES ${rocpd_PYTHON_OUTPUT_DIRECTORY}/${_REL_PATH}
             DESTINATION ${rocpd_PYTHON_INSTALL_DIRECTORY}/${_REL_DIR}
