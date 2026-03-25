@@ -71,6 +71,11 @@ schema_path = pkg_resources.files("rocpd.ai_analysis") / "docs" / "analysis-outp
 
 ## Version History
 
+> **Note**: Version labels below (v0.1.x, v0.1.y…) identify *analysis module* releases, not
+> changes to the JSON `schema_version` field. The JSON schema itself remains at **v0.1.0**
+> for all entries below unless a schema change is explicitly noted. Only entries that modify
+> the structure, field names, or types of the JSON output bump the `schema_version` string.
+
 ---
 
 ### v0.1.8 — 2026-02-27
