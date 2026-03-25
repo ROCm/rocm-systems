@@ -3351,9 +3351,11 @@ class WorkflowSession:
                 )
                 _print()
 
-            # Warn when GPU time is zero but profiling ran — likely multiprocessing
+            # Warn when GPU time is zero but profiling ran — likely multiprocessing.
+            # Skip this warning when ATT data is present: --att alone produces an empty
+            # kernel-dispatch DB (the trace is in stats_*.csv, not the DB).
             total_ns = result.profiling_info.total_duration_ns if eb else 0
-            if total_ns == 0 and self._state.trace_history:
+            if total_ns == 0 and self._state.trace_history and not _att_dir:
                 last_cmd = self._state.trace_history[-1].command
                 already_has_sync = "--process-sync" in last_cmd
                 _print("  ⚠  No GPU kernel activity captured.", style="yellow")
@@ -3587,11 +3589,14 @@ class WorkflowSession:
                 _print(f"  [{i}]  [{pri}]  {issue}", style=style)
             _print()
             has_real_data = bool(self._state.trace_history)
+            _att_already_run = any(
+                "--att" in tr.command for tr in self._state.trace_history
+            )
             if all_info and already_reprofiled:
                 # Re-profiling already attempted; nothing new to suggest at Tier 1/2.
                 if has_real_data:
                     # GPU data captured — we've exhausted Tier 1/2 analysis.
-                    # Offer deeper tiers.
+                    # Offer deeper tiers (skip options already collected).
                     _print(
                         "  All Tier 1/2 data collected. To investigate further:",
                         style="yellow",
@@ -3601,6 +3606,11 @@ class WorkflowSession:
                         "already shown in the report above",
                         style="dim",
                     )
+                    if not _att_already_run:
+                        _print(
+                            "  • ATT (Tier 3): per-instruction stall analysis",
+                            style="dim",
+                        )
                     _print(
                         "  • PC Sampling (Tier 3): instruction-level hotspots "
                         "within each kernel",
@@ -3616,10 +3626,11 @@ class WorkflowSession:
                         "  [d]  Go deeper: collect PC sampling data (Tier 3 — stochastic)",
                         style="cyan",
                     )
-                    _print(
-                        "  [t]  Go deeper: collect ATT trace (Tier 3 — instruction stall analysis)",
-                        style="cyan",
-                    )
+                    if not _att_already_run:
+                        _print(
+                            "  [t]  Go deeper: collect ATT trace (Tier 3 — instruction stall analysis)",
+                            style="cyan",
+                        )
                 else:
                     # No GPU data at all — likely multiprocessing spawn issue.
                     _print(
@@ -3682,7 +3693,7 @@ class WorkflowSession:
                 )
                 _print("  Select [3] at the next prompt to run it.", style="dim")
                 return None
-            if choice == "t" and all_info and already_reprofiled and has_real_data:
+            if choice == "t" and all_info and already_reprofiled and has_real_data and not _att_already_run:
                 # Build ATT command and route it to Phase 7 as option [3].
                 # Phase 4 auto-detects stats_*.csv in the output dir and runs ATT analysis.
                 run_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")

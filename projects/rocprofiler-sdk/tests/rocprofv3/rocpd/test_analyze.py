@@ -1331,7 +1331,10 @@ def test_att_below_hitcount_threshold_no_rec():
         att_analysis=att,
     )
     att_recs = [r for r in recs if "ATT" in r["category"]]
-    assert att_recs == [], "Should not emit ATT rec when hitcount below threshold"
+    # Below hitcount threshold: no HIGH/MEDIUM rec, but an INFO rec is emitted
+    # confirming ATT ran and found no significant stalls.
+    assert len(att_recs) == 1
+    assert att_recs[0]["priority"] == "INFO"
 
 
 def test_att_below_stall_ratio_threshold_no_rec():
@@ -1356,7 +1359,10 @@ def test_att_below_stall_ratio_threshold_no_rec():
         att_analysis=att,
     )
     att_recs = [r for r in recs if "ATT" in r["category"]]
-    assert att_recs == [], "Should not emit ATT rec when stall_ratio below 0.40"
+    # Below stall_ratio threshold: no HIGH/MEDIUM rec, but an INFO rec is emitted
+    # confirming ATT ran and found no significant stalls.
+    assert len(att_recs) == 1
+    assert att_recs[0]["priority"] == "INFO"
 
 
 def test_att_multiple_kernels_sorted_by_weighted_stall():

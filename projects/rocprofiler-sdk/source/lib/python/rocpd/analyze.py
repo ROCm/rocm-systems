@@ -1146,6 +1146,7 @@ def generate_recommendations(
 
     # Tier 3: ATT (Advanced Thread Trace) recommendations
     if att_analysis and att_analysis.get("has_att_data"):
+        _pre_att_rec_count = len(recommendations)
         _CATEGORY_LABELS: Dict[str, str] = {
             "att_vmem_latency": "VMEM Latency",
             "att_lds_conflict": "LDS Bank Conflict",
@@ -1245,6 +1246,28 @@ def generate_recommendations(
                             ),
                         },
                     ],
+                }
+            )
+
+        # If ATT data was present but no HIGH/MEDIUM stalls found, emit an informational rec
+        # so the user knows ATT ran successfully and kernels look clean at instruction level.
+        if len(recommendations) == _pre_att_rec_count:
+            k_count = att_analysis.get("summary", {}).get("kernel_count", 0)
+            recommendations.append(
+                {
+                    "priority": "INFO",
+                    "category": "ATT Analysis",
+                    "issue": (
+                        f"ATT analysis complete: {k_count} kernel(s) traced — "
+                        "no significant instruction-level stalls detected (stall ratio < 40%)"
+                    ),
+                    "suggestion": "GPU kernels appear well-optimized at the instruction level",
+                    "actions": [
+                        "Consider profiling with hardware counters (--pmc) to check memory bandwidth utilization",
+                        "Use rocprof-compute for full roofline model and micro-architecture metrics",
+                    ],
+                    "estimated_impact": "N/A — no significant stalls found",
+                    "commands": [],
                 }
             )
 
