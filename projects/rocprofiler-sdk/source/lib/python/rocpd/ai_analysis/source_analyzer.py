@@ -822,9 +822,7 @@ class SourceAnalyzer:
 
         # hipLaunchKernelGGL(kernel_name, ...
         for m in re.finditer(
-            r"\bhipLaunchKernelGGL\s*\(\s*(?:\(void\s*\*\)\s*)?(\w+)",
-            clean,
-            re.MULTILINE,
+            r"\bhipLaunchKernelGGL\s*\(\s*(?:\(void\s*\*\)\s*)?(\w+)", clean, re.MULTILINE
         ):
             name = m.group(1)
             if name not in seen:
