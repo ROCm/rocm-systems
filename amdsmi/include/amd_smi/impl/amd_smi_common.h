@@ -26,13 +26,6 @@
 #include <map>
 #include "amd_smi/amdsmi.h"
 
-#ifdef ENABLE_ESMI_LIB
-extern "C" {
-    #include <cstdint>
-    #include <e_smi/e_smi.h>
-}
-#endif
-
 namespace amd::smi {
 
 const std::map<unsigned, amdsmi_vram_type_t> vram_type_map = {
@@ -54,35 +47,6 @@ const std::map<unsigned, amdsmi_vram_type_t> vram_type_map = {
 
 amdsmi_vram_type_t vram_type_value(unsigned type);
 
-#ifdef ENABLE_ESMI_LIB
-// Define a map of esmi status codes to amdsmi status codes
-const std::map<esmi_status_t, amdsmi_status_t> esmi_status_map = {
-    {ESMI_SUCCESS, AMDSMI_STATUS_SUCCESS},
-    {ESMI_INITIALIZED, AMDSMI_STATUS_SUCCESS},
-    {ESMI_INVALID_INPUT, AMDSMI_STATUS_INVAL},
-    {ESMI_NOT_SUPPORTED, AMDSMI_STATUS_NOT_SUPPORTED},
-    {ESMI_PERMISSION, AMDSMI_STATUS_NO_PERM},
-    {ESMI_INTERRUPTED, AMDSMI_STATUS_INTERRUPT},
-    {ESMI_IO_ERROR, AMDSMI_STATUS_IO},
-    {ESMI_FILE_ERROR, AMDSMI_STATUS_FILE_ERROR},
-    {ESMI_NO_MEMORY, AMDSMI_STATUS_OUT_OF_RESOURCES},
-    {ESMI_DEV_BUSY, AMDSMI_STATUS_BUSY},
-    {ESMI_NOT_INITIALIZED, AMDSMI_STATUS_NOT_INIT},
-    {ESMI_UNEXPECTED_SIZE, AMDSMI_STATUS_UNEXPECTED_SIZE},
-    {ESMI_UNKNOWN_ERROR, AMDSMI_STATUS_UNKNOWN_ERROR},
-    {ESMI_NO_ENERGY_DRV, AMDSMI_STATUS_NO_ENERGY_DRV},
-    {ESMI_NO_MSR_DRV, AMDSMI_STATUS_NO_MSR_DRV},
-    {ESMI_NO_HSMP_DRV, AMDSMI_STATUS_NO_HSMP_DRV},
-    {ESMI_NO_HSMP_SUP, AMDSMI_STATUS_NO_HSMP_SUP},
-    {ESMI_NO_DRV, AMDSMI_STATUS_NO_DRV},
-    {ESMI_FILE_NOT_FOUND, AMDSMI_STATUS_FILE_NOT_FOUND},
-    {ESMI_ARG_PTR_NULL, AMDSMI_STATUS_ARG_PTR_NULL},
-    {ESMI_HSMP_TIMEOUT, AMDSMI_STATUS_HSMP_TIMEOUT},
-    {ESMI_NO_HSMP_MSG_SUP, AMDSMI_STATUS_NO_HSMP_MSG_SUP},
-};
-
-amdsmi_status_t esmi_to_amdsmi_status(esmi_status_t status);
-#endif
 
 } // namespace amd::smi
 

@@ -57,11 +57,6 @@ list(REMOVE_ITEM RAS_DECODE_SOURCES "main.c")
 set(SRC_LIST ${SRC_LIST} ${RAS_DECODE_SOURCES})
 set(INC_LIST ${INC_LIST} ${RAS_DECODE_INCLUDES})
 
-if(ENABLE_ESMI_LIB)
-    list(APPEND INC_LIST ${ESMI_INC_DIR}/e_smi/e_smi.h)
-    list(APPEND INC_LIST ${ESMI_INC_DIR}/e_smi/e_smi_monitor.h)
-    list(APPEND INC_LIST ${ESMI_INC_DIR}/e_smi/e_smi_utils.h)
-endif()
 # VERSION_* variables should be set by get_version_from_tag
 message("Package version: ${PKG_VERSION_STR}")
 

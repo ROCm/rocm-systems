@@ -160,57 +160,7 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wformat=2 -fno-common -Wstrict-overflow
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Woverloaded-virtual -Wreorder")
 
 if(ENABLE_ESMI_LIB)
-    # Supported esmi library version tag
-    set(current_esmi_tag "esmi_pkg_ver-4.2")
-
-    if(NOT EXISTS ${PROJECT_SOURCE_DIR}/esmi_ib_library/src)
-        # TODO: use ExternalProject_Add instead or a submodule
-        message(STATUS "Adding esmi_ib_library...")
-        execute_process(COMMAND git clone --depth=1 -b ${current_esmi_tag} https://github.com/amd/esmi_ib_library.git
-                                ${PROJECT_SOURCE_DIR}/esmi_ib_library)
-    else()
-        message(STATUS "esmi_ib_library already installed, checking version...")
-
-        # Grab latest commit and get the tag
-        execute_process(
-            COMMAND git rev-list --tags --max-count=1
-            WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/esmi_ib_library
-            OUTPUT_VARIABLE latest_commit
-            OUTPUT_STRIP_TRAILING_WHITESPACE)
-        execute_process(
-            COMMAND git describe --tags ${latest_commit} --match "*pkg*"
-            WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/esmi_ib_library
-            OUTPUT_VARIABLE latest_esmi_tag
-            OUTPUT_STRIP_TRAILING_WHITESPACE)
-
-        # Update to latest tags if not matched
-        if(NOT latest_esmi_tag STREQUAL current_esmi_tag)
-            message(STATUS "Updating esmi_ib_library...")
-            execute_process(
-                COMMAND git clone --depth=1 -b ${current_esmi_tag} https://github.com/amd/esmi_ib_library.git
-                        ${PROJECT_SOURCE_DIR}/esmi_ib_library_temp RESULT_VARIABLE clone_result)
-            if(clone_result EQUAL 0)
-                file(REMOVE_RECURSE ${PROJECT_SOURCE_DIR}/esmi_ib_library)
-                file(RENAME ${PROJECT_SOURCE_DIR}/esmi_ib_library_temp ${PROJECT_SOURCE_DIR}/esmi_ib_library)
-                message(STATUS "Successfully cloned updated esmi_ib_library")
-            else()
-                file(REMOVE_RECURSE ${PROJECT_SOURCE_DIR}/esmi_ib_library_temp)
-                message(FATAL_ERROR "Failed to clone updated esmi_ib_library")
-            endif()
-        else()
-            message(STATUS "esmi_ib_library is the latest version: ${current_esmi_tag}...")
-        endif()
-    endif()
-
-    # Make sure to update the amd_hsmp.h file with the corresponding esmi version
-    file(COPY "${PROJECT_SOURCE_DIR}/include/amd_smi/impl/amd_hsmp.h"
-         DESTINATION "${PROJECT_SOURCE_DIR}/esmi_ib_library/include/asm")
-
     add_definitions("-DENABLE_ESMI_LIB=1")
-    set(ESMI_INC_DIR "${PROJECT_SOURCE_DIR}/esmi_ib_library/include")
-    set(ESMI_SRC_DIR "${PROJECT_SOURCE_DIR}/esmi_ib_library/src")
-    # esmi has a lot of write-strings warnings - silence them
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-write-strings")
 endif()
 
 include_directories(
@@ -222,13 +172,6 @@ include_directories(
 )
 
 set(CMN_SRC_LIST)
-
-if(ENABLE_ESMI_LIB)
-    list(APPEND CMN_SRC_LIST ${ESMI_SRC_DIR}/e_smi.c)
-    list(APPEND CMN_SRC_LIST ${ESMI_SRC_DIR}/e_smi_monitor.c)
-    list(APPEND CMN_SRC_LIST ${ESMI_SRC_DIR}/e_smi_plat.c)
-    list(APPEND CMN_SRC_LIST ${ESMI_SRC_DIR}/e_smi_utils.c)
-endif()
 
 set(CMN_INC_LIST)
 
