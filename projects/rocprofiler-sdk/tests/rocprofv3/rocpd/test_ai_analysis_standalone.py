@@ -27,7 +27,6 @@ from pathlib import Path
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Helpers: build a minimal AnalysisResult without touching a real DB
 # ---------------------------------------------------------------------------
