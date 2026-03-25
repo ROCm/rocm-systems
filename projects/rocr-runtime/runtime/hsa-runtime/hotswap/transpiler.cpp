@@ -3626,15 +3626,15 @@ static void PatchKernelDescriptorsForWave64(uint8_t* elf, size_t elf_size,
     rsrc1 |= (1u << 21) | (1u << 23);
 
     // GFX12 RSRC1 layout: bits [5:0] = VGPR field, bits [11:6] = SGPR field
-    // GFX9  RSRC1 layout: bits [5:0] = SGPR field, bits [11:6] = VGPR field
+    // GFX9  RSRC1 layout: bits [5:0] = VGPR field (gran 4), bits [9:6] = SGPR field (gran 8)
+    //                      bits [11:10] = PRIORITY
     //
-    // On GFX940/GFX942 (CDNA3), the VGPR allocation works differently than GFX908:
-    //   - RSRC1 bits [11:6] (VGPR field) = 0 for non-MFMA kernels
-    //   - RSRC3 ACCUM_OFFSET controls ALL VGPR allocation: arch_vgprs = (ACCUM+1)*4
-    //   - The RSRC1 VGPR field only specifies extra accumulation VGPRs (for MFMA)
-    //   - Setting RSRC1 VGPR field > 0 without proper MFMA usage causes INVALID_ISA
+    // On GFX942 (CDNA3), RSRC3 ACCUM_OFFSET controls arch VGPR allocation:
+    //   arch_vgprs = (ACCUM_OFFSET+1)*4.
+    //   total_vgprs = max((RSRC1_VGPR+1)*4, (ACCUM+1)*4).
+    //   Setting RSRC1 VGPR = ACCUM means all VGPRs are arch (no accum VGPRs).
     //
-    // Convert VGPR count: GFX12 granularity 12 (wave32) → GFX9 controlled by ACCUM_OFFSET.
+    // Convert VGPR count: GFX12 granularity 12 (wave32) → GFX9 granularity 4.
     // Add 8 extra VGPRs: 2 save registers (sv_x, sv_y) + 4 temp VGPRs (vt0-vt3)
     // + padding to align to 4-VGPR granularity.
     uint32_t vgpr_field12 = rsrc1 & 0x3Fu;
@@ -3649,15 +3649,12 @@ static void PatchKernelDescriptorsForWave64(uint8_t* elf, size_t elf_size,
     // Round up to 4-VGPR granularity.
     uint32_t gfx9_vgpr = ((num_vgprs + 3u) / 4u) - 1u;  // ACCUM_OFFSET = all-arch
     if (gfx9_vgpr > 62u) gfx9_vgpr = 62u;
-    // GFX942 (CDNA3): RSRC1 VGPR field = ACCUM_OFFSET.
-    // On gfx942, total = max((vgpr_field+1)*4, (ACCUM+1)*4).
-    // Setting vgpr_field = ACCUM means total = arch, no accum VGPRs allocated.
-    // No extra accumulation registers are created (would require MFMA instructions).
+    // RSRC1 VGPR field = ACCUM_OFFSET so total = arch (no extra accum VGPRs).
     uint32_t rsrc1_vgpr_field = gfx9_vgpr;
     if (rsrc1_vgpr_field > 63u) rsrc1_vgpr_field = 63u;
-    // Clear bits [11:0] and set GFX9 SGPR[5:0] and VGPR[11:6]
+    // Clear bits [11:0] and set GFX9 VGPR[5:0] and SGPR[9:6]
     rsrc1 &= ~0xFFFu;
-    rsrc1 |= (rsrc1_vgpr_field << 6u);  // VGPR in bits [11:6]
+    rsrc1 |= (rsrc1_vgpr_field & 0x3Fu);  // VGPR in bits [5:0]
     // SGPR: kernel's SGPRs + 8 extra for v_cmpx temp pair (GFX9 gran = 8)
     {
       uint32_t orig_sgpr_field = sgpr_field12_kd;
@@ -3672,9 +3669,11 @@ static void PatchKernelDescriptorsForWave64(uint8_t* elf, size_t elf_size,
           break;
         }
       }
-      uint32_t gfx9_sgpr = (num_sgprs / 8u) - 1u;
+      // Ceiling division: round UP to ensure enough SGPRs allocated.
+      // Transpiler adds cmpx_temp + kernarg_save above kernel's count.
+      uint32_t gfx9_sgpr = ((num_sgprs + 7u) / 8u) - 1u;
       if (gfx9_sgpr > 12u) gfx9_sgpr = 12u;
-      rsrc1 |= gfx9_sgpr;
+      rsrc1 |= (gfx9_sgpr << 6u);  // SGPR in bits [9:6]
     }
 
     std::memcpy(elf + info.text_offset + offset + 48, &rsrc1, 4);
@@ -3839,14 +3838,14 @@ static void PatchElfMetadata(uint8_t* elf, size_t elf_size,
         if (entry == 0 || entry > 1000000u) continue;  // not a valid kernel descriptor
 
         // Read the already-patched GFX9 RSRC1 and RSRC3 (written by PatchKernelDescriptorsForWave64).
-        // GFX9 RSRC1: bits [5:0] = SGPR field (gran=8), bits [11:6] = VGPR field
+        // GFX9 RSRC1: bits [5:0] = VGPR field (gran=4), bits [9:6] = SGPR field (gran=8)
         // On GFX942 (CDNA3): VGPR allocation controlled by RSRC3 ACCUM_OFFSET, not RSRC1.
         // arch_vgprs = (ACCUM_OFFSET + 1) * 4
         uint32_t rsrc1;
         std::memcpy(&rsrc1, elf + cand.off + off + 48, 4);
         uint32_t rsrc3;
         std::memcpy(&rsrc3, elf + cand.off + off + 44, 4);
-        uint32_t sgpr_field = rsrc1 & 0x3Fu;
+        uint32_t sgpr_field = (rsrc1 >> 6) & 0xFu;
         uint32_t accum_offset = rsrc3 & 0x3Fu;
         kd_vgpr_count = (accum_offset + 1u) * 4u;  // GFX942: arch VGPRs from ACCUM_OFFSET
         kd_sgpr_count = (sgpr_field + 1u) * 8u;    // GFX9 SGPR granularity = 8
@@ -5642,9 +5641,10 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
             // Clear GFX12-specific high bits (reserved on GFX9), then set GFX9 fields
             rsrc1 &= 0x00FFFFFFu;  // Clear bits [31:24] (reserved on GFX9)
             rsrc1 |= (1u << 21) | (1u << 23);  // DX10_CLAMP + IEEE_MODE
-            // GFX9 RSRC1: bits [5:0] = SGPR field, bits [11:6] = VGPR field
+            // GFX9 RSRC1: bits [5:0] = VGPR field (gran 4), bits [9:6] = SGPR field (gran 8)
+            //             bits [11:10] = PRIORITY
             // GFX12 RSRC1: bits [5:0] = VGPR field, bits [11:6] = SGPR field
-            // Convert VGPR: GFX12 granularity 8 → GFX9 granularity 4.
+            // Convert VGPR: GFX12 granularity 12 (wave32) → GFX9 granularity 4.
             // Add 8 extra VGPRs for save registers (sv_x, sv_y) and 4 temp
             // VGPRs (vt0-vt3) used by instruction expansion + even-align pad.
             uint32_t vgpr_field12 = rsrc1 & 0x3Fu;
@@ -5654,11 +5654,11 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
             num_vgprs += 8u;  // room for save registers + temp VGPRs
             uint32_t gfx9_vgpr = ((num_vgprs + 3u) / 4u) - 1u;
             if (gfx9_vgpr > 62u) gfx9_vgpr = 62u;
-            // GFX942 (CDNA3): RSRC1 VGPR field = ACCUM_OFFSET (no extra accum VGPRs).
+            // GFX942: RSRC1 VGPR = ACCUM_OFFSET (all arch, no extra accum VGPRs).
             uint32_t rsrc1_vgpr_field = gfx9_vgpr;
             if (rsrc1_vgpr_field > 63u) rsrc1_vgpr_field = 63u;
             rsrc1 &= ~0xFFFu;
-            rsrc1 |= (rsrc1_vgpr_field << 6u);
+            rsrc1 |= (rsrc1_vgpr_field & 0x3Fu);  // VGPR in bits [5:0]
             {
               uint32_t num_sgprs_rd = (sgpr_field12_rd + 1u) * 16u + 8u;
               // Check .note MSGPACK for .sgpr_count
@@ -5671,9 +5671,9 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
                   break;
                 }
               }
-              uint32_t gfx9_sgpr = (num_sgprs_rd / 8u) - 1u;
+              uint32_t gfx9_sgpr = ((num_sgprs_rd + 7u) / 8u) - 1u;  // ceiling division
               if (gfx9_sgpr > 12u) gfx9_sgpr = 12u;
-              rsrc1 |= gfx9_sgpr;
+              rsrc1 |= (gfx9_sgpr << 6u);  // SGPR in bits [9:6]
             }
             std::memcpy(desc + 48, &rsrc1, 4);
 
@@ -5712,7 +5712,7 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
                         << " RSRC3=0x" << r3_log
                         << " props=0x" << p << std::dec
                         << " arch_vgpr=" << (accum_off + 1) * 4
-                        << " sgpr=" << ((r1 & 0x3f) + 1) * 8
+                        << " sgpr=" << (((r1 >> 6) & 0xf) + 1) * 8
                         << " user_sgpr=" << ((r2 >> 1) & 0x1f)
                         << " tgidx=" << ((r2 >> 7) & 1)
                         << " tgidy=" << ((r2 >> 8) & 1)

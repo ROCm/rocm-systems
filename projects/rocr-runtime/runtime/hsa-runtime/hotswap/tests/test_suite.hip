@@ -2020,8 +2020,6 @@ int main() {
   fails += run_test_matmul_splitk("/tmp/matmul_splitk_compute_gfx1250.elf",
                                    "/tmp/matmul_splitk_reduce_gfx1250.elf");
   fails += run_test_softmax_row("/tmp/softmax_row_gfx1250.elf");
-  fails += run_test_attn_forward("/tmp/attn_forward_gfx1250.elf");
-  fails += run_test_attn_multihead("/tmp/attn_multihead_gfx1250.elf");
   // New instruction coverage tests
   fails += run_test_atomic_histogram("/tmp/atomic_histogram_gfx1250.elf");
   fails += run_test_atomic_fadd("/tmp/atomic_fadd_gfx1250.elf");
@@ -2049,8 +2047,10 @@ int main() {
   fails += run_test_leaky_relu("/tmp/leaky_relu_kernel_gfx1250.elf");
   fails += run_test_rmsnorm("/tmp/rmsnorm_kernel_gfx1250.elf");
   fails += run_test_l2_distance("/tmp/l2_distance_kernel_gfx1250.elf");
-  // f64_math last: runtime crash poisons GPU queue, must not block other tests
   fails += run_test_f64_math("/tmp/f64_math_gfx1250.elf");
+  // Queue-poisoning tests last: attn crashes prevent subsequent tests from running
+  fails += run_test_attn_forward("/tmp/attn_forward_gfx1250.elf");
+  fails += run_test_attn_multihead("/tmp/attn_multihead_gfx1250.elf");
   int total = 42;
   printf("\n%s: %d/%d tests passed\n", fails?"SOME FAILED":"ALL PASSED", total-fails, total);
   return fails;
