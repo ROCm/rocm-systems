@@ -63,7 +63,7 @@ file(WRITE ${PROJECT_BINARY_DIR}/${CATCH_BUILD_DIR}/script/windows/CTestTestfile
 set(INSTALL_DIR ${CMAKE_INSTALL_DATADIR}/hip)
 if(NOT WIN32)
   if(NOT DEFINED CPACK_INSTALL_PREFIX)
-    set(CPACK_INSTALL_PREFIX "/opt/rocm/")
+    set(CPACK_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}/")
   endif()
   execute_process(COMMAND rpmbuild --version
                   RESULT_VARIABLE rpm_found

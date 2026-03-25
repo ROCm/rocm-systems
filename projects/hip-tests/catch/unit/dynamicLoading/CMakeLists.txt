@@ -29,9 +29,9 @@ if(UNIX AND BUILD_SHARED_LIBS)
   elseif(HIP_PLATFORM MATCHES "nvidia")
     add_custom_target(libLazyLoad.so COMMAND ${CMAKE_CUDA_COMPILER} -Xcompiler -fPIC -lpthread -shared
     -x cu ${CMAKE_CURRENT_SOURCE_DIR}/liblazyLoad.cc -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
-    -I${Catch2_SOURCE_DIR}/src -I${Catch2_BINARY_DIR}/generated-includes -I${HIP_PATH}/include/ -o libLazyLoad.so)
+    -I${Catch2_SOURCE_DIR}/src -I${Catch2_BINARY_DIR}/generated-includes -I${HIP_INCLUDE_DIR} -o libLazyLoad.so)
     add_custom_target(bit_extract_kernel.code COMMAND ${CMAKE_HIP_COMPILER} --fatbin
-      -x cu ${CMAKE_CURRENT_SOURCE_DIR}/bit_extract_kernel.cpp -I${HIP_PATH}/include/
+      -x cu ${CMAKE_CURRENT_SOURCE_DIR}/bit_extract_kernel.cpp -I${HIP_INCLUDE_DIR}
       ${OFFLOAD_ARCH_LIST} -o ${CMAKE_CURRENT_BINARY_DIR}/../dynamicLoading/bit_extract_kernel.code
       -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
   endif()

@@ -51,14 +51,15 @@ find_package(Git)
 find_package(Python 3 COMPONENTS Interpreter REQUIRED)
 find_program(HIPCONFIG_EXEC hipconfig REQUIRED)
 
-# hip root dir is 3 levels down the hip-config.cmake file path
-set(HIP_PATH ${hip_DIR}/../../../)
-if(NOT DEFINED ROCM_PATH)
-  set(ROCM_PATH "/opt/rocm")
-  if(NOT EXISTS "${ROCM_PATH}")
-    set(ROCM_PATH ${HIP_PATH})
-  endif()
-endif()
+# Derive the HIP installation root from the hip cmake package location.
+# hip_DIR is typically <rocm_root>/lib/cmake/hip, so three levels up is the root.
+cmake_path(GET hip_DIR PARENT_PATH _hip_cmake_dir)   # lib/cmake
+cmake_path(GET _hip_cmake_dir PARENT_PATH _hip_lib_dir) # lib
+cmake_path(GET _hip_lib_dir PARENT_PATH _hip_root)     # <rocm_root>
+
+# Expose a single include-dir variable for use by subdirectory custom commands.
+# hip_INCLUDE_DIRS is the authoritative value from find_package(hip).
+set(HIP_INCLUDE_DIR ${hip_INCLUDE_DIRS})
 
 if(UNIX)
   if(NOT ENABLE_SPIRV)
@@ -68,15 +69,15 @@ if(UNIX)
   find_program(GXX_EXEC g++)
 else() # Win32
   find_program(LLVM_RC_EXEC NAMES llvm-rc llvm-rc.exe
-                 PATHS ${HIP_PATH} ${HIP_PATH}../lc/bin ${ROCM_PATH})
+                 PATHS ${_hip_root} ${_hip_root}/lc/bin)
 endif()
 
 find_program(CLANG_CPP_EXEC NAMES clang-cpp clang-cpp.exe
-             PATHS ${HIP_PATH} ${HIP_PATH}../lc/bin ${ROCM_PATH}/llvm/bin)
+             PATHS ${_hip_root} ${_hip_root}/lc/bin ${_hip_root}/llvm/bin)
 message(STATUS "HIP Lib path: ${HIP_LIB_INSTALL_DIR}")
 
-# used by clang to find hip
-set(HIP_PATH_OPT "--hip-path=${HIP_PATH}")
+# used by clang to find hip; derived from the find_package(hip) result
+set(HIP_PATH_OPT "--hip-path=${_hip_root}")
 
 if(TEST_CLOCK_CYCLE)
   add_definitions(-DTEST_CLOCK_CYCLE)
@@ -109,7 +110,7 @@ endif()
 
 if(NOT WIN32)
   if(NOT BUILD_SHARED_LIBS)
-    list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH} ${ROCM_PATH}/llvm)
+    list(APPEND CMAKE_PREFIX_PATH ${_hip_root} ${_hip_root}/llvm)
     find_package(amd_comgr)
     find_package(hsa-runtime64)
     link_libraries(hsa-runtime64::hsa-runtime64)
@@ -289,7 +290,7 @@ elseif(DEFINED GPU_TARGETS)
 elseif(NOT DEFINED OFFLOAD_ARCH_STR
    AND EXISTS "${ROCM_AGENT_ENUMERATOR_EXEC}"
    AND HIP_PLATFORM STREQUAL "amd" AND UNIX)
-  execute_process(COMMAND "${ROCM_PATH}/bin/rocm_agent_enumerator"
+  execute_process(COMMAND "${ROCM_AGENT_ENUMERATOR_EXEC}"
          OUTPUT_VARIABLE HIP_GPU_ARCH
          RESULT_VARIABLE ROCM_AGENT_ENUM_RESULT
          OUTPUT_STRIP_TRAILING_WHITESPACE)
@@ -432,7 +433,7 @@ endif()
 add_custom_target(gen_coverage
                   COMMAND ${CMAKE_COMMAND} -B build/
                   COMMAND ${CMAKE_COMMAND} --build build/
-                  COMMAND ./build/generateHipAPICoverage ${HIP_PATH}/include
+                  COMMAND ./build/generateHipAPICoverage ${HIP_INCLUDE_DIR}
                   WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/../utils/coverage
                   COMMENT "Generating Test Coverage Report")
 
