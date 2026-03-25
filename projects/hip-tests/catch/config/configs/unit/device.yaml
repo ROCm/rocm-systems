@@ -376,3 +376,7 @@ device:
     <<: *level_2
     # Note: Windows disabled
     disabled: [amd_wsl]
+  Unit_hipIpcOpenMemHandle_Multiproc: *level_2
+  Unit_hipIpcOpenMemHandle_Multiproc_Child:
+    <<: *level_2
+    disabled: [amd_wsl, amd_linux, nvidia_windows, nvidia_linux, amd_windows]

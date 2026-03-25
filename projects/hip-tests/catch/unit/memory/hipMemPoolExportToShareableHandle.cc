@@ -453,7 +453,7 @@ HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_GrndChldUseHdl) {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMemPoolExportToShareableHandle_multiproc") {
+HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_multiproc) {
   checkMempoolSupported(0)
   HIP_CHECK(hipSetDevice(0));
 
@@ -565,7 +565,7 @@ TEST_CASE("Unit_hipMemPoolExportToShareableHandle_multiproc") {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMemPoolExportToShareableHandle_multiproc_child") {
+HIP_TEST_CASE(Unit_hipMemPoolExportToShareableHandle_multiproc_child) {
   unsigned long parentPid = getParentProcessId();
   if (parentPid == 0) {
     HipTest::HIP_SKIP_TEST("Not launched by parent test. Skipping..");
