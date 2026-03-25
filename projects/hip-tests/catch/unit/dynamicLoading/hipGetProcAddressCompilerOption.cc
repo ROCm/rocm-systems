@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
 in the Software without restriction, including without limitation the rights
@@ -42,9 +42,9 @@ THE SOFTWARE.
  *  - unit/dynamicLoading/hipGetProcAddressCompilerOption.cc
  * Test requirements
  * ------------------------
- *  - HIP_VERSION >= 7.2
+ *  - HIP_VERSION >= 7.12
  */
-TEST_CASE("Unit_hipGetProcAddress_With_spt_CompilerOption") {
+HIP_TEST_CASE(Unit_hipGetProcAddress_With_spt_CompilerOption) {
   void *funcPtr_default = nullptr;
   void *funcPtr_legacy = nullptr;
   void *funcPtr_spt = nullptr;

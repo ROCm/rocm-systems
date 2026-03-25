@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
 in the Software without restriction, including without limitation the rights
@@ -48,9 +48,9 @@ THE SOFTWARE.
  *  - unit/dynamicLoading/hipGetProcAddress.cc
  * Test requirements
  * ------------------------
- *  - HIP_VERSION >= 7.2
+ *  - HIP_VERSION >= 7.12
  */
-TEST_CASE("Unit_hipGetProcAddress_Positive") {
+HIP_TEST_CASE(Unit_hipGetProcAddress_Positive) {
   void *funcPtr = nullptr;
   hipDriverProcAddressQueryResult status;
   int currentHipVersion = 0;
@@ -100,9 +100,9 @@ TEST_CASE("Unit_hipGetProcAddress_Positive") {
  *  - unit/dynamicLoading/hipGetProcAddress.cc
  * Test requirements
  * ------------------------
- *  - HIP_VERSION >= 7.2
+ *  - HIP_VERSION >= 7.12
  */
-TEST_CASE("Unit_hipGetProcAddress_Negative") {
+HIP_TEST_CASE(Unit_hipGetProcAddress_Negative) {
   void *funcPtr = nullptr;
   hipDriverProcAddressQueryResult status;
   int currentHipVersion = 0;
@@ -132,9 +132,9 @@ TEST_CASE("Unit_hipGetProcAddress_Negative") {
  *  - unit/dynamicLoading/hipGetProcAddress.cc
  * Test requirements
  * ------------------------
- *  - HIP_VERSION >= 7.2
+ *  - HIP_VERSION >= 7.12
  */
-TEST_CASE("Unit_hipGetProcAddress_spt_Positive") {
+HIP_TEST_CASE(Unit_hipGetProcAddress_spt_Positive) {
   void *funcPtr = nullptr;
   hipDriverProcAddressQueryResult status;
   int currentHipVersion = 0;
@@ -184,9 +184,9 @@ TEST_CASE("Unit_hipGetProcAddress_spt_Positive") {
  *  - unit/dynamicLoading/hipGetProcAddress.cc
  * Test requirements
  * ------------------------
- *  - HIP_VERSION >= 7.2
+ *  - HIP_VERSION >= 7.12
  */
-TEST_CASE("Unit_hipGetProcAddress_spt_Negative") {
+HIP_TEST_CASE(Unit_hipGetProcAddress_spt_Negative) {
   void *funcPtr = nullptr;
   hipDriverProcAddressQueryResult status;
   int currentHipVersion = 0;
@@ -219,9 +219,9 @@ TEST_CASE("Unit_hipGetProcAddress_spt_Negative") {
  *  - unit/dynamicLoading/hipGetProcAddress.cc
  * Test requirements
  * ------------------------
- *  - HIP_VERSION >= 7.2
+ *  - HIP_VERSION >= 7.12
  */
-TEST_CASE("Unit_hipGetProcAddress_hipGetProcAddress_spt_CheckAddress") {
+HIP_TEST_CASE(Unit_hipGetProcAddress_hipGetProcAddress_spt_CheckAddress) {
   hipDriverProcAddressQueryResult status;
   int currentHipVersion = 0;
   HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
