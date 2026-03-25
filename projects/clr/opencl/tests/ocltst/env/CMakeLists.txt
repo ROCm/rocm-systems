@@ -46,7 +46,10 @@ endif()
 if (NOT WIN32)
   set(THREADS_PREFER_PTHREAD_FLAG ON)
   find_package(Threads REQUIRED)
-  target_link_libraries(ocltst PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
+  # Explicitly link pthread in addition to Threads::Threads. On some platforms
+  # (e.g. clang+lld with ASAN's -shared-libsan), CMAKE_HAVE_LIBC_PTHREAD=1 causes
+  # Threads::Threads to be an empty target, leaving pthread_mutex_trylock unresolved.
+  target_link_libraries(ocltst PRIVATE Threads::Threads pthread ${CMAKE_DL_LIBS})
 endif()
 
 set_target_properties(ocltst PROPERTIES INSTALL_RPATH "$ORIGIN")
