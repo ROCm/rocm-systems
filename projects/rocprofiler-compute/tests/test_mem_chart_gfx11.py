@@ -439,7 +439,7 @@ class TestPlotMemChart:
         assert "TCP" in result or "L0" in result  # L0 cache
         assert "GL1C" in result  # L1 cache
         assert "GL2C" in result  # L2 cache
-        assert "GCEA" in result  # Memory controller
+        assert "GCEA" in result  # Graphics Core Efficiency Arbiter (block label in diagram)
         assert "DRAM" in result  # System memory
 
     def test_contains_bandwidth_values(self):

@@ -1,13 +1,13 @@
 # =============================================================================
-# RDNA3.5 (gfx1151) - RDNA3.5 GCEA (External Access) Performance Metrics
+# RDNA3.5 (gfx1151) - Graphics Core Efficiency Arbiter (GCEA) performance metrics
 # =============================================================================
-# GCEA (Graphics Core External Access) handles memory controller interface
+# GCEA (Graphics Core Efficiency Arbiter) interfaces to system memory (DRAM).
 # For APUs, this connects to system memory (DDR5/LPDDR5) instead of HBM
 # =============================================================================
 
 Panel Config:
   id: 1500
-  title: External Access (GCEA)
+  title: Graphics Core Efficiency Arbiter (GCEA)
   data source:
   # =========================================================================
   # GCEA DRAM (System Memory) Read Interface

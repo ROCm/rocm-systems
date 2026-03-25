@@ -43,7 +43,7 @@ Use ``MEM_CHART_PANEL_METRIC_KEYS`` for the authoritative ordered list.
 
 Bandwidth values are **Bytes/s**, matching the YAML ``unit: Bytes/s`` rows.
 
-RDNA3.5 MEMORY HIERARCHY:
+RDNA3.5 MEMORY HIERARCHY (GCEA = Graphics Core Efficiency Arbiter):
    Kernel -> TCP (L0 Vector Cache) -> GL1C (L1) -> GL2C (L2) -> GCEA -> System Memory
          -> SQC (ICache/DCache)   -> GL1C (L1) -> GL2C (L2) -> GCEA -> System Memory
          -> LDS (Local Data Share) [stays on CU, no GL1C connection]
@@ -124,7 +124,7 @@ _MEM_CHART_DEFAULT_ROWS: Tuple[Tuple[str, Union[int, float]], ...] = (
     ("GL2C Hit Rate", 82.5),
     ("GL2C Read Bandwidth", 64e9),
     ("GL2C Write Bandwidth", 24e9),
-    # Table 309: GCEA to System Memory
+    # Table 309: Graphics Core Efficiency Arbiter (GCEA) to System Memory
     ("SARB Utilization", 52.3),
     ("SARB Stall Rate", 12.4),
     ("DRAM Read Requests", 25_000),
@@ -502,9 +502,9 @@ def create_mem_chart_diagram(
     main_layout.add_column()  # GL1C
     main_layout.add_column()  # GL1-GL2 edges
     main_layout.add_column()  # GL2C
-    main_layout.add_column()  # GL2-GCEA edges
+    main_layout.add_column()  # GL2–GCEA (Graphics Core Efficiency Arbiter) edges
     main_layout.add_column()  # GCEA
-    main_layout.add_column()  # GCEA-DRAM edges
+    main_layout.add_column()  # GCEA–DRAM edges
     main_layout.add_column()  # DRAM
 
     # Kernel panel - height matches total of TCP+LDS+SQC stack (10+10+10=30)
@@ -671,7 +671,7 @@ def create_mem_chart_diagram(
         height=30,
     )
 
-    # GL2-GCEA edges - more padding to center vertically
+    # GL2–GCEA (Graphics Core Efficiency Arbiter) edges — more padding to center vertically
     gl2_gcea_edges_lines = [
         "",
         "",
@@ -698,7 +698,7 @@ def create_mem_chart_diagram(
     ]
     gl2_gcea_edges_text = Text.from_markup("\n".join(gl2_gcea_edges_lines))
 
-    # GCEA panel - height=30 to match
+    # GCEA (Graphics Core Efficiency Arbiter) panel — height=30 to match
     gcea_panel = Panel(
         f"{metric_line('SysArb Util', sarb_util, '%', COLORS['util'])}\n"
         f"[dim]{bar(sarb_util)}[/dim]\n"
@@ -710,7 +710,7 @@ def create_mem_chart_diagram(
         height=30,
     )
 
-    # GCEA-DRAM edges - more padding to center vertically
+    # GCEA–DRAM edges — more padding to center vertically
     dram_edges_lines = [
         "",
         "",

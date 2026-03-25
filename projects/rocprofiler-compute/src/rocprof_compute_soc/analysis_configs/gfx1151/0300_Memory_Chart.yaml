@@ -10,7 +10,7 @@
 #   - LDS (Local Data Share)
 #   - GL1C Cache (L1)
 #   - GL2C Cache (L2)
-#   - GCEA to System Memory (DDR5/LPDDR5 for APU)
+#   - Graphics Core Efficiency Arbiter (GCEA) to system memory (DDR5/LPDDR5 for APU)
 # =============================================================================
 
 Panel Config:
@@ -19,10 +19,12 @@ Panel Config:
   description: |-
     Detailed memory hierarchy metrics for RDNA3.5 (RDNA3.5), showing request counts,
     bandwidth, hit rates, and utilization at each cache level.
-    Memory hierarchy: LDS/TCP (L0) -> GL1C (L1) -> GL2C (L2) -> System Memory (GCEA).
+    Memory hierarchy: LDS/TCP (L0) -> GL1C (L1) -> GL2C (L2) -> System Memory via GCEA
+    (Graphics Core Efficiency Arbiter).
 
     Use this panel as the reference for **where** bandwidth is measured: GL2C Read/Write
-    Bandwidth use **client-side** GL2 counters; GCEA tables use **DRAM interface** counters.
+    Bandwidth use **client-side** GL2 counters; GCEA (Graphics Core Efficiency Arbiter)
+    tables use **DRAM interface** counters.
     System Speed-of-Light lists separate **L2→fabric (EA)** and **memory controller** rates;
     those are kernel-summary views and are not the same rows as GL2C client read BW here.
 
@@ -309,11 +311,11 @@ Panel Config:
           unit: Bytes/s
 
   # =========================================================================
-  # Table 309: GCEA to System Memory (APU)
+  # Table 309: Graphics Core Efficiency Arbiter (GCEA) to system memory (APU)
   # =========================================================================
   - metric_table:
       id: 309
-      title: "GCEA to System Memory"
+      title: "Graphics Core Efficiency Arbiter (GCEA) to System Memory"
       cli_style: mem_chart
       tui_style: mem_chart
       comparable: false
@@ -411,8 +413,8 @@ Panel Config:
       Formula: 100 * GL2C_HIT_sum / (GL2C_HIT_sum + GL2C_MISS_sum)
 
     SARB Utilization: |-
-      Definition: Percentage of cycles the System Arbiter in GCEA was busy.
-      Description: SARB handles arbitration between GPU and system memory interface.
+      Definition: Percentage of cycles the System Arbiter (SARB) in GCEA (Graphics Core Efficiency Arbiter) was busy.
+      Description: SARB handles arbitration between the GPU and the system memory interface.
       Formula: 100 * GCEA_SARB_BUSY_sum / GCEA_ALWAYS_COUNT_sum
 
     DRAM Read Bandwidth: |-
