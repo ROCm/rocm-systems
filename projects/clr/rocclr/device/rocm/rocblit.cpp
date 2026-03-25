@@ -486,6 +486,9 @@ inline bool DmaBlitManager::rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, c
       (copyMetadata.copyEnginePreference_ == amd::CopyMetadata::CopyEnginePreference::SDMA);
   HwQueueEngine engine = HwQueueEngine::Unknown;
 
+  // copyAgent/peerAgent are used for SDMA engine allocation queries only.
+  // The HSA API calls must use the original dstAgent/srcAgent to maintain
+  // correct memory ownership semantics for profiling tools.
   hsa_agent_t copyAgent, peerAgent;
   // Determine engine based on source and destination agents
   if (srcAgent.handle == dstAgent.handle) {
@@ -496,19 +499,17 @@ inline bool DmaBlitManager::rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, c
   } else {
     // Different devices
     if (srcAgent.handle == dev().getCpuAgent().handle) {
-      // Host to device
+      // Host to device: copyAgent is the GPU that performs the copy
       engine = HwQueueEngine::SdmaH2D;
       copyAgent = dstAgent;
       peerAgent = srcAgent;
     } else if (dstAgent.handle == dev().getCpuAgent().handle) {
-      // Device to host
+      // Device to host: copyAgent is the GPU that performs the copy
       engine = HwQueueEngine::SdmaD2H;
       copyAgent = srcAgent;
       peerAgent = dstAgent;
     } else {
-      // For P2P, always use the backendDevice as the copy agent. ROCr selects the
-      // SDMA engine from the src_agent, so we place backendDevice there.
-      // peerAgent must be the peer
+      // For P2P, always use the backendDevice as the copy agent for engine selection.
       engine = HwQueueEngine::SdmaP2P;
       copyAgent = dev().getBackendDevice();
       peerAgent = (srcAgent.handle == copyAgent.handle) ? dstAgent : srcAgent;
@@ -559,6 +560,16 @@ inline bool DmaBlitManager::rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, c
       // Copy on the first available free engine if ROCr returns a valid mask
       hsa_amd_sdma_engine_id_t copyEngine = static_cast<hsa_amd_sdma_engine_id_t>(copyMask);
 
+      // For P2P copies, we need to pass the backendDevice as src_agent to ROCr so it
+      // selects the correct SDMA engine from the local device. However, we must preserve
+      // the original dstAgent/srcAgent semantics for profiling tools.
+      hsa_agent_t apiDstAgent = dstAgent;
+      hsa_agent_t apiSrcAgent = srcAgent;
+      if (engine == HwQueueEngine::SdmaP2P) {
+        // ROCr selects SDMA engine from src_agent, so place backendDevice there
+        apiSrcAgent = dev().getBackendDevice();
+      }
+
       ClPrint(amd::LOG_DEBUG, amd::LOG_COPY2,
               "HSA Copy copy_engine=0x%x, dst=0x%zx, src=0x%zx, "
               "size=%ld, forceSDMA=%d, engineOp=%s, wait_event=0x%zx, completion_signal=0x%zx",
@@ -566,7 +577,7 @@ inline bool DmaBlitManager::rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, c
               (wait_events.size() != 0) ? wait_events[0].handle : 0, active.handle);
 
       status =
-          Hsa::memory_async_copy_on_engine(dst, peerAgent, src, copyAgent, size, wait_events.size(),
+          Hsa::memory_async_copy_on_engine(dst, apiDstAgent, src, apiSrcAgent, size, wait_events.size(),
                                            wait_events.data(), active, copyEngine, forceSDMA);
     } else {
       kUseRegularCopyApi = true;
@@ -574,13 +585,20 @@ inline bool DmaBlitManager::rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, c
   }
 
   if (engine == HwQueueEngine::Unknown || kUseRegularCopyApi) {
+    // For P2P copies using the regular copy API, also need to adjust src_agent
+    hsa_agent_t apiDstAgent = dstAgent;
+    hsa_agent_t apiSrcAgent = srcAgent;
+    if (engine == HwQueueEngine::SdmaP2P) {
+      apiSrcAgent = dev().getBackendDevice();
+    }
+
     ClPrint(amd::LOG_DEBUG, amd::LOG_COPY2,
             "HSA Copy dst=0x%zx, src=0x%zx, size=%ld, wait_event=0x%zx, "
             "completion_signal=0x%zx, engineOp=%s",
             dst, src, size, (wait_events.size() != 0) ? wait_events[0].handle : 0, active.handle,
             EngineOpName(engine));
 
-    status = Hsa::memory_async_copy(dst, peerAgent, src, copyAgent, size, wait_events.size(),
+    status = Hsa::memory_async_copy(dst, apiDstAgent, src, apiSrcAgent, size, wait_events.size(),
                                     wait_events.data(), active);
   }
 
