@@ -29,34 +29,6 @@ set(INC_LIST
     "${PROJECT_SOURCE_DIR}"
 )
 
-set(RAS_DECODE "ras-decode")
-set(RAS_DECODE_REPO "git@github.amd.com:dctools/ras-decode-instinct-staging.git")
-set(RAS_DECODE_SRC_DIR "${PROJECT_SOURCE_DIR}/src/${RAS_DECODE}")
-set(RAS_DECODE_INC_DIR "${PROJECT_SOURCE_DIR}/include/${RAS_DECODE}")
-find_package(Git QUIET)
-if(GIT_FOUND)
-    add_custom_target(
-        ${RAS_DECODE}
-        COMMAND ${CMAKE_COMMAND} -E remove_directory ${CMAKE_CURRENT_BINARY_DIR}/${RAS_DECODE}
-        COMMAND ${GIT_EXECUTABLE} clone ${RAS_DECODE_REPO} -b main ${CMAKE_CURRENT_BINARY_DIR}/${RAS_DECODE}
-        COMMAND ${CMAKE_COMMAND} -E remove_directory ${RAS_DECODE_SRC_DIR}
-        COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_BINARY_DIR}/${RAS_DECODE}/src ${RAS_DECODE_SRC_DIR}
-        COMMAND ${CMAKE_COMMAND} -E remove_directory ${RAS_DECODE_INC_DIR}
-        COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_BINARY_DIR}/${RAS_DECODE}/include ${RAS_DECODE_INC_DIR}
-        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-        COMMENT "Cloning ${RAS_DECODE_REPO} from GitHub"
-        VERBATIM
-    )
-else()
-    message(WARNING "Git not found, cannot clone ${RAS_DECODE_REPO}.")
-endif()
-file(GLOB RAS_DECODE_INCLUDES "${RAS_DECODE_INC_DIR}/*.h")
-file(GLOB RAS_DECODE_SOURCES "${RAS_DECODE_SRC_DIR}/*.c")
-list(REMOVE_ITEM RAS_DECODE_SOURCES "main.c")
-
-set(SRC_LIST ${SRC_LIST} ${RAS_DECODE_SOURCES})
-set(INC_LIST ${INC_LIST} ${RAS_DECODE_INCLUDES})
-
 # VERSION_* variables should be set by get_version_from_tag
 message("Package version: ${PKG_VERSION_STR}")
 
@@ -75,7 +47,6 @@ target_include_directories(${AMD_SMI} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/../
     ${PROJECT_SOURCE_DIR}/common/shared_mutex
-    ${RAS_DECODE_INC_DIR}
     ${PROJECT_SOURCE_DIR}/../include
     ${WIN_SDK}
 )
