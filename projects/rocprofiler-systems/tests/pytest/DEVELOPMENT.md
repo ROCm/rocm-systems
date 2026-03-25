@@ -162,11 +162,13 @@ class TestConsumer(RocprofsysTest):
 
 ### Adding Markers
 
-To add a new test marker, register it in `pytest_configure()`. There are two types:
+**Every marker must be registered in `pytest_configure()` before use.** Check the `non_functional_markers` and `generic_functional_markers` lists first; if the marker is not there, add it.
 
-- **Informational markers** — Used to categorize tests for CTest label filtering (e.g., `-L "avail"`). They don't affect test execution.
+There are two types of markers:
 
-- **Functional markers** — Affect test behavior, typically used to skip tests based on system capabilities. Their logic is implemented in `pytest_collection_modifyitems`.
+- **Informational markers** — Used to categorize tests for CTest label filtering (e.g., `-L "avail"`). They don't affect test execution. Add these to the `non_functional_markers` list.
+
+- **Functional markers** — Affect test behavior, typically used to skip tests based on system capabilities. Their logic is implemented in `pytest_collection_modifyitems`. Add these to the `generic_functional_markers` list (or register them individually with `config.addinivalue_line` if they need a custom description).
 
 When adding a functional marker:
 

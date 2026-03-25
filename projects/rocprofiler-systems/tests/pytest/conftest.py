@@ -882,6 +882,10 @@ def _ctest_generate_tests(
         '    message(FATAL_ERROR "Cannot find test package. Set ROCPROFSYS_TEST_DIR=/path/to/rocprofsys-tests.pyz")',
         "endif()",
         "",
+        "if(DEFINED ENV{ROCPROFSYS_CI_TIMEOUT})",
+        '    set(_ROCPROFSYS_CI_TIMEOUT "$ENV{ROCPROFSYS_CI_TIMEOUT}")',
+        "endif()",
+        "",
     ]
 
     # Ensure that the configuration header can be generated
@@ -893,7 +897,7 @@ def _ctest_generate_tests(
     lines.append('set_tests_properties("RocprofilerSystems_pytest_config" PROPERTIES')
     lines.append('    FIXTURES_SETUP "rocprofsys-global-tmp-files"')
     lines.append('    LABELS "prerequisite;global"')
-    lines.append("    TIMEOUT 30")
+    lines.append("    TIMEOUT 10")
     lines.append(")")
     lines.append("")
 
@@ -978,10 +982,20 @@ def _ctest_generate_tests(
             f' "${{_ROCPROFSYS_NODEID_PFX}}{escaped_nodeid}"'
             f"{extra_args} ${{_ROCPROFSYS_EXTRA_ARGS}})"
         )
+
+        # Allow support for ROCPROFSYS_CI_TIMEOUT
+        default_timeout = timeout + TIMEOUT_BUFFER
+        lines.append(f"if(DEFINED _ROCPROFSYS_CI_TIMEOUT)")
+        lines.append(
+            f'    math(EXPR _TEST_TIMEOUT "${{_ROCPROFSYS_CI_TIMEOUT}} + {TIMEOUT_BUFFER}")'
+        )
+        lines.append(f"else()")
+        lines.append(f"    set(_TEST_TIMEOUT {default_timeout})")
+        lines.append(f"endif()")
         props = []
         if labels:
             props.append(f'    LABELS "{";".join(sorted(labels))}"')
-        props.append(f"    TIMEOUT {timeout + TIMEOUT_BUFFER}")
+        props.append(f"    TIMEOUT ${{_TEST_TIMEOUT}}")
         props.append(f"    SKIP_RETURN_CODE {SKIP_RETURN_CODE}")
         props.append(f'    FIXTURES_REQUIRED "rocprofsys-global-tmp-files"')
         if run_serial:
@@ -1805,21 +1819,28 @@ def run_test(
             except FileNotFoundError:
                 pass
 
-        # Timeout marker
-        if request.node.get_closest_marker("timeout"):
+        env = env.copy() if env else {}
+
+        # Apply --monochrome option if set
+        if request.config.getoption("--monochrome", default=False):
+            env["ROCPROFSYS_MONOCHROME"] = "ON"
+
+        # Timeout: Prioritize ROCPROFSYS_CI_TIMEOUT env, else
+        # fallback to timeout marker if defined
+        ci_timeout_env = os.environ.get("ROCPROFSYS_CI_TIMEOUT")
+        if ci_timeout_env is not None:
+            timeout = int(ci_timeout_env)
+        elif request.node.get_closest_marker("timeout"):
             timeout = request.node.get_closest_marker("timeout").args[0]
         else:
             timeout = 300
+
+        env["ROCPROFSYS_CI_TIMEOUT"] = str(timeout)
 
         # Verify that MPI is available for "mpi_optional" tests
         if request.node.get_closest_marker("mpi_optional") and num_procs > 0:
             if not request.node.get_closest_marker("mpi"):
                 num_procs = 0
-
-        # Apply --monochrome option if set
-        if request.config.getoption("--monochrome", default=False):
-            env = env.copy() if env else {}
-            env["ROCPROFSYS_MONOCHROME"] = "ON"
 
         try:
             runner = runner_class(
