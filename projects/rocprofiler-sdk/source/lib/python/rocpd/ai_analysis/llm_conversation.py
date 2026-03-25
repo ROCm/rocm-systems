@@ -1,5 +1,6 @@
 # ai_analysis/llm_conversation.py
 """Persistent multi-turn LLM conversation with streaming, compaction, and disk archive."""
+
 from __future__ import annotations
 
 import json
@@ -67,7 +68,7 @@ def _build_private_client(api_key: Optional[str], model_override: Optional[str])
             except json.JSONDecodeError as e:
                 raise ValueError(
                     f"ROCPD_LLM_PRIVATE_HEADERS is not valid JSON: {e}\n"
-                    f"Use double-quoted JSON: '{{\"Ocp-Apim-Subscription-Key\": \"abc123\"}}'\n"
+                    f'Use double-quoted JSON: \'{{"Ocp-Apim-Subscription-Key": "abc123"}}\'\n'
                     f"Value was: {raw_headers!r}"
                 )
         headers.update(parsed_headers)
@@ -79,6 +80,7 @@ def _build_private_client(api_key: Optional[str], model_override: Optional[str])
     if not verify_ssl:
         try:
             import httpx as _httpx
+
             http_client = _httpx.Client(verify=False)
         except ImportError:
             warnings.warn(
@@ -168,14 +170,18 @@ class LLMConversation:
         try:
             import anthropic as _anthropic
         except ImportError:
-            raise ImportError("anthropic package not installed. Run: pip install anthropic")
+            raise ImportError(
+                "anthropic package not installed. Run: pip install anthropic"
+            )
 
         api_key = self._api_key or os.environ.get("ANTHROPIC_API_KEY", "")
         if not api_key:
             raise LLMAuthenticationError(
                 "No Anthropic API key. Set ANTHROPIC_API_KEY environment variable."
             )
-        model = self._model or os.environ.get("ROCPD_LLM_MODEL") or DEFAULT_ANTHROPIC_MODEL
+        model = (
+            self._model or os.environ.get("ROCPD_LLM_MODEL") or DEFAULT_ANTHROPIC_MODEL
+        )
         client = _anthropic.Anthropic(api_key=api_key)
         result = ""
         try:
@@ -216,10 +222,14 @@ class LLMConversation:
 
         if self._provider == "local":
             base_url = os.environ.get("ROCPD_LLM_LOCAL_URL", _DEFAULT_LOCAL_URL)
-            model = self._model or os.environ.get("ROCPD_LLM_LOCAL_MODEL", _DEFAULT_LOCAL_MODEL)
+            model = self._model or os.environ.get(
+                "ROCPD_LLM_LOCAL_MODEL", _DEFAULT_LOCAL_MODEL
+            )
             client = _openai.OpenAI(api_key="ignored", base_url=base_url)
         elif self._provider == "private":
-            client, model, _http_client = _build_private_client(self._api_key, self._model)
+            client, model, _http_client = _build_private_client(
+                self._api_key, self._model
+            )
             if not model:
                 if _http_client is not None:
                     _http_client.close()
@@ -233,11 +243,15 @@ class LLMConversation:
                 raise LLMAuthenticationError(
                     "No OpenAI API key. Set OPENAI_API_KEY environment variable."
                 )
-            model = self._model or os.environ.get("ROCPD_LLM_MODEL") or DEFAULT_OPENAI_MODEL
+            model = (
+                self._model or os.environ.get("ROCPD_LLM_MODEL") or DEFAULT_OPENAI_MODEL
+            )
             client = _openai.OpenAI(api_key=api_key)
             _http_client = None
 
-        messages_with_system = [{"role": "system", "content": self._system}] + self._messages
+        messages_with_system = [
+            {"role": "system", "content": self._system}
+        ] + self._messages
         result = ""
         try:
             try:
@@ -306,7 +320,8 @@ class LLMConversation:
 
         try:
             summary = self._call_non_streaming(
-                messages=old_messages + [{"role": "user", "content": self._COMPACTION_PROMPT}],
+                messages=old_messages
+                + [{"role": "user", "content": self._COMPACTION_PROMPT}],
                 max_tokens=600,
             )
             summary_block = [
@@ -327,7 +342,11 @@ class LLMConversation:
             except ImportError:
                 raise ImportError("anthropic package not installed.")
             api_key = self._api_key or os.environ.get("ANTHROPIC_API_KEY", "")
-            model = self._model or os.environ.get("ROCPD_LLM_MODEL") or DEFAULT_ANTHROPIC_MODEL
+            model = (
+                self._model
+                or os.environ.get("ROCPD_LLM_MODEL")
+                or DEFAULT_ANTHROPIC_MODEL
+            )
             client = _anthropic.Anthropic(api_key=api_key)
             resp = client.messages.create(
                 model=model,
@@ -348,9 +367,13 @@ class LLMConversation:
                 api_key="ignored",
                 base_url=os.environ.get("ROCPD_LLM_LOCAL_URL", _DEFAULT_LOCAL_URL),
             )
-            model = self._model or os.environ.get("ROCPD_LLM_LOCAL_MODEL", _DEFAULT_LOCAL_MODEL)
+            model = self._model or os.environ.get(
+                "ROCPD_LLM_LOCAL_MODEL", _DEFAULT_LOCAL_MODEL
+            )
         elif self._provider == "private":
-            client, model, _http_client = _build_private_client(self._api_key, self._model)
+            client, model, _http_client = _build_private_client(
+                self._api_key, self._model
+            )
             if not model:
                 if _http_client is not None:
                     _http_client.close()
@@ -359,18 +382,26 @@ class LLMConversation:
                     "Set ROCPD_LLM_PRIVATE_MODEL or pass --llm-private-model."
                 )
         else:
-            client = _openai.OpenAI(api_key=self._api_key or os.environ.get("OPENAI_API_KEY", ""))
-            model = self._model or os.environ.get("ROCPD_LLM_MODEL") or DEFAULT_OPENAI_MODEL
+            client = _openai.OpenAI(
+                api_key=self._api_key or os.environ.get("OPENAI_API_KEY", "")
+            )
+            model = (
+                self._model or os.environ.get("ROCPD_LLM_MODEL") or DEFAULT_OPENAI_MODEL
+            )
         full_messages = [{"role": "system", "content": self._system}] + messages
         try:
             try:
                 resp = client.chat.completions.create(
-                    model=model, messages=full_messages, max_completion_tokens=max_tokens,
+                    model=model,
+                    messages=full_messages,
+                    max_completion_tokens=max_tokens,
                 )
             except _openai.BadRequestError as e:
                 if "max_completion_tokens" in str(e):
                     resp = client.chat.completions.create(
-                        model=model, messages=full_messages, max_tokens=max_tokens,
+                        model=model,
+                        messages=full_messages,
+                        max_tokens=max_tokens,
                     )
                 else:
                     raise
