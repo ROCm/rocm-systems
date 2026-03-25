@@ -1214,7 +1214,7 @@ template <unsigned int size> struct tiled_partition_internal<size, thread_block>
 template <unsigned int size, unsigned int ParentSize, class GrandParentCGTy>
 struct tiled_partition_internal<size, thread_block_tile<ParentSize, GrandParentCGTy> >
     : public thread_block_tile<size, thread_block_tile<ParentSize, GrandParentCGTy> > {
-  static_assert(size <= ParentSize, "Sub tile size must be <= parent tile size in tiled_partition");
+  static_assert(size < ParentSize, "Sub tile size must be < parent tile size in tiled_partition");
 
   __CG_QUALIFIER__ tiled_partition_internal(const thread_block_tile<ParentSize, GrandParentCGTy>& g)
       : thread_block_tile<size, thread_block_tile<ParentSize, GrandParentCGTy> >(g) {}
@@ -1283,6 +1283,54 @@ __CG_QUALIFIER__ coalesced_group binary_partition(const thread_block_tile<size, 
     return coalesced_group(tgrp.build_mask() ^ mask);
   }
 }
+
+template <class T>
+struct plus {
+  __CG_QUALIFIER__ T operator()(T lhs, T rhs) const
+  {
+    return lhs + rhs;
+  }
+};
+
+template <class T>
+struct less {
+  __CG_QUALIFIER__ T operator()(T lhs, T rhs) const
+  {
+    return lhs < rhs? lhs : rhs;
+  }
+};
+
+template <class T>
+struct greater {
+  __CG_QUALIFIER__ T operator()(T lhs, T rhs) const
+  {
+    return lhs < rhs? rhs : lhs;
+  }
+};
+
+template <class T>
+struct bit_and {
+  __CG_QUALIFIER__ T operator()(T lhs, T rhs) const
+  {
+    return lhs & rhs;
+  }
+};
+
+template <class T>
+struct bit_xor {
+  __CG_QUALIFIER__ T operator()(T lhs, T rhs) const
+  {
+    return lhs ^ rhs;
+  }
+};
+
+template <class T>
+struct bit_or {
+  __CG_QUALIFIER__ T operator()(T lhs, T rhs) const
+  {
+    return lhs | rhs;
+  }
+};
 #endif
 }  // namespace cooperative_groups
 
