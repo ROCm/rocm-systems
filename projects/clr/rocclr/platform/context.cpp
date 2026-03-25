@@ -216,6 +216,7 @@ int Context::create(const intptr_t* properties) {
           info_.hCtx_ = (void*)glenv_->glXGetCurrentContext_();
           info_.hDev_[GLDeviceKhrIdx] = (void*)glenv_->glXGetCurrentDisplay_();
 #endif
+          GLFunctions::initAMDInterop(info_.hDev_[GLDeviceKhrIdx]);
         }
       }
 
@@ -302,7 +303,7 @@ bool Context::beginGLInterop() {
 
   if (glenv_ == nullptr || info_.hCtx_ == nullptr) return false;
 
-  if (!glenv_->beginCLInterop(info_.hCtx_)) {
+  if (!glenv_->beginGLInterop(info_.hCtx_)) {
     return false;
   }
   glInteropBound_ = true;
@@ -314,7 +315,7 @@ bool Context::endGLInterop() {
   if (!glInteropBound_) return true;
   if (glenv_ == nullptr || glInteropCtx_ == nullptr) return false;
 
-  if (!glenv_->endCLInterop(glInteropCtx_)) {
+  if (!glenv_->endGLInterop(glInteropCtx_)) {
     return false;
   }
   glInteropBound_ = false;

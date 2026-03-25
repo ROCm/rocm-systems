@@ -617,7 +617,6 @@ class Device : public NullDevice {
   bool createBlitProgram();
 
   //! Interop for GL device
-  bool initGLInteropPrivateExt(void* GLplatformContext, void* GLdeviceContext) const;
   bool glCanInterop(void* GLplatformContext, void* GLdeviceContext) const;
   bool resGLAssociate(void* GLContext, uint name, uint type, Pal::OsExternalHandle* handle,
                       void** mbResHandle, size_t* offset, cl_image_format& newClFormat

@@ -110,11 +110,125 @@ void amd::ImageGL::initDeviceMemory() {
   memset(deviceMemories_, 0, context_().devices().size() * sizeof(DeviceMemory));
 }
 
+#include <mutex>
+
 #ifdef _WIN32
 #define CONVERT_CHAR_GLUBYTE
 #else  //!_WIN32
 #define CONVERT_CHAR_GLUBYTE (GLubyte*)
 #endif  //!_WIN32
+
+// Static AMD GL interop extension function pointers
+#ifdef _WIN32
+amd::PFN_wglGetCurrentContext amd::GLFunctions::wglGetCurrentContext_s = nullptr;
+amd::PFN_wglBeginCLInteropAMD amd::GLFunctions::wglBeginCLInteropAMD_s = nullptr;
+amd::PFN_wglEndCLInteropAMD amd::GLFunctions::wglEndCLInteropAMD_s = nullptr;
+PFNWGLRESOURCEATTACHAMD amd::GLFunctions::wglResourceAttachAMD_s = nullptr;
+PFNWGLRESOURCEDETACHAMD amd::GLFunctions::wglResourceAcquireAMD_s = nullptr;
+PFNWGLRESOURCEDETACHAMD amd::GLFunctions::wglResourceReleaseAMD_s = nullptr;
+PFNWGLRESOURCEDETACHAMD amd::GLFunctions::wglResourceDetachAMD_s = nullptr;
+PFNWGLGETCONTEXTGPUINFOAMD amd::GLFunctions::wglGetContextGPUInfoAMD_s = nullptr;
+#else
+amd::PFN_glXBeginCLInteropAMD amd::GLFunctions::glXBeginCLInteropAMD_s = nullptr;
+amd::PFN_glXEndCLInteropAMD amd::GLFunctions::glXEndCLInteropAMD_s = nullptr;
+amd::PFN_glXResourceAttachAMD amd::GLFunctions::glXResourceAttachAMD_s = nullptr;
+amd::PFN_glXResourceDetachAMD amd::GLFunctions::glXResourceAcquireAMD_s = nullptr;
+amd::PFN_glXResourceDetachAMD amd::GLFunctions::glXResourceReleaseAMD_s = nullptr;
+amd::PFN_glXResourceDetachAMD amd::GLFunctions::glXResourceDetachAMD_s = nullptr;
+amd::PFN_glXGetContextMVPUInfoAMD amd::GLFunctions::glXGetContextMVPUInfoAMD_s = nullptr;
+amd::PFN_MesaGLInteropGLXQueryDeviceInfo amd::GLFunctions::pfnMesaGLInteropGLXQueryDeviceInfo_s =
+    nullptr;
+#endif
+
+bool amd::GLFunctions::initAMDInterop(void* glDeviceContext) {
+  static std::once_flag flag;
+  static bool loaded = false;
+
+  std::call_once(flag, [glDeviceContext]() {
+#ifdef _WIN32
+    HMODULE h = static_cast<HMODULE>(amd::Os::loadLibrary("opengl32.dll"));
+    if (!h) return;
+
+    auto pfnGetProc =
+        reinterpret_cast<PFN_xxxGetProcAddress>(GetProcAddress(h, "wglGetProcAddress"));
+    auto pfnGetCtx =
+        reinterpret_cast<PFN_wglGetCurrentContext>(GetProcAddress(h, "wglGetCurrentContext"));
+    auto pfnCreate =
+        reinterpret_cast<PFN_wglCreateContext>(GetProcAddress(h, "wglCreateContext"));
+    auto pfnDelete =
+        reinterpret_cast<PFN_wglDeleteContext>(GetProcAddress(h, "wglDeleteContext"));
+    auto pfnMakeCur =
+        reinterpret_cast<PFN_wglMakeCurrent>(GetProcAddress(h, "wglMakeCurrent"));
+    if (!pfnGetProc || !pfnGetCtx || !pfnCreate || !pfnDelete || !pfnMakeCur) {
+      LogError("Couldn't obtain WGL context API");
+      return;
+    }
+
+    HGLRC fakeRC = nullptr;
+    if (!pfnGetCtx()) {
+      if (glDeviceContext) {
+        fakeRC = pfnCreate(static_cast<HDC>(glDeviceContext));
+        if (fakeRC) pfnMakeCur(static_cast<HDC>(glDeviceContext), fakeRC);
+      }
+    }
+
+    wglGetCurrentContext_s = pfnGetCtx;
+    wglResourceAttachAMD_s =
+        reinterpret_cast<PFNWGLRESOURCEATTACHAMD>(pfnGetProc("wglResourceAttachAMD"));
+    wglResourceAcquireAMD_s =
+        reinterpret_cast<PFNWGLRESOURCEDETACHAMD>(pfnGetProc("wglResourceAcquireAMD"));
+    wglResourceReleaseAMD_s =
+        reinterpret_cast<PFNWGLRESOURCEDETACHAMD>(pfnGetProc("wglResourceReleaseAMD"));
+    wglResourceDetachAMD_s =
+        reinterpret_cast<PFNWGLRESOURCEDETACHAMD>(pfnGetProc("wglResourceDetachAMD"));
+    wglGetContextGPUInfoAMD_s =
+        reinterpret_cast<PFNWGLGETCONTEXTGPUINFOAMD>(pfnGetProc("wglGetContextGPUInfoAMD"));
+    wglBeginCLInteropAMD_s =
+        reinterpret_cast<PFN_wglBeginCLInteropAMD>(pfnGetProc("wglBeginCLInteroperabilityAMD"));
+    wglEndCLInteropAMD_s =
+        reinterpret_cast<PFN_wglEndCLInteropAMD>(pfnGetProc("wglEndCLInteroperabilityAMD"));
+
+    if (fakeRC) {
+      pfnMakeCur(nullptr, nullptr);
+      pfnDelete(fakeRC);
+    }
+
+    loaded = wglBeginCLInteropAMD_s && wglEndCLInteropAMD_s &&
+             wglResourceAttachAMD_s && wglResourceDetachAMD_s && wglGetContextGPUInfoAMD_s;
+#else
+    void* pModule = dlopen("libGL.so.1", RTLD_NOW);
+    if (!pModule) return;
+
+    auto pfnGetProc =
+        reinterpret_cast<PFN_xxxGetProcAddress>(dlsym(pModule, "glXGetProcAddress"));
+    if (!pfnGetProc) return;
+
+    pfnMesaGLInteropGLXQueryDeviceInfo_s = reinterpret_cast<PFN_MesaGLInteropGLXQueryDeviceInfo>(
+        dlsym(pModule, "MesaGLInteropGLXQueryDeviceInfo"));
+
+    glXResourceAttachAMD_s = reinterpret_cast<PFN_glXResourceAttachAMD>(
+        pfnGetProc(reinterpret_cast<const GLubyte*>("glXResourceAttachAMD")));
+    glXResourceAcquireAMD_s = reinterpret_cast<PFN_glXResourceDetachAMD>(
+        pfnGetProc(reinterpret_cast<const GLubyte*>("glXResourceAcquireAMD")));
+    glXResourceReleaseAMD_s = reinterpret_cast<PFN_glXResourceDetachAMD>(
+        pfnGetProc(reinterpret_cast<const GLubyte*>("glXResourceReleaseAMD")));
+    glXResourceDetachAMD_s = reinterpret_cast<PFN_glXResourceDetachAMD>(
+        pfnGetProc(reinterpret_cast<const GLubyte*>("glXResourceDetachAMD")));
+    glXGetContextMVPUInfoAMD_s = reinterpret_cast<PFN_glXGetContextMVPUInfoAMD>(
+        pfnGetProc(reinterpret_cast<const GLubyte*>("glXGetContextMVPUInfoAMD")));
+    glXBeginCLInteropAMD_s = reinterpret_cast<PFN_glXBeginCLInteropAMD>(
+        pfnGetProc(reinterpret_cast<const GLubyte*>("glXBeginCLInteroperabilityAMD")));
+    glXEndCLInteropAMD_s = reinterpret_cast<PFN_glXEndCLInteropAMD>(
+        pfnGetProc(reinterpret_cast<const GLubyte*>("glXEndCLInteroperabilityAMD")));
+
+    loaded = glXBeginCLInteropAMD_s && glXEndCLInteropAMD_s &&
+             glXResourceAttachAMD_s && glXResourceDetachAMD_s &&
+             glXGetContextMVPUInfoAMD_s && pfnMesaGLInteropGLXQueryDeviceInfo_s;
+#endif
+  });
+
+  return loaded;
+}
 
 #define GLPREFIX(rtype, fcn, dclargs)                                                              \
   if (!(fcn##_ = (PFN_##fcn)GETPROCADDRESS(libHandle_, #fcn))) {                                   \
@@ -420,41 +534,25 @@ bool amd::GLFunctions::setIntEnv() {
   return true;
 }
 
-bool amd::GLFunctions::beginCLInterop(void* glContext) {
+bool amd::GLFunctions::beginGLInterop(void* glContext) {
   if (isEGL_) return true;
 #ifdef _WIN32
-  if (!wglBeginCLInteropAMD_) {
-    wglBeginCLInteropAMD_ = reinterpret_cast<PFN_wglBeginCLInteropAMD>(
-        GetProcAddress_(reinterpret_cast<FCN_STR_TYPE>("wglBeginCLInteroperabilityAMD")));
-    if (!wglBeginCLInteropAMD_) return false;
-  }
-  return wglBeginCLInteropAMD_(static_cast<HGLRC>(glContext), 0) != FALSE;
+  if (!wglBeginCLInteropAMD_s) return false;
+  return wglBeginCLInteropAMD_s(static_cast<HGLRC>(glContext), 0) != FALSE;
 #else
-  if (!glXBeginCLInteropAMD_) {
-    glXBeginCLInteropAMD_ = reinterpret_cast<PFN_glXBeginCLInteropAMD>(
-        GetProcAddress_(reinterpret_cast<FCN_STR_TYPE>("glXBeginCLInteroperabilityAMD")));
-    if (!glXBeginCLInteropAMD_) return false;
-  }
-  return glXBeginCLInteropAMD_(static_cast<GLXContext>(glContext), 0);
+  if (!glXBeginCLInteropAMD_s) return false;
+  return glXBeginCLInteropAMD_s(static_cast<GLXContext>(glContext), 0);
 #endif
 }
 
-bool amd::GLFunctions::endCLInterop(void* glContext) {
+bool amd::GLFunctions::endGLInterop(void* glContext) {
   if (isEGL_) return true;
 #ifdef _WIN32
-  if (!wglEndCLInteropAMD_) {
-    wglEndCLInteropAMD_ = reinterpret_cast<PFN_wglEndCLInteropAMD>(
-        GetProcAddress_(reinterpret_cast<FCN_STR_TYPE>("wglEndCLInteroperabilityAMD")));
-    if (!wglEndCLInteropAMD_) return false;
-  }
-  return wglEndCLInteropAMD_(static_cast<HGLRC>(glContext), 0) != FALSE;
+  if (!wglEndCLInteropAMD_s) return false;
+  return wglEndCLInteropAMD_s(static_cast<HGLRC>(glContext), 0) != FALSE;
 #else
-  if (!glXEndCLInteropAMD_) {
-    glXEndCLInteropAMD_ = reinterpret_cast<PFN_glXEndCLInteropAMD>(
-        GetProcAddress_(reinterpret_cast<FCN_STR_TYPE>("glXEndCLInteroperabilityAMD")));
-    if (!glXEndCLInteropAMD_) return false;
-  }
-  return glXEndCLInteropAMD_(static_cast<GLXContext>(glContext), 0);
+  if (!glXEndCLInteropAMD_s) return false;
+  return glXEndCLInteropAMD_s(static_cast<GLXContext>(glContext), 0);
 #endif
 }
 

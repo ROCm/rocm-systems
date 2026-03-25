@@ -15,6 +15,7 @@
 #include <GL/gl.h>
 #include <GL/glext.h>
 #include "CL/cl_gl.h"
+#include "GL/gl_interop.h"
 #ifndef _WIN32
 #include <GL/glx.h>
 #endif  //!_WIN32
@@ -189,6 +190,12 @@ typedef void (*PFNglXDestroyContext)(Display* dpy, GLXContext ctx);
 typedef Bool (*PFNglXMakeCurrent)(Display* dpy, GLXDrawable drawable, GLXContext ctx);
 typedef Bool (*PFN_glXBeginCLInteropAMD)(GLXContext ctx, GLuint flags);
 typedef Bool (*PFN_glXEndCLInteropAMD)(GLXContext ctx, GLuint flags);
+typedef Bool (*PFN_glXResourceAttachAMD)(GLXContext context, GLvoid* resource,
+                                         GLvoid* pResourceData);
+typedef Bool (*PFN_glXResourceDetachAMD)(GLXContext context, GLvoid* resource);
+typedef Bool (*PFN_glXGetContextMVPUInfoAMD)(GLXContext context, GLuint* deviceId,
+                                             GLuint* chainMask);
+typedef int (*PFN_MesaGLInteropGLXQueryDeviceInfo)(Display* dpy, GLXContext context, void* out);
 typedef void* HMODULE;
 #endif  //!_WIN32
 
@@ -256,8 +263,6 @@ class GLFunctions {
   PFN_wglDeleteContext wglDeleteContext_;
   PFN_wglMakeCurrent wglMakeCurrent_;
   PFN_wglShareLists wglShareLists_;
-  PFN_wglBeginCLInteropAMD wglBeginCLInteropAMD_ = nullptr;
-  PFN_wglEndCLInteropAMD wglEndCLInteropAMD_ = nullptr;
 #else
  public:
   Display* Dpy_;
@@ -283,8 +288,6 @@ class GLFunctions {
   PFNglXCreateContext glXCreateContext_;
   PFNglXDestroyContext glXDestroyContext_;
   PFNglXMakeCurrent glXMakeCurrent_;
-  PFN_glXBeginCLInteropAMD glXBeginCLInteropAMD_ = nullptr;
-  PFN_glXEndCLInteropAMD glXEndCLInteropAMD_ = nullptr;
 #endif
  public:
   GLFunctions(HMODULE h, bool isEGL);
@@ -342,10 +345,10 @@ class GLFunctions {
   bool setIntEnv();
   bool restoreEnv();
 
-  //! Begin/End CL-GL interop (wglBeginCLInteropAMD / glXBeginCLInteropAMD).
+  //! Begin/End GL interop (wglBeginCLInteropAMD / glXBeginCLInteropAMD).
   //! Lazy-loads the function pointers on first call via GetProcAddress_.
-  bool beginCLInterop(void* glContext);
-  bool endCLInterop(void* glContext);
+  bool beginGLInterop(void* glContext);
+  bool endGLInterop(void* glContext);
 
   amd::Monitor& getLock() { return lock_; }
 
@@ -354,6 +357,31 @@ class GLFunctions {
 #define GLPREFIX(rtype, fcn, dclargs) PFN_##fcn fcn##_;
 // Declare pointers to GL functions
 #include "gl_functions.hpp"
+
+  //! Load AMD GL interop extension function pointers (process-wide, once).
+  //! @param glDeviceContext HDC on Windows, Display* on Linux — used if a
+  //!        temporary GL context must be created for wglGetProcAddress.
+  static bool initAMDInterop(void* glDeviceContext);
+
+#ifdef _WIN32
+  static PFN_wglGetCurrentContext wglGetCurrentContext_s;
+  static PFN_wglBeginCLInteropAMD wglBeginCLInteropAMD_s;
+  static PFN_wglEndCLInteropAMD wglEndCLInteropAMD_s;
+  static PFNWGLRESOURCEATTACHAMD wglResourceAttachAMD_s;
+  static PFNWGLRESOURCEDETACHAMD wglResourceAcquireAMD_s;
+  static PFNWGLRESOURCEDETACHAMD wglResourceReleaseAMD_s;
+  static PFNWGLRESOURCEDETACHAMD wglResourceDetachAMD_s;
+  static PFNWGLGETCONTEXTGPUINFOAMD wglGetContextGPUInfoAMD_s;
+#else
+  static PFN_glXBeginCLInteropAMD glXBeginCLInteropAMD_s;
+  static PFN_glXEndCLInteropAMD glXEndCLInteropAMD_s;
+  static PFN_glXResourceAttachAMD glXResourceAttachAMD_s;
+  static PFN_glXResourceDetachAMD glXResourceAcquireAMD_s;
+  static PFN_glXResourceDetachAMD glXResourceReleaseAMD_s;
+  static PFN_glXResourceDetachAMD glXResourceDetachAMD_s;
+  static PFN_glXGetContextMVPUInfoAMD glXGetContextMVPUInfoAMD_s;
+  static PFN_MesaGLInteropGLXQueryDeviceInfo pfnMesaGLInteropGLXQueryDeviceInfo_s;
+#endif
 };
 
 //! Functions for executing the GL related stuff

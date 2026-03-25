@@ -14,94 +14,6 @@
 namespace amd::roc {
 namespace GlInterop {
 
-typedef PROC(WINAPI* PFNWGLGETPROCADDRESS)(LPCSTR name);
-typedef HGLRC(WINAPI* PFNWGLGETCURRENTCONTEXT)(void);
-typedef HGLRC(WINAPI* PFNWGLCREATECONTEXT)(HDC hdc);
-typedef BOOL(WINAPI* PFNWGLDELETECONTEXT)(HGLRC hglrc);
-typedef BOOL(WINAPI* PFNWGLMAKECURRENT)(HDC hdc, HGLRC hglrc);
-static PFNWGLGETPROCADDRESS pfnWglGetProcAddress = nullptr;
-static PFNWGLGETCURRENTCONTEXT pfnWglGetCurrentContext = nullptr;
-static PFNWGLCREATECONTEXT pfnWglCreateContext = nullptr;
-static PFNWGLDELETECONTEXT pfnWglDeleteContext = nullptr;
-static PFNWGLMAKECURRENT pfnWglMakeCurrent = nullptr;
-static PFNWGLBEGINCLINTEROPAMD wglBeginCLInteropAMD = nullptr;
-static PFNWGLENDCLINTEROPAMD wglEndCLInteropAMD = nullptr;
-static PFNWGLRESOURCEATTACHAMD wglResourceAttachAMD = nullptr;
-static PFNWGLRESOURCEDETACHAMD wglResourceAcquireAMD = nullptr;
-static PFNWGLRESOURCEDETACHAMD wglResourceReleaseAMD = nullptr;
-static PFNWGLRESOURCEDETACHAMD wglResourceDetachAMD = nullptr;
-static PFNWGLGETCONTEXTGPUINFOAMD wglGetContextGPUInfoAMD = nullptr;
-
-// ================================================================================================
-bool initGLInteropPrivateExt(void* GLdeviceContext) {
-  static std::once_flag gGlFuncInit;
-  static bool gGlFuncLoaded = false;
-
-
-  std::call_once(gGlFuncInit, [GLdeviceContext]() {
-    if (!GLdeviceContext) {
-      LogError("GLdeviceContext is null");
-      return;
-    }
-
-    HMODULE h = static_cast<HMODULE>(amd::Os::loadLibrary("opengl32.dll"));
-
-    if (!h) {
-      LogError("Couldn't load opengl32.dll");
-      return;
-    }
-
-    pfnWglGetProcAddress =
-        reinterpret_cast<PFNWGLGETPROCADDRESS>(GetProcAddress(h, "wglGetProcAddress"));
-    pfnWglGetCurrentContext =
-        reinterpret_cast<PFNWGLGETCURRENTCONTEXT>(GetProcAddress(h, "wglGetCurrentContext"));
-    pfnWglCreateContext =
-        reinterpret_cast<PFNWGLCREATECONTEXT>(GetProcAddress(h, "wglCreateContext"));
-    pfnWglDeleteContext =
-        reinterpret_cast<PFNWGLDELETECONTEXT>(GetProcAddress(h, "wglDeleteContext"));
-    pfnWglMakeCurrent = reinterpret_cast<PFNWGLMAKECURRENT>(GetProcAddress(h, "wglMakeCurrent"));
-
-    if (!pfnWglGetProcAddress || !pfnWglGetCurrentContext || !pfnWglCreateContext ||
-        !pfnWglDeleteContext || !pfnWglMakeCurrent) {
-      LogError("Couldn't obtain WGL context API");
-      return;
-    }
-
-    // Create a temporary GL context if none is current; WGL extension
-    // functions require some current GL context when loaded.
-    HGLRC fakeRC = nullptr;
-    if (!pfnWglGetCurrentContext()) {
-      fakeRC = pfnWglCreateContext(static_cast<HDC>(GLdeviceContext));
-      if (fakeRC == nullptr) {
-        LogError("Couldn't create temporary WGL context");
-        return;
-      }
-      pfnWglMakeCurrent(static_cast<HDC>(GLdeviceContext), fakeRC);
-    }
-
-    wglBeginCLInteropAMD =
-        reinterpret_cast<PFNWGLBEGINCLINTEROPAMD>(pfnWglGetProcAddress("wglBeginCLInteroperabilityAMD"));
-    wglEndCLInteropAMD = reinterpret_cast<PFNWGLENDCLINTEROPAMD>(pfnWglGetProcAddress("wglEndCLInteroperabilityAMD"));
-    wglResourceAttachAMD = reinterpret_cast<PFNWGLRESOURCEATTACHAMD>(pfnWglGetProcAddress("wglResourceAttachAMD"));
-    wglResourceAcquireAMD = reinterpret_cast<PFNWGLRESOURCEDETACHAMD>(pfnWglGetProcAddress("wglResourceAcquireAMD"));
-    wglResourceReleaseAMD = reinterpret_cast<PFNWGLRESOURCEDETACHAMD>(pfnWglGetProcAddress("wglResourceReleaseAMD"));
-    wglResourceDetachAMD = reinterpret_cast<PFNWGLRESOURCEDETACHAMD>(pfnWglGetProcAddress("wglResourceDetachAMD"));
-    wglGetContextGPUInfoAMD =
-        reinterpret_cast<PFNWGLGETCONTEXTGPUINFOAMD>(pfnWglGetProcAddress("wglGetContextGPUInfoAMD"));
-
-    if (fakeRC) {
-      pfnWglMakeCurrent(nullptr, nullptr);
-      pfnWglDeleteContext(fakeRC);
-    }
-
-    gGlFuncLoaded = wglBeginCLInteropAMD && wglEndCLInteropAMD && wglResourceAttachAMD &&
-                    wglResourceAcquireAMD && wglResourceReleaseAMD &&
-                    wglResourceDetachAMD && wglGetContextGPUInfoAMD;
-  });
-
-  return gGlFuncLoaded;
-}
-
 // ================================================================================================
 bool glCanInterop(Device* device, void* GLplatformContext, void* GLdeviceContext) {
   bool canInteroperate = false;
@@ -111,7 +23,7 @@ bool glCanInterop(Device* device, void* GLplatformContext, void* GLdeviceContext
   HGLRC hRC = static_cast<HGLRC>(GLplatformContext);
 
   // get GL context's LUID and chainBitMask from UGL
-  if (wglGetContextGPUInfoAMD(hRC, &glAdapterLuid, &glChainBitMask)) {
+  if (amd::GLFunctions::wglGetContextGPUInfoAMD_s(hRC, &glAdapterLuid, &glChainBitMask)) {
     // match the adapter
     canInteroperate = device->info().luidLowPart_ == glAdapterLuid.LowPart &&
                       device->info().luidHighPart_ == glAdapterLuid.HighPart &&
@@ -124,8 +36,6 @@ bool glCanInterop(Device* device, void* GLplatformContext, void* GLdeviceContext
 // ================================================================================================
 bool glAssociate(Device* device, uint flags, void* GLplatformContext, void* GLdeviceContext) {
   static_cast<void>(flags); // unused
-
-  if (!initGLInteropPrivateExt(GLdeviceContext)) return false;
 
   return glCanInterop(device, GLplatformContext, GLdeviceContext);
 }
@@ -170,7 +80,7 @@ bool Export(amd::Memory* mem, GLenum targetType, int miplevel, hsa_handle_t* han
   GLResource glResource = {.type = type, .name = name};
   GLResourceData glResourceData = {.version = GL_RESOURCE_DATA_VERSION};
 
-  if (!wglResourceAttachAMD(glRenderContext, static_cast<GLvoid*>(&glResource), &glResourceData))
+  if (!amd::GLFunctions::wglResourceAttachAMD_s(glRenderContext, static_cast<GLvoid*>(&glResource), &glResourceData))
     return false;
   *handle = reinterpret_cast<hsa_handle_t>(glResourceData.handle);
   *resHandle = reinterpret_cast<hsa_handle_t>(glResourceData.mbResHandle);
