@@ -3627,9 +3627,16 @@ static void PatchKernelDescriptorsForWave64(uint8_t* elf, size_t elf_size,
 
     // GFX12 RSRC1 layout: bits [5:0] = VGPR field, bits [11:6] = SGPR field
     // GFX9  RSRC1 layout: bits [5:0] = SGPR field, bits [11:6] = VGPR field
-    // Convert VGPR count: GFX12 granularity 8 (wave32) → GFX9 granularity 4 (wave64).
-    // Add 8 extra VGPRs: 2 save registers (sv_x, sv_y) + 3 temp VGPRs (vt0, vt1,
-    // vt2) used by instruction expansion handlers + padding to align to granularity.
+    //
+    // On GFX940/GFX942 (CDNA3), the VGPR allocation works differently than GFX908:
+    //   - RSRC1 bits [11:6] (VGPR field) = 0 for non-MFMA kernels
+    //   - RSRC3 ACCUM_OFFSET controls ALL VGPR allocation: arch_vgprs = (ACCUM+1)*4
+    //   - The RSRC1 VGPR field only specifies extra accumulation VGPRs (for MFMA)
+    //   - Setting RSRC1 VGPR field > 0 without proper MFMA usage causes INVALID_ISA
+    //
+    // Convert VGPR count: GFX12 granularity 12 (wave32) → GFX9 controlled by ACCUM_OFFSET.
+    // Add 8 extra VGPRs: 2 save registers (sv_x, sv_y) + 4 temp VGPRs (vt0-vt3)
+    // + padding to align to 4-VGPR granularity.
     uint32_t vgpr_field12 = rsrc1 & 0x3Fu;
     uint32_t sgpr_field12_kd = (rsrc1 >> 6) & 0x3Fu;  // save before clear
     // GFX12 (RDNA4) wave32 VGPR granularity is 12 (GFX10=8, GFX11+=12).
@@ -3637,12 +3644,16 @@ static void PatchKernelDescriptorsForWave64(uint8_t* elf, size_t elf_size,
     uint32_t num_vgprs = (vgpr_field12 + 1u) * 12u;
     if (num_vgprs < 8u) num_vgprs = 8u;
     num_vgprs += 8u;  // room for sv_x, sv_y + 4 temp VGPRs (vt0-vt3) + even-align pad
-    // ACCUM_OFFSET: on GFX942, arch VGPRs = (ACCUM_OFFSET+1)*4.  Set ACCUM_OFFSET
-    // so ALL allocated VGPRs (kernel's + save regs + temps) are arch VGPRs (VALU accessible).
-    // Hardware requires ACCUM_OFFSET < RSRC1 VGPR field, so add one extra accum group.
-    uint32_t gfx9_vgpr = (num_vgprs / 4u) - 1u;  // ACCUM_OFFSET = all-arch
+    // ACCUM_OFFSET: on GFX942, arch VGPRs = (ACCUM_OFFSET+1)*4.
+    // Set ACCUM_OFFSET so ALL allocated VGPRs (kernel's + save regs + temps) are arch VGPRs.
+    // Round up to 4-VGPR granularity.
+    uint32_t gfx9_vgpr = ((num_vgprs + 3u) / 4u) - 1u;  // ACCUM_OFFSET = all-arch
     if (gfx9_vgpr > 62u) gfx9_vgpr = 62u;
-    uint32_t rsrc1_vgpr_field = gfx9_vgpr + 1u;   // one extra accum group (ACCUM < field required)
+    // GFX942 (CDNA3): RSRC1 VGPR field = ACCUM_OFFSET.
+    // On gfx942, total = max((vgpr_field+1)*4, (ACCUM+1)*4).
+    // Setting vgpr_field = ACCUM means total = arch, no accum VGPRs allocated.
+    // No extra accumulation registers are created (would require MFMA instructions).
+    uint32_t rsrc1_vgpr_field = gfx9_vgpr;
     if (rsrc1_vgpr_field > 63u) rsrc1_vgpr_field = 63u;
     // Clear bits [11:0] and set GFX9 SGPR[5:0] and VGPR[11:6]
     rsrc1 &= ~0xFFFu;
@@ -3827,16 +3838,21 @@ static void PatchElfMetadata(uint8_t* elf, size_t elf_size,
         std::memcpy(&entry, elf + cand.off + off + 16, 8);
         if (entry == 0 || entry > 1000000u) continue;  // not a valid kernel descriptor
 
-        // Read the already-patched GFX9 RSRC1 (written by PatchKernelDescriptorsForWave64).
-        // GFX9 RSRC1: bits [5:0] = SGPR field (gran=8), bits [11:6] = VGPR field (gran=4).
+        // Read the already-patched GFX9 RSRC1 and RSRC3 (written by PatchKernelDescriptorsForWave64).
+        // GFX9 RSRC1: bits [5:0] = SGPR field (gran=8), bits [11:6] = VGPR field
+        // On GFX942 (CDNA3): VGPR allocation controlled by RSRC3 ACCUM_OFFSET, not RSRC1.
+        // arch_vgprs = (ACCUM_OFFSET + 1) * 4
         uint32_t rsrc1;
         std::memcpy(&rsrc1, elf + cand.off + off + 48, 4);
-        uint32_t vgpr_field = (rsrc1 >> 6) & 0x3Fu;
+        uint32_t rsrc3;
+        std::memcpy(&rsrc3, elf + cand.off + off + 44, 4);
         uint32_t sgpr_field = rsrc1 & 0x3Fu;
-        kd_vgpr_count = (vgpr_field + 1u) * 4u;   // GFX9 wave64 VGPR granularity = 4
-        kd_sgpr_count = (sgpr_field + 1u) * 8u;   // GFX9 SGPR granularity = 8
+        uint32_t accum_offset = rsrc3 & 0x3Fu;
+        kd_vgpr_count = (accum_offset + 1u) * 4u;  // GFX942: arch VGPRs from ACCUM_OFFSET
+        kd_sgpr_count = (sgpr_field + 1u) * 8u;    // GFX9 SGPR granularity = 8
         std::cerr << "hotswap: transpile: KD-derived vgpr_count=" << kd_vgpr_count
-                  << " sgpr_count=" << kd_sgpr_count << " (from patched RSRC1=0x"
+                  << " sgpr_count=" << kd_sgpr_count << " (ACCUM_OFFSET="
+                  << accum_offset << ", RSRC1=0x"
                   << std::hex << rsrc1 << std::dec << ")\n";
         found_kd = true;
         break;
@@ -5435,8 +5451,10 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
       // Copy transpiled kernel code at the kernel's starting offset
       std::memcpy(new_elf + elf_info.text_offset + kernel_text_offset,
                   new_text, new_text_size);
-      // s_code_end-fill remainder after kernel (tells instruction prefetcher to stop)
-      uint8_t nop_bytes[] = {0x00, 0x00, 0x9F, 0xBF};  // s_code_end
+      // s_nop 0 fill remainder after kernel — GFX9 does not support s_code_end
+      // (0xBF9F0000 is an illegal instruction on GFX9 and can trigger a trap if
+      // the instruction prefetcher reads past s_endpgm).
+      uint8_t nop_bytes[] = {0x00, 0x00, 0x80, 0xBF};  // s_nop 0
       for (uint64_t i = kernel_text_offset + new_text_size;
            i + 4 <= elf_info.text_size; i += 4) {
         std::memcpy(new_elf + elf_info.text_offset + i, nop_bytes, 4);
@@ -5492,10 +5510,10 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
         std::memcpy(grown, new_elf, text_end);
         // Write new .text content
         std::memcpy(grown + elf_info.text_offset, new_text, new_text_size);
-        // s_code_end-pad .text to aligned boundary (stops instruction prefetcher)
+        // s_nop 0 pad .text to aligned boundary (GFX9 has no s_code_end)
         uint64_t new_sec_size = elf_info.text_size + delta;
         for (uint64_t p = new_text_size; p < new_sec_size; p += 4) {
-          uint8_t nop[] = {0x00, 0x00, 0x9F, 0xBF};  // s_code_end
+          uint8_t nop[] = {0x00, 0x00, 0x80, 0xBF};  // s_nop 0
           std::memcpy(grown + elf_info.text_offset + p, nop, 4);
         }
         // Copy everything after .text, shifted by delta
@@ -5559,7 +5577,7 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
 
   std::cerr << "hotswap: transpile: .text replaced successfully ("
             << new_text_size << " bytes + "
-            << (elf_info.text_size - new_text_size) << " bytes s_code_end padding)\n";
+            << (elf_info.text_size - new_text_size) << " bytes s_nop padding)\n";
 
   // Step 6: Patch kernel descriptors for wave64
   // Scan ALL sections for kernel descriptors (may be in .text or .rodata)
@@ -5634,15 +5652,13 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
             uint32_t num_vgprs = (vgpr_field12 + 1u) * 12u;  // GFX12 wave32 gran=12
             if (num_vgprs < 8u) num_vgprs = 8u;
             num_vgprs += 8u;  // room for save registers + temp VGPRs
-            uint32_t gfx9_vgpr = (num_vgprs / 4u) - 1u;
+            uint32_t gfx9_vgpr = ((num_vgprs + 3u) / 4u) - 1u;
             if (gfx9_vgpr > 62u) gfx9_vgpr = 62u;
-            // Hardware requires ACCUM_OFFSET < RSRC1 VGPR field.
-            // Add one extra group so ACCUM_OFFSET < field (strictly).
-            uint32_t rsrc1_vgpr_field = gfx9_vgpr + 1u;
+            // GFX942 (CDNA3): RSRC1 VGPR field = ACCUM_OFFSET (no extra accum VGPRs).
+            uint32_t rsrc1_vgpr_field = gfx9_vgpr;
             if (rsrc1_vgpr_field > 63u) rsrc1_vgpr_field = 63u;
-            // Clear bits [11:0] and set GFX9 SGPR[5:0] and VGPR[11:6]
             rsrc1 &= ~0xFFFu;
-            rsrc1 |= (rsrc1_vgpr_field << 6u);  // VGPR in bits [11:6]
+            rsrc1 |= (rsrc1_vgpr_field << 6u);
             {
               uint32_t num_sgprs_rd = (sgpr_field12_rd + 1u) * 16u + 8u;
               // Check .note MSGPACK for .sgpr_count
@@ -5688,10 +5704,14 @@ RewriteResult TranspileCodeObject(void** elf_data, size_t* elf_size,
               std::memcpy(&r1, desc + 48, 4);
               std::memcpy(&r2, desc + 52, 4);
               std::memcpy(&p, desc + 56, 2);
+              uint32_t r3_log;
+              std::memcpy(&r3_log, desc + 44, 4);
+              uint32_t accum_off = r3_log & 0x3Fu;
               std::cerr << "hotswap: transpile: patched KD: RSRC1=0x"
                         << std::hex << r1 << " RSRC2=0x" << r2
+                        << " RSRC3=0x" << r3_log
                         << " props=0x" << p << std::dec
-                        << " vgpr=" << (((r1 >> 6) & 0x3f) + 1) * 4
+                        << " arch_vgpr=" << (accum_off + 1) * 4
                         << " sgpr=" << ((r1 & 0x3f) + 1) * 8
                         << " user_sgpr=" << ((r2 >> 1) & 0x1f)
                         << " tgidx=" << ((r2 >> 7) & 1)
