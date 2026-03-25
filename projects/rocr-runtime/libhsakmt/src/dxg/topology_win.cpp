@@ -96,14 +96,18 @@ HSAKMT_STATUS topology_parse_numa_node_info(
                                       const std::vector<proc_cpu_info>& cpu_info) {
   DWORD length = 0;
   auto relationship = RelationNumaNodeEx;
-  if (!GetLogicalProcessorInformationEx(relationship, nullptr, &length) &&
-      GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
-    relationship = RelationNumaNode;
-    length = 0;
-    if (!GetLogicalProcessorInformationEx(relationship, nullptr, &length) &&
-        GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
-      pr_err("GetLogicalProcessorInformationEx failed with error %lu\n", GetLastError());
-      return HSAKMT_STATUS_ERROR;
+  if (!GetLogicalProcessorInformationEx(relationship, nullptr, &length)) {
+    const auto error = GetLastError();
+    if (error != ERROR_INSUFFICIENT_BUFFER) {
+      pr_warn("GetLogicalProcessorInformationEx(RelationNumaNodeEx) failed with error %lu, "
+              "falling back to RelationNumaNode\n", error);
+      relationship = RelationNumaNode;
+      length = 0;
+      if (!GetLogicalProcessorInformationEx(relationship, nullptr, &length) &&
+          GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
+        pr_err("GetLogicalProcessorInformationEx failed with error %lu\n", GetLastError());
+        return HSAKMT_STATUS_ERROR;
+      }
     }
   }
   std::vector<char> buffer(length);
