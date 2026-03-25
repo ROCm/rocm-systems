@@ -5,6 +5,7 @@
 
 #pragma once
 
+#include "hipfile-cpp20.h"
 #include "hipfile-warnings.h"
 #include "stats.h"
 
@@ -13,17 +14,21 @@
 #include <mutex>
 #endif
 
+#define HIPFILE_CONTEXT_DEFAULT_IMPL(T, Impl)                                                                \
+    template <> struct ContextDefaultImpl<T> : ContextDefaultImplChecked<T, Impl> {}
+
 namespace hipFile {
 
 template <typename T> struct ContextOverride;
 
-template <typename T> struct ContextDefaultImpl {
-    using type = T;
+template <typename T, typename Impl>
+HIPFILE_REQUIRES(std::derived_from<Impl, T>)
+struct ContextDefaultImplChecked {
+    using type = Impl;
 };
 
-template <> struct ContextDefaultImpl<IStatsServer> {
-    using type = StatsServer;
-};
+template <typename T> struct ContextDefaultImpl : ContextDefaultImplChecked<T, T> {};
+HIPFILE_CONTEXT_DEFAULT_IMPL(IStatsServer, StatsServer);
 
 template <typename T> struct Context {
     using DefaultImpl = typename ContextDefaultImpl<T>::type;

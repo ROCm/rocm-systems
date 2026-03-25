@@ -47,6 +47,9 @@ set(HIPFILE_SRC_COMMON_PATH "${CMAKE_CURRENT_SOURCE_DIR}/src/common")
 set(HIPFILE_TEST_COMMON_PATH "${CMAKE_CURRENT_SOURCE_DIR}/test/common")
 set(HIPFILE_AMD_TEST_PATH "${CMAKE_CURRENT_SOURCE_DIR}/test/amd_detail")
 
+set(AIS_CXX_STANDARD "17" CACHE STRING "C++ standard to build with")
+set_property(CACHE AIS_CXX_STANDARD PROPERTY STRINGS "17" "20")
+
 # Set the list of build types for ccmake/CMake GUI
 #
 # This turns the build type box into a multi-select so you don't have to
