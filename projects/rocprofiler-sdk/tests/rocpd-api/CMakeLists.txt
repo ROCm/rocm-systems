@@ -18,7 +18,7 @@ set(rocpd-api-env "ROCPD_SCHEMA_PATH=${rocpd-api-schema-path}")
 # Main test: run C++ rocpd-api-test (rocpd_get_version + rocpd_sql_load_schema)
 ################################################################################
 rocprofiler_add_integration_execute_test(
-    rocpd-api-test
+    rocpd-api-cpp-interface-test
     COMMAND $<TARGET_FILE:rocpd-api-test>
     DEPENDS rocpd-api-test
     TIMEOUT 45
@@ -38,17 +38,17 @@ list(JOIN rocpd-api-pythonpath-list ":" rocpd-api-pythonpath)
 list(APPEND rocpd-api-env "PYTHONPATH=${rocpd-api-pythonpath}")
 
 rocprofiler_add_integration_execute_test(
-    rocpd-api-schema
+    rocpd-api-python-interface-test
     COMMAND ${Python3_EXECUTABLE} -c "pass"
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 10
     LABELS "integration-tests;rocpd"
     PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
     ENVIRONMENT "${rocpd-api-env}"
-    FIXTURES_SETUP rocpd-api-schema)
+    FIXTURES_SETUP rocpd-api-python-interface)
 
 rocprofiler_add_integration_validate_test(
-    rocpd-api-schema
+    rocpd-api-python-interface-test
     TEST_PATHS validate.py
     COPY conftest.py
     CONFIG pytest.ini
@@ -56,5 +56,5 @@ rocprofiler_add_integration_validate_test(
     LABELS "integration-tests;rocpd"
     PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
     ENVIRONMENT "${rocpd-api-env}"
-    FIXTURES_REQUIRED rocpd-api-schema
+    FIXTURES_REQUIRED rocpd-api-python-interface
     DEPENDS rocprofiler-sdk::rocprofv3)

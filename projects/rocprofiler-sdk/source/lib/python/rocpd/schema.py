@@ -42,6 +42,10 @@ class RocpdSchema:
         variables.uuid = f"{uuid}"
         variables.guid = f"{guid}"
 
+        self.supported_schema_versions = libpyrocpd.list_schema_versions(
+            libpyrocpd.sql_engine.sqlite3
+        )
+
         # version=0.0.0 means use the default schema version
         schema_version = libpyrocpd.schema_version(version)
 
@@ -99,6 +103,10 @@ class RocpdSchema:
                 setattr(variables, itr, f"{_variable}")
 
         return libpyrocpd.load_schema(engine, kind, options, version, variables)
+
+
+def get_supported_schema_versions(engine=libpyrocpd.sql_engine.sqlite3):
+    return libpyrocpd.list_schema_versions(engine)
 
 
 def main(create=None):

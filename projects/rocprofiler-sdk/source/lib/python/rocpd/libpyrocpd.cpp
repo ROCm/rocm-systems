@@ -430,14 +430,17 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
 
             py::list out{};
             for(uint64_t i = 0; i < list.count; ++i)
-                out.append(py::cast(list.versions[i]));
+            {
+                const auto& v = list.versions[i];
+                out.append(py::str(fmt::format("{}.{}.{}", v.major, v.minor, v.patch)));
+            }
             rocpd_sql_free_schema_versions_list(&list);
             return out;
         },
         py::arg("engine")            = ROCPD_SQL_ENGINE_SQLITE3,
         py::arg("schema_path_hints") = py::none(),
-        "Return supported rocpd SQL schema versions (from versions.yml) as schema_version "
-        "objects.");
+        "Return supported rocpd SQL schema versions (from versions.yml) as list of"
+        "strings.");
 
     // NOLINTBEGIN(performance-unnecessary-value-param)
 
