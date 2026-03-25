@@ -2553,6 +2553,13 @@ get_use_rocpd()
 }
 
 bool&
+get_use_unified_memory_profiling()
+{
+    static auto _v = get_config()->at("ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING");
+    return static_cast<tim::tsettings<bool>&>(*_v).get();
+}
+
+bool&
 get_caching_perfetto()
 {
     static auto _trace_setting  = get_config()->at("ROCPROFSYS_TRACE");

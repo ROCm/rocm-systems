@@ -1,0 +1,60 @@
+{
+    "required_tables": [
+        {
+            "commit": "KFD page migration events table",
+            "min_rows": 1,
+            "name": "kfd_page_migrate",
+            "required_columns": [
+                "id",
+                "timestamp",
+                "tid",
+                "args_str",
+                "value"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "greater_than_or_equal",
+                    "description": "Check that migration events have valid timestamps",
+                    "error_message": "No migration events with valid timestamps found",
+                    "expected_result": 1,
+                    "query": "SELECT COUNT(*) FROM kfd_page_migrate WHERE timestamp > 0"
+                },
+                {
+                    "comparison": "greater_than_or_equal",
+                    "description": "Check that migration events have args_str containing agent info",
+                    "error_message": "Migration events missing src_agent or dst_agent in args_str",
+                    "expected_result": 1,
+                    "query": "SELECT COUNT(*) FROM kfd_page_migrate WHERE args_str LIKE '%src_agent%' AND args_str LIKE '%dst_agent%'"
+                },
+                {
+                    "comparison": "greater_than_or_equal",
+                    "description": "Check that migration events have non-zero size",
+                    "error_message": "No migration events with non-zero size found",
+                    "expected_result": 1,
+                    "query": "SELECT COUNT(*) FROM kfd_page_migrate WHERE value > 0"
+                }
+            ]
+        },
+        {
+            "commit": "KFD page fault events table (optional - depends on workload)",
+            "min_rows": 0,
+            "name": "kfd_page_fault",
+            "required_columns": [
+                "id",
+                "timestamp",
+                "tid",
+                "name",
+                "args_str"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "greater_than_or_equal",
+                    "description": "If page faults exist, check they have valid timestamps",
+                    "error_message": "Page fault events found but with invalid timestamps",
+                    "expected_result": 1,
+                    "query": "SELECT CASE WHEN COUNT(*) = 0 THEN 1 ELSE (SELECT COUNT(*) FROM kfd_page_fault WHERE timestamp > 0) END FROM kfd_page_fault"
+                }
+            ]
+        }
+    ]
+}

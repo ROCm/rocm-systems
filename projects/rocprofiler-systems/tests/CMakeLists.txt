@@ -59,6 +59,7 @@ else()
     include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-binary-tests.cmake)
     include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-thread-limit-tests.cmake)
     include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-scratch-memory-tests.cmake)
+    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-unified-memory-tests.cmake)
 
     # -------------------------------------------------------------------------------------- #
     #
@@ -97,6 +98,7 @@ set(ROCPROFSYS_PYTHON_VALIDATION_FILES
     ${CMAKE_CURRENT_LIST_DIR}/validate-perfetto-proto.py
     ${CMAKE_CURRENT_LIST_DIR}/validate-rocpd.py
     ${CMAKE_CURRENT_LIST_DIR}/validate-timemory-json.py
+    ${CMAKE_CURRENT_LIST_DIR}/validate-unified-memory.py
 )
 
 set(ROCPROFSYS_TEST_SCRIPTS

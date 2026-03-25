@@ -630,6 +630,15 @@ get_buffered_domains()
         }
     }
 
+#if(ROCPROFILER_VERSION >= 700)
+    // Automatically enable KFD domains when unified memory profiling is enabled
+    if(config::get_use_unified_memory_profiling())
+    {
+        _data.emplace(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT);
+        _data.emplace(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE);
+    }
+#endif
+
     return _data;
 }
 
