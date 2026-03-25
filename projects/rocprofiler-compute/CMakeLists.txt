@@ -836,15 +836,6 @@ install(
     COMPONENT main
 )
 
-# License header update(s)
-add_custom_target(
-    license
-    COMMAND
-        ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tools/update_copyright.py
-        ${PROJECT_SOURCE_DIR}
-    COMMENT "Updating copyright headers"
-)
-
 install(
     FILES ${PROJECT_SOURCE_DIR}/LICENSE.md
     DESTINATION ${CMAKE_INSTALL_DOCDIR}
