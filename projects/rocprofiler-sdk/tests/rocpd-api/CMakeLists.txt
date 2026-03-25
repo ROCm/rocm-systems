@@ -32,10 +32,8 @@ rocprofiler_add_integration_execute_test(
 set(rocpd-api-rocpd-pythonpath
     "${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
     )
-set(rocpd-api-pythonpath-list
-    "${ROCPROFILER_SDK_TESTS_BINARY_DIR}/pytest-packages"
-    "${rocpd-api-rocpd-pythonpath}"
-    )
+set(rocpd-api-pythonpath-list "${ROCPROFILER_SDK_TESTS_BINARY_DIR}/pytest-packages"
+                              "${rocpd-api-rocpd-pythonpath}")
 list(JOIN rocpd-api-pythonpath-list ":" rocpd-api-pythonpath)
 list(APPEND rocpd-api-env "PYTHONPATH=${rocpd-api-pythonpath}")
 

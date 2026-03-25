@@ -415,8 +415,8 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
             std::vector<const char*> hints;
             if(!hints_opt.is_none())
             {
-                auto seq = hints_opt.cast<py::sequence>();
-                const auto n = seq.size();
+                auto       seq = hints_opt.cast<py::sequence>();
+                const auto n   = seq.size();
                 for(size_t i = 0; i < n; ++i)
                 {
                     storage.push_back(py::cast<std::string>(seq[i]));
@@ -436,7 +436,8 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
         },
         py::arg("engine")            = ROCPD_SQL_ENGINE_SQLITE3,
         py::arg("schema_path_hints") = py::none(),
-        "Return supported rocpd SQL schema versions (from versions.yml) as schema_version objects.");
+        "Return supported rocpd SQL schema versions (from versions.yml) as schema_version "
+        "objects.");
 
     // NOLINTBEGIN(performance-unnecessary-value-param)
 

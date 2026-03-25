@@ -155,8 +155,9 @@ rocpd_sql_load_schema(rocpd_sql_engine_t                        engine,
  */
 typedef struct ROCPD_EXPERIMENTAL rocpd_sql_schema_versions_list_t
 {
-    rocpd_version_triplet_t* versions;  ///< Array of length @p count (may be nullptr when count is 0)
-    uint64_t                 count;     ///< Number of entries in @p versions
+    rocpd_version_triplet_t*
+             versions;  ///< Array of length @p count (may be nullptr when count is 0)
+    uint64_t count;     ///< Number of entries in @p versions
 } rocpd_sql_schema_versions_list_t;
 
 /**
@@ -174,10 +175,10 @@ typedef struct ROCPD_EXPERIMENTAL rocpd_sql_schema_versions_list_t
  * @retval ROCPD_STATUS_ERROR Allocation failure
  */
 ROCPD_EXPERIMENTAL rocpd_status_t
-rocpd_sql_list_schema_versions(rocpd_sql_engine_t                    engine,
-                               const char**                          schema_path_hints,
-                               uint64_t                              num_schema_path_hints,
-                               rocpd_sql_schema_versions_list_t*     out_list) ROCPD_API;
+rocpd_sql_list_schema_versions(rocpd_sql_engine_t                engine,
+                               const char**                      schema_path_hints,
+                               uint64_t                          num_schema_path_hints,
+                               rocpd_sql_schema_versions_list_t* out_list) ROCPD_API;
 
 /**
  * @brief (experimental) Release memory returned in ::rocpd_sql_schema_versions_list_t::versions.

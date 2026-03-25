@@ -14,4 +14,4 @@ add_executable(rocpd-api-test)
 target_sources(rocpd-api-test PRIVATE rocpd-api-test.cpp)
 target_compile_options(rocpd-api-test PRIVATE -W -Wall -Wextra)
 target_link_libraries(rocpd-api-test
-                     PRIVATE rocprofiler-sdk-rocpd::rocprofiler-sdk-rocpd-shared-library)
+                      PRIVATE rocprofiler-sdk-rocpd::rocprofiler-sdk-rocpd-shared-library)

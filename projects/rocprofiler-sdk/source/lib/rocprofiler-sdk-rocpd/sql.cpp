@@ -163,8 +163,8 @@ build_schema_paths_string(const char** schema_path_hints, uint64_t num_schema_pa
 }
 
 void
-load_version_file_map(const std::string&    _schema_paths,
-                      version_file_map_t&   version_file_map,
+load_version_file_map(const std::string&       _schema_paths,
+                      version_file_map_t&      version_file_map,
                       rocpd_version_triplet_t& latest_version)
 {
     namespace fs = ::rocpd::sql::fs;
@@ -249,7 +249,7 @@ rocpd_sql_load_schema(rocpd_sql_engine_t                        engine,
         }
     }
 
-    auto version_file_map = rocpd::sql::version_file_map_t{};
+    auto       version_file_map = rocpd::sql::version_file_map_t{};
     const auto _schema_paths =
         rocpd::sql::build_schema_paths_string(schema_path_hints, num_schema_path_hints);
 
@@ -366,9 +366,9 @@ rocpd_sql_load_schema(rocpd_sql_engine_t                        engine,
 }
 
 rocpd_status_t
-rocpd_sql_list_schema_versions(rocpd_sql_engine_t                   engine,
-                               const char**                         schema_path_hints,
-                               uint64_t                             num_schema_path_hints,
+rocpd_sql_list_schema_versions(rocpd_sql_engine_t                engine,
+                               const char**                      schema_path_hints,
+                               uint64_t                          num_schema_path_hints,
                                rocpd_sql_schema_versions_list_t* out_list)
 {
     if(out_list == nullptr) return ROCPD_STATUS_ERROR_INVALID_ARGUMENT;
@@ -378,14 +378,12 @@ rocpd_sql_list_schema_versions(rocpd_sql_engine_t                   engine,
 
     switch(engine)
     {
-        case ROCPD_SQL_ENGINE_SQLITE3:
-            break;
+        case ROCPD_SQL_ENGINE_SQLITE3: break;
         case ROCPD_SQL_ENGINE_NONE:
-        case ROCPD_SQL_ENGINE_LAST:
-            return ROCPD_STATUS_ERROR_SQL_INVALID_ENGINE;
+        case ROCPD_SQL_ENGINE_LAST: return ROCPD_STATUS_ERROR_SQL_INVALID_ENGINE;
     }
 
-    auto version_file_map = rocpd::sql::version_file_map_t{};
+    auto       version_file_map = rocpd::sql::version_file_map_t{};
     const auto _schema_paths =
         rocpd::sql::build_schema_paths_string(schema_path_hints, num_schema_path_hints);
 
@@ -400,12 +398,14 @@ rocpd_sql_list_schema_versions(rocpd_sql_engine_t                   engine,
     for(const auto& kv : version_file_map)
         sorted_versions.emplace_back(kv.first);
 
-    std::sort(sorted_versions.begin(), sorted_versions.end(), [](const std::string& a, const std::string& b) {
-        return rocpd::sql::get_version_triplet(a) < rocpd::sql::get_version_triplet(b);
-    });
+    std::sort(sorted_versions.begin(),
+              sorted_versions.end(),
+              [](const std::string& a, const std::string& b) {
+                  return rocpd::sql::get_version_triplet(a) < rocpd::sql::get_version_triplet(b);
+              });
 
     const auto num_versions = sorted_versions.size();
-    auto* versions    = static_cast<rocpd_version_triplet_t*>(
+    auto*      versions     = static_cast<rocpd_version_triplet_t*>(
         std::malloc(num_versions * sizeof(rocpd_version_triplet_t)));  // NOLINT
     if(!versions) return ROCPD_STATUS_ERROR;
 
