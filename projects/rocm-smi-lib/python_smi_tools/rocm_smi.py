@@ -2981,7 +2981,7 @@ def showPids(verbose):
                     [
                         pid,
                         getProcessName(pid),
-                        str(gpuNumber),
+                        str(dv_ind),
                         str(vramUsage),
                         str(sdmaUsage),
                         str(cuOccupancy),
