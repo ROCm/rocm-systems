@@ -372,7 +372,7 @@ foreach(SRC_FILE ${SRC_FILES})
     add_custom_command(
       OUTPUT ${HIP_FILE}
       COMMAND mkdir -p ${HIP_FILE_DIR}
-              && ${hipify-perl_executable} -quiet-warnings ${PROJECT_SOURCE_DIR}/${SRC_FILE} -o ${HIP_FILE}
+              && ${CMAKE_COMMAND} -E env bash ${PROJECT_SOURCE_DIR}/cmake/scripts/hipify.sh ${hipify-perl_executable} ${PROJECT_SOURCE_DIR} ${SRC_FILE} ${HIP_FILE}
               && ${CMAKE_COMMAND} -E env bash ${PROJECT_SOURCE_DIR}/cmake/scripts/add_unroll.sh ${HIP_FILE}
               && ${CMAKE_COMMAND} -E env bash ${PROJECT_SOURCE_DIR}/cmake/scripts/add_faults.sh ${HIP_FILE}
       MAIN_DEPENDENCY ${PROJECT_SOURCE_DIR}/${SRC_FILE}
@@ -382,7 +382,7 @@ foreach(SRC_FILE ${SRC_FILES})
     add_custom_command(
       OUTPUT ${HIP_FILE}
       COMMAND mkdir -p ${HIP_FILE_DIR}
-              && ${hipify-perl_executable} -quiet-warnings ${PROJECT_SOURCE_DIR}/${SRC_FILE} -o ${HIP_FILE}
+              && ${CMAKE_COMMAND} -E env bash ${PROJECT_SOURCE_DIR}/cmake/scripts/hipify.sh ${hipify-perl_executable} ${PROJECT_SOURCE_DIR} ${SRC_FILE} ${HIP_FILE}
               && ${CMAKE_COMMAND} -E env bash ${PROJECT_SOURCE_DIR}/cmake/scripts/add_unroll.sh ${HIP_FILE}
       MAIN_DEPENDENCY ${PROJECT_SOURCE_DIR}/${SRC_FILE}
       COMMENT "Hipifying ${SRC_FILE} -> ${HIP_FILE}"
