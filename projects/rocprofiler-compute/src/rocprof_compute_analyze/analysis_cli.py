@@ -28,18 +28,18 @@ import sys
 from pathlib import Path
 
 import pandas as pd
+from utils.utils_analysis import (
+    build_call_trees,
+    build_call_trees_with_kernel_ids,
+    process_torch_trace_output,
+    write_torch_trace_consolidated_csv,
+)
 
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from roofline import Roofline
 from utils import file_io, parser, schema, tty
 from utils.logger import console_error, console_log, console_warning, demarcate
 from utils.roofline_calc import calc_ai_analyze, validate_roofline_csv
-from utils.utils import (
-    build_call_trees,
-    build_call_trees_with_kernel_ids,
-    process_torch_trace_output,
-    write_torch_trace_consolidated_csv,
-)
 
 
 def parse_torch_operator_patterns(args: argparse.Namespace) -> list[str]:
@@ -299,7 +299,7 @@ class cli_analysis(OmniAnalyze_Base):
             consolidated_df["Operator_Name"].isin(matched_names)
         ].copy()
 
-        kernel_top_df = pd.read_csv(str(Path(workload_path) / "pmc_kernel_top.csv"))
+        kernel_top_df = workload.dfs[parser.PMC_KERNEL_TOP_TABLE_ID]
         name_to_id: dict[str, int] = {
             str(kernel_name).strip(): idx
             for idx, kernel_name in enumerate(kernel_top_df["Kernel_Name"].tolist())
