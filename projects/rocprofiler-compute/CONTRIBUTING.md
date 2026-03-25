@@ -231,8 +231,6 @@ These tests are automatically protected by guards in `tests/conftest.py` when te
 The guard intercepts ALL imports (direct, nested, dynamic) and fails tests immediately if
 non-stdlib packages are imported.
 
-NOTE: Tests
-
 ### What's Allowed
 
 **Python standard library** (Python 3.8+):
