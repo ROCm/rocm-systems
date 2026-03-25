@@ -114,7 +114,18 @@ class TestTranspose(RocprofsysTest):
     LOOPS_RUN_ARGS = ["2", "100", "50"]
 
     @pytest.mark.parametrize(
-        "mode", ["baseline", "binary_rewrite", "runtime_instrument", "sys_run"]
+        "mode",
+        [
+            "baseline",
+            "binary_rewrite",
+            pytest.param(
+                "runtime_instrument",
+                marks=pytest.mark.ci_disable(
+                    "all"
+                ),  # TODO: Deprecate once TheRock switches to CTest
+            ),
+            "sys_run",
+        ],
     )
     def test(self, mode, transpose_env, num_processes):
         result = self.run_test(

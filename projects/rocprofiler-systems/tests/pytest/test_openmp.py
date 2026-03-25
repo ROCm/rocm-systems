@@ -307,7 +307,13 @@ class TestOpenMPVV(RocprofsysTest):
             "sys_run",
             pytest.param(
                 "runtime_instrument",
-                marks=[pytest.mark.slow, pytest.mark.serialize],
+                marks=[
+                    pytest.mark.slow,
+                    pytest.mark.serialize,
+                    pytest.mark.ci_disable(
+                        "all"
+                    ),  # TODO: Deprecate once TheRock switches to CTest
+                ],
             ),
         ],
     )

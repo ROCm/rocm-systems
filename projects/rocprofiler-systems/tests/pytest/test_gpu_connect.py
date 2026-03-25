@@ -13,7 +13,6 @@ from conftest import RocprofsysTest
 pytestmark = [
     pytest.mark.gpu,
     pytest.mark.xgmi,
-    pytest.mark.ci_enable,  # TODO: Deprecate once TheRock switches to CTest
     pytest.mark.rocm,
 ]
 
