@@ -1579,6 +1579,63 @@ def test_att_malformed_csv_skipped_gracefully():
 
 
 # ---------------------------------------------------------------------------
+# generate_recommendations – Rule 2a: Init-overhead guard
+# ---------------------------------------------------------------------------
+
+
+def test_init_overhead_short_run_low_kernel_pct():
+    """Rule 2a: short run (<1s) with <5% kernel → init overhead, not API overhead."""
+    from rocinsight.analyze import generate_recommendations
+
+    td = _empty_breakdown(total_runtime=500_000_000, overhead_percent=95.0, kernel_percent=2.0)
+    recs = generate_recommendations(td, [], {})
+    init_recs = [r for r in recs if r["category"] == "Runtime Initialization"]
+    api_recs = [r for r in recs if r["category"] == "API Overhead"]
+    assert len(init_recs) == 1
+    assert len(api_recs) == 0  # suppressed by init-overhead guard
+
+
+def test_init_overhead_long_run_not_triggered():
+    """Rule 2a: long run (>1s) with low kernel% does NOT trigger init guard."""
+    from rocinsight.analyze import generate_recommendations
+
+    td = _empty_breakdown(total_runtime=10_000_000_000, overhead_percent=85.0, kernel_percent=2.0)
+    recs = generate_recommendations(td, [], {})
+    init_recs = [r for r in recs if r["category"] == "Runtime Initialization"]
+    assert len(init_recs) == 0  # not init-dominated — it's a real overhead problem
+
+
+def test_init_overhead_short_run_normal_kernel_pct():
+    """Rule 2a: short run but >5% kernel → NOT init overhead."""
+    from rocinsight.analyze import generate_recommendations
+
+    td = _empty_breakdown(total_runtime=800_000_000, overhead_percent=50.0, kernel_percent=40.0)
+    recs = generate_recommendations(td, [], {})
+    init_recs = [r for r in recs if r["category"] == "Runtime Initialization"]
+    assert len(init_recs) == 0
+
+
+def test_init_overhead_zero_runtime_guard():
+    """Rule 2a: total_runtime=0 does NOT trigger (division by zero guard)."""
+    from rocinsight.analyze import generate_recommendations
+
+    td = _empty_breakdown(total_runtime=0, kernel_percent=0.0)
+    recs = generate_recommendations(td, [], {})
+    init_recs = [r for r in recs if r["category"] == "Runtime Initialization"]
+    assert len(init_recs) == 0
+
+
+def test_init_overhead_suppresses_api_overhead_rule():
+    """When init-overhead fires, API overhead rule is suppressed even at 90%+ overhead."""
+    from rocinsight.analyze import generate_recommendations
+
+    td = _empty_breakdown(total_runtime=300_000_000, overhead_percent=92.0, kernel_percent=1.0)
+    recs = generate_recommendations(td, [], {})
+    api_recs = [r for r in recs if r["category"] == "API Overhead"]
+    assert len(api_recs) == 0  # suppressed
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 

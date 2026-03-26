@@ -1317,9 +1317,39 @@ def generate_recommendations(
             }
         )
 
+    # Rule 2a: Init-overhead guard — suppress generic API overhead advice
+    # when the workload is so short that ROCm runtime initialization dominates
+    _INIT_OVERHEAD_MAX_KERNEL_PCT = 5.0
+    _INIT_OVERHEAD_MAX_RUNTIME_NS = 1_000_000_000  # 1 second
+
+    kernel_pct = time_breakdown.get("kernel_percent", 0)
+    total_runtime_ns = time_breakdown.get("total_runtime", 0)
+    _is_init_overhead = (
+        kernel_pct < _INIT_OVERHEAD_MAX_KERNEL_PCT
+        and 0 < total_runtime_ns < _INIT_OVERHEAD_MAX_RUNTIME_NS
+    )
+
+    if _is_init_overhead:
+        recommendations.append(
+            {
+                "priority": "INFO",
+                "category": "Runtime Initialization",
+                "issue": f"Short workload ({total_runtime_ns/1e6:.0f} ms) with {kernel_pct:.1f}% GPU compute — overhead is dominated by ROCm runtime initialization",
+                "suggestion": "GPU code is already well-optimized for this workload size — remaining overhead is one-time initialization cost",
+                "actions": [
+                    "Run a longer workload or increase iteration count so GPU compute dominates total runtime",
+                    "For micro-benchmarks, run one warmup iteration before measurement to amortize init cost",
+                    "Place roctxRangeStart/Stop markers around the hot loop only to exclude init from analysis",
+                    "If this IS the full workload, consider lazy initialization or pre-compiled kernels (hiprtc)",
+                ],
+                "estimated_impact": "N/A — GPU compute itself appears efficient; runtime init cost is one-time",
+                "commands": [],
+            }
+        )
+
     # Rule 2: High API overhead
     overhead_percent = time_breakdown.get("overhead_percent", 0)
-    if overhead_percent > 15:
+    if overhead_percent > 15 and not _is_init_overhead:
         recommendations.append(
             {
                 "priority": "MEDIUM",

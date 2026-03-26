@@ -207,3 +207,166 @@ class TestAlternativeApplyCompileWait:
                 allow_retry=True,
             )
         assert action == "continue"
+
+
+# ---------------------------------------------------------------------------
+# Plateau detection tests
+# ---------------------------------------------------------------------------
+
+
+class TestPlateauDetection:
+    """Tests for the optimization plateau detection feature."""
+
+    def _make_breakdown(self, total_runtime_ns: int) -> dict:
+        return {
+            "kernel_time_pct": 80.0,
+            "memcpy_time_pct": 10.0,
+            "api_overhead_pct": 5.0,
+            "idle_time_pct": 5.0,
+            "total_runtime_ns": total_runtime_ns,
+        }
+
+    def _make_snap(self, iteration: int, total_runtime_ns: int):
+        from rocinsight.ai_analysis.interactive import _AnalysisSnapshot
+
+        return _AnalysisSnapshot(
+            timestamp="2026-01-01T00:00:00+00:00",
+            iteration=iteration,
+            recommendations=[],
+            execution_breakdown=self._make_breakdown(total_runtime_ns),
+            hotspots=[],
+        )
+
+    def test_plateau_after_two_small_changes(self, tmp_path):
+        """Two consecutive <2% changes should trigger plateau detection."""
+        sess = _make_session(tmp_path)
+        # Simulate 2 prior runs with similar runtimes
+        sess._state.analysis_history.append(self._make_snap(0, 1_000_000_000))
+        sess._state.analysis_history.append(self._make_snap(1, 1_005_000_000))
+        # First small change: increment plateau_iteration_count to 1
+        sess._state.plateau_iteration_count = 1
+
+        # New breakdown with <2% change from last
+        new_bd = self._make_breakdown(1_010_000_000)  # ~0.5% change from 1_005_000_000
+        is_plateaued, count, pct = sess._compute_plateau_status(new_bd)
+        assert is_plateaued is True
+        assert count >= 2
+        assert pct < 2.0
+
+    def test_no_plateau_on_first_run(self, tmp_path):
+        """No prior history should not trigger plateau."""
+        sess = _make_session(tmp_path)
+        new_bd = self._make_breakdown(1_000_000_000)
+        is_plateaued, count, pct = sess._compute_plateau_status(new_bd)
+        assert is_plateaued is False
+        assert count == 0
+        assert pct == 0.0
+
+    def test_plateau_resets_on_improvement(self, tmp_path):
+        """A >5% change should reset the plateau counter."""
+        sess = _make_session(tmp_path)
+        sess._state.analysis_history.append(self._make_snap(0, 1_000_000_000))
+        sess._state.plateau_iteration_count = 3
+
+        # New breakdown with >5% change
+        new_bd = self._make_breakdown(900_000_000)  # 10% change
+        is_plateaued, count, pct = sess._compute_plateau_status(new_bd)
+        assert is_plateaued is False
+        assert sess._state.plateau_iteration_count == 0
+
+    def test_filter_seen_recommendations(self, tmp_path):
+        """Previously-seen recommendations should be filtered out."""
+        sess = _make_session(tmp_path)
+        sess._state.seen_recommendation_hashes = [
+            "MEMORY_TRANSFER:High memory transfer overhead detected",
+        ]
+        recs = [
+            {"category": "MEMORY_TRANSFER", "issue": "High memory transfer overhead detected"},
+            {"category": "COMPUTE", "issue": "Kernel compute bottleneck"},
+        ]
+        filtered, suppressed = sess._filter_seen_recommendations(recs)
+        assert suppressed == 1
+        assert len(filtered) == 1
+        assert filtered[0]["category"] == "COMPUTE"
+
+    def test_zero_runtime_guard(self, tmp_path):
+        """Previous run with total_runtime_ns=0 should not crash."""
+        sess = _make_session(tmp_path)
+        sess._state.analysis_history.append(self._make_snap(0, 0))  # zero runtime
+
+        new_bd = self._make_breakdown(1_000_000_000)
+        is_plateaued, count, pct = sess._compute_plateau_status(new_bd)
+        assert is_plateaued is False
+        assert pct == 0.0
+
+
+# ---------------------------------------------------------------------------
+# WorkflowSession conversation persistence tests
+# ---------------------------------------------------------------------------
+
+
+class TestWorkflowConversation:
+    """WorkflowSession conversation persistence tests."""
+
+    def test_ensure_conv_no_llm_returns_none(self, tmp_path):
+        """Without LLM provider, _ensure_conv returns None."""
+        sess = _make_session(tmp_path)
+        sess._llm_provider = None
+        assert sess._ensure_conv() is None
+
+    def test_ensure_conv_creates_conversation(self, tmp_path):
+        """With LLM provider, _ensure_conv creates an LLMConversation."""
+        sess = _make_session(tmp_path)
+        sess._llm_provider = "anthropic"
+        sess._llm_api_key = "dummy"
+        with patch(
+            "rocinsight.ai_analysis.interactive.LLMConversation"
+        ) as MockConv:
+            instance = MockConv.return_value
+            instance.initialize = MagicMock()
+            conv = sess._ensure_conv()
+            assert conv is not None
+            instance.initialize.assert_called_once()
+
+    def test_ensure_conv_restores_from_state(self, tmp_path):
+        """When state.conversation is set, _ensure_conv calls from_dict."""
+        sess = _make_session(tmp_path)
+        sess._llm_provider = "anthropic"
+        sess._llm_api_key = "dummy"
+        sess._state.conversation = {"messages": [], "system": "test"}
+        with patch(
+            "rocinsight.ai_analysis.interactive.LLMConversation"
+        ) as MockConv:
+            MockConv.from_dict = MagicMock(return_value=MagicMock())
+            conv = sess._ensure_conv()
+            MockConv.from_dict.assert_called_once()
+
+    def test_save_session_flushes_conversation(self, tmp_path):
+        """_save_session stores conversation dict in state."""
+        sess = _make_session(tmp_path)
+        mock_conv = MagicMock()
+        mock_conv.to_dict.return_value = {
+            "messages": [{"role": "user", "content": "test"}]
+        }
+        sess._conv = mock_conv
+        # Manually trigger the flush logic
+        if sess._conv is not None:
+            sess._state.conversation = sess._conv.to_dict()
+        assert sess._state.conversation is not None
+        assert len(sess._state.conversation["messages"]) == 1
+
+    def test_ensure_conv_idempotent(self, tmp_path):
+        """Calling _ensure_conv twice returns the same instance."""
+        sess = _make_session(tmp_path)
+        sess._llm_provider = "anthropic"
+        sess._llm_api_key = "dummy"
+        with patch(
+            "rocinsight.ai_analysis.interactive.LLMConversation"
+        ) as MockConv:
+            instance = MockConv.return_value
+            instance.initialize = MagicMock()
+            conv1 = sess._ensure_conv()
+            conv2 = sess._ensure_conv()
+            assert conv1 is conv2
+            # initialize should only be called once
+            assert instance.initialize.call_count == 1

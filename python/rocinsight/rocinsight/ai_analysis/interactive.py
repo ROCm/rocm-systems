@@ -18,6 +18,11 @@ from typing import Any, Dict, List, Optional, Union
 from .llm_conversation import LLMConversation
 from .llm_analyzer import load_reference_guide
 
+# ── Plateau detection constants ──────────────────────────────────────────────
+_PLATEAU_THRESHOLD_PCT = 2.0  # <2% change = plateau
+_PLATEAU_MIN_ITERATIONS = 2   # need 2+ sub-threshold iterations to declare plateau
+_MAX_SEEN_REC_HASHES = 200    # cap to prevent unbounded growth
+
 # ── Session data ─────────────────────────────────────────────────────────────
 
 
@@ -2077,6 +2082,7 @@ class _AnalysisSnapshot:
     execution_breakdown: Optional[Dict[str, Any]] = None
     hotspots: List[Dict[str, Any]] = field(default_factory=list)
     ai_recommended_command: Optional[str] = None
+    plateau_detected: bool = False
 
 
 @dataclass
@@ -2277,6 +2283,9 @@ class WorkflowState:
     checkpoints: List[CheckpointRecord] = field(default_factory=list)
     active_checkpoint: Optional[int] = None
     blacklisted_approaches: List[str] = field(default_factory=list)
+    plateau_iteration_count: int = 0
+    seen_recommendation_hashes: List[str] = field(default_factory=list)
+    conversation: Optional[Dict[str, Any]] = None
 
 
 def _edit_summary_from_suggestions(suggestions: str) -> str:
@@ -2313,6 +2322,7 @@ class WorkflowSession:
         self._sessions_dir = pathlib.Path.home() / ".rocinsight" / "sessions"
         # Checkpoint manager — set after _init_checkpoints() called from run()
         self._gcm: Optional["GitCheckpointManager"] = None
+        self._conv: Optional["LLMConversation"] = None
         self._resumed = False
 
         if resume_session:
@@ -2339,6 +2349,47 @@ class WorkflowSession:
             _slug = "app"
         self._session_id = f"workflow_{_ts}_{_slug}"
         self._session_file = self._sessions_dir / f"{self._session_id}.json"
+
+    def _ensure_conv(self) -> Optional["LLMConversation"]:
+        """Lazily create or restore the persistent LLMConversation."""
+        if not self._llm_provider:
+            return None
+        if self._conv is not None:
+            return self._conv
+        try:
+            if self._state.conversation:
+                # Restore from saved session
+                self._conv = LLMConversation.from_dict(
+                    self._state.conversation,
+                    api_key=self._llm_api_key,
+                    model=self._llm_model,
+                )
+            else:
+                # Create fresh conversation
+                fence = ""
+                try:
+                    fence = load_reference_guide()
+                except Exception:
+                    pass
+                system_prompt = (
+                    "You are an expert AMD GPU performance engineer in an iterative "
+                    "optimization workflow. You will see profiling results, source code, "
+                    "and edit history across multiple messages. Remember what was already "
+                    "tried — do NOT repeat suggestions that failed or showed no impact.\n\n"
+                    + fence
+                )
+                self._conv = LLMConversation(
+                    provider=self._llm_provider,
+                    api_key=self._llm_api_key,
+                    model=self._llm_model,
+                    compact_every=10,
+                    keep_recent_turns=6,
+                )
+                self._conv.initialize(system_prompt)
+            return self._conv
+        except Exception as exc:
+            _print(f"  (Conversation init failed: {exc})", style="dim")
+            return None
 
     def _load_session(
         self, path_or_id: str
@@ -2433,11 +2484,21 @@ class WorkflowSession:
             checkpoints=checkpoints,
             active_checkpoint=raw.get("active_checkpoint"),
             blacklisted_approaches=raw.get("blacklisted_approaches", []),
+            plateau_iteration_count=raw.get("plateau_iteration_count", 0),
+            seen_recommendation_hashes=raw.get("seen_recommendation_hashes", []),
+            conversation=raw.get("conversation"),
         )
 
     def _save_session(self) -> None:
         """Serialize WorkflowState to ~/.rocinsight/sessions/workflow_<id>.json."""
         from dataclasses import asdict as _asdict
+
+        # Flush conversation state before serializing
+        if self._conv is not None:
+            try:
+                self._state.conversation = self._conv.to_dict()
+            except Exception:
+                pass
 
         try:
             self._sessions_dir.mkdir(parents=True, exist_ok=True)
@@ -3441,44 +3502,76 @@ class WorkflowSession:
             f"\n=== FAILED EDIT ===\n{failed_content}" if failed_content else ""
         )
 
-        system = (
-            "You are an expert AMD GPU performance engineer. "
-            "A code edit you suggested was reverted because it caused errors. "
-            "Analyze what went wrong and propose a SPECIFIC corrected alternative.\n\n"
-            "Format your response with exactly two sections:\n"
-            "ANALYSIS: (root cause — what was wrong in the failed edit and why)\n"
-            "ALTERNATIVE: (the corrected optimization approach with specific code changes — "
-            "be concrete, not generic)"
-        )
-        user = (
-            f"The edit to {file_path.name} was reverted because it failed."
-            f"{error_block}"
-            f"\n=== ORIGINAL CODE (now restored) ===\n{original_content}"
-            f"{failed_block}"
-        )
+        # --- Conversation-based analysis (if available) ---
+        analysis = None
+        conv = self._ensure_conv()
+        if conv is not None:
+            try:
+                _revert_msg = (
+                    f"The edit to {file_path.name} was reverted because it caused errors."
+                    f"{error_block}"
+                    f"\n=== ORIGINAL CODE (now restored) ===\n{original_content}"
+                    f"{failed_block}"
+                    "\n\nAnalyze what went wrong. Format response as:\n"
+                    "ANALYSIS: (root cause)\n"
+                    "ALTERNATIVE: (corrected approach with specific code)"
+                )
+                _tokens: List[str] = []
 
-        try:
-            from rocinsight.ai_analysis.llm_analyzer import LLMAnalyzer  # type: ignore[import]
+                def _collect(tok: str) -> None:
+                    _tokens.append(tok)
 
-            analyzer = LLMAnalyzer(
-                provider=self._llm_provider,
-                api_key=self._llm_api_key,
-                model=self._llm_model,
+                with _Spinner(f"  {self._llm_provider} analyzing failure..."):
+                    conv.send(_revert_msg, on_token=_collect, max_tokens=4096)
+                _result = "".join(_tokens)
+                if _result and _result.strip():
+                    analysis = _result
+            except Exception as exc:
+                _print(
+                    f"  (Conversation analysis failed: {exc}; falling back to one-shot)",
+                    style="dim",
+                )
+
+        # --- Fallback: one-shot LLMAnalyzer (existing code) ---
+        if analysis is None:
+            system = (
+                "You are an expert AMD GPU performance engineer. "
+                "A code edit you suggested was reverted because it caused errors. "
+                "Analyze what went wrong and propose a SPECIFIC corrected alternative.\n\n"
+                "Format your response with exactly two sections:\n"
+                "ANALYSIS: (root cause — what was wrong in the failed edit and why)\n"
+                "ALTERNATIVE: (the corrected optimization approach with specific code changes — "
+                "be concrete, not generic)"
             )
-            with _Spinner(f"  {self._llm_provider} analyzing failure..."):
-                if self._llm_provider == "openai":
-                    analysis = analyzer._call_openai(system, user, timeout=120)
-                elif self._llm_provider == "anthropic":
-                    analysis = analyzer._call_anthropic(system, user, timeout=120)
-                elif self._llm_provider == "private":
-                    analysis = analyzer._call_private(system, user)
-                elif self._llm_provider == "claude-code":
-                    analysis = analyzer._call_claude_code(system, user)
-                else:
-                    analysis = analyzer._call_local(system, user)
-        except Exception as exc:
-            _print(f"  (LLM analysis failed: {exc})", style="red")
-            return self._post_revert_menu(show_retry=allow_retry)
+            user = (
+                f"The edit to {file_path.name} was reverted because it failed."
+                f"{error_block}"
+                f"\n=== ORIGINAL CODE (now restored) ===\n{original_content}"
+                f"{failed_block}"
+            )
+
+            try:
+                from rocinsight.ai_analysis.llm_analyzer import LLMAnalyzer  # type: ignore[import]
+
+                analyzer = LLMAnalyzer(
+                    provider=self._llm_provider,
+                    api_key=self._llm_api_key,
+                    model=self._llm_model,
+                )
+                with _Spinner(f"  {self._llm_provider} analyzing failure..."):
+                    if self._llm_provider == "openai":
+                        analysis = analyzer._call_openai(system, user, timeout=120)
+                    elif self._llm_provider == "anthropic":
+                        analysis = analyzer._call_anthropic(system, user, timeout=120)
+                    elif self._llm_provider == "private":
+                        analysis = analyzer._call_private(system, user)
+                    elif self._llm_provider == "claude-code":
+                        analysis = analyzer._call_claude_code(system, user)
+                    else:
+                        analysis = analyzer._call_local(system, user)
+            except Exception as exc:
+                _print(f"  (LLM analysis failed: {exc})", style="red")
+                return self._post_revert_menu(show_retry=allow_retry)
 
         if not analysis:
             return self._post_revert_menu(show_retry=allow_retry)
@@ -3845,6 +3938,55 @@ class WorkflowSession:
                 else:
                     return False
 
+    # ── Plateau detection helpers ─────────────────────────────────────────────
+
+    def _compute_plateau_status(
+        self, new_breakdown: Optional[Dict[str, Any]]
+    ) -> tuple:
+        """Check whether optimization has plateaued.
+
+        Returns (is_plateaued: bool, consecutive_count: int, pct_change: float).
+        """
+        if new_breakdown is None or not self._state.analysis_history:
+            return (False, 0, 0.0)
+
+        prev = self._state.analysis_history[-1]
+        prev_bd = prev.execution_breakdown or {}
+        prev_ns = prev_bd.get("total_runtime_ns", 0)
+        new_ns = new_breakdown.get("total_runtime_ns", 0)
+
+        if prev_ns == 0:
+            return (False, 0, 0.0)
+
+        abs_pct_change = abs((new_ns - prev_ns) / prev_ns * 100)
+
+        if abs_pct_change < _PLATEAU_THRESHOLD_PCT:
+            self._state.plateau_iteration_count += 1
+        else:
+            self._state.plateau_iteration_count = 0
+
+        is_plateaued = self._state.plateau_iteration_count >= _PLATEAU_MIN_ITERATIONS
+        return (is_plateaued, self._state.plateau_iteration_count, abs_pct_change)
+
+    def _filter_seen_recommendations(
+        self, recs: List[Dict[str, Any]]
+    ) -> tuple:
+        """Filter out recommendations whose hash has been seen before.
+
+        Returns (filtered_recs, suppressed_count).
+        Does NOT update seen_recommendation_hashes (caller does that).
+        """
+        seen = set(self._state.seen_recommendation_hashes)
+        filtered = []
+        suppressed = 0
+        for r in recs:
+            _hash = f"{r.get('category', '')}:{r.get('issue', '')[:40]}"
+            if _hash in seen:
+                suppressed += 1
+            else:
+                filtered.append(r)
+        return (filtered, suppressed)
+
     # ── Phase 4: AI trace analysis ─────────────────────────────────────────────
 
     def _record_analysis(
@@ -3853,6 +3995,7 @@ class WorkflowSession:
         execution_breakdown: Optional[Dict[str, Any]],
         hotspots: List[Dict[str, Any]],
         ai_recommended_command: Optional[str] = None,
+        plateau_detected: bool = False,
     ) -> _AnalysisSnapshot:
         snap = _AnalysisSnapshot(
             timestamp=datetime.now(timezone.utc).isoformat(),
@@ -3861,6 +4004,7 @@ class WorkflowSession:
             execution_breakdown=execution_breakdown,
             hotspots=hotspots,
             ai_recommended_command=ai_recommended_command,
+            plateau_detected=plateau_detected,
         )
         self._state.analysis_history.append(snap)
         self._state.iteration_count += 1
@@ -4071,6 +4215,81 @@ class WorkflowSession:
             _print(f"  (Analysis failed: {exc})", style="red")
             raw_recs = []
 
+        # ── LLM-refined recommendations ──────────────────────────────────
+        # When a conversation is available, ask the LLM to refine the
+        # rule-based recommendations using the full fence context (GPU specs,
+        # optimization techniques), edit history, and prior iteration results.
+        # This prevents repetitive suggestions for already-applied optimizations.
+        conv = self._ensure_conv()
+        if conv is not None and recs and breakdown:
+            try:
+                _edit_summary = ""
+                if self._state.edit_history:
+                    _edits = [
+                        pathlib.Path(e.file_path).name
+                        for e in self._state.edit_history[-5:]
+                    ]
+                    _edit_summary = (
+                        f"\n\nEdits already applied in this session: "
+                        + ", ".join(_edits)
+                    )
+
+                _prior_recs = ""
+                if self._state.seen_recommendation_hashes:
+                    _prior_recs = (
+                        "\n\nPrior recommendations already shown to user: "
+                        + "; ".join(self._state.seen_recommendation_hashes[-10:])
+                    )
+
+                _refine_msg = (
+                    f"Here are the rule-based recommendations from this iteration's trace analysis.\n"
+                    f"Runtime: {breakdown.get('total_runtime_ns', 0)/1e9:.3f}s, "
+                    f"kernel={breakdown.get('kernel_time_pct', 0):.1f}%, "
+                    f"memcpy={breakdown.get('memcpy_time_pct', 0):.1f}%, "
+                    f"overhead={breakdown.get('idle_time_pct', 0):.1f}%.\n\n"
+                    f"Rule-based recommendations:\n"
+                )
+                for r in recs:
+                    _refine_msg += (
+                        f"- [{r.get('priority','')}] {r.get('issue','')}: "
+                        f"{r.get('suggestion','')}\n"
+                    )
+                _refine_msg += (
+                    f"{_edit_summary}{_prior_recs}\n\n"
+                    "Based on your knowledge of AMD GPU optimization (from the reference guide), "
+                    "the edit history, and prior recommendations:\n"
+                    "1. Remove any recommendations for optimizations already applied in the edits\n"
+                    "2. Adjust suggestion text to be specific to the current state (not generic)\n"
+                    "3. Add any NEW recommendations the rules missed but the fence document covers\n"
+                    "4. If the workload is init-dominated (<1s total, <5% kernel), say so\n\n"
+                    "Output ONLY a numbered list of refined recommendations in this format:\n"
+                    "[PRIORITY] Issue title\n"
+                    "  Suggestion: specific actionable text\n"
+                    "  Actions: bullet list\n\n"
+                    "If a rule-based rec is still valid, keep it. If not, drop it."
+                )
+                _tokens: List[str] = []
+                with _Spinner("  Refining recommendations with AI context..."):
+                    conv.send(
+                        _refine_msg,
+                        on_token=lambda t: _tokens.append(t),
+                        max_tokens=2048,
+                    )
+                _refined = "".join(_tokens).strip()
+                if _refined:
+                    # Parse refined recommendations and replace the rule-based ones
+                    # Display the AI-refined output as the primary recommendation text
+                    _print()
+                    _print(
+                        "  ── AI-Refined Analysis (context-aware) ────────────────",
+                        style=_AMD_RED,
+                    )
+                    _print()
+                    _print(_refined, style="white")
+                    _print()
+            except Exception as exc:
+                pass  # Silently fall through to rule-based display
+
         # Source correlation note
         if self._state.source_paths:
             _print(
@@ -4111,6 +4330,36 @@ class WorkflowSession:
         # Comparison with previous run
         if self._state.analysis_history:
             self._print_comparison(breakdown)
+
+        # Plateau detection — warn the user and filter duplicate recommendations
+        is_plateaued, consec_count, last_pct = self._compute_plateau_status(breakdown)
+        if is_plateaued:
+            _print(
+                f"  \u26a0  Optimization plateau detected: <{last_pct:.1f}% change over "
+                f"{consec_count} consecutive iterations",
+                style="yellow",
+            )
+            _print(
+                "     Consider deeper analysis: ATT (instruction stalls) or "
+                "rocprof-compute (roofline model)",
+                style="yellow",
+            )
+            filtered_recs, suppressed = self._filter_seen_recommendations(recs)
+            if suppressed > 0:
+                _print(
+                    f"     ({suppressed} previously-seen recommendation(s) suppressed)",
+                    style="dim",
+                )
+            recs = filtered_recs
+
+        # Update seen recommendation hashes
+        for r in recs:
+            _hash = f"{r.get('category', '')}:{r.get('issue', '')[:40]}"
+            if _hash not in self._state.seen_recommendation_hashes:
+                self._state.seen_recommendation_hashes.append(_hash)
+        # Cap the list
+        if len(self._state.seen_recommendation_hashes) > _MAX_SEEN_REC_HASHES:
+            self._state.seen_recommendation_hashes = self._state.seen_recommendation_hashes[-_MAX_SEEN_REC_HASHES:]
 
         # Derive AI-recommended re-profiling command from the first rocprofv3
         # command found in any recommendation, replacing the generic placeholder
@@ -4203,10 +4452,36 @@ class WorkflowSession:
                 ai_rec_cmd = None  # every suggested collection already performed
 
         snap = self._record_analysis(
-            recs, breakdown, hotspots, ai_recommended_command=ai_rec_cmd
+            recs, breakdown, hotspots, ai_recommended_command=ai_rec_cmd,
+            plateau_detected=is_plateaued,
         )
         # Compute performance delta now that analysis_history has been updated
         self._update_checkpoint_delta()
+
+        # Seed conversation with this iteration's analysis results
+        conv = self._ensure_conv()
+        if conv is not None and breakdown:
+            _ctx = (
+                f"Iteration {snap.iteration + 1} analysis complete.\n"
+                f"Runtime: {breakdown.get('total_runtime_ns', 0)/1e9:.3f}s. "
+                f"Breakdown: kernel={breakdown.get('kernel_time_pct', 0):.1f}%, "
+                f"memcpy={breakdown.get('memcpy_time_pct', 0):.1f}%, "
+                f"overhead={breakdown.get('idle_time_pct', 0):.1f}%.\n"
+                f"Recommendations ({len(recs)}):\n"
+            )
+            for r in recs[:5]:
+                _ctx += f"- [{r.get('priority','')}] {r.get('issue','')}\n"
+            try:
+                # Fire-and-forget: inject context, discard response
+                _discard: List[str] = []
+                conv.send(
+                    _ctx + "\nAcknowledge this context briefly.",
+                    on_token=lambda t: _discard.append(t),
+                    max_tokens=256,
+                )
+            except Exception:
+                pass  # Never block Phase 4 on conversation failure
+
         return snap
 
     # ── Phase 5: Recommendations menu ─────────────────────────────────────────
@@ -4301,6 +4576,30 @@ class WorkflowSession:
                 _menu_opt("s", "Save session")
                 _menu_opt("n", "Skip — stop re-profiling")
                 _menu_opt("q", "Quit session")
+            elif snap.plateau_detected and not already_reprofiled:
+                # Optimization has plateaued — suggest deeper analysis tiers
+                _print("  Optimization has plateaued. Consider deeper analysis:", style="yellow")
+                if not _att_already_run:
+                    _print(
+                        "  \u2022 ATT (Tier 3): per-instruction stall analysis",
+                        style="dim",
+                    )
+                _print(
+                    "  \u2022 PC Sampling (Tier 3): instruction-level hotspots "
+                    "within each kernel",
+                    style="dim",
+                )
+                _print()
+                _menu_opt("d", "Go deeper: collect PC sampling data", "Tier 3 \u2014 stochastic")
+                if not _att_already_run:
+                    _menu_opt("t", "Go deeper: collect ATT trace", "Tier 3 \u2014 instruction stall analysis")
+                if not all_info:
+                    _menu_opt("a", "Address all with AI optimization")
+                if self._state.checkpoints:
+                    _menu_opt("b", "Roll back to a checkpoint")
+                _menu_opt("s", "Save session")
+                _menu_opt("n", "Skip \u2014 proceed to re-profiling")
+                _menu_opt("q", "Quit session")
             elif all_info:
                 # Only profiling-guidance recommendations — no source code to optimize.
                 # Direct the user to re-profile with the suggested commands.
@@ -4334,7 +4633,10 @@ class WorkflowSession:
             if choice == "b" and self._state.checkpoints:
                 self._show_checkpoint_picker()
                 return None
-            if choice == "d" and all_info and already_reprofiled and has_real_data:
+            _show_deeper = (all_info and already_reprofiled and has_real_data) or (
+                snap.plateau_detected and not already_reprofiled
+            )
+            if choice == "d" and _show_deeper:
                 # Build PC sampling command and route it to Phase 7 as option [3].
                 run_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
                 new_dir = f"{self._trace_dir}/run_{run_id}"
@@ -4352,9 +4654,7 @@ class WorkflowSession:
                 return None
             if (
                 choice == "t"
-                and all_info
-                and already_reprofiled
-                and has_real_data
+                and _show_deeper
                 and not _att_already_run
             ):
                 # Build ATT command and route it to Phase 7 as option [3].
@@ -4482,6 +4782,69 @@ class WorkflowSession:
         except OSError as exc:
             _print(f"  (Cannot read {file_path.name}: {exc})", style="red")
             return None
+
+        # Try conversation-based rewrite first (maintains cross-iteration context)
+        conv = self._ensure_conv()
+        if conv is not None:
+            try:
+                _rewrite_msg = (
+                    "Apply these GPU optimizations to the source file below.\n\n"
+                    "OUTPUT FORMAT — use SEARCH/REPLACE blocks:\n"
+                    "<<<<<<< SEARCH\n<exact lines from original>\n=======\n"
+                    "<replacement lines>\n>>>>>>> REPLACE\n\n"
+                    "RULES:\n"
+                    "1. SEARCH must be EXACT substring of the original file\n"
+                    "2. Include 2-3 lines context around each change\n"
+                    "3. Add // comment on changed lines\n"
+                    "4. Output ONLY SEARCH/REPLACE blocks — no prose\n"
+                    "5. Do NOT repeat changes that were already tried and showed no improvement\n\n"
+                    f"=== OPTIMIZATIONS TO APPLY ===\n{suggestions}\n\n"
+                    f"=== SOURCE FILE: {file_path.name} ===\n{original}"
+                )
+                _tokens: List[str] = []
+
+                def _collect(tok: str) -> None:
+                    _tokens.append(tok)
+
+                with _Spinner(f"  {self._llm_provider} LLM rewriting {file_path.name}..."):
+                    conv.send(_rewrite_msg, on_token=_collect, max_tokens=16384)
+
+                result = "".join(_tokens)
+                if result and result.strip():
+                    # Try SEARCH/REPLACE parsing
+                    if "<<<<<<< SEARCH" in result:
+                        merged = _apply_search_replace_blocks(original, result)
+                        if merged is not None:
+                            return merged
+                        _print(
+                            "  ⚠  SEARCH/REPLACE blocks could not be applied (search text not found).",
+                            style="yellow",
+                        )
+                        return None
+                    # Full-file fallback with truncation detection
+                    result = _strip_code_preamble(result)
+                    if result and result.strip():
+                        _ext = file_path.suffix.lower()
+                        _is_c = _ext in (".cpp", ".c", ".cu", ".hip", ".hpp", ".h", ".cxx")
+                        if _is_c:
+                            if result.count("{") != result.count("}"):
+                                _print("  ⚠  Truncated output (brace mismatch). Discarding.", style="yellow")
+                                return None
+                            # Strip trailing prose
+                            _lines = result.rstrip().splitlines()
+                            while _lines and not any(
+                                c in _lines[-1].strip()
+                                for c in ("{", "}", ";", "#", "//", "/*")
+                            ) and not _lines[-1].strip().endswith(")"):
+                                _lines.pop()
+                            if _lines:
+                                return "\n".join(_lines) + "\n"
+                        return result
+                return None
+            except Exception as exc:
+                _print(f"  (Conversation rewrite failed: {exc}; falling back to one-shot)", style="dim")
+                # Fall through to existing LLMAnalyzer path
+
         try:
             from rocinsight.ai_analysis.llm_analyzer import LLMAnalyzer  # type: ignore[import]
 
