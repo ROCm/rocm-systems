@@ -17,7 +17,9 @@
 # AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.# Usage:
+# THE SOFTWARE.
+
+# Usage:
 
 BEGIN {
   max_rank=0
@@ -169,14 +171,37 @@ BEGIN {
 
 END {
   printf "digraph RCCL {\n"
+  
+  # Add graph-level attributes for better rendering of large topologies
+  # These improve clarity and prevent blurring at high zoom levels
+  printf "  // Graph layout attributes for large-scale visualization\n"
+  printf "  graph [fontname=\"Helvetica\", fontsize=12, compound=true];\n"
+  printf "  node [fontname=\"Helvetica\", shape=circle, fixedsize=true, width=0.6, height=0.6];\n"
+  printf "  edge [fontname=\"Helvetica\", fontsize=10];\n"
+  
+  # Automatically detect large topologies and add appropriate settings
+  if (max_rank >= 64) {
+    printf "  // Large topology detected (%d+ ranks) - using optimized settings\n", max_rank+1
+    printf "  graph [overlap=false, splines=true, sep=\"+10\", esep=\"+5\"];\n"
+    printf "  node [width=0.5, height=0.5, fontsize=20];\n"
+  } else if (max_rank >= 32) {
+    printf "  // Medium topology detected (%d ranks)\n", max_rank+1
+    printf "  node [width=0.55, height=0.55, fontsize=24];\n"
+  }
+  printf "\n"
+  
   for(r=0;r<max_treedn+1;r++) {
-    printf "  subgraph tree_%d {\n", r
+    printf "  subgraph cluster_tree_%d {\n", r
+    printf "    label=\"Tree Channel %d\";\n", r
+    printf "    style=dashed;\n"
+    printf "    color=gray;\n"
     for(s=0;s<=max_rank;s++) {
       for(d=0;d<=max_rank;d++) {
         if ((s "," d "," r) in treedns) {
           val=conn[s "," d "," r]
           style="solid"
           color="red"
+          penwidth="1.5"
           if (match(val,"NET")) {
             style="dashed"
             if (match(val,"GDRDMA"))
@@ -185,13 +210,20 @@ END {
           if (match(val,"P2P")) {
             color="green"
           }
-          printf "    t%d_%d -> t%d_%d [label=\"%s\",color=\"%s\",style=\"%s\",fontname=\"Helvetica\"];\n", r, s, r, d, val, color, style
+          printf "    t%d_%d -> t%d_%d [label=\"%s\",color=\"%s\",style=\"%s\",penwidth=\"%s\"];\n", r, s, r, d, val, color, style, penwidth
         }
       }
     }
     printf "\n"
     for(s=0;s<=max_rank;s++) {
-      printf "    t%d_%d [label=\"%d\",fontsize=\"28\"];\n", r, s, s
+      # Scale font size based on number of ranks for readability
+      if (max_rank >= 64)
+        fs = 18
+      else if (max_rank >= 32)
+        fs = 22
+      else
+        fs = 28
+      printf "    t%d_%d [label=\"%d\",fontsize=\"%d\"];\n", r, s, s, fs
     }
     printf "  }\n\n"
   }
@@ -210,13 +242,17 @@ END {
     }
     if (remove_ring!=0)
       continue
-    printf "  subgraph ring_%d {\n", r
+    printf "  subgraph cluster_ring_%d {\n", r
+    printf "    label=\"Ring Channel %d\";\n", r
+    printf "    style=dashed;\n"
+    printf "    color=gray;\n"
     for(s=0;s<=max_rank;s++) {
       for(d=0;d<=max_rank;d++) {
         if ((s "," d "," r) in rings) {
           val=conn[s "," d "," r]
           style="solid"
           color="red"
+          penwidth="1.5"
           if (match(val,"NET")) {
             style="dashed"
             if (match(val,"GDRDMA"))
@@ -225,19 +261,29 @@ END {
           if (match(val,"P2P")) {
             color="green"
           }
-          printf "    r%d_%d -> r%d_%d [label=\"%s\",color=\"%s\",style=\"%s\",fontname=\"Helvetica\"];\n", r, s, r, d, val, color, style
+          printf "    r%d_%d -> r%d_%d [label=\"%s\",color=\"%s\",style=\"%s\",penwidth=\"%s\"];\n", r, s, r, d, val, color, style, penwidth
         }
       }
     }
     printf "\n"
     for(s=0;s<=max_rank;s++) {
-      printf "    r%d_%d [label=\"%d\",fontsize=\"28\"];\n", r, s, s
+      # Scale font size based on number of ranks for readability
+      if (max_rank >= 64)
+        fs = 18
+      else if (max_rank >= 32)
+        fs = 22
+      else
+        fs = 28
+      printf "    r%d_%d [label=\"%d\",fontsize=\"%d\"];\n", r, s, s, fs
     }
     printf "  }\n\n"
   }
 
   for(r=0; has_collnet && r<=max_collnet; r++) {
-    printf "  subgraph collnet_%d {\n", r
+    printf "  subgraph cluster_collnet_%d {\n", r
+    printf "    label=\"CollNet Channel %d\";\n", r
+    printf "    style=dashed;\n"
+    printf "    color=gray;\n"
     num_top_ranks=0
     rank_switch=max_collnet_rank+1
     for(s=0;s<=max_collnet_rank;s++) {
@@ -250,25 +296,39 @@ END {
       val=collnet_conn_type[rank "," r]
       style="solid"
       color="red"
+      penwidth="1.5"
       if (match(val,"COLLNET")) {
         style="dashed"
         if (match(val,"GDRDMA"))
           color="green"
       }
-      printf "    c%d_%d -> c%d_%d [label=\"%s\",color=\"%s\",style=\"%s\",fontname=\"Helvetica\"];\n", r, rank_switch, r, rank, val, color, style
+      printf "    c%d_%d -> c%d_%d [label=\"%s\",color=\"%s\",style=\"%s\",penwidth=\"%s\"];\n", r, rank_switch, r, rank, val, color, style, penwidth
       for(s=0;s<=max_collnet_rank;s++) {
         if((rank "," s) in collnet) {
           style="solid"
           color="green"
-          printf "    c%d_%d -> c%d_%d [label=\"%s\",color=\"%s\",style=\"%s\",fontname=\"Helvetica\"];\n", r, rank, r, s, "", color, style
+          printf "    c%d_%d -> c%d_%d [label=\"%s\",color=\"%s\",style=\"%s\",penwidth=\"%s\"];\n", r, rank, r, s, "", color, style, penwidth
         }
       }
     }
     printf "\n"
     for(s=0;s<=max_collnet_rank;s++) {
-      printf "    c%d_%d [label=\"%d\",fontsize=\"28\"];\n", r, s, s
+      # Scale font size based on number of ranks for readability
+      if (max_rank >= 64)
+        fs = 18
+      else if (max_rank >= 32)
+        fs = 22
+      else
+        fs = 28
+      printf "    c%d_%d [label=\"%d\",fontsize=\"%d\"];\n", r, s, s, fs
     }
-    printf "    c%d_%d [label=\"SHARP:%d\",fontsize=\"28\"];\n", r, rank_switch, r
+    if (max_rank >= 64)
+      fs = 18
+    else if (max_rank >= 32)
+      fs = 22
+    else
+      fs = 28
+    printf "    c%d_%d [label=\"SHARP:%d\",fontsize=\"%d\",shape=box];\n", r, rank_switch, r, fs
     printf "  }\n\n"
   }
   printf "}\n"
