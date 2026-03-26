@@ -2782,6 +2782,10 @@ class WorkflowSession:
           uses_fork      – True when the app spawns child processes via fork/exec
                            so the profiling command should use --process-sync and
                            per-process output filenames (%nid%)
+          mpi_wrap       – True when the launcher is mpirun/mpiexec/srun; the
+                           profiling command must be restructured as
+                           ``mpirun <args> rocprofv3 <flags> -- <binary>`` so
+                           each rank gets its own profiler instance
         """
         try:
             tokens = shlex.split(app_cmd)
@@ -2818,20 +2822,26 @@ class WorkflowSession:
             kw in binary for kw in ("mpirun", "mpiexec", "srun", "jsrun", "orterun")
         )
         if is_mpi:
-            # MPI forks worker processes — use --process-sync so rocprofv3 follows
-            # them, and %nid% in the output name so each rank gets its own DB.
-            extra_flags.append("--process-sync")
-            hints.append("MPI/Slurm launcher (--process-sync enabled)")
+            # MPI: rocprofv3 must be placed *inside* mpirun so each rank gets its
+            # own profiler instance: ``mpirun <args> rocprofv3 <flags> -- <binary>``
+            # --process-sync (LD_PRELOAD) does NOT work with MPI because OpenMPI
+            # strips the preloaded library from child processes.
+            mpi_prefix, mpi_app = WorkflowSession._split_mpi_command(app_cmd)
+            hints.append("MPI/Slurm launcher — rocprofv3 will wrap each rank individually")
             warnings.append(
-                "MPI/Slurm launcher detected — using --process-sync and %nid% output "
-                "naming so each rank's trace is captured separately and merged."
+                "MPI launcher detected. The profiler will be placed inside mpirun "
+                "so each rank gets its own trace: "
+                "mpirun <args> rocprofv3 <flags> -- <binary>"
             )
             return {
                 "workload_type": "mpi_multi",
                 "hints": hints,
-                "extra_flags": extra_flags,
+                "extra_flags": [],
                 "warnings": warnings,
-                "uses_fork": True,
+                "uses_fork": False,
+                "mpi_wrap": True,
+                "mpi_prefix": mpi_prefix,
+                "mpi_app": mpi_app,
             }
 
         # ── Python workloads ─────────────────────────────────────────────────
@@ -2943,6 +2953,63 @@ class WorkflowSession:
             "uses_fork": False,
         }
 
+    @staticmethod
+    def _split_mpi_command(app_cmd: str) -> tuple:
+        """Split an MPI command into (mpi_prefix, app_binary_with_args).
+
+        E.g. ``mpirun -n 2 ./multi_gpu_demo arg1``
+          → (``mpirun -n 2``, ``./multi_gpu_demo arg1``)
+
+        The split happens at the first token that does not look like an
+        mpirun flag or its value.  Any ``--`` separator is removed.
+        Returns (app_cmd, "") when no launcher is detected.
+        """
+        try:
+            tokens = shlex.split(app_cmd)
+        except ValueError:
+            tokens = app_cmd.split()
+        if not tokens:
+            return (app_cmd, "")
+
+        launcher_keywords = ("mpirun", "mpiexec", "srun", "jsrun", "orterun")
+        if not any(tokens[0].endswith(kw) for kw in launcher_keywords):
+            return (app_cmd, "")
+
+        # Flags that consume the next token as a value
+        value_flags = {
+            "-n", "--n", "-np", "--np", "-N", "--N",
+            "-H", "--host", "--hosts", "-hostfile", "--hostfile",
+            "--machinefile", "-machinefile",
+            "-x", "--map-by", "--bind-to", "--rank-by",
+            "--mca", "-mca",
+            "--ntasks", "--ntasks-per-node", "--nodes",
+            "--partition", "--job-name",
+        }
+        prefix_tokens: List[str] = [tokens[0]]
+        i = 1
+        while i < len(tokens):
+            tok = tokens[i]
+            if tok == "--":
+                i += 1  # skip separator; rest is the app
+                break
+            if tok in value_flags:
+                # flag + its value
+                prefix_tokens.append(tok)
+                i += 1
+                if i < len(tokens):
+                    prefix_tokens.append(tokens[i])
+                    i += 1
+            elif tok.startswith("-"):
+                prefix_tokens.append(tok)
+                i += 1
+            else:
+                # First non-flag, non-value token → start of the app binary
+                break
+
+        mpi_prefix = " ".join(prefix_tokens)
+        mpi_app = " ".join(tokens[i:])
+        return (mpi_prefix, mpi_app)
+
     def _phase1b_quick_workload_analysis(self) -> Optional[str]:
         """Analyze the workload before Phase 2 to suggest the best starter command.
 
@@ -2996,10 +3063,26 @@ class WorkflowSession:
         # Build the final command
         run_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         out_dir = f"{self._trace_dir}/run_{run_id}"
+        mpi_wrap = app_info.get("mpi_wrap", False)
         uses_fork = app_info.get("uses_fork", False)
         out_name = "results_%nid%" if uses_fork else "results"
 
-        if source_cmd_flags:
+        if mpi_wrap:
+            # MPI: rocprofv3 goes inside mpirun so each rank gets its own profiler.
+            # Structure: ``mpirun <args> rocprofv3 <flags> -- <binary>``
+            mpi_prefix = app_info.get("mpi_prefix", "mpirun")
+            mpi_app = app_info.get("mpi_app", self._state.app_command)
+            base_flags = "--sys-trace --kernel-trace --memory-copy-trace --stats"
+            extra = " ".join(app_info.get("extra_flags", []))
+            if extra:
+                base_flags = f"{base_flags} {extra}"
+            cmd = (
+                f"{mpi_prefix} rocprofv3 {base_flags} "
+                f"-d {out_dir} -o results "
+                f"-- {mpi_app}"
+            )
+            reason = "MPI wrap — rocprofv3 inside mpirun"
+        elif source_cmd_flags:
             # Source-derived flags — replace any `-d <dir>` and `-o <name>` with fresh values.
             # When the app forks, override -o with per-process naming regardless of what the
             # source analyzer suggested.
@@ -3045,16 +3128,33 @@ class WorkflowSession:
     def _build_profiling_command(self, app_info: Optional[Dict[str, Any]] = None) -> str:
         """Build a default rocprofv3 profiling command wrapping the user's app.
 
-        When app_info indicates uses_fork=True, adds --process-sync and uses
-        %nid% in the output filename so each forked process writes its own DB.
+        When app_info indicates mpi_wrap=True, restructures the command as
+        ``mpirun <args> rocprofv3 <flags> -- <binary>`` so each rank gets its
+        own profiler instance.
+
+        When app_info indicates uses_fork=True (Python DDP/torchrun), adds
+        --process-sync and uses %nid% in the output filename.
         """
         run_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         out_dir = f"{self._trace_dir}/run_{run_id}"
-        uses_fork = (app_info or {}).get("uses_fork", False)
+        info = app_info or {}
+        mpi_wrap = info.get("mpi_wrap", False)
+        uses_fork = info.get("uses_fork", False)
+        base = "--sys-trace --kernel-trace --memory-copy-trace --stats"
+
+        if mpi_wrap:
+            mpi_prefix = info.get("mpi_prefix", "mpirun")
+            mpi_app = info.get("mpi_app", self._state.app_command)
+            return (
+                f"{mpi_prefix} rocprofv3 {base} "
+                f"-d {out_dir} -o results "
+                f"-- {mpi_app}"
+            )
+
         proc_sync = " --process-sync" if uses_fork else ""
         out_name = "results_%nid%" if uses_fork else "results"
         return (
-            f"rocprofv3 --sys-trace --kernel-trace --memory-copy-trace --stats{proc_sync} "
+            f"rocprofv3 {base}{proc_sync} "
             f"-d {out_dir} -o {out_name} "
             f"-- {self._state.app_command}"
         )
@@ -3704,9 +3804,32 @@ class WorkflowSession:
             total_ns = result.profiling_info.total_duration_ns if eb else 0
             if total_ns == 0 and self._state.trace_history and not _att_dir:
                 last_cmd = self._state.trace_history[-1].command
+                # MPI: command has mpirun <args> rocprofv3 ... -- <binary>
+                is_mpi_cmd = any(
+                    kw in last_cmd.split()[0].lower()
+                    for kw in ("mpirun", "mpiexec", "srun", "jsrun", "orterun")
+                    if last_cmd.split()
+                )
                 already_has_sync = "--process-sync" in last_cmd
                 _print("  ⚠  No GPU kernel activity captured.", style="yellow")
-                if already_has_sync:
+                if is_mpi_cmd:
+                    _print(
+                        "     MPI command run but no GPU activity detected.",
+                        style="yellow",
+                    )
+                    _print(
+                        "     Ensure the binary and GPU are accessible from all ranks.",
+                        style="yellow",
+                    )
+                    _print(
+                        "     Expected command structure:",
+                        style="yellow",
+                    )
+                    _print(
+                        "       mpirun -n <N> rocprofv3 --sys-trace -d <dir> -o results -- <binary>",
+                        style="yellow",
+                    )
+                elif already_has_sync:
                     _print(
                         "     --process-sync is active but the DB is still empty.",
                         style="yellow",
@@ -3729,7 +3852,7 @@ class WorkflowSession:
                         style="yellow",
                     )
                     _print(
-                        "     torchrun, DDP, MPI) add --process-sync to the profiling",
+                        "     torchrun, DDP) add --process-sync to the profiling",
                         style="yellow",
                     )
                     _print(
@@ -3738,6 +3861,10 @@ class WorkflowSession:
                     )
                     _print(
                         "     -o results_%nid% so each process writes its own DB.",
+                        style="yellow",
+                    )
+                    _print(
+                        "     For MPI apps, use: mpirun -n N rocprofv3 ... -- <binary>",
                         style="yellow",
                     )
                     _print(
