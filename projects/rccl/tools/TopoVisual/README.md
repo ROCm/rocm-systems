@@ -5,6 +5,8 @@ Topology Visualizer extracts topology information from RCCL log file and present
 Following packages are required to run Topology Visualizer:
 1. gawk
 2. graphviz
+3. bc (for parallel script timing)
+4. ImageMagick (optional, for merging PNG/PDF in parallel mode)
 
 ## Usage
 Topology Visualizer accepts both RCCL log files or simulator output, i.e. [Topology Explorer](https://github.com/ROCm/rccl/tree/master/tools/topo_expl "Topology Explorer").
@@ -18,7 +20,10 @@ mpirun -np 4 -host rocm-framework-1,rocm-framework-3,rocm-framework-5,rocm-frame
 ./topo_visual.sh -i 4_nodes.log
 ```
 
-## Command Line Options
+## Scripts
+
+### topo_visual.sh (Standard)
+Single-threaded visualization, good for small to medium topologies.
 
 ```
 Usage: topo_visual.sh -i input_filename [-f format] [-d dpi] [-l]
@@ -26,47 +31,64 @@ Usage: topo_visual.sh -i input_filename [-f format] [-d dpi] [-l]
 Options:
   -i input_filename   Input log file (required)
   -f format           Output format: svg (default), png, pdf
-                      SVG recommended for large topologies (scalable, no blur)
-  -d dpi              DPI for PNG output (default: 300, use 600+ for large graphs)
+  -d dpi              DPI for PNG output (default: 300)
   -l                  Large graph mode: optimizes layout for 64+ GPUs
 ```
 
-### Examples
+### topo_visual_parallel.sh (Parallel - Recommended for Large Topologies)
+Parallel visualization that renders each channel concurrently. **Significantly faster for large topologies (64+ GPUs).**
+
+```
+Usage: topo_visual_parallel.sh -i input_filename [-f format] [-d dpi] [-j jobs] [-m] [-k]
+
+Options:
+  -i input_filename   Input log file (required)
+  -f format           Output format: svg (default), png, pdf
+  -d dpi              DPI for PNG output (default: 300)
+  -j jobs             Number of parallel jobs (default: auto = CPU count)
+  -m                  Merge all channels into single output file
+  -k                  Keep temporary files (for debugging)
+```
+
+## Examples
 
 ```shell
-# Generate SVG (recommended for large topologies - infinite zoom without blur)
-./topo_visual.sh -i nccl_log.txt
+# Standard visualization (small topologies)
+./topo_visual.sh -i 4_nodes.log
 
-# Generate high-DPI PNG for 256 GPU topology
-./topo_visual.sh -i nccl_log.txt -f png -d 600
+# Parallel visualization for 256 GPU topology with 32 parallel jobs
+./topo_visual_parallel.sh -i large_topo.log -j 32
 
-# SVG with large graph layout optimizations
-./topo_visual.sh -i nccl_log.txt -f svg -l
+# Parallel with merged output
+./topo_visual_parallel.sh -i large_topo.log -j 16 -m
 
-# Generate PDF (also vector format, no blur)
-./topo_visual.sh -i nccl_log.txt -f pdf
+# High-DPI PNG with parallel rendering
+./topo_visual_parallel.sh -i large_topo.log -f png -d 600 -j 16
 ```
+
+## Performance Comparison
+
+For a 256 GPU topology with 32 channels:
+
+| Method | Time |
+|--------|------|
+| topo_visual.sh | ~5-10 minutes |
+| topo_visual_parallel.sh -j 16 | ~30-60 seconds |
+| topo_visual_parallel.sh -j 32 | ~15-30 seconds |
 
 ## Output Formats
 
 | Format | Type | Best For | Zoom Quality |
 |--------|------|----------|--------------|
-| **SVG** (default) | Vector | Large topologies (64+ GPUs), web viewing | Perfect at any zoom |
+| **SVG** (default) | Vector | Large topologies, web viewing | Perfect at any zoom |
 | **PNG** | Raster | Documentation, sharing | Depends on DPI |
 | **PDF** | Vector | Printing, documentation | Perfect at any zoom |
 
-### Recommendations for Large Topologies (64+ GPUs)
+## Parallel Script Files
 
-For topologies with many GPUs (e.g., 256 GPUs across multiple nodes):
-
-1. **Use SVG format** (default): Vector graphics scale infinitely without blur
-2. **Use `-l` flag**: Enables layout optimizations for large graphs
-3. **For PNG**: Use high DPI (600+) with `-d 600` or higher
-
-The visualizer automatically detects large topologies and adjusts:
-- Node sizes and font sizes for readability
-- Graph layout parameters to prevent overlapping
-- Edge rendering for clearer connections
+- `extract_topo_split.awk` - Splits topology into separate DOT files per channel
+- `topo_visual_parallel.sh` - Main parallel wrapper script
+- `merge_svg.sh` - Merges multiple SVG files into one (used with -m flag)
 
 ## Legend
 
@@ -82,4 +104,4 @@ Red: Connections over shared memory or without GPU RDMA
 ![image info](./4_nodes.log.png)
 
 ## Copyright
-All source code and accompanying documentation are copyright (c) 2019-2020 Advanced Micro Devices, Inc. All rights reserved.
+All source code and accompanying documentation are copyright (c) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
