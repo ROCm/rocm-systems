@@ -419,7 +419,8 @@ class AMDSMIHelpers():
          
         except amdsmi_interface.AmdSmiLibraryException as e:
             if e.err_code in (amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_INIT,
-                              amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_DRIVER_NOT_LOADED):
+                              amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_DRIVER_NOT_LOADED,
+                              amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED):
                 logging.info('Unable to get device choices, driver not initialized (BRCM_NIC, IONIC_NIC, RDMA_NIC not found in modules)')
             else:
                 raise e
@@ -459,7 +460,8 @@ class AMDSMIHelpers():
         except amdsmi_interface.AmdSmiLibraryException as e:
       
             if e.err_code in (amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_INIT,
-                              amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_DRIVER_NOT_LOADED):
+                              amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_DRIVER_NOT_LOADED,
+                              amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED):
                 logging.info('Unable to get device choices, driver not initialized (BRCM_switch not found in modules)')
           
             else:

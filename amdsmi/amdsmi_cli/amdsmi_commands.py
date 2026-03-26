@@ -65,11 +65,19 @@ class AMDSMICommands():
         if self.helpers.is_amdgpu_initialized():
             try:
                 self.device_handles = amdsmi_interface.amdsmi_get_processor_handles()
-                self.device_handles_gpus = amdsmi_interface.get_gpu_handles()
             except amdsmi_exception.AmdSmiLibraryException as e:
                 if e.err_code in (amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_INIT,
                                 amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_DRIVER_NOT_LOADED):
                     logging.error('Unable to get devices, driver not initialized (amdgpu not found in modules)')
+                else:
+                    raise e
+            try:
+                self.device_handles_gpus = amdsmi_interface.get_gpu_handles()
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                if e.err_code == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED:
+                    # get_processor_handles_by_type not available (e.g. WSL/DXG),
+                    # fall back to the full handle list which are all GPUs anyway.
+                    self.device_handles_gpus = list(self.device_handles)
                 else:
                     raise e
 
