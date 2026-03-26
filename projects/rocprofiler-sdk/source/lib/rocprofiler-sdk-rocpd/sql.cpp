@@ -331,9 +331,9 @@ rocpd_sql_load_schema(rocpd_sql_engine_t                        engine,
         for(auto [key, value] : jinja_init_list_t{
                 {"{{guid}}", variables->guid},
                 {"{{schema_version}}", _schema_version.c_str()},
-                {"{{schema_major}}", _schema_major.c_str()},
-                {"{{schema_minor}}", _schema_minor.c_str()},
-                {"{{schema_patch}}", _schema_patch.c_str()},
+                {"{{schema_version_major}}", _schema_major.c_str()},
+                {"{{schema_version_minor}}", _schema_minor.c_str()},
+                {"{{schema_version_patch}}", _schema_patch.c_str()},
             })
         {
             if(value != nullptr)
@@ -371,16 +371,25 @@ rocpd_sql_list_schema_versions(rocpd_sql_engine_t                engine,
                                uint64_t                          num_schema_path_hints,
                                rocpd_sql_schema_versions_list_t* out_list)
 {
-    if(out_list == nullptr) return ROCPD_STATUS_ERROR_INVALID_ARGUMENT;
+    if(out_list == nullptr)
+    {
+        return ROCPD_STATUS_ERROR_INVALID_ARGUMENT;
+    }
 
     out_list->versions = nullptr;
     out_list->count    = 0;
 
     switch(engine)
     {
-        case ROCPD_SQL_ENGINE_SQLITE3: break;
+        case ROCPD_SQL_ENGINE_SQLITE3:
+        {
+            break;
+        }
         case ROCPD_SQL_ENGINE_NONE:
-        case ROCPD_SQL_ENGINE_LAST: return ROCPD_STATUS_ERROR_SQL_INVALID_ENGINE;
+        case ROCPD_SQL_ENGINE_LAST:
+        {
+            return ROCPD_STATUS_ERROR_SQL_INVALID_ENGINE;
+        }
     }
 
     auto       version_file_map = rocpd::sql::version_file_map_t{};
