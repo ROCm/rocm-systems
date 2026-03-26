@@ -295,7 +295,8 @@ else()
             rocprofiler-sdk-system-sqlite3
             PROPERTIES INTERFACE_LINK_LIBRARIES "${SQLite3_LIBRARIES}"
                        INTERFACE_INCLUDE_DIRECTORIES "${SQLite3_INCLUDE_DIRS}")
-        target_link_libraries(rocprofiler-sdk-sqlite3 INTERFACE rocprofiler-sdk-system-sqlite3)
+        target_link_libraries(rocprofiler-sdk-sqlite3
+                              INTERFACE rocprofiler-sdk-system-sqlite3)
     else()
         message(
             FATAL_ERROR
