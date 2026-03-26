@@ -477,7 +477,6 @@ if(ENABLE_SPLIT_DEVICE_COMPILE)
        AND NOT _fname STREQUAL "host_table"
        AND NOT _fname STREQUAL "device_table")
       list(APPEND DEVICE_TU_SOURCES ${file})
-      # These TUs get -DRCCL_SPLIT_DEVICE_TU so they skip kernel dispatch code
       list(APPEND DEVICE_FUNC_ONLY_SOURCES ${file})
       list(REMOVE_ITEM HIP_SOURCES ${file})
     endif()
@@ -1080,8 +1079,11 @@ if(ENABLE_SPLIT_DEVICE_COMPILE)
     BUNDLER_HOST_TARGET   ${_bundler_host_target}
   )
 
-  add_dependencies(rccl rccl_device_objects)
   add_dependencies(rccl_device_objects hipify_all)
 
+  # Only the final link step needs the device fat object -- not individual host
+  # TU compiles. Using LINK_DEPENDS (instead of add_dependencies) lets host
+  # compilation overlap with the device pipeline.
+  set_property(TARGET rccl APPEND PROPERTY LINK_DEPENDS "${DEVICE_FAT_OBJECTS}")
   target_link_options(rccl PRIVATE ${DEVICE_FAT_OBJECTS})
 endif()

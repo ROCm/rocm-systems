@@ -539,11 +539,18 @@ with open(os.path.join(gensrc, "host_table.cpp"), "w") as f:
       out(f'  {{{key}, {fn_id}}}, {comment}\n')
   out("};\n")
 
-# Maps to .cu filename which implements this func. The only constraint is that
-# "coll" is reflected in the name: formally that no two funcs having different
-# coll's map to the same filename.
+# Maps to .cpp filename which implements this func. One file per function
+# maximizes parallelism in the SPLIT_DEVICE_COMPILE pipeline.
 def impl_filename(coll, algo, proto, redop, ty, acc, pipeline, unroll):
-  return "%s.cpp" % paste("_", coll_camel_to_lower[coll], redop and redop.lower(), ty)
+  return "%s.cpp" % paste("_",
+    coll_camel_to_lower[coll],
+    algo.lower() if algo else None,
+    proto.lower() if proto else None,
+    redop.lower() if redop else None,
+    ty,
+    "acc" + acc if acc != "0" else None,
+    "pipe" + pipeline if pipeline != "0" else None,
+    "u" + unroll)
 
 # Partition the functions and kernels to the .cu filenames. The partition is
 # a dictionary mapping filename to (coll, func-tuple list)
