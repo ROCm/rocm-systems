@@ -6,24 +6,28 @@
 #   - MI300/MI300X (CDNA3): gfx942  
 #   - MI350/MI355X (CDNA4): gfx950
 #
+#   RDNA 3.5 (Strix / Strix Halo APU):
+#   - Strix Point B0 (RDNA 3.5): gfx1150
+#   - Strix Point B1 (RDNA 3.5): gfx1151
+#   - Strix Halo (RDNA 3.5): gfx1152
+#
 #   RDNA4 (Consumer):
 #   - RX 9070 XT/9070 (RDNA4): gfx1201
 #   - RX 9060 series (RDNA4): gfx1200
 #
-#   RDNA4 (Datacenter):
-#   -  (RDNA4-DC): 
-#
 # Targets:
-#   make          - Build for gfx950 (default)
-#   make gfx950   - Build for MI350 (gfx950/CDNA4)
-#   make gfx942   - Build for MI300 (gfx942/CDNA3)
-#   make gfx90a   - Build for MI250 (gfx90a/CDNA2)
-#   make gfx1201  - Build for RX 9070 XT (gfx1201/RDNA4)
-#   make gfx1200  - Build for RX 9060 (gfx1200/RDNA4)
-#   make   - Build for  (/RDNA4-DC)
-#   make all-arch - Build for all supported architectures
-#   make clean    - Remove build artifacts
-#   make run      - Build and run the test
+#   make           - Build for gfx950 (default)
+#   make gfx950    - Build for MI350 (gfx950/CDNA4)
+#   make gfx942    - Build for MI300 (gfx942/CDNA3)
+#   make gfx90a    - Build for MI250 (gfx90a/CDNA2)
+#   make gfx1150   - Build for Strix Point (gfx1150/RDNA3.5)
+#   make gfx1151   - Build for Strix Point (gfx1151/RDNA3.5)
+#   make gfx1152   - Build for Strix Halo (gfx1152/RDNA3.5)
+#   make gfx1201   - Build for RX 9070 XT (gfx1201/RDNA4)
+#   make gfx1200   - Build for RX 9060 (gfx1200/RDNA4)
+#   make all-arch  - Build for all supported architectures
+#   make clean     - Remove build artifacts
+#   make run       - Build and run the test
 
 # Compiler
 HIPCC ?= hipcc
@@ -47,7 +51,7 @@ HOST_SRC = main.cpp
 DEFAULT_TARGET = mega_kernel_test
 
 # Build rules
-.PHONY: all clean run gfx950 gfx942 gfx90a gfx1201 gfx1200  all-arch all-arch-full help
+.PHONY: all clean run gfx950 gfx942 gfx90a gfx1150 gfx1151 gfx1152 gfx1201 gfx1200 all-arch all-arch-full help
 
 all: $(DEFAULT_TARGET)
 
@@ -82,9 +86,19 @@ mega_kernel_test_gfx1200: $(KERNEL_SRC) $(HOST_SRC)
 	$(HIPCC) $(HIPCC_FLAGS) --offload-arch=gfx1200 $(INCLUDES) -o $@ $^
 	@echo "Build complete: $@"
 
-mega_kernel_test_: $(KERNEL_SRC) $(HOST_SRC)
-	@echo "Building for  (/RDNA4-DC)..."
-	$(HIPCC) $(HIPCC_FLAGS) --offload-arch= $(INCLUDES) -o $@ $^
+mega_kernel_test_gfx1150: $(KERNEL_SRC) $(HOST_SRC)
+	@echo "Building for gfx1150 (Strix Point/RDNA3.5)..."
+	$(HIPCC) $(HIPCC_FLAGS) --offload-arch=gfx1150 $(INCLUDES) -o $@ $^
+	@echo "Build complete: $@"
+
+mega_kernel_test_gfx1151: $(KERNEL_SRC) $(HOST_SRC)
+	@echo "Building for gfx1151 (Strix Point/RDNA3.5)..."
+	$(HIPCC) $(HIPCC_FLAGS) --offload-arch=gfx1151 $(INCLUDES) -o $@ $^
+	@echo "Build complete: $@"
+
+mega_kernel_test_gfx1152: $(KERNEL_SRC) $(HOST_SRC)
+	@echo "Building for gfx1152 (Strix Halo/RDNA3.5)..."
+	$(HIPCC) $(HIPCC_FLAGS) --offload-arch=gfx1152 $(INCLUDES) -o $@ $^
 	@echo "Build complete: $@"
 
 # Architecture-specific targets (using gfx names)
@@ -108,18 +122,25 @@ gfx1200: mega_kernel_test_gfx1200
 	@ln -sf mega_kernel_test_gfx1200 mega_kernel_test
 	@echo "Linked mega_kernel_test -> mega_kernel_test_gfx1200"
 
-: mega_kernel_test_
-	@ln -sf mega_kernel_test_ mega_kernel_test
-	@echo "Linked mega_kernel_test -> mega_kernel_test_"
+gfx1150: mega_kernel_test_gfx1150
+	@ln -sf mega_kernel_test_gfx1150 mega_kernel_test
+	@echo "Linked mega_kernel_test -> mega_kernel_test_gfx1150"
 
-# Build for all architectures (excludes  which requires ROCm 7.x+)
-all-arch: mega_kernel_test_gfx950 mega_kernel_test_gfx942 mega_kernel_test_gfx90a mega_kernel_test_gfx1201 mega_kernel_test_gfx1200
-	@echo "Built for all architectures: gfx950, gfx942, gfx90a, gfx1201, gfx1200"
-	@echo "Note:  () requires ROCm 7.x+ - build with 'make ' separately"
+gfx1151: mega_kernel_test_gfx1151
+	@ln -sf mega_kernel_test_gfx1151 mega_kernel_test
+	@echo "Linked mega_kernel_test -> mega_kernel_test_gfx1151"
+
+gfx1152: mega_kernel_test_gfx1152
+	@ln -sf mega_kernel_test_gfx1152 mega_kernel_test
+	@echo "Linked mega_kernel_test -> mega_kernel_test_gfx1152"
+
+# Build for all architectures
+all-arch: mega_kernel_test_gfx950 mega_kernel_test_gfx942 mega_kernel_test_gfx90a mega_kernel_test_gfx1150 mega_kernel_test_gfx1151 mega_kernel_test_gfx1152 mega_kernel_test_gfx1201 mega_kernel_test_gfx1200
+	@echo "Built for all architectures: gfx950, gfx942, gfx90a, gfx1150, gfx1151, gfx1152, gfx1201, gfx1200"
 
 # Build all including experimental (requires newer ROCm)
-all-arch-full: mega_kernel_test_gfx950 mega_kernel_test_gfx942 mega_kernel_test_gfx90a mega_kernel_test_gfx1201 mega_kernel_test_gfx1200 mega_kernel_test_
-	@echo "Built for all architectures including experimental: gfx950, gfx942, gfx90a, gfx1201, gfx1200, "
+all-arch-full: mega_kernel_test_gfx950 mega_kernel_test_gfx942 mega_kernel_test_gfx90a mega_kernel_test_gfx1150 mega_kernel_test_gfx1151 mega_kernel_test_gfx1152 mega_kernel_test_gfx1201 mega_kernel_test_gfx1200
+	@echo "Built for all architectures: gfx950, gfx942, gfx90a, gfx1150, gfx1151, gfx1152, gfx1201, gfx1200"
 
 # Run the test
 run: $(DEFAULT_TARGET)
@@ -143,21 +164,25 @@ help:
 	@echo "    gfx942  - MI300/MI300X (CDNA3): + FP8/BF8, TF32, Sparse MFMA"
 	@echo "    gfx950  - MI350/MI355X (CDNA4): + FP6/FP4, Async LDS, Dual-Issue"
 	@echo ""
+	@echo "  RDNA 3.5 (Strix / Strix Halo APU):"
+	@echo "    gfx1150 - Strix Point B0 (RDNA 3.5): WMMA, FP8/BF8, VOPD dual-issue"
+	@echo "    gfx1151 - Strix Point B1 (RDNA 3.5): WMMA, FP8/BF8, VOPD dual-issue"
+	@echo "    gfx1152 - Strix Halo    (RDNA 3.5): WMMA, FP8/BF8, VOPD dual-issue"
+	@echo ""
 	@echo "  RDNA4 (Consumer):"
 	@echo "    gfx1201 - RX 9070 XT/9070: FP8/BF8 OCP, Async LDS, Raytracing"
 	@echo "    gfx1200 - RX 9060 series:  FP8/BF8 OCP, Async LDS, Raytracing"
-	@echo ""
-	@echo "  RDNA4 (Datacenter):"
-	@echo "     - : FP8/BF8 OCP, Async LDS, TDM, Full Features"
 	@echo ""
 	@echo "Usage:"
 	@echo "  make             - Build for gfx950 (default)"
 	@echo "  make gfx950      - Build for MI350 (gfx950/CDNA4)"
 	@echo "  make gfx942      - Build for MI300 (gfx942/CDNA3)"
 	@echo "  make gfx90a      - Build for MI250 (gfx90a/CDNA2)"
+	@echo "  make gfx1150     - Build for Strix Point (gfx1150/RDNA3.5)"
+	@echo "  make gfx1151     - Build for Strix Point (gfx1151/RDNA3.5)"
+	@echo "  make gfx1152     - Build for Strix Halo (gfx1152/RDNA3.5)"
 	@echo "  make gfx1201     - Build for RX 9070 XT (gfx1201/RDNA4)"
 	@echo "  make gfx1200     - Build for RX 9060 (gfx1200/RDNA4)"
-	@echo "  make      - Build for  (/RDNA4-DC)"
 	@echo "  make all-arch    - Build for all architectures"
 	@echo "  make run         - Build and run the test"
 	@echo "  make clean       - Remove build artifacts"
