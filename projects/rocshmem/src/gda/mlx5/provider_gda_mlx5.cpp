@@ -439,7 +439,7 @@ static int mlx5_create_cq(const mlx5dv_funcs_t& mlx5dv, mlx5_devx_qp& qp) {
 
   // create CQ
   qp.devx_cq_obj = mlx5dv.devx_obj_create(qp.ctx, in, sizeof(in), out, sizeof(out));
-  CHECK_NNULL(qp.devx_cq_obj, "mlx5dv_devx_obj_create (QP)");
+  CHECK_NNULL(qp.devx_cq_obj, "mlx5dv_devx_obj_create (CQ)");
   // extract CQ number
   qp.cqn = DEVX_GET(create_cq_out, out, cqn);
 
