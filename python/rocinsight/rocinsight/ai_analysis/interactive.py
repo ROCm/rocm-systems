@@ -4136,6 +4136,9 @@ class WorkflowSession:
                             _app_idx = fc.find("-- ./app")
                             if _rp_idx >= 0 and _app_idx > _rp_idx:
                                 _rp_flags = fc[_rp_idx + len("rocprofv3 "):_app_idx].strip()
+                                # Strip any existing -o <name> — we'll add our own
+                                _rp_flags = re.sub(r"-o\s+\S+", "", _rp_flags).strip()
+                                _rp_flags = re.sub(r" {2,}", " ", _rp_flags)
                                 fc = f"{mpi_prefix} rocprofv3 {_rp_flags} -o results_%nid% -- {mpi_app}"
                             else:
                                 fc = fc.replace("-- ./app", f"-- {app_cmd}")
