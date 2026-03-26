@@ -4,7 +4,7 @@
 
 find_package(amd_comgr 2.9 CONFIG
   PATHS
-    /opt/rocm/
+    ${ROCM_PATH}
     ${ROCM_INSTALL_PATH}
   PATH_SUFFIXES
     cmake/amd_comgr
@@ -13,7 +13,7 @@ find_package(amd_comgr 2.9 CONFIG
 if (NOT amd_comgr_FOUND)
   find_package(amd_comgr 3.0 REQUIRED CONFIG
     PATHS
-      /opt/rocm/
+      ${ROCM_PATH}
       ${ROCM_INSTALL_PATH}
     PATH_SUFFIXES
       cmake/amd_comgr

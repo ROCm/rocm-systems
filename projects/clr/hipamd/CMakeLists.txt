@@ -35,8 +35,8 @@ if(MSVC)
   set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} /DEBUG:FULL")
 endif()
 
-# Set default HIPCC_BIN_DIR to /opt/rocm/bin
-set(HIPCC_BIN_DIR "/opt/rocm/bin" CACHE STRING "HIPCC and HIPCONFIG binary directories")
+# Set default HIPCC_BIN_DIR to ${ROCM_PATH}/bin
+set(HIPCC_BIN_DIR "${ROCM_PATH}/bin" CACHE STRING "HIPCC and HIPCONFIG binary directories")
 
 if(__HIP_ENABLE_PCH)
   set(_pchStatus 1)
@@ -273,8 +273,9 @@ message(STATUS "HIP Compiler: " ${HIP_COMPILER})
 add_to_config(_buildInfo HIP_RUNTIME)
 add_to_config(_buildInfo HIP_COMPILER)
 
-if (NOT DEFINED ROCM_PATH )
-     set ( ROCM_PATH "/opt/rocm"  CACHE STRING "Default ROCM installation directory." )
+# ROCM_PATH is set by the parent clr/CMakeLists.txt.
+if (NOT DEFINED ROCM_PATH)
+     set (ROCM_PATH "${CMAKE_INSTALL_PREFIX}"  CACHE STRING "Default ROCM installation directory." )
 endif ()
 message (STATUS "ROCM Installation path(ROCM_PATH): ${ROCM_PATH}")
 
@@ -386,7 +387,7 @@ if(NOT ${INSTALL_SOURCE} EQUAL 0)
       endif()
     else()
       # Exclude .bat files on Linux.
-      #Hip bin files moved to /opt/rocm/bin and the file permission need to set properly
+      #Hip bin files moved to ${ROCM_PATH}/bin and the file permission need to set properly
       install(DIRECTORY ${HIP_COMMON_BIN_DIR} DESTINATION . USE_SOURCE_PERMISSIONS
               DIRECTORY_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
               PATTERN *.bat EXCLUDE)
