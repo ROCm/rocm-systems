@@ -1433,12 +1433,12 @@ static int psp_ring_init(struct PspRingContext *ctx,
      * Our old offsets (5-8MB) were INSIDE the TMR, causing the PSP to
      * load stale firmware from TMR instead of our staging data.
      * amdgpu allocates near VRAM end via kernel BO (0x87D6AF8000 etc.).
-     * We place buffers at VRAM_SIZE - 16MB to be safely above the TMR. */
-    ULONGLONG safe_base = vram_size - (16ULL * 1024 * 1024);
-    ULONGLONG ring_off  = safe_base;
-    ULONGLONG fw_off    = safe_base + (1ULL * 1024 * 1024);
-    ULONGLONG cmd_off   = safe_base + (3ULL * 1024 * 1024);
-    ULONGLONG fence_off = safe_base + (3ULL * 1024 * 1024) + 4096;
+     * NOTE: VRAM-end buffers don't work (PSP can't access them).
+     * Reverting to VRAM-start. TMR overlap theory is disproven. */
+    ULONGLONG ring_off  = 5 * 1024 * 1024;
+    ULONGLONG fw_off    = 6 * 1024 * 1024;
+    ULONGLONG cmd_off   = 8 * 1024 * 1024;
+    ULONGLONG fence_off = 8 * 1024 * 1024 + 4096;
 
     ctx->ring_mc_addr  = ctx->vram_mc_base + ring_off;
     ctx->fw_mc_addr    = ctx->vram_mc_base + fw_off;
@@ -1488,8 +1488,10 @@ static int psp_ring_init(struct PspRingContext *ctx,
     MemoryBarrier();
 
     /* Verify fence is actually zero */
-    ULONG fence_check = *(volatile ULONG *)ctx->fence_cpu;
-    pr_info("psp_ring: fence after zero: 0x%08x (should be 0)\n", fence_check);
+    {
+        ULONG fence_check = *(volatile ULONG *)ctx->fence_cpu;
+        pr_info("psp_ring: fence after zero: 0x%08x (should be 0)\n", fence_check);
+    }
 
     /* ---- Destroy existing ring + Create fresh ---- */
     {
@@ -4774,11 +4776,11 @@ int gpu_smu_mode1_reset(struct WddmLiteDevice *dev)
 
     /* Wait for bootloader to come back (C2PMSG_35 = 0x80000000) */
     pr_info("gpu_smu: waiting for bootloader ready...\n");
-    for (int i = 0; i < 5000; i++) {  /* Up to 5 seconds */
+    for (int i = 0; i < 30000; i++) {  /* Up to 30 seconds */
         ULONG bl = mp0_rreg(dev, regMPASP_SMN_C2PMSG_35);
-        if (bl == 0x80000000) {
-            pr_info("gpu_smu: bootloader ready after mode1 reset (%d ms)\n",
-                    500 + i);
+        if (bl & 0x80000000) {  /* bit 31 = ready (not exact match) */
+            pr_info("gpu_smu: bootloader ready after mode1 reset (%d ms, "
+                    "C2PMSG_35=0x%08x)\n", 500 + i, bl);
             /* Mark SOS as dead so it gets reloaded */
             dev->hw.psp_sos_alive = FALSE;
             return 0;
