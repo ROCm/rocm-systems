@@ -563,8 +563,8 @@ async_copy_impl(Args... args)
         auto _src_addr = compute_address(std::get<src_addr_idx>(_tied_args));
 
         // Query pointer info to determine actual memory types
-        hsa_amd_pointer_info_t _src_info = {sizeof(hsa_amd_pointer_info_t)};
-        hsa_amd_pointer_info_t _dst_info = {sizeof(hsa_amd_pointer_info_t)};
+        auto _src_info = hsa_amd_pointer_info_t{.size = sizeof(hsa_amd_pointer_info_t)};
+        auto _dst_info = hsa_amd_pointer_info_t{.size = sizeof(hsa_amd_pointer_info_t)};
 
         auto _src_status = get_amd_ext_table()->hsa_amd_pointer_info_fn(
             const_cast<void*>(_src_addr.ptr), &_src_info, nullptr, nullptr, nullptr);
@@ -572,10 +572,10 @@ async_copy_impl(Args... args)
             const_cast<void*>(_dst_addr.ptr), &_dst_info, nullptr, nullptr, nullptr);
 
         // Determine if source/destination is host or device memory based on pointer info
-        bool _src_is_device = false;
-        bool _dst_is_device = false;
-        hsa_agent_t _actual_src_agent = _hsa_src_agent;
-        hsa_agent_t _actual_dst_agent = _hsa_dst_agent;
+        auto _src_is_device    = false;
+        auto _dst_is_device    = false;
+        auto _actual_src_agent = _hsa_src_agent;
+        auto _actual_dst_agent = _hsa_dst_agent;
 
         if(_src_status == HSA_STATUS_SUCCESS)
         {
@@ -596,7 +596,7 @@ async_copy_impl(Args... args)
         if(_dst_status == HSA_STATUS_SUCCESS)
         {
             _actual_dst_agent = _dst_info.agentOwner;
-            _dst_is_device = (_dst_info.type == HSA_EXT_POINTER_TYPE_HSA);
+            _dst_is_device    = (_dst_info.type == HSA_EXT_POINTER_TYPE_HSA);
         }
         else
         {
@@ -607,8 +607,8 @@ async_copy_impl(Args... args)
         }
 
         // Map actual agents to rocprofiler agents for reporting
-        auto _rocp_dst_agent = agent::get_rocprofiler_agent(_actual_dst_agent);
-        auto _rocp_src_agent = agent::get_rocprofiler_agent(_actual_src_agent);
+        const auto* _rocp_dst_agent = agent::get_rocprofiler_agent(_actual_dst_agent);
+        const auto* _rocp_src_agent = agent::get_rocprofiler_agent(_actual_src_agent);
 
         if(_rocp_dst_agent && _rocp_src_agent)
         {
@@ -617,11 +617,12 @@ async_copy_impl(Args... args)
         }
         else
         {
-            // Fallback to the agent parameters if pointer_info agents couldn't be mapped
-            auto _fallback_dst_agent = agent::get_rocprofiler_agent(_hsa_dst_agent);
-            auto _fallback_src_agent = agent::get_rocprofiler_agent(_hsa_src_agent);
-            if(_fallback_dst_agent) _dst_agent_id = _fallback_dst_agent->id;
-            if(_fallback_src_agent) _src_agent_id = _fallback_src_agent->id;
+            ROCP_ERROR_IF(!_rocp_src_agent)
+                << "failed to find source rocprofiler agent for hsa agent with handle="
+                << _actual_src_agent.handle;
+            ROCP_ERROR_IF(!_rocp_dst_agent)
+                << "failed to find destination rocprofiler agent for hsa agent with handle="
+                << _actual_dst_agent.handle;
         }
 
         // Determine copy direction based on memory types
