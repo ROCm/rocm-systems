@@ -61,7 +61,12 @@ typedef struct _HsaKFDContext
      */
     bool hsakmt_is_primary_ctx;
 
-    /* whether to check all dGPUs in the topology support SVM API */
+    /*
+     * Indicates whether the SVM API is available for use
+     * in this context. True only if HSA_USE_SVM is not
+     * explicitly disabled (via env var) and all dGPUs in
+     * the topology report SVM API capability.
+     */
     bool hsakmt_is_svm_api_supported;
 
     /* Topology context for managing system topology information */
@@ -83,15 +88,23 @@ typedef struct _HsaKFDContext
     struct hsa_kfd_perf_context *perf_context;
 } HsaKFDContext;
 
-// Initialize a pre-allocated HsaKFDContext with the given file descriptor
-void hsakmt_kfdcontext_init_context(int fd, HsaKFDContext *ctx);
-// Release all resources associated with the given KFD context
+/* Initialize a pre-allocated HsaKFDContext with the given fd.
+ * Returns 0 on success, -1 on allocation failure.
+ */
+int hsakmt_kfdcontext_init_context(int fd, HsaKFDContext *ctx);
+
+/*
+ * Free all sub-context allocations. Also resets fd to -1 to
+ * mark the context as invalid.
+ * Does NOT free the HsaKFDContext struct itself;
+ * the caller retains ownership.
+ */
 void hsakmt_kfdcontext_clear_context(HsaKFDContext *ctx);
 
 struct hsa_kfd_topology_context *hsakmt_kfdcontext_get_topology_context(HsaKFDContext *ctx);
 struct hsa_kfd_fmm_context *hsakmt_kfdcontext_get_fmm_context(HsaKFDContext *ctx);
 struct hsa_kfd_queue_context *hsakmt_kfdcontext_get_queue_context(HsaKFDContext *ctx);
-struct hsa_kfd_event_context *hsakmt_kfdcontext_get_event_context(HsaKFDContext *ctx);
+int hsakmt_kfdcontext_init_event_context(HsaKFDContext *ctx);
 struct hsa_kfd_debug_context *hsakmt_kfdcontext_get_debug_context(HsaKFDContext *ctx);
 struct hsa_kfd_perf_context *hsakmt_kfdcontext_get_perf_context(HsaKFDContext *ctx);
 #endif /* _KFDCONTEXT_H_ */
