@@ -51,10 +51,16 @@ Panel Config:
           peak: 5
           pop: ((100 * AVG((SQ_INSTS_ALL_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)) / 5)
         Wavefront Occupancy:
-          value: AVG((SQ_WAVE_CYCLES_sum / (GRBM_GUI_ACTIVE_sum * $cu_per_gpu)))
+          # To be fixed: Counter semantics vs GRBM_GUI_ACTIVE / aggregation do not yield a
+          # trustworthy wave count on gfx1151; restore when formula is validated.
+          # value: AVG(((4 * SQ_WAVE_CYCLES_sum) / (GRBM_GUI_ACTIVE_sum * $cu_per_gpu)))
+          # peak: ($max_waves_per_cu * $cu_per_gpu)
+          # pop: (100 * AVG((((4 * SQ_WAVE_CYCLES_sum) / (GRBM_GUI_ACTIVE_sum * $cu_per_gpu))
+          #   / ($max_waves_per_cu * $cu_per_gpu))))
+          value: None
           unit: Wavefronts
-          peak: ($max_waves_per_cu * $cu_per_gpu)
-          pop: (100 * AVG(((SQ_WAVE_CYCLES_sum / (GRBM_GUI_ACTIVE_sum * $cu_per_gpu)) / ($max_waves_per_cu * $cu_per_gpu))))
+          peak: None
+          pop: None
         # --- L2 / fabric (EA) ---
         L2 Cache Hit Rate:
           value: AVG((100 * GL2C_HIT_sum / (GL2C_HIT_sum + GL2C_MISS_sum)) if ((GL2C_HIT_sum + GL2C_MISS_sum) != 0) else None)
@@ -80,11 +86,6 @@ Panel Config:
           unit: Conflicts
           peak: None
           pop: None
-        TA Busy Util Rate:
-          value: AVG((100 * TA_BUSY_avr / GRBM_GUI_ACTIVE) if (GRBM_GUI_ACTIVE != 0) else None)
-          unit: Percent
-          peak: 100
-          pop: AVG((100 * TA_BUSY_avr / GRBM_GUI_ACTIVE) if (GRBM_GUI_ACTIVE != 0) else None)
         Wave Dependency Wait:
           value: AVG(((100 * SQ_WAIT_ANY / SQ_WAVE_CYCLES) if (SQ_WAVE_CYCLES != 0) else 0))
           unit: Percent
@@ -162,11 +163,9 @@ Panel Config:
       Calculated as (Total Instructions - Internal Instructions) / Busy Cycles.
       Higher IPC indicates better instruction throughput.
     Wavefront Occupancy: |-
-      Time-averaged number of wavefronts resident on the GPU during kernel execution.
-      Computed as SQ_WAVE_CYCLES / (GRBM_GUI_ACTIVE × $cu_per_gpu). Peak / % of peak
-      compare to $max_waves_per_cu × $cu_per_gpu. Uses SQ_WAVE_CYCLES because
-      SQ_ACCUM_PREV is non-functional on gfx1151. RDNA3.5 is primarily wave32 with 16
-      wavefront slots per SIMD32 unit.
+      To be fixed: Disabled — Avg / Peak / Pct of Peak are None until a validated gfx1151
+      formula exists (SQ_ACCUM_PREV non-functional; SQ_WAVE_CYCLES–based estimates
+      were not reliable in testing).
     L2 Cache Hit Rate: |-
       GL2C last-level cache hit rate (same as Memory Chart / GL2C panel).
       Formula: 100 * GL2C_HIT_sum / (GL2C_HIT_sum + GL2C_MISS_sum) when the denominator is non-zero.
@@ -180,10 +179,6 @@ Panel Config:
       Peak / % of peak are N/A (no sysinfo memory BW).
     LDS Bank Conflicts: |-
       Number of LDS bank conflicts. Peak / % of Peak are N/A for raw counts.
-    TA Busy Util Rate: |-
-      Texture Addresser (TA) utilization vs GPU-active time: mean TA busy cycles
-      (TA_BUSY_avr — average of TA_TA_BUSY over TA instances) as a percent of
-      GRBM_GUI_ACTIVE. Peak / % of peak use 100% (TA fully busy whenever the GPU is active).
     Wave Dependency Wait: |-
       Percent of wave lifetime spent waiting for data dependencies (e.g. VMEM/LDS results).
     Wave Issue Wait: |-

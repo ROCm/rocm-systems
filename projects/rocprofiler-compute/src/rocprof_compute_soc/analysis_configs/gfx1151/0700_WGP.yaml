@@ -22,9 +22,13 @@ Panel Config:
         unit: Unit
       metric:
         WGP Utilization:
-          avg: AVG((100 * SQ_BUSY_CYCLES_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
-          min: MIN((100 * SQ_BUSY_CYCLES_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
-          max: MAX((100 * SQ_BUSY_CYCLES_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
+          # To be fixed: SQ_BUSY_CYCLES_sum vs GRBM_GUI_ACTIVE_sum ratio not validated for gfx1151.
+          # avg: AVG((100 * SQ_BUSY_CYCLES_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
+          # min: MIN((100 * SQ_BUSY_CYCLES_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
+          # max: MAX((100 * SQ_BUSY_CYCLES_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
+          avg: None
+          min: None
+          max: None
           unit: Percent
 
   - metric_table:
@@ -307,8 +311,10 @@ Panel Config:
 
   metrics_description:
     WGP Utilization: |-
-      Percentage of cycles where the WGP (Workgroup Processor) was busy executing
-      waves. RDNA3.5 WGPs contain 2 CUs, each with 2 SIMD32 units.
+      To be fixed: Disabled — Avg / Min / Max are None until the utilization formula
+      is validated for gfx1151. Intended meaning: WGP busy as a percent of GRBM
+      GUI-active cycles (100 * SQ_BUSY_CYCLES_sum / GRBM_GUI_ACTIVE_sum when
+      GRBM_GUI_ACTIVE_sum != 0). RDNA3.5 WGPs pair 2 CUs, each with 2 SIMD32 units.
     Wave Life: |-
       Average number of cycles a wave exists from creation to completion.
       Calculated as SQ_WAVE_CYCLES / SQ_WAVES.

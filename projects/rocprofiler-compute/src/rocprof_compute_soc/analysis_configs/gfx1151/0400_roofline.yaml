@@ -32,7 +32,7 @@ Panel Config:
           value: AVG((($wave_size * (SQ_INSTS_VALU_DP_sum)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
           unit: GFLOP/s
           peak: $FP64Flops_empirical_peak
-        # Fixme: GL2C_EA_WRREQ_sum not available - commenting out metric
+        # To be fixed: GL2C_EA_WRREQ_sum not available - commenting out metric
         # System Memory Bandwidth:
         #   value: AVG(((GL2C_EA_RDREQ_128B_sum * 128 + GL2C_EA_RDREQ_32B_sum * 32 + GL2C_EA_RDREQ_64B_sum * 64 + GL2C_EA_RDREQ_96B_sum * 96 + GL2C_EA_WRREQ_64B_sum * 64 + ((GL2C_EA_WRREQ_sum - GL2C_EA_WRREQ_64B_sum) * 32)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
         #   unit: GB/s
@@ -65,7 +65,7 @@ Panel Config:
         value: Value
         unit: Unit
       metric:
-        # Fixme: GL2C_EA_WRREQ_sum not available - commenting out metric
+        # To be fixed: GL2C_EA_WRREQ_sum not available - commenting out metric
         # AI System Memory:
         #   value: ( SUM($wave_size * SQ_INSTS_VALU_sum) / SUM((GL2C_EA_RDREQ_128B_sum * 128) + (GL2C_EA_RDREQ_32B_sum * 32) + (GL2C_EA_RDREQ_64B_sum * 64) + (GL2C_EA_RDREQ_96B_sum * 96) + (GL2C_EA_WRREQ_64B_sum * 64) + ((GL2C_EA_WRREQ_sum - GL2C_EA_WRREQ_64B_sum) * 32)) )
         #   unit: FLOPs/Byte
@@ -100,7 +100,7 @@ Panel Config:
       FP64 throughput is typically 1/16 or 1/32 of FP32 on RDNA3.5 consumer parts.
       This is presented with the value of the peak empirical F64 FLOPs achievable
       on the specific accelerator.
-    # Fixme: GL2C_EA_WRREQ_sum not available - commenting out description
+    # To be fixed: GL2C_EA_WRREQ_sum not available - commenting out description
     # System Memory Bandwidth: >-
     #   The total number of bytes read from and written to system memory per second.
     #   RDNA3.5 is an APU that uses system memory (DDR5/LPDDR5) instead of HBM.
@@ -139,7 +139,7 @@ Panel Config:
       The Arithmetic Intensity (AI) relative to GL2C (L2 Cache). It is the ratio
       of total floating-point operations (FLOPs) to total bytes transferred between
       GL2C and GL1C. This value is used as the x-coordinate for the GL2 roofline.
-    # Fixme: GL2C_EA_WRREQ_sum not available - commenting out description
+    # To be fixed: GL2C_EA_WRREQ_sum not available - commenting out description
     # AI System Memory: >-
     #   The Arithmetic Intensity (AI) relative to System Memory. It is the ratio
     #   of total floating-point operations (FLOPs) to total bytes transferred

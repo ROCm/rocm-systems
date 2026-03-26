@@ -54,7 +54,7 @@ Panel Config:
   # =========================================================================
   # Resource Allocation
   # =========================================================================
-  # Fixme: SPI_CSN_STALL_* counters not available - commenting out table
+  # To be fixed: SPI_CSN_STALL_* counters not available - commenting out table
   # - metric_table:
   #     id: 603
   #     title: "Resource Allocation Stalls"
@@ -101,7 +101,7 @@ Panel Config:
     Wave Dispatch Rate: |-
       Average number of waves dispatched per GPU active cycle. Computed as
       SPI_CSN_WAVE / GRBM_GUI_ACTIVE.
-    # Fixme: SPI_CSN_STALL_* counters not available - commenting out descriptions
+    # To be fixed: SPI_CSN_STALL_* counters not available - commenting out descriptions
     # VGPR Stall: |-
     #   Cycles SPI was stalled due to insufficient VGPRs.
     #   Consider reducing VGPR usage per wave.
