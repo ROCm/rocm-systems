@@ -432,27 +432,32 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void)
                     }
                 }
 
-                /* Step 6: SMU features — MUST happen before AUTOLOAD.
-                 * EnableAllSmuFeatures powers up the GFX domain via IMU.
-                 * Without GFX power, RLC cannot run and AUTOLOAD status
-                 * stays 0x00000000. This matches Linux: smu hw_init runs
-                 * before gfx hw_init (which triggers AUTOLOAD).
-                 * NOTE: On VFIO, SMU triggers power-up but may not
-                 * respond (resp stays 0). GC SMN access is temporarily
-                 * blocked during the GFX power transition (~80-120s).
-                 * DO NOT read GC registers immediately after this call. */
+                /* Step 6: Send AUTOLOAD_RLC command BEFORE SMU init.
+                 * CRITICAL: amdgpu sends AUTOLOAD during psp_load_non_psp_fw
+                 * but does NOT wait for completion. AUTOLOAD completes
+                 * asynchronously AFTER EnableAllSmuFeatures powers up GFX.
+                 * DO NOT call gpu_psp_trigger_autoload() which waits for
+                 * BOOTLOAD_STATUS bit 31 — that's a deadlock (needs GFX power).
+                 * Just send the PSP command and move on. */
+                if (fw_staged && g_wddm_lite_dev.hw.psp_sos_alive) {
+                    pr_info("wddm_lite: sending AUTOLOAD_RLC command (non-blocking)\n");
+                    /* Send via PSP ring: GFX_CMD_ID_AUTOLOAD_RLC = 0x21 */
+                    extern int gpu_psp_send_autoload_cmd(struct WddmLiteDevice *dev);
+                    int al_ret = gpu_psp_send_autoload_cmd(&g_wddm_lite_dev);
+                    if (al_ret == 0)
+                        pr_info("wddm_lite: AUTOLOAD_RLC command sent OK\n");
+                    else
+                        pr_warn("wddm_lite: AUTOLOAD_RLC command failed\n");
+                }
+
+                /* Step 7: SMU features — after AUTOLOAD.
+                 * amdgpu's sequence: AUTOLOAD → GMC → SMU init.
+                 * EnableAllSmuFeatures(0) should now work because AUTOLOAD
+                 * activated the pptable context in the SMU. */
                 if (g_wddm_lite_dev.hw.psp_sos_alive && skip_fw[0] != '1') {
                     gpu_smu_enable_features(&g_wddm_lite_dev);
                 } else if (skip_fw[0] == '1') {
                     pr_info("wddm_lite: SMU enable_features skipped (SKIP_FW_LOAD)\n");
-                }
-
-                /* Step 6b: Trigger AUTOLOAD now that GFX power is up.
-                 * GFX domain should be powered after EnableAllSmuFeatures.
-                 * RLC can now run and distribute firmware to MEC/RLCP/RLCV,
-                 * setting BOOTLOAD_STATUS bits 0-5 and eventually bit 31. */
-                if (fw_staged && g_wddm_lite_dev.hw.psp_sos_alive) {
-                    gpu_psp_trigger_autoload(&g_wddm_lite_dev);
                 }
 
                 /* Step 7: DisallowGfxOff */

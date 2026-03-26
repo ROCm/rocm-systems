@@ -3342,6 +3342,30 @@ int gpu_psp_load_smu_fw(struct WddmLiteDevice *dev, const char *fw_dir)
     return gpu_psp_load_all_fw(dev, fw_dir);
 }
 
+/* Non-blocking AUTOLOAD_RLC: just send the PSP command, don't wait.
+ * amdgpu sends AUTOLOAD_RLC during psp_load_non_psp_fw and does NOT wait
+ * for BOOTLOAD_STATUS. AUTOLOAD completes asynchronously after
+ * EnableAllSmuFeatures powers up GFX. */
+int gpu_psp_send_autoload_cmd(struct WddmLiteDevice *dev)
+{
+    struct PspRingContext ctx;
+    int ret = psp_ring_init(&ctx, dev);
+    if (ret != 0) {
+        pr_warn("psp_autoload_cmd: ring init failed\n");
+        return ret;
+    }
+
+    pr_info("psp_autoload_cmd: sending AUTOLOAD_RLC (non-blocking)...\n");
+    ret = psp_ring_autoload_rlc(&ctx);
+    if (ret == 0)
+        pr_info("psp_autoload_cmd: AUTOLOAD_RLC sent OK\n");
+    else
+        pr_warn("psp_autoload_cmd: AUTOLOAD_RLC failed\n");
+
+    psp_ring_destroy(&ctx);
+    return ret;
+}
+
 
 /* ======================================================================
  * GMC Initialization
@@ -4408,476 +4432,131 @@ int gpu_smu_send_msg(struct WddmLiteDevice *dev, ULONG msg, ULONG param)
  */
 int gpu_smu_enable_features(struct WddmLiteDevice *dev)
 {
+    /* ===================================================================
+     * EXACT amdgpu re-init SMU sequence (captured via MMIO sniffer).
+     *
+     * amdgpu's sequence after Mode1 reset + firmware reload:
+     *   1. GetDriverIfVersion (0x03)
+     *   2. GetSmuVersion (0x02)
+     *   3. SetDriverDramAddrHigh/Low (0x0E/0x0F)
+     *   4. SetToolsDramAddrHigh/Low (0x10/0x11)
+     *   5. TransferTableSmu2Dram(WATERMARKS=1) (0x12)
+     *   6. RunDcBtc (0x36)
+     *   7. OverridePcieParameters (0x20)
+     *   8. EnableAllSmuFeatures(0) (0x06) → responds in 19ms!
+     *
+     * Critical: NO DisallowGfxOff, NO IMU unhalt, NO FGCG override,
+     * NO Dram2Smu, NO SetAllowedFeaturesMask, NO individual features.
+     * The pptable is preserved in TMR from the first amdgpu init.
+     * Any extra messages before EnableAllSmuFeatures may corrupt state.
+     * =================================================================== */
+
     if (dev->hw.ip.mp1_base == 0) {
         pr_err("gpu_smu: MP1 base not found\n");
         return -1;
     }
 
-    /* First check if SMU is alive after firmware loading.
-     *
-     * After VBIOS hands off, SMU may be in a GFXOFF low-power mode where
-     * the normal mailbox is gated and won't respond to GetSmuVersion.
-     * Send DisallowGfxOff (0x27) first to wake the SMU out of GFXOFF state,
-     * then retry GetSmuVersion.  Ignore the DisallowGfxOff response — if
-     * SMU is already in normal mode it's a no-op; if it's in GFXOFF it will
-     * wake up and respond to GetSmuVersion. */
-    /* Whether GFX was already powered before we start (VBIOS-preserve mode).
-     * If true: EnableAllSmuFeatures only needs to set internal feature flags
-     * (no PMIC voltage raise), so we use a shorter timeout.
-     * If false (Mode1-reset): SMU must physically power up GFX via PMIC,
-     * which takes longer. */
-    BOOLEAN cpc_was_powered = FALSE;
-    BOOLEAN smu_wedged = FALSE;
+    pr_info("gpu_smu: === amdgpu-style SMU init (no extra messages) ===\n");
 
-    pr_info("gpu_smu: checking if SMU is alive after firmware load...\n");
+    /* Step 1: GetDriverIfVersion + GetSmuVersion */
     {
-        /* Send DisallowGfxOff (0x29 per smu_v14_0_2 message table) to wake
-         * SMU from GFXOFF low-power state.  Note: 0x27 is a different message
-         * (PrepareMp1ForUnload or SoftFiniSmu) — do not confuse them. */
-        pr_info("gpu_smu: sending DisallowGfxOff (0x%02x) to wake SMU from GFXOFF...\n",
-                PPSMC_MSG_DisallowGfxOff);
-        /* Read mailbox state via BOTH SMN indirect and direct MMIO */
-        ULONG cur66_smn = mp1_rreg(dev, regMP1_SMN_C2PMSG_66);
-        ULONG cur90_smn = mp1_rreg(dev, regMP1_SMN_C2PMSG_90);
-        ULONG cur66_dir = mp1_rreg_direct(dev, regMP1_SMN_C2PMSG_66);
-        ULONG cur90_dir = mp1_rreg_direct(dev, regMP1_SMN_C2PMSG_90);
-        pr_info("gpu_smu: mailbox state: SMN(msg=0x%08x resp=0x%08x) "
-                "DIRECT(msg=0x%08x resp=0x%08x)\n",
-                cur66_smn, cur90_smn, cur66_dir, cur90_dir);
-
-        /* If stale message in C2PMSG_66, clear it via direct MMIO.
-         * Previous runs using SMN indirect may have written to C2PMSG_66
-         * without triggering the SMU's interrupt, leaving a stale value. */
-        if (cur66_smn != 0 || cur66_dir != 0) {
-            pr_info("gpu_smu: clearing stale C2PMSG_66 (0x%02x) via direct MMIO\n",
-                    cur66_smn ? cur66_smn : cur66_dir);
-            mp1_wreg_direct(dev, regMP1_SMN_C2PMSG_66, 0);
-            mp1_wreg_direct(dev, regMP1_SMN_C2PMSG_90, 0);
-            Sleep(10);
-        }
-
-        /* Send DisallowGfxOff via DIRECT MMIO (not SMN indirect).
-         * The SMU's internal interrupt that triggers message processing
-         * may only fire on direct BAR0 MMIO writes to C2PMSG_66.
-         * Linux uses WREG32_SOC15(MP1,...) which is direct MMIO. */
-        pr_info("gpu_smu: sending DisallowGfxOff via DIRECT MMIO "
-                "(mp1_base=0x%x, byte_offset=0x%x)\n",
-                dev->hw.ip.mp1_base,
-                (dev->hw.ip.mp1_base + regMP1_SMN_C2PMSG_66) * 4);
-        mp1_wreg_direct(dev, regMP1_SMN_C2PMSG_90, 0);
-        mp1_wreg_direct(dev, regMP1_SMN_C2PMSG_82, 0);
-        mp1_wreg_direct(dev, regMP1_SMN_C2PMSG_66, PPSMC_MSG_DisallowGfxOff);
-        {
-            DWORD dgfx_start = GetTickCount();
-            for (;;) {
-                /* Read response via BOTH paths */
-                ULONG resp_smn = mp1_rreg(dev, regMP1_SMN_C2PMSG_90);
-                ULONG resp_dir = mp1_rreg_direct(dev, regMP1_SMN_C2PMSG_90);
-                if (resp_smn != 0 || resp_dir != 0) {
-                    pr_info("gpu_smu: DisallowGfxOff responded! "
-                            "smn_resp=0x%x direct_resp=0x%x (%u ms)\n",
-                            resp_smn, resp_dir,
-                            (unsigned)(GetTickCount() - dgfx_start));
-                    break;
-                }
-                if (GetTickCount() - dgfx_start >= 3000) break;
-                Sleep(10);
-            }
-        }
-        pr_info("gpu_smu: post-DisallowGfxOff: SMN_resp=0x%08x DIRECT_resp=0x%08x\n",
-                mp1_rreg(dev, regMP1_SMN_C2PMSG_90),
-                mp1_rreg_direct(dev, regMP1_SMN_C2PMSG_90));
-    }
-
-    /* Check if GFX power domain is already up (VBIOS-preserve mode).
-     *
-     * CPC_PSP_DEBUG (gc_base1 + 0x5c11) reads 0xffffffff when the CPC/GFX
-     * power domain is gated off.  Any other value means GFX is accessible.
-     * In VBIOS-preserve mode (HSAKMT_SKIP_MODE1_RESET=1), VBIOS already
-     * powered GFX up and we just need to enable the SMU feature flags.
-     *
-     * We do NOT skip EnableAllSmuFeatures even when GFX is already powered:
-     * RLC AUTOLOAD will not distribute firmware to MEC/CPC until SMU sets
-     * the FEATURE_PWR_GFX feature flag, which only happens after this message.
-     * In VBIOS-preserve mode, EnableAllSmuFeatures only needs to SET FLAGS
-     * (GFX already on, no PMIC voltage raise needed) → responds much faster.
-     * We use cpc_was_powered to select a shorter 30s timeout for that case. */
-    if (dev->hw.ip.gc_base1 != 0) {
-        ULONG cpc_psp = gpu_smn_rreg(dev, dev->hw.ip.gc_base1 + 0x5c11);
-        pr_info("gpu_smu: CPC_PSP_DEBUG (gc_base1+0x5c11) = 0x%08x%s\n",
-                cpc_psp, (cpc_psp != 0xffffffff) ? " (GFX already powered)" : " (GFX off)");
-        if (cpc_psp != 0xffffffff) {
-            cpc_was_powered = TRUE;
-            dev->hw.gfxoff_disabled = TRUE;
-            pr_info("gpu_smu: GFX already powered — calling EnableAllSmuFeatures "
-                    "with 30s timeout to set RLC AUTOLOAD trigger flags\n");
-        }
-    }
-
-    /* GFX domain is gated off (CPC_PSP_DEBUG=0xffffffff).
-     * Before hanging 120s on EnableAllSmuFeatures, try the RLC-based GFXOFF exit:
-     * assert GFXIP_FGCG_OVERRIDE (bit 20) in RLC_CGCG_CGLS_CTRL (gc_base1+0x4c49).
-     * Linux gfx_v12_0_gfxclk_fgcg_override() uses this to force GFXOFF exit via
-     * the RLC register path rather than the SMU mailbox path.
-     * If CPC_PSP_DEBUG changes from 0xffffffff → anything else, CPC is up. */
-    if (dev->hw.ip.gc_base1 != 0) {
-        ULONG cgcg = gpu_smn_rreg(dev, dev->hw.ip.gc_base1 + 0x4c49);
-        pr_info("gpu_smu: RLC_CGCG_CGLS_CTRL = 0x%08x (pre-FGCG_OVERRIDE)\n", cgcg);
-        ULONG new_cgcg = cgcg | 0x00100000;  /* bit 20 = GFXIP_FGCG_OVERRIDE */
-        gpu_smn_wreg(dev, dev->hw.ip.gc_base1 + 0x4c49, new_cgcg);
-        pr_info("gpu_smu: wrote RLC_CGCG_CGLS_CTRL = 0x%08x "
-                "(GFXIP_FGCG_OVERRIDE asserted, bit 20)\n", new_cgcg);
-        Sleep(500);
-        ULONG cpc2 = gpu_smn_rreg(dev, dev->hw.ip.gc_base1 + 0x5c11);
-        pr_info("gpu_smu: CPC_PSP_DEBUG after FGCG_OVERRIDE = 0x%08x%s\n",
-                cpc2, (cpc2 != 0xffffffff) ? " (CPC POWERED ON!)" : " (still off)");
-        if (cpc2 != 0xffffffff) {
-            pr_info("gpu_smu: FGCG_OVERRIDE powered up GFX — "
-                    "skipping EnableAllSmuFeatures\n");
-            dev->hw.gfxoff_disabled = TRUE;
-            return 0;
-        }
-    }
-
-    /* Unhalt IMU before calling EnableAllSmuFeatures.
-     * On GFX12, SMU's GFXOFF exit (and thus DisallowGfxOff) requires IMU to be
-     * running.  If IMU is halted (GFX_IMU_CORE_CTRL bit 0 = 1), DisallowGfxOff
-     * returns 0xff (PPSMC_Result_Fail_FitNotSupported) because SMU cannot drive
-     * the GFXOFF exit handshake without IMU.
-     * Note: IMU firmware must already have been loaded by psp_ring before this. */
-    if (dev->hw.ip.gc_base1 != 0) {
-        ULONG imu_ctrl = gpu_smn_rreg(dev, dev->hw.ip.gc_base1 + 0x40b6);
-        pr_info("gpu_smu: GFX_IMU_CORE_CTRL = 0x%08x (halted=%d)\n",
-                imu_ctrl, (int)(imu_ctrl & 0x1));
-        if (imu_ctrl != 0xFFFFFFFF && (imu_ctrl & 0x1)) {
-            pr_info("gpu_smu: IMU is halted — unhalting before EnableAllSmuFeatures\n");
-            gpu_smn_wreg(dev, dev->hw.ip.gc_base1 + 0x40b6, imu_ctrl & ~0x1U);
-            /* Wait up to 10s for IMU to signal GFX reset complete
-             * (GFX_IMU_GFX_RESET_CTRL bits [4:0] all set = 0x1f) */
-            ULONG imu_reset = 0;
-            {
-                DWORD imu_start = GetTickCount();
-                DWORD last_imu_s = 0;
-                for (;;) {
-                    imu_reset = gpu_smn_rreg(dev, dev->hw.ip.gc_base1 + 0x40bc);
-                    if ((imu_reset & 0x1f) == 0x1f) {
-                        DWORD e = GetTickCount() - imu_start;
-                        pr_info("gpu_smu: IMU GFX reset complete at %u ms "
-                                "(RESET_CTRL=0x%08x)\n", (unsigned)e, imu_reset);
-                        break;
-                    }
-                    DWORD e = GetTickCount() - imu_start;
-                    if (e >= 10000) break;
-                    DWORD es = e / 1000;
-                    if (es > last_imu_s && (es % 2) == 0) {
-                        pr_info("gpu_smu: IMU wait [%us]: RESET_CTRL=0x%08x\n",
-                                (unsigned)es, imu_reset);
-                        last_imu_s = es;
-                    }
-                    Sleep(50);
-                }
-            }
-            /* Check if IMU woke CPC */
-            ULONG cpc_after_imu = gpu_smn_rreg(dev, dev->hw.ip.gc_base1 + 0x5c11);
-            pr_info("gpu_smu: CPC_PSP_DEBUG after IMU boot = 0x%08x%s\n",
-                    cpc_after_imu,
-                    (cpc_after_imu != 0xffffffff) ? " (CPC ON!)" : " (still off)");
-            if (cpc_after_imu != 0xffffffff) {
-                dev->hw.gfxoff_disabled = TRUE;
-                return 0;
-            }
-            /* IMU booted, retry DisallowGfxOff — should now succeed */
-            pr_info("gpu_smu: retrying DisallowGfxOff after IMU boot...\n");
-            mp1_wreg(dev, regMP1_SMN_C2PMSG_90, 0);
-            mp1_wreg(dev, regMP1_SMN_C2PMSG_82, 0);
-            mp1_wreg(dev, regMP1_SMN_C2PMSG_66, PPSMC_MSG_DisallowGfxOff);
-            {
-                DWORD pIMU_start = GetTickCount();
-                for (;;) {
-                    ULONG resp = mp1_rreg(dev, regMP1_SMN_C2PMSG_90);
-                    if (resp != 0) {
-                        pr_info("gpu_smu: DisallowGfxOff (post-IMU): resp=0x%x at %u ms%s\n",
-                                resp, (unsigned)(GetTickCount() - pIMU_start),
-                                (resp == 1) ? " (OK)" : " (error)");
-                        break;
-                    }
-                    if (GetTickCount() - pIMU_start >= 5000) break;
-                    Sleep(10);
-                }
-            }
-            cpc_after_imu = gpu_smn_rreg(dev, dev->hw.ip.gc_base1 + 0x5c11);
-            pr_info("gpu_smu: CPC_PSP_DEBUG after DisallowGfxOff (post-IMU) = 0x%08x%s\n",
-                    cpc_after_imu,
-                    (cpc_after_imu != 0xffffffff) ? " (CPC ON!)" : " (still off)");
-            if (cpc_after_imu != 0xffffffff) {
-                dev->hw.gfxoff_disabled = TRUE;
-                return 0;
-            }
-        } else if (imu_ctrl == 0xFFFFFFFF) {
-            pr_info("gpu_smu: IMU registers inaccessible (GFXOFF active?)\n");
+        int ret = gpu_smu_send_msg(dev, PPSMC_MSG_GetDriverIfVersion, 0);
+        if (ret == 0) {
+            ULONG if_ver = mp1_rreg(dev, regMP1_SMN_C2PMSG_82);
+            pr_info("gpu_smu: GetDriverIfVersion = 0x%08x\n", if_ver);
         } else {
-            pr_info("gpu_smu: IMU already unhalted (bit 0 = 0)\n");
+            pr_warn("gpu_smu: GetDriverIfVersion failed — SMU not responding\n");
+        }
+        ret = gpu_smu_send_msg(dev, PPSMC_MSG_GetSmuVersion, 0);
+        if (ret == 0) {
+            ULONG ver = mp1_rreg(dev, regMP1_SMN_C2PMSG_82);
+            pr_info("gpu_smu: GetSmuVersion = 0x%08x\n", ver);
+        } else {
+            pr_warn("gpu_smu: GetSmuVersion failed — SMU not alive\n");
+            return -1;
         }
     }
 
-    /* If SMU is wedged, skip GetSmuVersion and go directly to EnableAllSmuFeatures.
-     * A wedged SMU won't respond to GetSmuVersion either, so skip the 5s wait. */
-    BOOLEAN alive = FALSE;
-    ULONG smu_version = 0;
-    if (smu_wedged) {
-        pr_warn("gpu_smu: SMU wedged — skipping GetSmuVersion check\n");
-        goto try_enable_smu_features;
-    }
-
-    /* Edge-detection: after FLR, C2PMSG_66 may hold stale VBIOS value
-     * (e.g. 0x02 = GetSmuVersion). If we write the same value, SMU won't
-     * see a transition. Clear to 0 first. */
-    {
-        ULONG cur_msg = mp1_rreg(dev, regMP1_SMN_C2PMSG_66);
-        pr_info("gpu_smu: C2PMSG_66 current = 0x%08x (before GetSmuVersion)\n", cur_msg);
-        if (cur_msg == PPSMC_MSG_GetSmuVersion) {
-            pr_info("gpu_smu: stale GetSmuVersion in mailbox, clearing for edge detect\n");
-            mp1_wreg(dev, regMP1_SMN_C2PMSG_66, 0);
-            Sleep(1);
-        }
-    }
-
-    /* Use direct MMIO — SMN indirect writes may not trigger SMU interrupt */
-    mp1_wreg_direct(dev, regMP1_SMN_C2PMSG_90, 0);
-    mp1_wreg_direct(dev, regMP1_SMN_C2PMSG_82, 0);
-    mp1_wreg_direct(dev, regMP1_SMN_C2PMSG_66, PPSMC_MSG_GetSmuVersion);
-
-    {
-        DWORD gsv_start = GetTickCount();
-        for (;;) {
-            ULONG resp = mp1_rreg(dev, regMP1_SMN_C2PMSG_90);
-            if (resp != 0) {
-                alive = TRUE;
-                smu_version = mp1_rreg(dev, regMP1_SMN_C2PMSG_82);
-                pr_info("gpu_smu: SMU is alive! version=0x%08x (resp=%u, %u ms)\n",
-                        smu_version, resp,
-                        (unsigned)(GetTickCount() - gsv_start));
-                break;
-            }
-            if (GetTickCount() - gsv_start >= 5000) break;
-            Sleep(10);
-        }
-    }
-
-    if (!alive) {
-        /* Comprehensive SMU mailbox dump for diagnostics */
-        ULONG resp = mp1_rreg(dev, regMP1_SMN_C2PMSG_90);
-        smu_version = mp1_rreg(dev, regMP1_SMN_C2PMSG_82);
-        pr_warn("gpu_smu: SMU not responding after firmware load "
-                "(resp=0x%08x, ver=0x%08x)\n", resp, smu_version);
-
-        /* Read all relevant C2PMSG registers for diagnostics */
-        pr_info("gpu_smu: === SMU mailbox register dump ===\n");
-        pr_info("gpu_smu: C2PMSG_66 (msg)  = 0x%08x (via mp1_base 0x%05x)\n",
-                mp1_rreg(dev, regMP1_SMN_C2PMSG_66), dev->hw.ip.mp1_base);
-        pr_info("gpu_smu: C2PMSG_82 (param)= 0x%08x\n",
-                mp1_rreg(dev, regMP1_SMN_C2PMSG_82));
-        pr_info("gpu_smu: C2PMSG_90 (resp) = 0x%08x\n",
-                mp1_rreg(dev, regMP1_SMN_C2PMSG_90));
-
-        /* Debug mailbox */
-        pr_info("gpu_smu: C2PMSG_75 (dbg msg)   = 0x%08x\n",
-                mp1_rreg(dev, 0x028B));  /* regMP1_SMN_C2PMSG_75 */
-        pr_info("gpu_smu: C2PMSG_53 (dbg param) = 0x%08x\n",
-                mp1_rreg(dev, 0x0275));
-        pr_info("gpu_smu: C2PMSG_54 (dbg resp)  = 0x%08x\n",
-                mp1_rreg(dev, 0x0276));
-
-        /* Try reading from mp1_base1 in case mailbox is there */
-        if (dev->hw.ip.mp1_base1 != 0) {
-            ULONG b1_resp = gpu_smn_rreg(dev,
-                dev->hw.ip.mp1_base1 + regMP1_SMN_C2PMSG_90);
-            ULONG b1_ver = gpu_smn_rreg(dev,
-                dev->hw.ip.mp1_base1 + regMP1_SMN_C2PMSG_82);
-            ULONG b1_msg = gpu_smn_rreg(dev,
-                dev->hw.ip.mp1_base1 + regMP1_SMN_C2PMSG_66);
-            pr_info("gpu_smu: via mp1_base1 (0x%05x): resp=0x%08x "
-                    "ver=0x%08x msg=0x%08x\n",
-                    dev->hw.ip.mp1_base1, b1_resp, b1_ver, b1_msg);
-        }
-
-        /* Check SMU SRAM for alive indicator */
-        {
-            /* MP1_SMN_FW_STATUS at mp1_base + 0x004E (varies by version) */
-            ULONG fw_status = mp1_rreg(dev, 0x004E);
-            pr_info("gpu_smu: MP1_FW_STATUS (0x004E) = 0x%08x\n", fw_status);
-            /* Try a few other potential status registers */
-            ULONG c2p_0 = mp1_rreg(dev, 0x0240);  /* C2PMSG_0 for mp1 */
-            ULONG c2p_33 = mp1_rreg(dev, 0x0261); /* C2PMSG_33 */
-            pr_info("gpu_smu: MP1 C2PMSG_0=0x%08x C2PMSG_33=0x%08x\n",
-                    c2p_0, c2p_33);
-        }
-
-        /* Probe the DEBUG mailbox to check if SMU firmware is alive.
-         * Debug mailbox: C2PMSG_75 (msg), C2PMSG_53 (param), C2PMSG_54 (resp).
-         * msg=1 is believed to be __DEBUGSMC_MSG_GetSmuVersion (safe).
-         * msg=2 is __DEBUGSMC_MSG_Mode1Reset (DANGEROUS — do not use). */
-        {
-            pr_info("gpu_smu: === Probing DEBUG mailbox (msg=1) ===\n");
-            /* Use direct MMIO for debug mailbox too */
-            ULONG dbg_resp_before = mp1_rreg_direct(dev, 0x0276);  /* C2PMSG_54 */
-            pr_info("gpu_smu: debug resp before clear = 0x%08x\n", dbg_resp_before);
-
-            mp1_wreg_direct(dev, 0x0276, 0);  /* Clear debug response */
-            mp1_wreg_direct(dev, 0x0275, 0);  /* Clear debug param */
-            mp1_wreg_direct(dev, 0x028B, 1);  /* Send debug msg=1 (GetSmuVersion?) */
-
-            /* Also try SMN indirect for comparison */
-            mp1_wreg(dev, 0x0276, 0);   /* Clear via SMN */
-            mp1_wreg(dev, 0x0275, 0);
-            mp1_wreg(dev, 0x028B, 1);   /* Send via SMN */
-
-            DWORD dbg_start = GetTickCount();
-            for (;;) {
-                ULONG dr_smn = mp1_rreg(dev, 0x0276);
-                ULONG dr_dir = mp1_rreg_direct(dev, 0x0276);
-                if (dr_smn != 0 || dr_dir != 0) {
-                    ULONG dbg_param = mp1_rreg(dev, 0x0275);
-                    pr_info("gpu_smu: DEBUG mailbox responded! "
-                            "smn_resp=0x%x dir_resp=0x%x param=0x%08x (%u ms)\n",
-                            dr_smn, dr_dir, dbg_param,
-                            (unsigned)(GetTickCount() - dbg_start));
-                    alive = TRUE;  /* SMU is alive on debug channel */
-                    break;
-                }
-                if (GetTickCount() - dbg_start >= 3000) break;
-                Sleep(10);
-            }
-            if (!alive)
-                pr_warn("gpu_smu: DEBUG mailbox also not responding\n");
-        }
-
-        pr_warn("gpu_smu: SMU not responding on normal mailbox — "
-                "will still attempt EnableAllSmuFeatures(FEATURE_PWR_GFX)\n");
-        /* Fall through: try EnableAllSmuFeatures even without GetSmuVersion
-         * response.  The SMU may be in GFXOFF low-power mode where the
-         * normal mailbox is gated, but EnableAllSmuFeatures should wake it.
-         * Skip the SetDriverDramAddr / feature-mask prerequisites — they
-         * also need a responsive mailbox and are not required for the GFX
-         * power-up path (Linux smu_v14_0_2_enable_gfx_features sends
-         * EnableAllSmuFeatures directly without prerequisites). */
-        goto try_enable_smu_features;
-    }
-
-    /* Send SetDriverDramAddr before EnableAllSmuFeatures.
-     * The SMU needs a VRAM buffer for its driver table. Without this,
-     * EnableAllSmuFeatures may hang. (Matches tinygrad AM_SMU.init_hw)
-     *
-     * Read VRAM MC base from MMHUB. Place the 16KB driver table at
-     * VRAM+9MB (beyond the PSP ring region at 5-8MB). */
+    /* Step 2: SetDriverDramAddr (allocate at end of VRAM like amdgpu) */
     {
         ULONG fb_base_reg = mmhub_rreg(dev, regMMMC_VM_FB_LOCATION_BASE);
-        ULONGLONG vram_mc_base = (ULONGLONG)fb_base_reg << 24;
-        ULONGLONG smu_table_mc = vram_mc_base + 0x100000;  /* 1MB offset */
+        ULONG fb_top_reg = mmhub_rreg(dev, regMMMC_VM_FB_LOCATION_TOP);
+        ULONGLONG vram_end = ((ULONGLONG)fb_top_reg << 24) + 0xFFFFFF;
+        /* Place driver table 64KB before end of VRAM (like amdgpu BO alloc) */
+        ULONGLONG smu_table_mc = (vram_end - 0x10000) & ~0xFFFULL;
         ULONG addr_hi = (ULONG)(smu_table_mc >> 32);
         ULONG addr_lo = (ULONG)(smu_table_mc & 0xFFFFFFFF);
-        pr_info("gpu_smu: SetDriverDramAddr = 0x%08x_%08x (vram_base=0x%llx)\n",
-                addr_hi, addr_lo, (unsigned long long)vram_mc_base);
-
-        int ret = gpu_smu_send_msg(dev, PPSMC_MSG_SetDriverDramAddrHigh, addr_hi);
-        if (ret != 0) {
-            pr_warn("gpu_smu: SetDriverDramAddrHigh failed\n");
-        }
-        ret = gpu_smu_send_msg(dev, PPSMC_MSG_SetDriverDramAddrLow, addr_lo);
-        if (ret != 0) {
-            pr_warn("gpu_smu: SetDriverDramAddrLow failed\n");
-        }
+        pr_info("gpu_smu: SetDriverDramAddr = 0x%08x_%08x (near VRAM end)\n",
+                addr_hi, addr_lo);
+        gpu_smu_send_msg(dev, PPSMC_MSG_SetDriverDramAddrHigh, addr_hi);
+        gpu_smu_send_msg(dev, PPSMC_MSG_SetDriverDramAddrLow, addr_lo);
     }
 
-    /* SetToolsDramAddr: optional tools table, send 0 (not used for compute).
-     * Linux smu_v14_0_set_tool_table_location() sends this as part of
-     * smu_v14_0_init_smc_tables().  SMU firmware may expect it before
-     * UseDefaultPPTable/EnableAllSmuFeatures. */
+    /* Step 3: SetToolsDramAddr */
     {
-        int ret = gpu_smu_send_msg(dev, PPSMC_MSG_SetToolsDramAddrHigh, 0);
-        if (ret != 0)
-            pr_warn("gpu_smu: SetToolsDramAddrHigh failed\n");
-        ret = gpu_smu_send_msg(dev, PPSMC_MSG_SetToolsDramAddrLow, 0);
-        if (ret != 0)
-            pr_warn("gpu_smu: SetToolsDramAddrLow failed\n");
-        else
-            pr_info("gpu_smu: SetToolsDramAddr OK (tools addr=0)\n");
+        ULONG fb_base_reg = mmhub_rreg(dev, regMMMC_VM_FB_LOCATION_BASE);
+        ULONG fb_top_reg = mmhub_rreg(dev, regMMMC_VM_FB_LOCATION_TOP);
+        ULONGLONG vram_end = ((ULONGLONG)fb_top_reg << 24) + 0xFFFFFF;
+        ULONGLONG tools_mc = (vram_end - 0x20000) & ~0xFFFULL;
+        gpu_smu_send_msg(dev, PPSMC_MSG_SetToolsDramAddrHigh,
+                         (ULONG)(tools_mc >> 32));
+        gpu_smu_send_msg(dev, PPSMC_MSG_SetToolsDramAddrLow,
+                         (ULONG)(tools_mc & 0xFFFFFFFF));
     }
 
-    /* === MINIMAL TINYGRAD APPROACH ===
-     *
-     * Tinygrad does ONLY: SetDriverDramAddr + EnableAllSmuFeatures(0).
-     * No pptable round-trip, no SetAllowedFeaturesMask, no RunDcBtc,
-     * no DramLogSetDramAddr, no DisallowGfxOff. The SMU uses its
-     * internal default PPTable from the firmware .bin file.
-     *
-     * All previous attempts with intermediate steps (UseDefaultPPTable,
-     * TransferTableDram2Smu, SetAllowedFeaturesMask) failed. Let's try
-     * the absolute minimum that works on bare metal. */
-    pr_info("gpu_smu: === MINIMAL INIT: SetDriverDramAddr + EnableAllSmuFeatures(0) ===\n");
-    /* Go directly to EnableAllSmuFeatures — skip all intermediate steps.
-     * tinygrad proves: only SetDriverDramAddr + EnableAllSmuFeatures(0)
-     * are needed. The SMU uses its internal default PPTable. */
+    /* Step 4: Smu2Dram(WATERMARKS=1) — amdgpu reads watermarks before EnableAll */
+    gpu_smu_send_msg(dev, PPSMC_MSG_TransferTableSmu2Dram, 1);
 
-try_enable_smu_features:
-    /* Check if EnableAllSmuFeatures should be skipped.
-     * HSAKMT_SKIP_ENABLE_SMU_FEATURES=1 skips this to avoid wedging
-     * the SMU mailbox (the command never responds on VFIO).
-     * Also skip if SMU is detected as wedged (saves the full timeout wait). */
-    if (smu_wedged) {
-        pr_warn("gpu_smu: SMU wedged — skipping EnableAllSmuFeatures "
-                "(physical power cycle needed to recover SMU mailbox)\n");
-        dev->hw.gfxoff_disabled = TRUE;
-        return 0;
+    /* Step 5: RunDcBtc */
+    {
+        int ret = gpu_smu_send_msg(dev, PPSMC_MSG_RunDcBtc, 0);
+        pr_info("gpu_smu: RunDcBtc %s\n", ret == 0 ? "OK" : "failed");
     }
+
+    /* Step 6: OverridePcieParameters (amdgpu sends 0x00020306) */
+    gpu_smu_send_msg(dev, 0x20, 0x00020306);
+
+    /* Step 7: EnableAllSmuFeatures(0) — the critical message */
+    pr_info("gpu_smu: EnableAllSmuFeatures(param=0)...\n");
+
+    /* SKIP_ENABLE check */
     {
         char skip_enable[32] = {};
         GetEnvironmentVariableA("HSAKMT_SKIP_ENABLE_SMU_FEATURES",
             skip_enable, sizeof(skip_enable));
         if (skip_enable[0] == '1') {
-            pr_info("gpu_smu: EnableAllSmuFeatures skipped "
-                    "(HSAKMT_SKIP_ENABLE_SMU_FEATURES=1)\n");
+            pr_info("gpu_smu: EnableAllSmuFeatures skipped\n");
             return 0;
         }
     }
 
-    /* Send EnableAllSmuFeatures to trigger RLC AUTOLOAD.
+    /* NOTE: removed all the old diagnostic code:
+     * - DisallowGfxOff probes (corrupt SMU state)
+     * - IMU unhalt (not needed before EnableAll — amdgpu doesn't do this)
+     * - FGCG override (not needed)
+     * - CPC_PSP_DEBUG checks (not needed)
+     * - Individual EnableSmuFeatures (partial enables corrupt state)
+     * - SetAllowedFeaturesMask (rejected without pptable)
+     * - TransferTableDram2Smu attempts (locked after first write)
+     * - GetRunningSmuFeatures (not needed before EnableAll)
+     * - Debug mailbox probes
+     * This matches the EXACT amdgpu message sequence captured via sniffer.
      *
-     * RLC will not distribute compute firmware to MEC/CPC until SMU sets
-     * the FEATURE_PWR_GFX flag — which only happens after this message.
-     *
-     * Timeout strategy:
-     *   cpc_was_powered=TRUE (VBIOS-preserve): GFX already on, SMU only needs
-     *     to set internal feature flags (no PMIC voltage raise) → fast, 30s max.
-     *   cpc_was_powered=FALSE (Mode1-reset): SMU must physically power up GFX
-     *     via PMIC, may take up to 120s on VFIO without response.
-     *
-     * On VFIO, resp=0 is expected even when the command actually works
-     * (SMU performs the action but doesn't write the response register).
-     * DO NOT check GC registers during this wait in Mode1-reset mode —
-     * at ~80s the GFX domain power transition freezes SMN access. */
-    /* Linux sequence: EnableAllSmuFeatures with param=0 (enable ALL allowed features).
-     * The Linux driver (smu_v14_0_2_ppt.c) calls smu_system_features_control(true)
-     * which sends EnableAllSmuFeatures with param=0. The combo pptable embedded
-     * in the SMU firmware has the board-specific PMIC/I2C addresses.
-     *
-     * Previous attempts used param=FEATURE_PWR_GFX(4) which only enables GFX.
-     * The Linux driver enables ALL features at once. */
-    pr_info("gpu_smu: EnableAllSmuFeatures(param=0) — minimal tinygrad path...\n");
+     * IMPORTANT: The old code was OBSOLETED because:
+     * 1. amdgpu NEVER sends DisallowGfxOff before EnableAllSmuFeatures
+     * 2. amdgpu NEVER sends SetAllowedFeaturesMask on re-init
+     * 3. amdgpu NEVER sends Dram2Smu on re-init (pptable in TMR)
+     * 4. Individual EnableSmuFeaturesLow/High corrupt the SMU state
+     * 5. Extra messages cause EnableAllSmuFeatures to hang */
+
     {
-        {
-            ULONG cur = mp1_rreg(dev, regMP1_SMN_C2PMSG_66);
-            if (cur == PPSMC_MSG_EnableAllSmuFeatures) {
-                mp1_wreg(dev, regMP1_SMN_C2PMSG_66, 0);
-                Sleep(1);
-            }
-        }
+        /* Send EnableAllSmuFeatures(0) — no extra messages before this. */
         mp1_wreg_direct(dev, regMP1_SMN_C2PMSG_90, 0);
         mp1_wreg_direct(dev, regMP1_SMN_C2PMSG_82, 0);
         mp1_wreg_direct(dev, regMP1_SMN_C2PMSG_66, PPSMC_MSG_EnableAllSmuFeatures);
 
         BOOLEAN success = FALSE;
-        DWORD timeout_ms = 300000;  /* 5 min — VFIO may be very slow */
+        DWORD timeout_ms = 120000;
         DWORD start_tick = GetTickCount();
         DWORD last_print_s = 0;
         for (;;) {
@@ -4906,20 +4585,11 @@ try_enable_smu_features:
         }
         if (!success) {
             DWORD elapsed = GetTickCount() - start_tick;
-            pr_info("gpu_smu: EnableAllSmuFeatures timed out (%u ms) — "
-                    "%s, proceeding to AUTOLOAD\n",
-                    (unsigned)elapsed,
-                    cpc_was_powered ? "GFX was already powered, SMU may have set flags"
-                                    : "assuming GFX power-up in progress");
-            ULONG msg_after = mp1_rreg(dev, regMP1_SMN_C2PMSG_66);
-            ULONG resp_after = mp1_rreg(dev, regMP1_SMN_C2PMSG_90);
-            pr_info("gpu_smu: mailbox state after: msg=0x%x resp=0x%x\n",
-                    msg_after, resp_after);
+            pr_info("gpu_smu: EnableAllSmuFeatures timed out (%u ms)\n",
+                    (unsigned)elapsed);
             dev->hw.gfxoff_disabled = TRUE;
         }
     }
-
-skip_enable_all:
     return 0;
 }
 
