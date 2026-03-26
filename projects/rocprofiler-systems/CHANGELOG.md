@@ -6,6 +6,10 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 ## ROCm Systems Profiler 1.6.0 for ROCm 7.13.0
 
+### Added
+
+- KFD (Kernel Fusion Driver) event tracing support to capture page faults, page migrations, queue evictions, GPU unmap events, and dropped events via `ROCPROFSYS_ROCM_DOMAINS=kfd_events`.
+
 ### Changed
 
 - `rocprof-sys-avail` no longer queries GPU devices or hardware counters unless `--hw-counters` or `--all` is requested, reducing startup time and allowing settings/component queries in environments without GPU/ROCm.
