@@ -80,8 +80,9 @@ is_colltrace       = 1 if sys.argv[3] == "ON" else 0
 is_msccl_kernels   = 1 if sys.argv[4] == "ON" else 0
 is_local_arch_only = 1 if sys.argv[5] == "ON" else 0
 is_rocshmem        = 1 if sys.argv[6] == "ON" else 0
+is_split_compile   = 1 if sys.argv[7] == "ON" else 0
 
-func_pattern = sys.argv[7:8]
+func_pattern = sys.argv[8:9]
 
 if func_pattern and func_pattern[0]:
   func_pattern = func_pattern[0]
@@ -539,10 +540,20 @@ with open(os.path.join(gensrc, "host_table.cpp"), "w") as f:
       out(f'  {{{key}, {fn_id}}}, {comment}\n')
   out("};\n")
 
-# Maps to .cu filename which implements this func. The only constraint is that
+# Maps to .cpp filename which implements this func. The only constraint is that
 # "coll" is reflected in the name: formally that no two funcs having different
 # coll's map to the same filename.
 def impl_filename(coll, algo, proto, redop, ty, acc, pipeline, unroll):
+  if is_split_compile:
+    return "%s.cpp" % paste("_",
+      coll_camel_to_lower[coll],
+      algo.lower() if algo else None,
+      proto.lower() if proto else None,
+      redop.lower() if redop else None,
+      ty,
+      "acc" + acc if acc != "0" else None,
+      "pipe" + pipeline if pipeline != "0" else None,
+      "u" + unroll)
   return "%s.cpp" % paste("_", coll_camel_to_lower[coll], redop and redop.lower(), ty)
 
 # Partition the functions and kernels to the .cu filenames. The partition is

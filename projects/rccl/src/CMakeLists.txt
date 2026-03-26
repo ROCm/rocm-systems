@@ -418,7 +418,7 @@ endif()
 
 # Execute the python script to generate required collective functions
 execute_process(
-    COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/src/device/generate.py ${GEN_DIR} ${IFC_ENABLED} ${COLLTRACE} ${ENABLE_MSCCL_KERNEL} ${BUILD_LOCAL_GPU_TARGET_ONLY} ${ENABLE_ROCSHMEM} ${ONLY_FUNCS}
+    COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/src/device/generate.py ${GEN_DIR} ${IFC_ENABLED} ${COLLTRACE} ${ENABLE_MSCCL_KERNEL} ${BUILD_LOCAL_GPU_TARGET_ONLY} ${ENABLE_ROCSHMEM} ${ENABLE_SPLIT_DEVICE_COMPILE} ${ONLY_FUNCS}
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
     RESULT_VARIABLE gen_py_result
     ERROR_VARIABLE gen_py_error
@@ -459,7 +459,7 @@ if(ENABLE_SPLIT_DEVICE_COMPILE)
 endif()
 
 # Find the generated files in the output directory
-file(GLOB_RECURSE GENERATED_FILES "${GEN_DIR}/*")
+file(GLOB GENERATED_FILES "${GEN_DIR}/*")
 
 # Append all found generated files to the list
 foreach(file ${GENERATED_FILES})
@@ -1080,8 +1080,9 @@ if(ENABLE_SPLIT_DEVICE_COMPILE)
     BUNDLER_HOST_TARGET   ${_bundler_host_target}
   )
 
-  add_dependencies(rccl rccl_device_objects)
   add_dependencies(rccl_device_objects hipify_all)
 
+  # Only the final link needs the fat object; host .o compiles are independent.
+  set_property(TARGET rccl APPEND PROPERTY LINK_DEPENDS ${DEVICE_FAT_OBJECTS})
   target_link_options(rccl PRIVATE ${DEVICE_FAT_OBJECTS})
 endif()
