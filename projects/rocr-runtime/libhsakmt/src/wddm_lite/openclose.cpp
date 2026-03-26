@@ -381,6 +381,24 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void)
                     }
                 }
 
+                /* Step 2b: Mode1 reset NOW (SOS should be alive).
+                 * amdgpu ALWAYS does Mode1 reset. It clears all hardware to
+                 * a known state. Without Mode1, VBIOS hardware state persists
+                 * and conflicts with fresh firmware (EnableAllSmuFeatures hangs).
+                 * The old code only did Mode1 if SOS was already alive at boot.
+                 * We now do Mode1 after loading SOS, matching amdgpu's behavior. */
+                if (g_wddm_lite_dev.hw.psp_sos_alive && !did_mode1_reset) {
+                    char skip_reset[32] = {};
+                    GetEnvironmentVariableA("HSAKMT_SKIP_MODE1_RESET",
+                        skip_reset, sizeof(skip_reset));
+                    if (skip_reset[0] != '1') {
+                        pr_info("wddm_lite: SOS now alive — performing Mode1 "
+                                "hardware reset (matching amdgpu)\n");
+                        gpu_smu_mode1_reset(&g_wddm_lite_dev);
+                        did_mode1_reset = TRUE;
+                    }
+                }
+
                 /* Step 3: GMC init */
                 {
                     char skip_gmc[32] = {};
@@ -428,6 +446,13 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void)
                             pr_warn("wddm_lite: firmware staging failed\n");
                         } else {
                             fw_staged = TRUE;
+                            /* IMMEDIATELY send SMU init after firmware load.
+                             * amdgpu does EnableAllSmuFeatures ~100ms after
+                             * LOAD_IP_FW. Our old code had GMC/IH init in
+                             * between (seconds of delay). The SMU might go
+                             * to sleep if not contacted quickly. */
+                            pr_info("wddm_lite: SMU init IMMEDIATELY after FW load\n");
+                            gpu_smu_enable_features(&g_wddm_lite_dev);
                         }
                     }
                 }
@@ -450,11 +475,9 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void)
                         pr_warn("wddm_lite: AUTOLOAD_RLC command failed\n");
                 }
 
-                /* Step 7: SMU features — after AUTOLOAD.
-                 * amdgpu's sequence: AUTOLOAD → GMC → SMU init.
-                 * EnableAllSmuFeatures(0) should now work because AUTOLOAD
-                 * activated the pptable context in the SMU. */
-                if (g_wddm_lite_dev.hw.psp_sos_alive && skip_fw[0] != '1') {
+                /* Step 7: SMU features — already called immediately after FW load.
+                 * Skip here to avoid double-sending EnableAllSmuFeatures. */
+                if (0 && g_wddm_lite_dev.hw.psp_sos_alive && skip_fw[0] != '1') {
                     gpu_smu_enable_features(&g_wddm_lite_dev);
                 } else if (skip_fw[0] == '1') {
                     pr_info("wddm_lite: SMU enable_features skipped (SKIP_FW_LOAD)\n");
