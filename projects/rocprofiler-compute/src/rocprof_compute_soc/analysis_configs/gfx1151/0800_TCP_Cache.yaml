@@ -22,14 +22,14 @@ Panel Config:
         max: Max
         unit: Unit
       metric:
+        # TCP_GATE_EN2_sum = sum of TCP core-clock-on cycles over all TCP instances (reduce).
+        # GRBM_GUI_ACTIVE is one GPU-level count; compare to GUI × NUM_TCP with NUM_TCP ≈ WGP
+        # count = max(1, CU/2) on RDNA3.x (one TCP per WGP, 2 CUs per WGP). AVG/MIN/MAX apply
+        # to the per-sample ratio (same pattern as other utilization rows).
         TCP Busy:
-          # To be fixed: Restore when TCP_GATE_EN2 vs GRBM_GUI_ACTIVE ratio is validated for gfx1151.
-          # avg: AVG((100 * TCP_GATE_EN2 / GRBM_GUI_ACTIVE) if (GRBM_GUI_ACTIVE != 0) else None)
-          # min: MIN((100 * TCP_GATE_EN2 / GRBM_GUI_ACTIVE) if (GRBM_GUI_ACTIVE != 0) else None)
-          # max: MAX((100 * TCP_GATE_EN2 / GRBM_GUI_ACTIVE) if (GRBM_GUI_ACTIVE != 0) else None)
-          avg: None
-          min: None
-          max: None
+          avg: AVG((100 * TCP_GATE_EN2_sum / (GRBM_GUI_ACTIVE * MAX(1, TO_INT($cu_per_gpu / 2)))) if ((GRBM_GUI_ACTIVE * MAX(1, TO_INT($cu_per_gpu / 2))) != 0) else None)
+          min: MIN((100 * TCP_GATE_EN2_sum / (GRBM_GUI_ACTIVE * MAX(1, TO_INT($cu_per_gpu / 2)))) if ((GRBM_GUI_ACTIVE * MAX(1, TO_INT($cu_per_gpu / 2))) != 0) else None)
+          max: MAX((100 * TCP_GATE_EN2_sum / (GRBM_GUI_ACTIVE * MAX(1, TO_INT($cu_per_gpu / 2)))) if ((GRBM_GUI_ACTIVE * MAX(1, TO_INT($cu_per_gpu / 2))) != 0) else None)
           unit: Percent
 
   # =========================================================================
@@ -151,9 +151,11 @@ Panel Config:
 
   metrics_description:
     TCP Busy: |-
-      To be fixed: Disabled — Avg / Min / Max are None until the utilization formula is
-      validated for gfx1151. Intended meaning: TCP busy as a percent of GRBM GUI-active
-      cycles (100 * TCP_GATE_EN2 / GRBM_GUI_ACTIVE when GRBM_GUI_ACTIVE != 0).
+      Estimated TCP utilization: 100 × TCP_GATE_EN2_sum / (GRBM_GUI_ACTIVE × NUM_TCP).
+      TCP_GATE_EN2_sum aggregates all TCP blocks; GRBM_GUI_ACTIVE is not multiplied per
+      instance, so NUM_TCP scales the GUI-active budget. On RDNA3.5 (gfx1151) we take
+      NUM_TCP = max(1, ⌊$cu_per_gpu / 2⌋) as one TCP per WGP (2 CUs per WGP). If a part
+      differs, override via sysinfo / specs so $cu_per_gpu matches active CUs.
     Total Requests: |-
       Total number of requests to the TCP cache including reads, writes, and atomics.
     Read Requests: |-
