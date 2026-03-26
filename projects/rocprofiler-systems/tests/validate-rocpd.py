@@ -396,11 +396,11 @@ if __name__ == "__main__":
 
         gpus = get_available_metrics()
         available_metrics = set()
-        from check_amd_smi_metrics import _collect_metric_names
+        from check_amd_smi_metrics import collect_metric_names
 
         print("\n--- Platform GPU Metric Availability ---")
         for gpu in gpus:
-            gpu_metrics = _collect_metric_names(gpu)
+            gpu_metrics = collect_metric_names(gpu)
             available_metrics |= gpu_metrics
             print(f"GPU {gpu.gpu_id}:")
             print(

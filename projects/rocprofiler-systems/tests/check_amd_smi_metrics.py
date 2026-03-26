@@ -153,20 +153,25 @@ def run_amd_smi_monitor() -> list[dict]:
     """Run 'amd-smi monitor --json -w 1 -i 1' and return parsed JSON.
 
     Used only for mem_usage detection (C++ uses separate get_memory_usage() API).
+    Returns [] on failure (graceful fallback).
     """
-    stdout = _run_command(["amd-smi", "monitor", "-w", "1", "-i", "1", "--json"])
+    stdout = _run_command(
+        ["amd-smi", "monitor", "-w", "1", "-i", "1", "--json"], exit_on_failure=False
+    )
+    if stdout is None:
+        return []
 
     # Strip the leading info line ("'CTRL' + 'C' to stop watching output:")
     json_start = stdout.find("[")
     if json_start == -1:
         print("No JSON array found in amd-smi monitor output", file=sys.stderr)
-        sys.exit(1)
+        return []
 
     try:
         return json.loads(stdout[json_start:])
     except json.JSONDecodeError as exc:
         print(f"Failed to parse amd-smi monitor JSON: {exc}", file=sys.stderr)
-        sys.exit(1)
+        return []
 
 
 # ---------------------------------------------------------------------------
@@ -393,8 +398,8 @@ _FINE_GRAINED_NAMES = (
 )
 
 # Note: vcn_activity and jpeg_activity are handled separately in
-# _collect_metric_names() because they can be sourced from two C++ paths
-# (device-level for Radeon vs per-XCP for Instict).
+# collect_metric_names() because they can be sourced from two C++ paths
+# (device-level Radeon vs per-XCP MI300).
 _COARSE_NAMES = (
     "busy",
     "temp",
@@ -405,11 +410,24 @@ _COARSE_NAMES = (
 )
 
 
+def _build_gpu_list_from_metric(gpu_data: list[dict]) -> list[GpuMetricAvailability]:
+    """Build GPU list from amd-smi metric output (fallback when monitor fails)."""
+    return [
+        GpuMetricAvailability(gpu_id=entry.get("gpu", i))
+        for i, entry in enumerate(gpu_data)
+    ]
+
+
 def get_available_metrics() -> list[GpuMetricAvailability]:
     """Detect available metrics on all GPUs. Importable entry point."""
     # 1. Get GPU list + mem_usage from monitor
     monitor_data = run_amd_smi_monitor()
     gpus = parse_monitor_json(monitor_data)
+
+    # Fallback: if monitor failed, build GPU list from metric -u output
+    if not gpus:
+        metric_data = _run_amd_smi_metric_json(["-u"])
+        gpus = _build_gpu_list_from_metric(metric_data)
 
     # 2. Fine-grained detection via amd-smi metric (each gracefully falls back)
     detect_usage_metrics(gpus)
@@ -431,7 +449,7 @@ def get_available_metrics() -> list[GpuMetricAvailability]:
     return gpus
 
 
-def _collect_metric_names(gpu: GpuMetricAvailability) -> set[str]:
+def collect_metric_names(gpu: GpuMetricAvailability) -> set[str]:
     """Collect all available metric names (fine-grained + coarse) for a GPU."""
     metrics: set[str] = set()
 
@@ -459,14 +477,14 @@ def get_available_metrics_set() -> set[str]:
     gpus = get_available_metrics()
     metrics: set[str] = set()
     for gpu in gpus:
-        metrics |= _collect_metric_names(gpu)
+        metrics |= collect_metric_names(gpu)
     return metrics
 
 
 def get_available_metrics_per_gpu() -> dict[int, set[str]]:
     """Return a dict mapping GPU ID to its available metric names."""
     gpus = get_available_metrics()
-    return {gpu.gpu_id: _collect_metric_names(gpu) for gpu in gpus}
+    return {gpu.gpu_id: collect_metric_names(gpu) for gpu in gpus}
 
 
 # ---------------------------------------------------------------------------
