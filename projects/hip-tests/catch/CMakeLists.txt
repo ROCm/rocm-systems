@@ -69,11 +69,11 @@ if(UNIX)
   find_program(GXX_EXEC g++)
 else() # Win32
   find_program(LLVM_RC_EXEC NAMES llvm-rc llvm-rc.exe
-                 PATHS ${_hip_root} ${_hip_root}/lc/bin)
+                 PATHS ${_hip_root} ${_hip_root}/lc/bin ${_hip_root}/../lc/bin)
 endif()
 
 find_program(CLANG_CPP_EXEC NAMES clang-cpp clang-cpp.exe
-             PATHS ${_hip_root} ${_hip_root}/lc/bin ${_hip_root}/llvm/bin)
+             PATHS ${_hip_root} ${_hip_root}/lc/bin ${_hip_root}/../lc/bin ${_hip_root}/llvm/bin)
 message(STATUS "HIP Lib path: ${HIP_LIB_INSTALL_DIR}")
 
 # used by clang to find hip; derived from the find_package(hip) result
