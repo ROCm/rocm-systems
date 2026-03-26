@@ -92,7 +92,7 @@ constexpr int rcclShmemDynamicSize(int cudaArch = NCCL_CUDA_ARCH, int WarpSize =
 }
 
 NCCL_PARAM(L1SharedMemoryCarveout, "L1_SHARED_MEMORY_CARVEOUT", 0);
-NCCL_PARAM(RootedCollBuffSize, "ROOTED_COLL_BUFFSIZE", 2097152);
+RCCL_PARAM(RootedCollBuffSize, "ROOTED_COLL_BUFFSIZE", 2097152);
 // Returns maximum kernel stack size of all CUDA kernels
 ncclResult_t ncclInitKernelsForDevice(int cudaArch, int maxSharedMem, size_t* maxStackSize) {
   constexpr int KernelCount = sizeof(ncclKerns)/sizeof(ncclKerns[0]);
