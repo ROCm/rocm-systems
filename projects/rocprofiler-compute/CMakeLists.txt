@@ -93,7 +93,10 @@ if(NOT STANDALONEBINARY)
     message(STATUS "Detecting Python interpreter...")
     find_package(Python3 3.8 COMPONENTS Interpreter REQUIRED)
     message(STATUS "Python ${Python3_VERSION} found")
-    message(STATUS "Note: Profile mode uses stdlib only. Analyze mode deps checked at runtime.")
+    message(
+        STATUS
+        "Note: Profile mode uses stdlib only. Analyze mode deps checked at runtime."
+    )
 endif()
 
 # ----------------------
@@ -256,9 +259,8 @@ if(NOT STANDALONEBINARY)
     add_test(
         NAME test_import_guard
         COMMAND
-            ${PYTHON_TEST_COMMAND} -m pytest
-            --junitxml=tests/test_import_guard.xml ${COV_OPTION}
-            tests/test_import_guard.py ${WORKING_DIR_OPTION}
+            ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_import_guard.xml
+            ${COV_OPTION} tests/test_import_guard.py ${WORKING_DIR_OPTION}
     )
 endif()
 
