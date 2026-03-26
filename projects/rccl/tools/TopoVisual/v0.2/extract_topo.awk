@@ -139,8 +139,10 @@ BEGIN {
       collnet_conn[rank "," chan]=0
     else if($col_p4=="[send]")
       collnet_conn[rank "," chan]=1
-    else
-      printf "Error!\n"
+    else {
+      printf "Error: unexpected CollNet direction '%s' at line %d: %s\n", $col_p4, NR, $0 > "/dev/stderr"
+      exit 1
+    }
     collnet_conn_type[rank "," chan]=$col_p6
     if(chan>max_collnet)
       max_collnet=chan
