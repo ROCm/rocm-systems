@@ -9,6 +9,7 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 ### Changed
 
 - `rocprof-sys-avail` no longer queries GPU devices or hardware counters unless `--hw-counters` or `--all` is requested, reducing startup time and allowing settings/component queries in environments without GPU/ROCm.
+- Testing infrastructure migrated from CMake-based CTests to pytest. See `tests/README.md`.
 
 ## ROCm Systems Profiler 1.5.0 for ROCm 7.12.0
 
