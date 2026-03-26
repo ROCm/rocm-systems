@@ -94,7 +94,18 @@ class TestROCTx(RocprofsysTest):
 
     @pytest.mark.timeout(120)
     @pytest.mark.parametrize(
-        "mode", ["baseline", "binary_rewrite", "sys_run", "runtime_instrument"]
+        "mode",
+        [
+            "baseline",
+            "binary_rewrite",
+            "sys_run",
+            pytest.param(
+                "runtime_instrument",
+                marks=pytest.mark.ci_disable(
+                    "all"
+                ),  # TODO: Remove once TheRock switches to CTest
+            ),
+        ],
     )
     def test(self, mode, roctx_env):
         result = self.run_test(
