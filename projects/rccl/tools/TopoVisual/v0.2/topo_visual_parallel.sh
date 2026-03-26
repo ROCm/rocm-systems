@@ -106,8 +106,6 @@ chmod +x "$TMPDIR/render.sh"
 # Find all DOT files and render in parallel
 find "$TMPDIR" -name "*.dot" | xargs -P "$JOBS" -I {} "$TMPDIR/render.sh" {}
 
-RENDER_TIME=$(date +%s.%N)
-
 # Step 3: Output results
 echo "Step 3/3: Generating output..."
 
