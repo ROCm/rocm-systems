@@ -181,7 +181,7 @@ get_perfetto_track(CategoryT, FuncT&& _desc_generator, Args&&... _args)
     // overhead of generating string during releases
 #if defined(ROCPROFSYS_CI) && ROCPROFSYS_CI > 0
     auto _name = std::forward<FuncT>(_desc_generator)(std::forward<Args>(_args)...);
-    if(get_is_continuous_integration() && _track_uuids.at(_uuid) != _name)
+    if(_track_uuids.at(_uuid) != _name)
     {
         throw std::runtime_error(
             fmt::format("Error! Multiple invocations of UUID {} produced different "

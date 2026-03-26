@@ -68,7 +68,7 @@ set_state(State _n)
                   std::to_string(_n));
     }
     // state should always be increased, not decreased
-    if(get_is_continuous_integration() && _n < get_state())
+    if(_n < get_state())
     {
         throw std::runtime_error(
             fmt::format("State is being assigned to a lesser value :: {} -> {}",

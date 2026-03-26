@@ -128,7 +128,7 @@ stop()
 
     auto& tracing_session = get_perfetto_session();
 
-    if(get_is_continuous_integration() && tracing_session == nullptr)
+    if(tracing_session == nullptr)
     {
         throw std::runtime_error("Null pointer to the tracing session");
     }
@@ -179,7 +179,7 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error,
             auto _fnum_read = ::fread(_data.data(), sizeof(char), _fnum_elem, _fdata);
             ::fclose(_fdata);
 
-            if(get_is_continuous_integration() && _fnum_read != _fnum_elem)
+            if(_fnum_read != _fnum_elem)
             {
                 throw std::runtime_error(fmt::format(
                     "read {} elements from perfetto trace file '{}'. Expected {}",

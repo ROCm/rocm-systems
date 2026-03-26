@@ -61,7 +61,7 @@ pthread_mutex_gotcha::get_hashes()
                 LOG_WARNING("pthread_mutex_gotcha tool id at index {} was empty!", i);
             }
 
-            if(get_is_continuous_integration() && (_id.empty() || _init.at(i) == 0))
+            if(_id.empty() || _init.at(i) == 0)
             {
                 LOG_CRITICAL("pthread_mutex_gotcha tool id at index {} has no hash value",
                              i);

@@ -59,7 +59,7 @@ struct comm_rank_data
 
     friend bool operator>(const comm_rank_data& _lhs, const comm_rank_data& _rhs)
     {
-        if(get_is_continuous_integration() && !_lhs.updated() && !_rhs.updated())
+        if(!_lhs.updated() && !_rhs.updated())
         {
             throw std::runtime_error("Error! Comparing rank data that is not updated");
         }
