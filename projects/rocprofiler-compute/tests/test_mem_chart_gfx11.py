@@ -389,7 +389,7 @@ class TestGetSampleMetrics:
         assert "GL2C Utilization" in metrics
 
         # Check for hit rate metrics
-        assert "TCP Hit Rate" in metrics
+        assert "TCP Read Hit Rate" in metrics
         assert "GL1C Hit Rate" in metrics
         assert "GL2C Hit Rate" in metrics
 
@@ -467,10 +467,10 @@ class TestPlotMemChart:
 
     def test_normalize_mem_chart_metrics_flat_ordered(self):
         """Metrics are flattened to panel YAML order; extras dropped; missing None."""
-        raw = {"TCP Hit Rate": 1.0, "noise_key": 99}
+        raw = {"TCP Read Hit Rate": 1.0, "noise_key": 99}
         norm = mem_chart_gfx11.normalize_mem_chart_metrics(raw)
         assert list(norm.keys()) == list(mem_chart_gfx11.MEM_CHART_PANEL_METRIC_KEYS)
-        assert norm["TCP Hit Rate"] == 1.0
+        assert norm["TCP Read Hit Rate"] == 1.0
         assert "noise_key" not in norm
         assert norm["ICache Requests"] is None
 
