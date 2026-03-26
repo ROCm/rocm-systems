@@ -1020,10 +1020,20 @@ static ncclResult_t ncclNetGetDeviceHandle(ncclNetDeviceType type, int version, 
   return ncclSuccess;
 }
 
+static inline bool isAinicOrANPPlugin(struct ncclProxyState* proxyState)
+{
+  const char *anp_name = "RCCL-ANP";
+  if (rcclUseAinic()) return true;
+  if ((proxyState->ncclNet->name)
+       && (strcmp(anp_name, proxyState->ncclNet->name) == 0)) return true;
+  return false;
+}
+
+
 static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, struct ncclProxyState* proxyState, void* reqBuff, int reqSize, void* respBuff, int respSize, int* done) {
   ncclNet_ctxt_t ncclNetCtxt = {};
   struct sendNetResources* resources = (struct sendNetResources*)(connection->transportResources);
-  bool rcclAinicRoce = rcclUseAinic();
+  bool rcclAinicRoce = isAinicOrANPPlugin(proxyState);
   if (reqSize != sizeof(netSendConnectArgs)) return ncclInternalError;
   ncclResult_t ret = ncclSuccess;
   netSendConnectArgs* req = (netSendConnectArgs*) reqBuff;
@@ -1245,7 +1255,7 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
   resources->tpRemoteProxyRank = req->proxyRank;
   ncclResult_t ret = ncclSuccess;
   ncclNet_ctxt_t ncclNetCtxt = {};
-  bool rcclAinicRoce = rcclUseAinic();
+  bool rcclAinicRoce = isAinicOrANPPlugin(proxyState);
 
   setNetAttrs(proxyState, &req->netAttr);
 
