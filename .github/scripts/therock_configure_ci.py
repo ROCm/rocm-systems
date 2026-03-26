@@ -241,7 +241,12 @@ def retrieve_projects(args):
         config = project_map.get(project)
         if not config:
             continue
-        flags = [f.strip() for f in config.get("cmake_options", "").split()]
+        cmake_options = config.get("cmake_options", [])
+        # Handle both array and string formats for backwards compatibility
+        if isinstance(cmake_options, str):
+            flags = [f.strip() for f in cmake_options.split()]
+        else:
+            flags = cmake_options
         if "-DTHEROCK_ENABLE_ALL=ON" in flags:
             enable_all = True
         merged_flags.update(flags)
@@ -252,6 +257,8 @@ def retrieve_projects(args):
         final_flags = "-DTHEROCK_ENABLE_ALL=ON"
     else:
         final_flags = " ".join(sorted(merged_flags))
+    # Always append -DTHEROCK_ENABLE_CORE=ON as a default at the end
+    final_flags += " -DTHEROCK_ENABLE_CORE=ON"
 
     return [
         {
