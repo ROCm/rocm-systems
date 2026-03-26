@@ -33,7 +33,8 @@ USAGE:
 
 API:
     normalize_mem_chart_metrics(metric_dict) -> flat ordered dict for UIs
-    plot_mem_chart(arch, normal_unit, metric_dict) -> str
+    plot_mem_chart(..., *, chart_title=...) -> str
+    format_mem_chart_heading(normal_unit, *, panel_id=300, section_label=...) -> str
 
 Metric dict keys must match the Memory Chart panel YAML for RDNA3.5:
 
@@ -57,7 +58,7 @@ os.environ["COLUMNS"] = "200"
 import argparse
 import json
 from dataclasses import dataclass, field
-from typing import Any, Union
+from typing import Any, Optional, Union
 
 from rich.console import Console
 from rich.panel import Panel
@@ -139,6 +140,35 @@ _MEM_CHART_DEFAULT_ROWS: tuple[tuple[str, Union[int, float]], ...] = (
 MEM_CHART_PANEL_METRIC_KEYS: tuple[str, ...] = tuple(
     k for k, _ in _MEM_CHART_DEFAULT_ROWS
 )
+
+def _print_mem_chart_scope_bar(console: Console) -> None:
+    """Horizontal rule: GPU span vs System Memory (above the diagram body)."""
+    console.print(
+        "|"
+        + "-" * 62
+        + " [dim]GPU[/dim] "
+        + "-" * 62
+        + "|"
+        + "-" * 4
+        + " [dim]System Memory[/dim] "
+        + "-" * 4
+        + "|"
+    )
+
+
+def format_mem_chart_heading(
+    normal_unit: str,
+    *,
+    panel_id: int = 300,
+    section_label: str = "Memory Chart",
+) -> str:
+    """Build CLI diagram title: ``{panel_id//100}. {label} (Normalization: …)``.
+
+    Matches other panels (e.g. ``3. System Speed-of-Light``) where the leading
+    number is ``Panel Config id // 100`` (panel 300 → ``3.``).
+    """
+    section = max(0, int(panel_id)) // 100
+    return f"{section}. {section_label} (Normalization: {normal_unit})"
 
 
 def normalize_mem_chart_metrics(metric_dict: dict[str, Any]) -> dict[str, Any]:
@@ -410,8 +440,13 @@ def create_mem_chart_diagram(
     console: Console,
     show_debug: bool = False,
     compact: bool = False,
+    chart_title: str = "",
 ) -> None:
-    """Create the RDNA3.5 memory diagram (TCP, LDS, SQC blocks)."""
+    """Create the RDNA3.5 memory diagram (TCP, LDS, SQC blocks).
+
+    ``chart_title``: printed once above the diagram (e.g. from YAML panel title +
+    normalization unit).
+    """
 
     # Extract metrics
     icache_req = get_metric(metric_dict, "ICache Requests")
@@ -473,7 +508,10 @@ def create_mem_chart_diagram(
 
     total_bw = (dram_read_bw or 0) + (dram_write_bw or 0)
 
-    # Single diagram only (no panel/table titles; callers add section headers if needed)
+    console.print()
+    if chart_title:
+        console.print(f"[bold]{chart_title}[/bold]")
+    _print_mem_chart_scope_bar(console)
     console.print()
 
     # Arrow constants
@@ -805,12 +843,21 @@ def create_mem_chart_diagram(
         console.print()
 
 
-def plot_mem_chart(arch: str, normal_unit: str, metric_dict: dict[str, Any]) -> str:
+def plot_mem_chart(
+    arch: str,
+    normal_unit: str,
+    metric_dict: dict[str, Any],
+    *,
+    chart_title: Optional[str] = None,
+) -> str:
     """Plot the memory chart and return as string.
 
     ``metric_dict`` keys should match ``0300_Memory_Chart.yaml`` (gfx1151), i.e.
     ``MEM_CHART_PANEL_METRIC_KEYS``. Values for bandwidth metrics are in **Bytes/s**.
     Input is normalized to a flat ordered dict before rendering.
+
+    ``chart_title``: full heading line; if omitted, uses ``format_mem_chart_heading``
+    with ``panel_id=300`` (section ``3.``).
     """
 
     class FakeFile:
@@ -830,10 +877,21 @@ def plot_mem_chart(arch: str, normal_unit: str, metric_dict: dict[str, Any]) -> 
             return "".join(self.data)
 
     flat = normalize_mem_chart_metrics(metric_dict)
+    resolved_heading = (
+        format_mem_chart_heading(normal_unit, panel_id=300)
+        if chart_title is None
+        else chart_title
+    )
     fake_file = FakeFile()
     console = Console(file=fake_file, force_terminal=True, width=200, height=80)
     create_mem_chart_diagram(
-        arch, normal_unit, flat, console, show_debug=False, compact=False
+        arch,
+        normal_unit,
+        flat,
+        console,
+        show_debug=False,
+        compact=False,
+        chart_title=resolved_heading,
     )
     return fake_file.getvalue()
 
@@ -866,6 +924,8 @@ def main() -> None:
     else:
         metric_dict = normalize_mem_chart_metrics(DEFAULT_SAMPLE_METRICS.copy())
 
+    heading = format_mem_chart_heading(args.norm, panel_id=300)
+
     # Create console
     class FakeFile:
         def __init__(self) -> None:
@@ -889,7 +949,13 @@ def main() -> None:
             file=fake_file, force_terminal=True, width=200, height=80, no_color=True
         )
         create_mem_chart_diagram(
-            args.arch, args.norm, metric_dict, console, args.debug, args.compact
+            args.arch,
+            args.norm,
+            metric_dict,
+            console,
+            args.debug,
+            args.compact,
+            chart_title=heading,
         )
         import re
 
@@ -905,9 +971,15 @@ def main() -> None:
             file=StringIO(), force_terminal=True, width=200, height=80, record=True
         )
         create_mem_chart_diagram(
-            args.arch, args.norm, metric_dict, svg_console, args.debug, args.compact
+            args.arch,
+            args.norm,
+            metric_dict,
+            svg_console,
+            args.debug,
+            args.compact,
+            chart_title=heading,
         )
-        svg_output = svg_console.export_svg(title="")
+        svg_output = svg_console.export_svg(title=heading)
         with open(args.svg, "w") as f:
             f.write(svg_output)
         print(f"SVG saved to {args.svg}")
@@ -915,7 +987,13 @@ def main() -> None:
         fake_file = FakeFile()
         console = Console(file=fake_file, force_terminal=True, width=200, height=80)
         create_mem_chart_diagram(
-            args.arch, args.norm, metric_dict, console, args.debug, args.compact
+            args.arch,
+            args.norm,
+            metric_dict,
+            console,
+            args.debug,
+            args.compact,
+            chart_title=heading,
         )
         print(fake_file.getvalue())
 

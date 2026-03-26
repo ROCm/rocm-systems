@@ -685,6 +685,14 @@ def process_table_data(
     return result_df
 
 
+def _gfx115_mem_chart_heading(
+    panel: Optional[dict[str, Any]], normal_unit: str
+) -> str:
+    """Section number from ``panel id // 100`` (panel 300 → ``3. Memory Chart``)."""
+    panel_id = int((panel or {}).get("id", 300))
+    return mem_chart_gfx11.format_mem_chart_heading(normal_unit, panel_id=panel_id)
+
+
 def _panel_is_mem_chart_only(panel: dict[str, Any]) -> bool:
     """True when every table uses ``cli_style: mem_chart`` (one merged chart)."""
     sources = panel.get("data source") or []
@@ -762,7 +770,12 @@ def flatten_mem_chart_tables(
 
         # Plot the combined memory chart
         content = (
-            mem_chart_gfx11.plot_mem_chart("", args.normal_unit, combined_mem_data)
+            mem_chart_gfx11.plot_mem_chart(
+                "",
+                args.normal_unit,
+                combined_mem_data,
+                chart_title=_gfx115_mem_chart_heading(panel, args.normal_unit),
+            )
             + "\n"
         )
         return content, False
@@ -889,7 +902,12 @@ def format_table_output(
                 content += chart_content
             else:
                 content += (
-                    mem_chart_gfx11.plot_mem_chart("", args.normal_unit, mem_data)
+                    mem_chart_gfx11.plot_mem_chart(
+                        "",
+                        args.normal_unit,
+                        mem_data,
+                        chart_title=_gfx115_mem_chart_heading(panel, args.normal_unit),
+                    )
                     + "\n"
                 )
         else:

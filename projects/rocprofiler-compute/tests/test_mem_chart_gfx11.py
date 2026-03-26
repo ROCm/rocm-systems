@@ -428,6 +428,20 @@ class TestPlotMemChart:
 
         assert isinstance(result, str)
         assert len(result) > 0
+        assert "3. Memory Chart" in result
+        assert "Normalization: per_kernel" in result
+        assert "GPU" in result and "System Memory" in result
+
+    def test_chart_title_override(self):
+        """Explicit chart_title appears in output."""
+        metrics = mem_chart_gfx11.get_sample_metrics()
+        result = mem_chart_gfx11.plot_mem_chart(
+            "gfx1151",
+            "per_kernel",
+            metrics,
+            chart_title="3. Memory Chart (Normalization: per_kernel)",
+        )
+        assert "3. Memory Chart (Normalization: per_kernel)" in result
 
     def test_contains_architecture_elements(self):
         """Test that output contains RDNA3.5 architecture elements."""

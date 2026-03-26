@@ -97,7 +97,7 @@ Panel Config:
           peak: 100
           pop: AVG(((100 * SQ_WAIT_INST_ANY / SQ_WAVE_CYCLES) if (SQ_WAVE_CYCLES != 0) else 0))
         # --- Cache hierarchy: TCP (L0) -> GL1C (L1) -> GL2C client / SQC ---
-        # Peak/pop for TCP/GL1C/GL2C/SQC BW: heuristic (not from public RDNA3 tables).
+        # BW formulas and counters match 0300_Memory_Chart.yaml; peak/pop N/A (chart has no ceilings).
         TCP Cache Hit Rate:
           value: AVG((100 * (TCP_REQ_sum - TCP_REQ_MISS_sum) / TCP_REQ_sum) if (TCP_REQ_sum != 0) else None)
           unit: Percent
@@ -106,43 +106,45 @@ Panel Config:
         TCP Cache BW:
           value: AVG((TCP_REQ_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9))
           unit: Bytes/s
-          peak: ((($max_sclk / 1000) * 256) * $cu_per_gpu * 1e9)
-          pop: ((100 * AVG((TCP_REQ_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9))) / ((($max_sclk / 1000) * 256) * $cu_per_gpu * 1e9))
+          peak: None
+          pop: None
         GL1C Hit Rate:
           value: AVG((100 * (GL1C_REQ_sum - GL1C_REQ_MISS_sum) / GL1C_REQ_sum) if (GL1C_REQ_sum != 0) else None)
           unit: Percent
           peak: 100
           pop: AVG((100 * (GL1C_REQ_sum - GL1C_REQ_MISS_sum) / GL1C_REQ_sum) if (GL1C_REQ_sum != 0) else None)
         GL1C Read BW:
-          value: AVG((GL1C_REQ_READ_32B_sum*32 + GL1C_REQ_READ_64B_sum*64 + GL1C_REQ_READ_128B_sum*128) / ((End_Timestamp - Start_Timestamp) / 1e9))
+          # Same bins as Memory Chart table 307 (GL1C–GL2 read bandwidth).
+          value: AVG((GL1C_GL2_REQ_READ_32B_sum*32 + GL1C_GL2_REQ_READ_64B_sum*64 + GL1C_GL2_REQ_READ_128B_sum*128) / ((End_Timestamp - Start_Timestamp) / 1e9))
           unit: Bytes/s
-          peak: ((($max_sclk / 1000) * 128) * $se_per_gpu * 1e9)
-          pop: ((100 * AVG((GL1C_REQ_READ_32B_sum*32 + GL1C_REQ_READ_64B_sum*64 + GL1C_REQ_READ_128B_sum*128) / ((End_Timestamp - Start_Timestamp) / 1e9))) / ((($max_sclk / 1000) * 128) * $se_per_gpu * 1e9))
+          peak: None
+          pop: None
         GL2C Cache BW:
           value: AVG((GL2C_READ_32_REQ_sum*32 + GL2C_READ_64_REQ_sum*64 + GL2C_READ_128_REQ_sum*128 + GL2C_COMPRESSED_READ_96_REQ_sum*96) / ((End_Timestamp - Start_Timestamp) / 1e9))
           unit: Bytes/s
-          peak: ((($max_sclk / 1000) * 128) * TO_INT_sum($total_l2_chan) * 1e9)
-          pop: ((100 * AVG((GL2C_READ_32_REQ_sum*32 + GL2C_READ_64_REQ_sum*64 + GL2C_READ_128_REQ_sum*128 + GL2C_COMPRESSED_READ_96_REQ_sum*96) / ((End_Timestamp - Start_Timestamp) / 1e9))) / ((($max_sclk / 1000) * 128) * TO_INT_sum($total_l2_chan) * 1e9))
+          peak: None
+          pop: None
         Scalar Data Cache Hit Rate:
           value: AVG((100 * SQC_DCACHE_HITS_sum / SQC_DCACHE_REQ_sum) if (SQC_DCACHE_REQ_sum != 0) else None)
           unit: Percent
           peak: 100
           pop: AVG((100 * SQC_DCACHE_HITS_sum / SQC_DCACHE_REQ_sum) if (SQC_DCACHE_REQ_sum != 0) else None)
         Scalar Data Cache BW:
-          value: AVG((SQC_DCACHE_REQ_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9))
+          # Same as Memory Chart table 302 (Icache-GL1 uses SQC_TC_INST; Dcache uses TC data read).
+          value: AVG((SQC_TC_DATA_READ_REQ_sum * 128) / ((End_Timestamp - Start_Timestamp) / 1e9))
           unit: Bytes/s
-          peak: ((($max_sclk / 1000) * 64) * $sqc_per_gpu * 1e9)
-          pop: ((100 * AVG((SQC_DCACHE_REQ_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9))) / ((($max_sclk / 1000) * 64) * $sqc_per_gpu * 1e9))
+          peak: None
+          pop: None
         Instruction Cache Hit Rate:
           value: AVG((100 * SQC_ICACHE_HITS_sum / SQC_ICACHE_REQ_sum) if (SQC_ICACHE_REQ_sum != 0) else None)
           unit: Percent
           peak: 100
           pop: AVG((100 * SQC_ICACHE_HITS_sum / SQC_ICACHE_REQ_sum) if (SQC_ICACHE_REQ_sum != 0) else None)
         Instruction Cache BW:
-          value: AVG((SQC_ICACHE_REQ_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9))
+          value: AVG((SQC_TC_INST_REQ_sum * 128) / ((End_Timestamp - Start_Timestamp) / 1e9))
           unit: Bytes/s
-          peak: ((($max_sclk / 1000) * 64) * $sqc_per_gpu * 1e9)
-          pop: ((100 * AVG((SQC_ICACHE_REQ_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9))) / ((($max_sclk / 1000) * 64) * $sqc_per_gpu * 1e9))
+          peak: None
+          pop: None
 
   metrics_description:
     VALU FLOPs (FP16): |-
@@ -187,26 +189,27 @@ Panel Config:
       Texture Cache Per-pipe (TCP) hit rate. TCP is the L0 vector cache in RDNA3.5.
       Same as Memory Chart TCP Hit Rate: 100 * (TCP_REQ_sum - TCP_REQ_MISS_sum) / TCP_REQ_sum.
     TCP Cache BW: |-
-      TCP request bandwidth (Memory Chart “TCP Request Bandwidth”): TCP_REQ_sum * 64 B divided by kernel wall time.
-      Peak / % of peak use a heuristic B/s ceiling (shader clock × CU × assumed B/cycle); not from public RDNA 3 tables.
+      Same as Memory Chart “TCP Request Bandwidth” (table 303): TCP_REQ_sum × 64 B / kernel wall time.
+      Peak / % of peak are N/A (same as Memory Chart — no theoretical ceiling row).
     GL1C Hit Rate: |-
       GL1 Cache hit rate (same as Memory Chart / GL1C panel).
       Formula: 100 * (GL1C_REQ_sum - GL1C_REQ_MISS_sum) / GL1C_REQ_sum when GL1C_REQ_sum != 0.
     GL1C Read BW: |-
-      Achieved read bandwidth at GL1C (32/64/128 B request bins).
-      Peak / % of peak: heuristic (shader clock × shader engine × assumed B/cycle); indicative only vs public specs.
+      Same as Memory Chart table 307 “GL1C-GL2 Read Bandwidth”:
+      32·GL1C_GL2_REQ_READ_32B_sum + 64·GL1C_GL2_REQ_READ_64B_sum + 128·GL1C_GL2_REQ_READ_128B_sum, over time.
+      Peak / % of peak are N/A.
     GL2C Cache BW: |-
-      Achieved bandwidth at GL2C from client read size counters (32/64/128 B) plus 96 B compressed reads.
-      Peak / % of peak: heuristic per L2 channel; indicative only vs public specs.
+      Same as Memory Chart table 308 “GL2C Read Bandwidth”: sized client read bins plus 96 B compressed reads, over time.
+      Peak / % of peak are N/A.
     Scalar Data Cache Hit Rate: |-
       Same as Memory Chart Dcache Hit Rate: 100 * SQC_DCACHE_HITS_sum / SQC_DCACHE_REQ_sum
       when SQC_DCACHE_REQ_sum != 0.
     Scalar Data Cache BW: |-
-      Bandwidth on the scalar data cache path (64 B line model × request rate).
-      Peak / % of peak: heuristic (shader clock × SQC instance count × 64 B/cycle); indicative only.
+      Same as Memory Chart table 302 “Dcache-GL1 Read Bandwidth”: SQC_TC_DATA_READ_REQ_sum × 128 B / kernel time.
+      Peak / % of peak are N/A.
     Instruction Cache Hit Rate: |-
       Same as Memory Chart Icache Hit Rate: 100 * SQC_ICACHE_HITS_sum / SQC_ICACHE_REQ_sum
       when SQC_ICACHE_REQ_sum != 0.
     Instruction Cache BW: |-
-      Bandwidth on the instruction cache path (64 B line model × request rate).
-      Peak / % of peak: heuristic (shader clock × SQC instance count × 64 B/cycle); indicative only.
+      Same as Memory Chart table 301 “ICache-GL1 Read Bandwidth”: SQC_TC_INST_REQ_sum × 128 B / kernel time.
+      Peak / % of peak are N/A.
