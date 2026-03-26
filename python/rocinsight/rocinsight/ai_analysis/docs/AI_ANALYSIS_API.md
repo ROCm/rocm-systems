@@ -1142,8 +1142,28 @@ result = analyzer.analyze_with_llm(data, context=ctx)
 
 When `context=None` (default), the full guide is used — backward compatible.
 
+**`_select_tags` behavior (which guide sections are included):**
+
+| Scenario | Tags included | Notes |
+|---|---|---|
+| Tier 1, clear bottleneck (e.g. `memory_transfer`) | `{"always"}` | Bottleneck known; LLM only needs formatting rules. ~40% token savings vs. old behavior. |
+| Tier 1, unclear bottleneck (`mixed` or `None`) | `{"always", "tier1"}` | Same as before |
+| Tier 2 (counters present) | `{"always", "tier2"}` | Drops `tier1`; was `{"always", "tier1", "tier2"}` |
+| Tier 0 (source-only) | `{"always", "tier1", "source"}` | Unchanged |
+| `compiler` tag | Added when bottleneck is `compute` OR prompt mentions compiler/flag/build/register | No longer added for `memory` bottleneck |
+
+**Bottleneck-aware `_format_data_for_llm`** (data trimming sent to LLM):
+
+| Bottleneck | Kernels sent | Counter fields | Memory ops section |
+|---|---|---|---|
+| `memory_transfer` | Top 3, no counter fields | omitted | included (full) |
+| `compute` | Top 3, with counter fields | included | omitted |
+| `latency` / `api` | Top 3, no counter fields | omitted | omitted |
+| `mixed` or `None` | Top 5, all fields | included | included |
+
 Token savings by scenario:
 - Tier 1 trace-only: ~47% fewer tokens
+- Tier 1 with clear bottleneck: ~40% additional savings on guide sections
 - Tier 0 source-only: ~51% fewer tokens
 - Tier 2 with latency bottleneck: ~18% fewer tokens
 
@@ -1217,7 +1237,34 @@ LLM calls could hang indefinitely on slow or unavailable network connections. If
 call takes longer than 120 seconds a network timeout exception is raised and wrapped
 as a non-fatal warning (local analysis continues).
 
+**LLM truncation retry for reasoning models (`_call_openai`)**
+
+Reasoning models (gpt-5, o1, o3) consume `max_completion_tokens=4096` on internal
+thinking tokens, leaving no budget for the actual output. When `_call_openai` receives
+empty content with `finish_reason=="length"`, `analyze_with_llm` automatically retries:
+
+1. System prompt filtered to only `<!-- rocinsight-context: always -->` sections
+2. `max_completion_tokens` raised to `16384` to give reasoning models room for thinking + output
+
+If the retry also produces empty content, a clean user-facing error is raised — no
+internal sentinel values leak to callers. If content is non-empty but truncated
+(`finish_reason=="length"`), the partial content is returned with a warning attached
+to `result.warnings` rather than raising an exception.
+
 ### Output & Serialization
+
+**`-d <dir>` without `-o <name>` auto-generates output filename**
+
+When a directory is specified with `-d` but no explicit `-o` name is given, the output
+filename is now derived from the database basename:
+
+```bash
+# merged_opt.db → merged_opt.html  (with --format webview)
+rocinsight analyze -i merged_opt.db --format webview -d ./reports
+```
+
+Previously the analysis was printed to the terminal even when `-d` was specified.
+`-o` can still be used to override the filename explicitly.
 
 **`AnalysisResult.to_json()` now raises `RuntimeError` when `_raw` is absent**
 

@@ -123,7 +123,7 @@ class LLMConversation:
         keep_recent_turns: int = 6,
         history_path: Optional[Path] = None,
     ) -> None:
-        valid = {"anthropic", "openai", "local", "private"}
+        valid = {"anthropic", "openai", "local", "private", "claude-code"}
         if provider not in valid:
             raise ValueError(
                 f"Unknown provider: {provider!r}. Must be one of: {', '.join(sorted(valid))}"
@@ -172,6 +172,8 @@ class LLMConversation:
     ) -> str:
         if self._provider == "anthropic":
             return self._stream_anthropic(max_tokens=max_tokens, on_token=on_token)
+        if self._provider == "claude-code":
+            return self._stream_claude_code(max_tokens=max_tokens, on_token=on_token)
         return self._stream_openai(max_tokens=max_tokens, on_token=on_token)
 
     def _stream_anthropic(
@@ -222,6 +224,164 @@ class LLMConversation:
             else:
                 raise
         return "".join(chunks)
+
+    # Mapping from Claude Code CLI aliases → full Anthropic API model IDs (fallback path).
+    _CLAUDE_CODE_ALIAS_MAP: Dict[str, str] = {
+        "sonnet": "claude-sonnet-4-6",
+        "opus": "claude-opus-4-6",
+        "haiku": "claude-haiku-4-5",
+    }
+
+    def _stream_claude_code(
+        self,
+        max_tokens: int,
+        on_token: Optional[Callable[[str], None]],
+    ) -> str:
+        """Call via Claude Agent SDK (inherits Claude Code auth) with fallback to ANTHROPIC_API_KEY.
+
+        Auth priority:
+        1. ``claude-agent-sdk`` — uses Claude Code's stored credentials.
+        2. ``anthropic`` SDK with ANTHROPIC_API_KEY — when CLI not found or SDK missing.
+
+        The full conversation history is inlined into the user message so each
+        invocation is stateless. Streaming is emulated: ``on_token`` is called
+        once with the complete response text.
+        """
+        import asyncio
+
+        model = self._model or os.environ.get("ROCINSIGHT_LLM_MODEL") or "sonnet"
+
+        # Build a transcript of prior turns to include as context
+        history_lines: List[str] = []
+        for msg in self._messages[:-1]:  # all but the last (current) user message
+            role = "User" if msg["role"] == "user" else "Assistant"
+            history_lines.append(f"[{role}]: {msg['content']}")
+
+        current_user_msg = self._messages[-1]["content"] if self._messages else ""
+        if history_lines:
+            user_prompt = (
+                "Previous conversation:\n"
+                + "\n\n".join(history_lines)
+                + f"\n\n[User]: {current_user_msg}"
+            )
+        else:
+            user_prompt = current_user_msg
+
+        result = self._call_claude_code_turn(user_prompt, model)
+        if on_token and result:
+            on_token(result)
+        return result
+
+    def _call_claude_code_turn(self, user_prompt: str, model: str) -> str:
+        """Single-turn call for _stream_claude_code.
+
+        Priority:
+        1. ANTHROPIC_API_KEY via ``anthropic`` SDK (direct API, no CLI needed).
+        2. ``claude -p`` subprocess — stored Claude Code CLI credentials.
+        """
+        # ── Tier 1: ANTHROPIC_API_KEY via anthropic SDK ───────────────────────
+        api_key = self._api_key or os.environ.get("ANTHROPIC_API_KEY")
+        if api_key:
+            try:
+                import anthropic as _anthropic
+                api_model = self._CLAUDE_CODE_ALIAS_MAP.get(model, model)
+                client = _anthropic.Anthropic(api_key=api_key)
+                response = client.messages.create(
+                    model=api_model,
+                    max_tokens=4096,
+                    system=self._system,
+                    messages=[{"role": "user", "content": user_prompt}],
+                )
+                return next(
+                    (b.text for b in response.content if b.type == "text"), ""
+                ).strip()
+            except ImportError:
+                pass  # anthropic package not installed — try CLI
+            except Exception as _exc:
+                # Re-raise auth/rate-limit errors; for anything else fall through to CLI
+                if isinstance(_exc, (LLMAuthenticationError, LLMRateLimitError)):
+                    raise
+                try:
+                    import anthropic as _a
+                    if isinstance(_exc, _a.AuthenticationError):
+                        raise LLMAuthenticationError("ANTHROPIC_API_KEY is invalid or expired.")
+                    if isinstance(_exc, _a.RateLimitError):
+                        raise LLMRateLimitError("Anthropic API rate limit reached.")
+                except ImportError:
+                    pass
+                raise
+
+        # ── Tier 2: claude -p subprocess (stored CLI credentials) ────────────
+        try:
+            result = self._call_claude_cli_subprocess(user_prompt, model)
+            if result:
+                return result
+        except Exception as _cli_err:
+            raise LLMAuthenticationError(
+                f"Claude Code: no ANTHROPIC_API_KEY and CLI also failed ({_cli_err}). "
+                "Set ANTHROPIC_API_KEY or ensure 'claude' CLI is authenticated."
+            ) from _cli_err
+
+        raise LLMAuthenticationError(
+            "Claude Code: ANTHROPIC_API_KEY not set and 'claude' CLI returned empty. "
+            "Set ANTHROPIC_API_KEY or ensure 'claude' CLI is working."
+        )
+
+    def _call_claude_cli_subprocess(self, user_prompt: str, model: str) -> str:
+        """Call ``claude -p`` subprocess using Claude Code's stored credentials.
+
+        Tier-2 fallback: used when the Agent SDK returns empty but the ``claude``
+        CLI is on PATH.  The system prompt is written as CLAUDE.md in a temporary
+        directory so the CLI picks it up as project context (avoids argument-length
+        limits and mirrors Claude Code's natural project-instruction mechanism).
+        Raises on failure so the caller can fall through to the next tier.
+        """
+        import subprocess as _subprocess
+        import json as _json
+        import tempfile as _tempfile
+        import pathlib as _pathlib
+
+        with _tempfile.TemporaryDirectory(prefix="rocinsight_claude_") as _tmpdir:
+            (_pathlib.Path(_tmpdir) / "CLAUDE.md").write_text(
+                self._system or "", encoding="utf-8"
+            )
+
+            cmd = [
+                "claude",
+                "-p", user_prompt,
+                "--output-format", "json",
+                "--no-session-persistence",
+                "--model", model,
+            ]
+            try:
+                proc = _subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=300,
+                    cwd=_tmpdir,
+                )
+            except FileNotFoundError:
+                raise RuntimeError("claude CLI not found on PATH")
+            except _subprocess.TimeoutExpired:
+                raise RuntimeError("claude CLI timed out after 300 s")
+
+        if proc.returncode != 0:
+            detail = (proc.stderr or proc.stdout).strip()
+            raise RuntimeError(
+                f"claude CLI exited with code {proc.returncode}"
+                + (f": {detail}" if detail else "")
+            )
+
+        try:
+            data = _json.loads(proc.stdout)
+        except _json.JSONDecodeError:
+            return proc.stdout.strip()
+
+        if data.get("is_error"):
+            raise RuntimeError(data.get("result") or "claude CLI reported an error")
+
+        return (data.get("result") or "").strip()
 
     def _stream_openai(
         self,

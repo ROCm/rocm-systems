@@ -17,7 +17,9 @@ dependencies = []
 [project.optional-dependencies]
 llm  = ["anthropic>=0.18", "openai>=1.0"]
 rich = ["rich>=13.0"]
-all  = ["anthropic>=0.18", "openai>=1.0", "rich>=13.0"]
+# claude-agent-sdk enables --llm claude-code using Claude Code's stored credentials
+# (falls back to ANTHROPIC_API_KEY if CLI not found)
+all  = ["anthropic>=0.18", "openai>=1.0", "rich>=13.0", "claude-agent-sdk>=0.1"]
 dev  = ["pytest", "flake8", "black"]
 
 [project.scripts]

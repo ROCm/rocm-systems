@@ -60,6 +60,28 @@ DEFAULT_REFERENCE_GUIDE_NAME = "llm-reference-guide.md"
 DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-20250514"
 DEFAULT_OPENAI_MODEL = "gpt-4-turbo-preview"
 
+# ---------------------------------------------------------------------------
+# Provider registry
+# ---------------------------------------------------------------------------
+# Maps provider name → human-readable description.
+# Used for --llm CLI help text, error messages, and validation.
+#
+# To add a new provider:
+#   1. Add an entry here: PROVIDER_REGISTRY["my-provider"] = "My Provider description"
+#   2. Add the call method to LLMAnalyzer: _call_my_provider(self, system, user) -> str
+#   3. Route it in analyze_with_llm's _dispatch() and summarize_source_file()
+#   4. Add streaming to LLMConversation._stream_response() if multi-turn is needed
+#   5. Add it to the --llm choices in analyze.py add_args()
+#   6. Optionally add it to LLMConversation's valid set (for interactive mode)
+#
+PROVIDER_REGISTRY: Dict[str, str] = {
+    "anthropic": "Anthropic Claude API (requires ANTHROPIC_API_KEY)",
+    "openai": "OpenAI API (requires OPENAI_API_KEY)",
+    "private": "Private/enterprise OpenAI-compatible endpoint (requires ROCINSIGHT_LLM_PRIVATE_URL)",
+    "local": "Local Ollama or OpenAI-compatible server (ROCINSIGHT_LLM_LOCAL_URL)",
+    "claude-code": "Claude Code — ANTHROPIC_API_KEY (primary) or 'claude' CLI stored credentials (fallback)",
+}
+
 
 def get_reference_guide_path() -> Path:
     """
@@ -159,7 +181,8 @@ class AnalysisContext:
 
 def _select_tags(ctx: AnalysisContext) -> set:
     """
-    Map an AnalysisContext to the set of section tags to include.
+    Map an AnalysisContext to the minimum set of section tags needed for the
+    current analysis, minimising prompt token cost.
 
     Tag vocabulary:
         always   — critical rules, role, output format, what not to do, summary
@@ -168,30 +191,52 @@ def _select_tags(ctx: AnalysisContext) -> set:
         compiler — compiler flags section (HIPCC, LLVM AMDGPU, register control)
         source   — reserved for future Tier 0-specific guidance sections
 
+    Selection strategy (most selective first):
+    - Tier 1 with a clear bottleneck and no counters → ``always`` only.
+      The bottleneck is already identified; the LLM just needs formatting rules
+      and output constraints — not the full profiling workflow or GPU spec tables.
+    - Tier 1 without a clear bottleneck → ``always + tier1`` so the LLM can
+      reason about the pattern from first principles.
+    - Tier 2 (counters available) → ``always + tier2``.  The tier2 section
+      covers hardware specs and roofline; tier1 workflow adds limited value once
+      counter data is present and just inflates the prompt.
+    - ``compiler`` is only added when the bottleneck is compute-bound or the
+      user explicitly mentions compiler/build topics.
+    - ``tier0`` / ``source`` / ``tracelens_metrics`` are additive when the
+      matching data is present.
+
     Fallback: sections with no tag comment are always included.
     """
     tags = {"always"}
-    if ctx.tier >= 1:
+
+    _bt = ctx.bottleneck_type or ""
+    _cp = (ctx.custom_prompt or "").lower()
+
+    if ctx.tier == 0:
+        # Source-only: tier1 workflow + source-specific guidance
         tags.add("tier1")
-    if ctx.has_counters or ctx.tier >= 2:
+        tags.add("source")
+    elif ctx.has_counters or ctx.tier >= 2:
+        # Counter data available: tier2 covers GPU specs + roofline.
+        # Skip tier1 (profiling workflow is less useful once we have counters).
         tags.add("tier2")
-    if (
-        ctx.tier == 0
-        or ctx.bottleneck_type in ("compute", "memory")
-        or (
-            ctx.custom_prompt
-            and any(
-                w in ctx.custom_prompt.lower()
-                for w in ("compiler", "flag", "build", "compile")
-            )
-        )
+    else:
+        # Tier 1 trace, no counters.
+        # If the bottleneck is already clear, always-only suffices.
+        # Otherwise include tier1 so the LLM can reason about the pattern.
+        if not _bt or _bt == "mixed":
+            tags.add("tier1")
+
+    # compiler: only when compute-bound or user asks about build/compile topics
+    if _bt == "compute" or any(
+        w in _cp for w in ("compiler", "flag", "build", "compile", "register")
     ):
         tags.add("compiler")
-    if ctx.tier == 0:
-        tags.add("source")
+
     # tracelens_metrics: include when TraceLens analysis data is available
     if ctx.kernel_categories or ctx.interval_timeline:
         tags.add("tracelens_metrics")
+
     return tags
 
 
@@ -280,11 +325,10 @@ class LLMAnalyzer:
                 (claude-opus-4, claude-sonnet-4-5, claude-3-7-sonnet).
                 Can also be set via ROCINSIGHT_LLM_THINKING environment variable.
         """
-        valid_providers = {"anthropic", "openai", "local", "private"}
-        if provider not in valid_providers:
+        if provider not in PROVIDER_REGISTRY:
             raise ValueError(
                 f"Unknown provider: {provider!r}. "
-                f"Must be one of: {', '.join(sorted(valid_providers))}"
+                f"Must be one of: {', '.join(sorted(PROVIDER_REGISTRY))}"
             )
         self.provider = provider
         self.model = model
@@ -333,6 +377,9 @@ class LLMAnalyzer:
             return os.environ.get("ROCINSIGHT_LLM_LOCAL_API_KEY", "ignored")
         elif self.provider == "private":
             return os.environ.get("ROCINSIGHT_LLM_PRIVATE_API_KEY", "dummy")
+        elif self.provider == "claude-code":
+            # No dedicated API key — uses Claude Code auth; may fall back to ANTHROPIC_API_KEY.
+            return os.environ.get("ANTHROPIC_API_KEY", "")
         else:
             raise ValueError(f"Unknown provider: {self.provider}")
 
@@ -488,6 +535,7 @@ CRITICAL: Follow these guidelines strictly:
         self,
         analysis_data: Dict[str, Any],
         custom_prompt: Optional[str] = None,
+        bottleneck_type: Optional[str] = None,
     ) -> str:
         """
         Build user prompt with profiling data.
@@ -495,12 +543,14 @@ CRITICAL: Follow these guidelines strictly:
         Args:
             analysis_data: Sanitized profiling data
             custom_prompt: Optional user question
+            bottleneck_type: Primary bottleneck (drives data section selection)
 
         Returns:
             User prompt string
         """
-        # Format data as structured text for LLM
-        data_summary = self._format_data_for_llm(analysis_data)
+        # Format data as structured text for LLM — only include sections
+        # relevant to the detected bottleneck to minimise token usage.
+        data_summary = self._format_data_for_llm(analysis_data, bottleneck_type=bottleneck_type)
 
         if custom_prompt:
             return f"""User Question: {custom_prompt}
@@ -538,18 +588,36 @@ IMPORTANT FORMAT REQUIREMENTS:
 
 Follow the reference guide strictly for analysis methodology and output format."""
 
-    def _format_data_for_llm(self, data: Dict[str, Any]) -> str:
-        """Format analysis data as readable text for LLM"""
-        lines = []
+    def _format_data_for_llm(
+        self,
+        data: Dict[str, Any],
+        bottleneck_type: Optional[str] = None,
+    ) -> str:
+        """Format analysis data as readable text for LLM.
 
-        # GPU info
+        Only sections relevant to the detected bottleneck are included to
+        minimise prompt token cost and speed up inference.
+
+        Section selection by bottleneck:
+        - memory_transfer : execution breakdown + memory ops + top-3 kernels (no counter fields)
+        - latency / api   : execution breakdown + top-3 kernels (no memory or counter detail)
+        - compute         : execution breakdown + top-3 kernels with counter fields
+        - mixed / None    : all sections, top-5 kernels
+        """
+        lines = []
+        _bt = bottleneck_type or ""
+        _include_memory = _bt in ("", "memory_transfer", "mixed")
+        _include_counter_fields = _bt in ("", "compute", "mixed")
+        _top_n = 3 if _bt and _bt != "mixed" else 5
+
+        # GPU info — always included (small)
         if "gpu" in data:
             lines.append("## GPU Information")
             lines.append(f"- Name: {data['gpu'].get('name', 'Unknown')}")
             lines.append(f"- Architecture: {data['gpu'].get('arch', 'Unknown')}")
             lines.append("")
 
-        # Execution breakdown
+        # Execution breakdown — always included
         if "execution_breakdown" in data:
             lines.append("## Execution Breakdown")
             breakdown = data["execution_breakdown"]
@@ -560,32 +628,33 @@ Follow the reference guide strictly for analysis methodology and output format."
             lines.append(f"- API Overhead: {breakdown.get('api_overhead_pct', 0):.1f}%")
             lines.append("")
 
-        # Top kernels
+        # Top kernels — limit count and fields by bottleneck
         if "kernels" in data:
-            lines.append("## Top Kernels")
-            for kernel in data["kernels"][:5]:  # Top 5
+            lines.append(f"## Top Kernels (top {_top_n})")
+            for kernel in data["kernels"][:_top_n]:
                 lines.append(f"- {kernel.get('kernel_id', 'Unknown')}")
                 lines.append(f"  - Time: {kernel.get('pct_total_time', 0):.1f}% of total")
                 lines.append(f"  - Dispatches: {kernel.get('dispatch_count', 'N/A')}")
 
-                if "vgpr_count" in kernel:
-                    lines.append(f"  - VGPR Usage: {kernel.get('vgpr_count')}")
-                if "occupancy_pct" in kernel:
-                    lines.append(
-                        f"  - Wave Occupancy: {kernel.get('occupancy_pct'):.1f}%"
-                    )
-                if "valu_util_pct" in kernel:
-                    lines.append(
-                        f"  - VALU Utilization: {kernel.get('valu_util_pct'):.1f}%"
-                    )
-                if "hbm_util_pct" in kernel:
-                    lines.append(
-                        f"  - HBM Utilization: {kernel.get('hbm_util_pct'):.1f}%"
-                    )
+                if _include_counter_fields:
+                    if "vgpr_count" in kernel:
+                        lines.append(f"  - VGPR Usage: {kernel.get('vgpr_count')}")
+                    if "occupancy_pct" in kernel:
+                        lines.append(
+                            f"  - Wave Occupancy: {kernel.get('occupancy_pct'):.1f}%"
+                        )
+                    if "valu_util_pct" in kernel:
+                        lines.append(
+                            f"  - VALU Utilization: {kernel.get('valu_util_pct'):.1f}%"
+                        )
+                    if "hbm_util_pct" in kernel:
+                        lines.append(
+                            f"  - HBM Utilization: {kernel.get('hbm_util_pct'):.1f}%"
+                        )
                 lines.append("")
 
-        # Memory operations
-        if "memory_ops" in data:
+        # Memory operations — omit for pure compute / latency bottlenecks
+        if _include_memory and "memory_ops" in data:
             lines.append("## Memory Operations")
             mem = data["memory_ops"]
             if "h2d" in mem:
@@ -665,8 +734,11 @@ Follow the reference guide strictly for analysis methodology and output format."
         sanitized_data = self._sanitize_data(analysis_data)
 
         # Build prompts (includes reference guide as "fence")
+        _bottleneck = context.bottleneck_type if context else None
         system_prompt = self._build_system_prompt(context=context)
-        user_prompt = self._build_user_prompt(sanitized_data, custom_prompt)
+        user_prompt = self._build_user_prompt(
+            sanitized_data, custom_prompt, bottleneck_type=_bottleneck
+        )
 
         if self.verbose:
             print(f"[LLM] Calling {self.provider} API...")
@@ -681,17 +753,55 @@ Follow the reference guide strictly for analysis methodology and output format."
                 "Remove --llm-thinking or switch to --llm anthropic."
             )
 
-        # Call appropriate LLM API
-        if self.provider == "anthropic":
-            return self._call_anthropic(system_prompt, user_prompt)
-        elif self.provider == "openai":
-            return self._call_openai(system_prompt, user_prompt)
-        elif self.provider == "local":
-            return self._call_local(system_prompt, user_prompt)
-        elif self.provider == "private":
-            return self._call_private(system_prompt, user_prompt)
-        else:
-            raise ValueError(f"Unknown provider: {self.provider}")
+        # Reasoning models (gpt-5, o1, o3) consume thinking tokens against
+        # max_completion_tokens, leaving nothing for actual output at 4096.
+        # Use a higher ceiling that gives room for both thinking + response.
+        _RETRY_MAX_TOKENS = 16384
+
+        def _dispatch(sp: str, up: str, max_tokens: int = 4096) -> str:
+            if self.provider == "anthropic":
+                return self._call_anthropic(sp, up)
+            elif self.provider == "openai":
+                return self._call_openai(sp, up, max_tokens=max_tokens)
+            elif self.provider == "local":
+                return self._call_local(sp, up)
+            elif self.provider == "private":
+                return self._call_private(sp, up)
+            elif self.provider == "claude-code":
+                return self._call_claude_code(sp, up)
+            else:
+                raise ValueError(f"Unknown provider: {self.provider}")
+
+        # Call appropriate LLM API; on context-overflow retry with a smaller
+        # guide and a higher token budget (needed for reasoning models).
+        try:
+            return _dispatch(system_prompt, user_prompt)
+        except AnalysisError as _ae:
+            if "Retrying with a smaller context" not in str(_ae):
+                raise
+            # Rebuild system prompt using only the mandatory "always" sections.
+            _compact_guide = _filter_guide(self.reference_guide, {"always"})
+            _compact_prompt = (
+                f"You are an expert GPU performance analyst specializing in AMD GPUs.\n\n"
+                f"{_compact_guide}\n\n"
+                "CRITICAL: Use ONLY current generation tools (rocprofv3, rocprof-compute, "
+                "rocprof-sys). Output plain text only — no markdown headers."
+            )
+            if self.verbose:
+                print(
+                    f"[LLM] Retrying with always-only guide "
+                    f"({len(_compact_prompt)} chars, was {len(system_prompt)}) "
+                    f"and max_tokens={_RETRY_MAX_TOKENS}"
+                )
+            try:
+                return _dispatch(_compact_prompt, user_prompt, max_tokens=_RETRY_MAX_TOKENS)
+            except AnalysisError as _ae2:
+                # Retry also failed — raise a clean user-facing error.
+                raise AnalysisError(
+                    f"OpenAI response empty even after reducing context "
+                    f"(max_completion_tokens={_RETRY_MAX_TOKENS}). "
+                    "The model may not support this token budget — try a different model."
+                ) from _ae2
 
     def _call_anthropic(
         self, system_prompt: str, user_prompt: str, timeout: int = 120
@@ -833,18 +943,30 @@ Follow the reference guide strictly for analysis methodology and output format."
                         text_parts.append(part.get("text", ""))
                 content = "\n".join(text_parts)
 
+            finish = getattr(response.choices[0], "finish_reason", "unknown")
+
+            # Non-empty but truncated: return what we have (partial > nothing)
+            if content and finish == "length":
+                import warnings as _w
+                _w.warn(
+                    f"[LLMAnalyzer] OpenAI response truncated at {max_tokens} tokens "
+                    "— returning partial output.",
+                    stacklevel=3,
+                )
+                return content
+
             if content is None or content == "":
                 # Check for explicit refusal
                 refusal = getattr(msg, "refusal", None)
                 if refusal:
                     raise AnalysisError(f"OpenAI refused request: {refusal}")
-                # Report finish reason for diagnostics
-                finish = getattr(response.choices[0], "finish_reason", "unknown")
+                # Empty content with finish_reason="length" means the prompt consumed
+                # all available tokens — caller should retry with a smaller guide.
                 if finish == "length":
                     raise AnalysisError(
                         f"OpenAI response truncated at token limit "
                         f"(max_completion_tokens={max_tokens}). "
-                        "Try with a shorter prompt or increase max tokens."
+                        "Retrying with a smaller context."
                     )
                 raise AnalysisError(
                     f"OpenAI returned empty content (finish_reason={finish!r}). "
@@ -1002,6 +1124,158 @@ Follow the reference guide strictly for analysis methodology and output format."
             if http_client is not None:
                 http_client.close()
 
+    # Mapping from Claude Code CLI model aliases to full Anthropic API model IDs.
+    # Used by the ANTHROPIC_API_KEY fallback path.
+    _CLAUDE_CODE_ALIAS_MAP: Dict[str, str] = {
+        "sonnet": "claude-sonnet-4-6",
+        "opus": "claude-opus-4-6",
+        "haiku": "claude-haiku-4-5",
+    }
+
+    def _call_claude_code(self, system_prompt: str, user_prompt: str) -> str:
+        """Call the ``claude-code`` provider with a two-tier auth chain.
+
+        Priority:
+        1. ``claude-agent-sdk`` with ``ANTHROPIC_API_KEY`` — direct Anthropic API
+           call via the SDK, no CLI required.
+        2. ``claude -p`` subprocess — falls back to the locally installed Claude
+           Code CLI, which uses stored OAuth/session credentials.  The system
+           prompt is placed in a CLAUDE.md file so the CLI loads it as project
+           context (avoids command-line argument-length limits).
+
+        The model can be overridden with ``--llm-model`` (accepts Claude Code
+        aliases: sonnet, opus, haiku, or a full model id).
+        """
+        model = self.model or os.environ.get("ROCINSIGHT_LLM_MODEL") or "sonnet"
+
+        # ── Tier 1: Agent SDK with ANTHROPIC_API_KEY ─────────────────────────
+        try:
+            result = self._call_claude_code_api_fallback(system_prompt, user_prompt, model)
+            if result:
+                return result
+        except LLMAuthenticationError:
+            pass  # No API key — fall through to CLI
+        except (LLMRateLimitError, AnalysisError):
+            raise  # Propagate real errors upward
+
+        # ── Tier 2: claude -p subprocess (stored CLI credentials) ────────────
+        try:
+            cli_result = self._call_claude_cli_subprocess(system_prompt, user_prompt, model)
+            if cli_result:
+                return cli_result
+        except AnalysisError as _cli_err:
+            raise LLMAuthenticationError(
+                f"Claude Code: no ANTHROPIC_API_KEY and CLI also failed ({_cli_err}). "
+                "Set ANTHROPIC_API_KEY or ensure 'claude' CLI is authenticated."
+            ) from _cli_err
+
+        raise LLMAuthenticationError(
+            "Claude Code: both API-key and CLI tiers returned empty. "
+            "Set ANTHROPIC_API_KEY or ensure 'claude' CLI is working."
+        )
+
+    def _call_claude_cli_subprocess(
+        self, system_prompt: str, user_prompt: str, model: str
+    ) -> str:
+        """Call ``claude -p`` as a subprocess using Claude Code's stored credentials.
+
+        This is a tier-2 fallback for when the Agent SDK returns empty but the
+        ``claude`` CLI is available on PATH.  No API key is required — the CLI
+        uses the same stored OAuth session as Claude Code.
+
+        The ``system_prompt`` is written as a CLAUDE.md file in a temporary
+        working directory so that Claude Code picks it up as project context —
+        this avoids command-line length limits and mirrors how Claude Code
+        naturally loads project instructions.
+
+        Raises:
+            AnalysisError: If the CLI is not found, times out, or returns an error.
+        """
+        import subprocess as _subprocess
+        import json as _json
+        import tempfile as _tempfile
+        import pathlib as _pathlib
+
+        with _tempfile.TemporaryDirectory(prefix="rocinsight_claude_") as _tmpdir:
+            # Write the system prompt as CLAUDE.md so the CLI picks it up as
+            # project-level context (no --system-prompt arg needed, no arg-length
+            # limits).  Do NOT pass --bare: that flag prevents Claude Code from
+            # reading CLAUDE.md.
+            (_pathlib.Path(_tmpdir) / "CLAUDE.md").write_text(system_prompt, encoding="utf-8")
+
+            cmd = [
+                "claude",
+                "-p", user_prompt,
+                "--output-format", "json",
+                "--no-session-persistence",
+                "--model", model,
+            ]
+            try:
+                proc = _subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=300,
+                    cwd=_tmpdir,
+                )
+            except FileNotFoundError:
+                raise AnalysisError("claude CLI not found on PATH")
+            except _subprocess.TimeoutExpired:
+                raise AnalysisError("claude CLI timed out after 300 s")
+
+        if proc.returncode != 0:
+            detail = (proc.stderr or proc.stdout).strip()
+            raise AnalysisError(
+                f"claude CLI exited with code {proc.returncode}"
+                + (f": {detail}" if detail else "")
+            )
+
+        try:
+            data = _json.loads(proc.stdout)
+        except _json.JSONDecodeError:
+            # Plain text output (older CLI versions): return as-is
+            return proc.stdout.strip()
+
+        if data.get("is_error"):
+            raise AnalysisError(data.get("result") or "claude CLI reported an error")
+
+        return (data.get("result") or "").strip()
+
+    def _call_claude_code_api_fallback(
+        self, system_prompt: str, user_prompt: str, model: str
+    ) -> str:
+        """Fallback: call Anthropic API directly using ANTHROPIC_API_KEY."""
+        try:
+            import anthropic as _anthropic
+        except ImportError:
+            raise AnalysisError(
+                "Neither claude-agent-sdk nor anthropic package is installed. "
+                "Install one: pip install 'rocinsight[llm]'  or  pip install claude-agent-sdk"
+            )
+
+        api_key = self.api_key or os.environ.get("ANTHROPIC_API_KEY")
+        if not api_key:
+            raise LLMAuthenticationError(
+                "Claude Code auth unavailable and ANTHROPIC_API_KEY is not set. "
+                "Either install Claude Code (https://claude.ai/code) or set ANTHROPIC_API_KEY."
+            )
+
+        api_model = self._CLAUDE_CODE_ALIAS_MAP.get(model, model)
+        client = _anthropic.Anthropic(api_key=api_key)
+        try:
+            response = client.messages.create(
+                model=api_model,
+                max_tokens=4096,
+                system=system_prompt,
+                messages=[{"role": "user", "content": user_prompt}],
+            )
+        except _anthropic.AuthenticationError:
+            raise LLMAuthenticationError("ANTHROPIC_API_KEY is invalid or expired.")
+        except _anthropic.RateLimitError:
+            raise LLMRateLimitError("Anthropic API rate limit reached (claude-code fallback).")
+
+        return next((b.text for b in response.content if b.type == "text"), "").strip()
+
     def summarize_source_file(self, filename: str, content: str) -> str:
         """Stage 1: summarize a GPU source file to its key patterns (local LLM)."""
         system = (
@@ -1019,6 +1293,8 @@ Follow the reference guide strictly for analysis methodology and output format."
             return self._call_openai(system, user)
         elif self.provider == "private":
             return self._call_private(system, user)
+        elif self.provider == "claude-code":
+            return self._call_claude_code(system, user)
         return ""
 
     def annotate_profiling_plan(self, metadata: dict) -> str:

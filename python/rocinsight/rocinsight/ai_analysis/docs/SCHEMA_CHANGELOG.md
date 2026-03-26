@@ -1,4 +1,4 @@
-# ROCpd AI Analysis Output - JSON Schema Changelog
+# ROCInsight AI Analysis Output - JSON Schema Changelog
 
 This document tracks all changes to the JSON output schema for `rocinsight analyze --format json`
 and the `rocinsight.ai_analysis` Python API.
@@ -75,6 +75,45 @@ schema_path = pkg_resources.files("rocinsight.ai_analysis") / "docs" / "analysis
 ---
 
 ## Version History
+
+---
+
+## v0.3.2 — 2026-03-25
+
+**No schema changes.** Branding, output routing, and LLM hardening only.
+
+**Branding:**
+- Webview `<title>`, HTML logo span, and markdown output headers changed from
+  "ROCpd AI Performance Analysis" to "ROCInsight AI Performance Analysis".
+- `analysis-output.schema.json` `title` field updated to "ROCInsight AI Analysis Output".
+
+**Output routing fix (`-d` without `-o`):**
+- When `-d <dir>` is given without `-o <name>`, rocinsight now auto-generates the output
+  filename from the database basename (e.g. `merged_opt.db` → `merged_opt.html`).
+  Previously the analysis was printed to the terminal even when `-d` was specified.
+
+**LLM truncation retry (`_call_openai`):**
+- When `_call_openai` receives empty content with `finish_reason=="length"` (reasoning
+  models like gpt-5/o1/o3 exhaust `max_completion_tokens=4096` on thinking tokens),
+  `analyze_with_llm` now retries with the system prompt filtered to only
+  `<!-- rocinsight-context: always -->` sections and `max_completion_tokens=16384`.
+- If the retry also fails, a clean user-facing error is raised (no internal sentinel leaking).
+- If content is non-empty but truncated (`finish_reason=="length"`), partial content is
+  returned with a warning instead of raising.
+
+**Smarter `_select_tags` (guide filtering by bottleneck):**
+- Tier 1 with a clear bottleneck (e.g. `memory_transfer`): only `{"always"}` — saves ~40% tokens.
+- Tier 1 with unclear bottleneck (`mixed` or `None`): `{"always", "tier1"}` — unchanged.
+- Tier 2 (counters): `{"always", "tier2"}` — drops `tier1` (was `{"always", "tier1", "tier2"}`).
+- `compiler` tag: only added when bottleneck is `compute` OR user prompt mentions
+  compiler/flag/build/register topics. No longer added for `memory` bottleneck.
+- Tier 0 (source-only): `{"always", "tier1", "source"}` — unchanged.
+
+**Bottleneck-aware `_format_data_for_llm`:**
+- `memory_transfer` bottleneck: top-3 kernels (no counter fields), full memory ops section.
+- `compute` bottleneck: top-3 kernels with counter fields, no memory ops section.
+- `latency`/`api` bottleneck: top-3 kernels (no counter fields), no memory ops section.
+- `mixed` or `None`: top-5 kernels with all fields, all sections (previous behavior).
 
 ---
 

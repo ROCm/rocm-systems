@@ -463,10 +463,10 @@ Override model: `ROCINSIGHT_LLM_MODEL` env var or `--llm-model <model-name>`.
 Invoked with `rocinsight analyze -i output.db --interactive` (no app string):
 
 ```
-  [p]  Profile   — run a new rocprofv3 command and analyze output
-  [a]  Analyze   — re-analyze current .db and refresh recommendations
-  [o]  Optimize  — ask the LLM for optimization advice
-  [s]  Save      — serialize session to ~/.rocinsight/sessions/
+  [p]  Profile app  — run rocprofv3, collect .db
+  [a]  Analyze .db  — load existing trace and find bottlenecks
+  [o]  Optimize     — AI code optimization suggestions
+  [s]  Save session
   [q]  Quit
 ```
 
@@ -487,10 +487,35 @@ Phase 3   Run rocprofv3 (streams output, handles ENV=VALUE prefixes)
 Phase 4   Analyze trace DB → print report with ATT auto-detection
 Phase 5   Recommendations menu (INFO vs. HIGH/MEDIUM split; Tier 3 escalation)
 Phase 6   AI file edit → .bak backup → revert flow on failure
-Phase 7   Re-profiling choice: same / edit / AI-recommended command
+Phase 7   Re-profiling choice: same / edit / AI-recommended / save-and-continue
 ```
 
 Sessions save to `~/.rocinsight/sessions/`.  `--resume-session` applies to `InteractiveSession` only.
+
+**`[s]` Save is available at every menu** — Phase 5 (all branches), Phase 7, and the
+post-revert "What would you like to do next?" menu.  Selecting `[s]` calls
+`WorkflowSession._save_session()` and re-shows the current menu without exiting.
+
+### Terminal Rendering (`interactive.py`)
+
+All rendering uses the `rich` library (falls back to raw ANSI if `rich` is not installed).
+
+**AMD brand palette**: accent color `#E0001A` (AMD red) used for menu borders, `[key]`
+labels, and `@@` diff headers.
+
+**Rich markup bracket escaping**: In Rich markup, unrecognized `[TAG]` sequences are
+silently stripped. Any text that must render as a literal `[WORD]` must be written as
+`\[WORD]` in the markup string (Python: `"\\[WORD]"`).
+
+| Helper | Pattern | Output |
+|---|---|---|
+| `_menu_opt(key, desc)` | `f"[bold #E0001A]\\[{key}][/bold #E0001A]  {desc}"` | `[p]  Profile…` in AMD red |
+| `_priority_badge(pri)` | `f"[{style}]\\[{pri}][/{style}]"` | `[HIGH]` in bold red |
+| Rec item `[N]` | `f"[bold #E0001A]\\[{i}][/bold #E0001A]"` | `[1]` in AMD red |
+
+**`WorkflowSession` must NOT have `_conv`** — that attribute belongs to `InteractiveSession`.
+Any save code in `WorkflowSession` must call `self._save_session()`; never reference `self._conv`,
+`self._session`, or `self._store` (those are `InteractiveSession` attributes).
 
 ---
 

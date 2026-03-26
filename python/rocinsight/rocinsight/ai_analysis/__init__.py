@@ -56,7 +56,7 @@ from .exceptions import (
     SourceAnalysisError,
 )
 
-from .llm_analyzer import LLMAnalyzer, AnalysisContext, load_reference_guide
+from .llm_analyzer import LLMAnalyzer, AnalysisContext, load_reference_guide, PROVIDER_REGISTRY
 from .llm_conversation import LLMConversation
 from .source_analyzer import SourceAnalyzer
 
@@ -113,6 +113,7 @@ __all__ = [
     "AnalysisContext",
     "LLMConversation",
     "load_reference_guide",
+    "PROVIDER_REGISTRY",
     # Source analysis
     "SourceAnalyzer",
 ]

@@ -10,6 +10,7 @@ import shlex
 import subprocess
 import tempfile
 import warnings
+import dataclasses
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Union
@@ -173,16 +174,75 @@ except ImportError:
 
 _console = Console() if _RICH else None
 
+# AMD brand palette
+_AMD_RED = "#E0001A"           # exact AMD red
+_AMD_RED_STYLE = f"bold {_AMD_RED}"
 _PRI_STYLE = {"HIGH": "bold red", "MEDIUM": "yellow", "LOW": "green", "INFO": "blue"}
+
+# ANSI constants for non-Rich fallback
+_A_RED    = "\033[91m"   # bright red ≈ AMD red
+_A_BOLD   = "\033[1m"
+_A_DIM    = "\033[2m"
+_A_WHITE  = "\033[97m"
+_A_RESET  = "\033[0m"
 
 
 def _print(msg: str = "", style: str = "") -> None:
+    """Print a line with a uniform style.  markup=False so user-content brackets
+    like kernel names or file paths are never accidentally parsed as Rich tags."""
     if _RICH and _console:
-        # markup=False so literal brackets like [p], [o], [n], [1] are not
-        # consumed as Rich markup tags and are shown to the user as-is.
         _console.print(msg, style=style or None, markup=False)
     else:
         print(msg)
+
+
+def _print_m(msg: str = "") -> None:
+    """Print a line that may contain Rich markup (for static, trusted strings only)."""
+    if _RICH and _console:
+        _console.print(msg)
+    else:
+        # Strip Rich markup tags for plain-text fallback using a simple regex
+        import re
+        plain = re.sub(r"\[/?[^\]]+\]", "", msg)
+        print(plain)
+
+
+def _menu_opt(key: str, desc: str, dim_suffix: str = "") -> None:
+    """Print a colored menu option:  [key]  desc  dim_suffix.
+
+    In Rich markup ``\\[`` renders as a literal ``[``, so ``\\[key]``
+    produces the styled ``[key]`` bracket pair.
+    """
+    suffix = f"  [dim]{dim_suffix}[/dim]" if dim_suffix else ""
+    _print_m(
+        f"  [bold {_AMD_RED}]\\[{key}][/bold {_AMD_RED}]"
+        f"  {desc}{suffix}"
+    )
+
+
+def _print_diff_line(line: str) -> None:
+    """Print one unified-diff line with appropriate color."""
+    if not _RICH or not _console:
+        print(line)
+        return
+    if line.startswith("+++") or line.startswith("---"):
+        _console.print(line, style="bold white", markup=False)
+    elif line.startswith("@@"):
+        _console.print(line, style=f"bold {_AMD_RED}", markup=False)
+    elif line.startswith("+"):
+        _console.print(line, style="bold green", markup=False)
+    elif line.startswith("-"):
+        _console.print(line, style="bold red", markup=False)
+    else:
+        _console.print(line, style="dim", markup=False)
+
+
+def _priority_badge(pri: str) -> str:
+    """Return a Rich-markup colored priority badge string."""
+    colors = {"HIGH": "bold red", "MEDIUM": "bold yellow", "LOW": "bold green", "INFO": "bold blue"}
+    style = colors.get(pri.upper(), "white")
+    # \\[ renders as literal [ in Rich markup so [HIGH] etc. are not consumed as tags
+    return f"[{style}]\\[{pri}][/{style}]"
 
 
 def _input(prompt: str) -> str:
@@ -270,6 +330,42 @@ def _render_logo_halfblock(width: int = 66, threshold: int = 70) -> Optional[str
         return None
 
 
+def _strip_code_preamble(text: str) -> str:
+    """Strip any non-code preamble that an LLM may have prefixed before the source.
+
+    Some models prepend an explanation such as "Here's the complete optimized
+    file." before the actual code.  This helper finds the first line that looks
+    like the start of a C/C++/HIP source file and discards everything before it.
+
+    A fenced code block (```...```) is also unwrapped if present.
+    """
+    import re as _re
+
+    # Unwrap a fenced code block first (```cpp ... ``` or ``` ... ```)
+    fence_match = _re.search(r"```[a-zA-Z]*\n(.*?)```", text, _re.DOTALL)
+    if fence_match:
+        return fence_match.group(1).rstrip()
+
+    # Scan line by line: return from the first line that looks like source code.
+    # Valid code starts: preprocessor directives, C/C++ comments, shebangs, or
+    # leading keywords/identifiers.
+    _CODE_LINE = _re.compile(
+        r"^[ \t]*(#\s*(include|define|pragma|ifndef|ifdef|endif|if\s)|"  # preprocessor
+        r"//|/\*|"                                                        # C/C++ comments
+        r"#!|"                                                            # shebang
+        r"(namespace|using|class|struct|typedef|int|void|float|double"
+        r"|extern|static|inline|template|__global__|__device__|__host__)\b)",
+    )
+    lines = text.splitlines(keepends=True)
+    for i, line in enumerate(lines):
+        if _CODE_LINE.match(line):
+            if i == 0:
+                return text  # already clean — no preamble
+            return "".join(lines[i:])
+
+    return text
+
+
 def _replace_output_dir(cmd: str, new_dir: str) -> str:
     """Replace the -d <dir> argument in a rocprofv3 command with new_dir."""
     import shlex as _shlex
@@ -305,10 +401,41 @@ def _print_startup_banner() -> None:
         print()
         print(art)
         print()
+        # Subtitle under the logo
+        if _RICH and _console:
+            _console.print(
+                f"  [bold white]ROCInsight[/bold white]"
+                f"  [dim]·[/dim]"
+                f"  [bold {_AMD_RED}]AMD ROCm[/bold {_AMD_RED}] AI Analysis"
+                f"  [dim]·  Interactive Session[/dim]"
+            )
+        else:
+            print(
+                f"  {_A_BOLD}{_A_WHITE}ROCInsight{_A_RESET}"
+                f"  {_A_DIM}·{_A_RESET}"
+                f"  {_A_BOLD}{_A_RED}AMD ROCm{_A_RESET} AI Analysis"
+                f"  {_A_DIM}·  Interactive Session{_A_RESET}"
+            )
+        print()
     else:
-        # Fallback: plain text header with AMD red
-        RED, BOLD, RESET = "\033[31m", "\033[1m", "\033[0m"
-        print(f"\n  {BOLD}{RED}AMD ROCm{RESET}  AI Analysis — Interactive Session\n")
+        # Fallback: styled text banner (no logo image)
+        _w = 68
+        if _RICH and _console:
+            _console.print(f"\n  [bold {_AMD_RED}]{'─' * _w}[/bold {_AMD_RED}]")
+            _console.print(
+                f"  [bold {_AMD_RED}]▌[/bold {_AMD_RED}]"
+                f"  [bold white]ROCInsight[/bold white]"
+                f"  [dim]AMD ROCm AI Analysis  ·  Interactive Session[/dim]"
+            )
+            _console.print(f"  [bold {_AMD_RED}]{'─' * _w}[/bold {_AMD_RED}]\n")
+        else:
+            print(f"\n  {_A_BOLD}{_A_RED}{'─' * _w}{_A_RESET}")
+            print(
+                f"  {_A_BOLD}{_A_RED}▌{_A_RESET}"
+                f"  {_A_BOLD}{_A_WHITE}ROCInsight{_A_RESET}"
+                f"  {_A_DIM}AMD ROCm AI Analysis  ·  Interactive Session{_A_RESET}"
+            )
+            print(f"  {_A_BOLD}{_A_RED}{'─' * _w}{_A_RESET}\n")
 
 
 # ── InteractiveSession ────────────────────────────────────────────────────────
@@ -421,20 +548,26 @@ class InteractiveSession:
 
     def _prompt_resume(self, existing: List[SessionData]) -> Optional[SessionData]:
         _print()
-        _print(
-            f"Found {len(existing)} previous session(s) for {self._source_dir}:",
-            style="cyan",
+        _print_m(
+            f"  [bold {_AMD_RED}]── Resume a previous session? [/bold {_AMD_RED}]"
+            f"[dim]{'─' * 36}[/dim]"
         )
+        _print(
+            f"  Found {len(existing)} saved session(s) for {self._source_dir}:",
+            style="dim",
+        )
+        _print()
         for i, s in enumerate(existing, 1):
             n_runs = sum(1 for h in s.history if h.type == "profiling_run")
             n_change = sum(1 for h in s.history if h.type == "code_change")
             n_items = len(s.persistent_menu_items)
-            _print(
-                f"  [{i}]  {s.session_id}  "
-                f"({n_runs} profiling run(s), {n_change} code change(s), "
-                f"{n_items} saved recommendation(s))"
+            detail = (
+                f"{n_runs} profiling run(s), {n_change} code change(s), "
+                f"{n_items} saved recommendation(s)"
             )
-        _print("  [n]  Start new session  (or press Enter)")
+            _menu_opt(str(i), s.session_id, detail)
+        _print()
+        _menu_opt("n", "Start new session  (or press Enter)")
         _print()
         choice = _input("  > ").strip().lower()
         if choice.isdigit():
@@ -463,31 +596,45 @@ class InteractiveSession:
                 Panel(
                     f"[bold]Source:[/bold] {src_label}   "
                     f"[bold]Session:[/bold] {self._session.session_id}   " + status_line,
-                    title="[bold cyan]rocinsight Interactive Analysis[/bold cyan]",
-                    border_style="blue",
+                    title=f"[bold {_AMD_RED}]▌[/bold {_AMD_RED}] [bold white]ROCInsight[/bold white]  [dim]AMD ROCm AI Analysis[/dim]",
+                    border_style=_AMD_RED,
                 )
             )
         else:
             w = 70
-            print("=" * w)
-            print(f"  rocinsight Interactive Analysis | {src_label}")
+            print(f"  {_A_BOLD}{_A_RED}{'─' * w}{_A_RESET}")
             print(
-                f"  Session: {self._session.session_id}"
-                f"  {db_label}  [s] save  [q] quit"
+                f"  {_A_BOLD}{_A_RED}▌{_A_RESET}"
+                f"  {_A_BOLD}{_A_WHITE}ROCInsight{_A_RESET}"
+                f"  {_A_DIM}AMD ROCm AI Analysis{_A_RESET}"
+                f"  {_A_DIM}|  {src_label}{_A_RESET}"
             )
-            print("=" * w)
+            print(
+                f"  {_A_DIM}Session: {self._session.session_id}"
+                f"  {db_label}  [s] save  [q] quit{_A_RESET}"
+            )
+            print(f"  {_A_BOLD}{_A_RED}{'─' * w}{_A_RESET}")
 
         _print()
-        _print("  [p]  Profile app  — run rocprofv3, collect .db", style="white")
-        _print(
-            "  [a]  Analyze .db  — load existing trace and find bottlenecks",
-            style="white",
-        )
-        _print("  [o]  Optimize     — AI code optimization suggestions", style="white")
+        _menu_opt("p", "Profile app  — run rocprofv3, collect .db")
+        _menu_opt("a", "Analyze .db  — load existing trace and find bottlenecks")
+        _menu_opt("o", "Optimize     — AI code optimization suggestions")
+        _print()
+        _menu_opt("s", "Save session")
+        _menu_opt("q", "Quit")
 
         if self._session.persistent_menu_items:
             _print()
-            _print("  ── Findings from this session " + "─" * 33, style="dim")
+            if _RICH and _console:
+                _console.print(
+                    f"  [bold {_AMD_RED}]── Findings from this session [/bold {_AMD_RED}]"
+                    + f"[dim]{'─' * 33}[/dim]"
+                )
+            else:
+                print(
+                    f"  {_A_BOLD}{_A_RED}── Findings from this session {_A_RESET}"
+                    + f"{_A_DIM}{'─' * 33}{_A_RESET}"
+                )
             for i, item in enumerate(self._session.persistent_menu_items, 1):
                 pri = item.priority.upper()
                 pri_style = _PRI_STYLE.get(pri, "white")
@@ -496,12 +643,15 @@ class InteractiveSession:
                 )
                 if _RICH and _console:
                     _console.print(
-                        f"  [cyan bold]\\[{i}][/cyan bold]  "
+                        f"  [bold {_AMD_RED}]\\[{i}][/bold {_AMD_RED}]  "
                         f"[{pri_style}][{pri}][/{pri_style}]  "
                         f"{item.title}{src_tag}"
                     )
                 else:
-                    print(f"  [{i}]  [{pri}]  {item.title}{src_tag}")
+                    print(
+                        f"  {_A_BOLD}{_A_RED}[{i}]{_A_RESET}"
+                        f"  [{pri}]  {item.title}{src_tag}"
+                    )
         _print()
 
     def _path_analyze_db(self) -> None:
@@ -511,10 +661,10 @@ class InteractiveSession:
             _print(f"  Current .db: {self._db_path}", style="dim")
             _print(
                 "  Enter a .db path to analyze, or press Enter to re-analyze current:",
-                style="cyan",
+                style=_AMD_RED,
             )
         else:
-            _print("  Enter path to a .db trace file:", style="cyan")
+            _print("  Enter path to a .db trace file:", style=_AMD_RED)
         try:
             db_input = _input("  > ").strip()
         except EOFError:
@@ -548,11 +698,13 @@ class InteractiveSession:
         high = [r for r in recs if r.get("priority", "").upper() == "HIGH"]
         med = [r for r in recs if r.get("priority", "").upper() == "MEDIUM"]
         _print()
-        _print("  ── Analysis Summary ────────────────────────────────────", style="cyan")
+        _print_m(f"  [bold {_AMD_RED}]── Analysis Summary ────────────────────────────────────[/bold {_AMD_RED}]")
         for r in high:
-            _print(f"  [HIGH]    {r.get('issue', r.get('title', ''))}", style="bold red")
+            issue = r.get("issue", r.get("title", ""))
+            _print_m(f"  {_priority_badge('HIGH')}  [white]{issue}[/white]")
         for r in med:
-            _print(f"  [MEDIUM]  {r.get('issue', r.get('title', ''))}", style="yellow")
+            issue = r.get("issue", r.get("title", ""))
+            _print_m(f"  {_priority_badge('MEDIUM')}  [white]{issue}[/white]")
         _print()
 
     def run(self) -> None:
@@ -602,7 +754,7 @@ class InteractiveSession:
             self._session.conversation = self._conv.to_dict()
         self._session.sent_source_files = list(self._sent_source_files)
         self._store.save(self._session)
-        _print("  Session saved. Goodbye.", style="cyan")
+        _print("  Session saved. Goodbye.", style=_AMD_RED)
 
     def _ingest_recommendations(
         self, new_recs: List[Dict[str, Any]], source: str = "profiling_analysis"
@@ -631,7 +783,7 @@ class InteractiveSession:
     def _path_profiling(self, _source: str = "profiling_analysis") -> None:
         """Show profiling commands; let user pick one to run; auto-ingest output .db."""
         _print()
-        _print("  ── Profiling Commands ──────────────────────────────────", style="cyan")
+        _print("  ── Profiling Commands ──────────────────────────────────", style=_AMD_RED)
         _print()
 
         cmds = self._collect_profiling_commands()
@@ -645,11 +797,11 @@ class InteractiveSession:
             return
 
         for i, (label, cmd) in enumerate(cmds, 1):
-            _print(f"  [{i}]  {label}", style="white")
+            _menu_opt(str(i), label)
             _print(f"       $ {cmd}", style="dim")
             _print()
 
-        _print("  Enter command number to run it, or Enter to skip:", style="cyan")
+        _print("  Enter command number to run it, or Enter to skip:", style=_AMD_RED)
         try:
             choice = _input("  > ").strip()
         except EOFError:
@@ -669,7 +821,7 @@ class InteractiveSession:
             auto = self._resolve_app_placeholder(selected_cmd)
             auto_app = auto.split("-- ", 1)[1] if "-- " in auto else ""
             hint = f" (default: {auto_app})" if auto_app and auto_app != "./app" else ""
-            _print(f"  Enter application to profile{hint}:", style="cyan")
+            _print(f"  Enter application to profile{hint}:", style=_AMD_RED)
             _print(
                 "  (e.g.  ./my_app --arg1 val1   or press Enter to use default)",
                 style="dim",
@@ -685,7 +837,7 @@ class InteractiveSession:
             # else leave as-is (./app stays in command; user will see it)
 
         _print()
-        _print(f"  Running: $ {selected_cmd}", style="cyan")
+        _print(f"  Running: $ {selected_cmd}", style=_AMD_RED)
         _print()
 
         proc = subprocess.run(shlex.split(selected_cmd))
@@ -699,7 +851,7 @@ class InteractiveSession:
             _print(f"  Found output: {db_path}", style="green")
         else:
             _print(
-                "  Enter path to the output .db file (or Enter to skip):", style="cyan"
+                "  Enter path to the output .db file (or Enter to skip):", style=_AMD_RED
             )
             try:
                 db_input = _input("  > ").strip()
@@ -863,7 +1015,7 @@ class InteractiveSession:
                 f"{_json.dumps(metadata)}"
             )
             _print()
-            _print("  ── LLM Profiling Advice ────────────────────────────", style="cyan")
+            _print("  ── LLM Profiling Advice ────────────────────────────", style=_AMD_RED)
             self._conv.send(user_msg, on_token=_print_token)
             _print()
         except Exception as exc:
@@ -1010,10 +1162,10 @@ class InteractiveSession:
             return
         _print()
         _print(
-            "  ── AI-suggested profiling commands ───────────────────────", style="cyan"
+            "  ── AI-suggested profiling commands ───────────────────────", style=_AMD_RED
         )
         for i, cmd in enumerate(commands, 1):
-            _print(f"  [{i}]  $ {cmd}", style="dim")
+            _print_m(f"  [bold {_AMD_RED}][{i}][/bold {_AMD_RED}]  [dim]$ {cmd}[/dim]")
         _print()
         prompt_opts = "/".join(str(i) for i in range(1, len(commands) + 1)) + "/n"
         try:
@@ -1026,7 +1178,7 @@ class InteractiveSession:
         cmd = commands[int(choice) - 1]
         if "-- ./app" in cmd:
             auto = self._resolve_app_placeholder(cmd)
-            _print("  Enter application to profile:", style="cyan")
+            _print("  Enter application to profile:", style=_AMD_RED)
             try:
                 app_input = _input("  > ").strip()
             except EOFError:
@@ -1037,7 +1189,7 @@ class InteractiveSession:
                 cmd = auto
 
         _print()
-        _print(f"  Running: $ {cmd}", style="cyan")
+        _print(f"  Running: $ {cmd}", style=_AMD_RED)
         _print()
         proc = subprocess.run(shlex.split(cmd))
         _print()
@@ -1047,7 +1199,7 @@ class InteractiveSession:
         db_path = self._find_output_db(cmd)
         if not db_path:
             _print(
-                "  Enter path to the output .db file (or Enter to skip):", style="cyan"
+                "  Enter path to the output .db file (or Enter to skip):", style=_AMD_RED
             )
             try:
                 db_input = _input("  > ").strip()
@@ -1177,7 +1329,7 @@ class InteractiveSession:
             return
 
         _print()
-        _print(f"  Analyzing {len(hot_files)} file(s):", style="cyan")
+        _print(f"  Analyzing {len(hot_files)} file(s):", style=_AMD_RED)
         for path, _ in hot_files:
             try:
                 label = pathlib.Path(path).relative_to(pathlib.Path(self._source_dir))
@@ -1195,7 +1347,7 @@ class InteractiveSession:
         if first_text:
             _print()
             _print(
-                "  ── Optimization Suggestions ─────────────────────────", style="cyan"
+                "  ── Optimization Suggestions ─────────────────────────", style=_AMD_RED
             )
             _print(first_text[:3000] + ("…" if len(first_text) > 3000 else ""))
             _print()
@@ -1312,7 +1464,7 @@ class InteractiveSession:
             + _json.dumps(metadata, indent=2)
         )
         _print()
-        _print("  ── AI Optimization Suggestions ──────────────────────", style="cyan")
+        _print("  ── AI Optimization Suggestions ──────────────────────", style=_AMD_RED)
         try:
             note = self._conv.send(user_msg, on_token=_print_token)
             _print()
@@ -1336,10 +1488,10 @@ class InteractiveSession:
         self, suggestions: str, llm_provider: Optional[str] = None
     ) -> None:
         """Ask user whether to save the suggestions or let the LLM edit source code directly."""
-        _print("  Apply these suggestions to your source files?", style="cyan")
-        _print("    [s] Save suggestions to a file", style="dim")
-        _print("    [e] Edit code with AI  (LLM rewrites a source file)", style="dim")
-        _print("    [n] No, return to menu (default)", style="dim")
+        _print("  Apply these suggestions to your source files?", style=_AMD_RED)
+        _menu_opt("s", "Save suggestions to a file")
+        _menu_opt("e", "Edit code with AI  (LLM rewrites a source file)")
+        _menu_opt("n", "No, return to menu (default)")
         try:
             ans = _input("  > ").strip().lower()
         except EOFError:
@@ -1376,13 +1528,13 @@ class InteractiveSession:
             return None
 
         _print()
-        _print("  Choose a file to edit:", style="cyan")
+        _print("  Choose a file to edit:", style=_AMD_RED)
         for i, p in enumerate(src_files[:15]):
             try:
                 label = p.relative_to(pathlib.Path(self._source_dir))
             except ValueError:
                 label = p.name
-            _print(f"    [{i + 1}] {label}", style="dim")
+            _menu_opt(str(i + 1), str(label))
         try:
             choice = _input("  > ").strip()
         except EOFError:
@@ -1485,6 +1637,8 @@ class InteractiveSession:
                     rewritten = analyzer._call_anthropic(system, user)
                 elif llm_provider == "private":
                     rewritten = analyzer._call_private(system, user)
+                elif llm_provider == "claude-code":
+                    rewritten = analyzer._call_claude_code(system, user)
                 else:
                     rewritten = analyzer._call_local(system, user)
         except Exception as exc:
@@ -1509,16 +1663,10 @@ class InteractiveSession:
         )
 
         _print()
-        _print("  ── Proposed changes ─────────────────────────────────", style="cyan")
+        _print_m(f"  [bold {_AMD_RED}]── Proposed changes ─────────────────────────────────[/bold {_AMD_RED}]")
         if diff_lines:
             for line in diff_lines[:120]:  # cap at 120 diff lines for readability
-                line = line.rstrip("\n")
-                if line.startswith("+"):
-                    _print(line, style="green")
-                elif line.startswith("-"):
-                    _print(line, style="red")
-                else:
-                    _print(line, style="dim")
+                _print_diff_line(line.rstrip("\n"))
             if len(diff_lines) > 120:
                 _print(
                     f"  ... ({len(diff_lines) - 120} more diff lines omitted)",
@@ -1606,7 +1754,7 @@ class InteractiveSession:
                     if isinstance(rec, dict)
                     else getattr(rec, "actions", [])
                 )
-                _print(f"  [{pri}] {issue}", style="yellow" if pri == "MEDIUM" else "red")
+                _print_m(f"  {_priority_badge(pri)}  {issue}")
                 if suggest:
                     _print(f"    → {suggest}", style="dim")
                 for act in actions[:3]:
@@ -1657,7 +1805,7 @@ class InteractiveSession:
                 self._sent_source_files.update(new_files)
             _print()
             _print(
-                "  ── AI Optimization Suggestions ──────────────────────", style="cyan"
+                "  ── AI Optimization Suggestions ──────────────────────", style=_AMD_RED
             )
             raw = self._conv.send(user_msg, on_token=_print_token)
             _print()
@@ -1687,7 +1835,7 @@ class InteractiveSession:
         name = pathlib.Path(path).name
         _print()
         _print(
-            f"  ── Suggestions for {name} ──────────────────────────────", style="cyan"
+            f"  ── Suggestions for {name} ──────────────────────────────", style=_AMD_RED
         )
         _print(suggestion[:2000] + ("…" if len(suggestion) > 2000 else ""))
         _print()
@@ -1729,7 +1877,7 @@ class InteractiveSession:
         _print()
         _print(
             f"  ── {item.title} [{item.priority}] ──────────────────────────────",
-            style="cyan",
+            style=_AMD_RED,
         )
         detail = item.detail
         if detail.get("issue"):
@@ -1741,7 +1889,7 @@ class InteractiveSession:
         actions = detail.get("actions", [])
         if actions:
             _print()
-            _print("  Next steps:", style="cyan")
+            _print("  Next steps:", style=_AMD_RED)
             for act in actions:
                 _print(f"    • {act}", style="dim")
 
@@ -1752,16 +1900,16 @@ class InteractiveSession:
         ]
         if cmds:
             _print()
-            _print("  Suggested commands:", style="cyan")
+            _print("  Suggested commands:", style=_AMD_RED)
             for i, cmd in enumerate(cmds, 1):
                 _print(f"    [{i}]  $ {cmd}", style="dim")
 
         _print()
         if cmds:
-            _print("  [r]  Run suggested command")
+            _menu_opt("r", "Run suggested command")
         else:
-            _print("  [r]  Run a profiling command")
-        _print("  [m]  Back to main menu")
+            _menu_opt("r", "Run a profiling command")
+        _menu_opt("m", "Back to main menu")
         _print()
         try:
             choice = _input("  > ").strip().lower()
@@ -1775,7 +1923,7 @@ class InteractiveSession:
             cmd = self._resolve_app_placeholder(cmds[0])
             # Ask for app if placeholder not resolved
             if "-- ./app" in cmd:
-                _print("  Enter application to profile:", style="cyan")
+                _print("  Enter application to profile:", style=_AMD_RED)
                 try:
                     app_input = _input("  > ").strip()
                 except EOFError:
@@ -1784,7 +1932,7 @@ class InteractiveSession:
                     cmd = cmd.replace("-- ./app", f"-- {app_input}")
 
             _print()
-            _print(f"  Running: $ {cmd}", style="cyan")
+            _print(f"  Running: $ {cmd}", style=_AMD_RED)
             _print()
             proc = subprocess.run(shlex.split(cmd), check=False)
             _print()
@@ -2072,26 +2220,136 @@ class WorkflowSession:
         llm_api_key: Optional[str] = None,
         llm_model: Optional[str] = None,
         trace_dir: Optional[str] = None,
+        resume_session: Optional[str] = None,
     ) -> None:
-        self._state = WorkflowState(
-            app_command=app_command,
-            source_paths=list(source_paths or []),
-        )
         self._llm_provider = llm_provider
         self._llm_api_key = llm_api_key
         self._llm_model = llm_model
         self._trace_dir = trace_dir or self._DEFAULT_TRACE_DIR
-        # Session persistence
+        self._sessions_dir = pathlib.Path.home() / ".rocinsight" / "sessions"
+        # Checkpoint manager — set after _init_checkpoints() called from run()
+        self._gcm: Optional["GitCheckpointManager"] = None
+        self._resumed = False
+
+        if resume_session:
+            loaded = self._load_session(resume_session)
+            if loaded is not None:
+                self._state, self._session_id = loaded
+                self._session_file = self._sessions_dir / f"{self._session_id}.json"
+                # Merge any new source paths provided on the command line
+                for sp in source_paths or []:
+                    if sp not in self._state.source_paths:
+                        self._state.source_paths.append(sp)
+                self._resumed = True
+                return
+
+        # Fresh session
+        self._state = WorkflowState(
+            app_command=app_command,
+            source_paths=list(source_paths or []),
+        )
         _ts = datetime.now(timezone.utc).strftime("%Y-%m-%d_%H-%M-%S")
         try:
             _slug = re.sub(r"[^\w-]", "_", shlex.split(app_command)[0])[:24]
         except (ValueError, IndexError):
             _slug = "app"
         self._session_id = f"workflow_{_ts}_{_slug}"
-        self._sessions_dir = pathlib.Path.home() / ".rocinsight" / "sessions"
         self._session_file = self._sessions_dir / f"{self._session_id}.json"
-        # Checkpoint manager — set after _init_checkpoints() called from run()
-        self._gcm: Optional["GitCheckpointManager"] = None
+
+    def _load_session(
+        self, path_or_id: str
+    ) -> Optional[tuple]:  # -> (WorkflowState, session_id) or None
+        """Load a saved WorkflowSession from disk.
+
+        Accepts:
+          - An absolute path to a .json file
+          - A session ID (looked up in ~/.rocinsight/sessions/<id>.json)
+          - "latest" — picks the most-recently-modified workflow session file
+        """
+        p = pathlib.Path(path_or_id)
+        if not p.is_absolute():
+            # Try as session ID under sessions dir
+            candidate = self._sessions_dir / f"{path_or_id}.json"
+            if candidate.exists():
+                p = candidate
+            elif path_or_id == "latest":
+                wf_files = sorted(
+                    self._sessions_dir.glob("workflow_*.json"),
+                    key=lambda f: f.stat().st_mtime,
+                    reverse=True,
+                )
+                if not wf_files:
+                    _print("  No saved workflow sessions found.", style="yellow")
+                    return None
+                p = wf_files[0]
+            else:
+                _print(
+                    f"  Session not found: {path_or_id!r}", style="yellow"
+                )
+                return None
+
+        if not p.exists():
+            _print(f"  Session file not found: {p}", style="yellow")
+            return None
+
+        try:
+            payload = json.loads(p.read_text())
+        except Exception as exc:
+            _print(f"  Could not load session: {exc}", style="yellow")
+            return None
+
+        if payload.get("type") != "workflow":
+            _print(
+                "  Session file is not a workflow session — use "
+                "--resume-session with a workflow_*.json file.",
+                style="yellow",
+            )
+            return None
+
+        session_id: str = payload.get("session_id", p.stem)
+        raw_state: dict = payload.get("state", {})
+        try:
+            state = self._restore_state(raw_state)
+        except Exception as exc:
+            _print(f"  Session state could not be restored: {exc}", style="yellow")
+            return None
+
+        return state, session_id
+
+    @staticmethod
+    def _restore_state(raw: dict) -> "WorkflowState":
+        """Reconstruct a WorkflowState dataclass from an asdict() dict."""
+        trace_history = [
+            _TraceRun(**r) for r in raw.get("trace_history", [])
+        ]
+        analysis_history = []
+        for s in raw.get("analysis_history", []):
+            s = dict(s)
+            # Remove any unknown keys that may have been added in later versions
+            known = {f.name for f in dataclasses.fields(_AnalysisSnapshot)}
+            analysis_history.append(_AnalysisSnapshot(**{k: v for k, v in s.items() if k in known}))
+        edit_history = [
+            _EditRecord(**e) for e in raw.get("edit_history", [])
+        ]
+        checkpoints = []
+        for c in raw.get("checkpoints", []):
+            c = dict(c)
+            known = {f.name for f in dataclasses.fields(CheckpointRecord)}
+            checkpoints.append(CheckpointRecord(**{k: v for k, v in c.items() if k in known}))
+        return WorkflowState(
+            app_command=raw.get("app_command", ""),
+            source_paths=raw.get("source_paths", []),
+            profiling_command=raw.get("profiling_command", ""),
+            trace_history=trace_history,
+            analysis_history=analysis_history,
+            edit_history=edit_history,
+            iteration_count=raw.get("iteration_count", 0),
+            repo_root=raw.get("repo_root", ""),
+            baseline_commit=raw.get("baseline_commit", ""),
+            checkpoints=checkpoints,
+            active_checkpoint=raw.get("active_checkpoint"),
+            blacklisted_approaches=raw.get("blacklisted_approaches", []),
+        )
 
     def _save_session(self) -> None:
         """Serialize WorkflowState to ~/.rocinsight/sessions/workflow_<id>.json."""
@@ -2439,7 +2697,7 @@ class WorkflowSession:
             _print("\n  Blacklist approaches that caused regressions?")
             for idx, cp in enumerate(regression_cps, 1):
                 delta_str = f"{cp.performance_delta_pct:.1f}%"
-                _print(f"    [{idx}]  cp-{cp.cp_id}: {cp.edit_summary} ({delta_str})")
+                _print_m(f"    [bold {_AMD_RED}][{idx}][/bold {_AMD_RED}]  [dim]cp-{cp.cp_id}: {cp.edit_summary} ({delta_str})[/dim]")
             bl_raw = (
                 _input("  Enter numbers to blacklist (space-separated), or [n] skip: ")
                 .strip()
@@ -2699,7 +2957,7 @@ class WorkflowSession:
         _print()
         _print(
             "  ── Quick Workload Analysis ─────────────────────────────────",
-            style="cyan",
+            style=_AMD_RED,
         )
 
         # App-command heuristics
@@ -2806,9 +3064,9 @@ class WorkflowSession:
         _print()
         width = max(66, len(cmd) + 8)
         border = "─" * (width - 2)
-        _print(f"╭{border}╮", style="cyan")
-        _print("│  Profiling Command" + " " * (width - 21) + "│", style="cyan")
-        _print("│" + " " * (width - 2) + "│", style="cyan")
+        _print(f"╭{border}╮", style=_AMD_RED)
+        _print("│  Profiling Command" + " " * (width - 21) + "│", style=_AMD_RED)
+        _print("│" + " " * (width - 2) + "│", style=_AMD_RED)
         indent = "│  "
         tail = "  │"
         avail = width - len(indent) - len(tail)
@@ -2817,14 +3075,14 @@ class WorkflowSession:
         line = ""
         for word in words:
             if line and len(line) + 1 + len(word) > avail:
-                _print(f"{indent}{line:<{avail}}{tail}", style="cyan")
+                _print(f"{indent}{line:<{avail}}{tail}", style=_AMD_RED)
                 line = word
             else:
                 line = f"{line} {word}".lstrip()
         if line:
-            _print(f"{indent}{line:<{avail}}{tail}", style="cyan")
-        _print("│" + " " * (width - 2) + "│", style="cyan")
-        _print(f"╰{border}╯", style="cyan")
+            _print(f"{indent}{line:<{avail}}{tail}", style=_AMD_RED)
+        _print("│" + " " * (width - 2) + "│", style=_AMD_RED)
+        _print(f"╰{border}╯", style=_AMD_RED)
         _print()
         try:
             ans = (
@@ -2856,25 +3114,24 @@ class WorkflowSession:
         Returns one of: "retry" | "continue" | "exit"
         """
         _print()
-        _print("  ── What would you like to do next? ─────────────────────", style="cyan")
+        _print("  ── What would you like to do next? ─────────────────────", style=_AMD_RED)
         if show_retry:
-            _print(
-                "    [f]  Try a different fix  — let the AI attempt another approach",
-                style="white",
-            )
-        _print(
-            "    [p]  Continue to re-profiling  (skip code changes this round)",
-            style="white",
-        )
-        _print("    [q]  Exit session", style="white")
+            _menu_opt("f", "Try a different fix  — let the AI attempt another approach")
+        _menu_opt("p", "Continue to re-profiling  (skip code changes this round)")
+        _menu_opt("s", "Save session")
+        _menu_opt("q", "Exit session")
         _print()
-        prompt = "  [f/p/q]: " if show_retry else "  [p/q]: "
+        prompt = "  [f/p/s/q]: " if show_retry else "  [p/s/q]: "
         try:
             choice = _input(prompt).strip().lower()
         except EOFError:
             return "continue"
         if choice in ("f", "fix", "retry") and show_retry:
             return "retry"
+        if choice == "s":
+            self._save_session()
+            _print("  Session saved.", style="green")
+            return "continue"
         if choice in ("q", "quit", "exit"):
             return "exit"
         return "continue"
@@ -2958,7 +3215,7 @@ class WorkflowSession:
             _print()
             _print(
                 "  What went wrong? Paste the error output or briefly describe the issue.",
-                style="cyan",
+                style=_AMD_RED,
             )
             _print(
                 "  (Press Enter to skip and proceed without error context)", style="dim"
@@ -2979,7 +3236,7 @@ class WorkflowSession:
             return self._post_revert_menu(show_retry=False)
 
         _print()
-        _print("  ── Analyzing failure with LLM ──────────────────────────", style="cyan")
+        _print("  ── Analyzing failure with LLM ──────────────────────────", style=_AMD_RED)
 
         error_block = (
             f"\n=== COMPILATION / RUNTIME ERRORS ===\n{failure_reason[:1500]}"
@@ -3021,6 +3278,8 @@ class WorkflowSession:
                     analysis = analyzer._call_anthropic(system, user, timeout=120)
                 elif self._llm_provider == "private":
                     analysis = analyzer._call_private(system, user)
+                elif self._llm_provider == "claude-code":
+                    analysis = analyzer._call_claude_code(system, user)
                 else:
                     analysis = analyzer._call_local(system, user)
         except Exception as exc:
@@ -3073,18 +3332,9 @@ class WorkflowSession:
                     )
                 else:
                     _print()
-                    _print(
-                        "  ── Proposed alternative ──────────────────────────",
-                        style="cyan",
-                    )
+                    _print_m(f"  [bold {_AMD_RED}]── Proposed alternative ──────────────────────────[/bold {_AMD_RED}]")
                     for line in diff_lines[:120]:
-                        line = line.rstrip("\n")
-                        if line.startswith("+"):
-                            _print(line, style="green")
-                        elif line.startswith("-"):
-                            _print(line, style="red")
-                        else:
-                            _print(line, style="dim")
+                        _print_diff_line(line.rstrip("\n"))
                     if len(diff_lines) > 120:
                         _print(f"  ... ({len(diff_lines) - 120} more lines)", style="dim")
                     _print()
@@ -3140,7 +3390,7 @@ class WorkflowSession:
         try:
             from rocinsight.connection import merge_sqlite_dbs  # type: ignore[import]
 
-            _print(f"  Merging {len(db_files)} per-process databases…", style="cyan")
+            _print(f"  Merging {len(db_files)} per-process databases…", style=_AMD_RED)
             merge_sqlite_dbs(db_files, merged_path)
             _print(f"  ✓ Merged → {merged_path}", style="green")
             return merged_path
@@ -3182,7 +3432,7 @@ class WorkflowSession:
         import shlex as _shlex
 
         while True:
-            _print(f"  Running: $ {cmd}", style="cyan")
+            _print(f"  Running: $ {cmd}", style=_AMD_RED)
             _print()
 
             # Separate leading ENV=value tokens from the executable + args.
@@ -3298,11 +3548,11 @@ class WorkflowSession:
                     f"  Profiling command failed (exit code {proc.returncode}).",
                     style="red",
                 )
-                _print("    [r]  Retry same command", style="dim")
-                _print("    [e]  Edit the command and retry", style="dim")
+                _menu_opt("r", "Retry same command")
+                _menu_opt("e", "Edit the command and retry")
                 if self._state.edit_history:
-                    _print("    [v]  Revert last AI edit and retry", style="yellow")
-                _print("    [a]  Abort", style="dim")
+                    _menu_opt("v", "Revert last AI edit and retry")
+                _menu_opt("a", "Abort")
                 try:
                     choice = _input("  > ").strip().lower()
                 except EOFError:
@@ -3325,7 +3575,7 @@ class WorkflowSession:
                     if action == "exit":
                         return False
                     if reverted and action != "retry":
-                        _print("  Please recompile, then retry.", style="cyan")
+                        _print("  Please recompile, then retry.", style=_AMD_RED)
                     continue
                 else:
                     return False
@@ -3369,7 +3619,7 @@ class WorkflowSession:
         pct = (new_s - prev_s) / prev_s * 100
         arrow = "▼" if pct < 0 else "▲"
         _print()
-        _print("  ── Performance Comparison ──────────────────────────────", style="cyan")
+        _print("  ── Performance Comparison ──────────────────────────────", style=_AMD_RED)
         _print(f"  {'Metric':<28}  {'Before':>8}  {'After':>8}  Change", style="bold")
         _print(
             f"  {'Total GPU time':<28}  {prev_s:>7.2f}s  {new_s:>7.2f}s  "
@@ -3399,7 +3649,7 @@ class WorkflowSession:
             header = "  ══ AI Trace Analysis Report " + "═" * 44
         else:
             header = f"  ══ AI Trace Analysis Report  (Run #{iteration}) " + "═" * 35
-        _print(header, style="bold cyan")
+        _print(header, style=_AMD_RED_STYLE)
         _print()
 
         recs: List[Dict[str, Any]] = []
@@ -3425,7 +3675,7 @@ class WorkflowSession:
             if _att_dir:
                 _print(
                     f"  [ATT] Found {len(_att_csvs)} stats_*.csv file(s) — Tier 3 ATT analysis active",
-                    style="cyan",
+                    style=_AMD_RED,
                 )
 
             eb = result.execution_breakdown
@@ -3542,7 +3792,7 @@ class WorkflowSession:
         for i, rec in enumerate(recs, 1):
             pri = rec.get("priority", "INFO")
             style = _PRI_STYLE.get(pri, "white")
-            _print(f"  ─── Issue #{i}: {rec.get('issue', '')[:70]} ───", style="cyan")
+            _print(f"  ─── Issue #{i}: {rec.get('issue', '')[:70]} ───", style=_AMD_RED)
             _print(f"  Severity   : {pri}", style=style)
             if rec.get("suggestion"):
                 _print(f"  Root Cause : {rec['suggestion']}", style="dim")
@@ -3557,7 +3807,7 @@ class WorkflowSession:
                     fc = cmd_obj.get("full_command", "")
                     desc = cmd_obj.get("description", "")
                     if fc:
-                        _print(f"    $ {fc}", style="cyan")
+                        _print(f"    $ {fc}", style=_AMD_RED)
                     if desc:
                         _print(f"      ({desc})", style="dim")
             _print()
@@ -3677,13 +3927,12 @@ class WorkflowSession:
             _print()
             _print(
                 "  ── Recommendations ─────────────────────────────────────",
-                style="bold cyan",
+                style=_AMD_RED_STYLE,
             )
             for i, rec in enumerate(recs, 1):
                 pri = rec.get("priority", "INFO")
-                style = _PRI_STYLE.get(pri, "white")
                 issue = rec.get("issue", "")[:70]
-                _print(f"  [{i}]  [{pri}]  {issue}", style=style)
+                _print_m(f"  [bold {_AMD_RED}]\\[{i}][/bold {_AMD_RED}]  {_priority_badge(pri)}  {issue}")
             _print()
             has_real_data = bool(self._state.trace_history)
             _att_already_run = any(
@@ -3719,15 +3968,9 @@ class WorkflowSession:
                         style="dim",
                     )
                     _print()
-                    _print(
-                        "  [d]  Go deeper: collect PC sampling data (Tier 3 — stochastic)",
-                        style="cyan",
-                    )
+                    _menu_opt("d", "Go deeper: collect PC sampling data", "Tier 3 — stochastic")
                     if not _att_already_run:
-                        _print(
-                            "  [t]  Go deeper: collect ATT trace (Tier 3 — instruction stall analysis)",
-                            style="cyan",
-                        )
+                        _menu_opt("t", "Go deeper: collect ATT trace", "Tier 3 — instruction stall analysis")
                 else:
                     # No GPU data at all — likely multiprocessing spawn issue.
                     _print(
@@ -3744,23 +3987,26 @@ class WorkflowSession:
                     )
                 _print()
                 if self._state.checkpoints:
-                    _print("  [b]  Roll back to a checkpoint", style="dim")
-                _print("  [n]  Skip — stop re-profiling", style="dim")
-                _print("  [q]  Quit session", style="dim")
+                    _menu_opt("b", "Roll back to a checkpoint")
+                _menu_opt("s", "Save session")
+                _menu_opt("n", "Skip — stop re-profiling")
+                _menu_opt("q", "Quit session")
             elif all_info:
                 # Only profiling-guidance recommendations — no source code to optimize.
                 # Direct the user to re-profile with the suggested commands.
-                _print("  [r]  Re-profile with suggested commands", style="cyan")
+                _menu_opt("r", "Re-profile with suggested commands")
                 if self._state.checkpoints:
-                    _print("  [b]  Roll back to a checkpoint", style="dim")
-                _print("  [n]  Skip", style="dim")
-                _print("  [q]  Quit session", style="dim")
+                    _menu_opt("b", "Roll back to a checkpoint")
+                _menu_opt("s", "Save session")
+                _menu_opt("n", "Skip")
+                _menu_opt("q", "Quit session")
             else:
-                _print("  [a]  Address all with AI optimization", style="dim")
+                _menu_opt("a", "Address all with AI optimization")
                 if self._state.checkpoints:
-                    _print("  [b]  Roll back to a checkpoint", style="dim")
-                _print("  [n]  Skip — proceed to re-profiling", style="dim")
-                _print("  [q]  Quit session", style="dim")
+                    _menu_opt("b", "Roll back to a checkpoint")
+                _menu_opt("s", "Save session")
+                _menu_opt("n", "Skip — proceed to re-profiling")
+                _menu_opt("q", "Quit session")
             _print()
             try:
                 choice = _input("  Enter choice: ").strip().lower()
@@ -3769,6 +4015,10 @@ class WorkflowSession:
 
             if choice == "q":
                 return None
+            if choice == "s":
+                self._save_session()
+                _print("  Session saved.", style="green")
+                continue
             if choice in ("n", ""):
                 return None
             if choice == "b" and self._state.checkpoints:
@@ -3849,7 +4099,7 @@ class WorkflowSession:
                 _print()
                 _print(
                     f"  ─── {r.get('issue', '')[:60]} [{r.get('priority', '')}] ───",
-                    style="cyan",
+                    style=_AMD_RED,
                 )
                 if r.get("suggestion"):
                     _print(f"  Root Cause : {r['suggestion']}", style="dim")
@@ -3862,16 +4112,10 @@ class WorkflowSession:
                 _print("  Invalid choice.", style="yellow")
                 continue
 
-            _print("  How would you like the optimization applied?", style="cyan")
-            _print(
-                "    [1]  Edit files directly (AI modifies source files in-place)",
-                style="dim",
-            )
-            _print(
-                "    [2]  Provide a diff/patch file (you review and apply manually)",
-                style="dim",
-            )
-            _print("    [n]  Back to recommendations menu", style="dim")
+            _print("  How would you like the optimization applied?", style=_AMD_RED)
+            _menu_opt("1", "Edit files directly  (AI modifies source files in-place)")
+            _menu_opt("2", "Provide a diff/patch file  (you review and apply manually)")
+            _menu_opt("n", "Back to recommendations menu")
             _print()
             try:
                 mode_choice = _input("  > ").strip().lower()
@@ -3900,13 +4144,13 @@ class WorkflowSession:
             _print("  (No source files found in provided --source paths)", style="yellow")
             return None
         _print()
-        _print("  Choose a file to edit:", style="cyan")
+        _print("  Choose a file to edit:", style=_AMD_RED)
         for i, f in enumerate(files[:15], 1):
             try:
                 label = f.relative_to(self._state.source_paths[0])
             except (ValueError, IndexError):
                 label = f.name  # type: ignore[assignment]
-            _print(f"    [{i}]  {label}", style="dim")
+            _menu_opt(str(i), str(label))
         try:
             choice = _input("  > ").strip()
             idx = int(choice) - 1
@@ -3937,13 +4181,23 @@ class WorkflowSession:
                 model=self._llm_model,
             )
             system = (
-                "You are an expert AMD GPU performance engineer. "
-                "Rewrite the source file applying the optimization suggestions. "
-                "Return ONLY the complete rewritten file — no explanation, no markdown. "
-                "Add a short inline comment on each changed line explaining why."
+                "You are a code transformation engine for AMD GPU source files.\n"
+                "CRITICAL OUTPUT FORMAT — any violation will corrupt the source file and"
+                " prevent compilation:\n"
+                "1. Output RAW SOURCE CODE ONLY. No prose, no markdown, no bullet lists.\n"
+                "2. The very first character of your response must be the first character"
+                " of the source file (typically '/' for a comment or '#' for an include).\n"
+                "3. Do NOT start with explanatory sentences such as 'Here\\'s', 'I\\'ve',"
+                " 'The following', 'Below is', etc.\n"
+                "4. Do NOT use markdown (no **, no backticks, no '- bullet' lists).\n"
+                "5. The response must be a single, complete, compilable source file —"
+                " nothing before the first line of code, nothing after the last.\n"
+                "6. Add a short // inline comment on each changed line explaining why."
             )
             user = (
-                f"=== SUGGESTIONS ===\n{suggestions}\n\n=== SOURCE FILE ===\n{original}"
+                f"Apply these GPU optimizations to the source file below.\n\n"
+                f"=== OPTIMIZATIONS TO APPLY ===\n{suggestions}\n\n"
+                f"=== SOURCE FILE (return the complete rewritten version) ===\n{original}"
             )
             # File rewrites can be large — use a generous timeout (5 min).
             _rewrite_timeout = 300
@@ -3969,9 +4223,14 @@ class WorkflowSession:
                     )
                 elif self._llm_provider == "private":
                     result = analyzer._call_private(system, user)
+                elif self._llm_provider == "claude-code":
+                    result = analyzer._call_claude_code(system, user)
                 else:
                     result = analyzer._call_local(system, user)
-            return result if result and result.strip() else None
+            if not result or not result.strip():
+                return None
+            result = _strip_code_preamble(result)
+            return result if result.strip() else None
         except Exception as exc:
             _print(f"  (LLM rewrite failed: {exc})", style="red")
             return None
@@ -4023,7 +4282,7 @@ class WorkflowSession:
             )
             _print()
             _print(
-                "  ── Proposed changes ─────────────────────────────────", style="cyan"
+                "  ── Proposed changes ─────────────────────────────────", style=_AMD_RED
             )
             for line in diff_lines[:120]:
                 line = line.rstrip("\n")
@@ -4086,7 +4345,7 @@ class WorkflowSession:
 
             # Wait for recompile
             _print()
-            _print("  Changes applied. Please recompile your application.", style="cyan")
+            _print("  Changes applied. Please recompile your application.", style=_AMD_RED)
             _print(
                 "  Type 'done' when compiled, 'revert' to undo the AI edit,",
                 style="dim",
@@ -4123,7 +4382,7 @@ class WorkflowSession:
             if _revert_action == "retry":
                 _print(
                     "  ── Trying a different fix ───────────────────────────",
-                    style="cyan",
+                    style=_AMD_RED,
                 )
                 continue  # re-enter the while True loop above
             if _revert_action == "exit":
@@ -4158,20 +4417,25 @@ class WorkflowSession:
 
         _print()
         _print(
-            "  Ready to re-profile. Which command would you like to run?", style="cyan"
+            "  Ready to re-profile. Which command would you like to run?", style=_AMD_RED
         )
-        _print("    [1]  Same command as before:", style="dim")
+        _menu_opt("1", "Same command as before:")
         _print(f"         {current}", style="dim")
-        _print("    [2]  Let me edit the command first", style="dim")
+        _menu_opt("2", "Let me edit the command first")
         if ai_cmd:
-            _print("    [3]  Use AI-recommended command:", style="dim")
+            _menu_opt("3", "Use AI-recommended command:")
             _print(f"         {ai_cmd}", style="dim")
-        _print("    [n]  Stop — I'm done profiling", style="dim")
+        _menu_opt("s", "Save session")
+        _menu_opt("n", "Stop — I'm done profiling")
         _print()
         try:
             choice = _input("  > ").strip().lower()
         except EOFError:
             return None
+        if choice == "s":
+            self._save_session()
+            _print("  Session saved.", style="green")
+            return self._phase7_reprofiling_prompt()
         if choice in ("1", ""):
             return current
         elif choice == "2":
@@ -4191,9 +4455,9 @@ class WorkflowSession:
     def print_session_summary(self) -> None:
         """Print final session summary."""
         _print()
-        _print("  ══════════════════════════════════════════", style="bold cyan")
-        _print("   Session Summary", style="bold cyan")
-        _print("  ══════════════════════════════════════════", style="bold cyan")
+        _print("  ══════════════════════════════════════════", style=_AMD_RED_STYLE)
+        _print("   Session Summary", style=_AMD_RED_STYLE)
+        _print("  ══════════════════════════════════════════", style=_AMD_RED_STYLE)
         _print(f"  Iterations : {self._state.iteration_count}", style="white")
 
         if len(self._state.analysis_history) >= 2:
@@ -4224,8 +4488,14 @@ class WorkflowSession:
 
         if self._session_file.exists():
             _print(f"  Session    : {self._session_file}", style="dim")
+            _print(
+                f"  Resume     : rocinsight analyze --interactive "
+                f'"{self._state.app_command}" '
+                f"--resume-session {self._session_file}",
+                style="dim",
+            )
 
-        _print("  ══════════════════════════════════════════", style="bold cyan")
+        _print("  ══════════════════════════════════════════", style=_AMD_RED_STYLE)
         _print()
 
     # ── Main entry point ──────────────────────────────────────────────────────
@@ -4235,27 +4505,60 @@ class WorkflowSession:
         _print_startup_banner()
 
         try:
-            # Phase 1: validate source paths
-            for sp in self._state.source_paths:
-                if not pathlib.Path(sp).exists():
-                    _print(f"  Warning: --source path not found: {sp}", style="yellow")
-
             self._init_checkpoints()
             self._prune_stale_worktrees()
 
-            # Phase 1b: quick workload analysis → derive best starter command.
-            # _phase1b always classifies the app; if it returns None we still want
-            # app_info (uses_fork etc.) so _build_profiling_command can use %nid%.
-            _app_info = self._classify_app_command(self._state.app_command)
-            cmd = (
-                self._phase1b_quick_workload_analysis()
-                or self._build_profiling_command(_app_info)
-            )
+            if self._resumed and self._state.trace_history:
+                # ── Resumed session: skip Phase 1-2, re-analyze last DB ────────
+                _print(
+                    f"  Resuming session {self._session_id}",
+                    style=f"bold {_AMD_RED}",
+                )
+                _print(
+                    f"  Iteration {self._state.iteration_count}  ·  "
+                    f"{len(self._state.trace_history)} trace run(s)  ·  "
+                    f"{len(self._state.edit_history)} edit(s)",
+                    style="dim",
+                )
+                _print()
+                # Re-analyze the last collected DB so the user sees fresh recs
+                last_run = self._state.trace_history[-1]
+                snap = self._phase4_analyze(last_run.db_path)
+                result = self._phase5_rec_menu(snap)
+                if result is not None:
+                    mode, selected_recs = result
+                    scoped = _AnalysisSnapshot(
+                        timestamp=snap.timestamp,
+                        iteration=snap.iteration,
+                        recommendations=selected_recs,
+                        execution_breakdown=snap.execution_breakdown,
+                        hotspots=snap.hotspots,
+                        ai_recommended_command=snap.ai_recommended_command,
+                    )
+                    if mode == "direct":
+                        if self._phase6_apply_direct(scoped) == "exit":
+                            return
+                    elif mode == "diff":
+                        self._phase6_apply_diff(scoped)
+                # Fall through to Phase 7
+                next_cmd = self._phase7_reprofiling_prompt()
+                if next_cmd is None:
+                    return
+                self._state.profiling_command = next_cmd
+            else:
+                # ── Fresh session: Phase 1 → 1b → 2 ──────────────────────────
+                for sp in self._state.source_paths:
+                    if not pathlib.Path(sp).exists():
+                        _print(f"  Warning: --source path not found: {sp}", style="yellow")
 
-            # Phase 2: confirm profiling command with user
-            self._state.profiling_command = cmd
-            if not self._phase2_show_command(cmd):
-                return
+                _app_info = self._classify_app_command(self._state.app_command)
+                cmd = (
+                    self._phase1b_quick_workload_analysis()
+                    or self._build_profiling_command(_app_info)
+                )
+                self._state.profiling_command = cmd
+                if not self._phase2_show_command(cmd):
+                    return
 
             # Phases 3-7 loop
             while True:

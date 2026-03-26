@@ -8,6 +8,7 @@ Run with system rocinsight first in PYTHONPATH:
 """
 
 import os
+import pathlib
 import sys
 from unittest.mock import patch, MagicMock
 
@@ -816,3 +817,302 @@ def test_stale_worktrees_pruned_on_start():
     pruned_paths = [str(c.args[0]) for c in mock_remove.call_args_list]
     assert any("other_session" in p for p in pruned_paths)
     assert not any(ws._session_id in p for p in pruned_paths)
+
+
+# ── Rendering helpers ──────────────────────────────────────────────────────────
+
+
+def test_priority_badge_renders_visible_brackets():
+    """_priority_badge must escape inner [ so Rich doesn't strip the label."""
+    from rocinsight.ai_analysis.interactive import _priority_badge
+
+    for pri in ("HIGH", "MEDIUM", "LOW", "INFO"):
+        badge = _priority_badge(pri)
+        # The escaped bracket pattern \[PRI] must be present so Rich renders [PRI].
+        assert f"\\[{pri}]" in badge, f"badge for {pri!r} missing escaped brackets: {badge!r}"
+
+
+def test_priority_badge_contains_style():
+    from rocinsight.ai_analysis.interactive import _priority_badge
+
+    assert "bold red" in _priority_badge("HIGH")
+    assert "bold yellow" in _priority_badge("MEDIUM")
+    assert "bold green" in _priority_badge("LOW")
+    assert "bold blue" in _priority_badge("INFO")
+
+
+# ── Phase 5: save choice ───────────────────────────────────────────────────────
+
+
+def _make_high_snap():
+    from rocinsight.ai_analysis.interactive import _AnalysisSnapshot
+
+    return _AnalysisSnapshot(
+        timestamp="t",
+        iteration=0,
+        recommendations=[
+            {
+                "priority": "HIGH",
+                "category": "C",
+                "issue": "Kernel slow",
+                "suggestion": "s",
+                "actions": [],
+                "id": "R1",
+                "estimated_impact": "",
+                "commands": [],
+            }
+        ],
+    )
+
+
+def test_phase5_save_calls_save_session_and_continues():
+    """[s] in Phase 5 must call _save_session() and not exit the loop."""
+    from rocinsight.ai_analysis.interactive import WorkflowSession
+
+    ws = WorkflowSession(app_command="./app")
+    snap = _make_high_snap()
+
+    with patch.object(ws, "_save_session") as mock_save, patch(
+        "builtins.input", side_effect=["s", "n"]
+    ):
+        result = ws._phase5_rec_menu(snap)
+
+    mock_save.assert_called_once()
+    assert result is None  # [n] after save exits normally
+
+
+def test_phase5_save_does_not_use_conv_attribute():
+    """WorkflowSession._phase5_rec_menu [s] must not reference self._conv."""
+    from rocinsight.ai_analysis.interactive import WorkflowSession
+
+    ws = WorkflowSession(app_command="./app")
+    snap = _make_high_snap()
+
+    assert not hasattr(ws, "_conv"), "WorkflowSession must not have _conv"
+
+    with patch.object(ws, "_save_session"), patch("builtins.input", side_effect=["s", "n"]):
+        # Must not raise AttributeError
+        ws._phase5_rec_menu(snap)
+
+
+# ── Phase 7: save choice ───────────────────────────────────────────────────────
+
+
+def test_phase7_save_calls_save_session_and_reprompts():
+    """[s] in Phase 7 must save and re-show the prompt (recursion)."""
+    from rocinsight.ai_analysis.interactive import WorkflowSession
+
+    ws = WorkflowSession(app_command="./app")
+    ws._state.profiling_command = "rocprofv3 --sys-trace -- ./app"
+
+    with patch.object(ws, "_save_session") as mock_save, patch(
+        "builtins.input", side_effect=["s", "n"]
+    ):
+        result = ws._phase7_reprofiling_prompt()
+
+    mock_save.assert_called_once()
+    assert result is None  # [n] after save → stop
+
+
+def test_phase7_save_does_not_use_conv_attribute():
+    """WorkflowSession._phase7_reprofiling_prompt [s] must not reference self._conv."""
+    from rocinsight.ai_analysis.interactive import WorkflowSession
+
+    ws = WorkflowSession(app_command="./app")
+    ws._state.profiling_command = "rocprofv3 --sys-trace -- ./app"
+
+    assert not hasattr(ws, "_conv"), "WorkflowSession must not have _conv"
+
+    with patch.object(ws, "_save_session"), patch("builtins.input", side_effect=["s", "n"]):
+        ws._phase7_reprofiling_prompt()  # must not raise
+
+
+# ── Resume session ─────────────────────────────────────────────────────────────
+
+import json as _json
+import dataclasses as _dc
+from datetime import datetime, timezone
+
+
+def _write_workflow_session(tmp_path, state_overrides: dict) -> pathlib.Path:
+    """Write a minimal workflow_*.json session file and return its path."""
+    from rocinsight.ai_analysis.interactive import (
+        WorkflowState,
+        _TraceRun,
+        _AnalysisSnapshot,
+    )
+
+    trace_run = _TraceRun(
+        timestamp="2026-03-26T03:25:31Z",
+        command="rocprofv3 --sys-trace -d /tmp/run -- ./app",
+        db_path="/tmp/run/results.db",
+    )
+    snap = _AnalysisSnapshot(
+        timestamp="2026-03-26T03:25:40Z",
+        iteration=1,
+        recommendations=[
+            {
+                "priority": "HIGH",
+                "category": "C",
+                "issue": "slow kernel",
+                "suggestion": "s",
+                "actions": [],
+                "id": "R1",
+                "estimated_impact": "",
+                "commands": [],
+            }
+        ],
+        execution_breakdown={"kernel_time_pct": 80.0},
+    )
+    state = WorkflowState(
+        app_command="./app",
+        source_paths=[],
+        profiling_command="rocprofv3 --sys-trace -d /tmp/run -- ./app",
+        trace_history=[trace_run],
+        analysis_history=[snap],
+        iteration_count=1,
+    )
+    raw_state = _dc.asdict(state)
+    raw_state.update(state_overrides)
+
+    session_id = "workflow_2026-03-26_03-25-31___app"
+    payload = {
+        "session_id": session_id,
+        "type": "workflow",
+        "app_command": "./app",
+        "state": raw_state,
+    }
+    sessions_dir = tmp_path / "sessions"
+    sessions_dir.mkdir(parents=True, exist_ok=True)
+    p = sessions_dir / f"{session_id}.json"
+    p.write_text(_json.dumps(payload, indent=2))
+    return p
+
+
+def test_load_session_returns_state_and_id(tmp_path):
+    from rocinsight.ai_analysis.interactive import WorkflowSession
+
+    p = _write_workflow_session(tmp_path, {})
+    ws = WorkflowSession(app_command="./app")
+    ws._sessions_dir = tmp_path / "sessions"
+    result = ws._load_session(str(p))
+    assert result is not None
+    state, sid = result
+    assert sid == "workflow_2026-03-26_03-25-31___app"
+    assert len(state.trace_history) == 1
+    assert state.trace_history[0].db_path == "/tmp/run/results.db"
+    assert state.iteration_count == 1
+
+
+def test_load_session_nonexistent_returns_none(tmp_path):
+    from rocinsight.ai_analysis.interactive import WorkflowSession
+
+    ws = WorkflowSession(app_command="./app")
+    ws._sessions_dir = tmp_path / "sessions"
+    assert ws._load_session("/nonexistent/path.json") is None
+
+
+def test_load_session_wrong_type_returns_none(tmp_path):
+    """A non-workflow session file must be rejected."""
+    from rocinsight.ai_analysis.interactive import WorkflowSession
+
+    p = tmp_path / "sessions" / "interactive_test.json"
+    p.parent.mkdir(parents=True)
+    p.write_text(_json.dumps({"type": "interactive", "session_id": "x", "state": {}}))
+    ws = WorkflowSession(app_command="./app")
+    ws._sessions_dir = tmp_path / "sessions"
+    assert ws._load_session(str(p)) is None
+
+
+def test_resume_session_sets_resumed_flag(tmp_path):
+    """When --resume-session is given with a valid file, _resumed must be True."""
+    from rocinsight.ai_analysis.interactive import WorkflowSession
+
+    p = _write_workflow_session(tmp_path, {})
+    # Patch sessions_dir before WorkflowSession resolves paths
+    with patch.object(
+        pathlib.Path,
+        "home",
+        return_value=tmp_path,
+    ):
+        ws = WorkflowSession(app_command="./app", resume_session=str(p))
+    assert ws._resumed is True
+    assert len(ws._state.trace_history) == 1
+
+
+def test_resume_session_skips_phase1_2(tmp_path):
+    """run() on a resumed session must not call _phase1b or _phase2."""
+    from rocinsight.ai_analysis.interactive import WorkflowSession
+
+    p = _write_workflow_session(tmp_path, {})
+    with patch.object(pathlib.Path, "home", return_value=tmp_path):
+        ws = WorkflowSession(app_command="./app", resume_session=str(p))
+
+    assert ws._resumed is True
+
+    snap_stub = _make_high_snap()
+    with (
+        patch.object(ws, "_init_checkpoints"),
+        patch.object(ws, "_prune_stale_worktrees"),
+        patch.object(ws, "_phase1b_quick_workload_analysis") as mock_p1b,
+        patch.object(ws, "_phase2_show_command") as mock_p2,
+        patch.object(ws, "_phase4_analyze", return_value=snap_stub),
+        patch.object(ws, "_phase5_rec_menu", return_value=None),
+        patch.object(ws, "_phase7_reprofiling_prompt", return_value=None),
+        patch.object(ws, "_teardown_checkpoints"),
+        patch.object(ws, "_save_session"),
+        patch.object(ws, "print_session_summary"),
+    ):
+        ws.run()
+
+    mock_p1b.assert_not_called()
+    mock_p2.assert_not_called()
+
+
+def test_resume_session_calls_phase4_on_last_db(tmp_path):
+    """run() resumed must call _phase4_analyze with the last trace DB path."""
+    from rocinsight.ai_analysis.interactive import WorkflowSession
+
+    p = _write_workflow_session(tmp_path, {})
+    with patch.object(pathlib.Path, "home", return_value=tmp_path):
+        ws = WorkflowSession(app_command="./app", resume_session=str(p))
+
+    snap_stub = _make_high_snap()
+    with (
+        patch.object(ws, "_init_checkpoints"),
+        patch.object(ws, "_prune_stale_worktrees"),
+        patch.object(ws, "_phase4_analyze", return_value=snap_stub) as mock_p4,
+        patch.object(ws, "_phase5_rec_menu", return_value=None),
+        patch.object(ws, "_phase7_reprofiling_prompt", return_value=None),
+        patch.object(ws, "_teardown_checkpoints"),
+        patch.object(ws, "_save_session"),
+        patch.object(ws, "print_session_summary"),
+    ):
+        ws.run()
+
+    mock_p4.assert_called_once_with("/tmp/run/results.db")
+
+
+def test_load_session_latest(tmp_path):
+    """'latest' keyword picks the most-recently-modified workflow file."""
+    import time
+    from rocinsight.ai_analysis.interactive import WorkflowSession
+
+    sessions_dir = tmp_path / "sessions"
+    sessions_dir.mkdir(parents=True, exist_ok=True)
+
+    # Write two session files; the second one is newer
+    p_old = _write_workflow_session(tmp_path, {})
+    time.sleep(0.05)
+    # Write a second session file
+    payload2 = _json.loads(p_old.read_text())
+    payload2["session_id"] = "workflow_2026-03-26_04-00-00___app"
+    p_new = sessions_dir / "workflow_2026-03-26_04-00-00___app.json"
+    p_new.write_text(_json.dumps(payload2, indent=2))
+
+    ws = WorkflowSession(app_command="./app")
+    ws._sessions_dir = sessions_dir
+    result = ws._load_session("latest")
+    assert result is not None
+    _, sid = result
+    assert sid == "workflow_2026-03-26_04-00-00___app"

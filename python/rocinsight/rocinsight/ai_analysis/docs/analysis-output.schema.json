@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "rocpd-ai-analysis-output",
-  "title": "ROCpd AI Analysis Output",
+  "title": "ROCInsight AI Analysis Output",
   "description": "JSON output schema for 'rocinsight analyze --format json' and the rocinsight.ai_analysis Python API. Consumers MUST check schema_version before parsing.",
   "type": "object",
   "required": [

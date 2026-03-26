@@ -3,14 +3,19 @@
 Unit tests for rocpd/tracelens_port.py.
 
 Run:
-    ROCINSIGHT_SYS=$(python3 -c "import site; print(site.getsitepackages()[-1])")
-    PYTHONPATH="${ROCINSIGHT_SYS}" pytest --noconftest test_tracelens_port.py -v
+    pytest rocinsight/ai_analysis/tests/test_tracelens_port.py -v
 
-Integration test (requires real merged_db.db):
-    ROCINSIGHT_TEST_DB=/path/to/merged_db.db pytest --noconftest test_tracelens_port.py -v
+Integration test — auto-generates a trace DB with rocprofv3 when available.
+Falls back to ROCINSIGHT_TEST_DB env var if rocprofv3 is not installed.
 """
 
+import os
+import shutil
+import subprocess
+import tempfile
+from pathlib import Path
 from unittest.mock import MagicMock, patch
+
 import pytest
 
 # ---------------------------------------------------------------------------
@@ -388,38 +393,97 @@ class TestAnalyzeShortKernels:
 
 
 # ===========================================================================
-# Integration test (requires real merged_db.db)
+# Integration test — generates a real trace DB with rocprofv3
 # ===========================================================================
 
-MERGED_DB = __import__("os").environ.get(
-    "ROCINSIGHT_TEST_DB",
-    "",
+# Candidate HIP binaries to profile, in preference order.
+# rocprofv3 must be on PATH; the binary just needs to launch and exit cleanly.
+#
+# File layout (parents of this file):
+#   [0] tests/            [1] ai_analysis/   [2] rocinsight/   [3] python/rocinsight/
+#   [4] python/           [5] rocm-systems-dev/                [6] repo root (ai-analysis-rocpd/)
+_REPO_ROOT = Path(__file__).parents[6]
+_CANDIDATE_APPS = [
+    # Override: point at any HIP binary via env var
+    os.environ.get("ROCINSIGHT_DEMO_APP", ""),
+    # project demo binary (always present in this repo)
+    str(_REPO_ROOT / "demo-app" / "inefficient_demo"),
+    # ROCm sample binaries (present when full ROCm SDK is installed)
+    "/opt/rocm/share/rocprofiler-sdk/samples/api_buffered_tracing/api_buffered_tracing",
+]
+
+_ROCPROFV3 = shutil.which("rocprofv3")
+
+
+def _find_app() -> str:
+    """Return the first candidate HIP binary that exists and is executable."""
+    for app in _CANDIDATE_APPS:
+        if Path(app).is_file() and os.access(app, os.X_OK):
+            return app
+    return ""
+
+
+def _generate_trace_db() -> str:
+    """Run rocprofv3 --sys-trace on a HIP app and return path to the .db file.
+
+    Returns "" if rocprofv3 or a suitable app is not available.
+    """
+    if not _ROCPROFV3:
+        return ""
+    app = _find_app()
+    if not app:
+        return ""
+
+    out_dir = tempfile.mkdtemp(prefix="rocinsight_integ_")
+    try:
+        result = subprocess.run(
+            [_ROCPROFV3, "--sys-trace", "-d", out_dir, "-o", "results", "--", app],
+            capture_output=True,
+            timeout=120,
+        )
+        if result.returncode != 0:
+            return ""
+        dbs = list(Path(out_dir).glob("*.db"))
+        return str(dbs[0]) if dbs else ""
+    except Exception:
+        return ""
+
+
+# Determine the DB path once at collection time.
+# Priority: auto-generate via rocprofv3 > ROCINSIGHT_TEST_DB env var.
+_GENERATED_DB: str = _generate_trace_db()
+_FALLBACK_DB: str = os.environ.get("ROCINSIGHT_TEST_DB", "")
+_INTEGRATION_DB: str = _GENERATED_DB or (
+    _FALLBACK_DB if _FALLBACK_DB and Path(_FALLBACK_DB).exists() else ""
+)
+
+_SKIP_REASON = (
+    "rocprofv3 not found and ROCINSIGHT_TEST_DB not set — "
+    "install ROCm or export ROCINSIGHT_TEST_DB=/path/to/trace.db"
 )
 
 
-@pytest.mark.skipif(
-    not (MERGED_DB and __import__("os").path.exists(MERGED_DB)),
-    reason="merged_db.db not found; set ROCINSIGHT_TEST_DB env var to enable",
-)
+@pytest.mark.skipif(not _INTEGRATION_DB, reason=_SKIP_REASON)
 def test_integration_tracelens_with_real_db():
-    """End-to-end: all three functions return valid dicts from merged_db.db."""
-    from rocinsight.connection import RocinsightConnection as RocpdImportData
+    """End-to-end: generate a live trace with rocprofv3, then validate all three
+    tracelens functions return correct structured data from the real DB."""
+    from rocinsight.connection import RocinsightConnection
     from rocinsight.tracelens_port import (
         compute_interval_timeline,
         analyze_kernels_by_category,
         analyze_short_kernels,
     )
 
-    conn = RocpdImportData([MERGED_DB])
+    conn = RocinsightConnection([_INTEGRATION_DB])
 
     timeline = compute_interval_timeline(conn)
-    assert timeline["total_wall_ns"] > 0
+    assert timeline["total_wall_ns"] > 0, "Expected non-zero wall time from real trace"
     assert 0.0 <= timeline["true_compute_pct"] <= 100.0
     assert 0.0 <= timeline["idle_pct"] <= 100.0
 
     categories = analyze_kernels_by_category(conn, timeline["total_wall_ns"])
     assert isinstance(categories, list)
-    assert len(categories) > 0
+    assert len(categories) > 0, "Expected at least one kernel category from real trace"
     assert all("category" in c and "count" in c and "total_ns" in c for c in categories)
 
     short = analyze_short_kernels(conn)

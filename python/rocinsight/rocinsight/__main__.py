@@ -37,7 +37,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(
         prog="rocinsight",
         description=(
-            "rocinsight -- AI-powered GPU trace analysis\n\n"
+            "ROCInsight -- AI-powered GPU trace analysis\n\n"
             "Reads rocprofiler-sdk trace databases (.db) and provides\n"
             "performance insights, bottleneck detection, and optimization\n"
             "recommendations. Optionally enhances output with LLM analysis."
