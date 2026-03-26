@@ -1327,13 +1327,13 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   do {
     // Compute intra-process ranks
     int intraProcRank0 = -1, intraProcRank = -1, intraProcRanks = 0;
-    for (int i = 0; i < nranks; i++) comm->minCompCap = std::min(comm->minCompCap, comm->peerInfo[i].cudaCompCap);
-    for (int i = 0; i < nranks; i++) comm->maxCompCap = std::max(comm->maxCompCap, comm->peerInfo[i].cudaCompCap);
 
     comm->nvlsRegSupport = 1;
     for (int i = 0; i < nranks; i++) {
-      if ((comm->peerInfo[i].hostHash == comm->peerInfo[rank].hostHash)
-          && (comm->peerInfo[i].pidHash == comm->peerInfo[rank].pidHash)) {
+      comm->minCompCap = std::min(comm->minCompCap, comm->peerInfo[i].cudaCompCap);
+      comm->maxCompCap = std::max(comm->maxCompCap, comm->peerInfo[i].cudaCompCap);
+      if ((comm->peerInfo[i].hostHash == comm->peerInfo[rank].hostHash) &&
+          (comm->peerInfo[i].pidHash == comm->peerInfo[rank].pidHash)) {
         // Rank is in same process
         if (intraProcRanks == 0) intraProcRank0 = i;
         if (i == rank) intraProcRank = intraProcRanks;
