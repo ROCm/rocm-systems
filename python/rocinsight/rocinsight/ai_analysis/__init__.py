@@ -45,6 +45,7 @@ from .api import (
 
 from .exceptions import (
     AnalysisError,
+    AnalysisTimeoutError,
     DatabaseNotFoundError,
     DatabaseCorruptedError,
     MissingDataError,
@@ -95,6 +96,7 @@ __all__ = [
     "OutputFormat",
     # Exceptions
     "AnalysisError",
+    "AnalysisTimeoutError",
     "DatabaseNotFoundError",
     "DatabaseCorruptedError",
     "MissingDataError",

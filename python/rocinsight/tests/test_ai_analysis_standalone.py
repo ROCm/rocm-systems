@@ -379,8 +379,8 @@ class TestBuildAnalysisResultKeyMapping:
         )
         assert len(result.recommendations.medium_priority) == 1
 
-    def test_info_bucketed_as_medium(self):
-        """INFO priority should be placed in medium_priority bucket."""
+    def test_info_bucketed_as_low(self):
+        """INFO priority should be placed in low_priority bucket (not medium)."""
         from rocinsight.ai_analysis.api import _build_analysis_result
 
         result = _build_analysis_result(
@@ -399,7 +399,8 @@ class TestBuildAnalysisResultKeyMapping:
             database_path=Path("test.db"),
             custom_prompt=None,
         )
-        assert len(result.recommendations.medium_priority) == 1
+        assert len(result.recommendations.low_priority) == 1
+        assert len(result.recommendations.medium_priority) == 0
 
 
 # ===========================================================================

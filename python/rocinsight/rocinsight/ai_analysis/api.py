@@ -273,7 +273,7 @@ class AnalysisResult:
         or use to_dict() for a non-schema-conformant dict.
         """
         raw = getattr(self, "_raw", None)
-        if raw:
+        if raw is not None:
             return format_analysis_output(
                 time_breakdown=raw["time_breakdown"],
                 hotspots=raw["hotspots"],
@@ -303,7 +303,7 @@ class AnalysisResult:
             RuntimeError: If the result was not created via analyze_database().
         """
         raw = getattr(self, "_raw", None)
-        if not raw:
+        if raw is None:
             raise RuntimeError(
                 "Raw analysis data not available. "
                 "Use analyze_database() to create the result."
@@ -821,7 +821,7 @@ def _build_analysis_result(
 
         if priority_upper == "HIGH":
             rec_set.high_priority.append(recommendation)
-        elif priority_upper in ("MEDIUM", "INFO"):
+        elif priority_upper == "MEDIUM":
             rec_set.medium_priority.append(recommendation)
         else:
             rec_set.low_priority.append(recommendation)

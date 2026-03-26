@@ -450,8 +450,8 @@ class LLMAnalyzer:
             for i, kernel in enumerate(analysis_data["kernels"], 1):
                 sanitized_kernel = {
                     "kernel_id": f"[KERNEL_{i}]",
-                    "dispatch_count": kernel.get("calls"),
-                    "pct_total_time": kernel.get("percent_of_total"),
+                    "dispatch_count": kernel.get("dispatch_count"),
+                    "pct_total_time": kernel.get("pct_total_time"),
                     "avg_duration_ns": kernel.get("avg_duration_ns"),
                 }
 
@@ -761,7 +761,7 @@ Follow the reference guide strictly for analysis methodology and output format."
 
         def _dispatch(sp: str, up: str, max_tokens: int = 4096) -> str:
             if self.provider == "anthropic":
-                return self._call_anthropic(sp, up)
+                return self._call_anthropic(sp, up, max_tokens=max_tokens)
             elif self.provider == "openai":
                 return self._call_openai(sp, up, max_tokens=max_tokens)
             elif self.provider == "local":
@@ -1003,6 +1003,10 @@ Follow the reference guide strictly for analysis methodology and output format."
                 timeout=60,
             )
             return resp.choices[0].message.content
+        except openai.AuthenticationError as e:
+            raise LLMAuthenticationError(f"Local LLM authentication failed: {e}")
+        except openai.RateLimitError as e:
+            raise LLMRateLimitError(f"Local LLM rate limit exceeded: {e}")
         except Exception as exc:
             raise RuntimeError(
                 f"Local LLM request failed ({base_url}). "
@@ -1316,6 +1320,10 @@ Follow the reference guide strictly for analysis methodology and output format."
             return self._call_openai(system, user)
         elif self.provider == "local":
             return self._call_local(system, user)
+        elif self.provider == "private":
+            return self._call_private(system, user)
+        elif self.provider == "claude-code":
+            return self._call_claude_code(system, user)
         return ""
 
     def _sanitize_source_data(self, source_result: Any) -> Dict[str, Any]:
@@ -1540,6 +1548,10 @@ Follow the reference guide strictly for analysis methodology and output format."
             return self._call_openai(system, user, max_tokens=3000)
         elif self.provider == "local":
             return self._call_local(system, user)
+        elif self.provider == "private":
+            return self._call_private(system, user)
+        elif self.provider == "claude-code":
+            return self._call_claude_code(system, user)
         else:
             raise ValueError(f"Unknown provider: {self.provider}")
 

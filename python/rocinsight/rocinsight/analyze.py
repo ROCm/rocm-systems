@@ -1501,7 +1501,49 @@ def generate_recommendations(
                 }
             )
 
-    # Rule 6: Default if no issues found
+    # Rule 9 — SHORT KERNELS (TraceLens-derived)
+    if short_kernels and short_kernels.get("wasted_pct_of_kernel_time", 0) > 5.0:
+        wasted_pct = short_kernels["wasted_pct_of_kernel_time"]
+        count = short_kernels.get("short_kernel_count", 0)
+        threshold = short_kernels.get("threshold_us", 10)
+        recommendations.append(
+            {
+                "priority": "MEDIUM",
+                "category": "Launch Efficiency",
+                "issue": f"Short kernel overhead: {count} kernels below {threshold}μs consume {wasted_pct:.1f}% of kernel time",
+                "suggestion": "Reduce kernel launch overhead by fusing small kernels or using persistent kernel patterns",
+                "actions": [
+                    "- Fuse consecutive elementwise ops into a single kernel",
+                    "- Use hipGraph to batch kernel launches and reduce launch latency",
+                    "- Consider persistent kernels for kernels called >1000×/sec",
+                    "- Profile with rocprofv3 --hip-trace to measure queue latency vs. execution time",
+                ],
+                "estimated_impact": "5–15% reduction in total kernel time if short kernels are dominant",
+                "commands": [],
+            }
+        )
+
+    # Rule 10 — GPU IDLE TIME (TraceLens interval arithmetic, more accurate than overhead%)
+    if interval_timeline and interval_timeline.get("idle_pct", 0) > 20.0:
+        idle_pct = interval_timeline["idle_pct"]
+        recommendations.append(
+            {
+                "priority": "HIGH",
+                "category": "GPU Utilization",
+                "issue": f"High GPU idle time detected: {idle_pct:.1f}% of wall time the GPU is idle",
+                "suggestion": "Overlap CPU dispatch work with GPU execution to reduce idle gaps",
+                "actions": [
+                    "- Use async HIP API calls (hipMemcpyAsync, kernel launches without hipDeviceSynchronize)",
+                    "- Introduce hipStream_t streams to overlap independent kernels and transfers",
+                    "- Check for unnecessary hipDeviceSynchronize() calls in hot loops",
+                    "- Use rocprofv3 --hip-trace to identify synchronization points causing stalls",
+                ],
+                "estimated_impact": f"Up to {idle_pct:.0f}% improvement in wall-time throughput if idle is CPU-bound dispatch",
+                "commands": [],
+            }
+        )
+
+    # Rule 6: Default if no issues found (MUST be last — sentinel for "nothing actionable")
     if not recommendations:
         recommendations.append(
             {
@@ -1547,48 +1589,6 @@ def generate_recommendations(
                         "full_command": "rocprof-compute profile -- ./app",
                     },
                 ],
-            }
-        )
-
-    # Rule 9 — SHORT KERNELS (TraceLens-derived)
-    if short_kernels and short_kernels.get("wasted_pct_of_kernel_time", 0) > 5.0:
-        wasted_pct = short_kernels["wasted_pct_of_kernel_time"]
-        count = short_kernels.get("short_kernel_count", 0)
-        threshold = short_kernels.get("threshold_us", 10)
-        recommendations.append(
-            {
-                "priority": "MEDIUM",
-                "category": "Launch Efficiency",
-                "issue": f"Short kernel overhead: {count} kernels below {threshold}μs consume {wasted_pct:.1f}% of kernel time",
-                "suggestion": "Reduce kernel launch overhead by fusing small kernels or using persistent kernel patterns",
-                "actions": [
-                    "- Fuse consecutive elementwise ops into a single kernel",
-                    "- Use hipGraph to batch kernel launches and reduce launch latency",
-                    "- Consider persistent kernels for kernels called >1000×/sec",
-                    "- Profile with rocprofv3 --hip-trace to measure queue latency vs. execution time",
-                ],
-                "estimated_impact": "5–15% reduction in total kernel time if short kernels are dominant",
-                "commands": [],
-            }
-        )
-
-    # Rule 10 — GPU IDLE TIME (TraceLens interval arithmetic, more accurate than overhead%)
-    if interval_timeline and interval_timeline.get("idle_pct", 0) > 20.0:
-        idle_pct = interval_timeline["idle_pct"]
-        recommendations.append(
-            {
-                "priority": "HIGH",
-                "category": "GPU Utilization",
-                "issue": f"High GPU idle time detected: {idle_pct:.1f}% of wall time the GPU is idle",
-                "suggestion": "Overlap CPU dispatch work with GPU execution to reduce idle gaps",
-                "actions": [
-                    "- Use async HIP API calls (hipMemcpyAsync, kernel launches without hipDeviceSynchronize)",
-                    "- Introduce hipStream_t streams to overlap independent kernels and transfers",
-                    "- Check for unnecessary hipDeviceSynchronize() calls in hot loops",
-                    "- Use rocprofv3 --hip-trace to identify synchronization points causing stalls",
-                ],
-                "estimated_impact": f"Up to {idle_pct:.0f}% improvement in wall-time throughput if idle is CPU-bound dispatch",
-                "commands": [],
             }
         )
 
@@ -3248,6 +3248,7 @@ document.querySelectorAll('.ctr-row').forEach(function(tr) {{
             category = k.get("stall_category", "unknown")
             cat_label = _CAT_LABELS.get(category, category)
             cat_tip = _CAT_TIPS.get(category, f"<strong>{_h(cat_label)}</strong>")
+            cat_tip_safe = cat_tip.replace("'", "&#39;")
             top = (k.get("top_stalling_instructions") or [{}])[0]
             top_instr = _h(top.get("pc_offset", "—"))
             top_ratio = float(top.get("stall_ratio", 0)) * 100
@@ -3294,7 +3295,7 @@ document.querySelectorAll('.ctr-row').forEach(function(tr) {{
                 f"</div>"
                 f'<span style="color:{ratio_color};font-weight:600">{avg_ratio:.1f}%</span>'
                 f"</div></td>"
-                f"<td><span data-tip='{cat_tip}' style=\"cursor:help;border-bottom:1px dotted #555\">"
+                f"<td><span data-tip='{cat_tip_safe}' style=\"cursor:help;border-bottom:1px dotted #555\">"
                 f"{_h(cat_label)}</span></td>"
                 f'<td><code style="font-size:.82rem;color:#b0b8d8">{top_instr}</code></td>'
                 f'<td style="color:{top_color};font-weight:600;text-align:center">{top_ratio:.0f}%</td>'
@@ -5602,18 +5603,17 @@ def _get_app_path_from_db(database_path: str) -> str:
     try:
         import sqlite3 as _sqlite3
 
-        con = _sqlite3.connect(database_path)
-        # Find all rocpd_info_process_* tables
-        tables = con.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'rocpd_info_process_%'"
-        ).fetchall()
-        for (tname,) in tables:
-            row = con.execute(
-                f'SELECT command FROM "{tname}" WHERE command IS NOT NULL LIMIT 1'
-            ).fetchone()
-            if row and row[0]:
-                return row[0].strip()
-        con.close()
+        with _sqlite3.connect(database_path) as con:
+            # Find all rocpd_info_process_* tables
+            tables = con.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'rocpd_info_process_%'"
+            ).fetchall()
+            for (tname,) in tables:
+                row = con.execute(
+                    f'SELECT command FROM "{tname}" WHERE command IS NOT NULL LIMIT 1'
+                ).fetchone()
+                if row and row[0]:
+                    return row[0].strip()
     except Exception:
         pass
     return ""

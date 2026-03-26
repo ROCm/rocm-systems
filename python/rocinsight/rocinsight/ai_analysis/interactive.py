@@ -2797,6 +2797,8 @@ class WorkflowSession:
                 "hints": [],
                 "extra_flags": [],
                 "warnings": [],
+                "uses_fork": False,
+                "mpi_wrap": False,
             }
 
         # Strip leading KEY=VALUE env-var tokens (same logic as _phase3_run_profiler)
@@ -2808,6 +2810,8 @@ class WorkflowSession:
                 "hints": [],
                 "extra_flags": [],
                 "warnings": [],
+                "uses_fork": False,
+                "mpi_wrap": False,
             }
 
         binary = tokens[0].lower()
@@ -3008,6 +3012,8 @@ class WorkflowSession:
 
         mpi_prefix = " ".join(prefix_tokens)
         mpi_app = " ".join(tokens[i:])
+        if not mpi_app:
+            return (app_cmd, "")
         return (mpi_prefix, mpi_app)
 
     def _phase1b_quick_workload_analysis(self) -> Optional[str]:
@@ -3271,7 +3277,11 @@ class WorkflowSession:
         except OSError:
             failed_content = ""
 
-        original_content = bak.read_text()
+        try:
+            original_content = bak.read_text()
+        except OSError as exc:
+            _print(f"  Backup read failed: {exc}", style="red")
+            return False, "continue"
 
         try:
             dst.write_text(original_content)
@@ -3509,6 +3519,9 @@ class WorkflowSession:
                                         _print(
                                             f"  Revert failed: {_exc}", style="red"
                                         )
+                                    if _alt_errors:
+                                        _err_ctx = "\n".join(_alt_errors)
+                                        _print(f"  Errors from this attempt:\n{_err_ctx}", style="dim")
                                     _alt_action = self._post_revert_menu(
                                         show_retry=allow_retry
                                     )
@@ -4594,45 +4607,46 @@ class WorkflowSession:
 
     def _phase7_reprofiling_prompt(self) -> Optional[str]:
         """Ask which profiling command to use for re-profiling. Returns cmd or None."""
-        current = self._state.profiling_command
-        ai_cmd: Optional[str] = None
-        if self._state.analysis_history:
-            ai_cmd = self._state.analysis_history[-1].ai_recommended_command
+        while True:
+            current = self._state.profiling_command
+            ai_cmd: Optional[str] = None
+            if self._state.analysis_history:
+                ai_cmd = self._state.analysis_history[-1].ai_recommended_command
 
-        _print()
-        _print(
-            "  Ready to re-profile. Which command would you like to run?", style=_AMD_RED
-        )
-        _menu_opt("1", "Same command as before:")
-        _print(f"         {current}", style="dim")
-        _menu_opt("2", "Let me edit the command first")
-        if ai_cmd:
-            _menu_opt("3", "Use AI-recommended command:")
-            _print(f"         {ai_cmd}", style="dim")
-        _menu_opt("s", "Save session")
-        _menu_opt("n", "Stop — I'm done profiling")
-        _print()
-        try:
-            choice = _input("  > ").strip().lower()
-        except EOFError:
-            return None
-        if choice == "s":
-            self._save_session()
-            _print("  Session saved.", style="green")
-            return self._phase7_reprofiling_prompt()
-        if choice in ("1", ""):
-            return current
-        elif choice == "2":
+            _print()
+            _print(
+                "  Ready to re-profile. Which command would you like to run?", style=_AMD_RED
+            )
+            _menu_opt("1", "Same command as before:")
+            _print(f"         {current}", style="dim")
+            _menu_opt("2", "Let me edit the command first")
+            if ai_cmd:
+                _menu_opt("3", "Use AI-recommended command:")
+                _print(f"         {ai_cmd}", style="dim")
+            _menu_opt("s", "Save session")
+            _menu_opt("n", "Stop — I'm done profiling")
+            _print()
             try:
-                new_cmd = _input(
-                    f"  Edit command (Enter to keep):\n  {current}\n  > "
-                ).strip()
-                return new_cmd or current
+                choice = _input("  > ").strip().lower()
             except EOFError:
+                return None
+            if choice == "s":
+                self._save_session()
+                _print("  Session saved.", style="green")
+                continue
+            if choice in ("1", ""):
                 return current
-        elif choice == "3" and ai_cmd:
-            return ai_cmd
-        return None
+            elif choice == "2":
+                try:
+                    new_cmd = _input(
+                        f"  Edit command (Enter to keep):\n  {current}\n  > "
+                    ).strip()
+                    return new_cmd or current
+                except EOFError:
+                    return current
+            elif choice == "3" and ai_cmd:
+                return ai_cmd
+            return None
 
     # ── Session summary ────────────────────────────────────────────────────────
 

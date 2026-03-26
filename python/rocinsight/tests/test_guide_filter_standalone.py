@@ -325,7 +325,7 @@ class TestAnalyzeWithLLMContextParam:
         ):
             analyzer = LLMAnalyzer(provider="anthropic", api_key="fake")
 
-        def fake_call(system_prompt, user_prompt):
+        def fake_call(system_prompt, user_prompt, **kwargs):
             captured["system_prompt"] = system_prompt
             return "fake llm response"
 
@@ -363,7 +363,7 @@ class TestAnalyzeWithLLMContextParam:
         ):
             analyzer = LLMAnalyzer(provider="anthropic", api_key="fake")
 
-        def fake_call(system_prompt, user_prompt):
+        def fake_call(system_prompt, user_prompt, **kwargs):
             captured["system_prompt"] = system_prompt
             return "fake source response"
 
