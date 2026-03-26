@@ -35,9 +35,10 @@ int hsakmt_kfdcontext_init_context(int fd, HsaKFDContext *ctx)
 
     ctx->fd = fd;
     ctx->topology_context = NULL;
-    ctx->queue_context = NULL;
     ctx->fmm_context = NULL;
 
+    if (hsakmt_kfdcontext_init_queue_context(ctx))
+        return -1;
     if (hsakmt_kfdcontext_init_event_context(ctx))
         return -1;
     if (hsakmt_kfdcontext_init_debug_context(ctx))
