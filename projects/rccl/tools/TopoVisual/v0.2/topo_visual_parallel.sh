@@ -68,7 +68,7 @@ fi
 
 # Create temp directory
 TMPDIR=$(mktemp -d -t topo_parallel.XXXXXX)
-trap "[ '$KEEP_TEMP' = false ] && rm -rf '$TMPDIR'" EXIT
+trap '[ "$KEEP_TEMP" = false ] && rm -rf "$TMPDIR"' EXIT
 
 echo "Processing topology with $JOBS parallel jobs..."
 START_TIME=$(date +%s.%N)
