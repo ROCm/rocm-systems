@@ -1,5 +1,5 @@
 #!/bin/bash
-# Copyright (c) 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
 # Parallel topology visualization - renders channels concurrently
 
 DIR="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -117,7 +117,7 @@ OUTDIR=$(dirname "$INPUT_NAME")
 if [ "$MERGE" = true ]; then
   # Merge all rendered outputs (for SVG, combine; for PNG/PDF, create montage)
   OUTPUT_FILE="$OUTDIR/${BASENAME}.$FORMAT"
-  
+
   if [ "$FORMAT" = "svg" ]; then
     # Create combined SVG with embedded sub-SVGs
     $DIR/merge_svg.sh "$TMPDIR" "$OUTPUT_FILE"
@@ -130,7 +130,7 @@ if [ "$MERGE" = true ]; then
       MERGE=false
     fi
   fi
-  
+
   if [ "$MERGE" = true ]; then
     echo "Created merged output: $OUTPUT_FILE"
   fi

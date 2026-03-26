@@ -1,5 +1,5 @@
 #!/usr/bin/gawk -f
-# Copyright (c) 2019-2021 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
 # Parallel version: Generates separate DOT files per channel for parallel rendering
 
 BEGIN {
@@ -25,7 +25,7 @@ BEGIN {
   col_p6=col_start+6
   col_p7=col_start+7
   col_p8=col_start+8
-  
+
   # Output directory from environment or default
   outdir = ENVIRON["TOPO_OUTDIR"]
   if (outdir == "") outdir = "/tmp/topo_split"
@@ -157,21 +157,21 @@ function write_header(file) {
 
 END {
   fs = get_fontsize()
-  
+
   # Write manifest file listing all channels
   manifest = outdir "/manifest.txt"
   printf "" > manifest
-  
+
   # Generate separate DOT file for each tree channel
   for(r=0; r<max_treedn+1; r++) {
     dotfile = outdir "/tree_" r ".dot"
     printf "tree_%d\n", r >> manifest
-    
+
     write_header(dotfile)
     printf "  subgraph cluster_tree_%d {\n", r > dotfile
     printf "    label=\"Tree Channel %d\";\n", r > dotfile
     printf "    style=dashed; color=gray;\n" > dotfile
-    
+
     for(s=0; s<=max_rank; s++) {
       for(d=0; d<=max_rank; d++) {
         if ((s "," d "," r) in treedns) {
@@ -202,15 +202,15 @@ END {
       if(d<=max_rank) break
     }
     if (remove_ring!=0) continue
-    
+
     dotfile = outdir "/ring_" r ".dot"
     printf "ring_%d\n", r >> manifest
-    
+
     write_header(dotfile)
     printf "  subgraph cluster_ring_%d {\n", r > dotfile
     printf "    label=\"Ring Channel %d\";\n", r > dotfile
     printf "    style=dashed; color=gray;\n" > dotfile
-    
+
     for(s=0; s<=max_rank; s++) {
       for(d=0; d<=max_rank; d++) {
         if ((s "," d "," r) in rings) {
@@ -233,12 +233,12 @@ END {
   for(r=0; has_collnet && r<=max_collnet; r++) {
     dotfile = outdir "/collnet_" r ".dot"
     printf "collnet_%d\n", r >> manifest
-    
+
     write_header(dotfile)
     printf "  subgraph cluster_collnet_%d {\n", r > dotfile
     printf "    label=\"CollNet Channel %d\";\n", r > dotfile
     printf "    style=dashed; color=gray;\n" > dotfile
-    
+
     num_top_ranks=0
     rank_switch=max_collnet_rank+1
     for(s=0; s<=max_collnet_rank; s++) {
@@ -263,7 +263,7 @@ END {
     printf "  }\n}\n" > dotfile
     close(dotfile)
   }
-  
+
   close(manifest)
   printf "Generated %d DOT files in %s\n", (max_treedn+1) + (max_ring+1) + (has_collnet ? max_collnet+1 : 0), outdir > "/dev/stderr"
 }

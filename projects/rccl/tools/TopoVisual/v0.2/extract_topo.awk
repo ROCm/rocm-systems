@@ -1,5 +1,5 @@
 #!/usr/bin/gawk -f
-# Copyright (c) 2019-2021 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -171,14 +171,14 @@ BEGIN {
 
 END {
   printf "digraph RCCL {\n"
-  
+
   # Add graph-level attributes for better rendering of large topologies
   # These improve clarity and prevent blurring at high zoom levels
   printf "  // Graph layout attributes for large-scale visualization\n"
   printf "  graph [fontname=\"Helvetica\", fontsize=12, compound=true];\n"
   printf "  node [fontname=\"Helvetica\", shape=circle, fixedsize=true, width=0.6, height=0.6];\n"
   printf "  edge [fontname=\"Helvetica\", fontsize=10];\n"
-  
+
   # Automatically detect large topologies and add appropriate settings
   if (max_rank >= 64) {
     printf "  // Large topology detected (%d+ ranks) - using optimized settings\n", max_rank+1
@@ -189,7 +189,7 @@ END {
     printf "  node [width=0.55, height=0.55, fontsize=24];\n"
   }
   printf "\n"
-  
+
   for(r=0;r<max_treedn+1;r++) {
     printf "  subgraph cluster_tree_%d {\n", r
     printf "    label=\"Tree Channel %d\";\n", r
