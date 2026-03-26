@@ -590,11 +590,11 @@ static bool ncclMlx5dvDmaBufCapable(ibv_context *context){
 
   struct ibv_pd* pd;
   NCCLCHECKGOTO(wrap_ibv_alloc_pd(&pd, context), res, failure);
-  // Test kernel DMA-BUF support with a dummy call (fd=-1)
+  // Test kernel DMA-BUF support with a dummy call (fd=-1).
+  // Check errno after each call since the next call overwrites it.
   (void)wrap_direct_ibv_reg_dmabuf_mr(pd, 0ULL /*offset*/, 0ULL /*len*/, 0ULL /*iova*/, -1 /*fd*/, 0 /*flags*/);
-  // ibv_reg_dmabuf_mr() will fail with EOPNOTSUPP/EPROTONOSUPPORT if not supported (EBADF otherwise)
+  dev_fail |= (errno == EOPNOTSUPP) || (errno == EPROTONOSUPPORT);
   (void)wrap_direct_mlx5dv_reg_dmabuf_mr(pd, 0ULL /*offset*/, 0ULL /*len*/, 0ULL /*iova*/, -1 /*fd*/, 0 /*flags*/, 0 /* mlx5 flags*/);
-  // mlx5dv_reg_dmabuf_mr() will fail with EOPNOTSUPP/EPROTONOSUPPORT if not supported (EBADF otherwise)
   dev_fail |= (errno == EOPNOTSUPP) || (errno == EPROTONOSUPPORT);
   NCCLCHECKGOTO(wrap_ibv_dealloc_pd(pd), res, failure);
   // stop the search and goto failure
@@ -1048,7 +1048,7 @@ getUpdateParm:
     size_t fileNameLen;
 
     gethostname(hostName, HOST_NAME_MAX);
-    sprintf(pid, "%d", getpid());
+    snprintf(pid, sizeof(pid), "%d", getpid());
     fileNameLen = strlen(str) + 1 + strlen(QP_SCHED_LOG_FILE_NAME_PREFIX) +
 	          strlen(hostName) + 1 + strlen(pid);
     logFileName = (char *) calloc(1, fileNameLen + 1);
@@ -1056,12 +1056,7 @@ getUpdateParm:
       WARN("(IB-CAST) NCCL_IB_QP_SCHED_LOG_PATH: calloc failed");
       goto err_exit;
     }
-    strcpy(logFileName, str);
-    strcat(logFileName, "/");
-    strcat(logFileName, QP_SCHED_LOG_FILE_NAME_PREFIX);
-    strcat(logFileName, hostName);
-    strcat(logFileName, "_");
-    strcat(logFileName, pid);
+    snprintf(logFileName, fileNameLen + 1, "%s/%s%s_%s", str, QP_SCHED_LOG_FILE_NAME_PREFIX, hostName, pid);
     IbCastQpSchedLogStream = fopen(logFileName, "w");
     if (IbCastQpSchedLogStream == NULL) {
       WARN("(IB-CAST) NCCL_IB_QP_SCHED_LOG_PATH: fopen failed: %s (logging disabled)", strerror(errno));
