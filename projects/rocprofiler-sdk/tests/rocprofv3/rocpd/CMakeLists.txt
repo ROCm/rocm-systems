@@ -126,8 +126,8 @@ rocprofiler_add_integration_execute_test(
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-rocpd-perfetto-generation
     COMMAND
-        ${Python3_EXECUTABLE} -m rocpd convert -f pftrace --kernel-rename -d
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data -i
+        ${Python3_EXECUTABLE} -m rocpd convert -f pftrace --kernel-rename --annotate-args
+        -d ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data -i
         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 120
@@ -135,20 +135,6 @@ rocprofiler_add_integration_execute_test(
     PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
     ENVIRONMENT "${rocprofv3-rocpd-env}"
     FIXTURES_SETUP rocprofv3-test-rocpd-generation
-    FIXTURES_REQUIRED rocprofv3-test-rocpd)
-
-rocprofiler_add_integration_execute_test(
-    rocprofv3-test-rocpd-perfetto-generation-annotations
-    COMMAND
-        ${Python3_EXECUTABLE} -m rocpd convert -f pftrace --kernel-rename --annotate-args
-        -d ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data-annotations -i
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db
-    DEPENDS rocprofiler-sdk::rocprofv3
-    TIMEOUT 120
-    LABELS "integration-tests;rocpd"
-    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
-    ENVIRONMENT "${rocprofv3-rocpd-env}"
-    FIXTURES_SETUP rocprofv3-test-rocpd-generation-annotations
     FIXTURES_REQUIRED rocprofv3-test-rocpd)
 
 rocprofiler_add_integration_execute_test(
@@ -258,11 +244,10 @@ rocprofiler_add_integration_validate_test(
     TEST_PATHS validate_annotations.py
     COPY conftest.py
     CONFIG pytest.ini
-    ARGS --pftrace-input
-         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data-annotations/out_results.pftrace
+    ARGS --pftrace-input ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_results.pftrace
     TIMEOUT 120
     LABELS "integration-tests;rocpd"
-    FIXTURES_REQUIRED rocprofv3-test-rocpd-generation-annotations)
+    FIXTURES_REQUIRED rocprofv3-test-rocpd-generation)
 
 #########################################################################################
 #
