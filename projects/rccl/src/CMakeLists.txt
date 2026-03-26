@@ -1043,11 +1043,11 @@ set_property(TARGET rccl PROPERTY RULE_LAUNCH_LINK "${CMAKE_COMMAND} -E time")
 
 # ── Split device compilation pipeline ─────────────────────────────────────────
 if(ENABLE_SPLIT_DEVICE_COMPILE)
-  list(GET GPU_TARGETS 0 _split_gpu_arch)
-  message(STATUS "Split device compile: targeting ${_split_gpu_arch}")
-
-  set(_bundler_device_target "hip-amdgcn-amd-amdhsa--${_split_gpu_arch}")
   set(_bundler_host_target "host-x86_64-unknown-linux-gnu-")
+  set(_bundler_device_targets "")
+  foreach(_arch ${GPU_TARGETS})
+    list(APPEND _bundler_device_targets "hip-amdgcn-amd-amdhsa--${_arch}")
+  endforeach()
 
   # Read properties from the rccl target so the pipeline stays in sync
   get_target_property(_split_include_dirs rccl INCLUDE_DIRECTORIES)
@@ -1069,19 +1069,19 @@ if(ENABLE_SPLIT_DEVICE_COMPILE)
     TARGET              rccl
     SOURCES             ${DEVICE_TU_SOURCES}
     FUNC_ONLY_SOURCES   ${DEVICE_FUNC_ONLY_SOURCES}
-    GPU_ARCH            ${_split_gpu_arch}
+    GPU_ARCHS           ${GPU_TARGETS}
     ROCM_PATH           ${ROCM_PATH}
     OUTPUT_DIR          ${CMAKE_CURRENT_BINARY_DIR}
     INCLUDE_DIRS        ${_split_include_dirs}
     COMPILE_DEFS        ${_split_compile_defs}
     COMPILE_OPTS        ${_split_compile_opts}
-    BUNDLER_DEVICE_TARGET ${_bundler_device_target}
+    BUNDLER_DEVICE_TARGETS ${_bundler_device_targets}
     BUNDLER_HOST_TARGET   ${_bundler_host_target}
   )
 
   add_dependencies(rccl_device_objects hipify_all)
 
-  # Only the final link step needs the device fat object -- not individual host
+  # Only the final link step needs the device fat objects -- not individual host
   # TU compiles. Using LINK_DEPENDS (instead of add_dependencies) lets host
   # compilation overlap with the device pipeline.
   set_property(TARGET rccl APPEND PROPERTY LINK_DEPENDS "${DEVICE_FAT_OBJECTS}")
