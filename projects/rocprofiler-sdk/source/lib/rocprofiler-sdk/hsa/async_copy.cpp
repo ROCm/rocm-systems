@@ -563,8 +563,10 @@ async_copy_impl(Args... args)
         auto _src_addr = compute_address(std::get<src_addr_idx>(_tied_args));
 
         // Query pointer info to determine actual memory types
-        auto _src_info = hsa_amd_pointer_info_t{.size = sizeof(hsa_amd_pointer_info_t)};
-        auto _dst_info = hsa_amd_pointer_info_t{.size = sizeof(hsa_amd_pointer_info_t)};
+        auto _src_info = hsa_amd_pointer_info_t{};
+        auto _dst_info = hsa_amd_pointer_info_t{};
+        _src_info.size = sizeof(hsa_amd_pointer_info_t);
+        _dst_info.size = sizeof(hsa_amd_pointer_info_t);
 
         auto _src_status = get_amd_ext_table()->hsa_amd_pointer_info_fn(
             const_cast<void*>(_src_addr.ptr), &_src_info, nullptr, nullptr, nullptr);
