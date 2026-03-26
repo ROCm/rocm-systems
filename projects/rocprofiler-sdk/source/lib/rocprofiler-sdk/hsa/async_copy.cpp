@@ -579,29 +579,32 @@ async_copy_impl(Args... args)
 
         if(_src_status == HSA_STATUS_SUCCESS)
         {
-            _actual_src_agent = _src_info.agentOwner;
-            // HSA_POINTER_TYPE_HSA indicates GPU/device memory
-            // HSA_POINTER_TYPE_LOCKED indicates pinned host memory
-            // HSA_POINTER_TYPE_UNKNOWN typically indicates unmapped or host memory
+            // Only use agentOwner if it has a valid handle (non-zero)
+            // Host memory may return agentOwner with handle 0
+            if(_src_info.agentOwner.handle != 0) _actual_src_agent = _src_info.agentOwner;
+            // HSA_EXT_POINTER_TYPE_HSA indicates GPU/device memory
+            // HSA_EXT_POINTER_TYPE_LOCKED indicates pinned host memory
+            // HSA_EXT_POINTER_TYPE_UNKNOWN typically indicates unmapped or host memory
             _src_is_device = (_src_info.type == HSA_EXT_POINTER_TYPE_HSA);
         }
         else
         {
             // Fallback to agent-based detection
-            auto _rocp_src_agent = agent::get_rocprofiler_agent(_hsa_src_agent);
+            const auto* _rocp_src_agent = agent::get_rocprofiler_agent(_hsa_src_agent);
             if(_rocp_src_agent)
                 _src_is_device = (_rocp_src_agent->type == ROCPROFILER_AGENT_TYPE_GPU);
         }
 
         if(_dst_status == HSA_STATUS_SUCCESS)
         {
-            _actual_dst_agent = _dst_info.agentOwner;
-            _dst_is_device    = (_dst_info.type == HSA_EXT_POINTER_TYPE_HSA);
+            // Only use agentOwner if it has a valid handle (non-zero)
+            if(_dst_info.agentOwner.handle != 0) _actual_dst_agent = _dst_info.agentOwner;
+            _dst_is_device = (_dst_info.type == HSA_EXT_POINTER_TYPE_HSA);
         }
         else
         {
             // Fallback to agent-based detection
-            auto _rocp_dst_agent = agent::get_rocprofiler_agent(_hsa_dst_agent);
+            const auto* _rocp_dst_agent = agent::get_rocprofiler_agent(_hsa_dst_agent);
             if(_rocp_dst_agent)
                 _dst_is_device = (_rocp_dst_agent->type == ROCPROFILER_AGENT_TYPE_GPU);
         }
