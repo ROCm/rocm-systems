@@ -280,29 +280,28 @@ if(ROCPROFILER_BUILD_SQLITE3)
     add_dependencies(rocprofiler-sdk-sqlite3 rocprofiler-sdk-sqlite-build)
 else()
     find_package(SQLite3 REQUIRED MODULE)
-    if(NOT SQLite3_INCLUDE_DIRS AND SQLite3_INCLUDE_DIR)
-        set(SQLite3_INCLUDE_DIRS "${SQLite3_INCLUDE_DIR}")
-    endif()
-    if(NOT SQLite3_LIBRARIES AND SQLite3_LIBRARY)
-        set(SQLite3_LIBRARIES "${SQLite3_LIBRARY}")
-    endif()
+    # if(NOT SQLite3_INCLUDE_DIRS AND SQLite3_INCLUDE_DIR)
+    #    set(SQLite3_INCLUDE_DIRS "${SQLite3_INCLUDE_DIR}")
+    # endif()
+    # if(NOT SQLite3_LIBRARIES AND SQLite3_LIBRARY)
+    #    set(SQLite3_LIBRARIES "${SQLite3_LIBRARY}")
+    # endif()
 
     if(TARGET SQLite3::SQLite3)
         target_link_libraries(rocprofiler-sdk-sqlite3 INTERFACE SQLite3::SQLite3)
     elseif(SQLite3_INCLUDE_DIRS AND SQLite3_LIBRARIES)
-        add_library(rocprofiler-sdk-system-sqlite3 INTERFACE IMPORTED)
-        set_target_properties(
-            rocprofiler-sdk-system-sqlite3
-            PROPERTIES INTERFACE_LINK_LIBRARIES "${SQLite3_LIBRARIES}"
-                       INTERFACE_INCLUDE_DIRECTORIES "${SQLite3_INCLUDE_DIRS}")
-        target_link_libraries(rocprofiler-sdk-sqlite3
-                              INTERFACE rocprofiler-sdk-system-sqlite3)
+        target_include_directories(
+            rocprofiler-sdk-sqlite3 SYSTEM
+            INTERFACE ${SQLite3_INCLUDE_DIRS})
+        target_link_libraries(rocprofiler-sdk-sqlite3 
+                              INTERFACE ${SQLite3_LIBRARIES})
     else()
         message(
             FATAL_ERROR
-                "find_package(SQLite3 MODULE) did not define SQLite3::SQLite3, SQLite::SQLite3, "
-                "or SQLite3_INCLUDE_DIRS and SQLite3_LIBRARIES (or *_DIR / *_LIBRARY).")
+                "find_package(SQLite3) succeeded but no usable SQLite3 target or "
+                "SQLite3_INCLUDE_DIRS/SQLite3_LIBRARIES variables were provided.")
     endif()
+
 endif()
 
 #
