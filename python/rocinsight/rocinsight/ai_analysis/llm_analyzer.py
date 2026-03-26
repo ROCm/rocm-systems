@@ -43,8 +43,8 @@ _PATH_PATTERN = re.compile(
     r'/tmp/[^\s,"\';>]+|/var/[^\s,"\';>]+|[A-Za-z]:\\[^\s,"\';>]+)'
 )
 
-# Regex to match rocpd-context tag comments in the reference guide
-_TAG_RE = re.compile(r"<!--\s*rocpd-context:\s*([^-]+?)\s*-->")
+# Regex to match rocinsight-context tag comments in the reference guide
+_TAG_RE = re.compile(r"<!--\s*rocinsight-context:\s*([^-]+?)\s*-->")
 
 
 def _redact_paths(value: str) -> str:
@@ -53,10 +53,10 @@ def _redact_paths(value: str) -> str:
 
 
 # Default location for the reference guide (relative to package installation)
-# Users can override with ROCPD_LLM_REFERENCE_GUIDE environment variable
+# Users can override with ROCINSIGHT_LLM_REFERENCE_GUIDE environment variable
 DEFAULT_REFERENCE_GUIDE_NAME = "llm-reference-guide.md"
 
-# Default model names — override at runtime with ROCPD_LLM_MODEL env var
+# Default model names — override at runtime with ROCINSIGHT_LLM_MODEL env var
 DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-20250514"
 DEFAULT_OPENAI_MODEL = "gpt-4-turbo-preview"
 
@@ -66,7 +66,7 @@ def get_reference_guide_path() -> Path:
     Get the path to the LLM reference guide.
 
     Priority order:
-    1. ROCPD_LLM_REFERENCE_GUIDE environment variable
+    1. ROCINSIGHT_LLM_REFERENCE_GUIDE environment variable
     2. Relative to this module (ai_analysis/share/)
     3. /opt/rocm/share/rocprofiler-sdk/llm-reference-guide.md
 
@@ -79,7 +79,7 @@ def get_reference_guide_path() -> Path:
     attempted = []
 
     # Check environment variable first
-    env_path = os.environ.get("ROCPD_LLM_REFERENCE_GUIDE")
+    env_path = os.environ.get("ROCINSIGHT_LLM_REFERENCE_GUIDE")
     if env_path:
         guide_path = Path(env_path)
         if guide_path.exists():
@@ -106,7 +106,7 @@ def load_reference_guide() -> str:
     """Load the LLM fence document.
 
     Same path lookup order as get_reference_guide_path():
-    ROCPD_LLM_REFERENCE_GUIDE env var → module share/ dir → /opt/rocm/share/...
+    ROCINSIGHT_LLM_REFERENCE_GUIDE env var → module share/ dir → /opt/rocm/share/...
 
     Raises:
         ReferenceGuideNotFoundError: If guide file not found.
@@ -198,7 +198,7 @@ def _select_tags(ctx: AnalysisContext) -> set:
 def _filter_guide(guide_text: str, tags: set) -> str:
     """
     Return only the sections of the reference guide whose
-    ``<!-- rocpd-context: TAG [, TAG ...] -->`` comment matches one of the
+    ``<!-- rocinsight-context: TAG [, TAG ...] -->`` comment matches one of the
     requested *tags*.
 
     Parsing rules:
@@ -278,7 +278,7 @@ class LLMAnalyzer:
             thinking_budget_tokens: Enable extended thinking with this token budget.
                 Only supported with the Anthropic provider and compatible models
                 (claude-opus-4, claude-sonnet-4-5, claude-3-7-sonnet).
-                Can also be set via ROCPD_LLM_THINKING environment variable.
+                Can also be set via ROCINSIGHT_LLM_THINKING environment variable.
         """
         valid_providers = {"anthropic", "openai", "local", "private"}
         if provider not in valid_providers:
@@ -295,7 +295,7 @@ class LLMAnalyzer:
         if thinking_budget_tokens is not None:
             self.thinking_budget_tokens = thinking_budget_tokens
         else:
-            _env_thinking = os.environ.get("ROCPD_LLM_THINKING")
+            _env_thinking = os.environ.get("ROCINSIGHT_LLM_THINKING")
             if _env_thinking:
                 try:
                     self.thinking_budget_tokens = int(_env_thinking)
@@ -303,7 +303,7 @@ class LLMAnalyzer:
                     import warnings
 
                     warnings.warn(
-                        f"ROCPD_LLM_THINKING={_env_thinking!r} is not a valid integer; "
+                        f"ROCINSIGHT_LLM_THINKING={_env_thinking!r} is not a valid integer; "
                         "extended thinking disabled.",
                         stacklevel=2,
                     )
@@ -330,9 +330,9 @@ class LLMAnalyzer:
         elif self.provider == "openai":
             key = os.getenv("OPENAI_API_KEY", "")
         elif self.provider == "local":
-            return os.environ.get("ROCPD_LLM_LOCAL_API_KEY", "ignored")
+            return os.environ.get("ROCINSIGHT_LLM_LOCAL_API_KEY", "ignored")
         elif self.provider == "private":
-            return os.environ.get("ROCPD_LLM_PRIVATE_API_KEY", "dummy")
+            return os.environ.get("ROCINSIGHT_LLM_PRIVATE_API_KEY", "dummy")
         else:
             raise ValueError(f"Unknown provider: {self.provider}")
 
@@ -712,7 +712,7 @@ Follow the reference guide strictly for analysis methodology and output format."
             client = anthropic.Anthropic(api_key=self.api_key)
 
             model = (
-                self.model or os.environ.get("ROCPD_LLM_MODEL") or DEFAULT_ANTHROPIC_MODEL
+                self.model or os.environ.get("ROCINSIGHT_LLM_MODEL") or DEFAULT_ANTHROPIC_MODEL
             )
 
             # Build base API call kwargs
@@ -793,7 +793,7 @@ Follow the reference guide strictly for analysis methodology and output format."
             client = openai.OpenAI(api_key=self.api_key)
 
             model = (
-                self.model or os.environ.get("ROCPD_LLM_MODEL") or DEFAULT_OPENAI_MODEL
+                self.model or os.environ.get("ROCINSIGHT_LLM_MODEL") or DEFAULT_OPENAI_MODEL
             )
             _messages = [
                 {"role": "system", "content": system_prompt},
@@ -865,9 +865,9 @@ Follow the reference guide strictly for analysis methodology and output format."
             import openai
         except ImportError:
             raise ImportError("openai package required for local LLM: pip install openai")
-        base_url = os.environ.get("ROCPD_LLM_LOCAL_URL", "http://localhost:11434/v1")
+        base_url = os.environ.get("ROCINSIGHT_LLM_LOCAL_URL", "http://localhost:11434/v1")
         client = openai.OpenAI(base_url=base_url, api_key="ignored")
-        model = self.model or os.environ.get("ROCPD_LLM_LOCAL_MODEL", "codellama:13b")
+        model = self.model or os.environ.get("ROCINSIGHT_LLM_LOCAL_MODEL", "codellama:13b")
         try:
             resp = client.chat.completions.create(
                 model=model,
@@ -882,7 +882,7 @@ Follow the reference guide strictly for analysis methodology and output format."
         except Exception as exc:
             raise RuntimeError(
                 f"Local LLM request failed ({base_url}). "
-                f"Is Ollama running? Set ROCPD_LLM_LOCAL_URL to override endpoint. "
+                f"Is Ollama running? Set ROCINSIGHT_LLM_LOCAL_URL to override endpoint. "
                 f"Error: {exc}"
             ) from exc
 
@@ -890,12 +890,12 @@ Follow the reference guide strictly for analysis methodology and output format."
         """Call a private/enterprise OpenAI-compatible LLM server.
 
         Configuration via environment variables:
-            ROCPD_LLM_PRIVATE_URL        Base URL (required)
-            ROCPD_LLM_PRIVATE_MODEL      Model name (required)
-            ROCPD_LLM_PRIVATE_API_KEY    API key (default: "dummy")
-            ROCPD_LLM_PRIVATE_HEADERS    JSON object of extra request headers
+            ROCINSIGHT_LLM_PRIVATE_URL        Base URL (required)
+            ROCINSIGHT_LLM_PRIVATE_MODEL      Model name (required)
+            ROCINSIGHT_LLM_PRIVATE_API_KEY    API key (default: "dummy")
+            ROCINSIGHT_LLM_PRIVATE_HEADERS    JSON object of extra request headers
                                          (the "user" header defaults to os.getlogin())
-            ROCPD_LLM_PRIVATE_VERIFY_SSL Set to "0" or "false" to disable SSL
+            ROCINSIGHT_LLM_PRIVATE_VERIFY_SSL Set to "0" or "false" to disable SSL
                                          certificate verification (requires httpx).
         """
         try:
@@ -906,26 +906,26 @@ Follow the reference guide strictly for analysis methodology and output format."
                 "openai package required for private LLM: pip install openai"
             )
 
-        base_url = os.environ.get("ROCPD_LLM_PRIVATE_URL", "")
+        base_url = os.environ.get("ROCINSIGHT_LLM_PRIVATE_URL", "")
         if not base_url:
             raise ValueError(
-                "ROCPD_LLM_PRIVATE_URL is not set. "
+                "ROCINSIGHT_LLM_PRIVATE_URL is not set. "
                 "Export it to point at your private LLM server."
             )
-        model = self.model or os.environ.get("ROCPD_LLM_PRIVATE_MODEL", "")
+        model = self.model or os.environ.get("ROCINSIGHT_LLM_PRIVATE_MODEL", "")
         if not model:
             raise ValueError(
                 "No model specified for private provider. "
-                "Set ROCPD_LLM_PRIVATE_MODEL or pass --llm-private-model."
+                "Set ROCINSIGHT_LLM_PRIVATE_MODEL or pass --llm-private-model."
             )
-        key = self.api_key or os.environ.get("ROCPD_LLM_PRIVATE_API_KEY", "dummy")
+        key = self.api_key or os.environ.get("ROCINSIGHT_LLM_PRIVATE_API_KEY", "dummy")
 
         headers: dict = {}
         try:
             headers["user"] = os.getlogin()
         except OSError:
             pass
-        raw_headers = os.environ.get("ROCPD_LLM_PRIVATE_HEADERS", "")
+        raw_headers = os.environ.get("ROCINSIGHT_LLM_PRIVATE_HEADERS", "")
         if raw_headers:
             # Try strict JSON first; only normalize single-quotes as a fallback.
             # The replace-based normalization would corrupt values with apostrophes.
@@ -936,16 +936,16 @@ Follow the reference guide strictly for analysis methodology and output format."
                 try:
                     parsed_h = _json.loads(raw_headers.replace("'", '"'))
                 except _json.JSONDecodeError as e:
-                    raise ValueError(f"ROCPD_LLM_PRIVATE_HEADERS is not valid JSON: {e}")
+                    raise ValueError(f"ROCINSIGHT_LLM_PRIVATE_HEADERS is not valid JSON: {e}")
             if not isinstance(parsed_h, dict):
                 raise ValueError(
-                    "ROCPD_LLM_PRIVATE_HEADERS must be a JSON object of header "
+                    "ROCINSIGHT_LLM_PRIVATE_HEADERS must be a JSON object of header "
                     'key/value pairs (e.g. {"X-My-Header": "value"}), '
                     f"got {type(parsed_h).__name__}"
                 )
             headers.update(parsed_h)
 
-        verify_ssl_env = os.environ.get("ROCPD_LLM_PRIVATE_VERIFY_SSL", "1").lower()
+        verify_ssl_env = os.environ.get("ROCINSIGHT_LLM_PRIVATE_VERIFY_SSL", "1").lower()
         verify_ssl = verify_ssl_env not in ("0", "false", "no")
         http_client = None
         if not verify_ssl:
@@ -957,7 +957,7 @@ Follow the reference guide strictly for analysis methodology and output format."
                 import warnings
 
                 warnings.warn(
-                    "ROCPD_LLM_PRIVATE_VERIFY_SSL=0 requested but httpx is not installed. "
+                    "ROCINSIGHT_LLM_PRIVATE_VERIFY_SSL=0 requested but httpx is not installed. "
                     "SSL verification will remain enabled. Run: pip install httpx",
                     stacklevel=2,
                 )
@@ -995,7 +995,7 @@ Follow the reference guide strictly for analysis methodology and output format."
             except Exception as exc:
                 raise RuntimeError(
                     f"Private LLM request failed ({base_url}). "
-                    f"Check ROCPD_LLM_PRIVATE_URL, ROCPD_LLM_PRIVATE_HEADERS. "
+                    f"Check ROCINSIGHT_LLM_PRIVATE_URL, ROCINSIGHT_LLM_PRIVATE_HEADERS. "
                     f"Error: {exc}"
                 ) from exc
         finally:

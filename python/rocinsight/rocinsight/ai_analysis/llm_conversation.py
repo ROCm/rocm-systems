@@ -21,14 +21,14 @@ def _build_private_client(api_key: Optional[str], model_override: Optional[str])
     """Build an OpenAI client for a private/enterprise LLM server.
 
     Reads configuration from environment variables:
-        ROCPD_LLM_PRIVATE_URL        Base URL of the private server (required)
-        ROCPD_LLM_PRIVATE_MODEL      Model name to use
-        ROCPD_LLM_PRIVATE_API_KEY    API key (default: "dummy" for header-auth servers)
-        ROCPD_LLM_PRIVATE_HEADERS    JSON object of extra request headers, e.g.
+        ROCINSIGHT_LLM_PRIVATE_URL        Base URL of the private server (required)
+        ROCINSIGHT_LLM_PRIVATE_MODEL      Model name to use
+        ROCINSIGHT_LLM_PRIVATE_API_KEY    API key (default: "dummy" for header-auth servers)
+        ROCINSIGHT_LLM_PRIVATE_HEADERS    JSON object of extra request headers, e.g.
                                      '{"Ocp-Apim-Subscription-Key": "abc123"}'
                                      The "user" header is auto-set to os.getlogin()
-                                     unless already present in ROCPD_LLM_PRIVATE_HEADERS.
-        ROCPD_LLM_PRIVATE_VERIFY_SSL Set to "0" or "false" to disable SSL certificate
+                                     unless already present in ROCINSIGHT_LLM_PRIVATE_HEADERS.
+        ROCINSIGHT_LLM_PRIVATE_VERIFY_SSL Set to "0" or "false" to disable SSL certificate
                                      verification (e.g. for corporate proxies with
                                      self-signed certs). Requires httpx package.
     """
@@ -37,15 +37,15 @@ def _build_private_client(api_key: Optional[str], model_override: Optional[str])
     except ImportError:
         raise ImportError("openai package not installed. Run: pip install openai")
 
-    base_url = os.environ.get("ROCPD_LLM_PRIVATE_URL", "")
+    base_url = os.environ.get("ROCINSIGHT_LLM_PRIVATE_URL", "")
     if not base_url:
         raise ValueError(
-            "ROCPD_LLM_PRIVATE_URL is not set. "
+            "ROCINSIGHT_LLM_PRIVATE_URL is not set. "
             "Export it to point at your private LLM server, e.g.:\n"
-            "  export ROCPD_LLM_PRIVATE_URL=https://my-apim.example.com/openai/deployments/gpt4"
+            "  export ROCINSIGHT_LLM_PRIVATE_URL=https://my-apim.example.com/openai/deployments/gpt4"
         )
-    key = api_key or os.environ.get("ROCPD_LLM_PRIVATE_API_KEY", "dummy")
-    model = model_override or os.environ.get("ROCPD_LLM_PRIVATE_MODEL", "")
+    key = api_key or os.environ.get("ROCINSIGHT_LLM_PRIVATE_API_KEY", "dummy")
+    model = model_override or os.environ.get("ROCINSIGHT_LLM_PRIVATE_MODEL", "")
 
     # Build headers: start with user auto-header, then overlay env-var headers
     headers: Dict[str, str] = {}
@@ -53,7 +53,7 @@ def _build_private_client(api_key: Optional[str], model_override: Optional[str])
         headers["user"] = os.getlogin()
     except OSError:
         pass  # getlogin() can fail in some CI/container environments
-    raw_headers = os.environ.get("ROCPD_LLM_PRIVATE_HEADERS", "")
+    raw_headers = os.environ.get("ROCINSIGHT_LLM_PRIVATE_HEADERS", "")
     if raw_headers:
         # Try strict JSON first; only normalize single-quotes as a fallback.
         # The replace-based normalization is intentionally not the first path
@@ -67,21 +67,21 @@ def _build_private_client(api_key: Optional[str], model_override: Optional[str])
                 parsed_headers = json.loads(raw_headers.replace("'", '"'))
             except json.JSONDecodeError as e:
                 raise ValueError(
-                    f"ROCPD_LLM_PRIVATE_HEADERS is not valid JSON: {e}\n"
+                    f"ROCINSIGHT_LLM_PRIVATE_HEADERS is not valid JSON: {e}\n"
                     f'Use double-quoted JSON: \'{{"Ocp-Apim-Subscription-Key": "abc123"}}\'\n'
                     f"Value was: {raw_headers!r}"
                 )
         if not isinstance(parsed_headers, dict):
             raise ValueError(
-                f"ROCPD_LLM_PRIVATE_HEADERS must be a JSON object, got "
+                f"ROCINSIGHT_LLM_PRIVATE_HEADERS must be a JSON object, got "
                 f"{type(parsed_headers).__name__}.\n"
                 f'Expected format: \'{{"Ocp-Apim-Subscription-Key": "abc123"}}\'\n'
                 f"Value was: {raw_headers!r}"
             )
         headers.update(parsed_headers)
 
-    # SSL verification — disabled when ROCPD_LLM_PRIVATE_VERIFY_SSL=0/false
-    verify_ssl_env = os.environ.get("ROCPD_LLM_PRIVATE_VERIFY_SSL", "1").lower()
+    # SSL verification — disabled when ROCINSIGHT_LLM_PRIVATE_VERIFY_SSL=0/false
+    verify_ssl_env = os.environ.get("ROCINSIGHT_LLM_PRIVATE_VERIFY_SSL", "1").lower()
     verify_ssl = verify_ssl_env not in ("0", "false", "no")
     http_client = None
     if not verify_ssl:
@@ -91,7 +91,7 @@ def _build_private_client(api_key: Optional[str], model_override: Optional[str])
             http_client = _httpx.Client(verify=False)
         except ImportError:
             warnings.warn(
-                "[LLMConversation] ROCPD_LLM_PRIVATE_VERIFY_SSL=0 requested but httpx is "
+                "[LLMConversation] ROCINSIGHT_LLM_PRIVATE_VERIFY_SSL=0 requested but httpx is "
                 "not installed. SSL verification will remain enabled. "
                 "Run: pip install httpx",
                 stacklevel=3,
@@ -192,7 +192,7 @@ class LLMConversation:
                 "No Anthropic API key. Set ANTHROPIC_API_KEY environment variable."
             )
         model = (
-            self._model or os.environ.get("ROCPD_LLM_MODEL") or DEFAULT_ANTHROPIC_MODEL
+            self._model or os.environ.get("ROCINSIGHT_LLM_MODEL") or DEFAULT_ANTHROPIC_MODEL
         )
         client = _anthropic.Anthropic(api_key=api_key)
         chunks: List[str] = []
@@ -235,9 +235,9 @@ class LLMConversation:
 
         _http_client = None
         if self._provider == "local":
-            base_url = os.environ.get("ROCPD_LLM_LOCAL_URL", _DEFAULT_LOCAL_URL)
+            base_url = os.environ.get("ROCINSIGHT_LLM_LOCAL_URL", _DEFAULT_LOCAL_URL)
             model = self._model or os.environ.get(
-                "ROCPD_LLM_LOCAL_MODEL", _DEFAULT_LOCAL_MODEL
+                "ROCINSIGHT_LLM_LOCAL_MODEL", _DEFAULT_LOCAL_MODEL
             )
             client = _openai.OpenAI(api_key="ignored", base_url=base_url)
         elif self._provider == "private":
@@ -249,7 +249,7 @@ class LLMConversation:
                     _http_client.close()
                 raise ValueError(
                     "No model specified for private provider. "
-                    "Set ROCPD_LLM_PRIVATE_MODEL or pass --llm-private-model."
+                    "Set ROCINSIGHT_LLM_PRIVATE_MODEL or pass --llm-private-model."
                 )
         else:
             api_key = self._api_key or os.environ.get("OPENAI_API_KEY", "")
@@ -258,7 +258,7 @@ class LLMConversation:
                     "No OpenAI API key. Set OPENAI_API_KEY environment variable."
                 )
             model = (
-                self._model or os.environ.get("ROCPD_LLM_MODEL") or DEFAULT_OPENAI_MODEL
+                self._model or os.environ.get("ROCINSIGHT_LLM_MODEL") or DEFAULT_OPENAI_MODEL
             )
             client = _openai.OpenAI(api_key=api_key)
             _http_client = None
@@ -360,7 +360,7 @@ class LLMConversation:
             api_key = self._api_key or os.environ.get("ANTHROPIC_API_KEY", "")
             model = (
                 self._model
-                or os.environ.get("ROCPD_LLM_MODEL")
+                or os.environ.get("ROCINSIGHT_LLM_MODEL")
                 or DEFAULT_ANTHROPIC_MODEL
             )
             client = _anthropic.Anthropic(api_key=api_key)
@@ -382,10 +382,10 @@ class LLMConversation:
         if self._provider == "local":
             client = _openai.OpenAI(
                 api_key="ignored",
-                base_url=os.environ.get("ROCPD_LLM_LOCAL_URL", _DEFAULT_LOCAL_URL),
+                base_url=os.environ.get("ROCINSIGHT_LLM_LOCAL_URL", _DEFAULT_LOCAL_URL),
             )
             model = self._model or os.environ.get(
-                "ROCPD_LLM_LOCAL_MODEL", _DEFAULT_LOCAL_MODEL
+                "ROCINSIGHT_LLM_LOCAL_MODEL", _DEFAULT_LOCAL_MODEL
             )
         elif self._provider == "private":
             client, model, _http_client = _build_private_client(
@@ -396,14 +396,14 @@ class LLMConversation:
                     _http_client.close()
                 raise ValueError(
                     "No model specified for private provider. "
-                    "Set ROCPD_LLM_PRIVATE_MODEL or pass --llm-private-model."
+                    "Set ROCINSIGHT_LLM_PRIVATE_MODEL or pass --llm-private-model."
                 )
         else:
             client = _openai.OpenAI(
                 api_key=self._api_key or os.environ.get("OPENAI_API_KEY", "")
             )
             model = (
-                self._model or os.environ.get("ROCPD_LLM_MODEL") or DEFAULT_OPENAI_MODEL
+                self._model or os.environ.get("ROCINSIGHT_LLM_MODEL") or DEFAULT_OPENAI_MODEL
             )
         full_messages = [{"role": "system", "content": self._system}] + messages
         try:

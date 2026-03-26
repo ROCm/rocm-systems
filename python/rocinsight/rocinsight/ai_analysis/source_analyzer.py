@@ -1132,7 +1132,7 @@ class SourceAnalyzer:
                     ),
                     "actions": [
                         "Collect a sys-trace with hardware counters (split across passes if needed)",
-                        "Open the resulting .db file with 'rocpd analyze -i output.db'",
+                        "Open the resulting .db file with 'rocinsight analyze -i output.db'",
                         "Identify the top 3 kernels by time before deeper optimization",
                     ],
                     "estimated_impact": "Establishes ground truth for all subsequent optimization",

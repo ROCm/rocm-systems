@@ -136,7 +136,7 @@ This installs the `rocinsight` script to `/opt/rocm/bin/` and the Python package
 | `anthropic >= 0.18` | `--llm anthropic` | `pip install anthropic` |
 | `openai >= 1.0` | `--llm openai` / `--llm private` | `pip install openai` |
 | `rich >= 13.0` | Colored terminal output | `pip install rich` |
-| `httpx` | `ROCPD_LLM_PRIVATE_VERIFY_SSL=0` (SSL skip) | `pip install httpx` |
+| `httpx` | `ROCINSIGHT_LLM_PRIVATE_VERIFY_SSL=0` (SSL skip) | `pip install httpx` |
 | `pytest` | Running tests | `pip install pytest` |
 
 Core analysis (Tier 0–3) requires **no third-party packages** — only Python stdlib.
@@ -236,8 +236,8 @@ export OPENAI_API_KEY="sk-..."
 rocinsight analyze -i output.db --llm openai
 
 # Private/enterprise OpenAI-compatible server
-export ROCPD_LLM_PRIVATE_URL="https://llm.corp.example.com/openai"
-export ROCPD_LLM_PRIVATE_HEADERS='{"Ocp-Apim-Subscription-Key": "abc123"}'
+export ROCINSIGHT_LLM_PRIVATE_URL="https://llm.corp.example.com/openai"
+export ROCINSIGHT_LLM_PRIVATE_HEADERS='{"Ocp-Apim-Subscription-Key": "abc123"}'
 rocinsight analyze -i output.db --llm private --llm-private-model gpt-4o
 
 # ── Custom analysis prompt ─────────────────────────────────────────
@@ -576,7 +576,7 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 rocinsight analyze -i output.db --llm anthropic
 ```
 
-Default model: `claude-sonnet-4-20250514`.  Override with `ROCPD_LLM_MODEL` or
+Default model: `claude-sonnet-4-20250514`.  Override with `ROCINSIGHT_LLM_MODEL` or
 `--llm-model claude-opus-4-6`.
 
 #### OpenAI GPT
@@ -594,17 +594,17 @@ For HPC centers, air-gapped environments, or enterprise deployments that run a
 locally-hosted OpenAI-compatible API:
 
 ```bash
-export ROCPD_LLM_PRIVATE_URL="https://llm-api.example.com/OpenAI"
-export ROCPD_LLM_PRIVATE_HEADERS='{"Ocp-Apim-Subscription-Key": "abc123", "api-version": "preview"}'
+export ROCINSIGHT_LLM_PRIVATE_URL="https://llm-api.example.com/OpenAI"
+export ROCINSIGHT_LLM_PRIVATE_HEADERS='{"Ocp-Apim-Subscription-Key": "abc123", "api-version": "preview"}'
 rocinsight analyze -i output.db --llm private --llm-private-model gpt-4o
 ```
 
 The `user` HTTP header is automatically set to `os.getlogin()` (the logged-in OS user)
-unless already present in `ROCPD_LLM_PRIVATE_HEADERS`.
+unless already present in `ROCINSIGHT_LLM_PRIVATE_HEADERS`.
 
 Disable SSL verification for internal CAs:
 ```bash
-export ROCPD_LLM_PRIVATE_VERIFY_SSL=0   # requires httpx
+export ROCINSIGHT_LLM_PRIVATE_VERIFY_SSL=0   # requires httpx
 ```
 
 #### Local Ollama
@@ -616,7 +616,7 @@ ollama pull codellama:13b
 rocinsight analyze -i output.db --llm-local ollama --llm-local-model codellama:13b
 ```
 
-Default Ollama URL: `http://localhost:11434/v1`.  Override with `ROCPD_LLM_LOCAL_URL`.
+Default Ollama URL: `http://localhost:11434/v1`.  Override with `ROCINSIGHT_LLM_LOCAL_URL`.
 
 ### The LLM Reference Guide ("Fence")
 
@@ -631,7 +631,7 @@ LLM system prompt.  It defines:
 - Prohibited behaviors (no fabricated metrics, no deprecated tools)
 
 **File location (lookup order):**
-1. `ROCPD_LLM_REFERENCE_GUIDE` environment variable (if set)
+1. `ROCINSIGHT_LLM_REFERENCE_GUIDE` environment variable (if set)
 2. Package-relative: `rocinsight/ai_analysis/share/llm-reference-guide.md`
 3. System install: `/opt/rocm/share/rocprofiler-sdk/llm-reference-guide.md`
 
@@ -682,7 +682,7 @@ are replaced by an LLM-generated summary.  The most recent 6 turns are always ke
 **Session resume:**
 ```bash
 # List saved sessions
-ls ~/.rocpd/sessions/*.json
+ls ~/.rocinsight/sessions/*.json
 
 # Resume by session ID (format: YYYY-MM-DD_HH-MM-SS_<source_dir>)
 rocinsight analyze -i output.db --interactive \
@@ -762,8 +762,8 @@ cleared before it reaches Phase 7, preventing sys-trace ↔ pmc cycling.
 
 | Session type | Save triggers | File location |
 |---|---|---|
-| `InteractiveSession` | `[s]`, `[q]`, Ctrl+C | `~/.rocpd/sessions/<ts>_<source>.json` |
-| `WorkflowSession` | Phase 3 success, Phase 6 edit, exit | `~/.rocpd/sessions/workflow_<ts>_<app>.json` |
+| `InteractiveSession` | `[s]`, `[q]`, Ctrl+C | `~/.rocinsight/sessions/<ts>_<source>.json` |
+| `WorkflowSession` | Phase 3 success, Phase 6 edit, exit | `~/.rocinsight/sessions/workflow_<ts>_<app>.json` |
 
 `WorkflowSession` saves are for audit/debugging; resume (`--resume-session`) applies
 only to `InteractiveSession`.
@@ -776,26 +776,26 @@ only to `InteractiveSession`.
 |---|---|---|
 | `ANTHROPIC_API_KEY` | Anthropic Claude API key | — |
 | `OPENAI_API_KEY` | OpenAI GPT API key | — |
-| `ROCPD_LLM_MODEL` | Override default model for `--llm anthropic` or `--llm openai` | Provider default |
-| `ROCPD_LLM_REFERENCE_GUIDE` | Path to custom LLM reference guide | Package `share/llm-reference-guide.md` |
-| `ROCPD_LLM_PRIVATE_URL` | Base URL for private OpenAI-compatible server (**required** for `--llm private`) | — |
-| `ROCPD_LLM_PRIVATE_MODEL` | Model name for private server | — |
-| `ROCPD_LLM_PRIVATE_API_KEY` | API key for private server | `"dummy"` |
-| `ROCPD_LLM_PRIVATE_HEADERS` | Extra HTTP headers as JSON or Python-dict (e.g. `{"Ocp-Apim-Subscription-Key": "..."}`) | — |
-| `ROCPD_LLM_PRIVATE_VERIFY_SSL` | Set to `0` or `false` to skip SSL certificate verification (requires `httpx`) | enabled |
-| `ROCPD_LLM_LOCAL_URL` | Ollama base URL | `http://localhost:11434/v1` |
-| `ROCPD_LLM_LOCAL_MODEL` | Ollama model name | `codellama:13b` |
+| `ROCINSIGHT_LLM_MODEL` | Override default model for `--llm anthropic` or `--llm openai` | Provider default |
+| `ROCINSIGHT_LLM_REFERENCE_GUIDE` | Path to custom LLM reference guide | Package `share/llm-reference-guide.md` |
+| `ROCINSIGHT_LLM_PRIVATE_URL` | Base URL for private OpenAI-compatible server (**required** for `--llm private`) | — |
+| `ROCINSIGHT_LLM_PRIVATE_MODEL` | Model name for private server | — |
+| `ROCINSIGHT_LLM_PRIVATE_API_KEY` | API key for private server | `"dummy"` |
+| `ROCINSIGHT_LLM_PRIVATE_HEADERS` | Extra HTTP headers as JSON or Python-dict (e.g. `{"Ocp-Apim-Subscription-Key": "..."}`) | — |
+| `ROCINSIGHT_LLM_PRIVATE_VERIFY_SSL` | Set to `0` or `false` to skip SSL certificate verification (requires `httpx`) | enabled |
+| `ROCINSIGHT_LLM_LOCAL_URL` | Ollama base URL | `http://localhost:11434/v1` |
+| `ROCINSIGHT_LLM_LOCAL_MODEL` | Ollama model name | `codellama:13b` |
 
-### `ROCPD_LLM_PRIVATE_HEADERS` format
+### `ROCINSIGHT_LLM_PRIVATE_HEADERS` format
 
 Both JSON and Python-dict formats are accepted and single-quoted keys are normalized:
 
 ```bash
 # JSON (double-quoted keys)
-export ROCPD_LLM_PRIVATE_HEADERS='{"Ocp-Apim-Subscription-Key": "abc123", "api-version": "preview"}'
+export ROCINSIGHT_LLM_PRIVATE_HEADERS='{"Ocp-Apim-Subscription-Key": "abc123", "api-version": "preview"}'
 
 # Python dict (single-quoted keys — normalized automatically)
-export ROCPD_LLM_PRIVATE_HEADERS="{'Ocp-Apim-Subscription-Key': 'abc123'}"
+export ROCINSIGHT_LLM_PRIVATE_HEADERS="{'Ocp-Apim-Subscription-Key': 'abc123'}"
 ```
 
 ---

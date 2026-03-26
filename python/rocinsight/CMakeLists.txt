@@ -63,7 +63,7 @@ if(ROCINSIGHT_BUILD_TESTS AND BUILD_TESTING)
     add_test(
         NAME rocinsight_unit_tests
         COMMAND ${Python3_EXECUTABLE} -m pytest
-            "${CMAKE_CURRENT_SOURCE_DIR}/python/rocinsight/ai_analysis/tests"
+            "${CMAKE_CURRENT_SOURCE_DIR}/rocinsight/ai_analysis/tests"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests"
             --noconftest
             -v
@@ -72,6 +72,6 @@ if(ROCINSIGHT_BUILD_TESTS AND BUILD_TESTING)
 
     set_tests_properties(rocinsight_unit_tests PROPERTIES
         LABELS "rocinsight;python;unit"
-        ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/python"
+        ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}"
     )
 endif()

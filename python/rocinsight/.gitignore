@@ -9,3 +9,5 @@ build/
 *.so
 .pytest_cache/
 /wheelhouse/
+# editable install metadata
+rocinsight.egg-info/

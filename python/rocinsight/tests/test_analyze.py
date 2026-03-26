@@ -99,7 +99,7 @@ def _hw_counters(avg_waves=None, gpu_util=None):
 
 def test_analyze_module_import():
     """Verify analyze module can be imported."""
-    from rocpd import analyze
+    from rocinsight import analyze
 
     assert hasattr(analyze, "compute_time_breakdown")
     assert hasattr(analyze, "identify_hotspots")
@@ -113,7 +113,7 @@ def test_analyze_module_import():
 
 def test_analyze_module_has_all():
     """Verify analyze module exports expected functions."""
-    from rocpd import analyze
+    from rocinsight import analyze
 
     expected_exports = [
         "compute_time_breakdown",

@@ -34,9 +34,6 @@ packages = [
     "rocinsight.ai_analysis.tests",
 ]
 
-[tool.setuptools.package-dir]
-"" = "python"
-
 [tool.setuptools.package-data]
 rocinsight = [
     "ai_analysis/share/*.md",
@@ -47,7 +44,7 @@ rocinsight = [
 
 [tool.pytest.ini_options]
 testpaths = [
-    "python/rocinsight/ai_analysis/tests",
+    "rocinsight/ai_analysis/tests",
     "tests",
 ]
 python_files = ["test_*.py"]

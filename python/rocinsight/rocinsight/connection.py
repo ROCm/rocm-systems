@@ -55,7 +55,7 @@ class RocinsightConnection:
     """
 
     # Standard rocpd table names that analysis functions query
-    _ROCPD_TABLES = [
+    _ROCINSIGHT_TABLES = [
         "rocpd_kernel_dispatch",
         "rocpd_memory_copy",
         "rocpd_api",
@@ -120,7 +120,7 @@ class RocinsightConnection:
     def _create_union_views(self, conn: sqlite3.Connection) -> None:
         """Create UNION ALL views so multi-file queries are transparent."""
         n = len(self._paths)
-        for table in self._ROCPD_TABLES:
+        for table in self._ROCINSIGHT_TABLES:
             # Check which schemas actually have this table
             schemas_with_table = []
             for idx in range(n):

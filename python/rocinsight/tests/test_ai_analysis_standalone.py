@@ -6,18 +6,18 @@
 ###############################################################################
 
 """
-Standalone unit tests for the rocpd ai_analysis module.
+Standalone unit tests for the rocinsight ai_analysis module.
 
 These tests do NOT require a real GPU trace database.
-They DO require the rocpd package to be importable (needs the built libpyrocpd
-C extension). Run with the system-installed rocpd path first, then the source
+They DO require the rocinsight package to be importable (needs the built libpyrocpd
+C extension). Run with the system-installed rocinsight path first, then the source
 path for the edited Python modules:
 
-    ROCPD_SYS=/opt/rocm-7.0.0/lib/python3.12/site-packages
-    ROCPD_SRC=/dockerx/ai-analysis-rocpd/rocm-systems-dev/projects/rocprofiler-sdk/source/lib/python
-    PYTHONPATH="${ROCPD_SYS}:${ROCPD_SRC}" pytest --noconftest test_api_standalone.py -v
+    ROCINSIGHT_SYS=/opt/rocm-7.0.0/lib/python3.12/site-packages
+    ROCINSIGHT_SRC=/dockerx/ai-analysis-rocpd/rocm-systems-dev/projects/rocprofiler-sdk/source/lib/python
+    PYTHONPATH="${ROCINSIGHT_SYS}:${ROCINSIGHT_SRC}" pytest --noconftest test_api_standalone.py -v
 
-IMPORTANT: ROCPD_SYS must come BEFORE ROCPD_SRC in PYTHONPATH to avoid a
+IMPORTANT: ROCINSIGHT_SYS must come BEFORE ROCINSIGHT_SRC in PYTHONPATH to avoid a
 circular import of libpyrocpd.
 """
 
@@ -472,7 +472,7 @@ class TestBugFixes:
         # total_kernel=900, total_memcpy=200, total_runtime=1000 → overhead=-10%
         mock_result = (900, 200, 1000, 90.0, 20.0, -10.0)
         mock_conn = MagicMock()
-        with patch("rocpd.analyze.execute_statement") as mock_exec:
+        with patch("rocinsight.analyze.execute_statement") as mock_exec:
             mock_exec.return_value.fetchone.return_value = mock_result
             result = compute_time_breakdown(mock_conn)
 
@@ -566,7 +566,7 @@ class TestBugFixes:
         mock_analyzer = MagicMock()
         mock_analyzer.analyze_source_with_llm.return_value = "LLM result"
 
-        with patch("rocpd.ai_analysis.api.LLMAnalyzer", return_value=mock_analyzer):
+        with patch("rocinsight.ai_analysis.api.LLMAnalyzer", return_value=mock_analyzer):
             analyze_source(
                 tmp_path, enable_llm=True, llm_provider="anthropic", llm_api_key="fake"
             )
@@ -756,7 +756,7 @@ class TestLLMThinking:
 
         # Ensure env var is absent so it doesn't override the default
         with patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("ROCPD_LLM_THINKING", None)
+            os.environ.pop("ROCINSIGHT_LLM_THINKING", None)
             analyzer = LLMAnalyzer(provider="anthropic")
 
         assert (
@@ -787,12 +787,12 @@ class TestLLMThinking:
                 )
 
     def test_llm_thinking_env_var(self):
-        """ROCPD_LLM_THINKING env var must set thinking_budget_tokens on construction."""
+        """ROCINSIGHT_LLM_THINKING env var must set thinking_budget_tokens on construction."""
         import os
         from unittest.mock import patch
         from rocinsight.ai_analysis.llm_analyzer import LLMAnalyzer
 
-        with patch.dict(os.environ, {"ROCPD_LLM_THINKING": "5000"}):
+        with patch.dict(os.environ, {"ROCINSIGHT_LLM_THINKING": "5000"}):
             analyzer = LLMAnalyzer(provider="anthropic")
 
         assert analyzer.thinking_budget_tokens == 5000, (

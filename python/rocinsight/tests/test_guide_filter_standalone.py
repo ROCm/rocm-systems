@@ -9,8 +9,8 @@ Standalone unit tests for LLM reference guide context-aware filtering.
 
 These tests do NOT require a GPU trace database or real LLM credentials.
 Run with:
-    ROCPD_SYS=$(python3 -c "import site; print(site.getsitepackages()[-1])")
-    PYTHONPATH="${ROCPD_SYS}" pytest --noconftest test_guide_filter_standalone.py -v
+    ROCINSIGHT_SYS=$(python3 -c "import site; print(site.getsitepackages()[-1])")
+    PYTHONPATH="${ROCINSIGHT_SYS}" pytest --noconftest test_guide_filter_standalone.py -v
 """
 
 import sys
@@ -158,7 +158,7 @@ class TestFilterGuide:
         """Build a mini guide string from (title, tag_or_None, content) tuples."""
         parts = ["# LLM Reference Guide\n\nIntro block with no tag.\n"]
         for title, tag, content in sections:
-            tag_line = f"<!-- rocpd-context: {tag} -->\n" if tag else ""
+            tag_line = f"<!-- rocinsight-context: {tag} -->\n" if tag else ""
             parts.append(f"## {title}\n{tag_line}{content}\n")
         return "\n".join(parts)
 
@@ -188,7 +188,7 @@ class TestFilterGuide:
 
     def test_section_with_multiple_tags_included_on_any_match(self):
         guide = (
-            "# Guide\n\n## Multi\n<!-- rocpd-context: tier1, tier2 -->\nmulti content\n"
+            "# Guide\n\n## Multi\n<!-- rocinsight-context: tier1, tier2 -->\nmulti content\n"
         )
         result = self._filter(guide, {"always", "tier2"})
         assert "multi content" in result
@@ -208,7 +208,7 @@ class TestFilterGuide:
 
     def test_tag_comment_with_extra_whitespace_parsed_correctly(self):
         guide = (
-            "# Guide\n\n## Section\n<!--  rocpd-context:  tier2  -->\nspaced content\n"
+            "# Guide\n\n## Section\n<!--  rocinsight-context:  tier2  -->\nspaced content\n"
         )
         result = self._filter(guide, {"tier2"})
         assert "spaced content" in result
@@ -220,7 +220,7 @@ class TestFilterGuide:
 
     def test_tag_comment_on_line2_still_found(self):
         guide = (
-            "# Guide\n\n## Section\n\n<!-- rocpd-context: tier1 -->\nline2 tag content\n"
+            "# Guide\n\n## Section\n\n<!-- rocinsight-context: tier1 -->\nline2 tag content\n"
         )
         result = self._filter(guide, {"tier1"})
         assert "line2 tag content" in result
@@ -229,7 +229,7 @@ class TestFilterGuide:
         # Tag comment on line 5 (beyond first-3-line scan) → treated as no tag → included
         guide = (
             "# Guide\n\n## Section\nline1\nline2\nline3\nline4\n"
-            "<!-- rocpd-context: tier2 -->\nlate tag content\n"
+            "<!-- rocinsight-context: tier2 -->\nlate tag content\n"
         )
         result = self._filter(guide, {"always"})
         assert "late tag content" in result
@@ -260,9 +260,9 @@ class TestBuildSystemPrompt:
             LLMAnalyzer,
             "_load_reference_guide",
             return_value=(
-                "# Guide\n\n## Always Section\n<!-- rocpd-context: always -->\nalways content\n\n"
-                "## Tier2 Section\n<!-- rocpd-context: tier2 -->\ntier2 content\n\n"
-                "## Compiler Section\n<!-- rocpd-context: compiler -->\ncompiler content\n"
+                "# Guide\n\n## Always Section\n<!-- rocinsight-context: always -->\nalways content\n\n"
+                "## Tier2 Section\n<!-- rocinsight-context: tier2 -->\ntier2 content\n\n"
+                "## Compiler Section\n<!-- rocinsight-context: compiler -->\ncompiler content\n"
             ),
         ):
             return LLMAnalyzer(provider="anthropic", api_key="fake-key")
@@ -319,8 +319,8 @@ class TestAnalyzeWithLLMContextParam:
             LLMAnalyzer,
             "_load_reference_guide",
             return_value=(
-                "# Guide\n\n## Always\n<!-- rocpd-context: always -->\nalways text\n\n"
-                "## Tier2\n<!-- rocpd-context: tier2 -->\ntier2 text\n"
+                "# Guide\n\n## Always\n<!-- rocinsight-context: always -->\nalways text\n\n"
+                "## Tier2\n<!-- rocinsight-context: tier2 -->\ntier2 text\n"
             ),
         ):
             analyzer = LLMAnalyzer(provider="anthropic", api_key="fake")
@@ -357,8 +357,8 @@ class TestAnalyzeWithLLMContextParam:
             LLMAnalyzer,
             "_load_reference_guide",
             return_value=(
-                "# Guide\n\n## Always\n<!-- rocpd-context: always -->\nalways text\n\n"
-                "## Compiler\n<!-- rocpd-context: compiler -->\ncompiler text\n"
+                "# Guide\n\n## Always\n<!-- rocinsight-context: always -->\nalways text\n\n"
+                "## Compiler\n<!-- rocinsight-context: compiler -->\ncompiler text\n"
             ),
         ):
             analyzer = LLMAnalyzer(provider="anthropic", api_key="fake")
@@ -427,7 +427,7 @@ class TestEndToEndWithRealGuide:
         guide = (
             LLMAnalyzer.__module__
             and __import__(
-                "rocpd.ai_analysis.llm_analyzer", fromlist=["get_reference_guide_path"]
+                "rocinsight.ai_analysis.llm_analyzer", fromlist=["get_reference_guide_path"]
             )
             .get_reference_guide_path()
             .read_text()
@@ -479,7 +479,7 @@ class TestEndToEndWithRealGuide:
 class TestGuideIntegrity:
     """Validate that the real llm-reference-guide.md is correctly tagged."""
 
-    KNOWN_TAGS = {"always", "tier1", "tier2", "compiler", "source", "tracelens_metrics"}
+    KNOWN_TAGS = {"always", "tier1", "tier2", "tier3", "compiler", "source", "tracelens_metrics"}
     # The intro block (before the first ## section) is intentionally untagged
     UNTAGGED_ALLOWED_PREFIXES = ("LLM Reference Guide",)
 
@@ -490,7 +490,7 @@ class TestGuideIntegrity:
         from rocinsight.ai_analysis.llm_analyzer import get_reference_guide_path
 
         text = get_reference_guide_path().read_text()
-        tag_re = re.compile(r"<!--\s*rocpd-context:\s*([^-]+?)\s*-->")
+        tag_re = re.compile(r"<!--\s*rocinsight-context:\s*([^-]+?)\s*-->")
         results = []
         for raw in re.split(r"\n(?=## )", text):
             if not raw.startswith("## "):
@@ -503,14 +503,14 @@ class TestGuideIntegrity:
         return results
 
     def test_every_section_has_a_tag(self):
-        """No ## section should be accidentally left without a rocpd-context tag."""
+        """No ## section should be accidentally left without a rocinsight-context tag."""
         untagged = [
             title
             for title, tag in self._sections()
             if tag is None
             and not any(title.startswith(p) for p in self.UNTAGGED_ALLOWED_PREFIXES)
         ]
-        assert untagged == [], f"Sections missing rocpd-context tag: {untagged}"
+        assert untagged == [], f"Sections missing rocinsight-context tag: {untagged}"
 
     def test_all_tags_are_from_known_vocabulary(self):
         """Catch typos in tag names e.g. 'tier_2' instead of 'tier2'."""

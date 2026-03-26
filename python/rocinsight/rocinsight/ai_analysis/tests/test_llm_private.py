@@ -33,11 +33,11 @@ def ref_guide_path(tmp_path) -> Path:
 @pytest.fixture()
 def private_env(monkeypatch):
     """Set the minimum env vars required for private provider."""
-    monkeypatch.setenv("ROCPD_LLM_PRIVATE_URL", "https://private.example.com/v1")
-    monkeypatch.setenv("ROCPD_LLM_PRIVATE_MODEL", "my-private-model")
-    monkeypatch.setenv("ROCPD_LLM_PRIVATE_API_KEY", "test-key-123")
-    monkeypatch.delenv("ROCPD_LLM_PRIVATE_HEADERS", raising=False)
-    monkeypatch.delenv("ROCPD_LLM_PRIVATE_VERIFY_SSL", raising=False)
+    monkeypatch.setenv("ROCINSIGHT_LLM_PRIVATE_URL", "https://private.example.com/v1")
+    monkeypatch.setenv("ROCINSIGHT_LLM_PRIVATE_MODEL", "my-private-model")
+    monkeypatch.setenv("ROCINSIGHT_LLM_PRIVATE_API_KEY", "test-key-123")
+    monkeypatch.delenv("ROCINSIGHT_LLM_PRIVATE_HEADERS", raising=False)
+    monkeypatch.delenv("ROCINSIGHT_LLM_PRIVATE_VERIFY_SSL", raising=False)
 
 
 def _make_chat_response(text: str):
@@ -60,20 +60,20 @@ def _make_stream_chunk(text: str):
 
 class TestBuildPrivateClient:
     def test_requires_private_url_env(self, monkeypatch):
-        monkeypatch.delenv("ROCPD_LLM_PRIVATE_URL", raising=False)
-        monkeypatch.delenv("ROCPD_LLM_PRIVATE_HEADERS", raising=False)
+        monkeypatch.delenv("ROCINSIGHT_LLM_PRIVATE_URL", raising=False)
+        monkeypatch.delenv("ROCINSIGHT_LLM_PRIVATE_HEADERS", raising=False)
         with patch.dict("sys.modules", {"openai": MagicMock()}):
             import openai as _oi
-            with pytest.raises(ValueError, match="ROCPD_LLM_PRIVATE_URL"):
+            with pytest.raises(ValueError, match="ROCINSIGHT_LLM_PRIVATE_URL"):
                 _build_private_client(None, None)
 
     def test_merges_json_headers_from_env(self, monkeypatch):
-        monkeypatch.setenv("ROCPD_LLM_PRIVATE_URL", "https://example.com/v1")
+        monkeypatch.setenv("ROCINSIGHT_LLM_PRIVATE_URL", "https://example.com/v1")
         monkeypatch.setenv(
-            "ROCPD_LLM_PRIVATE_HEADERS",
+            "ROCINSIGHT_LLM_PRIVATE_HEADERS",
             '{"Ocp-Apim-Subscription-Key": "abc123"}',
         )
-        monkeypatch.delenv("ROCPD_LLM_PRIVATE_VERIFY_SSL", raising=False)
+        monkeypatch.delenv("ROCINSIGHT_LLM_PRIVATE_VERIFY_SSL", raising=False)
 
         captured_kwargs: Dict[str, Any] = {}
 
@@ -91,12 +91,12 @@ class TestBuildPrivateClient:
 
     def test_single_quoted_headers_parsed(self, monkeypatch):
         """Python-dict style headers (single-quoted keys) must be normalized."""
-        monkeypatch.setenv("ROCPD_LLM_PRIVATE_URL", "https://example.com/v1")
+        monkeypatch.setenv("ROCINSIGHT_LLM_PRIVATE_URL", "https://example.com/v1")
         monkeypatch.setenv(
-            "ROCPD_LLM_PRIVATE_HEADERS",
+            "ROCINSIGHT_LLM_PRIVATE_HEADERS",
             "{'X-Custom-Header': 'value42'}",
         )
-        monkeypatch.delenv("ROCPD_LLM_PRIVATE_VERIFY_SSL", raising=False)
+        monkeypatch.delenv("ROCINSIGHT_LLM_PRIVATE_VERIFY_SSL", raising=False)
 
         captured_kwargs: Dict[str, Any] = {}
 
@@ -113,9 +113,9 @@ class TestBuildPrivateClient:
         assert headers.get("X-Custom-Header") == "value42"
 
     def test_verify_ssl_false_uses_httpx_client(self, monkeypatch):
-        monkeypatch.setenv("ROCPD_LLM_PRIVATE_URL", "https://example.com/v1")
-        monkeypatch.setenv("ROCPD_LLM_PRIVATE_VERIFY_SSL", "0")
-        monkeypatch.delenv("ROCPD_LLM_PRIVATE_HEADERS", raising=False)
+        monkeypatch.setenv("ROCINSIGHT_LLM_PRIVATE_URL", "https://example.com/v1")
+        monkeypatch.setenv("ROCINSIGHT_LLM_PRIVATE_VERIFY_SSL", "0")
+        monkeypatch.delenv("ROCINSIGHT_LLM_PRIVATE_HEADERS", raising=False)
 
         mock_httpx_client = MagicMock()
         mock_httpx = MagicMock()
@@ -141,9 +141,9 @@ class TestBuildPrivateClient:
         assert captured_kwargs.get("http_client") is mock_httpx_client
 
     def test_auto_sets_user_header(self, monkeypatch):
-        monkeypatch.setenv("ROCPD_LLM_PRIVATE_URL", "https://example.com/v1")
-        monkeypatch.delenv("ROCPD_LLM_PRIVATE_HEADERS", raising=False)
-        monkeypatch.delenv("ROCPD_LLM_PRIVATE_VERIFY_SSL", raising=False)
+        monkeypatch.setenv("ROCINSIGHT_LLM_PRIVATE_URL", "https://example.com/v1")
+        monkeypatch.delenv("ROCINSIGHT_LLM_PRIVATE_HEADERS", raising=False)
+        monkeypatch.delenv("ROCINSIGHT_LLM_PRIVATE_VERIFY_SSL", raising=False)
 
         captured_kwargs: Dict[str, Any] = {}
         mock_openai_cls = MagicMock()
@@ -166,7 +166,7 @@ class TestBuildPrivateClient:
 
 class TestLLMAnalyzerPrivate:
     def test_call_private_uses_correct_url(self, private_env, ref_guide_path):
-        """LLMAnalyzer._call_private must build a client pointing at ROCPD_LLM_PRIVATE_URL."""
+        """LLMAnalyzer._call_private must build a client pointing at ROCINSIGHT_LLM_PRIVATE_URL."""
         analyzer = LLMAnalyzer(
             provider="private",
             api_key="test-key",
@@ -230,9 +230,9 @@ class TestLLMAnalyzerPrivate:
         assert "memory-bound" in result
 
     def test_private_headers_include_auto_user(self, private_env, ref_guide_path, monkeypatch):
-        """ROCPD_LLM_PRIVATE_HEADERS merges with the auto-set user header."""
+        """ROCINSIGHT_LLM_PRIVATE_HEADERS merges with the auto-set user header."""
         monkeypatch.setenv(
-            "ROCPD_LLM_PRIVATE_HEADERS",
+            "ROCINSIGHT_LLM_PRIVATE_HEADERS",
             '{"Authorization": "Bearer tok"}',
         )
         analyzer = LLMAnalyzer(
@@ -303,7 +303,7 @@ class TestLLMConversationPrivate:
         assert "GPU" in result or "analysis" in result
 
     def test_send_local_uses_ollama_endpoint(self, monkeypatch):
-        monkeypatch.setenv("ROCPD_LLM_LOCAL_URL", "http://localhost:11434/v1")
+        monkeypatch.setenv("ROCINSIGHT_LLM_LOCAL_URL", "http://localhost:11434/v1")
         conv = LLMConversation(provider="local", model="codellama:13b")
         conv.initialize("You are a GPU analyst.")
 
@@ -425,9 +425,9 @@ class TestLLMAnalyzerErrorPropagation:
 
 class TestBuildPrivateClientSSL:
     def test_ssl_enabled_by_default(self, monkeypatch):
-        monkeypatch.setenv("ROCPD_LLM_PRIVATE_URL", "https://example.com/v1")
-        monkeypatch.delenv("ROCPD_LLM_PRIVATE_HEADERS", raising=False)
-        monkeypatch.delenv("ROCPD_LLM_PRIVATE_VERIFY_SSL", raising=False)
+        monkeypatch.setenv("ROCINSIGHT_LLM_PRIVATE_URL", "https://example.com/v1")
+        monkeypatch.delenv("ROCINSIGHT_LLM_PRIVATE_HEADERS", raising=False)
+        monkeypatch.delenv("ROCINSIGHT_LLM_PRIVATE_VERIFY_SSL", raising=False)
 
         captured_kwargs: Dict[str, Any] = {}
         mock_openai_cls = MagicMock()
@@ -443,9 +443,9 @@ class TestBuildPrivateClientSSL:
         assert "http_client" not in captured_kwargs
 
     def test_ssl_disabled_false_value(self, monkeypatch):
-        monkeypatch.setenv("ROCPD_LLM_PRIVATE_URL", "https://example.com/v1")
-        monkeypatch.setenv("ROCPD_LLM_PRIVATE_VERIFY_SSL", "false")
-        monkeypatch.delenv("ROCPD_LLM_PRIVATE_HEADERS", raising=False)
+        monkeypatch.setenv("ROCINSIGHT_LLM_PRIVATE_URL", "https://example.com/v1")
+        monkeypatch.setenv("ROCINSIGHT_LLM_PRIVATE_VERIFY_SSL", "false")
+        monkeypatch.delenv("ROCINSIGHT_LLM_PRIVATE_HEADERS", raising=False)
 
         mock_httpx_client = MagicMock()
         mock_httpx = MagicMock()

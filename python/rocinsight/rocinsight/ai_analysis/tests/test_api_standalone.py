@@ -13,11 +13,11 @@ They DO require the rocpd package to be importable (needs the built libpyrocpd
 C extension). Run with the system-installed rocpd path first, then the source
 path for the edited Python modules:
 
-    ROCPD_SYS=$(python3 -c "import site; print(site.getsitepackages()[-1])")
-    ROCPD_SRC=<repo>/projects/rocprofiler-sdk/source/lib/python
-    PYTHONPATH="${ROCPD_SYS}:${ROCPD_SRC}" pytest --noconftest test_api_standalone.py -v
+    ROCINSIGHT_SYS=$(python3 -c "import site; print(site.getsitepackages()[-1])")
+    ROCINSIGHT_SRC=<repo>/projects/rocprofiler-sdk/source/lib/python
+    PYTHONPATH="${ROCINSIGHT_SYS}:${ROCINSIGHT_SRC}" pytest --noconftest test_api_standalone.py -v
 
-IMPORTANT: ROCPD_SYS must come BEFORE ROCPD_SRC in PYTHONPATH to avoid a
+IMPORTANT: ROCINSIGHT_SYS must come BEFORE ROCINSIGHT_SRC in PYTHONPATH to avoid a
 circular import of libpyrocpd.
 """
 

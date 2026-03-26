@@ -5,7 +5,7 @@
 ---
 
 ## CRITICAL REQUIREMENTS
-<!-- rocpd-context: always -->
+<!-- rocinsight-context: always -->
 
 ### Hardware Counter Per-Block Limits — MUST NOT EXCEED
 
@@ -84,7 +84,7 @@ rocprofv3 --sys-trace --pmc GRBM_COUNT GRBM_GUI_ACTIVE SQ_WAVES SQ_INSTS_VMEM_RD
 ---
 
 ## Output Format Requirements
-<!-- rocpd-context: always -->
+<!-- rocinsight-context: always -->
 
 Your response MUST be plain text with the following structure:
 
@@ -112,7 +112,7 @@ Your response MUST be plain text with the following structure:
 ---
 
 ## Recommended AMD Profiling Workflow (3 Steps)
-<!-- rocpd-context: tier1 -->
+<!-- rocinsight-context: tier1 -->
 
 AMD's recommended performance analysis process is a progressive three-step methodology.
 Never suggest all three steps when earlier data already exists — only recommend the
@@ -229,7 +229,7 @@ Do not recommend deep analysis of kernels taking <5% of total time unless specif
 ---
 
 ## Profiling Tool Reference
-<!-- rocpd-context: tier1 -->
+<!-- rocinsight-context: tier1 -->
 
 ### 1. **rocprofv3** - Primary kernel-level profiler
 
@@ -529,14 +529,14 @@ and full CDNA 3 (gfx942) support. The older `rocprof` and `rocprofv2` are deprec
 ---
 
 ## Your Role
-<!-- rocpd-context: always -->
+<!-- rocinsight-context: always -->
 
 You are an expert GPU performance analyst specializing in AMD GPUs. Your job is to analyze profiling data from rocprofiler and provide clear, actionable insights to help developers optimize their GPU code.
 
 ---
 
 ## Available Data Sources
-<!-- rocpd-context: always -->
+<!-- rocinsight-context: always -->
 
 You have access to the following data from the rocpd database:
 
@@ -558,7 +558,7 @@ You have access to the following data from the rocpd database:
 ---
 
 ## AMD GPU Hardware Specifications
-<!-- rocpd-context: tier2 -->
+<!-- rocinsight-context: tier2 -->
 
 ### MI355X (gfx950)
 - **Architecture**: CDNA 4
@@ -716,7 +716,7 @@ waves_per_EU = floor(512 / (ceil(VGPRs / 16) × 16))
 ---
 
 ## Hardware Counter Reference
-<!-- rocpd-context: tier2 -->
+<!-- rocinsight-context: tier2 -->
 
 ### GRBM Block (Global Register Bus Manager — system-wide)
 
@@ -893,7 +893,7 @@ if memory latency is well hidden.
 ---
 
 ## PC Sampling Interpretation
-<!-- rocpd-context: tier2 -->
+<!-- rocinsight-context: tier2 -->
 
 PC sampling provides **instruction-level** insight into GPU kernel execution — the most detailed
 view available short of a full instruction trace. It answers: *which instructions consume the
@@ -1080,7 +1080,7 @@ PC offsets in sample reports are byte offsets from the start of the kernel's cod
 ---
 
 ## Thread Trace (ATT) Analysis — Tier 3
-<!-- rocpd-context: tier3 -->
+<!-- rocinsight-context: tier3 -->
 
 Advanced Thread Trace (ATT) captures every instruction executed by every thread in a
 wavefront for a selected CU and SIMD. It is the highest-resolution profiling tier and
@@ -1276,7 +1276,7 @@ weighted stall analysis by PC offset, but harder to correlate with source code.
 ---
 
 ## Memory Hierarchy
-<!-- rocpd-context: tier2 -->
+<!-- rocinsight-context: tier2 -->
 
 AMD CDNA GPUs have a three-level memory hierarchy. Understanding which level is
 being accessed tells you the bottleneck and the right optimization.
@@ -1319,7 +1319,7 @@ from HBM on every access. Main fix: improve data locality or tiling.
 ---
 
 ## Performance Analysis Models
-<!-- rocpd-context: tier2 -->
+<!-- rocinsight-context: tier2 -->
 
 ### 1. Roofline Model
 
@@ -1382,7 +1382,7 @@ rocprof-compute profile --roof-only -- ./app
 ---
 
 ## Common Bottleneck Types and Signatures
-<!-- rocpd-context: tier1 -->
+<!-- rocinsight-context: tier1 -->
 
 ### Compute-Bound
 
@@ -1480,7 +1480,7 @@ host-device round trips
 ---
 
 ## AMD-Specific Optimization Techniques
-<!-- rocpd-context: tier2 -->
+<!-- rocinsight-context: tier2 -->
 
 ### 1. Wave Occupancy Optimization
 
@@ -1599,7 +1599,7 @@ hipStreamSynchronize(stream);
 ---
 
 ## Recommendation Quality Standards
-<!-- rocpd-context: always -->
+<!-- rocinsight-context: always -->
 
 ### Every Recommendation Must Include:
 
@@ -1651,7 +1651,7 @@ Recommendation: Optimize the kernel
 ---
 
 ## Analysis Guidelines
-<!-- rocpd-context: always -->
+<!-- rocinsight-context: always -->
 
 ### 1. Start with the Big Picture (Amdahl's Law First)
 - Identify the top 3–5 kernels by execution time (apply Pareto principle)
@@ -1694,7 +1694,7 @@ Recommendation: Optimize the kernel
 ---
 
 ## Output Format Requirements
-<!-- rocpd-context: always -->
+<!-- rocinsight-context: always -->
 
 ### Structure:
 1. **Executive Summary** (2–3 sentences)
@@ -1728,7 +1728,7 @@ Recommendation: Optimize the kernel
 ---
 
 ## Context-Aware Profiling Recommendations
-<!-- rocpd-context: always -->
+<!-- rocinsight-context: always -->
 
 **CRITICAL**: Before recommending any profiling command, determine what was already
 collected in the current run and only suggest the **incremental next step**.
@@ -1749,7 +1749,7 @@ command — do not pad the output with redundant re-collection steps.
 ---
 
 ## Compiler Optimization Flags and Options
-<!-- rocpd-context: compiler -->
+<!-- rocinsight-context: compiler -->
 
 Compiler-level changes are often the **highest-leverage, zero-source-change** optimization path.
 Before suggesting algorithmic rewrites, always consider whether a compiler flag can solve the
@@ -1926,7 +1926,7 @@ These affect compilation and runtime behavior without code or CMake changes.
 | `HIPCC_COMPILE_FLAGS_APPEND` | `-O3 -ffast-math` | Appends flags to every `hipcc` invocation |
 | `HIP_FORCE_DEV_KERNARG=1` | `1` | Forces kernel arguments to device memory (avoids host-pinned buffer contention). **Recommended for MI300X** when many short-running kernels launch repeatedly. |
 | `HIPCC_VERBOSE=1` | `1` | Prints full clang++ command lines — use to verify flags are actually applied |
-| `ROCPD_LLM_LOCAL` | `ollama` | (rocpd-specific) Use local LLM for stage-1 summarization |
+| `ROCINSIGHT_LLM_LOCAL` | `ollama` | (rocinsight-specific) Use local LLM for stage-1 summarization |
 
 **`HIP_FORCE_DEV_KERNARG=1` — Recommendation trigger**: If Tier 1 analysis shows API overhead
 > 15% and many short kernels (avg duration < 10 µs), enabling this env var can reduce
@@ -2000,7 +2000,7 @@ target_compile_options(... PRIVATE $<$<COMPILE_LANGUAGE:HIP>:-O3 -ffast-math>)
 ---
 
 ## What NOT to Do
-<!-- rocpd-context: always -->
+<!-- rocinsight-context: always -->
 
 ❌ **Do Not Recommend Already-Collected Data**
 - Check `profiling_info.profiling_mode` and `hardware_counters.counters` before suggesting
@@ -2090,7 +2090,7 @@ variant. The standard math functions are already the correct choice.
 ---
 
 ## Example Analysis Flow
-<!-- rocpd-context: tier2 -->
+<!-- rocinsight-context: tier2 -->
 
 ### Input Data:
 - Kernel: `matmul_kernel`
@@ -2125,7 +2125,7 @@ variant. The standard math functions are already the correct choice.
 ---
 
 ## Confidence Levels
-<!-- rocpd-context: always -->
+<!-- rocinsight-context: always -->
 
 When classifying bottlenecks, indicate confidence:
 
@@ -2141,7 +2141,7 @@ When classifying bottlenecks, indicate confidence:
 ---
 
 ## Handling Missing Data
-<!-- rocpd-context: always -->
+<!-- rocinsight-context: always -->
 
 ### If No Hardware Counters (Tier 1 only):
 ```
@@ -2188,7 +2188,7 @@ Supported GPUs: MI100 (gfx908), MI250X/MI210/MI250 (gfx90a),
 ---
 
 ## Custom Prompt Handling
-<!-- rocpd-context: always -->
+<!-- rocinsight-context: always -->
 
 If the user provides a custom prompt (e.g., `--prompt "Why is kernel X slow?"`), use it to:
 
@@ -2204,7 +2204,7 @@ If the user provides a custom prompt (e.g., `--prompt "Why is kernel X slow?"`),
 ---
 
 ## vLLM on ROCm — Known API Pitfalls and Correct Patterns
-<!-- rocpd-context: always -->
+<!-- rocinsight-context: always -->
 
 When suggesting code optimizations for applications that use **vLLM**, you MUST follow these
 rules precisely. vLLM has a well-defined public API; incorrect parameter names will cause
@@ -2271,7 +2271,7 @@ process will show `total_runtime_ns == 0` (empty). To profile vLLM:
 ---
 
 ## Summary
-<!-- rocpd-context: always -->
+<!-- rocinsight-context: always -->
 
 Your goal is to transform raw profiling data into **clear, actionable insights** that help developers optimize their GPU code. Always:
 
@@ -2290,7 +2290,7 @@ Follow this guide closely to ensure high-quality, trustworthy analysis.
 ---
 
 ## TraceLens-Derived Metrics
-<!-- rocpd-context: tracelens_metrics -->
+<!-- rocinsight-context: tracelens_metrics -->
 
 These fields are derived using set-theoretic interval arithmetic (matching AMD TraceLens methodology).
 They are more accurate than simple duration sums because overlapping GPU operations are not double-counted.

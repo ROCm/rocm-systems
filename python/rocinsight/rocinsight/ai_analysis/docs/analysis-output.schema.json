@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "rocpd-ai-analysis-output",
   "title": "ROCpd AI Analysis Output",
-  "description": "JSON output schema for 'rocpd analyze --format json' and the rocpd.ai_analysis Python API. Consumers MUST check schema_version before parsing.",
+  "description": "JSON output schema for 'rocinsight analyze --format json' and the rocinsight.ai_analysis Python API. Consumers MUST check schema_version before parsing.",
   "type": "object",
   "required": [
     "schema_version",
@@ -22,7 +22,7 @@
 
     "schema_version": {
       "type": "string",
-      "enum": ["0.1.0", "0.2.0", "0.3.0"],
+      "enum": ["0.1.0", "0.2.0", "0.3.0", "0.4.0"],
       "description": "Version of this JSON schema. Tools MUST validate this field before parsing. Breaking changes increment the major number. See SCHEMA_CHANGELOG.md for migration guidance."
     },
 
@@ -625,6 +625,118 @@
               "count":           { "type": "integer" },
               "avg_us":          { "type": "number"  },
               "total_wasted_ns": { "type": "integer" }
+            }
+          }
+        }
+      }
+    },
+
+    "att_trace": {
+      "type": ["object", "null"],
+      "description": "Tier 3 Advanced Thread Trace instruction-level stall analysis. Present when --att-dir is used and ATT CSV data is found. Absent in Tier 1/2 runs.",
+      "properties": {
+        "has_att_data": {
+          "type": "boolean",
+          "description": "True when valid ATT CSV data was parsed successfully."
+        },
+        "reason": {
+          "type": "string",
+          "description": "Error or status message when has_att_data is false."
+        },
+        "summary": {
+          "type": "object",
+          "description": "Aggregated ATT statistics across all traced kernels.",
+          "properties": {
+            "kernel_count": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Number of kernels with valid ATT trace data."
+            },
+            "high_stall_kernels": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Number of kernels with stall_ratio >= 0.60 on the top stalling instruction."
+            }
+          }
+        },
+        "kernels": {
+          "type": "array",
+          "description": "Per-kernel ATT analysis results, sorted by total_weighted_stall descending.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Demangled kernel function name."
+              },
+              "csv_file": {
+                "type": "string",
+                "description": "Path to the ATT stats CSV file for this kernel."
+              },
+              "instruction_count": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Total number of instructions parsed from the CSV."
+              },
+              "avg_stall_ratio": {
+                "type": "number",
+                "minimum": 0.0,
+                "maximum": 1.0,
+                "description": "Average stall_ratio across all instructions (stall_cycles / total_latency_cycles)."
+              },
+              "stall_category": {
+                "type": "string",
+                "description": "Classified bottleneck type derived from top stalling instruction PC prefix.",
+                "examples": ["att_vmem_latency", "att_lds_conflict", "att_branch_divergence", "att_dependency", "att_unknown"]
+              },
+              "total_weighted_stall": {
+                "type": "number",
+                "minimum": 0,
+                "description": "Sum of (stall_cycles * hitcount) across all instructions — primary sort key."
+              },
+              "top_stalling_instructions": {
+                "type": "array",
+                "description": "Top 10 instructions ranked by weighted_stall (stall_cycles * hitcount) descending.",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "pc_offset": {
+                      "type": "string",
+                      "description": "Instruction identifier or PC offset as reported by rocprofv3 ATT."
+                    },
+                    "hitcount": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "description": "Number of times this instruction was sampled."
+                    },
+                    "total_latency_cycles": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "description": "Total latency cycles accumulated for this instruction."
+                    },
+                    "stall_cycles": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "description": "Total stall cycles for this instruction."
+                    },
+                    "stall_ratio": {
+                      "type": "number",
+                      "minimum": 0.0,
+                      "maximum": 1.0,
+                      "description": "Fraction of latency spent stalling (stall_cycles / total_latency_cycles)."
+                    },
+                    "weighted_stall": {
+                      "type": "number",
+                      "minimum": 0,
+                      "description": "stall_cycles * hitcount — composite severity score used for ranking."
+                    },
+                    "source_line": {
+                      "type": "string",
+                      "description": "Source file and line number associated with this instruction, if available."
+                    }
+                  }
+                }
+              }
             }
           }
         }

@@ -3,11 +3,11 @@
 Unit tests for rocpd/tracelens_port.py.
 
 Run:
-    ROCPD_SYS=$(python3 -c "import site; print(site.getsitepackages()[-1])")
-    PYTHONPATH="${ROCPD_SYS}" pytest --noconftest test_tracelens_port.py -v
+    ROCINSIGHT_SYS=$(python3 -c "import site; print(site.getsitepackages()[-1])")
+    PYTHONPATH="${ROCINSIGHT_SYS}" pytest --noconftest test_tracelens_port.py -v
 
 Integration test (requires real merged_db.db):
-    ROCPD_TEST_DB=/path/to/merged_db.db pytest --noconftest test_tracelens_port.py -v
+    ROCINSIGHT_TEST_DB=/path/to/merged_db.db pytest --noconftest test_tracelens_port.py -v
 """
 
 from unittest.mock import MagicMock, patch
@@ -392,14 +392,14 @@ class TestAnalyzeShortKernels:
 # ===========================================================================
 
 MERGED_DB = __import__("os").environ.get(
-    "ROCPD_TEST_DB",
+    "ROCINSIGHT_TEST_DB",
     "",
 )
 
 
 @pytest.mark.skipif(
     not (MERGED_DB and __import__("os").path.exists(MERGED_DB)),
-    reason="merged_db.db not found; set ROCPD_TEST_DB env var to enable",
+    reason="merged_db.db not found; set ROCINSIGHT_TEST_DB env var to enable",
 )
 def test_integration_tracelens_with_real_db():
     """End-to-end: all three functions return valid dicts from merged_db.db."""

@@ -39,8 +39,8 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 rocinsight analyze -i output.db --llm anthropic
 
 # Private/enterprise OpenAI-compatible server
-export ROCPD_LLM_PRIVATE_URL="https://llm-api.example.com/OpenAI"
-export ROCPD_LLM_PRIVATE_HEADERS='{"Ocp-Apim-Subscription-Key": "abc123"}'
+export ROCINSIGHT_LLM_PRIVATE_URL="https://llm-api.example.com/OpenAI"
+export ROCINSIGHT_LLM_PRIVATE_HEADERS='{"Ocp-Apim-Subscription-Key": "abc123"}'
 rocinsight analyze -i output.db --llm private --llm-private-model gpt-4o
 
 # Local Ollama model
@@ -157,7 +157,7 @@ The LLM reference guide ("fence") is a **user-modifiable Markdown file** that co
 LLM behavior.  It is loaded as the system prompt for every LLM API request.
 
 **Location (lookup order):**
-1. `ROCPD_LLM_REFERENCE_GUIDE` environment variable (if set)
+1. `ROCINSIGHT_LLM_REFERENCE_GUIDE` environment variable (if set)
 2. Package-relative: `rocinsight/ai_analysis/share/llm-reference-guide.md`
 3. System install: `/opt/rocm/share/rocprofiler-sdk/llm-reference-guide.md`
 
@@ -399,10 +399,10 @@ result = analyze_database(
 |---|---|---|---|
 | `--llm anthropic` | `ANTHROPIC_API_KEY` | `claude-sonnet-4-20250514` | Recommended |
 | `--llm openai` | `OPENAI_API_KEY` | `gpt-4-turbo-preview` | — |
-| `--llm private` | `ROCPD_LLM_PRIVATE_URL` | `ROCPD_LLM_PRIVATE_MODEL` | Any OpenAI-compatible endpoint |
-| `--llm-local ollama` | `ROCPD_LLM_LOCAL_URL` | `ROCPD_LLM_LOCAL_MODEL` | Local Ollama |
+| `--llm private` | `ROCINSIGHT_LLM_PRIVATE_URL` | `ROCINSIGHT_LLM_PRIVATE_MODEL` | Any OpenAI-compatible endpoint |
+| `--llm-local ollama` | `ROCINSIGHT_LLM_LOCAL_URL` | `ROCINSIGHT_LLM_LOCAL_MODEL` | Local Ollama |
 
-Override model: `ROCPD_LLM_MODEL` env var or `--llm-model <model-name>`.
+Override model: `ROCINSIGHT_LLM_MODEL` env var or `--llm-model <model-name>`.
 
 ### Data Sanitization
 
@@ -466,7 +466,7 @@ Invoked with `rocinsight analyze -i output.db --interactive` (no app string):
   [p]  Profile   — run a new rocprofv3 command and analyze output
   [a]  Analyze   — re-analyze current .db and refresh recommendations
   [o]  Optimize  — ask the LLM for optimization advice
-  [s]  Save      — serialize session to ~/.rocpd/sessions/
+  [s]  Save      — serialize session to ~/.rocinsight/sessions/
   [q]  Quit
 ```
 
@@ -490,7 +490,7 @@ Phase 6   AI file edit → .bak backup → revert flow on failure
 Phase 7   Re-profiling choice: same / edit / AI-recommended command
 ```
 
-Sessions save to `~/.rocpd/sessions/`.  `--resume-session` applies to `InteractiveSession` only.
+Sessions save to `~/.rocinsight/sessions/`.  `--resume-session` applies to `InteractiveSession` only.
 
 ---
 
@@ -515,15 +515,15 @@ PYTHONPATH=. python3 -m pytest tests -v \
 |---|---|
 | `ANTHROPIC_API_KEY` | Anthropic Claude API key |
 | `OPENAI_API_KEY` | OpenAI GPT API key |
-| `ROCPD_LLM_MODEL` | Override default LLM model |
-| `ROCPD_LLM_REFERENCE_GUIDE` | Path to custom reference guide |
-| `ROCPD_LLM_PRIVATE_URL` | Private server base URL (required for `--llm private`) |
-| `ROCPD_LLM_PRIVATE_MODEL` | Private server model name |
-| `ROCPD_LLM_PRIVATE_API_KEY` | Private server API key (default: `"dummy"`) |
-| `ROCPD_LLM_PRIVATE_HEADERS` | Extra HTTP headers as JSON / Python-dict |
-| `ROCPD_LLM_PRIVATE_VERIFY_SSL` | `0` = disable SSL verification (requires `httpx`) |
-| `ROCPD_LLM_LOCAL_URL` | Ollama base URL (default: `http://localhost:11434/v1`) |
-| `ROCPD_LLM_LOCAL_MODEL` | Ollama model (default: `codellama:13b`) |
+| `ROCINSIGHT_LLM_MODEL` | Override default LLM model |
+| `ROCINSIGHT_LLM_REFERENCE_GUIDE` | Path to custom reference guide |
+| `ROCINSIGHT_LLM_PRIVATE_URL` | Private server base URL (required for `--llm private`) |
+| `ROCINSIGHT_LLM_PRIVATE_MODEL` | Private server model name |
+| `ROCINSIGHT_LLM_PRIVATE_API_KEY` | Private server API key (default: `"dummy"`) |
+| `ROCINSIGHT_LLM_PRIVATE_HEADERS` | Extra HTTP headers as JSON / Python-dict |
+| `ROCINSIGHT_LLM_PRIVATE_VERIFY_SSL` | `0` = disable SSL verification (requires `httpx`) |
+| `ROCINSIGHT_LLM_LOCAL_URL` | Ollama base URL (default: `http://localhost:11434/v1`) |
+| `ROCINSIGHT_LLM_LOCAL_MODEL` | Ollama model (default: `codellama:13b`) |
 
 ---
 

@@ -89,7 +89,7 @@ def single_db(tmp_dir):
 
 @pytest.fixture()
 def two_dbs(tmp_dir):
-    """Two databases both containing pmc_events (which IS in _ROCPD_TABLES)."""
+    """Two databases both containing pmc_events (which IS in _ROCINSIGHT_TABLES)."""
     p1 = tmp_dir / "trace0.db"
     p2 = tmp_dir / "trace1.db"
 
@@ -200,7 +200,7 @@ class TestMultiFileConnection:
         """pmc_events from both shards are visible via the UNION ALL view."""
         p1, p2 = two_dbs
         conn = RocinsightConnection([p1, p2])
-        # pmc_events is in _ROCPD_TABLES so a UNION ALL view is created for it
+        # pmc_events is in _ROCINSIGHT_TABLES so a UNION ALL view is created for it
         rows = conn.execute(
             "SELECT counter_name FROM pmc_events ORDER BY counter_name"
         ).fetchall()

@@ -760,31 +760,31 @@ result = analyze_database(
 
 - **Private/enterprise server** (any OpenAI-compatible endpoint)
   - Provider: `"private"` (`--llm private`)
-  - Required env var: `ROCPD_LLM_PRIVATE_URL` — base URL (e.g. `https://llm-api.example.com/OpenAI`)
-  - Required: `ROCPD_LLM_PRIVATE_MODEL` or `--llm-private-model`
-  - Optional: `ROCPD_LLM_PRIVATE_API_KEY` (default: `"dummy"` for header-authenticated servers)
-  - Optional: `ROCPD_LLM_PRIVATE_HEADERS` — JSON object of extra request headers;
+  - Required env var: `ROCINSIGHT_LLM_PRIVATE_URL` — base URL (e.g. `https://llm-api.example.com/OpenAI`)
+  - Required: `ROCINSIGHT_LLM_PRIVATE_MODEL` or `--llm-private-model`
+  - Optional: `ROCINSIGHT_LLM_PRIVATE_API_KEY` (default: `"dummy"` for header-authenticated servers)
+  - Optional: `ROCINSIGHT_LLM_PRIVATE_HEADERS` — JSON object of extra request headers;
     must be a JSON object (`{...}`), not an array or scalar — a `ValueError` is raised
     if the parsed value is not a dict; the `user` header is auto-set to `os.getlogin()`
     unless already provided
-  - Optional: `ROCPD_LLM_PRIVATE_VERIFY_SSL=0` — disable SSL certificate verification (requires `httpx`)
+  - Optional: `ROCINSIGHT_LLM_PRIVATE_VERIFY_SSL=0` — disable SSL certificate verification (requires `httpx`)
 
   ```bash
-  export ROCPD_LLM_PRIVATE_URL="https://llm-api.example.com/OpenAI"
-  export ROCPD_LLM_PRIVATE_HEADERS='{"Ocp-Apim-Subscription-Key": "abc123", "api-version": "preview"}'
+  export ROCINSIGHT_LLM_PRIVATE_URL="https://llm-api.example.com/OpenAI"
+  export ROCINSIGHT_LLM_PRIVATE_HEADERS='{"Ocp-Apim-Subscription-Key": "abc123", "api-version": "preview"}'
   rocinsight analyze -i output.db --llm private --llm-private-model gpt-4o
   ```
 
 - **Local Ollama**
   - Provider: `--llm-local ollama`
-  - Env var: `ROCPD_LLM_LOCAL_URL` (default: `http://localhost:11434/v1`)
-  - Env var: `ROCPD_LLM_LOCAL_MODEL` (default: `codellama:13b`)
+  - Env var: `ROCINSIGHT_LLM_LOCAL_URL` (default: `http://localhost:11434/v1`)
+  - Env var: `ROCINSIGHT_LLM_LOCAL_MODEL` (default: `codellama:13b`)
 
 **Override the model at runtime** (anthropic/openai providers):
 
 ```bash
-export ROCPD_LLM_MODEL="claude-opus-4-6"   # Use a different Anthropic model
-export ROCPD_LLM_MODEL="gpt-4o"            # Use a different OpenAI model
+export ROCINSIGHT_LLM_MODEL="claude-opus-4-6"   # Use a different Anthropic model
+export ROCINSIGHT_LLM_MODEL="gpt-4o"            # Use a different OpenAI model
 ```
 
 ### Custom Prompts
@@ -1039,7 +1039,7 @@ compare_traces(Path("baseline.db"), Path("optimized.db"))
 ## See Also
 
 - [LLM Reference Guide Documentation](LLM_REFERENCE_GUIDE.md) - How to customize LLM behavior
-- [CLI Documentation](../README.md) - Using `rocpd analyze` command
+- [CLI Documentation](../README.md) - Using `rocinsight analyze` command
 - [rocprofiler-sdk Documentation](https://rocm.docs.amd.com/projects/rocprofiler-sdk/)
 
 ---
@@ -1082,8 +1082,8 @@ conv2 = LLMConversation.from_dict(state, api_key="sk-ant-...")
 | Parameter | Default | Description |
 |---|---|---|
 | `provider` | — | `"anthropic"`, `"openai"`, `"private"`, or `"local"` |
-| `api_key` | `None` | API key; falls back to `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `ROCPD_LLM_PRIVATE_API_KEY` |
-| `model` | `None` | Model override; falls back to `ROCPD_LLM_MODEL` then built-in default |
+| `api_key` | `None` | API key; falls back to `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `ROCINSIGHT_LLM_PRIVATE_API_KEY` |
+| `model` | `None` | Model override; falls back to `ROCINSIGHT_LLM_MODEL` then built-in default |
 | `compact_every` | `10` | Trigger LLM-based history compaction every N turns |
 | `keep_recent_turns` | `6` | Number of recent turns preserved verbatim after compaction |
 | `history_path` | `None` | JSONL file path for append-only message archive |
@@ -1114,7 +1114,7 @@ conv.initialize("You are an expert AMD GPU engineer.\n\n" + guide)
 ```
 
 The guide is loaded from (in order):
-1. `ROCPD_LLM_REFERENCE_GUIDE` environment variable path
+1. `ROCINSIGHT_LLM_REFERENCE_GUIDE` environment variable path
 2. Module-relative `share/llm-reference-guide.md`
 3. `/opt/rocm/share/rocprofiler-sdk/llm-reference-guide.md`
 
@@ -1192,12 +1192,12 @@ result = analyzer.analyze_with_llm(data)
 
 **`LLMAnalyzer(model=...)` is now honored**
 
-Previously, the `model` parameter was stored but the `ROCPD_LLM_MODEL` environment
+Previously, the `model` parameter was stored but the `ROCINSIGHT_LLM_MODEL` environment
 variable was checked first at call time, silently overriding any explicit `model=`
 argument. The priority is now:
 
 1. `model=` constructor argument (highest priority)
-2. `ROCPD_LLM_MODEL` environment variable
+2. `ROCINSIGHT_LLM_MODEL` environment variable
 3. Built-in default (`DEFAULT_ANTHROPIC_MODEL` or `DEFAULT_OPENAI_MODEL`)
 
 **`analyze_source()` now passes `AnalysisContext(tier=0)` to the LLM automatically**
@@ -1480,7 +1480,7 @@ starts fresh each invocation. It does not support session resume.
 
 1. The session ID (format: `YYYY-MM-DD_HH-MM-SS_<source_dir_basename>`) is passed to
    `InteractiveSession(resume_session_id=...)`.
-2. `_init_session(resume_id)` loads the session JSON from `~/.rocpd/sessions/`.
+2. `_init_session(resume_id)` loads the session JSON from `~/.rocinsight/sessions/`.
 3. `_restore_or_create_conv(loaded)` reconstructs the `LLMConversation` from the
    serialized `loaded.conversation` dict via `LLMConversation.from_dict()`.
 4. `_sent_source_files` is restored from `loaded.sent_source_files`.
@@ -1493,7 +1493,7 @@ prompts the user to choose one. This means repeat invocations against the same
 **Session ID discovery:**
 
 ```bash
-ls ~/.rocpd/sessions/*.json | xargs -I{} python3 -c \
+ls ~/.rocinsight/sessions/*.json | xargs -I{} python3 -c \
     "import json; d=json.load(open('{}'));print(d['session_id'],'|',d['source_dir'])"
 ```
 
@@ -1509,8 +1509,8 @@ any prior state and blacklist approaches that caused regressions.
 ```
 Phase 6 AI edit
   └─► git commit all modified files
-  └─► git update-ref refs/rocpd/<session_id>/cp-N  (GC-pinned ref, not a branch)
-  └─► git worktree add --detach ~/.rocpd/sessions/<session_id>/cp-N
+  └─► git update-ref refs/rocinsight/<session_id>/cp-N  (GC-pinned ref, not a branch)
+  └─► git worktree add --detach ~/.rocinsight/sessions/<session_id>/cp-N
   └─► CheckpointRecord appended to WorkflowState.checkpoints
         ├── cp_id, commit_hash, ref_name, worktree_path
         ├── files_modified, file_snapshots (full file contents for offline restore)
@@ -1520,7 +1520,7 @@ Phase 6 AI edit
 ```
 
 When the session exits (normally or via Ctrl+C), `_teardown_checkpoints()` removes all
-worktrees. Refs (`refs/rocpd/…`) are kept so the commits survive GC until the user
+worktrees. Refs (`refs/rocinsight/…`) are kept so the commits survive GC until the user
 explicitly runs a cleanup command.
 
 #### Dataclasses
@@ -1531,7 +1531,7 @@ explicitly runs a cleanup command.
 |---|---|---|
 | `cp_id` | `int` | Sequential checkpoint index (0-based) |
 | `commit_hash` | `str` | Full git commit SHA |
-| `ref_name` | `str` | `refs/rocpd/<session_id>/cp-<N>` |
+| `ref_name` | `str` | `refs/rocinsight/<session_id>/cp-<N>` |
 | `worktree_path` | `str` | Absolute path to the detached worktree |
 | `timestamp` | `str` | ISO-8601 timestamp |
 | `files_modified` | `List[str]` | Repo-relative paths of files in this edit batch |
@@ -1565,7 +1565,7 @@ repo_root = GitCheckpointManager.detect_repo(cwd="/path/to/project")
 
 # Core checkpoint operations
 hash_ = gcm.commit_files(files=["src/kernel.cpp"], message="rocpd: checkpoint 0")
-gcm.tag_checkpoint(commit_hash=hash_, cp_id=0)          # creates refs/rocpd/.../cp-0
+gcm.tag_checkpoint(commit_hash=hash_, cp_id=0)          # creates refs/rocinsight/.../cp-0
 gcm.add_worktree(commit_hash=hash_, cp_id=0)             # git worktree add --detach
 gcm.remove_worktree(worktree_path="/path/to/wt")
 
@@ -1576,7 +1576,7 @@ gcm.list_worktrees()                                     # all registered worktr
 gcm.restore_files_from_commit(commit_hash, files)        # git checkout <hash> -- <files>
 ```
 
-`commit_files` uses `-c user.email=rocpd@local -c user.name=rocpd` overrides and
+`commit_files` uses `-c user.email=rocinsight@local -c user.name=rocpd` overrides and
 `--no-verify` to work in any git environment regardless of hooks or missing config.
 
 #### Rollback

@@ -1,10 +1,10 @@
 """Tests for WorkflowSession 7-phase interactive profiling workflow.
 
-Run with system rocpd first in PYTHONPATH:
+Run with system rocinsight first in PYTHONPATH:
 
-    ROCPD_SYS=$(python3 -c "import site; print(site.getsitepackages()[-1])")
-    ROCPD_SRC=<repo>/projects/rocprofiler-sdk/source/lib/python
-    PYTHONPATH="${ROCPD_SYS}:${ROCPD_SRC}" pytest --noconftest test_workflow.py -v
+    ROCINSIGHT_SYS=$(python3 -c "import site; print(site.getsitepackages()[-1])")
+    ROCINSIGHT_SRC=<repo>/projects/rocprofiler-sdk/source/lib/python
+    PYTHONPATH="${ROCINSIGHT_SYS}:${ROCINSIGHT_SRC}" pytest --noconftest test_workflow.py -v
 """
 
 import os
@@ -13,19 +13,19 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-# If ROCPD_SYS is set, ensure the system-installed rocpd wins over any path that
+# If ROCINSIGHT_SYS is set, ensure the system-installed rocpd wins over any path that
 # pytest may have prepended during package-discovery (e.g. the build tree).
-_ROCPD_SYS = os.environ.get("ROCPD_SYS", "")
-if _ROCPD_SYS:
-    if not os.path.isdir(_ROCPD_SYS):
+_ROCINSIGHT_SYS = os.environ.get("ROCINSIGHT_SYS", "")
+if _ROCINSIGHT_SYS:
+    if not os.path.isdir(_ROCINSIGHT_SYS):
         pytest.skip(
-            f"ROCPD_SYS={_ROCPD_SYS!r} does not exist; skipping workflow tests",
+            f"ROCINSIGHT_SYS={_ROCINSIGHT_SYS!r} does not exist; skipping workflow tests",
             allow_module_level=True,
         )
-    sys.path.insert(0, _ROCPD_SYS)
-    # Purge any partially-initialised rocpd loaded from the wrong tree.
+    sys.path.insert(0, _ROCINSIGHT_SYS)
+    # Purge any partially-initialised rocinsight loaded from the wrong tree.
     for _key in list(sys.modules):
-        if _key == "rocpd" or _key.startswith("rocpd."):
+        if _key == "rocinsight" or _key.startswith("rocinsight."):
             del sys.modules[_key]
 
 from rocinsight.ai_analysis.interactive import WorkflowState  # noqa: E402
@@ -48,7 +48,7 @@ def test_checkpoint_record_defaults():
     cp = CheckpointRecord(
         cp_id=0,
         commit_hash="abc1234",
-        ref_name="refs/rocpd/session-1/cp-0",
+        ref_name="refs/rocinsight/session-1/cp-0",
         worktree_path="/tmp/cp-0",
         timestamp="2026-03-13T00:00:00Z",
         files_modified=["kernel.hip"],
@@ -97,7 +97,7 @@ def _make_gcm(repo_root="/repo", session_id="sess1"):
     return GitCheckpointManager(
         repo_root=repo_root,
         session_id=session_id,
-        sessions_dir="/home/user/.rocpd/sessions",
+        sessions_dir="/home/user/.rocinsight/sessions",
     )
 
 
@@ -152,7 +152,7 @@ def test_gcm_create_checkpoint_commit_passes_identity():
         mock_run.return_value = MagicMock(returncode=0, stdout="abc\n")
         gcm.create_checkpoint_commit(["f.hip"], "msg")
     for c in mock_run.call_args_list:
-        assert "rocpd@local" in str(c)
+        assert "rocinsight@local" in str(c)
 
 
 def test_gcm_tag_checkpoint():
@@ -160,7 +160,7 @@ def test_gcm_tag_checkpoint():
     with patch("subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(returncode=0, stdout="")
         ref = gcm.tag_checkpoint(0, "abc1234")
-    assert ref == "refs/rocpd/sess1/cp-0"
+    assert ref == "refs/rocinsight/sess1/cp-0"
     assert "update-ref" in str(mock_run.call_args_list)
 
 
@@ -170,7 +170,7 @@ def test_gcm_tag_checkpoint_not_a_branch():
         mock_run.return_value = MagicMock(returncode=0, stdout="")
         ref = gcm.tag_checkpoint(0, "abc")
     assert "refs/heads" not in ref
-    assert ref.startswith("refs/rocpd/")
+    assert ref.startswith("refs/rocinsight/")
 
 
 def test_gcm_add_worktree():
@@ -178,7 +178,7 @@ def test_gcm_add_worktree():
     with patch("subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(returncode=0, stdout="")
         path = gcm.add_worktree(0, "abc1234")
-    assert path == "/home/user/.rocpd/sessions/sess1/cp-0"
+    assert path == "/home/user/.rocinsight/sessions/sess1/cp-0"
     assert "--detach" in str(mock_run.call_args)
 
 
@@ -217,7 +217,7 @@ def test_gcm_delete_ref():
     gcm = _make_gcm()
     with patch("subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(returncode=0)
-        gcm.delete_ref("refs/rocpd/sess1/cp-0")
+        gcm.delete_ref("refs/rocinsight/sess1/cp-0")
     assert "update-ref" in str(mock_run.call_args)
     assert "-d" in str(mock_run.call_args)
 
@@ -237,11 +237,11 @@ def test_gcm_list_worktrees():
     with patch("subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(
             returncode=0,
-            stdout="worktree /repo\nHEAD abc\n\nworktree /home/user/.rocpd/sessions/s/cp-0\nHEAD def\n",
+            stdout="worktree /repo\nHEAD abc\n\nworktree /home/user/.rocinsight/sessions/s/cp-0\nHEAD def\n",
         )
         paths = gcm.list_worktrees()
     assert "/repo" in paths
-    assert "/home/user/.rocpd/sessions/s/cp-0" in paths
+    assert "/home/user/.rocinsight/sessions/s/cp-0" in paths
 
 
 def test_gcm_restore_files_from_commit():
@@ -326,7 +326,7 @@ def test_create_checkpoint_appends_checkpoint_record():
 
     ws = _make_workflow_session_with_gcm()
     ws._gcm.create_checkpoint_commit.return_value = "abc1234"
-    ws._gcm.tag_checkpoint.return_value = "refs/rocpd/sess/cp-0"
+    ws._gcm.tag_checkpoint.return_value = "refs/rocinsight/sess/cp-0"
     ws._gcm.add_worktree.return_value = "/tmp/cp-0"
 
     with patch.object(ws, "_save_session"):
@@ -347,7 +347,7 @@ def test_create_checkpoint_appends_checkpoint_record():
 def test_create_checkpoint_links_edit_record():
     ws = _make_workflow_session_with_gcm()
     ws._gcm.create_checkpoint_commit.return_value = "abc"
-    ws._gcm.tag_checkpoint.return_value = "refs/rocpd/s/cp-0"
+    ws._gcm.tag_checkpoint.return_value = "refs/rocinsight/s/cp-0"
     ws._gcm.add_worktree.return_value = "/tmp/cp-0"
     from rocinsight.ai_analysis.interactive import _EditRecord
 
@@ -519,7 +519,7 @@ def _make_ws_with_checkpoints():
         cp = CheckpointRecord(
             cp_id=i,
             commit_hash=f"hash{i}",
-            ref_name=f"refs/rocpd/s/cp-{i}",
+            ref_name=f"refs/rocinsight/s/cp-{i}",
             worktree_path=f"/wt/cp-{i}",
             timestamp="t",
             files_modified=["kernel.hip"],

@@ -1,4 +1,4 @@
-"""Interactive session for rocpd analyze --interactive."""
+"""Interactive session for rocinsight analyze --interactive."""
 
 from __future__ import annotations
 
@@ -95,7 +95,7 @@ class SessionData:
 
 # ── SessionStore ──────────────────────────────────────────────────────────────
 
-_DEFAULT_SESSIONS_DIR = pathlib.Path.home() / ".rocpd" / "sessions"
+_DEFAULT_SESSIONS_DIR = pathlib.Path.home() / ".rocinsight" / "sessions"
 
 
 class SessionStore:
@@ -315,7 +315,7 @@ def _print_startup_banner() -> None:
 
 
 class InteractiveSession:
-    """Top-level interactive menu for rocpd analyze --interactive."""
+    """Top-level interactive menu for rocinsight analyze --interactive."""
 
     def __init__(
         self,
@@ -463,14 +463,14 @@ class InteractiveSession:
                 Panel(
                     f"[bold]Source:[/bold] {src_label}   "
                     f"[bold]Session:[/bold] {self._session.session_id}   " + status_line,
-                    title="[bold cyan]rocpd Interactive Analysis[/bold cyan]",
+                    title="[bold cyan]rocinsight Interactive Analysis[/bold cyan]",
                     border_style="blue",
                 )
             )
         else:
             w = 70
             print("=" * w)
-            print(f"  rocpd Interactive Analysis | {src_label}")
+            print(f"  rocinsight Interactive Analysis | {src_label}")
             print(
                 f"  Session: {self._session.session_id}"
                 f"  {db_label}  [s] save  [q] quit"
@@ -1430,7 +1430,7 @@ class InteractiveSession:
                     _print("  Options:", style="dim")
                     _print("    • Start a local model:  ollama run llama3", style="dim")
                     _print(
-                        "    • Or pass --llm anthropic / --llm openai when launching rocpd.",
+                        "    • Or pass --llm anthropic / --llm openai when launching rocinsight.",
                         style="dim",
                     )
                     return
@@ -1567,7 +1567,7 @@ class InteractiveSession:
         try:
             import urllib.request
 
-            url = os.environ.get("ROCPD_LLM_LOCAL_URL", "http://localhost:11434")
+            url = os.environ.get("ROCINSIGHT_LLM_LOCAL_URL", "http://localhost:11434")
             req = urllib.request.urlopen(f"{url}/api/tags", timeout=1)
             if req.status == 200:
                 _print(f"  Auto-detected ollama at {url} — using local LLM.", style="dim")
@@ -1867,8 +1867,8 @@ class CheckpointRecord:
 
     cp_id: int  # 0-based index
     commit_hash: str  # git commit hash
-    ref_name: str  # refs/rocpd/<session_id>/cp-N
-    worktree_path: str  # ~/.rocpd/sessions/<id>/cp-N
+    ref_name: str  # refs/rocinsight/<session_id>/cp-N
+    worktree_path: str  # ~/.rocinsight/sessions/<id>/cp-N
     timestamp: str  # ISO-8601
     files_modified: List[str]  # repo-relative paths touched
     edit_summary: str  # human-readable description of AI changes
@@ -1889,7 +1889,7 @@ class GitCheckpointManager:
     """
 
     # Base args prepended to every git call
-    _ID = ["-c", "user.email=rocpd@local", "-c", "user.name=rocpd"]
+    _ID = ["-c", "user.email=rocinsight@local", "-c", "user.name=rocinsight"]
 
     def __init__(
         self,
@@ -1934,7 +1934,7 @@ class GitCheckpointManager:
     def create_checkpoint_commit(self, files: List[str], message: str) -> str:
         """Stage files and create a commit; return commit hash.
 
-        Uses --no-verify to skip pre-commit hooks (rocpd checkpoints are
+        Uses --no-verify to skip pre-commit hooks (rocinsight checkpoints are
         tooling artifacts, not user commits).
         """
         # Stage only the specified files
@@ -1953,9 +1953,9 @@ class GitCheckpointManager:
     def tag_checkpoint(self, cp_id: int, commit_hash: str) -> str:
         """Create a named ref (not a branch) pinning commit_hash from GC.
 
-        Returns the ref name: refs/rocpd/<session_id>/cp-N
+        Returns the ref name: refs/rocinsight/<session_id>/cp-N
         """
-        ref_name = f"refs/rocpd/{self._session_id}/cp-{cp_id}"
+        ref_name = f"refs/rocinsight/{self._session_id}/cp-{cp_id}"
         result = self._git("update-ref", ref_name, commit_hash)
         if result.returncode != 0:
             raise CheckpointError(f"git update-ref failed: {result.stderr.strip()}")
@@ -2059,10 +2059,10 @@ def _edit_summary_from_suggestions(suggestions: str) -> str:
 class WorkflowSession:
     """7-phase interactive profiling + optimization workflow.
 
-    Triggered by: rocpd analyze --interactive "<app_command>"
+    Triggered by: rocinsight analyze --interactive "<app_command>"
     """
 
-    _DEFAULT_TRACE_DIR = "/tmp/rocpd_trace"
+    _DEFAULT_TRACE_DIR = "/tmp/rocinsight_trace"
 
     def __init__(
         self,
@@ -2088,13 +2088,13 @@ class WorkflowSession:
         except (ValueError, IndexError):
             _slug = "app"
         self._session_id = f"workflow_{_ts}_{_slug}"
-        self._sessions_dir = pathlib.Path.home() / ".rocpd" / "sessions"
+        self._sessions_dir = pathlib.Path.home() / ".rocinsight" / "sessions"
         self._session_file = self._sessions_dir / f"{self._session_id}.json"
         # Checkpoint manager — set after _init_checkpoints() called from run()
         self._gcm: Optional["GitCheckpointManager"] = None
 
     def _save_session(self) -> None:
-        """Serialize WorkflowState to ~/.rocpd/sessions/workflow_<id>.json."""
+        """Serialize WorkflowState to ~/.rocinsight/sessions/workflow_<id>.json."""
         from dataclasses import asdict as _asdict
 
         try:
@@ -2170,7 +2170,7 @@ class WorkflowSession:
             return
 
         cp_id = len(self._state.checkpoints)
-        message = f"rocpd: cp-{cp_id} — {edit_summary}"
+        message = f"rocinsight: cp-{cp_id} — {edit_summary}"
 
         try:
             commit_hash = self._gcm.create_checkpoint_commit(files_modified, message)
@@ -2464,8 +2464,8 @@ class WorkflowSession:
     def _teardown_checkpoints(self) -> None:
         """Remove all checkpoint worktrees on session exit.
 
-        Refs (refs/rocpd/…) are kept so commits survive GC until
-        the user runs 'rocpd sessions --cleanup'.
+        Refs (refs/rocinsight/…) are kept so commits survive GC until
+        the user runs 'rocinsight sessions --cleanup'.
         """
         if self._gcm is None:
             return
@@ -2476,7 +2476,7 @@ class WorkflowSession:
                 pass
 
     def _prune_stale_worktrees(self) -> None:
-        """Remove worktrees under ~/.rocpd/sessions/ with no matching session JSON.
+        """Remove worktrees under ~/.rocinsight/sessions/ with no matching session JSON.
 
         Called at session start, after git repo is detected.
         """

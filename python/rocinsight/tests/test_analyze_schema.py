@@ -28,7 +28,7 @@ Tests for the AI analysis JSON schema (analysis-output.schema.json).
 
 Validates:
   - The schema file is present, parseable, and structurally correct.
-  - rocpd analyze --format json output conforms to the schema.
+  - rocinsight analyze --format json output conforms to the schema.
   - Recommendations contain the structured commands array.
 """
 
@@ -97,7 +97,7 @@ COMMAND_TOOLS = {"rocprofv3", "rocprof-sys", "rocprof-compute"}
 def _load_schema():
     """Load the schema JSON from the installed package."""
     schema_text = (
-        pkg_resources.files("rocpd.ai_analysis")
+        pkg_resources.files("rocinsight.ai_analysis")
         .joinpath("docs/analysis-output.schema.json")
         .read_text(encoding="utf-8")
     )
@@ -158,7 +158,7 @@ def _make_synthetic_json_output():
 def test_schema_file_is_readable():
     """Schema file can be located and read through the package."""
     text = (
-        pkg_resources.files("rocpd.ai_analysis")
+        pkg_resources.files("rocinsight.ai_analysis")
         .joinpath("docs/analysis-output.schema.json")
         .read_text(encoding="utf-8")
     )

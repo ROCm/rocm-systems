@@ -1,6 +1,6 @@
 # ROCpd AI Analysis Output - JSON Schema Changelog
 
-This document tracks all changes to the JSON output schema for `rocpd analyze --format json`
+This document tracks all changes to the JSON output schema for `rocinsight analyze --format json`
 and the `rocinsight.ai_analysis` Python API.
 
 ## Versioning Policy
@@ -112,7 +112,7 @@ imported from `typing`).
 `test_analyze_schema.py` used `import importlib.resources` which also requires Python 3.7.
 Fixed with a `try/except ImportError` shim that falls back to `pkgutil.get_data()`.
 
-**`ROCPD_LLM_PRIVATE_HEADERS` dict validation:**
+**`ROCINSIGHT_LLM_PRIVATE_HEADERS` dict validation:**
 
 After `json.loads()`, the parsed result is now validated to be a `dict` before
 `headers.update()` is called.  A non-dict JSON value (e.g. `"[1,2,3]"`) previously
@@ -201,7 +201,7 @@ consumers without altering the JSON document structure or field names.
 
 **Tier 0: Static Source Code Analysis support.**
 
-New fields and values added to support `rocpd analyze --source-dir` (no database required):
+New fields and values added to support `rocinsight analyze --source-dir` (no database required):
 
 | Change | Details |
 |---|---|
@@ -315,8 +315,8 @@ infrastructure improvements.
   and shows all in the error message (was only showing one path). Updated
   `get_reference_guide_path()` to collect all attempted paths before raising.
 - AIA-009: Added `DEFAULT_ANTHROPIC_MODEL` / `DEFAULT_OPENAI_MODEL` constants. Model names
-  are now configurable via `ROCPD_LLM_MODEL` environment variable at runtime or the new
-  `--llm-model` CLI flag (`rocpd analyze --llm anthropic --llm-model claude-opus-4-6`).
+  are now configurable via `ROCINSIGHT_LLM_MODEL` environment variable at runtime or the new
+  `--llm-model` CLI flag (`rocinsight analyze --llm anthropic --llm-model claude-opus-4-6`).
 - AIA-013: `validate_database()` now queries `type IN ('table','view')` instead of
   `type='table'` so `kernels`, `memory_copies`, and `pmc_events` views are detected.
 
@@ -378,7 +378,7 @@ infrastructure improvements.
 **No schema changes.** Webview UI/UX redesign only.
 
 - Redesigned webview layout inspired by AMD dashboard design language:
-  - **Light/Dark theme toggle** — persisted in `localStorage` (`rocpd-theme` key);
+  - **Light/Dark theme toggle** — persisted in `localStorage` (`rocinsight-theme` key);
     defaults to dark. Header always uses AMD dark gradient regardless of theme.
   - **Status summary badges** in header — Critical/Warning/Low/Info counts derived
     from recommendations so key issues are visible before scrolling.

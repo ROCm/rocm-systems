@@ -636,6 +636,9 @@ def analyze_database(
     result._raw["short_kernels"] = short_kernels_data
     if att_dir and att_analysis.get("has_att_data"):
         result._raw["att_trace"] = att_analysis
+        result._raw["att_analysis"] = att_analysis
+        result.profiling_info.analysis_tier = 3
+        result.profiling_info.profiling_mode = "thread_trace"
 
     # Optional LLM enhancement
     if enable_llm and llm_provider:
