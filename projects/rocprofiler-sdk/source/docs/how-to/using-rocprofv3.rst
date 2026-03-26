@@ -543,7 +543,10 @@ The preceding command generates a rocpd database file prefixed with the process 
 
     $ /opt/rocm/bin/rocpd2pftrace -i 163852_results.db
 
-Here is the RCCL trace visualized in Perfetto UI for this `sample <https://github.com/bgopesh/allreduce_rccl/blob/master/rccl_allreduce.cpp>`_ `rccl` allreduce application:
+The following image visualizes the ``RCCL`` trace for the referenced `allreduce_rccl sample application <https://github.com/bgopesh/allreduce_rccl/blob/master/nccl_allreduce.cpp>`_ using the Perfetto UI.
+The visualization pins the host thread track and select compute streams to enhance readability.
+This enables clear observation of the ``RCCL`` compute kernels launched during ``ncclAllReduce`` operations on the host thread.
+
 
 .. image:: /data/perfetto_rccl.png
 
