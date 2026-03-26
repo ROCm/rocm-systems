@@ -3041,7 +3041,7 @@ class WorkflowSession:
             try:
                 from .source_analyzer import SourceAnalyzer
 
-                plan = SourceAnalyzer(self._state.source_paths[0]).analyze()
+                plan = SourceAnalyzer(pathlib.Path(self._state.source_paths[0])).analyze()
                 _print(
                     f"  Source scan: {plan.files_scanned} files, "
                     f"{plan.kernel_count} kernels, "
@@ -3078,7 +3078,7 @@ class WorkflowSession:
                 base_flags = f"{base_flags} {extra}"
             cmd = (
                 f"{mpi_prefix} rocprofv3 {base_flags} "
-                f"-d {out_dir} -o results "
+                f"-d {out_dir} -o results_%nid% "
                 f"-- {mpi_app}"
             )
             reason = "MPI wrap — rocprofv3 inside mpirun"
@@ -3147,7 +3147,7 @@ class WorkflowSession:
             mpi_app = info.get("mpi_app", self._state.app_command)
             return (
                 f"{mpi_prefix} rocprofv3 {base} "
-                f"-d {out_dir} -o results "
+                f"-d {out_dir} -o results_%nid% "
                 f"-- {mpi_app}"
             )
 
