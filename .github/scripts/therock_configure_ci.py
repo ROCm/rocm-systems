@@ -254,11 +254,12 @@ def retrieve_projects(args):
         if tests:
             merged_tests.update(t.strip() for t in tests.split(","))
     if enable_all:
-        final_flags = "-DTHEROCK_ENABLE_ALL=ON"
+        final_flags_list = ["-DTHEROCK_ENABLE_ALL=ON"]
     else:
-        final_flags = " ".join(sorted(merged_flags))
+        final_flags_list = sorted(merged_flags)
     # Always append -DTHEROCK_ENABLE_CORE=ON as a default at the end
-    final_flags += " -DTHEROCK_ENABLE_CORE=ON"
+    final_flags_list.append("-DTHEROCK_ENABLE_CORE=ON")
+    final_flags = " ".join(final_flags_list)
 
     return [
         {
