@@ -34,8 +34,9 @@ int hsakmt_kfdcontext_init_context(int fd, HsaKFDContext *ctx)
     assert(ctx);
 
     ctx->fd = fd;
-    ctx->fmm_context = NULL;
 
+    if (hsakmt_kfdcontext_init_fmm_context(ctx))
+        return -1;
     if (hsakmt_kfdcontext_init_topology_context(ctx))
         return -1;
     if (hsakmt_kfdcontext_init_queue_context(ctx))
