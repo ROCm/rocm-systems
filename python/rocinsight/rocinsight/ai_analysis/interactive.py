@@ -4389,7 +4389,13 @@ class WorkflowSession:
                 "4. Do NOT use markdown (no **, no backticks, no '- bullet' lists).\n"
                 "5. The response must be a single, complete, compilable source file —"
                 " nothing before the first line of code, nothing after the last.\n"
-                "6. Add a short // inline comment on each changed line explaining why."
+                "6. Add a short // inline comment on each changed line explaining why.\n"
+                "7. COMPLETENESS IS MANDATORY. The file MUST compile. If the file is too"
+                " long, make FEWER changes rather than truncating. Every opening brace"
+                " must have a matching closing brace. Every function must be complete."
+                " Copy unchanged sections verbatim — do NOT abbreviate with '...' or"
+                " comments like '// rest unchanged'. The last line of a C/C++ file"
+                " must be a closing brace or newline after one."
             )
             user = (
                 f"Apply these GPU optimizations to the source file below.\n\n"
@@ -4427,7 +4433,36 @@ class WorkflowSession:
             if not result or not result.strip():
                 return None
             result = _strip_code_preamble(result)
-            return result if result.strip() else None
+            if not result or not result.strip():
+                return None
+
+            # ── Truncation detection ────────────────────────────────────
+            # LLM output that was cut off mid-line will produce uncompilable
+            # code.  Detect common truncation signals and reject the result
+            # so the user isn't asked to apply a broken file.
+            _ext = file_path.suffix.lower()
+            _is_c_family = _ext in (".cpp", ".c", ".cu", ".hip", ".hpp", ".h", ".cxx")
+            if _is_c_family:
+                # Brace balance: opening and closing braces must match
+                _open = result.count("{")
+                _close = result.count("}")
+                if _open != _close:
+                    _print(
+                        f"  ⚠  LLM output appears truncated (braces: {_open} open,"
+                        f" {_close} close). Discarding to prevent broken code.",
+                        style="yellow",
+                    )
+                    return None
+                # Last non-whitespace char should be } or ; or newline for C/C++
+                _last_char = result.rstrip()[-1] if result.rstrip() else ""
+                if _last_char and _last_char not in ("}", ";", ")", "#"):
+                    _print(
+                        f"  ⚠  LLM output ends with '{_last_char}' — likely truncated."
+                        f" Discarding to prevent broken code.",
+                        style="yellow",
+                    )
+                    return None
+            return result
         except Exception as exc:
             _print(f"  (LLM rewrite failed: {exc})", style="red")
             return None
