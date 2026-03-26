@@ -4621,13 +4621,26 @@ int gpu_smu_enable_features(struct WddmLiteDevice *dev)
      * 5. Extra messages cause EnableAllSmuFeatures to hang */
 
     {
-        /* Send EnableAllSmuFeatures(0) — no extra messages before this. */
+        /* Try sending via gpu_smu_send_msg first (2s timeout).
+         * If it fails, fall back to manual send with long poll. */
+        pr_info("gpu_smu: trying EnableAllSmuFeatures via gpu_smu_send_msg...\n");
+        int msg_ret = gpu_smu_send_msg(dev, PPSMC_MSG_EnableAllSmuFeatures, 0);
+        if (msg_ret == 0) {
+            pr_info("gpu_smu: *** EnableAllSmuFeatures SUCCEEDED via send_msg! ***\n");
+            dev->hw.gfxoff_disabled = TRUE;
+            return 0;
+        }
+        ULONG resp_after = mp1_rreg(dev, regMP1_SMN_C2PMSG_90);
+        pr_info("gpu_smu: send_msg returned %d, C2PMSG_90=0x%08x — "
+                "falling back to long poll\n", msg_ret, resp_after);
+
+        /* Long poll — clear and resend */
         mp1_wreg_direct(dev, regMP1_SMN_C2PMSG_90, 0);
         mp1_wreg_direct(dev, regMP1_SMN_C2PMSG_82, 0);
         mp1_wreg_direct(dev, regMP1_SMN_C2PMSG_66, PPSMC_MSG_EnableAllSmuFeatures);
 
         BOOLEAN success = FALSE;
-        DWORD timeout_ms = 120000;
+        DWORD timeout_ms = 600000;  /* 10 minutes! Previous test showed response came eventually */
         DWORD start_tick = GetTickCount();
         DWORD last_print_s = 0;
         for (;;) {
