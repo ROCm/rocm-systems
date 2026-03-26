@@ -1747,3 +1747,24 @@ graph:
   Unit_hipGraphAllocNodeMemReuse_CaptureEscapedUseAfterDestroy:
     <<: *level_2
     tags: [node]
+  ThreadLocal_SameDevice_SyncInvalidates:
+    <<: *level_2
+    tags: [capture, multithreaded]
+  Global_SameDevice_SyncInvalidates:
+    <<: *level_2
+    tags: [capture, multithreaded]
+  Relaxed_SameDevice_SyncInvalidates:
+    <<: *level_2
+    tags: [capture, multithreaded]
+  Global_DifferentDevice_SyncDoesNotInvalidate:
+    <<: *level_2
+    tags: [capture, multithreaded, multigpu]
+  ThreadLocal_DifferentDevice_SyncDoesNotInvalidate:
+    <<: *level_2
+    tags: [capture, multithreaded, multigpu]
+  Relaxed_DifferentDevice_SyncDoesNotInvalidate:
+    <<: *level_2
+    tags: [capture, multithreaded, multigpu]
+  ThreadLocal_GraphLaunch_DifferentDevice:
+    <<: *level_2
+    tags: [capture, multithreaded, multigpu]
