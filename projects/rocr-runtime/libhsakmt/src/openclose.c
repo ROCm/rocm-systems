@@ -215,7 +215,12 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFDCtx(HsaKFDContext **pCtx)
 				result = HSAKMT_STATUS_KERNEL_IO_CHANNEL_NOT_OPENED;
 				goto open_failed;
 			}
-			hsakmt_kfdcontext_init_context(fd, &hsakmt_primary_kfd_ctx);
+			if (hsakmt_kfdcontext_init_context(fd, &hsakmt_primary_kfd_ctx)) {
+				close(fd);
+				hsakmt_kfdcontext_clear_context(&hsakmt_primary_kfd_ctx);
+				result = HSAKMT_STATUS_NO_MEMORY;
+				goto open_failed;
+			}
 		}
 
 		init_page_size();
@@ -345,7 +350,13 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenSecondaryKFDCtx(HsaKFDContext **pCtx)
 				result = HSAKMT_STATUS_NO_MEMORY;
 				goto create_process_failed;
 			}
-			hsakmt_kfdcontext_init_context(kfd_fd, new_ctx);
+			if (hsakmt_kfdcontext_init_context(kfd_fd, new_ctx)) {
+				close(kfd_fd);
+				hsakmt_kfdcontext_clear_context(new_ctx);
+				free(new_ctx);
+				result = HSAKMT_STATUS_NO_MEMORY;
+				goto create_process_failed;
+			}
 			new_ctx->hsakmt_is_primary_ctx = false;
 			new_ctx->hsakmt_is_svm_api_supported = false;
 
