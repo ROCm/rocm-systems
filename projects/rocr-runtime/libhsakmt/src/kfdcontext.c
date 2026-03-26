@@ -38,9 +38,10 @@ int hsakmt_kfdcontext_init_context(int fd, HsaKFDContext *ctx)
     ctx->queue_context = NULL;
     ctx->fmm_context = NULL;
     ctx->debug_context = NULL;
-    ctx->perf_context = NULL;
 
     if (hsakmt_kfdcontext_init_event_context(ctx))
+        return -1;
+    if (hsakmt_kfdcontext_init_perf_context(ctx))
         return -1;
 
     return 0;

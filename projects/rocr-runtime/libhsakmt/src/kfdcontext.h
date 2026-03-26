@@ -106,5 +106,5 @@ struct hsa_kfd_fmm_context *hsakmt_kfdcontext_get_fmm_context(HsaKFDContext *ctx
 struct hsa_kfd_queue_context *hsakmt_kfdcontext_get_queue_context(HsaKFDContext *ctx);
 int hsakmt_kfdcontext_init_event_context(HsaKFDContext *ctx);
 struct hsa_kfd_debug_context *hsakmt_kfdcontext_get_debug_context(HsaKFDContext *ctx);
-struct hsa_kfd_perf_context *hsakmt_kfdcontext_get_perf_context(HsaKFDContext *ctx);
+int hsakmt_kfdcontext_init_perf_context(HsaKFDContext *ctx);
 #endif /* _KFDCONTEXT_H_ */
