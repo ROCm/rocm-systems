@@ -95,13 +95,22 @@ if(TBB_FOUND)
     set(TBB_DEFINITIONS ${TBB_DEFINITIONS} CACHE STRING "TBB compiler definitions" FORCE)
     set(TBB_LIBRARIES ${TBB_LIBRARIES} CACHE FILEPATH "TBB library files" FORCE)
 
-    # Update TBB_ROOT_DIR to the found location for Dyninst
-    if(TBB_DIR)
-        get_filename_component(_tbb_root "${TBB_DIR}/../../.." ABSOLUTE)
-        set(TBB_ROOT_DIR "${_tbb_root}" CACHE PATH "TBB root directory" FORCE)
-    elseif(TBB_INCLUDE_DIRS)
-        # Fallback: derive from include directory
-        get_filename_component(_tbb_root "${TBB_INCLUDE_DIRS}" DIRECTORY)
+    # Update TBB_ROOT_DIR to the found location for Dyninst.
+    # Prefer include dirs: multiarch TBB_DIR under lib/<triplet>/cmake/... breaks fixed depth.
+    set(_tbb_root "")
+    if(TBB_INCLUDE_DIRS)
+        list(GET TBB_INCLUDE_DIRS 0 _tbb_inc)
+        get_filename_component(_tbb_root "${_tbb_inc}" DIRECTORY)
+    endif()
+    if(NOT _tbb_root AND TBB_DIR)
+        string(REGEX REPLACE "/lib(/[^/]+)*/cmake/TBB[^/]*$" "" _tbb_root "${TBB_DIR}")
+        if(_tbb_root STREQUAL TBB_DIR)
+            set(_tbb_root "")
+        else()
+            get_filename_component(_tbb_root "${_tbb_root}" ABSOLUTE)
+        endif()
+    endif()
+    if(_tbb_root)
         set(TBB_ROOT_DIR "${_tbb_root}" CACHE PATH "TBB root directory" FORCE)
     endif()
     set(TBB_ROOT ${TBB_ROOT_DIR})
@@ -246,8 +255,15 @@ foreach(_DIR_TYPE INCLUDE LIBRARY)
     endif()
 endforeach()
 
+if(NOT DEFINED _tbb_cmake_interface_definitions)
+    set(_tbb_cmake_interface_definitions "")
+endif()
+
 target_include_directories(rocprofiler-systems-tbb SYSTEM INTERFACE ${TBB_INCLUDE_DIRS})
-target_compile_definitions(rocprofiler-systems-tbb INTERFACE ${TBB_DEFINITIONS})
+target_compile_definitions(
+    rocprofiler-systems-tbb
+    INTERFACE ${_tbb_cmake_interface_definitions}
+)
 target_link_directories(rocprofiler-systems-tbb INTERFACE ${TBB_LIBRARY_DIRS})
 target_link_libraries(rocprofiler-systems-tbb INTERFACE ${TBB_LIBRARIES})
 
@@ -295,10 +311,11 @@ if(NOT TARGET TBB::tbb AND NOT ROCPROFSYS_BUILD_TBB)
                 IMPORTED_LOCATION "${_tbb_lib}"
                 INTERFACE_INCLUDE_DIRECTORIES "${TBB_INCLUDE_DIRS}"
         )
-        if(TBB_DEFINITIONS)
+        if(_tbb_cmake_interface_definitions)
             set_target_properties(
                 TBB::tbb
-                PROPERTIES INTERFACE_COMPILE_DEFINITIONS "${TBB_DEFINITIONS}"
+                PROPERTIES
+                    INTERFACE_COMPILE_DEFINITIONS "${_tbb_cmake_interface_definitions}"
             )
         endif()
     endif()

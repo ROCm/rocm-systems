@@ -180,19 +180,30 @@ if(Boost_FOUND AND NOT ROCPROFSYS_BUILD_BOOST)
     )
     set(Boost_INCLUDE_DIR ${Boost_INCLUDE_DIR} CACHE PATH "Boost include directory" FORCE)
 
-    # Update Boost_ROOT_DIR to the found location for Dyninst
-    # If Boost_DIR is set by find_package, use its parent directories
-    if(Boost_DIR)
-        get_filename_component(_boost_root "${Boost_DIR}/../../.." ABSOLUTE)
-        set(Boost_ROOT_DIR
-            "${_boost_root}"
-            CACHE PATH
-            "Base directory of the Boost installation"
-            FORCE
+    # Update Boost_ROOT_DIR to the found location for Dyninst.
+    # Prefer include dirs: on Debian/Ubuntu multiarch, Boost_DIR may be under
+    # lib/<triplet>/cmake/... and a fixed "../.." depth yields /usr/lib instead of /usr.
+    set(_boost_root "")
+    if(Boost_INCLUDE_DIRS)
+        list(GET Boost_INCLUDE_DIRS 0 _boost_inc)
+        get_filename_component(_boost_root "${_boost_inc}" DIRECTORY)
+    endif()
+    if(NOT _boost_root AND Boost_DIR)
+        # Strip lib/.../cmake/Boost* from Boost_DIR to recover the install prefix.
+        string(
+            REGEX REPLACE
+            "/lib(/[^/]+)*/cmake/Boost[^/]*$"
+            ""
+            _boost_root
+            "${Boost_DIR}"
         )
-    elseif(Boost_INCLUDE_DIRS)
-        # Fallback: derive from include directory
-        get_filename_component(_boost_root "${Boost_INCLUDE_DIRS}" DIRECTORY)
+        if(_boost_root STREQUAL Boost_DIR)
+            set(_boost_root "")
+        else()
+            get_filename_component(_boost_root "${_boost_root}" ABSOLUTE)
+        endif()
+    endif()
+    if(_boost_root)
         set(Boost_ROOT_DIR
             "${_boost_root}"
             CACHE PATH
@@ -464,6 +475,11 @@ rocprofiler_systems_message(STATUS "Boost libraries: ${Boost_LIBRARIES}")
 # When Boost is built from source, Dyninst's find_package(Boost) would fail
 # because the bundled Boost isn't installed in standard locations. Creating this
 # target causes Dyninst to skip find_package(Boost) and use the bundled dependency.
+#
+# Also defines Dyninst::Boost_headers below when ROCPROFSYS_BUILD_BOOST=ON. When
+# ROCPROFSYS_BUILD_DYNINST=OFF, Packages.cmake creates Dyninst::Boost_headers before
+# find_package(Dyninst) instead (preinstalled Dyninst); that path does not run when
+# building the Dyninst submodule here.
 
 if(ROCPROFSYS_BUILD_BOOST)
     if(NOT TARGET Dyninst::Boost)
