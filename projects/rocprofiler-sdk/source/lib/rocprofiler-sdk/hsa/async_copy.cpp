@@ -533,8 +533,6 @@ template <size_t TableIdx, size_t OpIdx, typename... Args>
 hsa_status_t
 async_copy_impl(Args... args)
 {
-    using meta_type = hsa_api_meta<TableIdx, OpIdx>;
-
     constexpr auto N             = sizeof...(Args);
     constexpr auto copy_size_idx = arg_indices<OpIdx>::copy_size_idx;
     constexpr auto dst_addr_idx  = arg_indices<OpIdx>::dst_address_idx;
