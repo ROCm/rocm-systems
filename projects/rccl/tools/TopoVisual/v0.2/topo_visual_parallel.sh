@@ -99,7 +99,11 @@ cat > "$TMPDIR/render.sh" << RENDERSCRIPT
 #!/bin/bash
 DOTFILE="\$1"
 OUTFILE="\${DOTFILE%.dot}.$FORMAT"
-dot -T$FORMAT $DOT_OPTS "\$DOTFILE" -o "\$OUTFILE" 2>/dev/null
+ERRFILE="\${DOTFILE%.dot}.err"
+
+if ! dot -T$FORMAT $DOT_OPTS "\$DOTFILE" -o "\$OUTFILE" 2>"\$ERRFILE"; then
+  echo "Warning: dot failed for '\$(basename \$DOTFILE)'. Error: \$(cat \$ERRFILE)" >&2
+fi
 RENDERSCRIPT
 chmod +x "$TMPDIR/render.sh"
 
