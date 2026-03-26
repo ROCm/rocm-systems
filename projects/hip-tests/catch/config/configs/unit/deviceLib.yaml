@@ -591,3 +591,6 @@ deviceLib:
   Unit_hipTestHalfConstexpr_DeviceConstexpr:
     <<: *level_2
     tags: [types]
+  Unit_MemcpyToSymbolInParallelWithStreamLaunch:
+    <<: *level_3
+    tags: [misc]

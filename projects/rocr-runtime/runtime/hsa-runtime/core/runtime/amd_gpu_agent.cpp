@@ -3867,5 +3867,18 @@ hsa_status_t GpuAgent::ReleaseCountedQueue(hsa_queue_t* queue) {
   return queue_pool_.ReleaseQueue(queue);
 }
 
+hsa_status_t GpuAgent::Preload(uint64_t flags) {
+  // By default preload everything; flags are used to skip specific resources
+  if (!(flags & HSA_AMD_AGENT_PRELOAD_SKIP_CLOCK_SYNC)) {
+    CheckClockTicks();
+  }
+
+  if (!(flags & HSA_AMD_AGENT_PRELOAD_SKIP_BLITS)) {
+    PreloadBlits();
+  }
+
+  return HSA_STATUS_SUCCESS;
+}
+
 }  // namespace amd
 }  // namespace rocr
