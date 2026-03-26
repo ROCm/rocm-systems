@@ -29,6 +29,14 @@ BEGIN {
   # Output directory from environment or default
   outdir = ENVIRON["TOPO_OUTDIR"]
   if (outdir == "") outdir = "/tmp/topo_split"
+
+  # Ensure output directory exists; create it or exit with an error.
+  cmd = "mkdir -p \"" outdir "\""
+  ret = system(cmd)
+  if (ret != 0) {
+    print "extract_topo_split.awk: failed to create output directory: " outdir > "/dev/stderr"
+    exit 1
+  }
 }
 
 {
