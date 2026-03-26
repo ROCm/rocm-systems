@@ -4553,10 +4553,11 @@ class WorkflowSession:
                 if merged is not None:
                     return merged
                 _print(
-                    "  ⚠  SEARCH/REPLACE blocks could not be applied.",
+                    "  ⚠  SEARCH/REPLACE blocks found but could not be applied"
+                    " (search text not found in file — file may have changed).",
                     style="yellow",
                 )
-                # Fall through to full-file mode
+                return None  # Don't fall through — raw SEARCH/REPLACE output is not a valid file
 
             # ── Full-file fallback ──────────────────────────────────────
             result = _strip_code_preamble(result)
