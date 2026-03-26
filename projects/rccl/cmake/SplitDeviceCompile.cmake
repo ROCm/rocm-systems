@@ -276,6 +276,7 @@ function(setup_split_device_compile)
     OUTPUT  ${COMBINED_HIPFB}
     COMMAND ${BUNDLER}
       --type=bc
+      --compress
       --targets=${_bundler_targets}
       ${_bundler_input_flags}
       --output=${COMBINED_HIPFB}
