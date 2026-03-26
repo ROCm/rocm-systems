@@ -31,7 +31,7 @@ from typing import List, Optional, Dict, Any
 try:
     from importlib.metadata import version as _pkg_version
 
-    _ROCPD_VERSION = _pkg_version("rocpd")
+    _ROCPD_VERSION = _pkg_version("rocinsight")
 except Exception:
     _ROCPD_VERSION = "0.1.0"  # fallback if metadata not available (common in dev / ROCm system installs)
 
@@ -572,12 +572,9 @@ def analyze_database(
     # NOTE: We do NOT call analyze_performance() — it returns a formatted str,
     # not a dict. We need raw data to build the AnalysisResult dataclass.
     try:
-        from ..importer import RocpdImportData
+        from ..connection import RocinsightConnection as RocpdImportData
 
-        # RocpdImportData's internal sanitize_input_list() iterates over its
-        # argument. Passing a plain str would iterate over characters. Pass a
-        # list with the single path string to ensure correct behavior.
-        connection = RocpdImportData([str(database_path)])
+        connection = RocpdImportData(str(database_path))
 
         time_breakdown = compute_time_breakdown(connection)
         hotspots = identify_hotspots(connection, top_n=top_kernels)
@@ -1115,9 +1112,9 @@ def validate_database(database_path: Path) -> Dict[str, Any]:
         raise DatabaseNotFoundError(f"Database not found: {database_path}")
 
     try:
-        from ..importer import RocpdImportData, execute_statement
+        from ..connection import RocinsightConnection as RocpdImportData, execute_statement
 
-        connection = RocpdImportData([str(database_path)])
+        connection = RocpdImportData(str(database_path))
 
         # Check for required tables AND views (kernels/memory_copies are views,
         # not raw tables, in rocprofv3 databases created by the rocpd importer)

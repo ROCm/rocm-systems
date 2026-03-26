@@ -78,7 +78,7 @@ def __getattr__(name):
         mod.SessionStore = SessionStore
         mod.SessionData = SessionData
         return getattr(mod, name)
-    raise AttributeError(f"module 'rocpd.ai_analysis' has no attribute {name!r}")
+    raise AttributeError(f"module 'rocinsight.ai_analysis' has no attribute {name!r}")
 
 
 __all__ = [

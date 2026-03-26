@@ -144,7 +144,11 @@ class SessionStore:
 
         def _safe_dt(s):
             try:
-                return datetime.fromisoformat(s.created_at)
+                dt = datetime.fromisoformat(s.created_at)
+                # Ensure timezone-aware so comparison with the fallback doesn't fail
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                return dt
             except Exception:
                 return datetime.min.replace(tzinfo=timezone.utc)
 
