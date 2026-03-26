@@ -396,6 +396,22 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void)
                                 "hardware reset (matching amdgpu)\n");
                         gpu_smu_mode1_reset(&g_wddm_lite_dev);
                         did_mode1_reset = TRUE;
+
+                        /* After Mode1 reset, SOS was killed. Reload it.
+                         * Mode1 → bootloader runs → we load SOS again. */
+                        pr_info("wddm_lite: reloading SOS after Mode1 reset\n");
+                        g_wddm_lite_dev.hw.psp_sos_alive = FALSE;
+                        {
+                            char fw_dir_buf[256] = {};
+                            GetEnvironmentVariableA("HSAKMT_FW_DIR",
+                                fw_dir_buf, sizeof(fw_dir_buf));
+                            char sos_path[256];
+                            snprintf(sos_path, sizeof(sos_path),
+                                     "%s\\psp_14_0_3_sos.bin",
+                                     fw_dir_buf[0] ? fw_dir_buf : ".");
+                            if (gpu_psp_load_sos(&g_wddm_lite_dev, sos_path) != 0)
+                                pr_warn("wddm_lite: SOS reload after Mode1 failed\n");
+                        }
                     }
                 }
 
@@ -446,34 +462,17 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void)
                             pr_warn("wddm_lite: firmware staging failed\n");
                         } else {
                             fw_staged = TRUE;
-                            /* IMMEDIATELY send SMU init after firmware load.
-                             * amdgpu does EnableAllSmuFeatures ~100ms after
-                             * LOAD_IP_FW. Our old code had GMC/IH init in
-                             * between (seconds of delay). The SMU might go
-                             * to sleep if not contacted quickly. */
-                            pr_info("wddm_lite: SMU init IMMEDIATELY after FW load\n");
+                            /* SMU init immediately after firmware load.
+                             * AUTOLOAD_RLC is now sent inside gpu_psp_load_all_fw
+                             * as the last PSP command (matching amdgpu). */
+                            pr_info("wddm_lite: SMU init after FW+AUTOLOAD\n");
                             gpu_smu_enable_features(&g_wddm_lite_dev);
                         }
                     }
                 }
 
-                /* Step 6: Send AUTOLOAD_RLC command BEFORE SMU init.
-                 * CRITICAL: amdgpu sends AUTOLOAD during psp_load_non_psp_fw
-                 * but does NOT wait for completion. AUTOLOAD completes
-                 * asynchronously AFTER EnableAllSmuFeatures powers up GFX.
-                 * DO NOT call gpu_psp_trigger_autoload() which waits for
-                 * BOOTLOAD_STATUS bit 31 — that's a deadlock (needs GFX power).
-                 * Just send the PSP command and move on. */
-                if (fw_staged && g_wddm_lite_dev.hw.psp_sos_alive) {
-                    pr_info("wddm_lite: sending AUTOLOAD_RLC command (non-blocking)\n");
-                    /* Send via PSP ring: GFX_CMD_ID_AUTOLOAD_RLC = 0x21 */
-                    extern int gpu_psp_send_autoload_cmd(struct WddmLiteDevice *dev);
-                    int al_ret = gpu_psp_send_autoload_cmd(&g_wddm_lite_dev);
-                    if (al_ret == 0)
-                        pr_info("wddm_lite: AUTOLOAD_RLC command sent OK\n");
-                    else
-                        pr_warn("wddm_lite: AUTOLOAD_RLC command failed\n");
-                }
+                /* AUTOLOAD_RLC is now sent inside gpu_psp_load_all_fw as the
+                 * last PSP ring command (matching amdgpu's psp_load_non_psp_fw). */
 
                 /* Step 7: SMU features — already called immediately after FW load.
                  * Skip here to avoid double-sending EnableAllSmuFeatures. */

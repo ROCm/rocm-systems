@@ -2878,10 +2878,53 @@ int gpu_psp_load_all_fw(struct WddmLiteDevice *dev, const char *fw_dir)
         }
     }
 
-    /* NOTE: AUTOLOAD_RLC is NOT triggered here. It must be called separately
-     * via gpu_psp_trigger_autoload() AFTER GFXOFF has been disabled.
-     * The RLC cannot distribute firmware to CP instruction caches while
-     * the GC block is in GFXOFF power-down state. */
+    /* MES KIQ firmware (RS64 — code + data/stack) */
+    pr_info("psp_ring: === Loading MES KIQ firmware (RS64) ===\n");
+    {
+        ULONG mes1_stacks[] = { GFX_FW_TYPE_MES_KIQ_STACK };
+        ret = load_fw_rs64(&ctx, fw_dir, "gc_12_0_1_mes1.bin",
+                            GFX_FW_TYPE_CP_MES_KIQ, mes1_stacks, 1, NULL);
+        if (ret != 0) {
+            pr_warn("psp_ring: MES KIQ load failed (continuing)\n");
+            load_failures++;
+        }
+    }
+
+    /* MES firmware (RS64 — code + data/stack) */
+    pr_info("psp_ring: === Loading MES firmware (RS64) ===\n");
+    {
+        ULONG mes_stacks[] = { GFX_FW_TYPE_RS64_MES_STACK };
+        ret = load_fw_rs64(&ctx, fw_dir, "gc_12_0_1_mes.bin",
+                            GFX_FW_TYPE_RS64_MES, mes_stacks, 1, NULL);
+        if (ret != 0) {
+            pr_warn("psp_ring: MES load failed (continuing)\n");
+            load_failures++;
+        }
+    }
+
+    /* PSP Trusted Applications (TA — RAS, HDCP, DTM) */
+    pr_info("psp_ring: === Loading TA firmware ===\n");
+    {
+        /* TA uses a v1 header with fw_type 0 (generic PSP TA) */
+        ret = load_fw_v1(&ctx, fw_dir, "psp_14_0_3_ta.bin",
+                          2 /* GFX_FW_TYPE_PSP_TA */, NULL);
+        if (ret != 0) {
+            pr_warn("psp_ring: TA load failed (continuing)\n");
+            load_failures++;
+        }
+    }
+
+    /* AUTOLOAD_RLC — sent as part of the PSP ring sequence.
+     * amdgpu sends this as the LAST PSP command before SMU init.
+     * It triggers asynchronous firmware distribution by RLC. */
+    pr_info("psp_ring: === Sending AUTOLOAD_RLC ===\n");
+    ret = psp_ring_autoload_rlc(&ctx);
+    if (ret != 0) {
+        pr_warn("psp_ring: AUTOLOAD_RLC failed\n");
+        load_failures++;
+    } else {
+        pr_info("psp_ring: AUTOLOAD_RLC sent OK\n");
+    }
 
     pr_info("psp_ring: firmware staging complete "
             "(%d failures)\n", load_failures);
