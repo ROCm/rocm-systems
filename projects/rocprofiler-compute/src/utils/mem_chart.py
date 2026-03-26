@@ -1015,7 +1015,7 @@ class MemChart:
         block_instr_disp.instrs["SALU"] = metric_dict.get("SALU", "n/a")
         block_instr_disp.instrs["SMEM"] = metric_dict.get("SMEM", "n/a")
         block_instr_disp.instrs["VALU"] = metric_dict.get("VALU", "n/a")
-        block_instr_disp.instrs["MFMA"] = metric_dict.get("MFMA", "n/a")
+        block_instr_disp.instrs["Matrix Ops"] = metric_dict.get("Matrix Ops", "n/a")
         block_instr_disp.instrs["VMEM"] = metric_dict.get("VMEM", "n/a")
         block_instr_disp.instrs["LDS"] = metric_dict.get("LDS", "n/a")
         block_instr_disp.instrs["GWS"] = metric_dict.get("GWS", "n/a")
@@ -1276,7 +1276,7 @@ if __name__ == "__main__":
     metric_dict["SALU"] = 3
     metric_dict["SMEM"] = 4
     metric_dict["VALU"] = 5
-    metric_dict["MFMA"] = 6
+    metric_dict["Matrix Ops"] = 6
     metric_dict["VMEM"] = 7
     metric_dict["LDS"] = 8
     metric_dict["GWS"] = 9

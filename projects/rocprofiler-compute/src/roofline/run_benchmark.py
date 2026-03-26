@@ -23,7 +23,7 @@ import importlib
 from typing import Optional
 
 
-def load_bench(device_ids: list[str], mode: Optional[str] = None) -> object:
+def load_bench(device_ids: list[str]) -> Optional[object | None]:
     try:
         from roofline.hip.hip import hipGetDeviceProperties
 
@@ -62,10 +62,10 @@ if __name__ == "__main__":
 
     if len(sys.argv) >= 3:
         if sys.argv[1] == "-d":
-            device_ids = int(sys.argv[2:])
+            device_ids = int(sys.argv[2])
 
     sys.path.append(str(Path("..").absolute().resolve()))
     # TODO: verify multi-device scenario- only one device works at this time
-    bench = load_bench(device_ids, "standalone")
+    bench = load_bench(device_ids)
     metrics = bench.run_on_devices(device_ids)
     bench.dump_csv(metrics, "roofline.csv")
