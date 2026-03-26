@@ -30,9 +30,9 @@ declare -a HEIGHTS
 declare -a WIDTHS
 i=0
 for svg in $SVG_FILES; do
-  # Extract width and height from SVG
-  W=$(grep -oP 'width="[0-9]+' "$svg" | head -1 | grep -oP '[0-9]+')
-  H=$(grep -oP 'height="[0-9]+' "$svg" | head -1 | grep -oP '[0-9]+')
+  # Extract width and height from SVG (POSIX-compatible)
+  W=$(sed -n 's/.*width="\([0-9][0-9]*\)".*/\1/p' "$svg" | head -n 1)
+  H=$(sed -n 's/.*height="\([0-9][0-9]*\)".*/\1/p' "$svg" | head -n 1)
   
   # Default if not found
   [ -z "$W" ] && W=800
