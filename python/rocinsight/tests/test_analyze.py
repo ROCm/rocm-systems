@@ -1004,7 +1004,7 @@ def test_format_output_markdown():
         td, hs, mem, recs, output_format="markdown", database_path="/test/db.db"
     )
     assert isinstance(out, str)
-    assert out.startswith("# ROCpd AI Performance Analysis")
+    assert out.startswith("# ROCInsight AI Performance Analysis")
     assert "## Time Breakdown" in out
     assert "## Top Kernel Hotspots" in out
     assert "## Memory Copy Analysis" in out

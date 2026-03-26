@@ -6,7 +6,7 @@
 ###############################################################################
 
 """
-AI Analysis Module for rocpd
+AI Analysis Module for rocinsight
 
 This module provides AI-powered GPU performance analysis with optional
 LLM enhancement. The analysis is guided by a user-modifiable reference

@@ -237,18 +237,17 @@ class LLMConversation:
         max_tokens: int,
         on_token: Optional[Callable[[str], None]],
     ) -> str:
-        """Call via Claude Agent SDK (inherits Claude Code auth) with fallback to ANTHROPIC_API_KEY.
+        """Two-tier call for the ``claude-code`` provider.
 
         Auth priority:
-        1. ``claude-agent-sdk`` — uses Claude Code's stored credentials.
-        2. ``anthropic`` SDK with ANTHROPIC_API_KEY — when CLI not found or SDK missing.
+        1. ``ANTHROPIC_API_KEY`` via the ``anthropic`` SDK — direct API, no CLI.
+        2. ``claude -p`` subprocess — stored Claude Code CLI OAuth credentials
+           (activated only when no API key is available).
 
         The full conversation history is inlined into the user message so each
         invocation is stateless. Streaming is emulated: ``on_token`` is called
         once with the complete response text.
         """
-        import asyncio
-
         model = self._model or os.environ.get("ROCINSIGHT_LLM_MODEL") or "sonnet"
 
         # Build a transcript of prior turns to include as context
@@ -267,17 +266,17 @@ class LLMConversation:
         else:
             user_prompt = current_user_msg
 
-        result = self._call_claude_code_turn(user_prompt, model)
+        result = self._call_claude_code_turn(user_prompt, model, max_tokens=max_tokens)
         if on_token and result:
             on_token(result)
         return result
 
-    def _call_claude_code_turn(self, user_prompt: str, model: str) -> str:
-        """Single-turn call for _stream_claude_code.
+    def _call_claude_code_turn(self, user_prompt: str, model: str, *, max_tokens: int = 4096) -> str:
+        """Single-turn call for _stream_claude_code and _call_non_streaming.
 
         Priority:
-        1. ANTHROPIC_API_KEY via ``anthropic`` SDK (direct API, no CLI needed).
-        2. ``claude -p`` subprocess — stored Claude Code CLI credentials.
+        1. ``ANTHROPIC_API_KEY`` via the ``anthropic`` SDK — direct API, no CLI.
+        2. ``claude -p`` subprocess — stored Claude Code CLI OAuth credentials.
         """
         # ── Tier 1: ANTHROPIC_API_KEY via anthropic SDK ───────────────────────
         api_key = self._api_key or os.environ.get("ANTHROPIC_API_KEY")
@@ -288,7 +287,7 @@ class LLMConversation:
                 client = _anthropic.Anthropic(api_key=api_key)
                 response = client.messages.create(
                     model=api_model,
-                    max_tokens=4096,
+                    max_tokens=max_tokens,
                     system=self._system,
                     messages=[{"role": "user", "content": user_prompt}],
                 )
@@ -330,11 +329,11 @@ class LLMConversation:
     def _call_claude_cli_subprocess(self, user_prompt: str, model: str) -> str:
         """Call ``claude -p`` subprocess using Claude Code's stored credentials.
 
-        Tier-2 fallback: used when the Agent SDK returns empty but the ``claude``
-        CLI is on PATH.  The system prompt is written as CLAUDE.md in a temporary
-        directory so the CLI picks it up as project context (avoids argument-length
-        limits and mirrors Claude Code's natural project-instruction mechanism).
-        Raises on failure so the caller can fall through to the next tier.
+        Tier-2 fallback: used when no ``ANTHROPIC_API_KEY`` is available.  The
+        system prompt is written as ``CLAUDE.md`` in a temporary directory so the
+        CLI picks it up as project context (avoids argument-length limits and
+        mirrors Claude Code's natural project-instruction mechanism).
+        Raises on failure so the caller can propagate the error.
         """
         import subprocess as _subprocess
         import json as _json
@@ -512,6 +511,17 @@ class LLMConversation:
 
     def _call_non_streaming(self, messages: List[Dict], max_tokens: int) -> str:
         """Non-streaming API call used for compaction. Does NOT increment _turn_count."""
+        if self._provider == "claude-code":
+            # Inline the messages as a single user prompt so the stateless
+            # _call_claude_code_turn helper can handle both tiers.
+            lines: List[str] = []
+            for m in messages:
+                role = "User" if m["role"] == "user" else "Assistant"
+                lines.append(f"[{role}]: {m['content']}")
+            prompt = "\n\n".join(lines)
+            model = self._model or os.environ.get("ROCINSIGHT_LLM_MODEL") or "sonnet"
+            return self._call_claude_code_turn(prompt, model, max_tokens=max_tokens)
+
         if self._provider == "anthropic":
             try:
                 import anthropic as _anthropic

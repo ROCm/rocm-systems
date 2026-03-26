@@ -137,7 +137,7 @@ ai_analysis/
 ├── docs/
 │   ├── analysis-output.schema.json  # Versioned JSON output schema
 │   ├── AI_ANALYSIS_API.md           # Complete Python API reference
-│   ├── SCHEMA_CHANGELOG.md          # Schema version history (current: v0.4.0 for ATT)
+│   ├── SCHEMA_CHANGELOG.md          # Schema version history (through v0.3.x; v0.4.0 planned)
 │   └── LLM_REFERENCE_GUIDE.md       # Fence documentation
 ├── tests/
 │   ├── __init__.py
@@ -398,9 +398,10 @@ result = analyze_database(
 | Provider flag | Env var | Default model | Notes |
 |---|---|---|---|
 | `--llm anthropic` | `ANTHROPIC_API_KEY` | `claude-sonnet-4-20250514` | Recommended |
+| `--llm claude-code` | `ANTHROPIC_API_KEY` (Tier 1) or stored CLI credentials (Tier 2) | same as `--llm anthropic` | No separate API key needed when Claude Code CLI is authenticated |
 | `--llm openai` | `OPENAI_API_KEY` | `gpt-4-turbo-preview` | — |
 | `--llm private` | `ROCINSIGHT_LLM_PRIVATE_URL` | `ROCINSIGHT_LLM_PRIVATE_MODEL` | Any OpenAI-compatible endpoint |
-| `--llm-local ollama` | `ROCINSIGHT_LLM_LOCAL_URL` | `ROCINSIGHT_LLM_LOCAL_MODEL` | Local Ollama |
+| `--llm local` | `ROCINSIGHT_LLM_LOCAL_URL` | `ROCINSIGHT_LLM_LOCAL_MODEL` | Local Ollama |
 
 Override model: `ROCINSIGHT_LLM_MODEL` env var or `--llm-model <model-name>`.
 

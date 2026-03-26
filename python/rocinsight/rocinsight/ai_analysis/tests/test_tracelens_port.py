@@ -396,45 +396,52 @@ class TestAnalyzeShortKernels:
 # Integration test — generates a real trace DB with rocprofv3
 # ===========================================================================
 
-# Candidate HIP binaries to profile, in preference order.
-# rocprofv3 must be on PATH; the binary just needs to launch and exit cleanly.
-#
-# File layout (parents of this file):
-#   [0] tests/            [1] ai_analysis/   [2] rocinsight/   [3] python/rocinsight/
-#   [4] python/           [5] rocm-systems-dev/                [6] repo root (ai-analysis-rocpd/)
-_REPO_ROOT = Path(__file__).parents[6]
-_CANDIDATE_APPS = [
-    # Override: point at any HIP binary via env var
-    os.environ.get("ROCINSIGHT_DEMO_APP", ""),
-    # project demo binary (always present in this repo)
-    str(_REPO_ROOT / "demo-app" / "inefficient_demo"),
-    # ROCm sample binaries (present when full ROCm SDK is installed)
-    "/opt/rocm/share/rocprofiler-sdk/samples/api_buffered_tracing/api_buffered_tracing",
-]
-
 _ROCPROFV3 = shutil.which("rocprofv3")
 
+_SKIP_REASON = (
+    "rocprofv3 not found and ROCINSIGHT_TEST_DB not set — "
+    "install ROCm or export ROCINSIGHT_TEST_DB=/path/to/trace.db"
+)
 
-def _find_app() -> str:
+
+def _find_repo_root() -> Path:
+    """Walk upward from this file until a directory containing .git is found."""
+    current = Path(__file__).resolve().parent
+    while current != current.parent:
+        if (current / ".git").exists():
+            return current
+        current = current.parent
+    # Fallback: return the package root (python/rocinsight/) as a safe default.
+    return Path(__file__).resolve().parents[3]
+
+
+def _find_app(repo_root: Path) -> str:
     """Return the first candidate HIP binary that exists and is executable."""
-    for app in _CANDIDATE_APPS:
-        if Path(app).is_file() and os.access(app, os.X_OK):
+    candidates = [
+        # Override: point at any HIP binary via env var
+        os.environ.get("ROCINSIGHT_DEMO_APP", ""),
+        # project demo binary (always present in this repo)
+        str(repo_root / "demo-app" / "inefficient_demo"),
+        # ROCm sample binaries (present when full ROCm SDK is installed)
+        "/opt/rocm/share/rocprofiler-sdk/samples/api_buffered_tracing/api_buffered_tracing",
+    ]
+    for app in candidates:
+        if app and Path(app).is_file() and os.access(app, os.X_OK):
             return app
     return ""
 
 
-def _generate_trace_db() -> str:
+def _generate_trace_db(out_dir: str) -> str:
     """Run rocprofv3 --sys-trace on a HIP app and return path to the .db file.
 
     Returns "" if rocprofv3 or a suitable app is not available.
+    ``out_dir`` is an already-created directory managed by the caller.
     """
     if not _ROCPROFV3:
         return ""
-    app = _find_app()
+    app = _find_app(_find_repo_root())
     if not app:
         return ""
-
-    out_dir = tempfile.mkdtemp(prefix="rocinsight_integ_")
     try:
         result = subprocess.run(
             [_ROCPROFV3, "--sys-trace", "-d", out_dir, "-o", "results", "--", app],
@@ -449,22 +456,28 @@ def _generate_trace_db() -> str:
         return ""
 
 
-# Determine the DB path once at collection time.
-# Priority: auto-generate via rocprofv3 > ROCINSIGHT_TEST_DB env var.
-_GENERATED_DB: str = _generate_trace_db()
-_FALLBACK_DB: str = os.environ.get("ROCINSIGHT_TEST_DB", "")
-_INTEGRATION_DB: str = _GENERATED_DB or (
-    _FALLBACK_DB if _FALLBACK_DB and Path(_FALLBACK_DB).exists() else ""
-)
+@pytest.fixture(scope="session")
+def integration_db(tmp_path_factory):
+    """Session-scoped fixture: provide a real trace DB path or skip the test.
 
-_SKIP_REASON = (
-    "rocprofv3 not found and ROCINSIGHT_TEST_DB not set — "
-    "install ROCm or export ROCINSIGHT_TEST_DB=/path/to/trace.db"
-)
+    Priority: auto-generate via rocprofv3 > ROCINSIGHT_TEST_DB env var.
+    The temporary directory is managed by pytest and cleaned up after the session.
+    """
+    fallback = os.environ.get("ROCINSIGHT_TEST_DB", "")
+    if fallback and Path(fallback).exists():
+        return fallback
+
+    if not _ROCPROFV3:
+        pytest.skip(_SKIP_REASON)
+
+    out_dir = str(tmp_path_factory.mktemp("rocinsight_integ"))
+    db_path = _generate_trace_db(out_dir)
+    if not db_path:
+        pytest.skip(_SKIP_REASON)
+    return db_path
 
 
-@pytest.mark.skipif(not _INTEGRATION_DB, reason=_SKIP_REASON)
-def test_integration_tracelens_with_real_db():
+def test_integration_tracelens_with_real_db(integration_db):
     """End-to-end: generate a live trace with rocprofv3, then validate all three
     tracelens functions return correct structured data from the real DB."""
     from rocinsight.connection import RocinsightConnection
@@ -474,7 +487,7 @@ def test_integration_tracelens_with_real_db():
         analyze_short_kernels,
     )
 
-    conn = RocinsightConnection([_INTEGRATION_DB])
+    conn = RocinsightConnection([integration_db])
 
     timeline = compute_interval_timeline(conn)
     assert timeline["total_wall_ns"] > 0, "Expected non-zero wall time from real trace"

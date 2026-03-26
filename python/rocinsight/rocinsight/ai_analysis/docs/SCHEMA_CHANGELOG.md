@@ -53,7 +53,7 @@ if major != 0 or minor < 1:
 A single schema file covers all emitted versions via its `schema_version` enum:
 
 ```
-rocpd/ai_analysis/docs/
+rocinsight/ai_analysis/docs/
 ├── analysis-output.schema.json   ← single schema; schema_version enum lists all valid values
 │                                    Tier 1/2 output emits: "0.1.0"
 │                                    Tier 0 (source-only) output emits: "0.2.0"
@@ -657,7 +657,7 @@ To validate a JSON output document against this schema:
 # Using jsonschema (pip install jsonschema)
 python3 -m jsonschema \
   --instance analysis.json \
-  rocpd/ai_analysis/docs/analysis-output.schema.json
+  rocinsight/ai_analysis/docs/analysis-output.schema.json
 ```
 
 ```python
