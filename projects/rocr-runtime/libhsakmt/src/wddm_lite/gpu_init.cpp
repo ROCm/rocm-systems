@@ -1424,12 +1424,21 @@ static int psp_ring_init(struct PspRingContext *ctx,
     ctx->fence_seq = 1;
 
     ULONG fb_base_reg = mmhub_rreg(dev, regMMMC_VM_FB_LOCATION_BASE);
+    ULONG fb_top_reg  = mmhub_rreg(dev, regMMMC_VM_FB_LOCATION_TOP);
     ctx->vram_mc_base = (ULONGLONG)fb_base_reg << 24;
+    ULONGLONG vram_size = (((ULONGLONG)fb_top_reg << 24) + 0xFFFFFF) - ctx->vram_mc_base + 1;
 
-    ULONGLONG ring_off  = 5 * 1024 * 1024;
-    ULONGLONG fw_off    = 6 * 1024 * 1024;
-    ULONGLONG cmd_off   = 8 * 1024 * 1024;
-    ULONGLONG fence_off = 8 * 1024 * 1024 + 4096;
+    /* Place PSP buffers near END of VRAM to avoid boot_time_tmr.
+     * The TMR (Trusted Memory Region) occupies the first ~20MB of VRAM.
+     * Our old offsets (5-8MB) were INSIDE the TMR, causing the PSP to
+     * load stale firmware from TMR instead of our staging data.
+     * amdgpu allocates near VRAM end via kernel BO (0x87D6AF8000 etc.).
+     * We place buffers at VRAM_SIZE - 16MB to be safely above the TMR. */
+    ULONGLONG safe_base = vram_size - (16ULL * 1024 * 1024);
+    ULONGLONG ring_off  = safe_base;
+    ULONGLONG fw_off    = safe_base + (1ULL * 1024 * 1024);
+    ULONGLONG cmd_off   = safe_base + (3ULL * 1024 * 1024);
+    ULONGLONG fence_off = safe_base + (3ULL * 1024 * 1024) + 4096;
 
     ctx->ring_mc_addr  = ctx->vram_mc_base + ring_off;
     ctx->fw_mc_addr    = ctx->vram_mc_base + fw_off;
@@ -1472,9 +1481,15 @@ static int psp_ring_init(struct PspRingContext *ctx,
         goto fail;
     }
 
-    /* Initialize fence */
-    *(volatile ULONG *)ctx->fence_cpu = 0;
+    /* Zero all buffers at new VRAM locations (end of VRAM may have stale data) */
+    memset(ctx->ring_cpu, 0, PSP_RING_SIZE);
+    memset(ctx->cmd_cpu, 0, 4096);
+    memset(ctx->fence_cpu, 0, 4096);
     MemoryBarrier();
+
+    /* Verify fence is actually zero */
+    ULONG fence_check = *(volatile ULONG *)ctx->fence_cpu;
+    pr_info("psp_ring: fence after zero: 0x%08x (should be 0)\n", fence_check);
 
     /* ---- Destroy existing ring + Create fresh ---- */
     {
@@ -1662,6 +1677,30 @@ static int psp_ring_load_fw(struct PspRingContext *ctx,
 
     MemoryBarrier();
     gpu_hdp_flush(ctx->dev);
+
+    /* Dump first 64 bytes of command buffer for SMU firmware load */
+    if (fw_type == GFX_FW_TYPE_SMU) {
+        UCHAR *p = (UCHAR *)cmd;
+        pr_info("psp_ring: SMU LOAD_IP_FW cmd buffer (first 48 bytes):\n");
+        for (int row = 0; row < 3; row++) {
+            pr_info("  +0x%02x: %02x%02x%02x%02x %02x%02x%02x%02x "
+                    "%02x%02x%02x%02x %02x%02x%02x%02x\n",
+                    row*16,
+                    p[row*16+0], p[row*16+1], p[row*16+2], p[row*16+3],
+                    p[row*16+4], p[row*16+5], p[row*16+6], p[row*16+7],
+                    p[row*16+8], p[row*16+9], p[row*16+10], p[row*16+11],
+                    p[row*16+12], p[row*16+13], p[row*16+14], p[row*16+15]);
+        }
+        pr_info("psp_ring: fw_mc=0x%llx fw_size=%u fw_type=%u\n",
+                ctx->fw_mc_addr, fw_size, fw_type);
+        /* Also verify first 16 bytes of firmware data in VRAM */
+        UCHAR *fw = (UCHAR *)ctx->fw_cpu;
+        pr_info("psp_ring: FW data first 16 bytes in VRAM: "
+                "%02x%02x%02x%02x %02x%02x%02x%02x "
+                "%02x%02x%02x%02x %02x%02x%02x%02x\n",
+                fw[0], fw[1], fw[2], fw[3], fw[4], fw[5], fw[6], fw[7],
+                fw[8], fw[9], fw[10], fw[11], fw[12], fw[13], fw[14], fw[15]);
+    }
 
     char desc[64];
     snprintf(desc, sizeof(desc), "LOAD_IP_FW(%s, type=%u, %u bytes)",
