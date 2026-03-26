@@ -931,7 +931,7 @@ Queue::set_state(queue_state state)
 void
 queue_fini()
 {
-    if(auto pool = get_signal_pool(); pool != nullptr)
+    if(auto* pool = get_signal_pool(); pool != nullptr)
     {
         ROCP_INFO << pool->get_usage_report();
         pool->clear([](auto& signal) { Queue::destroy_signal(&signal); });

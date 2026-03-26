@@ -194,8 +194,7 @@ template <typename FuncT>
 void
 pool<Tp>::clear(FuncT&& func)
 {
-    auto _write_pool_lk  = std::unique_lock<std::shared_mutex>{m_pool_mtx};
-    auto _write_avail_lk = std::unique_lock<std::shared_mutex>{m_available_mtx};
+    auto _write_pool_lk = std::unique_lock<std::shared_mutex>{m_pool_mtx};
 
     for(auto& itr : m_pool)
     {
@@ -205,6 +204,8 @@ pool<Tp>::clear(FuncT&& func)
         // run cleanup lambda
         std::forward<FuncT>(func)(itr);
     }
+
+    auto _write_avail_lk = std::unique_lock<std::shared_mutex>{m_available_mtx};
 
     while(!m_available.empty())
         m_available.pop();
