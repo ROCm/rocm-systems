@@ -141,6 +141,7 @@ struct GpuHwState {
     BOOLEAN                 gfx_initialized;
     BOOLEAN                 gfxoff_disabled;
     BOOLEAN                 psp_sos_alive;
+    ULONG                   hdp_flush_addr;  /* DWORD offset for HDP flush (from remap) */
 };
 
 /*

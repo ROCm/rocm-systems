@@ -4258,21 +4258,49 @@ void gpu_hdp_flush(struct WddmLiteDevice *dev)
      * Fallback: write to HDP_MEM_COHERENCY_FLUSH at NBIO base_index 2
      * offset 0x00F7 (from the Python reference).
      */
-    if (dev->hw.ip.nbio_base != 0) {
-        /* Read the remap register (NBIO base + known offset) */
-        ULONG remap_offset = (dev->hw.ip.nbio_base + 0x0393) * 4; /* regBIF_BX0_REMAP_HDP_MEM_FLUSH_CNTL */
+    /* regBIF_BX0_REMAP_HDP_MEM_FLUSH_CNTL uses BASE_IDX=2 (nbio_base2).
+     * Previous code used nbio_base (BASE_IDX=0) which gave DWORD 0x0393 → wrong!
+     * Correct: nbio_base2 (0x0d20) + 0x0393 = DWORD 0x10B3.
+     * Tinygrad: self.adev.reg("regBIF_BX0_REMAP_HDP_MEM_FLUSH_CNTL").read() // 4 */
+    if (dev->hw.ip.nbio_base2 != 0) {
+        ULONG remap_offset = (dev->hw.ip.nbio_base2 + 0x0393) * 4;
         ULONG flush_reg = wddm_lite_read_reg32(dev, remap_offset);
 
         if (flush_reg != 0 && flush_reg != 0xFFFFFFFF) {
-            /* Write 0 to the remapped flush address */
+            wddm_lite_write_reg32(dev, (flush_reg / 4) * 4, 0);
+            return;
+        }
+        /* First call: log the remap value for debugging */
+        static BOOLEAN hdp_logged = FALSE;
+        if (!hdp_logged) {
+            pr_info("gpu_hdp: remap reg at DWORD 0x%x (base2=0x%x+0x393) = 0x%08x\n",
+                    dev->hw.ip.nbio_base2 + 0x0393, dev->hw.ip.nbio_base2, flush_reg);
+            /* Also try reading via SMN indirect */
+            ULONG smn_val = gpu_smn_rreg(dev, dev->hw.ip.nbio_base2 + 0x0393);
+            pr_info("gpu_hdp: remap via SMN = 0x%08x\n", smn_val);
+            if (smn_val != 0 && smn_val != 0xFFFFFFFF) {
+                pr_info("gpu_hdp: SMN remap works! Using 0x%08x for flush\n", smn_val);
+                dev->hw.hdp_flush_addr = smn_val / 4;
+            }
+            hdp_logged = TRUE;
+        }
+        /* Try SMN-based flush if direct MMIO remap failed */
+        if (dev->hw.hdp_flush_addr != 0) {
+            wddm_lite_write_reg32(dev, dev->hw.hdp_flush_addr * 4, 0);
+            return;
+        }
+    }
+
+    /* Fallback: try with nbio_base (BASE_IDX=0) — wrong but try anyway */
+    if (dev->hw.ip.nbio_base != 0) {
+        ULONG remap_offset = (dev->hw.ip.nbio_base + 0x0393) * 4;
+        ULONG flush_reg = wddm_lite_read_reg32(dev, remap_offset);
+        if (flush_reg != 0 && flush_reg != 0xFFFFFFFF) {
             wddm_lite_write_reg32(dev, (flush_reg / 4) * 4, 0);
             return;
         }
     }
 
-    /* Fallback: direct HDP flush via NBIO base2 + 0xF7 */
-    /* For passthrough GPU, this may not be needed since VBIOS already
-     * configured HDP, but do it anyway for correctness */
     pr_debug("gpu_hdp: using fallback flush path\n");
 }
 
