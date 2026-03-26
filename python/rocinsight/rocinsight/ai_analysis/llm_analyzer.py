@@ -805,7 +805,8 @@ Follow the reference guide strictly for analysis methodology and output format."
                 ) from _ae2
 
     def _call_anthropic(
-        self, system_prompt: str, user_prompt: str, timeout: int = 120
+        self, system_prompt: str, user_prompt: str, timeout: int = 120,
+        max_tokens: int = 4096,
     ) -> str:
         """Call Anthropic Claude API"""
         if not self.api_key:
@@ -829,7 +830,7 @@ Follow the reference guide strictly for analysis methodology and output format."
             # Build base API call kwargs
             create_kwargs: Dict[str, Any] = dict(
                 model=model,
-                max_tokens=4096,
+                max_tokens=max_tokens,
                 system=system_prompt,
                 messages=[{"role": "user", "content": user_prompt}],
                 timeout=timeout,

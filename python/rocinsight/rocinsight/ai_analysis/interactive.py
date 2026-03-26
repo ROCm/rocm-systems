@@ -4403,7 +4403,7 @@ class WorkflowSession:
                             raise
                 elif self._llm_provider == "anthropic":
                     result = analyzer._call_anthropic(
-                        system, user, timeout=_rewrite_timeout
+                        system, user, max_tokens=16384, timeout=_rewrite_timeout
                     )
                 elif self._llm_provider == "private":
                     result = analyzer._call_private(system, user)
