@@ -1758,6 +1758,8 @@ typedef enum {
 /**
  * @brief Types of memory
  *
+ * @note Sum of the process memory is not expected to be the total memory usage.
+ *
  * @cond @tag{gpu_bm_linux} @endcond
  */
 typedef enum {
@@ -3983,6 +3985,8 @@ amdsmi_status_t amdsmi_get_cpu_core_ccd_power(amdsmi_processor_handle processor_
  *  a pointer to a uint64_t @p total, this function will write the total amount
  *  of @p mem_type memory that exists to the location pointed to by @p total.
  *
+ *  @note Sum of the process memory is not expected to be the total memory usage.
+ *
  *  @param[in] processor_handle a processor handle
  *
  *  @param[in] mem_type The type of memory for which the total amount will be
@@ -4009,6 +4013,8 @@ amdsmi_status_t amdsmi_get_gpu_memory_total(amdsmi_processor_handle processor_ha
  *
  *  @details This function will write the amount of @p mem_type memory that
  *  that is currently being used to the location pointed to by @p used.
+ *
+ *  @note Sum of the process memory is not expected to be the total memory usage.
  *
  *  @param[in] processor_handle a processor handle
  *
