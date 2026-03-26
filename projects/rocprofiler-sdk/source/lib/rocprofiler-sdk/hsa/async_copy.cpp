@@ -542,7 +542,10 @@ async_copy_impl(Args... args)
 
     auto&& _tied_args = std::tie(args...);
 
-    // determine the direction of the memory copy
+    // determine the direction of the memory copy using pointer_info on actual addresses
+    // Note: We cannot rely solely on agent parameters because runtimes like CLR/HIP may
+    // pass the local GPU agent for SDMA engine selection purposes rather than indicating
+    // memory ownership. Use hsa_amd_pointer_info to determine actual memory types.
     auto _direction    = ROCPROFILER_MEMORY_COPY_NONE;
     auto _src_agent_id = rocprofiler_agent_id_t{};
     auto _dst_agent_id = rocprofiler_agent_id_t{};
@@ -551,59 +554,85 @@ async_copy_impl(Args... args)
         constexpr auto dst_agent_idx = arg_indices<OpIdx>::dst_agent_idx;
         constexpr auto src_agent_idx = arg_indices<OpIdx>::src_agent_idx;
 
-        // extract the completion signal argument and the destination hsa_agent_t
+        // extract the agents from arguments (these may not reflect actual memory ownership)
         auto _hsa_dst_agent = std::get<dst_agent_idx>(_tied_args);
         auto _hsa_src_agent = std::get<src_agent_idx>(_tied_args);
 
-        // map the hsa agents to rocprofiler agents
-        auto _rocp_dst_agent = agent::get_rocprofiler_agent(_hsa_dst_agent);
-        auto _rocp_src_agent = agent::get_rocprofiler_agent(_hsa_src_agent);
+        // Get actual source and destination addresses
+        auto _dst_addr = compute_address(std::get<dst_addr_idx>(_tied_args));
+        auto _src_addr = compute_address(std::get<src_addr_idx>(_tied_args));
+
+        // Query pointer info to determine actual memory types
+        hsa_amd_pointer_info_t _src_info = {sizeof(hsa_amd_pointer_info_t)};
+        hsa_amd_pointer_info_t _dst_info = {sizeof(hsa_amd_pointer_info_t)};
+
+        auto _src_status = get_amd_ext_table()->hsa_amd_pointer_info_fn(
+            const_cast<void*>(_src_addr.ptr), &_src_info, nullptr, nullptr, nullptr);
+        auto _dst_status = get_amd_ext_table()->hsa_amd_pointer_info_fn(
+            const_cast<void*>(_dst_addr.ptr), &_dst_info, nullptr, nullptr, nullptr);
+
+        // Determine if source/destination is host or device memory based on pointer info
+        bool _src_is_device = false;
+        bool _dst_is_device = false;
+        hsa_agent_t _actual_src_agent = _hsa_src_agent;
+        hsa_agent_t _actual_dst_agent = _hsa_dst_agent;
+
+        if(_src_status == HSA_STATUS_SUCCESS)
+        {
+            _actual_src_agent = _src_info.agentOwner;
+            // HSA_POINTER_TYPE_HSA indicates GPU/device memory
+            // HSA_POINTER_TYPE_LOCKED indicates pinned host memory
+            // HSA_POINTER_TYPE_UNKNOWN typically indicates unmapped or host memory
+            _src_is_device = (_src_info.type == HSA_EXT_POINTER_TYPE_HSA);
+        }
+        else
+        {
+            // Fallback to agent-based detection
+            auto _rocp_src_agent = agent::get_rocprofiler_agent(_hsa_src_agent);
+            if(_rocp_src_agent)
+                _src_is_device = (_rocp_src_agent->type == ROCPROFILER_AGENT_TYPE_GPU);
+        }
+
+        if(_dst_status == HSA_STATUS_SUCCESS)
+        {
+            _actual_dst_agent = _dst_info.agentOwner;
+            _dst_is_device = (_dst_info.type == HSA_EXT_POINTER_TYPE_HSA);
+        }
+        else
+        {
+            // Fallback to agent-based detection
+            auto _rocp_dst_agent = agent::get_rocprofiler_agent(_hsa_dst_agent);
+            if(_rocp_dst_agent)
+                _dst_is_device = (_rocp_dst_agent->type == ROCPROFILER_AGENT_TYPE_GPU);
+        }
+
+        // Map actual agents to rocprofiler agents for reporting
+        auto _rocp_dst_agent = agent::get_rocprofiler_agent(_actual_dst_agent);
+        auto _rocp_src_agent = agent::get_rocprofiler_agent(_actual_src_agent);
 
         if(_rocp_dst_agent && _rocp_src_agent)
         {
             _src_agent_id = _rocp_src_agent->id;
             _dst_agent_id = _rocp_dst_agent->id;
-            if(_rocp_src_agent->type == ROCPROFILER_AGENT_TYPE_CPU)
-            {
-                if(_rocp_dst_agent->type == ROCPROFILER_AGENT_TYPE_CPU)
-                    _direction = ROCPROFILER_MEMORY_COPY_HOST_TO_HOST;
-                else if(_rocp_dst_agent->type == ROCPROFILER_AGENT_TYPE_GPU)
-                    _direction = ROCPROFILER_MEMORY_COPY_HOST_TO_DEVICE;
-                else
-                {
-                    ROCP_CI_LOG(WARNING)
-                        << meta_type::name
-                        << " had an unhandled destination type: " << _rocp_dst_agent->type;
-                }
-            }
-            else if(_rocp_src_agent->type == ROCPROFILER_AGENT_TYPE_GPU)
-            {
-                if(_rocp_dst_agent->type == ROCPROFILER_AGENT_TYPE_CPU)
-                    _direction = ROCPROFILER_MEMORY_COPY_DEVICE_TO_HOST;
-                else if(_rocp_dst_agent->type == ROCPROFILER_AGENT_TYPE_GPU)
-                    _direction = ROCPROFILER_MEMORY_COPY_DEVICE_TO_DEVICE;
-                else
-                {
-                    ROCP_CI_LOG(WARNING)
-                        << meta_type::name
-                        << " had an unhandled destination type: " << _rocp_dst_agent->type;
-                }
-            }
-            else
-            {
-                ROCP_CI_LOG(WARNING) << meta_type::name
-                                     << " had an unhandled source type: " << _rocp_dst_agent->type;
-            }
         }
         else
         {
-            ROCP_ERROR_IF(!_rocp_src_agent)
-                << "failed to find source rocprofiler agent for hsa agent with handle="
-                << _hsa_src_agent.handle;
-            ROCP_ERROR_IF(!_rocp_dst_agent)
-                << "failed to find destination rocprofiler agent for hsa agent with handle="
-                << _hsa_dst_agent.handle;
+            // Fallback to the agent parameters if pointer_info agents couldn't be mapped
+            auto _fallback_dst_agent = agent::get_rocprofiler_agent(_hsa_dst_agent);
+            auto _fallback_src_agent = agent::get_rocprofiler_agent(_hsa_src_agent);
+            if(_fallback_dst_agent) _dst_agent_id = _fallback_dst_agent->id;
+            if(_fallback_src_agent) _src_agent_id = _fallback_src_agent->id;
         }
+
+        // Determine copy direction based on memory types
+        if(!_src_is_device && !_dst_is_device)
+            _direction = ROCPROFILER_MEMORY_COPY_HOST_TO_HOST;
+        else if(!_src_is_device && _dst_is_device)
+            _direction = ROCPROFILER_MEMORY_COPY_HOST_TO_DEVICE;
+        else if(_src_is_device && !_dst_is_device)
+            _direction = ROCPROFILER_MEMORY_COPY_DEVICE_TO_HOST;
+        else if(_src_is_device && _dst_is_device)
+            _direction = ROCPROFILER_MEMORY_COPY_DEVICE_TO_DEVICE;
     }
 
     async_copy_data* _data = nullptr;
