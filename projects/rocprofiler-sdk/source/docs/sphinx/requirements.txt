@@ -127,7 +127,7 @@ pyyaml==6.0.2
     #   myst-parser
     #   rocm-docs-core
     #   sphinx-external-toc
-requests==2.32.3
+requests==2.33.0
     # via
     #   pygithub
     #   sphinx
