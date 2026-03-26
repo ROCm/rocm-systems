@@ -1478,7 +1478,7 @@ def test_roofline_plot_points_data_generation():
             "l2": [[0.01, 10], [10, 800], 80],
             "hbm": [[0.01, 10], [10, 500], 50],
             "valu": [[1, 100], [200, 200], 200],
-            "mfma": [[1, 100], [500, 500], 500],
+            "matrix_ops": [[1, 100], [500, 500], 500],
         }
 
         plot_points_data = []
@@ -1582,7 +1582,7 @@ def test_roofline_bound_status_calculation():
         ceiling_data = {
             "hbm": [[0.01, 10], [10, 1000], 100],
             "valu": [[1, 100], [200, 200], 200],
-            "mfma": [[1, 100], [500, 500], 500],
+            "matrix_ops": [[1, 100], [500, 500], 500],
         }
 
         status1 = roofline_instance._determine_kernel_bound_status(

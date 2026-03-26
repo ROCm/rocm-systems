@@ -57,7 +57,7 @@ from utils.parser import (
 )
 from utils.roofline_calc import (
     CACHE_HIERARCHY,
-    MFMA_DATATYPES,
+    MATRIX_DATATYPES,
     PEAK_OPS_DATATYPES,
     SUPPORTED_DATATYPES,
 )
@@ -351,7 +351,7 @@ class db_analysis(OmniAnalyze_Base):
                         keys.append(f"{dtype}Flops")
                     elif dtype.startswith("I"):
                         keys.append(f"{dtype}Ops")
-                if dtype in MFMA_DATATYPES:
+                if dtype in MATRIX_DATATYPES:
                     if dtype.startswith("F") or dtype.startswith("B"):
                         # FP16 -> F16
                         dtype = dtype.replace("FP", "F")
