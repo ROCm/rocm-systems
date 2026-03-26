@@ -4577,14 +4577,27 @@ class WorkflowSession:
                         style="yellow",
                     )
                     return None
-                _last_char = result.rstrip()[-1] if result.rstrip() else ""
-                if _last_char and _last_char not in ("}", ";", ")", "#"):
-                    _print(
-                        f"  ⚠  LLM output ends with '{_last_char}' — likely truncated."
-                        f" Discarding to prevent broken code.",
-                        style="yellow",
-                    )
-                    return None
+                # Braces balance — strip any trailing non-code prose the LLM
+                # may have added after the last closing brace (e.g. "These
+                # changes should improve...").  This avoids false truncation
+                # rejections when the code itself is complete.
+                _lines = result.rstrip().splitlines()
+                while _lines:
+                    _last = _lines[-1].strip()
+                    if not _last:
+                        _lines.pop()
+                        continue
+                    # Line looks like code if it has braces, semicolons,
+                    # preprocessor directives, or C/C++ comment markers
+                    if any(c in _last for c in ("{", "}", ";", "#", "//", "/*")):
+                        break
+                    # Also accept lines ending with ) — e.g. function closing
+                    if _last.endswith(")"):
+                        break
+                    # Trailing prose — strip it
+                    _lines.pop()
+                if _lines:
+                    result = "\n".join(_lines) + "\n"
             return result
         except Exception as exc:
             _print(f"  (LLM rewrite failed: {exc})", style="red")
