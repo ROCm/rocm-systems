@@ -885,7 +885,14 @@ def apply_copytoshmem16_overloads(text):
         text, count=1
     )
 
-    # WARP_SPEED copyToShmem16 calls
+    # WARP_SPEED copyToShmem16 calls (global -> LDS)
+    # Convert void* dst/src block to u8_gptr src, removing unused dst
+    text = re.sub(
+        r'void\* dst = &ncclShmem->warpChannel\[localWarpId\];\s*\n'
+        r'\s*void\* src = &\(\(ncclKernelCommAndChannels\*\)ncclShmem->args\.comm\)->channels\[ncclShmem->warpChannelId\[localWarpId\]\];',
+        'u8_gptr src = u8_gptr(&((ncclKernelCommAndChannels*)ncclShmem->args.comm)->channels[ncclShmem->warpChannelId[localWarpId]]);',
+        text
+    )
     text = re.sub(
         r'copyToShmem16\(tid-localWarpId\*WARP_SIZE, dst, src, bytes\);',
         'copyToShmem16(tid-localWarpId*WARP_SIZE, LDSPtr<uint8_t>(&ncclShmem->warpChannel[localWarpId]), src, bytes);',

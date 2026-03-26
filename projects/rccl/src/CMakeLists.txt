@@ -418,7 +418,7 @@ endif()
 
 # Execute the python script to generate required collective functions
 execute_process(
-    COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/src/device/generate.py ${GEN_DIR} ${IFC_ENABLED} ${COLLTRACE} ${ENABLE_MSCCL_KERNEL} ${BUILD_LOCAL_GPU_TARGET_ONLY} ${ENABLE_ROCSHMEM} ${ONLY_FUNCS}
+    COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/src/device/generate.py ${GEN_DIR} ${IFC_ENABLED} ${COLLTRACE} ${ENABLE_MSCCL_KERNEL} ${BUILD_LOCAL_GPU_TARGET_ONLY} ${ENABLE_ROCSHMEM} ${ENABLE_SPLIT_DEVICE_COMPILE} ${ONLY_FUNCS}
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
     RESULT_VARIABLE gen_py_result
     ERROR_VARIABLE gen_py_error
@@ -459,7 +459,7 @@ if(ENABLE_SPLIT_DEVICE_COMPILE)
 endif()
 
 # Find the generated files in the output directory
-file(GLOB_RECURSE GENERATED_FILES "${GEN_DIR}/*")
+file(GLOB GENERATED_FILES "${GEN_DIR}/*")
 
 # Append all found generated files to the list
 foreach(file ${GENERATED_FILES})
@@ -810,9 +810,7 @@ target_compile_options(rccl PRIVATE -Wall)
 target_compile_options(rccl PRIVATE -Werror=deprecated-copy-with-user-provided-copy)
 target_compile_options(rccl PRIVATE -Wno-format-nonliteral)
 target_compile_options(rccl PRIVATE -Wno-unused-function)
-if(ENABLE_SPLIT_DEVICE_COMPILE)
-  target_compile_definitions(rccl PRIVATE RCCL_LDS_POINTERS)
-else()
+if(NOT ENABLE_SPLIT_DEVICE_COMPILE)
   target_compile_options(rccl PRIVATE -fgpu-rdc)
 endif()
 
@@ -1044,10 +1042,8 @@ set_property(TARGET rccl PROPERTY RULE_LAUNCH_LINK "${CMAKE_COMMAND} -E time")
 
 # ── Split device compilation pipeline ─────────────────────────────────────────
 if(ENABLE_SPLIT_DEVICE_COMPILE)
-  list(GET GPU_TARGETS 0 _split_gpu_arch)
-  message(STATUS "Split device compile: targeting ${_split_gpu_arch}")
+  message(STATUS "Split device compile: targeting ${GPU_TARGETS}")
 
-  set(_bundler_device_target "hip-amdgcn-amd-amdhsa--${_split_gpu_arch}")
   set(_bundler_host_target "host-x86_64-unknown-linux-gnu-")
 
   # Read properties from the rccl target so the pipeline stays in sync
@@ -1061,27 +1057,35 @@ if(ENABLE_SPLIT_DEVICE_COMPILE)
   if(NOT _split_compile_defs)
     set(_split_compile_defs "")
   endif()
+  list(APPEND _split_compile_defs "RCCL_LDS_POINTERS")
   if(NOT _split_compile_opts)
     set(_split_compile_opts "")
   endif()
 
   include(${PROJECT_SOURCE_DIR}/cmake/SplitDeviceCompile.cmake)
+  if(ENABLE_COMPRESS)
+    set(_sdc_compress COMPRESS)
+  else()
+    set(_sdc_compress "")
+  endif()
+
   setup_split_device_compile(
     TARGET              rccl
     SOURCES             ${DEVICE_TU_SOURCES}
     FUNC_ONLY_SOURCES   ${DEVICE_FUNC_ONLY_SOURCES}
-    GPU_ARCH            ${_split_gpu_arch}
+    GPU_ARCHES          ${GPU_TARGETS}
     ROCM_PATH           ${ROCM_PATH}
     OUTPUT_DIR          ${CMAKE_CURRENT_BINARY_DIR}
     INCLUDE_DIRS        ${_split_include_dirs}
     COMPILE_DEFS        ${_split_compile_defs}
     COMPILE_OPTS        ${_split_compile_opts}
-    BUNDLER_DEVICE_TARGET ${_bundler_device_target}
-    BUNDLER_HOST_TARGET   ${_bundler_host_target}
+    BUNDLER_HOST_TARGET ${_bundler_host_target}
+    ${_sdc_compress}
   )
 
-  add_dependencies(rccl rccl_device_objects)
   add_dependencies(rccl_device_objects hipify_all)
 
+  # Only the final link needs the fat object; host .o compiles are independent.
+  set_property(TARGET rccl APPEND PROPERTY LINK_DEPENDS ${DEVICE_FAT_OBJECTS})
   target_link_options(rccl PRIVATE ${DEVICE_FAT_OBJECTS})
 endif()

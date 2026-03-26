@@ -3,6 +3,7 @@ import os
 import sys
 import subprocess
 from dataclasses import dataclass
+from fnmatch import fnmatch
 import shutil
 
 # Order of colls, redops, tys, protos, algos must match src/include/device.h
@@ -80,8 +81,19 @@ is_colltrace       = 1 if sys.argv[3] == "ON" else 0
 is_msccl_kernels   = 1 if sys.argv[4] == "ON" else 0
 is_local_arch_only = 1 if sys.argv[5] == "ON" else 0
 is_rocshmem        = 1 if sys.argv[6] == "ON" else 0
+is_split_compile   = 1 if sys.argv[7] == "ON" else 0
 
-func_pattern = sys.argv[7:8]
+_split_file_patterns = []
+if is_split_compile:
+  _patterns_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "split_file_patterns.txt")
+  if os.path.exists(_patterns_path):
+    with open(_patterns_path) as _pf:
+      _split_file_patterns = [
+        line.strip() for line in _pf
+        if line.strip() and not line.strip().startswith("#")
+      ]
+
+func_pattern = sys.argv[8:9]
 
 if func_pattern and func_pattern[0]:
   func_pattern = func_pattern[0]
@@ -539,10 +551,28 @@ with open(os.path.join(gensrc, "host_table.cpp"), "w") as f:
       out(f'  {{{key}, {fn_id}}}, {comment}\n')
   out("};\n")
 
-# Maps to .cu filename which implements this func. The only constraint is that
+# Maps to .cpp filename which implements this func. The only constraint is that
 # "coll" is reflected in the name: formally that no two funcs having different
 # coll's map to the same filename.
+def _should_split_file(coll, redop, ty):
+  if not is_split_compile:
+    return False
+  if not _split_file_patterns:
+    return True
+  basename = paste("_", coll_camel_to_lower[coll], redop and redop.lower(), ty)
+  return any(fnmatch(basename, pat) for pat in _split_file_patterns)
+
 def impl_filename(coll, algo, proto, redop, ty, acc, pipeline, unroll):
+  if _should_split_file(coll, redop, ty):
+    return "%s.cpp" % paste("_",
+      coll_camel_to_lower[coll],
+      algo.lower() if algo else None,
+      proto.lower() if proto else None,
+      redop.lower() if redop else None,
+      ty,
+      "acc" + acc if acc != "0" else None,
+      "pipe" + pipeline if pipeline != "0" else None,
+      "u" + unroll)
   return "%s.cpp" % paste("_", coll_camel_to_lower[coll], redop and redop.lower(), ty)
 
 # Partition the functions and kernels to the .cu filenames. The partition is
