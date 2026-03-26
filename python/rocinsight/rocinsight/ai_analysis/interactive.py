@@ -4108,13 +4108,28 @@ class WorkflowSession:
         app_cmd = self._state.app_command
         run_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         new_out_dir = f"{self._trace_dir}/run_{run_id}"
+        # Detect MPI app to restructure the command correctly
+        _app_info = self._classify_app_command(app_cmd)
+        _is_mpi = _app_info.get("mpi_wrap", False)
         for rec in recs:
             for cmd_obj in rec.get("commands", []):
                 if cmd_obj.get("tool") == "rocprofv3":
                     fc = cmd_obj.get("full_command", "")
                     if fc and "-- ./app" in fc:
-                        # Replace placeholder app and generic output dir
-                        fc = fc.replace("-- ./app", f"-- {app_cmd}")
+                        if _is_mpi:
+                            # MPI: restructure as mpirun <args> rocprofv3 <flags> -- <binary>
+                            mpi_prefix = _app_info.get("mpi_prefix", "mpirun")
+                            mpi_app = _app_info.get("mpi_app", app_cmd)
+                            # Extract rocprofv3 flags (everything between rocprofv3 and -- ./app)
+                            _rp_idx = fc.find("rocprofv3 ")
+                            _app_idx = fc.find("-- ./app")
+                            if _rp_idx >= 0 and _app_idx > _rp_idx:
+                                _rp_flags = fc[_rp_idx + len("rocprofv3 "):_app_idx].strip()
+                                fc = f"{mpi_prefix} rocprofv3 {_rp_flags} -o results_%nid% -- {mpi_app}"
+                            else:
+                                fc = fc.replace("-- ./app", f"-- {app_cmd}")
+                        else:
+                            fc = fc.replace("-- ./app", f"-- {app_cmd}")
                         fc = _replace_output_dir(fc, new_out_dir)
                         # Strip flags not accepted by rocprofv3 CLI.
                         # The LLM fence documents valid flags, but LLMs still
