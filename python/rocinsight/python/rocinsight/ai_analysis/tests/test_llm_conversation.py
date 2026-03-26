@@ -594,7 +594,7 @@ class TestInteractiveIntegration(unittest.TestCase):
         import rocinsight.ai_analysis.interactive as imod
 
         with patch(
-            "rocpd.ai_analysis.llm_analyzer.LLMAnalyzer", return_value=mock_analyzer
+            "rocinsight.ai_analysis.llm_analyzer.LLMAnalyzer", return_value=mock_analyzer
         ):
             with patch.object(imod, "_input", return_value="y"):
                 session._apply_suggestions_via_llm(
@@ -610,14 +610,12 @@ class TestInteractiveIntegration(unittest.TestCase):
             "Expected _conv.send() to be called with post-rewrite summary",
         )
 
-    def test_session_context_not_referenced(self):
-        """SessionContext must not exist in the interactive module."""
-        import rocinsight.ai_analysis.interactive as imod
+    def test_session_context_is_importable(self):
+        """SessionContext must be importable from interactive module."""
+        from rocinsight.ai_analysis.interactive import SessionContext
 
-        self.assertFalse(
-            hasattr(imod, "SessionContext"),
-            "SessionContext should have been removed from interactive.py",
-        )
+        ctx = SessionContext()
+        self.assertEqual(ctx.iteration, 0)
 
     def test_workflow_session_has_no_conv(self):
         """WorkflowSession must not own a _conv attribute."""

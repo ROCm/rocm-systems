@@ -42,6 +42,22 @@ class HistoryEntry:
 
 
 @dataclass
+class SessionContext:
+    """Accumulated analysis context stored inside a SessionData.
+
+    Tracks iteration count, per-run analysis summaries, suggestions given to
+    the user, and profiling commands that have been executed.  Serialized as a
+    plain dict inside ``SessionData.context`` for backward compatibility with
+    sessions written before this field existed.
+    """
+
+    iteration: int = 0
+    analyses: List[Dict[str, Any]] = field(default_factory=list)
+    suggestions_given: List[str] = field(default_factory=list)
+    commands_run: List[Dict[str, Any]] = field(default_factory=list)
+
+
+@dataclass
 class SessionData:
     session_id: str
     source_dir: str
@@ -53,6 +69,7 @@ class SessionData:
     sent_source_files: List[str] = field(
         default_factory=list
     )  # files already sent to LLM
+    context: Optional[Dict[str, Any]] = None  # serialized SessionContext
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -72,6 +89,7 @@ class SessionData:
             sent_source_files=d.get(
                 "sent_source_files", []
             ),  # empty list for old sessions
+            context=d.get("context"),  # None for sessions written before this field
         )
 
 
@@ -324,6 +342,9 @@ class InteractiveSession:
         self._conv: Optional[LLMConversation] = None
         self._sent_source_files: set = set()  # filenames already sent to _conv
         self._session = self._init_session(resume_session_id)
+        # Restore or create a SessionContext from the session's context dict
+        raw_ctx = self._session.context or {}
+        self._ctx = SessionContext(**raw_ctx) if raw_ctx else SessionContext()
 
     @property
     def session(self) -> SessionData:
@@ -844,6 +865,78 @@ class InteractiveSession:
         except Exception as exc:
             _print(f"  (LLM annotation skipped: {exc})", style="dim")
         return cmds
+
+    # ── SessionContext helpers ────────────────────────────────────────────────
+
+    def _update_ctx_analysis(
+        self,
+        recs: List[Dict[str, Any]],
+        breakdown: Optional[Dict[str, Any]],
+    ) -> None:
+        """Record a completed analysis run in the session context."""
+        self._ctx.iteration += 1
+        top_rec = recs[0] if recs else {}
+        entry: Dict[str, Any] = {
+            "db": self._db_path or "",
+            "kernel_pct": (breakdown or {}).get("kernel_time_pct", 0.0),
+            "memcpy_pct": (breakdown or {}).get("memcpy_time_pct", 0.0),
+            "idle_pct": (breakdown or {}).get("idle_time_pct", 0.0),
+            "top_issue": top_rec.get("issue", ""),
+            "top_priority": top_rec.get("priority", ""),
+        }
+        self._ctx.analyses.append(entry)
+        if len(self._ctx.analyses) > 5:
+            self._ctx.analyses = self._ctx.analyses[-5:]
+
+    def _update_ctx_suggestion(self, suggestion: str) -> None:
+        """Record a suggestion shown to the user (capped at 3, truncated at 120 chars)."""
+        self._ctx.suggestions_given.append(suggestion[:120])
+        if len(self._ctx.suggestions_given) > 3:
+            self._ctx.suggestions_given = self._ctx.suggestions_given[-3:]
+
+    def _update_ctx_command(self, cmd: str, exit_code: int) -> None:
+        """Record a profiling command that was executed (capped at 5)."""
+        self._ctx.commands_run.append({"cmd": cmd, "exit_code": exit_code})
+        if len(self._ctx.commands_run) > 5:
+            self._ctx.commands_run = self._ctx.commands_run[-5:]
+
+    def _format_context_block(self) -> str:
+        """Return a compact text block summarising prior session activity for LLM prompts.
+
+        Returns an empty string when there is no accumulated context yet.
+        Kept under ~1500 chars to avoid bloating LLM token budgets.
+        """
+        ctx = self._ctx
+        if not ctx.iteration and not ctx.analyses and not ctx.commands_run:
+            return ""
+
+        lines: List[str] = [f"=== Session Context (iteration {ctx.iteration}) ==="]
+
+        if ctx.analyses:
+            lines.append("Prior analyses:")
+            for a in ctx.analyses[-3:]:  # show at most 3 most-recent
+                db_label = f" db={a.get('db', '')}" if a.get("db") else ""
+                priority = a.get("top_priority", "")
+                prio_label = f" [{priority}]" if priority else ""
+                lines.append(
+                    f"  run:{db_label} kernel={a.get('kernel_pct', 0):.1f}% "
+                    f"idle={a.get('idle_pct', 0):.1f}% "
+                    f"top_issue={a.get('top_issue', '')!r}{prio_label}"
+                )
+
+        if ctx.suggestions_given:
+            lines.append("Suggestions given:")
+            for s in ctx.suggestions_given:
+                lines.append(f"  - {s[:80]}")
+
+        if ctx.commands_run:
+            lines.append("Commands run:")
+            for c in ctx.commands_run[-3:]:
+                lines.append(f"  $ {c.get('cmd', '')}  [exit {c.get('exit_code', '')}]")
+
+        return "\n".join(lines)
+
+    # ── Analysis helpers ──────────────────────────────────────────────────────
 
     def _run_tier1_analysis(self, db_path: str):
         """Run Tier 1/2 analysis on db_path; return (recs, breakdown) tuple.

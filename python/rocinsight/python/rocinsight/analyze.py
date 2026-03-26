@@ -5865,8 +5865,8 @@ def execute(
     # Get database path for display
     database_path = ""
     if input is not None and hasattr(input, "_paths") and input._paths:
-        database_path = (
-            input._paths[0] if isinstance(input._paths, list) else str(input._paths)
+        database_path = str(
+            input._paths[0] if isinstance(input._paths, list) else input._paths
         )
 
     # Pop interactive before passing to analyze_performance (it doesn't accept it)

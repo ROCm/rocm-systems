@@ -71,8 +71,25 @@ def main(argv=None):
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
 
-    # Wire analyze subcommand using the same add_args/execute pattern as rocpd
-    analyze.add_args(analyze_parser)
+    # Wire analyze subcommand using the same add_args/execute pattern as rocpd.
+    # add_args() registers all analysis flags AND returns a process_args() callback.
+    process_args = analyze.add_args(analyze_parser)
+
+    # Register -i / --input on the analyze subparser (not the top-level parser)
+    analyze_parser.add_argument(
+        "-i",
+        "--input",
+        nargs="+",
+        type=str,
+        default=None,
+        metavar="DB",
+        help="Input rocprofiler-sdk trace database file(s) (.db). "
+        "Required unless --source-dir is used for Tier 0 source analysis.",
+    )
+
+    # Add -o / -d output flags to both the top-level parser (for help display)
+    # and the analyze subparser (so they can appear after the subcommand name).
+    output_config.add_args(analyze_parser)
     output_config.add_args(parser)
 
     if argv is None:
@@ -89,11 +106,30 @@ def main(argv=None):
         sys.exit(0)
 
     if args.subcommand == "analyze":
+        # Validate: need at least -i or --source-dir
+        has_input = bool(getattr(args, "input", None))
+        has_source = bool(getattr(args, "source_dir", None))
+        if not has_input and not has_source:
+            analyze_parser.error(
+                "at least one of -i/--input (trace database) or "
+                "--source-dir (source code) is required"
+            )
+
         input_data = None
-        if getattr(args, "input", None):
+        if has_input:
             input_data = RocinsightConnection(args.input)
+
+        # Build output config from -o / -d flags
+        cfg = output_config.output_config(
+            output_file=getattr(args, "output_file", None),
+            output_path=getattr(args, "output_path", None),
+        )
+
+        # Collect analysis kwargs via the process_args callback from add_args()
+        kwargs = process_args(input_data, args)
+
         try:
-            analyze.execute(input_data, args)
+            analyze.execute(input_data, cfg, **kwargs)
         finally:
             if input_data is not None:
                 input_data.close()

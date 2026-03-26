@@ -803,12 +803,14 @@ export ROCPD_LLM_PRIVATE_HEADERS="{'Ocp-Apim-Subscription-Key': 'abc123'}"
 ## Project Structure
 
 ```
-projects/rocinsight/
+python/rocinsight/
 ├── README.md                          ← this file
 ├── pyproject.toml                     ← PEP 517 package metadata; entry point: rocinsight
 ├── CMakeLists.txt                     ← pip-based install target + ctest wiring
+├── tests/                             ← integration tests (use real .db files)
 │
-├── rocinsight/                        ← Python package
+└── python/
+    └── rocinsight/                    ← Python package
 │   ├── __init__.py                    ← version="0.1.0"; exports RocinsightConnection
 │   ├── __main__.py                    ← entry point for python -m rocinsight
 │   ├── connection.py                  ← RocinsightConnection (pure-sqlite3, no C++)
@@ -966,7 +968,7 @@ rocinsight is a pure-Python package.  The CMakeLists.txt provides:
 
 ```bash
 # Standalone build
-cmake -B build -DCMAKE_INSTALL_PREFIX=/opt/rocm projects/rocinsight
+cmake -B build -DCMAKE_INSTALL_PREFIX=/opt/rocm python/rocinsight
 cmake --build build
 sudo cmake --install build
 
@@ -991,45 +993,96 @@ CMake options:
 
 ## Testing
 
-### Unit tests (no GPU required)
+rocinsight has two test suites: **unit tests** (no GPU or real .db required) and
+**integration tests** (use a real rocprofv3 .db file).
+
+### Quick start
 
 ```bash
-cd projects/rocinsight
-PYTHONPATH=. python3 -m pytest rocinsight/ai_analysis/tests -v
+# 1. Install rocinsight in editable mode (once)
+cd python/rocinsight
+pip install -e ".[dev]"
 
-# Or from any directory
-PYTHONPATH=/path/to/projects/rocinsight \
-    python3 -m pytest /path/to/projects/rocinsight/rocinsight/ai_analysis/tests \
-    --noconftest -v
+# 2. Run all unit tests
+pytest python/rocinsight/ai_analysis/tests -v
+
+# 3. Run all integration tests (need a real .db)
+pytest tests -v --db-path /path/to/trace.db
+```
+
+### Unit tests (no GPU required)
+
+Unit tests live in `python/rocinsight/python/rocinsight/ai_analysis/tests/`.
+They mock all external I/O and cover the full API surface without needing a GPU or
+a real profiling database.
+
+```bash
+# From the repo root
+cd python/rocinsight
+pytest python/rocinsight/ai_analysis/tests -v
+
+# Run a specific file
+pytest python/rocinsight/ai_analysis/tests/test_api_standalone.py -v
+
+# Run with coverage report
+pytest python/rocinsight/ai_analysis/tests -v --cov=rocinsight --cov-report=term-missing
+
+# If not installed in editable mode, set PYTHONPATH manually
+PYTHONPATH=python python3 -m pytest python/rocinsight/ai_analysis/tests -v
 ```
 
 Test files and what they cover:
 
-| File | Tests | What it covers |
-|---|---|---|
-| `test_api_standalone.py` | 23 | `analyze_database()` API, `AnalysisResult` dataclass, output formats |
-| `test_interactive_context.py` | — | `InteractiveSession` menu logic, context persistence |
-| `test_llm_conversation.py` | 51 | `LLMConversation` send/compact/serialize, multi-provider mocking |
-| `test_local_llm.py` | — | Ollama local model integration |
-| `test_tracelens_port.py` | — | TraceLens interval arithmetic and kernel category classification |
+| File | Coverage |
+|---|---|
+| `test_api_standalone.py` | `analyze_database()`, `AnalysisResult` dataclass, all output formats (text/json/markdown/webview), schema validation |
+| `test_connection.py` | `RocinsightConnection` single/multi-DB, UNION ALL views, `merge_sqlite_dbs()`, error handling |
+| `test_analyze_core.py` | `compute_time_breakdown()`, `identify_hotspots()`, `analyze_memory_copies()`, `analyze_hardware_counters()`, `_split_pmc_into_passes()` (TCC derived counter isolation), `generate_recommendations()` |
+| `test_interactive_context.py` | `InteractiveSession` menu logic, context persistence across menu selections |
+| `test_interactive.py` | Full interactive session 7-phase workflow, session save/resume |
+| `test_llm_conversation.py` | `LLMConversation` send/compact/serialize, multi-provider mocking (anthropic/openai/private/local) |
+| `test_local_llm.py` | Ollama local model integration |
+| `test_workflow.py` | `WorkflowSession` 7-phase loop, auto-save, revert-on-failure |
+| `test_tracelens_port.py` | TraceLens interval arithmetic and kernel category classification |
 
 ### Integration tests (require a real .db file)
 
-```bash
-cd projects/rocinsight
-PYTHONPATH=. python3 -m pytest tests -v \
-    --db-path /path/to/real/trace.db
-```
-
-A real test database is available after building rocprofiler-sdk:
-```
-projects/rocprofiler-sdk/build/tests/rocprofv3/rocpd/rocpd-input-data/merged_db.db
-```
-
-### CTest
+Integration tests in `tests/` run against a real rocprofv3 SQLite database.
 
 ```bash
+# Run all integration tests
+cd python/rocinsight
+pytest tests -v --db-path /path/to/trace.db
+
+# A real test database is available after building rocprofiler-sdk:
+DB=rocm-systems-dev/projects/rocprofiler-sdk/build/tests/rocprofv3/rocpd/rocpd-input-data/merged_db.db
+pytest tests -v --db-path $DB
+
+# Run specific integration test file
+pytest tests/test_analyze.py -v --db-path $DB
+pytest tests/test_analyze_schema.py -v --db-path $DB
+```
+
+Integration test files:
+
+| File | What it covers |
+|---|---|
+| `test_analyze.py` | End-to-end analysis pipeline against a real .db file |
+| `test_analyze_schema.py` | JSON output schema validation against real trace data |
+| `test_ai_analysis_standalone.py` | `analyze_database()` API with real database |
+| `test_guide_filter_standalone.py` | LLM reference guide loading and filtering |
+
+### CTest (within CMake super-build)
+
+```bash
+# Register and run tests via CTest
+cmake -B build -DROCINSIGHT_BUILD_TESTS=ON python/rocinsight
+cmake --build build
 ctest --test-dir build -R rocinsight -V
+
+# Or inside the full super-repo build
+cmake --build super-build --target rocinsight_unit_tests
+ctest --test-dir super-build -R rocinsight
 ```
 
 ---

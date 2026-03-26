@@ -119,7 +119,7 @@ class TestSessionStore:
 class TestInteractiveSessionMenu:
     def test_new_session_created_when_none_exist(self, tmp_path):
         store = SessionStore(sessions_dir=tmp_path)
-        with patch("rocpd.ai_analysis.interactive._input", return_value=""):
+        with patch("rocinsight.ai_analysis.interactive._input", return_value=""):
             s = InteractiveSession(
                 source_dir="/tmp/myapp",
                 tier0_result=None,
@@ -136,7 +136,7 @@ class TestInteractiveSessionMenu:
 
     def test_quit_saves_session(self, tmp_path):
         store = SessionStore(sessions_dir=tmp_path)
-        with patch("rocpd.ai_analysis.interactive._input", side_effect=["q"]):
+        with patch("rocinsight.ai_analysis.interactive._input", side_effect=["q"]):
             s = InteractiveSession(
                 source_dir="/tmp/myapp",
                 tier0_result=None,
@@ -169,7 +169,7 @@ class TestInteractiveSessionMenu:
             ],
         )
         store.save(existing)
-        with patch("rocpd.ai_analysis.interactive._input", return_value=""):
+        with patch("rocinsight.ai_analysis.interactive._input", return_value=""):
             s = InteractiveSession(
                 source_dir="/tmp/myapp",
                 tier0_result=None,
@@ -187,7 +187,7 @@ class TestInteractiveSessionMenu:
     def test_run_save_without_quit(self, tmp_path):
         """[s] saves session without exiting; [q] then exits."""
         store = SessionStore(sessions_dir=tmp_path)
-        with patch("rocpd.ai_analysis.interactive._input", side_effect=["s", "q"]):
+        with patch("rocinsight.ai_analysis.interactive._input", side_effect=["s", "q"]):
             s = InteractiveSession(
                 source_dir="/tmp/myapp",
                 tier0_result=None,
@@ -206,7 +206,7 @@ class TestInteractiveSessionMenu:
     def test_run_eof_saves_and_exits(self, tmp_path):
         """EOFError on input triggers save-and-quit gracefully."""
         store = SessionStore(sessions_dir=tmp_path)
-        with patch("rocpd.ai_analysis.interactive._input", side_effect=EOFError()):
+        with patch("rocinsight.ai_analysis.interactive._input", side_effect=EOFError()):
             s = InteractiveSession(
                 source_dir="/tmp/myapp",
                 tier0_result=None,
@@ -231,7 +231,7 @@ class TestInteractiveSessionMenu:
             source="profiling_analysis",
             added_at="2026-03-10T10:00:00Z",
         )
-        with patch("rocpd.ai_analysis.interactive._input", side_effect=["1", "q"]):
+        with patch("rocinsight.ai_analysis.interactive._input", side_effect=["1", "q"]):
             s = InteractiveSession(
                 source_dir="/tmp/myapp",
                 tier0_result=None,
@@ -260,7 +260,7 @@ class TestInteractiveSessionMenu:
         )
         store.save(existing)
         # "99" is out of range; should fall back to new session
-        with patch("rocpd.ai_analysis.interactive._input", return_value="99"):
+        with patch("rocinsight.ai_analysis.interactive._input", return_value="99"):
             s = InteractiveSession(
                 source_dir="/tmp/myapp",
                 tier0_result=None,
@@ -321,7 +321,7 @@ class TestPathProfiling:
         mock_proc.returncode = 0
         # _path_profiling now prompts: (1) command number, (2) app placeholder, (3) db path
         input_seq = ["1", "", str(fake_db)]
-        with patch("rocpd.ai_analysis.interactive._input", side_effect=input_seq):
+        with patch("rocinsight.ai_analysis.interactive._input", side_effect=input_seq):
             with patch("subprocess.run", return_value=mock_proc):
                 with patch.object(
                     s,
@@ -352,7 +352,7 @@ class TestPathProfiling:
             session_store=store,
             resume_session_id=None,
         )
-        with patch("rocpd.ai_analysis.interactive._input", return_value=""):
+        with patch("rocinsight.ai_analysis.interactive._input", return_value=""):
             s._path_profiling()
         assert len(s.session.persistent_menu_items) == 0
 
@@ -447,7 +447,7 @@ class TestPursueRecommendation:
             resume_session_id=None,
         )
         s.session.persistent_menu_items.append(item)
-        with patch("rocpd.ai_analysis.interactive._input", return_value="m"):
+        with patch("rocinsight.ai_analysis.interactive._input", return_value="m"):
             s._pursue_recommendation(item)
         # Item must still be in the list (not consumed)
         assert len(s.session.persistent_menu_items) == 1

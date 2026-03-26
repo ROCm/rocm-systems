@@ -112,7 +112,7 @@ class TestRunTier1AnalysisRefactor(unittest.TestCase):
         mock_result.execution_breakdown = eb
         mock_result.profiling_info.total_duration_ns = 1_000_000_000
 
-        with patch("rocpd.ai_analysis.api.analyze_database", return_value=mock_result):
+        with patch("rocinsight.ai_analysis.api.analyze_database", return_value=mock_result):
             result = InteractiveSession._run_tier1_analysis(s, "/tmp/test.db")
 
         self.assertIsInstance(result, tuple)
@@ -128,7 +128,7 @@ class TestRunTier1AnalysisRefactor(unittest.TestCase):
         s._db_path = "/tmp/test.db"
 
         with patch(
-            "rocpd.ai_analysis.api.analyze_database", side_effect=RuntimeError("db error")
+            "rocinsight.ai_analysis.api.analyze_database", side_effect=RuntimeError("db error")
         ):
             recs, breakdown = InteractiveSession._run_tier1_analysis(s, "/tmp/bad.db")
 

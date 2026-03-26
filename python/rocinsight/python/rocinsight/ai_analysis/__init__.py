@@ -56,7 +56,9 @@ from .exceptions import (
     SourceAnalysisError,
 )
 
-from .llm_analyzer import LLMAnalyzer, AnalysisContext
+from .llm_analyzer import LLMAnalyzer, AnalysisContext, load_reference_guide
+from .llm_conversation import LLMConversation
+from .source_analyzer import SourceAnalyzer
 
 
 def _get_interactive():
@@ -109,6 +111,10 @@ __all__ = [
     # LLM integration
     "LLMAnalyzer",
     "AnalysisContext",
+    "LLMConversation",
+    "load_reference_guide",
+    # Source analysis
+    "SourceAnalyzer",
 ]
 
 __version__ = "0.1.0"
