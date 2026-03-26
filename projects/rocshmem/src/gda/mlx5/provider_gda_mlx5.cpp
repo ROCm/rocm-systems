@@ -635,7 +635,10 @@ void mlx5_devx_qp::dump(int conn_num) {
   DPRINTF("  (uint32_t)  qpn              = 0x%x\n",  this->qpn);
   DPRINTF("  (void*)     sq               = %p\n",    this->sq);
   DPRINTF("  (uint16_t)  sq_depth         = %hu\n",   this->sq_depth);
-  DPRINTF("  (uint32_t*) dbrec            = %p\n",    this->dbrec);
+  DPRINTF("  (uint32_t*) qp_dbrec         = %p\n",    this->qp_dbrec);
+  DPRINTF("  (uint32_t)  cqn              = 0x%x\n",  this->cqn);
+  DPRINTF("  (void*)     cq               = %p\n",    this->cq);
+  DPRINTF("  (uint32_t*) cq_dbrec         = %p\n",    this->cq_dbrec);
   DPRINTF("  (void*)     uar->reg_addr    = %p\n",    this->uar->reg_addr);
   DPRINTF("  (void*)     uar->base_addr   = %p\n",    this->uar->base_addr);
   DPRINTF("  (uint32_t)  uar->page_id     = 0x%x\n",  this->uar->page_id);
