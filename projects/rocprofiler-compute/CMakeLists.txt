@@ -614,8 +614,8 @@ add_test(
     NAME test_utils_profile_csv
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
-        --junitxml=tests/test_utils_profile_csv.xml ${COV_OPTION} tests/test_utils_profile_csv.py
-        ${WORKING_DIR_OPTION}
+        --junitxml=tests/test_utils_profile_csv.xml ${COV_OPTION}
+        tests/test_utils_profile_csv.py ${WORKING_DIR_OPTION}
 )
 
 # -----------------------------------
