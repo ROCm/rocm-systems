@@ -51,10 +51,10 @@ Panel Config:
           value: AVG((100 * SQC_ICACHE_BUSY_CYCLES_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
           unit: Percent
         ICache Hit Rate:
-          value: AVG((100 * SQC_ICACHE_HITS_sum / SQC_ICACHE_REQ_sum) if (SQC_ICACHE_REQ_sum != 0) else None)
+          value: AVG((100 * SQC_ICACHE_HITS_sum / (SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum)) if ((SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum) != 0) else None)
           unit: Percent
         ICache Miss Rate:
-          value: AVG((100 * SQC_ICACHE_MISSES_sum / SQC_ICACHE_REQ_sum) if (SQC_ICACHE_REQ_sum != 0) else None)
+          value: AVG((100 * SQC_ICACHE_MISSES_sum / (SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum)) if ((SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum) != 0) else None)
           unit: Percent
         ICache Request Stall Rate:
           value: AVG((100 * SQC_ICACHE_INPUT_VALID_READYB_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
@@ -84,7 +84,7 @@ Panel Config:
           value: AVG((100 * SQC_DCACHE_BUSY_CYCLES_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
           unit: Percent
         Dcache Hit Rate:
-          value: AVG((100 * SQC_DCACHE_HITS_sum / SQC_DCACHE_REQ_sum) if (SQC_DCACHE_REQ_sum != 0) else None)
+          value: AVG((100 * SQC_DCACHE_HITS_sum / (SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum)) if ((SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum) != 0) else None)
           unit: Percent
         Dcache Request Stall Rate:
           value: AVG((100 * SQC_DCACHE_INPUT_VALID_READYB_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
@@ -355,16 +355,22 @@ Panel Config:
       Formula: 100 * SQC_ICACHE_BUSY_CYCLES_sum / SQ_BUSY_CYCLES_sum
 
     ICache Hit Rate: |-
-      Definition: Percentage of instruction cache requests that hit in cache.
-      Formula: 100 * SQC_ICACHE_HITS_sum / SQC_ICACHE_REQ_sum
+      Definition: Share of instruction cache accesses that hit, using hit+miss as denominator.
+      Formula: 100 * SQC_ICACHE_HITS_sum / (SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum)
+      when the denominator is non-zero. HITS/REQ alone can exceed 100% (per-SQ per-bank counters).
+
+    ICache Miss Rate: |-
+      Definition: Share of instruction cache accesses that miss (same denominator as hit rate).
+      Formula: 100 * SQC_ICACHE_MISSES_sum / (SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum)
 
     Dcache Utilization: |-
       Definition: Percentage of cycles the scalar data cache is busy.
       Formula: 100 * SQC_DCACHE_BUSY_CYCLES_sum / SQ_BUSY_CYCLES_sum
 
     Dcache Hit Rate: |-
-      Definition: Percentage of scalar data cache requests that hit in cache.
-      Formula: 100 * SQC_DCACHE_HITS_sum / SQC_DCACHE_REQ_sum
+      Definition: Share of scalar data cache accesses that hit (hit+miss denominator).
+      Formula: 100 * SQC_DCACHE_HITS_sum / (SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum)
+      when the denominator is non-zero.
 
     TCP Hit Rate: |-
       Definition: Percentage of TCP (L0 vector cache) requests that hit in cache.
