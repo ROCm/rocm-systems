@@ -69,9 +69,10 @@
  * - 1.16 - hsa_amd_counted_queue APIs
  * - 1.17 - hsa_amd_memory_async_batch_copy
  * - 1.18 - hsa_amd_pointer_info: Added alloc_flags field to hsa_amd_pointer_info_t
+ * - 1.19 - hsa_amd_agent_preload
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 18
+#define HSA_AMD_INTERFACE_VERSION_MINOR 19
 
 #ifdef __cplusplus
 extern "C" {
@@ -940,6 +941,43 @@ hsa_status_t HSA_API
  */
 hsa_status_t HSA_API
     hsa_amd_profiling_async_copy_enable(bool enable);
+
+/**
+ * @brief Flags for hsa_amd_agent_preload.
+ *
+ * @details By default, hsa_amd_agent_preload preloads all resources.
+ * These flags can be used to skip specific resources.
+ */
+typedef enum hsa_amd_agent_preload_flag_s {
+  /**
+   * Skip preloading clock synchronization data.
+   */
+  HSA_AMD_AGENT_PRELOAD_SKIP_CLOCK_SYNC = (1 << 0),
+  /**
+   * Skip preloading blit kernel objects.
+   */
+  HSA_AMD_AGENT_PRELOAD_SKIP_BLITS = (1 << 1)
+} hsa_amd_agent_preload_flag_t;
+
+/**
+ * @brief Performance hint to preload agent resources.
+ *
+ * @details Trigger early initialization of agent resources. By default,
+ * all resources are preloaded. Use flags to skip specific resources.
+ *
+ * @param[in] agent The agent to preload resources for. Must be a GPU agent.
+ *
+ * @param[in] flags A bitwise OR of ::hsa_amd_agent_preload_flag_t values
+ * specifying which resources to skip.
+ *
+ * @retval ::HSA_STATUS_SUCCESS The function has been executed successfully.
+ *
+ * @retval ::HSA_STATUS_ERROR_NOT_INITIALIZED The HSA runtime has not been
+ * initialized.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_AGENT The agent is invalid or not a GPU.
+ */
+hsa_status_t HSA_API hsa_amd_agent_preload(hsa_agent_t agent, uint64_t flags);
 
 /**
  * @brief Retrieve packet processing time stamps.

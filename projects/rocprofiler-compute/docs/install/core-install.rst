@@ -102,6 +102,9 @@ follows.
     * - ``TEST_FROM_INSTALL``
       - Should be ON to enable testing from the installation location without dependency on the source directory.
 
+    * - ``SKIP_NATIVE_TOOL_BUILD``
+      - Should be ON to skip building the native profiling tool. When enabled, the native tool will be compiled at runtime instead of build time. This is useful when rocprofiler-sdk is not available during build time.
+
 .. _core-install-steps:
 
 Install from the TheRock nightly releases
