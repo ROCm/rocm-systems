@@ -13,5 +13,5 @@ context:
   Unit_hipCtxGetSetSharedMemConfig_not_supported: *level_2
   Unit_hipCtxPeerAccess_not_supported: *level_2
   Unit_hipCtxAPIs_not_supported: *level_2
-  hipDevicePrimaryCtxGetState_Negative: *level_2
+  Unit_hipDevicePrimaryCtxGetState_Negative: *level_2
   Unit_hipSetDevice_CheckPrimaryCtxState: *level_2

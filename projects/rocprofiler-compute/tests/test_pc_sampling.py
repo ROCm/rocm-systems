@@ -1,27 +1,5 @@
-##############################################################################
-# MIT License
-#
-# Copyright (c) 2026 Advanced Micro Devices, Inc. All Rights Reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-
-##############################################################################
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
 import os
 
@@ -59,6 +37,14 @@ PC_SAMPLING_STOCHASTIC_FILES = sorted([
     "ps_file_results.json",
     "sysinfo.csv",
 ])
+
+
+def is_pc_sampling_not_supported(output):
+    """
+    To be called with the stdout + stderr after profiling.
+    Check whether profiling output said PC sampling is not supported on the machine
+    """
+    return "Given PC sampling configuration is not supported" in output
 
 
 def test_pc_sampling_host_trap(binary_handler_profile_rocprof_compute):
@@ -114,15 +100,22 @@ def test_pc_sampling_stochastic(binary_handler_profile_rocprof_compute):
 
     workload_dir = test_utils.get_output_dir()
 
-    _ = binary_handler_profile_rocprof_compute(
+    code, stdout, stderr = binary_handler_profile_rocprof_compute(
         config,
         workload_dir,
         options,
-        check_success=True,
+        check_success=False,
+        capture_output=True,
         roof=False,
         app_name="app_mat_mul_max",
     )
 
+    output = f"{stdout}\n{stderr}"
+    if is_pc_sampling_not_supported(output):
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        pytest.skip("PC sampling is not supported")
+
+    assert code == 0
     file_dict = test_utils.check_non_pmc_files(workload_dir, num_devices, 1)
     assert sorted(list(file_dict.keys())) == sorted(PC_SAMPLING_STOCHASTIC_FILES)
 
