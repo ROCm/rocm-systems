@@ -2546,15 +2546,9 @@ void Runtime::Unload() {
   UnloadTools();
   UnloadExtensions();
 
-  // Close the aqlprofile probe handle. Skip the dlclose when
-  // running under Valgrind due to a Valgrind bug, see below:
-  // http://valgrind.org/docs/manual/faq.html#faq.unhelpful
-  if (aqlprofile_lib_ != nullptr) {
-    if (!flag_.running_valgrind()) {
-      os::CloseLib(aqlprofile_lib_);
-    }
-    aqlprofile_lib_ = nullptr;
-  }
+  // Do not dlclose: aqlprofile links against us, so during fini
+  // teardown the dlclose can unmap our own code mid-execution.
+  aqlprofile_lib_ = nullptr;
 
   amd::hsa::loader::Loader::Destroy(loader_.get());
   loader_.reset();
