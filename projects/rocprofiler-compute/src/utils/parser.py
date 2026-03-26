@@ -198,14 +198,18 @@ def to_int(
         raise Exception("to_int: unsupported type.")
 
 
-def to_sum(a: Union[pd.Series, None]) -> float:
+def to_sum(a: Union[pd.Series, int, float, np.number, None]) -> float:
     if a is None:
         return np.nan
-    elif np.isnan(a).all():
-        return np.nan
-    elif a.empty:
-        return np.nan
+    elif isinstance(a, (int, float, np.number)):
+        if np.isnan(a):
+            return np.nan
+        return float(a)
     elif isinstance(a, pd.Series):
+        if a.empty:
+            return np.nan
+        elif np.isnan(a).all():
+            return np.nan
         return a.sum()
     else:
         raise Exception("to_sum: unsupported type.")
