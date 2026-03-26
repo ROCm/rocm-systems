@@ -88,11 +88,15 @@ jobs:
               yum install -y https://repo.radeon.com/amdgpu-install/${ROCM_MAJOR}.${ROCM_MINOR}/rhel/9.4/amdgpu-install-${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1.el9.noarch.rpm
             fi
             yum install -y rocm-dev
-            
+
       - name: Checkout
         uses: actions/checkout@v5
         with:
           sparse-checkout: projects/rocprofiler-compute
+          set-safe-directory: true
+
+      - name: Configure git safe directory
+        run: git config --global --add safe.directory '*'
 
       - name: Install Python prereqs
         working-directory: projects/rocprofiler-compute

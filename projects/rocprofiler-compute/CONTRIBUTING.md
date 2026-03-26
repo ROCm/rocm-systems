@@ -1,62 +1,56 @@
-## How to fork from us
+# Contributing to ROCm Compute Profiler
 
-To keep our development fast and conflict free, we recommend you to [fork](https://github.com/ROCm/rocm-systems/forks) our repository and start your work from our `develop` branch in your private repository.
+## Getting Started
 
-Afterwards, git clone your repository to your local machine. But that is not it! To keep track of the original develop repository, add it as another remote.
+ROCm Compute Profiler lives under `projects/rocprofiler-compute` in the [ROCm Systems super-repo](https://github.com/ROCm/rocm-systems). To set up your local environment, follow the [clone and setup instructions](https://github.com/ROCm/rocm-systems/blob/develop/CONTRIBUTING.md#getting-started) in the rocm-systems CONTRIBUTING.md. Sparse checkout is recommended for most contributors.
 
-```
-git remote add mainline https://github.com/ROCm/rocm-systems.git
-git checkout develop
-```
+## Reporting Issues and Bugs
 
-As always in git, start a new branch with
+- Search [existing issues](https://github.com/ROCm/rocm-systems/issues) before filing a new one — your bug may already be tracked.
+- If you don't find an existing issue, [open a new one](https://github.com/ROCm/rocm-systems/issues/new) with a clear description of the problem and steps to reproduce it.
 
-```
-git checkout -b topic-<yourFeatureName>
-```
+## Submitting a Pull Request
 
-and apply your changes there. For more help reference GitHub's ['About Forking'](https://docs.github.com/en/get-started/exploring-projects-on-github/contributing-to-a-project) page.
+Follow the [pull request guidelines](https://github.com/ROCm/rocm-systems/blob/develop/CONTRIBUTING.md#pull-request-guidelines) in the rocm-systems CONTRIBUTING.md.
 
-## How to contribute to ROCm Compute Profiler
+> **Note for external contributors:** Please refer to the [ROCm contribution guide](https://rocm.docs.amd.com/en/develop/contribute/contributing.html) for instructions on contributing from a fork.
 
-### Did you find a bug?
+### Review and Labeling
 
-- Ensure the bug was not already reported by searching on GitHub under [Issues](https://github.com/ROCm/rocm-systems/issues).
+Labels and reviewer assignments are handled automatically based on the files you've changed. Reviewers for `projects/rocprofiler-compute` are defined in the top-level [CODEOWNERS](https://github.com/ROCm/rocm-systems/blob/develop/CODEOWNERS) file.
 
-- If you're unable to find an open issue addressing the problem, [open a new one](https://github.com/ROCm/rocm-systems/issues/new).
+### CI Requirements
 
-### Did you write a patch that fixes a bug?
-
-- Open a new GitHub [pull request](https://github.com/ROCm/rocm-systems/compare) with the patch.
-
-- Ensure the PR description clearly describes the problem and solution. If there is an existing GitHub issue open describing this bug, please include it in the description so we can close it.
-
-- Ensure the PR is based on the `develop` branch of the ROCm Systems GitHub repository.
+All pull requests must pass CI checks before merging. For `rocprofiler-compute`, these currently include compilation checks, with correctness and performance tests being added over time. See the [CI documentation](https://github.com/ROCm/rocm-systems/blob/develop/docs/continuous-integration.md) for a full breakdown of what runs on each PR.
 
 > [!TIP]
-> To ensure you meet all formatting requirements before publishing, we recommend you utilize our included [*pre-commit hooks*](https://pre-commit.com/#introduction). For more information on how to use pre-commit hooks please see the [section below](#using-pre-commit-hooks).
+> Run our pre-commit hooks locally before pushing to catch formatting issues early. See [Using Pre-Commit Hooks](#using-pre-commit-hooks) below for setup instructions.
 
+## Adding Experimental Features
 
-### Adding Experimental Features
+New features that aren't yet stable can be introduced behind the `--experimental` flag. This lets users opt in to preview functionality while keeping the default experience stable.
 
-This project uses the `ExperimentalAction` custom argparse action for experimental features in `src/argparser.py`. The experimental flag system allows users to opt-in to unstable or preview features that are under development.
+### How It Works
 
-#### How It Works
+The `--experimental` flag acts as a master toggle:
 
-The `--experimental` flag acts as a master toggle that:
-- Shows help text for experimental features when enabled (prefixed with "EXPERIMENTAL:")
-- Hides experimental options completely when disabled (using `argparse.SUPPRESS`)
-- Prevents usage of experimental features without the flag (raises parser error)
-- Displays a warning when experimental features are used
-- Delegates to standard argparse actions for proper value storage
+- Experimental options are **hidden** from help output unless `--experimental` is passed.
+- Attempting to use an experimental flag without `--experimental` raises a clear error.
+- A warning is displayed when an experimental feature is active.
 
-#### Adding a New Experimental Feature
+To see available experimental features:
 
-To add a new experimental feature, follow these 3 steps:
+```bash
+rocprof-compute profile --experimental --help
+```
 
-**1. Update the `--experimental` flag help text**
+### Adding a New Experimental Feature
 
-Add your feature to the help text in `src/argparser.py` in the `add_general_group()` function:
+Follow these three steps to add a new experimental flag.
+
+**Step 1 — Register it in the `--experimental` help text**
+
+In `src/argparser.py`, update the `add_general_group()` function:
 
 ```python
 general_group.add_argument(
@@ -65,18 +59,17 @@ general_group.add_argument(
     default=False,
     help=(
         "Enable experimental feature(s):\n"
-        "   Spatial multiplexing (--spatial-multiplexing)\n"
         "   Your feature name (--your-flag)\n"  # Add this line
     ),
 )
 ```
 
-**2. Add the option to the appropriate parser mode using `ExperimentalAction`**
+**Step 2 — Add the argument using `ExperimentalAction`**
 
-Add your argument to the relevant parser (profile, analyze, etc.) using the `ExperimentalAction` custom action:
+Add your flag to the relevant parser group (profile, analyze, etc.):
 
 ```python
-# For a flag that stores values (like --spatial-multiplexing in profile mode)
+# For a flag that accepts a value
 profile_group.add_argument(
     "--your-flag",
     dest="your_flag",
@@ -85,14 +78,14 @@ profile_group.add_argument(
     action=ExperimentalAction,
     experimental_enabled=experimental_enabled,
     feature_label="Your feature name",
-    base_action="store",  # REQUIRED: Specify the base action type
-    type=str,  # Optional: specify type if needed
-    nargs="*",  # Optional: specify nargs if needed
-    metavar="",  # Optional: specify metavar for help text
+    base_action="store",  # Required — see supported actions below
+    type=str,
+    nargs="*",
+    metavar="",
     help="\t\t\tDescription of your feature",
 )
 
-# For a boolean flag (like --spatial-multiplexing in analyze mode)
+# For a boolean toggle flag
 analyze_group.add_argument(
     "--your-flag",
     dest="your_flag",
@@ -101,216 +94,114 @@ analyze_group.add_argument(
     action=ExperimentalAction,
     experimental_enabled=experimental_enabled,
     feature_label="Your feature description",
-    base_action="store_const",  # REQUIRED: For boolean-like behavior
+    base_action="store_const",  # Required — see supported actions below
     nargs=0,
     const=True,
     help="\t\tDescription of your feature",
 )
 ```
 
-#### Supported Base Actions
+The `base_action` parameter is required and must be one of:
 
-The `base_action` parameter is **required** and must be one of:
-- `store` - Store a value (default argparse behavior)
-- `store_const` - Store a constant value (no arguments consumed)
-- `store_true` - Store True when flag is present
-- `store_false` - Store False when flag is present
-- `append` - Append values to a list
-- `append_const` - Append a constant to a list
-- `count` - Count the number of times flag appears (like `-vvv`)
-- `extend` - Extend a list with multiple values
+| Value | Behavior |
+|---|---|
+| `store` | Store a value (standard argparse default) |
+| `store_const` | Store a fixed constant; consumes no arguments |
+| `store_true` | Store `True` when the flag is present |
+| `store_false` | Store `False` when the flag is present |
+| `append` | Append each value to a list |
+| `append_const` | Append a constant to a list |
+| `count` | Count occurrences (e.g. `-vvv`) |
+| `extend` | Extend a list with multiple values |
 
-The `ExperimentalAction` class automatically:
-- Suppresses help text when `experimental_enabled=False`
-- Preserves leading whitespace and prefixes help content with "EXPERIMENTAL:" when enabled
-- Raises an error if the feature is used without `--experimental`
-- Displays a warning message when the feature is used
-- Auto-sets `nargs=0` for actions that don't consume arguments
-- Auto-sets `const` for boolean actions (`store_true`/`store_false`)
-- Delegates to the appropriate argparse action for proper value storage
+**Step 3 — Verify behavior**
 
-#### Promoting Features to Stable
-
-When a feature is ready to graduate from experimental to stable:
-
-1. Remove the entry from the `--experimental` flag help text
-2. Change `action=ExperimentalAction` to `action="store"` (or appropriate standard action)
-3. Remove the `experimental_enabled`, `feature_label`, and `base_action` parameters
-4. Update any relevant documentation and tests
-
-#### Testing Experimental Features
-
-Users can enable experimental features by passing the `--experimental` flag:
+Confirm the flag is hidden without `--experimental` and visible with it:
 
 ```bash
-# View available experimental features (in profile mode)
+# Should not appear
+rocprof-compute profile --help
+
+# Should appear with EXPERIMENTAL: prefix
 rocprof-compute profile --experimental --help
 ```
 
-Without `--experimental`, experimental features remain hidden and will raise an error if used.
+### Promoting a Feature to Stable
 
+When a feature is ready for general availability:
 
-## Using pre-commit hooks
+1. Remove it from the `--experimental` help text in `src/argparser.py`.
+2. Replace `action=ExperimentalAction` with a standard argparse action (e.g. `action="store"`).
+3. Remove the `experimental_enabled`, `feature_label`, and `base_action` parameters.
+4. Update documentation and tests accordingly.
 
-Our project supports optional [*pre-commit hooks*](https://pre-commit.com/#introduction) which developers can leverage to verify formatting before publishing their code. Once enabled, any commits you propose to the repository will be automatically checked for formatting. Initial setup is as follows:
+## Using Pre-Commit Hooks
 
-```console
+Pre-commit hooks automatically check your code for formatting issues before each commit, helping you catch problems before they reach CI.
+
+**Setup:**
+
+```bash
 python3 -m pip install pre-commit
 cd rocprofiler-compute
 pre-commit install
 ```
 
-Now, when you commit code to the repository you should see something like this:
+Once installed, every commit will run the configured checks automatically:
 
 ![A screen capture showing terminal output from a pre-commit hook](docs/data/contributing/pre-commit-hook.png)
 
-Please see the [pre-commit documentation](https://pre-commit.com/#quick-start) for additional information.
+See the [pre-commit documentation](https://pre-commit.com/#quick-start) for more details.
 
-## Contribution Guidelines
+## Code Style and Formatting
 
-To ensure code quality and consistency, we use **Ruff**, a fast Python linter and formatter. Before submitting a pull request, please ensure your code is formatted and linted correctly. This is the manual alternative to running ruff pre-commit hooks.
+ROCm Compute Profiler uses [Ruff](https://docs.astral.sh/ruff/) for linting and formatting. All contributions to `src/` must pass Ruff checks before merging. Pre-commit hooks handle this automatically.
 
------
+**Style references:**
 
-### Installing and Running Ruff
+| Topic | Source of Truth |
+|-------|-----------------|
+| Function design, naming, code organization | [Python Coding Style Guidelines](PYTHON_CODING_STYLE.md) |
+| Ruff configuration (enforced rules, ignores, formatting) | [`pyproject.toml`](pyproject.toml) |
 
-Ruff is available on PyPI and can be installed using `pip`:
-
-```bash
-pip install ruff
-```
-
-Once installed, you can run Ruff from the command line. To check for linting errors and formatting issues, navigate to the project root and run:
+### Running Ruff Manually
 
 ```bash
+# Check for issues
 ruff check .
 ruff format --check .
-```
 
-To automatically fix most of the issues detected, you can use the `--fix` flag with the `check` command and run the `format` command without the `--check` flag:
-
-```bash
+# Auto-fix most issues
 ruff check --fix .
 ruff format .
 ```
 
------
+## Documentation Changes
 
-### Type Annotation Guidelines
-
-This project enforces type annotations using Ruff's `flake8-annotations` rules (ANN). All new code in `src/` must include proper type annotations.
-
-#### Requirements
-
-- All function arguments must have type annotations (except `self` and `cls`)
-- All function return types must be annotated
-- Class attributes should have type annotations where applicable
-
-#### Examples
-
-```python
-# Good - properly annotated
-def process_kernel_data(kernel_name: str, metrics: list[float]) -> dict[str, Any]:
-    """Process kernel performance metrics."""
-    return {"kernel": kernel_name, "avg": sum(metrics) / len(metrics)}
-
-# Bad - missing annotations (will be caught by Ruff)
-def process_kernel_data(kernel_name, metrics):
-    return {"kernel": kernel_name, "avg": sum(metrics) / len(metrics)}
-```
-
-#### Checking Type Annotations
-
-To specifically check for missing type annotations:
-
-```bash
-ruff check --select ANN .
-```
-
-For existing code, we're gradually adding type annotations. When modifying existing functions, please add type annotations to any code you touch.
-
------
-
-### String Formatting Guidelines
-
-This project enforces modern Python string formatting practices using Ruff's `pyupgrade` rules (UP). All new code in `src/` should use f-strings where applicable instead of older formatting methods.
-
-#### Requirements
-
-- Use f-strings for string formatting when variables or expressions need to be embedded
-- Replace `.format()` method calls and `%` formatting with f-strings where possible
-- F-strings are preferred for readability and performance
-
-#### Examples
-```python
-# Good - using f-strings
-name = "kernel_analysis"
-count = 42
-message = f"Processing {name} with {count} metrics"
-path = f"{base_dir}/results/{filename}.csv"
-
-# Bad - will be caught by Ruff (UP045)
-message = "Processing {} with {} metrics".format(name, count)
-message = "Processing %s with %s metrics" % (name, count)
-path = "{}/results/{}.csv".format(base_dir, filename)
-```
-
------
-
-### Path Handling Guidelines
-
-This project enforces modern Python path handling practices using Ruff's `flake8-use-pathlib` rules (PTH). All new code in `src/` should use `pathlib.Path` methods instead of legacy `os.path` functions for directory operations.
-
-#### Requirements
-
-- Use `pathlib.Path` methods for all path operations instead of `os.path` functions
-- Use `Path.cwd()` instead of `os.getcwd()`
-- Use `Path.exists()` instead of `os.path.exists()`
-- Use `Path.is_file()` and `Path.is_dir()` instead of `os.path.isfile()` and `os.path.isdir()`
-- Use the `/` operator for path joining instead of `os.path.join()`
-
-#### Examples
-```python
-# Good - using pathlib methods
-current_dir = Path.cwd()
-config_path = current_dir / "config" / "settings.yaml"
-if config_path.exists() and config_path.is_file():
-    # Process file
-
-# Bad - will be caught by Ruff (PTH rules)
-import os
-current_dir = Path(os.getcwd())  # PTH109
-config_path = os.path.join(current_dir, "config", "settings.yaml")  # PTH118
-if os.path.exists(config_path) and os.path.isfile(config_path):  # PTH110, PTH113
-    # Process file
-```
-
------
-
-### Disabling Formatting for Specific Sections
-
-There may be instances where you need to disable Ruff's formatting on a specific block of code. You can do this using special comments:
-
-  * **`# fmt: off`** and **`# fmt: on`**: These comments can be used to disable and re-enable formatting for a block of code.
-  * **`# fmt: skip`**: This comment, placed at the end of a line, will prevent Ruff from formatting that specific statement.
-
-You can also disable specific linting rules for a line by using `# noqa: <rule_code>`.
-
-### Coding guidelines
-
-Below are some repository specific guidelines which are followed throughout the repository.
-Any future contributions should adhere to these guidelines:
-* Use the `pathlib` library functions instead of `os.path` for manipulating the file paths.
-
-### Build and test documentation changes
-
-For instructions on how to build and test documentation changes (files under docs folder), please see https://rocm.docs.amd.com/en/latest/contribute/contributing.html
-
+For instructions on building and testing changes to files under the `docs/` folder, see the [ROCm documentation contributing guide](https://rocm.docs.amd.com/en/latest/contribute/contributing.html).
 
 ## Metrics Management
 
-If your PR touches **metric configs** (panel YAMLs under `src/rocprof_compute_soc/analysis_configs/gfx<arch>/*.yaml`, config deltas, or metric descriptions in `docs/data/metrics_description.yaml`), please follow the metric management workflow summarized here:
-- Edit the panel YAMLs and, when appropriate, generate/apply a delta and (optionally) promote a new architecture using the [workflow script](`tools/config_management/master_config_workflow_script.py`).
-- Verify hashes are updated and CI tests pass.
+If your PR modifies **metric configurations** — panel YAMLs under `src/rocprof_compute_soc/analysis_configs/gfx<arch>/*.yaml`, config deltas, or metric descriptions in `docs/data/metrics_description.yaml` — follow the metric management workflow:
 
-For full details, see the [metric config management README](./tools/config_management/README.md)
+1. Edit the relevant panel YAMLs.
+2. Where appropriate, generate and apply a config delta using the [workflow script](tools/config_management/master_config_workflow_script.py).
+3. Verify that hashes are updated and CI tests pass.
+
+For full details, see the [metric config management README](./tools/config_management/README.md).
+
+## Vendoring External Dependencies
+
+rocprofiler-compute vendors certain Python dependencies (via git submodules) to eliminate external dependencies in profile mode. This improves portability and reliability on HPC systems.
+
+**We vendor:**
+- Pure Python packages used in profile code path
+- Stable packages with permissive licenses
+
+For detailed vendoring workflow (adding/updating packages), see [`src/vendored/README.md`](./src/vendored/README.md).
+
+## AI Agent Guidelines
+
+This project uses AI coding assistants (Claude Code, Cursor, GitHub Copilot). All AI-specific guidelines live in [`AGENTS.md`](AGENTS.md), which serves as the single source of truth. Tool-specific adapter files (e.g., `CLAUDE.md`, `.github/copilot-instructions.md`) reference `AGENTS.md` without duplicating content.
+
+To add or update AI guidelines, edit the appropriate file under `.ai/` and add a reference in `AGENTS.md`.

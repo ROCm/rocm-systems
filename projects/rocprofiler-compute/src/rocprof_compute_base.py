@@ -1,27 +1,5 @@
-##############################################################################
-# MIT License
-#
-# Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-
-##############################################################################
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
 
 import argparse
 import importlib
@@ -47,11 +25,10 @@ from utils.logger import (
 )
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.specs import MachineSpecs, generate_machine_specs
-from utils.utils import (
+from utils.utils_common import (
     detect_rocprof,
     get_panel_alias,
     get_rank,
-    get_submodules,
     get_version,
     get_version_display,
     parse_sets_yaml,
@@ -60,6 +37,7 @@ from utils.utils import (
     resolve_rocm_library_path,
     set_locale_encoding,
 )
+from utils.utils_profile import get_submodules
 
 
 class RocProfCompute:
@@ -373,10 +351,8 @@ class RocProfCompute:
             sys.exit(0)
         elif self.__args.list_metrics is not None:
             self.list_metrics()
-            sys.exit(0)
         elif self.__args.list_blocks is not None:
             self.list_blocks()
-            sys.exit(0)
 
         if self.__mode == "profile":
             if self.__args.list_sets:
@@ -387,18 +363,13 @@ class RocProfCompute:
     @demarcate
     def list_metrics(self) -> None:
         for_current_arch = getattr(self.__args, "list_available_metrics", False)
-
         arch = self.__mspec.gpu_arch if for_current_arch else self.__args.list_metrics
 
         if arch in self.__supported_archs.keys():
-            ac = schema.ArchConfig()
-            ac.panel_configs = file_io.load_panel_configs([
-                str(Path(self.__args.config_dir) / arch)
-            ])
             sys_info = (
                 self.__mspec.get_class_members().iloc[0] if for_current_arch else None
             )
-            parser.build_dfs(arch_configs=ac, filter_metrics=[], sys_info=sys_info)
+            ac = self._build_arch_metric_list(arch, sys_info)
             for key, value in ac.metric_list.items():
                 prefix = "\t" * min(key.count("."), 2)
                 print(f"{prefix}{key} -> {value}")
@@ -411,12 +382,7 @@ class RocProfCompute:
         arch = self.__args.list_blocks
 
         if arch in self.__supported_archs.keys():
-            ac = schema.ArchConfig()
-            ac.panel_configs = file_io.load_panel_configs([
-                str(Path(self.__args.config_dir) / arch)
-            ])
-            parser.build_dfs(arch_configs=ac, filter_metrics=[], sys_info=None)
-
+            ac = self._build_arch_metric_list(arch, sys_info=None)
             print(f"{'INDEX':<8} {'BLOCK ALIAS':<16} {'BLOCK NAME'}")
             panel_alias_dict = {value: key for key, value in get_panel_alias().items()}
             for key, value in ac.metric_list.items():
@@ -426,6 +392,20 @@ class RocProfCompute:
             sys.exit(0)
         else:
             console_error("Unsupported arch")
+
+    def _build_arch_metric_list(
+        self,
+        arch: str,
+        sys_info: "pd.Series",  # noqa: F821
+    ) -> schema.ArchConfig:
+        """Load panel configs for arch and populate metric_list.
+        Returns the ArchConfig."""
+        ac = schema.ArchConfig()
+        ac.panel_configs = file_io.load_panel_configs([
+            str(Path(self.__args.config_dir) / arch)
+        ])
+        parser.build_metric_list(ac, sys_info)
+        return ac
 
     @demarcate
     def list_sets(self) -> None:
@@ -553,7 +533,6 @@ class RocProfCompute:
 
         post_duration = int(time_end_post - time_end_prof)
         console_debug(f'time taken for "post_processing" was {post_duration} seconds')
-        self.__soc[self.__mspec.gpu_arch].post_profiling()
 
     @demarcate
     def run_analysis(self) -> None:
